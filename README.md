@@ -252,6 +252,12 @@ zwasm follows [Semantic Versioning](https://semver.org/). The public API surface
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions, development workflow, and CI checks.
 
+## Support
+
+Developed in spare time alongside a day job. If you'd like to support
+continued development, sponsorship is welcome via
+[GitHub Sponsors](https://github.com/sponsors/chaploud).
+
 ## License
 
 MIT
