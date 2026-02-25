@@ -39,6 +39,7 @@ pub const runtime = struct {
     pub const Module = rt.module_mod.Module;
     pub const Instance = rt.instance_mod.Instance;
     pub const VmImpl = rt.vm_mod.Vm;
+    pub const validateModule = rt.validate.validateModule;
 };
 
 // ============================================================

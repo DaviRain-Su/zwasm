@@ -254,9 +254,50 @@ pub const Instance = struct {
                         return error.WasmInstantiateError;
                     try self.funcaddrs.append(self.alloc, addr);
                 },
-                .memory => try self.memaddrs.append(self.alloc, handle),
-                .table => try self.tableaddrs.append(self.alloc, handle),
-                .global => try self.globaladdrs.append(self.alloc, handle),
+                .memory => {
+                    if (imp.memory_type) |expected| {
+                        const wasm_mem = self.store.getMemory(handle) catch
+                            return error.ImportNotFound;
+                        // Spec: check current size (not declared min) against required min
+                        if (wasm_mem.size() < expected.limits.min)
+                            return error.ImportTypeMismatch;
+                        if (expected.limits.max) |exp_max| {
+                            if (wasm_mem.max) |actual_max| {
+                                if (actual_max > exp_max) return error.ImportTypeMismatch;
+                            } else return error.ImportTypeMismatch; // expected max but got none
+                        }
+                    }
+                    try self.memaddrs.append(self.alloc, handle);
+                },
+                .table => {
+                    if (imp.table_type) |expected| {
+                        const tbl = self.store.getTable(handle) catch
+                            return error.ImportNotFound;
+                        if (tbl.reftype != expected.reftype)
+                            return error.ImportTypeMismatch;
+                        // Spec: check current size (not declared min) against required min
+                        if (tbl.size() < expected.limits.min)
+                            return error.ImportTypeMismatch;
+                        if (expected.limits.max) |exp_max| {
+                            if (tbl.max) |actual_max| {
+                                if (actual_max > exp_max) return error.ImportTypeMismatch;
+                            } else return error.ImportTypeMismatch;
+                        }
+                    }
+                    try self.tableaddrs.append(self.alloc, handle);
+                },
+                .global => {
+                    if (imp.global_type) |expected| {
+                        const glob = self.store.getGlobal(handle) catch
+                            return error.ImportNotFound;
+                        if (!glob.valtype.eql(expected.valtype))
+                            return error.ImportTypeMismatch;
+                        const expected_mut: store_mod.Mutability = if (expected.mutability == 1) .mutable else .immutable;
+                        if (glob.mutability != expected_mut)
+                            return error.ImportTypeMismatch;
+                    }
+                    try self.globaladdrs.append(self.alloc, handle);
+                },
                 .tag => try self.tagaddrs.append(self.alloc, handle),
             }
         }

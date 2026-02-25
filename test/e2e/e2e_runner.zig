@@ -18,6 +18,7 @@ const Store = zwasm.runtime.Store;
 const Module = zwasm.runtime.Module;
 const Instance = zwasm.runtime.Instance;
 const VmImpl = zwasm.runtime.VmImpl;
+const validateModule = zwasm.runtime.validateModule;
 
 // ============================================================
 // JSON types for wast2json output
@@ -356,9 +357,15 @@ const TestRunner = struct {
 
         var mod = Module.init(self.allocator, wasm_bytes);
         if (mod.decode()) |_| {
-            mod.deinit();
-            self.failed += 1;
-            self.addFailure("line {d}: assert_invalid expected error but decoded OK", .{cmd.line});
+            // Decode succeeded — run validation to catch type errors
+            if (validateModule(self.allocator, &mod)) |_| {
+                mod.deinit();
+                self.failed += 1;
+                self.addFailure("line {d}: assert_invalid expected error but decoded OK", .{cmd.line});
+            } else |_| {
+                mod.deinit();
+                self.passed += 1;
+            }
         } else |_| {
             mod.deinit();
             self.passed += 1;
