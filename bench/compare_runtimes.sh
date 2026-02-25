@@ -46,6 +46,9 @@ for arg in "$@"; do
       echo "  Layer 3 (Shootout): st_fib2, st_sieve, st_nestedloop,"
       echo "                      st_ackermann, st_matrix"
       echo "  Layer 4 (GC):      gc_alloc, gc_tree"
+      echo "  Layer 5 (Real):    rw_rust_fib, rw_c_matrix, rw_c_math,"
+      echo "                     rw_c_string, rw_cpp_string, rw_cpp_sort,"
+      echo "                     rw_go_sort, rw_go_json"
       exit 0
       ;;
   esac
@@ -114,10 +117,18 @@ BENCHMARKS=(
   # Layer 4: GC proposal (struct/ref types)
   "gc_alloc:bench/wasm/gc_alloc.wasm:gc_bench:100000:gc_invoke"
   "gc_tree:bench/wasm/gc_tree.wasm:gc_tree_bench:18:gc_invoke"
+  # Layer 5: Real-world (Rust, C, C++ WASI programs)
+  # Go benchmarks excluded (< 5ms, too fast for meaningful comparison)
+  "rw_rust_fib:test/realworld/wasm/rust_fib_compute.wasm::_start:wasi"
+  "rw_c_matrix:test/realworld/wasm/c_matrix_multiply.wasm::_start:wasi"
+  "rw_c_math:test/realworld/wasm/c_math_compute.wasm::_start:wasi"
+  "rw_c_string:test/realworld/wasm/c_string_processing.wasm::_start:wasi"
+  "rw_cpp_string:test/realworld/wasm/cpp_string_ops.wasm::_start:wasi"
+  "rw_cpp_sort:test/realworld/wasm/cpp_vector_sort.wasm::_start:wasi"
 )
 
-RUNS=3
-WARMUP=1
+RUNS=5
+WARMUP=3
 if [[ $QUICK -eq 1 ]]; then
   RUNS=1
   WARMUP=0

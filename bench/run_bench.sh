@@ -58,6 +58,13 @@ BENCHMARKS=(
   # Layer 4: GC proposal (struct/ref types)
   "gc_alloc:bench/wasm/gc_alloc.wasm:gc_bench:100000:invoke"
   "gc_tree:bench/wasm/gc_tree.wasm:gc_tree_bench:18:invoke"
+  # Layer 5: Real-world (Rust, C, C++ WASI programs)
+  "rw_rust_fib:test/realworld/wasm/rust_fib_compute.wasm::_start:wasi"
+  "rw_c_matrix:test/realworld/wasm/c_matrix_multiply.wasm::_start:wasi"
+  "rw_c_math:test/realworld/wasm/c_math_compute.wasm::_start:wasi"
+  "rw_c_string:test/realworld/wasm/c_string_processing.wasm::_start:wasi"
+  "rw_cpp_string:test/realworld/wasm/cpp_string_ops.wasm::_start:wasi"
+  "rw_cpp_sort:test/realworld/wasm/cpp_vector_sort.wasm::_start:wasi"
 )
 
 for entry in "${BENCHMARKS[@]}"; do

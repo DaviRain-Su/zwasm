@@ -4,7 +4,7 @@
 > Read plan for full context. Update after each phase.
 
 ## Branch
-`strictly-check/reliability-002` (from main at 86e0490)
+`strictly-check/reliability-003` (from main at d55a72b)
 
 Branch naming: `-001`, `-002`, ... (sequential). See CLAUDE.md § Reliability Work Branch Strategy.
 
@@ -24,10 +24,10 @@ Branch naming: `-001`, `-002`, ... (sequential). See CLAUDE.md § Reliability Wo
 - [x] D.1: Fix existing E2E failures (was already 356/356)
 - [x] D.2: Feature-specific E2E tests (53 proposal tests added, 724/778 pass)
 - [x] D.3: Update E2E runner (named module auto-register, GC ref types, table index fix)
-- [ ] E.1: Real-world benchmarks
-- [ ] E.2: Benchmark harness update
-- [ ] E.3: Fair benchmark audit
-- [ ] E.4: Record baseline
+- [x] E.1: Real-world benchmarks (6 Rust/C/C++ benchmarks in Layer 5)
+- [x] E.2: Benchmark harness update (Layer 5 in compare_runtimes.sh + run_bench.sh)
+- [x] E.3: Fair benchmark audit (5 runs / 3 warmup default)
+- [x] E.4: Record baseline (runtime_comparison.yaml updated)
 - [ ] F.1: Analyze weak spots
 - [ ] F.2: Profile and optimize
 - [x] F.3: JIT back-edge reentry fix (W34)
@@ -43,7 +43,7 @@ Branch naming: `-001`, `-002`, ... (sequential). See CLAUDE.md § Reliability Wo
 ## Current Phase
 C complete. F.3 done (W34 root cause fixed). Merged to main (86e0490).
 Now on reliability-002.
-D.1: existing E2E was already 356/356. D.2 in progress: proposal E2E added.
+Phases A-E complete, F.3 done. Next: F.1 (analyze weak spots) or G (Ubuntu).
 
 ## W34 Root Cause Analysis
 

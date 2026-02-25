@@ -40,15 +40,14 @@ See `private/roadmap-production.md` Phase 46 for full detail.
 
 ## Current Task
 
-Reliability improvement (branch: `strictly-check/reliability-002`).
+Reliability improvement (branch: `strictly-check/reliability-003`).
 Plan: `.dev/reliability-plan.md`. Progress: `.dev/reliability-handover.md`.
-Phases A-D complete, F.3 done. Next: E (benchmarks) or merge and continue.
+Phases A-E complete, F.3 done. Next: F.1 (perf analysis) or G (Ubuntu).
 
 ## Previous Task
 
-D.2: Proposal E2E tests — 53 tests from wasmtime misc_testsuite. Found & fixed table_grow/size/fill
-using wrong table index (store vs instance), E2E runner named-module auto-register, GC ref types.
-724/778 pass (93.1%). 54 failures are known limitations (validation, type checking, bounds edges).
+E.1-E.4: Real-world benchmarks added (Layer 5: 6 Rust/C/C++ programs). Fair benchmark defaults
+(5 runs/3 warmup). Baseline recorded. zwasm competitive on C++ (tied), gaps on C math (6x).
 
 ## Wasm 3.0 Coverage
 
