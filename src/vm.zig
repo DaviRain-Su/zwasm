@@ -1972,7 +1972,7 @@ pub const Vm = struct {
             },
             .table_grow => {
                 const table_idx = try reader.readU32();
-                const t = try instance.store.getTable(table_idx);
+                const t = try instance.getTable(table_idx);
                 const n: u32 = if (t.is_64) @truncate(self.popU64()) else @as(u32, @bitCast(self.popI32()));
                 const val = self.pop();
                 const init_val: ?usize = if (val == 0) null else @intCast(val - 1);
@@ -1984,12 +1984,12 @@ pub const Vm = struct {
             },
             .table_size => {
                 const table_idx = try reader.readU32();
-                const t = try instance.store.getTable(table_idx);
+                const t = try instance.getTable(table_idx);
                 if (t.is_64) try self.pushI64(@intCast(t.size())) else try self.pushI32(@bitCast(t.size()));
             },
             .table_fill => {
                 const table_idx = try reader.readU32();
-                const t = try instance.store.getTable(table_idx);
+                const t = try instance.getTable(table_idx);
                 const n: u32 = if (t.is_64) @truncate(self.popU64()) else @as(u32, @bitCast(self.popI32()));
                 const val = self.pop();
                 const start: u32 = if (t.is_64) @truncate(self.popU64()) else @as(u32, @bitCast(self.popI32()));
@@ -5220,7 +5220,7 @@ pub const Vm = struct {
                 }
             },
             0x0F => { // table.grow
-                const t = try instance.store.getTable(instr.operand);
+                const t = try instance.getTable(instr.operand);
                 const n: u32 = if (t.is_64) @truncate(self.popU64()) else @as(u32, @bitCast(self.popI32()));
                 const val = self.pop();
                 const init_val: ?usize = if (val == 0) null else @intCast(val - 1);
@@ -5231,11 +5231,11 @@ pub const Vm = struct {
                 if (t.is_64) try self.pushI64(@intCast(old)) else try self.pushI32(@bitCast(old));
             },
             0x10 => { // table.size
-                const t = try instance.store.getTable(instr.operand);
+                const t = try instance.getTable(instr.operand);
                 if (t.is_64) try self.pushI64(@intCast(t.size())) else try self.pushI32(@bitCast(t.size()));
             },
             0x11 => { // table.fill
-                const t = try instance.store.getTable(instr.operand);
+                const t = try instance.getTable(instr.operand);
                 const n: u32 = if (t.is_64) @truncate(self.popU64()) else @as(u32, @bitCast(self.popI32()));
                 const val = self.pop();
                 const start: u32 = if (t.is_64) @truncate(self.popU64()) else @as(u32, @bitCast(self.popI32()));

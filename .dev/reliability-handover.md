@@ -4,7 +4,7 @@
 > Read plan for full context. Update after each phase.
 
 ## Branch
-`strictly-check/reliability-001` (from main at 7b81746)
+`strictly-check/reliability-002` (from main at 86e0490)
 
 Branch naming: `-001`, `-002`, ... (sequential). See CLAUDE.md § Reliability Work Branch Strategy.
 
@@ -21,9 +21,9 @@ Branch naming: `-001`, `-002`, ... (sequential). See CLAUDE.md § Reliability Wo
 - [x] C.1: Compatibility test runner
 - [x] C.2: Fix compatibility failures (W34 root cause + test fixes)
 - [x] C.3: Document unsupported cases (FP precision only)
-- [ ] D.1: Fix existing E2E failures (15 failures)
-- [ ] D.2: Feature-specific E2E tests
-- [ ] D.3: Update E2E runner
+- [x] D.1: Fix existing E2E failures (was already 356/356)
+- [x] D.2: Feature-specific E2E tests (53 proposal tests added, 724/778 pass)
+- [x] D.3: Update E2E runner (named module auto-register, GC ref types, table index fix)
 - [ ] E.1: Real-world benchmarks
 - [ ] E.2: Benchmark harness update
 - [ ] E.3: Fair benchmark audit
@@ -41,7 +41,9 @@ Branch naming: `-001`, `-002`, ... (sequential). See CLAUDE.md § Reliability Wo
 - [ ] H.3: Update benchmark table
 
 ## Current Phase
-C complete. F.3 done (W34 root cause fixed). Ready to merge to main.
+C complete. F.3 done (W34 root cause fixed). Merged to main (86e0490).
+Now on reliability-002.
+D.1: existing E2E was already 356/356. D.2 in progress: proposal E2E added.
 
 ## W34 Root Cause Analysis
 
@@ -65,6 +67,37 @@ The 1 DIFF is c_math_compute (FP precision difference, expected):
 - wasmtime: 21304744.878669
 
 All benchmark performance restored (no regressions from fix).
+
+## Phase D: E2E Test Expansion Results
+
+Added 53 proposal-specific E2E tests from wasmtime misc_testsuite:
+- Function references: 5 files (call_indirect, table_fill/get/grow/set)
+- Tail call: 1 file (loop-across-modules)
+- Multi-memory: 1 file
+- Threads: 12 files
+- Memory64: 8 files (excl. more-than-4gb)
+- GC: 25 files
+
+Total: 778 assertions, 724 PASS (93.1%), 54 FAIL.
+
+### Bugs found and fixed
+1. **table_grow/size/fill used store.getTable(raw_idx) instead of instance.getTable(idx)**
+   — wrong table accessed in multi-module scenarios. Fixed in both bytecode and RegIR paths.
+2. **E2E runner: named modules not auto-registered** — modules with `$name` weren't
+   importable by other modules. Fixed: `registerExports()` called for named modules.
+3. **E2E runner: GC ref types not handled** — anyref, structref, arrayref, i31ref etc.
+   not recognized in valuesMatch(). Fixed.
+
+### Remaining 54 failures (known limitations)
+- 30 assert_invalid: typed funcref validation (zwasm accepts invalid stack types)
+- 7 assert_unlinkable (linking-errors): import type checking not implemented
+- 6 memory64_bounds: zero-length ops at out-of-bounds addresses should trap
+- 3 memory64_multi-memory: same bounds edge case
+- 2 gc_ref-test: ref.test with certain type combinations returns wrong result
+- 2 gc_array-alloc-too-large: missing OOM trap for oversized arrays
+- 2 memory64_linking: linking type validation
+- 1 memory64_linking-errors: decode overflow
+- 1 threads_SB_atomic: concurrency ordering (single-threaded limitation)
 
 ## Notes
 - Rust: system rustup with wasm32-wasip1 target (not in nix)

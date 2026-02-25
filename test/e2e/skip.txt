@@ -6,16 +6,9 @@
 # in convert.sh instead of adding entries here.
 
 # Unimplemented proposals (not in e2e scope)
-gc/
-threads/
-memory64/
-tail-call/
 component-model/
 component-model-threading/
-multi-memory/
-custom-page-sizes/
 shared-everything-threads/
-function-references/
 
 # Wasmtime JIT-specific
 winch/

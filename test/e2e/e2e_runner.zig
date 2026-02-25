@@ -219,8 +219,48 @@ const TestRunner = struct {
 
         if (cmd.name) |name| {
             self.named_modules.put(name, entry) catch return;
+            // Auto-register named modules so other modules can import from them
+            self.registerExports(name, entry);
         }
         self.current_module = entry;
+    }
+
+    fn registerExports(self: *TestRunner, as_name: []const u8, entry: ModuleEntry) void {
+        self.registered.put(as_name, entry) catch return;
+        for (entry.module.exports.items) |exp| {
+            switch (exp.kind) {
+                .func => {
+                    if (exp.index < entry.instance.funcaddrs.items.len) {
+                        const addr = entry.instance.funcaddrs.items[exp.index];
+                        self.store.addExport(as_name, exp.name, .func, addr) catch continue;
+                    }
+                },
+                .table => {
+                    if (exp.index < entry.instance.tableaddrs.items.len) {
+                        const addr = entry.instance.tableaddrs.items[exp.index];
+                        self.store.addExport(as_name, exp.name, .table, addr) catch continue;
+                    }
+                },
+                .memory => {
+                    if (exp.index < entry.instance.memaddrs.items.len) {
+                        const addr = entry.instance.memaddrs.items[exp.index];
+                        self.store.addExport(as_name, exp.name, .memory, addr) catch continue;
+                    }
+                },
+                .global => {
+                    if (exp.index < entry.instance.globaladdrs.items.len) {
+                        const addr = entry.instance.globaladdrs.items[exp.index];
+                        self.store.addExport(as_name, exp.name, .global, addr) catch continue;
+                    }
+                },
+                .tag => {
+                    if (exp.index < entry.instance.tagaddrs.items.len) {
+                        const addr = entry.instance.tagaddrs.items[exp.index];
+                        self.store.addExport(as_name, exp.name, .tag, addr) catch continue;
+                    }
+                },
+            }
+        }
     }
 
     fn handleRegister(self: *TestRunner, cmd: *const JsonCommand) void {
@@ -232,43 +272,7 @@ const TestRunner = struct {
             self.current_module;
 
         if (source) |entry| {
-            self.registered.put(as_name, entry) catch return;
-
-            // Add all exports from this instance to the shared store under the registered name
-            for (entry.module.exports.items) |exp| {
-                switch (exp.kind) {
-                    .func => {
-                        if (exp.index < entry.instance.funcaddrs.items.len) {
-                            const addr = entry.instance.funcaddrs.items[exp.index];
-                            self.store.addExport(as_name, exp.name, .func, addr) catch continue;
-                        }
-                    },
-                    .table => {
-                        if (exp.index < entry.instance.tableaddrs.items.len) {
-                            const addr = entry.instance.tableaddrs.items[exp.index];
-                            self.store.addExport(as_name, exp.name, .table, addr) catch continue;
-                        }
-                    },
-                    .memory => {
-                        if (exp.index < entry.instance.memaddrs.items.len) {
-                            const addr = entry.instance.memaddrs.items[exp.index];
-                            self.store.addExport(as_name, exp.name, .memory, addr) catch continue;
-                        }
-                    },
-                    .global => {
-                        if (exp.index < entry.instance.globaladdrs.items.len) {
-                            const addr = entry.instance.globaladdrs.items[exp.index];
-                            self.store.addExport(as_name, exp.name, .global, addr) catch continue;
-                        }
-                    },
-                    .tag => {
-                        if (exp.index < entry.instance.tagaddrs.items.len) {
-                            const addr = entry.instance.tagaddrs.items[exp.index];
-                            self.store.addExport(as_name, exp.name, .tag, addr) catch continue;
-                        }
-                    },
-                }
-            }
+            self.registerExports(as_name, entry);
         }
     }
 
@@ -562,7 +566,12 @@ fn parseValue(v: JsonValue) u64 {
             const signed = std.fmt.parseInt(i64, s, 10) catch return 0;
             return @bitCast(signed);
         };
-    } else if (std.mem.eql(u8, v.type, "externref") or std.mem.eql(u8, v.type, "funcref")) {
+    } else if (std.mem.eql(u8, v.type, "externref") or std.mem.eql(u8, v.type, "funcref") or
+        std.mem.eql(u8, v.type, "anyref") or std.mem.eql(u8, v.type, "structref") or
+        std.mem.eql(u8, v.type, "arrayref") or std.mem.eql(u8, v.type, "eqref") or
+        std.mem.eql(u8, v.type, "i31ref") or std.mem.eql(u8, v.type, "nullref") or
+        std.mem.eql(u8, v.type, "nullfuncref") or std.mem.eql(u8, v.type, "nullexternref"))
+    {
         if (std.mem.eql(u8, s, "null")) return 0;
         return std.fmt.parseInt(u64, s, 10) catch return 0;
     }
@@ -602,6 +611,18 @@ fn valuesMatch(expected: JsonValue, actual: u64) bool {
         return actual == (std.fmt.parseInt(u64, s, 10) catch return false);
     } else if (std.mem.eql(u8, expected.type, "funcref")) {
         if (std.mem.eql(u8, s, "null")) return actual == 0;
+        return actual != 0;
+    } else if (std.mem.eql(u8, expected.type, "anyref") or
+        std.mem.eql(u8, expected.type, "structref") or
+        std.mem.eql(u8, expected.type, "arrayref") or
+        std.mem.eql(u8, expected.type, "eqref") or
+        std.mem.eql(u8, expected.type, "i31ref") or
+        std.mem.eql(u8, expected.type, "nullref") or
+        std.mem.eql(u8, expected.type, "nullfuncref") or
+        std.mem.eql(u8, expected.type, "nullexternref"))
+    {
+        if (std.mem.eql(u8, s, "null")) return actual == 0;
+        // Non-null GC ref: just check it's not null
         return actual != 0;
     } else if (std.mem.eql(u8, expected.type, "v128")) {
         // v128: skip detailed comparison for now

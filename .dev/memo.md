@@ -8,7 +8,7 @@ Session handover document. Read at session start.
 - Source: ~38K LOC, 24 files, 510 unit tests all pass
 - Component Model: WIT parser, binary decoder, Canonical ABI, WASI P2 adapter, CLI support (121 CM tests)
 - Opcode: 236 core + 256 SIMD (236 + 20 relaxed) + 31 GC = 523, WASI: 46/46 (100%)
-- Spec: 62,158/62,158 Mac + Ubuntu (100.0%). GC+EH integrated, threads 310/310, E2E: 356/356
+- Spec: 62,158/62,158 Mac + Ubuntu (100.0%). GC+EH integrated, threads 310/310, E2E: 724/778 (93.1%)
 - Benchmarks: 4 layers (WAT 5, TinyGo 11, Shootout 5, GC 2 = 23 total)
 - Register IR + ARM64 JIT: full arithmetic/control/FP/memory/call_indirect
 - JIT optimizations: fast path, inline self-call, smart spill, doCallDirectIR, lightweight self-call
@@ -40,16 +40,15 @@ See `private/roadmap-production.md` Phase 46 for full detail.
 
 ## Current Task
 
-Reliability improvement (branch: `strictly-check/reliability-001`).
+Reliability improvement (branch: `strictly-check/reliability-002`).
 Plan: `.dev/reliability-plan.md`. Progress: `.dev/reliability-handover.md`.
-Phases A-C complete, F.3 done. W34 root cause fixed (reentry guard detection).
-Next: merge to main, then D.1 (E2E failures).
+Phases A-D complete, F.3 done. Next: E (benchmarks) or merge and continue.
 
 ## Previous Task
 
-W34 JIT back-edge reentry bug — FIXED. Root cause: C/C++ `__wasm_call_ctors` reentry guard
-traps when back-edge JIT restarts function. Fix: `hasReentryGuard()` in vm.zig detects
-early branch-to-unreachable and skips back-edge JIT. 12/13 compat pass, 0 benchmark regression.
+D.2: Proposal E2E tests — 53 tests from wasmtime misc_testsuite. Found & fixed table_grow/size/fill
+using wrong table index (store vs instance), E2E runner named-module auto-register, GC ref types.
+724/778 pass (93.1%). 54 failures are known limitations (validation, type checking, bounds edges).
 
 ## Wasm 3.0 Coverage
 

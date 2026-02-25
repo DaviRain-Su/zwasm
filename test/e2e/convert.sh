@@ -6,6 +6,7 @@
 #   --batch 2  Priority 2: Float & Reference Types (~15 files)
 #   --batch 3  Priority 3: Programs & Regressions (~20 files)
 #   --batch 4  Priority 4: SIMD (~15 files)
+#   --batch 5  Priority 5: Proposals (GC, Threads, Memory64, etc.)
 #   (no flag)  All portable files
 
 set -e
@@ -109,6 +110,44 @@ BATCH4_SIMD=(
     simd/spillslot-size-fuzzbug.wast simd/sse-cannot-fold-unaligned-loads.wast
 )
 
+# Batch 5: Proposal-specific E2E tests
+BATCH5_PROPOSALS=(
+    # Function references (instance.wast excluded: uses module_definition/module_instance)
+    function-references/call_indirect.wast
+    function-references/table_fill.wast
+    function-references/table_get.wast
+    function-references/table_grow.wast
+    function-references/table_set.wast
+    # Tail call
+    tail-call/loop-across-modules.wast
+    # Multi-memory
+    multi-memory/simple.wast
+    # Threads
+    threads/LB.wast threads/LB_atomic.wast
+    threads/MP.wast threads/MP_atomic.wast threads/MP_wait.wast
+    threads/SB.wast threads/SB_atomic.wast
+    threads/atomics-end-of-memory.wast threads/atomics_notify.wast
+    threads/atomics_wait_address.wast threads/load-store-alignment.wast
+    threads/wait_notify.wast
+    # Memory64 (more-than-4gb excluded: needs >4GB RAM)
+    memory64/bounds.wast memory64/codegen.wast
+    memory64/linking-errors.wast memory64/linking.wast
+    memory64/multi-memory.wast memory64/offsets.wast
+    memory64/simd.wast memory64/threads.wast
+    # GC
+    gc/alloc-v128-struct.wast gc/anyref_that_is_i31_barriers.wast
+    gc/array-alloc-too-large.wast gc/array-init-data.wast
+    gc/array-new-data.wast gc/array-new-elem.wast
+    gc/array-types.wast gc/arrays-of-different-types.wast
+    gc/externrefs-can-be-i31refs.wast gc/func-refs-in-gc-heap.wast
+    gc/fuzz-segfault.wast gc/i31ref-of-global-initializers.wast
+    gc/i31ref-tables.wast gc/issue-10171.wast gc/issue-10182.wast
+    gc/issue-10353.wast gc/issue-10397.wast gc/issue-10459.wast
+    gc/issue-10467.wast gc/more-rec-groups-than-types.wast
+    gc/null-i31ref.wast gc/rec-group-funcs.wast gc/ref-test.wast
+    gc/struct-instructions.wast gc/struct-types.wast
+)
+
 # Determine which files to process
 BATCH="${1#--batch=}"
 [ "$1" = "--batch" ] && BATCH="$2"
@@ -129,6 +168,9 @@ collect_files() {
         4)
             for f in "${BATCH4_SIMD[@]}"; do files+=("$WASMTIME_MISC/$f"); done
             ;;
+        5)
+            for f in "${BATCH5_PROPOSALS[@]}"; do files+=("$WASMTIME_MISC/$f"); done
+            ;;
         *)
             # All batches combined (explicit list — no wildcard scan)
             for f in "${BATCH1[@]}"; do files+=("$WASMTIME_MISC/$f"); done
@@ -136,6 +178,7 @@ collect_files() {
             for f in "${BATCH3[@]}"; do files+=("$WASMTIME_MISC/$f"); done
             for f in "${BATCH3_WAT[@]}"; do files+=("$WASMTIME_MISC/$f"); done
             for f in "${BATCH4_SIMD[@]}"; do files+=("$WASMTIME_MISC/$f"); done
+            for f in "${BATCH5_PROPOSALS[@]}"; do files+=("$WASMTIME_MISC/$f"); done
             ;;
     esac
     echo "${files[@]}"
@@ -159,11 +202,15 @@ for src in "${FILES[@]}"; do
     base="${name%.*}"
     ext="${name##*.}"
 
-    # For simd/ subdir files, flatten name with simd_ prefix
+    # For subdir files, flatten name with dir_ prefix (e.g. simd/foo.wast → simd_foo.wast)
     relpath="${src#$WASMTIME_MISC/}"
-    if [[ "$relpath" == simd/* ]]; then
-        flat_name="simd_${name}"
-        flat_base="simd_${base}"
+    if [[ "$relpath" == */* ]]; then
+        prefix="${relpath%%/*}"
+        # Normalize: function-references → funcref, custom-page-sizes → custom_page_sizes
+        prefix="${prefix//-/_}"
+        [ "$prefix" = "function_references" ] && prefix="funcref"
+        flat_name="${prefix}_${name}"
+        flat_base="${prefix}_${base}"
     else
         flat_name="$name"
         flat_base="$base"
