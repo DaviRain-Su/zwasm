@@ -21,11 +21,9 @@ Plan: `@./.dev/reliability-plan.md`. Progress: `@./.dev/reliability-handover.md`
 - [x] P2: nbody FP cache fix — expand D-reg cache D2-D15, FP-aware MOV (23.1ms, 0.97x wasmtime)
 - [x] P3: rw_c_math — accepted as regalloc limit (58ms, 4.92x, 136 regs)
 - [x] P4: GC JIT — predecode+regalloc+JIT for struct ops (gc_alloc 0.50x, gc_tree 0.73x wasmtime)
-- P5: st_matrix accept as exception (Priority C)
+- [x] P5: st_matrix — accepted as regalloc limit exception (296ms, 3.23x, 35 vregs)
 
-**Active: P5 (st_matrix accept as exception)**
-st_matrix: 296.4ms, 3.23x wasmtime. Regalloc limit (too many regs for single-pass).
-Accept ≤3.5x as exception.
+**All P1-P5 phases complete.** Ready for merge gate (Mac local + Ubuntu x86_64).
 
 ## Previous Task
 

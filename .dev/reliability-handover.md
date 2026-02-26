@@ -10,14 +10,14 @@ P1+P2 merged to main. Remaining: P3-P5.
 ## Current: Plan A — Incremental regression fix + feature implementation
 
 ### Active Phase
-**Phase 4: GC JIT basic implementation** (Priority B)
+**All phases complete.** Ready for merge gate.
 
 ### Phase Checklist
 - [x] **P1**: rw_c_string hang fix — skip back-edge JIT for reentry guard functions (20.2ms, was timeout)
 - [x] **P2**: nbody FP cache fix — expand D-reg cache D2-D15 + FP-aware MOV (23.1ms, 0.97x wasmtime)
 - [x] **P3**: rw_c_math — accepted as regalloc limit (58ms, 4.92x, 136 regs / 1381 IR instrs)
 - [x] **P4**: GC JIT basic implementation — predecode+regalloc+JIT for struct ops (gc_alloc 0.50x, gc_tree 0.73x wasmtime)
-- [ ] **P5**: st_matrix accept — ≤3.5x exception (single-pass limit)
+- [x] **P5**: st_matrix — accepted as regalloc limit exception (296ms, 3.23x wasmtime, 35 vregs)
 
 ### Per-Phase Workflow (important)
 ```
@@ -32,11 +32,11 @@ P1+P2 merged to main. Remaining: P3-P5.
 
 ## Latest Benchmark Snapshot (P4, runs=5/warmup=3)
 
-### >1.5x wasmtime (action required)
+### Accepted exceptions (regalloc limit — single-pass architecture)
 | bench | zwasm | wasmtime | ratio | Phase |
 |-------|------:|--------:|------:|-------|
-| rw_c_math | 59.7 | 11.8 | 5.06x | P3 exception (regalloc limit) |
-| st_matrix | 296.4 | 91.7 | 3.23x | P5 exception (regalloc limit) |
+| rw_c_math | 59.7 | 11.8 | 5.06x | P3 (136 vregs / 1381 IR instrs) |
+| st_matrix | 296.4 | 91.7 | 3.23x | P5 (35 vregs, matrix multiply) |
 
 ### ≤1.5x wasmtime (OK — 27 benchmarks)
 fib 0.88x, tak 0.86x, sieve 0.51x, nbody 0.97x, nqueens 0.65x, tgo_tak 0.62x,
