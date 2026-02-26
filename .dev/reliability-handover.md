@@ -22,11 +22,12 @@
 **Phase K: Performance optimization (target: all ≤1.5x wasmtime)**
 - [x] K.2: JIT opcode coverage — select, br_table, trunc_sat, div-by-constant (UMULL+LSR)
 - [x] K.3: FP optimization — FP-direct load/store, const-folded ADD/SUB (marginal on ARM64)
+- [x] K.4: Self-call setup optimization — bypass shared prologue, skip reg_ptr memory sync
 - [ ] K.5: Benchmark re-recording on BOTH platforms
 
 **Remaining gaps (non-blocked, > 1.5x wasmtime):**
 - st_matrix 3.5x: register pressure (35 vregs, 12 spills) → needs regalloc improvement
-- st_fib2 1.6x: self-call overhead (~20 vs ~5 instrs) → needs calling convention change
+- st_fib2 1.51x (was 1.6x): self-call still ~13 instrs overhead vs wasmtime ~5
 - tgo_mfr 1.56x: MOV overhead from SSA lowering → needs better regalloc
 - tgo_strops 1.1x (was 1.5x, fixed by div-by-constant)
 - **Blocked**: gc_tree/gc_alloc (GC not JIT'd), rw_c_math/c_matrix/c_string (W34 needs OSR)
@@ -52,6 +53,6 @@ All C/C++ real-world programs pass with JIT on Ubuntu x86_64:
 - go_*: EXIT=0 but no output (WASI compat issue, not JIT — same with --profile)
 
 ## Benchmark gaps (Phase K status)
-**Improved**: tgo_strops 1.51x→1.1x (div-by-constant UMULL+LSR).
+**Improved**: tgo_strops 1.51x→1.1x (div-by-constant). fib 61→49ms (-20%), tak 10→8ms (-20%), st_fib2 1.06→0.99s (-6%).
 **Blocked (needs OSR/GC JIT)**: rw_c_math 4.1x, rw_c_matrix 2.7x, rw_c_string 2.0x, gc_tree 5.0x, gc_alloc 2.4x.
-**Needs arch changes**: st_matrix 3.5x (regalloc), st_fib2 1.6x (call overhead), tgo_mfr 1.56x (regalloc).
+**Needs arch changes**: st_matrix 3.5x (regalloc), st_fib2 1.51x (call overhead), tgo_mfr 1.56x (regalloc).
