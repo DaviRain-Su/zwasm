@@ -4,10 +4,10 @@ Session handover document. Read at session start.
 
 ## Current State
 
-- Stages 0-46 complete. v1.1.0 released. ~38K LOC, 510 unit tests.
+- Stages 0-46 complete. v1.1.0 released. ~50K LOC, 521 unit tests.
 - Spec: 62,158/62,158 Mac + Ubuntu (100.0%). E2E: 792/792 (100.0%).
 - Wasm 3.0: all 9 proposals. WASI: 46/46 (100%). WAT parser complete.
-- JIT: Register IR + ARM64/x86_64. Size: 1.31MB / 3.44MB RSS.
+- JIT: Register IR + ARM64/x86_64. Size: ~1.4MB / ~3.5MB RSS.
 - **main = stable**: ClojureWasm depends on main (v1.1.0 tag).
 
 ## Current Task
@@ -22,9 +22,10 @@ Plan: `@./.dev/reliability-plan.md`. Progress: `@./.dev/reliability-handover.md`
 - [x] R3: cpp_string_ops Ubuntu fix — same root cause as R2
 - [x] R4: c_hello_wasi Ubuntu fix — same root cause as R2
 - [x] R5: 18 new real-world tests + JIT IR limit + x86 select fix (30/30 Mac+Ubuntu)
-- [ ] R6: Phase H Gate pass (all 9 conditions)
-- [ ] R7: Merge to main, push, CI green
-- [ ] R8: Phase H — 41-file documentation audit
+- [x] R6: OSR for back-edge JIT — st_sieve 0.97x restored, all gates pass
+- [x] R7: Merged to main (cf1c259), CI green (run 22459949055)
+  - x86 OSR prologue register push order fix + macOS CI WASI SDK permission fix
+- [x] R8: Phase H — 41-file documentation audit (complete)
 
 ## Previous Task
 

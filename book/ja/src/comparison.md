@@ -7,7 +7,7 @@ zwasm と他の WebAssembly ランタイムの比較です。
 | 特徴 | zwasm | wasmtime | wasm3 | wasmer |
 |------|-------|----------|-------|--------|
 | 言語 | Zig | Rust | C | Rust/C |
-| バイナリサイズ | 1.3 MB | 56 MB | ~100 KB | 30+ MB |
+| バイナリサイズ | 約 1.4 MB | 56 MB | ~100 KB | 30+ MB |
 | メモリ (fib) | 3.5 MB | 12 MB | ~1 MB | 15+ MB |
 | 実行方式 | Interp + JIT | AOT/JIT | Interpreter | AOT/JIT |
 | Wasm 3.0 | 完全対応 | 完全対応 | 部分対応 | 部分対応 |
@@ -18,7 +18,7 @@ zwasm と他の WebAssembly ランタイムの比較です。
 
 ## zwasm を選ぶべきとき
 
-**小さなフットプリント**: バイナリサイズとメモリ使用量が重要な場合。zwasm は wasmtime の 43 分の 1 のサイズです。
+**小さなフットプリント**: バイナリサイズとメモリ使用量が重要な場合。zwasm は wasmtime の約 40 分の 1 のサイズです。
 
 **Zig エコシステム**: Zig アプリケーションに組み込む場合。zwasm は C 依存なしのネイティブな `zig build` 依存関係として統合できます。
 

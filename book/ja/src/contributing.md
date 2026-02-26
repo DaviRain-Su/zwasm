@@ -49,8 +49,9 @@ src/
   instance.zig    Module instantiation
 test/
   spec/           WebAssembly spec tests
-  e2e/            End-to-end tests (wasmtime misc_testsuite)
+  e2e/            End-to-end tests (wasmtime misc_testsuite, 792 assertions)
   fuzz/           Fuzz testing infrastructure
+  realworld/      Real-world compatibility tests (30 programs)
 bench/
   run_bench.sh    Benchmark runner
   record.sh       Record results to history.yaml
@@ -79,7 +80,7 @@ bench/
 
 - ユニットテストの通過（macOS + Ubuntu）
 - スペックテストの通過（62,158 テスト）
-- E2E テストの通過（356 アサーション）
+- E2E テストの通過（792 アサーション）
 - バイナリサイズ <= 1.5 MB
 - ベンチマークの性能劣化が 20% 以内
 - ReleaseSafe ビルドの成功

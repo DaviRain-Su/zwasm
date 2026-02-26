@@ -19,30 +19,30 @@ Once JIT-compiled, all subsequent calls to that function execute native machine 
 
 | Metric | Value |
 |--------|-------|
-| Binary size (ReleaseSafe) | 1.31 MB |
-| Runtime memory (fib benchmark) | 3.44 MB RSS |
+| Binary size (ReleaseSafe) | ~1.4 MB |
+| Runtime memory (fib benchmark) | ~3.5 MB RSS |
 | wasmtime binary for comparison | 56.3 MB |
 
-zwasm is ~43x smaller than wasmtime.
+zwasm is ~40x smaller than wasmtime.
 
 ## Benchmark results
 
 Representative benchmarks comparing zwasm against wasmtime 41.0.1, Bun 1.3.8, and Node v24.13.0 on Apple M4 Pro.
-14 of 23 benchmarks match or beat wasmtime. 21/23 within 2x.
+16 of 29 benchmarks match or beat wasmtime. 25/29 within 1.5x.
 
 | Benchmark | zwasm | wasmtime | Bun | Node |
 |-----------|------:|---------:|----:|-----:|
-| nqueens(8) | 2 ms | 5 ms | 14 ms | 22 ms |
-| nbody(1M) | 11 ms | 21 ms | 32 ms | 36 ms |
-| gcd(12K,67K) | 2 ms | 4 ms | 15 ms | 22 ms |
-| tak(24,16,8) | 7 ms | 10 ms | 17 ms | 25 ms |
-| sieve(1M) | 4 ms | 7 ms | 16 ms | 26 ms |
-| fib(35) | 51 ms | 49 ms | 31 ms | 46 ms |
-| st_fib2 | 1014 ms | 656 ms | 345 ms | 375 ms |
+| nqueens(8) | 2 ms | 5 ms | 14 ms | 23 ms |
+| nbody(1M) | 22 ms | 22 ms | 32 ms | 36 ms |
+| gcd(12K,67K) | 2 ms | 5 ms | 14 ms | 23 ms |
+| tak(24,16,8) | 5 ms | 9 ms | 17 ms | 29 ms |
+| sieve(1M) | 5 ms | 7 ms | 17 ms | 29 ms |
+| fib(35) | 46 ms | 51 ms | 36 ms | 52 ms |
+| st_fib2 | 900 ms | 674 ms | 353 ms | 389 ms |
 
-zwasm uses 3-4x less memory than wasmtime and 8-12x less than Bun/Node.
+zwasm uses 3-4x less memory than wasmtime and 8-10x less than Bun/Node.
 
-Full results (23 benchmarks): `bench/runtime_comparison.yaml`
+Full results (29 benchmarks): `bench/runtime_comparison.yaml`
 
 ### SIMD performance
 
@@ -72,6 +72,7 @@ bash bench/record.sh --id="X" --reason="description"
 | WAT micro | 5 | Hand-written: fib, tak, sieve, nbody, nqueens |
 | TinyGo | 11 | TinyGo compiler output: same algorithms + string ops |
 | Shootout | 5 | Sightglass shootout suite (WASI) |
+| Real-world | 6 | Rust, C, C++ compiled to Wasm (matrix, math, string, sort) |
 | GC | 2 | GC proposal: struct allocation, tree traversal |
 
 ### CI regression detection

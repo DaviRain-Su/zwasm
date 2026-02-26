@@ -42,8 +42,15 @@
   - hasBrTableInPrologue: inclusive of target instruction (Go back-edge → br_table)
   - st_sieve: 0.97x wasmtime (restored from 30.82x regression)
   - Mac + Ubuntu: 30/30 compat, 62158/62158 spec, unit tests PASS
-- [ ] **R7**: Merge to main, push, CI green
-- [ ] **R8**: Phase H — 41-file comprehensive documentation audit
+- [x] **R7**: Merge to main (cf1c259), push, CI green (run 22459949055)
+  - x86_64 OSR prologue register push order fix (rbp/rbx swap → match normal prologue)
+  - macOS CI WASI SDK permission fix (sudo for /opt/wasi-sdk)
+- [x] **R8**: Phase H — 41-file comprehensive documentation audit
+  - Root files (6): README, CHANGELOG, CONTRIBUTING, SECURITY, LICENSE, CODE_OF_CONDUCT
+  - docs/ (5): security.md, audit-36.md, usage.md, errors.md, api-boundary.md
+  - book/en/ (13): introduction, architecture, performance, contributing, comparison, spec-coverage + 7 OK
+  - book/ja/ (13): mirrored all English updates
+  - .github/ (4): FUNDING, issue templates, book workflow — all OK
 
 ### Existing Real-World Tests (12)
 | # | Program | Language | WASI Features |

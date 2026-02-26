@@ -55,18 +55,21 @@ The JIT threshold is adaptive: hot loops trigger compilation faster via back-edg
 |------|------|-----|
 | `module.zig` | Binary decoder, section parsing, LEB128 | ~2K |
 | `validate.zig` | Type checker, operand stack simulation | ~1.7K |
-| `predecode.zig` | Stack IR → register IR conversion | ~2K |
-| `regalloc.zig` | Virtual → physical register allocation | ~1.8K |
-| `vm.zig` | Interpreter, execution engine, store | ~7.3K |
-| `jit.zig` | ARM64 JIT backend | ~4.9K |
-| `x86.zig` | x86_64 JIT backend | ~3.9K |
+| `predecode.zig` | Stack IR → register IR conversion | ~0.7K |
+| `regalloc.zig` | Virtual → physical register allocation | ~2K |
+| `vm.zig` | Interpreter, execution engine, store | ~8K |
+| `jit.zig` | ARM64 JIT backend | ~5.9K |
+| `x86.zig` | x86_64 JIT backend | ~4.7K |
 | `types.zig` | Core type definitions, value types | ~1.3K |
-| `opcode.zig` | Opcode definitions (523 total) | ~1.3K |
-| `wasi.zig` | WASI Preview 1 (46 syscalls) | ~2.5K |
+| `opcode.zig` | Opcode definitions (581+ total) | ~1.3K |
+| `wasi.zig` | WASI Preview 1 (46 syscalls) | ~2.6K |
 | `gc.zig` | GC proposal: heap, struct/array types | ~1.4K |
-| `wat.zig` | WAT text format parser | ~3K |
-| `cli.zig` | CLI frontend | ~1.9K |
-| `instance.zig` | Module instantiation, linking | ~1K |
+| `wat.zig` | WAT text format parser | ~5.9K |
+| `cli.zig` | CLI frontend | ~2.1K |
+| `instance.zig` | Module instantiation, linking | ~0.9K |
+| `component.zig` | Component Model decoder | ~1.9K |
+| `wit.zig` | WIT parser | ~2.1K |
+| `canon_abi.zig` | Canonical ABI | ~1.2K |
 
 ## Register IR
 

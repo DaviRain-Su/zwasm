@@ -7,7 +7,7 @@ How zwasm compares to other WebAssembly runtimes.
 | Feature | zwasm | wasmtime | wasm3 | wasmer |
 |---------|-------|----------|-------|--------|
 | Language | Zig | Rust | C | Rust/C |
-| Binary size | 1.3 MB | 56 MB | ~100 KB | 30+ MB |
+| Binary size | ~1.4 MB | 56 MB | ~100 KB | 30+ MB |
 | Memory (fib) | 3.5 MB | 12 MB | ~1 MB | 15+ MB |
 | Execution | Interp + JIT | AOT/JIT | Interpreter | AOT/JIT |
 | Wasm 3.0 | Full | Full | Partial | Partial |
@@ -18,7 +18,7 @@ How zwasm compares to other WebAssembly runtimes.
 
 ## When to choose zwasm
 
-**Small footprint**: When binary size and memory usage matter. zwasm is 43x smaller than wasmtime.
+**Small footprint**: When binary size and memory usage matter. zwasm is ~40x smaller than wasmtime.
 
 **Zig ecosystem**: When embedding in a Zig application. zwasm integrates as a native `zig build` dependency with zero C dependencies.
 
