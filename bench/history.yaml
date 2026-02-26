@@ -2139,3 +2139,38 @@ entries:
       rw_c_string: {time_ms: 20.2}
       rw_cpp_string: {time_ms: 7.3}
       rw_cpp_sort: {time_ms: 3.9}
+  - id: "P2"
+    date: "2026-02-26"
+    reason: "Fix nbody FP cache: expand D-reg cache D2-D15, FP-aware MOV"
+    commit: "c34454a"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 53.0}
+      tak: {time_ms: 6.9}
+      sieve: {time_ms: 4.0}
+      nbody: {time_ms: 21.3}
+      nqueens: {time_ms: 2.6}
+      tgo_fib: {time_ms: 33.7}
+      tgo_tak: {time_ms: 6.3}
+      tgo_arith: {time_ms: 2.5}
+      tgo_sieve: {time_ms: 3.0}
+      tgo_fib_loop: {time_ms: 2.0}
+      tgo_gcd: {time_ms: 2.2}
+      tgo_nqueens: {time_ms: 41.6}
+      tgo_mfr: {time_ms: 49.4}
+      tgo_list: {time_ms: 36.5}
+      tgo_rwork: {time_ms: 6.0}
+      tgo_strops: {time_ms: 31.2}
+      st_fib2: {time_ms: 908.4}
+      st_sieve: {time_ms: 185.6}
+      st_nestedloop: {time_ms: 2.2}
+      st_ackermann: {time_ms: 4.1}
+      st_matrix: {time_ms: 286.4}
+      gc_alloc: {time_ms: 19.5}
+      gc_tree: {time_ms: 128.9}
+      rw_rust_fib: {time_ms: 35.9}
+      rw_c_matrix: {time_ms: 17.1}
+      rw_c_math: {time_ms: 53.6}
+      rw_c_string: {time_ms: 20.9}
+      rw_cpp_string: {time_ms: 6.8}
+      rw_cpp_sort: {time_ms: 2.6}

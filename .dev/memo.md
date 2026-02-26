@@ -18,14 +18,13 @@ Plan: `@./.dev/reliability-plan.md`. Progress: `@./.dev/reliability-handover.md`
 
 **Plan A: Incremental regression fix + feature implementation**
 - [x] P1: rw_c_string hang fix — skip back-edge JIT for reentry guard (20.2ms)
-- P2: nbody FP cache fix (Priority C — regression)
+- [x] P2: nbody FP cache fix — expand D-reg cache D2-D15, FP-aware MOV (23.1ms, was 43.8ms)
 - P3: rw_c_math re-measure (Priority C)
 - P4: GC JIT basic implementation (Priority B)
 - P5: st_matrix accept as exception (Priority C)
 
-**Active: P2 (nbody FP cache)**
-be466a0 caused 4x regression (43ms → should be ≤15ms).
-FP cache dirty check over-evicts. Restrict to rd==rs1 case.
+**Active: P3 (rw_c_math re-measure)**
+P1+P2 complete. Ready for merge gate check, then reliability-004 for P3-P5.
 
 ## Previous Task
 

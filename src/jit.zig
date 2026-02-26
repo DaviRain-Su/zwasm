@@ -460,6 +460,18 @@ const a64 = struct {
         return 0xA8C00000 | (@as(u32, imm) << 15) | (@as(u32, rt2) << 10) | (@as(u32, rn) << 5) | rt1;
     }
 
+    /// STP Dt1, Dt2, [Xn, #imm]! — store FP pair, pre-indexed (imm in units of 8 bytes).
+    fn stpFpPre(dt1: u5, dt2: u5, xn: u5, imm7: i7) u32 {
+        const imm: u7 = @bitCast(imm7);
+        return 0x6D800000 | (@as(u32, imm) << 15) | (@as(u32, dt2) << 10) | (@as(u32, xn) << 5) | dt1;
+    }
+
+    /// LDP Dt1, Dt2, [Xn], #imm — load FP pair, post-indexed (imm in units of 8 bytes).
+    fn ldpFpPost(dt1: u5, dt2: u5, xn: u5, imm7: i7) u32 {
+        const imm: u7 = @bitCast(imm7);
+        return 0x6CC00000 | (@as(u32, imm) << 15) | (@as(u32, dt2) << 10) | (@as(u32, xn) << 5) | dt1;
+    }
+
     // --- Move ---
 
     /// MOV Xd, Xm (ORR Xd, XZR, Xm)
@@ -640,6 +652,11 @@ const a64 = struct {
     /// FMOV Xd, Dn — move FP register to 64-bit GPR.
     fn fmovToGp64(xd: u5, dn: u5) u32 {
         return 0x9E660000 | (@as(u32, dn) << 5) | xd;
+    }
+
+    /// FMOV Dd, Dn — copy between FP registers (scalar f64).
+    fn fmovDD(dd: u5, dn: u5) u32 {
+        return 0x1E604000 | (@as(u32, dn) << 5) | dd;
     }
 
     /// FADD Dd, Dn, Dm (f64)
@@ -898,12 +915,12 @@ pub const Compiler = struct {
     /// Which memory-backed vreg's value is currently in SCRATCH (x8).
     /// Valid only at instruction boundaries — used to skip redundant loads.
     scratch_vreg: ?u16,
-    /// FP register cache: maps D2-D7 to vregs holding f64 values.
+    /// FP register cache: maps D2-D15 to vregs holding f64 values.
     /// fp_dreg[i] = vreg whose f64 value is in D(i+2), null if register free.
-    /// Allows FP operations to use D registers directly, avoiding GPR↔FPR round-trips.
-    fp_dreg: [6]?u16,
+    /// Slots 0-5 = D2-D7 (caller-saved), slots 6-13 = D8-D15 (callee-saved).
+    fp_dreg: [FP_CACHE_SIZE]?u16,
     /// True when the D register value has not been written back to GPR/vreg array.
-    fp_dreg_dirty: [6]bool,
+    fp_dreg_dirty: [FP_CACHE_SIZE]bool,
     /// True when vm_ptr is cached in x20 (only when reg_count <= 12 and has self-calls).
     vm_ptr_cached: bool,
     /// True when inst_ptr is cached in x21 (only when reg_count <= 13 and has self-calls).
@@ -911,6 +928,9 @@ pub const Compiler = struct {
     /// True when call_depth is cached in x28 (non-memory self-call functions only).
     /// Eliminates per-call memory load/store for depth tracking.
     depth_reg_cached: bool,
+    /// Effective FP cache size: 14 (D2-D15) for non-self-call functions,
+    /// 6 (D2-D7) for self-call functions (self-call entry skips D8-D15 save).
+    fp_cache_limit: u5,
     /// Live vreg bitmap at current call site (set by spillCallerSavedLive).
     /// Bit N = 1 means vreg N is live and must be spilled/reloaded across the call.
     call_live_set: u32,
@@ -987,11 +1007,12 @@ pub const Compiler = struct {
             .known_consts = .{null} ** 128,
             .written_vregs = 0,
             .scratch_vreg = null,
-            .fp_dreg = .{null} ** 6,
-            .fp_dreg_dirty = .{false} ** 6,
+            .fp_dreg = .{null} ** FP_CACHE_SIZE,
+            .fp_dreg_dirty = .{false} ** FP_CACHE_SIZE,
             .vm_ptr_cached = false,
             .inst_ptr_cached = false,
             .depth_reg_cached = false,
+            .fp_cache_limit = FP_CACHE_SIZE,
             .call_live_set = 0,
             .callee_live_set = 0,
             .shared_exit_idx = 0,
@@ -1082,19 +1103,21 @@ pub const Compiler = struct {
         return vregToPhys(vreg) orelse SCRATCH;
     }
 
-    // --- FP D-register cache (D2-D7) ---
+    // --- FP D-register cache (D2-D15) ---
 
-    /// Number of FP cache registers (D2-D7).
-    const FP_CACHE_SIZE = 6;
+    /// Number of FP cache registers: D2-D7 (caller-saved) + D8-D15 (callee-saved).
+    const FP_CACHE_SIZE = 14;
+    /// Slots 0-5 are caller-saved (D2-D7), clobbered by BLR.
+    const FP_CALLER_SAVED_SLOTS = 6;
 
-    /// Convert cache slot index (0-5) to ARM64 D register number (2-7).
-    fn fpSlotToDreg(slot: u3) u5 {
+    /// Convert cache slot index (0-13) to ARM64 D register number (2-15).
+    fn fpSlotToDreg(slot: u4) u5 {
         return @as(u5, slot) + 2;
     }
 
     /// Find which D-register cache slot holds a vreg's f64 value.
     /// Returns the slot index (0-5) or null if not cached.
-    fn fpCacheFind(self: *Compiler, vreg: u16) ?u3 {
+    fn fpCacheFind(self: *Compiler, vreg: u16) ?u4 {
         for (0..FP_CACHE_SIZE) |i| {
             if (self.fp_dreg[i]) |cached| {
                 if (cached == vreg) return @intCast(i);
@@ -1103,11 +1126,11 @@ pub const Compiler = struct {
         return null;
     }
 
-    /// Allocate a D-register cache slot for a vreg. Evicts LRU (slot 0) if full.
-    /// Returns the slot index (0-5).
-    fn fpCacheAlloc(self: *Compiler) u3 {
-        // Find a free slot
-        for (0..FP_CACHE_SIZE) |i| {
+    /// Allocate a D-register cache slot for a vreg. Evicts slot 0 if full.
+    fn fpCacheAlloc(self: *Compiler) u4 {
+        // Find a free slot within the effective limit
+        const limit = self.fp_cache_limit;
+        for (0..limit) |i| {
             if (self.fp_dreg[i] == null) return @intCast(i);
         }
         // No free slot — evict slot 0 (simple round-robin)
@@ -1129,9 +1152,17 @@ pub const Compiler = struct {
         self.fp_dreg[slot] = null;
     }
 
-    /// Evict all dirty FP cache entries. Called before BLR, branch targets, calls.
+    /// Evict all FP cache entries. Called at branch targets (merge points).
     fn fpCacheEvictAll(self: *Compiler) void {
         for (0..FP_CACHE_SIZE) |i| {
+            self.fpCacheEvictSlot(i);
+        }
+    }
+
+    /// Evict only caller-saved FP cache entries (D2-D7, slots 0-5).
+    /// Called before BLR — D8-D15 are callee-saved, preserved by callee.
+    fn fpCacheEvictCallerSaved(self: *Compiler) void {
+        for (0..FP_CALLER_SAVED_SLOTS) |i| {
             self.fpCacheEvictSlot(i);
         }
     }
@@ -1703,6 +1734,15 @@ pub const Compiler = struct {
         // stp x27, x28, [sp, #-16]!
         self.emit(a64.stpPre(27, 28, 31, -2));
 
+        // Save callee-saved FP registers D8-D15 for expanded FP cache (14 slots).
+        // Only for non-self-call functions — self-call entry skips this.
+        if (!self.has_self_call) {
+            self.emit(a64.stpFpPre(8, 9, 31, -2));
+            self.emit(a64.stpFpPre(10, 11, 31, -2));
+            self.emit(a64.stpFpPre(12, 13, 31, -2));
+            self.emit(a64.stpFpPre(14, 15, 31, -2));
+        }
+
         var b_vreg_load_idx: u32 = 0; // Patched later: self-call B to vreg loading
 
         if (self.has_self_call) {
@@ -1930,6 +1970,13 @@ pub const Compiler = struct {
             self.emit(a64.ldr64(SCRATCH, REGS_PTR, rp_slot)); // &vm.reg_ptr
             self.emit(a64.str64(28, SCRATCH, 8)); // vm.call_depth = x28
         }
+        // Restore callee-saved FP registers D8-D15 (only for non-self-call).
+        if (!self.has_self_call) {
+            self.emit(a64.ldpFpPost(14, 15, 31, 2));
+            self.emit(a64.ldpFpPost(12, 13, 31, 2));
+            self.emit(a64.ldpFpPost(10, 11, 31, 2));
+            self.emit(a64.ldpFpPost(8, 9, 31, 2));
+        }
         self.emit(a64.ldpPost(27, 28, 31, 2));
         self.emit(a64.ldpPost(25, 26, 31, 2));
         self.emit(a64.ldpPost(23, 24, 31, 2));
@@ -2120,6 +2167,8 @@ pub const Compiler = struct {
         }
         self.has_self_call = found_self_call;
         self.self_call_only = found_self_call and !found_other_call;
+        // Self-call functions can't use D8-D15 (self-call entry skips D8-D15 save).
+        self.fp_cache_limit = if (found_self_call) FP_CALLER_SAVED_SLOTS else FP_CACHE_SIZE;
 
         // Detect reentry guard: early branch to unreachable in first 8 IR instructions.
         // JitRestart re-executes from pc=0; guard already passed, so skip it in JIT code.
@@ -2226,8 +2275,22 @@ pub const Compiler = struct {
         switch (instr.op) {
             // --- Register ops ---
             regalloc_mod.OP_MOV => {
-                const src = self.getOrLoad(instr.rs1, SCRATCH);
-                self.storeVreg(instr.rd, src);
+                // FP-cache-aware MOV: if source is in D-reg cache, copy D-reg
+                // directly instead of materializing to GPR and back.
+                if (self.fpCacheFind(instr.rs1)) |src_slot| {
+                    const src_dreg = fpSlotToDreg(src_slot);
+                    // Invalidate destination's old FP cache entry
+                    self.fpCacheInvalidate(instr.rd);
+                    // Allocate D-reg for destination
+                    const dst_dreg = self.fpAllocResult(instr.rd);
+                    if (dst_dreg != src_dreg) {
+                        self.emit(a64.fmovDD(dst_dreg, src_dreg));
+                    }
+                    self.fpMarkResultDirty(instr.rd);
+                } else {
+                    const src = self.getOrLoad(instr.rs1, SCRATCH);
+                    self.storeVreg(instr.rd, src);
+                }
             },
             regalloc_mod.OP_CONST32 => {
                 const d = destReg(instr.rd);
