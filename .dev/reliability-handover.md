@@ -16,6 +16,9 @@
 - J.1-J.3: x86_64 JIT bug fixes complete. All C/C++ real-world pass with JIT.
   Fixes: division safety (SIGFPE), ABI register clobbering (global.set, mem ops),
   SCRATCH2/vreg10 alias (R11 reserved), call liveness (rd as USE for return/store).
+- K.x86: x86_64 JIT trunc_sat fix. Indefinite value detection for i32 case,
+  subtract-2^63-and-add-back for i64 unsigned. Interpreter: floatToIntBits (IEEE 754).
+  Ubuntu spec: 62150→62158/62158 (100%).
 
 ### Active / TODO
 
@@ -23,25 +26,32 @@
 - [x] K.2: JIT opcode coverage — select, br_table, trunc_sat, div-by-constant (UMULL+LSR)
 - [x] K.3: FP optimization — FP-direct load/store, const-folded ADD/SUB (marginal on ARM64)
 - [x] K.4: Self-call setup optimization — bypass shared prologue, skip reg_ptr memory sync
-- [ ] K.5: Benchmark re-recording on BOTH platforms
+- [x] K.5: Benchmark re-recording on BOTH platforms (results below)
 
-**Remaining gaps (non-blocked, > 1.5x wasmtime):**
-- st_matrix 3.5x: register pressure (35 vregs, 12 spills) → needs regalloc improvement
-- st_fib2 1.51x (was 1.6x): self-call still ~13 instrs overhead vs wasmtime ~5
-- tgo_mfr 1.56x: MOV overhead from SSA lowering → needs better regalloc
-- tgo_strops 1.1x (was 1.5x, fixed by div-by-constant)
-- **Blocked**: gc_tree/gc_alloc (GC not JIT'd), rw_c_math/c_matrix/c_string (W34 needs OSR)
+**Mac ARM64 benchmark status (quick run, vs wasmtime 41.0.1):**
+- Non-blocked gap >1.5x: st_matrix 3.21x (regalloc, 35 vregs)
+- Improved to ≤1.5x: tgo_mfr 1.21x (was 1.56x), st_fib2 1.34x (was 1.51x), gc_alloc 1.47x
+- **Blocked**: rw_c_math 2.94x, rw_c_matrix 1.71x, rw_c_string 1.63x (OSR), gc_tree 4.10x (GC JIT)
+
+**Ubuntu x86_64 benchmark status (quick run):**
+- x86_64 JIT significantly slower than ARM64 on most benchmarks
+- fib 3.05x, tak 3.30x, tgo_fib 3.22x, st_fib2 6.98x, tgo_list 4.87x, rw_c_math 4.89x
+- x86_64 JIT lacks: div-by-constant (UMULL→MUL+SHR), self-call optimization
+- Some wins: sieve 0.50x, nbody 0.71x, st_nestedloop 0.06x, tgo_rwork 0.53x
 
 **Phase H: Documentation (LAST — requires Phase H Gate pass, see plan)**
-- [ ] H.0: Phase H Gate — all 9 conditions verified (see `@./.dev/reliability-plan.md`)
+- [ ] H.0: Phase H Gate — conditions 1-5,8 met. Conditions 6-7 (benchmarks ≤1.5x) blocked by:
+  - Mac: st_matrix (regalloc), rw_c_* (OSR), gc_tree (GC JIT)
+  - Ubuntu: x86_64 JIT needs optimization parity with ARM64
 - [ ] H.1: Audit README claims
 - [ ] H.2: Fix discrepancies
 - [ ] H.3: Update benchmark table
 
 ## Next session: start here
 
-1. **Phase K: Performance optimization** — reduce benchmark gaps to ≤1.5x wasmtime.
-2. After K: Phase H (documentation audit).
+1. **x86_64 JIT optimization**: Port ARM64 optimizations (div-by-constant, self-call) to x86_64.
+2. **Phase H Gate blockers**: st_matrix (regalloc), OSR for rw_c_*, GC JIT for gc_tree.
+3. After gates pass: Phase H (documentation audit).
 
 ## x86_64 JIT status (Phase J complete)
 All C/C++ real-world programs pass with JIT on Ubuntu x86_64:

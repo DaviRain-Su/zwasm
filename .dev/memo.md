@@ -15,10 +15,13 @@ Session handover document. Read at session start.
 Reliability improvement (branch: `strictly-check/reliability-003`).
 Plan: `@./.dev/reliability-plan.md`. Progress: `@./.dev/reliability-handover.md`.
 
-Phases A-J complete. E2E 792/792 (100%), x86_64 JIT bugs fixed.
-**Phase K** (perf): div-by-constant (UMULL+LSR), FP-direct load/store, const-folded ADD/SUB,
-self-call setup optimization (bypass shared prologue). fib 61→49ms (-20%), st_fib2 1.06→0.99s (-6%).
-Next: K.5 benchmark re-recording on both platforms, then Phase H (documentation).
+Phases A-K complete. E2E 792/792 (100%), x86_64 JIT bugs fixed + trunc_sat fix.
+**Phase K** (perf): div-by-constant, FP-direct load/store, const-folded ADD/SUB,
+self-call optimization, x86_64 trunc_sat edge cases. K.5 benchmarks recorded.
+**Phase H Gate**: conditions 1-5,8 met. Conditions 6-7 (≤1.5x) blocked:
+Mac: st_matrix 3.21x (regalloc), rw_c_* (OSR), gc_tree (GC JIT).
+Ubuntu: x86_64 JIT needs optimization parity with ARM64.
+Next: x86_64 JIT optimization (port ARM64 div-by-constant, self-call to x86).
 
 ## Previous Task
 
