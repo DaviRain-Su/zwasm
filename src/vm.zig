@@ -504,12 +504,20 @@ pub const Vm = struct {
                         {
                             wf.call_count += 1;
                             if (wf.call_count >= jit_mod.HOT_THRESHOLD) {
-                                wf.jit_code = jit_mod.compileFunction(self.alloc, reg, wf.ir.?.pool64, wf.func_idx, @intCast(func_ptr.params.len), @intCast(func_ptr.results.len), self.trace, jit_mod.getMinMemoryBytes(inst), jit_mod.getUseGuardPages(inst), null);
-                                if (wf.jit_code == null) {
+                                // Skip JIT for very large functions — single-pass regalloc
+                                // produces incorrect code for 2000+ IR instruction functions
+                                // (e.g., vfprintf). Fall back to register IR interpreter.
+                                if (reg.code.len > jit_mod.MAX_JIT_IR_INSTRS) {
                                     wf.jit_failed = true;
-                                    if (self.trace) |tc| trace_mod.traceJitBail(tc, wf.func_idx, "compilation failed");
+                                    if (self.trace) |tc| trace_mod.traceJitBail(tc, wf.func_idx, "too many IR instrs — skip JIT");
                                 } else {
-                                    if (self.trace) |tc| trace_mod.traceJitCompile(tc, wf.func_idx, @intCast(reg.code.len), @intCast(wf.jit_code.?.buf.len));
+                                    wf.jit_code = jit_mod.compileFunction(self.alloc, reg, wf.ir.?.pool64, wf.func_idx, @intCast(func_ptr.params.len), @intCast(func_ptr.results.len), self.trace, jit_mod.getMinMemoryBytes(inst), jit_mod.getUseGuardPages(inst), null);
+                                    if (wf.jit_code == null) {
+                                        wf.jit_failed = true;
+                                        if (self.trace) |tc| trace_mod.traceJitBail(tc, wf.func_idx, "compilation failed");
+                                    } else {
+                                        if (self.trace) |tc| trace_mod.traceJitCompile(tc, wf.func_idx, @intCast(reg.code.len), @intCast(wf.jit_code.?.buf.len));
+                                    }
                                 }
                             }
                         }
@@ -5231,13 +5239,18 @@ pub const Vm = struct {
                             {
                                 wf.call_count += 1;
                                 if (wf.call_count >= jit_mod.HOT_THRESHOLD) {
-                                    const jit_inst: *Instance = @ptrCast(@alignCast(wf.instance));
-                                    wf.jit_code = jit_mod.compileFunction(self.alloc, reg, wf.ir.?.pool64, wf.func_idx, @intCast(current_fp.params.len), @intCast(current_fp.results.len), self.trace, jit_mod.getMinMemoryBytes(jit_inst), jit_mod.getUseGuardPages(jit_inst), null);
-                                    if (wf.jit_code == null) {
+                                    if (reg.code.len > jit_mod.MAX_JIT_IR_INSTRS) {
                                         wf.jit_failed = true;
-                                        if (self.trace) |tc| trace_mod.traceJitBail(tc, wf.func_idx, "compilation failed");
+                                        if (self.trace) |tc| trace_mod.traceJitBail(tc, wf.func_idx, "too many IR instrs — skip JIT");
                                     } else {
-                                        if (self.trace) |tc| trace_mod.traceJitCompile(tc, wf.func_idx, @intCast(reg.code.len), @intCast(wf.jit_code.?.buf.len));
+                                        const jit_inst: *Instance = @ptrCast(@alignCast(wf.instance));
+                                        wf.jit_code = jit_mod.compileFunction(self.alloc, reg, wf.ir.?.pool64, wf.func_idx, @intCast(current_fp.params.len), @intCast(current_fp.results.len), self.trace, jit_mod.getMinMemoryBytes(jit_inst), jit_mod.getUseGuardPages(jit_inst), null);
+                                        if (wf.jit_code == null) {
+                                            wf.jit_failed = true;
+                                            if (self.trace) |tc| trace_mod.traceJitBail(tc, wf.func_idx, "compilation failed");
+                                        } else {
+                                            if (self.trace) |tc| trace_mod.traceJitCompile(tc, wf.func_idx, @intCast(reg.code.len), @intCast(wf.jit_code.?.buf.len));
+                                        }
                                     }
                                 }
                             }

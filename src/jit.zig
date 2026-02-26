@@ -68,6 +68,12 @@ pub const HOT_THRESHOLD: u32 = 10;
 /// Back-edge threshold — JIT after this many loop iterations in a single call.
 pub const BACK_EDGE_THRESHOLD: u32 = 1000;
 
+/// Maximum IR instruction count for JIT compilation.
+/// Functions exceeding this limit fall back to the register IR interpreter.
+/// Prevents single-pass regalloc from producing excessively spill-heavy code
+/// for very large library functions (e.g., vfprintf at 3000+ IR instrs).
+pub const MAX_JIT_IR_INSTRS: u32 = 2000;
+
 // ================================================================
 // ARM64 instruction encoding
 // ================================================================
