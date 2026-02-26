@@ -78,7 +78,7 @@ const REGS_PTR = Reg.r12;
 const MEM_BASE = Reg.r13;
 const MEM_SIZE = Reg.r14;
 const SCRATCH = Reg.rax;
-const SCRATCH2 = Reg.r11; // secondary scratch (caller-saved, not a vreg)
+const SCRATCH2 = Reg.r11; // secondary scratch (caller-saved, reserved — NOT a vreg)
 
 // ================================================================
 // x86_64 instruction encoding
@@ -1061,13 +1061,13 @@ fn vregToPhys(vreg: u16) ?Reg {
         7 => .r8,
         8 => .r9,
         9 => .r10,
-        10 => .r11,
+        // R11 reserved for SCRATCH2 — do NOT map a vreg here.
         else => null, // spill to memory
     };
 }
 
 /// Maximum virtual registers mappable to physical registers.
-const MAX_PHYS_REGS: u8 = 11;
+const MAX_PHYS_REGS: u8 = 10;
 
 /// First caller-saved vreg index (for spill/reload).
 const FIRST_CALLER_SAVED_VREG: u8 = 3;
@@ -3635,8 +3635,8 @@ test "x86_64 virtual register mapping" {
     try testing.expectEqual(Reg.r8, vregToPhys(7).?);
     try testing.expectEqual(Reg.r9, vregToPhys(8).?);
     try testing.expectEqual(Reg.r10, vregToPhys(9).?);
-    try testing.expectEqual(Reg.r11, vregToPhys(10).?);
-    // r11+ → spill
+    // r10+ → spill (R11 reserved for SCRATCH2)
+    try testing.expectEqual(@as(?Reg, null), vregToPhys(10));
     try testing.expectEqual(@as(?Reg, null), vregToPhys(11));
     try testing.expectEqual(@as(?Reg, null), vregToPhys(20));
 }
