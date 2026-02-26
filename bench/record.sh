@@ -25,17 +25,20 @@ OVERWRITE=false
 DELETE_ID=""
 BENCH_FILTER=""
 RUNS=5
-WARMUP=2
+WARMUP=3
+TIMEOUT=60  # per-benchmark timeout in seconds
 
 # --- Benchmark definitions: name:wasm:function:args:type ---
 # Keep in sync with run_bench.sh
 # type: invoke (--invoke func args) or wasi (_start entry point)
 BENCHMARKS=(
+  # Layer 1: Hand-written WAT
   "fib:src/testdata/02_fibonacci.wasm:fib:35:invoke"
   "tak:bench/wasm/tak.wasm:tak:24 16 8:invoke"
   "sieve:bench/wasm/sieve.wasm:sieve:1000000:invoke"
   "nbody:bench/wasm/nbody.wasm:run:1000000:invoke"
   "nqueens:src/testdata/25_nqueens.wasm:nqueens:8:invoke"
+  # Layer 2: TinyGo
   "tgo_fib:bench/wasm/tgo_fib.wasm:fib:35:invoke"
   "tgo_tak:bench/wasm/tgo_tak.wasm:tak:24 16 8:invoke"
   "tgo_arith:bench/wasm/tgo_arith.wasm:arith_loop:100000000:invoke"
@@ -47,19 +50,25 @@ BENCHMARKS=(
   "tgo_list:bench/wasm/tgo_list_build.wasm:list_build:100000:invoke"
   "tgo_rwork:bench/wasm/tgo_real_work.wasm:real_work:2000000:invoke"
   "tgo_strops:bench/wasm/tgo_string_ops.wasm:string_ops:10000000:invoke"
+  # Layer 3: Shootout (WASI)
   "st_fib2:bench/wasm/shootout/shootout-fib2.wasm::_start:wasi"
   "st_sieve:bench/wasm/shootout/shootout-sieve.wasm::_start:wasi"
   "st_nestedloop:bench/wasm/shootout/shootout-nestedloop.wasm::_start:wasi"
   "st_ackermann:bench/wasm/shootout/shootout-ackermann.wasm::_start:wasi"
-  # ed25519 excluded (crypto, very slow on interpreter)
-  #"st_ed25519:bench/wasm/shootout/shootout-ed25519.wasm::_start:wasi"
   "st_matrix:bench/wasm/shootout/shootout-matrix.wasm::_start:wasi"
-  # Layer 4: GC proposal (struct/ref types)
+  # Layer 4: GC
   "gc_alloc:bench/wasm/gc_alloc.wasm:gc_bench:100000:invoke"
   "gc_tree:bench/wasm/gc_tree.wasm:gc_tree_bench:18:invoke"
+  # Layer 5: Real-world (WASI)
+  "rw_rust_fib:test/realworld/wasm/rust_fib_compute.wasm::_start:wasi"
+  "rw_c_matrix:test/realworld/wasm/c_matrix_multiply.wasm::_start:wasi"
+  "rw_c_math:test/realworld/wasm/c_math_compute.wasm::_start:wasi"
+  "rw_c_string:test/realworld/wasm/c_string_processing.wasm::_start:wasi"
+  "rw_cpp_string:test/realworld/wasm/cpp_string_ops.wasm::_start:wasi"
+  "rw_cpp_sort:test/realworld/wasm/cpp_vector_sort.wasm::_start:wasi"
 )
 
-BENCH_ORDER=(fib tak sieve nbody nqueens tgo_fib tgo_tak tgo_arith tgo_sieve tgo_fib_loop tgo_gcd tgo_nqueens tgo_mfr tgo_list tgo_rwork tgo_strops st_fib2 st_sieve st_nestedloop st_ackermann st_matrix gc_alloc gc_tree)
+BENCH_ORDER=(fib tak sieve nbody nqueens tgo_fib tgo_tak tgo_arith tgo_sieve tgo_fib_loop tgo_gcd tgo_nqueens tgo_mfr tgo_list tgo_rwork tgo_strops st_fib2 st_sieve st_nestedloop st_ackermann st_matrix gc_alloc gc_tree rw_rust_fib rw_c_matrix rw_c_math rw_c_string rw_cpp_string rw_cpp_sort)
 
 # --- Parse arguments ---
 for arg in "$@"; do
@@ -71,6 +80,7 @@ for arg in "$@"; do
     --bench=*)    BENCH_FILTER="${arg#--bench=}" ;;
     --runs=*)     RUNS="${arg#--runs=}" ;;
     --warmup=*)   WARMUP="${arg#--warmup=}" ;;
+    --timeout=*)  TIMEOUT="${arg#--timeout=}" ;;
     -h|--help)
       echo "Usage: bash bench/record.sh --id=ID --reason=REASON [OPTIONS]"
       echo ""
@@ -83,7 +93,8 @@ for arg in "$@"; do
       echo "  --delete=ID       Delete entry by id (no benchmark run)"
       echo "  --bench=NAME      Run specific benchmark only (e.g. fib)"
       echo "  --runs=N          Number of hyperfine runs (default: 5)"
-      echo "  --warmup=N        Number of warmup runs (default: 2)"
+      echo "  --warmup=N        Number of warmup runs (default: 3)"
+      echo "  --timeout=SEC     Per-benchmark timeout (default: 60)"
       echo "  -h, --help        Show this help"
       exit 0
       ;;
@@ -169,24 +180,30 @@ for entry in "${BENCHMARKS[@]}"; do
   fi
 
   # shellcheck disable=SC2086
-  hyperfine \
+  if timeout "${TIMEOUT}s" hyperfine \
     --warmup "$WARMUP" \
     --runs "$RUNS" \
     --export-json "$json_file" \
     "$bench_cmd" \
-    >/dev/null 2>&1
+    >/dev/null 2>&1; then
 
-  # Parse mean time from JSON (1 decimal place for sub-ms precision)
-  time_ms=$(python3 -c "
+    time_ms=$(python3 -c "
 import json
 with open('$json_file') as f:
     data = json.load(f)
 r = data['results'][0]
 print(round(r['mean'] * 1000, 1))
-")
+" 2>/dev/null || echo "")
 
-  printf "%8s ms\n" "$time_ms"
-  BENCH_RESULTS["$name"]="$time_ms"
+    if [[ -n "$time_ms" ]]; then
+      printf "%8s ms\n" "$time_ms"
+      BENCH_RESULTS["$name"]="$time_ms"
+    else
+      echo "PARSE_ERR"
+    fi
+  else
+    echo "FAIL/TIMEOUT"
+  fi
 done
 
 echo ""

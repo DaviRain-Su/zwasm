@@ -47,14 +47,15 @@ bash bench/run_bench.sh --quick
 bash bench/compare_runtimes.sh --quick
 # Specific benchmark only
 bash bench/run_bench.sh --bench=fib
-# Record to history (hyperfine 5 runs + 2 warmup)
+# Record to history (hyperfine 5 runs + 3 warmup)
 bash bench/record.sh --id="3.9" --reason="JIT function-level"
 ```
 
 ## Before Committing Optimization/JIT Changes
 
 1. **Quick check**: `bash bench/run_bench.sh --quick` — verify no regression
-2. **Record**: `bash bench/record.sh --id=TASK_ID --reason=REASON`
+2. **Record** (mandatory): `bash bench/record.sh --id=TASK_ID --reason=REASON`
+   - This prevents needing history_rerun later — every commit has its own record
 3. If benchmark items changed: also `bash bench/record_comparison.sh`
 
 ## Files

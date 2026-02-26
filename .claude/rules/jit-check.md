@@ -20,6 +20,7 @@ paths:
    when copying functions across modules (function imports).
 
 5. **Run benchmarks**: `bash bench/run_bench.sh --quick` to verify no regression.
+   Then **record**: `bash bench/record.sh --id=ID --reason=REASON`
 
 6. **Scratch register cache**: `getOrLoad(vreg, hint)` only checks the scratch cache
    when `hint == SCRATCH`. Passing a different register (e.g. `destReg(rd)`) bypasses

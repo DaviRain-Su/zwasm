@@ -1125,3 +1125,982 @@ entries:
       st_matrix: {time_ms: 283.1}
       gc_alloc: {time_ms: 17.7}
       gc_tree: {time_ms: 126.1}
+  - id: "b39b828"
+    date: "2026-02-26"
+    reason: "Add real-world benchmark layer and fair benchmark defaults"
+    commit: "b39b828"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 59.7}
+      tak: {time_ms: 9.3}
+      sieve: {time_ms: 4.5}
+      nbody: {time_ms: 10.9}
+      nqueens: {time_ms: 4.6}
+      tgo_fib: {time_ms: 41.0}
+      tgo_tak: {time_ms: 12.4}
+      tgo_arith: {time_ms: 4.7}
+      tgo_sieve: {time_ms: 7.0}
+      tgo_fib_loop: {time_ms: 3.0}
+      tgo_gcd: {time_ms: 3.0}
+      tgo_nqueens: {time_ms: 44.4}
+      tgo_mfr: {time_ms: 55.1}
+      tgo_list: {time_ms: 37.5}
+      tgo_rwork: {time_ms: 8.6}
+      tgo_strops: {time_ms: 38.0}
+      st_fib2: {time_ms: 1049.3}
+      st_sieve: {time_ms: 185.6}
+      st_nestedloop: {time_ms: 1.9}
+      st_ackermann: {time_ms: 4.4}
+      st_matrix: {time_ms: 294.6}
+      gc_alloc: {time_ms: 18.6}
+      gc_tree: {time_ms: 134.7}
+      rw_rust_fib: {time_ms: 40.3}
+      rw_c_matrix: {time_ms: 17.2}
+      rw_c_math: {time_ms: 64.0}
+      rw_c_string: {time_ms: 45.1}
+      rw_cpp_string: {time_ms: 6.8}
+      rw_cpp_sort: {time_ms: 7.4}
+  - id: "7531200"
+    date: "2026-02-26"
+    reason: "Revise reliability plan: zero tolerance, experiment-first, context efficiency"
+    commit: "7531200"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 55.1}
+      tak: {time_ms: 9.2}
+      sieve: {time_ms: 6.0}
+      nbody: {time_ms: 8.2}
+      nqueens: {time_ms: 2.0}
+      tgo_fib: {time_ms: 39.3}
+      tgo_tak: {time_ms: 8.7}
+      tgo_arith: {time_ms: 1.1}
+      tgo_sieve: {time_ms: 3.1}
+      tgo_fib_loop: {time_ms: 5.0}
+      tgo_gcd: {time_ms: 0.5}
+      tgo_nqueens: {time_ms: 44.1}
+      tgo_mfr: {time_ms: 49.6}
+      tgo_list: {time_ms: 38.1}
+      tgo_rwork: {time_ms: 9.9}
+      tgo_strops: {time_ms: 33.9}
+      st_fib2: {time_ms: 1056.2}
+      st_sieve: {time_ms: 186.8}
+      st_nestedloop: {time_ms: 0.6}
+      st_ackermann: {time_ms: 5.7}
+      st_matrix: {time_ms: 298.8}
+      gc_alloc: {time_ms: 21.8}
+      gc_tree: {time_ms: 139.9}
+      rw_rust_fib: {time_ms: 41.7}
+      rw_c_matrix: {time_ms: 19.5}
+      rw_c_math: {time_ms: 64.7}
+      rw_c_string: {time_ms: 43.3}
+      rw_cpp_string: {time_ms: 7.8}
+      rw_cpp_sort: {time_ms: 10.1}
+  - id: "b658a41"
+    date: "2026-02-26"
+    reason: "Add validation + import type checking to E2E runner (I.1, I.2)"
+    commit: "b658a41"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 60.1}
+      tak: {time_ms: 8.7}
+      sieve: {time_ms: 3.5}
+      nbody: {time_ms: 12.5}
+      nqueens: {time_ms: 2.3}
+      tgo_fib: {time_ms: 40.6}
+      tgo_tak: {time_ms: 9.4}
+      tgo_arith: {time_ms: 2.3}
+      tgo_sieve: {time_ms: 2.3}
+      tgo_fib_loop: {time_ms: 2.5}
+      tgo_gcd: {time_ms: 1.9}
+      tgo_nqueens: {time_ms: 46.3}
+      tgo_mfr: {time_ms: 51.4}
+      tgo_list: {time_ms: 38.1}
+      tgo_rwork: {time_ms: 9.2}
+      tgo_strops: {time_ms: 37.5}
+      st_fib2: {time_ms: 1065.6}
+      st_sieve: {time_ms: 189.3}
+      st_nestedloop: {time_ms: 3.1}
+      st_ackermann: {time_ms: 5.7}
+      st_matrix: {time_ms: 293.8}
+      gc_alloc: {time_ms: 20.0}
+      gc_tree: {time_ms: 134.4}
+      rw_rust_fib: {time_ms: 40.0}
+      rw_c_matrix: {time_ms: 21.2}
+      rw_c_math: {time_ms: 67.6}
+      rw_c_string: {time_ms: 45.8}
+      rw_cpp_string: {time_ms: 7.5}
+      rw_cpp_sort: {time_ms: 8.3}
+  - id: "eec6fa4"
+    date: "2026-02-26"
+    reason: "Fix memory64 bulk ops and import is_64 checking (I.3, I.6)"
+    commit: "eec6fa4"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 64.3}
+      tak: {time_ms: 9.3}
+      sieve: {time_ms: 5.1}
+      nbody: {time_ms: 11.2}
+      nqueens: {time_ms: 2.4}
+      tgo_fib: {time_ms: 40.5}
+      tgo_tak: {time_ms: 7.4}
+      tgo_arith: {time_ms: 1.4}
+      tgo_sieve: {time_ms: 3.5}
+      tgo_fib_loop: {time_ms: 1.7}
+      tgo_gcd: {time_ms: 2.4}
+      tgo_nqueens: {time_ms: 44.2}
+      tgo_mfr: {time_ms: 50.1}
+      tgo_list: {time_ms: 36.6}
+      tgo_rwork: {time_ms: 7.3}
+      tgo_strops: {time_ms: 38.7}
+      st_fib2: {time_ms: 1061.3}
+      st_sieve: {time_ms: 188.9}
+      st_nestedloop: {time_ms: 2.7}
+      st_ackermann: {time_ms: 5.8}
+      st_matrix: {time_ms: 301.4}
+      gc_alloc: {time_ms: 22.5}
+      gc_tree: {time_ms: 136.4}
+      rw_rust_fib: {time_ms: 42.5}
+      rw_c_matrix: {time_ms: 19.4}
+      rw_c_math: {time_ms: 62.5}
+      rw_c_string: {time_ms: 41.2}
+      rw_cpp_string: {time_ms: 7.9}
+      rw_cpp_sort: {time_ms: 14.0}
+  - id: "589a4db"
+    date: "2026-02-26"
+    reason: "Fix GC array alloc limit and externref encoding in E2E runner (I.4, I.5)"
+    commit: "589a4db"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 59.3}
+      tak: {time_ms: 9.3}
+      sieve: {time_ms: 3.3}
+      nbody: {time_ms: 11.0}
+      nqueens: {time_ms: 3.4}
+      tgo_fib: {time_ms: 40.4}
+      tgo_tak: {time_ms: 7.6}
+      tgo_arith: {time_ms: 3.3}
+      tgo_sieve: {time_ms: 3.6}
+      tgo_fib_loop: {time_ms: 2.6}
+      tgo_gcd: {time_ms: 1.6}
+      tgo_nqueens: {time_ms: 44.7}
+      tgo_mfr: {time_ms: 49.6}
+      tgo_list: {time_ms: 40.7}
+      tgo_rwork: {time_ms: 9.6}
+      tgo_strops: {time_ms: 39.3}
+      st_fib2: {time_ms: 1073.4}
+      st_sieve: {time_ms: 191.3}
+      st_nestedloop: {time_ms: 2.6}
+      st_ackermann: {time_ms: 7.1}
+      st_matrix: {time_ms: 295.6}
+      gc_alloc: {time_ms: 20.0}
+      gc_tree: {time_ms: 146.6}
+      rw_rust_fib: {time_ms: 40.9}
+      rw_c_matrix: {time_ms: 18.9}
+      rw_c_math: {time_ms: 65.7}
+      rw_c_string: {time_ms: 45.4}
+      rw_cpp_string: {time_ms: 8.4}
+      rw_cpp_sort: {time_ms: 9.1}
+  - id: "9dc57c0"
+    date: "2026-02-26"
+    reason: "Add thread/wait command support to E2E runner (I.7)"
+    commit: "9dc57c0"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 57.2}
+      tak: {time_ms: 11.8}
+      sieve: {time_ms: 5.0}
+      nbody: {time_ms: 10.8}
+      nqueens: {time_ms: 3.0}
+      tgo_fib: {time_ms: 40.2}
+      tgo_tak: {time_ms: 7.6}
+      tgo_arith: {time_ms: 3.0}
+      tgo_sieve: {time_ms: 3.6}
+      tgo_fib_loop: {time_ms: 1.6}
+      tgo_gcd: {time_ms: 4.4}
+      tgo_nqueens: {time_ms: 45.7}
+      tgo_mfr: {time_ms: 49.9}
+      tgo_list: {time_ms: 38.0}
+      tgo_rwork: {time_ms: 7.1}
+      tgo_strops: {time_ms: 38.7}
+      st_fib2: {time_ms: 1070.7}
+      st_sieve: {time_ms: 190.9}
+      st_nestedloop: {time_ms: 2.2}
+      st_ackermann: {time_ms: 4.0}
+      st_matrix: {time_ms: 301.6}
+      gc_alloc: {time_ms: 21.2}
+      gc_tree: {time_ms: 136.0}
+      rw_rust_fib: {time_ms: 42.3}
+      rw_c_matrix: {time_ms: 16.4}
+      rw_c_math: {time_ms: 62.8}
+      rw_c_string: {time_ms: 42.0}
+      rw_cpp_string: {time_ms: 5.7}
+      rw_cpp_sort: {time_ms: 7.1}
+  - id: "6752fde"
+    date: "2026-02-26"
+    reason: "Update handover: I.1-I.7 complete, E2E 792/792 (100%)"
+    commit: "6752fde"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 57.6}
+      tak: {time_ms: 8.4}
+      sieve: {time_ms: 3.7}
+      nbody: {time_ms: 8.6}
+      nqueens: {time_ms: 2.8}
+      tgo_fib: {time_ms: 39.4}
+      tgo_tak: {time_ms: 9.0}
+      tgo_arith: {time_ms: 1.8}
+      tgo_sieve: {time_ms: 4.0}
+      tgo_fib_loop: {time_ms: 2.1}
+      tgo_gcd: {time_ms: 1.7}
+      tgo_nqueens: {time_ms: 44.4}
+      tgo_mfr: {time_ms: 49.7}
+      tgo_list: {time_ms: 38.5}
+      tgo_rwork: {time_ms: 7.5}
+      tgo_strops: {time_ms: 37.6}
+      st_fib2: {time_ms: 1064.4}
+      st_sieve: {time_ms: 186.2}
+      st_nestedloop: {time_ms: 3.3}
+      st_ackermann: {time_ms: 4.9}
+      st_matrix: {time_ms: 299.0}
+      gc_alloc: {time_ms: 21.9}
+      gc_tree: {time_ms: 139.7}
+      rw_rust_fib: {time_ms: 38.6}
+      rw_c_matrix: {time_ms: 18.5}
+      rw_c_math: {time_ms: 63.9}
+      rw_c_string: {time_ms: 41.6}
+      rw_cpp_string: {time_ms: 7.7}
+      rw_cpp_sort: {time_ms: 6.6}
+  - id: "be466a0"
+    date: "2026-02-26"
+    reason: "Fix JIT FP precision: getOrLoad must check dirty FP cache first (I.0)"
+    commit: "be466a0"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 59.9}
+      tak: {time_ms: 8.9}
+      sieve: {time_ms: 6.0}
+      nbody: {time_ms: 43.6}
+      nqueens: {time_ms: 3.9}
+      tgo_fib: {time_ms: 39.2}
+      tgo_tak: {time_ms: 9.8}
+      tgo_arith: {time_ms: 1.9}
+      tgo_sieve: {time_ms: 4.0}
+      tgo_fib_loop: {time_ms: 2.6}
+      tgo_gcd: {time_ms: 1.9}
+      tgo_nqueens: {time_ms: 46.3}
+      tgo_mfr: {time_ms: 52.1}
+      tgo_list: {time_ms: 39.1}
+      tgo_rwork: {time_ms: 7.3}
+      tgo_strops: {time_ms: 40.9}
+      st_fib2: {time_ms: 1067.1}
+      st_sieve: {time_ms: 190.2}
+      st_nestedloop: {time_ms: 2.6}
+      st_ackermann: {time_ms: 4.0}
+      st_matrix: {time_ms: 308.0}
+      gc_alloc: {time_ms: 26.5}
+      gc_tree: {time_ms: 137.1}
+      rw_rust_fib: {time_ms: 40.8}
+      rw_c_matrix: {time_ms: 15.8}
+      rw_c_math: {time_ms: 65.5}
+      rw_c_string: {time_ms: 46.5}
+      rw_cpp_string: {time_ms: 6.7}
+      rw_cpp_sort: {time_ms: 7.3}
+  - id: "465146a"
+    date: "2026-02-26"
+    reason: "Update handover: Phase I complete, FP precision fixed"
+    commit: "465146a"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 56.6}
+      tak: {time_ms: 10.1}
+      sieve: {time_ms: 5.5}
+      nbody: {time_ms: 41.4}
+      nqueens: {time_ms: 2.6}
+      tgo_fib: {time_ms: 40.3}
+      tgo_tak: {time_ms: 9.2}
+      tgo_arith: {time_ms: 1.2}
+      tgo_sieve: {time_ms: 3.5}
+      tgo_fib_loop: {time_ms: 1.8}
+      tgo_gcd: {time_ms: 1.4}
+      tgo_nqueens: {time_ms: 46.7}
+      tgo_mfr: {time_ms: 52.6}
+      tgo_list: {time_ms: 46.1}
+      tgo_rwork: {time_ms: 8.0}
+      tgo_strops: {time_ms: 41.2}
+      st_fib2: {time_ms: 1071.1}
+      st_sieve: {time_ms: 192.9}
+      st_nestedloop: {time_ms: 1.1}
+      st_ackermann: {time_ms: 6.6}
+      st_matrix: {time_ms: 297.3}
+      gc_alloc: {time_ms: 20.3}
+      gc_tree: {time_ms: 137.2}
+      rw_rust_fib: {time_ms: 41.4}
+      rw_c_matrix: {time_ms: 17.9}
+      rw_c_math: {time_ms: 62.7}
+      rw_c_string: {time_ms: 43.7}
+      rw_cpp_string: {time_ms: 7.3}
+      rw_cpp_sort: {time_ms: 7.2}
+  - id: "61e1c4d"
+    date: "2026-02-26"
+    reason: "Add x86 JIT division safety: zero check, overflow, signed rem fixup"
+    commit: "61e1c4d"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 57.1}
+      tak: {time_ms: 7.2}
+      sieve: {time_ms: 5.3}
+      nbody: {time_ms: 47.1}
+      nqueens: {time_ms: 1.9}
+      tgo_fib: {time_ms: 41.1}
+      tgo_tak: {time_ms: 9.8}
+      tgo_arith: {time_ms: 2.6}
+      tgo_sieve: {time_ms: 3.3}
+      tgo_fib_loop: {time_ms: 1.6}
+      tgo_gcd: {time_ms: 3.0}
+      tgo_nqueens: {time_ms: 44.9}
+      tgo_mfr: {time_ms: 51.2}
+      tgo_list: {time_ms: 38.7}
+      tgo_rwork: {time_ms: 8.7}
+      tgo_strops: {time_ms: 37.5}
+      st_fib2: {time_ms: 1070.4}
+      st_sieve: {time_ms: 190.0}
+      st_nestedloop: {time_ms: 3.0}
+      st_ackermann: {time_ms: 6.9}
+      st_matrix: {time_ms: 300.0}
+      gc_alloc: {time_ms: 21.3}
+      gc_tree: {time_ms: 135.3}
+      rw_rust_fib: {time_ms: 42.6}
+      rw_c_matrix: {time_ms: 18.5}
+      rw_c_math: {time_ms: 62.1}
+      rw_c_string: {time_ms: 42.1}
+      rw_cpp_string: {time_ms: 7.7}
+      rw_cpp_sort: {time_ms: 8.4}
+  - id: "a93d4ab"
+    date: "2026-02-26"
+    reason: "Fix x86 JIT register clobbering in division and ABI call setup"
+    commit: "a93d4ab"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 61.1}
+      tak: {time_ms: 10.9}
+      sieve: {time_ms: 3.6}
+      nbody: {time_ms: 44.8}
+      nqueens: {time_ms: 2.1}
+      tgo_fib: {time_ms: 39.7}
+      tgo_tak: {time_ms: 8.9}
+      tgo_arith: {time_ms: 3.1}
+      tgo_sieve: {time_ms: 2.4}
+      tgo_fib_loop: {time_ms: 2.3}
+      tgo_gcd: {time_ms: 2.9}
+      tgo_nqueens: {time_ms: 47.7}
+      tgo_mfr: {time_ms: 50.5}
+      tgo_list: {time_ms: 37.3}
+      tgo_rwork: {time_ms: 9.4}
+      tgo_strops: {time_ms: 38.2}
+      st_fib2: {time_ms: 1070.2}
+      st_sieve: {time_ms: 194.1}
+      st_nestedloop: {time_ms: 3.6}
+      st_ackermann: {time_ms: 5.3}
+      st_matrix: {time_ms: 298.4}
+      gc_alloc: {time_ms: 19.5}
+      gc_tree: {time_ms: 139.5}
+      rw_rust_fib: {time_ms: 39.4}
+      rw_c_matrix: {time_ms: 18.5}
+      rw_c_math: {time_ms: 62.7}
+      rw_c_string: {time_ms: 41.3}
+      rw_cpp_string: {time_ms: 6.2}
+      rw_cpp_sort: {time_ms: 6.1}
+  - id: "9ec9434"
+    date: "2026-02-26"
+    reason: "Fix x86 JIT SCRATCH2/vreg10 register alias: reserve R11 for scratch only"
+    commit: "9ec9434"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 60.5}
+      tak: {time_ms: 8.5}
+      sieve: {time_ms: 3.6}
+      nbody: {time_ms: 45.9}
+      nqueens: {time_ms: 4.4}
+      tgo_fib: {time_ms: 42.5}
+      tgo_tak: {time_ms: 7.5}
+      tgo_arith: {time_ms: 1.6}
+      tgo_sieve: {time_ms: 3.9}
+      tgo_fib_loop: {time_ms: 2.6}
+      tgo_gcd: {time_ms: 2.1}
+      tgo_nqueens: {time_ms: 45.8}
+      tgo_mfr: {time_ms: 49.4}
+      tgo_list: {time_ms: 37.3}
+      tgo_rwork: {time_ms: 7.4}
+      tgo_strops: {time_ms: 38.2}
+      st_fib2: {time_ms: 1078.7}
+      st_sieve: {time_ms: 193.4}
+      st_nestedloop: {time_ms: 3.2}
+      st_ackermann: {time_ms: 5.4}
+      st_matrix: {time_ms: 295.4}
+      gc_alloc: {time_ms: 18.2}
+      gc_tree: {time_ms: 141.7}
+      rw_rust_fib: {time_ms: 40.5}
+      rw_c_matrix: {time_ms: 20.1}
+      rw_c_math: {time_ms: 67.8}
+      rw_c_string: {time_ms: 43.0}
+      rw_cpp_string: {time_ms: 9.0}
+      rw_cpp_sort: {time_ms: 7.0}
+  - id: "bad86de"
+    date: "2026-02-26"
+    reason: "Fix call liveness analysis: treat rd as USE for return/store/branch"
+    commit: "bad86de"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 59.5}
+      tak: {time_ms: 9.0}
+      sieve: {time_ms: 5.2}
+      nbody: {time_ms: 49.2}
+      nqueens: {time_ms: 1.2}
+      tgo_fib: {time_ms: 40.5}
+      tgo_tak: {time_ms: 9.4}
+      tgo_arith: {time_ms: 1.7}
+      tgo_sieve: {time_ms: 3.6}
+      tgo_fib_loop: {time_ms: 1.8}
+      tgo_gcd: {time_ms: 2.9}
+      tgo_nqueens: {time_ms: 44.7}
+      tgo_mfr: {time_ms: 49.8}
+      tgo_list: {time_ms: 40.5}
+      tgo_rwork: {time_ms: 7.8}
+      tgo_strops: {time_ms: 38.7}
+      st_fib2: {time_ms: 1073.2}
+      st_sieve: {time_ms: 197.2}
+      st_nestedloop: {time_ms: 2.1}
+      st_ackermann: {time_ms: 5.7}
+      st_matrix: {time_ms: 300.7}
+      gc_alloc: {time_ms: 19.7}
+      gc_tree: {time_ms: 141.1}
+      rw_rust_fib: {time_ms: 43.4}
+      rw_c_matrix: {time_ms: 17.7}
+      rw_c_math: {time_ms: 63.4}
+      rw_c_string: {time_ms: 41.2}
+      rw_cpp_string: {time_ms: 7.5}
+      rw_cpp_sort: {time_ms: 7.2}
+  - id: "be29897"
+    date: "2026-02-26"
+    reason: "Update handover: Phase J complete, all x86 JIT bugs fixed"
+    commit: "be29897"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 56.1}
+      tak: {time_ms: 8.0}
+      sieve: {time_ms: 4.3}
+      nbody: {time_ms: 44.9}
+      nqueens: {time_ms: 1.9}
+      tgo_fib: {time_ms: 39.4}
+      tgo_tak: {time_ms: 8.8}
+      tgo_arith: {time_ms: 1.6}
+      tgo_sieve: {time_ms: 3.3}
+      tgo_fib_loop: {time_ms: 2.2}
+      tgo_gcd: {time_ms: 2.0}
+      tgo_nqueens: {time_ms: 45.1}
+      tgo_mfr: {time_ms: 49.4}
+      tgo_list: {time_ms: 37.4}
+      tgo_rwork: {time_ms: 8.9}
+      tgo_strops: {time_ms: 42.5}
+      st_fib2: {time_ms: 1067.4}
+      st_sieve: {time_ms: 191.0}
+      st_nestedloop: {time_ms: 6.2}
+      st_ackermann: {time_ms: 3.2}
+      st_matrix: {time_ms: 299.8}
+      gc_alloc: {time_ms: 19.3}
+      gc_tree: {time_ms: 138.4}
+      rw_rust_fib: {time_ms: 41.5}
+      rw_c_matrix: {time_ms: 14.8}
+      rw_c_math: {time_ms: 60.3}
+      rw_c_string: {time_ms: 45.3}
+      rw_cpp_string: {time_ms: 6.6}
+      rw_cpp_sort: {time_ms: 7.0}
+  - id: "22859e2"
+    date: "2026-02-26"
+    reason: "Add select, br_table, trunc_sat JIT opcodes for ARM64 and x86_64"
+    commit: "22859e2"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 62.2}
+      tak: {time_ms: 7.1}
+      sieve: {time_ms: 5.5}
+      nbody: {time_ms: 46.6}
+      nqueens: {time_ms: 2.8}
+      tgo_fib: {time_ms: 43.5}
+      tgo_tak: {time_ms: 8.6}
+      tgo_arith: {time_ms: 3.4}
+      tgo_sieve: {time_ms: 3.6}
+      tgo_fib_loop: {time_ms: 2.8}
+      tgo_gcd: {time_ms: 2.5}
+      tgo_nqueens: {time_ms: 46.8}
+      tgo_mfr: {time_ms: 49.3}
+      tgo_list: {time_ms: 38.5}
+      tgo_rwork: {time_ms: 8.3}
+      tgo_strops: {time_ms: 38.9}
+      st_fib2: {time_ms: 1068.6}
+      st_sieve: {time_ms: 190.4}
+      st_nestedloop: {time_ms: 1.5}
+      st_ackermann: {time_ms: 5.2}
+      st_matrix: {time_ms: 296.1}
+      gc_alloc: {time_ms: 21.5}
+      gc_tree: {time_ms: 136.5}
+      rw_rust_fib: {time_ms: 41.7}
+      rw_c_matrix: {time_ms: 21.0}
+      rw_c_math: {time_ms: 55.7}
+      rw_c_string: {time_ms: 21.6}
+      rw_cpp_string: {time_ms: 8.9}
+      rw_cpp_sort: {time_ms: 3.8}
+  - id: "c01aa39"
+    date: "2026-02-26"
+    reason: "Clarify W34 reentry guard comment: needs OSR for optimization"
+    commit: "c01aa39"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 60.6}
+      tak: {time_ms: 8.5}
+      sieve: {time_ms: 5.2}
+      nbody: {time_ms: 43.3}
+      nqueens: {time_ms: 3.5}
+      tgo_fib: {time_ms: 38.1}
+      tgo_tak: {time_ms: 9.7}
+      tgo_arith: {time_ms: 1.6}
+      tgo_sieve: {time_ms: 4.2}
+      tgo_fib_loop: {time_ms: 4.4}
+      tgo_gcd: {time_ms: 2.6}
+      tgo_nqueens: {time_ms: 47.4}
+      tgo_mfr: {time_ms: 51.1}
+      tgo_list: {time_ms: 36.0}
+      tgo_rwork: {time_ms: 8.4}
+      tgo_strops: {time_ms: 40.3}
+      st_fib2: {time_ms: 1070.6}
+      st_sieve: {time_ms: 195.8}
+      st_nestedloop: {time_ms: 2.6}
+      st_ackermann: {time_ms: 5.7}
+      st_matrix: {time_ms: 301.4}
+      gc_alloc: {time_ms: 19.2}
+      gc_tree: {time_ms: 138.6}
+      rw_rust_fib: {time_ms: 40.0}
+      rw_c_matrix: {time_ms: 16.4}
+      rw_c_math: {time_ms: 56.9}
+      rw_c_string: {time_ms: 20.2}
+      rw_cpp_string: {time_ms: 7.0}
+      rw_cpp_sort: {time_ms: 3.7}
+  - id: "bf56424"
+    date: "2026-02-26"
+    reason: "Add ARM64 JIT optimizations: FP-direct load/store, const-folded ADD/SUB"
+    commit: "bf56424"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 61.5}
+      tak: {time_ms: 9.5}
+      sieve: {time_ms: 7.0}
+      nbody: {time_ms: 46.6}
+      nqueens: {time_ms: 3.3}
+      tgo_fib: {time_ms: 41.2}
+      tgo_tak: {time_ms: 10.0}
+      tgo_arith: {time_ms: 3.6}
+      tgo_sieve: {time_ms: 2.6}
+      tgo_fib_loop: {time_ms: 2.7}
+      tgo_gcd: {time_ms: 3.1}
+      tgo_nqueens: {time_ms: 47.4}
+      tgo_mfr: {time_ms: 52.7}
+      tgo_list: {time_ms: 38.3}
+      tgo_rwork: {time_ms: 7.5}
+      tgo_strops: {time_ms: 38.1}
+      st_fib2: {time_ms: 1063.7}
+      st_sieve: {time_ms: 191.6}
+      st_nestedloop: {time_ms: 3.0}
+      st_ackermann: {time_ms: 6.5}
+      st_matrix: {time_ms: 295.8}
+      gc_alloc: {time_ms: 20.6}
+      gc_tree: {time_ms: 142.3}
+      rw_rust_fib: {time_ms: 42.1}
+      rw_c_matrix: {time_ms: 19.9}
+      rw_c_math: {time_ms: 57.9}
+      rw_c_string: {time_ms: 21.7}
+      rw_cpp_string: {time_ms: 6.9}
+      rw_cpp_sort: {time_ms: 3.1}
+  - id: "9261dbe"
+    date: "2026-02-26"
+    reason: "Add ARM64 JIT div/rem-by-constant optimization (UMULL+LSR)"
+    commit: "9261dbe"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 61.3}
+      tak: {time_ms: 9.6}
+      sieve: {time_ms: 4.6}
+      nbody: {time_ms: 44.2}
+      nqueens: {time_ms: 2.7}
+      tgo_fib: {time_ms: 39.6}
+      tgo_tak: {time_ms: 6.6}
+      tgo_arith: {time_ms: 2.6}
+      tgo_sieve: {time_ms: 3.5}
+      tgo_fib_loop: {time_ms: 2.0}
+      tgo_gcd: {time_ms: 2.7}
+      tgo_nqueens: {time_ms: 46.4}
+      tgo_mfr: {time_ms: 48.6}
+      tgo_list: {time_ms: 38.0}
+      tgo_rwork: {time_ms: 6.8}
+      tgo_strops: {time_ms: 35.5}
+      st_fib2: {time_ms: 1067.1}
+      st_sieve: {time_ms: 192.2}
+      st_nestedloop: {time_ms: 2.3}
+      st_ackermann: {time_ms: 6.0}
+      st_matrix: {time_ms: 296.1}
+      gc_alloc: {time_ms: 21.0}
+      gc_tree: {time_ms: 136.2}
+      rw_rust_fib: {time_ms: 39.0}
+      rw_c_matrix: {time_ms: 15.5}
+      rw_c_math: {time_ms: 53.8}
+      rw_c_string: {time_ms: 21.0}
+      rw_cpp_string: {time_ms: 8.2}
+      rw_cpp_sort: {time_ms: 4.0}
+  - id: "a8db014"
+    date: "2026-02-26"
+    reason: "Update Phase K progress: div-by-constant done, gaps documented"
+    commit: "a8db014"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 57.5}
+      tak: {time_ms: 8.0}
+      sieve: {time_ms: 5.0}
+      nbody: {time_ms: 44.4}
+      nqueens: {time_ms: 2.6}
+      tgo_fib: {time_ms: 39.7}
+      tgo_tak: {time_ms: 12.8}
+      tgo_arith: {time_ms: 2.9}
+      tgo_sieve: {time_ms: 3.5}
+      tgo_fib_loop: {time_ms: 2.2}
+      tgo_gcd: {time_ms: 2.8}
+      tgo_nqueens: {time_ms: 44.6}
+      tgo_mfr: {time_ms: 51.7}
+      tgo_list: {time_ms: 37.6}
+      tgo_rwork: {time_ms: 7.9}
+      tgo_strops: {time_ms: 34.2}
+      st_fib2: {time_ms: 1075.1}
+      st_sieve: {time_ms: 191.6}
+      st_nestedloop: {time_ms: 3.5}
+      st_ackermann: {time_ms: 6.3}
+      st_matrix: {time_ms: 299.2}
+      gc_alloc: {time_ms: 18.5}
+      gc_tree: {time_ms: 141.1}
+      rw_rust_fib: {time_ms: 39.6}
+      rw_c_matrix: {time_ms: 18.4}
+      rw_c_math: {time_ms: 55.9}
+      rw_c_string: {time_ms: 18.8}
+      rw_cpp_string: {time_ms: 6.9}
+      rw_cpp_sort: {time_ms: 3.0}
+  - id: "26523a2"
+    date: "2026-02-26"
+    reason: "Optimize self-call setup: bypass shared prologue for self-call entry"
+    commit: "26523a2"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 52.4}
+      tak: {time_ms: 6.7}
+      sieve: {time_ms: 6.5}
+      nbody: {time_ms: 46.1}
+      nqueens: {time_ms: 3.8}
+      tgo_fib: {time_ms: 35.3}
+      tgo_tak: {time_ms: 7.7}
+      tgo_arith: {time_ms: 2.5}
+      tgo_sieve: {time_ms: 3.9}
+      tgo_fib_loop: {time_ms: 2.4}
+      tgo_gcd: {time_ms: 2.3}
+      tgo_nqueens: {time_ms: 46.1}
+      tgo_mfr: {time_ms: 49.5}
+      tgo_list: {time_ms: 39.4}
+      tgo_rwork: {time_ms: 7.6}
+      tgo_strops: {time_ms: 35.8}
+      st_fib2: {time_ms: 993.3}
+      st_sieve: {time_ms: 190.9}
+      st_nestedloop: {time_ms: 3.7}
+      st_ackermann: {time_ms: 5.1}
+      st_matrix: {time_ms: 294.0}
+      gc_alloc: {time_ms: 19.2}
+      gc_tree: {time_ms: 134.8}
+      rw_rust_fib: {time_ms: 38.6}
+      rw_c_matrix: {time_ms: 19.3}
+      rw_c_math: {time_ms: 58.2}
+      rw_c_string: {time_ms: 22.2}
+      rw_cpp_string: {time_ms: 6.1}
+      rw_cpp_sort: {time_ms: 5.8}
+  - id: "9b54765"
+    date: "2026-02-26"
+    reason: "Update Phase K progress: self-call setup optimization results"
+    commit: "9b54765"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 54.8}
+      tak: {time_ms: 7.3}
+      sieve: {time_ms: 4.4}
+      nbody: {time_ms: 46.1}
+      nqueens: {time_ms: 2.2}
+      tgo_fib: {time_ms: 36.0}
+      tgo_tak: {time_ms: 7.3}
+      tgo_arith: {time_ms: 2.9}
+      tgo_sieve: {time_ms: 3.6}
+      tgo_fib_loop: {time_ms: 1.6}
+      tgo_gcd: {time_ms: 2.3}
+      tgo_nqueens: {time_ms: 45.2}
+      tgo_mfr: {time_ms: 50.2}
+      tgo_list: {time_ms: 37.6}
+      tgo_rwork: {time_ms: 6.6}
+      tgo_strops: {time_ms: 33.5}
+      st_fib2: {time_ms: 991.5}
+      st_sieve: {time_ms: 192.7}
+      st_nestedloop: {time_ms: 1.4}
+      st_ackermann: {time_ms: 4.9}
+      st_matrix: {time_ms: 295.4}
+      gc_alloc: {time_ms: 19.5}
+      gc_tree: {time_ms: 134.1}
+      rw_rust_fib: {time_ms: 42.4}
+      rw_c_matrix: {time_ms: 18.1}
+      rw_c_math: {time_ms: 54.4}
+      rw_c_string: {time_ms: 19.8}
+      rw_cpp_string: {time_ms: 6.8}
+      rw_cpp_sort: {time_ms: 6.6}
+  - id: "9655e97"
+    date: "2026-02-26"
+    reason: "Eliminate redundant reg_ptr overflow check for self-call-only functions"
+    commit: "9655e97"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 54.8}
+      tak: {time_ms: 9.1}
+      sieve: {time_ms: 4.6}
+      nbody: {time_ms: 46.8}
+      nqueens: {time_ms: 2.5}
+      tgo_fib: {time_ms: 37.0}
+      tgo_tak: {time_ms: 6.2}
+      tgo_arith: {time_ms: 3.3}
+      tgo_sieve: {time_ms: 3.8}
+      tgo_fib_loop: {time_ms: 2.8}
+      tgo_gcd: {time_ms: 2.4}
+      tgo_nqueens: {time_ms: 44.9}
+      tgo_mfr: {time_ms: 49.2}
+      tgo_list: {time_ms: 37.0}
+      tgo_rwork: {time_ms: 8.8}
+      tgo_strops: {time_ms: 33.3}
+      st_fib2: {time_ms: 954.7}
+      st_sieve: {time_ms: 219.3}
+      st_nestedloop: {time_ms: 3.0}
+      st_ackermann: {time_ms: 0.7}
+      st_matrix: {time_ms: 294.6}
+      gc_alloc: {time_ms: 18.7}
+      gc_tree: {time_ms: 134.1}
+      rw_rust_fib: {time_ms: 40.4}
+      rw_c_matrix: {time_ms: 18.9}
+      rw_c_math: {time_ms: 59.5}
+      rw_c_string: {time_ms: 21.2}
+      rw_cpp_string: {time_ms: 8.3}
+      rw_cpp_sort: {time_ms: 2.9}
+  - id: "a1acec0"
+    date: "2026-02-26"
+    reason: "Fix trunc_sat edge cases in x86_64 JIT and interpreter"
+    commit: "a1acec0"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 49.8}
+      tak: {time_ms: 6.6}
+      sieve: {time_ms: 4.3}
+      nbody: {time_ms: 44.1}
+      nqueens: {time_ms: 2.4}
+      tgo_fib: {time_ms: 38.5}
+      tgo_tak: {time_ms: 6.1}
+      tgo_arith: {time_ms: 3.2}
+      tgo_sieve: {time_ms: 2.0}
+      tgo_fib_loop: {time_ms: 2.7}
+      tgo_gcd: {time_ms: 3.0}
+      tgo_nqueens: {time_ms: 45.6}
+      tgo_mfr: {time_ms: 46.2}
+      tgo_list: {time_ms: 35.7}
+      tgo_rwork: {time_ms: 7.3}
+      tgo_strops: {time_ms: 33.5}
+      st_fib2: {time_ms: 946.1}
+      st_sieve: {time_ms: 190.8}
+      st_nestedloop: {time_ms: 3.2}
+      st_ackermann: {time_ms: 3.4}
+      st_matrix: {time_ms: 294.4}
+      gc_alloc: {time_ms: 17.7}
+      gc_tree: {time_ms: 136.6}
+      rw_rust_fib: {time_ms: 37.2}
+      rw_c_matrix: {time_ms: 18.0}
+      rw_c_math: {time_ms: 58.8}
+      rw_c_string: {time_ms: 19.8}
+      rw_cpp_string: {time_ms: 7.6}
+      rw_cpp_sort: {time_ms: 2.9}
+  - id: "999dfb3"
+    date: "2026-02-26"
+    reason: "Record K.5 benchmark results, update Phase H Gate status"
+    commit: "999dfb3"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 49.0}
+      tak: {time_ms: 7.2}
+      sieve: {time_ms: 3.1}
+      nbody: {time_ms: 49.6}
+      nqueens: {time_ms: 1.6}
+      tgo_fib: {time_ms: 37.0}
+      tgo_tak: {time_ms: 8.9}
+      tgo_arith: {time_ms: 2.2}
+      tgo_sieve: {time_ms: 2.8}
+      tgo_fib_loop: {time_ms: 3.0}
+      tgo_gcd: {time_ms: 3.2}
+      tgo_nqueens: {time_ms: 48.5}
+      tgo_mfr: {time_ms: 51.4}
+      tgo_list: {time_ms: 37.7}
+      tgo_rwork: {time_ms: 8.1}
+      tgo_strops: {time_ms: 32.1}
+      st_fib2: {time_ms: 946.9}
+      st_sieve: {time_ms: 192.0}
+      st_nestedloop: {time_ms: 4.5}
+      st_ackermann: {time_ms: 4.9}
+      st_matrix: {time_ms: 294.8}
+      gc_alloc: {time_ms: 19.6}
+      gc_tree: {time_ms: 137.4}
+      rw_rust_fib: {time_ms: 37.4}
+      rw_c_matrix: {time_ms: 18.5}
+      rw_c_math: {time_ms: 58.5}
+      rw_c_string: {time_ms: 19.9}
+      rw_cpp_string: {time_ms: 8.5}
+      rw_cpp_sort: {time_ms: 3.1}
+  - id: "ced7c48"
+    date: "2026-02-26"
+    reason: "Add x86_64 JIT self-call optimization"
+    commit: "ced7c48"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 54.9}
+      tak: {time_ms: 6.6}
+      sieve: {time_ms: 6.2}
+      nbody: {time_ms: 44.7}
+      nqueens: {time_ms: 4.0}
+      tgo_fib: {time_ms: 34.2}
+      tgo_tak: {time_ms: 9.0}
+      tgo_arith: {time_ms: 1.6}
+      tgo_sieve: {time_ms: 5.0}
+      tgo_fib_loop: {time_ms: 3.0}
+      tgo_gcd: {time_ms: 2.9}
+      tgo_nqueens: {time_ms: 48.0}
+      tgo_mfr: {time_ms: 51.1}
+      tgo_list: {time_ms: 38.9}
+      tgo_rwork: {time_ms: 8.2}
+      tgo_strops: {time_ms: 34.8}
+      st_fib2: {time_ms: 947.9}
+      st_sieve: {time_ms: 195.1}
+      st_nestedloop: {time_ms: 3.6}
+      st_ackermann: {time_ms: 3.9}
+      st_matrix: {time_ms: 297.9}
+      gc_alloc: {time_ms: 21.0}
+      gc_tree: {time_ms: 137.7}
+      rw_rust_fib: {time_ms: 40.1}
+      rw_c_matrix: {time_ms: 17.7}
+      rw_c_math: {time_ms: 60.5}
+      rw_c_string: {time_ms: 25.1}
+      rw_cpp_string: {time_ms: 5.9}
+      rw_cpp_sort: {time_ms: 4.3}
+  - id: "d010830"
+    date: "2026-02-26"
+    reason: "Add x86_64 JIT div-by-constant optimization"
+    commit: "d010830"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 51.7}
+      tak: {time_ms: 6.9}
+      sieve: {time_ms: 3.5}
+      nbody: {time_ms: 46.0}
+      nqueens: {time_ms: 2.4}
+      tgo_fib: {time_ms: 35.8}
+      tgo_tak: {time_ms: 8.0}
+      tgo_arith: {time_ms: 3.3}
+      tgo_sieve: {time_ms: 3.3}
+      tgo_fib_loop: {time_ms: 3.6}
+      tgo_gcd: {time_ms: 3.7}
+      tgo_nqueens: {time_ms: 47.8}
+      tgo_mfr: {time_ms: 51.8}
+      tgo_list: {time_ms: 37.9}
+      tgo_rwork: {time_ms: 8.3}
+      tgo_strops: {time_ms: 32.3}
+      st_fib2: {time_ms: 952.2}
+      st_sieve: {time_ms: 193.1}
+      st_nestedloop: {time_ms: 4.2}
+      st_ackermann: {time_ms: 4.6}
+      st_matrix: {time_ms: 298.0}
+      gc_alloc: {time_ms: 19.8}
+      gc_tree: {time_ms: 135.3}
+      rw_rust_fib: {time_ms: 37.7}
+      rw_c_matrix: {time_ms: 18.5}
+      rw_c_math: {time_ms: 60.1}
+      rw_c_string: {time_ms: 22.0}
+      rw_cpp_string: {time_ms: 7.0}
+      rw_cpp_sort: {time_ms: 3.1}
+  - id: "fd30f76"
+    date: "2026-02-26"
+    reason: "Update handover: x86_64 self-call and div-by-constant complete"
+    commit: "fd30f76"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 48.8}
+      tak: {time_ms: 6.4}
+      sieve: {time_ms: 3.5}
+      nbody: {time_ms: 44.7}
+      nqueens: {time_ms: 2.2}
+      tgo_fib: {time_ms: 36.6}
+      tgo_tak: {time_ms: 8.3}
+      tgo_arith: {time_ms: 2.1}
+      tgo_sieve: {time_ms: 2.9}
+      tgo_fib_loop: {time_ms: 3.7}
+      tgo_gcd: {time_ms: 3.2}
+      tgo_nqueens: {time_ms: 48.5}
+      tgo_mfr: {time_ms: 50.6}
+      tgo_list: {time_ms: 42.3}
+      tgo_rwork: {time_ms: 7.9}
+      tgo_strops: {time_ms: 32.1}
+      st_fib2: {time_ms: 947.8}
+      st_sieve: {time_ms: 192.0}
+      st_nestedloop: {time_ms: 3.1}
+      st_ackermann: {time_ms: 6.9}
+      st_matrix: {time_ms: 296.4}
+      gc_alloc: {time_ms: 17.0}
+      gc_tree: {time_ms: 137.7}
+      rw_rust_fib: {time_ms: 39.9}
+      rw_c_matrix: {time_ms: 19.8}
+      rw_c_math: {time_ms: 57.3}
+      rw_c_string: {time_ms: 20.9}
+      rw_cpp_string: {time_ms: 7.4}
+      rw_cpp_sort: {time_ms: 3.0}
+  - id: "ee5f585"
+    date: "2026-02-26"
+    reason: "Fix ARM64 JIT: OSR support, FP cache self-clobber, globalGet x0 clobber"
+    commit: "ee5f585"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 53.3}
+      tak: {time_ms: 8.6}
+      sieve: {time_ms: 4.2}
+      nbody: {time_ms: 44.6}
+      nqueens: {time_ms: 3.5}
+      tgo_fib: {time_ms: 37.6}
+      tgo_tak: {time_ms: 8.1}
+      tgo_arith: {time_ms: 2.0}
+      tgo_sieve: {time_ms: 7.4}
+      tgo_fib_loop: {time_ms: 1.3}
+      tgo_gcd: {time_ms: 1.7}
+      tgo_nqueens: {time_ms: 46.1}
+      tgo_mfr: {time_ms: 51.5}
+      tgo_list: {time_ms: 42.2}
+      tgo_rwork: {time_ms: 6.1}
+      tgo_strops: {time_ms: 33.2}
+      st_fib2: {time_ms: 952.8}
+      st_sieve: {time_ms: 200.0}
+      st_nestedloop: {time_ms: 3.3}
+      st_ackermann: {time_ms: 5.2}
+      st_matrix: {time_ms: 296.5}
+      gc_alloc: {time_ms: 21.8}
+      gc_tree: {time_ms: 139.7}
+      rw_rust_fib: {time_ms: 41.5}
+      rw_c_matrix: {time_ms: 3.5}
+      rw_c_math: {time_ms: 19.0}
+      rw_cpp_string: {time_ms: 4.0}
+      rw_cpp_sort: {time_ms: 2.9}

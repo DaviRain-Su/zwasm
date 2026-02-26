@@ -86,7 +86,9 @@ When in doubt, **continue**.
 0. **TDD**: Test written/updated BEFORE production code (skip for doc-only)
 1. **Tests**: `zig build test` passes
 2. **Spec tests**: Required when modifying vm.zig, predecode.zig, regalloc.zig, opcode.zig, module.zig, wasi.zig
-3. **Benchmarks**: Required for optimization/JIT tasks. `bash bench/run_bench.sh --quick`
+3. **Benchmarks**: Required for optimization/JIT tasks.
+   - Quick check: `bash bench/run_bench.sh --quick`
+   - **Record**: `bash bench/record.sh --id=ID --reason="REASON"` (appends to history.yaml)
 4. **Size guard**: Binary ≤ 1.5MB, memory ≤ 4.5MB
 5. **decisions.md / checklist.md / spec-support.md / memo.md**: Update as needed
 
