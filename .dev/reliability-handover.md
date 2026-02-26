@@ -3,10 +3,9 @@
 > Plan: `@./.dev/reliability-plan.md`. Rules: `@./.claude/rules/reliability-work.md`.
 
 ## Branch
-`strictly-check/reliability-003` (from main at d55a72b)
+`strictly-check/reliability-004` (from main at 74153ff, after P1+P2 merge)
 
-**Merge gate**: Do NOT merge to main until P1 (rw_c_string hang) + P2 (nbody regression) are fixed.
-No regressions allowed on main. After P1+P2: Merge Gate check → merge → reliability-004 for P3-P5.
+P1+P2 merged to main. Remaining: P3-P5.
 
 ## Current: Plan A — Incremental regression fix + feature implementation
 
