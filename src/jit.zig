@@ -1273,6 +1273,13 @@ pub const Compiler = struct {
                 if (isCallerSavedVreg(instr.rd)) {
                     resolved |= @as(u32, 1) << @as(u5, @intCast(instr.rd));
                 }
+            } else if (instr.op != regalloc_mod.OP_NOP and
+                instr.op != regalloc_mod.OP_DELETED and
+                instr.op != regalloc_mod.OP_BLOCK_END and
+                instr.op != regalloc_mod.OP_BR)
+            {
+                // rd is a USE (not a define) for: return, stores, br_if, br_table, global.set
+                markCallerSavedUse(&live, &resolved, instr.rd);
             }
 
             // At backward branches (loop back-edges), be conservative: mark all

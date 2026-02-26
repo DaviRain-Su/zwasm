@@ -1110,6 +1110,13 @@ fn computeCallLiveSet(ir: []const RegInstr, call_pc: u32) u32 {
             if (isCallerSavedVreg(instr.rd)) {
                 resolved |= @as(u32, 1) << @as(u5, @intCast(instr.rd));
             }
+        } else if (instr.op != regalloc_mod.OP_NOP and
+            instr.op != regalloc_mod.OP_DELETED and
+            instr.op != regalloc_mod.OP_BLOCK_END and
+            instr.op != regalloc_mod.OP_BR)
+        {
+            // rd is a USE (not a define) for: return, stores, br_if, br_table, global.set
+            markCallerSavedUse(&live, &resolved, instr.rd);
         }
 
         if (instr.op == regalloc_mod.OP_BR or instr.op == regalloc_mod.OP_BR_IF or
