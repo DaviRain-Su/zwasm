@@ -5,45 +5,45 @@
 ## Branch
 `strictly-check/reliability-003` (from main at d55a72b)
 
-**マージ条件**: P1 (rw_c_string hang) + P2 (nbody regression) を修正するまで main にマージ禁止。
-リグレッションを main に入れない。P1+P2 完了 → Merge Gate → main マージ → reliability-004 で P3-P5。
+**Merge gate**: Do NOT merge to main until P1 (rw_c_string hang) + P2 (nbody regression) are fixed.
+No regressions allowed on main. After P1+P2: Merge Gate check → merge → reliability-004 for P3-P5.
 
-## Current: Plan A (段階的リグレッション修正 + 機能実装)
+## Current: Plan A — Incremental regression fix + feature implementation
 
 ### Active Phase
-**Phase 1: rw_c_string hang 修正** (Priority A)
+**Phase 1: rw_c_string hang fix** (Priority A)
 
 ### Phase Checklist
-- [ ] **P1**: rw_c_string hang 修正 — OSR 誤爆調査
-- [ ] **P2**: nbody FP キャッシュ修正 — be466a0 のリグレッション解消 (43ms→≤15ms)
-- [ ] **P3**: rw_c_math 再計測 — P2 の波及効果確認、追加最適化判断
-- [ ] **P4**: GC JIT 基本実装 — struct/array ops を JIT 化
-- [ ] **P5**: st_matrix 許容判断 — 3.5x 以内で例外扱い
+- [ ] **P1**: rw_c_string hang fix — investigate OSR misjudgment
+- [ ] **P2**: nbody FP cache fix — resolve be466a0 regression (43ms → ≤15ms)
+- [ ] **P3**: rw_c_math re-measure — check P2 ripple effect, decide on further optimization
+- [ ] **P4**: GC JIT basic implementation — JIT-compile struct/array ops
+- [ ] **P5**: st_matrix accept — ≤3.5x exception (single-pass limit)
 
-### Per-Phase Workflow (重要)
+### Per-Phase Workflow (important)
 ```
-1. 調査: 原因特定、wasmtime 参照
-2. 実装: TDD (Red→Green→Refactor)
-3. 検証: zig build test + spec tests (該当時)
-4. ベンチ: bash bench/run_bench.sh --quick (リグレッション確認)
-5. 記録: bash bench/record.sh --id=P{N} --reason="..."  ← 必須！
-6. コミット
-7. 次の Phase へ
+1. Investigate: identify root cause, check wasmtime reference
+2. Implement: TDD (Red → Green → Refactor)
+3. Verify: zig build test + spec tests (when applicable)
+4. Bench: bash bench/run_bench.sh --quick (regression check)
+5. Record: bash bench/record.sh --id=P{N} --reason="..."  ← MANDATORY
+6. Commit
+7. Proceed to next phase
 ```
 
 ## Latest Benchmark Snapshot (a26a178, runs=5/warmup=3)
 
-### >1.5x wasmtime (要対応)
+### >1.5x wasmtime (action required)
 | bench | zwasm | wasmtime | ratio | Phase |
 |-------|------:|--------:|------:|-------|
 | nbody | 43.8 | 22.0 | 1.99x | P2 |
 | rw_c_math | 16.4 | 8.8 | 1.86x | P3 |
 | gc_alloc | 19.2 | 10.7 | 1.79x | P4 |
 | gc_tree | 138.1 | 31.4 | 4.40x | P4 |
-| st_matrix | 296.3 | 91.7 | 3.23x | P5 (例外) |
-| rw_c_string | ∞ | 9.3 | hang | P1 |
+| st_matrix | 296.3 | 91.7 | 3.23x | P5 (exception) |
+| rw_c_string | timeout | 9.3 | hang | P1 |
 
-### ≤1.5x wasmtime (OK — 21個)
+### ≤1.5x wasmtime (OK — 23 benchmarks)
 fib 0.88x, tak 0.86x, sieve 0.51x, nqueens 0.65x, tgo_tak 0.62x,
 tgo_arith 0.40x, tgo_sieve 0.61x, tgo_fib_loop 0.51x, tgo_gcd 0.38x,
 tgo_list 0.53x, tgo_strops 0.95x, st_sieve 0.94x, st_nestedloop 0.56x,
@@ -61,9 +61,8 @@ rw_rust_fib 1.22x
 - history.yaml: per-commit rerun data (28 commits b39b828..ee5f585)
 
 ## Uncommitted
-- `src/jit.zig`: experimental FP immediate-offset optimization (ldrFp64Imm/strFp64Imm)
-  → P2 で判断。効果薄ければ revert。
+None (jit.zig FP immediate-offset experiment reverted — revisit in P2 if needed).
 
 ## Known Bugs
-- c_hello_wasi: EXIT=71 on Ubuntu (WASI issue, not JIT)
-- Go WASI: 3 Go programs produce no output (WASI compatibility)
+- c_hello_wasi: EXIT=71 on Ubuntu (WASI issue, not JIT — same with --profile)
+- Go WASI: 3 Go programs produce no output (WASI compatibility, not JIT-related)

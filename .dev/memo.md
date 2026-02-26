@@ -13,19 +13,19 @@ Session handover document. Read at session start.
 ## Current Task
 
 Reliability improvement (branch: `strictly-check/reliability-003`).
-**P1+P2 完了まで main マージ禁止** (nbody regression + rw_c_string hang)。
+**Do NOT merge to main until P1+P2 complete** (nbody regression + rw_c_string hang).
 Plan: `@./.dev/reliability-plan.md`. Progress: `@./.dev/reliability-handover.md`.
 
-**Plan A: 段階的リグレッション修正 + 機能実装**
-- P1: rw_c_string hang 修正 (Priority A — 正確性)
-- P2: nbody FP キャッシュ修正 (Priority C — リグレッション)
-- P3: rw_c_math 再計測 (Priority C)
-- P4: GC JIT 基本実装 (Priority B)
-- P5: st_matrix 許容判断 (Priority C)
+**Plan A: Incremental regression fix + feature implementation**
+- P1: rw_c_string hang fix (Priority A — correctness)
+- P2: nbody FP cache fix (Priority C — regression)
+- P3: rw_c_math re-measure (Priority C)
+- P4: GC JIT basic implementation (Priority B)
+- P5: st_matrix accept as exception (Priority C)
 
 **Active: P1 (rw_c_string hang)**
-OSR (ee5f585) で発生。22859e2 時点では 21ms で正常。
-back-edge 検出 or guard 判定の誤爆を調査。
+Introduced at ee5f585 (OSR). Worked at 22859e2 (21ms).
+Investigate OSR back-edge detection or guard function misjudgment.
 
 ## Previous Task
 
@@ -33,7 +33,7 @@ reliability-003 Phases A-K + OSR + bench infra upgrade:
 - E2E 792/792, spec 62,158, x86 JIT fixes, self-call/div-const opt
 - Bench recording upgraded: 29 benchmarks, runs=5/warmup=3, timeout
 - history.yaml: per-commit rerun (28 commits)
-- **発見**: be466a0 で nbody 4x リグレッション (FP cache precision fix)
+- **Discovery**: be466a0 caused nbody 4x regression (FP cache precision fix)
 
 ## Known Bugs
 

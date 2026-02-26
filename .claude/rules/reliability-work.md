@@ -13,10 +13,10 @@ Plan: `@./.dev/reliability-plan.md`. Progress: `@./.dev/reliability-handover.md`
 
 ## Principles
 
-1. **Priority A > B > C** — 正確性 > 機能充足 > 性能。
-   A: spec/test/real-world が arm64+amd64 で完全動作。
-   B: 未実装機能を実装（GC JIT 等）。
-   C: wasmtime 1x 目標、1.5x 許容。single-pass 限界は 2-3x 許容。
+1. **Priority A > B > C** — Correctness > Features > Performance.
+   A: spec/test/real-world fully working on arm64+amd64.
+   B: Implement missing features (GC JIT, etc.).
+   C: Target wasmtime 1x, accept 1.5x. Single-pass limits allow 2-3x.
 2. **Zero tolerance** — every test failure is a bug. No "known limitations".
 3. **Cross-platform** — Mac aarch64 + Ubuntu x86_64 must both pass.
 4. **Fair benchmarks** — all scripts: 5 runs / 3 warmup. No legacy defaults.
@@ -24,7 +24,8 @@ Plan: `@./.dev/reliability-plan.md`. Progress: `@./.dev/reliability-handover.md`
 ## Benchmark Recording — MUST DO
 
 **Every optimization/JIT/VM commit MUST record benchmarks.**
-This is the #1 lesson from reliability-003: リグレッションに気づかず最適化を積み重ねた。
+This is the #1 lesson from reliability-003: regressions went unnoticed while
+optimizations were stacked on top.
 
 ```bash
 # Quick check (regression detection)
@@ -37,7 +38,7 @@ bash bench/record.sh --id=ID --reason="REASON"
 bash bench/record_comparison.sh
 ```
 
-**If a benchmark regresses >10% vs previous history.yaml entry → STOP and fix.**
+**If a benchmark regresses >10% vs previous history.yaml entry, STOP and fix.**
 
 ## Investigation — Go Wide
 
