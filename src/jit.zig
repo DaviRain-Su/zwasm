@@ -72,7 +72,7 @@ pub const BACK_EDGE_THRESHOLD: u32 = 1000;
 /// Functions exceeding this limit fall back to the register IR interpreter.
 /// Prevents single-pass regalloc from producing excessively spill-heavy code
 /// for very large library functions (e.g., vfprintf at 3000+ IR instrs).
-pub const MAX_JIT_IR_INSTRS: u32 = 2000;
+pub const MAX_JIT_IR_INSTRS: u32 = 1500;
 
 // ================================================================
 // ARM64 instruction encoding
