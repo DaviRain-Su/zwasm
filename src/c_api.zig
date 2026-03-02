@@ -108,7 +108,7 @@ const CHostFn = struct {
 const CApiImports = struct {
     alloc: std.mem.Allocator,
     /// Flat list of (module_name, func_name, host_fn) tuples
-    entries: std.ArrayList(ImportItem),
+    entries: std.ArrayList(ImportItem) = .empty,
 
     const ImportItem = struct {
         module_name: []const u8,
@@ -116,15 +116,8 @@ const CApiImports = struct {
         host_fn: CHostFn,
     };
 
-    fn init(alloc: std.mem.Allocator) CApiImports {
-        return .{
-            .alloc = alloc,
-            .entries = std.ArrayList(ImportItem).init(alloc),
-        };
-    }
-
     fn deinit(self: *CApiImports) void {
-        self.entries.deinit();
+        self.entries.deinit(self.alloc);
     }
 };
 
@@ -133,14 +126,7 @@ pub const zwasm_imports_t = CApiImports;
 /// Trampoline context stored per-import for bridging C callbacks to Zig HostFn.
 /// These are stored in a global registry so the trampoline can look them up.
 var trampoline_registry: std.ArrayList(CHostFn) = .empty;
-var trampoline_registry_alloc: ?std.mem.Allocator = null;
-
-fn ensureTrampolineRegistry(alloc: std.mem.Allocator) void {
-    if (trampoline_registry_alloc == null) {
-        trampoline_registry = std.ArrayList(CHostFn).init(alloc);
-        trampoline_registry_alloc = alloc;
-    }
-}
+var trampoline_alloc: std.mem.Allocator = std.heap.page_allocator;
 
 /// The HostFn trampoline: called by the Wasm VM, bridges to C callback.
 fn hostFnTrampoline(ctx_ptr: *anyopaque, context_id: usize) anyerror!void {
@@ -241,8 +227,9 @@ export fn zwasm_module_invoke(
 ) bool {
     clearError();
     const name = std.mem.sliceTo(name_ptr, 0);
-    const args_slice = if (args) |a| a[0..nargs] else &[_]u64{};
-    const results_slice = if (results) |r| r[0..nresults] else &[_]u64{};
+    var empty = [_]u64{};
+    const args_slice: []u64 = if (args) |a| a[0..nargs] else &empty;
+    const results_slice: []u64 = if (results) |r| r[0..nresults] else &empty;
     module.module.invoke(name, args_slice, results_slice) catch |err| {
         setError(err);
         return false;
@@ -253,7 +240,8 @@ export fn zwasm_module_invoke(
 /// Invoke the _start function (WASI entry point). Returns false on error.
 export fn zwasm_module_invoke_start(module: *zwasm_module_t) bool {
     clearError();
-    module.module.invoke("_start", &[_]u64{}, &[_]u64{}) catch |err| {
+    var empty = [_]u64{};
+    module.module.invoke("_start", &empty, &empty) catch |err| {
         setError(err);
         return false;
     };
@@ -305,42 +293,29 @@ export fn zwasm_module_export_result_count(module: *zwasm_module_t, idx: u32) u3
 // ============================================================
 
 /// Opaque WASI configuration handle.
-const CApiWasiConfig = struct {
-    argv: std.ArrayList([*:0]const u8),
-    env_keys: std.ArrayList([*]const u8),
-    env_vals: std.ArrayList([*]const u8),
-    env_key_lens: std.ArrayList(usize),
-    env_val_lens: std.ArrayList(usize),
-    preopen_host: std.ArrayList([*]const u8),
-    preopen_guest: std.ArrayList([*]const u8),
-    preopen_host_lens: std.ArrayList(usize),
-    preopen_guest_lens: std.ArrayList(usize),
+const page_alloc = std.heap.page_allocator;
 
-    fn init() CApiWasiConfig {
-        const alloc = std.heap.page_allocator;
-        return .{
-            .argv = std.ArrayList([*:0]const u8).init(alloc),
-            .env_keys = std.ArrayList([*]const u8).init(alloc),
-            .env_vals = std.ArrayList([*]const u8).init(alloc),
-            .env_key_lens = std.ArrayList(usize).init(alloc),
-            .env_val_lens = std.ArrayList(usize).init(alloc),
-            .preopen_host = std.ArrayList([*]const u8).init(alloc),
-            .preopen_guest = std.ArrayList([*]const u8).init(alloc),
-            .preopen_host_lens = std.ArrayList(usize).init(alloc),
-            .preopen_guest_lens = std.ArrayList(usize).init(alloc),
-        };
-    }
+const CApiWasiConfig = struct {
+    argv: std.ArrayList([*:0]const u8) = .empty,
+    env_keys: std.ArrayList([*]const u8) = .empty,
+    env_vals: std.ArrayList([*]const u8) = .empty,
+    env_key_lens: std.ArrayList(usize) = .empty,
+    env_val_lens: std.ArrayList(usize) = .empty,
+    preopen_host: std.ArrayList([*]const u8) = .empty,
+    preopen_guest: std.ArrayList([*]const u8) = .empty,
+    preopen_host_lens: std.ArrayList(usize) = .empty,
+    preopen_guest_lens: std.ArrayList(usize) = .empty,
 
     fn deinit(self: *CApiWasiConfig) void {
-        self.argv.deinit();
-        self.env_keys.deinit();
-        self.env_vals.deinit();
-        self.env_key_lens.deinit();
-        self.env_val_lens.deinit();
-        self.preopen_host.deinit();
-        self.preopen_guest.deinit();
-        self.preopen_host_lens.deinit();
-        self.preopen_guest_lens.deinit();
+        self.argv.deinit(page_alloc);
+        self.env_keys.deinit(page_alloc);
+        self.env_vals.deinit(page_alloc);
+        self.env_key_lens.deinit(page_alloc);
+        self.env_val_lens.deinit(page_alloc);
+        self.preopen_host.deinit(page_alloc);
+        self.preopen_guest.deinit(page_alloc);
+        self.preopen_host_lens.deinit(page_alloc);
+        self.preopen_guest_lens.deinit(page_alloc);
     }
 };
 
@@ -348,22 +323,22 @@ pub const zwasm_wasi_config_t = CApiWasiConfig;
 
 /// Create a new WASI configuration handle.
 export fn zwasm_wasi_config_new() ?*zwasm_wasi_config_t {
-    const config = std.heap.page_allocator.create(CApiWasiConfig) catch return null;
-    config.* = CApiWasiConfig.init();
+    const config = page_alloc.create(CApiWasiConfig) catch return null;
+    config.* = .{};
     return config;
 }
 
 /// Free a WASI configuration handle.
 export fn zwasm_wasi_config_delete(config: *zwasm_wasi_config_t) void {
     config.deinit();
-    std.heap.page_allocator.destroy(config);
+    page_alloc.destroy(config);
 }
 
 /// Set command-line arguments for WASI. argv entries are null-terminated C strings.
 export fn zwasm_wasi_config_set_argv(config: *zwasm_wasi_config_t, argc: u32, argv: [*]const [*:0]const u8) void {
     config.argv.clearRetainingCapacity();
     for (0..argc) |i| {
-        config.argv.append(argv[i]) catch {};
+        config.argv.append(page_alloc, argv[i]) catch {};
     }
 }
 
@@ -381,10 +356,10 @@ export fn zwasm_wasi_config_set_env(
     config.env_key_lens.clearRetainingCapacity();
     config.env_val_lens.clearRetainingCapacity();
     for (0..count) |i| {
-        config.env_keys.append(keys[i]) catch {};
-        config.env_vals.append(vals[i]) catch {};
-        config.env_key_lens.append(key_lens[i]) catch {};
-        config.env_val_lens.append(val_lens[i]) catch {};
+        config.env_keys.append(page_alloc, keys[i]) catch {};
+        config.env_vals.append(page_alloc, vals[i]) catch {};
+        config.env_key_lens.append(page_alloc, key_lens[i]) catch {};
+        config.env_val_lens.append(page_alloc, val_lens[i]) catch {};
     }
 }
 
@@ -396,10 +371,10 @@ export fn zwasm_wasi_config_preopen_dir(
     guest_path: [*]const u8,
     guest_path_len: usize,
 ) void {
-    config.preopen_host.append(host_path) catch {};
-    config.preopen_host_lens.append(host_path_len) catch {};
-    config.preopen_guest.append(guest_path) catch {};
-    config.preopen_guest_lens.append(guest_path_len) catch {};
+    config.preopen_host.append(page_alloc, host_path) catch {};
+    config.preopen_host_lens.append(page_alloc, host_path_len) catch {};
+    config.preopen_guest.append(page_alloc, guest_path) catch {};
+    config.preopen_guest_lens.append(page_alloc, guest_path_len) catch {};
 }
 
 /// Create a new WASI module with custom configuration.
@@ -421,17 +396,17 @@ export fn zwasm_module_new_wasi_configured(
     };
 
     // env: build slices from stored pointers + lengths
-    const gpa_alloc = std.heap.page_allocator;
-    const env_keys = gpa_alloc.alloc([]const u8, config.env_keys.items.len) catch {
+    const alloc = page_alloc;
+    const env_keys = alloc.alloc([]const u8, config.env_keys.items.len) catch {
         setError(error.OutOfMemory);
         return null;
     };
-    defer gpa_alloc.free(env_keys);
-    const env_vals = gpa_alloc.alloc([]const u8, config.env_vals.items.len) catch {
+    defer alloc.free(env_keys);
+    const env_vals = alloc.alloc([]const u8, config.env_vals.items.len) catch {
         setError(error.OutOfMemory);
         return null;
     };
-    defer gpa_alloc.free(env_vals);
+    defer alloc.free(env_vals);
     for (config.env_keys.items, config.env_key_lens.items, 0..) |ptr, l, i| {
         env_keys[i] = ptr[0..l];
     }
@@ -440,11 +415,11 @@ export fn zwasm_module_new_wasi_configured(
     }
 
     // preopens: build slices
-    const preopens = gpa_alloc.alloc([]const u8, config.preopen_host.items.len) catch {
+    const preopens = alloc.alloc([]const u8, config.preopen_host.items.len) catch {
         setError(error.OutOfMemory);
         return null;
     };
-    defer gpa_alloc.free(preopens);
+    defer alloc.free(preopens);
     for (config.preopen_host.items, config.preopen_host_lens.items, 0..) |ptr, l, i| {
         preopens[i] = ptr[0..l];
     }
@@ -468,17 +443,15 @@ export fn zwasm_module_new_wasi_configured(
 
 /// Create a new import collection.
 export fn zwasm_import_new() ?*zwasm_imports_t {
-    const alloc = std.heap.page_allocator;
-    const imports = alloc.create(CApiImports) catch return null;
-    imports.* = CApiImports.init(alloc);
+    const imports = page_alloc.create(CApiImports) catch return null;
+    imports.* = .{ .alloc = page_alloc };
     return imports;
 }
 
 /// Free an import collection.
 export fn zwasm_import_delete(imports: *zwasm_imports_t) void {
-    const alloc = imports.alloc;
     imports.deinit();
-    alloc.destroy(imports);
+    page_alloc.destroy(imports);
 }
 
 /// Register a host function in the import collection.
@@ -491,7 +464,7 @@ export fn zwasm_import_add_fn(
     param_count: u32,
     result_count: u32,
 ) void {
-    imports.entries.append(.{
+    imports.entries.append(imports.alloc, .{
         .module_name = std.mem.sliceTo(module_name, 0),
         .func_name = std.mem.sliceTo(func_name, 0),
         .host_fn = .{
@@ -514,12 +487,11 @@ export fn zwasm_module_new_with_imports(
 
     // Build ImportEntry array from CApiImports
     // Group entries by module_name
-    const alloc = std.heap.page_allocator;
-    ensureTrampolineRegistry(alloc);
+    const alloc = page_alloc;
 
     // Collect unique module names
-    var module_names = std.ArrayList([]const u8).init(alloc);
-    defer module_names.deinit();
+    var module_names: std.ArrayList([]const u8) = .empty;
+    defer module_names.deinit(alloc);
     for (imports.entries.items) |entry| {
         var found = false;
         for (module_names.items) |name| {
@@ -528,7 +500,7 @@ export fn zwasm_module_new_with_imports(
                 break;
             }
         }
-        if (!found) module_names.append(entry.module_name) catch {};
+        if (!found) module_names.append(alloc, entry.module_name) catch {};
     }
 
     // Build HostFnEntry slices per module, registering trampolines
@@ -555,7 +527,7 @@ export fn zwasm_module_new_with_imports(
             if (!std.mem.eql(u8, entry.module_name, mod_name)) continue;
             // Register trampoline
             const trampoline_id = trampoline_registry.items.len;
-            trampoline_registry.append(entry.host_fn) catch {
+            trampoline_registry.append(trampoline_alloc, entry.host_fn) catch {
                 setError(error.OutOfMemory);
                 return null;
             };

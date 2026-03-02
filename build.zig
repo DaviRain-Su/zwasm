@@ -118,4 +118,37 @@ pub fn build(b: *std.Build) void {
         .root_module = fuzz_wat_mod,
     });
     b.installArtifact(fuzz_wat);
+
+    // Shared library (libzwasm.dylib / libzwasm.so)
+    const lib_shared_mod = b.createModule(.{
+        .root_source_file = b.path("src/c_api.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    lib_shared_mod.addOptions("build_options", options);
+    const lib_shared = b.addLibrary(.{
+        .linkage = .dynamic,
+        .name = "zwasm",
+        .root_module = lib_shared_mod,
+    });
+    lib_shared.installHeader(b.path("include/zwasm.h"), "zwasm.h");
+
+    // Static library (libzwasm.a)
+    const lib_static_mod = b.createModule(.{
+        .root_source_file = b.path("src/c_api.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    lib_static_mod.addOptions("build_options", options);
+    const lib_static = b.addLibrary(.{
+        .linkage = .static,
+        .name = "zwasm",
+        .root_module = lib_static_mod,
+    });
+    lib_static.installHeader(b.path("include/zwasm.h"), "zwasm.h");
+
+    // "lib" step builds both shared and static libraries
+    const lib_step = b.step("lib", "Build shared and static libraries");
+    lib_step.dependOn(&b.addInstallArtifact(lib_shared, .{}).step);
+    lib_step.dependOn(&b.addInstallArtifact(lib_static, .{}).step);
 }
