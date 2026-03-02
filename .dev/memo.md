@@ -12,27 +12,29 @@ Session handover document. Read at session start.
 
 ## Current Task
 
-v1.2.0 released (tagged, pushed, CW updated).
+Phase 1: Guard Pages + Module Cache (see `roadmap.md` Phase 1).
 
-## Previous Task (gate-hardening)
+### 1.1 Virtual Memory Guard Pages
 
-All merged to main. Zero-skip/zero-leak + gate enforcement:
-- T1-T6 complete. Spec 62,263/0/0, E2E 792/0/0, Compat 30/0/0.
+Eliminate per-load/store bounds check. mmap(8GB) + mprotect + SIGSEGV trap.
+Files: memory.zig, jit.zig, x86.zig, vm.zig. Decision: D123.
+Expected: 1.5-2x on memory-intensive benchmarks.
 
-## Previous Task
+### 1.2 Module Cache / AOT Serialize
 
-reliability-005 (R0-R8): E2E segfault fix, Go/C++/C WASI back-edge JIT fixes,
-18 new real-world tests, OSR for back-edge JIT, x86 OSR fixes, Phase H doc audit.
-All merged to main at 48b3202.
+Save predecoded/RegIR to disk. cache.zig, `zwasm run --cache`, `zwasm compile`.
+Decision: D124. Expected: 10-100x startup improvement.
+
+Previous: v1.2.0 released (tagged 5d54ae9, CW updated).
 
 ## Known Bugs
 
-None — all previously known bugs fixed (R1: E2E segfault, R2-R4: back-edge JIT restart).
+None.
 
 ## References
 
-- `@./.dev/roadmap.md`, `@./private/roadmap-production.md` (stages)
+- `@./.dev/roadmap.md` (future phases), `@./.dev/roadmap-archive.md` (completed stages)
+- `@./private/future/03_zwasm_clojurewasm_roadmap_ja.md` (integrated roadmap)
 - `@./.dev/decisions.md`, `@./.dev/checklist.md`, `@./.dev/spec-support.md`
-- `@./.dev/reliability-plan.md` (plan), `@./.dev/reliability-handover.md` (progress)
-- `@./.dev/jit-debugging.md`, `@./.dev/ubuntu-x86_64.md` (gitignored)
+- `@./.dev/jit-debugging.md`, `@./.dev/bench-strategy.md`
 - External: wasmtime (`~/Documents/OSS/wasmtime/`), zware (`~/Documents/OSS/zware/`)

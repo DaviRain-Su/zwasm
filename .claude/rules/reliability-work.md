@@ -3,19 +3,17 @@ paths:
   - "src/**"
   - "test/**"
   - "bench/**"
-  - ".dev/reliability-*"
 ---
 
-# Reliability Work Rules
+# Development Work Rules
 
-Active when on `strictly-check/reliability-*` branches.
-Plan: `@./.dev/reliability-plan.md`. Progress: `@./.dev/reliability-handover.md`.
+General principles for src/test/bench development.
 
 ## Principles
 
 1. **Priority A > B > C** — Correctness > Features > Performance.
    A: spec/test/real-world fully working on arm64+amd64.
-   B: Implement missing features (GC JIT, etc.).
+   B: Implement missing features.
    C: Target wasmtime 1x, accept 1.5x. Single-pass limits allow 2-3x.
 2. **Zero tolerance** — every test failure is a bug. No "known limitations".
 3. **Cross-platform** — Mac aarch64 + Ubuntu x86_64 must both pass.
@@ -24,8 +22,6 @@ Plan: `@./.dev/reliability-plan.md`. Progress: `@./.dev/reliability-handover.md`
 ## Benchmark Recording — MUST DO
 
 **Every optimization/JIT/VM commit MUST record benchmarks.**
-This is the #1 lesson from reliability-003: regressions went unnoticed while
-optimizations were stacked on top.
 
 ```bash
 # Quick check (regression detection)
@@ -56,9 +52,3 @@ bash bench/record_comparison.sh
 - **Regressions are the only hard stop.** test pass + spec pass +
   no benchmark regression = safe to keep. Otherwise revert completely.
 - **No partial fixes.** Every fix must be clean and spec-compliant.
-
-## Branch Strategy
-
-- Branches: `strictly-check/reliability-001`, `-002`, `-003`, ...
-- Each branch = one **regression-free improvement unit**
-- Merge to main after Merge Gate → create next branch → continue

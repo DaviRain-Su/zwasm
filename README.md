@@ -235,7 +235,7 @@ execution compared to wasmtime's Cranelift NEON/SSE backend.
 SIMD functions fall back to the slower stack interpreter with per-instruction dispatch overhead.
 
 **Planned fix**: Extend register IR with `v128` register support (Phase 1), then add selective
-JIT NEON/SSE emission (Phase 2). See `.dev/simd-analysis.md` for the detailed roadmap.
+JIT NEON/SSE emission (Phase 2). See `.dev/roadmap.md` Phase 13 for the detailed plan.
 
 Scalar (non-SIMD) performance is unaffected — 16/29 scalar benchmarks beat wasmtime.
 

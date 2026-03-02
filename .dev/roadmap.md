@@ -4,148 +4,176 @@ Independent Zig-native WebAssembly runtime — library and CLI tool.
 Benchmark target: **wasmtime**. Optimization target: ARM64 Mac first.
 
 **Library Consumer Guarantee**: ClojureWasm depends on zwasm main via GitHub URL.
-All development on feature branches; merge to main requires CW verification.
+All development on feature branches; merge to main requires Merge Gate.
 
-## Completed Stages (details: roadmap-archive.md)
+## Completed (v1.2.0)
 
-| Stage | Name                          | Key Result                              |
-|-------|-------------------------------|-----------------------------------------|
-| 0     | Extraction & Independence     | Standalone lib+CLI from CW              |
-| 1     | Library Quality + CLI Polish  | Public API, build.zig.zon               |
-| 2     | Spec Conformance              | Wast runner, CI pipeline                |
-| 3     | JIT + Optimization (ARM64)    | fib 544→103ms (2.0x wasmtime)           |
-| 4     | Polish & Robustness           | Regalloc fixes, cross-runtime bench     |
-| 5     | JIT Coverage Expansion        | 20/21 within 2x, f64/f32 JIT           |
-| 5F    | E2E Compliance                | 30,666 spec (99.9%)                     |
-| 6     | Bug Fixes & Stability         | All active bugs resolved                |
-| 7     | Memory64 Table Ops            | +37 spec passes                         |
-| 8     | Exception Handling            | throw/try_table/exnref                  |
-| 9     | Wide Arithmetic               | 4 i128 opcodes                          |
-| 10    | Custom Page Sizes             | Non-64KB pages                          |
-| 11    | Security Hardening            | Deny-by-default WASI, fuel, W^X         |
-| 12    | WAT Parser                    | `zwasm run file.wat`, `-Dwat=false`     |
-| 13    | x86_64 JIT Backend            | x86.zig, System V ABI, CI              |
-| 14    | Trivial Proposals             | extended_const, branch_hinting, tail_call |
-| 15    | Multi-memory                  | memidx for all load/store               |
-| 16    | Relaxed SIMD                  | 20 opcodes, NEON mapping                |
-| 17    | Function References           | call_ref, generalized ref types         |
-| 18    | GC                            | 32 opcodes, struct/array, mark-sweep    |
-| 19    | Post-GC Improvements          | GC spec, WASI P1 46/46, collector       |
-| 20    | `zwasm features` CLI          | --json, spec level tags                 |
-| 21    | Threads                       | 79 atomics, wait/notify                 |
-| 22    | Component Model               | WIT, Canon ABI, WASI P2                 |
-| 23    | Smart Spill + Direct Call     | 13/21 beat wasmtime, fib 331→91ms       |
-| 25    | Lightweight Self-Call         | fib 91→52ms, matches wasmtime (D117)    |
-| 26    | JIT Peephole Optimizations    | CMP+B.cond fusion, MOVN constants       |
-| 27-31 | Platform + Spec + Perf + GC   | threads 310/310, GC 2-4x wasmtime       |
-| 32    | Spec Failure Cleanup          | 62,158/62,158 (100.0%) both platforms   |
-| 33    | Fuzz Testing                  | Diff testing, 10K+ iterations, 0 crashes |
-| 34    | Global Type Registry          | Store-level hash consing, 15 E2E fixes  |
+Stages 0-46 complete. Details: `roadmap-archive.md`.
 
-## v0.3.0 Roadmap (COMPLETE)
+- Wasm 3.0: all 9 proposals (581+ opcodes). WASI P1 46/46. WAT parser.
+- JIT: Register IR + ARM64/x86_64. Spec: 62,263/62,263 (100%, 0 skip).
+- E2E: 792/792 (0 leak). Real-world: 30/30. Fuzz: 10K+ iterations, 0 crashes.
+- Size: 1.19MB stripped / 1.52MB RSS. Mac + Ubuntu x86_64.
 
-All targets achieved: 100% spec compliance, thread support, perf gaps analyzed.
+## Future Phases (zwasm only)
 
-### Stage 27: Platform Verification + Spec Runner Hardening
+Integrated roadmap (zwasm + CW): `private/future/03_zwasm_clojurewasm_roadmap_ja.md`
+CW-specific phases (2, 4, 6, 7, 9, 14, 16, 17) are in that document only.
 
-- Ubuntu x86_64 verification of Stage 26 (CMP+Jcc fusion)
-- Switch spec runner default build to ReleaseSafe (eliminates 11 tail-call timeouts)
-- Migrate all tooling from wabt to wasm-tools (check latest version)
-- Remove wabt references from docs and rules
+### Phase 1: Guard Pages + Module Cache (3 days)
 
-### Stage 28: Spec Test Improvements
+Performance impact: highest of remaining items. Improvements propagate to CW.
 
-Baseline: 225 failures → 103 remaining (Mac), 120 (Ubuntu +15 endianness64).
+**1.1 Virtual Memory Guard Pages (2 days)**
 
-Completed:
-- [x] 28.0: Regenerate GC spec tests with wasm-tools (-85 from wabt limitation)
-- [x] 28.1: Fix JIT FP cache, nullexnref, table init, S33 heap types, block type range (-85)
-- [x] 28.2a-d: Spec runner either/binary/array_init fixes (-37)
+Eliminate explicit bounds check on every memory load/store.
+8GB virtual address reservation → `mprotect` → trap SIGSEGV as Wasm trap.
 
-Remaining 103 failures by category:
-- **28.2c: Multi-module linking (~36)** — spec runner lacks cross-module state sharing (linking, instance, imports4)
-- **28.2e: endianness64 (15, Ubuntu only)** — x86 byte order for memory64 load/store
-- **28.3: GC subtyping (~48)** — type hierarchy checks missing (ref_test, type-subtyping, br_on_cast, i31, array, elem)
-- **28.4: GC type canonicalization (5)** — type-equivalence 3, type-rec 2
-- **28.5: externref representation (2)** — externref(0) conflated with null
-- **28.6: throw_ref (1)** — opcode stub, needs proper exnref handling
-- **28.7: call batch state (1)** — spec runner process state loss after invoke
-- threads 4 — deferred to Stage 29
+- D## decision record (D123)
+- `memory.zig`: mmap(8GB) + mprotect approach
+- `jit.zig` / `x86.zig`: skip bounds check 2-instruction sequence when guard pages active
+- `vm.zig`: interpreter fast path
+- 32-bit fallback maintained
+- Benchmark: st_matrix, shootout programs
 
-### Stage 29: Thread Execution
+Expected: 1.5-2x speedup on memory-intensive benchmarks.
 
-- Set up build toolchain (Emscripten/Rust wasm32-wasip1-threads)
-- Create thread test suite (pthread-based wasm samples)
-- Implement thread spawning mechanism in zwasm if missing
-- Fix remaining 4 threads spec failures
+**1.2 Module Cache / AOT Serialize (1 day)**
 
-### Stage 30: Performance Gap Analysis + Improvements
+Eliminate recompilation cost for repeated execution.
 
-Single-pass constraint maintained. Codegen analysis of cranelift output.
+- D## decision record (D124)
+- `cache.zig`: save predecoded/RegIR to `~/.cache/zwasm/<hash>.bin`
+- `zwasm run --cache` option + `zwasm compile` command
+- Cache invalidation (wasm hash + zwasm version)
 
-- **st_matrix (3.3x)**: Investigate MAX_PHYS_REGS expansion (ARM64 has 30 GPRs),
-  liveness hints, loop-local register pressure reduction. D116 rejected LIRA but
-  other single-pass approaches may help.
-- **tgo_mfr (1.6x)**: Analyze cranelift codegen for loop optimizations
-  (LICM, strength reduction, base+offset precomputation).
-- Deliverable: analysis doc with feasibility estimates before implementation.
+Expected: 10-100x faster startup for large modules on subsequent runs.
 
-### Stage 31: GC Benchmarks + Collector Assessment ✓
+**Gate**: All tests pass + benchmark recorded. zwasm v1.3.0 candidate.
 
-- GC stress test suite (5 tests: alloc pressure, deep chain, large array, free list, mixed burst)
-- GC benchmarks: gc_alloc (linked list 100K), gc_tree (binary tree depth 18)
-- Arena allocator + adaptive threshold (D121)
-- Result: gc_alloc 62→20ms (2.5x vs wasmtime), gc_tree 1668→131ms (3.7x vs wasmtime)
+### Phase 3: CI Automation + Documentation (2 days)
 
-### Stage 33: Fuzz Testing ✓
+**3.1 CI Automation (1 day)**
 
-- Fuzz harness: std.testing.fuzz + standalone binary for wasm module loader
-- Seed corpus: 198 seeds from spec/e2e/manual, 1000 iterations 0 crashes
-- Differential testing: zwasm vs wasmtime output comparison
-- Extended campaign: 10,000+ iterations, 0 crashes
-- Bugs found and fixed: @intCast panic in store.zig, branchTo underflow, tail-call label target
-- New API: WasmModule.loadWithFuel for fuel-limited start functions
+- Spec submodule auto-bump (weekly cron)
+- wasm-tools version auto-update (monthly cron)
+- SpecTec monitoring
+- `.dev/proposal-watch.md` (Phase 3-4 proposal watchlist)
 
-### Exit criteria for v0.3.0
+**3.2 Documentation (1 day)**
 
-Spec failure targets (103 remaining as of 28.2, now 11):
-- [x] Multi-module linking 36 → 0 (spec runner fix, 28.2c)
-- [x] GC subtyping 48 → ~6 (vm.zig type hierarchy, 28.3-28.5)
-- [x] endianness64 15 → 0 (Ubuntu x86 byte order, 28.2e)
-- [x] externref 2 → 0 (representation fix, 28.5)
-- [x] throw_ref 1 → 0 (opcode implementation, 28.6)
-- [x] threads 4 → 0 (thread spawning, 29.0-29.2)
-- [x] st_matrix / tgo_mfr gaps analyzed (30.0-30.2, D120)
-- [x] GC performance baselined (31.0-31.5, D121)
-- [x] Remaining 11 failures: type-subtyping(4), imports4(2), type-rec(2), call(1), instance(1), table_grow(1) — Stage 32
-- [x] Fuzz testing: differential testing harness, 10K+ iterations, 0 crashes — Stage 33
+- `ARCHITECTURE.md` (4-layer execution pipeline diagram + file mapping)
+- `///` doc comments on all source files
+- `docs/data-structures.md` (glossary)
+- decisions.md: add affected file references
 
-All exit criteria met. v0.3.0 ready.
+**Gate**: CI cron working. ARCHITECTURE.md in place.
 
-## Production Readiness Roadmap (Stages 35+)
+### Phase 5: C API + Conditional Compilation (3 days)
 
-Detailed plan: `private/roadmap-production.md`
+**5.1 C API (wasm-c-api) (2 days)**
 
-| Phase | Name | Tier |
-|-------|------|------|
-| 35 | Crash Hardening | 1: Harden |
-| 36 | Security Audit & Hardening | 1: Harden |
-| 37 | Error System Maturity | 1: Harden |
-| 38 | CI/CD Strengthening | 2: Quality |
-| 39 | Documentation & Book | 2: Quality |
-| 40 | API Stabilization | 2: Quality |
-| 41 | Distribution | 3: Ecosystem |
-| 42 | Community Preparation | 3: Ecosystem |
-| 43 | v1.0.0 Release | 3: Ecosystem |
-| 44 | Advanced Optimization | 4: Future |
-| 45 | Ecosystem Expansion | 4: Future |
+- D## decision record (D125)
+- `c_api.zig`: export engine/store/module/instance/func/memory/val via C ABI
+- WASI config C API
+- `include/zwasm.h` header generation
+- `libzwasm.so` / `libzwasm.dylib` shared library build
+- C test + Python ctypes example
 
-## Future (post v1.0)
+**5.2 Conditional Compilation (1 day)**
 
-- WASI P2 full interface coverage
-- WASI P3 / async
-- GC collector upgrade (generational/Immix) — D121 arena+adaptive approach close enough (2-4x vs JIT)
-- Liveness-based regalloc / LIRA — rejected for now (D116/D120), single-pass sufficient
+- `-Djit=false`, `-Dsimd=false`, `-Dgc=false`, `-Dthreads=false`, `-Dcomponent=false`
+- Minimal build (MVP+WASI, no JIT) target < 500KB
+- CI size matrix
+
+**Gate**: C API tests pass. Minimal build < 500KB.
+
+### Phase 8: Real-World Coverage + WAT Parity (3 days)
+
+**8.1 Real-World Coverage Expansion (2 days)**
+
+- High-priority targets: SQLite, Lua WASI, PHP WASI
+- Toolchain tests: Emscripten, AssemblyScript, TinyGo
+- WasmBench evaluation (WASI-compatible module batch execution)
+- Stress tests (large functions, deep recursion, large memory)
+- Compatibility metric (target 95%+, 50+ programs)
+
+**8.2 WAT Spec Parity (1 day)**
+
+- WAT roundtrip audit script
+- Gap triage → categorical fixes
+- Input validation hardening
+- GC type annotation support
+
+**Gate**: real-world 50+ / WAT roundtrip rate 100% (where feasible).
+
+### Phase 10: Quality / Stabilization (zwasm portion, 1 day)
+
+- Full test suite re-verification (Mac + Ubuntu)
+- Benchmark regression check
+- Size guard confirmation (≤ 1.5MB)
+- Merge Gate pass
+
+**Gate**: All test suites pass. No regressions.
+
+### Phase 13: SIMD JIT (5 days)
+
+Largest technical challenge.
+
+- SIMD microbenchmark suite
+- RegIR v128 register class extension
+- ARM64 NEON + x86 SSE codegen (top 20 instructions)
+- Target: st_matrix gap 22.3x → ≤ 5x
+- Size guard ≤ 1.5MB
+
+**Gate**: SIMD bench faster than scalar. zwasm v2.0.0 candidate.
+
+### Phase 15: Windows Port (3 days)
+
+- D## decision record (SEH, VirtualAlloc, CI strategy)
+- Memory management OS abstraction (mmap → VirtualAlloc)
+- Signal handler port (SIGSEGV → SEH)
+- JIT W^X port (VirtualProtect + FlushInstructionCache)
+- WASI filesystem Windows branch
+- CI Windows job + release binaries
+
+**Gate**: Windows x86_64 all tests pass. 3-OS support complete.
+
+### Phase 18: Book i18n + Lazy Compilation + CLI Extensions (3 days)
+
+**18.1 Book i18n (1 day)**
+
+- `book/en/` + `book/ja/` structure
+- Japanese translation + language switcher
+
+**18.2 Lazy Compilation (1 day)**
+
+JIT deferred to first call. Trampoline → direct jump patch.
+
+**18.3 CLI Extensions (1 day)**
+
+- `zwasm dump` (detailed module dump)
+- `zwasm bench` (built-in benchmark runner)
+- `zwasm diff` (module comparison)
+- Fuel API docs + Memory growth callback
+
+## Future (timeline TBD)
+
+| Item | Condition |
+|------|-----------|
+| Stack Switching | Proposal reaches Phase 4 |
+| WASI P3 / Async | After wasmtime stabilizes |
+| Copy-and-Patch JIT | When technique matures |
+| GC collector upgrade (generational/Immix) | D121 arena approach sufficient for now |
+| Liveness-based regalloc / LIRA | Rejected (D116/D120), single-pass sufficient |
+
+## Version Milestones
+
+| Version | Phases | Key Results |
+|---------|--------|-------------|
+| **v1.3.0** | 1, 3 | Guard pages, cache, CI automation, ARCHITECTURE.md |
+| **v1.4.0** | 5, 8 | C API, conditional compilation, 50+ real-world, WAT parity |
+| **v2.0.0** | 13, 15 | SIMD JIT, Windows, 3-OS support |
 
 ## Benchmark History
 

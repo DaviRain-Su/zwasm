@@ -1,13 +1,10 @@
 # zwasm Spec Support Matrix
 
-Human-readable summary. **Single Source of Truth**: `.dev/status/compliance.yaml`
-
-Per-opcode details live in code (`src/opcode.zig` enum).
-Update compliance.yaml when implementing new opcode categories or WASI syscalls.
+Human-readable summary. Per-opcode details live in code (`src/opcode.zig` enum).
 
 **Run tests**:
-- Spec: `python3 test/spec/run_spec.py --summary` (62,158/62,158 = 100%, 105 skips)
-- E2E: `bash test/e2e/run_e2e.sh --summary` (341/356 = 95.8%, 70 files, Zig runner)
+- Spec: `python3 test/spec/run_spec.py --build --summary` (62,263/62,263 = 100%, 0 skips)
+- E2E: `bash test/e2e/run_e2e.sh --convert --summary` (792/792 = 100%, 0 leak)
 
 ## Opcode Coverage Summary
 
@@ -74,10 +71,8 @@ Update compliance.yaml when implementing new opcode categories or WASI syscalls.
 
 ## E2E Test Status
 
-70 wasmtime misc_testsuite files ported. 341/356 assertions pass (95.8%, Zig runner with shared Store).
-15 failures: call_indirect (13, MismatchedSignatures with GC subtypes), table_copy_on_imported_tables (2).
+792/792 assertions pass (100%, 0 leak). Gate-hardened: 87 validation skips + 18 infra skips eliminated.
 
-| Category                  | Status                   | Checklist         |
-|---------------------------|--------------------------|-------------------|
-| wast2json NaN syntax      | RESOLVED (wasm-tools)    | ~~W16~~           |
-| .wat files                | 2 files skipped          | W17 (partial)     |
+## Real-World Compatibility
+
+30/30 programs pass (5C + 6C++ + 7Go + 7Rust + 5 existing). Mac + Ubuntu both 30/30.

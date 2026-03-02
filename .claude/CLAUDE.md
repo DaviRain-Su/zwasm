@@ -1,7 +1,7 @@
 # zwasm
 
 Standalone Zig WebAssembly runtime — library AND CLI tool.
-Zig 0.15.2. Memo: `@./.dev/memo.md`. Roadmap: `@./.dev/roadmap.md` + `@./private/roadmap-production.md`.
+Zig 0.15.2. Memo: `@./.dev/memo.md`. Roadmap: `@./.dev/roadmap.md`.
 
 ## Language Policy
 
@@ -48,7 +48,6 @@ git log --oneline -3 && git status --short && git branch --show-current
 ```
 
 Read `@./.dev/memo.md` → `## Current Task`:
-- If on `strictly-check/reliability-*` branch → also read `@./.dev/reliability-handover.md`
 - **Has design details** → Execute
 - **Title only or empty** → Plan
 
@@ -77,7 +76,6 @@ Read `@./.dev/memo.md` → `## Current Task`:
 ### When to Stop
 
 Stop **only** when: user requests, ambiguous requirements, or current stage done.
-- **Reliability work**: done when all phases in `@./.dev/reliability-handover.md` are `[x]`.
 Do NOT stop for: merges, branch boundaries, empty queue, large context, user not responding.
 When in doubt, **continue**.
 
@@ -99,7 +97,7 @@ When in doubt, **continue**.
 
 ### Merge Gate Checklist
 
-**Mac AND Ubuntu x86_64** (see `@./.dev/ubuntu-x86_64.md`):
+**Mac AND Ubuntu x86_64** (see `@./.dev/references/ubuntu-testing-guide.md`, setup: `@./.dev/references/setup-orbstack.md`):
 - `zig build test` — all pass, 0 fail, 0 leak
 - `python3 test/spec/run_spec.py --build --summary` — fail=0, skip=0
 - `bash test/e2e/run_e2e.sh --convert --summary` — fail=0, leak=0
@@ -127,4 +125,7 @@ zig build test -- "X"              # Specific test only
 Zig tips: `@./.claude/references/zig-tips.md` — check before writing Zig code.
 Benchmarks: `@./.claude/rules/bench-check.md` (auto-loads on bench/jit/vm edits).
 JIT: `@./.claude/rules/jit-check.md` (auto-loads on jit.zig edits).
-Reliability: `@./.claude/rules/reliability-work.md` (auto-loads on src/test/bench edits).
+Development: `@./.claude/rules/reliability-work.md` (auto-loads on src/test/bench edits).
+Roadmap: `@./.dev/roadmap.md` (zwasm phases) + `@./private/future/03_zwasm_clojurewasm_roadmap_ja.md` (integrated).
+Ubuntu testing: `@./.dev/references/ubuntu-testing-guide.md` — OrbStack VM test commands.
+OrbStack setup: `@./.dev/references/setup-orbstack.md` — VM creation and tool installation.

@@ -21,9 +21,8 @@ Wasm 3.0 was ratified in batches: 2024-07-10 (8 proposals) and 2025-07-23 (3 pro
 
 | Resource | Path |
 |----------|------|
-| Proposal catalog (YAML) | `.dev/status/proposals.yaml` |
+| Proposals (per-proposal) | `.dev/references/proposals/*.md` |
 | Repository index (YAML) | `.dev/references/repo-catalog.yaml` |
-| Implementation summaries | `.dev/references/proposals/*.md` |
 | Spec repos (local clones) | `~/Documents/OSS/WebAssembly/` |
 
 ### Finished Proposals (Wasm 3.0)
@@ -51,7 +50,6 @@ Wasm 3.0 was ratified in batches: 2024-07-10 (8 proposals) and 2025-07-23 (3 pro
 ### Reference Workflow
 
 ```
-proposals.yaml  →  select next proposal
 proposals/X.md  →  implementation guide for X
 repo-catalog.yaml → find spec repo path
 ~/Documents/OSS/WebAssembly/[repo]/ → read official spec & tests

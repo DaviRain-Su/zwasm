@@ -113,7 +113,7 @@ Still uses stack-based value manipulation for SIMD ops.
 
 **If revisited**: Start with RegIR v128 type tagging (extend RegInstr with
 reg_class bits, add v128_regs parallel to u64 regs), then selective NEON for the
-20 hot ops. See `.dev/simd-analysis.md` for full bottleneck data.
+20 hot ops. See `roadmap.md` Phase 13 (SIMD JIT) for the plan.
 
 ## D121: GC heap — arena allocator + adaptive threshold
 

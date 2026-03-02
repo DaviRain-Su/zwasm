@@ -15,7 +15,7 @@ Hand-written WAT — minimal overhead, isolates specific instruction patterns.
 | nqueens | (testdata)       | src/testdata/25_nqueens.wasm | Mixed int + memory  |
 
 Purpose: Fast iteration during register IR and JIT development.
-Profile analysis: `.dev/profile-analysis.md`
+Profile analysis: see `decisions.md` D120/D116 for performance gap records.
 
 ## Layer 2: Compiler Output (Real Compiler Evaluation)
 
