@@ -40,15 +40,42 @@ BENCHMARKS=(
     "tgo_fib:bench/wasm/tgo_fib.wasm:fib:35:invoke"
     "st_nestedloop:bench/wasm/shootout/shootout-nestedloop.wasm::_start:wasi"
     "gc_alloc:bench/wasm/gc_alloc.wasm:gc_bench:100000:invoke"
+    # Cached variants
+    "fib_cached:src/testdata/02_fibonacci.wasm:fib:35:invoke_cached"
+    "sieve_cached:bench/wasm/sieve.wasm:sieve:1000000:invoke_cached"
+    "nbody_cached:bench/wasm/nbody.wasm:run:1000000:invoke_cached"
+    "tgo_fib_cached:bench/wasm/tgo_fib.wasm:fib:35:invoke_cached"
+    "st_nestedloop_cached:bench/wasm/shootout/shootout-nestedloop.wasm::_start:wasi_cached"
+    "gc_alloc_cached:bench/wasm/gc_alloc.wasm:gc_bench:100000:invoke_cached"
 )
 
 TMPDIR_CI=$(mktemp -d)
 trap "rm -rf $TMPDIR_CI" EXIT
 
+# Pre-compile all wasm files for cache
+precompile_for_cache() {
+    local binary="$1"
+    rm -rf ~/.cache/zwasm/
+    declare -A seen
+    for entry in "${BENCHMARKS[@]}"; do
+        IFS=: read -r _name wasm _func _args kind <<< "$entry"
+        # Only pre-compile for cached variants
+        if [[ "$kind" != *_cached ]]; then continue; fi
+        local wasm_path="$PROJECT_DIR/$wasm"
+        if [[ -f "$wasm_path" && -z "${seen[$wasm_path]+x}" ]]; then
+            seen["$wasm_path"]=1
+            "$binary" compile "$wasm_path" >/dev/null 2>&1 || true
+        fi
+    done
+}
+
 # Run benchmarks for a given binary, write results to file
 run_benchmarks() {
     local binary="$1"
     local outfile="$2"
+
+    # Pre-compile for cached variants
+    precompile_for_cache "$binary"
 
     for entry in "${BENCHMARKS[@]}"; do
         IFS=: read -r name wasm func bench_args kind <<< "$entry"
@@ -61,12 +88,22 @@ run_benchmarks() {
 
         local json_file="$TMPDIR_CI/${name}_$(basename "$outfile" .txt).json"
 
-        if [[ "$kind" == "invoke" ]]; then
-            # shellcheck disable=SC2086
-            cmd="$binary run --invoke $func $wasm_path $bench_args"
-        else
-            cmd="$binary run $wasm_path"
-        fi
+        case "$kind" in
+            invoke)
+                # shellcheck disable=SC2086
+                cmd="$binary run --invoke $func $wasm_path $bench_args"
+                ;;
+            invoke_cached)
+                # shellcheck disable=SC2086
+                cmd="$binary run --cache --invoke $func $wasm_path $bench_args"
+                ;;
+            wasi)
+                cmd="$binary run $wasm_path"
+                ;;
+            wasi_cached)
+                cmd="$binary run --cache $wasm_path"
+                ;;
+        esac
 
         # shellcheck disable=SC2086
         hyperfine --warmup "$WARMUP" --runs "$RUNS" --export-json "$json_file" $cmd >/dev/null 2>&1

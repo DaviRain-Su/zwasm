@@ -5,6 +5,7 @@
 #   bash bench/run_bench.sh --quick      # Single run, no warmup
 #   bash bench/run_bench.sh --bench=fib  # Run specific benchmark
 #   bash bench/run_bench.sh --profile    # Show execution profiles
+#   bash bench/run_bench.sh --no-cache   # Skip cached variants
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -13,18 +14,38 @@ ZWASM=./zig-out/bin/zwasm
 QUICK=0
 BENCH=""
 PROFILE=0
+NO_CACHE=0
 
 for arg in "$@"; do
   case "$arg" in
     --quick) QUICK=1 ;;
     --bench=*) BENCH="${arg#--bench=}" ;;
     --profile) PROFILE=1 ;;
+    --no-cache) NO_CACHE=1 ;;
   esac
 done
 
 # Build ReleaseSafe
 echo "Building (ReleaseSafe)..."
 zig build -Doptimize=ReleaseSafe
+
+# Pre-compile for cached benchmarks
+precompile_for_cache() {
+  echo "Pre-compiling modules for cache..."
+  rm -rf ~/.cache/zwasm/
+  # Collect unique wasm files from BENCHMARKS
+  declare -A seen
+  for entry in "${BENCHMARKS[@]}"; do
+    IFS=: read -r _name wasm _func _args _kind <<< "$entry"
+    if [[ -n "$BENCH" && "$_name" != "$BENCH" ]]; then continue; fi
+    if [[ ! -f "$wasm" ]]; then continue; fi
+    if [[ -z "${seen[$wasm]+x}" ]]; then
+      seen["$wasm"]=1
+      $ZWASM compile "$wasm" >/dev/null 2>&1 || true
+    fi
+  done
+  echo ""
+}
 
 # Benchmark format: name:wasm:function:args:type
 # type: invoke (--invoke func args) or wasi (_start entry point)
@@ -67,6 +88,11 @@ BENCHMARKS=(
   "rw_cpp_sort:test/realworld/wasm/cpp_vector_sort.wasm::_start:wasi"
 )
 
+# Pre-compile if cache variants enabled
+if [[ $NO_CACHE -eq 0 ]]; then
+  precompile_for_cache
+fi
+
 for entry in "${BENCHMARKS[@]}"; do
   IFS=: read -r name wasm func bench_args kind <<< "$entry"
 
@@ -87,6 +113,7 @@ for entry in "${BENCHMARKS[@]}"; do
     continue
   fi
 
+  # Uncached run
   echo "=== $name ==="
   if [[ "$kind" == "invoke" ]]; then
     cmd="$ZWASM run --invoke $func $wasm $bench_args"
@@ -100,4 +127,21 @@ for entry in "${BENCHMARKS[@]}"; do
     hyperfine --runs 5 --warmup 3 "$cmd"
   fi
   echo
+
+  # Cached run
+  if [[ $NO_CACHE -eq 0 ]]; then
+    echo "=== ${name}_cached ==="
+    if [[ "$kind" == "invoke" ]]; then
+      cmd_cached="$ZWASM run --cache --invoke $func $wasm $bench_args"
+    else
+      cmd_cached="$ZWASM run --cache $wasm"
+    fi
+
+    if [[ $QUICK -eq 1 ]]; then
+      hyperfine --runs 1 --warmup 0 "$cmd_cached"
+    else
+      hyperfine --runs 5 --warmup 3 "$cmd_cached"
+    fi
+    echo
+  fi
 done

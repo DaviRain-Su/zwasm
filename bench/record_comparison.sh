@@ -28,6 +28,7 @@ BENCH_FILTER=""
 RUNS=5
 WARMUP=3
 TIMEOUT=60  # per-runtime timeout in seconds
+NO_CACHE=0
 
 for arg in "$@"; do
   case "$arg" in
@@ -35,6 +36,7 @@ for arg in "$@"; do
     --bench=*)  BENCH_FILTER="${arg#--bench=}" ;;
     --quick)    RUNS=1; WARMUP=0 ;;
     --runs=*)   RUNS="${arg#--runs=}" ;;
+    --no-cache) NO_CACHE=1 ;;
     -h|--help)
       echo "Usage: bash bench/record_comparison.sh [OPTIONS]"
       echo ""
@@ -44,6 +46,7 @@ for arg in "$@"; do
       echo "  --bench=NAME      Specific benchmark"
       echo "  --quick           1 run, no warmup"
       echo "  --runs=N          Hyperfine runs (default: 3)"
+      echo "  --no-cache        Skip cached variants"
       echo "  -h, --help        Show this help"
       exit 0
       ;;
@@ -99,29 +102,38 @@ get_binary_size() {
 }
 
 # Build command for a given runtime + benchmark
+# $6 = cached (0 or 1)
 build_cmd() {
-  local rt="$1" wasm="$2" func="$3" args="$4" kind="$5"
+  local rt="$1" wasm="$2" func="$3" args="$4" kind="$5" cached="${6:-0}"
+
+  local zwasm_cache_flag=""
+  local wt_cache_flag=""
+  if [[ "$cached" -eq 1 ]]; then
+    zwasm_cache_flag=" --cache"
+    wt_cache_flag=" -C cache"
+  fi
+
   case "$kind" in
     invoke)
       case "$rt" in
-        zwasm)    echo "$ZWASM run --invoke $func $wasm $args" ;;
-        wasmtime) echo "wasmtime run --invoke $func $wasm $args" ;;
+        zwasm)    echo "$ZWASM run${zwasm_cache_flag} --invoke $func $wasm $args" ;;
+        wasmtime) echo "wasmtime run${wt_cache_flag} --invoke $func $wasm $args" ;;
         bun)      echo "bun $RUNNER $wasm $func $args" ;;
         node)     echo "node $RUNNER $wasm $func $args" ;;
       esac
       ;;
     gc_invoke)
       case "$rt" in
-        zwasm)    echo "$ZWASM run --invoke $func $wasm $args" ;;
-        wasmtime) echo "wasmtime run --wasm gc --invoke $func $wasm $args" ;;
+        zwasm)    echo "$ZWASM run${zwasm_cache_flag} --invoke $func $wasm $args" ;;
+        wasmtime) echo "wasmtime run${wt_cache_flag} --wasm gc --invoke $func $wasm $args" ;;
         bun)      echo "bun $RUNNER $wasm $func $args" ;;
         node)     echo "node $RUNNER $wasm $func $args" ;;
       esac
       ;;
     wasi)
       case "$rt" in
-        zwasm)    echo "$ZWASM run $wasm" ;;
-        wasmtime) echo "wasmtime $wasm" ;;
+        zwasm)    echo "$ZWASM run${zwasm_cache_flag} $wasm" ;;
+        wasmtime) echo "wasmtime${wt_cache_flag} $wasm" ;;
         bun)      echo "bun $RUNNER_WASI $wasm" ;;
         node)     echo "node $RUNNER_WASI $wasm" ;;
       esac
@@ -179,6 +191,33 @@ BENCHMARKS=(
   "rw_cpp_string:test/realworld/wasm/cpp_string_ops.wasm::_start:wasi"
   "rw_cpp_sort:test/realworld/wasm/cpp_vector_sort.wasm::_start:wasi"
 )
+
+# Pre-compile for cached benchmarks
+if [[ $NO_CACHE -eq 0 ]]; then
+  for rt in "${RT_LIST[@]}"; do
+    if [[ "$rt" == "zwasm" ]]; then
+      echo "Pre-compiling zwasm cache..."
+      rm -rf ~/.cache/zwasm/
+      declare -A _seen_wasm
+      for entry in "${BENCHMARKS[@]}"; do
+        IFS=: read -r _name _wasm _func _args _kind <<< "$entry"
+        if [[ -n "$BENCH_FILTER" && "$_name" != "$BENCH_FILTER" ]]; then continue; fi
+        if [[ -f "$_wasm" && -z "${_seen_wasm[$_wasm]+x}" ]]; then
+          _seen_wasm["$_wasm"]=1
+          $ZWASM compile "$_wasm" >/dev/null 2>&1 || true
+        fi
+      done
+      unset _seen_wasm
+      break
+    fi
+  done
+  for rt in "${RT_LIST[@]}"; do
+    if [[ "$rt" == "wasmtime" ]]; then
+      wasmtime config new 2>/dev/null || true
+      break
+    fi
+  done
+fi
 
 TMPDIR_BENCH=$(mktemp -d)
 trap "rm -rf $TMPDIR_BENCH" EXIT
@@ -243,12 +282,12 @@ for entry in "${BENCHMARKS[@]}"; do
   echo "  $name:" >> "$OUTPUT"
 
   for rt in "${RT_LIST[@]}"; do
-    cmd=$(build_cmd "$rt" "$wasm" "$func" "$bench_args" "$kind")
+    cmd=$(build_cmd "$rt" "$wasm" "$func" "$bench_args" "$kind" 0)
     json_file="$TMPDIR_BENCH/${name}_${rt}.json"
 
     # Speed: hyperfine with timeout (skip runtime if it fails or times out)
     if ! timeout "${TIMEOUT}s" hyperfine --warmup "$WARMUP" --runs "$RUNS" --export-json "$json_file" "$cmd" >/dev/null 2>&1; then
-      printf "  %-10s   FAILED/TIMEOUT\n" "$rt"
+      printf "  %-18s   FAILED/TIMEOUT\n" "$rt"
       continue
     fi
     time_ms=$(python3 -c "
@@ -262,12 +301,45 @@ print(round(data['results'][0]['mean'] * 1000, 1))
     mem_bytes=$(measure_memory "$cmd")
     mem_mb=$(python3 -c "print(round(${mem_bytes:-0} / 1048576, 1))")
 
-    printf "  %-10s %8s ms  %6s MB\n" "$rt" "$time_ms" "$mem_mb"
+    printf "  %-18s %8s ms  %6s MB\n" "$rt" "$time_ms" "$mem_mb"
 
     cat >> "$OUTPUT" << BENCHEOF
     $rt: {time_ms: $time_ms, mem_mb: $mem_mb}
 BENCHEOF
   done
+
+  # Cached variants (zwasm + wasmtime only)
+  if [[ $NO_CACHE -eq 0 ]]; then
+    for rt in "${RT_LIST[@]}"; do
+      if [[ "$rt" != "zwasm" && "$rt" != "wasmtime" ]]; then
+        continue
+      fi
+
+      cached_label="${rt}_cached"
+      cmd=$(build_cmd "$rt" "$wasm" "$func" "$bench_args" "$kind" 1)
+      json_file="$TMPDIR_BENCH/${name}_${cached_label}.json"
+
+      if ! timeout "${TIMEOUT}s" hyperfine --warmup "$WARMUP" --runs "$RUNS" --export-json "$json_file" "$cmd" >/dev/null 2>&1; then
+        printf "  %-18s   FAILED/TIMEOUT\n" "$cached_label"
+        continue
+      fi
+      time_ms=$(python3 -c "
+import json
+with open('$json_file') as f:
+    data = json.load(f)
+print(round(data['results'][0]['mean'] * 1000, 1))
+")
+
+      mem_bytes=$(measure_memory "$cmd")
+      mem_mb=$(python3 -c "print(round(${mem_bytes:-0} / 1048576, 1))")
+
+      printf "  %-18s %8s ms  %6s MB\n" "$cached_label" "$time_ms" "$mem_mb"
+
+      cat >> "$OUTPUT" << BENCHEOF
+    $cached_label: {time_ms: $time_ms, mem_mb: $mem_mb}
+BENCHEOF
+    done
+  fi
   echo ""
 done
 

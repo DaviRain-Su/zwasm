@@ -23,12 +23,14 @@ cd "$PROJECT_ROOT"
 QUICK=0
 BENCH=""
 RUNTIMES="zwasm,wasmtime"
+NO_CACHE=0
 
 for arg in "$@"; do
   case "$arg" in
     --quick)    QUICK=1 ;;
     --bench=*)  BENCH="${arg#--bench=}" ;;
     --rt=*)     RUNTIMES="${arg#--rt=}" ;;
+    --no-cache) NO_CACHE=1 ;;
     -h|--help)
       echo "Usage: bash bench/compare_runtimes.sh [OPTIONS]"
       echo ""
@@ -37,6 +39,7 @@ for arg in "$@"; do
       echo "                    Available: zwasm, wasmtime, bun, node"
       echo "  --bench=NAME      Specific benchmark"
       echo "  --quick           Single run, no warmup"
+      echo "  --no-cache        Skip cached variants"
       echo ""
       echo "Benchmarks:"
       echo "  Layer 1 (WAT):     fib, tak, sieve, nbody, nqueens"
@@ -133,36 +136,120 @@ if [[ $QUICK -eq 1 ]]; then
   WARMUP=0
 fi
 
+# Pre-compile zwasm cache and ensure wasmtime cache config exists
+if [[ $NO_CACHE -eq 0 ]]; then
+  for rt in "${RT_LIST[@]}"; do
+    if [[ "$rt" == "zwasm" ]]; then
+      echo "Pre-compiling zwasm cache..."
+      rm -rf ~/.cache/zwasm/
+      declare -A _seen_wasm
+      for entry in "${BENCHMARKS[@]}"; do
+        IFS=: read -r _name _wasm _func _args _kind <<< "$entry"
+        if [[ -n "$BENCH" && "$_name" != "$BENCH" ]]; then continue; fi
+        if [[ -f "$_wasm" && -z "${_seen_wasm[$_wasm]+x}" ]]; then
+          _seen_wasm["$_wasm"]=1
+          ./zig-out/bin/zwasm compile "$_wasm" >/dev/null 2>&1 || true
+        fi
+      done
+      unset _seen_wasm
+      break
+    fi
+  done
+  for rt in "${RT_LIST[@]}"; do
+    if [[ "$rt" == "wasmtime" ]]; then
+      wasmtime config new 2>/dev/null || true
+      break
+    fi
+  done
+  echo ""
+fi
+
 # Build command for a runtime+benchmark combination
+# $6 = cached (0 or 1)
 build_cmd() {
-  local rt="$1" wasm="$2" func="$3" bench_args="$4" kind="$5"
+  local rt="$1" wasm="$2" func="$3" bench_args="$4" kind="$5" cached="${6:-0}"
+
+  local zwasm_cache_flag=""
+  local wt_cache_flag=""
+  if [[ "$cached" -eq 1 ]]; then
+    zwasm_cache_flag=" --cache"
+    wt_cache_flag=" -C cache"
+  fi
 
   case "$kind" in
     invoke)
       case "$rt" in
-        zwasm)    echo "./zig-out/bin/zwasm run --invoke $func $wasm $bench_args" ;;
-        wasmtime) echo "wasmtime run --invoke $func $wasm $bench_args" ;;
+        zwasm)    echo "./zig-out/bin/zwasm run${zwasm_cache_flag} --invoke $func $wasm $bench_args" ;;
+        wasmtime) echo "wasmtime run${wt_cache_flag} --invoke $func $wasm $bench_args" ;;
         bun)      echo "bun bench/run_wasm.mjs $wasm $func $bench_args" ;;
         node)     echo "node bench/run_wasm.mjs $wasm $func $bench_args" ;;
       esac
       ;;
     gc_invoke)
       case "$rt" in
-        zwasm)    echo "./zig-out/bin/zwasm run --invoke $func $wasm $bench_args" ;;
-        wasmtime) echo "wasmtime run --wasm gc --invoke $func $wasm $bench_args" ;;
+        zwasm)    echo "./zig-out/bin/zwasm run${zwasm_cache_flag} --invoke $func $wasm $bench_args" ;;
+        wasmtime) echo "wasmtime run${wt_cache_flag} --wasm gc --invoke $func $wasm $bench_args" ;;
         bun)      echo "bun bench/run_wasm.mjs $wasm $func $bench_args" ;;
         node)     echo "node bench/run_wasm.mjs $wasm $func $bench_args" ;;
       esac
       ;;
     wasi)
       case "$rt" in
-        zwasm)    echo "./zig-out/bin/zwasm run $wasm" ;;
-        wasmtime) echo "wasmtime $wasm" ;;
+        zwasm)    echo "./zig-out/bin/zwasm run${zwasm_cache_flag} $wasm" ;;
+        wasmtime) echo "wasmtime${wt_cache_flag} $wasm" ;;
         bun)      echo "bun bench/run_wasm_wasi.mjs $wasm" ;;
         node)     echo "node bench/run_wasm_wasi.mjs $wasm" ;;
       esac
       ;;
   esac
+}
+
+# Run a single benchmark with given runtimes (uncached or cached)
+run_benchmark() {
+  local name="$1" wasm="$2" func="$3" bench_args="$4" kind="$5" cached="$6"
+
+  local label="$name"
+  if [[ "$cached" -eq 1 ]]; then
+    label="${name} (cached)"
+  fi
+
+  echo ""
+  echo "=== $label ($kind) ==="
+
+  cmds=()
+  cmd_names=()
+
+  for rt in "${RT_LIST[@]}"; do
+    # bun/node: skip cached variant (no controllable cache flag)
+    if [[ "$cached" -eq 1 && "$rt" != "zwasm" && "$rt" != "wasmtime" ]]; then
+      continue
+    fi
+
+    cmd=$(build_cmd "$rt" "$wasm" "$func" "$bench_args" "$kind" "$cached")
+    if [[ -n "$cmd" ]]; then
+      cmds+=("$cmd")
+      local rt_label="$rt"
+      if [[ "$cached" -eq 1 ]]; then
+        rt_label="${rt}_cached"
+      fi
+      cmd_names+=("$rt_label")
+    fi
+  done
+
+  if [[ ${#cmds[@]} -lt 1 ]]; then
+    echo "  (no compatible runtimes)"
+    return
+  fi
+
+  hyp_args=(--runs "$RUNS" --warmup "$WARMUP")
+  for i in "${!cmds[@]}"; do
+    hyp_args+=(--command-name "${cmd_names[$i]}")
+  done
+  for cmd in "${cmds[@]}"; do
+    hyp_args+=("$cmd")
+  done
+
+  hyperfine "${hyp_args[@]}"
 }
 
 for entry in "${BENCHMARKS[@]}"; do
@@ -177,32 +264,11 @@ for entry in "${BENCHMARKS[@]}"; do
     continue
   fi
 
-  echo ""
-  echo "=== $name ($kind) ==="
+  # Uncached run
+  run_benchmark "$name" "$wasm" "$func" "$bench_args" "$kind" 0
 
-  cmds=()
-  cmd_names=()
-
-  for rt in "${RT_LIST[@]}"; do
-    cmd=$(build_cmd "$rt" "$wasm" "$func" "$bench_args" "$kind")
-    if [[ -n "$cmd" ]]; then
-      cmds+=("$cmd")
-      cmd_names+=("$rt")
-    fi
-  done
-
-  if [[ ${#cmds[@]} -lt 1 ]]; then
-    echo "  (no compatible runtimes)"
-    continue
+  # Cached run (zwasm + wasmtime only)
+  if [[ $NO_CACHE -eq 0 ]]; then
+    run_benchmark "$name" "$wasm" "$func" "$bench_args" "$kind" 1
   fi
-
-  hyp_args=(--runs "$RUNS" --warmup "$WARMUP")
-  for i in "${!cmds[@]}"; do
-    hyp_args+=(--command-name "${cmd_names[$i]}")
-  done
-  for cmd in "${cmds[@]}"; do
-    hyp_args+=("$cmd")
-  done
-
-  hyperfine "${hyp_args[@]}"
 done

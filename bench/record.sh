@@ -27,6 +27,7 @@ BENCH_FILTER=""
 RUNS=5
 WARMUP=3
 TIMEOUT=60  # per-benchmark timeout in seconds
+NO_CACHE=false
 
 # --- Benchmark definitions: name:wasm:function:args:type ---
 # Keep in sync with run_bench.sh
@@ -83,6 +84,7 @@ for arg in "$@"; do
     --runs=*)     RUNS="${arg#--runs=}" ;;
     --warmup=*)   WARMUP="${arg#--warmup=}" ;;
     --timeout=*)  TIMEOUT="${arg#--timeout=}" ;;
+    --no-cache)   NO_CACHE=true ;;
     -h|--help)
       echo "Usage: bash bench/record.sh --id=ID --reason=REASON [OPTIONS]"
       echo ""
@@ -97,6 +99,7 @@ for arg in "$@"; do
       echo "  --runs=N          Number of hyperfine runs (default: 5)"
       echo "  --warmup=N        Number of warmup runs (default: 3)"
       echo "  --timeout=SEC     Per-benchmark timeout (default: 60)"
+      echo "  --no-cache        Skip cached variant measurements"
       echo "  -h, --help        Show this help"
       exit 0
       ;;
@@ -151,11 +154,34 @@ echo "Recording: id=$ID reason=\"$REASON\""
 echo "Runs=$RUNS, warmup=$WARMUP"
 echo ""
 
+# --- Pre-compile for cached benchmarks ---
+precompile_for_cache() {
+  echo "Pre-compiling modules for cache..."
+  rm -rf ~/.cache/zwasm/
+  declare -A seen
+  for entry in "${BENCHMARKS[@]}"; do
+    IFS=: read -r _name wasm _func _args _kind <<< "$entry"
+    if [[ -n "$BENCH_FILTER" && "$_name" != "$BENCH_FILTER" ]]; then continue; fi
+    local wasm_path="$PROJECT_ROOT/$wasm"
+    if [[ ! -f "$wasm_path" ]]; then continue; fi
+    if [[ -z "${seen[$wasm_path]+x}" ]]; then
+      seen["$wasm_path"]=1
+      $ZWASM compile "$wasm_path" >/dev/null 2>&1 || true
+    fi
+  done
+  echo ""
+}
+
+if ! $NO_CACHE; then
+  precompile_for_cache
+fi
+
 # --- Run benchmarks with hyperfine ---
 TMPDIR_BENCH=$(mktemp -d)
 trap "rm -rf $TMPDIR_BENCH" EXIT
 
 declare -A BENCH_RESULTS  # bench_name -> time_ms
+declare -A BENCH_RESULTS_CACHED  # bench_name_cached -> time_ms
 
 for entry in "${BENCHMARKS[@]}"; do
   IFS=: read -r name wasm func bench_args kind <<< "$entry"
@@ -208,6 +234,62 @@ print(round(r['mean'] * 1000, 1))
   fi
 done
 
+# --- Cached variant measurements ---
+if ! $NO_CACHE; then
+  echo ""
+  echo "--- Cached variants ---"
+  for entry in "${BENCHMARKS[@]}"; do
+    IFS=: read -r name wasm func bench_args kind <<< "$entry"
+
+    if [[ -n "$BENCH_FILTER" && "$name" != "$BENCH_FILTER" ]]; then
+      continue
+    fi
+
+    wasm_path="$PROJECT_ROOT/$wasm"
+    if [[ ! -f "$wasm_path" ]]; then
+      continue
+    fi
+
+    cached_name="${name}_cached"
+    printf "  %-16s " "$cached_name"
+
+    json_file="$TMPDIR_BENCH/${cached_name}.json"
+
+    # Build cached command
+    if [[ "$kind" == "invoke" ]]; then
+      bench_cmd="$ZWASM run --cache --invoke $func $wasm_path $bench_args"
+    else
+      bench_cmd="$ZWASM run --cache $wasm_path"
+    fi
+
+    # shellcheck disable=SC2086
+    if timeout "${TIMEOUT}s" hyperfine \
+      --warmup "$WARMUP" \
+      --runs "$RUNS" \
+      --export-json "$json_file" \
+      "$bench_cmd" \
+      >/dev/null 2>&1; then
+
+      time_ms=$(python3 -c "
+import json
+with open('$json_file') as f:
+    data = json.load(f)
+r = data['results'][0]
+print(round(r['mean'] * 1000, 1))
+" 2>/dev/null || echo "")
+
+      if [[ -n "$time_ms" ]]; then
+        printf "%8s ms\n" "$time_ms"
+        BENCH_RESULTS_CACHED["$cached_name"]="$time_ms"
+      else
+        echo "PARSE_ERR"
+      fi
+    else
+      echo "FAIL/TIMEOUT"
+    fi
+  done
+fi
+
 echo ""
 
 # --- Build entry and write to history.yaml ---
@@ -249,11 +331,16 @@ for key in "${BENCH_ORDER[@]}"; do
   if [[ -v "BENCH_RESULTS[$key]" ]]; then
     echo "  $key: {time_ms: ${BENCH_RESULTS[$key]}}" >> "$ENTRY_FILE"
   fi
+  cached_key="${key}_cached"
+  if [[ -v "BENCH_RESULTS_CACHED[$cached_key]" ]]; then
+    echo "  $cached_key: {time_ms: ${BENCH_RESULTS_CACHED[$cached_key]}}" >> "$ENTRY_FILE"
+  fi
 done
 
 # Append entry
 yq -i ".entries += [load(\"$ENTRY_FILE\")]" "$HISTORY_FILE"
 rm -f "$ENTRY_FILE"
 
-echo "Recorded entry '$ID' (${#BENCH_RESULTS[@]} benchmarks)"
+total_count=$(( ${#BENCH_RESULTS[@]} + ${#BENCH_RESULTS_CACHED[@]} ))
+echo "Recorded entry '$ID' ($total_count benchmarks: ${#BENCH_RESULTS[@]} uncached + ${#BENCH_RESULTS_CACHED[@]} cached)"
 echo "Done. Results in $HISTORY_FILE"
