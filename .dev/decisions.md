@@ -231,3 +231,42 @@ bumps can introduce subtle behavior changes. Nightly workflow re-enabled as week
 Affected files: `.github/tool-versions`, `.github/workflows/ci.yml`,
 `.github/workflows/nightly.yml`, `.github/workflows/spec-bump.yml`,
 `.github/workflows/wasm-tools-bump.yml`, `.github/workflows/spectec-monitor.yml`
+
+---
+
+## D126: C API — hybrid design with `zwasm_` prefix
+
+**Context**: Phase 5. Make zwasm usable from C and any FFI-capable language
+(Python/ctypes, Rust/FFI, Go/cgo, etc.). Two approaches considered:
+
+1. **wasm-c-api standard** (`wasm_engine_new`, `wasm_module_new`, etc.):
+   Maximum interop but heavyweight API surface (~60 functions), complex
+   ownership model (engine → store → module → instance hierarchy).
+
+2. **Custom `zwasm_` API**: Simple module-centric API wrapping `WasmModule`.
+   Fewer functions, flatter hierarchy, zwasm-specific features exposed directly.
+
+**Decision**: Hybrid — custom `zwasm_` API designed so a wasm-c-api compatibility
+layer can be added on top later. Rationale:
+
+- **Simplicity**: `WasmModule` already encapsulates store+module+instance+vm.
+  Exposing the full wasm-c-api hierarchy would force users into unnecessary
+  boilerplate for common use cases.
+- **Zero-overhead FFI**: Functions use `callconv(.c)` + `export` for direct
+  symbol export. No runtime dispatch or vtables.
+- **Opaque pointers**: C sees `zwasm_module_t*`, `zwasm_wasi_config_t*`,
+  `zwasm_imports_t*` — all opaque. Internal layout can change freely.
+- **Error handling**: Functions return null/false on error.
+  `zwasm_last_error_message()` returns thread-local error string
+  (similar to SQLite `sqlite3_errmsg` / OpenGL `glGetError` pattern).
+- **Allocator strategy**: Each module owns a `GeneralPurposeAllocator`.
+  Created in `_new`, freed in `_delete`. No allocator parameter in C API —
+  simpler for FFI callers. GPA detects leaks in debug builds.
+- **u64 value interface**: Args/results passed as `uint64_t` arrays matching
+  the Zig API. C callers pack/unpack typed values themselves — no `wasm_val_t`
+  union overhead.
+
+**Future**: wasm-c-api shim can be built atop these primitives if needed
+for ecosystem compatibility (e.g., wasm-c-api test suite).
+
+Affected files: `src/c_api.zig`, `include/zwasm.h`, `build.zig`
