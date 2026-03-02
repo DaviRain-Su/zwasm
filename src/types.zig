@@ -26,6 +26,7 @@ const rt = struct {
     const validate = @import("validate.zig");
     const guard = @import("guard.zig");
     const fuzz_gen = @import("fuzz_gen.zig");
+    const c_api = @import("c_api.zig");
 };
 
 // ============================================================
