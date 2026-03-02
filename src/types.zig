@@ -1111,6 +1111,7 @@ test "nqueens(8) = 92 — with JIT" {
 // ============================================================
 
 test "WAT round-trip — i32.add" {
+    if (!@import("build_options").enable_wat) return error.SkipZigTest;
     var wasm_mod = try WasmModule.loadFromWat(testing.allocator,
         \\(module
         \\  (func $add (param i32 i32) (result i32)
@@ -1130,6 +1131,7 @@ test "WAT round-trip — i32.add" {
 }
 
 test "WAT round-trip — i32.const" {
+    if (!@import("build_options").enable_wat) return error.SkipZigTest;
     var wasm_mod = try WasmModule.loadFromWat(testing.allocator,
         \\(module
         \\  (func (export "forty_two") (result i32)
@@ -1145,6 +1147,7 @@ test "WAT round-trip — i32.const" {
 }
 
 test "WAT round-trip — if/else" {
+    if (!@import("build_options").enable_wat) return error.SkipZigTest;
     var wasm_mod = try WasmModule.loadFromWat(testing.allocator,
         \\(module
         \\  (func (export "abs") (param i32) (result i32)
@@ -1168,6 +1171,7 @@ test "WAT round-trip — if/else" {
 }
 
 test "WAT round-trip — loop (factorial)" {
+    if (!@import("build_options").enable_wat) return error.SkipZigTest;
     var wasm_mod = try WasmModule.loadFromWat(testing.allocator,
         \\(module
         \\  (func (export "fac") (param i32) (result i32)
@@ -1194,6 +1198,7 @@ test "WAT round-trip — loop (factorial)" {
 }
 
 test "WAT round-trip — named locals" {
+    if (!@import("build_options").enable_wat) return error.SkipZigTest;
     var wasm_mod = try WasmModule.loadFromWat(testing.allocator,
         \\(module
         \\  (func (export "swap_sub") (param $a i32) (param $b i32) (result i32)
@@ -1210,6 +1215,7 @@ test "WAT round-trip — named locals" {
 }
 
 test "WAT round-trip — named globals" {
+    if (!@import("build_options").enable_wat) return error.SkipZigTest;
     var wasm_mod = try WasmModule.loadFromWat(testing.allocator,
         \\(module
         \\  (global $counter (mut i32) (i32.const 0))
@@ -1229,6 +1235,7 @@ test "WAT round-trip — named globals" {
 }
 
 test "WAT round-trip — return_call simple" {
+    if (!@import("build_options").enable_wat) return error.SkipZigTest;
     var wasm_mod = try WasmModule.loadFromWat(testing.allocator,
         \\(module
         \\  (func $get42 (result i32)
@@ -1248,6 +1255,7 @@ test "WAT round-trip — return_call simple" {
 }
 
 test "WAT round-trip — return_call mutual recursion" {
+    if (!@import("build_options").enable_wat) return error.SkipZigTest;
     var wasm_mod = try WasmModule.loadFromWat(testing.allocator,
         \\(module
         \\  (func $even (param i32) (result i32)

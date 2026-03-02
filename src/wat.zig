@@ -4476,6 +4476,7 @@ test "WAT — build option available" {
 }
 
 test "WAT tokenizer — basic module" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var tok = Tokenizer.init("(module)");
     const t1 = tok.next();
     try testing.expectEqual(TokenTag.lparen, t1.tag);
@@ -4489,6 +4490,7 @@ test "WAT tokenizer — basic module" {
 }
 
 test "WAT tokenizer — func with params" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var tok = Tokenizer.init("(func $add (param i32 i32) (result i32))");
     try testing.expectEqual(TokenTag.lparen, tok.next().tag); // (
     try testing.expectEqualStrings("func", tok.next().text); // func
@@ -4509,6 +4511,7 @@ test "WAT tokenizer — func with params" {
 }
 
 test "WAT tokenizer — numbers" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var tok = Tokenizer.init("42 0xFF -1 1.0 0x1p+0");
     const t1 = tok.next();
     try testing.expectEqual(TokenTag.integer, t1.tag);
@@ -4528,6 +4531,7 @@ test "WAT tokenizer — numbers" {
 }
 
 test "WAT tokenizer — string and comments" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var tok = Tokenizer.init(
         \\;; line comment
         \\"hello\nworld"
@@ -4542,6 +4546,7 @@ test "WAT tokenizer — string and comments" {
 }
 
 test "WAT tokenizer — instructions" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var tok = Tokenizer.init("i32.add local.get memory.grow");
     try testing.expectEqualStrings("i32.add", tok.next().text);
     try testing.expectEqualStrings("local.get", tok.next().text);
@@ -4554,6 +4559,7 @@ test "WAT tokenizer — instructions" {
 // ============================================================
 
 test "WAT parser — empty module" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(), "(module)");
@@ -4567,6 +4573,7 @@ test "WAT parser — empty module" {
 }
 
 test "WAT parser — named module" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(), "(module $test)");
@@ -4575,6 +4582,7 @@ test "WAT parser — named module" {
 }
 
 test "WAT parser — type definition" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4590,6 +4598,7 @@ test "WAT parser — type definition" {
 }
 
 test "WAT parser — func with params and result" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4608,6 +4617,7 @@ test "WAT parser — func with params and result" {
 }
 
 test "WAT parser — memory" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4620,6 +4630,7 @@ test "WAT parser — memory" {
 }
 
 test "WAT parser — export" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4636,6 +4647,7 @@ test "WAT parser — export" {
 }
 
 test "WAT parser — import func" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4653,6 +4665,7 @@ test "WAT parser — import func" {
 }
 
 test "WAT parser — import memory" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4666,6 +4679,7 @@ test "WAT parser — import memory" {
 }
 
 test "WAT parser — global mutable" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4680,6 +4694,7 @@ test "WAT parser — global mutable" {
 }
 
 test "WAT parser — table" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4692,6 +4707,7 @@ test "WAT parser — table" {
 }
 
 test "WAT parser — start function" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4705,6 +4721,7 @@ test "WAT parser — start function" {
 }
 
 test "WAT parser — inline export on func" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4718,6 +4735,7 @@ test "WAT parser — inline export on func" {
 }
 
 test "WAT parser — multiple sections" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4743,6 +4761,7 @@ test "WAT parser — multiple sections" {
 // ============================================================
 
 test "WAT parser — func with i32.add body" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4768,6 +4787,7 @@ test "WAT parser — func with i32.add body" {
 }
 
 test "WAT parser — i32.const instruction" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4784,6 +4804,7 @@ test "WAT parser — i32.const instruction" {
 }
 
 test "WAT parser — folded S-expression" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4805,6 +4826,7 @@ test "WAT parser — folded S-expression" {
 }
 
 test "WAT parser — nested folded expressions" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4826,6 +4848,7 @@ test "WAT parser — nested folded expressions" {
 }
 
 test "WAT parser — block instruction" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4847,6 +4870,7 @@ test "WAT parser — block instruction" {
 }
 
 test "WAT parser — if/then/else" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4871,6 +4895,7 @@ test "WAT parser — if/then/else" {
 }
 
 test "WAT parser — global with init" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4886,6 +4911,7 @@ test "WAT parser — global with init" {
 }
 
 test "WAT parser — memory load/store" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4908,6 +4934,7 @@ test "WAT parser — memory load/store" {
 }
 
 test "WAT parser — loop with br_if" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -4930,6 +4957,7 @@ test "WAT parser — loop with br_if" {
 }
 
 test "WAT parser — number literals" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     try testing.expectEqual(@as(i32, 42), try parseIntLiteral(i32, "42"));
     try testing.expectEqual(@as(i32, -1), try parseIntLiteral(i32, "-1"));
     try testing.expectEqual(@as(i32, 255), try parseIntLiteral(i32, "0xFF"));
@@ -4942,6 +4970,7 @@ test "WAT parser — number literals" {
 // ============================================================
 
 test "WAT encoder — empty module" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator, "(module)");
     defer testing.allocator.free(wasm);
     try testing.expectEqual(@as(usize, 8), wasm.len);
@@ -4949,6 +4978,7 @@ test "WAT encoder — empty module" {
 }
 
 test "WAT encoder — add function bytes" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (func $add (param i32 i32) (result i32)
@@ -4972,6 +5002,7 @@ test "WAT encoder — add function bytes" {
 }
 
 test "WAT encoder — module with memory" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module (memory 1))
     );
@@ -4983,6 +5014,7 @@ test "WAT encoder — module with memory" {
 }
 
 test "WAT encoder — i32.const function" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (func (result i32)
@@ -5021,6 +5053,7 @@ test "WAT encoder — i32.const function" {
 }
 
 test "WAT encoder — LEB128 encoding" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     // Test u32 LEB128
     var buf: std.ArrayListUnmanaged(u8) = .empty;
     defer buf.deinit(testing.allocator);
@@ -5052,6 +5085,7 @@ test "WAT encoder — LEB128 encoding" {
 }
 
 test "WAT encoder — export with name resolution" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (func $add (param i32 i32) (result i32)
@@ -5086,6 +5120,7 @@ test "WAT encoder — export with name resolution" {
 }
 
 test "WAT round-trip — v128.const SIMD" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (func (export "hi") (result v128)
@@ -5111,6 +5146,7 @@ test "WAT round-trip — v128.const SIMD" {
 }
 
 test "WAT parser — memory.size default index" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (memory 1)
@@ -5128,6 +5164,7 @@ test "WAT parser — memory.size default index" {
 }
 
 test "WAT parser — memory.grow default index" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (memory 1)
@@ -5147,6 +5184,7 @@ test "WAT parser — memory.grow default index" {
 }
 
 test "WAT parser — data section round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (memory (export "mem") 1)
@@ -5166,6 +5204,7 @@ test "WAT parser — data section round-trip" {
 }
 
 test "WAT parser — data section with escape sequences" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (memory 1)
@@ -5185,6 +5224,7 @@ test "WAT parser — data section with escape sequences" {
 }
 
 test "WAT parser — data section with offset keyword" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (memory 1)
@@ -5204,6 +5244,7 @@ test "WAT parser — data section with offset keyword" {
 }
 
 test "WAT parser — elem section round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (type $t (func (result i32)))
@@ -5229,18 +5270,21 @@ test "WAT parser — elem section round-trip" {
 }
 
 test "decodeWatString — basic escapes" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const result = try decodeWatString(testing.allocator, "Hello\\nWorld");
     defer testing.allocator.free(result);
     try testing.expectEqualStrings("Hello\nWorld", result);
 }
 
 test "decodeWatString — hex escapes" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const result = try decodeWatString(testing.allocator, "\\48\\65\\6c\\6c\\6f");
     defer testing.allocator.free(result);
     try testing.expectEqualStrings("Hello", result);
 }
 
 test "WAT parser — i32.trunc_sat_f64_s round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (func (export "sat") (param f64) (result i32)
@@ -5259,6 +5303,7 @@ test "WAT parser — i32.trunc_sat_f64_s round-trip" {
 }
 
 test "WAT parser — memory.fill round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (memory 1)
@@ -5281,6 +5326,7 @@ test "WAT parser — memory.fill round-trip" {
 }
 
 test "WAT parser — memory.copy round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (memory 1)
@@ -5304,6 +5350,7 @@ test "WAT parser — memory.copy round-trip" {
 }
 
 test "WAT parser — table.fill round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (table 3 funcref)
@@ -5330,6 +5377,7 @@ test "WAT parser — table.fill round-trip" {
 }
 
 test "WAT parser — try_table encode round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     // Verify try_table parses and encodes to valid wasm binary
     // Uses catch_all (no tag needed) with body that returns normally
     const wasm = try watToWasm(testing.allocator,
@@ -5351,6 +5399,7 @@ test "WAT parser — try_table encode round-trip" {
 }
 
 test "WAT parser — i32x4.extract_lane round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (func (export "test") (result i32)
@@ -5368,6 +5417,7 @@ test "WAT parser — i32x4.extract_lane round-trip" {
 }
 
 test "WAT parser — i32.atomic.load round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (memory 1)
@@ -5389,6 +5439,7 @@ test "WAT parser — i32.atomic.load round-trip" {
 }
 
 test "WAT parser — memory shared" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -5402,6 +5453,7 @@ test "WAT parser — memory shared" {
 }
 
 test "WAT encoder — memory shared round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module (memory 1 4 shared))
     );
@@ -5431,6 +5483,7 @@ test "WAT encoder — memory shared round-trip" {
 }
 
 test "WAT parser — memory shared requires max" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -5440,6 +5493,7 @@ test "WAT parser — memory shared requires max" {
 }
 
 test "WAT parser — import memory shared" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -5453,6 +5507,7 @@ test "WAT parser — import memory shared" {
 }
 
 test "WAT parser — tag declaration" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -5468,6 +5523,7 @@ test "WAT parser — tag declaration" {
 }
 
 test "WAT encoder — tag round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (tag $e (param i32))
@@ -5482,6 +5538,7 @@ test "WAT encoder — tag round-trip" {
 }
 
 test "WAT encoder — tag with try_table catch" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (tag $e (param i32))
@@ -5505,6 +5562,7 @@ test "WAT encoder — tag with try_table catch" {
 }
 
 test "WAT parser — import tag" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -5519,6 +5577,7 @@ test "WAT parser — import tag" {
 }
 
 test "WAT encoder — export tag" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (tag $e (param i32))
@@ -5533,6 +5592,7 @@ test "WAT encoder — export tag" {
 }
 
 test "WAT parser — GC valtype abbreviations" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -5551,6 +5611,7 @@ test "WAT parser — GC valtype abbreviations" {
 }
 
 test "WAT parser — ref type" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -5567,6 +5628,7 @@ test "WAT parser — ref type" {
 }
 
 test "WAT encoder — ref.null heap type" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (func (export "test") (result funcref)
@@ -5584,6 +5646,7 @@ test "WAT encoder — ref.null heap type" {
 }
 
 test "WAT encoder — anyref param round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (func (param anyref))
@@ -5596,6 +5659,7 @@ test "WAT encoder — anyref param round-trip" {
 }
 
 test "WAT parser — struct type definition" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -5614,6 +5678,7 @@ test "WAT parser — struct type definition" {
 }
 
 test "WAT parser — struct with mutable field" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -5629,6 +5694,7 @@ test "WAT parser — struct with mutable field" {
 }
 
 test "WAT parser — array type definition" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     var parser = Parser.init(arena.allocator(),
@@ -5644,6 +5710,7 @@ test "WAT parser — array type definition" {
 }
 
 test "WAT encoder — struct type round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (type $point (struct (field $x i32) (field $y f64)))
@@ -5658,6 +5725,7 @@ test "WAT encoder — struct type round-trip" {
 }
 
 test "WAT encoder — array type round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (type $arr (array (mut f32)))
@@ -5671,6 +5739,7 @@ test "WAT encoder — array type round-trip" {
 }
 
 test "WAT encoder — i31.get_s round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (func (param i31ref) (result i32)
@@ -5688,6 +5757,7 @@ test "WAT encoder — i31.get_s round-trip" {
 }
 
 test "WAT encoder — struct.new round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (type $point (struct (field i32) (field i32)))
@@ -5706,6 +5776,7 @@ test "WAT encoder — struct.new round-trip" {
 }
 
 test "WAT encoder — rec group round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (rec
@@ -5722,6 +5793,7 @@ test "WAT encoder — rec group round-trip" {
 }
 
 test "WAT encoder — struct.get round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (type $point (struct (field $x i32) (field $y i32)))
@@ -5739,6 +5811,7 @@ test "WAT encoder — struct.get round-trip" {
 }
 
 test "WAT encoder — ref.test round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (type $my (struct))
@@ -5756,6 +5829,7 @@ test "WAT encoder — ref.test round-trip" {
 }
 
 test "WAT encoder — array.new_fixed round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (type $arr (array i32))
@@ -5779,22 +5853,27 @@ test "WAT encoder — array.new_fixed round-trip" {
 // ============================================================
 
 test "WAT validation — empty input" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     try testing.expectError(error.InvalidWat, watToWasm(testing.allocator, ""));
 }
 
 test "WAT validation — unclosed paren" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     try testing.expectError(error.InvalidWat, watToWasm(testing.allocator, "(module"));
 }
 
 test "WAT validation — not a module" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     try testing.expectError(error.InvalidWat, watToWasm(testing.allocator, "(func)"));
 }
 
 test "WAT validation — invalid keyword" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     try testing.expectError(error.InvalidWat, watToWasm(testing.allocator, "(bogus)"));
 }
 
 test "WAT validation — unresolved name reference" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     // Unresolved names produce an error (not a panic)
     const result = watToWasm(testing.allocator,
         \\(module (func (call $nonexistent)))
@@ -5806,6 +5885,7 @@ test "WAT validation — unresolved name reference" {
 }
 
 test "WAT validation — deeply nested folded instrs" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     // Build a deeply nested (drop (drop (drop ... ))) to test recursion limit
     var buf: [12000]u8 = undefined;
     var pos: usize = 0;
@@ -5829,20 +5909,24 @@ test "WAT validation — deeply nested folded instrs" {
 }
 
 test "WAT validation — invalid number literal" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     try testing.expectError(error.InvalidWat, watToWasm(testing.allocator,
         \\(module (func (result i32) i32.const abc))
     ));
 }
 
 test "WAT validation — no opening paren" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     try testing.expectError(error.InvalidWat, watToWasm(testing.allocator, "func"));
 }
 
 test "WAT validation — unclosed func" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     try testing.expectError(error.InvalidWat, watToWasm(testing.allocator, "(module (func"));
 }
 
 test "WAT encoder — ref.test with parenthesized reftype" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (type $st (struct))
@@ -5860,6 +5944,7 @@ test "WAT encoder — ref.test with parenthesized reftype" {
 }
 
 test "WAT encoder — packed storage types i8/i16" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (type $arr8 (array i8))
@@ -5875,6 +5960,7 @@ test "WAT encoder — packed storage types i8/i16" {
 }
 
 test "WAT encoder — sub type round-trip" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (type $st (sub (struct)))
@@ -5892,6 +5978,7 @@ test "WAT encoder — sub type round-trip" {
 }
 
 test "WAT encoder — throw catch named tag" {
+    if (!build_options.enable_wat) return error.SkipZigTest;
     const wasm = try watToWasm(testing.allocator,
         \\(module
         \\  (type (;0;) (func))
