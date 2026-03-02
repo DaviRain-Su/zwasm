@@ -181,3 +181,37 @@ immutable artifacts. Version field allows future format changes without silent c
 **Not cached**: RegIR and JIT native code. RegIR depends on runtime state (function
 indices, memory layout). JIT code contains absolute addresses. Both regenerated at
 runtime from predecoded IR (fast: <1ms per function).
+
+---
+
+## D125: CI automation — cron-based dependency freshness
+
+**Context**: Phase 3. zwasm depends on external artifacts (WebAssembly spec testsuite,
+wasm-tools, WASI SDK, wasmtime) that update independently. Manual version bumps are
+easy to forget, causing silent drift from upstream.
+
+**Decision**: Three automated workflows:
+
+1. **Spec bump** (`spec-bump.yml`): Weekly (Monday 04:00 UTC). Clones latest spec,
+   runs convert + spec tests, creates PR if tests pass. Tracks spec SHA in
+   `.github/spec-sha` marker file.
+
+2. **wasm-tools bump** (`wasm-tools-bump.yml`): Monthly (1st, 05:00 UTC). Queries
+   GitHub API for latest release, updates `.github/tool-versions`, runs tests,
+   creates PR if they pass.
+
+3. **SpecTec monitor** (`spectec-monitor.yml`): Weekly (Monday 06:00 UTC). Checks
+   for changes in `document/core/` or `spectec/` directories. Creates GitHub issue
+   (with dedup) if changes found. Advisory only — no auto-merge.
+
+**Centralized versions**: `.github/tool-versions` stores WASM_TOOLS_VERSION,
+WASMTIME_VERSION, WASI_SDK_VERSION. All workflows `source` this file instead of
+hardcoding versions. Single-file version bumps.
+
+**Trade-off**: Auto-PRs require manual review before merge. Acceptable: version
+bumps can introduce subtle behavior changes. Nightly workflow re-enabled as weekly
+(Wednesday 03:00 UTC) to catch regressions without burning CI minutes daily.
+
+Affected files: `.github/tool-versions`, `.github/workflows/ci.yml`,
+`.github/workflows/nightly.yml`, `.github/workflows/spec-bump.yml`,
+`.github/workflows/wasm-tools-bump.yml`, `.github/workflows/spectec-monitor.yml`
