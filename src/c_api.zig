@@ -178,6 +178,208 @@ export fn zwasm_module_invoke_start(module: *zwasm_module_t) bool {
 }
 
 // ============================================================
+// Export introspection
+// ============================================================
+
+/// Return the number of exported functions.
+export fn zwasm_module_export_count(module: *zwasm_module_t) u32 {
+    return @intCast(module.module.export_fns.len);
+}
+
+/// Return the name of the idx-th exported function as a null-terminated string.
+/// Returns null if idx is out of range.
+export fn zwasm_module_export_name(module: *zwasm_module_t, idx: u32) ?[*:0]const u8 {
+    if (idx >= module.module.export_fns.len) return null;
+    const name = module.module.export_fns[idx].name;
+    // Wasm names are stored as slices. Return as pointer — the data lives in
+    // the module's decoded section and is null-terminated by virtue of the
+    // underlying wasm bytes being contiguous. However, we can't guarantee a
+    // null terminator after the slice, so we copy into the error_buf as a
+    // scratch space. This is a simplification for C callers.
+    // For zero-copy, callers should use memory_data + offsets.
+    if (name.len >= ERROR_BUF_SIZE) return null;
+    @memcpy(error_buf[0..name.len], name);
+    error_buf[name.len] = 0;
+    return @ptrCast(error_buf[0..name.len :0]);
+}
+
+/// Return the number of parameters of the idx-th exported function.
+/// Returns 0 if idx is out of range.
+export fn zwasm_module_export_param_count(module: *zwasm_module_t, idx: u32) u32 {
+    if (idx >= module.module.export_fns.len) return 0;
+    return @intCast(module.module.export_fns[idx].param_types.len);
+}
+
+/// Return the number of results of the idx-th exported function.
+/// Returns 0 if idx is out of range.
+export fn zwasm_module_export_result_count(module: *zwasm_module_t, idx: u32) u32 {
+    if (idx >= module.module.export_fns.len) return 0;
+    return @intCast(module.module.export_fns[idx].result_types.len);
+}
+
+// ============================================================
+// WASI configuration
+// ============================================================
+
+/// Opaque WASI configuration handle.
+const CApiWasiConfig = struct {
+    argv: std.ArrayList([*:0]const u8),
+    env_keys: std.ArrayList([*]const u8),
+    env_vals: std.ArrayList([*]const u8),
+    env_key_lens: std.ArrayList(usize),
+    env_val_lens: std.ArrayList(usize),
+    preopen_host: std.ArrayList([*]const u8),
+    preopen_guest: std.ArrayList([*]const u8),
+    preopen_host_lens: std.ArrayList(usize),
+    preopen_guest_lens: std.ArrayList(usize),
+
+    fn init() CApiWasiConfig {
+        const alloc = std.heap.page_allocator;
+        return .{
+            .argv = std.ArrayList([*:0]const u8).init(alloc),
+            .env_keys = std.ArrayList([*]const u8).init(alloc),
+            .env_vals = std.ArrayList([*]const u8).init(alloc),
+            .env_key_lens = std.ArrayList(usize).init(alloc),
+            .env_val_lens = std.ArrayList(usize).init(alloc),
+            .preopen_host = std.ArrayList([*]const u8).init(alloc),
+            .preopen_guest = std.ArrayList([*]const u8).init(alloc),
+            .preopen_host_lens = std.ArrayList(usize).init(alloc),
+            .preopen_guest_lens = std.ArrayList(usize).init(alloc),
+        };
+    }
+
+    fn deinit(self: *CApiWasiConfig) void {
+        self.argv.deinit();
+        self.env_keys.deinit();
+        self.env_vals.deinit();
+        self.env_key_lens.deinit();
+        self.env_val_lens.deinit();
+        self.preopen_host.deinit();
+        self.preopen_guest.deinit();
+        self.preopen_host_lens.deinit();
+        self.preopen_guest_lens.deinit();
+    }
+};
+
+pub const zwasm_wasi_config_t = CApiWasiConfig;
+
+/// Create a new WASI configuration handle.
+export fn zwasm_wasi_config_new() ?*zwasm_wasi_config_t {
+    const config = std.heap.page_allocator.create(CApiWasiConfig) catch return null;
+    config.* = CApiWasiConfig.init();
+    return config;
+}
+
+/// Free a WASI configuration handle.
+export fn zwasm_wasi_config_delete(config: *zwasm_wasi_config_t) void {
+    config.deinit();
+    std.heap.page_allocator.destroy(config);
+}
+
+/// Set command-line arguments for WASI. argv entries are null-terminated C strings.
+export fn zwasm_wasi_config_set_argv(config: *zwasm_wasi_config_t, argc: u32, argv: [*]const [*:0]const u8) void {
+    config.argv.clearRetainingCapacity();
+    for (0..argc) |i| {
+        config.argv.append(argv[i]) catch {};
+    }
+}
+
+/// Set environment variables for WASI. keys and vals are arrays of C strings.
+export fn zwasm_wasi_config_set_env(
+    config: *zwasm_wasi_config_t,
+    count: u32,
+    keys: [*]const [*]const u8,
+    key_lens: [*]const usize,
+    vals: [*]const [*]const u8,
+    val_lens: [*]const usize,
+) void {
+    config.env_keys.clearRetainingCapacity();
+    config.env_vals.clearRetainingCapacity();
+    config.env_key_lens.clearRetainingCapacity();
+    config.env_val_lens.clearRetainingCapacity();
+    for (0..count) |i| {
+        config.env_keys.append(keys[i]) catch {};
+        config.env_vals.append(vals[i]) catch {};
+        config.env_key_lens.append(key_lens[i]) catch {};
+        config.env_val_lens.append(val_lens[i]) catch {};
+    }
+}
+
+/// Add a preopened directory mapping for WASI.
+export fn zwasm_wasi_config_preopen_dir(
+    config: *zwasm_wasi_config_t,
+    host_path: [*]const u8,
+    host_path_len: usize,
+    guest_path: [*]const u8,
+    guest_path_len: usize,
+) void {
+    config.preopen_host.append(host_path) catch {};
+    config.preopen_host_lens.append(host_path_len) catch {};
+    config.preopen_guest.append(guest_path) catch {};
+    config.preopen_guest_lens.append(guest_path_len) catch {};
+}
+
+/// Create a new WASI module with custom configuration.
+/// Returns null on error.
+export fn zwasm_module_new_wasi_configured(
+    wasm_ptr: [*]const u8,
+    len: usize,
+    config: *zwasm_wasi_config_t,
+) ?*zwasm_module_t {
+    clearError();
+
+    // Build WasiOptions from config
+    // argv: slice of sentinel-terminated pointers — direct from config
+    const argv_slice: []const [:0]const u8 = blk: {
+        const items = config.argv.items;
+        // Reinterpret [*:0]const u8 array as [:0]const u8 slice
+        const ptr: [*]const [:0]const u8 = @ptrCast(items.ptr);
+        break :blk ptr[0..items.len];
+    };
+
+    // env: build slices from stored pointers + lengths
+    const gpa_alloc = std.heap.page_allocator;
+    const env_keys = gpa_alloc.alloc([]const u8, config.env_keys.items.len) catch {
+        setError(error.OutOfMemory);
+        return null;
+    };
+    defer gpa_alloc.free(env_keys);
+    const env_vals = gpa_alloc.alloc([]const u8, config.env_vals.items.len) catch {
+        setError(error.OutOfMemory);
+        return null;
+    };
+    defer gpa_alloc.free(env_vals);
+    for (config.env_keys.items, config.env_key_lens.items, 0..) |ptr, l, i| {
+        env_keys[i] = ptr[0..l];
+    }
+    for (config.env_vals.items, config.env_val_lens.items, 0..) |ptr, l, i| {
+        env_vals[i] = ptr[0..l];
+    }
+
+    // preopens: build slices
+    const preopens = gpa_alloc.alloc([]const u8, config.preopen_host.items.len) catch {
+        setError(error.OutOfMemory);
+        return null;
+    };
+    defer gpa_alloc.free(preopens);
+    for (config.preopen_host.items, config.preopen_host_lens.items, 0..) |ptr, l, i| {
+        preopens[i] = ptr[0..l];
+    }
+
+    const opts = WasiOptions{
+        .args = argv_slice,
+        .env_keys = env_keys,
+        .env_vals = env_vals,
+        .preopen_paths = preopens,
+    };
+
+    return CApiModule.createWasiConfigured(wasm_ptr[0..len], opts) catch |err| {
+        setError(err);
+        return null;
+    };
+}
+
+// ============================================================
 // Memory access
 // ============================================================
 
@@ -359,6 +561,29 @@ test "c_api: memory_read out of bounds" {
 
     var buf: [1]u8 = undefined;
     try testing.expect(!zwasm_module_memory_read(module, 0xFFFFFFFF, 1, &buf));
+}
+
+test "c_api: export introspection" {
+    const module = zwasm_module_new(RETURN42_WASM.ptr, RETURN42_WASM.len).?;
+    defer zwasm_module_delete(module);
+
+    try testing.expectEqual(@as(u32, 1), zwasm_module_export_count(module));
+
+    const name = zwasm_module_export_name(module, 0);
+    try testing.expect(name != null);
+    try testing.expectEqualStrings("f", std.mem.sliceTo(name.?, 0));
+
+    try testing.expectEqual(@as(u32, 0), zwasm_module_export_param_count(module, 0));
+    try testing.expectEqual(@as(u32, 1), zwasm_module_export_result_count(module, 0));
+
+    // Out of range
+    try testing.expect(zwasm_module_export_name(module, 99) == null);
+}
+
+test "c_api: wasi config lifecycle" {
+    const config = zwasm_wasi_config_new();
+    try testing.expect(config != null);
+    zwasm_wasi_config_delete(config.?);
 }
 
 test "c_api: last_error_message is empty after success" {
