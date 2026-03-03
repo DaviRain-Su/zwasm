@@ -42,10 +42,16 @@ Session handover document. Read at session start.
   spillCallerSaved wrote garbage to register file)
 - ARM64 spillCallerSavedLive: reverted "spill ALL" back to "spill live only"
   (the "spill ALL" caused intermittent failures in Go programs)
+- emitInlineSelfCall: moved emitLoadMemCache before reloadCallerSavedLive
+  (BLR clobbers caller-saved regs; also fixed Ubuntu TinyGo 0.37.0 OOB crash)
 - Mac: 50/50 PASS (W31 resolved — bad test data, not JIT bug)
 - Ubuntu: 50/50 PASS, 0 CRASH. Spec 62,263/62,263. E2E 792/792.
 
-**Next**: Merge Gate (Mac + Ubuntu), then merge to main + update compat count.
+### Merge Gate PASSED
+- Mac: unit PASS, spec 62,263/62,263, E2E 792/792, compat 50/50, binary 1.20MB
+- Ubuntu: unit PASS, spec 62,263/62,263, E2E 792/792, compat 50/50
+
+**Next**: Merge to main + update compat count.
 
 ## References
 
