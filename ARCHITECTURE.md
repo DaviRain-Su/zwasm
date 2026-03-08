@@ -63,6 +63,7 @@ This document describes the execution pipeline and file organization.
 | File | Description |
 |------|-------------|
 | `src/wasi.zig` | WASI Preview 1 — 19 host functions (I/O, fs, clock, random) |
+| `src/c_api.zig` | C ABI export layer — 29 `zwasm_*` functions for FFI embedding |
 | `src/cache.zig` | Module cache — predecoded IR serialization (`ZWCACHE` format) |
 | `src/trace.zig` | Debug tracing — JIT, RegIR, execution analysis (zero-cost) |
 | `src/cli.zig` | CLI — `run`, `inspect`, `validate`, `compile` commands |
@@ -107,10 +108,35 @@ This document describes the execution pipeline and file organization.
 | Real-world | `bash test/realworld/run_compat.sh` | 30 programs |
 | Fuzz | `bash test/fuzz/fuzz_campaign.sh --duration=60` | Continuous |
 
+## Allocator Flow
+
+All components receive the same `std.mem.Allocator` from the caller.
+No global allocator. C API wraps external alloc/free callbacks into the same interface.
+
+```
+Caller allocator
+  └─ WasmModule.load(alloc, bytes)
+       ├─ Store.init(alloc)
+       │    ├─ GcHeap.init(alloc)        ← WasmGC struct/array arena
+       │    └─ TypeRegistry.init(alloc)   ← rec group dedup
+       ├─ Module.init(alloc, bytes)      ← parsed sections
+       ├─ Instance.init(alloc, ...)      ← address mappings
+       └─ Vm.init(alloc)                ← execution state
+
+C API path:
+  zwasm_module_new()              → internal GPA as allocator
+  zwasm_module_new_configured()   → NULL config: internal GPA
+                                  → with config: C callback-wrapped allocator
+```
+
+Wasm linear memory (`memory.grow`) is separately managed per spec — unaffected
+by the host allocator choice.
+
 ## Cross-References
 
 - **Design decisions**: `.dev/decisions.md` (D116+), `.dev/decisions-archive.md` (D100-D115)
 - **Data structures**: `docs/data-structures.md`
+- **Embedding guide**: `docs/embedding.md`
 - **Proposal tracking**: `.dev/proposal-watch.md`
 - **Roadmap**: `.dev/roadmap.md`
 - **API boundary**: `docs/api-boundary.md`
