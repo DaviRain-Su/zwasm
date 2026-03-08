@@ -31,6 +31,7 @@ extern "C" {
  * ================================================================ */
 
 typedef struct zwasm_module_t zwasm_module_t;
+typedef struct zwasm_config_t zwasm_config_t;
 typedef struct zwasm_wasi_config_t zwasm_wasi_config_t;
 typedef struct zwasm_imports_t zwasm_imports_t;
 
@@ -59,6 +60,38 @@ typedef bool (*zwasm_host_fn_callback_t)(void *env, const uint64_t *args,
  * The pointer is valid until the next zwasm_* call on the same thread.
  */
 const char *zwasm_last_error_message(void);
+
+/* ================================================================
+ * Configuration (optional)
+ * ================================================================ */
+
+/**
+ * Custom allocator callback types.
+ * alignment is in bytes (1, 2, 4, 8, ...).
+ */
+typedef void *(*zwasm_alloc_fn_t)(void *ctx, size_t size, size_t alignment);
+typedef void (*zwasm_free_fn_t)(void *ctx, void *ptr, size_t size,
+                                size_t alignment);
+
+/** Create a new configuration handle. */
+zwasm_config_t *zwasm_config_new(void);
+
+/** Free a configuration handle. */
+void zwasm_config_delete(zwasm_config_t *config);
+
+/**
+ * Set a custom allocator for module creation.
+ * This controls zwasm's internal bookkeeping memory only.
+ * Wasm linear memory (memory.grow) is unaffected.
+ *
+ * @param config    Configuration handle.
+ * @param alloc_fn  Allocation callback: (ctx, size, alignment) -> ptr or NULL.
+ * @param free_fn   Deallocation callback: (ctx, ptr, size, alignment).
+ * @param ctx       User context pointer passed to callbacks.
+ */
+void zwasm_config_set_allocator(zwasm_config_t *config,
+                                zwasm_alloc_fn_t alloc_fn,
+                                zwasm_free_fn_t free_fn, void *ctx);
 
 /* ================================================================
  * Module lifecycle
@@ -93,6 +126,24 @@ zwasm_module_t *zwasm_module_new_wasi_configured(const uint8_t *wasm_ptr,
 zwasm_module_t *zwasm_module_new_with_imports(const uint8_t *wasm_ptr,
                                                size_t len,
                                                zwasm_imports_t *imports);
+
+/**
+ * Create a module with optional configuration (custom allocator, etc.).
+ * Pass NULL for config to use the default internal allocator.
+ * Returns NULL on error.
+ */
+zwasm_module_t *zwasm_module_new_configured(const uint8_t *wasm_ptr, size_t len,
+                                             zwasm_config_t *config);
+
+/**
+ * Create a WASI module with both WASI config and optional custom allocator.
+ * Pass NULL for config to use the default internal allocator.
+ * Returns NULL on error.
+ */
+zwasm_module_t *zwasm_module_new_wasi_configured2(const uint8_t *wasm_ptr,
+                                                    size_t len,
+                                                    zwasm_wasi_config_t *wasi_config,
+                                                    zwasm_config_t *config);
 
 /**
  * Free all resources held by a module.

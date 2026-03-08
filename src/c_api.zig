@@ -37,6 +37,66 @@ fn clearError() void {
 }
 
 // ============================================================
+// Custom allocator wrapper — C callback → std.mem.Allocator
+// ============================================================
+
+const Alignment = std.mem.Alignment;
+
+/// C callback types for custom allocator injection.
+pub const zwasm_alloc_fn_t = *const fn (?*anyopaque, usize, usize) callconv(.c) ?[*]u8;
+pub const zwasm_free_fn_t = *const fn (?*anyopaque, [*]u8, usize, usize) callconv(.c) void;
+
+/// Wraps C alloc/free callbacks as a std.mem.Allocator.
+/// Heap-allocated via page_allocator so the pointer remains stable.
+const CAllocatorWrapper = struct {
+    alloc_fn: zwasm_alloc_fn_t,
+    free_fn: zwasm_free_fn_t,
+    ctx: ?*anyopaque,
+
+    fn allocator(self: *CAllocatorWrapper) std.mem.Allocator {
+        return .{ .ptr = self, .vtable = &vtable };
+    }
+
+    const vtable = std.mem.Allocator.VTable{
+        .alloc = cAlloc,
+        .resize = std.mem.Allocator.noResize,
+        .remap = std.mem.Allocator.noRemap,
+        .free = cFree,
+    };
+
+    fn cAlloc(ptr: *anyopaque, len: usize, alignment: Alignment, _: usize) ?[*]u8 {
+        const self: *CAllocatorWrapper = @ptrCast(@alignCast(ptr));
+        return self.alloc_fn(self.ctx, len, alignment.toByteUnits());
+    }
+
+    fn cFree(ptr: *anyopaque, memory: []u8, alignment: Alignment, _: usize) void {
+        const self: *CAllocatorWrapper = @ptrCast(@alignCast(ptr));
+        self.free_fn(self.ctx, memory.ptr, memory.len, alignment.toByteUnits());
+    }
+};
+
+// ============================================================
+// Configuration — zwasm_config_t
+// ============================================================
+
+/// Configuration handle for module creation. Optional custom allocator.
+const CApiConfig = struct {
+    c_alloc: ?*CAllocatorWrapper = null,
+
+    fn deinit(self: *CApiConfig) void {
+        if (self.c_alloc) |ca| page_alloc.destroy(ca);
+    }
+
+    /// Return the configured allocator, or null for default GPA.
+    fn getAllocator(self: *CApiConfig) ?std.mem.Allocator {
+        if (self.c_alloc) |ca| return ca.allocator();
+        return null;
+    }
+};
+
+pub const zwasm_config_t = CApiConfig;
+
+// ============================================================
 // Internal wrapper — GPA + WasmModule co-located
 // ============================================================
 
@@ -44,15 +104,33 @@ const Gpa = std.heap.GeneralPurposeAllocator(.{});
 
 /// Internal wrapper owning both the GPA and WasmModule.
 /// Heap-allocated via page_allocator for address stability.
+///
+/// When a custom allocator is injected via zwasm_config_t, gpa is unused
+/// and the custom allocator handles all allocations. The `owns_gpa` flag
+/// tracks whether we need to deinit gpa.
 const CApiModule = struct {
     gpa: Gpa,
+    owns_gpa: bool,
     module: *WasmModule,
 
     fn create(wasm_bytes: []const u8, wasi: bool) !*CApiModule {
+        return createWithAllocator(wasm_bytes, wasi, null);
+    }
+
+    fn createWithAllocator(wasm_bytes: []const u8, wasi: bool, custom_alloc: ?std.mem.Allocator) !*CApiModule {
         const self = try std.heap.page_allocator.create(CApiModule);
         errdefer std.heap.page_allocator.destroy(self);
-        self.gpa = .{};
-        const allocator = self.gpa.allocator();
+
+        const allocator = if (custom_alloc) |ca| blk: {
+            self.gpa = .{};
+            self.owns_gpa = false;
+            break :blk ca;
+        } else blk: {
+            self.gpa = .{};
+            self.owns_gpa = true;
+            break :blk self.gpa.allocator();
+        };
+
         self.module = if (wasi)
             try WasmModule.loadWasi(allocator, wasm_bytes)
         else
@@ -61,10 +139,23 @@ const CApiModule = struct {
     }
 
     fn createWasiConfigured(wasm_bytes: []const u8, opts: WasiOptions) !*CApiModule {
+        return createWasiConfiguredWithAllocator(wasm_bytes, opts, null);
+    }
+
+    fn createWasiConfiguredWithAllocator(wasm_bytes: []const u8, opts: WasiOptions, custom_alloc: ?std.mem.Allocator) !*CApiModule {
         const self = try std.heap.page_allocator.create(CApiModule);
         errdefer std.heap.page_allocator.destroy(self);
-        self.gpa = .{};
-        const allocator = self.gpa.allocator();
+
+        const allocator = if (custom_alloc) |ca| blk: {
+            self.gpa = .{};
+            self.owns_gpa = false;
+            break :blk ca;
+        } else blk: {
+            self.gpa = .{};
+            self.owns_gpa = true;
+            break :blk self.gpa.allocator();
+        };
+
         self.module = try WasmModule.loadWasiWithOptions(allocator, wasm_bytes, opts);
         return self;
     }
@@ -73,6 +164,7 @@ const CApiModule = struct {
         const self = try std.heap.page_allocator.create(CApiModule);
         errdefer std.heap.page_allocator.destroy(self);
         self.gpa = .{};
+        self.owns_gpa = true;
         const allocator = self.gpa.allocator();
         self.module = try WasmModule.loadWithImports(allocator, wasm_bytes, imports);
         return self;
@@ -80,7 +172,7 @@ const CApiModule = struct {
 
     fn destroy(self: *CApiModule) void {
         self.module.deinit();
-        _ = self.gpa.deinit();
+        if (self.owns_gpa) _ = self.gpa.deinit();
         std.heap.page_allocator.destroy(self);
     }
 };
@@ -161,6 +253,43 @@ fn hostFnTrampoline(ctx_ptr: *anyopaque, context_id: usize) anyerror!void {
 pub const zwasm_module_t = CApiModule;
 
 // ============================================================
+// Configuration lifecycle
+// ============================================================
+
+/// Create a new configuration handle.
+export fn zwasm_config_new() ?*zwasm_config_t {
+    const config = page_alloc.create(CApiConfig) catch return null;
+    config.* = .{};
+    return config;
+}
+
+/// Free a configuration handle.
+export fn zwasm_config_delete(config: *zwasm_config_t) void {
+    config.deinit();
+    page_alloc.destroy(config);
+}
+
+/// Set a custom allocator for module creation.
+/// alloc_fn: fn(ctx, size, alignment_log2) -> ?[*]u8
+/// free_fn: fn(ctx, ptr, size, alignment_log2) -> void
+export fn zwasm_config_set_allocator(
+    config: *zwasm_config_t,
+    alloc_fn: zwasm_alloc_fn_t,
+    free_fn: zwasm_free_fn_t,
+    ctx: ?*anyopaque,
+) void {
+    // Free existing wrapper if any
+    if (config.c_alloc) |ca| page_alloc.destroy(ca);
+    const wrapper = page_alloc.create(CAllocatorWrapper) catch return;
+    wrapper.* = .{
+        .alloc_fn = alloc_fn,
+        .free_fn = free_fn,
+        .ctx = ctx,
+    };
+    config.c_alloc = wrapper;
+}
+
+// ============================================================
 // Module lifecycle
 // ============================================================
 
@@ -179,6 +308,75 @@ export fn zwasm_module_new(wasm_ptr: [*]const u8, len: usize) ?*zwasm_module_t {
 export fn zwasm_module_new_wasi(wasm_ptr: [*]const u8, len: usize) ?*zwasm_module_t {
     clearError();
     return CApiModule.create(wasm_ptr[0..len], true) catch |err| {
+        setError(err);
+        return null;
+    };
+}
+
+/// Create a module with optional custom configuration (allocator, etc.).
+/// Pass null for config to use default allocator (same as zwasm_module_new).
+export fn zwasm_module_new_configured(wasm_ptr: [*]const u8, len: usize, config: ?*zwasm_config_t) ?*zwasm_module_t {
+    clearError();
+    const custom_alloc = if (config) |c| c.getAllocator() else null;
+    return CApiModule.createWithAllocator(wasm_ptr[0..len], false, custom_alloc) catch |err| {
+        setError(err);
+        return null;
+    };
+}
+
+/// Create a WASI module with both WASI config and optional custom allocator.
+/// Pass null for config to use default allocator.
+export fn zwasm_module_new_wasi_configured2(
+    wasm_ptr: [*]const u8,
+    len: usize,
+    wasi_config: *zwasm_wasi_config_t,
+    config: ?*zwasm_config_t,
+) ?*zwasm_module_t {
+    clearError();
+
+    // Build WasiOptions from wasi_config (same logic as zwasm_module_new_wasi_configured)
+    const argv_slice: []const [:0]const u8 = blk: {
+        const items = wasi_config.argv.items;
+        const ptr: [*]const [:0]const u8 = @ptrCast(items.ptr);
+        break :blk ptr[0..items.len];
+    };
+
+    const alloc = page_alloc;
+    const env_keys = alloc.alloc([]const u8, wasi_config.env_keys.items.len) catch {
+        setError(error.OutOfMemory);
+        return null;
+    };
+    defer alloc.free(env_keys);
+    const env_vals = alloc.alloc([]const u8, wasi_config.env_vals.items.len) catch {
+        setError(error.OutOfMemory);
+        return null;
+    };
+    defer alloc.free(env_vals);
+    for (wasi_config.env_keys.items, wasi_config.env_key_lens.items, 0..) |ptr, l, i| {
+        env_keys[i] = ptr[0..l];
+    }
+    for (wasi_config.env_vals.items, wasi_config.env_val_lens.items, 0..) |ptr, l, i| {
+        env_vals[i] = ptr[0..l];
+    }
+
+    const preopens = alloc.alloc([]const u8, wasi_config.preopen_host.items.len) catch {
+        setError(error.OutOfMemory);
+        return null;
+    };
+    defer alloc.free(preopens);
+    for (wasi_config.preopen_host.items, wasi_config.preopen_host_lens.items, 0..) |ptr, l, i| {
+        preopens[i] = ptr[0..l];
+    }
+
+    const opts = WasiOptions{
+        .args = argv_slice,
+        .env_keys = env_keys,
+        .env_vals = env_vals,
+        .preopen_paths = preopens,
+    };
+
+    const custom_alloc = if (config) |c| c.getAllocator() else null;
+    return CApiModule.createWasiConfiguredWithAllocator(wasm_ptr[0..len], opts, custom_alloc) catch |err| {
         setError(err);
         return null;
     };
@@ -815,4 +1013,68 @@ test "c_api: last_error_message is empty after success" {
     _ = zwasm_module_validate(MINIMAL_WASM.ptr, MINIMAL_WASM.len);
     const msg = zwasm_last_error_message();
     try testing.expect(msg[0] == 0);
+}
+
+test "c_api: config lifecycle" {
+    const config = zwasm_config_new();
+    try testing.expect(config != null);
+    zwasm_config_delete(config.?);
+}
+
+test "c_api: module_new_configured with null config uses default allocator" {
+    const module = zwasm_module_new_configured(RETURN42_WASM.ptr, RETURN42_WASM.len, null);
+    try testing.expect(module != null);
+    defer zwasm_module_delete(module.?);
+
+    var results = [_]u64{0};
+    try testing.expect(zwasm_module_invoke(module.?, "f", null, 0, &results, 1));
+    try testing.expectEqual(@as(u64, 42), results[0]);
+}
+
+test "c_api: custom allocator — counting allocs" {
+    const CountingCtx = struct {
+        alloc_count: usize = 0,
+        free_count: usize = 0,
+    };
+
+    const S = struct {
+        fn allocFn(ctx: ?*anyopaque, size: usize, alignment: usize) callconv(.c) ?[*]u8 {
+            const counting: *CountingCtx = @ptrCast(@alignCast(ctx));
+            counting.alloc_count += 1;
+            return std.heap.page_allocator.rawAlloc(std.heap.page_allocator.ptr, size, Alignment.fromByteUnits(alignment), @returnAddress());
+        }
+
+        fn freeFn(ctx: ?*anyopaque, buf: [*]u8, size: usize, alignment: usize) callconv(.c) void {
+            const counting: *CountingCtx = @ptrCast(@alignCast(ctx));
+            counting.free_count += 1;
+            std.heap.page_allocator.rawFree(std.heap.page_allocator.ptr, buf[0..size], Alignment.fromByteUnits(alignment), @returnAddress());
+        }
+    };
+
+    var counting_ctx = CountingCtx{};
+    const config = zwasm_config_new().?;
+    defer zwasm_config_delete(config);
+    zwasm_config_set_allocator(config, S.allocFn, S.freeFn, &counting_ctx);
+
+    const module = zwasm_module_new_configured(RETURN42_WASM.ptr, RETURN42_WASM.len, config);
+    try testing.expect(module != null);
+
+    // Verify allocations happened through our allocator
+    try testing.expect(counting_ctx.alloc_count > 0);
+
+    const alloc_before_delete = counting_ctx.alloc_count;
+    _ = alloc_before_delete;
+    zwasm_module_delete(module.?);
+
+    // After delete, all allocations should be freed
+    try testing.expectEqual(counting_ctx.alloc_count, counting_ctx.free_count);
+}
+
+test "c_api: module_new_wasi_configured2 with null config" {
+    const wasi_config = zwasm_wasi_config_new().?;
+    defer zwasm_wasi_config_delete(wasi_config);
+
+    const module = zwasm_module_new_wasi_configured2(MINIMAL_WASM.ptr, MINIMAL_WASM.len, wasi_config, null);
+    try testing.expect(module != null);
+    zwasm_module_delete(module.?);
 }
