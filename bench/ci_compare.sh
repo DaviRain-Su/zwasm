@@ -136,11 +136,15 @@ echo ""
 
 # Step 1: Build and benchmark current HEAD
 echo "[1/3] Building and benchmarking current HEAD..."
-if ! (cd "$PROJECT_DIR" && zig build -Doptimize=ReleaseSafe 2>&1); then
-    echo "ERROR: zig build -Doptimize=ReleaseSafe failed" >&2
-    echo "Retrying with verbose output..." >&2
-    (cd "$PROJECT_DIR" && zig build -Doptimize=ReleaseSafe 2>&1) || true
-    exit 2
+BUILD_LOG="$TMPDIR_CI/build.log"
+set +e
+(cd "$PROJECT_DIR" && zig build -Doptimize=ReleaseSafe 2>&1) | tee "$BUILD_LOG"
+BUILD_EXIT=${PIPESTATUS[0]}
+set -e
+if [[ "$BUILD_EXIT" -ne 0 ]]; then
+    echo "ERROR: zig build -Doptimize=ReleaseSafe failed (exit $BUILD_EXIT)" >&2
+    cat "$BUILD_LOG" >&2
+    exit "$BUILD_EXIT"
 fi
 
 CURRENT_RESULTS="$TMPDIR_CI/current.txt"
