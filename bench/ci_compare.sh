@@ -82,10 +82,12 @@ run_benchmarks() {
     local outfile="$2"
     local wasm_root="$3"
 
-    precompile_for_cache "$binary" "$wasm_root"
+    echo "  [run_benchmarks] starting... binary=$binary wasm_root=$wasm_root" >&2
+    precompile_for_cache "$binary" "$wasm_root" || echo "  [precompile warning] non-zero exit" >&2
 
     for entry in "${BENCHMARKS[@]}"; do
         IFS=: read -r name wasm func bench_args kind <<< "$entry"
+        echo "  [bench] $name ($kind)" >&2
         local wasm_path="$wasm_root/$wasm"
 
         if [[ ! -f "$wasm_path" ]]; then
