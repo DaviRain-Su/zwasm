@@ -334,11 +334,11 @@ fn cmdRun(allocator: Allocator, args: []const []const u8, stdout: *std.Io.Writer
             types.WasmModule.loadWithImports(allocator, link_bytes, import_entries.items) catch
                 // Retry without imports if the linked module doesn't need them
                 types.WasmModule.load(allocator, link_bytes) catch |err| {
-                    allocator.free(link_bytes);
-                    try stderr.print("error: failed to load linked module '{s}': {s}\n", .{ lpath, formatWasmError(err) });
-                    try stderr.flush();
-                    return false;
-                }
+                allocator.free(link_bytes);
+                try stderr.print("error: failed to load linked module '{s}': {s}\n", .{ lpath, formatWasmError(err) });
+                try stderr.flush();
+                return false;
+            }
         else
             types.WasmModule.load(allocator, link_bytes) catch |err| {
                 allocator.free(link_bytes);
@@ -799,7 +799,10 @@ fn printProfile(profile: *const vm_mod.Profile, w: *std.Io.Writer) void {
     // Print misc opcode counts if any
     var has_misc = false;
     for (0..32) |i| {
-        if (profile.misc_counts[i] > 0) { has_misc = true; break; }
+        if (profile.misc_counts[i] > 0) {
+            has_misc = true;
+            break;
+        }
     }
     if (has_misc) {
         w.print("\nMisc opcodes (0xFC prefix):\n", .{}) catch {};
@@ -1311,7 +1314,10 @@ fn cmdBatch(allocator: Allocator, wasm_bytes: []const u8, imports: []const types
             // (after set_main, the original main needs to remain accessible)
             var already_tracked = false;
             for (dyn_modules.items) |dm| {
-                if (dm == main_module) { already_tracked = true; break; }
+                if (dm == main_module) {
+                    already_tracked = true;
+                    break;
+                }
             }
             if (!already_tracked) {
                 dyn_names.append(allocator, reg_name) catch {};
@@ -1419,11 +1425,17 @@ fn cmdBatch(allocator: Allocator, wasm_bytes: []const u8, imports: []const types
             // Find the target module
             var t_module: ?*types.WasmModule = null;
             for (dyn_names.items, dyn_modules.items) |dn, dm| {
-                if (std.mem.eql(u8, dn, t_mod_name)) { t_module = dm; break; }
+                if (std.mem.eql(u8, dn, t_mod_name)) {
+                    t_module = dm;
+                    break;
+                }
             }
             if (t_module == null) {
                 for (link_names, linked_modules) |ln, lm| {
-                    if (std.mem.eql(u8, ln, t_mod_name)) { t_module = lm; break; }
+                    if (std.mem.eql(u8, ln, t_mod_name)) {
+                        t_module = lm;
+                        break;
+                    }
                 }
             }
             if (t_module == null) {
@@ -1726,7 +1738,10 @@ fn cmdBatch(allocator: Allocator, wasm_bytes: []const u8, imports: []const types
                         break;
                     };
                     arg_count += 1;
-                    if (arg_count >= arg_buf.len) { arg_err = true; break; }
+                    if (arg_count >= arg_buf.len) {
+                        arg_err = true;
+                        break;
+                    }
                     arg_buf[arg_count] = std.fmt.parseInt(u64, v128_data[colon + 1 ..], 10) catch {
                         arg_err = true;
                         break;
