@@ -23,18 +23,23 @@ Session handover document. Read at session start.
 Checklist: `@./.dev/checklist-jit-fuel-timeout.md`
 PR review: `@./private/pr6-timeout-review.md`
 
-### Phase A: Fix JIT fuel bypass (branch: `fix/jit-fuel-bypass`)
+### Phase A: Fix JIT fuel bypass (branch: `fix/jit-fuel-bypass`) — DONE
 - [x] A1. Add `jitSuppressed()` — suppress JIT when `fuel != null` (6 locations in vm.zig)
 - [x] A2. Test: infinite loop with fuel=1M terminates (`30_infinite_loop.wasm`)
-- [ ] A3. Commit Gate: `zig build test` pass, spec/e2e/realworld/bench (running)
-- [ ] A4. Merge Gate (Mac + Ubuntu)
+- [x] A3. Commit Gate: all pass (spec 62263/0, e2e 792/0, compat 50/0)
+- [x] A4. Merge Gate (Mac + Ubuntu) — merged to main (fec8d99)
 
-### Phase B: Merge timeout support (PR #6 + additions)
-- [ ] B1. Apply PR #6 changes (TimeoutExceeded, deadline, consumeInstructionBudget)
-- [ ] B2. Add `--timeout <ms>` CLI option
-- [ ] B3. Tests + verify with JIT enabled
-- [ ] B4. Commit + Merge Gate
-- [ ] B5. Comment on PR #6, credit DeanoC
+### Phase B: Merge timeout support (PR #6 + additions) — DONE
+- [x] B1. Apply PR #6 changes (TimeoutExceeded, deadline, consumeInstructionBudget)
+- [x] B2. Add `--timeout <ms>` CLI option
+- [x] B3. Tests + verify with JIT enabled (deadline JIT suppression)
+- [x] B4. Commit + Merge Gate (Mac + Ubuntu, all pass)
+- [x] B5. PR #6 merged (c4b9196), DeanoC credited as original author
+
+### Phase C: CI benchmark fix (branch: `fix/ci-bench-worktree`)
+- [ ] C1. `ci_compare.sh`: git worktree instead of checkout (fork PR safe)
+- [ ] C2. CI: benchmark on main push too (record-only mode)
+- [ ] C3. Commit + push
 
 ## Handover Notes
 

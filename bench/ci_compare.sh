@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 # CI benchmark regression detection.
 #
-# Runs a fast benchmark subset on both main and the current branch,
-# then compares. Fails if any benchmark regresses by more than the
-# threshold (default 20%).
+# Runs a fast benchmark subset on both the base branch and the current HEAD,
+# then compares. Fails if any benchmark regresses by more than the threshold.
+#
+# Uses git worktree for the base build — never touches the current working tree.
+# Safe for fork PRs and any branch topology.
 #
 # Usage:
 #   bash bench/ci_compare.sh                    # compare HEAD vs main
-#   bash bench/ci_compare.sh --base=main        # explicit base branch
+#   bash bench/ci_compare.sh --base=origin/main # explicit base ref
 #   bash bench/ci_compare.sh --threshold=25     # 25% regression threshold
+#   bash bench/ci_compare.sh --record-only      # no comparison, just run current
 #
-# Exit: 0 if no regression, 1 if regression detected.
+# Exit: 0 if no regression (or --record-only), 1 if regression detected.
 
 set -euo pipefail
 
@@ -18,17 +21,19 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ZWASM="$PROJECT_DIR/zig-out/bin/zwasm"
 
-BASE_BRANCH="main"
+BASE_REF="origin/main"
 THRESHOLD=20
 RUNS=3
 WARMUP=1
+RECORD_ONLY=false
 
 for arg in "$@"; do
     case "$arg" in
-        --base=*) BASE_BRANCH="${arg#*=}" ;;
+        --base=*) BASE_REF="${arg#*=}" ;;
         --threshold=*) THRESHOLD="${arg#*=}" ;;
         --runs=*) RUNS="${arg#*=}" ;;
         --warmup=*) WARMUP="${arg#*=}" ;;
+        --record-only) RECORD_ONLY=true ;;
     esac
 done
 
@@ -55,13 +60,13 @@ trap "rm -rf $TMPDIR_CI" EXIT
 # Pre-compile all wasm files for cache
 precompile_for_cache() {
     local binary="$1"
+    local wasm_root="$2"
     rm -rf ~/.cache/zwasm/
     declare -A seen
     for entry in "${BENCHMARKS[@]}"; do
         IFS=: read -r _name wasm _func _args kind <<< "$entry"
-        # Only pre-compile for cached variants
         if [[ "$kind" != *_cached ]]; then continue; fi
-        local wasm_path="$PROJECT_DIR/$wasm"
+        local wasm_path="$wasm_root/$wasm"
         if [[ -f "$wasm_path" && -z "${seen[$wasm_path]+x}" ]]; then
             seen["$wasm_path"]=1
             "$binary" compile "$wasm_path" >/dev/null 2>&1 || true
@@ -73,13 +78,13 @@ precompile_for_cache() {
 run_benchmarks() {
     local binary="$1"
     local outfile="$2"
+    local wasm_root="$3"
 
-    # Pre-compile for cached variants
-    precompile_for_cache "$binary"
+    precompile_for_cache "$binary" "$wasm_root"
 
     for entry in "${BENCHMARKS[@]}"; do
         IFS=: read -r name wasm func bench_args kind <<< "$entry"
-        local wasm_path="$PROJECT_DIR/$wasm"
+        local wasm_path="$wasm_root/$wasm"
 
         if [[ ! -f "$wasm_path" ]]; then
             echo "  $name: SKIP (not found)" >&2
@@ -119,49 +124,61 @@ print(round(data['results'][0]['mean'] * 1000, 1))
     done
 }
 
-# Save current state
-CURRENT_BRANCH=$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD)
-CURRENT_COMMIT=$(git -C "$PROJECT_DIR" rev-parse HEAD)
-
 echo "========================================"
 echo "CI Benchmark Regression Detection"
 echo "========================================"
-echo "Current: $CURRENT_BRANCH ($(git -C "$PROJECT_DIR" rev-parse --short HEAD))"
-echo "Base:    $BASE_BRANCH"
+echo "Current: $(git -C "$PROJECT_DIR" rev-parse --short HEAD)"
+echo "Base:    $BASE_REF"
 echo "Threshold: ${THRESHOLD}% regression"
 echo "Runs: $RUNS, Warmup: $WARMUP"
+echo "Record only: $RECORD_ONLY"
 echo ""
 
-# Step 1: Build and benchmark base branch
-echo "[1/3] Benchmarking base ($BASE_BRANCH)..."
-git -C "$PROJECT_DIR" stash -q --include-untracked 2>/dev/null || true
-git -C "$PROJECT_DIR" checkout -q "$BASE_BRANCH"
-(cd "$PROJECT_DIR" && zig build -Doptimize=ReleaseSafe 2>&1 | tail -1)
-cp "$ZWASM" "$TMPDIR_CI/zwasm_base"
-
-BASE_RESULTS="$TMPDIR_CI/base.txt"
-: > "$BASE_RESULTS"
-run_benchmarks "$TMPDIR_CI/zwasm_base" "$BASE_RESULTS"
-echo "  Done."
-echo ""
-
-# Step 2: Build and benchmark current branch
-echo "[2/3] Benchmarking current ($CURRENT_BRANCH)..."
-git -C "$PROJECT_DIR" checkout -q "$CURRENT_COMMIT"
-git -C "$PROJECT_DIR" stash pop -q 2>/dev/null || true
-(cd "$PROJECT_DIR" && zig build -Doptimize=ReleaseSafe 2>&1 | tail -1)
+# Step 1: Build and benchmark current HEAD
+echo "[1/3] Building and benchmarking current HEAD..."
+(cd "$PROJECT_DIR" && zig build -Doptimize=ReleaseSafe)
 
 CURRENT_RESULTS="$TMPDIR_CI/current.txt"
 : > "$CURRENT_RESULTS"
-run_benchmarks "$ZWASM" "$CURRENT_RESULTS"
+run_benchmarks "$ZWASM" "$CURRENT_RESULTS" "$PROJECT_DIR"
 echo "  Done."
 echo ""
+
+# Print current results
+echo "  Current results:"
+while IFS=' ' read -r name time_ms; do
+    printf "    %-20s %8s ms\n" "$name" "$time_ms"
+done < "$CURRENT_RESULTS"
+echo ""
+
+if [[ "$RECORD_ONLY" == "true" ]]; then
+    echo "========================================"
+    echo "RECORD ONLY: Benchmarks recorded, no comparison."
+    exit 0
+fi
+
+# Step 2: Build base in a worktree (never touches current working tree)
+echo "[2/3] Building base ($BASE_REF) in worktree..."
+BASE_WORKTREE="$TMPDIR_CI/base-worktree"
+git -C "$PROJECT_DIR" worktree add -q "$BASE_WORKTREE" "$BASE_REF" 2>&1
+
+(cd "$BASE_WORKTREE" && zig build -Doptimize=ReleaseSafe)
+cp "$BASE_WORKTREE/zig-out/bin/zwasm" "$TMPDIR_CI/zwasm_base"
+# Use base worktree for wasm files (they may differ between branches)
+BASE_RESULTS="$TMPDIR_CI/base.txt"
+: > "$BASE_RESULTS"
+run_benchmarks "$TMPDIR_CI/zwasm_base" "$BASE_RESULTS" "$BASE_WORKTREE"
+echo "  Done."
+echo ""
+
+# Clean up worktree
+git -C "$PROJECT_DIR" worktree remove -f "$BASE_WORKTREE" 2>/dev/null || true
 
 # Step 3: Compare
 echo "[3/3] Comparing results..."
 echo ""
-printf "  %-16s %10s %10s %8s  %s\n" "Benchmark" "Base(ms)" "PR(ms)" "Change" "Status"
-printf "  %-16s %10s %10s %8s  %s\n" "---------" "--------" "------" "------" "------"
+printf "  %-20s %10s %10s %8s  %s\n" "Benchmark" "Base(ms)" "PR(ms)" "Change" "Status"
+printf "  %-20s %10s %10s %8s  %s\n" "---------" "--------" "------" "------" "------"
 
 regressions=0
 
@@ -198,7 +215,7 @@ else:
         status="ok"
     fi
 
-    printf "  %-16s %10s %10s %8s  %s\n" "$name" "$base_ms" "$current_ms" "$change" "$status"
+    printf "  %-20s %10s %10s %8s  %s\n" "$name" "$base_ms" "$current_ms" "$change" "$status"
 done < "$BASE_RESULTS"
 
 echo ""

@@ -197,7 +197,6 @@ jobs:
         run: zig build test -Djit=false -Dcomponent=false -Dwat=false
 
   benchmark:
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -215,4 +214,9 @@ jobs:
           sudo dpkg -i /tmp/hyperfine.deb
 
       - name: Benchmark regression check
+        if: github.event_name == 'pull_request'
         run: bash bench/ci_compare.sh --base=origin/main --threshold=20 --runs=3 --warmup=1
+
+      - name: Benchmark record (main push)
+        if: github.event_name == 'push'
+        run: bash bench/ci_compare.sh --record-only --runs=3 --warmup=1
