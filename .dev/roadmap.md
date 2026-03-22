@@ -160,6 +160,35 @@ Largest technical challenge.
 
 **Gate**: Windows x86_64 all tests pass. 3-OS CI complete.
 
+### Phase 19: JIT Reliability (2 days)
+
+Make JIT a verifiably correct optimization layer over the interpreter.
+Principle: interpreter is the source of truth; JIT must produce identical results.
+All changes incremental — no existing behavior removed, only verification added.
+
+**19.1 Differential Testing Infrastructure**
+
+- Add `force_interpreter` flag to Vm — bypass JIT/RegIR, use stack interpreter
+- Differential test harness: run same function via interpreter AND JIT, compare results
+- Integrate into spec runner (`--diff` mode), fuzz harness, real-world compat
+- Catches JIT-only bugs (W35, W36 class) automatically
+
+**19.2 JIT Fuel Check at Back-Edges**
+
+- Emit fuel decrement + conditional trampoline exit at loop back-edges
+- ARM64: `ldr x0, [x20, #fuel_offset]; subs x0, x0, #1; str; b.mi exit`
+- x86: `dec qword [vm+fuel_offset]; js exit`
+- Remove `jitSuppressed()` fuel condition (keep profile/deadline suppression initially)
+- Unblocks PR #6 (timeout support)
+
+**19.3 W35 ARM64 JIT OOB Investigation**
+
+- Diff serde_json.wasm between rustc 1.92.0 and 1.93.1
+- Identify wasm opcode pattern that triggers ARM64 JIT miscompilation
+- Create minimal reproducer, fix JIT codegen, unpin CI Rust version
+
+**Gate**: Differential test suite pass. Fuel+JIT coexist. CI Rust unpinned.
+
 ### Phase 18: Book i18n + Lazy Compilation + CLI Extensions (3 days)
 
 **18.1 Book i18n (1 day)**
@@ -197,6 +226,7 @@ JIT deferred to first call. Trampoline → direct jump patch.
 | **v1.4.0** | 5, 8 | C API, conditional compilation, 50+ real-world, WAT parity |
 | **v1.5.0** | 11     | Allocator injection, C API config, embedding docs |
 | **v1.6.0** | 15     | Windows x86_64, 3-OS CI, platform abstraction      |
+| **v1.7.0** | 19     | JIT differential testing, fuel check, W35 fix       |
 | **v2.0.0** | 13     | SIMD JIT (NEON/SSE)                                |
 
 ## Benchmark History

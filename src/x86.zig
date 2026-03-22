@@ -1222,6 +1222,8 @@ pub const Compiler = struct {
     param_count: u16,
     result_count: u16,
     reg_ptr_offset: u32,
+    jit_fuel_offset: u32,
+    fuel_check_patches: std.ArrayList(u32),
     min_memory_bytes: u32,
     known_consts: [128]?u32,
     written_vregs: u128,
@@ -1280,6 +1282,8 @@ pub const Compiler = struct {
             .param_count = 0,
             .result_count = 0,
             .reg_ptr_offset = 0,
+            .jit_fuel_offset = 0,
+            .fuel_check_patches = .empty,
             .min_memory_bytes = 0,
             .known_consts = .{null} ** 128,
             .written_vregs = 0,
@@ -1296,6 +1300,7 @@ pub const Compiler = struct {
         self.pc_map.deinit(self.alloc);
         self.patches.deinit(self.alloc);
         self.error_stubs.deinit(self.alloc);
+        self.fuel_check_patches.deinit(self.alloc);
     }
 
     fn currentOffset(self: *Compiler) u32 {
@@ -1555,6 +1560,32 @@ pub const Compiler = struct {
     // --- Error handling ---
 
     /// Emit conditional error: if condition is true, branch forward to error stub.
+    /// Emit fuel check at a loop back-edge (x86_64).
+    /// push rax / load vm_ptr / SUB [vm+fuel],1 / JS exit / pop rax.
+    /// If JS is taken, the shared fuel exit stub pops rax before returning.
+    fn emitFuelCheck(self: *Compiler) void {
+        // Skip fuel checks when offset is 0 (unit tests without Vm struct)
+        if (self.jit_fuel_offset == 0) return;
+        // push rax (save — may hold live vreg)
+        self.code.append(self.alloc, 0x50) catch {};
+        // Load vm_ptr into rax
+        const vm_slot_disp: i32 = (@as(i32, self.reg_count) + 2) * 8;
+        Enc.loadDisp32(&self.code, self.alloc, .rax, REGS_PTR, vm_slot_disp);
+        const fuel_disp: i32 = @intCast(self.jit_fuel_offset);
+        // SUB QWORD PTR [rax + disp32], 1 — sets SF
+        self.code.append(self.alloc, 0x48) catch {}; // REX.W
+        self.code.append(self.alloc, 0x83) catch {}; // SUB r/m64, imm8
+        self.code.append(self.alloc, 0xA8) catch {}; // ModRM: mod=10, /5, r/m=rax
+        Enc.appendI32(&self.code, self.alloc, fuel_disp);
+        self.code.append(self.alloc, 0x01) catch {}; // imm8 = 1
+        // JS to fuel exit (rax still pushed — exit stub does pop rax)
+        const rel32_off = Enc.jccRel32(&self.code, self.alloc, .s);
+        self.fuel_check_patches.append(self.alloc, rel32_off) catch {};
+        // pop rax (restore on non-exit path)
+        self.code.append(self.alloc, 0x58) catch {};
+        self.scratch_vreg = null;
+    }
+
     fn emitCondError(self: *Compiler, cond: Cond, error_code: u16) void {
         // Jcc rel32 (6 bytes: 0F 8x cd cd cd cd)
         const rel32_off = Enc.jccRel32(&self.code, self.alloc, cond);
@@ -1568,7 +1599,7 @@ pub const Compiler = struct {
 
     /// Emit error stubs at function end and patch forward branches.
     fn emitErrorStubs(self: *Compiler) void {
-        if (self.error_stubs.items.len == 0 and !self.use_guard_pages) return;
+        if (self.error_stubs.items.len == 0 and self.fuel_check_patches.items.len == 0 and !self.use_guard_pages) return;
 
         // Shared error epilogue: restore callee-saved, return with RAX=error_code
         const shared_exit = self.currentOffset();
@@ -1590,6 +1621,19 @@ pub const Compiler = struct {
                 Enc.patchRel32(self.code.items, jmp_patch_off, shared_exit);
                 // Patch original Jcc to point to this stub
                 Enc.patchRel32(self.code.items, stub.rel32_offset, stub_offset);
+            }
+        }
+
+        // Shared fuel-exhausted exit: pop rax (balance push from emitFuelCheck),
+        // set error code, jump to shared exit.
+        if (self.fuel_check_patches.items.len > 0) {
+            const fuel_stub = self.currentOffset();
+            self.code.append(self.alloc, 0x58) catch {}; // pop rax (balance push)
+            Enc.movImm32ToReg(&self.code, self.alloc, .rax, 9);
+            const jmp_off = Enc.jmpRel32(&self.code, self.alloc);
+            Enc.patchRel32(self.code.items, jmp_off, shared_exit);
+            for (self.fuel_check_patches.items) |patch_off| {
+                Enc.patchRel32(self.code.items, patch_off, fuel_stub);
             }
         }
     }
@@ -3246,6 +3290,8 @@ pub const Compiler = struct {
 
             // --- Control flow ---
             regalloc_mod.OP_BR => {
+                // Fuel check at back-edges (target <= current pc)
+                if (instr.operand <= pc.* - 1) self.emitFuelCheck();
                 const patch_off = Enc.jmpRel32(&self.code, self.alloc);
                 self.patches.append(self.alloc, .{
                     .rel32_offset = patch_off,
@@ -3254,6 +3300,8 @@ pub const Compiler = struct {
                 }) catch return false;
             },
             regalloc_mod.OP_BR_IF => {
+                // Fuel check at back-edges
+                if (instr.operand <= pc.* - 1) self.emitFuelCheck();
                 // Branch if rd != 0
                 const cond_reg = self.getOrLoad(instr.rd, SCRATCH);
                 Enc.testRegReg(&self.code, self.alloc, cond_reg, cond_reg);
@@ -3265,6 +3313,8 @@ pub const Compiler = struct {
                 }) catch return false;
             },
             regalloc_mod.OP_BR_IF_NOT => {
+                // Fuel check at back-edges
+                if (instr.operand <= pc.* - 1) self.emitFuelCheck();
                 const cond_reg = self.getOrLoad(instr.rd, SCRATCH);
                 Enc.testRegReg(&self.code, self.alloc, cond_reg, cond_reg);
                 const patch_off = Enc.jccRel32(&self.code, self.alloc, .e);
@@ -4270,6 +4320,7 @@ pub fn compileFunction(
     var compiler = Compiler.init(alloc);
     compiler.use_guard_pages = use_guard_pages;
     compiler.osr_target_pc = osr_target_pc;
+    compiler.jit_fuel_offset = @intCast(@offsetOf(vm_mod.Vm, "jit_fuel"));
     defer compiler.deinit();
 
     return compiler.compile(
@@ -4525,8 +4576,12 @@ test "x86_64 compile and execute loop (simple counter)" {
     defer jit_code.deinit(alloc);
 
     // count(10) = 10
-    var regs: [8]u64 = .{ 10, 0, 0, 0, 0, 0, 0, 0 };
-    try testing.expectEqual(@as(u64, 0), jit_code.entry(&regs, undefined, undefined));
+    // regs layout: [0..3]=vregs, [4]=reg_ptr_addr, [5]=unused, [6]=vm_ptr, [7]=inst_ptr
+    // Fuel check reads vm_ptr from regs[reg_count+2] and accesses vm.jit_fuel.
+    // Provide a real Vm so the fuel decrement doesn't SEGV.
+    var vm = vm_mod.Vm.init(alloc);
+    var regs: [8]u64 = .{ 10, 0, 0, 0, 0, 0, @intFromPtr(&vm), 0 };
+    try testing.expectEqual(@as(u64, 0), jit_code.entry(&regs, @ptrCast(&vm), undefined));
     try testing.expectEqual(@as(u64, 10), regs[0]);
 }
 

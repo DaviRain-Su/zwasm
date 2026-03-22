@@ -4,33 +4,34 @@ Session handover document. Read at session start.
 
 ## Current State
 
-- Stages 0-46 + Phase 1, 3, 5, 8, 11, 15 complete. **v1.5.0** (tagged 48342ab).
+- Stages 0-46 + Phase 1, 3, 5, 8, 11, 15 complete. **v1.6.0** (tagged 503e73a).
 - Spec: 62,263/62,263 Mac+Ubuntu+Windows (100.0%, 0 skip). E2E: 792/792. Real-world: 50/50.
 - Wasm 3.0: all 9 proposals. WASI: 46/46 (100%). WAT parser complete.
 - JIT: Register IR + ARM64/x86_64 (macOS, Linux, Windows x86_64). Size: 1.22MB stripped.
 - **Windows x86_64**: First-class support (D129, PR #8). platform.zig abstraction,
   VEH guard pages, Win64 ABI, HostHandle WASI, Python test runners, CI 3-OS.
-- **C API**: `libzwasm` (.dll/.lib, .dylib/.a, .so/.a) — 25 exported functions (D126).
+- **C API**: `libzwasm` — 25 exported functions (D126). c_allocator + ReleaseSafe default.
+  Issue #11 fixed (Zig GPA PIC bug). 64-test FFI suite via dlopen.
+- **Rust FFI example**: PR #12 merged. edition 2024, CI integrated.
 - **Conditional compilation**: `-Djit=false`, `-Dcomponent=false`, `-Dwat=false` (D127).
-- **main = stable**: v1.5.0. ClojureWasm updated to v1.5.0.
+- **main = stable**: v1.6.0+. ClojureWasm updated to v1.5.0.
 
 ## Current Task
 
-**PR #8 Windows support review + merge** (branch: `fix/pr8-review-fixes`)
+**Phase 19: JIT Reliability — differential testing + fuel check**
 
-- [x] Code review: 26 files, platform.zig / guard.zig / wasi.zig / x86.zig / CI
-- [x] Fix run_compat.py rust_file_io regression (guest path alias)
-- [x] Fix path_filestat_get SYMLINK_NOFOLLOW restoration
-- [x] Fix README Stage 33 duplicate, run_spec.py .exe detection
-- [x] Code quality: VEH constant, HostHandle.close(), fd placeholder docs
-- [x] Doc updates: embedding.md, security.md, roadmap.md, decisions.md (D129)
-- [ ] Merge Gate (Mac + Ubuntu)
-- [ ] Benchmark recording
-- [ ] Push to PR branch → merge via GitHub
+Goal: make JIT a verifiably correct optimization layer over the interpreter.
 
-### Pending: JIT fuel bypass + PR #6 timeout
-Checklist: `@./.dev/checklist-jit-fuel-timeout.md`
-PR review: `@./private/pr6-timeout-review.md`
+- [ ] JIT differential testing infrastructure (interp vs JIT comparison)
+- [ ] JIT fuel/deadline check at back-edges (replaces jitSuppressed())
+- [ ] W35 ARM64 JIT OOB investigation (unpin CI Rust)
+
+### Design Principles
+
+1. **Interpreter = source of truth**. JIT must produce identical results.
+2. **Differential testing** catches JIT-only bugs automatically.
+3. **Incremental**: each step independently committable, all gates pass.
+4. **No existing behavior removed** — only new verification added.
 
 ## Handover Notes
 
@@ -42,6 +43,11 @@ PR review: `@./private/pr6-timeout-review.md`
   - Separate future task. See `@./private/pr6-timeout-review.md` §Fix Options and wasmtime research in `~/Documents/OSS/wasmtime/crates/cranelift/src/func_environ.rs`.
 - **Flaky compat tests**: W36 in checklist.md — `go_crypto_sha256`/`go_regex` intermittent DIFF on base code (pre-existing, likely W35-related).
 
+### Issue #11 root cause (2026-03-22)
+- Zig 0.15 GPA crashes in Debug-mode shared libraries on Linux x86_64 (PIC codegen).
+- Fix: c_allocator (libc malloc) + library builds default to ReleaseSafe.
+- Zig build system also has shuffle bug with same-named artifacts → shared-lib/static-lib split.
+
 ## References
 
 - `@./.dev/roadmap.md` (future phases), `@./.dev/roadmap-archive.md` (completed stages)
@@ -50,4 +56,3 @@ PR review: `@./private/pr6-timeout-review.md`
 - `@./.dev/decisions.md`, `@./.dev/checklist.md`, `@./.dev/spec-support.md`
 - `@./.dev/jit-debugging.md`, `@./.dev/bench-strategy.md`
 - External: wasmtime (`~/Documents/OSS/wasmtime/`), zware (`~/Documents/OSS/zware/`)
-

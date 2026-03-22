@@ -457,6 +457,15 @@ pub const WasmModule = struct {
         try self.vm.invoke(&self.instance, name, args, results);
     }
 
+    /// Invoke using only the stack-based interpreter, bypassing RegIR and JIT.
+    /// Used by differential testing to get a reference result.
+    pub fn invokeInterpreterOnly(self: *WasmModule, name: []const u8, args: []u64, results: []u64) !void {
+        self.vm.reset();
+        self.vm.force_interpreter = true;
+        defer self.vm.force_interpreter = false;
+        try self.vm.invoke(&self.instance, name, args, results);
+    }
+
     /// Read bytes from linear memory at the given offset.
     /// The returned slice is owned by the caller and must be freed with `allocator`.
     pub fn memoryRead(self: *WasmModule, allocator: Allocator, offset: u32, length: u32) ![]const u8 {

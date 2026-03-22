@@ -269,6 +269,11 @@ const a64 = struct {
         return 0xD1000000 | (@as(u32, imm12) << 10) | (@as(u32, rn) << 5) | rd;
     }
 
+    /// SUBS Xd, Xn, #imm12 (64-bit, sets flags)
+    fn subsImm64(rd: u5, rn: u5, imm12: u12) u32 {
+        return 0xF1000000 | (@as(u32, imm12) << 10) | (@as(u32, rn) << 5) | rd;
+    }
+
     /// SUB Wd, Wn, #imm12 (32-bit)
     fn subImm32(rd: u5, rn: u5, imm12: u12) u32 {
         return 0x51000000 | (@as(u32, imm12) << 10) | (@as(u32, rn) << 5) | rd;
@@ -887,6 +892,8 @@ pub const Compiler = struct {
     patches: std.ArrayList(Patch),
     /// Error stubs: branch-to-error sites to be patched at end of function.
     error_stubs: std.ArrayList(ErrorStub),
+    /// Branch indices from fuel checks — all patched to a single shared fuel exit.
+    fuel_check_branches: std.ArrayList(u32),
     alloc: Allocator,
     reg_count: u16,
     local_count: u16,
@@ -916,6 +923,7 @@ pub const Compiler = struct {
     param_count: u16,
     result_count: u16,
     reg_ptr_offset: u32,
+    jit_fuel_offset: u32,
     min_memory_bytes: u32,
     /// Bitmask of vregs that need loading in the prologue.
     /// Bit N = 1 means vreg N is read before written and must be loaded.
@@ -993,6 +1001,7 @@ pub const Compiler = struct {
             .pc_map = .empty,
             .patches = .empty,
             .error_stubs = .empty,
+            .fuel_check_branches = .empty,
             .alloc = alloc,
             .reg_count = 0,
             .local_count = 0,
@@ -1016,6 +1025,7 @@ pub const Compiler = struct {
             .param_count = 0,
             .result_count = 0,
             .reg_ptr_offset = 0,
+            .jit_fuel_offset = 0,
             .min_memory_bytes = 0,
             .prologue_load_mask = 0xFFFFF, // default: load all (20 vregs)
             .known_consts = .{null} ** 128,
@@ -1041,6 +1051,7 @@ pub const Compiler = struct {
         self.pc_map.deinit(self.alloc);
         self.patches.deinit(self.alloc);
         self.error_stubs.deinit(self.alloc);
+        self.fuel_check_branches.deinit(self.alloc);
     }
 
     fn emit(self: *Compiler, inst: u32) void {
@@ -2381,6 +2392,8 @@ pub const Compiler = struct {
             regalloc_mod.OP_BR => {
                 self.fpCacheEvictAll();
                 const target = instr.operand;
+                // Fuel check at back-edges (target <= current pc)
+                if (target <= pc.* - 1) self.emitFuelCheck();
                 const arm_idx = self.currentIdx();
                 self.emit(a64.b(0)); // placeholder
                 self.patches.append(self.alloc, .{
@@ -2391,6 +2404,8 @@ pub const Compiler = struct {
             },
             regalloc_mod.OP_BR_IF => {
                 self.fpCacheEvictAll();
+                // Fuel check at back-edges (before the conditional branch)
+                if (instr.operand <= pc.* - 1) self.emitFuelCheck();
                 // Branch if rd != 0
                 const cond_reg = self.getOrLoad(instr.rd, SCRATCH);
                 const arm_idx = self.currentIdx();
@@ -2403,6 +2418,8 @@ pub const Compiler = struct {
             },
             regalloc_mod.OP_BR_IF_NOT => {
                 self.fpCacheEvictAll();
+                // Fuel check at back-edges
+                if (instr.operand <= pc.* - 1) self.emitFuelCheck();
                 const cond_reg = self.getOrLoad(instr.rd, SCRATCH);
                 const arm_idx = self.currentIdx();
                 self.emit(a64.cbz32(cond_reg, 0)); // placeholder
@@ -3305,6 +3322,40 @@ pub const Compiler = struct {
         }
         self.emit(a64.msub64(d, d, rs2, rs1));
         self.storeVreg(instr.rd, d);
+    }
+
+    /// Emit fuel check at a loop back-edge.
+    /// Decrements jit_fuel in the VM struct; if negative, branches to a shared
+    /// fuel-exhausted exit (emitted once at end of function by emitErrorStubs).
+    fn emitFuelCheck(self: *Compiler) void {
+        // Skip when offset is 0 (unit tests without Vm struct)
+        if (self.jit_fuel_offset == 0) return;
+        // Load vm_ptr → SCRATCH (x8)
+        self.emitLoadVmPtr(SCRATCH);
+        const fuel_reg: u5 = 0; // x0: safe — not mapped to any vreg
+        // Compute address of jit_fuel: ADD SCRATCH, SCRATCH, #offset
+        // jit_fuel offset exceeds u16 (Vm struct is >500KB), so use ADD imm.
+        const fuel_off = self.jit_fuel_offset;
+        // ADD can encode up to 12-bit immediate (4095). If larger, use two-step.
+        if (fuel_off <= 4095) {
+            self.emit(a64.addImm64(SCRATCH, SCRATCH, @intCast(fuel_off)));
+        } else {
+            // MOVZ x0, #(fuel_off & 0xFFFF), LSL#0
+            self.emit(a64.movz64(fuel_reg, @truncate(fuel_off), 0));
+            if (fuel_off > 0xFFFF) {
+                self.emit(a64.movk64(fuel_reg, @truncate(fuel_off >> 16), 1));
+            }
+            self.emit(a64.add64(SCRATCH, SCRATCH, fuel_reg));
+        }
+        // Now SCRATCH points to &vm.jit_fuel
+        self.emit(a64.ldr64(fuel_reg, SCRATCH, 0));
+        self.emit(a64.subsImm64(fuel_reg, fuel_reg, 1));
+        self.emit(a64.str64(fuel_reg, SCRATCH, 0));
+        self.scratch_vreg = null;
+        // Branch to shared fuel exit (patched in emitErrorStubs)
+        const branch_idx = self.currentIdx();
+        self.emit(a64.bCond(.mi, 0)); // placeholder
+        self.fuel_check_branches.append(self.alloc, branch_idx) catch {};
     }
 
     /// Emit conditional error: if condition is true, branch to shared error stub.
@@ -4652,7 +4703,7 @@ pub const Compiler = struct {
     /// Emit error stubs and shared error epilogue at end of function.
     /// Each error site branches to a stub that sets x0 and jumps to shared exit.
     fn emitErrorStubs(self: *Compiler) void {
-        if (self.error_stubs.items.len == 0 and !self.use_guard_pages) return;
+        if (self.error_stubs.items.len == 0 and self.fuel_check_branches.items.len == 0 and !self.use_guard_pages) return;
 
         // Shared error epilogue: restore callee-saved regs and return (x0 has error code)
         const shared_exit = self.currentIdx();
@@ -4688,6 +4739,22 @@ pub const Compiler = struct {
                     },
                     .cbnz64 => unreachable, // condition errors always use b_cond
                 }
+            }
+        }
+
+        // Emit shared fuel-exhausted exit and patch all fuel check branches.
+        // Single stub: MOVZ x0, #9 + B shared_exit. All back-edge checks branch here.
+        if (self.fuel_check_branches.items.len > 0) {
+            const fuel_stub_idx = self.currentIdx();
+            self.emit(a64.movz64(0, 9, 0)); // x0 = 9 (FuelExhausted)
+            const exit_offset: i26 = @intCast(@as(i32, @intCast(shared_exit)) - @as(i32, @intCast(self.currentIdx())));
+            self.emit(a64.b(exit_offset));
+
+            // Patch all fuel check B.MI branches to point to this stub
+            for (self.fuel_check_branches.items) |branch_idx| {
+                const offset: i32 = @as(i32, @intCast(fuel_stub_idx)) - @as(i32, @intCast(branch_idx));
+                const imm: u19 = @bitCast(@as(i19, @intCast(offset)));
+                self.code.items[branch_idx] = 0x54000000 | (@as(u32, imm) << 5) | @as(u32, @intFromEnum(a64.Cond.mi));
             }
         }
     }
@@ -5199,6 +5266,7 @@ pub fn compileFunction(
     compiler.use_guard_pages = use_guard_pages;
     compiler.osr_target_pc = osr_target_pc;
     compiler.gc_trampoline_addr = gc_trampoline_addr;
+    compiler.jit_fuel_offset = @intCast(@offsetOf(vm_mod.Vm, "jit_fuel"));
 
     // Dump JIT code before deinit (pc_map still alive, one-shot)
     if (trace) |tc| {
