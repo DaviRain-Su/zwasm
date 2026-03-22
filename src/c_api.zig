@@ -8,9 +8,9 @@
 //! layout. Error messages are stored in a thread-local buffer accessible
 //! via `zwasm_last_error_message()`.
 //!
-//! Allocator strategy: Each CApiModule owns a GeneralPurposeAllocator,
-//! heap-allocated via page_allocator so its address is stable. The GPA
-//! provides the allocator for WasmModule and all its internal state.
+//! Allocator strategy: The C API uses libc malloc (c_allocator) as the
+//! default backing allocator for WasmModule and all its internal state.
+//! Custom allocators can be injected via zwasm_config_t.
 
 const std = @import("std");
 const types = @import("types.zig");
@@ -97,20 +97,22 @@ const CApiConfig = struct {
 pub const zwasm_config_t = CApiConfig;
 
 // ============================================================
-// Internal wrapper — GPA + WasmModule co-located
+// Internal wrapper — allocator + WasmModule co-located
 // ============================================================
 
-const Gpa = std.heap.GeneralPurposeAllocator(.{});
+// Zig 0.15's GeneralPurposeAllocator crashes in Debug-mode shared
+// libraries on Linux x86_64 (PIC codegen issue, see GitHub #11).
+// The C API uses libc malloc (c_allocator) as the default backing
+// allocator, which is correct for a library loaded via dlopen/ctypes.
+// GPA is only used when running Zig tests (leak detection).
+const default_allocator = std.heap.c_allocator;
 
-/// Internal wrapper owning both the GPA and WasmModule.
+/// Internal wrapper owning a WasmModule.
 /// Heap-allocated via page_allocator for address stability.
 ///
-/// When a custom allocator is injected via zwasm_config_t, gpa is unused
-/// and the custom allocator handles all allocations. The `owns_gpa` flag
-/// tracks whether we need to deinit gpa.
+/// When a custom allocator is injected via zwasm_config_t, that
+/// allocator is used instead of the default.
 const CApiModule = struct {
-    gpa: Gpa,
-    owns_gpa: bool,
     module: *WasmModule,
 
     fn create(wasm_bytes: []const u8, wasi: bool) !*CApiModule {
@@ -121,15 +123,7 @@ const CApiModule = struct {
         const self = try std.heap.page_allocator.create(CApiModule);
         errdefer std.heap.page_allocator.destroy(self);
 
-        const allocator = if (custom_alloc) |ca| blk: {
-            self.gpa = .{};
-            self.owns_gpa = false;
-            break :blk ca;
-        } else blk: {
-            self.gpa = .{};
-            self.owns_gpa = true;
-            break :blk self.gpa.allocator();
-        };
+        const allocator = custom_alloc orelse default_allocator;
 
         self.module = if (wasi)
             try WasmModule.loadWasi(allocator, wasm_bytes)
@@ -146,15 +140,7 @@ const CApiModule = struct {
         const self = try std.heap.page_allocator.create(CApiModule);
         errdefer std.heap.page_allocator.destroy(self);
 
-        const allocator = if (custom_alloc) |ca| blk: {
-            self.gpa = .{};
-            self.owns_gpa = false;
-            break :blk ca;
-        } else blk: {
-            self.gpa = .{};
-            self.owns_gpa = true;
-            break :blk self.gpa.allocator();
-        };
+        const allocator = custom_alloc orelse default_allocator;
 
         self.module = try WasmModule.loadWasiWithOptions(allocator, wasm_bytes, opts);
         return self;
@@ -163,16 +149,12 @@ const CApiModule = struct {
     fn createWithImports(wasm_bytes: []const u8, imports: []const types.ImportEntry) !*CApiModule {
         const self = try std.heap.page_allocator.create(CApiModule);
         errdefer std.heap.page_allocator.destroy(self);
-        self.gpa = .{};
-        self.owns_gpa = true;
-        const allocator = self.gpa.allocator();
-        self.module = try WasmModule.loadWithImports(allocator, wasm_bytes, imports);
+        self.module = try WasmModule.loadWithImports(default_allocator, wasm_bytes, imports);
         return self;
     }
 
     fn destroy(self: *CApiModule) void {
         self.module.deinit();
-        if (self.owns_gpa) _ = self.gpa.deinit();
         std.heap.page_allocator.destroy(self);
     }
 };
@@ -392,9 +374,7 @@ export fn zwasm_module_delete(module: *zwasm_module_t) void {
 /// Returns true if valid, false if invalid or malformed.
 export fn zwasm_module_validate(wasm_ptr: [*]const u8, len: usize) bool {
     clearError();
-    var gpa = Gpa{};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const allocator = default_allocator;
     const validate = types.runtime.validateModule;
     var module = types.runtime.Module.init(allocator, wasm_ptr[0..len]);
     defer module.deinit();
@@ -906,7 +886,7 @@ const MEMORY_WASM = "\x00\x61\x73\x6d\x01\x00\x00\x00" ++
     "\x01\x04\x01\x60\x00\x00" ++ // type: () -> ()
     "\x03\x02\x01\x00" ++ // func section
     "\x05\x03\x01\x00\x01" ++ // memory: min=0, max=1
-    "\x07\x0d\x02\x01\x6d\x02\x00" ++ // export "m" = memory 0
+    "\x07\x09\x02\x01\x6d\x02\x00" ++ // export "m" = memory 0
     "\x01\x66\x00\x00" ++ // export "f" = func 0
     "\x0a\x0b\x01\x09\x00\x41\x00\x41\x2a\x36\x02\x00\x0b"; // code: i32.const 0, i32.const 42, i32.store, end
 

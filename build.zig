@@ -143,10 +143,15 @@ pub fn build(b: *std.Build) void {
     }
 
     // Shared library (libzwasm.dylib / libzwasm.so)
+    // Default to ReleaseSafe: Zig 0.15's Debug-mode shared libraries
+    // crash on Linux x86_64 due to GPA/PIC codegen issues (see #11).
+    // Users embedding zwasm want optimized code anyway.
+    const lib_optimize = b.option(bool, "lib-debug", "Build libraries in Debug mode (default: false)") orelse false;
     const lib_shared_mod = b.createModule(.{
         .root_source_file = b.path("src/c_api.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = if (lib_optimize) optimize else if (optimize == .Debug) .ReleaseSafe else optimize,
+        .link_libc = true,
     });
     lib_shared_mod.addOptions("build_options", options);
     const lib_shared = b.addLibrary(.{
@@ -160,7 +165,8 @@ pub fn build(b: *std.Build) void {
     const lib_static_mod = b.createModule(.{
         .root_source_file = b.path("src/c_api.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = if (lib_optimize) optimize else if (optimize == .Debug) .ReleaseSafe else optimize,
+        .link_libc = true,
     });
     lib_static_mod.addOptions("build_options", options);
     const lib_static = b.addLibrary(.{
@@ -170,10 +176,18 @@ pub fn build(b: *std.Build) void {
     });
     lib_static.installHeader(b.path("include/zwasm.h"), "zwasm.h");
 
+    // Separate steps to avoid Zig 0.15.2 build graph shuffle bug
+    // when two same-named artifacts are in the same step.
+    const shared_lib_step = b.step("shared-lib", "Build shared library (libzwasm.so/.dylib)");
+    shared_lib_step.dependOn(&b.addInstallArtifact(lib_shared, .{}).step);
+
+    const static_lib_step = b.step("static-lib", "Build static library (libzwasm.a)");
+    static_lib_step.dependOn(&b.addInstallArtifact(lib_static, .{}).step);
+
     // "lib" step builds both shared and static libraries
     const lib_step = b.step("lib", "Build shared and static libraries");
-    lib_step.dependOn(&b.addInstallArtifact(lib_shared, .{}).step);
-    lib_step.dependOn(&b.addInstallArtifact(lib_static, .{}).step);
+    lib_step.dependOn(shared_lib_step);
+    lib_step.dependOn(static_lib_step);
 
     // C API test executables (link against static library)
     const c_tests = [_]struct { name: []const u8, src: []const u8 }{
