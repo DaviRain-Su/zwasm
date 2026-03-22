@@ -89,11 +89,13 @@ When in doubt, **continue**.
    (Required when modifying interpreter/opcodes)
 4. **Real-world compat**: `bash test/realworld/run_compat.sh` — PASS=50, FAIL=0, CRASH=0
    (Required when modifying vm/wasi/JIT)
-5. **Benchmarks**: Required for optimization/JIT tasks.
+5. **FFI tests**: `bash test/c_api/run_ffi_test.sh --build` — 0 failed
+   (Required when modifying c_api.zig, build.zig lib targets, or include/zwasm.h)
+6. **Benchmarks**: Required for optimization/JIT tasks.
    - Quick check: `bash bench/run_bench.sh --quick`
    - **Record**: `bash bench/record.sh --id=ID --reason="REASON"` (appends to history.yaml)
-6. **Size guard**: Binary ≤ 1.5MB (stripped), memory ≤ 4.5MB RSS
-7. **decisions.md / checklist.md / spec-support.md / memo.md**: Update as needed
+7. **Size guard**: Binary ≤ 1.5MB (stripped), memory ≤ 4.5MB RSS
+8. **decisions.md / checklist.md / spec-support.md / memo.md**: Update as needed
 
 ### Merge Gate Checklist
 
@@ -102,6 +104,7 @@ When in doubt, **continue**.
 - `python3 test/spec/run_spec.py --build --summary` — fail=0, skip=0
 - `bash test/e2e/run_e2e.sh --convert --summary` — fail=0, leak=0
 - `bash test/realworld/run_compat.sh` — PASS=50, FAIL=0, CRASH=0
+- `bash test/c_api/run_ffi_test.sh --build` — 0 failed
 - Benchmarks pass (no regression)
 Fix root cause before merging if Ubuntu reveals new failures.
 
