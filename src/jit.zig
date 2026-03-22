@@ -2748,7 +2748,7 @@ pub const Compiler = struct {
             0x38 => self.emitMemStore(instr, .w32, 4),  // f32.store
             0x39 => self.emitFpMemStore64(instr),         // f64.store → FP cache direct
             0x3A => self.emitMemStore(instr, .b8, 1),   // i32.store8
-            0x3B => self.emitMemStore(instr, .h16, 1),  // i32.store16
+            0x3B => self.emitMemStore(instr, .h16, 2),  // i32.store16
             0x3C => self.emitMemStore(instr, .b8, 1),   // i64.store8
             0x3D => self.emitMemStore(instr, .h16, 2),  // i64.store16
             0x3E => self.emitMemStore(instr, .w32, 4),  // i64.store32
@@ -3448,8 +3448,8 @@ pub const Compiler = struct {
         // Fast path: const-addr with guaranteed in-bounds → skip bounds check
         if (self.isConstAddrSafe(instr.rs1, instr.operand, access_size)) |eff_addr| {
             self.emitLoadImm(SCRATCH, eff_addr);
-            const val_reg = self.getOrLoad(instr.rd, SCRATCH2);
-            self.emit(emitStoreInstr(kind, val_reg, MEM_BASE, SCRATCH));
+            const val_reg2 = self.getOrLoad(instr.rd, SCRATCH2);
+            self.emit(emitStoreInstr(kind, val_reg2, MEM_BASE, SCRATCH));
             self.scratch_vreg = null;
             return;
         }
@@ -3590,11 +3590,13 @@ pub const Compiler = struct {
     fn emitGlobalSet(self: *Compiler, instr: RegInstr) void {
         self.fpCacheEvictAll();
         self.spillCallerSaved();
-        // Args: x0 = instance, w1 = global_idx, x2 = value
-        self.emitLoadInstPtr(0);
-        self.emit(a64.movz32(1, @truncate(instr.operand), 0));
+        // Read value FIRST — ABI arg setup clobbers x0/x1 which are vregs r20/r21
+        // when reg_count > 20. Reading after movz32(1,...) would get the clobbered value.
         const val_reg = self.getOrLoad(instr.rd, SCRATCH);
         self.emit(a64.mov64(2, val_reg));
+        // Args: x0 = instance, w1 = global_idx, x2 = value (already set)
+        self.emitLoadInstPtr(0);
+        self.emit(a64.movz32(1, @truncate(instr.operand), 0));
         // Call jitGlobalSet
         const addr_instrs = a64.loadImm64(SCRATCH, self.global_set_addr);
         for (addr_instrs) |inst| self.emit(inst);
