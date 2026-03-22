@@ -181,13 +181,18 @@ All changes incremental — no existing behavior removed, only verification adde
 - Remove `jitSuppressed()` fuel condition (keep profile/deadline suppression initially)
 - Unblocks PR #6 (timeout support)
 
-**19.3 W35 ARM64 JIT OOB Investigation**
+**19.3 W35 Interpreter OOB Fix** (reclassified: was "ARM64 JIT OOB")
 
-- Diff serde_json.wasm between rustc 1.92.0 and 1.93.1
-- Identify wasm opcode pattern that triggers ARM64 JIT miscompilation
-- Create minimal reproducer, fix JIT codegen, unpin CI Rust version
+Originally diagnosed as JIT-only, confirmed as **interpreter correctness bug**
+(2026-03-22). Both `--interp` and JIT crash; wasmtime runs correctly.
+Triggered by wasm codegen patterns new in rustc 1.93.1.
 
-**Gate**: Differential test suite pass. Fuel+JIT coexist. CI Rust unpinned.
+- wasm-tools dump diff (1.92.0 vs 1.93.1) → identify new patterns
+- Binary search: which wasm function causes OOB? (strip/tracing)
+- Minimal reproducer (.wat) → fix interpreter → verify JIT also fixed
+- Unpin CI Rust version, verify real-world 50/50
+
+**Gate**: serde_json 1.93.1 passes on zwasm. CI Rust unpinned. Spec/E2E/compat all pass.
 
 ### Phase 18: Book i18n + Lazy Compilation + CLI Extensions (3 days)
 

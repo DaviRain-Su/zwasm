@@ -23,16 +23,36 @@ Prefix: W## (to distinguish from CW's F## items).
   Fix: corrected expected hash for "Hello, SHA-256!" in main.go.
   50/50 PASS (go_crypto_sha256 + go_regex) after fix. No JIT bug.
 
-- [ ] W35: ARM64 JIT OOB memory access with rustc 1.93.1 / Go 1.26.0 wasm
-  Symptom: OOB trap in JIT-compiled code. Works without JIT (interpreter).
-  Works on x86_64 JIT. Only ARM64 JIT affected.
-  Triggered by wasm codegen differences in newer compiler versions.
-  CI pinned to Rust 1.92.0 as workaround. Go not installed on macOS CI.
-  Reproduce: `rustup run 1.93.1 cargo build` serde_json, run with zwasm ARM64.
+- [ ] W35: OOB in serde_json built with rustc 1.93.1 — **INTERPRETER BUG, NOT JIT**
+  **2026-03-22 update**: Both `--interp` and JIT crash with OOB. wasmtime runs
+  correctly. The original diagnosis "JIT-only" was wrong — it's an interpreter
+  correctness bug triggered by wasm patterns new in rustc 1.93.1 codegen.
+  `--interp` crashes earlier (2 lines output), JIT gets further (6 lines).
+  CI pinned to Rust 1.92.0 as workaround.
+
+  Reproduce:
+  ```bash
+  cd test/realworld/rust/serde_json
+  rustup run 1.93.1 cargo build --release --target wasm32-wasip1
+  cp target/wasm32-wasip1/release/serde_json.wasm /tmp/serde_json_1.93.wasm
+  # Both crash:
+  ./zig-out/bin/zwasm run /tmp/serde_json_1.93.wasm          # OOB at "nested"
+  ./zig-out/bin/zwasm run --interp /tmp/serde_json_1.93.wasm # OOB at "scores"
+  # Reference (correct):
+  wasmtime /tmp/serde_json_1.93.wasm                         # full output, exit 0
+  ```
+
+  Investigation plan (Phase 19.3):
+  1. `wasm-tools dump` diff between 1.92.0 and 1.93.1 → new opcode patterns
+  2. Binary search the wasm functions: which function causes OOB?
+     - Use `wasm-tools strip` / `wasm-tools mutate` to isolate
+     - Or add per-function tracing in zwasm to find crash PC
+  3. Minimal reproducer (.wat) → fix interpreter → verify JIT also fixed
+  4. Unpin CI Rust, verify real-world 50/50
 
 - [ ] W36: Flaky real-world compat: go_crypto_sha256 / go_regex intermittent DIFF
   Reproduced on base code (no local changes). Non-deterministic — passes ~50% of runs.
-  Likely related to W35 (ARM64 JIT OOB). Not blocking current work.
+  May or may not be related to W35 (both are OOB class).
 
 ## Resolved items (summary, details in git history)
 
