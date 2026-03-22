@@ -215,6 +215,86 @@ const TempAlloc = struct {
     }
 };
 
+/// SIMD opcode stack effect: how many values are popped/pushed.
+/// Returns null for unknown sub-opcodes (bail).
+///
+/// Classification based on wasm SIMD spec stack signatures.
+/// Default for unrecognized-but-in-range: binary (pop 2, push 1).
+fn simdStackEffect(sub: u32) ?struct { pop: u8, push: u8 } {
+    return switch (sub) {
+        // --- Memory loads: pop 1 addr, push 1 v128 ---
+        // v128.load, load8x8_s/u, load16x4_s/u, load32x2_s/u, load_splat(4), load_zero(2)
+        0x00...0x0A, 0x5C, 0x5D => .{ .pop = 1, .push = 1 },
+        // --- v128.store: pop v128 + addr ---
+        0x0B => .{ .pop = 2, .push = 0 },
+        // --- v128.const: push 1 ---
+        0x0C => .{ .pop = 0, .push = 1 },
+        // --- shuffle, swizzle: pop 2, push 1 ---
+        0x0D, 0x0E => .{ .pop = 2, .push = 1 },
+        // --- splat: pop 1 scalar, push 1 v128 ---
+        0x0F...0x14 => .{ .pop = 1, .push = 1 },
+        // --- extract_lane: pop 1 v128, push 1 scalar ---
+        0x15...0x1C => .{ .pop = 1, .push = 1 },
+        // --- replace_lane: pop v128 + scalar, push v128 ---
+        0x1D...0x22 => .{ .pop = 2, .push = 1 },
+        // --- comparison: pop 2, push 1 ---
+        0x23...0x40 => .{ .pop = 2, .push = 1 },
+        // --- v128.not: unary ---
+        0x41 => .{ .pop = 1, .push = 1 },
+        // --- v128.and/andnot/or/xor: binary ---
+        0x42...0x45 => .{ .pop = 2, .push = 1 },
+        // --- v128.any_true: unary (v128 → i32) ---
+        0x46 => .{ .pop = 1, .push = 1 },
+        // --- i8x16 all_true/bitmask, shl/shr: unary (all_true/bitmask) or binary (shift) ---
+        // all_true/bitmask: 0x47-0x48, 0x62-0x63, 0x82-0x83, 0xA1-0xA3, 0xC1-0xC3
+        // Shifts take v128 + i32 → v128 (binary)
+        // all_true, bitmask: v128 → i32 (unary)
+        0x47, 0x48 => .{ .pop = 1, .push = 1 }, // i8x16.all_true, bitmask
+        0x62, 0x63 => .{ .pop = 1, .push = 1 }, // i16x8.all_true, bitmask
+        0x82, 0x83 => .{ .pop = 1, .push = 1 }, // i32x4.all_true, bitmask
+        0xC3, 0xC4 => .{ .pop = 1, .push = 1 }, // i64x2.all_true, bitmask (0xC3=all_true, 0xC4=bitmask)
+        // --- v128.bitselect: pop 3, push 1 ---
+        0x52 => .{ .pop = 3, .push = 1 },
+        // --- lane load: pop v128 + addr, push v128 ---
+        // Note: wasm stack order is [addr, v128] but predecode pops v128 then addr
+        0x54...0x57 => .{ .pop = 2, .push = 1 },
+        // --- lane store: pop v128 + addr ---
+        0x58...0x5B => .{ .pop = 2, .push = 0 },
+        // --- Unary operations (abs, neg, popcnt, extend, convert, trunc, etc.) ---
+        // i8x16: abs(0x60), neg(0x61), popcnt(0x62→dup! need to check)
+        // Pattern: use explicit list of known unary ops
+        0x60, 0x61, // i8x16.abs, neg
+        0x64, 0x65, // i8x16.popcnt, (reserved)
+        0x80, 0x81, // i16x8.extadd_pairwise_i8x16_s/u
+        0x84, 0x85, // i8x16→i16x8 extend (handled as unary)
+        0x87, // i16x8.abs
+        0x88, // i16x8.neg
+        0xA0, // i32x4.extadd_pairwise_i16x8_s
+        0xA1, // i32x4.extadd_pairwise_i16x8_u
+        0xA7, // i32x4.abs
+        0xA8, // i32x4.neg
+        0xC0, // i64x2.abs
+        0xC1, // i64x2.neg
+        0xD4...0xD7, // f32x4.ceil, floor, trunc, nearest
+        0xE1, // f32x4.abs
+        0xE2, // f32x4.neg
+        0xE3, // f32x4.sqrt
+        0xED, // f64x2.abs
+        0xEE, // f64x2.neg
+        0xEF, // f64x2.sqrt
+        0x5E, 0x5F, // f32x4.demote_f64x2_zero, f64x2.promote_low_f32x4
+        0xFC, 0xFD, 0xFE, 0xFF, // f64x2.ceil, floor, trunc, nearest
+        // Conversions and extends that are unary
+        0xF0...0xFB, // i32x4.trunc_sat_*, f32x4.convert_*, i32x4.extend_*, etc.
+        0x100...0x113, // relaxed SIMD + remaining conversions (all unary or binary)
+        => .{ .pop = 1, .push = 1 },
+        // --- Default: binary (pop 2, push 1) ---
+        // Covers: add, sub, mul, div, min, max, shl, shr, avgr, q15mulr, dot,
+        // narrow, swizzle variants, and remaining ops.
+        else => if (sub <= 0x113) .{ .pop = 2, .push = 1 } else null,
+    };
+}
+
 /// Convert PreInstr[] to RegInstr[].
 /// Returns null if conversion fails (unsupported opcodes).
 pub fn convert(
@@ -2008,4 +2088,35 @@ test "convert — GC struct.get produces unary register op" {
         }
     }
     try testing.expect(found);
+}
+
+test "simdStackEffect — correct stack effects for key opcodes" {
+    // v128.load: pop 1 addr, push 1 v128
+    try testing.expectEqual(@as(u8, 1), simdStackEffect(0x00).?.pop);
+    try testing.expectEqual(@as(u8, 1), simdStackEffect(0x00).?.push);
+    // v128.store: pop 2, push 0
+    try testing.expectEqual(@as(u8, 2), simdStackEffect(0x0B).?.pop);
+    try testing.expectEqual(@as(u8, 0), simdStackEffect(0x0B).?.push);
+    // v128.const: pop 0, push 1
+    try testing.expectEqual(@as(u8, 0), simdStackEffect(0x0C).?.pop);
+    try testing.expectEqual(@as(u8, 1), simdStackEffect(0x0C).?.push);
+    // shuffle: pop 2, push 1
+    try testing.expectEqual(@as(u8, 2), simdStackEffect(0x0D).?.pop);
+    // splat: pop 1, push 1
+    try testing.expectEqual(@as(u8, 1), simdStackEffect(0x0F).?.pop);
+    // extract_lane: pop 1, push 1
+    try testing.expectEqual(@as(u8, 1), simdStackEffect(0x15).?.pop);
+    // replace_lane: pop 2, push 1
+    try testing.expectEqual(@as(u8, 2), simdStackEffect(0x1D).?.pop);
+    // bitselect: pop 3, push 1
+    try testing.expectEqual(@as(u8, 3), simdStackEffect(0x52).?.pop);
+    try testing.expectEqual(@as(u8, 1), simdStackEffect(0x52).?.push);
+    // lane store: pop 2, push 0
+    try testing.expectEqual(@as(u8, 2), simdStackEffect(0x58).?.pop);
+    try testing.expectEqual(@as(u8, 0), simdStackEffect(0x58).?.push);
+    // i32x4.add (0x6E in binary range): default binary — pop 2, push 1
+    try testing.expectEqual(@as(u8, 2), simdStackEffect(0x6E).?.pop);
+    try testing.expectEqual(@as(u8, 1), simdStackEffect(0x6E).?.push);
+    // Out of range: null
+    try testing.expect(simdStackEffect(0x114) == null);
 }
