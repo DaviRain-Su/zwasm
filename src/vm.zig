@@ -6827,7 +6827,7 @@ pub const Vm = struct {
                     // JIT compilation + fast execution for hot callees.
                     if (wf.reg_ir) |reg| {
                         if (comptime jit_mod.jitSupported()) {
-                            if (self.profile == null and !self.jitSuppressed() and
+                            if (self.profile == null and !self.jitSuppressed() and !self.force_interpreter and
                                 wf.jit_code == null and !wf.jit_failed)
                             {
                                 wf.call_count += 1;
@@ -6849,7 +6849,7 @@ pub const Vm = struct {
                             }
                         }
 
-                        if (self.profile == null and !self.jitSuppressed()) {
+                        if (self.profile == null and !self.jitSuppressed() and !self.force_interpreter) {
                             if (wf.jit_code) |jc| {
                                 if (param_count <= 16) {
                                     var arg_buf: [16]u64 = undefined;

@@ -117,6 +117,7 @@ fn printUsage(w: *std.Io.Writer) void {
         \\  --max-memory <N>    Memory ceiling in bytes (limits memory.grow)
         \\  --fuel <N>          Instruction fuel limit (traps when exhausted)
         \\  --timeout <ms>      Execution timeout in milliseconds
+        \\  --interp            Force interpreter only (bypass RegIR and JIT)
         \\  --trace=CATS        Trace categories: jit,regir,exec,mem,call (comma-separated)
         \\  --dump-regir=N      Dump RegIR for function index N
         \\  --cache             Cache predecoded IR to disk for faster startup
@@ -155,6 +156,7 @@ fn cmdRun(allocator: Allocator, args: []const []const u8, stdout: *std.Io.Writer
     var max_memory_bytes: ?u64 = null;
     var fuel: ?u64 = null;
     var timeout_ms: ?u64 = null;
+    var force_interpreter = false;
 
     // Parse options
     var i: usize = 0;
@@ -275,6 +277,8 @@ fn cmdRun(allocator: Allocator, args: []const []const u8, stdout: *std.Io.Writer
                 try stderr.flush();
                 return false;
             };
+        } else if (std.mem.eql(u8, args[i], "--interp")) {
+            force_interpreter = true;
         } else if (std.mem.eql(u8, args[i], "--")) {
             // Explicit separator: everything after is function/WASI args
             func_args_start = i + 1;
@@ -455,6 +459,7 @@ fn cmdRun(allocator: Allocator, args: []const []const u8, stdout: *std.Io.Writer
         // Apply resource limits
         module.vm.max_memory_bytes = max_memory_bytes;
         module.vm.fuel = fuel;
+        module.vm.force_interpreter = force_interpreter;
         if (timeout_ms) |ms| module.vm.setDeadlineTimeoutMs(ms);
 
         // Lookup export info for type-aware parsing and validation
@@ -603,6 +608,7 @@ fn cmdRun(allocator: Allocator, args: []const []const u8, stdout: *std.Io.Writer
         // Apply resource limits
         module.vm.max_memory_bytes = max_memory_bytes;
         module.vm.fuel = fuel;
+        module.vm.force_interpreter = force_interpreter;
         if (timeout_ms) |ms| module.vm.setDeadlineTimeoutMs(ms);
 
         var no_args = [_]u64{};

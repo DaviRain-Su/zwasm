@@ -23,16 +23,15 @@ Prefix: W## (to distinguish from CW's F## items).
   Fix: corrected expected hash for "Hello, SHA-256!" in main.go.
   50/50 PASS (go_crypto_sha256 + go_regex) after fix. No JIT bug.
 
-- [ ] W35: ARM64 JIT OOB memory access with rustc 1.93.1 / Go 1.26.0 wasm
-  Symptom: OOB trap in JIT-compiled code. Works without JIT (interpreter).
-  Works on x86_64 JIT. Only ARM64 JIT affected.
-  Triggered by wasm codegen differences in newer compiler versions.
-  CI pinned to Rust 1.92.0 as workaround. Go not installed on macOS CI.
-  Reproduce: `rustup run 1.93.1 cargo build` serde_json, run with zwasm ARM64.
+- [x] W35: OOB in serde_json built with rustc 1.93.1 — **FIXED**
+  Root cause: ARM64 JIT `emitGlobalSet` clobbered vreg r21 (x1) with global_idx
+  before reading the value. Stack pointer set to 0 → memory corruption → OOB.
+  Also fixed: `--interp` flag incomplete (doCallDirectIR), i32.store16 access_size.
+  Commit 1429f81 on branch `fix/w35-arm64-jit-oob`.
 
 - [ ] W36: Flaky real-world compat: go_crypto_sha256 / go_regex intermittent DIFF
   Reproduced on base code (no local changes). Non-deterministic — passes ~50% of runs.
-  Likely related to W35 (ARM64 JIT OOB). Not blocking current work.
+  May or may not be related to W35 (both are OOB class).
 
 ## Resolved items (summary, details in git history)
 
