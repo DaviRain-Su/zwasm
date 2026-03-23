@@ -1303,6 +1303,17 @@ const Enc = struct {
         buf.appendSlice(alloc, &[_]u8{ 0x0F, 0x50 }) catch {};
         buf.append(alloc, modrm(3, gpr.low3(), @truncate(xmm))) catch {};
     }
+    // PMADDWD xmm, xmm: 66 0F F5 /r (multiply-add i16 pairs → i32)
+    fn pmaddwd(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xF5, dst, src); }
+    // PMULUDQ xmm, xmm: 66 0F F4 /r (unsigned multiply low 32-bit → 64-bit)
+    fn pmuludq(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xF4, dst, src); }
+    // PCMPEQQ xmm, xmm (SSE4.1): 66 0F 38 29 /r
+    fn pcmpeqq(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x29, dst, src); }
+    // PCMPGTQ xmm, xmm (SSE4.2): 66 0F 38 37 /r
+    fn pcmpgtq(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x37, dst, src); }
+    // PMULDQ xmm, xmm (SSE4.1): 66 0F 38 28 /r (signed multiply low 32→64)
+    fn pmuldq(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x28, dst, src); }
+
     /// MOVMSKPD r32, xmm: 66 0F 50 /r
     fn movmskpd(buf: *std.ArrayList(u8), alloc: Allocator, gpr: Reg, xmm: u4) void {
         buf.append(alloc, 0x66) catch {};
@@ -4473,6 +4484,113 @@ pub const Compiler = struct {
                 self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
                 return true;
             },
+
+            // --- all_true (PCMPEQ zero + PTEST) ---
+            0x63 => { // i8x16.all_true
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                Enc.pxor(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1); // zero
+                Enc.pcmpeqb(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH0); // lanes = FF where zero
+                Enc.ptest(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1); // ZF=1 if no zero lanes
+                const d = vregToPhys(instr.rd) orelse SCRATCH;
+                Enc.setcc(&self.code, self.alloc, .e, d); // ZF=1 → all non-zero
+                Enc.movzxByte(&self.code, self.alloc, d, d);
+                self.storeVreg(instr.rd, d);
+                return true;
+            },
+            0x83 => { // i16x8.all_true
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                Enc.pxor(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pcmpeqw(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH0);
+                Enc.ptest(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                const d = vregToPhys(instr.rd) orelse SCRATCH;
+                Enc.setcc(&self.code, self.alloc, .e, d);
+                Enc.movzxByte(&self.code, self.alloc, d, d);
+                self.storeVreg(instr.rd, d);
+                return true;
+            },
+            0xA3 => { // i32x4.all_true
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                Enc.pxor(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pcmpeqd(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH0);
+                Enc.ptest(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                const d = vregToPhys(instr.rd) orelse SCRATCH;
+                Enc.setcc(&self.code, self.alloc, .e, d);
+                Enc.movzxByte(&self.code, self.alloc, d, d);
+                self.storeVreg(instr.rd, d);
+                return true;
+            },
+            0xC3 => { // i64x2.all_true
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                Enc.pxor(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pcmpeqq(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH0);
+                Enc.ptest(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                const d = vregToPhys(instr.rd) orelse SCRATCH;
+                Enc.setcc(&self.code, self.alloc, .e, d);
+                Enc.movzxByte(&self.code, self.alloc, d, d);
+                self.storeVreg(instr.rd, d);
+                return true;
+            },
+
+            // --- i16x8.bitmask: PACKSSWB to compress sign bits, then PMOVMSKB ---
+            0x84 => {
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                // PACKSSWB compresses sign bits: 8 × i16 → 8 bytes (lower half has the signs)
+                Enc.packsswb(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                const d = vregToPhys(instr.rd) orelse SCRATCH;
+                Enc.pmovmskb(&self.code, self.alloc, d, SIMD_SCRATCH0);
+                // Only lower 8 bits are valid (upper 8 are duplicates from self-pack)
+                Enc.movzxByte(&self.code, self.alloc, d, d); // mask to 8 bits
+                self.storeVreg(instr.rd, d);
+                return true;
+            },
+
+            // --- i64x2 comparisons (SSE4.2) ---
+            0xD6 => { self.emitSimdBinarySse(instr, &Enc.pcmpeqq); return true; }, // i64x2.eq
+            0xD7 => { // i64x2.ne
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                Enc.pcmpeqq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                Enc.pcmpeqd(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pxor(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xD9 => { self.emitSimdBinarySse(instr, &Enc.pcmpgtq); return true; }, // i64x2.gt_s
+            0xD8 => { // i64x2.lt_s = swap + gt
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs2_field);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs1);
+                Enc.pcmpgtq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xDB => { // i64x2.ge_s = swap + gt + NOT
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs2_field);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs1);
+                Enc.pcmpgtq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                Enc.pcmpeqd(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pxor(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xDA => { // i64x2.le_s = gt + NOT
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                Enc.pcmpgtq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                Enc.pcmpeqd(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pxor(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+
+            // --- i32x4.dot_i16x8_s (PMADDWD) ---
+            0xBA => { self.emitSimdBinarySse(instr, &Enc.pmaddwd); return true; },
+
+            // --- i64x2 abs (PXOR zero + PSUBQ + BLENDVPD with XMM0) ---
+            // Complex, leave for trampoline
+
+            // --- extadd_pairwise ---
+            // i16x8.extadd_pairwise_i8x16_s: PMADDUBSW with all-ones
+            // Complex multi-instr, leave for trampoline
 
             // --- v128.bitselect (PAND+PANDN+POR, uses 3 XMM regs) ---
             0x52 => {
