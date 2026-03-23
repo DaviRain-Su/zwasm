@@ -4430,6 +4430,25 @@ pub const Compiler = struct {
                 return true;
             },
 
+            // --- i64x2.mul (5-instr sequence: REV64+MUL+ADDP+SHL+UMLAL) ---
+            0xD5 => {
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1); // a → V0
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field); // b → V1
+                const V2: u5 = 2;
+                // REV64 V2.4S, V1.4S — swap 32-bit halves within each 64-bit lane
+                self.emit(0x4EA00800 | (@as(u32, SIMD_SCRATCH1) << 5) | V2);
+                // MUL V2.4S, V2.4S, V0.4S — cross products [a_lo*b_hi, a_hi*b_lo]
+                self.emit(0x4EA09C00 | (@as(u32, SIMD_SCRATCH0) << 16) | (@as(u32, V2) << 5) | V2);
+                // ADDP V2.4S, V2.4S, V2.4S — pairwise: cross_sum per lane in S[0],S[1]
+                self.emit(0x4EA0BC00 | (@as(u32, V2) << 16) | (@as(u32, V2) << 5) | V2);
+                // SHL V2.2D, V2.2D, #32 — shift cross terms left 32
+                self.emit(0x4F605400 | (@as(u32, V2) << 5) | V2);
+                // UMLAL V2.2D, V0.2S, V1.2S — accumulate a_lo * b_lo (widening)
+                self.emit(0x2EA08000 | (@as(u32, SIMD_SCRATCH1) << 16) | (@as(u32, SIMD_SCRATCH0) << 5) | V2);
+                self.emitStoreV128(V2, instr.rd);
+                return true;
+            },
+
             // --- i64x2 extmul ---
             0xDC => { self.emitSimdBinaryNeon(instr, 0x0EA0C000); return true; }, // i64x2.extmul_low_i32x4_s — SMULL .2D
             0xDD => { self.emitSimdBinaryNeon(instr, 0x4EA0C000); return true; }, // i64x2.extmul_high_i32x4_s — SMULL2 .2D
@@ -5066,6 +5085,26 @@ pub const Compiler = struct {
             0xF9 => { self.emitSimdUnaryNeon(instr, 0x6EA1B800); return true; }, // i32x4.trunc_sat_f32x4_u — FCVTZU .4S
             0xFA => { self.emitSimdUnaryNeon(instr, 0x4E21B800); return true; }, // f32x4.convert_i32x4_s — SCVTF .4S
             0xFB => { self.emitSimdUnaryNeon(instr, 0x6E21B800); return true; }, // f32x4.convert_i32x4_u — UCVTF .4S
+
+            // --- i32x4_trunc_sat_f64x2 ---
+            0xFC => { // i32x4_trunc_sat_f64x2_s_zero — FCVTZS .2D + SQXTN .2S
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                // FCVTZS V0.2D, V0.2D = 0x4EE1B800
+                self.emit(0x4EE1B800 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
+                // SQXTN V0.2S, V0.2D = 0x0EA14800 (Q=0 zeroes upper half)
+                self.emit(0x0EA14800 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xFD => { // i32x4_trunc_sat_f64x2_u_zero — FCVTZU .2D + UQXTN .2S
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                // FCVTZU V0.2D, V0.2D = 0x6EE1B800
+                self.emit(0x6EE1B800 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
+                // UQXTN V0.2S, V0.2D = 0x2EA14800 (Q=0 zeroes upper half)
+                self.emit(0x2EA14800 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
 
             // --- f32x4 demote / f64x2 promote ---
             0x5E => { // f32x4.demote_f64x2_zero — FCVTN Vd.2S, Vn.2D (upper zeroed)
