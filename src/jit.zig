@@ -1020,6 +1020,7 @@ pub const Compiler = struct {
     mem_copy_addr: u64,
     call_indirect_addr: u64,
     gc_trampoline_addr: u64,
+    fuel_check_helper_addr: u64,
     pool64: []const u64,
     has_memory: bool,
     has_self_call: bool,
@@ -1129,6 +1130,7 @@ pub const Compiler = struct {
             .mem_copy_addr = 0,
             .call_indirect_addr = 0,
             .gc_trampoline_addr = 0,
+            .fuel_check_helper_addr = 0,
             .pool64 = &.{},
             .has_memory = false,
             .has_self_call = false,
@@ -3448,8 +3450,9 @@ pub const Compiler = struct {
     }
 
     /// Emit fuel check at a loop back-edge.
-    /// Decrements jit_fuel in the VM struct; if negative, branches to a shared
-    /// fuel-exhausted exit (emitted once at end of function by emitErrorStubs).
+    /// Decrements jit_fuel in the VM struct; if negative, calls a shared
+    /// fuel-check stub via BL. The stub calls jitFuelCheckHelper which either
+    /// re-arms the counter (returns to continue) or exits JIT with an error.
     fn emitFuelCheck(self: *Compiler) void {
         // Skip when offset is 0 (unit tests without Vm struct)
         if (self.jit_fuel_offset == 0) return;
@@ -3475,10 +3478,19 @@ pub const Compiler = struct {
         self.emit(a64.subsImm64(fuel_reg, fuel_reg, 1));
         self.emit(a64.str64(fuel_reg, SCRATCH, 0));
         self.scratch_vreg = null;
-        // Branch to shared fuel exit (patched in emitErrorStubs)
-        const branch_idx = self.currentIdx();
-        self.emit(a64.bCond(.mi, 0)); // placeholder
-        self.fuel_check_branches.append(self.alloc, branch_idx) catch {};
+        // Fast path: fuel >= 0, skip the slow path
+        const skip_idx = self.currentIdx();
+        self.emit(a64.bCond(.pl, 0)); // placeholder: B.PL .skip
+        // Slow path: BL to shared fuel check stub (patched in emitErrorStubs).
+        // BL sets x30 = return address (= .skip), so the stub can RET to continue.
+        const bl_idx = self.currentIdx();
+        self.emit(0x94000000); // BL placeholder
+        // .skip: — fast-path and stub-return land here
+        // Patch B.PL to jump here
+        const skip_offset: i32 = @as(i32, @intCast(self.currentIdx())) - @as(i32, @intCast(skip_idx));
+        const skip_imm: u19 = @bitCast(@as(i19, @intCast(skip_offset)));
+        self.code.items[skip_idx] = 0x54000000 | (@as(u32, skip_imm) << 5) | @as(u32, @intFromEnum(a64.Cond.pl));
+        self.fuel_check_branches.append(self.alloc, bl_idx) catch {};
     }
 
     /// Emit conditional error: if condition is true, branch to shared error stub.
@@ -6548,19 +6560,74 @@ pub const Compiler = struct {
             }
         }
 
-        // Emit shared fuel-exhausted exit and patch all fuel check branches.
-        // Single stub: MOVZ x0, #9 + B shared_exit. All back-edge checks branch here.
+        // Emit shared fuel-check stub: called via BL from back-edge fuel checks.
+        // Spills caller-saved vregs, calls jitFuelCheckHelper, and either
+        // RET (continue) or B shared_exit (error).
         if (self.fuel_check_branches.items.len > 0) {
             const fuel_stub_idx = self.currentIdx();
-            self.emit(a64.movz64(0, 9, 0)); // x0 = 9 (FuelExhausted)
-            const exit_offset: i26 = @intCast(@as(i32, @intCast(shared_exit)) - @as(i32, @intCast(self.currentIdx())));
-            self.emit(a64.b(exit_offset));
 
-            // Patch all fuel check B.MI branches to point to this stub
-            for (self.fuel_check_branches.items) |branch_idx| {
-                const offset: i32 = @as(i32, @intCast(fuel_stub_idx)) - @as(i32, @intCast(branch_idx));
-                const imm: u19 = @bitCast(@as(i19, @intCast(offset)));
-                self.code.items[branch_idx] = 0x54000000 | (@as(u32, imm) << 5) | @as(u32, @intFromEnum(a64.Cond.mi));
+            // Save x30 (return address from BL) on stack
+            self.emit(a64.stpPre(29, 30, 31, -2)); // STP x29, x30, [sp, #-16]!
+
+            // Spill caller-saved vregs to memory (x2-x7 = r14-r19, x9-x15 = r5-r11)
+            const max: u8 = @intCast(@min(self.reg_count, MAX_PHYS_REGS));
+            if (max > 5) {
+                for (5..max) |i| {
+                    const vreg: u16 = @intCast(i);
+                    if (vreg == 12 or vreg == 13) continue; // callee-saved
+                    if (vregToPhys(vreg)) |phys| {
+                        self.emit(a64.str64(phys, REGS_PTR, @as(u16, vreg) * 8));
+                    }
+                }
+            }
+
+            // Call jitFuelCheckHelper(vm_ptr)
+            self.emitLoadVmPtr(0); // x0 = vm_ptr (first arg)
+            const addr = self.fuel_check_helper_addr;
+            self.emit(a64.movz64(SCRATCH, @truncate(addr), 0));
+            self.emit(a64.movk64(SCRATCH, @truncate(addr >> 16), 1));
+            self.emit(a64.movk64(SCRATCH, @truncate(addr >> 32), 2));
+            self.emit(a64.movk64(SCRATCH, @truncate(addr >> 48), 3));
+            self.emit(a64.blr(SCRATCH)); // BLR x8
+
+            // Check result: 0 = continue, nonzero = error code
+            const exit_branch_idx = self.currentIdx();
+            self.emit(a64.cbnz64(0, 0)); // placeholder: CBNZ x0, .exit_error
+
+            // Reload caller-saved vregs from memory
+            if (max > 5) {
+                for (5..max) |i| {
+                    const vreg: u16 = @intCast(i);
+                    if (vreg == 12 or vreg == 13) continue;
+                    if (vregToPhys(vreg)) |phys| {
+                        self.emit(a64.ldr64(phys, REGS_PTR, @as(u16, vreg) * 8));
+                    }
+                }
+            }
+
+            // Restore x30 and return to continue execution
+            self.emit(a64.ldpPost(29, 30, 31, 2)); // LDP x29, x30, [sp], #16
+            self.emit(a64.ret_());
+
+            // .exit_error: x0 already has error code, jump to shared exit
+            const exit_error_idx = self.currentIdx();
+            self.emit(a64.ldpPost(29, 30, 31, 2)); // LDP x29, x30, [sp], #16
+            {
+                const exit_offset: i26 = @intCast(@as(i32, @intCast(shared_exit)) - @as(i32, @intCast(self.currentIdx())));
+                self.emit(a64.b(exit_offset));
+            }
+
+            // Patch CBNZ to point to .exit_error
+            {
+                const offset: i19 = @intCast(@as(i32, @intCast(exit_error_idx)) - @as(i32, @intCast(exit_branch_idx)));
+                self.code.items[exit_branch_idx] = a64.cbnz64(0, offset);
+            }
+
+            // Patch all fuel check BL instructions to branch to this stub
+            for (self.fuel_check_branches.items) |bl_idx| {
+                const offset: i32 = @as(i32, @intCast(fuel_stub_idx)) - @as(i32, @intCast(bl_idx));
+                const imm: u26 = @bitCast(@as(i26, @intCast(offset)));
+                self.code.items[bl_idx] = 0x94000000 | @as(u32, imm); // BL imm26
             }
         }
     }
@@ -7075,6 +7142,7 @@ pub fn compileFunction(
     compiler.use_guard_pages = use_guard_pages;
     compiler.osr_target_pc = osr_target_pc;
     compiler.gc_trampoline_addr = gc_trampoline_addr;
+    compiler.fuel_check_helper_addr = @intFromPtr(&vm_mod.Vm.jitFuelCheckHelper);
     compiler.jit_fuel_offset = @intCast(@offsetOf(vm_mod.Vm, "jit_fuel"));
     compiler.simd_hi_offset = @intCast(@offsetOf(vm_mod.Vm, "simd_hi"));
 

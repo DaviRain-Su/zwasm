@@ -1651,6 +1651,8 @@ pub const Compiler = struct {
     has_simd: bool,
     /// Address of jitSimdTrampoline function.
     simd_trampoline_addr: u64,
+    /// Address of Vm.jitFuelCheckHelper for deadline/fuel checks.
+    fuel_check_helper_addr: u64,
     /// True when the memory has guard pages — skip explicit bounds checks.
     use_guard_pages: bool,
     /// Byte offset of the shared error epilogue (for signal handler recovery).
@@ -1714,6 +1716,7 @@ pub const Compiler = struct {
             .simd_hi_offset = 0,
             .has_simd = false,
             .simd_trampoline_addr = 0,
+            .fuel_check_helper_addr = 0,
             .use_guard_pages = false,
             .shared_exit_offset = 0,
             .osr_target_pc = null,
@@ -1987,8 +1990,9 @@ pub const Compiler = struct {
 
     /// Emit conditional error: if condition is true, branch forward to error stub.
     /// Emit fuel check at a loop back-edge (x86_64).
-    /// push rax / load vm_ptr / SUB [vm+fuel],1 / JS exit / pop rax.
-    /// If JS is taken, the shared fuel exit stub pops rax before returning.
+    /// push rax / load vm_ptr / SUB [vm+fuel],1 / JNS skip / CALL stub / skip: pop rax.
+    /// The shared stub calls jitFuelCheckHelper, which either re-arms (RET to
+    /// continue) or exits JIT with an error code.
     fn emitFuelCheck(self: *Compiler) void {
         // Skip fuel checks when offset is 0 (unit tests without Vm struct)
         if (self.jit_fuel_offset == 0) return;
@@ -2004,10 +2008,15 @@ pub const Compiler = struct {
         self.code.append(self.alloc, 0xA8) catch {}; // ModRM: mod=10, /5, r/m=rax
         Enc.appendI32(&self.code, self.alloc, fuel_disp);
         self.code.append(self.alloc, 0x01) catch {}; // imm8 = 1
-        // JS to fuel exit (rax still pushed — exit stub does pop rax)
-        const rel32_off = Enc.jccRel32(&self.code, self.alloc, .s);
-        self.fuel_check_patches.append(self.alloc, rel32_off) catch {};
-        // pop rax (restore on non-exit path)
+        // JNS .skip (fast path: fuel >= 0)
+        const jns_off = Enc.jccRel32(&self.code, self.alloc, .ns);
+        // Slow path: CALL shared fuel-check stub (patched in emitErrorStubs).
+        // CALL pushes return address = .skip, stub can RET to continue.
+        const call_off = Enc.callRel32(&self.code, self.alloc);
+        self.fuel_check_patches.append(self.alloc, call_off) catch {};
+        // .skip: patch JNS to here
+        Enc.patchRel32(self.code.items, jns_off, self.currentOffset());
+        // pop rax (restore on both fast and continue paths)
         self.code.append(self.alloc, 0x58) catch {};
         self.scratch_vreg = null;
     }
@@ -2050,14 +2059,71 @@ pub const Compiler = struct {
             }
         }
 
-        // Shared fuel-exhausted exit: pop rax (balance push from emitFuelCheck),
-        // set error code, jump to shared exit.
+        // Shared fuel-check stub: called via CALL from back-edge fuel checks.
+        // Spills caller-saved vregs, calls jitFuelCheckHelper, and either
+        // RET (continue) or JMP shared_exit (error).
         if (self.fuel_check_patches.items.len > 0) {
             const fuel_stub = self.currentOffset();
-            self.code.append(self.alloc, 0x58) catch {}; // pop rax (balance push)
-            Enc.movImm32ToReg(&self.code, self.alloc, .rax, 9);
-            const jmp_off = Enc.jmpRel32(&self.code, self.alloc);
-            Enc.patchRel32(self.code.items, jmp_off, shared_exit);
+
+            // Spill caller-saved vregs (r3-r9 → rcx,rdi,rsi,rdx,r8,r9,r10) to memory
+            const max: u8 = @intCast(@min(self.reg_count, MAX_PHYS_REGS));
+            if (max > FIRST_CALLER_SAVED_VREG) {
+                for (FIRST_CALLER_SAVED_VREG..max) |i| {
+                    const vreg: u16 = @intCast(i);
+                    if (vregToPhys(vreg)) |phys| {
+                        const disp: i32 = @as(i32, vreg) * 8;
+                        Enc.storeDisp32(&self.code, self.alloc, REGS_PTR, disp, phys);
+                    }
+                }
+            }
+
+            // Align stack for C call (stack has: [push rax] [CALL ret_addr] = 16 bytes
+            // above prologue alignment). Push a dummy to align if needed.
+            // The prologue ensures 16-byte alignment at function body. push rax + CALL
+            // adds 16 bytes, so stack is still aligned. No extra alignment needed.
+
+            // Call jitFuelCheckHelper(vm_ptr)
+            const vm_slot_disp: i32 = (@as(i32, self.reg_count) + 2) * 8;
+            if (builtin.os.tag == .windows) {
+                Enc.loadDisp32(&self.code, self.alloc, .rcx, REGS_PTR, vm_slot_disp); // rcx = vm_ptr
+            } else {
+                Enc.loadDisp32(&self.code, self.alloc, .rdi, REGS_PTR, vm_slot_disp); // rdi = vm_ptr
+            }
+            self.emitLoadImm64(SCRATCH, self.fuel_check_helper_addr);
+            Enc.callReg(&self.code, self.alloc, SCRATCH);
+
+            // Check result: TEST rax, rax; JNZ .exit_error
+            Enc.testRegReg(&self.code, self.alloc, .rax, .rax);
+            const jnz_off = Enc.jccRel32(&self.code, self.alloc, .nz);
+
+            // Reload caller-saved vregs from memory
+            if (max > FIRST_CALLER_SAVED_VREG) {
+                for (FIRST_CALLER_SAVED_VREG..max) |i| {
+                    const vreg: u16 = @intCast(i);
+                    if (vregToPhys(vreg)) |phys| {
+                        const disp: i32 = @as(i32, vreg) * 8;
+                        Enc.loadDisp32(&self.code, self.alloc, phys, REGS_PTR, disp);
+                    }
+                }
+            }
+
+            // RET: return to .skip (after CALL in emitFuelCheck), caller pops rax
+            self.code.append(self.alloc, 0xC3) catch {}; // RET
+
+            // .exit_error: rax has error code, discard CALL ret_addr + push rax
+            Enc.patchRel32(self.code.items, jnz_off, self.currentOffset());
+            // ADD rsp, 16 — pop [CALL ret_addr] + [push rax from emitFuelCheck]
+            self.code.append(self.alloc, 0x48) catch {}; // REX.W
+            self.code.append(self.alloc, 0x83) catch {}; // ADD r/m64, imm8
+            self.code.append(self.alloc, 0xC4) catch {}; // ModRM: mod=11, /0, rm=rsp
+            self.code.append(self.alloc, 0x10) catch {}; // imm8 = 16
+            // JMP shared_exit (rax already has error code)
+            {
+                const jmp_off = Enc.jmpRel32(&self.code, self.alloc);
+                Enc.patchRel32(self.code.items, jmp_off, shared_exit);
+            }
+
+            // Patch all CALL rel32 instructions to point to this stub
             for (self.fuel_check_patches.items) |patch_off| {
                 Enc.patchRel32(self.code.items, patch_off, fuel_stub);
             }
@@ -6676,6 +6742,7 @@ pub fn compileFunction(
     compiler.jit_fuel_offset = @intCast(@offsetOf(vm_mod.Vm, "jit_fuel"));
     compiler.simd_hi_offset = @intCast(@offsetOf(vm_mod.Vm, "simd_hi"));
     compiler.simd_trampoline_addr = @intFromPtr(&vm_mod.Vm.jitSimdTrampoline);
+    compiler.fuel_check_helper_addr = @intFromPtr(&vm_mod.Vm.jitFuelCheckHelper);
     defer compiler.deinit();
 
     return compiler.compile(

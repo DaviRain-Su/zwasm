@@ -110,6 +110,10 @@ const FRAME_STACK_SIZE = 1024;
 pub const MAX_CALL_DEPTH = 1024; // native recursion limit — must not overflow Zig stack
 const LABEL_STACK_SIZE = 4096;
 const DEADLINE_CHECK_INTERVAL: u32 = 1024;
+/// JIT back-edge interval for deadline checks. When a deadline is active,
+/// jit_fuel is armed to this value so the JIT periodically exits to check
+/// wall-clock time without suppressing JIT compilation entirely.
+const DEADLINE_JIT_INTERVAL: i64 = 10_000;
 
 const Frame = struct {
     locals_start: usize, // index into operand stack where locals begin
@@ -397,8 +401,13 @@ pub const Vm = struct {
     force_interpreter: bool = false,
     /// JIT-accessible fuel counter. Signed so JIT can check < 0 with a single
     /// branch after decrement. Synced from/to `fuel` before/after JIT execution.
+    /// When deadline is active, armed to DEADLINE_JIT_INTERVAL so JIT periodically
+    /// calls the fuel check helper to verify wall-clock time.
     /// maxInt = unlimited (JIT skips the check entirely when this value is seen).
     jit_fuel: i64 = std.math.maxInt(i64),
+    /// The value jit_fuel was last armed to. Used to calculate consumed fuel
+    /// when the fuel check helper fires or JIT exits normally.
+    jit_fuel_initial: i64 = std.math.maxInt(i64),
 
     /// v128 upper 64 bits for SIMD in RegIR/JIT. Index = vreg number.
     /// Lower 64 bits stored in reg_stack[base + vreg].
@@ -468,11 +477,68 @@ pub const Vm = struct {
         }
     }
 
-    /// Returns true when JIT must be suppressed because deadline is active.
-    /// Fuel is now handled by JIT back-edge checks (jit_fuel counter),
-    /// so only deadline still requires interpreter fallback.
-    pub inline fn jitSuppressed(self: *const Vm) bool {
-        return self.deadline_ns != null;
+    /// Arm jit_fuel for the next JIT execution interval.
+    /// When fuel and/or deadline are active, sets jit_fuel to the smaller budget
+    /// so the JIT periodically returns control for fuel/deadline checks.
+    pub fn armJitFuel(self: *Vm) void {
+        const fuel_budget: i64 = if (self.fuel) |f| @intCast(f) else std.math.maxInt(i64);
+        const deadline_budget: i64 = if (self.deadline_ns != null) DEADLINE_JIT_INTERVAL else std.math.maxInt(i64);
+        self.jit_fuel = @min(fuel_budget, deadline_budget);
+        self.jit_fuel_initial = self.jit_fuel;
+    }
+
+    /// Sync consumed jit_fuel ticks back to interpreter fuel counter.
+    fn syncJitFuelBack(self: *Vm) void {
+        if (self.fuel) |*f| {
+            const consumed: i64 = self.jit_fuel_initial - self.jit_fuel;
+            if (consumed > 0) {
+                if (consumed >= @as(i64, @intCast(f.*))) {
+                    f.* = 0;
+                } else {
+                    f.* -= @intCast(@as(u64, @intCast(consumed)));
+                }
+            }
+        }
+    }
+
+    /// JIT fuel check helper — called from JIT code when jit_fuel goes negative.
+    /// Map JIT error code to WasmError.
+    fn jitErrorCode(err_code: u64) WasmError {
+        return switch (err_code) {
+            1 => error.Trap,
+            2 => error.StackOverflow,
+            3 => error.DivisionByZero,
+            4 => error.IntegerOverflow,
+            5 => error.Unreachable,
+            6 => error.OutOfBoundsMemoryAccess,
+            7 => error.WasmException,
+            8 => error.InvalidConversion,
+            9 => error.FuelExhausted,
+            10 => error.TimeoutExceeded,
+            else => error.Trap,
+        };
+    }
+
+    /// JIT fuel check helper — called from JIT code when jit_fuel goes negative.
+    /// Returns 0 to continue execution, or an error code to exit JIT:
+    ///   9 = FuelExhausted, 10 = TimeoutExceeded.
+    pub fn jitFuelCheckHelper(vm: *Vm) callconv(.c) u64 {
+        // Sync consumed fuel back to interpreter counter
+        vm.syncJitFuelBack();
+
+        // Check real fuel exhaustion
+        if (vm.fuel) |f| {
+            if (f == 0) return 9; // FuelExhausted
+        }
+
+        // Check wall-clock deadline
+        if (vm.deadline_ns) |dl| {
+            if (std.time.nanoTimestamp() >= dl) return 10; // TimeoutExceeded
+        }
+
+        // Neither exhausted — re-arm and continue
+        vm.armJitFuel();
+        return 0;
     }
 
     /// Store an exception and return its exnref value (index + 1).
@@ -620,8 +686,7 @@ pub const Vm = struct {
 
                     // JIT compilation: check hot threshold (skip when profiling or fuel metering)
                     if (comptime jit_mod.jitSupported()) {
-                        if (self.profile == null and !self.jitSuppressed() and
-                            wf.jit_code == null and !wf.jit_failed)
+                        if (self.profile == null and                             wf.jit_code == null and !wf.jit_failed)
                         {
                             wf.call_count += 1;
                             if (wf.call_count >= jit_mod.HOT_THRESHOLD) {
@@ -644,8 +709,8 @@ pub const Vm = struct {
                         }
                     }
 
-                    // JIT path: execute native code (skip when profiling or fuel metering)
-                    if (self.profile == null and !self.jitSuppressed()) {
+                    // JIT path: execute native code (skip when profiling)
+                    if (self.profile == null) {
                         if (wf.jit_code) |jc| {
                             if (self.trace) |tc| trace_mod.traceExecTier(tc, wf.func_idx, "jit", wf.call_count);
                             try self.executeJIT(jc, reg, inst, func_ptr, args, results);
@@ -658,7 +723,7 @@ pub const Vm = struct {
                     if (self.trace) |tc| trace_mod.traceExecTier(tc, wf.func_idx, "regir", wf.call_count);
                     self.executeRegIR(reg, wf.ir.?.pool64, inst, func_ptr, args, results) catch |err| {
                         if (err == error.JitRestart) {
-                            if (!self.jitSuppressed()) {
+                            {
                                 if (wf.jit_code) |jc| {
                                     if (self.trace) |tc| trace_mod.traceJitRestart(tc, wf.func_idx);
                                     // OSR: use osr_entry (enters at loop body, bypassing init)
@@ -4284,35 +4349,20 @@ pub const Vm = struct {
             });
         }
 
-        // Sync fuel to JIT counter before entry
-        if (self.fuel) |f| {
-            self.jit_fuel = @intCast(f);
-        }
+        // Arm fuel/deadline interval for JIT
+        self.armJitFuel();
 
         // Call OSR entry: sets up callee-saved, memory cache, then jumps to loop body
         const err_code = osr_fn(regs_ptr, @ptrCast(self), @ptrCast(instance));
 
-        // Sync JIT counter back to fuel after exit
-        if (self.fuel != null) {
-            self.fuel = if (self.jit_fuel >= 0) @intCast(self.jit_fuel) else 0;
-        }
+        // Sync remaining JIT fuel back to interpreter fuel
+        self.syncJitFuelBack();
 
         // Restore caller's recovery context
         guard_mod.setRecovery(saved_recovery);
 
         if (err_code != 0) {
-            return switch (err_code) {
-                1 => error.Trap,
-                2 => error.StackOverflow,
-                3 => error.DivisionByZero,
-                4 => error.IntegerOverflow,
-                5 => error.Unreachable,
-                6 => error.OutOfBoundsMemoryAccess,
-                7 => error.WasmException,
-                8 => error.InvalidConversion,
-                9 => error.FuelExhausted,
-                else => error.Trap,
-            };
+            return jitErrorCode(err_code);
         }
 
         // Result is in regs[0]
@@ -4357,35 +4407,20 @@ pub const Vm = struct {
             });
         }
 
-        // Sync fuel to JIT counter before entry
-        if (self.fuel) |f| {
-            self.jit_fuel = @intCast(f);
-        }
+        // Arm fuel/deadline interval for JIT
+        self.armJitFuel();
 
         // Call JIT-compiled function
         const err_code = jc.entry(regs.ptr, @ptrCast(self), @ptrCast(instance));
 
-        // Sync JIT counter back to fuel after exit
-        if (self.fuel != null) {
-            self.fuel = if (self.jit_fuel >= 0) @intCast(self.jit_fuel) else 0;
-        }
+        // Sync remaining JIT fuel back to interpreter fuel
+        self.syncJitFuelBack();
 
         // Restore caller's recovery context (not just clear)
         guard_mod.setRecovery(saved_recovery);
 
         if (err_code != 0) {
-            return switch (err_code) {
-                1 => error.Trap,
-                2 => error.StackOverflow,
-                3 => error.DivisionByZero,
-                4 => error.IntegerOverflow,
-                5 => error.Unreachable,
-                6 => error.OutOfBoundsMemoryAccess,
-                7 => error.WasmException,
-                8 => error.InvalidConversion,
-                9 => error.FuelExhausted,
-                else => error.Trap,
-            };
+            return jitErrorCode(err_code);
         }
 
         // Result is in regs[0]
@@ -4526,7 +4561,7 @@ pub const Vm = struct {
             &func_ptr.subtype.wasm_function
         else
             null;
-        const jit_eligible = if (!comptime jit_mod.jitSupported()) false else self.profile == null and !self.jitSuppressed() and wf != null and wf.?.jit_code == null and !wf.?.jit_failed;
+        const jit_eligible = if (!comptime jit_mod.jitSupported()) false else self.profile == null and wf != null and wf.?.jit_code == null and !wf.?.jit_failed;
         const jit_param_count: u16 = @intCast(func_ptr.params.len);
         const jit_result_count: u16 = @intCast(func_ptr.results.len);
         const jit_min_mem_bytes: u32 = jit_mod.getMinMemoryBytes(instance);
@@ -7001,7 +7036,7 @@ pub const Vm = struct {
                     // JIT compilation + fast execution for hot callees.
                     if (wf.reg_ir) |reg| {
                         if (comptime jit_mod.jitSupported()) {
-                            if (self.profile == null and !self.jitSuppressed() and !self.force_interpreter and
+                            if (self.profile == null and !self.force_interpreter and
                                 wf.jit_code == null and !wf.jit_failed)
                             {
                                 wf.call_count += 1;
@@ -7023,7 +7058,7 @@ pub const Vm = struct {
                             }
                         }
 
-                        if (self.profile == null and !self.jitSuppressed() and !self.force_interpreter) {
+                        if (self.profile == null and !self.force_interpreter) {
                             if (wf.jit_code) |jc| {
                                 if (param_count <= 16) {
                                     var arg_buf: [16]u64 = undefined;
@@ -9904,9 +9939,9 @@ test "Resource limits — fuel metering" {
     try testing.expectError(error.FuelExhausted, vm.invoke(&inst, "memory_size", &.{}, &results));
 }
 
-test "Resource limits — fuel metering with infinite loop (JIT suppression)" {
-    // Infinite loop function — without JIT suppression, a high fuel value
-    // would allow JIT to compile the loop and bypass fuel checks forever.
+test "Resource limits — fuel metering with infinite loop (JIT fuel check)" {
+    // Infinite loop function — JIT uses jit_fuel with periodic helper checks
+    // to enforce fuel limits even in JIT-compiled code.
     const wasm = try readTestFile(testing.allocator, "30_infinite_loop.wasm");
     defer testing.allocator.free(wasm);
 
@@ -9990,6 +10025,83 @@ test "Resource limits — deadline timeout API" {
     vm.setDeadlineTimeoutMs(1000);
     vm.setDeadlineTimeoutMs(0);
     try testing.expect(vm.deadline_ns == null);
+}
+
+test "jitFuelCheckHelper — deadline expired returns TimeoutExceeded" {
+    var vm = Vm.init(testing.allocator);
+    vm.deadline_ns = 0; // already expired
+    vm.jit_fuel = -1;
+    vm.jit_fuel_initial = DEADLINE_JIT_INTERVAL;
+
+    const result = Vm.jitFuelCheckHelper(&vm);
+    try testing.expectEqual(@as(u64, 10), result); // TimeoutExceeded
+}
+
+test "jitFuelCheckHelper — deadline not expired re-arms and continues" {
+    var vm = Vm.init(testing.allocator);
+    vm.deadline_ns = std.time.nanoTimestamp() + 10 * std.time.ns_per_s; // 10s from now
+    vm.jit_fuel = -1;
+    vm.jit_fuel_initial = DEADLINE_JIT_INTERVAL;
+
+    const result = Vm.jitFuelCheckHelper(&vm);
+    try testing.expectEqual(@as(u64, 0), result); // continue
+    try testing.expectEqual(DEADLINE_JIT_INTERVAL, vm.jit_fuel); // re-armed
+    try testing.expectEqual(DEADLINE_JIT_INTERVAL, vm.jit_fuel_initial);
+}
+
+test "jitFuelCheckHelper — fuel exhausted returns FuelExhausted" {
+    var vm = Vm.init(testing.allocator);
+    vm.fuel = 100;
+    vm.jit_fuel = -1;
+    vm.jit_fuel_initial = 100; // was armed to fuel budget
+
+    const result = Vm.jitFuelCheckHelper(&vm);
+    try testing.expectEqual(@as(u64, 9), result); // FuelExhausted
+    try testing.expectEqual(@as(u64, 0), vm.fuel.?); // fuel synced to 0
+}
+
+test "jitFuelCheckHelper — fuel+deadline, neither exhausted" {
+    var vm = Vm.init(testing.allocator);
+    vm.fuel = 50_000;
+    vm.deadline_ns = std.time.nanoTimestamp() + 10 * std.time.ns_per_s;
+    vm.jit_fuel = -1;
+    vm.jit_fuel_initial = DEADLINE_JIT_INTERVAL; // min(50000, 10000) = 10000
+
+    const result = Vm.jitFuelCheckHelper(&vm);
+    try testing.expectEqual(@as(u64, 0), result); // continue
+    // Fuel consumed: 10000 - (-1) = 10001
+    try testing.expectEqual(@as(u64, 50_000 - 10_001), vm.fuel.?);
+    // Re-armed: min(39999, 10000) = 10000
+    try testing.expectEqual(DEADLINE_JIT_INTERVAL, vm.jit_fuel);
+}
+
+test "armJitFuel — fuel only" {
+    var vm = Vm.init(testing.allocator);
+    vm.fuel = 500;
+    vm.armJitFuel();
+    try testing.expectEqual(@as(i64, 500), vm.jit_fuel);
+    try testing.expectEqual(@as(i64, 500), vm.jit_fuel_initial);
+}
+
+test "armJitFuel — deadline only" {
+    var vm = Vm.init(testing.allocator);
+    vm.deadline_ns = std.time.nanoTimestamp() + std.time.ns_per_s;
+    vm.armJitFuel();
+    try testing.expectEqual(DEADLINE_JIT_INTERVAL, vm.jit_fuel);
+}
+
+test "armJitFuel — fuel+deadline picks smaller" {
+    var vm = Vm.init(testing.allocator);
+    vm.fuel = 500; // smaller than DEADLINE_JIT_INTERVAL
+    vm.deadline_ns = std.time.nanoTimestamp() + std.time.ns_per_s;
+    vm.armJitFuel();
+    try testing.expectEqual(@as(i64, 500), vm.jit_fuel);
+}
+
+test "armJitFuel — no fuel no deadline stays maxInt" {
+    var vm = Vm.init(testing.allocator);
+    vm.armJitFuel();
+    try testing.expectEqual(@as(i64, std.math.maxInt(i64)), vm.jit_fuel);
 }
 
 test "Back-edge JIT — hasPrologueSideEffects" {

@@ -454,3 +454,40 @@ interpreter-only execution 2.6-7.7x slower than scalar JIT.
 simd_arm64.zig (new), simd_x86.zig (new).
 
 Related: D127 (conditional compilation), `.dev/references/simd-jit-research.md`.
+
+---
+
+## D131: Epoch-Based JIT Timeout — Fuel Check Helper
+
+**Context**: W40 — deadline (wall-clock timeout) suppressed JIT entirely because JIT
+code couldn't check wall-clock time at back-edges. This forced interpreter fallback
+when timeout was active, losing 5-10x performance.
+
+**Decision**: Reuse the existing `jit_fuel` back-edge counter as a periodic interval
+timer. When deadline is active, arm `jit_fuel` to `DEADLINE_JIT_INTERVAL` (10,000
+back-edge ticks). When fuel goes negative, JIT calls `jitFuelCheckHelper` via
+BL (ARM64) / CALL (x86) from a shared out-of-line stub. The helper checks both
+fuel exhaustion and wall-clock deadline, then either re-arms (returns 0 → RET to
+continue JIT) or returns an error code (→ JIT exits to shared epilogue).
+
+**Alternatives considered**:
+1. Signal-based (SIGALRM): lightweight check, but requires platform-specific timer
+   infrastructure and conflicts with existing SIGSEGV guard pages.
+2. Atomic epoch counter (wasmtime-style): clean but requires external timer thread
+   or event loop, unnecessary complexity for single-threaded runtime.
+3. Exit-and-re-enter JIT: impossible without state checkpoint — JIT code has side
+   effects (memory writes, globals) that can't be replayed.
+
+**Error codes**: 9 = FuelExhausted (unchanged), 10 = TimeoutExceeded (new).
+
+**Key design points**:
+- `jit_fuel_initial` field tracks the armed value for fuel sync calculation.
+- `armJitFuel()` sets `jit_fuel = min(fuel, DEADLINE_JIT_INTERVAL)`.
+- `syncJitFuelBack()` decrements `fuel` by consumed ticks after JIT exit.
+- Shared stub spills/reloads caller-saved vregs to reg_stack memory.
+- Stack alignment maintained: ARM64 uses STP/LDP x29,x30; x86 leverages
+  the push rax + CALL = 16 bytes alignment property.
+- No changes to interpreter `consumeInstructionBudget` — both paths coexist.
+
+**Affected files**: vm.zig (helper, fuel arming), jit.zig (ARM64 stub),
+x86.zig (x86_64 stub).
