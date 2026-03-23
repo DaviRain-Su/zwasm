@@ -9,7 +9,7 @@ zwasm is a Zig package. Add it to your `build.zig.zon`:
 ```zig
 .dependencies = .{
     .zwasm = .{
-        .url = "https://github.com/user/zwasm/archive/v1.5.0.tar.gz",
+        .url = "https://github.com/clojurewasm/zwasm/archive/v1.6.1.tar.gz",
         .hash = "...",
     },
 },
