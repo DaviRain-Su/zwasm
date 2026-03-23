@@ -1094,6 +1094,64 @@ const Enc = struct {
     fn andnps(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sseOpNp(buf, alloc, 0x55, dst, src); }
     fn andps_(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sseOpNp(buf, alloc, 0x54, dst, src); }
 
+    // Saturating add/sub (SSE2: 66 0F xx)
+    fn paddsb(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xEC, dst, src); }
+    fn paddsw(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xED, dst, src); }
+    fn paddusb(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xDC, dst, src); }
+    fn paddusw(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xDD, dst, src); }
+    fn psubsb(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xE8, dst, src); }
+    fn psubsw(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xE9, dst, src); }
+    fn psubusb(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xD8, dst, src); }
+    fn psubusw(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xD9, dst, src); }
+
+    // Integer min/max (SSE2/SSE4.1)
+    fn pminsw(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xEA, dst, src); }
+    fn pmaxsw(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xEE, dst, src); }
+    fn pminub(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xDA, dst, src); }
+    fn pmaxub(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xDE, dst, src); }
+    // SSE4.1 min/max (66 0F 38 xx): 3-byte opcode
+    fn sse41Op(buf: *std.ArrayList(u8), alloc: Allocator, op: u8, dst: u4, src: u4) void {
+        buf.append(alloc, 0x66) catch {};
+        if (dst >= 8 or src >= 8) {
+            var r: u8 = 0x40;
+            if (dst >= 8) r |= 0x04;
+            if (src >= 8) r |= 0x01;
+            buf.append(alloc, r) catch {};
+        }
+        buf.appendSlice(alloc, &[_]u8{ 0x0F, 0x38, op }) catch {};
+        buf.append(alloc, modrm(3, @truncate(dst), @truncate(src))) catch {};
+    }
+    fn pminsb(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x38, dst, src); }
+    fn pmaxsb(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x3C, dst, src); }
+    fn pminuw(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x3A, dst, src); }
+    fn pmaxuw(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x3E, dst, src); }
+    fn pminsd(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x39, dst, src); }
+    fn pmaxsd(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x3D, dst, src); }
+    fn pminud(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x3B, dst, src); }
+    fn pmaxud(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x3F, dst, src); }
+    fn pabsb(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x1C, dst, src); }
+    fn pabsw(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x1D, dst, src); }
+    fn pabsd(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x1E, dst, src); }
+    fn pavgb(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xE0, dst, src); }
+    fn pavgw(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xE3, dst, src); }
+
+    /// PSHUFD xmm, xmm, imm8: 66 0F 70 /r imm8
+    fn pshufd(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4, imm8: u8) void {
+        buf.append(alloc, 0x66) catch {};
+        if (dst >= 8 or src >= 8) {
+            var r: u8 = 0x40;
+            if (dst >= 8) r |= 0x04;
+            if (src >= 8) r |= 0x01;
+            buf.append(alloc, r) catch {};
+        }
+        buf.appendSlice(alloc, &[_]u8{ 0x0F, 0x70 }) catch {};
+        buf.append(alloc, modrm(3, @truncate(dst), @truncate(src))) catch {};
+        buf.append(alloc, imm8) catch {};
+    }
+
+    /// PUNPCKLQDQ xmm, xmm: 66 0F 6C /r (interleave low qwords)
+    fn punpcklqdq(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0x6C, dst, src); }
+
     /// CVTSI2SD xmm, r64: F2 REX.W 0F 2A /r (signed i64 → f64)
     fn cvtsi2sd64(buf: *std.ArrayList(u8), alloc: Allocator, xmm: u4, gpr: Reg) void {
         buf.append(alloc, 0xF2) catch {};
@@ -3694,6 +3752,69 @@ pub const Compiler = struct {
             // --- f64x2 min/max ---
             0xF4 => { self.emitSimdBinarySse(instr, &Enc.minpd); return true; }, // f64x2.min
             0xF5 => { self.emitSimdBinarySse(instr, &Enc.maxpd); return true; }, // f64x2.max
+
+            // --- saturating add/sub ---
+            0x6F => { self.emitSimdBinarySse(instr, &Enc.paddsb); return true; }, // i8x16.add_sat_s
+            0x70 => { self.emitSimdBinarySse(instr, &Enc.paddusb); return true; }, // i8x16.add_sat_u
+            0x72 => { self.emitSimdBinarySse(instr, &Enc.psubsb); return true; }, // i8x16.sub_sat_s
+            0x73 => { self.emitSimdBinarySse(instr, &Enc.psubusb); return true; }, // i8x16.sub_sat_u
+            0x8F => { self.emitSimdBinarySse(instr, &Enc.paddsw); return true; }, // i16x8.add_sat_s
+            0x90 => { self.emitSimdBinarySse(instr, &Enc.paddusw); return true; }, // i16x8.add_sat_u
+            0x92 => { self.emitSimdBinarySse(instr, &Enc.psubsw); return true; }, // i16x8.sub_sat_s
+            0x93 => { self.emitSimdBinarySse(instr, &Enc.psubusw); return true; }, // i16x8.sub_sat_u
+
+            // --- integer min/max ---
+            0x76 => { self.emitSimdBinarySse(instr, &Enc.pminsb); return true; }, // i8x16.min_s (SSE4.1)
+            0x77 => { self.emitSimdBinarySse(instr, &Enc.pminub); return true; }, // i8x16.min_u
+            0x78 => { self.emitSimdBinarySse(instr, &Enc.pmaxsb); return true; }, // i8x16.max_s (SSE4.1)
+            0x79 => { self.emitSimdBinarySse(instr, &Enc.pmaxub); return true; }, // i8x16.max_u
+            0x96 => { self.emitSimdBinarySse(instr, &Enc.pminsw); return true; }, // i16x8.min_s
+            0x97 => { self.emitSimdBinarySse(instr, &Enc.pminuw); return true; }, // i16x8.min_u (SSE4.1)
+            0x98 => { self.emitSimdBinarySse(instr, &Enc.pmaxsw); return true; }, // i16x8.max_s
+            0x99 => { self.emitSimdBinarySse(instr, &Enc.pmaxuw); return true; }, // i16x8.max_u (SSE4.1)
+            0xB6 => { self.emitSimdBinarySse(instr, &Enc.pminsd); return true; }, // i32x4.min_s (SSE4.1)
+            0xB7 => { self.emitSimdBinarySse(instr, &Enc.pminud); return true; }, // i32x4.min_u (SSE4.1)
+            0xB8 => { self.emitSimdBinarySse(instr, &Enc.pmaxsd); return true; }, // i32x4.max_s (SSE4.1)
+            0xB9 => { self.emitSimdBinarySse(instr, &Enc.pmaxud); return true; }, // i32x4.max_u (SSE4.1)
+
+            // --- integer abs (SSSE3: 66 0F 38 xx) ---
+            0x60 => { self.emitSimdUnarySse(instr, &Enc.pabsb); return true; }, // i8x16.abs
+            0x80 => { self.emitSimdUnarySse(instr, &Enc.pabsw); return true; }, // i16x8.abs
+            0xA0 => { self.emitSimdUnarySse(instr, &Enc.pabsd); return true; }, // i32x4.abs
+
+            // --- avgr_u ---
+            0x7B => { self.emitSimdBinarySse(instr, &Enc.pavgb); return true; }, // i8x16.avgr_u
+            0x9B => { self.emitSimdBinarySse(instr, &Enc.pavgw); return true; }, // i16x8.avgr_u
+
+            // --- splat ---
+            0x11 => { // i32x4.splat: MOVD + PSHUFD 0x00
+                const src = self.getOrLoad(instr.rs1, SCRATCH);
+                Enc.movdToXmm(&self.code, self.alloc, SIMD_SCRATCH0, src);
+                Enc.pshufd(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0, 0x00);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x12 => { // i64x2.splat: MOVQ + PUNPCKLQDQ
+                const src = self.getOrLoad(instr.rs1, SCRATCH);
+                Enc.movqToXmm(&self.code, self.alloc, SIMD_SCRATCH0, src);
+                Enc.punpcklqdq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x13 => { // f32x4.splat: same as i32x4.splat
+                const src = self.getOrLoad(instr.rs1, SCRATCH);
+                Enc.movdToXmm(&self.code, self.alloc, SIMD_SCRATCH0, src);
+                Enc.pshufd(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0, 0x00);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x14 => { // f64x2.splat: same as i64x2.splat
+                const src = self.getOrLoad(instr.rs1, SCRATCH);
+                Enc.movqToXmm(&self.code, self.alloc, SIMD_SCRATCH0, src);
+                Enc.punpcklqdq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
 
             else => return false,
         }
