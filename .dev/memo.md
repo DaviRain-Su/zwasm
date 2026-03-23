@@ -42,12 +42,15 @@ Session handover document. Read at session start.
   - Foundation DONE: simd_hi_offset, has_simd, SSE encoders, emitLoadV128/StoreV128
   - SIMD trampoline DONE: all SIMD functions JIT-accepted on x86 (trampoline fallback)
   - OP_MOV/CONST simd_hi handling DONE
-  - **~200 native SSE opcodes**: bitwise, int arithmetic/sat/min/max/abs/neg/avgr,
-    all signed int + float comparisons, f32x4/f64x2 full (arith/sqrt/min/max/rounding),
-    v128 load/store/const, extract/replace/lane, splat, extend/narrow, shift, convert,
-    bitmask (i8x16/i32x4/i64x2), swizzle (PSHUFB), bitselect, any_true
+  - **~212 native SSE opcodes** (83%, 92% of non-relaxed):
+    all comparisons (signed+unsigned), all arithmetic/sat/min/max/abs/neg/avgr,
+    f32x4/f64x2 full (arith/sqrt/min/max/rounding/abs/neg/pmin/pmax/compare),
+    v128 load/store/const, all lane ops, load/store lane, load splat/zero/extend,
+    splat, extend/narrow, shift, convert, demote/promote, bitmask, swizzle,
+    bitselect, any/all_true, dot, q15mulr
   - Ubuntu x86_64: 62,263/62,263 spec tests pass
-  - **Next**: load variants (splat/zero/extend), extmul, unsigned compare, remaining convert
+  - Remaining trampoline (~24 non-relaxed + 20 relaxed): byte shift/shuffle/popcnt,
+    extmul, extadd_pairwise, i64x2 mul/abs/shr_s, unsigned convert
   - **Long-term**: NEON register allocator or contiguous v128 storage
 - See `@./.dev/roadmap.md` Phase 13 for step breakdown (13.0-13.8)
 
