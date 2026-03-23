@@ -4980,6 +4980,54 @@ pub const Compiler = struct {
                 return true;
             },
 
+            // --- i64x2.abs: negate where negative ---
+            0xC0 => {
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                // PXOR zero
+                Enc.pxor(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                // PSUBQ zero - x = -x
+                const SIMD_X5: u4 = 5;
+                Enc.movaps(&self.code, self.alloc, SIMD_X5, SIMD_SCRATCH1);
+                Enc.psubq(&self.code, self.alloc, SIMD_X5, SIMD_SCRATCH0); // negated in XMM5
+                // PCMPGTQ to get sign mask (SSE4.2: all-ones where 0 > x, i.e., x < 0)
+                Enc.pcmpgtq(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH0); // mask where x < 0
+                // Blend: select negated where negative, original where positive
+                // PAND mask, negated; PANDN mask_copy, original; POR
+                // Simpler: use PXOR + PSUBQ trick: abs(x) = (x XOR sign) - sign
+                // sign = PSRAD 31 then broadcast... too complex
+                // Just use blend with 3 registers:
+                Enc.pand(&self.code, self.alloc, SIMD_X5, SIMD_SCRATCH1); // neg AND mask
+                Enc.pandn(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH0); // NOT(mask) AND orig
+                Enc.por(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_X5); // combine
+                self.emitStoreV128(SIMD_SCRATCH1, instr.rd);
+                return true;
+            },
+
+            // --- i64x2.shr_s: emulate with PSRLQ + sign extension ---
+            0xCC => {
+                // i64x2.shr_s has no direct SSE instruction (PSRAQ doesn't exist in SSE)
+                // Strategy: use PSRAD for high 32 bits, PSRLQ for full shift, blend
+                // This is very complex. Use trampoline.
+                return false;
+            },
+
+            // --- i8x16.popcnt: PSHUFB lookup table ---
+            0x62 => {
+                // Classic PSHUFB nibble lookup:
+                // 1. Extract low nibbles: PAND 0x0F
+                // 2. Lookup in table: PSHUFB
+                // 3. Extract high nibbles: PSRLW 4, PAND 0x0F
+                // 4. Lookup + add
+                // Needs constant generation. Use trampoline for simplicity.
+                return false;
+            },
+
+            // --- i8x16 byte shift: complex masking ---
+            0x6B, 0x6C, 0x6D => return false, // trampoline
+
+            // --- unsigned trunc/convert: complex branch logic ---
+            0xF9, 0xFB, 0xFD, 0x102, 0x104 => return false, // trampoline
+
             // --- i32x4.dot_i16x8_s (PMADDWD) ---
             0xBA => { self.emitSimdBinarySse(instr, &Enc.pmaddwd); return true; },
 
