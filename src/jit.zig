@@ -4482,6 +4482,67 @@ pub const Compiler = struct {
                 return true;
             },
 
+            // --- bitmask ---
+            0x64 => { // i8x16.bitmask — SSHR + USHR/SLI ladder + extract
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                // SSHR V0.16B, V0.16B, #7 — sign bits → 0xFF/0x00
+                self.emit(0x4F090400 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
+                // Pack 2 bits per 16-bit lane
+                self.emit(0x6F190400 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH1); // USHR V1.8H, V0.8H, #7
+                self.emit(0x6F115400 | (@as(u32, SIMD_SCRATCH1) << 5) | SIMD_SCRATCH0); // SLI V0.8H, V1.8H, #1
+                // Pack 4 bits per 32-bit lane
+                self.emit(0x6F320400 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH1); // USHR V1.4S, V0.4S, #14
+                self.emit(0x6F225400 | (@as(u32, SIMD_SCRATCH1) << 5) | SIMD_SCRATCH0); // SLI V0.4S, V1.4S, #2
+                // Pack 8 bits per 64-bit lane
+                self.emit(0x6F640400 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH1); // USHR V1.2D, V0.2D, #28
+                self.emit(0x6F445400 | (@as(u32, SIMD_SCRATCH1) << 5) | SIMD_SCRATCH0); // SLI V0.2D, V1.2D, #4
+                // Extract and combine: UMOV lo + hi, ORR
+                const d = destReg(instr.rd);
+                self.emit(0x0E013C00 | (@as(u32, SIMD_SCRATCH0) << 5) | d); // UMOV Wd, V0.B[0]
+                self.emit(0x0E013C00 | (8 << 17) | (@as(u32, SIMD_SCRATCH0) << 5) | SCRATCH); // UMOV W_SCRATCH, V0.B[8]
+                // ORR Wd, Wd, W_SCRATCH, LSL #8
+                self.emit(0x2A000000 | (@as(u32, SCRATCH) << 16) | (8 << 10) | (@as(u32, d) << 5) | d);
+                self.storeVreg(instr.rd, d);
+                return true;
+            },
+            0x84 => { // i16x8.bitmask
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emit(0x4F110400 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0); // SSHR V0.8H, #15
+                self.emit(0x6F310400 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH1); // USHR V1.4S, V0.4S, #15
+                self.emit(0x6F215400 | (@as(u32, SIMD_SCRATCH1) << 5) | SIMD_SCRATCH0); // SLI V0.4S, V1.4S, #1
+                self.emit(0x6F620400 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH1); // USHR V1.2D, V0.2D, #30
+                self.emit(0x6F425400 | (@as(u32, SIMD_SCRATCH1) << 5) | SIMD_SCRATCH0); // SLI V0.2D, V1.2D, #2
+                const d = destReg(instr.rd);
+                self.emit(0x0E013C00 | (@as(u32, SIMD_SCRATCH0) << 5) | d); // UMOV Wd, V0.B[0]
+                self.emit(0x0E013C00 | (8 << 17) | (@as(u32, SIMD_SCRATCH0) << 5) | SCRATCH); // UMOV W, V0.B[8]
+                self.emit(0x2A000000 | (@as(u32, SCRATCH) << 16) | (4 << 10) | (@as(u32, d) << 5) | d); // ORR Wd, Wd, W, LSL #4
+                self.storeVreg(instr.rd, d);
+                return true;
+            },
+            0xA4 => { // i32x4.bitmask
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emit(0x4F210400 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0); // SSHR V0.4S, #31
+                self.emit(0x6F610400 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH1); // USHR V1.2D, V0.2D, #31
+                self.emit(0x6F415400 | (@as(u32, SIMD_SCRATCH1) << 5) | SIMD_SCRATCH0); // SLI V0.2D, V1.2D, #1
+                const d = destReg(instr.rd);
+                self.emit(0x0E013C00 | (@as(u32, SIMD_SCRATCH0) << 5) | d); // UMOV Wd, V0.B[0]
+                self.emit(0x0E013C00 | (8 << 17) | (@as(u32, SIMD_SCRATCH0) << 5) | SCRATCH); // UMOV W, V0.B[8]
+                self.emit(0x2A000000 | (@as(u32, SCRATCH) << 16) | (2 << 10) | (@as(u32, d) << 5) | d); // ORR Wd, Wd, W, LSL #2
+                self.storeVreg(instr.rd, d);
+                return true;
+            },
+            0xC4 => { // i64x2.bitmask
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emit(0x6F410400 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0); // USHR V0.2D, #63
+                const d = destReg(instr.rd);
+                self.emit(0x0E043C00 | (@as(u32, SIMD_SCRATCH0) << 5) | d); // UMOV Wd, V0.S[0]
+                // V0.S[2] = low 32 bits of V0.D[1] (lane index 2 for .S)
+                self.emit(0x0E043C00 | (@as(u32, 2) << 21) | (@as(u32, SIMD_SCRATCH0) << 5) | SCRATCH); // UMOV W, V0.S[2]
+                self.emit(0x2A000000 | (@as(u32, SCRATCH) << 16) | (1 << 10) | (@as(u32, d) << 5) | d); // ORR Wd, Wd, W, LSL #1
+                self.storeVreg(instr.rd, d);
+                return true;
+            },
+
             // --- v128.any_true ---
             0x53 => { // v128.any_true — UMAXV + check
                 self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
