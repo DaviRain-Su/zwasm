@@ -4466,6 +4466,10 @@ pub const Compiler = struct {
             0x77 => { self.emitSimdBinaryNeon(instr, 0x6E206C00); return true; }, // i8x16.min_u — UMIN .16B
             0x78 => { self.emitSimdBinaryNeon(instr, 0x4E206400); return true; }, // i8x16.max_s — SMAX .16B
             0x79 => { self.emitSimdBinaryNeon(instr, 0x6E206400); return true; }, // i8x16.max_u — UMAX .16B
+            0x6F => { self.emitSimdBinaryNeon(instr, 0x4E200C00); return true; }, // i8x16.add_sat_s — SQADD .16B
+            0x70 => { self.emitSimdBinaryNeon(instr, 0x6E200C00); return true; }, // i8x16.add_sat_u — UQADD .16B
+            0x72 => { self.emitSimdBinaryNeon(instr, 0x4E202C00); return true; }, // i8x16.sub_sat_s — SQSUB .16B
+            0x73 => { self.emitSimdBinaryNeon(instr, 0x6E202C00); return true; }, // i8x16.sub_sat_u — UQSUB .16B
             // --- i16x8 arithmetic ---
             0x8E => { self.emitSimdBinaryNeon(instr, 0x4E608400); return true; }, // i16x8.add — ADD .8H
             0x91 => { self.emitSimdBinaryNeon(instr, 0x6E608400); return true; }, // i16x8.sub — SUB .8H
@@ -4476,6 +4480,10 @@ pub const Compiler = struct {
             0x97 => { self.emitSimdBinaryNeon(instr, 0x6E606C00); return true; }, // i16x8.min_u — UMIN .8H
             0x98 => { self.emitSimdBinaryNeon(instr, 0x4E606400); return true; }, // i16x8.max_s — SMAX .8H
             0x99 => { self.emitSimdBinaryNeon(instr, 0x6E606400); return true; }, // i16x8.max_u — UMAX .8H
+            0x8F => { self.emitSimdBinaryNeon(instr, 0x4E600C00); return true; }, // i16x8.add_sat_s — SQADD .8H
+            0x90 => { self.emitSimdBinaryNeon(instr, 0x6E600C00); return true; }, // i16x8.add_sat_u — UQADD .8H
+            0x92 => { self.emitSimdBinaryNeon(instr, 0x4E602C00); return true; }, // i16x8.sub_sat_s — SQSUB .8H
+            0x93 => { self.emitSimdBinaryNeon(instr, 0x6E602C00); return true; }, // i16x8.sub_sat_u — UQSUB .8H
 
             // --- i16x8 extend (unary) ---
             0x87 => { // i16x8.extend_low_i8x16_s — SXTL V.8H, V.8B
@@ -4732,6 +4740,60 @@ pub const Compiler = struct {
                 self.emit(a64.sub32(SCRATCH, 31, shift_reg));
                 self.emit(0x4E080C00 | (@as(u32, SCRATCH) << 5) | SIMD_SCRATCH1);
                 self.emit(0x6EE04400 | (@as(u32, SIMD_SCRATCH1) << 16) | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0); // USHL .2D
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+
+            // --- f32x4 comparisons ---
+            0x41 => { self.emitSimdBinaryNeon(instr, 0x4E20E400); return true; }, // f32x4.eq — FCMEQ .4S
+            0x42 => { // f32x4.ne — FCMEQ + NOT
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                self.emit(0x4E20E400 | (@as(u32, SIMD_SCRATCH1) << 16) | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
+                self.emit(a64.notV16b(SIMD_SCRATCH0, SIMD_SCRATCH0));
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x44 => { self.emitSimdBinaryNeon(instr, 0x6EA0E400); return true; }, // f32x4.gt — FCMGT .4S
+            0x46 => { self.emitSimdBinaryNeon(instr, 0x6E20E400); return true; }, // f32x4.ge — FCMGE .4S
+            0x43 => { // f32x4.lt — FCMGT swapped
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs2_field);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs1);
+                self.emit(0x6EA0E400 | (@as(u32, SIMD_SCRATCH1) << 16) | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x45 => { // f32x4.le — FCMGE swapped
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs2_field);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs1);
+                self.emit(0x6E20E400 | (@as(u32, SIMD_SCRATCH1) << 16) | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+
+            // --- f64x2 comparisons ---
+            0x47 => { self.emitSimdBinaryNeon(instr, 0x4E60E400); return true; }, // f64x2.eq — FCMEQ .2D
+            0x48 => { // f64x2.ne — FCMEQ + NOT
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                self.emit(0x4E60E400 | (@as(u32, SIMD_SCRATCH1) << 16) | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
+                self.emit(a64.notV16b(SIMD_SCRATCH0, SIMD_SCRATCH0));
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x4A => { self.emitSimdBinaryNeon(instr, 0x6EE0E400); return true; }, // f64x2.gt — FCMGT .2D
+            0x4C => { self.emitSimdBinaryNeon(instr, 0x6E60E400); return true; }, // f64x2.ge — FCMGE .2D
+            0x49 => { // f64x2.lt — FCMGT swapped
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs2_field);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs1);
+                self.emit(0x6EE0E400 | (@as(u32, SIMD_SCRATCH1) << 16) | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x4B => { // f64x2.le — FCMGE swapped
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs2_field);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs1);
+                self.emit(0x6E60E400 | (@as(u32, SIMD_SCRATCH1) << 16) | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
                 self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
                 return true;
             },
