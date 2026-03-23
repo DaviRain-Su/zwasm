@@ -746,6 +746,33 @@ const a64 = struct {
         return 0x6E205800 | (@as(u32, vn) << 5) | vd;
     }
 
+    /// INS Vd.D[1], Xn — insert GP register into vector lane D[1] (upper 64 bits)
+    fn insVdD1(vd: u5, xn: u5) u32 {
+        return 0x4E180000 | (@as(u32, xn) << 5) | @as(u32, vd);
+    }
+
+    /// UMOV Xd, Vn.D[1] — extract vector lane D[1] to GP register
+    fn umovXdD1(xd: u5, vn: u5) u32 {
+        return 0x4E183C00 | (@as(u32, vn) << 5) | @as(u32, xd);
+    }
+
+    /// LDR Dt, [Xn, #imm] — load 64-bit FP/SIMD, unsigned offset (imm_bytes / 8)
+    fn ldrFp64(dt: u5, xn: u5, imm_bytes: u16) u32 {
+        const imm12: u12 = @intCast(imm_bytes / 8);
+        return 0xFD400000 | (@as(u32, imm12) << 10) | (@as(u32, xn) << 5) | dt;
+    }
+
+    /// STR Dt, [Xn, #imm] — store 64-bit FP/SIMD, unsigned offset (imm_bytes / 8)
+    fn strFp64(dt: u5, xn: u5, imm_bytes: u16) u32 {
+        const imm12: u12 = @intCast(imm_bytes / 8);
+        return 0xFD000000 | (@as(u32, imm12) << 10) | (@as(u32, xn) << 5) | dt;
+    }
+
+    /// MOV Vd.16B, Vn.16B — copy 128-bit vector (alias for ORR Vd, Vn, Vn)
+    fn movV16b(vd: u5, vn: u5) u32 {
+        return orrV16b(vd, vn, vn);
+    }
+
     // --- Floating-point (double-precision, f64) ---
 
     /// FMOV Dd, Xn — move 64-bit GPR to FP register.
@@ -2974,9 +3001,11 @@ pub const Compiler = struct {
             predecode_mod.GC_BASE | 0x04 => self.emitGcSimple(instr, ir, pc.* - 1), // struct.get_u
             predecode_mod.GC_BASE | 0x05 => self.emitGcSimple(instr, ir, pc.* - 1), // struct.set
 
-            // ---- SIMD opcodes: trampoline to interpreter ----
+            // ---- SIMD opcodes: native NEON or trampoline fallback ----
             predecode_mod.SIMD_BASE...predecode_mod.SIMD_BASE + 0x113 => {
-                self.emitSimdTrampoline(instr, ir, pc);
+                if (!self.emitSimdNative(instr, ir, pc)) {
+                    self.emitSimdTrampoline(instr, ir, pc);
+                }
             },
 
             // Unsupported opcode — bail out, function can't be JIT compiled
@@ -4082,6 +4111,149 @@ pub const Compiler = struct {
         self.reloadCallerSavedLive();
         // Reload result register (for get ops and struct.new_default)
         if (sub_op <= 0x04) self.reloadVreg(instr.rd);
+    }
+
+    // --- SIMD v128 helpers ---
+
+    /// NEON scratch registers for SIMD. Using Q0/Q1 (caller-saved, volatile).
+    const SIMD_SCRATCH0: u5 = 0; // V0/Q0
+    const SIMD_SCRATCH1: u5 = 1; // V1/Q1
+
+    /// Load v128 from regs[vreg] + simd_hi[vreg] into NEON Q register.
+    /// Uses SCRATCH (x8) as temp. 3 instructions.
+    fn emitLoadV128(self: *Compiler, qd: u5, vreg: u16) void {
+        const vreg_offset: u16 = vreg * 8;
+        // Step 1: LDR Dd, [REGS_PTR, #vreg*8] — load lower 64 bits into D register
+        //         (upper 64 bits of Qd are zeroed by LDR D)
+        self.emit(a64.ldrFp64(qd, REGS_PTR, vreg_offset));
+        // Step 2: LDR X8, [VM_PTR, #simd_hi_offset + vreg*8] — load upper 64 bits to GP
+        self.emitLoadVmPtr(SCRATCH);
+        const hi_offset = self.simd_hi_offset + @as(u32, vreg) * 8;
+        if (hi_offset <= 32760) {
+            self.emit(a64.ldr64(SCRATCH, SCRATCH, @intCast(hi_offset)));
+        } else {
+            // Large offset: use SCRATCH2 for address
+            const hi_instrs = a64.loadImm64(SCRATCH2, hi_offset);
+            for (hi_instrs) |inst| self.emit(inst);
+            self.emit(a64.add64(SCRATCH, SCRATCH, SCRATCH2));
+            self.emit(a64.ldr64(SCRATCH, SCRATCH, 0));
+        }
+        // Step 3: INS Vd.D[1], X8 — insert upper half
+        self.emit(a64.insVdD1(qd, SCRATCH));
+    }
+
+    /// Store NEON Q register to regs[vreg] + simd_hi[vreg].
+    /// Uses SCRATCH (x8) as temp. 3 instructions.
+    fn emitStoreV128(self: *Compiler, qs: u5, vreg: u16) void {
+        const vreg_offset: u16 = vreg * 8;
+        // Step 1: STR Ds, [REGS_PTR, #vreg*8] — store lower 64 bits from D register
+        self.emit(a64.strFp64(qs, REGS_PTR, vreg_offset));
+        // Step 2: UMOV X8, Vs.D[1] — extract upper 64 bits to GP
+        self.emit(a64.umovXdD1(SCRATCH, qs));
+        // Step 3: STR X8, [VM_PTR, #simd_hi_offset + vreg*8] — store upper 64 bits
+        self.emitLoadVmPtr(SCRATCH2);
+        const hi_offset = self.simd_hi_offset + @as(u32, vreg) * 8;
+        if (hi_offset <= 32760) {
+            self.emit(a64.str64(SCRATCH, SCRATCH2, @intCast(hi_offset)));
+        } else {
+            const hi_instrs = a64.loadImm64(17, hi_offset); // use x17 as temp
+            for (hi_instrs) |inst| self.emit(inst);
+            self.emit(a64.add64(SCRATCH2, SCRATCH2, 17));
+            self.emit(a64.str64(SCRATCH, SCRATCH2, 0));
+        }
+    }
+
+    /// Emit native NEON instruction for a binary v128 op.
+    /// Pattern: load rs1 → Q0, load rs2 → Q1, op Q0 ← Q0,Q1, store Q0 → rd.
+    fn emitSimdBinaryNeon(self: *Compiler, instr: RegInstr, neon_insn: u32) void {
+        self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+        self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+        // Replace Vd/Vn/Vm fields in neon_insn with SCRATCH0/SCRATCH1
+        const insn = (neon_insn & 0xFFE0FC00) | (@as(u32, SIMD_SCRATCH1) << 16) | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0;
+        self.emit(insn);
+        self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+    }
+
+    /// Emit native NEON instruction for a unary v128 op.
+    fn emitSimdUnaryNeon(self: *Compiler, instr: RegInstr, neon_insn: u32) void {
+        self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+        const insn = (neon_insn & 0xFFFFFC00) | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0;
+        self.emit(insn);
+        self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+    }
+
+    /// Try to emit native NEON for a SIMD opcode. Returns true if handled.
+    fn emitSimdNative(self: *Compiler, instr: RegInstr, ir: []const RegInstr, pc: *u32) bool {
+        const sub: u32 = instr.op - predecode_mod.SIMD_BASE;
+
+        // Check if handled natively — if so, consume trailing NOP if present
+        const handled = self.emitSimdNativeInner(instr, sub);
+        if (handled) {
+            // Consume trailing NOP (extra metadata) if present
+            if (pc.* < ir.len and ir[pc.*].op == regalloc_mod.OP_NOP) {
+                pc.* += 1;
+            }
+        }
+        return handled;
+    }
+
+    fn emitSimdNativeInner(self: *Compiler, instr: RegInstr, sub: u32) bool {
+        switch (sub) {
+            // --- f32x4 arithmetic ---
+            0xE4 => { self.emitSimdBinaryNeon(instr, a64.faddV4s(0, 0, 0)); return true; }, // f32x4.add
+            0xE5 => { self.emitSimdBinaryNeon(instr, a64.fsubV4s(0, 0, 0)); return true; }, // f32x4.sub
+            0xE6 => { self.emitSimdBinaryNeon(instr, a64.fmulV4s(0, 0, 0)); return true; }, // f32x4.mul
+            0xE7 => { self.emitSimdBinaryNeon(instr, a64.fdivV4s(0, 0, 0)); return true; }, // f32x4.div
+            // --- f64x2 arithmetic ---
+            0xF0 => { self.emitSimdBinaryNeon(instr, a64.faddV2d(0, 0, 0)); return true; }, // f64x2.add
+            0xF2 => { self.emitSimdBinaryNeon(instr, a64.fmulV2d(0, 0, 0)); return true; }, // f64x2.mul
+            // --- i32x4 arithmetic ---
+            0xAE => { self.emitSimdBinaryNeon(instr, a64.addV4s(0, 0, 0)); return true; }, // i32x4.add
+            0xB1 => { self.emitSimdBinaryNeon(instr, a64.subV4s(0, 0, 0)); return true; }, // i32x4.sub
+            // --- v128 bitwise ---
+            0x4E => { self.emitSimdBinaryNeon(instr, a64.andV16b(0, 0, 0)); return true; }, // v128.and
+            0x4F => { // v128.andnot — ARM64: BIC Vd, Vn, Vm (= Vn AND NOT Vm)
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                // BIC Vd.16B, Vn.16B, Vm.16B = 0x4E601C00
+                self.emit(0x4E601C00 | (@as(u32, SIMD_SCRATCH1) << 16) | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x50 => { self.emitSimdBinaryNeon(instr, a64.orrV16b(0, 0, 0)); return true; }, // v128.or
+            0x51 => { self.emitSimdBinaryNeon(instr, a64.eorV16b(0, 0, 0)); return true; }, // v128.xor
+            0x4D => { self.emitSimdUnaryNeon(instr, a64.notV16b(0, 0)); return true; }, // v128.not
+            // --- v128.const ---
+            0x0C => {
+                // Load 128-bit constant from pool64[operand] (2x u64)
+                const pool_idx = instr.operand;
+                if (pool_idx + 1 < self.pool64.len) {
+                    const lo = self.pool64[pool_idx];
+                    const hi = self.pool64[pool_idx + 1];
+                    // Store lo to regs[rd], hi to simd_hi[rd]
+                    const d = destReg(instr.rd);
+                    const lo_instrs = a64.loadImm64(d, lo);
+                    for (lo_instrs) |inst| self.emit(inst);
+                    self.storeVreg(instr.rd, d);
+                    // Store hi to simd_hi[rd]
+                    const hi_instrs = a64.loadImm64(SCRATCH, hi);
+                    for (hi_instrs) |inst| self.emit(inst);
+                    self.emitLoadVmPtr(SCRATCH2);
+                    const hi_offset = self.simd_hi_offset + @as(u32, instr.rd) * 8;
+                    if (hi_offset <= 32760) {
+                        self.emit(a64.str64(SCRATCH, SCRATCH2, @intCast(hi_offset)));
+                    } else {
+                        const off_instrs = a64.loadImm64(17, hi_offset);
+                        for (off_instrs) |inst| self.emit(inst);
+                        self.emit(a64.add64(SCRATCH2, SCRATCH2, 17));
+                        self.emit(a64.str64(SCRATCH, SCRATCH2, 0));
+                    }
+                    return true;
+                }
+                return false;
+            },
+            else => return false,
+        }
     }
 
     /// Emit SIMD trampoline call: spill → set up args → BLR → error check → reload.
