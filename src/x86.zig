@@ -2007,7 +2007,7 @@ pub const Compiler = struct {
 
     /// Store vreg value to regs[result_idx] for multi-value return.
     fn emitStoreResultVreg(self: *Compiler, result_idx: u32, vreg: u16) void {
-        const disp: i32 = @as(i32, result_idx) * 8;
+        const disp: i32 = @as(i32, @intCast(result_idx)) * 8;
         if (vregToPhys(vreg)) |phys| {
             Enc.storeDisp32(&self.code, self.alloc, REGS_PTR, disp, phys);
         } else {
@@ -2166,7 +2166,7 @@ pub const Compiler = struct {
 
             // Check result: TEST rax, rax; JNZ .exit_error
             Enc.testRegReg(&self.code, self.alloc, .rax, .rax);
-            const jnz_off = Enc.jccRel32(&self.code, self.alloc, .nz);
+            const jnz_off = Enc.jccRel32(&self.code, self.alloc, .ne);
 
             // Reload caller-saved vregs from memory
             if (max > FIRST_CALLER_SAVED_VREG) {
