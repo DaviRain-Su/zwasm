@@ -768,6 +768,18 @@ const a64 = struct {
         return 0xFD000000 | (@as(u32, imm12) << 10) | (@as(u32, xn) << 5) | dt;
     }
 
+    /// LDR Qt, [Xn, #imm] — load 128-bit FP/SIMD, unsigned offset (imm_bytes / 16)
+    fn ldrFp128(qt: u5, xn: u5, imm_bytes: u16) u32 {
+        const imm12: u12 = @intCast(imm_bytes / 16);
+        return 0x3DC00000 | (@as(u32, imm12) << 10) | (@as(u32, xn) << 5) | qt;
+    }
+
+    /// STR Qt, [Xn, #imm] — store 128-bit FP/SIMD, unsigned offset (imm_bytes / 16)
+    fn strFp128(qt: u5, xn: u5, imm_bytes: u16) u32 {
+        const imm12: u12 = @intCast(imm_bytes / 16);
+        return 0x3D800000 | (@as(u32, imm12) << 10) | (@as(u32, xn) << 5) | qt;
+    }
+
     /// MOV Vd.16B, Vn.16B — copy 128-bit vector (alias for ORR Vd, Vn, Vn)
     fn movV16b(vd: u5, vn: u5) u32 {
         return orrV16b(vd, vn, vn);
@@ -1039,7 +1051,7 @@ pub const Compiler = struct {
     result_count: u16,
     reg_ptr_offset: u32,
     jit_fuel_offset: u32,
-    simd_hi_offset: u32,
+    simd_v128_offset: u32,
     min_memory_bytes: u32,
     /// Bitmask of vregs that need loading in the prologue.
     /// Bit N = 1 means vreg N is read before written and must be loaded.
@@ -1143,7 +1155,7 @@ pub const Compiler = struct {
             .result_count = 0,
             .reg_ptr_offset = 0,
             .jit_fuel_offset = 0,
-            .simd_hi_offset = 0,
+            .simd_v128_offset = 0,
             .min_memory_bytes = 0,
             .prologue_load_mask = 0xFFFFF, // default: load all (20 vregs)
             .known_consts = .{null} ** 128,
@@ -4131,48 +4143,35 @@ pub const Compiler = struct {
     const SIMD_SCRATCH0: u5 = 0; // V0/Q0
     const SIMD_SCRATCH1: u5 = 1; // V1/Q1
 
-    /// Load v128 from regs[vreg] + simd_hi[vreg] into NEON Q register.
-    /// Uses SCRATCH (x8) as temp. 3 instructions.
-    fn emitLoadV128(self: *Compiler, qd: u5, vreg: u16) void {
-        const vreg_offset: u16 = vreg * 8;
-        // Step 1: LDR Dd, [REGS_PTR, #vreg*8] — load lower 64 bits into D register
-        //         (upper 64 bits of Qd are zeroed by LDR D)
-        self.emit(a64.ldrFp64(qd, REGS_PTR, vreg_offset));
-        // Step 2: LDR X8, [VM_PTR, #simd_hi_offset + vreg*8] — load upper 64 bits to GP
+    /// Compute the base address of simd_v128[vreg] into SCRATCH.
+    /// simd_v128 is [512][2]u64 align(16), so each entry is 16 bytes.
+    fn emitSimdV128Addr(self: *Compiler, vreg: u16) void {
         self.emitLoadVmPtr(SCRATCH);
-        const hi_offset = self.simd_hi_offset + @as(u32, vreg) * 8;
-        if (hi_offset <= 32760) {
-            self.emit(a64.ldr64(SCRATCH, SCRATCH, @intCast(hi_offset)));
+        const byte_offset = self.simd_v128_offset + @as(u32, vreg) * 16;
+        if (byte_offset <= 4095) {
+            self.emit(a64.addImm64(SCRATCH, SCRATCH, @intCast(byte_offset)));
         } else {
-            // Large offset: use SCRATCH2 for address
-            const hi_instrs = a64.loadImm64(SCRATCH2, hi_offset);
-            for (hi_instrs) |inst| self.emit(inst);
+            const offset_instrs = a64.loadImm64(SCRATCH2, byte_offset);
+            for (offset_instrs) |inst| self.emit(inst);
             self.emit(a64.add64(SCRATCH, SCRATCH, SCRATCH2));
-            self.emit(a64.ldr64(SCRATCH, SCRATCH, 0));
         }
-        // Step 3: INS Vd.D[1], X8 — insert upper half
-        self.emit(a64.insVdD1(qd, SCRATCH));
     }
 
-    /// Store NEON Q register to regs[vreg] + simd_hi[vreg].
-    /// Uses SCRATCH (x8) as temp. 3 instructions.
+    /// Load v128 from simd_v128[vreg] into NEON Q register (contiguous 128-bit).
+    fn emitLoadV128(self: *Compiler, qd: u5, vreg: u16) void {
+        self.emitSimdV128Addr(vreg);
+        // LDR Q, [SCRATCH] — single 128-bit load
+        self.emit(a64.ldrFp128(qd, SCRATCH, 0));
+    }
+
+    /// Store NEON Q register to simd_v128[vreg] (contiguous 128-bit).
+    /// Also writes lo half to regs[vreg] for trampoline/interpreter compatibility.
     fn emitStoreV128(self: *Compiler, qs: u5, vreg: u16) void {
-        const vreg_offset: u16 = vreg * 8;
-        // Step 1: STR Ds, [REGS_PTR, #vreg*8] — store lower 64 bits from D register
-        self.emit(a64.strFp64(qs, REGS_PTR, vreg_offset));
-        // Step 2: UMOV X8, Vs.D[1] — extract upper 64 bits to GP
-        self.emit(a64.umovXdD1(SCRATCH, qs));
-        // Step 3: STR X8, [VM_PTR, #simd_hi_offset + vreg*8] — store upper 64 bits
-        self.emitLoadVmPtr(SCRATCH2);
-        const hi_offset = self.simd_hi_offset + @as(u32, vreg) * 8;
-        if (hi_offset <= 32760) {
-            self.emit(a64.str64(SCRATCH, SCRATCH2, @intCast(hi_offset)));
-        } else {
-            const hi_instrs = a64.loadImm64(17, hi_offset); // use x17 as temp
-            for (hi_instrs) |inst| self.emit(inst);
-            self.emit(a64.add64(SCRATCH2, SCRATCH2, 17));
-            self.emit(a64.str64(SCRATCH, SCRATCH2, 0));
-        }
+        self.emitSimdV128Addr(vreg);
+        // STR Q, [SCRATCH] — single 128-bit store
+        self.emit(a64.strFp128(qs, SCRATCH, 0));
+        // Also store lo half to regs[vreg] for cross-tier compatibility
+        self.emit(a64.strFp64(qs, REGS_PTR, @as(u16, vreg) * 8));
     }
 
     /// Emit native NEON instruction for a binary v128 op.
@@ -5438,21 +5437,10 @@ pub const Compiler = struct {
                 self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
                 self.emitCondError(.hi, 6);
                 self.emit(a64.ldr32Reg(SCRATCH, MEM_BASE, SCRATCH));
-                // Store as GP vreg (lo = value, hi = 0)
-                const d = destReg(instr.rd);
-                self.emit(a64.mov32(d, SCRATCH));
-                self.storeVreg(instr.rd, d);
-                // Zero simd_hi
-                self.emitLoadVmPtr(SCRATCH2);
-                const hi_offset = self.simd_hi_offset + @as(u32, instr.rd) * 8;
-                if (hi_offset <= 32760) {
-                    self.emit(a64.str64(31, SCRATCH2, @intCast(hi_offset))); // XZR
-                } else {
-                    const off_instrs = a64.loadImm64(SCRATCH, hi_offset);
-                    for (off_instrs) |inst| self.emit(inst);
-                    self.emit(a64.add64(SCRATCH2, SCRATCH2, SCRATCH));
-                    self.emit(a64.str64(31, SCRATCH2, 0));
-                }
+                // Store as v128 with hi=0: use FMOV to move GP→FP, then store
+                // FMOV Dd, Xn — move GP to lo half of Q (hi zeroed)
+                self.emit(a64.fmovToFp64(SIMD_SCRATCH0, SCRATCH));
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
                 return true;
             },
             0x5D => { // v128.load64_zero: load 8 bytes into lane 0, zero rest
@@ -5464,21 +5452,9 @@ pub const Compiler = struct {
                 self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
                 self.emitCondError(.hi, 6);
                 self.emit(a64.ldr64Reg(SCRATCH, MEM_BASE, SCRATCH));
-                // Store as GP vreg (lo = value, hi = 0)
-                const d = destReg(instr.rd);
-                self.emit(a64.mov64(d, SCRATCH));
-                self.storeVreg(instr.rd, d);
-                // Zero simd_hi
-                self.emitLoadVmPtr(SCRATCH2);
-                const hi_offset = self.simd_hi_offset + @as(u32, instr.rd) * 8;
-                if (hi_offset <= 32760) {
-                    self.emit(a64.str64(31, SCRATCH2, @intCast(hi_offset)));
-                } else {
-                    const off_instrs = a64.loadImm64(SCRATCH, hi_offset);
-                    for (off_instrs) |inst| self.emit(inst);
-                    self.emit(a64.add64(SCRATCH2, SCRATCH2, SCRATCH));
-                    self.emit(a64.str64(31, SCRATCH2, 0));
-                }
+                // Store as v128 with hi=0
+                self.emit(a64.fmovToFp64(SIMD_SCRATCH0, SCRATCH));
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
                 return true;
             },
 
@@ -5698,24 +5674,19 @@ pub const Compiler = struct {
                 if (pool_idx + 1 < self.pool64.len) {
                     const lo = self.pool64[pool_idx];
                     const hi = self.pool64[pool_idx + 1];
-                    // Store lo to regs[rd], hi to simd_hi[rd]
-                    const d = destReg(instr.rd);
-                    const lo_instrs = a64.loadImm64(d, lo);
+                    // Load lo into SCRATCH, hi into SCRATCH2
+                    const lo_instrs = a64.loadImm64(SCRATCH, lo);
                     for (lo_instrs) |inst| self.emit(inst);
-                    self.storeVreg(instr.rd, d);
-                    // Store hi to simd_hi[rd]
-                    const hi_instrs = a64.loadImm64(SCRATCH, hi);
-                    for (hi_instrs) |inst| self.emit(inst);
-                    self.emitLoadVmPtr(SCRATCH2);
-                    const hi_offset = self.simd_hi_offset + @as(u32, instr.rd) * 8;
-                    if (hi_offset <= 32760) {
-                        self.emit(a64.str64(SCRATCH, SCRATCH2, @intCast(hi_offset)));
-                    } else {
-                        const off_instrs = a64.loadImm64(17, hi_offset);
-                        for (off_instrs) |inst| self.emit(inst);
-                        self.emit(a64.add64(SCRATCH2, SCRATCH2, 17));
-                        self.emit(a64.str64(SCRATCH, SCRATCH2, 0));
+                    // FMOV Dd, Xn — lo into D register (hi zeroed)
+                    self.emit(a64.fmovToFp64(SIMD_SCRATCH0, SCRATCH));
+                    if (hi != 0) {
+                        const hi_instrs = a64.loadImm64(SCRATCH, hi);
+                        for (hi_instrs) |inst| self.emit(inst);
+                        // INS Vd.D[1], Xn — insert hi half
+                        self.emit(a64.insVdD1(SIMD_SCRATCH0, SCRATCH));
                     }
+                    // Store contiguous v128 + lo to regs
+                    self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
                     return true;
                 }
                 return false;
@@ -7144,7 +7115,7 @@ pub fn compileFunction(
     compiler.gc_trampoline_addr = gc_trampoline_addr;
     compiler.fuel_check_helper_addr = @intFromPtr(&vm_mod.Vm.jitFuelCheckHelper);
     compiler.jit_fuel_offset = @intCast(@offsetOf(vm_mod.Vm, "jit_fuel"));
-    compiler.simd_hi_offset = @intCast(@offsetOf(vm_mod.Vm, "simd_hi"));
+    compiler.simd_v128_offset = @intCast(@offsetOf(vm_mod.Vm, "simd_v128"));
 
     // Dump JIT code before deinit (pc_map still alive, one-shot)
     if (trace) |tc| {

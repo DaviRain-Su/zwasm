@@ -409,10 +409,12 @@ pub const Vm = struct {
     /// when the fuel check helper fires or JIT exits normally.
     jit_fuel_initial: i64 = std.math.maxInt(i64),
 
-    /// v128 upper 64 bits for SIMD in RegIR/JIT. Index = vreg number.
-    /// Lower 64 bits stored in reg_stack[base + vreg].
+    /// Contiguous v128 storage for SIMD in RegIR/JIT. Index = vreg number.
+    /// [vreg][0] = lower 64 bits, [vreg][1] = upper 64 bits.
+    /// JIT uses LDR Q / STR Q for single-instruction 128-bit access.
+    /// Interpreter uses [vreg][0] for lo, [vreg][1] for hi.
     /// Sized for typical SIMD functions (reg_count < 512).
-    simd_hi: [512]u64 = @splat(0),
+    simd_v128: [512][2]u64 = @splat(.{ 0, 0 }),
 
     // Tail call support: when return_call is executed, the callee's func_ptr
     // is stored here and execute() returns normally. doCallDirect() then
@@ -4539,8 +4541,8 @@ pub const Vm = struct {
         self.reg_ptr = base + needed;
         defer self.reg_ptr = base;
 
-        // Reset v128 upper halves for this function (Vm.simd_hi, accessible by JIT)
-        @memset(self.simd_hi[0..@min(reg.reg_count, 512)], 0);
+        // Reset v128 storage for this function (Vm.simd_v128, accessible by JIT)
+        @memset(self.simd_v128[0..@min(reg.reg_count, 512)], .{ 0, 0 });
 
         // v128 upper halves (SIMD adapter)
 
@@ -4584,17 +4586,17 @@ pub const Vm = struct {
                 regalloc_mod.OP_MOV => {
                     regs[instr.rd] = regs[instr.rs1];
                     if (instr.rd < 512 and instr.rs1 < 512)
-                        self.simd_hi[instr.rd] = self.simd_hi[instr.rs1];
+                        self.simd_v128[instr.rd] = self.simd_v128[instr.rs1];
                 },
 
                 regalloc_mod.OP_CONST32 => {
                     regs[instr.rd] = instr.operand;
-                    if (instr.rd < 512) self.simd_hi[instr.rd] = 0;
+                    if (instr.rd < 512) self.simd_v128[instr.rd] = .{ 0, 0 };
                 },
 
                 regalloc_mod.OP_CONST64 => {
                     regs[instr.rd] = pool64[instr.operand];
-                    if (instr.rd < 512) self.simd_hi[instr.rd] = 0;
+                    if (instr.rd < 512) self.simd_v128[instr.rd] = .{ 0, 0 };
                 },
 
                 // ---- Control flow ----
@@ -5608,7 +5610,7 @@ pub const Vm = struct {
         // Fell off the end without return — void return
     }
 
-    /// SIMD adapter: marshal regs[]/simd_hi[] ↔ op_stack, call existing SIMD interpreter.
+    /// SIMD adapter: marshal regs[]/simd_v128[] ↔ op_stack, call existing SIMD interpreter.
     /// This allows all 252 SIMD opcodes to execute in RegIR without re-implementation.
     ///
     /// Strategy: push all operands to op_stack as u128 (safe because op_stack is u128[]),
@@ -5623,7 +5625,7 @@ pub const Vm = struct {
         code: []const regalloc_mod.RegInstr,
         pc_ptr: *u32,
     ) WasmError!void {
-        const simd_hi = &self.simd_hi;
+        const simd_v128 = &self.simd_v128;
         const sub: u32 = instr.op - predecode_mod.SIMD_BASE;
         const effect = regalloc_mod.simdStackEffect(sub) orelse return error.Trap;
         const saved_op_ptr = self.op_ptr;
@@ -5675,21 +5677,23 @@ pub const Vm = struct {
             // Result on op_stack — pop to rd
             const val = self.popV128();
             regs[instr.rd] = @truncate(val);
-            if (instr.rd < 512) simd_hi[instr.rd] = @truncate(val >> 64);
+            if (instr.rd < 512) {
+                simd_v128[instr.rd] = .{ @truncate(val), @truncate(val >> 64) };
+            }
         }
         // defer restores op_ptr
     }
 
-    /// Push value from regs[]/self.simd_hi[] to op_stack as u128.
+    /// Push value from regs[]/self.simd_v128[] to op_stack as u128.
     fn pushRegToOpStack(self: *Vm, regs: []u64, vreg: u16) void {
         const lo: u128 = regs[vreg];
-        const hi: u128 = if (vreg < 512) self.simd_hi[vreg] else 0;
+        const hi: u128 = if (vreg < 512) self.simd_v128[vreg][1] else 0;
         self.op_stack[self.op_ptr] = lo | (hi << 64);
         self.op_ptr += 1;
     }
 
     /// SIMD JIT trampoline: called from JIT code to execute a single SIMD instruction.
-    /// Marshals regs[]/simd_hi[] ↔ op_stack, calls executeSimdIR, writes result back.
+    /// Marshals regs[]/simd_v128[] ↔ op_stack, calls executeSimdIR, writes result back.
     pub fn jitSimdTrampoline(
         vm_opaque: *anyopaque,
         instance_opaque: *anyopaque,
@@ -5710,29 +5714,29 @@ pub const Vm = struct {
         const sub = simd_op - predecode_mod.SIMD_BASE;
         const effect = regalloc_mod.simdStackEffect(sub) orelse return 1;
         const saved_op_ptr = self.op_ptr;
-        const simd_hi = &self.simd_hi;
+        const simd_v128 = &self.simd_v128;
 
         const pushV = struct {
-            fn f(vm: *Vm, r: [*]u64, sh: *[512]u64, vreg: u16) void {
+            fn f(vm: *Vm, r: [*]u64, sv: *[512][2]u64, vreg: u16) void {
                 const lo: u128 = r[vreg];
-                const hi: u128 = if (vreg < 512) sh[vreg] else 0;
+                const hi: u128 = if (vreg < 512) sv[vreg][1] else 0;
                 vm.op_stack[vm.op_ptr] = lo | (hi << 64);
                 vm.op_ptr += 1;
             }
         }.f;
 
         if (effect.pop == 3) {
-            pushV(self, regs, simd_hi, rs1);
-            pushV(self, regs, simd_hi, rs2);
-            pushV(self, regs, simd_hi, @truncate(regs_packed >> 48));
+            pushV(self, regs, simd_v128, rs1);
+            pushV(self, regs, simd_v128, rs2);
+            pushV(self, regs, simd_v128, @truncate(regs_packed >> 48));
         } else if (effect.push == 0 and effect.pop == 2) {
-            pushV(self, regs, simd_hi, rs1);
-            pushV(self, regs, simd_hi, rd);
+            pushV(self, regs, simd_v128, rs1);
+            pushV(self, regs, simd_v128, rd);
         } else if (effect.pop == 2) {
-            pushV(self, regs, simd_hi, rs1);
-            pushV(self, regs, simd_hi, rs2);
+            pushV(self, regs, simd_v128, rs1);
+            pushV(self, regs, simd_v128, rs2);
         } else if (effect.pop == 1) {
-            pushV(self, regs, simd_hi, rs1);
+            pushV(self, regs, simd_v128, rs1);
         }
 
         const pool64 = pool64_ptr[0..@intCast(pool64_len)];
@@ -5750,7 +5754,7 @@ pub const Vm = struct {
         if (self.op_ptr > saved_op_ptr) {
             const val = self.popV128();
             regs[rd] = @truncate(val);
-            if (rd < 512) simd_hi[rd] = @truncate(val >> 64);
+            if (rd < 512) simd_v128[rd] = .{ @truncate(val), @truncate(val >> 64) };
         }
         self.op_ptr = saved_op_ptr;
         return 0;

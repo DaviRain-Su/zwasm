@@ -1038,6 +1038,46 @@ const Enc = struct {
         buf.append(alloc, sib(0, idx.low3(), base.low3())) catch {};
     }
 
+    /// MOVDQU xmm, [base + disp32]: F3 [REX] 0F 6F ModRM(mod=10, reg=xmm, rm=base) disp32
+    fn movdquFromMem(buf: *std.ArrayList(u8), alloc: Allocator, xmm: u4, base: Reg, disp: i32) void {
+        buf.append(alloc, 0xF3) catch {};
+        if (xmm >= 8 or base.isExt()) {
+            var r: u8 = 0x40;
+            if (xmm >= 8) r |= 0x04;
+            if (base.isExt()) r |= 0x01;
+            buf.append(alloc, r) catch {};
+        }
+        buf.appendSlice(alloc, &[_]u8{ 0x0F, 0x6F }) catch {};
+        const rm = base.low3();
+        if (rm == 4) { // RSP/R12 needs SIB
+            buf.append(alloc, modrm(2, @truncate(xmm), 4)) catch {};
+            buf.append(alloc, sib(0, 4, 4)) catch {}; // SIB: no index, base=RSP
+        } else {
+            buf.append(alloc, modrm(2, @truncate(xmm), rm)) catch {};
+        }
+        appendI32(buf, alloc, disp);
+    }
+
+    /// MOVDQU [base + disp32], xmm: F3 [REX] 0F 7F ModRM(mod=10, reg=xmm, rm=base) disp32
+    fn movdquToMem(buf: *std.ArrayList(u8), alloc: Allocator, base: Reg, disp: i32, xmm: u4) void {
+        buf.append(alloc, 0xF3) catch {};
+        if (xmm >= 8 or base.isExt()) {
+            var r: u8 = 0x40;
+            if (xmm >= 8) r |= 0x04;
+            if (base.isExt()) r |= 0x01;
+            buf.append(alloc, r) catch {};
+        }
+        buf.appendSlice(alloc, &[_]u8{ 0x0F, 0x7F }) catch {};
+        const rm = base.low3();
+        if (rm == 4) {
+            buf.append(alloc, modrm(2, @truncate(xmm), 4)) catch {};
+            buf.append(alloc, sib(0, 4, 4)) catch {};
+        } else {
+            buf.append(alloc, modrm(2, @truncate(xmm), rm)) catch {};
+        }
+        appendI32(buf, alloc, disp);
+    }
+
     /// SSE2 packed integer binary op: 66 [REX] 0F opcode ModRM (xmm, xmm)
     fn ssePacked(buf: *std.ArrayList(u8), alloc: Allocator, op: u8, dst: u4, src: u4) void {
         sseOp(buf, alloc, 0x66, 0x0F, op, dst, src);
@@ -1645,9 +1685,9 @@ pub const Compiler = struct {
     known_consts: [128]?u32,
     written_vregs: u128,
     scratch_vreg: ?u16,
-    /// Offset of Vm.simd_hi field (for v128 upper 64-bit storage).
-    simd_hi_offset: u32,
-    /// True when the function uses SIMD opcodes (skip simd_hi handling if false).
+    /// Offset of Vm.simd_v128 field (contiguous v128 storage).
+    simd_v128_offset: u32,
+    /// True when the function uses SIMD opcodes (skip simd_v128 handling if false).
     has_simd: bool,
     /// Address of jitSimdTrampoline function.
     simd_trampoline_addr: u64,
@@ -1713,7 +1753,7 @@ pub const Compiler = struct {
             .known_consts = .{null} ** 128,
             .written_vregs = 0,
             .scratch_vreg = null,
-            .simd_hi_offset = 0,
+            .simd_v128_offset = 0,
             .has_simd = false,
             .simd_trampoline_addr = 0,
             .fuel_check_helper_addr = 0,
@@ -3780,44 +3820,47 @@ pub const Compiler = struct {
     const SIMD_SCRATCH0: u4 = 3; // XMM3
     const SIMD_SCRATCH1: u4 = 4; // XMM4
 
-    /// Load v128 from regs[vreg] (lo) + simd_hi[vreg] (hi) into XMM register.
+    // --- v128 load/store (contiguous simd_v128 storage) ---
+    /// Compute the base address of simd_v128[vreg] into SCRATCH2.
+    fn emitSimdV128Addr(self: *Compiler, vreg: u16) void {
+        self.emitLoadVmPtr(SCRATCH2);
+        const byte_offset: i32 = @as(i32, @intCast(self.simd_v128_offset)) + @as(i32, vreg) * 16;
+        Enc.addImm32(&self.code, self.alloc, SCRATCH2, byte_offset);
+    }
+
+    /// Load v128 from simd_v128[vreg] into XMM register (contiguous 128-bit).
     fn emitLoadV128(self: *Compiler, xmm: u4, vreg: u16) void {
-        const lo_disp: i32 = @as(i32, vreg) * 8;
-        // MOVQ xmm, [REGS_PTR + vreg*8] — loads lo 64 bits, zeros hi
-        Enc.movqXmmFromMem(&self.code, self.alloc, xmm, REGS_PTR, lo_disp);
-        // Load vm_ptr into SCRATCH2, then PINSRQ xmm, [SCRATCH2 + hi_off], 1
-        self.emitLoadVmPtr(SCRATCH2);
-        const hi_disp: i32 = @as(i32, @intCast(self.simd_hi_offset)) + @as(i32, vreg) * 8;
-        Enc.pinsrqMem(&self.code, self.alloc, xmm, SCRATCH2, hi_disp, 1);
+        self.emitSimdV128Addr(vreg);
+        // MOVDQU xmm, [SCRATCH2] — unaligned 128-bit load
+        Enc.movdquFromMem(&self.code, self.alloc, xmm, SCRATCH2, 0);
     }
 
-    /// Store XMM register to regs[vreg] (lo) + simd_hi[vreg] (hi).
+    /// Store XMM register to simd_v128[vreg] (contiguous 128-bit).
+    /// Also writes lo half to regs[vreg] for trampoline/interpreter compatibility.
     fn emitStoreV128(self: *Compiler, xmm: u4, vreg: u16) void {
+        self.emitSimdV128Addr(vreg);
+        // MOVDQU [SCRATCH2], xmm — unaligned 128-bit store
+        Enc.movdquToMem(&self.code, self.alloc, SCRATCH2, 0, xmm);
+        // Also store lo half to regs[vreg] for cross-tier compatibility
         const lo_disp: i32 = @as(i32, vreg) * 8;
-        // MOVQ [REGS_PTR + vreg*8], xmm — stores lo 64 bits
         Enc.movqXmmToMem(&self.code, self.alloc, REGS_PTR, lo_disp, xmm);
-        // PEXTRQ [SCRATCH2 + hi_off], xmm, 1 — extract and store hi 64 bits
-        self.emitLoadVmPtr(SCRATCH2);
-        const hi_disp: i32 = @as(i32, @intCast(self.simd_hi_offset)) + @as(i32, vreg) * 8;
-        Enc.pextrqMem(&self.code, self.alloc, SCRATCH2, hi_disp, xmm, 1);
     }
 
-    /// Copy simd_hi[rd] = simd_hi[rs1] (for OP_MOV).
-    fn emitCopySimdHi(self: *Compiler, rd: u16, rs1: u16) void {
-        self.emitLoadVmPtr(SCRATCH2);
-        const src_disp: i32 = @as(i32, @intCast(self.simd_hi_offset)) + @as(i32, rs1) * 8;
-        Enc.loadDisp32(&self.code, self.alloc, SCRATCH, SCRATCH2, src_disp);
-        const dst_disp: i32 = @as(i32, @intCast(self.simd_hi_offset)) + @as(i32, rd) * 8;
-        Enc.storeDisp32(&self.code, self.alloc, SCRATCH2, dst_disp, SCRATCH);
+    /// Copy simd_v128[rd] = simd_v128[rs1] (for OP_MOV).
+    fn emitCopySimdV128(self: *Compiler, rd: u16, rs1: u16) void {
+        // Load full v128 from rs1
+        self.emitLoadV128(0, rs1); // xmm0
+        // Store to rd
+        self.emitStoreV128(0, rd);
     }
 
-    /// Clear simd_hi[rd] = 0 (for OP_CONST).
-    fn emitClearSimdHi(self: *Compiler, rd: u16) void {
-        self.emitLoadVmPtr(SCRATCH2);
-        const disp: i32 = @as(i32, @intCast(self.simd_hi_offset)) + @as(i32, rd) * 8;
-        // XOR SCRATCH,SCRATCH then store (avoid MOV imm64)
-        Enc.xorRegReg(&self.code, self.alloc, SCRATCH, SCRATCH);
-        Enc.storeDisp32(&self.code, self.alloc, SCRATCH2, disp, SCRATCH);
+    /// Clear simd_v128[rd] = {0, 0} (for scalar ops that need to zero the v128 slot).
+    /// Does NOT touch regs[rd] — caller already set the scalar value there.
+    fn emitClearSimdV128(self: *Compiler, rd: u16) void {
+        // PXOR xmm0, xmm0 then MOVDQU [addr], xmm0
+        Enc.pxor(&self.code, self.alloc, 0, 0);
+        self.emitSimdV128Addr(rd);
+        Enc.movdquToMem(&self.code, self.alloc, SCRATCH2, 0, 0);
     }
 
     /// Try to emit native SSE for a SIMD opcode. Returns true if handled.
@@ -4298,9 +4341,9 @@ pub const Compiler = struct {
                     self.emitCondError(.a, 6);
                 }
                 Enc.loadBaseIdx32(&self.code, self.alloc, SCRATCH, MEM_BASE, SCRATCH);
-                // Store as scalar, zero simd_hi
-                self.storeVreg(instr.rd, SCRATCH);
-                self.emitClearSimdHi(instr.rd);
+                // MOVD xmm, r32 — load 32 bits, zero rest of xmm
+                Enc.movdToXmm(&self.code, self.alloc, SIMD_SCRATCH0, SCRATCH);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
                 return true;
             },
             0x5D => { // v128.load64_zero
@@ -4315,8 +4358,9 @@ pub const Compiler = struct {
                     self.emitCondError(.a, 6);
                 }
                 Enc.loadBaseIdx64(&self.code, self.alloc, SCRATCH, MEM_BASE, SCRATCH);
-                self.storeVreg(instr.rd, SCRATCH);
-                self.emitClearSimdHi(instr.rd);
+                // MOVQ xmm, r64 — load 64 bits, zero hi
+                Enc.movqToXmm(&self.code, self.alloc, SIMD_SCRATCH0, SCRATCH);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
                 return true;
             },
 
@@ -5689,15 +5733,15 @@ pub const Compiler = struct {
             regalloc_mod.OP_MOV => {
                 const src = self.getOrLoad(instr.rs1, SCRATCH);
                 self.storeVreg(instr.rd, src);
-                if (self.has_simd) self.emitCopySimdHi(instr.rd, instr.rs1);
+                if (self.has_simd) self.emitCopySimdV128(instr.rd, instr.rs1);
             },
             regalloc_mod.OP_CONST32 => {
                 self.emitConst32(instr);
-                if (self.has_simd) self.emitClearSimdHi(instr.rd);
+                if (self.has_simd) self.emitClearSimdV128(instr.rd);
             },
             regalloc_mod.OP_CONST64 => {
                 if (!self.emitConst64(instr)) return false;
-                if (self.has_simd) self.emitClearSimdHi(instr.rd);
+                if (self.has_simd) self.emitClearSimdV128(instr.rd);
             },
 
             // --- Control flow ---
@@ -6740,7 +6784,7 @@ pub fn compileFunction(
     compiler.use_guard_pages = use_guard_pages;
     compiler.osr_target_pc = osr_target_pc;
     compiler.jit_fuel_offset = @intCast(@offsetOf(vm_mod.Vm, "jit_fuel"));
-    compiler.simd_hi_offset = @intCast(@offsetOf(vm_mod.Vm, "simd_hi"));
+    compiler.simd_v128_offset = @intCast(@offsetOf(vm_mod.Vm, "simd_v128"));
     compiler.simd_trampoline_addr = @intFromPtr(&vm_mod.Vm.jitSimdTrampoline);
     compiler.fuel_check_helper_addr = @intFromPtr(&vm_mod.Vm.jitFuelCheckHelper);
     defer compiler.deinit();
