@@ -1200,6 +1200,37 @@ const Enc = struct {
     // PEXTRQ r64, xmm, imm8 (SSE4.1): 66 REX.W 0F 3A 16
     fn pextrqReg(buf: *std.ArrayList(u8), alloc: Allocator, gpr: Reg, xmm: u4, imm8: u8) void { sse41OpWImm(buf, alloc, 0x16, xmm, gpr, imm8); }
 
+    // SSE4.1 extend (PMOVSX/ZX): 66 0F 38 xx /r
+    fn pmovsxbw(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x20, dst, src); }
+    fn pmovsxwd(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x23, dst, src); }
+    fn pmovsxdq(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x25, dst, src); }
+    fn pmovzxbw(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x30, dst, src); }
+    fn pmovzxwd(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x33, dst, src); }
+    fn pmovzxdq(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x35, dst, src); }
+
+    // Narrow: PACKSSWB/PACKUSWB/PACKSSDW/PACKUSDW
+    fn packsswb(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0x63, dst, src); }
+    fn packuswb(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0x67, dst, src); }
+    fn packssdw(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0x6B, dst, src); }
+    fn packusdw(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sse41Op(buf, alloc, 0x2B, dst, src); } // SSE4.1
+
+    // Shift by XMM (shift amount in low 64 bits of src)
+    fn psllw(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xF1, dst, src); }
+    fn pslld(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xF2, dst, src); }
+    fn psllq(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xF3, dst, src); }
+    fn psrlw(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xD1, dst, src); }
+    fn psrld(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xD2, dst, src); }
+    fn psrlq(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xD3, dst, src); }
+    fn psraw(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xE1, dst, src); }
+    fn psrad(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0xE2, dst, src); }
+
+    // Convert: CVTDQ2PS, CVTTPS2DQ
+    fn cvtdq2ps(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sseOpNp(buf, alloc, 0x5B, dst, src); } // 0F 5B
+    fn cvttps2dq(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { sseOp(buf, alloc, 0xF3, 0x0F, 0x5B, dst, src); } // F3 0F 5B
+
+    // PUNPCKHQDQ: interleave high qwords (for extend_high)
+    fn punpckhqdq(buf: *std.ArrayList(u8), alloc: Allocator, dst: u4, src: u4) void { ssePacked(buf, alloc, 0x6D, dst, src); }
+
     /// CVTSI2SD xmm, r64: F2 REX.W 0F 2A /r (signed i64 → f64)
     fn cvtsi2sd64(buf: *std.ArrayList(u8), alloc: Allocator, xmm: u4, gpr: Reg) void {
         buf.append(alloc, 0xF2) catch {};
@@ -3988,6 +4019,189 @@ pub const Compiler = struct {
                 self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
                 return true;
             },
+
+            // --- integer neg (PXOR zero, PSUB) ---
+            0x61 => { // i8x16.neg: 0 - x
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                Enc.pxor(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1); // zero
+                Enc.psubb(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH1, instr.rd);
+                return true;
+            },
+            0x81 => { // i16x8.neg
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                Enc.pxor(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.psubw(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH1, instr.rd);
+                return true;
+            },
+            0xA1 => { // i32x4.neg
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                Enc.pxor(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.psubd(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH1, instr.rd);
+                return true;
+            },
+            0xC1 => { // i64x2.neg
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                Enc.pxor(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.psubq(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH1, instr.rd);
+                return true;
+            },
+
+            // --- extend low (SSE4.1 PMOVSX/ZX, operates on low half of source) ---
+            0x87 => { self.emitSimdUnarySse(instr, &Enc.pmovsxbw); return true; }, // i16x8.extend_low_i8x16_s
+            0x89 => { self.emitSimdUnarySse(instr, &Enc.pmovzxbw); return true; }, // i16x8.extend_low_i8x16_u
+            0xA7 => { self.emitSimdUnarySse(instr, &Enc.pmovsxwd); return true; }, // i32x4.extend_low_i16x8_s
+            0xA9 => { self.emitSimdUnarySse(instr, &Enc.pmovzxwd); return true; }, // i32x4.extend_low_i16x8_u
+            0xC7 => { self.emitSimdUnarySse(instr, &Enc.pmovsxdq); return true; }, // i64x2.extend_low_i32x4_s
+            0xC9 => { self.emitSimdUnarySse(instr, &Enc.pmovzxdq); return true; }, // i64x2.extend_low_i32x4_u
+
+            // --- extend high: shift high half to low, then PMOVSX/ZX ---
+            0x88 => { // i16x8.extend_high_i8x16_s
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                // Move high 64 bits to low: PUNPCKHQDQ with self puts [hi, hi]
+                Enc.punpckhqdq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                Enc.pmovsxbw(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x8A => { // i16x8.extend_high_i8x16_u
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                Enc.punpckhqdq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                Enc.pmovzxbw(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xA8 => { // i32x4.extend_high_i16x8_s
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                Enc.punpckhqdq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                Enc.pmovsxwd(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xAA => { // i32x4.extend_high_i16x8_u
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                Enc.punpckhqdq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                Enc.pmovzxwd(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xC8 => { // i64x2.extend_high_i32x4_s
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                Enc.punpckhqdq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                Enc.pmovsxdq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xCA => { // i64x2.extend_high_i32x4_u
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                Enc.punpckhqdq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                Enc.pmovzxdq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+
+            // --- narrow ---
+            0x65 => { // i8x16.narrow_i16x8_s: PACKSSWB
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                Enc.packsswb(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x66 => { // i8x16.narrow_i16x8_u: PACKUSWB
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                Enc.packuswb(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x85 => { // i16x8.narrow_i32x4_s: PACKSSDW
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                Enc.packssdw(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x86 => { // i16x8.narrow_i32x4_u: PACKUSDW (SSE4.1)
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                Enc.packusdw(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+
+            // --- shift (shift amount from GP reg via MOVD → XMM) ---
+            0x8B => { // i16x8.shl
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                const shift_reg = self.getOrLoad(instr.rs2_field, SCRATCH);
+                Enc.movdToXmm(&self.code, self.alloc, SIMD_SCRATCH1, shift_reg);
+                Enc.psllw(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x8C => { // i16x8.shr_s
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                const shift_reg = self.getOrLoad(instr.rs2_field, SCRATCH);
+                Enc.movdToXmm(&self.code, self.alloc, SIMD_SCRATCH1, shift_reg);
+                Enc.psraw(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x8D => { // i16x8.shr_u
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                const shift_reg = self.getOrLoad(instr.rs2_field, SCRATCH);
+                Enc.movdToXmm(&self.code, self.alloc, SIMD_SCRATCH1, shift_reg);
+                Enc.psrlw(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xAB => { // i32x4.shl
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                const shift_reg = self.getOrLoad(instr.rs2_field, SCRATCH);
+                Enc.movdToXmm(&self.code, self.alloc, SIMD_SCRATCH1, shift_reg);
+                Enc.pslld(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xAC => { // i32x4.shr_s
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                const shift_reg = self.getOrLoad(instr.rs2_field, SCRATCH);
+                Enc.movdToXmm(&self.code, self.alloc, SIMD_SCRATCH1, shift_reg);
+                Enc.psrad(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xAD => { // i32x4.shr_u
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                const shift_reg = self.getOrLoad(instr.rs2_field, SCRATCH);
+                Enc.movdToXmm(&self.code, self.alloc, SIMD_SCRATCH1, shift_reg);
+                Enc.psrld(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xCB => { // i64x2.shl
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                const shift_reg = self.getOrLoad(instr.rs2_field, SCRATCH);
+                Enc.movdToXmm(&self.code, self.alloc, SIMD_SCRATCH1, shift_reg);
+                Enc.psllq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xCD => { // i64x2.shr_u
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                const shift_reg = self.getOrLoad(instr.rs2_field, SCRATCH);
+                Enc.movdToXmm(&self.code, self.alloc, SIMD_SCRATCH1, shift_reg);
+                Enc.psrlq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+
+            // --- convert ---
+            0xFA => { self.emitSimdUnarySse(instr, &Enc.cvtdq2ps); return true; }, // f32x4.convert_i32x4_s
+            0xF8 => { self.emitSimdUnarySse(instr, &Enc.cvttps2dq); return true; }, // i32x4.trunc_sat_f32x4_s
 
             else => return false,
         }
