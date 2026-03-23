@@ -42,11 +42,12 @@ Session handover document. Read at session start.
   - Foundation DONE: simd_hi_offset, has_simd, SSE encoders, emitLoadV128/StoreV128
   - SIMD trampoline DONE: all SIMD functions JIT-accepted on x86 (trampoline fallback)
   - OP_MOV/CONST simd_hi handling DONE
-  - **~160 native SSE opcodes**: bitwise, all int arithmetic/sat/min/max/abs/neg/avgr,
-    all signed int comparisons, f32x4/f64x2 arithmetic/sqrt/min/max,
-    v128 load/store/const, all extract/replace/lane, splat, extend/narrow, shift, convert
+  - **~200 native SSE opcodes**: bitwise, int arithmetic/sat/min/max/abs/neg/avgr,
+    all signed int + float comparisons, f32x4/f64x2 full (arith/sqrt/min/max/rounding),
+    v128 load/store/const, extract/replace/lane, splat, extend/narrow, shift, convert,
+    bitmask (i8x16/i32x4/i64x2), swizzle (PSHUFB), bitselect, any_true
   - Ubuntu x86_64: 62,263/62,263 spec tests pass
-  - **Next**: unsigned compare, remaining convert/rounding, load variants, extmul, f32x4 compare
+  - **Next**: all_true, unsigned compare, load variants, extmul, remaining convert, dot
   - **Long-term**: NEON register allocator or contiguous v128 storage
 - See `@./.dev/roadmap.md` Phase 13 for step breakdown (13.0-13.8)
 
