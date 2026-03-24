@@ -14,24 +14,26 @@ Session handover document. Read at session start.
 
 ## Current Task
 
-**W38 investigation** — on branch `perf/w38-simd-compiler-patterns`.
+**W38 merged to main** — v128 sync fix + investigation.
 
-ARM64 JIT v128 sync fix committed: MOV copies simd_v128, CONST clears it.
-Reentry guard OSR attempted but blocked by v128 state transfer issues.
+- ARM64 JIT v128 sync: MOV copies simd_v128, CONST clears it (correctness bug fix)
+- OSR prologue: x20/x21 caching before emitLoadMemCache
+- Root cause: C-compiled functions have reentry guards preventing JIT (13-131x gap)
+- OSR attempted but blocked by v128 state transfer for complex functions
 
-### Investigation Summary
+### Next: Lazy AOT (Recommended approach for W38)
 
-Root cause of 13-131x gap: C-compiled functions have reentry guards that
-prevent JIT. Hot loops run entirely in register IR interpreter.
-OSR (On-Stack Replacement) can bypass guards but SIMD v128 state doesn't
-transfer correctly from interpreter to JIT for complex C functions.
+Compile all functions to JIT at module load / first call, bypassing interpreter.
+Eliminates tier-up state transfer problem entirely (matches wasmtime architecture).
+Detailed research and 4 candidate approaches documented in:
+**`@./.dev/references/w38-osr-research.md`** — read this before starting.
 
 ### Open Work Items
 
-| Item     | Description                          | Status       |
-|----------|--------------------------------------|--------------|
-| W38      | Compiler-generated SIMD patterns     | Investigated |
-| Phase 18 | Lazy Compilation + CLI Extensions    | Not started  |
+| Item     | Description                            | Status             |
+|----------|----------------------------------------|--------------------|
+| W38      | C-compiled SIMD perf (Lazy AOT path)   | Research complete   |
+| Phase 18 | Lazy Compilation + CLI Extensions      | Aligns with W38    |
 
 ## Completed Phases (summary)
 
@@ -51,6 +53,7 @@ transfer correctly from interpreter to JIT for complex C functions.
 
 - `@./.dev/roadmap.md` — Phase roadmap
 - `@./.dev/checklist.md` — W38 details (investigation steps, benchmarks, sources)
+- `@./.dev/references/w38-osr-research.md` — **W38 next steps: 4 approaches compared**
 - `@./.dev/decisions.md` — architectural decisions (D131: epoch JIT timeout)
 - `@./.dev/jit-debugging.md` — JIT debug techniques
 - `bench/simd_comparison.yaml` — SIMD performance data (3 layers: baseline → post-opt → JIT)
