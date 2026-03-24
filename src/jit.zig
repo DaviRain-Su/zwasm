@@ -3853,15 +3853,15 @@ pub const Compiler = struct {
     fn emitMemGrow(self: *Compiler, instr: RegInstr) void {
         self.fpCacheEvictAll();
         self.spillCallerSaved();
-        // Args: x0 = instance, x1 = pages (from rs1 vreg, truncated to 32-bit)
+        // Args: x0 = instance, x1 = pages (u64 for memory64 compat)
         self.emitLoadInstPtr(0);
         const pages_reg = self.getOrLoad(instr.rs1, SCRATCH);
-        self.emit(a64.mov32(1, pages_reg)); // zero-extend to w1
-        // Call jitMemGrow
+        self.emit(a64.mov64(1, pages_reg));
+        // Call jitMemGrow (returns u64: old_pages or -1)
         const addr_instrs = a64.loadImm64(SCRATCH, self.mem_grow_addr);
         for (addr_instrs) |inst| self.emit(inst);
         self.emit(a64.blr(SCRATCH));
-        // Result in w0 (u32): old_pages or 0xFFFFFFFF
+        // Result in x0 (u64): old_pages or fail value
         // Store result to regs[rd] in memory immediately (before x0 is clobbered)
         self.emit(a64.str64(0, REGS_PTR, @as(u16, instr.rd) * 8));
         // Reload memory cache FIRST (BLR clobbers x0-x15)
@@ -6908,7 +6908,8 @@ pub fn jitCallTrampoline(
                     });
                 }
 
-                const err = jc.entry(callee_regs.ptr, vm_opaque, instance_opaque);
+                // Use callee's instance (not caller's) for cross-module calls.
+                const err = jc.entry(callee_regs.ptr, vm_opaque, @ptrCast(wf.instance));
 
                 guard_mod.setRecovery(saved_recovery);
                 vm.reg_ptr = base;
@@ -7006,7 +7007,8 @@ pub fn jitCallIndirectTrampoline(
                     });
                 }
 
-                const err = jc.entry(callee_regs.ptr, vm_opaque, instance_opaque);
+                // Use callee's instance (not caller's) for cross-module calls.
+                const err = jc.entry(callee_regs.ptr, vm_opaque, @ptrCast(wf.instance));
 
                 guard_mod.setRecovery(saved_recovery);
                 vm.reg_ptr = base;
@@ -7182,10 +7184,11 @@ pub fn jitGlobalSet(instance_opaque: *anyopaque, idx: u32, val: u64) callconv(.c
 
 /// JIT helper: memory.grow — grow linear memory by n pages.
 /// Returns old size in pages on success, or 0xFFFFFFFF (-1 as u32) on failure.
-pub fn jitMemGrow(instance_opaque: *anyopaque, pages: u32) callconv(.c) u32 {
+pub fn jitMemGrow(instance_opaque: *anyopaque, pages: u64) callconv(.c) u64 {
     const instance: *Instance = @ptrCast(@alignCast(instance_opaque));
-    const m = instance.getMemory(0) catch return 0xFFFFFFFF;
-    return m.grow(pages) catch 0xFFFFFFFF;
+    const m = instance.getMemory(0) catch return 0xFFFFFFFFFFFFFFFF;
+    const fail_val: u64 = if (m.is_64) 0xFFFFFFFFFFFFFFFF else 0xFFFFFFFF;
+    return m.grow(@intCast(pages)) catch fail_val;
 }
 
 /// JIT helper: memory.fill — fill memory[dst..dst+n] with val.

@@ -2809,7 +2809,7 @@ pub const Compiler = struct {
         self.spillCallerSaved();
         const pages_reg = self.getOrLoad(instr.rs1, SCRATCH);
         if (builtin.os.tag == .windows) {
-            Enc.movRegReg32(&self.code, self.alloc, .rdx, pages_reg);
+            Enc.movRegReg64(&self.code, self.alloc, .rdx, pages_reg);
             self.emitLoadInstPtr(.rcx);
             const frame_bytes = self.emitWindowsCallSetup(0);
             self.emitLoadImm64(SCRATCH, self.mem_grow_addr);
@@ -2817,12 +2817,12 @@ pub const Compiler = struct {
             Enc.addImm32(&self.code, self.alloc, .rsp, @intCast(frame_bytes));
         } else {
             // Load pages BEFORE clobbering RDI — value may be in RDI (vreg 4)
-            Enc.movRegReg32(&self.code, self.alloc, .rsi, pages_reg);
+            Enc.movRegReg64(&self.code, self.alloc, .rsi, pages_reg);
             self.emitLoadInstPtr(.rdi);
             self.emitLoadImm64(SCRATCH, self.mem_grow_addr);
             Enc.callReg(&self.code, self.alloc, SCRATCH);
         }
-        // Result in EAX (u32): old_pages or 0xFFFFFFFF
+        // Result in RAX (u64): old_pages or fail value
         // Store result to regs[rd] immediately (before RAX is clobbered)
         const rd_disp: i32 = @as(i32, instr.rd) * 8;
         Enc.storeDisp32(&self.code, self.alloc, REGS_PTR, rd_disp, .rax);
