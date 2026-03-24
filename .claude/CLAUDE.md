@@ -102,16 +102,20 @@ When in doubt, **continue**.
 
 ### Merge Gate Checklist
 
-**Mac AND Ubuntu x86_64** (see `@./.dev/references/ubuntu-testing-guide.md`, setup: `@./.dev/references/setup-orbstack.md`):
-- `zig build test` — all pass, 0 fail, 0 leak
-- `python3 test/spec/run_spec.py --build --summary` — fail=0, skip=0
-- `bash test/e2e/run_e2e.sh --convert --summary` — fail=0, leak=0
-- `bash test/realworld/run_compat.sh` — PASS=50, FAIL=0, CRASH=0
-- `bash test/c_api/run_ffi_test.sh --build` — 0 failed
-- Benchmarks pass (no regression)
-- **Minimal build**: `zig build test -Djit=false -Dcomponent=false -Dwat=false` — 0 fail
-  (WAT-dependent tests must have `if (!build_options.enable_wat) return error.SkipZigTest;`)
-- **CI green**: `gh run list --branch main --limit 1` — check after push
+**EVERY item on BOTH Mac AND Ubuntu x86_64.** No skipping.
+(see `@./.dev/references/ubuntu-testing-guide.md`, setup: `@./.dev/references/setup-orbstack.md`)
+
+1. `zig build test` — all pass, 0 fail, 0 leak
+2. `python3 test/spec/run_spec.py --build --summary` — fail=0, skip=0
+3. `bash test/e2e/run_e2e.sh --convert --summary` — fail=0, leak=0
+4. `bash test/realworld/run_compat.sh` — PASS=50, FAIL=0, CRASH=0
+5. `bash test/c_api/run_ffi_test.sh --build` — 0 failed
+6. `zig build test -Djit=false -Dcomponent=false -Dwat=false` — 0 fail (minimal build)
+7. Benchmarks pass (no regression)
+8. **CI green**: `gh run list --branch main --limit 1` — check after push
+
+Items 1-6 must pass on BOTH platforms before merge. Run them in parallel:
+Mac items can run locally, Ubuntu items via `orb run -m my-ubuntu-amd64`.
 Fix root cause before merging if Ubuntu reveals new failures.
 
 ## Build & Test

@@ -5,26 +5,54 @@ Session handover document. Read at session start.
 ## Current State
 
 - Stages 0-46 + Phase 1, 3, 5, 8, 10, 11, 13, 15, 19 all complete.
-- Spec: 62,263/62,263 Mac+Ubuntu+Windows (100.0%, 0 skip).
-- E2E: 792/792 (Mac+Ubuntu). Real-world: 50/50.
+- Spec: 62,263/62,263 Mac+Ubuntu (100.0%, 0 skip).
+- E2E: 792/792 (Mac+Ubuntu).
+- Real-world: Mac 41/50, Ubuntu 48/50 (JIT bugs W41 + wasmtime diffs W42).
 - JIT: Register IR + ARM64/x86_64 + SIMD (NEON 253/256, SSE 244/256).
+- HOT_THRESHOLD=3 (lowered from 10 in W38).
 - Binary: 1.29MB stripped. Memory: ~3.5MB RSS.
 - Platforms: macOS ARM64, Linux x86_64/ARM64, Windows x86_64.
 - **main = stable**. ClojureWasm updated to v1.5.0.
 
 ## Current Task
 
-**W38 merged to main** — Lazy AOT + JIT correctness fixes.
+**Phase 20: JIT Correctness Sweep** — next session.
 
-- HOT_THRESHOLD 10 → 3, back_edge_bailed, extract_lane fix
-- jitMemGrow u64, cross-module instance fix, x86 div/rem_s -1 fix
+W38 (Lazy AOT) で HOT_THRESHOLD を 10→3 に下げた結果、以前は JIT されなかった
+関数がコンパイルされるようになり、潜在 JIT バグが露出した。
+Spec は 100% だが、real-world プログラムに影響がある。これらを修正するフェーズ。
+
+### Real-world JIT failures (W41)
+
+| Program          | Mac   | Ubuntu | 原因                                     |
+|------------------|-------|--------|------------------------------------------|
+| rust_compression | DIFF  | PASS   | ARM64 back-edge JIT OOB (T=10でも再現)   |
+| rust_enum_match  | DIFF  | PASS   | ARM64 JIT float 化け                     |
+| rust_serde_json  | DIFF  | PASS   | ARM64 JIT OOB                            |
+| tinygo_hello     | DIFF  | DIFF   | ARM64+x86 共通 JIT OOB                   |
+| tinygo_json      | DIFF  | DIFF   | ARM64+x86 共通 JIT OOB                   |
+| tinygo_sort      | DIFF  | PASS   | ARM64 JIT 出力差異                        |
+
+全て `--interp` で正常動作。JIT コードの correctness 問題。
+
+### wasmtime 互換性差異 (W42, Mac のみ)
+
+go_crypto_sha256, go_math_big, go_regex — JIT 無関係、interp でも差異。
+Go runtime の env/args 処理や WASI 差異の可能性。
+
+### Approach
+
+1. tinygo_hello/json (両プラットフォーム) から着手 — 共通の根本原因の可能性
+2. `--trace=jit` で JIT される関数を特定 → `--dump-jit=N` で逆アセンブル
+3. `--interp` で正常値を取得し differential で比較
+4. 修正後、全マージゲートを再実行（FFI + minimal build 含む）
 
 ### Open Work Items
 
 | Item     | Description                                       | Status         |
 |----------|---------------------------------------------------|----------------|
-| W41      | JIT real-world correctness (6 programs, T=3 露出)  | New            |
-| W42      | wasmtime 互換性差異 (3 Go programs, JIT 無関係)     | New            |
+| W41      | JIT real-world correctness (6 programs)           | Next session   |
+| W42      | wasmtime 互換性差異 (3 Go programs, Mac)           | Low priority   |
 | Phase 18 | Lazy Compilation + CLI Extensions                 | Future         |
 
 ## Completed Phases (summary)
@@ -44,11 +72,9 @@ Session handover document. Read at session start.
 ## References
 
 - `@./.dev/roadmap.md` — Phase roadmap
-- `@./.dev/checklist.md` — W38 details (investigation steps, benchmarks, sources)
-- `@./.dev/references/w38-osr-research.md` — **W38 next steps: 4 approaches compared**
+- `@./.dev/checklist.md` — W38/W41/W42 details
+- `@./.dev/references/w38-osr-research.md` — OSR research (4 approaches)
 - `@./.dev/decisions.md` — architectural decisions (D131: epoch JIT timeout)
 - `@./.dev/jit-debugging.md` — JIT debug techniques
-- `bench/simd_comparison.yaml` — SIMD performance data (3 layers: baseline → post-opt → JIT)
-- `bench/simd/src/` — C source for compiler-generated SIMD benchmarks
-- `bench/run_simd_bench.sh` — SIMD microbenchmark runner
+- `bench/simd_comparison.yaml` — SIMD performance data
 - External: wasmtime (`~/Documents/OSS/wasmtime/`), zware (`~/Documents/OSS/zware/`)
