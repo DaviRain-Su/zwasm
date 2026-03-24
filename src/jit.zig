@@ -3853,10 +3853,11 @@ pub const Compiler = struct {
     fn emitMemGrow(self: *Compiler, instr: RegInstr) void {
         self.fpCacheEvictAll();
         self.spillCallerSaved();
+        // Spill rs1 then load from memory to avoid ABI register conflicts.
+        self.spillVreg(instr.rs1);
         // Args: x0 = instance, x1 = pages (u64 for memory64 compat)
         self.emitLoadInstPtr(0);
-        const pages_reg = self.getOrLoad(instr.rs1, SCRATCH);
-        self.emit(a64.mov64(1, pages_reg));
+        self.emit(a64.ldr64(1, REGS_PTR, @as(u16, instr.rs1) * 8));
         // Call jitMemGrow (returns u64: old_pages or -1)
         const addr_instrs = a64.loadImm64(SCRATCH, self.mem_grow_addr);
         for (addr_instrs) |inst| self.emit(inst);
@@ -3878,14 +3879,17 @@ pub const Compiler = struct {
     fn emitMemFill(self: *Compiler, instr: RegInstr) void {
         self.fpCacheEvictAll();
         self.spillCallerSaved();
+        // Spill all arg vregs then load from memory to avoid ABI register conflicts.
+        // getOrLoad returns physical registers that may alias ABI arg registers (x0-x3);
+        // loading from regs[] after spill avoids all clobbering issues.
+        self.spillVreg(instr.rd);
+        self.spillVreg(instr.rs1);
+        self.spillVreg(instr.rs2());
         // Args: x0 = instance, w1 = dst (rd), w2 = val (rs1), w3 = n (rs2)
         self.emitLoadInstPtr(0);
-        const dst_reg = self.getOrLoad(instr.rd, SCRATCH);
-        self.emit(a64.mov32(1, dst_reg));
-        const val_reg = self.getOrLoad(instr.rs1, SCRATCH);
-        self.emit(a64.mov32(2, val_reg));
-        const n_reg = self.getOrLoad(instr.rs2(), SCRATCH);
-        self.emit(a64.mov32(3, n_reg));
+        self.emit(a64.ldr64(1, REGS_PTR, @as(u16, instr.rd) * 8));
+        self.emit(a64.ldr64(2, REGS_PTR, @as(u16, instr.rs1) * 8));
+        self.emit(a64.ldr64(3, REGS_PTR, @as(u16, instr.rs2()) * 8));
         // Call jitMemFill
         const addr_instrs = a64.loadImm64(SCRATCH, self.mem_fill_addr);
         for (addr_instrs) |inst| self.emit(inst);
@@ -3901,14 +3905,15 @@ pub const Compiler = struct {
     fn emitMemCopy(self: *Compiler, instr: RegInstr) void {
         self.fpCacheEvictAll();
         self.spillCallerSaved();
+        // Spill all arg vregs then load from memory to avoid ABI register conflicts.
+        self.spillVreg(instr.rd);
+        self.spillVreg(instr.rs1);
+        self.spillVreg(instr.rs2());
         // Args: x0 = instance, w1 = dst (rd), w2 = src (rs1), w3 = n (rs2)
         self.emitLoadInstPtr(0);
-        const dst_reg = self.getOrLoad(instr.rd, SCRATCH);
-        self.emit(a64.mov32(1, dst_reg));
-        const src_reg = self.getOrLoad(instr.rs1, SCRATCH);
-        self.emit(a64.mov32(2, src_reg));
-        const n_reg = self.getOrLoad(instr.rs2(), SCRATCH);
-        self.emit(a64.mov32(3, n_reg));
+        self.emit(a64.ldr64(1, REGS_PTR, @as(u16, instr.rd) * 8));
+        self.emit(a64.ldr64(2, REGS_PTR, @as(u16, instr.rs1) * 8));
+        self.emit(a64.ldr64(3, REGS_PTR, @as(u16, instr.rs2()) * 8));
         // Call jitMemCopy
         const addr_instrs = a64.loadImm64(SCRATCH, self.mem_copy_addr);
         for (addr_instrs) |inst| self.emit(inst);
