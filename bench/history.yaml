@@ -3053,3 +3053,195 @@ entries:
       rw_cpp_string_cached: {time_ms: 8.3}
       rw_cpp_sort: {time_ms: 9.5}
       rw_cpp_sort_cached: {time_ms: 7.9}
+  - id: "w38-lazy-aot"
+    date: "2026-03-24"
+    reason: "W38: HOT_THRESHOLD 10→3, extract_lane fix, back_edge_bailed"
+    commit: "98a2827"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 50.8}
+      fib_cached: {time_ms: 49.6}
+      tak: {time_ms: 7.9}
+      tak_cached: {time_ms: 7.6}
+      sieve: {time_ms: 6.7}
+      sieve_cached: {time_ms: 4.7}
+      nbody: {time_ms: 28.1}
+      nbody_cached: {time_ms: 23.8}
+      nqueens: {time_ms: 2.9}
+      nqueens_cached: {time_ms: 2.1}
+      tgo_fib: {time_ms: 36.5}
+      tgo_fib_cached: {time_ms: 35.7}
+      tgo_tak: {time_ms: 10.2}
+      tgo_tak_cached: {time_ms: 5.6}
+      tgo_arith: {time_ms: 8.8}
+      tgo_arith_cached: {time_ms: 3.8}
+      tgo_sieve: {time_ms: 3.4}
+      tgo_sieve_cached: {time_ms: 2.6}
+      tgo_fib_loop: {time_ms: 6.7}
+      tgo_fib_loop_cached: {time_ms: 8.5}
+      tgo_gcd: {time_ms: 2.2}
+      tgo_gcd_cached: {time_ms: 5.5}
+      tgo_nqueens: {time_ms: 56.0}
+      tgo_nqueens_cached: {time_ms: 55.3}
+      tgo_mfr: {time_ms: 49.7}
+      tgo_mfr_cached: {time_ms: 87.8}
+      tgo_list: {time_ms: 59.4}
+      tgo_list_cached: {time_ms: 63.6}
+      tgo_rwork: {time_ms: 9.8}
+      tgo_rwork_cached: {time_ms: 7.7}
+      tgo_strops: {time_ms: 58.6}
+      tgo_strops_cached: {time_ms: 73.1}
+      st_fib2: {time_ms: 1006.8}
+      st_fib2_cached: {time_ms: 963.3}
+      st_sieve: {time_ms: 202.3}
+      st_sieve_cached: {time_ms: 196.4}
+      st_nestedloop: {time_ms: 1.6}
+      st_nestedloop_cached: {time_ms: 1.8}
+      st_ackermann: {time_ms: 4.2}
+      st_ackermann_cached: {time_ms: 8.6}
+      st_matrix: {time_ms: 295.6}
+      st_matrix_cached: {time_ms: 307.8}
+      gc_alloc: {time_ms: 3.4}
+      gc_alloc_cached: {time_ms: 6.1}
+      gc_tree: {time_ms: 22.8}
+      gc_tree_cached: {time_ms: 23.9}
+      rw_rust_fib: {time_ms: 41.1}
+      rw_rust_fib_cached: {time_ms: 30.5}
+      rw_c_matrix: {time_ms: 26.2}
+      rw_c_matrix_cached: {time_ms: 20.2}
+      rw_c_math: {time_ms: 68.0}
+      rw_c_math_cached: {time_ms: 82.1}
+      rw_c_string: {time_ms: 51.9}
+      rw_c_string_cached: {time_ms: 53.8}
+      rw_cpp_string: {time_ms: 7.1}
+      rw_cpp_string_cached: {time_ms: 9.6}
+      rw_cpp_sort: {time_ms: 6.2}
+      rw_cpp_sort_cached: {time_ms: 10.9}
+  - id: "w38-final"
+    date: "2026-03-24"
+    reason: "W38 final: threshold=3 + all fixes"
+    commit: "8085bab"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 57.0}
+      fib_cached: {time_ms: 50.0}
+      tak: {time_ms: 8.4}
+      tak_cached: {time_ms: 8.0}
+      sieve: {time_ms: 4.5}
+      sieve_cached: {time_ms: 4.2}
+      nbody: {time_ms: 22.4}
+      nbody_cached: {time_ms: 24.3}
+      nqueens: {time_ms: 5.7}
+      nqueens_cached: {time_ms: 3.2}
+      tgo_fib: {time_ms: 33.6}
+      tgo_fib_cached: {time_ms: 37.3}
+      tgo_tak: {time_ms: 8.0}
+      tgo_tak_cached: {time_ms: 5.7}
+      tgo_arith: {time_ms: 3.1}
+      tgo_arith_cached: {time_ms: 3.1}
+      tgo_sieve: {time_ms: 5.6}
+      tgo_sieve_cached: {time_ms: 8.0}
+      tgo_fib_loop: {time_ms: 4.4}
+      tgo_fib_loop_cached: {time_ms: 2.6}
+      tgo_gcd: {time_ms: 0.4}
+      tgo_gcd_cached: {time_ms: 1.7}
+      tgo_nqueens: {time_ms: 90.6}
+      tgo_nqueens_cached: {time_ms: 54.1}
+      tgo_mfr: {time_ms: 49.7}
+      tgo_mfr_cached: {time_ms: 51.1}
+      tgo_list: {time_ms: 55.1}
+      tgo_list_cached: {time_ms: 57.8}
+      tgo_rwork: {time_ms: 7.2}
+      tgo_rwork_cached: {time_ms: 18.2}
+      tgo_strops: {time_ms: 82.6}
+      tgo_strops_cached: {time_ms: 71.6}
+      st_fib2: {time_ms: 942.2}
+      st_fib2_cached: {time_ms: 941.6}
+      st_sieve: {time_ms: 204.7}
+      st_sieve_cached: {time_ms: 200.7}
+      st_nestedloop: {time_ms: 1.9}
+      st_nestedloop_cached: {time_ms: 2.2}
+      st_ackermann: {time_ms: 4.8}
+      st_ackermann_cached: {time_ms: 8.0}
+      st_matrix: {time_ms: 305.6}
+      st_matrix_cached: {time_ms: 300.7}
+      gc_alloc: {time_ms: 5.9}
+      gc_alloc_cached: {time_ms: 6.2}
+      gc_tree: {time_ms: 28.0}
+      gc_tree_cached: {time_ms: 28.2}
+      rw_rust_fib: {time_ms: 39.0}
+      rw_rust_fib_cached: {time_ms: 38.0}
+      rw_c_matrix: {time_ms: 31.6}
+      rw_c_matrix_cached: {time_ms: 22.3}
+      rw_c_math: {time_ms: 68.5}
+      rw_c_math_cached: {time_ms: 100.1}
+      rw_c_string: {time_ms: 52.8}
+      rw_c_string_cached: {time_ms: 49.9}
+      rw_cpp_string: {time_ms: 15.5}
+      rw_cpp_string_cached: {time_ms: 11.5}
+      rw_cpp_sort: {time_ms: 3.3}
+      rw_cpp_sort_cached: {time_ms: 7.7}
+  - id: "written_vregs_prescan"
+    date: "2026-03-25"
+    reason: "Phase 20: written_vregs pre-scan fix — correctness fix, no perf change expected"
+    commit: "126fa91"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 46.6}
+      fib_cached: {time_ms: 46.9}
+      tak: {time_ms: 7.0}
+      tak_cached: {time_ms: 5.7}
+      sieve: {time_ms: 5.6}
+      sieve_cached: {time_ms: 4.6}
+      nbody: {time_ms: 23.1}
+      nbody_cached: {time_ms: 21.5}
+      nqueens: {time_ms: 2.0}
+      nqueens_cached: {time_ms: 2.2}
+      tgo_fib: {time_ms: 31.6}
+      tgo_fib_cached: {time_ms: 31.7}
+      tgo_tak: {time_ms: 6.5}
+      tgo_tak_cached: {time_ms: 6.8}
+      tgo_arith: {time_ms: 2.4}
+      tgo_arith_cached: {time_ms: 2.0}
+      tgo_sieve: {time_ms: 2.9}
+      tgo_sieve_cached: {time_ms: 3.4}
+      tgo_fib_loop: {time_ms: 2.2}
+      tgo_fib_loop_cached: {time_ms: 2.1}
+      tgo_gcd: {time_ms: 1.8}
+      tgo_gcd_cached: {time_ms: 2.2}
+      tgo_nqueens: {time_ms: 52.0}
+      tgo_nqueens_cached: {time_ms: 52.7}
+      tgo_mfr: {time_ms: 47.8}
+      tgo_mfr_cached: {time_ms: 46.3}
+      tgo_list: {time_ms: 54.9}
+      tgo_list_cached: {time_ms: 57.1}
+      tgo_rwork: {time_ms: 6.7}
+      tgo_rwork_cached: {time_ms: 6.9}
+      tgo_strops: {time_ms: 75.8}
+      tgo_strops_cached: {time_ms: 92.5}
+      st_fib2: {time_ms: 862.8}
+      st_fib2_cached: {time_ms: 858.5}
+      st_sieve: {time_ms: 175.1}
+      st_sieve_cached: {time_ms: 175.4}
+      st_nestedloop: {time_ms: 2.8}
+      st_nestedloop_cached: {time_ms: 2.2}
+      st_ackermann: {time_ms: 5.1}
+      st_ackermann_cached: {time_ms: 4.7}
+      st_matrix: {time_ms: 283.2}
+      st_matrix_cached: {time_ms: 282.0}
+      gc_alloc: {time_ms: 5.4}
+      gc_alloc_cached: {time_ms: 4.9}
+      gc_tree: {time_ms: 22.1}
+      gc_tree_cached: {time_ms: 21.2}
+      rw_rust_fib: {time_ms: 35.3}
+      rw_rust_fib_cached: {time_ms: 34.1}
+      rw_c_matrix: {time_ms: 21.3}
+      rw_c_matrix_cached: {time_ms: 20.1}
+      rw_c_math: {time_ms: 63.1}
+      rw_c_math_cached: {time_ms: 66.4}
+      rw_c_string: {time_ms: 47.2}
+      rw_c_string_cached: {time_ms: 48.5}
+      rw_cpp_string: {time_ms: 7.6}
+      rw_cpp_string_cached: {time_ms: 7.3}
+      rw_cpp_sort: {time_ms: 4.3}
+      rw_cpp_sort_cached: {time_ms: 4.7}

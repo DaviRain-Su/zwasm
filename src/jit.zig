@@ -2491,9 +2491,21 @@ pub const Compiler = struct {
             }
         }
 
-        // Mark params as written (they're initialized by the caller)
+        // Pre-scan: compute written_vregs for the ENTIRE function.
+        // This must cover all instructions, not just those before each call site,
+        // because loops can write a vreg AFTER a call that needs to spill it.
+        // Without the full pre-scan, the spill optimization incorrectly skips
+        // vregs that are written later in the loop body (bug: stale reload).
         for (0..self.param_count) |i| {
             if (i < 128) self.written_vregs |= @as(u128, 1) << @as(u7, @intCast(i));
+        }
+        for (ir) |scan_instr| {
+            if (scan_instr.rd < 128) {
+                const op = scan_instr.op;
+                if (!self.isControlFlowOp(op) or op == regalloc_mod.OP_CALL or op == regalloc_mod.OP_CALL_INDIRECT) {
+                    self.written_vregs |= @as(u128, 1) << @as(u7, @intCast(scan_instr.rd));
+                }
+            }
         }
 
         while (pc < ir.len) {
@@ -2527,14 +2539,7 @@ pub const Compiler = struct {
                 // Non-const write to rd invalidates that vreg's known const
                 self.known_consts[instr.rd] = null;
             }
-            // Track written vregs for spill optimization
-            // Include CALL/CALL_INDIRECT results — they write to rd and must be spilled
-            if (instr.rd < 128) {
-                const op = instr.op;
-                if (!self.isControlFlowOp(op) or op == regalloc_mod.OP_CALL or op == regalloc_mod.OP_CALL_INDIRECT) {
-                    self.written_vregs |= @as(u128, 1) << @as(u7, @intCast(instr.rd));
-                }
-            }
+            // written_vregs already computed in pre-scan (covers full function for loops)
         }
         // Trailing entry for end-of-function
         self.pc_map.items[ir.len] = self.currentIdx();

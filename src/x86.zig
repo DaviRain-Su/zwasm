@@ -3824,9 +3824,19 @@ pub const Compiler = struct {
         self.ir_slice = ir;
         self.branch_targets_slice = branch_targets;
 
-        // Mark params as written
+        // Pre-scan: compute written_vregs for the ENTIRE function.
+        // Must cover all instructions (not just those before each call site)
+        // because loops can write a vreg AFTER a call that needs to spill it.
         for (0..self.param_count) |i| {
             if (i < 128) self.written_vregs |= @as(u128, 1) << @as(u7, @intCast(i));
+        }
+        for (ir) |scan_instr| {
+            if (scan_instr.rd < 128) {
+                const op = scan_instr.op;
+                if (!self.isControlFlowOp(op) or op == regalloc_mod.OP_CALL or op == regalloc_mod.OP_CALL_INDIRECT) {
+                    self.written_vregs |= @as(u128, 1) << @as(u7, @intCast(scan_instr.rd));
+                }
+            }
         }
 
         while (pc < ir.len) {
@@ -3842,10 +3852,7 @@ pub const Compiler = struct {
             } else if (instr.rd < 128) {
                 self.known_consts[instr.rd] = null;
             }
-            // Track written vregs
-            if (instr.rd < 128) {
-                self.written_vregs |= @as(u128, 1) << @as(u7, @intCast(instr.rd));
-            }
+            // written_vregs already computed in pre-scan (covers full function for loops)
         }
         self.pc_map.items[ir.len] = self.currentOffset();
 
