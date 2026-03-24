@@ -62,8 +62,11 @@ pub const WasmFunction = struct {
     reg_ir_failed: bool = false,
     /// JIT-compiled native code (lazy: compiled after hot threshold).
     jit_code: ?*jit_mod.JitCode = null,
-    /// True if JIT compilation was attempted and failed.
+    /// True if JIT compilation was attempted and failed (compilation error or too large).
     jit_failed: bool = false,
+    /// True if back-edge JIT was skipped (reentry guard, br_table).
+    /// Separate from jit_failed so call-path JIT can still compile the function.
+    back_edge_bailed: bool = false,
     /// Call count for hot function detection.
     call_count: u32 = 0,
 };

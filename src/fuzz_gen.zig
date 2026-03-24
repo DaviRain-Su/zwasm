@@ -1700,7 +1700,7 @@ fn genSelect(alloc: Allocator) ![]u8 {
 // ============================================================
 
 const FUZZ_FUEL: u64 = 100_000;
-const FUZZ_JIT_CALLS: u32 = 11; // HOT_THRESHOLD(10) + 1
+const FUZZ_JIT_CALLS: u32 = 4; // HOT_THRESHOLD(3) + 1
 const FUZZ_MAX_ARGS: usize = 8;
 const FUZZ_MAX_RESULTS: usize = 8;
 

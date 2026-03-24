@@ -604,6 +604,7 @@ fn registerImports(
                             src_func.subtype.wasm_function.reg_ir_failed = false;
                             src_func.subtype.wasm_function.jit_code = null;
                             src_func.subtype.wasm_function.jit_failed = false;
+                            src_func.subtype.wasm_function.back_edge_bailed = false;
                             src_func.subtype.wasm_function.call_count = 0;
                         }
                         const addr = store.addFunction(src_func) catch
@@ -656,6 +657,7 @@ fn registerImports(
                                     func.subtype.wasm_function.reg_ir_failed = false;
                                     func.subtype.wasm_function.jit_code = null;
                                     func.subtype.wasm_function.jit_failed = false;
+                                    func.subtype.wasm_function.back_edge_bailed = false;
                                     func.subtype.wasm_function.call_count = 0;
                                 }
                                 const new_addr = store.addFunction(func) catch continue;
@@ -694,6 +696,7 @@ fn registerImports(
                                     func.subtype.wasm_function.reg_ir_failed = false;
                                     func.subtype.wasm_function.jit_code = null;
                                     func.subtype.wasm_function.jit_failed = false;
+                                    func.subtype.wasm_function.back_edge_bailed = false;
                                     func.subtype.wasm_function.call_count = 0;
                                 }
                                 const new_func_addr = store.addFunction(func) catch

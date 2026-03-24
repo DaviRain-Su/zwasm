@@ -67,8 +67,11 @@ pub fn jitSupported() bool {
     };
 }
 
-/// Hot function call threshold — JIT after this many calls.
-pub const HOT_THRESHOLD: u32 = 10;
+/// Hot function call threshold — JIT after 3 calls (Lazy AOT).
+/// Lowered from 10 to 3 for early JIT compilation. Combined with
+/// back_edge_bailed (separate from jit_failed), C-compiled functions
+/// with reentry guards get call-path JIT instead of never.
+pub const HOT_THRESHOLD: u32 = 3;
 
 /// Back-edge threshold — JIT after this many loop iterations in a single call.
 pub const BACK_EDGE_THRESHOLD: u32 = 1000;
@@ -385,6 +388,34 @@ const a64 = struct {
     fn str64(rt: u5, rn: u5, imm_bytes: u16) u32 {
         const imm12: u12 = @intCast(imm_bytes / 8);
         return 0xF9000000 | (@as(u32, imm12) << 10) | (@as(u32, rn) << 5) | rt;
+    }
+
+    /// LDR Wt, [Xn, #imm] — load 32-bit, imm is byte offset (must be 4-aligned).
+    fn ldr32(rt: u5, rn: u5, imm_bytes: u16) u32 {
+        const imm12: u12 = @intCast(imm_bytes / 4);
+        return 0xB9400000 | (@as(u32, imm12) << 10) | (@as(u32, rn) << 5) | rt;
+    }
+
+    /// LDRB Wt, [Xn, #imm] — load unsigned byte.
+    fn ldrb(rt: u5, rn: u5, imm_bytes: u12) u32 {
+        return 0x39400000 | (@as(u32, imm_bytes) << 10) | (@as(u32, rn) << 5) | rt;
+    }
+
+    /// LDRSB Wt, [Xn, #imm] — load signed byte, sign-extend to 32-bit.
+    fn ldrsb32(rt: u5, rn: u5, imm_bytes: u12) u32 {
+        return 0x39C00000 | (@as(u32, imm_bytes) << 10) | (@as(u32, rn) << 5) | rt;
+    }
+
+    /// LDRH Wt, [Xn, #imm] — load unsigned halfword, imm is byte offset (must be 2-aligned).
+    fn ldrh(rt: u5, rn: u5, imm_bytes: u16) u32 {
+        const imm12: u12 = @intCast(imm_bytes / 2);
+        return 0x79400000 | (@as(u32, imm12) << 10) | (@as(u32, rn) << 5) | rt;
+    }
+
+    /// LDRSH Wt, [Xn, #imm] — load signed halfword, sign-extend to 32-bit.
+    fn ldrsh32(rt: u5, rn: u5, imm_bytes: u16) u32 {
+        const imm12: u12 = @intCast(imm_bytes / 2);
+        return 0x79C00000 | (@as(u32, imm12) << 10) | (@as(u32, rn) << 5) | rt;
     }
 
     // --- Register-offset loads (for Wasm memory access) ---
@@ -4359,38 +4390,79 @@ pub const Compiler = struct {
             },
 
             // --- extract_lane ---
-            0x15 => { // i8x16.extract_lane_s — SMOV Wd, Vn.B[lane]
-                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+            // ARM64 UMOV/SMOV with Q=0 only accesses lower-half lanes.
+            // Upper-half lanes (B>=8, H>=4, S>=2) use direct memory load
+            // from simd_v128 storage instead.
+            0x15 => { // i8x16.extract_lane_s
                 const d = destReg(instr.rd);
-                self.emit(0x0E012C00 | (@as(u32, @as(u4, @truncate(extra))) << 17) | (@as(u32, SIMD_SCRATCH0) << 5) | d);
+                const lane: u4 = @truncate(extra);
+                if (lane < 8) {
+                    self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                    self.emit(0x0E012C00 | (@as(u32, lane) << 17) | (@as(u32, SIMD_SCRATCH0) << 5) | d);
+                } else {
+                    self.emitSimdV128Addr(instr.rs1);
+                    self.emit(a64.ldrsb32(d, SCRATCH, lane));
+                }
                 self.storeVreg(instr.rd, d);
                 return true;
             },
-            0x16 => { // i8x16.extract_lane_u — UMOV Wd, Vn.B[lane]
-                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+            0x16 => { // i8x16.extract_lane_u
                 const d = destReg(instr.rd);
-                self.emit(0x0E013C00 | (@as(u32, @as(u4, @truncate(extra))) << 17) | (@as(u32, SIMD_SCRATCH0) << 5) | d);
+                const lane: u4 = @truncate(extra);
+                if (lane < 8) {
+                    self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                    self.emit(0x0E013C00 | (@as(u32, lane) << 17) | (@as(u32, SIMD_SCRATCH0) << 5) | d);
+                } else {
+                    self.emitSimdV128Addr(instr.rs1);
+                    self.emit(a64.ldrb(d, SCRATCH, lane));
+                }
                 self.storeVreg(instr.rd, d);
                 return true;
             },
-            0x18 => { // i16x8.extract_lane_s — SMOV Wd, Vn.H[lane]
-                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+            0x18 => { // i16x8.extract_lane_s
                 const d = destReg(instr.rd);
-                self.emit(0x0E022C00 | (@as(u32, @as(u3, @truncate(extra))) << 19) | (@as(u32, SIMD_SCRATCH0) << 5) | d);
+                const lane: u3 = @truncate(extra);
+                if (lane < 4) {
+                    self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                    self.emit(0x0E022C00 | (@as(u32, lane) << 18) | (@as(u32, SIMD_SCRATCH0) << 5) | d);
+                } else {
+                    self.emitSimdV128Addr(instr.rs1);
+                    self.emit(a64.ldrsh32(d, SCRATCH, @as(u16, lane) * 2));
+                }
                 self.storeVreg(instr.rd, d);
                 return true;
             },
-            0x19 => { // i16x8.extract_lane_u — UMOV Wd, Vn.H[lane]
-                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+            0x19 => { // i16x8.extract_lane_u
                 const d = destReg(instr.rd);
-                self.emit(0x0E023C00 | (@as(u32, @as(u3, @truncate(extra))) << 19) | (@as(u32, SIMD_SCRATCH0) << 5) | d);
+                const lane: u3 = @truncate(extra);
+                if (lane < 4) {
+                    self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                    self.emit(0x0E023C00 | (@as(u32, lane) << 18) | (@as(u32, SIMD_SCRATCH0) << 5) | d);
+                } else {
+                    self.emitSimdV128Addr(instr.rs1);
+                    self.emit(a64.ldrh(d, SCRATCH, @as(u16, lane) * 2));
+                }
                 self.storeVreg(instr.rd, d);
                 return true;
             },
-            0x1B, 0x1F => { // i32x4/f32x4.extract_lane — UMOV Wd, Vn.S[lane]
+            0x1B, 0x1F => { // i32x4/f32x4.extract_lane
                 self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
                 const d = destReg(instr.rd);
-                self.emit(0x0E043C00 | (@as(u32, @as(u2, @truncate(extra))) << 21) | (@as(u32, SIMD_SCRATCH0) << 5) | d);
+                const lane: u2 = @truncate(extra);
+                if (lane < 2) {
+                    // UMOV Wd, Vn.S[0|1] — Q=0 valid for lower half
+                    self.emit(0x0E043C00 | (@as(u32, lane) << 19) | (@as(u32, SIMD_SCRATCH0) << 5) | d);
+                } else {
+                    // Upper half: UMOV Xd, Vn.D[1] gets both S[2] and S[3]
+                    self.emit(0x4E183C00 | (@as(u32, SIMD_SCRATCH0) << 5) | d);
+                    if (lane == 3) {
+                        // S[3] is in bits [63:32] — LSR Xd, Xd, #32
+                        self.emit(a64.lsr64Imm(d, d, 32));
+                    } else {
+                        // S[2] is in bits [31:0] — zero upper 32 via MOV Wd, Wd
+                        self.emit(0x2A0003E0 | (@as(u32, d) << 16) | d);
+                    }
+                }
                 self.storeVreg(instr.rd, d);
                 return true;
             },

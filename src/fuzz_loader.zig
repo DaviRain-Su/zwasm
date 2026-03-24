@@ -8,7 +8,7 @@
 //! - WASI fallback: tries non-WASI first, then WASI with sandbox caps
 //! - Parameterized invoke: synthesizes args from input bytes (up to 8 params)
 //! - Multi-value returns: handles up to 8 result values
-//! - JIT trigger: calls each function 11 times (HOT_THRESHOLD+1)
+//! - JIT trigger: calls each function 4 times (HOT_THRESHOLD+1)
 //!
 //! Usage:
 //!   echo -n '<bytes>' | ./zig-out/bin/fuzz_loader
@@ -19,7 +19,7 @@ const std = @import("std");
 const zwasm = @import("zwasm");
 
 const FUEL_LIMIT: u64 = 1_000_000;
-const JIT_CALLS: u32 = 11; // HOT_THRESHOLD(10) + 1
+const JIT_CALLS: u32 = 4; // HOT_THRESHOLD(3) + 1
 const MAX_ARGS: usize = 8;
 const MAX_RESULTS: usize = 8;
 

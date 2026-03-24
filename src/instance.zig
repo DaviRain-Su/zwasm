@@ -248,6 +248,7 @@ pub const Instance = struct {
                         func.subtype.wasm_function.reg_ir_failed = false;
                         func.subtype.wasm_function.jit_code = null;
                         func.subtype.wasm_function.jit_failed = false;
+                        func.subtype.wasm_function.back_edge_bailed = false;
                         func.subtype.wasm_function.call_count = 0;
                     }
                     const addr = self.store.addFunction(func) catch
