@@ -14,26 +14,38 @@ Session handover document. Read at session start.
 
 ## Current Task
 
-**W38 merged to main** — v128 sync fix + investigation.
+**W38 Lazy AOT — in progress** on branch `perf/w38-lazy-aot`.
 
-- ARM64 JIT v128 sync: MOV copies simd_v128, CONST clears it (correctness bug fix)
-- OSR prologue: x20/x21 caching before emitLoadMemCache
-- Root cause: C-compiled functions have reentry guards preventing JIT (13-131x gap)
-- OSR attempted but blocked by v128 state transfer for complex functions
+### Done
 
-### Next: Lazy AOT (Recommended approach for W38)
+- HOT_THRESHOLD 10 → 3: earlier JIT compilation
+- Back-edge `jit_failed` poisoning fix: `back_edge_bailed` separate flag
+  so reentry guard/br_table bail doesn't block call-path JIT
+- ARM64 extract_lane encoding fix: imm5 shift + upper-half memory load
+- Added ldr32/ldrb/ldrsb32/ldrh/ldrsh32 ARM64 helpers
+- Tests: force_interpreter for fuel/deadline/memory resource tests
 
-Compile all functions to JIT at module load / first call, bypassing interpreter.
-Eliminates tier-up state transfer problem entirely (matches wasmtime architecture).
-Detailed research and 4 candidate approaches documented in:
-**`@./.dev/references/w38-osr-research.md`** — read this before starting.
+### Status
+
+- `zig build test`: all pass
+- Spec: 62,258/62,263 (5 pre-existing JIT bugs in linking/memory_grow64)
+- E2E: 792/792. Real-world: 49/50 (rust_compression pre-existing)
+- Benchmarks: no regression
+
+### Next Steps
+
+1. Run SIMD benchmarks to measure W38 perf improvement
+2. Investigate 5 spec failures (linking: 3, memory_grow64: 2)
+3. Run Merge Gate (Ubuntu) if merging
 
 ### Open Work Items
 
-| Item     | Description                            | Status             |
-|----------|----------------------------------------|--------------------|
-| W38      | C-compiled SIMD perf (Lazy AOT path)   | Research complete   |
-| Phase 18 | Lazy Compilation + CLI Extensions      | Aligns with W38    |
+| Item     | Description                                      | Status           |
+|----------|--------------------------------------------------|------------------|
+| W38      | C-compiled SIMD perf (threshold + back-edge fix) | Implementation   |
+| W39      | JIT bugs: linking(3), memory_grow64(2) at T=3    | New              |
+| W40      | JIT SIMD: stack-allocated Vm simd_v128 access     | New              |
+| Phase 18 | Lazy Compilation + CLI Extensions                | Aligns with W38  |
 
 ## Completed Phases (summary)
 
