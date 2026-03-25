@@ -20,6 +20,7 @@ SOURCES=(
     nbody_simd
     mandelbrot
     matmul
+    simd_chain
 )
 
 echo "=== Building SIMD benchmarks ==="
