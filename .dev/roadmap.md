@@ -48,7 +48,7 @@ Details: `roadmap-archive.md`.
 
 | Task                       | Priority | Description                                     |
 |----------------------------|----------|-------------------------------------------------|
-| PR #6: Timeout support     | High     | External contributor PR. JIT fuel bypass fixed.  |
+| ~~PR #6: Timeout support~~ | Done     | Merged 2026-03-08. DeanoC.                       |
 | ~~Epoch-based JIT check~~  | Done     | D131: fuel check helper replaces jitSuppressed   |
 | CLI: `zwasm dump`          | Low      | Detailed module inspection                       |
 | CLI: `zwasm bench`         | Low      | Built-in benchmark runner                        |
