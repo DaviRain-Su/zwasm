@@ -7,7 +7,7 @@ Session handover document. Read at session start.
 - Stages 0-46 + Phase 1, 3, 5, 8, 10, 11, 13, 15, 19, **20 (partial)** complete.
 - Spec: 62,263/62,263 Mac+Ubuntu (100.0%, 0 skip).
 - E2E: 792/792 (Mac+Ubuntu).
-- Real-world: Mac 48/50, Ubuntu 50/50. Merged to main 2026-03-25.
+- Real-world: Mac 49/50, Ubuntu 50/50. rust_enum_match fixed 2026-03-25.
 - JIT: Register IR + ARM64/x86_64 + SIMD (NEON 253/256, SSE 244/256).
 - HOT_THRESHOLD=3 (lowered from 10 in W38).
 - Binary: 1.29MB stripped. Memory: ~3.5MB RSS.
@@ -29,24 +29,25 @@ All Phase 20 fixes merged to main (2026-03-25). Merge Gate passed (Mac + Ubuntu)
 | written_vregs pre-scan (ARM64 + x86)             | +2 Mac (tinygo_hello/json) |
 | void self-call result clobber (ARM64 + x86)      | Preventive fix             |
 | **ARM64 fuel check x0 clobber** (this branch)    | **tinygo_sort FIXED**      |
+| **Stale scratch cache in signed div** (this branch) | **rust_enum_match FIXED** |
 
-**Root cause — fuel check clobbered vreg 20 (x0)**: The ARM64 `emitFuelCheck`
-used x0 as a temporary for the fuel counter. But x0 maps to vreg 20 when
-reg_count > 20. At loop back-edges, this clobbered vreg 20's live value,
-causing incorrect results in the partition loop (wrong sort output).
-Fix: use SCRATCH2 (x16/IP0) instead of x0. x86 backend was already correct
-(push/pop rax around fuel check).
+**Root cause — stale scratch cache in emitDiv32/emitDiv64**: The signed
+division overflow check (INT_MIN / -1) uses SCRATCH (x8) for temporary
+values (-1 and INT_MIN) but did not invalidate `scratch_vreg`. After the
+check, `getOrLoad()` returned the stale SCRATCH instead of reloading.
+This caused wrong exponent computation in the Grisu float-to-decimal
+function (func#185, 52 vregs), producing garbage f64 formatting output.
+Fix: `self.scratch_vreg = null` before the overflow check.
 
 ### Remaining
 
-- `rust_enum_match`: garbage f64 values in Triangle coordinates — FP-related JIT bug
 - W42: `go_math_big` wasmtime compat diff (env-dependent, not JIT-related)
 
 ### Open Work Items
 
 | Item     | Description                                       | Status         |
 |----------|---------------------------------------------------|----------------|
-| W41      | JIT real-world: rust_enum_match                   | **Next**       |
+| W41      | JIT real-world: ALL FIXED (Mac 49/50)             | **Done**       |
 | W42      | wasmtime 互換性差異 (go_math_big, Mac)             | Low priority   |
 | Phase 18 | Lazy Compilation + CLI Extensions                 | Future         |
 
