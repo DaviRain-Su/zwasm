@@ -3414,6 +3414,7 @@ pub const Compiler = struct {
         if (sign == .signed) {
             // Check INT_MIN / -1 → IntegerOverflow
             // INT_MIN (i32) = 0x80000000
+            self.scratch_vreg = null; // Overflow check clobbers SCRATCH
             self.emit(a64.movn32(SCRATCH, 0)); // SCRATCH = -1 (0xFFFFFFFF)
             self.emit(a64.cmp32(rs2, SCRATCH));
             const skip_idx = self.currentIdx();
@@ -3527,6 +3528,7 @@ pub const Compiler = struct {
         if (sign == .signed) {
             // Check INT_MIN / -1 → overflow
             // -1 = ~0, use MOVN (1 insn instead of 5)
+            self.scratch_vreg = null; // Overflow check clobbers SCRATCH
             self.emit(a64.movn64(SCRATCH, 0, 0));
             self.emit(a64.cmp64(rs2, SCRATCH));
             const skip_idx = self.currentIdx();
