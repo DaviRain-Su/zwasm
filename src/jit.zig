@@ -4413,6 +4413,18 @@ pub const Compiler = struct {
         }
     }
 
+    /// Flush a specific vreg from Q cache to simd_v128[] if dirty, keeping cache entry valid.
+    /// Used before direct simd_v128[] memory reads (e.g., extract_lane upper-half fallback).
+    fn simdQregFlushVreg(self: *Compiler, vreg: u16) void {
+        if (self.simdQregFind(vreg)) |slot| {
+            if (self.simd_qreg_dirty[slot]) {
+                const qreg: u5 = @intCast(@as(u6, SIMD_QREG_BASE) + @as(u6, @intCast(slot)));
+                self.emitStoreV128Raw(qreg, vreg);
+                self.simd_qreg_dirty[slot] = false;
+            }
+        }
+    }
+
     /// Invalidate a vreg from Q cache (called when scalar op overwrites the vreg).
     /// Does NOT write back — the scalar op will provide a new value.
     fn simdQregInvalidate(self: *Compiler, vreg: u16) void {
@@ -4634,6 +4646,7 @@ pub const Compiler = struct {
                     self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
                     self.emit(0x0E012C00 | (@as(u32, lane) << 17) | (@as(u32, SIMD_SCRATCH0) << 5) | d);
                 } else {
+                    self.simdQregFlushVreg(instr.rs1);
                     self.emitSimdV128Addr(instr.rs1);
                     self.emit(a64.ldrsb32(d, SCRATCH, lane));
                 }
@@ -4647,6 +4660,7 @@ pub const Compiler = struct {
                     self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
                     self.emit(0x0E013C00 | (@as(u32, lane) << 17) | (@as(u32, SIMD_SCRATCH0) << 5) | d);
                 } else {
+                    self.simdQregFlushVreg(instr.rs1);
                     self.emitSimdV128Addr(instr.rs1);
                     self.emit(a64.ldrb(d, SCRATCH, lane));
                 }
@@ -4660,6 +4674,7 @@ pub const Compiler = struct {
                     self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
                     self.emit(0x0E022C00 | (@as(u32, lane) << 18) | (@as(u32, SIMD_SCRATCH0) << 5) | d);
                 } else {
+                    self.simdQregFlushVreg(instr.rs1);
                     self.emitSimdV128Addr(instr.rs1);
                     self.emit(a64.ldrsh32(d, SCRATCH, @as(u16, lane) * 2));
                 }
@@ -4673,6 +4688,7 @@ pub const Compiler = struct {
                     self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
                     self.emit(0x0E023C00 | (@as(u32, lane) << 18) | (@as(u32, SIMD_SCRATCH0) << 5) | d);
                 } else {
+                    self.simdQregFlushVreg(instr.rs1);
                     self.emitSimdV128Addr(instr.rs1);
                     self.emit(a64.ldrh(d, SCRATCH, @as(u16, lane) * 2));
                 }
