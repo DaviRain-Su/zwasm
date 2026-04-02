@@ -24,7 +24,7 @@ pub const WaitQueue = struct {
     waiters: std.ArrayList(Waiter) = .empty,
 
     const Waiter = struct {
-        addr: u32,
+        addr: u64,
         cond: std.Thread.Condition = .{},
     };
 
@@ -170,9 +170,11 @@ pub const Memory = struct {
     }
 
     /// Read a typed value at offset + address (little-endian).
-    pub fn read(self: *const Memory, comptime T: type, offset: u32, address: u32) !T {
-        const effective = @as(u33, offset) + @as(u33, address);
-        if (effective + @sizeOf(T) > self.data.items.len) return error.OutOfBoundsMemoryAccess;
+    /// For memory64, offset and address may be full u64; overflow → OOB.
+    pub fn read(self: *const Memory, comptime T: type, offset: u64, address: u64) !T {
+        const effective, const overflow = @addWithOverflow(offset, address);
+        const len = self.data.items.len;
+        if (overflow != 0 or len < @sizeOf(T) or effective > len - @sizeOf(T)) return error.OutOfBoundsMemoryAccess;
 
         const ptr: *const [@sizeOf(T)]u8 = @ptrCast(&self.data.items[effective]);
         return switch (T) {
@@ -185,9 +187,11 @@ pub const Memory = struct {
     }
 
     /// Write a typed value at offset + address (little-endian).
-    pub fn write(self: *Memory, comptime T: type, offset: u32, address: u32, value: T) !void {
-        const effective = @as(u33, offset) + @as(u33, address);
-        if (effective + @sizeOf(T) > self.data.items.len) return error.OutOfBoundsMemoryAccess;
+    /// For memory64, offset and address may be full u64; overflow → OOB.
+    pub fn write(self: *Memory, comptime T: type, offset: u64, address: u64, value: T) !void {
+        const effective, const overflow = @addWithOverflow(offset, address);
+        const len = self.data.items.len;
+        if (overflow != 0 or len < @sizeOf(T) or effective > len - @sizeOf(T)) return error.OutOfBoundsMemoryAccess;
 
         const ptr: *[@sizeOf(T)]u8 = @ptrCast(&self.data.items[effective]);
         switch (T) {
@@ -209,7 +213,7 @@ pub const Memory = struct {
 
     /// memory.atomic.wait32: block until notified or timeout.
     /// Returns 0 (ok/woken), 1 (not-equal), 2 (timed-out).
-    pub fn atomicWait32(self: *Memory, addr: u32, expected: i32, timeout_ns: i64) !i32 {
+    pub fn atomicWait32(self: *Memory, addr: u64, expected: i32, timeout_ns: i64) !i32 {
         if (!self.is_shared_memory) return error.Trap;
         const loaded = try self.read(i32, 0, addr);
         if (loaded != expected) return 1; // not-equal
@@ -246,7 +250,7 @@ pub const Memory = struct {
 
     /// memory.atomic.wait64: block until notified or timeout.
     /// Returns 0 (ok/woken), 1 (not-equal), 2 (timed-out).
-    pub fn atomicWait64(self: *Memory, addr: u32, expected: i64, timeout_ns: i64) !i32 {
+    pub fn atomicWait64(self: *Memory, addr: u64, expected: i64, timeout_ns: i64) !i32 {
         if (!self.is_shared_memory) return error.Trap;
         const loaded = try self.read(i64, 0, addr);
         if (loaded != expected) return 1; // not-equal
@@ -279,7 +283,7 @@ pub const Memory = struct {
 
     /// memory.atomic.notify: wake up to `count` waiters at `addr`.
     /// Returns the number of waiters woken.
-    pub fn atomicNotify(self: *Memory, addr: u32, count: u32) !i32 {
+    pub fn atomicNotify(self: *Memory, addr: u64, count: u32) !i32 {
         // Notify is valid on non-shared memory (returns 0 per spec).
         _ = try self.read(u32, 0, addr); // bounds check
         if (count == 0) return 0; // wake 0 threads

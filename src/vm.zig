@@ -2820,9 +2820,10 @@ pub const Vm = struct {
 
         // All other atomic ops have memarg (align + offset)
         const align_flags = try reader.readU32();
-        const offset = try reader.readU32();
-        _ = align_flags; // alignment validated at decode time
-        const m = instance.getMemory(0) catch return error.OutOfBoundsMemoryAccess;
+        const memidx: u16 = if (align_flags & 0x40 != 0) @intCast(try reader.readU32()) else 0;
+        const m = instance.getMemory(memidx) catch return error.OutOfBoundsMemoryAccess;
+        // memory64: offset is u64 LEB128
+        const offset: u64 = if (m.is_64) try reader.readU64() else try reader.readU32();
 
         switch (atomic_op) {
             .atomic_fence => unreachable, // handled above
@@ -2830,8 +2831,9 @@ pub const Vm = struct {
             // ---- Wait/Notify ----
             .memory_atomic_notify => {
                 const count: u32 = @bitCast(self.popI32());
-                const addr: u32 = @bitCast(self.popI32());
-                const effective_addr = addr +% offset;
+                const addr: u64 = if (m.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
+                const effective_addr, const ov = @addWithOverflow(addr, offset);
+                if (ov != 0) return error.OutOfBoundsMemoryAccess;
                 if (effective_addr % 4 != 0) return error.Trap; // unaligned atomic
                 const result = m.atomicNotify(effective_addr, count) catch return error.OutOfBoundsMemoryAccess;
                 try self.pushI32(result);
@@ -2839,8 +2841,9 @@ pub const Vm = struct {
             .memory_atomic_wait32 => {
                 const timeout: i64 = self.popI64();
                 const expected: i32 = self.popI32();
-                const addr: u32 = @bitCast(self.popI32());
-                const effective_addr = addr +% offset;
+                const addr: u64 = if (m.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
+                const effective_addr, const ov = @addWithOverflow(addr, offset);
+                if (ov != 0) return error.OutOfBoundsMemoryAccess;
                 if (effective_addr % 4 != 0) return error.Trap; // unaligned atomic
                 const result = m.atomicWait32(effective_addr, expected, timeout) catch |err| switch (err) {
                     error.Trap => return error.Trap,
@@ -2851,8 +2854,9 @@ pub const Vm = struct {
             .memory_atomic_wait64 => {
                 const timeout: i64 = self.popI64();
                 const expected: i64 = self.popI64();
-                const addr: u32 = @bitCast(self.popI32());
-                const effective_addr = addr +% offset;
+                const addr: u64 = if (m.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
+                const effective_addr, const ov = @addWithOverflow(addr, offset);
+                if (ov != 0) return error.OutOfBoundsMemoryAccess;
                 if (effective_addr % 8 != 0) return error.Trap; // unaligned atomic
                 const result = m.atomicWait64(effective_addr, expected, timeout) catch |err| switch (err) {
                     error.Trap => return error.Trap,
@@ -2950,32 +2954,38 @@ pub const Vm = struct {
 
     const RmwOp = enum { add, sub, @"and", @"or", xor, xchg };
 
-    fn atomicLoad(self: *Vm, comptime MemT: type, comptime ResultT: type, offset: u32, m: *WasmMemory) WasmError!void {
-        const addr: u32 = @bitCast(self.popI32());
-        if (@sizeOf(MemT) > 1 and (addr +% offset) % @sizeOf(MemT) != 0) return error.Trap;
+    fn atomicLoad(self: *Vm, comptime MemT: type, comptime ResultT: type, offset: u64, m: *WasmMemory) WasmError!void {
+        const addr: u64 = if (m.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
+        const effective, const ov = @addWithOverflow(addr, offset);
+        if (ov != 0) return error.OutOfBoundsMemoryAccess;
+        if (@sizeOf(MemT) > 1 and effective % @sizeOf(MemT) != 0) return error.Trap;
         const val = m.read(MemT, offset, addr) catch return error.OutOfBoundsMemoryAccess;
         const result: ResultT = @intCast(val);
         try self.push(asU64(ResultT, result));
     }
 
-    fn atomicStore(self: *Vm, comptime MemT: type, comptime pop_type: enum { i32, i64 }, offset: u32, m: *WasmMemory) WasmError!void {
+    fn atomicStore(self: *Vm, comptime MemT: type, comptime pop_type: enum { i32, i64 }, offset: u64, m: *WasmMemory) WasmError!void {
         const val: MemT = switch (pop_type) {
             .i32 => @truncate(@as(u32, @bitCast(self.popI32()))),
             .i64 => @truncate(@as(u64, @bitCast(self.popI64()))),
         };
-        const addr: u32 = @bitCast(self.popI32());
-        if (@sizeOf(MemT) > 1 and (addr +% offset) % @sizeOf(MemT) != 0) return error.Trap;
+        const addr: u64 = if (m.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
+        const effective, const ov = @addWithOverflow(addr, offset);
+        if (ov != 0) return error.OutOfBoundsMemoryAccess;
+        if (@sizeOf(MemT) > 1 and effective % @sizeOf(MemT) != 0) return error.Trap;
         m.write(MemT, offset, addr, val) catch return error.OutOfBoundsMemoryAccess;
     }
 
-    fn atomicRmw(self: *Vm, comptime MemT: type, comptime ResultT: type, comptime op: RmwOp, offset: u32, m: *WasmMemory) WasmError!void {
+    fn atomicRmw(self: *Vm, comptime MemT: type, comptime ResultT: type, comptime op: RmwOp, offset: u64, m: *WasmMemory) WasmError!void {
         const operand: MemT = switch (ResultT) {
             u32 => @truncate(@as(u32, @bitCast(self.popI32()))),
             u64 => @truncate(@as(u64, @bitCast(self.popI64()))),
             else => unreachable,
         };
-        const addr: u32 = @bitCast(self.popI32());
-        if (@sizeOf(MemT) > 1 and (addr +% offset) % @sizeOf(MemT) != 0) return error.Trap;
+        const addr: u64 = if (m.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
+        const effective, const ov = @addWithOverflow(addr, offset);
+        if (ov != 0) return error.OutOfBoundsMemoryAccess;
+        if (@sizeOf(MemT) > 1 and effective % @sizeOf(MemT) != 0) return error.Trap;
         const old = m.read(MemT, offset, addr) catch return error.OutOfBoundsMemoryAccess;
         const new_val: MemT = switch (op) {
             .add => old +% operand,
@@ -2990,7 +3000,7 @@ pub const Vm = struct {
         try self.push(asU64(ResultT, result));
     }
 
-    fn atomicCmpxchg(self: *Vm, comptime MemT: type, comptime ResultT: type, offset: u32, m: *WasmMemory) WasmError!void {
+    fn atomicCmpxchg(self: *Vm, comptime MemT: type, comptime ResultT: type, offset: u64, m: *WasmMemory) WasmError!void {
         const replacement: MemT = switch (ResultT) {
             u32 => @truncate(@as(u32, @bitCast(self.popI32()))),
             u64 => @truncate(@as(u64, @bitCast(self.popI64()))),
@@ -3001,8 +3011,10 @@ pub const Vm = struct {
             u64 => @truncate(@as(u64, @bitCast(self.popI64()))),
             else => unreachable,
         };
-        const addr: u32 = @bitCast(self.popI32());
-        if (@sizeOf(MemT) > 1 and (addr +% offset) % @sizeOf(MemT) != 0) return error.Trap;
+        const addr: u64 = if (m.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
+        const effective, const ov = @addWithOverflow(addr, offset);
+        if (ov != 0) return error.OutOfBoundsMemoryAccess;
+        if (@sizeOf(MemT) > 1 and effective % @sizeOf(MemT) != 0) return error.Trap;
         const loaded = m.read(MemT, offset, addr) catch return error.OutOfBoundsMemoryAccess;
         if (loaded == expected) {
             m.write(MemT, offset, addr, replacement) catch return error.OutOfBoundsMemoryAccess;
@@ -3022,14 +3034,14 @@ pub const Vm = struct {
             // ---- Memory operations (36.2) ----
             .v128_load => {
                 const ma = try readMemarg(reader, instance);
-                const base = @as(u32, @bitCast(self.popI32()));
+                const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
                 const val = ma.mem.read(u128, ma.offset, base) catch return error.OutOfBoundsMemoryAccess;
                 try self.pushV128(val);
             },
             .v128_store => {
                 const ma = try readMemarg(reader, instance);
                 const val = self.popV128();
-                const base = @as(u32, @bitCast(self.popI32()));
+                const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
                 ma.mem.write(u128, ma.offset, base, val) catch return error.OutOfBoundsMemoryAccess;
             },
             .v128_const => {
@@ -3042,28 +3054,28 @@ pub const Vm = struct {
             // Splat loads
             .v128_load8_splat => {
                 const ma = try readMemarg(reader, instance);
-                const base = @as(u32, @bitCast(self.popI32()));
+                const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
                 const val = ma.mem.read(u8, ma.offset, base) catch return error.OutOfBoundsMemoryAccess;
                 const vec: @Vector(16, u8) = @splat(val);
                 try self.pushV128(@bitCast(vec));
             },
             .v128_load16_splat => {
                 const ma = try readMemarg(reader, instance);
-                const base = @as(u32, @bitCast(self.popI32()));
+                const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
                 const val = ma.mem.read(u16, ma.offset, base) catch return error.OutOfBoundsMemoryAccess;
                 const vec: @Vector(8, u16) = @splat(val);
                 try self.pushV128(@bitCast(vec));
             },
             .v128_load32_splat => {
                 const ma = try readMemarg(reader, instance);
-                const base = @as(u32, @bitCast(self.popI32()));
+                const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
                 const val = ma.mem.read(u32, ma.offset, base) catch return error.OutOfBoundsMemoryAccess;
                 const vec: @Vector(4, u32) = @splat(val);
                 try self.pushV128(@bitCast(vec));
             },
             .v128_load64_splat => {
                 const ma = try readMemarg(reader, instance);
-                const base = @as(u32, @bitCast(self.popI32()));
+                const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
                 const val = ma.mem.read(u64, ma.offset, base) catch return error.OutOfBoundsMemoryAccess;
                 const vec: @Vector(2, u64) = @splat(val);
                 try self.pushV128(@bitCast(vec));
@@ -3080,13 +3092,13 @@ pub const Vm = struct {
             // Zero-extending loads
             .v128_load32_zero => {
                 const ma = try readMemarg(reader, instance);
-                const base = @as(u32, @bitCast(self.popI32()));
+                const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
                 const val = ma.mem.read(u32, ma.offset, base) catch return error.OutOfBoundsMemoryAccess;
                 try self.pushV128(@as(u128, val));
             },
             .v128_load64_zero => {
                 const ma = try readMemarg(reader, instance);
-                const base = @as(u32, @bitCast(self.popI32()));
+                const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
                 const val = ma.mem.read(u64, ma.offset, base) catch return error.OutOfBoundsMemoryAccess;
                 try self.pushV128(@as(u128, val));
             },
@@ -3958,12 +3970,12 @@ pub const Vm = struct {
     ) WasmError!void {
         const N = 16 / @sizeOf(WideT); // number of lanes
         const ma = try readMemarg(reader, instance);
-        const base = @as(u32, @bitCast(self.popI32()));
+        const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
         const m = ma.mem;
         // Read N narrow values
         const byte_count = N * @sizeOf(NarrowT);
-        const effective = @as(u33, ma.offset) + @as(u33, base);
-        if (effective + byte_count > m.data.items.len) return error.OutOfBoundsMemoryAccess;
+        const effective, const ov = @addWithOverflow(ma.offset, base);
+        if (ov != 0 or m.data.items.len < byte_count or effective > m.data.items.len - byte_count) return error.OutOfBoundsMemoryAccess;
         var narrow: [N]NarrowT = undefined;
         for (&narrow, 0..) |*n, i| {
             const ptr: *const [@sizeOf(NarrowT)]u8 = @ptrCast(&m.data.items[effective + i * @sizeOf(NarrowT)]);
@@ -3988,9 +4000,8 @@ pub const Vm = struct {
         const ma = try readMemarg(reader, instance);
         const lane = try reader.readByte();
         var vec: @Vector(N, T) = @bitCast(self.popV128());
-        const base = @as(u32, @bitCast(self.popI32()));
-        const m = ma.mem;
-        const val = m.read(T, ma.offset, base) catch return error.OutOfBoundsMemoryAccess;
+        const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
+        const val = ma.mem.read(T, ma.offset, base) catch return error.OutOfBoundsMemoryAccess;
         vec[lane] = val;
         try self.pushV128(@bitCast(vec));
     }
@@ -4006,9 +4017,8 @@ pub const Vm = struct {
         const ma = try readMemarg(reader, instance);
         const lane = try reader.readByte();
         const vec: @Vector(N, T) = @bitCast(self.popV128());
-        const base = @as(u32, @bitCast(self.popI32()));
-        const m = ma.mem;
-        m.write(T, ma.offset, base, vec[lane]) catch return error.OutOfBoundsMemoryAccess;
+        const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
+        ma.mem.write(T, ma.offset, base, vec[lane]) catch return error.OutOfBoundsMemoryAccess;
     }
 
     // SIMD helper: lane-wise comparison producing all-ones/all-zeros result
@@ -7570,8 +7580,8 @@ pub const Vm = struct {
     // ================================================================
 
     fn memLoadCached(self: *Vm, comptime LoadT: type, comptime ResultT: type, offset: u32, cached_mem: ?*WasmMemory) WasmError!void {
-        const base = @as(u32, @bitCast(self.popI32()));
         const m = cached_mem orelse return error.OutOfBoundsMemoryAccess;
+        const base: u64 = if (m.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
         const val = m.read(LoadT, offset, base) catch return error.OutOfBoundsMemoryAccess;
         const result: ResultT = if (@bitSizeOf(LoadT) == @bitSizeOf(ResultT))
             @bitCast(val)
@@ -7581,8 +7591,8 @@ pub const Vm = struct {
     }
 
     fn memLoadFloatCached(self: *Vm, comptime T: type, offset: u32, cached_mem: ?*WasmMemory) WasmError!void {
-        const base = @as(u32, @bitCast(self.popI32()));
         const m = cached_mem orelse return error.OutOfBoundsMemoryAccess;
+        const base: u64 = if (m.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
         const val = m.read(T, offset, base) catch return error.OutOfBoundsMemoryAccess;
         switch (T) {
             f32 => try self.pushF32(val),
@@ -7593,8 +7603,8 @@ pub const Vm = struct {
 
     fn memStoreCached(self: *Vm, comptime T: type, offset: u32, cached_mem: ?*WasmMemory) WasmError!void {
         const val: T = @truncate(self.pop());
-        const base = @as(u32, @bitCast(self.popI32()));
         const m = cached_mem orelse return error.OutOfBoundsMemoryAccess;
+        const base: u64 = if (m.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
         m.write(T, offset, base, val) catch return error.OutOfBoundsMemoryAccess;
     }
 
@@ -7604,8 +7614,8 @@ pub const Vm = struct {
             f64 => self.popF64(),
             else => unreachable,
         };
-        const base = @as(u32, @bitCast(self.popI32()));
         const m = cached_mem orelse return error.OutOfBoundsMemoryAccess;
+        const base: u64 = if (m.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
         m.write(T, offset, base, val) catch return error.OutOfBoundsMemoryAccess;
     }
 
@@ -7621,18 +7631,19 @@ pub const Vm = struct {
     // ================================================================
 
     /// Read memarg from bytecode stream, returning offset and resolved memory.
-    /// Handles multi-memory: bit 6 of alignment signals memidx follows.
-    fn readMemarg(reader: *Reader, instance: *Instance) !struct { offset: u32, mem: *WasmMemory } {
+    /// Handles multi-memory (bit 6 of alignment) and memory64 (u64 offset).
+    fn readMemarg(reader: *Reader, instance: *Instance) !struct { offset: u64, mem: *WasmMemory } {
         const align_flags = try reader.readU32();
         const memidx: u16 = if (align_flags & 0x40 != 0) @intCast(try reader.readU32()) else 0;
-        const offset = try reader.readU32();
         const m = instance.getMemory(memidx) catch return error.OutOfBoundsMemoryAccess;
+        // memory64: offset is u64 LEB128
+        const offset: u64 = if (m.is_64) try reader.readU64() else try reader.readU32();
         return .{ .offset = offset, .mem = m };
     }
 
     fn memLoad(self: *Vm, comptime LoadT: type, comptime ResultT: type, reader: *Reader, instance: *Instance) WasmError!void {
         const ma = try readMemarg(reader, instance);
-        const base = @as(u32, @bitCast(self.popI32()));
+        const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
         const val = ma.mem.read(LoadT, ma.offset, base) catch return error.OutOfBoundsMemoryAccess;
         const result: ResultT = if (@bitSizeOf(LoadT) == @bitSizeOf(ResultT))
             @bitCast(val)
@@ -7643,7 +7654,7 @@ pub const Vm = struct {
 
     fn memLoadFloat(self: *Vm, comptime T: type, reader: *Reader, instance: *Instance) WasmError!void {
         const ma = try readMemarg(reader, instance);
-        const base = @as(u32, @bitCast(self.popI32()));
+        const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
         const val = ma.mem.read(T, ma.offset, base) catch return error.OutOfBoundsMemoryAccess;
         switch (T) {
             f32 => try self.pushF32(val),
@@ -7655,7 +7666,7 @@ pub const Vm = struct {
     fn memStore(self: *Vm, comptime T: type, reader: *Reader, instance: *Instance) WasmError!void {
         const ma = try readMemarg(reader, instance);
         const val: T = @truncate(self.pop());
-        const base = @as(u32, @bitCast(self.popI32()));
+        const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
         ma.mem.write(T, ma.offset, base, val) catch return error.OutOfBoundsMemoryAccess;
     }
 
@@ -7666,14 +7677,14 @@ pub const Vm = struct {
             f64 => self.popF64(),
             else => unreachable,
         };
-        const base = @as(u32, @bitCast(self.popI32()));
+        const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
         ma.mem.write(T, ma.offset, base, val) catch return error.OutOfBoundsMemoryAccess;
     }
 
     fn memStoreTrunc(self: *Vm, comptime StoreT: type, comptime _: type, reader: *Reader, instance: *Instance) WasmError!void {
         const ma = try readMemarg(reader, instance);
         const val: StoreT = @truncate(self.pop());
-        const base = @as(u32, @bitCast(self.popI32()));
+        const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
         ma.mem.write(StoreT, ma.offset, base, val) catch return error.OutOfBoundsMemoryAccess;
     }
 

@@ -884,7 +884,7 @@ pub const Module = struct {
                 0x28...0x3E => { // memory load/store
                     const align_flags = try r.readU32();
                     if (align_flags & 0x40 != 0) _ = try r.readU32(); // memidx (multi-memory)
-                    _ = try r.readU32(); // offset
+                    _ = try r.readU64(); // offset (u64 for memory64)
                 },
                 0x3F, 0x40 => _ = try r.readU32(), // memory.size/grow (memidx)
                 0xD0 => _ = try r.readI33(), // ref.null (heap type, S33 LEB128)
@@ -910,12 +910,12 @@ pub const Module = struct {
                     if (sub <= 11 or sub == 92 or sub == 93) {
                         // v128.load/store variants (0-11), load32/64_zero (92-93) — memarg
                         const simd_align = try r.readU32();
-                        _ = try r.readU32(); // offset
+                        _ = try r.readU64(); // offset (u64 for memory64)
                         if (simd_align & 0x40 != 0) _ = try r.readU32(); // memidx
                     } else if (sub >= 84 and sub <= 91) {
                         // v128.load*_lane (84-87), v128.store*_lane (88-91) — memarg + lane_index
                         const lane_align = try r.readU32();
-                        _ = try r.readU32(); // offset
+                        _ = try r.readU64(); // offset (u64 for memory64)
                         if (lane_align & 0x40 != 0) _ = try r.readU32(); // memidx
                         _ = try r.readByte();
                     } else if (sub == 12) {
@@ -965,7 +965,7 @@ pub const Module = struct {
                     } else {
                         // All other atomic ops have memarg (align + offset)
                         _ = try r.readU32(); // align
-                        _ = try r.readU32(); // offset
+                        _ = try r.readU64(); // offset (u64 for memory64)
                     }
                 },
                 else => {}, // opcodes with no immediates

@@ -240,7 +240,14 @@ pub fn predecode(alloc: Allocator, bytecode: []const u8) PredecodeError!?*IrFunc
                     @intCast(reader.readU32() catch return error.InvalidWasm)
                 else
                     0;
-                const offset = reader.readU32() catch return error.InvalidWasm;
+                // memory64: offset is u64 LEB128 (safe to read u64 always — validation already passed)
+                const offset64 = reader.readU64() catch return error.InvalidWasm;
+                // Bail to bytecode interpreter if offset > u32_max (very rare, memory64 only)
+                const offset = std.math.cast(u32, offset64) orelse {
+                    code.deinit(alloc);
+                    pool64.deinit(alloc);
+                    return null;
+                };
                 try code.append(alloc, .{ .opcode = @intCast(byte), .extra = memidx, .operand = offset });
             },
 
@@ -481,7 +488,7 @@ fn predecodeSimd(alloc: Allocator, code: *std.ArrayList(PreInstr), pool64: *std.
                 @intCast(reader.readU32() catch return false)
             else
                 0;
-            const offset = reader.readU32() catch return false;
+            const offset = std.math.cast(u32, reader.readU64() catch return false) orelse return false;
             try code.append(alloc, .{ .opcode = ir_op, .extra = memidx, .operand = offset });
         },
         // v128.const (0x0C): 16 raw bytes → store as 2 pool64 entries
@@ -516,7 +523,7 @@ fn predecodeSimd(alloc: Allocator, code: *std.ArrayList(PreInstr), pool64: *std.
                 @intCast(reader.readU32() catch return false)
             else
                 0;
-            const offset = reader.readU32() catch return false;
+            const offset = std.math.cast(u32, reader.readU64() catch return false) orelse return false;
             const lane = reader.readByte() catch return false;
             // Pack lane into extra high byte, memidx into extra low byte
             try code.append(alloc, .{ .opcode = ir_op, .extra = (@as(u16, lane) << 8) | memidx, .operand = offset });

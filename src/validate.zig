@@ -972,7 +972,11 @@ const Validator = struct {
         const align_val = align_byte & 0x3F;
         const has_memidx = (align_byte & 0x40) != 0;
         const memidx: u32 = if (has_memidx) try reader.readU32() else 0;
-        _ = try reader.readU32(); // offset
+        // memory64: offset is u64 LEB128
+        if (self.memAddrType(memidx) == .i64)
+            _ = try reader.readU64()
+        else
+            _ = try reader.readU32();
 
         if (naturalAlignment(op)) |nat| {
             if (align_val > nat) return error.InvalidAlignment;
@@ -990,7 +994,11 @@ const Validator = struct {
         const align_val = align_byte & 0x3F;
         const has_memidx = (align_byte & 0x40) != 0;
         const memidx: u32 = if (has_memidx) try reader.readU32() else 0;
-        _ = try reader.readU32(); // offset
+        // memory64: offset is u64 LEB128
+        if (self.memAddrType(memidx) == .i64)
+            _ = try reader.readU64()
+        else
+            _ = try reader.readU32();
 
         if (naturalAlignment(op)) |nat| {
             if (align_val > nat) return error.InvalidAlignment;
@@ -1194,7 +1202,11 @@ const Validator = struct {
         const align_val = align_byte & 0x3F;
         const has_memidx = (align_byte & 0x40) != 0;
         const memidx: u32 = if (has_memidx) try reader.readU32() else 0;
-        _ = try reader.readU32(); // offset
+        // memory64: offset is u64 LEB128
+        if (self.memAddrType(memidx) == .i64)
+            _ = try reader.readU64()
+        else
+            _ = try reader.readU32();
 
         // Check memory index
         const total_mems = self.module.num_imported_memories + self.module.memories.items.len;
@@ -1244,10 +1256,10 @@ const Validator = struct {
                 const align_byte = try reader.readU32();
                 const align_val = align_byte & 0x3F;
                 const has_memidx = (align_byte & 0x40) != 0;
-                if (has_memidx) _ = try reader.readU32();
-                _ = try reader.readU32(); // offset
+                const memidx: u32 = if (has_memidx) try reader.readU32() else 0;
+                if (self.memAddrType(memidx) == .i64) _ = try reader.readU64() else _ = try reader.readU32();
                 if (align_val > 4) return error.InvalidAlignment; // natural = 16 = 2^4
-                try self.popI32(); // address
+                _ = try self.popExpecting(self.memAddrType(memidx)); // address
                 try self.pushVal(.v128);
             },
             // v128.load8x8_s/u, load16x4_s/u, load32x2_s/u (1-6) — memarg, natural align 8 (2^3)
@@ -1255,10 +1267,10 @@ const Validator = struct {
                 const align_byte = try reader.readU32();
                 const align_val = align_byte & 0x3F;
                 const has_memidx = (align_byte & 0x40) != 0;
-                if (has_memidx) _ = try reader.readU32();
-                _ = try reader.readU32();
+                const memidx: u32 = if (has_memidx) try reader.readU32() else 0;
+                if (self.memAddrType(memidx) == .i64) _ = try reader.readU64() else _ = try reader.readU32();
                 if (align_val > 3) return error.InvalidAlignment;
-                try self.popI32();
+                _ = try self.popExpecting(self.memAddrType(memidx));
                 try self.pushVal(.v128);
             },
             // v128.load8_splat(7), load16_splat(8), load32_splat(9), load64_splat(10) — memarg
@@ -1271,11 +1283,11 @@ const Validator = struct {
                 const align_byte = try reader.readU32();
                 const align_val = align_byte & 0x3F;
                 const has_memidx = (align_byte & 0x40) != 0;
-                if (has_memidx) _ = try reader.readU32();
-                _ = try reader.readU32();
+                const memidx: u32 = if (has_memidx) try reader.readU32() else 0;
+                if (self.memAddrType(memidx) == .i64) _ = try reader.readU64() else _ = try reader.readU32();
                 if (align_val > 4) return error.InvalidAlignment;
                 try self.popV128(); // value
-                try self.popI32(); // address
+                _ = try self.popExpecting(self.memAddrType(memidx)); // address
             },
             // v128.const (12) — 16 bytes immediate
             12 => { _ = try reader.readBytes(16); try self.pushVal(.v128); },
@@ -1419,10 +1431,10 @@ const Validator = struct {
         const align_byte = try reader.readU32();
         const align_val = align_byte & 0x3F;
         const has_memidx = (align_byte & 0x40) != 0;
-        if (has_memidx) _ = try reader.readU32();
-        _ = try reader.readU32(); // offset
+        const memidx: u32 = if (has_memidx) try reader.readU32() else 0;
+        if (self.memAddrType(memidx) == .i64) _ = try reader.readU64() else _ = try reader.readU32();
         if (align_val > natural_align) return error.InvalidAlignment;
-        try self.popI32(); // address
+        _ = try self.popExpecting(self.memAddrType(memidx)); // address
         try self.pushVal(.v128);
     }
 
@@ -1430,13 +1442,13 @@ const Validator = struct {
         const align_byte = try reader.readU32();
         const align_val = align_byte & 0x3F;
         const has_memidx = (align_byte & 0x40) != 0;
-        if (has_memidx) _ = try reader.readU32();
-        _ = try reader.readU32(); // offset
+        const memidx: u32 = if (has_memidx) try reader.readU32() else 0;
+        if (self.memAddrType(memidx) == .i64) _ = try reader.readU64() else _ = try reader.readU32();
         const lane = try reader.readByte();
         if (align_val > natural_align) return error.InvalidAlignment;
         if (lane >= max_lanes) return error.InvalidLaneIndex;
         try self.popV128(); // existing vector
-        try self.popI32(); // address
+        _ = try self.popExpecting(self.memAddrType(memidx)); // address
         try self.pushVal(.v128);
     }
 
@@ -1444,13 +1456,13 @@ const Validator = struct {
         const align_byte = try reader.readU32();
         const align_val = align_byte & 0x3F;
         const has_memidx = (align_byte & 0x40) != 0;
-        if (has_memidx) _ = try reader.readU32();
-        _ = try reader.readU32(); // offset
+        const memidx: u32 = if (has_memidx) try reader.readU32() else 0;
+        if (self.memAddrType(memidx) == .i64) _ = try reader.readU64() else _ = try reader.readU32();
         const lane = try reader.readByte();
         if (align_val > natural_align) return error.InvalidAlignment;
         if (lane >= max_lanes) return error.InvalidLaneIndex;
         try self.popV128(); // vector value
-        try self.popI32(); // address
+        _ = try self.popExpecting(self.memAddrType(memidx)); // address
     }
 
     fn validateLane(self: *Validator, reader: *Reader, max_lanes: u8) !void {
