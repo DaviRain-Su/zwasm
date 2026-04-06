@@ -66,9 +66,17 @@ jobs:
           rustup target add wasm32-wasip1
           rustc --version
 
-      - name: Run Rust FFI example
+      - name: Run Rust FFI example (dynamic)
         if: runner.os != 'Windows'
         run: cd examples/rust && cargo run
+
+      - name: Build static library (PIC + compiler_rt)
+        if: runner.os != 'Windows'
+        run: zig build static-lib -Dpic=true -Dcompiler-rt=true
+
+      - name: Run static link tests
+        if: runner.os != 'Windows'
+        run: bash test/c_api/run_static_link_test.sh
 
       - name: Install wasm-tools
         run: |

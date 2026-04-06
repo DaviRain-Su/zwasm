@@ -10,7 +10,7 @@ struct zwasm_module_t {
     _private: [u8; 0],
 }
 
-#[link(name = "zwasm")]
+// Linking is handled by build.rs (supports both static and dynamic)
 unsafe extern "C" {
     fn zwasm_module_new(wasm_ptr: *const u8, len: usize) -> *mut zwasm_module_t;
     fn zwasm_module_invoke(

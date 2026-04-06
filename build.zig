@@ -12,6 +12,10 @@ pub fn build(b: *std.Build) void {
     const enable_threads = b.option(bool, "threads", "Enable threads/atomics (default: true)") orelse true;
     const enable_component = b.option(bool, "component", "Enable component model (default: true)") orelse true;
 
+    // Static library options — needed when linking libzwasm.a from non-Zig toolchains
+    const enable_pic = b.option(bool, "pic", "Enable Position Independent Code for static library") orelse false;
+    const bundle_compiler_rt = b.option(bool, "compiler-rt", "Bundle compiler_rt into static library") orelse false;
+
     const build_zon = @import("build.zig.zon");
 
     const options = b.addOptions();
@@ -167,6 +171,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = if (lib_optimize) optimize else if (optimize == .Debug) .ReleaseSafe else optimize,
         .link_libc = true,
+        .pic = if (enable_pic) true else null,
     });
     lib_static_mod.addOptions("build_options", options);
     const lib_static = b.addLibrary(.{
@@ -174,6 +179,7 @@ pub fn build(b: *std.Build) void {
         .name = "zwasm",
         .root_module = lib_static_mod,
     });
+    lib_static.bundle_compiler_rt = bundle_compiler_rt;
     lib_static.installHeader(b.path("include/zwasm.h"), "zwasm.h");
 
     // Separate steps to avoid Zig 0.15.2 build graph shuffle bug
