@@ -385,6 +385,7 @@ pub const WasmModule = struct {
         self.module = rt.module_mod.Module.init(allocator, wasm_bytes);
         self.module.decode() catch |err| {
             self.module.deinit();
+            self.store.deinit();
             allocator.destroy(self);
             return err;
         };
@@ -395,6 +396,7 @@ pub const WasmModule = struct {
         self.instance.instantiateBase() catch |err| {
             self.instance.deinit();
             self.module.deinit();
+            self.store.deinit();
             allocator.destroy(self);
             return err;
         };
