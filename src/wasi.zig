@@ -2676,12 +2676,27 @@ fn readTestFile(name: []const u8) ![]const u8 {
     for (&paths) |prefix| {
         const path = try std.fmt.allocPrint(testing.allocator, "{s}{s}", .{ prefix, name });
         defer testing.allocator.free(path);
-        const file = std.fs.cwd().openFile(path, .{}) catch continue;
-        defer file.close();
-        const stat = try file.stat();
-        const data = try testing.allocator.alloc(u8, stat.size);
-        const n = try file.readAll(data);
-        return data[0..n];
+        var path_z: [std.posix.PATH_MAX]u8 = undefined;
+        if (path.len >= path_z.len) continue;
+        @memcpy(path_z[0..path.len], path);
+        path_z[path.len] = 0;
+        const fd = std.c.open(@ptrCast(&path_z), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
+        if (fd < 0) continue;
+        defer _ = std.c.close(fd);
+        var st: std.posix.Stat = undefined;
+        if (std.c.fstat(fd, &st) != 0) continue;
+        const size: usize = @intCast(st.size);
+        const data = try testing.allocator.alloc(u8, size);
+        var filled: usize = 0;
+        while (filled < size) {
+            const rc = std.c.read(fd, data.ptr + filled, size - filled);
+            if (rc <= 0) {
+                testing.allocator.free(data);
+                return error.ReadFailed;
+            }
+            filled += @intCast(rc);
+        }
+        return data[0..filled];
     }
     return error.FileNotFound;
 }
@@ -2717,13 +2732,16 @@ test "WASI — fd_write via 07_wasi_hello.wasm" {
     try instance.instantiate();
 
     // Create pipe for capturing stdout
-    const pipe = try posix.pipe();
+    var pipe_fds: [2]posix.fd_t = undefined;
+    if (std.c.pipe(&pipe_fds) != 0) return error.SkipZigTest;
+    const pipe = pipe_fds;
     defer _ = std.c.close(pipe[0]);
 
     // Redirect stdout to pipe write end
-    const saved_stdout = try posix.dup(@as(posix.fd_t, 1));
+    const saved_stdout = std.c.dup(@as(posix.fd_t, 1));
+    if (saved_stdout < 0) return error.SkipZigTest;
     defer _ = std.c.close(saved_stdout);
-    try posix.dup2(pipe[1], @as(posix.fd_t, 1));
+    if (std.c.dup2(pipe[1], @as(posix.fd_t, 1)) < 0) return error.SkipZigTest;
     _ = std.c.close(pipe[1]);
 
     // Run _start
@@ -2735,12 +2753,13 @@ test "WASI — fd_write via 07_wasi_hello.wasm" {
     };
 
     // Restore stdout
-    try posix.dup2(saved_stdout, @as(posix.fd_t, 1));
+    _ = std.c.dup2(saved_stdout, @as(posix.fd_t, 1));
 
     // Read captured output
     var buf: [256]u8 = undefined;
-    const n = try posix.read(pipe[0], &buf);
-    const output = buf[0..n];
+    const n_rc = std.c.read(pipe[0], &buf, buf.len);
+    if (n_rc < 0) return error.SkipZigTest;
+    const output = buf[0..@intCast(n_rc)];
 
     try testing.expectEqualStrings("Hello, WASI!\n", output);
 }
@@ -2863,7 +2882,10 @@ test "WASI — clock_time_get returns nonzero" {
 
     try instance.instantiate();
 
+    var th = std.Io.Threaded.init(alloc, .{});
+    defer th.deinit();
     var vm_inst = Vm.init(alloc);
+    vm_inst.io = th.io();
     vm_inst.current_instance = &instance;
 
     // clock_time_get(clock_id=0, precision=0, time_ptr=300)
@@ -2905,7 +2927,10 @@ test "WASI — random_get fills buffer" {
 
     try instance.instantiate();
 
+    var th = std.Io.Threaded.init(alloc, .{});
+    defer th.deinit();
     var vm_inst = Vm.init(alloc);
+    vm_inst.io = th.io();
     vm_inst.current_instance = &instance;
 
     const memory = try instance.getMemory(0);
@@ -2989,6 +3014,8 @@ test "WASI — path_open creates file and returns valid fd" {
     wasi_ctx.caps = Capabilities.all;
     instance.wasi = &wasi_ctx;
 
+    var th = std.Io.Threaded.init(alloc, .{});
+    defer th.deinit();
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     const host_path = try std.fmt.allocPrint(alloc, ".zig-cache/tmp/{s}", .{tmp.sub_path});
@@ -2998,6 +3025,7 @@ test "WASI — path_open creates file and returns valid fd" {
     try instance.instantiate();
 
     var vm_inst = Vm.init(alloc);
+    vm_inst.io = th.io();
     vm_inst.current_instance = &instance;
 
     const memory = try instance.getMemory(0);
@@ -3008,7 +3036,7 @@ test "WASI — path_open creates file and returns valid fd" {
     @memcpy(data[100 .. 100 + test_path.len], test_path);
 
     // Clean up test file if it exists
-    tmp.dir.deleteFile(test_path) catch {};
+    tmp.dir.deleteFile(th.io(), test_path) catch {};
 
     // Push path_open args in signature order (stack: first pushed = bottom)
     // path_open(fd=3, dirflags=1, path_ptr=100, path_len, oflags=CREAT(1),
@@ -3052,7 +3080,7 @@ test "WASI — path_open creates file and returns valid fd" {
     try testing.expectEqual(@as(u64, @intFromEnum(Errno.SUCCESS)), close_errno);
 
     // Clean up
-    tmp.dir.deleteFile(test_path) catch {};
+    tmp.dir.deleteFile(th.io(), test_path) catch {};
 }
 
 test "WASI — fd_readdir lists directory entries" {
@@ -3077,6 +3105,9 @@ test "WASI — fd_readdir lists directory entries" {
     wasi_ctx.caps = Capabilities.all;
     instance.wasi = &wasi_ctx;
 
+    var th = std.Io.Threaded.init(alloc, .{});
+    defer th.deinit();
+    const io = th.io();
     var tmp = testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     const host_path = try std.fmt.allocPrint(alloc, ".zig-cache/tmp/{s}", .{tmp.sub_path});
@@ -3084,28 +3115,29 @@ test "WASI — fd_readdir lists directory entries" {
 
     // Create a temp directory with known contents
     const test_dir = "zwasm_test_readdir";
-    tmp.dir.makeDir(test_dir) catch {};
-    var dir_fd = try tmp.dir.openDir(test_dir, .{ .access_sub_paths = true });
-    defer dir_fd.close();
+    tmp.dir.createDir(io, test_dir, .default_dir) catch {};
+    var dir_fd = try tmp.dir.openDir(io, test_dir, .{ .access_sub_paths = true });
+    defer dir_fd.close(io);
 
     // Create two files in the directory
-    const f1 = try dir_fd.createFile("afile.txt", .{ .read = true });
-    f1.close();
-    const f2 = try dir_fd.createFile("bfile.txt", .{ .read = true });
-    f2.close();
+    const f1 = try dir_fd.createFile(io, "afile.txt", .{ .read = true });
+    f1.close(io);
+    const f2 = try dir_fd.createFile(io, "bfile.txt", .{ .read = true });
+    f2.close(io);
 
     // Reopen dir fd for reading
-    const read_dir_fd = try tmp.dir.openDir(test_dir, .{ .access_sub_paths = true, .iterate = true });
+    const read_dir_fd = try tmp.dir.openDir(io, test_dir, .{ .access_sub_paths = true, .iterate = true });
     try wasi_ctx.addPreopenPath(3, "/tmp", host_path);
     // Put the dir fd in fd_table
     const wasi_dir_fd = try wasi_ctx.allocFd(.{
-        .raw = read_dir_fd.fd,
+        .raw = read_dir_fd.handle,
         .kind = .dir,
     }, false);
 
     try instance.instantiate();
 
     var vm_inst = Vm.init(alloc);
+    vm_inst.io = io;
     vm_inst.current_instance = &instance;
 
     const memory = try instance.getMemory(0);
@@ -3133,9 +3165,9 @@ test "WASI — fd_readdir lists directory entries" {
     try testing.expect(d_namlen < 256);
 
     // Clean up
-    dir_fd.deleteFile("afile.txt") catch {};
-    dir_fd.deleteFile("bfile.txt") catch {};
-    tmp.dir.deleteDir(test_dir) catch {};
+    dir_fd.deleteFile(io, "afile.txt") catch {};
+    dir_fd.deleteFile(io, "bfile.txt") catch {};
+    tmp.dir.deleteDir(io, test_dir) catch {};
 }
 
 test "WASI — registerAll for wasi_hello module" {
@@ -3261,7 +3293,9 @@ test "stdio override: custom fd replaces default" {
     defer ctx.deinit();
 
     // Create a pipe to use as custom stdout
-    const pipe = try posix.pipe();
+    var pipe_fds: [2]std.posix.fd_t = undefined;
+    if (std.c.pipe(&pipe_fds) != 0) return error.SkipZigTest;
+    const pipe = pipe_fds;
     defer _ = std.c.close(pipe[0]);
 
     // Set stdout (fd 1) to write end of pipe, with ownership (runtime closes it)
@@ -3280,7 +3314,9 @@ test "stdio override: borrow mode does not close fd on deinit" {
     if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = testing.allocator;
 
-    const pipe = try posix.pipe();
+    var pipe_fds: [2]std.posix.fd_t = undefined;
+    if (std.c.pipe(&pipe_fds) != 0) return error.SkipZigTest;
+    const pipe = pipe_fds;
     defer _ = std.c.close(pipe[0]);
     defer _ = std.c.close(pipe[1]);
 
@@ -3292,8 +3328,8 @@ test "stdio override: borrow mode does not close fd on deinit" {
 
     // pipe[1] should still be valid (borrowed, not closed by deinit)
     // Writing to it should succeed
-    const written = posix.write(pipe[1], "ok") catch 0;
-    try testing.expectEqual(@as(usize, 2), written);
+    const written_rc = std.c.write(pipe[1], "ok", 2);
+    try testing.expect(written_rc == 2);
 }
 
 test "addPreopenFd: registers fd-based preopen" {
@@ -3303,10 +3339,8 @@ test "addPreopenFd: registers fd-based preopen" {
     defer ctx.deinit();
 
     // Open a real directory to get a valid fd
-    var dir = try std.fs.cwd().openDir(".", .{});
-    const dir_fd = dir.fd;
-    // Transfer ownership to WasiContext (which will close it)
-    dir = undefined;
+    const dir_fd = std.c.open(".", std.posix.O{ .ACCMODE = .RDONLY, .DIRECTORY = true }, @as(std.c.mode_t, 0));
+    if (dir_fd < 0) return error.SkipZigTest;
 
     try ctx.addPreopenFd(3, "/sandbox", dir_fd, .dir, .own);
 

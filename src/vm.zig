@@ -8484,12 +8484,27 @@ fn readTestFile(alloc: Allocator, name: []const u8) ![]const u8 {
     for (prefixes) |prefix| {
         const path = try std.fmt.allocPrint(alloc, "{s}{s}", .{ prefix, name });
         defer alloc.free(path);
-        const file = std.fs.cwd().openFile(path, .{}) catch continue;
-        defer file.close();
-        const stat = try file.stat();
-        const data = try alloc.alloc(u8, stat.size);
-        const read = try file.readAll(data);
-        return data[0..read];
+        var path_z: [std.posix.PATH_MAX]u8 = undefined;
+        if (path.len >= path_z.len) continue;
+        @memcpy(path_z[0..path.len], path);
+        path_z[path.len] = 0;
+        const fd = std.c.open(@ptrCast(&path_z), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
+        if (fd < 0) continue;
+        defer _ = std.c.close(fd);
+        var st: std.posix.Stat = undefined;
+        if (std.c.fstat(fd, &st) != 0) continue;
+        const size: usize = @intCast(st.size);
+        const data = try alloc.alloc(u8, size);
+        var filled: usize = 0;
+        while (filled < size) {
+            const rc = std.c.read(fd, data.ptr + filled, size - filled);
+            if (rc <= 0) {
+                alloc.free(data);
+                return error.ReadFailed;
+            }
+            filled += @intCast(rc);
+        }
+        return data[0..filled];
     }
     return error.FileNotFound;
 }
@@ -9526,12 +9541,27 @@ test "Tiered — back-edge counting triggers JIT for single-call loop function" 
         for (prefixes) |prefix| {
             const path = try std.fmt.allocPrint(testing.allocator, "{s}sieve.wasm", .{prefix});
             defer testing.allocator.free(path);
-            const file = std.fs.cwd().openFile(path, .{}) catch continue;
-            defer file.close();
-            const stat = try file.stat();
-            const data = try testing.allocator.alloc(u8, stat.size);
-            const read = try file.readAll(data);
-            break :blk data[0..read];
+            var path_z: [std.posix.PATH_MAX]u8 = undefined;
+            if (path.len >= path_z.len) continue;
+            @memcpy(path_z[0..path.len], path);
+            path_z[path.len] = 0;
+            const fd = std.c.open(@ptrCast(&path_z), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
+            if (fd < 0) continue;
+            defer _ = std.c.close(fd);
+            var st: std.posix.Stat = undefined;
+            if (std.c.fstat(fd, &st) != 0) continue;
+            const size: usize = @intCast(st.size);
+            const data = try testing.allocator.alloc(u8, size);
+            var filled: usize = 0;
+            while (filled < size) {
+                const rc = std.c.read(fd, data.ptr + filled, size - filled);
+                if (rc <= 0) {
+                    testing.allocator.free(data);
+                    return error.SkipZigTest;
+                }
+                filled += @intCast(rc);
+            }
+            break :blk data[0..filled];
         }
         return error.SkipZigTest; // sieve.wasm not found
     };
@@ -10064,7 +10094,10 @@ test "Resource limits — deadline timeout (expired)" {
     defer inst.deinit();
     try inst.instantiate();
 
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var vm = Vm.init(testing.allocator);
+    vm.io = th.io();
     vm.deadline_ns = 0; // epoch = always expired
     vm.deadline_check_remaining = 0; // check immediately
     // Deadline check on trivial (loop-free) functions only works in interpreter;
@@ -10090,8 +10123,11 @@ test "Resource limits — deadline timeout (infinite loop)" {
     defer inst.deinit();
     try inst.instantiate();
 
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var vm = Vm.init(testing.allocator);
-    vm.deadline_ns = std.time.nanoTimestamp() - std.time.ns_per_ms;
+    vm.io = th.io();
+    vm.deadline_ns = std.Io.Timestamp.now(vm.io, .awake).nanoseconds - std.time.ns_per_ms;
     vm.deadline_check_remaining = 0;
 
     var results = [_]u64{0};
@@ -10099,7 +10135,10 @@ test "Resource limits — deadline timeout (infinite loop)" {
 }
 
 test "Resource limits — deadline timeout API" {
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var vm = Vm.init(testing.allocator);
+    vm.io = th.io();
 
     vm.setDeadlineTimeoutMs(1000);
     try testing.expect(vm.deadline_ns != null);
@@ -10113,7 +10152,10 @@ test "Resource limits — deadline timeout API" {
 }
 
 test "jitFuelCheckHelper — deadline expired returns TimeoutExceeded" {
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var vm = Vm.init(testing.allocator);
+    vm.io = th.io();
     vm.deadline_ns = 0; // already expired
     vm.jit_fuel = -1;
     vm.jit_fuel_initial = DEADLINE_JIT_INTERVAL;
@@ -10123,8 +10165,11 @@ test "jitFuelCheckHelper — deadline expired returns TimeoutExceeded" {
 }
 
 test "jitFuelCheckHelper — deadline not expired re-arms and continues" {
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var vm = Vm.init(testing.allocator);
-    vm.deadline_ns = std.time.nanoTimestamp() + 10 * std.time.ns_per_s; // 10s from now
+    vm.io = th.io();
+    vm.deadline_ns = std.Io.Timestamp.now(vm.io, .awake).nanoseconds + 10 * std.time.ns_per_s; // 10s from now
     vm.jit_fuel = -1;
     vm.jit_fuel_initial = DEADLINE_JIT_INTERVAL;
 
@@ -10135,7 +10180,10 @@ test "jitFuelCheckHelper — deadline not expired re-arms and continues" {
 }
 
 test "jitFuelCheckHelper — fuel exhausted returns FuelExhausted" {
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var vm = Vm.init(testing.allocator);
+    vm.io = th.io();
     vm.fuel = 100;
     vm.jit_fuel = -1;
     vm.jit_fuel_initial = 100; // was armed to fuel budget
@@ -10146,9 +10194,12 @@ test "jitFuelCheckHelper — fuel exhausted returns FuelExhausted" {
 }
 
 test "jitFuelCheckHelper — fuel+deadline, neither exhausted" {
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var vm = Vm.init(testing.allocator);
+    vm.io = th.io();
     vm.fuel = 50_000;
-    vm.deadline_ns = std.time.nanoTimestamp() + 10 * std.time.ns_per_s;
+    vm.deadline_ns = std.Io.Timestamp.now(vm.io, .awake).nanoseconds + 10 * std.time.ns_per_s;
     vm.jit_fuel = -1;
     vm.jit_fuel_initial = DEADLINE_JIT_INTERVAL; // min(50000, 10000) = 10000
 
@@ -10169,16 +10220,22 @@ test "armJitFuel — fuel only" {
 }
 
 test "armJitFuel — deadline only" {
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var vm = Vm.init(testing.allocator);
-    vm.deadline_ns = std.time.nanoTimestamp() + std.time.ns_per_s;
+    vm.io = th.io();
+    vm.deadline_ns = std.Io.Timestamp.now(vm.io, .awake).nanoseconds + std.time.ns_per_s;
     vm.armJitFuel();
     try testing.expectEqual(DEADLINE_JIT_INTERVAL, vm.jit_fuel);
 }
 
 test "armJitFuel — fuel+deadline picks smaller" {
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var vm = Vm.init(testing.allocator);
+    vm.io = th.io();
     vm.fuel = 500; // smaller than DEADLINE_JIT_INTERVAL
-    vm.deadline_ns = std.time.nanoTimestamp() + std.time.ns_per_s;
+    vm.deadline_ns = std.Io.Timestamp.now(vm.io, .awake).nanoseconds + std.time.ns_per_s;
     vm.armJitFuel();
     try testing.expectEqual(@as(i64, 500), vm.jit_fuel);
 }
@@ -10216,7 +10273,8 @@ test "Cancellation — cancel flag stops interpreter loop" {
 
     const cancel_thread = try std.Thread.spawn(.{}, struct {
         fn run(v: *Vm) void {
-            std.Thread.sleep(1 * std.time.ns_per_ms); // let invoke() start
+            const req: std.posix.timespec = .{ .sec = 0, .nsec = 1 * std.time.ns_per_ms };
+            _ = std.c.nanosleep(&req, null); // let invoke() start
             v.cancel();
         }
     }.run, .{&vm});
@@ -10280,7 +10338,8 @@ test "Cancellation — cancel flag stops JIT loop" {
 
     const cancel_thread = try std.Thread.spawn(.{}, struct {
         fn run(v: *Vm) void {
-            std.Thread.sleep(1 * std.time.ns_per_ms); // let invoke() start
+            const req: std.posix.timespec = .{ .sec = 0, .nsec = 1 * std.time.ns_per_ms };
+            _ = std.c.nanosleep(&req, null); // let invoke() start
             v.cancel();
         }
     }.run, .{&vm});

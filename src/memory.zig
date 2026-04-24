@@ -625,7 +625,7 @@ test "Memory — atomicWait32 + notify cross-thread" {
     }.run, .{ &m, io, &wait_result });
 
     // Give the waiter thread time to enter wait state
-    std.Thread.sleep(10 * std.time.ns_per_ms);
+    io.sleep(.{ .nanoseconds = 10 * std.time.ns_per_ms }, .awake) catch {};
 
     // Notify should wake the waiter
     const woken = try m.atomicNotify(io, 0, 1);

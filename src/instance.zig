@@ -697,12 +697,27 @@ fn readTestFile(alloc: Allocator, name: []const u8) ![]const u8 {
     for (prefixes) |prefix| {
         const path = try std.fmt.allocPrint(alloc, "{s}{s}", .{ prefix, name });
         defer alloc.free(path);
-        const file = std.fs.cwd().openFile(path, .{}) catch continue;
-        defer file.close();
-        const stat = try file.stat();
-        const data = try alloc.alloc(u8, stat.size);
-        const read = try file.readAll(data);
-        return data[0..read];
+        var path_z: [std.posix.PATH_MAX]u8 = undefined;
+        if (path.len >= path_z.len) continue;
+        @memcpy(path_z[0..path.len], path);
+        path_z[path.len] = 0;
+        const fd = std.c.open(@ptrCast(&path_z), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
+        if (fd < 0) continue;
+        defer _ = std.c.close(fd);
+        var st: std.posix.Stat = undefined;
+        if (std.c.fstat(fd, &st) != 0) continue;
+        const size: usize = @intCast(st.size);
+        const data = try alloc.alloc(u8, size);
+        var filled: usize = 0;
+        while (filled < size) {
+            const rc = std.c.read(fd, data.ptr + filled, size - filled);
+            if (rc <= 0) {
+                alloc.free(data);
+                return error.ReadFailed;
+            }
+            filled += @intCast(rc);
+        }
+        return data[0..filled];
     }
     return error.FileNotFound;
 }

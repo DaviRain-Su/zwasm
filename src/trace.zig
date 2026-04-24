@@ -611,7 +611,9 @@ test "dumpRegIR: basic output" {
     };
 
     // Write to stderr (verifies no crash, output format tested manually)
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var err_buf: [4096]u8 = undefined;
-    var ew = std.Io.File.stderr().writer(&err_buf);
+    var ew = std.Io.File.stderr().writer(th.io(), &err_buf);
     dumpRegIR(&ew.interface, &reg_func, &.{}, 5);
 }

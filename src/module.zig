@@ -1330,12 +1330,27 @@ fn readTestFile(alloc: Allocator, name: []const u8) ![]const u8 {
     for (prefixes) |prefix| {
         const path = try std.fmt.allocPrint(alloc, "{s}{s}", .{ prefix, name });
         defer alloc.free(path);
-        const file = std.fs.cwd().openFile(path, .{}) catch continue;
-        defer file.close();
-        const stat = try file.stat();
-        const data = try alloc.alloc(u8, stat.size);
-        const read = try file.readAll(data);
-        return data[0..read];
+        var path_z: [std.posix.PATH_MAX]u8 = undefined;
+        if (path.len >= path_z.len) continue;
+        @memcpy(path_z[0..path.len], path);
+        path_z[path.len] = 0;
+        const fd = std.c.open(@ptrCast(&path_z), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
+        if (fd < 0) continue;
+        defer _ = std.c.close(fd);
+        var st: std.posix.Stat = undefined;
+        if (std.c.fstat(fd, &st) != 0) continue;
+        const size: usize = @intCast(st.size);
+        const data = try alloc.alloc(u8, size);
+        var filled: usize = 0;
+        while (filled < size) {
+            const rc = std.c.read(fd, data.ptr + filled, size - filled);
+            if (rc <= 0) {
+                alloc.free(data);
+                return error.ReadFailed;
+            }
+            filled += @intCast(rc);
+        }
+        return data[0..filled];
     }
     return error.FileNotFound;
 }
@@ -1901,7 +1916,29 @@ test "Module — type canonicalization: ref_test.1 GC struct types" {
     //   6: sub(0) struct()             — $t0' (NOT same as 0: has super=[0])
     //   7: sub(6) struct(i32, i32)     — $t4
     //   8: func() -> ()
-    const wasm = try std.fs.cwd().readFileAlloc(testing.allocator, "test/spec/json/ref_test.1.wasm", 1024 * 1024);
+    const wasm = blk: {
+        const p = "test/spec/json/ref_test.1.wasm";
+        var pz: [std.posix.PATH_MAX]u8 = undefined;
+        @memcpy(pz[0..p.len], p);
+        pz[p.len] = 0;
+        const fd = std.c.open(@ptrCast(&pz), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
+        if (fd < 0) return error.SkipZigTest;
+        defer _ = std.c.close(fd);
+        var st: std.posix.Stat = undefined;
+        if (std.c.fstat(fd, &st) != 0) return error.SkipZigTest;
+        const size: usize = @intCast(st.size);
+        const buf = try testing.allocator.alloc(u8, size);
+        var filled: usize = 0;
+        while (filled < size) {
+            const rc = std.c.read(fd, buf.ptr + filled, size - filled);
+            if (rc <= 0) {
+                testing.allocator.free(buf);
+                return error.SkipZigTest;
+            }
+            filled += @intCast(rc);
+        }
+        break :blk buf[0..filled];
+    };
     defer testing.allocator.free(wasm);
     var m = Module.init(testing.allocator, wasm);
     defer m.deinit();
@@ -2029,7 +2066,8 @@ test "fuzz — module decode does not panic on arbitrary input" {
     try std.testing.fuzz(
         Ctx{ .corpus = fuzz_corpus },
         struct {
-            fn f(_: Ctx, input: []const u8) anyerror!void {
+            fn f(_: Ctx, smith: *std.testing.Smith) anyerror!void {
+                const input = smith.in orelse return;
                 var m = Module.init(testing.allocator, input);
                 defer m.deinit();
                 m.decode() catch return;
@@ -2044,7 +2082,8 @@ test "fuzz — full pipeline (load+instantiate) does not panic" {
     try std.testing.fuzz(
         Ctx{ .corpus = fuzz_corpus },
         struct {
-            fn f(_: Ctx, input: []const u8) anyerror!void {
+            fn f(_: Ctx, smith: *std.testing.Smith) anyerror!void {
+                const input = smith.in orelse return;
                 const zwasm = @import("types.zig");
                 const module = zwasm.WasmModule.loadWithFuel(
                     testing.allocator,
