@@ -97,89 +97,81 @@ pub const Reader = struct {
     }
 };
 
-// Direct LEB128 decoding on our byte-slice Reader. Zig 0.16.0 removed
-// `std.leb.readUleb128` / `readIleb128` in favour of `std.Io.Reader.takeLeb128`,
-// but our Reader is a plain byte-slice cursor (not a `std.Io.Reader`), and
-// wrapping it just to recover `takeLeb128` would cost more than inlining
-// the 15-line decoder. LEB128 is simple enough that spec-fidelity review is
-// straightforward: 7 data bits per byte, continuation flag in bit 7, signed
-// variant sign-extends on the final byte based on bit 6.
-
+// Port of Zig 0.15's `std.leb.readUleb128` / `readIleb128` algorithm. Zig 0.16
+// removed those in favour of `std.Io.Reader.takeLeb128`, but our `Reader` is a
+// plain byte-slice cursor (not `std.Io.Reader`), and `takeLeb128` doesn't
+// enforce the WASM-specific "overshoot bits must match sign" check that the
+// spec test suite exercises (e.g. binary-leb128.77, 10-byte i64 with bit 0 = 0
+// but bits 1..6 = 1 — must be rejected as "integer too large"). Staying close
+// to the 0.15 stdlib algorithm keeps behaviour identical to what the spec
+// suite was already passing before the toolchain bump.
 fn readUnsigned(comptime T: type, reader: *Reader) Error!T {
-    const U = std.meta.Int(.unsigned, @typeInfo(T).int.bits);
-    const max_bits = @typeInfo(T).int.bits;
-    var result: U = 0;
-    var shift: u8 = 0;
-    while (true) {
-        const b = try reader.readByte();
-        const low7: U = @as(U, b & 0x7F);
+    const U = if (@typeInfo(T).int.bits < 8) u8 else T;
+    const ShiftT = std.math.Log2Int(U);
+    const max_group = (@typeInfo(U).int.bits + 6) / 7;
 
-        // Overflow check: bits beyond T's width must be zero.
-        if (shift >= max_bits) {
-            if (low7 != 0) return error.Overflow;
-        } else if (shift + 7 > max_bits) {
-            const overflow_mask: u8 = @truncate(@as(u16, 0xFF) << @intCast(max_bits - shift));
-            if ((b & 0x7F & overflow_mask) != 0) return error.Overflow;
-            result |= low7 << @intCast(shift);
-        } else {
-            result |= low7 << @intCast(shift);
-        }
-
-        if ((b & 0x80) == 0) return @intCast(result);
-        shift += 7;
+    var value: U = 0;
+    var group: ShiftT = 0;
+    while (group < max_group) : (group += 1) {
+        const byte = try reader.readByte();
+        const ov = @shlWithOverflow(@as(U, byte & 0x7f), group * 7);
+        if (ov[1] != 0) return error.Overflow;
+        value |= ov[0];
+        if (byte & 0x80 == 0) break;
+    } else {
+        return error.Overflow;
     }
+
+    if (U != T) {
+        if (value > std.math.maxInt(T)) return error.Overflow;
+    }
+    return @truncate(value);
 }
 
 fn readSigned(comptime T: type, reader: *Reader) Error!T {
-    const max_bits = @typeInfo(T).int.bits;
-    var result: i64 = 0;
-    var shift: u8 = 0;
-    while (true) {
-        const b = try reader.readByte();
-        const low7: i64 = @as(i64, b & 0x7F);
+    const S = if (@typeInfo(T).int.bits < 8) i8 else T;
+    const U = std.meta.Int(.unsigned, @typeInfo(S).int.bits);
+    const ShiftU = std.math.Log2Int(U);
+    const max_group = (@typeInfo(U).int.bits + 6) / 7;
 
-        if (shift + 7 >= max_bits) {
-            // Last byte: validate that unused high bits match the sign bit.
-            const sign_bit: u8 = 1 << 6;
-            const sign_extended: u8 = if ((b & sign_bit) != 0) 0xFF else 0x00;
-            const used_bits = max_bits - shift;
-            if (used_bits < 7) {
-                const data_mask: u8 = @truncate((@as(u16, 1) << @intCast(used_bits)) - 1);
-                const sign_source = b & 0x7F & ~data_mask;
-                const expected_sign = sign_extended & ~data_mask & 0x7F;
-                if (sign_source != expected_sign) return error.Overflow;
-            }
-            result |= low7 << @intCast(shift);
-            // Sign-extend if negative.
-            if ((b & sign_bit) != 0 and shift + 7 < 64) {
-                result |= @as(i64, -1) << @intCast(shift + 7);
-            }
-            if ((b & 0x80) == 0) {
-                if (T == i64) return result;
-                // Range-check against T.
-                const min_v = @as(i64, std.math.minInt(T));
-                const max_v = @as(i64, std.math.maxInt(T));
-                if (result < min_v or result > max_v) return error.Overflow;
-                return @intCast(result);
-            }
-            // Continuation past the type width — overflow.
-            return error.Overflow;
+    var value: U = 0;
+    var group: ShiftU = 0;
+    while (group < max_group) : (group += 1) {
+        const byte = try reader.readByte();
+        const shift = group * 7;
+        const ov = @shlWithOverflow(@as(U, byte & 0x7f), shift);
+        if (ov[1] != 0) {
+            if (byte & 0x80 != 0) return error.Overflow;
+            if (@as(S, @bitCast(ov[0])) >= 0) return error.Overflow;
+            const remaining_shift: u3 = @intCast(@typeInfo(U).int.bits - @as(u16, shift));
+            const remaining_bits = @as(i8, @bitCast(byte | 0x80)) >> remaining_shift;
+            if (remaining_bits != -1) return error.Overflow;
         } else {
-            result |= low7 << @intCast(shift);
-            if ((b & 0x80) == 0) {
-                // Sign-extend from bit 6 of the final byte.
-                if ((b & (1 << 6)) != 0 and shift + 7 < 64) {
-                    result |= @as(i64, -1) << @intCast(shift + 7);
-                }
-                if (T == i64) return result;
-                const min_v = @as(i64, std.math.minInt(T));
-                const max_v = @as(i64, std.math.maxInt(T));
-                if (result < min_v or result > max_v) return error.Overflow;
-                return @intCast(result);
+            if ((byte & 0x80 == 0) and (@as(S, @bitCast(ov[0])) < 0)) {
+                const remaining_shift: u3 = @intCast(@typeInfo(U).int.bits - @as(u16, shift));
+                const remaining_bits = @as(i8, @bitCast(byte | 0x80)) >> remaining_shift;
+                if (remaining_bits != -1) return error.Overflow;
             }
         }
-        shift += 7;
+
+        value |= ov[0];
+        if (byte & 0x80 == 0) {
+            const needs_sign_ext = group + 1 < max_group;
+            if (byte & 0x40 != 0 and needs_sign_ext) {
+                const ones = @as(S, -1);
+                value |= @as(U, @bitCast(ones)) << (shift + 7);
+            }
+            break;
+        }
+    } else {
+        return error.Overflow;
     }
+
+    const result = @as(S, @bitCast(value));
+    if (S != T) {
+        if (result > std.math.maxInt(T) or result < std.math.minInt(T)) return error.Overflow;
+    }
+    return @truncate(result);
 }
 
 // ============================================================
