@@ -30,7 +30,7 @@ pub fn main() !void {
         guard_mod.installSignalHandler();
     }
 
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 

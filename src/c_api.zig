@@ -131,8 +131,9 @@ pub const zwasm_config_t = CApiConfig;
 // Internal wrapper — allocator + WasmModule co-located
 // ============================================================
 
-// Zig 0.15's GeneralPurposeAllocator crashes in Debug-mode shared
-// libraries on Linux x86_64 (PIC codegen issue, see GitHub #11).
+// Zig's DebugAllocator (formerly GeneralPurposeAllocator in 0.15) crashes
+// in Debug-mode shared libraries on Linux x86_64 (PIC codegen issue, see
+// GitHub #11).
 // The C API uses libc malloc (c_allocator) as the default backing
 // allocator, which is correct for a library loaded via dlopen/ctypes.
 // GPA is only used when running Zig tests (leak detection).

@@ -24,7 +24,7 @@ const MAX_ARGS: usize = 8;
 const MAX_RESULTS: usize = 8;
 
 pub fn main() void {
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
