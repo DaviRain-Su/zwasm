@@ -1,6 +1,44 @@
-# Zig 0.15.2 Tips & Pitfalls
+# Zig 0.16.0 Tips & Pitfalls
 
-Common mistakes and workarounds discovered during development.
+Common mistakes and workarounds discovered during development. Most entries
+below carry over from 0.15.2 unchanged — 0.16.0's big shift is **"I/O as an
+Interface"** (filesystem and I/O routines now take an explicit `io: Io`
+argument); see the dedicated section below.
+
+## Filesystem: std.fs is deprecated — use std.Io.Dir with an `io` argument
+
+0.16.0 deprecates the entire `std.fs` module. `std.fs.cwd()`, `openFile`,
+`readFileAlloc`, etc. now live on `std.Io.Dir`, and every method that performs
+real I/O takes a second positional parameter of type `std.Io` (the interface
+vtable). `std.fs.*` stubs still exist but forward to `std.Io.Dir` — prefer the
+new path in new code.
+
+```zig
+// 0.15.2
+const file = try std.fs.cwd().openFile(path, .{});
+
+// 0.16.0
+const file = try std.Io.Dir.cwd().openFile(io, path, .{});
+```
+
+Acquiring an `io` instance:
+
+```zig
+var threaded = std.Io.Threaded.init(allocator);
+defer threaded.deinit();
+const io = threaded.io();
+```
+
+On Linux you can swap `std.Io.Threaded` for `std.Io.Uring`; on macOS/BSD,
+`std.Io.Kqueue`. `Threaded` is the portable default and what this project
+uses in `wasi.zig`.
+
+> **Common mistake**: writing `std.Io.Dir.cwd().openFile(path, .{})` without
+> the `io` argument. The compile error is misleading ("expected 3 arguments,
+> found 2") and doesn't name `Io` — if you see it, check the method signature
+> in `lib/zig/std/Io/Dir.zig`.
+
+## tagged union comparison: use switch, not ==
 
 ## tagged union comparison: use switch, not ==
 
@@ -31,7 +69,7 @@ try stdout.flush();  // don't forget
 
 ## Use std.Io.Writer (type-erased) instead of anytype for writers
 
-In 0.15.2, `std.Io.Writer` is the new type-erased writer.
+`std.Io.Writer` is the type-erased writer (landed in 0.15, finalized in 0.16).
 `GenericWriter` and `fixedBufferStream` are deprecated.
 
 Prefer `*std.Io.Writer` over `anytype` for writer parameters.

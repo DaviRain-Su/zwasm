@@ -174,7 +174,7 @@ pub const Capabilities = rt.wasi.Capabilities;
 /// Options for configuring WASI modules.
 /// FD-based preopen entry: binds an existing host fd to a WASI guest path.
 pub const PreopenFd = struct {
-    host_fd: std.fs.File.Handle,
+    host_fd: std.Io.File.Handle,
     guest_path: []const u8,
     kind: rt.wasi.HandleKind,
     ownership: rt.wasi.Ownership,
@@ -192,7 +192,7 @@ pub const WasiOptions = struct {
     preopen_fds: []const PreopenFd = &.{},
     /// Stdio fd overrides (null = use process default).
     /// Index 0=stdin, 1=stdout, 2=stderr.
-    stdio_fds: [3]?std.fs.File.Handle = .{ null, null, null },
+    stdio_fds: [3]?std.Io.File.Handle = .{ null, null, null },
     stdio_ownership: [3]rt.wasi.Ownership = .{ .borrow, .borrow, .borrow },
     /// WASI capability flags. Default: cli_default (stdio, clock, random, proc_exit).
     /// Use `.caps = Capabilities.all` for full access.
@@ -242,6 +242,10 @@ pub const WasmModule = struct {
     /// to `vm.force_interpreter` before each call; when null, `vm.force_interpreter`
     /// is left untouched so callers may set it directly on `self.vm`.
     force_interpreter: ?bool = null,
+    /// Owned Io implementation constructed when Config.io was null. The module
+    /// tears this down in `deinit` alongside the Vm. Null when the embedder
+    /// supplied their own `io` — lifetime is the embedder's responsibility.
+    owned_io: ?*std.Io.Threaded = null,
 
     /// Configuration for module loading.
     pub const Config = struct {
@@ -256,6 +260,11 @@ pub const WasmModule = struct {
         /// Set to `false` to skip the check for peak JIT throughput, at the cost
         /// of making `WasmModule.cancel()` ineffective for JIT-compiled code.
         cancellable: ?bool = null,
+        /// Zig 0.16 I/O interface. Null → the loaded module owns a private
+        /// `std.Io.Threaded` (torn down in `deinit`). Embedders pass their own
+        /// `io` when they need `Uring`/`Kqueue`, to share an event loop, or to
+        /// inject a mock for tests. See D135 in `.dev/decisions.md`.
+        io: ?std.Io = null,
     };
 
     /// Load a Wasm module from binary bytes with explicit configuration.
@@ -298,7 +307,7 @@ pub const WasmModule = struct {
     }
 
     /// Apply WasiOptions to a WasiContext (shared logic for all WASI loaders).
-    fn applyWasiOptions(wc: *rt.wasi.WasiContext, opts: WasiOptions) !void {
+    fn applyWasiOptions(wc: *rt.wasi.WasiContext, io: std.Io, opts: WasiOptions) !void {
         wc.caps = opts.caps;
         if (opts.args.len > 0) wc.setArgs(opts.args);
 
@@ -311,7 +320,7 @@ pub const WasmModule = struct {
         for (opts.preopen_paths, 0..) |path, i| {
             const fd: i32 = @intCast(3 + i);
             const spec = splitPreopenSpec(path);
-            wc.addPreopenPath(fd, spec.guest, spec.host) catch continue;
+            wc.addPreopenPath(io, fd, spec.guest, spec.host) catch continue;
         }
 
         // FD-based preopens (fd auto-assigned after path-based ones)
@@ -383,6 +392,7 @@ pub const WasmModule = struct {
 
         self.allocator = allocator;
         self.owned_wasm_bytes = null;
+        self.owned_io = null;
         self.store = rt.store_mod.Store.init(allocator);
         self.wasi_ctx = null;
         self.timeout_ms = null;
@@ -422,6 +432,15 @@ pub const WasmModule = struct {
         };
         self.vm.?.* = rt.vm_mod.Vm.init(allocator);
 
+        // Stand up a private Threaded Io for this linked module. loadLinked
+        // has no Config, so we always own it; embedders who need to share an
+        // Io across linked modules can set `self.vm.io` after the call.
+        self.owned_io = allocator.create(std.Io.Threaded) catch null;
+        if (self.owned_io) |t| {
+            t.* = std.Io.Threaded.init(allocator, .{});
+            self.vm.?.io = t.io();
+        }
+
         // Phase 2: apply active element/data segments (may partially fail).
         var apply_error: ?anyerror = null;
         self.instance.applyActive() catch |err| {
@@ -437,12 +456,30 @@ pub const WasmModule = struct {
 
         self.allocator = allocator;
         self.owned_wasm_bytes = null;
+        self.owned_io = null;
         self.store = rt.store_mod.Store.init(allocator);
         errdefer self.store.deinit();
 
         self.module = rt.module_mod.Module.init(allocator, wasm_bytes);
         errdefer self.module.deinit();
         try self.module.decode();
+
+        // Io acquisition per D135: use caller-supplied io if any, otherwise
+        // stand up a private `std.Io.Threaded` owned by this module.
+        // Acquired early — applyWasiOptions's addPreopenPath needs io to open
+        // host directories cross-platform (Zig 0.16's `std.Io.Dir.openDir`).
+        const io: std.Io = blk: {
+            if (config.io) |io_val| break :blk io_val;
+            const threaded = try allocator.create(std.Io.Threaded);
+            errdefer allocator.destroy(threaded);
+            threaded.* = std.Io.Threaded.init(allocator, .{});
+            self.owned_io = threaded;
+            break :blk threaded.io();
+        };
+        errdefer if (self.owned_io) |t| {
+            t.deinit();
+            allocator.destroy(t);
+        };
 
         if (config.wasi) {
             try rt.wasi.registerAll(&self.store, &self.module);
@@ -455,7 +492,7 @@ pub const WasmModule = struct {
 
         if (self.wasi_ctx) |*wc| {
             if (config.wasi_options) |opts| {
-                try applyWasiOptions(wc, opts);
+                try applyWasiOptions(wc, io, opts);
             }
         }
 
@@ -475,6 +512,8 @@ pub const WasmModule = struct {
         self.vm = try allocator.create(rt.vm_mod.Vm);
         errdefer if (self.vm) |vm| allocator.destroy(vm);
         self.vm.?.* = rt.vm_mod.Vm.init(allocator);
+        self.vm.?.io = io;
+
         self.max_memory_bytes = config.max_memory_bytes;
         self.force_interpreter = config.force_interpreter;
         self.timeout_ms = config.timeout_ms;
@@ -519,6 +558,13 @@ pub const WasmModule = struct {
         self.module.deinit();
         self.store.deinit();
         if (self.owned_wasm_bytes) |bytes| allocator.free(bytes);
+        // Tear down the Io after Vm/Instance so anything that captured the
+        // vtable is already gone. Embedder-supplied io (owned_io == null) is
+        // the embedder's lifetime to manage.
+        if (self.owned_io) |t| {
+            t.deinit();
+            allocator.destroy(t);
+        }
         allocator.destroy(self);
     }
 

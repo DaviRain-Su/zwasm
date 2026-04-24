@@ -205,7 +205,7 @@ Rust FFI example: same workflow as C, using `extern "C"` bindings.
 
 ## Build
 
-Requires Zig 0.15.2.
+Requires Zig 0.16.0.
 
 ```bash
 zig build              # Build (Debug)

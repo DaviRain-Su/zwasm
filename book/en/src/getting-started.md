@@ -4,7 +4,7 @@ This guide gets you from zero to running a WebAssembly module in under 5 minutes
 
 ## Prerequisites
 
-- [Zig 0.15.2](https://ziglang.org/download/) or later
+- [Zig 0.16.0](https://ziglang.org/download/) or later
 
 ## Install
 

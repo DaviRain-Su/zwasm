@@ -24,25 +24,40 @@ const guard_mod = @import("guard.zig");
 const jit_mod = vm_mod.jit_mod;
 const cache_mod = @import("cache.zig");
 
-pub fn main() !void {
+/// Process-wide Io handle. Populated once at the top of `main` from the
+/// `std.process.Init` the compiler-generated entrypoint hands us, and read
+/// by the CLI's file-I/O helpers (`readFile`, etc.). A module-level var is
+/// acceptable here because a CLI invocation is single-process / single-io
+/// by construction; library code (vm.zig, module.zig, ...) carries its own
+/// `io` through explicit parameters rather than relying on this global.
+var cli_io: std.Io = undefined;
+
+pub fn main(init: std.process.Init) !void {
     // Install signal handler for JIT guard page OOB traps
     if (comptime jit_mod.jitSupported()) {
         guard_mod.installSignalHandler();
     }
 
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    cli_io = init.io;
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    // `init.gpa` is a DebugAllocator-backed allocator in Debug builds
+    // (leak-checked by start.zig) and the appropriate production allocator
+    // otherwise. `init.arena` is the process arena — args/environ live there.
+    const allocator = init.gpa;
+    const arena = init.arena.allocator();
+
+    const args_z = try init.minimal.args.toSlice(arena);
+    // Command dispatch below operates on `[]const []const u8`; the sentinel
+    // on `[:0]const u8` is redundant here (we never compare-by-address).
+    const args = try arena.alloc([]const u8, args_z.len);
+    for (args_z, args) |src, *dst| dst.* = src;
 
     var buf: [8192]u8 = undefined;
-    var writer = std.fs.File.stdout().writer(&buf);
+    var writer = std.Io.File.stdout().writer(init.io, &buf);
     const stdout = &writer.interface;
 
     var err_buf: [4096]u8 = undefined;
-    var err_writer = std.fs.File.stderr().writer(&err_buf);
+    var err_writer = std.Io.File.stderr().writer(init.io, &err_buf);
     const stderr = &err_writer.interface;
 
     if (args.len < 2) {
@@ -453,7 +468,7 @@ fn cmdRun(allocator: Allocator, args: []const []const u8, stdout: *std.Io.Writer
         var cache_hit = false;
         if (cache_mode) {
             wasm_hash = cache_mod.wasmHash(wasm_bytes);
-            if (cache_mod.loadFromFile(allocator, wasm_hash) catch null) |cached| {
+            if (cache_mod.loadFromFile(cli_io, allocator,wasm_hash) catch null) |cached| {
                 cache_mod.applyCachedIr(cached, module.store.functions.items, module.module.num_imported_funcs);
                 allocator.free(cached); // IrFuncs transferred to WasmFunctions
                 cache_hit = true;
@@ -473,6 +488,7 @@ fn cmdRun(allocator: Allocator, args: []const []const u8, stdout: *std.Io.Writer
             .categories = trace_categories,
             .dump_regir_func = dump_regir_func,
             .dump_jit_func = dump_jit_func,
+            .io = cli_io,
         };
         if (trace_categories != 0 or dump_regir_func != null or dump_jit_func != null) {
             module.vm.?.trace = &trace_config;
@@ -605,7 +621,7 @@ fn cmdRun(allocator: Allocator, args: []const []const u8, stdout: *std.Io.Writer
         var wasi_cache_hit = false;
         if (cache_mode) {
             wasi_wasm_hash = cache_mod.wasmHash(wasm_bytes);
-            if (cache_mod.loadFromFile(allocator, wasi_wasm_hash) catch null) |cached| {
+            if (cache_mod.loadFromFile(cli_io, allocator,wasi_wasm_hash) catch null) |cached| {
                 cache_mod.applyCachedIr(cached, module.store.functions.items, module.module.num_imported_funcs);
                 allocator.free(cached); // IrFuncs transferred to WasmFunctions
                 wasi_cache_hit = true;
@@ -621,6 +637,7 @@ fn cmdRun(allocator: Allocator, args: []const []const u8, stdout: *std.Io.Writer
             .categories = trace_categories,
             .dump_regir_func = dump_regir_func,
             .dump_jit_func = dump_jit_func,
+            .io = cli_io,
         };
         if (trace_categories != 0 or dump_regir_func != null or dump_jit_func != null) {
             module.vm.?.trace = &wasi_trace_config;
@@ -660,7 +677,7 @@ fn cmdRun(allocator: Allocator, args: []const []const u8, stdout: *std.Io.Writer
 fn saveCacheQuietly(allocator: Allocator, hash: [32]u8, funcs: []store_mod.Function, num_imports: u32) void {
     const ir_funcs = cache_mod.collectIrFuncs(allocator, funcs, num_imports) catch return;
     defer allocator.free(ir_funcs);
-    cache_mod.saveToFile(allocator, hash, ir_funcs) catch {};
+    cache_mod.saveToFile(cli_io, allocator,hash, ir_funcs) catch {};
 }
 
 const store_mod = @import("store.zig");
@@ -702,7 +719,7 @@ fn cmdCompile(allocator: Allocator, args: []const []const u8, stdout: *std.Io.Wr
     };
     defer allocator.free(ir_funcs);
 
-    cache_mod.saveToFile(allocator, hash, ir_funcs) catch |err| {
+    cache_mod.saveToFile(cli_io, allocator,hash, ir_funcs) catch |err| {
         try stderr.print("error: failed to save cache: {s}\n", .{@errorName(err)});
         try stderr.flush();
         return false;
@@ -714,7 +731,7 @@ fn cmdCompile(allocator: Allocator, args: []const []const u8, stdout: *std.Io.Wr
         if (ir != null) predecoded += 1;
     }
 
-    const cache_path = cache_mod.getCachePath(allocator, hash) catch {
+    const cache_path = cache_mod.getCachePath(cli_io, allocator, hash) catch {
         try stderr.print("compiled {d}/{d} functions\n", .{ predecoded, ir_funcs.len });
         try stderr.flush();
         return true;
@@ -1265,14 +1282,15 @@ fn cmdBatch(allocator: Allocator, wasm_bytes: []const u8, imports: []const types
         .categories = trace_categories,
         .dump_regir_func = dump_regir_func,
         .dump_jit_func = dump_jit_func,
+        .io = cli_io,
     };
     if (trace_categories != 0 or dump_regir_func != null or dump_jit_func != null) {
         module.vm.?.trace = &batch_trace_config;
     }
 
-    const stdin = std.fs.File.stdin();
+    const stdin = std.Io.File.stdin();
     var read_buf: [8192]u8 = undefined;
-    var reader = stdin.reader(&read_buf);
+    var reader = stdin.reader(cli_io, &read_buf);
     const r = &reader.interface;
 
     // Reusable buffers for args/results (400+ params needed for func-400-params test)
@@ -1323,7 +1341,7 @@ fn cmdBatch(allocator: Allocator, wasm_bytes: []const u8, imports: []const types
             error.StreamTooLong => continue,
             else => break,
         } orelse break;
-        const line = std.mem.trimRight(u8, raw_line, "\r");
+        const line = std.mem.trimEnd(u8, raw_line, "\r");
 
         // Skip empty lines
         if (line.len == 0) continue;
@@ -1499,7 +1517,7 @@ fn cmdBatch(allocator: Allocator, wasm_bytes: []const u8, imports: []const types
             // Buffer invocations until thread_end
             while (true) {
                 const raw_tline = r.takeDelimiter('\n') catch break orelse break;
-                const tline = std.mem.trimRight(u8, raw_tline, "\r");
+                const tline = std.mem.trimEnd(u8, raw_tline, "\r");
                 if (std.mem.eql(u8, tline, "thread_end")) break;
                 if (!std.mem.startsWith(u8, tline, "invoke ")) continue;
                 // Parse: invoke <len>:<func> [args...]
@@ -2067,11 +2085,11 @@ test "features list has expected entries" {
 }
 
 fn readFile(allocator: Allocator, path: []const u8) ![]const u8 {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-    const stat = try file.stat();
+    const file = try std.Io.Dir.cwd().openFile(cli_io, path, .{});
+    defer file.close(cli_io);
+    const stat = try file.stat(cli_io);
     const data = try allocator.alloc(u8, stat.size);
-    const read = try file.readAll(data);
+    const read = try file.readPositionalAll(cli_io, data, 0);
     return data[0..read];
 }
 

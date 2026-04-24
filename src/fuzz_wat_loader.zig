@@ -23,11 +23,11 @@ const MAX_ARGS: usize = 8;
 const MAX_RESULTS: usize = 8;
 
 pub fn main() void {
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const stdin = std.fs.File.stdin();
+    const stdin = std.Io.File.stdin();
     var read_buf: [4096]u8 = undefined;
     var reader = stdin.reader(&read_buf);
     const input = reader.interface.allocRemaining(allocator, .unlimited) catch return;

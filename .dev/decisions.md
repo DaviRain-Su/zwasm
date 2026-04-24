@@ -645,3 +645,101 @@ throughput for hosts that never need cancel.
 **Affected files**: vm.zig, types.zig, cli.zig, c_api.zig, include/zwasm.h,
 test/c_api/test_ffi.c, docs/{embedding,errors,usage,api-boundary}.md,
 book/{en,ja}/src/{c-api,embedding-guide}.md.
+
+## D135: Io Threading Strategy for Zig 0.16.0 Migration
+
+**Context**: Zig 0.16.0's "I/O as an Interface" shift routes every filesystem,
+network, and synchronization primitive through a `std.Io` vtable. `std.fs.*` is
+deprecated in favour of `std.Io.Dir`; `std.Thread.Mutex` moved to `std.Io.Mutex`;
+`File.openFile`, `File.stat`, `File.close`, and friends all take `io: Io` as
+their second positional argument. We cannot migrate to 0.16 without deciding
+where `io` comes from at every call site — it cannot be recovered from thin
+air, and constructing a fresh `std.Io.Threaded` per call is both wasteful and
+semantically wrong (independent Io instances do not share resources).
+
+**Decision**: Use a two-tier strategy, matching the two distinct lifecycle
+regimes in the codebase.
+
+1. **Library code owns an `io: std.Io` field on the Vm struct.**
+
+   `Vm` is the long-lived object that outlasts any individual invocation and is
+   already the owner of other execution-global state (fuel, deadline, cancel
+   flag). It becomes the natural owner of `io`. `Memory` and `WasiContext`
+   reach `io` via the `Vm` they belong to rather than holding their own copy —
+   keeps a single source of truth per module.
+
+   `WasmModule.Config` gains `io: ?std.Io = null`. When null, `loadCore`
+   constructs a `std.Io.Threaded` backed by the module's allocator, owns it,
+   and tears it down in `WasmModule.deinit`. Embedders who need a specific
+   Io implementation (`Uring` on Linux, `Kqueue` on macOS, or a mock for
+   tests) pass their own.
+
+2. **CLI code uses a module-level `cli_io: std.Io` var.**
+
+   A CLI invocation is one process, one event loop, one Io. The `init.io`
+   handed to `cli.main` by `start.zig` lives for the whole run. Threading it
+   through the five `cmd*` functions plus all their helpers adds noise with
+   no correctness benefit — a CLI is single-threaded with respect to its
+   own I/O.
+
+   `start.zig` itself sets up its debug_allocator this way (module-level
+   `var`), so the pattern matches upstream idiom for single-process globals.
+
+**Alternatives considered**:
+
+- **Option A (thread `io` through all public API)**: Forces breaking changes on
+  every embedder (ClojureWasm + future consumers). Rejected — the benefit
+  (fine-grained per-call Io override) is not a use case we have.
+- **Option B (mandatory `Config.io`)**: Forces embedders to construct an Io
+  before they can call `WasmModule.load`. Rejected — the common case is
+  "I just want the default behaviour" and we shouldn't make that verbose.
+- **Option C (WASI-local io, construct inline in wasi.zig)**: Wastes resources
+  by constructing a fresh `Threaded` per WASI syscall and doesn't help
+  `Memory.Mutex` or `guard.zig`'s signal handler paths. Rejected once we
+  realised how many non-WASI sites also need `io`.
+
+**C API implications**: `zwasm_config_t` does not expose `io` — C callers get
+the default `Threaded` constructed internally. This is honest to the ABI (Zig
+interface vtables do not cross FFI cleanly) and matches how `zwasm_config_t`
+already handles Zig-only fields like `imports`.
+
+**Affected files (migration-time)**: `src/vm.zig` (io field, init signature),
+`src/types.zig` (`Config.io`, lifecycle), `src/memory.zig` (Mutex routes
+through Vm.io), `src/wasi.zig` (33 `std.fs.*` sites), `src/cli.zig` (cli_io
+module var — already in develop/zig-0.16.0), `src/module.zig`,
+`src/instance.zig`, tests.
+
+**Lifetime invariant**: `io` on Vm outlives every operation that captures it.
+Since Vm owns any auto-constructed `Threaded` and tears it down last in
+`deinit`, and since no invoke path holds `io` past the invoke's return,
+there is no use-after-free path introduced by the threading.
+
+**Result (2026-04-24)**: Migration shipped as v1.10.0. Strategy validated:
+
+- Library: `Vm.io: std.Io = undefined`; `WasmModule.Config.io: ?std.Io = null`;
+  `loadCore` / `loadLinked` stand up an owned `std.Io.Threaded` (kept in
+  `WasmModule.owned_io`) when `io` is null, deinit'd last.
+- CLI: `cli.cli_io: std.Io = undefined` set from `main(init: std.process.Init).io`
+  before any sub-command runs.
+- Tests: each test that hits an `io`-using Vm path constructs its own local
+  `std.Io.Threaded` and assigns `vm.io = th.io()`.
+
+**Pragmatic split from the original plan**: for POSIX ops that `std.posix`
+dropped in 0.16 (fsync, mkdirat, unlinkat, renameat, pread/pwrite, dup,
+futimens, readlinkat, symlinkat, linkat, fstatat, close, pipe, getenv,
+mprotect), WASI handlers call `std.c.*` directly with `file.handle` rather
+than threading `io` through. `file.handle` is trivially available from the
+`HostHandle` / `FdEntry` structures and errno is mapped with a single local
+helper (`cErrnoToWasi`). This keeps `io` as the currency for the std-Io-based
+operations that genuinely need it (`file.stat`, `file.setTimestamps`,
+`Dir.openDir`, `Io.Timestamp.now`, `io.random`, `io.sleep`,
+`process.spawn`) while leaving the bulk of WASI's POSIX surface un-io-y.
+
+**Pitfall noted**: in long-running executable `main()` functions (the e2e
+runner in particular), constructing a fresh `std.Io.Threaded` locally and
+using its `.io()` caused sporadic segfaults in `Io.Timestamp.now` after many
+iterations — symptoms consistent with the Threaded scheduler being torn down
+too early even though the variable was still in scope. Using `init.io`
+(supplied by `start.zig`) avoids this entirely. Use init.io for top-level
+binaries; use a freshly constructed Threaded only when the scope is bounded.
+

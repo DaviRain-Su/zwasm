@@ -28,6 +28,7 @@ pub const TraceConfig = struct {
     categories: u8 = 0,
     dump_regir_func: ?u32 = null,
     dump_jit_func: ?u32 = null,
+    io: std.Io = undefined,
 
     pub fn isEnabled(self: TraceConfig, cat: TraceCategory) bool {
         return (self.categories & (@as(u8, 1) << @intFromEnum(cat))) != 0;
@@ -62,9 +63,12 @@ pub fn parseCategories(input: []const u8) u8 {
 
 fn stderrPrint(comptime fmt: []const u8, args: anytype) void {
     var buf: [4096]u8 = undefined;
-    var w = std.fs.File.stderr().writer(&buf);
-    w.interface.print(fmt, args) catch {};
-    w.interface.flush() catch {};
+    const msg = std.fmt.bufPrint(&buf, fmt, args) catch return;
+    const stderr_fd: std.posix.fd_t = if (@import("builtin").os.tag == .windows)
+        std.os.windows.peb().ProcessParameters.hStdError
+    else
+        std.posix.STDERR_FILENO;
+    _ = std.c.write(stderr_fd, msg.ptr, msg.len);
 }
 
 pub fn traceJitCompile(tc: *const TraceConfig, func_idx: u32, ir_count: u32, code_size: u32) void {
@@ -419,13 +423,14 @@ pub fn dumpRegIR(w: *std.Io.Writer, reg_func: *const RegFunc, pool64: []const u6
 /// Dump JIT-compiled ARM64 code for a function.
 /// Writes raw binary to the host temp directory, attempts llvm-objdump, falls back to hex.
 pub fn dumpJitCode(
+    io: std.Io,
     alloc: Allocator,
     code_items: []const u32,
     pc_map_items: []const u32,
     func_idx: u32,
 ) void {
     var buf: [4096]u8 = undefined;
-    var ew = std.fs.File.stderr().writer(&buf);
+    var ew = std.Io.File.stderr().writer(io, &buf);
     const w = &ew.interface;
 
     const code_bytes = code_items.len * 4;
@@ -452,23 +457,23 @@ pub fn dumpJitCode(
     };
     defer alloc.free(bin_path);
 
-    const file = std.fs.createFileAbsolute(bin_path, .{}) catch {
+    const file = std.Io.Dir.createFileAbsolute(io, bin_path, .{}) catch {
         w.print("  (failed to create {s})\n", .{bin_path}) catch {};
         w.flush() catch {};
         return;
     };
-    file.writeAll(std.mem.sliceAsBytes(code_items)) catch {
-        file.close();
+    file.writePositionalAll(io, std.mem.sliceAsBytes(code_items), 0) catch {
+        file.close(io);
         w.print("  (failed to write {s})\n", .{bin_path}) catch {};
         w.flush() catch {};
         return;
     };
-    file.close();
+    file.close(io);
 
     w.print("  raw binary: {s}\n", .{bin_path}) catch {};
 
     // Try llvm-objdump, then objdump
-    const tried = tryObjdump(alloc, bin_path, w);
+    const tried = tryObjdump(io, alloc, bin_path, w);
     if (!tried) {
         // Fallback: hex dump
         w.print("  (objdump not available — hex dump)\n", .{}) catch {};
@@ -493,7 +498,7 @@ pub fn dumpJitCode(
     w.flush() catch {};
 }
 
-fn tryObjdump(alloc: Allocator, bin_path: []const u8, w: *std.Io.Writer) bool {
+fn tryObjdump(io: std.Io, alloc: Allocator, bin_path: []const u8, w: *std.Io.Writer) bool {
     _ = alloc;
     // Try llvm-objdump first, then objdump
     const tool_configs = [_]struct { name: []const u8, args: []const []const u8 }{
@@ -502,15 +507,16 @@ fn tryObjdump(alloc: Allocator, bin_path: []const u8, w: *std.Io.Writer) bool {
     };
 
     for (tool_configs) |tool| {
-        var child = std.process.Child.init(tool.args, std.heap.page_allocator);
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Pipe;
-        child.spawn() catch continue;
+        var child = std.process.spawn(io, .{
+            .argv = tool.args,
+            .stdout = .pipe,
+            .stderr = .pipe,
+        }) catch continue;
 
         // Read stdout in chunks
         var out_buf: [32768]u8 = undefined;
         var read_buf: [4096]u8 = undefined;
-        var child_reader = child.stdout.?.reader(&read_buf);
+        var child_reader = child.stdout.?.reader(io, &read_buf);
         const reader = &child_reader.interface;
         var total: usize = 0;
         while (total < out_buf.len) {
@@ -518,7 +524,7 @@ fn tryObjdump(alloc: Allocator, bin_path: []const u8, w: *std.Io.Writer) bool {
             if (chunk == 0) break;
             total += chunk;
         }
-        _ = child.wait() catch continue;
+        _ = child.wait(io) catch continue;
 
         if (total > 0) {
             w.print("  disassembly ({s}):\n", .{tool.name}) catch {};
@@ -605,7 +611,9 @@ test "dumpRegIR: basic output" {
     };
 
     // Write to stderr (verifies no crash, output format tested manually)
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var err_buf: [4096]u8 = undefined;
-    var ew = std.fs.File.stderr().writer(&err_buf);
+    var ew = std.Io.File.stderr().writer(th.io(), &err_buf);
     dumpRegIR(&ew.interface, &reg_func, &.{}, 5);
 }

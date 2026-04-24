@@ -4,7 +4,7 @@
 
 ## 前提条件
 
-- [Zig 0.15.2](https://ziglang.org/download/) 以降
+- [Zig 0.16.0](https://ziglang.org/download/) 以降
 
 ## インストール
 

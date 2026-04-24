@@ -7875,7 +7875,7 @@ pub fn compileFunction(
         if (tc.dump_jit_func) |dump_idx| {
             if (dump_idx == self_func_idx) {
                 const result = compiler.compile(reg_func, pool64, trampoline_addr, mem_info_addr, global_get_addr, global_set_addr, mem_grow_addr, mem_fill_addr, mem_copy_addr, call_indirect_addr, self_func_idx, param_count, result_count, reg_ptr_offset);
-                trace_mod.dumpJitCode(alloc, compiler.code.items, compiler.pc_map.items, self_func_idx);
+                trace_mod.dumpJitCode(tc.io, alloc, compiler.code.items, compiler.pc_map.items, self_func_idx);
                 tc.dump_jit_func = null;
                 compiler.deinit();
                 return result;

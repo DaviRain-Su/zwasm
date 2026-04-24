@@ -97,29 +97,81 @@ pub const Reader = struct {
     }
 };
 
-/// Internal: adapter that makes Reader work with std.leb functions.
-const ByteReader = struct {
-    reader: *Reader,
-
-    pub fn readByte(self: *ByteReader) Error!u8 {
-        return self.reader.readByte();
-    }
-};
-
+// Port of Zig 0.15's `std.leb.readUleb128` / `readIleb128` algorithm. Zig 0.16
+// removed those in favour of `std.Io.Reader.takeLeb128`, but our `Reader` is a
+// plain byte-slice cursor (not `std.Io.Reader`), and `takeLeb128` doesn't
+// enforce the WASM-specific "overshoot bits must match sign" check that the
+// spec test suite exercises (e.g. binary-leb128.77, 10-byte i64 with bit 0 = 0
+// but bits 1..6 = 1 — must be rejected as "integer too large"). Staying close
+// to the 0.15 stdlib algorithm keeps behaviour identical to what the spec
+// suite was already passing before the toolchain bump.
 fn readUnsigned(comptime T: type, reader: *Reader) Error!T {
-    var br = ByteReader{ .reader = reader };
-    return std.leb.readUleb128(T, &br) catch |err| switch (err) {
-        error.Overflow => return error.Overflow,
-        error.EndOfStream => return error.EndOfStream,
-    };
+    const U = if (@typeInfo(T).int.bits < 8) u8 else T;
+    const ShiftT = std.math.Log2Int(U);
+    const max_group = (@typeInfo(U).int.bits + 6) / 7;
+
+    var value: U = 0;
+    var group: ShiftT = 0;
+    while (group < max_group) : (group += 1) {
+        const byte = try reader.readByte();
+        const ov = @shlWithOverflow(@as(U, byte & 0x7f), group * 7);
+        if (ov[1] != 0) return error.Overflow;
+        value |= ov[0];
+        if (byte & 0x80 == 0) break;
+    } else {
+        return error.Overflow;
+    }
+
+    if (U != T) {
+        if (value > std.math.maxInt(T)) return error.Overflow;
+    }
+    return @truncate(value);
 }
 
 fn readSigned(comptime T: type, reader: *Reader) Error!T {
-    var br = ByteReader{ .reader = reader };
-    return std.leb.readIleb128(T, &br) catch |err| switch (err) {
-        error.Overflow => return error.Overflow,
-        error.EndOfStream => return error.EndOfStream,
-    };
+    const S = if (@typeInfo(T).int.bits < 8) i8 else T;
+    const U = std.meta.Int(.unsigned, @typeInfo(S).int.bits);
+    const ShiftU = std.math.Log2Int(U);
+    const max_group = (@typeInfo(U).int.bits + 6) / 7;
+
+    var value: U = 0;
+    var group: ShiftU = 0;
+    while (group < max_group) : (group += 1) {
+        const byte = try reader.readByte();
+        const shift = group * 7;
+        const ov = @shlWithOverflow(@as(U, byte & 0x7f), shift);
+        if (ov[1] != 0) {
+            if (byte & 0x80 != 0) return error.Overflow;
+            if (@as(S, @bitCast(ov[0])) >= 0) return error.Overflow;
+            const remaining_shift: u3 = @intCast(@typeInfo(U).int.bits - @as(u16, shift));
+            const remaining_bits = @as(i8, @bitCast(byte | 0x80)) >> remaining_shift;
+            if (remaining_bits != -1) return error.Overflow;
+        } else {
+            if ((byte & 0x80 == 0) and (@as(S, @bitCast(ov[0])) < 0)) {
+                const remaining_shift: u3 = @intCast(@typeInfo(U).int.bits - @as(u16, shift));
+                const remaining_bits = @as(i8, @bitCast(byte | 0x80)) >> remaining_shift;
+                if (remaining_bits != -1) return error.Overflow;
+            }
+        }
+
+        value |= ov[0];
+        if (byte & 0x80 == 0) {
+            const needs_sign_ext = group + 1 < max_group;
+            if (byte & 0x40 != 0 and needs_sign_ext) {
+                const ones = @as(S, -1);
+                value |= @as(U, @bitCast(ones)) << (shift + 7);
+            }
+            break;
+        }
+    } else {
+        return error.Overflow;
+    }
+
+    const result = @as(S, @bitCast(value));
+    if (S != T) {
+        if (result > std.math.maxInt(T) or result < std.math.minInt(T)) return error.Overflow;
+    }
+    return @truncate(result);
 }
 
 // ============================================================

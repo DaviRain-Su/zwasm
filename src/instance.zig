@@ -693,16 +693,22 @@ pub fn evalInitExpr(expr: []const u8, instance: *Instance) !u128 {
 const testing = std.testing;
 
 fn readTestFile(alloc: Allocator, name: []const u8) ![]const u8 {
+    var th = std.Io.Threaded.init(alloc, .{});
+    defer th.deinit();
+    const io = th.io();
     const prefixes = [_][]const u8{ "src/testdata/", "testdata/", "src/wasm/testdata/" };
     for (prefixes) |prefix| {
         const path = try std.fmt.allocPrint(alloc, "{s}{s}", .{ prefix, name });
         defer alloc.free(path);
-        const file = std.fs.cwd().openFile(path, .{}) catch continue;
-        defer file.close();
-        const stat = try file.stat();
-        const data = try alloc.alloc(u8, stat.size);
-        const read = try file.readAll(data);
-        return data[0..read];
+        const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch continue;
+        defer file.close(io);
+        const size = file.length(io) catch continue;
+        const data = try alloc.alloc(u8, @intCast(size));
+        const n = file.readPositionalAll(io, data, 0) catch {
+            alloc.free(data);
+            return error.ReadFailed;
+        };
+        return data[0..n];
     }
     return error.FileNotFound;
 }

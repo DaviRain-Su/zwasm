@@ -24,7 +24,7 @@ bash bench/run_bench.sh --quick
 
 ## 必要なツール
 
-- Zig 0.15.2
+- Zig 0.16.0
 - Python 3（スペックテストランナー用）
 - [wasm-tools](https://github.com/bytecodealliance/wasm-tools)（スペックテスト変換用）
 - [hyperfine](https://github.com/sharkdp/hyperfine)（ベンチマーク用）

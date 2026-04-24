@@ -1327,15 +1327,21 @@ fn readTestFile(alloc: Allocator, name: []const u8) ![]const u8 {
         "testdata/",
         "src/wasm/testdata/",
     };
+    var th = std.Io.Threaded.init(alloc, .{});
+    defer th.deinit();
+    const io = th.io();
     for (prefixes) |prefix| {
         const path = try std.fmt.allocPrint(alloc, "{s}{s}", .{ prefix, name });
         defer alloc.free(path);
-        const file = std.fs.cwd().openFile(path, .{}) catch continue;
-        defer file.close();
-        const stat = try file.stat();
-        const data = try alloc.alloc(u8, stat.size);
-        const read = try file.readAll(data);
-        return data[0..read];
+        const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch continue;
+        defer file.close(io);
+        const size = file.length(io) catch continue;
+        const data = try alloc.alloc(u8, @intCast(size));
+        const n = file.readPositionalAll(io, data, 0) catch {
+            alloc.free(data);
+            return error.ReadFailed;
+        };
+        return data[0..n];
     }
     return error.FileNotFound;
 }
@@ -1901,7 +1907,21 @@ test "Module — type canonicalization: ref_test.1 GC struct types" {
     //   6: sub(0) struct()             — $t0' (NOT same as 0: has super=[0])
     //   7: sub(6) struct(i32, i32)     — $t4
     //   8: func() -> ()
-    const wasm = try std.fs.cwd().readFileAlloc(testing.allocator, "test/spec/json/ref_test.1.wasm", 1024 * 1024);
+    const wasm = blk: {
+        var th = std.Io.Threaded.init(testing.allocator, .{});
+        defer th.deinit();
+        const io = th.io();
+        const file = std.Io.Dir.cwd().openFile(io, "test/spec/json/ref_test.1.wasm", .{}) catch
+            return error.SkipZigTest;
+        defer file.close(io);
+        const size = file.length(io) catch return error.SkipZigTest;
+        const buf = try testing.allocator.alloc(u8, @intCast(size));
+        const n = file.readPositionalAll(io, buf, 0) catch {
+            testing.allocator.free(buf);
+            return error.SkipZigTest;
+        };
+        break :blk buf[0..n];
+    };
     defer testing.allocator.free(wasm);
     var m = Module.init(testing.allocator, wasm);
     defer m.deinit();
@@ -2029,7 +2049,8 @@ test "fuzz — module decode does not panic on arbitrary input" {
     try std.testing.fuzz(
         Ctx{ .corpus = fuzz_corpus },
         struct {
-            fn f(_: Ctx, input: []const u8) anyerror!void {
+            fn f(_: Ctx, smith: *std.testing.Smith) anyerror!void {
+                const input = smith.in orelse return;
                 var m = Module.init(testing.allocator, input);
                 defer m.deinit();
                 m.decode() catch return;
@@ -2044,7 +2065,8 @@ test "fuzz — full pipeline (load+instantiate) does not panic" {
     try std.testing.fuzz(
         Ctx{ .corpus = fuzz_corpus },
         struct {
-            fn f(_: Ctx, input: []const u8) anyerror!void {
+            fn f(_: Ctx, smith: *std.testing.Smith) anyerror!void {
+                const input = smith.in orelse return;
                 const zwasm = @import("types.zig");
                 const module = zwasm.WasmModule.loadWithFuel(
                     testing.allocator,

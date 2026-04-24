@@ -405,6 +405,13 @@ pub const Vm = struct {
     /// If true (default), JIT loops are periodically interrupted to check the flag.
     /// If false, JIT execution runs at maximum speed but cannot be cancelled.
     cancellable: bool = true,
+    /// Zig 0.16 I/O interface. Populated by `WasmModule.loadCore` before any
+    /// filesystem or synchronization operation runs; tests that never touch
+    /// wasi/memory-atomic paths can leave this `undefined` and `Vm.init` will
+    /// not access it. Long-running processes should treat this as immutable
+    /// after load — all downstream code captures it by value through the
+    /// vtable pointer inside `std.Io`.
+    io: std.Io = undefined,
     /// Force stack-based interpreter for all functions, bypassing RegIR and JIT.
     /// Used by differential testing to get a "reference" result.
     force_interpreter: bool = false,
@@ -466,7 +473,7 @@ pub const Vm = struct {
             if (value == 0) {
                 self.deadline_ns = null;
             } else {
-                self.deadline_ns = std.time.nanoTimestamp() + @as(i128, @intCast(value)) * std.time.ns_per_ms;
+                self.deadline_ns = std.Io.Timestamp.now(self.io, .awake).nanoseconds + @as(i128, @intCast(value)) * std.time.ns_per_ms;
             }
         } else {
             self.deadline_ns = null;
@@ -494,7 +501,7 @@ pub const Vm = struct {
                 }
                 // Check deadline (wal-clock time)
                 if (self.deadline_ns) |d| {
-                    if (std.time.nanoTimestamp() >= d) return error.TimeoutExceeded;
+                    if (std.Io.Timestamp.now(self.io, .awake).nanoseconds >= d) return error.TimeoutExceeded;
                 }
                 // Reset check counter
                 self.deadline_check_remaining = DEADLINE_CHECK_INTERVAL;
@@ -564,7 +571,7 @@ pub const Vm = struct {
 
         // Check wall-clock deadline
         if (vm.deadline_ns) |dl| {
-            if (std.time.nanoTimestamp() >= dl) return 10; // TimeoutExceeded
+            if (std.Io.Timestamp.now(vm.io, .awake).nanoseconds >= dl) return 10; // TimeoutExceeded
         }
 
         // Neither exhausted — re-arm and continue
@@ -709,7 +716,7 @@ pub const Vm = struct {
                         if (tc.dump_regir_func) |dump_idx| {
                             if (dump_idx == wf.func_idx) {
                                 var err_buf2: [4096]u8 = undefined;
-                                var ew = std.fs.File.stderr().writer(&err_buf2);
+                                var ew = std.Io.File.stderr().writer(self.io, &err_buf2);
                                 trace_mod.dumpRegIR(&ew.interface, reg, wf.ir.?.pool64, wf.func_idx);
                                 tc.dump_regir_func = null;
                             }
@@ -2860,7 +2867,7 @@ pub const Vm = struct {
                 const effective_addr, const ov = @addWithOverflow(addr, offset);
                 if (ov != 0) return error.OutOfBoundsMemoryAccess;
                 if (effective_addr % 4 != 0) return error.Trap; // unaligned atomic
-                const result = m.atomicNotify(effective_addr, count) catch return error.OutOfBoundsMemoryAccess;
+                const result = m.atomicNotify(self.io, effective_addr, count) catch return error.OutOfBoundsMemoryAccess;
                 try self.pushI32(result);
             },
             .memory_atomic_wait32 => {
@@ -2870,7 +2877,7 @@ pub const Vm = struct {
                 const effective_addr, const ov = @addWithOverflow(addr, offset);
                 if (ov != 0) return error.OutOfBoundsMemoryAccess;
                 if (effective_addr % 4 != 0) return error.Trap; // unaligned atomic
-                const result = m.atomicWait32(effective_addr, expected, timeout) catch |err| switch (err) {
+                const result = m.atomicWait32(self.io, effective_addr, expected, timeout) catch |err| switch (err) {
                     error.Trap => return error.Trap,
                     else => return error.OutOfBoundsMemoryAccess,
                 };
@@ -2883,7 +2890,7 @@ pub const Vm = struct {
                 const effective_addr, const ov = @addWithOverflow(addr, offset);
                 if (ov != 0) return error.OutOfBoundsMemoryAccess;
                 if (effective_addr % 8 != 0) return error.Trap; // unaligned atomic
-                const result = m.atomicWait64(effective_addr, expected, timeout) catch |err| switch (err) {
+                const result = m.atomicWait64(self.io, effective_addr, expected, timeout) catch |err| switch (err) {
                     error.Trap => return error.Trap,
                     else => return error.OutOfBoundsMemoryAccess,
                 };
@@ -3177,85 +3184,85 @@ pub const Vm = struct {
             // ---- Extract / replace lane ----
             .i8x16_extract_lane_s => {
                 const lane = try reader.readByte();
-                const vec: @Vector(16, i8) = @bitCast(self.popV128());
-                try self.pushI32(@as(i32, vec[lane]));
+                const arr: [16]i8 = @bitCast(self.popV128());
+                try self.pushI32(@as(i32, arr[lane]));
             },
             .i8x16_extract_lane_u => {
                 const lane = try reader.readByte();
-                const vec: @Vector(16, u8) = @bitCast(self.popV128());
-                try self.push(@as(u64, vec[lane]));
+                const arr: [16]u8 = @bitCast(self.popV128());
+                try self.push(@as(u64, arr[lane]));
             },
             .i8x16_replace_lane => {
                 const lane = try reader.readByte();
                 const val: u8 = @truncate(self.pop());
-                var vec: @Vector(16, u8) = @bitCast(self.popV128());
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                var arr: [16]u8 = @bitCast(self.popV128());
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
             .i16x8_extract_lane_s => {
                 const lane = try reader.readByte();
-                const vec: @Vector(8, i16) = @bitCast(self.popV128());
-                try self.pushI32(@as(i32, vec[lane]));
+                const arr: [8]i16 = @bitCast(self.popV128());
+                try self.pushI32(@as(i32, arr[lane]));
             },
             .i16x8_extract_lane_u => {
                 const lane = try reader.readByte();
-                const vec: @Vector(8, u16) = @bitCast(self.popV128());
-                try self.push(@as(u64, vec[lane]));
+                const arr: [8]u16 = @bitCast(self.popV128());
+                try self.push(@as(u64, arr[lane]));
             },
             .i16x8_replace_lane => {
                 const lane = try reader.readByte();
                 const val: u16 = @truncate(self.pop());
-                var vec: @Vector(8, u16) = @bitCast(self.popV128());
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                var arr: [8]u16 = @bitCast(self.popV128());
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
             .i32x4_extract_lane => {
                 const lane = try reader.readByte();
-                const vec: @Vector(4, i32) = @bitCast(self.popV128());
-                try self.pushI32(vec[lane]);
+                const arr: [4]i32 = @bitCast(self.popV128());
+                try self.pushI32(arr[lane]);
             },
             .i32x4_replace_lane => {
                 const lane = try reader.readByte();
                 const val = self.popI32();
-                var vec: @Vector(4, i32) = @bitCast(self.popV128());
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                var arr: [4]i32 = @bitCast(self.popV128());
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
             .i64x2_extract_lane => {
                 const lane = try reader.readByte();
-                const vec: @Vector(2, i64) = @bitCast(self.popV128());
-                try self.pushI64(vec[lane]);
+                const arr: [2]i64 = @bitCast(self.popV128());
+                try self.pushI64(arr[lane]);
             },
             .i64x2_replace_lane => {
                 const lane = try reader.readByte();
                 const val = self.popI64();
-                var vec: @Vector(2, i64) = @bitCast(self.popV128());
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                var arr: [2]i64 = @bitCast(self.popV128());
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
             .f32x4_extract_lane => {
                 const lane = try reader.readByte();
-                const vec: @Vector(4, u32) = @bitCast(self.popV128());
-                try self.pushF32(@bitCast(vec[lane]));
+                const arr: [4]u32 = @bitCast(self.popV128());
+                try self.pushF32(@bitCast(arr[lane]));
             },
             .f32x4_replace_lane => {
                 const lane = try reader.readByte();
                 const val: u32 = @bitCast(self.popF32());
-                var vec: @Vector(4, u32) = @bitCast(self.popV128());
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                var arr: [4]u32 = @bitCast(self.popV128());
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
             .f64x2_extract_lane => {
                 const lane = try reader.readByte();
-                const vec: @Vector(2, u64) = @bitCast(self.popV128());
-                try self.pushF64(@bitCast(vec[lane]));
+                const arr: [2]u64 = @bitCast(self.popV128());
+                try self.pushF64(@bitCast(arr[lane]));
             },
             .f64x2_replace_lane => {
                 const lane = try reader.readByte();
                 const val: u64 = @bitCast(self.popF64());
-                var vec: @Vector(2, u64) = @bitCast(self.popV128());
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                var arr: [2]u64 = @bitCast(self.popV128());
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
 
             // ---- Shuffle / swizzle ----
@@ -3274,14 +3281,14 @@ pub const Vm = struct {
                 try self.pushV128(@bitCast(@as(@Vector(16, u8), result)));
             },
             .i8x16_swizzle => {
-                const indices: @Vector(16, u8) = @bitCast(self.popV128());
+                const indices: [16]u8 = @bitCast(self.popV128());
                 const vec: [16]u8 = @bitCast(self.popV128());
                 var result: [16]u8 = undefined;
                 for (0..16) |i| {
                     const idx = indices[i];
                     result[i] = if (idx < 16) vec[idx] else 0;
                 }
-                try self.pushV128(@bitCast(@as(@Vector(16, u8), result)));
+                try self.pushV128(@bitCast(result));
             },
 
             // ---- Bitwise (36.3) ----
@@ -3846,14 +3853,14 @@ pub const Vm = struct {
 
             // ---- Relaxed SIMD (Wasm 3.0) ----
             .i8x16_relaxed_swizzle => {
-                const indices: @Vector(16, u8) = @bitCast(self.popV128());
+                const indices: [16]u8 = @bitCast(self.popV128());
                 const vec: [16]u8 = @bitCast(self.popV128());
                 var result: [16]u8 = undefined;
                 for (0..16) |i| {
                     const idx = indices[i];
                     result[i] = if (idx < 16) vec[idx] else 0;
                 }
-                try self.pushV128(@bitCast(@as(@Vector(16, u8), result)));
+                try self.pushV128(@bitCast(result));
             },
             .i32x4_relaxed_trunc_f32x4_s => {
                 const a: [4]f32 = @bitCast(self.popV128());
@@ -4007,8 +4014,8 @@ pub const Vm = struct {
             n.* = std.mem.readInt(NarrowT, ptr, .little);
         }
         // Extend to wide
-        var wide: @Vector(N, WideT) = undefined;
-        for (0..N) |i| {
+        var wide: [N]WideT = undefined;
+        inline for (0..N) |i| {
             wide[i] = @as(WideT, narrow[i]);
         }
         try self.pushV128(@bitCast(wide));
@@ -4024,11 +4031,11 @@ pub const Vm = struct {
     ) WasmError!void {
         const ma = try readMemarg(reader, instance);
         const lane = try reader.readByte();
-        var vec: @Vector(N, T) = @bitCast(self.popV128());
+        var arr: [N]T = @bitCast(self.popV128());
         const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
         const val = ma.mem.read(T, ma.offset, base) catch return error.OutOfBoundsMemoryAccess;
-        vec[lane] = val;
-        try self.pushV128(@bitCast(vec));
+        arr[lane] = val;
+        try self.pushV128(@bitCast(arr));
     }
 
     // SIMD helper: store a specific lane of v128 to memory
@@ -4041,9 +4048,9 @@ pub const Vm = struct {
     ) WasmError!void {
         const ma = try readMemarg(reader, instance);
         const lane = try reader.readByte();
-        const vec: @Vector(N, T) = @bitCast(self.popV128());
+        const arr: [N]T = @bitCast(self.popV128());
         const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
-        ma.mem.write(T, ma.offset, base, vec[lane]) catch return error.OutOfBoundsMemoryAccess;
+        ma.mem.write(T, ma.offset, base, arr[lane]) catch return error.OutOfBoundsMemoryAccess;
     }
 
     // SIMD helper: lane-wise comparison producing all-ones/all-zeros result
@@ -6882,48 +6889,48 @@ pub const Vm = struct {
                 const base = @as(u32, @bitCast(self.popI32()));
                 const raw = wm.read(u64, offset, base) catch return error.OutOfBoundsMemoryAccess;
                 const bytes: [8]i8 = @bitCast(raw);
-                var result: @Vector(8, i16) = undefined;
-                for (0..8) |i| result[i] = bytes[i];
+                var result: [8]i16 = undefined;
+                inline for (0..8) |i| result[i] = bytes[i];
                 try self.pushV128(@bitCast(result));
             },
             0x02 => { // v128.load8x8_u
                 const base = @as(u32, @bitCast(self.popI32()));
                 const raw = wm.read(u64, offset, base) catch return error.OutOfBoundsMemoryAccess;
                 const bytes: [8]u8 = @bitCast(raw);
-                var result: @Vector(8, u16) = undefined;
-                for (0..8) |i| result[i] = bytes[i];
+                var result: [8]u16 = undefined;
+                inline for (0..8) |i| result[i] = bytes[i];
                 try self.pushV128(@bitCast(result));
             },
             0x03 => { // v128.load16x4_s
                 const base = @as(u32, @bitCast(self.popI32()));
                 const raw = wm.read(u64, offset, base) catch return error.OutOfBoundsMemoryAccess;
                 const vals: [4]i16 = @bitCast(raw);
-                var result: @Vector(4, i32) = undefined;
-                for (0..4) |i| result[i] = vals[i];
+                var result: [4]i32 = undefined;
+                inline for (0..4) |i| result[i] = vals[i];
                 try self.pushV128(@bitCast(result));
             },
             0x04 => { // v128.load16x4_u
                 const base = @as(u32, @bitCast(self.popI32()));
                 const raw = wm.read(u64, offset, base) catch return error.OutOfBoundsMemoryAccess;
                 const vals: [4]u16 = @bitCast(raw);
-                var result: @Vector(4, u32) = undefined;
-                for (0..4) |i| result[i] = vals[i];
+                var result: [4]u32 = undefined;
+                inline for (0..4) |i| result[i] = vals[i];
                 try self.pushV128(@bitCast(result));
             },
             0x05 => { // v128.load32x2_s
                 const base = @as(u32, @bitCast(self.popI32()));
                 const raw = wm.read(u64, offset, base) catch return error.OutOfBoundsMemoryAccess;
                 const vals: [2]i32 = @bitCast(raw);
-                var result: @Vector(2, i64) = undefined;
-                for (0..2) |i| result[i] = vals[i];
+                var result: [2]i64 = undefined;
+                inline for (0..2) |i| result[i] = vals[i];
                 try self.pushV128(@bitCast(result));
             },
             0x06 => { // v128.load32x2_u
                 const base = @as(u32, @bitCast(self.popI32()));
                 const raw = wm.read(u64, offset, base) catch return error.OutOfBoundsMemoryAccess;
                 const vals: [2]u32 = @bitCast(raw);
-                var result: @Vector(2, u64) = undefined;
-                for (0..2) |i| result[i] = vals[i];
+                var result: [2]u64 = undefined;
+                inline for (0..2) |i| result[i] = vals[i];
                 try self.pushV128(@bitCast(result));
             },
             0x07 => { // v128.load8_splat
@@ -6972,52 +6979,52 @@ pub const Vm = struct {
     fn executeSimdLaneMemOp(self: *Vm, sub: u32, offset: u32, wm: *WasmMemory, lane: u8) WasmError!void {
         switch (sub) {
             0x54 => { // v128.load8_lane: [i32, v128] → [v128]
-                var vec: @Vector(16, u8) = @bitCast(self.popV128());
+                var arr: [16]u8 = @bitCast(self.popV128());
                 const base = @as(u32, @bitCast(self.popI32()));
                 const val = wm.read(u8, offset, base) catch return error.OutOfBoundsMemoryAccess;
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
             0x55 => { // v128.load16_lane
-                var vec: @Vector(8, u16) = @bitCast(self.popV128());
+                var arr: [8]u16 = @bitCast(self.popV128());
                 const base = @as(u32, @bitCast(self.popI32()));
                 const val = wm.read(u16, offset, base) catch return error.OutOfBoundsMemoryAccess;
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
             0x56 => { // v128.load32_lane
-                var vec: @Vector(4, u32) = @bitCast(self.popV128());
+                var arr: [4]u32 = @bitCast(self.popV128());
                 const base = @as(u32, @bitCast(self.popI32()));
                 const val = wm.read(u32, offset, base) catch return error.OutOfBoundsMemoryAccess;
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
             0x57 => { // v128.load64_lane
-                var vec: @Vector(2, u64) = @bitCast(self.popV128());
+                var arr: [2]u64 = @bitCast(self.popV128());
                 const base = @as(u32, @bitCast(self.popI32()));
                 const val = wm.read(u64, offset, base) catch return error.OutOfBoundsMemoryAccess;
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
             0x58 => { // v128.store8_lane
-                const vec: @Vector(16, u8) = @bitCast(self.popV128());
+                const arr: [16]u8 = @bitCast(self.popV128());
                 const base = @as(u32, @bitCast(self.popI32()));
-                wm.write(u8, offset, base, vec[lane]) catch return error.OutOfBoundsMemoryAccess;
+                wm.write(u8, offset, base, arr[lane]) catch return error.OutOfBoundsMemoryAccess;
             },
             0x59 => { // v128.store16_lane
-                const vec: @Vector(8, u16) = @bitCast(self.popV128());
+                const arr: [8]u16 = @bitCast(self.popV128());
                 const base = @as(u32, @bitCast(self.popI32()));
-                wm.write(u16, offset, base, vec[lane]) catch return error.OutOfBoundsMemoryAccess;
+                wm.write(u16, offset, base, arr[lane]) catch return error.OutOfBoundsMemoryAccess;
             },
             0x5A => { // v128.store32_lane
-                const vec: @Vector(4, u32) = @bitCast(self.popV128());
+                const arr: [4]u32 = @bitCast(self.popV128());
                 const base = @as(u32, @bitCast(self.popI32()));
-                wm.write(u32, offset, base, vec[lane]) catch return error.OutOfBoundsMemoryAccess;
+                wm.write(u32, offset, base, arr[lane]) catch return error.OutOfBoundsMemoryAccess;
             },
             0x5B => { // v128.store64_lane
-                const vec: @Vector(2, u64) = @bitCast(self.popV128());
+                const arr: [2]u64 = @bitCast(self.popV128());
                 const base = @as(u32, @bitCast(self.popI32()));
-                wm.write(u64, offset, base, vec[lane]) catch return error.OutOfBoundsMemoryAccess;
+                wm.write(u64, offset, base, arr[lane]) catch return error.OutOfBoundsMemoryAccess;
             },
             else => return error.Trap,
         }
@@ -8473,16 +8480,22 @@ fn roundToEven(comptime T: type, x: T) T {
 const testing = std.testing;
 
 fn readTestFile(alloc: Allocator, name: []const u8) ![]const u8 {
+    var th = std.Io.Threaded.init(alloc, .{});
+    defer th.deinit();
+    const io = th.io();
     const prefixes = [_][]const u8{ "src/testdata/", "testdata/", "src/wasm/testdata/" };
     for (prefixes) |prefix| {
         const path = try std.fmt.allocPrint(alloc, "{s}{s}", .{ prefix, name });
         defer alloc.free(path);
-        const file = std.fs.cwd().openFile(path, .{}) catch continue;
-        defer file.close();
-        const stat = try file.stat();
-        const data = try alloc.alloc(u8, stat.size);
-        const read = try file.readAll(data);
-        return data[0..read];
+        const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch continue;
+        defer file.close(io);
+        const size = file.length(io) catch continue;
+        const data = try alloc.alloc(u8, @intCast(size));
+        const n = file.readPositionalAll(io, data, 0) catch {
+            alloc.free(data);
+            return error.ReadFailed;
+        };
+        return data[0..n];
     }
     return error.FileNotFound;
 }
@@ -9515,16 +9528,23 @@ test "Tiered — back-edge counting triggers JIT for single-call loop function" 
     // sieve(100) is called once but has a hot inner loop.
     // Back-edge counting should trigger JIT mid-execution and restart via JIT.
     const wasm = blk: {
+        var th = std.Io.Threaded.init(testing.allocator, .{});
+        defer th.deinit();
+        const io = th.io();
         const prefixes = [_][]const u8{ "bench/wasm/", "../bench/wasm/" };
         for (prefixes) |prefix| {
             const path = try std.fmt.allocPrint(testing.allocator, "{s}sieve.wasm", .{prefix});
             defer testing.allocator.free(path);
-            const file = std.fs.cwd().openFile(path, .{}) catch continue;
-            defer file.close();
-            const stat = try file.stat();
-            const data = try testing.allocator.alloc(u8, stat.size);
-            const read = try file.readAll(data);
-            break :blk data[0..read];
+            const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch continue;
+            defer file.close(io);
+            const size = file.length(io) catch continue;
+            const data = try testing.allocator.alloc(u8, @intCast(size));
+            const n = file.readPositionalAll(io, data, 0) catch {
+                testing.allocator.free(data);
+                return error.SkipZigTest;
+            };
+            const filled = n;
+            break :blk data[0..filled];
         }
         return error.SkipZigTest; // sieve.wasm not found
     };
@@ -10057,7 +10077,10 @@ test "Resource limits — deadline timeout (expired)" {
     defer inst.deinit();
     try inst.instantiate();
 
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var vm = Vm.init(testing.allocator);
+    vm.io = th.io();
     vm.deadline_ns = 0; // epoch = always expired
     vm.deadline_check_remaining = 0; // check immediately
     // Deadline check on trivial (loop-free) functions only works in interpreter;
@@ -10083,8 +10106,11 @@ test "Resource limits — deadline timeout (infinite loop)" {
     defer inst.deinit();
     try inst.instantiate();
 
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var vm = Vm.init(testing.allocator);
-    vm.deadline_ns = std.time.nanoTimestamp() - std.time.ns_per_ms;
+    vm.io = th.io();
+    vm.deadline_ns = std.Io.Timestamp.now(vm.io, .awake).nanoseconds - std.time.ns_per_ms;
     vm.deadline_check_remaining = 0;
 
     var results = [_]u64{0};
@@ -10092,7 +10118,10 @@ test "Resource limits — deadline timeout (infinite loop)" {
 }
 
 test "Resource limits — deadline timeout API" {
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var vm = Vm.init(testing.allocator);
+    vm.io = th.io();
 
     vm.setDeadlineTimeoutMs(1000);
     try testing.expect(vm.deadline_ns != null);
@@ -10106,7 +10135,10 @@ test "Resource limits — deadline timeout API" {
 }
 
 test "jitFuelCheckHelper — deadline expired returns TimeoutExceeded" {
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var vm = Vm.init(testing.allocator);
+    vm.io = th.io();
     vm.deadline_ns = 0; // already expired
     vm.jit_fuel = -1;
     vm.jit_fuel_initial = DEADLINE_JIT_INTERVAL;
@@ -10116,8 +10148,11 @@ test "jitFuelCheckHelper — deadline expired returns TimeoutExceeded" {
 }
 
 test "jitFuelCheckHelper — deadline not expired re-arms and continues" {
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var vm = Vm.init(testing.allocator);
-    vm.deadline_ns = std.time.nanoTimestamp() + 10 * std.time.ns_per_s; // 10s from now
+    vm.io = th.io();
+    vm.deadline_ns = std.Io.Timestamp.now(vm.io, .awake).nanoseconds + 10 * std.time.ns_per_s; // 10s from now
     vm.jit_fuel = -1;
     vm.jit_fuel_initial = DEADLINE_JIT_INTERVAL;
 
@@ -10128,7 +10163,10 @@ test "jitFuelCheckHelper — deadline not expired re-arms and continues" {
 }
 
 test "jitFuelCheckHelper — fuel exhausted returns FuelExhausted" {
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var vm = Vm.init(testing.allocator);
+    vm.io = th.io();
     vm.fuel = 100;
     vm.jit_fuel = -1;
     vm.jit_fuel_initial = 100; // was armed to fuel budget
@@ -10139,9 +10177,12 @@ test "jitFuelCheckHelper — fuel exhausted returns FuelExhausted" {
 }
 
 test "jitFuelCheckHelper — fuel+deadline, neither exhausted" {
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var vm = Vm.init(testing.allocator);
+    vm.io = th.io();
     vm.fuel = 50_000;
-    vm.deadline_ns = std.time.nanoTimestamp() + 10 * std.time.ns_per_s;
+    vm.deadline_ns = std.Io.Timestamp.now(vm.io, .awake).nanoseconds + 10 * std.time.ns_per_s;
     vm.jit_fuel = -1;
     vm.jit_fuel_initial = DEADLINE_JIT_INTERVAL; // min(50000, 10000) = 10000
 
@@ -10162,16 +10203,22 @@ test "armJitFuel — fuel only" {
 }
 
 test "armJitFuel — deadline only" {
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var vm = Vm.init(testing.allocator);
-    vm.deadline_ns = std.time.nanoTimestamp() + std.time.ns_per_s;
+    vm.io = th.io();
+    vm.deadline_ns = std.Io.Timestamp.now(vm.io, .awake).nanoseconds + std.time.ns_per_s;
     vm.armJitFuel();
     try testing.expectEqual(DEADLINE_JIT_INTERVAL, vm.jit_fuel);
 }
 
 test "armJitFuel — fuel+deadline picks smaller" {
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
     var vm = Vm.init(testing.allocator);
+    vm.io = th.io();
     vm.fuel = 500; // smaller than DEADLINE_JIT_INTERVAL
-    vm.deadline_ns = std.time.nanoTimestamp() + std.time.ns_per_s;
+    vm.deadline_ns = std.Io.Timestamp.now(vm.io, .awake).nanoseconds + std.time.ns_per_s;
     vm.armJitFuel();
     try testing.expectEqual(@as(i64, 500), vm.jit_fuel);
 }
@@ -10187,6 +10234,21 @@ test "armJitFuel — cancellable = false prevents capping" {
     vm.cancellable = false;
     vm.armJitFuel();
     try testing.expectEqual(@as(i64, std.math.maxInt(i64)), vm.jit_fuel);
+}
+
+// Small cross-platform ~1ms sleep used by the cancellation tests below.
+// `std.posix.timespec` is `void` on Windows, so the nanosleep-based path
+// cannot even be *constructed* on Windows — branch at comptime.
+fn sleepOneMillisecondForCancelTest() void {
+    if (builtin.os.tag == .windows) {
+        const K32 = struct {
+            extern "kernel32" fn Sleep(dwMilliseconds: u32) callconv(.winapi) void;
+        };
+        K32.Sleep(1);
+    } else {
+        const req: std.posix.timespec = .{ .sec = 0, .nsec = 1 * std.time.ns_per_ms };
+        _ = std.c.nanosleep(&req, null);
+    }
 }
 
 test "Cancellation — cancel flag stops interpreter loop" {
@@ -10209,7 +10271,7 @@ test "Cancellation — cancel flag stops interpreter loop" {
 
     const cancel_thread = try std.Thread.spawn(.{}, struct {
         fn run(v: *Vm) void {
-            std.Thread.sleep(1 * std.time.ns_per_ms); // let invoke() start
+            sleepOneMillisecondForCancelTest(); // let invoke() start
             v.cancel();
         }
     }.run, .{&vm});
@@ -10273,7 +10335,7 @@ test "Cancellation — cancel flag stops JIT loop" {
 
     const cancel_thread = try std.Thread.spawn(.{}, struct {
         fn run(v: *Vm) void {
-            std.Thread.sleep(1 * std.time.ns_per_ms); // let invoke() start
+            sleepOneMillisecondForCancelTest(); // let invoke() start
             v.cancel();
         }
     }.run, .{&vm});

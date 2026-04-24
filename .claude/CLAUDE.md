@@ -1,7 +1,7 @@
 # zwasm
 
 Standalone Zig WebAssembly runtime — library AND CLI tool.
-Zig 0.15.2. Memo: `@./.dev/memo.md`. Roadmap: `@./.dev/roadmap.md`.
+Zig 0.16.0. Memo: `@./.dev/memo.md`. Roadmap: `@./.dev/roadmap.md`.
 
 ## Language Policy
 

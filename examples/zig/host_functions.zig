@@ -15,7 +15,7 @@ fn hostPrintI32(ctx_ptr: *anyopaque, context: usize) anyerror!void {
     const val = vm.popOperandI32();
 
     var buf: [256]u8 = undefined;
-    var writer = std.fs.File.stderr().writer(&buf);
+    var writer = std.Io.File.stderr().writer(&buf);
     const stderr = &writer.interface;
     try stderr.print("[host] print_i32({d})\n", .{val});
     try stderr.flush();
@@ -58,7 +58,7 @@ pub fn main() !void {
     try module.invoke("compute_and_print", &args, &results);
 
     var buf: [256]u8 = undefined;
-    var writer = std.fs.File.stdout().writer(&buf);
+    var writer = std.Io.File.stdout().writer(&buf);
     const stdout = &writer.interface;
     try stdout.print("compute_and_print(7, 3) completed\n", .{});
     try stdout.flush();

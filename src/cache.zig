@@ -165,10 +165,10 @@ pub fn wasmHash(wasm_bin: []const u8) [32]u8 {
 
 /// Get cache directory path (~/.cache/zwasm/). Creates it if needed.
 /// Returns owned slice. Caller must free.
-pub fn getCacheDir(alloc: Allocator) ![]u8 {
+pub fn getCacheDir(io: std.Io, alloc: Allocator) ![]u8 {
     const path = try platform.appCacheDir(alloc, "zwasm");
-    // Ensure directory exists
-    std.fs.makeDirAbsolute(path) catch |err| switch (err) {
+    // Ensure directory exists. Use std.Io.Dir so Windows works.
+    std.Io.Dir.createDirAbsolute(io, path, .default_dir) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => {
             alloc.free(path);
@@ -180,8 +180,8 @@ pub fn getCacheDir(alloc: Allocator) ![]u8 {
 
 /// Get cache file path for a given wasm hash.
 /// Returns owned slice. Caller must free.
-pub fn getCachePath(alloc: Allocator, hash: [32]u8) ![]u8 {
-    const dir = try getCacheDir(alloc);
+pub fn getCachePath(io: std.Io, alloc: Allocator, hash: [32]u8) ![]u8 {
+    const dir = try getCacheDir(io, alloc);
     defer alloc.free(dir);
     // Format hash as hex string
     var hex: [64]u8 = undefined;
@@ -193,29 +193,31 @@ pub fn getCachePath(alloc: Allocator, hash: [32]u8) ![]u8 {
     return std.fmt.allocPrint(alloc, "{s}/{s}.zwcache", .{ dir, hex });
 }
 
-/// Save serialized cache to disk.
-pub fn saveToFile(alloc: Allocator, hash: [32]u8, ir_funcs: []const ?*const IrFunc) !void {
+/// Save serialized cache to disk. Uses `std.Io.Dir` so Windows works without
+/// libc POSIX shims (on POSIX systems, the io-threaded path reduces to the
+/// same syscalls).
+pub fn saveToFile(io: std.Io, alloc: Allocator, hash: [32]u8, ir_funcs: []const ?*const IrFunc) !void {
     const data = try serialize(alloc, hash, ir_funcs);
     defer alloc.free(data);
-    const path = try getCachePath(alloc, hash);
+    const path = try getCachePath(io, alloc, hash);
     defer alloc.free(path);
-    const file = try std.fs.createFileAbsolute(path, .{});
-    defer file.close();
-    try file.writeAll(data);
+    const file = try std.Io.Dir.createFileAbsolute(io, path, .{});
+    defer file.close(io);
+    try file.writePositionalAll(io, data, 0);
 }
 
 /// Load cached IR from disk. Returns null on miss or mismatch.
-pub fn loadFromFile(alloc: Allocator, hash: [32]u8) !?[]?*IrFunc {
-    const path = getCachePath(alloc, hash) catch return null;
+pub fn loadFromFile(io: std.Io, alloc: Allocator, hash: [32]u8) !?[]?*IrFunc {
+    const path = getCachePath(io, alloc, hash) catch return null;
     defer alloc.free(path);
-    const file = std.fs.openFileAbsolute(path, .{}) catch return null;
-    defer file.close();
-    const stat = try file.stat();
-    if (stat.size > 256 * 1024 * 1024) return null; // sanity limit: 256 MB
-    const data = try alloc.alloc(u8, stat.size);
+    const file = std.Io.Dir.openFileAbsolute(io, path, .{}) catch return null;
+    defer file.close(io);
+    const len = file.length(io) catch return null;
+    if (len > 256 * 1024 * 1024) return null; // sanity limit: 256 MB
+    const data = try alloc.alloc(u8, @intCast(len));
     defer alloc.free(data);
-    const bytes_read = try file.readAll(data);
-    if (bytes_read != stat.size) return null;
+    const n = file.readPositionalAll(io, data, 0) catch return null;
+    if (n != data.len) return null;
     return deserialize(alloc, data, hash);
 }
 

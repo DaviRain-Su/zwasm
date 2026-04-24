@@ -18,8 +18,101 @@ const page_size = std.heap.page_size_min;
 
 const posix = std.posix;
 const windows = std.os.windows;
+// Zig 0.16 trimmed kernel32 down to CreateProcessW — declare the exception-
+// handler entry point ourselves. Signature from Win32 SDK.
+extern "kernel32" fn AddVectoredExceptionHandler(
+    First: windows.ULONG,
+    Handler: *const fn (*windows.EXCEPTION_POINTERS) callconv(.winapi) c_long,
+) callconv(.winapi) ?*anyopaque;
 
-const kernel32 = std.os.windows.kernel32;
+
+// Local `ucontext_t` definitions. Zig 0.16.0 moved the upstream type into
+// `std.debug.cpu_context` (private `signal_ucontext_t`), matching the kernel
+// ABI of the target OS/arch. We inline just the layouts we need — the kernel
+// ABI is stable across Zig versions so this isn't a maintenance burden.
+//
+// Fields are named to match the layouts in `lib/std/debug/cpu_context.zig` so
+// side-by-side comparison stays obvious. Only read/write what we actually use
+// (pc, return register); every other field is `_prefixed` or `_pad`.
+
+const DarwinMcontextAarch64 = extern struct {
+    _far: u64 align(16),
+    _esr: u64,
+    x: [30]u64,
+    lr: u64,
+    sp: u64,
+    pc: u64,
+};
+
+const DarwinMcontextX86_64 = extern struct {
+    _trapno: u16,
+    _cpu: u16,
+    _err: u32,
+    _faultvaddr: u64,
+    rax: u64,
+    rbx: u64,
+    rcx: u64,
+    rdx: u64,
+    rdi: u64,
+    rsi: u64,
+    rbp: u64,
+    rsp: u64,
+    r8: u64,
+    r9: u64,
+    r10: u64,
+    r11: u64,
+    r12: u64,
+    r13: u64,
+    r14: u64,
+    r15: u64,
+    rip: u64,
+};
+
+const Ucontext = switch (builtin.os.tag) {
+    .driverkit, .ios, .maccatalyst, .macos, .tvos, .visionos, .watchos => extern struct {
+        _onstack: i32,
+        _sigmask: std.c.sigset_t,
+        _stack: std.c.stack_t,
+        _link: ?*Ucontext,
+        _mcsize: u64,
+        // Darwin keeps mcontext out-of-line; kernel fills this pointer.
+        mcontext: *switch (builtin.cpu.arch) {
+            .aarch64 => DarwinMcontextAarch64,
+            .x86_64 => DarwinMcontextX86_64,
+            else => @compileError("unsupported Darwin arch for guard pages"),
+        },
+    },
+    // Linux aarch64 layout (generic-uncacheable `asm/ucontext.h` variant).
+    .linux => switch (builtin.cpu.arch) {
+        .aarch64, .aarch64_be => extern struct {
+            _flags: usize,
+            _link: ?*Ucontext,
+            _stack: std.os.linux.stack_t,
+            _sigmask: std.os.linux.sigset_t,
+            _unused: [120]u8,
+            mcontext: extern struct {
+                _fault_address: u64 align(16),
+                regs: [31]u64, // x0..x30 (lr==x30)
+                sp: u64,
+                pc: u64,
+            },
+        },
+        .x86_64 => extern struct {
+            _flags: usize,
+            _link: ?*Ucontext,
+            _stack: std.os.linux.stack_t,
+            mcontext: extern struct {
+                gregs: [23]u64, // REG_RAX=13, REG_RIP=16 (see <sys/ucontext.h>)
+                // fpregs pointer + other fields follow; we don't read them.
+                _fpregs: ?*anyopaque,
+                _reserved: [8]u64,
+            },
+            // sigmask and fpstate follow mcontext; we don't need them.
+        },
+        else => @compileError("unsupported Linux arch for guard pages"),
+    },
+    else => void, // Windows uses a different path (EXCEPTION_POINTERS)
+};
 
 /// Guard region size: 4 GiB + 64 KiB.
 /// This ensures any 32-bit index (0..0xFFFFFFFF) + small offset (up to 64 KiB)
@@ -134,7 +227,7 @@ pub fn installSignalHandler() void {
     }
 
     const handler_fn = struct {
-        fn handler(_: i32, _: *const posix.siginfo_t, ctx_ptr: ?*anyopaque) callconv(.c) void {
+        fn handler(_: posix.SIG, _: *const posix.siginfo_t, ctx_ptr: ?*anyopaque) callconv(.c) void {
             const rec = getRecovery();
             if (!rec.active) {
                 // Not in JIT code — re-raise with default handler
@@ -143,7 +236,7 @@ pub fn installSignalHandler() void {
             }
             // Verify faulting PC is within JIT code buffer
             // Kernel may place ucontext at non-16-byte-aligned address.
-            const ctx: *align(1) posix.ucontext_t = @ptrCast(ctx_ptr.?);
+            const ctx: *align(1) Ucontext = @ptrCast(ctx_ptr.?);
             const faulting_pc = getPc(ctx);
             if (faulting_pc < rec.jit_code_start or faulting_pc >= rec.jit_code_end) {
                 // PC not in JIT code — not our fault
@@ -180,7 +273,7 @@ var windows_handler_installed = false;
 
 fn installWindowsHandler() void {
     if (windows_handler_installed) return;
-    const handle = kernel32.AddVectoredExceptionHandler(1, windowsHandler);
+    const handle = AddVectoredExceptionHandler(1, windowsHandler);
     if (handle != null) {
         windows_handler_installed = true;
     }
@@ -231,16 +324,16 @@ fn getFaultAddress(info: *const posix.siginfo_t) usize {
     }
 }
 
-fn getPc(ctx: *align(1) posix.ucontext_t) usize {
+fn getPc(ctx: *align(1) Ucontext) usize {
     if (comptime builtin.cpu.arch == .aarch64) {
         if (comptime builtin.os.tag == .macos) {
-            return ctx.mcontext.ss.pc;
+            return ctx.mcontext.pc;
         } else {
             return ctx.mcontext.pc;
         }
     } else if (comptime builtin.cpu.arch == .x86_64) {
         if (comptime builtin.os.tag == .macos) {
-            return ctx.mcontext.ss.rip;
+            return ctx.mcontext.rip;
         } else {
             return ctx.mcontext.gregs[16]; // REG_RIP on Linux
         }
@@ -249,32 +342,32 @@ fn getPc(ctx: *align(1) posix.ucontext_t) usize {
     }
 }
 
-fn setPc(ctx: *align(1) posix.ucontext_t, pc: usize) void {
+fn setPc(ctx: *align(1) Ucontext, pc: usize) void {
     if (comptime builtin.cpu.arch == .aarch64) {
         if (comptime builtin.os.tag == .macos) {
-            ctx.mcontext.ss.pc = pc;
+            ctx.mcontext.pc = pc;
         } else {
             ctx.mcontext.pc = pc;
         }
     } else if (comptime builtin.cpu.arch == .x86_64) {
         if (comptime builtin.os.tag == .macos) {
-            ctx.mcontext.ss.rip = pc;
+            ctx.mcontext.rip = pc;
         } else {
             ctx.mcontext.gregs[16] = pc; // REG_RIP on Linux
         }
     }
 }
 
-fn setReturnReg(ctx: *align(1) posix.ucontext_t, value: u64) void {
+fn setReturnReg(ctx: *align(1) Ucontext, value: u64) void {
     if (comptime builtin.cpu.arch == .aarch64) {
         if (comptime builtin.os.tag == .macos) {
-            ctx.mcontext.ss.regs[0] = value; // x0
+            ctx.mcontext.x[0] = value; // x0
         } else {
             ctx.mcontext.regs[0] = value; // x0
         }
     } else if (comptime builtin.cpu.arch == .x86_64) {
         if (comptime builtin.os.tag == .macos) {
-            ctx.mcontext.ss.rax = value;
+            ctx.mcontext.rax = value;
         } else {
             ctx.mcontext.gregs[13] = value; // RAX on Linux
         }

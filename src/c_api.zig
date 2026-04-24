@@ -19,7 +19,7 @@ const WasmModule = types.WasmModule;
 const WasiOptions = types.WasiOptions;
 
 /// Convert isize (C intptr_t) to platform File.Handle.
-fn isizeToHandle(v: isize) std.fs.File.Handle {
+fn isizeToHandle(v: isize) std.Io.File.Handle {
     if (builtin.os.tag == .windows) {
         return @ptrFromInt(@as(usize, @bitCast(v)));
     } else {
@@ -131,8 +131,9 @@ pub const zwasm_config_t = CApiConfig;
 // Internal wrapper — allocator + WasmModule co-located
 // ============================================================
 
-// Zig 0.15's GeneralPurposeAllocator crashes in Debug-mode shared
-// libraries on Linux x86_64 (PIC codegen issue, see GitHub #11).
+// Zig's DebugAllocator (formerly GeneralPurposeAllocator in 0.15) crashes
+// in Debug-mode shared libraries on Linux x86_64 (PIC codegen issue, see
+// GitHub #11).
 // The C API uses libc malloc (c_allocator) as the default backing
 // allocator, which is correct for a library loaded via dlopen/ctypes.
 // GPA is only used when running Zig tests (leak detection).
@@ -425,7 +426,7 @@ export fn zwasm_module_new_wasi_configured2(
         };
     }
 
-    var stdio_fds2: [3]?std.fs.File.Handle = .{ null, null, null };
+    var stdio_fds2: [3]?std.Io.File.Handle = .{ null, null, null };
     var stdio_ownership2: [3]wasi.Ownership = .{ .borrow, .borrow, .borrow };
     for (0..3) |idx| {
         if (wasi_config.stdio_fds[idx] >= 0) {
@@ -760,7 +761,7 @@ export fn zwasm_module_new_wasi_configured(
     }
 
     // Stdio overrides
-    var stdio_fds: [3]?std.fs.File.Handle = .{ null, null, null };
+    var stdio_fds: [3]?std.Io.File.Handle = .{ null, null, null };
     var stdio_ownership: [3]wasi.Ownership = .{ .borrow, .borrow, .borrow };
     for (0..3) |idx| {
         if (config.stdio_fds[idx] >= 0) {

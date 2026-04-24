@@ -13,7 +13,7 @@ const posix = std.posix;
 const mem = std.mem;
 const Allocator = mem.Allocator;
 const windows = std.os.windows;
-const kernel32 = std.os.windows.kernel32;
+const platform = @import("platform.zig");
 const vm_mod = @import("vm.zig");
 const Vm = vm_mod.Vm;
 const WasmError = vm_mod.WasmError;
@@ -145,31 +145,29 @@ pub const HandleKind = enum {
 };
 
 const HostHandle = struct {
-    raw: std.fs.File.Handle,
+    raw: std.Io.File.Handle,
     kind: HandleKind,
 
-    fn file(self: HostHandle) std.fs.File {
+    fn file(self: HostHandle) std.Io.File {
+        return .{ .handle = self.raw, .flags = .{ .nonblocking = false } };
+    }
+
+    fn dir(self: HostHandle) std.Io.Dir {
         return .{ .handle = self.raw };
     }
 
-    fn dir(self: HostHandle) std.fs.Dir {
-        return .{ .fd = self.raw };
-    }
-
     fn close(self: HostHandle) void {
-        switch (self.kind) {
-            .file => self.file().close(),
-            .dir => {
-                var d = self.dir();
-                d.close();
-            },
+        if (builtin.os.tag == .windows) {
+            _ = windows.CloseHandle(self.raw);
+        } else {
+            _ = std.c.close(self.raw);
         }
     }
 
-    fn stat(self: HostHandle) !std.fs.File.Stat {
+    fn stat(self: HostHandle, io: std.Io) !std.Io.File.Stat {
         return switch (self.kind) {
-            .file => self.file().stat(),
-            .dir => self.dir().stat(),
+            .file => self.file().stat(io),
+            .dir => self.dir().stat(io),
         };
     }
 
@@ -177,7 +175,9 @@ const HostHandle = struct {
         const duplicated = if (builtin.os.tag == .windows) blk: {
             const proc = windows.GetCurrentProcess();
             var dup_handle: windows.HANDLE = undefined;
-            if (kernel32.DuplicateHandle(proc, self.raw, proc, &dup_handle, 0, 0, windows.DUPLICATE_SAME_ACCESS) == 0) {
+            // Our own DuplicateHandle extern in `platform` — 0.16 trimmed it
+            // out of `std.os.windows.kernel32`.
+            if (platform.DuplicateHandle(proc, self.raw, proc, &dup_handle, 0, windows.BOOL.FALSE, platform.DUPLICATE_SAME_ACCESS) == windows.BOOL.FALSE) {
                 switch (windows.GetLastError()) {
                     .NOT_ENOUGH_MEMORY => return error.SystemResources,
                     .ACCESS_DENIED => return error.AccessDenied,
@@ -185,7 +185,11 @@ const HostHandle = struct {
                 }
             }
             break :blk dup_handle;
-        } else try posix.dup(self.raw);
+        } else blk: {
+            const rc = std.c.dup(self.raw);
+            if (rc < 0) return error.Unexpected;
+            break :blk rc;
+        };
 
         return .{
             .raw = duplicated,
@@ -269,7 +273,7 @@ pub const WasiContext = struct {
     caps: Capabilities = .{}, // deny-by-default
 
     // Stdio override: per-fd custom handle (null = use process default)
-    stdio_handles: [3]?std.fs.File.Handle = .{ null, null, null },
+    stdio_handles: [3]?std.Io.File.Handle = .{ null, null, null },
     stdio_ownership: [3]Ownership = .{ .borrow, .borrow, .borrow },
 
     pub fn init(alloc: Allocator) WasiContext {
@@ -283,9 +287,12 @@ pub const WasiContext = struct {
         };
     }
 
-    fn closeHandle(handle: std.fs.File.Handle) void {
-        const f = std.fs.File{ .handle = handle };
-        f.close();
+    fn closeHandle(handle: std.Io.File.Handle) void {
+        if (builtin.os.tag == .windows) {
+            _ = windows.CloseHandle(handle);
+        } else {
+            _ = std.c.close(handle);
+        }
     }
 
     pub fn deinit(self: *WasiContext) void {
@@ -316,31 +323,30 @@ pub const WasiContext = struct {
         try self.environ_vals.append(self.alloc, val);
     }
 
-    pub fn addPreopen(self: *WasiContext, wasi_fd: i32, path: []const u8, host_dir: std.fs.Dir) !void {
+    pub fn addPreopen(self: *WasiContext, wasi_fd: i32, path: []const u8, host_dir: std.Io.Dir) !void {
         try self.preopens.append(self.alloc, .{
             .wasi_fd = wasi_fd,
             .path = path,
             .host = .{
-                .raw = host_dir.fd,
+                .raw = host_dir.handle,
                 .kind = .dir,
             },
         });
     }
 
-    pub fn addPreopenPath(self: *WasiContext, wasi_fd: i32, guest_path: []const u8, host_path: []const u8) !void {
-        const dir = if (std.fs.path.isAbsolute(host_path))
-            try std.fs.openDirAbsolute(host_path, .{ .access_sub_paths = true, .iterate = true })
+    pub fn addPreopenPath(self: *WasiContext, io: std.Io, wasi_fd: i32, guest_path: []const u8, host_path: []const u8) !void {
+        // Cross-platform via `std.Io.Dir.openDir` — Windows gets real support,
+        // POSIX reduces to the same openat+O_DIRECTORY under the hood.
+        const opened = if (std.fs.path.isAbsolute(host_path))
+            try std.Io.Dir.openDirAbsolute(io, host_path, .{ .access_sub_paths = true, .iterate = true })
         else
-            try std.fs.cwd().openDir(host_path, .{ .access_sub_paths = true, .iterate = true });
-        errdefer {
-            var owned = dir;
-            owned.close();
-        }
-        try self.addPreopen(wasi_fd, guest_path, dir);
+            try std.Io.Dir.cwd().openDir(io, host_path, .{ .access_sub_paths = true, .iterate = true });
+        errdefer opened.close(io);
+        try self.addPreopen(wasi_fd, guest_path, opened);
     }
 
     /// Register an existing host file descriptor as a preopened entry.
-    pub fn addPreopenFd(self: *WasiContext, wasi_fd: i32, guest_path: []const u8, host_fd: std.fs.File.Handle, kind: HandleKind, ownership: Ownership) !void {
+    pub fn addPreopenFd(self: *WasiContext, wasi_fd: i32, guest_path: []const u8, host_fd: std.Io.File.Handle, kind: HandleKind, ownership: Ownership) !void {
         try self.preopens.append(self.alloc, .{
             .wasi_fd = wasi_fd,
             .path = guest_path,
@@ -350,7 +356,7 @@ pub const WasiContext = struct {
     }
 
     /// Override a stdio file descriptor (0=stdin, 1=stdout, 2=stderr).
-    pub fn setStdioFd(self: *WasiContext, fd: i32, host_fd: std.fs.File.Handle, ownership: Ownership) void {
+    pub fn setStdioFd(self: *WasiContext, fd: i32, host_fd: std.Io.File.Handle, ownership: Ownership) void {
         const idx: usize = @intCast(fd);
         if (idx >= 3) return;
         // Close previous owned override if any
@@ -362,11 +368,11 @@ pub const WasiContext = struct {
     }
 
     /// Resolve a stdio fd (0-2) to a File, using override if set.
-    pub fn stdioFile(self: *const WasiContext, fd: i32) ?std.fs.File {
+    pub fn stdioFile(self: *const WasiContext, fd: i32) ?std.Io.File {
         if (fd < 0 or fd > 2) return null;
         const idx: usize = @intCast(fd);
         if (self.stdio_handles[idx]) |handle| {
-            return .{ .handle = handle };
+            return .{ .handle = handle, .flags = .{ .nonblocking = false } };
         }
         return defaultStdioFile(fd);
     }
@@ -384,7 +390,7 @@ pub const WasiContext = struct {
         return null;
     }
 
-    fn getHostFd(self: *WasiContext, wasi_fd: i32) ?std.fs.File.Handle {
+    fn getHostFd(self: *WasiContext, wasi_fd: i32) ?std.Io.File.Handle {
         if (self.stdioFile(wasi_fd)) |file| return file.handle;
         const host = self.getHostHandle(wasi_fd) orelse return null;
         return host.raw;
@@ -397,19 +403,19 @@ pub const WasiContext = struct {
         return &self.fd_table.items[idx];
     }
 
-    fn resolveFile(self: *WasiContext, wasi_fd: i32) ?std.fs.File {
+    fn resolveFile(self: *WasiContext, wasi_fd: i32) ?std.Io.File {
         return if (self.stdioFile(wasi_fd)) |file|
             file
         else if (self.getHostHandle(wasi_fd)) |host|
-            .{ .handle = host.raw }
+            .{ .handle = host.raw, .flags = .{ .nonblocking = false } }
         else
             null;
     }
 
-    fn resolveDir(self: *WasiContext, wasi_fd: i32) ?std.fs.Dir {
+    fn resolveDir(self: *WasiContext, wasi_fd: i32) ?std.Io.Dir {
         const host = self.getHostHandle(wasi_fd) orelse return null;
         if (host.kind != .dir) return null;
-        return .{ .fd = host.raw };
+        return .{ .handle = host.raw };
     }
 
     /// Allocate a new WASI fd. All preopens must be added before the first call.
@@ -484,16 +490,73 @@ inline fn hasCap(vm: *Vm, comptime field: std.meta.FieldEnum(Capabilities)) bool
 
 /// Default stdio mapping (process stdin/stdout/stderr). Used as fallback
 /// when no WasiContext is available or no override is set.
-fn defaultStdioFile(fd: i32) ?std.fs.File {
+fn defaultStdioFile(fd: i32) ?std.Io.File {
     return switch (fd) {
-        0 => std.fs.File.stdin(),
-        1 => std.fs.File.stdout(),
-        2 => std.fs.File.stderr(),
+        0 => std.Io.File.stdin(),
+        1 => std.Io.File.stdout(),
+        2 => std.Io.File.stderr(),
         else => null,
     };
 }
 
-fn wasiFiletypeFromKind(kind: std.fs.File.Kind) u8 {
+/// Copy path into a stack buffer and append a null sentinel. Returns a
+/// slice of the prefix so callers can pass `path_z.ptr` (typed as
+/// [*:0]const u8) to libc functions.
+fn pathToZ(buf: *[std.posix.PATH_MAX]u8, path: []const u8) error{NameTooLong}![:0]const u8 {
+    if (path.len >= buf.len) return error.NameTooLong;
+    @memcpy(buf[0..path.len], path);
+    buf[path.len] = 0;
+    return buf[0..path.len :0];
+}
+
+/// Size of an open regular file via `lseek(SEEK_END)`. Used by test helpers
+/// and the IR cache loader — `std.c.fstat` / `std.posix.Stat` are
+/// inaccessible on Linux in Zig 0.16 (see `fstatatToFileStat` for the
+/// full-stat path). Returns null on error or unseekable fd.
+pub fn fdSize(fd: posix.fd_t) ?u64 {
+    const end = platform.pfdSeek(fd, 0, posix.SEEK.END);
+    if (end < 0) return null;
+    _ = platform.pfdSeek(fd, 0, posix.SEEK.SET);
+    return @intCast(end);
+}
+
+/// Read libc errno and map to a WASI Errno.
+fn cErrnoToWasi() Errno {
+    const e: std.posix.E = @enumFromInt(std.c._errno().*);
+    return switch (e) {
+        .ACCES => .ACCES,
+        .AGAIN => .AGAIN,
+        .BADF => .BADF,
+        .BUSY => .BUSY,
+        .EXIST => .EXIST,
+        .FAULT => .FAULT,
+        .FBIG => .FBIG,
+        .INTR => .INTR,
+        .INVAL => .INVAL,
+        .IO => .IO,
+        .ISDIR => .ISDIR,
+        .LOOP => .LOOP,
+        .MFILE => .MFILE,
+        .NAMETOOLONG => .NAMETOOLONG,
+        .NFILE => .NFILE,
+        .NOENT => .NOENT,
+        .NOMEM => .NOMEM,
+        .NOSPC => .NOSPC,
+        .NOTDIR => .NOTDIR,
+        .NOTEMPTY => .NOTEMPTY,
+        .OPNOTSUPP => .NOTSUP,
+        .NXIO => .NXIO,
+        .PERM => .PERM,
+        .PIPE => .PIPE,
+        .RANGE => .RANGE,
+        .ROFS => .ROFS,
+        .SPIPE => .SPIPE,
+        .XDEV => .XDEV,
+        else => .IO,
+    };
+}
+
+fn wasiFiletypeFromKind(kind: std.Io.File.Kind) u8 {
     return switch (kind) {
         .directory => @intFromEnum(Filetype.DIRECTORY),
         .sym_link => @intFromEnum(Filetype.SYMBOLIC_LINK),
@@ -511,6 +574,89 @@ fn wasiNanos(value: i128) u64 {
         break :blk if (value < 0) std.math.minInt(i64) else std.math.maxInt(i64);
     };
     return @bitCast(clamped);
+}
+
+// Cross-platform fstatat wrapper. Zig 0.16 only binds `std.c.fstatat` on
+// Darwin/BSD (Linux is `{}`), and `std.posix.Stat` is `void` on Linux
+// because stdlib uses `statx` there. Define a platform-neutral FileStat with
+// just the WASI-filestat fields, then fill it via the best syscall per OS.
+const FileStat = struct {
+    ino: u64,
+    nlink: u64,
+    size: u64,
+    filetype: u8,
+    atim_ns: i128,
+    mtim_ns: i128,
+    ctim_ns: i128,
+};
+
+fn fstatatToFileStat(dirfd: posix.fd_t, path_z: [*:0]const u8, nofollow: u32) !FileStat {
+    if (builtin.os.tag == .linux) {
+        const linux = std.os.linux;
+        var sx: linux.Statx = undefined;
+        const STATX_BASIC_STATS: u32 = 0x7ff;
+        const rc = linux.statx(dirfd, path_z, nofollow, @bitCast(STATX_BASIC_STATS), &sx);
+        switch (posix.errno(rc)) {
+            .SUCCESS => {},
+            else => return error.Stat,
+        }
+        const filetype: u8 = blk: {
+            const mode = sx.mode;
+            const S_IFMT: u16 = 0o170000;
+            const kind = mode & S_IFMT;
+            if (kind == 0o040000) break :blk @intFromEnum(Filetype.DIRECTORY);
+            if (kind == 0o120000) break :blk @intFromEnum(Filetype.SYMBOLIC_LINK);
+            if (kind == 0o100000) break :blk @intFromEnum(Filetype.REGULAR_FILE);
+            if (kind == 0o060000) break :blk @intFromEnum(Filetype.BLOCK_DEVICE);
+            if (kind == 0o020000) break :blk @intFromEnum(Filetype.CHARACTER_DEVICE);
+            break :blk @intFromEnum(Filetype.UNKNOWN);
+        };
+        return .{
+            .ino = sx.ino,
+            .nlink = sx.nlink,
+            .size = sx.size,
+            .filetype = filetype,
+            .atim_ns = @as(i128, sx.atime.sec) * 1_000_000_000 + sx.atime.nsec,
+            .mtim_ns = @as(i128, sx.mtime.sec) * 1_000_000_000 + sx.mtime.nsec,
+            .ctim_ns = @as(i128, sx.ctime.sec) * 1_000_000_000 + sx.ctime.nsec,
+        };
+    }
+    // Darwin/BSD: std.c.fstatat + system.Stat.
+    var st: std.c.Stat = undefined;
+    if (std.c.fstatat(dirfd, path_z, &st, nofollow) != 0) return error.Stat;
+    const S = posix.S;
+    const filetype: u8 = if (S.ISDIR(st.mode))
+        @intFromEnum(Filetype.DIRECTORY)
+    else if (S.ISLNK(st.mode))
+        @intFromEnum(Filetype.SYMBOLIC_LINK)
+    else if (S.ISREG(st.mode))
+        @intFromEnum(Filetype.REGULAR_FILE)
+    else if (S.ISBLK(st.mode))
+        @intFromEnum(Filetype.BLOCK_DEVICE)
+    else if (S.ISCHR(st.mode))
+        @intFromEnum(Filetype.CHARACTER_DEVICE)
+    else
+        @intFromEnum(Filetype.UNKNOWN);
+    const at = st.atime();
+    const mt = st.mtime();
+    const ct = st.ctime();
+    return .{
+        .ino = @intCast(st.ino),
+        .nlink = @intCast(st.nlink),
+        .size = @bitCast(@as(i64, @intCast(st.size))),
+        .filetype = filetype,
+        .atim_ns = @as(i128, at.sec) * 1_000_000_000 + at.nsec,
+        .mtim_ns = @as(i128, mt.sec) * 1_000_000_000 + mt.nsec,
+        .ctim_ns = @as(i128, ct.sec) * 1_000_000_000 + ct.nsec,
+    };
+}
+
+fn wasiTsNanos(ts: std.Io.Timestamp) u64 {
+    return wasiNanos(@as(i128, ts.nanoseconds));
+}
+
+fn wasiOptTsNanos(ts: ?std.Io.Timestamp) u64 {
+    return if (ts) |t| wasiTsNanos(t) else 0;
 }
 
 // ============================================================
@@ -648,14 +794,8 @@ pub fn clock_time_get(ctx: *anyopaque, _: usize) anyerror!void {
     const memory = try vm.getMemory(0);
 
     const ts: i128 = switch (@as(ClockId, @enumFromInt(clock_id))) {
-        .REALTIME => blk: {
-            const t = std.time.nanoTimestamp();
-            break :blk t;
-        },
-        .MONOTONIC, .PROCESS_CPUTIME, .THREAD_CPUTIME => blk: {
-            const t = std.time.nanoTimestamp();
-            break :blk t;
-        },
+        .REALTIME => std.Io.Timestamp.now(vm.io, .real).nanoseconds,
+        .MONOTONIC, .PROCESS_CPUTIME, .THREAD_CPUTIME => std.Io.Timestamp.now(vm.io, .awake).nanoseconds,
     };
     const nanos: u64 = @intCast(@as(u128, @bitCast(ts)) & 0xFFFFFFFFFFFFFFFF);
     try memory.write(u64, time_ptr, 0, nanos);
@@ -709,7 +849,7 @@ pub fn fd_fdstat_get(ctx: *anyopaque, _: usize) anyerror!void {
         blk: {
             const host = wasi.getHostHandle(fd) orelse break :blk @intFromEnum(Filetype.UNKNOWN);
             if (host.kind == .dir) break :blk @intFromEnum(Filetype.DIRECTORY);
-            const stat = host.stat() catch break :blk @intFromEnum(Filetype.UNKNOWN);
+            const stat = host.stat(vm.io) catch break :blk @intFromEnum(Filetype.UNKNOWN);
             break :blk wasiFiletypeFromKind(stat.kind);
         }
     else
@@ -739,7 +879,7 @@ pub fn fd_filestat_get(ctx: *anyopaque, _: usize) anyerror!void {
         return;
     };
 
-    const stat = file.stat() catch |err| {
+    const stat = file.stat(vm.io) catch |err| {
         try pushErrno(vm, toWasiErrno(err));
         return;
     };
@@ -835,10 +975,12 @@ pub fn fd_read(ctx: *anyopaque, _: usize) anyerror!void {
         if (iov_ptr + iov_len > data.len) return error.OutOfBoundsMemoryAccess;
 
         const buf = data[iov_ptr .. iov_ptr + iov_len];
-        const n = file.read(buf) catch |err| {
-            try pushErrno(vm, toWasiErrno(err));
+        const rc = platform.pfdRead(file.handle, buf[0..buf.len]);
+        if (rc < 0) {
+            try pushErrno(vm, cErrnoToWasi());
             return;
-        };
+        }
+        const n: usize = @intCast(rc);
         total += @intCast(n);
         if (n < buf.len) break;
     }
@@ -869,39 +1011,19 @@ pub fn fd_seek(ctx: *anyopaque, _: usize) anyerror!void {
         return;
     };
 
-    switch (@as(Whence, @enumFromInt(whence_val))) {
-        .SET => file.seekTo(@bitCast(offset)) catch |err| {
-            try pushErrno(vm, toWasiErrno(err));
-            return;
-        },
-        .CUR => file.seekBy(offset) catch |err| {
-            try pushErrno(vm, toWasiErrno(err));
-            return;
-        },
-        .END => {
-            const end_pos = file.getEndPos() catch |err| {
-                try pushErrno(vm, toWasiErrno(err));
-                return;
-            };
-            const new_pos_i128 = @as(i128, @intCast(end_pos)) + offset;
-            if (new_pos_i128 < 0) {
-                try pushErrno(vm, .INVAL);
-                return;
-            }
-            file.seekTo(@intCast(new_pos_i128)) catch |err| {
-                try pushErrno(vm, toWasiErrno(err));
-                return;
-            };
-        },
+    const whence_c: c_int = switch (@as(Whence, @enumFromInt(whence_val))) {
+        .SET => posix.SEEK.SET,
+        .CUR => posix.SEEK.CUR,
+        .END => posix.SEEK.END,
+    };
+    const rc = platform.pfdSeek(file.handle, @intCast(offset), whence_c);
+    if (rc < 0) {
+        try pushErrno(vm, cErrnoToWasi());
+        return;
     }
 
-    const new_pos = file.getPos() catch |err| {
-        try pushErrno(vm, toWasiErrno(err));
-        return;
-    };
-
     const memory = try vm.getMemory(0);
-    try memory.write(u64, newoffset_ptr, 0, new_pos);
+    try memory.write(u64, newoffset_ptr, 0, @as(u64, @bitCast(rc)));
     try pushErrno(vm, .SUCCESS);
 }
 
@@ -942,22 +1064,20 @@ pub fn fd_write(ctx: *anyopaque, _: usize) anyerror!void {
         if (wasi) |w| {
             if (w.getFdEntry(fd)) |entry| {
                 if (entry.append) {
-                    const end_pos = file.getEndPos() catch |err| {
-                        try pushErrno(vm, toWasiErrno(err));
+                    if (platform.pfdSeek(file.handle, 0, posix.SEEK.END) < 0) {
+                        try pushErrno(vm, cErrnoToWasi());
                         return;
-                    };
-                    file.seekTo(end_pos) catch |err| {
-                        try pushErrno(vm, toWasiErrno(err));
-                        return;
-                    };
+                    }
                 }
             }
         }
 
-        const n = file.write(buf) catch |err| {
-            try pushErrno(vm, toWasiErrno(err));
+        const wrc = platform.pfdWrite(file.handle, buf);
+        if (wrc < 0) {
+            try pushErrno(vm, cErrnoToWasi());
             return;
-        };
+        }
+        const n: usize = @intCast(wrc);
         total += @intCast(n);
         if (n < buf.len) break;
     }
@@ -986,13 +1106,14 @@ pub fn fd_tell(ctx: *anyopaque, _: usize) anyerror!void {
         return;
     };
 
-    const cur = file.getPos() catch |err| {
-        try pushErrno(vm, toWasiErrno(err));
+    const cur_rc = platform.pfdSeek(file.handle, 0, posix.SEEK.CUR);
+    if (cur_rc < 0) {
+        try pushErrno(vm, cErrnoToWasi());
         return;
-    };
+    }
 
     const memory = try vm.getMemory(0);
-    try memory.write(u64, offset_ptr, 0, cur);
+    try memory.write(u64, offset_ptr, 0, @as(u64, @bitCast(cur_rc)));
     try pushErrno(vm, .SUCCESS);
 }
 
@@ -1026,7 +1147,7 @@ pub fn fd_readdir(ctx: *anyopaque, _: usize) anyerror!void {
     // Skip entries up to cookie
     var idx: i64 = 0;
     while (idx < cookie) : (idx += 1) {
-        _ = iter.next() catch {
+        _ = iter.next(vm.io) catch {
             try memory.write(u32, bufused_ptr, 0, 0);
             try pushErrno(vm, .SUCCESS);
             return;
@@ -1038,7 +1159,7 @@ pub fn fd_readdir(ctx: *anyopaque, _: usize) anyerror!void {
     var bufused: u32 = 0;
     const DIRENT_HDR: u32 = 24;
     while (true) {
-        const entry = iter.next() catch break;
+        const entry = iter.next(vm.io) catch break;
         if (entry == null) break;
         const e = entry.?;
         const name = e.name;
@@ -1107,15 +1228,15 @@ fn wasiTimesToTimespec(fst_flags: u32, atim_ns: i64, mtim_ns: i64) [2]std.posix.
     return times;
 }
 
-fn wasiTimestamp(fst_flags: u32, set_bit: u32, now_bit: u32, provided_ns: i64, fallback_ns: i128) i128 {
-    if (fst_flags & now_bit != 0) return std.time.nanoTimestamp();
-    if (fst_flags & set_bit != 0) return provided_ns;
-    return fallback_ns;
+fn wasiSetTimestamp(fst_flags: u32, set_bit: u32, now_bit: u32, provided_ns: i64, fallback: ?std.Io.Timestamp) std.Io.File.SetTimestamp {
+    if (fst_flags & now_bit != 0) return .now;
+    if (fst_flags & set_bit != 0) return .{ .new = .{ .nanoseconds = @as(i96, @intCast(provided_ns)) } };
+    return std.Io.File.SetTimestamp.init(fallback);
 }
 
 /// Write a WASI filestat struct (64 bytes) from a portable file stat to memory.
-/// Note: nlink is always 1 because std.fs.File.Stat does not expose link count.
-fn writeFilestat(memory: *WasmMemory, ptr: u32, stat: std.fs.File.Stat) !void {
+/// Note: nlink is always 1 because std.Io.File.Stat does not expose link count.
+fn writeFilestat(memory: *WasmMemory, ptr: u32, stat: std.Io.File.Stat) !void {
     const data = memory.memory();
     if (ptr + 64 > data.len) return error.OutOfBoundsMemoryAccess;
     @memset(data[ptr .. ptr + 64], 0);
@@ -1124,43 +1245,30 @@ fn writeFilestat(memory: *WasmMemory, ptr: u32, stat: std.fs.File.Stat) !void {
     data[ptr + 16] = wasiFiletypeFromKind(stat.kind);
     try memory.write(u64, ptr, 24, 1); // nlink unavailable in portable Stat
     try memory.write(u64, ptr, 32, stat.size);
-    try memory.write(u64, ptr, 40, wasiNanos(stat.atime));
-    try memory.write(u64, ptr, 48, wasiNanos(stat.mtime));
-    try memory.write(u64, ptr, 56, wasiNanos(stat.ctime));
+    try memory.write(u64, ptr, 40, wasiOptTsNanos(stat.atime));
+    try memory.write(u64, ptr, 48, wasiTsNanos(stat.mtime));
+    try memory.write(u64, ptr, 56, wasiTsNanos(stat.ctime));
 }
 
 /// Write a WASI filestat struct from a POSIX fstatat result (preserves nlink).
-/// Used on non-Windows for path_filestat_get where fstatat is needed for symlink control.
-fn writeFilestatPosix(memory: *WasmMemory, ptr: u32, stat: posix.Stat) !void {
+/// Write a WASI filestat struct from our cross-platform FileStat (populated
+/// via `fstatatToFileStat`). Used on non-Windows for path_filestat_get where
+/// fstatat is needed for symlink control.
+fn writeFilestatPosix(memory: *WasmMemory, ptr: u32, stat: FileStat) !void {
     if (comptime builtin.os.tag == .windows) @compileError("writeFilestatPosix not available on Windows");
     const data = memory.memory();
     if (ptr + 64 > data.len) return error.OutOfBoundsMemoryAccess;
     @memset(data[ptr .. ptr + 64], 0);
-    try memory.write(u64, ptr, 8, @bitCast(@as(i64, @intCast(stat.ino))));
-    const S = posix.S;
-    data[ptr + 16] = if (S.ISDIR(stat.mode))
-        @intFromEnum(Filetype.DIRECTORY)
-    else if (S.ISLNK(stat.mode))
-        @intFromEnum(Filetype.SYMBOLIC_LINK)
-    else if (S.ISREG(stat.mode))
-        @intFromEnum(Filetype.REGULAR_FILE)
-    else if (S.ISBLK(stat.mode))
-        @intFromEnum(Filetype.BLOCK_DEVICE)
-    else if (S.ISCHR(stat.mode))
-        @intFromEnum(Filetype.CHARACTER_DEVICE)
-    else
-        @intFromEnum(Filetype.UNKNOWN);
-    try memory.write(u64, ptr, 24, @bitCast(@as(i64, @intCast(stat.nlink))));
-    try memory.write(u64, ptr, 32, @bitCast(@as(i64, @intCast(stat.size))));
-    const at = stat.atime();
-    const mt = stat.mtime();
-    const ct = stat.ctime();
-    try memory.write(u64, ptr, 40, @bitCast(@as(i64, at.sec) * 1_000_000_000 + at.nsec));
-    try memory.write(u64, ptr, 48, @bitCast(@as(i64, mt.sec) * 1_000_000_000 + mt.nsec));
-    try memory.write(u64, ptr, 56, @bitCast(@as(i64, ct.sec) * 1_000_000_000 + ct.nsec));
+    try memory.write(u64, ptr, 8, stat.ino);
+    data[ptr + 16] = stat.filetype;
+    try memory.write(u64, ptr, 24, stat.nlink);
+    try memory.write(u64, ptr, 32, stat.size);
+    try memory.write(u64, ptr, 40, wasiNanos(stat.atim_ns));
+    try memory.write(u64, ptr, 48, wasiNanos(stat.mtim_ns));
+    try memory.write(u64, ptr, 56, wasiNanos(stat.ctim_ns));
 }
 
-fn wasiFiletype(kind: std.fs.Dir.Entry.Kind) u8 {
+fn wasiFiletype(kind: std.Io.File.Kind) u8 {
     return switch (kind) {
         .directory => @intFromEnum(Filetype.DIRECTORY),
         .sym_link => @intFromEnum(Filetype.SYMBOLIC_LINK),
@@ -1199,7 +1307,7 @@ pub fn path_filestat_get(ctx: *anyopaque, _: usize) anyerror!void {
     const path = data[path_ptr .. path_ptr + path_len];
     if (comptime builtin.os.tag == .windows) {
         // Windows: Dir.statFile always follows symlinks (no lstat equivalent)
-        const stat = dir.statFile(path) catch |err| {
+        const stat = dir.statFile(vm.io, path, .{}) catch |err| {
             try pushErrno(vm, toWasiErrno(err));
             return;
         };
@@ -1207,8 +1315,13 @@ pub fn path_filestat_get(ctx: *anyopaque, _: usize) anyerror!void {
     } else {
         // POSIX: respect SYMLINK_FOLLOW flag via fstatat (preserves nlink, mode)
         const nofollow: u32 = if (flags & 0x01 == 0) posix.AT.SYMLINK_NOFOLLOW else 0;
-        const stat = posix.fstatat(dir.fd, path, nofollow) catch |err| {
-            try pushErrno(vm, toWasiErrno(err));
+        var path_buf: [std.posix.PATH_MAX]u8 = undefined;
+        const path_z = pathToZ(&path_buf, path) catch {
+            try pushErrno(vm, .NAMETOOLONG);
+            return;
+        };
+        const stat = fstatatToFileStat(dir.handle, path_z.ptr, nofollow) catch {
+            try pushErrno(vm, cErrnoToWasi());
             return;
         };
         try writeFilestatPosix(memory, filestat_ptr, stat);
@@ -1245,7 +1358,7 @@ pub fn path_open(ctx: *anyopaque, _: usize) anyerror!void {
     const data = memory.memory();
     if (path_ptr + path_len > data.len) return error.OutOfBoundsMemoryAccess;
     const path = data[path_ptr .. path_ptr + path_len];
-    const dir_fd = dir.fd;
+    const dir_fd = dir.handle;
 
     if (builtin.os.tag == .windows) {
         const want_directory = oflags & 0x02 != 0;
@@ -1255,30 +1368,26 @@ pub fn path_open(ctx: *anyopaque, _: usize) anyerror!void {
         const want_append = fdflags & 0x01 != 0;
 
         const new_fd = if (want_directory) blk: {
-            const opened_dir = dir.openDir(path, .{
+            const opened_dir = dir.openDir(vm.io, path, .{
                 .access_sub_paths = true,
                 .iterate = true,
-                .no_follow = dirflags & 0x01 == 0,
+                .follow_symlinks = dirflags & 0x01 != 0,
             }) catch |err| {
                 try pushErrno(vm, toWasiErrno(err));
                 return;
             };
-            errdefer {
-                var owned = opened_dir;
-                owned.close();
-            }
+            errdefer opened_dir.close(vm.io);
             break :blk wasi.allocFd(.{
-                .raw = opened_dir.fd,
+                .raw = opened_dir.handle,
                 .kind = .dir,
             }, false) catch {
-                var owned = opened_dir;
-                owned.close();
+                opened_dir.close(vm.io);
                 try pushErrno(vm, .NOMEM);
                 return;
             };
         } else blk: {
             var opened_file = if (want_create)
-                dir.createFile(path, .{
+                dir.createFile(vm.io, path, .{
                     .read = true,
                     .truncate = want_truncate,
                     .exclusive = want_exclusive,
@@ -1287,14 +1396,14 @@ pub fn path_open(ctx: *anyopaque, _: usize) anyerror!void {
                     return;
                 }
             else
-                dir.openFile(path, .{ .mode = .read_write }) catch |err| {
+                dir.openFile(vm.io, path, .{ .mode = .read_write }) catch |err| {
                     try pushErrno(vm, toWasiErrno(err));
                     return;
                 };
-            errdefer opened_file.close();
+            errdefer opened_file.close(vm.io);
 
             if (!want_create and want_truncate) {
-                opened_file.setEndPos(0) catch |err| {
+                opened_file.setLength(vm.io, 0) catch |err| {
                     try pushErrno(vm, toWasiErrno(err));
                     return;
                 };
@@ -1304,7 +1413,7 @@ pub fn path_open(ctx: *anyopaque, _: usize) anyerror!void {
                 .raw = opened_file.handle,
                 .kind = .file,
             }, want_append) catch {
-                opened_file.close();
+                opened_file.close(vm.io);
                 try pushErrno(vm, .NOMEM);
                 return;
             };
@@ -1353,7 +1462,7 @@ pub fn path_open(ctx: *anyopaque, _: usize) anyerror!void {
                 .raw = ro_fd,
                 .kind = if (flags.DIRECTORY) .dir else .file,
             }, flags.APPEND) catch {
-                posix.close(ro_fd);
+                platform.pfdClose(ro_fd);
                 try pushErrno(vm, .NOMEM);
                 return;
             };
@@ -1371,7 +1480,7 @@ pub fn path_open(ctx: *anyopaque, _: usize) anyerror!void {
         .raw = host_fd,
         .kind = if (flags.DIRECTORY) .dir else .file,
     }, flags.APPEND) catch {
-        posix.close(host_fd);
+        platform.pfdClose(host_fd);
         try pushErrno(vm, .NOMEM);
         return;
     };
@@ -1408,7 +1517,7 @@ pub fn random_get(ctx: *anyopaque, _: usize) anyerror!void {
 
     if (buf_ptr + buf_len > data.len) return error.OutOfBoundsMemoryAccess;
 
-    std.crypto.random.bytes(data[buf_ptr .. buf_ptr + buf_len]);
+    vm.io.random(data[buf_ptr .. buf_ptr + buf_len]);
 
     try pushErrno(vm, .SUCCESS);
 }
@@ -1452,10 +1561,18 @@ pub fn fd_datasync(ctx: *anyopaque, _: usize) anyerror!void {
     };
 
     if (wasi.getHostFd(fd)) |host_fd| {
-        posix.fdatasync(host_fd) catch |err| {
-            try pushErrno(vm, toWasiErrno(err));
-            return;
-        };
+        if (builtin.os.tag == .windows) {
+            // FlushFileBuffers handles both data and metadata sync on Windows.
+            if (platform.FlushFileBuffers(host_fd) == windows.BOOL.FALSE) {
+                try pushErrno(vm, .IO);
+                return;
+            }
+        } else {
+            if (std.c.fdatasync(host_fd) != 0) {
+                try pushErrno(vm, cErrnoToWasi());
+                return;
+            }
+        }
         try pushErrno(vm, .SUCCESS);
     } else {
         try pushErrno(vm, .BADF);
@@ -1480,10 +1597,17 @@ pub fn fd_sync(ctx: *anyopaque, _: usize) anyerror!void {
     };
 
     if (wasi.getHostFd(fd)) |host_fd| {
-        posix.fsync(host_fd) catch |err| {
-            try pushErrno(vm, toWasiErrno(err));
-            return;
-        };
+        if (builtin.os.tag == .windows) {
+            if (platform.FlushFileBuffers(host_fd) == windows.BOOL.FALSE) {
+                try pushErrno(vm, .IO);
+                return;
+            }
+        } else {
+            if (std.c.fsync(host_fd) != 0) {
+                try pushErrno(vm, cErrnoToWasi());
+                return;
+            }
+        }
         try pushErrno(vm, .SUCCESS);
     } else {
         try pushErrno(vm, .BADF);
@@ -1514,10 +1638,24 @@ pub fn path_create_directory(ctx: *anyopaque, _: usize) anyerror!void {
     if (path_ptr + path_len > data.len) return error.OutOfBoundsMemoryAccess;
     const path = data[path_ptr .. path_ptr + path_len];
 
-    posix.mkdirat(host_fd, path, 0o777) catch |err| {
-        try pushErrno(vm, toWasiErrno(err));
+    if (builtin.os.tag == .windows) {
+        var dir = std.Io.Dir{ .handle = host_fd };
+        dir.createDir(vm.io, path, .default_dir) catch |err| {
+            try pushErrno(vm, toWasiErrno(err));
+            return;
+        };
+        try pushErrno(vm, .SUCCESS);
+        return;
+    }
+    var path_buf: [std.posix.PATH_MAX]u8 = undefined;
+    const path_z = pathToZ(&path_buf, path) catch {
+        try pushErrno(vm, .NAMETOOLONG);
         return;
     };
+    if (std.c.mkdirat(host_fd, path_z.ptr, 0o777) != 0) {
+        try pushErrno(vm, cErrnoToWasi());
+        return;
+    }
     try pushErrno(vm, .SUCCESS);
 }
 
@@ -1545,10 +1683,24 @@ pub fn path_remove_directory(ctx: *anyopaque, _: usize) anyerror!void {
     if (path_ptr + path_len > data.len) return error.OutOfBoundsMemoryAccess;
     const path = data[path_ptr .. path_ptr + path_len];
 
-    posix.unlinkat(host_fd, path, posix.AT.REMOVEDIR) catch |err| {
-        try pushErrno(vm, toWasiErrno(err));
+    if (builtin.os.tag == .windows) {
+        var dir = std.Io.Dir{ .handle = host_fd };
+        dir.deleteDir(vm.io, path) catch |err| {
+            try pushErrno(vm, toWasiErrno(err));
+            return;
+        };
+        try pushErrno(vm, .SUCCESS);
+        return;
+    }
+    var path_buf: [std.posix.PATH_MAX]u8 = undefined;
+    const path_z = pathToZ(&path_buf, path) catch {
+        try pushErrno(vm, .NAMETOOLONG);
         return;
     };
+    if (std.c.unlinkat(host_fd, path_z.ptr, @intCast(posix.AT.REMOVEDIR)) != 0) {
+        try pushErrno(vm, cErrnoToWasi());
+        return;
+    }
     try pushErrno(vm, .SUCCESS);
 }
 
@@ -1576,10 +1728,24 @@ pub fn path_unlink_file(ctx: *anyopaque, _: usize) anyerror!void {
     if (path_ptr + path_len > data.len) return error.OutOfBoundsMemoryAccess;
     const path = data[path_ptr .. path_ptr + path_len];
 
-    posix.unlinkat(host_fd, path, 0) catch |err| {
-        try pushErrno(vm, toWasiErrno(err));
+    if (builtin.os.tag == .windows) {
+        var dir = std.Io.Dir{ .handle = host_fd };
+        dir.deleteFile(vm.io, path) catch |err| {
+            try pushErrno(vm, toWasiErrno(err));
+            return;
+        };
+        try pushErrno(vm, .SUCCESS);
+        return;
+    }
+    var path_buf: [std.posix.PATH_MAX]u8 = undefined;
+    const path_z = pathToZ(&path_buf, path) catch {
+        try pushErrno(vm, .NAMETOOLONG);
         return;
     };
+    if (std.c.unlinkat(host_fd, path_z.ptr, 0) != 0) {
+        try pushErrno(vm, cErrnoToWasi());
+        return;
+    }
     try pushErrno(vm, .SUCCESS);
 }
 
@@ -1616,10 +1782,30 @@ pub fn path_rename(ctx: *anyopaque, _: usize) anyerror!void {
     const old_path = data[old_path_ptr .. old_path_ptr + old_path_len];
     const new_path = data[new_path_ptr .. new_path_ptr + new_path_len];
 
-    posix.renameat(old_host_fd, old_path, new_host_fd, new_path) catch |err| {
-        try pushErrno(vm, toWasiErrno(err));
+    if (builtin.os.tag == .windows) {
+        var old_dir = std.Io.Dir{ .handle = old_host_fd };
+        const new_dir = std.Io.Dir{ .handle = new_host_fd };
+        old_dir.rename(old_path, new_dir, new_path, vm.io) catch |err| {
+            try pushErrno(vm, toWasiErrno(err));
+            return;
+        };
+        try pushErrno(vm, .SUCCESS);
+        return;
+    }
+    var old_buf: [std.posix.PATH_MAX]u8 = undefined;
+    var new_buf: [std.posix.PATH_MAX]u8 = undefined;
+    const old_z = pathToZ(&old_buf, old_path) catch {
+        try pushErrno(vm, .NAMETOOLONG);
         return;
     };
+    const new_z = pathToZ(&new_buf, new_path) catch {
+        try pushErrno(vm, .NAMETOOLONG);
+        return;
+    };
+    if (std.c.renameat(old_host_fd, old_z.ptr, new_host_fd, new_z.ptr) != 0) {
+        try pushErrno(vm, cErrnoToWasi());
+        return;
+    }
     try pushErrno(vm, .SUCCESS);
 }
 
@@ -1674,12 +1860,12 @@ pub fn poll_oneoff(ctx: *anyopaque, _: usize) anyerror!void {
 
             if (clock_flags & 0x01 != 0) {
                 // ABSTIME: compute relative from current time
-                const now_ns = @as(u64, @bitCast(@as(i64, @intCast(std.time.nanoTimestamp()))));
+                const now_ns = @as(u64, @bitCast(@as(i64, @intCast(std.Io.Timestamp.now(vm.io, .real).nanoseconds))));
                 if (timeout > now_ns) {
-                    std.Thread.sleep(timeout - now_ns);
+                    vm.io.sleep(.{ .nanoseconds = @intCast(timeout - now_ns) }, .awake) catch {};
                 }
             } else {
-                std.Thread.sleep(timeout);
+                vm.io.sleep(.{ .nanoseconds = @intCast(timeout) }, .awake) catch {};
             }
             // error = SUCCESS (0, already zeroed)
         } else {
@@ -1799,7 +1985,7 @@ pub fn fd_filestat_set_size(ctx: *anyopaque, _: usize) anyerror!void {
             try pushErrno(vm, .BADF);
             return;
         };
-        file.setEndPos(@bitCast(size)) catch |err| {
+        file.setLength(vm.io, @bitCast(size)) catch |err| {
             try pushErrno(vm, toWasiErrno(err));
             return;
         };
@@ -1813,10 +1999,10 @@ pub fn fd_filestat_set_size(ctx: *anyopaque, _: usize) anyerror!void {
     };
 
     if (wasi.getHostFd(fd)) |host_fd| {
-        posix.ftruncate(host_fd, @bitCast(size)) catch |err| {
-            try pushErrno(vm, toWasiErrno(err));
+        if (std.c.ftruncate(host_fd, @bitCast(size)) != 0) {
+            try pushErrno(vm, cErrnoToWasi());
             return;
-        };
+        }
         try pushErrno(vm, .SUCCESS);
     } else {
         try pushErrno(vm, .BADF);
@@ -1841,14 +2027,14 @@ pub fn fd_filestat_set_times(ctx: *anyopaque, _: usize) anyerror!void {
             try pushErrno(vm, .BADF);
             return;
         };
-        const stat = file.stat() catch |err| {
+        const stat = file.stat(vm.io) catch |err| {
             try pushErrno(vm, toWasiErrno(err));
             return;
         };
-        file.updateTimes(
-            wasiTimestamp(fst_flags, 0x01, 0x02, atim_ns, stat.atime),
-            wasiTimestamp(fst_flags, 0x04, 0x08, mtim_ns, stat.mtime),
-        ) catch |err| {
+        file.setTimestamps(vm.io, .{
+            .access_timestamp = wasiSetTimestamp(fst_flags, 0x01, 0x02, atim_ns, stat.atime),
+            .modify_timestamp = wasiSetTimestamp(fst_flags, 0x04, 0x08, mtim_ns, stat.mtime),
+        }) catch |err| {
             try pushErrno(vm, toWasiErrno(err));
             return;
         };
@@ -1867,10 +2053,10 @@ pub fn fd_filestat_set_times(ctx: *anyopaque, _: usize) anyerror!void {
     };
 
     const times = wasiTimesToTimespec(fst_flags, atim_ns, mtim_ns);
-    std.posix.futimens(host_fd, &times) catch |err| {
-        try pushErrno(vm, toWasiErrno(err));
+    if (std.c.futimens(host_fd, &times) != 0) {
+        try pushErrno(vm, cErrnoToWasi());
         return;
-    };
+    }
     try pushErrno(vm, .SUCCESS);
 }
 
@@ -1906,7 +2092,7 @@ pub fn fd_pread(ctx: *anyopaque, _: usize) anyerror!void {
             if (iov_ptr + iov_len > data.len) return error.OutOfBoundsMemoryAccess;
 
             const buf = data[iov_ptr .. iov_ptr + iov_len];
-            const n = file.pread(buf, cur_offset) catch |err| {
+            const n = file.readPositionalAll(vm.io, buf, cur_offset) catch |err| {
                 try pushErrno(vm, toWasiErrno(err));
                 return;
             };
@@ -1941,10 +2127,12 @@ pub fn fd_pread(ctx: *anyopaque, _: usize) anyerror!void {
         if (iov_ptr + iov_len > data.len) return error.OutOfBoundsMemoryAccess;
 
         const buf = data[iov_ptr .. iov_ptr + iov_len];
-        const n = posix.pread(host_fd, buf, cur_offset) catch |err| {
-            try pushErrno(vm, toWasiErrno(err));
+        const rc = platform.pfdPread(host_fd, buf, cur_offset);
+        if (rc < 0) {
+            try pushErrno(vm, cErrnoToWasi());
             return;
-        };
+        }
+        const n: usize = @intCast(rc);
         total += @intCast(n);
         cur_offset += n;
         if (n < buf.len) break;
@@ -1986,13 +2174,13 @@ pub fn fd_pwrite(ctx: *anyopaque, _: usize) anyerror!void {
             if (iov_ptr + iov_len > data.len) return error.OutOfBoundsMemoryAccess;
 
             const buf = data[iov_ptr .. iov_ptr + iov_len];
-            const n = file.pwrite(buf, cur_offset) catch |err| {
+            file.writePositionalAll(vm.io, buf, cur_offset) catch |err| {
                 try pushErrno(vm, toWasiErrno(err));
                 return;
             };
+            const n = buf.len;
             total += @intCast(n);
             cur_offset += n;
-            if (n < buf.len) break;
         }
 
         try memory.write(u32, nwritten_ptr, 0, total);
@@ -2021,10 +2209,12 @@ pub fn fd_pwrite(ctx: *anyopaque, _: usize) anyerror!void {
         if (iov_ptr + iov_len > data.len) return error.OutOfBoundsMemoryAccess;
 
         const buf = data[iov_ptr .. iov_ptr + iov_len];
-        const n = posix.pwrite(host_fd, buf, cur_offset) catch |err| {
-            try pushErrno(vm, toWasiErrno(err));
+        const rc = platform.pfdPwrite(host_fd, buf, cur_offset);
+        if (rc < 0) {
+            try pushErrno(vm, cErrnoToWasi());
             return;
-        };
+        }
+        const n: usize = @intCast(rc);
         total += @intCast(n);
         cur_offset += n;
         if (n < buf.len) break;
@@ -2109,9 +2299,14 @@ pub fn fd_renumber(ctx: *anyopaque, _: usize) anyerror!void {
     _ = wasi.closeFd(fd_to);
 
     // Dup host fd and assign to fd_to slot
-    const new_host = (if (builtin.os.tag == .windows) unreachable else posix.dup(from_host)) catch |err| {
-        try pushErrno(vm, toWasiErrno(err));
-        return;
+    const new_host = blk: {
+        if (builtin.os.tag == .windows) unreachable;
+        const rc = std.c.dup(from_host);
+        if (rc < 0) {
+            try pushErrno(vm, cErrnoToWasi());
+            return;
+        }
+        break :blk rc;
     };
 
     // Close old fd_from
@@ -2132,7 +2327,7 @@ pub fn fd_renumber(ctx: *anyopaque, _: usize) anyerror!void {
                     .host = .{ .raw = undefined, .kind = .file }, // placeholder, never accessed
                     .is_open = false,
                 }) catch {
-                    posix.close(new_host);
+                    platform.pfdClose(new_host);
                     try pushErrno(vm, .NOMEM);
                     return;
                 };
@@ -2141,14 +2336,14 @@ pub fn fd_renumber(ctx: *anyopaque, _: usize) anyerror!void {
                 .host = .{ .raw = new_host, .kind = .file },
                 .append = append,
             }) catch {
-                posix.close(new_host);
+                platform.pfdClose(new_host);
                 try pushErrno(vm, .NOMEM);
                 return;
             };
         }
     } else {
         // Can't renumber to a preopened or stdio fd — just close new_host
-        posix.close(new_host);
+        platform.pfdClose(new_host);
         try pushErrno(vm, .BADF);
         return;
     }
@@ -2182,16 +2377,16 @@ pub fn path_filestat_set_times(ctx: *anyopaque, _: usize) anyerror!void {
         const data = memory.memory();
         if (path_ptr + path_len > data.len) return error.OutOfBoundsMemoryAccess;
         const path = data[path_ptr .. path_ptr + path_len];
-        if (dir.openFile(path, .{ .mode = .read_write })) |file| {
-            defer file.close();
-            const stat = file.stat() catch |err| {
+        if (dir.openFile(vm.io, path, .{ .mode = .read_write })) |file| {
+            defer file.close(vm.io);
+            const stat = file.stat(vm.io) catch |err| {
                 try pushErrno(vm, toWasiErrno(err));
                 return;
             };
-            file.updateTimes(
-                wasiTimestamp(fst_flags, 0x01, 0x02, atim_ns, stat.atime),
-                wasiTimestamp(fst_flags, 0x04, 0x08, mtim_ns, stat.mtime),
-            ) catch |err| {
+            file.setTimestamps(vm.io, .{
+                .access_timestamp = wasiSetTimestamp(fst_flags, 0x01, 0x02, atim_ns, stat.atime),
+                .modify_timestamp = wasiSetTimestamp(fst_flags, 0x04, 0x08, mtim_ns, stat.mtime),
+            }) catch |err| {
                 try pushErrno(vm, toWasiErrno(err));
                 return;
             };
@@ -2276,11 +2471,27 @@ pub fn path_readlink(ctx: *anyopaque, _: usize) anyerror!void {
     const path = data[path_ptr .. path_ptr + path_len];
     const buf = data[buf_ptr .. buf_ptr + buf_len];
 
-    const result = posix.readlinkat(host_fd, path, buf) catch |err| {
-        try pushErrno(vm, toWasiErrno(err));
+    if (builtin.os.tag == .windows) {
+        var dir = std.Io.Dir{ .handle = host_fd };
+        const n = dir.readLink(vm.io, path, buf) catch |err| {
+            try pushErrno(vm, toWasiErrno(err));
+            return;
+        };
+        try memory.write(u32, bufused_ptr, 0, @intCast(n));
+        try pushErrno(vm, .SUCCESS);
+        return;
+    }
+    var path_buf_z: [std.posix.PATH_MAX]u8 = undefined;
+    const path_z = pathToZ(&path_buf_z, path) catch {
+        try pushErrno(vm, .NAMETOOLONG);
         return;
     };
-    try memory.write(u32, bufused_ptr, 0, @intCast(result.len));
+    const rc = std.c.readlinkat(host_fd, path_z.ptr, buf.ptr, buf.len);
+    if (rc < 0) {
+        try pushErrno(vm, cErrnoToWasi());
+        return;
+    }
+    try memory.write(u32, bufused_ptr, 0, @intCast(rc));
     try pushErrno(vm, .SUCCESS);
 }
 
@@ -2313,16 +2524,26 @@ pub fn path_symlink(ctx: *anyopaque, _: usize) anyerror!void {
     const new_path = data[new_path_ptr .. new_path_ptr + new_path_len];
 
     if (builtin.os.tag == .windows) {
-        var dir = std.fs.Dir{ .fd = host_fd };
-        dir.symLink(old_path, new_path, .{}) catch |err| {
+        var dir = std.Io.Dir{ .handle = host_fd };
+        dir.symLink(vm.io, old_path, new_path, .{}) catch |err| {
             try pushErrno(vm, toWasiErrno(err));
             return;
         };
     } else {
-        posix.symlinkat(old_path, host_fd, new_path) catch |err| {
-            try pushErrno(vm, toWasiErrno(err));
+        var old_buf: [std.posix.PATH_MAX]u8 = undefined;
+        var new_buf: [std.posix.PATH_MAX]u8 = undefined;
+        const old_z = pathToZ(&old_buf, old_path) catch {
+            try pushErrno(vm, .NAMETOOLONG);
             return;
         };
+        const new_z = pathToZ(&new_buf, new_path) catch {
+            try pushErrno(vm, .NAMETOOLONG);
+            return;
+        };
+        if (std.c.symlinkat(old_z.ptr, host_fd, new_z.ptr) != 0) {
+            try pushErrno(vm, cErrnoToWasi());
+            return;
+        }
     }
     try pushErrno(vm, .SUCCESS);
 }
@@ -2365,10 +2586,20 @@ pub fn path_link(ctx: *anyopaque, _: usize) anyerror!void {
         try pushErrno(vm, .NOSYS);
         return;
     } else {
-        posix.linkat(old_host_fd, old_path, new_host_fd, new_path, 0) catch |err| {
-            try pushErrno(vm, toWasiErrno(err));
+        var old_buf: [std.posix.PATH_MAX]u8 = undefined;
+        var new_buf: [std.posix.PATH_MAX]u8 = undefined;
+        const old_z = pathToZ(&old_buf, old_path) catch {
+            try pushErrno(vm, .NAMETOOLONG);
             return;
         };
+        const new_z = pathToZ(&new_buf, new_path) catch {
+            try pushErrno(vm, .NAMETOOLONG);
+            return;
+        };
+        if (std.c.linkat(old_host_fd, old_z.ptr, new_host_fd, new_z.ptr, 0) != 0) {
+            try pushErrno(vm, cErrnoToWasi());
+            return;
+        }
     }
     try pushErrno(vm, .SUCCESS);
 }
@@ -2574,14 +2805,20 @@ fn readTestFile(name: []const u8) ![]const u8 {
         "testdata/",
         "src/wasm/testdata/",
     };
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
+    const io = th.io();
     for (&paths) |prefix| {
         const path = try std.fmt.allocPrint(testing.allocator, "{s}{s}", .{ prefix, name });
         defer testing.allocator.free(path);
-        const file = std.fs.cwd().openFile(path, .{}) catch continue;
-        defer file.close();
-        const stat = try file.stat();
-        const data = try testing.allocator.alloc(u8, stat.size);
-        const n = try file.readAll(data);
+        const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch continue;
+        defer file.close(io);
+        const size = file.length(io) catch continue;
+        const data = try testing.allocator.alloc(u8, @intCast(size));
+        const n = file.readPositionalAll(io, data, 0) catch {
+            testing.allocator.free(data);
+            return error.ReadFailed;
+        };
         return data[0..n];
     }
     return error.FileNotFound;
@@ -2618,14 +2855,17 @@ test "WASI — fd_write via 07_wasi_hello.wasm" {
     try instance.instantiate();
 
     // Create pipe for capturing stdout
-    const pipe = try posix.pipe();
-    defer posix.close(pipe[0]);
+    var pipe_fds: [2]posix.fd_t = undefined;
+    if (std.c.pipe(&pipe_fds) != 0) return error.SkipZigTest;
+    const pipe = pipe_fds;
+    defer _ = std.c.close(pipe[0]);
 
     // Redirect stdout to pipe write end
-    const saved_stdout = try posix.dup(@as(posix.fd_t, 1));
-    defer posix.close(saved_stdout);
-    try posix.dup2(pipe[1], @as(posix.fd_t, 1));
-    posix.close(pipe[1]);
+    const saved_stdout = std.c.dup(@as(posix.fd_t, 1));
+    if (saved_stdout < 0) return error.SkipZigTest;
+    defer _ = std.c.close(saved_stdout);
+    if (std.c.dup2(pipe[1], @as(posix.fd_t, 1)) < 0) return error.SkipZigTest;
+    _ = std.c.close(pipe[1]);
 
     // Run _start
     var vm_inst = Vm.init(alloc);
@@ -2636,12 +2876,13 @@ test "WASI — fd_write via 07_wasi_hello.wasm" {
     };
 
     // Restore stdout
-    try posix.dup2(saved_stdout, @as(posix.fd_t, 1));
+    _ = std.c.dup2(saved_stdout, @as(posix.fd_t, 1));
 
     // Read captured output
     var buf: [256]u8 = undefined;
-    const n = try posix.read(pipe[0], &buf);
-    const output = buf[0..n];
+    const n_rc = std.c.read(pipe[0], &buf, buf.len);
+    if (n_rc < 0) return error.SkipZigTest;
+    const output = buf[0..@intCast(n_rc)];
 
     try testing.expectEqualStrings("Hello, WASI!\n", output);
 }
@@ -2764,7 +3005,10 @@ test "WASI — clock_time_get returns nonzero" {
 
     try instance.instantiate();
 
+    var th = std.Io.Threaded.init(alloc, .{});
+    defer th.deinit();
     var vm_inst = Vm.init(alloc);
+    vm_inst.io = th.io();
     vm_inst.current_instance = &instance;
 
     // clock_time_get(clock_id=0, precision=0, time_ptr=300)
@@ -2806,7 +3050,10 @@ test "WASI — random_get fills buffer" {
 
     try instance.instantiate();
 
+    var th = std.Io.Threaded.init(alloc, .{});
+    defer th.deinit();
     var vm_inst = Vm.init(alloc);
+    vm_inst.io = th.io();
     vm_inst.current_instance = &instance;
 
     const memory = try instance.getMemory(0);
@@ -2890,15 +3137,18 @@ test "WASI — path_open creates file and returns valid fd" {
     wasi_ctx.caps = Capabilities.all;
     instance.wasi = &wasi_ctx;
 
+    var th = std.Io.Threaded.init(alloc, .{});
+    defer th.deinit();
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     const host_path = try std.fmt.allocPrint(alloc, ".zig-cache/tmp/{s}", .{tmp.sub_path});
     defer alloc.free(host_path);
-    try wasi_ctx.addPreopenPath(3, "/tmp", host_path);
+    try wasi_ctx.addPreopenPath(th.io(), 3, "/tmp", host_path);
 
     try instance.instantiate();
 
     var vm_inst = Vm.init(alloc);
+    vm_inst.io = th.io();
     vm_inst.current_instance = &instance;
 
     const memory = try instance.getMemory(0);
@@ -2909,7 +3159,7 @@ test "WASI — path_open creates file and returns valid fd" {
     @memcpy(data[100 .. 100 + test_path.len], test_path);
 
     // Clean up test file if it exists
-    tmp.dir.deleteFile(test_path) catch {};
+    tmp.dir.deleteFile(th.io(), test_path) catch {};
 
     // Push path_open args in signature order (stack: first pushed = bottom)
     // path_open(fd=3, dirflags=1, path_ptr=100, path_len, oflags=CREAT(1),
@@ -2953,7 +3203,7 @@ test "WASI — path_open creates file and returns valid fd" {
     try testing.expectEqual(@as(u64, @intFromEnum(Errno.SUCCESS)), close_errno);
 
     // Clean up
-    tmp.dir.deleteFile(test_path) catch {};
+    tmp.dir.deleteFile(th.io(), test_path) catch {};
 }
 
 test "WASI — fd_readdir lists directory entries" {
@@ -2978,6 +3228,9 @@ test "WASI — fd_readdir lists directory entries" {
     wasi_ctx.caps = Capabilities.all;
     instance.wasi = &wasi_ctx;
 
+    var th = std.Io.Threaded.init(alloc, .{});
+    defer th.deinit();
+    const io = th.io();
     var tmp = testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     const host_path = try std.fmt.allocPrint(alloc, ".zig-cache/tmp/{s}", .{tmp.sub_path});
@@ -2985,28 +3238,29 @@ test "WASI — fd_readdir lists directory entries" {
 
     // Create a temp directory with known contents
     const test_dir = "zwasm_test_readdir";
-    tmp.dir.makeDir(test_dir) catch {};
-    var dir_fd = try tmp.dir.openDir(test_dir, .{ .access_sub_paths = true });
-    defer dir_fd.close();
+    tmp.dir.createDir(io, test_dir, .default_dir) catch {};
+    var dir_fd = try tmp.dir.openDir(io, test_dir, .{ .access_sub_paths = true });
+    defer dir_fd.close(io);
 
     // Create two files in the directory
-    const f1 = try dir_fd.createFile("afile.txt", .{ .read = true });
-    f1.close();
-    const f2 = try dir_fd.createFile("bfile.txt", .{ .read = true });
-    f2.close();
+    const f1 = try dir_fd.createFile(io, "afile.txt", .{ .read = true });
+    f1.close(io);
+    const f2 = try dir_fd.createFile(io, "bfile.txt", .{ .read = true });
+    f2.close(io);
 
     // Reopen dir fd for reading
-    const read_dir_fd = try tmp.dir.openDir(test_dir, .{ .access_sub_paths = true, .iterate = true });
-    try wasi_ctx.addPreopenPath(3, "/tmp", host_path);
+    const read_dir_fd = try tmp.dir.openDir(io, test_dir, .{ .access_sub_paths = true, .iterate = true });
+    try wasi_ctx.addPreopenPath(th.io(), 3, "/tmp", host_path);
     // Put the dir fd in fd_table
     const wasi_dir_fd = try wasi_ctx.allocFd(.{
-        .raw = read_dir_fd.fd,
+        .raw = read_dir_fd.handle,
         .kind = .dir,
     }, false);
 
     try instance.instantiate();
 
     var vm_inst = Vm.init(alloc);
+    vm_inst.io = io;
     vm_inst.current_instance = &instance;
 
     const memory = try instance.getMemory(0);
@@ -3034,9 +3288,9 @@ test "WASI — fd_readdir lists directory entries" {
     try testing.expect(d_namlen < 256);
 
     // Clean up
-    dir_fd.deleteFile("afile.txt") catch {};
-    dir_fd.deleteFile("bfile.txt") catch {};
-    tmp.dir.deleteDir(test_dir) catch {};
+    dir_fd.deleteFile(io, "afile.txt") catch {};
+    dir_fd.deleteFile(io, "bfile.txt") catch {};
+    tmp.dir.deleteDir(io, test_dir) catch {};
 }
 
 test "WASI — registerAll for wasi_hello module" {
@@ -3141,15 +3395,15 @@ test "stdio override: default returns process stdio" {
     // Without overrides, stdioFile returns process stdin/stdout/stderr
     const stdin_file = ctx.stdioFile(0);
     try testing.expect(stdin_file != null);
-    try testing.expectEqual(std.fs.File.stdin().handle, stdin_file.?.handle);
+    try testing.expectEqual(std.Io.File.stdin().handle, stdin_file.?.handle);
 
     const stdout_file = ctx.stdioFile(1);
     try testing.expect(stdout_file != null);
-    try testing.expectEqual(std.fs.File.stdout().handle, stdout_file.?.handle);
+    try testing.expectEqual(std.Io.File.stdout().handle, stdout_file.?.handle);
 
     const stderr_file = ctx.stdioFile(2);
     try testing.expect(stderr_file != null);
-    try testing.expectEqual(std.fs.File.stderr().handle, stderr_file.?.handle);
+    try testing.expectEqual(std.Io.File.stderr().handle, stderr_file.?.handle);
 
     // Non-stdio fd returns null
     try testing.expect(ctx.stdioFile(3) == null);
@@ -3162,8 +3416,10 @@ test "stdio override: custom fd replaces default" {
     defer ctx.deinit();
 
     // Create a pipe to use as custom stdout
-    const pipe = try posix.pipe();
-    defer posix.close(pipe[0]);
+    var pipe_fds: [2]std.posix.fd_t = undefined;
+    if (std.c.pipe(&pipe_fds) != 0) return error.SkipZigTest;
+    const pipe = pipe_fds;
+    defer _ = std.c.close(pipe[0]);
 
     // Set stdout (fd 1) to write end of pipe, with ownership (runtime closes it)
     ctx.setStdioFd(1, pipe[1], .own);
@@ -3173,17 +3429,19 @@ test "stdio override: custom fd replaces default" {
     try testing.expectEqual(pipe[1], stdout_file.?.handle);
 
     // stdin and stderr remain default
-    try testing.expectEqual(std.fs.File.stdin().handle, ctx.stdioFile(0).?.handle);
-    try testing.expectEqual(std.fs.File.stderr().handle, ctx.stdioFile(2).?.handle);
+    try testing.expectEqual(std.Io.File.stdin().handle, ctx.stdioFile(0).?.handle);
+    try testing.expectEqual(std.Io.File.stderr().handle, ctx.stdioFile(2).?.handle);
 }
 
 test "stdio override: borrow mode does not close fd on deinit" {
     if (builtin.os.tag == .windows) return error.SkipZigTest;
     const alloc = testing.allocator;
 
-    const pipe = try posix.pipe();
-    defer posix.close(pipe[0]);
-    defer posix.close(pipe[1]);
+    var pipe_fds: [2]std.posix.fd_t = undefined;
+    if (std.c.pipe(&pipe_fds) != 0) return error.SkipZigTest;
+    const pipe = pipe_fds;
+    defer _ = std.c.close(pipe[0]);
+    defer _ = std.c.close(pipe[1]);
 
     {
         var ctx = WasiContext.init(alloc);
@@ -3193,8 +3451,8 @@ test "stdio override: borrow mode does not close fd on deinit" {
 
     // pipe[1] should still be valid (borrowed, not closed by deinit)
     // Writing to it should succeed
-    const written = posix.write(pipe[1], "ok") catch 0;
-    try testing.expectEqual(@as(usize, 2), written);
+    const written_rc = std.c.write(pipe[1], "ok", 2);
+    try testing.expect(written_rc == 2);
 }
 
 test "addPreopenFd: registers fd-based preopen" {
@@ -3203,11 +3461,12 @@ test "addPreopenFd: registers fd-based preopen" {
     var ctx = WasiContext.init(alloc);
     defer ctx.deinit();
 
-    // Open a real directory to get a valid fd
-    var dir = try std.fs.cwd().openDir(".", .{});
-    const dir_fd = dir.fd;
-    // Transfer ownership to WasiContext (which will close it)
-    dir = undefined;
+    // Open a real directory to get a valid fd (cross-platform via Io.Dir).
+    var th = std.Io.Threaded.init(alloc, .{});
+    defer th.deinit();
+    const io = th.io();
+    const opened = std.Io.Dir.cwd().openDir(io, ".", .{}) catch return error.SkipZigTest;
+    const dir_fd = opened.handle;
 
     try ctx.addPreopenFd(3, "/sandbox", dir_fd, .dir, .own);
 

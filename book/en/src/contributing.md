@@ -24,7 +24,7 @@ bash bench/run_bench.sh --quick
 
 ## Requirements
 
-- Zig 0.15.2
+- Zig 0.16.0
 - Python 3 (for spec test runner)
 - [wasm-tools](https://github.com/bytecodealliance/wasm-tools) (for spec test conversion)
 - [hyperfine](https://github.com/sharkdp/hyperfine) (for benchmarks)
