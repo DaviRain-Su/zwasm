@@ -22,16 +22,22 @@ Session handover document. Read at session start.
 
 ## Current Task
 
-**W46 Phase 1 — DONE (2026-04-25).** PR #49 merged (`30a3680`). See
-`.dev/checklist.md` Resolved section for details. Next candidate work:
+**W46 Phase 2 — DONE (2026-04-25).** Routed remaining `std.c.*` direct calls
+in `wasi.zig` (fdatasync, fcntl, ftruncate, futimens, utimensat, symlinkat,
+linkat, fstatat) through new `platform.zig` helpers. Size result was
+neutral — Linux never hit those branches (comptime-pruned), so this is a
+pure consistency/encapsulation refactor. Linux binary stays at 1.65 MB
+stripped; the 1.50 MB goal is now tracked as **W48** with specific size
+contributors identified (std.debug+Dwarf ~170 KB, std.Io.Threaded ~115 KB,
+sort.* ~50 KB, std.Progress ~18 KB). Next candidate work:
 
 - **W47**: `tgo_strops_cached` +24% regression investigation (single-benchmark,
   low priority). See checklist.
 - **W45**: SIMD loop persistence — skip Q-cache eviction at loop headers
   (requires back-edge detection in `scanBranchTargets`).
-- **W46 Phase 2 (optional)**: migrate `fd_read`/`fd_write` onto `std.Io`.
-  Not blocking. Would help return binary size to 1.50 MB target and improve
-  Windows I/O correctness further; pick up when `std.Io` stdlib APIs stabilize.
+- **W48**: Linux binary size 1.65 → 1.50 MB. Candidates: custom panic
+  handler (dropping source-location printing), trim std.Io.Threaded
+  surface, measure ReleaseSmall. Non-blocking; 1.80 MB ceiling has slack.
 
 ## Previous Task
 
@@ -61,6 +67,12 @@ C-API targets after the first push revealed `std.heap.c_allocator` needs libc.
   and `-Dtarget=x86_64-windows-gnu` compile cleanly on Mac even though the
   test binaries can't execute — the compile success alone catches link-time
   symbol-resolution issues before pushing to CI.
+- **Linux is already libc-free even when `std.c.*` appears in source.**
+  Inside a `switch (comptime builtin.os.tag)`, the `.linux =>` and
+  `else =>` arms are comptime-pruned; the Linux build never references
+  `std.c.*` bindings even if they appear textually. This is why W46 Phase 2
+  was size-neutral on Linux — the refactor only cleans up Mac/BSD code
+  paths.
 
 ## References
 

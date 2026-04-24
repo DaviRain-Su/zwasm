@@ -19,6 +19,15 @@ Prefix: W## (to distinguish from CW's F## items).
   path — likely regalloc or memory-access pattern change. Low priority
   since 20 other benchmarks improved >10% (GC paths 40–76% faster).
 
+- [ ] W48: Linux binary size 1.65 MB → 1.50 MB. W46 Phase 2 refactor was
+  size-neutral because Linux never hit the `std.c.*` branches (comptime-
+  pruned). The 150 KB gap vs 1.50 MB target is dominated by
+  `std.debug` + `Dwarf` (~170 KB, panic-handler source-location printing),
+  `std.Io.Threaded` (~115 KB), `sort.*` (~50 KB), `std.Progress` (~18 KB).
+  Candidates: override `std.debug.panic`, trim `std.Io.Threaded` surface,
+  measure `-Doptimize=ReleaseSmall`. Non-blocking; ceiling 1.80 MB still
+  has slack.
+
 ## Resolved (summary)
 
 W37: Contiguous v128 storage. W39: Multi-value return JIT (guard removed).
@@ -43,8 +52,14 @@ W46: Un-link libc — Phase 1 complete (delib 1a–1f, merged 2026-04-24/25).
      `src/c_api.zig` uses `std.heap.c_allocator`. Platform helpers added:
      pfdWrite, pfdRead, pfdClose, pfdDup, pfdDup2, pfdPipe, pfdSleepNs, pfdErrno,
      pfdFsync, pfdReadlinkAt (Linux=direct syscalls, Mac=libSystem auto-link,
-     Windows=kernel32/Win32). Payoff measured: Mac 1.38 MB, Linux 1.65 MB
-     stripped (vs 1.80 MB ceiling). The 1.50 MB target is deferred to the
-     std.Io migration (tracked separately if it resurfaces).
+     Windows=kernel32/Win32).
+     Phase 2 complete (2026-04-25): remaining wasi.zig direct `std.c.*` call
+     sites (fdatasync, fcntl, ftruncate, futimens, utimensat, symlinkat,
+     linkat, fstatat) routed through new platform helpers (pfdFdatasync,
+     pfdFcntlSetfl, pfdFtruncate, pfdFutimens, pfdUtimensat, pfdSymlinkat,
+     pfdLinkat, pfdFstatatDarwin). Linux was already libc-free through
+     comptime-pruned switches; Phase 2 is a pure refactor with zero
+     binary-size delta. Size payoff measured: Mac 1.38 MB, Linux 1.65 MB
+     stripped (vs 1.80 MB ceiling). The 1.50 MB target is tracked under W48.
 
 W2-W36: See git history. All resolved through Stages 0-47 and Phases 1-19.

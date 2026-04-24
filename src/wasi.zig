@@ -617,9 +617,9 @@ fn fstatatToFileStat(dirfd: posix.fd_t, path_z: [*:0]const u8, nofollow: u32) !F
             .ctim_ns = @as(i128, sx.ctime.sec) * 1_000_000_000 + sx.ctime.nsec,
         };
     }
-    // Darwin/BSD: std.c.fstatat + system.Stat.
+    // Darwin/BSD: fstatat + system.Stat.
     var st: std.c.Stat = undefined;
-    if (std.c.fstatat(dirfd, path_z, &st, nofollow) != 0) return error.Stat;
+    if (platform.pfdFstatatDarwin(dirfd, path_z, &st, nofollow) != 0) return error.Stat;
     const S = posix.S;
     const filetype: u8 = if (S.ISDIR(st.mode))
         @intFromEnum(Filetype.DIRECTORY)
@@ -1564,21 +1564,7 @@ pub fn fd_datasync(ctx: *anyopaque, _: usize) anyerror!void {
                 return;
             }
         } else {
-            const failed = switch (comptime builtin.os.tag) {
-                .linux => blk: {
-                    const rc = std.os.linux.fdatasync(host_fd);
-                    const e = std.os.linux.errno(rc);
-                    if (e != .SUCCESS) platform.pfd_last_errno = e;
-                    break :blk e != .SUCCESS;
-                },
-                .windows => unreachable,
-                else => blk: {
-                    const rc = std.c.fdatasync(host_fd);
-                    if (rc != 0) platform.syncErrnoFromLibC();
-                    break :blk rc != 0;
-                },
-            };
-            if (failed) {
+            if (platform.pfdFdatasync(host_fd) != 0) {
                 try pushErrno(vm, cErrnoToWasi());
                 return;
             }
@@ -1949,19 +1935,7 @@ pub fn fd_fdstat_set_flags(ctx: *anyopaque, _: usize) anyerror!void {
     if (fdflags & 0x04 != 0) os_flags |= @as(u32, @bitCast(posix.O{ .NONBLOCK = true }));
     if (fdflags & 0x10 != 0) os_flags |= @as(u32, @bitCast(posix.O{ .SYNC = true }));
 
-    const failed = switch (comptime builtin.os.tag) {
-        .linux => blk: {
-            const linux = std.os.linux;
-            const rc = linux.fcntl(host_fd, linux.F.SETFL, @as(usize, os_flags));
-            break :blk posix.errno(rc) != .SUCCESS;
-        },
-        .windows => false, // fcntl not meaningful on Windows; treat as success
-        else => blk: {
-            const rc = std.c.fcntl(host_fd, std.c.F.SETFL, os_flags);
-            break :blk rc < 0;
-        },
-    };
-    if (failed) {
+    if (platform.pfdFcntlSetfl(host_fd, os_flags) != 0) {
         try pushErrno(vm, .IO);
         return;
     }
@@ -2004,21 +1978,7 @@ pub fn fd_filestat_set_size(ctx: *anyopaque, _: usize) anyerror!void {
     };
 
     if (wasi.getHostFd(fd)) |host_fd| {
-        const failed = switch (comptime builtin.os.tag) {
-            .linux => blk: {
-                const rc = std.os.linux.ftruncate(host_fd, @bitCast(size));
-                const e = std.os.linux.errno(rc);
-                if (e != .SUCCESS) platform.pfd_last_errno = e;
-                break :blk e != .SUCCESS;
-            },
-            .windows => unreachable,
-            else => blk: {
-                const rc = std.c.ftruncate(host_fd, @bitCast(size));
-                if (rc != 0) platform.syncErrnoFromLibC();
-                break :blk rc != 0;
-            },
-        };
-        if (failed) {
+        if (platform.pfdFtruncate(host_fd, size) != 0) {
             try pushErrno(vm, cErrnoToWasi());
             return;
         }
@@ -2072,21 +2032,7 @@ pub fn fd_filestat_set_times(ctx: *anyopaque, _: usize) anyerror!void {
     };
 
     const times = wasiTimesToTimespec(fst_flags, atim_ns, mtim_ns);
-    const failed = switch (comptime builtin.os.tag) {
-        .linux => blk: {
-            // utimensat(fd, NULL, times, 0) == futimens(fd, times)
-            const rc = std.os.linux.utimensat(host_fd, null, &times, 0);
-            const e = std.os.linux.errno(rc);
-            if (e != .SUCCESS) platform.pfd_last_errno = e;
-            break :blk e != .SUCCESS;
-        },
-        else => blk: {
-            const rc = std.c.futimens(host_fd, &times);
-            if (rc != 0) platform.syncErrnoFromLibC();
-            break :blk rc != 0;
-        },
-    };
-    if (failed) {
+    if (platform.pfdFutimens(host_fd, &times) != 0) {
         try pushErrno(vm, cErrnoToWasi());
         return;
     }
@@ -2458,19 +2404,9 @@ pub fn path_filestat_set_times(ctx: *anyopaque, _: usize) anyerror!void {
     @memcpy(path_buf[0..path_len], path);
     path_buf[path_len] = 0;
 
-    if (comptime builtin.os.tag == .linux) {
-        const linux = std.os.linux;
-        const rc = linux.utimensat(host_fd, &path_buf, &times, nofollow);
-        if (posix.errno(rc) != .SUCCESS) {
-            try pushErrno(vm, .IO);
-            return;
-        }
-    } else {
-        const rc = std.c.utimensat(host_fd, &path_buf, &times, nofollow);
-        if (rc < 0) {
-            try pushErrno(vm, .IO);
-            return;
-        }
+    if (platform.pfdUtimensat(host_fd, &path_buf, &times, nofollow) != 0) {
+        try pushErrno(vm, .IO);
+        return;
     }
     try pushErrno(vm, .SUCCESS);
 }
@@ -2573,21 +2509,7 @@ pub fn path_symlink(ctx: *anyopaque, _: usize) anyerror!void {
             try pushErrno(vm, .NAMETOOLONG);
             return;
         };
-        const failed = switch (comptime builtin.os.tag) {
-            .linux => blk: {
-                const rc = std.os.linux.symlinkat(old_z.ptr, host_fd, new_z.ptr);
-                const e = std.os.linux.errno(rc);
-                if (e != .SUCCESS) platform.pfd_last_errno = e;
-                break :blk e != .SUCCESS;
-            },
-            .windows => unreachable,
-            else => blk: {
-                const rc = std.c.symlinkat(old_z.ptr, host_fd, new_z.ptr);
-                if (rc != 0) platform.syncErrnoFromLibC();
-                break :blk rc != 0;
-            },
-        };
-        if (failed) {
+        if (platform.pfdSymlinkat(old_z.ptr, host_fd, new_z.ptr) != 0) {
             try pushErrno(vm, cErrnoToWasi());
             return;
         }
@@ -2643,21 +2565,7 @@ pub fn path_link(ctx: *anyopaque, _: usize) anyerror!void {
             try pushErrno(vm, .NAMETOOLONG);
             return;
         };
-        const failed = switch (comptime builtin.os.tag) {
-            .linux => blk: {
-                const rc = std.os.linux.linkat(old_host_fd, old_z.ptr, new_host_fd, new_z.ptr, 0);
-                const e = std.os.linux.errno(rc);
-                if (e != .SUCCESS) platform.pfd_last_errno = e;
-                break :blk e != .SUCCESS;
-            },
-            .windows => unreachable,
-            else => blk: {
-                const rc = std.c.linkat(old_host_fd, old_z.ptr, new_host_fd, new_z.ptr, 0);
-                if (rc != 0) platform.syncErrnoFromLibC();
-                break :blk rc != 0;
-            },
-        };
-        if (failed) {
+        if (platform.pfdLinkat(old_host_fd, old_z.ptr, new_host_fd, new_z.ptr, 0) != 0) {
             try pushErrno(vm, cErrnoToWasi());
             return;
         }

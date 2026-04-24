@@ -386,6 +386,102 @@ pub fn pfdPipe(fds: *[2]std.posix.fd_t) i32 {
     }
 }
 
+pub fn pfdFdatasync(handle: std.posix.fd_t) i32 {
+    switch (comptime builtin.os.tag) {
+        .windows => {
+            if (FlushFileBuffers(handle) == windows.BOOL.FALSE) {
+                pfd_last_errno = .IO;
+                return -1;
+            }
+            return 0;
+        },
+        .linux => return linuxResultAsI32(std.os.linux.fdatasync(handle)),
+        else => return cResultAsI32(std.c.fdatasync(handle)),
+    }
+}
+
+/// `fcntl(fd, F_SETFL, flags)`. Returns 0 on success, -1 on error.
+pub fn pfdFcntlSetfl(handle: std.posix.fd_t, flags: u32) i32 {
+    switch (comptime builtin.os.tag) {
+        .windows => return 0, // fcntl is not meaningful on Windows; treat as no-op success
+        .linux => {
+            const linux = std.os.linux;
+            const rc = linux.fcntl(handle, linux.F.SETFL, @as(usize, flags));
+            return linuxResultAsI32(rc);
+        },
+        else => return cResultAsI32(std.c.fcntl(handle, std.c.F.SETFL, flags)),
+    }
+}
+
+pub fn pfdFtruncate(handle: std.posix.fd_t, length: i64) i32 {
+    switch (comptime builtin.os.tag) {
+        .windows => return -1, // callers use std.Io.File.setLength on Windows
+        .linux => return linuxResultAsI32(std.os.linux.ftruncate(handle, length)),
+        else => return cResultAsI32(std.c.ftruncate(handle, @bitCast(length))),
+    }
+}
+
+pub fn pfdFutimens(handle: std.posix.fd_t, times: *const [2]std.posix.timespec) i32 {
+    switch (comptime builtin.os.tag) {
+        .windows => return -1,
+        .linux => return linuxResultAsI32(std.os.linux.utimensat(handle, null, times, 0)),
+        else => return cResultAsI32(std.c.futimens(handle, times)),
+    }
+}
+
+pub fn pfdUtimensat(
+    dirfd: std.posix.fd_t,
+    path: [*:0]const u8,
+    times: *const [2]std.posix.timespec,
+    flags: u32,
+) i32 {
+    switch (comptime builtin.os.tag) {
+        .windows => return -1,
+        .linux => return linuxResultAsI32(std.os.linux.utimensat(dirfd, path, times, flags)),
+        else => return cResultAsI32(std.c.utimensat(dirfd, path, times, flags)),
+    }
+}
+
+pub fn pfdSymlinkat(
+    target: [*:0]const u8,
+    newdirfd: std.posix.fd_t,
+    linkpath: [*:0]const u8,
+) i32 {
+    switch (comptime builtin.os.tag) {
+        .windows => return -1,
+        .linux => return linuxResultAsI32(std.os.linux.symlinkat(target, newdirfd, linkpath)),
+        else => return cResultAsI32(std.c.symlinkat(target, newdirfd, linkpath)),
+    }
+}
+
+pub fn pfdLinkat(
+    olddirfd: std.posix.fd_t,
+    oldpath: [*:0]const u8,
+    newdirfd: std.posix.fd_t,
+    newpath: [*:0]const u8,
+    flags: u32,
+) i32 {
+    switch (comptime builtin.os.tag) {
+        .windows => return -1,
+        .linux => return linuxResultAsI32(std.os.linux.linkat(olddirfd, oldpath, newdirfd, newpath, flags)),
+        else => return cResultAsI32(std.c.linkat(olddirfd, oldpath, newdirfd, newpath, flags)),
+    }
+}
+
+/// Darwin/BSD-only `fstatat` helper. Linux callers go through `statx` instead
+/// (see `fstatatToFileStat`). Returns 0 on success, -1 on error.
+pub fn pfdFstatatDarwin(
+    dirfd: std.posix.fd_t,
+    path: [*:0]const u8,
+    stat_out: *std.c.Stat,
+    flags: u32,
+) i32 {
+    switch (comptime builtin.os.tag) {
+        .windows, .linux => return -1,
+        else => return cResultAsI32(std.c.fstatat(dirfd, path, stat_out, flags)),
+    }
+}
+
 /// Sleep for the given number of nanoseconds. Best-effort — short-sleep
 /// tests use this to give other threads time to start.
 pub fn pfdSleepNs(ns: u64) void {
