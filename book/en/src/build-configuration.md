@@ -23,17 +23,19 @@ zig build -Doptimize=ReleaseSafe -Djit=false -Dwat=false
 
 ## Size impact
 
-Measured on Linux x86_64, ReleaseSafe, stripped:
+Measured on Linux x86_64, ReleaseSafe, stripped (post-W48 main):
 
-| Variant | Flags | Size (approx.) | Delta |
-|---------|-------|---------------:|------:|
-| Full (default) | (none) | ~1.23 MB | — |
-| No JIT | `-Djit=false` | ~1.03 MB | −16% |
-| No Component Model | `-Dcomponent=false` | ~1.13 MB | −8% |
-| No WAT | `-Dwat=false` | ~1.15 MB | −6% |
-| Minimal | `-Djit=false -Dcomponent=false -Dwat=false` | ~940 KB | −24% |
+| Variant            | Flags                                          |    Size |  Delta |
+|--------------------|------------------------------------------------|--------:|-------:|
+| Full (default)     | (none)                                         | 1.56 MB |     —  |
+| No JIT             | `-Djit=false`                                  | 1.41 MB |   −10% |
+| No Component Model | `-Dcomponent=false`                            | 1.56 MB |    0%  |
+| No WAT             | `-Dwat=false`                                  | 1.41 MB |   −10% |
+| Minimal            | `-Djit=false -Dcomponent=false -Dwat=false`    | 1.26 MB |   −19% |
 
-The minimal configuration still passes all non-JIT spec tests and supports the full Wasm 3.0 instruction set (interpreted).
+`-Dcomponent=false` is currently a no-op on its own — the Component Model code path is fully dead-code-eliminated when not exercised at runtime. Combining it with `-Djit=false -Dwat=false` is what produces the 300 KB Minimal saving (the JIT and WAT paths share infrastructure that only gets stripped when both go).
+
+Mac aarch64 stripped is roughly 350 KB smaller than the Linux numbers above (Full 1.20 MB, Minimal 0.92 MB). The minimal configuration still passes all non-JIT spec tests and supports the full Wasm 3.0 instruction set in interpreted mode.
 
 ## Common profiles
 

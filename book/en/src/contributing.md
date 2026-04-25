@@ -49,9 +49,9 @@ src/
   instance.zig    Module instantiation
 test/
   spec/           WebAssembly spec tests
-  e2e/            End-to-end tests (wasmtime misc_testsuite, 792 assertions)
+  e2e/            End-to-end tests (wasmtime misc_testsuite, 796 assertions)
   fuzz/           Fuzz testing infrastructure
-  realworld/      Real-world compatibility tests (30 programs)
+  realworld/      Real-world compatibility tests (50 programs: Rust, C, C++, TinyGo)
 bench/
   run_bench.sh    Benchmark runner
   record.sh       Record results to history.yaml
@@ -77,9 +77,9 @@ bench/
 ## CI checks
 
 PRs are automatically checked for:
-- Unit test pass (macOS + Ubuntu)
+- Unit test pass (macOS + Ubuntu + Windows)
 - Spec test pass (62,263 tests)
-- E2E test pass (792 assertions)
-- Binary size <= 1.80 MB (stripped, Linux ELF; Mac Mach-O ~1.38 MB)
+- E2E test pass (796 assertions)
+- Binary size <= 1.60 MB (stripped, Linux ELF ~1.56 MB; Mac Mach-O ~1.20 MB)
 - No benchmark regression > 20%
 - ReleaseSafe build success

@@ -8,7 +8,7 @@ All 9 Wasm 3.0 proposals plus threads, wide arithmetic, and custom page sizes. S
 
 ### Does zwasm support Windows?
 
-Not currently. zwasm runs on macOS (ARM64) and Linux (x86_64, aarch64). The JIT and memory guard pages use POSIX APIs (mmap, mprotect, signal handlers).
+Yes. zwasm runs on macOS (ARM64), Linux (x86_64 / aarch64) and Windows (x86_64). On POSIX targets the JIT and memory guard pages use mmap / mprotect / signal handlers; on Windows they use VirtualAlloc / VirtualProtect / vectored exception handlers via `kernel32.dll`. CI runs the full test suite on all four target triples; real-world program coverage on Windows is currently 46/46.
 
 ### Can I use zwasm from C, Python, or other languages?
 
@@ -16,11 +16,11 @@ Yes. zwasm provides a C API (`libzwasm`) that any FFI-capable language can use. 
 
 ### Can I reduce the binary size?
 
-Yes. Use build-time feature flags to strip features you do not need: `-Djit=false` (no JIT, −16%), `-Dcomponent=false` (no Component Model, −8%), `-Dwat=false` (no WAT parser, −6%). Combining all three produces a ~940 KB minimal binary (−24%). See [Build Configuration](./build-configuration.md).
+Yes. Use build-time feature flags to strip features you do not need: `-Djit=false` (no JIT, ≈ −150 KB on Linux), `-Dwat=false` (no WAT parser, ≈ −150 KB). `-Dcomponent=false` is currently a no-op on its own because the Component Model code path is already dead-code-eliminated when not exercised; combining all three produces a ~1.26 MB minimal Linux binary (≈ −19 %). On Mac the equivalent minimal build is around 0.92 MB. See [Build Configuration](./build-configuration.md).
 
 ### Can I use zwasm without JIT?
 
-Yes. The interpreter handles all functions by default. JIT is only triggered for hot functions. To build without JIT entirely, use `-Djit=false` — this removes the JIT compiler from the binary and reduces its size by ~16%. Functions that are called fewer than ~8 times will always use the interpreter regardless.
+Yes. The register-IR interpreter handles all functions by default. JIT is only triggered once a function reaches `HOT_THRESHOLD = 3` (3 calls or 3 back-edges in a hot loop). To build without JIT entirely, pass `-Djit=false` — this removes the JIT compiler from the binary and saves about 150 KB on the Linux x86_64 build (≈10 %). Short-running scripts that don't tier up will perform identically to the no-JIT build.
 
 ### What is the WAT parser?
 

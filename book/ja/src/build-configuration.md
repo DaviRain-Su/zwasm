@@ -23,17 +23,19 @@ zig build -Doptimize=ReleaseSafe -Djit=false -Dwat=false
 
 ## サイズへの影響
 
-Linux x86_64、ReleaseSafe、strip 済みで計測:
+Linux x86_64、ReleaseSafe、strip 済みで計測 (W48 後の main):
 
-| バリアント | フラグ | サイズ (概算) | 差分 |
-|-----------|--------|-------------:|-----:|
-| フル (デフォルト) | (なし) | 約 1.23 MB | — |
-| JIT なし | `-Djit=false` | 約 1.03 MB | −16% |
-| Component Model なし | `-Dcomponent=false` | 約 1.13 MB | −8% |
-| WAT なし | `-Dwat=false` | 約 1.15 MB | −6% |
-| 最小構成 | `-Djit=false -Dcomponent=false -Dwat=false` | 約 940 KB | −24% |
+| バリアント           | フラグ                                         |  サイズ |   差分 |
+|----------------------|------------------------------------------------|--------:|-------:|
+| フル (デフォルト)    | (なし)                                         | 1.56 MB |     —  |
+| JIT なし             | `-Djit=false`                                  | 1.41 MB |   −10% |
+| Component Model なし | `-Dcomponent=false`                            | 1.56 MB |    0%  |
+| WAT なし             | `-Dwat=false`                                  | 1.41 MB |   −10% |
+| 最小構成             | `-Djit=false -Dcomponent=false -Dwat=false`    | 1.26 MB |   −19% |
 
-最小構成でも非 JIT のスペックテストはすべて通過し、完全な Wasm 3.0 命令セット（インタープリタ実行）をサポートします。
+`-Dcomponent=false` 単独はサイズに影響しません — Component Model のコードパスは実行時に到達しないと dead-code-elimination されるためです。`-Djit=false -Dwat=false` と組み合わせたとき初めて 300 KB 削減に寄与します (JIT と WAT が共有するインフラが両方無効化で初めて落ちるため)。
+
+Mac aarch64 strip 後は上記 Linux より約 350 KB 小さく、フルで 1.20 MB、最小構成で 0.92 MB です。最小構成でも非 JIT のスペックテストはすべて通過し、完全な Wasm 3.0 命令セットをインタープリタ実行でサポートします。
 
 ## よくあるプロファイル
 
