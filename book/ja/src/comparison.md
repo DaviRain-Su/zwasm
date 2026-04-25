@@ -4,21 +4,21 @@ zwasm と他の WebAssembly ランタイムの比較です。
 
 ## 概要
 
-| 特徴 | zwasm | wasmtime | wasm3 | wasmer |
-|------|-------|----------|-------|--------|
-| 言語 | Zig | Rust | C | Rust/C |
-| バイナリサイズ | 約 1.2 MB | 56 MB | ~100 KB | 30+ MB |
-| メモリ (fib) | 3.5 MB | 12 MB | ~1 MB | 15+ MB |
-| 実行方式 | Interp + JIT | AOT/JIT | Interpreter | AOT/JIT |
-| Wasm 3.0 | 完全対応 | 完全対応 | 部分対応 | 部分対応 |
-| GC プロポーザル | 対応 | 対応 | 非対応 | 非対応 |
-| SIMD | 完全対応 (256 ops) | 完全対応 | 部分対応 | 完全対応 |
-| WASI | P1 (46 syscalls) | P1 + P2 | P1 (部分的) | P1 + P2 |
-| プラットフォーム | macOS, Linux, Windows | macOS, Linux, Windows | 多数 (JIT なし) | macOS, Linux, Windows |
+| 特徴               | zwasm                            | wasmtime              | wasm3              | wasmer                    |
+|--------------------|----------------------------------|-----------------------|--------------------|---------------------------|
+| 言語               | Zig                              | Rust                  | C                  | Rust/C                    |
+| バイナリサイズ      | 1.20 MB (Mac) / 1.56 MB (Linux)  | 約 56 MB              | 約 100–500 KB      | 30+ MB                    |
+| メモリ (fib)       | 約 3.5 MB                        | 約 12 MB              | 約 1 MB            | 約 15 MB                  |
+| 実行方式           | Interp + ARM64/x86_64 JIT        | Cranelift AOT/JIT     | 純インタプリタ     | LLVM/Cranelift/Singlepass |
+| Wasm 3.0           | 完全対応 (9 プロポーザルすべて)  | 完全対応              | 部分対応           | 部分対応                  |
+| GC プロポーザル    | 対応                             | 対応                  | 非対応             | 非対応                    |
+| SIMD               | 完全対応 (256 ops, JIT)          | 完全対応              | 部分対応           | 完全対応                  |
+| WASI               | P1 (46/46) + P2 (アダプタ)       | P1 + P2 (ネイティブ)  | P1 (部分的)        | P1 + P2                   |
+| プラットフォーム   | macOS, Linux, Windows            | macOS, Linux, Windows | 多数 (JIT なし)    | macOS, Linux, Windows     |
 
 ## zwasm を選ぶべきとき
 
-**小さなフットプリント**: バイナリサイズとメモリ使用量が重要な場合。zwasm は wasmtime の約 40 分の 1 のサイズです。
+**小さなフットプリント**: バイナリサイズとメモリ使用量が重要な場合。zwasm は wasmtime の約 1/35〜1/47 (プラットフォーム依存) のサイズで、Wasm 3.0 機能セットを完全に備えています。
 
 **Zig エコシステム**: Zig アプリケーションに組み込む場合。zwasm は C 依存なしのネイティブな `zig build` 依存関係として統合できます。
 
@@ -28,7 +28,7 @@ zwasm と他の WebAssembly ランタイムの比較です。
 
 ## 他のランタイムを選ぶべきとき
 
-**最大スループット**: wasmtime の Cranelift AOT コンパイラは高度に最適化されたネイティブコードを生成します。長時間の計算負荷が高いワークロードでは、wasmtime のほうが高速な場合があります。SIMD マイクロベンチマークは互角（matrix_mul は wasmtime を上回る）ですが、コンパイラ生成の SIMD コードでは split v128 ストレージのオーバーヘッドにより差が大きくなります。
+**最大スループット**: wasmtime の Cranelift AOT コンパイラは高度に最適化されたネイティブコードを生成します。長時間の計算負荷が高いワークロードでは、wasmtime のほうが高速な場合があります。SIMD マイクロベンチマークは互角（matrix_mul は wasmtime を上回る）ですが、コンパイラ生成の SIMD コードでは `i16x8.replace_lane` 等のパターンで依然差が残っています。
 
 **最小サイズ**: wasm3 は約 100 KB でマイクロコントローラ上でも動作します。JIT なしで最も小さなランタイムが必要な場合は、wasm3 のほうが適しているかもしれません。
 

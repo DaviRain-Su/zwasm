@@ -4,13 +4,13 @@ A standalone WebAssembly runtime written in Zig. Runs Wasm modules as a CLI tool
 
 ## Features
 
-- **Full Wasm 3.0 support**: Core spec + 9 proposals (GC, exception handling, tail calls, SIMD, threads, and more)
-- **62,263 spec tests passing**: 100% on macOS ARM64 and Linux x86_64
-- **4-tier execution**: Interpreter with register IR and ARM64/x86_64 JIT compilation
-- **WASI Preview 1**: 46 syscalls with deny-by-default capability model
-- **Small footprint**: ~1.2 MB binary, ~3.5 MB runtime memory
-- **Library and CLI**: Use as a `zig build` dependency or run modules from the command line
-- **WAT support**: Run `.wat` text format files directly
+- **Full Wasm 3.0 support**: Core spec + all 9 ratified 3.0 proposals (GC, exception handling, tail calls, function references, multi-memory, memory64, branch hinting, extended const, relaxed SIMD), plus threads (79 atomics) and wide arithmetic
+- **62,263 spec tests passing**: 100% on macOS ARM64 and Linux x86_64 (Windows x86_64 is also covered by CI)
+- **4-tier execution**: Bytecode → predecoded IR → register IR → ARM64/x86_64 JIT (NEON/SSE SIMD), with HOT_THRESHOLD=3 for fast tier-up
+- **WASI Preview 1 + Component Model**: 46/46 P1 syscalls, P2 via component-model adapter
+- **Small footprint**: ~1.20 MB on Mac, ~1.56 MB on Linux (stripped, ReleaseSafe), ~3.5 MB runtime memory
+- **Library and CLI**: use as a `zig build` dependency, link as a C shared library, or run modules from the command line
+- **WAT support**: run `.wat` text format files directly
 
 ## Quick Start
 

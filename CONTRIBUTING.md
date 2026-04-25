@@ -53,7 +53,7 @@ src/
   canon_abi.zig   Canonical ABI
 test/
   spec/           WebAssembly spec tests (62,263 tests)
-  e2e/            End-to-end tests (792 assertions)
+  e2e/            End-to-end tests (796 assertions)
   realworld/      Real-world compatibility tests (50 programs)
   fuzz/           Fuzz testing infrastructure
 bench/
@@ -68,10 +68,10 @@ examples/
 
 PRs are automatically checked for:
 
-- Unit tests pass (macOS + Ubuntu)
+- Unit tests pass (macOS + Ubuntu + Windows)
 - Spec tests pass (62,263 tests)
-- E2E tests pass (792 assertions)
-- Binary size <= 1.80 MB (stripped, Linux ELF; Mac Mach-O ~1.38 MB). Limit raised from 1.50 MB in v1.10.0 because Zig 0.16 requires `link_libc = true` for WASI support. Tracked for reduction via 脱 libc migration (see `.dev/checklist.md`).
+- E2E tests pass (796 assertions)
+- Binary size <= 1.60 MB (stripped, Linux ELF ~1.56 MB; Mac Mach-O ~1.20 MB). Originally 1.50 MB on Zig 0.15; raised to 1.80 MB as a pragmatic compromise during the Zig 0.16 / `link_libc = true` transition; pulled back to 1.60 MB after W46 (link_libc=false restored) + W48 Phase 1 (panic / segfault / u8-main trim). Reaching the original 1.50 MB target is tracked as W48 Phase 2 (see `.dev/checklist.md`) — non-blocking.
 - No benchmark regression > 20%
 - ReleaseSafe build success
 

@@ -45,9 +45,9 @@ zwasm processes a WebAssembly module through a multi-stage pipeline: decode, val
 zwasm uses tiered execution with automatic promotion:
 
 1. **Interpreter** — Executes register IR instructions directly. All functions start here.
-2. **JIT (ARM64/x86_64)** — When a function's call count or back-edge count exceeds a threshold, the register IR is compiled to native machine code. Subsequent calls execute the native code directly.
+2. **JIT (ARM64/x86_64)** — When a function's call count or back-edge count reaches `HOT_THRESHOLD = 3`, the register IR is compiled to native machine code. Subsequent calls execute the native code directly.
 
-The JIT threshold is adaptive: hot loops trigger compilation faster via back-edge counting.
+The threshold is uniform; back-edge counting lets hot loops tier up before the call counter reaches 3.
 
 ## Source map
 

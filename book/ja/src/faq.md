@@ -8,7 +8,7 @@ Wasm 3.0 の全 9 プロポーザルに加え、threads、wide arithmetic、cust
 
 ### zwasm は Windows に対応していますか?
 
-現時点では対応していません。zwasm は macOS (ARM64) および Linux (x86_64, aarch64) で動作します。JIT とメモリガードページは POSIX API (mmap, mprotect, シグナルハンドラ) を使用しています。
+はい。zwasm は macOS (ARM64) / Linux (x86_64, aarch64) / Windows (x86_64) で動作します。POSIX 系では JIT とメモリガードページに mmap / mprotect / シグナルハンドラを使用し、Windows では `kernel32.dll` の VirtualAlloc / VirtualProtect / Vectored Exception Handler を使用します。CI は 4 ターゲット triple すべてでフルテストを回しています。Windows での real-world プログラム互換は現在 46/46 です。
 
 ### C や Python など他の言語から zwasm を使えますか?
 
@@ -16,11 +16,11 @@ Wasm 3.0 の全 9 プロポーザルに加え、threads、wide arithmetic、cust
 
 ### バイナリサイズを削減できますか?
 
-はい。ビルド時のフィーチャーフラグで不要な機能を除外できます: `-Djit=false` (JIT なし、−16%)、`-Dcomponent=false` (Component Model なし、−8%)、`-Dwat=false` (WAT パーサなし、−6%)。3 つすべてを組み合わせると約 940 KB の最小バイナリ (−24%) になります。[ビルド設定](./build-configuration.md)を参照してください。
+はい。ビルド時のフィーチャーフラグで不要な機能を除外できます: `-Djit=false` (JIT なし、Linux で約 −150 KB)、`-Dwat=false` (WAT パーサなし、約 −150 KB)。`-Dcomponent=false` 単独は実行時に Component Model コードが既に dead-code-elimination されるため現状はサイズ変化なし。3 つすべてを組み合わせると Linux で約 1.26 MB (≈ −19 %) の最小バイナリになります。Mac での同等構成は約 0.92 MB です。[ビルド設定](./build-configuration.md)を参照してください。
 
 ### JIT なしで zwasm を使えますか?
 
-はい。デフォルトではインタープリタがすべての関数を処理します。JIT はホットな関数に対してのみ起動されます。JIT を完全に除外してビルドするには `-Djit=false` を使用してください — これにより JIT コンパイラがバイナリから除去され、サイズが約 16% 削減されます。呼び出し回数が約 8 回未満の関数は、設定に関係なく常にインタープリタで実行されます。
+はい。デフォルトではレジスタ IR インタープリタがすべての関数を処理します。JIT は `HOT_THRESHOLD = 3` (3 回呼ばれるか、ホットループでバックエッジを 3 回踏む) を満たした関数のみ起動されます。JIT を完全に除外してビルドするには `-Djit=false` を使用してください — JIT コンパイラがバイナリから除去され、Linux x86_64 で約 150 KB (≈10 %) 小さくなります。短時間で終わるスクリプトはそもそも JIT に昇格しないため、no-JIT ビルドと性能差はありません。
 
 ### WAT パーサとは何ですか?
 

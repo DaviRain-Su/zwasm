@@ -4,21 +4,21 @@ How zwasm compares to other WebAssembly runtimes.
 
 ## Overview
 
-| Feature | zwasm | wasmtime | wasm3 | wasmer |
-|---------|-------|----------|-------|--------|
-| Language | Zig | Rust | C | Rust/C |
-| Binary size | ~1.2 MB | 56 MB | ~100 KB | 30+ MB |
-| Memory (fib) | 3.5 MB | 12 MB | ~1 MB | 15+ MB |
-| Execution | Interp + JIT | AOT/JIT | Interpreter | AOT/JIT |
-| Wasm 3.0 | Full | Full | Partial | Partial |
-| GC proposal | Yes | Yes | No | No |
-| SIMD | Full (256 ops) | Full | Partial | Full |
-| WASI | P1 (46 syscalls) | P1 + P2 | P1 (partial) | P1 + P2 |
-| Platforms | macOS, Linux, Windows | macOS, Linux, Windows | Many (no JIT) | macOS, Linux, Windows |
+| Feature       | zwasm                       | wasmtime               | wasm3                | wasmer                  |
+|---------------|-----------------------------|------------------------|----------------------|-------------------------|
+| Language      | Zig                         | Rust                   | C                    | Rust/C                  |
+| Binary size   | 1.20 MB Mac / 1.56 MB Linux | ~56 MB                 | ~100–500 KB          | 30+ MB                  |
+| Memory (fib)  | ~3.5 MB                     | ~12 MB                 | ~1 MB                | ~15 MB                  |
+| Execution     | Interp + ARM64/x86_64 JIT   | Cranelift AOT/JIT      | Pure interpreter     | LLVM/Cranelift/Singlepass |
+| Wasm 3.0      | Full (all 9 proposals)      | Full                   | Partial              | Partial                 |
+| GC proposal   | Yes                         | Yes                    | No                   | No                      |
+| SIMD          | Full (256 ops, JIT)         | Full                   | Partial              | Full                    |
+| WASI          | P1 (46/46) + P2 (adapter)   | P1 + P2 (native)       | P1 (partial)         | P1 + P2                 |
+| Platforms     | macOS, Linux, Windows       | macOS, Linux, Windows  | Many (no JIT)        | macOS, Linux, Windows   |
 
 ## When to choose zwasm
 
-**Small footprint**: When binary size and memory usage matter. zwasm is ~40x smaller than wasmtime.
+**Small footprint**: When binary size and memory usage matter. zwasm is roughly 35–47× smaller than wasmtime depending on platform, while still shipping the full Wasm 3.0 feature set.
 
 **Zig ecosystem**: When embedding in a Zig application. zwasm integrates as a native `zig build` dependency with zero C dependencies.
 

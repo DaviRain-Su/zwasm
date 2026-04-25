@@ -116,6 +116,14 @@ Check if a module is valid without executing it.
 zwasm validate <file.wasm|.wat>
 ```
 
+### `zwasm compile`
+
+Pre-decode a module and write the predecoded IR to the on-disk cache. Subsequent `zwasm run --cache <file>` invocations skip parse + validate + predecode and start executing immediately.
+
+```bash
+zwasm compile <file.wasm|.wat>
+```
+
 ### `zwasm features`
 
 List supported WebAssembly proposals.
@@ -161,6 +169,14 @@ Show usage information.
 |------|-------------|
 | `--max-memory <N>` | Memory ceiling in bytes (limits `memory.grow`) |
 | `--fuel <N>` | Instruction fuel limit (traps when exhausted) |
+| `--timeout <ms>` | Wall-clock timeout in milliseconds (traps when exceeded) |
+
+### Caching and tiering
+
+| Flag | Description |
+|------|-------------|
+| `--cache` | Use the on-disk predecoded IR cache (created via `zwasm compile`) |
+| `--interp` | Force interpreter only (bypass register IR and JIT) |
 
 ### Debugging
 

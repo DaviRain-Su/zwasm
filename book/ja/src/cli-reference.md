@@ -114,6 +114,14 @@ zwasm inspect --json math.wasm
 zwasm validate <file.wasm|.wat>
 ```
 
+### `zwasm compile`
+
+モジュールを事前にデコードし、predecode IR をディスクキャッシュに書き出します。以降 `zwasm run --cache <file>` を使うと parse + validate + predecode をスキップして即座に実行できます。
+
+```bash
+zwasm compile <file.wasm|.wat>
+```
+
 ### `zwasm features`
 
 サポートしている WebAssembly プロポーザルの一覧を表示します。
@@ -159,6 +167,14 @@ zwasm features [--json]
 |------|-------------|
 | `--max-memory <N>` | メモリ上限（バイト単位、`memory.grow` を制限） |
 | `--fuel <N>` | 命令 fuel の上限（使い切るとトラップ） |
+| `--timeout <ms>` | 壁時計タイムアウト（ミリ秒、超過でトラップ） |
+
+### キャッシュとティアリング
+
+| フラグ | 説明 |
+|------|-------------|
+| `--cache` | ディスク上の predecode IR キャッシュを利用（`zwasm compile` で作成） |
+| `--interp` | レジスタ IR / JIT を経由せず純インタプリタで実行 |
 
 ### デバッグ
 

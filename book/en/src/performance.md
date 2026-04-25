@@ -9,26 +9,26 @@ zwasm uses tiered execution:
 
 ### When JIT kicks in
 
-- **Call threshold**: After ~8 calls to the same function
-- **Back-edge counting**: Hot loops trigger JIT faster (loop iterations count toward the threshold)
-- **Adaptive**: The threshold adjusts based on function characteristics
+- **Call / back-edge threshold**: `HOT_THRESHOLD = 3` (lowered from 10 in W38). A function is promoted to JIT after 3 calls or 3 back-edges in a hot loop.
+- **Back-edge counting**: hot loops are detected without waiting for the call threshold; loop iterations count individually.
 
-Once JIT-compiled, all subsequent calls to that function execute native machine code directly, bypassing the interpreter.
+Once JIT-compiled, all subsequent calls to that function execute native machine code directly, bypassing the register-IR interpreter.
 
 ## Binary size and memory
 
-| Metric | Value |
-|--------|-------|
-| Binary size (ReleaseSafe) | ~1.2 MB |
-| Runtime memory (fib benchmark) | ~3.5 MB RSS |
-| wasmtime binary for comparison | 56.3 MB |
+| Metric                                | Value                       |
+|---------------------------------------|-----------------------------|
+| Binary size (ReleaseSafe, stripped)   | ~1.20 MB Mac / ~1.56 MB Linux |
+| CI ceiling (stripped)                 | 1.60 MB                     |
+| Runtime memory (fib benchmark)        | ~3.5 MB RSS                 |
+| wasmtime binary for comparison        | ~56 MB                      |
 
-zwasm is ~40x smaller than wasmtime.
+zwasm is roughly 35× smaller than wasmtime on Linux and 47× smaller on Mac.
 
 ## Benchmark results
 
 Representative benchmarks comparing zwasm against wasmtime 41.0.1, Bun 1.3.8, and Node v24.13.0 on Apple M4 Pro.
-16 of 29 benchmarks match or beat wasmtime. 25/29 within 1.5x.
+The majority of the 29 benchmarks match or beat wasmtime; a few compute-heavy long-running ones (e.g. `st_fib2`) still trail Cranelift AOT.
 
 | Benchmark | zwasm | wasmtime | Bun | Node |
 |-----------|------:|---------:|----:|-----:|
@@ -47,21 +47,21 @@ Full results (29 benchmarks): `bench/runtime_comparison.yaml`
 ### SIMD performance
 
 SIMD (v128) operations are JIT-compiled to native NEON (ARM64, 253/256 opcodes) and SSE
-(x86_64, 244/256 opcodes). v128 values are stored as split 64-bit halves in the register file.
+(x86_64, 244/256 opcodes). v128 values now use contiguous register storage (W37) with
+a Q-cache over Q16–Q31 / XMM6–XMM15 (W43, W44) to keep hot vectors resident.
 
-| Benchmark              | zwasm scalar | zwasm SIMD | wasmtime SIMD | SIMD speedup |
-|------------------------|-------------:|-----------:|--------------:|-------------:|
-| image_blend (128x128)  | 73 ms        | 16 ms      | 12 ms         | **4.7x**     |
-| matrix_mul (16x16)     | 10 ms        | 6 ms       | 8 ms          | **1.6x**     |
-| byte_search (64KB)     | 52 ms        | 43 ms      | 5 ms          | **1.2x**     |
-| dot_product (4096)     | 142 ms       | 190 ms     | 15 ms         | 0.75x        |
+| Benchmark              | zwasm scalar | zwasm SIMD | wasmtime SIMD | scalar→SIMD |
+|------------------------|-------------:|-----------:|--------------:|------------:|
+| image_blend (128x128)  | 73 ms        | 16 ms      | 12 ms         | **4.7×**    |
+| matrix_mul (16x16)     | 10 ms        | 6 ms       | 8 ms          | **1.6×**    |
+| byte_search (64 KB)    | 52 ms        | 43 ms      | 5 ms          | 1.2×        |
+| dot_product (4096)     | 142 ms       | 190 ms     | 15 ms         | 0.75×       |
 
-matrix_mul beats wasmtime. image_blend within 1.3x. dot_product is slower due to
-v128.load-heavy inner loop and split storage overhead.
-
-Compiler-generated SIMD code (C `-msimd128`) shows larger gaps due to patterns like
-`i16x8.replace_lane` that are expensive with split v128 storage. Future work: contiguous
-v128 register storage (W37) to eliminate this overhead.
+`matrix_mul` beats wasmtime; `image_blend` is within 1.4×. `byte_search` and
+`dot_product` still trail wasmtime — the remaining gaps are dominated by
+patterns like `i16x8.replace_lane` and `v128.load`-heavy inner loops in
+compiler-generated SIMD code (C `-msimd128`). Loop-header eviction in the
+Q-cache (tracked as W45) is the next lever.
 
 Full data: `bench/simd_comparison.yaml`
 
@@ -73,7 +73,7 @@ All measurements use [hyperfine](https://github.com/sharkdp/hyperfine) with Rele
 # Quick check (1 run, no warmup)
 bash bench/run_bench.sh --quick
 
-# Full measurement (3 runs, 1 warmup)
+# Full measurement (5 runs, 3 warmup)
 bash bench/run_bench.sh
 
 # Record to history
@@ -94,7 +94,7 @@ bash bench/record.sh --id="X" --reason="description"
 ### CI regression detection
 
 PRs are automatically checked for performance regressions:
-- 6 representative benchmarks run on both base and PR branch
+- 12 representative benchmarks (6 uncached + 6 cached) run on both base and PR branch
 - Fails if any benchmark regresses by more than 20%
 - Same runner ensures fair comparison
 

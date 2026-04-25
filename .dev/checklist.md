@@ -25,12 +25,14 @@ Prefix: W## (to distinguish from CW's F## items).
   installs its own SIGSEGV handler for JIT guard pages anyway) + changed
   `main` from `!void` to `u8` to avoid `dumpErrorReturnTrace` pull-in.
   Net: Linux 1.64 → 1.56 MB (-83 KB, -5%), Mac 1.38 → 1.20 MB (-180 KB).
+  CI ceiling tightened from 1.80 MB → 1.60 MB in the same iteration.
   Remaining contributors: `debug.*` still 81 KB (SelfInfo.Elf, Dwarf, writeTrace
   pulled via `std.debug.lockStderr` → `std.Options.debug_io` default),
   `std.Io.Threaded` ~115 KB, `sort.*` ~39 KB. Candidates: override
   `std_options_debug_io` with a minimal direct-stderr Io instance; audit
-  whether `init.io` Threaded can be thinned. Non-blocking; ceiling 1.80 MB
-  still has slack.
+  whether `init.io` Threaded can be thinned. Acknowledged as a hack against
+  stdlib intent — gain vs. risk needs a clean eval before commit.
+  Non-blocking; ceiling 1.60 MB still has ~40 KB slack.
 
 ## Resolved (summary)
 

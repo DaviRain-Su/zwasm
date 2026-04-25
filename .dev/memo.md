@@ -12,7 +12,7 @@ Session handover document. Read at session start.
 - FFI: 80/80 Mac+Ubuntu.
 - JIT: Register IR + ARM64/x86_64 + SIMD (NEON 253/256, SSE 244/256).
 - HOT_THRESHOLD=3 (lowered from 10 in W38).
-- Binary stripped: Mac 1.20 MB, Linux 1.56 MB (ceiling 1.80 MB; post-W48 Phase 1). Memory: ~3.5 MB RSS.
+- Binary stripped: Mac 1.20 MB, Linux 1.56 MB (ceiling 1.60 MB; tightened from 1.80 MB in W48 Phase 1). Memory: ~3.5 MB RSS.
 - Platforms: macOS ARM64, Linux x86_64/ARM64, Windows x86_64.
 - **main = stable**. v1.10.0 released; post-release work on delib / W46 merged
   via PRs #47 (1a/1b pre-cursor), #48 (1b), #49 (1c/1d/1e/1f + C-API libc fix).
