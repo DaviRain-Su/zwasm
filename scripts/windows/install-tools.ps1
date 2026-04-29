@@ -23,7 +23,7 @@
 
 .PARAMETER OnlyTool
     Install just one tool. Accepts: zig, wasm-tools, wasmtime, wasi-sdk,
-    rust, go, tinygo (and 'all', the default).
+    rust, go, tinygo, binaryen (and 'all', the default).
 
 .EXAMPLE
     pwsh -NoLogo -File scripts\windows\install-tools.ps1
@@ -35,7 +35,13 @@
 [CmdletBinding()]
 param(
     [switch]$Force,
-    [ValidateSet('zig', 'wasm-tools', 'wasmtime', 'wasi-sdk', 'rust', 'go', 'tinygo', 'all')]
+    # When set, skip the rust install entirely. CI runners ship with
+    # rustup pre-installed and are happy to `rustup target add
+    # wasm32-wasip1` directly; calling install-tools.ps1 with
+    # -SkipRust avoids re-bootstrapping a self-contained rustup tree
+    # under %LOCALAPPDATA%\zwasm-tools\rust-stable\.
+    [switch]$SkipRust,
+    [ValidateSet('zig', 'wasm-tools', 'wasmtime', 'wasi-sdk', 'rust', 'go', 'tinygo', 'binaryen', 'all')]
     [string]$OnlyTool = 'all'
 )
 
@@ -84,13 +90,21 @@ foreach ($k in 'ZIG_VERSION', 'WASM_TOOLS_VERSION', 'WASMTIME_VERSION', 'WASI_SD
         throw "install-tools.ps1: $k missing from versions.lock"
     }
 }
-# Realworld toolchain pins (W52). Fail loudly if a requested install
-# needs them but they're missing — keeps the script honest about its
-# inputs.
-$realworldKeys = @{ rust = 'RUST_VERSION'; go = 'GO_VERSION'; tinygo = 'TINYGO_VERSION' }
+# Realworld toolchain pins (W52 + binaryen). Fail loudly if a requested
+# install needs them but they're missing — keeps the script honest
+# about its inputs.
+$realworldKeys = @{
+    rust     = 'RUST_VERSION'
+    go       = 'GO_VERSION'
+    tinygo   = 'TINYGO_VERSION'
+    binaryen = 'BINARYEN_VERSION'
+}
 foreach ($pair in $realworldKeys.GetEnumerator()) {
     $tool = $pair.Key; $key = $pair.Value
-    if ($OnlyTool -in @('all', $tool) -and -not $versions.ContainsKey($key)) {
+    # binaryen is also pulled in transitively when 'tinygo' is requested
+    # (TinyGo invokes wasm-opt at build time).
+    $needs = ($OnlyTool -in @('all', $tool)) -or ($tool -eq 'binaryen' -and $OnlyTool -eq 'tinygo')
+    if ($needs -and -not $versions.ContainsKey($key)) {
         throw "install-tools.ps1: $key missing from versions.lock (needed for $tool install)"
     }
 }
@@ -261,6 +275,20 @@ if ($OnlyTool -in @('all', 'tinygo')) {
     $paths['tinygo'] = $dir
 }
 
+if ($OnlyTool -in @('all', 'binaryen', 'tinygo')) {
+    # TinyGo invokes `wasm-opt` as part of its wasm build pipeline.
+    # On Linux/macOS the Nix `tinygo` derivation is wrapped to prepend
+    # binaryen-125's bin/ to PATH automatically; on Windows we install
+    # binaryen explicitly so `wasm-opt` is on PATH for tinygo.
+    # The release tarball extracts to
+    # `binaryen-version_<N>-x86_64-windows/bin/wasm-opt.exe` — Resolve-
+    # SingleSubdir will flatten the version-stamped top dir, leaving
+    # `<install>/bin/wasm-opt.exe`.
+    $url = "https://github.com/WebAssembly/binaryen/releases/download/version_$($versions.BINARYEN_VERSION)/binaryen-version_$($versions.BINARYEN_VERSION)-x86_64-windows.tar.gz"
+    $dir = Install-Tool -Name 'binaryen' -Version $versions.BINARYEN_VERSION -Url $url -Format 'tar.gz'
+    $paths['binaryen'] = $dir
+}
+
 # Rustup is special: it's a self-installer (rustup-init.exe), not an
 # archive. Install into a stamped directory under $installRoot with
 # its own CARGO_HOME / RUSTUP_HOME so the install is self-contained
@@ -308,13 +336,37 @@ function Install-Rustup {
     return $stampedDir
 }
 
-if ($OnlyTool -in @('all', 'rust')) {
+if ($OnlyTool -in @('all', 'rust') -and -not $SkipRust) {
     $rustToolchain = $versions.RUST_VERSION  # e.g. 'stable'
     $rustRoot = Install-Rustup -Toolchain $rustToolchain -InstallRoot $installRoot
     $paths['rust'] = $rustRoot
 }
 
-# --- PATH and env wiring (User scope) ---
+# --- PATH and env wiring (User scope, plus GitHub Actions if present) ---
+#
+# In CI the runner exports `$GITHUB_PATH` and `$GITHUB_ENV` — appending
+# entries to those files exposes the change to subsequent steps in
+# the same job. Local Windows installs do not have those vars set;
+# behaviour falls back to the original User-scope-only path.
+
+$inGithubActions = ($env:GITHUB_PATH -and (Test-Path $env:GITHUB_PATH))
+
+function Append-GithubPath {
+    param([Parameter(Mandatory)][string]$Entry)
+    if ($inGithubActions) {
+        Add-Content -Path $env:GITHUB_PATH -Value $Entry -Encoding utf8
+    }
+}
+
+function Append-GithubEnv {
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [Parameter(Mandatory)][string]$Value
+    )
+    if ($inGithubActions -and (Test-Path $env:GITHUB_ENV)) {
+        Add-Content -Path $env:GITHUB_ENV -Value "$Key=$Value" -Encoding utf8
+    }
+}
 
 function Update-UserPath {
     param([Parameter(Mandatory)][string[]]$Add)
@@ -329,6 +381,9 @@ function Update-UserPath {
             Write-Host "[path] +$p"
             $changed = $true
         }
+        # Always export to GITHUB_PATH so a re-run with cached User
+        # PATH still propagates entries to the current GHA job.
+        Append-GithubPath -Entry $p
     }
     if ($changed) {
         [Environment]::SetEnvironmentVariable('Path', ($entries -join ';'), 'User')
@@ -341,18 +396,21 @@ function Update-UserPath {
 #                                 (no bin/ subdir on Windows).
 #   go                          — bin/ subdir holding go.exe + gofmt.exe.
 #   tinygo                      — bin/ subdir holding tinygo.exe.
+#   binaryen                    — bin/ subdir holding wasm-opt.exe et al.
 #   rust                        — cargo/bin/ holding cargo.exe + rustup.exe.
 $pathsToAdd = @()
 if ($paths.ContainsKey('zig'))        { $pathsToAdd += $paths['zig'] }
 if ($paths.ContainsKey('wasm-tools')) { $pathsToAdd += $paths['wasm-tools'] }
 if ($paths.ContainsKey('wasmtime'))   { $pathsToAdd += $paths['wasmtime'] }
-if ($paths.ContainsKey('go'))         { $pathsToAdd += (Join-Path $paths['go']     'bin') }
-if ($paths.ContainsKey('tinygo'))     { $pathsToAdd += (Join-Path $paths['tinygo'] 'bin') }
+if ($paths.ContainsKey('go'))         { $pathsToAdd += (Join-Path $paths['go']       'bin') }
+if ($paths.ContainsKey('tinygo'))     { $pathsToAdd += (Join-Path $paths['tinygo']   'bin') }
+if ($paths.ContainsKey('binaryen'))   { $pathsToAdd += (Join-Path $paths['binaryen'] 'bin') }
 if ($paths.ContainsKey('rust'))       { $pathsToAdd += (Join-Path (Join-Path $paths['rust'] 'cargo') 'bin') }
 Update-UserPath -Add $pathsToAdd
 
 if ($paths.ContainsKey('wasi-sdk')) {
     [Environment]::SetEnvironmentVariable('WASI_SDK_PATH', $paths['wasi-sdk'], 'User')
+    Append-GithubEnv -Key 'WASI_SDK_PATH' -Value $paths['wasi-sdk']
     Write-Host "[env] WASI_SDK_PATH=$($paths['wasi-sdk'])"
 }
 
@@ -364,6 +422,8 @@ if ($paths.ContainsKey('rust')) {
     $rustupHome = Join-Path $rustRoot 'rustup'
     [Environment]::SetEnvironmentVariable('CARGO_HOME',  $cargoHome,  'User')
     [Environment]::SetEnvironmentVariable('RUSTUP_HOME', $rustupHome, 'User')
+    Append-GithubEnv -Key 'CARGO_HOME'  -Value $cargoHome
+    Append-GithubEnv -Key 'RUSTUP_HOME' -Value $rustupHome
     Write-Host "[env] CARGO_HOME=$cargoHome"
     Write-Host "[env] RUSTUP_HOME=$rustupHome"
 }
