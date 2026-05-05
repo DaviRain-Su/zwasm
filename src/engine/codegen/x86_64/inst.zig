@@ -891,6 +891,47 @@ pub fn encMovqXmmFromR64(xmm_dst: Xmm, gpr_src: Gpr) EncodedInsn {
     return enc;
 }
 
+/// `MOVAPS xmm, xmm` (0x0F 0x28 /r) — 128-bit aligned move
+/// between XMM registers. Used as the FP equivalent of
+/// `MOV r32, r32` (lhs → dst before the SSE binary op).
+/// dst occupies ModR/M.reg, src occupies r/m.
+pub fn encMovapsXmmXmm(dst: Xmm, src: Xmm) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (dst.extBit() != 0 or src.extBit() != 0) {
+        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0x28);
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    return enc;
+}
+
+/// Mandatory prefix for SSE scalar ops. F3 = single-precision
+/// (operates on the low 32 bits of XMM = f32). F2 = double-
+/// precision (operates on the low 64 bits = f64).
+pub const SseScalarKind = enum(u8) {
+    f32 = 0xF3,
+    f64 = 0xF2,
+};
+
+/// SSE2 scalar binary op (ADDSS / ADDSD / SUBSS / SUBSD /
+/// MULSS / MULSD / DIVSS / DIVSD). Encoding:
+///   <prefix> [REX?] 0x0F <opcode> ModR/M
+/// where `<prefix>` is F3 (f32) or F2 (f64); `<opcode>` is
+/// 0x58 (add), 0x5C (sub), 0x59 (mul), 0x5E (div).
+/// dst occupies ModR/M.reg, src occupies r/m.
+pub fn encSseScalarBinary(kind: SseScalarKind, opcode: u8, dst: Xmm, src: Xmm) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(@intFromEnum(kind));
+    if (dst.extBit() != 0 or src.extBit() != 0) {
+        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(opcode);
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    return enc;
+}
+
 /// `MOV r32, imm32` (opcode 0xB8+rd ib32) — load a 32-bit
 /// immediate into a GPR. The 32-bit form zero-extends to 64
 /// bits (Wasm i32 semantics map to this). REX.B for R8..R15.
@@ -1460,4 +1501,34 @@ test "encMovqXmmFromR64: movq xmm0, rax → 66 48 0f 6e c0 (REX.W only)" {
 test "encMovqXmmFromR64: movq xmm8, rax → 66 4c 0f 6e c0 (REX.W + REX.R)" {
     const enc = encMovqXmmFromR64(.xmm8, .rax);
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x4C, 0x0F, 0x6E, 0xC0 }, enc.slice());
+}
+
+test "encMovapsXmmXmm: movaps xmm0, xmm1 → 0f 28 c1 (no REX)" {
+    const enc = encMovapsXmmXmm(.xmm0, .xmm1);
+    try testing.expectEqualSlices(u8, &.{ 0x0F, 0x28, 0xC1 }, enc.slice());
+}
+
+test "encMovapsXmmXmm: movaps xmm10, xmm8 → 45 0f 28 d0 (REX.R + REX.B)" {
+    const enc = encMovapsXmmXmm(.xmm10, .xmm8);
+    try testing.expectEqualSlices(u8, &.{ 0x45, 0x0F, 0x28, 0xD0 }, enc.slice());
+}
+
+test "encSseScalarBinary: addss xmm0, xmm1 → f3 0f 58 c1 (no REX)" {
+    const enc = encSseScalarBinary(.f32, 0x58, .xmm0, .xmm1);
+    try testing.expectEqualSlices(u8, &.{ 0xF3, 0x0F, 0x58, 0xC1 }, enc.slice());
+}
+
+test "encSseScalarBinary: addss xmm10, xmm9 → f3 45 0f 58 d1 (REX.R + REX.B)" {
+    const enc = encSseScalarBinary(.f32, 0x58, .xmm10, .xmm9);
+    try testing.expectEqualSlices(u8, &.{ 0xF3, 0x45, 0x0F, 0x58, 0xD1 }, enc.slice());
+}
+
+test "encSseScalarBinary: mulsd xmm8, xmm9 → f2 45 0f 59 c1 (REX, F2 prefix, opcode 59)" {
+    const enc = encSseScalarBinary(.f64, 0x59, .xmm8, .xmm9);
+    try testing.expectEqualSlices(u8, &.{ 0xF2, 0x45, 0x0F, 0x59, 0xC1 }, enc.slice());
+}
+
+test "encSseScalarBinary: divsd xmm0, xmm1 → f2 0f 5e c1 (no REX, opcode 5E)" {
+    const enc = encSseScalarBinary(.f64, 0x5E, .xmm0, .xmm1);
+    try testing.expectEqualSlices(u8, &.{ 0xF2, 0x0F, 0x5E, 0xC1 }, enc.slice());
 }

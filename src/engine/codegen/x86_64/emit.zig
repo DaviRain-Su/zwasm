@@ -265,6 +265,9 @@ pub fn compile(
             .@"call_indirect" => try emitCallIndirect(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, module_types, ins.payload),
             .@"f32.const", .@"f64.const",
             => try emitFpConst(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op, ins.payload, ins.extra),
+            .@"f32.add", .@"f32.sub", .@"f32.mul", .@"f32.div",
+            .@"f64.add", .@"f64.sub", .@"f64.mul", .@"f64.div",
+            => try emitFpBinary(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
             .@"local.get" => try emitLocalGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, num_locals, uses_runtime_ptr, ins.payload),
             .@"local.set" => try emitLocalSet(allocator, &buf, alloc, &pushed_vregs, num_locals, uses_runtime_ptr, ins.payload),
             .@"local.tee" => try emitLocalTee(allocator, &buf, alloc, &pushed_vregs, num_locals, uses_runtime_ptr, ins.payload),
@@ -683,6 +686,56 @@ fn emitFpConst(
         },
         else => unreachable,
     }
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// FP binary handler — f32/f64 add/sub/mul/div via SSE2 scalar
+/// ops (ADDSS/ADDSD/SUBSS/SUBSD/MULSS/MULSD/DIVSS/DIVSD). Emits
+/// `MOVAPS dst, lhs` then `<op> dst, rhs` (mirrors the integer
+/// always-MOV form; the peephole that elides the MOV when
+/// dst == lhs lands when regalloc starts reusing slots).
+///
+/// **Constraint**: dst must not equal rhs (MOVAPS dst, lhs would
+/// clobber rhs before OP reads it). With fresh-vreg-per-op
+/// allocation this never fires; surfaces as `UnsupportedOp` —
+/// same shape as `emitI32Binary`.
+fn emitFpBinary(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    op: zir.ZirOp,
+) Error!void {
+    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
+    const rhs_v = pushed_vregs.pop().?;
+    const lhs_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+    const lhs = abi.fpSlotToReg(alloc.slots[lhs_v]) orelse return Error.SlotOverflow;
+    const rhs = abi.fpSlotToReg(alloc.slots[rhs_v]) orelse return Error.SlotOverflow;
+    const dst = abi.fpSlotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+    if (dst == rhs and dst != lhs) return Error.UnsupportedOp;
+
+    if (dst != lhs) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst, lhs).slice());
+    }
+
+    const kind: inst.SseScalarKind = switch (op) {
+        .@"f32.add", .@"f32.sub", .@"f32.mul", .@"f32.div" => .f32,
+        .@"f64.add", .@"f64.sub", .@"f64.mul", .@"f64.div" => .f64,
+        else => unreachable,
+    };
+    const opcode: u8 = switch (op) {
+        .@"f32.add", .@"f64.add" => 0x58,
+        .@"f32.sub", .@"f64.sub" => 0x5C,
+        .@"f32.mul", .@"f64.mul" => 0x59,
+        .@"f32.div", .@"f64.div" => 0x5E,
+        else => unreachable,
+    };
+    try buf.appendSlice(allocator, inst.encSseScalarBinary(kind, opcode, dst, rhs).slice());
+
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -2630,6 +2683,81 @@ test "compile: f64.const — MOVABS RAX,bits + MOVQ XMM8,RAX" {
     try testing.expectEqualSlices(u8, expected_imm.slice(), out.bytes[4 .. 4 + expected_imm.len]);
     const expected_movq = inst.encMovqXmmFromR64(.xmm8, .rax);
     try testing.expectEqualSlices(u8, expected_movq.slice(), out.bytes[14 .. 14 + expected_movq.len]);
+}
+
+test "compile: f32.add — MOVAPS XMM10,XMM8 + ADDSS XMM10,XMM9" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0x3F800000 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0x40000000 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.add" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 2 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+        .{ .def_pc = 2, .last_use_pc = 3 },
+    } };
+    // FP slots 0,1,2 → XMM8, XMM9, XMM10.
+    const slots = [_]u8{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 3 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // Body layout (4-byte prologue):
+    //   [4..14]  f32.const 0x3F800000 (10 bytes: MOV EAX + MOVD XMM8)
+    //   [14..24] f32.const 0x40000000 (10 bytes: MOV EAX + MOVD XMM9)
+    //   [24..28] MOVAPS XMM10, XMM8   (4 bytes)
+    //   [28..33] ADDSS XMM10, XMM9    (5 bytes)
+    const expected_movaps = inst.encMovapsXmmXmm(.xmm10, .xmm8);
+    try testing.expectEqualSlices(u8, expected_movaps.slice(), out.bytes[24 .. 24 + expected_movaps.len]);
+    const expected_addss = inst.encSseScalarBinary(.f32, 0x58, .xmm10, .xmm9);
+    try testing.expectEqualSlices(u8, expected_addss.slice(), out.bytes[28 .. 28 + expected_addss.len]);
+}
+
+test "compile: f64.mul — MOVAPS XMM10,XMM8 + MULSD XMM10,XMM9" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f64} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    // 1.0 = 0x3FF0000000000000 split low/high.
+    try f.instrs.append(testing.allocator, .{ .op = .@"f64.const", .payload = 0, .extra = 0x3FF00000 });
+    // 2.0 = 0x4000000000000000 split low/high.
+    try f.instrs.append(testing.allocator, .{ .op = .@"f64.const", .payload = 0, .extra = 0x40000000 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f64.mul" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 2 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+        .{ .def_pc = 2, .last_use_pc = 3 },
+    } };
+    const slots = [_]u8{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 3 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // Body layout (4-byte prologue):
+    //   [4..19]  f64.const 1.0 (15 bytes: MOVABS RAX + MOVQ XMM8,RAX)
+    //   [19..34] f64.const 2.0 (15 bytes)
+    //   [34..38] MOVAPS XMM10, XMM8 (4 bytes)
+    //   [38..43] MULSD XMM10, XMM9  (5 bytes)
+    const expected_movaps = inst.encMovapsXmmXmm(.xmm10, .xmm8);
+    try testing.expectEqualSlices(u8, expected_movaps.slice(), out.bytes[34 .. 34 + expected_movaps.len]);
+    const expected_mulsd = inst.encSseScalarBinary(.f64, 0x59, .xmm10, .xmm9);
+    try testing.expectEqualSlices(u8, expected_mulsd.slice(), out.bytes[38 .. 38 + expected_mulsd.len]);
+}
+
+test "compile: f32.add stack underflow → AllocationMissing" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.add" }); // missing rhs
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+    } };
+    const slots = [_]u8{ 0, 1 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 2 };
+    try testing.expectError(Error.AllocationMissing, compile(testing.allocator, &f, alloc, &.{}, &.{}));
 }
 
 test "compile: call_indirect — out-of-range type_idx → AllocationMissing" {
