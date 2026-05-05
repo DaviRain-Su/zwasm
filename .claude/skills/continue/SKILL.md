@@ -591,12 +591,33 @@ Currently registered hard gates:
      ☑ as items resolve, and finally asking for the gate to
      be cleared (= flipping 7.13 to `[x]`).
 
-**Detection rule** for the autonomous loop: at every Step 7
-re-target, scan the §9.<active>'s next `[ ]` row. If its body
-text contains `🔒` AND `phase<N>_transition_gate.md`, the row
-is a hard gate. Stop instead of fire-and-forget. This pattern
-generalises — future hard gates (Phase 11 → 12+, etc.) can be
-added by replicating the row + gate document shape.
+**Detection rule** — the loop scans for hard gates at **two**
+checkpoints:
+
+1. **Resume Procedure Step 2** (every `/continue` invocation,
+   including fresh manual sessions and `ScheduleWakeup`-fired
+   wake-ups). When reading §9.<active>'s task table to identify
+   the first `[ ]` row, check whether that row's body contains
+   `🔒` AND a `phase<N>_transition_gate.md` reference. If yes,
+   this is a hard gate — surface to user immediately with a
+   one-sentence handoff and the gate doc path. **Do not enter
+   the per-task TDD loop**.
+2. **Step 7 re-target** (after a per-task close, before the
+   final `ScheduleWakeup`). Scan the next `[ ]` row in
+   §9.<active>; same detection. If matched, skip
+   `ScheduleWakeup` and surface to user.
+
+Both checkpoints are needed because: (1) a fresh `/continue`
+may load up after a previous session already flipped 7.12 to
+`[x]`, in which case Resume Procedure walks straight into the
+gate row without ever passing through Step 7 of a prior task;
+(2) a long-running autonomous session that closes the pre-gate
+row in-cycle and is about to re-arm needs Step 7 to catch the
+gate before sleeping.
+
+This pattern generalises — future hard gates (Phase 11 → 12+,
+etc.) can be added by replicating the row + gate document
+shape; the same Detection rule then catches them.
 
 A hard gate is **not** a bucket-2 unsolvable problem; the loop
 isn't broken. It's an explicit "this needs the user; don't
