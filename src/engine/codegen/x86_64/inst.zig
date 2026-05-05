@@ -906,6 +906,24 @@ pub fn encMovapsXmmXmm(dst: Xmm, src: Xmm) EncodedInsn {
     return enc;
 }
 
+/// `CVTSI2SS xmm, r/m32` / `CVTSI2SD xmm, r/m64` family —
+/// signed integer to scalar float conversion.
+///   F3 [REX?] 0F 2A /r (CVTSI2SS, src f32-aware via prefix)
+///   F2 [REX?] 0F 2A /r (CVTSI2SD)
+/// `src_is_64` toggles REX.W for the i64 source variant.
+/// xmm in ModR/M.reg, gpr in r/m.
+pub fn encCvtsi2Scalar(scalar_kind: SseScalarKind, src_is_64: bool, xmm_dst: Xmm, gpr_src: Gpr) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(@intFromEnum(scalar_kind));
+    if (src_is_64 or xmm_dst.extBit() != 0 or gpr_src.extBit() != 0) {
+        enc.push(encodeRex(src_is_64, xmm_dst.extBit(), 0, gpr_src.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0x2A);
+    enc.push(encodeModrm(0b11, xmm_dst.low3(), gpr_src.low3()));
+    return enc;
+}
+
 /// `MOVD r/m32, xmm` (0x66 + 0x0F 0x7E /r) — extract the low
 /// 32 bits of an XMM into a GPR. Mirror of `encMovdXmmFromR32`.
 /// xmm in ModR/M.reg, gpr in r/m.
@@ -1714,4 +1732,24 @@ test "encMovqR64FromXmm: movq rax, xmm8 → 66 4c 0f 7e c0 (REX.W + REX.R)" {
 test "encMovqR64FromXmm: movq rcx, xmm0 → 66 48 0f 7e c1 (REX.W only)" {
     const enc = encMovqR64FromXmm(.rcx, .xmm0);
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x48, 0x0F, 0x7E, 0xC1 }, enc.slice());
+}
+
+test "encCvtsi2Scalar: cvtsi2ss xmm0, eax → f3 0f 2a c0 (no REX)" {
+    const enc = encCvtsi2Scalar(.f32, false, .xmm0, .rax);
+    try testing.expectEqualSlices(u8, &.{ 0xF3, 0x0F, 0x2A, 0xC0 }, enc.slice());
+}
+
+test "encCvtsi2Scalar: cvtsi2ss xmm8, rax → f3 4c 0f 2a c0 (REX.W + REX.R)" {
+    const enc = encCvtsi2Scalar(.f32, true, .xmm8, .rax);
+    try testing.expectEqualSlices(u8, &.{ 0xF3, 0x4C, 0x0F, 0x2A, 0xC0 }, enc.slice());
+}
+
+test "encCvtsi2Scalar: cvtsi2sd xmm8, r10d → f2 45 0f 2a c2 (REX.R + REX.B)" {
+    const enc = encCvtsi2Scalar(.f64, false, .xmm8, .r10);
+    try testing.expectEqualSlices(u8, &.{ 0xF2, 0x45, 0x0F, 0x2A, 0xC2 }, enc.slice());
+}
+
+test "encCvtsi2Scalar: cvtsi2sd xmm0, rax → f2 48 0f 2a c0 (REX.W only)" {
+    const enc = encCvtsi2Scalar(.f64, true, .xmm0, .rax);
+    try testing.expectEqualSlices(u8, &.{ 0xF2, 0x48, 0x0F, 0x2A, 0xC0 }, enc.slice());
 }

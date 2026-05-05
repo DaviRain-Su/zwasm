@@ -280,6 +280,12 @@ pub fn compile(
             => try emitFpCopysign(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
             .@"f32.min", .@"f32.max", .@"f64.min", .@"f64.max",
             => try emitFpMinMax(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
+            .@"f64.promote_f32", .@"f32.demote_f64",
+            .@"i32.reinterpret_f32", .@"i64.reinterpret_f64",
+            .@"f32.reinterpret_i32", .@"f64.reinterpret_i64",
+            .@"f32.convert_i32_s", .@"f32.convert_i64_s",
+            .@"f64.convert_i32_s", .@"f64.convert_i64_s",
+            => try emitFpConvertSimple(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
             .@"local.get" => try emitLocalGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, num_locals, uses_runtime_ptr, ins.payload),
             .@"local.set" => try emitLocalSet(allocator, &buf, alloc, &pushed_vregs, num_locals, uses_runtime_ptr, ins.payload),
             .@"local.tee" => try emitLocalTee(allocator, &buf, alloc, &pushed_vregs, num_locals, uses_runtime_ptr, ins.payload),
@@ -695,6 +701,78 @@ fn emitFpConst(
             const value: u64 = (@as(u64, extra) << 32) | @as(u64, payload);
             try buf.appendSlice(allocator, inst.encMovImm64Q(.rax, value).slice());
             try buf.appendSlice(allocator, inst.encMovqXmmFromR64(xmm_dst, .rax).slice());
+        },
+        else => unreachable,
+    }
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// FP simple-convert handler — single-instruction conversions:
+/// - `f64.promote_f32` (CVTSS2SD), `f32.demote_f64` (CVTSD2SS).
+/// - reinterpret (i↔f bit-cast via existing MOVD/MOVQ).
+/// - signed i→f convert (CVTSI2SS/SD with REX.W for i64 source).
+///
+/// Unsigned i→f convert + trapping/saturating f→i trunc deferred
+/// to follow-up sub-chunks (need extra range-check / fixup).
+fn emitFpConvertSimple(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    op: zir.ZirOp,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    switch (op) {
+        .@"f64.promote_f32" => {
+            const src_x = abi.fpSlotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
+            const dst_x = abi.fpSlotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+            try buf.appendSlice(allocator, inst.encSseScalarBinary(.f32, 0x5A, dst_x, src_x).slice());
+        },
+        .@"f32.demote_f64" => {
+            const src_x = abi.fpSlotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
+            const dst_x = abi.fpSlotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+            try buf.appendSlice(allocator, inst.encSseScalarBinary(.f64, 0x5A, dst_x, src_x).slice());
+        },
+        .@"i32.reinterpret_f32" => {
+            const src_x = abi.fpSlotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
+            const dst_g = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+            try buf.appendSlice(allocator, inst.encMovdR32FromXmm(dst_g, src_x).slice());
+        },
+        .@"i64.reinterpret_f64" => {
+            const src_x = abi.fpSlotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
+            const dst_g = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+            try buf.appendSlice(allocator, inst.encMovqR64FromXmm(dst_g, src_x).slice());
+        },
+        .@"f32.reinterpret_i32" => {
+            const src_g = abi.slotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
+            const dst_x = abi.fpSlotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+            try buf.appendSlice(allocator, inst.encMovdXmmFromR32(dst_x, src_g).slice());
+        },
+        .@"f64.reinterpret_i64" => {
+            const src_g = abi.slotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
+            const dst_x = abi.fpSlotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+            try buf.appendSlice(allocator, inst.encMovqXmmFromR64(dst_x, src_g).slice());
+        },
+        .@"f32.convert_i32_s", .@"f32.convert_i64_s",
+        .@"f64.convert_i32_s", .@"f64.convert_i64_s",
+        => {
+            const src_g = abi.slotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
+            const dst_x = abi.fpSlotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+            const scalar_kind: inst.SseScalarKind = switch (op) {
+                .@"f32.convert_i32_s", .@"f32.convert_i64_s" => .f32,
+                else => .f64,
+            };
+            const src_is_64 = switch (op) {
+                .@"f32.convert_i64_s", .@"f64.convert_i64_s" => true,
+                else => false,
+            };
+            try buf.appendSlice(allocator, inst.encCvtsi2Scalar(scalar_kind, src_is_64, dst_x, src_g).slice());
         },
         else => unreachable,
     }
@@ -3087,6 +3165,88 @@ test "compile: f64.mul — MOVAPS XMM10,XMM8 + MULSD XMM10,XMM9" {
     try testing.expectEqualSlices(u8, expected_movaps.slice(), out.bytes[34 .. 34 + expected_movaps.len]);
     const expected_mulsd = inst.encSseScalarBinary(.f64, 0x59, .xmm10, .xmm9);
     try testing.expectEqualSlices(u8, expected_mulsd.slice(), out.bytes[38 .. 38 + expected_mulsd.len]);
+}
+
+test "compile: f64.promote_f32 — CVTSS2SD XMM9, XMM8" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f64} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0x40000000 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f64.promote_f32" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+    } };
+    const slots = [_]u8{ 0, 1 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 2 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // After f32.const at [4..14]: CVTSS2SD XMM9, XMM8 at [14..19].
+    const expected = inst.encSseScalarBinary(.f32, 0x5A, .xmm9, .xmm8);
+    try testing.expectEqualSlices(u8, expected.slice(), out.bytes[14 .. 14 + expected.len]);
+}
+
+test "compile: i32.reinterpret_f32 — MOVD R10D, XMM8 (XMM→GPR bit-cast)" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0xDEADBEEF });
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.reinterpret_f32" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+    } };
+    // FP slot 0 → XMM8; result GPR slot 0 → R10.
+    const slots = [_]u8{ 0, 0 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // After f32.const at [4..14]: MOVD R10D, XMM8 at [14..19].
+    const expected = inst.encMovdR32FromXmm(.r10, .xmm8);
+    try testing.expectEqualSlices(u8, expected.slice(), out.bytes[14 .. 14 + expected.len]);
+}
+
+test "compile: f32.reinterpret_i32 — MOVD XMM8, R10D (GPR→XMM bit-cast)" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0x3F800000 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.reinterpret_i32" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+    } };
+    // GPR slot 0 → R10; FP slot 0 → XMM8.
+    const slots = [_]u8{ 0, 0 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // After i32.const at [4..10] (6 bytes for R10): MOVD XMM8, R10D at [10..15].
+    const expected = inst.encMovdXmmFromR32(.xmm8, .r10);
+    try testing.expectEqualSlices(u8, expected.slice(), out.bytes[10 .. 10 + expected.len]);
+}
+
+test "compile: f32.convert_i32_s — CVTSI2SS XMM8, R10D" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 42 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.convert_i32_s" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+    } };
+    const slots = [_]u8{ 0, 0 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // After i32.const at [4..10]: CVTSI2SS XMM8, R10D at [10..15].
+    const expected = inst.encCvtsi2Scalar(.f32, false, .xmm8, .r10);
+    try testing.expectEqualSlices(u8, expected.slice(), out.bytes[10 .. 10 + expected.len]);
 }
 
 test "compile: f32.min — branch-based emit (UCOMISS + JP/JE + 3 paths)" {
