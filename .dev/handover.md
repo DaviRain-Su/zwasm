@@ -23,20 +23,20 @@
 ## Current state — Phase 7 / §9.7 / 7.7 IN-PROGRESS
 
 直近 commit:
-- `df99e67` §9.7 / 7.7-fp-convert-unsigned — x86_64 unsigned
-  i→f (i32_u via .q zero-extend trick + i64_u branch-based
-  slow-path); encShrRImm8 + encAndRImm8 new; 6 tests; 3-host green
+- `20a2c0e` §9.7 / 7.7-fp-trunc-sat-signed — x86_64 Wasm 2.0
+  saturating signed f→i (4 ops via CVTTSS2SI + INT_MIN sentinel
+  branch); encCvttScalar2Int new; 6 tests; 3-host green
+- `df99e67` §9.7 / 7.7-fp-convert-unsigned — unsigned i→f (4 ops)
 - `2e60605` §9.7 / 7.7-fp-convert-simple — promote/demote +
   reinterpret + signed convert (10 ops)
-- `1205ae0` §9.7 / 7.7-fp-minmax — f32/f64 min/max
 
-**Active task**: **NEXT** = 7.7-fp-trunc-sat (Wasm 2.0
-saturating f→i, 8 ops via CVTTSS2SI + range-clamp)。続いて
-fp-trunc-trap → fp-mem → fp-end-fix (D-032) → §9.7 / 7.8 spec
-gate。
+**Active task**: **NEXT** = 7.7-fp-trunc-sat-unsigned (4 ops:
+i32/i64.trunc_sat_f32/f64_u — branch on x≤0 / x≥MAX, then
+CVTTSS2SI signed for safe range)。続いて fp-trunc-trap (Wasm 1.0
+8 ops) → fp-mem → fp-end-fix (D-032) → §9.7 / 7.8 spec gate。
 
 **Phase**: Phase 7 (ARM64 + x86_64 baseline、ADR-0019)。
-**Branch**: `zwasm-from-scratch`、最新は `df99e67`。
+**Branch**: `zwasm-from-scratch`、最新は `20a2c0e`。
 
 ## ADR-0025 implementation chain (Phase A done; B-D pending)
 
@@ -90,7 +90,8 @@ fixed).
 | 7.7-fp-minmax | f32/f64 min/max (branch-based NaN/±0 spec) | DONE `1205ae0` |
 | 7.7-fp-convert-simple | promote/demote + reinterpret + signed i→f | DONE `2e60605` |
 | 7.7-fp-convert-unsigned | f.convert_iN_u (i64 branch-based) | DONE `df99e67` |
-| 7.7-fp-trunc-sat | Wasm 2.0 saturating f→i (8 ops) | **NEXT** |
+| 7.7-fp-trunc-sat-signed | Wasm 2.0 saturating signed f→i (4 ops) | DONE `20a2c0e` |
+| 7.7-fp-trunc-sat-unsigned | Wasm 2.0 saturating unsigned f→i (4 ops) | **NEXT** |
 | 7.7-fp-trunc-trap | Wasm 1.0 trapping f→i (8 ops) | pending |
 | 7.7-fp-mem | f32/f64 load/store | pending |
 | 7.7-fp-end-fix | FP-aware function-end (D-032 discharge) | pending |
@@ -114,10 +115,13 @@ deferred to phase boundary batch update.
 
 ## Recently closed (per `git log --oneline -45`)
 
+- §9.7 / 7.7-fp-trunc-sat-signed: x86_64 Wasm 2.0 saturating
+  signed f→i (4 ops via CVTTSS2SI sentinel + branch on NaN/sign
+  for INT_MAX vs INT_MIN saturation, NaN→0); encCvttScalar2Int
+  new; 6 tests (20a2c0e)。
 - §9.7 / 7.7-fp-convert-unsigned: x86_64 unsigned i→f (i32_u via
-  .q zero-extend trick / i64_u branch-based slow-path with SHR+
-  AND+OR halve/round + ADDSS double); encShrRImm8 + encAndRImm8
-  new; 6 tests (df99e67)。
+  .q zero-extend trick / i64_u branch-based slow-path); 6 tests
+  (df99e67)。
 - §9.7 / 7.7-fp-convert-simple: x86_64 promote/demote +
   reinterpret + signed convert (10 ops); encCvtsi2Scalar new;
   8 tests (2e60605)。
