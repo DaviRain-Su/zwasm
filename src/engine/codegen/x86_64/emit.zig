@@ -337,11 +337,40 @@ pub fn compile(
                     const top = pushed_vregs.items[pushed_vregs.items.len - 1];
                     if (top >= alloc.slots.len) return Error.SlotOverflow;
                     const slot_id = alloc.slots[top];
-                    const src = abi.slotToReg(slot_id) orelse return Error.SlotOverflow;
-                    if (src != abi.return_gpr) {
-                        // MOV EAX, src — Width.d zero-extends to
-                        // 64 bits, matching Wasm i32 ABI.
-                        try buf.appendSlice(allocator, inst.encMovRR(.d, abi.return_gpr, src).slice());
+                    switch (func.sig.results[0]) {
+                        .i32, .funcref, .externref => {
+                            const src = abi.slotToReg(slot_id) orelse return Error.SlotOverflow;
+                            if (src != abi.return_gpr) {
+                                // MOV EAX, src — Width.d zero-extends
+                                // the upper 32 bits of RAX, matching
+                                // the SysV i32 / 32-bit-pointer ABI.
+                                try buf.appendSlice(allocator, inst.encMovRR(.d, abi.return_gpr, src).slice());
+                            }
+                        },
+                        .i64 => {
+                            const src = abi.slotToReg(slot_id) orelse return Error.SlotOverflow;
+                            if (src != abi.return_gpr) {
+                                // MOV RAX, src — Width.q preserves
+                                // the full 64 bits; .d would silently
+                                // truncate (D-032 root cause).
+                                try buf.appendSlice(allocator, inst.encMovRR(.q, abi.return_gpr, src).slice());
+                            }
+                        },
+                        .f32, .f64 => {
+                            const src_x = abi.fpSlotToReg(slot_id) orelse return Error.SlotOverflow;
+                            if (src_x != abi.return_xmm) {
+                                // MOVAPS XMM0, src_xmm — copies the
+                                // full 128-bit XMM. Sufficient for
+                                // both f32 (low 32 used) and f64
+                                // (low 64 used). Mirrors ARM64's
+                                // FMOV S0/D0 marshal at
+                                // arm64/emit.zig:475-503 but does
+                                // not need width discrimination on
+                                // x86_64.
+                                try buf.appendSlice(allocator, inst.encMovapsXmmXmm(abi.return_xmm, src_x).slice());
+                            }
+                        },
+                        .v128 => return Error.UnsupportedOp,
                     }
                 }
                 // Epilogue: ADD RSP, frame ; POP R15? ; POP RBP ; RET.
@@ -690,13 +719,6 @@ fn emitCall(
 /// pool), then MOVD/MOVQ into the result XMM slot. ZirInstr
 /// packs the f64 bit pattern across (payload=low32, extra=high32);
 /// f32 uses payload only.
-///
-/// **End-handler limitation**: the function-level `end` currently
-/// emits MOV EAX,r32(src) for every result type, which truncates
-/// FP results. Byte-level emit tests still pass (the const-handler
-/// region is correct); execution-level fixtures gate on a
-/// follow-up "FP-aware end handler" chunk. See `.dev/debt.md`
-/// for the structural barrier.
 fn emitFpConst(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
@@ -4711,4 +4733,118 @@ test "compile: i32.add with stack underflow → AllocationMissing" {
     const slots = [_]u8{ 0, 1 };
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 2 };
     try testing.expectError(Error.AllocationMissing, compile(testing.allocator, &f, alloc, &.{}, &.{}));
+}
+
+// FP / i64 -aware function-level `end` return marshal (D-032).
+// `f32.const` / `f64.const` push their value onto an XMM slot;
+// `i64.extend_i32_u` pushes a full 64-bit GPR result. The
+// pre-fix end handler emitted `MOV EAX, r32(slotToReg(slot))`
+// for *every* result type, which (a) read the wrong physical
+// reg for FP results (fpSlotToReg ≠ slotToReg for the same
+// slot id) and (b) truncated i64 to i32 by using .d width.
+// The fix dispatches on `func.sig.results[0]`:
+//   .i32/.funcref/.externref → MOV EAX, src   (.d, current)
+//   .i64                     → MOV RAX, src   (.q, full width)
+//   .f32/.f64                → MOVAPS XMM0, src_xmm
+//   .v128                    → UnsupportedOp (deferred)
+// MOVAPS works for both f32 and f64: x86_64 returns FP values in
+// XMM0 with full register width, so a single 128-bit register
+// move is sufficient (vs ARM64's FMOV S0/D0 size-discriminated
+// move). See ARM64 reference at arm64/emit.zig:475-503.
+
+test "compile: f32.const → end emits MOVAPS XMM0, XMM8 (FP-aware return marshal)" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0x3F800000 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+    } };
+    const slots = [_]u8{0}; // FP slot 0 → XMM8.
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // Layout (uses_runtime_ptr = false, frame_bytes = 0):
+    //   [0..4]   prologue: PUSH RBP ; MOV RBP, RSP
+    //   [4..14]  f32.const: MOV EAX, bits ; MOVD XMM8, EAX
+    //   [14..18] end FP marshal: MOVAPS XMM0, XMM8 (4 bytes)
+    //   [18..20] epilogue: POP RBP ; RET
+    const expected_movaps = inst.encMovapsXmmXmm(.xmm0, .xmm8);
+    try testing.expectEqualSlices(u8, expected_movaps.slice(), out.bytes[14 .. 14 + expected_movaps.len]);
+    try testing.expectEqual(@as(usize, 20), out.bytes.len);
+}
+
+test "compile: f64.const → end emits MOVAPS XMM0, XMM8 (same MOVAPS works for f64)" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f64} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    const bits: u64 = 0x3FF0000000000000; // 1.0
+    try f.instrs.append(testing.allocator, .{
+        .op = .@"f64.const",
+        .payload = @truncate(bits),
+        .extra = @truncate(bits >> 32),
+    });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+    } };
+    const slots = [_]u8{0};
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // Layout:
+    //   [0..4]   prologue
+    //   [4..19]  f64.const: MOVABS RAX, bits ; MOVQ XMM8, RAX
+    //   [19..23] end FP marshal: MOVAPS XMM0, XMM8
+    //   [23..25] epilogue
+    const expected_movaps = inst.encMovapsXmmXmm(.xmm0, .xmm8);
+    try testing.expectEqualSlices(u8, expected_movaps.slice(), out.bytes[19 .. 19 + expected_movaps.len]);
+    try testing.expectEqual(@as(usize, 25), out.bytes.len);
+}
+
+test "compile: i64-result end emits MOV RAX, src (.q full width avoids truncation)" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i64} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0x12345678 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"i64.extend_i32_u" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+    } };
+    // GPR slot 0 → R10. Both vregs share slot id 0 (sub-7.5d shape).
+    const slots = [_]u8{ 0, 0 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // Layout:
+    //   [0..4]   prologue
+    //   [4..10]  i32.const: MOV R10D, imm32 (REX.B + opcode + 4-byte imm = 6 bytes)
+    //   [10..13] i64.extend_i32_u: MOV R10D, R10D (.d, 3 bytes)
+    //   [13..16] end i64 marshal: MOV RAX, R10 (.q, 3 bytes)
+    //   [16..18] epilogue
+    const expected_movrr = inst.encMovRR(.q, .rax, .r10);
+    try testing.expectEqualSlices(u8, expected_movrr.slice(), out.bytes[13 .. 13 + expected_movrr.len]);
+    try testing.expectEqual(@as(usize, 18), out.bytes.len);
+}
+
+test "compile: v128-result end → UnsupportedOp (v128 marshalling deferred)" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.v128} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    // v128 producer ops are not yet implemented; reuse f32.const
+    // to push an FP slot whose result_kind discriminator forces
+    // the end handler down the v128 arm. The test asserts the
+    // end handler refuses unknown-width returns rather than
+    // silently emitting truncating MOV EAX bytes.
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+    } };
+    const slots = [_]u8{0};
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    try testing.expectError(Error.UnsupportedOp, compile(testing.allocator, &f, alloc, &.{}, &.{}));
 }
