@@ -268,6 +268,9 @@ pub fn compile(
             .@"f32.add", .@"f32.sub", .@"f32.mul", .@"f32.div",
             .@"f64.add", .@"f64.sub", .@"f64.mul", .@"f64.div",
             => try emitFpBinary(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
+            .@"f32.eq", .@"f32.ne", .@"f32.lt", .@"f32.gt", .@"f32.le", .@"f32.ge",
+            .@"f64.eq", .@"f64.ne", .@"f64.lt", .@"f64.gt", .@"f64.le", .@"f64.ge",
+            => try emitFpCompare(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
             .@"local.get" => try emitLocalGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, num_locals, uses_runtime_ptr, ins.payload),
             .@"local.set" => try emitLocalSet(allocator, &buf, alloc, &pushed_vregs, num_locals, uses_runtime_ptr, ins.payload),
             .@"local.tee" => try emitLocalTee(allocator, &buf, alloc, &pushed_vregs, num_locals, uses_runtime_ptr, ins.payload),
@@ -683,6 +686,92 @@ fn emitFpConst(
             const value: u64 = (@as(u64, extra) << 32) | @as(u64, payload);
             try buf.appendSlice(allocator, inst.encMovImm64Q(.rax, value).slice());
             try buf.appendSlice(allocator, inst.encMovqXmmFromR64(xmm_dst, .rax).slice());
+        },
+        else => unreachable,
+    }
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// FP compare handler — f32/f64 eq/ne/lt/gt/le/ge. Returns
+/// i32 0/1 boolean per Wasm spec; NaN comparisons return 0
+/// (eq/lt/gt/le/ge) or 1 (ne) — the "unordered" case.
+///
+/// **Strategy** — UCOMISS/UCOMISD set ZF/CF/PF; we drive SETcc:
+/// - lt / le: swap operands, then SETA / SETAE. Since SETA/AE
+///   require CF=0, NaN (CF=1) returns 0 cleanly.
+/// - gt / ge: no swap; SETA / SETAE.
+/// - eq: SETNP (PF=0 → ordered) + SETE (ZF=1) AND-combined.
+///   NaN (PF=1) zeros the SETNP byte; ordered-equal sets both.
+/// - ne: SETP (PF=1 → unordered) + SETNE (ZF=0) OR-combined.
+///   NaN sets SETP=1; ordered-not-equal sets SETNE=1.
+///
+/// **Scratch**: AL is used as the SETNP/SETP byte. RAX is not
+/// in the regalloc pool so AL doesn't collide with any vreg.
+fn emitFpCompare(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    op: zir.ZirOp,
+) Error!void {
+    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
+    const rhs_v = pushed_vregs.pop().?;
+    const lhs_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+    const lhs_x = abi.fpSlotToReg(alloc.slots[lhs_v]) orelse return Error.SlotOverflow;
+    const rhs_x = abi.fpSlotToReg(alloc.slots[rhs_v]) orelse return Error.SlotOverflow;
+    const dst = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+
+    const is_f64 = switch (op) {
+        .@"f64.eq", .@"f64.ne", .@"f64.lt", .@"f64.gt", .@"f64.le", .@"f64.ge" => true,
+        else => false,
+    };
+    // For lt / le, compare in swapped order so SETA / SETAE
+    // expresses (lhs < rhs) / (lhs <= rhs) cleanly even with
+    // NaN (UCOMI sets CF=1 on unordered, which SETA / SETAE
+    // reject correctly).
+    const swap = switch (op) {
+        .@"f32.lt", .@"f32.le", .@"f64.lt", .@"f64.le" => true,
+        else => false,
+    };
+    const a = if (swap) rhs_x else lhs_x;
+    const b = if (swap) lhs_x else rhs_x;
+
+    if (is_f64) {
+        try buf.appendSlice(allocator, inst.encUcomisd(a, b).slice());
+    } else {
+        try buf.appendSlice(allocator, inst.encUcomiss(a, b).slice());
+    }
+
+    switch (op) {
+        .@"f32.lt", .@"f32.gt", .@"f64.lt", .@"f64.gt" => {
+            try buf.appendSlice(allocator, inst.encSetccR(.a, dst).slice());
+            try buf.appendSlice(allocator, inst.encMovzxR32R8(dst, dst).slice());
+        },
+        .@"f32.le", .@"f32.ge", .@"f64.le", .@"f64.ge" => {
+            try buf.appendSlice(allocator, inst.encSetccR(.ae, dst).slice());
+            try buf.appendSlice(allocator, inst.encMovzxR32R8(dst, dst).slice());
+        },
+        .@"f32.eq", .@"f64.eq" => {
+            // SETNP AL ; MOVZX EAX, AL ; SETE dst_low8 ;
+            // MOVZX dst32, dst_low8 ; AND dst, EAX.
+            try buf.appendSlice(allocator, inst.encSetccR(.np, .rax).slice());
+            try buf.appendSlice(allocator, inst.encMovzxR32R8(.rax, .rax).slice());
+            try buf.appendSlice(allocator, inst.encSetccR(.e, dst).slice());
+            try buf.appendSlice(allocator, inst.encMovzxR32R8(dst, dst).slice());
+            try buf.appendSlice(allocator, inst.encAndRR(.d, dst, .rax).slice());
+        },
+        .@"f32.ne", .@"f64.ne" => {
+            // SETP AL ; MOVZX EAX, AL ; SETNE dst_low8 ;
+            // MOVZX dst32, dst_low8 ; OR dst, EAX.
+            try buf.appendSlice(allocator, inst.encSetccR(.p, .rax).slice());
+            try buf.appendSlice(allocator, inst.encMovzxR32R8(.rax, .rax).slice());
+            try buf.appendSlice(allocator, inst.encSetccR(.ne, dst).slice());
+            try buf.appendSlice(allocator, inst.encMovzxR32R8(dst, dst).slice());
+            try buf.appendSlice(allocator, inst.encOrRR(.d, dst, .rax).slice());
         },
         else => unreachable,
     }
@@ -2742,6 +2831,89 @@ test "compile: f64.mul — MOVAPS XMM10,XMM8 + MULSD XMM10,XMM9" {
     try testing.expectEqualSlices(u8, expected_movaps.slice(), out.bytes[34 .. 34 + expected_movaps.len]);
     const expected_mulsd = inst.encSseScalarBinary(.f64, 0x59, .xmm10, .xmm9);
     try testing.expectEqualSlices(u8, expected_mulsd.slice(), out.bytes[38 .. 38 + expected_mulsd.len]);
+}
+
+test "compile: f32.lt — UCOMISS swapped + SETA + MOVZX" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0x3F800000 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0x40000000 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.lt" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 2 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+        .{ .def_pc = 2, .last_use_pc = 3 },
+    } };
+    // Slots 0,1 → XMM8, XMM9; slot 2 (i32 result) → R10.
+    const slots = [_]u8{ 0, 1, 0 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 2 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // After 2× f32.const (10+10=20 bytes) at body offset 4..24:
+    //   [24..28] UCOMISS XMM9, XMM8 (swap; 4 bytes: REX 45 0F 2E C8)
+    //   [28..32] SETA R10B (4 bytes: 41 0F 97 C2)
+    //   [32..36] MOVZX R10D, R10B (4 bytes: 45 0F B6 D2)
+    const expected_ucomiss = inst.encUcomiss(.xmm9, .xmm8); // swapped: a=rhs, b=lhs
+    try testing.expectEqualSlices(u8, expected_ucomiss.slice(), out.bytes[24 .. 24 + expected_ucomiss.len]);
+    const expected_seta = inst.encSetccR(.a, .r10);
+    try testing.expectEqualSlices(u8, expected_seta.slice(), out.bytes[28 .. 28 + expected_seta.len]);
+}
+
+test "compile: f32.eq — UCOMISS + SETNP/SETE + AND combine" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0x3F800000 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0x3F800000 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.eq" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 2 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+        .{ .def_pc = 2, .last_use_pc = 3 },
+    } };
+    const slots = [_]u8{ 0, 1, 0 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 2 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // After 2× f32.const (20 bytes) at body offset 4..24:
+    //   [24..28] UCOMISS XMM8, XMM9   (4 bytes; no swap for eq)
+    //   [28..32] SETNP AL             (4 bytes: 40 0F 9B C0)
+    //   [32..36] MOVZX EAX, AL        (4 bytes: 40 0F B6 C0)
+    //   [36..40] SETE R10B            (4 bytes: 41 0F 94 C2)
+    //   [40..44] MOVZX R10D, R10B
+    //   [44..47] AND R10D, EAX        (3 bytes: 44 21 c2)
+    const expected_ucomiss = inst.encUcomiss(.xmm8, .xmm9);
+    try testing.expectEqualSlices(u8, expected_ucomiss.slice(), out.bytes[24 .. 24 + expected_ucomiss.len]);
+    const expected_setnp = inst.encSetccR(.np, .rax);
+    try testing.expectEqualSlices(u8, expected_setnp.slice(), out.bytes[28 .. 28 + expected_setnp.len]);
+    const expected_and = inst.encAndRR(.d, .r10, .rax);
+    try testing.expectEqualSlices(u8, expected_and.slice(), out.bytes[44 .. 44 + expected_and.len]);
+}
+
+test "compile: f64.gt — UCOMISD + SETA + MOVZX" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"f64.const", .payload = 0, .extra = 0x40000000 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f64.const", .payload = 0, .extra = 0x3FF00000 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f64.gt" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 2 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+        .{ .def_pc = 2, .last_use_pc = 3 },
+    } };
+    const slots = [_]u8{ 0, 1, 0 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 2 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // 2× f64.const = 30 bytes at [4..34]. Then at [34..]:
+    //   UCOMISD XMM8, XMM9 (5 bytes; 66 prefix + REX)
+    const expected_ucomisd = inst.encUcomisd(.xmm8, .xmm9);
+    try testing.expectEqualSlices(u8, expected_ucomisd.slice(), out.bytes[34 .. 34 + expected_ucomisd.len]);
 }
 
 test "compile: f32.add stack underflow → AllocationMissing" {

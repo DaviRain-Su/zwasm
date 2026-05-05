@@ -906,6 +906,37 @@ pub fn encMovapsXmmXmm(dst: Xmm, src: Xmm) EncodedInsn {
     return enc;
 }
 
+/// `UCOMISS xmm, xmm/m32` (0x0F 0x2E /r) — Unordered Compare
+/// Scalar Single. Sets ZF / CF / PF on the comparison result:
+/// equal → ZF=1, CF=0, PF=0; less → ZF=0, CF=1, PF=0; greater →
+/// ZF=0, CF=0, PF=0; unordered (NaN) → ZF=1, CF=1, PF=1. Used
+/// by emitFpCompare to drive SETcc.
+pub fn encUcomiss(a: Xmm, b: Xmm) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (a.extBit() != 0 or b.extBit() != 0) {
+        enc.push(encodeRex(false, a.extBit(), 0, b.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0x2E);
+    enc.push(encodeModrm(0b11, a.low3(), b.low3()));
+    return enc;
+}
+
+/// `UCOMISD xmm, xmm/m64` (0x66 prefix + 0x0F 0x2E /r) —
+/// double-precision counterpart of UCOMISS. Same flag
+/// semantics.
+pub fn encUcomisd(a: Xmm, b: Xmm) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0x66);
+    if (a.extBit() != 0 or b.extBit() != 0) {
+        enc.push(encodeRex(false, a.extBit(), 0, b.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0x2E);
+    enc.push(encodeModrm(0b11, a.low3(), b.low3()));
+    return enc;
+}
+
 /// Mandatory prefix for SSE scalar ops. F3 = single-precision
 /// (operates on the low 32 bits of XMM = f32). F2 = double-
 /// precision (operates on the low 64 bits = f64).
@@ -1531,4 +1562,24 @@ test "encSseScalarBinary: mulsd xmm8, xmm9 → f2 45 0f 59 c1 (REX, F2 prefix, o
 test "encSseScalarBinary: divsd xmm0, xmm1 → f2 0f 5e c1 (no REX, opcode 5E)" {
     const enc = encSseScalarBinary(.f64, 0x5E, .xmm0, .xmm1);
     try testing.expectEqualSlices(u8, &.{ 0xF2, 0x0F, 0x5E, 0xC1 }, enc.slice());
+}
+
+test "encUcomiss: ucomiss xmm0, xmm1 → 0f 2e c1 (no REX, no prefix)" {
+    const enc = encUcomiss(.xmm0, .xmm1);
+    try testing.expectEqualSlices(u8, &.{ 0x0F, 0x2E, 0xC1 }, enc.slice());
+}
+
+test "encUcomiss: ucomiss xmm8, xmm9 → 45 0f 2e c1 (REX.R + REX.B)" {
+    const enc = encUcomiss(.xmm8, .xmm9);
+    try testing.expectEqualSlices(u8, &.{ 0x45, 0x0F, 0x2E, 0xC1 }, enc.slice());
+}
+
+test "encUcomisd: ucomisd xmm0, xmm1 → 66 0f 2e c1 (66 prefix, no REX)" {
+    const enc = encUcomisd(.xmm0, .xmm1);
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x2E, 0xC1 }, enc.slice());
+}
+
+test "encUcomisd: ucomisd xmm8, xmm9 → 66 45 0f 2e c1 (66 prefix + REX)" {
+    const enc = encUcomisd(.xmm8, .xmm9);
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x2E, 0xC1 }, enc.slice());
 }
