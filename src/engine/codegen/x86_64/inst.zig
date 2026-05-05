@@ -906,6 +906,33 @@ pub fn encMovapsXmmXmm(dst: Xmm, src: Xmm) EncodedInsn {
     return enc;
 }
 
+/// `MOVD r/m32, xmm` (0x66 + 0x0F 0x7E /r) — extract the low
+/// 32 bits of an XMM into a GPR. Mirror of `encMovdXmmFromR32`.
+/// xmm in ModR/M.reg, gpr in r/m.
+pub fn encMovdR32FromXmm(gpr_dst: Gpr, xmm_src: Xmm) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0x66);
+    if (xmm_src.extBit() != 0 or gpr_dst.extBit() != 0) {
+        enc.push(encodeRex(false, xmm_src.extBit(), 0, gpr_dst.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0x7E);
+    enc.push(encodeModrm(0b11, xmm_src.low3(), gpr_dst.low3()));
+    return enc;
+}
+
+/// `MOVQ r/m64, xmm` (0x66 + REX.W + 0x0F 0x7E /r) — extract
+/// the low 64 bits of an XMM into a GPR. REX.W mandatory.
+pub fn encMovqR64FromXmm(gpr_dst: Gpr, xmm_src: Xmm) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0x66);
+    enc.push(encodeRex(true, xmm_src.extBit(), 0, gpr_dst.extBit()));
+    enc.push(0x0F);
+    enc.push(0x7E);
+    enc.push(encodeModrm(0b11, xmm_src.low3(), gpr_dst.low3()));
+    return enc;
+}
+
 /// SSE packed bitwise op kind. f32 = no prefix (operates on
 /// single-precision-aligned packed lanes); f64 = 0x66 prefix
 /// (double-precision lanes). For abs/neg in scalar contexts
@@ -1667,4 +1694,24 @@ test "encRoundss: roundss xmm8, xmm9, 1 → 66 45 0f 3a 0a c1 01 (REX + floor mo
 test "encRoundsd: roundsd xmm0, xmm1, 3 → 66 0f 3a 0b c1 03 (trunc mode, opcode 0B)" {
     const enc = encRoundsd(.xmm0, .xmm1, 3);
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x3A, 0x0B, 0xC1, 0x03 }, enc.slice());
+}
+
+test "encMovdR32FromXmm: movd eax, xmm0 → 66 0f 7e c0 (no REX)" {
+    const enc = encMovdR32FromXmm(.rax, .xmm0);
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x7E, 0xC0 }, enc.slice());
+}
+
+test "encMovdR32FromXmm: movd r10d, xmm8 → 66 45 0f 7e c2 (REX.R + REX.B)" {
+    const enc = encMovdR32FromXmm(.r10, .xmm8);
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x7E, 0xC2 }, enc.slice());
+}
+
+test "encMovqR64FromXmm: movq rax, xmm8 → 66 4c 0f 7e c0 (REX.W + REX.R)" {
+    const enc = encMovqR64FromXmm(.rax, .xmm8);
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x4C, 0x0F, 0x7E, 0xC0 }, enc.slice());
+}
+
+test "encMovqR64FromXmm: movq rcx, xmm0 → 66 48 0f 7e c1 (REX.W only)" {
+    const enc = encMovqR64FromXmm(.rcx, .xmm0);
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x48, 0x0F, 0x7E, 0xC1 }, enc.slice());
 }

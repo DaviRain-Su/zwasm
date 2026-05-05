@@ -276,6 +276,8 @@ pub fn compile(
             .@"f64.abs", .@"f64.neg", .@"f64.sqrt",
             .@"f64.ceil", .@"f64.floor", .@"f64.trunc", .@"f64.nearest",
             => try emitFpUnary(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
+            .@"f32.copysign", .@"f64.copysign",
+            => try emitFpCopysign(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
             .@"local.get" => try emitLocalGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, num_locals, uses_runtime_ptr, ins.payload),
             .@"local.set" => try emitLocalSet(allocator, &buf, alloc, &pushed_vregs, num_locals, uses_runtime_ptr, ins.payload),
             .@"local.tee" => try emitLocalTee(allocator, &buf, alloc, &pushed_vregs, num_locals, uses_runtime_ptr, ins.payload),
@@ -694,6 +696,63 @@ fn emitFpConst(
         },
         else => unreachable,
     }
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// FP copysign handler — `f32.copysign` / `f64.copysign`.
+/// Composes magnitude(lhs) | sign(rhs) via GPR bit-twiddling:
+///   MOVD/Q EAX/RAX, lhs_xmm
+///   MOVD/Q EDX/RDX, rhs_xmm
+///   MOV ECX/RCX, magnitude_mask (0x7FFF.. low + low_imm or MOVABS)
+///   AND EAX/RAX, ECX/RCX
+///   MOV ECX/RCX, sign_mask (0x8000..)
+///   AND EDX/RDX, ECX/RCX
+///   OR EAX/RAX, EDX/RDX
+///   MOVD/Q dst_xmm, EAX/RAX
+///
+/// **Scratches**: RAX/RCX/RDX — none in regalloc pool (RAX is
+/// return_gpr, RCX/RDX are arg_gprs[3]/[2]; pool excludes both).
+/// All caller-saved (no calls within this op so OK).
+fn emitFpCopysign(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    op: zir.ZirOp,
+) Error!void {
+    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
+    const rhs_v = pushed_vregs.pop().?;
+    const lhs_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+    const lhs_x = abi.fpSlotToReg(alloc.slots[lhs_v]) orelse return Error.SlotOverflow;
+    const rhs_x = abi.fpSlotToReg(alloc.slots[rhs_v]) orelse return Error.SlotOverflow;
+    const dst_x = abi.fpSlotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+
+    const is_f64 = op == .@"f64.copysign";
+
+    if (is_f64) {
+        try buf.appendSlice(allocator, inst.encMovqR64FromXmm(.rax, lhs_x).slice());
+        try buf.appendSlice(allocator, inst.encMovqR64FromXmm(.rdx, rhs_x).slice());
+        try buf.appendSlice(allocator, inst.encMovImm64Q(.rcx, 0x7FFFFFFFFFFFFFFF).slice());
+        try buf.appendSlice(allocator, inst.encAndRR(.q, .rax, .rcx).slice());
+        try buf.appendSlice(allocator, inst.encMovImm64Q(.rcx, 0x8000000000000000).slice());
+        try buf.appendSlice(allocator, inst.encAndRR(.q, .rdx, .rcx).slice());
+        try buf.appendSlice(allocator, inst.encOrRR(.q, .rax, .rdx).slice());
+        try buf.appendSlice(allocator, inst.encMovqXmmFromR64(dst_x, .rax).slice());
+    } else {
+        try buf.appendSlice(allocator, inst.encMovdR32FromXmm(.rax, lhs_x).slice());
+        try buf.appendSlice(allocator, inst.encMovdR32FromXmm(.rdx, rhs_x).slice());
+        try buf.appendSlice(allocator, inst.encMovImm32W(.rcx, 0x7FFFFFFF).slice());
+        try buf.appendSlice(allocator, inst.encAndRR(.d, .rax, .rcx).slice());
+        try buf.appendSlice(allocator, inst.encMovImm32W(.rcx, 0x80000000).slice());
+        try buf.appendSlice(allocator, inst.encAndRR(.d, .rdx, .rcx).slice());
+        try buf.appendSlice(allocator, inst.encOrRR(.d, .rax, .rdx).slice());
+        try buf.appendSlice(allocator, inst.encMovdXmmFromR32(dst_x, .rax).slice());
+    }
+
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -2918,6 +2977,78 @@ test "compile: f64.mul — MOVAPS XMM10,XMM8 + MULSD XMM10,XMM9" {
     try testing.expectEqualSlices(u8, expected_movaps.slice(), out.bytes[34 .. 34 + expected_movaps.len]);
     const expected_mulsd = inst.encSseScalarBinary(.f64, 0x59, .xmm10, .xmm9);
     try testing.expectEqualSlices(u8, expected_mulsd.slice(), out.bytes[38 .. 38 + expected_mulsd.len]);
+}
+
+test "compile: f32.copysign — bit-twiddle via RAX/RDX/RCX scratches" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0x40400000 }); // 3.0
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0xBF800000 }); // -1.0
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.copysign" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 2 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+        .{ .def_pc = 2, .last_use_pc = 3 },
+    } };
+    const slots = [_]u8{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 3 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // After 2× f32.const (10+10=20 bytes) at body offset 4..24:
+    //   [24..29] MOVD EAX, XMM8        (5 bytes)
+    //   [29..34] MOVD EDX, XMM9        (5 bytes)
+    //   [34..39] MOV ECX, 0x7FFFFFFF   (5 bytes)
+    //   [39..41] AND EAX, ECX          (2 bytes)
+    //   [41..46] MOV ECX, 0x80000000   (5 bytes)
+    //   [46..48] AND EDX, ECX          (2 bytes)
+    //   [48..50] OR EAX, EDX           (2 bytes)
+    //   [50..55] MOVD XMM10, EAX       (5 bytes)
+    const expected_movd_lhs = inst.encMovdR32FromXmm(.rax, .xmm8);
+    try testing.expectEqualSlices(u8, expected_movd_lhs.slice(), out.bytes[24 .. 24 + expected_movd_lhs.len]);
+    const expected_mag_mask = inst.encMovImm32W(.rcx, 0x7FFFFFFF);
+    try testing.expectEqualSlices(u8, expected_mag_mask.slice(), out.bytes[34 .. 34 + expected_mag_mask.len]);
+    const expected_or = inst.encOrRR(.d, .rax, .rdx);
+    try testing.expectEqualSlices(u8, expected_or.slice(), out.bytes[48 .. 48 + expected_or.len]);
+    const expected_final_movd = inst.encMovdXmmFromR32(.xmm10, .rax);
+    try testing.expectEqualSlices(u8, expected_final_movd.slice(), out.bytes[50 .. 50 + expected_final_movd.len]);
+}
+
+test "compile: f64.copysign — same shape with .q widths and MOVABS masks" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f64} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"f64.const", .payload = 0, .extra = 0x40080000 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f64.const", .payload = 0, .extra = 0xBFF00000 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f64.copysign" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 2 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+        .{ .def_pc = 2, .last_use_pc = 3 },
+    } };
+    const slots = [_]u8{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 3 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // After 2× f64.const (15+15=30 bytes) at body offset 4..34:
+    //   [34..39] MOVQ RAX, XMM8        (5 bytes; 66 + REX.W + REX.R + ...)
+    //   [39..44] MOVQ RDX, XMM9
+    //   [44..54] MOVABS RCX, 0x7FFF... (10 bytes)
+    //   [54..57] AND RAX, RCX          (3 bytes; REX.W)
+    //   [57..67] MOVABS RCX, 0x8000... (10 bytes)
+    //   [67..70] AND RDX, RCX
+    //   [70..73] OR RAX, RDX
+    //   [73..78] MOVQ XMM10, RAX
+    const expected_movq_lhs = inst.encMovqR64FromXmm(.rax, .xmm8);
+    try testing.expectEqualSlices(u8, expected_movq_lhs.slice(), out.bytes[34 .. 34 + expected_movq_lhs.len]);
+    const expected_mag = inst.encMovImm64Q(.rcx, 0x7FFFFFFFFFFFFFFF);
+    try testing.expectEqualSlices(u8, expected_mag.slice(), out.bytes[44 .. 44 + expected_mag.len]);
+    const expected_sign = inst.encMovImm64Q(.rcx, 0x8000000000000000);
+    try testing.expectEqualSlices(u8, expected_sign.slice(), out.bytes[57 .. 57 + expected_sign.len]);
+    const expected_movq_dst = inst.encMovqXmmFromR64(.xmm10, .rax);
+    try testing.expectEqualSlices(u8, expected_movq_dst.slice(), out.bytes[73 .. 73 + expected_movq_dst.len]);
 }
 
 test "compile: f32.sqrt — SQRTSS XMM9, XMM8" {
