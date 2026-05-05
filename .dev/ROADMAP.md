@@ -1530,7 +1530,9 @@ JIT.
 | 7.9  | 40+ realworld samples (out of 50) run via ARM64 JIT — same fixtures as §9.6 / 6.1; trap categorisation reuses the run_runner buckets. | [ ]            |
 | 7.10 | 40+ realworld samples (out of 50) run via x86_64 JIT on both Linux + Windows hosts. | [ ]            |
 | 7.11 | Three-way differential (`interp == jit_arm64 == jit_x86`): 0 mismatch over the spec testsuite + 40+ realworld samples on each host. **🔒 gate**: this is the most important gate of the project (was Phase 8 lock; carries forward per ADR-0019). | [ ]            |
-| 7.12 | Phase-7 boundary `audit_scaffolding` pass + open §9.8 inline + flip phase tracker. | [ ]            |
+| 7.12 | Phase-7 boundary `audit_scaffolding` pass (auto-fired by /continue at boundary). | [ ]            |
+| 7.13 | **🔒 Phase 7 → Phase 8 transition gate** — collaborative human-in-loop review per [`phase8_transition_gate.md`](phase8_transition_gate.md): functional completion + debt reconciliation + design cleanliness extrapolation (AOT / Wasm 3.0 / WASI / SIMD horizon) + `optimisation_log.md` triage + `meta_audit` invocation. **The autonomous loop refuses to open §9.8 until this row is `[x]`** — it surfaces to the user with the gate document instead. | [ ]            |
+| 7.14 | Open §9.8 inline + flip phase tracker (only after 7.13 is `[x]`). | [ ]            |
 
 ### Phase 8 — JIT optimisation foundation 🔒
 
