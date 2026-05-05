@@ -906,6 +906,66 @@ pub fn encMovapsXmmXmm(dst: Xmm, src: Xmm) EncodedInsn {
     return enc;
 }
 
+/// SSE packed bitwise op kind. f32 = no prefix (operates on
+/// single-precision-aligned packed lanes); f64 = 0x66 prefix
+/// (double-precision lanes). For abs/neg in scalar contexts
+/// the choice only affects the prefix byte; all 128 bits are
+/// AND/XOR'd identically.
+pub const SsePackedKind = enum(u8) {
+    f32 = 0,
+    f64 = 0x66,
+};
+
+/// SSE2 packed bitwise binary (ANDPS/ANDPD/ORPS/ORPD/XORPS/XORPD).
+/// Encoding: `[<prefix>] [REX?] 0x0F <opcode> ModR/M`. Used by
+/// abs (ANDPS/ANDPD with 0x7F.. mask) and neg (XORPS/XORPD with
+/// 0x80.. sign bit). Opcode: 0x54=AND, 0x56=OR, 0x57=XOR.
+pub fn encSsePackedBinary(kind: SsePackedKind, opcode: u8, dst: Xmm, src: Xmm) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (kind != .f32) enc.push(@intFromEnum(kind));
+    if (dst.extBit() != 0 or src.extBit() != 0) {
+        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(opcode);
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    return enc;
+}
+
+/// `ROUNDSS xmm, xmm/m32, imm8` (66 0F 3A 0A /r ib) — SSE4.1
+/// scalar single-precision round with mode imm8: 0=nearest
+/// (ties to even), 1=floor (toward -inf), 2=ceil (toward +inf),
+/// 3=trunc (toward zero), 4=current MXCSR rounding mode.
+pub fn encRoundss(dst: Xmm, src: Xmm, mode: u8) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0x66);
+    if (dst.extBit() != 0 or src.extBit() != 0) {
+        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0x3A);
+    enc.push(0x0A);
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    enc.push(mode);
+    return enc;
+}
+
+/// `ROUNDSD xmm, xmm/m64, imm8` (66 0F 3A 0B /r ib) — SSE4.1
+/// scalar double-precision round; same mode encoding as ROUNDSS.
+pub fn encRoundsd(dst: Xmm, src: Xmm, mode: u8) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0x66);
+    if (dst.extBit() != 0 or src.extBit() != 0) {
+        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0x3A);
+    enc.push(0x0B);
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    enc.push(mode);
+    return enc;
+}
+
 /// `UCOMISS xmm, xmm/m32` (0x0F 0x2E /r) — Unordered Compare
 /// Scalar Single. Sets ZF / CF / PF on the comparison result:
 /// equal → ZF=1, CF=0, PF=0; less → ZF=0, CF=1, PF=0; greater →
@@ -1582,4 +1642,29 @@ test "encUcomisd: ucomisd xmm0, xmm1 → 66 0f 2e c1 (66 prefix, no REX)" {
 test "encUcomisd: ucomisd xmm8, xmm9 → 66 45 0f 2e c1 (66 prefix + REX)" {
     const enc = encUcomisd(.xmm8, .xmm9);
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x2E, 0xC1 }, enc.slice());
+}
+
+test "encSsePackedBinary: andps xmm0, xmm1 → 0f 54 c1 (no prefix)" {
+    const enc = encSsePackedBinary(.f32, 0x54, .xmm0, .xmm1);
+    try testing.expectEqualSlices(u8, &.{ 0x0F, 0x54, 0xC1 }, enc.slice());
+}
+
+test "encSsePackedBinary: xorpd xmm8, xmm9 → 66 45 0f 57 c1 (66 prefix + REX)" {
+    const enc = encSsePackedBinary(.f64, 0x57, .xmm8, .xmm9);
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x57, 0xC1 }, enc.slice());
+}
+
+test "encRoundss: roundss xmm0, xmm1, 2 → 66 0f 3a 0a c1 02 (ceil mode)" {
+    const enc = encRoundss(.xmm0, .xmm1, 2);
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x3A, 0x0A, 0xC1, 0x02 }, enc.slice());
+}
+
+test "encRoundss: roundss xmm8, xmm9, 1 → 66 45 0f 3a 0a c1 01 (REX + floor mode)" {
+    const enc = encRoundss(.xmm8, .xmm9, 1);
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x3A, 0x0A, 0xC1, 0x01 }, enc.slice());
+}
+
+test "encRoundsd: roundsd xmm0, xmm1, 3 → 66 0f 3a 0b c1 03 (trunc mode, opcode 0B)" {
+    const enc = encRoundsd(.xmm0, .xmm1, 3);
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x3A, 0x0B, 0xC1, 0x03 }, enc.slice());
 }

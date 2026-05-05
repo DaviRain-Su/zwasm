@@ -271,6 +271,11 @@ pub fn compile(
             .@"f32.eq", .@"f32.ne", .@"f32.lt", .@"f32.gt", .@"f32.le", .@"f32.ge",
             .@"f64.eq", .@"f64.ne", .@"f64.lt", .@"f64.gt", .@"f64.le", .@"f64.ge",
             => try emitFpCompare(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
+            .@"f32.abs", .@"f32.neg", .@"f32.sqrt",
+            .@"f32.ceil", .@"f32.floor", .@"f32.trunc", .@"f32.nearest",
+            .@"f64.abs", .@"f64.neg", .@"f64.sqrt",
+            .@"f64.ceil", .@"f64.floor", .@"f64.trunc", .@"f64.nearest",
+            => try emitFpUnary(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
             .@"local.get" => try emitLocalGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, num_locals, uses_runtime_ptr, ins.payload),
             .@"local.set" => try emitLocalSet(allocator, &buf, alloc, &pushed_vregs, num_locals, uses_runtime_ptr, ins.payload),
             .@"local.tee" => try emitLocalTee(allocator, &buf, alloc, &pushed_vregs, num_locals, uses_runtime_ptr, ins.payload),
@@ -690,6 +695,88 @@ fn emitFpConst(
         else => unreachable,
     }
     try pushed_vregs.append(allocator, result_v);
+}
+
+/// FP unary handler — f32/f64 abs/neg/sqrt + ceil/floor/trunc/
+/// nearest. 14 ops total. Strategies:
+/// - sqrt: SQRTSS/SQRTSD dst, src (single instruction).
+/// - ceil/floor/trunc/nearest: ROUNDSS/ROUNDSD dst, src, mode
+///   (SSE4.1; mode imm 0=nearest, 1=floor, 2=ceil, 3=trunc).
+/// - abs: materialise mask 0x7F.. into XMM7 via GPR → MOVD/MOVQ,
+///   MOVAPS dst, src (if dst != src), ANDPS/ANDPD dst, XMM7.
+/// - neg: same shape with mask 0x80.. and XORPS/XORPD.
+///
+/// **Scratches**: RAX (GPR mask materialisation, not in pool)
+/// + XMM7 (per abi.zig comment "XMM7 is reserved as a SIMD
+/// scratch"; pool starts at XMM8). Neither collides with any
+/// live vreg.
+fn emitFpUnary(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    op: zir.ZirOp,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+    const src = abi.fpSlotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
+    const dst = abi.fpSlotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+
+    const is_f64 = switch (op) {
+        .@"f64.abs", .@"f64.neg", .@"f64.sqrt",
+        .@"f64.ceil", .@"f64.floor", .@"f64.trunc", .@"f64.nearest",
+        => true,
+        else => false,
+    };
+
+    switch (op) {
+        .@"f32.sqrt", .@"f64.sqrt" => {
+            const kind: inst.SseScalarKind = if (is_f64) .f64 else .f32;
+            try buf.appendSlice(allocator, inst.encSseScalarBinary(kind, 0x51, dst, src).slice());
+        },
+        .@"f32.ceil", .@"f64.ceil" => try emitFpRound(allocator, buf, dst, src, is_f64, 2),
+        .@"f32.floor", .@"f64.floor" => try emitFpRound(allocator, buf, dst, src, is_f64, 1),
+        .@"f32.trunc", .@"f64.trunc" => try emitFpRound(allocator, buf, dst, src, is_f64, 3),
+        .@"f32.nearest", .@"f64.nearest" => try emitFpRound(allocator, buf, dst, src, is_f64, 0),
+        .@"f32.abs", .@"f64.abs" => try emitFpAbsNeg(allocator, buf, dst, src, is_f64, true),
+        .@"f32.neg", .@"f64.neg" => try emitFpAbsNeg(allocator, buf, dst, src, is_f64, false),
+        else => unreachable,
+    }
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// Helper: ROUNDSS / ROUNDSD `dst, src, mode`.
+fn emitFpRound(allocator: Allocator, buf: *std.ArrayList(u8), dst: inst.Xmm, src: inst.Xmm, is_f64: bool, mode: u8) Error!void {
+    const enc = if (is_f64) inst.encRoundsd(dst, src, mode) else inst.encRoundss(dst, src, mode);
+    try buf.appendSlice(allocator, enc.slice());
+}
+
+/// Helper: f32/f64 abs/neg via mask materialisation in XMM7
+/// followed by ANDPS/ANDPD (abs) or XORPS/XORPD (neg).
+fn emitFpAbsNeg(allocator: Allocator, buf: *std.ArrayList(u8), dst: inst.Xmm, src: inst.Xmm, is_f64: bool, is_abs: bool) Error!void {
+    const mask_f32: u32 = if (is_abs) 0x7FFFFFFF else 0x80000000;
+    const mask_f64: u64 = if (is_abs) 0x7FFFFFFFFFFFFFFF else 0x8000000000000000;
+    const scratch: inst.Xmm = .xmm7;
+
+    if (is_f64) {
+        try buf.appendSlice(allocator, inst.encMovImm64Q(.rax, mask_f64).slice());
+        try buf.appendSlice(allocator, inst.encMovqXmmFromR64(scratch, .rax).slice());
+    } else {
+        try buf.appendSlice(allocator, inst.encMovImm32W(.rax, mask_f32).slice());
+        try buf.appendSlice(allocator, inst.encMovdXmmFromR32(scratch, .rax).slice());
+    }
+
+    if (dst != src) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst, src).slice());
+    }
+
+    const kind: inst.SsePackedKind = if (is_f64) .f64 else .f32;
+    const opcode: u8 = if (is_abs) 0x54 else 0x57; // ANDPS/PD = 54, XORPS/PD = 57
+    try buf.appendSlice(allocator, inst.encSsePackedBinary(kind, opcode, dst, scratch).slice());
 }
 
 /// FP compare handler — f32/f64 eq/ne/lt/gt/le/ge. Returns
@@ -2831,6 +2918,98 @@ test "compile: f64.mul — MOVAPS XMM10,XMM8 + MULSD XMM10,XMM9" {
     try testing.expectEqualSlices(u8, expected_movaps.slice(), out.bytes[34 .. 34 + expected_movaps.len]);
     const expected_mulsd = inst.encSseScalarBinary(.f64, 0x59, .xmm10, .xmm9);
     try testing.expectEqualSlices(u8, expected_mulsd.slice(), out.bytes[38 .. 38 + expected_mulsd.len]);
+}
+
+test "compile: f32.sqrt — SQRTSS XMM9, XMM8" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0x40800000 }); // 4.0f
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.sqrt" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+    } };
+    const slots = [_]u8{ 0, 1 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 2 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // After f32.const at [4..14]: SQRTSS XMM9, XMM8 at [14..19].
+    const expected = inst.encSseScalarBinary(.f32, 0x51, .xmm9, .xmm8);
+    try testing.expectEqualSlices(u8, expected.slice(), out.bytes[14 .. 14 + expected.len]);
+}
+
+test "compile: f64.ceil — ROUNDSD XMM9, XMM8, mode=2" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f64} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"f64.const", .payload = 0, .extra = 0x3FF80000 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f64.ceil" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+    } };
+    const slots = [_]u8{ 0, 1 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 2 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // After f64.const at [4..19]: ROUNDSD XMM9, XMM8, 2 at [19..26].
+    const expected = inst.encRoundsd(.xmm9, .xmm8, 2);
+    try testing.expectEqualSlices(u8, expected.slice(), out.bytes[19 .. 19 + expected.len]);
+}
+
+test "compile: f32.abs — mask materialisation + MOVAPS + ANDPS" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0xBF800000 }); // -1.0f
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.abs" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+    } };
+    const slots = [_]u8{ 0, 1 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 2 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // After f32.const at [4..14]:
+    //   [14..19] MOV EAX, 0x7FFFFFFF (5 bytes)
+    //   [19..23] MOVD XMM7, EAX      (4 bytes; no REX since xmm7 < xmm8 and rax < r8)
+    //   [23..27] MOVAPS XMM9, XMM8   (4 bytes; REX.R+REX.B)
+    //   [27..31] ANDPS XMM9, XMM7    (4 bytes; REX.R only since xmm7 < xmm8)
+    const expected_mask = inst.encMovImm32W(.rax, 0x7FFFFFFF);
+    try testing.expectEqualSlices(u8, expected_mask.slice(), out.bytes[14 .. 14 + expected_mask.len]);
+    const expected_andps = inst.encSsePackedBinary(.f32, 0x54, .xmm9, .xmm7);
+    try testing.expectEqualSlices(u8, expected_andps.slice(), out.bytes[27 .. 27 + expected_andps.len]);
+}
+
+test "compile: f64.neg — XORPD with sign-bit mask" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f64} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"f64.const", .payload = 0, .extra = 0x3FF00000 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f64.neg" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+    } };
+    const slots = [_]u8{ 0, 1 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 2 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // After f64.const at [4..19]:
+    //   [19..29] MOVABS RAX, 0x80...0 (10 bytes)
+    //   [29..34] MOVQ XMM7, RAX       (5 bytes)
+    //   [34..38] MOVAPS XMM9, XMM8    (4 bytes)
+    //   [38..43] XORPD XMM9, XMM7     (5 bytes; 66 prefix + REX.R + 0F 57 + ModRM)
+    const expected_mask = inst.encMovImm64Q(.rax, 0x8000000000000000);
+    try testing.expectEqualSlices(u8, expected_mask.slice(), out.bytes[19 .. 19 + expected_mask.len]);
+    const expected_xorpd = inst.encSsePackedBinary(.f64, 0x57, .xmm9, .xmm7);
+    try testing.expectEqualSlices(u8, expected_xorpd.slice(), out.bytes[38 .. 38 + expected_xorpd.len]);
 }
 
 test "compile: f32.lt — UCOMISS swapped + SETA + MOVZX" {
