@@ -296,6 +296,9 @@ pub fn compile(
             => try emitFpTruncSatU32(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
             .@"i64.trunc_sat_f32_u", .@"i64.trunc_sat_f64_u",
             => try emitFpTruncSatU64(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
+            .@"i32.trunc_f32_s", .@"i32.trunc_f64_s",
+            .@"i64.trunc_f32_s", .@"i64.trunc_f64_s",
+            => try emitFpTruncTrapSigned(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, ins.op),
             .@"local.get" => try emitLocalGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, num_locals, uses_runtime_ptr, ins.payload),
             .@"local.set" => try emitLocalSet(allocator, &buf, alloc, &pushed_vregs, num_locals, uses_runtime_ptr, ins.payload),
             .@"local.tee" => try emitLocalTee(allocator, &buf, alloc, &pushed_vregs, num_locals, uses_runtime_ptr, ins.payload),
@@ -715,6 +718,118 @@ fn emitFpConst(
         else => unreachable,
     }
     try pushed_vregs.append(allocator, result_v);
+}
+
+/// Wasm 1.0 trapping signed truncate (`i32/i64.trunc_f32/f64_s`).
+/// Spec: trap on NaN, src ≥ INT_MAX+1, or src < INT_MIN. Otherwise
+/// truncate.
+///
+///   UCOMI src, src ; JP trap                ; NaN
+///   Materialise (INT_MAX+1) as float in xmm7
+///   UCOMI src, xmm7 ; JAE trap              ; src ≥ INT_MAX+1
+///   Materialise INT_MIN as float in xmm7
+///   UCOMI src, xmm7 ; JB trap               ; src < INT_MIN
+///   CVTTSS2SI dst, src                       ; in-range
+///
+/// Trap branches are appended to bounds_fixups (function-tail
+/// stub sets trap_flag=1 and returns 0; same shared mechanism
+/// as memory bounds traps; see ADR-0028 for per-reason split).
+///
+/// Thresholds (all exactly representable):
+///   2^31  = 0x4F000000 (f32) / 0x41E0000000000000 (f64)
+///   -2^31 = 0xCF000000 (f32) / 0xC1E0000000000000 (f64)
+///   2^63  = 0x5F000000 (f32) / 0x43E0000000000000 (f64)
+///   -2^63 = 0xDF000000 (f32) / 0xC3E0000000000000 (f64)
+fn emitFpTruncTrapSigned(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    bounds_fixups: *std.ArrayList(u32),
+    op: zir.ZirOp,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+    const src_x = abi.fpSlotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
+    const dst = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+
+    const is_f64_src = switch (op) {
+        .@"i32.trunc_f64_s", .@"i64.trunc_f64_s" => true,
+        else => false,
+    };
+    const is_i64_dst = switch (op) {
+        .@"i64.trunc_f32_s", .@"i64.trunc_f64_s" => true,
+        else => false,
+    };
+    const scalar_kind: inst.SseScalarKind = if (is_f64_src) .f64 else .f32;
+
+    const upper_bits: u64 = if (is_i64_dst)
+        (if (is_f64_src) @as(u64, 0x43E0000000000000) else 0x5F000000)
+    else
+        (if (is_f64_src) @as(u64, 0x41E0000000000000) else 0x4F000000);
+    const lower_bits: u64 = if (is_i64_dst)
+        (if (is_f64_src) @as(u64, 0xC3E0000000000000) else 0xDF000000)
+    else
+        (if (is_f64_src) @as(u64, 0xC1E0000000000000) else 0xCF000000);
+
+    // 1. UCOMI src, src ; JP trap.
+    if (is_f64_src) {
+        try buf.appendSlice(allocator, inst.encUcomisd(src_x, src_x).slice());
+    } else {
+        try buf.appendSlice(allocator, inst.encUcomiss(src_x, src_x).slice());
+    }
+    {
+        const fixup_at: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.p, 0).slice());
+        try bounds_fixups.append(allocator, fixup_at);
+    }
+
+    // 2. Upper bound: load (INT_MAX+1) into xmm7, UCOMI, JAE trap.
+    try materialiseFpThreshold(allocator, buf, is_f64_src, upper_bits);
+    if (is_f64_src) {
+        try buf.appendSlice(allocator, inst.encUcomisd(src_x, .xmm7).slice());
+    } else {
+        try buf.appendSlice(allocator, inst.encUcomiss(src_x, .xmm7).slice());
+    }
+    {
+        const fixup_at: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.ae, 0).slice());
+        try bounds_fixups.append(allocator, fixup_at);
+    }
+
+    // 3. Lower bound: load INT_MIN into xmm7, UCOMI, JB trap.
+    try materialiseFpThreshold(allocator, buf, is_f64_src, lower_bits);
+    if (is_f64_src) {
+        try buf.appendSlice(allocator, inst.encUcomisd(src_x, .xmm7).slice());
+    } else {
+        try buf.appendSlice(allocator, inst.encUcomiss(src_x, .xmm7).slice());
+    }
+    {
+        const fixup_at: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.b, 0).slice());
+        try bounds_fixups.append(allocator, fixup_at);
+    }
+
+    // 4. In-range: CVTTSS2SI/SD dst, src.
+    try buf.appendSlice(allocator, inst.encCvttScalar2Int(scalar_kind, is_i64_dst, dst, src_x).slice());
+
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// Materialise an FP bit pattern into XMM7 via RAX scratch.
+/// Used by the FP trunc-trap / trunc-sat helpers.
+fn materialiseFpThreshold(allocator: Allocator, buf: *std.ArrayList(u8), is_f64: bool, bits: u64) Error!void {
+    if (is_f64) {
+        try buf.appendSlice(allocator, inst.encMovImm64Q(.rax, bits).slice());
+        try buf.appendSlice(allocator, inst.encMovqXmmFromR64(.xmm7, .rax).slice());
+    } else {
+        try buf.appendSlice(allocator, inst.encMovImm32W(.rax, @truncate(bits)).slice());
+        try buf.appendSlice(allocator, inst.encMovdXmmFromR32(.xmm7, .rax).slice());
+    }
 }
 
 /// Wasm 2.0 saturating unsigned truncate to i64 (`i64.trunc_sat_
@@ -3684,6 +3799,32 @@ test "compile: f32.reinterpret_i32 — MOVD XMM8, R10D (GPR→XMM bit-cast)" {
     // After i32.const at [4..10] (6 bytes for R10): MOVD XMM8, R10D at [10..15].
     const expected = inst.encMovdXmmFromR32(.xmm8, .r10);
     try testing.expectEqualSlices(u8, expected.slice(), out.bytes[10 .. 10 + expected.len]);
+}
+
+test "compile: i32.trunc_f32_s — Wasm 1.0 trapping; NaN/upper/lower → bounds_fixups" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0x40400000 }); // 3.0f
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.trunc_f32_s" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+    } };
+    const slots = [_]u8{ 0, 0 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // Verify presence of the 3 thresholds + CVTTSS2SI in the
+    // emitted byte stream (full layout asserted via opcode+
+    // boundary checks rather than every offset).
+    const upper = inst.encMovImm32W(.rax, 0x4F000000); // 2^31
+    const lower = inst.encMovImm32W(.rax, 0xCF000000); // -2^31
+    const cvt = inst.encCvttScalar2Int(.f32, false, .r10, .xmm8);
+    try testing.expect(std.mem.find(u8, out.bytes, upper.slice()) != null);
+    try testing.expect(std.mem.find(u8, out.bytes, lower.slice()) != null);
+    try testing.expect(std.mem.find(u8, out.bytes, cvt.slice()) != null);
 }
 
 test "compile: i64.trunc_sat_f32_u — 2^63 split path with SUBSS + sign-bit OR" {
