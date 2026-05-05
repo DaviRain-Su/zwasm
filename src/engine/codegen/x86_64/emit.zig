@@ -285,7 +285,10 @@ pub fn compile(
             .@"f32.reinterpret_i32", .@"f64.reinterpret_i64",
             .@"f32.convert_i32_s", .@"f32.convert_i64_s",
             .@"f64.convert_i32_s", .@"f64.convert_i64_s",
+            .@"f32.convert_i32_u", .@"f64.convert_i32_u",
             => try emitFpConvertSimple(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
+            .@"f32.convert_i64_u", .@"f64.convert_i64_u",
+            => try emitFpConvertI64Unsigned(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
             .@"local.get" => try emitLocalGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, num_locals, uses_runtime_ptr, ins.payload),
             .@"local.set" => try emitLocalSet(allocator, &buf, alloc, &pushed_vregs, num_locals, uses_runtime_ptr, ins.payload),
             .@"local.tee" => try emitLocalTee(allocator, &buf, alloc, &pushed_vregs, num_locals, uses_runtime_ptr, ins.payload),
@@ -707,6 +710,75 @@ fn emitFpConst(
     try pushed_vregs.append(allocator, result_v);
 }
 
+/// FP convert handler for `f32.convert_i64_u` / `f64.convert_i64_u`.
+/// Branch-based (the i64 may have the high bit set; CVTSI2SS
+/// would interpret it as negative). Pattern (used by clang/gcc):
+///
+///   TEST src, src
+///   JS   slow_path           ; high bit set ⇒ src ≥ 2^63
+///   CVTSI2SS dst, src        ; positive case (REX.W form)
+///   JMP end
+///   slow_path:
+///     MOV RAX, src ; SHR RAX, 1     ; halve, drop high bit
+///     MOV RCX, src ; AND RCX, 1     ; preserve low bit (round)
+///     OR  RAX, RCX
+///     CVTSI2SS dst, RAX             ; convert as signed (now < 2^63)
+///     ADDSS dst, dst                ; double the result
+///   end:
+///
+/// Scratches RAX/RCX excluded from regalloc pool. Branches use
+/// rel32 placeholders patched at end-of-emit.
+fn emitFpConvertI64Unsigned(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    op: zir.ZirOp,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+    const src_g = abi.slotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
+    const dst_x = abi.fpSlotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+
+    const scalar_kind: inst.SseScalarKind = if (op == .@"f64.convert_i64_u") .f64 else .f32;
+
+    // 1. TEST src, src
+    try buf.appendSlice(allocator, inst.encTestRR(.q, src_g, src_g).slice());
+
+    // 2. JS rel32 → slow_path (placeholder)
+    const js_byte: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJccRel32(.s, 0).slice());
+
+    // 3. Positive path: CVTSI2SS dst, src (i64 form)
+    try buf.appendSlice(allocator, inst.encCvtsi2Scalar(scalar_kind, true, dst_x, src_g).slice());
+
+    // 4. JMP rel32 → end (placeholder)
+    const jmp_byte: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJmpRel32(0).slice());
+
+    // 5. Slow path; patch JS.
+    const slow_byte: u32 = @intCast(buf.items.len);
+    inst.patchRel32(buf.items, js_byte, 6, @as(i32, @intCast(slow_byte)) - @as(i32, @intCast(js_byte)) - 6);
+
+    try buf.appendSlice(allocator, inst.encMovRR(.q, .rax, src_g).slice());
+    try buf.appendSlice(allocator, inst.encShrRImm8(.q, .rax, 1).slice());
+    try buf.appendSlice(allocator, inst.encMovRR(.q, .rcx, src_g).slice());
+    try buf.appendSlice(allocator, inst.encAndRImm8(.q, .rcx, 1).slice());
+    try buf.appendSlice(allocator, inst.encOrRR(.q, .rax, .rcx).slice());
+    try buf.appendSlice(allocator, inst.encCvtsi2Scalar(scalar_kind, true, dst_x, .rax).slice());
+    try buf.appendSlice(allocator, inst.encSseScalarBinary(scalar_kind, 0x58, dst_x, dst_x).slice());
+
+    // 6. end; patch JMP.
+    const end_byte: u32 = @intCast(buf.items.len);
+    inst.patchRel32(buf.items, jmp_byte, 5, @as(i32, @intCast(end_byte)) - @as(i32, @intCast(jmp_byte)) - 5);
+
+    try pushed_vregs.append(allocator, result_v);
+}
+
 /// FP simple-convert handler — single-instruction conversions:
 /// - `f64.promote_f32` (CVTSS2SD), `f32.demote_f64` (CVTSD2SS).
 /// - reinterpret (i↔f bit-cast via existing MOVD/MOVQ).
@@ -761,16 +833,24 @@ fn emitFpConvertSimple(
         },
         .@"f32.convert_i32_s", .@"f32.convert_i64_s",
         .@"f64.convert_i32_s", .@"f64.convert_i64_s",
+        .@"f32.convert_i32_u", .@"f64.convert_i32_u",
         => {
             const src_g = abi.slotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
             const dst_x = abi.fpSlotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
             const scalar_kind: inst.SseScalarKind = switch (op) {
-                .@"f32.convert_i32_s", .@"f32.convert_i64_s" => .f32,
+                .@"f32.convert_i32_s", .@"f32.convert_i64_s",
+                .@"f32.convert_i32_u",
+                => .f32,
                 else => .f64,
             };
+            // i32_u trick: use the .q (REX.W) form of CVTSI2SS/SD on the i32
+            // source register. x86_64 i32 ops zero-extend their result to
+            // 64 bits, so the value is non-negative when interpreted as i64
+            // and CVTSI2SS converts it correctly without sign issues.
+            // i64_s also uses .q. i32_s uses .d.
             const src_is_64 = switch (op) {
-                .@"f32.convert_i64_s", .@"f64.convert_i64_s" => true,
-                else => false,
+                .@"f32.convert_i32_s", .@"f64.convert_i32_s" => false,
+                else => true,
             };
             try buf.appendSlice(allocator, inst.encCvtsi2Scalar(scalar_kind, src_is_64, dst_x, src_g).slice());
         },
@@ -3227,6 +3307,73 @@ test "compile: f32.reinterpret_i32 — MOVD XMM8, R10D (GPR→XMM bit-cast)" {
     // After i32.const at [4..10] (6 bytes for R10): MOVD XMM8, R10D at [10..15].
     const expected = inst.encMovdXmmFromR32(.xmm8, .r10);
     try testing.expectEqualSlices(u8, expected.slice(), out.bytes[10 .. 10 + expected.len]);
+}
+
+test "compile: f32.convert_i32_u — CVTSI2SS XMM8, R10 (REX.W on i32 src for zero-extend trick)" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0xFFFFFFFF }); // u32 max
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.convert_i32_u" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+    } };
+    const slots = [_]u8{ 0, 0 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // i32.const 0xFFFFFFFF at [4..10]; CVTSI2SS XMM8, R10 (i64 form) at [10..15].
+    const expected = inst.encCvtsi2Scalar(.f32, true, .xmm8, .r10);
+    try testing.expectEqualSlices(u8, expected.slice(), out.bytes[10 .. 10 + expected.len]);
+}
+
+test "compile: f32.convert_i64_u — branch-based slow-path emit" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    // i32.const placeholder for i64 source (synthetic; emit doesn't validate types).
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.convert_i64_u" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+    } };
+    const slots = [_]u8{ 0, 0 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // i32.const at [4..10]. Then:
+    //   [10..13] TEST R10, R10            (3 bytes; REX.W + REX.R + REX.B = 4D + 85 + D2)
+    //   [13..19] JS rel32 placeholder     (6 bytes)
+    //   [19..24] CVTSI2SS XMM8, R10 i64   (5 bytes; F3 + REX.W+R+B + 0F 2A C2)
+    //   [24..29] JMP rel32 to end         (5 bytes)
+    //   slow_path at 29:
+    const expected_test = inst.encTestRR(.q, .r10, .r10);
+    try testing.expectEqualSlices(u8, expected_test.slice(), out.bytes[10 .. 10 + expected_test.len]);
+    // JS rel32 opcode bytes (disp patched at end-of-emit).
+    try testing.expectEqual(@as(u8, 0x0F), out.bytes[13]);
+    try testing.expectEqual(@as(u8, 0x88), out.bytes[14]); // Jcc.s = 8
+    const expected_pos_cvt = inst.encCvtsi2Scalar(.f32, true, .xmm8, .r10);
+    try testing.expectEqualSlices(u8, expected_pos_cvt.slice(), out.bytes[19 .. 19 + expected_pos_cvt.len]);
+    // JMP rel32 opcode at 24.
+    try testing.expectEqual(@as(u8, 0xE9), out.bytes[24]);
+    // Slow path starts at 29: MOV RAX, R10 (3 bytes; REX.W+R = 4C 89 D0)
+    const expected_mov_rax = inst.encMovRR(.q, .rax, .r10);
+    try testing.expectEqualSlices(u8, expected_mov_rax.slice(), out.bytes[29 .. 29 + expected_mov_rax.len]);
+    // After slow path: MOV RAX (3) + SHR RAX (4) + MOV RCX (3) + AND RCX (4) + OR (3) +
+    //                  CVTSI2SS (5) + ADDSS dst,dst (5) = 27 bytes. Slow path ends at 29+27=56.
+    // Verify ADDSS is the final slow-path insn (5 bytes).
+    const expected_addss = inst.encSseScalarBinary(.f32, 0x58, .xmm8, .xmm8);
+    try testing.expectEqualSlices(u8, expected_addss.slice(), out.bytes[51 .. 51 + expected_addss.len]);
+    // Verify JS rel32 disp points at slow_path (29).
+    const js_disp = std.mem.readInt(i32, out.bytes[15..19], .little);
+    try testing.expectEqual(@as(i32, 29 - 13 - 6), js_disp);
+    // Verify JMP rel32 disp points at end (56).
+    const jmp_disp = std.mem.readInt(i32, out.bytes[25..29], .little);
+    try testing.expectEqual(@as(i32, 56 - 24 - 5), jmp_disp);
 }
 
 test "compile: f32.convert_i32_s — CVTSI2SS XMM8, R10D" {

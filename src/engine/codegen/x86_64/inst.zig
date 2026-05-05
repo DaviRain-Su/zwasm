@@ -906,6 +906,30 @@ pub fn encMovapsXmmXmm(dst: Xmm, src: Xmm) EncodedInsn {
     return enc;
 }
 
+/// `SHR r/m, imm8` (opcode 0xC1 /5 ib) — logical shift right
+/// by an 8-bit immediate. Width selects 32/64-bit form via REX.W.
+/// Used by f.convert_i64_u (slow-path divide-by-2 + round bit).
+pub fn encShrRImm8(size: Width, dst: Gpr, imm: u8) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (rexForRR(size, .rax, dst)) |rex| enc.push(rex);
+    enc.push(0xC1);
+    enc.push(encodeModrm(0b11, 5, dst.low3())); // /5 = SHR
+    enc.push(imm);
+    return enc;
+}
+
+/// `AND r/m, imm8` (opcode 0x83 /4 ib) — sign-extended 8-bit
+/// AND. Used by f.convert_i64_u to extract the low bit (round
+/// bit) before re-doubling.
+pub fn encAndRImm8(size: Width, dst: Gpr, imm: i8) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (rexForRR(size, .rax, dst)) |rex| enc.push(rex);
+    enc.push(0x83);
+    enc.push(encodeModrm(0b11, 4, dst.low3())); // /4 = AND
+    enc.push(@bitCast(imm));
+    return enc;
+}
+
 /// `CVTSI2SS xmm, r/m32` / `CVTSI2SD xmm, r/m64` family —
 /// signed integer to scalar float conversion.
 ///   F3 [REX?] 0F 2A /r (CVTSI2SS, src f32-aware via prefix)
@@ -1752,4 +1776,24 @@ test "encCvtsi2Scalar: cvtsi2sd xmm8, r10d → f2 45 0f 2a c2 (REX.R + REX.B)" {
 test "encCvtsi2Scalar: cvtsi2sd xmm0, rax → f2 48 0f 2a c0 (REX.W only)" {
     const enc = encCvtsi2Scalar(.f64, true, .xmm0, .rax);
     try testing.expectEqualSlices(u8, &.{ 0xF2, 0x48, 0x0F, 0x2A, 0xC0 }, enc.slice());
+}
+
+test "encShrRImm8: shr rax, 1 → 48 c1 e8 01" {
+    const enc = encShrRImm8(.q, .rax, 1);
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0xC1, 0xE8, 0x01 }, enc.slice());
+}
+
+test "encShrRImm8: shr r10, 1 → 49 c1 ea 01 (REX.W + REX.B)" {
+    const enc = encShrRImm8(.q, .r10, 1);
+    try testing.expectEqualSlices(u8, &.{ 0x49, 0xC1, 0xEA, 0x01 }, enc.slice());
+}
+
+test "encAndRImm8: and rax, 1 → 48 83 e0 01" {
+    const enc = encAndRImm8(.q, .rax, 1);
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x83, 0xE0, 0x01 }, enc.slice());
+}
+
+test "encAndRImm8: and rcx, 1 → 48 83 e1 01" {
+    const enc = encAndRImm8(.q, .rcx, 1);
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x83, 0xE1, 0x01 }, enc.slice());
 }
