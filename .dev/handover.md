@@ -22,19 +22,21 @@
 
 ## Current state — Phase 7 / §9.7 / 7.7 IN-PROGRESS
 
-§9.7 / 7.7-control-table landed (`46a6d9f` x86_64 br_table:
-linear CMP+JNE-skip+JMP chain + tail JMP; inst encCmpRImm8 +
-encJccRel8; 4 byte-level + 2 emit tests; cap 127 cases)。
-**control-flow surface 完備** (block/loop/br/br_if/br_table/
-if/else/end の 8 op-arms)。3-host green。
+§9.7 / 7.7-mem-load landed (`c0711fb` x86_64 i32.load: ADR-0026
+prologue (PUSH RBP+R15 / MOV RBP,RSP / MOV R15,RDI) + bounds-
+check trap stub (MOV [R15+trap_flag_off],1 / XOR EAX,EAX / RET)
++ 5 inst encoders (encMovR64FromMemDisp32 / encCmpR64MemDisp32 /
+encMovR32FromBaseIdx / encAddR64Imm32 / encStoreImm32MemDisp32);
+prescan で uses_runtime_ptr=false の path は既存 prologue 維持
+→ 全 emit テスト無傷; 7 byte-level + 2 emit tests; 3-host green。
 
-**Active task**: §9.7 / 7.7-globals — global.get/.set。
-JitRuntime extension (globals_base) を追加するか Instance
-直接アクセスか設計判断あり。または先行 7.7-mem (memory ops +
-ADR-0026 prologue 導入) を選択肢。
+**Active task**: §9.7 / 7.7-mem-store — i32.store + 狭幅
+load/store (i32.load8_s/u, i32.load16_s/u, i32.store8/16)。
+emitI32Load 実装と同じ ADR-0026 prologue を経由しつつ、store の
+src 値書き出し + 狭幅符号拡張 (MOVSX 系) を追加する。
 
 **Phase**: Phase 7 (ARM64 + x86_64 baseline、ADR-0019)。
-**Branch**: `zwasm-from-scratch`、最新は 46a6d9f。
+**Branch**: `zwasm-from-scratch`、最新は c0711fb。
 
 ## ADR-0025 implementation chain (Phase A done; B-D pending)
 
@@ -74,13 +76,12 @@ fixed).
 | 7.7-control-skel | block/loop/br + emitEndIntra + JMP/Jcc rel32 + patchRel32 | DONE `75f88e6` |
 | 7.7-control-if | if/else (+if_skip_byte +merge_top_vreg D-027) + br_if | DONE `c0ba23d` |
 | 7.7-control-table | br_table (linear CMP+JNE-skip+JMP chain + tail) | DONE `46a6d9f` |
-| 7.7-mem | i32.load/store (+ bounds_check; ADR-0026 prologue ここで導入) | **NEXT** |
+| 7.7-mem-load | i32.load + ADR-0026 prologue + bounds-check trap stub | DONE `c0711fb` |
+| 7.7-mem-store | i32.store + 狭幅 load/store (load8_s/u, load16_s/u, store8/16) | **NEXT** |
 | 7.7-globals | global.get/.set (needs JitRuntime globals_base extension) | pending |
 | 7.7-wrap | i32.wrap_i64 / i64.extend_i32_s/u | pending |
 | 7.7-call | call/call_indirect | pending |
 | 7.7-fp | f32/f64 surface | pending |
-| 7.7-mem | i32 load/store + reserved_invariant_gprs design | pending (forces invariant decision) |
-| 7.7-call | call / call_indirect | pending |
 | deferred-Win64 | Win64 ABI table + Cc enum | pending |
 
 ADR-0019 phase plan post-7.6: 7.7 emit.zig, 7.8 spec gate (Linux
@@ -101,6 +102,11 @@ deferred to phase boundary batch update.
 
 ## Recently closed (per `git log --oneline -45`)
 
+- §9.7 / 7.7-mem-load: x86_64 i32.load + ADR-0026 prologue
+  (PUSH RBP+R15, MOV R15,RDI) + bounds-check trap stub; 5 new
+  inst encoders; usesRuntimePtr prescan で既存 prologue 維持
+  (zero churn); 78-byte 完成バイト列 1 + underflow 1 emit tests;
+  3-host green (c0711fb)。
 - §9.7 / 7.7-control-table: x86_64 br_table 線形 chain (CMP+JNE-
   skip+JMP per case + tail JMP); 6 new tests; 127-cap; **control-
   flow surface 完備** (46a6d9f)。
