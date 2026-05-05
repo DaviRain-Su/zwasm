@@ -23,20 +23,20 @@
 ## Current state — Phase 7 / §9.7 / 7.7 IN-PROGRESS
 
 直近 commit:
+- `895ac3e` §9.7 / 7.7-fp-binary — x86_64 f32/f64 add/sub/mul/div
+  (SSE2 scalar; encMovapsXmmXmm + encSseScalarBinary; 9 new
+  tests; 3-host green)
 - `f062800` §9.7 / 7.7-fp-const — x86_64 f32.const / f64.const
-  (encMovImm64Q + encMovd/qXmmFromR{32,64}; 8 new tests; 3-host
-  green)。FP-aware end handler の gap を D-032 として queue。
 - `2248e03` §9.7 / 7.7-call-indirect — x86_64 emitCallIndirect
-- `d071173` §9.7 / 7.7-call-direct — x86_64 direct `call N`
 
 **Active task**: 7.7-fp は op-class で chunk 分割中。**NEXT** =
-7.7-fp-binary (f32/f64 add/sub/mul/div, ADDSS/ADDSD…)。続いて
-fp-compare / fp-unary / fp-minmax-copysign / fp-convert / fp-mem。
-すべて landing 後 7.7-fp-end-fix (D-032 discharge) → §9.7 / 7.8
-spec gate。
+7.7-fp-compare (f32/f64 eq/ne/lt/gt/le/ge via UCOMISS/UCOMISD +
+SETcc + flag handling for unordered NaN)。続いて fp-unary /
+fp-minmax-copysign / fp-convert / fp-mem / fp-end-fix (D-032)
+→ §9.7 / 7.8 spec gate。
 
 **Phase**: Phase 7 (ARM64 + x86_64 baseline、ADR-0019)。
-**Branch**: `zwasm-from-scratch`、最新は `f062800`。
+**Branch**: `zwasm-from-scratch`、最新は `895ac3e`。
 
 ## ADR-0025 implementation chain (Phase A done; B-D pending)
 
@@ -83,8 +83,8 @@ fixed).
 | 7.7-call-direct | direct `call N` (i32 args + i32/void return) | DONE `d071173` |
 | 7.7-call-indirect | `call_indirect type_idx` (bounds + sig + funcptr) | DONE `2248e03` |
 | 7.7-fp-const | f32.const / f64.const (XMM via GPR scratch) | DONE `f062800` |
-| 7.7-fp-binary | f32/f64 add/sub/mul/div (ADDSS/ADDSD …) | **NEXT** |
-| 7.7-fp-compare | f32/f64 eq/ne/lt/gt/le/ge (UCOMISS/UCOMISD) | pending |
+| 7.7-fp-binary | f32/f64 add/sub/mul/div (ADDSS/ADDSD …) | DONE `895ac3e` |
+| 7.7-fp-compare | f32/f64 eq/ne/lt/gt/le/ge (UCOMISS/UCOMISD) | **NEXT** |
 | 7.7-fp-unary | f32/f64 abs/neg/sqrt/ceil/floor/trunc/nearest | pending |
 | 7.7-fp-minmax-copysign | f32/f64 min/max/copysign | pending |
 | 7.7-fp-convert | f↔int + f32↔f64 + reinterpret | pending |
@@ -110,10 +110,13 @@ deferred to phase boundary batch update.
 
 ## Recently closed (per `git log --oneline -45`)
 
+- §9.7 / 7.7-fp-binary: x86_64 f32/f64 add/sub/mul/div (SSE2
+  scalar — F3/F2 prefix + 0F + 58/5C/59/5E + ModR/M);
+  encMovapsXmmXmm + encSseScalarBinary (generic); always-MOV
+  form mirrors emitI32Binary; 9 tests (895ac3e)。
 - §9.7 / 7.7-fp-const: x86_64 f32.const + f64.const (MOV/MOVABS
-  via RAX scratch + MOVD/MOVQ XMM,GPR); 3 new encoders
-  (encMovImm64Q / encMovd・qXmmFromR{32,64}); 8 tests; D-032
-  (FP-aware end handler) recorded for later discharge (f062800)。
+  via RAX scratch + MOVD/MOVQ XMM,GPR); 3 new encoders + 8 tests;
+  D-032 (FP-aware end handler) recorded (f062800)。
 - §9.7 / 7.7-call-indirect: x86_64 emitCallIndirect (bounds +
   sig + funcptr via [R15+offset] reload, RAX as scratch); 4 new
   encoders + 10 tests (2248e03)。
