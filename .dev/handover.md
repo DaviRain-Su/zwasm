@@ -34,6 +34,18 @@
 discharge) → §9.7 / 7.8 spec gate。チャンク粒度・テスト並列化・
 Phase 8 前の負債清算 / 最適化リスト整備は介入会話で議論中。
 
+> **🔒 Phase 7 → 8 hard gate registered** (commit `08dc2ef`)。
+> §9.7 / 7.13 が collaborative human-in-loop review row、その
+> 内容は [`phase8_transition_gate.md`](phase8_transition_gate.md)
+> を参照。autonomous /continue loop は 7.13 が `[x]` になるまで
+> §9.8 を開けず、到達時点で `ScheduleWakeup` をスキップして user
+> に surface する規律を `.claude/skills/continue/SKILL.md` §
+> "Exception — hard human-in-loop transition gates" に明記済。
+> Gate checklist は (1) functional completion / (2) debt
+> reconciliation / (3) AOT/Wasm 3.0/WASI/SIMD horizon の design
+> cleanliness / (4) optimisation_log triage / (5) meta_audit +
+> strategic review の 5 section。
+
 **Phase**: Phase 7 (ARM64 + x86_64 baseline、ADR-0019)。
 **Branch**: `zwasm-from-scratch`、最新は `3255c29`。
 

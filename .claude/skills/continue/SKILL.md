@@ -570,6 +570,39 @@ The phase-boundary review steps are **opportunistic, not
 mandatory**. Apply when the scaffolding seems to need it; skip
 when the work has been clean. Either way, the loop continues.
 
+### Exception — hard human-in-loop transition gates
+
+A small number of phase boundaries are **hard gates**: the
+autonomous loop must **stop** and surface to the user with a
+gate document. These override the "non-stop" default above.
+
+Currently registered hard gates:
+
+- **§9.7 → §9.8 (Phase 7 → Phase 8)** — anchored at row §9.7 /
+  7.13, document `.dev/phase8_transition_gate.md`. Triggers
+  when the next-task lookup resolves to row 7.13 OR to
+  "open §9.8". The loop must:
+  1. Skip `ScheduleWakeup` (do **not** re-arm).
+  2. Surface a one-sentence handoff: "Phase 8 entry gate
+     (`.dev/phase8_transition_gate.md`) needs collaborative
+     review; pausing autonomous mode."
+  3. Treat resumption as bucket-1 user intervention — the user
+     re-engages by working through the gate checklist, marking
+     ☑ as items resolve, and finally asking for the gate to
+     be cleared (= flipping 7.13 to `[x]`).
+
+**Detection rule** for the autonomous loop: at every Step 7
+re-target, scan the §9.<active>'s next `[ ]` row. If its body
+text contains `🔒` AND `phase<N>_transition_gate.md`, the row
+is a hard gate. Stop instead of fire-and-forget. This pattern
+generalises — future hard gates (Phase 11 → 12+, etc.) can be
+added by replicating the row + gate document shape.
+
+A hard gate is **not** a bucket-2 unsolvable problem; the loop
+isn't broken. It's an explicit "this needs the user; don't
+proceed silently" checkpoint, distinct from both stop buckets
+in the strict whitelist.
+
 ## Subagent delegation cheatsheet
 
 | Trigger                               | Action                                              |
