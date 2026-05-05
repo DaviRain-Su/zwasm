@@ -292,6 +292,8 @@ pub fn compile(
             .@"i32.trunc_sat_f32_s", .@"i32.trunc_sat_f64_s",
             .@"i64.trunc_sat_f32_s", .@"i64.trunc_sat_f64_s",
             => try emitFpTruncSatSigned(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
+            .@"i32.trunc_sat_f32_u", .@"i32.trunc_sat_f64_u",
+            => try emitFpTruncSatU32(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
             .@"local.get" => try emitLocalGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, num_locals, uses_runtime_ptr, ins.payload),
             .@"local.set" => try emitLocalSet(allocator, &buf, alloc, &pushed_vregs, num_locals, uses_runtime_ptr, ins.payload),
             .@"local.tee" => try emitLocalTee(allocator, &buf, alloc, &pushed_vregs, num_locals, uses_runtime_ptr, ins.payload),
@@ -710,6 +712,121 @@ fn emitFpConst(
         },
         else => unreachable,
     }
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// Wasm 2.0 saturating unsigned truncate to i32 (`i32.trunc_sat_
+/// f32/f64_u`). Uses the .q form CVTTSS2SI on the bounded range
+/// [0, 2^32), which fits comfortably inside positive i64 — no
+/// signed-overflow ambiguity. Branches handle NaN/negative→0 and
+/// ≥ 2^32 → UINT32_MAX:
+///
+///   UCOMI src, src ; JP zero_path     ; NaN
+///   XORPS xmm7, xmm7
+///   UCOMI src, xmm7 ; JBE zero_path   ; src ≤ 0 (or NaN)
+///   ; Materialise threshold 2^32 in xmm7 (overwriting zero).
+///   MOV/MOVABS rax, threshold ; MOVD/Q xmm7, rax
+///   UCOMI src, xmm7 ; JAE max_path    ; src ≥ 2^32
+///   CVTTSS2SI .q gpr_dst, src         ; in-range
+///   JMP done
+///   zero_path: XOR gpr_dst, gpr_dst (.d) ; JMP done
+///   max_path:  MOV gpr_dst, 0xFFFFFFFF
+///   done:
+///
+/// Threshold is 2^32 (0x4F800000 as f32, 0x41F0000000000000 as f64),
+/// both exactly representable.
+///
+/// XMM7 is the SIMD scratch (per abi.zig). RAX is GPR scratch
+/// for threshold materialisation. Neither in regalloc pool.
+///
+/// i64 unsigned variant deferred to a follow-up chunk: needs a
+/// 2^63 split path because i64 doesn't fit in positive i64
+/// signed range above 2^63.
+fn emitFpTruncSatU32(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    op: zir.ZirOp,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+    const src_x = abi.fpSlotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
+    const dst = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+
+    const is_f64_src = op == .@"i32.trunc_sat_f64_u";
+    const scalar_kind: inst.SseScalarKind = if (is_f64_src) .f64 else .f32;
+    const packed_kind: inst.SsePackedKind = if (is_f64_src) .f64 else .f32;
+
+    // 1. NaN check: UCOMI src, src ; JP zero_path.
+    if (is_f64_src) {
+        try buf.appendSlice(allocator, inst.encUcomisd(src_x, src_x).slice());
+    } else {
+        try buf.appendSlice(allocator, inst.encUcomiss(src_x, src_x).slice());
+    }
+    const jp_byte: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJccRel32(.p, 0).slice());
+
+    // 2. XORPS xmm7, xmm7 ; UCOMI src, xmm7 ; JBE zero_path.
+    try buf.appendSlice(allocator, inst.encSsePackedBinary(packed_kind, 0x57, .xmm7, .xmm7).slice());
+    if (is_f64_src) {
+        try buf.appendSlice(allocator, inst.encUcomisd(src_x, .xmm7).slice());
+    } else {
+        try buf.appendSlice(allocator, inst.encUcomiss(src_x, .xmm7).slice());
+    }
+    const jbe_byte: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJccRel32(.be, 0).slice());
+
+    // 3. Load threshold 2^32 into xmm7 (overwriting the zero).
+    if (is_f64_src) {
+        try buf.appendSlice(allocator, inst.encMovImm64Q(.rax, 0x41F0000000000000).slice());
+        try buf.appendSlice(allocator, inst.encMovqXmmFromR64(.xmm7, .rax).slice());
+    } else {
+        try buf.appendSlice(allocator, inst.encMovImm32W(.rax, 0x4F800000).slice());
+        try buf.appendSlice(allocator, inst.encMovdXmmFromR32(.xmm7, .rax).slice());
+    }
+
+    // 4. UCOMI src, xmm7 ; JAE max_path.
+    if (is_f64_src) {
+        try buf.appendSlice(allocator, inst.encUcomisd(src_x, .xmm7).slice());
+    } else {
+        try buf.appendSlice(allocator, inst.encUcomiss(src_x, .xmm7).slice());
+    }
+    const jae_byte: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJccRel32(.ae, 0).slice());
+
+    // 5. In-range: CVTTSS/SD2SI .q gpr_dst, src. Lower 32 bits
+    //    hold the i32 result (upper bits are 0 since src < 2^32).
+    try buf.appendSlice(allocator, inst.encCvttScalar2Int(scalar_kind, true, dst, src_x).slice());
+
+    // 6. JMP done.
+    const jmp_done_byte: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJmpRel32(0).slice());
+
+    // 7. zero_path; patch JP, JBE.
+    const zero_byte: u32 = @intCast(buf.items.len);
+    inst.patchRel32(buf.items, jp_byte, 6, @as(i32, @intCast(zero_byte)) - @as(i32, @intCast(jp_byte)) - 6);
+    inst.patchRel32(buf.items, jbe_byte, 6, @as(i32, @intCast(zero_byte)) - @as(i32, @intCast(jbe_byte)) - 6);
+    try buf.appendSlice(allocator, inst.encXorRR(.d, dst, dst).slice());
+
+    // 8. JMP done.
+    const jmp_zero_byte: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJmpRel32(0).slice());
+
+    // 9. max_path; patch JAE.
+    const max_byte: u32 = @intCast(buf.items.len);
+    inst.patchRel32(buf.items, jae_byte, 6, @as(i32, @intCast(max_byte)) - @as(i32, @intCast(jae_byte)) - 6);
+    try buf.appendSlice(allocator, inst.encMovImm32W(dst, 0xFFFFFFFF).slice());
+
+    // 10. done; patch JMPs.
+    const done_byte: u32 = @intCast(buf.items.len);
+    inst.patchRel32(buf.items, jmp_done_byte, 5, @as(i32, @intCast(done_byte)) - @as(i32, @intCast(jmp_done_byte)) - 5);
+    inst.patchRel32(buf.items, jmp_zero_byte, 5, @as(i32, @intCast(done_byte)) - @as(i32, @intCast(jmp_zero_byte)) - 5);
+
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -3420,6 +3537,49 @@ test "compile: f32.reinterpret_i32 — MOVD XMM8, R10D (GPR→XMM bit-cast)" {
     // After i32.const at [4..10] (6 bytes for R10): MOVD XMM8, R10D at [10..15].
     const expected = inst.encMovdXmmFromR32(.xmm8, .r10);
     try testing.expectEqualSlices(u8, expected.slice(), out.bytes[10 .. 10 + expected.len]);
+}
+
+test "compile: i32.trunc_sat_f32_u — UCOMI/JP + clamp paths + CVTTSS2SI .q form" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0x40400000 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.trunc_sat_f32_u" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+    } };
+    const slots = [_]u8{ 0, 0 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // After f32.const at [4..14]:
+    //   [14..18] UCOMISS XMM8, XMM8     (4 bytes; REX.R+B)
+    //   [18..24] JP rel32 zero_path     (6 bytes)
+    //   [24..27] XORPS XMM7, XMM7       (3 bytes; no prefix, no REX)
+    //   [27..31] UCOMISS XMM8, XMM7     (4 bytes; REX.R only)
+    //   [31..37] JBE rel32 zero_path    (6 bytes)
+    //   [37..42] MOV EAX, 0x4F800000    (5 bytes; no REX)
+    //   [42..46] MOVD XMM7, EAX         (4 bytes; no REX)
+    //   [46..50] UCOMISS XMM8, XMM7     (4 bytes)
+    //   [50..56] JAE rel32 max_path     (6 bytes)
+    //   [56..61] CVTTSS2SI R10, XMM8 .q (5 bytes)
+    //   [61..66] JMP rel32 done         (5 bytes)
+    //   zero_path at 66
+    const expected_xorps = inst.encSsePackedBinary(.f32, 0x57, .xmm7, .xmm7);
+    try testing.expectEqualSlices(u8, expected_xorps.slice(), out.bytes[24 .. 24 + expected_xorps.len]);
+    const expected_thresh = inst.encMovImm32W(.rax, 0x4F800000);
+    try testing.expectEqualSlices(u8, expected_thresh.slice(), out.bytes[37 .. 37 + expected_thresh.len]);
+    const expected_cvt = inst.encCvttScalar2Int(.f32, true, .r10, .xmm8);
+    try testing.expectEqualSlices(u8, expected_cvt.slice(), out.bytes[56 .. 56 + expected_cvt.len]);
+    // JP/JBE/JAE rel32 opcode bytes (disps patched at end-of-emit).
+    try testing.expectEqual(@as(u8, 0x0F), out.bytes[18]);
+    try testing.expectEqual(@as(u8, 0x8A), out.bytes[19]);
+    try testing.expectEqual(@as(u8, 0x0F), out.bytes[31]);
+    try testing.expectEqual(@as(u8, 0x86), out.bytes[32]); // Jcc.be = 6
+    try testing.expectEqual(@as(u8, 0x0F), out.bytes[50]);
+    try testing.expectEqual(@as(u8, 0x83), out.bytes[51]); // Jcc.ae = 3
 }
 
 test "compile: i32.trunc_sat_f32_s — CVTTSS2SI + CMP INT_MIN + branch saturation" {
