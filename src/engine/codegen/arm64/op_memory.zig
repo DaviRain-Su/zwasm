@@ -39,6 +39,7 @@ const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
+const trace = @import("../../../diagnostic/trace.zig");
 
 const ZirInstr = zir.ZirInstr;
 const EmitCtx = ctx_mod.EmitCtx;
@@ -114,6 +115,9 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const fixup_at: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hi, 0)); // unsigned >
     try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+    // ADR-0028 M3-a-1: record bounds-check emit site (no-op when
+    // -Dtrace-ringbuffer=false; comptime-folded out of release).
+    trace.writeBounds(ctx.func.func_idx, fixup_at);
 
     // Final LDR/STR. Allocate result vreg first for loads.
     if (is_store) {

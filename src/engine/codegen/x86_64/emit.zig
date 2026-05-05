@@ -46,6 +46,7 @@ const regalloc = @import("../shared/regalloc.zig");
 const inst = @import("inst.zig");
 const abi = @import("abi.zig");
 const jit_abi = @import("../shared/jit_abi.zig");
+const trace = @import("../../../diagnostic/trace.zig");
 
 const Allocator = std.mem.Allocator;
 const ZirFunc = zir.ZirFunc;
@@ -259,7 +260,7 @@ pub fn compile(
             .@"i32.load", .@"i32.load8_s", .@"i32.load8_u",
             .@"i32.load16_s", .@"i32.load16_u",
             .@"i32.store", .@"i32.store8", .@"i32.store16",
-            => try emitMemOp(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, ins.op, ins.payload),
+            => try emitMemOp(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, ins.op, ins.payload, func.func_idx),
             .@"block" => try emitBlock(allocator, &labels),
             .@"loop" => try emitLoop(allocator, &buf, &labels),
             .@"br" => try emitBr(allocator, &buf, &labels, ins.payload),
@@ -711,6 +712,7 @@ fn emitMemOp(
     bounds_fixups: *std.ArrayList(u32),
     op: zir.ZirOp,
     offset: u32,
+    func_idx: u32,
 ) Error!void {
     const is_store = switch (op) {
         .@"i32.store", .@"i32.store8", .@"i32.store16" => true,
@@ -753,6 +755,9 @@ fn emitMemOp(
     const fixup_at: u32 = @intCast(buf.items.len);
     try buf.appendSlice(allocator, inst.encJccRel32(.a, 0).slice()); // unsigned >
     try bounds_fixups.append(allocator, fixup_at);
+    // ADR-0028 M3-a-1: record bounds-check emit site (no-op when
+    // -Dtrace-ringbuffer=false; comptime-folded out of release).
+    trace.writeBounds(func_idx, fixup_at);
 
     // Per-op final encoding.
     if (is_store) {

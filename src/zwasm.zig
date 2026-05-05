@@ -178,6 +178,7 @@ test {
     _ = @import("support/leb128.zig");
     _ = @import("support/dbg.zig");
     _ = @import("diagnostic/diagnostic.zig");
+    _ = @import("diagnostic/trace.zig");
     _ = @import("cli/diag_print.zig");
     _ = @import("ir/zir.zig");
     _ = @import("ir/dispatch_table.zig");

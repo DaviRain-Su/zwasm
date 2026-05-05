@@ -48,10 +48,28 @@ pub fn build(b: *std.Build) void {
     // zwasm-lib module. Step is silent when -Dtask is unset.
     const repro_task = b.option([]const u8, "task", "Repro task name (private/dbg/<task>/repro.zig)");
 
+    // ADR-0028 / D-022: Diagnostic M3-a trace ringbuffer compile-time
+    // gate. Default false so release builds emit zero trace code in
+    // hot paths (per ROADMAP §A12). Enable on debug / audit runs via
+    // `-Dtrace-ringbuffer=true`.
+    const trace_ringbuffer = b.option(bool, "trace-ringbuffer",
+        "Compile in Diagnostic M3-a trace ringbuffer (default: false)") orelse false;
+
     const options = b.addOptions();
     options.addOption(WasmLevel, "wasm_level", wasm_level);
     options.addOption(WasiLevel, "wasi_level", wasi_level);
     options.addOption(EngineMode, "engine_mode", engine_mode);
+    options.addOption(bool, "trace_ringbuffer", trace_ringbuffer);
+
+    // Build_options as a single shared module so both `core` and
+    // `exe_mod` (and any other consumer) reference the same Module.
+    // ADR-0028 requires `src/diagnostic/trace.zig` to import
+    // `build_options`; the previous double-`addOptions` shape made
+    // the auto-generated file the root of two modules ("build_options"
+    // and "build_options0") and broke compilation when both root
+    // modules (core + exe_mod) appeared in the same `zig build test`
+    // run. Sharing a single Module via `b.addModule` deduplicates.
+    const build_options_mod = options.createModule();
 
     // ============================================================
     // `core` module — the shared library Module per ADR-0024 D-1.
@@ -76,7 +94,7 @@ pub fn build(b: *std.Build) void {
         // adjacent runtime (wasm-c-api consumers are C hosts).
         .link_libc = true,
     });
-    core.addOptions("build_options", options);
+    core.addImport("build_options", build_options_mod);
     // §9.3 / 3.1: `include/` carries the vendored C API headers
     // (wasm.h pinned via ADR-0004). Adding the path here lets
     // src/api/* modules `@cImport(@cInclude("wasm.h"))` resolve.
@@ -98,7 +116,7 @@ pub fn build(b: *std.Build) void {
         .strip = strip_opt,
         .link_libc = true,
     });
-    exe_mod.addOptions("build_options", options);
+    exe_mod.addImport("build_options", build_options_mod);
     exe_mod.addIncludePath(b.path("include"));
     applySanitize(exe_mod, sanitize_c, sanitize_thread);
     exe_mod.addImport("zwasm", core);

@@ -827,6 +827,7 @@ included in the build, not pervasive `if` branches.
 -Dapi=c|none                (default c; -Dapi=none drops api/ subtree for embed-only builds)
 -Doptimize=Debug|ReleaseFast|ReleaseSafe|ReleaseSmall  (Zig standard)
 -Dstrip=true|false          (default false; strips debug info from the CLI binary)
+-Dtrace-ringbuffer=true|false (default false; compile in Diagnostic M3-a trace per ADR-0028)
 ```
 
 Source-separation principle (A12): each feature module is its own

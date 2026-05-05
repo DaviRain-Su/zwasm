@@ -562,3 +562,11 @@ phase 2+ extension must satisfy them.
   (single shared enum across runtime + c-api; the model for
   principle 1. Path corrected from a previous draft that wrote
   `crates/wasmtime/src/runtime/`.)
+- ADR-0028 (Diagnostic M3 trace ringbuffer; this ADR's M3
+  phasing is amended by ADR-0028)
+
+## Revision history
+
+| Date | SHA | Note |
+|---|---|---|
+| 2026-05-05 | `<backfill>` | M3 phasing amended by ADR-0028: M3 is no longer "deferred to Phase 7 close". Phased as M3-a (bounds + trap, before §9.7 / 7.8 spec gate) → M3-b (regalloc + jit, before §9.7 / 7.11 differential) → M3-c (regir + exec, Phase 8+). M3-a-1 (ringbuffer infrastructure + compile-time bounds writes via `src/diagnostic/trace.zig` + `-Dtrace-ringbuffer` build flag) landed in this commit. |
