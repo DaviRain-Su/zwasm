@@ -22,21 +22,24 @@
 
 ## Current state — Phase 7 / §9.7 / 7.7 IN-PROGRESS
 
-§9.7 / 7.7-mem-store landed (`7d37a5b` x86_64 i32.store + 狭幅
-load/store、unified `emitMemOp` ハンドラ、7 inst encoders +
-5 emit tests; emitI32Load を emitMemOp に統合 refactor、既存
-78-byte i32.load テストはそのまま green; 8 mem-op surface 完備
-(i32.{load, load8_s/u, load16_s/u, store, store8, store16}))。
-3-host green。
+7-issue cleanup batch landed (`618ac14` ADR-0027 + ADR-0028)。
+構造課題 7 件を 4 commit で discharge:
+- `c58af89` #6 forced REX TODO + #2 D-029 ARM64 grep verified
+  + #3 D-030 ADR-0023 mirror gap row added
+- `afa3808` #4 D-028 windowsmini ×10 + WebSearch follow-up
+- `fe42735` #1 spec-strict bounds check (両 backend, ea+size>limit;
+  liveness.zig memory ops 追加; +2 trap fixtures, edge runner 24 PASS)
+- `618ac14` #5 ADR-0027 (JitRuntime globals_base 拡張設計確定)
+  + #7 ADR-0028 (Diagnostic M3 ringbuffer 前倒し設計確定)
 
-**Active task**: §9.7 / 7.7-globals — global.get/.set。
-JitRuntime extension (globals_base) を追加するか Instance
-直接アクセスか設計判断あり (これは設計判断 chunk なので、ADR
-or lesson 化が必要)。代替: 7.7-wrap (i32.wrap_i64 /
-i64.extend_i32_s/u) — 軽量で 7.7 の i64 path を開く。
+**Active task**: §9.7 / 7.7-globals 実装 (ADR-0027 で設計確定済み:
+JitRuntime に globals_base + globals_count 追加, ARM64 X23 予約)
+または M3-a 実装 (ADR-0028 で設計確定済み: bounds + trap カテゴリ
+の ringbuffer)。実装順は判断待ち (M3-a → 7.7-globals の方が trap
+diagnosis 整備の意義が大きいかもしれない)。
 
 **Phase**: Phase 7 (ARM64 + x86_64 baseline、ADR-0019)。
-**Branch**: `zwasm-from-scratch`、最新は 7d37a5b。
+**Branch**: `zwasm-from-scratch`、最新は 618ac14。
 
 ## ADR-0025 implementation chain (Phase A done; B-D pending)
 
@@ -102,6 +105,12 @@ deferred to phase boundary batch update.
 
 ## Recently closed (per `git log --oneline -45`)
 
+- 7-issue cleanup batch (2026-05-05, 4 commits):
+  - `618ac14` ADR-0027 (#5 globals 設計) + ADR-0028 (#7 M3 trace 前倒し)
+  - `fe42735` #1 spec-strict bounds (両 backend ea+size>limit + 2 trap fixtures
+    + liveness.zig memory ops + D-031 runner制約 debt)
+  - `afa3808` D-028 windowsmini ロギング (10 連 0 fail + WebSearch 確認)
+  - `c58af89` #6 TODO marker + #2 D-029 ARM64 grep + #3 D-030 ADR-0023 mirror gap
 - §9.7 / 7.7-mem-store: x86_64 i32.store + 狭幅 load/store
   (i32.{load8_s/u, load16_s/u, store8, store16}) + unified
   emitMemOp ハンドラへ refactor (emitI32Load 統合); 7 inst
