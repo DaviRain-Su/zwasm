@@ -23,23 +23,21 @@
 ## Current state — Phase 7 / §9.7 / 7.7 IN-PROGRESS
 
 直近 commit:
-- `eff1c75` §9.7 / 7.7-fp-trunc-trap-signed — x86_64 Wasm 1.0
-  trapping signed f→i (4 ops with NaN/upper/lower checks routed
-  through bounds_fixups + materialiseFpThreshold helper); 1 test;
-  3-host green
+- `78d5b06` §9.7 / 7.7-fp-trunc-trap-unsigned — x86_64 Wasm 1.0
+  trapping unsigned f→i (4 ops; NaN/≤-1/≥2^N → bounds_fixups;
+  i32_u .q-trick + i64_u 2^63 split); 2 tests; 3-host green
+  (D-028 transient retry)。fp-trunc-trap 全 8 ops 完了
+- `eff1c75` §9.7 / 7.7-fp-trunc-trap-signed — trapping signed
+  f→i (4 ops)
 - `7983dd3` §9.7 / 7.7-fp-trunc-sat-u64 — saturating unsigned
   f→i64 (2 ops)
-- `18314cf` §9.7 / 7.7-fp-trunc-sat-u32 — saturating unsigned
-  f→i32 (2 ops)
 
-**Active task**: **NEXT** = 7.7-fp-trunc-trap-unsigned (Wasm 1.0
-4 ops: i32/i64.trunc_f32/f64_u — NaN/≤-1/≥2^N range checks +
-in-range convert with .q-form trick for i32_u and 2^63 split for
-i64_u)。続いて fp-mem → fp-end-fix (D-032) → §9.7 / 7.8 spec
-gate。
+**Active task**: **NEXT** = 7.7-fp-mem (f32/f64.load + f32/f64.
+store — 既存 emitMemOp に 4 op 追加; ADR-0026 prologue は既存)。
+続いて fp-end-fix (D-032) → §9.7 / 7.8 spec gate。
 
 **Phase**: Phase 7 (ARM64 + x86_64 baseline、ADR-0019)。
-**Branch**: `zwasm-from-scratch`、最新は `eff1c75`。
+**Branch**: `zwasm-from-scratch`、最新は `78d5b06`。
 
 ## ADR-0025 implementation chain (Phase A done; B-D pending)
 
@@ -97,7 +95,8 @@ fixed).
 | 7.7-fp-trunc-sat-u32 | Wasm 2.0 saturating unsigned f→i32 (2 ops) | DONE `18314cf` |
 | 7.7-fp-trunc-sat-u64 | Wasm 2.0 saturating unsigned f→i64 (2 ops) | DONE `7983dd3` |
 | 7.7-fp-trunc-trap-signed | Wasm 1.0 trapping signed f→i (4 ops) | DONE `eff1c75` |
-| 7.7-fp-trunc-trap-unsigned | Wasm 1.0 trapping unsigned f→i (4 ops) | **NEXT** |
+| 7.7-fp-trunc-trap-unsigned | Wasm 1.0 trapping unsigned f→i (4 ops) | DONE `78d5b06` |
+| 7.7-fp-mem | f32/f64 load/store (4 ops) | **NEXT** |
 | 7.7-fp-mem | f32/f64 load/store | pending |
 | 7.7-fp-end-fix | FP-aware function-end (D-032 discharge) | pending |
 | deferred-Win64 | Win64 ABI table + Cc enum | pending |
@@ -120,10 +119,13 @@ deferred to phase boundary batch update.
 
 ## Recently closed (per `git log --oneline -45`)
 
-- §9.7 / 7.7-fp-trunc-trap-signed: x86_64 Wasm 1.0 trapping signed
-  f→i (4 ops with NaN+upper+lower bounds via bounds_fixups +
-  CVTTSS2SI direct in-range); materialiseFpThreshold helper
-  extracted; 1 test (eff1c75)。
+- §9.7 / 7.7-fp-trunc-trap-unsigned: x86_64 Wasm 1.0 trapping
+  unsigned f→i (4 ops; NaN/≤-1/≥2^N → bounds_fixups; in-range
+  via .q-trick (i32_u) or 2^63 split + SUBSS + sign-bit OR
+  (i64_u)); 2 tests (78d5b06)。fp-trunc-trap 全 8 ops 完了。
+- §9.7 / 7.7-fp-trunc-trap-signed: x86_64 Wasm 1.0 trapping
+  signed f→i (4 ops via NaN+upper+lower → bounds_fixups +
+  CVTTSS2SI in-range); 1 test (eff1c75)。
 - §9.7 / 7.7-fp-trunc-sat-u64: x86_64 Wasm 2.0 unsigned trunc_sat
   to i64 (2 ops via 2^63 split + SUBSS + sign-bit OR); 1 test
   (7983dd3)。fp-trunc-sat 全 8 ops 完了。
