@@ -23,19 +23,20 @@
 ## Current state — Phase 7 / §9.7 / 7.7 IN-PROGRESS
 
 直近 commit:
+- `1205ae0` §9.7 / 7.7-fp-minmax — x86_64 f32/f64 min/max
+  (branch-based UCOMI + JP/JE/3 paths; ORPS for min ±0,
+  ANDPS for max ±0, ADDSS for NaN propagation; 2 new tests;
+  3-host green)
 - `6af5239` §9.7 / 7.7-fp-copysign — x86_64 f32/f64 copysign
-  (GPR bit-twiddle via RAX/RDX/RCX scratches; encMovdR32FromXmm
-  + encMovqR64FromXmm; 6 new tests; 3-host green)
 - `d51c1b8` §9.7 / 7.7-fp-unary — x86_64 14 unary FP ops
-- `bc4348d` §9.7 / 7.7-fp-compare — x86_64 f32/f64 6 compares
 
-**Active task**: **NEXT** = 7.7-fp-minmax (f32/f64 min/max,
-branch-based emit for Wasm-spec NaN propagation + ±0 handling)。
-続いて fp-convert / fp-mem / fp-end-fix (D-032) → §9.7 / 7.8
-spec gate。
+**Active task**: **NEXT** = 7.7-fp-convert (f↔int conversions:
+trunc_sat / convert_i*_s/u + f32↔f64 promote/demote +
+reinterpret)。続いて fp-mem (load/store) / fp-end-fix (D-032)
+→ §9.7 / 7.8 spec gate。
 
 **Phase**: Phase 7 (ARM64 + x86_64 baseline、ADR-0019)。
-**Branch**: `zwasm-from-scratch`、最新は `6af5239`。
+**Branch**: `zwasm-from-scratch`、最新は `1205ae0`。
 
 ## ADR-0025 implementation chain (Phase A done; B-D pending)
 
@@ -86,8 +87,8 @@ fixed).
 | 7.7-fp-compare | f32/f64 eq/ne/lt/gt/le/ge (UCOMISS/UCOMISD) | DONE `bc4348d` |
 | 7.7-fp-unary | f32/f64 abs/neg/sqrt/ceil/floor/trunc/nearest | DONE `d51c1b8` |
 | 7.7-fp-copysign | f32/f64 copysign (GPR bit-twiddle) | DONE `6af5239` |
-| 7.7-fp-minmax | f32/f64 min/max (branch-based NaN/±0 spec) | **NEXT** |
-| 7.7-fp-convert | f↔int + f32↔f64 + reinterpret | pending |
+| 7.7-fp-minmax | f32/f64 min/max (branch-based NaN/±0 spec) | DONE `1205ae0` |
+| 7.7-fp-convert | f↔int + f32↔f64 + reinterpret | **NEXT** |
 | 7.7-fp-mem | f32/f64 load/store | pending |
 | 7.7-fp-end-fix | FP-aware function-end (D-032 discharge) | pending |
 | deferred-Win64 | Win64 ABI table + Cc enum | pending |
@@ -110,10 +111,13 @@ deferred to phase boundary batch update.
 
 ## Recently closed (per `git log --oneline -45`)
 
+- §9.7 / 7.7-fp-minmax: x86_64 f32/f64 min/max via branch-based
+  emit (UCOMI + JP→ADDSS NaN path / JE→ORPS-ANDPS ±0 path /
+  fallthrough→MINSS-MAXSS); rel32 placeholders patched at
+  end-of-emit; 2 tests (1205ae0)。
 - §9.7 / 7.7-fp-copysign: x86_64 f32/f64 copysign via GPR
-  bit-twiddle (XMM→RAX/RDX, mask via RCX, AND/OR, RAX→XMM);
-  encMovdR32FromXmm + encMovqR64FromXmm; min/max split off
-  to its own chunk; 6 tests (6af5239)。
+  bit-twiddle; encMovdR32FromXmm + encMovqR64FromXmm; 6 tests
+  (6af5239)。
 - §9.7 / 7.7-fp-unary: x86_64 14 unary FP ops — sqrt + round
   + abs/neg (mask materialisation); 9 tests (d51c1b8)。
 - §9.7 / 7.7-fp-compare: x86_64 f32/f64 eq/ne/lt/gt/le/ge via
