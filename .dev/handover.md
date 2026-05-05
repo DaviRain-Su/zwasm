@@ -23,21 +23,20 @@
 ## Current state — Phase 7 / §9.7 / 7.7 IN-PROGRESS
 
 直近 commit:
-- `18314cf` §9.7 / 7.7-fp-trunc-sat-u32 — x86_64 Wasm 2.0
-  unsigned trunc_sat to i32 (2 ops via .q-form trick + 5 branch
-  paths); 1 test; 3-host green
-- `20a2c0e` §9.7 / 7.7-fp-trunc-sat-signed — saturating signed
-  f→i (4 ops)
-- `df99e67` §9.7 / 7.7-fp-convert-unsigned — unsigned i→f (4 ops)
+- `7983dd3` §9.7 / 7.7-fp-trunc-sat-u64 — x86_64 Wasm 2.0
+  unsigned trunc_sat to i64 (2 ops via 2^63 split + SUBSS
+  + sign-bit OR); 1 test; 3-host green。fp-trunc-sat 全 8 ops
+  完了
+- `18314cf` §9.7 / 7.7-fp-trunc-sat-u32 — unsigned f→i32 (2 ops)
+- `20a2c0e` §9.7 / 7.7-fp-trunc-sat-signed — signed f→i (4 ops)
 
-**Active task**: **NEXT** = 7.7-fp-trunc-sat-u64 (2 ops:
-i64.trunc_sat_f32/f64_u — 2^63 split path: src < 2^63 → CVTTSS2SI
-direct; src ≥ 2^63 → SUBSS 2^63 + CVTTSS2SI + add 2^63 back)。
-続いて fp-trunc-trap (Wasm 1.0 8 ops) → fp-mem → fp-end-fix
-(D-032) → §9.7 / 7.8 spec gate。
+**Active task**: **NEXT** = 7.7-fp-trunc-trap (Wasm 1.0 8 ops:
+trapping i*.trunc_f*_s/u — 同じ branch shape を使うが overflow/
+NaN は trap 経路に invalidConversion 立てて trap_fixups append)。
+続いて fp-mem → fp-end-fix (D-032) → §9.7 / 7.8 spec gate。
 
 **Phase**: Phase 7 (ARM64 + x86_64 baseline、ADR-0019)。
-**Branch**: `zwasm-from-scratch`、最新は `18314cf`。
+**Branch**: `zwasm-from-scratch`、最新は `7983dd3`。
 
 ## ADR-0025 implementation chain (Phase A done; B-D pending)
 
@@ -93,8 +92,8 @@ fixed).
 | 7.7-fp-convert-unsigned | f.convert_iN_u (i64 branch-based) | DONE `df99e67` |
 | 7.7-fp-trunc-sat-signed | Wasm 2.0 saturating signed f→i (4 ops) | DONE `20a2c0e` |
 | 7.7-fp-trunc-sat-u32 | Wasm 2.0 saturating unsigned f→i32 (2 ops) | DONE `18314cf` |
-| 7.7-fp-trunc-sat-u64 | Wasm 2.0 saturating unsigned f→i64 (2 ops) | **NEXT** |
-| 7.7-fp-trunc-trap | Wasm 1.0 trapping f→i (8 ops) | pending |
+| 7.7-fp-trunc-sat-u64 | Wasm 2.0 saturating unsigned f→i64 (2 ops) | DONE `7983dd3` |
+| 7.7-fp-trunc-trap | Wasm 1.0 trapping f→i (8 ops) | **NEXT** |
 | 7.7-fp-mem | f32/f64 load/store | pending |
 | 7.7-fp-end-fix | FP-aware function-end (D-032 discharge) | pending |
 | deferred-Win64 | Win64 ABI table + Cc enum | pending |
@@ -117,9 +116,13 @@ deferred to phase boundary batch update.
 
 ## Recently closed (per `git log --oneline -45`)
 
+- §9.7 / 7.7-fp-trunc-sat-u64: x86_64 Wasm 2.0 unsigned trunc_sat
+  to i64 (2 ops via 2^63 split path: SUBSS + CVTTSS2SI + sign-bit
+  OR for high half); std.mem.indexOf→find lint fix; 1 test
+  (7983dd3)。fp-trunc-sat 全 8 ops 完了 (signed 4 + u32 2 + u64 2)。
 - §9.7 / 7.7-fp-trunc-sat-u32: x86_64 Wasm 2.0 unsigned trunc_sat
-  to i32 (2 ops via CVTTSS2SI .q form on bounded [0, 2^32) +
-  threshold 2^32 in XMM7 + 5-path branch); 1 test (18314cf)。
+  to i32 (2 ops via CVTTSS2SI .q form trick + 5-path branch); 1
+  test (18314cf)。
 - §9.7 / 7.7-fp-trunc-sat-signed: x86_64 Wasm 2.0 saturating
   signed f→i (4 ops via CVTTSS2SI sentinel + branch on NaN/sign
   for INT_MAX vs INT_MIN, NaN→0); 6 tests (20a2c0e)。
