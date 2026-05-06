@@ -69,12 +69,29 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     errdefer arena.deinit();
     const a = arena.allocator();
 
+    // Per Wasm spec: type / function / code sections are all
+    // OPTIONAL — a module with no defined functions is valid
+    // (just header + optional non-function sections). Bail out
+    // early with an empty CompiledWasm in that case rather than
+    // demanding a type section.
+    const func_section_opt = module.find(.function);
+    if (func_section_opt == null) {
+        const empty_results = try allocator.alloc(compile_func.FuncResult, 0);
+        const empty_sigs = try allocator.alloc(FuncType, 0);
+        const empty_module = try linker.link(allocator, &.{});
+        return .{
+            .module = empty_module,
+            .func_results = empty_results,
+            .func_sigs = empty_sigs,
+            .arena = arena,
+        };
+    }
+
     const type_section = module.find(.@"type") orelse return Error.MissingTypeSection;
     var types = try sections.decodeTypes(a, type_section.body);
     defer types.deinit();
 
-    const func_section = module.find(.function) orelse return Error.MissingFunctionSection;
-    const defined_func_typeidx = try sections.decodeFunctions(a, func_section.body);
+    const defined_func_typeidx = try sections.decodeFunctions(a, func_section_opt.?.body);
 
     const code_section = module.find(.code) orelse return Error.MissingCodeSection;
     var codes = try sections.decodeCodes(a, code_section.body);
@@ -259,4 +276,17 @@ test "runI32Export: trunc_f32_s/nan traps (sub-7.5b-ii trap_flag detection)" {
         0x43, 0x00, 0x00, 0xc0, 0x7f, 0xa8, 0x0b,
     };
     try testing.expectError(entry.Error.Trap, runI32Export(testing.allocator, &bytes, "test"));
+}
+
+test "compileWasm: empty module (header only) compiles to empty CompiledWasm" {
+    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
+        return error.SkipZigTest;
+    }
+    // Bare module header — magic + version, no sections at all.
+    // Per Wasm spec this is a valid empty module.
+    const bytes = [_]u8{ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
+    var compiled = try compileWasm(testing.allocator, &bytes);
+    defer compiled.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 0), compiled.func_sigs.len);
+    try testing.expectEqual(@as(usize, 0), compiled.func_results.len);
 }

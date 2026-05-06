@@ -64,6 +64,18 @@ pub const JitModule = struct {
 /// `JitBlock`. The block returns in the executable state (caller
 /// can immediately invoke entry pointers).
 pub fn link(allocator: Allocator, func_bodies: []const FuncBody) Error!JitModule {
+    // Empty module (Wasm spec allows zero defined functions):
+    // skip the jit_mem allocation entirely — there is no
+    // executable code to publish. Caller still receives a
+    // structurally valid JitModule whose bytes slice is empty
+    // and whose entry() must not be invoked.
+    if (func_bodies.len == 0) {
+        return .{
+            .block = .{ .bytes = &[_:0]u8{} },
+            .func_offsets = try allocator.alloc(u32, 0),
+        };
+    }
+
     var total_size: usize = 0;
     var offsets = try allocator.alloc(u32, func_bodies.len);
     errdefer allocator.free(offsets);
