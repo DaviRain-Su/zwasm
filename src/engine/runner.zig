@@ -107,13 +107,17 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         func_sigs[i] = types.items[type_idx];
     }
 
-    // Compile each defined function.
+    // Compile each defined function. On failure, log the
+    // offending func_idx to stderr — the spec-jit-compile runner
+    // captures this via `2>&1 > /tmp/<host>.log` so root-cause
+    // bisection (which fixture, which function) is visible
+    // without re-running the gate.
     const results = try allocator.alloc(compile_func.FuncResult, defined_func_typeidx.len);
     errdefer allocator.free(results);
     var compiled: usize = 0;
     errdefer for (results[0..compiled]) |*r| compile_func.deinitFuncResult(allocator, r);
     for (codes.items, 0..) |code, i| {
-        results[i] = try compile_func.compileOne(
+        results[i] = compile_func.compileOne(
             allocator,
             @intCast(i),
             func_sigs[i],
@@ -121,7 +125,15 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             code.locals,
             types.items,
             func_sigs,
-        );
+        ) catch |err| {
+            std.debug.print("compileWasm: func[{d}] params={d} results={d} → {s}\n", .{
+                i,
+                func_sigs[i].params.len,
+                func_sigs[i].results.len,
+                @errorName(err),
+            });
+            return err;
+        };
         compiled += 1;
     }
 
