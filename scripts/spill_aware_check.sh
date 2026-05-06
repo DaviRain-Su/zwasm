@@ -31,19 +31,14 @@
 
 set -euo pipefail
 
-# 2 = post-D-037 surface. Breakdown:
-#   - 2 GPR-side calls in op_control.emitEndIntra (merge MOV at
-#     if-else join — uses two operand vregs via short-lived
-#     resolveGpr; spill staging would require 3 stage regs in
-#     a structurally tighter shape than today's gpr helpers
-#     accept). Defer to a follow-up: either factor a 3-stage
-#     `gpr*Spilled3` variant, or restructure emitEndIntra to
-#     stage through ip0/ip1 then commit to the merge target.
-# D-037 chunk-d037-a closed the 12 FP-side + 2 mixed +
-# 1 op_const calls (15 of 17). Baseline ratchets DOWN as the
-# remaining 2 land; the gate forbids new bare resolveGpr/Fp
-# introductions.
-BASELINE=2
+# 0 = post-D-038 surface. The remaining 2 GPR-side calls in
+# op_control.emitEndIntra (merge MOV at if-else join) were
+# converted to the standard 2-stage shape via gprLoadSpilled
+# (operand, stage 1) + gprDefSpilled / gprStoreSpilled (dest,
+# stage 0). New bare gpr.resolveGpr / resolveFp introductions
+# in op-handler files are now forbidden unless paired with a
+# `// SPILL-EXEMPT: <reason>` comment.
+BASELINE=0
 MODE="${1:-info}"
 
 cd "$(dirname "$0")/.."

@@ -376,11 +376,18 @@ pub fn emitEndIntra(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
                 std.debug.print("arm64/op_control: emitEndIntra merge mismatch — top vreg={d}, merge={d} (func_idx={d})\n", .{ ctx.pushed_vregs.items[ctx.pushed_vregs.items.len - 1], merge_vreg, ctx.func.func_idx });
                 return Error.UnsupportedOp;
             }
-            const merge_reg_v = try gpr.resolveGpr(ctx.alloc, merge_vreg);
-            const else_reg_v = try gpr.resolveGpr(ctx.alloc, else_result);
+            // D-038 discharge: spill-aware merge MOV. Convention:
+            //   stage 0 = merge dest (def-then-store)
+            //   stage 1 = else-arm operand load
+            // For the unspilled common case both calls return home
+            // regs and gprStoreSpilled is a no-op (the slot
+            // discriminator goes through `.reg` arm).
+            const else_reg_v = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, else_result, 1);
+            const merge_reg_v = try gpr.gprDefSpilled(ctx.alloc, merge_vreg, 0);
             if (merge_reg_v != else_reg_v) {
                 try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(merge_reg_v, 31, else_reg_v));
             }
+            try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, merge_vreg, 0);
         }
     }
     const target_byte: u32 = @intCast(ctx.buf.items.len);
