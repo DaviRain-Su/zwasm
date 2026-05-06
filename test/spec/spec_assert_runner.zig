@@ -182,6 +182,14 @@ fn parseI64Token(tok: []const u8) !u64 {
 const ArgKind = enum { i32, i64, f32, f64 };
 const ArgValue = struct { kind: ArgKind, val: u64 };
 
+/// 64 KB (one Wasm page) scratch heap shared by every assertion.
+/// Memory-using fixtures (load/store) see this as `vm_base` with
+/// `mem_limit = 65536`. \`memory.grow\` does not actually expand
+/// this buffer — fixtures requiring grow semantics still go
+/// without a richer runtime path. ADR-grade module init lives in
+/// a future chunk.
+var scratch_memory: [65536]u8 = undefined;
+
 fn runAssertReturn(
     gpa: std.mem.Allocator,
     wasm_bytes: []const u8,
@@ -204,10 +212,13 @@ fn runAssertReturn(
         return false;
     };
 
-    var memory: [0]u8 = .{};
+    // 64 KB scratch heap shared by every assertion. Zero-init each
+    // call so memory-touching fixtures see a clean slate; the heap
+    // is reused (not freed) across calls within one corpus run.
+    @memset(scratch_memory[0..], 0);
     var rt: entry.JitRuntime = .{
-        .vm_base = &memory,
-        .mem_limit = 0,
+        .vm_base = scratch_memory[0..],
+        .mem_limit = scratch_memory.len,
         .funcptr_base = undefined,
         .table_size = 0,
         .typeidx_base = undefined,
@@ -351,10 +362,13 @@ fn runAssertTrap(
         return false;
     };
 
-    var memory: [0]u8 = .{};
+    // 64 KB scratch heap shared by every assertion. Zero-init each
+    // call so memory-touching fixtures see a clean slate; the heap
+    // is reused (not freed) across calls within one corpus run.
+    @memset(scratch_memory[0..], 0);
     var rt: entry.JitRuntime = .{
-        .vm_base = &memory,
-        .mem_limit = 0,
+        .vm_base = scratch_memory[0..],
+        .mem_limit = scratch_memory.len,
         .funcptr_base = undefined,
         .table_size = 0,
         .typeidx_base = undefined,

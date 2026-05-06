@@ -1,0 +1,5 @@
+module m.wasm
+assert_return store_load i32:0 i32:42 -> i32:42
+assert_return store_load i32:8 i32:-1 -> i32:-1
+assert_return store_load i32:16 i32:1234567 -> i32:1234567
+assert_return size () -> i32:1
