@@ -14,26 +14,26 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `d1eb42a`):
+直近 commit (HEAD = `bde1223`):
 
-- `d1eb42a` §9.7 / 7.5-spec-assertion-driver-t (local zero-init + local_get.wast; 108/0/22)
+- `bde1223` §9.7 / 7.5-spec-assertion-driver-u (corpus expand: local_set + int_literals; 138/0/94)
+- `d1eb42a` §9.7 / 7.5-spec-assertion-driver-t (local zero-init; 108/0/22)
 - `6c86c57` §9.7 / 7.5-spec-assertion-driver-s (debt stale-barrier review)
 - `ed2d7fa` §9.7 / 7.5-spec-assertion-driver-r (D-035 filed)
-- `d6bc382` §9.7 / 7.5-spec-assertion-driver-q (FP pool widening; 12/12; D-034 closed)
 
-**Active task**: spec-assertion-driver-t landed。**ARM64 prologue
-local zero-init** (Wasm spec §4.5.3.1) — `STR XZR, [SP, #(idx*8)]`
-per declared local。これにより `type-local-i32` / `type-local-i64`
-が正しく 0 を返す (実 spec corpus exec)。`local_get.wast` 取り込み
-で **+13 PASS / +22 SKIP**: spec_assert_runner 108/0/22 (skip は
-multi-arg shape 等)。emit_test の 3 ケースが prologue size 変動で
-update 必要だった。tests 1027/1032 / 12/12 据え置き。
+**Active task**: spec-assertion-driver-u landed。regen に
+wast2json proposal flags (function-references / tail-call / extended-
+const / multi-memory) + skip-on-fail。NAMES に `local_set` (multi-arg
+で全 SKIP) + `int_literals` (constants で +28 PASS) を追加。
+local_tee は 13 FAIL surface — semantic miscompile (`as-binary-left`)
++ runner gap (i64→i32) + memory.grow non-grow を含むため revert。
+spec_assert_runner: **138/0/94** (was 108/0/22; +30 PASS, +72 SKIP)。
 
-**NEXT** = `7.5-spec-assertion-driver-u` (more single-module wast
-fixtures: `nop.wast` / `switch.wast` / `if.wast` / `forward.wast`
-拡張、もしくは D-035 multi-value block discharge)。chunk-t で
-prologue zero-init は実 spec semantic を初めて exercise した —
-類似の semantic gap (params i32 vs declared i32 等) 残存可能性。
+**NEXT** = `7.5-spec-assertion-driver-v` (local_tee の semantic
+miscompile を investigate, もしくは runner i64-arg → i32-result
+dispatch 追加で SKIP → PASS pivot, もしくは別 corpus 探索)。
+local_tee の `as-binary-left` が `got 20, expected 13` という
+具体的 miscompile を出しているのは要 follow-up。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -99,7 +99,8 @@ prologue zero-init は実 spec semantic を初めて exercise した —
 | 7.5-spec-assertion-driver-r | corpus expand attempt; D-035 filed (Wasm 2.0 multi-value block) | DONE (ed2d7fa) |
 | 7.5-spec-assertion-driver-s | debt stale-barrier review (Step 0.5 maintenance; 4 rows refresh) | DONE (6c86c57) |
 | 7.5-spec-assertion-driver-t | local zero-init + local_get.wast (108/0/22; +13 PASS) | DONE (d1eb42a) |
-| 7.5-spec-assertion-driver-u | more single-module wast fixtures (nop / switch / if / forward 拡張) もしくは D-035 | **NEXT** |
+| 7.5-spec-assertion-driver-u | corpus expand (local_set + int_literals; 138/0/94) | DONE (bde1223) |
+| 7.5-spec-assertion-driver-v | local_tee semantic miscompile investigation または runner i64→i32 dispatch | **NEXT** |
 | 7.5-trap-reason-channel | trap_flag を `enum TrapReason` に拡張 (assert_trap reason discrimination) | pending (ADR-0028 / Diagnostic M3) |
 
 ADR-0019 phase plan post-7.6: 7.7 emit.zig, 7.8 spec gate (Linux
