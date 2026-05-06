@@ -3742,19 +3742,20 @@ test "compile: call N — 0 args, void return — emits MOV RDI,R15 + CALL + fix
     // byte differs); the call-fixup byte offset stays at 16.
     const expected_mov = inst.encMovRR(.q, abi.current.entry_arg0_gpr, abi.current.runtime_ptr_save_gpr);
     try testing.expectEqualSlices(u8, expected_mov.slice(), out.bytes[13 .. 13 + expected_mov.len]);
-    // Win64 shadow space: SUB RSP, 32 must precede the CALL.
-    // SysV: no SUB; the byte at offset 16 is the CALL opcode E8.
-    if (abi.current.shadow_space_bytes > 0) {
+    // Win64 shadow space: SUB RSP, 32 (4-byte encoding) must
+    // precede the CALL; ADD RSP, 32 (4-byte encoding) follows.
+    // SysV: no SUB/ADD; the byte at offset 16 is the CALL opcode.
+    const shadow_enc_len: u32 = if (abi.current.shadow_space_bytes > 0) 4 else 0;
+    if (shadow_enc_len > 0) {
         const expected_sub = inst.encSubRSpImm8(@intCast(abi.current.shadow_space_bytes));
         try testing.expectEqualSlices(u8, expected_sub.slice(), out.bytes[16 .. 16 + expected_sub.len]);
-        // ADD RSP, 32 follows the CALL (5 bytes after SUB).
-        const post_call = 16 + expected_sub.len + 5;
+        const post_call: u32 = 16 + shadow_enc_len + 5;
         const expected_add = inst.encAddRSpImm8(@intCast(abi.current.shadow_space_bytes));
         try testing.expectEqualSlices(u8, expected_add.slice(), out.bytes[post_call .. post_call + expected_add.len]);
     }
-    // Cc-pivot: CALL byte offset shifts by `shadow_space_bytes`
-    // when the SUB RSP, 32 precedes it. SysV: 16; Win64: 20.
-    const call_off: u32 = 16 + @as(u32, abi.current.shadow_space_bytes);
+    // CALL byte offset = post-prologue (13) + MOV <arg0>, R15
+    // (3) + shadow encoding length. SysV: 16; Win64: 20.
+    const call_off: u32 = 16 + shadow_enc_len;
     const expected_call = inst.encCallRel32(0);
     try testing.expectEqualSlices(u8, expected_call.slice(), out.bytes[call_off .. call_off + expected_call.len]);
 

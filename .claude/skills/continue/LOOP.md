@@ -9,81 +9,132 @@
 > "Self-perpetuation", or "Parallel test gate", the canonical
 > text lives here.
 
-## Parallel test gate — optimistic-push pipeline
+## Parallel test gate — file-logged pipeline
 
-The default Step 5 sequence (Mac → OrbStack → push → windowsmini)
-runs ~210s per cycle. With **optimistic push** — pushing as soon
-as Mac is green, then kicking OrbStack and windowsmini in
-parallel — the cycle drops to ~max(60, 90, 120) ≈ 120s. About
-90s saved per chunk; over a full FP-surface chain that is ~15
-minutes.
+The Step 5 gate has **three hosts** (Mac aarch64, OrbStack
+Ubuntu x86_64, windowsmini Windows x86_64) and **two distinct
+cost shapes**:
 
-**When to use** this pipeline:
+- **Mac**: native, fast (≤ 60 s typical). Run synchronously and
+  fail-fast — there is no value in backgrounding it because the
+  next steps (commit / push) need its result inline.
+- **OrbStack + windowsmini**: cross-machine, slow (each can take
+  several minutes; windowsmini occasionally hits the D-028 IPC
+  flake). These two MUST run **concurrently in the background**.
+  Re-running them just to re-grep is forbidden — they are
+  expensive enough that every invocation must be the only one.
 
-- Default ON for all chunks where the change is mechanical
-  (encoder additions, dispatch arms, byte-level handler edits).
-- Skip in favour of strict serial when:
-  - The diff touches load-bearing infra (build.zig, runner glue,
-    zone deps, ROADMAP).
-  - The previous chunk's windowsmini gate flaked (D-028) — re-
-    establish a clean serial baseline before going parallel
-    again.
-  - You are mid-incident (debugging a regression) — confidence
-    is too low to ship optimistically.
+### Mandatory shape of the gate
 
-**Procedure** for Step 5 + Step 6 + Step 7 fused:
+This shape is **load-bearing**. A loop iteration that runs
+OrbStack and windowsmini sequentially (or that re-invokes
+`bash scripts/run_remote_windows.sh test-all` to re-read its
+output) is in violation of this skill, even when the second
+run happens to succeed.
 
 ```bash
-# 1. Mac local: lint + unit tests (cheap, fast-fail).
-zig build test
-zig build lint -- --max-warnings 0
+# 1. Mac local: lint + unit tests (cheap, fast-fail). FOREGROUND.
+zig build test                         > /tmp/mac.log     2>&1
+zig build lint -- --max-warnings 0     > /tmp/mac-lint.log 2>&1
 
 # 2. Source commit (Step 6).
 git add <source-files>
 git commit -m "<conventional commit>"
 
-# 3. Push immediately (so windowsmini can fetch the new ref).
+# 3. Push immediately so windowsmini's git-fetch picks up the
+#    new ref before its zig build starts.
 git push origin zwasm-from-scratch
 
-# 4. Kick three hosts in parallel; capture logs.
-zig build test-all > /tmp/mac.log 2>&1 &                      # Mac aarch64
+# 4. Kick OrbStack + windowsmini IN PARALLEL, BOTH BACKGROUNDED,
+#    each writing its full stdout+stderr to a tmp log file.
+#    The two Bash tool calls go in a SINGLE tool message so the
+#    harness launches them simultaneously.
 orb run -m my-ubuntu-amd64 bash -c \
   'cd /Users/shota.508/Documents/MyProducts/zwasm_from_scratch && zig build test-all' \
-  > /tmp/orb.log 2>&1 &                                       # Linux x86_64
+  > /tmp/orb.log 2>&1                                           # run_in_background: true
 bash scripts/run_remote_windows.sh test-all \
-  > /tmp/win.log 2>&1 &                                       # Windows x86_64
+  > /tmp/win.log 2>&1                                           # run_in_background: true
 
-# 5. Wait for all three and inspect tails.
-wait
-tail -3 /tmp/mac.log /tmp/orb.log /tmp/win.log
+# 5. WAIT for both completion notifications (do NOT poll).
+#    When each fires, Read /tmp/orb.log resp. /tmp/win.log to
+#    inspect the tail. NEVER re-invoke the gate command just to
+#    extract output — the log file already has everything.
 ```
 
-Run all three Bash invocations in **a single tool message** with
-`run_in_background: true` (so the harness doesn't block on each
-sequentially). Use `Monitor` or `BashOutput` to poll, or send a
-follow-up message to drain stdout when notified.
+**Why this exact shape:**
 
-**Recovery on optimistic-push failure**:
+1. **Backgrounding is non-negotiable for OrbStack + windowsmini.**
+   These commands take long enough that running them in the
+   foreground blocks the loop for minutes. Run them with
+   `run_in_background: true`. The harness sends a single
+   completion notification per task; that is the signal to
+   inspect the log.
+2. **Single-message dispatch.** Both background Bash tool calls
+   MUST go in **one assistant message** so the harness fires
+   them concurrently. Two messages = two sequential dispatches
+   = the second host waits for the first to finish.
+3. **All output → log file.** Every host redirects stdout+stderr
+   to a `/tmp/<host>.log`. The log is the single source of
+   truth — read it with the Read tool when the notification
+   fires. Re-running the build to re-read output is forbidden
+   regardless of how convenient grep would have been.
+4. **No polling, no sleep.** Once backgrounded, the harness
+   notifies on completion. Sleep loops, retry-on-blank-output
+   loops, and eager `tail` re-runs are all loop-discipline
+   violations.
 
-- Mac green + remote (orbstack/windowsmini) red → land a fix-up
-  commit on top (`fix(p<N>): <one-line> — fixes <prev-sha>` or
-  similar) and re-run the parallel gate. **Do not amend** the
-  pushed commit — `git push --force` is forbidden (§14).
-- If the failing host's stdout shows the D-028 transient (zig
-  test runner IPC timeout), retry once before fix-up.
+### When to skip the parallel pattern (rare)
+
+Stay strictly serial only when:
+
+- The diff touches load-bearing infra (build.zig, runner glue,
+  zone deps, ROADMAP) AND a regression on either remote host
+  is plausible enough that you want OrbStack's outcome before
+  even attempting windowsmini.
+- You are mid-incident (debugging a known regression) — running
+  a clean serial baseline once is acceptable to localise.
+
+In both cases, still log to file (`> /tmp/...log 2>&1`) so a
+log-loss never forces a rerun.
+
+### Re-runs are debt, not a tool
+
+If a host's log shows a result you cannot interpret (truncated,
+ambiguous, missing the failure line), the response is **Read
+the log file again with offset/limit, or grep the file** —
+never `bash scripts/run_remote_windows.sh test-all` a second
+time hoping for cleaner output. The only legitimate reason to
+re-run a remote gate is the D-028 flake (the IPC-timeout-only
+failure pattern named in `.dev/debt.md` D-028); even then, the
+re-run is bounded to once per chunk and the rationale is
+documented in the commit message.
+
+### Recovery on failure
+
+- Mac green + remote (OrbStack / windowsmini) red → land a
+  fix-up commit on top (`fix(p<N>): <one-line> — fixes
+  <prev-sha>`) and re-run the parallel gate (one round, both
+  hosts). Do not amend the pushed commit — `git push --force`
+  is forbidden (§14).
+- If the failing host's log shows the D-028 transient pattern
+  (test runner failed to respond IPC timeout, no actual test
+  failures), retry once before fix-up — and only via a
+  one-off `bash scripts/run_remote_windows.sh test-all >
+  /tmp/win-retry.log 2>&1` (background, file-logged).
 - After fix-up lands, optionally squash the chain to a single
-  meaningful commit on the next chunk's pre-push (use
-  `git rebase -i` locally, then push) — but only when the
-  branch is yours and the squash is mechanical. Skip when in
-  doubt.
+  meaningful commit on the next chunk's pre-push (`git rebase
+  -i` locally, then push) — only when the squash is
+  mechanical. Skip when in doubt.
 
-**Step 7 (handover update + push) integrates** with this
-pipeline by batching: instead of two pushes (source-commit
-then handover-commit), make the source commit + push, run the
-parallel gate, *then* land handover update + ROADMAP `[x]` flip
-in a follow-up commit + push (still autonomous per "Push
-policy"). Keeps the gate's reference state fresh on
-windowsmini's clone.
+### Step 7 integration
+
+The Step 6 source-commit + push happens **before** the parallel
+remote gate starts (so windowsmini's git-fetch resolves the new
+ref). Step 7's handover update + ROADMAP `[x]` flip lands as a
+follow-up commit + push **after** both remote hosts return
+green. This keeps the gate's reference state fresh on
+windowsmini's clone and amortises bookkeeping over the gate
+wait.
 
 ## Push policy — autonomous, no approval
 
