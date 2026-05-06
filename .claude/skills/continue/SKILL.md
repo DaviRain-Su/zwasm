@@ -375,28 +375,56 @@ criterion specifies. The defaults are:
   narrower `zig build test` plus phase-relevant `test-spec` /
   `test-e2e` / etc. as they land).
 
-**Default: optimistic-push pipeline** (see `LOOP.md` §"Parallel
-test gate"). Mac lint+test → push → 3-host parallel `test-all`.
-Saves ~90s per cycle. Skip when the diff is load-bearing infra,
-the prior chunk flaked windowsmini, or you are mid-incident.
+**Default: file-logged parallel pipeline** — canonical form is in
+[`LOOP.md` §"Parallel test gate"](LOOP.md). The shape is
+load-bearing; **do not** improvise variations. Three rules
+restated here so they cannot be missed:
 
-Run on all available hosts in a single message with parallel Bash
-tool calls:
+1. **Mac runs foreground** (cheap, fail-fast). The next steps
+   (commit / push) need its result inline.
+2. **OrbStack and windowsmini run concurrently in the background**,
+   both Bash tool calls dispatched in **a single assistant
+   message** with `run_in_background: true`. Two messages = two
+   sequential dispatches (the second host waits) — that is a
+   loop-discipline violation regardless of whether the result
+   ends up green.
+3. **Every host's stdout+stderr redirects to a `/tmp/<host>.log`
+   file**. The log is the single source of truth. When a
+   completion notification fires, **Read the log file** to
+   inspect the tail. **Re-running `bash scripts/run_remote_
+   windows.sh test-all` (or the OrbStack `orb run …`) just to
+   re-grep its output is forbidden** — these builds take many
+   minutes, and a second invocation purely to read output again
+   is nonsense. If the log is hard to scan, Read it again with
+   offset/limit or grep the file; never rerun the build.
 
-- `zig build <step>` (Mac aarch64 host)
-- `orb run -m my-ubuntu-amd64 bash -c 'cd /Users/shota.508/Documents/MyProducts/zwasm_from_scratch && zig build <step>'`
+Skip the parallel pattern only when the diff is load-bearing
+infra (build.zig / runner glue / zone deps / ROADMAP) AND a
+serial baseline materially helps localise risk, or when
+mid-incident. Even then, every invocation still redirects to
+a log file — log-loss never justifies a rerun.
+
+Per-host commands (used inside the file-logged pipeline):
+
+- `zig build <step> > /tmp/mac.log 2>&1` (Mac aarch64 host,
+  foreground)
+- `orb run -m my-ubuntu-amd64 bash -c 'cd /Users/shota.508/Documents/MyProducts/zwasm_from_scratch && zig build <step>' > /tmp/orb.log 2>&1`
   (Linux x86_64 via OrbStack — Bash timeout ≥ 600000 ms for cold
-  builds)
-- For Windows: `bash scripts/run_remote_windows.sh <step>` — the
-  script `git fetch + reset --hard origin/zwasm-from-scratch` on
-  the windowsmini clone at `~/Documents/MyProducts/zwasm_from_scratch`
+  builds; **`run_in_background: true`**)
+- `bash scripts/run_remote_windows.sh <step> > /tmp/win.log 2>&1`
+  — the script `git fetch + reset --hard origin/zwasm-from-scratch`
+  on the windowsmini clone at `~/Documents/MyProducts/zwasm_from_scratch`
   and then runs `zig build <step>` there. It exercises the latest
   pushed origin state, so **push first** if a local commit needs
   to be reflected. Pushing is autonomous — see "Push policy".
+  **`run_in_background: true`**, dispatched in the same message
+  as the OrbStack call.
 
-All hosts must be green to proceed. If any output exceeds ~200
-lines, delegate to a Bash subagent and ask for "pass/fail + first
-failure only"; otherwise inline.
+All hosts must be green to proceed. The Read tool inspects the
+log tail when a completion notification fires; if the log
+exceeds ~200 lines and inline reading would crowd context,
+delegate the failure-line extraction to a Bash subagent —
+**always against the log file, never by re-invoking the gate**.
 
 OrbStack VM setup: `.dev/orbstack_setup.md`. Windows SSH:
 `.dev/windows_ssh_setup.md`. If a host appears absent (`error:

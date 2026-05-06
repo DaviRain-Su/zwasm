@@ -199,21 +199,43 @@ zig build test-all      # all enabled test layers (Phase 0+, expands per phase)
 zig fmt src/            # format
 ```
 
-Three-host invocation pattern:
+Three-host invocation pattern (canonical form — load-bearing,
+do not improvise):
+
+- **Mac**: foreground, fail-fast.
+- **OrbStack + windowsmini**: must run **concurrently in the
+  background**, both Bash tool calls dispatched in **a single
+  assistant message** with `run_in_background: true`.
+- **Every host's stdout+stderr redirects to a `/tmp/<host>.log`**
+  file. The log is the single source of truth — Read it on
+  completion notification. **Re-running a remote gate just to
+  re-grep its output is forbidden.** These builds take many
+  minutes; a second invocation purely to read output again is
+  nonsense. If the log is hard to scan, Read or grep the file
+  again — never rerun the build.
 
 ```sh
-# Mac native (default)
-zig build test-all
+# Mac native (foreground)
+zig build test-all > /tmp/mac.log 2>&1
 
-# OrbStack Ubuntu x86_64
+# OrbStack Ubuntu x86_64 — run_in_background: true, same
+# assistant message as the windowsmini call
 orb run -m my-ubuntu-amd64 bash -c '
   cd /Users/shota.508/Documents/MyProducts/zwasm_from_scratch &&
   zig build test-all
-'
+' > /tmp/orb.log 2>&1
 
-# Windows x86_64 via SSH (pulls origin/zwasm-from-scratch first)
-bash scripts/run_remote_windows.sh test-all
+# Windows x86_64 via SSH (script git-fetches origin first).
+# run_in_background: true, same assistant message as the
+# OrbStack call so the harness fires both concurrently.
+bash scripts/run_remote_windows.sh test-all > /tmp/win.log 2>&1
 ```
+
+The full discipline (recovery on failure, when the rare strict-
+serial baseline is acceptable, D-028 flake handling) lives in
+[`.claude/skills/continue/LOOP.md` §"Parallel test gate"](.claude/skills/continue/LOOP.md).
+That file is canonical; this section is a load-bearing
+reminder, not a substitute.
 
 ## References
 
@@ -249,11 +271,13 @@ All of:
    keep the OrbStack / windowsmini runners network-free)
 5. As phases add layers, `zig build test-all` runs them too
 
-OrbStack Ubuntu x86_64 must also pass before push:
-- `orb run -m my-ubuntu-amd64 bash -c '... zig build test-all'`
-
-`windowsmini` SSH must also pass before push:
-- `bash scripts/run_remote_windows.sh test-all`
+OrbStack Ubuntu x86_64 + `windowsmini` SSH must also pass before
+push. Run them **concurrently in the background, single-message,
+file-logged** per the Three-host invocation pattern above —
+never sequentially, and **never re-invoke a remote gate just to
+re-grep output** (Read the existing log file instead):
+- `orb run -m my-ubuntu-amd64 bash -c '... zig build test-all' > /tmp/orb.log 2>&1` (run_in_background)
+- `bash scripts/run_remote_windows.sh test-all > /tmp/win.log 2>&1` (run_in_background)
 
 The same three-host `test-all` is the **A13 merge gate** (per
 ROADMAP §A13 / §9.6 / 6.5): every push to `zwasm-from-scratch`
