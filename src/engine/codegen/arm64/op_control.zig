@@ -192,25 +192,56 @@ pub fn emitBrIf(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 
 /// Emit a `B target_for_depth` for a single br_table case (or
 /// the default tail). Backward (loop) → direct disp; forward →
-/// placeholder + Fixup append. Shared between the per-case loop
-/// body and the trailing default branch.
-fn emitBranchToDepth(
-    a: Allocator,
-    b: *std.ArrayList(u8),
-    labs: []Label,
-    depth: u32,
-) Error!void {
-    if (depth >= labs.len) return Error.UnsupportedOp;
-    const tgt_idx = labs.len - 1 - depth;
-    const tgt = &labs[tgt_idx];
-    const fixup_at: u32 = @intCast(b.items.len);
+/// placeholder + Fixup append. When `depth == labs.len` the
+/// branch targets the implicit function-level block (= return);
+/// marshal the function's result and append to return_fixups.
+fn emitBranchToDepth(ctx: *EmitCtx, depth: u32) Error!void {
+    if (depth == ctx.labels.items.len) {
+        // br_table case targeting function-depth: same shape as
+        // emitBr's return path.
+        if (ctx.pushed_vregs.items.len > 0 and ctx.func.sig.results.len > 0) {
+            const top_vreg = ctx.pushed_vregs.items[ctx.pushed_vregs.items.len - 1];
+            const result_kind = ctx.func.sig.results[0];
+            switch (result_kind) {
+                .f32, .f64 => {
+                    const src_vn = try gpr.resolveFp(ctx.alloc, top_vreg);
+                    if (src_vn != 0) {
+                        const base: u32 = if (result_kind == .f64) 0x1E604000 else 0x1E204000;
+                        try gpr.writeU32(ctx.allocator, ctx.buf, base | (@as(u32, src_vn) << 5));
+                    }
+                },
+                .i32, .i64, .v128, .funcref, .externref => {
+                    const src_xn = try gpr.gprLoadSpilled(
+                        ctx.allocator,
+                        ctx.buf,
+                        ctx.alloc,
+                        ctx.spill_base_off,
+                        top_vreg,
+                        0,
+                    );
+                    if (src_xn != 0) {
+                        const orr_word: u32 = 0xAA0003E0 | (@as(u32, src_xn) << 16);
+                        try gpr.writeU32(ctx.allocator, ctx.buf, orr_word);
+                    }
+                },
+            }
+        }
+        const fixup_at: u32 = @intCast(ctx.buf.items.len);
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encB(0));
+        try ctx.return_fixups.append(ctx.allocator, fixup_at);
+        return;
+    }
+    if (depth > ctx.labels.items.len) return Error.UnsupportedOp;
+    const tgt_idx = ctx.labels.items.len - 1 - depth;
+    const tgt = &ctx.labels.items[tgt_idx];
+    const fixup_at: u32 = @intCast(ctx.buf.items.len);
     if (tgt.kind == .loop) {
         const disp_words: i32 = @as(i32, @intCast(tgt.target_byte_offset)) -
             @as(i32, @intCast(fixup_at));
-        try gpr.writeU32(a, b, inst.encB(@divExact(disp_words, 4)));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encB(@divExact(disp_words, 4)));
     } else {
-        try gpr.writeU32(a, b, inst.encB(0));
-        try tgt.pending.append(a, .{ .byte_offset = fixup_at, .kind = .b_uncond });
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encB(0));
+        try tgt.pending.append(ctx.allocator, .{ .byte_offset = fixup_at, .kind = .b_uncond });
     }
 }
 
@@ -236,9 +267,9 @@ pub fn emitBrTable(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     while (i < count) : (i += 1) {
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmW(wn, @intCast(i)));
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.ne, 2));
-        try emitBranchToDepth(ctx.allocator, ctx.buf, ctx.labels.items, targets[start + i]);
+        try emitBranchToDepth(ctx, targets[start + i]);
     }
-    try emitBranchToDepth(ctx.allocator, ctx.buf, ctx.labels.items, targets[start + count]);
+    try emitBranchToDepth(ctx, targets[start + count]);
 }
 
 /// `if` — pop cond; emit `CBZ Wn, 0` placeholder that skips the
