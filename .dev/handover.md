@@ -14,34 +14,35 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `2daaded`):
+直近 commit (HEAD = `601c7da`):
 
-- `2daaded` feat(p7): §9.7 / 7.5-d037-a — FP-spill machinery (D-037 close, BASELINE 17→2)
-- `7dc0f3d` chore(p7): close D-036 — handover/debt/lesson/ADR-0018 — retarget at D-037
-- `f1c3ce3` feat(p7): §9.7 / 7.5-d036 — class-aware regalloc Allocation (D-036 close)
-- `4a74291` chore(p7): audit fixes — Phase 8 readiness drivers
+- `601c7da` feat(p7): §9.7 / 7.5-d035-a — Wasm 2.0 multi-value block validation + lower
+- `cade18f` chore(p7): close D-037 — handover/debt — file D-038 — retarget at D-035
+- `2daaded` feat(p7): §9.7 / 7.5-d037-a — FP-spill machinery (BASELINE 17→2)
+- `f1c3ce3` feat(p7): §9.7 / 7.5-d036 — class-aware regalloc Allocation
 
 **Phase status**: §9.7 / 7.5 IN-PROGRESS。spec-jit-compile 12/12,
 spec_assert 138/0/94。Phase 7 残 row = 7.5 / 7.8 / 7.9 / 7.10 /
-7.11 🔒 / 7.12 / 7.13 🔒。D-036 + D-037 closed (Track A 完了);
-D-038 (emitEndIntra residual) + D-035 + D-030 が now。
+7.11 🔒 / 7.12 / 7.13 🔒。D-036 + D-037 closed; D-035 partially
+discharged (validator + lower; emit-side merge residual のみ);
+D-030 / D-038 が now。
 
 **Active priority — Phase 7→8 transition gate prep** (per
 `phase8_transition_gate.md` §3a deferred-work DAG):
 
 **NEXT(優先順)**:
 
-1. **D-035 multi-value blocks** (Track B; D-037 完了で Track A
-   は infra fully landed, Track B が next) — parser/validator/
-   emit 3-phase。`readBlockType` を Wasm 2.0 typeidx-based blocktype
-   に拡張、`emitBlock` の merge を multi-value に拡張。block.wast /
-   br_*.wast / call.wast 等 corpus 拡張の鍵; 7.5 "skip=0" 達成の前提。
-2. **D-030 x86_64 emit refactor** (now; 7.7 [x] で barrier dissolved)
+1. **D-030 x86_64 emit refactor** (now; 7.7 [x] で barrier dissolved)
    — Phase 7.8 (x86_64 spec gate) の prereq。ARM64 ADR-0021 sub-b
-   10-chunk 抽出を x86_64 で踏襲。
-3. **D-038 emitEndIntra spill-staging** (chunk-d037-a の residual)
-   — 3-stage shape 追加 or restructure。spill_aware_check BASELINE
-   2 → 0 で convention 完全 enforce。
+   10-chunk 抽出を x86_64 で踏襲 (label / ctx / gpr / op_const /
+   op_alu_int / op_alu_float / op_convert / op_memory / op_control /
+   emit_test)。新規 ADR は不要 (ADR-0023 が load-bearing)。
+2. **D-035-b emit-side multi-result merge** (chunk-d035-a の partial
+   discharge を完成) — `Label.merge_top_vreg` を `?[]u32` 化、
+   `emitEndIntra` で N MOV を emit。block.wast の multi-RESULT
+   fixture を spec_assert 追加。
+3. **D-038 emitEndIntra spill-staging** — 3-stage shape 追加 or
+   restructure。spill_aware_check BASELINE 2 → 0。
 
 これらの後で 7.8 → 7.9/7.10 → 7.11 🔒 → 7.12 → 7.13 🔒 の順。
 
@@ -117,8 +118,9 @@ multi-value 修正後に再評価(関連する semantic 解釈が変わる可能
 | 7.5-readiness-scaffolding | spec_citation rule + spill_aware_check + Phase 8 dep-DAG | DONE (0324b88) |
 | 7.5-d036 | class-aware regalloc (Track A root; chunk-q shim → structural) | DONE (f1c3ce3) |
 | 7.5-d037-a | FP-spill machinery (Track A leaf; BASELINE 17→2; 15/17 sites) | DONE (2daaded) |
-| 7.5-d035 | Wasm 2.0 multi-value blocks (Track B; parallel to A) | **NEXT** |
-| 7.5-d030 | x86_64 emit refactor (now; barrier dissolved by 7.7 [x]) | pending |
+| 7.5-d035-a | Wasm 2.0 multi-value blocks — validator + lower side | DONE (601c7da) |
+| 7.5-d030 | x86_64 emit refactor (now; barrier dissolved by 7.7 [x]) | **NEXT** |
+| 7.5-d035-b | multi-value blocks — emit-side merge_top_vreg → []u32 | pending |
 | 7.5-d038 | emitEndIntra spill-staging residual (chunk-d037-a leftover; BASELINE 2→0) | pending |
 | 7.5-spec-assertion-driver-v | (deferred) local_tee semantic miscompile / runner i64→i32 — re-evaluate post D-035 | deferred |
 | 7.5-trap-reason-channel | trap_flag を `enum TrapReason` に拡張 (assert_trap reason discrimination) | pending (ADR-0028 / Diagnostic M3) |
