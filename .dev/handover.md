@@ -14,24 +14,25 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `cdfac4a`):
+直近 commit (HEAD = `bfd9b70`):
 
+- `bfd9b70` §9.7 / 7.5-spec-assertion-driver-n (D-034 memory+convert; ~40 ops)
 - `cdfac4a` §9.7 / 7.5-spec-assertion-driver-m (D-034 i64 family; 25 ops)
 - `a69ac4e` §9.7 / 7.5-spec-assertion-driver-l (D-034 i32 unary/cmp/bitcount/rot; 16 ops)
 - `ca80c4a` §9.7 / 7.5-spec-assertion-driver-k (D-034 emitI32Binary; 9 ops)
-- `5f19285` §9.7 / 7.5-spec-assertion-driver-j (globals; 95/0/0)
 
-**Active task**: spec-assertion-driver-m landed。i64 ALU
-全範囲が spill-aware に: emitI64Binary (6) + Compare (10) + Eqz
-+ Shift (4) + Rotl + Clz + Ctz + Popcnt = 25 ops。-k+l+m で
-合計 50 ops の D-034 chain progress。1027 tests / 95/0/0 /
-spec-jit-compile 10/2 据え置き。
+**Active task**: spec-assertion-driver-n landed。op_memory.zig の
+`emitMemOp` (addr/value/result の 3 resolveGpr 経路) と
+op_convert.zig の Wrap32/ExtendI32S/ConvertIntToFloat/TruncSat/
+Reinterpret 4 variants を spill-aware に。FP-spill machinery は
+別 D entry。-k〜-n 通算 90 ops 程度の D-034 chain progress。
+1027 tests / 95/0/0 / 10/2 据え置き。
 
-**NEXT** = `7.5-spec-assertion-driver-n` (memory / convert / call
-handlers — op_memory.zig (load/store の resolveGpr 経路) +
-op_convert.zig (i32↔i64 拡張/縮小, FP convert) を spill-aware に)。
-subsequent: -o (regalloc/liveness count desync 根本調査; 真の
-SlotOverflow 解消)。
+**NEXT** = `7.5-spec-assertion-driver-o` (D-034 chain 最終
+piece + regalloc/liveness count desync 根本調査 — 真の
+SlotOverflow @ func[9] params=5 を解消する; spec-jit-compile
+2/12 fail を狙う最後の段)。subsequent: D-034 close (debt entry
+remove), -p (op_alu_float.zig FP ops, op_call.zig)。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -90,9 +91,9 @@ SlotOverflow 解消)。
 | 7.5-spec-assertion-driver-k | D-034: emitI32Binary spill-aware (9 ops) | DONE (ca80c4a) |
 | 7.5-spec-assertion-driver-l | D-034 i32 unary/cmp/bitcount/rot (16 ops) | DONE (a69ac4e) |
 | 7.5-spec-assertion-driver-m | D-034 i64 family (25 ops) | DONE (cdfac4a) |
-| 7.5-spec-assertion-driver-n | D-034 memory / convert handlers | **NEXT** |
-| 7.5-spec-assertion-driver-n | D-034 memory / convert / call handlers | pending |
-| 7.5-spec-assertion-driver-o | regalloc/liveness count desync 調査 (true SlotOverflow root) | pending |
+| 7.5-spec-assertion-driver-n | D-034 memory / convert handlers (~40 ops) | DONE (bfd9b70) |
+| 7.5-spec-assertion-driver-o | regalloc/liveness count desync 調査 (true SlotOverflow root) | **NEXT** |
+| 7.5-spec-assertion-driver-p | D-034 残り (op_alu_float / op_call) + chain close | pending |
 | 7.5-trap-reason-channel | trap_flag を `enum TrapReason` に拡張 (assert_trap reason discrimination) | pending (ADR-0028 / Diagnostic M3) |
 
 ADR-0019 phase plan post-7.6: 7.7 emit.zig, 7.8 spec gate (Linux
