@@ -250,6 +250,7 @@ pub fn emitElse(
         while (i < arity) : (i += 1) {
             labels.items[lbl_idx].merge_top_vregs[i] = pushed_vregs.items[base + i];
         }
+        labels.items[lbl_idx].merge_captured = true;
     }
     const jmp_at: u32 = @intCast(buf.items.len);
     try buf.appendSlice(allocator, inst.encJmpRel32(0).slice());
@@ -286,7 +287,7 @@ pub fn emitEndIntra(
     // slot. Stack at entry is either:
     //   live  : [..., merge_0..N-1, else_0..N-1]
     //   dead  : [..., merge_0..N-1] (else broke out via br/return/unreachable)
-    if (lbl.kind == .else_open and lbl.result_arity > 0) {
+    if (lbl.kind == .else_open and lbl.merge_captured) {
         const arity: u32 = lbl.result_arity;
         const dead_else = blk: {
             if (pushed_vregs.items.len < arity) break :blk false;

@@ -327,6 +327,7 @@ pub fn emitElse(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
         while (i < arity) : (i += 1) {
             ctx.labels.items[lbl_idx].merge_top_vregs[i] = ctx.pushed_vregs.items[base + i];
         }
+        ctx.labels.items[lbl_idx].merge_captured = true;
     }
     const b_byte: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encB(0));
@@ -369,7 +370,7 @@ pub fn emitEndIntra(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     //   live  : [..., merge_0, ..., merge_{N-1}, else_0, ..., else_{N-1}]
     //   dead  : [..., merge_0, ..., merge_{N-1}]
     //           (else arm broke out via br / return / unreachable)
-    if (lbl.kind == .else_open and lbl.result_arity > 0) {
+    if (lbl.kind == .else_open and lbl.merge_captured) {
         const arity: u32 = lbl.result_arity;
         const dead_else = blk: {
             if (ctx.pushed_vregs.items.len < arity) break :blk false;

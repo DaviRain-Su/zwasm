@@ -57,4 +57,10 @@ pub const Label = struct {
     if_skip_byte: ?u32 = null,
     merge_top_vregs: [8]u32 = undefined,
     result_arity: u8 = 0,
+    /// emitElse sets this `true` only when the actual capture
+    /// of `result_arity` then-arm vregs succeeded. emitEndIntra
+    /// reads it to distinguish "merge needed AND captured" from
+    /// "skip merge" (dead-code zone / then-arm break-out).
+    /// Mirrors arm64/label.zig.
+    merge_captured: bool = false,
 };
