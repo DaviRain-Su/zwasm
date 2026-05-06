@@ -38,9 +38,10 @@ pub fn emitI32GlobalGet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const result = ctx.next_vreg.*;
     ctx.next_vreg.* += 1;
     if (result >= ctx.alloc.slots.len) return Error.SlotOverflow;
-    const wd = try gpr.resolveGpr(ctx.alloc, result);
+    const wd = try gpr.gprDefSpilled(ctx.alloc, result, 0);
 
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(wd, abi.globals_base_save_gpr, @intCast(byte_off)));
+    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result, 0);
     try ctx.pushed_vregs.append(ctx.allocator, result);
 }
 
@@ -55,7 +56,7 @@ pub fn emitI32GlobalSet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 
     if (ctx.pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const src_v = ctx.pushed_vregs.pop().?;
-    const ws = try gpr.resolveGpr(ctx.alloc, src_v);
+    const ws = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_v, 0);
 
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(ws, abi.globals_base_save_gpr, @intCast(byte_off)));
 }

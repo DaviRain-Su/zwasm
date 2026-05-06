@@ -102,7 +102,10 @@ pub fn emitFloatCopysign(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const vn_x = try gpr.resolveFp(ctx.alloc, args.lhs);
     const vm_y = try gpr.resolveFp(ctx.alloc, args.rhs);
     const vd = try gpr.resolveFp(ctx.alloc, args.result);
-    const w_a = try gpr.resolveGpr(ctx.alloc, args.result);
+    // GPR scratch reused for sign-bit manipulation. The result vreg
+    // is FP — `args.result` here is being read as a GPR slot for
+    // staging only; if spilled, route via stage-0 pseudo-def.
+    const w_a = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
     const ip0: Xn = 16;
     const ip1: Xn = 17;
     const is_d = ins.op == .@"f64.copysign";
@@ -156,7 +159,7 @@ pub fn emitFloatCompare(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const args = try ctx.popBinary();
     const vn = try gpr.resolveFp(ctx.alloc, args.lhs);
     const vm = try gpr.resolveFp(ctx.alloc, args.rhs);
-    const wd = try gpr.resolveGpr(ctx.alloc, args.result);
+    const wd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
     const is_d = switch (ins.op) {
         .@"f64.eq", .@"f64.ne", .@"f64.lt", .@"f64.gt", .@"f64.le", .@"f64.ge" => true,
         else => false,
@@ -172,5 +175,6 @@ pub fn emitFloatCompare(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     };
     try gpr.writeU32(ctx.allocator, ctx.buf, if (is_d) inst.encFCmpD(vn, vm) else inst.encFCmpS(vn, vm));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCsetW(wd, cond));
+    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
     try ctx.pushed_vregs.append(ctx.allocator, args.result);
 }

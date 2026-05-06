@@ -133,7 +133,7 @@ pub fn emitBr(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 pub fn emitBrIf(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     if (ctx.pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const cond = ctx.pushed_vregs.pop().?;
-    const wn = try gpr.resolveGpr(ctx.alloc, cond);
+    const wn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, cond, 0);
     if (ins.payload == ctx.labels.items.len) {
         // Conditional return: CBZ cond, skip ; marshal ; B
         // epilogue ; skip:
@@ -256,7 +256,7 @@ fn emitBranchToDepth(ctx: *EmitCtx, depth: u32) Error!void {
 pub fn emitBrTable(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     if (ctx.pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const idx_vreg = ctx.pushed_vregs.pop().?;
-    const wn = try gpr.resolveGpr(ctx.alloc, idx_vreg);
+    const wn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, idx_vreg, 0);
     const count = ins.payload;
     const start = ins.extra;
     if (count >= (@as(u32, 1) << 12)) return Error.SlotOverflow;
@@ -279,7 +279,7 @@ pub fn emitBrTable(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 pub fn emitIf(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     if (ctx.pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const cond = ctx.pushed_vregs.pop().?;
-    const wn = try gpr.resolveGpr(ctx.alloc, cond);
+    const wn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, cond, 0);
     const skip_byte: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCbzW(wn, 0));
     try ctx.labels.append(ctx.allocator, .{

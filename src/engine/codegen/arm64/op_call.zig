@@ -84,7 +84,7 @@ pub fn emitCallIndirect(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     // Bounds + sig check using the trap-stub at function tail
     // (shared with memory bounds — single trap reason today;
     // Diagnostic M3 / D-022 splits them later).
-    const w_idx = try gpr.resolveGpr(ctx.alloc, idx_vreg);
+    const w_idx = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, idx_vreg, 0);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(17, 31, w_idx));
 
     // Bounds: CMP W17, W25 ; B.HS trap.
@@ -153,7 +153,7 @@ fn marshalCallArgs(ctx: *EmitCtx, callee_sig: FuncType) Error!void {
         switch (callee_sig.params[k]) {
             .i32 => {
                 if (gpr_arg_slot >= 8) return Error.UnsupportedOp;
-                const ws = try gpr.resolveGpr(ctx.alloc, src_vreg);
+                const ws = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
                 if (ws != gpr_arg_slot) {
                     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(gpr_arg_slot, 31, ws));
                 }
@@ -161,7 +161,7 @@ fn marshalCallArgs(ctx: *EmitCtx, callee_sig: FuncType) Error!void {
             },
             .i64 => {
                 if (gpr_arg_slot >= 8) return Error.UnsupportedOp;
-                const xs = try gpr.resolveGpr(ctx.alloc, src_vreg);
+                const xs = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
                 if (xs != gpr_arg_slot) {
                     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(gpr_arg_slot, 31, xs));
                 }

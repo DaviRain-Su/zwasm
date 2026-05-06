@@ -518,10 +518,17 @@ pub fn compile(
                     std.debug.print("arm64/emit: local.get SlotOverflow func[{d}] vreg={d} >= slots.len={d} local_idx={d}\n", .{ func.func_idx, vreg, alloc.slots.len, local_idx });
                     return Error.SlotOverflow;
                 }
-                const rd = try gpr.resolveGpr(alloc, vreg);
                 switch (ty) {
-                    .i32 => try gpr.writeU32(allocator, &buf, inst.encLdrImmW(rd, 31, offset_w)),
-                    .i64 => try gpr.writeU32(allocator, &buf, inst.encLdrImm(rd, 31, offset_x)),
+                    .i32 => {
+                        const rd = try gpr.gprDefSpilled(alloc, vreg, 0);
+                        try gpr.writeU32(allocator, &buf, inst.encLdrImmW(rd, 31, offset_w));
+                        try gpr.gprStoreSpilled(allocator, &buf, alloc, ctx.spill_base_off, vreg, 0);
+                    },
+                    .i64 => {
+                        const rd = try gpr.gprDefSpilled(alloc, vreg, 0);
+                        try gpr.writeU32(allocator, &buf, inst.encLdrImm(rd, 31, offset_x));
+                        try gpr.gprStoreSpilled(allocator, &buf, alloc, ctx.spill_base_off, vreg, 0);
+                    },
                     .f32 => {
                         const vd = try gpr.resolveFp(alloc, vreg);
                         try gpr.writeU32(allocator, &buf, inst.encLdrSImm(vd, 31, offset_w));
@@ -624,12 +631,17 @@ pub fn compile(
                 const result_v = next_vreg;
                 next_vreg += 1;
                 if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-                const cond_w = try gpr.resolveGpr(alloc, cond_v);
-                const val2_w = try gpr.resolveGpr(alloc, val2_v);
-                const val1_w = try gpr.resolveGpr(alloc, val1_v);
-                const dst_w = try gpr.resolveGpr(alloc, result_v);
+                // D-034 spill-aware: 3 source operands but only 2
+                // stage regs. CMP is encoded first using stage 0 for
+                // cond; after CMP the cond value is dead, so stage 0
+                // is reused for val1 (and result).
+                const cond_w = try gpr.gprLoadSpilled(allocator, &buf, alloc, ctx.spill_base_off, cond_v, 0);
                 try gpr.writeU32(allocator, &buf, inst.encCmpImmW(cond_w, 0));
+                const val1_w = try gpr.gprLoadSpilled(allocator, &buf, alloc, ctx.spill_base_off, val1_v, 0);
+                const val2_w = try gpr.gprLoadSpilled(allocator, &buf, alloc, ctx.spill_base_off, val2_v, 1);
+                const dst_w = try gpr.gprDefSpilled(alloc, result_v, 0);
                 try gpr.writeU32(allocator, &buf, inst.encCselW(dst_w, val1_w, val2_w, .ne));
+                try gpr.gprStoreSpilled(allocator, &buf, alloc, ctx.spill_base_off, result_v, 0);
                 try pushed_vregs.append(allocator, result_v);
             },
             .@"drop" => {
