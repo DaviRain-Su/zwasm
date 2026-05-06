@@ -203,6 +203,28 @@ pub fn build(b: *std.Build) void {
     const test_edge_step = b.step("test-edge-cases", "Run edge-case fixture runner (Mac aarch64 only)");
     test_edge_step.dependOn(&run_edge_p7.step);
 
+    // `zig build test-spec-jit-compile` — §9.7 / 7.5 first
+    // sub-chunk. Walks spec corpora and reports whether each
+    // fixture compiles end-to-end through the JIT pipeline
+    // (parse + validate + lower + regalloc + ARM64 emit). Mac
+    // aarch64 only (linker tied to host arch).
+    const jit_compile_runner_mod = b.createModule(.{
+        .root_source_file = b.path("test/spec/jit_compile_runner.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    jit_compile_runner_mod.addImport("zwasm", zwasm_lib_mod);
+    applySanitize(jit_compile_runner_mod, sanitize_c, sanitize_thread);
+    const jit_compile_runner_exe = b.addExecutable(.{
+        .name = "zwasm-spec-jit-compile",
+        .root_module = jit_compile_runner_mod,
+    });
+    const run_jit_compile = b.addRunArtifact(jit_compile_runner_exe);
+    run_jit_compile.addArg(b.pathFromRoot("test/spec/smoke"));
+    run_jit_compile.addArg(b.pathFromRoot("test/spec/wasm-1.0"));
+    const test_jit_compile_step = b.step("test-spec-jit-compile", "JIT-compile spec corpus (Mac aarch64 only; §9.7 / 7.5)");
+    test_jit_compile_step.dependOn(&run_jit_compile.step);
+
     // `zig build test-spec-wasm-2.0` — wast-directive runner
     // (Phase 2 / §9.2 / 2.7). Reads each subdir's manifest.txt
     // and processes module / assert_invalid / assert_malformed
