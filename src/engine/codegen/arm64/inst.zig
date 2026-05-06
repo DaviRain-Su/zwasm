@@ -347,6 +347,26 @@ pub fn encStrDReg(vt: Vn, rn: Xn, rm: Xn) u32 {
     return 0xFC206800 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, vt);
 }
 
+/// `STR Sn, [Xn|SP, #pimm]` — 32-bit FP store (low 32 of V).
+/// Encoding: `1011 1101 00 [imm12] [Rn:5] [Rt:5]`. The imm12
+/// field is a *scaled* offset = `byte_offset / 4`; byte_offset
+/// must be aligned to 4. Used by §9.7 / 7.5-fp-params for f32
+/// param marshal at `[SP + p_idx*8]` (always 8-aligned, fits).
+pub fn encStrSImm(vt: Vn, rn: Xn, byte_offset: u14) u32 {
+    std.debug.assert(byte_offset % 4 == 0);
+    const imm12: u32 = @as(u32, byte_offset) >> 2;
+    return 0xBD000000 | (imm12 << 10) | (@as(u32, rn) << 5) | @as(u32, vt);
+}
+
+/// `STR Dn, [Xn|SP, #pimm]` — 64-bit FP store (low 64 of V).
+/// Encoding: `1111 1101 00 [imm12] [Rn:5] [Rt:5]`. imm12 =
+/// `byte_offset / 8`; byte_offset must be aligned to 8.
+pub fn encStrDImm(vt: Vn, rn: Xn, byte_offset: u15) u32 {
+    std.debug.assert(byte_offset % 8 == 0);
+    const imm12: u32 = @as(u32, byte_offset) >> 3;
+    return 0xFD000000 | (imm12 << 10) | (@as(u32, rn) << 5) | @as(u32, vt);
+}
+
 /// `LSR Wd, Wn, #imm` — alias for UBFM Wd, Wn, #imm, #31.
 /// Logical right shift with immediate count (1..31). Encoding
 /// (32-bit UBFM, sf=0, opc=10):

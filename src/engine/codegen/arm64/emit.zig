@@ -131,20 +131,24 @@ pub fn compile(
     // simple imm12 LDR/STR W addressing. Frame size rounds up to
     // 16 bytes per AAPCS64 §6.4 (SP must stay 16-byte aligned).
     // ============================================================
-    // Multi-arg entry (§9.7 / 7.5-multi-arg-entry + 7.5-i64-params):
-    // - AAPCS64 passes int args in X0..X7. X0 carries
-    //   `*const JitRuntime` per ADR-0017, so user args occupy
-    //   X1..X7 → at most 7 integer params today.
-    // - i32 + i64 supported via per-param STR width selection
-    //   (W width for i32, X width for i64). f32 / f64 / v128 /
-    //   refs surface as UnsupportedOp until follow-up sub-chunks
-    //   add V-reg marshalling.
-    // - Stack args (params.len > 7) likewise unsupported.
+    // Multi-arg entry (§9.7 / 7.5-multi-arg-entry / -i64-params /
+    // -fp-params):
+    // - AAPCS64 §6.4: int args in X0..X7; FP args in V0..V7.
+    //   X0 is `*const JitRuntime` (ADR-0017), so user int args
+    //   start at X1 (max 7). FP args have their own sequence
+    //   starting at V0 (max 8). Mixed-type signatures interleave
+    //   per declaration order but each type class indexes its own
+    //   arg-reg counter.
+    // - Per-class stores: i32 → STR W, i64 → STR X, f32 → STR S,
+    //   f64 → STR D. v128 / refs still surface as UnsupportedOp.
+    // - Total integer + FP params capped at 7 to avoid stack-arg
+    //   marshalling (which would require frame-relative loads of
+    //   8th+ args).
     if (func.sig.params.len > 7) return Error.UnsupportedOp;
     for (func.sig.params) |p| {
         switch (p) {
-            .i32, .i64 => {},
-            .f32, .f64, .v128, .funcref, .externref => return Error.UnsupportedOp,
+            .i32, .i64, .f32, .f64 => {},
+            .v128, .funcref, .externref => return Error.UnsupportedOp,
         }
     }
     const num_params: u32 = @intCast(func.sig.params.len);
@@ -214,16 +218,34 @@ pub fn compile(
     // (full 64-bit). AAPCS64 X0 = `*const JitRuntime` (already
     // snapshotted to X19 above), X1 = param 0, etc.
     var p_idx: u32 = 0;
+    var int_arg_idx: u5 = 1; // X0 = runtime ptr; user int args from X1
+    var fp_arg_idx: u5 = 0;  // V0..V7 for FP args
     while (p_idx < num_params) : (p_idx += 1) {
-        const param_off: u14 = @intCast(p_idx * 8);
-        const src_n: u5 = @intCast(p_idx + 1); // X1..X7 / W1..W7
+        const param_off_w: u14 = @intCast(p_idx * 8);
         switch (func.sig.params[p_idx]) {
-            .i32 => try gpr.writeU32(allocator, &buf, inst.encStrImmW(src_n, 31, param_off)),
-            .i64 => try gpr.writeU32(allocator, &buf, inst.encStrImm(src_n, 31, @intCast(p_idx * 8))),
-            // FP / SIMD / refs were already filtered as
-            // UnsupportedOp at the entry-shape check above; the
+            .i32 => {
+                if (int_arg_idx > 7) return Error.UnsupportedOp;
+                try gpr.writeU32(allocator, &buf, inst.encStrImmW(int_arg_idx, 31, param_off_w));
+                int_arg_idx += 1;
+            },
+            .i64 => {
+                if (int_arg_idx > 7) return Error.UnsupportedOp;
+                try gpr.writeU32(allocator, &buf, inst.encStrImm(int_arg_idx, 31, @intCast(p_idx * 8)));
+                int_arg_idx += 1;
+            },
+            .f32 => {
+                if (fp_arg_idx > 7) return Error.UnsupportedOp;
+                try gpr.writeU32(allocator, &buf, inst.encStrSImm(fp_arg_idx, 31, param_off_w));
+                fp_arg_idx += 1;
+            },
+            .f64 => {
+                if (fp_arg_idx > 7) return Error.UnsupportedOp;
+                try gpr.writeU32(allocator, &buf, inst.encStrDImm(fp_arg_idx, 31, @intCast(p_idx * 8)));
+                fp_arg_idx += 1;
+            },
+            // SIMD / refs were already filtered above; the
             // exhaustive switch here is for zlinter satisfaction.
-            .f32, .f64, .v128, .funcref, .externref => unreachable,
+            .v128, .funcref, .externref => unreachable,
         }
     }
 

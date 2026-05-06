@@ -1361,14 +1361,65 @@ test "compile: (param i64) — prologue stores X1 to [SP, #0] (STR X width)" {
     try testing.expectEqual(expected_str_x, std.mem.readInt(u32, out.bytes[36..][0..4], .little));
 }
 
-test "compile: function with f32 param still surfaces UnsupportedOp (FP V-reg marshalling pending)" {
+test "compile: (param f32) — prologue stores S0 to [SP, #0] (STR S width)" {
     const params = [_]zir.ValType{.f32};
     const sig: zir.FuncType = .{ .params = &params, .results = &.{.i32} };
     var f = ZirFunc.init(0, sig, &.{});
     defer f.deinit(testing.allocator);
-    f.liveness = .{ .ranges = &.{} };
-    const empty: regalloc.Allocation = .{ .slots = &.{}, .n_slots = 0 };
-    try testing.expectError(Error.UnsupportedOp, compile(testing.allocator, &f, empty, &.{}, &.{}));
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+    } };
+    const slots = [_]u8{0};
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    const expected = inst.encStrSImm(0, 31, 0);
+    try testing.expectEqual(expected, std.mem.readInt(u32, out.bytes[36..][0..4], .little));
+}
+
+test "compile: (param f64) — prologue stores D0 to [SP, #0] (STR D width)" {
+    const params = [_]zir.ValType{.f64};
+    const sig: zir.FuncType = .{ .params = &params, .results = &.{.i32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+    } };
+    const slots = [_]u8{0};
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    const expected = inst.encStrDImm(0, 31, 0);
+    try testing.expectEqual(expected, std.mem.readInt(u32, out.bytes[36..][0..4], .little));
+}
+
+test "compile: mixed (param i32 f32 i64 f64) — independent X/V counters" {
+    const params = [_]zir.ValType{ .i32, .f32, .i64, .f64 };
+    const sig: zir.FuncType = .{ .params = &params, .results = &.{.i32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+    } };
+    const slots = [_]u8{0};
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // Param marshalling at byte 36 (post-prologue):
+    //   STR W1, [SP, #0]   (i32 → X int_arg=1)
+    //   STR S0, [SP, #8]   (f32 → V fp_arg=0)
+    //   STR X2, [SP, #16]  (i64 → X int_arg=2)
+    //   STR D1, [SP, #24]  (f64 → V fp_arg=1)
+    try testing.expectEqual(inst.encStrImmW(1, 31, 0), std.mem.readInt(u32, out.bytes[36..][0..4], .little));
+    try testing.expectEqual(inst.encStrSImm(0, 31, 8), std.mem.readInt(u32, out.bytes[40..][0..4], .little));
+    try testing.expectEqual(inst.encStrImm(2, 31, 16), std.mem.readInt(u32, out.bytes[44..][0..4], .little));
+    try testing.expectEqual(inst.encStrDImm(1, 31, 24), std.mem.readInt(u32, out.bytes[48..][0..4], .little));
 }
 
 test "compile: (param i32) (result i32) local.get 0 — prologue stores W1 to [SP, #0]" {
