@@ -14,26 +14,23 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `503b5ee`):
+直近 commit (HEAD = `5cbf28a`):
 
-- `503b5ee` §9.7 / 7.5-spec-assertion-driver-a (forward.wast 4/4 PASS via JIT execute + assert)
-- `c95ea5e` chore: file D-034; retarget §9.7 / 7.5 chunks
+- `5cbf28a` §9.7 / 7.5-spec-assertion-driver-b (callI32_i32i32 + handcrafted_2arg 6/6 PASS)
+- `503b5ee` §9.7 / 7.5-spec-assertion-driver-a (forward.wast 4/4)
+- `c95ea5e` chore: file D-034
 - `6fa1c6d` §9.7 / 7.5-deadcode-labels-bookkeeping (8→10)
-- `4b275ed` §9.7 / 7.5-investigate-labels
-- `7aa7475` §9.7 / 7.5-br-table-to-function (7→8)
 
-**Active task**: spec-assertion-driver-a landed。`scripts/regen_
-spec_1_0_assert.sh` (wast2json → 拡張 manifest)、`callI32_i32` 型
-entry helper、`spec_assert_runner.zig` (corpus walker + dispatch)
-の 3 piece で forward.wast → 4/4 PASS の execute+assert pipeline
-が end-to-end に立った。chunk-a の scope は i32→i32 (0/1 args)
-のみ; 他 shape は `skip <reason>` line に。
+**Active task**: spec-assertion-driver-b landed。`callI32_i32i32`
+typed entry + tokenized arg dispatch (0/1/2 i32 args switch on
+n_args) + handcrafted 4-op fixture (add/sub/mul/and × 6 asserts)。
+spec_assert_runner: 10/0/0 (forward 4 + handcrafted 6)。
 
-**NEXT** = `7.5-spec-assertion-driver-b` (2-arg i32 shape を追加
-→ `callI32_i32i32` typed entry; regen script の args length
-gate を 2 まで開放; const.wast / labels.wast 等の curated 集合
-拡大)。subsequent chunks: -c (i64 result), -d (assert_trap), -e
-(broader corpus)。SlotOverflow は D-034 として並行 hold。
+**NEXT** = `7.5-spec-assertion-driver-c` (i64 result shape →
+`callI64NoArgs` / `callI64_i32` typed entries; regen の result
+type gate を i64 にも開放; handcrafted_i64 fixture (i64.const +
+i64.add 等))。subsequent chunks: -d (assert_trap), -e (broader
+corpus)。SlotOverflow は D-034 として並行 hold。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -80,8 +77,8 @@ gate を 2 まで開放; const.wast / labels.wast 等の curated 集合
 | 7.5-spill-enable-or-pool | SlotOverflow @ func[9] params=5 の spill vs pool-extension 判定 | DEFERRED (D-034; spill-aware op handlers refactor が必要) |
 | 7.5-local-type-aware | local.get/set/tee の width を declared type 別に (D-033 discharge) | pending |
 | 7.5-spec-assertion-driver-a | wast2json regen + callI32_i32 + spec_assert_runner; forward.wast 4/4 PASS | DONE (503b5ee) |
-| 7.5-spec-assertion-driver-b | 2-arg i32 (callI32_i32i32) + regen 2-arg gate + curated 集合拡大 | **NEXT** |
-| 7.5-spec-assertion-driver-c | i64 result (callI64*); FP result via bit-cast | pending |
+| 7.5-spec-assertion-driver-b | 2-arg i32 (callI32_i32i32) + handcrafted_2arg fixture (10/0/0) | DONE (5cbf28a) |
+| 7.5-spec-assertion-driver-c | i64 result (callI64NoArgs / callI64_i32); FP result via bit-cast | **NEXT** |
 | 7.5-spec-assertion-driver-d | assert_trap (trap_flag → reason discrimination — D-022 と連携) | pending |
 | 7.5-trap-reason-channel | trap_flag を `enum TrapReason` に拡張 (assert_trap reason discrimination) | pending (ADR-0028 / Diagnostic M3) |
 
