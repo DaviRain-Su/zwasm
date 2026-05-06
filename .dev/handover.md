@@ -149,7 +149,8 @@ multi-value 修正後に再評価(関連する semantic 解釈が変わる可能
 | 7.5-close-b  | assert_malformed runner directive (classification: 20 → directive-assert_malformed-text) | DONE (9b9715d) |
 | 7.5-close-skip-adr | skip-adr-text-format-parser; 20 skip-impl → skip-adr (51→31) | DONE (db0dd0a) |
 | 7.5-close-mta | runner 5-arg dispatch (+4 PASS; D-041 mta bucket discharged) | DONE (fedae43) |
-| 7.5-close-d042 | per-fixture validator strictness walk (D-042; 27 fixtures; sole §9.7 / 7.5 close blocker) | **NEXT** |
+| 7.5-close-d042-prep | thread module globals/tables/data through `compileOne` signature (no behaviour delta) | **NEXT** |
+| 7.5-close-d042-impl | enable `validator.validateFunction` in `compileOne`; verify 27 SKIP-VALIDATOR-GAP → PASS without regressions | pending (blocked-by d042-prep) |
 | 7.5-close-c3 | multi-result if/else fixture (D-035 deferred regression coverage) | pending |
 | 7.5-close-d | FP non-int-arg runner extension | pending |
 | 7.5-close-a | assert_invalid runner directive | pending |
