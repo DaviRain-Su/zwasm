@@ -14,29 +14,26 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `4b275ed`):
+直近 commit (HEAD = `6fa1c6d`):
 
-- `4b275ed` §9.7 / 7.5-investigate-labels (op_control diag; 残 fails の真因 surface)
+- `6fa1c6d` §9.7 / 7.5-deadcode-labels-bookkeeping (8→10; unreachable.0 + labels.0 both clear)
+- `4b275ed` §9.7 / 7.5-investigate-labels (op_control diag)
 - `7aa7475` §9.7 / 7.5-br-table-to-function (7→8)
 - `668c092` §9.7 / 7.5-br-to-function
-- `75668e1` §9.7 / 7.5-diag-spill
 - `4440622` §9.7 / 7.5-select-op (6→7)
-- `962a24c` §9.7 / 7.5-diag-op
 
-**Active task**: investigate-labels landed (8/12 stays; diag で
-真因判明)。**残 4/12 の root causes**:
-- local_get/set.0 — SlotOverflow @ regalloc pool (5 params + body)
-- unreachable.0 func[29] — `emitElse without matching if_then frame`
-  (dead-code が outer if_then を pop してしまった疑い)
-- labels.0 func[15] — `emitEndIntra (else_open merge) needs >=2
-  pushed_vregs, got 1` (then arm の `br N` で dead-code skip すると
-  merge 用の vreg が push されない)
+**Active task**: deadcode-labels-bookkeeping landed (10/12;
+unreachable.0 / labels.0 clear via placeholder labels in
+dead regions + tolerant emitElse + tolerant emitEndIntra)。
+**残 2/12**:
+- local_get/set.0 — SlotOverflow @ func[9] params=5 (regalloc pool)
 
-**NEXT** = `7.5-deadcode-labels-bookkeeping` (dead_code フラグの
-扱いを精緻化: `block` / `loop` / `if` / `else` / `end` は dead 中も
-labels-stack を維持する必要がある。現在の "skip while dead_code"
-が labels-stack 整合性を破っている疑い。fix 後 labels.0 +
-unreachable.0 の両方が解消見込み)。
+**NEXT** = `7.5-spill-enable-or-pool` (SlotOverflow が真の
+spill-needed か pool-extension で済むかを diagnostic 経由で
+判定。現状 9 GPR pool (X9..X13 + X20..X23) + 5 params = 5 vreg
+予約 → body ops が 5+ 同時 vreg を要求すると overflow。spill-
+aware emit 書き直しは大規模 → 別 chunk; pool 微調整 (e.g.
+arg-reg を post-prologue に転用) で済むなら quick win)。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -79,8 +76,8 @@ unreachable.0 の両方が解消見込み)。
 | 7.5-br-to-function | `br N` / `br_if N` で depth==labels.len を return として扱う | DONE (668c092) |
 | 7.5-br-table-to-function | `br_table` の per-case で function-depth case を return として扱う | DONE (7aa7475; 7→8) |
 | 7.5-investigate-labels | op_control diag で真因 surface (else without if_then; merge stack short) | DONE (4b275ed) |
-| 7.5-deadcode-labels-bookkeeping | dead_code skip が labels-stack 整合性を破る問題 (block/loop/if/else を dead 中も処理) | **NEXT** |
-| 7.5-spill-enable | regalloc pool 枯渇時に spill を enable (SlotOverflow 解消) | pending |
+| 7.5-deadcode-labels-bookkeeping | dead_code 中の placeholder labels + tolerant emitElse / emitEndIntra | DONE (6fa1c6d; 8→10) |
+| 7.5-spill-enable-or-pool | SlotOverflow @ func[9] params=5 の spill vs pool-extension 判定 | **NEXT** |
 | 7.5-local-type-aware | local.get/set/tee の width を declared type 別に (D-033 discharge) | pending |
 | 7.5-spec-assertion-driver | wast2json で spec corpus を `.wasm` + assertion manifest 化 → JIT 経由で execute → pass/fail counts | pending |
 | 7.5-trap-reason-channel | trap_flag を `enum TrapReason` に拡張 (assert_trap reason discrimination) | pending (ADR-0028 / Diagnostic M3) |
@@ -112,6 +109,7 @@ zone placement / "constant overhead" / WASI prereq 等)。
 
 ## Recently closed (full history via `git log --oneline`)
 
+- §9.7 / 7.5-deadcode-labels-bookkeeping (6fa1c6d): dead_code 中の block/loop/if が placeholder labels を push (no machine bytes; if_skip_byte=null marks no-CBZ)。emitElse は null skip_byte を tolerate して CBZ patch step を skip。emitEndIntra は dead else arm (pushed_vregs.len==1, top==merge_vreg) を検出して merge MOV を skip — merge target は既に top にいる。spec-jit-compile 8→10 (unreachable.0 / labels.0 both clear)。残 2 fails は両方とも SlotOverflow @ func[9] params=5。
 - §9.7 / 7.5-investigate-labels (4b275ed): op_control.zig の `emitElse` と `emitEndIntra` (merge stack underflow + merge-vreg mismatch) の reject に stderr diag を追加。spec-jit-compile が surface する真因: labels.0 func[15] の merge stack short (then arm の br + dead-code skip で merge vreg push 不発), unreachable.0 func[29] の "emitElse without matching if_then" (outer if_then が dead-code propagation で pop)。両方とも 7.5-emit-deadcode の labels-stack 整合性問題が起源。
 - §9.7 / 7.5-br-table-to-function (7aa7475): `op_control.emitBranchToDepth` を `*EmitCtx` ベースに refactor + `depth == labels.len` を return として処理 (br/br_if と同形)。各 br_table case で独立に marshal + B-fixup を emit (run-time に発火するのは 1 case のみなので duplicate marshal でも correct)。spec-jit-compile 7→8 (unwind.0 clears via func[5..7] の `br_table 0`)。
 - §9.7 / 7.5-br-to-function (668c092): emitBr / emitBrIf が `payload == labels.items.len` の場合 (Wasm spec §3.3.5 の implicit function-level block) を return として処理。EmitCtx に `return_fixups: *List(u32)` を追加して既存の return-op 機構を共有。emitBrIf は CBZ skip + marshal + B epilogue + skip-target patch の 4-instruction shape。`>=` の reject を `>` に絞る。spec-jit-compile pass count 据え置き 7/12 だが unwind.0 が func[1] → func[5] (br_table at function-depth) に shift。
