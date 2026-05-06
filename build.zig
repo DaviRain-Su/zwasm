@@ -466,6 +466,18 @@ pub fn build(b: *std.Build) void {
     test_all_step.dependOn(&run_wast_runtime_smoke.step);
     test_all_step.dependOn(&run_c_host.step);
     test_all_step.dependOn(&run_wasi_p1.step);
+    // §9.7 / 7.5-d040 (D-040 discharge): wire test-spec-assert
+    // into test-all on the only host where the ARM64 JIT runs.
+    // Linux/Windows runs would invoke the aarch64 backend which
+    // fails to spawn JIT-compiled bodies on x86_64 targets.
+    // The d035-c regression (138/0/94 → 72/68/94) showed the
+    // three-host gate without this wiring lets spec-assert
+    // breakage land silently.
+    const is_mac_aarch64 = target.result.os.tag == .macos and
+        target.result.cpu.arch == .aarch64;
+    if (is_mac_aarch64) {
+        test_all_step.dependOn(&run_spec_assert.step);
+    }
 
     // `zig build run-repro -Dtask=<name>` — discover
     // `private/dbg/<task>/repro.zig`, link it against the zwasm
