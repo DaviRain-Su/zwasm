@@ -14,19 +14,18 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `fedae43`):
+直近 commit (HEAD = `5746f2b`):
 
+- `5746f2b` feat(p7): §9.7 / 7.5-close-d042 — validator wired into compileWasm (D-042 closed; **§9.7 / 7.5 → [x]**)
+- `24e6c23` chore(p7,debt,lessons): D-042 root-cause investigation — validator dead code in compileOne
 - `fedae43` feat(p7): §9.7 / 7.5-close-mta — 5-arg dispatch (181→185; skip-impl 31→27)
 - `db0dd0a` feat(p7): §9.7 / 7.5-close-skip-adr — text-format-parser scope-out (51→31 skip-impl)
-- `9b9715d` feat(p7): §9.7 / 7.5-close-b — assert_malformed runner directive (classification only)
-- `f103209` feat(p7): §9.7 / 7.5-close-a — assert_invalid directive (159→181; D-042/D-043 filed)
-- `6505018` feat(p7): §9.7 / 7.5-close-c2 — true FP-result regen relax (155→159 / 77→73)
+- `f103209` feat(p7): §9.7 / 7.5-close-a — assert_invalid directive (159→181)
 
-**Phase status**: §9.7 / 7.5 IN-PROGRESS。spec-jit-compile 12/12,
-spec_assert 185 passed, 0 failed, 27 skip-impl + 20 skip-adr。
-§9.7 / 7.5 exit criterion (skip-impl == 0) は D-042 (validator
-strictness gaps in local_get/local_set assert_invalid corpus) の
-discharge のみが残るブロッカー。Phase 7 残 row =
+**Phase status**: §9.7 / 7.5 → **[x]** 完了 🎉 (spec_assert
+212/0/20 = 0 skip-impl + 20 skip-adr per ADR-0029)。spec-jit-
+compile 12/12。Phase 7 残 row = 7.8 / 7.9 / 7.10 / 7.11 🔒 /
+7.12 / 7.13 🔒。
 7.5 / 7.8 / 7.9 / 7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。
 D-030 / D-035 / D-036 / D-037 / D-038 / D-040 closed。
 次は §9.7 / 7.5 close (94 skips 分類) → 7.8 (x86_64 spec gate)。
@@ -36,23 +35,16 @@ D-030 / D-035 / D-036 / D-037 / D-038 / D-040 closed。
 
 **NEXT(優先順)**:
 
-1. **skip-adr-0030: text-format parser scope-out** — file
-   `.dev/decisions/skip_text_format_parser.md` covering the 20
-   `directive-assert_malformed-text` skips. Per ADR-0029, once
-   filed these become `skip-adr-<id>` (separate tally), not
-   `skip-impl`. spec_assert effective skip-impl drops 51 → 31.
-2. **D-042 validator strictness walk** — per-fixture audit of
-   the 27 SKIP-VALIDATOR-GAP cases; group by error class
-   (type-mismatch / out-of-bounds / unknown-global etc.) and
-   land per-class fixes in `src/validate/validator.zig`. This
-   discharge unblocks D-043 automatically (leak path stops
-   firing once compileWasm correctly rejects).
-3. **7.5-close-mta: more-than-2-args runner extension** —
-   add 5-arg + mixed-type call helpers (callXX_5args dispatch
-   for `type-mixed`/`read`/`write` fixtures); 4 of the 51
-   skips drop.
-4. After (1)+(2)+(3): §9.7 / 7.5 row → [x] (skip-impl == 0),
-   then 7.8 (x86_64 spec gate Linux + Windows)。
+1. **§9.7 / 7.8 spec gate (Linux + Windows)** — x86_64 spec
+   testsuite の pass=fail=skip=0 確立。spec_assert を
+   Linux/Windows host (orb + windowsmini) でも走らせる
+   仕組みを D-040 mac-aarch64 guard の x86_64-host
+   counterpart として組む。
+2. **§9.7 / 7.9 ARM64 realworld** — 40+ realworld サンプルを
+   ARM64 JIT で run (existing realworld_run runner extension)。
+3. **§9.7 / 7.10 x86_64 realworld** — same on Linux + Windows。
+4. **§9.7 / 7.11 🔒 three-way differential** — interp ==
+   jit_arm64 == jit_x86 — 0 mismatch over spec + realworld。
 
 これらの後で 7.8 → 7.9/7.10 → 7.11 🔒 → 7.12 → 7.13 🔒 の順。
 
@@ -149,12 +141,8 @@ multi-value 修正後に再評価(関連する semantic 解釈が変わる可能
 | 7.5-close-b  | assert_malformed runner directive (classification: 20 → directive-assert_malformed-text) | DONE (9b9715d) |
 | 7.5-close-skip-adr | skip-adr-text-format-parser; 20 skip-impl → skip-adr (51→31) | DONE (db0dd0a) |
 | 7.5-close-mta | runner 5-arg dispatch (+4 PASS; D-041 mta bucket discharged) | DONE (fedae43) |
-| 7.5-close-d042-prep | thread module globals/tables/data through `compileOne` signature (no behaviour delta) | **NEXT** |
-| 7.5-close-d042-impl | enable `validator.validateFunction` in `compileOne`; verify 27 SKIP-VALIDATOR-GAP → PASS without regressions | pending (blocked-by d042-prep) |
-| 7.5-close-c3 | multi-result if/else fixture (D-035 deferred regression coverage) | pending |
-| 7.5-close-d | FP non-int-arg runner extension | pending |
-| 7.5-close-a | assert_invalid runner directive | pending |
-| 7.5-close-b | assert_malformed runner directive | pending |
+| 7.5-close-d042 | validator wired into compileWasm (212/0/20 = 0 skip-impl + 20 skip-adr; **§9.7 / 7.5 → [x]**) | DONE (5746f2b) |
+| 7.8         | x86_64 spec gate (Linux + Windows hosts) — spec_assert wiring + pass=fail=skip-impl=0 | **NEXT** |
 | 7.5-close | §9.7 / 7.5 row → [x] (after a-d landing) | pending |
 | 7.5-d035-b | multi-value blocks — emit-side merge_top_vreg → []u32 | pending |
 | 7.5-d038 | emitEndIntra spill-staging residual (chunk-d037-a leftover; BASELINE 2→0) | pending |
