@@ -507,6 +507,34 @@ pub fn compile(
                 try gpr.writeU32(allocator, &buf, inst.encStrImmW(ws, 31, offset));
             },
             .@"i32.popcnt" => try op_alu_int.emitI32Popcnt(&ctx, &ins),
+            .@"select", .@"select_typed" => {
+                // Wasm spec §4.4.4: pop c, val2, val1 (top of
+                // stack is c). Push val1 if c != 0, else val2.
+                // ARM64 lowering: CMP c_w, #0 ; CSEL d_w,
+                // val1_w, val2_w, NE.
+                //
+                // Type assumption: val1 / val2 width is i32
+                // (CSEL Wd, 32-bit select). The validator
+                // already enforces both operands share a single
+                // type; supporting i64 needs CSEL Xd via
+                // type-aware dispatch (debt: D-034 / 7.5-select-
+                // i64-fp variant). FP / refs surface as a
+                // separate variant lifted later.
+                if (pushed_vregs.items.len < 3) return Error.AllocationMissing;
+                const cond_v = pushed_vregs.pop().?;
+                const val2_v = pushed_vregs.pop().?;
+                const val1_v = pushed_vregs.pop().?;
+                const result_v = next_vreg;
+                next_vreg += 1;
+                if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+                const cond_w = try gpr.resolveGpr(alloc, cond_v);
+                const val2_w = try gpr.resolveGpr(alloc, val2_v);
+                const val1_w = try gpr.resolveGpr(alloc, val1_v);
+                const dst_w = try gpr.resolveGpr(alloc, result_v);
+                try gpr.writeU32(allocator, &buf, inst.encCmpImmW(cond_w, 0));
+                try gpr.writeU32(allocator, &buf, inst.encCselW(dst_w, val1_w, val2_w, .ne));
+                try pushed_vregs.append(allocator, result_v);
+            },
             .@"drop" => {
                 // Discard the top operand. Wasm spec §4.4.4: the
                 // value is consumed without storage. No machine

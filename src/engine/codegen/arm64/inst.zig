@@ -367,6 +367,29 @@ pub fn encStrDImm(vt: Vn, rn: Xn, byte_offset: u15) u32 {
     return 0xFD000000 | (imm12 << 10) | (@as(u32, rn) << 5) | @as(u32, vt);
 }
 
+/// `CSEL Wd, Wn, Wm, cond` — 32-bit conditional select.
+/// `Wd = if (cond holds) Wn else Wm`. Encoding: `0 0 0 1 1 0 1 0
+/// 1 0 0 [Rm:5] [cond:4] 0 0 [Rn:5] [Rd:5]` = `0x1A800000 |
+/// (Rm<<16) | (cond<<12) | (Rn<<5) | Rd`. Used by §9.7 / 7.5-
+/// select-op.
+pub fn encCselW(rd: Xn, rn: Xn, rm: Xn, cond: Cond) u32 {
+    return 0x1A800000 |
+        (@as(u32, rm) << 16) |
+        (@as(u32, @intFromEnum(cond)) << 12) |
+        (@as(u32, rn) << 5) |
+        @as(u32, rd);
+}
+
+/// `CSEL Xd, Xn, Xm, cond` — 64-bit conditional select.
+/// Same shape as encCselW with sf=1 → opcode base 0x9A800000.
+pub fn encCselX(rd: Xn, rn: Xn, rm: Xn, cond: Cond) u32 {
+    return 0x9A800000 |
+        (@as(u32, rm) << 16) |
+        (@as(u32, @intFromEnum(cond)) << 12) |
+        (@as(u32, rn) << 5) |
+        @as(u32, rd);
+}
+
 /// `LSR Wd, Wn, #imm` — alias for UBFM Wd, Wn, #imm, #31.
 /// Logical right shift with immediate count (1..31). Encoding
 /// (32-bit UBFM, sf=0, opc=10):
