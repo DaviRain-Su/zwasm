@@ -14,16 +14,16 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `3308a3c`):
+直近 commit (HEAD = `91d4186`):
 
+- `91d4186` feat(p7): §9.7 / 7.5-close-c1 — void-result helpers (138→153 / 94→79)
 - `3308a3c` chore(p7,debt): close D-040 — wire test-spec-assert into test-all (Mac guard)
 - `a4b1510` fix(p7): §9.7 / 7.5-d035-c emit-side regression — Label.merge_captured tri-state
 - `13701e6` feat(p7): §9.7 / 7.5-d035-c — multi-result emit-side MOV chain (D-035 closed)
 - `d1b8523` feat(p7): §9.7 / 7.5-d038 — emitEndIntra spill-staging (D-038 closed; BASELINE 2→0)
-- `a2679f4` feat(p7): §9.7 / 7.5-d035-b — multi-result if/else gate (Label.result_arity)
 
 **Phase status**: §9.7 / 7.5 IN-PROGRESS。spec-jit-compile 12/12,
-spec_assert 138/0/94 (now in test-all on Mac)。Phase 7 残 row =
+spec_assert 153/0/79 (test-all on Mac; +15 from c1)。Phase 7 残 row =
 7.5 / 7.8 / 7.9 / 7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。
 D-030 / D-035 / D-036 / D-037 / D-038 / D-040 closed。
 次は §9.7 / 7.5 close (94 skips 分類) → 7.8 (x86_64 spec gate)。
@@ -33,12 +33,14 @@ D-030 / D-035 / D-036 / D-037 / D-038 / D-040 closed。
 
 **NEXT(優先順)** (D-041 の per-bucket chunks 順):
 
-1. **7.5-close-c: FP non-int-result (17 skips)** — runner に
-   missing FP entry-helpers (callF32_i32 / callF64_i32i32 等)
-   per-fixture 追加。multi-result if/else fixture (D-035 から
-   deferred) もここで投入。
-2. **7.5-close-d: FP non-int-arg (8 skips)** — (c) と
-   ペアの runner 拡張、入力側。
+1. **7.5-close-d: FP non-int-arg (8 skips)** — local_get/set
+   の f32/f64 引数 assertion。runner に callXX_fXX 系 (e.g.
+   callVoid_f32, callI32_f32 等) を追加。
+2. **7.5-close-c2: 真 FP-result (2 skips 残)** — local_get の
+   `type-local-f32` / `type-local-f64` 系 (returns f32/f64).
+   regen で `len(results) == 1 and results[0]` ∈ {f32, f64} を
+   通す + runner で callF32_<args> 群を網羅。multi-result if/else
+   fixture (D-035 から deferred) もここで投入。
 3. **7.5-close-a: assert_invalid (49 skips)** — runner に
    `assert_invalid` directive 追加; validate-only path で
    expected error と照合。
@@ -135,8 +137,9 @@ multi-value 修正後に再評価(関連する semantic 解釈が変わる可能
 | 7.5-d035-c | emit-side multi-result MOV chain (D-035 closed; cap=8) + regression fix | DONE (13701e6 + a4b1510) |
 | 7.5-d040 | test-spec-assert → test-all (Mac aarch64 guard; D-040 closed) | DONE (3308a3c) |
 | 7.5-d041 | 94 skip 分類 → D-041 (4 buckets: 49 invalid / 20 malformed / 17 fp-result / 8 fp-arg) | DONE (a6776e0; file-only) |
-| 7.5-close-c1 | void-result helpers (callVoidNoArgs / callVoid_i32 / callVoid_i32i32 / callVoid_i64); regen `len(results) == 0` 受け入れ; ~15 of local_set non-int-result skips を解除 | **NEXT** |
-| 7.5-close-c2 | true FP-result helpers (callI32_f32 / callF32_i32 / 等の missing combos) — D-041 c bucket 残り 2/17 + multi-result if/else fixture | pending |
+| 7.5-close-c1 | void-result helpers + regen len(results)==0 + runner void dispatch; +15 PASS | DONE (91d4186) |
+| 7.5-close-d  | FP non-int-arg (8 skips; local_get/set f32/f64 args) | **NEXT** |
+| 7.5-close-c2 | true FP-result helpers (2 残 skips + multi-result if/else fixture) | pending |
 | 7.5-close-d | FP non-int-arg runner extension | pending |
 | 7.5-close-a | assert_invalid runner directive | pending |
 | 7.5-close-b | assert_malformed runner directive | pending |
