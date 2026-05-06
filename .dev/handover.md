@@ -14,20 +14,19 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `db0dd0a`):
+直近 commit (HEAD = `fedae43`):
 
+- `fedae43` feat(p7): §9.7 / 7.5-close-mta — 5-arg dispatch (181→185; skip-impl 31→27)
 - `db0dd0a` feat(p7): §9.7 / 7.5-close-skip-adr — text-format-parser scope-out (51→31 skip-impl)
 - `9b9715d` feat(p7): §9.7 / 7.5-close-b — assert_malformed runner directive (classification only)
 - `f103209` feat(p7): §9.7 / 7.5-close-a — assert_invalid directive (159→181; D-042/D-043 filed)
 - `6505018` feat(p7): §9.7 / 7.5-close-c2 — true FP-result regen relax (155→159 / 77→73)
-- `72250c1` feat(p7): §9.7 / 7.5-close-d — FP-arg dispatch (153→155 / 79→77)
 
 **Phase status**: §9.7 / 7.5 IN-PROGRESS。spec-jit-compile 12/12,
-spec_assert 181 passed, 0 failed, 31 skip-impl + 20 skip-adr (text-
-format-parser per ADR `skip_text_format_parser.md`)。§9.7 / 7.5 exit
-criterion = skip-impl == 0; remaining 31: 27 SKIP-VALIDATOR-GAP
-(D-042) + 4 more-than-2-args (runner ext) — both fully scoped。
-Phase 7 残 row =
+spec_assert 185 passed, 0 failed, 27 skip-impl + 20 skip-adr。
+§9.7 / 7.5 exit criterion (skip-impl == 0) は D-042 (validator
+strictness gaps in local_get/local_set assert_invalid corpus) の
+discharge のみが残るブロッカー。Phase 7 残 row =
 7.5 / 7.8 / 7.9 / 7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。
 D-030 / D-035 / D-036 / D-037 / D-038 / D-040 closed。
 次は §9.7 / 7.5 close (94 skips 分類) → 7.8 (x86_64 spec gate)。
@@ -149,8 +148,8 @@ multi-value 修正後に再評価(関連する semantic 解釈が変わる可能
 | 7.5-close-a  | assert_invalid directive (+22 PASS; 27 SKIP-VALIDATOR-GAP → D-042; leak → D-043) | DONE (f103209) |
 | 7.5-close-b  | assert_malformed runner directive (classification: 20 → directive-assert_malformed-text) | DONE (9b9715d) |
 | 7.5-close-skip-adr | skip-adr-text-format-parser; 20 skip-impl → skip-adr (51→31) | DONE (db0dd0a) |
-| 7.5-close-mta | runner more-than-2-args extension (4 skips) | **NEXT** |
-| 7.5-close-d042 | per-fixture validator strictness walk (D-042; 27 fixtures across error classes) | pending |
+| 7.5-close-mta | runner 5-arg dispatch (+4 PASS; D-041 mta bucket discharged) | DONE (fedae43) |
+| 7.5-close-d042 | per-fixture validator strictness walk (D-042; 27 fixtures; sole §9.7 / 7.5 close blocker) | **NEXT** |
 | 7.5-close-c3 | multi-result if/else fixture (D-035 deferred regression coverage) | pending |
 | 7.5-close-d | FP non-int-arg runner extension | pending |
 | 7.5-close-a | assert_invalid runner directive | pending |
