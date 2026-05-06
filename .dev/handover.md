@@ -14,25 +14,25 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `c347bcd`):
+直近 commit (HEAD = `b8ebe8e`):
 
+- `b8ebe8e` §9.7 / 7.5-spec-assertion-driver-d (assert_trap; 17/0/1)
 - `c347bcd` §9.7 / 7.5-spec-assertion-driver-c (callI64* + handcrafted_i64; 14/0/1)
 - `5cbf28a` §9.7 / 7.5-spec-assertion-driver-b (10/0/0)
 - `503b5ee` §9.7 / 7.5-spec-assertion-driver-a (forward 4/4)
-- `c95ea5e` chore: file D-034
 
-**Active task**: spec-assertion-driver-c landed。`callI64NoArgs` /
-`callI64_i32` / `callI64_i64` typed entries + (n_args, arg-kind,
-result-kind) dispatch refactor + `handcrafted_i64` fixture。1
-SKIP は D-033 (local.get の i64 width truncation) を surface した
-もの — discharge 時に regression test として復活する。
-spec_assert_runner: 14/0/1。
+**Active task**: spec-assertion-driver-d landed。runner に
+`assert_trap` directive を追加 — `Error.Trap` を PASS とみなす
+boolean check (reason discrimination は D-022 / Diagnostic M3
+の仕事として保留)。`handcrafted_trap` fixture: `always_traps`
+(raw unreachable) + `trap_on_neg` (i32 if<0)。
+spec_assert_runner: 17/0/1。
 
-**NEXT** = `7.5-spec-assertion-driver-d` (assert_trap support →
-trap_flag が立った場合に reason 文字列と照合; 現状 `Error.Trap`
-の単 boolean だが ADR-0028 / Diagnostic M3 の trap_reason 拡張
-と統合)。subsequent: -e (broader corpus)。SlotOverflow / D-034
-+ D-033 は discharge ペンディング。
+**NEXT** = `7.5-spec-assertion-driver-e` (curated wasm-1.0 corpus
+拡大 → const.wast / unreachable.wast / nop.wast 等 0-arg
+fixture を regen で取り込み; 残った D-033 / D-034 を avoid する
+ように小さい curated 集合から始める)。SlotOverflow / D-034 +
+D-033 は依然 discharge ペンディング。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -81,7 +81,8 @@ trap_flag が立った場合に reason 文字列と照合; 現状 `Error.Trap`
 | 7.5-spec-assertion-driver-a | wast2json regen + callI32_i32 + spec_assert_runner; forward.wast 4/4 PASS | DONE (503b5ee) |
 | 7.5-spec-assertion-driver-b | 2-arg i32 (callI32_i32i32) + handcrafted_2arg fixture (10/0/0) | DONE (5cbf28a) |
 | 7.5-spec-assertion-driver-c | i64 result (callI64*); handcrafted_i64; D-033 surface | DONE (c347bcd) |
-| 7.5-spec-assertion-driver-d | assert_trap (trap_flag → reason discrimination — D-022 と連携) | **NEXT** |
+| 7.5-spec-assertion-driver-d | assert_trap directive + handcrafted_trap (17/0/1) | DONE (b8ebe8e) |
+| 7.5-spec-assertion-driver-e | curated wasm-1.0 corpus 拡大 (const/unreachable/nop の 0-arg fixture を regen で取り込み) | **NEXT** |
 | 7.5-trap-reason-channel | trap_flag を `enum TrapReason` に拡張 (assert_trap reason discrimination) | pending (ADR-0028 / Diagnostic M3) |
 
 ADR-0019 phase plan post-7.6: 7.7 emit.zig, 7.8 spec gate (Linux
