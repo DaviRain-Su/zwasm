@@ -40,6 +40,7 @@ fi
 # adds shapes (chunk-b: 2-arg; chunk-c: i64; …).
 NAMES=(
   forward
+  unreachable
 )
 
 mkdir -p "$DEST"
@@ -77,9 +78,13 @@ for c in d['commands']:
             continue
         args = a.get('args', [])
         results = c.get('expected', [])
-        # chunk-a: only i32 args + single i32 result.
-        if any(x['type'] != 'i32' for x in args) or len(results) != 1 or results[0]['type'] != 'i32':
-            lines.append(f'skip non-i32-shape {a["field"]}')
+        # i32→i32 (0/1/2 args) + i64-result (0/1 args of i32/i64).
+        allowed_arg = lambda x: x['type'] in ('i32', 'i64')
+        if not all(allowed_arg(x) for x in args):
+            lines.append(f'skip non-int-arg {a["field"]}')
+            continue
+        if len(results) != 1 or results[0]['type'] not in ('i32', 'i64'):
+            lines.append(f'skip non-int-result {a["field"]}')
             continue
         if len(args) > 2:
             lines.append(f'skip more-than-2-args {a["field"]}')
@@ -87,6 +92,20 @@ for c in d['commands']:
         args_s = ' '.join(fmt(x) for x in args) if args else '()'
         results_s = ' '.join(fmt(x) for x in results)
         lines.append(f'assert_return {a["field"]} {args_s} -> {results_s}')
+    elif t == 'assert_trap':
+        a = c['action']
+        if a.get('type') != 'invoke':
+            lines.append(f'skip trap-non-invoke')
+            continue
+        args = a.get('args', [])
+        if any(x['type'] not in ('i32', 'i64') for x in args):
+            lines.append(f'skip trap-non-int-arg {a["field"]}')
+            continue
+        if len(args) > 2:
+            lines.append(f'skip trap-more-than-2-args {a["field"]}')
+            continue
+        args_s = ' '.join(fmt(x) for x in args) if args else '()'
+        lines.append(f'assert_trap {a["field"]} {args_s}')
     else:
         lines.append(f'skip directive-{t}')
 with open(dst, 'w') as f:
