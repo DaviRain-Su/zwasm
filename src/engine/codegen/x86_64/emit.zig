@@ -3748,7 +3748,7 @@ test "compile: call N — 0 args, i32 return — captures EAX into result vreg" 
     try testing.expectEqualSlices(u8, expected_capture.slice(), out.bytes[21 .. 21 + expected_capture.len]);
 }
 
-test "compile: call N — 1 i32 arg — marshals top-of-stack into RSI" {
+test "compile: call N — 1 i32 arg — marshals top-of-stack into arg_gprs[1] (RSI on SysV, RDX on Win64)" {
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
     const callee_sig: zir.FuncType = .{ .params = &.{.i32}, .results = &.{} };
     const func_sigs = [_]zir.FuncType{ sig, callee_sig };
@@ -3767,12 +3767,13 @@ test "compile: call N — 1 i32 arg — marshals top-of-stack into RSI" {
     const out = try compile(testing.allocator, &f, alloc, &func_sigs, &.{});
     defer deinit(testing.allocator, out);
 
-    // Body layout (post-prologue at 13):
-    //   MOV R10D, 42    41 b8 2a 00 00 00   (6 bytes) → 19
-    //   MOV ESI, R10D   44 89 d6            (3 bytes) → 22  (marshal)
-    //   MOV RDI, R15    4c 89 ff            (3 bytes) → 25
-    //   CALL rel32      e8 00 00 00 00      (5 bytes) → 30
-    const expected_marshal = inst.encMovRR(.d, .rsi, .r10);
+    // Body layout (post-prologue at 13). Cc-pivot derives the
+    // marshalling target from `abi.current.arg_gprs[1]`.
+    //   MOV R10D, 42                     (6 bytes) → 19
+    //   MOV <arg1>, R10D                 (3 bytes) → 22  marshal
+    //   MOV <arg0>, R15                  (3 bytes) → 25  runtime_ptr restore
+    //   CALL rel32                       (5 bytes) → 30
+    const expected_marshal = inst.encMovRR(.d, abi.current.arg_gprs[1], .r10);
     try testing.expectEqualSlices(u8, expected_marshal.slice(), out.bytes[19 .. 19 + expected_marshal.len]);
 }
 
