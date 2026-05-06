@@ -197,7 +197,12 @@ pub fn compile(
     }
     try buf.appendSlice(allocator, inst.encMovRR(.q, .rbp, .rsp).slice());
     if (uses_runtime_ptr) {
-        try buf.appendSlice(allocator, inst.encMovRR(.q, .r15, .rdi).slice());
+        // MOV R15, <entry_arg0> — entry shim's runtime_ptr snapshot.
+        // Cc-pivot per ADR-0026: SysV passes *const JitRuntime in
+        // RDI; Win64 in RCX. Both encodings are 3 bytes (REX.W+B
+        // + opcode + modrm) so the prologue's frame-bytes formula
+        // stays Cc-agnostic.
+        try buf.appendSlice(allocator, inst.encMovRR(.q, abi.current.runtime_ptr_save_gpr, abi.current.entry_arg0_gpr).slice());
     }
     if (frame_bytes > 0) {
         try buf.appendSlice(allocator, inst.encSubRSpImm8(@intCast(frame_bytes)).slice());
@@ -696,11 +701,12 @@ fn emitCall(
 
     try marshalCallArgs(allocator, buf, alloc, pushed_vregs, callee_sig);
 
-    // Restore RDI = runtime_ptr from R15 before transferring
-    // control. The callee's prologue captures RDI into its own
-    // R15 (per ADR-0026). RDI is caller-saved in SysV §3.2.1
-    // and may have been clobbered by an earlier call.
-    try buf.appendSlice(allocator, inst.encMovRR(.q, .rdi, abi.runtime_ptr_save_gpr).slice());
+    // Restore <entry_arg0> = runtime_ptr from R15 before
+    // transferring control. The callee's prologue captures arg0
+    // into its own R15 (per ADR-0026). entry_arg0 is caller-
+    // saved in both SysV (RDI) and Win64 (RCX) and may have been
+    // clobbered by an earlier call.
+    try buf.appendSlice(allocator, inst.encMovRR(.q, abi.current.entry_arg0_gpr, abi.runtime_ptr_save_gpr).slice());
 
     // CALL placeholder; linker patches via call_fixups once
     // function-body offsets are known.
@@ -1993,16 +1999,18 @@ fn marshalCallArgs(
         arg_vregs[i] = pushed_vregs.pop().?;
     }
 
-    // SysV arg slot 0 is RDI (runtime_ptr) — skip; user args
-    // start at slot 1 (RSI). arg_gprs[1..6] = RSI, RDX, RCX, R8, R9.
+    // arg_gprs slot 0 carries `*const JitRuntime` (RDI on SysV,
+    // RCX on Win64) — skip; user args start at slot 1.
+    //   SysV: arg_gprs[1..6] = RSI, RDX, RCX, R8, R9 (5 user GPRs)
+    //   Win64: arg_gprs[1..4] = RDX, R8, R9 (3 user GPRs)
     var gpr_arg_slot: usize = 1;
     var k: u32 = 0;
     while (k < n_args) : (k += 1) {
         const src_vreg = arg_vregs[k];
         switch (callee_sig.params[k]) {
             .i32 => {
-                if (gpr_arg_slot >= abi.arg_gprs.len) return Error.UnsupportedOp;
-                const dst = abi.arg_gprs[gpr_arg_slot];
+                if (gpr_arg_slot >= abi.current.arg_gprs.len) return Error.UnsupportedOp;
+                const dst = abi.current.arg_gprs[gpr_arg_slot];
                 const src = abi.slotToReg(alloc.slots[src_vreg]) orelse return Error.SlotOverflow;
                 if (src != dst) {
                     try buf.appendSlice(allocator, inst.encMovRR(.d, dst, src).slice());
@@ -2988,8 +2996,24 @@ test "compile: (i32.const 0) i32.load offset=0 end — ADR-0026 prologue + bound
     //
     // Total length: 82 bytes (spec-strict bounds adds 4-byte LEA before CMP).
     try testing.expectEqual(@as(usize, 82), out.bytes.len);
-    // Spot-check the prologue (verifies ADR-0026 structure):
-    try testing.expectEqualSlices(u8, &.{ 0x55, 0x41, 0x57, 0x48, 0x89, 0xE5, 0x49, 0x89, 0xFF, 0x48, 0x83, 0xEC, 0x08 }, out.bytes[0..13]);
+    // Spot-check the prologue (verifies ADR-0026 structure).
+    // The MOV R15, <entry_arg0> byte differs by Cc; derive the
+    // expected sequence dynamically so this works on both SysV
+    // and Win64 builds.
+    const exp_push_rbp = inst.encPushR(.rbp);
+    const exp_push_r15 = inst.encPushR(.r15);
+    const exp_mov_rbp_rsp = inst.encMovRR(.q, .rbp, .rsp);
+    const exp_mov_r15_arg0 = inst.encMovRR(.q, abi.current.runtime_ptr_save_gpr, abi.current.entry_arg0_gpr);
+    const exp_sub_rsp_8 = inst.encSubRSpImm8(8);
+    var exp_prologue: [13]u8 = undefined;
+    var off: usize = 0;
+    @memcpy(exp_prologue[off .. off + exp_push_rbp.len], exp_push_rbp.slice()); off += exp_push_rbp.len;
+    @memcpy(exp_prologue[off .. off + exp_push_r15.len], exp_push_r15.slice()); off += exp_push_r15.len;
+    @memcpy(exp_prologue[off .. off + exp_mov_rbp_rsp.len], exp_mov_rbp_rsp.slice()); off += exp_mov_rbp_rsp.len;
+    @memcpy(exp_prologue[off .. off + exp_mov_r15_arg0.len], exp_mov_r15_arg0.slice()); off += exp_mov_r15_arg0.len;
+    @memcpy(exp_prologue[off .. off + exp_sub_rsp_8.len], exp_sub_rsp_8.slice()); off += exp_sub_rsp_8.len;
+    try testing.expectEqual(@as(usize, 13), off);
+    try testing.expectEqualSlices(u8, &exp_prologue, out.bytes[0..13]);
     // Spot-check the JA placeholder is patched (disp = 15 = 0x0F): JA = 0x0F 0x87 at byte 40.
     try testing.expectEqualSlices(u8, &.{ 0x0F, 0x87, 0x0F, 0x00, 0x00, 0x00 }, out.bytes[40..46]);
     // Spot-check trap stub starts at 61 with the trap_flag store:
@@ -3685,7 +3709,10 @@ test "compile: call N — 0 args, void return — emits MOV RDI,R15 + CALL + fix
     // Body starts at byte 13.
     //   MOV RDI, R15    4c 89 ff        (3 bytes) → 16
     //   CALL rel32      e8 00 00 00 00  (5 bytes) → 21
-    const expected_mov = inst.encMovRR(.q, .rdi, .r15);
+    // Cc-pivot: assert MOV <entry_arg0>, R15 (RDI on SysV, RCX
+    // on Win64). encMovRR length is 3 in both cases (only modrm
+    // byte differs); the call-fixup byte offset stays at 16.
+    const expected_mov = inst.encMovRR(.q, abi.current.entry_arg0_gpr, abi.current.runtime_ptr_save_gpr);
     try testing.expectEqualSlices(u8, expected_mov.slice(), out.bytes[13 .. 13 + expected_mov.len]);
     const expected_call = inst.encCallRel32(0);
     try testing.expectEqualSlices(u8, expected_call.slice(), out.bytes[16 .. 16 + expected_call.len]);

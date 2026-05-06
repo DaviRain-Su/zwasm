@@ -283,11 +283,38 @@ pub const win64 = struct {
 
     /// Allocatable GPRs under Win64. Two more than SysV because
     /// RDI + RSI are callee-saved here (caller-saved on SysV).
-    /// Order mirrors `allocatable_gprs`: caller-saved scratch
-    /// first (R10, R11), then callee-saved (RBX, RDI, RSI, R12,
-    /// R13, R14). RBP is the frame pointer; R15 is the reserved
+    /// **Order intentionally mirrors SysV for slots 0..5** so a
+    /// codegen pass that uses ≤ 6 slots produces identical
+    /// register choices under both ABIs (lets Mac-host byte-
+    /// level emit tests stay encoding-stable when the build
+    /// target switches). Slots 6/7 add RDI/RSI as a Win64-only
+    /// extension. RBP is the frame pointer; R15 is the reserved
     /// runtime-ptr-save register.
-    pub const allocatable_gprs = [_]Gpr{ .r10, .r11, .rbx, .rdi, .rsi, .r12, .r13, .r14 };
+    pub const allocatable_gprs = [_]Gpr{ .r10, .r11, .rbx, .r12, .r13, .r14, .rdi, .rsi };
+};
+
+// ============================================================
+// Compile-time selected current Cc + alias namespace
+// ============================================================
+
+const builtin = @import("builtin");
+
+/// The active calling convention for this zwasm build, selected
+/// at compile time per ADR-0026 line 229-232. emit.zig consumes
+/// `abi.current.X` to produce ABI-correct prologue / call-site
+/// marshalling without any runtime branch.
+pub const current_cc: Cc = switch (builtin.target.os.tag) {
+    .windows => .win64,
+    else => .sysv,
+};
+
+/// Alias to the active Cc's table namespace. Use as
+/// `abi.current.entry_arg0_gpr`, `abi.current.arg_gprs`, etc.
+/// On macOS / Linux / BSD targets this points at `sysv`; on
+/// Windows targets at `win64`.
+pub const current = switch (current_cc) {
+    .sysv => sysv,
+    .win64 => win64,
 };
 
 // Compile-time invariants for the Win64 pool — same shape as
@@ -490,4 +517,35 @@ test "win64.allocatable_gprs adds RDI+RSI vs SysV (8 regs vs 6)" {
     // Win64's broader callee-saved set yields 2 more allocatable
     // GPRs (RDI, RSI promoted from caller-saved → callee-saved).
     try testing.expectEqual(@as(usize, 8), win64.allocatable_gprs.len);
+}
+
+test "win64.allocatable_gprs slots 0..5 mirror SysV (cross-Cc test stability)" {
+    // Slot 0..5 must agree byte-for-byte with SysV so tests that
+    // exercise ≤ 6 slots produce identical encodings under both
+    // ABIs. RDI/RSI are appended as slots 6 / 7.
+    try testing.expectEqual(allocatable_gprs[0], win64.allocatable_gprs[0]);
+    try testing.expectEqual(allocatable_gprs[5], win64.allocatable_gprs[5]);
+    try testing.expectEqual(Gpr.rdi, win64.allocatable_gprs[6]);
+    try testing.expectEqual(Gpr.rsi, win64.allocatable_gprs[7]);
+}
+
+test "current_cc matches the build target (.windows → .win64; else → .sysv)" {
+    const expected: Cc = switch (builtin.target.os.tag) {
+        .windows => .win64,
+        else => .sysv,
+    };
+    try testing.expectEqual(expected, current_cc);
+}
+
+test "current.entry_arg0_gpr and runtime_ptr_save_gpr match the active Cc" {
+    switch (current_cc) {
+        .sysv => {
+            try testing.expectEqual(Gpr.rdi, current.entry_arg0_gpr);
+            try testing.expectEqual(Gpr.r15, current.runtime_ptr_save_gpr);
+        },
+        .win64 => {
+            try testing.expectEqual(Gpr.rcx, current.entry_arg0_gpr);
+            try testing.expectEqual(Gpr.r15, current.runtime_ptr_save_gpr);
+        },
+    }
 }
