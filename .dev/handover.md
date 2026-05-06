@@ -14,28 +14,26 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `67eb894`):
+直近 commit (HEAD = `8874bbb`):
 
-- `67eb894` §9.7 / 7.5-block-result-deadcode (liveness tolerant pop; OperandStackUnderflow 解消)
+- `8874bbb` §9.7 / 7.5-return-op (ARM64 `return`; epilogue 共有 B-fixup; 5→6)
+- `67eb894` §9.7 / 7.5-block-result-deadcode (liveness tolerant)
 - `3253a68` §9.7 / 7.5-fp-params (V0..V7 STR S/D)
-- `953eedf` §9.7 / 7.5-i64-params (i64 + STR X; D-033 filed)
-- `d286cbc` §9.7 / 7.5-nop (nop op)
-- `7745172` §9.7 / 7.5-jit-compile-diag (per-func stderr log)
-- `461cc1a` §9.7 / 7.5-drop-unreachable (drop + unreachable)
+- `953eedf` §9.7 / 7.5-i64-params (D-033 filed)
+- `d286cbc` §9.7 / 7.5-nop
+- `7745172` §9.7 / 7.5-jit-compile-diag
 
-**Active task**: block-result-deadcode landed (liveness が dead-code
-を tolerant に処理; labels.0 / unreachable.0 の OperandStackUnderflow
-解消 → 別の deeper gap に shift)。**Diagnostic 後の残 fails (5/12)**:
-- local_get/set.0 — SlotOverflow @ func[9] params=5 (regalloc pool 枯渇)
-- unreachable.0 func[20] — AllocationMissing (post-liveness fix で新
-  surface; emit-side stack underflow が候補)
-- switch.0 func[0] — `return` op 未実装
-- nop.0 func[9] / unwind.0 func[1] / labels.0 func[10] — deeper UnsupportedOp
+**Active task**: return-op landed (6/12; switch.0 clears)。
+**Diagnostic 後の残 fails (6/12)**:
+- local_get/set.0 — SlotOverflow @ func[9] params=5 (regalloc pool)
+- unreachable.0 func[20] — AllocationMissing (emit-side dead-code
+  pop が候補; liveness 側だけ fix 済)
+- nop.0 / unwind.0 / labels.0 — deeper UnsupportedOp
 
-**NEXT** = `7.5-return-op` (wasm `return` op を arm64 emit に追加。
-`unreachable` と類似の B-fixup pattern + 関数末尾の epilogue へ
-jump。result marshal は end ハンドラと共有するため refactor 必要)。
-これで switch.0 func[0] が unblock 見込み。
+**NEXT** = `7.5-emit-deadcode` (emit.zig の `pushed_vregs.pop` を
+liveness と同じく tolerant 化; AllocationMissing at unreachable.0
+の解消候補)。並行で SlotOverflow → 7.5-spill-enable または regalloc
+pool 拡張、UnsupportedOp は per-func 詳細調査に進む。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -69,7 +67,8 @@ jump。result marshal は end ハンドラと共有するため refactor 必要)
 | 7.5-i64-params | arm64/emit.zig:134 の i64 param 受け入れ + prologue STR X (64-bit) | DONE (953eedf; 5/12; D-033 filed) |
 | 7.5-fp-params | f32/f64 params (V0..V7 → STR S/D scalar マーシャル) | DONE (3253a68; 5/12) |
 | 7.5-block-result-deadcode | liveness の pop site を tolerant 化 (dead-code zone で no-op) | DONE (67eb894; OSU 解消) |
-| 7.5-return-op | wasm `return` op (mid-function early exit) | **NEXT** |
+| 7.5-return-op | wasm `return` op (mid-function early exit; B-fixup → epilogue) | DONE (8874bbb; 6/12) |
+| 7.5-emit-deadcode | emit.zig の `pushed_vregs.pop` を tolerant 化 (liveness 修正の emit mirror) | **NEXT** |
 | 7.5-spill-enable | regalloc pool 枯渇時に spill を enable (5+ params で SlotOverflow 解消) | pending |
 | 7.5-local-type-aware | local.get/set/tee の width を declared type 別に (D-033 discharge) | pending |
 | 7.5-spec-assertion-driver | wast2json で spec corpus を `.wasm` + assertion manifest 化 → JIT 経由で execute → pass/fail counts | pending |
@@ -102,6 +101,7 @@ zone placement / "constant overhead" / WASI prereq 等)。
 
 ## Recently closed (full history via `git log --oneline`)
 
+- §9.7 / 7.5-return-op (8874bbb): ARM64 emit に `return` op を追加。result marshal は end-handler の logic を inline 複製、その後 unconditional B placeholder を `return_fixups` に append。end-handler は frame teardown の byte offset (`epilogue_byte`) を capture し、return_fixups を全部 patch。trap stub は別 mechanism で従来通り。spec-jit-compile 5→6 (switch.0 clears via `return`)。
 - §9.7 / 7.5-block-result-deadcode (67eb894): `ir/analysis/liveness.zig` の pop site (if cond / br_if cond / call args / generic op pops) を「sim_len > 0 のとき pop、empty なら no-op」に変更。Wasm spec §3.3 polymorphic-stack の dead-code 領域で validator が既に shape を保証しているため、liveness は dead pop を tolerant にしてよい。push 側の max-stack overflow check は実 buffer 制約のため error のまま維持。labels.0 / unreachable.0 の OperandStackUnderflow が解消し別 gap (UnsupportedOp / AllocationMissing) に shift。
 - §9.7 / 7.5-fp-params (3253a68): arm64/emit.zig:134 の reject を f32/f64 にも開放; prologue を type-aware AAPCS64 multi-class marshalling に拡張 (independent int_arg_idx / fp_arg_idx counters)。inst.zig に `encStrSImm` / `encStrDImm` を追加。Mixed-sig (i32 f32 i64 f64) byte-level test を 1 つ追加。spec-jit-compile pass count 据え置き 5/12 だが local_get/set.0 が UnsupportedOp → SlotOverflow に shift (regalloc pool 5-param 枯渇; 別 chunk で対応)。
 - §9.7 / 7.5-i64-params (953eedf): arm64/emit.zig:134 の reject を i64 にも開放; prologue の per-param STR を type-aware (i32→STR W / i64→STR X) に分岐。AAPCS64 §6.4 (i32 args の上位 32-bit は undefined) 準拠で i32 の STR W は load-bearing。f32/f64 はまだ UnsupportedOp。Test 修正 (旧「i64 param surfaces UnsupportedOp」を「STR X width 検証」に置換)。**D-033 filed**: local.get/set/tee は 32-bit 固定で i64 silent truncate — 7.5 完了前に discharge 必要。
