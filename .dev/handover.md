@@ -14,26 +14,23 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `217c214`):
+直近 commit (HEAD = `818e5a8`):
 
-- `217c214` §9.7 / 7.5-spec-jit-compile-runner (corpus walker + build step; 1/12 pass; surfaces 11 gaps)
+- `818e5a8` §9.7 / 7.5-empty-module-fix (compileWasm + linker.link が 0-function modules を accept; 1/12 → 2/12)
+- `217c214` §9.7 / 7.5-spec-jit-compile-runner (corpus walker; 1/12 pass; surfaces 11 gaps)
 - `3e33ead` chore(p7): audit catch-up — flip §9.7 / 7.3 / 7.4 / 7.6 [x]
 - `884d7d8` chore(p7): mark §9.7 / 7.7 [x]
-- `cd81b8e` docs(workflow): propagate parallel-bg + file-logged gate rule
-- `6e935c9` / `0789c6e` §9.7 / 7.7-cc-pivot-shadow-space
-- `68675d4` §9.7 / 7.7-cc-pivot-emit
-- `219d461` §9.7 / 7.7-deferred-Win64
+- `cd81b8e` docs(workflow): parallel-bg + file-logged gate rule
+- `0789c6e` / `6e935c9` §9.7 / 7.7-cc-pivot-shadow-space
 
-**Active task**: spec-jit-compile-runner landed; surfaces 11 fails
-on `test/spec/{smoke,wasm-1.0}/`. **Top root cause**: 10/11 fails
-are `arm64/emit.zig:134 "func.sig.params.len > 0 → UnsupportedOp"`
-— spec fixtures pervasively use parameterised functions. **NEXT**
-= `7.5-empty-module-fix` (smallest first: lift `compileWasm`'s
-unconditional `Error.MissingTypeSection` so 0-function modules
-compile through trivially; closes 1/11). Then `7.5-multi-arg-entry`
-(unblocks the 10 multi-arg fails — bigger; multi-step including
-ARM64 + x86_64 prologue pivot, JitRuntime arg layout, entry shim
-parametric dispatch). Then assertion-driven JIT spec runner.
+**Active task**: empty-module-fix landed (2/12 pass on
+test-spec-jit-compile)。残り 10/12 fail はすべて `arm64/emit.zig:134
+"func.sig.params.len > 0 → UnsupportedOp"`。 **NEXT** =
+`7.5-multi-arg-entry` (ARM64 emit prologue が AAPCS64 arg regs
+X0..X7 を local slot にマーシャルするよう拡張 + entry shim を
+parametric dispatch + x86_64 mirror)。これで spec-jit-compile が
+12/12 pass になる見込み。続いて assertion-driven JIT spec runner
+(wast2json corpus + execute path)。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -57,8 +54,8 @@ parametric dispatch). Then assertion-driven JIT spec runner.
 | # | Chunk | Status |
 |---|---|---|
 | 7.5-jit-compile-runner | corpus walker; `zig build test-spec-jit-compile`; 1/12 pass | DONE (217c214) |
-| 7.5-empty-module-fix | `compileWasm` を 0-function modules で MissingTypeSection を返さず空 CompiledWasm を返すよう緩和 | **NEXT** |
-| 7.5-multi-arg-entry | ARM64 + x86_64 emit prologue + entry shim を multi-arg signature 対応 (`emit.zig:134` の params reject を解除) | pending |
+| 7.5-empty-module-fix | `compileWasm` + `linker.link` が 0-function modules を accept | DONE (818e5a8; 2/12 pass) |
+| 7.5-multi-arg-entry | ARM64 + x86_64 emit prologue + entry shim を multi-arg signature 対応 (`emit.zig:134` の params reject を解除) | **NEXT** |
 | 7.5-spec-assertion-driver | wast2json で spec corpus を `.wasm` + assertion manifest 化 → JIT 経由で execute → pass/fail counts | pending |
 | 7.5-trap-reason-channel | trap_flag を `enum TrapReason` に拡張 (assert_trap reason discrimination) | pending (ADR-0028 / Diagnostic M3) |
 
@@ -89,6 +86,7 @@ zone placement / "constant overhead" / WASI prereq 等)。
 
 ## Recently closed (full history via `git log --oneline`)
 
+- §9.7 / 7.5-empty-module-fix (818e5a8): `compileWasm` が `function` section absent のとき空 CompiledWasm を返す + `linker.link` が 0-body case で empty JitModule を返す。inline test (8-byte header → 0 sigs / 0 results) 追加。jit-compile-runner: 1→2 passed (empty.wasm clears)。残り 10 fails はすべて multi-arg UnsupportedOp。
 - §9.7 / 7.5-spec-jit-compile-runner (217c214): `test/spec/jit_compile_runner.zig` + `zig build test-spec-jit-compile` build step。`test/spec/{smoke,wasm-1.0}/` 12 fixtures を `engine.runner.compileWasm` でぶん回す。1/12 pass; 11/12 fail のうち 10/11 は arm64/emit.zig:134 の params-len reject、1/11 は empty.wasm の MissingTypeSection。test-all 未追加 (Mac aarch64 only)。
 - §9.7 / 7.7-cc-pivot-shadow-space (0789c6e + 6e935c9): emit.zig 直接/間接 CALL 両方を `emitShadowAlloc` / `emitShadowFree` で wrap (Win64 32-byte; SysV no-op)。byte-offset 計算で imm value (32) と SUB encoding length (4) を取り違えていた initial bug は 6e935c9 で修正。LOOP/SKILL/CLAUDE.md に並列バックグラウンド + ファイル出力 + 再実行禁止のルールを伝搬 (cd81b8e)。
 - §9.7 / 7.7-cc-pivot-emit (68675d4 + cfa5d04): `current_cc` + `current` alias を abi.zig に追加 (compile-time switch on `builtin.target.os.tag`); emit.zig が prologue / call-site で `abi.current.entry_arg0_gpr` + `abi.current.arg_gprs` を読む; win64.allocatable_gprs は slots 0..5 を SysV と同一順序にして cross-Cc test stability を確保; 3 abi tests + 1 emit test fix-up。
