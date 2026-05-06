@@ -14,18 +14,20 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `5746f2b`):
+直近 commit (HEAD = `3bd3b61`):
 
-- `5746f2b` feat(p7): §9.7 / 7.5-close-d042 — validator wired into compileWasm (D-042 closed; **§9.7 / 7.5 → [x]**)
+- `3bd3b61` fix(p7): §9.7 / 7.8 — revert spec_assert x86_64 wiring; linker is arm64-only
+- `c64f88c` feat(p7): §9.7 / 7.8 — extend test-all spec_assert wiring to x86_64 hosts (REVERTED)
+- `0925134` feat(p7): §9.7 / 7.8 — comptime arch dispatch in compile.zig (arm64 / x86_64)
+- `5746f2b` feat(p7): §9.7 / 7.5-close-d042 — validator wired into compileWasm (**§9.7 / 7.5 → [x]**)
 - `24e6c23` chore(p7,debt,lessons): D-042 root-cause investigation — validator dead code in compileOne
-- `fedae43` feat(p7): §9.7 / 7.5-close-mta — 5-arg dispatch (181→185; skip-impl 31→27)
-- `db0dd0a` feat(p7): §9.7 / 7.5-close-skip-adr — text-format-parser scope-out (51→31 skip-impl)
-- `f103209` feat(p7): §9.7 / 7.5-close-a — assert_invalid directive (159→181)
 
-**Phase status**: §9.7 / 7.5 → **[x]** 完了 🎉 (spec_assert
-212/0/20 = 0 skip-impl + 20 skip-adr per ADR-0029)。spec-jit-
-compile 12/12。Phase 7 残 row = 7.8 / 7.9 / 7.10 / 7.11 🔒 /
-7.12 / 7.13 🔒。
+**Phase status**: §9.7 / 7.5 → **[x]** 完了 (spec_assert
+212/0/20 on Mac aarch64)。Phase 7 残 row = 7.8 / 7.9 / 7.10 /
+7.11 🔒 / 7.12 / 7.13 🔒。§9.7 / 7.8 (x86_64 spec gate) は
+compile.zig 側の arch dispatch 完了済み; linker.zig がまだ
+arm64-only で CallFixup 型不一致が起きるため D-044 として
+filed。
 7.5 / 7.8 / 7.9 / 7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。
 D-030 / D-035 / D-036 / D-037 / D-038 / D-040 closed。
 次は §9.7 / 7.5 close (94 skips 分類) → 7.8 (x86_64 spec gate)。
@@ -142,7 +144,9 @@ multi-value 修正後に再評価(関連する semantic 解釈が変わる可能
 | 7.5-close-skip-adr | skip-adr-text-format-parser; 20 skip-impl → skip-adr (51→31) | DONE (db0dd0a) |
 | 7.5-close-mta | runner 5-arg dispatch (+4 PASS; D-041 mta bucket discharged) | DONE (fedae43) |
 | 7.5-close-d042 | validator wired into compileWasm (212/0/20 = 0 skip-impl + 20 skip-adr; **§9.7 / 7.5 → [x]**) | DONE (5746f2b) |
-| 7.8         | x86_64 spec gate (Linux + Windows hosts) — spec_assert wiring + pass=fail=skip-impl=0 | **NEXT** |
+| 7.8-arch-compile | comptime arch dispatch in `compile.zig` (arm64 / x86_64) | DONE (0925134) |
+| 7.8-arch-linker | port linker.zig to comptime arch dispatch + extract per-arch patchCallFixup; D-044 | **NEXT** |
+| 7.8-x86_64-spec-gate | re-enable spec_assert x86_64 wiring after D-044; pass=fail=skip-impl=0 on Linux + Windows | pending (blocked-by D-044) |
 | 7.5-close | §9.7 / 7.5 row → [x] (after a-d landing) | pending |
 | 7.5-d035-b | multi-value blocks — emit-side merge_top_vreg → []u32 | pending |
 | 7.5-d038 | emitEndIntra spill-staging residual (chunk-d037-a leftover; BASELINE 2→0) | pending |
