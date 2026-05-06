@@ -1,12 +1,12 @@
 module local_get.0.wasm
 assert_return type-local-i32 () -> i32:0
 assert_return type-local-i64 () -> i64:0
-skip non-int-result type-local-f32
-skip non-int-result type-local-f64
+assert_return type-local-f32 () -> f32:0
+assert_return type-local-f64 () -> f64:0
 assert_return type-param-i32 i32:2 -> i32:2
 assert_return type-param-i64 i64:3 -> i64:3
-skip non-int-result type-param-f32
-skip non-int-result type-param-f64
+assert_return type-param-f32 f32:1082969293 -> f32:1082969293
+assert_return type-param-f64 f64:4617878467915022336 -> f64:4617878467915022336
 assert_return as-block-value i32:6 -> i32:6
 assert_return as-loop-value i32:7 -> i32:7
 assert_return as-br-value i32:8 -> i32:8
@@ -17,7 +17,7 @@ assert_return as-return-value i32:0 -> i32:0
 assert_return as-if-then i32:1 -> i32:1
 assert_return as-if-else i32:0 -> i32:0
 skip more-than-2-args type-mixed
-skip non-int-result read
+skip more-than-2-args read
 skip directive-assert_invalid
 skip directive-assert_invalid
 skip directive-assert_invalid

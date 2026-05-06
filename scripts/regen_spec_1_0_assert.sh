@@ -100,10 +100,11 @@ for c in d['commands']:
             lines.append(f'skip non-int-arg {a["field"]}')
             continue
         # 7.5-close-c1: void-result (`expected: []`) flows through
-        # via callVoid* helpers. Per ADR-0029 still skip-impl until
-        # the runner side dispatches on len(results)==0, but the
-        # regen no longer rejects it at this stage.
-        if len(results) > 1 or any(r['type'] not in ('i32', 'i64') for r in results):
+        # via callVoid* helpers. 7.5-close-c2: f32/f64 single
+        # results flow through via callF32* / callF64* helpers.
+        # Multi-result (Wasm 2.0) still skip-impl pending runner
+        # extension.
+        if len(results) > 1 or any(r['type'] not in ('i32', 'i64', 'f32', 'f64') for r in results):
             lines.append(f'skip non-int-result {a["field"]}')
             continue
         if len(args) > 2:
