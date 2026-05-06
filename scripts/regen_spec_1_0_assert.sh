@@ -127,16 +127,25 @@ for c in d['commands']:
             continue
         args_s = ' '.join(fmt(x) for x in args) if args else '()'
         lines.append(f'assert_trap {a["field"]} {args_s}')
+    elif t == 'assert_invalid':
+        # 7.5-close-a: well-formed-but-type-checking-failure cases.
+        # Runner expects compileWasm to reject; matching the spec
+        # `text` reason verbatim is fragile (zwasm validator
+        # phrasing differs from upstream), so we drop it for now —
+        # any rejection counts as PASS.
+        lines.append(f'assert_invalid {c["filename"]}')
     else:
         lines.append(f'skip directive-{t}')
 with open(dst, 'w') as f:
     f.write('\n'.join(lines) + '\n')
 PY
 
-  # Copy referenced .wasm files only.
+  # Copy referenced .wasm files only (both `module ` directive
+  # and `assert_invalid ` per 7.5-close-a — the latter references
+  # malformed .wasm fixtures that the runner reads + validates).
   while read -r line; do
     set -- $line
-    if [ "$1" = "module" ]; then
+    if [ "$1" = "module" ] || [ "$1" = "assert_invalid" ]; then
       cp "$TMP/$2" "$out_dir/"
     fi
   done < "$out_dir/manifest.txt"

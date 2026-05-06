@@ -18,19 +18,19 @@ assert_return as-if-then i32:1 -> i32:1
 assert_return as-if-else i32:0 -> i32:0
 skip more-than-2-args type-mixed
 skip more-than-2-args read
-skip directive-assert_invalid
-skip directive-assert_invalid
-skip directive-assert_invalid
-skip directive-assert_invalid
-skip directive-assert_invalid
-skip directive-assert_invalid
-skip directive-assert_invalid
-skip directive-assert_invalid
-skip directive-assert_invalid
-skip directive-assert_invalid
-skip directive-assert_invalid
-skip directive-assert_invalid
-skip directive-assert_invalid
-skip directive-assert_invalid
-skip directive-assert_invalid
-skip directive-assert_invalid
+assert_invalid local_get.1.wasm
+assert_invalid local_get.2.wasm
+assert_invalid local_get.3.wasm
+assert_invalid local_get.4.wasm
+assert_invalid local_get.5.wasm
+assert_invalid local_get.6.wasm
+assert_invalid local_get.7.wasm
+assert_invalid local_get.8.wasm
+assert_invalid local_get.9.wasm
+assert_invalid local_get.10.wasm
+assert_invalid local_get.11.wasm
+assert_invalid local_get.12.wasm
+assert_invalid local_get.13.wasm
+assert_invalid local_get.14.wasm
+assert_invalid local_get.15.wasm
+assert_invalid local_get.16.wasm
