@@ -14,26 +14,25 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `d6bc382`):
+直近 commit (HEAD = `ed2d7fa`):
 
-- `d6bc382` §9.7 / 7.5-spec-assertion-driver-q (FP pool widening; **spec-jit-compile 12/12 PASS**; D-034 closed)
+- `ed2d7fa` §9.7 / 7.5-spec-assertion-driver-r (corpus expansion attempt; D-035 filed for multi-value blocks)
+- `d6bc382` §9.7 / 7.5-spec-assertion-driver-q (FP pool widening; spec-jit-compile 12/12; D-034 closed)
 - `7a8dcb6` §9.7 / 7.5-spec-assertion-driver-p (D-034 chain extends)
 - `4f3cd36` §9.7 / 7.5-spec-assertion-driver-o (regalloc/abi pool mismatch fix)
-- `bfd9b70` §9.7 / 7.5-spec-assertion-driver-n (D-034 memory+convert; ~40 ops)
 
-**Active task**: spec-assertion-driver-q landed。`resolveFp` を
-`fpSlotToReg` 経由で直接読むように shim — FP pool が 15 entries
-あるので id 0..14 を reg として扱う (id ≥ 15 のみ spill)。
-"mixing caveat" は abi.zig が既に documented (slot ids per-class)。
-**spec-jit-compile-runner: 12/0** — long-standing 2 fails 解消。
-**D-034 closed** (debt entry remove)。tests 1027/1032 / 95/0/0
-据え置き。
+**Active task**: spec-assertion-driver-r landed (investigation)。
+spec_assert NAMES に `block`/`br_if`/`select`/`switch`/`return`
+を追加 → `block.0.wasm` が `BadBlockType` で compile 失敗。
+`validator.readBlockType` が Wasm 1.0 simple blocktype のみ対応、
+multi-value block (Wasm 2.0) を拒否。**D-035 filed** で discharge
+plan を documented (parser/validator/emit の 3-phase work)。
+NAMES revert; spec_assert 95/0/0 維持。
 
-**NEXT** = `7.5-spec-assertion-driver-r` (spec-jit-compile 12/12 を
-spec-assert pipeline 経由で execute・assert に拡張; 真の "spec
-test pass=fail=skip=0" 達成への chain。あるいは別軸: §9.7 / 7.6
-以降の row close 着手)。chunk-q が大きな milestone — §9.7 / 7.5
-の中核問題は解消した。
+**NEXT** = `7.5-spec-assertion-driver-s` (D-035 discharge — Wasm
+2.0 multi-value block support; parser typeidx-blocktype path +
+validator multi-result resolve + emit merge extension)。あるいは
+別軸 (§9.7 / 7.8 spec-test x86_64 着手 or 既存 row close 着手)。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -96,7 +95,8 @@ test pass=fail=skip=0" 達成への chain。あるいは別軸: §9.7 / 7.6
 | 7.5-spec-assertion-driver-o | regalloc/abi pool mismatch root cause + fix | DONE (4f3cd36) |
 | 7.5-spec-assertion-driver-p | D-034 chain (globals/control/select/call/local.get + partial FP) | DONE (7a8dcb6) |
 | 7.5-spec-assertion-driver-q | FP pool widening (resolveFp shim); spec-jit-compile 12/12; D-034 closed | DONE (d6bc382) |
-| 7.5-spec-assertion-driver-r | execute-side coverage (12/12 compile を spec_assert で全 fixture run) または §9.7 / 7.6+ への pivot | **NEXT** |
+| 7.5-spec-assertion-driver-r | corpus expand attempt; D-035 filed (Wasm 2.0 multi-value block) | DONE (ed2d7fa) |
+| 7.5-spec-assertion-driver-s | D-035 discharge (multi-value block parser/validator/emit) もしくは §9.7 / 7.8 着手 | **NEXT** |
 | 7.5-trap-reason-channel | trap_flag を `enum TrapReason` に拡張 (assert_trap reason discrimination) | pending (ADR-0028 / Diagnostic M3) |
 
 ADR-0019 phase plan post-7.6: 7.7 emit.zig, 7.8 spec gate (Linux
