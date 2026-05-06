@@ -14,35 +14,32 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `0324b88`):
+直近 commit (HEAD = `f1c3ce3`):
 
+- `f1c3ce3` feat(p7): §9.7 / 7.5-d036 — class-aware regalloc Allocation (D-036 close)
+- `4a74291` chore(p7): audit fixes — Phase 8 readiness drivers (ADR-0029 + Step 0.5/0.6 + debts)
 - `0324b88` chore(p7): Phase 8 readiness scaffolding (spec_citation rule + spill_aware_check + dep-DAG gate)
 - `bde1223` §9.7 / 7.5-spec-assertion-driver-u (corpus expand: local_set + int_literals; 138/0/94)
-- `d1eb42a` §9.7 / 7.5-spec-assertion-driver-t (local zero-init)
-- `6c86c57` §9.7 / 7.5-spec-assertion-driver-s (debt stale-barrier review)
 
 **Phase status**: §9.7 / 7.5 IN-PROGRESS。spec-jit-compile 12/12,
 spec_assert 138/0/94。Phase 7 残 row = 7.5 / 7.8 / 7.9 / 7.10 /
-7.11 🔒 / 7.12 / 7.13 🔒。
+7.11 🔒 / 7.12 / 7.13 🔒。D-036 closed (Track A root); D-037 が
+now で次の active chunk。
 
 **Active priority — Phase 7→8 transition gate prep** (per
-`phase8_transition_gate.md` §3a deferred-work DAG)。chunk -u 後、
-spec-assertion-driver chain は corpus expansion を続けても
-diminishing return が見える(local_tee は semantic gap が深く、
-他は SKIP 多い)。pre-gate work に重心を移す:
+`phase8_transition_gate.md` §3a deferred-work DAG):
 
 **NEXT(優先順)**:
 
-1. **D-036 class-aware regalloc** (Track A root) — `max_reg_slots`
-   per-class 化。chunk-q resolveFp shim を band-aid から structural
-   に。ADR-0026 amendment 1 本で済む見込み。
-2. **D-037 FP-spill machinery** (Track A leaf, blocked-by D-036) —
-   V-class scratch + fpLoadSpilled/fpDefSpilled/fpStoreSpilled。
-   spill_aware_check BASELINE 17 → ≤ 5。
-3. **D-035 multi-value blocks** (Track B, parallel to A) — parser/
+1. **D-037 FP-spill machinery** (Track A leaf; D-036 dissolved
+   barrier) — V14/V15 を `allocatable_v_regs` から外して staging
+   reservation; `fpLoadSpilled/fpDefSpilled/fpStoreSpilled`
+   helpers (GPR mirror; `Allocation.slot(vreg, .fpr)` の `.spill`
+   arm を消費)。spill_aware_check BASELINE 17 → ≤ 5。
+2. **D-035 multi-value blocks** (Track B, parallel to A) — parser/
    validator/emit 3-phase。block.wast / br_*.wast / call.wast 等
    corpus 拡張の鍵; 7.5 "skip=0" 達成の前提。
-4. **D-030 x86_64 emit refactor** (now; 7.7 [x] で barrier dissolved)
+3. **D-030 x86_64 emit refactor** (now; 7.7 [x] で barrier dissolved)
    — Phase 7.8 (x86_64 spec gate) の prereq。
 
 これらの後で 7.8 → 7.9/7.10 → 7.11 🔒 → 7.12 → 7.13 🔒 の順。
@@ -117,8 +114,8 @@ multi-value 修正後に再評価(関連する semantic 解釈が変わる可能
 | 7.5-spec-assertion-driver-t | local zero-init + local_get.wast (108/0/22; +13 PASS) | DONE (d1eb42a) |
 | 7.5-spec-assertion-driver-u | corpus expand (local_set + int_literals; 138/0/94) | DONE (bde1223) |
 | 7.5-readiness-scaffolding | spec_citation rule + spill_aware_check + Phase 8 dep-DAG | DONE (0324b88) |
-| 7.5-d036 | class-aware regalloc (Track A root; chunk-q shim → structural) | **NEXT** |
-| 7.5-d037 | FP-spill machinery (Track A leaf; blocked-by d036) | pending |
+| 7.5-d036 | class-aware regalloc (Track A root; chunk-q shim → structural) | DONE (f1c3ce3) |
+| 7.5-d037 | FP-spill machinery (Track A leaf; D-036 unblocked) | **NEXT** |
 | 7.5-d035 | Wasm 2.0 multi-value blocks (Track B; parallel to A) | pending |
 | 7.5-d030 | x86_64 emit refactor (now; barrier dissolved by 7.7 [x]) | pending |
 | 7.5-spec-assertion-driver-v | (deferred) local_tee semantic miscompile / runner i64→i32 — re-evaluate post D-035 | deferred |

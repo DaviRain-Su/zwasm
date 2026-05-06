@@ -226,3 +226,20 @@ addressing imm12 displacement stays small for hot paths).
   gprs` pool: 9 → 8 regs (5 caller-saved scratch + 3 callee-
   saved). Spill territory begins at slot 8 (was 9). Comptime
   disjointness guards still hold. SHA: `<backfill>`
+- 2026-05-06 — **gap (class-aware boundary split per D-036)**:
+  ADR-0018 originally treated `Allocation.max_reg_slots` as a
+  single arch-wide pool size. Phase 7 / chunk-q surfaced the gap:
+  the FP pool (`allocatable_v_regs.len = 15`) is larger than the
+  GPR pool (`allocatable_gprs.len = 8`), and chunk-q's
+  `resolveFp` shim read `alloc.slots[vreg]` directly to bypass
+  the GPR threshold. Structural fix: split the boundary into
+  `max_reg_slots_gpr` (default 8) + `max_reg_slots_fp` (default
+  15); `Allocation.slot()` becomes class-aware
+  (`slot(vreg, class) -> Slot`). Spill offsets share a single
+  frame origin (`max_reg_slots_gpr`) so `spillBytes()` is
+  class-agnostic. The allocator stays class-blind (single
+  contiguous slot id space) — class-aware allocation is a
+  Phase 8 follow-up (D-036 §"option (b)"). FP-class spill
+  staging (D-037) consumes the new `.spill` arm. References
+  `lesson 2026-05-06-regalloc-pool-size-mismatch` (the symptom
+  side; this row is the structural side). SHA: `f1c3ce3`

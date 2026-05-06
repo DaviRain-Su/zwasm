@@ -46,3 +46,6 @@ are FP / call / select / float-ALU handlers (chunk -p).
 
 - discovery commit `<backfill>` (chunk -o)
 - ADR-0027 (callee-saved pool reduction)
+- structural-fix commit `f1c3ce3` (chunk-d036; class-aware
+  Allocation API; D-036 closed; band-aid removed) — paired
+  with ADR-0018 Revision history row 2026-05-06 (gap)
