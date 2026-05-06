@@ -14,23 +14,25 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `5cbf28a`):
+直近 commit (HEAD = `c347bcd`):
 
-- `5cbf28a` §9.7 / 7.5-spec-assertion-driver-b (callI32_i32i32 + handcrafted_2arg 6/6 PASS)
-- `503b5ee` §9.7 / 7.5-spec-assertion-driver-a (forward.wast 4/4)
+- `c347bcd` §9.7 / 7.5-spec-assertion-driver-c (callI64* + handcrafted_i64; 14/0/1)
+- `5cbf28a` §9.7 / 7.5-spec-assertion-driver-b (10/0/0)
+- `503b5ee` §9.7 / 7.5-spec-assertion-driver-a (forward 4/4)
 - `c95ea5e` chore: file D-034
-- `6fa1c6d` §9.7 / 7.5-deadcode-labels-bookkeeping (8→10)
 
-**Active task**: spec-assertion-driver-b landed。`callI32_i32i32`
-typed entry + tokenized arg dispatch (0/1/2 i32 args switch on
-n_args) + handcrafted 4-op fixture (add/sub/mul/and × 6 asserts)。
-spec_assert_runner: 10/0/0 (forward 4 + handcrafted 6)。
+**Active task**: spec-assertion-driver-c landed。`callI64NoArgs` /
+`callI64_i32` / `callI64_i64` typed entries + (n_args, arg-kind,
+result-kind) dispatch refactor + `handcrafted_i64` fixture。1
+SKIP は D-033 (local.get の i64 width truncation) を surface した
+もの — discharge 時に regression test として復活する。
+spec_assert_runner: 14/0/1。
 
-**NEXT** = `7.5-spec-assertion-driver-c` (i64 result shape →
-`callI64NoArgs` / `callI64_i32` typed entries; regen の result
-type gate を i64 にも開放; handcrafted_i64 fixture (i64.const +
-i64.add 等))。subsequent chunks: -d (assert_trap), -e (broader
-corpus)。SlotOverflow は D-034 として並行 hold。
+**NEXT** = `7.5-spec-assertion-driver-d` (assert_trap support →
+trap_flag が立った場合に reason 文字列と照合; 現状 `Error.Trap`
+の単 boolean だが ADR-0028 / Diagnostic M3 の trap_reason 拡張
+と統合)。subsequent: -e (broader corpus)。SlotOverflow / D-034
++ D-033 は discharge ペンディング。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -78,8 +80,8 @@ corpus)。SlotOverflow は D-034 として並行 hold。
 | 7.5-local-type-aware | local.get/set/tee の width を declared type 別に (D-033 discharge) | pending |
 | 7.5-spec-assertion-driver-a | wast2json regen + callI32_i32 + spec_assert_runner; forward.wast 4/4 PASS | DONE (503b5ee) |
 | 7.5-spec-assertion-driver-b | 2-arg i32 (callI32_i32i32) + handcrafted_2arg fixture (10/0/0) | DONE (5cbf28a) |
-| 7.5-spec-assertion-driver-c | i64 result (callI64NoArgs / callI64_i32); FP result via bit-cast | **NEXT** |
-| 7.5-spec-assertion-driver-d | assert_trap (trap_flag → reason discrimination — D-022 と連携) | pending |
+| 7.5-spec-assertion-driver-c | i64 result (callI64*); handcrafted_i64; D-033 surface | DONE (c347bcd) |
+| 7.5-spec-assertion-driver-d | assert_trap (trap_flag → reason discrimination — D-022 と連携) | **NEXT** |
 | 7.5-trap-reason-channel | trap_flag を `enum TrapReason` に拡張 (assert_trap reason discrimination) | pending (ADR-0028 / Diagnostic M3) |
 
 ADR-0019 phase plan post-7.6: 7.7 emit.zig, 7.8 spec gate (Linux
