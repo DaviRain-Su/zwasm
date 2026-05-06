@@ -1323,14 +1323,75 @@ test "compile: i64.eqz emits CMP-X-imm-0 + CSET EQ" {
     try testing.expectEqual(@as(u32, inst.encCsetW(9, .eq)),    std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
 }
 
-test "compile: function with non-empty params surfaces UnsupportedOp" {
-    const params = [_]zir.ValType{.i32};
-    const sig: zir.FuncType = .{ .params = &params, .results = &.{ .i32 } };
+// §9.7 / 7.5-multi-arg-entry: the prior version of this test
+// asserted UnsupportedOp on any params at all. Multi-arg entry
+// now accepts up to 7 i32 params via AAPCS64 X1..X7 marshalling;
+// rejects fire only on (a) non-i32 param types or (b) > 7 params.
+
+test "compile: function with > 7 i32 params surfaces UnsupportedOp" {
+    const params = [_]zir.ValType{ .i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32 };
+    const sig: zir.FuncType = .{ .params = &params, .results = &.{.i32} };
     var f = ZirFunc.init(0, sig, &.{});
     defer f.deinit(testing.allocator);
     f.liveness = .{ .ranges = &.{} };
     const empty: regalloc.Allocation = .{ .slots = &.{}, .n_slots = 0 };
     try testing.expectError(Error.UnsupportedOp, compile(testing.allocator, &f, empty, &.{}, &.{}));
+}
+
+test "compile: function with i64 param surfaces UnsupportedOp (i32 only today)" {
+    const params = [_]zir.ValType{.i64};
+    const sig: zir.FuncType = .{ .params = &params, .results = &.{.i32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    f.liveness = .{ .ranges = &.{} };
+    const empty: regalloc.Allocation = .{ .slots = &.{}, .n_slots = 0 };
+    try testing.expectError(Error.UnsupportedOp, compile(testing.allocator, &f, empty, &.{}, &.{}));
+}
+
+test "compile: (param i32) (result i32) local.get 0 — prologue stores W1 to [SP, #0]" {
+    const params = [_]zir.ValType{.i32};
+    const sig: zir.FuncType = .{ .params = &params, .results = &.{.i32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"local.get", .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+    } };
+    const slots = [_]u8{0};
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // Prologue (has_frame=true): bytes 0..36 standard. Then
+    // multi-arg STR W1, [SP, #0] at byte 36 (4 bytes). Body
+    // starts at byte 40.
+    const expected_str = inst.encStrImmW(1, 31, 0);
+    try testing.expectEqual(expected_str, std.mem.readInt(u32, out.bytes[36..][0..4], .little));
+    // Body: LDR W into the param's vreg (slot 0 → W9 by AAPCS64
+    // allocatable pool ordering).
+    const expected_ldr = inst.encLdrImmW(9, 31, 0);
+    try testing.expectEqual(expected_ldr, std.mem.readInt(u32, out.bytes[40..][0..4], .little));
+}
+
+test "compile: (param i32 i32) — prologue stores W1, W2 to [SP, #0], [SP, #8]" {
+    const params = [_]zir.ValType{ .i32, .i32 };
+    const sig: zir.FuncType = .{ .params = &params, .results = &.{.i32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"local.get", .payload = 1 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+    } };
+    const slots = [_]u8{0};
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // STR W1, [SP, #0] at byte 36; STR W2, [SP, #8] at byte 40.
+    try testing.expectEqual(inst.encStrImmW(1, 31, 0), std.mem.readInt(u32, out.bytes[36..][0..4], .little));
+    try testing.expectEqual(inst.encStrImmW(2, 31, 8), std.mem.readInt(u32, out.bytes[40..][0..4], .little));
+    // Body LDR for local.get 1 → reads from [SP, #8].
+    try testing.expectEqual(inst.encLdrImmW(9, 31, 8), std.mem.readInt(u32, out.bytes[44..][0..4], .little));
 }
 
 test "compile: i32.eqz emits CMP-imm-0 + CSET EQ" {

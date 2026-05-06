@@ -131,9 +131,26 @@ pub fn compile(
     // simple imm12 LDR/STR W addressing. Frame size rounds up to
     // 16 bytes per AAPCS64 §6.4 (SP must stay 16-byte aligned).
     // ============================================================
-    if (func.sig.params.len > 0) return Error.UnsupportedOp;
+    // Multi-arg entry (§9.7 / 7.5-multi-arg-entry):
+    // - AAPCS64 passes int args in X0..X7. X0 carries
+    //   `*const JitRuntime` per ADR-0017, so user args occupy
+    //   X1..X7 → at most 7 i32 params today.
+    // - i64 / f32 / f64 / v128 / refs surface as UnsupportedOp
+    //   until follow-up sub-chunks add per-class register
+    //   marshalling (W vs X width; V regs for FP).
+    // - Stack args (params.len > 7) likewise unsupported.
+    if (func.sig.params.len > 7) return Error.UnsupportedOp;
+    for (func.sig.params) |p| {
+        if (p != .i32) return Error.UnsupportedOp;
+    }
+    const num_params: u32 = @intCast(func.sig.params.len);
     const num_locals: u32 = @intCast(func.locals.len);
-    const locals_bytes: u32 = num_locals * 8;
+    // Wasm local-index space: 0..num_params-1 = params,
+    // num_params..num_params+num_locals-1 = declared locals.
+    // Both share the same per-slot 8-byte stack region; frame
+    // size accounts for both.
+    const total_locals: u32 = num_params + num_locals;
+    const locals_bytes: u32 = total_locals * 8;
     // ADR-0018: extend frame by spill region. Layout:
     //   [SP + 0 .. locals_bytes-1]                   locals
     //   [SP + locals_bytes .. +spill_bytes-1]        spills
@@ -181,6 +198,18 @@ pub fn compile(
     if (frame_bytes > 0) {
         if (frame_bytes >= (@as(u32, 1) << 12)) return Error.SlotOverflow;
         try gpr.writeU32(allocator, &buf, inst.encSubImm12(31, 31, @intCast(frame_bytes)));
+    }
+
+    // Multi-arg entry: store params from W1..W{num_params} into
+    // their stack slots [SP + 0], [SP + 8], … so subsequent
+    // `local.get N` (N < num_params) reads from the same slot
+    // shape as declared locals. AAPCS64 X0 = `*const JitRuntime`
+    // (already snapshotted to X19 above), X1 = param 0, etc.
+    var p_idx: u32 = 0;
+    while (p_idx < num_params) : (p_idx += 1) {
+        const param_off: u14 = @intCast(p_idx * 8);
+        const src_w: u5 = @intCast(p_idx + 1); // W1..W7
+        try gpr.writeU32(allocator, &buf, inst.encStrImmW(src_w, 31, param_off));
     }
 
     // ============================================================
@@ -377,7 +406,7 @@ pub fn compile(
                 // Push a fresh vreg holding the value loaded from
                 // [SP, #(local_idx * 8)].
                 const local_idx = ins.payload;
-                if (local_idx >= num_locals) return Error.UnsupportedOp;
+                if (local_idx >= total_locals) return Error.UnsupportedOp;
                 const offset: u14 = @intCast(local_idx * 8);
                 const vreg = next_vreg;
                 next_vreg += 1;
@@ -390,7 +419,7 @@ pub fn compile(
                 // Pop top vreg, write to [SP, #(local_idx * 8)].
                 if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
                 const local_idx = ins.payload;
-                if (local_idx >= num_locals) return Error.UnsupportedOp;
+                if (local_idx >= total_locals) return Error.UnsupportedOp;
                 const offset: u14 = @intCast(local_idx * 8);
                 const src = pushed_vregs.pop().?;
                 const ws = try gpr.resolveGpr(alloc, src);
@@ -401,7 +430,7 @@ pub fn compile(
                 // popping — the value remains pushed.
                 if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
                 const local_idx = ins.payload;
-                if (local_idx >= num_locals) return Error.UnsupportedOp;
+                if (local_idx >= total_locals) return Error.UnsupportedOp;
                 const offset: u14 = @intCast(local_idx * 8);
                 const src = pushed_vregs.items[pushed_vregs.items.len - 1];
                 const ws = try gpr.resolveGpr(alloc, src);
