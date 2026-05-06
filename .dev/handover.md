@@ -14,27 +14,27 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `d286cbc`):
+直近 commit (HEAD = `953eedf`):
 
-- `d286cbc` §9.7 / 7.5-nop (ARM64 nop op; 5/12 stays — fail moved to deeper func)
-- `7745172` §9.7 / 7.5-jit-compile-diag (compileWasm が func_idx + sig を stderr に log)
-- `461cc1a` §9.7 / 7.5-drop-unreachable (drop + unreachable + B-fixup patcher; 3→5)
-- `e0af079` §9.7 / 7.5-multi-arg-entry (ARM64 X1..X7 i32 params; 2→3)
-- `818e5a8` §9.7 / 7.5-empty-module-fix (0-function modules accept; 1→2)
-- `217c214` §9.7 / 7.5-spec-jit-compile-runner (corpus walker)
+- `953eedf` §9.7 / 7.5-i64-params (i64 params + width-aware STR X; 5/12 stays — D-033 filed)
+- `d286cbc` §9.7 / 7.5-nop (ARM64 nop; 5/12)
+- `7745172` §9.7 / 7.5-jit-compile-diag (per-func stderr log)
+- `461cc1a` §9.7 / 7.5-drop-unreachable (drop + unreachable + B-fixup; 3→5)
+- `e0af079` §9.7 / 7.5-multi-arg-entry (X1..X7 i32 params; 2→3)
+- `818e5a8` §9.7 / 7.5-empty-module-fix (0-function modules; 1→2)
 
-**Active task**: nop landed (5/12 pass; nop.0 が func[9] で別 op
-fail に切り替わり)。**Diagnostic から見えてきた根本原因**:
-- 多くの `UnsupportedOp` は arm64/emit.zig:134 の non-i32 params reject
-  (local_get.0 func[5] params=1 で i64 / local_set.0 同; nop.0 func[9])。
-- ARM64 end-handler は既に FP-aware (line 525-553) — x86_64 mirror で
-  ある必要なし。
-- `OperandStackUnderflow` は labels.0 / unreachable.0 の block-result +
-  br interaction が原因 (block (result T) で br 0 後 dead code 押し戻し)。
+**Active task**: i64-params landed (5/12; D-033 filed for
+local.get/set width-truncate). Diagnostic 後の残 fails:
+- nop.0 / local_get.0 / local_set.0 / unwind.0 — f32/f64 params or
+  results 必要 (V-reg / FMOV marshalling 未実装)
+- switch.0 func[0] — `return` op 未実装
+- labels.0 / unreachable.0 — OperandStackUnderflow (block-result +
+  br + dead-code tracking バグ)
 
-**NEXT** = `7.5-i64-params` (arm64/emit.zig:134 の i64 param 受け入れ;
-prologue は STR W (32-bit) → STR X (64-bit) を type-aware に分岐;
-local-slot は 8-byte 容量で既存)。x86_64 mirror は 7.8 開始時。
+**NEXT** = `7.5-fp-params` (arm64/emit.zig:134 を f32/f64 受け入れ;
+prologue で V0..V7 register marshalling — f32 は STR S/D scalar,
+f64 同; local-slot は 8-byte 容量で f32+f64 両方収まる)。
+あと block-result-deadcode + return-op が残 chunk。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -65,10 +65,11 @@ local-slot は 8-byte 容量で既存)。x86_64 mirror は 7.8 開始時。
 | 7.5-jit-compile-diag | compileWasm の per-func stderr log | DONE (7745172) |
 | 7.5-arm64-end-fp-i64 | ARM64 end-handler は既に FP-aware (line 525-553); 不要と判明 | OBSOLETE |
 | 7.5-nop | ARM64 emit に nop handler 追加 | DONE (d286cbc; 5/12) |
-| 7.5-i64-params | arm64/emit.zig:134 の i64 param 受け入れ + prologue STR X (64-bit) | **NEXT** |
-| 7.5-return-op | wasm `return` op (mid-function early exit; jump to function epilogue + result marshal) | pending |
-| 7.5-block-result-deadcode | block (result T) + br + dead code の operand-stack tracking バグ修正 | pending |
-| 7.5-fp-params | f32/f64 params (V regs S/D 経由のマーシャル) | pending |
+| 7.5-i64-params | arm64/emit.zig:134 の i64 param 受け入れ + prologue STR X (64-bit) | DONE (953eedf; 5/12; D-033 filed) |
+| 7.5-fp-params | f32/f64 params (V0..V7 → STR S/D scalar マーシャル) | **NEXT** |
+| 7.5-return-op | wasm `return` op (mid-function early exit; new return_fixups list patched at function-end) | pending |
+| 7.5-block-result-deadcode | block (result T) + br + dead-code の operand-stack tracking バグ修正 | pending |
+| 7.5-local-type-aware | local.get/set/tee の width を declared type 別に (D-033 discharge) | pending |
 | 7.5-spec-assertion-driver | wast2json で spec corpus を `.wasm` + assertion manifest 化 → JIT 経由で execute → pass/fail counts | pending |
 | 7.5-trap-reason-channel | trap_flag を `enum TrapReason` に拡張 (assert_trap reason discrimination) | pending (ADR-0028 / Diagnostic M3) |
 
@@ -99,6 +100,7 @@ zone placement / "constant overhead" / WASI prereq 等)。
 
 ## Recently closed (full history via `git log --oneline`)
 
+- §9.7 / 7.5-i64-params (953eedf): arm64/emit.zig:134 の reject を i64 にも開放; prologue の per-param STR を type-aware (i32→STR W / i64→STR X) に分岐。AAPCS64 §6.4 (i32 args の上位 32-bit は undefined) 準拠で i32 の STR W は load-bearing。f32/f64 はまだ UnsupportedOp。Test 修正 (旧「i64 param surfaces UnsupportedOp」を「STR X width 検証」に置換)。**D-033 filed**: local.get/set/tee は 32-bit 固定で i64 silent truncate — 7.5 完了前に discharge 必要。
 - §9.7 / 7.5-nop (d286cbc): arm64 emit switch に nop ハンドラ (no-op body)。spec-jit-compile pass count は 5/12 据え置きだが nop.0 の最初の fail が func[2] → func[9] に深く移動 (incremental progress; 後続 chunk が次の op を解決すれば pass する可能性)。
 - §9.7 / 7.5-jit-compile-diag (7745172): compileWasm の per-func compile loop に `std.debug.print` で `func[i] params=A results=B → ErrName` を stderr に出力。`> /tmp/<host>.log 2>&1` 経由で root-cause bisection が file から読める。
 - §9.7 / 7.5-drop-unreachable (461cc1a): ARM64 emit に `drop` (vreg pop only; no machine bytes) + `unreachable` (`encB(0)` placeholder + bounds_fixups append) を追加; 末尾の trap-stub patcher が opcode bits 31..26 で B vs B.cond を判別して再 encode。jit-compile-runner 3→5 (block, const)。残 unreachable.0 / local_get.0 / local_set.0 / switch.0 / labels.0 / unwind.0 / nop.0 (7) は FP/i64 return + return op + mixed-type params が原因。
