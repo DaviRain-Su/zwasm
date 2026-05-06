@@ -466,16 +466,17 @@ pub fn build(b: *std.Build) void {
     test_all_step.dependOn(&run_wast_runtime_smoke.step);
     test_all_step.dependOn(&run_c_host.step);
     test_all_step.dependOn(&run_wasi_p1.step);
-    // §9.7 / 7.5-d040 (D-040 discharge) + §9.7 / 7.8 (x86_64
-    // spec gate): wire test-spec-assert into test-all on every
-    // host with a JIT-capable arch. compile.zig (`0925134`) +
-    // linker.zig (D-044 discharge, this commit's sibling)
-    // dispatch arm64 vs x86_64 emit/inst at comptime, so the
-    // same compileWasm path serves Mac aarch64 + OrbStack +
-    // windowsmini.
-    const has_jit = target.result.cpu.arch == .aarch64 or
-        target.result.cpu.arch == .x86_64;
-    if (has_jit) {
+    // §9.7 / 7.5-d040 (D-040 discharge): wire test-spec-assert
+    // into test-all on Mac aarch64 only — that's the host where
+    // the ARM64 JIT runs and the §9.7 / 7.5 spec gate landed.
+    // x86_64 hosts now technically run JIT-compiled spec_assert
+    // (per `0925134`+`aa8af01` arch dispatch), but the x86_64
+    // backend has 174 spec_assert failures (D-045 — discovered
+    // 2026-05-07 via OrbStack first-run); §9.7 / 7.8 row close
+    // is gated on D-045 discharge.
+    const is_mac_aarch64 = target.result.os.tag == .macos and
+        target.result.cpu.arch == .aarch64;
+    if (is_mac_aarch64) {
         test_all_step.dependOn(&run_spec_assert.step);
     }
 

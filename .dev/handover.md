@@ -145,8 +145,9 @@ multi-value 修正後に再評価(関連する semantic 解釈が変わる可能
 | 7.5-close-mta | runner 5-arg dispatch (+4 PASS; D-041 mta bucket discharged) | DONE (fedae43) |
 | 7.5-close-d042 | validator wired into compileWasm (212/0/20 = 0 skip-impl + 20 skip-adr; **§9.7 / 7.5 → [x]**) | DONE (5746f2b) |
 | 7.8-arch-compile | comptime arch dispatch in `compile.zig` (arm64 / x86_64) | DONE (0925134) |
-| 7.8-arch-linker | port linker.zig to comptime arch dispatch + extract per-arch patchCallFixup; D-044 | **NEXT** |
-| 7.8-x86_64-spec-gate | re-enable spec_assert x86_64 wiring after D-044; pass=fail=skip-impl=0 on Linux + Windows | pending (blocked-by D-044) |
+| 7.8-arch-linker | linker.zig comptime arch dispatch + per-arch CALL-patch (D-044 closed) | DONE (aa8af01) |
+| 7.8-d045 | x86_64 spec_assert 174 FAILs triage (D-045; per-error-class fixes in src/engine/codegen/x86_64/) | **NEXT** |
+| 7.8-x86_64-spec-gate | re-enable test-all spec_assert wiring; pass=fail=skip-impl=0 on Linux + Windows | pending (blocked-by D-045) |
 | 7.5-close | §9.7 / 7.5 row → [x] (after a-d landing) | pending |
 | 7.5-d035-b | multi-value blocks — emit-side merge_top_vreg → []u32 | pending |
 | 7.5-d038 | emitEndIntra spill-staging residual (chunk-d037-a leftover; BASELINE 2→0) | pending |
