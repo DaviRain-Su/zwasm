@@ -12,27 +12,28 @@
 5. `.dev/lessons/INDEX.md` — keyword-grep for the active task domain.
 6. `.dev/optimisation_log.md` — F-NNN / R-NNN / O-NNN ledger.
 
-## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS (post audit-catch-up)
+## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `884d7d8`):
+直近 commit (HEAD = `217c214`):
 
-- `884d7d8` chore(p7): mark §9.7 / 7.7 [x] (x86_64 emit pass complete on 3 hosts)
-- `cd81b8e` docs(workflow): propagate parallel-bg + file-logged gate rule (LOOP/SKILL/CLAUDE)
-- `6e935c9` fix(p7) §9.7 / 7.7-cc-pivot-shadow-space — encoding-length offset 修正
-- `0789c6e` §9.7 / 7.7-cc-pivot-shadow-space (Win64 32-byte shadow at CALL)
-- `68675d4` §9.7 / 7.7-cc-pivot-emit (current_cc / current alias)
-- `219d461` §9.7 / 7.7-deferred-Win64 (Cc enum + sysv/win64 namespaces)
-- `57cf94c` §9.7 / 7.7-fp-end-fix (D-032 discharge)
+- `217c214` §9.7 / 7.5-spec-jit-compile-runner (corpus walker + build step; 1/12 pass; surfaces 11 gaps)
+- `3e33ead` chore(p7): audit catch-up — flip §9.7 / 7.3 / 7.4 / 7.6 [x]
+- `884d7d8` chore(p7): mark §9.7 / 7.7 [x]
+- `cd81b8e` docs(workflow): propagate parallel-bg + file-logged gate rule
+- `6e935c9` / `0789c6e` §9.7 / 7.7-cc-pivot-shadow-space
+- `68675d4` §9.7 / 7.7-cc-pivot-emit
+- `219d461` §9.7 / 7.7-deferred-Win64
 
-**Active task**: 7.7 closed; ROADMAP audit-catch-up: 7.3 / 7.4 /
-7.6 を `[x]` flip (substantively-done; entry.zig ADR-0017
-simplification + ARM64 emit split + x86_64 abi+Cc-pivot 既了)。
-**NEXT** = `§9.7 / 7.5` (spec test pass=fail=skip=0 via ARM64 JIT
-on Mac aarch64; ROADMAP-priority に従い 7.8 ではなく 7.5 を先に
-回す。spec runner を JIT execution path に wire する infra chunk
-群が必要)。その後 7.8 (spec via x86_64) → 7.9/7.10 realworld
-→ 7.11 🔒 three-way differential → 7.12 audit →
-**🔒 7.13 hard gate** → 7.14 open §9.8。
+**Active task**: spec-jit-compile-runner landed; surfaces 11 fails
+on `test/spec/{smoke,wasm-1.0}/`. **Top root cause**: 10/11 fails
+are `arm64/emit.zig:134 "func.sig.params.len > 0 → UnsupportedOp"`
+— spec fixtures pervasively use parameterised functions. **NEXT**
+= `7.5-empty-module-fix` (smallest first: lift `compileWasm`'s
+unconditional `Error.MissingTypeSection` so 0-function modules
+compile through trivially; closes 1/11). Then `7.5-multi-arg-entry`
+(unblocks the 10 multi-arg fails — bigger; multi-step including
+ARM64 + x86_64 prologue pivot, JitRuntime arg layout, entry shim
+parametric dispatch). Then assertion-driven JIT spec runner.
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -51,17 +52,15 @@ on Mac aarch64; ROADMAP-priority に従い 7.8 ではなく 7.5 を先に
 
 ## §9.7 / 7.7 chunk progress
 
-7.7 完了 (31 chunks)。次は **7.5** (spec gate via ARM64 JIT on
-Mac aarch64). 7.5 sub-chunk 設計はまだ未着手 — Step 0 survey で
-JIT execution path が runtime にどう wire されているか調査要。
-候補 sub-chunks (要 design):
+7.5 sub-chunks (post-survey + jit-compile-runner):
 
 | # | Chunk | Status |
 |---|---|---|
-| 7.5-survey | JIT execution entry survey (entry.zig + runtime.zig + run.zig path) | **NEXT** |
-| 7.5-runner-skeleton | spec runner `--engine=jit-arm64` flag + smoke fixture | pending |
-| 7.5-trap-surface | emit trap_flag → runtime Trap.* mapping for spec assert_trap | pending |
-| 7.5-pass-zero-fail | iterate until pass=fail=skip=0 on Wasm 1.0 + 2.0 op corpus | pending |
+| 7.5-jit-compile-runner | corpus walker; `zig build test-spec-jit-compile`; 1/12 pass | DONE (217c214) |
+| 7.5-empty-module-fix | `compileWasm` を 0-function modules で MissingTypeSection を返さず空 CompiledWasm を返すよう緩和 | **NEXT** |
+| 7.5-multi-arg-entry | ARM64 + x86_64 emit prologue + entry shim を multi-arg signature 対応 (`emit.zig:134` の params reject を解除) | pending |
+| 7.5-spec-assertion-driver | wast2json で spec corpus を `.wasm` + assertion manifest 化 → JIT 経由で execute → pass/fail counts | pending |
+| 7.5-trap-reason-channel | trap_flag を `enum TrapReason` に拡張 (assert_trap reason discrimination) | pending (ADR-0028 / Diagnostic M3) |
 
 ADR-0019 phase plan post-7.6: 7.7 emit.zig, 7.8 spec gate (Linux
 + Windows hosts), 7.9/7.10 realworld, 7.11 3-way differential
@@ -90,6 +89,7 @@ zone placement / "constant overhead" / WASI prereq 等)。
 
 ## Recently closed (full history via `git log --oneline`)
 
+- §9.7 / 7.5-spec-jit-compile-runner (217c214): `test/spec/jit_compile_runner.zig` + `zig build test-spec-jit-compile` build step。`test/spec/{smoke,wasm-1.0}/` 12 fixtures を `engine.runner.compileWasm` でぶん回す。1/12 pass; 11/12 fail のうち 10/11 は arm64/emit.zig:134 の params-len reject、1/11 は empty.wasm の MissingTypeSection。test-all 未追加 (Mac aarch64 only)。
 - §9.7 / 7.7-cc-pivot-shadow-space (0789c6e + 6e935c9): emit.zig 直接/間接 CALL 両方を `emitShadowAlloc` / `emitShadowFree` で wrap (Win64 32-byte; SysV no-op)。byte-offset 計算で imm value (32) と SUB encoding length (4) を取り違えていた initial bug は 6e935c9 で修正。LOOP/SKILL/CLAUDE.md に並列バックグラウンド + ファイル出力 + 再実行禁止のルールを伝搬 (cd81b8e)。
 - §9.7 / 7.7-cc-pivot-emit (68675d4 + cfa5d04): `current_cc` + `current` alias を abi.zig に追加 (compile-time switch on `builtin.target.os.tag`); emit.zig が prologue / call-site で `abi.current.entry_arg0_gpr` + `abi.current.arg_gprs` を読む; win64.allocatable_gprs は slots 0..5 を SysV と同一順序にして cross-Cc test stability を確保; 3 abi tests + 1 emit test fix-up。
 - §9.7 / 7.7-deferred-Win64 (219d461): Cc enum {sysv, win64} + per-Cc namespace (arg_gprs / callee_saved / shadow_space / entry_arg0); top-level aliases stay SysV; emit-side Cc-pivot は次の sub-chunk; 11 tests。
