@@ -14,24 +14,26 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `4e86b45`):
+直近 commit (HEAD = `5f19285`):
 
-- `4e86b45` §9.7 / 7.5-spec-assertion-driver-i (64KB scratch memory + handcrafted_mem; 91/0/0)
-- `e581282` §9.7 / 7.5-spec-assertion-driver-h (runner FP entries + handcrafted_fp; 87/0/0)
+- `5f19285` §9.7 / 7.5-spec-assertion-driver-j (globals + per-fixture state; 95/0/0)
+- `4e86b45` §9.7 / 7.5-spec-assertion-driver-i (scratch memory; 91/0/0)
+- `e581282` §9.7 / 7.5-spec-assertion-driver-h (runner FP entries; 87/0/0)
 - `7049a2c` §9.7 / 7.5-spec-assertion-driver-g (FP locals f32/f64)
-- `ff7df89` §9.7 / 7.5-spec-assertion-driver-f (D-033 discharged; 81/0/0)
 
-**Active task**: spec-assertion-driver-i landed。runner に
-module-level `scratch_memory: [65536]u8` を割り当て、
-JitRuntime.vm_base / mem_limit を指定。memory.size + i32.store
-+ i32.load round-trip 動作を確認。memory.grow は static buffer
-を実拡張できないため defer。spec_assert_runner: **91/0/0**。
+**Active task**: spec-assertion-driver-j landed。runner に
+`scratch_globals: [16]Value` + state reset を per-fixture (`module`
+directive) に移動。`handcrafted_globals` fixture (mut i32 g; get /
+set_get で cross-assert state)。spec_assert_runner: **95/0/0**。
+Pivot — original chunk-j (D-034 spill-aware) は genuinely
+multi-chunk; 単一 chunk としては globals support に置き換えた。
 
-**NEXT** = `7.5-spec-assertion-driver-j` (D-034 spill-aware
-refactor — ARM64 op handlers の resolveGpr/resolveFp を
-spill-staging 経由に変更。残 spec-jit-compile 2/12 解消が
-ターゲット)。subsequent: -k (broader curated wast / D-022
-trap reason)。
+**NEXT** = `7.5-spec-assertion-driver-k` (D-034 spill-aware
+refactor 着手 — まずは ARM64 i32 ALU handlers (i32.add / .sub /
+.mul / .and / .or / .xor / .shl / .shr_s) を resolveGpr →
+gprLoadSpilled/gprDefSpilled/gprStoreSpilled に書き換え。stage_idx
+0/1 を per-binary-op に割り当て。spec-jit-compile-runner 2/12 fail
+を狙う長い chain の最初の一歩)。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -86,7 +88,8 @@ trap reason)。
 | 7.5-spec-assertion-driver-g | FP locals (f32/f64) の V-reg encoders + local.get/set/tee 拡張 | DONE (7049a2c) |
 | 7.5-spec-assertion-driver-h | runner FP entry helpers + handcrafted_fp (87/0/0) | DONE (e581282) |
 | 7.5-spec-assertion-driver-i | 64KB scratch memory + handcrafted_mem; memory.size/load/store; 91/0/0 | DONE (4e86b45) |
-| 7.5-spec-assertion-driver-j | D-034 spill-aware refactor (resolveGpr/resolveFp 経由を spill-staging 化) | **NEXT** |
+| 7.5-spec-assertion-driver-j | globals support + per-fixture state reset (95/0/0) | DONE (5f19285) |
+| 7.5-spec-assertion-driver-k | D-034 spill-aware refactor 着手 (i32 ALU handlers 群) | **NEXT** |
 | 7.5-trap-reason-channel | trap_flag を `enum TrapReason` に拡張 (assert_trap reason discrimination) | pending (ADR-0028 / Diagnostic M3) |
 
 ADR-0019 phase plan post-7.6: 7.7 emit.zig, 7.8 spec gate (Linux
