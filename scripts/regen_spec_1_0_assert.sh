@@ -91,8 +91,11 @@ for c in d['commands']:
             continue
         args = a.get('args', [])
         results = c.get('expected', [])
-        # i32→i32 (0/1/2 args) + i64-result (0/1 args of i32/i64).
-        allowed_arg = lambda x: x['type'] in ('i32', 'i64')
+        # 7.5-close-d: relax arg filter to allow f32/f64 alongside
+        # i32/i64. Runner dispatches the supported single-FP-arg
+        # shapes; multi-arg + mixed-FP shapes still gate via the
+        # `more-than-2-args` filter below.
+        allowed_arg = lambda x: x['type'] in ('i32', 'i64', 'f32', 'f64')
         if not all(allowed_arg(x) for x in args):
             lines.append(f'skip non-int-arg {a["field"]}')
             continue

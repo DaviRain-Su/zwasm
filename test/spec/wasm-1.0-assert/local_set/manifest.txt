@@ -5,8 +5,8 @@ assert_return type-local-f32 () -> ()
 assert_return type-local-f64 () -> ()
 assert_return type-param-i32 i32:2 -> ()
 assert_return type-param-i64 i64:3 -> ()
-skip non-int-arg type-param-f32
-skip non-int-arg type-param-f64
+assert_return type-param-f32 f32:1082969293 -> ()
+assert_return type-param-f64 f64:4617878467915022336 -> ()
 assert_return as-block-value i32:0 -> ()
 assert_return as-loop-value i32:0 -> ()
 assert_return as-br-value i32:0 -> ()
@@ -16,8 +16,8 @@ assert_return as-br_table-value i32:0 -> ()
 assert_return as-return-value i32:0 -> ()
 assert_return as-if-then i32:1 -> ()
 assert_return as-if-else i32:0 -> ()
-skip non-int-arg type-mixed
-skip non-int-arg write
+skip more-than-2-args type-mixed
+skip more-than-2-args write
 skip directive-assert_invalid
 skip directive-assert_invalid
 skip directive-assert_invalid

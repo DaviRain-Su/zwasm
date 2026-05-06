@@ -286,6 +286,22 @@ fn runAssertReturn(
             };
             return true;
         }
+        if (n_args == 1 and args[0].kind == .f32) {
+            const a0_f: f32 = @bitCast(@as(u32, @intCast(args[0].val)));
+            entry.callVoid_f32(compiled.module, func_idx, &rt, a0_f) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+                return false;
+            };
+            return true;
+        }
+        if (n_args == 1 and args[0].kind == .f64) {
+            const a0_d: f64 = @bitCast(args[0].val);
+            entry.callVoid_f64(compiled.module, func_idx, &rt, a0_d) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+                return false;
+            };
+            return true;
+        }
         if (n_args == 2 and args[0].kind == .i32 and args[1].kind == .i32) {
             entry.callVoid_i32i32(compiled.module, func_idx, &rt, @intCast(args[0].val), @intCast(args[1].val)) catch |err| {
                 try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });

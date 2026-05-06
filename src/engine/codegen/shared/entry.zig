@@ -152,6 +152,35 @@ pub fn callVoid_i64(
     if (rt.trap_flag != 0) return Error.Trap;
 }
 
+/// Call a single-f32-argument void-returning JIT function.
+/// Used by spec_assert local_set fixtures whose param is f32.
+pub fn callVoid_f32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: f32,
+) Error!void {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: f32) callconv(.c) void;
+    const f = module.entry(func_idx, Fn);
+    f(rt, a0);
+    if (rt.trap_flag != 0) return Error.Trap;
+}
+
+/// Call a single-f64-argument void-returning JIT function.
+pub fn callVoid_f64(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: f64,
+) Error!void {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: f64) callconv(.c) void;
+    const f = module.entry(func_idx, Fn);
+    f(rt, a0);
+    if (rt.trap_flag != 0) return Error.Trap;
+}
+
 /// Call a no-argument JIT function returning i64. ARM64 epilogue
 /// MOV X0, X<vreg> (64-bit form) for results[0] == .i64 — landed
 /// under §9.7 / 7.7-fp-end-fix.
