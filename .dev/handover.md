@@ -14,35 +14,32 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `d1b8523`):
+直近 commit (HEAD = `13701e6`):
 
+- `13701e6` feat(p7): §9.7 / 7.5-d035-c — multi-result emit-side MOV chain (D-035 closed)
 - `d1b8523` feat(p7): §9.7 / 7.5-d038 — emitEndIntra spill-staging (D-038 closed; BASELINE 2→0)
 - `a2679f4` feat(p7): §9.7 / 7.5-d035-b — multi-result if/else gate (Label.result_arity)
 - `78bb577` feat(p7): §9.7 / 7.5-d030-h — x86_64 op_globals.zig (D-030 closed; 2843→2796 LOC)
 - `4a7fe4a` feat(p7): §9.7 / 7.5-d030-g — x86_64 op_call.zig (call/call_indirect; 3074→2843 LOC)
-- `ec37a59` feat(p7): §9.7 / 7.5-d030-f — x86_64 op_control.zig (label/branch; 3328→3074 LOC)
 
 **Phase status**: §9.7 / 7.5 IN-PROGRESS。spec-jit-compile 12/12,
 spec_assert 138/0/94。Phase 7 残 row = 7.5 / 7.8 / 7.9 / 7.10 /
-7.11 🔒 / 7.12 / 7.13 🔒。D-030 / D-036 / D-037 / D-038 closed;
-D-035 partially discharged (validator + lower + emit-side gate);
-D-035-c (full N-MOV emit) が next。
+7.11 🔒 / 7.12 / 7.13 🔒。D-030 / D-035 / D-036 / D-037 / D-038
+all closed。次は §9.7 / 7.5 close → 7.8 (x86_64 spec gate)。
 
 **Active priority — Phase 7→8 transition gate prep** (per
 `phase8_transition_gate.md` §3a deferred-work DAG):
 
 **NEXT(優先順)**:
 
-1. **D-035-c emit-side multi-result MOV chain** — `merge_top_vreg`
-   を slice/buffer 化し emitElse で N capture / emitEndIntra で
-   N MOV emit。d035-b の `arity > 1` UnsupportedOp gate を解除。
-   block.wast の multi-result fixture も同時に spec_assert へ
-   追加。両 backend (arm64 + x86_64) 同時更新。
+1. **§9.7 / 7.5 close**: 残 94 skips の per-fixture 分類 +
+   structural 解決策の debt 化。multi-result if/else fixture
+   を spec_assert に追加して d035-c の回帰検出を入れる。
 2. **§9.7 / 7.8 spec gate (Linux + Windows)** — x86_64 spec
    testsuite の pass=fail=skip=0 確立 (D-030 split が landing 済
    で x86_64 backend は機能網羅が揃っている前提)。
-3. **§9.7 / 7.5 close**: spec_assert 残 94 skips を per-fixture
-   分類し、structural な解決策を debt entry に分離。
+3. **§9.7 / 7.9 + 7.10 realworld** — ARM64 + x86_64 で 40+
+   realworld サンプル走らせ。
 
 これらの後で 7.8 → 7.9/7.10 → 7.11 🔒 → 7.12 → 7.13 🔒 の順。
 
@@ -129,7 +126,8 @@ multi-value 修正後に再評価(関連する semantic 解釈が変わる可能
 | 7.5-d030-h | x86_64 op_globals.zig (global.get/set 2 fns; -47 LOC); D-030 完了 | DONE (78bb577) |
 | 7.5-d035-b | Label.result_arity gate (arity>1 で UnsupportedOp; D-035 partial) | DONE (a2679f4) |
 | 7.5-d038 | emitEndIntra spill-staging refactor (BASELINE 2→0; D-038 closed) | DONE (d1b8523) |
-| 7.5-d035-c | emit-side multi-result MOV chain (lift d035-b gate; N MOV emit) | **NEXT** |
+| 7.5-d035-c | emit-side multi-result MOV chain (D-035 closed; cap=8) | DONE (13701e6) |
+| 7.5-close | 94 skips 分類 + multi-result fixture; §9.7 / 7.5 row → [x] | **NEXT** |
 | 7.5-d035-b | multi-value blocks — emit-side merge_top_vreg → []u32 | pending |
 | 7.5-d038 | emitEndIntra spill-staging residual (chunk-d037-a leftover; BASELINE 2→0) | pending |
 | 7.5-spec-assertion-driver-v | (deferred) local_tee semantic miscompile / runner i64→i32 — re-evaluate post D-035 | deferred |
