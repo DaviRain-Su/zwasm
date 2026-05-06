@@ -100,11 +100,15 @@ fn runCorpus(
 
         if (std.mem.startsWith(u8, line, "module ")) {
             const file = line[7..];
-            // Drop any prior compiled module.
+            // Drop any prior compiled module + reset scratch state
+            // so cross-fixture state doesn't leak (within-fixture
+            // state DOES persist across asserts, by design).
             if (current_compiled) |*c| c.deinit(gpa);
             current_compiled = null;
             if (current_wasm) |b| gpa.free(b);
             current_wasm = null;
+            @memset(scratch_memory[0..], 0);
+            @memset(scratch_globals[0..], Value.fromI32(0));
 
             const wasm_bytes = dir.readFileAlloc(io, file, gpa, .limited(4 << 20)) catch |err| {
                 try stdout.print("FAIL  {s}/{s} module read: {s}\n", .{ name, file, @errorName(err) });
@@ -190,6 +194,11 @@ const ArgValue = struct { kind: ArgKind, val: u64 };
 /// a future chunk.
 var scratch_memory: [65536]u8 = undefined;
 
+const Value = zwasm.runtime.Value;
+/// 16 globals slots backing global.get / global.set in fixtures.
+/// Zero-initialised on each assertion (alongside scratch_memory).
+var scratch_globals: [16]Value = undefined;
+
 fn runAssertReturn(
     gpa: std.mem.Allocator,
     wasm_bytes: []const u8,
@@ -212,10 +221,10 @@ fn runAssertReturn(
         return false;
     };
 
-    // 64 KB scratch heap shared by every assertion. Zero-init each
-    // call so memory-touching fixtures see a clean slate; the heap
-    // is reused (not freed) across calls within one corpus run.
-    @memset(scratch_memory[0..], 0);
+    // scratch_memory + scratch_globals are reset on each `module`
+    // directive (per-fixture); state persists across asserts
+    // within one fixture so global.set/get + memory.store/load
+    // round-trips behave as intended.
     var rt: entry.JitRuntime = .{
         .vm_base = scratch_memory[0..],
         .mem_limit = scratch_memory.len,
@@ -223,8 +232,8 @@ fn runAssertReturn(
         .table_size = 0,
         .typeidx_base = undefined,
         .trap_flag = 0,
-        .globals_base = undefined,
-        .globals_count = 0,
+        .globals_base = &scratch_globals,
+        .globals_count = scratch_globals.len,
     };
 
     // Parse arg tokens.
@@ -362,10 +371,10 @@ fn runAssertTrap(
         return false;
     };
 
-    // 64 KB scratch heap shared by every assertion. Zero-init each
-    // call so memory-touching fixtures see a clean slate; the heap
-    // is reused (not freed) across calls within one corpus run.
-    @memset(scratch_memory[0..], 0);
+    // scratch_memory + scratch_globals are reset on each `module`
+    // directive (per-fixture); state persists across asserts
+    // within one fixture so global.set/get + memory.store/load
+    // round-trips behave as intended.
     var rt: entry.JitRuntime = .{
         .vm_base = scratch_memory[0..],
         .mem_limit = scratch_memory.len,
@@ -373,8 +382,8 @@ fn runAssertTrap(
         .table_size = 0,
         .typeidx_base = undefined,
         .trap_flag = 0,
-        .globals_base = undefined,
-        .globals_count = 0,
+        .globals_base = &scratch_globals,
+        .globals_count = scratch_globals.len,
     };
 
     var args: [2]ArgValue = undefined;
