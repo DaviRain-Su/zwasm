@@ -101,7 +101,13 @@ pub const EmitCtx = struct {
         const lhs = self.pushed_vregs.pop().?;
         const result = self.next_vreg.*;
         self.next_vreg.* += 1;
-        if (result >= self.alloc.slots.len) return Error.SlotOverflow;
+        if (result >= self.alloc.slots.len) {
+            std.debug.print(
+                "arm64/ctx: popBinary SlotOverflow at func[{d}]: next_vreg={d} >= slots.len={d}\n",
+                .{ self.func.func_idx, result, self.alloc.slots.len },
+            );
+            return Error.SlotOverflow;
+        }
         return .{ .lhs = lhs, .rhs = rhs, .result = result };
     }
 
@@ -112,7 +118,13 @@ pub const EmitCtx = struct {
         const src = self.pushed_vregs.pop().?;
         const result = self.next_vreg.*;
         self.next_vreg.* += 1;
-        if (result >= self.alloc.slots.len) return Error.SlotOverflow;
+        if (result >= self.alloc.slots.len) {
+            std.debug.print(
+                "arm64/ctx: popUnary SlotOverflow at func[{d}]: next_vreg={d} >= slots.len={d}\n",
+                .{ self.func.func_idx, result, self.alloc.slots.len },
+            );
+            return Error.SlotOverflow;
+        }
         return .{ .src = src, .result = result };
     }
 };

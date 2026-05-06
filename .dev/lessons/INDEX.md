@@ -32,6 +32,7 @@
 | 2026-05-04 | adr-0017-merge-blind-spot             | ADR-0017, CFG join points, X19 amendment, design completeness  | ADR-0017 didn't anticipate `(if (result T))` join semantics; the X19 amendment hid the original incompleteness. Honest framing rule (gap vs refinement) needed in Revision history. |
 | 2026-05-04 | adr-revision-history-misuse           | ADR amend, Revision history, README convention, gap vs refinement | ADR Revision history rows have read like "minor refinement" when they were actually "we missed this at design time". Proposes sharper categorisation: gap / refinement / expansion. |
 | 2026-05-04 | adr-batch-dependency-order            | ADR batch, dependency DAG, Phase 7 reshape, lineage             | 4-ADR batch (0017-0020) had implicit dependency order; should have added Dependencies sections or a meta-DAG ADR for 3+ ADR batches. |
+| 2026-05-06 | regalloc-pool-size-mismatch           | regalloc, max_reg_slots, abi.allocatable_gprs, ADR-0027, SlotOverflow | regalloc default `max_reg_slots = 9` was not updated when ADR-0027 reduced `allocatable_gprs.len` 9 → 8. Result: func[9] of local_get.0 hit `SlotOverflow` (slotToReg returned null for slot 8). Cross-module config-sync rule needed. |
 
 ## Promotion to ADR — when to escalate
 

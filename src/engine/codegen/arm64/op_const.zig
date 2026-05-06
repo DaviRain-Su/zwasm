@@ -65,7 +65,10 @@ pub fn emitConstU64(allocator: Allocator, buf: *std.ArrayList(u8), xd: Xn, value
 pub fn emitI32Const(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const vreg = ctx.next_vreg.*;
     ctx.next_vreg.* += 1;
-    if (vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    if (vreg >= ctx.alloc.slots.len) {
+        std.debug.print("arm64/op_const: i32.const SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ ctx.func.func_idx, vreg, ctx.alloc.slots.len });
+        return Error.SlotOverflow;
+    }
     const xd = try gpr.gprDefSpilled(ctx.alloc, vreg, 0);
     try emitConstU32(ctx.allocator, ctx.buf, xd, ins.payload);
     try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, vreg, 0);
@@ -78,7 +81,10 @@ pub fn emitI32Const(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 pub fn emitI64Const(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const vreg = ctx.next_vreg.*;
     ctx.next_vreg.* += 1;
-    if (vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    if (vreg >= ctx.alloc.slots.len) {
+        std.debug.print("arm64/op_const: i64.const SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ ctx.func.func_idx, vreg, ctx.alloc.slots.len });
+        return Error.SlotOverflow;
+    }
     const xd = try gpr.resolveGpr(ctx.alloc, vreg);
     const value: u64 = (@as(u64, ins.extra) << 32) | @as(u64, ins.payload);
     const lane0: u16 = @truncate(value & 0xFFFF);

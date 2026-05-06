@@ -514,7 +514,10 @@ pub fn compile(
                 const offset_x: u15 = @intCast(local_idx * 8);
                 const vreg = next_vreg;
                 next_vreg += 1;
-                if (vreg >= alloc.slots.len) return Error.SlotOverflow;
+                if (vreg >= alloc.slots.len) {
+                    std.debug.print("arm64/emit: local.get SlotOverflow func[{d}] vreg={d} >= slots.len={d} local_idx={d}\n", .{ func.func_idx, vreg, alloc.slots.len, local_idx });
+                    return Error.SlotOverflow;
+                }
                 const rd = try gpr.resolveGpr(alloc, vreg);
                 switch (ty) {
                     .i32 => try gpr.writeU32(allocator, &buf, inst.encLdrImmW(rd, 31, offset_w)),

@@ -87,7 +87,7 @@ pub const Allocation = struct {
     /// runtime invariants). Per-class regalloc is a Phase 8
     /// follow-up; today FP-class vregs use the same threshold,
     /// which under-utilises the V-register pool but is correct.
-    max_reg_slots: u8 = 9,
+    max_reg_slots: u8 = 8,
 
     /// Resolve a vreg's home: register slot or spill offset.
     pub fn slot(self: Allocation, vreg: usize) Slot {
@@ -135,7 +135,10 @@ pub fn compute(allocator: Allocator, func: *const ZirFunc) Error!Allocation {
         var s: u8 = 0;
         const assigned: u8 = while (s < max_slots) : (s += 1) {
             if (!busy[s]) break s;
-        } else return Error.SlotOverflow;
+        } else {
+            std.debug.print("regalloc: SlotOverflow at func[{d}] vreg={d} ranges.len={d} (>255 simultaneously live)\n", .{ func.func_idx, vreg, live.ranges.len });
+            return Error.SlotOverflow;
+        };
         slots[vreg] = assigned;
         if (assigned + 1 > n_slots) n_slots = assigned + 1;
     }
