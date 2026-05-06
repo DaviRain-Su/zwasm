@@ -14,17 +14,19 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `f103209`):
+直近 commit (HEAD = `9b9715d`):
 
+- `9b9715d` feat(p7): §9.7 / 7.5-close-b — assert_malformed runner directive (classification only)
 - `f103209` feat(p7): §9.7 / 7.5-close-a — assert_invalid directive (159→181; D-042/D-043 filed)
 - `6505018` feat(p7): §9.7 / 7.5-close-c2 — true FP-result regen relax (155→159 / 77→73)
 - `72250c1` feat(p7): §9.7 / 7.5-close-d — FP-arg dispatch (153→155 / 79→77)
 - `91d4186` feat(p7): §9.7 / 7.5-close-c1 — void-result helpers (138→153 / 94→79)
-- `3308a3c` chore(p7,debt): close D-040 — wire test-spec-assert into test-all (Mac guard)
 
 **Phase status**: §9.7 / 7.5 IN-PROGRESS。spec-jit-compile 12/12,
-spec_assert 181/0/51 (test-all on Mac; +43 累計; 27 SKIP-VALIDATOR-GAP
-D-042 待ち)。Phase 7 残 row =
+spec_assert 181/0/51 (test-all on Mac; +43 累計)。残 51 skips:
+27 SKIP-VALIDATOR-GAP (D-042) + 20 directive-assert_malformed-text
+(text-parser scope-out; ADR候補) + 4 more-than-2-args (runner ext)。
+Phase 7 残 row =
 7.5 / 7.8 / 7.9 / 7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。
 D-030 / D-035 / D-036 / D-037 / D-038 / D-040 closed。
 次は §9.7 / 7.5 close (94 skips 分類) → 7.8 (x86_64 spec gate)。
@@ -32,23 +34,25 @@ D-030 / D-035 / D-036 / D-037 / D-038 / D-040 closed。
 **Active priority — Phase 7→8 transition gate prep** (per
 `phase8_transition_gate.md` §3a deferred-work DAG):
 
-**NEXT(優先順)** (D-041 の per-bucket chunks 順):
+**NEXT(優先順)**:
 
-1. **7.5-close-d: FP non-int-arg (8 skips)** — local_get/set
-   の f32/f64 引数 assertion。runner に callXX_fXX 系 (e.g.
-   callVoid_f32, callI32_f32 等) を追加。
-2. **7.5-close-c2: 真 FP-result (2 skips 残)** — local_get の
-   `type-local-f32` / `type-local-f64` 系 (returns f32/f64).
-   regen で `len(results) == 1 and results[0]` ∈ {f32, f64} を
-   通す + runner で callF32_<args> 群を網羅。multi-result if/else
-   fixture (D-035 から deferred) もここで投入。
-3. **7.5-close-a: assert_invalid (49 skips)** — runner に
-   `assert_invalid` directive 追加; validate-only path で
-   expected error と照合。
-4. **7.5-close-b: assert_malformed (20 skips)** — parser
-   layer 版、shape は (a) と同形。
-5. これら 4 chunk landing 後 §9.7 / 7.5 → [x]、続いて 7.8
-   (x86_64 spec gate Linux + Windows)。
+1. **skip-adr-0030: text-format parser scope-out** — file
+   `.dev/decisions/skip_text_format_parser.md` covering the 20
+   `directive-assert_malformed-text` skips. Per ADR-0029, once
+   filed these become `skip-adr-<id>` (separate tally), not
+   `skip-impl`. spec_assert effective skip-impl drops 51 → 31.
+2. **D-042 validator strictness walk** — per-fixture audit of
+   the 27 SKIP-VALIDATOR-GAP cases; group by error class
+   (type-mismatch / out-of-bounds / unknown-global etc.) and
+   land per-class fixes in `src/validate/validator.zig`. This
+   discharge unblocks D-043 automatically (leak path stops
+   firing once compileWasm correctly rejects).
+3. **7.5-close-mta: more-than-2-args runner extension** —
+   add 5-arg + mixed-type call helpers (callXX_5args dispatch
+   for `type-mixed`/`read`/`write` fixtures); 4 of the 51
+   skips drop.
+4. After (1)+(2)+(3): §9.7 / 7.5 row → [x] (skip-impl == 0),
+   then 7.8 (x86_64 spec gate Linux + Windows)。
 
 これらの後で 7.8 → 7.9/7.10 → 7.11 🔒 → 7.12 → 7.13 🔒 の順。
 
@@ -142,7 +146,10 @@ multi-value 修正後に再評価(関連する semantic 解釈が変わる可能
 | 7.5-close-d  | FP-arg dispatch (callVoid_f32/f64 + regen allow FP args); +2 PASS | DONE (72250c1) |
 | 7.5-close-c2 | true FP-result regen relax (+4 PASS; runner dispatch already had callF32_f32/F64) | DONE (6505018) |
 | 7.5-close-a  | assert_invalid directive (+22 PASS; 27 SKIP-VALIDATOR-GAP → D-042; leak → D-043) | DONE (f103209) |
-| 7.5-close-b  | assert_malformed runner directive (20 skips; parser-error mirror of -a) | **NEXT** |
+| 7.5-close-b  | assert_malformed runner directive (classification: 20 → directive-assert_malformed-text) | DONE (9b9715d) |
+| 7.5-close-skip-adr | skip-adr-text-format-parser; 20 skip-impl → skip-adr (51→31) | **NEXT** |
+| 7.5-close-d042 | per-fixture validator strictness walk (D-042; 27 fixtures across error classes) | pending |
+| 7.5-close-mta | runner more-than-2-args extension (4 skips) | pending |
 | 7.5-close-c3 | multi-result if/else fixture (D-035 deferred regression coverage) | pending |
 | 7.5-close-d | FP non-int-arg runner extension | pending |
 | 7.5-close-a | assert_invalid runner directive | pending |
