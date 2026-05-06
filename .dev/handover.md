@@ -14,25 +14,24 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `ed2d7fa`):
+直近 commit (HEAD = `6c86c57`):
 
-- `ed2d7fa` §9.7 / 7.5-spec-assertion-driver-r (corpus expansion attempt; D-035 filed for multi-value blocks)
+- `6c86c57` §9.7 / 7.5-spec-assertion-driver-s (debt stale-barrier review; 4 rows refreshed)
+- `ed2d7fa` §9.7 / 7.5-spec-assertion-driver-r (corpus expand attempt; D-035 filed)
 - `d6bc382` §9.7 / 7.5-spec-assertion-driver-q (FP pool widening; spec-jit-compile 12/12; D-034 closed)
 - `7a8dcb6` §9.7 / 7.5-spec-assertion-driver-p (D-034 chain extends)
-- `4f3cd36` §9.7 / 7.5-spec-assertion-driver-o (regalloc/abi pool mismatch fix)
 
-**Active task**: spec-assertion-driver-r landed (investigation)。
-spec_assert NAMES に `block`/`br_if`/`select`/`switch`/`return`
-を追加 → `block.0.wasm` が `BadBlockType` で compile 失敗。
-`validator.readBlockType` が Wasm 1.0 simple blocktype のみ対応、
-multi-value block (Wasm 2.0) を拒否。**D-035 filed** で discharge
-plan を documented (parser/validator/emit の 3-phase work)。
-NAMES revert; spec_assert 95/0/0 維持。
+**Active task**: spec-assertion-driver-s landed (Step 0.5
+maintenance)。D-007 / D-009 / D-010 / D-011 の Last reviewed
+を 2026-05-06 に refresh。barrier は依然有効 (WASI envv,
+Zig 0.17+, allocator semantics, ADR-0016 M3)。code 変更なし;
+tests 1027/1032 / 95/0/0 / 12/12 据え置き。
 
-**NEXT** = `7.5-spec-assertion-driver-s` (D-035 discharge — Wasm
-2.0 multi-value block support; parser typeidx-blocktype path +
-validator multi-result resolve + emit merge extension)。あるいは
-別軸 (§9.7 / 7.8 spec-test x86_64 着手 or 既存 row close 着手)。
+**NEXT** = `7.5-spec-assertion-driver-t` (Wasm 2.0 multi-value
+block support — D-035 discharge; or §9.7 / 7.8 着手で x86_64
+spec gate 開始)。chunk-q の 12/12 milestone 以降は infra cleanup
+phase に入っており、新規 code-side row close (7.8〜) への
+pivot タイミングが近い。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -96,7 +95,8 @@ validator multi-result resolve + emit merge extension)。あるいは
 | 7.5-spec-assertion-driver-p | D-034 chain (globals/control/select/call/local.get + partial FP) | DONE (7a8dcb6) |
 | 7.5-spec-assertion-driver-q | FP pool widening (resolveFp shim); spec-jit-compile 12/12; D-034 closed | DONE (d6bc382) |
 | 7.5-spec-assertion-driver-r | corpus expand attempt; D-035 filed (Wasm 2.0 multi-value block) | DONE (ed2d7fa) |
-| 7.5-spec-assertion-driver-s | D-035 discharge (multi-value block parser/validator/emit) もしくは §9.7 / 7.8 着手 | **NEXT** |
+| 7.5-spec-assertion-driver-s | debt stale-barrier review (Step 0.5 maintenance; 4 rows refresh) | DONE (6c86c57) |
+| 7.5-spec-assertion-driver-t | D-035 (Wasm 2.0 multi-value block) もしくは §9.7 / 7.8 (x86_64 spec gate) pivot | **NEXT** |
 | 7.5-trap-reason-channel | trap_flag を `enum TrapReason` に拡張 (assert_trap reason discrimination) | pending (ADR-0028 / Diagnostic M3) |
 
 ADR-0019 phase plan post-7.6: 7.7 emit.zig, 7.8 spec gate (Linux
