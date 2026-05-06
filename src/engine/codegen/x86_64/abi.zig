@@ -31,17 +31,19 @@
 //! saved runtime ptr; other JitRuntime invariants reload from
 //! [R15 + offset] at point of use).
 //!
-//! Two load-bearing consumers remain intentionally deferred:
+//! One load-bearing consumer remains intentionally deferred:
 //!
 //!   - **`spill_stage_gprs`** (mirrors arm64's X14/X15). Awaits
 //!     the spill-aware emit port that mirrors arm64's sub-1c.
-//!   - **Win64 ABI**: distinct arg regs (RCX/RDX/R8/R9), 32-byte
-//!     shadow space, RSI/RDI callee-saved. The `Cc` enum + per-
-//!     target binding lands in chunk c2 once emit.zig has a
-//!     concrete consumer for the choice. Note: the R15
-//!     reservation chosen here is Cc-agnostic (callee-saved in
-//!     both SysV and Win64) so the Win64 port doesn't reopen
-//!     this decision.
+//!
+//! Win64 ABI tables live alongside SysV in this file — see the
+//! `sysv` and `win64` namespaces and the `Cc` enum below. The
+//! emit-side Cc-pivot wiring (selecting `arg_gprs` etc. per
+//! target at compile time per ADR-0026 line 229-232) lands when
+//! 7.8 spec gate prep needs windowsmini to run the x86_64 JIT;
+//! today the top-level aliases (`arg_gprs`, `return_gpr`, …)
+//! continue to expose the SysV values so existing emit byte-
+//! tests are unchanged.
 //!
 //! Zone 2 (`src/engine/codegen/x86_64/`) — must NOT import
 //! `src/engine/codegen/arm64/` per ROADMAP §A3.
@@ -221,6 +223,89 @@ pub fn isCalleeSaved(g: Gpr) bool {
 }
 
 // ============================================================
+// Calling convention selector + per-Cc tables
+// ============================================================
+
+/// x86_64 calling convention. Selected at zwasm compile time
+/// (per ADR-0026 line 229-232: "Cc selection happens at compile
+/// time of zwasm itself, not at JIT time"). The emit pass
+/// consumes the right namespace via comptime; there is no
+/// runtime dispatch.
+pub const Cc = enum { sysv, win64 };
+
+/// System V x86_64 ABI tables (Linux, macOS, BSD). Mirror of
+/// the top-level `arg_gprs` / `return_gpr` / etc. aliases — kept
+/// here so `abi.sysv.X` reads symmetrically with `abi.win64.X`
+/// in future Cc-pivot wiring. The top-level aliases continue to
+/// expose these same values for existing callers.
+pub const sysv = struct {
+    pub const arg_gprs = [_]Gpr{ .rdi, .rsi, .rdx, .rcx, .r8, .r9 };
+    pub const arg_xmms = [_]Xmm{ .xmm0, .xmm1, .xmm2, .xmm3, .xmm4, .xmm5, .xmm6, .xmm7 };
+    pub const return_gpr: Gpr = .rax;
+    pub const return_xmm: Xmm = .xmm0;
+    pub const callee_saved_gprs = [_]Gpr{ .rbx, .rbp, .r12, .r13, .r14, .r15 };
+    pub const caller_saved_gprs = [_]Gpr{ .rax, .rcx, .rdx, .rdi, .rsi, .r8, .r9, .r10, .r11 };
+    /// SysV does not reserve a shadow space below the call site.
+    pub const shadow_space_bytes: u32 = 0;
+    /// First arg in RDI per SysV §3.2.3 — the entry shim's
+    /// `MOV R15, RDI` snapshots `*const JitRuntime` into the
+    /// runtime-ptr-save register.
+    pub const entry_arg0_gpr: Gpr = .rdi;
+    pub const runtime_ptr_save_gpr: Gpr = .r15;
+};
+
+/// Microsoft Win64 ABI tables (Windows x86_64). Differs from
+/// SysV in three load-bearing ways:
+///
+/// 1. **Arg regs**: RCX/RDX/R8/R9 (only 4 GPRs), XMM0..XMM3
+///    (only 4 XMMs). FP and integer args share positions —
+///    arg_n in either RXX_n or XMMn but not both.
+/// 2. **Callee-saved**: RDI/RSI promoted to callee-saved (vs
+///    SysV's caller-saved). Pool grows by 2 if Win64 is the
+///    target.
+/// 3. **Shadow space**: 32 bytes reserved by the caller below
+///    the call site. The callee owns these bytes (may spill
+///    its 4 register args there).
+///
+/// R15 reservation stays Cc-agnostic (callee-saved in both
+/// ABIs); only the entry-arg0 register changes (`RCX` here vs
+/// `RDI` for SysV). See ADR-0026 line 225-232.
+pub const win64 = struct {
+    pub const arg_gprs = [_]Gpr{ .rcx, .rdx, .r8, .r9 };
+    pub const arg_xmms = [_]Xmm{ .xmm0, .xmm1, .xmm2, .xmm3 };
+    pub const return_gpr: Gpr = .rax;
+    pub const return_xmm: Xmm = .xmm0;
+    pub const callee_saved_gprs = [_]Gpr{ .rbx, .rbp, .rdi, .rsi, .r12, .r13, .r14, .r15 };
+    pub const caller_saved_gprs = [_]Gpr{ .rax, .rcx, .rdx, .r8, .r9, .r10, .r11 };
+    pub const shadow_space_bytes: u32 = 32;
+    pub const entry_arg0_gpr: Gpr = .rcx;
+    pub const runtime_ptr_save_gpr: Gpr = .r15;
+
+    /// Allocatable GPRs under Win64. Two more than SysV because
+    /// RDI + RSI are callee-saved here (caller-saved on SysV).
+    /// Order mirrors `allocatable_gprs`: caller-saved scratch
+    /// first (R10, R11), then callee-saved (RBX, RDI, RSI, R12,
+    /// R13, R14). RBP is the frame pointer; R15 is the reserved
+    /// runtime-ptr-save register.
+    pub const allocatable_gprs = [_]Gpr{ .r10, .r11, .rbx, .rdi, .rsi, .r12, .r13, .r14 };
+};
+
+// Compile-time invariants for the Win64 pool — same shape as
+// the SysV block above (W54-class structural fix against
+// pool/role overlap).
+comptime {
+    for (win64.allocatable_gprs) |a| {
+        for (win64.arg_gprs) |arg| {
+            if (a == arg) @compileError("win64 regalloc pool overlaps win64.arg_gprs — Microsoft x64 §arg-passing violated");
+        }
+        if (a == win64.return_gpr) @compileError("win64 regalloc pool overlaps win64.return_gpr");
+        if (a == stack_pointer) @compileError("win64 regalloc pool overlaps stack_pointer");
+        if (a == frame_pointer) @compileError("win64 regalloc pool overlaps frame_pointer");
+        if (a == win64.runtime_ptr_save_gpr) @compileError("win64 regalloc pool overlaps win64.runtime_ptr_save_gpr — ADR-0026 invariant violated");
+    }
+}
+
+// ============================================================
 // Tests
 // ============================================================
 
@@ -330,4 +415,79 @@ test "isCalleeSaved: SysV callee-saved set" {
 test "frame_pointer + stack_pointer tracked" {
     try testing.expectEqual(Gpr.rbp, frame_pointer);
     try testing.expectEqual(Gpr.rsp, stack_pointer);
+}
+
+// Win64 ABI tables (Microsoft x64 calling convention). Tracked
+// alongside the SysV tables but not yet consumed by emit.zig —
+// the Cc-pivot wiring lands when 7.8 spec gate prep needs
+// windowsmini to run the x86_64 JIT. ADR-0026 line 225-232
+// documents the relationship.
+
+test "Cc enum lists the two x86_64 calling conventions" {
+    try testing.expectEqual(Cc.sysv, @as(Cc, .sysv));
+    try testing.expectEqual(Cc.win64, @as(Cc, .win64));
+}
+
+test "win64.arg_gprs covers RCX, RDX, R8, R9 in Win64 order (4 regs vs SysV's 6)" {
+    try testing.expectEqual(@as(usize, 4), win64.arg_gprs.len);
+    try testing.expectEqual(Gpr.rcx, win64.arg_gprs[0]);
+    try testing.expectEqual(Gpr.rdx, win64.arg_gprs[1]);
+    try testing.expectEqual(Gpr.r8,  win64.arg_gprs[2]);
+    try testing.expectEqual(Gpr.r9,  win64.arg_gprs[3]);
+}
+
+test "win64.arg_xmms covers XMM0..XMM3 (4 regs vs SysV's 8)" {
+    try testing.expectEqual(@as(usize, 4), win64.arg_xmms.len);
+    try testing.expectEqual(Xmm.xmm0, win64.arg_xmms[0]);
+    try testing.expectEqual(Xmm.xmm3, win64.arg_xmms[3]);
+}
+
+test "win64.return_gpr is RAX, win64.return_xmm is XMM0 (same as SysV)" {
+    try testing.expectEqual(Gpr.rax, win64.return_gpr);
+    try testing.expectEqual(Xmm.xmm0, win64.return_xmm);
+}
+
+test "win64.callee_saved_gprs adds RDI/RSI vs SysV (8 regs total)" {
+    try testing.expectEqual(@as(usize, 8), win64.callee_saved_gprs.len);
+    // RDI + RSI are callee-saved under Win64 (caller-saved under SysV).
+    var saw_rdi = false;
+    var saw_rsi = false;
+    for (win64.callee_saved_gprs) |g| {
+        if (g == .rdi) saw_rdi = true;
+        if (g == .rsi) saw_rsi = true;
+    }
+    try testing.expect(saw_rdi);
+    try testing.expect(saw_rsi);
+}
+
+test "win64.caller_saved_gprs excludes RDI/RSI (the SysV/Win64 divergence)" {
+    for (win64.caller_saved_gprs) |g| {
+        try testing.expect(g != .rdi);
+        try testing.expect(g != .rsi);
+    }
+}
+
+test "win64.shadow_space_bytes = 32 (Microsoft x64 mandates 32-byte shadow)" {
+    try testing.expectEqual(@as(u32, 32), win64.shadow_space_bytes);
+}
+
+test "sysv.shadow_space_bytes = 0 (SysV has no shadow space)" {
+    try testing.expectEqual(@as(u32, 0), sysv.shadow_space_bytes);
+}
+
+test "win64.runtime_ptr_save_gpr is R15 (Cc-agnostic per ADR-0026)" {
+    try testing.expectEqual(Gpr.r15, win64.runtime_ptr_save_gpr);
+}
+
+test "win64.entry_arg0_gpr is RCX (Win64 first arg)" {
+    // SysV passes *const JitRuntime in RDI; Win64 in RCX. The
+    // entry shim's `MOV R15, <arg0>` differs by Cc.
+    try testing.expectEqual(Gpr.rcx, win64.entry_arg0_gpr);
+    try testing.expectEqual(Gpr.rdi, sysv.entry_arg0_gpr);
+}
+
+test "win64.allocatable_gprs adds RDI+RSI vs SysV (8 regs vs 6)" {
+    // Win64's broader callee-saved set yields 2 more allocatable
+    // GPRs (RDI, RSI promoted from caller-saved → callee-saved).
+    try testing.expectEqual(@as(usize, 8), win64.allocatable_gprs.len);
 }
