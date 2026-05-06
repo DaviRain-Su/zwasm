@@ -45,6 +45,11 @@ pub fn main(init: std.process.Init) !void {
     var passed: u32 = 0;
     var failed: u32 = 0;
     var skipped: u32 = 0;
+    // Per ADR-0029: skip-impl vs skip-adr split. The §9.7 / 7.5
+    // exit criterion is `skip-impl == 0`; skip-adr counts are
+    // documented and accepted (e.g. text-format-parser scope-out
+    // per `.dev/decisions/skip_text_format_parser.md`).
+    var skipped_adr: u32 = 0;
 
     const cwd = std.Io.Dir.cwd();
     var root = cwd.openDir(io, corpus_root, .{ .iterate = true }) catch |err| {
@@ -57,10 +62,10 @@ pub fn main(init: std.process.Init) !void {
     var it = root.iterate();
     while (try it.next(io)) |dir_entry| {
         if (dir_entry.kind != .directory) continue;
-        try runCorpus(io, gpa, &root, dir_entry.name, stdout, &passed, &failed, &skipped);
+        try runCorpus(io, gpa, &root, dir_entry.name, stdout, &passed, &failed, &skipped, &skipped_adr);
     }
 
-    try stdout.print("\nspec_assert_runner: {d} passed, {d} failed, {d} skipped\n", .{ passed, failed, skipped });
+    try stdout.print("\nspec_assert_runner: {d} passed, {d} failed, {d} skipped (= {d} skip-impl + {d} skip-adr)\n", .{ passed, failed, skipped + skipped_adr, skipped, skipped_adr });
     try stdout.flush();
     if (failed != 0) std.process.exit(1);
 }
@@ -74,6 +79,7 @@ fn runCorpus(
     passed: *u32,
     failed: *u32,
     skipped: *u32,
+    skipped_adr: *u32,
 ) !void {
     var dir = try root.openDir(io, name, .{});
     defer dir.close(io);
@@ -94,7 +100,16 @@ fn runCorpus(
         if (line.len == 0) continue;
 
         if (std.mem.startsWith(u8, line, "skip ")) {
-            skipped.* += 1;
+            // skip-adr classification — `directive-assert_malformed-text`
+            // is covered by `.dev/decisions/skip_text_format_parser.md`
+            // and counts as skip-adr (not skip-impl) per ADR-0029.
+            // Other skip reasons remain skip-impl until ADR-promoted.
+            const reason = line[5..];
+            if (std.mem.eql(u8, reason, "directive-assert_malformed-text")) {
+                skipped_adr.* += 1;
+            } else {
+                skipped.* += 1;
+            }
             continue;
         }
 
