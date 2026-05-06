@@ -179,7 +179,7 @@ fn parseI64Token(tok: []const u8) !u64 {
         @as(u64, @bitCast(std.fmt.parseInt(i64, tok, 10) catch return error.BadValue));
 }
 
-const ArgKind = enum { i32, i64 };
+const ArgKind = enum { i32, i64, f32, f64 };
 const ArgValue = struct { kind: ArgKind, val: u64 };
 
 fn runAssertReturn(
@@ -230,6 +230,10 @@ fn runAssertReturn(
                 args[n_args] = .{ .kind = .i32, .val = try parseI32Token(tok[4..]) };
             } else if (std.mem.startsWith(u8, tok, "i64:")) {
                 args[n_args] = .{ .kind = .i64, .val = try parseI64Token(tok[4..]) };
+            } else if (std.mem.startsWith(u8, tok, "f32:")) {
+                args[n_args] = .{ .kind = .f32, .val = @as(u64, try parseI32Token(tok[4..])) };
+            } else if (std.mem.startsWith(u8, tok, "f64:")) {
+                args[n_args] = .{ .kind = .f64, .val = try parseI64Token(tok[4..]) };
             } else {
                 try stdout.print("FAIL  {s}: unsupported arg type ({s})\n", .{ name, tok });
                 return false;
@@ -239,14 +243,14 @@ fn runAssertReturn(
     }
 
     // Parse expected result.
-    const result_kind: ArgKind = if (std.mem.startsWith(u8, results_s, "i32:")) .i32 else if (std.mem.startsWith(u8, results_s, "i64:")) .i64 else {
+    const result_kind: ArgKind = if (std.mem.startsWith(u8, results_s, "i32:")) .i32 else if (std.mem.startsWith(u8, results_s, "i64:")) .i64 else if (std.mem.startsWith(u8, results_s, "f32:")) .f32 else if (std.mem.startsWith(u8, results_s, "f64:")) .f64 else {
         try stdout.print("FAIL  {s}: unsupported result type '{s}'\n", .{ name, results_s });
         return false;
     };
     const exp_s = results_s[4..];
     const expected: u64 = switch (result_kind) {
-        .i32 => @as(u64, try parseI32Token(exp_s)),
-        .i64 => try parseI64Token(exp_s),
+        .i32, .f32 => @as(u64, try parseI32Token(exp_s)),
+        .i64, .f64 => try parseI64Token(exp_s),
     };
 
     // Dispatch on (n_args, arg-kind shape, result-kind).
@@ -286,6 +290,36 @@ fn runAssertReturn(
                 try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
                 return false;
             });
+        }
+        if (n_args == 0 and result_kind == .f32) {
+            const r = entry.callF32NoArgs(compiled.module, func_idx, &rt) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}(): {s}\n", .{ name, fn_name, @errorName(err) });
+                return false;
+            };
+            break :blk @as(u64, @as(u32, @bitCast(r)));
+        }
+        if (n_args == 0 and result_kind == .f64) {
+            const r = entry.callF64NoArgs(compiled.module, func_idx, &rt) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}(): {s}\n", .{ name, fn_name, @errorName(err) });
+                return false;
+            };
+            break :blk @as(u64, @bitCast(r));
+        }
+        if (n_args == 1 and args[0].kind == .f32 and result_kind == .f32) {
+            const a0_f: f32 = @bitCast(@as(u32, @intCast(args[0].val)));
+            const r = entry.callF32_f32(compiled.module, func_idx, &rt, a0_f) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+                return false;
+            };
+            break :blk @as(u64, @as(u32, @bitCast(r)));
+        }
+        if (n_args == 1 and args[0].kind == .f64 and result_kind == .f64) {
+            const a0_d: f64 = @bitCast(args[0].val);
+            const r = entry.callF64_f64(compiled.module, func_idx, &rt, a0_d) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+                return false;
+            };
+            break :blk @as(u64, @bitCast(r));
         }
         try stdout.print("FAIL  {s}: unsupported (n_args={d}, arg/result shape) for {s}({s}) -> {s}\n", .{ name, n_args, fn_name, args_s, results_s });
         return false;

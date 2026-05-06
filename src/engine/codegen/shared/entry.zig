@@ -136,6 +136,64 @@ pub fn callI64_i64(
     return result;
 }
 
+/// Call a no-argument JIT function returning f32.
+pub fn callF32NoArgs(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+) Error!f32 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime) callconv(.c) f32;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+/// Call a single-f32-argument JIT function returning f32.
+pub fn callF32_f32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: f32,
+) Error!f32 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: f32) callconv(.c) f32;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, a0);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+/// Call a no-argument JIT function returning f64.
+pub fn callF64NoArgs(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+) Error!f64 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime) callconv(.c) f64;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+/// Call a single-f64-argument JIT function returning f64.
+pub fn callF64_f64(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: f64,
+) Error!f64 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: f64) callconv(.c) f64;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, a0);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
 // ============================================================
 // Tests
 // ============================================================
