@@ -40,7 +40,16 @@ pub fn writeU32(allocator: Allocator, buf: *std.ArrayList(u8), word: u32) !void 
 pub fn resolveGpr(alloc: regalloc.Allocation, vreg: usize) Error!inst.Xn {
     return switch (alloc.slot(vreg)) {
         .reg => |id| abi.slotToReg(id) orelse Error.SlotOverflow,
-        .spill => Error.UnsupportedOp,
+        .spill => blk: {
+            // §9.7 / 7.5-diag-spill: surface which vreg / spill
+            // slot triggered the reject so the next chunk can
+            // narrow scope (spill-aware handler vs pool extension).
+            std.debug.print(
+                "arm64/gpr: resolveGpr rejected spilled vreg={d} (handler not spill-aware)\n",
+                .{vreg},
+            );
+            break :blk Error.UnsupportedOp;
+        },
     };
 }
 
@@ -119,6 +128,12 @@ pub fn gprStoreSpilled(
 pub fn resolveFp(alloc: regalloc.Allocation, vreg: usize) Error!inst.Vn {
     return switch (alloc.slot(vreg)) {
         .reg => |id| abi.fpSlotToReg(id) orelse Error.SlotOverflow,
-        .spill => Error.UnsupportedOp,
+        .spill => blk: {
+            std.debug.print(
+                "arm64/gpr: resolveFp rejected spilled vreg={d} (FP handler not spill-aware)\n",
+                .{vreg},
+            );
+            break :blk Error.UnsupportedOp;
+        },
     };
 }
