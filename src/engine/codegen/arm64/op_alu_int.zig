@@ -177,9 +177,12 @@ pub fn emitI64Popcnt(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 /// (Wasm i32 wraps mod 2^32).
 pub fn emitI32Binary(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const args = try ctx.popBinary();
-    const wn = try gpr.resolveGpr(ctx.alloc, args.lhs);
-    const wm = try gpr.resolveGpr(ctx.alloc, args.rhs);
-    const wd = try gpr.resolveGpr(ctx.alloc, args.result);
+    // D-034 spill-aware: stage 0 for lhs, stage 1 for rhs (so two
+    // spilled operands don't collide), stage 0 reused for result
+    // (lhs has been consumed by the op already).
+    const wn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.lhs, 0);
+    const wm = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.rhs, 1);
+    const wd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
     const word: u32 = switch (ins.op) {
         .@"i32.add"   => inst.encAddRegW(wd, wn, wm),
         .@"i32.sub"   => inst.encSubRegW(wd, wn, wm),
@@ -193,6 +196,7 @@ pub fn emitI32Binary(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         else => unreachable,
     };
     try gpr.writeU32(ctx.allocator, ctx.buf, word);
+    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
     try ctx.pushed_vregs.append(ctx.allocator, args.result);
 }
 
