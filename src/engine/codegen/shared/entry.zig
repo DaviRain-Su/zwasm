@@ -90,6 +90,52 @@ pub fn callI32_i32i32(
     return result;
 }
 
+/// Call a no-argument JIT function returning i64. ARM64 epilogue
+/// MOV X0, X<vreg> (64-bit form) for results[0] == .i64 — landed
+/// under §9.7 / 7.7-fp-end-fix.
+pub fn callI64NoArgs(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+) Error!u64 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime) callconv(.c) u64;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+/// Call a single-i32-argument JIT function returning i64.
+pub fn callI64_i32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u32,
+) Error!u64 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: u32) callconv(.c) u64;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, a0);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+/// Call a single-i64-argument JIT function returning i64.
+pub fn callI64_i64(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u64,
+) Error!u64 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: u64) callconv(.c) u64;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, a0);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
 // ============================================================
 // Tests
 // ============================================================
@@ -368,4 +414,45 @@ test "entry: callI32_i32 — 1 i32 param echoed through W1 → SP slot 0 → res
     };
     try testing.expectEqual(@as(u32, 0xCAFEBABE), try callI32_i32(module, 0, &rt, 0xCAFEBABE));
     try testing.expectEqual(@as(u32, 42), try callI32_i32(module, 0, &rt, 42));
+}
+
+test "entry: callI64NoArgs — i64.const 0xDEADBEEFCAFE returns full 64-bit" {
+    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
+        return error.SkipZigTest;
+    }
+    // (result i64) — body: i64.const 0xDEADBEEFCAFE; end
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i64} };
+    var fn0 = ZirFunc.init(0, sig, &.{});
+    defer fn0.deinit(testing.allocator);
+    // i64.const 0xDEADBEEFCAFE → low32 = 0xBEEFCAFE, high32 = 0xDEAD.
+    try fn0.instrs.append(testing.allocator, .{ .op = .@"i64.const", .payload = 0xBEEFCAFE, .extra = 0xDEAD });
+    try fn0.instrs.append(testing.allocator, .{ .op = .@"end" });
+    fn0.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+    } };
+    const slots = [_]u8{0};
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const sigs = [_]zir.FuncType{sig};
+
+    const out0 = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{});
+    defer emit.deinit(testing.allocator, out0);
+
+    const bodies = [_]linker.FuncBody{
+        .{ .bytes = out0.bytes, .call_fixups = out0.call_fixups },
+    };
+    var module = try linker.link(testing.allocator, &bodies);
+    defer module.deinit(testing.allocator);
+
+    var memory: [0]u8 = .{};
+    var rt: JitRuntime = .{
+        .vm_base = &memory,
+        .mem_limit = 0,
+        .funcptr_base = undefined,
+        .table_size = 0,
+        .typeidx_base = undefined,
+        .trap_flag = 0,
+        .globals_base = undefined,
+        .globals_count = 0,
+    };
+    try testing.expectEqual(@as(u64, 0xDEADBEEFCAFE), try callI64NoArgs(module, 0, &rt));
 }

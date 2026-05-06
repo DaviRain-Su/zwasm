@@ -148,6 +148,19 @@ fn runCorpus(
     }
 }
 
+fn parseI32Token(tok: []const u8) !u32 {
+    return std.fmt.parseInt(u32, tok, 10) catch
+        @as(u32, @bitCast(std.fmt.parseInt(i32, tok, 10) catch return error.BadValue));
+}
+
+fn parseI64Token(tok: []const u8) !u64 {
+    return std.fmt.parseInt(u64, tok, 10) catch
+        @as(u64, @bitCast(std.fmt.parseInt(i64, tok, 10) catch return error.BadValue));
+}
+
+const ArgKind = enum { i32, i64 };
+const ArgValue = struct { kind: ArgKind, val: u64 };
+
 fn runAssertReturn(
     gpa: std.mem.Allocator,
     wasm_bytes: []const u8,
@@ -182,55 +195,80 @@ fn runAssertReturn(
         .globals_count = 0,
     };
 
-    // Parse args. Supports `()`, `i32:<v>`, `i32:<v> i32:<v>`.
-    const got: u32 = blk: {
-        if (std.mem.eql(u8, args_s, "()")) {
-            break :blk entry.callI32NoArgs(compiled.module, func_idx, &rt) catch |err| {
+    // Parse arg tokens.
+    var args: [2]ArgValue = undefined;
+    var n_args: usize = 0;
+    if (!std.mem.eql(u8, args_s, "()")) {
+        var arg_it = std.mem.tokenizeScalar(u8, args_s, ' ');
+        while (arg_it.next()) |tok| {
+            if (n_args >= 2) {
+                try stdout.print("FAIL  {s}: > 2 args unsupported ({s})\n", .{ name, args_s });
+                return false;
+            }
+            if (std.mem.startsWith(u8, tok, "i32:")) {
+                args[n_args] = .{ .kind = .i32, .val = try parseI32Token(tok[4..]) };
+            } else if (std.mem.startsWith(u8, tok, "i64:")) {
+                args[n_args] = .{ .kind = .i64, .val = try parseI64Token(tok[4..]) };
+            } else {
+                try stdout.print("FAIL  {s}: unsupported arg type ({s})\n", .{ name, tok });
+                return false;
+            }
+            n_args += 1;
+        }
+    }
+
+    // Parse expected result.
+    const result_kind: ArgKind = if (std.mem.startsWith(u8, results_s, "i32:")) .i32 else if (std.mem.startsWith(u8, results_s, "i64:")) .i64 else {
+        try stdout.print("FAIL  {s}: unsupported result type '{s}'\n", .{ name, results_s });
+        return false;
+    };
+    const exp_s = results_s[4..];
+    const expected: u64 = switch (result_kind) {
+        .i32 => @as(u64, try parseI32Token(exp_s)),
+        .i64 => try parseI64Token(exp_s),
+    };
+
+    // Dispatch on (n_args, arg-kind shape, result-kind).
+    const got: u64 = blk: {
+        if (n_args == 0 and result_kind == .i32) {
+            break :blk @as(u64, entry.callI32NoArgs(compiled.module, func_idx, &rt) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}(): {s}\n", .{ name, fn_name, @errorName(err) });
+                return false;
+            });
+        }
+        if (n_args == 0 and result_kind == .i64) {
+            break :blk entry.callI64NoArgs(compiled.module, func_idx, &rt) catch |err| {
                 try stdout.print("FAIL  {s}: call {s}(): {s}\n", .{ name, fn_name, @errorName(err) });
                 return false;
             };
         }
-        var arg_buf: [2]u32 = undefined;
-        var n_args: usize = 0;
-        var arg_it = std.mem.tokenizeScalar(u8, args_s, ' ');
-        while (arg_it.next()) |tok| {
-            if (n_args >= 2) {
-                try stdout.print("FAIL  {s}: > 2 args unsupported in chunk-b ({s})\n", .{ name, args_s });
-                return false;
-            }
-            if (!std.mem.startsWith(u8, tok, "i32:")) {
-                try stdout.print("FAIL  {s}: non-i32 arg unsupported ({s})\n", .{ name, tok });
-                return false;
-            }
-            const v_s = tok[4..];
-            arg_buf[n_args] = std.fmt.parseInt(u32, v_s, 10) catch
-                @as(u32, @bitCast(std.fmt.parseInt(i32, v_s, 10) catch return error.BadValue));
-            n_args += 1;
-        }
-        switch (n_args) {
-            1 => break :blk entry.callI32_i32(compiled.module, func_idx, &rt, arg_buf[0]) catch |err| {
+        if (n_args == 1 and args[0].kind == .i32 and result_kind == .i32) {
+            break :blk @as(u64, entry.callI32_i32(compiled.module, func_idx, &rt, @intCast(args[0].val)) catch |err| {
                 try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
                 return false;
-            },
-            2 => break :blk entry.callI32_i32i32(compiled.module, func_idx, &rt, arg_buf[0], arg_buf[1]) catch |err| {
+            });
+        }
+        if (n_args == 1 and args[0].kind == .i32 and result_kind == .i64) {
+            break :blk entry.callI64_i32(compiled.module, func_idx, &rt, @intCast(args[0].val)) catch |err| {
                 try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
                 return false;
-            },
-            else => {
-                try stdout.print("FAIL  {s}: 0-arg via tokenized path? ({s})\n", .{ name, args_s });
-                return false;
-            },
+            };
         }
-    };
-
-    // Parse expected result: "i32:<value>"
-    if (!std.mem.startsWith(u8, results_s, "i32:")) {
-        try stdout.print("FAIL  {s}: unsupported result shape '{s}'\n", .{ name, results_s });
+        if (n_args == 1 and args[0].kind == .i64 and result_kind == .i64) {
+            break :blk entry.callI64_i64(compiled.module, func_idx, &rt, args[0].val) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+                return false;
+            };
+        }
+        if (n_args == 2 and args[0].kind == .i32 and args[1].kind == .i32 and result_kind == .i32) {
+            break :blk @as(u64, entry.callI32_i32i32(compiled.module, func_idx, &rt, @intCast(args[0].val), @intCast(args[1].val)) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+                return false;
+            });
+        }
+        try stdout.print("FAIL  {s}: unsupported (n_args={d}, arg/result shape) for {s}({s}) -> {s}\n", .{ name, n_args, fn_name, args_s, results_s });
         return false;
-    }
-    const exp_s = results_s[4..];
-    const expected = std.fmt.parseInt(u32, exp_s, 10) catch
-        @as(u32, @bitCast(std.fmt.parseInt(i32, exp_s, 10) catch return error.BadValue));
+    };
 
     if (got != expected) {
         try stdout.print("FAIL  {s}: {s}({s}) → got {d}, expected {d}\n", .{ name, fn_name, args_s, got, expected });
