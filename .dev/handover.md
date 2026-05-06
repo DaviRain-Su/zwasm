@@ -14,26 +14,42 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `bde1223`):
+直近 commit (HEAD = `0324b88`):
 
+- `0324b88` chore(p7): Phase 8 readiness scaffolding (spec_citation rule + spill_aware_check + dep-DAG gate)
 - `bde1223` §9.7 / 7.5-spec-assertion-driver-u (corpus expand: local_set + int_literals; 138/0/94)
-- `d1eb42a` §9.7 / 7.5-spec-assertion-driver-t (local zero-init; 108/0/22)
+- `d1eb42a` §9.7 / 7.5-spec-assertion-driver-t (local zero-init)
 - `6c86c57` §9.7 / 7.5-spec-assertion-driver-s (debt stale-barrier review)
-- `ed2d7fa` §9.7 / 7.5-spec-assertion-driver-r (D-035 filed)
 
-**Active task**: spec-assertion-driver-u landed。regen に
-wast2json proposal flags (function-references / tail-call / extended-
-const / multi-memory) + skip-on-fail。NAMES に `local_set` (multi-arg
-で全 SKIP) + `int_literals` (constants で +28 PASS) を追加。
-local_tee は 13 FAIL surface — semantic miscompile (`as-binary-left`)
-+ runner gap (i64→i32) + memory.grow non-grow を含むため revert。
-spec_assert_runner: **138/0/94** (was 108/0/22; +30 PASS, +72 SKIP)。
+**Phase status**: §9.7 / 7.5 IN-PROGRESS。spec-jit-compile 12/12,
+spec_assert 138/0/94。Phase 7 残 row = 7.5 / 7.8 / 7.9 / 7.10 /
+7.11 🔒 / 7.12 / 7.13 🔒。
 
-**NEXT** = `7.5-spec-assertion-driver-v` (local_tee の semantic
-miscompile を investigate, もしくは runner i64-arg → i32-result
-dispatch 追加で SKIP → PASS pivot, もしくは別 corpus 探索)。
-local_tee の `as-binary-left` が `got 20, expected 13` という
-具体的 miscompile を出しているのは要 follow-up。
+**Active priority — Phase 7→8 transition gate prep** (per
+`phase8_transition_gate.md` §3a deferred-work DAG)。chunk -u 後、
+spec-assertion-driver chain は corpus expansion を続けても
+diminishing return が見える(local_tee は semantic gap が深く、
+他は SKIP 多い)。pre-gate work に重心を移す:
+
+**NEXT(優先順)**:
+
+1. **D-036 class-aware regalloc** (Track A root) — `max_reg_slots`
+   per-class 化。chunk-q resolveFp shim を band-aid から structural
+   に。ADR-0026 amendment 1 本で済む見込み。
+2. **D-037 FP-spill machinery** (Track A leaf, blocked-by D-036) —
+   V-class scratch + fpLoadSpilled/fpDefSpilled/fpStoreSpilled。
+   spill_aware_check BASELINE 17 → ≤ 5。
+3. **D-035 multi-value blocks** (Track B, parallel to A) — parser/
+   validator/emit 3-phase。block.wast / br_*.wast / call.wast 等
+   corpus 拡張の鍵; 7.5 "skip=0" 達成の前提。
+4. **D-030 x86_64 emit refactor** (now; 7.7 [x] で barrier dissolved)
+   — Phase 7.8 (x86_64 spec gate) の prereq。
+
+これらの後で 7.8 → 7.9/7.10 → 7.11 🔒 → 7.12 → 7.13 🔒 の順。
+
+**deferred (small chunks)**: local_tee semantic miscompile
+investigation + runner i64-arg→i32-result dispatch は D-035 の
+multi-value 修正後に再評価(関連する semantic 解釈が変わる可能性)。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -100,7 +116,12 @@ local_tee の `as-binary-left` が `got 20, expected 13` という
 | 7.5-spec-assertion-driver-s | debt stale-barrier review (Step 0.5 maintenance; 4 rows refresh) | DONE (6c86c57) |
 | 7.5-spec-assertion-driver-t | local zero-init + local_get.wast (108/0/22; +13 PASS) | DONE (d1eb42a) |
 | 7.5-spec-assertion-driver-u | corpus expand (local_set + int_literals; 138/0/94) | DONE (bde1223) |
-| 7.5-spec-assertion-driver-v | local_tee semantic miscompile investigation または runner i64→i32 dispatch | **NEXT** |
+| 7.5-readiness-scaffolding | spec_citation rule + spill_aware_check + Phase 8 dep-DAG | DONE (0324b88) |
+| 7.5-d036 | class-aware regalloc (Track A root; chunk-q shim → structural) | **NEXT** |
+| 7.5-d037 | FP-spill machinery (Track A leaf; blocked-by d036) | pending |
+| 7.5-d035 | Wasm 2.0 multi-value blocks (Track B; parallel to A) | pending |
+| 7.5-d030 | x86_64 emit refactor (now; barrier dissolved by 7.7 [x]) | pending |
+| 7.5-spec-assertion-driver-v | (deferred) local_tee semantic miscompile / runner i64→i32 — re-evaluate post D-035 | deferred |
 | 7.5-trap-reason-channel | trap_flag を `enum TrapReason` に拡張 (assert_trap reason discrimination) | pending (ADR-0028 / Diagnostic M3) |
 
 ADR-0019 phase plan post-7.6: 7.7 emit.zig, 7.8 spec gate (Linux

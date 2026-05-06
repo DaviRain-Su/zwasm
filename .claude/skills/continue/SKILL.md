@@ -146,20 +146,36 @@ change between iterations.
    that the row's author named) prevents discharge. Discharge
    commit messages take the form `chore(debt): close D-NNN
    <one line>`; remove the row from `.dev/debt.md` in the same
-   commit. If a `blocked-by` row's structural barrier was
-   removed by recent work, flip its Status to `now` and
-   discharge alongside. New debts discovered during the active
-   task are appended at task close (Step 7), not mid-task.
+   commit. New debts discovered during the active task are
+   appended at task close (Step 7), not mid-task.
 
-   **Stale-barrier check**: scan every `Status: blocked-by:`
-   row's `Last reviewed` date. Any row reviewed more than 3
-   resume cycles ago (or > 14 days) gets its barrier
-   re-evaluated NOW: walk the named barrier ("did this still
-   exist?"), then either (a) the barrier still holds — update
-   `Last reviewed` to today, OR (b) the barrier dissolved —
-   flip Status to `now` and discharge. **If 3+ rows hit the
-   stale check in one resume**, fire `audit_scaffolding` in
-   narrow mode (`§F` debt-coherence checks only) before
+   **Barrier-dissolution check (unconditional, every resume)**:
+   regardless of `Last reviewed` date, walk every `Status:
+   blocked-by: <X>` row and re-evaluate the named barrier
+   right now. The barrier is by construction **testable in
+   concrete terms** (per the same-resume discipline below):
+   "§9.7 / 7.7 完了" → grep ROADMAP for the row's `[x]`;
+   "x86_64 regalloc port" → grep src/engine/codegen/x86_64
+   for `regalloc` evidence; "Zig 0.17 stdlib API" → check
+   `zig version`. If the barrier dissolved (= the named
+   condition is now satisfied), **flip to `Status: now` in the
+   same resume**, then discharge alongside as if it had been
+   `now` from the start. This check is cheap (`grep | head`
+   per row) and runs **before** any per-task work — it
+   prevents stale `blocked-by` rows from outliving their
+   barriers silently. The `Last reviewed` column is then
+   updated only when the barrier still holds.
+
+   **Stale-barrier escalation** (secondary trigger, for rows
+   the unconditional check can't resolve definitively): scan
+   every `Status: blocked-by:` row's `Last reviewed` date.
+   Any row reviewed more than 3 resume cycles ago (or > 14
+   days) without barrier dissolution gets its barrier
+   re-walked with deeper investigation (read referenced
+   files, run referenced commands, walk referenced ADRs),
+   then `Last reviewed` updated to today. **If 3+ rows hit
+   this escalation in one resume**, fire `audit_scaffolding`
+   in narrow mode (`§F` debt-coherence checks only) before
    continuing — this catches the failure mode where multiple
    barriers quietly evaporated together (a closed phase, a
    landed ADR, a Zig version bump).
@@ -171,6 +187,38 @@ change between iterations.
    ROADMAP for M3 status. Vague barriers ("later", "TBD") were
    forbidden at file creation; if one slipped in, the audit
    `§F.2` rejects the row.
+5a. **Step 0.6 — Hard-gate prep awareness**. When the active
+   phase has a registered hard-gate row (per the "Exception —
+   hard human-in-loop transition gates" section below) and the
+   first `[ ]` row in §9.<phase> is **at or past** the
+   prep-window threshold (= 3 rows before the hard-gate row
+   in §9.<phase>'s task table; for §9.7 with hard gate at 7.13
+   that's 7.10 onward), open the hard-gate document
+   (`.dev/phase<N+1>_transition_gate.md`) and:
+
+   - Cross-check every checkbox under "design cleanliness
+     extrapolation" / "deferred-work dependency DAG" sections
+     against current code state.
+   - For any unmet checkbox that maps to a concrete code
+     change, ensure a corresponding `.dev/debt.md` row exists
+     (Status: `now` if all predecessors landed, else
+     `blocked-by: <named predecessor>`).
+   - If a gate-checkbox unmet item has **no** corresponding
+     debt row and no ROADMAP §9.<phase> row, that is a gap —
+     file the debt entry **immediately** (this is why the
+     check happens at Step 0.6, not at gate-stop time).
+
+   This is cheap (one file read + grep) and runs **before**
+   the per-task TDD loop picks the next chunk. It ensures the
+   hard-gate prep work is **discoverable as `now` debt** while
+   there's still iteration budget, not deferred to the
+   collaborative gate review where it surfaces as
+   "unchecked checkboxes with no work-tracking artifact".
+
+   For §9.7 specifically: at every resume where active row is
+   ≥ 7.10, the loop reads `.dev/phase8_transition_gate.md`
+   §3a (deferred-work DAG) + §3 (design cleanliness) and
+   reconciles their checkboxes with `.dev/debt.md`.
 6. `zig build test` (Phase 0+) — confirm the build is green. From
    Phase 1, also run `zig build test-spec`. From Phase 7, also run
    the differential subset. **If output is large (>200 lines), run

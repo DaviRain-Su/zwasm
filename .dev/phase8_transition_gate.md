@@ -131,6 +131,13 @@ Discovered during §9.7 / 7.5-spec-assertion-driver-{o,p,q}:
                   `.dev/lessons/2026-05-06-regalloc-pool-size-mismatch.md`).
 ```
 
+**`skip=0` semantics anchor (ADR-0029)**: §9.7 / 7.5 + 7.8 exit
+criteria's `skip=0` counts only `skip-impl` (implementation-gap +
+test-shape); `skip-adr-<id>` (proposal-skip ADR) is excluded by
+construction. Every proposal-skip ADR cited under
+`.dev/decisions/skip_*.md` MUST have a removal condition
+consistent with §9.8+ phase plan — gate review checks this.
+
 **Sequencing constraint**: each successor needs its predecessor
 landed first; otherwise the same lessons re-pay. Specifically:
 
