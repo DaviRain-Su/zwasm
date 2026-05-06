@@ -226,11 +226,16 @@ pub fn compute(
         }
 
         // if: pops the condition (1 operand), no push.
+        // Tolerant pop: in dead code (after br / return /
+        // unreachable drained sim_stack to 0), the cond pop is a
+        // no-op. Validator already proved the stack shape; we
+        // need not re-validate here.
         if (instr.op == .@"if") {
-            if (sim_len == 0) return Error.OperandStackUnderflow;
-            sim_len -= 1;
-            const cond_vreg = sim_stack[sim_len];
-            ranges.items[cond_vreg].last_use_pc = pc;
+            if (sim_len > 0) {
+                sim_len -= 1;
+                const cond_vreg = sim_stack[sim_len];
+                ranges.items[cond_vreg].last_use_pc = pc;
+            }
             continue;
         }
 
@@ -266,10 +271,12 @@ pub fn compute(
             continue;
         }
         if (instr.op == .@"br_if" or instr.op == .@"br_table") {
-            if (sim_len == 0) return Error.OperandStackUnderflow;
-            sim_len -= 1;
-            const cond_vreg = sim_stack[sim_len];
-            ranges.items[cond_vreg].last_use_pc = pc;
+            // Tolerant pop (see if-handler above for rationale).
+            if (sim_len > 0) {
+                sim_len -= 1;
+                const cond_vreg = sim_stack[sim_len];
+                ranges.items[cond_vreg].last_use_pc = pc;
+            }
             continue;
         }
 
@@ -285,17 +292,20 @@ pub fn compute(
                 }
             };
             // call_indirect's stack at entry is [args..., idx]; pop idx first.
+            // Tolerant: dead-code pops are no-ops (validator proved
+            // shape).
             if (instr.op == .@"call_indirect") {
-                if (sim_len == 0) return Error.OperandStackUnderflow;
-                sim_len -= 1;
-                const idx_vreg = sim_stack[sim_len];
-                ranges.items[idx_vreg].last_use_pc = pc;
+                if (sim_len > 0) {
+                    sim_len -= 1;
+                    const idx_vreg = sim_stack[sim_len];
+                    ranges.items[idx_vreg].last_use_pc = pc;
+                }
             }
-            // Pop N args (in reverse stack order).
+            // Pop N args (in reverse stack order). Best-effort:
+            // pop only as many as actually present.
             const n_args: usize = callee_sig.params.len;
-            if (sim_len < n_args) return Error.OperandStackUnderflow;
             var ai: usize = 0;
-            while (ai < n_args) : (ai += 1) {
+            while (ai < n_args and sim_len > 0) : (ai += 1) {
                 sim_len -= 1;
                 const arg_vreg = sim_stack[sim_len];
                 ranges.items[arg_vreg].last_use_pc = pc;
@@ -315,10 +325,11 @@ pub fn compute(
 
         const eff = stackEffect(instr.op) orelse return Error.UnsupportedOp;
 
-        // Pop side first — record last_use for each vreg consumed.
+        // Pop side first — record last_use for each vreg
+        // consumed. Best-effort: in dead code (validator-cleared,
+        // post-br/unreachable region), pops silently no-op.
         var i: u8 = 0;
-        while (i < eff.pops) : (i += 1) {
-            if (sim_len == 0) return Error.OperandStackUnderflow;
+        while (i < eff.pops and sim_len > 0) : (i += 1) {
             sim_len -= 1;
             const vreg = sim_stack[sim_len];
             ranges.items[vreg].last_use_pc = pc;
@@ -431,14 +442,45 @@ test "compute: br closes all live vregs at branch site (sub-7.5c-iv)" {
     try testing.expectEqual(@as(u32, 1), live.ranges[0].last_use_pc); // br at pc=1
 }
 
-test "compute: stack underflow when pop with empty stack" {
+test "compute: pop on empty stack is tolerant (validator-cleared dead-code path)" {
+    // Liveness trusts the validator's prior pass for stack-shape
+    // validity. A pop on an empty stack — only reachable via the
+    // dead-code zone after an unconditional branch — is a no-op
+    // here, not an error. See §9.7 / 7.5-block-result-deadcode.
     var f = try buildFunc(testing.allocator, &.{
         .{ .op = .drop },
         .{ .op = .@"end" },
     });
     defer f.deinit(testing.allocator);
 
-    try testing.expectError(Error.OperandStackUnderflow, compute(testing.allocator, &f, &.{}, &.{}));
+    const live = try compute(testing.allocator, &f, &.{}, &.{});
+    defer testing.allocator.free(live.ranges);
+    try testing.expectEqual(@as(usize, 0), live.ranges.len);
+}
+
+test "compute: dead code after `br 0` does not underflow" {
+    // Real-world repro from spec/wasm-1.0/labels.0.wasm:
+    //   block (result i32) i32.const 1 ; br 0 ; i32.const 0 end
+    // After `br 0` the stack drains; `i32.const 0` (dead code)
+    // pushes a fresh vreg. The matching `end` is the
+    // function-level end (block / function share `end` op since
+    // the block-result path collapses).
+    var f = try buildFunc(testing.allocator, &.{
+        .{ .op = .@"block" },
+        .{ .op = .@"i32.const", .payload = 1 },
+        .{ .op = .@"br", .payload = 0 },
+        .{ .op = .@"i32.const", .payload = 0 },
+        .{ .op = .@"end" },
+        .{ .op = .@"end" },
+    });
+    defer f.deinit(testing.allocator);
+
+    // Should compute successfully — no underflow on the dead
+    // i32.const after the br.
+    const live = try compute(testing.allocator, &f, &.{}, &.{});
+    defer testing.allocator.free(live.ranges);
+    // Two i32.const pushes → 2 vreg ranges.
+    try testing.expectEqual(@as(usize, 2), live.ranges.len);
 }
 
 test "compute: select consumes 3 vregs and produces 1" {
