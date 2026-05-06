@@ -14,24 +14,26 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `ff7df89`):
+直近 commit (HEAD = `7049a2c`):
 
-- `ff7df89` §9.7 / 7.5-spec-assertion-driver-f (D-033 discharged; local.get/set/tee width-aware; 81/0/0)
+- `7049a2c` §9.7 / 7.5-spec-assertion-driver-g (FP locals f32/f64; entry-side test)
+- `ff7df89` §9.7 / 7.5-spec-assertion-driver-f (D-033 discharged; 81/0/0)
 - `a6cd9f3` §9.7 / 7.5-spec-assertion-driver-e (unreachable.wast +63; 80/0/1)
 - `b8ebe8e` §9.7 / 7.5-spec-assertion-driver-d (assert_trap; 17/0/1)
-- `c347bcd` §9.7 / 7.5-spec-assertion-driver-c (callI64* + handcrafted_i64; 14/0/1)
 
-**Active task**: spec-assertion-driver-f landed。**D-033 discharge**:
-ARM64 emit の local.get/set/tee が declared type で i32→W/i64→X
-を分岐 (`localValType` helper)。SKIP'd `id i64:-1 -> i64:-1` を
-restore — spec_assert_runner: **81/0/0**。Pivot した — chunk-f は
-richer-runtime path 予定だったが D-033 の方が leverage 高。
+**Active task**: spec-assertion-driver-g landed。ARM64 emit の
+local.get/set/tee が f32/f64 を V-class encoders (encLdrSImm /
+encLdrDImm 新設 + 既存 encStrSImm / encStrDImm) に dispatch。
+i32/i64/f32/f64 の 4 通りで local-slot 操作 が completion した。
+Unit test (entry.zig) で f32 round-trip。pivot した — original
+chunk-g (richer JitRuntime) より D-033 兄弟の FP-local fix の
+方が leverage 高い。spec_assert_runner: 81/0/0 (FP-result
+runner side は -h)。
 
-**NEXT** = `7.5-spec-assertion-driver-g` (richer JitRuntime: default
-memory page + table の populate で nop.wast / br.wast 等の
-memory.grow / call_indirect を含む corpus を取り込み)。
-subsequent: -h (FP local — f32/f64 local.get の V-reg encoders),
--i (broader curated set)。SlotOverflow / D-034 は依然 hold。
+**NEXT** = `7.5-spec-assertion-driver-h` (runner FP entry helpers
+→ `callF32_f32` / `callF64_*`; bit-pattern 経由で f32:/f64: token
+parse + handcrafted_fp fixture)。subsequent: -i (richer JitRuntime
+or broader corpus), -j (D-034 spill-aware refactor)。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -83,8 +85,9 @@ subsequent: -h (FP local — f32/f64 local.get の V-reg encoders),
 | 7.5-spec-assertion-driver-d | assert_trap directive + handcrafted_trap (17/0/1) | DONE (b8ebe8e) |
 | 7.5-spec-assertion-driver-e | regen に assert_trap + i64 受容; unreachable.wast 取込 (80/0/1) | DONE (a6cd9f3) |
 | 7.5-spec-assertion-driver-f | D-033 discharge (local.get/set/tee width-aware); 81/0/0 | DONE (ff7df89) |
-| 7.5-spec-assertion-driver-g | richer JitRuntime (default mem + table) で call_indirect / memory.grow 系を取り込み | **NEXT** |
-| 7.5-spec-assertion-driver-h | FP locals (f32/f64) の V-reg encoders + local.get/set/tee 拡張 | pending |
+| 7.5-spec-assertion-driver-g | FP locals (f32/f64) の V-reg encoders + local.get/set/tee 拡張 | DONE (7049a2c) |
+| 7.5-spec-assertion-driver-h | runner FP entry helpers (callF32* / callF64*) + handcrafted_fp fixture | **NEXT** |
+| 7.5-spec-assertion-driver-i | richer JitRuntime (default mem + table) で memory.grow / call_indirect 系 | pending |
 | 7.5-trap-reason-channel | trap_flag を `enum TrapReason` に拡張 (assert_trap reason discrimination) | pending (ADR-0028 / Diagnostic M3) |
 
 ADR-0019 phase plan post-7.6: 7.7 emit.zig, 7.8 spec gate (Linux
