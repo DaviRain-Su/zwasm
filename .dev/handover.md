@@ -14,23 +14,22 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `818e5a8`):
+直近 commit (HEAD = `e0af079`):
 
-- `818e5a8` §9.7 / 7.5-empty-module-fix (compileWasm + linker.link が 0-function modules を accept; 1/12 → 2/12)
-- `217c214` §9.7 / 7.5-spec-jit-compile-runner (corpus walker; 1/12 pass; surfaces 11 gaps)
+- `e0af079` §9.7 / 7.5-multi-arg-entry (ARM64 X1..X7 i32 params; 2/12 → 3/12)
+- `818e5a8` §9.7 / 7.5-empty-module-fix (0-function modules accept; 1/12 → 2/12)
+- `217c214` §9.7 / 7.5-spec-jit-compile-runner (corpus walker; 1/12 pass)
 - `3e33ead` chore(p7): audit catch-up — flip §9.7 / 7.3 / 7.4 / 7.6 [x]
 - `884d7d8` chore(p7): mark §9.7 / 7.7 [x]
 - `cd81b8e` docs(workflow): parallel-bg + file-logged gate rule
-- `0789c6e` / `6e935c9` §9.7 / 7.7-cc-pivot-shadow-space
 
-**Active task**: empty-module-fix landed (2/12 pass on
-test-spec-jit-compile)。残り 10/12 fail はすべて `arm64/emit.zig:134
-"func.sig.params.len > 0 → UnsupportedOp"`。 **NEXT** =
-`7.5-multi-arg-entry` (ARM64 emit prologue が AAPCS64 arg regs
-X0..X7 を local slot にマーシャルするよう拡張 + entry shim を
-parametric dispatch + x86_64 mirror)。これで spec-jit-compile が
-12/12 pass になる見込み。続いて assertion-driven JIT spec runner
-(wast2json corpus + execute path)。
+**Active task**: multi-arg-entry (i32 only) landed (3/12 pass)。
+残り 9 fails は heterogeneous: UnsupportedOp と
+OperandStackUnderflow が混在。**NEXT** =
+`7.5-investigate-fails` (各 fixture を個別に展開して原因を分類
+— i64 const / param / f32+f64 const、br_table edge、unreachable op
+など)。原因が判明した時点で per-cause sub-chunk に分割。並行で
+x86_64 multi-arg mirror は 7.8 始動時に実施。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -54,8 +53,9 @@ parametric dispatch + x86_64 mirror)。これで spec-jit-compile が
 | # | Chunk | Status |
 |---|---|---|
 | 7.5-jit-compile-runner | corpus walker; `zig build test-spec-jit-compile`; 1/12 pass | DONE (217c214) |
-| 7.5-empty-module-fix | `compileWasm` + `linker.link` が 0-function modules を accept | DONE (818e5a8; 2/12 pass) |
-| 7.5-multi-arg-entry | ARM64 + x86_64 emit prologue + entry shim を multi-arg signature 対応 (`emit.zig:134` の params reject を解除) | **NEXT** |
+| 7.5-empty-module-fix | `compileWasm` + `linker.link` が 0-function modules を accept | DONE (818e5a8; 2/12) |
+| 7.5-multi-arg-entry | ARM64 X1..X7 i32 params (≤ 7 i32 のみ; i64/f/* + 8th+ stack-arg は defer) | DONE (e0af079; 3/12) |
+| 7.5-investigate-fails | 残り 9 fails を per-fixture で原因分類 → per-cause sub-chunk 化 | **NEXT** |
 | 7.5-spec-assertion-driver | wast2json で spec corpus を `.wasm` + assertion manifest 化 → JIT 経由で execute → pass/fail counts | pending |
 | 7.5-trap-reason-channel | trap_flag を `enum TrapReason` に拡張 (assert_trap reason discrimination) | pending (ADR-0028 / Diagnostic M3) |
 
@@ -86,6 +86,7 @@ zone placement / "constant overhead" / WASI prereq 等)。
 
 ## Recently closed (full history via `git log --oneline`)
 
+- §9.7 / 7.5-multi-arg-entry (e0af079): ARM64 emit.zig:134 の params reject を lift。AAPCS64 X1..X7 の最大 7 i32 params を prologue で `STR W{i+1}, [SP, #(i*8)]` 経由で local slot に snapshot。`local.get/.set/.tee` が `total_locals = num_params + num_locals` を bound にする。i64 / f32 / f64 / refs / 8 個目以降は今 deferred → UnsupportedOp。spec-jit-compile-runner 2/12 → 3/12 (forward.0.wasm clears)。x86_64 mirror は 7.8 開始時。
 - §9.7 / 7.5-empty-module-fix (818e5a8): `compileWasm` が `function` section absent のとき空 CompiledWasm を返す + `linker.link` が 0-body case で empty JitModule を返す。inline test (8-byte header → 0 sigs / 0 results) 追加。jit-compile-runner: 1→2 passed (empty.wasm clears)。残り 10 fails はすべて multi-arg UnsupportedOp。
 - §9.7 / 7.5-spec-jit-compile-runner (217c214): `test/spec/jit_compile_runner.zig` + `zig build test-spec-jit-compile` build step。`test/spec/{smoke,wasm-1.0}/` 12 fixtures を `engine.runner.compileWasm` でぶん回す。1/12 pass; 11/12 fail のうち 10/11 は arm64/emit.zig:134 の params-len reject、1/11 は empty.wasm の MissingTypeSection。test-all 未追加 (Mac aarch64 only)。
 - §9.7 / 7.7-cc-pivot-shadow-space (0789c6e + 6e935c9): emit.zig 直接/間接 CALL 両方を `emitShadowAlloc` / `emitShadowFree` で wrap (Win64 32-byte; SysV no-op)。byte-offset 計算で imm value (32) と SUB encoding length (4) を取り違えていた initial bug は 6e935c9 で修正。LOOP/SKILL/CLAUDE.md に並列バックグラウンド + ファイル出力 + 再実行禁止のルールを伝搬 (cd81b8e)。
