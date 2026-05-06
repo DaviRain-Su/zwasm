@@ -1338,8 +1338,31 @@ test "compile: function with > 7 i32 params surfaces UnsupportedOp" {
     try testing.expectError(Error.UnsupportedOp, compile(testing.allocator, &f, empty, &.{}, &.{}));
 }
 
-test "compile: function with i64 param surfaces UnsupportedOp (i32 only today)" {
+test "compile: (param i64) — prologue stores X1 to [SP, #0] (STR X width)" {
     const params = [_]zir.ValType{.i64};
+    const sig: zir.FuncType = .{ .params = &params, .results = &.{.i32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    // Body is just `(i32.const 0) end` — exercises only the
+    // prologue's STR X for the param; result-type marshalling is
+    // outside this chunk's scope.
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+    } };
+    const slots = [_]u8{0};
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // STR X1, [SP, #0] for the i64 param at byte 36 (post-
+    // prologue with frame). encStrImm width-X vs encStrImmW.
+    const expected_str_x = inst.encStrImm(1, 31, 0);
+    try testing.expectEqual(expected_str_x, std.mem.readInt(u32, out.bytes[36..][0..4], .little));
+}
+
+test "compile: function with f32 param still surfaces UnsupportedOp (FP V-reg marshalling pending)" {
+    const params = [_]zir.ValType{.f32};
     const sig: zir.FuncType = .{ .params = &params, .results = &.{.i32} };
     var f = ZirFunc.init(0, sig, &.{});
     defer f.deinit(testing.allocator);

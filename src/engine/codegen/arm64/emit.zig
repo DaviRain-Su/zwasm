@@ -131,17 +131,21 @@ pub fn compile(
     // simple imm12 LDR/STR W addressing. Frame size rounds up to
     // 16 bytes per AAPCS64 §6.4 (SP must stay 16-byte aligned).
     // ============================================================
-    // Multi-arg entry (§9.7 / 7.5-multi-arg-entry):
+    // Multi-arg entry (§9.7 / 7.5-multi-arg-entry + 7.5-i64-params):
     // - AAPCS64 passes int args in X0..X7. X0 carries
     //   `*const JitRuntime` per ADR-0017, so user args occupy
-    //   X1..X7 → at most 7 i32 params today.
-    // - i64 / f32 / f64 / v128 / refs surface as UnsupportedOp
-    //   until follow-up sub-chunks add per-class register
-    //   marshalling (W vs X width; V regs for FP).
+    //   X1..X7 → at most 7 integer params today.
+    // - i32 + i64 supported via per-param STR width selection
+    //   (W width for i32, X width for i64). f32 / f64 / v128 /
+    //   refs surface as UnsupportedOp until follow-up sub-chunks
+    //   add V-reg marshalling.
     // - Stack args (params.len > 7) likewise unsupported.
     if (func.sig.params.len > 7) return Error.UnsupportedOp;
     for (func.sig.params) |p| {
-        if (p != .i32) return Error.UnsupportedOp;
+        switch (p) {
+            .i32, .i64 => {},
+            .f32, .f64, .v128, .funcref, .externref => return Error.UnsupportedOp,
+        }
     }
     const num_params: u32 = @intCast(func.sig.params.len);
     const num_locals: u32 = @intCast(func.locals.len);
@@ -200,16 +204,27 @@ pub fn compile(
         try gpr.writeU32(allocator, &buf, inst.encSubImm12(31, 31, @intCast(frame_bytes)));
     }
 
-    // Multi-arg entry: store params from W1..W{num_params} into
+    // Multi-arg entry: store params from X1..X{num_params} into
     // their stack slots [SP + 0], [SP + 8], … so subsequent
     // `local.get N` (N < num_params) reads from the same slot
-    // shape as declared locals. AAPCS64 X0 = `*const JitRuntime`
-    // (already snapshotted to X19 above), X1 = param 0, etc.
+    // shape as declared locals. Per AAPCS64 §6.4: i32 args are
+    // passed with the upper 32 bits of the X register undefined,
+    // so STR W (32-bit) is mandatory for .i32 to avoid storing
+    // caller garbage in the high half. i64 args use STR X
+    // (full 64-bit). AAPCS64 X0 = `*const JitRuntime` (already
+    // snapshotted to X19 above), X1 = param 0, etc.
     var p_idx: u32 = 0;
     while (p_idx < num_params) : (p_idx += 1) {
         const param_off: u14 = @intCast(p_idx * 8);
-        const src_w: u5 = @intCast(p_idx + 1); // W1..W7
-        try gpr.writeU32(allocator, &buf, inst.encStrImmW(src_w, 31, param_off));
+        const src_n: u5 = @intCast(p_idx + 1); // X1..X7 / W1..W7
+        switch (func.sig.params[p_idx]) {
+            .i32 => try gpr.writeU32(allocator, &buf, inst.encStrImmW(src_n, 31, param_off)),
+            .i64 => try gpr.writeU32(allocator, &buf, inst.encStrImm(src_n, 31, @intCast(p_idx * 8))),
+            // FP / SIMD / refs were already filtered as
+            // UnsupportedOp at the entry-shape check above; the
+            // exhaustive switch here is for zlinter satisfaction.
+            .f32, .f64, .v128, .funcref, .externref => unreachable,
+        }
     }
 
     // ============================================================
