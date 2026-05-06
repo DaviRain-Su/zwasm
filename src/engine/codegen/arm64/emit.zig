@@ -505,26 +505,46 @@ pub fn compile(
             .@"i32.ctz" => try op_alu_int.emitI32Ctz(&ctx, &ins),
             .@"local.get" => {
                 // Push a fresh vreg holding the value loaded from
-                // [SP, #(local_idx * 8)].
+                // [SP, #(local_idx * 8)]. Width follows declared
+                // local type (i32 → LDR W, i64 → LDR X) per D-033.
                 const local_idx = ins.payload;
                 if (local_idx >= total_locals) return Error.UnsupportedOp;
-                const offset: u14 = @intCast(local_idx * 8);
+                const ty = localValType(func, num_params, local_idx);
+                const offset_w: u14 = @intCast(local_idx * 8);
+                const offset_x: u15 = @intCast(local_idx * 8);
                 const vreg = next_vreg;
                 next_vreg += 1;
                 if (vreg >= alloc.slots.len) return Error.SlotOverflow;
-                const wd = try gpr.resolveGpr(alloc, vreg);
-                try gpr.writeU32(allocator, &buf, inst.encLdrImmW(wd, 31, offset));
+                const rd = try gpr.resolveGpr(alloc, vreg);
+                switch (ty) {
+                    .i32 => try gpr.writeU32(allocator, &buf, inst.encLdrImmW(rd, 31, offset_w)),
+                    .i64 => try gpr.writeU32(allocator, &buf, inst.encLdrImm(rd, 31, offset_x)),
+                    .f32, .f64, .v128, .funcref, .externref => {
+                        std.debug.print("arm64/emit: local.get type `{s}` unsupported (idx={d})\n", .{ @tagName(ty), local_idx });
+                        return Error.UnsupportedOp;
+                    },
+                }
                 try pushed_vregs.append(allocator, vreg);
             },
             .@"local.set" => {
                 // Pop top vreg, write to [SP, #(local_idx * 8)].
+                // Width follows declared local type per D-033.
                 if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
                 const local_idx = ins.payload;
                 if (local_idx >= total_locals) return Error.UnsupportedOp;
-                const offset: u14 = @intCast(local_idx * 8);
+                const ty = localValType(func, num_params, local_idx);
+                const offset_w: u14 = @intCast(local_idx * 8);
+                const offset_x: u15 = @intCast(local_idx * 8);
                 const src = pushed_vregs.pop().?;
-                const ws = try gpr.resolveGpr(alloc, src);
-                try gpr.writeU32(allocator, &buf, inst.encStrImmW(ws, 31, offset));
+                const rs = try gpr.resolveGpr(alloc, src);
+                switch (ty) {
+                    .i32 => try gpr.writeU32(allocator, &buf, inst.encStrImmW(rs, 31, offset_w)),
+                    .i64 => try gpr.writeU32(allocator, &buf, inst.encStrImm(rs, 31, offset_x)),
+                    .f32, .f64, .v128, .funcref, .externref => {
+                        std.debug.print("arm64/emit: local.set type `{s}` unsupported (idx={d})\n", .{ @tagName(ty), local_idx });
+                        return Error.UnsupportedOp;
+                    },
+                }
             },
             .@"local.tee" => {
                 // Write top vreg to [SP, #(local_idx * 8)] WITHOUT
@@ -532,10 +552,19 @@ pub fn compile(
                 if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
                 const local_idx = ins.payload;
                 if (local_idx >= total_locals) return Error.UnsupportedOp;
-                const offset: u14 = @intCast(local_idx * 8);
+                const ty = localValType(func, num_params, local_idx);
+                const offset_w: u14 = @intCast(local_idx * 8);
+                const offset_x: u15 = @intCast(local_idx * 8);
                 const src = pushed_vregs.items[pushed_vregs.items.len - 1];
-                const ws = try gpr.resolveGpr(alloc, src);
-                try gpr.writeU32(allocator, &buf, inst.encStrImmW(ws, 31, offset));
+                const rs = try gpr.resolveGpr(alloc, src);
+                switch (ty) {
+                    .i32 => try gpr.writeU32(allocator, &buf, inst.encStrImmW(rs, 31, offset_w)),
+                    .i64 => try gpr.writeU32(allocator, &buf, inst.encStrImm(rs, 31, offset_x)),
+                    .f32, .f64, .v128, .funcref, .externref => {
+                        std.debug.print("arm64/emit: local.tee type `{s}` unsupported (idx={d})\n", .{ @tagName(ty), local_idx });
+                        return Error.UnsupportedOp;
+                    },
+                }
             },
             .@"i32.popcnt" => try op_alu_int.emitI32Popcnt(&ctx, &ins),
             .@"select", .@"select_typed" => {
@@ -826,6 +855,14 @@ pub fn compile(
 fn encStpFpLrPreIdx() u32 {
     // 0xA9BF7BFD = STP X29, X30, [SP, #-16]!
     return 0xA9BF7BFD;
+}
+
+/// Look up the declared Wasm value-type at a local index (params
+/// followed by declared locals; per D-033 fix). Caller has already
+/// validated `local_idx < total_locals`.
+fn localValType(func: *const ZirFunc, num_params: u32, local_idx: u32) zir.ValType {
+    if (local_idx < num_params) return func.sig.params[local_idx];
+    return func.locals[local_idx - num_params];
 }
 
 /// `LDP X29, X30, [SP], #16` — post-index pop of FP/LR pair.

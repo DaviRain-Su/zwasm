@@ -1,6 +1,6 @@
 module m.wasm
 assert_return k () -> i64:244837814094590
 assert_return id i64:42 -> i64:42
-skip d033 id i64:-1 (local.get truncates i64 to 32-bit; .dev/debt.md D-033)
+assert_return id i64:-1 -> i64:-1
 assert_return iadd i64:41 -> i64:42
 assert_return ext i32:-1 -> i64:-1
