@@ -14,13 +14,13 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `ec37a59`):
+直近 commit (HEAD = `4a7fe4a`):
 
+- `4a7fe4a` feat(p7): §9.7 / 7.5-d030-g — x86_64 op_call.zig (call/call_indirect; 3074→2843 LOC)
 - `ec37a59` feat(p7): §9.7 / 7.5-d030-f — x86_64 op_control.zig (label/branch; 3328→3074 LOC)
 - `edd9d20` feat(p7): §9.7 / 7.5-d030-e — x86_64 op_memory.zig (load/store; 3456→3328 LOC)
 - `981d879` feat(p7): §9.7 / 7.5-d030-d — x86_64 op_convert.zig (FP↔i / FP↔FP; 4208→3456 LOC)
 - `aec4e3c` feat(p7): §9.7 / 7.5-d030-c — x86_64 op_alu_float.zig (FP scalar; 4625→4208 LOC)
-- `874b10b` feat(p7): §9.7 / 7.5-d030-b — x86_64 op_alu_int.zig (i32 ALU; 4925→4625 LOC)
 
 **Phase status**: §9.7 / 7.5 IN-PROGRESS。spec-jit-compile 12/12,
 spec_assert 138/0/94。Phase 7 残 row = 7.5 / 7.8 / 7.9 / 7.10 /
@@ -33,11 +33,10 @@ D-030 / D-038 が now。
 
 **NEXT(優先順)**:
 
-1. **D-030 chunk-d030-g: x86_64 op_call.zig** — emitCall /
-   emitCallIndirect / emitShadowAlloc / emitShadowFree /
-   marshalCallArgs / captureCallResult (~280 LOC)。
-2. **D-030 chunk-d030-h..i** — op_globals / op_const+local
-   (small remainders)。
+1. **D-030 chunk-d030-h: x86_64 op_globals.zig** — emitI32GlobalGet
+   + emitI32GlobalSet (~50 LOC)。
+2. **D-030 chunk-d030-i: x86_64 op_local.zig** — localDisp +
+   emitLocalGet/Set/Tee (~80 LOC)。これで D-030 完了。
 3. **D-035-b emit-side multi-result merge** — `Label.merge_top_vreg`
    を `?[]u32` 化、`emitEndIntra` で N MOV を emit。
 4. **D-038 emitEndIntra spill-staging** — BASELINE 2 → 0。
@@ -123,8 +122,9 @@ multi-value 修正後に再評価(関連する semantic 解釈が変わる可能
 | 7.5-d030-d | x86_64 op_convert.zig (FP↔i / FP↔FP 7 fns; -752 LOC) | DONE (981d879) |
 | 7.5-d030-e | x86_64 op_memory.zig (emitMemOp + bounds_fixup; -128 LOC) | DONE (edd9d20) |
 | 7.5-d030-f | x86_64 op_control.zig (label/branch 9 fns; -254 LOC) | DONE (ec37a59) |
-| 7.5-d030-g | x86_64 op_call.zig (call/call_indirect + shadow + marshal) | **NEXT** |
-| 7.5-d030-h..i | x86_64 op_globals / op_const+local | pending |
+| 7.5-d030-g | x86_64 op_call.zig (call/call_indirect 5 fns; -231 LOC) | DONE (4a7fe4a) |
+| 7.5-d030-h | x86_64 op_globals.zig (global.get/set; ~50 LOC) | **NEXT** |
+| 7.5-d030-i | x86_64 op_local.zig (localDisp + local.get/set/tee) | pending |
 | 7.5-d035-b | multi-value blocks — emit-side merge_top_vreg → []u32 | pending |
 | 7.5-d038 | emitEndIntra spill-staging residual (chunk-d037-a leftover; BASELINE 2→0) | pending |
 | 7.5-spec-assertion-driver-v | (deferred) local_tee semantic miscompile / runner i64→i32 — re-evaluate post D-035 | deferred |
