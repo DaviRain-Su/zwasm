@@ -1,21 +1,21 @@
 module local_set.0.wasm
-skip non-int-result type-local-i32
-skip non-int-result type-local-i64
-skip non-int-result type-local-f32
-skip non-int-result type-local-f64
-skip non-int-result type-param-i32
-skip non-int-result type-param-i64
+assert_return type-local-i32 () -> ()
+assert_return type-local-i64 () -> ()
+assert_return type-local-f32 () -> ()
+assert_return type-local-f64 () -> ()
+assert_return type-param-i32 i32:2 -> ()
+assert_return type-param-i64 i64:3 -> ()
 skip non-int-arg type-param-f32
 skip non-int-arg type-param-f64
-skip non-int-result as-block-value
-skip non-int-result as-loop-value
-skip non-int-result as-br-value
-skip non-int-result as-br_if-value
-skip non-int-result as-br_if-value-cond
-skip non-int-result as-br_table-value
-skip non-int-result as-return-value
-skip non-int-result as-if-then
-skip non-int-result as-if-else
+assert_return as-block-value i32:0 -> ()
+assert_return as-loop-value i32:0 -> ()
+assert_return as-br-value i32:0 -> ()
+assert_return as-br_if-value i32:0 -> ()
+assert_return as-br_if-value-cond i32:0 -> ()
+assert_return as-br_table-value i32:0 -> ()
+assert_return as-return-value i32:0 -> ()
+assert_return as-if-then i32:1 -> ()
+assert_return as-if-else i32:0 -> ()
 skip non-int-arg type-mixed
 skip non-int-arg write
 skip directive-assert_invalid

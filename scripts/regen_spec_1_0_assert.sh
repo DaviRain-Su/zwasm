@@ -96,14 +96,18 @@ for c in d['commands']:
         if not all(allowed_arg(x) for x in args):
             lines.append(f'skip non-int-arg {a["field"]}')
             continue
-        if len(results) != 1 or results[0]['type'] not in ('i32', 'i64'):
+        # 7.5-close-c1: void-result (`expected: []`) flows through
+        # via callVoid* helpers. Per ADR-0029 still skip-impl until
+        # the runner side dispatches on len(results)==0, but the
+        # regen no longer rejects it at this stage.
+        if len(results) > 1 or any(r['type'] not in ('i32', 'i64') for r in results):
             lines.append(f'skip non-int-result {a["field"]}')
             continue
         if len(args) > 2:
             lines.append(f'skip more-than-2-args {a["field"]}')
             continue
         args_s = ' '.join(fmt(x) for x in args) if args else '()'
-        results_s = ' '.join(fmt(x) for x in results)
+        results_s = ' '.join(fmt(x) for x in results) if results else '()'
         lines.append(f'assert_return {a["field"]} {args_s} -> {results_s}')
     elif t == 'assert_trap':
         a = c['action']

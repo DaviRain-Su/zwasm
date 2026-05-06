@@ -262,6 +262,41 @@ fn runAssertReturn(
         }
     }
 
+    // 7.5-close-c1: void-result dispatch (`results_s == "()"`).
+    // No expected value to compare; just invoke + check no trap.
+    if (std.mem.eql(u8, results_s, "()")) {
+        if (n_args == 0) {
+            entry.callVoidNoArgs(compiled.module, func_idx, &rt) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}(): {s}\n", .{ name, fn_name, @errorName(err) });
+                return false;
+            };
+            return true;
+        }
+        if (n_args == 1 and args[0].kind == .i32) {
+            entry.callVoid_i32(compiled.module, func_idx, &rt, @intCast(args[0].val)) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+                return false;
+            };
+            return true;
+        }
+        if (n_args == 1 and args[0].kind == .i64) {
+            entry.callVoid_i64(compiled.module, func_idx, &rt, args[0].val) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+                return false;
+            };
+            return true;
+        }
+        if (n_args == 2 and args[0].kind == .i32 and args[1].kind == .i32) {
+            entry.callVoid_i32i32(compiled.module, func_idx, &rt, @intCast(args[0].val), @intCast(args[1].val)) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+                return false;
+            };
+            return true;
+        }
+        try stdout.print("FAIL  {s}: void-result unsupported (n_args={d}, arg shape) for {s}({s})\n", .{ name, n_args, fn_name, args_s });
+        return false;
+    }
+
     // Parse expected result.
     const result_kind: ArgKind = if (std.mem.startsWith(u8, results_s, "i32:")) .i32 else if (std.mem.startsWith(u8, results_s, "i64:")) .i64 else if (std.mem.startsWith(u8, results_s, "f32:")) .f32 else if (std.mem.startsWith(u8, results_s, "f64:")) .f64 else {
         try stdout.print("FAIL  {s}: unsupported result type '{s}'\n", .{ name, results_s });

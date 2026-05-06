@@ -90,6 +90,68 @@ pub fn callI32_i32i32(
     return result;
 }
 
+/// Call a no-argument void-returning JIT function (results.len == 0).
+/// The JIT body's function-level `end` handler skips result
+/// marshalling when `func.sig.results.len == 0`; the epilogue
+/// runs as POP RBP / RET (x86_64) or LDP / RET (ARM64). Used by
+/// §9.7 / 7.5-close-c1 spec_assert dispatch for `local.set` /
+/// `global.set` / store-style assertions whose `(invoke ...)`
+/// has empty `expected`. Trap detection mirrors `callI32NoArgs`.
+pub fn callVoidNoArgs(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+) Error!void {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime) callconv(.c) void;
+    const f = module.entry(func_idx, Fn);
+    f(rt);
+    if (rt.trap_flag != 0) return Error.Trap;
+}
+
+/// Call a single-i32-argument void-returning JIT function.
+pub fn callVoid_i32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u32,
+) Error!void {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: u32) callconv(.c) void;
+    const f = module.entry(func_idx, Fn);
+    f(rt, a0);
+    if (rt.trap_flag != 0) return Error.Trap;
+}
+
+/// Call a two-i32-argument void-returning JIT function.
+pub fn callVoid_i32i32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u32,
+    a1: u32,
+) Error!void {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: u32) callconv(.c) void;
+    const f = module.entry(func_idx, Fn);
+    f(rt, a0, a1);
+    if (rt.trap_flag != 0) return Error.Trap;
+}
+
+/// Call a single-i64-argument void-returning JIT function.
+pub fn callVoid_i64(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u64,
+) Error!void {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: u64) callconv(.c) void;
+    const f = module.entry(func_idx, Fn);
+    f(rt, a0);
+    if (rt.trap_flag != 0) return Error.Trap;
+}
+
 /// Call a no-argument JIT function returning i64. ARM64 epilogue
 /// MOV X0, X<vreg> (64-bit form) for results[0] == .i64 — landed
 /// under §9.7 / 7.7-fp-end-fix.
