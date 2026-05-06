@@ -18,11 +18,24 @@
 //! Phase 8 / x86_64 emit will introduce arch dispatch).
 
 const std = @import("std");
+const builtin_arch = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 const jit_mem = @import("../../../platform/jit_mem.zig");
-const emit = @import("../arm64/emit.zig");
-const inst = @import("../arm64/inst.zig");
+/// 7.5-close-d042 / §9.7 / 7.8 prep: comptime arch dispatch
+/// matching `compile.zig` (commit `0925134`). Both backends
+/// expose `CallFixup` with the same
+/// `{byte_offset: u32, target_func_idx: u32}` shape.
+const emit = switch (builtin_arch.target.cpu.arch) {
+    .aarch64 => @import("../arm64/emit.zig"),
+    .x86_64 => @import("../x86_64/emit.zig"),
+    else => @compileError("unsupported host arch for linker"),
+};
+const inst = switch (builtin_arch.target.cpu.arch) {
+    .aarch64 => @import("../arm64/inst.zig"),
+    .x86_64 => @import("../x86_64/inst.zig"),
+    else => @compileError("unsupported host arch for linker"),
+};
 
 pub const Error = error{
     /// A call_fixup names a target_func_idx outside `func_bodies`.
@@ -95,24 +108,41 @@ pub fn link(allocator: Allocator, func_bodies: []const FuncBody) Error!JitModule
         @memcpy(block.bytes[off..][0..body.bytes.len], body.bytes);
     }
 
-    // Patch every BL placeholder. Each fixup's byte_offset is
-    // function-local; add the function's own base offset to get
-    // its absolute byte position.
+    // Patch every CALL/BL placeholder. Each fixup's byte_offset
+    // is function-local; add the function's own base offset to
+    // get its absolute byte position. The encoding differs per
+    // arch (BL imm26 on ARM64; CALL rel32 on x86_64) — comptime
+    // switch picks the right path with no runtime cost.
     for (func_bodies, 0..) |body, i| {
         const base = offsets[i];
         for (body.call_fixups) |fx| {
             if (fx.target_func_idx >= func_bodies.len) return Error.UnknownCallTarget;
             const fixup_abs: i64 = @as(i64, base) + @as(i64, fx.byte_offset);
             const target_abs: i64 = offsets[fx.target_func_idx];
-            const disp_bytes = target_abs - fixup_abs;
-            if (@rem(disp_bytes, 4) != 0) return Error.DisplacementOverflow;
-            const disp_words = @divExact(disp_bytes, 4);
-            // imm26 signed range: ±2^25 words = ±128 MiB.
-            if (disp_words < -(1 << 25) or disp_words >= (1 << 25)) {
-                return Error.DisplacementOverflow;
+            switch (builtin_arch.target.cpu.arch) {
+                .aarch64 => {
+                    const disp_bytes = target_abs - fixup_abs;
+                    if (@rem(disp_bytes, 4) != 0) return Error.DisplacementOverflow;
+                    const disp_words = @divExact(disp_bytes, 4);
+                    // imm26 signed range: ±2^25 words = ±128 MiB.
+                    if (disp_words < -(1 << 25) or disp_words >= (1 << 25)) {
+                        return Error.DisplacementOverflow;
+                    }
+                    const new_word = inst.encBL(@intCast(disp_words));
+                    std.mem.writeInt(u32, block.bytes[@intCast(fixup_abs)..][0..4], new_word, .little);
+                },
+                .x86_64 => {
+                    // CALL rel32: 5-byte instruction (0xE8 +
+                    // disp32). disp = target - (at + 5). i32
+                    // signed range = ±2 GiB; flag overflow.
+                    const disp_bytes = target_abs - fixup_abs - 5;
+                    if (disp_bytes < std.math.minInt(i32) or disp_bytes > std.math.maxInt(i32)) {
+                        return Error.DisplacementOverflow;
+                    }
+                    inst.patchRel32(block.bytes, @intCast(fixup_abs), 5, @intCast(disp_bytes));
+                },
+                else => @compileError("unsupported host arch for linker patch loop"),
             }
-            const new_word = inst.encBL(@intCast(disp_words));
-            std.mem.writeInt(u32, block.bytes[@intCast(fixup_abs)..][0..4], new_word, .little);
         }
     }
 
