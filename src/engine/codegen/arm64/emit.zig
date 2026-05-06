@@ -255,6 +255,17 @@ pub fn compile(
         }
     }
 
+    // Zero-initialise declared locals (Wasm spec §4.5.3.1: locals
+    // beyond params are initialised to zero on entry). Each slot is
+    // 8 bytes; STR XZR covers all i32/i64/f32/f64 widths since the
+    // upper bits of narrower local-loads are masked by the LDR W /
+    // LDR S forms.
+    var loc_idx: u32 = num_params;
+    while (loc_idx < total_locals) : (loc_idx += 1) {
+        const loc_off: u15 = @intCast(loc_idx * 8);
+        try gpr.writeU32(allocator, &buf, inst.encStrImm(31, 31, loc_off));
+    }
+
     // ============================================================
     // Body: walk instrs, dispatch per op.
     //

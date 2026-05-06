@@ -41,6 +41,7 @@ fi
 NAMES=(
   forward
   unreachable
+  local_get
 )
 
 mkdir -p "$DEST"
