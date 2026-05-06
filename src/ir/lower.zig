@@ -536,8 +536,13 @@ const Lowerer = struct {
     /// types the block pushes back at end). Wasm 1.0 forms (single
     /// byte 0x40 / 0x7F..0x7C) yield 0 or 1. Wasm 2.0 multivalue
     /// (s33 typeidx ≥ 0) yields the typeidx'd FuncType's results
-    /// length, but only if its params slice is empty (multi-param
-    /// blocks are deferred).
+    /// length. D-035 chunk-d035-a lifts the previous `params.len !=
+    /// 0` rejection — multi-param + multi-result blocks now flow
+    /// through. The `arity` slot still communicates only the result
+    /// count; param consumption + push-back is handled by the
+    /// validator's stack discipline (the operand stack already
+    /// carries the params at block entry — emit sees them as
+    /// existing vregs).
     fn readBlockArity(self: *Lowerer) Error!u32 {
         if (self.pos >= self.body.len) return Error.UnexpectedEnd;
         const sleb = leb128.readSleb128(i32, self.body, &self.pos) catch
@@ -552,7 +557,6 @@ const Lowerer = struct {
         const idx: u32 = @intCast(sleb);
         if (idx >= self.module_types.len) return Error.BadBlockType;
         const ft = self.module_types[idx];
-        if (ft.params.len != 0) return Error.BadBlockType;
         return @intCast(ft.results.len);
     }
 

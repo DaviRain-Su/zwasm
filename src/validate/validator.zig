@@ -65,38 +65,73 @@ pub const max_control_stack: usize = 256;
 
 /// Block result type. Wasm 1.0 binary block-types are `empty` (0x40)
 /// or `single` (one valtype byte). Wasm 2.0 multivalue extends this
-/// to `multi` (an s33 typeidx referencing a FuncType). Phase 1 only
-/// uses `multi` for function frames whose signature has > 1 result;
-/// the binary block-type decoder still rejects s33 references in
-/// `readBlockType` so block-level multivalue stays out of scope.
+/// to `multi` via an s33 typeidx referencing a FuncType — both for
+/// function frames whose signature has > 1 result, and for blocks /
+/// loops / ifs whose `(param ...)` and / or `(result ...)` lists
+/// have multi-value shape (D-035 chunk-d035-a).
 pub const BlockType = union(enum) {
     empty,
     single: ValType,
     multi: []const ValType,
 };
 
+/// Composite block signature: the `(param ...)` / `(result ...)`
+/// lists Wasm 2.0 typeidx blocktypes carry. Wasm 1.0 forms always
+/// have `start = .empty`; only the `end` slot is populated. For
+/// loops, `start` is the label type (br to a loop transfers the
+/// param values); for blocks / ifs, `end` is the label type.
+pub const BlockTypeFull = struct {
+    start: BlockType,
+    end: BlockType,
+};
+
+/// Map a slice of valtypes to the corresponding `BlockType` form:
+/// 0-length → `.empty`, 1-length → `.single`, ≥2 → `.multi`.
+fn blockTypeOfSlice(types: []const ValType) BlockType {
+    return switch (types.len) {
+        0 => .empty,
+        1 => .{ .single = types[0] },
+        else => .{ .multi = types },
+    };
+}
+
 const ControlFrame = struct {
     kind: BlockKind,
-    block_type: BlockType,
-    /// Operand-stack height at frame entry (length, not byte index).
+    /// Block's `(param ...)` types — popped from the outer stack
+    /// when the block opens, and re-pushed as the block body's
+    /// initial operand-stack contents. Wasm 1.0 → always `.empty`.
+    /// Loops use this as their label type so a `br` target re-
+    /// transfers the params (Wasm 2.0 §3.4.4).
+    start_type: BlockType,
+    /// Block's `(result ...)` types — popped from the inner stack
+    /// at `end` (verifying the body produced them) and re-pushed
+    /// onto the outer stack. Blocks / ifs use this as their label
+    /// type. Single-result Wasm 1.0 forms use `.single`; empty
+    /// uses `.empty`; multi-value 2.0 typeidx may use `.multi`.
+    end_type: BlockType,
+    /// Operand-stack height at frame entry, **after** params have
+    /// been popped + re-pushed (i.e. the height seen from outside
+    /// the block, before the block's own params land on the
+    /// stack). `popAny` floor checks against this so the block
+    /// body cannot pop below the outer stack.
     height: u32,
     /// True after `unreachable` / `br` / `return` until this frame's
     /// `end` (or `else`, which resets it for the alternate branch).
     unreachable_flag: bool,
 
-    /// Types popped by `br` to this label. Spec: blocks/ifs use the
-    /// frame's *end* types; loops use the frame's *start* types
-    /// (which are empty in MVP).
+    /// Types popped by `br` to this label. Wasm 2.0 §3.4.4: blocks
+    /// / ifs use the frame's *end* types; loops use the frame's
+    /// *start* types.
     fn labelType(self: ControlFrame) BlockType {
         return switch (self.kind) {
-            .loop => .empty,
-            .block, .if_then, .else_open => self.block_type,
+            .loop => self.start_type,
+            .block, .if_then, .else_open => self.end_type,
         };
     }
 
     /// Types pushed back onto the operand stack at `end`.
     fn endType(self: ControlFrame) BlockType {
-        return self.block_type;
+        return self.end_type;
     }
 };
 
@@ -154,13 +189,13 @@ const Validator = struct {
 
     fn run(self: *Validator) Error!void {
         // Implicit function frame: a `block` with the function's result type.
-        const fn_block_type: BlockType = switch (self.sig.results.len) {
-            0 => .empty,
-            1 => .{ .single = self.sig.results[0] },
-            else => .{ .multi = self.sig.results },
-        };
+        // The frame's start_type stays `.empty` — the function's params live
+        // as locals (not on the operand stack at entry), so `return` pops
+        // the result types and `br depth=N-1` does the same. (Wasm 2.0
+        // §3.4.10 retains this convention even with multi-value.)
+        const fn_end_type: BlockType = blockTypeOfSlice(self.sig.results);
 
-        try self.pushFrame(.block, fn_block_type);
+        try self.pushFrame(.block, .empty, fn_end_type);
 
         while (self.control_len > 0) {
             if (self.pos >= self.body.len) return Error.UnexpectedEnd;
@@ -213,11 +248,17 @@ const Validator = struct {
     // Control-stack helpers
     // ----------------------------------------------------------------
 
-    fn pushFrame(self: *Validator, kind: BlockKind, bt: BlockType) Error!void {
+    fn pushFrame(
+        self: *Validator,
+        kind: BlockKind,
+        start_bt: BlockType,
+        end_bt: BlockType,
+    ) Error!void {
         if (self.control_len == max_control_stack) return Error.ControlStackOverflow;
         self.control_buf[self.control_len] = .{
             .kind = kind,
-            .block_type = bt,
+            .start_type = start_bt,
+            .end_type = end_bt,
             .height = @intCast(self.operand_len),
             .unreachable_flag = false,
         };
@@ -255,34 +296,40 @@ const Validator = struct {
     }
 
     // ----------------------------------------------------------------
-    // Block-type decoder (Wasm 1.0 only)
+    // Block-type decoder (Wasm 1.0 forms + Wasm 2.0 typeidx)
     // ----------------------------------------------------------------
 
-    fn readBlockType(self: *Validator) Error!BlockType {
+    /// Wasm spec §5.4.X (block type) — encoded as an s33 LEB. Negative
+    /// values are well-known type abbreviations (-64 = empty, -1..-4 =
+    /// single valtype); positive values are typeidx into the module's
+    /// type section (Wasm 2.0 multivalue per §3.4.4).
+    ///
+    /// Returns the block's full signature (`start` = params, `end` =
+    /// results). Wasm 1.0 forms always have `start = .empty`.
+    /// D-035 chunk-d035-a lifts the previous `params.len != 0`
+    /// rejection so multi-param + multi-result blocks (block.wast,
+    /// br_*.wast, call.wast) round-trip through validate + lower.
+    fn readBlockType(self: *Validator) Error!BlockTypeFull {
         if (self.pos >= self.body.len) return Error.UnexpectedEnd;
         const sleb = leb128.readSleb128(i32, self.body, &self.pos) catch
             return Error.BadBlockType;
         if (sleb < 0) {
-            return switch (sleb) {
+            const end: BlockType = switch (sleb) {
                 -64 => .empty, // 0x40
                 -1 => .{ .single = .i32 }, // 0x7F
                 -2 => .{ .single = .i64 }, // 0x7E
                 -3 => .{ .single = .f32 }, // 0x7D
                 -4 => .{ .single = .f64 }, // 0x7C
-                else => Error.BadBlockType,
+                else => return Error.BadBlockType,
             };
+            return .{ .start = .empty, .end = end };
         }
-        // Wasm 2.0 multivalue: positive value is a typeidx into the
-        // module's type section (§9.2 / 2.3 chunk 3). Multi-param
-        // blocks are deferred — chunk 3 supports multi-result only.
         const idx: u32 = @intCast(sleb);
         if (idx >= self.module_types.len) return Error.BadBlockType;
         const ft = self.module_types[idx];
-        if (ft.params.len != 0) return Error.BadBlockType;
-        return switch (ft.results.len) {
-            0 => .empty,
-            1 => .{ .single = ft.results[0] },
-            else => .{ .multi = ft.results },
+        return .{
+            .start = blockTypeOfSlice(ft.params),
+            .end = blockTypeOfSlice(ft.results),
         };
     }
 
@@ -415,14 +462,32 @@ const Validator = struct {
 
     fn opBlock(self: *Validator, kind: BlockKind) Error!void {
         const bt = try self.readBlockType();
-        // Wasm 1.0 block-type has no params, so nothing pops here.
-        try self.pushFrame(kind, bt);
+        // Wasm 2.0 §3.4.4: pop params from the outer stack (verifying
+        // their types), push frame at the post-pop height, then re-
+        // push params as the block body's initial operand stack so the
+        // body sees them.
+        try self.popLabelTypes(bt.start);
+        try self.pushFrame(kind, bt.start, bt.end);
+        switch (bt.start) {
+            .empty => {},
+            .single => |t| try self.pushType(t),
+            .multi => |ts| for (ts) |t| try self.pushType(t),
+        }
     }
 
     fn opIf(self: *Validator) Error!void {
         const bt = try self.readBlockType();
+        // The cond i32 is popped *before* the params (it lives above
+        // them on the outer stack — Wasm 2.0 §3.4.4 specifies the
+        // structured-control encoding pops the cond first).
         try self.popExpect(.i32);
-        try self.pushFrame(.if_then, bt);
+        try self.popLabelTypes(bt.start);
+        try self.pushFrame(.if_then, bt.start, bt.end);
+        switch (bt.start) {
+            .empty => {},
+            .single => |t| try self.pushType(t),
+            .multi => |ts| for (ts) |t| try self.pushType(t),
+        }
     }
 
     fn opElse(self: *Validator) Error!void {
@@ -459,7 +524,7 @@ const Validator = struct {
     fn opReturn(self: *Validator) Error!void {
         // Function frame is always at depth control_len - 1 (index 0 in our buffer).
         const fn_frame = &self.control_buf[0];
-        try self.popLabelTypes(fn_frame.block_type);
+        try self.popLabelTypes(fn_frame.end_type);
         self.markUnreachable();
     }
 

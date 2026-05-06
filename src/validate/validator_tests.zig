@@ -258,18 +258,48 @@ test "validate: multivalue block via s33 typeidx — empty params, two i32 resul
     try validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &types, 0, &.{}, 0);
 }
 
-test "validate: multivalue block typeidx with non-empty params → BadBlockType" {
-    // module_types[0] = ([i32] -> [i32]) — multi-param case deferred
+test "validate: multivalue block typeidx with single-param/single-result validates (D-035 chunk-d035-a)" {
+    // module_types[0] = ([i32] -> [i32])
     const i32_arr_local = [_]ValType{.i32};
     const types = [_]FuncType{.{ .params = &i32_arr_local, .results = &i32_arr_local }};
     const body = [_]u8{
         0x41, 0x07, // i32.const 7 (push the param)
-        0x02, 0x00, // block (typeidx 0)
-        0x0B, // end (block)
+        0x02, 0x00, // block typeidx=0 — pops the i32 param, body's stack starts with i32
+        0x0B, // end (block) — verifies one i32 is on the body stack
+        0x1A, // drop (consume the i32 the block left so function-end sees an empty stack)
         0x0B, // end (function)
     };
+    try validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &types, 0, &.{}, 0);
+}
+
+test "validate: multivalue block missing param on entry stack → StackUnderflow" {
+    // module_types[0] = ([i32] -> [i32]) — but the outer stack is empty.
+    const i32_arr_local = [_]ValType{.i32};
+    const types = [_]FuncType{.{ .params = &i32_arr_local, .results = &i32_arr_local }};
+    const body = [_]u8{
+        0x02, 0x00, // block typeidx=0 — needs an i32 on the outer stack
+        0x0B, 0x0B,
+    };
     const r = validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &types, 0, &.{}, 0);
-    try testing.expectError(Error.BadBlockType, r);
+    try testing.expectError(Error.StackUnderflow, r);
+}
+
+test "validate: multivalue loop with params — `br 0` re-transfers params (label type = start)" {
+    // module_types[0] = ([i32] -> []) — loop with one i32 param, no result.
+    // Body inside loop: drop the param, push i32.const 0, br 0 — must
+    // re-transfer the i32 to the loop label.
+    const i32_arr_local = [_]ValType{.i32};
+    const types = [_]FuncType{.{ .params = &i32_arr_local, .results = &.{} }};
+    const body = [_]u8{
+        0x41, 0x07, // i32.const 7 (push the param)
+        0x03, 0x00, // loop typeidx=0
+        0x1A, // drop the loaded i32
+        0x41, 0x00, // i32.const 0 (param re-supply)
+        0x0C, 0x00, // br 0 — pops the i32 (loop label = params)
+        0x0B, // end (loop, unreachable after br)
+        0x0B, // end (function)
+    };
+    try validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &types, 0, &.{}, 0);
 }
 
 test "validate: memory.copy (0xFC 10) — pops three i32" {

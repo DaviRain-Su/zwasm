@@ -494,12 +494,14 @@ test "lower: multivalue block via s33 typeidx — extra = arity (#results)" {
     try testing.expectEqual(@as(u32, 3), open.extra);
 }
 
-test "lower: multivalue block typeidx with non-empty params → BadBlockType" {
+test "lower: multivalue block typeidx with non-empty params lowers (D-035 chunk-d035-a)" {
     var f = newFunc(empty_sig);
     defer f.deinit(testing.allocator);
     const i32_arr_local = [_]ValType{.i32};
     const types = [_]FuncType{.{ .params = &i32_arr_local, .results = &i32_arr_local }};
     const body = [_]u8{ 0x02, 0x00, 0x0B, 0x0B };
-    const r = lowerFunctionBody(testing.allocator, &body, &f, &types);
-    try testing.expectError(Error.BadBlockType, r);
+    try lowerFunctionBody(testing.allocator, &body, &f, &types);
+    // arity slot still communicates only the result count.
+    try testing.expectEqual(ZirOp.@"block", f.instrs.items[0].op);
+    try testing.expectEqual(@as(u32, 1), f.instrs.items[0].extra);
 }
