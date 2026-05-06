@@ -81,8 +81,8 @@ for c in d['commands']:
         if any(x['type'] != 'i32' for x in args) or len(results) != 1 or results[0]['type'] != 'i32':
             lines.append(f'skip non-i32-shape {a["field"]}')
             continue
-        if len(args) > 1:
-            lines.append(f'skip more-than-1-arg {a["field"]}')
+        if len(args) > 2:
+            lines.append(f'skip more-than-2-args {a["field"]}')
             continue
         args_s = ' '.join(fmt(x) for x in args) if args else '()'
         results_s = ' '.join(fmt(x) for x in results)

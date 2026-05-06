@@ -72,6 +72,24 @@ pub fn callI32_i32(
     return result;
 }
 
+/// Call a two-i32-argument JIT function returning i32. ABI puts
+/// `rt`, `a0`, `a1` in X0, X1, X2 (AAPCS64) / RDI, RSI, RDX (SysV);
+/// the prologue stores W1 → [SP, #0] and W2 → [SP, #8].
+pub fn callI32_i32i32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u32,
+    a1: u32,
+) Error!u32 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: u32) callconv(.c) u32;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, a0, a1);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
 // ============================================================
 // Tests
 // ============================================================
@@ -265,6 +283,51 @@ test "entry: pure constant function returns 42 (sanity — no memory access)" {
     };
     const result = try callI32NoArgs(module, 0, &rt);
     try testing.expectEqual(@as(u32, 42), result);
+}
+
+test "entry: callI32_i32i32 — 2 i32 params summed via i32.add" {
+    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
+        return error.SkipZigTest;
+    }
+    // (param i32 i32) (result i32) — body: local.get 0; local.get 1; i32.add; end
+    const sig: zir.FuncType = .{ .params = &.{ .i32, .i32 }, .results = &.{.i32} };
+    var fn0 = ZirFunc.init(0, sig, &.{});
+    defer fn0.deinit(testing.allocator);
+    try fn0.instrs.append(testing.allocator, .{ .op = .@"local.get", .payload = 0 });
+    try fn0.instrs.append(testing.allocator, .{ .op = .@"local.get", .payload = 1 });
+    try fn0.instrs.append(testing.allocator, .{ .op = .@"i32.add" });
+    try fn0.instrs.append(testing.allocator, .{ .op = .@"end" });
+    fn0.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 2 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+        .{ .def_pc = 2, .last_use_pc = 3 },
+    } };
+    const slots = [_]u8{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 3 };
+    const sigs = [_]zir.FuncType{sig};
+
+    const out0 = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{});
+    defer emit.deinit(testing.allocator, out0);
+
+    const bodies = [_]linker.FuncBody{
+        .{ .bytes = out0.bytes, .call_fixups = out0.call_fixups },
+    };
+    var module = try linker.link(testing.allocator, &bodies);
+    defer module.deinit(testing.allocator);
+
+    var memory: [0]u8 = .{};
+    var rt: JitRuntime = .{
+        .vm_base = &memory,
+        .mem_limit = 0,
+        .funcptr_base = undefined,
+        .table_size = 0,
+        .typeidx_base = undefined,
+        .trap_flag = 0,
+        .globals_base = undefined,
+        .globals_count = 0,
+    };
+    try testing.expectEqual(@as(u32, 7), try callI32_i32i32(module, 0, &rt, 3, 4));
+    try testing.expectEqual(@as(u32, 0), try callI32_i32i32(module, 0, &rt, 0, 0));
 }
 
 test "entry: callI32_i32 — 1 i32 param echoed through W1 → SP slot 0 → result" {

@@ -182,7 +182,7 @@ fn runAssertReturn(
         .globals_count = 0,
     };
 
-    // Parse args.
+    // Parse args. Supports `()`, `i32:<v>`, `i32:<v> i32:<v>`.
     const got: u32 = blk: {
         if (std.mem.eql(u8, args_s, "()")) {
             break :blk entry.callI32NoArgs(compiled.module, func_idx, &rt) catch |err| {
@@ -190,18 +190,37 @@ fn runAssertReturn(
                 return false;
             };
         }
-        // Single i32 arg: "i32:<value>"
-        if (std.mem.startsWith(u8, args_s, "i32:")) {
-            const v_s = args_s[4..];
-            const a0 = std.fmt.parseInt(u32, v_s, 10) catch
+        var arg_buf: [2]u32 = undefined;
+        var n_args: usize = 0;
+        var arg_it = std.mem.tokenizeScalar(u8, args_s, ' ');
+        while (arg_it.next()) |tok| {
+            if (n_args >= 2) {
+                try stdout.print("FAIL  {s}: > 2 args unsupported in chunk-b ({s})\n", .{ name, args_s });
+                return false;
+            }
+            if (!std.mem.startsWith(u8, tok, "i32:")) {
+                try stdout.print("FAIL  {s}: non-i32 arg unsupported ({s})\n", .{ name, tok });
+                return false;
+            }
+            const v_s = tok[4..];
+            arg_buf[n_args] = std.fmt.parseInt(u32, v_s, 10) catch
                 @as(u32, @bitCast(std.fmt.parseInt(i32, v_s, 10) catch return error.BadValue));
-            break :blk entry.callI32_i32(compiled.module, func_idx, &rt, a0) catch |err| {
+            n_args += 1;
+        }
+        switch (n_args) {
+            1 => break :blk entry.callI32_i32(compiled.module, func_idx, &rt, arg_buf[0]) catch |err| {
                 try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
                 return false;
-            };
+            },
+            2 => break :blk entry.callI32_i32i32(compiled.module, func_idx, &rt, arg_buf[0], arg_buf[1]) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+                return false;
+            },
+            else => {
+                try stdout.print("FAIL  {s}: 0-arg via tokenized path? ({s})\n", .{ name, args_s });
+                return false;
+            },
         }
-        try stdout.print("FAIL  {s}: unsupported args shape '{s}'\n", .{ name, args_s });
-        return false;
     };
 
     // Parse expected result: "i32:<value>"
