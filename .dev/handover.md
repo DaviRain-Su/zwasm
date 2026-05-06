@@ -12,25 +12,27 @@
 5. `.dev/lessons/INDEX.md` — keyword-grep for the active task domain.
 6. `.dev/optimisation_log.md` — F-NNN / R-NNN / O-NNN ledger.
 
-## Current state — Phase 7 / §9.7 / 7.7 IN-PROGRESS
+## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS (post audit-catch-up)
 
-直近 commit (HEAD = `cd81b8e`):
+直近 commit (HEAD = `884d7d8`):
 
+- `884d7d8` chore(p7): mark §9.7 / 7.7 [x] (x86_64 emit pass complete on 3 hosts)
 - `cd81b8e` docs(workflow): propagate parallel-bg + file-logged gate rule (LOOP/SKILL/CLAUDE)
-- `6e935c9` fix(p7) §9.7 / 7.7-cc-pivot-shadow-space — SUB/ADD encoding-length offset 修正 + LOOP.md 改訂
-- `0789c6e` §9.7 / 7.7-cc-pivot-shadow-space (Win64 32-byte shadow at CALL; emitShadowAlloc/Free helpers)
-- `e8a1051` chore(p7): retarget at 7.7-cc-pivot-shadow-space
-- `cfa5d04` fix-up: 1-arg call test を Cc-aware 化
-- `68675d4` §9.7 / 7.7-cc-pivot-emit (current_cc / current alias; entry_arg0 + arg_gprs per-Cc)
+- `6e935c9` fix(p7) §9.7 / 7.7-cc-pivot-shadow-space — encoding-length offset 修正
+- `0789c6e` §9.7 / 7.7-cc-pivot-shadow-space (Win64 32-byte shadow at CALL)
+- `68675d4` §9.7 / 7.7-cc-pivot-emit (current_cc / current alias)
 - `219d461` §9.7 / 7.7-deferred-Win64 (Cc enum + sysv/win64 namespaces)
+- `57cf94c` §9.7 / 7.7-fp-end-fix (D-032 discharge)
 
-**Active task**: cc-pivot-shadow-space 完了 (Win64 SUB/ADD RSP, 32
-around CALL; 3-host green @ `cd81b8e`)。**NEXT** = 7.7 row を
-`[x]` flip + 7.8 開始 (spec test pass=fail=skip=0 via x86_64 JIT
-on Linux + Windows hosts). 7.8 は run-spec の JIT path wiring +
-試験用 spec fixtures を JIT で実行する大きな chunk。
-その後 7.9/7.10 realworld → 7.11 🔒 three-way differential →
-7.12 audit → **🔒 7.13 hard gate** → 7.14 open §9.8。
+**Active task**: 7.7 closed; ROADMAP audit-catch-up: 7.3 / 7.4 /
+7.6 を `[x]` flip (substantively-done; entry.zig ADR-0017
+simplification + ARM64 emit split + x86_64 abi+Cc-pivot 既了)。
+**NEXT** = `§9.7 / 7.5` (spec test pass=fail=skip=0 via ARM64 JIT
+on Mac aarch64; ROADMAP-priority に従い 7.8 ではなく 7.5 を先に
+回す。spec runner を JIT execution path に wire する infra chunk
+群が必要)。その後 7.8 (spec via x86_64) → 7.9/7.10 realworld
+→ 7.11 🔒 three-way differential → 7.12 audit →
+**🔒 7.13 hard gate** → 7.14 open §9.8。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -49,16 +51,17 @@ on Linux + Windows hosts). 7.8 は run-spec の JIT path wiring +
 
 ## §9.7 / 7.7 chunk progress
 
-完了済 31 chunk: skel / alu / cmp / eqz / shift / bitcount / locals /
-control-{skel,if,table} / mem-{load,store} / globals / wrap /
-call-{direct,indirect} / fp-{const,binary,compare,unary,copysign,
-minmax,convert-{simple,unsigned},trunc-sat-{signed,u32,u64},
-trunc-trap-{signed,unsigned},mem,end-fix} / deferred-Win64 /
-cc-pivot-{emit,shadow-space}。
-SHA は `git log --grep='§9.7 / 7.7-'` で取得可能。
+7.7 完了 (31 chunks)。次は **7.5** (spec gate via ARM64 JIT on
+Mac aarch64). 7.5 sub-chunk 設計はまだ未着手 — Step 0 survey で
+JIT execution path が runtime にどう wire されているか調査要。
+候補 sub-chunks (要 design):
 
-7.7 sub-chunk table は空 (全 sub-chunk 完了)。次は §9.7 / 7.7
-row 自体を `[x]` flip → 7.8 開始。
+| # | Chunk | Status |
+|---|---|---|
+| 7.5-survey | JIT execution entry survey (entry.zig + runtime.zig + run.zig path) | **NEXT** |
+| 7.5-runner-skeleton | spec runner `--engine=jit-arm64` flag + smoke fixture | pending |
+| 7.5-trap-surface | emit trap_flag → runtime Trap.* mapping for spec assert_trap | pending |
+| 7.5-pass-zero-fail | iterate until pass=fail=skip=0 on Wasm 1.0 + 2.0 op corpus | pending |
 
 ADR-0019 phase plan post-7.6: 7.7 emit.zig, 7.8 spec gate (Linux
 + Windows hosts), 7.9/7.10 realworld, 7.11 3-way differential
