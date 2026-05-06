@@ -49,6 +49,7 @@ const jit_abi = @import("../shared/jit_abi.zig");
 const trace = @import("../../../diagnostic/trace.zig");
 const types = @import("types.zig");
 const label_mod = @import("label.zig");
+const op_alu_int = @import("op_alu_int.zig");
 
 const Allocator = std.mem.Allocator;
 const ZirFunc = zir.ZirFunc;
@@ -205,19 +206,19 @@ pub fn compile(
             },
             .@"i32.add", .@"i32.sub", .@"i32.mul",
             .@"i32.and", .@"i32.or", .@"i32.xor",
-            => try emitI32Binary(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
+            => try op_alu_int.emitI32Binary(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
             .@"i32.eq", .@"i32.ne",
             .@"i32.lt_s", .@"i32.lt_u", .@"i32.gt_s", .@"i32.gt_u",
             .@"i32.le_s", .@"i32.le_u", .@"i32.ge_s", .@"i32.ge_u",
-            => try emitI32Compare(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
-            .@"i32.eqz" => try emitI32Eqz(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            => try op_alu_int.emitI32Compare(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
+            .@"i32.eqz" => try op_alu_int.emitI32Eqz(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"i32.shl", .@"i32.shr_s", .@"i32.shr_u",
             .@"i32.rotl", .@"i32.rotr",
-            => try emitI32Shift(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
+            => try op_alu_int.emitI32Shift(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
             .@"i32.clz", .@"i32.ctz", .@"i32.popcnt",
-            => try emitI32Bitcount(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
+            => try op_alu_int.emitI32Bitcount(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
             .@"i32.wrap_i64", .@"i64.extend_i32_u", .@"i64.extend_i32_s",
-            => try emitConvertWidth(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
+            => try op_alu_int.emitConvertWidth(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.op),
             .@"call" => try emitCall(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &call_fixups, func_sigs, ins.payload),
             .@"call_indirect" => try emitCallIndirect(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, module_types, ins.payload),
             .@"f32.const", .@"f64.const",
@@ -374,257 +375,6 @@ pub fn compile(
         .n_slots = alloc.n_slots,
         .call_fixups = try call_fixups.toOwnedSlice(allocator),
     };
-}
-
-/// Binary i32 ALU handler (add / sub / mul / and / or / xor).
-/// Pop rhs + lhs, allocate result vreg, emit MOV dst, lhs ;
-/// OP dst, rhs (always-MOV form — the peephole that elides the
-/// MOV when dst == lhs lands when regalloc starts reusing slots
-/// for in-place updates).
-///
-/// **Constraint**: dst must not equal rhs (MOV dst, lhs would
-/// clobber rhs before OP reads it). With fresh-vreg-per-op
-/// allocation this never fires; surfaces as `UnsupportedOp`
-/// when the regalloc port needs to handle slot reuse.
-fn emitI32Binary(
-    allocator: Allocator,
-    buf: *std.ArrayList(u8),
-    alloc: regalloc.Allocation,
-    pushed_vregs: *std.ArrayList(u32),
-    next_vreg: *u32,
-    op: zir.ZirOp,
-) Error!void {
-    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
-    const rhs_v = pushed_vregs.pop().?;
-    const lhs_v = pushed_vregs.pop().?;
-    const result_v = next_vreg.*;
-    next_vreg.* += 1;
-    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const lhs_r = abi.slotToReg(alloc.slots[lhs_v]) orelse return Error.SlotOverflow;
-    const rhs_r = abi.slotToReg(alloc.slots[rhs_v]) orelse return Error.SlotOverflow;
-    const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
-    if (dst_r == rhs_r and dst_r != lhs_r) return Error.UnsupportedOp;
-
-    if (dst_r != lhs_r) {
-        try buf.appendSlice(allocator, inst.encMovRR(.d, dst_r, lhs_r).slice());
-    }
-    const enc = switch (op) {
-        .@"i32.add" => inst.encAddRR(.d, dst_r, rhs_r),
-        .@"i32.sub" => inst.encSubRR(.d, dst_r, rhs_r),
-        .@"i32.mul" => inst.encImulRR(.d, dst_r, rhs_r),
-        .@"i32.and" => inst.encAndRR(.d, dst_r, rhs_r),
-        .@"i32.or"  => inst.encOrRR(.d, dst_r, rhs_r),
-        .@"i32.xor" => inst.encXorRR(.d, dst_r, rhs_r),
-        else => unreachable,
-    };
-    try buf.appendSlice(allocator, enc.slice());
-    try pushed_vregs.append(allocator, result_v);
-}
-
-/// i32 compare handler (eq / ne / lt_s / lt_u / gt_s / gt_u /
-/// le_s / le_u / ge_s / ge_u — 10 ops). x86_64 pattern:
-///
-///   CMP lhs, rhs           ; sets EFLAGS based on lhs - rhs
-///   SETcc dst_low8         ; writes 0 / 1 to low byte of dst
-///   MOVZX dst, dst_low8    ; zero-extend to 32 bits
-///
-/// Wasm result type i32 (0 or 1). Total ~10 bytes per compare
-/// (3 instr × 3-4 bytes each with REX). Signed vs unsigned
-/// distinction is the cc code only — operand encoding is
-/// identical.
-fn emitI32Compare(
-    allocator: Allocator,
-    buf: *std.ArrayList(u8),
-    alloc: regalloc.Allocation,
-    pushed_vregs: *std.ArrayList(u32),
-    next_vreg: *u32,
-    op: zir.ZirOp,
-) Error!void {
-    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
-    const rhs_v = pushed_vregs.pop().?;
-    const lhs_v = pushed_vregs.pop().?;
-    const result_v = next_vreg.*;
-    next_vreg.* += 1;
-    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const lhs_r = abi.slotToReg(alloc.slots[lhs_v]) orelse return Error.SlotOverflow;
-    const rhs_r = abi.slotToReg(alloc.slots[rhs_v]) orelse return Error.SlotOverflow;
-    const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
-
-    const cc: inst.Cond = switch (op) {
-        .@"i32.eq"   => .e,
-        .@"i32.ne"   => .ne,
-        .@"i32.lt_s" => .l,
-        .@"i32.lt_u" => .b,
-        .@"i32.gt_s" => .g,
-        .@"i32.gt_u" => .a,
-        .@"i32.le_s" => .le,
-        .@"i32.le_u" => .be,
-        .@"i32.ge_s" => .ge,
-        .@"i32.ge_u" => .ae,
-        else => unreachable,
-    };
-
-    try buf.appendSlice(allocator, inst.encCmpRR(.d, lhs_r, rhs_r).slice());
-    try buf.appendSlice(allocator, inst.encSetccR(cc, dst_r).slice());
-    try buf.appendSlice(allocator, inst.encMovzxR32R8(dst_r, dst_r).slice());
-
-    try pushed_vregs.append(allocator, result_v);
-}
-
-/// `i32.eqz` handler — unary "is the operand zero?". Emits
-/// TEST src, src ; SETE dst_low8 ; MOVZX dst, dst_low8. Same
-/// 3-instr shape as compare; operand reuse means no separate
-/// rhs vreg.
-fn emitI32Eqz(
-    allocator: Allocator,
-    buf: *std.ArrayList(u8),
-    alloc: regalloc.Allocation,
-    pushed_vregs: *std.ArrayList(u32),
-    next_vreg: *u32,
-) Error!void {
-    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
-    const src_v = pushed_vregs.pop().?;
-    const result_v = next_vreg.*;
-    next_vreg.* += 1;
-    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const src_r = abi.slotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
-    const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
-
-    try buf.appendSlice(allocator, inst.encTestRR(.d, src_r, src_r).slice());
-    try buf.appendSlice(allocator, inst.encSetccR(.e, dst_r).slice());
-    try buf.appendSlice(allocator, inst.encMovzxR32R8(dst_r, dst_r).slice());
-
-    try pushed_vregs.append(allocator, result_v);
-}
-
-/// i32 shift / rotate handler (shl / shr_s / shr_u / rotl / rotr,
-/// 5 ops). x86_64 SHL/SHR/SAR/ROL/ROR with variable count
-/// require the count in CL (RCX low byte). Emit:
-///
-///   MOV ECX, rhs       ; (skip if rhs already in RCX — never
-///                        the case since RCX is excluded from
-///                        the regalloc pool per abi.zig)
-///   MOV dst, lhs       ; (skip if dst == lhs)
-///   <op> dst, CL       ; D3 / kind
-///
-/// Wasm shift count is implicit-modulo-(width); x86_64 SHL/SHR
-/// also mask the count by (width - 1), so the semantics line up
-/// without an extra AND.
-///
-/// Constraints (caller cannot violate without UnsupportedOp):
-/// - dst != RCX: RCX is the count register; would self-clobber.
-///   In practice this never fires because abi.allocatable_gprs
-///   excludes RCX.
-/// - dst != rhs (when dst != lhs): the MOV dst, lhs would clobber
-///   rhs before the shift reads CL. Guard mirrors emitI32Binary.
-fn emitI32Shift(
-    allocator: Allocator,
-    buf: *std.ArrayList(u8),
-    alloc: regalloc.Allocation,
-    pushed_vregs: *std.ArrayList(u32),
-    next_vreg: *u32,
-    op: zir.ZirOp,
-) Error!void {
-    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
-    const rhs_v = pushed_vregs.pop().?;
-    const lhs_v = pushed_vregs.pop().?;
-    const result_v = next_vreg.*;
-    next_vreg.* += 1;
-    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const lhs_r = abi.slotToReg(alloc.slots[lhs_v]) orelse return Error.SlotOverflow;
-    const rhs_r = abi.slotToReg(alloc.slots[rhs_v]) orelse return Error.SlotOverflow;
-    const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
-    if (dst_r == .rcx) return Error.UnsupportedOp;
-    if (dst_r == rhs_r and dst_r != lhs_r) return Error.UnsupportedOp;
-
-    // 1. Move shift count into ECX (CL is the low byte).
-    if (rhs_r != .rcx) {
-        try buf.appendSlice(allocator, inst.encMovRR(.d, .rcx, rhs_r).slice());
-    }
-    // 2. Materialise lhs into dst (skip if already same reg).
-    if (dst_r != lhs_r) {
-        try buf.appendSlice(allocator, inst.encMovRR(.d, dst_r, lhs_r).slice());
-    }
-    // 3. Shift / rotate.
-    const kind: inst.ShiftKind = switch (op) {
-        .@"i32.shl"   => .shl,
-        .@"i32.shr_s" => .sar,
-        .@"i32.shr_u" => .shr,
-        .@"i32.rotl"  => .rol,
-        .@"i32.rotr"  => .ror,
-        else => unreachable,
-    };
-    try buf.appendSlice(allocator, inst.encShiftRCl(.d, kind, dst_r).slice());
-
-    try pushed_vregs.append(allocator, result_v);
-}
-
-/// i32 bit-count handler (clz / ctz / popcnt — 3 ops). Direct
-/// 1:1 mapping to LZCNT / TZCNT / POPCNT (BMI1 + POPCNT
-/// extensions). All three:
-/// - Take src in r/m and write dst in reg (operand-role
-///   inversion vs the ADD/SUB/CMP family).
-/// - Return 32 for input 0 (LZCNT/TZCNT) which matches Wasm
-///   spec — the older BSR/BSF would leave dst undefined at 0
-///   and would need a fixup; LZCNT/TZCNT exist exactly to
-///   provide defined-at-zero semantics.
-fn emitI32Bitcount(
-    allocator: Allocator,
-    buf: *std.ArrayList(u8),
-    alloc: regalloc.Allocation,
-    pushed_vregs: *std.ArrayList(u32),
-    next_vreg: *u32,
-    op: zir.ZirOp,
-) Error!void {
-    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
-    const src_v = pushed_vregs.pop().?;
-    const result_v = next_vreg.*;
-    next_vreg.* += 1;
-    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const src_r = abi.slotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
-    const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
-
-    const enc = switch (op) {
-        .@"i32.clz"    => inst.encLzcntR32(dst_r, src_r),
-        .@"i32.ctz"    => inst.encTzcntR32(dst_r, src_r),
-        .@"i32.popcnt" => inst.encPopcntR32(dst_r, src_r),
-        else => unreachable,
-    };
-    try buf.appendSlice(allocator, enc.slice());
-
-    try pushed_vregs.append(allocator, result_v);
-}
-
-/// i32 ↔ i64 width-cross handler — `i32.wrap_i64` and
-/// `i64.extend_i32_u` both lower to `MOV r32_dst, r32_src`
-/// (the 32-bit write zero-extends the upper half of the
-/// destination's 64-bit slot, matching Wasm's value-class
-/// representation). `i64.extend_i32_s` lowers to MOVSXD.
-/// Mirrors arm64/op_convert.zig's emitWrap32 / emitExtendI32S.
-fn emitConvertWidth(
-    allocator: Allocator,
-    buf: *std.ArrayList(u8),
-    alloc: regalloc.Allocation,
-    pushed_vregs: *std.ArrayList(u32),
-    next_vreg: *u32,
-    op: zir.ZirOp,
-) Error!void {
-    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
-    const src_v = pushed_vregs.pop().?;
-    const result_v = next_vreg.*;
-    next_vreg.* += 1;
-    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const src_r = abi.slotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
-    const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
-
-    const enc = switch (op) {
-        .@"i32.wrap_i64", .@"i64.extend_i32_u" => inst.encMovRR(.d, dst_r, src_r),
-        .@"i64.extend_i32_s" => inst.encMovsxdR64R32(dst_r, src_r),
-        else => unreachable,
-    };
-    try buf.appendSlice(allocator, enc.slice());
-
-    try pushed_vregs.append(allocator, result_v);
 }
 
 /// Direct call: `call N`. Mirrors arm64/op_call.zig's emitCall
