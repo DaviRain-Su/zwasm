@@ -28,7 +28,17 @@ const FuncType = zir.FuncType;
 const lowerer = @import("../../../ir/lower.zig");
 const liveness = @import("../../../ir/analysis/liveness.zig");
 const regalloc = @import("regalloc.zig");
-const emit = @import("../arm64/emit.zig");
+
+/// 7.5-close-d042 / 7.8 prep: comptime arch dispatch. ARM64 hosts
+/// (Mac) use `arm64/emit.zig`; x86_64 hosts (Linux + Windows) use
+/// `x86_64/emit.zig`. Both expose the same `compile() / deinit() /
+/// EmitOutput / Error / CallFixup` surface so the dispatch is a
+/// pure import switch.
+const emit = switch (builtin.target.cpu.arch) {
+    .aarch64 => @import("../arm64/emit.zig"),
+    .x86_64 => @import("../x86_64/emit.zig"),
+    else => @compileError("unsupported host arch — JIT requires aarch64 or x86_64"),
+};
 
 pub const Error = lowerer.Error || liveness.Error || regalloc.Error || emit.Error || Allocator.Error;
 
