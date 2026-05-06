@@ -186,14 +186,26 @@ pub fn emitBrIf(
 /// skip_placeholder. Push label.if_then with the JE byte offset
 /// recorded; the matching `else` patches it to else-body start,
 /// or the matching `end` patches it to end-of-if (no-else case).
+///
+/// **Multi-result gate** (D-035 chunk-d035-b): `arity` is the
+/// blocktype's result count (= `ZirInstr.extra` per
+/// `lower.zig:openBlock`; Wasm 2.0 multi-value). The merge MOV
+/// path in emitElse / emitEndIntra only handles a single merge
+/// target today; arity > 1 surfaces as `UnsupportedOp` so
+/// multi-result if/else fails loudly instead of silently
+/// miscompiling. The full N-MOV merge is queued as d035-c.
+/// Mirrors `arm64/op_control.zig:emitIf`.
 pub fn emitIf(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     labels: *std.ArrayList(Label),
+    arity_extra: u32,
 ) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const arity: u8 = std.math.cast(u8, arity_extra) orelse return Error.UnsupportedOp;
+    if (arity > 1) return Error.UnsupportedOp;
     const cond_v = pushed_vregs.pop().?;
     const cond_r = abi.slotToReg(alloc.slots[cond_v]) orelse return Error.SlotOverflow;
     try buf.appendSlice(allocator, inst.encTestRR(.d, cond_r, cond_r).slice());
@@ -204,6 +216,7 @@ pub fn emitIf(
         .target_byte_offset = 0,
         .pending = .empty,
         .if_skip_byte = skip_at,
+        .result_arity = arity,
     });
 }
 

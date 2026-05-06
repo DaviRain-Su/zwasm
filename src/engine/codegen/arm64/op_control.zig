@@ -276,8 +276,18 @@ pub fn emitBrTable(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// then-body when cond=0; push Label.if_then with the skip byte
 /// recorded. The skip resolves at matching `else` (to else-body
 /// start) or `end` (to end-of-if).
-pub fn emitIf(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+///
+/// **Multi-result gate** (D-035 chunk-d035-b): `ins.extra` carries
+/// the blocktype result arity per `lower.zig:openBlock` (Wasm 2.0
+/// multi-value). The merge MOV path in emitElse / emitEndIntra
+/// only handles a single merge target today; arity > 1 surfaces
+/// as `UnsupportedOp` so multi-result if/else fails loudly instead
+/// of silently miscompiling. The full N-MOV merge is queued as
+/// d035-c.
+pub fn emitIf(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     if (ctx.pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const arity: u8 = std.math.cast(u8, ins.extra) orelse return Error.UnsupportedOp;
+    if (arity > 1) return Error.UnsupportedOp;
     const cond = ctx.pushed_vregs.pop().?;
     const wn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, cond, 0);
     const skip_byte: u32 = @intCast(ctx.buf.items.len);
@@ -287,6 +297,7 @@ pub fn emitIf(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
         .target_byte_offset = 0,
         .pending = .empty,
         .if_skip_byte = skip_byte,
+        .result_arity = arity,
     });
 }
 

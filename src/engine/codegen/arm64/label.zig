@@ -55,10 +55,20 @@ pub const Fixup = struct {
 ///       both paths converge on the same physical reg. Null
 ///       for blocks without arity OR when no `else` was
 ///       emitted.
+///   result_arity — Wasm 2.0 multi-value blocktype's result
+///       count, captured from `ZirInstr.extra` at the matching
+///       block / loop / if push. emitIf rejects `arity > 1`
+///       with UnsupportedOp because the merge MOV path only
+///       handles a single merge target today (D-035 chunk-d035-b
+///       foundation; full N-MOV emit is the d035-c follow-up).
+///       Block / loop don't merge two arms so arity > 1 is
+///       transparently supported there — the field is set for
+///       symmetry / future regalloc-stage uses.
 pub const Label = struct {
     kind: LabelKind,
     target_byte_offset: u32,
     pending: std.ArrayList(Fixup),
     if_skip_byte: ?u32 = null,
     merge_top_vreg: ?u32 = null,
+    result_arity: u8 = 0,
 };

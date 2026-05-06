@@ -281,7 +281,7 @@ pub fn compile(
             .@"br" => try op_control.emitBr(allocator, &buf, &labels, ins.payload),
             .@"br_if" => try op_control.emitBrIf(allocator, &buf, alloc, &pushed_vregs, &labels, ins.payload),
             .@"br_table" => try op_control.emitBrTable(allocator, &buf, func, alloc, &pushed_vregs, &labels, ins.payload, ins.extra),
-            .@"if" => try op_control.emitIf(allocator, &buf, alloc, &pushed_vregs, &labels),
+            .@"if" => try op_control.emitIf(allocator, &buf, alloc, &pushed_vregs, &labels, ins.extra),
             .@"else" => try op_control.emitElse(allocator, &buf, &pushed_vregs, &labels),
             .@"end" => {
                 // Two distinct forms (mirrors arm64/emit.zig):
