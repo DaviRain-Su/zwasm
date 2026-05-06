@@ -14,24 +14,26 @@
 
 ## Current state — Phase 7 / §9.7 / 7.5 IN-PROGRESS
 
-直近 commit (HEAD = `6c86c57`):
+直近 commit (HEAD = `d1eb42a`):
 
-- `6c86c57` §9.7 / 7.5-spec-assertion-driver-s (debt stale-barrier review; 4 rows refreshed)
-- `ed2d7fa` §9.7 / 7.5-spec-assertion-driver-r (corpus expand attempt; D-035 filed)
-- `d6bc382` §9.7 / 7.5-spec-assertion-driver-q (FP pool widening; spec-jit-compile 12/12; D-034 closed)
-- `7a8dcb6` §9.7 / 7.5-spec-assertion-driver-p (D-034 chain extends)
+- `d1eb42a` §9.7 / 7.5-spec-assertion-driver-t (local zero-init + local_get.wast; 108/0/22)
+- `6c86c57` §9.7 / 7.5-spec-assertion-driver-s (debt stale-barrier review)
+- `ed2d7fa` §9.7 / 7.5-spec-assertion-driver-r (D-035 filed)
+- `d6bc382` §9.7 / 7.5-spec-assertion-driver-q (FP pool widening; 12/12; D-034 closed)
 
-**Active task**: spec-assertion-driver-s landed (Step 0.5
-maintenance)。D-007 / D-009 / D-010 / D-011 の Last reviewed
-を 2026-05-06 に refresh。barrier は依然有効 (WASI envv,
-Zig 0.17+, allocator semantics, ADR-0016 M3)。code 変更なし;
-tests 1027/1032 / 95/0/0 / 12/12 据え置き。
+**Active task**: spec-assertion-driver-t landed。**ARM64 prologue
+local zero-init** (Wasm spec §4.5.3.1) — `STR XZR, [SP, #(idx*8)]`
+per declared local。これにより `type-local-i32` / `type-local-i64`
+が正しく 0 を返す (実 spec corpus exec)。`local_get.wast` 取り込み
+で **+13 PASS / +22 SKIP**: spec_assert_runner 108/0/22 (skip は
+multi-arg shape 等)。emit_test の 3 ケースが prologue size 変動で
+update 必要だった。tests 1027/1032 / 12/12 据え置き。
 
-**NEXT** = `7.5-spec-assertion-driver-t` (Wasm 2.0 multi-value
-block support — D-035 discharge; or §9.7 / 7.8 着手で x86_64
-spec gate 開始)。chunk-q の 12/12 milestone 以降は infra cleanup
-phase に入っており、新規 code-side row close (7.8〜) への
-pivot タイミングが近い。
+**NEXT** = `7.5-spec-assertion-driver-u` (more single-module wast
+fixtures: `nop.wast` / `switch.wast` / `if.wast` / `forward.wast`
+拡張、もしくは D-035 multi-value block discharge)。chunk-t で
+prologue zero-init は実 spec semantic を初めて exercise した —
+類似の semantic gap (params i32 vs declared i32 等) 残存可能性。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -96,7 +98,8 @@ pivot タイミングが近い。
 | 7.5-spec-assertion-driver-q | FP pool widening (resolveFp shim); spec-jit-compile 12/12; D-034 closed | DONE (d6bc382) |
 | 7.5-spec-assertion-driver-r | corpus expand attempt; D-035 filed (Wasm 2.0 multi-value block) | DONE (ed2d7fa) |
 | 7.5-spec-assertion-driver-s | debt stale-barrier review (Step 0.5 maintenance; 4 rows refresh) | DONE (6c86c57) |
-| 7.5-spec-assertion-driver-t | D-035 (Wasm 2.0 multi-value block) もしくは §9.7 / 7.8 (x86_64 spec gate) pivot | **NEXT** |
+| 7.5-spec-assertion-driver-t | local zero-init + local_get.wast (108/0/22; +13 PASS) | DONE (d1eb42a) |
+| 7.5-spec-assertion-driver-u | more single-module wast fixtures (nop / switch / if / forward 拡張) もしくは D-035 | **NEXT** |
 | 7.5-trap-reason-channel | trap_flag を `enum TrapReason` に拡張 (assert_trap reason discrimination) | pending (ADR-0028 / Diagnostic M3) |
 
 ADR-0019 phase plan post-7.6: 7.7 emit.zig, 7.8 spec gate (Linux
