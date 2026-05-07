@@ -14,12 +14,12 @@
 
 ## Current state — Phase 7 / §9.7 / 7.10 IN-PROGRESS
 
-直近 commit (HEAD = `43e8336`):
+直近 commit (HEAD = `911b92c`):
 
-- `43e8336` feat(p7): §9.7 / 7.10 chunk k — x86_64 gpr.zig spill-region disp32 widening (D-048 close)
+- `911b92c` feat(p7): §9.7 / 7.10 chunk l (partial) — JIT entry() defensive guards
+- `72c633d` chore(p7): mark §9.7 / 7.10 chunk k close
+- `43e8336` feat(p7): §9.7 / 7.10 chunk k — x86_64 gpr.zig spill-region disp32 widening (D-048)
 - `6b4bd2b` chore(p7): mark §9.7 / 7.10 chunk j close
-- `6bab26e` feat(p7): §9.7 / 7.10 chunk j — x86_64 SysV callee param-arg-overflow READ
-- `9cfd3aa` chore(p7): mark §9.7 / 7.10 chunk i close
 
 **Phase status**: §9.7 / 7.5 + 7.8 + **7.9 [x]**。Phase 7 残 row = 7.10 /
 7.11 🔒 / 7.12 / 7.13 🔒。
@@ -38,15 +38,34 @@
   entry shim runtime data structure。debug 必要。
 
 **§9.7 / 7.10 chain plan** (NEXT 群):
-- **7.10-l (NEXT)**: JIT run-stage segfault investigation。
-  smallest-first: 1 fixture (e.g. `c_simple_add` if available) を
-  isolated で動かして MAP/JIT entry を debug。Possible causes:
-  - JitRuntime initialization gap (vm_base / mem_limit not set)
-  - Host import dispatch unwired (D-026)
-  - trap stub address calculation error
-  - prologue clobber of caller-saved regs the entry shim assumed
+- **7.10-l-cont (NEXT, surfaced to user)**: JIT run-stage SEGV
+  deep dive。Phase 1 (chunk l, commit `911b92c`) added defensive
+  bounds + sentinel guards in `linker.zig:entry`; verified the
+  guards do NOT trigger, narrowing the SEGV to **inside the JIT'd
+  function body** (prologue / body / epilogue). Diagnostic
+  confirmed at call site: `func_idx=6, func_offsets.len=47,
+  block.bytes.len=49152` are all sane. Phase 2 needs interactive
+  lldb / disasm step-through of the faulting JIT'd code on a
+  minimal hand-crafted fixture. **Bucket-2 surface — needs
+  human-in-loop debug session** (debugger attach + step + map
+  back to emit byte stream not autonomous-friendly).
 - 7.10-br_table-fdepth (deferred): return-trampoline pattern。
 - 7.10-regalloc-port (deferred to Phase 8): D-029。
+
+## Open questions / blockers (§9.7 / 7.10)
+
+**Run-stage SEGV** (D-049): `ZWASM_JIT_RUN=1` produces
+`Segmentation fault at address 0x0` + `aborting due to recursive
+panic` on ALL fixtures across both arm64 (Mac) and x86_64
+(Linux). Compile-pass = 45/55 (well past the 40+ threshold for
+7.10's compile side); run-pass = 0/55 — blocking 7.10's strict
+"40+ run" exit criterion AND 7.11 differential (which needs JIT
+to actually run). Ruled out: out-of-range entry idx, import-
+sentinel resolution. Likely-in: prologue NULL deref, body
+invalid memory access, epilogue stack-corruption RET, or trap
+stub address mis-calc after chunks f-k's encoder extensions.
+Reproducer: `ZWASM_JIT_RUN=1 zig build test-realworld-run-jit`
+on Mac (arm64) or via OrbStack (x86_64).
 
 **Pre-existing infra observation (out-of-scope)**:
 `.githooks/pre_commit` (snake_case) は Git の `pre-commit`
