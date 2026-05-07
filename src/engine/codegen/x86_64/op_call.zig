@@ -66,6 +66,7 @@ pub fn emitCall(
     next_vreg: *u32,
     call_fixups: *std.ArrayList(CallFixup),
     spill_base_off: u32,
+    outgoing_max_bytes: u32,
     func_sigs: []const zir.FuncType,
     num_imports: u32,
     callee_idx: u32,
@@ -96,9 +97,9 @@ pub fn emitCall(
         try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.host_dispatch_base_off).slice());
         try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .rax, idx_byte_off).slice());
         try buf.appendSlice(allocator, inst.encMovRR(.q, abi.current.entry_arg0_gpr, abi.runtime_ptr_save_gpr).slice());
-        try emitShadowAlloc(allocator, buf);
+        try emitShadowAlloc(allocator, buf, outgoing_max_bytes);
         try buf.appendSlice(allocator, inst.encCallReg(.rax).slice());
-        try emitShadowFree(allocator, buf);
+        try emitShadowFree(allocator, buf, outgoing_max_bytes);
 
         try captureCallResult(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, callee_sig);
         return;
@@ -113,10 +114,14 @@ pub fn emitCall(
 
     // Win64 ABI: caller reserves 32 bytes of shadow space below
     // the call site for the callee to optionally spill its 4
-    // register args. SysV has no shadow space. The reservation
-    // is per-call (simpler than prologue-batched) and stays
-    // 16-byte-aligned with the post-CALL push of return addr.
-    try emitShadowAlloc(allocator, buf);
+    // register args. §9.7 / 7.10-f folds shadow allocation into
+    // the prologue's outgoing-args region (`outgoing_max_bytes`
+    // already includes shadow when any call exists), so this
+    // helper becomes a no-op when prologue pre-allocation took
+    // ownership. Falls back to per-call SUB RSP, 32 only when
+    // outgoing_max_bytes == 0 (= no calls; defensive — emitCall
+    // would not be reached).
+    try emitShadowAlloc(allocator, buf, outgoing_max_bytes);
 
     // CALL placeholder; linker patches via call_fixups once
     // function-body offsets are known.
@@ -127,21 +132,26 @@ pub fn emitCall(
         .target_func_idx = callee_idx,
     });
 
-    try emitShadowFree(allocator, buf);
+    try emitShadowFree(allocator, buf, outgoing_max_bytes);
 
     try captureCallResult(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, callee_sig);
 }
 
-/// Reserve Win64 shadow space below the upcoming CALL. SysV
-/// no-op (shadow_space_bytes = 0). Per ADR-0026 / Microsoft x64.
-pub fn emitShadowAlloc(allocator: Allocator, buf: *std.ArrayList(u8)) Error!void {
+/// Reserve Win64 shadow space below the upcoming CALL. No-op when
+/// `outgoing_max_bytes > 0` (shadow already allocated by the
+/// prologue per §9.7 / 7.10-f) or when SysV (`shadow_space_bytes
+/// == 0`). Per ADR-0026 / Microsoft x64.
+pub fn emitShadowAlloc(allocator: Allocator, buf: *std.ArrayList(u8), outgoing_max_bytes: u32) Error!void {
     if (abi.current.shadow_space_bytes == 0) return;
+    if (outgoing_max_bytes > 0) return;
     try buf.appendSlice(allocator, inst.encSubRSpImm8(@intCast(abi.current.shadow_space_bytes)).slice());
 }
 
-/// Free Win64 shadow space after CALL returns. SysV no-op.
-pub fn emitShadowFree(allocator: Allocator, buf: *std.ArrayList(u8)) Error!void {
+/// Free Win64 shadow space after CALL returns. Mirror of
+/// `emitShadowAlloc` (same gating).
+pub fn emitShadowFree(allocator: Allocator, buf: *std.ArrayList(u8), outgoing_max_bytes: u32) Error!void {
     if (abi.current.shadow_space_bytes == 0) return;
+    if (outgoing_max_bytes > 0) return;
     try buf.appendSlice(allocator, inst.encAddRSpImm8(@intCast(abi.current.shadow_space_bytes)).slice());
 }
 
@@ -172,6 +182,7 @@ pub fn emitCallIndirect(
     next_vreg: *u32,
     bounds_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
+    outgoing_max_bytes: u32,
     module_types: []const zir.FuncType,
     type_idx: u32,
 ) Error!void {
@@ -215,31 +226,44 @@ pub fn emitCallIndirect(
     // RCX on Win64).
     try buf.appendSlice(allocator, inst.encMovRR(.q, abi.current.entry_arg0_gpr, abi.runtime_ptr_save_gpr).slice());
 
-    // Win64 shadow space (32 bytes; SysV no-op).
-    try emitShadowAlloc(allocator, buf);
+    // Win64 shadow space (32 bytes; SysV no-op; both no-op when
+    // §9.7 / 7.10-f prologue pre-allocation took ownership).
+    try emitShadowAlloc(allocator, buf, outgoing_max_bytes);
 
     // CALL RAX (indirect).
     try buf.appendSlice(allocator, inst.encCallReg(.rax).slice());
 
-    try emitShadowFree(allocator, buf);
+    try emitShadowFree(allocator, buf, outgoing_max_bytes);
 
     try captureCallResult(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, callee_sig);
 }
 
-/// Marshal call arguments per SysV x86_64 §3.2.3: pop N arg
-/// vregs in REVERSE (top-of-stack = rightmost arg), then emit
-/// MOV from each arg's home register into RSI, RDX, RCX, R8,
-/// R9 (skipping RDI = runtime_ptr per ADR-0026).
+/// Marshal call arguments per SysV x86_64 §3.2.3 / Microsoft x64
+/// §"Argument Passing": pop N arg vregs in REVERSE (top-of-stack =
+/// rightmost arg), then emit MOV from each arg's home register
+/// into the per-Cc arg slot. Args overflowing the register pool
+/// land at `[RSP + outgoing_offset + 8 * K]` in the caller's
+/// pre-allocated outgoing-args region (§9.7 / 7.10-f mirror of
+/// arm64 d-11). The callee's prologue reads them at `[RBP + 16
+/// + r15_save_off + 8 * K]`.
 ///
-/// **No source-clobber risk by construction**: the regalloc
-/// pool (R10, R11 + RBX, R12-R14) is disjoint from the SysV
-/// arg regs (RDI..R9), so naive sequential MOV per arg is
-/// correct without parallel-move analysis. Mirrors arm64's
-/// constraint (op_call.zig § marshalCallArgs).
+/// **Per-Cc overflow position**:
+///   - SysV: outgoing_offset = 0; per-overflow slot K = NSAA index
+///     (incremented per overflowed arg of EITHER class — both
+///     classes share the NSAA stream in declaration order).
+///   - Win64: outgoing_offset = 32 (shadow space); per-overflow
+///     slot K = `shared_slot - 4` where shared_slot tracks the
+///     int/fp shared counter and 4 is the per-Cc reg pool size.
 ///
-/// **Scope**: ≤ 5 i32 user-visible args (RSI..R9 — RDI is
-/// reserved for runtime_ptr). f32/f64/i64 args surface as
-/// UnsupportedOp.
+/// **No source-clobber risk by construction**: the regalloc pool
+/// (RBX, R12-R14 ± RDI/RSI on Win64) is disjoint from the per-Cc
+/// arg regs, so naive sequential MOV per arg is correct without
+/// parallel-move analysis. Spilled args stage through R10/R11
+/// (GPR) or XMM14/15 (FP) via the spill-aware helpers — disjoint
+/// from arg regs and from each other across stages.
+///
+/// **Scope**: ≤ 64 args (effectively unlimited). v128 / funcref /
+/// externref still surface UnsupportedOp.
 pub fn marshalCallArgs(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
@@ -252,7 +276,7 @@ pub fn marshalCallArgs(
     if (n_args == 0) return;
     if (pushed_vregs.items.len < n_args) return Error.AllocationMissing;
 
-    var arg_vregs: [5]u32 = undefined;
+    var arg_vregs: [64]u32 = undefined;
     if (n_args > arg_vregs.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig:217", 0);
     var i: u32 = n_args;
     while (i > 0) {
@@ -273,43 +297,79 @@ pub fn marshalCallArgs(
     //          shared count with int).
     var gpr_arg_slot: usize = 1;
     var fp_arg_slot: usize = if (abi.current_cc == .win64) 1 else 0;
+    // SysV NSAA index (per-overflow counter; increments only on
+    // overflow). Win64 reuses gpr_arg_slot/fp_arg_slot's shared
+    // value to derive its overflow slot.
+    var nsaa_idx: u32 = 0;
     var k: u32 = 0;
     while (k < n_args) : (k += 1) {
         const src_vreg = arg_vregs[k];
         switch (callee_sig.params[k]) {
             .i32 => {
-                if (gpr_arg_slot >= abi.current.arg_gprs.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig:234", 0);
-                const dst = abi.current.arg_gprs[gpr_arg_slot];
-                const src = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
-                if (src != dst) {
-                    try buf.appendSlice(allocator, inst.encMovRR(.d, dst, src).slice());
+                if (gpr_arg_slot >= abi.current.arg_gprs.len) {
+                    // Overflow: stage src into R10 (or R11 if R10
+                    // already holds a prior overflowed arg in
+                    // flight — but the marshal sequence emits each
+                    // store before staging the next, so stage 0 is
+                    // safe here). Then STR W to outgoing region.
+                    const src = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
+                    const disp = computeOverflowDisp(nsaa_idx, gpr_arg_slot);
+                    try buf.appendSlice(allocator, inst.encStoreR32MemRSPDisp32(src, disp).slice());
+                    nsaa_idx += 1;
+                } else {
+                    const dst = abi.current.arg_gprs[gpr_arg_slot];
+                    const src = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
+                    if (src != dst) {
+                        try buf.appendSlice(allocator, inst.encMovRR(.d, dst, src).slice());
+                    }
                 }
                 gpr_arg_slot += 1;
                 if (abi.current_cc == .win64) fp_arg_slot += 1;
             },
             .i64 => {
-                // §9.7 / 7.10-c: i64 arg via .q-form MOV.
-                if (gpr_arg_slot >= abi.current.arg_gprs.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig:234", 0);
-                const dst = abi.current.arg_gprs[gpr_arg_slot];
-                const src = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
-                if (src != dst) {
-                    try buf.appendSlice(allocator, inst.encMovRR(.q, dst, src).slice());
+                if (gpr_arg_slot >= abi.current.arg_gprs.len) {
+                    const src = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
+                    const disp = computeOverflowDisp(nsaa_idx, gpr_arg_slot);
+                    try buf.appendSlice(allocator, inst.encStoreR64MemRSPDisp32(src, disp).slice());
+                    nsaa_idx += 1;
+                } else {
+                    const dst = abi.current.arg_gprs[gpr_arg_slot];
+                    const src = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
+                    if (src != dst) {
+                        try buf.appendSlice(allocator, inst.encMovRR(.q, dst, src).slice());
+                    }
                 }
                 gpr_arg_slot += 1;
                 if (abi.current_cc == .win64) fp_arg_slot += 1;
             },
-            .f32, .f64 => {
-                // §9.7 / 7.10-e: f32/f64 arg via MOVAPS (XMM-to-XMM
-                // copy of the full 128-bit register). The f32/f64
-                // distinction matters only for the bit pattern in
-                // the low 32/64 bits; MOVAPS preserves whatever's
-                // there. Spilled FP vregs stage through XMM14/15
-                // via fpLoadSpilled.
-                if (fp_arg_slot >= abi.current.arg_xmms.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig:242", 0);
-                const dst = abi.current.arg_xmms[fp_arg_slot];
-                const src = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
-                if (src != dst) {
-                    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst, src).slice());
+            .f32 => {
+                if (fp_arg_slot >= abi.current.arg_xmms.len) {
+                    const src = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
+                    const disp = computeOverflowDisp(nsaa_idx, fp_arg_slot);
+                    try buf.appendSlice(allocator, inst.encStoreXmmF32MemRSPDisp32(src, disp).slice());
+                    nsaa_idx += 1;
+                } else {
+                    const dst = abi.current.arg_xmms[fp_arg_slot];
+                    const src = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
+                    if (src != dst) {
+                        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst, src).slice());
+                    }
+                }
+                fp_arg_slot += 1;
+                if (abi.current_cc == .win64) gpr_arg_slot += 1;
+            },
+            .f64 => {
+                if (fp_arg_slot >= abi.current.arg_xmms.len) {
+                    const src = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
+                    const disp = computeOverflowDisp(nsaa_idx, fp_arg_slot);
+                    try buf.appendSlice(allocator, inst.encStoreXmmF64MemRSPDisp32(src, disp).slice());
+                    nsaa_idx += 1;
+                } else {
+                    const dst = abi.current.arg_xmms[fp_arg_slot];
+                    const src = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
+                    if (src != dst) {
+                        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst, src).slice());
+                    }
                 }
                 fp_arg_slot += 1;
                 if (abi.current_cc == .win64) gpr_arg_slot += 1;
@@ -317,6 +377,18 @@ pub fn marshalCallArgs(
             .v128, .funcref, .externref => return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig:242", 0),
         }
     }
+}
+
+/// Compute the [RSP + disp] offset for an overflowed arg per
+/// the active Cc. SysV uses the NSAA counter; Win64 uses the
+/// shared int/fp slot index post-shadow-space (slot 4 = first
+/// overflow at [RSP + 32]). See §9.7 / 7.10-f rationale on
+/// `marshalCallArgs`.
+fn computeOverflowDisp(nsaa_idx: u32, shared_slot: usize) i32 {
+    return switch (abi.current_cc) {
+        .sysv => @intCast(nsaa_idx * 8),
+        .win64 => @intCast(shared_slot * 8),
+    };
 }
 
 /// Capture a call's return value into the next vreg per SysV

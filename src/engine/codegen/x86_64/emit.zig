@@ -88,6 +88,63 @@ fn rejectUnsupported(reason: []const u8, func_idx: u32) Error {
     return Error.UnsupportedOp;
 }
 
+/// §9.7 / 7.10-f mirror of `arm64/emit.zig:computeOutgoingMaxBytes`.
+/// Pre-scan the function body for the worst-case outgoing-args
+/// region size at the bottom of the caller's frame (`[RSP, #0]`
+/// upward). For each `call N` / `call_indirect type_idx`, count
+/// the args that overflow the per-Cc register pools and sum the
+/// per-slot 8-byte allocations; track the max across all calls.
+///
+/// **SysV** (System V x86_64 §3.2.3): int args use arg_gprs[1..6]
+/// (5 user slots; arg_gprs[0] = RDI = runtime_ptr per ADR-0026).
+/// FP args use arg_xmms[0..7] (8 user slots, independent counter).
+/// Per-call overflow = `(max(0, n_int - 5) + max(0, n_fp - 8)) * 8`.
+///
+/// **Win64** (Microsoft x64): int and FP share slots arg_gprs[1..3]
+/// (3 user slots; arg_gprs[0] = RCX = runtime_ptr). Total user
+/// args > 3 ⇒ overflow. The shared shadow-space-prefixed region
+/// places overflow at `[RSP + 32 + 8*K]`, so the outgoing region
+/// must include the 32-byte shadow when any call exists. Per-call
+/// outgoing = `32 + max(0, n_int + n_fp - 3) * 8`.
+fn computeOutgoingMaxBytes(
+    func: *const ZirFunc,
+    func_sigs: []const zir.FuncType,
+    module_types: []const zir.FuncType,
+) u32 {
+    var max_bytes: u32 = 0;
+    for (func.instrs.items) |ins| {
+        const sig: ?zir.FuncType = switch (ins.op) {
+            .call => if (ins.payload < func_sigs.len) func_sigs[ins.payload] else null,
+            .call_indirect => if (ins.payload < module_types.len) module_types[ins.payload] else null,
+            else => null,
+        };
+        const callee_sig = sig orelse continue;
+        var n_int: u32 = 0;
+        var n_fp: u32 = 0;
+        for (callee_sig.params) |p| {
+            switch (p) {
+                .i32, .i64 => n_int += 1,
+                .f32, .f64 => n_fp += 1,
+                .v128, .funcref, .externref => {},
+            }
+        }
+        const bytes: u32 = switch (abi.current_cc) {
+            .sysv => blk: {
+                const n_int_overflow: u32 = if (n_int > 5) n_int - 5 else 0;
+                const n_fp_overflow: u32 = if (n_fp > 8) n_fp - 8 else 0;
+                break :blk (n_int_overflow + n_fp_overflow) * 8;
+            },
+            .win64 => blk: {
+                const n_total = n_int + n_fp;
+                const n_overflow: u32 = if (n_total > 3) n_total - 3 else 0;
+                break :blk abi.current.shadow_space_bytes + n_overflow * 8;
+            },
+        };
+        if (bytes > max_bytes) max_bytes = bytes;
+    }
+    return max_bytes;
+}
+
 /// Emit x86_64 machine code for `func`. Requires `alloc.slots`
 /// to be populated (call `regalloc.compute` first; pass the
 /// `Allocation` here). `func_sigs` and `module_types` are
@@ -211,7 +268,14 @@ pub fn compile(
     const spill_bytes: u32 = alloc.spillBytes();
     const r15_save_bytes: u32 = if (uses_runtime_ptr) 8 else 0;
     const spill_base_off: u32 = locals_bytes + r15_save_bytes + 8;
-    const frame_unaligned: u32 = locals_bytes + spill_bytes;
+    // §9.7 / 7.10-f: outgoing-args region pre-allocated at the
+    // BOTTOM of the frame (`[RSP, #0]` upward). For SysV this is
+    // pure overflow bytes; for Win64 it includes the 32-byte
+    // shadow space when any call exists. When `outgoing_max_bytes`
+    // > 0 the per-call `emitShadowAlloc` / `Free` become no-ops
+    // (the shadow is already part of the prologue's SUB RSP).
+    const outgoing_max_bytes: u32 = computeOutgoingMaxBytes(func, func_sigs, module_types);
+    const frame_unaligned: u32 = outgoing_max_bytes + locals_bytes + spill_bytes;
     const frame_bytes: u32 = if (uses_runtime_ptr)
         ((frame_unaligned + 7) & ~@as(u32, 15)) + 8
     else
@@ -286,10 +350,18 @@ pub fn compile(
             }
             // Win64 stack-arg fallback for slot >= 4. The shared
             // slot is `int_arg_idx` (== `fp_arg_idx` under Win64).
-            // Read from the shadow-space-relative location
-            // [RBP + 16 + 8*slot] and write to local slot.
+            // Read from the shadow-space-relative location and
+            // write to local slot.
+            //   [RBP + 16 + r15_save_off + 8*slot]
+            // where +16 = saved RBP (8) + return addr (8); the
+            // +r15_save_off (8 bytes) covers our PUSH R15 prologue
+            // shifting RBP one cell deeper than the std ABI shape.
+            // Without it, [RBP + 48] (the standard "first overflow
+            // at slot 4") reads the saved-RBP slot instead of
+            // caller-written arg bytes when uses_runtime_ptr fires.
             if (abi.current_cc == .win64 and int_arg_idx >= abi.current.arg_gprs.len) {
-                const stack_disp: i32 = 16 + @as(i32, @intCast(int_arg_idx * 8));
+                const r15_save_off: i32 = if (uses_runtime_ptr) 8 else 0;
+                const stack_disp: i32 = 16 + r15_save_off + @as(i32, @intCast(int_arg_idx * 8));
                 switch (ptype) {
                     .i32 => {
                         try buf.appendSlice(allocator, inst.encMovR32FromMemDisp32(.rax, .rbp, stack_disp).slice());
@@ -549,8 +621,8 @@ pub fn compile(
             .@"i64.rem_s",
             .@"i64.rem_u",
             => try op_alu_int.emitI64DivRem(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.op),
-            .call => try op_call.emitCall(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &call_fixups, spill_base_off, func_sigs, num_imports, ins.payload),
-            .call_indirect => try op_call.emitCallIndirect(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, module_types, ins.payload),
+            .call => try op_call.emitCall(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &call_fixups, spill_base_off, outgoing_max_bytes, func_sigs, num_imports, ins.payload),
+            .call_indirect => try op_call.emitCallIndirect(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, outgoing_max_bytes, module_types, ins.payload),
             .@"f32.const",
             .@"f64.const",
             => try op_alu_float.emitFpConst(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.op, ins.payload, ins.extra),
@@ -3910,6 +3982,66 @@ test "compile: unreachable emits JMP rel32 + trap stub patches disp to trap_byte
     // + POP RBP (1) + RET (1) = 8 bytes → trap stub starts at
     // 13 + 5 + 8 = 26.
     try testing.expectEqual(@as(i32, 26), target_abs);
+}
+
+test "compile: call N — 6 i32 args, SysV: 6th arg overflows to caller stack [RSP, #0] (STR W)" {
+    // §9.7 / 7.10-f mirror of arm64's d-11 caller-side stack-arg
+    // lowering. SysV reserves arg_gprs[0] = RDI for runtime_ptr,
+    // so user int args fit in arg_gprs[1..5] = RSI/RDX/RCX/R8/R9
+    // (5 slots). 6 i32 args ⇒ args 0..4 register-pass, arg 5
+    // overflows to the NSAA stack at [RSP + 0] (= bottom of the
+    // caller's outgoing-args region pre-allocated in the prologue).
+    //
+    // Win64 path differs (3 user GPR slots, shared int/fp counter,
+    // shadow space precedes overflow); covered by separate test
+    // gating on `abi.current_cc == .win64`.
+    if (abi.current_cc != .sysv) return error.SkipZigTest;
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
+    const callee_sig: zir.FuncType = .{ .params = &.{ .i32, .i32, .i32, .i32, .i32, .i32 }, .results = &.{} };
+    const func_sigs = [_]zir.FuncType{ sig, callee_sig };
+
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    var k: u32 = 0;
+    while (k < 6) : (k += 1) {
+        try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 100 + k });
+    }
+    try f.instrs.append(testing.allocator, .{ .op = .call, .payload = 1 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 6 },
+        .{ .def_pc = 1, .last_use_pc = 6 },
+        .{ .def_pc = 2, .last_use_pc = 6 },
+        .{ .def_pc = 3, .last_use_pc = 6 },
+        .{ .def_pc = 4, .last_use_pc = 6 },
+        .{ .def_pc = 5, .last_use_pc = 6 },
+    } };
+
+    // 6 vregs need 6 slots — pin max_reg_slots_gpr = 4 to match
+    // x86_64's actual pool (RBX, R12, R13, R14 per chunk 13b
+    // shrink). Slots 0..3 land on registers; slots 4 + 5 spill.
+    // The marshal site stages spilled args through R10 (stage 0)
+    // via `gprLoadSpilled` then writes them to the outgoing region.
+    const slots = [_]u16{ 0, 1, 2, 3, 4, 5 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 6, .max_reg_slots_gpr = 4 };
+    const out = try compile(testing.allocator, &f, alloc, &func_sigs, &.{}, 0);
+    defer deinit(testing.allocator, out);
+
+    // Locate the STR W to [RSP + 0] for the 6th arg (slot 5).
+    // After spill staging into R10 (stage 0), the encoder emits
+    // `MOV [RSP + 0], R10D`. Look for that exact opcode pattern
+    // anywhere in the body — bytewise position depends on prior
+    // spill/load encoding lengths which vary per pool layout.
+    const expected = inst.encStoreR32MemRSPDisp32(.r10, 0);
+    var found: bool = false;
+    var i: usize = 0;
+    while (i + expected.len <= out.bytes.len) : (i += 1) {
+        if (std.mem.eql(u8, out.bytes[i .. i + expected.len], expected.slice())) {
+            found = true;
+            break;
+        }
+    }
+    try testing.expect(found);
 }
 
 test "compile: v128-result end → UnsupportedOp (v128 marshalling deferred)" {

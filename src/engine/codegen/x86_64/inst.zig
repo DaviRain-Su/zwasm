@@ -1155,6 +1155,89 @@ pub fn encLoadXmmF64MemRBP(dst: Xmm, disp: i8) EncodedInsn {
     return enc;
 }
 
+// ============================================================
+// RSP-relative stores (§9.7 / 7.10-f caller-side stack-arg
+// lowering). RSP encodes as r/m=100 which forces a SIB byte
+// regardless of mod, so RSP base requires its own encoders
+// distinct from the RBP-base helpers above. SIB byte for
+// "RSP base, no index" = scale=00, index=100, base=100 = 0x24.
+// disp32 form is used unconditionally (5-byte vs 4-byte for
+// disp8) so the outgoing-args region can grow past 127 bytes
+// without needing two encoder variants — Phase 7 P3 cold-start
+// over peak-throughput trade per ROADMAP §2.
+// ============================================================
+
+/// Wasm spec §3.4.7 (caller-side stack-arg) — `MOV [RSP + disp32], r32`
+/// (opcode 0x89, REX.R for src extension, ModR/M mod=10 + rm=100,
+/// SIB 0x24, disp32). Used by `op_call.marshalCallArgs` to write
+/// overflowed i32 args into the caller's outgoing-args region at
+/// `[RSP + 8 * NSAA_idx]` (SysV) or `[RSP + 8 * shared_slot]` (Win64).
+pub fn encStoreR32MemRSPDisp32(src: Gpr, disp: i32) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (src.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
+    enc.push(0x89);
+    enc.push(encodeModrm(0b10, src.low3(), 0b100));
+    enc.push(0x24); // SIB: scale=00, index=100 (none), base=100 (RSP)
+    const u: u32 = @bitCast(disp);
+    enc.push(@truncate(u));
+    enc.push(@truncate(u >> 8));
+    enc.push(@truncate(u >> 16));
+    enc.push(@truncate(u >> 24));
+    return enc;
+}
+
+/// `MOV [RSP + disp32], r64` (REX.W form). i64 caller-side stack
+/// arg analog of `encStoreR32MemRSPDisp32`.
+pub fn encStoreR64MemRSPDisp32(src: Gpr, disp: i32) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(encodeRex(true, src.extBit(), 0, 0));
+    enc.push(0x89);
+    enc.push(encodeModrm(0b10, src.low3(), 0b100));
+    enc.push(0x24);
+    const u: u32 = @bitCast(disp);
+    enc.push(@truncate(u));
+    enc.push(@truncate(u >> 8));
+    enc.push(@truncate(u >> 16));
+    enc.push(@truncate(u >> 24));
+    return enc;
+}
+
+/// `MOVSS [RSP + disp32], xmm` (F3 0F 11 /r). f32 caller-side
+/// stack arg.
+pub fn encStoreXmmF32MemRSPDisp32(src: Xmm, disp: i32) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0xF3);
+    if (src.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
+    enc.push(0x0F);
+    enc.push(0x11);
+    enc.push(encodeModrm(0b10, src.low3(), 0b100));
+    enc.push(0x24);
+    const u: u32 = @bitCast(disp);
+    enc.push(@truncate(u));
+    enc.push(@truncate(u >> 8));
+    enc.push(@truncate(u >> 16));
+    enc.push(@truncate(u >> 24));
+    return enc;
+}
+
+/// `MOVSD [RSP + disp32], xmm` (F2 0F 11 /r). f64 caller-side
+/// stack arg.
+pub fn encStoreXmmF64MemRSPDisp32(src: Xmm, disp: i32) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0xF2);
+    if (src.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
+    enc.push(0x0F);
+    enc.push(0x11);
+    enc.push(encodeModrm(0b10, src.low3(), 0b100));
+    enc.push(0x24);
+    const u: u32 = @bitCast(disp);
+    enc.push(@truncate(u));
+    enc.push(@truncate(u >> 8));
+    enc.push(@truncate(u >> 16));
+    enc.push(@truncate(u >> 24));
+    return enc;
+}
+
 /// `PUSH r64` (opcode 0x50+rd) — push a 64-bit GPR onto the
 /// stack. REX.B (0x41) is needed for R8..R15. Width is implicit
 /// 64-bit; no operand-size override exists for PUSH r64.
@@ -2250,4 +2333,20 @@ test "encIdivR32 idiv r10d → 41 f7 fa (REX.B)" {
 }
 test "encDivR64 div r10 → 49 f7 f2 (REX.W + REX.B)" {
     try testing.expectEqualSlices(u8, &.{ 0x49, 0xF7, 0xF2 }, encDivR64(.r10).slice());
+}
+
+test "encStoreR32MemRSPDisp32 RBX, [RSP+0] → 89 9c 24 00 00 00 00 (no REX)" {
+    try testing.expectEqualSlices(u8, &.{ 0x89, 0x9C, 0x24, 0x00, 0x00, 0x00, 0x00 }, encStoreR32MemRSPDisp32(.rbx, 0).slice());
+}
+test "encStoreR32MemRSPDisp32 R10, [RSP+8] → 44 89 94 24 08 00 00 00 (REX.R for r10)" {
+    try testing.expectEqualSlices(u8, &.{ 0x44, 0x89, 0x94, 0x24, 0x08, 0x00, 0x00, 0x00 }, encStoreR32MemRSPDisp32(.r10, 8).slice());
+}
+test "encStoreR64MemRSPDisp32 RBX, [RSP+16] → 48 89 9c 24 10 00 00 00 (REX.W)" {
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x89, 0x9C, 0x24, 0x10, 0x00, 0x00, 0x00 }, encStoreR64MemRSPDisp32(.rbx, 16).slice());
+}
+test "encStoreXmmF32MemRSPDisp32 XMM8, [RSP+0] → f3 44 0f 11 84 24 00 00 00 00 (REX.R for xmm8)" {
+    try testing.expectEqualSlices(u8, &.{ 0xF3, 0x44, 0x0F, 0x11, 0x84, 0x24, 0x00, 0x00, 0x00, 0x00 }, encStoreXmmF32MemRSPDisp32(.xmm8, 0).slice());
+}
+test "encStoreXmmF64MemRSPDisp32 XMM0, [RSP+24] → f2 0f 11 84 24 18 00 00 00 (no REX for xmm0)" {
+    try testing.expectEqualSlices(u8, &.{ 0xF2, 0x0F, 0x11, 0x84, 0x24, 0x18, 0x00, 0x00, 0x00 }, encStoreXmmF64MemRSPDisp32(.xmm0, 24).slice());
 }
