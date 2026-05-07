@@ -265,8 +265,13 @@ pub fn emitFpUnary(
     const dst = try gpr.xmmDefSpilled(alloc, result_v, 1);
 
     const is_f64 = switch (op) {
-        .@"f64.abs", .@"f64.neg", .@"f64.sqrt",
-        .@"f64.ceil", .@"f64.floor", .@"f64.trunc", .@"f64.nearest",
+        .@"f64.abs",
+        .@"f64.neg",
+        .@"f64.sqrt",
+        .@"f64.ceil",
+        .@"f64.floor",
+        .@"f64.trunc",
+        .@"f64.nearest",
         => true,
         else => false,
     };
@@ -434,12 +439,15 @@ pub fn emitFpBinary(
     const lhs = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
     const rhs = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
     const dst = try gpr.xmmDefSpilled(alloc, result_v, 0);
-    if (dst == rhs and dst != lhs) return types.rejectUnsupported("src/engine/codegen/x86_64/op_alu_float.zig:437", 0);
 
-    if (dst != lhs) {
-        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst, lhs).slice());
-    }
-
+    // §9.7 / 7.10-d: parallel-move for the dst==rhs case on FP
+    // (XMM-class mirror of D-029). Commute commutative add/mul;
+    // scratch through XMM14 for non-commutative sub/div.
+    const commutative = switch (op) {
+        .@"f32.add", .@"f32.mul", .@"f64.add", .@"f64.mul" => true,
+        .@"f32.sub", .@"f32.div", .@"f64.sub", .@"f64.div" => false,
+        else => unreachable,
+    };
     const kind: inst.SseScalarKind = switch (op) {
         .@"f32.add", .@"f32.sub", .@"f32.mul", .@"f32.div" => .f32,
         .@"f64.add", .@"f64.sub", .@"f64.mul", .@"f64.div" => .f64,
@@ -452,7 +460,24 @@ pub fn emitFpBinary(
         .@"f32.div", .@"f64.div" => 0x5E,
         else => unreachable,
     };
-    try buf.appendSlice(allocator, inst.encSseScalarBinary(kind, opcode, dst, rhs).slice());
+
+    if (dst == rhs and dst != lhs) {
+        if (commutative) {
+            try buf.appendSlice(allocator, inst.encSseScalarBinary(kind, opcode, dst, lhs).slice());
+        } else {
+            const scratch = abi.fp_spill_stage_xmms[0];
+            try buf.appendSlice(allocator, inst.encMovapsXmmXmm(scratch, lhs).slice());
+            try buf.appendSlice(allocator, inst.encSseScalarBinary(kind, opcode, scratch, rhs).slice());
+            if (dst != scratch) {
+                try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst, scratch).slice());
+            }
+        }
+    } else {
+        if (dst != lhs) {
+            try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst, lhs).slice());
+        }
+        try buf.appendSlice(allocator, inst.encSseScalarBinary(kind, opcode, dst, rhs).slice());
+    }
 
     try gpr.xmmStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
