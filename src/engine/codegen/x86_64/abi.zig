@@ -189,6 +189,43 @@ pub const allocatable_xmms = [_]Xmm{
     .xmm8, .xmm9, .xmm10, .xmm11, .xmm12, .xmm13, .xmm14, .xmm15,
 };
 
+/// Spill staging GPRs (mirrors arm64's `spill_stage_gprs` =
+/// X14/X15 per ADR-0021). Used by `x86_64/gpr.zig`'s spill-aware
+/// helpers (`gprLoadSpilled` / `gprDefSpilled` / `gprStoreSpilled`)
+/// to pipe a spilled vreg through a physical register on the way
+/// to/from the spill frame slot.
+///
+/// **Choice**: R10/R11 — caller-saved scratch in both SysV
+/// (§3.2.1 "static chain" / "intra-procedure scratch") and Win64
+/// (caller-clobberable, not used for arg passing or returns).
+/// These are the only x86_64 GPRs that are caller-saved AND not
+/// otherwise reserved AND ABI-portable (RAX/RDX = return; RCX =
+/// shift count + Win64 arg0; RDX/R8/R9 = args).
+///
+/// **Two stage regs** (matching arm64's count) so binary ops can
+/// stage two spilled operands without collision (`stage_idx`
+/// 0 → R10, 1 → R11).
+///
+/// **State (D-045 chunk 13a)**: constants land here as foundation;
+/// `gpr.zig` helpers reference them but no op-handler caller has
+/// migrated yet. R10/R11 remain in `allocatable_caller_saved_
+/// scratch_gprs` for now — the dual-listing is **intentionally
+/// inert** (no caller fires the spill helpers) until chunk 13b
+/// completes the handler migration and removes R10/R11 from the
+/// regalloc pool. The comptime overlap check below is intentionally
+/// gated by `enforce_spill_stage_disjoint` (default `false` in
+/// 13a, flipped to `true` in 13b).
+pub const spill_stage_gprs = [_]Gpr{ .r10, .r11 };
+
+/// XMM-class counterpart of `spill_stage_gprs`. XMM14/XMM15 are
+/// caller-saved in both SysV (§3.2.3) and Win64 (XMM6..XMM15 are
+/// callee-saved on Win64, so XMM14/XMM15 require save/restore
+/// across calls — Win64 gpr.zig migration is chunk 13b).
+///
+/// See `spill_stage_gprs` doc for the dual-listing inertness
+/// rationale.
+pub const fp_spill_stage_xmms = [_]Xmm{ .xmm14, .xmm15 };
+
 /// Translate a regalloc slot id (from `engine/codegen/shared/
 /// regalloc.compute`) into a concrete GPR via the allocatable
 /// pool. Returns null when the slot id exceeds the pool size —

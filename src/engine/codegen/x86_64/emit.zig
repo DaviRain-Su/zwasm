@@ -56,6 +56,13 @@ const op_control = @import("op_control.zig");
 const op_call = @import("op_call.zig");
 const op_globals = @import("op_globals.zig");
 
+// Force gpr.zig into the test build via a comptime reference. The
+// helpers are not yet called from any op-handler (D-045 chunk 13a
+// foundation; chunk 13b migrates op_*.zig sites).
+comptime {
+    _ = @import("gpr.zig");
+}
+
 const Allocator = std.mem.Allocator;
 const ZirFunc = zir.ZirFunc;
 
