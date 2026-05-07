@@ -16,58 +16,54 @@
 
 直近 commit (HEAD = `<this>`):
 
-- `<this>` chore(p7): §9.7 / 7.9 chunk d-1 close (host-import dispatch infra)
+- `<this>` chore(p7): §9.7 / 7.9 chunk d-2 close (WASI dispatch handlers)
+- `6800bb7` feat(p7): §9.7 / 7.9 chunk d-2 — WASI dispatch handlers + first run-stage host call
 - `95d5ec8` feat(p7): §9.7 / 7.9 chunk d-1 — host-import dispatch infrastructure
 - `ceb5b1e` feat(p7): §9.7 / 7.9 chunk c3 — i{32,64}.div_s INT_MIN/-1 overflow trap
-- `ca01778` feat(p7): §9.7 / 7.9 chunk c2 — memory.copy + memory.fill
 
 **Phase status**: §9.7 / 7.5 + 7.8 → **[x]**。Phase 7 残 row = 7.9 /
 7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。
 
-**§9.7 / 7.9 progress**: chunks a..d-1 closed (a baseline runner;
-b import-reject lift; c sign-ext + div/rem; c2 memory.copy/fill =
-D-046; c3 div_s INT_MIN/-1 overflow = D-047; d-1 host-dispatch
-infrastructure)。3-host gate green: spec_assert 212/0/20 +
-realworld 55/0 + wast 1158+72/0 + edge_cases 31/0 across Mac /
-OrbStack Linux / windowsmini Win。
+**§9.7 / 7.9 progress**: chunks a..d-2 closed across 9 commits。
+3-host gate green: spec_assert 212/0/20 + realworld 55/0 + wast
+1158+72/0 + edge_cases 32/0 + new wasi-jit-dispatch unit tests
+across Mac / OrbStack Linux / windowsmini Win。
 
-**Chunk 7.9-d-1 完了** (`95d5ec8`): JitRuntime tail-extended with
-`host_dispatch_base: [*]const usize` + `host_dispatch_count: u32`
-(layout 64→80 bytes); per-arch `op_call.zig` import path now
-emits `LDR X16, [X19+host_dispatch_off]; LDR X16, [X16, #idx*8];
-restore X0; BLR X16` (arm64) / `MOV RAX, [R15+off]; MOV RAX,
-[RAX+idx*8]; MOV arg0, R15; CALL RAX` (x86_64); runner.zig
-populates dispatch table with `hostDispatchTrap` (sets trap_flag
-+ returns 0) preserving the prior trap-on-import-call observable
-behaviour。Calling convention: host fn signatures are `fn(rt:
-*JitRuntime, ...wasm_args) callconv(.c)` — arg0 is the JitRuntime
-ptr (matching JIT-body internal CC).
+**Chunk 7.9-d-2 完了** (`6800bb7`): real WASI handlers wired:
+- `src/wasi/jit_dispatch.zig` — `fd_write` (iov walk + bounds
+  check + nwritten write; stdout routing deferred), `clock_time_
+  get` / `random_get` (deterministic stubs writing 0), args /
+  environ stubs returning 0/empty。
+- `lookup(module, name)` matches wasi_snapshot_preview1 +
+  wasi_unstable; `populateDispatch` walks imports in wasm-space
+  order filling per-fn-idx slots。
+- `runner.zig.runI32Export` re-decodes imports section, calls
+  populateDispatch, hands the dispatch slice to JitRuntime。
+- End-to-end smoke `test/edge_cases/p7/wasi/fd_write_badf.{wat,
+  wasm,expect}`: imports fd_write, calls with fd=99, expects
+  i32:8 (EBADF). Mac edge_cases 31→32 PASS — first realworld
+  WASI host-call via JIT works end-to-end。
 
-**Chunk 7.9-d-2 plan** (NEXT, the user-visible payoff): real WASI
-handlers replace `hostDispatchTrap` for the realworld corpus:
-- proc_exit(rt, code) — `std.process.exit(code)` after setting a
-  PROC_EXIT trap variant on rt.trap_flag (M3 / D-022 will widen
-  the trap_flag to a typed code; for d-2 use `2` as the
-  proc-exit sentinel).
-- fd_write(rt, fd, iovs_ptr, iovs_len, nwritten_ptr) —
-  iterate iovs (read u32 offset + u32 len from rt.vm_base
-  + iovs_ptr), write each chunk to stdout/stderr per fd, store
-  total bytes-written to `[rt.vm_base + nwritten_ptr]`.
-- clock_time_get(rt, clock_id, precision, time_ptr) — POSIX
-  CLOCK_REALTIME / CLOCK_MONOTONIC via std.time.Instant; write
-  u64 nanos to `[rt.vm_base + time_ptr]`.
-- args_get / args_sizes_get / environ_get / environ_sizes_get
-  — read from a process-global WasiContext (set by run_runner_jit
-  before invoking the JIT entry).
-- random_get — POSIX getentropy.
-- After d-2: realworld_run_runner_jit will start showing run-pass
-  counts > 0 (at least proc_exit-only fixtures).
+**Chunk 7.9-d-3 plan** (NEXT): the proc_exit + real I/O finish:
+- `proc_exit(rt, code)` — extend JitRuntime tail with
+  `proc_exit_code: u32`; handler sets trap_flag = 2 (PROC_EXIT
+  sentinel) + writes code; entry shim's post-return check
+  surfaces (Trap-vs-ProcExit-vs-Value) to the host.
+- Thread `init.io: std.Io` through JitRuntime so `fd_write`
+  routes to actual stdout / stderr。
+- Replace `clock_time_get` zero-stub with real wall-clock;
+  `random_get` with std.posix.getrandom (gated by zig-stdlib
+  detection).
+- Update `test/realworld/run_runner_jit.zig` to invoke the entry
+  via entry.callVoidNoArgs (per `_start` export sig); report
+  run-pass count alongside compile-pass.
+- 目標: §9.7 / 7.9 exit criterion = 40+ realworld run-pass via
+  ARM64 JIT。
 
-**Chunk 7.9-d-3 plan**: linker / runner wires real handlers into
-host_dispatch_base by name-matching the import's
-`(module, field)` tuple against a registered WASI dispatch
-manifest; run_runner_jit invokes the entry function via
-entry.callI32NoArgs / callVoidNoArgs and reports run-pass.
+**Chunk 7.9-d-4 plan** (if needed): memory + data segment init
+in JitRuntime — the runner currently uses `[0]u8` memory which
+blocks fixtures that touch linear memory beyond pure host-call
+dispatch (D-031).
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
