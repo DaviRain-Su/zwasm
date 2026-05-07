@@ -68,8 +68,33 @@ pub const JitModule = struct {
     /// Cast function `idx`'s entry to a function pointer of the
     /// given signature. Caller is responsible for matching the
     /// emitted body's signature.
+    ///
+    /// §9.7 / 7.10-l defensive guard: the realworld_run_jit run-
+    /// stage SEGV investigation surfaced this site as a possible
+    /// out-of-bounds read path (idx ≥ func_offsets.len would walk
+    /// into garbage and produce a wildly invalid function pointer,
+    /// then the JIT prologue's first LDR would deref NULL and
+    /// trigger a recursive panic in the unwinder). Surface the
+    /// out-of-range case explicitly via @panic so future SEGVs
+    /// land with a useful message instead of silent NULL deref.
+    /// Also reject the IMPORT_SENTINEL_OFFSET path — the run-stage
+    /// caller MUST resolve imports through the host_dispatch_base
+    /// table, never through entry().
     pub fn entry(self: JitModule, idx: u32, comptime Fn: type) Fn {
-        return @ptrCast(@alignCast(self.block.bytes.ptr + self.func_offsets[idx]));
+        if (idx >= self.func_offsets.len) {
+            std.debug.panic(
+                "JitModule.entry: idx {d} >= func_offsets.len {d}",
+                .{ idx, self.func_offsets.len },
+            );
+        }
+        const off = self.func_offsets[idx];
+        if (off == IMPORT_SENTINEL_OFFSET) {
+            std.debug.panic(
+                "JitModule.entry: idx {d} resolves to IMPORT_SENTINEL_OFFSET — caller routed an import through entry() instead of host_dispatch_base",
+                .{idx},
+            );
+        }
+        return @ptrCast(@alignCast(self.block.bytes.ptr + off));
     }
 };
 
