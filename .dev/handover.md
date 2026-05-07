@@ -16,24 +16,22 @@
 
 直近 commit (HEAD = `<this>`):
 
-- `<this>` chore(p7): mark §9.7 / 7.8-spill-aware-regalloc chunk 13a foundation; retarget at 13b migration
+- `<this>` chore(p7): mark §9.7 / 7.8-spill-aware-regalloc chunk 13b close (+62 PASS x86_64)
+- `aaa2268` feat(p7): §9.7 / 7.8-x86-spill-aware-regalloc — migration (D-045 chunk 13b)
+- `c3180e4` chore(p7): refine §9.7 / 7.8-spill-aware-regalloc chunk 13b plan
 - `e811441` feat(p7): §9.7 / 7.8-x86-spill-aware-regalloc — foundation (D-045 chunk 13a)
-- `2b1688c` chore(p7): mark §9.7 / 7.8-x86-jit-mem-windows close
-- `6db570c` fix(p7): §9.7 / 7.8-x86-jit-mem-windows — use 0.16 stable APIs
 
 **Phase status**: §9.7 / 7.5 → **[x]** 完了。Phase 7 残 row = 7.8 /
 7.9 / 7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。**§9.7 / 7.8** = x86_64 spec
-gate — D-045 active。chunks 1-12 完了。3-host baseline post-chunk-12:
+gate — D-045 active。chunks 1-13b 完了。3-host baseline post-chunk-13b:
 
 - Mac aarch64       : **212 / 0 / 20**     (gate green — `test-all` wired)
-- OrbStack Linux    : **109 / 106 / 20**   (unchanged — Linux 不依存)
-- windowsmini Win   : **105 / 110 / 20**   (was 49/174/20 → +56 PASS)
+- OrbStack Linux    : **141 / 72 / 20**    (was 109/106/20 → +32 PASS)
+- windowsmini Win   : **135 / 78 / 20**    (was 105/110/20 → +30 PASS)
 
-Linux ↔ Win 差 = 4 PASS (vs 60 before chunk 12)。両ホスト共通の
-**残 ~106 fail = SlotOverflow** が主因 (regalloc pool 6 reg を 5+
-params で枯渇 — arm64 D-036/D-037 staged-spill machinery が
-prior-art)。次の主軸 = **7.8-x86-spill-aware-regalloc** (両ホストで
-106 fail を大量 close 見込み)。test-all 配線は Mac aarch64 のみ維持
+Total **+62 PASS** via spill-aware regalloc port (R10/R11 + XMM14/15
+を spill stage に reserve、110 op handler を `gpr.gpr*Spilled` /
+`xmm*Spilled` 経由に migrate)。test-all 配線は Mac aarch64 のみ維持
 (§9.7 / 7.8 row close = fail==0 で flip)。
 
 **Active priority — §9.7 / 7.8 D-045 chunk chain**:
@@ -50,10 +48,8 @@ prior-art)。次の主軸 = **7.8-x86-spill-aware-regalloc** (両ホストで
 10. ☑ 7.8-jit-mem-linux — Linux x86_64 mmap-RWX (+60 PASS)
 11. ☑ 7.8-x86-spec-gate — three-host baseline measurement + comment refresh
 12. ☑ **7.8-x86-jit-mem-windows** — Windows NtAllocateVirtualMemory RWX (Win +56 PASS)
-13. **7.8-x86-spill-aware-regalloc** — split into 13a (foundation) + 13b (migration):
-    - ☑ **13a foundation** (`e811441`): abi.zig adds `spill_stage_gprs` / `fp_spill_stage_xmms`; gpr.zig (NEW, mirrors arm64/gpr.zig); 12 unit tests. R10/R11 + XMM14/XMM15 still in allocatable (intentional dual-listing — chunk 13b removes them).
-    - **13b migration** (NEXT — **dual-component chunk**): (a) remove R10/R11 from allocatable_caller_saved_scratch_gprs (sysv + win64); (b) remove XMM14/XMM15 from allocatable_xmms; (c) thread `spill_base_off` through emit.zig handler signatures (110 sites in op_alu_int + op_alu_float + op_memory + op_globals + op_convert + op_call + emit.zig:emitLocalGet/Set/Tee/Select/etc); (d) replace `abi.slotToReg(alloc.slots[v])` with `gpr.gprLoadSpilled / gprDefSpilled / gprStoreSpilled` (or xmm* counterparts); (e) extend prologue to allocate spill frame area (SUB RSP, #(num_spill_slots * 8)); (f) update Allocation defaults or x86_64 callsites to pass `max_reg_slots_gpr = 4 / max_reg_slots_fp = 6`; **(g) update ~50 stale byte-sequence emit tests** in `src/engine/codegen/x86_64/emit.zig` whose `expected` arrays hardcoded slot 0 = R10 (now slot 0 = RBX, no REX.B prefix → 1-2 bytes shorter per encoded instruction). **Coupled work**: (a)-(f) and (g) MUST land in the same commit — partial migration leaves Mac unit tests red. **Prior attempt**: 2026-05-07 subagent migration produced (a)-(f) cleanly (Mac compile green, 1011 pass / 50 fail) but skipped (g); patch saved at `private/chunk13b-attempt/full.patch` (93KB, 1783 lines) for re-application. Expected impact: closes ~80% of 106 SlotOverflow fails on Linux + Windows.
-14. 7.8-x86-misc-cleanup — residual UnsupportedOp (unreachable.0.wasm + handcrafted_trap func[29]) + "did NOT trap"
+13. ☑ **7.8-x86-spill-aware-regalloc** — landed across 13a foundation (`e811441`) + 13b migration (`aaa2268`)。Pool shrink R10/R11 → spill_stage_gprs、XMM14/15 → fp_spill_stage_xmms。110 site migration、prologue spill-area allocation、~50 fixture update。+62 PASS across Linux + Windows。
+14. **7.8-x86-misc-cleanup** (NEXT) — residual UnsupportedOp (unreachable.0.wasm + handcrafted_trap func[29]) + "did NOT trap"。Plus follow-ups: D-029 dst==rhs reject path (now reachable with stage collisions); RBX callee-save in prologue (slot 0 = RBX post-13b)。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -79,11 +75,26 @@ Phase D (migration doc) は post-7.8 着手予定。詳細は
 - **D-026** env-stub host-func wiring (cross-module dispatch)。
 - **D-029** x86_64 emitI32Binary `dst==rhs` reject — regalloc port 後に discharge。
 - **D-031** runner runI32Export FP/i64 拡張 — JitRuntime memory init 後に at_limit 境界 fixture を再追加。
-- **D-045** §9.7 / 7.8 close blocker — x86_64 backend gap (chunks 1-12 closed; chunks 13-14 残)。
+- **D-045** §9.7 / 7.8 close blocker — x86_64 backend gap (chunks 1-13b closed; chunk 14 misc-cleanup 残)。
 - 詳細・staleness check は `.dev/debt.md`。
 
 ## Recently closed (full history via `git log --oneline`)
 
+- §9.7 / 7.8-x86-spill-aware-regalloc chunk 13b migration (`aaa2268`):
+  abi.zig pool shrink (R10/R11 → spill_stage_gprs; XMM14/15 →
+  fp_spill_stage_xmms; SysV pool 6→4、Win64 8→6、XMM 8→6)。emit.zig
+  + op_*.zig 110 site migration: `abi.slotToReg(alloc.slots[v])` →
+  `gpr.gprLoadSpilled / gprDefSpilled / gprStoreSpilled` (and xmm*
+  counterparts)。`spill_base_off: u32` を全 handler signature に
+  thread。prologue extend frame for spill area (`spill_base_off =
+  locals_bytes + (uses_runtime_ptr ? 8 : 0) + 8`)。shared/compile.zig
+  で x86_64 host 専用に `max_reg_slots_gpr = 4 / max_reg_slots_fp = 6`
+  を override。~50 stale byte-sequence emit test fixture を更新
+  (slot 0: R10 → RBX、REX.B prefix 削除で 1-2 byte 短縮)。
+  3-host gate green: Mac 212/0/20 unchanged + 1061/1066 unit pass、
+  Linux 109/106/20 → 141/72/20 (+32 PASS)、Win 105/110/20 → 135/78/20
+  (+30 PASS)。Total **+62 PASS** x86_64。残 ~75 fail/host: chunk 14
+  misc-cleanup (UnsupportedOp + handcrafted_trap "did NOT trap")。
 - §9.7 / 7.8-spill-aware-regalloc chunk 13a foundation (`e811441`):
   abi.zig に `spill_stage_gprs = [.r10, .r11]` と `fp_spill_stage_
   xmms = [.xmm14, .xmm15]` 定数を追加。x86_64/gpr.zig (NEW、
