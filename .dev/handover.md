@@ -14,36 +14,38 @@
 
 ## Current state — Phase 7 / §9.7 / 7.10 IN-PROGRESS
 
-直近 commit (HEAD = `f47db77`):
+直近 commit (HEAD = `093906f`):
 
-- `f47db77` feat(p7): §9.7 / 7.10 chunk g — x86_64 localDisp i8→i32 widening + RBP/RSP disp32 encoders
+- `093906f` feat(p7): §9.7 / 7.10 chunk h — x86_64 op_control br/br_if function-depth (return path)
+- `2dd5adf` chore(p7): mark §9.7 / 7.10 chunk g close
+- `f47db77` feat(p7): §9.7 / 7.10 chunk g — x86_64 localDisp i8→i32 + RBP/RSP disp32 encoders
 - `7b7f12b` fix(p7): §9.7 / 7.10 chunk f tests — Win64 prologue-batched shadow expectations
-- `ef57f3b` chore(p7): mark §9.7 / 7.10 chunk f close
-- `6c523fa` feat(p7): §9.7 / 7.10 chunk f — x86_64 op_call caller-side stack-args
 
 **Phase status**: §9.7 / 7.5 + 7.8 + **7.9 [x]**。Phase 7 残 row = 7.10 /
 7.11 🔒 / 7.12 / 7.13 🔒。
 
 **§9.7 / 7.10 progress** (Linux x86_64 realworld_run_jit 0/55 still):
-- chunks a..g closed: D-029 ALU 解消、op_call i32/i64/f32/f64
-  marshal + capture 完備、FP D-029 mirror 解消、caller-side
-  stack-args (SysV NSAA + Win64 shadow-aware shared-slot)、
-  localDisp i32 widening + disp32 RBP/RSP 系 encoder 完備
-  (`total_locals>15` cap 撤廃)。
+- chunks a..h closed: D-029 ALU/FP parallel-move、op_call 全
+  valtype marshal+capture、caller-side stack-args、localDisp
+  + RBP/RSP disp32 encoder、op_control br/br_if function-depth
+  (return path) — emit.zig+op_control inline marshal+epilogue+
+  RET (arm64 return_fixups は不要、physical-RET 複数許容)。
 - 各 chunk は dominant bottleneck を 1 つ解消するが、fixture は
   複数 gap を chain しているため compile-pass 数自体は 0/55。
   7.10 exit は bottleneck 枯渇=infra 完備で判断。
 
 **§9.7 / 7.10 chain plan** (NEXT 群):
-- **7.10-h (NEXT)**: op_control:178 / :104 / :78 — `depth ==
-  labels.len` (function-return) 経路を追加。x86_64 op_control.zig
-  は positional API; signature 拡張 (func/frame_bytes/uses_runtime
-  _ptr 受け取り) または return_fixups 機構導入 (arm64 mirror)。
-- 7.10-i: op_memory 32-bit offset (arm64 d-14 mirror)。
-- 7.10-spill-disp32 (deferred): `gpr.zig:rbpDispNegI8` も i8 制限。
-  spill region が 16 slot × 8 byte = 128 byte を超えるところで
-  surfaces。Phase 8 regalloc port で広い再設計が予定されている
-  ため、現状は debt として retain。
+- **7.10-i (NEXT)**: op_memory 32-bit offset (arm64 d-14
+  mirror)。`memarg.offset` が i32 disp 範囲を超えるケースを
+  encMov系の disp32 form encoder + scratch reg ベース計算で
+  lowering。x86_64 はベース addressing が広いので arm64 ほど
+  非自明ではない。
+- 7.10-br_table-fdepth (deferred): emitBrTable で depth ==
+  labels.len のケース。CMP + JNE rel8 + JMP の per-case 5-byte
+  fixed shape を維持するには return-trampoline pattern が必要
+  (function-end に 1 つ集約)。chunk i 後で評価。
+- 7.10-spill-disp32 (deferred to Phase 8): `gpr.zig:rbpDispNegI8`
+  → debt D-048。
 
 **Pre-existing infra observation (out-of-scope)**:
 `.githooks/pre_commit` (snake_case) は Git の `pre-commit`
@@ -87,9 +89,10 @@ Phase D (migration doc) は post-7.8 着手予定。詳細は
 
 ## Recently closed (canonical history via `git log --oneline --grep="§9.7"`)
 
-- §9.7 / 7.10 chunks a..g closed (commits `a8777ac` `4fb4fcb`
-  `68dd2dc` `da5db53` `6c523fa` `f47db77`)。x86_64 JIT で
-  D-029 ALU/FP parallel-move、op_call 全 valtype marshal+capture、
-  caller-side stack-args、localDisp + RBP/RSP disp32 encoder を
-  完備。realworld_run_jit compile-pass 数は 0/55 のまま (h/i 待ち)。
+- §9.7 / 7.10 chunks a..h closed (commits `a8777ac` `4fb4fcb`
+  `68dd2dc` `da5db53` `6c523fa` `f47db77` `093906f`)。x86_64 JIT
+  で D-029 ALU/FP parallel-move、op_call 全 valtype marshal+
+  capture、caller-side stack-args、localDisp + RBP/RSP disp32
+  encoder、op_control br/br_if function-depth を完備。
+  realworld_run_jit compile-pass 数は 0/55 のまま (i 待ち)。
 - §9.7 / 7.9 [x] — arm64 realworld JIT 52/55 compile-pass。
