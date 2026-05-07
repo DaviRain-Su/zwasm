@@ -23,6 +23,7 @@ const parser = @import("../parse/parser.zig");
 const sections = @import("../parse/sections.zig");
 const zir = @import("../ir/zir.zig");
 const validator_mod = @import("../validate/validator.zig");
+const jit_dispatch = @import("../wasi/jit_dispatch.zig");
 const FuncType = zir.FuncType;
 const compile_func = @import("codegen/shared/compile.zig");
 const linker = @import("codegen/shared/linker.zig");
@@ -333,15 +334,31 @@ pub fn runI32Export(
         return Error.UnsupportedEntrySignature;
     }
 
-    // Allocate + populate host_dispatch table with the default
-    // trap trampoline (chunk 7.9-d MVP). Each import-call site
-    // emits an indirect call through `host_dispatch_base[idx]`;
-    // the trap trampoline sets `trap_flag` and returns 0 so
-    // entry.callI32NoArgs detects the trap via the post-return
-    // check. Real WASI handlers replace these slots in chunk d-2.
+    // Allocate + populate host_dispatch table. Each import-call
+    // site emits an indirect call through
+    // `host_dispatch_base[idx]`. Default-fill with the trap
+    // trampoline, then overlay real WASI handlers for any
+    // imports whose `(module, name)` matches the snapshot-
+    // preview1 manifest in `wasi/jit_dispatch.zig`. Imports
+    // outside the manifest stay pointed at the trap (the host
+    // hasn't supplied that capability).
     const dispatch = try allocator.alloc(usize, compiled.num_imports);
     defer allocator.free(dispatch);
     for (dispatch) |*slot| slot.* = @intFromPtr(&hostDispatchTrap);
+
+    // Re-decode imports section for the (module, name) → handler
+    // pattern match. Arena-backed so freeing is one shot.
+    if (compiled.num_imports > 0) {
+        var temp_arena = std.heap.ArenaAllocator.init(allocator);
+        defer temp_arena.deinit();
+        const ta = temp_arena.allocator();
+        var module = try parser.parse(ta, wasm_bytes);
+        if (module.find(.import)) |s| {
+            var imports_buf = try sections.decodeImports(ta, s.body);
+            defer imports_buf.deinit();
+            jit_dispatch.populateDispatch(dispatch, imports_buf.items);
+        }
+    }
 
     var memory: [0]u8 = .{};
     var rt: entry.JitRuntime = .{

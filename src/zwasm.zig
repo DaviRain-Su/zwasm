@@ -151,6 +151,7 @@ pub const wasi = struct {
     pub const fd = @import("wasi/fd.zig");
     pub const clocks = @import("wasi/clocks.zig");
     pub const proc = @import("wasi/proc.zig");
+    pub const jit_dispatch = @import("wasi/jit_dispatch.zig");
 };
 
 // Zone 3
@@ -233,5 +234,6 @@ test {
     _ = @import("wasi/proc.zig");
     _ = @import("wasi/fd.zig");
     _ = @import("wasi/clocks.zig");
+    _ = @import("wasi/jit_dispatch.zig");
     _ = @import("cli/run.zig");
 }
