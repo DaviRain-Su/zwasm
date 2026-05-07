@@ -22,10 +22,14 @@
 //!     BLR X17.
 //!   - Capture return value.
 //!
-//! marshalCallArgs / captureCallResult enforce ≤ 8 GPR + ≤ 8 FP
-//! args per ADR-0017 sub-g3b scope; stack-arg lowering is
-//! post-MVP. v128/funcref/externref param/result types surface
-//! as UnsupportedOp.
+//! marshalCallArgs / captureCallResult enforce ≤ 7 GPR + ≤ 8 FP
+//! args in registers. §9.7 / 7.9-d-7 lifts the prior `arg_vregs[8]`
+//! hard cap: per AAPCS64 §6.4.2 (Arm IHI 0055), arguments that
+//! overflow X1..X7 / V0..V7 land on the stack at SP-relative
+//! offsets `[SP, #(8*K)]` for K = 0..n_stack_args-1, where the
+//! caller emits a SUB SP, SP, #stack_bytes before the BL/BLR
+//! and an ADD SP, SP, #stack_bytes after. v128 / funcref /
+//! externref param / result types surface as UnsupportedOp.
 //!
 //! Zone 2 (`src/engine/codegen/arm64/`).
 

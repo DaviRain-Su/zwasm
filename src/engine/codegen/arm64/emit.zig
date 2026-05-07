@@ -142,13 +142,16 @@ pub fn compile(
     //   arg-reg counter.
     // - Per-class stores: i32 → STR W, i64 → STR X, f32 → STR S,
     //   f64 → STR D. v128 / refs still surface as UnsupportedOp.
-    // - Total integer + FP params capped at 7 to avoid stack-arg
-    //   marshalling (which would require frame-relative loads of
-    //   8th+ args).
-    if (func.sig.params.len > 7) {
-        std.debug.print("arm64/emit: > 7 params unsupported (func_idx={d}, n={d})\n", .{ func.func_idx, func.sig.params.len });
-        return Error.UnsupportedOp;
-    }
+    // - §9.7 / 7.9-d-7 — AAPCS64 §6.4.2 stack-arg lowering: when
+    //   a class would overflow (int > X7 or fp > V7), the arg
+    //   (and every subsequent arg of the SAME class) lands on
+    //   the caller's stack at `[X29, #16 + 8*stack_arg_idx]`
+    //   (the +16 skips the saved FP/LR pair pushed by the
+    //   `STP X29,X30,[SP,#-16]!` prologue). Per AAPCS64 each
+    //   class tracks its own overflow point independently;
+    //   they share one NSAA stream. Loaded into X16 (GPR
+    //   scratch) / V16 (FP scratch) and re-stored to the
+    //   local-slot at `[SP, p_idx*8]`.
     for (func.sig.params) |p| {
         switch (p) {
             .i32, .i64, .f32, .f64 => {},
@@ -227,28 +230,72 @@ pub fn compile(
     var p_idx: u32 = 0;
     var int_arg_idx: u5 = 1; // X0 = runtime ptr; user int args from X1
     var fp_arg_idx: u5 = 0;  // V0..V7 for FP args
+    // §9.7 / 7.9-d-7: per-call NSAA index (Arm IHI 0055 §6.4.2
+    // stage C.13/C.14). Each overflowed arg consumes one 8-byte
+    // slot at [X29, #(16 + 8*stack_arg_idx)]; +16 skips the
+    // saved FP/LR pair pushed by the prologue's pre-index STP.
+    var stack_arg_idx: u14 = 0;
     while (p_idx < num_params) : (p_idx += 1) {
         const param_off_w: u14 = @intCast(p_idx * 8);
         switch (func.sig.params[p_idx]) {
             .i32 => {
-                if (int_arg_idx > 7) return Error.UnsupportedOp;
-                try gpr.writeU32(allocator, &buf, inst.encStrImmW(int_arg_idx, 31, param_off_w));
-                int_arg_idx += 1;
+                if (int_arg_idx > 7) {
+                    const stack_off_u: u32 = 16 + @as(u32, stack_arg_idx) * 8;
+                    if (stack_off_u > 32760) return Error.UnsupportedOp;
+                    // i32 stack args are zero-extended to 8 bytes
+                    // by the caller per AAPCS64 §6.4.2 stage C.16
+                    // (8-byte slot, low 4 bytes hold the value).
+                    const stack_off_w: u14 = @intCast(stack_off_u);
+                    try gpr.writeU32(allocator, &buf, inst.encLdrImmW(16, 29, stack_off_w));
+                    try gpr.writeU32(allocator, &buf, inst.encStrImmW(16, 31, param_off_w));
+                    stack_arg_idx += 1;
+                } else {
+                    try gpr.writeU32(allocator, &buf, inst.encStrImmW(int_arg_idx, 31, param_off_w));
+                    int_arg_idx += 1;
+                }
             },
             .i64 => {
-                if (int_arg_idx > 7) return Error.UnsupportedOp;
-                try gpr.writeU32(allocator, &buf, inst.encStrImm(int_arg_idx, 31, @intCast(p_idx * 8)));
-                int_arg_idx += 1;
+                if (int_arg_idx > 7) {
+                    const stack_off_u: u32 = 16 + @as(u32, stack_arg_idx) * 8;
+                    if (stack_off_u > 32760) return Error.UnsupportedOp;
+                    const stack_off: u15 = @intCast(stack_off_u);
+                    try gpr.writeU32(allocator, &buf, inst.encLdrImm(16, 29, stack_off));
+                    try gpr.writeU32(allocator, &buf, inst.encStrImm(16, 31, @intCast(p_idx * 8)));
+                    stack_arg_idx += 1;
+                } else {
+                    try gpr.writeU32(allocator, &buf, inst.encStrImm(int_arg_idx, 31, @intCast(p_idx * 8)));
+                    int_arg_idx += 1;
+                }
             },
             .f32 => {
-                if (fp_arg_idx > 7) return Error.UnsupportedOp;
-                try gpr.writeU32(allocator, &buf, inst.encStrSImm(fp_arg_idx, 31, param_off_w));
-                fp_arg_idx += 1;
+                if (fp_arg_idx > 7) {
+                    const stack_off_u: u32 = 16 + @as(u32, stack_arg_idx) * 8;
+                    if (stack_off_u > 32760) return Error.UnsupportedOp;
+                    // f32 stack args are zero-extended to 8 bytes
+                    // by the caller; load the low 4 bytes via
+                    // `LDR S16` (4-byte align — 16+8K is always
+                    // 8-aligned, so 4-aligned holds).
+                    const stack_off: u14 = @intCast(stack_off_u);
+                    try gpr.writeU32(allocator, &buf, inst.encLdrSImm(16, 29, stack_off));
+                    try gpr.writeU32(allocator, &buf, inst.encStrSImm(16, 31, param_off_w));
+                    stack_arg_idx += 1;
+                } else {
+                    try gpr.writeU32(allocator, &buf, inst.encStrSImm(fp_arg_idx, 31, param_off_w));
+                    fp_arg_idx += 1;
+                }
             },
             .f64 => {
-                if (fp_arg_idx > 7) return Error.UnsupportedOp;
-                try gpr.writeU32(allocator, &buf, inst.encStrDImm(fp_arg_idx, 31, @intCast(p_idx * 8)));
-                fp_arg_idx += 1;
+                if (fp_arg_idx > 7) {
+                    const stack_off_u: u32 = 16 + @as(u32, stack_arg_idx) * 8;
+                    if (stack_off_u > 32760) return Error.UnsupportedOp;
+                    const stack_off: u15 = @intCast(stack_off_u);
+                    try gpr.writeU32(allocator, &buf, inst.encLdrDImm(16, 29, stack_off));
+                    try gpr.writeU32(allocator, &buf, inst.encStrDImm(16, 31, @intCast(p_idx * 8)));
+                    stack_arg_idx += 1;
+                } else {
+                    try gpr.writeU32(allocator, &buf, inst.encStrDImm(fp_arg_idx, 31, @intCast(p_idx * 8)));
+                    fp_arg_idx += 1;
+                }
             },
             // SIMD / refs were already filtered above; the
             // exhaustive switch here is for zlinter satisfaction.

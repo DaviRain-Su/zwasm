@@ -1333,19 +1333,47 @@ test "compile: i64.eqz emits CMP-X-imm-0 + CSET EQ" {
     try testing.expectEqual(@as(u32, inst.encCsetW(9, .eq)),    std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
 }
 
-// §9.7 / 7.5-multi-arg-entry: the prior version of this test
-// asserted UnsupportedOp on any params at all. Multi-arg entry
-// now accepts up to 7 i32 params via AAPCS64 X1..X7 marshalling;
-// rejects fire only on (a) non-i32 param types or (b) > 7 params.
+// §9.7 / 7.9-d-7: AAPCS64 stack-arg lowering on the callee side.
+// Prologue accepts > 7 params by loading the overflow args from
+// `[X29, #(16 + 8*K)]` (K = 0-based NSAA index) into the local
+// slot at `[SP, #(p_idx*8)]`. Caller-side stack-arg marshal
+// remains capped at the marshalCallArgs `arg_vregs[8]` limit
+// (chunk d-8 will lift that with FP-relative spill addressing).
 
-test "compile: function with > 7 i32 params surfaces UnsupportedOp" {
+test "compile: function with 8 i32 params lowers param[7] from caller stack" {
+    // 8 i32 params: X1..X7 hold params 0..6 (7 regs), param 7
+    // overflows to caller stack at [X29, #16].
     const params = [_]zir.ValType{ .i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32 };
     const sig: zir.FuncType = .{ .params = &params, .results = &.{.i32} };
     var f = ZirFunc.init(0, sig, &.{});
     defer f.deinit(testing.allocator);
-    f.liveness = .{ .ranges = &.{} };
-    const empty: regalloc.Allocation = .{ .slots = &.{}, .n_slots = 0 };
-    try testing.expectError(Error.UnsupportedOp, compile(testing.allocator, &f, empty, &.{}, &.{}, 0));
+    // Body: `(i32.const 0) end` — exercises only the prologue's
+    // param-marshal sequence; body / result marshalling unchanged.
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+    } };
+    const slots = [_]u16{0};
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0);
+    defer deinit(testing.allocator, out);
+    // Locate the LDR W16, [X29, #16] / STR W16, [SP, #56] pair
+    // — the overflow load for param 7 (8th param, p_idx = 7,
+    // local slot 7 lives at [SP+56]).
+    const ldr_w16 = inst.encLdrImmW(16, 29, 16);
+    const str_w16 = inst.encStrImmW(16, 31, 56);
+    var found: bool = false;
+    var i: usize = 0;
+    while (i + 8 <= out.bytes.len) : (i += 4) {
+        const a = std.mem.readInt(u32, out.bytes[i..][0..4], .little);
+        const b = std.mem.readInt(u32, out.bytes[i + 4 ..][0..4], .little);
+        if (a == ldr_w16 and b == str_w16) {
+            found = true;
+            break;
+        }
+    }
+    try testing.expect(found);
 }
 
 test "compile: (param i64) — prologue stores X1 to [SP, #0] (STR X width)" {
