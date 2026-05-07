@@ -388,6 +388,46 @@ fn emitDivByZeroCheck(ctx: *EmitCtx, divisor: inst.Xn, is_64: bool) Error!void {
     try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
 }
 
+/// Wasm spec §4.4.1.1 (`i32.div_s` / `i64.div_s`) — signed
+/// division traps on `INT_MIN / -1` (the quotient `2^(N-1)`
+/// is unrepresentable in N-bit two's complement). On ARM64
+/// `SDIV` silently produces `INT_MIN` for that input pair, so
+/// the spec-mandated trap is a per-handler check, not a CPU
+/// exception. (`i32.rem_s` / `i64.rem_s` deliberately do NOT
+/// trap on this input — the SDIV+MSUB sequence already returns
+/// the spec-correct result `0` because `MSUB` arithmetic wraps
+/// in the 32/64-bit domain.)
+///
+/// Sequence (4 instructions, 16 bytes):
+///   CMN  divisor, #1       ; Z=1 iff divisor == -1
+///   B.NE +3 words          ; skip overflow trap when divisor != -1
+///   NEGS WZR/XZR, dividend ; V=1 iff dividend == INT_MIN
+///   B.VS trap_stub         ; both conditions met → trap
+fn emitDivSignedOverflowCheck(
+    ctx: *EmitCtx,
+    dividend: inst.Xn,
+    divisor: inst.Xn,
+    is_64: bool,
+) Error!void {
+    if (is_64) {
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmnImmX(divisor, 1));
+    } else {
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmnImmW(divisor, 1));
+    }
+    // disp_words = 3 means PC = B.NE_addr + 12 = past the next two
+    // instructions (NEGS + B.VS). The next handler op (SDIV) lands
+    // at the skip target.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.ne, 3));
+    if (is_64) {
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encNegsRegX(dividend));
+    } else {
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encNegsRegW(dividend));
+    }
+    const fixup_at: u32 = @intCast(ctx.buf.items.len);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.vs, 0));
+    try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+}
+
 /// Wasm spec §4.4.1.1 (i32.div_s / i32.div_u / i32.rem_s /
 /// i32.rem_u) — pop two i32, push quotient or remainder. Wasm
 /// traps on divide-by-zero (all four ops); div_s additionally
@@ -406,19 +446,21 @@ fn emitDivByZeroCheck(ctx: *EmitCtx, divisor: inst.Xn, is_64: bool) Error!void {
 ///   (for rem ops:)
 ///     MSUB Wd, Wd, Wm, Wn       ; rem = Wn - (Wd × Wm)
 ///
-/// For simplicity in this chunk we emit the div-by-zero check
-/// only and **omit the i32.div_s overflow check** — INT_MIN / -1
-/// produces INT_MIN on ARM SDIV (truncate), which differs from
-/// Wasm's "trap" semantics for that single edge. Tracked in a
-/// debt entry; coverage gap impacts at most one fixture in the
-/// realworld JIT corpus (it surfaces only when emitted INT_MIN
-/// constants meet -1 divisors).
+/// `i32.div_s` additionally traps on the `INT_MIN / -1`
+/// overflow case (Wasm spec §4.4.1.1). `i32.rem_s` does NOT
+/// trap on the same input — the `SDIV` then `MSUB` sequence
+/// produces the spec-correct value `0` (INT_MIN - INT_MIN*(-1)
+/// wraps to 0 in 32-bit). The overflow check therefore guards
+/// `div_s` only; see `emitDivSignedOverflowCheck`.
 pub fn emitI32DivRem(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const args = try ctx.popBinary();
     const wn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.lhs, 0);
     const wm = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.rhs, 1);
     const wd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
     try emitDivByZeroCheck(ctx, wm, false);
+    if (ins.op == .@"i32.div_s") {
+        try emitDivSignedOverflowCheck(ctx, wn, wm, false);
+    }
     const is_signed = switch (ins.op) {
         .@"i32.div_s", .@"i32.rem_s" => true,
         .@"i32.div_u", .@"i32.rem_u" => false,
@@ -440,7 +482,9 @@ pub fn emitI32DivRem(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 
 /// Wasm spec §4.4.1.1 (i64.div_s / i64.div_u / i64.rem_s /
 /// i64.rem_u) — 64-bit counterpart of `emitI32DivRem`. Same
-/// shape; X-form encoders. Same div_s overflow caveat.
+/// shape; X-form encoders. `i64.div_s` traps on the
+/// `INT_MIN_64 / -1` overflow per the same spec clause; `rem_s`
+/// does not (the SDIV+MSUB sequence wraps to 0).
 pub fn emitI64DivRem(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const args = try ctx.popBinary();
     const xn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.lhs, 0);
@@ -450,6 +494,9 @@ pub fn emitI64DivRem(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     // compare so a non-zero i64 with low 32 bits zero — e.g. 2^32
     // — does not falsely trap).
     try emitDivByZeroCheck(ctx, xm, true);
+    if (ins.op == .@"i64.div_s") {
+        try emitDivSignedOverflowCheck(ctx, xn, xm, true);
+    }
     const is_signed = switch (ins.op) {
         .@"i64.div_s", .@"i64.rem_s" => true,
         .@"i64.div_u", .@"i64.rem_u" => false,

@@ -511,15 +511,30 @@ pub fn emitSignExtend(
 ///   IDIV / DIV divisor           ; quotient → RAX, remainder → RDX
 ///   MOV   dst, EAX/RAX           ; or RDX/EDX for rem
 ///
-/// **Caveats** (tracked in debt):
-///   - i32.div_s / i64.div_s INT_MIN/-1 overflow check is omitted
-///     in this chunk; IDIV raises #DE which would crash the JIT
-///     under those exact inputs. The realworld JIT corpus does
-///     not exercise that edge in tested fixtures.
-///   - RAX and RDX are clobbered. They are not in the regalloc
-///     pool (allocatable_gprs = RBX,R12,R13,R14 per ADR-0026),
-///     so live-vreg homes are unaffected. Spill stages R10/R11
-///     are also disjoint from RAX/RDX.
+/// **Signed overflow** (`div_s` / `rem_s` only):
+/// Wasm spec §4.4.1.1 says `INT_MIN / -1` traps on `div_s` (the
+/// quotient `2^(N-1)` is unrepresentable) but `rem_s` returns
+/// `0` (`INT_MIN - INT_MIN*(-1)` wraps to 0). On x86_64, IDIV
+/// raises `#DE` for both shapes — without a pre-check the JIT
+/// process crashes. The handler emits a 4-step guard before
+/// IDIV when `is_signed`:
+///
+///   CMP rhs, -1        ; (imm8 sign-extended to width)
+///   JNE skip           ; rel32, patch-back at end
+///   CMP lhs, INT_MIN   ; .d uses CMP r32 imm32; .q uses
+///                      ; MOVABS RAX, INT_MIN_64 + CMP r64, RAX
+///   JNE skip           ; rel32, patch-back at end
+///   ; both conditions met:
+///   <div_s>:  JE trap_stub   ; rel32, registered on bounds_fixups
+///   <rem_s>:  XOR dst, dst   ; rem result is 0; then JMP done
+///   skip:                    ; patch target for the two JNEs
+///   <existing IDIV path>     ; MOV RAX, lhs; CDQ/CQO/XOR; IDIV
+///   done:                    ; rem_s patches its skip-IDIV JMP here
+///
+/// `RAX` and `RDX` are clobbered. They are not in the regalloc
+/// pool (allocatable_gprs = RBX,R12,R13,R14 per ADR-0026), so
+/// live-vreg homes are unaffected. Spill stages R10/R11 are
+/// also disjoint from RAX/RDX.
 fn emitDivRemImpl(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
@@ -548,6 +563,53 @@ fn emitDivRemImpl(
     try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
     try bounds_fixups.append(allocator, fixup_at);
 
+    // Signed overflow check (div_s / rem_s only). See the
+    // function-level docstring for the 4-step guard sequence.
+    var skip_idiv_jmp_at: ?u32 = null;
+    if (is_signed) {
+        // CMP rhs_r, -1 (imm8 sign-extends to width).
+        try buf.appendSlice(allocator, inst.encCmpRImm8(width, rhs_r, -1).slice());
+        // JNE skip (rel32 placeholder; patched after we know skip's offset).
+        const jne_rhs_at: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.ne, 0).slice());
+
+        // CMP lhs_r, INT_MIN. .d uses CMP r32, imm32; .q has no
+        // imm32 form for INT_MIN_64 (sign-extended imm32 cannot
+        // express 0x8000_0000_0000_0000), so materialise via
+        // MOVABS RAX, INT_MIN_64 + CMP r64, RAX. RAX is unused at
+        // this point and is about to be clobbered by IDIV anyway.
+        if (width == .d) {
+            try buf.appendSlice(allocator, inst.encCmpRImm32(lhs_r, 0x80000000).slice());
+        } else {
+            try buf.appendSlice(allocator, inst.encMovImm64Q(.rax, 0x8000_0000_0000_0000).slice());
+            try buf.appendSlice(allocator, inst.encCmpRR(.q, lhs_r, .rax).slice());
+        }
+        const jne_lhs_at: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.ne, 0).slice());
+
+        if (is_rem) {
+            // INT_MIN/-1 rem_s spec result is 0; emit XOR dst,dst
+            // then skip past the standard IDIV path.
+            try buf.appendSlice(allocator, inst.encXorRR(width, dst_r, dst_r).slice());
+            skip_idiv_jmp_at = @intCast(buf.items.len);
+            try buf.appendSlice(allocator, inst.encJmpRel32(0).slice());
+        } else {
+            // div_s: trap. Z is set from the second CMP (lhs == INT_MIN
+            // on this path), so JE is guaranteed taken. Use the same
+            // bounds_fixups channel as div-by-zero so the linker patches
+            // it to the function's trap stub.
+            const trap_jmp_at: u32 = @intCast(buf.items.len);
+            try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
+            try bounds_fixups.append(allocator, trap_jmp_at);
+        }
+
+        // Patch the two JNE rel32 placeholders to point at the
+        // current position (= the start of the standard IDIV path).
+        const skip_target: u32 = @intCast(buf.items.len);
+        inst.patchRel32(buf.items, jne_rhs_at, 6, @as(i32, @intCast(skip_target)) - (@as(i32, @intCast(jne_rhs_at)) + 6));
+        inst.patchRel32(buf.items, jne_lhs_at, 6, @as(i32, @intCast(skip_target)) - (@as(i32, @intCast(jne_lhs_at)) + 6));
+    }
+
     // Move dividend into RAX (low half).
     try buf.appendSlice(allocator, inst.encMovRR(width, .rax, lhs_r).slice());
     // Sign-extend / zero-extend dividend into RDX:RAX.
@@ -570,6 +632,12 @@ fn emitDivRemImpl(
     const result_src: inst.Gpr = if (is_rem) .rdx else .rax;
     if (dst_r != result_src) {
         try buf.appendSlice(allocator, inst.encMovRR(width, dst_r, result_src).slice());
+    }
+    // rem_s INT_MIN/-1 path patched its skip-IDIV JMP to land here
+    // (after MOV dst_r, RDX, before the spill store).
+    if (skip_idiv_jmp_at) |at| {
+        const target: u32 = @intCast(buf.items.len);
+        inst.patchRel32(buf.items, at, 5, @as(i32, @intCast(target)) - (@as(i32, @intCast(at)) + 5));
     }
     try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);

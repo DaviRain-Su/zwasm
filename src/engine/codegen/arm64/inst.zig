@@ -681,6 +681,44 @@ pub fn encCmpImmX(rn: Xn, imm12: u12) u32 {
     return 0xF100001F | (@as(u32, imm12) << 10) | (@as(u32, rn) << 5);
 }
 
+/// `CMN Wn, #imm12` — alias for `ADDS WZR, Wn, #imm12, lsl #0`.
+/// Z=1 iff Wn == -imm12 (because Wn + imm12 == 0). The
+/// `i32.div_s` overflow check uses `CMN Wm, #1` to detect the
+/// `Wm == -1` divisor in one instruction.
+/// Encoding (32-bit ADDS imm, sh=0): `0 01 10001 0 0 [imm12:12]
+/// [Rn:5] 11111` = `0x3100001F` | (imm12<<10) | (Rn<<5).
+pub fn encCmnImmW(rn: Xn, imm12: u12) u32 {
+    return 0x3100001F | (@as(u32, imm12) << 10) | (@as(u32, rn) << 5);
+}
+
+/// `CMN Xn, #imm12` — 64-bit counterpart of `encCmnImmW`. Used
+/// by `i64.div_s` overflow check.
+/// Encoding (64-bit ADDS imm, sh=0): `1 01 10001 0 0 [imm12:12]
+/// [Rn:5] 11111` = `0xB100001F` | (imm12<<10) | (Rn<<5).
+pub fn encCmnImmX(rn: Xn, imm12: u12) u32 {
+    return 0xB100001F | (@as(u32, imm12) << 10) | (@as(u32, rn) << 5);
+}
+
+/// `NEGS WZR, Wm` — alias for `SUBS WZR, WZR, Wm`. Sets V=1 iff
+/// Wm == INT_MIN_32 (negating INT_MIN overflows). The
+/// `i32.div_s` overflow check tests this after confirming the
+/// divisor was -1.
+/// Encoding (32-bit SUBS shifted-reg, shift=0, Rd=31, Rn=31):
+///   `0 11 01011 00 0 [Rm:5] 000000 11111 11111` = `0x6B0003FF`
+///   | (Rm<<16).
+pub fn encNegsRegW(rm: Xn) u32 {
+    return 0x6B0003FF | (@as(u32, rm) << 16);
+}
+
+/// `NEGS XZR, Xm` — 64-bit counterpart of `encNegsRegW`. V=1 iff
+/// Xm == INT_MIN_64.
+/// Encoding (64-bit SUBS shifted-reg, shift=0, Rd=31, Rn=31):
+///   `1 11 01011 00 0 [Rm:5] 000000 11111 11111` = `0xEB0003FF`
+///   | (Rm<<16).
+pub fn encNegsRegX(rm: Xn) u32 {
+    return 0xEB0003FF | (@as(u32, rm) << 16);
+}
+
 /// ARM condition codes (4-bit). The cond fed to `encCsetW` is
 /// the encoded condition under which the result becomes 0 (the
 /// CSINC alias inverts the user's "set if X" condition by XOR-1
@@ -1185,6 +1223,26 @@ test "encCmpRegX x1, x2 — `cmp x1, x2` → 0xEB02003F" {
 
 test "encCmpImmX x1, #0 — `cmp x1, #0` → 0xF100003F" {
     try testing.expectEqual(@as(u32, 0xF100003F), encCmpImmX(1, 0));
+}
+
+test "encCmnImmW w2, #1 — `cmn w2, #1` → 0x3100045F" {
+    // Base 0x3100001F | imm12=1 (<<10) = 0x400 | rn=2 (<<5) = 0x40.
+    try testing.expectEqual(@as(u32, 0x3100045F), encCmnImmW(2, 1));
+}
+
+test "encCmnImmX x3, #1 — `cmn x3, #1` → 0xB100047F" {
+    // Base 0xB100001F | imm12=1 (<<10) = 0x400 | rn=3 (<<5) = 0x60.
+    try testing.expectEqual(@as(u32, 0xB100047F), encCmnImmX(3, 1));
+}
+
+test "encNegsRegW wm=2 — `negs wzr, w2` → 0x6B0203FF" {
+    // Base 0x6B0003FF | rm=2 (<<16) = 0x20000.
+    try testing.expectEqual(@as(u32, 0x6B0203FF), encNegsRegW(2));
+}
+
+test "encNegsRegX xm=3 — `negs xzr, x3` → 0xEB0303FF" {
+    // Base 0xEB0003FF | rm=3 (<<16) = 0x30000.
+    try testing.expectEqual(@as(u32, 0xEB0303FF), encNegsRegX(3));
 }
 
 test "invertCond: eq <-> ne, lt <-> ge, lo <-> hs" {
