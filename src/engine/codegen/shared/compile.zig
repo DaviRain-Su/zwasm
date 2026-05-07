@@ -164,6 +164,8 @@ test "compileOne: tiny straight-line module — (func (result i32) i32.const 7 e
         .trap_flag = 0,
         .globals_base = undefined,
         .globals_count = 0,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
     };
     const result = try entry.callI32NoArgs(module, 0, &rt);
     try testing.expectEqual(@as(u32, 7), result);

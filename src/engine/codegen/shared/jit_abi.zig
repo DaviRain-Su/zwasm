@@ -78,6 +78,27 @@ pub const JitRuntime = extern struct {
     /// indices are statically validated.
     globals_count: u32,
     _pad2: u32 = 0,
+    /// Host-import dispatch table base (chunk 7.9-d). Indexed by
+    /// import-function-idx (0..host_dispatch_count). Each entry
+    /// is a C-ABI function pointer with signature
+    /// `fn (rt: *JitRuntime, ...wasm_args) callconv(.c) <ret>`
+    /// — i.e. arg 0 is the JitRuntime ptr (matching the JIT-body
+    /// internal calling convention) and args 1..N are the Wasm
+    /// imports' params marshalled per platform C ABI. The JIT
+    /// emits `LDR X16, [X19 + host_dispatch_base_off]; LDR X16,
+    /// [X16, #(idx*8)]; BLR X16` (arm64) / `MOV RAX, [R15 +
+    /// host_dispatch_base_off]; MOV RAX, [RAX + idx*8]; CALL RAX`
+    /// (x86_64) for `call N` when `N < num_imports`. Until
+    /// chunk d-2 lands real WASI handlers, every entry points to
+    /// `defaultTrap` (sets trap_flag = 1 + returns 0), preserving
+    /// the prior trap-on-import-call observable behaviour.
+    host_dispatch_base: [*]const usize,
+    /// Number of populated dispatch slots (= module's import-func
+    /// count). Reserved for diagnostic checks; the JIT body does
+    /// not bounds-check the dispatch idx because validator
+    /// rejects out-of-range function indices.
+    host_dispatch_count: u32,
+    _pad3: u32 = 0,
 };
 
 // ============================================================
@@ -100,6 +121,8 @@ pub const typeidx_base_off: u12 = @offsetOf(JitRuntime, "typeidx_base");
 pub const trap_flag_off: u12 = @offsetOf(JitRuntime, "trap_flag");
 pub const globals_base_off: u12 = @offsetOf(JitRuntime, "globals_base");
 pub const globals_count_off: u12 = @offsetOf(JitRuntime, "globals_count");
+pub const host_dispatch_base_off: u12 = @offsetOf(JitRuntime, "host_dispatch_base");
+pub const host_dispatch_count_off: u12 = @offsetOf(JitRuntime, "host_dispatch_count");
 
 /// Total size of the head section consumed by the prologue.
 pub const head_size: u32 = @sizeOf(JitRuntime);
@@ -132,6 +155,11 @@ comptime {
     if ((globals_count_off & 3) != 0) @compileError("globals_count_off not 4-aligned");
     if (globals_base_off > 32760) @compileError("globals_base_off exceeds X-form imm12 budget");
     if (globals_count_off > 16380) @compileError("globals_count_off exceeds W-form imm12 budget");
+    // Chunk 7.9-d: host_dispatch_base + host_dispatch_count.
+    if ((host_dispatch_base_off & 7) != 0) @compileError("host_dispatch_base_off not 8-aligned");
+    if ((host_dispatch_count_off & 3) != 0) @compileError("host_dispatch_count_off not 4-aligned");
+    if (host_dispatch_base_off > 32760) @compileError("host_dispatch_base_off exceeds X-form imm12 budget");
+    if (host_dispatch_count_off > 16380) @compileError("host_dispatch_count_off exceeds W-form imm12 budget");
 }
 
 // ============================================================
@@ -147,10 +175,12 @@ test "JitRuntime: layout offsets match documented prologue load sequence" {
     try testing.expectEqual(@as(u12, 24), table_size_off);
     try testing.expectEqual(@as(u12, 32), typeidx_base_off);
     try testing.expectEqual(@as(u12, 40), trap_flag_off);
+    try testing.expectEqual(@as(u12, 64), host_dispatch_base_off);
+    try testing.expectEqual(@as(u12, 72), host_dispatch_count_off);
 }
 
-test "JitRuntime: total size = 64 bytes (post-ADR-0027 globals extension)" {
-    try testing.expectEqual(@as(u32, 64), head_size);
+test "JitRuntime: total size = 80 bytes (post-chunk-7.9-d host_dispatch tail)" {
+    try testing.expectEqual(@as(u32, 80), head_size);
 }
 
 test "JitRuntime: round-trip construction + field reads" {
@@ -158,6 +188,7 @@ test "JitRuntime: round-trip construction + field reads" {
     const funcptrs = [_]u64{0xCAFE0000};
     const typeidxs = [_]u32{7};
     var globals = [_]Value{ Value.fromI32(11), Value.fromI32(22) };
+    const dispatch = [_]usize{0xDEADBEEF};
     const rt: JitRuntime = .{
         .vm_base = &memory,
         .mem_limit = memory.len,
@@ -167,6 +198,8 @@ test "JitRuntime: round-trip construction + field reads" {
         .trap_flag = 0,
         .globals_base = &globals,
         .globals_count = globals.len,
+        .host_dispatch_base = &dispatch,
+        .host_dispatch_count = dispatch.len,
     };
     try testing.expectEqual(@as(u64, 16), rt.mem_limit);
     try testing.expectEqual(@as(u32, 1), rt.table_size);
@@ -177,4 +210,6 @@ test "JitRuntime: round-trip construction + field reads" {
     try testing.expectEqual(@as(i32, 11), rt.globals_base[0].i32);
     try testing.expectEqual(@as(i32, 22), rt.globals_base[1].i32);
     try testing.expectEqual(@as(u32, 2), rt.globals_count);
+    try testing.expectEqual(@as(usize, 0xDEADBEEF), rt.host_dispatch_base[0]);
+    try testing.expectEqual(@as(u32, 1), rt.host_dispatch_count);
 }

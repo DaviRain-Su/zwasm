@@ -46,13 +46,14 @@ const CallFixup = types.CallFixup;
 /// emits CALL placeholder + records `CallFixup` for the post-emit
 /// linker, captures return into the next vreg.
 ///
-/// Chunk 7.9-b foundation: if `callee_idx < num_imports`, route
-/// through the function-local trap stub via `unreach_fixups`
-/// (5-byte JMP rel32 placeholder) instead of CALL — every import
-/// call traps unconditionally until chunk 7.9-c wires up the
-/// host-call dispatcher. Args are still marshalled (harmless
-/// waste; the unconditional JMP jumps over the rest of the call
-/// sequence).
+/// Chunk 7.9-d: if `callee_idx < num_imports`, dispatch via
+/// `JitRuntime.host_dispatch_base[idx]` — the host-import path
+/// is an indirect call through the dispatch table populated by
+/// the runner before invoking the entry. Args are passed
+/// per the platform C ABI; the JIT-side calling convention
+/// reserves arg0 for the runtime_ptr (= JitRuntime ptr), so host
+/// fn signatures take `(rt: *JitRuntime, ...wasm_args)
+/// callconv(.c)`.
 ///
 /// **Scope**: i32 args + i32 / void return only. f32/f64/i64
 /// args + return surface as UnsupportedOp (lifted alongside
@@ -64,7 +65,6 @@ pub fn emitCall(
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
     call_fixups: *std.ArrayList(CallFixup),
-    unreach_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     func_sigs: []const zir.FuncType,
     num_imports: u32,
@@ -76,21 +76,31 @@ pub fn emitCall(
     try marshalCallArgs(allocator, buf, alloc, pushed_vregs, spill_base_off, callee_sig);
 
     if (callee_idx < num_imports) {
-        // Import call → unconditional 5-byte JMP rel32 placeholder.
-        // The function-final trap-stub patch (emit.zig § unreach
-        // fixups) redirects the disp32 to land at the trap stub
-        // (which sets trap_flag, clears EAX, runs epilogue, RETs).
-        const fixup_at: u32 = @intCast(buf.items.len);
-        try buf.appendSlice(allocator, inst.encJmpRel32(0).slice());
-        try unreach_fixups.append(allocator, fixup_at);
-        // Bookkeeping-only result push (control never returns
-        // here — the JMP unconditionally jumps to the trap stub).
-        if (callee_sig.results.len == 0) return;
-        if (callee_sig.results.len > 1) return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig: import call multi-result", 0);
-        const result = next_vreg.*;
-        next_vreg.* += 1;
-        if (result >= alloc.slots.len) return Error.AllocationMissing;
-        try pushed_vregs.append(allocator, result);
+        // Chunk 7.9-d: host-import dispatch via JitRuntime.
+        // host_dispatch_base[idx]. Args are already in the per-CC
+        // arg regs (marshalCallArgs above). Restore entry_arg0 =
+        // runtime_ptr so the host stub sees the JitRuntime ptr as
+        // its hidden first arg (signature
+        // `fn(rt: *JitRuntime, ...wasm_args) callconv(.c)`).
+        //
+        //   MOV RAX, [R15 + host_dispatch_base_off]   ; ptr-of-ptrs
+        //   MOV RAX, [RAX + idx*8]                     ; actual fn ptr
+        //   MOV <entry_arg0>, R15                      ; restore rt_ptr
+        //   [Win64: SUB RSP, 32 — shadow space]
+        //   CALL RAX
+        //   [Win64: ADD RSP, 32]
+        const idx_byte_off_u: u64 = @as(u64, callee_idx) * 8;
+        if (idx_byte_off_u > 0x7FFF_FFFF) return Error.UnsupportedOp;
+        const idx_byte_off: i32 = @intCast(idx_byte_off_u);
+
+        try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.host_dispatch_base_off).slice());
+        try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .rax, idx_byte_off).slice());
+        try buf.appendSlice(allocator, inst.encMovRR(.q, abi.current.entry_arg0_gpr, abi.runtime_ptr_save_gpr).slice());
+        try emitShadowAlloc(allocator, buf);
+        try buf.appendSlice(allocator, inst.encCallReg(.rax).slice());
+        try emitShadowFree(allocator, buf);
+
+        try captureCallResult(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, callee_sig);
         return;
     }
 

@@ -333,6 +333,16 @@ pub fn runI32Export(
         return Error.UnsupportedEntrySignature;
     }
 
+    // Allocate + populate host_dispatch table with the default
+    // trap trampoline (chunk 7.9-d MVP). Each import-call site
+    // emits an indirect call through `host_dispatch_base[idx]`;
+    // the trap trampoline sets `trap_flag` and returns 0 so
+    // entry.callI32NoArgs detects the trap via the post-return
+    // check. Real WASI handlers replace these slots in chunk d-2.
+    const dispatch = try allocator.alloc(usize, compiled.num_imports);
+    defer allocator.free(dispatch);
+    for (dispatch) |*slot| slot.* = @intFromPtr(&hostDispatchTrap);
+
     var memory: [0]u8 = .{};
     var rt: entry.JitRuntime = .{
         .vm_base = &memory,
@@ -343,8 +353,30 @@ pub fn runI32Export(
         .trap_flag = 0,
         .globals_base = undefined,
         .globals_count = 0,
+        .host_dispatch_base = dispatch.ptr,
+        .host_dispatch_count = compiled.num_imports,
     };
     return entry.callI32NoArgs(compiled.module, func_idx, &rt);
+}
+
+/// Default host-import trap trampoline (chunk 7.9-d). C-ABI
+/// function pointer planted into every `host_dispatch_base[i]`
+/// slot when no real WASI handler has been installed. Sets
+/// `rt.trap_flag = 1` and returns 0 (sentinel). The entry shim's
+/// post-return inspection of `rt.trap_flag` distinguishes this
+/// trap from a real i32 return value of 0.
+///
+/// The trampoline takes the JitRuntime ptr as its first arg
+/// (matching the JIT-side calling convention's
+/// `entry_arg0 = runtime_ptr` reservation). Subsequent Wasm args
+/// are passed in arg-regs 1..N but are ignored — the trampoline
+/// has no per-import signature, only a fail-safe sink. This
+/// works because the C ABI on both AAPCS64 and SysV / Win64
+/// permits a callee to read fewer args than the caller passed
+/// without faulting.
+fn hostDispatchTrap(rt: *entry.JitRuntime) callconv(.c) u64 {
+    rt.trap_flag = 1;
+    return 0;
 }
 
 // ============================================================

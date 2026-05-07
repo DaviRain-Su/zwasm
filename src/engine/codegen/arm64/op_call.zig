@@ -34,6 +34,7 @@ const inst = @import("inst.zig");
 const abi = @import("abi.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
+const jit_abi = @import("../shared/jit_abi.zig");
 
 const ZirInstr = zir.ZirInstr;
 const FuncType = zir.FuncType;
@@ -62,24 +63,32 @@ pub fn emitCall(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     try marshalCallArgs(ctx, callee_sig);
 
     if (ins.payload < ctx.num_imports) {
-        // Import call → unconditional B to trap stub. Mirrors the
-        // arm64 `unreachable` op shape (emit.zig:672-684): emit a
-        // `B 0` placeholder + append byte-offset to `bounds_fixups`
-        // so the function-final trap-stub patch redirects it. The
-        // patcher distinguishes B vs B.cond by opcode bits 31..26.
-        const fixup_at: u32 = @intCast(ctx.buf.items.len);
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encB(0));
-        try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
-        // Keep operand-stack bookkeeping consistent: allocate +
-        // push the result vreg the validator expects, even though
-        // post-trap ops never run. Skip the actual MOV from W0/X0
-        // — control will not return to this point.
-        if (callee_sig.results.len == 0) return;
-        if (callee_sig.results.len > 1) return Error.UnsupportedOp;
-        const result = ctx.next_vreg.*;
-        ctx.next_vreg.* += 1;
-        if (result >= ctx.alloc.slots.len) return Error.SlotOverflow;
-        try ctx.pushed_vregs.append(ctx.allocator, result);
+        // Chunk 7.9-d: host-import dispatch. Indirect call via
+        // `JitRuntime.host_dispatch_base[idx]`. Args are already in
+        // X1..X7 (marshalCallArgs above); restore X0 = runtime_ptr
+        // so the host stub sees the JitRuntime ptr as its hidden
+        // first arg (the host fn signature is
+        // `fn(rt: *JitRuntime, ...wasm_args) callconv(.c)`).
+        //
+        //   LDR X16, [X19, #host_dispatch_base_off]    ; ptr-of-ptrs
+        //   LDR X16, [X16, #(idx*8)]                    ; actual fn ptr
+        //   ORR X0, XZR, X19                            ; restore rt_ptr
+        //   BLR X16
+        //
+        // imm12 budget for the per-idx LDR scales by 8, so idx must
+        // satisfy `idx * 8 <= 32760` ⇒ `idx <= 4095`. Realistic
+        // import counts stay well under this; surface as
+        // UnsupportedOp otherwise.
+        const idx_byte_off_u: u64 = @as(u64, ins.payload) * 8;
+        if (idx_byte_off_u > 32760) return Error.UnsupportedOp;
+        const idx_byte_off: u15 = @intCast(idx_byte_off_u);
+
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(16, abi.runtime_ptr_save_gpr, jit_abi.host_dispatch_base_off));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(16, 16, idx_byte_off));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(0, 31, abi.runtime_ptr_save_gpr));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBLR(16));
+
+        try captureCallResult(ctx, callee_sig);
         return;
     }
 

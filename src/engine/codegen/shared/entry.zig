@@ -394,6 +394,8 @@ test "entry: i32.load offset=0 reads memory[0..4] through X28 vm_base" {
         .trap_flag = 0,
         .globals_base = undefined,
         .globals_count = 0,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
     };
     const result = try callI32NoArgs(module, 0, &rt);
     try testing.expectEqual(@as(u32, 0xEFBEADDE), result);
@@ -441,6 +443,8 @@ test "entry: ADR-0018 sub-1c — spilled i32.const returns 42 via STR/LDR round-
         .trap_flag = 0,
         .globals_base = undefined,
         .globals_count = 0,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
     };
     const result = try callI32NoArgs(module, 0, &rt);
     try testing.expectEqual(@as(u32, 42), result);
@@ -489,6 +493,8 @@ test "entry: ADR-0027 — global.set 0 then global.get 0 (i32) round-trips throu
         .trap_flag = 0,
         .globals_base = &globals,
         .globals_count = globals.len,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
     };
     const result = try callI32NoArgs(module, 0, &rt);
     try testing.expectEqual(@as(u32, 7), result);
@@ -534,6 +540,8 @@ test "entry: pure constant function returns 42 (sanity — no memory access)" {
         .trap_flag = 0,
         .globals_base = undefined,
         .globals_count = 0,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
     };
     const result = try callI32NoArgs(module, 0, &rt);
     try testing.expectEqual(@as(u32, 42), result);
@@ -579,6 +587,8 @@ test "entry: callI32_i32i32 — 2 i32 params summed via i32.add" {
         .trap_flag = 0,
         .globals_base = undefined,
         .globals_count = 0,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
     };
     try testing.expectEqual(@as(u32, 7), try callI32_i32i32(module, 0, &rt, 3, 4));
     try testing.expectEqual(@as(u32, 0), try callI32_i32i32(module, 0, &rt, 0, 0));
@@ -619,6 +629,8 @@ test "entry: callI32_i32 — 1 i32 param echoed through W1 → SP slot 0 → res
         .trap_flag = 0,
         .globals_base = undefined,
         .globals_count = 0,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
     };
     try testing.expectEqual(@as(u32, 0xCAFEBABE), try callI32_i32(module, 0, &rt, 0xCAFEBABE));
     try testing.expectEqual(@as(u32, 42), try callI32_i32(module, 0, &rt, 42));
@@ -663,6 +675,8 @@ test "entry: f32 local round-trip — local.get 0 of f32 param via V0" {
         .trap_flag = 0,
         .globals_base = undefined,
         .globals_count = 0,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
     };
     rt.trap_flag = 0;
     const Fn = *const fn (rt: *const JitRuntime, a0: f32) callconv(.c) f32;
@@ -708,6 +722,8 @@ test "entry: callI64NoArgs — i64.const 0xDEADBEEFCAFE returns full 64-bit" {
         .trap_flag = 0,
         .globals_base = undefined,
         .globals_count = 0,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
     };
     try testing.expectEqual(@as(u64, 0xDEADBEEFCAFE), try callI64NoArgs(module, 0, &rt));
 }

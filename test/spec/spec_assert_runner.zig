@@ -309,6 +309,8 @@ fn runAssertReturn(
         .trap_flag = 0,
         .globals_base = &scratch_globals,
         .globals_count = scratch_globals.len,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
     };
 
     // Parse arg tokens.
@@ -536,6 +538,8 @@ fn runAssertTrap(
         .trap_flag = 0,
         .globals_base = &scratch_globals,
         .globals_count = scratch_globals.len,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
     };
 
     var args: [2]ArgValue = undefined;
