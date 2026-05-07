@@ -33,6 +33,8 @@
 //!
 //! Zone 2 (`src/engine/codegen/arm64/`).
 
+const std = @import("std");
+
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
 const abi = @import("abi.zig");
@@ -184,7 +186,10 @@ fn marshalCallArgs(ctx: *EmitCtx, callee_sig: FuncType) Error!void {
 
     // Pop in reverse stack order: top = arg N-1, deepest = arg 0.
     var arg_vregs: [8]u32 = undefined;
-    if (n_args > arg_vregs.len) return Error.UnsupportedOp;
+    if (n_args > arg_vregs.len) {
+        std.debug.print("arm64/op_call: marshal n_args={d} > 8 (caller-side stack-arg lowering NYI)\n", .{n_args});
+        return Error.UnsupportedOp;
+    }
     var i: u32 = n_args;
     while (i > 0) {
         i -= 1;
@@ -198,7 +203,7 @@ fn marshalCallArgs(ctx: *EmitCtx, callee_sig: FuncType) Error!void {
         const src_vreg = arg_vregs[k];
         switch (callee_sig.params[k]) {
             .i32 => {
-                if (gpr_arg_slot >= 8) return Error.UnsupportedOp;
+                if (gpr_arg_slot >= 8) { std.debug.print("arm64/op_call: gpr_arg_slot >= 8 (n_args={d})\n", .{n_args}); return Error.UnsupportedOp; }
                 const ws = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
                 if (ws != gpr_arg_slot) {
                     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(gpr_arg_slot, 31, ws));
@@ -206,7 +211,7 @@ fn marshalCallArgs(ctx: *EmitCtx, callee_sig: FuncType) Error!void {
                 gpr_arg_slot += 1;
             },
             .i64 => {
-                if (gpr_arg_slot >= 8) return Error.UnsupportedOp;
+                if (gpr_arg_slot >= 8) { std.debug.print("arm64/op_call: gpr_arg_slot >= 8 (n_args={d})\n", .{n_args}); return Error.UnsupportedOp; }
                 const xs = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
                 if (xs != gpr_arg_slot) {
                     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(gpr_arg_slot, 31, xs));
@@ -214,7 +219,7 @@ fn marshalCallArgs(ctx: *EmitCtx, callee_sig: FuncType) Error!void {
                 gpr_arg_slot += 1;
             },
             .f32 => {
-                if (fp_arg_slot >= 8) return Error.UnsupportedOp;
+                if (fp_arg_slot >= 8) { std.debug.print("arm64/op_call: fp_arg_slot >= 8 (n_args={d})\n", .{n_args}); return Error.UnsupportedOp; }
                 const vs = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
                 if (vs != fp_arg_slot) {
                     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovSReg(fp_arg_slot, vs));
@@ -222,14 +227,17 @@ fn marshalCallArgs(ctx: *EmitCtx, callee_sig: FuncType) Error!void {
                 fp_arg_slot += 1;
             },
             .f64 => {
-                if (fp_arg_slot >= 8) return Error.UnsupportedOp;
+                if (fp_arg_slot >= 8) { std.debug.print("arm64/op_call: fp_arg_slot >= 8 (n_args={d})\n", .{n_args}); return Error.UnsupportedOp; }
                 const vs = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
                 if (vs != fp_arg_slot) {
                     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovDReg(fp_arg_slot, vs));
                 }
                 fp_arg_slot += 1;
             },
-            .v128, .funcref, .externref => return Error.UnsupportedOp,
+            .v128, .funcref, .externref => |t| {
+                std.debug.print("arm64/op_call: marshal {s} param unsupported\n", .{@tagName(t)});
+                return Error.UnsupportedOp;
+            },
         }
     }
 }
