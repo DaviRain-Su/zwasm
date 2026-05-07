@@ -1767,6 +1767,47 @@ test "compile: call N — 8 i32 args, 8th arg spills to caller stack [SP, #0] (S
     try testing.expect(found_stack_arg);
 }
 
+// §9.7 / 7.9-d-13: spill-aware captureCallResult — when the result
+// vreg's slot is ≥ max_reg_slots_gpr (= 8) it lives in the spill
+// region, not a register. The handler must STR W0/X0/S0/D0 to
+// `[SP, #(spill_base_off + spill_off)]` instead of MOV-ing into a
+// home register that doesn't exist.
+
+test "compile: call N — i32 result in spill slot lands STR W0 (spill-aware)" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .call, .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+    } };
+    // Force the call result into the spill region by handing
+    // regalloc-generated `slots = {8}` (slot id 8 is the first
+    // spill slot since max_reg_slots_gpr = 8). spillBytes() returns
+    // (9-8)*8 = 8.
+    const slots = [_]u16{8};
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 9 };
+    const sigs = [_]zir.FuncType{
+        .{ .params = &.{}, .results = &.{.i32} },
+    };
+    const out = try compile(testing.allocator, &f, alloc, &sigs, &.{}, 0);
+    defer deinit(testing.allocator, out);
+    // Expect STR W0, [SP, #0] after the BL — the call's i32 result
+    // (W0 per AAPCS64) flushed to spill_base_off = 0 (no locals,
+    // no outgoing args, so spill region starts at SP+0).
+    const expected = inst.encStrImmW(0, 31, 0);
+    var found: bool = false;
+    var i: usize = 0;
+    while (i + 4 <= out.bytes.len) : (i += 4) {
+        if (std.mem.readInt(u32, out.bytes[i..][0..4], .little) == expected) {
+            found = true;
+            break;
+        }
+    }
+    try testing.expect(found);
+}
+
 test "compile: call_indirect — bounds (CMP/B.HS) + sig (LDR/CMP/B.NE) + funcptr (LDR-LSL3/BLR)" {
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
     var f = ZirFunc.init(0, sig, &.{});

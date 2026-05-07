@@ -290,36 +290,69 @@ fn captureCallResult(ctx: *EmitCtx, callee_sig: FuncType) Error!void {
     const result = ctx.next_vreg.*;
     ctx.next_vreg.* += 1;
     if (result >= ctx.alloc.slots.len) return Error.AllocationMissing;
-    const slot_id = ctx.alloc.slots[result];
 
+    // §9.7 / 7.9-d-13: spill-aware result capture. AAPCS64 puts the
+    // result in W0 / X0 / S0 / D0; if the result vreg's home is a
+    // pool register we MOV from W0/X0/S0/D0 into that register, but
+    // if the slot is in the spill region we STR W0/X0/S0/D0 to
+    // `[SP, #(spill_base_off + spill_off)]` directly. Treats class
+    // axis: i32/i64 use .gpr boundary, f32/f64 use .fpr boundary.
     switch (callee_sig.results[0]) {
-        .i32 => {
-            const wd = abi.slotToReg(slot_id) orelse {
-                std.debug.print("arm64/op_call: captureCallResult.i32 SlotOverflow func[{d}] result_vreg={d} slot_id={d} (call result spilled — handler not spill-aware)\n", .{ ctx.func.func_idx, result, slot_id });
-                return Error.SlotOverflow;
-            };
-            if (wd != 0) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(wd, 31, 0));
+        .i32 => switch (ctx.alloc.slot(result, .gpr)) {
+            .reg => |id| {
+                const wd = abi.slotToReg(id) orelse {
+                    std.debug.print("arm64/op_call: captureCallResult.i32 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, id });
+                    return Error.SlotOverflow;
+                };
+                if (wd != 0) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(wd, 31, 0));
+            },
+            .spill => |off| {
+                const abs_off: u32 = ctx.spill_base_off + off;
+                if (abs_off > 16380) return Error.SlotOverflow;
+                try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(0, 31, @intCast(abs_off)));
+            },
         },
-        .i64 => {
-            const xd = abi.slotToReg(slot_id) orelse {
-                std.debug.print("arm64/op_call: captureCallResult.i64 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, slot_id });
-                return Error.SlotOverflow;
-            };
-            if (xd != 0) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(xd, 31, 0));
+        .i64 => switch (ctx.alloc.slot(result, .gpr)) {
+            .reg => |id| {
+                const xd = abi.slotToReg(id) orelse {
+                    std.debug.print("arm64/op_call: captureCallResult.i64 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, id });
+                    return Error.SlotOverflow;
+                };
+                if (xd != 0) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(xd, 31, 0));
+            },
+            .spill => |off| {
+                const abs_off: u32 = ctx.spill_base_off + off;
+                if (abs_off > 32760 or (abs_off & 7) != 0) return Error.SlotOverflow;
+                try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImm(0, 31, @intCast(abs_off)));
+            },
         },
-        .f32 => {
-            const vd = abi.fpSlotToReg(slot_id) orelse {
-                std.debug.print("arm64/op_call: captureCallResult.f32 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, slot_id });
-                return Error.SlotOverflow;
-            };
-            if (vd != 0) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovSReg(vd, 0));
+        .f32 => switch (ctx.alloc.slot(result, .fpr)) {
+            .reg => |id| {
+                const vd = abi.fpSlotToReg(id) orelse {
+                    std.debug.print("arm64/op_call: captureCallResult.f32 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, id });
+                    return Error.SlotOverflow;
+                };
+                if (vd != 0) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovSReg(vd, 0));
+            },
+            .spill => |off| {
+                const abs_off: u32 = ctx.spill_base_off + off;
+                if (abs_off > 16380) return Error.SlotOverflow;
+                try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrSImm(0, 31, @intCast(abs_off)));
+            },
         },
-        .f64 => {
-            const vd = abi.fpSlotToReg(slot_id) orelse {
-                std.debug.print("arm64/op_call: captureCallResult.f64 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, slot_id });
-                return Error.SlotOverflow;
-            };
-            if (vd != 0) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovDReg(vd, 0));
+        .f64 => switch (ctx.alloc.slot(result, .fpr)) {
+            .reg => |id| {
+                const vd = abi.fpSlotToReg(id) orelse {
+                    std.debug.print("arm64/op_call: captureCallResult.f64 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, id });
+                    return Error.SlotOverflow;
+                };
+                if (vd != 0) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovDReg(vd, 0));
+            },
+            .spill => |off| {
+                const abs_off: u32 = ctx.spill_base_off + off;
+                if (abs_off > 32760 or (abs_off & 7) != 0) return Error.SlotOverflow;
+                try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrDImm(0, 31, @intCast(abs_off)));
+            },
         },
         .v128, .funcref, .externref => return Error.UnsupportedOp,
     }
