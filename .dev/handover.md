@@ -16,10 +16,10 @@
 
 直近 commit (HEAD = `<this>`):
 
-- `<this>` chore(p7): §9.7 / 7.8-x86-jit-mem-windows close — Windows 49/174/20 → 105/110/20 (+56 PASS)
+- `<this>` chore(p7): mark §9.7 / 7.8-spill-aware-regalloc chunk 13a foundation; retarget at 13b migration
+- `e811441` feat(p7): §9.7 / 7.8-x86-spill-aware-regalloc — foundation (D-045 chunk 13a)
+- `2b1688c` chore(p7): mark §9.7 / 7.8-x86-jit-mem-windows close
 - `6db570c` fix(p7): §9.7 / 7.8-x86-jit-mem-windows — use 0.16 stable APIs
-- `2748971` feat(p7): §9.7 / 7.8-x86-jit-mem-windows — Windows x86_64 RWX (D-045 chunk 12)
-- `f5e5f5b` chore(p7): §9.7 / 7.8-x86-spec-gate — three-host spec_assert baseline
 
 **Phase status**: §9.7 / 7.5 → **[x]** 完了。Phase 7 残 row = 7.8 /
 7.9 / 7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。**§9.7 / 7.8** = x86_64 spec
@@ -50,8 +50,10 @@ prior-art)。次の主軸 = **7.8-x86-spill-aware-regalloc** (両ホストで
 10. ☑ 7.8-jit-mem-linux — Linux x86_64 mmap-RWX (+60 PASS)
 11. ☑ 7.8-x86-spec-gate — three-host baseline measurement + comment refresh
 12. ☑ **7.8-x86-jit-mem-windows** — Windows NtAllocateVirtualMemory RWX (Win +56 PASS)
-13. **7.8-x86-spill-aware-regalloc** — mirror arm64 D-036/D-037 staged-spill (close ~106 SlotOverflow on both hosts) **NEXT**
-14. 7.8-x86-misc-cleanup — residual UnsupportedOp + handcrafted_trap "did NOT trap"
+13. **7.8-x86-spill-aware-regalloc** — split into 13a (foundation) + 13b (migration):
+    - ☑ **13a foundation** (`e811441`): abi.zig adds `spill_stage_gprs` / `fp_spill_stage_xmms`; gpr.zig (NEW, mirrors arm64/gpr.zig); 12 unit tests. R10/R11 + XMM14/XMM15 still in allocatable (intentional dual-listing — chunk 13b removes them).
+    - **13b migration** (NEXT): (a) remove R10/R11 from allocatable_caller_saved_scratch_gprs (sysv + win64); (b) remove XMM14/XMM15 from allocatable_xmms; (c) thread `spill_base_off` through emit.zig handler signatures (110 sites in op_alu_int + op_alu_float + op_memory + op_globals + op_convert + op_call + emit.zig:emitLocalGet/Set/Tee/Select/etc); (d) replace `abi.slotToReg(alloc.slots[v])` with `gpr.gprLoadSpilled / gprDefSpilled / gprStoreSpilled` (or xmm* counterparts); (e) extend prologue to allocate spill frame area (SUB RSP, #(num_spill_slots * 8)); (f) update Allocation defaults or x86_64 callsites to pass `max_reg_slots_gpr = 4 / max_reg_slots_fp = 6`. Expected impact: closes ~80% of 106 SlotOverflow fails on Linux + Windows.
+14. 7.8-x86-misc-cleanup — residual UnsupportedOp (unreachable.0.wasm + handcrafted_trap func[29]) + "did NOT trap"
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -82,6 +84,17 @@ Phase D (migration doc) は post-7.8 着手予定。詳細は
 
 ## Recently closed (full history via `git log --oneline`)
 
+- §9.7 / 7.8-spill-aware-regalloc chunk 13a foundation (`e811441`):
+  abi.zig に `spill_stage_gprs = [.r10, .r11]` と `fp_spill_stage_
+  xmms = [.xmm14, .xmm15]` 定数を追加。x86_64/gpr.zig (NEW、
+  arm64/gpr.zig mirror) で `resolveGpr` / `resolveXmm` (bare
+  resolution) + `gprLoadSpilled` / `gprDefSpilled` / `gprStore
+  Spilled` + `xmmLoadSpilled` 等の spill-staging trio を提供。
+  RBP-disp8 frame addressing (16-slot frame まで)。12 unit test。
+  R10/R11 + XMM14/XMM15 は allocatable に残ったまま (chunk 13b で
+  除去予定; dual-listing は意図的に inert — caller がまだいない)。
+  3-host gate green (Mac 212/0/20、OrbStack + Windows test-all
+  unchanged from chunk-12 baseline、additive only)。
 - §9.7 / 7.8-x86-jit-mem-windows (`2748971` + `6db570c`): Windows
   x86_64 RWX 配線。`std.os.windows.ntdll.NtAllocateVirtualMemory`
   + `NtFreeVirtualMemory` (zig 0.16 stable は wrapper-with-error-
