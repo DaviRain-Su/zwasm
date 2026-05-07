@@ -115,7 +115,10 @@ pub fn compile(
     // slot lives at -8 - 8*total_locals which must stay >= -128 →
     // total_locals <= 15. Without uses_runtime_ptr the cap is
     // total_locals <= 16.
-    if (total_locals > 15) return Error.UnsupportedOp;
+    if (total_locals > 15) {
+        std.debug.print("x86_64/emit: total_locals > 15 reject (func_idx={d}, total={d})\n", .{ func.func_idx, total_locals });
+        return Error.UnsupportedOp;
+    }
 
     // Prescan: does this function need the runtime-ptr save?
     // Per ADR-0026, memory ops (and future calls / call_indirect)
