@@ -267,6 +267,20 @@ pub fn encSetccR(cc: Cond, dst: Gpr) EncodedInsn {
     return enc;
 }
 
+/// `CMOVcc r, r/m` (2-byte opcode 0x0F 0x4? /r — `?` is cc).
+/// Conditional move. dst occupies ModR/M.reg, src occupies r/m
+/// (IMUL-style operand inversion). `size` = `.d` → r32 (zero-
+/// extends to r64); `.q` → r64 (REX.W). Used by `select` /
+/// `select_typed` (D-045 chunk 8).
+pub fn encCmovccRR(size: Width, cc: Cond, dst: Gpr, src: Gpr) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (rexForRR(size, dst, src)) |rex| enc.push(rex);
+    enc.push(0x0F);
+    enc.push(0x40 | @as(u8, @intFromEnum(cc)));
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    return enc;
+}
+
 /// `MOVZX r32, r/m8` (2-byte opcode 0x0F 0xB6 /r) — zero-extend
 /// the low byte of `src` into the 32-bit form of `dst` (which
 /// implicitly zero-extends to 64 bits). dst occupies ModR/M.reg,

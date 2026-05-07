@@ -16,10 +16,10 @@
 
 直近 commit (HEAD = `<this>`):
 
-- `<this>` feat(p7): §9.7 / 7.8-x86-params-i64fp — i64/FP params + type-aware local.{get,set,tee} (D-045 chunk 7/10)
+- `<this>` feat(p7): §9.7 / 7.8-x86-select — select / select_typed (CMOV; D-045 chunk 8/10)
+- `39142bd` feat(p7): §9.7 / 7.8-x86-params-i64fp — i64/FP params + type-aware local.{get,set,tee} (D-045 chunk 7/10)
 - `7f9e9fe` feat(p7): §9.7 / 7.8-x86-params-i32 — lift params=0; i32-only marshal (D-045 chunk 6/10)
 - `bfedfdf` feat(p7): §9.7 / 7.8-x86-i64-mem — i64 load/store family 8 ops (D-045 chunk 5/10)
-- `1e83c41` feat(p7): §9.7 / 7.8-x86-i64-alu — i64 ALU/cmp/shift/bitcount 22 ops (D-045 chunk 4/10)
 
 **Phase status**: §9.7 / 7.5 → **[x]** 完了 (Mac aarch64 spec_assert
 212/0/20)。Phase 7 残 row = 7.8 / 7.9 / 7.10 / 7.11 🔒 / 7.12 /
@@ -35,7 +35,7 @@ chunk plan; chunks 1-7/10 完了)。
 5. ☑ **7.8-x86-i64-mem** — i64 load/store family (8 ops)
 6. ☑ **7.8-x86-params-i32** — lift params=0 reject; i32-only marshal
 7. ☑ **7.8-x86-params-i64fp** — i64 / f32 / f64 params + type-aware local.get/set/tee
-8. **7.8-x86-select** — select / select_typed (CMOV encoder; spill-aware)
+8. ☑ **7.8-x86-select** — select / select_typed (CMOV)
 9. **7.8-x86-mem-grow-size** — memory.size + memory.grow (host call)
 10. **7.8-x86-spec-gate** — re-enable spec_assert in build.zig; pass=fail=skip-impl=0
 
@@ -62,8 +62,9 @@ chunk plan; chunks 1-7/10 完了)。
 | 7.8-x86-i64-alu | i64 ALU + cmp + bitcount + shifts + rot (22 ops) | DONE (1e83c41) |
 | 7.8-x86-i64-mem | i64 load/store family (8 ops) | DONE (bfedfdf) |
 | 7.8-x86-params-i32 | lift params=0 reject; i32-only marshal | DONE (7f9e9fe) |
-| 7.8-x86-params-i64fp | i64 / f32 / f64 params + type-aware local.{get,set,tee} | DONE (`<this>`) |
-| 7.8-x86-select | select / select_typed (CMOV encoder; spill-aware) | **NEXT** |
+| 7.8-x86-params-i64fp | i64 / f32 / f64 params + type-aware local.{get,set,tee} | DONE (39142bd) |
+| 7.8-x86-select | select / select_typed (CMOV encoder) | DONE (`<this>`) |
+| 7.8-x86-mem-grow-size | memory.size + memory.grow (host call out) | **NEXT** |
 | 7.8-x86-i64-mem | i64 load/store family (8 ops) | pending |
 | 7.8-x86-mem-grow-size | memory.size + memory.grow | pending |
 | 7.8-x86-params | lift `params.len > 0` reject; SysV/Win64 param marshalling | pending |
@@ -87,7 +88,14 @@ Phase D (migration doc) は post-7.8 着手予定。詳細は
 
 ## Recently closed (full history via `git log --oneline`)
 
-- §9.7 / 7.8-x86-params-i64fp (`<this>`): x86_64 emit prologue +
+- §9.7 / 7.8-x86-select (`<this>`): x86_64 emit に `select` /
+  `select_typed` op を追加。pop c (i32), val2, val1; TEST c,c +
+  MOV dst,val2 (.q) + CMOVNE dst,val1 (.q) で 3-instruction シー
+  ケンス。inst.zig に encCmovccRR(size, cc, dst, src) (0F 4? /r
+  family) を追加。.q-form 使用は i64 select 需要先行+i32 用にも
+  REX.W 無害。spec の trans-type 対応は val1/val2 が validator で
+  同一型保証なので OK。Mac unit 1048/1053 (5 skip)。
+- §9.7 / 7.8-x86-params-i64fp (39142bd): x86_64 emit prologue +
   local.{get,set,tee} を i64/f32/f64 まで拡張。inst.zig に 6 個の
   RBP-disp8 mem encoder 追加 (encStoreR64MemRBP / encLoadR64MemRBP
   / encStore/LoadXmmF{32,64}MemRBP)。emit.zig prologue の param

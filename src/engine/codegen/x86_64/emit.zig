@@ -395,6 +395,37 @@ pub fn compile(
             => try op_memory.emitMemOp(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, ins.op, ins.payload, func.func_idx),
             .@"global.get" => try op_globals.emitI32GlobalGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.payload),
             .@"global.set" => try op_globals.emitI32GlobalSet(allocator, &buf, alloc, &pushed_vregs, ins.payload),
+            .@"select", .@"select_typed" => {
+                // Wasm spec §4.4.4 (select / select_typed) — pop
+                // c (i32), val2, val1; push val1 if c != 0 else
+                // val2. x86_64 lowering (i32 only at this chunk;
+                // i64 / FP variants need additional encoder
+                // dispatch — surface as UnsupportedOp until
+                // chunk-9 expansion):
+                //   TEST c, c              ; sets ZF
+                //   MOV  dst, val2         ; default
+                //   CMOVNE dst, val1       ; overwrite if c != 0
+                if (pushed_vregs.items.len < 3) return Error.AllocationMissing;
+                const cond_v = pushed_vregs.pop().?;
+                const val2_v = pushed_vregs.pop().?;
+                const val1_v = pushed_vregs.pop().?;
+                const result_v = next_vreg;
+                next_vreg += 1;
+                if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+                const cond_r = abi.slotToReg(alloc.slots[cond_v]) orelse return Error.SlotOverflow;
+                const val1_r = abi.slotToReg(alloc.slots[val1_v]) orelse return Error.SlotOverflow;
+                const val2_r = abi.slotToReg(alloc.slots[val2_v]) orelse return Error.SlotOverflow;
+                const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+                try buf.appendSlice(allocator, inst.encTestRR(.d, cond_r, cond_r).slice());
+                if (dst_r != val2_r) {
+                    // .q-form MOV preserves the full 64 bits in
+                    // case the value happens to be an i64 select
+                    // operand. The extra REX.W is harmless for i32.
+                    try buf.appendSlice(allocator, inst.encMovRR(.q, dst_r, val2_r).slice());
+                }
+                try buf.appendSlice(allocator, inst.encCmovccRR(.q, .ne, dst_r, val1_r).slice());
+                try pushed_vregs.append(allocator, result_v);
+            },
             .@"unreachable" => {
                 // Wasm spec §4.4.6.1 — trap unconditionally.
                 // Emit JMP rel32 placeholder; record fixup so the
