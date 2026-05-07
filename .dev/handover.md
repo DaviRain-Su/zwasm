@@ -16,10 +16,10 @@
 
 直近 commit (HEAD = `<this>`):
 
-- `<this>` feat(p7): §9.7 / 7.8-x86-select — select / select_typed (CMOV; D-045 chunk 8/10)
-- `39142bd` feat(p7): §9.7 / 7.8-x86-params-i64fp — i64/FP params + type-aware local.{get,set,tee} (D-045 chunk 7/10)
+- `<this>` feat(p7): §9.7 / 7.8-x86-mem-grow-size — memory.size + memory.grow + dead_code (D-045 chunk 9/10)
+- `af40c41` feat(p7): §9.7 / 7.8-x86-select — select / select_typed (CMOV; D-045 chunk 8/10)
+- `39142bd` feat(p7): §9.7 / 7.8-x86-params-i64fp — i64/FP params + type-aware locals (D-045 chunk 7/10)
 - `7f9e9fe` feat(p7): §9.7 / 7.8-x86-params-i32 — lift params=0; i32-only marshal (D-045 chunk 6/10)
-- `bfedfdf` feat(p7): §9.7 / 7.8-x86-i64-mem — i64 load/store family 8 ops (D-045 chunk 5/10)
 
 **Phase status**: §9.7 / 7.5 → **[x]** 完了 (Mac aarch64 spec_assert
 212/0/20)。Phase 7 残 row = 7.8 / 7.9 / 7.10 / 7.11 🔒 / 7.12 /
@@ -36,7 +36,7 @@ chunk plan; chunks 1-7/10 完了)。
 6. ☑ **7.8-x86-params-i32** — lift params=0 reject; i32-only marshal
 7. ☑ **7.8-x86-params-i64fp** — i64 / f32 / f64 params + type-aware local.get/set/tee
 8. ☑ **7.8-x86-select** — select / select_typed (CMOV)
-9. **7.8-x86-mem-grow-size** — memory.size + memory.grow (host call)
+9. ☑ **7.8-x86-mem-grow-size** — memory.size + memory.grow + dead_code tracking
 10. **7.8-x86-spec-gate** — re-enable spec_assert in build.zig; pass=fail=skip-impl=0
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
@@ -63,8 +63,9 @@ chunk plan; chunks 1-7/10 完了)。
 | 7.8-x86-i64-mem | i64 load/store family (8 ops) | DONE (bfedfdf) |
 | 7.8-x86-params-i32 | lift params=0 reject; i32-only marshal | DONE (7f9e9fe) |
 | 7.8-x86-params-i64fp | i64 / f32 / f64 params + type-aware local.{get,set,tee} | DONE (39142bd) |
-| 7.8-x86-select | select / select_typed (CMOV encoder) | DONE (`<this>`) |
-| 7.8-x86-mem-grow-size | memory.size + memory.grow (host call out) | **NEXT** |
+| 7.8-x86-select | select / select_typed (CMOV encoder) | DONE (af40c41) |
+| 7.8-x86-mem-grow-size | memory.size (SHR) + memory.grow (-1 skel) + dead_code | DONE (`<this>`) |
+| 7.8-x86-spec-gate | re-enable spec_assert wiring; measure pass=fail=skip-impl on Linux + Windows | **NEXT** |
 | 7.8-x86-i64-mem | i64 load/store family (8 ops) | pending |
 | 7.8-x86-mem-grow-size | memory.size + memory.grow | pending |
 | 7.8-x86-params | lift `params.len > 0` reject; SysV/Win64 param marshalling | pending |
@@ -88,7 +89,16 @@ Phase D (migration doc) は post-7.8 着手予定。詳細は
 
 ## Recently closed (full history via `git log --oneline`)
 
-- §9.7 / 7.8-x86-select (`<this>`): x86_64 emit に `select` /
+- §9.7 / 7.8-x86-mem-grow-size (`<this>`): x86_64 emit に
+  `memory.size` (load mem_limit + SHR 16 で page count) と
+  `memory.grow` (skeleton: 常に -1 grow-failed return; mirror of
+  arm64) を追加。同時に dead_code tracking 導入: unreachable /
+  return 後の op を skip、end / else で reset。これにより
+  unreachable.wast の `as-memory.grow-size` (memory.grow が
+  unreachable 内) が compile を通る。uses_runtime_ptr prescan に
+  memory.size/grow を追加 (mem_limit_off 読出に R15 必要)。Mac
+  test-all 28/28、1048/1053、spec_assert 212/0/20 unchanged。
+- §9.7 / 7.8-x86-select (af40c41): x86_64 emit に `select` /
   `select_typed` op を追加。pop c (i32), val2, val1; TEST c,c +
   MOV dst,val2 (.q) + CMOVNE dst,val1 (.q) で 3-instruction シー
   ケンス。inst.zig に encCmovccRR(size, cc, dst, src) (0F 4? /r

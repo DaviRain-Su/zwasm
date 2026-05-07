@@ -141,6 +141,7 @@ pub fn compile(
                 .@"f32.load", .@"f64.load",
                 .@"f32.store", .@"f64.store",
                 .@"global.get", .@"global.set",
+                .@"memory.size", .@"memory.grow",
                 .@"call",
                 .@"call_indirect",
                 => break :blk true,
@@ -284,7 +285,21 @@ pub fn compile(
     var call_fixups: std.ArrayList(CallFixup) = .empty;
     errdefer call_fixups.deinit(allocator);
 
+    // §9.7 / 7.8-x86-mem-grow-size: dead_code tracking. After
+    // `unreachable` / `return` mid-function, subsequent ops are
+    // unreachable per Wasm spec §3.3 polymorphic-stack rules; the
+    // validator already accepts them but this emitter would
+    // attempt to lower them and trip UnsupportedOp on rare ops
+    // like memory.grow inside dead code (e.g. unreachable.wast's
+    // `as-memory.grow-size`). Mirror of arm64 7.5-emit-deadcode.
+    var dead_code: bool = false;
     for (func.instrs.items) |ins| {
+        if (dead_code) {
+            switch (ins.op) {
+                .@"end", .@"else" => dead_code = false,
+                else => continue,
+            }
+        }
         switch (ins.op) {
             .@"i32.const" => {
                 const vreg = next_vreg;
@@ -395,6 +410,40 @@ pub fn compile(
             => try op_memory.emitMemOp(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, ins.op, ins.payload, func.func_idx),
             .@"global.get" => try op_globals.emitI32GlobalGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.payload),
             .@"global.set" => try op_globals.emitI32GlobalSet(allocator, &buf, alloc, &pushed_vregs, ins.payload),
+            .@"memory.size" => {
+                // Wasm spec §4.4.7 — return current memory size in
+                // 64-KiB pages. mem_limit (bytes) lives at
+                // [R15 + jit_abi.mem_limit_off]; pages = bytes >> 16.
+                // Push fresh i32 vreg.
+                const result_v = next_vreg;
+                next_vreg += 1;
+                if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+                const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+                try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(dst_r, abi.runtime_ptr_save_gpr, jit_abi.mem_limit_off).slice());
+                try buf.appendSlice(allocator, inst.encShrRImm8(.q, dst_r, 16).slice());
+                try pushed_vregs.append(allocator, result_v);
+            },
+            .@"memory.grow" => {
+                // Skeleton: emit MOV r32, -1 (grow-failed). Real
+                // grow needs a runtime callout that allocates new
+                // pages + updates mem_limit. Mirrors arm64's
+                // skeleton (always returns -1) at this chunk; the
+                // failure-only behaviour is spec-conformant for
+                // any host that refuses growth. spec_assert's
+                // unreachable.wast has memory.grow inside dead
+                // code; handcrafted_mem doesn't grow.
+                if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+                _ = pushed_vregs.pop().?; // delta arg, unused
+                const result_v = next_vreg;
+                next_vreg += 1;
+                if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+                const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+                // MOV r32, 0xFFFFFFFF  → upper 32 bits of r64 are
+                // implicitly zero, but Wasm i32 reads only the low
+                // 32 — value = -1 as i32.
+                try buf.appendSlice(allocator, inst.encMovImm32W(dst_r, 0xFFFFFFFF).slice());
+                try pushed_vregs.append(allocator, result_v);
+            },
             .@"select", .@"select_typed" => {
                 // Wasm spec §4.4.4 (select / select_typed) — pop
                 // c (i32), val2, val1; push val1 if c != 0 else
@@ -438,6 +487,7 @@ pub fn compile(
                 const fixup_at: u32 = @intCast(buf.items.len);
                 try buf.appendSlice(allocator, inst.encJmpRel32(0).slice());
                 try unreach_fixups.append(allocator, fixup_at);
+                dead_code = true;
             },
             .@"nop" => {
                 // Wasm spec §4.4.6.2 (nop) — do nothing. No machine
@@ -493,6 +543,7 @@ pub fn compile(
                 }
                 try buf.appendSlice(allocator, inst.encPopR(.rbp).slice());
                 try buf.appendSlice(allocator, inst.encRet().slice());
+                dead_code = true;
             },
             .@"block" => try op_control.emitBlock(allocator, &labels),
             .@"loop" => try op_control.emitLoop(allocator, &buf, &labels),
