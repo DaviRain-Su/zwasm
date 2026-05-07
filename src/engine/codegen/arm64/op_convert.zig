@@ -61,7 +61,8 @@ pub fn emitExtendI32S(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 pub fn emitConvertIntToFloat(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const args = try ctx.popUnary();
     const src = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
-    const vd = try gpr.resolveFp(ctx.alloc, args.result);
+    // D-034 spill-aware: FP dest def via V29 (stage 0).
+    const vd = try gpr.fpDefSpilled(ctx.alloc, args.result, 0);
     const word: u32 = switch (ins.op) {
         .@"f32.convert_i32_s" => inst.encScvtfSFromW(vd, src),
         .@"f32.convert_i32_u" => inst.encUcvtfSFromW(vd, src),
@@ -74,6 +75,7 @@ pub fn emitConvertIntToFloat(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         else => unreachable,
     };
     try gpr.writeU32(ctx.allocator, ctx.buf, word);
+    try gpr.fpStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
     try ctx.pushed_vregs.append(ctx.allocator, args.result);
 }
 
@@ -84,7 +86,9 @@ pub fn emitConvertIntToFloat(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// XfromS, XfromD}.
 pub fn emitTruncSat(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const args = try ctx.popUnary();
-    const vn = try gpr.resolveFp(ctx.alloc, args.src);
+    // D-034 spill-aware: FP src via V29; GPR dest via X16 — separate
+    // classes, no stage collision.
+    const vn = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
     const dest = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
     const word: u32 = switch (ins.op) {
         .@"i32.trunc_sat_f32_s" => inst.encFcvtzsWFromS(dest, vn),
@@ -105,7 +109,7 @@ pub fn emitTruncSat(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// `i32.reinterpret_f32` — FMOV Wd, Sn (bit-cast, no value change).
 pub fn emitReinterpretI32FromF32(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     const args = try ctx.popUnary();
-    const vn = try gpr.resolveFp(ctx.alloc, args.src);
+    const vn = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
     const wd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovWFromS(wd, vn));
     try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
@@ -115,7 +119,7 @@ pub fn emitReinterpretI32FromF32(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 /// `i64.reinterpret_f64` — FMOV Xd, Dn (bit-cast).
 pub fn emitReinterpretI64FromF64(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     const args = try ctx.popUnary();
-    const vn = try gpr.resolveFp(ctx.alloc, args.src);
+    const vn = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
     const xd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovXFromD(xd, vn));
     try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
@@ -126,8 +130,9 @@ pub fn emitReinterpretI64FromF64(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 pub fn emitReinterpretF32FromI32(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     const args = try ctx.popUnary();
     const wn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
-    const vd = try gpr.resolveFp(ctx.alloc, args.result);
+    const vd = try gpr.fpDefSpilled(ctx.alloc, args.result, 0);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovStoFromW(vd, wn));
+    try gpr.fpStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
     try ctx.pushed_vregs.append(ctx.allocator, args.result);
 }
 
@@ -135,8 +140,9 @@ pub fn emitReinterpretF32FromI32(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 pub fn emitReinterpretF64FromI64(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     const args = try ctx.popUnary();
     const xn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
-    const vd = try gpr.resolveFp(ctx.alloc, args.result);
+    const vd = try gpr.fpDefSpilled(ctx.alloc, args.result, 0);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovDtoFromX(vd, xn));
+    try gpr.fpStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
     try ctx.pushed_vregs.append(ctx.allocator, args.result);
 }
 

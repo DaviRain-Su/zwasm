@@ -508,13 +508,21 @@ pub fn compile(
                 // Per the per-class slot mapping note in abi.zig
                 // (allocatable_v_regs comment), GPR slot 0 maps to
                 // X9 — we use that as the immediate scratch.
+                //
+                // D-034 spill-aware: when the vreg's GPR-class slot
+                // is spilled, gprDefSpilled returns the X16 stage
+                // reg; the FMOV reads from that stage. The FP-class
+                // dest uses fpDefSpilled + fpStoreSpilled to flush
+                // V29 to the spill slot when the FP-class slot is
+                // spilled.
                 const vreg = next_vreg;
                 next_vreg += 1;
                 if (vreg >= alloc.slots.len) return Error.SlotOverflow;
-                const vd = try gpr.resolveFp(alloc, vreg);
-                const w_scratch = try gpr.resolveGpr(alloc, vreg);
+                const vd = try gpr.fpDefSpilled(alloc, vreg, 0);
+                const w_scratch = try gpr.gprDefSpilled(alloc, vreg, 0);
                 try op_const.emitConstU32(allocator, &buf, w_scratch, ins.payload);
                 try gpr.writeU32(allocator, &buf, inst.encFmovStoFromW(vd, w_scratch));
+                try gpr.fpStoreSpilled(allocator, &buf, alloc, spill_base_off, vreg, 0);
                 try pushed_vregs.append(allocator, vreg);
             },
             .@"f64.const" => {
@@ -522,8 +530,8 @@ pub fn compile(
                 const vreg = next_vreg;
                 next_vreg += 1;
                 if (vreg >= alloc.slots.len) return Error.SlotOverflow;
-                const vd = try gpr.resolveFp(alloc, vreg);
-                const x_scratch = try gpr.resolveGpr(alloc, vreg);
+                const vd = try gpr.fpDefSpilled(alloc, vreg, 0);
+                const x_scratch = try gpr.gprDefSpilled(alloc, vreg, 0);
                 const value: u64 = (@as(u64, ins.extra) << 32) | @as(u64, ins.payload);
                 const lane0: u16 = @truncate(value & 0xFFFF);
                 const lane1: u16 = @truncate((value >> 16) & 0xFFFF);
@@ -534,6 +542,7 @@ pub fn compile(
                 if (lane2 != 0) try gpr.writeU32(allocator, &buf, inst.encMovkImm16(x_scratch, lane2, 2));
                 if (lane3 != 0) try gpr.writeU32(allocator, &buf, inst.encMovkImm16(x_scratch, lane3, 3));
                 try gpr.writeU32(allocator, &buf, inst.encFmovDtoFromX(vd, x_scratch));
+                try gpr.fpStoreSpilled(allocator, &buf, alloc, spill_base_off, vreg, 0);
                 try pushed_vregs.append(allocator, vreg);
             },
             .@"f32.add", .@"f32.sub", .@"f32.mul", .@"f32.div",
@@ -601,12 +610,14 @@ pub fn compile(
                         try gpr.gprStoreSpilled(allocator, &buf, alloc, ctx.spill_base_off, vreg, 0);
                     },
                     .f32 => {
-                        const vd = try gpr.resolveFp(alloc, vreg);
+                        const vd = try gpr.fpDefSpilled(alloc, vreg, 0);
                         try gpr.writeU32(allocator, &buf, inst.encLdrSImm(vd, 31, offset_w));
+                        try gpr.fpStoreSpilled(allocator, &buf, alloc, spill_base_off, vreg, 0);
                     },
                     .f64 => {
-                        const vd = try gpr.resolveFp(alloc, vreg);
+                        const vd = try gpr.fpDefSpilled(alloc, vreg, 0);
                         try gpr.writeU32(allocator, &buf, inst.encLdrDImm(vd, 31, offset_x));
+                        try gpr.fpStoreSpilled(allocator, &buf, alloc, spill_base_off, vreg, 0);
                     },
                     .v128, .funcref, .externref => {
                         std.debug.print("arm64/emit: local.get type `{s}` unsupported (idx={d})\n", .{ @tagName(ty), local_idx });
@@ -627,19 +638,19 @@ pub fn compile(
                 const src = pushed_vregs.pop().?;
                 switch (ty) {
                     .i32 => {
-                        const rs = try gpr.resolveGpr(alloc, src);
+                        const rs = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, src, 0);
                         try gpr.writeU32(allocator, &buf, inst.encStrImmW(rs, 31, offset_w));
                     },
                     .i64 => {
-                        const rs = try gpr.resolveGpr(alloc, src);
+                        const rs = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, src, 0);
                         try gpr.writeU32(allocator, &buf, inst.encStrImm(rs, 31, offset_x));
                     },
                     .f32 => {
-                        const vs = try gpr.resolveFp(alloc, src);
+                        const vs = try gpr.fpLoadSpilled(allocator, &buf, alloc, spill_base_off, src, 0);
                         try gpr.writeU32(allocator, &buf, inst.encStrSImm(vs, 31, offset_w));
                     },
                     .f64 => {
-                        const vs = try gpr.resolveFp(alloc, src);
+                        const vs = try gpr.fpLoadSpilled(allocator, &buf, alloc, spill_base_off, src, 0);
                         try gpr.writeU32(allocator, &buf, inst.encStrDImm(vs, 31, offset_x));
                     },
                     .v128, .funcref, .externref => {
@@ -660,19 +671,19 @@ pub fn compile(
                 const src = pushed_vregs.items[pushed_vregs.items.len - 1];
                 switch (ty) {
                     .i32 => {
-                        const rs = try gpr.resolveGpr(alloc, src);
+                        const rs = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, src, 0);
                         try gpr.writeU32(allocator, &buf, inst.encStrImmW(rs, 31, offset_w));
                     },
                     .i64 => {
-                        const rs = try gpr.resolveGpr(alloc, src);
+                        const rs = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, src, 0);
                         try gpr.writeU32(allocator, &buf, inst.encStrImm(rs, 31, offset_x));
                     },
                     .f32 => {
-                        const vs = try gpr.resolveFp(alloc, src);
+                        const vs = try gpr.fpLoadSpilled(allocator, &buf, alloc, spill_base_off, src, 0);
                         try gpr.writeU32(allocator, &buf, inst.encStrSImm(vs, 31, offset_w));
                     },
                     .f64 => {
-                        const vs = try gpr.resolveFp(alloc, src);
+                        const vs = try gpr.fpLoadSpilled(allocator, &buf, alloc, spill_base_off, src, 0);
                         try gpr.writeU32(allocator, &buf, inst.encStrDImm(vs, 31, offset_x));
                     },
                     .v128, .funcref, .externref => {
@@ -756,7 +767,7 @@ pub fn compile(
                     const result_kind = func.sig.results[0];
                     switch (result_kind) {
                         .f32, .f64 => {
-                            const src_vn = try gpr.resolveFp(alloc, top_vreg);
+                            const src_vn = try gpr.fpLoadSpilled(allocator, &buf, alloc, spill_base_off, top_vreg, 0);
                             if (src_vn != 0) {
                                 const base: u32 = if (result_kind == .f64) 0x1E604000 else 0x1E204000;
                                 try gpr.writeU32(allocator, &buf, base | (@as(u32, src_vn) << 5));
@@ -793,8 +804,9 @@ pub fn compile(
                 const result = next_vreg;
                 next_vreg += 1;
                 if (result >= alloc.slots.len) return Error.SlotOverflow;
-                const wd = try gpr.resolveGpr(alloc, result);
+                const wd = try gpr.gprDefSpilled(alloc, result, 0);
                 try gpr.writeU32(allocator, &buf, inst.encLsrImmW(wd, 27, 16));
+                try gpr.gprStoreSpilled(allocator, &buf, alloc, spill_base_off, result, 0);
                 try pushed_vregs.append(allocator, result);
             },
             .@"memory.grow" => {
@@ -810,8 +822,9 @@ pub fn compile(
                 const result = next_vreg;
                 next_vreg += 1;
                 if (result >= alloc.slots.len) return Error.SlotOverflow;
-                const wd = try gpr.resolveGpr(alloc, result);
+                const wd = try gpr.gprDefSpilled(alloc, result, 0);
                 try gpr.writeU32(allocator, &buf, inst.encMovnImmW(wd, 0));
+                try gpr.gprStoreSpilled(allocator, &buf, alloc, spill_base_off, result, 0);
                 try pushed_vregs.append(allocator, result);
             },
             .@"i32.load", .@"i32.load8_s", .@"i32.load8_u",
@@ -852,7 +865,7 @@ pub fn compile(
                         .i32, .i64, .v128, .funcref, .externref => false,
                     };
                     if (is_fp) {
-                        const src_vn = try gpr.resolveFp(alloc, top_vreg);
+                        const src_vn = try gpr.fpLoadSpilled(allocator, &buf, alloc, spill_base_off, top_vreg, 0);
                         if (src_vn != 0) {
                             // FMOV S0, Sn or FMOV D0, Dn — encoded
                             // via the FP-FP move (FMOV reg-reg).

@@ -137,8 +137,12 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 
     // Final LDR/STR. Allocate result vreg first for loads.
     if (is_store) {
+        // D-034 spill-aware: FP value uses fpLoadSpilled (V29/V30
+        // independent of the GPR stage regs holding the address);
+        // GPR value uses stage 1 (stage 0 is the address holder
+        // already captured into ip0).
         const wv: inst.Xn = if (is_fp_value)
-            try gpr.resolveFp(ctx.alloc, val_vreg)
+            try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, val_vreg, 1)
         else
             try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, val_vreg, 1);
         const word: u32 = switch (ins.op) {
@@ -158,8 +162,10 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         const result = ctx.next_vreg.*;
         ctx.next_vreg.* += 1;
         if (result >= ctx.alloc.slots.len) return Error.SlotOverflow;
+        // D-034 spill-aware: FP result def uses fpDefSpilled (V29
+        // stage if spilled); GPR result def stages through X16.
         const wd: inst.Xn = if (is_fp_value)
-            try gpr.resolveFp(ctx.alloc, result)
+            try gpr.fpDefSpilled(ctx.alloc, result, 0)
         else
             try gpr.gprDefSpilled(ctx.alloc, result, 0);
         const word: u32 = switch (ins.op) {
@@ -180,7 +186,9 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
             else => unreachable,
         };
         try gpr.writeU32(ctx.allocator, ctx.buf, word);
-        if (!is_fp_value) {
+        if (is_fp_value) {
+            try gpr.fpStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result, 0);
+        } else {
             try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result, 0);
         }
         try ctx.pushed_vregs.append(ctx.allocator, result);

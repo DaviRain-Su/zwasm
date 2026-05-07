@@ -215,7 +215,7 @@ fn marshalCallArgs(ctx: *EmitCtx, callee_sig: FuncType) Error!void {
             },
             .f32 => {
                 if (fp_arg_slot >= 8) return Error.UnsupportedOp;
-                const vs = try gpr.resolveFp(ctx.alloc, src_vreg);
+                const vs = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
                 if (vs != fp_arg_slot) {
                     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovSReg(fp_arg_slot, vs));
                 }
@@ -223,7 +223,7 @@ fn marshalCallArgs(ctx: *EmitCtx, callee_sig: FuncType) Error!void {
             },
             .f64 => {
                 if (fp_arg_slot >= 8) return Error.UnsupportedOp;
-                const vs = try gpr.resolveFp(ctx.alloc, src_vreg);
+                const vs = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
                 if (vs != fp_arg_slot) {
                     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovDReg(fp_arg_slot, vs));
                 }

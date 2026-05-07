@@ -90,7 +90,7 @@ pub fn emitBr(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
             const result_kind = ctx.func.sig.results[0];
             switch (result_kind) {
                 .f32, .f64 => {
-                    const src_vn = try gpr.resolveFp(ctx.alloc, top_vreg);
+                    const src_vn = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, top_vreg, 0);
                     if (src_vn != 0) {
                         const base: u32 = if (result_kind == .f64) 0x1E604000 else 0x1E204000;
                         try gpr.writeU32(ctx.allocator, ctx.buf, base | (@as(u32, src_vn) << 5));
@@ -150,7 +150,7 @@ pub fn emitBrIf(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
             const result_kind = ctx.func.sig.results[0];
             switch (result_kind) {
                 .f32, .f64 => {
-                    const src_vn = try gpr.resolveFp(ctx.alloc, top_vreg);
+                    const src_vn = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, top_vreg, 0);
                     if (src_vn != 0) {
                         const base: u32 = if (result_kind == .f64) 0x1E604000 else 0x1E204000;
                         try gpr.writeU32(ctx.allocator, ctx.buf, base | (@as(u32, src_vn) << 5));
@@ -210,7 +210,7 @@ fn emitBranchToDepth(ctx: *EmitCtx, depth: u32) Error!void {
             const result_kind = ctx.func.sig.results[0];
             switch (result_kind) {
                 .f32, .f64 => {
-                    const src_vn = try gpr.resolveFp(ctx.alloc, top_vreg);
+                    const src_vn = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, top_vreg, 0);
                     if (src_vn != 0) {
                         const base: u32 = if (result_kind == .f64) 0x1E604000 else 0x1E204000;
                         try gpr.writeU32(ctx.allocator, ctx.buf, base | (@as(u32, src_vn) << 5));

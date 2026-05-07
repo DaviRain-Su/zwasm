@@ -101,9 +101,15 @@ pub fn emitFloatUnary(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 ///   FMOV S_d, W_a  (or D_d, X_a)
 pub fn emitFloatCopysign(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const args = try ctx.popBinary(); // lhs = magnitude source, rhs = sign source
-    const vn_x = try gpr.resolveFp(ctx.alloc, args.lhs);
-    const vm_y = try gpr.resolveFp(ctx.alloc, args.rhs);
-    const vd = try gpr.resolveFp(ctx.alloc, args.result);
+    // D-034 spill-aware: stage 0 for lhs (magnitude src), stage 1 for
+    // rhs (sign src). Result def reuses stage 0 — the lhs / rhs FMOV
+    // out-of-V already consumed both stage regs in the body, but the
+    // final FMOV-into-Vd writes to `vd`, after which fpStoreSpilled
+    // flushes via stage 0 (the FP stage regs V29/V30 are independent
+    // of the GPR stage regs X16/X17 used as bit-mask scratches).
+    const vn_x = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.lhs, 0);
+    const vm_y = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.rhs, 1);
+    const vd = try gpr.fpDefSpilled(ctx.alloc, args.result, 0);
     // GPR scratch reused for sign-bit manipulation. The result vreg
     // is FP — `args.result` here is being read as a GPR slot for
     // staging only; if spilled, route via stage-0 pseudo-def.
@@ -129,6 +135,7 @@ pub fn emitFloatCopysign(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(w_a, w_a, ip1));
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovStoFromW(vd, w_a));
     }
+    try gpr.fpStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
     try ctx.pushed_vregs.append(ctx.allocator, args.result);
 }
 
@@ -160,8 +167,12 @@ pub fn emitFloatMinMax(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// - ge: GE (N=V; FCMP unordered → N=0,V=1 → false).
 pub fn emitFloatCompare(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const args = try ctx.popBinary();
-    const vn = try gpr.resolveFp(ctx.alloc, args.lhs);
-    const vm = try gpr.resolveFp(ctx.alloc, args.rhs);
+    // D-034 spill-aware: FP src operands stage through V29/V30 (FP
+    // stage regs); GPR result def stages through X16 (stage 0) — FP
+    // and GPR stage regs are independent classes so all three may
+    // coexist within one handler.
+    const vn = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.lhs, 0);
+    const vm = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.rhs, 1);
     const wd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
     const is_d = switch (ins.op) {
         .@"f64.eq", .@"f64.ne", .@"f64.lt", .@"f64.gt", .@"f64.le", .@"f64.ge" => true,
