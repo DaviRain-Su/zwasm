@@ -9,6 +9,12 @@
 //! `EmitCtx` consolidation to a later chunk that materialises a
 //! consumer for it.
 //!
+//! D-045 chunk 13b: handlers migrated from `abi.slotToReg(alloc.
+//! slots[v])` to spill-aware `gpr.gprLoadSpilled` /
+//! `gprDefSpilled` / `gprStoreSpilled` so vregs spilled past the
+//! 4-reg pool boundary stage through R10/R11 transparently. New
+//! `spill_base_off: u32` parameter threaded through each handler.
+//!
 //! Handlers in this module:
 //!   - `emitI32Binary`  — i32 add / sub / mul / and / or / xor.
 //!   - `emitI32Compare` — i32 eq / ne / lt_s / lt_u / gt_s / gt_u
@@ -29,6 +35,7 @@ const zir = @import("../../../ir/zir.zig");
 const regalloc = @import("../shared/regalloc.zig");
 const inst = @import("inst.zig");
 const abi = @import("abi.zig");
+const gpr = @import("gpr.zig");
 const types = @import("types.zig");
 
 const Allocator = std.mem.Allocator;
@@ -43,13 +50,16 @@ const Error = types.Error;
 /// **Constraint**: dst must not equal rhs (MOV dst, lhs would
 /// clobber rhs before OP reads it). With fresh-vreg-per-op
 /// allocation this never fires; surfaces as `UnsupportedOp`
-/// when the regalloc port needs to handle slot reuse.
+/// when the regalloc port needs to handle slot reuse. Note:
+/// post-D-045 13b spill-aware emit, dst-stage and rhs-stage can
+/// in principle collide (both R10) — D-029 follow-up.
 pub fn emitI32Binary(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     op: zir.ZirOp,
 ) Error!void {
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
@@ -58,9 +68,9 @@ pub fn emitI32Binary(
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const lhs_r = abi.slotToReg(alloc.slots[lhs_v]) orelse return Error.SlotOverflow;
-    const rhs_r = abi.slotToReg(alloc.slots[rhs_v]) orelse return Error.SlotOverflow;
-    const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+    const lhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
+    const rhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
+    const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
     if (dst_r == rhs_r and dst_r != lhs_r) return Error.UnsupportedOp;
 
     if (dst_r != lhs_r) {
@@ -76,6 +86,7 @@ pub fn emitI32Binary(
         else => unreachable,
     };
     try buf.appendSlice(allocator, enc.slice());
+    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -95,6 +106,7 @@ pub fn emitI32Compare(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     op: zir.ZirOp,
 ) Error!void {
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
@@ -103,9 +115,9 @@ pub fn emitI32Compare(
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const lhs_r = abi.slotToReg(alloc.slots[lhs_v]) orelse return Error.SlotOverflow;
-    const rhs_r = abi.slotToReg(alloc.slots[rhs_v]) orelse return Error.SlotOverflow;
-    const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+    const lhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
+    const rhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
+    const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
 
     const cc: inst.Cond = switch (op) {
         .@"i32.eq"   => .e,
@@ -125,6 +137,7 @@ pub fn emitI32Compare(
     try buf.appendSlice(allocator, inst.encSetccR(cc, dst_r).slice());
     try buf.appendSlice(allocator, inst.encMovzxR32R8(dst_r, dst_r).slice());
 
+    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -138,19 +151,21 @@ pub fn emitI32Eqz(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const src_v = pushed_vregs.pop().?;
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const src_r = abi.slotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
-    const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+    const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
+    const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
 
     try buf.appendSlice(allocator, inst.encTestRR(.d, src_r, src_r).slice());
     try buf.appendSlice(allocator, inst.encSetccR(.e, dst_r).slice());
     try buf.appendSlice(allocator, inst.encMovzxR32R8(dst_r, dst_r).slice());
 
+    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -180,6 +195,7 @@ pub fn emitI32Shift(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     op: zir.ZirOp,
 ) Error!void {
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
@@ -188,9 +204,9 @@ pub fn emitI32Shift(
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const lhs_r = abi.slotToReg(alloc.slots[lhs_v]) orelse return Error.SlotOverflow;
-    const rhs_r = abi.slotToReg(alloc.slots[rhs_v]) orelse return Error.SlotOverflow;
-    const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+    const lhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
+    const rhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
+    const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
     if (dst_r == .rcx) return Error.UnsupportedOp;
     if (dst_r == rhs_r and dst_r != lhs_r) return Error.UnsupportedOp;
 
@@ -213,6 +229,7 @@ pub fn emitI32Shift(
     };
     try buf.appendSlice(allocator, inst.encShiftRCl(.d, kind, dst_r).slice());
 
+    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -231,6 +248,7 @@ pub fn emitI32Bitcount(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     op: zir.ZirOp,
 ) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
@@ -238,8 +256,8 @@ pub fn emitI32Bitcount(
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const src_r = abi.slotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
-    const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+    const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
+    const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
 
     const enc = switch (op) {
         .@"i32.clz"    => inst.encLzcntR32(dst_r, src_r),
@@ -249,6 +267,7 @@ pub fn emitI32Bitcount(
     };
     try buf.appendSlice(allocator, enc.slice());
 
+    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -262,6 +281,7 @@ pub fn emitI64Binary(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     op: zir.ZirOp,
 ) Error!void {
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
@@ -270,9 +290,9 @@ pub fn emitI64Binary(
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const lhs_r = abi.slotToReg(alloc.slots[lhs_v]) orelse return Error.SlotOverflow;
-    const rhs_r = abi.slotToReg(alloc.slots[rhs_v]) orelse return Error.SlotOverflow;
-    const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+    const lhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
+    const rhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
+    const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
     if (dst_r == rhs_r and dst_r != lhs_r) return Error.UnsupportedOp;
 
     if (dst_r != lhs_r) {
@@ -288,6 +308,7 @@ pub fn emitI64Binary(
         else => unreachable,
     };
     try buf.appendSlice(allocator, enc.slice());
+    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -301,6 +322,7 @@ pub fn emitI64Compare(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     op: zir.ZirOp,
 ) Error!void {
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
@@ -309,9 +331,9 @@ pub fn emitI64Compare(
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const lhs_r = abi.slotToReg(alloc.slots[lhs_v]) orelse return Error.SlotOverflow;
-    const rhs_r = abi.slotToReg(alloc.slots[rhs_v]) orelse return Error.SlotOverflow;
-    const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+    const lhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
+    const rhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
+    const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
 
     const cc: inst.Cond = switch (op) {
         .@"i64.eq"   => .e,
@@ -331,6 +353,7 @@ pub fn emitI64Compare(
     try buf.appendSlice(allocator, inst.encSetccR(cc, dst_r).slice());
     try buf.appendSlice(allocator, inst.encMovzxR32R8(dst_r, dst_r).slice());
 
+    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -342,19 +365,21 @@ pub fn emitI64Eqz(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const src_v = pushed_vregs.pop().?;
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const src_r = abi.slotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
-    const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+    const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
+    const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
 
     try buf.appendSlice(allocator, inst.encTestRR(.q, src_r, src_r).slice());
     try buf.appendSlice(allocator, inst.encSetccR(.e, dst_r).slice());
     try buf.appendSlice(allocator, inst.encMovzxR32R8(dst_r, dst_r).slice());
 
+    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -368,6 +393,7 @@ pub fn emitI64Shift(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     op: zir.ZirOp,
 ) Error!void {
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
@@ -376,9 +402,9 @@ pub fn emitI64Shift(
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const lhs_r = abi.slotToReg(alloc.slots[lhs_v]) orelse return Error.SlotOverflow;
-    const rhs_r = abi.slotToReg(alloc.slots[rhs_v]) orelse return Error.SlotOverflow;
-    const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+    const lhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
+    const rhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
+    const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
     if (dst_r == .rcx) return Error.UnsupportedOp;
     if (dst_r == rhs_r and dst_r != lhs_r) return Error.UnsupportedOp;
 
@@ -398,6 +424,7 @@ pub fn emitI64Shift(
     };
     try buf.appendSlice(allocator, inst.encShiftRCl(.q, kind, dst_r).slice());
 
+    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -410,6 +437,7 @@ pub fn emitI64Bitcount(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     op: zir.ZirOp,
 ) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
@@ -417,8 +445,8 @@ pub fn emitI64Bitcount(
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const src_r = abi.slotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
-    const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+    const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
+    const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
 
     const enc = switch (op) {
         .@"i64.clz"    => inst.encLzcntR64(dst_r, src_r),
@@ -428,6 +456,7 @@ pub fn emitI64Bitcount(
     };
     try buf.appendSlice(allocator, enc.slice());
 
+    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -444,6 +473,7 @@ pub fn emitConvertWidth(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     op: zir.ZirOp,
 ) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
@@ -451,8 +481,8 @@ pub fn emitConvertWidth(
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const src_r = abi.slotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
-    const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+    const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
+    const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
 
     const enc = switch (op) {
         .@"i32.wrap_i64", .@"i64.extend_i32_u" => inst.encMovRR(.d, dst_r, src_r),
@@ -461,5 +491,6 @@ pub fn emitConvertWidth(
     };
     try buf.appendSlice(allocator, enc.slice());
 
+    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }

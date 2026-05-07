@@ -95,12 +95,14 @@ pub const stack_pointer: Gpr = .rsp;
 /// ADR-0017 mapping for x86_64 prologue revisits this.
 pub const frame_pointer: Gpr = .rbp;
 
-/// Caller-saved scratch GPRs other than args / return. R10 +
-/// R11 are the SysV "general scratch" regs — RAX is excluded
-/// here because it's the return slot (its post-call value is
-/// the function's return) and arg regs RDI..R9 are excluded
-/// because they carry args at call sites.
-pub const allocatable_caller_saved_scratch_gprs = [_]Gpr{ .r10, .r11 };
+/// Caller-saved scratch GPRs other than args / return. Per
+/// D-045 chunk 13b, R10 + R11 have been removed from the
+/// allocatable pool — they are now reserved as
+/// `spill_stage_gprs` (consumed by `gpr.zig`'s spill-aware
+/// helpers). The constant remains as an empty slice so the
+/// `allocatable_gprs = scratch ++ callee_saved` shape stays
+/// readable.
+pub const allocatable_caller_saved_scratch_gprs = [_]Gpr{};
 
 /// Reserved for runtime-ptr save per ADR-0026. Mirrors the
 /// role of arm64's `runtime_ptr_save_gpr` (X19, ADR-0017
@@ -147,10 +149,12 @@ pub const allocatable_callee_saved_gprs = [_]Gpr{ .rbx, .r12, .r13, .r14 };
 ///   - RBP (frame pointer per the prologue convention; ADR-0026
 ///     §"Frame-pointer policy")
 ///   - R15 (`reserved_invariant_gprs` per ADR-0026)
+///   - R10, R11 (`spill_stage_gprs` per D-045 chunk 13b — used
+///     to stage spilled vregs through physical regs in the
+///     spill-aware emit path)
 ///
-/// Pool size: 6 (R10, R11 + RBX, R12, R13, R14). For
-/// comparison arm64's pool is 9 (X9..X13 + X20..X23) post-
-/// ADR-0017 sub-2d-ii — x86_64 has fewer GPRs to start with
+/// Pool size: 4 (RBX, R12, R13, R14) post-13b. For comparison
+/// arm64's pool is 8 — x86_64 has fewer GPRs to start with
 /// (16 vs 31), so the asymmetry is structural and accepted
 /// per P3 (cold-start) / ADR-0026.
 pub const allocatable_gprs = allocatable_caller_saved_scratch_gprs ++ allocatable_callee_saved_gprs;
@@ -171,6 +175,20 @@ comptime {
         for (reserved_invariant_gprs) |r| {
             if (a == r) @compileError("regalloc pool overlaps reserved_invariant_gprs — ADR-0026 invariant violated");
         }
+        // D-045 chunk 13b: pool ∩ spill_stage = ∅. Stage regs
+        // are reserved exclusively for `gpr.zig`'s spill-aware
+        // helpers; allowing the regalloc to assign them would
+        // race with handlers that load spilled operands into
+        // them mid-instruction.
+        for (spill_stage_gprs) |s| {
+            if (a == s) @compileError("regalloc pool overlaps spill_stage_gprs — D-045 13b invariant violated");
+        }
+    }
+    // Same disjointness for the FP / XMM side.
+    for (allocatable_xmms) |a| {
+        for (fp_spill_stage_xmms) |s| {
+            if (a == s) @compileError("regalloc XMM pool overlaps fp_spill_stage_xmms — D-045 13b invariant violated");
+        }
     }
 }
 
@@ -186,7 +204,7 @@ comptime {
 /// whether to make XMM6/XMM7 allocatable and arrange call-site
 /// save/restore — saving 2 slots may matter for FP-heavy code.
 pub const allocatable_xmms = [_]Xmm{
-    .xmm8, .xmm9, .xmm10, .xmm11, .xmm12, .xmm13, .xmm14, .xmm15,
+    .xmm8, .xmm9, .xmm10, .xmm11, .xmm12, .xmm13,
 };
 
 /// Spill staging GPRs (mirrors arm64's `spill_stage_gprs` =
@@ -282,6 +300,10 @@ pub const sysv = struct {
     pub const return_xmm: Xmm = .xmm0;
     pub const callee_saved_gprs = [_]Gpr{ .rbx, .rbp, .r12, .r13, .r14, .r15 };
     pub const caller_saved_gprs = [_]Gpr{ .rax, .rcx, .rdx, .rdi, .rsi, .r8, .r9, .r10, .r11 };
+    /// Allocatable GPRs under SysV (D-045 chunk 13b: 4 regs;
+    /// R10/R11 reserved as spill-stage). Mirrors top-level
+    /// `allocatable_gprs` for symmetry with `win64.allocatable_gprs`.
+    pub const allocatable_gprs = [_]Gpr{ .rbx, .r12, .r13, .r14 };
     /// SysV does not reserve a shadow space below the call site.
     pub const shadow_space_bytes: u32 = 0;
     /// First arg in RDI per SysV §3.2.3 — the entry shim's
@@ -327,7 +349,7 @@ pub const win64 = struct {
     /// target switches). Slots 6/7 add RDI/RSI as a Win64-only
     /// extension. RBP is the frame pointer; R15 is the reserved
     /// runtime-ptr-save register.
-    pub const allocatable_gprs = [_]Gpr{ .r10, .r11, .rbx, .r12, .r13, .r14, .rdi, .rsi };
+    pub const allocatable_gprs = [_]Gpr{ .rbx, .r12, .r13, .r14, .rdi, .rsi };
 };
 
 // ============================================================
@@ -404,12 +426,14 @@ test "return_gpr is RAX, return_xmm is XMM0" {
     try testing.expectEqual(Xmm.xmm0, return_xmm);
 }
 
-test "allocatable_gprs is 6 regs (R10, R11 + RBX, R12..R14) post-ADR-0026" {
-    try testing.expectEqual(@as(usize, 6), allocatable_gprs.len);
-    try testing.expectEqual(Gpr.r10, allocatable_gprs[0]);
-    try testing.expectEqual(Gpr.r11, allocatable_gprs[1]);
-    try testing.expectEqual(Gpr.rbx, allocatable_gprs[2]);
-    try testing.expectEqual(Gpr.r14, allocatable_gprs[5]);
+test "allocatable_gprs is 4 regs (RBX, R12..R14) post-D-045-13b" {
+    // D-045 chunk 13b: R10/R11 removed from the pool — reserved
+    // as spill-stage regs for spill-aware emit.
+    try testing.expectEqual(@as(usize, 4), allocatable_gprs.len);
+    try testing.expectEqual(Gpr.rbx, allocatable_gprs[0]);
+    try testing.expectEqual(Gpr.r12, allocatable_gprs[1]);
+    try testing.expectEqual(Gpr.r13, allocatable_gprs[2]);
+    try testing.expectEqual(Gpr.r14, allocatable_gprs[3]);
 }
 
 test "allocatable_gprs is disjoint from arg/return/SP/FP/reserved at runtime" {
@@ -428,32 +452,28 @@ test "runtime_ptr_save_gpr is R15 (ADR-0026 reservation)" {
     try testing.expectEqual(Gpr.r15, reserved_invariant_gprs[0]);
 }
 
-test "slotToReg: slot 0 → R10 (first allocatable caller-saved scratch)" {
-    try testing.expectEqual(Gpr.r10, slotToReg(0).?);
+test "slotToReg: slot 0 → RBX (first allocatable post-13b; R10/R11 are spill-stage)" {
+    try testing.expectEqual(Gpr.rbx, slotToReg(0).?);
 }
 
-test "slotToReg: slot 2 → RBX (first allocatable callee-saved; RBP=FP, R15=reserved)" {
-    try testing.expectEqual(Gpr.rbx, slotToReg(2).?);
+test "slotToReg: slot 3 → R14 (last in the 4-slot pool post-13b)" {
+    try testing.expectEqual(Gpr.r14, slotToReg(3).?);
 }
 
-test "slotToReg: slot 5 → R14 (last in the 6-slot pool)" {
-    try testing.expectEqual(Gpr.r14, slotToReg(5).?);
-}
-
-test "slotToReg: slot 6 returns null (pool exhausted; spill territory)" {
-    try testing.expect(slotToReg(6) == null);
+test "slotToReg: slot 4 returns null (pool exhausted; spill territory)" {
+    try testing.expect(slotToReg(4) == null);
 }
 
 test "fpSlotToReg: slot 0 → XMM8 (first allocatable XMM after arg regs)" {
     try testing.expectEqual(Xmm.xmm8, fpSlotToReg(0).?);
 }
 
-test "fpSlotToReg: slot 7 → XMM15 (last in the 8-slot pool)" {
-    try testing.expectEqual(Xmm.xmm15, fpSlotToReg(7).?);
+test "fpSlotToReg: slot 5 → XMM13 (last in the 6-slot pool post-13b; XMM14/15 spill-stage)" {
+    try testing.expectEqual(Xmm.xmm13, fpSlotToReg(5).?);
 }
 
-test "fpSlotToReg: slot 8 returns null" {
-    try testing.expect(fpSlotToReg(8) == null);
+test "fpSlotToReg: slot 6 returns null" {
+    try testing.expect(fpSlotToReg(6) == null);
 }
 
 test "isCallerSaved: SysV caller-saved set" {
@@ -550,20 +570,20 @@ test "win64.entry_arg0_gpr is RCX (Win64 first arg)" {
     try testing.expectEqual(Gpr.rdi, sysv.entry_arg0_gpr);
 }
 
-test "win64.allocatable_gprs adds RDI+RSI vs SysV (8 regs vs 6)" {
-    // Win64's broader callee-saved set yields 2 more allocatable
-    // GPRs (RDI, RSI promoted from caller-saved → callee-saved).
-    try testing.expectEqual(@as(usize, 8), win64.allocatable_gprs.len);
+test "win64.allocatable_gprs adds RDI+RSI vs SysV (6 regs vs 4) post-D-045-13b" {
+    // D-045 chunk 13b: R10/R11 removed from the pool. SysV pool
+    // is 4 (RBX, R12..R14); Win64 adds RDI+RSI for 6.
+    try testing.expectEqual(@as(usize, 6), win64.allocatable_gprs.len);
 }
 
-test "win64.allocatable_gprs slots 0..5 mirror SysV (cross-Cc test stability)" {
-    // Slot 0..5 must agree byte-for-byte with SysV so tests that
-    // exercise ≤ 6 slots produce identical encodings under both
-    // ABIs. RDI/RSI are appended as slots 6 / 7.
+test "win64.allocatable_gprs slots 0..3 mirror SysV (cross-Cc test stability)" {
+    // Slot 0..3 must agree byte-for-byte with SysV so tests that
+    // exercise ≤ 4 slots produce identical encodings under both
+    // ABIs. RDI/RSI are appended as slots 4 / 5 post-13b.
     try testing.expectEqual(allocatable_gprs[0], win64.allocatable_gprs[0]);
-    try testing.expectEqual(allocatable_gprs[5], win64.allocatable_gprs[5]);
-    try testing.expectEqual(Gpr.rdi, win64.allocatable_gprs[6]);
-    try testing.expectEqual(Gpr.rsi, win64.allocatable_gprs[7]);
+    try testing.expectEqual(allocatable_gprs[3], win64.allocatable_gprs[3]);
+    try testing.expectEqual(Gpr.rdi, win64.allocatable_gprs[4]);
+    try testing.expectEqual(Gpr.rsi, win64.allocatable_gprs[5]);
 }
 
 test "current_cc matches the build target (.windows → .win64; else → .sysv)" {

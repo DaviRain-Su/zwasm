@@ -31,6 +31,7 @@ const zir = @import("../../../ir/zir.zig");
 const regalloc = @import("../shared/regalloc.zig");
 const inst = @import("inst.zig");
 const abi = @import("abi.zig");
+const gpr = @import("gpr.zig");
 const jit_abi = @import("../shared/jit_abi.zig");
 const types = @import("types.zig");
 
@@ -55,13 +56,14 @@ pub fn emitCall(
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
     call_fixups: *std.ArrayList(CallFixup),
+    spill_base_off: u32,
     func_sigs: []const zir.FuncType,
     callee_idx: u32,
 ) Error!void {
     if (callee_idx >= func_sigs.len) return Error.AllocationMissing;
     const callee_sig = func_sigs[callee_idx];
 
-    try marshalCallArgs(allocator, buf, alloc, pushed_vregs, callee_sig);
+    try marshalCallArgs(allocator, buf, alloc, pushed_vregs, spill_base_off, callee_sig);
 
     // Restore <entry_arg0> = runtime_ptr from R15 before
     // transferring control. The callee's prologue captures arg0
@@ -88,7 +90,7 @@ pub fn emitCall(
 
     try emitShadowFree(allocator, buf);
 
-    try captureCallResult(allocator, buf, alloc, pushed_vregs, next_vreg, callee_sig);
+    try captureCallResult(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, callee_sig);
 }
 
 /// Reserve Win64 shadow space below the upcoming CALL. SysV
@@ -130,6 +132,7 @@ pub fn emitCallIndirect(
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
     bounds_fixups: *std.ArrayList(u32),
+    spill_base_off: u32,
     module_types: []const zir.FuncType,
     type_idx: u32,
 ) Error!void {
@@ -139,9 +142,9 @@ pub fn emitCallIndirect(
     // Stack at entry: [args..., idx]. Pop idx first.
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const idx_vreg = pushed_vregs.pop().?;
-    const idx_r = abi.slotToReg(alloc.slots[idx_vreg]) orelse return Error.SlotOverflow;
+    const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_vreg, 0);
 
-    try marshalCallArgs(allocator, buf, alloc, pushed_vregs, callee_sig);
+    try marshalCallArgs(allocator, buf, alloc, pushed_vregs, spill_base_off, callee_sig);
 
     // Bounds: MOV EAX, [R15 + table_size_off] ; CMP idx_r, EAX ; JAE trap.
     try buf.appendSlice(allocator, inst.encMovR32FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.table_size_off).slice());
@@ -181,7 +184,7 @@ pub fn emitCallIndirect(
 
     try emitShadowFree(allocator, buf);
 
-    try captureCallResult(allocator, buf, alloc, pushed_vregs, next_vreg, callee_sig);
+    try captureCallResult(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, callee_sig);
 }
 
 /// Marshal call arguments per SysV x86_64 §3.2.3: pop N arg
@@ -203,6 +206,7 @@ pub fn marshalCallArgs(
     buf: *std.ArrayList(u8),
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
+    spill_base_off: u32,
     callee_sig: zir.FuncType,
 ) Error!void {
     const n_args: u32 = @intCast(callee_sig.params.len);
@@ -229,7 +233,7 @@ pub fn marshalCallArgs(
             .i32 => {
                 if (gpr_arg_slot >= abi.current.arg_gprs.len) return Error.UnsupportedOp;
                 const dst = abi.current.arg_gprs[gpr_arg_slot];
-                const src = abi.slotToReg(alloc.slots[src_vreg]) orelse return Error.SlotOverflow;
+                const src = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
                 if (src != dst) {
                     try buf.appendSlice(allocator, inst.encMovRR(.d, dst, src).slice());
                 }
@@ -250,6 +254,7 @@ pub fn captureCallResult(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     callee_sig: zir.FuncType,
 ) Error!void {
     if (callee_sig.results.len == 0) return;
@@ -261,10 +266,11 @@ pub fn captureCallResult(
 
     switch (callee_sig.results[0]) {
         .i32 => {
-            const dst = abi.slotToReg(alloc.slots[result]) orelse return Error.SlotOverflow;
+            const dst = try gpr.gprDefSpilled(alloc, result, 0);
             if (dst != abi.return_gpr) {
                 try buf.appendSlice(allocator, inst.encMovRR(.d, dst, abi.return_gpr).slice());
             }
+            try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result, 0);
         },
         .i64, .f32, .f64, .v128, .funcref, .externref => return Error.UnsupportedOp,
     }

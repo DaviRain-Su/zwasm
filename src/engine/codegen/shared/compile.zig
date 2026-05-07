@@ -20,6 +20,7 @@
 //! Zone 2 (`src/engine/codegen/shared/`).
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 const zir = @import("../../../ir/zir.zig");
@@ -86,8 +87,27 @@ pub fn compileOne(
     const lv = try liveness.compute(allocator, &func, func_sigs, module_types);
     func.liveness = lv;
 
-    const alloc = try regalloc.compute(allocator, &func);
+    var alloc = try regalloc.compute(allocator, &func);
     errdefer regalloc.deinit(allocator, alloc);
+    // D-045 chunk 13b: override per-arch class boundaries so that
+    // slot ids past the host's pool size resolve to `.spill` (not
+    // a null `slotToReg` the way the arm64-tuned defaults would
+    // do at slot 4..7 on x86_64). The defaults in
+    // `Allocation` (max_reg_slots_gpr=8, max_reg_slots_fp=13) match
+    // arm64; x86_64 has 4 GPRs / 6 XMMs in its pool post-13b.
+    // `emit.allocatable_gprs.len` / `emit.allocatable_xmms.len`
+    // is the canonical source.
+    switch (builtin.target.cpu.arch) {
+        .x86_64 => {
+            const x86_abi = @import("../x86_64/abi.zig");
+            alloc.max_reg_slots_gpr = x86_abi.allocatable_gprs.len;
+            alloc.max_reg_slots_fp = x86_abi.allocatable_xmms.len;
+        },
+        .aarch64 => {
+            // Defaults already match arm64 pool sizes.
+        },
+        else => @compileError("unsupported host arch"),
+    }
 
     const out = try emit.compile(allocator, &func, alloc, func_sigs, module_types);
     errdefer emit.deinit(allocator, out);
@@ -103,7 +123,6 @@ pub fn compileOne(
 // Tests
 // ============================================================
 
-const builtin = @import("builtin");
 const testing = std.testing;
 const linker = @import("linker.zig");
 const entry = @import("entry.zig");

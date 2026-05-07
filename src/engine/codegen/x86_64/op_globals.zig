@@ -22,6 +22,7 @@ const std = @import("std");
 const regalloc = @import("../shared/regalloc.zig");
 const inst = @import("inst.zig");
 const abi = @import("abi.zig");
+const gpr = @import("gpr.zig");
 const jit_abi = @import("../shared/jit_abi.zig");
 const types = @import("types.zig");
 
@@ -42,17 +43,19 @@ pub fn emitI32GlobalGet(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     idx: u32,
 ) Error!void {
     if (idx > 0x0FFF_FFFF) return Error.SlotOverflow; // sane Wasm-module ceiling
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+    const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
     const byte_off: i32 = @intCast(idx * 8);
 
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.globals_base_off).slice());
     try buf.appendSlice(allocator, inst.encMovR32FromMemDisp32(dst_r, .rax, byte_off).slice());
+    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -65,12 +68,13 @@ pub fn emitI32GlobalSet(
     buf: *std.ArrayList(u8),
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
+    spill_base_off: u32,
     idx: u32,
 ) Error!void {
     if (idx > 0x0FFF_FFFF) return Error.SlotOverflow;
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const src_v = pushed_vregs.pop().?;
-    const src_r = abi.slotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
+    const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
     const byte_off: i32 = @intCast(idx * 8);
 
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.globals_base_off).slice());

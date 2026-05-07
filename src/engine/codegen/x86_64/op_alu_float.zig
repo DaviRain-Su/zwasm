@@ -26,6 +26,7 @@ const zir = @import("../../../ir/zir.zig");
 const regalloc = @import("../shared/regalloc.zig");
 const inst = @import("inst.zig");
 const abi = @import("abi.zig");
+const gpr = @import("gpr.zig");
 const types = @import("types.zig");
 
 const Allocator = std.mem.Allocator;
@@ -42,6 +43,7 @@ pub fn emitFpConst(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     op: zir.ZirOp,
     payload: u32,
     extra: u32,
@@ -49,7 +51,7 @@ pub fn emitFpConst(
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const xmm_dst = abi.fpSlotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+    const xmm_dst = try gpr.xmmDefSpilled(alloc, result_v, 0);
 
     switch (op) {
         .@"f32.const" => {
@@ -63,6 +65,7 @@ pub fn emitFpConst(
         },
         else => unreachable,
     }
+    try gpr.xmmStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -87,6 +90,7 @@ pub fn emitFpMinMax(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     op: zir.ZirOp,
 ) Error!void {
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
@@ -95,9 +99,9 @@ pub fn emitFpMinMax(
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const lhs_x = abi.fpSlotToReg(alloc.slots[lhs_v]) orelse return Error.SlotOverflow;
-    const rhs_x = abi.fpSlotToReg(alloc.slots[rhs_v]) orelse return Error.SlotOverflow;
-    const dst = abi.fpSlotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+    const lhs_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
+    const rhs_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
+    const dst = try gpr.xmmDefSpilled(alloc, result_v, 0);
     if (dst == rhs_x and dst != lhs_x) return Error.UnsupportedOp;
 
     const is_f64 = switch (op) {
@@ -167,6 +171,7 @@ pub fn emitFpMinMax(
     inst.patchRel32(buf.items, jmp_common_byte, 5, @as(i32, @intCast(end_byte)) - @as(i32, @intCast(jmp_common_byte)) - 5);
     inst.patchRel32(buf.items, jmp_eq_byte, 5, @as(i32, @intCast(end_byte)) - @as(i32, @intCast(jmp_eq_byte)) - 5);
 
+    try gpr.xmmStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -190,6 +195,7 @@ pub fn emitFpCopysign(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     op: zir.ZirOp,
 ) Error!void {
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
@@ -198,9 +204,9 @@ pub fn emitFpCopysign(
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const lhs_x = abi.fpSlotToReg(alloc.slots[lhs_v]) orelse return Error.SlotOverflow;
-    const rhs_x = abi.fpSlotToReg(alloc.slots[rhs_v]) orelse return Error.SlotOverflow;
-    const dst_x = abi.fpSlotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+    const lhs_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
+    const rhs_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
+    const dst_x = try gpr.xmmDefSpilled(alloc, result_v, 0);
 
     const is_f64 = op == .@"f64.copysign";
 
@@ -224,6 +230,7 @@ pub fn emitFpCopysign(
         try buf.appendSlice(allocator, inst.encMovdXmmFromR32(dst_x, .rax).slice());
     }
 
+    try gpr.xmmStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -246,6 +253,7 @@ pub fn emitFpUnary(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     op: zir.ZirOp,
 ) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
@@ -253,8 +261,8 @@ pub fn emitFpUnary(
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const src = abi.fpSlotToReg(alloc.slots[src_v]) orelse return Error.SlotOverflow;
-    const dst = abi.fpSlotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+    const src = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
+    const dst = try gpr.xmmDefSpilled(alloc, result_v, 1);
 
     const is_f64 = switch (op) {
         .@"f64.abs", .@"f64.neg", .@"f64.sqrt",
@@ -276,6 +284,7 @@ pub fn emitFpUnary(
         .@"f32.neg", .@"f64.neg" => try emitFpAbsNeg(allocator, buf, dst, src, is_f64, false),
         else => unreachable,
     }
+    try gpr.xmmStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 1);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -330,6 +339,7 @@ pub fn emitFpCompare(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     op: zir.ZirOp,
 ) Error!void {
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
@@ -338,9 +348,9 @@ pub fn emitFpCompare(
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const lhs_x = abi.fpSlotToReg(alloc.slots[lhs_v]) orelse return Error.SlotOverflow;
-    const rhs_x = abi.fpSlotToReg(alloc.slots[rhs_v]) orelse return Error.SlotOverflow;
-    const dst = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+    const lhs_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
+    const rhs_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
+    const dst = try gpr.gprDefSpilled(alloc, result_v, 0);
 
     const is_f64 = switch (op) {
         .@"f64.eq", .@"f64.ne", .@"f64.lt", .@"f64.gt", .@"f64.le", .@"f64.ge" => true,
@@ -392,6 +402,7 @@ pub fn emitFpCompare(
         },
         else => unreachable,
     }
+    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -411,6 +422,7 @@ pub fn emitFpBinary(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     op: zir.ZirOp,
 ) Error!void {
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
@@ -419,9 +431,9 @@ pub fn emitFpBinary(
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const lhs = abi.fpSlotToReg(alloc.slots[lhs_v]) orelse return Error.SlotOverflow;
-    const rhs = abi.fpSlotToReg(alloc.slots[rhs_v]) orelse return Error.SlotOverflow;
-    const dst = abi.fpSlotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+    const lhs = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
+    const rhs = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
+    const dst = try gpr.xmmDefSpilled(alloc, result_v, 0);
     if (dst == rhs and dst != lhs) return Error.UnsupportedOp;
 
     if (dst != lhs) {
@@ -442,5 +454,6 @@ pub fn emitFpBinary(
     };
     try buf.appendSlice(allocator, inst.encSseScalarBinary(kind, opcode, dst, rhs).slice());
 
+    try gpr.xmmStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }

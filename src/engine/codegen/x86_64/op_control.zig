@@ -28,6 +28,7 @@ const zir = @import("../../../ir/zir.zig");
 const regalloc = @import("../shared/regalloc.zig");
 const inst = @import("inst.zig");
 const abi = @import("abi.zig");
+const gpr = @import("gpr.zig");
 const types = @import("types.zig");
 const label_mod = @import("label.zig");
 
@@ -138,13 +139,14 @@ pub fn emitBrTable(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     labels: *std.ArrayList(Label),
+    spill_base_off: u32,
     count: u32,
     start: u32,
 ) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
     if (count > 127) return Error.UnsupportedOp;
     const idx_v = pushed_vregs.pop().?;
-    const idx_r = abi.slotToReg(alloc.slots[idx_v]) orelse return Error.SlotOverflow;
+    const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
     const targets = func.branch_targets.items;
     if (start + count >= targets.len) return Error.UnsupportedOp;
 
@@ -167,11 +169,12 @@ pub fn emitBrIf(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     labels: *std.ArrayList(Label),
+    spill_base_off: u32,
     depth: u32,
 ) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const cond_v = pushed_vregs.pop().?;
-    const cond_r = abi.slotToReg(alloc.slots[cond_v]) orelse return Error.SlotOverflow;
+    const cond_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, cond_v, 0);
     if (depth >= labels.items.len) return Error.UnsupportedOp;
     try buf.appendSlice(allocator, inst.encTestRR(.d, cond_r, cond_r).slice());
     const tgt_idx = labels.items.len - 1 - depth;
@@ -206,13 +209,14 @@ pub fn emitIf(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     labels: *std.ArrayList(Label),
+    spill_base_off: u32,
     arity_extra: u32,
 ) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const arity: u8 = std.math.cast(u8, arity_extra) orelse return Error.UnsupportedOp;
     if (arity > merge_top_vregs_cap) return Error.UnsupportedOp;
     const cond_v = pushed_vregs.pop().?;
-    const cond_r = abi.slotToReg(alloc.slots[cond_v]) orelse return Error.SlotOverflow;
+    const cond_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, cond_v, 0);
     try buf.appendSlice(allocator, inst.encTestRR(.d, cond_r, cond_r).slice());
     const skip_at: u32 = @intCast(buf.items.len);
     try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice()); // JE = skip if cond==0
@@ -277,6 +281,7 @@ pub fn emitEndIntra(
     pushed_vregs: *std.ArrayList(u32),
     alloc: regalloc.Allocation,
     labels: *std.ArrayList(Label),
+    spill_base_off: u32,
 ) Error!void {
     var lbl = labels.pop().?;
     defer lbl.pending.deinit(allocator);
@@ -318,11 +323,16 @@ pub fn emitEndIntra(
                 i -= 1;
                 const else_result = pushed_vregs.pop().?;
                 const merge_vreg = lbl.merge_top_vregs[i];
-                const merge_reg = abi.slotToReg(alloc.slots[merge_vreg]) orelse return Error.SlotOverflow;
-                const else_reg = abi.slotToReg(alloc.slots[else_result]) orelse return Error.SlotOverflow;
+                // D-045 chunk 13b: spill-aware merge MOV. Stage 0 (R10)
+                // carries the else_reg load when spilled; stage 1
+                // (R11) reserves the merge_vreg def slot when spilled
+                // so the two never collide.
+                const else_reg = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, else_result, 0);
+                const merge_reg = try gpr.gprDefSpilled(alloc, merge_vreg, 1);
                 if (merge_reg != else_reg) {
                     try buf.appendSlice(allocator, inst.encMovRR(.d, merge_reg, else_reg).slice());
                 }
+                try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, merge_vreg, 1);
             }
         }
     }

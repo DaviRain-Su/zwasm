@@ -30,6 +30,7 @@ const zir = @import("../../../ir/zir.zig");
 const regalloc = @import("../shared/regalloc.zig");
 const inst = @import("inst.zig");
 const abi = @import("abi.zig");
+const gpr = @import("gpr.zig");
 const jit_abi = @import("../shared/jit_abi.zig");
 const trace = @import("../../../diagnostic/trace.zig");
 const types = @import("types.zig");
@@ -70,6 +71,7 @@ pub fn emitMemOp(
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
     bounds_fixups: *std.ArrayList(u32),
+    spill_base_off: u32,
     op: zir.ZirOp,
     offset: u32,
     func_idx: u32,
@@ -96,7 +98,7 @@ pub fn emitMemOp(
         if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
         idx_v = pushed_vregs.pop().?;
     }
-    const idx_r = abi.slotToReg(alloc.slots[idx_v]) orelse return Error.SlotOverflow;
+    const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
 
     // Per-op access size in bytes (Wasm spec memory.{load,store} 系)。
     // exhaustive switch (`require_exhaustive_enum_switch` lint gate);
@@ -136,11 +138,11 @@ pub fn emitMemOp(
     // Per-op final encoding.
     if (is_store) {
         if (is_fp) {
-            const src_x = abi.fpSlotToReg(alloc.slots[val_v]) orelse return Error.SlotOverflow;
+            const src_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, val_v, 0);
             const kind: inst.SseScalarKind = if (op == .@"f64.store") .f64 else .f32;
             try buf.appendSlice(allocator, inst.encMovssMovsdMemBaseIdx(kind, true, src_x, .rax, .rdx).slice());
         } else {
-            const src_r = abi.slotToReg(alloc.slots[val_v]) orelse return Error.SlotOverflow;
+            const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, val_v, 1);
             const enc = switch (op) {
                 .@"i32.store"    => inst.encStoreR32MemBaseIdx(src_r, .rax, .rdx),
                 .@"i32.store8"   => inst.encStoreR8MemBaseIdx(src_r, .rax, .rdx),
@@ -161,11 +163,12 @@ pub fn emitMemOp(
         next_vreg.* += 1;
         if (result_v >= alloc.slots.len) return Error.SlotOverflow;
         if (is_fp) {
-            const dst_x = abi.fpSlotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+            const dst_x = try gpr.xmmDefSpilled(alloc, result_v, 0);
             const kind: inst.SseScalarKind = if (op == .@"f64.load") .f64 else .f32;
             try buf.appendSlice(allocator, inst.encMovssMovsdMemBaseIdx(kind, false, dst_x, .rax, .rdx).slice());
+            try gpr.xmmStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
         } else {
-            const dst_r = abi.slotToReg(alloc.slots[result_v]) orelse return Error.SlotOverflow;
+            const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
             const enc = switch (op) {
                 .@"i32.load"     => inst.encMovR32FromBaseIdx(dst_r, .rax, .rdx),
                 .@"i32.load8_s"  => inst.encMovsxR32_8MemBaseIdx(dst_r, .rax, .rdx),
@@ -185,6 +188,7 @@ pub fn emitMemOp(
                 else => unreachable,
             };
             try buf.appendSlice(allocator, enc.slice());
+            try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
         }
         try pushed_vregs.append(allocator, result_v);
     }

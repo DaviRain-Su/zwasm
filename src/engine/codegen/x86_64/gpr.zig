@@ -338,6 +338,11 @@ test "xmmLoadSpilled: spilled vreg emits MOVSD xmm14, [rbp+disp]" {
     const alloc: regalloc.Allocation = .{
         .slots = &slots,
         .n_slots = pool_len + 1,
+        // D-045 chunk 13b: x86_64 FP pool (6) is smaller than the
+        // arm64-tuned default GPR boundary (8). Set both explicitly
+        // so the shared `Allocation.slot()` spill formula
+        // `(id - max_reg_slots_gpr)` doesn't underflow.
+        .max_reg_slots_gpr = pool_len,
         .max_reg_slots_fp = pool_len,
     };
     var buf: std.ArrayList(u8) = .empty;
@@ -355,6 +360,7 @@ test "xmmStoreSpilled: spilled vreg emits MOVSD [rbp+disp], xmm14" {
     const alloc: regalloc.Allocation = .{
         .slots = &slots,
         .n_slots = pool_len + 1,
+        .max_reg_slots_gpr = pool_len,
         .max_reg_slots_fp = pool_len,
     };
     var buf: std.ArrayList(u8) = .empty;
