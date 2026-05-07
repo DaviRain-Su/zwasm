@@ -16,23 +16,22 @@
 
 直近 commit (HEAD = `<this>`):
 
-- `<this>` chore(p7): mark §9.7 / 7.8-spill-aware-regalloc chunk 13b close (+62 PASS x86_64)
+- `<this>` chore(p7): mark §9.7 / 7.8-x86-zero-init-locals close (+10 PASS x86_64)
+- `bb8ccb5` feat(p7): §9.7 / 7.8-x86-zero-init-locals — Wasm spec §4.5.3.1 (chunk 14a)
+- `9f59ec5` chore(p7): mark §9.7 / 7.8-spill-aware-regalloc chunk 13b close (+62 PASS)
 - `aaa2268` feat(p7): §9.7 / 7.8-x86-spill-aware-regalloc — migration (D-045 chunk 13b)
-- `c3180e4` chore(p7): refine §9.7 / 7.8-spill-aware-regalloc chunk 13b plan
-- `e811441` feat(p7): §9.7 / 7.8-x86-spill-aware-regalloc — foundation (D-045 chunk 13a)
 
 **Phase status**: §9.7 / 7.5 → **[x]** 完了。Phase 7 残 row = 7.8 /
 7.9 / 7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。**§9.7 / 7.8** = x86_64 spec
 gate — D-045 active。chunks 1-13b 完了。3-host baseline post-chunk-13b:
 
 - Mac aarch64       : **212 / 0 / 20**     (gate green — `test-all` wired)
-- OrbStack Linux    : **141 / 72 / 20**    (was 109/106/20 → +32 PASS)
-- windowsmini Win   : **135 / 78 / 20**    (was 105/110/20 → +30 PASS)
+- OrbStack Linux    : **147 / 66 / 20**    (was 141/72 → +6 via zero-init 14a)
+- windowsmini Win   : **139 / 74 / 20**    (was 135/78 → +4 via zero-init 14a)
 
-Total **+62 PASS** via spill-aware regalloc port (R10/R11 + XMM14/15
-を spill stage に reserve、110 op handler を `gpr.gpr*Spilled` /
-`xmm*Spilled` 経由に migrate)。test-all 配線は Mac aarch64 のみ維持
-(§9.7 / 7.8 row close = fail==0 で flip)。
+Cumulative **+72 PASS** since chunk 12 close。次は chunk 14b で
+unreachable.0.wasm UnsupportedOp 解明 (~30 fail cascade close 見込み)。
+test-all 配線は Mac aarch64 のみ維持。
 
 **Active priority — §9.7 / 7.8 D-045 chunk chain**:
 
@@ -49,7 +48,11 @@ Total **+62 PASS** via spill-aware regalloc port (R10/R11 + XMM14/15
 11. ☑ 7.8-x86-spec-gate — three-host baseline measurement + comment refresh
 12. ☑ **7.8-x86-jit-mem-windows** — Windows NtAllocateVirtualMemory RWX (Win +56 PASS)
 13. ☑ **7.8-x86-spill-aware-regalloc** — landed across 13a foundation (`e811441`) + 13b migration (`aaa2268`)。Pool shrink R10/R11 → spill_stage_gprs、XMM14/15 → fp_spill_stage_xmms。110 site migration、prologue spill-area allocation、~50 fixture update。+62 PASS across Linux + Windows。
-14. **7.8-x86-misc-cleanup** (NEXT) — residual UnsupportedOp (unreachable.0.wasm + handcrafted_trap func[29]) + "did NOT trap"。Plus follow-ups: D-029 dst==rhs reject path (now reachable with stage collisions); RBX callee-save in prologue (slot 0 = RBX post-13b)。
+14. **7.8-x86-misc-cleanup** — split:
+    - ☑ **14a zero-init-locals** (`bb8ccb5`): Wasm spec §4.5.3.1 — XOR EAX, EAX + MOV [RBP+disp], RAX per local beyond params。+10 PASS (Linux +6、Win +4)。
+    - **14b unreachable.0-fix** (NEXT): unreachable.0.wasm compile fails UnsupportedOp。~30 fail cascade close 見込み。
+    - 14c handcrafted_trap "did NOT trap" (2 fails) + func[29] UnsupportedOp。
+    - 14d D-029 dst==rhs (now reachable with stage collisions); RBX callee-save in prologue。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
