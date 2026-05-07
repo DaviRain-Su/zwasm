@@ -342,11 +342,39 @@ pub fn compile(
     // `as-memory.grow-size`). Mirror of arm64 7.5-emit-deadcode.
     var dead_code: bool = false;
     for (func.instrs.items) |ins| {
+        // `end` / `else` always exit the dead region — emit's own
+        // bookkeeping (label-stack pop / arm switch) must run.
+        // Mirror of arm64/emit.zig:381-414.
+        if (ins.op == .@"end" or ins.op == .@"else") {
+            dead_code = false;
+        }
         if (dead_code) {
+            // Maintain label-stack consistency for structural ops
+            // inside the dead region: push placeholder labels for
+            // block / loop / if so the matching end / else find a
+            // frame. Without this, unreachable.wast's `as-if-cond`
+            // (where `(unreachable)` is the if-cond) surfaces
+            // `emitElse without if_then` once the inner else fires.
             switch (ins.op) {
-                .@"end", .@"else" => dead_code = false,
-                else => continue,
+                .@"block" => try labels.append(allocator, .{
+                    .kind = .block,
+                    .target_byte_offset = 0,
+                    .pending = .empty,
+                }),
+                .@"loop" => try labels.append(allocator, .{
+                    .kind = .loop,
+                    .target_byte_offset = @intCast(buf.items.len),
+                    .pending = .empty,
+                }),
+                .@"if" => try labels.append(allocator, .{
+                    .kind = .if_then,
+                    .target_byte_offset = 0,
+                    .pending = .empty,
+                    .if_skip_byte = null,
+                }),
+                else => {},
             }
+            continue;
         }
         switch (ins.op) {
             .@"i32.const" => {
