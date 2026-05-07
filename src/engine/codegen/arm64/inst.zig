@@ -61,6 +61,19 @@ pub fn encAddImm12(rd: Xn, rn: Xn, imm12: u12) u32 {
     return 0x91000000 | (@as(u32, imm12) << 10) | (@as(u32, rn) << 5) | @as(u32, rd);
 }
 
+/// `ADD Xd, Xn, #imm12, lsl #12` — 64-bit ADD imm with sh=1. The
+/// imm12 field shifts left by 12 to span offsets 0..16773120 in
+/// 4096-byte steps. Used by `op_memory.zig` to lower the high
+/// bits of a large constant offset (Wasm `i32.load offset=N`
+/// where N > 0xFFF) without spilling a scratch GPR. The full
+/// large-offset sequence is `ADD ip0, ip0, #(N >> 12), lsl #12;
+/// ADD ip0, ip0, #(N & 0xFFF)` (skip either when zero).
+/// Encoding: `1 00 10001 1 0 [imm12:12] [Rn:5] [Rd:5]` =
+/// `0x91400000` | (imm12 << 10) | (Rn << 5) | Rd.
+pub fn encAddImm12Lsl12(rd: Xn, rn: Xn, imm12: u12) u32 {
+    return 0x91400000 | (@as(u32, imm12) << 10) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
 /// `SUB Xd, Xn, #imm12` (no shift). 64-bit SUB imm with sh=0:
 /// `1 10 10001 0 0 [imm12:12] [Rn:5] [Rd:5]` = `0xD1000000` | …
 pub fn encSubImm12(rd: Xn, rn: Xn, imm12: u12) u32 {
@@ -1011,6 +1024,11 @@ test "encMovkImm16 x0, #1, lsl #16 — `movk x0, #1, lsl #16` → 0xF2A00020" {
 test "encAddImm12 x0, x1, #1 — `add x0, x1, #1` → 0x91000420" {
     // base 0x91000000; imm=1 (<<10)=0x400; rn=1 (<<5)=0x20; rd=0.
     try testing.expectEqual(@as(u32, 0x91000420), encAddImm12(0, 1, 1));
+}
+
+test "encAddImm12Lsl12 x16, x16, #1 — `add x16, x16, #1, lsl #12` → 0x91400610" {
+    // base 0x91400000; imm=1 (<<10)=0x400; rn=16 (<<5)=0x200; rd=16.
+    try testing.expectEqual(@as(u32, 0x91400610), encAddImm12Lsl12(16, 16, 1));
 }
 
 test "encSubImm12 x0, x1, #4 — `sub x0, x1, #4` → 0xD1001020" {

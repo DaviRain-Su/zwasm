@@ -61,7 +61,7 @@ pub const GlobalEntry = struct {
 };
 
 pub const max_operand_stack: usize = 1024;
-pub const max_control_stack: usize = 256;
+pub const max_control_stack: usize = 1024;
 
 /// Block result type. Wasm 1.0 binary block-types are `empty` (0x40)
 /// or `single` (one valtype byte). Wasm 2.0 multivalue extends this

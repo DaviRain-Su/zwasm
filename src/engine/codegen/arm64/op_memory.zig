@@ -65,7 +65,11 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const ip0: inst.Xn = 16;
     const ip1: inst.Xn = 17;
     const offset_imm = ins.payload;
-    if (offset_imm > 0xFFF) return Error.SlotOverflow;
+    // Accept offsets up to 0xFFFFFF (16 MiB-1) via the two-step
+    // ADD imm12<<12 + ADD imm12 sequence (chunk d-6). Larger
+    // offsets surface as SlotOverflow until the corresponding
+    // MOVZ/MOVK chain lowering lands.
+    if (offset_imm > 0xFFFFFF) return Error.SlotOverflow;
     // Per-op access size in bytes (Wasm spec memory.{load,store} 系)。
     // exhaustive switch (`require_exhaustive_enum_switch` lint gate)
     // のため else => unreachable で「memory op 以外が来たら型システム
@@ -113,7 +117,14 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     // u64 演算で overflow 不可: max(ea + size) = 2^33 + 7 << 2^64。
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(ip0, 31, w_addr));
     if (offset_imm != 0) {
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(ip0, ip0, @intCast(offset_imm)));
+        const off_high: u12 = @intCast((offset_imm >> 12) & 0xFFF);
+        const off_low: u12 = @intCast(offset_imm & 0xFFF);
+        if (off_high != 0) {
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12Lsl12(ip0, ip0, off_high));
+        }
+        if (off_low != 0) {
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(ip0, ip0, off_low));
+        }
     }
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(ip1, ip0, access_size));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(ip1, 27));

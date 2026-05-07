@@ -58,7 +58,7 @@ pub const Error = error{
     OutOfMemory,
 } || leb128.Error;
 
-pub const max_control_stack: usize = 256;
+pub const max_control_stack: usize = 1024;
 
 /// Lower the body bytes into `out`. `out` must be initialised
 /// (typically via `ZirFunc.init`); lowering appends to its
