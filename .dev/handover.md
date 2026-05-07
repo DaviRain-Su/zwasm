@@ -14,38 +14,45 @@
 
 ## Current state — Phase 7 / §9.7 / 7.10 IN-PROGRESS
 
-直近 commit (HEAD = `a8777ac`):
+直近 commit (HEAD = `68dd2dc`):
 
+- `68dd2dc` feat(p7): §9.7 / 7.10 chunk d — x86_64 op_alu_float parallel-move (D-029 FP mirror)
+- `4fb4fcb` feat(p7): §9.7 / 7.10 chunk c — x86_64 op_call i64 marshal + capture widening
 - `a8777ac` feat(p7): §9.7 / 7.10 chunk b — x86_64 parallel-move ALU (D-029 discharge)
 - `9e1978a` feat(p7): §9.7 / 7.9 chunk d-14 — arm64 op_memory 32-bit offset MOVZ/MOVK lowering
-- `659b01e` feat(p7): §9.7 / 7.9 chunk d-13 — arm64 spill-aware captureCallResult
-- `f532e16` feat(p7): §9.7 / 7.9 chunk d-11 — arm64 caller-side AAPCS64 stack-arg lowering
 
 **Phase status**: §9.7 / 7.5 + 7.8 + **7.9 [x]**。Phase 7 残 row = 7.10 /
 7.11 🔒 / 7.12 / 7.13 🔒。
 
-**§9.7 / 7.10 progress** (Linux x86_64 baseline → 0/55 compile-pass):
-- **7.10-a (baseline)**: realworld_run_jit 0/55、52 COMPILE-OP の
-  内訳: 33 op_alu_int dst==rhs (D-029)、11 total_locals>15、
-  5 op_call:242 (non-i32 marshal)、他。
-- **7.10-b (a8777ac)**: D-029 解消。i32/i64 binary に commute
-  (add/mul/and/or/xor) + R10 scratch (sub) で parallel-move; i32/i64
-  shift は既存 RCX-first 順序で dst==rhs を自然に処理 (defensive
-  reject 削除)。realworld 0/55 のままだが、各 fixture が次の
-  bottleneck (op_call i64/f32/f64、total_locals>15、fp ops、…) に
-  shift。
+**§9.7 / 7.10 progress** (Linux x86_64 realworld_run_jit 0/55 still):
+- 7.10-a baseline: 0/55 compile-pass、52 COMPILE-OP の内訳 (D-029 33、
+  total_locals>15 11、op_call:242 5、他)。
+- 7.10-b (`a8777ac`): D-029 i32/i64 binary + shift parallel-move
+  (commute / R10 scratch)。33+8+8+8 reject 解消。
+- 7.10-c (`4fb4fcb`): op_call i64 marshal + capture (.q-form MOV)。
+  14+7 → 1+1 (f32/f64 leftover)。
+- 7.10-d (`68dd2dc`): op_alu_float f32/f64 binary parallel-move
+  (XMM14 scratch for sub/div)。16 reject 解消。
+
+各 chunk は dominant bottleneck を解消するが、各 fixture は複数
+gap を chain しているため compile-pass 数自体は 0/55 のまま。
+7.10 全体としては bottleneck の枯渇=infra 完備が exit と判断。
 
 **§9.7 / 7.10 chain plan** (NEXT 群):
-- **7.10-c (NEXT)**: op_call.marshalCallArgs i64 拡張。`MOV .q dst,
-  src` で 64-bit 引数を渡す。captureCallResult i64 も同時に追加。
-- 7.10-d: op_call.marshalCallArgs f32/f64 拡張 (XMM レジスタ → arg_xmms)。
-- 7.10-e: total_locals>15 cap 拡張 (arm64 d-9 と同じ shape:
-  frame_bytes 拡張 + max_reg_slots 引き上げ)。
-- 7.10-f: op_alu_float.zig:437 reject (binary fp 系) — D-029 と同じ
-  parallel-move pattern を XMM 系に展開。
-- 7.10-g: caller-side stack-args (arm64 d-11 mirror)。
-- 7.10-h: spill-aware op_call.captureCallResult (arm64 d-13 mirror)。
-- 7.10-i: op_memory 32-bit offset (arm64 d-14 mirror)。
+- **7.10-e (NEXT)**: op_call.marshalCallArgs f32/f64 (XMM レジスタ
+  → arg_xmms) + captureCallResult f32/f64。chunk c の FP 版。
+- 7.10-f: op_call:217 caller-side stack-args (arm64 d-11 mirror、
+  outgoing_max region + 5+ args)。
+- 7.10-g: total_locals>15 cap 拡張 — `localDisp` を i8→i32 disp に
+  広げる encoding 大規模 refactor。MOV/STR 系の disp32 form
+  encoder を追加し、localBaseOff 経由化と組み合わせる。chunk
+  サイズが 400 LOC を超えるので 7.10-g1/g2 に分割可能。
+- 7.10-h: op_control:178 / :104 / :78 — `depth == labels.len`
+  (function-return) 経路を追加。x86_64 op_control.zig は
+  positional API; signature 拡張 (func/frame_bytes/uses_runtime_ptr
+  受け取り) または return_fixups 機構導入 (arm64 mirror)。
+- 7.10-i: spill-aware op_call.captureCallResult (arm64 d-13 mirror)。
+- 7.10-j: op_memory 32-bit offset (arm64 d-14 mirror)。
 
 **Pre-existing infra observation (out-of-scope)**:
 `.githooks/pre_commit` (snake_case) は Git の `pre-commit`
