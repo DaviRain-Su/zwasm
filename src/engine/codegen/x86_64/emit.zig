@@ -4050,6 +4050,48 @@ test "compile: unreachable emits JMP rel32 + trap stub patches disp to trap_byte
     try testing.expectEqual(@as(i32, 26), target_abs);
 }
 
+test "compile: i32.load with offset > i32 imm32 range (§9.7 / 7.10-i) lowers via MOVABS+ADD" {
+    // Wasm spec §4.4.7 — `memarg.offset` is u32. The pre-7.10-i
+    // `encAddR64Imm32` path capped at 0x7FFFFFFF (sign-extended
+    // imm32 range); offsets in [0x80000000, 0xFFFFFFFF] surfaced
+    // SlotOverflow at op_memory.zig:126. emcc/clang -O2 binaries
+    // can produce such offsets when the data segment + array
+    // index arithmetic crosses 2 GiB.
+    //
+    // Fix: when offset > 0x7FFFFFFF, materialise it as a 64-bit
+    // immediate in a scratch reg (MOVABS RCX, offset; 10 bytes)
+    // and add to RDX (ADD RDX, RCX; 3 bytes) before the LEA RCX
+    // overwrites RCX with ea+size.
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.load", .payload = 0x80000000 });
+    try f.instrs.append(testing.allocator, .{ .op = .drop });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+    } };
+    const slots = [_]u16{ 0, 0 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0);
+    defer deinit(testing.allocator, out);
+
+    // Look for the MOVABS RCX, 0x80000000 byte sequence anywhere
+    // in the body (REX.W + 0xB9 + 8-byte little-endian imm).
+    const expected = inst.encMovImm64Q(.rcx, 0x80000000);
+    var found: bool = false;
+    var i: usize = 0;
+    while (i + expected.len <= out.bytes.len) : (i += 1) {
+        if (std.mem.eql(u8, out.bytes[i .. i + expected.len], expected.slice())) {
+            found = true;
+            break;
+        }
+    }
+    try testing.expect(found);
+}
+
 test "compile: br N — function-depth (depth == labels.len) emits inline epilogue (§9.7 / 7.10-h)" {
     // Wasm spec §3.4.5 (br) — when the depth equals the number
     // of explicit labels, the branch targets the implicit

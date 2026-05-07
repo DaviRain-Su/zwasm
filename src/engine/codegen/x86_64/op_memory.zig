@@ -123,8 +123,19 @@ pub fn emitMemOp(
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.vm_base_off).slice());
     try buf.appendSlice(allocator, inst.encMovRR(.d, .rdx, idx_r).slice());
     if (offset != 0) {
-        if (offset > 0x7FFFFFFF) return Error.SlotOverflow; // imm32 range
-        try buf.appendSlice(allocator, inst.encAddR64Imm32(.rdx, @intCast(offset)).slice());
+        // §9.7 / 7.10-i: arm64 d-14 mirror. memarg.offset is u32
+        // per Wasm spec §5.4.6; emcc/clang -O2 can emit values past
+        // the imm32 sign-extended range (0x7FFFFFFF) when data
+        // segment + array index crosses 2 GiB. Lower as MOVABS RCX
+        // (10 bytes) + ADD RDX, RCX (3 bytes) — RCX is overwritten
+        // by the next LEA RCX, [RDX + access_size] so the scratch
+        // use is invariant-clean.
+        if (offset <= 0x7FFFFFFF) {
+            try buf.appendSlice(allocator, inst.encAddR64Imm32(.rdx, @intCast(offset)).slice());
+        } else {
+            try buf.appendSlice(allocator, inst.encMovImm64Q(.rcx, @as(u64, offset)).slice());
+            try buf.appendSlice(allocator, inst.encAddRR(.q, .rdx, .rcx).slice());
+        }
     }
     try buf.appendSlice(allocator, inst.encLeaR64BaseDisp8(.rcx, .rdx, access_size).slice());
     try buf.appendSlice(allocator, inst.encCmpR64MemDisp32(.rcx, abi.runtime_ptr_save_gpr, jit_abi.mem_limit_off).slice());
