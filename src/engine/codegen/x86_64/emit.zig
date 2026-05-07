@@ -182,11 +182,10 @@ pub fn compile(
     }
     const num_locals: u32 = @intCast(func.locals.len);
     const total_locals: u32 = num_params + num_locals;
-    // localDisp's i8 disp limits: with uses_runtime_ptr the deepest
-    // slot lives at -8 - 8*total_locals which must stay >= -128 →
-    // total_locals <= 15. Without uses_runtime_ptr the cap is
-    // total_locals <= 16.
-    if (total_locals > 15) return rejectUnsupported("total_locals>15", func.func_idx);
+    // §9.7 / 7.10-g: localDisp now returns i32 + auto-helpers
+    // pick disp8 / disp32 form per offset, so total_locals is no
+    // longer capped at 15. Practical cap = i32 disp range / 8 =
+    // ~268M slots — far past any realistic Wasm function.
 
     // Prescan: does this function need the runtime-ptr save?
     // Per ADR-0026, memory ops (and future calls / call_indirect)
@@ -308,11 +307,9 @@ pub fn compile(
         try buf.appendSlice(allocator, inst.encMovRR(.q, abi.current.runtime_ptr_save_gpr, abi.current.entry_arg0_gpr).slice());
     }
     if (frame_bytes > 0) {
-        // `encSubRSpImm8` is i8-bounded (≤ 127). With spill slots
-        // a function can exceed that; surface as SlotOverflow
-        // until chunk 13c adds the imm32 form.
-        if (frame_bytes > 127) return Error.SlotOverflow;
-        try buf.appendSlice(allocator, inst.encSubRSpImm8(@intCast(frame_bytes)).slice());
+        // §9.7 / 7.10-g: pick imm8 / imm32 form per range.
+        // imm8 form is 4 bytes; imm32 is 7 bytes.
+        try buf.appendSlice(allocator, rspSub(frame_bytes).slice());
     }
 
     // §9.7 / 7.8-x86-params: marshal i32 params from arg regs to
@@ -340,9 +337,9 @@ pub fn compile(
         var int_arg_idx: usize = 1;
         var fp_arg_idx: usize = if (abi.current_cc == .win64) 1 else 0;
         while (p_idx < num_params) : (p_idx += 1) {
-            const off_i32: i32 = @as(i32, base_off_for_locals) - @as(i32, @intCast((p_idx + 1) * 8));
-            if (off_i32 < -128) return rejectUnsupported("param-marshal-disp<-128", func.func_idx);
-            const off: i8 = @intCast(off_i32);
+            // §9.7 / 7.10-g: i32 disp throughout — auto-helpers
+            // pick disp8 / disp32 form per offset range.
+            const off: i32 = @as(i32, base_off_for_locals) - @as(i32, @intCast((p_idx + 1) * 8));
             const ptype = func.sig.params[p_idx];
             switch (ptype) {
                 .v128, .funcref, .externref => unreachable, // filtered above
@@ -365,11 +362,11 @@ pub fn compile(
                 switch (ptype) {
                     .i32 => {
                         try buf.appendSlice(allocator, inst.encMovR32FromMemDisp32(.rax, .rbp, stack_disp).slice());
-                        try buf.appendSlice(allocator, inst.encStoreR32MemRBP(off, .rax).slice());
+                        try buf.appendSlice(allocator, rbpStoreR32(off, .rax).slice());
                     },
                     .i64, .f32, .f64 => {
                         try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .rbp, stack_disp).slice());
-                        try buf.appendSlice(allocator, inst.encStoreR64MemRBP(off, .rax).slice());
+                        try buf.appendSlice(allocator, rbpStoreR64(off, .rax).slice());
                     },
                     else => unreachable,
                 }
@@ -382,7 +379,7 @@ pub fn compile(
                     if (int_arg_idx >= abi.current.arg_gprs.len) {
                         return rejectUnsupported("i32-param-arg-overflow", func.func_idx);
                     }
-                    try buf.appendSlice(allocator, inst.encStoreR32MemRBP(off, abi.current.arg_gprs[int_arg_idx]).slice());
+                    try buf.appendSlice(allocator, rbpStoreR32(off, abi.current.arg_gprs[int_arg_idx]).slice());
                     int_arg_idx += 1;
                     if (abi.current_cc == .win64) fp_arg_idx += 1;
                 },
@@ -390,7 +387,7 @@ pub fn compile(
                     if (int_arg_idx >= abi.current.arg_gprs.len) {
                         return rejectUnsupported("i64-param-arg-overflow", func.func_idx);
                     }
-                    try buf.appendSlice(allocator, inst.encStoreR64MemRBP(off, abi.current.arg_gprs[int_arg_idx]).slice());
+                    try buf.appendSlice(allocator, rbpStoreR64(off, abi.current.arg_gprs[int_arg_idx]).slice());
                     int_arg_idx += 1;
                     if (abi.current_cc == .win64) fp_arg_idx += 1;
                 },
@@ -398,7 +395,7 @@ pub fn compile(
                     if (fp_arg_idx >= abi.current.arg_xmms.len) {
                         return rejectUnsupported("f32-param-xmm-overflow", func.func_idx);
                     }
-                    try buf.appendSlice(allocator, inst.encStoreXmmF32MemRBP(off, abi.current.arg_xmms[fp_arg_idx]).slice());
+                    try buf.appendSlice(allocator, rbpStoreXmmF32(off, abi.current.arg_xmms[fp_arg_idx]).slice());
                     fp_arg_idx += 1;
                     if (abi.current_cc == .win64) int_arg_idx += 1;
                 },
@@ -406,7 +403,7 @@ pub fn compile(
                     if (fp_arg_idx >= abi.current.arg_xmms.len) {
                         return rejectUnsupported("f64-param-xmm-overflow", func.func_idx);
                     }
-                    try buf.appendSlice(allocator, inst.encStoreXmmF64MemRBP(off, abi.current.arg_xmms[fp_arg_idx]).slice());
+                    try buf.appendSlice(allocator, rbpStoreXmmF64(off, abi.current.arg_xmms[fp_arg_idx]).slice());
                     fp_arg_idx += 1;
                     if (abi.current_cc == .win64) int_arg_idx += 1;
                 },
@@ -426,7 +423,7 @@ pub fn compile(
         var loc_idx: u32 = num_params;
         while (loc_idx < total_locals) : (loc_idx += 1) {
             const loc_disp = try localDisp(loc_idx, total_locals, uses_runtime_ptr);
-            try buf.appendSlice(allocator, inst.encStoreR64MemRBP(loc_disp, .rax).slice());
+            try buf.appendSlice(allocator, rbpStoreR64(loc_disp, .rax).slice());
         }
     }
 
@@ -875,7 +872,7 @@ pub fn compile(
                     }
                 }
                 if (frame_bytes > 0) {
-                    try buf.appendSlice(allocator, inst.encAddRSpImm8(@intCast(frame_bytes)).slice());
+                    try buf.appendSlice(allocator, rspAdd(frame_bytes).slice());
                 }
                 if (uses_runtime_ptr) {
                     try buf.appendSlice(allocator, inst.encPopR(.r15).slice());
@@ -943,7 +940,7 @@ pub fn compile(
                 }
                 // Epilogue: ADD RSP, frame ; POP R15? ; POP RBP ; RET.
                 if (frame_bytes > 0) {
-                    try buf.appendSlice(allocator, inst.encAddRSpImm8(@intCast(frame_bytes)).slice());
+                    try buf.appendSlice(allocator, rspAdd(frame_bytes).slice());
                 }
                 if (uses_runtime_ptr) {
                     try buf.appendSlice(allocator, inst.encPopR(.r15).slice());
@@ -963,7 +960,7 @@ pub fn compile(
                     try buf.appendSlice(allocator, inst.encStoreImm32MemDisp32(abi.runtime_ptr_save_gpr, jit_abi.trap_flag_off, 1).slice());
                     try buf.appendSlice(allocator, inst.encXorRR(.d, .rax, .rax).slice()); // XOR EAX, EAX (return = 0)
                     if (frame_bytes > 0) {
-                        try buf.appendSlice(allocator, inst.encAddRSpImm8(@intCast(frame_bytes)).slice());
+                        try buf.appendSlice(allocator, rspAdd(frame_bytes).slice());
                     }
                     if (uses_runtime_ptr) {
                         try buf.appendSlice(allocator, inst.encPopR(.r15).slice());
@@ -1014,22 +1011,84 @@ fn localValType(func: *const ZirFunc, num_params: u32, local_idx: u32) zir.ValTy
     return func.locals[local_idx - num_params];
 }
 
-fn localDisp(idx: u32, total_locals: u32, uses_runtime_ptr: bool) Error!i8 {
+/// §9.7 / 7.10-g: localDisp returns i32 (was i8). The i8 form
+/// previously capped total_locals at 15 (deepest local at
+/// `[RBP - 136]` overflows i8). i32 widening uses the disp32
+/// form encoders for slots beyond i8 range; smaller slots stay
+/// on the disp8 form via `rbpStoreR{32,64}` / `rbpLoadR{32,64}`
+/// auto-helpers that pick form per offset.
+fn localDisp(idx: u32, total_locals: u32, uses_runtime_ptr: bool) Error!i32 {
     if (idx >= total_locals) {
         std.debug.print("x86_64/emit: UnsupportedOp[localDisp-idx>=total_locals] (idx={d}, total={d})\n", .{ idx, total_locals });
         return Error.UnsupportedOp;
     }
-    if (idx >= 16) {
-        std.debug.print("x86_64/emit: UnsupportedOp[localDisp-idx>=16] (idx={d})\n", .{idx});
-        return Error.UnsupportedOp;
-    }
     const base_off: i32 = if (uses_runtime_ptr) -8 else 0;
-    const off: i32 = base_off - @as(i32, @intCast((idx + 1) * 8));
-    if (off < -128) {
-        std.debug.print("x86_64/emit: UnsupportedOp[localDisp-off<-128] (idx={d}, off={d})\n", .{ idx, off });
-        return Error.UnsupportedOp;
-    }
-    return @intCast(off);
+    return base_off - @as(i32, @intCast((idx + 1) * 8));
+}
+
+/// `MOV [RBP + disp], r32` — picks disp8 / disp32 form per `disp`
+/// range. §9.7 / 7.10-g auto-helper used by all RBP-relative
+/// stores so call sites don't replicate the form-selection logic.
+fn rbpStoreR32(disp: i32, src: inst.Gpr) inst.EncodedInsn {
+    if (disp >= -128 and disp <= 127) return inst.encStoreR32MemRBP(@intCast(disp), src);
+    return inst.encStoreR32MemRBPDisp32(disp, src);
+}
+
+/// `MOV r32, [RBP + disp]` — load form auto-helper.
+fn rbpLoadR32(dst: inst.Gpr, disp: i32) inst.EncodedInsn {
+    if (disp >= -128 and disp <= 127) return inst.encLoadR32MemRBP(dst, @intCast(disp));
+    return inst.encLoadR32MemRBPDisp32(dst, disp);
+}
+
+/// `MOV [RBP + disp], r64` — store form auto-helper (REX.W).
+fn rbpStoreR64(disp: i32, src: inst.Gpr) inst.EncodedInsn {
+    if (disp >= -128 and disp <= 127) return inst.encStoreR64MemRBP(@intCast(disp), src);
+    return inst.encStoreR64MemRBPDisp32(disp, src);
+}
+
+/// `MOV r64, [RBP + disp]` — load form auto-helper (REX.W).
+fn rbpLoadR64(dst: inst.Gpr, disp: i32) inst.EncodedInsn {
+    if (disp >= -128 and disp <= 127) return inst.encLoadR64MemRBP(dst, @intCast(disp));
+    return inst.encLoadR64MemRBPDisp32(dst, disp);
+}
+
+/// `MOVSS [RBP + disp], xmm` — store form auto-helper (f32).
+fn rbpStoreXmmF32(disp: i32, src: inst.Xmm) inst.EncodedInsn {
+    if (disp >= -128 and disp <= 127) return inst.encStoreXmmF32MemRBP(@intCast(disp), src);
+    return inst.encStoreXmmF32MemRBPDisp32(disp, src);
+}
+
+/// `MOVSS xmm, [RBP + disp]` — load form auto-helper (f32).
+fn rbpLoadXmmF32(dst: inst.Xmm, disp: i32) inst.EncodedInsn {
+    if (disp >= -128 and disp <= 127) return inst.encLoadXmmF32MemRBP(dst, @intCast(disp));
+    return inst.encLoadXmmF32MemRBPDisp32(dst, disp);
+}
+
+/// `MOVSD [RBP + disp], xmm` — store form auto-helper (f64).
+fn rbpStoreXmmF64(disp: i32, src: inst.Xmm) inst.EncodedInsn {
+    if (disp >= -128 and disp <= 127) return inst.encStoreXmmF64MemRBP(@intCast(disp), src);
+    return inst.encStoreXmmF64MemRBPDisp32(disp, src);
+}
+
+/// `MOVSD xmm, [RBP + disp]` — load form auto-helper (f64).
+fn rbpLoadXmmF64(dst: inst.Xmm, disp: i32) inst.EncodedInsn {
+    if (disp >= -128 and disp <= 127) return inst.encLoadXmmF64MemRBP(dst, @intCast(disp));
+    return inst.encLoadXmmF64MemRBPDisp32(dst, disp);
+}
+
+/// `SUB RSP, imm` — picks imm8 / imm32 form per `imm` range. The
+/// caller passes a positive `u32` byte count; encoders consume an
+/// i32 / i8 (zero-extended in practice — frame_bytes is always
+/// positive since RSP grows down).
+fn rspSub(imm: u32) inst.EncodedInsn {
+    if (imm <= 127) return inst.encSubRSpImm8(@intCast(imm));
+    return inst.encSubRSpImm32(@intCast(imm));
+}
+
+/// `ADD RSP, imm` — pair of `rspSub`.
+fn rspAdd(imm: u32) inst.EncodedInsn {
+    if (imm <= 127) return inst.encAddRSpImm8(@intCast(imm));
+    return inst.encAddRSpImm32(@intCast(imm));
 }
 
 /// `local.get K` — push a fresh vreg holding the value loaded
@@ -1054,22 +1113,22 @@ fn emitLocalGet(
     switch (localValType(func, num_params, idx)) {
         .i32 => {
             const dst_r = try gpr.gprDefSpilled(alloc, vreg, 0);
-            try buf.appendSlice(allocator, inst.encLoadR32MemRBP(dst_r, disp).slice());
+            try buf.appendSlice(allocator, rbpLoadR32(dst_r, disp).slice());
             try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, vreg, 0);
         },
         .i64 => {
             const dst_r = try gpr.gprDefSpilled(alloc, vreg, 0);
-            try buf.appendSlice(allocator, inst.encLoadR64MemRBP(dst_r, disp).slice());
+            try buf.appendSlice(allocator, rbpLoadR64(dst_r, disp).slice());
             try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, vreg, 0);
         },
         .f32 => {
             const dst_x = try gpr.xmmDefSpilled(alloc, vreg, 0);
-            try buf.appendSlice(allocator, inst.encLoadXmmF32MemRBP(dst_x, disp).slice());
+            try buf.appendSlice(allocator, rbpLoadXmmF32(dst_x, disp).slice());
             try gpr.xmmStoreSpilled(allocator, buf, alloc, spill_base_off, vreg, 0);
         },
         .f64 => {
             const dst_x = try gpr.xmmDefSpilled(alloc, vreg, 0);
-            try buf.appendSlice(allocator, inst.encLoadXmmF64MemRBP(dst_x, disp).slice());
+            try buf.appendSlice(allocator, rbpLoadXmmF64(dst_x, disp).slice());
             try gpr.xmmStoreSpilled(allocator, buf, alloc, spill_base_off, vreg, 0);
         },
         .v128, .funcref, .externref => |t| {
@@ -1100,19 +1159,19 @@ fn emitLocalSet(
     switch (localValType(func, num_params, idx)) {
         .i32 => {
             const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
-            try buf.appendSlice(allocator, inst.encStoreR32MemRBP(disp, src_r).slice());
+            try buf.appendSlice(allocator, rbpStoreR32(disp, src_r).slice());
         },
         .i64 => {
             const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
-            try buf.appendSlice(allocator, inst.encStoreR64MemRBP(disp, src_r).slice());
+            try buf.appendSlice(allocator, rbpStoreR64(disp, src_r).slice());
         },
         .f32 => {
             const src_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
-            try buf.appendSlice(allocator, inst.encStoreXmmF32MemRBP(disp, src_x).slice());
+            try buf.appendSlice(allocator, rbpStoreXmmF32(disp, src_x).slice());
         },
         .f64 => {
             const src_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
-            try buf.appendSlice(allocator, inst.encStoreXmmF64MemRBP(disp, src_x).slice());
+            try buf.appendSlice(allocator, rbpStoreXmmF64(disp, src_x).slice());
         },
         .v128, .funcref, .externref => |t| {
             std.debug.print("x86_64/emit: UnsupportedOp[localSet-type-{s}] (idx={d})\n", .{ @tagName(t), idx });
@@ -1141,19 +1200,19 @@ fn emitLocalTee(
     switch (localValType(func, num_params, idx)) {
         .i32 => {
             const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
-            try buf.appendSlice(allocator, inst.encStoreR32MemRBP(disp, src_r).slice());
+            try buf.appendSlice(allocator, rbpStoreR32(disp, src_r).slice());
         },
         .i64 => {
             const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
-            try buf.appendSlice(allocator, inst.encStoreR64MemRBP(disp, src_r).slice());
+            try buf.appendSlice(allocator, rbpStoreR64(disp, src_r).slice());
         },
         .f32 => {
             const src_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
-            try buf.appendSlice(allocator, inst.encStoreXmmF32MemRBP(disp, src_x).slice());
+            try buf.appendSlice(allocator, rbpStoreXmmF32(disp, src_x).slice());
         },
         .f64 => {
             const src_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
-            try buf.appendSlice(allocator, inst.encStoreXmmF64MemRBP(disp, src_x).slice());
+            try buf.appendSlice(allocator, rbpStoreXmmF64(disp, src_x).slice());
         },
         .v128, .funcref, .externref => |t| {
             std.debug.print("x86_64/emit: UnsupportedOp[localTee-type-{s}] (idx={d})\n", .{ @tagName(t), idx });
@@ -1986,14 +2045,18 @@ test "compile: br with depth out of range → UnsupportedOp" {
     try testing.expectError(Error.UnsupportedOp, compile(testing.allocator, &f, empty_alloc, &.{}, &.{}, 0));
 }
 
-test "compile: function with > 15 locals → UnsupportedOp (i8 disp range)" {
+test "compile: function with 16 locals compiles (§9.7 / 7.10-g lifts the i8 cap)" {
+    // Pre-7.10-g this surfaced UnsupportedOp[total_locals>15];
+    // the disp32 form widening lifts the cap to ~268M slots.
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
     const sixteen_locals = [_]zir.ValType{.i32} ** 16;
     var f = ZirFunc.init(0, sig, &sixteen_locals);
     defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .end });
     f.liveness = .{ .ranges = &.{} };
     const empty_alloc: regalloc.Allocation = .{ .slots = &.{}, .n_slots = 0 };
-    try testing.expectError(Error.UnsupportedOp, compile(testing.allocator, &f, empty_alloc, &.{}, &.{}, 0));
+    const out = try compile(testing.allocator, &f, empty_alloc, &.{}, &.{}, 0);
+    defer deinit(testing.allocator, out);
 }
 
 test "compile: function with v128 param → UnsupportedOp (v128 not yet supported)" {
@@ -3976,6 +4039,44 @@ test "compile: unreachable emits JMP rel32 + trap stub patches disp to trap_byte
     // + POP RBP (1) + RET (1) = 8 bytes → trap stub starts at
     // 13 + 5 + 8 = 26.
     try testing.expectEqual(@as(i32, 26), target_abs);
+}
+
+test "compile: total_locals=20 (>15 cap) — disp32 form lifts the i8 limit" {
+    // §9.7 / 7.10-g: localDisp i8 → i32 widening. Pre-7.10-g
+    // surfaced `UnsupportedOp[total_locals>15]` for any function
+    // with > 15 declared locals (deepest local at [RBP - 8 - 16*8]
+    // = [RBP - 136], outside i8). With disp32 encoders the cap
+    // moves to ~512 MiB, well past any realistic Wasm function.
+    //
+    // Test: declare 20 i32 locals (no params). Compile must succeed
+    // and the deepest local zero-init store ([RBP - 168]) must use
+    // the disp32 form.
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
+    const locals: [20]zir.ValType = .{ .i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32 };
+    var f = ZirFunc.init(0, sig, &locals);
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{} };
+
+    const slots = [_]u16{};
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 0 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0);
+    defer deinit(testing.allocator, out);
+
+    // Deepest local 19 at [RBP - 8*(19+1)] = [RBP - 160]
+    // (uses_runtime_ptr=false; no calls/memory). The zero-init MOV
+    // for that slot must use the disp32 store form. Look for
+    // `MOV [RBP + (-160)], RAX` anywhere in the body.
+    const expected = inst.encStoreR64MemRBPDisp32(-160, .rax);
+    var found: bool = false;
+    var i: usize = 0;
+    while (i + expected.len <= out.bytes.len) : (i += 1) {
+        if (std.mem.eql(u8, out.bytes[i .. i + expected.len], expected.slice())) {
+            found = true;
+            break;
+        }
+    }
+    try testing.expect(found);
 }
 
 test "compile: call N — 6 i32 args, SysV: 6th arg overflows to caller stack [RSP, #0] (STR W)" {

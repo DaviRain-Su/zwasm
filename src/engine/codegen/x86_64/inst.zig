@@ -1059,6 +1059,38 @@ pub fn encAddRSpImm8(imm: i8) EncodedInsn {
     return enc;
 }
 
+/// `SUB RSP, imm32` (REX.W + 0x81 /5) — disp32 form for frame
+/// extensions > 127 bytes. §9.7 / 7.10-g uses this when
+/// total_locals × 8 + outgoing_max + spills exceeds the imm8
+/// range. 7-byte encoding (vs 4 for imm8).
+pub fn encSubRSpImm32(imm: i32) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(encodeRex(true, 0, 0, 0));
+    enc.push(0x81);
+    enc.push(encodeModrm(0b11, 5, 4)); // /5 = SUB, rm=4 (RSP)
+    const u: u32 = @bitCast(imm);
+    enc.push(@truncate(u));
+    enc.push(@truncate(u >> 8));
+    enc.push(@truncate(u >> 16));
+    enc.push(@truncate(u >> 24));
+    return enc;
+}
+
+/// `ADD RSP, imm32` (REX.W + 0x81 /0) — disp32 ADD-form pair of
+/// `encSubRSpImm32`.
+pub fn encAddRSpImm32(imm: i32) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(encodeRex(true, 0, 0, 0));
+    enc.push(0x81);
+    enc.push(encodeModrm(0b11, 0, 4)); // /0 = ADD
+    const u: u32 = @bitCast(imm);
+    enc.push(@truncate(u));
+    enc.push(@truncate(u >> 8));
+    enc.push(@truncate(u >> 16));
+    enc.push(@truncate(u >> 24));
+    return enc;
+}
+
 /// `MOV [RBP + disp8], r32` — store the low 32 bits of `src`
 /// to a stack slot at `RBP + disp`. Opcode 0x89 with mod=01
 /// (disp8) + rm=5 (RBP base). REX.R for src extension only
@@ -1152,6 +1184,136 @@ pub fn encLoadXmmF64MemRBP(dst: Xmm, disp: i8) EncodedInsn {
     enc.push(0x10);
     enc.push(encodeModrm(0b01, dst.low3(), 0b101));
     enc.push(@bitCast(disp));
+    return enc;
+}
+
+// ============================================================
+// RBP-relative disp32 forms (§9.7 / 7.10-g — total_locals > 15
+// cap expansion). The disp8 forms above are 4 bytes per
+// instruction; disp32 is 7 bytes (3 extra bytes for the wider
+// displacement). They share the same opcode + ModR/M shape
+// (mod=10 instead of mod=01); RBP base requires no SIB byte
+// (rm=101 with mod≠00 is direct disp). Used by emit.zig's
+// disp32-aware wrappers when the offset exceeds i8 range.
+// ============================================================
+
+/// `MOV [RBP + disp32], r32` — disp32 form of `encStoreR32MemRBP`.
+pub fn encStoreR32MemRBPDisp32(disp: i32, src: Gpr) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (src.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
+    enc.push(0x89);
+    enc.push(encodeModrm(0b10, src.low3(), 0b101));
+    const u: u32 = @bitCast(disp);
+    enc.push(@truncate(u));
+    enc.push(@truncate(u >> 8));
+    enc.push(@truncate(u >> 16));
+    enc.push(@truncate(u >> 24));
+    return enc;
+}
+
+/// `MOV r32, [RBP + disp32]` — disp32 form of `encLoadR32MemRBP`.
+pub fn encLoadR32MemRBPDisp32(dst: Gpr, disp: i32) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (dst.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
+    enc.push(0x8B);
+    enc.push(encodeModrm(0b10, dst.low3(), 0b101));
+    const u: u32 = @bitCast(disp);
+    enc.push(@truncate(u));
+    enc.push(@truncate(u >> 8));
+    enc.push(@truncate(u >> 16));
+    enc.push(@truncate(u >> 24));
+    return enc;
+}
+
+/// `MOV [RBP + disp32], r64` — disp32 form of `encStoreR64MemRBP`.
+pub fn encStoreR64MemRBPDisp32(disp: i32, src: Gpr) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(encodeRex(true, src.extBit(), 0, 0));
+    enc.push(0x89);
+    enc.push(encodeModrm(0b10, src.low3(), 0b101));
+    const u: u32 = @bitCast(disp);
+    enc.push(@truncate(u));
+    enc.push(@truncate(u >> 8));
+    enc.push(@truncate(u >> 16));
+    enc.push(@truncate(u >> 24));
+    return enc;
+}
+
+/// `MOV r64, [RBP + disp32]` — disp32 form of `encLoadR64MemRBP`.
+pub fn encLoadR64MemRBPDisp32(dst: Gpr, disp: i32) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(encodeRex(true, dst.extBit(), 0, 0));
+    enc.push(0x8B);
+    enc.push(encodeModrm(0b10, dst.low3(), 0b101));
+    const u: u32 = @bitCast(disp);
+    enc.push(@truncate(u));
+    enc.push(@truncate(u >> 8));
+    enc.push(@truncate(u >> 16));
+    enc.push(@truncate(u >> 24));
+    return enc;
+}
+
+/// `MOVSS [RBP + disp32], xmm` — disp32 form of `encStoreXmmF32MemRBP`.
+pub fn encStoreXmmF32MemRBPDisp32(disp: i32, src: Xmm) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0xF3);
+    if (src.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
+    enc.push(0x0F);
+    enc.push(0x11);
+    enc.push(encodeModrm(0b10, src.low3(), 0b101));
+    const u: u32 = @bitCast(disp);
+    enc.push(@truncate(u));
+    enc.push(@truncate(u >> 8));
+    enc.push(@truncate(u >> 16));
+    enc.push(@truncate(u >> 24));
+    return enc;
+}
+
+/// `MOVSS xmm, [RBP + disp32]` — disp32 form of `encLoadXmmF32MemRBP`.
+pub fn encLoadXmmF32MemRBPDisp32(dst: Xmm, disp: i32) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0xF3);
+    if (dst.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
+    enc.push(0x0F);
+    enc.push(0x10);
+    enc.push(encodeModrm(0b10, dst.low3(), 0b101));
+    const u: u32 = @bitCast(disp);
+    enc.push(@truncate(u));
+    enc.push(@truncate(u >> 8));
+    enc.push(@truncate(u >> 16));
+    enc.push(@truncate(u >> 24));
+    return enc;
+}
+
+/// `MOVSD [RBP + disp32], xmm` — disp32 form of `encStoreXmmF64MemRBP`.
+pub fn encStoreXmmF64MemRBPDisp32(disp: i32, src: Xmm) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0xF2);
+    if (src.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
+    enc.push(0x0F);
+    enc.push(0x11);
+    enc.push(encodeModrm(0b10, src.low3(), 0b101));
+    const u: u32 = @bitCast(disp);
+    enc.push(@truncate(u));
+    enc.push(@truncate(u >> 8));
+    enc.push(@truncate(u >> 16));
+    enc.push(@truncate(u >> 24));
+    return enc;
+}
+
+/// `MOVSD xmm, [RBP + disp32]` — disp32 form of `encLoadXmmF64MemRBP`.
+pub fn encLoadXmmF64MemRBPDisp32(dst: Xmm, disp: i32) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0xF2);
+    if (dst.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
+    enc.push(0x0F);
+    enc.push(0x10);
+    enc.push(encodeModrm(0b10, dst.low3(), 0b101));
+    const u: u32 = @bitCast(disp);
+    enc.push(@truncate(u));
+    enc.push(@truncate(u >> 8));
+    enc.push(@truncate(u >> 16));
+    enc.push(@truncate(u >> 24));
     return enc;
 }
 
@@ -2349,4 +2511,20 @@ test "encStoreXmmF32MemRSPDisp32 XMM8, [RSP+0] → f3 44 0f 11 84 24 00 00 00 00
 }
 test "encStoreXmmF64MemRSPDisp32 XMM0, [RSP+24] → f2 0f 11 84 24 18 00 00 00 (no REX for xmm0)" {
     try testing.expectEqualSlices(u8, &.{ 0xF2, 0x0F, 0x11, 0x84, 0x24, 0x18, 0x00, 0x00, 0x00 }, encStoreXmmF64MemRSPDisp32(.xmm0, 24).slice());
+}
+
+test "encStoreR32MemRBPDisp32 RBX, [RBP-160] → 89 9d 60 ff ff ff (mod=10 rm=101 disp32)" {
+    try testing.expectEqualSlices(u8, &.{ 0x89, 0x9D, 0x60, 0xFF, 0xFF, 0xFF }, encStoreR32MemRBPDisp32(-160, .rbx).slice());
+}
+test "encStoreR64MemRBPDisp32 RBX, [RBP-160] → 48 89 9d 60 ff ff ff (REX.W mod=10 rm=101)" {
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x89, 0x9D, 0x60, 0xFF, 0xFF, 0xFF }, encStoreR64MemRBPDisp32(-160, .rbx).slice());
+}
+test "encLoadR32MemRBPDisp32 RBX, [RBP-160] → 8b 9d 60 ff ff ff" {
+    try testing.expectEqualSlices(u8, &.{ 0x8B, 0x9D, 0x60, 0xFF, 0xFF, 0xFF }, encLoadR32MemRBPDisp32(.rbx, -160).slice());
+}
+test "encSubRSpImm32: sub rsp, 256 → 48 81 ec 00 01 00 00" {
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x81, 0xEC, 0x00, 0x01, 0x00, 0x00 }, encSubRSpImm32(256).slice());
+}
+test "encAddRSpImm32: add rsp, 256 → 48 81 c4 00 01 00 00" {
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x81, 0xC4, 0x00, 0x01, 0x00, 0x00 }, encAddRSpImm32(256).slice());
 }
