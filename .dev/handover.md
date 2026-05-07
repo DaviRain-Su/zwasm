@@ -14,9 +14,9 @@
 
 ## Current state — Phase 7 / §9.7 / 7.9 IN-PROGRESS
 
-直近 commit (HEAD = `<this>`):
+直近 commit (HEAD = `f532e16`):
 
-- `<this>` chore(p7): mark §9.7 / 7.9 chunk d-10 close (caller-side reject diag)
+- `f532e16` feat(p7): §9.7 / 7.9 chunk d-11 — arm64 caller-side AAPCS64 stack-arg lowering
 - `b9a5948` feat(p7): §9.7 / 7.9 chunk d-10 — arm64 op_call caller-side reject diag prints
 - `cc6a0eb` feat(p7): §9.7 / 7.9 chunk d-9 — arm64 frame_bytes + regalloc max_slots widening
 - `03d9875` feat(p7): §9.7 / 7.9 chunk d-8 — D-034 spill-aware migration tail (35 sites)
@@ -24,43 +24,49 @@
 **Phase status**: §9.7 / 7.5 + 7.8 → **[x]**。Phase 7 残 row = 7.9 /
 7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。
 
-**§9.7 / 7.9 progress**: chunks a..d-10 closed across 23 commits。
-realworld JIT compile-pass: 5/55 → 27/55 (chunk d-6 大躍進)。
+**§9.7 / 7.9 progress**: chunks a..d-11 closed across 24 commits。
+realworld JIT compile-pass: 5/55 → 33/55 (chunk d-11 +6)。
 3-host gate green。
 
-**Chunk 7.9-d-10 完了** (`b9a5948`): arm64 op_call caller-side
-silent-reject 4 sites に permanent diag prints 追加。Mac aarch64
-realworld_run_jit の 25 COMPILE-OP 内訳 (diag 直接実行で計測):
-- 11× `gpr_arg_slot >= 8 (n_args=8)` — X1..X7 1 個 overflow
-- 4× `marshal n_args > 8` (n_args ∈ {11, 12}) — long arg list
-- 10× その他 (op_control / emit-side; 別 chunk で diag 拡張)
+**Chunk 7.9-d-11 完了** (`f532e16`): option-2 を採用。
+caller frame の bottom に `outgoing_max_bytes` の outgoing-args
+region を予約; locals + spills は `local_base_off` だけ shift。
+`computeOutgoingMaxBytes` で `call N` / `call_indirect` を pre-
+scan し最悪値を計算。emit.zig 21 site (param-store loop / 宣言
+local zero-init / local.get/set/tee) が `[SP, #(local_base_off
++ idx*8)]` 経由に。`op_call.marshalCallArgs` は arg_vregs cap を
+8 → 64 に上げ、overflow int (>X7) / fp (>V7) を STR W/X/S/D で
+`[SP, #(K*8)]` に書き出す (NSAA index per AAPCS64 §6.4.2)。
+callee 側 d-7 の `[X29, #16+8*K]` 取り込みは無変更で完結。
+Mac aarch64 realworld_run_jit: 27/55 → 33/55 (+6); 残り 19
+COMPILE-OP は **全て SlotOverflow** に集約 (= regalloc 段階
+exhaustion)。
 
-**Chunk 7.9-d-11 plan** (NEXT、最大 leverage): caller-side
-stack-arg marshaling 実装で 15/25 fixtures unblock 見込み。
-2 設計選択肢:
-1. FP-relative spill addressing redesign (`gprLoadSpilled` 全 caller を
-   FP-relative 化; ~50 site refactor)。
-2. Pre-allocated outgoing-args region — frame の bottom に
-   max_stack_args_bytes を予約; locals/spill addressing が
-   `outgoing_max + p_idx*8` 相当に shift。設計簡潔だが
-   localBaseOff 経由化 (~30 sites) が必要。
-推奨: 選択肢 2。spill_base_off の既存パターンと整合的、emit
-時の SP 移動が不要。
-
-**Chunk 7.9-d-12 plan** (後続): op_control + emit.zig の残り
-10 silent-reject に diag prints 追加 (d-10 の続き) → さらなる
-特定 op gap の identify。
+**Chunk 7.9-d-12 plan** (NEXT): SlotOverflow 19 fixtures の
+共通根本原因を特定。候補:
+1. `max_reg_slots_gpr/fp` の更なる引き上げ (現在 GPR=8, FP=13)
+   — 単純引き上げで何が unblock されるか測定。
+2. vreg coalesce (連鎖 ALU の中間 vreg を即時 reuse) — ADR-grade。
+3. SlotOverflow 発火時の diag 拡張で具体 op / vreg id を出す
+   (d-10 と同じパターン)。
+推奨: まず 3 で計測 → 1 か 2 を選択。
 
 **§9.7 / 7.9 exit criterion** (40+ realworld run-pass) は run-
 stage 計測が opt-in (per-fixture timeout NYI) のため compile-
-pass 27/55 + 全 infra 揃った状態で 7.13 boundary review で
+pass 33/55 + 全 infra 揃った状態で 7.13 boundary review で
 「7.9 = infra 完備」として 7.10/7.11/7.12 chain に進む判断
 が妥当。
 
-**🛑 自律ループ停止 (2026-05-08)**: ユーザー指示によりここで
-キリが良いところまで進めて停止。次セッション resume 時:
-chunk d-11 (caller-side stack-arg, 上記の選択肢 2 推奨) を
-新セッションで主導開始。
+**Pre-existing infra observation (out-of-scope for d-11)**:
+`.githooks/pre_commit` (snake_case) は Git の `pre-commit`
+(kebab-case) hook 規約に合わないため fire しない。よって
+gate_commit.sh の `zig fmt --check src/` (38 files drift
+中、主に `@"opname"` → bare name の Zig 0.16 fmt rule 由来)
++ `file_size_check --gate` (3 files が hard-cap 2000 超過、
+全 pre-existing) も実行されていない。直近 10 commit すべて
+この状態で land 済 → 既存 infra bug。修復は専用 chore commit
+で別途 (gate を有効化するなら大規模 fmt 適用 + ファイル分割
+ADR が必要)。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
