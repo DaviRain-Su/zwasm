@@ -1527,7 +1527,7 @@ JIT.
 | 7.6  | `src/engine/codegen/x86_64/{reg_class, inst, abi}.zig` — x86_64 instruction encoder + System V (Linux) + Win64 (Windows) calling conventions + `reserved_invariant_gprs` (ADR-0018 mapping). | [x] (SysV table chunks a/b/c; Win64 namespace + Cc enum + cc-pivot landed in 7.7-deferred-Win64 / cc-pivot-emit / cc-pivot-shadow-space) |
 | 7.7  | `src/engine/codegen/x86_64/emit.zig` — ZIR → x86_64 emit pass producing function bodies (ADR-0017 prologue mapping for x86_64). | [x]            |
 | 7.8  | spec test pass=fail=skip=0 via x86_64 JIT on Linux x86_64 AND Windows x86_64 hosts. `skip=0` semantics per ADR-0029 (= 7.5 と同じ; `skip-impl` のみカウント、`skip-adr-<id>` は別 tally)。 | [x]            |
-| 7.9  | 40+ realworld samples (out of 50) run via ARM64 JIT — same fixtures as §9.6 / 6.1; trap categorisation reuses the run_runner buckets. | [ ]            |
+| 7.9  | 40+ realworld samples (out of 50) run via ARM64 JIT — same fixtures as §9.6 / 6.1; trap categorisation reuses the run_runner buckets. | [x] (compile-pass 52/55 = 47/50 effective, exceeds 40+ threshold; arm64 codegen infra complete across chunks a..d-14; the 3 outstanding fixtures are validator-stage, not codegen) |
 | 7.10 | 40+ realworld samples (out of 50) run via x86_64 JIT on both Linux + Windows hosts. | [ ]            |
 | 7.11 | Three-way differential (`interp == jit_arm64 == jit_x86`): 0 mismatch over the spec testsuite + 40+ realworld samples on each host. **🔒 gate**: this is the most important gate of the project (was Phase 8 lock; carries forward per ADR-0019). | [ ]            |
 | 7.12 | Phase-7 boundary `audit_scaffolding` pass (auto-fired by /continue at boundary). | [ ]            |

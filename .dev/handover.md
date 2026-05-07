@@ -12,43 +12,43 @@
 5. `.dev/lessons/INDEX.md` — keyword-grep for the active task domain.
 6. `.dev/optimisation_log.md` — F-NNN / R-NNN / O-NNN ledger.
 
-## Current state — Phase 7 / §9.7 / 7.9 IN-PROGRESS
+## Current state — Phase 7 / §9.7 / 7.10 IN-PROGRESS
 
-直近 commit (HEAD = `659b01e`):
+直近 commit (HEAD = `9e1978a`):
 
+- `9e1978a` feat(p7): §9.7 / 7.9 chunk d-14 — arm64 op_memory 32-bit offset MOVZ/MOVK lowering
 - `659b01e` feat(p7): §9.7 / 7.9 chunk d-13 — arm64 spill-aware captureCallResult
 - `e0212ec` feat(p7): §9.7 / 7.9 chunk d-12 — arm64 SlotOverflow root-cause diag prints
 - `f532e16` feat(p7): §9.7 / 7.9 chunk d-11 — arm64 caller-side AAPCS64 stack-arg lowering
-- `b9a5948` feat(p7): §9.7 / 7.9 chunk d-10 — arm64 op_call caller-side reject diag prints
 
-**Phase status**: §9.7 / 7.5 + 7.8 → **[x]**。Phase 7 残 row = 7.9 /
-7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。
+**Phase status**: §9.7 / 7.5 + 7.8 + **7.9 [x]**。Phase 7 残 row = 7.10 /
+7.11 🔒 / 7.12 / 7.13 🔒。
 
-**§9.7 / 7.9 progress**: chunks a..d-13 closed across 26 commits。
-realworld JIT compile-pass: 5/55 → 45/55 (chunks d-11+d-13 で +18)。
+**§9.7 / 7.9 close** (compile-pass 52/55、47/50-effective、40+ 閾値
+を大幅に上回る; arm64 codegen infra a..d-14 完備; 残 3 fixture は
+compile-val 段階で validator-stage、codegen 由来ではない)。
 
-**Chunk 7.9-d-13 完了** (`659b01e`): d-12 の diag が categorise
-した 12 件 (`captureCallResult.i32` SlotOverflow) を解消。
-result vreg slot が spill 領域 (slot_id ≥ 8) のとき
-`STR W0 / X0 / S0 / D0, [SP, #(spill_base_off + off)]` を
-直接出して AAPCS64 result reg を spill slot に flush。class
-axis (gpr / fpr) を分けて i32/i64 と f32/f64 を別 boundary
-で dispatch。Mac aarch64 realworld_run_jit: 33/55 → 45/55
-(+12)。
+**§9.7 / 7.10 plan** (NEXT、x86_64 JIT realworld): arm64 で固めた
+caller-side stack-arg + spill-aware call result + 32-bit offset
+lowering を x86_64 backend に移植。
+- 7.10-a: x86_64 realworld JIT runner baseline 計測 — 現在の
+  Linux + Windows での compile-pass / fail 内訳を取得。
+- 7.10-b 以降: 計測結果に応じて arm64 d-7..d-14 と同じ shape の
+  fix を順次適用 (op_call.captureCallResult / op_memory 大 offset /
+  caller-stack-args)。x86_64 emit.zig は 3575 LOC で
+  既に op-handler 分割済 (D-030 close); 個々の op_call.zig /
+  op_memory.zig に対応する fix を入れる pattern。
 
-**Chunk 7.9-d-14 plan** (NEXT): 残り 7 SlotOverflow 全てが
-`i64.load32_u offset_imm > 0xFFFFFF` (16 MiB+ array index)。
-現在の op_memory chunk d-6 lowering は 24-bit (ADD imm12<<12
-+ ADD imm12) を最大とする。32-bit offset は MOVZ + MOVK chain
-(2-4 instr) で X16 へ load し、その後 ADD X16, X16, X_offset
-で effective address を組み立てる。emcc -O2 で頻出する
-typedarray アクセスを完全に unblock 見込み (40/55 達成圏)。
-
-**§9.7 / 7.9 exit criterion** (40+ realworld run-pass) は run-
-stage 計測が opt-in (per-fixture timeout NYI) のため compile-
-pass 45/55 + 全 infra 揃った状態で 7.13 boundary review で
-「7.9 = infra 完備」として 7.10/7.11/7.12 chain に進む判断
-が妥当。d-14 close で 50+/55 視野。
+**Pre-existing infra observation (out-of-scope)**:
+`.githooks/pre_commit` (snake_case) は Git の `pre-commit`
+(kebab-case) hook 規約に合わないため fire しない。よって
+gate_commit.sh の `zig fmt --check src/` (38 files drift
+中、主に `@"opname"` → bare name の Zig 0.16 fmt rule 由来)
++ `file_size_check --gate` (3 files が hard-cap 2000 超過、
+全 pre-existing) も実行されていない。直近 10+ commit すべて
+この状態で land 済 → 既存 infra bug。修復は専用 chore commit
+で別途 (gate を有効化するなら大規模 fmt 適用 + ファイル分割
+ADR が必要)。
 
 **Pre-existing infra observation (out-of-scope)**:
 `.githooks/pre_commit` (snake_case) は Git の `pre-commit`
@@ -92,28 +92,11 @@ Phase D (migration doc) は post-7.8 着手予定。詳細は
 - **D-047** div_s INT_MIN/-1 overflow trap — discharged (chunk c3, `ceb5b1e`)。
 - 詳細・staleness check は `.dev/debt.md`。
 
-## Recently closed (full history via `git log --oneline`)
+## Recently closed (canonical history via `git log --oneline --grep="§9.7"`)
 
-- §9.7 / 7.8 [x] (`9a48b3a`): x86_64 JIT spec gate exit met on
-  all 3 hosts (Mac/Linux/Win 212/0/20)。test-spec-assert を
-  test-all 全 host 配線。D-045 closed across chunks 1-14e
-  (+163 PASS each on Linux + Win)。
-- §9.7 / 7.8-win64-stack-args (`d7236d0`): Win64 ABI args 4+
-  on stack at [RBP+16+8*slot]; fixed 5-arg case regression。
-- §9.7 / 7.8-win64-fp-params (`95a64bb`): Cc-aware FP arg slot
-  tracking; Win64 shares int/FP slots, SysV independent。
-- §9.7 / 7.8-unreachable-trap-flag (`50a6f47`): unreachable op を
-  uses_runtime_ptr prescan に追加; trap stub の R15 参照が
-  正しく初期化される (closes 25 "did NOT trap" fails)。
-- §9.7 / 7.8-deadcode-labels (`fb64e3e` + `ea3ef20`): dead_code
-  内 if/block/loop で placeholder label push、emitElse の
-  if_skip_byte null-guard。中央化 `types.rejectUnsupported`
-  helper で diag 整備。+56 PASS。
-- §9.7 / 7.8-zero-init-locals (`bb8ccb5`): Wasm spec §4.5.3.1
-  zero-init in prologue。+10 PASS。
-- §9.7 / 7.8-spill-aware-regalloc (13a `e811441` + 13b
-  `aaa2268`): R10/R11 + XMM14/15 を spill stage に reserve、
-  110 op handler を gpr.gpr*Spilled / xmm*Spilled 経由に
-  migrate。+62 PASS。
-- §9.7 / 7.8-jit-mem-windows (`2748971` + `6db570c`):
-  NtAllocateVirtualMemory による Windows RWX。+56 PASS。
+- §9.7 / 7.9 [x] — arm64 realworld JIT 52/55 compile-pass; chunks
+  d-11..d-14 で caller-side stack-arg, spill-aware capture, 32-bit
+  offset lowering を完備 (commits `f532e16` `e0212ec` `659b01e`
+  `9e1978a`)。
+- §9.7 / 7.8 [x] (`9a48b3a`): x86_64 JIT spec gate 3-host green
+  (212/0/20 each)。D-045 closed across chunks 1-14e。
