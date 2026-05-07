@@ -16,28 +16,25 @@
 
 直近 commit (HEAD = `<this>`):
 
-- `<this>` chore(p7): §9.7 / 7.8-x86-spec-gate — three-host spec_assert baseline (Mac 212/0/20, Linux 109/106/20, Win 49/174/20)
-- `5a5a423` docs(p7): correct D-045 residual fail diagnosis (SlotOverflow not StackTypeMismatch)
-- `f4eccdc` feat(p7): §9.7 / 7.8-jit-mem-linux — Linux x86_64 mmap-RWX (D-045 chunk 10; +60 PASS)
-- `d138326` feat(p7): §9.7 / 7.8-x86-mem-grow-size — memory.size + memory.grow + dead_code (D-045 chunk 9)
+- `<this>` chore(p7): §9.7 / 7.8-x86-jit-mem-windows close — Windows 49/174/20 → 105/110/20 (+56 PASS)
+- `6db570c` fix(p7): §9.7 / 7.8-x86-jit-mem-windows — use 0.16 stable APIs
+- `2748971` feat(p7): §9.7 / 7.8-x86-jit-mem-windows — Windows x86_64 RWX (D-045 chunk 12)
+- `f5e5f5b` chore(p7): §9.7 / 7.8-x86-spec-gate — three-host spec_assert baseline
 
-**Phase status**: §9.7 / 7.5 → **[x]** 完了 (Mac aarch64 spec_assert
-212/0/20)。Phase 7 残 row = 7.8 / 7.9 / 7.10 / 7.11 🔒 / 7.12 /
-7.13 🔒。**§9.7 / 7.8** = x86_64 spec gate — D-045 が active。
-chunks 1-10 完了 + 7.8-x86-spec-gate (chunk 11 — measurement) 完了。
-3-host baseline triangulated:
+**Phase status**: §9.7 / 7.5 → **[x]** 完了。Phase 7 残 row = 7.8 /
+7.9 / 7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。**§9.7 / 7.8** = x86_64 spec
+gate — D-045 active。chunks 1-12 完了。3-host baseline post-chunk-12:
 
 - Mac aarch64       : **212 / 0 / 20**     (gate green — `test-all` wired)
-- OrbStack Linux    : **109 / 106 / 20**   (chunks 1-10 反映済)
-- windowsmini Win   :  **49 / 174 / 20**   (Linux mmap-RWX 効果未到達)
+- OrbStack Linux    : **109 / 106 / 20**   (unchanged — Linux 不依存)
+- windowsmini Win   : **105 / 110 / 20**   (was 49/174/20 → +56 PASS)
 
-Linux ↔ Windows 60 PASS の差は chunk 10 (Linux mmap-RWX) そのもの。
-**残 106 fail (Linux) の主因 = SlotOverflow** (regalloc pool 6 reg を
-5+ params で枯渇 — mirror of arm64 D-036/D-037)。次の主軸 =
-(a) **Windows jit_mem** (VirtualAlloc; Win 49→~109 を見込む) +
-(b) **x86_64 spill-aware regalloc port** (Linux/Win 共通の 106 fail
-を大量 close)。test-all 配線は Mac aarch64 のみ維持 (§9.7 / 7.8 row
-close = fail==0 達成時に flip)。
+Linux ↔ Win 差 = 4 PASS (vs 60 before chunk 12)。両ホスト共通の
+**残 ~106 fail = SlotOverflow** が主因 (regalloc pool 6 reg を 5+
+params で枯渇 — arm64 D-036/D-037 staged-spill machinery が
+prior-art)。次の主軸 = **7.8-x86-spill-aware-regalloc** (両ホストで
+106 fail を大量 close 見込み)。test-all 配線は Mac aarch64 のみ維持
+(§9.7 / 7.8 row close = fail==0 で flip)。
 
 **Active priority — §9.7 / 7.8 D-045 chunk chain**:
 
@@ -51,9 +48,9 @@ close = fail==0 達成時に flip)。
 8. ☑ 7.8-x86-select — select / select_typed (CMOV)
 9. ☑ 7.8-x86-mem-grow-size — memory.size + memory.grow + dead_code
 10. ☑ 7.8-jit-mem-linux — Linux x86_64 mmap-RWX (+60 PASS)
-11. ☑ **7.8-x86-spec-gate** — three-host baseline measurement + comment refresh
-12. **7.8-x86-jit-mem-windows** — Windows VirtualAlloc RWX-region (chunk 12; close Win 49→~109) **NEXT**
-13. 7.8-x86-spill-aware-regalloc — mirror arm64 D-036/D-037 (close 106 SlotOverflow)
+11. ☑ 7.8-x86-spec-gate — three-host baseline measurement + comment refresh
+12. ☑ **7.8-x86-jit-mem-windows** — Windows NtAllocateVirtualMemory RWX (Win +56 PASS)
+13. **7.8-x86-spill-aware-regalloc** — mirror arm64 D-036/D-037 staged-spill (close ~106 SlotOverflow on both hosts) **NEXT**
 14. 7.8-x86-misc-cleanup — residual UnsupportedOp + handcrafted_trap "did NOT trap"
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
@@ -80,21 +77,27 @@ Phase D (migration doc) は post-7.8 着手予定。詳細は
 - **D-026** env-stub host-func wiring (cross-module dispatch)。
 - **D-029** x86_64 emitI32Binary `dst==rhs` reject — regalloc port 後に discharge。
 - **D-031** runner runI32Export FP/i64 拡張 — JitRuntime memory init 後に at_limit 境界 fixture を再追加。
-- **D-045** §9.7 / 7.8 close blocker — x86_64 backend gap (chunks 1-11 closed; chunks 12-14 残)。
+- **D-045** §9.7 / 7.8 close blocker — x86_64 backend gap (chunks 1-12 closed; chunks 13-14 残)。
 - 詳細・staleness check は `.dev/debt.md`。
 
 ## Recently closed (full history via `git log --oneline`)
 
-- §9.7 / 7.8-x86-spec-gate (`<this>`): three-host spec_assert
-  baseline triangulation。Mac aarch64 212/0/20 (test-all wired)、
-  OrbStack Linux 109/106/20 (chunks 1-10 反映)、windowsmini Win
-  49/174/20 (Linux mmap 効果未到達)。Linux ↔ Win 60 PASS = chunk
-  10 そのもの。残 106 fail (Linux) の主因 SlotOverflow → 次の
-  axes = Windows jit_mem + x86_64 spill-aware regalloc。
-  build.zig コメントブロックを 3-host 数値で更新、`test-spec-assert`
-  step description も "all hosts; test-all Mac-aarch64-only" に
-  refine。test-all 配線 Mac 限定維持 (fail==0 達成までは gate を
-  赤くしない)。Mac test-all 28/28 + spec_assert 212/0/20 unchanged。
+- §9.7 / 7.8-x86-jit-mem-windows (`2748971` + `6db570c`): Windows
+  x86_64 RWX 配線。`std.os.windows.ntdll.NtAllocateVirtualMemory`
+  + `NtFreeVirtualMemory` (zig 0.16 stable は wrapper-with-error-
+  union 形を未公開のため低レベル extern 直接呼び)。typed packed
+  struct (MEM.ALLOCATE { COMMIT, RESERVE } / MEM.FREE { RELEASE }
+  / PAGE { EXECUTE_READWRITE }) でリクエスト。setExecutable /
+  setWritable は Linux と同じく no-op (RWX page; x86_64 I/D
+  coherent)。Windows spec_assert 49/174/20 → 105/110/20 (+56
+  PASS, -64 FAIL)。Linux ↔ Win 4 PASS gap まで詰めた。3-host
+  test-all green。`2748971` の初版が 0.16 master の wrapper を
+  使ってしまい windowsmini で compile error → `6db570c` で
+  ntdll 直接呼びに修正。
+- §9.7 / 7.8-x86-spec-gate (f5e5f5b): three-host spec_assert
+  baseline triangulation。Mac 212/0/20 / OrbStack 109/106/20 /
+  Win 49/174/20。build.zig コメント更新、test-all 配線は Mac
+  aarch64 限定維持。
 - §9.7 / 7.8-jit-mem-linux (f4eccdc): Linux x86_64 mmap-RWX
   wiring (chunk 10)。OrbStack spec_assert 49/174/20 → 109/106/20
   (+60 PASS)。
