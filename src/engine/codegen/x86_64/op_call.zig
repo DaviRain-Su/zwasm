@@ -214,7 +214,7 @@ pub fn marshalCallArgs(
     if (pushed_vregs.items.len < n_args) return Error.AllocationMissing;
 
     var arg_vregs: [5]u32 = undefined;
-    if (n_args > arg_vregs.len) return Error.UnsupportedOp;
+    if (n_args > arg_vregs.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig:217", 0);
     var i: u32 = n_args;
     while (i > 0) {
         i -= 1;
@@ -231,7 +231,7 @@ pub fn marshalCallArgs(
         const src_vreg = arg_vregs[k];
         switch (callee_sig.params[k]) {
             .i32 => {
-                if (gpr_arg_slot >= abi.current.arg_gprs.len) return Error.UnsupportedOp;
+                if (gpr_arg_slot >= abi.current.arg_gprs.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig:234", 0);
                 const dst = abi.current.arg_gprs[gpr_arg_slot];
                 const src = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
                 if (src != dst) {
@@ -239,7 +239,7 @@ pub fn marshalCallArgs(
                 }
                 gpr_arg_slot += 1;
             },
-            .i64, .f32, .f64, .v128, .funcref, .externref => return Error.UnsupportedOp,
+            .i64, .f32, .f64, .v128, .funcref, .externref => return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig:242", 0),
         }
     }
 }
@@ -258,7 +258,7 @@ pub fn captureCallResult(
     callee_sig: zir.FuncType,
 ) Error!void {
     if (callee_sig.results.len == 0) return;
-    if (callee_sig.results.len > 1) return Error.UnsupportedOp;
+    if (callee_sig.results.len > 1) return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig:261", 0);
 
     const result = next_vreg.*;
     next_vreg.* += 1;
@@ -272,7 +272,7 @@ pub fn captureCallResult(
             }
             try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result, 0);
         },
-        .i64, .f32, .f64, .v128, .funcref, .externref => return Error.UnsupportedOp,
+        .i64, .f32, .f64, .v128, .funcref, .externref => return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig:275", 0),
     }
     try pushed_vregs.append(allocator, result);
 }

@@ -25,6 +25,16 @@ pub const Error = error{
     OutOfMemory,
 };
 
+/// Centralised diagnostic for `Error.UnsupportedOp` rejects across
+/// op-handler files (op_control / op_alu_int / op_alu_float /
+/// op_call / etc). Every silent reject site goes through here so
+/// the spec_assert / test runner stderr can identify **which**
+/// structural path fired. Avoids per-file print scaffolding.
+pub fn rejectUnsupported(reason: []const u8, ctx: u32) Error {
+    std.debug.print("x86_64/op: UnsupportedOp[{s}] ctx={d}\n", .{ reason, ctx });
+    return Error.UnsupportedOp;
+}
+
 /// Pending `CALL rel32` site requiring linker patch. Shape
 /// mirrors arm64's CallFixup so the post-emit linker can reuse
 /// the same fixup-record contract.

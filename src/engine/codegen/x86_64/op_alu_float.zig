@@ -102,7 +102,7 @@ pub fn emitFpMinMax(
     const lhs_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
     const rhs_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
     const dst = try gpr.xmmDefSpilled(alloc, result_v, 0);
-    if (dst == rhs_x and dst != lhs_x) return Error.UnsupportedOp;
+    if (dst == rhs_x and dst != lhs_x) return types.rejectUnsupported("src/engine/codegen/x86_64/op_alu_float.zig:105", 0);
 
     const is_f64 = switch (op) {
         .@"f64.min", .@"f64.max" => true,
@@ -434,7 +434,7 @@ pub fn emitFpBinary(
     const lhs = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
     const rhs = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
     const dst = try gpr.xmmDefSpilled(alloc, result_v, 0);
-    if (dst == rhs and dst != lhs) return Error.UnsupportedOp;
+    if (dst == rhs and dst != lhs) return types.rejectUnsupported("src/engine/codegen/x86_64/op_alu_float.zig:437", 0);
 
     if (dst != lhs) {
         try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst, lhs).slice());

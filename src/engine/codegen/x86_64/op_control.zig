@@ -75,7 +75,7 @@ pub fn emitBr(
     labels: *std.ArrayList(Label),
     depth: u32,
 ) Error!void {
-    if (depth >= labels.items.len) return Error.UnsupportedOp;
+    if (depth >= labels.items.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:78", 0);
     const tgt_idx = labels.items.len - 1 - depth;
     const tgt = &labels.items[tgt_idx];
     const at: u32 = @intCast(buf.items.len);
@@ -101,7 +101,7 @@ fn emitBrTableJmp(
     labels: *std.ArrayList(Label),
     depth: u32,
 ) Error!void {
-    if (depth >= labels.items.len) return Error.UnsupportedOp;
+    if (depth >= labels.items.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:104", 0);
     const tgt_idx = labels.items.len - 1 - depth;
     const tgt = &labels.items[tgt_idx];
     const at: u32 = @intCast(buf.items.len);
@@ -144,11 +144,11 @@ pub fn emitBrTable(
     start: u32,
 ) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
-    if (count > 127) return Error.UnsupportedOp;
+    if (count > 127) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:147", 0);
     const idx_v = pushed_vregs.pop().?;
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
     const targets = func.branch_targets.items;
-    if (start + count >= targets.len) return Error.UnsupportedOp;
+    if (start + count >= targets.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:151", 0);
 
     var i: u32 = 0;
     while (i < count) : (i += 1) {
@@ -175,7 +175,7 @@ pub fn emitBrIf(
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const cond_v = pushed_vregs.pop().?;
     const cond_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, cond_v, 0);
-    if (depth >= labels.items.len) return Error.UnsupportedOp;
+    if (depth >= labels.items.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:178", 0);
     try buf.appendSlice(allocator, inst.encTestRR(.d, cond_r, cond_r).slice());
     const tgt_idx = labels.items.len - 1 - depth;
     const tgt = &labels.items[tgt_idx];
@@ -213,8 +213,8 @@ pub fn emitIf(
     arity_extra: u32,
 ) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
-    const arity: u8 = std.math.cast(u8, arity_extra) orelse return Error.UnsupportedOp;
-    if (arity > merge_top_vregs_cap) return Error.UnsupportedOp;
+    const arity: u8 = std.math.cast(u8, arity_extra) orelse return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:216", 0);
+    if (arity > merge_top_vregs_cap) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:217", 0);
     const cond_v = pushed_vregs.pop().?;
     const cond_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, cond_v, 0);
     try buf.appendSlice(allocator, inst.encTestRR(.d, cond_r, cond_r).slice());
@@ -244,7 +244,7 @@ pub fn emitElse(
     if (labels.items.len == 0 or
         labels.items[labels.items.len - 1].kind != .if_then)
     {
-        return Error.UnsupportedOp;
+        return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:247", 0);
     }
     const lbl_idx = labels.items.len - 1;
     const arity: u32 = labels.items[lbl_idx].result_arity;
@@ -306,13 +306,13 @@ pub fn emitEndIntra(
         if (dead_else) {
             // Merge targets already on top of stack. Skip MOVs.
         } else if (pushed_vregs.items.len < 2 * arity) {
-            return Error.UnsupportedOp;
+            return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:309", 0);
         } else {
             const merge_base = pushed_vregs.items.len - 2 * arity;
             var v: u32 = 0;
             while (v < arity) : (v += 1) {
                 if (pushed_vregs.items[merge_base + v] != lbl.merge_top_vregs[v]) {
-                    return Error.UnsupportedOp;
+                    return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:315", 0);
                 }
             }
             // Pop in reverse (top = else_{N-1}); per-slot MOV

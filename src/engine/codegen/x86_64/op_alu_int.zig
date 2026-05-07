@@ -71,7 +71,7 @@ pub fn emitI32Binary(
     const lhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
     const rhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
     const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
-    if (dst_r == rhs_r and dst_r != lhs_r) return Error.UnsupportedOp;
+    if (dst_r == rhs_r and dst_r != lhs_r) return types.rejectUnsupported("src/engine/codegen/x86_64/op_alu_int.zig:74", 0);
 
     if (dst_r != lhs_r) {
         try buf.appendSlice(allocator, inst.encMovRR(.d, dst_r, lhs_r).slice());
@@ -207,8 +207,8 @@ pub fn emitI32Shift(
     const lhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
     const rhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
     const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
-    if (dst_r == .rcx) return Error.UnsupportedOp;
-    if (dst_r == rhs_r and dst_r != lhs_r) return Error.UnsupportedOp;
+    if (dst_r == .rcx) return types.rejectUnsupported("src/engine/codegen/x86_64/op_alu_int.zig:210", 0);
+    if (dst_r == rhs_r and dst_r != lhs_r) return types.rejectUnsupported("src/engine/codegen/x86_64/op_alu_int.zig:211", 0);
 
     // 1. Move shift count into ECX (CL is the low byte).
     if (rhs_r != .rcx) {
@@ -293,7 +293,7 @@ pub fn emitI64Binary(
     const lhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
     const rhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
     const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
-    if (dst_r == rhs_r and dst_r != lhs_r) return Error.UnsupportedOp;
+    if (dst_r == rhs_r and dst_r != lhs_r) return types.rejectUnsupported("src/engine/codegen/x86_64/op_alu_int.zig:296", 0);
 
     if (dst_r != lhs_r) {
         try buf.appendSlice(allocator, inst.encMovRR(.q, dst_r, lhs_r).slice());
@@ -405,8 +405,8 @@ pub fn emitI64Shift(
     const lhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
     const rhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
     const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
-    if (dst_r == .rcx) return Error.UnsupportedOp;
-    if (dst_r == rhs_r and dst_r != lhs_r) return Error.UnsupportedOp;
+    if (dst_r == .rcx) return types.rejectUnsupported("src/engine/codegen/x86_64/op_alu_int.zig:408", 0);
+    if (dst_r == rhs_r and dst_r != lhs_r) return types.rejectUnsupported("src/engine/codegen/x86_64/op_alu_int.zig:409", 0);
 
     if (rhs_r != .rcx) {
         try buf.appendSlice(allocator, inst.encMovRR(.d, .rcx, rhs_r).slice());
