@@ -68,14 +68,34 @@ pub fn emitLoop(allocator: Allocator, buf: *std.ArrayList(u8), labels: *std.Arra
 /// Wasm spec §3.4.5 (br N) — unconditional branch to label at
 /// depth N (0 = innermost). Loop targets resolve immediately to
 /// a concrete disp; block targets emit a placeholder JMP rel32
-/// and append a `Fixup` for the matching `end` to patch.
+/// and append a `Fixup` for the matching `end` to patch. When
+/// `depth == labels.items.len` the branch targets the implicit
+/// function-level block (= `return`); marshal the function's
+/// result and emit the inline epilogue (§9.7 / 7.10-h mirror of
+/// `arm64/op_control.zig:emitBr`'s function-depth path).
+///
+/// Per the existing `return` handler in `emit.zig`, x86_64 inlines
+/// the epilogue at every return site rather than using a
+/// `return_fixups` table — multiple physical RETs are harmless on
+/// x86_64 (no jump table needed, unlike ARM64 where return_fixups
+/// consolidate to a single epilogue).
 pub fn emitBr(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
     labels: *std.ArrayList(Label),
+    spill_base_off: u32,
+    func: *const ZirFunc,
+    frame_bytes: u32,
+    uses_runtime_ptr: bool,
     depth: u32,
 ) Error!void {
-    if (depth >= labels.items.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:78", 0);
+    if (depth == labels.items.len) {
+        try emitFunctionReturn(allocator, buf, alloc, pushed_vregs, spill_base_off, func, frame_bytes, uses_runtime_ptr);
+        return;
+    }
+    if (depth > labels.items.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:78", 0);
     const tgt_idx = labels.items.len - 1 - depth;
     const tgt = &labels.items[tgt_idx];
     const at: u32 = @intCast(buf.items.len);
@@ -89,6 +109,65 @@ pub fn emitBr(
         try buf.appendSlice(allocator, inst.encJmpRel32(0).slice());
         try tgt.pending.append(allocator, .{ .byte_offset = at, .insn_size = 5 });
     }
+}
+
+/// Marshal the top vreg as the function's result + emit the
+/// regular epilogue (ADD RSP, frame ; POP R15? ; POP RBP ; RET).
+/// Shared between `emitBr`'s function-depth path and `emitBrIf`'s
+/// conditional return path. Mirrors the inline body of `emit.zig`'s
+/// `.@"return"` handler — extracted here so br/br_if can reach for
+/// it without duplicating ~40 lines per site. Module-pub so the
+/// brTable path (a follow-up chunk) can reuse the same shape.
+pub fn emitFunctionReturn(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    spill_base_off: u32,
+    func: *const ZirFunc,
+    frame_bytes: u32,
+    uses_runtime_ptr: bool,
+) Error!void {
+    if (pushed_vregs.items.len > 0 and func.sig.results.len > 0) {
+        const top = pushed_vregs.items[pushed_vregs.items.len - 1];
+        if (top >= alloc.slots.len) return Error.SlotOverflow;
+        switch (func.sig.results[0]) {
+            .i32, .funcref, .externref => {
+                const src = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, top, 0);
+                if (src != abi.return_gpr) {
+                    try buf.appendSlice(allocator, inst.encMovRR(.d, abi.return_gpr, src).slice());
+                }
+            },
+            .i64 => {
+                const src = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, top, 0);
+                if (src != abi.return_gpr) {
+                    try buf.appendSlice(allocator, inst.encMovRR(.q, abi.return_gpr, src).slice());
+                }
+            },
+            .f32, .f64 => {
+                const src_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, top, 0);
+                if (src_x != abi.return_xmm) {
+                    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(abi.return_xmm, src_x).slice());
+                }
+            },
+            .v128 => return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:emitFunctionReturn-v128", 0),
+        }
+    }
+    if (frame_bytes > 0) {
+        // Inline imm8/imm32 SUB-form selection mirroring emit.zig's
+        // `rspAdd` helper. Kept inline here to avoid a Zone-internal
+        // back-reference into emit.zig.
+        if (frame_bytes <= 127) {
+            try buf.appendSlice(allocator, inst.encAddRSpImm8(@intCast(frame_bytes)).slice());
+        } else {
+            try buf.appendSlice(allocator, inst.encAddRSpImm32(@intCast(frame_bytes)).slice());
+        }
+    }
+    if (uses_runtime_ptr) {
+        try buf.appendSlice(allocator, inst.encPopR(.r15).slice());
+    }
+    try buf.appendSlice(allocator, inst.encPopR(.rbp).slice());
+    try buf.appendSlice(allocator, inst.encRet().slice());
 }
 
 /// Emit a single `JMP target_for_depth` for one br_table case
@@ -162,7 +241,12 @@ pub fn emitBrTable(
 /// Wasm spec §3.4.5 (br_if N) — pop cond, branch to label at
 /// depth N if cond is non-zero. Emit TEST cond, cond ; Jcc(NE)
 /// target. Backward (loop) target → concrete disp; forward
-/// (block / if) target → placeholder + Fixup append.
+/// (block / if) target → placeholder + Fixup append. When
+/// `depth == labels.items.len` the conditional branch targets
+/// the implicit function-level block (= conditional return); use
+/// a JE-skip + inline marshal + epilogue + RET sequence so the
+/// fall-through path lands on the next instruction (= cond was 0,
+/// don't return). §9.7 / 7.10-h mirror of arm64's CBZ-skip path.
 pub fn emitBrIf(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
@@ -170,12 +254,33 @@ pub fn emitBrIf(
     pushed_vregs: *std.ArrayList(u32),
     labels: *std.ArrayList(Label),
     spill_base_off: u32,
+    func: *const ZirFunc,
+    frame_bytes: u32,
+    uses_runtime_ptr: bool,
     depth: u32,
 ) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const cond_v = pushed_vregs.pop().?;
     const cond_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, cond_v, 0);
-    if (depth >= labels.items.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:178", 0);
+    if (depth == labels.items.len) {
+        // Conditional function-return:
+        //   TEST cond_r, cond_r
+        //   JE skip_byte                  (rel32 placeholder; backpatched)
+        //   <emitFunctionReturn>          (marshal + epilogue + RET)
+        // skip_byte:
+        try buf.appendSlice(allocator, inst.encTestRR(.d, cond_r, cond_r).slice());
+        const je_at: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
+        try emitFunctionReturn(allocator, buf, alloc, pushed_vregs, spill_base_off, func, frame_bytes, uses_runtime_ptr);
+        // Patch the JE rel32 to land on the byte AFTER the
+        // emitFunctionReturn block.
+        const skip_byte: u32 = @intCast(buf.items.len);
+        const je_disp: i32 = @as(i32, @intCast(skip_byte)) - @as(i32, @intCast(je_at)) - 6;
+        const patched = inst.encJccRel32(.e, je_disp);
+        @memcpy(buf.items[je_at .. je_at + patched.len], patched.slice());
+        return;
+    }
+    if (depth > labels.items.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:178", 0);
     try buf.appendSlice(allocator, inst.encTestRR(.d, cond_r, cond_r).slice());
     const tgt_idx = labels.items.len - 1 - depth;
     const tgt = &labels.items[tgt_idx];

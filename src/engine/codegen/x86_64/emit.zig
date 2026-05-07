@@ -883,8 +883,14 @@ pub fn compile(
             },
             .block => try op_control.emitBlock(allocator, &labels),
             .loop => try op_control.emitLoop(allocator, &buf, &labels),
-            .br => try op_control.emitBr(allocator, &buf, &labels, ins.payload),
-            .br_if => try op_control.emitBrIf(allocator, &buf, alloc, &pushed_vregs, &labels, spill_base_off, ins.payload),
+            .br => {
+                try op_control.emitBr(allocator, &buf, alloc, &pushed_vregs, &labels, spill_base_off, func, frame_bytes, uses_runtime_ptr, ins.payload);
+                // br is an unconditional control transfer; subsequent
+                // ops in the same body are unreachable until the
+                // matching `end` re-enters live emission.
+                dead_code = true;
+            },
+            .br_if => try op_control.emitBrIf(allocator, &buf, alloc, &pushed_vregs, &labels, spill_base_off, func, frame_bytes, uses_runtime_ptr, ins.payload),
             .br_table => try op_control.emitBrTable(allocator, &buf, func, alloc, &pushed_vregs, &labels, spill_base_off, ins.payload, ins.extra),
             .@"if" => try op_control.emitIf(allocator, &buf, alloc, &pushed_vregs, &labels, spill_base_off, ins.extra),
             .@"else" => try op_control.emitElse(allocator, &buf, &pushed_vregs, &labels),
@@ -2034,11 +2040,14 @@ test "compile: global.set with stack underflow → AllocationMissing" {
     try testing.expectError(Error.AllocationMissing, compile(testing.allocator, &f, empty, &.{}, &.{}, 0));
 }
 
-test "compile: br with depth out of range → UnsupportedOp" {
+test "compile: br with depth strictly above labels.len → UnsupportedOp" {
+    // §9.7 / 7.10-h: depth == labels.len is the function-return
+    // path (compiles to inline epilogue). depth > labels.len is
+    // still malformed and surfaces UnsupportedOp.
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
     var f = ZirFunc.init(0, sig, &.{});
     defer f.deinit(testing.allocator);
-    try f.instrs.append(testing.allocator, .{ .op = .br, .payload = 0 }); // no enclosing block/loop
+    try f.instrs.append(testing.allocator, .{ .op = .br, .payload = 1 }); // labels.len = 0; 1 > 0 ⇒ malformed
     try f.instrs.append(testing.allocator, .{ .op = .end });
     f.liveness = .{ .ranges = &.{} };
     const empty_alloc: regalloc.Allocation = .{ .slots = &.{}, .n_slots = 0 };
@@ -4039,6 +4048,43 @@ test "compile: unreachable emits JMP rel32 + trap stub patches disp to trap_byte
     // + POP RBP (1) + RET (1) = 8 bytes → trap stub starts at
     // 13 + 5 + 8 = 26.
     try testing.expectEqual(@as(i32, 26), target_abs);
+}
+
+test "compile: br N — function-depth (depth == labels.len) emits inline epilogue (§9.7 / 7.10-h)" {
+    // Wasm spec §3.4.5 (br) — when the depth equals the number
+    // of explicit labels, the branch targets the implicit
+    // function-level block (= return). Pre-7.10-h surfaced
+    // UnsupportedOp at op_control.zig:78. Now emits inline
+    // marshal (MOV EAX, src) + ADD RSP + POP RBP + RET.
+    //
+    // Test: `(func (result i32) (i32.const 42) (br 0) end)` — at
+    // br site labels.items.len = 0, depth = 0, so depth == len ⇒
+    // function-return. The matching `end` runs the regular epilogue
+    // path; both share the encoded marshal+RET shape.
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 42 });
+    try f.instrs.append(testing.allocator, .{ .op = .br, .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+    } };
+
+    const slots = [_]u16{0};
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0);
+    defer deinit(testing.allocator, out);
+
+    // The compiled body must contain exactly two RET (0xC3) bytes —
+    // one from the br-as-return inline epilogue, one from the
+    // matching `end`'s regular epilogue. Pre-7.10-h would have
+    // failed with UnsupportedOp before reaching the end.
+    var ret_count: usize = 0;
+    for (out.bytes) |b| {
+        if (b == 0xC3) ret_count += 1;
+    }
+    try testing.expect(ret_count >= 2);
 }
 
 test "compile: total_locals=20 (>15 cap) — disp32 form lifts the i8 limit" {
