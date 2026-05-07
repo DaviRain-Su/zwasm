@@ -11,8 +11,12 @@
 //!   PROT_READ|WRITE|EXEC (Linux doesn't enforce W^X on user
 //!   mmap unless SELinux/etc explicitly does). setExecutable /
 //!   setWritable are no-ops since the page is always RWX.
-//! - Windows x86_64: `VirtualAlloc` with PAGE_EXECUTE_READWRITE
-//!   (D-045 chunk 11; not yet implemented).
+//! - Windows x86_64 (D-045 chunk 12): `NtAllocateVirtualMemory`
+//!   with PAGE_EXECUTE_READWRITE (mirror of the Linux-RWX
+//!   shape; CFG / ACG aren't enforced for processes that don't
+//!   opt in, so RWX user pages are accepted by default).
+//!   setExecutable / setWritable are no-ops on this branch
+//!   too.
 //!
 //! Zone 0 (`src/platform/`) — depends only on Zig stdlib.
 
@@ -75,6 +79,25 @@ pub fn alloc(size: usize) Error!JitBlock {
         return .{ .bytes = @alignCast(result[0..rounded]) };
     }
 
+    if (builtin.os.tag == .windows and builtin.cpu.arch == .x86_64) {
+        // D-045 chunk 12: Windows x86_64 RWX page via
+        // NtAllocateVirtualMemory. Mirror of the Linux-RWX shape
+        // (PAGE_EXECUTE_READWRITE = single combined RWX page).
+        var base_addr: ?*anyopaque = null;
+        var alloc_size: std.os.windows.SIZE_T = rounded;
+        std.os.windows.NtAllocateVirtualMemory(
+            std.os.windows.self_process_handle,
+            @ptrCast(&base_addr),
+            0,
+            &alloc_size,
+            std.os.windows.MEM_COMMIT | std.os.windows.MEM_RESERVE,
+            std.os.windows.PAGE_EXECUTE_READWRITE,
+        ) catch return Error.AllocationFailed;
+        const ptr = base_addr orelse return Error.AllocationFailed;
+        const aligned: [*]align(page_size) u8 = @ptrCast(@alignCast(ptr));
+        return .{ .bytes = aligned[0..rounded] };
+    }
+
     return Error.NotImplemented;
 }
 
@@ -86,6 +109,19 @@ pub fn free(block: JitBlock) void {
     }
     if (builtin.os.tag == .linux and builtin.cpu.arch == .x86_64) {
         std.posix.munmap(block.bytes);
+        return;
+    }
+    if (builtin.os.tag == .windows and builtin.cpu.arch == .x86_64) {
+        // MEM_RELEASE requires size = 0 and addr = the original
+        // base returned by NtAllocateVirtualMemory.
+        var addr: ?*anyopaque = block.bytes.ptr;
+        var size: std.os.windows.SIZE_T = 0;
+        std.os.windows.NtFreeVirtualMemory(
+            std.os.windows.self_process_handle,
+            @ptrCast(&addr),
+            &size,
+            std.os.windows.MEM_RELEASE,
+        ) catch {};
         return;
     }
 }
@@ -108,6 +144,11 @@ pub fn setExecutable(block: JitBlock) Error!void {
         // implicitly per Intel SDM Vol 3 §11.6).
         return;
     }
+    if (builtin.os.tag == .windows and builtin.cpu.arch == .x86_64) {
+        // Same as Linux: PAGE_EXECUTE_READWRITE means the page is
+        // already executable; x86_64 I/D coherency holds.
+        return;
+    }
     return Error.NotImplemented;
 }
 
@@ -116,13 +157,15 @@ pub fn setExecutable(block: JitBlock) Error!void {
 /// `setExecutable`.
 pub fn setWritable(block: JitBlock) Error!void {
     _ = block; // Mac uses pthread_jit_write_protect_np (no block);
-               // Linux is a no-op (page is always RWX); Windows
-               // chunk 11 will use VirtualProtect (will read block).
+               // Linux + Windows are no-ops (page is RWX).
     if (builtin.os.tag == .macos and builtin.cpu.arch == .aarch64) {
         pthread_jit_write_protect_np(0); // 0 = disable W^X (RW)
         return;
     }
     if (builtin.os.tag == .linux and builtin.cpu.arch == .x86_64) {
+        return;
+    }
+    if (builtin.os.tag == .windows and builtin.cpu.arch == .x86_64) {
         return;
     }
     return Error.NotImplemented;
