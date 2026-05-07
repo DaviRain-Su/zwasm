@@ -310,9 +310,7 @@ pub fn findExportFunc(allocator: Allocator, wasm_bytes: []const u8, name: []cons
 }
 
 /// Run a no-arg, i32-result exported function and return the
-/// result value. Today's runner builds a no-memory, no-table
-/// JitRuntime — fixtures that touch memory/tables need a richer
-/// runtime construction (sub-7.5b-iii).
+/// result value. Wraps `setupRuntime` + `entry.callI32NoArgs`.
 pub fn runI32Export(
     allocator: Allocator,
     wasm_bytes: []const u8,
@@ -324,37 +322,77 @@ pub fn runI32Export(
     defer compiled.deinit(allocator);
 
     if (func_idx >= compiled.func_sigs.len) return Error.ExportNotFound;
-    // Re-exporting an imported function is rejected from this
-    // shim — the JitModule only has bodies for defined functions;
-    // the entry pointer for an import sentinel slot is a 0xFFFF
-    // sentinel, not callable. Fixtures wanting to call an imported
-    // export need the chunk 7.9-c host-call dispatcher.
     if (func_idx < compiled.num_imports) return Error.UnsupportedEntrySignature;
     const sig = compiled.func_sigs[func_idx];
     if (sig.params.len != 0 or sig.results.len != 1 or sig.results[0] != .i32) {
         return Error.UnsupportedEntrySignature;
     }
 
-    // Allocate + populate host_dispatch table. Each import-call
-    // site emits an indirect call through
-    // `host_dispatch_base[idx]`. Default-fill with the trap
-    // trampoline, then overlay real WASI handlers for any
-    // imports whose `(module, name)` matches the snapshot-
-    // preview1 manifest in `wasi/jit_dispatch.zig`. Imports
-    // outside the manifest stay pointed at the trap (the host
-    // hasn't supplied that capability).
+    var owned = try setupRuntime(allocator, &compiled, wasm_bytes);
+    defer owned.deinit(allocator);
+    return entry.callI32NoArgs(compiled.module, func_idx, &owned.rt);
+}
+
+/// Run a no-arg, void-result exported function (e.g. `_start`)
+/// and surface trap as Error.Trap. Mirrors `runI32Export`'s
+/// setup; differs only in the entry-call helper + signature
+/// gate.
+pub fn runVoidExport(
+    allocator: Allocator,
+    wasm_bytes: []const u8,
+    export_name: []const u8,
+) Error!void {
+    const func_idx = try findExportFunc(allocator, wasm_bytes, export_name);
+
+    var compiled = try compileWasm(allocator, wasm_bytes);
+    defer compiled.deinit(allocator);
+
+    if (func_idx >= compiled.func_sigs.len) return Error.ExportNotFound;
+    if (func_idx < compiled.num_imports) return Error.UnsupportedEntrySignature;
+    const sig = compiled.func_sigs[func_idx];
+    if (sig.params.len != 0 or sig.results.len != 0) {
+        return Error.UnsupportedEntrySignature;
+    }
+
+    var owned = try setupRuntime(allocator, &compiled, wasm_bytes);
+    defer owned.deinit(allocator);
+    return entry.callVoidNoArgs(compiled.module, func_idx, &owned.rt);
+}
+
+/// Allocations bundled with the JitRuntime they back. Returned
+/// from `setupRuntime`; caller defers `.deinit(allocator)`.
+const RuntimeOwned = struct {
+    rt: entry.JitRuntime,
+    memory: []u8,
+    dispatch: []usize,
+    globals: []@import("../runtime/value.zig").Value,
+    funcptrs: []u64,
+    typeidxs: []u32,
+
+    fn deinit(self: *RuntimeOwned, allocator: Allocator) void {
+        if (self.memory.len > 0) allocator.free(self.memory);
+        allocator.free(self.dispatch);
+        allocator.free(self.globals);
+        allocator.free(self.funcptrs);
+        allocator.free(self.typeidxs);
+    }
+};
+
+/// Build a JitRuntime + populate its host_dispatch table + init
+/// linear memory from data segments. Shared between `runI32Export`
+/// and `runVoidExport`. The caller owns the returned `memory` and
+/// `dispatch` slices via `RuntimeOwned.deinit`.
+fn setupRuntime(
+    allocator: Allocator,
+    compiled: *const CompiledWasm,
+    wasm_bytes: []const u8,
+) Error!RuntimeOwned {
     const dispatch = try allocator.alloc(usize, compiled.num_imports);
-    defer allocator.free(dispatch);
+    errdefer allocator.free(dispatch);
     for (dispatch) |*slot| slot.* = @intFromPtr(&hostDispatchTrap);
 
-    // Memory + data init (chunk 7.9-d-3, closes D-031). When the
-    // module declares a memory section, allocate
-    // `memories[0].min * 65536` bytes and copy each active data
-    // segment to its computed offset. Combined with d-2's WASI
-    // dispatch this lets fixtures that touch linear memory run
-    // end-to-end — fd_write iov walks, args/environ writes, etc.
-    var memory_slice: []u8 = &.{};
-    defer if (memory_slice.len > 0) allocator.free(memory_slice);
+    var memory: []u8 = &.{};
+    errdefer if (memory.len > 0) allocator.free(memory);
 
     var temp_arena = std.heap.ArenaAllocator.init(allocator);
     defer temp_arena.deinit();
@@ -376,14 +414,11 @@ pub fn runI32Export(
             const page_size: u64 = 65536;
             const min_pages: u64 = memories.items[0].min;
             const total_bytes: u64 = min_pages * page_size;
-            // Cap at 256 MiB to avoid runaway tests; realworld
-            // fixtures with larger declared memory surface as
-            // UnsupportedEntrySignature for the d-3 runner.
             if (total_bytes > 256 * 1024 * 1024) {
                 return Error.UnsupportedEntrySignature;
             }
-            memory_slice = try allocator.alloc(u8, @intCast(total_bytes));
-            @memset(memory_slice, 0);
+            memory = try allocator.alloc(u8, @intCast(total_bytes));
+            @memset(memory, 0);
         }
     }
 
@@ -395,26 +430,69 @@ pub fn runI32Export(
             const off = evalConstI32Expr(seg.offset_expr) catch return Error.UnsupportedEntrySignature;
             if (off < 0) return Error.UnsupportedEntrySignature;
             const off_u: u64 = @intCast(off);
-            if (off_u + seg.bytes.len > memory_slice.len) {
+            if (off_u + seg.bytes.len > memory.len) {
                 return Error.UnsupportedEntrySignature;
             }
-            @memcpy(memory_slice[@intCast(off_u)..][0..seg.bytes.len], seg.bytes);
+            @memcpy(memory[@intCast(off_u)..][0..seg.bytes.len], seg.bytes);
         }
     }
 
-    var rt: entry.JitRuntime = .{
-        .vm_base = if (memory_slice.len > 0) memory_slice.ptr else @ptrFromInt(@as(usize, 0x1000)),
-        .mem_limit = memory_slice.len,
-        .funcptr_base = undefined,
-        .table_size = 0,
-        .typeidx_base = undefined,
-        .trap_flag = 0,
-        .globals_base = undefined,
-        .globals_count = 0,
-        .host_dispatch_base = dispatch.ptr,
-        .host_dispatch_count = compiled.num_imports,
+    // Decode globals + tables for placeholder arrays. Realistic
+    // values are needed because fixtures' JIT bodies reach for
+    // global.get / call_indirect bodies that reference these
+    // offsets even when the bounds check would short-circuit
+    // — `globals_base = undefined` previously caused 0xaaaa...
+    // segfaults in the realworld corpus invocation path.
+    var globals_count: u32 = 0;
+    if (module.find(.global)) |s| {
+        var globals_buf = try sections.decodeGlobals(ta, s.body);
+        defer globals_buf.deinit();
+        globals_count = @intCast(globals_buf.items.len);
+    }
+    var table_size: u32 = 0;
+    if (module.find(.table)) |s| {
+        var tables_buf = try sections.decodeTables(ta, s.body);
+        defer tables_buf.deinit();
+        if (tables_buf.items.len > 0) {
+            table_size = tables_buf.items[0].min;
+        }
+    }
+    // Cap to keep allocator pressure bounded; fixtures with large
+    // declared globals / tables surface as UnsupportedEntrySignature.
+    if (globals_count > 4096) return Error.UnsupportedEntrySignature;
+    if (table_size > 4096) return Error.UnsupportedEntrySignature;
+
+    const Value = @import("../runtime/value.zig").Value;
+    const globals_buf = try allocator.alloc(Value, if (globals_count == 0) 1 else globals_count);
+    errdefer allocator.free(globals_buf);
+    @memset(globals_buf, .{ .bits64 = 0 });
+
+    const funcptrs_buf = try allocator.alloc(u64, if (table_size == 0) 1 else table_size);
+    errdefer allocator.free(funcptrs_buf);
+    @memset(funcptrs_buf, 0);
+    const typeidxs_buf = try allocator.alloc(u32, if (table_size == 0) 1 else table_size);
+    errdefer allocator.free(typeidxs_buf);
+    @memset(typeidxs_buf, 0);
+
+    return .{
+        .rt = .{
+            .vm_base = if (memory.len > 0) memory.ptr else @ptrFromInt(@as(usize, 0x1000)),
+            .mem_limit = memory.len,
+            .funcptr_base = funcptrs_buf.ptr,
+            .table_size = table_size,
+            .typeidx_base = typeidxs_buf.ptr,
+            .trap_flag = 0,
+            .globals_base = globals_buf.ptr,
+            .globals_count = globals_count,
+            .host_dispatch_base = dispatch.ptr,
+            .host_dispatch_count = compiled.num_imports,
+        },
+        .memory = memory,
+        .dispatch = dispatch,
+        .globals = globals_buf,
+        .funcptrs = funcptrs_buf,
+        .typeidxs = typeidxs_buf,
     };
-    return entry.callI32NoArgs(compiled.module, func_idx, &rt);
 }
 
 /// Evaluate a Wasm const-expression that resolves to an i32.
