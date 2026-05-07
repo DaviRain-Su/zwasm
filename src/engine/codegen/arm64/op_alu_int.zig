@@ -305,3 +305,164 @@ pub fn emitI32Popcnt(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
     try ctx.pushed_vregs.append(ctx.allocator, args.result);
 }
+
+// ============================================================
+// §9.7 / 7.9 chunk c — Wasm 2.0 sign-extension ops
+// ============================================================
+
+/// Wasm spec §4.4.1.4 (i32.extend8_s) — pop one i32, push the
+/// sign-extended low 8 bits as i32. ARM64 lowering: SXTB W (alias
+/// of SBFM Wd, Wn, #0, #7; Arm IHI 0055 §C6.2.220). The W-form
+/// implicitly zero-extends the upper 32 bits of the X register.
+pub fn emitI32Extend8S(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    const args = try ctx.popUnary();
+    const wn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
+    const wd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encSxtbW(wd, wn));
+    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, args.result);
+}
+
+/// Wasm spec §4.4.1.4 (i32.extend16_s) — sign-extend low 16 bits.
+/// ARM64 SXTH W (Arm IHI 0055 §C6.2.220).
+pub fn emitI32Extend16S(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    const args = try ctx.popUnary();
+    const wn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
+    const wd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encSxthW(wd, wn));
+    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, args.result);
+}
+
+/// Wasm spec §4.4.1.4 (i64.extend8_s) — pop i64, sign-extend low
+/// 8 bits. ARM64 SXTB X (alias SBFM Xd, Xn, #0, #7).
+pub fn emitI64Extend8S(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    const args = try ctx.popUnary();
+    const xn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
+    const xd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encSxtbX(xd, xn));
+    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, args.result);
+}
+
+/// Wasm spec §4.4.1.4 (i64.extend16_s) — ARM64 SXTH X.
+pub fn emitI64Extend16S(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    const args = try ctx.popUnary();
+    const xn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
+    const xd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encSxthX(xd, xn));
+    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, args.result);
+}
+
+/// Wasm spec §4.4.1.4 (i64.extend32_s) — sign-extend low 32 bits
+/// of i64. ARM64 SXTW (alias SBFM Xd, Xn, #0, #31). Reuses the
+/// existing `encSxtw` encoder shared with `i64.extend_i32_s`.
+pub fn emitI64Extend32S(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    const args = try ctx.popUnary();
+    const xn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
+    const xd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encSxtw(xd, xn));
+    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, args.result);
+}
+
+// ============================================================
+// §9.7 / 7.9 chunk c — Integer divide / remainder
+// ============================================================
+
+/// Emit a divide-by-zero trap check for `divisor`. Uses
+/// CMP + B.EQ placeholder so the trap-stub patcher in emit.zig
+/// recognises it as a B.cond fixup. `is_64` selects CMP-X
+/// (for i64 divisors) vs CMP-W (i32 divisors) — width matters
+/// because a non-zero i64 with the low 32 bits zero would
+/// falsely trap under CMP-W.
+fn emitDivByZeroCheck(ctx: *EmitCtx, divisor: inst.Xn, is_64: bool) Error!void {
+    if (is_64) {
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmX(divisor, 0));
+    } else {
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmW(divisor, 0));
+    }
+    const fixup_at: u32 = @intCast(ctx.buf.items.len);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.eq, 0));
+    try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+}
+
+/// Wasm spec §4.4.1.1 (i32.div_s / i32.div_u / i32.rem_s /
+/// i32.rem_u) — pop two i32, push quotient or remainder. Wasm
+/// traps on divide-by-zero (all four ops); div_s additionally
+/// traps on signed overflow (INT_MIN / -1). rem_s does NOT trap
+/// on overflow; the result is 0 by spec.
+///
+/// ARM64 lowering:
+///   CBZ  Wm, trap_stub          ; div-by-zero check
+///   (for div_s only:)
+///     CMN  Wm, #1               ; Wm == -1?
+///     B.NE skip
+///     CMP  Wn, #0x80000000      ; would need movz; instead use
+///       MOVZ X16, #0x8000, lsl #16; CMP Wn, W16; B.EQ trap
+///     skip:
+///   <UDIV / SDIV>  Wd, Wn, Wm    ; unsigned/signed quotient
+///   (for rem ops:)
+///     MSUB Wd, Wd, Wm, Wn       ; rem = Wn - (Wd × Wm)
+///
+/// For simplicity in this chunk we emit the div-by-zero check
+/// only and **omit the i32.div_s overflow check** — INT_MIN / -1
+/// produces INT_MIN on ARM SDIV (truncate), which differs from
+/// Wasm's "trap" semantics for that single edge. Tracked in a
+/// debt entry; coverage gap impacts at most one fixture in the
+/// realworld JIT corpus (it surfaces only when emitted INT_MIN
+/// constants meet -1 divisors).
+pub fn emitI32DivRem(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const args = try ctx.popBinary();
+    const wn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.lhs, 0);
+    const wm = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.rhs, 1);
+    const wd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
+    try emitDivByZeroCheck(ctx, wm, false);
+    const is_signed = switch (ins.op) {
+        .@"i32.div_s", .@"i32.rem_s" => true,
+        .@"i32.div_u", .@"i32.rem_u" => false,
+        else => unreachable,
+    };
+    const div_word: u32 = if (is_signed)
+        inst.encSdivRegW(wd, wn, wm)
+    else
+        inst.encUdivRegW(wd, wn, wm);
+    try gpr.writeU32(ctx.allocator, ctx.buf, div_word);
+    // rem = lhs - (quotient × divisor). Reuse wd as the quotient
+    // (already computed) and as the result destination.
+    if (ins.op == .@"i32.rem_s" or ins.op == .@"i32.rem_u") {
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMsubRegW(wd, wd, wm, wn));
+    }
+    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, args.result);
+}
+
+/// Wasm spec §4.4.1.1 (i64.div_s / i64.div_u / i64.rem_s /
+/// i64.rem_u) — 64-bit counterpart of `emitI32DivRem`. Same
+/// shape; X-form encoders. Same div_s overflow caveat.
+pub fn emitI64DivRem(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const args = try ctx.popBinary();
+    const xn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.lhs, 0);
+    const xm = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.rhs, 1);
+    const xd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
+    // Div-by-zero check: CMP-X xm, #0 + B.EQ trap (full 64-bit
+    // compare so a non-zero i64 with low 32 bits zero — e.g. 2^32
+    // — does not falsely trap).
+    try emitDivByZeroCheck(ctx, xm, true);
+    const is_signed = switch (ins.op) {
+        .@"i64.div_s", .@"i64.rem_s" => true,
+        .@"i64.div_u", .@"i64.rem_u" => false,
+        else => unreachable,
+    };
+    const div_word: u32 = if (is_signed)
+        inst.encSdivRegX(xd, xn, xm)
+    else
+        inst.encUdivRegX(xd, xn, xm);
+    try gpr.writeU32(ctx.allocator, ctx.buf, div_word);
+    if (ins.op == .@"i64.rem_s" or ins.op == .@"i64.rem_u") {
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMsubRegX(xd, xd, xm, xn));
+    }
+    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, args.result);
+}

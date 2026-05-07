@@ -479,6 +479,15 @@ pub fn compile(
             => try op_alu_int.emitI64Bitcount(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.op),
             .@"i32.wrap_i64", .@"i64.extend_i32_u", .@"i64.extend_i32_s",
             => try op_alu_int.emitConvertWidth(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.op),
+            // §9.7 / 7.9 chunk c: Wasm 2.0 sign-extension ops.
+            .@"i32.extend8_s", .@"i32.extend16_s",
+            .@"i64.extend8_s", .@"i64.extend16_s", .@"i64.extend32_s",
+            => try op_alu_int.emitSignExtend(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.op),
+            // §9.7 / 7.9 chunk c: integer divide / remainder.
+            .@"i32.div_s", .@"i32.div_u", .@"i32.rem_s", .@"i32.rem_u",
+            => try op_alu_int.emitI32DivRem(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.op),
+            .@"i64.div_s", .@"i64.div_u", .@"i64.rem_s", .@"i64.rem_u",
+            => try op_alu_int.emitI64DivRem(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.op),
             .@"call" => try op_call.emitCall(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &call_fixups, &unreach_fixups, spill_base_off, func_sigs, num_imports, ins.payload),
             .@"call_indirect" => try op_call.emitCallIndirect(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, module_types, ins.payload),
             .@"f32.const", .@"f64.const",

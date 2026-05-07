@@ -101,6 +101,12 @@ fn stackEffect(op: ZirOp) ?StackEffect {
         .@"i32.trunc_sat_f64_s", .@"i32.trunc_sat_f64_u",
         .@"i64.trunc_sat_f32_s", .@"i64.trunc_sat_f32_u",
         .@"i64.trunc_sat_f64_s", .@"i64.trunc_sat_f64_u",
+        // Wasm 2.0 sign-extension ops (§9.7 / 7.9 chunk c).
+        // Wasm spec §4.4.1.4 (extendN_s) — pop one int, push the
+        // sign-extended same-width int. Same 1→1 stack shape as
+        // any unary integer op.
+        .@"i32.extend8_s", .@"i32.extend16_s",
+        .@"i64.extend8_s", .@"i64.extend16_s", .@"i64.extend32_s",
         => .{ .pops = 1, .pushes = 1 },
         // 2 → 1 binop
         .@"i32.add", .@"i32.sub", .@"i32.mul",

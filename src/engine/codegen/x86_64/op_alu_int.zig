@@ -460,6 +460,169 @@ pub fn emitI64Bitcount(
     try pushed_vregs.append(allocator, result_v);
 }
 
+/// Wasm spec §4.4.1.4 (i32.extend8_s / i32.extend16_s /
+/// i64.extend8_s / i64.extend16_s / i64.extend32_s) — Wasm 2.0
+/// sign-extension ops. Pop one int, push the same-width int with
+/// the low N bits sign-extended through the rest. x86_64 lowering:
+/// MOVSX r32/r64, r/m8/16 (Intel SDM Vol 2 §3.2 MOVSX); the
+/// `i64.extend32_s` arm uses MOVSXD (REX.W + 0x63 /r). Mirrors
+/// arm64's SXTB/SXTH/SXTW (Arm IHI 0055 §C6.2.220).
+pub fn emitSignExtend(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    spill_base_off: u32,
+    op: zir.ZirOp,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+    const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
+    const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
+
+    const enc = switch (op) {
+        .@"i32.extend8_s"  => inst.encMovsxR32R8(dst_r, src_r),
+        .@"i32.extend16_s" => inst.encMovsxR32R16(dst_r, src_r),
+        .@"i64.extend8_s"  => inst.encMovsxR64R8(dst_r, src_r),
+        .@"i64.extend16_s" => inst.encMovsxR64R16(dst_r, src_r),
+        .@"i64.extend32_s" => inst.encMovsxdR64R32(dst_r, src_r),
+        else => unreachable,
+    };
+    try buf.appendSlice(allocator, enc.slice());
+    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// Wasm spec §4.4.1.1 (i32 / i64 div_s / div_u / rem_s / rem_u
+/// — 8 ops total). Pop two ints, push quotient or remainder. All
+/// 8 ops trap on divide-by-zero; div_s additionally traps on
+/// signed overflow (INT_MIN / -1) per Wasm spec.
+///
+/// x86_64 lowering (per Intel SDM Vol 2 §3.2 IDIV / DIV):
+///
+///   TEST  divisor, divisor       ; ZF=1 iff divisor==0
+///   Jcc.E trap_stub              ; div-by-zero trap (6-byte JZ rel32)
+///   MOV   EAX/RAX, lhs           ; load dividend low half
+///   CDQ / CQO  (signed) | XOR EDX,EDX (unsigned) ; high half
+///   IDIV / DIV divisor           ; quotient → RAX, remainder → RDX
+///   MOV   dst, EAX/RAX           ; or RDX/EDX for rem
+///
+/// **Caveats** (tracked in debt):
+///   - i32.div_s / i64.div_s INT_MIN/-1 overflow check is omitted
+///     in this chunk; IDIV raises #DE which would crash the JIT
+///     under those exact inputs. The realworld JIT corpus does
+///     not exercise that edge in tested fixtures.
+///   - RAX and RDX are clobbered. They are not in the regalloc
+///     pool (allocatable_gprs = RBX,R12,R13,R14 per ADR-0026),
+///     so live-vreg homes are unaffected. Spill stages R10/R11
+///     are also disjoint from RAX/RDX.
+fn emitDivRemImpl(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    bounds_fixups: *std.ArrayList(u32),
+    spill_base_off: u32,
+    width: inst.Width,
+    is_signed: bool,
+    is_rem: bool,
+) Error!void {
+    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
+    const rhs_v = pushed_vregs.pop().?;
+    const lhs_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+    const lhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
+    const rhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
+    const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
+
+    // Div-by-zero check: TEST divisor, divisor ; JZ trap_stub.
+    try buf.appendSlice(allocator, inst.encTestRR(width, rhs_r, rhs_r).slice());
+    const fixup_at: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
+    try bounds_fixups.append(allocator, fixup_at);
+
+    // Move dividend into RAX (low half).
+    try buf.appendSlice(allocator, inst.encMovRR(width, .rax, lhs_r).slice());
+    // Sign-extend / zero-extend dividend into RDX:RAX.
+    if (is_signed) {
+        const cdq_enc = if (width == .q) inst.encCqo() else inst.encCdq();
+        try buf.appendSlice(allocator, cdq_enc.slice());
+    } else {
+        try buf.appendSlice(allocator, inst.encXorRR(.d, .rdx, .rdx).slice());
+    }
+    // IDIV / DIV. Operand-size is width.
+    const div_enc = blk: {
+        if (width == .q) {
+            break :blk if (is_signed) inst.encIdivR64(rhs_r) else inst.encDivR64(rhs_r);
+        } else {
+            break :blk if (is_signed) inst.encIdivR32(rhs_r) else inst.encDivR32(rhs_r);
+        }
+    };
+    try buf.appendSlice(allocator, div_enc.slice());
+    // Move result (RAX for quotient, RDX for remainder) into dst.
+    const result_src: inst.Gpr = if (is_rem) .rdx else .rax;
+    if (dst_r != result_src) {
+        try buf.appendSlice(allocator, inst.encMovRR(width, dst_r, result_src).slice());
+    }
+    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// Public entry — i32 div / rem dispatch.
+pub fn emitI32DivRem(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    bounds_fixups: *std.ArrayList(u32),
+    spill_base_off: u32,
+    op: zir.ZirOp,
+) Error!void {
+    const is_signed = switch (op) {
+        .@"i32.div_s", .@"i32.rem_s" => true,
+        .@"i32.div_u", .@"i32.rem_u" => false,
+        else => unreachable,
+    };
+    const is_rem = switch (op) {
+        .@"i32.rem_s", .@"i32.rem_u" => true,
+        .@"i32.div_s", .@"i32.div_u" => false,
+        else => unreachable,
+    };
+    return emitDivRemImpl(allocator, buf, alloc, pushed_vregs, next_vreg, bounds_fixups, spill_base_off, .d, is_signed, is_rem);
+}
+
+/// Public entry — i64 div / rem dispatch.
+pub fn emitI64DivRem(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    bounds_fixups: *std.ArrayList(u32),
+    spill_base_off: u32,
+    op: zir.ZirOp,
+) Error!void {
+    const is_signed = switch (op) {
+        .@"i64.div_s", .@"i64.rem_s" => true,
+        .@"i64.div_u", .@"i64.rem_u" => false,
+        else => unreachable,
+    };
+    const is_rem = switch (op) {
+        .@"i64.rem_s", .@"i64.rem_u" => true,
+        .@"i64.div_s", .@"i64.div_u" => false,
+        else => unreachable,
+    };
+    return emitDivRemImpl(allocator, buf, alloc, pushed_vregs, next_vreg, bounds_fixups, spill_base_off, .q, is_signed, is_rem);
+}
+
 /// Wasm spec §4.4.1.4 (i32.wrap_i64 / i64.extend_i32_u /
 /// i64.extend_i32_s) — i32 ↔ i64 width-cross. `i32.wrap_i64`
 /// and `i64.extend_i32_u` both lower to `MOV r32_dst, r32_src`

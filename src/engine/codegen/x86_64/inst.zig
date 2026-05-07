@@ -387,6 +387,135 @@ pub fn encMovsxdR64R32(dst: Gpr, src: Gpr) EncodedInsn {
     return enc;
 }
 
+/// `MOVSX r32, r/m8` (2-byte opcode 0x0F 0xBE /r) — sign-extend
+/// the low 8 bits of `src` into the 32-bit form of `dst` (which
+/// implicitly zero-extends to 64). Used by Wasm 2.0
+/// `i32.extend8_s` (Intel SDM Vol 2 §3.2 MOVSX). REX always
+/// emitted for low-byte addressability (BL/BPL/SIL/DIL aliasing
+/// with BH/CH/DH/AH in 64-bit mode).
+pub fn encMovsxR32R8(dst: Gpr, src: Gpr) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
+    enc.push(0x0F);
+    enc.push(0xBE);
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    return enc;
+}
+
+/// `MOVSX r32, r/m16` (2-byte opcode 0x0F 0xBF /r) — sign-extend
+/// the low 16 bits. Used by `i32.extend16_s`.
+pub fn encMovsxR32R16(dst: Gpr, src: Gpr) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (rexForRR(.d, dst, src)) |rex| enc.push(rex);
+    enc.push(0x0F);
+    enc.push(0xBF);
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    return enc;
+}
+
+/// `MOVSX r64, r/m8` (REX.W + 0x0F 0xBE /r) — sign-extend low 8
+/// bits into 64-bit dst. Used by `i64.extend8_s`.
+pub fn encMovsxR64R8(dst: Gpr, src: Gpr) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(encodeRex(true, dst.extBit(), 0, src.extBit()));
+    enc.push(0x0F);
+    enc.push(0xBE);
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    return enc;
+}
+
+/// `MOVSX r64, r/m16` (REX.W + 0x0F 0xBF /r) — Used by
+/// `i64.extend16_s`.
+pub fn encMovsxR64R16(dst: Gpr, src: Gpr) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(encodeRex(true, dst.extBit(), 0, src.extBit()));
+    enc.push(0x0F);
+    enc.push(0xBF);
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    return enc;
+}
+
+/// `CDQ` (opcode 0x99) — sign-extend EAX into EDX:EAX (Intel
+/// SDM Vol 2 §3.2 CDQ). One byte. Used as the dividend prep
+/// step for IDIV r/m32 (signed 32-bit divide).
+pub fn encCdq() EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0x99);
+    return enc;
+}
+
+/// `CQO` (REX.W + 0x99) — sign-extend RAX into RDX:RAX. Used as
+/// the dividend prep step for IDIV r/m64.
+pub fn encCqo() EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(encodeRex(true, 0, 0, 0)); // 0x48
+    enc.push(0x99);
+    return enc;
+}
+
+/// `IDIV r/m32` (opcode 0xF7 /7) — signed divide of EDX:EAX by
+/// the operand; quotient → EAX, remainder → EDX. Intel SDM Vol 2
+/// §3.2 IDIV. Wasm spec §4.4.1.1 (i32.div_s / i32.rem_s) —
+/// caller is responsible for the divide-by-zero trap check + the
+/// INT_MIN/-1 overflow check (IDIV raises #DE, but we trap via
+/// the explicit pre-check so the JIT does not need a #DE
+/// handler).
+pub fn encIdivR32(divisor: Gpr) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (divisor.extBit() != 0) {
+        enc.push(encodeRex(false, 0, 0, divisor.extBit()));
+    }
+    enc.push(0xF7);
+    enc.push(encodeModrm(0b11, 7, divisor.low3())); // /7 = IDIV
+    return enc;
+}
+
+/// `DIV r/m32` (opcode 0xF7 /6) — unsigned divide of EDX:EAX by
+/// operand. Wasm spec §4.4.1.1 (i32.div_u / i32.rem_u).
+pub fn encDivR32(divisor: Gpr) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (divisor.extBit() != 0) {
+        enc.push(encodeRex(false, 0, 0, divisor.extBit()));
+    }
+    enc.push(0xF7);
+    enc.push(encodeModrm(0b11, 6, divisor.low3())); // /6 = DIV
+    return enc;
+}
+
+/// `IDIV r/m64` (REX.W + 0xF7 /7) — 64-bit signed divide.
+pub fn encIdivR64(divisor: Gpr) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(encodeRex(true, 0, 0, divisor.extBit()));
+    enc.push(0xF7);
+    enc.push(encodeModrm(0b11, 7, divisor.low3()));
+    return enc;
+}
+
+/// `DIV r/m64` (REX.W + 0xF7 /6) — 64-bit unsigned divide.
+pub fn encDivR64(divisor: Gpr) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(encodeRex(true, 0, 0, divisor.extBit()));
+    enc.push(0xF7);
+    enc.push(encodeModrm(0b11, 6, divisor.low3()));
+    return enc;
+}
+
+/// `TEST r/m32, imm32` (opcode 0xF7 /0) — sign-extended 32-bit
+/// AND with imm32, sets EFLAGS, no result. Useful for explicit
+/// non-zero comparison (TEST r, r is shorter for that). Used by
+/// the divide-by-zero check before `IDIV`/`DIV`.
+pub fn encTestRImm32(size: Width, dst: Gpr, imm: u32) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (rexForRR(size, .rax, dst)) |rex| enc.push(rex);
+    enc.push(0xF7);
+    enc.push(encodeModrm(0b11, 0, dst.low3()));
+    enc.push(@truncate(imm));
+    enc.push(@truncate(imm >> 8));
+    enc.push(@truncate(imm >> 16));
+    enc.push(@truncate(imm >> 24));
+    return enc;
+}
+
 /// Common shape for the `F3 0F <opcode> /r` family used by
 /// LZCNT / TZCNT / POPCNT. dst occupies ModR/M.reg and src is
 /// in r/m (IMUL-style operand inversion). The mandatory 0xF3
@@ -2077,4 +2206,48 @@ test "encMovssMovsdMemBaseIdx: movss [rax+rdx], xmm8 → f3 44 0f 11 04 10 (stor
 test "encMovssMovsdMemBaseIdx: movsd [r10+r11], xmm0 → f2 43 0f 11 04 1a (store, REX.B+X)" {
     const enc = encMovssMovsdMemBaseIdx(.f64, true, .xmm0, .r10, .r11);
     try testing.expectEqualSlices(u8, &.{ 0xF2, 0x43, 0x0F, 0x11, 0x04, 0x1A }, enc.slice());
+}
+
+// §9.7 / 7.9 chunk c: sign-extension + integer divide encoders.
+// Hex bytes verified via `clang -target x86_64-linux-gnu` Intel-
+// syntax assembler (encMovsxR32R8 etc.).
+test "encMovsxR32R8: movsbl %bl, %eax → 40 0f be c3" {
+    const enc = encMovsxR32R8(.rax, .rbx);
+    try testing.expectEqualSlices(u8, &.{ 0x40, 0x0F, 0xBE, 0xC3 }, enc.slice());
+}
+test "encMovsxR32R16: movswl %bx, %eax → 0f bf c3" {
+    const enc = encMovsxR32R16(.rax, .rbx);
+    try testing.expectEqualSlices(u8, &.{ 0x0F, 0xBF, 0xC3 }, enc.slice());
+}
+test "encMovsxR64R8: movsbq %bl, %rax → 48 0f be c3 (REX.W)" {
+    const enc = encMovsxR64R8(.rax, .rbx);
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x0F, 0xBE, 0xC3 }, enc.slice());
+}
+test "encMovsxR64R16: movswq %bx, %rax → 48 0f bf c3" {
+    const enc = encMovsxR64R16(.rax, .rbx);
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x0F, 0xBF, 0xC3 }, enc.slice());
+}
+test "encCdq → 0x99" {
+    try testing.expectEqualSlices(u8, &.{0x99}, encCdq().slice());
+}
+test "encCqo → 48 99" {
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x99 }, encCqo().slice());
+}
+test "encIdivR32 idiv ebx → f7 fb" {
+    try testing.expectEqualSlices(u8, &.{ 0xF7, 0xFB }, encIdivR32(.rbx).slice());
+}
+test "encDivR32 div ebx → f7 f3" {
+    try testing.expectEqualSlices(u8, &.{ 0xF7, 0xF3 }, encDivR32(.rbx).slice());
+}
+test "encIdivR64 idiv rbx → 48 f7 fb" {
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0xF7, 0xFB }, encIdivR64(.rbx).slice());
+}
+test "encDivR64 div rbx → 48 f7 f3" {
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0xF7, 0xF3 }, encDivR64(.rbx).slice());
+}
+test "encIdivR32 idiv r10d → 41 f7 fa (REX.B)" {
+    try testing.expectEqualSlices(u8, &.{ 0x41, 0xF7, 0xFA }, encIdivR32(.r10).slice());
+}
+test "encDivR64 div r10 → 49 f7 f2 (REX.W + REX.B)" {
+    try testing.expectEqualSlices(u8, &.{ 0x49, 0xF7, 0xF2 }, encDivR64(.r10).slice());
 }

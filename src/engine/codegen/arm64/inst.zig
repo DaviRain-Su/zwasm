@@ -157,6 +157,77 @@ pub fn encSxtw(xd: Xn, wn: Xn) u32 {
     return 0x93407C00 | (@as(u32, wn) << 5) | @as(u32, xd);
 }
 
+/// `SXTB Wd, Wn` — sign-extend low 8 bits of Wn into Wd
+/// (Wasm `i32.extend8_s`). Alias for `SBFM Wd, Wn, #0, #7`
+/// (Arm IHI 0055 §C6.2.220, SBFM 32-bit immr=0 imms=7).
+/// Encoding base 0x13001C00; sf=0, N=0, immr=0, imms=7.
+pub fn encSxtbW(wd: Xn, wn: Xn) u32 {
+    return 0x13001C00 | (@as(u32, wn) << 5) | @as(u32, wd);
+}
+
+/// `SXTH Wd, Wn` — sign-extend low 16 bits (Wasm `i32.extend16_s`).
+/// Alias for `SBFM Wd, Wn, #0, #15`. Encoding base 0x13003C00;
+/// sf=0, immr=0, imms=15. Arm IHI 0055 §C6.2.220.
+pub fn encSxthW(wd: Xn, wn: Xn) u32 {
+    return 0x13003C00 | (@as(u32, wn) << 5) | @as(u32, wd);
+}
+
+/// `SXTB Xd, Wn` — sign-extend low 8 bits into 64-bit Xd
+/// (Wasm `i64.extend8_s`). Alias for `SBFM Xd, Xn, #0, #7`.
+/// Encoding base 0x93401C00; sf=1, N=1, immr=0, imms=7.
+pub fn encSxtbX(xd: Xn, xn: Xn) u32 {
+    return 0x93401C00 | (@as(u32, xn) << 5) | @as(u32, xd);
+}
+
+/// `SXTH Xd, Wn` — sign-extend low 16 bits into 64-bit Xd
+/// (Wasm `i64.extend16_s`). Alias for `SBFM Xd, Xn, #0, #15`.
+/// Encoding base 0x93403C00; sf=1, N=1, immr=0, imms=15.
+pub fn encSxthX(xd: Xn, xn: Xn) u32 {
+    return 0x93403C00 | (@as(u32, xn) << 5) | @as(u32, xd);
+}
+
+/// `SDIV Wd, Wn, Wm` — signed divide, 32-bit. Arm IHI 0055
+/// §C6.2.234. Trapping behaviour deferred to caller (zero-check
+/// + INT_MIN/-1 overflow check happen before this).
+/// Encoding (32-bit SDIV): `0 00 11010110 [Rm:5] 000011 [Rn:5] [Rd:5]`
+/// = base 0x1AC00C00.
+pub fn encSdivRegW(rd: Xn, rn: Xn, rm: Xn) u32 {
+    return 0x1AC00C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `UDIV Wd, Wn, Wm` — unsigned divide, 32-bit.
+/// Encoding (32-bit UDIV): `0 00 11010110 [Rm:5] 000010 [Rn:5] [Rd:5]`
+/// = base 0x1AC00800. Arm IHI 0055 §C6.2.337.
+pub fn encUdivRegW(rd: Xn, rn: Xn, rm: Xn) u32 {
+    return 0x1AC00800 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `SDIV Xd, Xn, Xm` — signed divide, 64-bit. sf=1.
+/// Encoding base 0x9AC00C00.
+pub fn encSdivRegX(rd: Xn, rn: Xn, rm: Xn) u32 {
+    return 0x9AC00C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `UDIV Xd, Xn, Xm` — unsigned divide, 64-bit. Encoding base
+/// 0x9AC00800. Arm IHI 0055 §C6.2.337.
+pub fn encUdivRegX(rd: Xn, rn: Xn, rm: Xn) u32 {
+    return 0x9AC00800 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `MSUB Wd, Wn, Wm, Wa` — Wd = Wa - (Wn × Wm), 32-bit.
+/// Used to compute remainder = lhs - (lhs/rhs)*rhs.
+/// Encoding (32-bit MSUB): `0 00 11011 000 [Rm:5] 1 [Ra:5] [Rn:5] [Rd:5]`
+/// = base 0x1B008000. Arm IHI 0055 §C6.2.187.
+pub fn encMsubRegW(rd: Xn, rn: Xn, rm: Xn, ra: Xn) u32 {
+    return 0x1B008000 | (@as(u32, rm) << 16) | (@as(u32, ra) << 10) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `MSUB Xd, Xn, Xm, Xa` — 64-bit MSUB. sf=1; encoding base
+/// 0x9B008000.
+pub fn encMsubRegX(rd: Xn, rn: Xn, rm: Xn, ra: Xn) u32 {
+    return 0x9B008000 | (@as(u32, rm) << 16) | (@as(u32, ra) << 10) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
 // ============================================================
 // Sub-h2: int↔float conversions (SCVTF / UCVTF / FCVT).
 // All verified via clang assembler.
@@ -1248,4 +1319,38 @@ test "encUmovWFromVB0 w0 ← v0.B[0] — `umov w0, v0.b[0]` → 0x0E013C00" {
 
 test "encUmovWFromVB0 w10 ← v31.B[0] — `umov w10, v31.b[0]` → 0x0E013FEA" {
     try testing.expectEqual(@as(u32, 0x0E013FEA), encUmovWFromVB0(10, 31));
+}
+
+// §9.7 / 7.9 chunk c: sign-extension + integer divide encoders.
+// Hex bytes verified via `clang -target arm64-apple-darwin` assembler;
+// see inst.zig docstrings for Arm IHI 0055 references.
+test "encSxtbW w0, w0 → 0x13001C00" {
+    try testing.expectEqual(@as(u32, 0x13001C00), encSxtbW(0, 0));
+}
+test "encSxthW w0, w0 → 0x13003C00" {
+    try testing.expectEqual(@as(u32, 0x13003C00), encSxthW(0, 0));
+}
+test "encSxtbX x0, w0 → 0x93401C00" {
+    try testing.expectEqual(@as(u32, 0x93401C00), encSxtbX(0, 0));
+}
+test "encSxthX x0, w0 → 0x93403C00" {
+    try testing.expectEqual(@as(u32, 0x93403C00), encSxthX(0, 0));
+}
+test "encSdivRegW w0, w1, w2 → 0x1AC20C20" {
+    try testing.expectEqual(@as(u32, 0x1AC20C20), encSdivRegW(0, 1, 2));
+}
+test "encUdivRegW w0, w1, w2 → 0x1AC20820" {
+    try testing.expectEqual(@as(u32, 0x1AC20820), encUdivRegW(0, 1, 2));
+}
+test "encSdivRegX x0, x1, x2 → 0x9AC20C20" {
+    try testing.expectEqual(@as(u32, 0x9AC20C20), encSdivRegX(0, 1, 2));
+}
+test "encUdivRegX x0, x1, x2 → 0x9AC20820" {
+    try testing.expectEqual(@as(u32, 0x9AC20820), encUdivRegX(0, 1, 2));
+}
+test "encMsubRegW w0, w1, w2, w3 → 0x1B028C20" {
+    try testing.expectEqual(@as(u32, 0x1B028C20), encMsubRegW(0, 1, 2, 3));
+}
+test "encMsubRegX x0, x1, x2, x3 → 0x9B028C20" {
+    try testing.expectEqual(@as(u32, 0x9B028C20), encMsubRegX(0, 1, 2, 3));
 }

@@ -516,6 +516,17 @@ pub fn compile(
             .@"i32.eqz" => try op_alu_int.emitI32Eqz(&ctx, &ins),
             .@"i32.clz" => try op_alu_int.emitI32Clz(&ctx, &ins),
             .@"i32.ctz" => try op_alu_int.emitI32Ctz(&ctx, &ins),
+            // §9.7 / 7.9 chunk c: Wasm 2.0 sign-extension ops.
+            .@"i32.extend8_s" => try op_alu_int.emitI32Extend8S(&ctx, &ins),
+            .@"i32.extend16_s" => try op_alu_int.emitI32Extend16S(&ctx, &ins),
+            .@"i64.extend8_s" => try op_alu_int.emitI64Extend8S(&ctx, &ins),
+            .@"i64.extend16_s" => try op_alu_int.emitI64Extend16S(&ctx, &ins),
+            .@"i64.extend32_s" => try op_alu_int.emitI64Extend32S(&ctx, &ins),
+            // §9.7 / 7.9 chunk c: integer divide / remainder.
+            .@"i32.div_s", .@"i32.div_u", .@"i32.rem_s", .@"i32.rem_u",
+            => try op_alu_int.emitI32DivRem(&ctx, &ins),
+            .@"i64.div_s", .@"i64.div_u", .@"i64.rem_s", .@"i64.rem_u",
+            => try op_alu_int.emitI64DivRem(&ctx, &ins),
             .@"local.get" => {
                 // Push a fresh vreg holding the value loaded from
                 // [SP, #(local_idx * 8)]. Width follows declared
