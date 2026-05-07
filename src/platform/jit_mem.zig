@@ -2,13 +2,17 @@
 //!
 //! Allocates a page-aligned region that JIT-emitted bytes are
 //! written to, then flips its protection so the CPU can execute
-//! the bytes. macOS aarch64 with hardened runtime requires the
-//! MAP_JIT pattern + per-thread W^X toggle (`pthread_jit_write_
-//! protect_np`) + I-cache invalidation; Linux + Windows variants
-//! are not yet wired (the §9.7 / 7.4 gate exercises this only on
-//! Mac aarch64; Linux x86_64 / Windows x86_64 hosts surface
-//! `NotImplemented` and the test gates skip the JIT spec gate
-//! there until Phase 8 / x86_64 emit lands).
+//! the bytes. Per-OS implementation:
+//!
+//! - macOS aarch64 (hardened runtime): MAP_JIT + per-thread W^X
+//!   toggle (`pthread_jit_write_protect_np`) + I-cache
+//!   invalidation.
+//! - Linux x86_64 (D-045 chunk 10): plain `mmap` with
+//!   PROT_READ|WRITE|EXEC (Linux doesn't enforce W^X on user
+//!   mmap unless SELinux/etc explicitly does). setExecutable /
+//!   setWritable are no-ops since the page is always RWX.
+//! - Windows x86_64: `VirtualAlloc` with PAGE_EXECUTE_READWRITE
+//!   (D-045 chunk 11; not yet implemented).
 //!
 //! Zone 0 (`src/platform/`) — depends only on Zig stdlib.
 
@@ -24,7 +28,13 @@ pub const Error = error{
     NotImplemented,
 };
 
-const page_size: usize = 16 * 1024; // macOS aarch64 default
+/// Allocation-rounding granularity. macOS aarch64 = 16K; Linux
+/// x86_64 = 4K (mmap will round up itself, but we pre-round so
+/// the JitBlock's `bytes.len` matches the actual mapping).
+const page_size: usize = if (builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)
+    16 * 1024
+else
+    4 * 1024;
 
 /// A page-aligned RWX region holding JIT-emitted bytes. Lifetime
 /// owned by the caller; pair `alloc` with `free`.
@@ -57,6 +67,14 @@ pub fn alloc(size: usize) Error!JitBlock {
         return .{ .bytes = aligned[0..rounded] };
     }
 
+    if (builtin.os.tag == .linux and builtin.cpu.arch == .x86_64) {
+        // D-045 chunk 10: Linux x86_64 mmap-RWX.
+        const prot: std.posix.PROT = .{ .READ = true, .WRITE = true, .EXEC = true };
+        const flags: std.posix.MAP = .{ .TYPE = .PRIVATE, .ANONYMOUS = true };
+        const result = std.posix.mmap(null, rounded, prot, flags, -1, 0) catch return Error.AllocationFailed;
+        return .{ .bytes = @alignCast(result[0..rounded]) };
+    }
+
     return Error.NotImplemented;
 }
 
@@ -64,6 +82,10 @@ pub fn alloc(size: usize) Error!JitBlock {
 pub fn free(block: JitBlock) void {
     if (builtin.os.tag == .macos and builtin.cpu.arch == .aarch64) {
         _ = std.c.munmap(@ptrCast(block.bytes.ptr), block.bytes.len);
+        return;
+    }
+    if (builtin.os.tag == .linux and builtin.cpu.arch == .x86_64) {
+        std.posix.munmap(block.bytes);
         return;
     }
 }
@@ -80,6 +102,12 @@ pub fn setExecutable(block: JitBlock) Error!void {
         sys_icache_invalidate(@ptrCast(block.bytes.ptr), block.bytes.len);
         return;
     }
+    if (builtin.os.tag == .linux and builtin.cpu.arch == .x86_64) {
+        // No-op: page is RWX from alloc; x86_64 has no I-cache
+        // coherency concern (D-cache writes are visible to I-cache
+        // implicitly per Intel SDM Vol 3 §11.6).
+        return;
+    }
     return Error.NotImplemented;
 }
 
@@ -87,9 +115,14 @@ pub fn setExecutable(block: JitBlock) Error!void {
 /// patch `call_fixups` after initial publish. Pair with
 /// `setExecutable`.
 pub fn setWritable(block: JitBlock) Error!void {
-    _ = block;
+    _ = block; // Mac uses pthread_jit_write_protect_np (no block);
+               // Linux is a no-op (page is always RWX); Windows
+               // chunk 11 will use VirtualProtect (will read block).
     if (builtin.os.tag == .macos and builtin.cpu.arch == .aarch64) {
         pthread_jit_write_protect_np(0); // 0 = disable W^X (RW)
+        return;
+    }
+    if (builtin.os.tag == .linux and builtin.cpu.arch == .x86_64) {
         return;
     }
     return Error.NotImplemented;
