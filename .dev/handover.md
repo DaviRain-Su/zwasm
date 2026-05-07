@@ -16,54 +16,47 @@
 
 直近 commit (HEAD = `<this>`):
 
-- `<this>` chore(p7): §9.7 / 7.9 chunk d-2 close (WASI dispatch handlers)
+- `<this>` chore(p7): §9.7 / 7.9 chunk d-3 close (proc_exit + memory init; D-031)
+- `71f3896` feat(p7): §9.7 / 7.9 chunk d-3 — proc_exit dispatch + memory + data init (D-031)
 - `6800bb7` feat(p7): §9.7 / 7.9 chunk d-2 — WASI dispatch handlers + first run-stage host call
 - `95d5ec8` feat(p7): §9.7 / 7.9 chunk d-1 — host-import dispatch infrastructure
-- `ceb5b1e` feat(p7): §9.7 / 7.9 chunk c3 — i{32,64}.div_s INT_MIN/-1 overflow trap
 
 **Phase status**: §9.7 / 7.5 + 7.8 → **[x]**。Phase 7 残 row = 7.9 /
 7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。
 
-**§9.7 / 7.9 progress**: chunks a..d-2 closed across 9 commits。
+**§9.7 / 7.9 progress**: chunks a..d-3 closed across 11 commits。
 3-host gate green: spec_assert 212/0/20 + realworld 55/0 + wast
-1158+72/0 + edge_cases 32/0 + new wasi-jit-dispatch unit tests
-across Mac / OrbStack Linux / windowsmini Win。
+1158+72/0 + edge_cases 34/0 (3 new WASI: fd_write_badf, proc_exit_zero,
+fd_write_hello) + wasi-jit-dispatch unit tests +1 (proc_exit lookup)。
 
-**Chunk 7.9-d-2 完了** (`6800bb7`): real WASI handlers wired:
-- `src/wasi/jit_dispatch.zig` — `fd_write` (iov walk + bounds
-  check + nwritten write; stdout routing deferred), `clock_time_
-  get` / `random_get` (deterministic stubs writing 0), args /
-  environ stubs returning 0/empty。
-- `lookup(module, name)` matches wasi_snapshot_preview1 +
-  wasi_unstable; `populateDispatch` walks imports in wasm-space
-  order filling per-fn-idx slots。
-- `runner.zig.runI32Export` re-decodes imports section, calls
-  populateDispatch, hands the dispatch slice to JitRuntime。
-- End-to-end smoke `test/edge_cases/p7/wasi/fd_write_badf.{wat,
-  wasm,expect}`: imports fd_write, calls with fd=99, expects
-  i32:8 (EBADF). Mac edge_cases 31→32 PASS — first realworld
-  WASI host-call via JIT works end-to-end。
+**Chunk 7.9-d-3 完了** (`71f3896`): D-031 closed via runI32Export
+memory init + proc_exit dispatch:
+- `runner.zig.runI32Export` decodes memory + data sections,
+  allocates `min_pages * 65536` bytes (256 MiB cap), evaluates
+  active data segments via local `evalConstI32Expr`, copies bytes
+  to memory; passes populated slice to JitRuntime.
+- `jit_dispatch.proc_exit(rt, rval)` sets trap_flag = 1; rval
+  discarded (proc_exit_code field is d-4).
+- End-to-end fixtures: `proc_exit_zero` (trap), `fd_write_hello`
+  (memory init + iovec walk + nwritten store + i32:0 success).
 
-**Chunk 7.9-d-3 plan** (NEXT): the proc_exit + real I/O finish:
-- `proc_exit(rt, code)` — extend JitRuntime tail with
-  `proc_exit_code: u32`; handler sets trap_flag = 2 (PROC_EXIT
-  sentinel) + writes code; entry shim's post-return check
-  surfaces (Trap-vs-ProcExit-vs-Value) to the host.
-- Thread `init.io: std.Io` through JitRuntime so `fd_write`
-  routes to actual stdout / stderr。
-- Replace `clock_time_get` zero-stub with real wall-clock;
-  `random_get` with std.posix.getrandom (gated by zig-stdlib
-  detection).
-- Update `test/realworld/run_runner_jit.zig` to invoke the entry
-  via entry.callVoidNoArgs (per `_start` export sig); report
-  run-pass count alongside compile-pass.
+**Chunk 7.9-d-4 plan** (NEXT): real I/O + run_runner_jit harness:
+- Thread `io: std.Io` through JitRuntime tail-extension OR pass
+  via threadlocal `WasiContext` set by run_runner_jit before
+  invoking entry. fd_write routes to actual stdout / stderr;
+  clock_time_get uses real wall-clock; random_get uses
+  std.posix.getrandom.
+- Add `proc_exit_code: u32` JitRuntime tail field; proc_exit
+  handler writes exit code; entry shim's post-return check
+  surfaces ProcExit-vs-Trap distinction (new error variant or
+  out-param to caller).
+- `test/realworld/run_runner_jit.zig` invokes the entry via
+  entry.callVoidNoArgs after compileWasm; reports run-pass count
+  alongside compile-pass. The categorisation buckets become
+  RUN-PASS / RUN-TRAP / RUN-PROCEXIT(code) / COMPILE-OP / etc.
 - 目標: §9.7 / 7.9 exit criterion = 40+ realworld run-pass via
-  ARM64 JIT。
-
-**Chunk 7.9-d-4 plan** (if needed): memory + data segment init
-in JitRuntime — the runner currently uses `[0]u8` memory which
-blocks fixtures that touch linear memory beyond pure host-call
-dispatch (D-031).
+  ARM64 JIT。今 mac compile-pass 5/55 — d-4 で memory-init が
+  active な fixture 群が run-stage に到達する見込み。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -88,7 +81,9 @@ Phase D (migration doc) は post-7.8 着手予定。詳細は
 - **D-022** Diagnostic M3 / trace ringbuffer — Phase 7 close 後再評価。
 - **D-026** env-stub host-func wiring (cross-module dispatch)。
 - **D-029** x86_64 emitI32Binary `dst==rhs` reject — regalloc port 後に discharge。
-- **D-031** runner runI32Export FP/i64 拡張 — JitRuntime memory init 後に at_limit 境界 fixture を再追加。
+- **D-031** discharged (chunk d-3, `71f3896`) — runI32Export now
+  allocates real memory + populates data segments; `at_limit_load_i32`
+  境界 fixture 再追加は post-d-4 (FP/i64 拡張で arg marshaling 追加後)。
 - **D-045** §9.7 / 7.8 close blocker — discharged (chunks 1-14e)。
 - **D-046** memory.copy/fill — discharged (chunk c2, `ca01778`)。
 - **D-047** div_s INT_MIN/-1 overflow trap — discharged (chunk c3, `ceb5b1e`)。
