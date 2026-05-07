@@ -228,7 +228,7 @@ pub fn fpStoreSpilled(
 const testing = std.testing;
 
 test "fpLoadSpilled: vreg in V-reg returns it directly without emitting bytes" {
-    const slots = [_]u8{0};
+    const slots = [_]u16{0};
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(testing.allocator);
@@ -238,7 +238,7 @@ test "fpLoadSpilled: vreg in V-reg returns it directly without emitting bytes" {
 }
 
 test "fpLoadSpilled: spilled vreg emits LDR D and returns stage reg V29 (stage_idx=0)" {
-    const slots = [_]u8{13}; // just past the new max_reg_slots_fp boundary
+    const slots = [_]u16{13}; // just past the new max_reg_slots_fp boundary
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 14 };
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(testing.allocator);
@@ -251,7 +251,7 @@ test "fpLoadSpilled: spilled vreg emits LDR D and returns stage reg V29 (stage_i
 }
 
 test "fpLoadSpilled: stage_idx=1 yields V30" {
-    const slots = [_]u8{13};
+    const slots = [_]u16{13};
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 14 };
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(testing.allocator);
@@ -260,7 +260,7 @@ test "fpLoadSpilled: stage_idx=1 yields V30" {
 }
 
 test "fpStoreSpilled: spilled vreg emits STR D from stage reg" {
-    const slots = [_]u8{14};
+    const slots = [_]u16{14};
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 15 };
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(testing.allocator);
@@ -272,7 +272,7 @@ test "fpStoreSpilled: spilled vreg emits STR D from stage reg" {
 }
 
 test "fpStoreSpilled: in-V-reg vreg emits no bytes (no-op)" {
-    const slots = [_]u8{5};
+    const slots = [_]u16{5};
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 6 };
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(testing.allocator);
@@ -281,7 +281,7 @@ test "fpStoreSpilled: in-V-reg vreg emits no bytes (no-op)" {
 }
 
 test "fpDefSpilled: in-V-reg vreg returns the V-reg; spilled returns stage" {
-    const slots = [_]u8{ 3, 13 };
+    const slots = [_]u16{ 3, 13 };
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 14 };
     try testing.expectEqual(@as(inst.Vn, 19), try fpDefSpilled(alloc, 0, 0)); // V16+3
     try testing.expectEqual(@as(inst.Vn, 29), try fpDefSpilled(alloc, 1, 0));

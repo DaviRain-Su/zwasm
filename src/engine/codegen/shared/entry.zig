@@ -370,7 +370,7 @@ test "entry: i32.load offset=0 reads memory[0..4] through X28 vm_base" {
         .{ .def_pc = 0, .last_use_pc = 1 },
         .{ .def_pc = 1, .last_use_pc = 2 },
     } };
-    const slots = [_]u8{ 0, 0 };
+    const slots = [_]u16{ 0, 0 };
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const sigs = [_]zir.FuncType{sig};
 
@@ -417,7 +417,7 @@ test "entry: ADR-0018 sub-1c — spilled i32.const returns 42 via STR/LDR round-
     fn0.liveness = .{ .ranges = &[_]zir.LiveRange{
         .{ .def_pc = 0, .last_use_pc = 1 },
     } };
-    const slots = [_]u8{10};
+    const slots = [_]u16{10};
     const alloc: regalloc.Allocation = .{
         .slots = &slots,
         .n_slots = 11,
@@ -468,7 +468,7 @@ test "entry: ADR-0027 — global.set 0 then global.get 0 (i32) round-trips throu
         .{ .def_pc = 0, .last_use_pc = 1 }, // const → set
         .{ .def_pc = 2, .last_use_pc = 3 }, // get → end
     } };
-    const slots = [_]u8{ 0, 0 };
+    const slots = [_]u16{ 0, 0 };
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const sigs = [_]zir.FuncType{sig};
     const out0 = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{}, 0);
@@ -517,7 +517,7 @@ test "entry: pure constant function returns 42 (sanity — no memory access)" {
     fn0.liveness = .{ .ranges = &[_]zir.LiveRange{
         .{ .def_pc = 0, .last_use_pc = 1 },
     } };
-    const slots = [_]u8{0};
+    const slots = [_]u16{0};
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const sigs = [_]zir.FuncType{sig};
 
@@ -564,7 +564,7 @@ test "entry: callI32_i32i32 — 2 i32 params summed via i32.add" {
         .{ .def_pc = 1, .last_use_pc = 2 },
         .{ .def_pc = 2, .last_use_pc = 3 },
     } };
-    const slots = [_]u8{ 0, 1, 2 };
+    const slots = [_]u16{ 0, 1, 2 };
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 3 };
     const sigs = [_]zir.FuncType{sig};
 
@@ -606,7 +606,7 @@ test "entry: callI32_i32 — 1 i32 param echoed through W1 → SP slot 0 → res
     fn0.liveness = .{ .ranges = &[_]zir.LiveRange{
         .{ .def_pc = 0, .last_use_pc = 1 },
     } };
-    const slots = [_]u8{0};
+    const slots = [_]u16{0};
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const sigs = [_]zir.FuncType{sig};
 
@@ -652,7 +652,7 @@ test "entry: f32 local round-trip — local.get 0 of f32 param via V0" {
     fn0.liveness = .{ .ranges = &[_]zir.LiveRange{
         .{ .def_pc = 0, .last_use_pc = 1 },
     } };
-    const slots = [_]u8{0};
+    const slots = [_]u16{0};
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const sigs = [_]zir.FuncType{sig};
 
@@ -699,7 +699,7 @@ test "entry: callI64NoArgs — i64.const 0xDEADBEEFCAFE returns full 64-bit" {
     fn0.liveness = .{ .ranges = &[_]zir.LiveRange{
         .{ .def_pc = 0, .last_use_pc = 1 },
     } };
-    const slots = [_]u8{0};
+    const slots = [_]u16{0};
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const sigs = [_]zir.FuncType{sig};
 

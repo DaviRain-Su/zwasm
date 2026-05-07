@@ -45,7 +45,7 @@ pub const CallFixup = struct {
 
 pub const EmitOutput = struct {
     bytes: []u8,
-    n_slots: u8,
+    n_slots: u16,
     call_fixups: []CallFixup,
 };
 

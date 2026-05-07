@@ -85,7 +85,7 @@ pub const EmitOutput = struct {
     /// Distinct GPR slots used (mirrors `Allocation.n_slots`).
     /// The §9.7 / 7.4 gate consults this for stack-frame sizing
     /// when the spill follow-up lands.
-    n_slots: u8,
+    n_slots: u16,
     /// `BL` fixup sites. Each is a placeholder that the caller
     /// patches once function-body addresses are known.
     /// Caller-owned; pair with `deinit` to free.

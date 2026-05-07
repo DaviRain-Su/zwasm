@@ -53,10 +53,12 @@ pub const VerifyError = error{
 };
 
 /// Cap on distinct slots before `compute` returns `SlotOverflow`.
-/// Mirrors the validator's `max_operand_stack` (1024) → bounded
-/// in straight-line code, but we use a u8 dense slot id so the
-/// hard cap is 255 here. Spilling (§9.7 / 7.3+) widens this.
-pub const max_slots: u8 = 255;
+/// Mirrors the validator's `max_operand_stack` (1024) — bounded
+/// in straight-line code. Slot ids are u16 so the hard cap reaches
+/// 1023, matching the validator's max_operand_stack within one
+/// function. Spilling (§9.7 / 7.3+) means most slots beyond the
+/// per-arch pool resolve to `Slot.spill` rather than a register.
+pub const max_slots: u16 = 1023;
 
 /// Resolved slot — what physical home a vreg lives in.
 /// `reg`'s u8 indexes the per-arch `allocatable_gprs` /
@@ -83,11 +85,11 @@ pub const Allocation = struct {
     /// follow-up — D-036 §"option (b)") may reuse slot ids
     /// across disjoint classes; today the worst-case spill frame
     /// covers any slot id ≥ `max_reg_slots_gpr`.
-    slots: []const u8,
+    slots: []const u16,
     /// Distinct slots used. `max(slots) + 1`, or 0 for the
     /// empty-function case. Drives stack-frame sizing in the
     /// per-arch emit pass.
-    n_slots: u8,
+    n_slots: u16,
     /// GPR-class boundary: slot ids `< max_reg_slots_gpr` resolve
     /// to `Slot.reg` for class `.gpr`; ids `>= max_reg_slots_gpr`
     /// resolve to `Slot.spill` (per ADR-0018). Default = 8 (ARM64
@@ -133,13 +135,15 @@ pub const Allocation = struct {
     /// sufficient.
     pub fn slot(self: Allocation, vreg: usize, class: RegClass) Slot {
         const id = self.slots[vreg];
-        const threshold: u8 = switch (class) {
+        const threshold: u16 = switch (class) {
             .gpr => self.max_reg_slots_gpr,
             .fpr => self.max_reg_slots_fp,
             .simd, .inst_ptr_special, .vm_ptr_special, .simd_base_special => self.max_reg_slots_gpr,
             _ => self.max_reg_slots_gpr,
         };
-        if (id < threshold) return .{ .reg = id };
+        // `id < threshold` ⇒ id < pool size (≤ 16 today), so the
+        // u8 narrowing is provably safe.
+        if (id < threshold) return .{ .reg = @intCast(id) };
         return .{ .spill = (@as(u32, id) - self.max_reg_slots_gpr) * 8 };
     }
 
@@ -160,9 +164,9 @@ pub fn compute(allocator: Allocator, func: *const ZirFunc) Error!Allocation {
     const live = func.liveness orelse return Error.LivenessMissing;
     if (live.ranges.len == 0) return .{ .slots = &.{}, .n_slots = 0 };
 
-    var slots = try allocator.alloc(u8, live.ranges.len);
+    var slots = try allocator.alloc(u16, live.ranges.len);
     errdefer allocator.free(slots);
-    var n_slots: u8 = 0;
+    var n_slots: u16 = 0;
 
     // Scan vregs in def_pc order (vreg ids are def-order by
     // `liveness.compute`'s contract). For each vreg, mark which
@@ -181,11 +185,11 @@ pub fn compute(allocator: Allocator, func: *const ZirFunc) Error!Allocation {
         for (live.ranges[0..vreg], 0..) |earlier, ev| {
             if (earlier.last_use_pc > r.def_pc) busy[slots[ev]] = true;
         }
-        var s: u8 = 0;
-        const assigned: u8 = while (s < max_slots) : (s += 1) {
+        var s: u16 = 0;
+        const assigned: u16 = while (s < max_slots) : (s += 1) {
             if (!busy[s]) break s;
         } else {
-            std.debug.print("regalloc: SlotOverflow at func[{d}] vreg={d} ranges.len={d} (>255 simultaneously live)\n", .{ func.func_idx, vreg, live.ranges.len });
+            std.debug.print("regalloc: SlotOverflow at func[{d}] vreg={d} ranges.len={d} (>{d} simultaneously live)\n", .{ func.func_idx, vreg, live.ranges.len, max_slots });
             return Error.SlotOverflow;
         };
         slots[vreg] = assigned;
@@ -251,7 +255,7 @@ test "compute: empty liveness yields empty allocation" {
     const alloc = try compute(testing.allocator, &f);
     defer deinit(testing.allocator, alloc);
     try testing.expectEqual(@as(usize, 0), alloc.slots.len);
-    try testing.expectEqual(@as(u8, 0), alloc.n_slots);
+    try testing.expectEqual(@as(u16, 0), alloc.n_slots);
 }
 
 test "compute: missing liveness returns LivenessMissing" {
@@ -270,9 +274,9 @@ test "compute: two non-overlapping ranges share slot 0" {
     f.liveness = .{ .ranges = &ranges };
     const alloc = try compute(testing.allocator, &f);
     defer deinit(testing.allocator, alloc);
-    try testing.expectEqual(@as(u8, 1), alloc.n_slots);
-    try testing.expectEqual(@as(u8, 0), alloc.slots[0]);
-    try testing.expectEqual(@as(u8, 0), alloc.slots[1]);
+    try testing.expectEqual(@as(u16, 1), alloc.n_slots);
+    try testing.expectEqual(@as(u16, 0), alloc.slots[0]);
+    try testing.expectEqual(@as(u16, 0), alloc.slots[1]);
     try verify(&f, alloc);
 }
 
@@ -286,9 +290,9 @@ test "compute: two overlapping ranges get distinct slots" {
     f.liveness = .{ .ranges = &ranges };
     const alloc = try compute(testing.allocator, &f);
     defer deinit(testing.allocator, alloc);
-    try testing.expectEqual(@as(u8, 2), alloc.n_slots);
-    try testing.expectEqual(@as(u8, 0), alloc.slots[0]);
-    try testing.expectEqual(@as(u8, 1), alloc.slots[1]);
+    try testing.expectEqual(@as(u16, 2), alloc.n_slots);
+    try testing.expectEqual(@as(u16, 0), alloc.slots[0]);
+    try testing.expectEqual(@as(u16, 1), alloc.slots[1]);
     try verify(&f, alloc);
 }
 
@@ -304,7 +308,7 @@ test "compute: shared-edge (use=def at same pc) does not count as overlap" {
     defer deinit(testing.allocator, alloc);
     // Second vreg born at pc=2 reuses first's slot since first
     // dies at pc=2.
-    try testing.expectEqual(@as(u8, 1), alloc.n_slots);
+    try testing.expectEqual(@as(u16, 1), alloc.n_slots);
     try testing.expectEqual(alloc.slots[0], alloc.slots[1]);
     try verify(&f, alloc);
 }
@@ -320,10 +324,10 @@ test "compute: three overlapping ranges fan out to distinct slots" {
     f.liveness = .{ .ranges = &ranges };
     const alloc = try compute(testing.allocator, &f);
     defer deinit(testing.allocator, alloc);
-    try testing.expectEqual(@as(u8, 3), alloc.n_slots);
-    try testing.expectEqual(@as(u8, 0), alloc.slots[0]);
-    try testing.expectEqual(@as(u8, 1), alloc.slots[1]);
-    try testing.expectEqual(@as(u8, 2), alloc.slots[2]);
+    try testing.expectEqual(@as(u16, 3), alloc.n_slots);
+    try testing.expectEqual(@as(u16, 0), alloc.slots[0]);
+    try testing.expectEqual(@as(u16, 1), alloc.slots[1]);
+    try testing.expectEqual(@as(u16, 2), alloc.slots[2]);
     try verify(&f, alloc);
 }
 
@@ -332,7 +336,7 @@ test "verify: rejects allocation with slot index >= n_slots" {
     defer f.deinit(testing.allocator);
     const ranges = [_]LiveRange{.{ .def_pc = 0, .last_use_pc = 1 }};
     f.liveness = .{ .ranges = &ranges };
-    const bad_slots = [_]u8{5};
+    const bad_slots = [_]u16{5};
     const bad: Allocation = .{ .slots = &bad_slots, .n_slots = 1 };
     try testing.expectError(VerifyError.SlotIndexExceedsCount, verify(&f, bad));
 }
@@ -342,7 +346,7 @@ test "verify: rejects mismatched slot/range lengths" {
     defer f.deinit(testing.allocator);
     const ranges = [_]LiveRange{.{ .def_pc = 0, .last_use_pc = 1 }};
     f.liveness = .{ .ranges = &ranges };
-    const bad_slots = [_]u8{ 0, 1 };
+    const bad_slots = [_]u16{ 0, 1 };
     const bad: Allocation = .{ .slots = &bad_slots, .n_slots = 2 };
     try testing.expectError(VerifyError.SlotsLengthMismatch, verify(&f, bad));
 }
@@ -355,7 +359,7 @@ test "verify: rejects overlapping ranges sharing a slot" {
         .{ .def_pc = 1, .last_use_pc = 4 },
     };
     f.liveness = .{ .ranges = &ranges };
-    const bad_slots = [_]u8{ 0, 0 };
+    const bad_slots = [_]u16{ 0, 0 };
     const bad: Allocation = .{ .slots = &bad_slots, .n_slots = 1 };
     try testing.expectError(VerifyError.OverlappingVregsShareSlot, verify(&f, bad));
 }
@@ -365,7 +369,7 @@ test "verify: rejects overlapping ranges sharing a slot" {
 // ========================================================
 
 test "Allocation.slot: id < max_reg_slots_gpr resolves to .reg for class .gpr" {
-    const slots = [_]u8{ 0, 5, 9 };
+    const slots = [_]u16{ 0, 5, 9 };
     const alloc: Allocation = .{ .slots = &slots, .n_slots = 10, .max_reg_slots_gpr = 10 };
     try testing.expectEqual(Slot{ .reg = 0 }, alloc.slot(0, .gpr));
     try testing.expectEqual(Slot{ .reg = 5 }, alloc.slot(1, .gpr));
@@ -373,7 +377,7 @@ test "Allocation.slot: id < max_reg_slots_gpr resolves to .reg for class .gpr" {
 }
 
 test "Allocation.slot: id >= max_reg_slots_gpr resolves to .spill at 8-aligned offset" {
-    const slots = [_]u8{ 9, 10, 11, 12 };
+    const slots = [_]u16{ 9, 10, 11, 12 };
     const alloc: Allocation = .{ .slots = &slots, .n_slots = 13, .max_reg_slots_gpr = 10 };
     try testing.expectEqual(Slot{ .reg = 9 }, alloc.slot(0, .gpr));
     try testing.expectEqual(Slot{ .spill = 0 }, alloc.slot(1, .gpr));
@@ -382,13 +386,13 @@ test "Allocation.slot: id >= max_reg_slots_gpr resolves to .spill at 8-aligned o
 }
 
 test "Allocation.spillBytes: 0 when n_slots fits in pool" {
-    const slots = [_]u8{ 0, 1 };
+    const slots = [_]u16{ 0, 1 };
     const alloc: Allocation = .{ .slots = &slots, .n_slots = 2, .max_reg_slots_gpr = 10 };
     try testing.expectEqual(@as(u32, 0), alloc.spillBytes());
 }
 
 test "Allocation.spillBytes: 8-byte stride past pool size" {
-    const slots = [_]u8{ 9, 10, 11, 12 };
+    const slots = [_]u16{ 9, 10, 11, 12 };
     const alloc: Allocation = .{ .slots = &slots, .n_slots = 13, .max_reg_slots_gpr = 10 };
     try testing.expectEqual(@as(u32, 24), alloc.spillBytes()); // (13-10)*8
 }
@@ -398,7 +402,7 @@ test "Allocation.spillBytes: 8-byte stride past pool size" {
 // ========================================================
 
 test "Allocation.slot: same id resolves to .reg for .fpr but .spill for .gpr (class-aware boundaries)" {
-    const slots = [_]u8{ 0, 7, 8, 12 };
+    const slots = [_]u16{ 0, 7, 8, 12 };
     const alloc: Allocation = .{ .slots = &slots, .n_slots = 13 };
     // class .gpr — boundary at 8 (default max_reg_slots_gpr)
     try testing.expectEqual(Slot{ .reg = 0 }, alloc.slot(0, .gpr));
@@ -413,7 +417,7 @@ test "Allocation.slot: same id resolves to .reg for .fpr but .spill for .gpr (cl
 }
 
 test "Allocation.slot: id >= max_reg_slots_fp resolves to .spill for .fpr" {
-    const slots = [_]u8{ 12, 13, 14 };
+    const slots = [_]u16{ 12, 13, 14 };
     const alloc: Allocation = .{ .slots = &slots, .n_slots = 15 };
     try testing.expectEqual(Slot{ .reg = 12 }, alloc.slot(0, .fpr));
     // FP spill: id >= 13 → .spill, offset uses GPR boundary as origin
@@ -428,7 +432,7 @@ test "Allocation.slot: spill offset is class-agnostic (shared frame origin = max
     // Even though FP doesn't *actually* spill at slot 8..12
     // (those are V-regs), the offset formula stays consistent so
     // the prologue can size the frame from spillBytes() alone.
-    const slots = [_]u8{ 8, 14 };
+    const slots = [_]u16{ 8, 14 };
     const alloc: Allocation = .{ .slots = &slots, .n_slots = 15 };
     try testing.expectEqual(Slot{ .spill = 0 }, alloc.slot(0, .gpr));
     try testing.expectEqual(Slot{ .spill = (14 - 8) * 8 }, alloc.slot(1, .fpr));

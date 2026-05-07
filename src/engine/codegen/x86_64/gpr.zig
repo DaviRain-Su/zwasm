@@ -254,7 +254,7 @@ test "rbpDispNegI8: zero distance (no spill area) → SlotOverflow" {
 }
 
 test "gprLoadSpilled: vreg in reg returns slotToReg without emitting bytes" {
-    const slots = [_]u8{0};
+    const slots = [_]u16{0};
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(testing.allocator);
@@ -265,7 +265,7 @@ test "gprLoadSpilled: vreg in reg returns slotToReg without emitting bytes" {
 
 test "gprLoadSpilled: spilled vreg emits MOV r10, [rbp+disp] (stage_idx=0)" {
     const pool_len: u8 = abi.allocatable_gprs.len;
-    const slots = [_]u8{pool_len};
+    const slots = [_]u16{pool_len};
     const alloc: regalloc.Allocation = .{
         .slots = &slots,
         .n_slots = pool_len + 1,
@@ -282,7 +282,7 @@ test "gprLoadSpilled: spilled vreg emits MOV r10, [rbp+disp] (stage_idx=0)" {
 
 test "gprLoadSpilled: stage_idx=1 yields R11" {
     const pool_len: u8 = abi.allocatable_gprs.len;
-    const slots = [_]u8{pool_len};
+    const slots = [_]u16{pool_len};
     const alloc: regalloc.Allocation = .{
         .slots = &slots,
         .n_slots = pool_len + 1,
@@ -296,7 +296,7 @@ test "gprLoadSpilled: stage_idx=1 yields R11" {
 
 test "gprStoreSpilled: spilled vreg emits MOV [rbp+disp], r10" {
     const pool_len: u8 = abi.allocatable_gprs.len;
-    const slots = [_]u8{pool_len};
+    const slots = [_]u16{pool_len};
     const alloc: regalloc.Allocation = .{
         .slots = &slots,
         .n_slots = pool_len + 1,
@@ -311,7 +311,7 @@ test "gprStoreSpilled: spilled vreg emits MOV [rbp+disp], r10" {
 }
 
 test "gprStoreSpilled: in-reg vreg emits no bytes" {
-    const slots = [_]u8{2};
+    const slots = [_]u16{2};
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 3 };
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(testing.allocator);
@@ -321,7 +321,7 @@ test "gprStoreSpilled: in-reg vreg emits no bytes" {
 
 test "gprDefSpilled: in-reg vreg returns home; spilled returns stage" {
     const pool_len: u8 = abi.allocatable_gprs.len;
-    const slots = [_]u8{ 3, pool_len };
+    const slots = [_]u16{ 3, pool_len };
     const alloc: regalloc.Allocation = .{
         .slots = &slots,
         .n_slots = pool_len + 1,
@@ -334,7 +334,7 @@ test "gprDefSpilled: in-reg vreg returns home; spilled returns stage" {
 
 test "xmmLoadSpilled: spilled vreg emits MOVSD xmm14, [rbp+disp]" {
     const pool_len: u8 = abi.allocatable_xmms.len;
-    const slots = [_]u8{pool_len};
+    const slots = [_]u16{pool_len};
     const alloc: regalloc.Allocation = .{
         .slots = &slots,
         .n_slots = pool_len + 1,
@@ -356,7 +356,7 @@ test "xmmLoadSpilled: spilled vreg emits MOVSD xmm14, [rbp+disp]" {
 
 test "xmmStoreSpilled: spilled vreg emits MOVSD [rbp+disp], xmm14" {
     const pool_len: u8 = abi.allocatable_xmms.len;
-    const slots = [_]u8{pool_len};
+    const slots = [_]u16{pool_len};
     const alloc: regalloc.Allocation = .{
         .slots = &slots,
         .n_slots = pool_len + 1,

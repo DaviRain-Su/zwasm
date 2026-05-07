@@ -208,7 +208,7 @@ test "link: 2-function module — fn0 calls fn1, returns 7" {
     fn0.liveness = .{ .ranges = &[_]zir.LiveRange{
         .{ .def_pc = 0, .last_use_pc = 1 },
     } };
-    const fn0_slots = [_]u8{0};
+    const fn0_slots = [_]u16{0};
     const fn0_alloc: regalloc.Allocation = .{ .slots = &fn0_slots, .n_slots = 1 };
 
     // fn1: () → i32  { i32.const 7 ; end }
@@ -219,7 +219,7 @@ test "link: 2-function module — fn0 calls fn1, returns 7" {
     fn1.liveness = .{ .ranges = &[_]zir.LiveRange{
         .{ .def_pc = 0, .last_use_pc = 1 },
     } };
-    const fn1_slots = [_]u8{0};
+    const fn1_slots = [_]u16{0};
     const fn1_alloc: regalloc.Allocation = .{ .slots = &fn1_slots, .n_slots = 1 };
 
     const out0 = try emit.compile(testing.allocator, &fn0, fn0_alloc, &sigs, &.{}, 0);

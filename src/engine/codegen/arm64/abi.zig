@@ -168,7 +168,7 @@ comptime {
 /// Returns null when the slot id exceeds the pool size — the
 /// §9.7 / 7.3 emit pass treats that as a cue to spill (Phase-7
 /// follow-up; today we error rather than silently drop).
-pub fn slotToReg(slot_id: u8) ?Xn {
+pub fn slotToReg(slot_id: u16) ?Xn {
     if (slot_id >= allocatable_gprs.len) return null;
     return allocatable_gprs[slot_id];
 }
@@ -203,7 +203,7 @@ pub const allocatable_v_regs = [_]Xn{
 /// Excluded from `allocatable_v_regs` by construction.
 pub const fp_spill_stage_vregs = [_]Xn{ 29, 30 };
 
-pub fn fpSlotToReg(slot_id: u8) ?Xn {
+pub fn fpSlotToReg(slot_id: u16) ?Xn {
     if (slot_id >= allocatable_v_regs.len) return null;
     return allocatable_v_regs[slot_id];
 }

@@ -248,13 +248,13 @@ pub const fp_spill_stage_xmms = [_]Xmm{ .xmm14, .xmm15 };
 /// regalloc.compute`) into a concrete GPR via the allocatable
 /// pool. Returns null when the slot id exceeds the pool size —
 /// the §9.7 / 7.7 emit pass treats that as a cue to spill.
-pub fn slotToReg(slot_id: u8) ?Gpr {
+pub fn slotToReg(slot_id: u16) ?Gpr {
     if (slot_id >= allocatable_gprs.len) return null;
     return allocatable_gprs[slot_id];
 }
 
 /// FP-class counterpart of `slotToReg`.
-pub fn fpSlotToReg(slot_id: u8) ?Xmm {
+pub fn fpSlotToReg(slot_id: u16) ?Xmm {
     if (slot_id >= allocatable_xmms.len) return null;
     return allocatable_xmms[slot_id];
 }
