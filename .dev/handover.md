@@ -14,38 +14,37 @@
 
 ## Current state — Phase 7 / §9.7 / 7.10 IN-PROGRESS
 
-直近 commit (HEAD = `6ff23a0`):
+直近 commit (HEAD = `6bab26e`):
 
-- `6ff23a0` feat(p7): §9.7 / 7.10 chunk i — x86_64 op_memory u32 offset (arm64 d-14 mirror)
+- `6bab26e` feat(p7): §9.7 / 7.10 chunk j — x86_64 SysV callee param-arg-overflow READ
+- `9cfd3aa` chore(p7): mark §9.7 / 7.10 chunk i close
+- `6ff23a0` feat(p7): §9.7 / 7.10 chunk i — x86_64 op_memory u32 offset
 - `053de68` chore(p7): mark §9.7 / 7.10 chunk h close
-- `093906f` feat(p7): §9.7 / 7.10 chunk h — x86_64 op_control br/br_if function-depth (return path)
-- `2dd5adf` chore(p7): mark §9.7 / 7.10 chunk g close
 
 **Phase status**: §9.7 / 7.5 + 7.8 + **7.9 [x]**。Phase 7 残 row = 7.10 /
 7.11 🔒 / 7.12 / 7.13 🔒。
 
 **§9.7 / 7.10 progress** (Linux x86_64 realworld_run_jit 0/55 still):
-- chunks a..i closed: D-029 ALU/FP parallel-move、op_call 全
-  valtype marshal+capture、caller-side stack-args、localDisp
-  + RBP/RSP disp32 encoder、op_control br/br_if function-depth、
-  op_memory u32 offset (MOVABS+ADD lowering)。
-- 各 chunk は dominant bottleneck を 1 つ解消するが、fixture は
-  複数 gap を chain しているため compile-pass 数自体は 0/55。
-  7.10 exit は bottleneck 枯渇=infra 完備で判断。Linux 7.10-i
-  後の categorisation: SlotOverflow (regalloc pool 関連、D-029)
-  + UnsupportedOp (param-arg-overflow 等) が dominant。
+- chunks a..j closed: D-029 ALU/FP parallel-move、op_call 全
+  valtype、caller+callee stack-args、localDisp + RBP/RSP disp32、
+  br/br_if function-depth、op_memory u32 offset。
+- post-j Linux JIT categorisation: SlotOverflow が dominant
+  (regalloc pool exhaustion = D-029 / D-048 territory)。
+  UnsupportedOp 残: br_table count > 127 (op_control:147)、
+  br_table function-depth (op_control:78)。
+- 7.10 exit criterion (40+/55 run): まだ blocked。spill-disp32
+  widening (D-048) が SlotOverflow 群を多くカバー可能性。
 
 **§9.7 / 7.10 chain plan** (NEXT 群):
-- **7.10-j (NEXT)**: SysV `i{32,64}-param-arg-overflow`
-  (emit.zig:382/390/398/406)。我が関数が >5 i32/>3 mixed args
-  を受け取るときの callee-side stack-arg READ path。Win64 側
-  fallback は 7.10-f で既に存在 (line 362)。SysV 側は NSAA
-  per-overflow counter + `[RBP+16+8*K]` 読み出しを追加。
-  7.10-f の caller-side WRITE と対称的な mirror。
+- **7.10-k (NEXT)**: D-048 discharge — `gpr.zig:rbpDispNegI8`
+  i8→i32 widening。spill region の 16 slot cap を撤廃。7.10-g
+  と同じ shape (disp32 form encoder + auto-helper)。barrier
+  dissolved per D-048's "or fixture surfacing > 16 spill slots
+  before then" 条件 (post-j で複数 SlotOverflow surfaced)。
 - 7.10-br_table-fdepth (deferred): emitBrTable で depth ==
-  labels.len のケース。CMP + JNE rel8 + JMP の per-case 5-byte
-  fixed shape を維持するには return-trampoline pattern が必要。
-- 7.10-spill-disp32 (deferred to Phase 8): debt D-048。
+  labels.len のケース。return-trampoline pattern が必要。
+- 7.10-regalloc-port (deferred to Phase 8): D-029 解消は Phase
+  8 regalloc port が前提。残りの SlotOverflow は Phase 8 work。
 
 **Pre-existing infra observation (out-of-scope)**:
 `.githooks/pre_commit` (snake_case) は Git の `pre-commit`
@@ -89,10 +88,10 @@ Phase D (migration doc) は post-7.8 着手予定。詳細は
 
 ## Recently closed (canonical history via `git log --oneline --grep="§9.7"`)
 
-- §9.7 / 7.10 chunks a..i closed (commits `a8777ac` `4fb4fcb`
-  `68dd2dc` `da5db53` `6c523fa` `f47db77` `093906f` `6ff23a0`)。
-  x86_64 JIT で D-029 ALU/FP、op_call 全 valtype、caller stack-
-  args、localDisp + disp32、br/br_if function-depth、op_memory
-  u32 offset を完備。realworld_run_jit 0/55 のまま (callee
-  stack-arg read + SlotOverflow 残)。
+- §9.7 / 7.10 chunks a..j closed (commits `a8777ac` `4fb4fcb`
+  `68dd2dc` `da5db53` `6c523fa` `f47db77` `093906f` `6ff23a0`
+  `6bab26e`)。x86_64 JIT で D-029 ALU/FP、op_call 全 valtype、
+  caller+callee stack-args、localDisp+disp32、br/br_if function-
+  depth、op_memory u32 offset を完備。realworld_run_jit 0/55
+  のまま (SlotOverflow 残; 7.10-k = D-048 spill-disp32 で改善見込)。
 - §9.7 / 7.9 [x] — arm64 realworld JIT 52/55 compile-pass。
