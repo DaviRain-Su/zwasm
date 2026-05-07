@@ -248,16 +248,45 @@ pub fn compile(
         // at 1 (skip runtime_ptr in RDI = arg_gprs[0]); FP args
         // use a separate `fp_arg_idx` from XMM0. Win64 (Microsoft
         // ABI) shares slot positions: arg N occupies either
-        // arg_gprs[N] OR arg_xmms[N], so `fp_arg_idx` must mirror
-        // the int-side slot counter (= p_idx + 1, skipping
-        // runtime_ptr at RCX = arg_gprs[0]).
+        // arg_gprs[N] OR arg_xmms[N], so `fp_arg_idx` mirrors
+        // the int-side slot counter and both advance per arg.
+        // Win64 args at slot >= 4 land on the stack at
+        // [RBP + 16 + 8*slot] (Microsoft x64 ABI §"Argument
+        // Passing"); the prologue copies them via RAX scratch
+        // into the local frame slot.
         var int_arg_idx: usize = 1;
         var fp_arg_idx: usize = if (abi.current_cc == .win64) 1 else 0;
         while (p_idx < num_params) : (p_idx += 1) {
             const off_i32: i32 = @as(i32, base_off_for_locals) - @as(i32, @intCast((p_idx + 1) * 8));
             if (off_i32 < -128) return rejectUnsupported("param-marshal-disp<-128", func.func_idx);
             const off: i8 = @intCast(off_i32);
-            switch (func.sig.params[p_idx]) {
+            const ptype = func.sig.params[p_idx];
+            switch (ptype) {
+                .v128, .funcref, .externref => unreachable, // filtered above
+                else => {},
+            }
+            // Win64 stack-arg fallback for slot >= 4. The shared
+            // slot is `int_arg_idx` (== `fp_arg_idx` under Win64).
+            // Read from the shadow-space-relative location
+            // [RBP + 16 + 8*slot] and write to local slot.
+            if (abi.current_cc == .win64 and int_arg_idx >= abi.current.arg_gprs.len) {
+                const stack_disp: i32 = 16 + @as(i32, @intCast(int_arg_idx * 8));
+                switch (ptype) {
+                    .i32 => {
+                        try buf.appendSlice(allocator, inst.encMovR32FromMemDisp32(.rax, .rbp, stack_disp).slice());
+                        try buf.appendSlice(allocator, inst.encStoreR32MemRBP(off, .rax).slice());
+                    },
+                    .i64, .f32, .f64 => {
+                        try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .rbp, stack_disp).slice());
+                        try buf.appendSlice(allocator, inst.encStoreR64MemRBP(off, .rax).slice());
+                    },
+                    else => unreachable,
+                }
+                int_arg_idx += 1;
+                fp_arg_idx += 1;
+                continue;
+            }
+            switch (ptype) {
                 .i32 => {
                     if (int_arg_idx >= abi.current.arg_gprs.len) {
                         return rejectUnsupported("i32-param-arg-overflow", func.func_idx);
