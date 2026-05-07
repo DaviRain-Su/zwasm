@@ -260,10 +260,16 @@ pub fn emitElse(
     try buf.appendSlice(allocator, inst.encJmpRel32(0).slice());
     const else_start: u32 = @intCast(buf.items.len);
     const lbl = &labels.items[lbl_idx];
-    const skip_at = lbl.if_skip_byte.?;
-    const skip_disp: i32 = @as(i32, @intCast(else_start)) -
-        @as(i32, @intCast(skip_at)) - 6;
-    inst.patchRel32(buf.items, skip_at, 6, skip_disp);
+    // Patch the matching `if`'s skip-Jcc — but only if the
+    // if_then frame had one. Dead-code-pushed placeholder frames
+    // (mirror of arm64 §9.7/7.5-deadcode-labels-bookkeeping)
+    // carry `if_skip_byte = null` to mark "no Jcc to patch";
+    // the if itself emitted no bytes in dead code.
+    if (lbl.if_skip_byte) |skip_at| {
+        const skip_disp: i32 = @as(i32, @intCast(else_start)) -
+            @as(i32, @intCast(skip_at)) - 6;
+        inst.patchRel32(buf.items, skip_at, 6, skip_disp);
+    }
     lbl.if_skip_byte = null;
     lbl.kind = .else_open;
     try lbl.pending.append(allocator, .{ .byte_offset = jmp_at, .insn_size = 5 });
