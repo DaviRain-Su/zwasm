@@ -16,29 +16,39 @@
 
 直近 commit (HEAD = `<this>`):
 
-- `<this>` chore(p7): mark §9.7 / 7.9 chunk c2 close (D-046); retarget at 7.9-d
+- `<this>` chore(p7): mark §9.7 / 7.9 chunk c3 close (D-047); retarget at 7.9-d
+- `ceb5b1e` feat(p7): §9.7 / 7.9 chunk c3 — i{32,64}.div_s INT_MIN/-1 overflow trap (D-047)
+- `1a34189` chore(p7): mark §9.7 / 7.9 chunk c2 close (D-046)
 - `ca01778` feat(p7): §9.7 / 7.9 chunk c2 — memory.copy + memory.fill (D-046 closed)
-- `beab8cf` chore(p7): mark §9.7 / 7.9 chunk c close
-- `2bfe7fd` feat(p7): §9.7 / 7.9 chunk c — sign-ext + div/rem on arm64 + x86_64
 
 **Phase status**: §9.7 / 7.5 + 7.8 → **[x]**。Phase 7 残 row = 7.9 /
 7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。
 
-**§9.7 / 7.9 chunk b 完了** (`0f679cb`): import-reject lifted。
-3-host all green: Mac/Linux/Win 全て test-all PASS、spec_assert
-全 host 212/0/20 維持。`run_runner_jit` Mac:
-- 0/55 compile-pass (run-stage は chunk 14d 的 work が要る)
-- **0** compile-imports (was 55!)
-- 52 compile-op (chunk 7.9-c scope)
-- 3 compile-val (validator strictness、orthogonal)
+**§9.7 / 7.9 progress**: chunks a (run_runner_jit baseline) + b
+(import-reject lift) + c (sign-ext + div/rem) + c2 (memory.copy/
+fill, D-046) + c3 (div_s INT_MIN/-1 overflow trap, D-047) closed
+across 5 commits. Mac aarch64 spec_assert 212/0/20 + edge_cases
+31/0 (was 27, +4 idiv_overflow) + realworld 55/0 全て green。
+3-host gate dispatched (Orb + Win parallel-bg); awaiting completion.
 
-**Chunk 7.9-c plan** (NEXT): residual ARM64 + x86_64 emit gaps surfacing post-import-lift:
-- `memory.copy` / `memory.fill` (heaviest gap; emcc / clang -O2 binaries 全部使う; lower.zig 既にlower、liveness stackEffect 表 + emit handler 追加が要)
-- sign-extension ops (`i32.extend8_s` / `i64.extend32_s` 等)
-- `i32.div_u` / `i64.div_u` (両 arch backend に追加)
-- SlotOverflow on big modules (regalloc pool 不足、spill ratchet が不十分)
-
-**Chunk 7.9-d plan**: WASI host-call dispatch (現 chunk b では import call は trap 限定)。JitRuntime に host_dispatch_base 追加 → emit が import call で BLR via dispatch slot → runner に proc_exit / fd_write / clock_time_get stub。これで COMPILE-PASS が RUN-PASS に転換。
+**Chunk 7.9-d plan** (NEXT, highest leverage): WASI host-call
+dispatch — turns COMPILE-PASS into RUN-PASS。実装:
+- `src/engine/codegen/shared/jit_abi.zig` の `JitRuntime` を tail-
+  extend で `host_dispatch_base: [*]const anyopaque` 追加。
+- `src/engine/codegen/shared/linker.zig` で import slot
+  `func_offsets[k] = IMPORT_SENTINEL_OFFSET` の代わりに
+  dispatch-thunk アドレスを populate。
+- arm64/x86_64 `op_call.zig` の `emitCall` import path を、
+  trap-stub branch から `BLR via [X19 + host_dispatch_base + 8*idx]`
+  (arm64) / `CALL [R15 + host_dispatch_base + 8*idx]` (x86_64) へ
+  切替 (arg marshalling は維持)。
+- `src/wasi/preview1.zig` 経由の WASI stub handler (proc_exit /
+  fd_write / clock_time_get / args_get / args_sizes_get) を
+  AAPCS64 / SysV-x86_64 callconv で公開。
+- `test/realworld/run_runner_jit.zig` で JitRuntime に dispatch
+  table を載せ、コンパイル後に entry を実行 → run-pass count を
+  別 metric として report。
+- 目標: §9.7 / 7.9 exit criterion = 40+ realworld run-pass via JIT。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
@@ -64,7 +74,9 @@ Phase D (migration doc) は post-7.8 着手予定。詳細は
 - **D-026** env-stub host-func wiring (cross-module dispatch)。
 - **D-029** x86_64 emitI32Binary `dst==rhs` reject — regalloc port 後に discharge。
 - **D-031** runner runI32Export FP/i64 拡張 — JitRuntime memory init 後に at_limit 境界 fixture を再追加。
-- **D-045** §9.7 / 7.8 close blocker — **discharged** (chunks 1-14e); next resume's Step 0.5 deletes the row。
+- **D-045** §9.7 / 7.8 close blocker — discharged (chunks 1-14e)。
+- **D-046** memory.copy/fill — discharged (chunk c2, `ca01778`)。
+- **D-047** div_s INT_MIN/-1 overflow trap — discharged (chunk c3, `ceb5b1e`)。
 - 詳細・staleness check は `.dev/debt.md`。
 
 ## Recently closed (full history via `git log --oneline`)
