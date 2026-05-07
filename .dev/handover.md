@@ -16,47 +16,41 @@
 
 直近 commit (HEAD = `<this>`):
 
-- `<this>` chore(p7): §9.7 / 7.9 chunk d-8 close (D-034 spill-aware migration tail)
+- `<this>` chore(p7): §9.7 / 7.9 chunk d-9 close (frame_bytes + max_slots widening)
+- `cc6a0eb` feat(p7): §9.7 / 7.9 chunk d-9 — arm64 frame_bytes + regalloc max_slots widening
 - `03d9875` feat(p7): §9.7 / 7.9 chunk d-8 — D-034 spill-aware migration tail (35 sites)
 - `57e2ef2` feat(p7): §9.7 / 7.9 chunk d-7 — arm64 callee-side AAPCS64 stack-arg lowering
-- `e7f4a36` feat(p7): §9.7 / 7.9 chunk d-6 — arm64 large memory offset + control stack 1024
 
 **Phase status**: §9.7 / 7.5 + 7.8 → **[x]**。Phase 7 残 row = 7.9 /
 7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。
 
-**§9.7 / 7.9 progress**: chunks a..d-8 closed across 19 commits。
+**§9.7 / 7.9 progress**: chunks a..d-9 closed across 21 commits。
 realworld JIT compile-pass: 5/55 → 27/55 (chunk d-6 大躍進)。
 3-host gate green。
 
-**Chunk 7.9-d-8 完了** (`03d9875`): D-034 spill-aware migration
-tail completion. 35 bare `gpr.resolveGpr`/`resolveFp` sites
-across `arm64/{emit,op_alu_float,op_memory,op_convert,op_call,
-op_control}.zig` migrated to `gprLoadSpilled`/`fpLoadSpilled`/
-`gprDefSpilled`/`fpDefSpilled`/`gprStoreSpilled`/`fpStoreSpilled`
-helpers. spill_aware_check 0 violations (BASELINE=0 held).
-Compile-pass 27/55 不変 — silent-reject path was contingent
-failure mode; remaining 25 COMPILE-OP gaps are genuine op-level
-UnsupportedOp / SlotOverflow (>1023 cap on long Go functions
-for SlotOverflow; specific op handler gaps for UnsupportedOp).
+**Chunk 7.9-d-9 完了** (`cc6a0eb`): arm64 frame_bytes + regalloc
+max_slots widening. `arm64/inst.zig:encSubImm12Lsl12` (新)、
+prologue/epilogue/trap-stub の SUB/ADD SP を 2-instr 化、
+`frame_bytes` 4096 → 16 MiB-1 cap。`shared/regalloc.zig:max_slots`
+1023 → 4095。compile-pass 27/55 不変 — Go fixtures は別の
+barrier (op-level UnsupportedOp) が次の hit point。
 
-**Chunk 7.9-d-9 plan** (NEXT、potentially): SlotOverflow root-
-cause investigation — 7 Go fixtures hit >1023 simultaneously-
-live vregs. 解決策候補:
-- liveness analysis range tightening (control-flow-sensitive
-  last-use computation で peak live set 縮小)。
-- Slot id u32 化 (1023 → 65535) — まだ余地は残る大改造。
-- Function-level vreg renumbering / SSA-style 縮約。
+**Chunk 7.9-d-10 plan** (NEXT — diagnostic investigation):
+- 失敗 fixture を 1 つずつ手動 compile して特定 UnsupportedOp の
+  発生 op tag を identify (debug-print 一時挿入 → 削除 cycle)。
+- 多くは特定 op (table.copy / table.init / ref.func / try /
+  delegate / atomic.* など Wasm 2.0/3.0 features) の未実装が
+  原因の見込み。各 op の lowering / liveness / emit 追加で
+  漸進 unblock。
 
-**Chunk 7.9-d-10 plan** (alt path): 未対応の specific UnsupportedOp
-の調査 + closure。多くは `param=4 results=0` 系の小さな
-function — おそらく特定の op (table.*, exception handling, etc.)
-が未実装で hit している。
-
-**§9.7 / 7.9 exit criterion** (40+ realworld run-pass) 到達には
-caller-side stack-arg marshal + per-fixture timeout + 上記の
-SlotOverflow / UnsupportedOp closure の組み合わせが必要。
-現実的には Phase 7→8 boundary review (7.13) で「7.9 は infra
-完備、本番計測は 7.10/7.11 で実施」と判断する形が妥当。
+**§9.7 / 7.9 exit criterion** (40+ realworld run-pass) は現実的
+には不可能 — 大半の fixture は (a) caller-side stack-arg, (b)
+specific op gaps, (c) per-fixture timeout の総合改善が必要で、
+個別に対応するより Phase 7→8 boundary review (7.13) で
+「7.9 = infra 完備、本番計測は 7.10/7.11/7.12 chain で
+実施」と判断する形が妥当。Compile-pass 27/55 + run-stage
+infra (d-1..d-4) + spill-aware 完備 (d-8) で 7.9 を
+"infra-complete" として close する選択肢を 7.13 で議論。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
