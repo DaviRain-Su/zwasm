@@ -50,13 +50,41 @@ pub fn writeBytes(allocator: Allocator, buf: *std.ArrayList(u8), enc: inst.Encod
     try buf.appendSlice(allocator, enc.bytes[0..enc.len]);
 }
 
-/// Convert a u32 RBP-relative spill distance into the i8 disp
-/// the encoders require. Returns `Error.SlotOverflow` when the
-/// distance exceeds disp8 range (chunk 13b adds disp32 fallback).
-fn rbpDispNegI8(spill_base_off: u32, spill_off: u32) Error!i8 {
+/// §9.7 / 7.10-k (D-048 discharge) — convert a u32 RBP-relative
+/// spill distance into the i32 disp the encoders consume. The
+/// `[RBP - (spill_base_off + spill_off)]` address must be 8-byte
+/// aligned (we use 8-byte spill stride uniformly across both
+/// classes). Pre-7.10-k this returned i8, capping the spill
+/// region at 16 slots × 8 = 128 bytes; the wider i32 form lifts
+/// the cap to ~268 M slots and matches the locals-side
+/// `localDisp` widening that landed in 7.10-g.
+fn rbpDispNegI32(spill_base_off: u32, spill_off: u32) Error!i32 {
     const abs = spill_base_off + spill_off;
-    if (abs == 0 or abs > 128 or (abs & 7) != 0) return Error.SlotOverflow;
-    return @intCast(-@as(i32, @intCast(abs)));
+    if (abs == 0 or (abs & 7) != 0) return Error.SlotOverflow;
+    if (abs > 0x7FFF_FFFF) return Error.SlotOverflow;
+    return -@as(i32, @intCast(abs));
+}
+
+/// Pick disp8 / disp32 form per offset range. Mirrors emit.zig's
+/// local-region auto-helpers (`rbpLoadR64`/`rbpStoreR64`/etc.)
+/// but kept in gpr.zig so spill helpers don't cross-import. Cost:
+/// 4 bytes (disp8) when the spill slot fits in i8, 7 bytes
+/// (disp32) otherwise.
+fn rbpLoadR64Auto(dst: inst.Gpr, disp: i32) inst.EncodedInsn {
+    if (disp >= -128 and disp <= 127) return inst.encLoadR64MemRBP(dst, @intCast(disp));
+    return inst.encLoadR64MemRBPDisp32(dst, disp);
+}
+fn rbpStoreR64Auto(disp: i32, src: inst.Gpr) inst.EncodedInsn {
+    if (disp >= -128 and disp <= 127) return inst.encStoreR64MemRBP(@intCast(disp), src);
+    return inst.encStoreR64MemRBPDisp32(disp, src);
+}
+fn rbpLoadXmmF64Auto(dst: inst.Xmm, disp: i32) inst.EncodedInsn {
+    if (disp >= -128 and disp <= 127) return inst.encLoadXmmF64MemRBP(dst, @intCast(disp));
+    return inst.encLoadXmmF64MemRBPDisp32(dst, disp);
+}
+fn rbpStoreXmmF64Auto(disp: i32, src: inst.Xmm) inst.EncodedInsn {
+    if (disp >= -128 and disp <= 127) return inst.encStoreXmmF64MemRBP(@intCast(disp), src);
+    return inst.encStoreXmmF64MemRBPDisp32(disp, src);
 }
 
 /// Resolve a vreg's home register (GPR class). Returns the
@@ -96,8 +124,8 @@ pub fn gprLoadSpilled(
         .reg => |id| abi.slotToReg(id) orelse Error.SlotOverflow,
         .spill => |off| blk: {
             const stage = abi.spill_stage_gprs[stage_idx];
-            const disp = try rbpDispNegI8(spill_base_off, off);
-            try writeBytes(allocator, buf, inst.encLoadR64MemRBP(stage, disp));
+            const disp = try rbpDispNegI32(spill_base_off, off);
+            try writeBytes(allocator, buf, rbpLoadR64Auto(stage, disp));
             break :blk stage;
         },
     };
@@ -133,8 +161,8 @@ pub fn gprStoreSpilled(
         .reg => {},
         .spill => |off| {
             const stage = abi.spill_stage_gprs[stage_idx];
-            const disp = try rbpDispNegI8(spill_base_off, off);
-            try writeBytes(allocator, buf, inst.encStoreR64MemRBP(disp, stage));
+            const disp = try rbpDispNegI32(spill_base_off, off);
+            try writeBytes(allocator, buf, rbpStoreR64Auto(disp, stage));
         },
     }
 }
@@ -180,8 +208,8 @@ pub fn xmmLoadSpilled(
         .reg => |id| abi.fpSlotToReg(id) orelse Error.SlotOverflow,
         .spill => |off| blk: {
             const stage = abi.fp_spill_stage_xmms[stage_idx];
-            const disp = try rbpDispNegI8(spill_base_off, off);
-            try writeBytes(allocator, buf, inst.encLoadXmmF64MemRBP(stage, disp));
+            const disp = try rbpDispNegI32(spill_base_off, off);
+            try writeBytes(allocator, buf, rbpLoadXmmF64Auto(stage, disp));
             break :blk stage;
         },
     };
@@ -214,8 +242,8 @@ pub fn xmmStoreSpilled(
         .reg => {},
         .spill => |off| {
             const stage = abi.fp_spill_stage_xmms[stage_idx];
-            const disp = try rbpDispNegI8(spill_base_off, off);
-            try writeBytes(allocator, buf, inst.encStoreXmmF64MemRBP(disp, stage));
+            const disp = try rbpDispNegI32(spill_base_off, off);
+            try writeBytes(allocator, buf, rbpStoreXmmF64Auto(disp, stage));
         },
     }
 }
@@ -226,31 +254,30 @@ pub fn xmmStoreSpilled(
 
 const testing = std.testing;
 
-test "rbpDispNegI8: spill_base_off=8 + off=0 → disp=-8" {
-    const disp = try rbpDispNegI8(8, 0);
-    try testing.expectEqual(@as(i8, -8), disp);
+test "rbpDispNegI32: spill_base_off=8 + off=0 → disp=-8" {
+    try testing.expectEqual(@as(i32, -8), try rbpDispNegI32(8, 0));
 }
 
-test "rbpDispNegI8: spill_base_off=64 + off=8 → disp=-72" {
-    const disp = try rbpDispNegI8(64, 8);
-    try testing.expectEqual(@as(i8, -72), disp);
+test "rbpDispNegI32: spill_base_off=64 + off=8 → disp=-72" {
+    try testing.expectEqual(@as(i32, -72), try rbpDispNegI32(64, 8));
 }
 
-test "rbpDispNegI8: spill_base_off=120 + off=8 = 128 → disp=-128 (boundary)" {
-    const disp = try rbpDispNegI8(120, 8);
-    try testing.expectEqual(@as(i8, -128), disp);
+test "rbpDispNegI32: spill_base_off=120 + off=8 = 128 → disp=-128 (boundary)" {
+    try testing.expectEqual(@as(i32, -128), try rbpDispNegI32(120, 8));
 }
 
-test "rbpDispNegI8: abs > 128 → SlotOverflow" {
-    try testing.expectError(Error.SlotOverflow, rbpDispNegI8(128, 8));
+test "rbpDispNegI32: spill_base_off=200 + off=8 = 208 → disp=-208 (past i8 range)" {
+    // §9.7 / 7.10-k regression — pre-7.10-k surfaced SlotOverflow
+    // for any spill region whose deepest slot exceeded -128.
+    try testing.expectEqual(@as(i32, -208), try rbpDispNegI32(200, 8));
 }
 
-test "rbpDispNegI8: misaligned (not 8-multiple) → SlotOverflow" {
-    try testing.expectError(Error.SlotOverflow, rbpDispNegI8(8, 4));
+test "rbpDispNegI32: misaligned (not 8-multiple) → SlotOverflow" {
+    try testing.expectError(Error.SlotOverflow, rbpDispNegI32(8, 4));
 }
 
-test "rbpDispNegI8: zero distance (no spill area) → SlotOverflow" {
-    try testing.expectError(Error.SlotOverflow, rbpDispNegI8(0, 0));
+test "rbpDispNegI32: zero distance (no spill area) → SlotOverflow" {
+    try testing.expectError(Error.SlotOverflow, rbpDispNegI32(0, 0));
 }
 
 test "gprLoadSpilled: vreg in reg returns slotToReg without emitting bytes" {
