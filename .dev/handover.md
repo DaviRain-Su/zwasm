@@ -14,56 +14,49 @@
 
 ## Current state — Phase 7 / §9.7 / 7.9 IN-PROGRESS
 
-直近 commit (HEAD = `f532e16`):
+直近 commit (HEAD = `659b01e`):
 
+- `659b01e` feat(p7): §9.7 / 7.9 chunk d-13 — arm64 spill-aware captureCallResult
+- `e0212ec` feat(p7): §9.7 / 7.9 chunk d-12 — arm64 SlotOverflow root-cause diag prints
 - `f532e16` feat(p7): §9.7 / 7.9 chunk d-11 — arm64 caller-side AAPCS64 stack-arg lowering
 - `b9a5948` feat(p7): §9.7 / 7.9 chunk d-10 — arm64 op_call caller-side reject diag prints
-- `cc6a0eb` feat(p7): §9.7 / 7.9 chunk d-9 — arm64 frame_bytes + regalloc max_slots widening
-- `03d9875` feat(p7): §9.7 / 7.9 chunk d-8 — D-034 spill-aware migration tail (35 sites)
 
 **Phase status**: §9.7 / 7.5 + 7.8 → **[x]**。Phase 7 残 row = 7.9 /
 7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。
 
-**§9.7 / 7.9 progress**: chunks a..d-11 closed across 24 commits。
-realworld JIT compile-pass: 5/55 → 33/55 (chunk d-11 +6)。
-3-host gate green。
+**§9.7 / 7.9 progress**: chunks a..d-13 closed across 26 commits。
+realworld JIT compile-pass: 5/55 → 45/55 (chunks d-11+d-13 で +18)。
 
-**Chunk 7.9-d-11 完了** (`f532e16`): option-2 を採用。
-caller frame の bottom に `outgoing_max_bytes` の outgoing-args
-region を予約; locals + spills は `local_base_off` だけ shift。
-`computeOutgoingMaxBytes` で `call N` / `call_indirect` を pre-
-scan し最悪値を計算。emit.zig 21 site (param-store loop / 宣言
-local zero-init / local.get/set/tee) が `[SP, #(local_base_off
-+ idx*8)]` 経由に。`op_call.marshalCallArgs` は arg_vregs cap を
-8 → 64 に上げ、overflow int (>X7) / fp (>V7) を STR W/X/S/D で
-`[SP, #(K*8)]` に書き出す (NSAA index per AAPCS64 §6.4.2)。
-callee 側 d-7 の `[X29, #16+8*K]` 取り込みは無変更で完結。
-Mac aarch64 realworld_run_jit: 27/55 → 33/55 (+6); 残り 19
-COMPILE-OP は **全て SlotOverflow** に集約 (= regalloc 段階
-exhaustion)。
+**Chunk 7.9-d-13 完了** (`659b01e`): d-12 の diag が categorise
+した 12 件 (`captureCallResult.i32` SlotOverflow) を解消。
+result vreg slot が spill 領域 (slot_id ≥ 8) のとき
+`STR W0 / X0 / S0 / D0, [SP, #(spill_base_off + off)]` を
+直接出して AAPCS64 result reg を spill slot に flush。class
+axis (gpr / fpr) を分けて i32/i64 と f32/f64 を別 boundary
+で dispatch。Mac aarch64 realworld_run_jit: 33/55 → 45/55
+(+12)。
 
-**Chunk 7.9-d-12 plan** (NEXT): SlotOverflow 19 fixtures の
-共通根本原因を特定。候補:
-1. `max_reg_slots_gpr/fp` の更なる引き上げ (現在 GPR=8, FP=13)
-   — 単純引き上げで何が unblock されるか測定。
-2. vreg coalesce (連鎖 ALU の中間 vreg を即時 reuse) — ADR-grade。
-3. SlotOverflow 発火時の diag 拡張で具体 op / vreg id を出す
-   (d-10 と同じパターン)。
-推奨: まず 3 で計測 → 1 か 2 を選択。
+**Chunk 7.9-d-14 plan** (NEXT): 残り 7 SlotOverflow 全てが
+`i64.load32_u offset_imm > 0xFFFFFF` (16 MiB+ array index)。
+現在の op_memory chunk d-6 lowering は 24-bit (ADD imm12<<12
++ ADD imm12) を最大とする。32-bit offset は MOVZ + MOVK chain
+(2-4 instr) で X16 へ load し、その後 ADD X16, X16, X_offset
+で effective address を組み立てる。emcc -O2 で頻出する
+typedarray アクセスを完全に unblock 見込み (40/55 達成圏)。
 
 **§9.7 / 7.9 exit criterion** (40+ realworld run-pass) は run-
 stage 計測が opt-in (per-fixture timeout NYI) のため compile-
-pass 33/55 + 全 infra 揃った状態で 7.13 boundary review で
+pass 45/55 + 全 infra 揃った状態で 7.13 boundary review で
 「7.9 = infra 完備」として 7.10/7.11/7.12 chain に進む判断
-が妥当。
+が妥当。d-14 close で 50+/55 視野。
 
-**Pre-existing infra observation (out-of-scope for d-11)**:
+**Pre-existing infra observation (out-of-scope)**:
 `.githooks/pre_commit` (snake_case) は Git の `pre-commit`
 (kebab-case) hook 規約に合わないため fire しない。よって
 gate_commit.sh の `zig fmt --check src/` (38 files drift
 中、主に `@"opname"` → bare name の Zig 0.16 fmt rule 由来)
 + `file_size_check --gate` (3 files が hard-cap 2000 超過、
-全 pre-existing) も実行されていない。直近 10 commit すべて
+全 pre-existing) も実行されていない。直近 10+ commit すべて
 この状態で land 済 → 既存 infra bug。修復は専用 chore commit
 で別途 (gate を有効化するなら大規模 fmt 適用 + ファイル分割
 ADR が必要)。
