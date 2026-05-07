@@ -12,28 +12,35 @@
 5. `.dev/lessons/INDEX.md` — keyword-grep for the active task domain.
 6. `.dev/optimisation_log.md` — F-NNN / R-NNN / O-NNN ledger.
 
-## Current state — Phase 7 / §9.7 / 7.9 NEXT
+## Current state — Phase 7 / §9.7 / 7.9 IN-PROGRESS
 
 直近 commit (HEAD = `<this>`):
 
-- `<this>` chore(p7): mark §9.7 / 7.8 [x] close; retarget at 7.9
+- `<this>` chore(p7): refine §9.7 / 7.9 chunk plan
+- `61e42c4` feat(p7): §9.7 / 7.9 chunk a — JIT compile-baseline runner
+- `5a76f4d` chore(p7): mark §9.7 / 7.8 close + retarget at 7.9
 - `9a48b3a` feat(p7): §9.7 / 7.8 [x] — x86_64 JIT spec gate met on all 3 hosts
-- `d7236d0` feat(p7): §9.7 / 7.8-x86-win64-stack-args (chunk 14e)
-- `95a64bb` fix(p7): §9.7 / 7.8-x86-win64-fp-params (chunk 14d)
 
 **Phase status**: §9.7 / 7.5 + 7.8 → **[x]**。Phase 7 残 row = 7.9 /
-7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。**§9.7 / 7.9** = 40+ realworld
-samples via ARM64 JIT — same fixtures as §9.6 / 6.1; trap
-categorisation reuses run_runner buckets。
+7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。
 
-3-host spec_assert at §9.7 / 7.8 close (D-045 fully discharged):
+**§9.7 / 7.9 chunk a baseline** (`zig build test-realworld-run-jit` Mac):
+0/55 compile-pass, 55 compile-imports, 0 compile-op, 0 compile-val。
+全 fixture が `error.UnsupportedImports` で reject。`compileWasm`
+(`src/engine/runner.zig:66`) の import-reject guard が gate。
 
-- Mac aarch64       : **212 / 0 / 20**     (test-all wired)
-- OrbStack Linux    : **212 / 0 / 20**     (was 49/174 → +163 PASS cumulative)
-- windowsmini Win   : **212 / 0 / 20**     (was 49/174 → +163 PASS cumulative)
+**Chunk 7.9-b plan** (next): import resolution + JIT host-call dispatch:
+1. `JitRuntime` tail-extend with `host_dispatch_base` field (per `jit_abi.zig:27` 拡張規則)。
+2. `linker.link` で imports を func_offsets の先頭に予約 (現状: 0-based defined-only)。
+3. `op_call.emitCall` で import vs defined を判別: import は BLR via dispatch slot; defined は既存 BL fixup。
+4. Runner 側に WASI stub handlers: `proc_exit` / `fd_write` / `clock_time_get` / `args_get` / `args_sizes_get`、AAPCS64 callconv で wired via dispatch table。
 
-**+163 PASS** each on Linux + Windows across D-045 chunks 1-14e.
-test-spec-assert は now wired into test-all on **all 3 hosts**.
+**Chunk 7.9-c plan**: residual ARM64 emit gaps:
+- `memory.copy` / `memory.fill` (heaviest gap; emcc / clang -O2 binaries 全部使う)
+- sign-extension ops (`i32.extend8_s` 等; lower.zig 既に lower するが emit が空)
+- i64 / f32 / f64 globals (op_globals.zig が i32-only)
+
+**Chunk 7.9-d plan**: JitRuntime memory init from data section, table init from element section, `_start` entry resolution.
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
