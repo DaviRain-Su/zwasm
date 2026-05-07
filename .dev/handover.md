@@ -16,10 +16,10 @@
 
 直近 commit (HEAD = `<this>`):
 
-- `<this>` chore(p7): §9.7 / 7.9 chunk d-4 close (runVoidExport + run-stage harness)
+- `<this>` chore(p7): §9.7 / 7.9 chunk d-5 close (regalloc slot id u8→u16)
+- `e03015a` feat(p7): §9.7 / 7.9 chunk d-5 — widen regalloc slot id u8→u16 (1023 cap)
 - `76787d5` feat(p7): §9.7 / 7.9 chunk d-4 — runVoidExport + run-stage harness (opt-in)
 - `71f3896` feat(p7): §9.7 / 7.9 chunk d-3 — proc_exit dispatch + memory + data init (D-031)
-- `6800bb7` feat(p7): §9.7 / 7.9 chunk d-2 — WASI dispatch handlers + first run-stage host call
 
 **Phase status**: §9.7 / 7.5 + 7.8 → **[x]**。Phase 7 残 row = 7.9 /
 7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。
@@ -46,23 +46,30 @@ entries (opt-in) with shared setup helper:
   fixture timeout in this MVP). test-all stays responsive;
   measurement opt-in.
 
-**Chunk 7.9-d-5 plan** (NEXT): per-fixture timeout + real I/O。
-- Subprocess fork + `std.posix.alarm` deadline (or whatever
-  zig 0.16 exposes — `posix.setitimer` ITIMER_VIRTUAL or a
-  `RUSAGE_SELF` poll loop). Without per-fixture isolation the
-  run-stage gate stays opt-in.
-- Thread `init.io: std.Io` through JitRuntime tail-extension
-  for fd_write actual stdout / stderr routing; replace the
-  d-2 byte-counting stub.
-- Add `proc_exit_code: u32` JitRuntime tail field; the entry
-  shim distinguishes ProcExit vs Trap vs successful Return.
-- 目標: §9.7 / 7.9 exit criterion = 40+ realworld run-pass via
-  ARM64 JIT。
+**Chunk 7.9-d-5 完了** (`e03015a`): regalloc slot id u8→u16
+(1023 cap, matching validator's `max_operand_stack=1024`)。12
+ファイル / +228/-224。**重要発見**: 47 SlotOverflow 失敗の
+原因は実は regalloc 255-cap **ではなく** `arm64/op_memory.zig:68`
+の `offset_imm > 0xFFF` 拒否 — emcc/clang 出力の static-data
+セグメント先頭からの定数 offset が 4KB を超えるケース多数
+(例: `i64.load` offset=27616, `i32.load8_u` offset=1062912)。
+d-5 自体は構造的準備として green (compile-pass 5/55 不変)。
 
-**Chunk 7.9-d-6 plan** (after d-5): differential vs interp run-
-runner output (the §9.7 / 7.11 hard-gate predecessor); prep
-for §9.7 / 7.10 (x86_64 JIT realworld) which is a near-mirror
-of 7.9 with the x86_64 backend.
+**Chunk 7.9-d-6 plan** (NEXT、最大 leverage): arm64 op_memory の
+imm12 超 offset を multi-instr 化して 47 fixtures unblock:
+- `arm64/op_memory.zig` で `offset_imm > 0xFFF` を SlotOverflow
+  にせず、scratch GPR (X16/X17) に MOVZ/MOVK で offset を物
+  化、`LDR Xt, [Xn, Xm]` のレジスタオフセット addressing 形式に
+  切り替え (or `ADD Xt, Xn, Xm; LDR Xt, [Xt]`)。
+- store ops (i32.store / i64.store / etc.) も同様。
+- offset == 0 fast-path / imm12 fast-path 維持。
+- realworld_run_jit compile-pass 5/55 → 30+/55 を期待
+  (ほぼ全 SlotOverflow が解消する)。
+
+**Chunk 7.9-d-7 plan** (後続): 残り UnsupportedOp の closure
+(tinygo_fib / cpp_map_ops / cpp_string_ops) + per-fixture
+timeout (subprocess + alarm) で run-pass 計測の opt-in 制限を
+解除 → §9.7 / 7.9 exit criterion (40+ run-pass) 到達。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
