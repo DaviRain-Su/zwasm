@@ -46,6 +46,14 @@ const CallFixup = types.CallFixup;
 /// emits CALL placeholder + records `CallFixup` for the post-emit
 /// linker, captures return into the next vreg.
 ///
+/// Chunk 7.9-b foundation: if `callee_idx < num_imports`, route
+/// through the function-local trap stub via `unreach_fixups`
+/// (5-byte JMP rel32 placeholder) instead of CALL — every import
+/// call traps unconditionally until chunk 7.9-c wires up the
+/// host-call dispatcher. Args are still marshalled (harmless
+/// waste; the unconditional JMP jumps over the rest of the call
+/// sequence).
+///
 /// **Scope**: i32 args + i32 / void return only. f32/f64/i64
 /// args + return surface as UnsupportedOp (lifted alongside
 /// 7.7-fp / globals i64 chunks).
@@ -56,14 +64,35 @@ pub fn emitCall(
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
     call_fixups: *std.ArrayList(CallFixup),
+    unreach_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     func_sigs: []const zir.FuncType,
+    num_imports: u32,
     callee_idx: u32,
 ) Error!void {
     if (callee_idx >= func_sigs.len) return Error.AllocationMissing;
     const callee_sig = func_sigs[callee_idx];
 
     try marshalCallArgs(allocator, buf, alloc, pushed_vregs, spill_base_off, callee_sig);
+
+    if (callee_idx < num_imports) {
+        // Import call → unconditional 5-byte JMP rel32 placeholder.
+        // The function-final trap-stub patch (emit.zig § unreach
+        // fixups) redirects the disp32 to land at the trap stub
+        // (which sets trap_flag, clears EAX, runs epilogue, RETs).
+        const fixup_at: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJmpRel32(0).slice());
+        try unreach_fixups.append(allocator, fixup_at);
+        // Bookkeeping-only result push (control never returns
+        // here — the JMP unconditionally jumps to the trap stub).
+        if (callee_sig.results.len == 0) return;
+        if (callee_sig.results.len > 1) return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig: import call multi-result", 0);
+        const result = next_vreg.*;
+        next_vreg.* += 1;
+        if (result >= alloc.slots.len) return Error.AllocationMissing;
+        try pushed_vregs.append(allocator, result);
+        return;
+    }
 
     // Restore <entry_arg0> = runtime_ptr from R15 before
     // transferring control. The callee's prologue captures arg0

@@ -73,27 +73,53 @@ pub const JitModule = struct {
     }
 };
 
+/// Sentinel value stored in `func_offsets` for import slots. The
+/// JIT-emit pass routes import calls to the function-local trap
+/// stub directly (not through the linker's call_fixups), so this
+/// value is never read by any executable path. A reader that
+/// observes it (e.g. external tooling that unpacks JitModule)
+/// should treat it as "no body — call would trap".
+pub const IMPORT_SENTINEL_OFFSET: u32 = 0xFFFF_FFFF;
+
 /// Lay out and link `func_bodies` into a freshly-allocated
 /// `JitBlock`. The block returns in the executable state (caller
 /// can immediately invoke entry pointers).
-pub fn link(allocator: Allocator, func_bodies: []const FuncBody) Error!JitModule {
+///
+/// `num_imports` shifts the wasm-space function-index origin:
+/// `func_offsets` is sized `num_imports + func_bodies.len` and
+/// the first `num_imports` entries hold `IMPORT_SENTINEL_OFFSET`.
+/// Defined-function K is laid out at byte offset
+/// `func_offsets[num_imports + K]`. CallFixup `target_func_idx`
+/// values are wasm-space indices; the linker patches them by
+/// looking up `func_offsets[target_func_idx]` (which must NOT be
+/// the sentinel — emit-pass invariant: import calls never produce
+/// a CallFixup; import-as-trap branches go through the per-
+/// function bounds_fixups / unreach_fixups list).
+pub fn link(allocator: Allocator, func_bodies: []const FuncBody, num_imports: u32) Error!JitModule {
+    const total_funcs: usize = @as(usize, num_imports) + func_bodies.len;
     // Empty module (Wasm spec allows zero defined functions):
     // skip the jit_mem allocation entirely — there is no
     // executable code to publish. Caller still receives a
     // structurally valid JitModule whose bytes slice is empty
-    // and whose entry() must not be invoked.
+    // and whose entry() must not be invoked. Import-only modules
+    // (defined_count == 0, num_imports > 0) hit the same path:
+    // every wasm-idx-based entry() lookup hits a sentinel.
     if (func_bodies.len == 0) {
+        const offsets = try allocator.alloc(u32, total_funcs);
+        @memset(offsets, IMPORT_SENTINEL_OFFSET);
         return .{
             .block = .{ .bytes = &[_:0]u8{} },
-            .func_offsets = try allocator.alloc(u32, 0),
+            .func_offsets = offsets,
         };
     }
 
     var total_size: usize = 0;
-    var offsets = try allocator.alloc(u32, func_bodies.len);
+    var offsets = try allocator.alloc(u32, total_funcs);
     errdefer allocator.free(offsets);
+    // Imports occupy slots [0..num_imports); fill with sentinel.
+    @memset(offsets[0..num_imports], IMPORT_SENTINEL_OFFSET);
     for (func_bodies, 0..) |body, i| {
-        offsets[i] = @intCast(total_size);
+        offsets[num_imports + i] = @intCast(total_size);
         total_size += body.bytes.len;
         // Bodies emit only word-aligned content; no padding needed.
     }
@@ -104,7 +130,7 @@ pub fn link(allocator: Allocator, func_bodies: []const FuncBody) Error!JitModule
 
     try jit_mem.setWritable(block);
     for (func_bodies, 0..) |body, i| {
-        const off = offsets[i];
+        const off = offsets[num_imports + i];
         @memcpy(block.bytes[off..][0..body.bytes.len], body.bytes);
     }
 
@@ -114,9 +140,14 @@ pub fn link(allocator: Allocator, func_bodies: []const FuncBody) Error!JitModule
     // arch (BL imm26 on ARM64; CALL rel32 on x86_64) — comptime
     // switch picks the right path with no runtime cost.
     for (func_bodies, 0..) |body, i| {
-        const base = offsets[i];
+        const base = offsets[num_imports + i];
         for (body.call_fixups) |fx| {
-            if (fx.target_func_idx >= func_bodies.len) return Error.UnknownCallTarget;
+            // CallFixups carry wasm-space indices. Imports are
+            // routed via the trap stub by the emit pass — they
+            // must never appear here. A sentinel target is a
+            // structural emit-pass bug (post-chunk-b invariant).
+            if (fx.target_func_idx >= total_funcs) return Error.UnknownCallTarget;
+            if (fx.target_func_idx < num_imports) return Error.UnknownCallTarget;
             const fixup_abs: i64 = @as(i64, base) + @as(i64, fx.byte_offset);
             const target_abs: i64 = offsets[fx.target_func_idx];
             switch (builtin_arch.target.cpu.arch) {
@@ -191,16 +222,16 @@ test "link: 2-function module — fn0 calls fn1, returns 7" {
     const fn1_slots = [_]u8{0};
     const fn1_alloc: regalloc.Allocation = .{ .slots = &fn1_slots, .n_slots = 1 };
 
-    const out0 = try emit.compile(testing.allocator, &fn0, fn0_alloc, &sigs, &.{});
+    const out0 = try emit.compile(testing.allocator, &fn0, fn0_alloc, &sigs, &.{}, 0);
     defer emit.deinit(testing.allocator, out0);
-    const out1 = try emit.compile(testing.allocator, &fn1, fn1_alloc, &sigs, &.{});
+    const out1 = try emit.compile(testing.allocator, &fn1, fn1_alloc, &sigs, &.{}, 0);
     defer emit.deinit(testing.allocator, out1);
 
     const bodies = [_]FuncBody{
         .{ .bytes = out0.bytes, .call_fixups = out0.call_fixups },
         .{ .bytes = out1.bytes, .call_fixups = out1.call_fixups },
     };
-    var module = try link(testing.allocator, &bodies);
+    var module = try link(testing.allocator, &bodies, 0);
     defer module.deinit(testing.allocator);
 
     const Fn = *const fn () callconv(.c) u32;

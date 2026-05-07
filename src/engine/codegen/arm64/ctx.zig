@@ -90,6 +90,12 @@ pub const EmitCtx = struct {
     /// `gprLoadSpilled` / `gprStoreSpilled` to address spill
     /// slots.
     spill_base_off: u32,
+    /// Leading wasm-space function indices that name imports
+    /// (chunk 7.9-b foundation). `op_call.emitCall` checks
+    /// `ins.payload < num_imports` to decide between a normal
+    /// BL + CallFixup (defined function call) and an
+    /// import-as-trap branch (B → trap stub via bounds_fixups).
+    num_imports: u32,
 
     /// Pop two operands + allocate a result vreg. Shared header
     /// for every binary op-handler. Returns the lhs / rhs / result

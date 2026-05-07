@@ -6,7 +6,9 @@
 //! `runI32EntryByIdx` for the §9.7 / 7.5 spec gate.
 //!
 //! Restrictions for this skeleton:
-//!   - imports unsupported (returns `UnsupportedImports` if any)
+//!   - imports compile but trap unconditionally on first call
+//!     (chunk 7.9-b: import-as-trap foundation; host-call dispatch
+//!     lands at chunk 7.9-c)
 //!   - only no-arg + i32-result entry signatures supported
 //!   - trap detection deferred to sub-7.5b-ii (today: a trap
 //!     in the JIT body crashes the process; only value-
@@ -27,6 +29,12 @@ const linker = @import("codegen/shared/linker.zig");
 const entry = @import("codegen/shared/entry.zig");
 
 pub const Error = error{
+    /// Reserved for future "import shape we cannot represent at all"
+    /// failure (e.g. memory64 / shared imports beyond MVP). The
+    /// chunk-b "every import call traps unconditionally" foundation
+    /// does NOT raise this — function imports are accepted, indexed
+    /// into the wasm-space func table, and emit a trap-stub branch
+    /// at every call site.
     UnsupportedImports,
     MissingTypeSection,
     MissingFunctionSection,
@@ -43,7 +51,16 @@ pub const Error = error{
 pub const CompiledWasm = struct {
     module: linker.JitModule,
     func_results: []compile_func.FuncResult,
+    /// Wasm-space function signatures: imports first (length =
+    /// `num_imports`), then defined functions. Indexed by the
+    /// wasm function index (matches `Export.idx`, `call N` payload,
+    /// validator's `func_types`).
     func_sigs: []FuncType,
+    /// Number of function imports. The first `num_imports` entries
+    /// of `func_sigs` correspond to imports (no body compiled);
+    /// `func_results` covers only the defined functions and is
+    /// indexed by `defined_idx = wasm_idx - num_imports`.
+    num_imports: u32,
     arena: std.heap.ArenaAllocator,
 
     pub fn deinit(self: *CompiledWasm, allocator: Allocator) void {
@@ -59,31 +76,65 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     var module = try parser.parse(allocator, wasm_bytes);
     defer module.deinit(allocator);
 
-    // Reject imports (sub-7.5b-i scope).
-    if (module.find(.import)) |s| {
-        var imports = try sections.decodeImports(allocator, s.body);
-        defer imports.deinit();
-        if (imports.items.len > 0) return Error.UnsupportedImports;
-    }
-
     var arena = std.heap.ArenaAllocator.init(allocator);
     errdefer arena.deinit();
     const a = arena.allocator();
+
+    // Decode the import section (chunk 7.9-b). Imports are accepted
+    // in MVP shape; only function imports contribute to the wasm
+    // function index space. Memory / table / global imports are
+    // recorded as kind-only — table-size / globals_base / mem
+    // wiring lands at chunk 7.9-c when host-call dispatch arrives.
+    var imports_buf: ?sections.Imports = null;
+    defer if (imports_buf) |*ib| ib.deinit();
+    if (module.find(.import)) |s| imports_buf = try sections.decodeImports(allocator, s.body);
 
     // Per Wasm spec: type / function / code sections are all
     // OPTIONAL — a module with no defined functions is valid
     // (just header + optional non-function sections). Bail out
     // early with an empty CompiledWasm in that case rather than
-    // demanding a type section.
+    // demanding a type section. (A module may have imports but no
+    // defined functions; that case also returns an empty
+    // JitModule — call-by-export to an import-only function is
+    // unreachable from JIT-compiled code today.)
     const func_section_opt = module.find(.function);
     if (func_section_opt == null) {
         const empty_results = try allocator.alloc(compile_func.FuncResult, 0);
-        const empty_sigs = try allocator.alloc(FuncType, 0);
-        const empty_module = try linker.link(allocator, &.{});
+        // Build func_sigs from import-only function entries (if any)
+        // so `findExportFunc` → wasm-space idx → func_sigs[idx]
+        // resolution remains valid for export-import re-exports.
+        var sig_count: u32 = 0;
+        if (imports_buf) |ib| {
+            for (ib.items) |imp| {
+                if (imp.kind == .func) sig_count += 1;
+            }
+        }
+        const empty_module = try linker.link(allocator, &.{}, sig_count);
+        const sigs = try allocator.alloc(FuncType, sig_count);
+        if (imports_buf) |ib| {
+            // Need a type section to resolve func imports' typeidx.
+            if (sig_count > 0) {
+                const type_section = module.find(.@"type") orelse return Error.MissingTypeSection;
+                var types = try sections.decodeTypes(a, type_section.body);
+                defer types.deinit();
+                var w: u32 = 0;
+                for (ib.items) |imp| {
+                    if (imp.kind != .func) continue;
+                    const tidx = imp.payload.func_typeidx;
+                    if (tidx >= types.items.len) {
+                        allocator.free(sigs);
+                        return Error.MissingTypeSection;
+                    }
+                    sigs[w] = types.items[tidx];
+                    w += 1;
+                }
+            }
+        }
         return .{
             .module = empty_module,
             .func_results = empty_results,
-            .func_sigs = empty_sigs,
+            .func_sigs = sigs,
+            .num_imports = sig_count,
             .arena = arena,
         };
     }
@@ -100,12 +151,34 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
 
     if (codes.items.len != defined_func_typeidx.len) return Error.MissingCodeSection;
 
-    // Build the per-function FuncType vector.
-    const func_sigs = try allocator.alloc(FuncType, defined_func_typeidx.len);
+    // Count function imports (memory / table / global imports do
+    // not extend the function index space).
+    var num_imports: u32 = 0;
+    if (imports_buf) |ib| {
+        for (ib.items) |imp| {
+            if (imp.kind == .func) num_imports += 1;
+        }
+    }
+
+    // Build the unified wasm-space func_sigs vector:
+    // `[import_func_sigs..., defined_func_sigs...]`. Indexed by
+    // wasm function index throughout (validator, lower, emit).
+    const total_funcs = num_imports + @as(u32, @intCast(defined_func_typeidx.len));
+    const func_sigs = try allocator.alloc(FuncType, total_funcs);
     errdefer allocator.free(func_sigs);
+    if (imports_buf) |ib| {
+        var w: u32 = 0;
+        for (ib.items) |imp| {
+            if (imp.kind != .func) continue;
+            const tidx = imp.payload.func_typeidx;
+            if (tidx >= types.items.len) return Error.MissingTypeSection;
+            func_sigs[w] = types.items[tidx];
+            w += 1;
+        }
+    }
     for (defined_func_typeidx, 0..) |type_idx, i| {
         if (type_idx >= types.items.len) return Error.MissingTypeSection;
-        func_sigs[i] = types.items[type_idx];
+        func_sigs[num_imports + i] = types.items[type_idx];
     }
 
     // 7.5-close-d042-prep: decode globals / tables / data /
@@ -146,6 +219,9 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     var compiled: usize = 0;
     errdefer for (results[0..compiled]) |*r| compile_func.deinitFuncResult(allocator, r);
     for (codes.items, 0..) |code, i| {
+        // Defined function K's wasm-space index = num_imports + K.
+        const wasm_idx: u32 = num_imports + @as(u32, @intCast(i));
+        const sig = func_sigs[wasm_idx];
         // 7.5-close-d042-impl: validate before compile. Surfaces
         // type-mismatch / unknown-local / unknown-global etc. as
         // ValidationFailed instead of silent miscompile or arbitrary
@@ -153,7 +229,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         // documented in `.dev/lessons/2026-05-07-validator-dead-
         // code-in-runtime.md`.
         validator_mod.validateFunction(
-            func_sigs[i],
+            sig,
             code.locals,
             code.body,
             func_sigs,
@@ -164,26 +240,27 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             validator_elem_count,
         ) catch |err| {
             std.debug.print("compileWasm: func[{d}] params={d} results={d} → validate {s}\n", .{
-                i,
-                func_sigs[i].params.len,
-                func_sigs[i].results.len,
+                wasm_idx,
+                sig.params.len,
+                sig.results.len,
                 @errorName(err),
             });
             return err;
         };
         results[i] = compile_func.compileOne(
             allocator,
-            @intCast(i),
-            func_sigs[i],
+            wasm_idx,
+            sig,
             code.body,
             code.locals,
             types.items,
             func_sigs,
+            num_imports,
         ) catch |err| {
             std.debug.print("compileWasm: func[{d}] params={d} results={d} → {s}\n", .{
-                i,
-                func_sigs[i].params.len,
-                func_sigs[i].results.len,
+                wasm_idx,
+                sig.params.len,
+                sig.results.len,
                 @errorName(err),
             });
             return err;
@@ -191,18 +268,23 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         compiled += 1;
     }
 
-    // Link into one JitModule.
+    // Link into one JitModule. The linker reserves the first
+    // `num_imports` slots in `func_offsets` for import sentinels;
+    // import calls never produce a CallFixup (the emit pass routes
+    // them to the function-local trap stub directly), so the
+    // sentinel slots are never read.
     const bodies = try allocator.alloc(linker.FuncBody, results.len);
     defer allocator.free(bodies);
     for (results, 0..) |r, i| {
         bodies[i] = .{ .bytes = r.out.bytes, .call_fixups = r.out.call_fixups };
     }
-    const linked = try linker.link(allocator, bodies);
+    const linked = try linker.link(allocator, bodies, num_imports);
 
     return .{
         .module = linked,
         .func_results = results,
         .func_sigs = func_sigs,
+        .num_imports = num_imports,
         .arena = arena,
     };
 }
@@ -240,6 +322,12 @@ pub fn runI32Export(
     defer compiled.deinit(allocator);
 
     if (func_idx >= compiled.func_sigs.len) return Error.ExportNotFound;
+    // Re-exporting an imported function is rejected from this
+    // shim — the JitModule only has bodies for defined functions;
+    // the entry pointer for an import sentinel slot is a 0xFFFF
+    // sentinel, not callable. Fixtures wanting to call an imported
+    // export need the chunk 7.9-c host-call dispatcher.
+    if (func_idx < compiled.num_imports) return Error.UnsupportedEntrySignature;
     const sig = compiled.func_sigs[func_idx];
     if (sig.params.len != 0 or sig.results.len != 1 or sig.results[0] != .i32) {
         return Error.UnsupportedEntrySignature;

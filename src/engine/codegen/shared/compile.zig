@@ -69,7 +69,14 @@ pub fn deinitFuncResult(allocator: Allocator, r: *FuncResult) void {
 ///          (locals prefix + instructions, ending in `end`).
 /// `locals` = the function's local-types list (post-decode).
 /// `module_types` = the module's type table (for typeidx blocks).
-/// `func_sigs` = sigs of all module functions (for `call N`).
+/// `func_sigs` = sigs of all module functions (for `call N`),
+///               wasm-space (imports first, defined after).
+/// `num_imports` = leading wasm-space indices that name function
+///                 imports (chunk 7.9-b foundation). The emit pass
+///                 routes a `call N` with `N < num_imports` to the
+///                 function-local trap stub instead of a body-
+///                 relative BL/CALL — host-call dispatch lands at
+///                 chunk 7.9-c.
 pub fn compileOne(
     allocator: Allocator,
     func_idx: u32,
@@ -78,6 +85,7 @@ pub fn compileOne(
     locals: []const zir.ValType,
     module_types: []const FuncType,
     func_sigs: []const FuncType,
+    num_imports: u32,
 ) Error!FuncResult {
     var func = ZirFunc.init(func_idx, sig, locals);
     errdefer func.deinit(allocator);
@@ -109,7 +117,7 @@ pub fn compileOne(
         else => @compileError("unsupported host arch"),
     }
 
-    const out = try emit.compile(allocator, &func, alloc, func_sigs, module_types);
+    const out = try emit.compile(allocator, &func, alloc, func_sigs, module_types, num_imports);
     errdefer emit.deinit(allocator, out);
 
     return .{
@@ -137,13 +145,13 @@ test "compileOne: tiny straight-line module — (func (result i32) i32.const 7 e
     const body = [_]u8{ 0x41, 0x07, 0x0B };
     const sig: FuncType = .{ .params = &.{}, .results = &.{ .i32 } };
 
-    var r = try compileOne(testing.allocator, 0, sig, &body, &.{}, &.{}, &.{sig});
+    var r = try compileOne(testing.allocator, 0, sig, &body, &.{}, &.{}, &.{sig}, 0);
     defer deinitFuncResult(testing.allocator, &r);
 
     const bodies = [_]linker.FuncBody{
         .{ .bytes = r.out.bytes, .call_fixups = r.out.call_fixups },
     };
-    var module = try linker.link(testing.allocator, &bodies);
+    var module = try linker.link(testing.allocator, &bodies, 0);
     defer module.deinit(testing.allocator);
 
     var memory: [0]u8 = .{};

@@ -114,6 +114,7 @@ pub fn compile(
     alloc: regalloc.Allocation,
     func_sigs: []const zir.FuncType,
     module_types: []const zir.FuncType,
+    num_imports: u32,
 ) Error!EmitOutput {
     if (alloc.slots.len != (func.liveness orelse return Error.AllocationMissing).ranges.len) {
         return Error.AllocationMissing;
@@ -361,6 +362,7 @@ pub fn compile(
         .return_fixups = &return_fixups,
         .call_fixups = &call_fixups,
         .spill_base_off = spill_base_off,
+        .num_imports = num_imports,
     };
 
     // §9.7 / 7.5-emit-deadcode: track polymorphic-stack dead

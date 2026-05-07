@@ -374,13 +374,13 @@ test "entry: i32.load offset=0 reads memory[0..4] through X28 vm_base" {
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const sigs = [_]zir.FuncType{sig};
 
-    const out0 = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{});
+    const out0 = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{}, 0);
     defer emit.deinit(testing.allocator, out0);
 
     const bodies = [_]linker.FuncBody{
         .{ .bytes = out0.bytes, .call_fixups = out0.call_fixups },
     };
-    var module = try linker.link(testing.allocator, &bodies);
+    var module = try linker.link(testing.allocator, &bodies, 0);
     defer module.deinit(testing.allocator);
 
     // Stage 16 bytes; the Wasm body reads memory[0..4] little-endian.
@@ -422,13 +422,13 @@ test "entry: ADR-0018 sub-1c — spilled i32.const returns 42 via STR/LDR round-
         .max_reg_slots_gpr = 10,
     };
     const sigs = [_]zir.FuncType{sig};
-    const out = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{});
+    const out = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{}, 0);
     defer emit.deinit(testing.allocator, out);
 
     const bodies = [_]linker.FuncBody{
         .{ .bytes = out.bytes, .call_fixups = out.call_fixups },
     };
-    var module = try linker.link(testing.allocator, &bodies);
+    var module = try linker.link(testing.allocator, &bodies, 0);
     defer module.deinit(testing.allocator);
 
     var memory: [0]u8 = .{};
@@ -467,12 +467,12 @@ test "entry: ADR-0027 — global.set 0 then global.get 0 (i32) round-trips throu
     const slots = [_]u8{ 0, 0 };
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const sigs = [_]zir.FuncType{sig};
-    const out0 = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{});
+    const out0 = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{}, 0);
     defer emit.deinit(testing.allocator, out0);
     const bodies = [_]linker.FuncBody{
         .{ .bytes = out0.bytes, .call_fixups = out0.call_fixups },
     };
-    var module = try linker.link(testing.allocator, &bodies);
+    var module = try linker.link(testing.allocator, &bodies, 0);
     defer module.deinit(testing.allocator);
 
     var memory: [0]u8 = .{};
@@ -515,13 +515,13 @@ test "entry: pure constant function returns 42 (sanity — no memory access)" {
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const sigs = [_]zir.FuncType{sig};
 
-    const out0 = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{});
+    const out0 = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{}, 0);
     defer emit.deinit(testing.allocator, out0);
 
     const bodies = [_]linker.FuncBody{
         .{ .bytes = out0.bytes, .call_fixups = out0.call_fixups },
     };
-    var module = try linker.link(testing.allocator, &bodies);
+    var module = try linker.link(testing.allocator, &bodies, 0);
     defer module.deinit(testing.allocator);
 
     var memory: [0]u8 = .{};
@@ -560,13 +560,13 @@ test "entry: callI32_i32i32 — 2 i32 params summed via i32.add" {
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 3 };
     const sigs = [_]zir.FuncType{sig};
 
-    const out0 = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{});
+    const out0 = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{}, 0);
     defer emit.deinit(testing.allocator, out0);
 
     const bodies = [_]linker.FuncBody{
         .{ .bytes = out0.bytes, .call_fixups = out0.call_fixups },
     };
-    var module = try linker.link(testing.allocator, &bodies);
+    var module = try linker.link(testing.allocator, &bodies, 0);
     defer module.deinit(testing.allocator);
 
     var memory: [0]u8 = .{};
@@ -600,13 +600,13 @@ test "entry: callI32_i32 — 1 i32 param echoed through W1 → SP slot 0 → res
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const sigs = [_]zir.FuncType{sig};
 
-    const out0 = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{});
+    const out0 = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{}, 0);
     defer emit.deinit(testing.allocator, out0);
 
     const bodies = [_]linker.FuncBody{
         .{ .bytes = out0.bytes, .call_fixups = out0.call_fixups },
     };
-    var module = try linker.link(testing.allocator, &bodies);
+    var module = try linker.link(testing.allocator, &bodies, 0);
     defer module.deinit(testing.allocator);
 
     var memory: [0]u8 = .{};
@@ -644,13 +644,13 @@ test "entry: f32 local round-trip — local.get 0 of f32 param via V0" {
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const sigs = [_]zir.FuncType{sig};
 
-    const out0 = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{});
+    const out0 = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{}, 0);
     defer emit.deinit(testing.allocator, out0);
 
     const bodies = [_]linker.FuncBody{
         .{ .bytes = out0.bytes, .call_fixups = out0.call_fixups },
     };
-    var module = try linker.link(testing.allocator, &bodies);
+    var module = try linker.link(testing.allocator, &bodies, 0);
     defer module.deinit(testing.allocator);
 
     var memory: [0]u8 = .{};
@@ -689,13 +689,13 @@ test "entry: callI64NoArgs — i64.const 0xDEADBEEFCAFE returns full 64-bit" {
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const sigs = [_]zir.FuncType{sig};
 
-    const out0 = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{});
+    const out0 = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{}, 0);
     defer emit.deinit(testing.allocator, out0);
 
     const bodies = [_]linker.FuncBody{
         .{ .bytes = out0.bytes, .call_fixups = out0.call_fixups },
     };
-    var module = try linker.link(testing.allocator, &bodies);
+    var module = try linker.link(testing.allocator, &bodies, 0);
     defer module.deinit(testing.allocator);
 
     var memory: [0]u8 = .{};

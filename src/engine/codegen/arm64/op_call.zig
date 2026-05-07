@@ -41,14 +41,47 @@ const EmitCtx = ctx_mod.EmitCtx;
 const Error = ctx_mod.Error;
 const CallFixup = ctx_mod.CallFixup;
 
-/// Direct call: `call N`. Looks up `func_sigs[N]` for the callee
-/// signature, marshals args, emits BL placeholder + CallFixup,
-/// captures the result.
+/// Wasm spec §3.4.7 (call N) — direct call. Looks up
+/// `func_sigs[N]` for the callee signature, marshals args, emits
+/// BL placeholder + CallFixup, captures the result.
+///
+/// Chunk 7.9-b foundation: if `N < num_imports` (the leading
+/// wasm-space slots that name imports), the call routes to the
+/// function-local trap stub instead of a body-relative BL —
+/// **every import call traps unconditionally** until chunk 7.9-c
+/// wires up the host-call dispatcher. Args are still marshalled
+/// (harmless waste; the trap branch jumps over the rest of the
+/// call sequence) and the result vreg is still allocated /
+/// pushed so post-call ops that pop it find a slot, even though
+/// they never execute (the unconditional B redirects control to
+/// the trap stub which RETs out of the function).
 pub fn emitCall(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     if (ins.payload >= ctx.func_sigs.len) return Error.AllocationMissing;
     const callee_sig: FuncType = ctx.func_sigs[ins.payload];
 
     try marshalCallArgs(ctx, callee_sig);
+
+    if (ins.payload < ctx.num_imports) {
+        // Import call → unconditional B to trap stub. Mirrors the
+        // arm64 `unreachable` op shape (emit.zig:672-684): emit a
+        // `B 0` placeholder + append byte-offset to `bounds_fixups`
+        // so the function-final trap-stub patch redirects it. The
+        // patcher distinguishes B vs B.cond by opcode bits 31..26.
+        const fixup_at: u32 = @intCast(ctx.buf.items.len);
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encB(0));
+        try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+        // Keep operand-stack bookkeeping consistent: allocate +
+        // push the result vreg the validator expects, even though
+        // post-trap ops never run. Skip the actual MOV from W0/X0
+        // — control will not return to this point.
+        if (callee_sig.results.len == 0) return;
+        if (callee_sig.results.len > 1) return Error.UnsupportedOp;
+        const result = ctx.next_vreg.*;
+        ctx.next_vreg.* += 1;
+        if (result >= ctx.alloc.slots.len) return Error.SlotOverflow;
+        try ctx.pushed_vregs.append(ctx.allocator, result);
+        return;
+    }
 
     // ADR-0017 sub-2d-ii: restore runtime_ptr in X0 (X0 is
     // caller-saved per AAPCS64, may have been clobbered by an

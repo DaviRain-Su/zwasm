@@ -286,7 +286,7 @@ test "trace: JIT emit invokes writeBounds for i32.load (integration, both backen
     } };
     const slots = [_]u8{ 0, 0 };
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
-    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{});
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0);
     defer deinit(testing.allocator, out);
 
     try testing.expectEqual(@as(u64, 1), writeCount());
