@@ -263,6 +263,21 @@ pub fn compile(
         }
     }
 
+    // Wasm spec §4.5.3.1 — locals beyond params are initialised to
+    // zero on entry. Mirror of arm64/emit.zig:263-267 (STR XZR per
+    // slot). x86_64: `XOR EAX, EAX` zeros RAX (32-bit XOR zero-
+    // extends to 64); then `MOV [RBP+disp], RAX` writes 8 bytes per
+    // local slot. RAX is the return reg, overwritten at function-
+    // end, so its temporary use here is invariant-clean.
+    if (num_locals > 0) {
+        try buf.appendSlice(allocator, inst.encXorRR(.d, .rax, .rax).slice());
+        var loc_idx: u32 = num_params;
+        while (loc_idx < total_locals) : (loc_idx += 1) {
+            const loc_disp = try localDisp(loc_idx, total_locals, uses_runtime_ptr);
+            try buf.appendSlice(allocator, inst.encStoreR64MemRBP(loc_disp, .rax).slice());
+        }
+    }
+
     // ============================================================
     // Body: walk instrs, dispatch per op.
     //
@@ -942,6 +957,11 @@ test "compile: function with 1 local + (i32.const 42) (local.set 0) (local.get 0
     //   BB 2A 00 00 00                 MOV EBX, #42           (const, slot 0 = RBX)
     //   89 5D F8                       MOV [RBP-8], EBX       (local.set 0)
     //   44 8B 65 F8                    MOV R12D, [RBP-8]      (local.get 0; slot 1 = R12)
+    //   31 C0                          XOR EAX, EAX        (zero-init §4.5.3.1)
+    //   48 89 45 F8                    MOV [RBP-8], RAX    (zero local 0)
+    //   BB 2A 00 00 00                 MOV EBX, 42
+    //   89 5D F8                       MOV [RBP-8], EBX
+    //   44 8B 65 F8                    MOV R12D, [RBP-8]
     //   44 89 E0                       MOV EAX, R12D
     //   48 83 C4 10                    ADD RSP, 16
     //   5D                             POP RBP
@@ -950,6 +970,8 @@ test "compile: function with 1 local + (i32.const 42) (local.set 0) (local.get 0
         0x55,
         0x48, 0x89, 0xE5,
         0x48, 0x83, 0xEC, 0x10,
+        0x31, 0xC0,
+        0x48, 0x89, 0x45, 0xF8,
         0xBB, 0x2A, 0x00, 0x00, 0x00,
         0x89, 0x5D, 0xF8,
         0x44, 0x8B, 0x65, 0xF8,
@@ -978,12 +1000,12 @@ test "compile: local.tee preserves stack — uses top vreg without popping" {
     // local.tee writes [RBP-8] but doesn't pop, so the top vreg
     // (slot 0 = RBX after chunk 13b pool shrink) is still on the stack
     // for the `end` to marshal into EAX.
-    // Expected: prologue(4) + SUB(4) + MOV EBX #7 (5) + MOV [RBP-8] EBX (3)
-    // + MOV EAX EBX (2) + ADD RSP + POP RBP + RET.
-    // Spot-check: STORE [RBP-8] EBX = 89 5D F8 at offset 13..16,
-    // followed by MOV EAX, EBX = 89 D8 at 16..18.
-    try testing.expectEqualSlices(u8, &.{ 0x89, 0x5D, 0xF8 }, out.bytes[13..16]);
-    try testing.expectEqualSlices(u8, &.{ 0x89, 0xD8 }, out.bytes[16..18]);
+    // Expected: prologue(4) + SUB(4) + zero-init(6) + MOV EBX #7 (5)
+    // + MOV [RBP-8] EBX (3) + MOV EAX EBX (2) + ADD RSP + POP RBP + RET.
+    // Spot-check: STORE [RBP-8] EBX = 89 5D F8 at offset 19..22,
+    // followed by MOV EAX, EBX = 89 D8 at 22..24.
+    try testing.expectEqualSlices(u8, &.{ 0x89, 0x5D, 0xF8 }, out.bytes[19..22]);
+    try testing.expectEqualSlices(u8, &.{ 0x89, 0xD8 }, out.bytes[22..24]);
 }
 
 test "compile: (block (br 0) end) end — forward br with end-patch" {
