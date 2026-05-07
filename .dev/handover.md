@@ -16,21 +16,24 @@
 
 直近 commit (HEAD = `<this>`):
 
-- `<this>` chore(p7): mark §9.7 / 7.8-x86-zero-init-locals close (+10 PASS x86_64)
-- `bb8ccb5` feat(p7): §9.7 / 7.8-x86-zero-init-locals — Wasm spec §4.5.3.1 (chunk 14a)
-- `9f59ec5` chore(p7): mark §9.7 / 7.8-spill-aware-regalloc chunk 13b close (+62 PASS)
-- `aaa2268` feat(p7): §9.7 / 7.8-x86-spill-aware-regalloc — migration (D-045 chunk 13b)
+- `<this>` chore(p7): mark §9.7 / 7.8-x86-deadcode-labels close (+56 PASS x86_64)
+- `ea3ef20` fix(p7): §9.7 / 7.8-x86-deadcode-labels guard if_skip_byte unwrap
+- `fb64e3e` fix(p7): §9.7 / 7.8-x86-deadcode-labels — placeholder labels in dead region (chunk 14b)
+- `977d67a` diag(p7): centralised UnsupportedOp helper in x86_64/types.zig + op_* migration
 
 **Phase status**: §9.7 / 7.5 → **[x]** 完了。Phase 7 残 row = 7.8 /
 7.9 / 7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。**§9.7 / 7.8** = x86_64 spec
 gate — D-045 active。chunks 1-13b 完了。3-host baseline post-chunk-13b:
 
 - Mac aarch64       : **212 / 0 / 20**     (gate green — `test-all` wired)
-- OrbStack Linux    : **147 / 66 / 20**    (was 141/72 → +6 via zero-init 14a)
-- windowsmini Win   : **139 / 74 / 20**    (was 135/78 → +4 via zero-init 14a)
+- OrbStack Linux    : **175 / 37 / 20**    (was 147/66 → +28 via deadcode-labels 14b)
+- windowsmini Win   : **167 / 45 / 20**    (was 139/74 → +28 via deadcode-labels 14b)
 
-Cumulative **+72 PASS** since chunk 12 close。次は chunk 14b で
-unreachable.0.wasm UnsupportedOp 解明 (~30 fail cascade close 見込み)。
+Cumulative **+128 PASS** since chunk 12 close (Linux 109→175、Win
+49→167)。chunk 14b 根本原因: dead_code 内 if/block/loop で
+placeholder label を push しなかった arm64 mirror gap +
+emitElse の if_skip_byte unwrap が null で panic。次 chunk 14c
+で残 ~40 fails per host (handcrafted_trap "did NOT trap" 等)。
 test-all 配線は Mac aarch64 のみ維持。
 
 **Active priority — §9.7 / 7.8 D-045 chunk chain**:
@@ -49,13 +52,9 @@ test-all 配線は Mac aarch64 のみ維持。
 12. ☑ **7.8-x86-jit-mem-windows** — Windows NtAllocateVirtualMemory RWX (Win +56 PASS)
 13. ☑ **7.8-x86-spill-aware-regalloc** — landed across 13a foundation (`e811441`) + 13b migration (`aaa2268`)。Pool shrink R10/R11 → spill_stage_gprs、XMM14/15 → fp_spill_stage_xmms。110 site migration、prologue spill-area allocation、~50 fixture update。+62 PASS across Linux + Windows。
 14. **7.8-x86-misc-cleanup** — split:
-    - ☑ **14a zero-init-locals** (`bb8ccb5`): Wasm spec §4.5.3.1 — XOR EAX, EAX + MOV [RBP+disp], RAX per local beyond params。+10 PASS (Linux +6、Win +4)。
-    - **14b unreachable.0 + FP globals** (NEXT — **stuck on probe tooling**): 未特定 path で UnsupportedOp。Probe attempts:
-      - emit.zig 内 `else => return Error.UnsupportedOp` への `std.debug.print` 追加 → OrbStack spec_assert_runner で **stderr が suppressed** (`strings binary` で文字列確認済みだが実行時に出ず)。runner.zig の `compileWasm:` print は出るので path 自体は到達している。原因不明。
-      - run-repro infrastructure で Mac 単独 probe → zig 0.16 IO API friction (`std.Io.Threaded.init` 引数違い、`@embedFile` package path 制限)。
-      - 候補: x86_64 unit test 内で `@embedFile` の代わりに `comptime { _ = include_bytes }`、もしくは zwasm.zig surface 拡張 + std.fs (deprecated) 利用。Possibly +30 cascade fails close。
-    - 14c handcrafted_trap "did NOT trap" (2 fails) + func[29] UnsupportedOp。
-    - 14d D-029 dst==rhs (now reachable with stage collisions); RBX callee-save in prologue。
+    - ☑ **14a zero-init-locals** (`bb8ccb5`): Wasm spec §4.5.3.1 — XOR EAX, EAX + MOV [RBP+disp], RAX per local beyond params。+10 PASS。
+    - ☑ **14b deadcode-labels** (`fb64e3e` + `ea3ef20` + helper `977d67a` + `731c070` + `11f10f3`): dead_code 内 if/block/loop で placeholder label を push、emitElse の if_skip_byte unwrap を null-guard。中央化 `types.rejectUnsupported` helper で全 silent UnsupportedOp path に文脈識別子付き diag 追加 (root-cause 特定が future-proof)。**+56 PASS** (Linux +28、Win +28)。
+    - **14c misc-cleanup** (NEXT) — 残 ~40 fails per host: handcrafted_trap "did NOT trap" (op_alu_int D-029 stage collision); RBX callee-save prologue; その他 individual cases。`types.rejectUnsupported` の reason strings で root-cause を特定して個別修正。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
