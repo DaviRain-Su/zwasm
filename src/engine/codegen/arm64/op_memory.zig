@@ -52,9 +52,15 @@ const Error = ctx_mod.Error;
 /// shared bounds-check prologue and per-op LDR/STR emission.
 pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const is_store = switch (ins.op) {
-        .@"i32.store", .@"i32.store8", .@"i32.store16",
-        .@"i64.store", .@"i64.store8", .@"i64.store16", .@"i64.store32",
-        .@"f32.store", .@"f64.store",
+        .@"i32.store",
+        .@"i32.store8",
+        .@"i32.store16",
+        .@"i64.store",
+        .@"i64.store8",
+        .@"i64.store16",
+        .@"i64.store32",
+        .@"f32.store",
+        .@"f64.store",
         => true,
         else => false,
     };
@@ -69,29 +75,41 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     // ADD imm12<<12 + ADD imm12 sequence (chunk d-6). Larger
     // offsets surface as SlotOverflow until the corresponding
     // MOVZ/MOVK chain lowering lands.
-    if (offset_imm > 0xFFFFFF) return Error.SlotOverflow;
+    if (offset_imm > 0xFFFFFF) {
+        std.debug.print("arm64/op_memory: SlotOverflow func[{d}] op={s} offset_imm={d}>0xFFFFFF\n", .{ ctx.func.func_idx, @tagName(ins.op), offset_imm });
+        return Error.SlotOverflow;
+    }
     // Per-op access size in bytes (Wasm spec memory.{load,store} 系)。
     // exhaustive switch (`require_exhaustive_enum_switch` lint gate)
     // のため else => unreachable で「memory op 以外が来たら型システム
     // 違反」として落とす。
     const access_size: u12 = switch (ins.op) {
-        .@"i32.load8_s", .@"i32.load8_u",
+        .@"i32.load8_s",
+        .@"i32.load8_u",
         .@"i32.store8",
-        .@"i64.load8_s", .@"i64.load8_u",
+        .@"i64.load8_s",
+        .@"i64.load8_u",
         .@"i64.store8",
         => 1,
-        .@"i32.load16_s", .@"i32.load16_u",
+        .@"i32.load16_s",
+        .@"i32.load16_u",
         .@"i32.store16",
-        .@"i64.load16_s", .@"i64.load16_u",
+        .@"i64.load16_s",
+        .@"i64.load16_u",
         .@"i64.store16",
         => 2,
-        .@"i32.load", .@"i32.store",
-        .@"i64.load32_s", .@"i64.load32_u",
+        .@"i32.load",
+        .@"i32.store",
+        .@"i64.load32_s",
+        .@"i64.load32_u",
         .@"i64.store32",
-        .@"f32.load", .@"f32.store",
+        .@"f32.load",
+        .@"f32.store",
         => 4,
-        .@"i64.load", .@"i64.store",
-        .@"f64.load", .@"f64.store",
+        .@"i64.load",
+        .@"i64.store",
+        .@"f64.load",
+        .@"f64.store",
         => 8,
         else => unreachable,
     };
@@ -146,22 +164,25 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         else
             try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, val_vreg, 1);
         const word: u32 = switch (ins.op) {
-            .@"i32.store"   => inst.encStrWReg(wv, 28, ip0),
-            .@"i32.store8"  => inst.encStrbWReg(wv, 28, ip0),
+            .@"i32.store" => inst.encStrWReg(wv, 28, ip0),
+            .@"i32.store8" => inst.encStrbWReg(wv, 28, ip0),
             .@"i32.store16" => inst.encStrhWReg(wv, 28, ip0),
-            .@"i64.store"   => inst.encStrXReg(wv, 28, ip0),
-            .@"i64.store8"  => inst.encStrbWReg(wv, 28, ip0),
+            .@"i64.store" => inst.encStrXReg(wv, 28, ip0),
+            .@"i64.store8" => inst.encStrbWReg(wv, 28, ip0),
             .@"i64.store16" => inst.encStrhWReg(wv, 28, ip0),
             .@"i64.store32" => inst.encStrWReg(wv, 28, ip0),
-            .@"f32.store"   => inst.encStrSReg(wv, 28, ip0),
-            .@"f64.store"   => inst.encStrDReg(wv, 28, ip0),
+            .@"f32.store" => inst.encStrSReg(wv, 28, ip0),
+            .@"f64.store" => inst.encStrDReg(wv, 28, ip0),
             else => unreachable,
         };
         try gpr.writeU32(ctx.allocator, ctx.buf, word);
     } else {
         const result = ctx.next_vreg.*;
         ctx.next_vreg.* += 1;
-        if (result >= ctx.alloc.slots.len) return Error.SlotOverflow;
+        if (result >= ctx.alloc.slots.len) {
+            std.debug.print("arm64/op_memory: load SlotOverflow func[{d}] op={s} vreg={d} >= slots.len={d}\n", .{ ctx.func.func_idx, @tagName(ins.op), result, ctx.alloc.slots.len });
+            return Error.SlotOverflow;
+        }
         // D-034 spill-aware: FP result def uses fpDefSpilled (V29
         // stage if spilled); GPR result def stages through X16.
         const wd: inst.Xn = if (is_fp_value)
@@ -169,20 +190,20 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         else
             try gpr.gprDefSpilled(ctx.alloc, result, 0);
         const word: u32 = switch (ins.op) {
-            .@"i32.load"     => inst.encLdrWReg(wd, 28, ip0),
-            .@"i32.load8_s"  => inst.encLdrsbWReg(wd, 28, ip0),
-            .@"i32.load8_u"  => inst.encLdrbWReg(wd, 28, ip0),
+            .@"i32.load" => inst.encLdrWReg(wd, 28, ip0),
+            .@"i32.load8_s" => inst.encLdrsbWReg(wd, 28, ip0),
+            .@"i32.load8_u" => inst.encLdrbWReg(wd, 28, ip0),
             .@"i32.load16_s" => inst.encLdrshWReg(wd, 28, ip0),
             .@"i32.load16_u" => inst.encLdrhWReg(wd, 28, ip0),
-            .@"i64.load"     => inst.encLdrXReg(wd, 28, ip0),
-            .@"i64.load8_s"  => inst.encLdrsbXReg(wd, 28, ip0),
-            .@"i64.load8_u"  => inst.encLdrbWReg(wd, 28, ip0),
+            .@"i64.load" => inst.encLdrXReg(wd, 28, ip0),
+            .@"i64.load8_s" => inst.encLdrsbXReg(wd, 28, ip0),
+            .@"i64.load8_u" => inst.encLdrbWReg(wd, 28, ip0),
             .@"i64.load16_s" => inst.encLdrshXReg(wd, 28, ip0),
             .@"i64.load16_u" => inst.encLdrhWReg(wd, 28, ip0),
             .@"i64.load32_s" => inst.encLdrswXReg(wd, 28, ip0),
             .@"i64.load32_u" => inst.encLdrWReg(wd, 28, ip0),
-            .@"f32.load"     => inst.encLdrSReg(wd, 28, ip0),
-            .@"f64.load"     => inst.encLdrDReg(wd, 28, ip0),
+            .@"f32.load" => inst.encLdrSReg(wd, 28, ip0),
+            .@"f64.load" => inst.encLdrDReg(wd, 28, ip0),
             else => unreachable,
         };
         try gpr.writeU32(ctx.allocator, ctx.buf, word);

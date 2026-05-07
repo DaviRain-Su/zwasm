@@ -13,6 +13,8 @@
 //!
 //! Zone 2 (`src/engine/codegen/arm64/`).
 
+const std = @import("std");
+
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
 const ctx_mod = @import("ctx.zig");
@@ -33,11 +35,17 @@ pub fn emitI32GlobalGet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     // imm12 in W-form scales by 4 → max byte_offset = 4 * 4095 = 16380
     // → max idx = 16380 / 8 = 2047. Beyond that, escalate (very rare).
     const byte_off: u32 = idx * 8;
-    if (byte_off > 16380) return Error.SlotOverflow;
+    if (byte_off > 16380) {
+        std.debug.print("arm64/op_globals: global.get SlotOverflow func[{d}] idx={d} byte_off={d}>16380\n", .{ ctx.func.func_idx, idx, byte_off });
+        return Error.SlotOverflow;
+    }
 
     const result = ctx.next_vreg.*;
     ctx.next_vreg.* += 1;
-    if (result >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    if (result >= ctx.alloc.slots.len) {
+        std.debug.print("arm64/op_globals: global.get SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ ctx.func.func_idx, result, ctx.alloc.slots.len });
+        return Error.SlotOverflow;
+    }
     const wd = try gpr.gprDefSpilled(ctx.alloc, result, 0);
 
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(wd, abi.globals_base_save_gpr, @intCast(byte_off)));
@@ -52,7 +60,10 @@ pub fn emitI32GlobalGet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 pub fn emitI32GlobalSet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const idx = ins.payload;
     const byte_off: u32 = idx * 8;
-    if (byte_off > 16380) return Error.SlotOverflow;
+    if (byte_off > 16380) {
+        std.debug.print("arm64/op_globals: global.set SlotOverflow func[{d}] idx={d} byte_off={d}>16380\n", .{ ctx.func.func_idx, idx, byte_off });
+        return Error.SlotOverflow;
+    }
 
     if (ctx.pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const src_v = ctx.pushed_vregs.pop().?;

@@ -43,7 +43,14 @@ pub fn writeU32(allocator: Allocator, buf: *std.ArrayList(u8), word: u32) !void 
 /// (handlers that haven't been migrated to spill-aware emission).
 pub fn resolveGpr(alloc: regalloc.Allocation, vreg: usize) Error!inst.Xn {
     return switch (alloc.slot(vreg, .gpr)) {
-        .reg => |id| abi.slotToReg(id) orelse Error.SlotOverflow,
+        .reg => |id| abi.slotToReg(id) orelse blk: {
+            // §9.7 / 7.9-d-12 diag: slot id beyond pool. Surfaces
+            // when `max_reg_slots_gpr` exceeds `slotToReg.len`
+            // (config drift) or when class disagreement assigns a
+            // GPR-bound id that's too high for the GPR pool.
+            std.debug.print("arm64/gpr: SlotOverflow resolveGpr vreg={d} slot_id={d}\n", .{ vreg, id });
+            break :blk Error.SlotOverflow;
+        },
         .spill => blk: {
             // §9.7 / 7.5-diag-spill: surface which vreg / spill
             // slot triggered the reject so the next chunk can
@@ -75,12 +82,18 @@ pub fn gprLoadSpilled(
     stage_idx: u8,
 ) Error!inst.Xn {
     return switch (alloc.slot(vreg, .gpr)) {
-        .reg => |id| abi.slotToReg(id) orelse Error.SlotOverflow,
+        .reg => |id| abi.slotToReg(id) orelse blk: {
+            std.debug.print("arm64/gpr: SlotOverflow gprLoadSpilled.reg vreg={d} slot_id={d}\n", .{ vreg, id });
+            break :blk Error.SlotOverflow;
+        },
         .spill => |off| blk: {
             const stage = abi.spill_stage_gprs[stage_idx];
             const abs_off = spill_base_off + off;
             // X-form imm12 scales by 8; max byte offset is 8*4095 = 32760.
-            if (abs_off > 32760 or (abs_off & 7) != 0) return Error.SlotOverflow;
+            if (abs_off > 32760 or (abs_off & 7) != 0) {
+                std.debug.print("arm64/gpr: SlotOverflow gprLoadSpilled.spill vreg={d} abs_off={d} (base={d}+off={d})\n", .{ vreg, abs_off, spill_base_off, off });
+                return Error.SlotOverflow;
+            }
             try writeU32(allocator, buf, inst.encLdrImm(stage, 31, @intCast(abs_off)));
             break :blk stage;
         },
@@ -98,7 +111,10 @@ pub fn gprDefSpilled(
     stage_idx: u8,
 ) Error!inst.Xn {
     return switch (alloc.slot(vreg, .gpr)) {
-        .reg => |id| abi.slotToReg(id) orelse Error.SlotOverflow,
+        .reg => |id| abi.slotToReg(id) orelse blk: {
+            std.debug.print("arm64/gpr: SlotOverflow gprDefSpilled.reg vreg={d} slot_id={d}\n", .{ vreg, id });
+            break :blk Error.SlotOverflow;
+        },
         .spill => abi.spill_stage_gprs[stage_idx],
     };
 }
@@ -120,7 +136,10 @@ pub fn gprStoreSpilled(
         .spill => |off| {
             const stage = abi.spill_stage_gprs[stage_idx];
             const abs_off = spill_base_off + off;
-            if (abs_off > 32760 or (abs_off & 7) != 0) return Error.SlotOverflow;
+            if (abs_off > 32760 or (abs_off & 7) != 0) {
+                std.debug.print("arm64/gpr: SlotOverflow gprStoreSpilled.spill vreg={d} abs_off={d} (base={d}+off={d})\n", .{ vreg, abs_off, spill_base_off, off });
+                return Error.SlotOverflow;
+            }
             try writeU32(allocator, buf, inst.encStrImm(stage, 31, @intCast(abs_off)));
         },
     }
@@ -138,7 +157,10 @@ pub fn gprStoreSpilled(
 /// remains eliminated.
 pub fn resolveFp(alloc: regalloc.Allocation, vreg: usize) Error!inst.Vn {
     return switch (alloc.slot(vreg, .fpr)) {
-        .reg => |id| abi.fpSlotToReg(id) orelse Error.SlotOverflow,
+        .reg => |id| abi.fpSlotToReg(id) orelse blk: {
+            std.debug.print("arm64/gpr: SlotOverflow resolveFp vreg={d} slot_id={d}\n", .{ vreg, id });
+            break :blk Error.SlotOverflow;
+        },
         .spill => |off| blk: {
             std.debug.print(
                 "arm64/gpr: resolveFp rejected spilled vreg={d} spill_off={d} (handler not FP-spill-aware)\n",
@@ -171,12 +193,18 @@ pub fn fpLoadSpilled(
     stage_idx: u8,
 ) Error!inst.Vn {
     return switch (alloc.slot(vreg, .fpr)) {
-        .reg => |id| abi.fpSlotToReg(id) orelse Error.SlotOverflow,
+        .reg => |id| abi.fpSlotToReg(id) orelse blk: {
+            std.debug.print("arm64/gpr: SlotOverflow fpLoadSpilled.reg vreg={d} slot_id={d}\n", .{ vreg, id });
+            break :blk Error.SlotOverflow;
+        },
         .spill => |off| blk: {
             const stage = abi.fp_spill_stage_vregs[stage_idx];
             const abs_off = spill_base_off + off;
             // D-form imm12 scales by 8; max byte offset is 8*4095 = 32760.
-            if (abs_off > 32760 or (abs_off & 7) != 0) return Error.SlotOverflow;
+            if (abs_off > 32760 or (abs_off & 7) != 0) {
+                std.debug.print("arm64/gpr: SlotOverflow fpLoadSpilled.spill vreg={d} abs_off={d} (base={d}+off={d})\n", .{ vreg, abs_off, spill_base_off, off });
+                return Error.SlotOverflow;
+            }
             try writeU32(allocator, buf, inst.encLdrDImm(stage, 31, @intCast(abs_off)));
             break :blk stage;
         },
@@ -193,7 +221,10 @@ pub fn fpDefSpilled(
     stage_idx: u8,
 ) Error!inst.Vn {
     return switch (alloc.slot(vreg, .fpr)) {
-        .reg => |id| abi.fpSlotToReg(id) orelse Error.SlotOverflow,
+        .reg => |id| abi.fpSlotToReg(id) orelse blk: {
+            std.debug.print("arm64/gpr: SlotOverflow fpDefSpilled.reg vreg={d} slot_id={d}\n", .{ vreg, id });
+            break :blk Error.SlotOverflow;
+        },
         .spill => abi.fp_spill_stage_vregs[stage_idx],
     };
 }
@@ -215,7 +246,10 @@ pub fn fpStoreSpilled(
         .spill => |off| {
             const stage = abi.fp_spill_stage_vregs[stage_idx];
             const abs_off = spill_base_off + off;
-            if (abs_off > 32760 or (abs_off & 7) != 0) return Error.SlotOverflow;
+            if (abs_off > 32760 or (abs_off & 7) != 0) {
+                std.debug.print("arm64/gpr: SlotOverflow fpStoreSpilled.spill vreg={d} abs_off={d} (base={d}+off={d})\n", .{ vreg, abs_off, spill_base_off, off });
+                return Error.SlotOverflow;
+            }
             try writeU32(allocator, buf, inst.encStrDImm(stage, 31, @intCast(abs_off)));
         },
     }

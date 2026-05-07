@@ -614,7 +614,10 @@ pub fn compile(
                 // spilled.
                 const vreg = next_vreg;
                 next_vreg += 1;
-                if (vreg >= alloc.slots.len) return Error.SlotOverflow;
+                if (vreg >= alloc.slots.len) {
+                    std.debug.print("arm64/emit: f32.const SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ func.func_idx, vreg, alloc.slots.len });
+                    return Error.SlotOverflow;
+                }
                 const vd = try gpr.fpDefSpilled(alloc, vreg, 0);
                 const w_scratch = try gpr.gprDefSpilled(alloc, vreg, 0);
                 try op_const.emitConstU32(allocator, &buf, w_scratch, ins.payload);
@@ -626,7 +629,10 @@ pub fn compile(
                 // Similar to f32.const but for 64-bit (FMOV D, X).
                 const vreg = next_vreg;
                 next_vreg += 1;
-                if (vreg >= alloc.slots.len) return Error.SlotOverflow;
+                if (vreg >= alloc.slots.len) {
+                    std.debug.print("arm64/emit: f64.const SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ func.func_idx, vreg, alloc.slots.len });
+                    return Error.SlotOverflow;
+                }
                 const vd = try gpr.fpDefSpilled(alloc, vreg, 0);
                 const x_scratch = try gpr.gprDefSpilled(alloc, vreg, 0);
                 const value: u64 = (@as(u64, ins.extra) << 32) | @as(u64, ins.payload);
@@ -868,7 +874,10 @@ pub fn compile(
                 const val1_v = pushed_vregs.pop().?;
                 const result_v = next_vreg;
                 next_vreg += 1;
-                if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+                if (result_v >= alloc.slots.len) {
+                    std.debug.print("arm64/emit: select SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ func.func_idx, result_v, alloc.slots.len });
+                    return Error.SlotOverflow;
+                }
                 // D-034 spill-aware: 3 source operands but only 2
                 // stage regs. CMP is encoded first using stage 0 for
                 // cond; after CMP the cond value is dead, so stage 0
@@ -959,7 +968,10 @@ pub fn compile(
                 // result vreg.
                 const result = next_vreg;
                 next_vreg += 1;
-                if (result >= alloc.slots.len) return Error.SlotOverflow;
+                if (result >= alloc.slots.len) {
+                    std.debug.print("arm64/emit: memory.size SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ func.func_idx, result, alloc.slots.len });
+                    return Error.SlotOverflow;
+                }
                 const wd = try gpr.gprDefSpilled(alloc, result, 0);
                 try gpr.writeU32(allocator, &buf, inst.encLsrImmW(wd, 27, 16));
                 try gpr.gprStoreSpilled(allocator, &buf, alloc, spill_base_off, result, 0);
@@ -977,7 +989,10 @@ pub fn compile(
                 _ = pushed_vregs.pop().?; // delta arg, unused in skeleton
                 const result = next_vreg;
                 next_vreg += 1;
-                if (result >= alloc.slots.len) return Error.SlotOverflow;
+                if (result >= alloc.slots.len) {
+                    std.debug.print("arm64/emit: memory.grow SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ func.func_idx, result, alloc.slots.len });
+                    return Error.SlotOverflow;
+                }
                 const wd = try gpr.gprDefSpilled(alloc, result, 0);
                 try gpr.writeU32(allocator, &buf, inst.encMovnImmW(wd, 0));
                 try gpr.gprStoreSpilled(allocator, &buf, alloc, spill_base_off, result, 0);
