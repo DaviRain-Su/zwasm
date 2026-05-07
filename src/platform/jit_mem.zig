@@ -82,17 +82,20 @@ pub fn alloc(size: usize) Error!JitBlock {
     if (builtin.os.tag == .windows and builtin.cpu.arch == .x86_64) {
         // D-045 chunk 12: Windows x86_64 RWX page via
         // NtAllocateVirtualMemory. Mirror of the Linux-RWX shape
-        // (PAGE_EXECUTE_READWRITE = single combined RWX page).
+        // (PAGE.EXECUTE_READWRITE = single combined RWX page).
+        // zig 0.16 stable exposes the low-level extern only;
+        // wrapper-with-error-union landed post-0.16.
         var base_addr: ?*anyopaque = null;
         var alloc_size: std.os.windows.SIZE_T = rounded;
-        std.os.windows.NtAllocateVirtualMemory(
-            std.os.windows.self_process_handle,
+        const status = std.os.windows.ntdll.NtAllocateVirtualMemory(
+            std.os.windows.GetCurrentProcess(),
             @ptrCast(&base_addr),
             0,
             &alloc_size,
-            std.os.windows.MEM_COMMIT | std.os.windows.MEM_RESERVE,
-            std.os.windows.PAGE_EXECUTE_READWRITE,
-        ) catch return Error.AllocationFailed;
+            .{ .COMMIT = true, .RESERVE = true },
+            .{ .EXECUTE_READWRITE = true },
+        );
+        if (status != .SUCCESS) return Error.AllocationFailed;
         const ptr = base_addr orelse return Error.AllocationFailed;
         const aligned: [*]align(page_size) u8 = @ptrCast(@alignCast(ptr));
         return .{ .bytes = aligned[0..rounded] };
@@ -112,16 +115,16 @@ pub fn free(block: JitBlock) void {
         return;
     }
     if (builtin.os.tag == .windows and builtin.cpu.arch == .x86_64) {
-        // MEM_RELEASE requires size = 0 and addr = the original
-        // base returned by NtAllocateVirtualMemory.
+        // MEM.FREE.RELEASE requires size = 0 and addr = the
+        // original base returned by NtAllocateVirtualMemory.
         var addr: ?*anyopaque = block.bytes.ptr;
         var size: std.os.windows.SIZE_T = 0;
-        std.os.windows.NtFreeVirtualMemory(
-            std.os.windows.self_process_handle,
+        _ = std.os.windows.ntdll.NtFreeVirtualMemory(
+            std.os.windows.GetCurrentProcess(),
             @ptrCast(&addr),
             &size,
-            std.os.windows.MEM_RELEASE,
-        ) catch {};
+            .{ .RELEASE = true },
+        );
         return;
     }
 }
