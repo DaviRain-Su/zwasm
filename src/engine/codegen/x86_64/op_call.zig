@@ -261,10 +261,18 @@ pub fn marshalCallArgs(
     }
 
     // arg_gprs slot 0 carries `*const JitRuntime` (RDI on SysV,
-    // RCX on Win64) — skip; user args start at slot 1.
+    // RCX on Win64) — skip; user int args start at slot 1.
+    // FP args use a separate slot counter on SysV (§3.2.3 — int and
+    // FP register pools are independent), but a SHARED counter on
+    // Win64 (Microsoft x64 §"Argument Passing" — arg N occupies
+    // either arg_gprs[N] or arg_xmms[N], advancing both indices).
     //   SysV: arg_gprs[1..6] = RSI, RDX, RCX, R8, R9 (5 user GPRs)
-    //   Win64: arg_gprs[1..4] = RDX, R8, R9 (3 user GPRs)
+    //         arg_xmms[0..7] = XMM0..XMM7 (8 user FP slots)
+    //   Win64: arg_gprs[1..4] = RDX, R8, R9 (3 user GPRs);
+    //          arg_xmms[1..4] = XMM1..XMM3 (3 user FP slots,
+    //          shared count with int).
     var gpr_arg_slot: usize = 1;
+    var fp_arg_slot: usize = if (abi.current_cc == .win64) 1 else 0;
     var k: u32 = 0;
     while (k < n_args) : (k += 1) {
         const src_vreg = arg_vregs[k];
@@ -277,10 +285,10 @@ pub fn marshalCallArgs(
                     try buf.appendSlice(allocator, inst.encMovRR(.d, dst, src).slice());
                 }
                 gpr_arg_slot += 1;
+                if (abi.current_cc == .win64) fp_arg_slot += 1;
             },
             .i64 => {
-                // §9.7 / 7.10-c: i64 arg via .q-form MOV. Same arg_gprs
-                // slot accounting as i32 (SysV / Win64 NSAA per ABI).
+                // §9.7 / 7.10-c: i64 arg via .q-form MOV.
                 if (gpr_arg_slot >= abi.current.arg_gprs.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig:234", 0);
                 const dst = abi.current.arg_gprs[gpr_arg_slot];
                 const src = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
@@ -288,8 +296,25 @@ pub fn marshalCallArgs(
                     try buf.appendSlice(allocator, inst.encMovRR(.q, dst, src).slice());
                 }
                 gpr_arg_slot += 1;
+                if (abi.current_cc == .win64) fp_arg_slot += 1;
             },
-            .f32, .f64, .v128, .funcref, .externref => return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig:242", 0),
+            .f32, .f64 => {
+                // §9.7 / 7.10-e: f32/f64 arg via MOVAPS (XMM-to-XMM
+                // copy of the full 128-bit register). The f32/f64
+                // distinction matters only for the bit pattern in
+                // the low 32/64 bits; MOVAPS preserves whatever's
+                // there. Spilled FP vregs stage through XMM14/15
+                // via fpLoadSpilled.
+                if (fp_arg_slot >= abi.current.arg_xmms.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig:242", 0);
+                const dst = abi.current.arg_xmms[fp_arg_slot];
+                const src = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
+                if (src != dst) {
+                    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst, src).slice());
+                }
+                fp_arg_slot += 1;
+                if (abi.current_cc == .win64) gpr_arg_slot += 1;
+            },
+            .v128, .funcref, .externref => return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig:242", 0),
         }
     }
 }
@@ -330,7 +355,18 @@ pub fn captureCallResult(
             }
             try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result, 0);
         },
-        .f32, .f64, .v128, .funcref, .externref => return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig:275", 0),
+        .f32, .f64 => {
+            // §9.7 / 7.10-e: f32/f64 result via MOVAPS from XMM0
+            // (= return_xmm). Same MOVAPS-preserves-128-bit shape
+            // as marshalCallArgs's f32/f64 widening. Spilled result
+            // vregs flush via xmmStoreSpilled.
+            const dst = try gpr.xmmDefSpilled(alloc, result, 0);
+            if (dst != abi.return_xmm) {
+                try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst, abi.return_xmm).slice());
+            }
+            try gpr.xmmStoreSpilled(allocator, buf, alloc, spill_base_off, result, 0);
+        },
+        .v128, .funcref, .externref => return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig:275", 0),
     }
     try pushed_vregs.append(allocator, result);
 }
