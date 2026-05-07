@@ -16,31 +16,29 @@
 
 直近 commit (HEAD = `<this>`):
 
-- `<this>` chore(p7): refine §9.7 / 7.9 chunk plan
+- `<this>` chore(p7): mark §9.7 / 7.9 chunk b close; retarget at 7.9-c
+- `0f679cb` feat(p7): §9.7 / 7.9 chunk b — lift import-reject + import-call traps
+- `25a1832` chore(p7): refine §9.7 / 7.9 chunk plan
 - `61e42c4` feat(p7): §9.7 / 7.9 chunk a — JIT compile-baseline runner
-- `5a76f4d` chore(p7): mark §9.7 / 7.8 close + retarget at 7.9
-- `9a48b3a` feat(p7): §9.7 / 7.8 [x] — x86_64 JIT spec gate met on all 3 hosts
 
 **Phase status**: §9.7 / 7.5 + 7.8 → **[x]**。Phase 7 残 row = 7.9 /
 7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。
 
-**§9.7 / 7.9 chunk a baseline** (`zig build test-realworld-run-jit` Mac):
-0/55 compile-pass, 55 compile-imports, 0 compile-op, 0 compile-val。
-全 fixture が `error.UnsupportedImports` で reject。`compileWasm`
-(`src/engine/runner.zig:66`) の import-reject guard が gate。
+**§9.7 / 7.9 chunk b 完了** (`0f679cb`): import-reject lifted。
+3-host all green: Mac/Linux/Win 全て test-all PASS、spec_assert
+全 host 212/0/20 維持。`run_runner_jit` Mac:
+- 0/55 compile-pass (run-stage は chunk 14d 的 work が要る)
+- **0** compile-imports (was 55!)
+- 52 compile-op (chunk 7.9-c scope)
+- 3 compile-val (validator strictness、orthogonal)
 
-**Chunk 7.9-b plan** (next): import resolution + JIT host-call dispatch:
-1. `JitRuntime` tail-extend with `host_dispatch_base` field (per `jit_abi.zig:27` 拡張規則)。
-2. `linker.link` で imports を func_offsets の先頭に予約 (現状: 0-based defined-only)。
-3. `op_call.emitCall` で import vs defined を判別: import は BLR via dispatch slot; defined は既存 BL fixup。
-4. Runner 側に WASI stub handlers: `proc_exit` / `fd_write` / `clock_time_get` / `args_get` / `args_sizes_get`、AAPCS64 callconv で wired via dispatch table。
+**Chunk 7.9-c plan** (NEXT): residual ARM64 + x86_64 emit gaps surfacing post-import-lift:
+- `memory.copy` / `memory.fill` (heaviest gap; emcc / clang -O2 binaries 全部使う; lower.zig 既にlower、liveness stackEffect 表 + emit handler 追加が要)
+- sign-extension ops (`i32.extend8_s` / `i64.extend32_s` 等)
+- `i32.div_u` / `i64.div_u` (両 arch backend に追加)
+- SlotOverflow on big modules (regalloc pool 不足、spill ratchet が不十分)
 
-**Chunk 7.9-c plan**: residual ARM64 emit gaps:
-- `memory.copy` / `memory.fill` (heaviest gap; emcc / clang -O2 binaries 全部使う)
-- sign-extension ops (`i32.extend8_s` 等; lower.zig 既に lower するが emit が空)
-- i64 / f32 / f64 globals (op_globals.zig が i32-only)
-
-**Chunk 7.9-d plan**: JitRuntime memory init from data section, table init from element section, `_start` entry resolution.
+**Chunk 7.9-d plan**: WASI host-call dispatch (現 chunk b では import call は trap 限定)。JitRuntime に host_dispatch_base 追加 → emit が import call で BLR via dispatch slot → runner に proc_exit / fd_write / clock_time_get stub。これで COMPILE-PASS が RUN-PASS に転換。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
 > Autonomous /continue loop は 7.13 row を発見した時点で
