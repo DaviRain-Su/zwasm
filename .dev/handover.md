@@ -16,10 +16,10 @@
 
 直近 commit (HEAD = `<this>`):
 
-- `<this>` chore(p7): mark §9.7 / 7.9 chunk c close; retarget at c2 (memory.copy/fill)
+- `<this>` chore(p7): mark §9.7 / 7.9 chunk c2 close (D-046); retarget at 7.9-d
+- `ca01778` feat(p7): §9.7 / 7.9 chunk c2 — memory.copy + memory.fill (D-046 closed)
+- `beab8cf` chore(p7): mark §9.7 / 7.9 chunk c close
 - `2bfe7fd` feat(p7): §9.7 / 7.9 chunk c — sign-ext + div/rem on arm64 + x86_64
-- `531dfe3` chore(p7): mark §9.7 / 7.9 chunk b close
-- `0f679cb` feat(p7): §9.7 / 7.9 chunk b — lift import-reject + import-call traps
 
 **Phase status**: §9.7 / 7.5 + 7.8 → **[x]**。Phase 7 残 row = 7.9 /
 7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。
