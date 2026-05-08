@@ -16,6 +16,8 @@ const std = @import("std");
 
 const Allocator = std.mem.Allocator;
 
+const trace = @import("../diagnostic/trace.zig");
+
 pub const ValType = enum(u8) {
     i32,
     i64,
@@ -556,6 +558,40 @@ pub const ElisionRecord = struct {};
 /// Phase 15+: mov-coalescer audit record.
 pub const CoalesceRecord = struct {};
 
+/// Phase 8+: per-function per-pass diagnostic record (per
+/// ADR-0033). Populated by the compile pipeline's `passExit`
+/// wrapper at each pipeline stage. The `extra` field is
+/// per-pass (documented at the call site to avoid the
+/// `single_slot_dual_meaning.md` anti-pattern):
+///   - `lower`: resulting `instrs.len`
+///   - `loop_info`: 0
+///   - `hoist`: synthetic locals added
+///   - `liveness`: range-table length
+///   - `regalloc`: high-water slot id
+///   - `emit`: bytes emitted
+pub const PassRecord = struct {
+    pass: trace.PassId,
+    applied: u32,
+    skipped: u32,
+    extra: u32,
+};
+
+/// Phase 8+: per-function pass-diagnostics slot (per ADR-0033).
+/// Borrowed slice; lifetime mirrors `Liveness` / `LoopInfo`.
+/// Populated when `trace.enabled == true`; otherwise the slot
+/// stays `null` and is dead state. Freed via
+/// `deinitPassDiagnostics` from the same allocator that built
+/// the slice.
+pub const PassDiagnostics = struct {
+    entries: []const PassRecord = &.{},
+};
+
+/// Free a `PassDiagnostics`'s entries slice. No-op when the
+/// slice is empty (default-initialised case).
+pub fn deinitPassDiagnostics(allocator: Allocator, pd: PassDiagnostics) void {
+    if (pd.entries.len != 0) allocator.free(pd.entries);
+}
+
 pub const ZirFunc = struct {
     func_idx: u32,
     sig: FuncType,
@@ -595,6 +631,13 @@ pub const ZirFunc = struct {
     synthetic_locals: ?[]ValType = null,
     bounds_check_elision_map: ?[]ElisionRecord = null,
     coalesced_movs: ?[]CoalesceRecord = null,
+
+    /// Phase 8+ — per-function per-pass diagnostic record
+    /// (per ADR-0033 + §9.8a / 8a.1). Populated only when
+    /// `trace.enabled == true`; otherwise stays `null` and
+    /// folds out as dead state. Freed via
+    /// `deinitPassDiagnostics`.
+    pass_diagnostics: ?PassDiagnostics = null,
 
     pub fn init(func_idx: u32, sig: FuncType, locals: []const ValType) ZirFunc {
         return .{
@@ -666,6 +709,7 @@ test "ZirFunc.init: required fields populated, slots null" {
     try std.testing.expect(f.hoisted_constants == null);
     try std.testing.expect(f.bounds_check_elision_map == null);
     try std.testing.expect(f.coalesced_movs == null);
+    try std.testing.expect(f.pass_diagnostics == null);
 }
 
 test "ZirFunc: instrs grow via per-call allocator" {
@@ -741,4 +785,44 @@ test "ZirOp: tag count meets §4.2 baseline" {
     // accidental deletion of a swath of tags.
     const fields = @typeInfo(ZirOp).@"enum".fields;
     try std.testing.expect(fields.len >= 250);
+}
+
+test "PassDiagnostics: empty default + deinit no-op + populated free" {
+    // Empty default: deinit is a no-op (zero-length slice ≠ allocation).
+    const empty: PassDiagnostics = .{};
+    deinitPassDiagnostics(std.testing.allocator, empty);
+
+    // Populated: allocate a slice via the test allocator, attach to
+    // a fresh slot, and verify deinit frees cleanly (the leak
+    // detector in std.testing.allocator catches any escape).
+    const records = try std.testing.allocator.alloc(PassRecord, 3);
+    records[0] = .{ .pass = .lower, .applied = 12, .skipped = 0, .extra = 12 };
+    records[1] = .{ .pass = .hoist, .applied = 4, .skipped = 8, .extra = 2 };
+    records[2] = .{ .pass = .emit, .applied = 12, .skipped = 0, .extra = 96 };
+    const pd: PassDiagnostics = .{ .entries = records };
+    try std.testing.expectEqual(@as(usize, 3), pd.entries.len);
+    try std.testing.expectEqual(trace.PassId.hoist, pd.entries[1].pass);
+    try std.testing.expectEqual(@as(u32, 8), pd.entries[1].skipped);
+    deinitPassDiagnostics(std.testing.allocator, pd);
+}
+
+test "ZirFunc: pass_diagnostics slot attaches + detaches without leak" {
+    const sig: FuncType = .{ .params = &.{}, .results = &.{} };
+    var f = ZirFunc.init(99, sig, &.{});
+    defer f.deinit(std.testing.allocator);
+
+    try std.testing.expect(f.pass_diagnostics == null);
+
+    const records = try std.testing.allocator.alloc(PassRecord, 1);
+    records[0] = .{ .pass = .liveness, .applied = 5, .skipped = 0, .extra = 7 };
+    f.pass_diagnostics = .{ .entries = records };
+
+    try std.testing.expect(f.pass_diagnostics != null);
+    try std.testing.expectEqual(@as(usize, 1), f.pass_diagnostics.?.entries.len);
+
+    // Caller-owned slot: deinit before f.deinit (mirrors compile.zig's
+    // deinitFuncResult ordering — pass_diagnostics is freed before
+    // ZirFunc.deinit, same as Liveness / LoopInfo).
+    deinitPassDiagnostics(std.testing.allocator, f.pass_diagnostics.?);
+    f.pass_diagnostics = null;
 }
