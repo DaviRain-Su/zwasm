@@ -13,57 +13,48 @@
 6. `.dev/decisions/0019_x86_64_in_phase7.md` / 0021 / 0023 / 0026 / 0027 / 0028 / 0029 — recent ADRs.
 7. `.dev/phase8_transition_gate.md` — historical reference (gate now closed; 7.13 [x]).
 
-## Current state — Phase 8 / §9.8 / 8.2 (D-051 x86_64 prologue extraction)
+## Current state — Phase 8 / §9.8 / 8.3 (windowsmini bench disposition)
 
-§9.8 / 8.1 [x] (D-050 closed). Mac local `ZWASM_JIT_RUN=1`
-realworld_run_jit baseline: **52/55 compile-pass → 15/55
-RUN-PASS, 37 RUN-TRAP, 0 RUN-TIMEOUT, 0 fail-other** (was 0/55
-RUN-PASS at row entry). `fd_read` JIT thunk landed in 8.1-a
-(`4fd8b61`); per-fixture fork+SIGALRM timeout machinery landed
-in 8.1-b (this commit). Windows host falls back to compile-only
-with a one-line warning per `extended_challenge.md` graceful-
-degradation allowance.
+§9.8 / 8.0+8.1+8.2 [x]. D-051 closed via ADR-0030 (test
+extraction primary; prologue deferred to D-052 per ROADMAP §P14
+trigger). `src/engine/codegen/x86_64/emit.zig` 4305→1247 LOC
+(under §A2 hard cap); ~3050 LOC of inline tests moved to
+family-split siblings `emit_test_int.zig` + `emit_test_float.zig`
++ tiny `emit_test.zig` aggregator (mirror of arm64 ADR-0021).
+
+Mac local `ZWASM_JIT_RUN=1` realworld_run_jit baseline (8.1
+exit): **52/55 compile-pass → 15/55 RUN-PASS, 37 RUN-TRAP,
+0 RUN-TIMEOUT, 0 fail-other** (was 0/55 at row entry).
 
 直近 commits (latest at top):
 
-- (this commit) feat(p8): §9.8 / 8.1-b — per-fixture fork+SIGALRM
+- (this commit) feat(p8): §9.8 / 8.2 — D-051 close via emit_test
+  family split per ADR-0030; mark 8.2 [x]; D-052 records
+  deferred prologue extraction.
+- `85d75b7` feat(p8): §9.8 / 8.1-b — per-fixture fork+SIGALRM
   timeout; close D-050; mark 8.1 [x].
 - `4fd8b61` feat(p8): §9.8 / 8.1-a — add WASI fd_read JIT thunk
   + close 8 pre-existing lint warnings.
-- `9fb44dd` bench(ci): record 9da3c99 [skip ci] (CI bot).
-- `9da3c99` chore(p7): close Phase 7; expand §9.8 inline.
 
-**Phase 8 status**: §9.8 / 8.0+8.1 [x]; 8.2 IN-PROGRESS. Phase 8
-残 rows = 8.2 (D-051 emit.zig prologue extraction, ADR-grade,
-**NEXT**) + 8.3 (windowsmini bench disposition) + 8.4-8.10
+**Phase 8 status**: §9.8 / 8.0+8.1+8.2 [x]; 8.3 NEXT. Phase 8
+残 rows = 8.3 (windowsmini bench disposition) + 8.4-8.10
 (optimisation pipeline + AOT skeleton + bench delta + audit +
 open §9.9).
 
-The 37 residual RUN-TRAP fixtures from 8.1's baseline are
-non-WASI engine gaps (globals / call_indirect / runtime-fn
-paths) — to be discharged across §9.8 / 8.4-8.7 optimisation
-pipeline as opportunistic gaps, not as fresh debt entries.
+## Active task — §9.8 / 8.3: windowsmini bench Phase 8.0 disposition **NEXT**
 
-## Active task — §9.8 / 8.2: D-051 x86_64/emit.zig prologue extraction **NEXT**
+Per Phase 7 close finding (gate doc §5b, Mac:Win ratio 3-12x
+with fib2 33min/fixture): either define a windowsmini-specific
+3-5 hot-fixture subset for periodic local verification, OR wire
+SSH-from-Linux-runner CI integration so windowsmini bench runs
+out-of-band of the inline gate cadence. Decision-driven row;
+likely sub-chunks:
 
-ADR-grade refactor; mirror of ARM64 ADR-0021 (`prologue.zig`
-pattern). Sub-tasks per `.dev/debt.md` D-051:
-
-1. Draft ADR `0030_x86_64_prologue_split.md` mirroring
-   ADR-0021's structure (compute byte-offsets via helper,
-   `body_start_offset`, etc.).
-2. Extract prologue/epilogue from `src/engine/codegen/x86_64/
-   emit.zig` (4305 LOC) into `src/engine/codegen/x86_64/
-   prologue.zig` with corresponding helpers.
-3. Migrate the ~50+ test sites in `test/runners/` that compute
-   byte offsets manually to use the helper (regret #6 from
-   2026-05-04 retrospective applies here).
-4. Verify spill-aware staging path remains green (BASELINE delta
-   check).
-
-Exit: `x86_64/emit.zig` under §A2 2000 LOC hard cap; D-051
-deleted from `.dev/debt.md`; spec-jit-compile + realworld
-baselines unchanged.
+| #     | Description                                              | Status   |
+|-------|----------------------------------------------------------|----------|
+| 8.3-a | Survey windowsmini bench fixture latencies; pick subset OR confirm SSH-from-Linux as the right model. | **NEXT** |
+| 8.3-b | Implement chosen approach; document in ADR if load-bearing. | [ ]      |
+| 8.3-c | Update `.dev/orbstack_setup.md` / `.dev/windows_ssh_setup.md` if procedure changes; close 8.3 [x]. | [ ]      |
 
 ## Phase 7 close summary (snapshot for cold-start context)
 
