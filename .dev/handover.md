@@ -51,23 +51,34 @@ Step 5b's `8a.1+8a.2+8a.3 all [x]` trigger satisfied — Phase
 onward; 8b.1's bench-delta requirement is absorbed into
 8b.4 aggregate per ADR-0036).
 
-## Active task — §9.8b / 8b.2: Regalloc upgrade **NEXT**
+## Active task — §9.8b / 8b.2-c: Slot reuse implementation **NEXT**
 
-Greedy-local (Phase 7.1) → linear-scan with live-range
-splitting + slot reuse. Resolves D-029 parallel-move via
-O-002 trigger derivation per Phase 7 close host-baseline.
-**Bench-delta table required** per ADR-0032. The linear-scan
-output naturally produces same-slot alias conditions that
-8b.1's scaffolding can later layer detection records onto
-during Phase 15 (per ADR-0036 §"Phase 15 prep").
+Per ADR-0037 (Status: Accepted), **Option 1 (slot reuse on
+dead vregs)** is the 8b.2 MVP. Free-slot pool (LIFO/stack)
+returned at `liveness.last_use_at_pc[pc]`, popped at
+`liveness.def_at_pc[pc]`. ABI preserved (`Allocation { slots,
+n_slots }` unchanged). Options 2 (live-range splitting) +
+Option 3 (full SSA linear-scan) deferred to Phase 15
+alongside coalescer detection lift (ADR-0036).
+
+8b.2-a Step 0 survey complete (`private/notes/p8-8b2-regalloc-
+survey.md`, 496 lines, gitignored). Five codebases surveyed
+(zwasm v1 W43-W45 + W54 post-mortem; regalloc2;
+wasmtime/cranelift; wasmtime/winch; wasmer singlepass).
+
+Three divergences anchored to project principles:
+1. No parallel-move insertion (P6 + ADR-0035) — coalesce-time.
+2. Straight-line liveness only (P3 + P6) — full CFG to Phase 14+.
+3. Slot-id ABI stability (ADR-0018 + ADR-0035) — `slots[]`
+   unchanged.
 
 Suggested chunk plan (8b.2):
 
 | #     | Description                                                            | Status   |
 |-------|------------------------------------------------------------------------|----------|
-| 8b.2-a | Step 0 survey: regalloc2 / cranelift linear-scan / wasmtime winch / v1 W43-W45 (no copy) | **NEXT** |
-| 8b.2-b | ADR-0037 design framing — linear-scan with live-range splitting; slot-reuse policy; spill discipline; bail conditions | [ ] |
-| 8b.2-c | Implement allocator (`src/engine/codegen/shared/regalloc.zig` extension or sibling); preserve `Allocation` ABI for downstream (`src/ir/coalesce/pass.zig`, emit) | [ ] |
+| 8b.2-a | Step 0 survey across regalloc2 + cranelift + winch + wasmer + v1 W54 post-mortem | [x] (this commit; survey at `private/notes/p8-8b2-regalloc-survey.md`) |
+| 8b.2-b | ADR-0037 design framing — Option 1 slot-reuse MVP; LIFO free-pool; ABI preserved | [x] (this commit; ADR-0037 Accepted) |
+| 8b.2-c | Implement free-slot pool in `regalloc.zig`; new unit test for `n_slots = 1` on 3-vreg sequential program | **NEXT** |
 | 8b.2-d | Wire into `compile.zig`; bench-delta capture on tinygo/fib_loop + shootout/nestedloop + tinygo/string_ops | [ ] |
 | 8b.2-e | 3-host gate; close 8b.2 [x] with bench-delta in commit body | [ ] |
 
