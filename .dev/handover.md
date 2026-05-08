@@ -13,7 +13,7 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 8 / §9.8b / 8b.1-b (ADR-0035 Coalescer design framing)
+## Current state — Phase 8 / §9.8b / 8b.1-c (Coalescer pass implementation)
 
 §9.8a closed across 6 commits (a/b/c/d/e/f rows). Lesson
 `2026-05-09-hoist-branch-targets-as-pc.md` + ADR-0031 D-053-
@@ -39,7 +39,32 @@ discharge Revision row landed this commit. SHA backfill for
 Step 5b's `8a.1+8a.2+8a.3 all [x]` trigger satisfied — Phase
 8b chunks will be **bench-delta-gated** per ADR-0032.
 
-## Active task — §9.8b / 8b.1-b: ADR-0035 Coalescer design framing **NEXT**
+## Active task — §9.8b / 8b.1-c: Coalescer pass implementation **NEXT**
+
+8b.1-b complete: ADR-0035 landed at
+`.dev/decisions/0035_coalescer_pass.md`. Decision: post-
+regalloc slot-aliasing metadata-only pass at
+`src/ir/coalesce/pass.zig` (Zone 1, mirrors
+`src/ir/hoist/pass.zig` shape). No IR mutation; populates
+`func.coalesced_movs: ?[]CoalesceRecord` (already-
+reserved slot per ROADMAP §P13). Emit pass queries
+metadata before each MOV emission and skips redundant
+slots. Arch-blind (no per-arch logic per A12).
+
+8b.1-c plan:
+- Implement `src/ir/coalesce/pass.zig` with `pub fn run(
+  allocator, func, alloc) Error!void` shape.
+- `CoalesceRecord` struct (already declared in `src/ir/
+  zir.zig` as Phase 15+ slot).
+- `isCoalesceCandidate` op catalogue (start with
+  `local.tee` post-regalloc + return-value marshalling
+  + select; grow as bench-delta surfaces wins).
+- Bail logic: branch targets, call sites, across-call
+  spill-timing (per W54 lesson).
+- 3 unit tests: same-slot detection / call-site bail /
+  branch-target bail.
+
+## Active task (historical) — §9.8b / 8b.1-b ADR-0035 design
 
 8b.1-a survey complete (private/notes/p8-8b1-coalescer-survey.md;
 155 lines). Headline:
