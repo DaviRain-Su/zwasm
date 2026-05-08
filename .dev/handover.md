@@ -53,11 +53,21 @@ Suggested chunk plan (8b.3):
 
 | #     | Description                                                            | Status   |
 |-------|------------------------------------------------------------------------|----------|
-| 8b.3-a | Step 0 survey: wasmer AOT path + WasmEdge AOT strategy + v1 AOT attempts (no copy) | **NEXT** |
-| 8b.3-b | ADR-0039 design framing — `engine/codegen/aot/` module shape + .cwasm format spec | [ ] |
-| 8b.3-c | Implement AOT codegen pipeline (mirror JIT pipeline; emit to .cwasm bytes) | [ ] |
-| 8b.3-d | CLI wiring (`zwasm compile`); deserialise + run `.cwasm`; bench-delta cold-start vs JIT | [ ] |
-| 8b.3-e | 3-host gate; close 8b.3 [x] with bench-delta in commit body | [ ] |
+| 8b.3-a | Step 0 survey across wasmer + WasmEdge + wasmtime/cranelift + WAMR + v1 zwasm | [x] (this commit; survey at `private/notes/p8-8b3-aot-survey.md`) |
+| 8b.3-b | ADR-0039 design framing — inline-bytes `.cwasm` v0.1 format + pipeline reuse | [x] (this commit; ADR-0039 Accepted) |
+| 8b.3-c | Implement `engine/codegen/aot/{format, serialise}.zig`; round-trip parser test | **NEXT** |
+| 8b.3-d | CLI wiring (`zwasm compile <input.wasm> -o <out.cwasm>`); bench-delta deferred to Phase 12 per ADR-0039 (Phase 12 loader prerequisite); body documents per ADR-0036/0038 precedent | [ ] |
+| 8b.3-e | 3-host gate; close 8b.3 [x] | [ ] |
+
+**§9.8b ≥10% aggregate risk acknowledgement** (per ADR-0039
+§"Negative"): three Phase 8b rows in a row produce 0% per-
+row bench-delta (8b.1 ADR-0036 scope-down; 8b.2 ADR-0037+0038
+substrate; 8b.3 ADR-0039 generator-only). 8b.4's ≥10% target
+is **structurally unattainable** with current plan. Resolution:
+**ADR-0040** to revise §9.8b's exit criterion (file after
+8b.3-c lands; options: lower aggregate target, defer
+measurement to Phase 12, or extend with measurement-focused
+row 8b.7).
 
 After 8b.3: 8b.4 (≥10% aggregate; concentrated on 8b.3
 contribution per ADR-0038), 8b.5 (Phase 8 boundary audit),
