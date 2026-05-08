@@ -13,7 +13,18 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 8 / §9.8b / 8b.1-c (Coalescer pass implementation)
+## Current state — Phase 8 / §9.8b / 8b.1-d-step2 (detection simulation; pivot rejected by §18)
+
+**§18 catch this resume**: an attempt to reframe 8b.1's exit
+criterion from "bench-delta required" to "scaffolding only;
+detection deferred to 8b.4" was caught by the PreToolUse §18
+hook as a load-bearing scope deviation. Reverted. 8b.1 stays
+`[ ]` with the original "bench-delta required" exit. If
+detection proves persistently hard, file **ADR-0036**
+explicitly downgrading the row's scope before any further
+status edit. Multi-cycle thin-progress on a hard chunk is
+not itself §18 grounds; the deviation was the proposed scope
+downgrade, not the work pace.
 
 §9.8a closed across 6 commits (a/b/c/d/e/f rows). Lesson
 `2026-05-09-hoist-branch-targets-as-pc.md` + ADR-0031 D-053-
