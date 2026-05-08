@@ -138,6 +138,7 @@ pub const engine = struct {
         };
         pub const arm64 = struct {
             pub const inst = @import("engine/codegen/arm64/inst.zig");
+            pub const inst_neon = @import("engine/codegen/arm64/inst_neon.zig");
             pub const abi = @import("engine/codegen/arm64/abi.zig");
             pub const prologue = @import("engine/codegen/arm64/prologue.zig");
             pub const label = @import("engine/codegen/arm64/label.zig");
@@ -198,6 +199,7 @@ test {
     _ = @import("engine/codegen/shared/reg_class.zig");
     _ = @import("engine/codegen/shared/regalloc.zig");
     _ = @import("engine/codegen/arm64/inst.zig");
+    _ = @import("engine/codegen/arm64/inst_neon.zig");
     _ = @import("engine/codegen/arm64/abi.zig");
     _ = @import("engine/codegen/arm64/emit.zig");
     _ = @import("engine/codegen/arm64/emit_test.zig");

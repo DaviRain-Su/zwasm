@@ -13,66 +13,61 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 9 (SIMD-128) / §9.9/9.4 [x]; **§9.9/9.5 NEXT** (ARM64 NEON emit pt 1)
+## Current state — Phase 9 / §9.9/9.5-a [x] (NEON encoder foundation); **§9.9/9.5-b NEXT**
 
-§9.9/9.4 lands the IR extension:
-- `emitPrefixFD` in `src/ir/lower.zig` (mirrors `emitPrefixFC`)
-  with MVP catalogue: v128.{const,load*,store,not} + shuffle/
-  swizzle + splat (6 shapes) + extract/replace_lane (12 variants)
-  + i32x4.add as representative binop.
-- `ShapeTag` enum + `Allocation.shape_tags` field +
-  `Allocation.shapeTag(vreg)` API in `src/engine/codegen/
-  shared/regalloc.zig` per ADR-0041 §"Decision" / 2 + §14
-  (single_slot_dual_meaning enforcement). 9.4 MVP returns
-  `.scalar` default; 9.5+ ARM64 NEON emit will populate
-  `shape_tags` from ZirOp metadata.
+§9.9/9.5-a lands `src/engine/codegen/arm64/inst_neon.zig` with
+foundational NEON encoders: `encLdrQImm` / `encStrQImm` (128-bit
+load/store, 16-byte stride), `encOrrV16B` + `encMovV16B` alias
+(reg-to-reg move via ORR), `encDup4S` (i32x4.splat from W reg),
+`encAdd4S` (i32x4 vector add). 14 encoder unit tests verify bit
+patterns against Arm IHI 0055 §C7.
 
-13 unit tests cover lower (10: const/load/store/splat shapes/
-extract_lane/shuffle/lane bound check/truncated imm/unknown
-sub-op) + ShapeTag (3: null default / per-vreg lookup /
-out-of-range defensive default).
+Per LOOP.md chunk granularity, the 9.5 row's ~900 LOC scope
+splits into sub-chunks (annotated in the row text). 9.5-a is
+the encoder foundation; 9.5-b wires ZirOp dispatch + populates
+`Allocation.shape_tags` from ZirOp metadata; 9.5-c covers
+extract/replace_lane + remaining int-arith shapes.
 
-**§9.9/9.5 NEXT** — ARM64 NEON emit (pt 1): load/store + lane
-access + integer arithmetic (i8x16/i16x8/i32x4/i64x2 add/sub/
-mul/min/max/avgr). Per ADR-0041 chunk plan: ~900 src + ~250
-tests. Wires `Allocation.shape_tags` population from ZirOp
-metadata.
+**§9.9/9.5-b NEXT** — per-op handlers in `src/engine/codegen/
+arm64/`. Dispatch v128.load / v128.store / i32x4.splat /
+i32x4.add ZirOps to the new NEON encoders + populate
+`Allocation.shape_tags` during `regalloc.compute()` when the
+function's instr stream contains v128 ZirOps. Estimated
+~250 src + ~150 tests.
 
-## Active task — §9.9/9.5: ARM64 NEON emit (pt 1) **NEXT**
+## Active task — §9.9/9.5-b: ARM64 NEON per-op dispatch **NEXT**
 
-Per ADR-0041 chunk plan + §"Decision" / 2 + 4: ARM64 NEON
-load/store + lane access + integer arithmetic. ~900 src +
-~250 tests.
+Per ADR-0041 + 9.5-a's encoder foundation. Wires the NEON
+encoders into the ZirOp dispatch path in
+`src/engine/codegen/arm64/emit.zig` (or a new
+`op_simd.zig` sibling if soft-cap pressure on emit.zig).
 
-Implementation surface:
-1. **NEON instruction encoders** in `src/engine/codegen/arm64/
-   inst.zig` (or new `inst_neon.zig` if file-size cap pressure
-   — current inst.zig at 1463 LOC, soft cap 1000 already
-   exceeded). Encoders: `LDR Q<n>` / `STR Q<n>` (memops),
-   `MOV V<d>.16B, V<n>.16B` (reg-to-reg), `LDR D<n>` for
-   scalar fallback during shape transitions, etc.
-2. **Per-op handlers** in `src/engine/codegen/arm64/`: per
-   ZirOp (`v128.load`, `v128.store`, `i8x16.splat`, ...).
-   Handlers consume the operand stack via the existing pop/
-   push helpers, calling NEON encoders.
-3. **`Allocation.shape_tags` population** in `regalloc.compute`
-   (or a new helper called pre-emit). Walk the ZirInstr stream
-   for SIMD ops, mark vregs they touch as `.v128`. ARM64 emit
-   queries `alloc.shapeTag(vreg)` to select 16-byte stride.
-4. **Spill-frame stride**: the 16-byte stride for v128 vregs
-   needs prologue + emit synchronization. Tighter packing
-   defers to Phase 15 per ADR-0038; 9.5 MVP just enlarges
-   the spill frame conservatively.
+MVP handlers (matching 9.4 lower's MVP catalogue):
+- `v128.load` (offset payload from emitMemarg) → encLdrQImm
+- `v128.store` → encStrQImm
+- `i32x4.splat` → encDup4S (reads i32 vreg, emits to v128 vreg)
+- `i32x4.add` → encAdd4S (pop 2 v128, push v128)
 
-Smallest red test: ARM64 emit accepts a ZirInstr stream
-containing `i32x4.splat` + `i32x4.add` and produces a
-non-empty bytes slice with the expected NEON opcodes
-(verifiable via inst.zig encoder unit tests for the same
-sequence).
+Cross-cutting concerns:
+- **`Allocation.shape_tags` population**: `regalloc.compute()`
+  (or a wrapper pre-emit) walks `func.instrs` checking each
+  op's ZirOp for v128 shape (any `v128.*`, `i*x*.*`, `f*x*.*`
+  prefix) and marks the popped/pushed vregs accordingly.
+- **Spill-frame stride**: v128 vregs spill at 16-byte stride
+  (NEON `LDR Q` / `STR Q` alignment). Tighter per-shape
+  packing defers to Phase 15 per ADR-0038; 9.5 MVP enlarges
+  the conservative spill frame.
 
-After 9.5: 9.6 ARM64 NEON emit pt 2 (float arith + compare
-+ shuffle + conversion) → 9.7/9.8 x86_64 SSE4.1 emit →
-9.9 spec test → 9.10 bench → 9.11 audit → 9.12 open §9.10.
+Smallest red test: arm64/emit.zig accepts a ZirInstr stream
+containing `(i32.const 7) + i32x4.splat` and produces a
+non-empty bytes slice whose disassembly matches `MOVZ W?, #7;
+DUP V?.4S, W?` (bit-pattern verification via inst_neon
+encoder tests for the expected DUP word).
+
+After 9.5-b: 9.5-c (extract/replace_lane + remaining int
+arith shapes) → 9.6 ARM64 NEON emit pt 2 (float + compare +
+shuffle + conversion) → 9.7/9.8 x86_64 SSE4.1 emit → 9.9
+spec test → 9.10 bench → 9.11 audit → 9.12 open §9.10.
 
 After 8b.4: 8b.5 (boundary audit_scaffolding) + 8b.6 (open
 §9.9 inline + flip Phase Status).
