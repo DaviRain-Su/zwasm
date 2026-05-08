@@ -8,20 +8,17 @@
 //! owned buffer" shape as arm64, just with a slice instead of a
 //! u32 word.
 //!
-//! Phase 7.6 chunk-b scope: foundation primitives + a handful of
-//! canonical ops to prove the encoding model end-to-end:
+//! This file is the orchestrator: it owns the public types
+//! (`Gpr`, `Xmm`, `Width`, `Cond`, `ShiftKind`, `EncodedInsn`,
+//! `SseScalarKind`, `SsePackedKind`, `max_insn_bytes`) and the
+//! shared prefix / ModR/M / SIB byte builders, then re-exports
+//! every `enc*` function from the per-family sibling modules
+//! grouped by Intel SDM ISA family:
 //!
-//!   - REX / ModR/M / SIB byte builders (inline helpers).
-//!   - `EncodedInsn` value type for variable-width emission.
-//!   - reg-reg ALU (mov / add / sub) for 32-bit and 64-bit
-//!     operand sizes.
-//!   - control flow no-arg ops (ret, nop).
-//!
-//! Subsequent chunks layer on:
-//!   - Memory ops (load / store with disp / SIB).
-//!   - Immediate operands (mov-imm, add-imm, etc.).
-//!   - Branch / call (rel8 / rel32 disps + label fixup model).
-//!   - FP / SIMD via XMM (sub-h equivalents).
+//!   - `inst_alu.zig`    — ALU register/immediate (§3.4 / §3.5).
+//!   - `inst_mem.zig`    — Memory load/store + sign/zero extension.
+//!   - `inst_branch.zig` — Control flow + stack + integer divide.
+//!   - `inst_sse.zig`    — XMM scalar/packed + FP-related.
 //!
 //! Bit patterns from AMD64 Architecture Programmer's Manual
 //! Vol. 3 (Pub. 24594) and Intel® 64 Vol. 2 (Order 325383).
@@ -33,6 +30,11 @@
 const std = @import("std");
 
 const reg_class = @import("reg_class.zig");
+
+const inst_alu = @import("inst_alu.zig");
+const inst_mem = @import("inst_mem.zig");
+const inst_branch = @import("inst_branch.zig");
+const inst_sse = @import("inst_sse.zig");
 
 pub const Gpr = reg_class.Gpr;
 pub const Xmm = reg_class.Xmm;
@@ -61,14 +63,16 @@ pub const EncodedInsn = struct {
         return self.bytes[0..self.len];
     }
 
-    fn push(self: *EncodedInsn, b: u8) void {
+    pub fn push(self: *EncodedInsn, b: u8) void {
         self.bytes[self.len] = b;
         self.len += 1;
     }
 };
 
 // ============================================================
-// Prefix / ModR/M / SIB byte builders
+// Prefix / ModR/M / SIB byte builders (shared with sibling
+// modules; pub-visible so inst_alu / inst_mem / inst_branch /
+// inst_sse can compose them without duplicating logic).
 // ============================================================
 
 /// Encode the REX prefix byte. The four payload bits:
@@ -78,7 +82,7 @@ pub const EncodedInsn = struct {
 ///   - B (bit 0): high-bit extension of ModR/M.rm OR SIB.base
 ///                OR opcode-embedded reg.
 /// The fixed top half is `0100` per AMD64 Vol.3 §1.2.7.
-inline fn encodeRex(w: bool, r: u1, x: u1, b: u1) u8 {
+pub inline fn encodeRex(w: bool, r: u1, x: u1, b: u1) u8 {
     return 0x40 |
         (@as(u8, @intFromBool(w)) << 3) |
         (@as(u8, r) << 2) |
@@ -90,7 +94,7 @@ inline fn encodeRex(w: bool, r: u1, x: u1, b: u1) u8 {
 /// register-direct, 0/1/2 = memory with 0/8/32-bit disp), `reg`
 /// is the low 3 bits of the source/extension reg, `rm` is the
 /// low 3 bits of the destination/base.
-inline fn encodeModrm(mod: u2, reg: u3, rm: u3) u8 {
+pub inline fn encodeModrm(mod: u2, reg: u3, rm: u3) u8 {
     return (@as(u8, mod) << 6) | (@as(u8, reg) << 3) | @as(u8, rm);
 }
 
@@ -98,13 +102,9 @@ inline fn encodeModrm(mod: u2, reg: u3, rm: u3) u8 {
 /// is the low 3 bits of the index reg, `base` is the low 3 bits
 /// of the base reg. Only used when ModR/M.rm == 0b100 in memory
 /// addressing modes.
-inline fn encodeSib(scale: u2, index: u3, base: u3) u8 {
+pub inline fn encodeSib(scale: u2, index: u3, base: u3) u8 {
     return (@as(u8, scale) << 6) | (@as(u8, index) << 3) | @as(u8, base);
 }
-
-// ============================================================
-// Foundation ops — reg-reg ALU (32-bit + 64-bit) + control flow
-// ============================================================
 
 /// Decide whether REX must be emitted for a 2-operand reg/reg
 /// instruction, given the operand size. REX.W is set for 64-bit;
@@ -114,7 +114,7 @@ inline fn encodeSib(scale: u2, index: u3, base: u3) u8 {
 /// bit (R or B) is set — the 32-bit encoding is the default and
 /// the prefix is otherwise redundant. For 64-bit ops REX is
 /// always emitted (to set the W bit).
-inline fn rexForRR(size: Width, reg: Gpr, rm: Gpr) ?u8 {
+pub inline fn rexForRR(size: Width, reg: Gpr, rm: Gpr) ?u8 {
     const w = size == .q;
     const r = reg.extBit();
     const b = rm.extBit();
@@ -122,64 +122,9 @@ inline fn rexForRR(size: Width, reg: Gpr, rm: Gpr) ?u8 {
     return encodeRex(w, r, 0, b);
 }
 
-/// `MOV r/m, r` (opcode 0x89) — copy `src` into `dst`. Width
-/// `.d` = 32-bit (zero-extends to 64), `.q` = 64-bit.
-///
-/// Encoding (no SIB, mod=11 register-direct):
-///   [REX?] 89 ModR/M
-///   ModR/M.mod = 0b11, ModR/M.reg = src.low3, ModR/M.rm = dst.low3
-pub fn encMovRR(size: Width, dst: Gpr, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (rexForRR(size, src, dst)) |rex| enc.push(rex);
-    enc.push(0x89);
-    enc.push(encodeModrm(0b11, src.low3(), dst.low3()));
-    return enc;
-}
-
-/// `ADD r/m, r` (opcode 0x01) — `dst += src`.
-pub fn encAddRR(size: Width, dst: Gpr, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (rexForRR(size, src, dst)) |rex| enc.push(rex);
-    enc.push(0x01);
-    enc.push(encodeModrm(0b11, src.low3(), dst.low3()));
-    return enc;
-}
-
-/// `SUB r/m, r` (opcode 0x29) — `dst -= src`.
-pub fn encSubRR(size: Width, dst: Gpr, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (rexForRR(size, src, dst)) |rex| enc.push(rex);
-    enc.push(0x29);
-    enc.push(encodeModrm(0b11, src.low3(), dst.low3()));
-    return enc;
-}
-
-/// `AND r/m, r` (opcode 0x21) — `dst &= src`.
-pub fn encAndRR(size: Width, dst: Gpr, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (rexForRR(size, src, dst)) |rex| enc.push(rex);
-    enc.push(0x21);
-    enc.push(encodeModrm(0b11, src.low3(), dst.low3()));
-    return enc;
-}
-
-/// `OR r/m, r` (opcode 0x09) — `dst |= src`.
-pub fn encOrRR(size: Width, dst: Gpr, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (rexForRR(size, src, dst)) |rex| enc.push(rex);
-    enc.push(0x09);
-    enc.push(encodeModrm(0b11, src.low3(), dst.low3()));
-    return enc;
-}
-
-/// `XOR r/m, r` (opcode 0x31) — `dst ^= src`.
-pub fn encXorRR(size: Width, dst: Gpr, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (rexForRR(size, src, dst)) |rex| enc.push(rex);
-    enc.push(0x31);
-    enc.push(encodeModrm(0b11, src.low3(), dst.low3()));
-    return enc;
-}
+// ============================================================
+// Shared enums
+// ============================================================
 
 /// EFLAGS condition code per AMD64 Vol.3 §3.1.4 (J<cc> /
 /// SET<cc> / CMOV<cc> share the same 4-bit cc field). The
@@ -191,17 +136,6 @@ pub const Cond = enum(u4) {
     s = 0x8, ns = 0x9, p = 0xA, np = 0xB,
     l = 0xC, ge = 0xD, le = 0xE, g = 0xF,
 };
-
-/// `CMP r/m, r` (opcode 0x39) — sets EFLAGS based on `dst -
-/// src` (no result stored). Same operand-role + REX layout as
-/// ADD/SUB.
-pub fn encCmpRR(size: Width, dst: Gpr, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (rexForRR(size, src, dst)) |rex| enc.push(rex);
-    enc.push(0x39);
-    enc.push(encodeModrm(0b11, src.low3(), dst.low3()));
-    return enc;
-}
 
 /// Shift / rotate variants for the 0xD3 r/m, CL family. The
 /// numeric value matches the ModR/M.reg field. AMD64 Vol.3
@@ -216,1379 +150,13 @@ pub const ShiftKind = enum(u3) {
     sar = 7,
 };
 
-/// `<shift> r/m, CL` (opcode 0xD3 + ModR/M.reg = kind) —
-/// shift / rotate the destination by the count in CL. Width
-/// `.d` shifts the low 32 bits (zero-extends to 64); `.q`
-/// shifts all 64 bits. Caller is responsible for moving the
-/// shift count into ECX/RCX before this instruction.
-///
-/// **Caller invariant**: dst should not be RCX (the count
-/// register). The emit-side handler checks this and surfaces
-/// `UnsupportedOp` rather than emitting a self-clobbering
-/// sequence.
-pub fn encShiftRCl(size: Width, kind: ShiftKind, dst: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    // REX.R is unused (kind sits in ModR/M.reg, all kinds < 8).
-    // Pass .rax as a no-op for the reg-position arg of rexForRR
-    // so REX.R = 0 and only REX.W + REX.B contribute.
-    if (rexForRR(size, .rax, dst)) |rex| enc.push(rex);
-    enc.push(0xD3);
-    enc.push(encodeModrm(0b11, @intFromEnum(kind), dst.low3()));
-    return enc;
-}
-
-/// `TEST r/m, r` (opcode 0x85) — sets EFLAGS based on bitwise
-/// AND of `dst` and `src` (no result stored). Same operand-role
-/// + REX layout as CMP. Used by Wasm `eqz` as `TEST x, x` →
-/// ZF=1 iff x==0.
-pub fn encTestRR(size: Width, dst: Gpr, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (rexForRR(size, src, dst)) |rex| enc.push(rex);
-    enc.push(0x85);
-    enc.push(encodeModrm(0b11, src.low3(), dst.low3()));
-    return enc;
-}
-
-/// `SETcc r/m8` (2-byte opcode 0x0F 0x90+cc) — write 0 or 1 to
-/// the low byte of `dst` based on the EFLAGS condition. ModR/M:
-/// mod=11, reg=0 (always for SETcc), rm = dst.low3.
-///
-/// **REX is always emitted.** For R8..R15 the REX.B bit is
-/// needed; for RBX/RBP/RSI/RDI any REX (including 0x40) is
-/// required to access the low-byte form (BL/BPL/SIL/DIL) rather
-/// than the high-byte aliases (BH/CH/DH/AH) which clash in
-/// 64-bit mode.
-pub fn encSetccR(cc: Cond, dst: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(false, 0, 0, dst.extBit()));
-    enc.push(0x0F);
-    enc.push(0x90 | @as(u8, @intFromEnum(cc)));
-    enc.push(encodeModrm(0b11, 0, dst.low3()));
-    return enc;
-}
-
-/// `CMOVcc r, r/m` (2-byte opcode 0x0F 0x4? /r — `?` is cc).
-/// Conditional move. dst occupies ModR/M.reg, src occupies r/m
-/// (IMUL-style operand inversion). `size` = `.d` → r32 (zero-
-/// extends to r64); `.q` → r64 (REX.W). Used by `select` /
-/// `select_typed` (D-045 chunk 8).
-pub fn encCmovccRR(size: Width, cc: Cond, dst: Gpr, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (rexForRR(size, dst, src)) |rex| enc.push(rex);
-    enc.push(0x0F);
-    enc.push(0x40 | @as(u8, @intFromEnum(cc)));
-    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
-    return enc;
-}
-
-/// `MOVZX r32, r/m8` (2-byte opcode 0x0F 0xB6 /r) — zero-extend
-/// the low byte of `src` into the 32-bit form of `dst` (which
-/// implicitly zero-extends to 64 bits). dst occupies ModR/M.reg,
-/// src occupies r/m (same role inversion as IMUL).
-///
-/// **REX always emitted** for the same low-byte addressability
-/// reason as SETcc.
-pub fn encMovzxR32R8(dst: Gpr, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
-    enc.push(0x0F);
-    enc.push(0xB6);
-    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
-    return enc;
-}
-
-/// `CALL rel32` (opcode 0xE8) — direct call with 32-bit
-/// signed displacement from the byte AFTER the disp32 (i.e.
-/// the next instruction). Used by `emitCall` as a placeholder
-/// (disp=0); the post-emit linker patches the disp via
-/// `patchRel32` once function offsets are known.
-pub fn encCallRel32(disp: i32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0xE8);
-    const u: u32 = @bitCast(disp);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `CALL r/m64` (opcode 0xFF /2) — indirect call through a
-/// 64-bit register. CALL is implicitly 64-bit on x86_64; REX.W
-/// is NOT required. REX.B is set if `target` is R8..R15. Used
-/// by `emitCallIndirect` after the funcptr is loaded into a
-/// scratch register.
-pub fn encCallReg(target: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (target.extBit() != 0) {
-        enc.push(encodeRex(false, 0, 0, target.extBit()));
-    }
-    enc.push(0xFF);
-    enc.push(encodeModrm(0b11, 2, target.low3())); // /2 = CALL
-    return enc;
-}
-
-/// `CMP r/m32, imm32` (opcode 0x81 /7) — sign-extended 32-bit
-/// compare. Used by `emitCallIndirect`'s sig check vs the
-/// call-site's expected typeidx (a u32 module-type index).
-pub fn encCmpRImm32(dst: Gpr, imm: u32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (rexForRR(.d, .rax, dst)) |rex| enc.push(rex);
-    enc.push(0x81);
-    enc.push(encodeModrm(0b11, 7, dst.low3())); // /7 = CMP
-    enc.push(@truncate(imm));
-    enc.push(@truncate(imm >> 8));
-    enc.push(@truncate(imm >> 16));
-    enc.push(@truncate(imm >> 24));
-    return enc;
-}
-
-/// `MOV r32, [base + idx*4]` (opcode 0x8B with SIB scale=2 →
-/// ×4). 32-bit load with 4-scaled index; used by
-/// `emitCallIndirect` to read `typeidx_base[idx]` (each entry
-/// is a u32). mod=00 + rm=4 signals SIB-byte addressing
-/// (no displacement).
-pub fn encMovR32FromBaseIdxLsl2(dst: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    const r = dst.extBit();
-    const x = idx.extBit();
-    const b = base.extBit();
-    if (r != 0 or x != 0 or b != 0) {
-        enc.push(encodeRex(false, r, x, b));
-    }
-    enc.push(0x8B);
-    enc.push(encodeModrm(0b00, dst.low3(), 0b100));
-    enc.push(encodeSib(0b10, idx.low3(), base.low3())); // scale = ×4
-    return enc;
-}
-
-/// `MOV r64, [base + idx*8]` (REX.W + opcode 0x8B with SIB
-/// scale=3 → ×8). 64-bit load with 8-scaled index; used by
-/// `emitCallIndirect` to read `funcptr_base[idx]` (each entry
-/// is a u64 native funcptr).
-pub fn encMovR64FromBaseIdxLsl3(dst: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, dst.extBit(), idx.extBit(), base.extBit()));
-    enc.push(0x8B);
-    enc.push(encodeModrm(0b00, dst.low3(), 0b100));
-    enc.push(encodeSib(0b11, idx.low3(), base.low3())); // scale = ×8
-    return enc;
-}
-
-/// `MOVSXD r64, r/m32` (REX.W + 0x63 /r) — sign-extend 32-bit
-/// source into 64-bit destination. Used by `i64.extend_i32_s`.
-/// dst occupies ModR/M.reg, src occupies r/m (IMUL-style
-/// operand inversion). REX.W is mandatory.
-pub fn encMovsxdR64R32(dst: Gpr, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, dst.extBit(), 0, src.extBit()));
-    enc.push(0x63);
-    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
-    return enc;
-}
-
-/// `MOVSX r32, r/m8` (2-byte opcode 0x0F 0xBE /r) — sign-extend
-/// the low 8 bits of `src` into the 32-bit form of `dst` (which
-/// implicitly zero-extends to 64). Used by Wasm 2.0
-/// `i32.extend8_s` (Intel SDM Vol 2 §3.2 MOVSX). REX always
-/// emitted for low-byte addressability (BL/BPL/SIL/DIL aliasing
-/// with BH/CH/DH/AH in 64-bit mode).
-pub fn encMovsxR32R8(dst: Gpr, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
-    enc.push(0x0F);
-    enc.push(0xBE);
-    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
-    return enc;
-}
-
-/// `MOVSX r32, r/m16` (2-byte opcode 0x0F 0xBF /r) — sign-extend
-/// the low 16 bits. Used by `i32.extend16_s`.
-pub fn encMovsxR32R16(dst: Gpr, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (rexForRR(.d, dst, src)) |rex| enc.push(rex);
-    enc.push(0x0F);
-    enc.push(0xBF);
-    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
-    return enc;
-}
-
-/// `MOVSX r64, r/m8` (REX.W + 0x0F 0xBE /r) — sign-extend low 8
-/// bits into 64-bit dst. Used by `i64.extend8_s`.
-pub fn encMovsxR64R8(dst: Gpr, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, dst.extBit(), 0, src.extBit()));
-    enc.push(0x0F);
-    enc.push(0xBE);
-    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
-    return enc;
-}
-
-/// `MOVSX r64, r/m16` (REX.W + 0x0F 0xBF /r) — Used by
-/// `i64.extend16_s`.
-pub fn encMovsxR64R16(dst: Gpr, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, dst.extBit(), 0, src.extBit()));
-    enc.push(0x0F);
-    enc.push(0xBF);
-    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
-    return enc;
-}
-
-/// `CDQ` (opcode 0x99) — sign-extend EAX into EDX:EAX (Intel
-/// SDM Vol 2 §3.2 CDQ). One byte. Used as the dividend prep
-/// step for IDIV r/m32 (signed 32-bit divide).
-pub fn encCdq() EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0x99);
-    return enc;
-}
-
-/// `CQO` (REX.W + 0x99) — sign-extend RAX into RDX:RAX. Used as
-/// the dividend prep step for IDIV r/m64.
-pub fn encCqo() EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, 0, 0, 0)); // 0x48
-    enc.push(0x99);
-    return enc;
-}
-
-/// `IDIV r/m32` (opcode 0xF7 /7) — signed divide of EDX:EAX by
-/// the operand; quotient → EAX, remainder → EDX. Intel SDM Vol 2
-/// §3.2 IDIV. Wasm spec §4.4.1.1 (i32.div_s / i32.rem_s) —
-/// caller is responsible for the divide-by-zero trap check + the
-/// INT_MIN/-1 overflow check (IDIV raises #DE, but we trap via
-/// the explicit pre-check so the JIT does not need a #DE
-/// handler).
-pub fn encIdivR32(divisor: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (divisor.extBit() != 0) {
-        enc.push(encodeRex(false, 0, 0, divisor.extBit()));
-    }
-    enc.push(0xF7);
-    enc.push(encodeModrm(0b11, 7, divisor.low3())); // /7 = IDIV
-    return enc;
-}
-
-/// `DIV r/m32` (opcode 0xF7 /6) — unsigned divide of EDX:EAX by
-/// operand. Wasm spec §4.4.1.1 (i32.div_u / i32.rem_u).
-pub fn encDivR32(divisor: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (divisor.extBit() != 0) {
-        enc.push(encodeRex(false, 0, 0, divisor.extBit()));
-    }
-    enc.push(0xF7);
-    enc.push(encodeModrm(0b11, 6, divisor.low3())); // /6 = DIV
-    return enc;
-}
-
-/// `IDIV r/m64` (REX.W + 0xF7 /7) — 64-bit signed divide.
-pub fn encIdivR64(divisor: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, 0, 0, divisor.extBit()));
-    enc.push(0xF7);
-    enc.push(encodeModrm(0b11, 7, divisor.low3()));
-    return enc;
-}
-
-/// `DIV r/m64` (REX.W + 0xF7 /6) — 64-bit unsigned divide.
-pub fn encDivR64(divisor: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, 0, 0, divisor.extBit()));
-    enc.push(0xF7);
-    enc.push(encodeModrm(0b11, 6, divisor.low3()));
-    return enc;
-}
-
-/// `TEST r/m32, imm32` (opcode 0xF7 /0) — sign-extended 32-bit
-/// AND with imm32, sets EFLAGS, no result. Useful for explicit
-/// non-zero comparison (TEST r, r is shorter for that). Used by
-/// the divide-by-zero check before `IDIV`/`DIV`.
-pub fn encTestRImm32(size: Width, dst: Gpr, imm: u32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (rexForRR(size, .rax, dst)) |rex| enc.push(rex);
-    enc.push(0xF7);
-    enc.push(encodeModrm(0b11, 0, dst.low3()));
-    enc.push(@truncate(imm));
-    enc.push(@truncate(imm >> 8));
-    enc.push(@truncate(imm >> 16));
-    enc.push(@truncate(imm >> 24));
-    return enc;
-}
-
-/// Common shape for the `F3 0F <opcode> /r` family used by
-/// LZCNT / TZCNT / POPCNT. dst occupies ModR/M.reg and src is
-/// in r/m (IMUL-style operand inversion). The mandatory 0xF3
-/// prefix precedes any REX byte per AMD64 Vol.3 §1.2.6. `size`
-/// = `.d` → r/m32; `.q` → r/m64 (REX.W set).
-inline fn encF3_0F_RR(size: Width, opcode: u8, dst: Gpr, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0xF3);
-    if (rexForRR(size, dst, src)) |rex| enc.push(rex);
-    enc.push(0x0F);
-    enc.push(opcode);
-    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
-    return enc;
-}
-
-inline fn encF3_0F_R32R(opcode: u8, dst: Gpr, src: Gpr) EncodedInsn {
-    return encF3_0F_RR(.d, opcode, dst, src);
-}
-
-/// `CMP r/m32, imm8` (opcode 0x83 /7) — sign-extended 8-bit
-/// compare. Used by br_table case-checks. imm8 covers Wasm
-/// case indices 0..127; larger requires the 0x81 /7 imm32
-/// form (currently surfaces as UnsupportedOp at the
-/// emit-handler level rather than here).
-pub fn encCmpRImm8(size: Width, dst: Gpr, imm: i8) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (rexForRR(size, .rax, dst)) |rex| enc.push(rex);
-    enc.push(0x83);
-    enc.push(encodeModrm(0b11, 7, dst.low3())); // /7 = CMP
-    enc.push(@bitCast(imm));
-    return enc;
-}
-
-/// `Jcc rel8` (opcode 0x70+cc) — short conditional jump with
-/// 8-bit signed displacement (-128..127). 2 bytes total.
-/// Used by br_table to skip a single 5-byte JMP rel32 (disp = +5).
-pub fn encJccRel8(cc: Cond, disp: i8) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0x70 | @as(u8, @intFromEnum(cc)));
-    enc.push(@bitCast(disp));
-    return enc;
-}
-
-/// `MOV r64, [base + disp32]` (opcode 0x8B with REX.W, mod=10).
-/// Used to reload JitRuntime invariants from `[R15 + offset]`
-/// per ADR-0026.
-pub fn encMovR64FromMemDisp32(dst: Gpr, base: Gpr, disp: i32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, dst.extBit(), 0, base.extBit()));
-    enc.push(0x8B);
-    enc.push(encodeModrm(0b10, dst.low3(), base.low3()));
-    const u: u32 = @bitCast(disp);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `MOV r32, [base + disp32]` (opcode 0x8B without REX.W, mod=10).
-/// 32-bit load with disp32; zero-extends to 64-bit dst. Used by
-/// `global.get` (i32) to read `[globals_base + idx*8]` for the
-/// low 4 bytes of the 8-byte Value slot.
-pub fn encMovR32FromMemDisp32(dst: Gpr, base: Gpr, disp: i32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (dst.extBit() == 1 or base.extBit() == 1) {
-        enc.push(encodeRex(false, dst.extBit(), 0, base.extBit()));
-    }
-    enc.push(0x8B);
-    enc.push(encodeModrm(0b10, dst.low3(), base.low3()));
-    const u: u32 = @bitCast(disp);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `MOV [base + disp32], r32` (opcode 0x89 without REX.W, mod=10).
-/// 32-bit store with disp32. Used by `global.set` (i32) to write
-/// `[globals_base + idx*8]` for the low 4 bytes of the 8-byte
-/// Value slot. The upper 4 bytes are left untouched (acceptable
-/// for i32-typed globals because the slot is zero-initialised at
-/// module load).
-pub fn encStoreR32MemDisp32(src: Gpr, base: Gpr, disp: i32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (src.extBit() == 1 or base.extBit() == 1) {
-        enc.push(encodeRex(false, src.extBit(), 0, base.extBit()));
-    }
-    enc.push(0x89);
-    enc.push(encodeModrm(0b10, src.low3(), base.low3()));
-    const u: u32 = @bitCast(disp);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `CMP r64, [base + disp32]` (opcode 0x3B with REX.W, mod=10).
-/// Used by memory bounds check to compare eff_addr against
-/// `[R15 + mem_limit_off]`.
-pub fn encCmpR64MemDisp32(reg: Gpr, base: Gpr, disp: i32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, reg.extBit(), 0, base.extBit()));
-    enc.push(0x3B);
-    enc.push(encodeModrm(0b10, reg.low3(), base.low3()));
-    const u: u32 = @bitCast(disp);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `MOV r32, [base + idx]` (opcode 0x8B with SIB, scale=1).
-/// Used by memory loads to read the actual word from
-/// `[vm_base + eff_addr]`. mod=00 + rm=4 signals SIB-byte
-/// addressing (no disp).
-pub fn encMovR32FromBaseIdx(dst: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    const r = dst.extBit();
-    const x = idx.extBit();
-    const b = base.extBit();
-    if (r != 0 or x != 0 or b != 0) {
-        enc.push(encodeRex(false, r, x, b));
-    }
-    enc.push(0x8B);
-    enc.push(encodeModrm(0b00, dst.low3(), 0b100));
-    enc.push(encodeSib(0b00, idx.low3(), base.low3()));
-    return enc;
-}
-
-/// `MOV [base + idx], r32` (opcode 0x89 with SIB, scale=1).
-/// 32-bit store; ModR/M.reg = source register. Mirror of
-/// `encMovR32FromBaseIdx` for the store direction (i32.store).
-pub fn encStoreR32MemBaseIdx(src: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    const r = src.extBit();
-    const x = idx.extBit();
-    const b = base.extBit();
-    if (r != 0 or x != 0 or b != 0) {
-        enc.push(encodeRex(false, r, x, b));
-    }
-    enc.push(0x89);
-    enc.push(encodeModrm(0b00, src.low3(), 0b100));
-    enc.push(encodeSib(0b00, idx.low3(), base.low3()));
-    return enc;
-}
-
-/// `MOV [base + idx], r16` (operand-size prefix 0x66 + opcode
-/// 0x89 with SIB). 16-bit store; used by i32.store16.
-pub fn encStoreR16MemBaseIdx(src: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0x66); // operand-size override
-    const r = src.extBit();
-    const x = idx.extBit();
-    const b = base.extBit();
-    if (r != 0 or x != 0 or b != 0) {
-        enc.push(encodeRex(false, r, x, b));
-    }
-    enc.push(0x89);
-    enc.push(encodeModrm(0b00, src.low3(), 0b100));
-    enc.push(encodeSib(0b00, idx.low3(), base.low3()));
-    return enc;
-}
-
-/// `MOV [base + idx], r8` (opcode 0x88 with SIB). 8-bit store;
-/// used by i32.store8. **Always emits REX** so r8-r15 + the
-/// SPL/BPL/SIL/DIL low-byte forms encode correctly (without REX,
-/// reg=4..7 means AH/CH/DH/BH).
-///
-/// TODO(perf, optimisation-phase): when src ∈ {RAX, RCX, RDX, RBX}
-/// (low-byte AL/CL/DL/BL accessible without REX), the prefix can
-/// be omitted for a 1-byte saving per insn. Deferred until the
-/// benchmark loop surfaces store8-dominant fixtures; until then
-/// the unconditional REX keeps the encoder simple and uniform.
-pub fn encStoreR8MemBaseIdx(src: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(false, src.extBit(), idx.extBit(), base.extBit())); // force REX
-    enc.push(0x88);
-    enc.push(encodeModrm(0b00, src.low3(), 0b100));
-    enc.push(encodeSib(0b00, idx.low3(), base.low3()));
-    return enc;
-}
-
-/// `MOVZX r32, byte ptr [base + idx]` (opcode 0x0F 0xB6 with
-/// SIB). 8→32 zero-extend load; used by i32.load8_u.
-pub fn encMovzxR32_8MemBaseIdx(dst: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    const r = dst.extBit();
-    const x = idx.extBit();
-    const b = base.extBit();
-    if (r != 0 or x != 0 or b != 0) {
-        enc.push(encodeRex(false, r, x, b));
-    }
-    enc.push(0x0F);
-    enc.push(0xB6);
-    enc.push(encodeModrm(0b00, dst.low3(), 0b100));
-    enc.push(encodeSib(0b00, idx.low3(), base.low3()));
-    return enc;
-}
-
-/// `MOVSX r32, byte ptr [base + idx]` (opcode 0x0F 0xBE with
-/// SIB). 8→32 sign-extend load; used by i32.load8_s.
-pub fn encMovsxR32_8MemBaseIdx(dst: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    const r = dst.extBit();
-    const x = idx.extBit();
-    const b = base.extBit();
-    if (r != 0 or x != 0 or b != 0) {
-        enc.push(encodeRex(false, r, x, b));
-    }
-    enc.push(0x0F);
-    enc.push(0xBE);
-    enc.push(encodeModrm(0b00, dst.low3(), 0b100));
-    enc.push(encodeSib(0b00, idx.low3(), base.low3()));
-    return enc;
-}
-
-/// `MOVZX r32, word ptr [base + idx]` (opcode 0x0F 0xB7 with
-/// SIB). 16→32 zero-extend load; used by i32.load16_u.
-pub fn encMovzxR32_16MemBaseIdx(dst: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    const r = dst.extBit();
-    const x = idx.extBit();
-    const b = base.extBit();
-    if (r != 0 or x != 0 or b != 0) {
-        enc.push(encodeRex(false, r, x, b));
-    }
-    enc.push(0x0F);
-    enc.push(0xB7);
-    enc.push(encodeModrm(0b00, dst.low3(), 0b100));
-    enc.push(encodeSib(0b00, idx.low3(), base.low3()));
-    return enc;
-}
-
-/// `MOVSX r32, word ptr [base + idx]` (opcode 0x0F 0xBF with
-/// SIB). 16→32 sign-extend load; used by i32.load16_s.
-pub fn encMovsxR32_16MemBaseIdx(dst: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    const r = dst.extBit();
-    const x = idx.extBit();
-    const b = base.extBit();
-    if (r != 0 or x != 0 or b != 0) {
-        enc.push(encodeRex(false, r, x, b));
-    }
-    enc.push(0x0F);
-    enc.push(0xBF);
-    enc.push(encodeModrm(0b00, dst.low3(), 0b100));
-    enc.push(encodeSib(0b00, idx.low3(), base.low3()));
-    return enc;
-}
-
-// ============================================================
-// 64-bit mem load/store (i64.load / i64.store family — D-045
-// chunk 5/9 / §9.7 / 7.8). Same SIB shape as the R32 variants
-// above; differ only in REX.W (always set) and the sign/zero-
-// extending opcodes for sub-word loads.
-// ============================================================
-
-/// `MOV r64, qword ptr [base + idx]` (REX.W + 0x8B with SIB).
-/// 8-byte load; used by i64.load.
-pub fn encMovR64FromBaseIdx(dst: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, dst.extBit(), idx.extBit(), base.extBit()));
-    enc.push(0x8B);
-    enc.push(encodeModrm(0b00, dst.low3(), 0b100));
-    enc.push(encodeSib(0b00, idx.low3(), base.low3()));
-    return enc;
-}
-
-/// `MOV qword ptr [base + idx], r64` (REX.W + 0x89 with SIB).
-/// 8-byte store; used by i64.store.
-pub fn encStoreR64MemBaseIdx(src: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, src.extBit(), idx.extBit(), base.extBit()));
-    enc.push(0x89);
-    enc.push(encodeModrm(0b00, src.low3(), 0b100));
-    enc.push(encodeSib(0b00, idx.low3(), base.low3()));
-    return enc;
-}
-
-/// `MOVZX r64, byte ptr [base + idx]` (REX.W + 0x0F 0xB6 with
-/// SIB). Zero-extends a byte to 64 bits; used by i64.load8_u.
-pub fn encMovzxR64_8MemBaseIdx(dst: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, dst.extBit(), idx.extBit(), base.extBit()));
-    enc.push(0x0F);
-    enc.push(0xB6);
-    enc.push(encodeModrm(0b00, dst.low3(), 0b100));
-    enc.push(encodeSib(0b00, idx.low3(), base.low3()));
-    return enc;
-}
-
-/// `MOVSX r64, byte ptr [base + idx]` (REX.W + 0x0F 0xBE with
-/// SIB). Sign-extends a byte to 64 bits; used by i64.load8_s.
-pub fn encMovsxR64_8MemBaseIdx(dst: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, dst.extBit(), idx.extBit(), base.extBit()));
-    enc.push(0x0F);
-    enc.push(0xBE);
-    enc.push(encodeModrm(0b00, dst.low3(), 0b100));
-    enc.push(encodeSib(0b00, idx.low3(), base.low3()));
-    return enc;
-}
-
-/// `MOVZX r64, word ptr [base + idx]` (REX.W + 0x0F 0xB7 with
-/// SIB). Zero-extends a word to 64 bits; used by i64.load16_u.
-pub fn encMovzxR64_16MemBaseIdx(dst: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, dst.extBit(), idx.extBit(), base.extBit()));
-    enc.push(0x0F);
-    enc.push(0xB7);
-    enc.push(encodeModrm(0b00, dst.low3(), 0b100));
-    enc.push(encodeSib(0b00, idx.low3(), base.low3()));
-    return enc;
-}
-
-/// `MOVSX r64, word ptr [base + idx]` (REX.W + 0x0F 0xBF with
-/// SIB). Sign-extends a word to 64 bits; used by i64.load16_s.
-pub fn encMovsxR64_16MemBaseIdx(dst: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, dst.extBit(), idx.extBit(), base.extBit()));
-    enc.push(0x0F);
-    enc.push(0xBF);
-    enc.push(encodeModrm(0b00, dst.low3(), 0b100));
-    enc.push(encodeSib(0b00, idx.low3(), base.low3()));
-    return enc;
-}
-
-/// `MOVSXD r64, dword ptr [base + idx]` (REX.W + 0x63 with SIB).
-/// Sign-extends a dword to 64 bits; used by i64.load32_s.
-/// Counterpart of `encMovsxdR64R32` for memory-source operands.
-/// (i64.load32_u uses the existing `encMovR32FromBaseIdx` because
-/// MOV to r32 on x86_64 zero-extends to r64 implicitly.)
-pub fn encMovsxdR64_32MemBaseIdx(dst: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, dst.extBit(), idx.extBit(), base.extBit()));
-    enc.push(0x63);
-    enc.push(encodeModrm(0b00, dst.low3(), 0b100));
-    enc.push(encodeSib(0b00, idx.low3(), base.low3()));
-    return enc;
-}
-
-/// `LEA r64, [base + disp8]` (opcode 0x8D /r with REX.W,
-/// ModR/M mod=01, disp8). Used by spec-strict bounds check to
-/// compute `ea + access_size` into a separate scratch reg without
-/// mutating `base`. disp8 covers access_size ∈ {1..8}.
-///
-/// **Caller constraint**: `base` must NOT be RSP (low3=0b100). With
-/// mod=01 + rm=0b100 the AMD64 ISA mandates a SIB byte; this encoder
-/// emits no SIB and would produce a malformed instruction. RBP is
-/// safe (mod=01 always carries disp8). Current call sites pass
-/// `.rdx` only.
-pub fn encLeaR64BaseDisp8(dst: Gpr, base: Gpr, disp: i8) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, dst.extBit(), 0, base.extBit()));
-    enc.push(0x8D);
-    enc.push(encodeModrm(0b01, dst.low3(), base.low3()));
-    enc.push(@bitCast(disp));
-    return enc;
-}
-
-/// `ADD r/m64, imm32` (opcode 0x81 /0 with REX.W). 4-byte
-/// little-endian immediate. Used to fold the Wasm static offset
-/// into the effective address before bounds check.
-pub fn encAddR64Imm32(dst: Gpr, imm: i32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, 0, 0, dst.extBit()));
-    enc.push(0x81);
-    enc.push(encodeModrm(0b11, 0, dst.low3())); // /0 = ADD
-    const u: u32 = @bitCast(imm);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `MOV DWORD PTR [base + disp32], imm32` (opcode 0xC7 /0).
-/// Used by trap stub to set `JitRuntime.trap_flag = 1` per
-/// ADR-0017 sub-7.5b-ii equivalent.
-pub fn encStoreImm32MemDisp32(base: Gpr, disp: i32, imm: u32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (base.extBit() == 1) enc.push(encodeRex(false, 0, 0, 1));
-    enc.push(0xC7);
-    enc.push(encodeModrm(0b10, 0, base.low3())); // /0 in reg field
-    const ud: u32 = @bitCast(disp);
-    enc.push(@truncate(ud));
-    enc.push(@truncate(ud >> 8));
-    enc.push(@truncate(ud >> 16));
-    enc.push(@truncate(ud >> 24));
-    enc.push(@truncate(imm));
-    enc.push(@truncate(imm >> 8));
-    enc.push(@truncate(imm >> 16));
-    enc.push(@truncate(imm >> 24));
-    return enc;
-}
-
-/// `JMP rel32` (opcode 0xE9) — unconditional near jump with
-/// 32-bit signed displacement. Disp is relative to the byte
-/// AFTER the 5-byte instruction. Use `encJmpRel32(0)` as a
-/// placeholder for forward jumps that patch later via
-/// `patchRel32` once the target is known.
-pub fn encJmpRel32(disp: i32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0xE9);
-    const u: u32 = @bitCast(disp);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `Jcc rel32` — conditional near jump (2-byte opcode 0x0F
-/// 0x80+cc + 32-bit disp). 6 bytes total. Disp is relative to
-/// the byte AFTER the instruction.
-pub fn encJccRel32(cc: Cond, disp: i32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0x0F);
-    enc.push(0x80 | @as(u8, @intFromEnum(cc)));
-    const u: u32 = @bitCast(disp);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// In-place patch the disp32 field of a JMP/Jcc rel32 placeholder.
-/// `at` is the byte offset of the instruction's first byte
-/// (0xE9 for JMP or 0x0F for Jcc). `disp` is computed by the
-/// caller as `target - (at + insn_size)` where insn_size is 5
-/// (JMP) or 6 (Jcc). Writes 4 bytes little-endian.
-pub fn patchRel32(buf: []u8, at: usize, insn_size: u8, disp: i32) void {
-    const off = at + insn_size - 4;
-    const u: u32 = @bitCast(disp);
-    buf[off + 0] = @truncate(u);
-    buf[off + 1] = @truncate(u >> 8);
-    buf[off + 2] = @truncate(u >> 16);
-    buf[off + 3] = @truncate(u >> 24);
-}
-
-/// `LZCNT r32, r/m32` (F3 0F BD /r, BMI1) — count leading
-/// zeros. Returns 32 if the input is 0; matches Wasm i32.clz
-/// semantics exactly. Distinct from BSR (older op with
-/// undefined behaviour at 0).
-pub fn encLzcntR32(dst: Gpr, src: Gpr) EncodedInsn {
-    return encF3_0F_R32R(0xBD, dst, src);
-}
-
-/// `TZCNT r32, r/m32` (F3 0F BC /r, BMI1) — count trailing
-/// zeros. Returns 32 if the input is 0; matches Wasm i32.ctz.
-/// Distinct from BSF (older op with undefined behaviour at 0).
-pub fn encTzcntR32(dst: Gpr, src: Gpr) EncodedInsn {
-    return encF3_0F_R32R(0xBC, dst, src);
-}
-
-/// `POPCNT r32, r/m32` (F3 0F B8 /r, POPCNT extension) —
-/// population count (number of 1 bits). Matches Wasm i32.popcnt
-/// directly.
-pub fn encPopcntR32(dst: Gpr, src: Gpr) EncodedInsn {
-    return encF3_0F_R32R(0xB8, dst, src);
-}
-
-/// `LZCNT r64, r/m64` (F3 REX.W 0F BD /r) — 64-bit form for
-/// Wasm i64.clz. Returns 64 for input 0.
-pub fn encLzcntR64(dst: Gpr, src: Gpr) EncodedInsn {
-    return encF3_0F_RR(.q, 0xBD, dst, src);
-}
-
-/// `TZCNT r64, r/m64` (F3 REX.W 0F BC /r) — 64-bit form for
-/// Wasm i64.ctz. Returns 64 for input 0.
-pub fn encTzcntR64(dst: Gpr, src: Gpr) EncodedInsn {
-    return encF3_0F_RR(.q, 0xBC, dst, src);
-}
-
-/// `POPCNT r64, r/m64` (F3 REX.W 0F B8 /r) — 64-bit form for
-/// Wasm i64.popcnt.
-pub fn encPopcntR64(dst: Gpr, src: Gpr) EncodedInsn {
-    return encF3_0F_RR(.q, 0xB8, dst, src);
-}
-
-/// `IMUL r, r/m` (2-byte opcode 0x0F 0xAF /r) — `dst *= src`,
-/// signed/unsigned identical for the low N bits (Wasm i32.mul
-/// doesn't distinguish signedness).
-///
-/// **Operand-role inversion vs ADD/SUB/AND/OR/XOR**: IMUL's
-/// 2-operand form puts `dst` in the ModR/M.reg field and `src`
-/// in r/m, opposite to ADD/SUB/etc. So REX.R extends `dst`
-/// (not `src`) and REX.B extends `src` (not `dst`).
-pub fn encImulRR(size: Width, dst: Gpr, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (rexForRR(size, dst, src)) |rex| enc.push(rex);
-    enc.push(0x0F);
-    enc.push(0xAF);
-    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
-    return enc;
-}
-
-/// `RET` near (opcode 0xC3) — pop return address from stack and
-/// jump. Single byte; no operands.
-pub fn encRet() EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0xC3);
-    return enc;
-}
-
-/// `NOP` (opcode 0x90) — single-byte no-op. Useful for
-/// instruction-stream alignment (multi-byte NOPs land in a
-/// later chunk).
-pub fn encNop() EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0x90);
-    return enc;
-}
-
-/// `SUB RSP, imm8` (sign-extended) — opcode 0x83 /5 with REX.W.
-/// 4-byte encoding. Caller responsibility to pass `imm` in
-/// i8 range; larger frame extensions need the 6-byte imm32 form
-/// (out of scope for the §9.7 / 7.7 skeleton — capped at 15
-/// locals = 120-byte frame).
-pub fn encSubRSpImm8(imm: i8) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, 0, 0, 0));
-    enc.push(0x83);
-    enc.push(encodeModrm(0b11, 5, 4)); // /5 = SUB, rm=4 (RSP)
-    enc.push(@bitCast(imm));
-    return enc;
-}
-
-/// `ADD RSP, imm8` (sign-extended) — opcode 0x83 /0 with REX.W.
-pub fn encAddRSpImm8(imm: i8) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, 0, 0, 0));
-    enc.push(0x83);
-    enc.push(encodeModrm(0b11, 0, 4)); // /0 = ADD
-    enc.push(@bitCast(imm));
-    return enc;
-}
-
-/// `SUB RSP, imm32` (REX.W + 0x81 /5) — disp32 form for frame
-/// extensions > 127 bytes. §9.7 / 7.10-g uses this when
-/// total_locals × 8 + outgoing_max + spills exceeds the imm8
-/// range. 7-byte encoding (vs 4 for imm8).
-pub fn encSubRSpImm32(imm: i32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, 0, 0, 0));
-    enc.push(0x81);
-    enc.push(encodeModrm(0b11, 5, 4)); // /5 = SUB, rm=4 (RSP)
-    const u: u32 = @bitCast(imm);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `ADD RSP, imm32` (REX.W + 0x81 /0) — disp32 ADD-form pair of
-/// `encSubRSpImm32`.
-pub fn encAddRSpImm32(imm: i32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, 0, 0, 0));
-    enc.push(0x81);
-    enc.push(encodeModrm(0b11, 0, 4)); // /0 = ADD
-    const u: u32 = @bitCast(imm);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `MOV [RBP + disp8], r32` — store the low 32 bits of `src`
-/// to a stack slot at `RBP + disp`. Opcode 0x89 with mod=01
-/// (disp8) + rm=5 (RBP base). REX.R for src extension only
-/// (no W since 32-bit; no B since base is RBP, low reg).
-pub fn encStoreR32MemRBP(disp: i8, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (src.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
-    enc.push(0x89);
-    enc.push(encodeModrm(0b01, src.low3(), 0b101));
-    enc.push(@bitCast(disp));
-    return enc;
-}
-
-/// `MOV r32, [RBP + disp8]` — load the 32-bit value at
-/// `RBP + disp` into `dst` (zero-extends to 64 bits per the
-/// W-form). Opcode 0x8B with mod=01 + rm=5.
-pub fn encLoadR32MemRBP(dst: Gpr, disp: i8) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (dst.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
-    enc.push(0x8B);
-    enc.push(encodeModrm(0b01, dst.low3(), 0b101));
-    enc.push(@bitCast(disp));
-    return enc;
-}
-
-/// `MOV [RBP + disp8], r64` — REX.W form of `encStoreR32MemRBP`
-/// for i64 locals / params (chunk 7 / D-045). Opcode 0x89 with
-/// REX.W set.
-pub fn encStoreR64MemRBP(disp: i8, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, src.extBit(), 0, 0));
-    enc.push(0x89);
-    enc.push(encodeModrm(0b01, src.low3(), 0b101));
-    enc.push(@bitCast(disp));
-    return enc;
-}
-
-/// `MOV r64, [RBP + disp8]` — REX.W form of `encLoadR32MemRBP`.
-pub fn encLoadR64MemRBP(dst: Gpr, disp: i8) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, dst.extBit(), 0, 0));
-    enc.push(0x8B);
-    enc.push(encodeModrm(0b01, dst.low3(), 0b101));
-    enc.push(@bitCast(disp));
-    return enc;
-}
-
-/// `MOVSS [RBP + disp8], xmm` (F3 0F 11 /r) — store 32-bit FP
-/// scalar to a stack slot. f32 local-store path (chunk 7).
-pub fn encStoreXmmF32MemRBP(disp: i8, src: Xmm) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0xF3);
-    if (src.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
-    enc.push(0x0F);
-    enc.push(0x11);
-    enc.push(encodeModrm(0b01, src.low3(), 0b101));
-    enc.push(@bitCast(disp));
-    return enc;
-}
-
-/// `MOVSS xmm, [RBP + disp8]` (F3 0F 10 /r).
-pub fn encLoadXmmF32MemRBP(dst: Xmm, disp: i8) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0xF3);
-    if (dst.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
-    enc.push(0x0F);
-    enc.push(0x10);
-    enc.push(encodeModrm(0b01, dst.low3(), 0b101));
-    enc.push(@bitCast(disp));
-    return enc;
-}
-
-/// `MOVSD [RBP + disp8], xmm` (F2 0F 11 /r) — 64-bit FP store.
-pub fn encStoreXmmF64MemRBP(disp: i8, src: Xmm) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0xF2);
-    if (src.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
-    enc.push(0x0F);
-    enc.push(0x11);
-    enc.push(encodeModrm(0b01, src.low3(), 0b101));
-    enc.push(@bitCast(disp));
-    return enc;
-}
-
-/// `MOVSD xmm, [RBP + disp8]` (F2 0F 10 /r).
-pub fn encLoadXmmF64MemRBP(dst: Xmm, disp: i8) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0xF2);
-    if (dst.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
-    enc.push(0x0F);
-    enc.push(0x10);
-    enc.push(encodeModrm(0b01, dst.low3(), 0b101));
-    enc.push(@bitCast(disp));
-    return enc;
-}
-
-// ============================================================
-// RBP-relative disp32 forms (§9.7 / 7.10-g — total_locals > 15
-// cap expansion). The disp8 forms above are 4 bytes per
-// instruction; disp32 is 7 bytes (3 extra bytes for the wider
-// displacement). They share the same opcode + ModR/M shape
-// (mod=10 instead of mod=01); RBP base requires no SIB byte
-// (rm=101 with mod≠00 is direct disp). Used by emit.zig's
-// disp32-aware wrappers when the offset exceeds i8 range.
-// ============================================================
-
-/// `MOV [RBP + disp32], r32` — disp32 form of `encStoreR32MemRBP`.
-pub fn encStoreR32MemRBPDisp32(disp: i32, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (src.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
-    enc.push(0x89);
-    enc.push(encodeModrm(0b10, src.low3(), 0b101));
-    const u: u32 = @bitCast(disp);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `MOV r32, [RBP + disp32]` — disp32 form of `encLoadR32MemRBP`.
-pub fn encLoadR32MemRBPDisp32(dst: Gpr, disp: i32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (dst.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
-    enc.push(0x8B);
-    enc.push(encodeModrm(0b10, dst.low3(), 0b101));
-    const u: u32 = @bitCast(disp);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `MOV [RBP + disp32], r64` — disp32 form of `encStoreR64MemRBP`.
-pub fn encStoreR64MemRBPDisp32(disp: i32, src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, src.extBit(), 0, 0));
-    enc.push(0x89);
-    enc.push(encodeModrm(0b10, src.low3(), 0b101));
-    const u: u32 = @bitCast(disp);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `MOV r64, [RBP + disp32]` — disp32 form of `encLoadR64MemRBP`.
-pub fn encLoadR64MemRBPDisp32(dst: Gpr, disp: i32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, dst.extBit(), 0, 0));
-    enc.push(0x8B);
-    enc.push(encodeModrm(0b10, dst.low3(), 0b101));
-    const u: u32 = @bitCast(disp);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `MOVSS [RBP + disp32], xmm` — disp32 form of `encStoreXmmF32MemRBP`.
-pub fn encStoreXmmF32MemRBPDisp32(disp: i32, src: Xmm) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0xF3);
-    if (src.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
-    enc.push(0x0F);
-    enc.push(0x11);
-    enc.push(encodeModrm(0b10, src.low3(), 0b101));
-    const u: u32 = @bitCast(disp);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `MOVSS xmm, [RBP + disp32]` — disp32 form of `encLoadXmmF32MemRBP`.
-pub fn encLoadXmmF32MemRBPDisp32(dst: Xmm, disp: i32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0xF3);
-    if (dst.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
-    enc.push(0x0F);
-    enc.push(0x10);
-    enc.push(encodeModrm(0b10, dst.low3(), 0b101));
-    const u: u32 = @bitCast(disp);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `MOVSD [RBP + disp32], xmm` — disp32 form of `encStoreXmmF64MemRBP`.
-pub fn encStoreXmmF64MemRBPDisp32(disp: i32, src: Xmm) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0xF2);
-    if (src.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
-    enc.push(0x0F);
-    enc.push(0x11);
-    enc.push(encodeModrm(0b10, src.low3(), 0b101));
-    const u: u32 = @bitCast(disp);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `MOVSD xmm, [RBP + disp32]` — disp32 form of `encLoadXmmF64MemRBP`.
-pub fn encLoadXmmF64MemRBPDisp32(dst: Xmm, disp: i32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0xF2);
-    if (dst.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
-    enc.push(0x0F);
-    enc.push(0x10);
-    enc.push(encodeModrm(0b10, dst.low3(), 0b101));
-    const u: u32 = @bitCast(disp);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-// ============================================================
-// RSP-relative stores (§9.7 / 7.10-f caller-side stack-arg
-// lowering). RSP encodes as r/m=100 which forces a SIB byte
-// regardless of mod, so RSP base requires its own encoders
-// distinct from the RBP-base helpers above. SIB byte for
-// "RSP base, no index" = scale=00, index=100, base=100 = 0x24.
-// disp32 form is used unconditionally (5-byte vs 4-byte for
-// disp8) so the outgoing-args region can grow past 127 bytes
-// without needing two encoder variants — Phase 7 P3 cold-start
-// over peak-throughput trade per ROADMAP §2.
-// ============================================================
-
-/// Wasm spec §3.4.7 (caller-side stack-arg) — `MOV [RSP + disp32], r32`
-/// (opcode 0x89, REX.R for src extension, ModR/M mod=10 + rm=100,
-/// SIB 0x24, disp32). Used by `op_call.marshalCallArgs` to write
-/// overflowed i32 args into the caller's outgoing-args region at
-/// `[RSP + 8 * NSAA_idx]` (SysV) or `[RSP + 8 * shared_slot]` (Win64).
-pub fn encStoreR32MemRSPDisp32(src: Gpr, disp: i32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (src.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
-    enc.push(0x89);
-    enc.push(encodeModrm(0b10, src.low3(), 0b100));
-    enc.push(0x24); // SIB: scale=00, index=100 (none), base=100 (RSP)
-    const u: u32 = @bitCast(disp);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `MOV [RSP + disp32], r64` (REX.W form). i64 caller-side stack
-/// arg analog of `encStoreR32MemRSPDisp32`.
-pub fn encStoreR64MemRSPDisp32(src: Gpr, disp: i32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, src.extBit(), 0, 0));
-    enc.push(0x89);
-    enc.push(encodeModrm(0b10, src.low3(), 0b100));
-    enc.push(0x24);
-    const u: u32 = @bitCast(disp);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `MOVSS [RSP + disp32], xmm` (F3 0F 11 /r). f32 caller-side
-/// stack arg.
-pub fn encStoreXmmF32MemRSPDisp32(src: Xmm, disp: i32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0xF3);
-    if (src.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
-    enc.push(0x0F);
-    enc.push(0x11);
-    enc.push(encodeModrm(0b10, src.low3(), 0b100));
-    enc.push(0x24);
-    const u: u32 = @bitCast(disp);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `MOVSD [RSP + disp32], xmm` (F2 0F 11 /r). f64 caller-side
-/// stack arg.
-pub fn encStoreXmmF64MemRSPDisp32(src: Xmm, disp: i32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0xF2);
-    if (src.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
-    enc.push(0x0F);
-    enc.push(0x11);
-    enc.push(encodeModrm(0b10, src.low3(), 0b100));
-    enc.push(0x24);
-    const u: u32 = @bitCast(disp);
-    enc.push(@truncate(u));
-    enc.push(@truncate(u >> 8));
-    enc.push(@truncate(u >> 16));
-    enc.push(@truncate(u >> 24));
-    return enc;
-}
-
-/// `PUSH r64` (opcode 0x50+rd) — push a 64-bit GPR onto the
-/// stack. REX.B (0x41) is needed for R8..R15. Width is implicit
-/// 64-bit; no operand-size override exists for PUSH r64.
-pub fn encPushR(reg: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (reg.extBit() == 1) enc.push(encodeRex(false, 0, 0, 1));
-    enc.push(0x50 | @as(u8, reg.low3()));
-    return enc;
-}
-
-/// `POP r64` (opcode 0x58+rd) — pop a 64-bit GPR from the stack.
-/// Same REX.B treatment as PUSH r64.
-pub fn encPopR(reg: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (reg.extBit() == 1) enc.push(encodeRex(false, 0, 0, 1));
-    enc.push(0x58 | @as(u8, reg.low3()));
-    return enc;
-}
-
-/// `MOV r64, imm64` (REX.W + 0xB8+rd iq) — `MOVABS`-form
-/// 64-bit immediate load. 10 bytes total. Used by FP const
-/// handlers to materialise a 64-bit bit pattern in a GPR for
-/// MOVQ → XMM transfer.
-pub fn encMovImm64Q(dst: Gpr, imm: u64) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(encodeRex(true, 0, 0, dst.extBit()));
-    enc.push(0xB8 | @as(u8, dst.low3()));
-    var i: u6 = 0;
-    while (i < 8) : (i += 1) {
-        enc.push(@truncate(imm >> (i * 8)));
-    }
-    return enc;
-}
-
-/// `MOVD xmm, r/m32` (0x66 prefix + 0x0F 0x6E /r) — copy a
-/// 32-bit GPR's low half into an XMM (zero-extends the high
-/// 96 bits). xmm in ModR/M.reg, gpr in r/m. Used by f32.const
-/// to plant the IEEE-754 bit pattern in an XMM slot.
-pub fn encMovdXmmFromR32(xmm_dst: Xmm, gpr_src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0x66);
-    if (xmm_dst.extBit() != 0 or gpr_src.extBit() != 0) {
-        enc.push(encodeRex(false, xmm_dst.extBit(), 0, gpr_src.extBit()));
-    }
-    enc.push(0x0F);
-    enc.push(0x6E);
-    enc.push(encodeModrm(0b11, xmm_dst.low3(), gpr_src.low3()));
-    return enc;
-}
-
-/// `MOVQ xmm, r/m64` (0x66 prefix + REX.W + 0x0F 0x6E /r) —
-/// 64-bit MOVD-equivalent. REX.W is mandatory. Used by
-/// f64.const after the bit pattern is materialised in a GPR
-/// via MOVABS.
-pub fn encMovqXmmFromR64(xmm_dst: Xmm, gpr_src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0x66);
-    enc.push(encodeRex(true, xmm_dst.extBit(), 0, gpr_src.extBit()));
-    enc.push(0x0F);
-    enc.push(0x6E);
-    enc.push(encodeModrm(0b11, xmm_dst.low3(), gpr_src.low3()));
-    return enc;
-}
-
-/// `MOVAPS xmm, xmm` (0x0F 0x28 /r) — 128-bit aligned move
-/// between XMM registers. Used as the FP equivalent of
-/// `MOV r32, r32` (lhs → dst before the SSE binary op).
-/// dst occupies ModR/M.reg, src occupies r/m.
-pub fn encMovapsXmmXmm(dst: Xmm, src: Xmm) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (dst.extBit() != 0 or src.extBit() != 0) {
-        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
-    }
-    enc.push(0x0F);
-    enc.push(0x28);
-    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
-    return enc;
-}
-
-/// `SHR r/m, imm8` (opcode 0xC1 /5 ib) — logical shift right
-/// by an 8-bit immediate. Width selects 32/64-bit form via REX.W.
-/// Used by f.convert_i64_u (slow-path divide-by-2 + round bit).
-pub fn encShrRImm8(size: Width, dst: Gpr, imm: u8) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (rexForRR(size, .rax, dst)) |rex| enc.push(rex);
-    enc.push(0xC1);
-    enc.push(encodeModrm(0b11, 5, dst.low3())); // /5 = SHR
-    enc.push(imm);
-    return enc;
-}
-
-/// `AND r/m, imm8` (opcode 0x83 /4 ib) — sign-extended 8-bit
-/// AND. Used by f.convert_i64_u to extract the low bit (round
-/// bit) before re-doubling.
-pub fn encAndRImm8(size: Width, dst: Gpr, imm: i8) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (rexForRR(size, .rax, dst)) |rex| enc.push(rex);
-    enc.push(0x83);
-    enc.push(encodeModrm(0b11, 4, dst.low3())); // /4 = AND
-    enc.push(@bitCast(imm));
-    return enc;
-}
-
-/// `MOVSS / MOVSD xmm,[base+idx]` and the store direction —
-/// scalar single/double FP load/store with SIB scale=1 (no
-/// displacement). `is_store` toggles opcode 0x10 (load) / 0x11
-/// (store). `scalar_kind` selects the F3 (f32) / F2 (f64) prefix.
-/// xmm goes into ModR/M.reg, base into SIB.base, idx into
-/// SIB.index.
-pub fn encMovssMovsdMemBaseIdx(scalar_kind: SseScalarKind, is_store: bool, xmm: Xmm, base: Gpr, idx: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(@intFromEnum(scalar_kind));
-    if (xmm.extBit() != 0 or base.extBit() != 0 or idx.extBit() != 0) {
-        enc.push(encodeRex(false, xmm.extBit(), idx.extBit(), base.extBit()));
-    }
-    enc.push(0x0F);
-    enc.push(if (is_store) @as(u8, 0x11) else 0x10);
-    enc.push(encodeModrm(0b00, xmm.low3(), 0b100)); // mod=00, rm=4 → SIB
-    enc.push(encodeSib(0b00, idx.low3(), base.low3())); // scale=1
-    return enc;
-}
-
-/// `CVTTSS2SI r/m32 or r/m64, xmm/m32-or-64` family — scalar
-/// truncating float→signed-int conversion.
-///   F3 [REX?] 0F 2C /r (CVTTSS2SI; src f32 via prefix)
-///   F2 [REX?] 0F 2C /r (CVTTSD2SI; src f64 via prefix)
-/// `dst_is_64` toggles REX.W for the i64 destination variant.
-/// dst is in ModR/M.reg (gpr), src is in r/m (xmm).
-///
-/// **Saturation behaviour**: returns INT_MIN of the destination
-/// width (0x80000000 for r32, 0x8000000000000000 for r64) when
-/// the source is NaN OR out of range. Used as the sentinel by
-/// emitFpTruncSatSigned to drive the spec-correct saturation.
-pub fn encCvttScalar2Int(scalar_kind: SseScalarKind, dst_is_64: bool, gpr_dst: Gpr, xmm_src: Xmm) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(@intFromEnum(scalar_kind));
-    if (dst_is_64 or gpr_dst.extBit() != 0 or xmm_src.extBit() != 0) {
-        enc.push(encodeRex(dst_is_64, gpr_dst.extBit(), 0, xmm_src.extBit()));
-    }
-    enc.push(0x0F);
-    enc.push(0x2C);
-    enc.push(encodeModrm(0b11, gpr_dst.low3(), xmm_src.low3()));
-    return enc;
-}
-
-/// `CVTSI2SS xmm, r/m32` / `CVTSI2SD xmm, r/m64` family —
-/// signed integer to scalar float conversion.
-///   F3 [REX?] 0F 2A /r (CVTSI2SS, src f32-aware via prefix)
-///   F2 [REX?] 0F 2A /r (CVTSI2SD)
-/// `src_is_64` toggles REX.W for the i64 source variant.
-/// xmm in ModR/M.reg, gpr in r/m.
-pub fn encCvtsi2Scalar(scalar_kind: SseScalarKind, src_is_64: bool, xmm_dst: Xmm, gpr_src: Gpr) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(@intFromEnum(scalar_kind));
-    if (src_is_64 or xmm_dst.extBit() != 0 or gpr_src.extBit() != 0) {
-        enc.push(encodeRex(src_is_64, xmm_dst.extBit(), 0, gpr_src.extBit()));
-    }
-    enc.push(0x0F);
-    enc.push(0x2A);
-    enc.push(encodeModrm(0b11, xmm_dst.low3(), gpr_src.low3()));
-    return enc;
-}
-
-/// `MOVD r/m32, xmm` (0x66 + 0x0F 0x7E /r) — extract the low
-/// 32 bits of an XMM into a GPR. Mirror of `encMovdXmmFromR32`.
-/// xmm in ModR/M.reg, gpr in r/m.
-pub fn encMovdR32FromXmm(gpr_dst: Gpr, xmm_src: Xmm) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0x66);
-    if (xmm_src.extBit() != 0 or gpr_dst.extBit() != 0) {
-        enc.push(encodeRex(false, xmm_src.extBit(), 0, gpr_dst.extBit()));
-    }
-    enc.push(0x0F);
-    enc.push(0x7E);
-    enc.push(encodeModrm(0b11, xmm_src.low3(), gpr_dst.low3()));
-    return enc;
-}
-
-/// `MOVQ r/m64, xmm` (0x66 + REX.W + 0x0F 0x7E /r) — extract
-/// the low 64 bits of an XMM into a GPR. REX.W mandatory.
-pub fn encMovqR64FromXmm(gpr_dst: Gpr, xmm_src: Xmm) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0x66);
-    enc.push(encodeRex(true, xmm_src.extBit(), 0, gpr_dst.extBit()));
-    enc.push(0x0F);
-    enc.push(0x7E);
-    enc.push(encodeModrm(0b11, xmm_src.low3(), gpr_dst.low3()));
-    return enc;
-}
+/// Mandatory prefix for SSE scalar ops. F3 = single-precision
+/// (operates on the low 32 bits of XMM = f32). F2 = double-
+/// precision (operates on the low 64 bits = f64).
+pub const SseScalarKind = enum(u8) {
+    f32 = 0xF3,
+    f64 = 0xF2,
+};
 
 /// SSE packed bitwise op kind. f32 = no prefix (operates on
 /// single-precision-aligned packed lanes); f64 = 0x66 prefix
@@ -1600,128 +168,134 @@ pub const SsePackedKind = enum(u8) {
     f64 = 0x66,
 };
 
-/// SSE2 packed bitwise binary (ANDPS/ANDPD/ORPS/ORPD/XORPS/XORPD).
-/// Encoding: `[<prefix>] [REX?] 0x0F <opcode> ModR/M`. Used by
-/// abs (ANDPS/ANDPD with 0x7F.. mask) and neg (XORPS/XORPD with
-/// 0x80.. sign bit). Opcode: 0x54=AND, 0x56=OR, 0x57=XOR.
-pub fn encSsePackedBinary(kind: SsePackedKind, opcode: u8, dst: Xmm, src: Xmm) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (kind != .f32) enc.push(@intFromEnum(kind));
-    if (dst.extBit() != 0 or src.extBit() != 0) {
-        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
-    }
-    enc.push(0x0F);
-    enc.push(opcode);
-    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
-    return enc;
-}
+// ============================================================
+// ALU re-exports (inst_alu.zig)
+// ============================================================
 
-/// `ROUNDSS xmm, xmm/m32, imm8` (66 0F 3A 0A /r ib) — SSE4.1
-/// scalar single-precision round with mode imm8: 0=nearest
-/// (ties to even), 1=floor (toward -inf), 2=ceil (toward +inf),
-/// 3=trunc (toward zero), 4=current MXCSR rounding mode.
-pub fn encRoundss(dst: Xmm, src: Xmm, mode: u8) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0x66);
-    if (dst.extBit() != 0 or src.extBit() != 0) {
-        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
-    }
-    enc.push(0x0F);
-    enc.push(0x3A);
-    enc.push(0x0A);
-    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
-    enc.push(mode);
-    return enc;
-}
+pub const encMovRR = inst_alu.encMovRR;
+pub const encAddRR = inst_alu.encAddRR;
+pub const encSubRR = inst_alu.encSubRR;
+pub const encAndRR = inst_alu.encAndRR;
+pub const encOrRR = inst_alu.encOrRR;
+pub const encXorRR = inst_alu.encXorRR;
+pub const encCmpRR = inst_alu.encCmpRR;
+pub const encShiftRCl = inst_alu.encShiftRCl;
+pub const encTestRR = inst_alu.encTestRR;
+pub const encCmpRImm32 = inst_alu.encCmpRImm32;
+pub const encTestRImm32 = inst_alu.encTestRImm32;
+pub const encCmpRImm8 = inst_alu.encCmpRImm8;
+pub const encImulRR = inst_alu.encImulRR;
+pub const encAddR64Imm32 = inst_alu.encAddR64Imm32;
+pub const encSubRSpImm8 = inst_alu.encSubRSpImm8;
+pub const encAddRSpImm8 = inst_alu.encAddRSpImm8;
+pub const encSubRSpImm32 = inst_alu.encSubRSpImm32;
+pub const encAddRSpImm32 = inst_alu.encAddRSpImm32;
+pub const encMovImm64Q = inst_alu.encMovImm64Q;
+pub const encShrRImm8 = inst_alu.encShrRImm8;
+pub const encAndRImm8 = inst_alu.encAndRImm8;
+pub const encMovImm32W = inst_alu.encMovImm32W;
 
-/// `ROUNDSD xmm, xmm/m64, imm8` (66 0F 3A 0B /r ib) — SSE4.1
-/// scalar double-precision round; same mode encoding as ROUNDSS.
-pub fn encRoundsd(dst: Xmm, src: Xmm, mode: u8) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0x66);
-    if (dst.extBit() != 0 or src.extBit() != 0) {
-        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
-    }
-    enc.push(0x0F);
-    enc.push(0x3A);
-    enc.push(0x0B);
-    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
-    enc.push(mode);
-    return enc;
-}
+// ============================================================
+// Memory re-exports (inst_mem.zig)
+// ============================================================
 
-/// `UCOMISS xmm, xmm/m32` (0x0F 0x2E /r) — Unordered Compare
-/// Scalar Single. Sets ZF / CF / PF on the comparison result:
-/// equal → ZF=1, CF=0, PF=0; less → ZF=0, CF=1, PF=0; greater →
-/// ZF=0, CF=0, PF=0; unordered (NaN) → ZF=1, CF=1, PF=1. Used
-/// by emitFpCompare to drive SETcc.
-pub fn encUcomiss(a: Xmm, b: Xmm) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (a.extBit() != 0 or b.extBit() != 0) {
-        enc.push(encodeRex(false, a.extBit(), 0, b.extBit()));
-    }
-    enc.push(0x0F);
-    enc.push(0x2E);
-    enc.push(encodeModrm(0b11, a.low3(), b.low3()));
-    return enc;
-}
+pub const encMovzxR32R8 = inst_mem.encMovzxR32R8;
+pub const encMovR32FromBaseIdxLsl2 = inst_mem.encMovR32FromBaseIdxLsl2;
+pub const encMovR64FromBaseIdxLsl3 = inst_mem.encMovR64FromBaseIdxLsl3;
+pub const encMovsxdR64R32 = inst_mem.encMovsxdR64R32;
+pub const encMovsxR32R8 = inst_mem.encMovsxR32R8;
+pub const encMovsxR32R16 = inst_mem.encMovsxR32R16;
+pub const encMovsxR64R8 = inst_mem.encMovsxR64R8;
+pub const encMovsxR64R16 = inst_mem.encMovsxR64R16;
+pub const encMovR64FromMemDisp32 = inst_mem.encMovR64FromMemDisp32;
+pub const encMovR32FromMemDisp32 = inst_mem.encMovR32FromMemDisp32;
+pub const encStoreR32MemDisp32 = inst_mem.encStoreR32MemDisp32;
+pub const encCmpR64MemDisp32 = inst_mem.encCmpR64MemDisp32;
+pub const encMovR32FromBaseIdx = inst_mem.encMovR32FromBaseIdx;
+pub const encStoreR32MemBaseIdx = inst_mem.encStoreR32MemBaseIdx;
+pub const encStoreR16MemBaseIdx = inst_mem.encStoreR16MemBaseIdx;
+pub const encStoreR8MemBaseIdx = inst_mem.encStoreR8MemBaseIdx;
+pub const encMovzxR32_8MemBaseIdx = inst_mem.encMovzxR32_8MemBaseIdx;
+pub const encMovsxR32_8MemBaseIdx = inst_mem.encMovsxR32_8MemBaseIdx;
+pub const encMovzxR32_16MemBaseIdx = inst_mem.encMovzxR32_16MemBaseIdx;
+pub const encMovsxR32_16MemBaseIdx = inst_mem.encMovsxR32_16MemBaseIdx;
+pub const encMovR64FromBaseIdx = inst_mem.encMovR64FromBaseIdx;
+pub const encStoreR64MemBaseIdx = inst_mem.encStoreR64MemBaseIdx;
+pub const encMovzxR64_8MemBaseIdx = inst_mem.encMovzxR64_8MemBaseIdx;
+pub const encMovsxR64_8MemBaseIdx = inst_mem.encMovsxR64_8MemBaseIdx;
+pub const encMovzxR64_16MemBaseIdx = inst_mem.encMovzxR64_16MemBaseIdx;
+pub const encMovsxR64_16MemBaseIdx = inst_mem.encMovsxR64_16MemBaseIdx;
+pub const encMovsxdR64_32MemBaseIdx = inst_mem.encMovsxdR64_32MemBaseIdx;
+pub const encLeaR64BaseDisp8 = inst_mem.encLeaR64BaseDisp8;
+pub const encStoreImm32MemDisp32 = inst_mem.encStoreImm32MemDisp32;
+pub const encStoreR32MemRBP = inst_mem.encStoreR32MemRBP;
+pub const encLoadR32MemRBP = inst_mem.encLoadR32MemRBP;
+pub const encStoreR64MemRBP = inst_mem.encStoreR64MemRBP;
+pub const encLoadR64MemRBP = inst_mem.encLoadR64MemRBP;
+pub const encStoreR32MemRBPDisp32 = inst_mem.encStoreR32MemRBPDisp32;
+pub const encLoadR32MemRBPDisp32 = inst_mem.encLoadR32MemRBPDisp32;
+pub const encStoreR64MemRBPDisp32 = inst_mem.encStoreR64MemRBPDisp32;
+pub const encLoadR64MemRBPDisp32 = inst_mem.encLoadR64MemRBPDisp32;
+pub const encStoreR32MemRSPDisp32 = inst_mem.encStoreR32MemRSPDisp32;
+pub const encStoreR64MemRSPDisp32 = inst_mem.encStoreR64MemRSPDisp32;
 
-/// `UCOMISD xmm, xmm/m64` (0x66 prefix + 0x0F 0x2E /r) —
-/// double-precision counterpart of UCOMISS. Same flag
-/// semantics.
-pub fn encUcomisd(a: Xmm, b: Xmm) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(0x66);
-    if (a.extBit() != 0 or b.extBit() != 0) {
-        enc.push(encodeRex(false, a.extBit(), 0, b.extBit()));
-    }
-    enc.push(0x0F);
-    enc.push(0x2E);
-    enc.push(encodeModrm(0b11, a.low3(), b.low3()));
-    return enc;
-}
+// ============================================================
+// Branch re-exports (inst_branch.zig)
+// ============================================================
 
-/// Mandatory prefix for SSE scalar ops. F3 = single-precision
-/// (operates on the low 32 bits of XMM = f32). F2 = double-
-/// precision (operates on the low 64 bits = f64).
-pub const SseScalarKind = enum(u8) {
-    f32 = 0xF3,
-    f64 = 0xF2,
-};
+pub const encSetccR = inst_branch.encSetccR;
+pub const encCmovccRR = inst_branch.encCmovccRR;
+pub const encCallRel32 = inst_branch.encCallRel32;
+pub const encCallReg = inst_branch.encCallReg;
+pub const encJccRel8 = inst_branch.encJccRel8;
+pub const encJmpRel32 = inst_branch.encJmpRel32;
+pub const encJccRel32 = inst_branch.encJccRel32;
+pub const patchRel32 = inst_branch.patchRel32;
+pub const encRet = inst_branch.encRet;
+pub const encNop = inst_branch.encNop;
+pub const encPushR = inst_branch.encPushR;
+pub const encPopR = inst_branch.encPopR;
+pub const encCdq = inst_branch.encCdq;
+pub const encCqo = inst_branch.encCqo;
+pub const encIdivR32 = inst_branch.encIdivR32;
+pub const encDivR32 = inst_branch.encDivR32;
+pub const encIdivR64 = inst_branch.encIdivR64;
+pub const encDivR64 = inst_branch.encDivR64;
+pub const encLzcntR32 = inst_branch.encLzcntR32;
+pub const encTzcntR32 = inst_branch.encTzcntR32;
+pub const encPopcntR32 = inst_branch.encPopcntR32;
+pub const encLzcntR64 = inst_branch.encLzcntR64;
+pub const encTzcntR64 = inst_branch.encTzcntR64;
+pub const encPopcntR64 = inst_branch.encPopcntR64;
 
-/// SSE2 scalar binary op (ADDSS / ADDSD / SUBSS / SUBSD /
-/// MULSS / MULSD / DIVSS / DIVSD). Encoding:
-///   <prefix> [REX?] 0x0F <opcode> ModR/M
-/// where `<prefix>` is F3 (f32) or F2 (f64); `<opcode>` is
-/// 0x58 (add), 0x5C (sub), 0x59 (mul), 0x5E (div).
-/// dst occupies ModR/M.reg, src occupies r/m.
-pub fn encSseScalarBinary(kind: SseScalarKind, opcode: u8, dst: Xmm, src: Xmm) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    enc.push(@intFromEnum(kind));
-    if (dst.extBit() != 0 or src.extBit() != 0) {
-        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
-    }
-    enc.push(0x0F);
-    enc.push(opcode);
-    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
-    return enc;
-}
+// ============================================================
+// SSE re-exports (inst_sse.zig)
+// ============================================================
 
-/// `MOV r32, imm32` (opcode 0xB8+rd ib32) — load a 32-bit
-/// immediate into a GPR. The 32-bit form zero-extends to 64
-/// bits (Wasm i32 semantics map to this). REX.B for R8..R15.
-///
-/// `imm` is emitted little-endian per AMD64 Vol.3 §1.2.2.
-pub fn encMovImm32W(dst: Gpr, imm: u32) EncodedInsn {
-    var enc: EncodedInsn = .{};
-    if (dst.extBit() == 1) enc.push(encodeRex(false, 0, 0, 1));
-    enc.push(0xB8 | @as(u8, dst.low3()));
-    enc.push(@truncate(imm));
-    enc.push(@truncate(imm >> 8));
-    enc.push(@truncate(imm >> 16));
-    enc.push(@truncate(imm >> 24));
-    return enc;
-}
+pub const encStoreXmmF32MemRBP = inst_sse.encStoreXmmF32MemRBP;
+pub const encLoadXmmF32MemRBP = inst_sse.encLoadXmmF32MemRBP;
+pub const encStoreXmmF64MemRBP = inst_sse.encStoreXmmF64MemRBP;
+pub const encLoadXmmF64MemRBP = inst_sse.encLoadXmmF64MemRBP;
+pub const encStoreXmmF32MemRBPDisp32 = inst_sse.encStoreXmmF32MemRBPDisp32;
+pub const encLoadXmmF32MemRBPDisp32 = inst_sse.encLoadXmmF32MemRBPDisp32;
+pub const encStoreXmmF64MemRBPDisp32 = inst_sse.encStoreXmmF64MemRBPDisp32;
+pub const encLoadXmmF64MemRBPDisp32 = inst_sse.encLoadXmmF64MemRBPDisp32;
+pub const encStoreXmmF32MemRSPDisp32 = inst_sse.encStoreXmmF32MemRSPDisp32;
+pub const encStoreXmmF64MemRSPDisp32 = inst_sse.encStoreXmmF64MemRSPDisp32;
+pub const encMovdXmmFromR32 = inst_sse.encMovdXmmFromR32;
+pub const encMovqXmmFromR64 = inst_sse.encMovqXmmFromR64;
+pub const encMovapsXmmXmm = inst_sse.encMovapsXmmXmm;
+pub const encMovssMovsdMemBaseIdx = inst_sse.encMovssMovsdMemBaseIdx;
+pub const encCvttScalar2Int = inst_sse.encCvttScalar2Int;
+pub const encCvtsi2Scalar = inst_sse.encCvtsi2Scalar;
+pub const encMovdR32FromXmm = inst_sse.encMovdR32FromXmm;
+pub const encMovqR64FromXmm = inst_sse.encMovqR64FromXmm;
+pub const encSsePackedBinary = inst_sse.encSsePackedBinary;
+pub const encRoundss = inst_sse.encRoundss;
+pub const encRoundsd = inst_sse.encRoundsd;
+pub const encUcomiss = inst_sse.encUcomiss;
+pub const encUcomisd = inst_sse.encUcomisd;
+pub const encSseScalarBinary = inst_sse.encSseScalarBinary;
 
 // ============================================================
 // Tests
