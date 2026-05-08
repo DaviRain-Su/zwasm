@@ -38,79 +38,63 @@
   entry shim runtime data structure。debug 必要。
 
 **§9.7 / 7.10 chain plan** (NEXT 群):
-- **7.10-l-cont (NEXT, surfaced to user)**: JIT run-stage SEGV
-  deep dive。Phase 1 (chunk l, commit `911b92c`) added defensive
-  bounds + sentinel guards in `linker.zig:entry`; verified the
-  guards do NOT trigger, narrowing the SEGV to **inside the JIT'd
-  function body** (prologue / body / epilogue). Diagnostic
-  confirmed at call site: `func_idx=6, func_offsets.len=47,
-  block.bytes.len=49152` are all sane. Phase 2 needs interactive
-  lldb / disasm step-through of the faulting JIT'd code on a
-  minimal hand-crafted fixture. **Bucket-2 surface — needs
-  human-in-loop debug session** (debugger attach + step + map
-  back to emit byte stream not autonomous-friendly).
+- **7.10-m (NEXT, AUTONOMOUS)**: D-049 自律調査・解消。chunk
+  l Phase 1 で SEGV を JIT body 内部に narrow 済。`extended_
+  challenge.md` Step 4 の spike + WebFetch + reference-read
+  は autonomous 範囲。具体的戦略 (6 axes、いずれから着手):
+  1. **Spike**: `private/spikes/jit_segv/` に最小 wasm
+     (hand-crafted bytes, 1 関数 `(func) end` のみ、no imports)
+     の in-process repro を作る → `compileWasm` + `runVoidExport`
+     直接呼んで JIT block bytes を hex-dump。
+  2. **SIGSEGV handler**: `std.posix.sigaction` (Linux/macOS
+     共通 API) で SEGV 捕捉 → `faulting RIP/PC` を print →
+     `block.bytes.ptr` からの offset 計算 → emit-pass 上の
+     どの instruction が fault なのか逆引き。
+  3. **Bisection**: spike 最小 → `i32.const 0; drop; end` →
+     `i32.add` → `local.get` → ... と instr 1 つずつ足して、
+     どの op 追加で SEGV が始まるか二分探索。
+  4. **JIT block protection 確認**: Linux `/proc/self/maps`
+     を read or `os.linux.mprotect` 確認 → JIT block が
+     `r-x` permission (PROT_EXEC) になってるか。
+     macOS は `vmmap` 相当 + `pthread_jit_write_protect_np`
+     確認。
+  5. **JitRuntime 整合性**: `@sizeOf(JitRuntime)` +
+     `@offsetOf` 全フィールドを print → `jit_abi.zig` 定数と
+     byte-by-byte 一致確認 (padding ずれや field 抜けの検出)。
+  6. **WebFetch 裏取り**: zig 0.16 + Mac M1 の MAP_JIT /
+     W^X / `pthread_jit_write_protect_np` 既知 issue、
+     wasmtime `winch/codegen/x64` の prologue/epilogue
+     invariants、cranelift JIT が同様 SEGV をどう debug
+     したかのリリースノート。
+  Likely candidates: prologue stack alignment (chunks f-k で
+  frame layout 変化)、spill region SUB RSP imm32 化 (chunk-k)
+  後の guard page 抵触、trap stub address calc (chunks f-i 後)。
+  spike outcome → ADR or lesson per `lessons_vs_adr.md`。
 - 7.10-br_table-fdepth (deferred): return-trampoline pattern。
+  D-049 が片付いて 7.10 close 後の Phase 8 早期 work でも OK。
 - 7.10-regalloc-port (deferred to Phase 8): D-029。
 
-## Open questions / blockers (§9.7 / 7.10)
+**Pre-existing infra (out-of-scope)**: `.githooks/pre_commit`
+(snake_case) が fire しないため fmt/file_size/lint gate 無効。
+fmt drift 38 files, hard-cap 超過 3 files, lint warns 4 (全
+pre-existing)。修復は専用 chore + 大規模 fmt + 分割 ADR 必要。
 
-**Run-stage SEGV** (D-049): `ZWASM_JIT_RUN=1` produces
-`Segmentation fault at address 0x0` + `aborting due to recursive
-panic` on ALL fixtures across both arm64 (Mac) and x86_64
-(Linux). Compile-pass = 45/55 (well past the 40+ threshold for
-7.10's compile side); run-pass = 0/55 — blocking 7.10's strict
-"40+ run" exit criterion AND 7.11 differential (which needs JIT
-to actually run). Ruled out: out-of-range entry idx, import-
-sentinel resolution. Likely-in: prologue NULL deref, body
-invalid memory access, epilogue stack-corruption RET, or trap
-stub address mis-calc after chunks f-k's encoder extensions.
-Reproducer: `ZWASM_JIT_RUN=1 zig build test-realworld-run-jit`
-on Mac (arm64) or via OrbStack (x86_64).
-
-**Pre-existing infra observation (out-of-scope)**:
-`.githooks/pre_commit` (snake_case) は Git の `pre-commit`
-(kebab-case) hook 規約に合わないため fire しない。よって
-gate_commit.sh の `zig fmt --check src/` (38 files drift
-中、主に `@"opname"` → bare name の Zig 0.16 fmt rule 由来)
-+ `file_size_check --gate` (3 files が hard-cap 2000 超過、
-全 pre-existing) + `zig build lint` (4 warnings: 2 exhaustive-
-switch on x86_64/emit.zig param-marshal + 2 unused `abi` import
-in op_convert/op_control) も実行されていない。直近 10+ commit
-すべてこの状態で land 済 → 既存 infra bug。修復は専用 chore
-commit で別途 (gate を有効化するなら大規模 fmt 適用 + ファイル
-分割 ADR + lint warn 修正が必要)。
-
-> **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。
-> Autonomous /continue loop は 7.13 row を発見した時点で
-> ScheduleWakeup を skip して user に surface する規律
-> ([`phase8_transition_gate.md`](phase8_transition_gate.md) +
-> `.claude/skills/continue/SKILL.md` §"Exception — hard
-> human-in-loop transition gates")。Detection は 2 checkpoint
-> (Resume Procedure Step 2 + Step 7 re-target) で発火。
+> **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。Detection
+> は Resume Step 2 + Step 7 re-target。詳細 `phase8_transition_gate.md`。
 
 **Phase**: Phase 7 (ARM64 + x86_64 baseline、ADR-0019)。
 **Branch**: `zwasm-from-scratch`。
 
-## ADR-0025 (Zig host API) implementation chain
-
-Phase A (design + ROADMAP §10 sync) DONE。Phase B-1〜B-5 (thin
-facade + TypedFunc + WasiConfig + ImportEntry + examples) +
-Phase D (migration doc) は post-7.8 着手予定。詳細は
-`.dev/decisions/0025_zig_library_surface.md` Revision history。
-
 ## Open structural debt (pointers)
 
+- **D-049 (now)** run-stage SEGV — chunk-m autonomous strategy 上記。
 - **D-022** Diagnostic M3 / trace ringbuffer — Phase 7 close 後再評価。
 - **D-026** env-stub host-func wiring (cross-module dispatch)。
-- **D-029** x86_64 emitI32Binary `dst==rhs` reject — chunks b/d で
-  parallel-move 経路は完備、underlying reject 自体は regalloc port
-  後に最終 discharge。
+- **D-029** parallel-move 経路完備、reject は regalloc port 後 discharge。
 - 詳細・staleness check は `.dev/debt.md`。
+- ADR-0025 (Zig host API) Phase B/D は post-7.8 — `0025_zig_library_surface.md`。
 
-## Recently closed (canonical history via `git log --oneline --grep="§9.7"`)
-
-- §9.7 / 7.10 chunks a..k closed (commits `a8777ac` `4fb4fcb`
-  `68dd2dc` `da5db53` `6c523fa` `f47db77` `093906f` `6ff23a0`
-  `6bab26e` `43e8336`)。compile-pass 0 → 45/55 (D-048 spill-
-  disp32 が大寄与)。run-stage segfault が次の壁。
+## Recently closed
+- §9.7 / 7.10 chunks a..l-partial (`a8777ac`..`911b92c`)。
+  compile-pass 0 → 45/55 (D-048 が大寄与)。run-stage SEGV = D-049。
 - §9.7 / 7.9 [x] — arm64 realworld JIT 52/55 compile-pass。
