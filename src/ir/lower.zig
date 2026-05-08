@@ -377,6 +377,12 @@ const Lowerer = struct {
             // Wasm 2.0+ prefix opcodes (sat-trunc / bulk-memory / ...)
             0xFC => try self.emitPrefixFC(),
 
+            // Wasm SIMD-128 prefix (§9.9 per ADR-0041).
+            // Sub-opcode is uleb32; emit lands the ZirOp + immediate
+            // payload mirroring the validator's prefix-0xFD catalogue
+            // from §9.9/9.3.
+            0xFD => try self.emitPrefixFD(),
+
             else => return Error.NotImplemented,
         }
     }
@@ -460,6 +466,103 @@ const Lowerer = struct {
             },
             else => return Error.NotImplemented,
         }
+    }
+
+    /// Wasm SIMD-128 prefix-0xFD opcode group (§9.9 per ADR-0041).
+    /// Sub-opcode is uleb32; MVP catalogue mirrors the validator's
+    /// 9.3 coverage. The 16-byte v128.const immediate + 16-byte
+    /// shuffle lane immediate are stored via the ZirInstr's
+    /// `payload`/`extra` fields as offsets into a side-table managed
+    /// in 9.5 emit; for the 9.4 lower-pass MVP, we record the
+    /// immediate's byte offset within `self.body` so emit can read
+    /// the original bytes by position. Per ADR-0041 §"Decision" / 1
+    /// (shape-as-variant), each sub-opcode resolves to a single
+    /// ZirOp without nested dispatch.
+    fn emitPrefixFD(self: *Lowerer) Error!void {
+        const sub = try leb128.readUleb128(u32, self.body, &self.pos);
+        switch (sub) {
+            0 => try self.emitMemarg(.@"v128.load"),
+            1 => try self.emitMemarg(.@"v128.load8x8_s"),
+            2 => try self.emitMemarg(.@"v128.load8x8_u"),
+            3 => try self.emitMemarg(.@"v128.load16x4_s"),
+            4 => try self.emitMemarg(.@"v128.load16x4_u"),
+            5 => try self.emitMemarg(.@"v128.load32x2_s"),
+            6 => try self.emitMemarg(.@"v128.load32x2_u"),
+            7 => try self.emitMemarg(.@"v128.load8_splat"),
+            8 => try self.emitMemarg(.@"v128.load16_splat"),
+            9 => try self.emitMemarg(.@"v128.load32_splat"),
+            10 => try self.emitMemarg(.@"v128.load64_splat"),
+            11 => try self.emitMemarg(.@"v128.store"),
+            92 => try self.emitMemarg(.@"v128.load32_zero"),
+            93 => try self.emitMemarg(.@"v128.load64_zero"),
+
+            12 => {
+                // v128.const: 16 immediate bytes. Record the body
+                // offset in payload so emit can index back; 16 is
+                // implicit in the op.
+                if (self.pos + 16 > self.body.len) return Error.UnexpectedEnd;
+                const imm_off: u32 = @intCast(self.pos);
+                self.pos += 16;
+                try self.emit(.@"v128.const", imm_off, 0);
+            },
+            13 => {
+                // i8x16.shuffle: 16 immediate lane bytes (each < 32).
+                if (self.pos + 16 > self.body.len) return Error.UnexpectedEnd;
+                for (self.body[self.pos..][0..16]) |lane| {
+                    if (lane >= 32) return Error.BadBlockType;
+                }
+                const imm_off: u32 = @intCast(self.pos);
+                self.pos += 16;
+                try self.emit(.@"i8x16.shuffle", imm_off, 0);
+            },
+            14 => try self.emit(.@"i8x16.swizzle", 0, 0),
+
+            // Splats: single ZirOp per shape; no immediate payload.
+            15 => try self.emit(.@"i8x16.splat", 0, 0),
+            16 => try self.emit(.@"i16x8.splat", 0, 0),
+            17 => try self.emit(.@"i32x4.splat", 0, 0),
+            18 => try self.emit(.@"i64x2.splat", 0, 0),
+            19 => try self.emit(.@"f32x4.splat", 0, 0),
+            20 => try self.emit(.@"f64x2.splat", 0, 0),
+
+            // extract_lane / replace_lane: 1-byte lane immediate → payload.
+            21 => try self.emitLaneByte(.@"i8x16.extract_lane_s"),
+            22 => try self.emitLaneByte(.@"i8x16.extract_lane_u"),
+            23 => try self.emitLaneByte(.@"i8x16.replace_lane"),
+            24 => try self.emitLaneByte(.@"i16x8.extract_lane_s"),
+            25 => try self.emitLaneByte(.@"i16x8.extract_lane_u"),
+            26 => try self.emitLaneByte(.@"i16x8.replace_lane"),
+            27 => try self.emitLaneByte(.@"i32x4.extract_lane"),
+            28 => try self.emitLaneByte(.@"i32x4.replace_lane"),
+            29 => try self.emitLaneByte(.@"i64x2.extract_lane"),
+            30 => try self.emitLaneByte(.@"i64x2.replace_lane"),
+            31 => try self.emitLaneByte(.@"f32x4.extract_lane"),
+            32 => try self.emitLaneByte(.@"f32x4.replace_lane"),
+            33 => try self.emitLaneByte(.@"f64x2.extract_lane"),
+            34 => try self.emitLaneByte(.@"f64x2.replace_lane"),
+
+            // Comparison / bitwise / int-arith / float-arith: full
+            // op-by-op catalogue lands in 9.5/9.6 ARM64 emit + 9.7/
+            // 9.8 x86_64 emit chunks alongside their lowering. For
+            // 9.4 MVP we lower a representative subset (`i32x4.add`,
+            // `v128.not`) demonstrating the pattern; remaining
+            // sub-opcodes below the validator-accepted ranges return
+            // `NotImplemented` here even though the validator
+            // accepts them — the lower → emit pipeline closes the
+            // gap as the emit chunks land.
+            174 => try self.emit(.@"i32x4.add", 0, 0),
+            77 => try self.emit(.@"v128.not", 0, 0),
+
+            else => return Error.NotImplemented,
+        }
+    }
+
+    /// SIMD lane-byte op: read 1-byte lane immediate → payload.
+    fn emitLaneByte(self: *Lowerer, op: ZirOp) Error!void {
+        if (self.pos >= self.body.len) return Error.UnexpectedEnd;
+        const lane = self.body[self.pos];
+        self.pos += 1;
+        try self.emit(op, lane, 0);
     }
 
     fn emitLocalIndexed(self: *Lowerer, op: ZirOp) Error!void {

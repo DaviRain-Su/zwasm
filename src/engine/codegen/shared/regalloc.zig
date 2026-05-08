@@ -76,6 +76,21 @@ pub const Slot = union(enum) {
     spill: u32,
 };
 
+/// Per-vreg shape tag (§9.9 SIMD-128 per ADR-0041
+/// §"Decision" / 2). The slot id alone cannot encode whether
+/// a vreg occupies an 8-byte (scalar) or 16-byte (v128)
+/// spill stride — per `single_slot_dual_meaning.md` (§14
+/// enforcement), shape lives on a separate axis from the
+/// slot id. ARM64 NEON `LDR Q<n>` / x86_64 SSE4.1 `MOVDQA`
+/// require 16-byte alignment for fast paths; the spill-frame
+/// layout queries this tag to size the per-vreg stride.
+///
+/// 9.4 MVP: `shapeTag(vreg)` returns `.scalar` by default (no
+/// per-vreg shape storage yet). 9.5 ARM64 NEON emit will
+/// populate `Allocation.shape_tags` from ZirOp metadata when
+/// `compute()` runs over a function containing SIMD ops.
+pub const ShapeTag = enum(u2) { scalar, v128, _ };
+
 pub const Allocation = struct {
     /// `slots[v]` is the dense physical slot id assigned to
     /// vreg `v`. Length matches `func.liveness.?.ranges.len`.
@@ -118,6 +133,13 @@ pub const Allocation = struct {
     /// detection, so a default-default mismatch surfaces as a test
     /// failure rather than silent miscompile.
     max_reg_slots_fp: u8 = 13,
+    /// Per-vreg shape tags (§9.9 / 9.4 per ADR-0041 §"Decision" / 2).
+    /// `null` means all vregs are `.scalar` (no SIMD ops in the
+    /// function); a populated slice indexes by vreg id. Length when
+    /// non-null equals `slots.len`. 9.4 MVP leaves this `null`;
+    /// 9.5 ARM64 NEON emit populates it during `compute()` when
+    /// the function's ZirInstr stream contains v128 ops.
+    shape_tags: ?[]const ShapeTag = null,
 
     /// Resolve a vreg's home for the given register class: physical
     /// register slot or spill offset. The class selects which
@@ -160,6 +182,20 @@ pub const Allocation = struct {
     pub fn spillBytes(self: Allocation) u32 {
         if (self.n_slots <= self.max_reg_slots_gpr) return 0;
         return (@as(u32, self.n_slots) - self.max_reg_slots_gpr) * 8;
+    }
+
+    /// Per-vreg shape tag query (§9.9 / 9.4 per ADR-0041
+    /// §"Decision" / 2). Returns `.scalar` when `shape_tags`
+    /// is `null` (no SIMD vregs in the function) or when the
+    /// per-vreg slot is unmarked; `.v128` when the vreg's
+    /// ZirOp metadata indicates v128. Used by 9.5+ ARM64 NEON
+    /// emit + 9.7+ x86_64 SSE4.1 emit for spill-frame stride
+    /// selection (8-byte vs 16-byte) and for `LDR Q` / `MOVDQA`
+    /// instruction selection vs scalar `LDR D` / `MOVSD`.
+    pub fn shapeTag(self: Allocation, vreg: usize) ShapeTag {
+        const tags = self.shape_tags orelse return .scalar;
+        if (vreg >= tags.len) return .scalar;
+        return tags[vreg];
     }
 };
 
@@ -513,4 +549,42 @@ test "Allocation.slot: spill offset is class-agnostic (shared frame origin = max
     const alloc: Allocation = .{ .slots = &slots, .n_slots = 15 };
     try testing.expectEqual(Slot{ .spill = 0 }, alloc.slot(0, .gpr));
     try testing.expectEqual(Slot{ .spill = (14 - 8) * 8 }, alloc.slot(1, .fpr));
+}
+
+// ============================================================
+// §9.9 / 9.4 — ShapeTag API tests (per ADR-0041 §"Decision" / 2)
+// ============================================================
+
+test "Allocation.shapeTag: returns .scalar when shape_tags is null" {
+    const slots = [_]u16{ 0, 1, 2 };
+    const alloc: Allocation = .{ .slots = &slots, .n_slots = 3 };
+    try testing.expectEqual(ShapeTag.scalar, alloc.shapeTag(0));
+    try testing.expectEqual(ShapeTag.scalar, alloc.shapeTag(1));
+    try testing.expectEqual(ShapeTag.scalar, alloc.shapeTag(2));
+}
+
+test "Allocation.shapeTag: returns per-vreg tag from populated slice" {
+    const slots = [_]u16{ 0, 1, 2 };
+    const tags = [_]ShapeTag{ .scalar, .v128, .scalar };
+    const alloc: Allocation = .{
+        .slots = &slots,
+        .n_slots = 3,
+        .shape_tags = &tags,
+    };
+    try testing.expectEqual(ShapeTag.scalar, alloc.shapeTag(0));
+    try testing.expectEqual(ShapeTag.v128, alloc.shapeTag(1));
+    try testing.expectEqual(ShapeTag.scalar, alloc.shapeTag(2));
+}
+
+test "Allocation.shapeTag: out-of-range vreg returns .scalar" {
+    const slots = [_]u16{0};
+    const tags = [_]ShapeTag{.v128};
+    const alloc: Allocation = .{
+        .slots = &slots,
+        .n_slots = 1,
+        .shape_tags = &tags,
+    };
+    try testing.expectEqual(ShapeTag.v128, alloc.shapeTag(0));
+    // Out-of-range — defensive default, not a hard error.
+    try testing.expectEqual(ShapeTag.scalar, alloc.shapeTag(99));
 }
