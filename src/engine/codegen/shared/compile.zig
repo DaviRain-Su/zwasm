@@ -30,6 +30,7 @@ const lowerer = @import("../../../ir/lower.zig");
 const liveness = @import("../../../ir/analysis/liveness.zig");
 const loop_info_mod = @import("../../../ir/analysis/loop_info.zig");
 const hoist = @import("../../../ir/hoist/pass.zig");
+const coalesce = @import("../../../ir/coalesce/pass.zig");
 const regalloc = @import("regalloc.zig");
 const trace = @import("../../../diagnostic/trace.zig");
 
@@ -44,7 +45,7 @@ const emit = switch (builtin.target.cpu.arch) {
     else => @compileError("unsupported host arch — JIT requires aarch64 or x86_64"),
 };
 
-pub const Error = lowerer.Error || liveness.Error || regalloc.Error || emit.Error || hoist.Error || Allocator.Error;
+pub const Error = lowerer.Error || liveness.Error || regalloc.Error || emit.Error || hoist.Error || coalesce.Error || Allocator.Error;
 
 /// One function's compilation result. `func` retains lowered
 /// ZIR + liveness for downstream consumers (debug dump,
@@ -63,6 +64,7 @@ pub fn deinitFuncResult(allocator: Allocator, r: *FuncResult) void {
     if (r.func.liveness) |lv| if (lv.ranges.len != 0) allocator.free(lv.ranges);
     if (r.func.loop_info) |li| loop_info_mod.deinit(allocator, li);
     hoist.deinitArtifacts(allocator, &r.func);
+    coalesce.deinitArtifacts(allocator, &r.func);
     if (r.func.pass_diagnostics) |pd| zir.deinitPassDiagnostics(allocator, pd);
     r.func.deinit(allocator);
 }
@@ -202,6 +204,15 @@ pub fn compileOne(
             try pass_records.append(allocator, .{ .pass = .regalloc, .applied = applied, .skipped = 0, .extra = high_water });
         }
     }
+
+    // §9.8b / 8b.1-c (ADR-0035) — post-regalloc slot-aliasing
+    // coalescer. Side-table metadata pass; no IR or
+    // Allocation mutation. 8b.1-c MVP ships scaffolding only
+    // (zero detected records); detection logic lands
+    // incrementally in 8b.1-d alongside emit-side query
+    // wiring + bench-delta evidence.
+    try coalesce.run(allocator, &func, alloc);
+    errdefer coalesce.deinitArtifacts(allocator, &func);
 
     trace.passEnter(func_idx, .emit);
     const out = try emit.compile(allocator, &func, alloc, func_sigs, module_types, num_imports);

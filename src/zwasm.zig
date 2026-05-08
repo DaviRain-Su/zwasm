@@ -184,6 +184,7 @@ test {
     _ = @import("ir/zir.zig");
     _ = @import("ir/dispatch_table.zig");
     _ = @import("ir/hoist/pass.zig");
+    _ = @import("ir/coalesce/pass.zig");
     _ = @import("engine/codegen/shared/reg_class.zig");
     _ = @import("engine/codegen/shared/regalloc.zig");
     _ = @import("engine/codegen/arm64/inst.zig");

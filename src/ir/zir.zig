@@ -555,8 +555,34 @@ pub const HoistedConst = struct {
 /// Phase 15+: bounds-check elision proof.
 pub const ElisionRecord = struct {};
 
-/// Phase 15+: mov-coalescer audit record.
-pub const CoalesceRecord = struct {};
+/// Phase 8+ (§9.8b / 8b.1; ADR-0035): post-regalloc slot-
+/// aliasing coalescer record. Emit pass queries
+/// `func.coalesced_movs` for each MOV-shaped emission site
+/// and skips emission when a record's `instr_pc` matches
+/// the current dispatch index. Side-table metadata only —
+/// neither ZIR nor `regalloc.Allocation` is mutated.
+pub const CoalesceRecord = struct {
+    /// PC of the ZIR instr in `func.instrs.items` whose
+    /// emit-time MOV is redundant (src_slot == dst_slot
+    /// AND dst is consumed via that slot OR is dead before
+    /// next write).
+    instr_pc: u32,
+    /// The slot id involved (informational; both src and
+    /// dst share this slot — that's the alias).
+    slot: u16,
+    /// Detection class. Open enum (`_` extension) so
+    /// future detection passes can add new reasons without
+    /// breaking existing emit-side consumers.
+    reason: Reason,
+
+    pub const Reason = enum(u8) {
+        /// `slots[src_vreg] == slots[dst_vreg]` AND not
+        /// across a call boundary AND not at a branch
+        /// target (per ADR-0035 detection algorithm).
+        same_slot_alias = 0,
+        _,
+    };
+};
 
 /// Phase 8+: per-function per-pass diagnostic record (per
 /// ADR-0033). Populated by the compile pipeline's `passExit`
