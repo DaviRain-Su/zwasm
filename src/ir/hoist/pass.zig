@@ -54,13 +54,6 @@ pub const Error = error{OutOfMemory};
 /// Caller-owned: `func.synthetic_locals` and `func.
 /// hoisted_constants` slices must be freed by `deinit*`
 /// helpers below before `func.deinit`.
-/// Maximum synthetic locals to introduce per function (MVP cap;
-/// avoids stress-testing the emit pass with very large synthetic-
-/// local counts before the regression source is fully localised
-/// per `2026-05-08-hoist-vreg-semantic.md` Update §). When a
-/// function would exceed this, the pass returns early without
-/// hoisting — the original IR compiles unchanged.
-const max_hoists_per_func: u32 = 4;
 
 pub fn run(allocator: Allocator, func: *ZirFunc) Error!void {
     const li = func.loop_info orelse return;
@@ -86,7 +79,15 @@ pub fn run(allocator: Allocator, func: *ZirFunc) Error!void {
     }
 
     if (total_hoists == 0) return;
-    if (total_hoists > max_hoists_per_func) return; // §9.8 / 8.4 MVP guard; see D-053
+    // §9.8a / 8a.5-c: max_hoists_per_func cap REMOVED (D-053
+    // discharged). The cap was masking a hoist bug in
+    // `branch_targets[]` shift logic — depth values were being
+    // PC-shifted, inflating beyond labels.items.len for funcs with
+    // many hoists. Cap=4 happened to keep the inflation small
+    // enough that depths often landed on valid block-stack
+    // entries by coincidence. Cap=1000 confirmed the bug;
+    // removing the spurious branch_targets shift (above)
+    // restores the baseline AND removes the cap need.
 
     // Allocate one synthetic local per hoist. local_idx_at[orig_pc] gives
     // the absolute Wasm-space local index assigned to the const at orig_pc.
@@ -191,10 +192,17 @@ pub fn run(allocator: Allocator, func: *ZirFunc) Error!void {
         blk.end_inst += pc_shift[blk.end_inst];
     }
 
-    // Update branch_targets[].
-    for (func.branch_targets.items) |*tgt| {
-        tgt.* += pc_shift[tgt.*];
-    }
+    // §9.8a / 8a.5-c — DO NOT shift `branch_targets[]`. Each
+    // entry is a Wasm br/br_table **depth** (block-stack index),
+    // not a PC — see `lower.zig:emitBrTable` (reads ULEB128
+    // depth) + `arm64/op_control.zig:emitBranchToDepth` (treats
+    // value as `depth > labels.items.len → UnsupportedOp`).
+    // Hoist's prologue insertion shifts PCs, never block-stack
+    // depth, so depth values are invariant. Pre-fix shift was
+    // tolerable at cap=4 (small Δ often landed on a valid depth
+    // by coincidence) but inflated at cap=1000+, surfacing as
+    // br_table UnsupportedOp on 10/55 realworld fixtures (D-053
+    // root cause).
 
     // Swap in new instrs.
     func.instrs.deinit(allocator);
@@ -353,14 +361,23 @@ test "run: const outside any loop is left alone" {
     try testing.expect(f.hoisted_constants == null);
 }
 
-test "run: shifts branch_targets across hoist prologue" {
+test "run: leaves branch_targets[] depths invariant across hoist prologue (§9.8a / 8a.5-c)" {
     // PC 0: loop  (block.start=0, block.end=3)
     // PC 1: i32.const 7
     // PC 2: drop
     // PC 3: end
-    // branch_targets[0] = 0 (target = loop header)
+    // branch_targets[0] = 0 (Wasm depth — index into the block
+    // stack from the top, NOT a PC; see lower.zig:emitBrTable +
+    // arm64/op_control.zig:emitBranchToDepth).
     //
-    // After hoist: loop now at PC 2; target should be 2.
+    // Pre-§9.8a / 8a.5-c, hoist erroneously shifted this entry
+    // by `pc_shift[0]`, mutating depth=0 → 0 (no shift accumulated
+    // at PC 0) on this trivial case but inflating it on real
+    // fixtures with hoists before the br_table site, producing
+    // depths > labels.items.len → UnsupportedOp at cap=1000+
+    // (D-053 root cause).
+    //
+    // Post-fix: branch_targets entries are invariant.
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
     var f = ZirFunc.init(0, sig, &.{});
     defer f.deinit(testing.allocator);
@@ -379,7 +396,8 @@ test "run: shifts branch_targets across hoist prologue" {
 
     try run(testing.allocator, &f);
 
-    try testing.expectEqual(@as(u32, 2), f.branch_targets.items[0]);
+    // Depth invariant: 0 stays 0 regardless of hoist's PC shift.
+    try testing.expectEqual(@as(u32, 0), f.branch_targets.items[0]);
 }
 
 test "run: multiple consts in same loop allocate distinct locals" {
