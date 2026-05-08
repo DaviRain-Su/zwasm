@@ -166,7 +166,8 @@ pub fn main(init: std.process.Init) !void {
                 try stdout.print("COMPILE-IMPORTS  {s} (host imports — chunk 7.9-b will lift)\n", .{entry.name});
                 compile_imports += 1;
             },
-            error.UnsupportedOp, error.UnsupportedControlFlow,
+            error.UnsupportedOp,
+            error.UnsupportedControlFlow,
             // Chunk 7.9-b unhid these by lifting UnsupportedImports:
             // SlotOverflow = regalloc pool exhaustion (post-MVP
             // spill ratchet, ROADMAP §A12), surfaces same shape as
@@ -176,9 +177,14 @@ pub fn main(init: std.process.Init) !void {
                 try stdout.print("COMPILE-OP  {s}: {s}\n", .{ entry.name, @errorName(err) });
                 compile_op += 1;
             },
-            error.StackTypeMismatch, error.ArityMismatch, error.InvalidLocalIndex,
-            error.StackUnderflow, error.InvalidFuncIndex, error.InvalidGlobalIndex,
-            error.BadValType, error.UnsupportedEntrySignature,
+            error.StackTypeMismatch,
+            error.ArityMismatch,
+            error.InvalidLocalIndex,
+            error.StackUnderflow,
+            error.InvalidFuncIndex,
+            error.InvalidGlobalIndex,
+            error.BadValType,
+            error.UnsupportedEntrySignature,
             // Chunk 7.9-b unhid: realworld fixtures with malformed
             // (per our validator) func-types. Investigation belongs
             // alongside chunk 7.9-c (some go binaries use multi-
