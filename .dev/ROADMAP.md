@@ -1547,44 +1547,76 @@ P7 backend equality within Phase 7). Phase 8 takes on the
 optimisation foundation work + partial AOT skeleton (transferred
 from Phase 12).
 
+**Phase 8 reorg per ADR-0032 (foundation-first, bench-driven)**:
+the §9.8 task list is sequenced as **§9.8a foundation** (pass-
+trace + JIT-execution sentinel + bench-delta-per-commit infra)
+followed by **§9.8b bench-driven optimisation** (Coalescer /
+Regalloc upgrade / AOT skeleton, each requiring a bench-delta
+table in the commit message per the amended /continue skill).
+The 8.4 Hoist row stays `[x]` as the historical record of the
+cap=4 partial land (`4d6fc0b`); Hoist cap-removal moves to
+8a.5 (D-053 promotion).
+
 **Exit criterion**:
 
-- Hoist + coalesce passes implemented as ZIR transformations
-  (slots reserved P13).
-- Regalloc upgraded from greedy-local (Phase 7.1) to linear-scan
-  with live-range splitting + reuse.
-- AOT skeleton: `zwasm compile foo.wasm -o foo.cwasm` produces a
-  loadable artifact (the generator pipeline; the consumer side
-  finalises in Phase 12).
-- Bench history records optimisation deltas vs. Phase 7 baseline
-  (≥10% improvement on at least 3 of the v1-class hyperfine
-  fixtures, signal of the optimisation paying off).
+- §9.8a infra rows all `[x]` — pass-trace, JIT-execution sentinel,
+  bench-delta-per-commit infrastructure all in place; D-053
+  cap=4 root cause investigated and resolved.
+- §9.8b optimisation rows all `[x]` — Coalescer + Regalloc
+  upgrade + AOT skeleton implemented, **each with a bench-delta
+  table in its commit message** documenting per-fixture
+  before/after numbers (positive AND negative movements both
+  surface; regressions need paired explanations).
+- Aggregate bench delta ≥10% improvement on at least 3 of the
+  v1-class hyperfine fixtures vs. Phase 7 close baseline
+  (`bench/results/history.yaml` SHA `bf138df` / `22147629`).
+  Adoption discipline per `optimisation_log.md` §4: every
+  `Adopted` O-NNN row records the implementing commit SHA +
+  before/after numbers.
 
 **🔒 gate**: yes — optimisation pipeline correctness is checked
 via the three-way differential carried forward from Phase 7.11.
 
-#### §9.8 task list (expanded)
+#### §9.8 task list (expanded; reorg per ADR-0032)
 
-> Phase 8 carries the JIT optimisation foundation work plus the
-> Phase-7-deferred follow-ups (D-050 WASI subset for JIT, D-051
-> x86_64 prologue extraction, windowsmini bench wiring). Rows
-> 8.0/8.1/8.2 are Phase-7 carry-overs (= sharper 7.11 follow-up
-> + 7.13 gate `§3` file-size deferral discharge); rows
-> 8.3〜8.7 are the Phase 8 optimisation foundation proper.
+> §9.8 splits into 8.0-8.4 (Phase-7 carry-overs + partial-landed
+> Hoist MVP) → §9.8a (foundation: observability + bench infra
+> + D-053 cap-removal investigation) → §9.8b (bench-driven
+> Coalescer / Regalloc upgrade / AOT skeleton).
+>
+> Carry-overs `8.0`–`8.3` and the partial-landed Hoist `8.4`
+> all closed `[x]`; the renumbered foundation work begins at
+> **`8a.1`**.
 
 | #    | Description                                                                                              | Status         |
 |------|----------------------------------------------------------------------------------------------------------|----------------|
-| 8.0  | Open §9.8 inline + flip Phase Status widget (= this commit). | [x]            |
-| 8.1  | **D-050 discharge** — minimal WASI subset (`proc_exit` / `fd_write` / `fd_read` / `environ_get` / `environ_sizes_get` / `args_get` / `args_sizes_get` / `clock_time_get`) wired to JIT-callable `host_dispatch_base[i]` thunks; `setupRuntime` installs thunks instead of trap stub for known WASI exports; per-fixture timeout (subprocess fork + SIGALRM) so cljw_*/tinygo_fib loops don't hang. Unlocks per-fixture interp-vs-JIT execution differential (= sharper §9.7 / 7.11 follow-up). | [x]            |
-| 8.2  | **D-051 discharge** — `x86_64/emit.zig` reduction to under §A2 2000-LOC hard cap. Survey at entry (`private/notes/p8-8.2-survey.md`, re-derivable) showed naive prologue extraction (D-051's original ADR-0021 mirror plan) yields only ~200-400 LOC reduction — insufficient. ADR-0030 picks test extraction as the primary path: ~3050 LOC of inline tests move to family-split siblings `emit_test_int.zig` + `emit_test_float.zig` + `emit_test.zig` aggregator (mirror of arm64's post-ADR-0021 shape). Net: `emit.zig` 4305→1247 LOC. Prologue extraction deferred to D-052 with concrete trigger (re-evaluate when emit.zig next approaches 1000-LOC soft cap OR when a Phase 8 optimisation pass changes prologue shape). | [x]            |
-| 8.3  | **Windowsmini bench Phase 8.0 disposition** — per Phase 7 close finding (gate doc §5b, Mac:Win ratio ~12x with fib2 8m24s/run): chose the **5-fixture fast subset** path (shootout/nestedloop + tinygo/{arith,fib,sieve,tak}; all < 30ms on Linux baseline; ~6s total on windowsmini at quick-mode cadence). `scripts/run_bench.sh --windows-subset` flag implements the filter. SSH-from-Linux-runner CI rejected — secret management + cross-network reliability outweigh once-per-merge value when manual periodic verification covers the regression-detection goal. Procedure documented in `.dev/windows_ssh_setup.md` "Bench mode for windowsmini" §. | [x]            |
-| 8.4  | **Hoist pass** (ZIR transformation) — load/store hoisting out of inner loops per v1 W43 reference; `ir/analysis/loop_info.zig` is the prerequisite for hoist site identification. Three-way differential carried forward as the correctness gate. | [ ]            |
-| 8.5  | **Coalescer pass** (ZIR transformation) — vreg coalescing for MOV elimination per v1 W44 reference; runs after regalloc verifies the alloc. Three-way differential carried forward. | [ ]            |
-| 8.6  | **Regalloc upgrade** — greedy-local (Phase 7.1) → linear-scan with live-range splitting + slot reuse. Resolves D-029 parallel-move via O-002 trigger derivation per Phase 7 close host-baseline (Mac vs Orb vs Win ratio anchored in `bench/results/history.yaml`). | [ ]            |
-| 8.7  | **AOT skeleton** — `zwasm compile foo.wasm -o foo.cwasm` produces a loadable artifact (the generator pipeline; consumer side finalises in Phase 12). `engine/codegen/aot/` slot already reserved per ADR-0023; mirror the JIT pipeline's ZIR + regalloc.Allocation outputs without interpreter coupling. | [ ]            |
-| 8.8  | **Bench delta** — ≥10% improvement on at least 3 of the v1-class hyperfine fixtures vs Phase 7 close baseline (`bench/results/history.yaml` SHA `bf138df` / `22147629`). Adoption discipline per `optimisation_log.md` §4: every `Adopted` O-NNN row records the implementing commit SHA + before/after numbers. | [ ]            |
-| 8.9  | Phase-8 boundary `audit_scaffolding` pass (auto-fired by /continue at boundary). | [ ]            |
-| 8.10 | Open §9.9 inline + flip phase tracker. | [ ]            |
+| 8.0  | Open §9.8 inline + flip Phase Status widget. | [x]            |
+| 8.1  | **D-050 discharge** — minimal WASI subset (`proc_exit` / `fd_write` / `fd_read` / `environ_get` / `environ_sizes_get` / `args_get` / `args_sizes_get` / `clock_time_get`) wired to JIT-callable `host_dispatch_base[i]` thunks; `setupRuntime` installs thunks instead of trap stub for known WASI exports; per-fixture timeout (subprocess fork + SIGALRM) so cljw_*/tinygo_fib loops don't hang. Unlocks per-fixture interp-vs-JIT execution differential. | [x]            |
+| 8.2  | **D-051 discharge** — `x86_64/emit.zig` reduction to under §A2 2000-LOC hard cap. Per ADR-0030 test extraction is the primary path; ~3050 LOC of inline tests moved to family-split siblings (`emit_test_int.zig` + `emit_test_float.zig` + `emit_test.zig` aggregator). Net: `emit.zig` 4305→1247 LOC. Prologue extraction deferred to D-052. | [x]            |
+| 8.3  | **Windowsmini bench Phase 8.0 disposition** — adopted **5-fixture fast subset** (shootout/nestedloop + tinygo/{arith,fib,sieve,tak}; all < 30ms on Linux baseline; ~6s total on windowsmini at quick-mode cadence) via `scripts/run_bench.sh --windows-subset` flag. SSH-from-Linux-runner CI rejected. Procedure in `.dev/windows_ssh_setup.md`. | [x]            |
+| 8.4  | **Hoist MVP (cap=4 partial land)** — historical record per ADR-0031 + lesson `2026-05-08-hoist-vreg-semantic.md`: 8.4-a/b/c/d cycle landed the local-set/local-get rewrite as `src/ir/hoist/pass.zig` + zir.zig helpers + 4 unit tests + emit consumer migration; pipeline integration committed at `4d6fc0b` behind `max_hoists_per_func = 4` cap that insulates the integration from a still-unidentified emit-stage UnsupportedOp source on functions with high-hoist counts. The cap-removal + root-cause investigation moves to 8a.5; this row records the partial-landed work as the ROADMAP-visible artifact. | [x]            |
+
+##### §9.8a — Foundation (observability + bench infra)
+
+| #    | Description                                                                                              | Status         |
+|------|----------------------------------------------------------------------------------------------------------|----------------|
+| 8a.1 | **Per-pass diagnostic ringbuffer extension** — extend ADR-0028's Diagnostic ring buffer with `passEvent(pass_name, summary)` entries. Each pipeline stage (`lower` / `hoist` / `liveness` / `regalloc` / `emit`) emits enter + exit events with structured per-pass summaries (e.g. `hoist: 4 const → local; 12 skipped`). `ZirFunc` gains a `?PassDiagnostics` slot mirroring the `?Liveness` / `?LoopInfo` shape (Phase-5+ slot reservation discipline). Surfaces opt-in via `ZWASM_DIAG=passes` (8a.4). | [ ] **NEXT**   |
+| 8a.2 | **JIT-execution sentinel** — JIT block prologue gets a small inject (counter increment / sentinel store at a known runtime offset) so post-execution checks can prove the JIT-emitted body actually ran (vs. compile-passed but never invoked). The `realworld_run_jit` runner reads the counter post-call and reports `RUN-JIT-VERIFIED` vs `RUN-JIT-COMPILE-ONLY-PATH`. Resolves the v1-era recurring "is the JIT actually running" confusion. Delta on prologue size is at most 4-8 bytes (ARM64 single LDR-ADD-STR or x86_64 single INC-MEM); negligible for hot-loop benchmarks. | [ ]            |
+| 8a.3 | **Bench-delta-per-commit infra** — `scripts/run_bench.sh --diff <ref>` produces a before/after fixture-by-fixture table (median_ms delta, percent change, regression highlight). `scripts/record_bench_delta.sh` formats it as a markdown block suitable for commit-message inclusion. Used by the new /continue skill bench-discipline trigger (8b tasks); also runnable manually for any ad-hoc verification. | [ ]            |
+| 8a.4 | **`ZWASM_DIAG=passes,jit_exec,bench` env var** — opt-in surfacing of the 8a.1/8a.2/8a.3 outputs without recompile, single binary across release + diagnostic modes. Diagnostic threadlocal infra (per ADR-0016) carries the flag set; affected components (passes, JIT prologue, bench runners) check the bit before emitting. | [ ]            |
+| 8a.5 | **D-053 cap-removal root-cause investigation** — using 8a.1 + 8a.2, identify which silent UnsupportedOp source in arm64 `op_call.zig` / `op_control.zig` / `gpr.zig` fires under post-hoist IR with > 4 synthetic locals. Either fix the affected emit path (preferred) or refine the cap into a precise filter (acceptable). On success: remove `max_hoists_per_func = 4` from `src/ir/hoist/pass.zig`. Verifies via `realworld_run_jit` baseline maintained AND increased hoist application count (per 8a.1 pass-trace counters). Discharges D-053. | [ ]            |
+| 8a.6 | Phase-8a boundary `audit_scaffolding` pass — focuses on §A (functional health) + §F (debt coherence after D-053 discharge) + §G (extended challenge anchors with the new diag infra). | [ ]            |
+
+##### §9.8b — Bench-driven optimisation
+
+| #    | Description                                                                                              | Status         |
+|------|----------------------------------------------------------------------------------------------------------|----------------|
+| 8b.1 | **Coalescer pass** — vreg coalescing / MOV elimination. Survey-corrected from the original "v1 W44" reference (which was actually SIMD register-class introduction, not coalescing — see `private/notes/p8-8.5-survey.md`). MVP candidate per the survey's option (b) post-regalloc slot-aliasing. **Bench-delta table in commit message required** per /continue skill amendment. | [ ]            |
+| 8b.2 | **Regalloc upgrade** — greedy-local (Phase 7.1) → linear-scan with live-range splitting + slot reuse. Resolves D-029 parallel-move via O-002 trigger derivation per Phase 7 close host-baseline. **Bench-delta table required**. | [ ]            |
+| 8b.3 | **AOT skeleton** — `zwasm compile foo.wasm -o foo.cwasm` produces a loadable artifact (the generator pipeline; consumer side finalises in Phase 12). `engine/codegen/aot/` slot already reserved per ADR-0023; mirror the JIT pipeline's ZIR + regalloc.Allocation outputs without interpreter coupling. **Bench-delta** measures cold-start time (.cwasm load) vs JIT first-invocation. | [ ]            |
+| 8b.4 | **Bench delta ≥10% aggregate** — ≥10% improvement on at least 3 of the v1-class hyperfine fixtures vs Phase 7 close baseline (`bench/results/history.yaml` SHA `bf138df` / `22147629`). Aggregates the per-task bench-delta artefacts from 8b.1 + 8b.2 + 8b.3 (and 8a.5's hoist cap-removal if it improved any fixture). Adoption discipline per `optimisation_log.md` §4. | [ ]            |
+| 8b.5 | Phase-8b boundary `audit_scaffolding` pass. | [ ]            |
+| 8b.6 | Open §9.9 inline + flip phase tracker. | [ ]            |
 
 ### Phase 9 — SIMD-128
 

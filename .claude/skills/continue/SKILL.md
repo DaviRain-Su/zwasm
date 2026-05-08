@@ -489,6 +489,43 @@ otherwise reachable (e.g. windowsmini's wasmtime-stub case
 from §9.6 / 6.F) are usually not stop conditions — file a
 debt entry naming the structural barrier and proceed.
 
+#### Step 5b — Bench-delta sub-step (Phase 8b only; ADR-0032)
+
+After the three-host test gate passes AND the active task
+is a **bench-driven optimisation row** (currently §9.8b
+rows; future Phases tagged the same way), capture a
+per-fixture bench delta:
+
+```sh
+bash scripts/run_bench.sh --quick --diff HEAD~1 \
+    > /tmp/bench-delta.md
+```
+
+The output table goes verbatim into the commit message body
+(under a `## Bench delta` heading). **Both positive and
+negative movements surface** — the loop neither cherry-picks
+positives nor hides regressions. A regression on any
+recorded fixture without a paired explanation in the commit
+body is a Step-7 forbid.
+
+**Trigger conditions** (ALL must hold):
+
+- Active row is in §9.8b OR a Phase-section explicitly tagged
+  "bench-driven" in its ROADMAP description.
+- Diff modifies `src/ir/`, `src/engine/codegen/`, or other
+  optimisation-pass-touching files.
+- §9.8a foundation rows 8a.1 / 8a.2 / 8a.3 are all `[x]`
+  (the bench-delta script + observability infra exist).
+
+When ANY trigger fails, Step 5b is **skipped** — Phase 8a
+foundation work and non-optimisation Phase rows do not
+require per-commit bench delta (it'd be ceremony noise).
+
+The discipline exists because the autonomous loop demonstrated
+in §9.8 / 8.4 cycles that landing optimisations without
+measuring per-pass effect produces "implemented but unmeasured"
+work; ADR-0032 codifies the bench-driven sequencing.
+
 ### Step 6 — Source commit
 
 `git add` only the source files; `git commit -m "<type>(<scope>):

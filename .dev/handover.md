@@ -13,48 +13,85 @@
 6. `.dev/decisions/0019_x86_64_in_phase7.md` / 0021 / 0023 / 0026 / 0027 / 0028 / 0029 — recent ADRs.
 7. `.dev/phase8_transition_gate.md` — historical reference (gate now closed; 7.13 [x]).
 
-## Current state — Phase 8 / §9.8 / 8.4 (Hoist pass — JIT optimisation begins)
+## Current state — Phase 8 / §9.8a / 8a.1 (foundation-first reorg per ADR-0032)
 
-§9.8 / 8.0–8.3 [x]. Phase 8 carry-over rows from Phase 7 all
-closed (D-050 / D-051 / windowsmini-bench-disposition).
-Optimisation pipeline rows 8.4–8.7 (Hoist / Coalescer / Regalloc
-upgrade / AOT skeleton) are the Phase 8 substantive work.
+§9.8 reorganised per **ADR-0032** into foundation-first
+(§9.8a) + bench-driven optimisation (§9.8b). Phase-7 carry-
+overs (8.0–8.3) and the partial-landed Hoist MVP (8.4 cap=4
+behind `4d6fc0b`) all `[x]` as historical record. Active
+work moves to **§9.8a foundation** rows.
 
 直近 commits (latest at top):
 
-- (this commit) feat(p8): §9.8 / 8.3 — windowsmini bench subset
-  path (`--windows-subset` flag + 5-fixture fast set);
-  SSH-from-Linux CI rejected; mark 8.3 [x].
-- `89dee4d` feat(p8): §9.8 / 8.2 — D-051 close via emit_test
-  family split per ADR-0030.
-- `85d75b7` feat(p8): §9.8 / 8.1-b — per-fixture fork+SIGALRM
-  timeout; close D-050; mark 8.1 [x].
+- (this commit) chore(p8): ADR-0032 + ROADMAP §9.8 reorg into
+  8a (foundation) + 8b (bench-driven); /continue skill +
+  bench discipline; D-053 promoted to ROADMAP row 8a.5;
+  handover retargets at 8a.1.
+- `4d6fc0b` feat(p8): §9.8 / 8.4-d — hoist pipeline integration
+  with MVP cap (D-053 partial).
+- `8180c66` feat(p8): §9.8 / 8.4-d — D-053 hoist redesign
+  landed (integration deferred again).
 
-Mac local realworld_run_jit baseline (8.1 exit, carried as the
-Phase 8 starting point): 52/55 compile-pass → 15/55 RUN-PASS,
-37 RUN-TRAP, 0 RUN-TIMEOUT, 0 fail-other.
+Mac local realworld_run_jit baseline (carried as Phase 8a
+starting point): **52/55 compile-pass, 15/55 RUN-PASS** with
+hoist active behind cap=4. 8a.5 (D-053 cap-removal investigation)
+verifies this baseline is maintained AND hoist application count
+increases (per 8a.1's pass-trace counters).
 
-**Phase 8 status**: §9.8 / 8.0-8.3 [x]; 8.4 NEXT. Phase 8 残
-rows = 8.4 (Hoist pass) + 8.5 (Coalescer) + 8.6 (Regalloc upgrade)
-+ 8.7 (AOT skeleton) + 8.8 (bench delta ≥10%) + 8.9 (boundary
-audit) + 8.10 (open §9.9).
+**Phase 8 status**: §9.8 / 8.0-8.4 [x]; **§9.8a / 8a.1 NEXT**.
+Phase 8 残 rows = 8a.1-8a.6 (foundation) + 8b.1-8b.6
+(optimisation).
 
-## Active task — §9.8 / 8.4-d hoist landed (gated); 8.5 NEXT
+## Active task — §9.8a / 8a.1: per-pass diagnostic ringbuffer extension **NEXT**
 
-**8.4-d landed with MVP guard** — hoist pipeline integration
-active in `compile.zig`; `max_hoists_per_func=4` cap insulates
-the integration from a still-unidentified emit-stage
-UnsupportedOp source. Many small functions get hoisted across
-realworld fixtures; baseline maintained at 52/55+15/55. Root-
-cause investigation parked as a continuation of D-053 (cap
-removal, not redesign — the redesign IS landed).
+The first §9.8a foundation row. Extends ADR-0028's Diagnostic
+ring buffer with `passEvent(pass_name, summary)` entries.
+Each pipeline stage (`lower` / `hoist` / `liveness` / `regalloc`
+/ `emit`) emits enter + exit events with structured per-pass
+summaries (e.g. `hoist: 4 const → local; 12 skipped`). `ZirFunc`
+gains a `?PassDiagnostics` slot mirroring the `?Liveness` /
+`?LoopInfo` shape. Surfaces opt-in via `ZWASM_DIAG=passes`
+(landed in 8a.4).
 
-Diagnostic gathered this cycle: error originates in the **emit
-stage** (post-regalloc); arm64/emit.zig main paths instrumented
-and didn't fire → source is in op_call.zig / op_control.zig /
-gpr.zig silent UnsupportedOp returns. D-053 updated.
+Suggested chunk plan:
 
-## §9.8 row design surface (carried forward)
+| #     | Description                                              | Status   |
+|-------|----------------------------------------------------------|----------|
+| 8a.1-a | ADR `0033_pass_trace_extension.md` design framing       | **NEXT** |
+| 8a.1-b | Extend `src/diagnostic/trace.zig` with `passEvent()`    | [ ]      |
+| 8a.1-c | `ZirFunc.pass_diagnostics: ?PassDiagnostics` slot + helpers | [ ]   |
+| 8a.1-d | Wire into compile.zig pipeline stages (lower/hoist/liveness/regalloc/emit) | [ ]      |
+| 8a.1-e | Unit tests + 3-host gate; close 8a.1 [x]                | [ ]      |
+
+After 8a.1 closes: 8a.2 (JIT-execution sentinel), 8a.3 (bench-
+delta-per-commit), 8a.4 (`ZWASM_DIAG` env var), 8a.5 (D-053
+cap-removal investigation using the new infra), 8a.6 (8a
+boundary audit).
+
+Then §9.8b begins: 8b.1 (Coalescer, bench-delta required) →
+8b.2 (Regalloc upgrade) → 8b.3 (AOT skeleton) → 8b.4 (≥10%
+aggregate) → 8b.5 (boundary audit) → 8b.6 (open §9.9).
+
+## Reorg context (ADR-0032)
+
+Phase 8 was reorganised into foundation-first / bench-driven
+optimisation per user collaborative review. Background:
+
+1. The 8.4 Hoist cycles (8.4-a/b/c/d) demonstrated that
+   landing optimisations without observability infra produces
+   debugging-cycle-per-attempt costs that don't amortise.
+2. The /continue skill verified "baseline maintained" but
+   didn't measure "did this optimisation actually speed
+   anything up?" — bench-driven discipline was missing.
+3. v1 development had a recurring "is the JIT actually
+   running?" confusion that per-pass DBG prints kept being
+   re-derived for. Centralised pass-trace + JIT-execution
+   sentinel solves this structurally.
+
+The 8.4 Hoist work is preserved verbatim in commit history
+(`4f0be65` / `dba7cbb` / `8180c66` / `4d6fc0b`); the
+cap=4 partial integration stays active. Cap removal is the
+discharge condition for 8a.5 (the D-053 promotion).
 
 **8.4-d landed** this cycle — local-set/local-get rewrite hoist
 infrastructure committed (zir.zig helpers + synthetic_locals

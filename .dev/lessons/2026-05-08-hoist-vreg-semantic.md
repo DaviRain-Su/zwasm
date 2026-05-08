@@ -105,3 +105,35 @@ UnsupportedOp under hoist; bisect by guarding hoist with a
 size threshold; check arm64/emit's uncovered UnsupportedOp
 return paths (lines 200, 301, 308, 324, 337, 354, 378, 745,
 750, 782, 792, 795, 818, 827, 830, 853, 1155).
+
+---
+
+## Update 2026-05-08 (resume cycle 3 + reorg)
+
+Cycle-3 outcome:
+
+- 3-stage catch-print probe (`liveness` / `regalloc` / `emit`)
+  localised the regression source to the **emit stage** (post-
+  regalloc).
+- arm64/emit.zig main path instrumentation (lines 301, 378,
+  745, 750, 792, 795, 827, 830) did NOT fire under hoist
+  → silent source narrowed to op_call.zig / op_control.zig /
+  gpr.zig silent returns.
+- A `max_hoists_per_func = 4` cap landed as the MVP guard at
+  `4d6fc0b`; baseline 52/55+15 maintained, many APPLY events
+  fire across small functions, large-hoist functions skip
+  transformation.
+
+User-driven reframing (this cycle): the recurring per-cycle
+DBG-print rebuilding cost + the absence of bench-delta
+discipline motivated **ADR-0032 (Phase 8 foundation-first
+reorg)**. D-053 promotes from debt-ledger to ROADMAP row
+8a.5 (the cap-removal root-cause investigation, scheduled
+after 8a.1's pass-trace infra and 8a.2's JIT-execution
+sentinel land — providing the structural support that ad-hoc
+DBG prints kept missing).
+
+**This lesson stays put** — its observational findings
+(ZIR vreg renumbering at liveness; Wasm frame-scoped operand
+stack; redesign attempt + cap=4 partial land) remain
+load-bearing context for the cap-removal investigation.
