@@ -143,6 +143,10 @@ pub const engine = struct {
             pub const label = @import("engine/codegen/arm64/label.zig");
             pub const emit = @import("engine/codegen/arm64/emit.zig");
         };
+        pub const aot = struct {
+            pub const format = @import("engine/codegen/aot/format.zig");
+            pub const serialise = @import("engine/codegen/aot/serialise.zig");
+        };
     };
 };
 pub const wasi = struct {
@@ -185,6 +189,8 @@ test {
     _ = @import("ir/dispatch_table.zig");
     _ = @import("ir/hoist/pass.zig");
     _ = @import("ir/coalesce/pass.zig");
+    _ = @import("engine/codegen/aot/format.zig");
+    _ = @import("engine/codegen/aot/serialise.zig");
     _ = @import("engine/codegen/shared/reg_class.zig");
     _ = @import("engine/codegen/shared/regalloc.zig");
     _ = @import("engine/codegen/arm64/inst.zig");

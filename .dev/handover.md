@@ -13,32 +13,28 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 8 / §9.8b / 8b.2 closed (per ADR-0038); **§9.8b / 8b.3 NEXT**
+## Current state — Phase 8 / §9.8b / 8b.3-c landed; 8b.3-d **NEXT**
 
-ADR-0038 (`0038_class_aware_alloc_deferral.md`, Status:
-Accepted) defers 8b.2-d class-aware allocation to Phase 15
-alongside the coalescer detection lift, mirroring ADR-0036's
-8b.1 pattern. Justification: liveness type-tagging is the
-structural prerequisite for both the allocator's dual-pool
-upgrade AND Phase 15's coalescer detection; running it once
-in Phase 15 instead of twice (8b.2-d then re-touched in
-Phase 15) preserves ABI stability per ADR-0035 + ADR-0036.
+§9.8b / 8b.3-c lands the AOT generator scaffolding:
+`src/engine/codegen/aot/{format, serialise}.zig` with
+inline-bytes `.cwasm` v0.1 format per ADR-0039. 15 unit
+tests cover header / func-meta / reloc round-trips +
+produceCwasm assembly + reloc rebase + 4-byte alignment
+padding. ADR-0039 amended (Revision 2) with header-size
+correction (60 not 56 bytes; `relocs_size` field placement
+clarification — pure numeric correction, no design change).
 
-8b.2 closes at 8b.2-c (LIFO free-pool refactor at
-`c7b0ea5`). 8b.2-d + 8b.2-e dissolve into 8b.2's closure.
+**Phase 8 status**: §9.8 / 8.0-8.4 [x]; §9.8a complete;
+§9.8b / 8b.1 [x] (ADR-0036); 8b.2 [x] (ADR-0038);
+8b.3-a/b/c [x]; **§9.8b / 8b.3-d NEXT** — `zwasm compile
+<input.wasm> -o <out.cwasm>` CLI wiring + compile.zig
+producer integration. Bench-delta deferred to Phase 12
+per ADR-0039.
 
-**Phase 8 status**: §9.8 / 8.0-8.4 [x]; §9.8a complete
-(8a.1-8a.6 [x]); §9.8b / 8b.1 [x] (ADR-0036);
-§9.8b / 8b.2 [x] (ADR-0038); **§9.8b / 8b.3 NEXT** — AOT
-skeleton (`zwasm compile foo.wasm -o foo.cwasm`).
-Phase 8 残 rows = 8b.3 + 8b.4 + 8b.5 + 8b.6.
-
-**Risk**: 8b.4 ≥10% aggregate now concentrates on 8b.3
-(AOT cold-start delta) + residual 8a.5 hoist cap-removal
-contribution. If 8b.3 underperforms, file ADR-0039 to
-amend §9.8b — either re-open class-aware in Phase 8b OR
-revise the ≥10% target downward (per ADR-0038
-§"Neutral / follow-ups" risk acknowledgement).
+**Risk** (per ADR-0039 §"Negative"): three §9.8b rows in
+a row produce 0% per-row delta. 8b.4 ≥10% aggregate is
+**structurally unattainable** with current plan; ADR-0040
+will revise §9.8b's exit criterion after 8b.3-d lands.
 
 ## Active task — §9.8b / 8b.3: AOT skeleton **NEXT**
 
@@ -55,8 +51,8 @@ Suggested chunk plan (8b.3):
 |-------|------------------------------------------------------------------------|----------|
 | 8b.3-a | Step 0 survey across wasmer + WasmEdge + wasmtime/cranelift + WAMR + v1 zwasm | [x] (this commit; survey at `private/notes/p8-8b3-aot-survey.md`) |
 | 8b.3-b | ADR-0039 design framing — inline-bytes `.cwasm` v0.1 format + pipeline reuse | [x] (this commit; ADR-0039 Accepted) |
-| 8b.3-c | Implement `engine/codegen/aot/{format, serialise}.zig`; round-trip parser test | **NEXT** |
-| 8b.3-d | CLI wiring (`zwasm compile <input.wasm> -o <out.cwasm>`); bench-delta deferred to Phase 12 per ADR-0039 (Phase 12 loader prerequisite); body documents per ADR-0036/0038 precedent | [ ] |
+| 8b.3-c | Implement `engine/codegen/aot/{format, serialise}.zig`; round-trip parser test (15 unit tests covering header / func meta / reloc / produceCwasm) | [x] (this commit) |
+| 8b.3-d | CLI wiring (`zwasm compile <input.wasm> -o <out.cwasm>`); bench-delta deferred to Phase 12 per ADR-0039 (Phase 12 loader prerequisite); body documents per ADR-0036/0038 precedent | **NEXT** |
 | 8b.3-e | 3-host gate; close 8b.3 [x] | [ ] |
 
 **§9.8b ≥10% aggregate risk acknowledgement** (per ADR-0039
