@@ -163,9 +163,45 @@ pub const Allocation = struct {
     }
 };
 
-/// Greedy-local allocation. `func.liveness` MUST be populated
-/// (call `liveness.compute` and assign first); otherwise returns
-/// `LivenessMissing`.
+/// Active-list entry: a currently-live vreg and the slot it
+/// holds. The expire pass at each new vreg's def_pc returns
+/// the slots of expired entries to the free pool.
+const ActiveEntry = struct { slot: u16, last_use_pc: u32 };
+
+/// Linear-scan allocation with LIFO free-pool reuse on dead
+/// vregs (§9.8b / 8b.2-c per ADR-0037).
+///
+/// `func.liveness` MUST be populated (call `liveness.compute`
+/// and assign first); otherwise returns `LivenessMissing`.
+///
+/// **Algorithm**: walk vregs in def_pc order (vreg ids are
+/// def-order by `liveness.compute`'s contract). At each
+/// vreg, expire actives whose `last_use_pc <= r.def_pc`,
+/// returning their slots to the LIFO free pool; then
+/// allocate by popping the free pool (if non-empty) or
+/// minting a fresh slot id (`n_slots += 1`).
+///
+/// Edge convention: a vreg dying at pc=N (last_use_pc=N) and
+/// a vreg born at pc=N (def_pc=N) do NOT overlap — the use
+/// happens before the def at that instr (e.g. `i32.add`
+/// pops two and pushes one; result reuses a popped slot).
+/// Standard LSRA practice.
+///
+/// **8b.2-c discovery (per ADR-0037 Revision 2)**: the prior
+/// busy-mask scan (`busy[slots[ev]] = true if earlier.last_
+/// use_pc > r.def_pc`) was already an inline slot-reuse
+/// mechanism — same semantic as this LIFO free-pool. The
+/// refactor's value is algorithmic (no per-vreg
+/// `@memset(&busy, false)` over 4 KiB; reduced constant
+/// factor) + Phase 15 substrate (free-pool pops produce
+/// explicit same-slot reuse events the coalescer per
+/// ADR-0035 + ADR-0036 can subscribe to). Bench-delta is
+/// 0% by construction. Existing tests are regression
+/// checks; functional behaviour is preserved (specific slot
+/// id assignments may differ — LIFO reuses recently-freed
+/// slots vs the prior "smallest free" picker — but
+/// `n_slots` and the overlap-free verifier post-condition
+/// are unchanged).
 pub fn compute(allocator: Allocator, func: *const ZirFunc) Error!Allocation {
     const live = func.liveness orelse return Error.LivenessMissing;
     if (live.ranges.len == 0) return .{ .slots = &.{}, .n_slots = 0 };
@@ -174,32 +210,45 @@ pub fn compute(allocator: Allocator, func: *const ZirFunc) Error!Allocation {
     errdefer allocator.free(slots);
     var n_slots: u16 = 0;
 
-    // Scan vregs in def_pc order (vreg ids are def-order by
-    // `liveness.compute`'s contract). For each vreg, mark which
-    // slots are still busy (held by an earlier vreg whose
-    // last_use_pc strictly outlives this vreg's def_pc), then
-    // pick the smallest free slot.
-    //
-    // Edge convention: a vreg dying at pc=N (last_use_pc=N) and
-    // a vreg born at pc=N (def_pc=N) do NOT overlap — the use
-    // happens before the def at that instr (e.g. `i32.add`
-    // pops two and pushes one; result reuses a popped slot).
-    // This is standard LSRA practice.
-    var busy: [@as(usize, max_slots) + 1]bool = undefined;
+    var active_buf: [@as(usize, max_slots) + 1]ActiveEntry = undefined;
+    var active_len: u16 = 0;
+    var free_buf: [@as(usize, max_slots) + 1]u16 = undefined;
+    var free_len: u16 = 0;
+
     for (live.ranges, 0..) |r, vreg| {
-        @memset(&busy, false);
-        for (live.ranges[0..vreg], 0..) |earlier, ev| {
-            if (earlier.last_use_pc > r.def_pc) busy[slots[ev]] = true;
+        // Expire actives whose last_use_pc <= r.def_pc; return
+        // their slots to the free pool. Swap-remove walk so
+        // the active list stays compact without preserving
+        // insertion order (the verifier's correctness check
+        // doesn't depend on it).
+        var i: u16 = 0;
+        while (i < active_len) {
+            if (active_buf[i].last_use_pc <= r.def_pc) {
+                free_buf[free_len] = active_buf[i].slot;
+                free_len += 1;
+                active_len -= 1;
+                if (i < active_len) active_buf[i] = active_buf[active_len];
+            } else {
+                i += 1;
+            }
         }
-        var s: u16 = 0;
-        const assigned: u16 = while (s < max_slots) : (s += 1) {
-            if (!busy[s]) break s;
-        } else {
-            std.debug.print("regalloc: SlotOverflow at func[{d}] vreg={d} ranges.len={d} (>{d} simultaneously live)\n", .{ func.func_idx, vreg, live.ranges.len, max_slots });
-            return Error.SlotOverflow;
+        // Allocate: pop from free pool (LIFO) or mint fresh.
+        const assigned: u16 = blk: {
+            if (free_len > 0) {
+                free_len -= 1;
+                break :blk free_buf[free_len];
+            }
+            if (n_slots >= max_slots) {
+                std.debug.print("regalloc: SlotOverflow at func[{d}] vreg={d} ranges.len={d} (>{d} simultaneously live)\n", .{ func.func_idx, vreg, live.ranges.len, max_slots });
+                return Error.SlotOverflow;
+            }
+            const new = n_slots;
+            n_slots += 1;
+            break :blk new;
         };
         slots[vreg] = assigned;
-        if (assigned + 1 > n_slots) n_slots = assigned + 1;
+        active_buf[active_len] = .{ .slot = assigned, .last_use_pc = r.last_use_pc };
+        active_len += 1;
     }
 
     return .{ .slots = slots, .n_slots = n_slots };
@@ -316,6 +365,28 @@ test "compute: shared-edge (use=def at same pc) does not count as overlap" {
     // dies at pc=2.
     try testing.expectEqual(@as(u16, 1), alloc.n_slots);
     try testing.expectEqual(alloc.slots[0], alloc.slots[1]);
+    try verify(&f, alloc);
+}
+
+// §9.8b / 8b.2-c (per ADR-0037): three sequential non-overlapping
+// vregs collapse to a single slot via free-pool reuse. Regression
+// check that slot reuse extends past the 2-vreg case in the
+// "two non-overlapping ranges share slot 0" test above.
+test "compute: three sequential non-overlapping ranges all share slot 0 (n_slots = 1)" {
+    var f = freshFunc();
+    defer f.deinit(testing.allocator);
+    const ranges = [_]LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 2 },
+        .{ .def_pc = 3, .last_use_pc = 5 },
+        .{ .def_pc = 6, .last_use_pc = 8 },
+    };
+    f.liveness = .{ .ranges = &ranges };
+    const alloc = try compute(testing.allocator, &f);
+    defer deinit(testing.allocator, alloc);
+    try testing.expectEqual(@as(u16, 1), alloc.n_slots);
+    try testing.expectEqual(@as(u16, 0), alloc.slots[0]);
+    try testing.expectEqual(@as(u16, 0), alloc.slots[1]);
+    try testing.expectEqual(@as(u16, 0), alloc.slots[2]);
     try verify(&f, alloc);
 }
 

@@ -13,43 +13,33 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 8 / §9.8b / 8b.1 closed via ADR-0036; **§9.8b / 8b.2 NEXT**
+## Current state — Phase 8 / §9.8b / 8b.2-c landed (LIFO free-pool refactor); 8b.2-d **NEXT**
 
-ADR-0036 (`0036_coalescer_scope_downgrade.md`, Status:
-Accepted) formalises 8b.1's scope as scaffolding-only;
-concrete detection (operand-stack vreg-numbering simulation
-+ emit-side query) deferred to Phase 15 once 8b.2's
-allocator reshape exposes natural same-slot sites. ADR-0035
-amended with Revision row citing ADR-0036. ROADMAP §9.8b /
-8b.1 row updated and flipped `[x]` per §18 (ADR filed
-first). The previous resume's §18-caught quiet downgrade
-attempt is structurally resolved.
+§9.8b / 8b.2-c lands the LIFO free-pool refactor of
+`regalloc.compute`. **Discovery** during implementation:
+the prior busy-mask scan already implemented slot reuse on
+dead vregs (the `earlier.last_use_pc > r.def_pc` check is
+an inline reuse mechanism). The refactor's value is
+algorithmic (no per-vreg `@memset` over 4 KiB) + Phase 15
+substrate (free-pool pops as same-slot reuse events for
+the coalescer per ADR-0035 + ADR-0036). Bench-delta 0% by
+construction.
 
-§9.8a closed across 6 commits. **Phase 8a foundation
-complete.** §9.8b now opens with 8b.1 closed; remaining
-rows = 8b.2 + 8b.3 + 8b.4 + 8b.5 + 8b.6.
-
-直近 commits (latest at top):
-
-- (this commit) chore(p8): close §9.8b / 8b.1 via ADR-0036 —
-  scope downgrade + ADR-0035 amend + ROADMAP retarget.
-- `e0128c7` chore(p8): annotate §9.8b / 8b.1 sub-rows
-  (8b.1-c + 8b.1-d-step1 [x] within row text).
-- `b2b47f8` chore(p8): mark §9.8a / 8a.5 [x]; reframe D-054
-  as independent.
-
-3-host gate at `34a3ac1`: Mac green, OrbStack 1 known D-054
-FAIL only, windowsmini green.
+ADR-0037 amended with Revision row 2 capturing the
+discovery. Lesson `2026-05-09-greedy-local-already-does-
+reuse.md` codifies "read the actual code before accepting
+upstream framing" rule. **Pivot for 8b.2-d**: real bench-
+delta wins migrate to **class-aware allocation** (D-036
+§option-b — current `regalloc.zig:131-133` notes
+"Tighter accounting lands when the allocator becomes
+class-aware"); requires ADR-0038 before implementation.
 
 **Phase 8 status**: §9.8 / 8.0-8.4 [x]; §9.8a complete
 (8a.1-8a.6 [x]); §9.8b / 8b.1 [x] (per ADR-0036);
-**§9.8b / 8b.2 NEXT** — Phase 8 残 rows = 8b.2 + 8b.3 + 8b.4
-+ 8b.5 + 8b.6.
-
-Step 5b's `8a.1+8a.2+8a.3 all [x]` trigger satisfied — Phase
-8b chunks remain **bench-delta-gated** per ADR-0032 (8b.2
-onward; 8b.1's bench-delta requirement is absorbed into
-8b.4 aggregate per ADR-0036).
+§9.8b / 8b.2-a (survey) + 8b.2-b (ADR-0037) + 8b.2-c
+(refactor) [x]; **§9.8b / 8b.2-d NEXT** — class-aware
+allocation per D-036 §option-b + ADR-0038. Phase 8 残
+rows = 8b.2-d + 8b.2-e + 8b.3 + 8b.4 + 8b.5 + 8b.6.
 
 ## Active task — §9.8b / 8b.2-c: Slot reuse implementation **NEXT**
 
@@ -76,10 +66,10 @@ Suggested chunk plan (8b.2):
 
 | #     | Description                                                            | Status   |
 |-------|------------------------------------------------------------------------|----------|
-| 8b.2-a | Step 0 survey across regalloc2 + cranelift + winch + wasmer + v1 W54 post-mortem | [x] (this commit; survey at `private/notes/p8-8b2-regalloc-survey.md`) |
-| 8b.2-b | ADR-0037 design framing — Option 1 slot-reuse MVP; LIFO free-pool; ABI preserved | [x] (this commit; ADR-0037 Accepted) |
-| 8b.2-c | Implement free-slot pool in `regalloc.zig`; new unit test for `n_slots = 1` on 3-vreg sequential program | **NEXT** |
-| 8b.2-d | Wire into `compile.zig`; bench-delta capture on tinygo/fib_loop + shootout/nestedloop + tinygo/string_ops | [ ] |
+| 8b.2-a | Step 0 survey across regalloc2 + cranelift + winch + wasmer + v1 W54 post-mortem | [x] (`8381dfb`) |
+| 8b.2-b | ADR-0037 design framing — Option 1 slot-reuse MVP (later amended w/ Revision 2 noting current allocator already implements reuse) | [x] (`8381dfb`; amended this commit) |
+| 8b.2-c | LIFO free-pool refactor of `regalloc.compute`; bench-delta 0% (semantic equivalence with prior busy-mask); Phase 15 substrate | [x] (this commit) |
+| 8b.2-d | Class-aware allocation per D-036 §option-b — needs ADR-0038 first; tighter spill-frame accounting when GPR + FP vregs share id space | **NEXT** |
 | 8b.2-e | 3-host gate; close 8b.2 [x] with bench-delta in commit body | [ ] |
 
 After 8b.2: 8b.3 (AOT skeleton), 8b.4 (≥10% aggregate
