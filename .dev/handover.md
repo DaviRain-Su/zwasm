@@ -13,7 +13,7 @@
    `0028_diagnostic_m3_trace_ringbuffer.md` (parent).
 6. `.dev/decisions/0021_arm64_prologue_split.md` (relevant for 8a.2 prologue inject).
 
-## Current state — Phase 8 / §9.8a / 8a.2 (JIT-execution sentinel)
+## Current state — Phase 8 / §9.8a / 8a.2-b (ARM64 prologue inject)
 
 §9.8a / 8a.1 closed: per-pass diagnostic two-channel design
 (ringbuffer Category.pass + ZirFunc.pass_diagnostics slot)
@@ -23,13 +23,14 @@ pipeline wiring + integration test).
 
 直近 commits (latest at top):
 
-- (this commit) chore(p8): mark §9.8a / 8a.1 [x]; retarget at
-  8a.2 JIT-execution sentinel.
+- (this commit) docs(p8): §9.8a / 8a.2-a — ADR-0034 JIT-
+  execution sentinel design framing.
+- `dc1097c` chore(p8): mark §9.8a / 8a.1 [x]; retarget at
+  8a.2.
 - `af0fb5a` feat(p8): §9.8a / 8a.1-d/e — wire passEvent into
   compile.zig pipeline (closes 8a.1).
 - `26b4fcf` feat(p8): §9.8a / 8a.1-c — ZirFunc.pass_diagnostics
   slot per ADR-0033.
-- `0b6408c` feat(p8): §9.8a / 8a.1-b — trace.zig passEvent API.
 
 3-host gate at `af0fb5a`:
 - Mac aarch64: green (test-all + lint).
@@ -41,28 +42,34 @@ pipeline wiring + integration test).
 **Phase 8 status**: §9.8 / 8.0-8.4 [x]; 8a.1 [x]; **§9.8a /
 8a.2 NEXT**. Phase 8 残 rows = 8a.2-8a.6 + 8b.1-8b.6.
 
-## Active task — §9.8a / 8a.2: JIT-execution sentinel **NEXT**
+## Active task — §9.8a / 8a.2-b: ARM64 prologue inject **NEXT**
 
-Per ROADMAP §9.8a row text: JIT block prologue gets a small
-inject (counter increment / sentinel store at a known runtime
-offset) so post-execution checks can prove the JIT-emitted body
-actually ran (vs. compile-passed but never invoked). The
-`realworld_run_jit` runner reads the counter post-call and
-reports `RUN-JIT-VERIFIED` vs `RUN-JIT-COMPILE-ONLY-PATH`.
-Resolves the v1-era recurring "is the JIT actually running?"
-confusion. Delta on prologue size is at most 4-8 bytes (ARM64
-single LDR-ADD-STR or x86_64 single INC-MEM); negligible for
-hot-loop benchmarks.
+Per ADR-0034:
+- Add `jit_executed_flag: u32 = 0` to `JitRuntime` (extern
+  struct in `src/engine/codegen/shared/jit_abi.zig`); add
+  `jit_executed_flag_off: u12` constant + 4-aligned imm12
+  budget assert.
+- ARM64 prologue inject (2 insns / 8 bytes) after the
+  existing X19 = X0 setup (word 7) and before optional
+  `SUB SP`:
+  - `ORR W17, WZR, #1` (W17 = 1)
+  - `STR W17, [X19, #jit_executed_flag_off]`
+- Update `prologue.body_start_offset(has_frame)`: 32 → 40
+  (no frame), 36 → 44 (frame > 0).
+- ~128 sites that hard-code prologue-relative offsets via
+  the helper migrate automatically.
+- Unit test: compile `i32.const 7; end`, build JitRuntime
+  with `jit_executed_flag = 0`, invoke, assert flag == 1.
 
 Suggested chunk plan:
 
 | #     | Description                                              | Status   |
 |-------|----------------------------------------------------------|----------|
-| 8a.2-a | Step 0 survey + design: where does the sentinel counter live (JitRuntime field? threadlocal? trace ringbuffer Category.exec?); both-arch prologue inject shape | **NEXT** |
-| 8a.2-b | ARM64 prologue inject + unit test                       | [ ]      |
-| 8a.2-c | x86_64 prologue inject + unit test                      | [ ]      |
-| 8a.2-d | realworld_run_jit runner reads counter; new RUN-JIT-VERIFIED status | [ ]      |
-| 8a.2-e | 3-host gate; close 8a.2 [x]                             | [ ]      |
+| 8a.2-a | ADR `0034_jit_execution_sentinel.md` design framing      | [x] (this commit) |
+| 8a.2-b | JitRuntime field + ARM64 prologue inject + unit test     | **NEXT** |
+| 8a.2-c | x86_64 prologue inject + unit test                       | [ ]      |
+| 8a.2-d | realworld_run_jit child marker print + parent grep; RUN-JIT-VERIFIED status | [ ]      |
+| 8a.2-e | 3-host gate; close 8a.2 [x]                              | [ ]      |
 
 After 8a.2 closes: 8a.3 (bench-delta-per-commit), 8a.4
 (`ZWASM_DIAG` env var), 8a.5 (D-053 + D-054 cap-removal
