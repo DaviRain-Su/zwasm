@@ -40,6 +40,13 @@ echo 'export PATH="/opt/zig:$PATH"' >> ~/.bashrc
 # (Phase 1+) wasm-tools and wasm-c-api are pulled by scripts when needed.
 # (Phase 4+) wasmtime, WASI SDK, Rust + wasm32-wasip1 — added on demand.
 # (Phase 11+) hyperfine — added on demand.
+
+# (Phase 7 / §9.7 / 7.10-l onward) JIT debug toolkit per
+# `.claude/rules/debug_jit.md` — install when investigating
+# realworld_run_jit run-stage SEGVs, JIT miscompiles, or
+# any x86_64 byte-stream debug task. `rr` is omitted: OrbStack
+# VMs don't expose perf counters (ptrace EIO on rr record).
+sudo apt install -y gdb lldb nasm strace
 ```
 
 ## Build verification (§9.0 / 0.2)

@@ -109,6 +109,13 @@ reach for:
   output, type-system behaviour, hot-loop timing. Bound: ≤ 1
   day; outcome → ADR (Rejected if rejected; or merged into the
   real implementation) or lesson if observational.
+- **Runtime debug toolkit** (lldb / gdb / ndisasm / strace /
+  SIGSEGV-handler): see `.claude/rules/debug_jit.md` for the
+  canonical inventory + copy-paste batch-mode recipes. That
+  file is **living** — extend it whenever you discover a new
+  tool / recipe so the next debug session inherits the
+  knowledge. Spikes for JIT crashes (the typical Step-4
+  trigger) almost always start there.
 
 **Trigger**: any in-flight decision that hinges on an unverified
 assumption ("I think the AAPCS64 stack alignment is 16 bytes" /
