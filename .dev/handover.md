@@ -12,38 +12,42 @@
 5. `.dev/lessons/INDEX.md` — keyword-grep for the active task domain.
 6. `.dev/optimisation_log.md` — F-NNN / R-NNN / O-NNN ledger.
 
-## Current state — Phase 7 / §9.7 / 7.10 IN-PROGRESS
+## Current state — Phase 7 / §9.7 / 7.11 IN-PROGRESS
 
-直近 commit (HEAD = `ff1e62a`):
+直近 commit (HEAD = `7caec5a`):
 
+- `7caec5a` fix(p7): liveness ranges leak in compile.zig errdefer chain
+- `c153918` chore(p7): close §9.7 / 7.10 chunk m + discharge D-049
+- `af44173` style(p7): zig fmt cleanup post 7.10-m
 - `ff1e62a` feat(p7): §9.7 / 7.10 chunk m — D-049 root cause + fix
-  (call_indirect funcref table population)
-- `98c8305` chore(infra): JIT/runtime debug toolkit
-- `9b60c17` chore(p7): chunk-m strategy — promote lldb batch mode
-- `911b92c` feat(p7): §9.7 / 7.10 chunk l (partial) — JIT entry() guards
 
-**Phase status**: §9.7 / 7.5 + 7.8 + **7.9 [x]**。Phase 7 残 row =
-7.10 / 7.11 🔒 / 7.12 / 7.13 🔒。
+**Phase status**: §9.7 / 7.5 + 7.8 + **7.9 [x]** + **7.10 [x]**.
+Phase 7 残 row = **7.11 🔒** / 7.12 / 7.13 🔒 / 7.14。
 
-**§9.7 / 7.10 progress** (post-chunk-m):
-- compile-pass: arm64 52/55, x86_64 45/55 (post-D-048)
-- run-stage: **SEGV 解消** — minimal call_indirect spike + 27
-  realworld fixtures all RUN-TRAP / RUN-UNSUPPORTED-SIG, 0 SEGV.
-  D-049 discharged at `ff1e62a`.
-- run-pass: still 0/55 — WASI host stubs trap on first import
-  (`fd_write` / `proc_exit`). Not a JIT bug; needs WASI host
-  wiring or strict-trap-pass interpretation per 7.9 precedent.
+**§9.7 / 7.10 close** (this session):
+- Mac arm64: 52/55 compile-pass (47/50 effective), 0 leak.
+- OrbStack Linux x86_64: 45/55 compile-pass (40/50 effective), 0 leak.
+- windowsmini x86_64: 45/55 compile-pass (40/50 effective), 0 leak.
+- All 3 hosts SEGV-free (D-049 element-table population fix).
+- liveness ranges leak in compile.zig errdefer chain
+  fixed inline (`7caec5a`).
 
-**§9.7 / 7.10 chain plan** (NEXT 群):
-- **7.10-n (NEXT)**: x86_64 host (OrbStack / windowsmini)
-  ZWASM_JIT_RUN=1 verification — confirm chunk-m fix removes
-  SEGV on Linux + Windows x86_64 too (Mac arm64 already
-  verified). After confirm, decide 7.10 close path: (a) follow
-  7.9 precedent (interpret "40+ run" as "40+ no-SEGV / clean
-  trap"), or (b) wire minimal WASI stubs (proc_exit + fd_write
-  → noop OK) to convert RUN-TRAP→RUN-PASS.
-- 7.10-br_table-fdepth (deferred): return-trampoline pattern。
-- 7.10-regalloc-port (deferred to Phase 8): D-029.
+**§9.7 / 7.11 三-way differential 🔒** (NEXT row):
+The most important gate of the project (per ADR-0019 carry-
+forward from Phase 8 lock). Exit criterion: `interp ==
+jit_arm64 == jit_x86` 0 mismatch over the spec testsuite +
+40+ realworld samples on each host.
+
+**§9.7 / 7.11 chain plan** (NEXT 群):
+- **7.11-survey (NEXT)**: Step 0 Explore subagent — survey
+  current diff_runner / wast_runtime_runner / spec_runner
+  shape; identify what cross-engine harness exists today and
+  where the three-way comparator hooks in. Verify the existing
+  realworld_diff (interp vs wasmtime) shape can extend to a
+  3-way (interp / arm64 / x86_64) with shared fixtures.
+- 7.11-impl (next, after survey): wire a triple-runner harness
+  per the survey's findings.
+- 7.11-gate: 0-mismatch verification on all 3 hosts; close 7.11.
 
 **Pre-existing infra (out-of-scope)**: `.githooks/pre_commit`
 (snake_case) が fire しないため fmt/file_size/lint gate 無効。
@@ -53,8 +57,8 @@ pre-existing)。修復は専用 chore + 大規模 fmt + 分割 ADR 必要。
 
 > **🔒 Phase 7 → 8 hard gate** が §9.7 / 7.13 に登録済。Detection
 > は Resume Step 2 + Step 7 re-target。詳細 `phase8_transition_gate.md`。
-> Active row 7.10 は gate prep window (= 7.13 - 3) 内 — Step 0.6
-> awareness 必須。
+> Active row 7.11 は gate prep window (= 7.13 - 2) 内 — Step 0.6
+> awareness 必須 (§3a deferred-work DAG cross-check)。
 
 **Phase**: Phase 7 (ARM64 + x86_64 baseline、ADR-0019)。
 **Branch**: `zwasm-from-scratch`。
@@ -65,15 +69,19 @@ pre-existing)。修復は専用 chore + 大規模 fmt + 分割 ADR 必要。
 - **D-026** env-stub host-func wiring (cross-module dispatch)。
 - **D-029** parallel-move 経路完備、reject は regalloc port 後 discharge
   (currently absent from debt.md — file row at next regalloc-port chunk).
-- 詳細・staleness check は `.dev/debt.md`（all active rows are
-  `blocked-by:` after D-049 discharge — zero `now` rows）。
+- **WASI host wiring (Phase 8 follow-up)**: 3 hosts all show
+  RUN-PASS = 0/55 under ZWASM_JIT_RUN=1 because WASI host stubs
+  trap on first import. Gate the conversion to RUN-PASS via
+  proc_exit + fd_write minimal wiring at §9.8 entry. Not a 7.10
+  blocker — the row interpreted compile-pass per 7.9 precedent.
+- 詳細・staleness check は `.dev/debt.md` (all active rows are
+  `blocked-by:` after D-049 discharge — zero `now` rows).
 - ADR-0025 (Zig host API) Phase B/D は post-7.8 — `0025_zig_library_surface.md`。
 
 ## Recently closed
-- §9.7 / 7.10 chunk m (`ff1e62a`) — D-049 SEGV 解消。call_indirect
-  funcref table population in `setupRuntime`。Edge fixture
-  `test/edge_cases/p7/call_indirect/funcref_roundtrip.{wat,wasm,expect}`
-  追加。
-- §9.7 / 7.10 chunks a..l-partial (`a8777ac`..`911b92c`)。
-  compile-pass 0 → 45/55 (D-048 が大寄与)。
+- §9.7 / 7.10 [x] (`c153918`) + chunk m fix (`ff1e62a`) — D-049
+  SEGV 解消 (call_indirect funcref table population)。Edge fixture
+  `test/edge_cases/p7/call_indirect/funcref_roundtrip.{wat,wasm,expect}`。
+- liveness leak fix (`7caec5a`) — compile.zig errdefer chain
+  (7 leaks on Linux/Windows DebugAllocator → 0)。
 - §9.7 / 7.9 [x] — arm64 realworld JIT 52/55 compile-pass。
