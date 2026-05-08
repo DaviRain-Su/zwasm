@@ -31,6 +31,7 @@ const liveness = @import("../../../ir/analysis/liveness.zig");
 const loop_info_mod = @import("../../../ir/analysis/loop_info.zig");
 const hoist = @import("../../../ir/hoist/pass.zig");
 const regalloc = @import("regalloc.zig");
+const trace = @import("../../../diagnostic/trace.zig");
 
 /// 7.5-close-d042 / 7.8 prep: comptime arch dispatch. ARM64 hosts
 /// (Mac) use `arm64/emit.zig`; x86_64 hosts (Linux + Windows) use
@@ -62,6 +63,7 @@ pub fn deinitFuncResult(allocator: Allocator, r: *FuncResult) void {
     if (r.func.liveness) |lv| if (lv.ranges.len != 0) allocator.free(lv.ranges);
     if (r.func.loop_info) |li| loop_info_mod.deinit(allocator, li);
     hoist.deinitArtifacts(allocator, &r.func);
+    if (r.func.pass_diagnostics) |pd| zir.deinitPassDiagnostics(allocator, pd);
     r.func.deinit(allocator);
 }
 
@@ -94,7 +96,23 @@ pub fn compileOne(
     var func = ZirFunc.init(func_idx, sig, locals);
     errdefer func.deinit(allocator);
 
+    // §9.8a / 8a.1-d — per-pass diagnostic records (per ADR-0033).
+    // Builds in-flight; transferred to `func.pass_diagnostics` at
+    // function close. Comptime-elided when `trace.enabled == false`
+    // (the ArrayList itself stays as an empty stack-resident value;
+    // the `.append` calls fold to no-ops via the comptime branches).
+    var pass_records: std.ArrayList(zir.PassRecord) = .empty;
+    errdefer if (comptime trace.enabled) pass_records.deinit(allocator);
+
+    trace.passEnter(func_idx, .lower);
     try lowerer.lowerFunctionBody(allocator, body, &func, module_types);
+    {
+        const applied: u32 = @intCast(func.instrs.items.len);
+        trace.passExit(func_idx, .lower, .{ .applied = applied, .skipped = 0, .extra = applied });
+        if (comptime trace.enabled) {
+            try pass_records.append(allocator, .{ .pass = .lower, .applied = applied, .skipped = 0, .extra = applied });
+        }
+    }
 
     // §9.8 / 8.4-d — ZIR hoist pass with local-set/local-get
     // rewrite (D-053 redesign per amended ADR-0031). Lifts
@@ -107,12 +125,33 @@ pub fn compileOne(
     // skip transformation; the cap insulates the integration
     // from a still-unidentified emit-stage UnsupportedOp source
     // tracked under D-053.
+    trace.passEnter(func_idx, .loop_info);
     const li = try loop_info_mod.compute(allocator, &func);
     errdefer loop_info_mod.deinit(allocator, li);
     func.loop_info = li;
+    {
+        const applied: u32 = @intCast(li.loop_headers.len);
+        const total_blocks: u32 = @intCast(func.blocks.items.len);
+        const skipped: u32 = if (total_blocks > applied) total_blocks - applied else 0;
+        trace.passExit(func_idx, .loop_info, .{ .applied = applied, .skipped = skipped, .extra = 0 });
+        if (comptime trace.enabled) {
+            try pass_records.append(allocator, .{ .pass = .loop_info, .applied = applied, .skipped = skipped, .extra = 0 });
+        }
+    }
+
+    trace.passEnter(func_idx, .hoist);
     try hoist.run(allocator, &func);
     errdefer hoist.deinitArtifacts(allocator, &func);
+    {
+        const applied: u32 = if (func.hoisted_constants) |h| @intCast(h.len) else 0;
+        const synth: u32 = if (func.synthetic_locals) |s| @intCast(s.len) else 0;
+        trace.passExit(func_idx, .hoist, .{ .applied = applied, .skipped = 0, .extra = synth });
+        if (comptime trace.enabled) {
+            try pass_records.append(allocator, .{ .pass = .hoist, .applied = applied, .skipped = 0, .extra = synth });
+        }
+    }
 
+    trace.passEnter(func_idx, .liveness);
     const lv = try liveness.compute(allocator, &func, func_sigs, module_types);
     func.liveness = lv;
     // ZirFunc.deinit does NOT walk into the (optional) liveness
@@ -122,7 +161,15 @@ pub fn compileOne(
     // would leak `lv.ranges`. Mirror deinitFuncResult's free
     // here so the unwind path is symmetric.
     errdefer if (lv.ranges.len != 0) allocator.free(lv.ranges);
+    {
+        const applied: u32 = @intCast(lv.ranges.len);
+        trace.passExit(func_idx, .liveness, .{ .applied = applied, .skipped = 0, .extra = applied });
+        if (comptime trace.enabled) {
+            try pass_records.append(allocator, .{ .pass = .liveness, .applied = applied, .skipped = 0, .extra = applied });
+        }
+    }
 
+    trace.passEnter(func_idx, .regalloc);
     var alloc = try regalloc.compute(allocator, &func);
     errdefer regalloc.deinit(allocator, alloc);
     // D-045 chunk 13b: override per-arch class boundaries so that
@@ -144,9 +191,33 @@ pub fn compileOne(
         },
         else => @compileError("unsupported host arch"),
     }
+    {
+        const applied: u32 = alloc.n_slots;
+        // High-water slot id ≈ `n_slots - 1` (the highest assigned
+        // slot index); 0 when no slots assigned. `extra` carries
+        // the high-water value per ADR-0033's per-pass table.
+        const high_water: u32 = if (alloc.n_slots == 0) 0 else alloc.n_slots - 1;
+        trace.passExit(func_idx, .regalloc, .{ .applied = applied, .skipped = 0, .extra = high_water });
+        if (comptime trace.enabled) {
+            try pass_records.append(allocator, .{ .pass = .regalloc, .applied = applied, .skipped = 0, .extra = high_water });
+        }
+    }
 
+    trace.passEnter(func_idx, .emit);
     const out = try emit.compile(allocator, &func, alloc, func_sigs, module_types, num_imports);
     errdefer emit.deinit(allocator, out);
+    {
+        const applied: u32 = @intCast(func.instrs.items.len);
+        const bytes_emitted: u32 = @intCast(out.bytes.len);
+        trace.passExit(func_idx, .emit, .{ .applied = applied, .skipped = 0, .extra = bytes_emitted });
+        if (comptime trace.enabled) {
+            try pass_records.append(allocator, .{ .pass = .emit, .applied = applied, .skipped = 0, .extra = bytes_emitted });
+        }
+    }
+
+    if (comptime trace.enabled) {
+        func.pass_diagnostics = .{ .entries = try pass_records.toOwnedSlice(allocator) };
+    }
 
     return .{
         .func = func,
@@ -162,6 +233,45 @@ pub fn compileOne(
 const testing = std.testing;
 const linker = @import("linker.zig");
 const entry = @import("entry.zig");
+
+test "compileOne: pass_diagnostics records all 6 passes when trace enabled" {
+    if (!trace.enabled) return error.SkipZigTest;
+    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64) and
+        builtin.cpu.arch != .x86_64)
+    {
+        return error.SkipZigTest;
+    }
+    trace.clear();
+
+    // Pure instruction bytes: `i32.const 7` (0x41 0x07) + `end` (0x0B).
+    const body = [_]u8{ 0x41, 0x07, 0x0B };
+    const sig: FuncType = .{ .params = &.{}, .results = &.{.i32} };
+    var r = try compileOne(testing.allocator, 42, sig, &body, &.{}, &.{}, &.{sig}, 0);
+    defer deinitFuncResult(testing.allocator, &r);
+
+    // Per-function slot populated with 6 records, in pipeline order.
+    try testing.expect(r.func.pass_diagnostics != null);
+    const entries = r.func.pass_diagnostics.?.entries;
+    try testing.expectEqual(@as(usize, 6), entries.len);
+    try testing.expectEqual(trace.PassId.lower, entries[0].pass);
+    try testing.expectEqual(trace.PassId.loop_info, entries[1].pass);
+    try testing.expectEqual(trace.PassId.hoist, entries[2].pass);
+    try testing.expectEqual(trace.PassId.liveness, entries[3].pass);
+    try testing.expectEqual(trace.PassId.regalloc, entries[4].pass);
+    try testing.expectEqual(trace.PassId.emit, entries[5].pass);
+    // Lower processed at least 2 instructions (i32.const + end).
+    try testing.expect(entries[0].applied >= 2);
+    // No loops in this module: loop_info applied = 0.
+    try testing.expectEqual(@as(u32, 0), entries[1].applied);
+    // Hoist found nothing to hoist (no loops): applied = 0, synth = 0.
+    try testing.expectEqual(@as(u32, 0), entries[2].applied);
+    try testing.expectEqual(@as(u32, 0), entries[2].extra);
+    // Emit produced non-zero bytes.
+    try testing.expect(entries[5].extra > 0);
+
+    // Ringbuffer captured 12 events (6 enter + 6 exit).
+    try testing.expectEqual(@as(u64, 12), trace.writeCount());
+}
 
 test "compileOne: tiny straight-line module — (func (result i32) i32.const 7 end) returns 7" {
     if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
