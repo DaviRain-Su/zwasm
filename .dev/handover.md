@@ -13,55 +13,65 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 8 closed; **Phase 9 (SIMD-128) IN-PROGRESS**, §9.9/9.1 NEXT
+## Current state — Phase 9 (SIMD-128) / §9.9/9.1 [x]; **§9.9/9.2 NEXT** (ADR design framing)
 
-Phase 8 boundary closed: §9.8b/8b.5 [x] (lite audit clean
-across §A-§G categories; artefact at `private/audit-2026-
-05-09.md`) + 8b.6 [x] (Phase Status widget flipped Phase 8
-= DONE / Phase 9 = IN-PROGRESS; §9.9 task table expanded
-inline with 13 rows from 9.0 → 9.12).
+§9.9/9.1 Step 0 survey complete (`private/notes/p9-9.1-simd-
+survey.md`, 302 lines, gitignored). Headlines:
+- 415 op variants across 59 spec test files; 171 ZirOp pre-
+  declared across 8 categories.
+- Three divergences anchored to project principles: (a) one
+  ZirOp per operation (shape-as-variant); (b) reuse FP-class
+  register pool; (c) spec-fidelity float ops (NEON must
+  explicitly trap on IEEE-754 specials, not silently saturate).
+- SSE4.1 minimum baseline confirmed correct (PMULLD / PINSRB /
+  PBLENDVB are SSE4.1-only).
+- §9.2-9.10 chunk plan: ~4500 LOC total across both backends.
 
-**Phase 9 (SIMD-128)** opens. Goal: `simd.wast` spec test
-fail=skip=0 across both backends; SSE4.1 minimum baseline;
-SIMD smoke benches against reference runtimes. **🔒 gate**: no.
+§9.8 SHA backfill landed at `4af7acd` per LOOP.md phase-
+boundary one-commit bookkeeping discipline.
 
-§9.9/9.0 [x] (this commit). **§9.9/9.1 NEXT** — Step 0
-survey for SIMD-128 op catalogue + ARM64 NEON / x86_64
-SSE4.1 encoding strategy. Lands `private/notes/p9-9.1-simd-
-survey.md`.
+**§9.9/9.2 NEXT** — ADR-NNNN design framing for SIMD-128:
+ZirOp catalogue + register-class extension (FP-class pool
+reuse) + dispatch-table integration via `feature/simd_128/
+register.zig` + spec-fidelity strategy.
 
-## Active task — §9.9/9.1: SIMD-128 Step 0 survey **NEXT**
+## Active task — §9.9/9.2: SIMD-128 ADR design framing **NEXT**
 
-Per ROADMAP §9.9 task table (just opened), 9.1 dispatches
-an Explore subagent surveying the SIMD-128 op catalogue +
-encoding strategy across:
-- wasmtime/cranelift (ISLE-based SIMD lowering reference)
-- wasmer compiler-singlepass (singlepass NEON / SSE4.1)
-- zware (Zig idiom for SIMD)
-- v1 zwasm (W43 SIMD addr cache + W44 reg class — read,
-  never copy per P10)
+Per the survey + ROADMAP §9.9 row text: ADR-NNNN frames the
+design choices. Substantial draft (~10 pages per survey
+estimate) covering:
 
-Survey lands at `private/notes/p9-9.1-simd-survey.md` (200-
-400 lines per `textbook_survey.md` Default brief). Headlines:
-op grouping (load/store / lane access / arithmetic /
-comparison / shuffle / conversion), 1300+ `simd.wast`
-assertion catalogue, 3 divergences anchored to P3 + P6 + P7.
+1. **ZirOp catalogue**: shape-as-variant decision (one ZirOp
+   per `<shape>.<op>` combination) per P6 + §A12. Confirms
+   that the existing 171 ZirOp pre-declarations cover the
+   415 spec ops via shape-suffix encoding.
+2. **Register-class extension**: v128 vregs reuse the FP-
+   class register pool (`max_reg_slots_fp = 13` for ARM64
+   V16-V28; XMM0-XMM15 for x86_64). Spill-frame stride
+   diverges (8 bytes scalar / 16 bytes v128) — needs shape
+   tag to disambiguate. **W54-class regression risk**: per
+   `single_slot_dual_meaning.md`, the slot id alone can't
+   carry shape semantics; design must surface shape as a
+   separate axis (RegClass hint) not packed into slot id.
+3. **Feature-register pattern**: SIMD-128 ops register into
+   the central dispatch table at startup via `feature/simd_
+   128/register.zig` (per ADR-0023 §4.5). Validator + parser
+   + interpreter + emit consult the dispatch table only —
+   no `if (simd_enabled)` branching in shared code per A12.
+4. **Spec-fidelity float strategy**: ARM64 NEON's silently-
+   saturating semantics must be overridden to match Wasm's
+   IEEE-754 quirks (trap on special values where spec
+   demands).
+5. **SSE4.1 minimum baseline**: PMULLD + PINSRB/W/D + PBLENDVB
+   require SSE4.1; runtime feature detection refuses startup
+   on older CPUs. Cite Intel SDM line ranges.
 
-After 9.1: 9.2 ADR-NNNN design framing → 9.3 validator
-extension → 9.4 IR → 9.5-9.8 emit (ARM64 NEON + x86_64
-SSE4.1 split) → 9.9 spec test wire-in → 9.10 bench → 9.11
-audit → 9.12 open §9.10 (Wasm 3.0 features).
-
-## Phase 8 close — SHA backfill deferred
-
-Per LOOP.md Phase boundary discipline, §9.8a + §9.8b SHA
-backfill is a separate one-commit step. Most §9.8b rows
-already carry SHAs in their row text (8b.1/0036, 8b.2/0038,
-8b.3-c/b1720a1, 8b.3-d/2460386, 8b.4/this-commit). Bare
-[x] rows in §9.8a / §9.8b that need backfill are addressed
-in a follow-on `chore(p8): backfill §9.8 SHA pointers`
-commit (deferred to next /continue iteration since the
-phase-close commit is already substantial).
+Estimated chunk size: ~250-350 LOC ADR (similar to ADR-0035
++ ADR-0038 shape). After 9.2: 9.3 validator (~150 LOC) →
+9.4 IR ZirOp catalogue + lower paths (~450 LOC) → 9.5-9.8
+ARM64 + x86_64 emit (~3600 LOC across 4 chunks) → 9.9 spec
+test wire-in → 9.10 bench → 9.11 boundary audit → 9.12 open
+§9.10 (Wasm 3.0).
 
 After 8b.4: 8b.5 (boundary audit_scaffolding) + 8b.6 (open
 §9.9 inline + flip Phase Status).
