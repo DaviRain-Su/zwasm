@@ -19,6 +19,12 @@
 # `--phase-record` writes one history.yaml entry tagged with the
 # current commit + arch + the supplied --reason. Without
 # --phase-record, recent.yaml is overwritten in place.
+#
+# CI (.github/workflows/bench.yml) invokes this script with
+# `--quick --phase-record --reason="CI: ..."` on each push to
+# zwasm-from-scratch; the per-arch entry is then extracted via
+# scripts/append_bench_to_history.sh and aggregated into one bot
+# commit. Local users do not call append_bench_to_history.sh.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."

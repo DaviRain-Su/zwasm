@@ -23,18 +23,19 @@ preserved long-term.
 
 ## Cadence (ROADMAP §12.4)
 
-- **Local manual** (Phases 0–12): `bash scripts/run_bench.sh
-  [--quick]` writes `bench/results/recent.yaml`. `bash
-  scripts/record_merge_bench.sh [--phase-record] [--quick]`
-  appends one row to `bench/results/history.yaml` when
-  `--phase-record` is set; without that flag it still writes
-  to `recent.yaml`.
-- **Per-merge automated** (Phase 13+): GitHub Actions matrix
-  records on `macos-15`, `ubuntu-22.04`, `windows-2022`. Phase-
-  boundary commits trigger `--phase-record`.
-- **Manual baselines**: workflow_dispatch in Phase 13+, or local
-  `bash scripts/record_merge_bench.sh --phase-record` + manual
-  commit.
+- **Local manual**: `bash scripts/run_bench.sh [--quick]` writes
+  `bench/results/recent.yaml`. Adding `--phase-record
+  --reason="<tag>: <gist>"` also appends one row to
+  `bench/results/history.yaml`. `scripts/record_merge_bench.sh`
+  is the phase-boundary wrapper.
+- **Per-push CI**: [`.github/workflows/bench.yml`](../.github/workflows/bench.yml)
+  runs `--quick --phase-record` on every push to
+  `zwasm-from-scratch` across `macos-latest` (aarch64-darwin) +
+  `ubuntu-latest` (x86_64-linux). Each arch uploads a YAML
+  fragment as an artifact; an `aggregate` job merges them in
+  arch-name-sorted order into `history.yaml` and pushes one bot
+  commit tagged `[skip ci]`. windowsmini stays a local-only path
+  (no GitHub-hosted Windows bench runner).
 
 ## Schema (ROADMAP §12.3)
 
@@ -52,8 +53,10 @@ preserved long-term.
 ```
 
 `bench/results/history.yaml` is append-only (ROADMAP §A9). Rows
-are added by `scripts/record_merge_bench.sh --phase-record` and
-the Phase-13+ CI bench-record job. Never edit historical rows.
+are added by `scripts/run_bench.sh --phase-record` (manual /
+phase boundary) and the per-push CI bench-aggregate job
+([`.github/workflows/bench.yml`](../.github/workflows/bench.yml)).
+Never edit historical rows.
 
 `bench/results/recent.yaml` is gitignored and overwritten on
 every local run.
@@ -66,12 +69,9 @@ behaviour toward the number, not the underlying goal. Comparison
 against reference runtimes (wasm3, wasmtime baseline, wasmtime
 cranelift, wasmer singlepass) is recorded but not gated.
 
-## Current status (post-§9.6 / 6.H, pre-Phase 11)
+## Current status (post-Phase-7, Phase-8 onward)
 
-`bench/results/history.yaml` carries the pre-Phase-6-revert
-trap-time baseline (preserved per ADR-0011 §3). Real numbers
-against the post-6.K interpreter land at Phase 11 when
-`scripts/run_bench.sh` + `record_merge_bench.sh` finish their
-stub→hyperfine wiring (their TODO p11 markers). Until then, the
-file's role is structural — proving the layout per ADR-0012 §7
-holds.
+`scripts/run_bench.sh` is hyperfine-driven; CI records two arch
+rows per push (per the cadence above). Local phase-boundary
+rows continue to land via `--phase-record`. The pre-Phase-6
+trap-time baseline rows are preserved per ADR-0011 §3.
