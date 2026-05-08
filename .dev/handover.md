@@ -12,65 +12,71 @@
 5. `.dev/lessons/INDEX.md` — keyword-grep for the active task domain.
 6. `.dev/optimisation_log.md` — F-NNN / R-NNN / O-NNN ledger.
 
-## Current state — Phase 7 / §9.7 / 7.12 IN-PROGRESS
+## Current state — Phase 7 / §9.7 / 7.13 🔒 hard gate (PAUSED)
 
-直近 commit (HEAD pending — chunk-7.11-close):
+直近 commit (HEAD pending — chunk-7.12-close):
 
-- (pending) chore(p7): mark §9.7 / 7.11 [x] (three-way diff — cross-host
-  total anchors); retarget at 7.12 (Phase-7 audit_scaffolding boundary)
+- (pending) chore(p7): mark §9.7 / 7.12 [x] (audit_scaffolding boundary
+  pass; report at `private/audit-2026-05-08-phase7-close.md`); 7.13 🔒
+  surfaced to user
+- `a6d9e47` chore(p7): mark §9.7 / 7.11 [x] (three-way differential)
 - `fa23eb5` chore(p7): mark §9.7 / 7.10 [x]
 - `7caec5a` fix(p7): liveness ranges leak in compile.zig errdefer chain
-- `ff1e62a` feat(p7): §9.7 / 7.10 chunk m — D-049 root cause + fix
 
 **Phase status**: §9.7 / 7.5 + 7.8 + **7.9 [x]** + **7.10 [x]** +
-**7.11 [x]**. Phase 7 残 row = 7.12 (audit) / 7.13 🔒 (hard gate) / 7.14。
+**7.11 [x]** + **7.12 [x]**. Phase 7 残 row = **7.13 🔒** (hard gate)
++ 7.14 (open §9.8 inline).
 
-**§9.7 / 7.11 close** (this session):
-- `scripts/check_three_host_diff.sh` aggregates cross-host total
-  anchors from /tmp/{mac,orb,win}.log; verifies engine differential
-  via runner-totals identity:
-  - spec_assert_runner: 212/0/20 IDENTICAL all 3 hosts
-  - wast_runner: 1158/0 IDENTICAL all 3 hosts
-  - realworld_run_runner: 44/55 passed IDENTICAL all 3 hosts
-  - diff_runner: 39/55 matched IDENTICAL all 3 hosts
-  - realworld_run_jit_runner: 45/55 IDENTICAL on x86_64 hosts
-- Per-host interp-vs-JIT execution differential deferred to Phase 8
-  alongside JIT WASI host wiring (new D-050).
+## 🔒 Phase 7 → Phase 8 hard gate (loop paused here)
 
-**§9.7 / 7.12 (NEXT)**:
-"Phase-7 boundary `audit_scaffolding` pass (auto-fired by /continue
-at boundary)". Invoke audit_scaffolding skill on the closing phase;
-review §A〜§G categories; address any `block` findings inline or
-via debt entries; close 7.12 with the audit report path.
+Per `continue/SKILL.md` "Exception — hard human-in-loop transition
+gates", the loop must surface to the user at this row. The
+`phase8_transition_gate.md` Section-1〜Section-5 checklist needs
+collaborative review:
 
-**§9.7 / 7.13 🔒 hard gate** is right after 7.12. The autonomous
-loop must surface to the user with `phase8_transition_gate.md`
-when 7.12 closes (Detection rule: row body contains 🔒 AND
-phase8_transition_gate.md reference).
+1. **Functional completion** — Phase 7 functional rows green:
+   ☑ 7.5 + 7.8 spec gates closed (skip-impl=0 on all 3 hosts).
+   ☑ 7.9 + 7.10 realworld closed (compile-pass effective ≥ 40+ on
+   each arch). ☑ 7.11 differential gate closed via cross-host
+   total anchors (`scripts/check_three_host_diff.sh`).
+2. **Debt ledger reconciliation** — Active rows = 13, all
+   `blocked-by:` with named barriers; 0 `now` rows.
+3. **Design cleanliness extrapolation** (§3a deferred-work DAG):
+   ☑ class-aware-regalloc landed (D-036). ☑ fp-spill-machinery
+   landed (D-037). ☑ D-035 multi-value landed. D-029 (parallel-
+   move + reject) explicit Phase 8 deferral — collaborative review
+   should record the rationale here.
+4. **Optimisation log triage** — needs walk-through.
+5. **Strategic review** — `meta_audit` skill invocation; user-
+   gated.
+
+User picks up from here. Resumption mechanism: work through
+the gate doc's checklist, then ask to flip 7.13 → `[x]`.
+
+## Recently closed (this session)
+
+- §9.7 / 7.10 [x] (`fa23eb5`) — D-049 SEGV 解消 via call_indirect
+  funcref table population (`ff1e62a` chunk m).
+- §9.7 / 7.11 [x] (`a6d9e47`) — three-way differential via
+  cross-host total anchors + `scripts/check_three_host_diff.sh`.
+- §9.7 / 7.12 [x] (this commit) — audit_scaffolding boundary pass.
+- liveness leak fix (`7caec5a`) — compile.zig errdefer chain.
+
+## Open structural debt (pointers — current)
+
+- **D-050** WASI host wiring for JIT — Phase 8 candidate; gates
+  sharper 7.11 per-fixture comparator.
+- **D-022** Diagnostic M3 / trace ringbuffer — re-evaluate Phase 7
+  close 後.
+- **D-026** env-stub host-func wiring (cross-module dispatch).
+- **D-029** parallel-move 経路完備 — Phase 8 deferred.
+- **D-030 follow-up** x86_64 emit.zig orchestrator > 2000 LOC —
+  ADR-grade refactor (prologue split) deferred to Phase 8.
+- 詳細・全 13 Active rows は `.dev/debt.md` 参照。
 
 **Pre-existing infra (out-of-scope)**: `.githooks/pre_commit`
-(snake_case) が fire しないため fmt/file_size/lint gate 無効。
+fmt/file_size/lint gate — not firing per snake_case mismatch;
 fmt drift / hard-cap 超過 3 files / lint warns 4 (全 pre-existing)。
 
 **Phase**: Phase 7 (ARM64 + x86_64 baseline、ADR-0019)。
 **Branch**: `zwasm-from-scratch`。
-
-## Open structural debt (pointers)
-
-- **D-050 (NEW)** WASI host wiring for JIT path — gates a sharper
-  7.11 per-fixture comparator + converts RUN-TRAP cluster to
-  RUN-PASS for proc_exit-only fixtures. Phase 8 candidate.
-- **D-022** Diagnostic M3 / trace ringbuffer — Phase 7 close 後再評価。
-- **D-026** env-stub host-func wiring (cross-module dispatch)。
-- **D-029** parallel-move 経路完備、reject は regalloc port 後 discharge
-  (currently absent from debt.md — file row at next regalloc-port chunk).
-- 詳細・staleness check は `.dev/debt.md` (no `now` rows).
-- ADR-0025 (Zig host API) Phase B/D は post-7.8 — `0025_zig_library_surface.md`。
-
-## Recently closed
-- §9.7 / 7.11 [x] (this commit) — three-way differential via
-  cross-host total anchors + `scripts/check_three_host_diff.sh`.
-- §9.7 / 7.10 [x] (`fa23eb5`) + chunk m fix (`ff1e62a`) — D-049
-  SEGV 解消。
-- liveness leak fix (`7caec5a`) — compile.zig errdefer chain。
-- §9.7 / 7.9 [x] — arm64 realworld JIT 52/55 compile-pass。
