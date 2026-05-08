@@ -266,6 +266,113 @@ pub fn writeCount() u64 {
 }
 
 // ============================================================
+// §9.8a / 8a.4 — `ZWASM_DIAG` runtime opt-in surface.
+//
+// Build-time gate `-Dtrace-ringbuffer` controls whether the
+// ringbuffer itself is compiled in (per ADR-0028). The runtime
+// `ZWASM_DIAG` env var controls whether built-in surfaces drain
+// the data on demand — orthogonal to recording.
+//
+// Tokens (comma-separated, e.g. `ZWASM_DIAG=passes,jit_exec`):
+//   * `passes`    — drain `Category.pass` events to stderr at
+//                    process exit. Per ADR-0033.
+//   * `jit_exec`  — surface JIT-execution sentinel results.
+//                    Per ADR-0034 (currently realworld_run_jit
+//                    runner reads this directly; this token
+//                    reserves the surface for future
+//                    interp-vs-JIT differential tools).
+//   * `bench`     — bench-script verbose output. Per ADR-0032.
+//                    Currently host-side bash; this token
+//                    reserves the name.
+//   * `*`         — enable every channel.
+//
+// Zone 1 declares the data shape; Zone 3 entry points (cli/
+// main.zig + api/instance.zig) read process env via their zone-
+// appropriate API and pass the value to `initFromEnv`. Mirrors
+// the `support/dbg.zig:ZWASM_DEBUG` pattern (D-009).
+// ============================================================
+
+/// Runtime channel bits. Comptime-elided when `enabled == false`
+/// (the build flag controls whether the field even exists in any
+/// meaningful sense; release builds compile out).
+pub const Channels = packed struct(u8) {
+    passes: bool = false,
+    jit_exec: bool = false,
+    bench: bool = false,
+    _pad: u5 = 0,
+};
+
+var channels: Channels = .{};
+var channels_initialised: bool = false;
+
+/// Configure runtime channels from a `ZWASM_DIAG` env var
+/// value. Pass `null` (or empty) to disable every channel;
+/// `*` to enable all.
+pub fn initFromEnv(value: ?[]const u8) void {
+    if (comptime !enabled) return;
+    channels = .{};
+    channels_initialised = true;
+    const v = value orelse return;
+    if (v.len == 0) return;
+    if (std.mem.eql(u8, v, "*")) {
+        channels = .{ .passes = true, .jit_exec = true, .bench = true };
+        return;
+    }
+    var it = std.mem.tokenizeScalar(u8, v, ',');
+    while (it.next()) |raw_tok| {
+        const tok = std.mem.trim(u8, raw_tok, " \t");
+        if (std.mem.eql(u8, tok, "passes")) channels.passes = true
+        else if (std.mem.eql(u8, tok, "jit_exec")) channels.jit_exec = true
+        else if (std.mem.eql(u8, tok, "bench")) channels.bench = true;
+        // Unknown tokens silently ignored — keeps forward-compat
+        // with future channel additions.
+    }
+}
+
+/// Query whether a named channel is enabled. Returns false in
+/// release / pre-init / unknown-name cases.
+pub fn channelEnabled(name: []const u8) bool {
+    if (comptime !enabled) return false;
+    if (!channels_initialised) return false;
+    if (std.mem.eql(u8, name, "passes")) return channels.passes;
+    if (std.mem.eql(u8, name, "jit_exec")) return channels.jit_exec;
+    if (std.mem.eql(u8, name, "bench")) return channels.bench;
+    return false;
+}
+
+/// §9.8a / 8a.4 — drain `Category.pass` ringbuffer entries to
+/// stderr in chronological order. No-op when `enabled == false`,
+/// when `ZWASM_DIAG=passes` is unset, or when the ring is empty.
+/// Intended for `defer trace.drainPassesToStderr()` at process
+/// entry-point scope (cli/main.zig).
+pub fn drainPassesToStderr() void {
+    if (comptime !enabled) return;
+    if (!channelEnabled("passes")) return;
+    var buf: [capacity]TraceEntry = undefined;
+    const n = drain(&buf, capacity);
+    if (n == 0) return;
+    std.debug.print("[zwasm-diag passes] drained {d} pass-event entries:\n", .{n});
+    for (buf[0..n]) |entry| {
+        if (entry.category != .pass) continue;
+        const fi: u32 = @as(u32, entry.payload_a) >> 4;
+        const pid_lo4: u4 = @intCast(entry.payload_a & 0xF);
+        const ev_tag: u4 = @intFromEnum(entry.event);
+        const ev_str = if (ev_tag == @intFromEnum(PassEvent.pass_enter)) "enter" else "exit";
+        std.debug.print(
+            "  func={d} pass_id_lo4={d} {s} payload_b=0x{x}\n",
+            .{ fi, pid_lo4, ev_str, entry.payload_b },
+        );
+    }
+}
+
+/// Test-only: reset channel state.
+pub fn resetChannelsForTest() void {
+    if (comptime !enabled) return;
+    channels = .{};
+    channels_initialised = false;
+}
+
+// ============================================================
 // Tests
 // ============================================================
 
@@ -364,6 +471,44 @@ test "trace: PassSummary.digest saturates applied + skipped at u16 max" {
 
     const small: PassSummary = .{ .applied = 3, .skipped = 5, .extra = 99 };
     try testing.expectEqual(@as(u32, (5 << 16) | 3), small.digest());
+}
+
+test "ZWASM_DIAG: initFromEnv null/empty disables every channel" {
+    if (!enabled) return error.SkipZigTest;
+    resetChannelsForTest();
+    initFromEnv(null);
+    try testing.expect(!channelEnabled("passes"));
+    try testing.expect(!channelEnabled("jit_exec"));
+    try testing.expect(!channelEnabled("bench"));
+
+    initFromEnv("");
+    try testing.expect(!channelEnabled("passes"));
+    try testing.expect(!channelEnabled("jit_exec"));
+}
+
+test "ZWASM_DIAG: comma-separated tokens parse + tolerate whitespace + unknown tokens" {
+    if (!enabled) return error.SkipZigTest;
+    resetChannelsForTest();
+    initFromEnv(" passes , jit_exec , unknown_future ");
+    try testing.expect(channelEnabled("passes"));
+    try testing.expect(channelEnabled("jit_exec"));
+    try testing.expect(!channelEnabled("bench"));
+    try testing.expect(!channelEnabled("unknown_future"));
+}
+
+test "ZWASM_DIAG: `*` enables every channel" {
+    if (!enabled) return error.SkipZigTest;
+    resetChannelsForTest();
+    initFromEnv("*");
+    try testing.expect(channelEnabled("passes"));
+    try testing.expect(channelEnabled("jit_exec"));
+    try testing.expect(channelEnabled("bench"));
+}
+
+test "ZWASM_DIAG: pre-init returns false (matches ZWASM_DEBUG idiom)" {
+    if (!enabled) return error.SkipZigTest;
+    resetChannelsForTest();
+    try testing.expect(!channelEnabled("passes"));
 }
 
 test "trace: packPass saturates func_idx at 20 bits" {

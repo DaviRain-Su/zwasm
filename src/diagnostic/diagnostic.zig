@@ -41,6 +41,13 @@
 
 const std = @import("std");
 
+/// §9.8a / 8a.4 — trace ringbuffer + ZWASM_DIAG runtime opt-in
+/// surface. Re-exported here so `zwasm.diagnostic.trace.X` is
+/// the canonical path for callers (cli/main.zig + future api/
+/// instance.zig) without needing a separate top-level zwasm.zig
+/// re-export.
+pub const trace = @import("trace.zig");
+
 /// Initial tag set. Numbering is **draft** in phase 1; M4 locks
 /// the values when the C-ABI accessor family ships, after which
 /// adding a tag is append-only. Phase 1 callers should reference

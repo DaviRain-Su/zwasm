@@ -37,6 +37,12 @@ pub fn main(init: std.process.Init) !void {
     // returns null when the var is unset → dbg becomes a no-op.
     dbg.initFromEnv(init.environ_map.get("ZWASM_DEBUG"));
 
+    // §9.8a / 8a.4 — `ZWASM_DIAG` runtime opt-in for the trace
+    // ringbuffer drain + future bench/jit_exec channels. Pre-init
+    // and `-Dtrace-ringbuffer=false` builds make this a no-op.
+    diagnostic.trace.initFromEnv(init.environ_map.get("ZWASM_DIAG"));
+    defer diagnostic.trace.drainPassesToStderr();
+
     var arg_it = try std.process.Args.Iterator.initAllocator(init.minimal.args, gpa);
     defer arg_it.deinit();
     _ = arg_it.next().?; // executable name
