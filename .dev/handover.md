@@ -13,37 +13,55 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 8 / §9.8b/8b.4 [x] (substrate audit + ROADMAP prep); **8b.5 NEXT**
+## Current state — Phase 8 closed; **Phase 9 (SIMD-128) IN-PROGRESS**, §9.9/9.1 NEXT
 
-8b.4 closed: ADRs 0036/0037/0038/0039 audit confirmed
-they each cite Phase 12 / Phase 15 lift points 5-12 times
-in Consequences §§ (no Revision amendments needed).
-Phase 12 + Phase 15 Exit criteria amended with explicit
-§9.8b artefact references + concrete bench-delta targets
-(≥30% cold-start; ≥5% coalescer + ≥3% class-aware = ≥10%
-combined Phase 15 aggregate).
+Phase 8 boundary closed: §9.8b/8b.5 [x] (lite audit clean
+across §A-§G categories; artefact at `private/audit-2026-
+05-09.md`) + 8b.6 [x] (Phase Status widget flipped Phase 8
+= DONE / Phase 9 = IN-PROGRESS; §9.9 task table expanded
+inline with 13 rows from 9.0 → 9.12).
 
-**Phase 8 status**: §9.8/8.0-8.4 [x]; §9.8a complete;
-§9.8b/8b.1 [x], 8b.2 [x], 8b.3 [x], 8b.4 [x]; **8b.5
-NEXT** — Phase-8b boundary `audit_scaffolding` pass.
-After 8b.5: 8b.6 (open §9.9 inline + Phase Status widget
-flip Phase 8 = DONE → Phase 9 = IN-PROGRESS).
+**Phase 9 (SIMD-128)** opens. Goal: `simd.wast` spec test
+fail=skip=0 across both backends; SSE4.1 minimum baseline;
+SIMD smoke benches against reference runtimes. **🔒 gate**: no.
 
-3-host gates green at `2460386` (Mac 1151/0/12; OrbStack
-211/1/20 D-054 baseline; windowsmini retry 212/0/20 +
-all sub-runners after D-028 first-run flake).
+§9.9/9.0 [x] (this commit). **§9.9/9.1 NEXT** — Step 0
+survey for SIMD-128 op catalogue + ARM64 NEON / x86_64
+SSE4.1 encoding strategy. Lands `private/notes/p9-9.1-simd-
+survey.md`.
 
-## Active task — §9.8b / 8b.5: Phase-8b boundary audit_scaffolding **NEXT**
+## Active task — §9.9/9.1: SIMD-128 Step 0 survey **NEXT**
 
-Per the per-task TDD loop's **Phase boundary** section in
-`continue/SKILL.md`: "Mandatory: invoke `audit_scaffolding`
-(the skill's 'Mandatory' trigger — phase boundary)". 8b.5
-fires the audit, produces `private/audit-2026-05-09.md`,
-and either fixes `block` findings inline or files an ADR.
+Per ROADMAP §9.9 task table (just opened), 9.1 dispatches
+an Explore subagent surveying the SIMD-128 op catalogue +
+encoding strategy across:
+- wasmtime/cranelift (ISLE-based SIMD lowering reference)
+- wasmer compiler-singlepass (singlepass NEON / SSE4.1)
+- zware (Zig idiom for SIMD)
+- v1 zwasm (W43 SIMD addr cache + W44 reg class — read,
+  never copy per P10)
 
-After 8b.5: 8b.6 opens §9.9 inline (SIMD-128) + flips
-Phase Status widget (Phase 8 = DONE; Phase 9 = IN-PROGRESS).
-Then SHA-backfill commit per phase-boundary discipline.
+Survey lands at `private/notes/p9-9.1-simd-survey.md` (200-
+400 lines per `textbook_survey.md` Default brief). Headlines:
+op grouping (load/store / lane access / arithmetic /
+comparison / shuffle / conversion), 1300+ `simd.wast`
+assertion catalogue, 3 divergences anchored to P3 + P6 + P7.
+
+After 9.1: 9.2 ADR-NNNN design framing → 9.3 validator
+extension → 9.4 IR → 9.5-9.8 emit (ARM64 NEON + x86_64
+SSE4.1 split) → 9.9 spec test wire-in → 9.10 bench → 9.11
+audit → 9.12 open §9.10 (Wasm 3.0 features).
+
+## Phase 8 close — SHA backfill deferred
+
+Per LOOP.md Phase boundary discipline, §9.8a + §9.8b SHA
+backfill is a separate one-commit step. Most §9.8b rows
+already carry SHAs in their row text (8b.1/0036, 8b.2/0038,
+8b.3-c/b1720a1, 8b.3-d/2460386, 8b.4/this-commit). Bare
+[x] rows in §9.8a / §9.8b that need backfill are addressed
+in a follow-on `chore(p8): backfill §9.8 SHA pointers`
+commit (deferred to next /continue iteration since the
+phase-close commit is already substantial).
 
 After 8b.4: 8b.5 (boundary audit_scaffolding) + 8b.6 (open
 §9.9 inline + flip Phase Status).

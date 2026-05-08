@@ -1170,8 +1170,8 @@ of each phase advances it.
 | 5     | DONE        | —                             |
 | 6     | DONE        | —                                                              |
 | 7     | DONE        | —                                                              |
-| 8     | IN-PROGRESS | JIT optimisation foundation 🔒 (per ADR-0019)                  |
-| 9     | PENDING     | SIMD-128                                                       |
+| 8     | DONE        | JIT optimisation foundation 🔒 (per ADR-0019)                  |
+| 9     | IN-PROGRESS | SIMD-128                                                       |
 | 10    | PENDING     | GC, EH, Tail call, memory64 (Wasm 3.0 完備) 🔒                 |
 | 11    | PENDING     | WASI 0.1 full + bench infra                                    |
 | 12    | PENDING     | AOT compilation mode                                           |
@@ -1615,8 +1615,8 @@ via the three-way differential carried forward from Phase 7.11.
 | 8b.2 | **Regalloc upgrade** — LIFO free-pool refactor of `regalloc.compute` (8b.2-c) + design framing (8b.2-b ADR-0037) + survey (8b.2-a). **Discovery during 8b.2-c**: the prior busy-mask scan already implemented slot reuse on dead vregs (per ADR-0037 Revision 2 + lesson `2026-05-09-greedy-local-already-does-reuse.md`); the free-pool refactor's value is algorithmic cleanup + Phase 15 substrate. Class-aware allocation per D-036 §option-b (originally 8b.2-d) deferred to Phase 15 alongside coalescer detection lift per ADR-0038 (structural overlap with the liveness type-tagging prerequisite). 8b.4 ≥10% aggregate concentrates on 8b.3 AOT. | [x] (per ADR-0038; 8b.2-c at `c7b0ea5`) |
 | 8b.3 | **AOT skeleton** — `zwasm compile foo.wasm -o foo.cwasm` produces a loadable artifact per ADR-0039 (inline-bytes `.cwasm` v0.1 format with arch-tagged 60-byte header + per-func metadata + relocs + types + code sections). `engine/codegen/aot/{format, serialise, produce}.zig` + `cli/compile.zig` land the generator pipeline; Phase 12's loader executes the artifact. Bench-delta (cold-start vs JIT first-invocation) deferred to Phase 12 per ADR-0039 (loader prerequisite); ADR-0040 migrates the §9.8b aggregate target to Phase 12 + Phase 15. | [x] (per ADR-0039; 8b.3-c at `b1720a1`, 8b.3-d at `2460386`) |
 | 8b.4 | **Substrate-coherence audit** (revised by ADR-0040; was "Bench delta ≥10% aggregate"). Verifies that the §9.8b scaffolding (coalesce pass + free-pool allocator + .cwasm format) composes cleanly and is referenced by the Phase 12 (AOT loader) + Phase 15 (coalescer detection + class-aware allocator) ROADMAP plans. 8b.4-a audit (this commit): ADRs 0036/0037/0038/0039 each cite Phase 12 / Phase 15 lift points 5-12 times in their Consequences §§ — no Revision amendments needed. 8b.4-b ROADMAP prep (this commit): Phase 12 + Phase 15 Exit criteria amended with explicit §9.8b artefact references + concrete bench-delta targets (≥30% cold-start; ≥5% coalescer + ≥3% class-aware = ≥10% combined). The ≥10% aggregate runtime-bench target migrates to Phase 12 (cold-start delta) + Phase 15 (coalescer + class-aware delta) where the work that delivers the wins lives. | [x] (per ADR-0040; this commit) |
-| 8b.5 | Phase-8b boundary `audit_scaffolding` pass. | [ ]            |
-| 8b.6 | Open §9.9 inline + flip phase tracker. | [ ]            |
+| 8b.5 | Phase-8b boundary `audit_scaffolding` pass — lite-mode coverage of §A-§G categories (skill not in available-skills this session); audit clean across functional health / ADR coherence / code coherence / lessons / handover / debt / extended-challenge anchors. Artefact at `private/audit-2026-05-09.md` (gitignored). | [x] (this commit) |
+| 8b.6 | Open §9.9 inline + flip Phase Status widget (Phase 8 → DONE; Phase 9 → IN-PROGRESS). | [x] (this commit) |
 
 ### Phase 9 — SIMD-128
 
@@ -1631,6 +1631,24 @@ via the three-way differential carried forward from Phase 7.11.
   numeric ratio target.
 
 **🔒 gate**: no.
+
+#### §9.9 task list (initial expansion; refines as the phase progresses)
+
+| #    | Description                                                                                              | Status         |
+|------|----------------------------------------------------------------------------------------------------------|----------------|
+| 9.0  | Open §9.9 inline + flip Phase Status widget (Phase 8 = DONE; Phase 9 = IN-PROGRESS). | [x] (this commit) |
+| 9.1  | Step 0 survey: SIMD-128 op catalogue + ARM64 NEON / x86_64 SSE4.1 encoding strategy across wasmtime / wasmer / zware / v1 zwasm. Lands `private/notes/p9-9.1-simd-survey.md`. | [ ]            |
+| 9.2  | ADR-NNNN — SIMD-128 design framing: register-class extension (V-register pool already reserved per ADR-0027 + D-037); op grouping (load/store / lane access / arithmetic / comparison / shuffle / conversion); spec-fidelity strategy (`simd.wast` 1300+ assertions). | [ ]            |
+| 9.3  | Validator extension: SIMD value type (`v128`) + per-op type signatures. Activates the `feature/simd_128/` register entry per ADR-0023 §4.5. | [ ]            |
+| 9.4  | IR extension: SIMD ZirOps + lower paths (per the §A12 dispatch-table-not-pervasive-if pattern). | [ ]            |
+| 9.5  | ARM64 emit (NEON): SIMD load/store + lane access + integer arithmetic. Bundle by op family per LOOP.md chunk granularity. | [ ]            |
+| 9.6  | ARM64 emit (NEON): SIMD comparison + shuffle + float arithmetic + conversion. | [ ]            |
+| 9.7  | x86_64 emit (SSE4.1): SIMD load/store + lane access + integer arithmetic. | [ ]            |
+| 9.8  | x86_64 emit (SSE4.1): SIMD comparison + shuffle + float arithmetic + conversion. | [ ]            |
+| 9.9  | `simd.wast` spec test wired in; fail=skip=0 across both backends (3-host gate). | [ ]            |
+| 9.10 | SIMD smoke benches against wasmtime + wazero + wasmer; recorded to `bench/results/history.yaml` per ADR-0012. | [ ]            |
+| 9.11 | Phase-9 boundary `audit_scaffolding` pass + SHA backfill. | [ ]            |
+| 9.12 | Open §9.10 inline + flip phase tracker. | [ ]            |
 
 ### Phase 10 — GC, EH, Tail call, memory64 (Wasm 3.0 完備) 🔒
 
