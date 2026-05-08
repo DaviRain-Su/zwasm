@@ -7,113 +7,99 @@
 
 1. `.dev/handover.md` (this file).
 2. `.dev/ROADMAP.md` §9 Phase Status widget + §9.8 task table — Phase 8 active.
-3. `.dev/debt.md` — D-054 + D-055 `blocked-by:` chain; 9 other rows.
-4. `.dev/lessons/INDEX.md` — keyword-grep for the active task domain
-   (focus: hoist-vreg-semantic, regalloc-pool-size-mismatch, w54-class).
-5. `.dev/decisions/0031_zir_hoist_pass.md` (ADR-0031 hoist design + cap=4 amend).
-6. `.dev/decisions/0033_pass_trace_extension.md` + `0034_jit_execution_sentinel.md`
-   (8a.1 + 8a.2 observability infra; the read-side for 8a.5).
+3. `.dev/debt.md` — D-054 `blocked-by:` reframed (separate from D-053);
+   D-055 + 9 other rows.
+4. `.dev/lessons/INDEX.md` — keyword-grep for the active task domain.
+5. `.dev/decisions/0031_zir_hoist_pass.md` (ADR-0031 hoist; needs amend
+   after D-053 close).
 
-## Current state — Phase 8 / §9.8a / 8a.5-c (fix br_table post-hoist UnsupportedOp)
+## Current state — Phase 8 / §9.8a / 8a.6 (boundary audit)
 
-§9.8a / 8a.1-8a.4 closed. The four foundation rows landed
-across this session arc. Now the substantive 8a.5 row begins:
-the cap-removal investigation that uses 8a.1 (pass-trace) +
-8a.2 (sentinel) + 8a.3 (bench-delta) + 8a.4 (ZWASM_DIAG drain)
-to localise which silent `UnsupportedOp` in
-`arm64/{op_call,op_control,gpr}.zig` fires under post-hoist
-IR with > 4 synthetic locals.
+§9.8a / 8a.5 closed: D-053 hoist branch_targets-as-PC bug
+fixed at `2e0022c`. Cap removed; baseline preserved (52/55
+compile-pass + 15 RUN-JIT-VERIFIED on Mac aarch64).
 
 直近 commits (latest at top):
 
-- (this commit) chore(p8): mark §9.8a / 8a.4 [x]; retarget at
-  8a.5 cap-removal investigation.
-- `9785ab8` feat(p8): §9.8a / 8a.4 — ZWASM_DIAG runtime opt-in.
-- `d0a364b` feat(p8): §9.8a / 8a.3 — bench-delta-per-commit.
-- `308ca97` feat(p8): §9.8a / 8a.2-d — realworld_run_jit
-  cross-process sentinel surface (closes 8a.2 minus D-055).
+- (this commit) chore(p8): mark §9.8a / 8a.5 [x]; D-053 closed;
+  D-054 reframed as independent OrbStack-only investigation.
+- `2e0022c` (rebased to `34a3ac1`) fix(p8): §9.8a / 8a.5-c/d —
+  hoist branch_targets-as-PC bug; remove cap.
+- `b204ad3` feat(p8): §9.8a / 8a.5-b — diagnostic errdefer in
+  arm64/emit op-dispatch; localised regression to br_table.
+- `f212892` chore(p8): §9.8a / 8a.5-a cap-removed reproducer
+  findings.
 
-3-host gate at `9785ab8`: Mac green, OrbStack 1 known D-054
-FAIL only, windowsmini green.
+3-host gate at `34a3ac1` (post-D-053 fix): Mac green; OrbStack
+1 known D-054 FAIL (unchanged from pre-fix; same 0xFD1BD386 →
+D-054 has separate root cause); windowsmini green (212/0/20).
 
-**Phase 8 status**: §9.8 / 8.0-8.4 [x]; 8a.1-8a.4 [x];
-**§9.8a / 8a.5 NEXT**. Phase 8 残 rows = 8a.5 + 8a.6 +
+**Phase 8 status**: §9.8 / 8.0-8.4 [x]; 8a.1-8a.5 [x]; **§9.8a /
+8a.6 NEXT** (8a boundary audit). Phase 8 残 rows = 8a.6 +
 8b.1-8b.6.
 
-## Active task — §9.8a / 8a.5-c: fix br_table post-hoist UnsupportedOp **NEXT**
+## Active task — §9.8a / 8a.6: 8a boundary audit **NEXT**
 
-8a.5-b finding (full notes: `private/notes/p8-8a5-survey.md`):
-diagnostic `errdefer` added to `arm64/emit.zig` main op-
-dispatch loop. Cap=1000 rerun surfaces:
+Per ROADMAP row text:
+> Phase-8a boundary `audit_scaffolding` pass — focuses on §A
+> (functional health) + §F (debt coherence after D-053
+> discharge) + §G (extended challenge anchors with the new
+> diag infra).
 
-```
-arm64/emit: failing op `br_table` at func[18] pc=64
-```
+This is a meta-pass invoking the `audit_scaffolding` skill in
+"phase boundary" mode. Then close 8a, advance to 8b.
 
-The post-hoist regression source is **`br_table` in `arm64/
-op_control.zig`** (one of: line 270 `start+count >= targets.
-len`, lines 295-296 `arity > merge_top_vregs_cap (8)`, line
-320). Hoist's synthetic-local insertions shift the operand-
-stack state; the br_table's per-target arity computation may
-exceed the merge_top_vregs_cap.
+D-053 closure note: the actual root cause was NOT in the emit
+pass (the 8a.5 row's hypothesis was "ZirOp emit handler under
+post-hoist IR"). The bug was upstream in `hoist/pass.zig`:
+`branch_targets[]` entries were being PC-shifted as if they
+were PCs, but they're Wasm br/br_table block-stack depths.
+At cap=4, depth values (0/1/2 typically) plus small shifts
+landed by coincidence on valid block-stack indices. At cap >
+~10-20, depth shift inflated past `labels.items.len`,
+triggering `arm64/op_control.zig:240` UnsupportedOp on
+br_table.
 
-8a.5-c plan: read `emitBrTable`, identify exact failing
-constraint, fix or refine cap.
+Lesson candidate: `2026-05-09-hoist-branch-targets-as-pc.md`
+("a single-axis-mistake hidden by a small-input mask"). The
+existing test "shifts branch_targets across hoist prologue"
+locked in the wrong semantics; rewriting it as "leaves
+depths invariant" exposes the lock-in failure mode worth
+codifying.
 
-## Active task — historical 8a.5-b chunk-plan retired (was: bisect)
-
-8a.5-a (cap-removed reproducer) findings (full survey in
-`private/notes/p8-8a5-survey.md`):
-
-- Cap=1000 regression: 52/55 → **42/55 compile-pass** (−10);
-  15/55 → **8/55 RUN-PASS** (−7).
-- Repeated stderr signature: `compileWasm: func[18] params=1
-  results=1 → UnsupportedOp` across ≥5 fixtures (rust_file_io,
-  go_string_builder, go_crypto_sha256, go_hello_wasi,
-  cpp_vector_sort, …) — strongly suggests one shared runtime-
-  stub function (≥5 const ops in a loop) hits a single
-  ZirOp emit handler that fails under post-hoist IR.
-- One outlier: cpp_unique_ptr_test.wasm fails with
-  COMPILE-VAL BadValType (validator-stage) — unrelated to
-  cap; likely a v128/funcref param leak. Not 8a.5 scope.
-
-8a.5-b plan (next chunk):
-1. Pick one fixture (e.g. tinygo_fib.wasm or rust_file_io.wasm).
-2. Wire `trace.drainPassesToStderr()` into the realworld_run_jit
-   runner's exit path so 8a.4's ZWASM_DIAG=passes drain fires
-   from that exe (currently only cli/main.zig drains).
-3. Re-run cap-removed with ZWASM_DIAG=passes,jit_exec; identify
-   which pass produces the IR shape that arm64 emit rejects.
-4. Hand-craft a minimal repro under `private/spikes/8a5_cap_
-   removal/` (≤ 1 day per extended_challenge.md Step 4 spike
-   discipline). Outcome → ADR or fix.
-
-8a.5 still discharges D-054 + D-055 contingent (per chain in
-debt.md).
+D-054 reframe (debt.md updated this commit): the OrbStack-only
+as-loop-broke regression is **NOT** caused by the hoist
+branch_targets bug. Same 0xFD1BD386 value pre/post D-053 fix.
+Independent root cause; hypothesis: OrbStack/Rosetta x86_64
+emulation interaction OR a Linux-x86_64-only path skirted by
+Win64 ABI on windowsmini. Investigation deferred; D-054 stays
+`blocked-by:` with updated barrier.
 
 Suggested chunk plan:
 
 | #     | Description                                              | Status   |
 |-------|----------------------------------------------------------|----------|
-| 8a.5-a | Build with `-Dtrace-ringbuffer=true`; reproduce cap-removed regression locally; capture pass-trace + emit-stage logs | [x] (this commit; survey at `private/notes/p8-8a5-survey.md`) |
-| 8a.5-b | Wire trace drain into realworld_run_jit runner; bisect to single fixture + ZirOp combo; small spike under `private/spikes/` | **NEXT** |
-| 8a.5-c | Either fix emit path OR refine cap into structurally-correct filter | [ ]      |
-| 8a.5-d | Remove `max_hoists_per_func` cap from `src/ir/hoist/pass.zig`; verify baseline ≥ 15/55 RUN-PASS + hoist count increased | [ ]      |
-| 8a.5-e | 3-host gate; close D-053 + D-054 + D-055 contingent; close 8a.5 [x] | [ ]      |
+| 8a.6-a | Run audit_scaffolding skill in phase-boundary mode       | **NEXT** |
+| 8a.6-b | Apply any local-fix `block` findings inline              | [ ]      |
+| 8a.6-c | Add lesson `2026-05-09-hoist-branch-targets-as-pc.md`    | [ ]      |
+| 8a.6-d | Amend ADR-0031 Revision history with D-053 root-cause note | [ ]    |
+| 8a.6-e | SHA-backfill §9.8a rows; mark 8a.6 [x]; open §9.8b        | [ ]      |
 
-After 8a.5 closes: 8a.6 (8a boundary audit). Then §9.8b begins.
+After 8a.6 closes: §9.8b begins (Coalescer / Regalloc upgrade /
+AOT skeleton). Step 5b's `8a.1+8a.2+8a.3 all [x]` trigger now
+satisfied — Phase 8b chunks will be bench-delta-gated.
 
 ## Open structural debt (pointers — current; full list in `.dev/debt.md`)
 
+- **D-054** (`blocked-by: separate investigation; OrbStack-only`)
+  — reframed; separate from D-053.
 - **D-055** (`blocked-by: D-052 + emit_test_*.zig migration`) —
   x86_64 prologue inject deferred.
-- **D-054** (`blocked-by: 8a.5 + D-055`) — OrbStack-only as-
-  loop-broke regression.
 - 9 `blocked-by:` rows — D-007 / D-010 / D-016 / D-018 / D-020
-  / D-021 / D-022 / D-026 / D-028 / D-052; barriers all hold
-  this resume.
+  / D-021 / D-022 / D-026 / D-028 / D-052; barriers all hold.
 
-D-053 promoted to ROADMAP row §9.8a / 8a.5 per ADR-0032.
+D-053 closed at `2e0022c` (was promoted to ROADMAP row §9.8a /
+8a.5).
 
 **Phase**: Phase 8 (JIT optimisation foundation 🔒、ADR-0019)。
 **Branch**: `zwasm-from-scratch`。
