@@ -13,58 +13,65 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 8 / §9.8b / 8b.3 closed (CLI + producer landed); 8b.3-e gate **NEXT**
+## Current state — Phase 8 / §9.8b / 8b.3 [x] + ADR-0040 landed; 8b.4 **NEXT** (substrate audit)
 
-§9.8b / 8b.3-d lands `zwasm compile <input.wasm> -o
-<out.cwasm>` CLI wiring + producer orchestration:
-`src/engine/codegen/aot/produce.zig` (compileWasm output →
-.cwasm bytes) + `src/cli/compile.zig` (subcommand handler)
-+ `src/cli/main.zig` (compile branch). The synthetic
-`() -> i32 7` round-trip test exercises the full producer
-path through compileWasm + parseHeader; types section is
-1 FuncType per defined func with `(params_count, results_
-count, val_type bytes)` tight encoding.
+§9.8b / 8b.3 closed (per ADR-0039); 8b.3-c at `b1720a1`
+(format + serialise) + 8b.3-d at `2460386` (CLI +
+producer). ADR-0040 (`99fcceb1`) revises §9.8b's
+aggregate target — substrate work + measurement migrates
+to Phase 12 + Phase 15. ROADMAP §9.8b row 8b.4 reframed
+from "Bench delta ≥10%" to "Substrate-coherence audit"
+per ADR-0040.
 
-**Phase 8 status**: §9.8 / 8.0-8.4 [x]; §9.8a complete;
-§9.8b / 8b.1 [x] (ADR-0036); 8b.2 [x] (ADR-0038);
-8b.3-a/b/c/d [x]; **§9.8b / 8b.3-e NEXT** — 3-host gate +
-close 8b.3 [x]. Then **ADR-0040** revises §9.8b ≥10%
-aggregate exit per the deferred-Phase-12 measurement
-trajectory.
+**Phase 8 status**: §9.8/8.0-8.4 [x]; §9.8a complete;
+§9.8b/8b.1 [x] (ADR-0036), 8b.2 [x] (ADR-0038), 8b.3 [x]
+(ADR-0039); **§9.8b/8b.4 NEXT** — substrate-coherence
+audit per ADR-0040. After 8b.4: 8b.5 (boundary
+`audit_scaffolding`) + 8b.6 (open §9.9 inline).
 
-**Risk** (per ADR-0039 §"Negative"): three rows produced
-0% per-row delta. ADR-0040 resolution path after 8b.3-e:
-options include lowering aggregate target, deferring
-measurement to Phase 12, or extending §9.8b with row 8b.7.
+3-host gates dispatched at `2460386` (running); ADR-0040
++ ROADMAP edits land in subsequent commit on top.
 
-## Active task — §9.8b / 8b.3: AOT skeleton **NEXT**
+## Active task — §9.8b / 8b.4: Substrate-coherence audit **NEXT**
 
-`zwasm compile foo.wasm -o foo.cwasm` produces a loadable
-artifact (the generator pipeline; consumer side finalises in
-Phase 12). `engine/codegen/aot/` slot already reserved per
-ADR-0023; mirror the JIT pipeline's ZIR + regalloc.Allocation
-outputs without interpreter coupling. **Bench-delta** measures
-cold-start time (.cwasm load) vs JIT first-invocation.
+Per ADR-0040 (Status: Accepted, `99fcceb1`), 8b.4 is now
+a **substrate-coherence audit** verifying:
 
-Suggested chunk plan (8b.3):
+1. `src/ir/coalesce/pass.zig` + `func.coalesced_movs` slot
+   are referenced by the Phase 15 coalescer plan.
+2. `src/engine/codegen/shared/regalloc.zig` LIFO free-pool
+   is the substrate Phase 15's class-aware allocator
+   extends.
+3. `src/engine/codegen/aot/{format, serialise, produce}.zig`
+   + `src/cli/compile.zig` are referenced by the Phase 12
+   loader plan.
+4. ADR-0036 + ADR-0037 + ADR-0038 + ADR-0039 each cite the
+   Phase 15 / Phase 12 lift point in their `Consequences` §
+   (verify; amend Revision rows if missing).
 
-| #     | Description                                                            | Status   |
-|-------|------------------------------------------------------------------------|----------|
-| 8b.3-a | Step 0 survey across wasmer + WasmEdge + wasmtime/cranelift + WAMR + v1 zwasm | [x] (this commit; survey at `private/notes/p8-8b3-aot-survey.md`) |
-| 8b.3-b | ADR-0039 design framing — inline-bytes `.cwasm` v0.1 format + pipeline reuse | [x] (this commit; ADR-0039 Accepted) |
-| 8b.3-c | Implement `engine/codegen/aot/{format, serialise}.zig`; round-trip parser test (15 unit tests covering header / func meta / reloc / produceCwasm) | [x] (`b1720a1`) |
-| 8b.3-d | CLI wiring (`zwasm compile <input.wasm> -o <out.cwasm>`); `aot/produce.zig` orchestrator (CompiledWasm → .cwasm); synthetic `() -> i32 7` round-trip test through compileWasm. Bench-delta deferred to Phase 12 per ADR-0039. | [x] (this commit) |
-| 8b.3-e | 3-host gate; close 8b.3 [x]; file ADR-0040 to revise §9.8b ≥10% aggregate target | **NEXT** |
+Suggested chunk plan (8b.4):
 
-**§9.8b ≥10% aggregate risk acknowledgement** (per ADR-0039
-§"Negative"): three Phase 8b rows in a row produce 0% per-
-row bench-delta (8b.1 ADR-0036 scope-down; 8b.2 ADR-0037+0038
-substrate; 8b.3 ADR-0039 generator-only). 8b.4's ≥10% target
-is **structurally unattainable** with current plan. Resolution:
-**ADR-0040** to revise §9.8b's exit criterion (file after
-8b.3-c lands; options: lower aggregate target, defer
-measurement to Phase 12, or extend with measurement-focused
-row 8b.7).
+| #     | Description                                                                                  | Status   |
+|-------|----------------------------------------------------------------------------------------------|----------|
+| 8b.4-a | Audit ADR-0036/0037/0038/0039 Consequences §§ for Phase 12/15 lift-point citations; amend Revisions if absent | **NEXT** |
+| 8b.4-b | Phase 12 + Phase 15 ROADMAP row prep: stub task tables noting the inherited bench-delta obligations (per ADR-0040 §"Neutral / follow-ups") | [ ] |
+| 8b.4-c | Close 8b.4 [x]; 3-host gate is doc-only so foreground sufficient | [ ] |
+
+After 8b.4: 8b.5 (boundary audit_scaffolding) + 8b.6 (open
+§9.9 inline + flip Phase Status).
+
+## Closed §9.8b artefacts (for Phase 12 + Phase 15 reference)
+
+- ADRs: 0035 (coalescer design) / 0036 (8b.1 scope down) /
+  0037 (regalloc upgrade + Rev 2 discovery) / 0038 (class-
+  aware deferral) / 0039 (.cwasm format + Rev 2 numeric
+  correction) / 0040 (aggregate target revision)
+- Lessons: `2026-05-09-greedy-local-already-does-reuse.md`
+- Code: `src/ir/coalesce/pass.zig`, `src/engine/codegen/
+  shared/regalloc.zig` LIFO free-pool, `src/engine/codegen/
+  aot/{format, serialise, produce}.zig`, `src/cli/compile.zig`
+- Surveys (gitignored): `private/notes/p8-8b{1,2,3}-*-
+  survey.md`
 
 After 8b.3: 8b.4 (≥10% aggregate; concentrated on 8b.3
 contribution per ADR-0038), 8b.5 (Phase 8 boundary audit),
