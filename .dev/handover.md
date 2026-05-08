@@ -39,22 +39,58 @@ rows = 8.4 (Hoist pass) + 8.5 (Coalescer) + 8.6 (Regalloc upgrade)
 + 8.7 (AOT skeleton) + 8.8 (bench delta ≥10%) + 8.9 (boundary
 audit) + 8.10 (open §9.9).
 
-## Active task — §9.8 / 8.4: Hoist pass — **PARTIAL; redesign required**
+## Active task — §9.8 / 8.4–8.7 all surveyed; design surface non-trivial
 
-Sub-chunk progress (this cycle):
+Phase 8 substantive rows (8.4 Hoist / 8.5 Coalescer / 8.6
+Regalloc upgrade / 8.7 AOT skeleton) all need careful per-row
+ADR + design before implementation. Two surveys this cycle
+exposed scope subtleties:
 
-| #     | Description                                                                              | Status      |
-|-------|------------------------------------------------------------------------------------------|-------------|
-| 8.4-a | ADR-0031 draft (`zir_hoist_pass.md`) — constant-hoist MVP design framing. Committed. | [x]         |
-| 8.4-b | `src/ir/hoist/pass.zig` MVP: instr-move + pc_shift / blocks / branch_targets update; unit tests for splice mechanics. Committed. | [x]         |
-| 8.4-c | Pipeline integration in `src/engine/codegen/shared/compile.zig` — **REVERTED**. realworld_run_jit regressed 52/55+15/55 → 38/55+2/55 due to ZIR vreg renumbering at liveness (operand-stack push-order). Lesson `2026-05-08-hoist-vreg-semantic.md` records root cause; ADR-0031 amended; D-053 tracks the correct local-set/local-get rewrite. | (reverted)  |
-| 8.4-d | Hoist redesign (D-053) — insert `*.const K; local.set N` before loop; rewrite in-loop `*.const K` to `local.get N`. Reuses 8.4-b's pc_shift/blocks/branch_targets infrastructure; what changes is what gets emitted. **NEXT** | **NEXT**    |
-| 8.4-e | Bench delta vs Phase 7 close baseline; close 8.4 [x] only after 8.4-d lands and 3-host gate green. | [ ]         |
+**8.4 (Hoist)** — `[ ]`. 8.4-a (ADR-0031 draft) + 8.4-b (MVP
+module) committed; 8.4-c integration **reverted** because naive
+instr-move breaks ZIR vreg renumbering. Lesson `2026-05-08-
+hoist-vreg-semantic.md` records the gotcha; **D-053** carries
+the local-set/local-get rewrite redesign forward. Estimated
+~300 LOC redesign requires extending `func.locals` mutability
+(or adding `synthetic_locals` slot) + helper at 2 emit consumer
+sites — meaningful refactor surface that warrants its own
+chunk-cycle.
 
-8.4 is **not closed** in this resume cycle. The MVP module
-(8.4-b) is preserved as production code but not wired into the
-compile pipeline — it serves as the starting point for D-053's
-redesign. 8.4-d's redesign extends rather than replaces 8.4-b.
+**8.5 (Coalescer)** — `[ ]`. Survey at `private/notes/p8-8.5-
+survey.md` (re-derivable) found:
+- v1 W44 referenced in ROADMAP row text is a **misreference**
+  — v1's W44 was SIMD register-class introduction, NOT MOV
+  coalescing. The actual MOV-elimination work in v1 is
+  unidentified.
+- Current v2 emit pipeline already avoids most redundant MOVs
+  (op_alu commute path, regalloc deterministic slot
+  assignment). Trivial post-emit MOV-elim option (a) would
+  catch only call-site `ORR X0, XZR, X19` style restores
+  which are NOT redundant (they thread runtime_ptr to call
+  arg-0). MVP yield is uncertain.
+- Slot-aliasing option (b) is the canonical industrial path
+  (~150-250 LOC) but needs interference-graph stub for
+  correctness — non-trivial.
+
+**8.6 (Regalloc upgrade)** — `[ ]`. Greedy-local → linear-scan
+with live-range splitting + slot reuse. ADR-grade; large
+chunk; resolves D-029.
+
+**8.7 (AOT skeleton)** — `[ ]`. `zwasm compile foo.wasm -o
+foo.cwasm` artifact; needs format ADR + serialiser. Distinct
+from 8.4-8.6 (no JIT-pipeline overlap).
+
+**Next concrete chunk (when /continue resumes)**: pick **one**
+of the four rows above; survey-then-impl is the appropriate
+shape per /continue skill chunk-table discipline. The most
+tractable next entry is likely **8.4-d (D-053 redesign)** —
+the design path is now clear (local-rewrite semantic + helper
+function for emit consumers); the MVP module is reusable; the
+result has a clear correctness gate (realworld_run_jit ≥
+15/55).
+
+This cycle's productive output: 4 commits (8.1-a, 8.1-b, 8.2,
+8.3 close + 8.4-a/b/revert + design surface mapping for 8.5).
 
 Open structural debts (current):
 
