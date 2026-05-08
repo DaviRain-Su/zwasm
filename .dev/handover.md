@@ -7,94 +7,74 @@
 
 1. `.dev/handover.md` (this file).
 2. `.dev/ROADMAP.md` §9 Phase Status widget + §9.8 task table — Phase 8 active.
-3. `.dev/debt.md` — D-054 `blocked-by:` reframed (separate from D-053);
-   D-055 + 9 other rows.
-4. `.dev/lessons/INDEX.md` — keyword-grep for the active task domain.
-5. `.dev/decisions/0031_zir_hoist_pass.md` (ADR-0031 hoist; needs amend
-   after D-053 close).
+3. `.dev/debt.md` — D-054 + D-055 + 9 other rows.
+4. `.dev/lessons/INDEX.md` — keyword-grep for the active task domain
+   (focus: hoist-branch-targets-as-pc, regalloc, coalescer).
+5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
+6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 8 / §9.8a / 8a.6 (boundary audit)
+## Current state — Phase 8 / §9.8b / 8b.1 (Coalescer pass)
 
-§9.8a / 8a.5 closed: D-053 hoist branch_targets-as-PC bug
-fixed at `2e0022c`. Cap removed; baseline preserved (52/55
-compile-pass + 15 RUN-JIT-VERIFIED on Mac aarch64).
+§9.8a closed across 6 commits (a/b/c/d/e/f rows). Lesson
+`2026-05-09-hoist-branch-targets-as-pc.md` + ADR-0031 D-053-
+discharge Revision row landed this commit. SHA backfill for
+§9.8a rows. **Phase 8a foundation complete.**
 
 直近 commits (latest at top):
 
-- (this commit) chore(p8): mark §9.8a / 8a.5 [x]; D-053 closed;
-  D-054 reframed as independent OrbStack-only investigation.
-- `2e0022c` (rebased to `34a3ac1`) fix(p8): §9.8a / 8a.5-c/d —
+- (this commit) chore(p8): close §9.8a — lesson + ADR-0031
+  amend + SHA-backfill + retarget at §9.8b.
+- `b2b47f8` chore(p8): mark §9.8a / 8a.5 [x]; reframe D-054 as
+  independent.
+- `2e0022c` (rebased `34a3ac1`) fix(p8): §9.8a / 8a.5-c/d —
   hoist branch_targets-as-PC bug; remove cap.
-- `b204ad3` feat(p8): §9.8a / 8a.5-b — diagnostic errdefer in
-  arm64/emit op-dispatch; localised regression to br_table.
-- `f212892` chore(p8): §9.8a / 8a.5-a cap-removed reproducer
-  findings.
 
-3-host gate at `34a3ac1` (post-D-053 fix): Mac green; OrbStack
-1 known D-054 FAIL (unchanged from pre-fix; same 0xFD1BD386 →
-D-054 has separate root cause); windowsmini green (212/0/20).
+3-host gate at `34a3ac1` post-D-053-fix: Mac green, OrbStack
+1 known D-054 FAIL only, windowsmini green.
 
-**Phase 8 status**: §9.8 / 8.0-8.4 [x]; 8a.1-8a.5 [x]; **§9.8a /
-8a.6 NEXT** (8a boundary audit). Phase 8 残 rows = 8a.6 +
-8b.1-8b.6.
+**Phase 8 status**: §9.8 / 8.0-8.4 [x]; **§9.8a complete**
+(8a.1-8a.6 [x]); **§9.8b / 8b.1 NEXT** — Phase 8 残 rows =
+8b.1 + 8b.2 + 8b.3 + 8b.4 + 8b.5 + 8b.6.
 
-## Active task — §9.8a / 8a.6: 8a boundary audit **NEXT**
+Step 5b's `8a.1+8a.2+8a.3 all [x]` trigger satisfied — Phase
+8b chunks will be **bench-delta-gated** per ADR-0032.
+
+## Active task — §9.8b / 8b.1: Coalescer pass **NEXT**
 
 Per ROADMAP row text:
-> Phase-8a boundary `audit_scaffolding` pass — focuses on §A
-> (functional health) + §F (debt coherence after D-053
-> discharge) + §G (extended challenge anchors with the new
-> diag infra).
+> Vreg coalescing / MOV elimination. Survey-corrected from the
+> original "v1 W44" reference (which was actually SIMD register-
+> class introduction, not coalescing — see `private/notes/p8-
+> 8.5-survey.md`). MVP candidate per the survey's option (b)
+> post-regalloc slot-aliasing. **Bench-delta table in commit
+> message required** per /continue skill amendment.
 
-This is a meta-pass invoking the `audit_scaffolding` skill in
-"phase boundary" mode. Then close 8a, advance to 8b.
-
-D-053 closure note: the actual root cause was NOT in the emit
-pass (the 8a.5 row's hypothesis was "ZirOp emit handler under
-post-hoist IR"). The bug was upstream in `hoist/pass.zig`:
-`branch_targets[]` entries were being PC-shifted as if they
-were PCs, but they're Wasm br/br_table block-stack depths.
-At cap=4, depth values (0/1/2 typically) plus small shifts
-landed by coincidence on valid block-stack indices. At cap >
-~10-20, depth shift inflated past `labels.items.len`,
-triggering `arm64/op_control.zig:240` UnsupportedOp on
-br_table.
-
-Lesson candidate: `2026-05-09-hoist-branch-targets-as-pc.md`
-("a single-axis-mistake hidden by a small-input mask"). The
-existing test "shifts branch_targets across hoist prologue"
-locked in the wrong semantics; rewriting it as "leaves
-depths invariant" exposes the lock-in failure mode worth
-codifying.
-
-D-054 reframe (debt.md updated this commit): the OrbStack-only
-as-loop-broke regression is **NOT** caused by the hoist
-branch_targets bug. Same 0xFD1BD386 value pre/post D-053 fix.
-Independent root cause; hypothesis: OrbStack/Rosetta x86_64
-emulation interaction OR a Linux-x86_64-only path skirted by
-Win64 ABI on windowsmini. Investigation deferred; D-054 stays
-`blocked-by:` with updated barrier.
+§9.8b is **bench-driven**: every chunk's commit body carries
+a `## Bench delta` section produced by `scripts/run_bench.sh
+--quick --diff HEAD~1` (8a.3 infra). Both positive and
+negative movements surface.
 
 Suggested chunk plan:
 
 | #     | Description                                              | Status   |
 |-------|----------------------------------------------------------|----------|
-| 8a.6-a | Run audit_scaffolding skill in phase-boundary mode       | **NEXT** |
-| 8a.6-b | Apply any local-fix `block` findings inline              | [ ]      |
-| 8a.6-c | Add lesson `2026-05-09-hoist-branch-targets-as-pc.md`    | [ ]      |
-| 8a.6-d | Amend ADR-0031 Revision history with D-053 root-cause note | [ ]    |
-| 8a.6-e | SHA-backfill §9.8a rows; mark 8a.6 [x]; open §9.8b        | [ ]      |
+| 8b.1-a | Step 0 survey (subagent: Explore) — vreg coalescing in cranelift / wasmtime singlepass / wasm3 / regalloc2; option-(b) slot-aliasing shape | **NEXT** |
+| 8b.1-b | ADR `0035_coalescer_pass.md` design framing               | [ ]      |
+| 8b.1-c | Implement post-regalloc slot-aliasing pass (`src/ir/coalesce/pass.zig`) + unit tests | [ ]      |
+| 8b.1-d | Wire into `compile.zig` pipeline; bench-delta capture     | [ ]      |
+| 8b.1-e | 3-host gate; close 8b.1 [x] with bench-delta in commit body | [ ]      |
 
-After 8a.6 closes: §9.8b begins (Coalescer / Regalloc upgrade /
-AOT skeleton). Step 5b's `8a.1+8a.2+8a.3 all [x]` trigger now
-satisfied — Phase 8b chunks will be bench-delta-gated.
+After 8b.1: 8b.2 (Regalloc upgrade), 8b.3 (AOT skeleton),
+8b.4 (≥10% aggregate), 8b.5 (Phase 8 boundary audit), 8b.6
+(open §9.9).
 
 ## Open structural debt (pointers — current; full list in `.dev/debt.md`)
 
-- **D-054** (`blocked-by: separate investigation; OrbStack-only`)
-  — reframed; separate from D-053.
+- **D-054** (`blocked-by: separate investigation`) — OrbStack-
+  only; independent of D-053. Likely Rosetta JIT-emulation
+  interaction or Linux-x86_64-only path.
 - **D-055** (`blocked-by: D-052 + emit_test_*.zig migration`) —
-  x86_64 prologue inject deferred.
+  x86_64 prologue inject deferred (sentinel ARM64-only).
 - 9 `blocked-by:` rows — D-007 / D-010 / D-016 / D-018 / D-020
   / D-021 / D-022 / D-026 / D-028 / D-052; barriers all hold.
 
