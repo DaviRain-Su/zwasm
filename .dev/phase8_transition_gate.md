@@ -218,16 +218,25 @@ out of order means re-doing earlier work.
 
 - [x] `.dev/optimisation_log.md` has `bench/results/history.yaml`
       datapoints recorded for Phase 7 close baseline (= zero
-      point for every Phase 8 measurement). Two entries
-      appended this gate (commit pending in C2):
+      point for every Phase 8 measurement). Three entries
+      now in history.yaml:
       - `aarch64-darwin` at `bf138df`, reason "Phase 7 close
         baseline (Mac aarch64; Quick mode 3 runs + 1 warmup)"
+        — full 26-fixture inventory.
       - `x86_64-linux` at `bf138df`, reason "Phase 7 close
         baseline (Linux x86_64 OrbStack Ubuntu; Quick mode
-        3 runs + 1 warmup)"
-      windowsmini baseline deferred to Phase 8.0 (separate
-      Mac vs Win bench wiring is more involved than the
-      Mac/Orb shared-fs case; out-of-scope for Phase 7 close).
+        3 runs + 1 warmup)" — full 26-fixture inventory.
+      - `x86_64-windows` at `22147629`, reason "Phase 7 close
+        baseline (Windows x86_64 windowsmini; Quick mode
+        3 runs + 1 warmup; PARTIAL — 3/26 fixtures)" —
+        captured before manual halt at fixture 5. Pulled
+        forward at user direction; finding: Windows hyperfine
+        is ~12x slower than Mac on hot fixtures (fib2 took
+        8m24s/run × 4 runs = 33min on windowsmini vs 40s/run
+        on Mac aarch64). Full windowsmini inventory ≈ 5+
+        hours; deferred to Phase 8.0 once CI bench picks up
+        the slack OR a windowsmini-specific subset is
+        defined. matrix and beyond not captured.
 - [x] Every `O-NNN` candidate row reviewed: O-001 + O-007 stay
       `Investigating` (count 2, threshold 3). O-002, O-004,
       O-005, O-006, O-008, O-009, O-010 are `Deferred` with
@@ -335,17 +344,55 @@ recorded here. Rationale:
   "x86_64 5% slow" conflates JIT quality with the
   virtualisation-on-Mac penalty.
 
-#### 5b. Mac vs Orb host-difference baseline (Phase 7 close)
+#### 5b. Host-difference baseline (Phase 7 close)
 
-Both hosts ran `scripts/run_bench.sh --quick --phase-record`
-at SHA `bf138df`. Per-fixture ratio (`x86_64-linux mean_ms /
-aarch64-darwin mean_ms`) is the Phase 7 close anchor; future
-Phase-8 bench runs can compute "JIT-quality delta" by
-dividing the new ratio by this anchor (= isolating the
-non-host change). Anchor preserved in
-`bench/results/history.yaml`; user-facing analysis tooling
-(percentile / slowdown ratio extractor) deferred to Phase
-8.0 (out-of-scope for Phase 7 close).
+Per-host bench at the Phase 7 close gate:
+
+- **Mac aarch64-darwin** at `bf138df` — full 26-fixture inventory.
+- **Linux x86_64 OrbStack Ubuntu** at `bf138df` — full 26-fixture inventory.
+- **Windows x86_64 windowsmini** at `22147629` — PARTIAL
+  3-fixture (fib2, sieve, nestedloop) before manual halt.
+
+**Observed Mac:Win slowdown ratios** (load-bearing for O-002
+trigger derivation):
+
+| Fixture | Mac aarch64 | Win x86_64 | Ratio Win/Mac |
+|---|---|---|---|
+| shootout/fib2 | 43102 ms | 504584 ms | **11.70x** |
+| shootout/sieve | 15110 ms | 75518 ms | **4.99x** |
+| shootout/nestedloop | ~6.6 ms | 23.4 ms | **3.54x** |
+
+The slowdown ratio varies by fixture (3-12x), implying it's
+not a uniform host-speed delta but rather a Windows-specific
+penalty that scales with workload type (likely interpreter
+hot-loop overhead amplified by MSVC ABI + unoptimised release
+build path on windowsmini's older hardware).
+
+**Implication for Phase 8 O-002 (x86_64 regalloc port + parallel-
+move) trigger derivation**: when a Phase 8 hot-loop bench
+shows "x86_64 is N% slower than ARM64", the comparison must
+explicitly state which x86_64 host (Linux OrbStack vs Win
+windowsmini) AND subtract the corresponding Phase 7 close
+host-baseline ratio above before claiming a JIT-quality
+delta. Conflating host-speed difference with JIT-quality
+difference would risk re-pre-mature O-002 adoption (= the
+gut-feel-adoption anti-pattern §4 explicitly forbids).
+
+User-facing analysis tooling (per-fixture ratio extractor +
+host-baseline subtraction calculator) deferred to Phase 8.0
+— out-of-scope for Phase 7 close, but the load-bearing
+**raw data** is preserved in `bench/results/history.yaml`.
+
+**Why windowsmini bench is genuinely Phase 8.0 deferral**:
+fib2 alone took 33 minutes on windowsmini for 4 runs (warmup
+1 + runs 3). Full 26-fixture inventory at this rate = 5+
+hours per push, which is incompatible with the inline-gate-
+review cadence. The CI bench workflow added at this gate
+(`.github/workflows/bench.yml`) does NOT include windowsmini
+(no GitHub-hosted Win runner in scope for Phase 7 close).
+Phase 8.0 candidate work: either define a Windows-specific
+hot-fixture subset (~3-5 fast fixtures) for periodic local
+verification, OR wire SSH-from-Linux-runner CI integration.
 
 ## Gate exit conditions
 

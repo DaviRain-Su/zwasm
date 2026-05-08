@@ -13,23 +13,53 @@
 6. `.dev/lessons/INDEX.md` — keyword-grep for the active task domain.
 7. `.dev/optimisation_log.md` — F-NNN / R-NNN / O-NNN ledger.
 
-## Current state — Phase 7 / §9.7 / 7.13 🔒 hard gate (5/5 sections ☑; awaiting user sign-off)
+## Current state — Phase 7 / §9.7 / 7.13 🔒 hard gate (5/5 sections ☑; second debt sweep done; awaiting user sign-off)
 
 直近 commits (latest at top):
 
-- (pending C2) chore(p7): §9.7 / 7.13 gate-close artefacts —
-  meta_audit + lesson + bench Phase 7 close baseline + gate doc
-  marks; 7.13 row stays `[ ]` pending user sign-off
-- `cde3405` refactor(p7): split x86_64/inst.zig (2530→1104 LOC, 4
-  ISA-family siblings) + arm64/emit_test.zig (2356→28 LOC + 6
-  op-family siblings); discharges §3 file-size box (modulo D-051)
-- `bf138df` chore(p7): mark §9.7 / 7.12 [x] (audit boundary pass)
+- (pending C5) chore(p7): windowsmini Phase 7 close partial
+  baseline + handover/gate-doc updates; 7.13 row stays `[ ]`
+  pending user sign-off
+- `e3e6668` chore(infra p7): hyperfine CI bench workflow
+  (Phase 11 deferral lifted)
+- `8c51fcd` chore(debt p7): close D-009 + D-011 + D-017 (Phase 7
+  close debt sweep)
+- `2214762` chore(p7): §9.7 / 7.13 gate-close artefacts (5/5
+  sections ☑; awaits user sign-off)
+- `cde3405` refactor(p7): split x86_64/inst.zig (2530→1104 LOC) +
+  arm64/emit_test.zig (2356→28 LOC + 6 siblings); §3 file-size
+  box dischargd (modulo D-051)
+- `bf138df` chore(p7): mark §9.7 / 7.12 [x]
 - `a6d9e47` chore(p7): mark §9.7 / 7.11 [x] (three-way differential)
 - `fa23eb5` chore(p7): mark §9.7 / 7.10 [x]
 
 **Phase status**: §9.7 / 7.5 + 7.8 + 7.9 + 7.10 + 7.11 + 7.12
 all `[x]`. Phase 7 残 row = **7.13 🔒** (hard gate; all 5 gate
-sections now ☑) + 7.14 (open §9.8 inline; gated on 7.13).
+sections now ☑; debt sweep pulled forward 3 closes + CI bench
++ partial windowsmini bench) + 7.14 (open §9.8 inline; gated
+on 7.13).
+
+## Phase 7 close debt sweep (second pass; user direction)
+
+Per user judgment ("もう debt から消せるな" + "hyperfine CI bench
+を今用意しといた方がいい"), 5 additional gate-prep items pulled
+forward beyond the original 5 sections:
+
+1. **D-009 close** (commit `8c51fcd`) — Zone 0 dbg.zig env-read
+   refactor (was blocked-by Zig 0.17 wait; real fix was Zone 3
+   plumbing).
+2. **D-011 close** (commit `8c51fcd`) — duplicate of D-022; ADR-0028
+   does not depend on M2 (verified).
+3. **D-017 close** (commit `8c51fcd`) — runner-exe exemption codified
+   in zone_deps.md + zone_check.sh comment.
+4. **Hyperfine CI bench** (commit `e3e6668`) — Phase 11 deferral
+   lifted; `.github/workflows/bench.yml` + helper script added.
+   First CI run will fire on next push to zwasm-from-scratch.
+5. **Windowsmini partial Phase 7 close baseline** (commit pending
+   C5) — 3/26 fixtures captured before manual halt; finding:
+   Windows hyperfine ~12x slower than Mac on hot fixtures
+   (fib2 33min). Mac:Win:Linux ratio anchors recorded in
+   gate doc §5b for O-002 trigger derivation.
 
 ## 🔒 Phase 7 → Phase 8 hard gate — gate doc fully populated
 

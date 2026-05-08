@@ -484,3 +484,26 @@
       stddev_ms: 1.08
       min_ms: 22.69
       max_ms: 24.84
+
+- date: 2026-05-08T09:34:25Z
+  commit: 22147629268d9bf8916d0a22966c84cd7dfffffe
+  arch: x86_64-windows
+  reason: "Phase 7 close baseline (Windows x86_64 windowsmini; Quick mode 3 runs + 1 warmup; PARTIAL — 3/26 fixtures captured before manual halt at fixture 5; user time budget exceeded after observing fib2 took 8m24s/run = ~11.7x Mac aarch64 baseline; matrix onwards halted) at 22147629"
+  runs: 3
+  warmup: 1
+  benches:
+    - name: shootout/fib2
+      mean_ms: 504584.00
+      stddev_ms: 12498.80
+      min_ms: 490160.00
+      max_ms: 512215.00
+    - name: shootout/sieve
+      mean_ms: 75518.80
+      stddev_ms: 2459.06
+      min_ms: 72822.30
+      max_ms: 77637.50
+    - name: shootout/nestedloop
+      mean_ms: 23.42
+      stddev_ms: 0.59
+      min_ms: 23.07
+      max_ms: 24.10
