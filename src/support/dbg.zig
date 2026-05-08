@@ -1,19 +1,32 @@
 //! Env-gated debug logger (ADR-0015 candidate).
 //!
 //! `dbg.print(comptime mod, fmt, args)` is a no-op unless the
-//! environment variable `ZWASM_DEBUG` enables `mod` (or one of its
-//! prefixes — `interp` enables `interp.alloc`, `interp.dispatch`,
-//! …). The value `*` enables every module; the empty / unset
-//! value disables every module.
+//! whitelist (configured via `initFromEnv`) enables `mod` or one
+//! of its prefixes — `interp` enables `interp.alloc`,
+//! `interp.dispatch`, …. The value `*` enables every module; an
+//! empty / null value disables every module.
 //!
 //! Compile-stripped in `ReleaseFast` / `ReleaseSmall` via a
 //! `builtin.mode` guard — release builds emit zero code for the
 //! call site (the comptime branch + `@compileLog`-free body
 //! collapses).
 //!
-//! The whitelist is parsed lazily on the first call from each
-//! module, then cached in a comptime-keyed `bool`. Subsequent
-//! calls are a single atomic load + branch when disabled.
+//! ## Initialization (D-009 refactor)
+//!
+//! Zone 0 (`src/support/`) cannot read process env directly per
+//! ROADMAP §A1 (`std.c.getenv` would re-introduce the libc
+//! dependency this zone explicitly excludes; `std.posix.getenv`
+//! was removed in Zig 0.16). The env value is plumbed down from
+//! Zone 3 entry points:
+//!
+//! - `cli/main.zig` reads `init.environ.getPosix("ZWASM_DEBUG")`
+//!   and calls `dbg.initFromEnv(value)` at startup.
+//! - `api/instance.zig:wasm_engine_new` reads `std.c.getenv`
+//!   (libc-linked Zone 3 c_api context is OK) and calls
+//!   `dbg.initFromEnv(value)` once per process.
+//!
+//! Until init is called, every `enabled(mod)` returns false (=
+//! release-equivalent default).
 //!
 //! ## Usage
 //!
@@ -35,20 +48,18 @@
 //! prefixed with `[dbg <mod>] ` so multiple modules' lines stay
 //! distinguishable when several are enabled.
 //!
-//! Zone 0 (`src/util/`).
+//! Zone 0 (`src/support/`).
 
 const std = @import("std");
 const builtin = @import("builtin");
 
-/// Set at startup if anyone calls `print`; cached so repeated calls
-/// don't re-read the environment. The whitelist itself is interned
-/// in a static buffer to avoid relying on the GPA / arena.
+/// Whitelist of enabled module prefixes; populated by
+/// `initFromEnv`. The whitelist itself is interned in a static
+/// buffer to avoid relying on the GPA / arena.
 const Whitelist = struct {
     /// `*` enables every module.
     everything: bool = false,
-    /// Stable storage for the comma-split env value. We never grow
-    /// this; the env is read once per process. 4 KiB is enough for
-    /// any sensible developer setup.
+    /// Stable storage for the comma-split env value.
     buf: [4096]u8 = undefined,
     len: usize = 0,
     /// Pointers into `buf`; up to 64 entries.
@@ -59,47 +70,38 @@ const Whitelist = struct {
 var whitelist: Whitelist = .{};
 var whitelist_initialised: bool = false;
 
-fn initWhitelist() void {
-    // Single-threaded init: the loop sets `whitelist_initialised`
-    // last, and concurrent readers tolerate seeing the partial
-    // state because they re-check the flag before consulting
-    // entries. Since this is a debug-only path the cost is
-    // immaterial.
-    if (whitelist_initialised) return;
-    // TODO(adr-0015): remove the std.c.getenv dependency once Zig
-    // stdlib re-exposes a libc-free env-read suitable for a no-
-    // allocator init path. Today's options:
-    //   * std.posix.getenv         — removed in Zig 0.16 (was the
-    //                                canonical no-allocator path).
-    //   * std.process.getEnvVarOwned — needs an Allocator we don't
-    //                                  have here.
-    //   * std.process.Init.environ_map — only available via the
-    //                                    Juicy Main entrypoint.
-    // Until one of those becomes accessible from a leaf utility,
-    // dbg.zig is callable only from libc-linked compilation units
-    // (c_api binding + test runners — see ADR-0015 §1 "libc
-    // requirement" + Negative consequences).
-    const raw = std.c.getenv("ZWASM_DEBUG");
-    const value: []const u8 = if (raw) |p| std.mem.span(p) else "";
-    if (std.mem.eql(u8, value, "*")) {
-        whitelist.everything = true;
-        whitelist_initialised = true;
-        return;
-    }
-    if (value.len == 0) {
-        whitelist_initialised = true;
-        return;
-    }
-    const copy_len = @min(value.len, whitelist.buf.len);
-    @memcpy(whitelist.buf[0..copy_len], value[0..copy_len]);
-    whitelist.len = copy_len;
-    var it = std.mem.tokenizeScalar(u8, whitelist.buf[0..copy_len], ',');
-    while (it.next()) |tok| {
-        const trimmed = std.mem.trim(u8, tok, " \t");
-        if (trimmed.len == 0) continue;
-        if (whitelist.entry_count >= whitelist.entries.len) break;
-        whitelist.entries[whitelist.entry_count] = trimmed;
-        whitelist.entry_count += 1;
+/// Configure the whitelist from a `ZWASM_DEBUG` env var value.
+/// Pass `null` (or empty) to disable every module. Idempotent —
+/// a second call replaces the prior whitelist.
+///
+/// Zone 0 (`support/`) declares the data shape; Zone 3 entry
+/// points (`cli/main.zig`, `api/instance.zig:wasm_engine_new`)
+/// read process env via their zone-appropriate API and pass the
+/// value here. This keeps libc and `std.process.Init` out of
+/// Zone 0.
+pub fn initFromEnv(value: ?[]const u8) void {
+    whitelist = .{};
+    if (value) |v| {
+        if (std.mem.eql(u8, v, "*")) {
+            whitelist.everything = true;
+            whitelist_initialised = true;
+            return;
+        }
+        if (v.len == 0) {
+            whitelist_initialised = true;
+            return;
+        }
+        const copy_len = @min(v.len, whitelist.buf.len);
+        @memcpy(whitelist.buf[0..copy_len], v[0..copy_len]);
+        whitelist.len = copy_len;
+        var it = std.mem.tokenizeScalar(u8, whitelist.buf[0..copy_len], ',');
+        while (it.next()) |tok| {
+            const trimmed = std.mem.trim(u8, tok, " \t");
+            if (trimmed.len == 0) continue;
+            if (whitelist.entry_count >= whitelist.entries.len) break;
+            whitelist.entries[whitelist.entry_count] = trimmed;
+            whitelist.entry_count += 1;
+        }
     }
     whitelist_initialised = true;
 }
@@ -110,7 +112,10 @@ fn enabled(comptime mod: []const u8) bool {
     if (builtin.mode == .ReleaseFast or builtin.mode == .ReleaseSmall) {
         return false;
     }
-    if (!whitelist_initialised) initWhitelist();
+    // Pre-init: dbg is a no-op (= release-equivalent default).
+    // Zone 0 has no env-read capability; init is the caller's
+    // responsibility.
+    if (!whitelist_initialised) return false;
     if (whitelist.everything) return true;
     var i: usize = 0;
     while (i < whitelist.entry_count) : (i += 1) {
@@ -153,19 +158,30 @@ pub fn resetForTest() void {
 
 const testing = std.testing;
 
-test "enabled: empty whitelist disables every module" {
+test "enabled: pre-init returns false (Zone 0 default)" {
     resetForTest();
-    // ZWASM_DEBUG isn't set in the test process — initWhitelist
-    // takes the empty branch.
     try testing.expect(!enabled("any"));
     try testing.expect(!enabled("interp.alloc"));
 }
 
+test "enabled: initFromEnv(null) disables every module" {
+    resetForTest();
+    initFromEnv(null);
+    defer resetForTest();
+    try testing.expect(!enabled("any"));
+    try testing.expect(!enabled("interp.alloc"));
+}
+
+test "enabled: initFromEnv(\"\") disables every module" {
+    resetForTest();
+    initFromEnv("");
+    defer resetForTest();
+    try testing.expect(!enabled("any"));
+}
+
 test "enabled: prefix match — `interp` enables `interp.alloc`" {
     resetForTest();
-    whitelist.entries[0] = "interp";
-    whitelist.entry_count = 1;
-    whitelist_initialised = true;
+    initFromEnv("interp");
     defer resetForTest();
     try testing.expect(enabled("interp"));
     try testing.expect(enabled("interp.alloc"));
@@ -176,9 +192,7 @@ test "enabled: prefix match — `interp` enables `interp.alloc`" {
 
 test "enabled: more specific entry doesn't enable the parent" {
     resetForTest();
-    whitelist.entries[0] = "interp.alloc";
-    whitelist.entry_count = 1;
-    whitelist_initialised = true;
+    initFromEnv("interp.alloc");
     defer resetForTest();
     try testing.expect(enabled("interp.alloc"));
     try testing.expect(!enabled("interp"));
@@ -187,11 +201,19 @@ test "enabled: more specific entry doesn't enable the parent" {
 
 test "enabled: `*` enables every module" {
     resetForTest();
-    whitelist.everything = true;
-    whitelist_initialised = true;
+    initFromEnv("*");
     defer resetForTest();
     try testing.expect(enabled("anything"));
     try testing.expect(enabled("interp.alloc"));
-    // Empty mod string isn't expected from real call sites (every
-    // call passes a comptime literal); we don't assert on it.
+}
+
+test "enabled: comma-separated whitelist" {
+    resetForTest();
+    initFromEnv("interp,c_api,emit");
+    defer resetForTest();
+    try testing.expect(enabled("interp"));
+    try testing.expect(enabled("interp.alloc"));
+    try testing.expect(enabled("c_api"));
+    try testing.expect(enabled("emit"));
+    try testing.expect(!enabled("validate"));
 }

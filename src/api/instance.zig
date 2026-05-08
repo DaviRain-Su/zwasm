@@ -38,6 +38,7 @@ const ext_sign_ext = @import("../instruction/wasm_2_0/sign_extension.zig");
 const ext_sat_trunc = @import("../instruction/wasm_2_0/nontrap_conversion.zig");
 const ext_bulk_memory = @import("../instruction/wasm_2_0/bulk_memory.zig");
 const ext_ref_types = @import("../instruction/wasm_2_0/reference_types.zig");
+const dbg = @import("../support/dbg.zig");
 const ext_table_ops = @import("../instruction/wasm_2_0/table_ops.zig");
 const parser = @import("../parse/parser.zig");
 const cross_module = @import("cross_module.zig");
@@ -191,7 +192,26 @@ inline fn engineAllocator(e: *const Engine) std.mem.Allocator {
 /// allocator. Returns null on OOM (zero allocations should
 /// happen at this layer beyond the Engine struct itself; the C
 /// allocator is process-wide).
+///
+/// First-time side effect: pulls `ZWASM_DEBUG` from process env
+/// via `std.c.getenv` (libc is linked at this Zone 3 c_api
+/// binding by definition) and configures the Zone 0 `dbg`
+/// whitelist via `dbg.initFromEnv`. Per D-009 refactor: Zone 0
+/// no longer reads env directly; Zone 3 entry points plumb the
+/// value down. Idempotent — only the first call observes the
+/// env; subsequent `initFromEnv` calls overwrite, but every C
+/// host process traverses `wasm_engine_new` at most a handful
+/// of times.
 pub export fn wasm_engine_new() callconv(.c) ?*Engine {
+    const tls = struct {
+        var dbg_initialised: bool = false;
+    };
+    if (!tls.dbg_initialised) {
+        const raw = std.c.getenv("ZWASM_DEBUG");
+        const value: ?[]const u8 = if (raw) |p| std.mem.span(p) else null;
+        dbg.initFromEnv(value);
+        tls.dbg_initialised = true;
+    }
     const alloc = std.heap.c_allocator;
     const e = alloc.create(Engine) catch return null;
     e.* = .{

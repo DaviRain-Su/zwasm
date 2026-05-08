@@ -94,9 +94,22 @@ imports (A3).
 - `bash scripts/zone_check.sh --gate` — exit 1 if violation count
   exceeds the in-script BASELINE (currently 0).
 
-Tests are exempt: everything after the first `test "…"` line OR
-the first `const testing = std.testing` declaration in a file is
-skipped (test code may legitimately cross zones; per Zig idiom the
-testing alias + per-test sibling/parent imports are usually
-declared in the test-helper section above the first `test "…"`
-block, so the earlier marker captures that region too).
+Tests are exempt at two levels (D-017 codification):
+
+1. **In-source test blocks**: everything after the first
+   `test "…"` line OR the first `const testing = std.testing`
+   declaration in a file is skipped (test code may legitimately
+   cross zones; per Zig idiom the testing alias + per-test
+   sibling/parent imports are usually declared in the
+   test-helper section above the first `test "…"` block, so
+   the earlier marker captures that region too).
+2. **Files under `test/`**: not in the zone hierarchy at all.
+   Test infrastructure (runners under `test/runners/*.zig`,
+   `test/spec/*.zig`, `test/realworld/*.zig`, `test/wasi/*.zig`,
+   `test/edge_cases/*.zig`) may import from any Zone freely —
+   they routinely consume the Zone 3 `cli_run.runWasmCaptured`
+   surface and the Zone 2 engine pipeline. `scripts/zone_check.sh
+   --gate` only scans `src/`, enforcing this by tool-level
+   exclusion. The `test/` exemption is **not opt-in via in-file
+   marker**; it's structural — runner exe top-level code is
+   intentional Zone-3-from-test-context usage, not a violation.

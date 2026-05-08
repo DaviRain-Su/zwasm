@@ -26,10 +26,16 @@ const zwasm = @import("zwasm");
 const cli_run = zwasm.cli.run;
 const diag_print = zwasm.cli.diag_print;
 const diagnostic = zwasm.diagnostic;
+const dbg = zwasm.support.dbg;
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const gpa = init.gpa;
+
+    // D-009 refactor: Zone 0 dbg.zig has no env-read capability;
+    // plumb `ZWASM_DEBUG` down from Zone 3 here. `Map.get`
+    // returns null when the var is unset → dbg becomes a no-op.
+    dbg.initFromEnv(init.environ_map.get("ZWASM_DEBUG"));
 
     var arg_it = try std.process.Args.Iterator.initAllocator(init.minimal.args, gpa);
     defer arg_it.deinit();

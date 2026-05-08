@@ -14,6 +14,15 @@
 #
 # Test blocks (everything after the first `test "..."` line in a file)
 # are skipped — test code may legitimately cross zones.
+#
+# Files under test/ are NOT scanned at all (this script only walks
+# src/). Test infrastructure (runners under test/runners/*.zig,
+# test/spec/*.zig, test/realworld/*.zig, test/wasi/*.zig,
+# test/edge_cases/*.zig) is outside the zone hierarchy by design —
+# runner exes calling cli_run.runWasmCaptured at top-level is
+# intentional Zone-3-from-test-context usage. See
+# .claude/rules/zone_deps.md "Tests are exempt at two levels"
+# (D-017 codification, 2026-05-08).
 
 set -euo pipefail
 
