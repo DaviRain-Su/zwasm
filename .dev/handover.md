@@ -39,7 +39,69 @@ discharge Revision row landed this commit. SHA backfill for
 Step 5b's `8a.1+8a.2+8a.3 all [x]` trigger satisfied — Phase
 8b chunks will be **bench-delta-gated** per ADR-0032.
 
-## Active task — §9.8b / 8b.1-c: Coalescer pass implementation **NEXT**
+## Active task — §9.8b / 8b.1-d: Coalescer detection + emit query **NEXT**
+
+8b.1-c (scaffolding) closed at `94290c5`/`1e428f7`. Pipeline
+wired between regalloc and emit; `func.coalesced_movs`
+populated as empty slice; baseline 52/55+15 RUN-JIT-VERIFIED
+preserved.
+
+8b.1-d work breakdown (from this resume's design exploration):
+
+The naive ZIR-level detection `slots[src_vreg] == slots[dst_vreg]`
+on MOV-shaped ops is more subtle than ADR-0035's framing
+suggested. Concrete observation from reading `arm64/emit.zig`:
+
+- ZirOps don't carry an "emits a MOV" tag. The emit pass's
+  MOVs arise emit-internally at:
+  1. End-of-block multi-value merges (D-035 chunk-d035-c —
+     emitEndIntra emits per-slot MOV merge_reg ← arm_result).
+  2. Function-return marshalling (`MOV W0/RAX, slot_reg`).
+  3. Call-arg setup (per-arg MOV).
+  4. `local.set N; local.get N` pairs (consecutive or not)
+     where regalloc happens to re-use the same slot for both
+     value-vregs.
+
+- Detection (1)–(3) requires emit-time per-vreg slot
+  inspection; metadata-discovery at coalesce-pass time means
+  REPLICATING emit's per-arg / per-merge logic. Heavy.
+
+- Detection (4) is more tractable: walk `func.instrs.items`
+  finding consecutive `local.set N; local.get N` pairs where
+  no intervening read of local N exists; record both PCs.
+  But emit's `local.set` and `local.get` already
+  store/load via the local frame; they don't emit a MOV
+  per se — the redundancy is a load-after-store pair.
+
+Likely cleanest 8b.1-d MVP: skip type-(1)-(3) detection
+entirely; target only the **post-hoist `local.set N; …
+local.get N` pattern where N is a synthetic local from
+hoist** (per ADR-0031). The hoist pass already records
+`hoisted_constants[]` with `prologue_set_pc` and
+`in_loop_pc` — so coalesce can directly inspect those
+records and check whether the prologue-set's value-vreg
+shares slot with the in-loop-get's result-vreg. If so,
+the load can be replaced by direct slot-register
+reference. **However** this is still emit-side semantics;
+the metadata records a "hint" that emit's `local.get`
+handler queries.
+
+Recommendation: 8b.1-d first chunk lands the **hint
+mechanism** (extend `local.get` handler to optionally
+short-circuit when `coalesced_movs` flags it) — measure
+bench delta. If <2% on tinygo/fib_loop, pivot to
+type-(2) return-marshalling detection (simpler emit
+hook).
+
+Suggested chunk plan:
+
+| #     | Description                                              | Status   |
+|-------|----------------------------------------------------------|----------|
+| 8b.1-a | Survey                                                  | [x] (`64b135a`) |
+| 8b.1-b | ADR-0035 design framing                                 | [x] (`3991db7`) |
+| 8b.1-c | Pass scaffolding + types + pipeline wiring              | [x] (`94290c5`) |
+| 8b.1-d | Detection: post-hoist local.set/local.get same-slot via hoisted_constants[] inspection; emit-side hint query in arm64 local.get handler. Bench-delta required. | **NEXT** |
+| 8b.1-e | x86_64 emit-side hint query; 3-host gate; close 8b.1 [x] | [ ]      |
 
 8b.1-b complete: ADR-0035 landed at
 `.dev/decisions/0035_coalescer_pass.md`. Decision: post-
