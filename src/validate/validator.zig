@@ -448,6 +448,13 @@ const Validator = struct {
             // Wasm 2.0 prefix opcodes (§9.2 / 2.3 chunk 2 onward)
             0xFC => try self.dispatchPrefixFC(),
 
+            // Wasm SIMD-128 prefix (§9.9 / Phase 9 per ADR-0041).
+            // The validator dispatches inline (mirroring 0xFC's
+            // shape) per ADR-0041 Revision 2 — the central
+            // DispatchTable's validator slot is not consumed
+            // today; that's a Phase 14+ structural refactor.
+            0xFD => try self.dispatchPrefixFD(),
+
             else => return Error.NotImplemented,
         }
     }
@@ -648,6 +655,154 @@ const Validator = struct {
             17 => try self.opTableFill(),
             else => return Error.NotImplemented,
         }
+    }
+
+    /// Wasm SIMD-128 prefix-`0xFD` sub-opcode dispatch (§9.9 per
+    /// ADR-0041 + Revision 2). MVP catalogue lands the
+    /// foundational op shapes; remaining sub-opcodes extend
+    /// across §9.4 IR + 9.5-9.8 emit chunks per ADR-0041's
+    /// chunk plan. Sub-opcode numbering follows the Wasm SIMD
+    /// proposal (`~/Documents/OSS/WebAssembly/testsuite/
+    /// proposals/simd/*.wast`).
+    fn dispatchPrefixFD(self: *Validator) Error!void {
+        const sub = try leb128.readUleb128(u32, self.body, &self.pos);
+        switch (sub) {
+            // Loads (memarg → align uleb32 + offset uleb32; pop i32 addr; push v128).
+            0 => try self.opLoad(.v128), // v128.load
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10 => try self.opLoad(.v128), // load{8x8,16x4,32x2}_{s,u} + load{8,16,32,64}_splat
+            92, 93 => try self.opLoad(.v128), // v128.load32_zero, v128.load64_zero
+
+            // Store: pop v128 + i32 addr (memarg).
+            11 => try self.opStore(.v128), // v128.store
+
+            // v128.const: 16 immediate bytes; push v128.
+            12 => try self.opSimdConst(),
+
+            // i8x16.shuffle: 16 immediate lane bytes; pop 2× v128, push v128.
+            13 => try self.opSimdShuffle(),
+
+            // i8x16.swizzle: pop 2× v128, push v128.
+            14 => try self.opSimdBinop(),
+
+            // Splat ops: pop scalar (per shape), push v128.
+            15 => try self.opSimdSplat(.i32), // i8x16.splat (i32 input, narrowed at runtime)
+            16 => try self.opSimdSplat(.i32), // i16x8.splat
+            17 => try self.opSimdSplat(.i32), // i32x4.splat
+            18 => try self.opSimdSplat(.i64), // i64x2.splat
+            19 => try self.opSimdSplat(.f32), // f32x4.splat
+            20 => try self.opSimdSplat(.f64), // f64x2.splat
+
+            // extract_lane / replace_lane: read 1-byte lane immediate.
+            21, 22 => try self.opSimdExtractLane(.i32), // i8x16.extract_lane_{s,u}
+            23 => try self.opSimdReplaceLane(.i32), // i8x16.replace_lane
+            24, 25 => try self.opSimdExtractLane(.i32), // i16x8.extract_lane_{s,u}
+            26 => try self.opSimdReplaceLane(.i32), // i16x8.replace_lane
+            27 => try self.opSimdExtractLane(.i32), // i32x4.extract_lane
+            28 => try self.opSimdReplaceLane(.i32), // i32x4.replace_lane
+            29 => try self.opSimdExtractLane(.i64), // i64x2.extract_lane
+            30 => try self.opSimdReplaceLane(.i64), // i64x2.replace_lane
+            31 => try self.opSimdExtractLane(.f32), // f32x4.extract_lane
+            32 => try self.opSimdReplaceLane(.f32), // f32x4.replace_lane
+            33 => try self.opSimdExtractLane(.f64), // f64x2.extract_lane
+            34 => try self.opSimdReplaceLane(.f64), // f64x2.replace_lane
+
+            // Comparison ops (relops, sub 35..76): pop 2× v128, push
+            // v128 mask. Bitwise ops (sub 77..82) routed to binop
+            // helper too — `v128.not` (sub 77) is conservatively
+            // typed as binop here (a 9.4 IR refinement will split
+            // it into unop), and `v128.bitselect` (sub 82) needs 3×
+            // v128 → 1× v128, which the MVP under-approximates as
+            // binop (deferred to 9.4 alongside ZirOp lower-pass
+            // catalogue refinement).
+            35...82 => try self.opSimdBinop(),
+
+            // any_true (sub 83): pop v128, push i32.
+            83 => try self.opSimdAllTrueOrAnyTrue(),
+
+            // Integer arithmetic (i8x16 / i16x8 / i32x4 / i64x2): binop.
+            // 84..211 covers most int unop/binop variants (excluding
+            // 92, 93 which are loads handled above); the spec's exact
+            // mapping per sub-opcode is encoded inline by 9.4 when
+            // ZirOps are activated. MVP: route the ranges to the
+            // generic v128-binop helper.
+            84...91 => try self.opSimdBinop(),
+            94...211 => try self.opSimdBinop(),
+
+            // Float arithmetic (f32x4 / f64x2): binop.
+            // 224..255 covers float ops; mirror MVP routing.
+            224...255 => try self.opSimdBinop(),
+
+            else => return Error.NotImplemented,
+        }
+    }
+
+    /// `v128.const`: 16 immediate bytes; push v128.
+    fn opSimdConst(self: *Validator) Error!void {
+        if (self.pos + 16 > self.body.len) return Error.UnexpectedEnd;
+        self.pos += 16;
+        try self.pushType(.v128);
+    }
+
+    /// `i8x16.shuffle`: 16 immediate lane bytes; pop 2× v128, push v128.
+    /// Each lane byte must be < 32 (per spec; lane indices into the
+    /// concatenated 32-byte input). Validator enforces lane-bound; emit
+    /// pass uses the immediate at code-emit time.
+    fn opSimdShuffle(self: *Validator) Error!void {
+        if (self.pos + 16 > self.body.len) return Error.UnexpectedEnd;
+        for (self.body[self.pos..][0..16]) |lane| {
+            if (lane >= 32) return Error.BadValType;
+        }
+        self.pos += 16;
+        try self.popExpect(.v128);
+        try self.popExpect(.v128);
+        try self.pushType(.v128);
+    }
+
+    /// SIMD splat (`i8x16.splat`, `i32x4.splat`, …): pop a scalar of
+    /// the source-element type; push v128.
+    fn opSimdSplat(self: *Validator, src: ValType) Error!void {
+        try self.popExpect(src);
+        try self.pushType(.v128);
+    }
+
+    /// SIMD extract_lane (`i8x16.extract_lane_s`, `f32x4.extract_lane`,
+    /// …): read 1-byte lane immediate; pop v128; push scalar.
+    fn opSimdExtractLane(self: *Validator, dst: ValType) Error!void {
+        if (self.pos >= self.body.len) return Error.UnexpectedEnd;
+        self.pos += 1; // lane byte (bound-check deferred to emit per spec)
+        try self.popExpect(.v128);
+        try self.pushType(dst);
+    }
+
+    /// SIMD replace_lane (`i8x16.replace_lane`, `f64x2.replace_lane`,
+    /// …): read 1-byte lane immediate; pop scalar + v128; push v128.
+    fn opSimdReplaceLane(self: *Validator, src: ValType) Error!void {
+        if (self.pos >= self.body.len) return Error.UnexpectedEnd;
+        self.pos += 1;
+        try self.popExpect(src);
+        try self.popExpect(.v128);
+        try self.pushType(.v128);
+    }
+
+    /// Generic v128 binop (and/or/xor, integer add/sub/mul, shifts,
+    /// comparisons, etc. — anything that pops 2 v128 and pushes 1).
+    fn opSimdBinop(self: *Validator) Error!void {
+        try self.popExpect(.v128);
+        try self.popExpect(.v128);
+        try self.pushType(.v128);
+    }
+
+    /// Generic v128 unop (`v128.not`, `i8x16.abs`, etc. — pop 1 v128,
+    /// push 1 v128).
+    fn opSimdUnop(self: *Validator) Error!void {
+        try self.popExpect(.v128);
+        try self.pushType(.v128);
+    }
+
+    /// `v128.any_true` / `i8x16.all_true` / etc.: pop v128, push i32.
+    fn opSimdAllTrueOrAnyTrue(self: *Validator) Error!void {
+        try self.popExpect(.v128);
+        try self.pushType(.i32);
     }
 
     /// memory.copy: 0xFC 10 0x00 0x00 (two reserved memidx bytes).

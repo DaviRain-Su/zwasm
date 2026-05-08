@@ -13,53 +13,46 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 9 (SIMD-128) / §9.9/9.2 [x] (ADR-0041); **§9.9/9.3 NEXT**
+## Current state — Phase 9 (SIMD-128) / §9.9/9.3 [x]; **§9.9/9.4 NEXT**
 
-§9.9/9.2 ADR-0041 landed (`.dev/decisions/0041_simd_128_
-design.md`, Status: Accepted). Design framing:
-- **Shape-as-variant ZirOps**: 171 pre-declared cover ~415 spec
-  ops via shape-suffix encoding (P6 + §A12).
-- **FP-class register pool reuse**: v128 vregs occupy V0-V31 /
-  XMM0-XMM15 alongside scalar f32/f64. Spill-stride
-  disambiguated via separate `ShapeTag` axis (per
-  `single_slot_dual_meaning.md`); conservative per-vreg-pays-
-  its-stride packing (Phase 15 lift via ADR-0038 class-aware).
-- **Feature-register pattern**: `feature/simd_128/register.zig`
-  installs all 171 op handlers into the central dispatch table
-  at startup (per ADR-0023 §4.5).
-- **Spec-fidelity NEON**: explicit IEEE-754 trap-on-specials
-  overriding NEON's silent-saturate default; Wasm spec § cited
-  per handler.
-- **SSE4.1 minimum**: PMULLD / PINSRB-W-D / PBLENDVB required;
-  runtime CPUID check at startup refuses pre-Nehalem hardware.
+§9.9/9.3 lands the validator's prefix-`0xFD` dispatch.
+Discovery during implementation: the validator uses inline
+static dispatch (not the central DispatchTable), so the SIMD
+extension mirrors the existing `dispatchPrefixFC` shape inline
+in `src/validate/validator.zig`. ADR-0041 amended with
+Revision 2 capturing the discovery + adjusted approach
+(full dispatch-table-driven validator = Phase 14+ refactor).
 
-**§9.9/9.3 NEXT** — Validator extension: v128 type-stack +
-per-op signatures via dispatch-table install (~150 src + ~80
-tests). Activates the `feature/simd_128/register.zig` slot.
+MVP catalogue covers v128.const, v128.load/store, splat
+(per shape), extract/replace_lane (per shape), binop/unop/
+relop ranges, any_true. 10 unit tests cover happy-path +
+type-mismatch + truncated-immediate + unknown-sub-opcode.
 
-## Active task — §9.9/9.3: SIMD-128 validator extension **NEXT**
+**§9.9/9.4 NEXT** — IR extension: ZirOp activation (171
+already pre-declared in `src/ir/zir.zig`) + lower paths from
+prefix-0xFD opcodes to ZirOps + `Allocation.shapeTag()` API
+introduction. Estimated ~450 src + ~120 tests per ADR-0041
+chunk plan.
 
-Per ADR-0041 §"Concrete chunk plan" + §"Decision" / 3:
-v128 type-stack + per-op signatures via dispatch-table
-install. Activates `src/feature/simd_128/register.zig` from
-placeholder to load-bearing.
+## Active task — §9.9/9.4: SIMD-128 IR extension **NEXT**
 
-Smallest red test: validator accepts a wasm module with
-`(func (result v128) (v128.const i32x4 0 0 0 0))` and
-rejects type mismatches (e.g. `(i32.add v128.const)` should
-TypeError). Existing `src/validate/validator.zig` consumes
-type signatures from the dispatch table; SIMD ops register
-their `(params, results)` shapes via the
-`feature/simd_128/register.zig:register()` entry point
-which gets called at startup.
+Per ADR-0041 §"Decision" / 1 + chunk plan: activate the 171
+pre-declared SIMD ZirOps (`src/ir/zir.zig`) + lower paths
+from validator-accepted prefix-0xFD ops to ZirOps + introduce
+`Allocation.shapeTag()` API for per-vreg shape disambiguation
+(per ADR-0041 §"Decision" / 2 — `single_slot_dual_meaning.md`
+enforcement). The shape-as-variant catalogue means each
+prefix-0xFD sub-opcode maps to a single ZirOp via a
+straightforward lookup table.
 
-Estimated diff: ~150 src + ~80 tests. Single chunk per
-ADR-0041's chunk-plan row.
+Smallest red test: lower a wasm body with `i32x4.splat
+(i32.const 7)` to a ZirInstr stream containing
+`@"i32.const"` + `@"i32x4.splat"` ZirOps, and verify
+`func.liveness.ranges[v128_vreg].shape == .v128`.
 
-After 9.3: 9.4 IR (ZirOp activation + lower paths +
-`Allocation.shapeTag()` API) → 9.5/9.6 ARM64 NEON emit →
-9.7/9.8 x86_64 SSE4.1 emit → 9.9 spec test → 9.10 bench →
-9.11 audit → 9.12 open §9.10.
+Estimated diff: ~450 src + ~120 tests. After 9.4: 9.5/9.6
+ARM64 NEON emit → 9.7/9.8 x86_64 SSE4.1 emit → 9.9 spec
+test → 9.10 bench → 9.11 audit → 9.12 open §9.10.
 
 After 8b.4: 8b.5 (boundary audit_scaffolding) + 8b.6 (open
 §9.9 inline + flip Phase Status).

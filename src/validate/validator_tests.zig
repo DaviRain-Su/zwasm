@@ -531,3 +531,122 @@ test "validate: 0xFC unknown sub-opcode → NotImplemented" {
     const r = validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
     try testing.expectError(Error.NotImplemented, r);
 }
+
+
+// ============================================================
+// §9.9 / 9.3 — SIMD-128 prefix-`0xFD` validator tests
+// (per ADR-0041 + Revision 2). MVP catalogue covers v128.const
+// + v128.load/store + splat + extract/replace_lane + binop +
+// type-mismatch rejection. Remaining op coverage extends in
+// 9.4 IR + 9.5-9.8 emit chunks.
+// ============================================================
+
+const v128_arr = [_]ValType{.v128};
+const v128_result_sig: FuncType = .{ .params = &.{}, .results = &v128_arr };
+
+test "validate (simd): v128.const + end produces v128 result" {
+    // 0xFD 0x0C [16 bytes] 0x0B
+    var body: [19]u8 = undefined;
+    body[0] = 0xFD;
+    body[1] = 0x0C;
+    @memset(body[2..18], 0); // 16 immediate bytes (all zero)
+    body[18] = 0x0B;
+    try validateFunction(v128_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
+test "validate (simd): v128.const truncated immediate fails" {
+    // Header says v128.const but only 8 immediate bytes follow.
+    var body: [11]u8 = undefined;
+    body[0] = 0xFD;
+    body[1] = 0x0C;
+    @memset(body[2..10], 0); // truncated: 8 bytes instead of 16
+    body[10] = 0x0B;
+    const r = validateFunction(v128_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+    try testing.expectError(Error.UnexpectedEnd, r);
+}
+
+test "validate (simd): i32x4.splat consumes i32, pushes v128" {
+    // i32.const 0 ; 0xFD 17 (i32x4.splat) ; end
+    const body = [_]u8{ 0x41, 0x00, 0xFD, 0x11, 0x0B };
+    try validateFunction(v128_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
+test "validate (simd): i32x4.splat with wrong scalar type fails" {
+    // i64.const 0 ; 0xFD 17 (i32x4.splat — expects i32) ; end
+    const body = [_]u8{ 0x42, 0x00, 0xFD, 0x11, 0x0B };
+    const r = validateFunction(v128_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+    try testing.expectError(Error.StackTypeMismatch, r);
+}
+
+test "validate (simd): f64x2.splat consumes f64, pushes v128" {
+    // f64.const 0.0 (8 bytes) ; 0xFD 20 (f64x2.splat) ; end
+    var body: [13]u8 = undefined;
+    body[0] = 0x44; // f64.const
+    @memset(body[1..9], 0); // 8 immediate bytes
+    body[9] = 0xFD;
+    body[10] = 0x14; // sub-opcode 20 = f64x2.splat
+    body[11] = 0x0B;
+    // Adjust slice length to 12 (we declared 13 but use 12).
+    try validateFunction(v128_result_sig, &.{}, body[0..12], &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
+test "validate (simd): i32x4.extract_lane consumes v128, pushes i32" {
+    // v128.const [16 bytes] ; 0xFD 27 (i32x4.extract_lane) lane=0 ; end
+    var body: [22]u8 = undefined;
+    body[0] = 0xFD;
+    body[1] = 0x0C;
+    @memset(body[2..18], 0);
+    body[18] = 0xFD;
+    body[19] = 0x1B; // sub-opcode 27 = i32x4.extract_lane
+    body[20] = 0x00; // lane index 0
+    body[21] = 0x0B;
+    try validateFunction(i32_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
+test "validate (simd): i32x4.replace_lane consumes v128 + i32, pushes v128" {
+    // v128.const ; i32.const 7 ; 0xFD 28 (i32x4.replace_lane) lane=0 ; end
+    var body: [24]u8 = undefined;
+    body[0] = 0xFD;
+    body[1] = 0x0C;
+    @memset(body[2..18], 0);
+    body[18] = 0x41; // i32.const
+    body[19] = 0x07;
+    body[20] = 0xFD;
+    body[21] = 0x1C; // sub-opcode 28 = i32x4.replace_lane
+    body[22] = 0x00; // lane index
+    body[23] = 0x0B;
+    try validateFunction(v128_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
+test "validate (simd): v128 binop (sub 110) consumes 2× v128, pushes v128" {
+    // v128.const ; v128.const ; 0xFD 110 (in the i32x4-arith range) ; end
+    var body: [40]u8 = undefined;
+    var i: usize = 0;
+    body[i] = 0xFD; i += 1;
+    body[i] = 0x0C; i += 1;
+    @memset(body[i..i+16], 0);
+    i += 16;
+    body[i] = 0xFD; i += 1;
+    body[i] = 0x0C; i += 1;
+    @memset(body[i..i+16], 0);
+    i += 16;
+    body[i] = 0xFD; i += 1;
+    body[i] = 0x6E; // sub-opcode 110 (LEB128: single byte since < 128)
+    i += 1;
+    body[i] = 0x0B; i += 1;
+    try validateFunction(v128_result_sig, &.{}, body[0..i], &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
+test "validate (simd): v128 binop with wrong stack types fails" {
+    // i32.const ; i32.const ; 0xFD 110 — expects v128 + v128, not i32 + i32.
+    const body = [_]u8{ 0x41, 0x00, 0x41, 0x00, 0xFD, 0x6E, 0x0B };
+    const r = validateFunction(v128_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+    try testing.expectError(Error.StackTypeMismatch, r);
+}
+
+test "validate (simd): unknown 0xFD sub-opcode → NotImplemented" {
+    // 0xFD with sub 0xFFFF (way past defined SIMD range; LEB128 multi-byte)
+    const body = [_]u8{ 0xFD, 0xFF, 0xFF, 0x03, 0x0B };
+    const r = validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+    try testing.expectError(Error.NotImplemented, r);
+}
