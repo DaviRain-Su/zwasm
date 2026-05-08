@@ -13,7 +13,7 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 8 / §9.8b / 8b.1 (Coalescer pass)
+## Current state — Phase 8 / §9.8b / 8b.1-b (ADR-0035 Coalescer design framing)
 
 §9.8a closed across 6 commits (a/b/c/d/e/f rows). Lesson
 `2026-05-09-hoist-branch-targets-as-pc.md` + ADR-0031 D-053-
@@ -39,27 +39,48 @@ discharge Revision row landed this commit. SHA backfill for
 Step 5b's `8a.1+8a.2+8a.3 all [x]` trigger satisfied — Phase
 8b chunks will be **bench-delta-gated** per ADR-0032.
 
-## Active task — §9.8b / 8b.1: Coalescer pass **NEXT**
+## Active task — §9.8b / 8b.1-b: ADR-0035 Coalescer design framing **NEXT**
 
-Per ROADMAP row text:
-> Vreg coalescing / MOV elimination. Survey-corrected from the
-> original "v1 W44" reference (which was actually SIMD register-
-> class introduction, not coalescing — see `private/notes/p8-
-> 8.5-survey.md`). MVP candidate per the survey's option (b)
-> post-regalloc slot-aliasing. **Bench-delta table in commit
-> message required** per /continue skill amendment.
+8b.1-a survey complete (private/notes/p8-8b1-coalescer-survey.md;
+155 lines). Headline:
 
-§9.8b is **bench-driven**: every chunk's commit body carries
-a `## Bench delta` section produced by `scripts/run_bench.sh
---quick --diff HEAD~1` (8a.3 infra). Both positive and
-negative movements surface.
+- v1 had a coalescer attempt (`ec8182f` archived) that passed
+  Mac aarch64 but failed x86_64 `go_math_big` due to emit-stage
+  spill-timing assumptions. Lesson: liveness must be const
+  input to regalloc; post-regalloc IR shape can't assume
+  per-arch details.
+- cranelift delegates coalescing to regalloc2 entirely.
+  regalloc2 itself coalesces DURING allocation via
+  `ParallelMoves<T>`.
+- winch + wasmer singlepass: no dedicated coalescer pass —
+  validates that single-pass JIT can't afford multi-pass
+  analysis.
 
-Suggested chunk plan:
+**MVP recommendation: option (b) post-regalloc slot-aliasing**
+(per ROADMAP row text). 1-2 day scope. Single-pass scan after
+regalloc; detect `src_slot == dst_slot` MOVs where dst isn't
+re-used; emit-time skip via `redundant_movs` metadata table.
+
+Three divergences from upstream:
+1. No in-IR coalescing (vs regalloc2): liveness is const input;
+   coalescing as metadata discovery, not IR mutation.
+2. No scratch-register cycle insertion: greedy-local regalloc +
+   deterministic slot assignment means no same-slot cycles.
+3. Branch-target bail: option (b) conservatively bails on
+   forward branches (W54-class lesson). Dominance-aware Phase 15.
+
+Bench candidates (highest SNR for coalescer wins):
+- ★★★ tinygo/fib_loop.wasm (15-25% expected)
+- ★★★ shootout/nestedloop.wasm (10-20%)
+- ★★ tinygo/string_ops.wasm (8-12%)
+- ★★ shootout/sieve.wasm (5-10%)
+
+Suggested chunk plan (continuing 8b.1):
 
 | #     | Description                                              | Status   |
 |-------|----------------------------------------------------------|----------|
-| 8b.1-a | Step 0 survey (subagent: Explore) — vreg coalescing in cranelift / wasmtime singlepass / wasm3 / regalloc2; option-(b) slot-aliasing shape | **NEXT** |
-| 8b.1-b | ADR `0035_coalescer_pass.md` design framing               | [ ]      |
+| 8b.1-a | Step 0 survey (subagent: Explore)                        | [x] (this commit; survey at `private/notes/p8-8b1-coalescer-survey.md`) |
+| 8b.1-b | ADR `0035_coalescer_pass.md` design framing               | **NEXT** |
 | 8b.1-c | Implement post-regalloc slot-aliasing pass (`src/ir/coalesce/pass.zig`) + unit tests | [ ]      |
 | 8b.1-d | Wire into `compile.zig` pipeline; bench-delta capture     | [ ]      |
 | 8b.1-e | 3-host gate; close 8b.1 [x] with bench-delta in commit body | [ ]      |
