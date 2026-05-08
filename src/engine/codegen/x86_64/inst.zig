@@ -210,6 +210,7 @@ pub const encMovsxR64R16 = inst_mem.encMovsxR64R16;
 pub const encMovR64FromMemDisp32 = inst_mem.encMovR64FromMemDisp32;
 pub const encMovR32FromMemDisp32 = inst_mem.encMovR32FromMemDisp32;
 pub const encStoreR32MemDisp32 = inst_mem.encStoreR32MemDisp32;
+pub const encMovMemDisp32Imm32 = inst_mem.encMovMemDisp32Imm32;
 pub const encCmpR64MemDisp32 = inst_mem.encCmpR64MemDisp32;
 pub const encMovR32FromBaseIdx = inst_mem.encMovR32FromBaseIdx;
 pub const encStoreR32MemBaseIdx = inst_mem.encStoreR32MemBaseIdx;

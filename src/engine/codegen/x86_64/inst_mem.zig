@@ -185,6 +185,32 @@ pub fn encStoreR32MemDisp32(src: Gpr, base: Gpr, disp: i32) EncodedInsn {
     return enc;
 }
 
+/// `MOV DWORD PTR [base + disp32], imm32` (opcode 0xC7 /0,
+/// mod=10). Stores a 32-bit immediate into memory; no register
+/// dependency. Used by §9.8a / 8a.2 (ADR-0034) JIT-execution
+/// sentinel: prologue stores `1` into
+/// `[entry_arg0 + jit_executed_flag_off]` unconditionally.
+/// 7 bytes (no REX) for RAX/RCX/RDX/RBX/RSP/RBP/RSI/RDI bases;
+/// 8 bytes (with REX.B) for R8-R15 bases.
+pub fn encMovMemDisp32Imm32(base: Gpr, disp: i32, imm: u32) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (base.extBit() == 1) {
+        enc.push(encodeRex(false, 0, 0, base.extBit()));
+    }
+    enc.push(0xC7);
+    enc.push(encodeModrm(0b10, 0, base.low3()));
+    const ud: u32 = @bitCast(disp);
+    enc.push(@truncate(ud));
+    enc.push(@truncate(ud >> 8));
+    enc.push(@truncate(ud >> 16));
+    enc.push(@truncate(ud >> 24));
+    enc.push(@truncate(imm));
+    enc.push(@truncate(imm >> 8));
+    enc.push(@truncate(imm >> 16));
+    enc.push(@truncate(imm >> 24));
+    return enc;
+}
+
 /// `CMP r64, [base + disp32]` (opcode 0x3B with REX.W, mod=10).
 /// Used by memory bounds check to compare eff_addr against
 /// `[R15 + mem_limit_off]`.

@@ -306,6 +306,17 @@ pub fn compile(
         // stays Cc-agnostic.
         try buf.appendSlice(allocator, inst.encMovRR(.q, abi.current.runtime_ptr_save_gpr, abi.current.entry_arg0_gpr).slice());
     }
+    // §9.8a / 8a.2 (ADR-0034) — JIT-execution sentinel: ARM64
+    // has the inject landed at d6e29ac; x86_64 inject is deferred
+    // (D-055) pending x86_64 prologue.zig helper extract (D-052)
+    // because the existing test landscape uses
+    // `expectEqualSlices(&full_byte_array, out.bytes)` rather than
+    // a body_start_offset()-relative pattern. Inserting 7 sentinel
+    // bytes per func without a helper layer would require updating
+    // 50+ test sites manually, exceeding chunk-bundle threshold.
+    // The encoder helper `inst.encMovMemDisp32Imm32` lands now
+    // (reusable for future Phase 8 / 15 work) so the wire-up
+    // becomes a 5-line patch once the helper migration completes.
     if (frame_bytes > 0) {
         // §9.7 / 7.10-g: pick imm8 / imm32 form per range.
         // imm8 form is 4 bytes; imm32 is 7 bytes.
