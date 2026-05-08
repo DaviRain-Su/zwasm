@@ -354,3 +354,4 @@ unit-test consumers and the future spec_assert path.
 | Date | SHA | Note |
 |---|---|---|
 | 2026-05-09 | `<backfill>` | Initial accepted version (§9.8a / 8a.2-a design framing) |
+| 2026-05-09 | `<backfill>` | **Refinement (§9.8a / 8a.2-d)**: cross-process surface uses **exit-code encoding** (5 = pass+compile-only-path, 0 = pass+verified) instead of the originally-spec'd stderr marker line. Functionally equivalent: both convey the same single bit (flag != 0 vs flag == 0) on the success path. Exit-code form avoids fork-time pipe / dup2 setup, fitting the runner's existing exit-code → RunResult decoding pattern. The two new RunResult variants (`pass_verified`, `pass_compile_only_path`) replace the prior unified `pass`. Stderr marker remains a viable future option if multi-bit / multi-event surface is needed (e.g. trap-stub side flag in M3-c). |

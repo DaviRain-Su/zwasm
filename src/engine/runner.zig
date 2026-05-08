@@ -353,11 +353,18 @@ pub fn runI32Export(
 /// and surface trap as Error.Trap. Mirrors `runI32Export`'s
 /// setup; differs only in the entry-call helper + signature
 /// gate.
+/// Compile + invoke a void-returning export. Returns the
+/// post-call value of `JitRuntime.jit_executed_flag` (per
+/// §9.8a / 8a.2 ADR-0034 sentinel) so callers can distinguish
+/// "JIT body actually executed" (`flag != 0`) from "compile-
+/// passed but never invoked" (`flag == 0`). On Mac aarch64
+/// hosts the ARM64 prologue inject sets the flag; x86_64
+/// hosts always return 0 until D-055 lands the x86_64 wire-up.
 pub fn runVoidExport(
     allocator: Allocator,
     wasm_bytes: []const u8,
     export_name: []const u8,
-) Error!void {
+) Error!u32 {
     const func_idx = try findExportFunc(allocator, wasm_bytes, export_name);
 
     var compiled = try compileWasm(allocator, wasm_bytes);
@@ -372,7 +379,8 @@ pub fn runVoidExport(
 
     var owned = try setupRuntime(allocator, &compiled, wasm_bytes);
     defer owned.deinit(allocator);
-    return entry.callVoidNoArgs(compiled.module, func_idx, &owned.rt);
+    try entry.callVoidNoArgs(compiled.module, func_idx, &owned.rt);
+    return owned.rt.jit_executed_flag;
 }
 
 /// Allocations bundled with the JitRuntime they back. Returned

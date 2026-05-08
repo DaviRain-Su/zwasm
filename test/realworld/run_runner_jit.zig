@@ -66,7 +66,24 @@ const use_fork = builtin.os.tag == .linux or builtin.os.tag == .macos;
 /// Result classes mirrored from the inline switch the parent
 /// process used pre-fork. Encoded into the child's exit code so
 /// the parent can reconstruct the category without IPC.
-const RunResult = enum { pass, trap, no_entry, unsupported_sig, other, timeout };
+///
+/// §9.8a / 8a.2-d (ADR-0034): `pass_verified` vs
+/// `pass_compile_only_path` carry the JIT-execution sentinel
+/// signal — flag != 0 means at least one JIT-emitted prologue
+/// actually fired. ADR-0034's original design printed a marker
+/// line to stderr; this implementation encodes the bit into
+/// the child's exit code (5 = pass+compile-only-path, 0 =
+/// pass+verified) to avoid fork-time pipe / dup2 setup. ADR-
+/// 0034 Revision history records the swap.
+const RunResult = enum {
+    pass_verified,
+    pass_compile_only_path,
+    trap,
+    no_entry,
+    unsupported_sig,
+    other,
+    timeout,
+};
 
 // SIGALRM handler state — read by `sigalrmHandler` (async-signal
 // context, can only touch volatile globals + call async-safe
@@ -106,7 +123,9 @@ fn classifyRunError(err: anyerror) RunResult {
 
 fn runFixtureNoFork(gpa: std.mem.Allocator, bytes: []const u8) RunResult {
     const r = engine_runner.runVoidExport(gpa, bytes, "_start");
-    if (r) |_| return .pass else |e| return classifyRunError(e);
+    if (r) |flag| {
+        return if (flag != 0) .pass_verified else .pass_compile_only_path;
+    } else |e| return classifyRunError(e);
 }
 
 fn runFixtureWithTimeout(gpa: std.mem.Allocator, bytes: []const u8) RunResult {
@@ -120,8 +139,17 @@ fn runFixtureWithTimeout(gpa: std.mem.Allocator, bytes: []const u8) RunResult {
     if (pid == 0) {
         // Child: run the entry, encode the category as the exit
         // code, and `std.process.exit` (skips parent-side defers).
+        // Exit-code map (extended for §9.8a / 8a.2-d sentinel):
+        //   0 = pass + JIT body verified (flag != 0)
+        //   1 = trap
+        //   2 = no_entry
+        //   3 = unsupported_sig
+        //   4 = other
+        //   5 = pass + JIT body never invoked (flag == 0)
         const r = engine_runner.runVoidExport(gpa, bytes, "_start");
-        const code: u8 = if (r) |_| 0 else |err| switch (err) {
+        const code: u8 = if (r) |flag|
+            (if (flag != 0) @as(u8, 0) else @as(u8, 5))
+        else |err| switch (err) {
             error.Trap => 1,
             error.ExportNotFound, error.ExportIsNotFunction => 2,
             error.UnsupportedEntrySignature => 3,
@@ -143,10 +171,11 @@ fn runFixtureWithTimeout(gpa: std.mem.Allocator, bytes: []const u8) RunResult {
     const u_status: u32 = @bitCast(status);
     if (std.posix.W.IFEXITED(u_status)) {
         return switch (std.posix.W.EXITSTATUS(u_status)) {
-            0 => .pass,
+            0 => .pass_verified,
             1 => .trap,
             2 => .no_entry,
             3 => .unsupported_sig,
+            5 => .pass_compile_only_path,
             else => .other,
         };
     }
@@ -210,7 +239,16 @@ pub fn main(init: std.process.Init) !void {
 
     var total: u32 = 0;
     var compile_pass: u32 = 0;
+    // §9.8a / 8a.2-d: split run_pass into JIT-verified vs compile-
+    // only-path per ADR-0034. `run_pass` retains aggregate count
+    // for backward-compatible reporting; the two new counters
+    // surface the sentinel signal. `run_jit_verified == 0` while
+    // `run_pass > 0` means RUN-PASS reached but no JIT prologue
+    // fired — useful diagnostic for D-054 OrbStack-vs-windowsmini
+    // differential once D-055 lands the x86_64 sentinel wire-up.
     var run_pass: u32 = 0;
+    var run_jit_verified: u32 = 0;
+    var run_jit_compile_only_path: u32 = 0;
     var run_trap: u32 = 0;
     var run_no_entry: u32 = 0;
     var run_unsupported_sig: u32 = 0;
@@ -251,10 +289,17 @@ pub fn main(init: std.process.Init) !void {
                 // deadline. See helper `runFixtureWithTimeout`
                 // above for the exit-code → RunResult decoding.
                 switch (runFixtureWithTimeout(gpa, bytes)) {
-                    .pass => {
-                        try stdout.print("RUN-PASS  {s}\n", .{entry.name});
+                    .pass_verified => {
+                        try stdout.print("RUN-PASS  {s} (RUN-JIT-VERIFIED)\n", .{entry.name});
                         try stdout.flush();
                         run_pass += 1;
+                        run_jit_verified += 1;
+                    },
+                    .pass_compile_only_path => {
+                        try stdout.print("RUN-PASS  {s} (RUN-JIT-COMPILE-ONLY-PATH)\n", .{entry.name});
+                        try stdout.flush();
+                        run_pass += 1;
+                        run_jit_compile_only_path += 1;
                     },
                     .trap => {
                         try stdout.print("RUN-TRAP  {s}\n", .{entry.name});
@@ -329,8 +374,8 @@ pub fn main(init: std.process.Init) !void {
 
     if (run_stage_active) {
         try stdout.print(
-            "\nrealworld_run_jit_runner: {d}/{d} compile-pass | run: {d} pass, {d} trap, {d} no-entry, {d} unsupported-sig, {d} timeout (>{d}s) | compile gaps: {d} imports, {d} op, {d} val | {d} fail-other\n",
-            .{ compile_pass, total, run_pass, run_trap, run_no_entry, run_unsupported_sig, run_timeout, FIXTURE_TIMEOUT_SECS, compile_imports, compile_op, compile_val, fail_other },
+            "\nrealworld_run_jit_runner: {d}/{d} compile-pass | run: {d} pass ({d} jit-verified, {d} compile-only-path), {d} trap, {d} no-entry, {d} unsupported-sig, {d} timeout (>{d}s) | compile gaps: {d} imports, {d} op, {d} val | {d} fail-other\n",
+            .{ compile_pass, total, run_pass, run_jit_verified, run_jit_compile_only_path, run_trap, run_no_entry, run_unsupported_sig, run_timeout, FIXTURE_TIMEOUT_SECS, compile_imports, compile_op, compile_val, fail_other },
         );
     } else {
         try stdout.print(
