@@ -1177,6 +1177,8 @@ pub fn compile(
             .@"i32x4.sub" => try op_simd.emitI32x4Sub(&ctx, &ins),
             .@"i64x2.add" => try op_simd.emitI64x2Add(&ctx, &ins),
             .@"i64x2.sub" => try op_simd.emitI64x2Sub(&ctx, &ins),
+            .@"i16x8.mul" => try op_simd.emitI16x8Mul(&ctx, &ins),
+            .@"i32x4.mul" => try op_simd.emitI32x4Mul(&ctx, &ins),
 
             else => {
                 // §9.7 / 7.5-diag-op: surface the unhandled op

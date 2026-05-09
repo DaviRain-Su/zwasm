@@ -13,40 +13,35 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 9 / §9.9/9.5-c-iv [x] (i8x16/i16x8/i64x2 add+sub); **§9.9/9.5-c-v NEXT**
+## Current state — Phase 9 / §9.9/9.5-c-v [x] (i16x8/i32x4 mul); **§9.9/9.5-c-vi NEXT**
 
-§9.9/9.5-c-iv bundles 7 new ADD/SUB encoders (i8x16, i16x8,
-i64x2 add+sub + i32x4.sub) sharing the SIMD ADD/SUB
-encoding family — size field at bits[23:22] selects lane
-shape (00/01/10/11 for 16B/8H/4S/2D); U bit at bit[29]
-toggles ADD↔SUB. Refactored op_simd.zig with shared
-`emitV128Binop` helper taking an encoder fn — 8 thin
-handlers (i*x*.add + i*x*.sub for 4 shapes) reduce to
-~3 LOC each. emit.zig dispatch extended with 7 new arms
-(i32x4.add already wired).
+§9.9/9.5-c-v adds NEON MUL encoders (encMul16B / encMul8H /
+encMul4S; same shape as ADD with bits[15:11] = 10011 vs ADD's
+10000) + emitI16x8Mul / emitI32x4Mul handlers + 2 dispatch
+arms. Wasm SIMD has no i8x16.mul (encMul16B preserved for
+completeness). i64x2.mul defers to 9.5-c-vi since A64 NEON
+has no `MUL Vd.2D` instruction — needs multi-instr synthesis.
 
 Per LOOP.md chunk granularity, 9.5 row split:
-- 9.5-a/b/c-i…c-iv [x]: encoder foundation + shape-tag
+- 9.5-a/b/c-i…c-v [x]: encoder foundation + shape-tag
   pipeline + Q-form spill + op_simd refactor + lane access +
-  ADD/SUB across 4 shapes.
-- 9.5-c-v NEXT: mul shapes (i8x16/i16x8/i32x4 via NEON MUL
-  Vd.<T>; i64x2.mul via synthesis since no NEON 2D-MUL exists)
-  + remaining lane-access shapes (i8x16 / i16x8 / i64x2 /
-  f32x4 / f64x2 extract/replace_lane).
+  ADD/SUB + MUL (16B/8H/4S).
+- 9.5-c-vi NEXT: i64x2.mul synthesis (extract/scalar-mul/
+  insert sequence) + remaining lane-access shapes (i8x16/
+  i16x8/i64x2/f32x4/f64x2 extract/replace_lane).
 
 Mac gates: zone ✓, file_size ✓, spill ✓, lint ✓, test
-1220/0/12 (was 1211; +9 ADD/SUB encoder tests).
+1224/0/12 (was 1220; +4 MUL encoder tests).
 
-**§9.9/9.5-c-v NEXT** — i8x16/i16x8/i32x4 mul via NEON MUL
-encoder family (size field discriminator; bits[15:11] = 10011
-distinguishes from ADD/SUB) + i64x2.mul synthesis (multi-instr
-sequence: extract lanes → 2× scalar mul → insert lanes; or
-SMULL2/UMLAL pattern for higher throughput — design choice
-for the chunk). Plus extract/replace_lane handlers for the
-remaining 5 shapes (i8x16/i16x8/i64x2/f32x4/f64x2) — each
-needs UMOV/SMOV/INS variants per element width.
+**§9.9/9.5-c-vi NEXT** — i64x2.mul multi-instr synthesis +
+extract/replace_lane for i8x16 / i16x8 / i64x2 / f32x4 /
+f64x2. The synthesis sequence for i64x2.mul: extract each
+i64 lane via UMOV X<rd>, V<rn>.D[i]; scalar MUL via
+inst.encMulRR; insert via INS V<rd>.D[i], X<rn>. ~120 src +
+~60 tests (estimate; chunk granularity may further split if
+the lane-access shape variants exceed thresholds).
 
-## Active task — §9.9/9.5-c-v: mul shapes + remaining lane access **NEXT**
+## Active task — §9.9/9.5-c-vi: i64x2.mul synthesis + lane access shapes **NEXT**
 
 Per ADR-0041 + 9.5-a's encoder foundation. Wires the NEON
 encoders into the ZirOp dispatch path in

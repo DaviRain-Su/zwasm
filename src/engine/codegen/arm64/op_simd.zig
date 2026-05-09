@@ -172,6 +172,15 @@ pub fn emitI64x2Add(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 pub fn emitI64x2Sub(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     try emitV128Binop(ctx, inst_neon.encSub2D);
 }
+// Note: Wasm SIMD has no `i8x16.mul` (only i16x8/i32x4/i64x2). The
+// underlying NEON `MUL Vd.16B` encoding (encMul16B) is preserved
+// in inst_neon.zig for completeness but no ZirOp dispatches to it.
+pub fn emitI16x8Mul(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128Binop(ctx, inst_neon.encMul8H);
+}
+pub fn emitI32x4Mul(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128Binop(ctx, inst_neon.encMul4S);
+}
 
 /// `i32x4.extract_lane`: pop v128 (Vn.4S), push i32 result (Wd).
 /// `UMOV W<wd>, V<vn>.S[lane]` extracts the 32-bit lane (zero-

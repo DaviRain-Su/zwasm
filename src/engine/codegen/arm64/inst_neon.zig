@@ -182,6 +182,36 @@ pub fn encSub2D(rd: Vn, rn: Vn, rm: Vn) u32 {
     return 0x6EE08400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
 }
 
+/// `MUL V<d>.<T>, V<n>.<T>, V<m>.<T>` — element-wise integer
+/// multiply. Same encoding shape as ADD but bits[15:11] = 10011
+/// (vs ADD's 10000); delta from ADD base = 0x1800.
+///
+/// Encoding (SIMD MUL vector, U=0, Q=1):
+///   `0 1 0 01110 [size:2] 1 [Rm:5] 100111 [Rn:5] [Rd:5]`
+///
+/// Per Arm IHI 0055 §C7.2.222.
+///
+/// **Note**: NEON has no `MUL Vd.2D` form — i64x2.mul requires
+/// a multi-instr synthesis (extract / scalar mul / insert) and
+/// defers to §9.9 / 9.5-c-vi alongside the other 64-bit-lane ops
+/// that need synthesis.
+
+/// `MUL V<d>.16B, V<n>.16B, V<m>.16B` — i8x16 lanewise mul.
+pub fn encMul16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E209C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `MUL V<d>.8H, V<n>.8H, V<m>.8H` — i16x8 lanewise mul.
+pub fn encMul8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E609C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `MUL V<d>.4S, V<n>.4S, V<m>.4S` — i32x4 lanewise mul.
+/// SSE4.1's PMULLD per ADR-0041 §"5. SSE4.1 minimum baseline".
+pub fn encMul4S(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4EA09C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
 // =====================================================================
 // Lane access (extract / replace)
 // =====================================================================
@@ -390,4 +420,30 @@ test "encAdd shapes pairwise distinct (size field separates)" {
     try testing.expect(encAdd16B(0, 1, 2) != encAdd8H(0, 1, 2));
     try testing.expect(encAdd8H(0, 1, 2) != encAdd4S(0, 1, 2));
     try testing.expect(encAdd4S(0, 1, 2) != encAdd2D(0, 1, 2));
+}
+
+// ============================================================
+// §9.9 / 9.5-c-v — MUL family (16B/8H/4S; 2D needs synthesis)
+// ============================================================
+
+test "encMul16B: V0, V1, V2 (i8x16.mul shape)" {
+    // 0x4E209C00 | (2 << 16) | (1 << 5) | 0 = 0x4E229C20
+    try testing.expectEqual(@as(u32, 0x4E229C20), encMul16B(0, 1, 2));
+}
+
+test "encMul8H: V0, V1, V2 (i16x8.mul)" {
+    // 0x4E609C00 | ... = 0x4E629C20
+    try testing.expectEqual(@as(u32, 0x4E629C20), encMul8H(0, 1, 2));
+}
+
+test "encMul4S: V0, V1, V2 (i32x4.mul)" {
+    // 0x4EA09C00 | ... = 0x4EA29C20
+    try testing.expectEqual(@as(u32, 0x4EA29C20), encMul4S(0, 1, 2));
+}
+
+test "encMul vs encAdd: bits[15:11] differ by 0b00011 << 11 = 0x1800" {
+    // MUL bits[15:11] = 10011, ADD = 10000 → delta 0x1800.
+    const add_word = encAdd4S(0, 1, 2);
+    const mul_word = encMul4S(0, 1, 2);
+    try testing.expectEqual(@as(u32, 0x1800), mul_word ^ add_word);
 }
