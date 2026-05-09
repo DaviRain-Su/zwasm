@@ -13,43 +13,49 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 9 / §9.5 [x] (full sub-row chain closed); **§9.6 NEXT**
+## Current state — Phase 9 / §9.6/9.6-a [x] (FP binary arith); **§9.6/9.6-b NEXT**
 
-§9.5 closed. The parent row now `[x]` after 9.5-c-vii-mul wired
-i64x2.mul via per-lane GPR transit (UMOV X.D / scalar X-form MUL
-/ INS X.D, X16/X17 IP0/IP1 scratch reused from existing
-op_alu_int rotl + op_alu_float copysign convention). Same chunk
-also fixed a latent bug: shape_tag walker in
-shared/regalloc.zig was missing the int-arith catalogue beyond
-i32x4.add (closed proactively per bug_fix_survey grep
-discipline; latent only because no fixture spilled v128 vregs
-yet).
+§9.6/9.6-a adds 8 NEON FP three-same encoders (FADD/FSUB/FMUL/
+FDIV × 4S/2D) + 8 op_simd handlers via `emitV128Binop` thin
+adapters. NEON FP arith is IEEE-754 round-to-nearest-even with
+NaN-propagation matching Wasm semantics (per ADR-0041 §"4. NEON
+IEEE-754 spec-fidelity"). Shape_tag walker extends.
+
+Per LOOP.md chunk granularity, §9.6 sub-row split:
+- 9.6-a [x]: f32x4/f64x2 add/sub/mul/div.
+- 9.6-b NEXT: FP unary — sqrt/abs/neg/ceil/floor/trunc/nearest
+  for f32x4/f64x2 (shape: pop 1 v128, push 1 v128). NEON
+  encoders FSQRT/FABS/FNEG/FRINTP/FRINTM/FRINTZ/FRINTN with
+  4S/2D.
+- 9.6-c: FP min/max/pmin/pmax (Wasm-spec quirky NaN handling
+  — non-default NaN-propagation requires FMAXP/FMINP variants).
+- 9.6-d: int compare (CMEQ/CMGT/CMHI/CMGE/CMHS).
+- 9.6-e: FP compare (FCMEQ/FCMGT/FCMGE).
+- 9.6-f: shuffle (TBL-based).
+- 9.6-g: conversion (trunc_sat / convert / narrow / extend).
 
 Mac gates: zone ✓, file_size ✓, spill ✓, lint ✓; spec
 212/0/20, wast 1158/0/0.
 
-**§9.6 NEXT** — ARM64 emit (NEON) pt 2: SIMD comparison +
-shuffle + float arithmetic + conversion. The encoder catalogue
-expands substantially:
-- Float arith: f32x4/f64x2 add/sub/mul/div/min/max/sqrt/abs/neg.
-- Compare: i*x*.eq/ne/lt/gt/le/ge (signed and unsigned for int);
-  f*x*.eq/ne/lt/gt/le/ge (ordered).
-- Shuffle: i8x16.shuffle (16-byte permutation) + swizzle
-  (TBL/TBX-based).
-- Conversion: i32x4.trunc_sat_f32x4_{s,u}, f32x4.convert_i32x4_{s,u},
-  similar for f64x2 ↔ i64x2 (where supported), narrow / extend
-  ops.
+**§9.6/9.6-b NEXT** — FP unary ops. Encoders + handlers for
+f32x4 / f64x2: sqrt, abs, neg, ceil, floor, trunc, nearest.
+Shape: pop 1 v128, push 1 v128. Need a new helper
+`emitV128Unop(ctx, encoder)` (parallel to `emitV128Binop`)
+since current shape only covers binary.
 
-Per LOOP.md chunk granularity, expect to split into multiple
-sub-rows similar to §9.5's c-i / c-ii / ... pattern. Step 0
-survey expected — wasmtime / cranelift's NEON emit + Wasm SIMD
-spec §"Comparison" / §"Conversion" / §"Floating-point" sections.
+## Active task — §9.6/9.6-b: f32x4 / f64x2 FP unary **NEXT**
 
-## Active task — §9.6: ARM64 NEON emit pt 2 **NEXT**
+7 ops × 2 shapes = 14 ZirOp variants:
+- f32x4.sqrt → FSQRT V<d>.4S, V<n>.4S
+- f32x4.abs → FABS V<d>.4S, V<n>.4S
+- f32x4.neg → FNEG V<d>.4S, V<n>.4S
+- f32x4.ceil → FRINTP (round toward +∞)
+- f32x4.floor → FRINTM (round toward -∞)
+- f32x4.trunc → FRINTZ (round toward zero)
+- f32x4.nearest → FRINTN (round to nearest, ties-to-even)
 
-Open the §9.6 chunk plan with Step 0 survey; first sub-chunk
-likely `9.6-a` (float arith — add/sub/mul/div for f32x4/f64x2,
-shape parallel to §9.5-c-iv ADD/SUB family).
+Same 7 ops with .2D suffix for f64x2. Estimated ~250 src + ~150
+tests including encoder bit-pattern tests + helper introduction.
 
 After 8b.4: 8b.5 (boundary audit_scaffolding) + 8b.6 (open
 §9.9 inline + flip Phase Status).
