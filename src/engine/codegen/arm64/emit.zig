@@ -1297,6 +1297,11 @@ pub fn compile(
             .@"i64x2.extend_high_i32x4_s" => try op_simd.emitI64x2ExtendHighI32x4S(&ctx, &ins),
             .@"i64x2.extend_low_i32x4_u" => try op_simd.emitI64x2ExtendLowI32x4U(&ctx, &ins),
             .@"i64x2.extend_high_i32x4_u" => try op_simd.emitI64x2ExtendHighI32x4U(&ctx, &ins),
+            // §9.6/9.6-g-ii — saturating narrow (SQXTN/SQXTUN family).
+            .@"i8x16.narrow_i16x8_s" => try op_simd.emitI8x16NarrowI16x8S(&ctx, &ins),
+            .@"i8x16.narrow_i16x8_u" => try op_simd.emitI8x16NarrowI16x8U(&ctx, &ins),
+            .@"i16x8.narrow_i32x4_s" => try op_simd.emitI16x8NarrowI32x4S(&ctx, &ins),
+            .@"i16x8.narrow_i32x4_u" => try op_simd.emitI16x8NarrowI32x4U(&ctx, &ins),
 
             else => {
                 // §9.7 / 7.5-diag-op: surface the unhandled op

@@ -906,6 +906,54 @@ pub fn emitI64x2ExtendHighI32x4S(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 pub fn emitI64x2ExtendLowI32x4U(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Unop(ctx, inst_neon.encUxtl2D); }
 pub fn emitI64x2ExtendHighI32x4U(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Unop(ctx, inst_neon.encUxtl2_2D); }
 
+// ============================================================
+// §9.6 / 9.6-g-ii — saturating narrow (4 ops)
+// ============================================================
+//
+// Wasm spec — `*.narrow_*_{s,u}`. Two-instruction synthesis:
+//   1. <low_enc>  result.<half>, lhs.<full>   ; writes lower, zeros upper
+//   2. <high_enc> result.<full>, rhs.<full>   ; writes upper, preserves lower
+// SQXTN's Q=0 form clears upper half + Q=1 form preserves lower half
+// → no scratch register needed (cranelift uses same pattern).
+
+fn emitV128NarrowSaturating(
+    ctx: *EmitCtx,
+    low_encoder: *const fn (rd: u5, rn: u5) u32,
+    high_encoder: *const fn (rd: u5, rn: u5) u32,
+) Error!void {
+    const rhs_vreg = ctx.pushed_vregs.pop().?;
+    const rhs_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, rhs_vreg, 1);
+
+    const lhs_vreg = ctx.pushed_vregs.pop().?;
+    const lhs_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, lhs_vreg, 0);
+
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
+
+    // Step 1: low-half narrow into result_v (zeros upper half).
+    try gpr.writeU32(ctx.allocator, ctx.buf, low_encoder(result_v, lhs_v));
+    // Step 2: high-half narrow merges into upper of result_v.
+    try gpr.writeU32(ctx.allocator, ctx.buf, high_encoder(result_v, rhs_v));
+
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
+pub fn emitI8x16NarrowI16x8S(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128NarrowSaturating(ctx, inst_neon.encSqxtn8B, inst_neon.encSqxtn2_16B);
+}
+pub fn emitI8x16NarrowI16x8U(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128NarrowSaturating(ctx, inst_neon.encSqxtun8B, inst_neon.encSqxtun2_16B);
+}
+pub fn emitI16x8NarrowI32x4S(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128NarrowSaturating(ctx, inst_neon.encSqxtn4H, inst_neon.encSqxtn2_8H);
+}
+pub fn emitI16x8NarrowI32x4U(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128NarrowSaturating(ctx, inst_neon.encSqxtun4H, inst_neon.encSqxtun2_8H);
+}
+
 pub fn emitI8x16Swizzle(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     const indices_vreg = ctx.pushed_vregs.pop().?;
     const indices_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, indices_vreg, 1);

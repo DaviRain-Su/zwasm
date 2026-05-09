@@ -668,6 +668,57 @@ pub fn encUxtl2_2D(rd: Vn, rn: Vn) u32 {
     return 0x6F20A400 | (@as(u32, rn) << 5) | @as(u32, rd);
 }
 
+// ---------------------------------------------------------------------
+// §9.6 / 9.6-g-ii — SQXTN/SQXTN2 + SQXTUN/SQXTUN2 (saturating narrow)
+// ---------------------------------------------------------------------
+// Wasm spec (SIMD) — `*.narrow_*_{s,u}` (4 ops):
+//   i8x16.narrow_i16x8_s  → SQXTN  + SQXTN2 (.8H → .8B/.16B)
+//   i8x16.narrow_i16x8_u  → SQXTUN + SQXTUN2 (.8H → .8B/.16B; signed
+//                          source clamped to unsigned range — Wasm
+//                          spec §4.4.3.X says negative inputs → 0)
+//   i16x8.narrow_i32x4_s  → SQXTN  + SQXTN2 (.4S → .4H/.8H)
+//   i16x8.narrow_i32x4_u  → SQXTUN + SQXTUN2 (.4S → .4H/.8H)
+//
+// NEON destination semantics (the design enabler):
+//   Q=0 form (low):  Vd[63:0] = sat-narrow(Vn); Vd[127:64] = 0
+//   Q=1 form (high): Vd[127:64] = sat-narrow(Vn); Vd[63:0] preserved
+// Sequence: SQXTN result.<half>, lhs.<full>; SQXTN2 result.<full>, rhs.<full>
+// — second instruction's preserve-lower semantics replaces the need
+// for a scratch register (cranelift uses the same pattern).
+//
+// Encoding family "Advanced SIMD two-register miscellaneous":
+//   `0 Q U 01110 size:2 10000 opcode:5 10 Rn Rd`
+// SQXTN  : U=0, opcode=10100
+// SQXTUN : U=1, opcode=10010
+// size: 00=8H→8B, 01=4S→4H, 10=2D→2S (only 00/01 used by Wasm narrow).
+// Per Arm IHI 0055 §C7.2.330 (SQXTN) / §C7.2.339 (SQXTUN).
+
+pub fn encSqxtn8B(rd: Vn, rn: Vn) u32 {
+    return 0x0E214800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encSqxtn2_16B(rd: Vn, rn: Vn) u32 {
+    return 0x4E214800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encSqxtn4H(rd: Vn, rn: Vn) u32 {
+    return 0x0E614800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encSqxtn2_8H(rd: Vn, rn: Vn) u32 {
+    return 0x4E614800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+pub fn encSqxtun8B(rd: Vn, rn: Vn) u32 {
+    return 0x2E212800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encSqxtun2_16B(rd: Vn, rn: Vn) u32 {
+    return 0x6E212800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encSqxtun4H(rd: Vn, rn: Vn) u32 {
+    return 0x2E612800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encSqxtun2_8H(rd: Vn, rn: Vn) u32 {
+    return 0x6E612800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
 /// `BSL V<d>.16B, V<n>.16B, V<m>.16B` — bitwise select using V<d>
 /// as the mask. Element width is irrelevant since BSL is bitwise.
 pub fn encBsl16B(rd: Vn, rn: Vn, rm: Vn) u32 {
@@ -1410,6 +1461,54 @@ test "Sxtl shapes pairwise distinct (immh field)" {
     try testing.expect(encSxtl8H(0, 0) != encSxtl4S(0, 0));
     try testing.expect(encSxtl4S(0, 0) != encSxtl2D(0, 0));
     try testing.expect(encSxtl8H(0, 0) != encSxtl2D(0, 0));
+}
+
+// ============================================================
+// §9.6 / 9.6-g-ii — SQXTN/SQXTUN saturating narrow
+// ============================================================
+// Cranelift cross-references (wasmtime/cranelift/codegen/src/isa/
+// aarch64/inst/emit_tests.rs:3016-3128):
+//   sqxtn2 v7.16b,  v22.8h  → 0x4E214AC7
+//   uqxtn  v31.4h,  v31.4s  → 0x2E614BFF (UQXTN; we use SQXTUN
+//   for Wasm narrow_*_u — encoding pattern shape verified)
+
+test "encSqxtn2_16B: v7.16b, v22.8h (cranelift cross-check)" {
+    // 0x4E214800 | (22 << 5) | 7 = 0x4E214AC7
+    try testing.expectEqual(@as(u32, 0x4E214AC7), encSqxtn2_16B(7, 22));
+}
+
+test "encSqxtn8B: v0.8b, v0.8h (low-form base)" {
+    // 0x0E214800 | 0 | 0 = 0x0E214800
+    try testing.expectEqual(@as(u32, 0x0E214800), encSqxtn8B(0, 0));
+}
+
+test "encSqxtn4H: v0.4h, v0.4s (size=01)" {
+    // 0x0E614800 | 0 | 0 = 0x0E614800
+    try testing.expectEqual(@as(u32, 0x0E614800), encSqxtn4H(0, 0));
+}
+
+test "encSqxtn vs encSqxtn2: Q bit (bit 30) differs" {
+    try testing.expectEqual(@as(u32, 0x40000000), encSqxtn2_16B(0, 0) ^ encSqxtn8B(0, 0));
+    try testing.expectEqual(@as(u32, 0x40000000), encSqxtn2_8H(0, 0) ^ encSqxtn4H(0, 0));
+}
+
+test "encSqxtun vs encSqxtn: U bit + opcode bit 14 differ (10010 vs 10100)" {
+    // SQXTUN: U=1, opcode=10010. SQXTN: U=0, opcode=10100.
+    // Bit-level diff: bit 29 (U) + bits 14, 13 (opcode 10010 ^ 10100 = 00110)
+    //   = 0x20000000 + 0x4000 + 0x2000 = 0x20006000
+    // Wait, opcode bits are at 16:12. 10010 = 18; 10100 = 20. XOR = 6 = 0b00110 = bit 13 + bit 14 set.
+    // 13<<12 = 0x2000, 14<<12 = 0x4000. So opcode XOR contributes 0x6000.
+    try testing.expectEqual(@as(u32, 0x20006000), encSqxtun8B(0, 0) ^ encSqxtn8B(0, 0));
+}
+
+test "encSqxtun4H: v0.4h, v0.4s (signed→unsigned narrow base)" {
+    // 0x2E612800 | 0 | 0 = 0x2E612800
+    try testing.expectEqual(@as(u32, 0x2E612800), encSqxtun4H(0, 0));
+}
+
+test "encSqxtun2_8H: v31.8h, v31.4s (max indices)" {
+    // 0x6E612800 | (31 << 5) | 31 = 0x6E612BFF
+    try testing.expectEqual(@as(u32, 0x6E612BFF), encSqxtun2_8H(31, 31));
 }
 
 test "Int compare shapes: 4 CMEQ encodings pairwise distinct" {
