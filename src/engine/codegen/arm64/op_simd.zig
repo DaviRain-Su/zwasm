@@ -870,3 +870,31 @@ pub fn emitF64x2Gt(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128B
 pub fn emitF64x2Ge(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Binop(ctx, inst_neon.encFCmGe2D); }
 pub fn emitF64x2Lt(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128BinopSwapped(ctx, inst_neon.encFCmGt2D); }
 pub fn emitF64x2Le(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128BinopSwapped(ctx, inst_neon.encFCmGe2D); }
+
+// ============================================================
+// §9.6 / 9.6-f-i — i8x16.swizzle
+// ============================================================
+//
+// Wasm spec (SIMD) — `i8x16.swizzle(operand, indices)`:
+//   for each lane k: output[k] = (indices[k] < 16) ? operand[indices[k]] : 0
+//
+// Lowers to NEON TBL (1-register table form):
+//   TBL V<result>.16B, { V<operand>.16B }, V<indices>.16B
+// Stack order: operand pushed first, indices pushed second; popped
+// in reverse → indices first, operand second.
+pub fn emitI8x16Swizzle(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    const indices_vreg = ctx.pushed_vregs.pop().?;
+    const indices_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, indices_vreg, 1);
+
+    const operand_vreg = ctx.pushed_vregs.pop().?;
+    const operand_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, operand_vreg, 0);
+
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
+
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encTbl1Reg(result_v, operand_v, indices_v));
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}

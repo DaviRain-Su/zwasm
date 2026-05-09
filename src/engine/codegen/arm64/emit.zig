@@ -1282,6 +1282,8 @@ pub fn compile(
             .@"f64x2.gt" => try op_simd.emitF64x2Gt(&ctx, &ins),
             .@"f64x2.le" => try op_simd.emitF64x2Le(&ctx, &ins),
             .@"f64x2.ge" => try op_simd.emitF64x2Ge(&ctx, &ins),
+            // §9.6/9.6-f-i — i8x16.swizzle via NEON TBL (1-register form).
+            .@"i8x16.swizzle" => try op_simd.emitI8x16Swizzle(&ctx, &ins),
 
             else => {
                 // §9.7 / 7.5-diag-op: surface the unhandled op

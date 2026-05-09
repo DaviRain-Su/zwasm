@@ -588,6 +588,26 @@ pub fn encFCmGe2D(rd: Vn, rn: Vn, rm: Vn) u32 {
     return 0x6E60E400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
 }
 
+// ---------------------------------------------------------------------
+// §9.6 / 9.6-f-i — TBL (1-register table form)
+// ---------------------------------------------------------------------
+// Wasm spec (SIMD) — `i8x16.swizzle`:
+//   for each lane k: output[k] = (indices[k] < 16) ? operand[indices[k]] : 0
+//
+// Maps directly to NEON `TBL Vd.16B, { Vn.16B }, Vm.16B`:
+//   `0 Q 0 01110 00 0 Rm 0 len 0 00 Rn Rd` where len=00 (1-register table).
+// NEON TBL semantics: output[k] = (Vm[k] < 16) ? Vn[Vm[k]] : 0 — exact
+// Wasm match. Per Arm IHI 0055 §C7.2.299.
+//
+// `i8x16.shuffle` (with 16-byte index immediate) defers to 9.6-f-ii
+// because TBL's 2-register form requires consecutive Rn, Rn+1 — the
+// regalloc doesn't guarantee adjacency, so a copy-to-fixed-pair
+// preamble is needed.
+
+pub fn encTbl1Reg(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E000000 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
 /// `BSL V<d>.16B, V<n>.16B, V<m>.16B` — bitwise select using V<d>
 /// as the mask. Element width is irrelevant since BSL is bitwise.
 pub fn encBsl16B(rd: Vn, rn: Vn, rm: Vn) u32 {
@@ -1260,6 +1280,20 @@ test "encFCmGt vs encFCmGe: bit 23 differs" {
 test "encFCmEq2D: V31, V31, V31 (max indices)" {
     // 0x4E60E400 | (31 << 16) | (31 << 5) | 31 = 0x4E7FE7FF
     try testing.expectEqual(@as(u32, 0x4E7FE7FF), encFCmEq2D(31, 31, 31));
+}
+
+// ============================================================
+// §9.6 / 9.6-f-i — TBL 1-register (i8x16.swizzle)
+// ============================================================
+
+test "encTbl1Reg: V0, V1, V2 (tbl v0.16b, {v1.16b}, v2.16b)" {
+    // 0x4E000000 | (2 << 16) | (1 << 5) | 0 = 0x4E020020
+    try testing.expectEqual(@as(u32, 0x4E020020), encTbl1Reg(0, 1, 2));
+}
+
+test "encTbl1Reg: V31, V31, V31 (max indices)" {
+    // 0x4E000000 | (31 << 16) | (31 << 5) | 31 = 0x4E1F03FF
+    try testing.expectEqual(@as(u32, 0x4E1F03FF), encTbl1Reg(31, 31, 31));
 }
 
 test "Int compare shapes: 4 CMEQ encodings pairwise distinct" {
