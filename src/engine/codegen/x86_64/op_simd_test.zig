@@ -426,6 +426,112 @@ test "emitI32x4GeU: PMAXUD + PCMPEQD lhs (ge path, no NOT)" {
     try testing.expectEqualSlices(u8, expected.items, buf.items);
 }
 
+test "emitF32x4Eq: direct CMPPS imm=0x00 (no swap)" {
+    var slot_ids = [_]u16{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 3,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    try pushed.append(testing.allocator, 1);
+    var next_vreg: u32 = 2;
+
+    try op_simd.emitF32x4Eq(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm10, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encCmpps(.xmm10, .xmm9, 0x00).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
+test "emitF32x4Gt: swap path — MOVAPS dst, rhs + CMPPS dst, lhs, imm=0x01 (LT)" {
+    var slot_ids = [_]u16{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 3,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0); // lhs
+    try pushed.append(testing.allocator, 1); // rhs
+    var next_vreg: u32 = 2;
+
+    try op_simd.emitF32x4Gt(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    // gt = swap + LT: MOVAPS dst, rhs (XMM9) ; CMPPS dst, lhs (XMM8), 0x01.
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm10, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encCmpps(.xmm10, .xmm8, 0x01).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
+test "emitF64x2Lt: direct CMPPD imm=0x01 (no swap)" {
+    var slot_ids = [_]u16{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 3,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    try pushed.append(testing.allocator, 1);
+    var next_vreg: u32 = 2;
+
+    try op_simd.emitF64x2Lt(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm10, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encCmppd(.xmm10, .xmm9, 0x01).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
+test "emitF64x2Ge: swap + CMPPD imm=0x02 (LE)" {
+    var slot_ids = [_]u16{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 3,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    try pushed.append(testing.allocator, 1);
+    var next_vreg: u32 = 2;
+
+    try op_simd.emitF64x2Ge(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    // ge = swap + LE: MOVAPS dst, rhs (XMM9) ; CMPPD dst, lhs (XMM8), 0x02.
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm10, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encCmppd(.xmm10, .xmm8, 0x02).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
 test "emitI64x2GeS: lt + NOT (operand swap then NOT)" {
     var slot_ids = [_]u16{ 0, 1, 2 };
     const alloc: regalloc.Allocation = .{

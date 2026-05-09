@@ -670,6 +670,102 @@ pub fn emitI32x4GeU(
     return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxud, inst.encPcmpeqD, .ge);
 }
 
+/// Wasm spec §4.4.4 (f*x*.{eq, ne, lt, gt, le, ge}) — pop two
+/// v128, push v128 where each lane is all-ones if the IEEE-754
+/// comparison holds else all-zero. Wasm requires ordered eq / lt /
+/// gt / le / ge (NaN inputs ⇒ false) and unordered ne (NaN ⇒
+/// true). Mapped to CMPPS / CMPPD imm8 predicates per Intel SDM
+/// Vol 2A "CMPPS" Table 3-7:
+///   0 = EQ_OQ  (Wasm eq)
+///   1 = LT_OS  (Wasm lt; via swap covers gt)
+///   2 = LE_OS  (Wasm le; via swap covers ge)
+///   4 = NEQ_UQ (Wasm ne)
+///
+/// gt and ge use `swap_operands = true` with predicate LT / LE
+/// per cranelift `lower.isle:2169-2172` (no native ordered-gt
+/// predicate exists in the legacy 0..7 imm8 range; CMPPS(b, a, LT)
+/// computes b < a which is a > b). One-instruction emit + the
+/// MOVAPS preamble matches the integer signed-compare shape.
+fn emitV128FpCmp(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    encoder: *const fn (dst: inst.Xmm, src: inst.Xmm, imm8: u8) inst.EncodedInsn,
+    imm8: u8,
+    swap_operands: bool,
+) Error!void {
+    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
+    const rhs_v = pushed_vregs.pop().?;
+    const lhs_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const rhs_x = try gpr.resolveXmm(alloc, rhs_v);
+    const lhs_x = try gpr.resolveXmm(alloc, lhs_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+
+    const base_x = if (swap_operands) rhs_x else lhs_x;
+    const cmp_x = if (swap_operands) lhs_x else rhs_x;
+
+    if (dst_x != base_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, base_x).slice());
+    }
+    try buf.appendSlice(allocator, encoder(dst_x, cmp_x, imm8).slice());
+
+    try pushed_vregs.append(allocator, result_v);
+}
+
+pub fn emitF32x4Eq(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpCmp(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encCmpps, 0x00, false);
+}
+
+pub fn emitF32x4Ne(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpCmp(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encCmpps, 0x04, false);
+}
+
+pub fn emitF32x4Lt(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpCmp(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encCmpps, 0x01, false);
+}
+
+pub fn emitF32x4Gt(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpCmp(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encCmpps, 0x01, true);
+}
+
+pub fn emitF32x4Le(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpCmp(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encCmpps, 0x02, false);
+}
+
+pub fn emitF32x4Ge(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpCmp(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encCmpps, 0x02, true);
+}
+
+pub fn emitF64x2Eq(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpCmp(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encCmppd, 0x00, false);
+}
+
+pub fn emitF64x2Ne(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpCmp(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encCmppd, 0x04, false);
+}
+
+pub fn emitF64x2Lt(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpCmp(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encCmppd, 0x01, false);
+}
+
+pub fn emitF64x2Gt(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpCmp(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encCmppd, 0x01, true);
+}
+
+pub fn emitF64x2Le(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpCmp(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encCmppd, 0x02, false);
+}
+
+pub fn emitF64x2Ge(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpCmp(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encCmppd, 0x02, true);
+}
+
 /// Wasm spec §4.4.4 (i*x*.eq variants) — pop two v128, push v128
 /// where each lane is all-ones if the inputs match else all-zero.
 /// Per-shape encoders (PCMPEQB / PCMPEQW / PCMPEQD / PCMPEQQ)

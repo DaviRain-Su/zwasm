@@ -849,6 +849,48 @@ pub fn encPcmpgtQ(dst: Xmm, src: Xmm) EncodedInsn {
 // NOT gives `a > b` unsigned; `eq(a, max)` gives `a >= b`
 // unsigned (and dual for min/lt/le).
 
+/// `CMPPS xmm, xmm, imm8` ([REX?] 0F C2 /r ib) — SSE packed
+/// single-precision compare. Each lane gets all-ones (mask) if the
+/// predicate is true on the lane, else all-zeros. **No 66 prefix**
+/// (PS variants are SSE-original, not SSE2-promoted). imm8 is the
+/// predicate per Intel SDM Vol 2A "CMPPS" Table 3-7:
+///   0 = EQ (ordered, quiet) — Wasm `f32x4.eq`
+///   1 = LT (ordered, signaling) — Wasm `f32x4.lt`; via swap covers `gt`
+///   2 = LE (ordered, signaling) — Wasm `f32x4.le`; via swap covers `ge`
+///   4 = NEQ (unordered, quiet) — Wasm `f32x4.ne` (NaN ⇒ true)
+///
+/// `gt` and `ge` lower as CMPPS(b, a) with predicate 1 / 2 per
+/// cranelift `lower.isle:2169-2172` — no native ordered-gt
+/// predicate exists in the legacy 0..7 imm8 range.
+pub fn encCmpps(dst: Xmm, src: Xmm, imm8: u8) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (dst.extBit() != 0 or src.extBit() != 0) {
+        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0xC2);
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    enc.push(imm8);
+    return enc;
+}
+
+/// `CMPPD xmm, xmm, imm8` (66 [REX?] 0F C2 /r ib) — SSE2 packed
+/// double-precision compare. Same imm8 predicate space as CMPPS.
+/// Wasm `f64x2.{eq, ne, lt, le}` direct; `gt` / `ge` swap operands
+/// + use predicate 1 / 2 per cranelift.
+pub fn encCmppd(dst: Xmm, src: Xmm, imm8: u8) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0x66);
+    if (dst.extBit() != 0 or src.extBit() != 0) {
+        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0xC2);
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    enc.push(imm8);
+    return enc;
+}
+
 /// `PMAXUB xmm, xmm` (66 [REX?] 0F DE /r) — SSE2 packed unsigned
 /// 8-bit max (16 lanes).
 pub fn encPmaxub(dst: Xmm, src: Xmm) EncodedInsn {
@@ -1195,6 +1237,20 @@ test "encPcmpgtQ: REX.R+B (xmm8, xmm13)" {
     // 66 45 0F 38 37 C5 — REX = 0x40 | R(1<<2) | B(1) = 0x45;
     // ModR/M = 11 000 101 = 0xC5 (mod=11, reg=0 [xmm8 low3], rm=5 [xmm13 low3]).
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x38, 0x37, 0xC5 }, encPcmpgtQ(.xmm8, .xmm13).slice());
+}
+
+test "encCmpps opcode bytes (xmm0, xmm1, imm=0x01 LT) — SSE no 66 prefix" {
+    try testing.expectEqualSlices(u8, &.{ 0x0F, 0xC2, 0xC1, 0x01 }, encCmpps(.xmm0, .xmm1, 0x01).slice());
+}
+
+test "encCmpps: REX.R+B (xmm10, xmm12, imm=0x04 NEQ)" {
+    // 45 0F C2 D4 04 — REX = 0x40 | R(1<<2) | B(1) = 0x45;
+    // ModR/M = 11 010 100 = 0xD4 (mod=11, reg=2 [xmm10 low3], rm=4 [xmm12 low3]).
+    try testing.expectEqualSlices(u8, &.{ 0x45, 0x0F, 0xC2, 0xD4, 0x04 }, encCmpps(.xmm10, .xmm12, 0x04).slice());
+}
+
+test "encCmppd opcode bytes (xmm0, xmm1, imm=0x00 EQ) — SSE2 with 66 prefix" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xC2, 0xC1, 0x00 }, encCmppd(.xmm0, .xmm1, 0x00).slice());
 }
 
 test "encPmaxub / encPminub opcode bytes (xmm0, xmm1) — SSE2" {

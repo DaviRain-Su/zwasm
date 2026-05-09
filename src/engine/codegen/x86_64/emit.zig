@@ -880,6 +880,24 @@ pub fn compile(
             .@"i32x4.lt_u" => try op_simd.emitI32x4LtU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"i32x4.le_u" => try op_simd.emitI32x4LeU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"i32x4.ge_u" => try op_simd.emitI32x4GeU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            // §9.7 / 9.7-o: FP compare eq/ne/lt/gt/le/ge for f32x4 +
+            // f64x2 (12 ops). CMPPS (SSE 0F C2 /r ib) + CMPPD (SSE2
+            // 66 0F C2 /r ib) with imm8 predicate per Intel SDM Vol
+            // 2A "CMPPS" Table 3-7. eq/ne/lt/le direct with imm
+            // 0/4/1/2; gt/ge swap operands + imm 1/2 per cranelift
+            // `lower.isle:2169-2172`.
+            .@"f32x4.eq" => try op_simd.emitF32x4Eq(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f32x4.ne" => try op_simd.emitF32x4Ne(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f32x4.lt" => try op_simd.emitF32x4Lt(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f32x4.gt" => try op_simd.emitF32x4Gt(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f32x4.le" => try op_simd.emitF32x4Le(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f32x4.ge" => try op_simd.emitF32x4Ge(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.eq" => try op_simd.emitF64x2Eq(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.ne" => try op_simd.emitF64x2Ne(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.lt" => try op_simd.emitF64x2Lt(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.gt" => try op_simd.emitF64x2Gt(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.le" => try op_simd.emitF64x2Le(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.ge" => try op_simd.emitF64x2Ge(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"memory.size" => {
                 // Wasm spec §4.4.7 — return current memory size in
                 // 64-KiB pages. mem_limit (bytes) lives at
