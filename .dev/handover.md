@@ -16,27 +16,27 @@
 6. `private/notes/p9-9.7-m-survey.md` (gitignored; cranelift recipe +
    adoption data) — only if revisiting the SSE4.2 baseline call.
 
-## Current state — Phase 9 / §9.7 in-flight (9.7-a..af landed); **9.7-ag NEXT**
+## Current state — Phase 9 / §9.7 in-flight (9.7-a..ag landed); **9.7-ah NEXT**
 
-9.7-af: x86_64 q15mulr_sat_s + dot_i16x8_s (2 ops). 2 new
-encoders (PMULHRSW SSSE3 + PMADDWD SSE2). Both single-instr
-via existing emitV128IntBinop. Total SIMD ops handled: 164.
+9.7-ag: x86_64 i16x8.extmul × 4 (i8x16 → i16x8). PMOVSX/ZX BW
+extend + PMULLW recipe. 2 parametric helpers + 4 wrappers.
+No new encoders — pure composition of existing primitives.
+Total SIMD ops handled: 168.
 
-**9.7-ag NEXT** — i16x8.extmul_{low,high}_i8x16_{s,u} (4 ops):
-3-instr recipe per cranelift `lower.isle:1197-1285` —
-PMULLW dst, src1, src2 (low halves) + PMULHW or PMULHUW tmp,
-src1, src2 (high halves) + PUNPCKLWD or PUNPCKHWD dst, dst,
-tmp. New encoders: PMULHW (SSE2 0F E5) + PMULHUW (SSE2 0F E4)
-+ PUNPCKLWD (0F 61) + PUNPCKHWD (0F 69). Reuses XMM14
-scratch. ~120 src + ~120 test, 4 new encoders.
+**9.7-ah NEXT** — i32x4.extmul_{low,high}_i16x8_{s,u} (4 ops).
+Same shape as 9.7-ag: PMOVSXWD / PMOVZXWD extend + PMULLD
+(SSE4.1, already from 9.7-c). High variants prefix PSHUFD
+imm=0xEE. The existing emitV128IntExtmulLow / High helpers
+should generalise — change encoder_extend to PMOVSX/ZX WD
+and encoder_mul to PMULLD. No new encoders. ~80 src + ~80
+test (just 4 wrappers).
 
-Subsequent: 9.7-ah (i32x4.extmul_{low,high}_i16x8_{s,u} 4 ops,
-similar shape with PMULLD already from 9.7-c), 9.7-ai
-(i64x2.extmul_{low,high}_i32x4_{s,u} 4 ops, PMULDQ SSE4.1 +
-PMULUDQ already from 9.7-d), 9.7-aj (ADR-0042 const-pool +
-popcnt + 4 extadd_pairwise + 4 deferred 9.7-ae u-variants +
-i8x16.shuffle + v128.const). Phase 7 close-out at 9.7-ax+
-pending.
+Subsequent: 9.7-ai (i64x2.extmul_{low,high}_i32x4_{s,u} 4 ops:
+PMOVSX/ZX DQ + PMULDQ (SSE4.1) for signed / PMULUDQ for
+unsigned — different multiply semantics so the helper may
+need a fork), 9.7-aj (ADR-0042 const-pool + popcnt + 4
+extadd_pairwise + 4 deferred 9.7-ae u-variants + i8x16.shuffle
++ v128.const). Phase 7 close-out pending.
 
 ## Open structural debt (pointers — full list in `.dev/debt.md`)
 
@@ -56,5 +56,5 @@ reference) live in git: ADRs 0035-0040, lessons indexed in
 
 **Phase**: Phase 9 (SIMD-128, ADR-0041 — SSE4.2 baseline post-9.7-m).
 §9.5 [x] (ARM64 NEON pt 1), §9.6 [x] (ARM64 NEON pt 2),
-§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..af landed; 9.7-ag NEXT).
+§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..ag landed; 9.7-ah NEXT).
 **Branch**: `zwasm-from-scratch`。
