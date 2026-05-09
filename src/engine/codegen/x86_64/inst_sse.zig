@@ -1126,6 +1126,49 @@ pub fn encPsubq(dst: Xmm, src: Xmm) EncodedInsn {
     return encSsePackedIntBinop(0xFB, dst, src);
 }
 
+// §9.7-x extend low/high primitives — SSE4.1 PMOVSX*/PMOVZX*
+// sign/zero-extend the low 8 bytes (or 4 i16, or 2 i32) of src
+// into the corresponding wider lanes of dst. A-form encoding
+// (dst in ModR/M.reg, src in r/m). For HIGH-half extends, callers
+// run PSHUFD imm=0xEE first to swap the upper 64 bits into the
+// lower 64 position, then PMOVSX/ZX from there.
+
+/// `PMOVSXBW xmm, xmm` (66 [REX?] 0F 38 20 /r) — SSE4.1 sign-
+/// extend 8 i8 lanes (low 64 of src) → 8 i16 lanes.
+pub fn encPmovsxbw(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinopExt(0x38, 0x20, dst, src);
+}
+
+/// `PMOVSXWD xmm, xmm` (66 [REX?] 0F 38 23 /r) — SSE4.1 sign-
+/// extend 4 i16 lanes (low 64 of src) → 4 i32 lanes.
+pub fn encPmovsxwd(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinopExt(0x38, 0x23, dst, src);
+}
+
+/// `PMOVSXDQ xmm, xmm` (66 [REX?] 0F 38 25 /r) — SSE4.1 sign-
+/// extend 2 i32 lanes (low 64 of src) → 2 i64 lanes.
+pub fn encPmovsxdq(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinopExt(0x38, 0x25, dst, src);
+}
+
+/// `PMOVZXBW xmm, xmm` (66 [REX?] 0F 38 30 /r) — SSE4.1 zero-
+/// extend 8 u8 lanes → 8 u16 lanes.
+pub fn encPmovzxbw(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinopExt(0x38, 0x30, dst, src);
+}
+
+/// `PMOVZXWD xmm, xmm` (66 [REX?] 0F 38 33 /r) — SSE4.1 zero-
+/// extend 4 u16 lanes → 4 u32 lanes.
+pub fn encPmovzxwd(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinopExt(0x38, 0x33, dst, src);
+}
+
+/// `PMOVZXDQ xmm, xmm` (66 [REX?] 0F 38 35 /r) — SSE4.1 zero-
+/// extend 2 u32 lanes → 2 u64 lanes.
+pub fn encPmovzxdq(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinopExt(0x38, 0x35, dst, src);
+}
+
 /// `PUNPCKLBW xmm, xmm` (66 [REX?] 0F 60 /r) — SSE2 unpack low
 /// 8 bytes from each operand into 8 interleaved word lanes
 /// (dst.byte[2i] = dst.byte[i]; dst.byte[2i+1] = src.byte[i]).
@@ -1424,6 +1467,18 @@ test "encPsrawReg / encPsradReg opcode bytes (xmm0, xmm1)" {
 
 test "encPsubq opcode bytes (xmm0, xmm1) — SSE2 packed 64-bit subtract" {
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xFB, 0xC1 }, encPsubq(.xmm0, .xmm1).slice());
+}
+
+test "encPmovsxbw / encPmovsxwd / encPmovsxdq opcode bytes (xmm0, xmm1)" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x20, 0xC1 }, encPmovsxbw(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x23, 0xC1 }, encPmovsxwd(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x25, 0xC1 }, encPmovsxdq(.xmm0, .xmm1).slice());
+}
+
+test "encPmovzxbw / encPmovzxwd / encPmovzxdq opcode bytes (xmm0, xmm1)" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x30, 0xC1 }, encPmovzxbw(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x33, 0xC1 }, encPmovzxwd(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x35, 0xC1 }, encPmovzxdq(.xmm0, .xmm1).slice());
 }
 
 test "encPunpcklbw / encPunpckhbw opcode bytes (xmm0, xmm1)" {

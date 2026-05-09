@@ -987,6 +987,22 @@ pub fn compile(
             // mask + PUNPCKL/HBW byte→word extension + PSRAW per
             // half + PACKSSWB pack.
             .@"i8x16.shr_s" => try op_simd.emitI8x16ShrS(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            // §9.7 / 9.7-x: i*x*.extend_{low,high}_*_{s,u} (12 ops).
+            // Low half: 1-instr SSE4.1 PMOVSX*/PMOVZX* direct.
+            // High half: PSHUFD imm=0xEE swaps upper qword to lower
+            // position + PMOVSX/ZX. 2 instr per high-extend.
+            .@"i16x8.extend_low_i8x16_s" => try op_simd.emitI16x8ExtendLowI8x16S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.extend_low_i8x16_u" => try op_simd.emitI16x8ExtendLowI8x16U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.extend_high_i8x16_s" => try op_simd.emitI16x8ExtendHighI8x16S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.extend_high_i8x16_u" => try op_simd.emitI16x8ExtendHighI8x16U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.extend_low_i16x8_s" => try op_simd.emitI32x4ExtendLowI16x8S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.extend_low_i16x8_u" => try op_simd.emitI32x4ExtendLowI16x8U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.extend_high_i16x8_s" => try op_simd.emitI32x4ExtendHighI16x8S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.extend_high_i16x8_u" => try op_simd.emitI32x4ExtendHighI16x8U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i64x2.extend_low_i32x4_s" => try op_simd.emitI64x2ExtendLowI32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i64x2.extend_low_i32x4_u" => try op_simd.emitI64x2ExtendLowI32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i64x2.extend_high_i32x4_s" => try op_simd.emitI64x2ExtendHighI32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i64x2.extend_high_i32x4_u" => try op_simd.emitI64x2ExtendHighI32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"memory.size" => {
                 // Wasm spec §4.4.7 — return current memory size in
                 // 64-KiB pages. mem_limit (bytes) lives at

@@ -1569,6 +1569,106 @@ pub fn emitI8x16ShrU(
 /// PSRAW preserves the sign bit invariant, and the resulting
 /// magnitude is bounded by the original i8 range). 11
 /// instructions; uses both XMM14 + XMM15 scratches.
+/// Wasm spec §4.4.4 (i*x*.extend_low / extend_high) — pop one
+/// v128, push one v128 with each lane sign- or zero-extended to
+/// the wider lane width. SSE4.1 PMOVSX*/PMOVZX* directly handle
+/// the LOW half (low 8 bytes / 4 i16 / 2 i32 of src extended).
+/// HIGH half: shuffle src's upper 64 bits into the lower 64 via
+/// PSHUFD imm=0xEE (selects lanes 2,3,2,3 — upper qword
+/// duplicated into both 64-bit halves), then PMOVSX/ZX on the
+/// shuffled register.
+fn emitV128ExtendLow(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    encoder: *const fn (dst: inst.Xmm, src: inst.Xmm) inst.EncodedInsn,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const src_x = try gpr.resolveXmm(alloc, src_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    try buf.appendSlice(allocator, encoder(dst_x, src_x).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
+fn emitV128ExtendHigh(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    encoder: *const fn (dst: inst.Xmm, src: inst.Xmm) inst.EncodedInsn,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const src_x = try gpr.resolveXmm(alloc, src_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // PSHUFD(dst, src, 0xEE): selects src lanes [2,3,2,3] →
+    // dst's low 64 = src's upper 64. Then encoder reads low 64
+    // of dst (now = src's upper 64) and extends to dst's lanes.
+    try buf.appendSlice(allocator, inst.encPshufd(dst_x, src_x, 0xEE).slice());
+    try buf.appendSlice(allocator, encoder(dst_x, dst_x).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
+pub fn emitI16x8ExtendLowI8x16S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128ExtendLow(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmovsxbw);
+}
+
+pub fn emitI16x8ExtendLowI8x16U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128ExtendLow(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmovzxbw);
+}
+
+pub fn emitI16x8ExtendHighI8x16S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128ExtendHigh(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmovsxbw);
+}
+
+pub fn emitI16x8ExtendHighI8x16U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128ExtendHigh(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmovzxbw);
+}
+
+pub fn emitI32x4ExtendLowI16x8S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128ExtendLow(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmovsxwd);
+}
+
+pub fn emitI32x4ExtendLowI16x8U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128ExtendLow(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmovzxwd);
+}
+
+pub fn emitI32x4ExtendHighI16x8S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128ExtendHigh(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmovsxwd);
+}
+
+pub fn emitI32x4ExtendHighI16x8U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128ExtendHigh(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmovzxwd);
+}
+
+pub fn emitI64x2ExtendLowI32x4S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128ExtendLow(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmovsxdq);
+}
+
+pub fn emitI64x2ExtendLowI32x4U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128ExtendLow(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmovzxdq);
+}
+
+pub fn emitI64x2ExtendHighI32x4S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128ExtendHigh(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmovsxdq);
+}
+
+pub fn emitI64x2ExtendHighI32x4U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128ExtendHigh(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmovzxdq);
+}
+
 pub fn emitI8x16ShrS(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
