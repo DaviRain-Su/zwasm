@@ -55,6 +55,7 @@ const op_memory = @import("op_memory.zig");
 const op_control = @import("op_control.zig");
 const op_call = @import("op_call.zig");
 const op_globals = @import("op_globals.zig");
+const op_simd = @import("op_simd.zig");
 const gpr = @import("gpr.zig");
 
 const Allocator = std.mem.Allocator;
@@ -766,6 +767,10 @@ pub fn compile(
             .@"memory.copy" => try op_memory.emitMemoryCopy(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, func.func_idx),
             .@"global.get" => try op_globals.emitI32GlobalGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
             .@"global.set" => try op_globals.emitI32GlobalSet(allocator, &buf, alloc, &pushed_vregs, spill_base_off, ins.payload),
+            // §9.7 / 9.7-a: SIMD-128 foundation. Single representative
+            // op (i32x4.add via PADDD) wires the FP-class regalloc +
+            // shape-tag pipeline on x86_64 per ADR-0041.
+            .@"i32x4.add" => try op_simd.emitI32x4Add(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"memory.size" => {
                 // Wasm spec §4.4.7 — return current memory size in
                 // 64-KiB pages. mem_limit (bytes) lives at

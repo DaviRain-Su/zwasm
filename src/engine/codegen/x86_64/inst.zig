@@ -297,6 +297,7 @@ pub const encRoundsd = inst_sse.encRoundsd;
 pub const encUcomiss = inst_sse.encUcomiss;
 pub const encUcomisd = inst_sse.encUcomisd;
 pub const encSseScalarBinary = inst_sse.encSseScalarBinary;
+pub const encPaddD = inst_sse.encPaddD;
 
 // ============================================================
 // Tests

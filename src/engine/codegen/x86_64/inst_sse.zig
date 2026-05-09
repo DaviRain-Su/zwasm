@@ -9,6 +9,8 @@
 //! `src/engine/codegen/arm64/` per ROADMAP §A3 (Zone-2 inter-arch
 //! isolation).
 
+const std = @import("std");
+
 const inst = @import("inst.zig");
 const reg_class = @import("reg_class.zig");
 
@@ -399,4 +401,55 @@ pub fn encSseScalarBinary(kind: SseScalarKind, opcode: u8, dst: Xmm, src: Xmm) E
     enc.push(opcode);
     enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
     return enc;
+}
+
+/// `PADDD xmm, xmm/m128` (66 [REX?] 0F FE /r) — packed 32-bit
+/// integer add (SSE2). Operates element-wise on the four
+/// 32-bit lanes; dst = dst + src (two-address; the first XMM
+/// is both source-1 and destination).
+///
+/// Wasm spec §4.4.4 (i32x4.add) — packed wraparound add per
+/// SIMD-128. Intel SDM Vol 2 PADDB/W/D/Q description (FE = .d
+/// lane width).
+///
+/// dst occupies ModR/M.reg; src occupies r/m. REX.W is omitted
+/// (ignored for SSE per Intel SDM Vol 3 §2.2.1.2). `encMovapsXmmXmm`
+/// (0F 28 /r) is used by the caller to copy lhs → dst before
+/// emitting PADDD when dst != lhs (NEON's three-address ADD .4S
+/// has no x86_64 equivalent until AVX VPADDD).
+pub fn encPaddD(dst: Xmm, src: Xmm) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0x66);
+    if (dst.extBit() != 0 or src.extBit() != 0) {
+        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0xFE);
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    return enc;
+}
+
+const testing = std.testing;
+
+test "encPaddD: low XMMs (xmm0, xmm1) — no REX, 4 bytes" {
+    const enc = encPaddD(.xmm0, .xmm1);
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xFE, 0xC1 }, enc.slice());
+}
+
+test "encPaddD: dst extended (xmm8, xmm1) — REX.R only" {
+    const enc = encPaddD(.xmm8, .xmm1);
+    // 66 44 0F FE C1: REX = 0x40 | R(0x4) — encodeRex(false, 1, 0, 0) = 0x44.
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x44, 0x0F, 0xFE, 0xC1 }, enc.slice());
+}
+
+test "encPaddD: src extended (xmm0, xmm9) — REX.B only" {
+    const enc = encPaddD(.xmm0, .xmm9);
+    // 66 41 0F FE C1: REX.B = 0x41.
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x41, 0x0F, 0xFE, 0xC1 }, enc.slice());
+}
+
+test "encPaddD: both extended (xmm8, xmm13) — REX.R + REX.B" {
+    const enc = encPaddD(.xmm8, .xmm13);
+    // 66 45 0F FE C5: REX = 0x45.  ModR/M = mod=11, reg=0, rm=5 → 0xC5.
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0xFE, 0xC5 }, enc.slice());
 }
