@@ -16,30 +16,31 @@
 6. `private/notes/p9-9.7-m-survey.md` (gitignored; cranelift recipe +
    adoption data) — only if revisiting the SSE4.2 baseline call.
 
-## Current state — Phase 9 / §9.7 in-flight (9.7-a..v landed); **9.7-w NEXT**
+## Current state — Phase 9 / §9.7 in-flight (9.7-a..w landed); **9.7-x NEXT**
 
-9.7-v: x86_64 i8x16.shl + i8x16.shr_u inline-mask synthesis
-(2 ops). encPsrlwImm new encoder + 9-/10-instr recipes via
-PSLLW/PSRLW + PSHUFB byte-0 broadcast. Avoids const-pool
-dep at cost of ~5 extra instr per call. Total SIMD ops
-handled: 118.
+9.7-w: x86_64 i8x16.shr_s sign-extension synthesis (1 op).
+encPunpcklbw + encPunpckhbw new encoders + 11-instr recipe
+(PCMPGTB sign-mask + byte→word extend + PSRAW × 2 +
+PACKSSWB). Closes the i*x*.shift family (12 shift ops).
+Total SIMD ops handled: 119.
 
-**9.7-w NEXT** — i8x16.shr_s synthesis (1 op).
-Cranelift's recipe (`lower.isle:846+`) uses byte→word
-sign-extension via PUNPCKLBW + PUNPCKHBW (interleaving
-with sign-mask scratch), then PSRAW on each half by c,
-then PACKSSWB to compress back. Structurally different
-from shl/shr_u (no AND-mask path).
+**9.7-x NEXT** — integer extend low/high (12 ops):
+i16x8.extend_{low,high}_i8x16_{s,u} + i32x4.extend_*_i16x8_*
++ i64x2.extend_*_i32x4_*. SSE4.1 has direct PMOVSXBW
+/PMOVZXBW + PMOVSXWD/PMOVZXWD + PMOVSXDQ/PMOVZXDQ for low
+half (4-byte interleaved memory→reg form, but reg-reg form
+exists too taking low 8 bytes of src). For HIGH half, no
+direct instruction; need PSRLDQ-shift + low-extend OR
+PUNPCKHBW-style trick.
 
-Likely 2 new encoders (encPunpcklbw + encPunpckhbw) +
-~12-15 instr handler. Sign-extension trick: PXOR(zero) +
-PCMPGTB(zero, src) gives sign-bit mask; PUNPCKLBW(src,
-sign_mask) interleaves to produce signed-extended words.
-~150 src + ~80 test, no ADR.
+Cranelift uses PMOVSX*/PMOVZX* directly for low; for high
+it uses PSHUFD(src, 0xEE) to swap high → low position then
+PMOVSX/ZX. ~6 new encoders (PMOVSXBW/WD/DQ + PMOVZXBW/WD/DQ)
++ 12 wrappers. ~250 src + ~80 test, no ADR.
 
-Subsequent: 9.7-x+ (conversion + narrow/extend + shuffle
-PSHUFB), 9.7-y (abs/neg via PXOR sign-mask synthesis),
-9.7-z (v128.const + ADR-0042 const-pool finalisation).
+Subsequent: 9.7-y+ (narrow saturating + shuffle PSHUFB +
+abs/neg sign-mask synthesis), 9.7-z (FP convert + trunc-
+sat), 9.7-aa (v128.const + ADR-0042 const-pool finalisation).
 
 ## Open structural debt (pointers — full list in `.dev/debt.md`)
 
@@ -59,5 +60,5 @@ reference) live in git: ADRs 0035-0040, lessons indexed in
 
 **Phase**: Phase 9 (SIMD-128, ADR-0041 — SSE4.2 baseline post-9.7-m).
 §9.5 [x] (ARM64 NEON pt 1), §9.6 [x] (ARM64 NEON pt 2),
-§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..v landed; 9.7-w NEXT).
+§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..w landed; 9.7-x NEXT).
 **Branch**: `zwasm-from-scratch`。
