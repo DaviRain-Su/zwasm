@@ -2913,3 +2913,20 @@ pub fn emitI32x4TruncSatF32x4S(allocator: Allocator, buf: *std.ArrayList(u8), al
 
     try pushed_vregs.append(allocator, result_v);
 }
+
+/// Wasm spec §4.4.4 (i16x8.q15mulr_sat_s) — Q15-format multiply
+/// with rounding and saturating clamp to i16. PMULHRSW (SSSE3,
+/// `lower.isle:1287-1294`) implements exactly this in 1
+/// instruction; reuses emitV128IntBinop.
+pub fn emitI16x8Q15mulrSatS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmulhrsw);
+}
+
+/// Wasm spec §4.4.4 (i32x4.dot_i16x8_s) — pairwise dot product
+/// of i16 lanes producing 4 i32 lanes. PMADDWD (SSE2,
+/// `lower.isle:4073-4078`) implements exactly this in 1
+/// instruction. Wrapping i32 accumulation matches Wasm spec
+/// (INT16_MIN^2 + INT16_MIN^2 wraps modulo 2^32).
+pub fn emitI32x4DotI16x8S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaddwd);
+}

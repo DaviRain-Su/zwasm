@@ -1042,6 +1042,13 @@ pub fn compile(
             // pending ADR-0042 const-pool plumbing.
             .@"f32x4.convert_i32x4_u" => try op_simd.emitF32x4ConvertI32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"i32x4.trunc_sat_f32x4_s" => try op_simd.emitI32x4TruncSatF32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            // §9.7 / 9.7-af: native single-instr multiply-and-add
+            // pair. PMULHRSW (SSSE3) implements Q15 multiply-round-
+            // saturate exactly per Wasm spec; PMADDWD (SSE2)
+            // implements pairwise dot product with wrapping i32
+            // accumulation matching the Wasm spec.
+            .@"i16x8.q15mulr_sat_s" => try op_simd.emitI16x8Q15mulrSatS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.dot_i16x8_s" => try op_simd.emitI32x4DotI16x8S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             // §9.7 / 9.7-ac: i8x16.swizzle (1 op). 10-instr inline
             // recipe synthesises 0x0F broadcast + PCMPGTB-detect of
             // idx>15 + POR-correct + PSHUFB. No const-pool dep.

@@ -1230,6 +1230,25 @@ pub fn encCvtdq2pd(dst: Xmm, src: Xmm) EncodedInsn {
     return enc;
 }
 
+/// `PMULHRSW xmm, xmm` (66 [REX?] 0F 38 0B /r) — SSSE3 packed
+/// multiply 8 i16 lanes with rounding and right-shift by 15.
+/// Result lane = ((x * y + 0x4000) >> 15) clamped to [-32768, 32767].
+/// Maps directly to Wasm `i16x8.q15mulr_sat_s` (Q15 fixed-point
+/// multiply-round-saturate).
+pub fn encPmulhrsw(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinopExt(0x38, 0x0B, dst, src);
+}
+
+/// `PMADDWD xmm, xmm` (66 [REX?] 0F F5 /r) — SSE2 multiply 8 pairs
+/// of i16 lanes producing i32, then horizontally add adjacent
+/// 32-bit products. Result is 4 i32 lanes (pairwise dot product).
+/// Wasm `i32x4.dot_i16x8_s`. Wrapping semantics on the inner i32
+/// products match the Wasm spec (INT16_MIN^2 + INT16_MIN^2 wraps
+/// modulo 2^32; not saturated).
+pub fn encPmaddwd(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xF5, dst, src);
+}
+
 /// `CVTTPS2DQ xmm, xmm` (F3 [REX?] 0F 5B /r) — SSE2 truncating
 /// convert 4 packed f32 to 4 packed signed i32. Out-of-range
 /// values and NaN both produce 0x80000000 (sentinel for trap-on-
@@ -1661,6 +1680,11 @@ test "encCvtpd2ps opcode bytes (xmm0, xmm1) — 66 prefix" {
 
 test "encCvtdq2pd opcode bytes (xmm0, xmm1) — F3 prefix" {
     try testing.expectEqualSlices(u8, &.{ 0xF3, 0x0F, 0xE6, 0xC1 }, encCvtdq2pd(.xmm0, .xmm1).slice());
+}
+
+test "encPmulhrsw / encPmaddwd opcode bytes (xmm0, xmm1)" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x0B, 0xC1 }, encPmulhrsw(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xF5, 0xC1 }, encPmaddwd(.xmm0, .xmm1).slice());
 }
 
 test "encCvttps2dq: F3 0F 5B /r" {

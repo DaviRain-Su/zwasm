@@ -1867,6 +1867,59 @@ test "emitF32x4ConvertI32x4U: 11-instr split-and-recombine recipe" {
     try testing.expectEqualSlices(u8, expected.items, buf.items);
 }
 
+test "emitI16x8Q15mulrSatS: PMULHRSW dst, src" {
+    var slot_ids = [_]u16{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 3,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    try pushed.append(testing.allocator, 1);
+    var next_vreg: u32 = 2;
+
+    try op_simd.emitI16x8Q15mulrSatS(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    // emitV128IntBinop: MOVAPS dst, lhs (when dst != lhs); ENC dst, rhs.
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm10, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encPmulhrsw(.xmm10, .xmm9).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
+test "emitI32x4DotI16x8S: PMADDWD dst, src" {
+    var slot_ids = [_]u16{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 3,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    try pushed.append(testing.allocator, 1);
+    var next_vreg: u32 = 2;
+
+    try op_simd.emitI32x4DotI16x8S(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm10, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encPmaddwd(.xmm10, .xmm9).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
 test "emitI32x4TruncSatF32x4S: 9-instr NaN-mask + XOR-fix recipe" {
     var slot_ids = [_]u16{ 0, 1 };
     const alloc: regalloc.Allocation = .{
