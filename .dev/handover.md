@@ -13,49 +13,37 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 9 / §9.6/9.6-a [x] (FP binary arith); **§9.6/9.6-b NEXT**
+## Current state — Phase 9 / §9.6/9.6-b [x] (FP unary); **§9.6/9.6-c NEXT**
 
-§9.6/9.6-a adds 8 NEON FP three-same encoders (FADD/FSUB/FMUL/
-FDIV × 4S/2D) + 8 op_simd handlers via `emitV128Binop` thin
-adapters. NEON FP arith is IEEE-754 round-to-nearest-even with
-NaN-propagation matching Wasm semantics (per ADR-0041 §"4. NEON
-IEEE-754 spec-fidelity"). Shape_tag walker extends.
+§9.6/9.6-b adds 14 NEON FP two-register-misc encoders (FABS /
+FNEG / FSQRT / FRINTN / FRINTM / FRINTP / FRINTZ × 4S/2D) +
+14 op_simd handlers via new `emitV128Unop` helper. Wasm-spec
+rounding-mode mapping: ceil→+∞, floor→-∞, trunc→0,
+nearest→ties-to-even.
 
-Per LOOP.md chunk granularity, §9.6 sub-row split:
-- 9.6-a [x]: f32x4/f64x2 add/sub/mul/div.
-- 9.6-b NEXT: FP unary — sqrt/abs/neg/ceil/floor/trunc/nearest
-  for f32x4/f64x2 (shape: pop 1 v128, push 1 v128). NEON
-  encoders FSQRT/FABS/FNEG/FRINTP/FRINTM/FRINTZ/FRINTN with
-  4S/2D.
-- 9.6-c: FP min/max/pmin/pmax (Wasm-spec quirky NaN handling
-  — non-default NaN-propagation requires FMAXP/FMINP variants).
-- 9.6-d: int compare (CMEQ/CMGT/CMHI/CMGE/CMHS).
-- 9.6-e: FP compare (FCMEQ/FCMGT/FCMGE).
-- 9.6-f: shuffle (TBL-based).
+Per LOOP.md chunk granularity, §9.6 sub-row state:
+- 9.6-a/b [x]: FP binary + FP unary.
+- 9.6-c NEXT: FP min/max/pmin/pmax — Wasm-spec NaN handling
+  has known quirks (`min`/`max` propagate NaN per IEEE-754 2008,
+  but `pmin`/`pmax` are zero-on-equal-magnitude pseudo-min/max).
+- 9.6-d: int compare (CMEQ / CMGT / CMHI / CMGE / CMHS).
+- 9.6-e: FP compare (FCMEQ / FCMGT / FCMGE).
+- 9.6-f: shuffle / swizzle (TBL).
 - 9.6-g: conversion (trunc_sat / convert / narrow / extend).
 
 Mac gates: zone ✓, file_size ✓, spill ✓, lint ✓; spec
 212/0/20, wast 1158/0/0.
 
-**§9.6/9.6-b NEXT** — FP unary ops. Encoders + handlers for
-f32x4 / f64x2: sqrt, abs, neg, ceil, floor, trunc, nearest.
-Shape: pop 1 v128, push 1 v128. Need a new helper
-`emitV128Unop(ctx, encoder)` (parallel to `emitV128Binop`)
-since current shape only covers binary.
-
-## Active task — §9.6/9.6-b: f32x4 / f64x2 FP unary **NEXT**
-
-7 ops × 2 shapes = 14 ZirOp variants:
-- f32x4.sqrt → FSQRT V<d>.4S, V<n>.4S
-- f32x4.abs → FABS V<d>.4S, V<n>.4S
-- f32x4.neg → FNEG V<d>.4S, V<n>.4S
-- f32x4.ceil → FRINTP (round toward +∞)
-- f32x4.floor → FRINTM (round toward -∞)
-- f32x4.trunc → FRINTZ (round toward zero)
-- f32x4.nearest → FRINTN (round to nearest, ties-to-even)
-
-Same 7 ops with .2D suffix for f64x2. Estimated ~250 src + ~150
-tests including encoder bit-pattern tests + helper introduction.
+**§9.6/9.6-c NEXT** — f32x4/f64x2 min/max/pmin/pmax (8 ops).
+Wasm spec for `*.min` / `*.max`: IEEE-754-2008 min/max
+(NaN-propagating). Maps cleanly to NEON FMIN / FMAX.
+For `*.pmin` / `*.pmax`: pseudo-min/max — return rhs when
+equal-magnitude (so min(-0,+0)=+0; max(-0,+0)=-0). NEON has
+no direct instruction; synthesise via FCMGT + BSL (bitwise
+select). Bundle constraint check: pmin/pmax cross "instruction
+class" boundary (single FMIN/FMAX vs synthesis with 2 insns
++ scratch V) — split into 9.6-c-i (min/max) and 9.6-c-ii
+(pmin/pmax) per LOOP.md.
 
 After 8b.4: 8b.5 (boundary audit_scaffolding) + 8b.6 (open
 §9.9 inline + flip Phase Status).
