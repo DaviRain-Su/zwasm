@@ -837,6 +837,22 @@ pub fn compile(
             .@"i16x8.ne" => try op_simd.emitI16x8Ne(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"i32x4.ne" => try op_simd.emitI32x4Ne(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"i64x2.ne" => try op_simd.emitI64x2Ne(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            // §9.7 / 9.7-l: signed lt/gt/le/ge for 8/16/32-bit shapes
+            // (12 ops). PCMPGT_<shape> direct for gt; operand swap for
+            // lt; PXOR-with-all-ones NOT for le/ge. i64x2 signed
+            // compares defer to 9.7-m (PCMPGTQ is SSE4.2 — needs ADR).
+            .@"i8x16.gt_s" => try op_simd.emitI8x16GtS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i8x16.lt_s" => try op_simd.emitI8x16LtS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i8x16.le_s" => try op_simd.emitI8x16LeS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i8x16.ge_s" => try op_simd.emitI8x16GeS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.gt_s" => try op_simd.emitI16x8GtS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.lt_s" => try op_simd.emitI16x8LtS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.le_s" => try op_simd.emitI16x8LeS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.ge_s" => try op_simd.emitI16x8GeS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.gt_s" => try op_simd.emitI32x4GtS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.lt_s" => try op_simd.emitI32x4LtS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.le_s" => try op_simd.emitI32x4LeS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.ge_s" => try op_simd.emitI32x4GeS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"memory.size" => {
                 // Wasm spec §4.4.7 — return current memory size in
                 // 64-KiB pages. mem_limit (bytes) lives at

@@ -329,6 +329,9 @@ pub const encPcmpeqB = inst_sse.encPcmpeqB;
 pub const encPcmpeqW = inst_sse.encPcmpeqW;
 pub const encPcmpeqD = inst_sse.encPcmpeqD;
 pub const encPcmpeqQ = inst_sse.encPcmpeqQ;
+pub const encPcmpgtB = inst_sse.encPcmpgtB;
+pub const encPcmpgtW = inst_sse.encPcmpgtW;
+pub const encPcmpgtD = inst_sse.encPcmpgtD;
 
 // ============================================================
 // Tests

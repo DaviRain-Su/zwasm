@@ -808,6 +808,28 @@ pub fn encPcmpeqQ(dst: Xmm, src: Xmm) EncodedInsn {
     return encSsePackedIntBinopExt(0x38, 0x29, dst, src);
 }
 
+/// `PCMPGTB xmm, xmm` (66 [REX?] 0F 64 /r) — SSE2 packed 8-bit
+/// **signed** greater-than. Each output byte is 0xFF when the
+/// dst byte > src byte (signed), else 0x00. Wasm
+/// `i8x16.gt_s` direct; Wasm `i8x16.lt_s` synthesises via
+/// operand swap; Wasm `i8x16.le_s` / `ge_s` synthesise by
+/// applying NOT (PXOR with all-ones) to gt / lt result.
+pub fn encPcmpgtB(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0x64, dst, src);
+}
+
+/// `PCMPGTW xmm, xmm` (66 [REX?] 0F 65 /r) — SSE2 packed 16-bit
+/// signed greater-than.
+pub fn encPcmpgtW(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0x65, dst, src);
+}
+
+/// `PCMPGTD xmm, xmm` (66 [REX?] 0F 66 /r) — SSE2 packed 32-bit
+/// signed greater-than.
+pub fn encPcmpgtD(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0x66, dst, src);
+}
+
 /// `MOVSD xmm, xmm` (F2 [REX?] 0F 10 /r — register-register
 /// form with ModR/M.mod=11) — copies the low 64 bits of `src`
 /// into the low 64 bits of `dst`, **preserving** the upper 64
@@ -1098,4 +1120,14 @@ test "encPcmpeqB: REX.R+B self-eq idiom for all-ones (xmm14, xmm14)" {
     // 66 45 0F 74 F6 — REX = 0x40 | R(1<<2) | B(1) = 0x45;
     // ModR/M = 11 110 110 = 0xF6 (mod=11, reg=6, rm=6).
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x74, 0xF6 }, encPcmpeqB(.xmm14, .xmm14).slice());
+}
+
+test "encPcmpgtB / W / D opcode bytes (xmm0, xmm1)" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x64, 0xC1 }, encPcmpgtB(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x65, 0xC1 }, encPcmpgtW(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x66, 0xC1 }, encPcmpgtD(.xmm0, .xmm1).slice());
+}
+
+test "encPcmpgtD: REX.R+B (xmm8, xmm13)" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x66, 0xC5 }, encPcmpgtD(.xmm8, .xmm13).slice());
 }
