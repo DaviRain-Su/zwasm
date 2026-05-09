@@ -780,6 +780,11 @@ pub fn compile(
             .@"i32x4.sub" => try op_simd.emitI32x4Sub(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"i64x2.add" => try op_simd.emitI64x2Add(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"i64x2.sub" => try op_simd.emitI64x2Sub(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            // §9.7 / 9.7-c: native multiply. PMULLW (SSE2) for
+            // i16x8.mul; PMULLD (SSE4.1) for i32x4.mul. i64x2.mul
+            // has no native form — queued for §9.7-d synthesis.
+            .@"i16x8.mul" => try op_simd.emitI16x8Mul(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.mul" => try op_simd.emitI32x4Mul(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"memory.size" => {
                 // Wasm spec §4.4.7 — return current memory size in
                 // 64-KiB pages. mem_limit (bytes) lives at

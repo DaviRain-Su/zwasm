@@ -403,28 +403,41 @@ pub fn encSseScalarBinary(kind: SseScalarKind, opcode: u8, dst: Xmm, src: Xmm) E
     return enc;
 }
 
-/// SSE2 packed integer add/sub family — internal helper. The 8
-/// public per-op encoders below differ only in the opcode byte;
-/// the prefix (0x66), escape (0x0F), and ModR/M shape are
-/// constant. Following ARM64's `inst_neon.encAdd16B/8H/4S/2D`
-/// pattern (per ROADMAP P7 backend parity), each public encoder
-/// is its own self-documenting wrapper rather than a single
-/// parameterised entry point — the call site reads the op family
-/// directly from the function name.
+/// SSE2 / SSE4.1 packed integer binop family — internal helper.
+/// The public per-op encoders below differ in the opcode byte
+/// and (for SSE4.1 ops like PMULLD) an optional secondary escape
+/// byte (0x38 for the 66 0F 38 .. group; 0x3A for the imm8-bearing
+/// 66 0F 3A .. group already used by `encRoundss`/`encRoundsd`).
+/// Following ARM64's `inst_neon.encAdd16B/8H/4S/2D` pattern (per
+/// ROADMAP P7 backend parity), each public encoder is its own
+/// self-documenting wrapper rather than a single parameterised
+/// entry point — the call site reads the op family directly from
+/// the function name.
 ///
-/// Wasm spec §4.4.4 (packed integer add/sub) — element-wise
-/// wraparound add/sub per SIMD-128. Intel SDM Vol 2 PADDB / PADDW
-/// / PADDD / PADDQ + PSUBB / PSUBW / PSUBD / PSUBQ descriptions.
-fn encSsePackedIntBinop(opcode: u8, dst: Xmm, src: Xmm) EncodedInsn {
+/// `escape2 == 0` skips the secondary escape byte (canonical SSE2
+/// form: 66 [REX?] 0F <opcode> /r). `escape2 == 0x38` selects the
+/// SSE4.1 / SSSE3 form (e.g. PMULLD): 66 [REX?] 0F 38 <opcode> /r.
+///
+/// Wasm spec §4.4.4 (packed integer arithmetic) — element-wise
+/// wraparound. Intel SDM Vol 2 PADDB/PADDW/PADDD/PADDQ +
+/// PSUBB/PSUBW/PSUBD/PSUBQ + PMULLW (SSE2) + PMULLD (SSE4.1).
+fn encSsePackedIntBinopExt(escape2: u8, opcode: u8, dst: Xmm, src: Xmm) EncodedInsn {
     var enc: EncodedInsn = .{};
     enc.push(0x66);
     if (dst.extBit() != 0 or src.extBit() != 0) {
         enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
     }
     enc.push(0x0F);
+    if (escape2 != 0) enc.push(escape2);
     enc.push(opcode);
     enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
     return enc;
+}
+
+/// Backward-compatible wrapper for the no-secondary-escape SSE2
+/// path. Existing add/sub encoders dispatch through this one.
+fn encSsePackedIntBinop(opcode: u8, dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinopExt(0, opcode, dst, src);
 }
 
 /// `PADDB xmm, xmm` (66 [REX?] 0F FC /r) — packed 8-bit add (16
@@ -476,6 +489,24 @@ pub fn encPsubQ(dst: Xmm, src: Xmm) EncodedInsn {
     return encSsePackedIntBinop(0xFB, dst, src);
 }
 
+/// `PMULLW xmm, xmm` (66 [REX?] 0F D5 /r) — SSE2 packed 16-bit
+/// multiply, low 16 bits per lane (8 lanes). Wasm `i16x8.mul`
+/// (Wasm spec §4.4.4 — modular wraparound at the lane width).
+pub fn encPmullW(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xD5, dst, src);
+}
+
+/// `PMULLD xmm, xmm` (66 [REX?] 0F 38 40 /r) — SSE4.1 packed
+/// 32-bit multiply, low 32 bits per lane (4 lanes). Wasm
+/// `i32x4.mul` (Wasm spec §4.4.4 — modular wraparound at the
+/// lane width). Per ADR-0041 §"5. SSE4.1 minimum baseline" this
+/// is the first SSE4.1-exclusive op zwasm v2 emits; runtime CPU
+/// feature detection at engine init refuses to start on hosts
+/// lacking SSE4.1.
+pub fn encPmullD(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinopExt(0x38, 0x40, dst, src);
+}
+
 const testing = std.testing;
 
 test "encPaddD: low XMMs (xmm0, xmm1) — no REX, 4 bytes" {
@@ -516,4 +547,18 @@ test "encPsubB / encPsubW / encPsubD / encPsubQ opcode bytes (xmm0, xmm1)" {
 
 test "encPsubD: REX.R+B path (xmm8, xmm13) carries opcode 0xFA" {
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0xFA, 0xC5 }, encPsubD(.xmm8, .xmm13).slice());
+}
+
+test "encPmullW: SSE2 i16x8.mul opcode 0xD5 (xmm0, xmm1) — 4 bytes" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xD5, 0xC1 }, encPmullW(.xmm0, .xmm1).slice());
+}
+
+test "encPmullD: SSE4.1 i32x4.mul (xmm0, xmm1) — 5 bytes with 0x38 escape" {
+    // 66 0F 38 40 C1 — escape2 = 0x38, opcode = 0x40.
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x40, 0xC1 }, encPmullD(.xmm0, .xmm1).slice());
+}
+
+test "encPmullD: SSE4.1 with REX.R+B (xmm8, xmm13) — 6 bytes" {
+    // 66 45 0F 38 40 C5 — REX = 0x45 between 0x66 and 0x0F.
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x38, 0x40, 0xC5 }, encPmullD(.xmm8, .xmm13).slice());
 }

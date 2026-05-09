@@ -177,6 +177,32 @@ pub fn emitI64x2Sub(
     return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPsubQ);
 }
 
+// §9.7-c: native multiply ops. i16x8.mul reaches PMULLW (SSE2);
+// i32x4.mul reaches PMULLD (SSE4.1). i64x2.mul has no native
+// SSE4.1 instruction and synthesises via PMULUDQ + shifts/adds —
+// queued for §9.7-d. The Wasm spec's modular-wraparound semantics
+// match the CPU's truncating low-half multiply for both ops.
+
+pub fn emitI16x8Mul(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmullW);
+}
+
+pub fn emitI32x4Mul(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmullD);
+}
+
 // ============================================================
 // Tests
 // ============================================================
@@ -279,6 +305,60 @@ test "emitI8x16Sub: dispatches to encPsubB — opcode 0xF8 reaches the buffer" {
     @memcpy(expected_buf[n..][0..psub.slice().len], psub.slice());
     n += psub.slice().len;
     try testing.expectEqualSlices(u8, expected_buf[0..n], buf.items);
+}
+
+test "emitI32x4Mul: dispatches to encPmullD — opcode 0x40 with 0x38 escape reaches the buffer" {
+    // Sanity guard for the SSE4.1 encoder path: PMULLD's second
+    // escape byte (0x38) must land between 0x0F and the opcode.
+    var slot_ids = [_]u16{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 3,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    try pushed.append(testing.allocator, 1);
+    var next_vreg: u32 = 2;
+
+    try emitI32x4Mul(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    var expected_buf: [32]u8 = undefined;
+    var n: usize = 0;
+    const mov = inst.encMovapsXmmXmm(.xmm10, .xmm8);
+    @memcpy(expected_buf[n..][0..mov.slice().len], mov.slice());
+    n += mov.slice().len;
+    const pmull = inst.encPmullD(.xmm10, .xmm9);
+    @memcpy(expected_buf[n..][0..pmull.slice().len], pmull.slice());
+    n += pmull.slice().len;
+    try testing.expectEqualSlices(u8, expected_buf[0..n], buf.items);
+}
+
+test "emitI16x8Mul: dispatches to encPmullW — opcode 0xD5 (SSE2 path)" {
+    var slot_ids = [_]u16{ 0, 1, 0 }; // dst aliases lhs → MOVAPS elided
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 2,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    try pushed.append(testing.allocator, 1);
+    var next_vreg: u32 = 2;
+
+    try emitI16x8Mul(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    try testing.expectEqualSlices(u8, inst.encPmullW(.xmm8, .xmm9).slice(), buf.items);
 }
 
 test "emitI64x2Add: dispatches to encPaddQ — opcode 0xD4 reaches the buffer" {
