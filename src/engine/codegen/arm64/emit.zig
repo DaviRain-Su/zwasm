@@ -1179,6 +1179,17 @@ pub fn compile(
             .@"i64x2.sub" => try op_simd.emitI64x2Sub(&ctx, &ins),
             .@"i16x8.mul" => try op_simd.emitI16x8Mul(&ctx, &ins),
             .@"i32x4.mul" => try op_simd.emitI32x4Mul(&ctx, &ins),
+            // §9.9/9.5-c-vi — int lane access for B/H/D element forms.
+            // i32x4 already wired in 9.5-c-iii above. f32x4/f64x2 +
+            // i64x2.mul defer to 9.5-c-vii.
+            .@"i8x16.extract_lane_s" => try op_simd.emitI8x16ExtractLaneS(&ctx, &ins),
+            .@"i8x16.extract_lane_u" => try op_simd.emitI8x16ExtractLaneU(&ctx, &ins),
+            .@"i8x16.replace_lane" => try op_simd.emitI8x16ReplaceLane(&ctx, &ins),
+            .@"i16x8.extract_lane_s" => try op_simd.emitI16x8ExtractLaneS(&ctx, &ins),
+            .@"i16x8.extract_lane_u" => try op_simd.emitI16x8ExtractLaneU(&ctx, &ins),
+            .@"i16x8.replace_lane" => try op_simd.emitI16x8ReplaceLane(&ctx, &ins),
+            .@"i64x2.extract_lane" => try op_simd.emitI64x2ExtractLane(&ctx, &ins),
+            .@"i64x2.replace_lane" => try op_simd.emitI64x2ReplaceLane(&ctx, &ins),
 
             else => {
                 // §9.7 / 7.5-diag-op: surface the unhandled op

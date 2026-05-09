@@ -246,6 +246,81 @@ pub fn encInsSFromW(rd: Vn, rn: Xn, lane: u2) u32 {
     return 0x4E001C00 | (imm5 << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
 }
 
+// ---------------------------------------------------------------------
+// §9.9 / 9.5-c-vi — B / H / D element forms
+// ---------------------------------------------------------------------
+// Wasm spec (SIMD) §extract_lane / replace_lane — i8x16, i16x8, i64x2.
+// The B and H forms come in U(zero-extend) and S(sign-extend) flavours
+// because Wasm distinguishes `i8x16.extract_lane_s` /
+// `_u`. The D form is single-flavour (UMOV X) since i64x2 has no
+// sub-i64 extraction width to disambiguate.
+
+/// `UMOV W<rd>, V<n>.B[lane]` — copy 8-bit lane from V<n>.16B
+/// into W<rd> (zero-extended). Used by `i8x16.extract_lane_u`.
+/// `lane` ∈ 0..15. imm5 = (lane << 1) | 0b00001 (B-element discriminator).
+/// Per Arm IHI 0055 §C7.2.371.
+pub fn encUmovWFromB(rd: Xn, rn: Vn, lane: u4) u32 {
+    const imm5: u32 = (@as(u32, lane) << 1) | 0b00001;
+    return 0x0E003C00 | (imm5 << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `SMOV W<rd>, V<n>.B[lane]` — copy 8-bit lane sign-extended into
+/// W<rd>. Used by `i8x16.extract_lane_s`. Same imm5 as UMOV B.
+/// Encoding base = `0x0E002C00` (bits[14:11] = 0101 vs UMOV's 0111).
+/// Per Arm IHI 0055 §C7.2.328.
+pub fn encSmovWFromB(rd: Xn, rn: Vn, lane: u4) u32 {
+    const imm5: u32 = (@as(u32, lane) << 1) | 0b00001;
+    return 0x0E002C00 | (imm5 << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `INS V<d>.B[lane], W<n>` — insert low 8 bits of W<n> into the
+/// B lane. Used by `i8x16.replace_lane`. imm5 = B form. Same INS
+/// base as S form (0x4E001C00). Per Arm IHI 0055 §C7.2.155.
+pub fn encInsBFromW(rd: Vn, rn: Xn, lane: u4) u32 {
+    const imm5: u32 = (@as(u32, lane) << 1) | 0b00001;
+    return 0x4E001C00 | (imm5 << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `UMOV W<rd>, V<n>.H[lane]` — copy 16-bit lane zero-extended into
+/// W<rd>. Used by `i16x8.extract_lane_u`. `lane` ∈ 0..7.
+/// imm5 = (lane << 2) | 0b00010 (H-element discriminator).
+pub fn encUmovWFromH(rd: Xn, rn: Vn, lane: u3) u32 {
+    const imm5: u32 = (@as(u32, lane) << 2) | 0b00010;
+    return 0x0E003C00 | (imm5 << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `SMOV W<rd>, V<n>.H[lane]` — copy 16-bit lane sign-extended into
+/// W<rd>. Used by `i16x8.extract_lane_s`. Same imm5 as UMOV H.
+pub fn encSmovWFromH(rd: Xn, rn: Vn, lane: u3) u32 {
+    const imm5: u32 = (@as(u32, lane) << 2) | 0b00010;
+    return 0x0E002C00 | (imm5 << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `INS V<d>.H[lane], W<n>` — insert low 16 bits of W<n> into the
+/// H lane. Used by `i16x8.replace_lane`.
+pub fn encInsHFromW(rd: Vn, rn: Xn, lane: u3) u32 {
+    const imm5: u32 = (@as(u32, lane) << 2) | 0b00010;
+    return 0x4E001C00 | (imm5 << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `UMOV X<rd>, V<n>.D[lane]` — copy 64-bit lane into X<rd>. Used
+/// by `i64x2.extract_lane`. `lane` ∈ 0..1. Q=1 (X-form result),
+/// imm5 = (lane << 4) | 0b01000 (D-element discriminator).
+/// Encoding base = `0x4E003C00` (Q bit set vs S/B/H W-form).
+pub fn encUmovXFromD(rd: Xn, rn: Vn, lane: u1) u32 {
+    const imm5: u32 = (@as(u32, lane) << 4) | 0b01000;
+    return 0x4E003C00 | (imm5 << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `INS V<d>.D[lane], X<n>` — insert X<n> into the D lane. Used by
+/// `i64x2.replace_lane`. INS reuses the standard general-from-GPR
+/// base; the GPR width is determined by imm5's element selector
+/// (D-form expects an X register).
+pub fn encInsDFromX(rd: Vn, rn: Xn, lane: u1) u32 {
+    const imm5: u32 = (@as(u32, lane) << 4) | 0b01000;
+    return 0x4E001C00 | (imm5 << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
 // =====================================================================
 // Tests
 // =====================================================================
@@ -446,4 +521,90 @@ test "encMul vs encAdd: bits[15:11] differ by 0b00011 << 11 = 0x1800" {
     const add_word = encAdd4S(0, 1, 2);
     const mul_word = encMul4S(0, 1, 2);
     try testing.expectEqual(@as(u32, 0x1800), mul_word ^ add_word);
+}
+
+// ============================================================
+// §9.9 / 9.5-c-vi — Lane access for B/H/D element forms
+// ============================================================
+
+test "encUmovWFromB: lane 0 (W0 ← V0.B[0])" {
+    // imm5 = (0 << 1) | 1 = 1 → 0x10000.
+    // 0x0E003C00 | 0x10000 = 0x0E013C00
+    try testing.expectEqual(@as(u32, 0x0E013C00), encUmovWFromB(0, 0, 0));
+}
+
+test "encUmovWFromB: lane 15 (W3 ← V2.B[15])" {
+    // imm5 = (15 << 1) | 1 = 31 = 0x1F → 0x1F0000.
+    // 0x0E003C00 | 0x1F0000 | (2 << 5) | 3 = 0x0E1F3C43
+    try testing.expectEqual(@as(u32, 0x0E1F3C43), encUmovWFromB(3, 2, 15));
+}
+
+test "encSmovWFromB: lane 0 vs encUmovWFromB lane 0 — bit[12] differs" {
+    // SMOV bits[14:11]=0101, UMOV=0111 → delta = 0b10 << 11 = 0x1000
+    const u_word = encUmovWFromB(0, 0, 0);
+    const s_word = encSmovWFromB(0, 0, 0);
+    try testing.expectEqual(@as(u32, 0x1000), u_word ^ s_word);
+}
+
+test "encInsBFromW: lane 0 (V0.B[0] ← W0)" {
+    // imm5 = 1 → 0x10000. Base 0x4E001C00 | 0x10000 = 0x4E011C00.
+    try testing.expectEqual(@as(u32, 0x4E011C00), encInsBFromW(0, 0, 0));
+}
+
+test "encInsBFromW: lane 15 (V31.B[15] ← W30)" {
+    // imm5 = 31 → 0x1F0000. 0x4E001C00 | 0x1F0000 | (30 << 5) | 31
+    //   = 0x4E1F1FDF
+    try testing.expectEqual(@as(u32, 0x4E1F1FDF), encInsBFromW(31, 30, 15));
+}
+
+test "encUmovWFromH: lane 0 (W0 ← V0.H[0])" {
+    // imm5 = (0 << 2) | 2 = 2 → 0x20000.
+    try testing.expectEqual(@as(u32, 0x0E023C00), encUmovWFromH(0, 0, 0));
+}
+
+test "encUmovWFromH: lane 7 (W0 ← V0.H[7])" {
+    // imm5 = (7 << 2) | 2 = 30 = 0x1E → 0x1E0000.
+    try testing.expectEqual(@as(u32, 0x0E1E3C00), encUmovWFromH(0, 0, 7));
+}
+
+test "encSmovWFromH vs encUmovWFromH: bit[12] differs" {
+    const u_word = encUmovWFromH(0, 0, 3);
+    const s_word = encSmovWFromH(0, 0, 3);
+    try testing.expectEqual(@as(u32, 0x1000), u_word ^ s_word);
+}
+
+test "encInsHFromW: lane 7 (V0.H[7] ← W1)" {
+    // imm5 = 30 → 0x1E0000. 0x4E001C00 | 0x1E0000 | (1 << 5) | 0
+    //   = 0x4E1E1C20
+    try testing.expectEqual(@as(u32, 0x4E1E1C20), encInsHFromW(0, 1, 7));
+}
+
+test "encUmovXFromD: lane 0 (X0 ← V0.D[0])" {
+    // Q=1, imm5 = (0 << 4) | 8 = 8 → 0x80000.
+    // 0x4E003C00 | 0x80000 = 0x4E083C00
+    try testing.expectEqual(@as(u32, 0x4E083C00), encUmovXFromD(0, 0, 0));
+}
+
+test "encUmovXFromD: lane 1 (X3 ← V2.D[1])" {
+    // imm5 = (1 << 4) | 8 = 24 = 0x18 → 0x180000.
+    // 0x4E003C00 | 0x180000 | (2 << 5) | 3 = 0x4E183C43
+    try testing.expectEqual(@as(u32, 0x4E183C43), encUmovXFromD(3, 2, 1));
+}
+
+test "encInsDFromX: lane 0 (V0.D[0] ← X0)" {
+    // imm5 = 8 → 0x80000. 0x4E001C00 | 0x80000 = 0x4E081C00.
+    try testing.expectEqual(@as(u32, 0x4E081C00), encInsDFromX(0, 0, 0));
+}
+
+test "encInsDFromX: lane 1 (V31.D[1] ← X30)" {
+    // imm5 = 24 → 0x180000. 0x4E001C00 | 0x180000 | (30 << 5) | 31
+    //   = 0x4E181FDF
+    try testing.expectEqual(@as(u32, 0x4E181FDF), encInsDFromX(31, 30, 1));
+}
+
+test "lane access encoders: B/H/S/D element discriminators distinct" {
+    // imm5 low bits: B=00001, H=00010, S=00100, D=01000. UMOV at lane 0.
+    try testing.expect(encUmovWFromB(0, 0, 0) != encUmovWFromH(0, 0, 0));
+    try testing.expect(encUmovWFromH(0, 0, 0) != encUmovWFromS(0, 0, 0));
+    try testing.expect(encUmovWFromS(0, 0, 0) != encUmovXFromD(0, 0, 0));
 }

@@ -231,3 +231,153 @@ pub fn emitI32x4ReplaceLane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 1);
     try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
 }
+
+// ============================================================
+// §9.9 / 9.5-c-vi — i8x16 / i16x8 / i64x2 lane access
+// ============================================================
+//
+// Wasm SIMD spec — extract_lane (signed/unsigned) + replace_lane
+// for the remaining int element widths. i32x4 is already wired
+// in 9.5-c-iii above. f32x4 / f64x2 + i64x2.mul defer to
+// 9.5-c-vii.
+//
+// All extract handlers return an i32 GPR result (i64 for i64x2).
+// replace handlers consume an i32 GPR new-lane (i64 for i64x2).
+// Per ADR-0041, the GPR side stays on the SPILL-EXEMPT escape
+// hatch alongside the rest of 9.5-c (D-034 BASELINE=0; spill-
+// aware GPR machinery lands in a later sub-row alongside the
+// remaining bare-resolveGpr sites).
+
+/// Helper: emit an `extract_lane` shape that reads a v128 lane via
+/// a UMOV/SMOV-family encoder. The encoder builds the 32-bit
+/// instruction word from (rd:Xn, rn:Vn, lane). `lane_mask` clamps
+/// `ins.payload`'s lane field to the element-form's valid range.
+fn emitV128ExtractLane(
+    ctx: *EmitCtx,
+    ins: *const ZirInstr,
+    encoder: *const fn (rd: u5, rn: u5, lane: u32) u32,
+    lane_mask: u32,
+) Error!void {
+    const src_vreg = ctx.pushed_vregs.pop().?;
+    const src_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
+
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    // SPILL-EXEMPT: scalar lane result (GPR); spill-aware path is its own follow-on alongside other GPR sites.
+    const result_x = try gpr.resolveGpr(ctx.alloc, result_vreg);
+
+    const lane = ins.payload & lane_mask;
+    try gpr.writeU32(ctx.allocator, ctx.buf, encoder(result_x, src_v, lane));
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
+/// Helper: emit a `replace_lane` shape that writes a v128 lane via
+/// an INS-family encoder.
+fn emitV128ReplaceLane(
+    ctx: *EmitCtx,
+    ins: *const ZirInstr,
+    encoder: *const fn (rd: u5, rn: u5, lane: u32) u32,
+    lane_mask: u32,
+) Error!void {
+    const new_lane_vreg = ctx.pushed_vregs.pop().?;
+    // SPILL-EXEMPT: scalar new-lane (GPR); spill-aware path is its own follow-on alongside other GPR sites.
+    const new_lane_x = try gpr.resolveGpr(ctx.alloc, new_lane_vreg);
+
+    const src_vreg = ctx.pushed_vregs.pop().?;
+    const src_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
+
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 1);
+
+    if (src_v != result_v) {
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(result_v, src_v));
+    }
+    const lane = ins.payload & lane_mask;
+    try gpr.writeU32(ctx.allocator, ctx.buf, encoder(result_v, new_lane_x, lane));
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 1);
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
+// Encoder thunks — adapt the per-element-form encoder signatures to
+// the helper's `(u5, u5, u32) -> u32` shape. The helpers want a
+// uniform lane type so both u4 (B) and u3 (H) and u1 (D) encoders
+// can share one code path; the cast is safe because `lane_mask`
+// constrains the value first.
+
+fn encUmovB(rd: u5, rn: u5, lane: u32) u32 {
+    return inst_neon.encUmovWFromB(rd, rn, @intCast(lane));
+}
+fn encSmovB(rd: u5, rn: u5, lane: u32) u32 {
+    return inst_neon.encSmovWFromB(rd, rn, @intCast(lane));
+}
+fn encInsB(rd: u5, rn: u5, lane: u32) u32 {
+    return inst_neon.encInsBFromW(rd, rn, @intCast(lane));
+}
+fn encUmovH(rd: u5, rn: u5, lane: u32) u32 {
+    return inst_neon.encUmovWFromH(rd, rn, @intCast(lane));
+}
+fn encSmovH(rd: u5, rn: u5, lane: u32) u32 {
+    return inst_neon.encSmovWFromH(rd, rn, @intCast(lane));
+}
+fn encInsH(rd: u5, rn: u5, lane: u32) u32 {
+    return inst_neon.encInsHFromW(rd, rn, @intCast(lane));
+}
+fn encUmovD(rd: u5, rn: u5, lane: u32) u32 {
+    return inst_neon.encUmovXFromD(rd, rn, @intCast(lane));
+}
+fn encInsD(rd: u5, rn: u5, lane: u32) u32 {
+    return inst_neon.encInsDFromX(rd, rn, @intCast(lane));
+}
+
+/// Wasm spec (SIMD) — `i8x16.extract_lane_s`: lane ∈ 0..15;
+/// sign-extend the byte into i32. Lowers to `SMOV W<rd>, V<rn>.B[lane]`.
+pub fn emitI8x16ExtractLaneS(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    return emitV128ExtractLane(ctx, ins, encSmovB, 0xF);
+}
+
+/// Wasm spec (SIMD) — `i8x16.extract_lane_u`: zero-extend the byte
+/// into i32. Lowers to `UMOV W<rd>, V<rn>.B[lane]`.
+pub fn emitI8x16ExtractLaneU(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    return emitV128ExtractLane(ctx, ins, encUmovB, 0xF);
+}
+
+/// Wasm spec (SIMD) — `i8x16.replace_lane`: replace the lane with the
+/// low 8 bits of an i32 input. Lowers to `INS V<vd>.B[lane], W<wn>`.
+pub fn emitI8x16ReplaceLane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    return emitV128ReplaceLane(ctx, ins, encInsB, 0xF);
+}
+
+/// Wasm spec (SIMD) — `i16x8.extract_lane_s`: sign-extend the halfword
+/// into i32. Lowers to `SMOV W<rd>, V<rn>.H[lane]`.
+pub fn emitI16x8ExtractLaneS(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    return emitV128ExtractLane(ctx, ins, encSmovH, 0x7);
+}
+
+/// Wasm spec (SIMD) — `i16x8.extract_lane_u`: zero-extend the halfword
+/// into i32. Lowers to `UMOV W<rd>, V<rn>.H[lane]`.
+pub fn emitI16x8ExtractLaneU(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    return emitV128ExtractLane(ctx, ins, encUmovH, 0x7);
+}
+
+/// Wasm spec (SIMD) — `i16x8.replace_lane`: replace the lane with the
+/// low 16 bits of an i32 input. Lowers to `INS V<vd>.H[lane], W<wn>`.
+pub fn emitI16x8ReplaceLane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    return emitV128ReplaceLane(ctx, ins, encInsH, 0x7);
+}
+
+/// Wasm spec (SIMD) — `i64x2.extract_lane`: lane ∈ 0..1; copy the
+/// 64-bit lane into an i64 GPR. Lowers to `UMOV X<rd>, V<rn>.D[lane]`.
+/// (No signed/unsigned variant — i64 has no narrower width to extend
+/// from.)
+pub fn emitI64x2ExtractLane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    return emitV128ExtractLane(ctx, ins, encUmovD, 0x1);
+}
+
+/// Wasm spec (SIMD) — `i64x2.replace_lane`: replace the lane with an
+/// i64 input. Lowers to `INS V<vd>.D[lane], X<rn>`.
+pub fn emitI64x2ReplaceLane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    return emitV128ReplaceLane(ctx, ins, encInsD, 0x1);
+}
