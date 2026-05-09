@@ -1949,6 +1949,60 @@ test "emitI32x4ExtmulLowI16x8U: PMOVZXWD + PMOVZXWD + PMULLD (3 instr)" {
     try testing.expectEqualSlices(u8, expected.items, buf.items);
 }
 
+test "emitI16x8ExtaddPairwiseI8x16U: PCMPEQB + PABSB + MOVAPS + PMADDUBSW (4 instr)" {
+    var slot_ids = [_]u16{ 0, 1 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 2,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    var next_vreg: u32 = 1;
+
+    try op_simd.emitI16x8ExtaddPairwiseI8x16U(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    // src = xmm8, dst = xmm9, tmp = xmm14.
+    try expected.appendSlice(testing.allocator, inst.encPcmpeqB(.xmm14, .xmm14).slice());
+    try expected.appendSlice(testing.allocator, inst.encPabsb(.xmm14, .xmm14).slice());
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm9, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encPmaddubsw(.xmm9, .xmm14).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
+test "emitI16x8ExtaddPairwiseI8x16S: PCMPEQB + PABSB + PMADDUBSW (3 instr; dst holds +1 mask)" {
+    var slot_ids = [_]u16{ 0, 1 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 2,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    var next_vreg: u32 = 1;
+
+    try op_simd.emitI16x8ExtaddPairwiseI8x16S(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    try expected.appendSlice(testing.allocator, inst.encPcmpeqB(.xmm9, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encPabsb(.xmm9, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encPmaddubsw(.xmm9, .xmm8).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
 test "emitI64x2ExtmulLowI32x4S: PSHUFD imm=0x50 x2 + PMULDQ (3 instr)" {
     var slot_ids = [_]u16{ 0, 1, 2 };
     const alloc: regalloc.Allocation = .{

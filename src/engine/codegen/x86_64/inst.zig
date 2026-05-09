@@ -359,6 +359,7 @@ pub const encPsradImm = inst_sse.encPsradImm;
 pub const encCvttps2dq = inst_sse.encCvttps2dq;
 pub const encPmulhrsw = inst_sse.encPmulhrsw;
 pub const encPmaddwd = inst_sse.encPmaddwd;
+pub const encPmaddubsw = inst_sse.encPmaddubsw;
 pub const encAndps = inst_sse.encAndps;
 pub const encAndpd = inst_sse.encAndpd;
 pub const encRoundps = inst_sse.encRoundps;

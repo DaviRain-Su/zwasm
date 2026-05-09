@@ -1240,6 +1240,18 @@ pub fn encCvtdq2pd(dst: Xmm, src: Xmm) EncodedInsn {
     return enc;
 }
 
+/// `PMADDUBSW xmm, xmm` (66 [REX?] 0F 38 04 /r) — SSSE3 packed
+/// multiply-and-add pairs with **mixed-sign** inputs: dst is read
+/// as 16 unsigned i8 lanes, src as 16 signed i8 lanes; each
+/// adjacent pair is multiplied and summed into a saturated i16.
+/// Used by Wasm `i16x8.extadd_pairwise_i8x16_{s,u}` synthesis with
+/// a +1 multiplier vector — the saturating sum of two i8/u8
+/// values fits in i16 (max u8+u8 = 510, min i8+i8 = -256), so the
+/// saturation never triggers and we get clean pairwise add.
+pub fn encPmaddubsw(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinopExt(0x38, 0x04, dst, src);
+}
+
 /// `PMULHRSW xmm, xmm` (66 [REX?] 0F 38 0B /r) — SSSE3 packed
 /// multiply 8 i16 lanes with rounding and right-shift by 15.
 /// Result lane = ((x * y + 0x4000) >> 15) clamped to [-32768, 32767].
@@ -1694,6 +1706,10 @@ test "encCvtpd2ps opcode bytes (xmm0, xmm1) — 66 prefix" {
 
 test "encCvtdq2pd opcode bytes (xmm0, xmm1) — F3 prefix" {
     try testing.expectEqualSlices(u8, &.{ 0xF3, 0x0F, 0xE6, 0xC1 }, encCvtdq2pd(.xmm0, .xmm1).slice());
+}
+
+test "encPmaddubsw: SSSE3 (xmm0, xmm1) opcode 0x38 0x04" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x04, 0xC1 }, encPmaddubsw(.xmm0, .xmm1).slice());
 }
 
 test "encPmulhrsw / encPmaddwd opcode bytes (xmm0, xmm1)" {

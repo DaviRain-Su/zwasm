@@ -1073,6 +1073,12 @@ pub fn compile(
             .@"i64x2.extmul_high_i32x4_s" => try op_simd.emitI64x2ExtmulHighI32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"i64x2.extmul_low_i32x4_u" => try op_simd.emitI64x2ExtmulLowI32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"i64x2.extmul_high_i32x4_u" => try op_simd.emitI64x2ExtmulHighI32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            // §9.7 / 9.7-aj: i16x8.extadd_pairwise_i8x16 × 2.
+            // PCMPEQB + PABSB synthesises a 0x01-per-byte vector;
+            // PMADDUBSW (SSSE3) reduces to pairwise add. No
+            // const-pool dep.
+            .@"i16x8.extadd_pairwise_i8x16_s" => try op_simd.emitI16x8ExtaddPairwiseI8x16S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.extadd_pairwise_i8x16_u" => try op_simd.emitI16x8ExtaddPairwiseI8x16U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             // §9.7 / 9.7-ac: i8x16.swizzle (1 op). 10-instr inline
             // recipe synthesises 0x0F broadcast + PCMPGTB-detect of
             // idx>15 + POR-correct + PSHUFB. No const-pool dep.

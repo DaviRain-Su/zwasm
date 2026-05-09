@@ -3068,3 +3068,58 @@ pub fn emitI64x2ExtmulLowI32x4U(allocator: Allocator, buf: *std.ArrayList(u8), a
 pub fn emitI64x2ExtmulHighI32x4U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
     return emitV128I64x2Extmul(allocator, buf, alloc, pushed_vregs, next_vreg, 0xFA, inst.encPmuludq);
 }
+
+/// Wasm spec §4.4.4 (i16x8.extadd_pairwise_i8x16_u) — pairwise-
+/// add adjacent unsigned i8 lanes, widening to i16. PMADDUBSW
+/// (SSSE3) computes saturating dot product where the first
+/// operand is read as unsigned bytes and the second as signed
+/// bytes; with a +1 vector as the signed operand, this reduces
+/// to plain pairwise-add. Synthesise the +1 vector inline via
+/// PCMPEQB ones + PABSB → 0x01 per byte (no const-pool dep).
+/// 4-instr recipe.
+pub fn emitI16x8ExtaddPairwiseI8x16U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const src_x = try gpr.resolveXmm(alloc, src_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const tmp = abi.fp_spill_stage_xmms[0]; // XMM14
+
+    // 1-2: tmp = 0x01 per byte (signed +1).
+    try buf.appendSlice(allocator, inst.encPcmpeqB(tmp, tmp).slice());
+    try buf.appendSlice(allocator, inst.encPabsb(tmp, tmp).slice());
+    // 3-4: dst = src (unsigned bytes); PMADDUBSW dst, tmp →
+    // result_word = u8(src[2i]) * 1 + u8(src[2i+1]) * 1.
+    if (dst_x != src_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, src_x).slice());
+    }
+    try buf.appendSlice(allocator, inst.encPmaddubsw(dst_x, tmp).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// Wasm spec §4.4.4 (i16x8.extadd_pairwise_i8x16_s) — pairwise-
+/// add adjacent signed i8 lanes, widening to i16. Same PMADDUBSW
+/// recipe as the unsigned variant but with operand roles swapped:
+/// the +1 vector goes into the unsigned slot (dst) so PMADDUBSW
+/// reads the source's signed bytes correctly. 4-instr recipe.
+pub fn emitI16x8ExtaddPairwiseI8x16S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const src_x = try gpr.resolveXmm(alloc, src_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+
+    // 1-2: dst = 0x01 per byte (read as unsigned 1 by PMADDUBSW).
+    try buf.appendSlice(allocator, inst.encPcmpeqB(dst_x, dst_x).slice());
+    try buf.appendSlice(allocator, inst.encPabsb(dst_x, dst_x).slice());
+    // 3: PMADDUBSW dst, src — result_word = unsigned(1)*signed(b0)
+    // + unsigned(1)*signed(b1) = i8 + i8 (sign-extended sum).
+    try buf.appendSlice(allocator, inst.encPmaddubsw(dst_x, src_x).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
