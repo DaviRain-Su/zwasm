@@ -16,36 +16,33 @@
 6. `private/notes/p9-9.7-m-survey.md` (gitignored; cranelift recipe +
    adoption data) — only if revisiting the SSE4.2 baseline call.
 
-## Current state — Phase 9 / §9.7 in-flight (9.7-a..m landed); **9.7-n NEXT**
+## Current state — Phase 9 / §9.7 in-flight (9.7-a..n landed); **9.7-o NEXT**
 
-9.7-m: i64x2 signed compares lt_s/gt_s/le_s/ge_s (4 ops). New
-encoder encPcmpgtQ (SSE4.2 66 0F 38 37 /r); reuses 9.7-l's
-`emitV128IntCmpSigned(encoder_gt, kind)` helper unchanged with
-the new encoder threaded as the `gt` primitive. ADR-0041 §5
-amended (Revision history row appended) — x86_64 baseline
-raised SSE4.1 → SSE4.2; Alternative E (SSE4.1 9-instr
-synthesis from cranelift `inst.isle:3179-3191`) added with
-rejection rationale; CPUID detection bumps from bit 19 to
-bit 20. Total SIMD ops handled: 54.
+9.7-n: x86_64 unsigned compares lt_u/gt_u/le_u/ge_u for
+i8x16/i16x8/i32x4 (12 ops). 6 new encoders (PMAXUB/PMINUB
+SSE2; PMAXUW/PMINUW/PMAXUD/PMINUD SSE4.1) + new helper
+`emitV128IntCmpUnsigned(encoder_minmax, encoder_pcmpeq, kind)`
+following cranelift's PMINU/PMAXU + PCMPEQ recipe
+(`lower.isle:2016-2080`). 12 1-line wrappers + 12 dispatch
+arms + 4 path-coverage tests. Total SIMD ops handled: 66.
 
-**9.7-n NEXT** — unsigned compares ult/ugt/ule/uge for
-8/16/32-bit shapes (12 ops; i64x2 unsigned not in spec).
-Cranelift's preferred path is PMINU/PMAXU + PCMPEQ (rule 1 in
-`lower.isle:2016-2080`):
-- ugt(a,b): PMAXU(a,b) → max; PCMPEQ(max,b); PXOR all-ones
-- ult(a,b): PMINU(a,b) → min; PCMPEQ(min,b); PXOR all-ones
-- uge(a,b): PMAXU(a,b) → max; PCMPEQ(a,max)  (2 instr)
-- ule(a,b): PMINU(a,b) → min; PCMPEQ(a,min)  (2 instr)
+**9.7-o NEXT** — FP compare ops eq/ne/lt/gt/le/ge for f32x4
++ f64x2 (12 ops). Cranelift recipe (`lower.isle` around fcmp
+arms) emits CMPPS/CMPPD with imm8 predicate codes:
+- 0x00 EQ_OQ (eq), 0x04 NEQ_UQ (ne), 0x01 LT_OS (lt),
+  0x02 LE_OS (le), 0x06 NLE_US (gt), 0x05 NLT_US (ge)
+  per Intel SDM Vol 2 CMPPS/CMPPD (SSE / SSE2 baseline).
+- Single instruction CMPPS xmm,xmm,imm8 (SSE 0F C2 /r ib);
+  CMPPD same opcode with 66 prefix (SSE2).
+Likely shape: 1 new encoder family `encCmppsImm` /
+`encCmppdImm` (or unified factor) + 1 new helper
+`emitV128FpCmp(encoder, predicate)` + 12 wrappers. ~120 src
++ ~120 test. No ADR needed.
 
-PMAXU/PMINU coverage: PMAXUB / PMINUB are SSE2; PMAXUW / PMINUW
-/ PMAXUD / PMINUD are SSE4.1 — all on baseline. 6 new encoders
-+ 1 new helper `emitV128IntCmpUnsigned` + 12 1-line wrappers.
-LOC estimate ~170 src + ~200 test. No ADR needed.
-
-Subsequent: 9.7-o+ (FP compare CMPPS/PD), 9.7-p+ (FP arith),
-9.7-q+ (bitwise ops + select), 9.7-r+ (conversion +
-narrow/extend + shuffle PSHUFB), 9.7-s (v128.const via
-ADR-0042 const-pool).
+Subsequent: 9.7-p+ (FP arith ADDPS/PD/MULPS/PD/DIVPS/PD/
+SQRTPS/PD/MINPS/PD/MAXPS/PD), 9.7-q+ (bitwise ops + select),
+9.7-r+ (conversion + narrow/extend + shuffle PSHUFB),
+9.7-s (v128.const via ADR-0042 const-pool).
 
 ## Open structural debt (pointers — full list in `.dev/debt.md`)
 
@@ -65,5 +62,5 @@ reference) live in git: ADRs 0035-0040, lessons indexed in
 
 **Phase**: Phase 9 (SIMD-128, ADR-0041 — SSE4.2 baseline post-9.7-m).
 §9.5 [x] (ARM64 NEON pt 1), §9.6 [x] (ARM64 NEON pt 2),
-§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..m landed; 9.7-n NEXT).
+§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..n landed; 9.7-o NEXT).
 **Branch**: `zwasm-from-scratch`。
