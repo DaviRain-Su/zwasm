@@ -323,6 +323,8 @@ pub const encPshufb = inst_sse.encPshufb;
 pub const encPshuflw = inst_sse.encPshuflw;
 pub const encPunpcklqdq = inst_sse.encPunpcklqdq;
 pub const encInsertps = inst_sse.encInsertps;
+pub const encMovsdXmmXmm = inst_sse.encMovsdXmmXmm;
+pub const encMovlhps = inst_sse.encMovlhps;
 
 // ============================================================
 // Tests

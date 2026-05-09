@@ -778,6 +778,42 @@ pub fn encPunpcklqdq(dst: Xmm, src: Xmm) EncodedInsn {
     return encSsePackedIntBinop(0x6C, dst, src);
 }
 
+/// `MOVSD xmm, xmm` (F2 [REX?] 0F 10 /r — register-register
+/// form with ModR/M.mod=11) — copies the low 64 bits of `src`
+/// into the low 64 bits of `dst`, **preserving** the upper 64
+/// bits of `dst`. (The mem→reg load form zero-fills the upper
+/// 64; the reg→reg form does NOT, per Intel SDM Vol 2.) Used by
+/// `f64x2.replace_lane` lane=0 to overwrite the low qword while
+/// preserving the high qword from the input vec.
+pub fn encMovsdXmmXmm(dst: Xmm, src: Xmm) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0xF2);
+    if (dst.extBit() != 0 or src.extBit() != 0) {
+        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0x10);
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    return enc;
+}
+
+/// `MOVLHPS xmm, xmm` (0F 16 /r) — moves the low 64 bits of
+/// `src` into the **high** 64 bits of `dst`; the low 64 bits of
+/// `dst` are preserved. Used by `f64x2.replace_lane` lane=1
+/// to overwrite the high qword (where the scalar `value` arrives
+/// in its XMM home's low qword, so we shuttle it up to dst's
+/// high qword).
+pub fn encMovlhps(dst: Xmm, src: Xmm) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (dst.extBit() != 0 or src.extBit() != 0) {
+        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0x16);
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    return enc;
+}
+
 /// `INSERTPS xmm, xmm/m32, imm8` (66 [REX?] 0F 3A 21 /r ib) —
 /// SSE4.1 insert scalar single-precision. Per Intel SDM:
 ///   imm8[7:6] = count_s (source lane index, 0..3)
@@ -1000,4 +1036,20 @@ test "encInsertps: lane 1 with count_s=0, ZMASK=0 (xmm0, xmm1, 0x10)" {
 test "encInsertps: REX.R+B (xmm8, xmm9, 0x30) — lane 3" {
     // 66 45 0F 3A 21 C1 30
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x3A, 0x21, 0xC1, 0x30 }, encInsertps(.xmm8, .xmm9, 0x30).slice());
+}
+
+test "encMovsdXmmXmm: reg-reg (xmm0, xmm1) — F2 0F 10 with mod=11" {
+    try testing.expectEqualSlices(u8, &.{ 0xF2, 0x0F, 0x10, 0xC1 }, encMovsdXmmXmm(.xmm0, .xmm1).slice());
+}
+
+test "encMovsdXmmXmm: REX.R+B (xmm8, xmm9)" {
+    try testing.expectEqualSlices(u8, &.{ 0xF2, 0x45, 0x0F, 0x10, 0xC1 }, encMovsdXmmXmm(.xmm8, .xmm9).slice());
+}
+
+test "encMovlhps: reg-reg (xmm0, xmm1) — 0F 16 /r" {
+    try testing.expectEqualSlices(u8, &.{ 0x0F, 0x16, 0xC1 }, encMovlhps(.xmm0, .xmm1).slice());
+}
+
+test "encMovlhps: REX.R+B (xmm8, xmm9)" {
+    try testing.expectEqualSlices(u8, &.{ 0x45, 0x0F, 0x16, 0xC1 }, encMovlhps(.xmm8, .xmm9).slice());
 }

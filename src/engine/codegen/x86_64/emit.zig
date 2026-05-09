@@ -819,6 +819,13 @@ pub fn compile(
             .@"f32x4.splat" => try op_simd.emitF32x4Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"f32x4.extract_lane" => try op_simd.emitF32x4ExtractLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.payload),
             .@"f32x4.replace_lane" => try op_simd.emitF32x4ReplaceLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.payload),
+            // §9.7 / 9.7-j: f64x2 lane access trio. splat + extract_lane
+            // reuse encPshufd (imm 0x44 / 0xEE for low/high qword).
+            // replace_lane uses MOVAPS preamble + MOVSD (lane=0) /
+            // MOVLHPS (lane=1).
+            .@"f64x2.splat" => try op_simd.emitF64x2Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.extract_lane" => try op_simd.emitF64x2ExtractLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.payload),
+            .@"f64x2.replace_lane" => try op_simd.emitF64x2ReplaceLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.payload),
             .@"memory.size" => {
                 // Wasm spec §4.4.7 — return current memory size in
                 // 64-KiB pages. mem_limit (bytes) lives at
