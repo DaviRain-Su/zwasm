@@ -1430,6 +1430,61 @@ pub fn emitI64x2ShrU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regal
     return emitV128IntShift(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsrlqReg, 63);
 }
 
+/// Wasm spec §4.4.4 (i64x2.shr_s) — pop count (i32), pop vec
+/// (v128), push v128 with arithmetic (signed) shift-right per
+/// 64-bit lane. SSE2 lacks PSRAQ (added in AVX-512); synthesise
+/// per cranelift `lower.isle:943-951` with runtime sign-bit-mask
+/// generation (avoids the const-pool plumbing the cranelift code
+/// uses via `flip_high_bit_mask`):
+///
+///   AND count_r, 63                ; mask count
+///   PCMPEQB scratch_mask, scratch_mask ; XMM14 = all-ones
+///   PSLLQ-imm scratch_mask, 63     ; XMM14 = 0x80...0 per qword (sign bits)
+///   MOVD scratch_count, count_r    ; XMM15 = count
+///   PSRLQ-reg scratch_mask, scratch_count ; XMM14 = sign_bit_loc =
+///                                  ;   0x80...0 >> c per qword
+///   MOVAPS dst, vec                ; (skip if dst==vec)
+///   PSRLQ-reg dst, scratch_count   ; ushr lanes
+///   PXOR dst, scratch_mask         ; flip sign-bit-loc bits
+///   PSUBQ dst, scratch_mask        ; subtract sign_bit_loc → arithmetic shr
+///
+/// 9-instruction emit; XMM14 holds sign_bit_loc (= mask shifted),
+/// XMM15 holds count. dst gets the canonical signed-shifted result.
+pub fn emitI64x2ShrS(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    spill_base_off: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
+    const count_v = pushed_vregs.pop().?;
+    const vec_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const vec_x = try gpr.resolveXmm(alloc, vec_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const count_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, count_v, 0);
+    const mask_x = abi.fp_spill_stage_xmms[0]; // XMM14 — sign_bit_loc
+    const count_x = abi.fp_spill_stage_xmms[1]; // XMM15 — count broadcast
+
+    try buf.appendSlice(allocator, inst.encAndRImm8(.d, count_r, 63).slice());
+    try buf.appendSlice(allocator, inst.encPcmpeqB(mask_x, mask_x).slice());
+    try buf.appendSlice(allocator, inst.encPsllqImm(mask_x, 63).slice());
+    try buf.appendSlice(allocator, inst.encMovdXmmFromR32(count_x, count_r).slice());
+    try buf.appendSlice(allocator, inst.encPsrlqReg(mask_x, count_x).slice());
+    if (dst_x != vec_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, vec_x).slice());
+    }
+    try buf.appendSlice(allocator, inst.encPsrlqReg(dst_x, count_x).slice());
+    try buf.appendSlice(allocator, inst.encPxor(dst_x, mask_x).slice());
+    try buf.appendSlice(allocator, inst.encPsubq(dst_x, mask_x).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
 /// Wasm spec §4.4.4 (i*x*.eq variants) — pop two v128, push v128
 /// where each lane is all-ones if the inputs match else all-zero.
 /// Per-shape encoders (PCMPEQB / PCMPEQW / PCMPEQD / PCMPEQQ)

@@ -364,6 +364,7 @@ pub const encPsrldReg = inst_sse.encPsrldReg;
 pub const encPsrlqReg = inst_sse.encPsrlqReg;
 pub const encPsrawReg = inst_sse.encPsrawReg;
 pub const encPsradReg = inst_sse.encPsradReg;
+pub const encPsubq = inst_sse.encPsubq;
 pub const encPacksswb = inst_sse.encPacksswb;
 pub const encMovmskps = inst_sse.encMovmskps;
 pub const encMovmskpd = inst_sse.encMovmskpd;

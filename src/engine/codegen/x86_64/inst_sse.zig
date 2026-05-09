@@ -1103,9 +1103,18 @@ pub fn encPsrawReg(dst: Xmm, src: Xmm) EncodedInsn {
 /// `PSRAD xmm, xmm` (66 [REX?] 0F E2 /r) — SSE2 packed 32-bit
 /// arithmetic (signed) shift-right. Sign-extends. Note: PSRAQ
 /// (64-bit signed) is NOT in SSE — added in AVX-512. i64x2.shr_s
-/// must synthesise; deferred to §9.7-u.
+/// must synthesise (§9.7-u via PSRLQ + sign-bit fixup).
 pub fn encPsradReg(dst: Xmm, src: Xmm) EncodedInsn {
     return encSsePackedIntBinop(0xE2, dst, src);
+}
+
+/// `PSUBQ xmm, xmm` (66 [REX?] 0F FB /r) — SSE2 packed 64-bit
+/// integer subtract. Wasm `i64x2.sub` (already covered via
+/// emitV128IntBinop in 9.7-b). Also used by §9.7-u
+/// `i64x2.shr_s` synthesis to apply the sign-bit fixup
+/// per cranelift `lower.isle:951`.
+pub fn encPsubq(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xFB, dst, src);
 }
 
 // `encMovdXmmFromR32` is defined earlier in this file (line ~179)
@@ -1379,6 +1388,10 @@ test "encPsrlwReg / encPsrldReg / encPsrlqReg opcode bytes (xmm0, xmm1)" {
 test "encPsrawReg / encPsradReg opcode bytes (xmm0, xmm1)" {
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xE1, 0xC1 }, encPsrawReg(.xmm0, .xmm1).slice());
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xE2, 0xC1 }, encPsradReg(.xmm0, .xmm1).slice());
+}
+
+test "encPsubq opcode bytes (xmm0, xmm1) — SSE2 packed 64-bit subtract" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xFB, 0xC1 }, encPsubq(.xmm0, .xmm1).slice());
 }
 
 test "encMovdXmmFromR32: xmm0, eax — 66 0F 6E ModRM" {

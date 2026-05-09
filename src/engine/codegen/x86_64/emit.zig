@@ -966,6 +966,14 @@ pub fn compile(
             .@"i32x4.shr_u" => try op_simd.emitI32x4ShrU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"i64x2.shl" => try op_simd.emitI64x2Shl(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"i64x2.shr_u" => try op_simd.emitI64x2ShrU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            // §9.7 / 9.7-u: i64x2.shr_s synthesis (no native PSRAQ
+            // in SSE; runtime-mask sign-bit fixup recipe per
+            // cranelift `lower.isle:943-951` — 9 instr, no
+            // const-pool needed since the sign-bit mask is
+            // PCMPEQB+PSLLQ-imm-synthesised inline). i8x16 shifts
+            // defer to 9.7-v (count-dependent broadcast mask
+            // synthesis or const-pool dependency per ADR-0042).
+            .@"i64x2.shr_s" => try op_simd.emitI64x2ShrS(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"memory.size" => {
                 // Wasm spec §4.4.7 — return current memory size in
                 // 64-KiB pages. mem_limit (bytes) lives at
