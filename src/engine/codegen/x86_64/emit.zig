@@ -807,6 +807,12 @@ pub fn compile(
             .@"i16x8.extract_lane_u" => try op_simd.emitI16x8ExtractLaneU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
             .@"i8x16.replace_lane" => try op_simd.emitI8x16ReplaceLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
             .@"i16x8.replace_lane" => try op_simd.emitI16x8ReplaceLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
+            // §9.7 / 9.7-h: integer splat siblings (i32x4 already
+            // landed in 9.7-e). i8x16 via PSHUFB-broadcast; i16x8
+            // via PSHUFLW + PSHUFD; i64x2 via PUNPCKLQDQ.
+            .@"i8x16.splat" => try op_simd.emitI8x16Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i16x8.splat" => try op_simd.emitI16x8Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i64x2.splat" => try op_simd.emitI64x2Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"memory.size" => {
                 // Wasm spec §4.4.7 — return current memory size in
                 // 64-KiB pages. mem_limit (bytes) lives at

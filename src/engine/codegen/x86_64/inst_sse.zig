@@ -725,6 +725,59 @@ pub fn encPinsrW(xmm_dst: Xmm, gpr_src: Gpr, lane: u3) EncodedInsn {
     return enc;
 }
 
+/// `PXOR xmm, xmm` (66 [REX?] 0F EF /r) — SSE2 packed XOR; the
+/// `PXOR x, x` self-XOR idiom produces a zeroed XMM in 1 byte
+/// less than `MOVAPS x, <const0>`. Used by `i8x16.splat` synth
+/// to build the all-zero PSHUFB control mask (each byte = 0
+/// indexes lane 0 of the source — broadcasting it to all 16
+/// destination bytes).
+pub fn encPxor(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xEF, dst, src);
+}
+
+/// `PSHUFB xmm, xmm` (66 [REX?] 0F 38 00 /r) — SSSE3 packed
+/// shuffle bytes. For each output byte position i, the
+/// instruction reads the corresponding byte of the second
+/// operand (the control mask) and uses its low 4 bits to
+/// index a byte of the first operand (the destination), or
+/// zeroes the output when the high bit of the control byte
+/// is set. Used by `i8x16.splat` with an all-zero control to
+/// broadcast lane 0.
+pub fn encPshufb(dst: Xmm, ctrl: Xmm) EncodedInsn {
+    return encSsePackedIntBinopExt(0x38, 0x00, dst, ctrl);
+}
+
+/// `PSHUFLW xmm, xmm, imm8` (F2 [REX?] 0F 70 /r ib) — SSE2
+/// shuffle low 4 packed words. The imm8 selects 4 source words
+/// (2 bits each) within the lower 64 bits of `src`, writing the
+/// chosen 4 words to the lower 64 of `dst`; the upper 64 of
+/// `dst` is copied verbatim from `src`. Used by `i16x8.splat`
+/// to broadcast the low word of `src` across the four lower
+/// lanes (then PSHUFD broadcasts the lower 64 to the upper 64).
+pub fn encPshuflw(dst: Xmm, src: Xmm, imm8: u8) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0xF2);
+    if (dst.extBit() != 0 or src.extBit() != 0) {
+        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0x70);
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    enc.push(imm8);
+    return enc;
+}
+
+/// `PUNPCKLQDQ xmm, xmm` (66 [REX?] 0F 6C /r) — SSE2 unpack low
+/// qwords. Takes qword 0 of `dst` followed by qword 0 of `src`
+/// to produce a 128-bit result `(src.q[0], dst.q[0])` written
+/// to `dst`. The `PUNPCKLQDQ x, x` self-unpack idiom broadcasts
+/// the low qword to both lanes — used by `i64x2.splat` after
+/// `MOVQ xmm, src_gpr` zero-extends the i64 source into the low
+/// qword of the XMM.
+pub fn encPunpcklqdq(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0x6C, dst, src);
+}
+
 const testing = std.testing;
 
 test "encPaddD: low XMMs (xmm0, xmm1) — no REX, 4 bytes" {
@@ -884,4 +937,31 @@ test "encPinsrW: lane 3 (xmm0, rax, 3) — SSE2 form opcode 0xC4" {
 
 test "encPinsrW: REX.R+B (xmm8, r9, 7)" {
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0xC4, 0xC1, 0x07 }, encPinsrW(.xmm8, .r9, 7).slice());
+}
+
+test "encPxor: self-XOR zero idiom (xmm14, xmm14) — opcode 0xEF" {
+    // 66 45 0F EF F6 — REX.R+B for XMM14 in both fields, ModR/M=11 110 110.
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0xEF, 0xF6 }, encPxor(.xmm14, .xmm14).slice());
+}
+
+test "encPshufb: SSSE3 broadcast (xmm0, xmm14) — opcode 0x38 0x00" {
+    // 66 41 0F 38 00 C6 — REX.B for ctrl XMM14, ModR/M=11 000 110.
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x41, 0x0F, 0x38, 0x00, 0xC6 }, encPshufb(.xmm0, .xmm14).slice());
+}
+
+test "encPshuflw: low-4 broadcast (xmm0, xmm0, 0x00) — F2 0F 70 /r ib" {
+    try testing.expectEqualSlices(u8, &.{ 0xF2, 0x0F, 0x70, 0xC0, 0x00 }, encPshuflw(.xmm0, .xmm0, 0x00).slice());
+}
+
+test "encPshuflw: REX.R+B (xmm8, xmm13, 0x00)" {
+    // F2 45 0F 70 C5 00 — REX = 0x45.
+    try testing.expectEqualSlices(u8, &.{ 0xF2, 0x45, 0x0F, 0x70, 0xC5, 0x00 }, encPshuflw(.xmm8, .xmm13, 0x00).slice());
+}
+
+test "encPunpcklqdq: self-unpack (xmm0, xmm0) — opcode 0x6C" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x6C, 0xC0 }, encPunpcklqdq(.xmm0, .xmm0).slice());
+}
+
+test "encPunpcklqdq: REX.R+B (xmm8, xmm8)" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x6C, 0xC0 }, encPunpcklqdq(.xmm8, .xmm8).slice());
 }

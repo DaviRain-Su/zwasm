@@ -318,6 +318,10 @@ pub const encPextrB = inst_sse.encPextrB;
 pub const encPextrW = inst_sse.encPextrW;
 pub const encPinsrB = inst_sse.encPinsrB;
 pub const encPinsrW = inst_sse.encPinsrW;
+pub const encPxor = inst_sse.encPxor;
+pub const encPshufb = inst_sse.encPshufb;
+pub const encPshuflw = inst_sse.encPshuflw;
+pub const encPunpcklqdq = inst_sse.encPunpcklqdq;
 
 // ============================================================
 // Tests

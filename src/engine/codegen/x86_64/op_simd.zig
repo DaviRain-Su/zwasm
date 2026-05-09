@@ -264,6 +264,101 @@ pub fn emitI32x4ExtractLane(
     try pushed_vregs.append(allocator, result_v);
 }
 
+/// Wasm spec §4.4.3 (i8x16.splat) — pop scalar i32, push v128
+/// with all 16 byte lanes equal to the low 8 bits of the scalar.
+/// x86_64 lowering: `MOVD xmm_dst, src_gpr` (zero-extends to
+/// 128) — places `src8` in byte 0 with the rest cleared. Then
+/// `PXOR scratch, scratch` (build all-zero PSHUFB control mask)
+/// + `PSHUFB xmm_dst, scratch` — PSHUFB reads each control byte's
+/// low 4 bits as a source-lane index; an all-zero ctrl makes
+/// every output byte = source byte 0 = `src8`.
+///
+/// **Scratch reuse**: borrows `abi.fp_spill_stage_xmms[0]` as
+/// the zero ctrl mask (mirrors §9.7-d's i64x2.mul scratch
+/// strategy). Safe — the handler is atomic; no nested
+/// `xmmLoadSpilled` intervenes.
+pub fn emitI8x16Splat(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    spill_base_off: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const ctrl = abi.fp_spill_stage_xmms[0]; // XMM14 — zero ctrl mask scratch
+
+    try buf.appendSlice(allocator, inst.encMovdXmmFromR32(dst_x, src_r).slice());
+    try buf.appendSlice(allocator, inst.encPxor(ctrl, ctrl).slice());
+    try buf.appendSlice(allocator, inst.encPshufb(dst_x, ctrl).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// Wasm spec §4.4.3 (i16x8.splat) — pop scalar i32, push v128
+/// with 8 word lanes equal to the low 16 bits of the scalar.
+/// Lowering: `MOVD xmm_dst, src_gpr` (low 32 bits of XMM = src,
+/// rest zeroed) → `PSHUFLW xmm_dst, xmm_dst, 0x00` (broadcasts
+/// word 0 to lanes 0-3 of the lower 64) → `PSHUFD xmm_dst,
+/// xmm_dst, 0x00` (broadcasts dword 0 across all 4 dwords,
+/// filling the upper 64 bits).
+pub fn emitI16x8Splat(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    spill_base_off: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+
+    try buf.appendSlice(allocator, inst.encMovdXmmFromR32(dst_x, src_r).slice());
+    try buf.appendSlice(allocator, inst.encPshuflw(dst_x, dst_x, 0x00).slice());
+    try buf.appendSlice(allocator, inst.encPshufd(dst_x, dst_x, 0x00).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// Wasm spec §4.4.3 (i64x2.splat) — pop scalar i64, push v128
+/// with both 64-bit lanes equal to the scalar. Lowering: `MOVQ
+/// xmm_dst, src_gpr` (zero-extends i64 into the low 64 bits;
+/// upper 64 cleared) → `PUNPCKLQDQ xmm_dst, xmm_dst` (unpacks
+/// low qwords from both operands — same XMM here — producing
+/// `(src64, src64)`).
+pub fn emitI64x2Splat(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    spill_base_off: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+
+    try buf.appendSlice(allocator, inst.encMovqXmmFromR64(dst_x, src_r).slice());
+    try buf.appendSlice(allocator, inst.encPunpcklqdq(dst_x, dst_x).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
 /// Wasm spec §4.4.3 (i8x16 / i16x8 extract_lane variants) — pop
 /// v128, push i32. PEXTRB / PEXTRW write the byte/word lane into
 /// the destination GPR's low 8/16 bits zero-extended to 32 bits.
@@ -671,6 +766,84 @@ test "emitI8x16Sub: dispatches to encPsubB — opcode 0xF8 reaches the buffer" {
     @memcpy(expected_buf[n..][0..psub.slice().len], psub.slice());
     n += psub.slice().len;
     try testing.expectEqualSlices(u8, expected_buf[0..n], buf.items);
+}
+
+test "emitI8x16Splat: MOVD + PXOR + PSHUFB sequence" {
+    var slot_ids = [_]u16{ 0, 0 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 1,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    var next_vreg: u32 = 1;
+
+    try emitI8x16Splat(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    const ctrl = abi.fp_spill_stage_xmms[0]; // XMM14
+    try expected.appendSlice(testing.allocator, inst.encMovdXmmFromR32(.xmm8, .rbx).slice());
+    try expected.appendSlice(testing.allocator, inst.encPxor(ctrl, ctrl).slice());
+    try expected.appendSlice(testing.allocator, inst.encPshufb(.xmm8, ctrl).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
+test "emitI16x8Splat: MOVD + PSHUFLW + PSHUFD sequence" {
+    var slot_ids = [_]u16{ 0, 0 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 1,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    var next_vreg: u32 = 1;
+
+    try emitI16x8Splat(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    try expected.appendSlice(testing.allocator, inst.encMovdXmmFromR32(.xmm8, .rbx).slice());
+    try expected.appendSlice(testing.allocator, inst.encPshuflw(.xmm8, .xmm8, 0x00).slice());
+    try expected.appendSlice(testing.allocator, inst.encPshufd(.xmm8, .xmm8, 0x00).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
+test "emitI64x2Splat: MOVQ + PUNPCKLQDQ sequence" {
+    var slot_ids = [_]u16{ 0, 0 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 1,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    var next_vreg: u32 = 1;
+
+    try emitI64x2Splat(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    try expected.appendSlice(testing.allocator, inst.encMovqXmmFromR64(.xmm8, .rbx).slice());
+    try expected.appendSlice(testing.allocator, inst.encPunpcklqdq(.xmm8, .xmm8).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
 }
 
 test "emitI8x16ExtractLaneS: PEXTRB + MOVSX r32, r8" {
