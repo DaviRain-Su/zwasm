@@ -974,6 +974,14 @@ pub fn compile(
             // defer to 9.7-v (count-dependent broadcast mask
             // synthesis or const-pool dependency per ADR-0042).
             .@"i64x2.shr_s" => try op_simd.emitI64x2ShrS(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            // §9.7 / 9.7-v: i8x16.shl + i8x16.shr_u via inline-mask
+            // synthesis (no const-pool dep). 9-/10-instr recipes
+            // using PSLLW/PSRLW + PCMPEQB-derived all-ones + PSHUFB
+            // broadcast of byte-0 of the shifted-mask word.
+            // i8x16.shr_s defers to 9.7-w (byte→word extension via
+            // PUNPCKLBW + PSRAW + PACKSSWB — structurally different).
+            .@"i8x16.shl" => try op_simd.emitI8x16Shl(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i8x16.shr_u" => try op_simd.emitI8x16ShrU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"memory.size" => {
                 // Wasm spec §4.4.7 — return current memory size in
                 // 64-KiB pages. mem_limit (bytes) lives at

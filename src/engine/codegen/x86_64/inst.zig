@@ -353,6 +353,7 @@ pub const encXorps = inst_sse.encXorps;
 pub const encXorpd = inst_sse.encXorpd;
 pub const encAndnps = inst_sse.encAndnps;
 pub const encAndnpd = inst_sse.encAndnpd;
+pub const encPsrlwImm = inst_sse.encPsrlwImm;
 pub const encPsrldImm = inst_sse.encPsrldImm;
 pub const encCmpps = inst_sse.encCmpps;
 pub const encCmppd = inst_sse.encCmppd;

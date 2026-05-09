@@ -410,6 +410,8 @@ pub fn populateShapeTags(allocator: Allocator, func: *const ZirFunc, n_vregs: us
             .@"i64x2.shl",
             .@"i64x2.shr_u",
             .@"i64x2.shr_s",
+            .@"i8x16.shl",
+            .@"i8x16.shr_u",
             .@"i8x16.splat",
             .@"i16x8.splat",
             .@"i32x4.splat",

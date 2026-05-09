@@ -1450,6 +1450,100 @@ pub fn emitI64x2ShrU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regal
 ///
 /// 9-instruction emit; XMM14 holds sign_bit_loc (= mask shifted),
 /// XMM15 holds count. dst gets the canonical signed-shifted result.
+/// Wasm spec §4.4.4 (i8x16.shl) — pop count (i32), pop vec
+/// (v128), push v128 with each byte shifted left by `c & 7`.
+/// SSE has no native byte shift; synthesise via 16-bit-lane
+/// shift + AND-mask broadcast (cranelift's approach uses a
+/// const-pool table; we synthesise the mask inline to avoid
+/// the still-pending ADR-0042 const-pool dependency).
+///
+/// 9-instruction emit:
+///   AND count_r, 7                    ; mask count
+///   PCMPEQB XMM14, XMM14              ; XMM14 = all-0xFF
+///   MOVD XMM15, count_r                ; XMM15 = count
+///   PSLLW XMM14, XMM15                  ; XMM14 = 0xFFFF<<c per word;
+///                                      ;   low byte of each word = 0xFF<<c (= mask byte)
+///   MOVAPS dst, vec                    ; (skip-elide if dst==vec)
+///   PSLLW dst, XMM15                    ; shift vec lanes (16-bit shift; carry pollutes high bytes)
+///   PXOR XMM15, XMM15                   ; reuse XMM15 as zero-control for PSHUFB
+///   PSHUFB XMM14, XMM15                 ; broadcast byte 0 of XMM14 to all 16 bytes (uniform mask)
+///   PAND dst, XMM14                     ; clear cross-byte carry bits
+pub fn emitI8x16Shl(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    spill_base_off: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
+    const count_v = pushed_vregs.pop().?;
+    const vec_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const vec_x = try gpr.resolveXmm(alloc, vec_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const count_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, count_v, 0);
+    const mask_x = abi.fp_spill_stage_xmms[0]; // XMM14
+    const count_x = abi.fp_spill_stage_xmms[1]; // XMM15
+
+    try buf.appendSlice(allocator, inst.encAndRImm8(.d, count_r, 7).slice());
+    try buf.appendSlice(allocator, inst.encPcmpeqB(mask_x, mask_x).slice());
+    try buf.appendSlice(allocator, inst.encMovdXmmFromR32(count_x, count_r).slice());
+    try buf.appendSlice(allocator, inst.encPsllwReg(mask_x, count_x).slice());
+    if (dst_x != vec_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, vec_x).slice());
+    }
+    try buf.appendSlice(allocator, inst.encPsllwReg(dst_x, count_x).slice());
+    try buf.appendSlice(allocator, inst.encPxor(count_x, count_x).slice()); // reuse as zero ctrl
+    try buf.appendSlice(allocator, inst.encPshufb(mask_x, count_x).slice()); // broadcast byte 0
+    try buf.appendSlice(allocator, inst.encPand(dst_x, mask_x).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// Wasm spec §4.4.4 (i8x16.shr_u) — pop count (i32), pop vec,
+/// push v128 with each byte logically shifted right by `c & 7`.
+/// 10-instruction synthesis: PSRLW(0xFFFF, 8) → 0x00FF per word,
+/// PSRLW that by c → 0x00FF >> c whose low byte = 0xFF >> c =
+/// per-byte mask. PSHUFB-broadcast then PAND.
+pub fn emitI8x16ShrU(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    spill_base_off: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
+    const count_v = pushed_vregs.pop().?;
+    const vec_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const vec_x = try gpr.resolveXmm(alloc, vec_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const count_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, count_v, 0);
+    const mask_x = abi.fp_spill_stage_xmms[0]; // XMM14
+    const count_x = abi.fp_spill_stage_xmms[1]; // XMM15
+
+    try buf.appendSlice(allocator, inst.encAndRImm8(.d, count_r, 7).slice());
+    try buf.appendSlice(allocator, inst.encPcmpeqB(mask_x, mask_x).slice());
+    try buf.appendSlice(allocator, inst.encPsrlwImm(mask_x, 8).slice()); // → 0x00FF per word
+    try buf.appendSlice(allocator, inst.encMovdXmmFromR32(count_x, count_r).slice());
+    try buf.appendSlice(allocator, inst.encPsrlwReg(mask_x, count_x).slice()); // → 0x00FF >> c per word
+    if (dst_x != vec_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, vec_x).slice());
+    }
+    try buf.appendSlice(allocator, inst.encPsrlwReg(dst_x, count_x).slice());
+    try buf.appendSlice(allocator, inst.encPxor(count_x, count_x).slice()); // zero ctrl
+    try buf.appendSlice(allocator, inst.encPshufb(mask_x, count_x).slice()); // broadcast byte 0
+    try buf.appendSlice(allocator, inst.encPand(dst_x, mask_x).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
 pub fn emitI64x2ShrS(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
