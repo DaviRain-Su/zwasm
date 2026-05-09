@@ -517,6 +517,16 @@ pub fn encPmuludq(dst: Xmm, src: Xmm) EncodedInsn {
     return encSsePackedIntBinop(0xF4, dst, src);
 }
 
+/// `PMULDQ xmm, xmm` (66 [REX?] 0F 38 28 /r) — SSE4.1 packed
+/// SIGNED 32×32 → 64 multiply. Reads the **low 32 bits** of each
+/// 64-bit lane in source and destination as signed i32; produces
+/// a signed i64 product per 64-bit lane (2 lanes total). Wasm
+/// `i64x2.extmul_{low,high}_i32x4_s` per cranelift `lower.isle`
+/// extmul rule.
+pub fn encPmuldq(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinopExt(0x38, 0x28, dst, src);
+}
+
 /// SSE2 packed shift-by-immediate /X-group helper. The
 /// `66 0F <opcode> /<group> ib` encoding has ModR/M.reg = group
 /// code (selecting the op within the family) and ModR/M.rm = the
@@ -1613,6 +1623,10 @@ test "encPmullD: SSE4.1 i32x4.mul (xmm0, xmm1) — 5 bytes with 0x38 escape" {
 test "encPmullD: SSE4.1 with REX.R+B (xmm8, xmm13) — 6 bytes" {
     // 66 45 0F 38 40 C5 — REX = 0x45 between 0x66 and 0x0F.
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x38, 0x40, 0xC5 }, encPmullD(.xmm8, .xmm13).slice());
+}
+
+test "encPmuldq: SSE4.1 (xmm0, xmm1) opcode 0x38 0x28 — 5 bytes" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x28, 0xC1 }, encPmuldq(.xmm0, .xmm1).slice());
 }
 
 test "encPmuludq: SSE2 (xmm0, xmm1) opcode 0xF4 — 4 bytes" {
