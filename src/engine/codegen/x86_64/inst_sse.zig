@@ -1047,6 +1047,71 @@ pub fn encCmppd(dst: Xmm, src: Xmm, imm8: u8) EncodedInsn {
     return enc;
 }
 
+// §9.7-t shift primitives — SSE2 packed shift with count from
+// xmm src register (low 64 bits). Wasm `iN.shl/shr_s/shr_u(v, c)`
+// where c is an i32; we mask c to lane-width-1 bits then load it
+// into the low 32 of a scratch xmm via MOVD before invoking the
+// shift instruction. Per Intel SDM, PSLL*/PSRL*/PSRA* read the
+// count from the low 64 bits of src; values exceeding lane width
+// produce all-zero (PSLL/PSRL) or sign-extended (PSRA) lanes —
+// this differs from Wasm's spec semantics ("shift by c mod
+// lane_width") only when c >= lane_width, which the explicit
+// AND-mask handles.
+
+/// `PSLLW xmm, xmm` (66 [REX?] 0F F1 /r) — SSE2 packed 16-bit
+/// logical shift-left. Count from low 64 bits of src.
+pub fn encPsllwReg(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xF1, dst, src);
+}
+
+/// `PSLLD xmm, xmm` (66 [REX?] 0F F2 /r) — SSE2 packed 32-bit
+/// logical shift-left.
+pub fn encPslldReg(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xF2, dst, src);
+}
+
+/// `PSLLQ xmm, xmm` (66 [REX?] 0F F3 /r) — SSE2 packed 64-bit
+/// logical shift-left.
+pub fn encPsllqReg(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xF3, dst, src);
+}
+
+/// `PSRLW xmm, xmm` (66 [REX?] 0F D1 /r) — SSE2 packed 16-bit
+/// logical shift-right.
+pub fn encPsrlwReg(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xD1, dst, src);
+}
+
+/// `PSRLD xmm, xmm` (66 [REX?] 0F D2 /r) — SSE2 packed 32-bit
+/// logical shift-right.
+pub fn encPsrldReg(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xD2, dst, src);
+}
+
+/// `PSRLQ xmm, xmm` (66 [REX?] 0F D3 /r) — SSE2 packed 64-bit
+/// logical shift-right.
+pub fn encPsrlqReg(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xD3, dst, src);
+}
+
+/// `PSRAW xmm, xmm` (66 [REX?] 0F E1 /r) — SSE2 packed 16-bit
+/// arithmetic (signed) shift-right. Sign-extends.
+pub fn encPsrawReg(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xE1, dst, src);
+}
+
+/// `PSRAD xmm, xmm` (66 [REX?] 0F E2 /r) — SSE2 packed 32-bit
+/// arithmetic (signed) shift-right. Sign-extends. Note: PSRAQ
+/// (64-bit signed) is NOT in SSE — added in AVX-512. i64x2.shr_s
+/// must synthesise; deferred to §9.7-u.
+pub fn encPsradReg(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xE2, dst, src);
+}
+
+// `encMovdXmmFromR32` is defined earlier in this file (line ~179)
+// for the lane-0 splat path; reused here by §9.7-t shift handlers
+// to load shift count into the low 32 bits of a scratch xmm.
+
 /// `PACKSSWB xmm, xmm` (66 [REX?] 0F 63 /r) — SSE2 pack 8 signed
 /// 16-bit lanes from each operand into 16 saturated 8-bit lanes
 /// (low half from dst, high half from src). Used by
@@ -1297,6 +1362,33 @@ test "encPsrldImm: PSRLD xmm0, 10 — group /2, opcode=0x72 (D-form)" {
 test "encPsrldImm: PSRLD xmm15, 10 — REX.B (xmm15)" {
     // 66 41 0F 72 D7 0A — REX.B = 0x41; ModR/M = 11 010 111 = 0xD7.
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x41, 0x0F, 0x72, 0xD7, 0x0A }, encPsrldImm(.xmm15, 10).slice());
+}
+
+test "encPsllwReg / encPslldReg / encPsllqReg opcode bytes (xmm0, xmm1)" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xF1, 0xC1 }, encPsllwReg(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xF2, 0xC1 }, encPslldReg(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xF3, 0xC1 }, encPsllqReg(.xmm0, .xmm1).slice());
+}
+
+test "encPsrlwReg / encPsrldReg / encPsrlqReg opcode bytes (xmm0, xmm1)" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xD1, 0xC1 }, encPsrlwReg(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xD2, 0xC1 }, encPsrldReg(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xD3, 0xC1 }, encPsrlqReg(.xmm0, .xmm1).slice());
+}
+
+test "encPsrawReg / encPsradReg opcode bytes (xmm0, xmm1)" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xE1, 0xC1 }, encPsrawReg(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xE2, 0xC1 }, encPsradReg(.xmm0, .xmm1).slice());
+}
+
+test "encMovdXmmFromR32: xmm0, eax — 66 0F 6E ModRM" {
+    // 66 0F 6E C0 — ModR/M = 11 000 000 (reg=0=xmm0, rm=0=eax).
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x6E, 0xC0 }, encMovdXmmFromR32(.xmm0, .rax).slice());
+}
+
+test "encMovdXmmFromR32: xmm14, r10 — REX.R + REX.B" {
+    // 66 45 0F 6E F2 — REX = 0x45; ModR/M = 11 110 010 (reg=6=xmm14.lo3, rm=2=r10.lo3).
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x6E, 0xF2 }, encMovdXmmFromR32(.xmm14, .r10).slice());
 }
 
 test "encPacksswb opcode bytes (xmm0, xmm1)" {

@@ -1350,6 +1350,86 @@ pub fn emitI64x2Bitmask(
     try pushed_vregs.append(allocator, result_v);
 }
 
+/// Wasm spec §4.4.4 (i*x*.{shl, shr_s, shr_u}) for shapes that
+/// have direct SSE2 packed-shift instructions — i16x8 / i32x4 /
+/// i64x2 (with PSRAQ / i8x16 deferred to §9.7-u for synthesis).
+/// Stack: pop count (i32), pop vec (v128), push v128.
+///
+/// SSE shift count semantics differ from Wasm: Intel SDM "If the
+/// count value is greater than the operand size, destination is
+/// set to all-zeros (PSLL/PSRL) or sign-extended (PSRA)". Wasm
+/// requires `c mod lane_width` semantics. The explicit
+/// `AND count_r, lane_width-1` aligns the two — when c <
+/// lane_width, both behave identically.
+///
+/// 5-instruction emit:
+///   AND count_r, mask_imm           ; mask to lane bits
+///   MOVD scratch_xmm, count_r       ; count → low 32 of scratch
+///   MOVAPS dst, vec                 ; (skip if dst==vec)
+///   <shift> dst, scratch_xmm        ; shift dst in-place
+fn emitV128IntShift(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    spill_base_off: u32,
+    encoder_shift: *const fn (dst: inst.Xmm, src: inst.Xmm) inst.EncodedInsn,
+    mask_imm: i8,
+) Error!void {
+    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
+    const count_v = pushed_vregs.pop().?;
+    const vec_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const vec_x = try gpr.resolveXmm(alloc, vec_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const count_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, count_v, 0);
+    const scratch_x = abi.fp_spill_stage_xmms[0]; // XMM14
+
+    try buf.appendSlice(allocator, inst.encAndRImm8(.d, count_r, mask_imm).slice());
+    try buf.appendSlice(allocator, inst.encMovdXmmFromR32(scratch_x, count_r).slice());
+    if (dst_x != vec_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, vec_x).slice());
+    }
+    try buf.appendSlice(allocator, encoder_shift(dst_x, scratch_x).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
+pub fn emitI16x8Shl(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntShift(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsllwReg, 15);
+}
+
+pub fn emitI16x8ShrS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntShift(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsrawReg, 15);
+}
+
+pub fn emitI16x8ShrU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntShift(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsrlwReg, 15);
+}
+
+pub fn emitI32x4Shl(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntShift(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPslldReg, 31);
+}
+
+pub fn emitI32x4ShrS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntShift(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsradReg, 31);
+}
+
+pub fn emitI32x4ShrU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntShift(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsrldReg, 31);
+}
+
+pub fn emitI64x2Shl(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntShift(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsllqReg, 63);
+}
+
+pub fn emitI64x2ShrU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntShift(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsrlqReg, 63);
+}
+
 /// Wasm spec §4.4.4 (i*x*.eq variants) — pop two v128, push v128
 /// where each lane is all-ones if the inputs match else all-zero.
 /// Per-shape encoders (PCMPEQB / PCMPEQW / PCMPEQD / PCMPEQQ)

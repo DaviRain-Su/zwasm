@@ -953,6 +953,19 @@ pub fn compile(
             .@"i16x8.bitmask" => try op_simd.emitI16x8Bitmask(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"i32x4.bitmask" => try op_simd.emitI32x4Bitmask(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"i64x2.bitmask" => try op_simd.emitI64x2Bitmask(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            // §9.7 / 9.7-t: i*x* packed shifts shl/shr_s/shr_u for
+            // i16x8 + i32x4 + i64x2 (8 ops; i8x16 + i64x2.shr_s
+            // synthesis defer to 9.7-u). 5-instr emit per shift:
+            // AND mask (lane_width - 1), MOVD count→xmm, MOVAPS
+            // dst,vec (skip-elide), <shift> dst,scratch.
+            .@"i16x8.shl" => try op_simd.emitI16x8Shl(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i16x8.shr_s" => try op_simd.emitI16x8ShrS(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i16x8.shr_u" => try op_simd.emitI16x8ShrU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i32x4.shl" => try op_simd.emitI32x4Shl(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i32x4.shr_s" => try op_simd.emitI32x4ShrS(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i32x4.shr_u" => try op_simd.emitI32x4ShrU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i64x2.shl" => try op_simd.emitI64x2Shl(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i64x2.shr_u" => try op_simd.emitI64x2ShrU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"memory.size" => {
                 // Wasm spec §4.4.7 — return current memory size in
                 // 64-KiB pages. mem_limit (bytes) lives at
