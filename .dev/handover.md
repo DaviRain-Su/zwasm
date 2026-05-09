@@ -16,30 +16,29 @@
 6. `private/notes/p9-9.7-m-survey.md` (gitignored; cranelift recipe +
    adoption data) — only if revisiting the SSE4.2 baseline call.
 
-## Current state — Phase 9 / §9.7 in-flight (9.7-a..ad landed); **9.7-ae NEXT**
+## Current state — Phase 9 / §9.7 in-flight (9.7-a..ae landed); **9.7-af NEXT**
 
-9.7-ad: x86_64 FP unop family (12 ops). abs/neg via inline
-sign-mask synthesis (PCMPEQB ones + PSLL{D,Q}-imm 31/63);
-ceil/floor/trunc/nearest via SSE4.1 ROUND{PS,PD} imm with
-precision-exception suppression. 3 new encoders. Total SIMD
-ops handled: 160.
+9.7-ae: x86_64 inline-synth FP convert + trunc-sat (2 of 6
+candidate ops). f32x4.convert_i32x4_u (11-instr split-and-
+recombine) + i32x4.trunc_sat_f32x4_s (9-instr NaN-mask +
+XOR-fix). 4 new encoders (Cvttps2dq, PsradImm, Andps,
+Andpd). 4 const-pool-dependent variants deferred to 9.7-ag.
+Total SIMD ops handled: 162.
 
-**9.7-ae NEXT** — FP convert u-variants + trunc-sat (~6 ops):
-f32x4.convert_i32x4_u, f64x2.convert_low_i32x4_u, plus 4
-trunc-sat ops (i32x4.trunc_sat_f32x4_{s,u}, i32x4.trunc_sat_
-f64x2_{s,u}_zero). Cranelift recipes (`lower.isle:3761+`)
-use const-pool float magic numbers (e.g. 2^31 for the u-
-variants, +0.0 / 2^31 for trunc-sat NaN/clamp masks).
-Pending: ADR-0042 const-pool plumbing decision — either
-land 9.7-ae as inline-synth (likely 12-15 instr per op via
-PCMPEQB+PSLL/SUB chains) or land ADR-0042 first then 9.7-ae
-in const-pool form (~5 instr per op). Inline-synth is the
-faster path; defer const-pool-final to 9.7-ag.
+**9.7-af NEXT** — i*x*.popcnt + i16x8.q15mulr_sat_s +
+i32x4.dot_i16x8_s + i*x*.extadd_pairwise_* (~6 ops). Most
+are inline-synthesisable: popcnt via Mula nibble-LUT or
+PSHUFB-table or shift-and-add (no const-pool with
+shift-and-add; const-pool with PSHUFB); q15mulr_sat via
+PMULHRSW (SSE4.1, 1 instr); dot_i16x8_s via PMADDWD (SSE2,
+1 instr); extadd_pairwise via PMADDUBSW (SSSE3) +
+PMADDWD. Bundle most into one chunk; popcnt may split if
+const-pool dep tipping.
 
-Subsequent: 9.7-af (i8x16.shuffle const-pool dep — defer
-until 9.7-ag), 9.7-ag (v128.const + ADR-0042 const-pool
-finalisation), 9.7-ah+ (i*x*.popcnt + i16x8.q15 + misc
-remaining ops).
+Subsequent: 9.7-ag (ADR-0042 const-pool plumbing + 4
+deferred 9.7-ae u-variants + i8x16.shuffle + v128.const),
+9.7-ah+ (any remaining misc ops; phase 7 close-out at
+9.7-ax pending).
 
 ## Open structural debt (pointers — full list in `.dev/debt.md`)
 
@@ -59,5 +58,5 @@ reference) live in git: ADRs 0035-0040, lessons indexed in
 
 **Phase**: Phase 9 (SIMD-128, ADR-0041 — SSE4.2 baseline post-9.7-m).
 §9.5 [x] (ARM64 NEON pt 1), §9.6 [x] (ARM64 NEON pt 2),
-§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..ad landed; 9.7-ae NEXT).
+§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..ae landed; 9.7-af NEXT).
 **Branch**: `zwasm-from-scratch`。
