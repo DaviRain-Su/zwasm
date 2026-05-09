@@ -13,35 +13,36 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 9 / §9.7 in-flight (9.7-a + 9.7-b [x]); **9.7-c NEXT**
+## Current state — Phase 9 / §9.7 in-flight (9.7-a + 9.7-b + 9.7-c [x]); **9.7-d NEXT**
 
-9.7-b landed at 1e798581: bundled packed integer add/sub family
-(8 ops). Refactored 9.7-a's `emitI32x4Add` body into shared
-`emitV128IntBinop(encoder)` helper; 7 new encoders (encPaddB/W/Q
-+ encPsubB/W/D/Q) + 7 new handler wrappers + 7 new dispatch
-arms. ARM64 mirror per ROADMAP P7. v128 spill remains
-UnsupportedOp pending 9.7-c MOVDQU helpers.
+9.7-c landed at 0fe5413d: native packed integer multiply (2 ops).
+Extended `encSsePackedIntBinopExt(escape2, opcode, ...)` to cover
+the SSE4.1 secondary-escape form (66 0F 38 ..); added `encPmullW`
+(SSE2 i16x8.mul) + `encPmullD` (SSE4.1 i32x4.mul, **first
+SSE4.1-exclusive op** zwasm v2 emits per ADR-0041). Handlers
+reuse 9.7-b's `emitV128IntBinop` helper without ABI changes.
+Total SIMD ops handled: 10.
 
-Three-host gate at 1e798581: Mac unit 1344/0/12 + zone/file_size/
-spill/lint ✓; OrbStack at known D-054 baseline (211/1/20
-spec_assert + every other runner green); windowsmini full green
-(212/0/20 spec_assert + every other runner green).
+Three-host gate at 0fe5413d: Mac unit 1349/0/12 + zone/file_size/
+spill/lint ✓; OrbStack at known D-054 baseline (211/1/20); v128
+spill remains UnsupportedOp pending 16-byte MOVDQU helpers
+(post-9.7-d task).
 
-**9.7-c NEXT** — SIMD integer multiply family. i16x8.mul (PMULLW
-SSE2) + i32x4.mul (PMULLD SSE4.1, the first SSE4.1-exclusive op
-in this phase) bundle naturally. i64x2.mul has no native form
-(neither SSE2 nor SSE4.1 has packed 64×64→64); synthesis via
-3-mul + 2-shift + 2-add per cranelift idiom — ADR-grade design,
-likely separate sub-chunk. Step 0 survey will scope.
+**9.7-d NEXT** — i64x2.mul synthesis. No native SSE4.1 form
+(VPMULLQ is AVX-512-gated, beyond ADR-0041 baseline). Cranelift
+idiom uses PMULUDQ (32×32→64) lane-decomposition with PSHUFD lane
+swaps, PSLLQ shifts, and PADDQ accumulate (~8-12 instructions).
+Per p9-9.7-c-survey.md: ~150 LOC, may need 1-2 SIMD scratches
+from spill-stage XMM14/XMM15 (or a dedicated SIMD scratch —
+ADR-grade if it changes allocatable_xmms). Step 0 survey for
+9.7-d should pin down the exact instruction sequence + scratch
+reservation strategy + whether it warrants a new ADR.
 
-Alternative ordering: lane access (splat / extract_lane /
-replace_lane via PSHUFD + PINSRB/W/D + PEXTRB/W/D) could land
-first if needed by an end-to-end integration fixture. Decided
-during 9.7-c's Plan step.
-
-Subsequent chunks: 9.7-d (compare family), 9.7-e (FP arith),
-9.7-f (FP compare), 9.7-g (conversion + shuffle). Sub-row plan
-refines as each chunk's Step 0 survey lands.
+Subsequent chunks: 9.7-e (lane access — splat / extract_lane /
+replace_lane via PSHUFD + PINSRB/W/D + PEXTRB/W/D), 9.7-f
+(compare family), 9.7-g (FP arith), 9.7-h (FP compare), 9.7-i
+(conversion + shuffle). Sub-row plan refines as each chunk's
+Step 0 survey lands.
 
 ## Open structural debt (pointers — full list in `.dev/debt.md`)
 
