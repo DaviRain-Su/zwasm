@@ -13,23 +13,21 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 9 / §9.6/9.6-g-iii [x] (i→f convert × 4); §9.6/9.6-f-ii deferred via D-056; **§9.6/9.6-g-iv NEXT**
+## Current state — Phase 9 / §9.6/9.6-g-iv [x] (FP promote/demote × 2); §9.6/9.6-f-ii deferred via D-056; **§9.6/9.6-g-v NEXT**
 
-§9.6/9.6-g-iii adds 4 NEON SCVTF/UCVTF .4S/.2D encoders + 4
-op_simd handlers + new `emitV128ConvertLowI32ToF64` helper for
-the f64x2.convert_low_* synthesis (SXTL/UXTL .2D + SCVTF/UCVTF .2D
-in place). Cranelift cross-checks for both .4S and .2D forms
-verified. FPCR RMode=00 default matches Wasm spec round-to-nearest-
-even.
+§9.6/9.6-g-iv adds encFCvtl_2D_2S + encFCvtn_2S_2D encoders + 2
+thin handlers via emitV128Unop. Cranelift cross-checks verified
+both encodings (FCVTN .2S-.2D base 0x0E616800; FCVTL .2D-.2S base
+0x0E617800). Q=0 form for FCVTN naturally zeros upper 64 bits,
+matching Wasm `_zero` semantic.
 
 Per LOOP.md chunk granularity, §9.6 sub-row state:
-- 9.6-a/b/c-i/c-ii/d/e/f-i/g-i/g-ii/g-iii [x]: FP arith / compares /
-  int compares / swizzle / extend / narrow / i→f convert.
+- 9.6-a/b/c-i/c-ii/d/e/f-i/g-i/g-ii/g-iii/g-iv [x]: FP arith /
+  compares / int compares / swizzle / extend / narrow / i→f /
+  promote / demote.
 - 9.6-f-ii deferred (D-056): shuffle + v128.const need const-pool
   ADR; trigger = §9.6 close v1-audit findings.
-- 9.6-g-iv NEXT: promote/demote (FCVTL/FCVTN — width-changing FP).
-- 9.6-g-v: trunc_sat with NaN→0 + clamp (most complex; FCVTZS/U
-  + special-value handling).
+- 9.6-g-v NEXT: trunc_sat (most complex — NaN→0 + clamp).
 
 Mac gates: zone ✓, file_size ✓, spill ✓, lint ✓; spec
 212/0/20, wast 1158/0/0.
@@ -59,19 +57,29 @@ before flipping §9.6 to `[x]`:
   plumbing, ABI quirks) — better to back-fill before x86_64 SIMD
   (§9.7) where the same gaps would compound.
 
-**§9.6/9.6-g-iv NEXT** — FP promote/demote (2 ops):
-- f32x4.demote_f64x2_zero → 2 f64 lanes → 4 f32 lanes (lower 2
-  populated, upper 2 zero). NEON `FCVTN V<rd>.2S, V<rn>.2D` writes
-  lower 64 bits, zeros upper. Single instruction.
-- f64x2.promote_low_f32x4 → lower 2 f32 lanes → 2 f64 lanes.
-  NEON `FCVTL V<rd>.2D, V<rn>.2S` (width-doubling FP convert).
+**§9.6/9.6-g-v NEXT** — trunc_sat (4 ops, most complex):
+- i32x4.trunc_sat_f32x4_s/u: 4 f32 → 4 i32, NaN→0, saturating
+  clamp. NEON FCVTZS/FCVTZU .4S → mostly correct semantics but
+  NaN handling differs (NEON returns INT_MIN/0 for NaN; Wasm
+  spec requires 0 — needs explicit NaN→0 mask).
+- i32x4.trunc_sat_f64x2_s_zero/u_zero: 2 f64 → 2 i32 (lower 2
+  populated, upper 2 zero). Synthesis: FCVTZS/U .2D + SQXTN .2S
+  (or similar narrow with saturation).
 
-NEON encoders: FCVTN/FCVTL (advanced SIMD two-reg misc, FP).
-Per Arm IHI 0055 §C7.2.118 (FCVTN) / §C7.2.116 (FCVTL).
+The NaN→0 handling is the load-bearing design choice. NEON
+FCVTZS returns INT_MIN for NaN (per default FPCR), but Wasm
+spec mandates 0. Common approach: pre-compare with FCMEQ
+(self-comparison detects NaN) + BSL to zero NaN lanes.
+Cranelift uses this pattern; survey will confirm.
 
-Step 0 should verify encoding bases + confirm FCVTN's upper-half
-zeroing (since Wasm `demote_f64x2_zero` requires upper 2 lanes
-to be 0). Estimated ~50 src + ~30 tests.
+Step 0 mandatory — multiple ADR-grade considerations: (1) NaN
+masking pattern; (2) trunc_sat_f64x2 → i32x4_zero synthesis;
+(3) saturation behaviour for ±Inf and out-of-range values
+(does NEON's default sat match Wasm's clamp-to-INT_MIN/MAX?
+Yes per IEEE-754 default behaviour, but verify).
+
+Estimated ~150 src + ~80 tests; possibly the largest single
+sub-chunk in §9.6-g.
 
 Estimated ~150 src + ~80 tests; may need a `private/spikes/`
 spike to verify the const-pool / scratch-reg approach before
