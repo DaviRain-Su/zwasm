@@ -1166,9 +1166,17 @@ pub fn compile(
             .@"v128.load" => try op_simd.emitV128Load(&ctx, &ins),
             .@"v128.store" => try op_simd.emitV128Store(&ctx, &ins),
             .@"i32x4.splat" => try op_simd.emitI32x4Splat(&ctx, &ins),
-            .@"i32x4.add" => try op_simd.emitI32x4Add(&ctx, &ins),
             .@"i32x4.extract_lane" => try op_simd.emitI32x4ExtractLane(&ctx, &ins),
             .@"i32x4.replace_lane" => try op_simd.emitI32x4ReplaceLane(&ctx, &ins),
+            // §9.9/9.5-c-iv — int-arith ADD/SUB across all 4 shapes.
+            .@"i8x16.add" => try op_simd.emitI8x16Add(&ctx, &ins),
+            .@"i8x16.sub" => try op_simd.emitI8x16Sub(&ctx, &ins),
+            .@"i16x8.add" => try op_simd.emitI16x8Add(&ctx, &ins),
+            .@"i16x8.sub" => try op_simd.emitI16x8Sub(&ctx, &ins),
+            .@"i32x4.add" => try op_simd.emitI32x4Add(&ctx, &ins),
+            .@"i32x4.sub" => try op_simd.emitI32x4Sub(&ctx, &ins),
+            .@"i64x2.add" => try op_simd.emitI64x2Add(&ctx, &ins),
+            .@"i64x2.sub" => try op_simd.emitI64x2Sub(&ctx, &ins),
 
             else => {
                 // §9.7 / 7.5-diag-op: surface the unhandled op

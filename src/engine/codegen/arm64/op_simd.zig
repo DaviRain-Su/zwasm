@@ -124,12 +124,14 @@ pub fn emitI32x4Splat(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 /// `i32x4.add`: pop two v128 (Vn.4S, Vm.4S), push v128 sum
 /// (Vd.4S). `ADD V<vd>.4S, V<vn>.4S, V<vm>.4S` does element-wise
 /// 32-bit add across the four lanes.
-pub fn emitI32x4Add(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    // §9.5-c-ii spill-aware binop pattern (mirrors gpr/fp helpers):
-    // - lhs at stage_idx=0 (V29 if spilled, else its V-reg home),
-    // - rhs at stage_idx=1 (V30 if spilled),
-    // - result at stage_idx=0 (V29 — same as lhs which is consumed
-    //   by the binop, or its own V-reg home when not spilled).
+/// Shared v128 binop emit helper (§9.5-c-iv): pop 2 v128, emit
+/// `encoder(rd, rn, rm)`, push 1 v128. Spill-aware via the q*
+/// trio at stage_idx 0/1 (same convention as gpr/fp binops —
+/// lhs at 0, rhs at 1; result reuses 0 since lhs is consumed).
+fn emitV128Binop(
+    ctx: *EmitCtx,
+    encoder: *const fn (rd: u5, rn: u5, rm: u5) u32,
+) Error!void {
     const rhs_vreg = ctx.pushed_vregs.pop().?;
     const rhs_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, rhs_vreg, 1);
 
@@ -141,9 +143,34 @@ pub fn emitI32x4Add(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
     const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
 
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encAdd4S(result_v, lhs_v, rhs_v));
+    try gpr.writeU32(ctx.allocator, ctx.buf, encoder(result_v, lhs_v, rhs_v));
     try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
     try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
+pub fn emitI8x16Add(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128Binop(ctx, inst_neon.encAdd16B);
+}
+pub fn emitI8x16Sub(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128Binop(ctx, inst_neon.encSub16B);
+}
+pub fn emitI16x8Add(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128Binop(ctx, inst_neon.encAdd8H);
+}
+pub fn emitI16x8Sub(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128Binop(ctx, inst_neon.encSub8H);
+}
+pub fn emitI32x4Add(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128Binop(ctx, inst_neon.encAdd4S);
+}
+pub fn emitI32x4Sub(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128Binop(ctx, inst_neon.encSub4S);
+}
+pub fn emitI64x2Add(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128Binop(ctx, inst_neon.encAdd2D);
+}
+pub fn emitI64x2Sub(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128Binop(ctx, inst_neon.encSub2D);
 }
 
 /// `i32x4.extract_lane`: pop v128 (Vn.4S), push i32 result (Wd).

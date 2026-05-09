@@ -126,16 +126,60 @@ pub fn encDup4S(rd: Vn, rn: Xn) u32 {
 // Integer arithmetic (i32x4)
 // =====================================================================
 
-/// `ADD V<d>.4S, V<n>.4S, V<m>.4S` — element-wise i32x4 add.
+/// `ADD V<d>.<T>, V<n>.<T>, V<m>.<T>` — element-wise integer
+/// add across a SIMD-128 register. The size field at bits
+/// [23:22] selects the lane shape:
+///   00 → 16B (i8x16)
+///   01 → 8H  (i16x8)
+///   10 → 4S  (i32x4)
+///   11 → 2D  (i64x2)
 ///
-/// Encoding (SIMD ADD vector, size=10, Q=1):
+/// Encoding (SIMD ADD vector, U=0, Q=1):
 ///   `0 1 0 01110 [size:2] 1 [Rm:5] 100001 [Rn:5] [Rd:5]`
-///   size = 10 (32-bit lanes / 4S) → bits[23:22] = 10
-///   = `0x4EA08400` | (Rm << 16) | (Rn << 5) | Rd
+///   = `0x4E208400 | (size << 22) | (Rm << 16) | (Rn << 5) | Rd`
 ///
-/// Per Arm IHI 0055 §C7.2.5.
+/// Per Arm IHI 0055 §C7.2.5. SUB shares the same encoding shape
+/// with U=1 (bit[29] set; base += 0x20000000).
+
+/// `ADD V<d>.16B, V<n>.16B, V<m>.16B` — i8x16 lanewise add.
+pub fn encAdd16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E208400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `ADD V<d>.8H, V<n>.8H, V<m>.8H` — i16x8 lanewise add.
+pub fn encAdd8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E608400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `ADD V<d>.4S, V<n>.4S, V<m>.4S` — i32x4 lanewise add.
 pub fn encAdd4S(rd: Vn, rn: Vn, rm: Vn) u32 {
     return 0x4EA08400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `ADD V<d>.2D, V<n>.2D, V<m>.2D` — i64x2 lanewise add.
+pub fn encAdd2D(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4EE08400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `SUB V<d>.16B, V<n>.16B, V<m>.16B` — i8x16 lanewise sub.
+/// SUB encoding mirrors ADD with U=1 (bit[29]). Per §C7.2.339.
+pub fn encSub16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E208400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `SUB V<d>.8H, V<n>.8H, V<m>.8H` — i16x8 lanewise sub.
+pub fn encSub8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E608400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `SUB V<d>.4S, V<n>.4S, V<m>.4S` — i32x4 lanewise sub.
+pub fn encSub4S(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6EA08400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `SUB V<d>.2D, V<n>.2D, V<m>.2D` — i64x2 lanewise sub.
+pub fn encSub2D(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6EE08400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
 }
 
 // =====================================================================
@@ -291,4 +335,59 @@ test "encInsSFromW: lane 2 (V0.S[2] ← W1)" {
 test "encInsSFromW: max regs + max lane (V31.S[3] ← W31)" {
     // 0x4E1C1C00 | (31 << 5) | 31 = 0x4E1C1FFF
     try testing.expectEqual(@as(u32, 0x4E1C1FFF), encInsSFromW(31, 31, 3));
+}
+
+// ============================================================
+// §9.9 / 9.5-c-iv — ADD/SUB across i8x16/i16x8/i64x2 (i32x4
+// already in foundation tests). Tests verify size-field bit
+// patterns + cross-shape distinctness sanity.
+// ============================================================
+
+test "encAdd16B: V0, V1, V2 (i8x16, size=00)" {
+    // 0x4E208400 | (2 << 16) | (1 << 5) | 0 = 0x4E228420
+    try testing.expectEqual(@as(u32, 0x4E228420), encAdd16B(0, 1, 2));
+}
+
+test "encAdd8H: V0, V1, V2 (i16x8, size=01)" {
+    // 0x4E608400 | (2 << 16) | (1 << 5) | 0 = 0x4E628420
+    try testing.expectEqual(@as(u32, 0x4E628420), encAdd8H(0, 1, 2));
+}
+
+test "encAdd2D: V0, V1, V2 (i64x2, size=11)" {
+    // 0x4EE08400 | (2 << 16) | (1 << 5) | 0 = 0x4EE28420
+    try testing.expectEqual(@as(u32, 0x4EE28420), encAdd2D(0, 1, 2));
+}
+
+test "encSub16B: V0, V1, V2 (i8x16, size=00, U=1)" {
+    // 0x6E208400 | (2 << 16) | (1 << 5) | 0 = 0x6E228420
+    try testing.expectEqual(@as(u32, 0x6E228420), encSub16B(0, 1, 2));
+}
+
+test "encSub8H: V0, V1, V2 (i16x8, size=01, U=1)" {
+    // 0x6E608400 | ... = 0x6E628420
+    try testing.expectEqual(@as(u32, 0x6E628420), encSub8H(0, 1, 2));
+}
+
+test "encSub4S: V0, V1, V2 (i32x4, size=10, U=1)" {
+    // 0x6EA08400 | ... = 0x6EA28420
+    try testing.expectEqual(@as(u32, 0x6EA28420), encSub4S(0, 1, 2));
+}
+
+test "encSub2D: V0, V1, V2 (i64x2, size=11, U=1)" {
+    // 0x6EE08400 | ... = 0x6EE28420
+    try testing.expectEqual(@as(u32, 0x6EE28420), encSub2D(0, 1, 2));
+}
+
+test "encSub vs encAdd: U bit set distinguishes; same shape size field" {
+    // ADD/SUB at same shape (4S) differ only in bit[29] (U bit).
+    const add_word = encAdd4S(0, 1, 2);
+    const sub_word = encSub4S(0, 1, 2);
+    try testing.expectEqual(@as(u32, 0x20000000), sub_word ^ add_word);
+}
+
+test "encAdd shapes pairwise distinct (size field separates)" {
+    // 16B vs 8H vs 4S vs 2D — same operands, different bits[23:22].
+    try testing.expect(encAdd16B(0, 1, 2) != encAdd8H(0, 1, 2));
+    try testing.expect(encAdd8H(0, 1, 2) != encAdd4S(0, 1, 2));
+    try testing.expect(encAdd4S(0, 1, 2) != encAdd2D(0, 1, 2));
 }

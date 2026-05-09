@@ -13,36 +13,40 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 9 / §9.9/9.5-c-iii [x] (lane access); **§9.9/9.5-c-iv NEXT**
+## Current state — Phase 9 / §9.9/9.5-c-iv [x] (i8x16/i16x8/i64x2 add+sub); **§9.9/9.5-c-v NEXT**
 
-§9.9/9.5-c-iii lands i32x4.extract_lane + i32x4.replace_lane:
-- inst_neon.zig: `encUmovWFromS(rd, rn, lane)` (UMOV W ←
-  V.S[lane], lane ∈ 0..3) + `encInsSFromW(rd, rn, lane)`
-  (INS V.S[lane] ← W). Each with Arm IHI 0055 §C7 citation.
-- op_simd.zig: `emitI32x4ExtractLane` (pop v128 → push i32 via
-  UMOV) + `emitI32x4ReplaceLane` (pop i32 + v128 → push v128
-  via MOV-then-INS, with same-V-reg MOV elision when src ==
-  result_v).
-- emit.zig: 2 dispatch arms.
+§9.9/9.5-c-iv bundles 7 new ADD/SUB encoders (i8x16, i16x8,
+i64x2 add+sub + i32x4.sub) sharing the SIMD ADD/SUB
+encoding family — size field at bits[23:22] selects lane
+shape (00/01/10/11 for 16B/8H/4S/2D); U bit at bit[29]
+toggles ADD↔SUB. Refactored op_simd.zig with shared
+`emitV128Binop` helper taking an encoder fn — 8 thin
+handlers (i*x*.add + i*x*.sub for 4 shapes) reduce to
+~3 LOC each. emit.zig dispatch extended with 7 new arms
+(i32x4.add already wired).
 
 Per LOOP.md chunk granularity, 9.5 row split:
-- 9.5-a/b/c-i/c-ii/c-iii [x]: encoder foundation + shape-tag
-  pipeline + per-op handlers + Q-form spill helpers + op_simd
-  spill-aware refactor + lane access ops.
-- 9.5-c-iv NEXT: remaining int-arith op shapes (i8x16/i16x8/
-  i64x2 add/sub/mul NEON encoders + handlers).
+- 9.5-a/b/c-i…c-iv [x]: encoder foundation + shape-tag
+  pipeline + Q-form spill + op_simd refactor + lane access +
+  ADD/SUB across 4 shapes.
+- 9.5-c-v NEXT: mul shapes (i8x16/i16x8/i32x4 via NEON MUL
+  Vd.<T>; i64x2.mul via synthesis since no NEON 2D-MUL exists)
+  + remaining lane-access shapes (i8x16 / i16x8 / i64x2 /
+  f32x4 / f64x2 extract/replace_lane).
 
 Mac gates: zone ✓, file_size ✓, spill ✓, lint ✓, test
-1211/0/12 (was 1205; +6 lane encoder tests).
+1220/0/12 (was 1211; +9 ADD/SUB encoder tests).
 
-**§9.9/9.5-c-iv NEXT** — i8x16/i16x8/i64x2 add/sub/mul
-encoders (ADD/SUB/MUL Vd.<shape>, Vn.<shape>, Vm.<shape>;
-the size field selects the lane shape) + handlers in
-op_simd.zig + dispatch arms in arm64/emit.zig. Mostly
-mechanical bundling per chunk granularity (same encoder
-family, same handler shape, only `op` field differs).
+**§9.9/9.5-c-v NEXT** — i8x16/i16x8/i32x4 mul via NEON MUL
+encoder family (size field discriminator; bits[15:11] = 10011
+distinguishes from ADD/SUB) + i64x2.mul synthesis (multi-instr
+sequence: extract lanes → 2× scalar mul → insert lanes; or
+SMULL2/UMLAL pattern for higher throughput — design choice
+for the chunk). Plus extract/replace_lane handlers for the
+remaining 5 shapes (i8x16/i16x8/i64x2/f32x4/f64x2) — each
+needs UMOV/SMOV/INS variants per element width.
 
-## Active task — §9.9/9.5-c-iv: i8x16/i16x8/i64x2 add/sub/mul **NEXT**
+## Active task — §9.9/9.5-c-v: mul shapes + remaining lane access **NEXT**
 
 Per ADR-0041 + 9.5-a's encoder foundation. Wires the NEON
 encoders into the ZirOp dispatch path in
