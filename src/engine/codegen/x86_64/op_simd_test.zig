@@ -311,6 +311,121 @@ test "emitI64x2LeS: gt + NOT (PCMPGTQ + PCMPEQB ones + PXOR)" {
     try testing.expectEqualSlices(u8, expected.items, buf.items);
 }
 
+test "emitI8x16GtU: PMAXUB + PCMPEQB rhs + PXOR all-ones (gt path)" {
+    var slot_ids = [_]u16{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 3,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    try pushed.append(testing.allocator, 1);
+    var next_vreg: u32 = 2;
+
+    try op_simd.emitI8x16GtU(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    const ones = abi.fp_spill_stage_xmms[0];
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm10, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encPmaxub(.xmm10, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encPcmpeqB(.xmm10, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encPcmpeqB(ones, ones).slice());
+    try expected.appendSlice(testing.allocator, inst.encPxor(.xmm10, ones).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
+test "emitI16x8LtU: PMINUW + PCMPEQW rhs + PXOR all-ones (lt path)" {
+    var slot_ids = [_]u16{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 3,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    try pushed.append(testing.allocator, 1);
+    var next_vreg: u32 = 2;
+
+    try op_simd.emitI16x8LtU(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    const ones = abi.fp_spill_stage_xmms[0];
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm10, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encPminuw(.xmm10, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encPcmpeqW(.xmm10, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encPcmpeqB(ones, ones).slice());
+    try expected.appendSlice(testing.allocator, inst.encPxor(.xmm10, ones).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
+test "emitI32x4LeU: PMINUD + PCMPEQD lhs (le path, no NOT)" {
+    var slot_ids = [_]u16{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 3,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    try pushed.append(testing.allocator, 1);
+    var next_vreg: u32 = 2;
+
+    try op_simd.emitI32x4LeU(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    // dst = lhs ; dst = PMINUD(dst, rhs) ; dst = PCMPEQD(dst, lhs)
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm10, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encPminud(.xmm10, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encPcmpeqD(.xmm10, .xmm8).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
+test "emitI32x4GeU: PMAXUD + PCMPEQD lhs (ge path, no NOT)" {
+    var slot_ids = [_]u16{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 3,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    try pushed.append(testing.allocator, 1);
+    var next_vreg: u32 = 2;
+
+    try op_simd.emitI32x4GeU(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm10, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encPmaxud(.xmm10, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encPcmpeqD(.xmm10, .xmm8).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
 test "emitI64x2GeS: lt + NOT (operand swap then NOT)" {
     var slot_ids = [_]u16{ 0, 1, 2 };
     const alloc: regalloc.Allocation = .{

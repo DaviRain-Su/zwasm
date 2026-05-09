@@ -842,6 +842,49 @@ pub fn encPcmpgtQ(dst: Xmm, src: Xmm) EncodedInsn {
     return encSsePackedIntBinopExt(0x38, 0x37, dst, src);
 }
 
+// §9.7-n unsigned compare primitives — PMAXU* / PMINU*. Each
+// computes the per-lane unsigned max/min of dst and src, writing
+// the result back to dst. Used by `emitV128IntCmpUnsigned`
+// (cranelift idiom: lower.isle:2016-2080) — `eq(max, b)` then
+// NOT gives `a > b` unsigned; `eq(a, max)` gives `a >= b`
+// unsigned (and dual for min/lt/le).
+
+/// `PMAXUB xmm, xmm` (66 [REX?] 0F DE /r) — SSE2 packed unsigned
+/// 8-bit max (16 lanes).
+pub fn encPmaxub(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xDE, dst, src);
+}
+
+/// `PMINUB xmm, xmm` (66 [REX?] 0F DA /r) — SSE2 packed unsigned
+/// 8-bit min (16 lanes).
+pub fn encPminub(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xDA, dst, src);
+}
+
+/// `PMAXUW xmm, xmm` (66 [REX?] 0F 38 3E /r) — SSE4.1 packed
+/// unsigned 16-bit max (8 lanes).
+pub fn encPmaxuw(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinopExt(0x38, 0x3E, dst, src);
+}
+
+/// `PMINUW xmm, xmm` (66 [REX?] 0F 38 3A /r) — SSE4.1 packed
+/// unsigned 16-bit min (8 lanes).
+pub fn encPminuw(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinopExt(0x38, 0x3A, dst, src);
+}
+
+/// `PMAXUD xmm, xmm` (66 [REX?] 0F 38 3F /r) — SSE4.1 packed
+/// unsigned 32-bit max (4 lanes).
+pub fn encPmaxud(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinopExt(0x38, 0x3F, dst, src);
+}
+
+/// `PMINUD xmm, xmm` (66 [REX?] 0F 38 3B /r) — SSE4.1 packed
+/// unsigned 32-bit min (4 lanes).
+pub fn encPminud(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinopExt(0x38, 0x3B, dst, src);
+}
+
 /// `MOVSD xmm, xmm` (F2 [REX?] 0F 10 /r — register-register
 /// form with ModR/M.mod=11) — copies the low 64 bits of `src`
 /// into the low 64 bits of `dst`, **preserving** the upper 64
@@ -1152,4 +1195,22 @@ test "encPcmpgtQ: REX.R+B (xmm8, xmm13)" {
     // 66 45 0F 38 37 C5 — REX = 0x40 | R(1<<2) | B(1) = 0x45;
     // ModR/M = 11 000 101 = 0xC5 (mod=11, reg=0 [xmm8 low3], rm=5 [xmm13 low3]).
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x38, 0x37, 0xC5 }, encPcmpgtQ(.xmm8, .xmm13).slice());
+}
+
+test "encPmaxub / encPminub opcode bytes (xmm0, xmm1) — SSE2" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xDE, 0xC1 }, encPmaxub(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xDA, 0xC1 }, encPminub(.xmm0, .xmm1).slice());
+}
+
+test "encPmaxuw / encPminuw / encPmaxud / encPminud opcode bytes (xmm0, xmm1) — SSE4.1" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x3E, 0xC1 }, encPmaxuw(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x3A, 0xC1 }, encPminuw(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x3F, 0xC1 }, encPmaxud(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x3B, 0xC1 }, encPminud(.xmm0, .xmm1).slice());
+}
+
+test "encPmaxud: REX.R+B (xmm14, xmm15) — covers spill-stage scratch range" {
+    // 66 45 0F 38 3F F7 — REX = 0x40 | R(1<<2) | B(1) = 0x45;
+    // ModR/M = 11 110 111 = 0xF7 (mod=11, reg=6 [xmm14 low3], rm=7 [xmm15 low3]).
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x38, 0x3F, 0xF7 }, encPmaxud(.xmm14, .xmm15).slice());
 }

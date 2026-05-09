@@ -862,6 +862,24 @@ pub fn compile(
             .@"i64x2.lt_s" => try op_simd.emitI64x2LtS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"i64x2.le_s" => try op_simd.emitI64x2LeS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"i64x2.ge_s" => try op_simd.emitI64x2GeS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            // §9.7 / 9.7-n: unsigned compares lt_u/gt_u/le_u/ge_u for
+            // 8/16/32-bit shapes (12 ops). PMINU/PMAXU + PCMPEQ
+            // (cranelift `lower.isle:2016-2080`): gt/lt = NOT eq(min/max,
+            // rhs); ge/le = eq(lhs, max/min). PMAXUB/PMINUB SSE2;
+            // PMAXU{W,D} / PMINU{W,D} SSE4.1. i64x2 unsigned not in
+            // Wasm SIMD spec.
+            .@"i8x16.gt_u" => try op_simd.emitI8x16GtU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i8x16.lt_u" => try op_simd.emitI8x16LtU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i8x16.le_u" => try op_simd.emitI8x16LeU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i8x16.ge_u" => try op_simd.emitI8x16GeU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.gt_u" => try op_simd.emitI16x8GtU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.lt_u" => try op_simd.emitI16x8LtU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.le_u" => try op_simd.emitI16x8LeU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.ge_u" => try op_simd.emitI16x8GeU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.gt_u" => try op_simd.emitI32x4GtU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.lt_u" => try op_simd.emitI32x4LtU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.le_u" => try op_simd.emitI32x4LeU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.ge_u" => try op_simd.emitI32x4GeU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"memory.size" => {
                 // Wasm spec §4.4.7 — return current memory size in
                 // 64-KiB pages. mem_limit (bytes) lives at

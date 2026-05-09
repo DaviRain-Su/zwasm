@@ -486,6 +486,190 @@ pub fn emitI64x2GeS(
     return emitV128IntCmpSigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPcmpgtQ, .ge);
 }
 
+/// Wasm spec §4.4.4 (i*x*.{lt_u, gt_u, le_u, ge_u}) — pop two v128,
+/// push v128 where each lane is all-ones if lhs op rhs (unsigned)
+/// else all-zero. PMINU/PMAXU + PCMPEQ recipe (cranelift
+/// `lower.isle:2016-2080`):
+///
+///   gt_u(a,b): max=PMAXU(a,b) ; result = NOT PCMPEQ(max,b)
+///   lt_u(a,b): min=PMINU(a,b) ; result = NOT PCMPEQ(min,b)
+///   ge_u(a,b): max=PMAXU(a,b) ; result = PCMPEQ(a,max)
+///   le_u(a,b): min=PMINU(a,b) ; result = PCMPEQ(a,min)
+///
+/// dst gets MOVAPS lhs first (skip-elision when dst==lhs) then the
+/// PMINU/PMAXU encoder writes max/min into dst. For ge/le, PCMPEQ
+/// dst, lhs computes (max/min == lhs) which is the unsigned ≥/≤
+/// result. For gt/lt, PCMPEQ dst, rhs computes (max/min == rhs)
+/// then PXOR with all-ones (XMM14 scratch) inverts.
+///
+/// Two-instruction MOVAPS+PMINU/PMAXU (when dst != lhs) plus the
+/// ≤ 3-instr tail mirrors `emitV128IntCmpSigned`'s MOVAPS-elide
+/// pattern. Aliasing `dst == rhs` is not handled (matches
+/// emitV128IntCmpSigned's stance — current x86_64 regalloc allocates
+/// fresh xmm slots for new vregs; D-036 / Phase 15 class-aware
+/// allocation will revisit alongside coalescer-driven aliasing).
+const UnsignedCmpKind = enum { gt, lt, le, ge };
+
+fn emitV128IntCmpUnsigned(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    encoder_minmax: *const fn (dst: inst.Xmm, src: inst.Xmm) inst.EncodedInsn,
+    encoder_pcmpeq: *const fn (dst: inst.Xmm, src: inst.Xmm) inst.EncodedInsn,
+    kind: UnsignedCmpKind,
+) Error!void {
+    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
+    const rhs_v = pushed_vregs.pop().?;
+    const lhs_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const rhs_x = try gpr.resolveXmm(alloc, rhs_v);
+    const lhs_x = try gpr.resolveXmm(alloc, lhs_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+
+    if (dst_x != lhs_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, lhs_x).slice());
+    }
+    try buf.appendSlice(allocator, encoder_minmax(dst_x, rhs_x).slice());
+
+    switch (kind) {
+        .ge, .le => {
+            try buf.appendSlice(allocator, encoder_pcmpeq(dst_x, lhs_x).slice());
+        },
+        .gt, .lt => {
+            try buf.appendSlice(allocator, encoder_pcmpeq(dst_x, rhs_x).slice());
+            const ones = abi.fp_spill_stage_xmms[0];
+            try buf.appendSlice(allocator, inst.encPcmpeqB(ones, ones).slice());
+            try buf.appendSlice(allocator, inst.encPxor(dst_x, ones).slice());
+        },
+    }
+    try pushed_vregs.append(allocator, result_v);
+}
+
+pub fn emitI8x16GtU(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+) Error!void {
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxub, inst.encPcmpeqB, .gt);
+}
+
+pub fn emitI8x16LtU(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+) Error!void {
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminub, inst.encPcmpeqB, .lt);
+}
+
+pub fn emitI8x16LeU(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+) Error!void {
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminub, inst.encPcmpeqB, .le);
+}
+
+pub fn emitI8x16GeU(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+) Error!void {
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxub, inst.encPcmpeqB, .ge);
+}
+
+pub fn emitI16x8GtU(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+) Error!void {
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxuw, inst.encPcmpeqW, .gt);
+}
+
+pub fn emitI16x8LtU(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+) Error!void {
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminuw, inst.encPcmpeqW, .lt);
+}
+
+pub fn emitI16x8LeU(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+) Error!void {
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminuw, inst.encPcmpeqW, .le);
+}
+
+pub fn emitI16x8GeU(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+) Error!void {
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxuw, inst.encPcmpeqW, .ge);
+}
+
+pub fn emitI32x4GtU(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+) Error!void {
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxud, inst.encPcmpeqD, .gt);
+}
+
+pub fn emitI32x4LtU(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+) Error!void {
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminud, inst.encPcmpeqD, .lt);
+}
+
+pub fn emitI32x4LeU(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+) Error!void {
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminud, inst.encPcmpeqD, .le);
+}
+
+pub fn emitI32x4GeU(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+) Error!void {
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxud, inst.encPcmpeqD, .ge);
+}
+
 /// Wasm spec §4.4.4 (i*x*.eq variants) — pop two v128, push v128
 /// where each lane is all-ones if the inputs match else all-zero.
 /// Per-shape encoders (PCMPEQB / PCMPEQW / PCMPEQD / PCMPEQQ)

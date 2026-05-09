@@ -333,6 +333,12 @@ pub const encPcmpgtB = inst_sse.encPcmpgtB;
 pub const encPcmpgtW = inst_sse.encPcmpgtW;
 pub const encPcmpgtD = inst_sse.encPcmpgtD;
 pub const encPcmpgtQ = inst_sse.encPcmpgtQ;
+pub const encPmaxub = inst_sse.encPmaxub;
+pub const encPminub = inst_sse.encPminub;
+pub const encPmaxuw = inst_sse.encPmaxuw;
+pub const encPminuw = inst_sse.encPminuw;
+pub const encPmaxud = inst_sse.encPmaxud;
+pub const encPminud = inst_sse.encPminud;
 
 // ============================================================
 // Tests
