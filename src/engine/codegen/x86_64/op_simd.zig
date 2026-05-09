@@ -3189,6 +3189,118 @@ pub fn emitI32x4TruncSatF64x2SZero(
     try pushed_vregs.append(allocator, result_v);
 }
 
+/// 16-byte 0x0F-per-byte mask used by popcnt's nibble-split path.
+const NIBBLE_MASK_BROADCAST: [16]u8 = [_]u8{0x0F} ** 16;
+
+/// Wasm spec §4.4.4 (i8x16.popcnt) per-byte popcount LUT used by
+/// popcnt's PSHUFB-LUT path. Byte i = popcount(i) for i in 0..15.
+const POPCNT_LUT: [16]u8 = [_]u8{ 0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4 };
+
+/// Append `value` to `extra_consts` if not already present (linear
+/// scan dedup), returning the resulting global const_idx (i.e.
+/// simd_consts_base + position-in-extra_consts).
+fn lookupOrAppendExtraConst(
+    allocator: Allocator,
+    extra_consts: *std.ArrayList([16]u8),
+    simd_consts_base: u32,
+    value: [16]u8,
+) Error!u32 {
+    for (extra_consts.items, 0..) |c, i| {
+        if (std.mem.eql(u8, &c, &value)) {
+            return simd_consts_base + @as(u32, @intCast(i));
+        }
+    }
+    const idx: u32 = simd_consts_base + @as(u32, @intCast(extra_consts.items.len));
+    try extra_consts.append(allocator, value);
+    return idx;
+}
+
+/// Emit a MOVUPS-RIP-rel placeholder targeting the given const-pool
+/// idx and record the SimdConstFixup. Returns the destination XMM
+/// (handler must already have decided which scratch to load into).
+fn emitConstLoad(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    simd_const_fixups: *std.ArrayList(@import("types.zig").SimdConstFixup),
+    dst: inst.Xmm,
+    const_idx: u32,
+) Error!void {
+    const enc = inst.encMovupsXmmRipRelPlaceholder(dst);
+    const start_byte: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, enc.slice());
+    const enc_len: u32 = @intCast(enc.slice().len);
+    try simd_const_fixups.append(allocator, .{
+        .disp32_byte_offset = start_byte + enc_len - 4,
+        .post_insn_byte = start_byte + enc_len,
+        .const_idx = const_idx,
+    });
+}
+
+/// Wasm spec §4.4.4 (i8x16.popcnt) — per-byte population count
+/// via SSSE3 PSHUFB-LUT (cranelift `lower.isle:2491-2517`). Two
+/// const-pool entries: 16-byte LUT[0..15] = popcount(i), and a
+/// 0x0F-per-byte nibble mask. The recipe splits each byte into
+/// low/high nibbles, looks each up in the LUT via PSHUFB, then
+/// adds. PSHUFB clobbers its destination so the LUT must be
+/// reloaded between the two halves.
+///
+/// Recipe (11 instr including 2 const loads, fits 2-scratch budget):
+/// 1.  MOVUPS XMM15, [RIP+nibble_mask]
+/// 2-4. compute high_nibbles into XMM14 (MOVAPS+PSRLW+PAND)
+/// 5.  MOVUPS dst, [RIP+LUT]
+/// 6.  PSHUFB dst, XMM14                ; popcount(high)
+/// 7-8. compute low_nibbles into XMM14 (MOVAPS+PAND)
+/// 9.  MOVUPS XMM15, [RIP+LUT]          ; reload (clobbers mask)
+/// 10. PSHUFB XMM15, XMM14              ; popcount(low)
+/// 11. PADDB dst, XMM15
+pub fn emitI8x16Popcnt(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    simd_const_fixups: *std.ArrayList(@import("types.zig").SimdConstFixup),
+    extra_consts: *std.ArrayList([16]u8),
+    simd_consts_base: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const src_x = try gpr.resolveXmm(alloc, src_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const t1 = abi.fp_spill_stage_xmms[0]; // XMM14
+    const t2 = abi.fp_spill_stage_xmms[1]; // XMM15
+
+    const lut_idx = try lookupOrAppendExtraConst(allocator, extra_consts, simd_consts_base, POPCNT_LUT);
+    const mask_idx = try lookupOrAppendExtraConst(allocator, extra_consts, simd_consts_base, NIBBLE_MASK_BROADCAST);
+
+    // 1: t2 = nibble_mask (0x0F per byte).
+    try emitConstLoad(allocator, buf, simd_const_fixups, t2, mask_idx);
+    // 2-4: t1 = high_nibbles per byte. PSRLW shifts at word level
+    // so the mask AND is required.
+    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(t1, src_x).slice());
+    try buf.appendSlice(allocator, inst.encPsrlwImm(t1, 4).slice());
+    try buf.appendSlice(allocator, inst.encPand(t1, t2).slice());
+    // 5-6: dst = LUT, then PSHUFB(dst, t1) → dst = popcount(high).
+    try emitConstLoad(allocator, buf, simd_const_fixups, dst_x, lut_idx);
+    try buf.appendSlice(allocator, inst.encPshufb(dst_x, t1).slice());
+    // 7-8: t1 = low_nibbles per byte. PAND with mask suffices —
+    // no shift needed.
+    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(t1, src_x).slice());
+    try buf.appendSlice(allocator, inst.encPand(t1, t2).slice());
+    // 9-10: t2 = LUT (reload — t2 was the mask, no longer needed),
+    // then PSHUFB(t2, t1) → t2 = popcount(low).
+    try emitConstLoad(allocator, buf, simd_const_fixups, t2, lut_idx);
+    try buf.appendSlice(allocator, inst.encPshufb(t2, t1).slice());
+    // 11: dst = popcount(high) + popcount(low) = popcount(byte).
+    try buf.appendSlice(allocator, inst.encPaddB(dst_x, t2).slice());
+
+    try pushed_vregs.append(allocator, result_v);
+}
+
 /// Wasm spec §4.4.5 (v128.const) — push a 16-byte literal as a
 /// v128 value. Per ADR-0042: the lower pass populates
 /// `func.simd_consts` and stores the array index in
