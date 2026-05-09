@@ -1832,6 +1832,74 @@ test "emitF32x4Floor / Trunc / Nearest: ROUNDPS imm bits 09 / 0B / 08" {
     }
 }
 
+test "emitF32x4ConvertI32x4U: 11-instr split-and-recombine recipe" {
+    var slot_ids = [_]u16{ 0, 1 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 2,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    var next_vreg: u32 = 1;
+
+    try op_simd.emitF32x4ConvertI32x4U(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    // src = xmm8, dst = xmm9, a_lo = xmm14, a_hi = xmm15.
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm14, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encPslldImm(.xmm14, 16).slice());
+    try expected.appendSlice(testing.allocator, inst.encPsrldImm(.xmm14, 16).slice());
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm15, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encPsubD(.xmm15, .xmm14).slice());
+    try expected.appendSlice(testing.allocator, inst.encCvtdq2ps(.xmm14, .xmm14).slice());
+    try expected.appendSlice(testing.allocator, inst.encPsrldImm(.xmm15, 1).slice());
+    try expected.appendSlice(testing.allocator, inst.encCvtdq2ps(.xmm15, .xmm15).slice());
+    try expected.appendSlice(testing.allocator, inst.encAddps(.xmm15, .xmm15).slice());
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm9, .xmm15).slice());
+    try expected.appendSlice(testing.allocator, inst.encAddps(.xmm9, .xmm14).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
+test "emitI32x4TruncSatF32x4S: 9-instr NaN-mask + XOR-fix recipe" {
+    var slot_ids = [_]u16{ 0, 1 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 2,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    var next_vreg: u32 = 1;
+
+    try op_simd.emitI32x4TruncSatF32x4S(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    // src = xmm8, dst = xmm9, tmp = xmm14.
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm14, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encCmpps(.xmm14, .xmm8, 0x00).slice());
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm9, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encAndps(.xmm9, .xmm14).slice());
+    try expected.appendSlice(testing.allocator, inst.encXorps(.xmm14, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encCvttps2dq(.xmm9, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encPand(.xmm14, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encPsradImm(.xmm14, 31).slice());
+    try expected.appendSlice(testing.allocator, inst.encPxor(.xmm9, .xmm14).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
 test "emitF64x2 Ceil/Floor/Trunc/Nearest: ROUNDPD imm bits 0A/09/0B/08" {
     var slot_ids = [_]u16{ 0, 1 };
     const alloc: regalloc.Allocation = .{

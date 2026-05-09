@@ -1035,6 +1035,13 @@ pub fn compile(
             .@"f64x2.convert_low_i32x4_s" => try op_simd.emitF64x2ConvertLowI32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"f64x2.promote_low_f32x4" => try op_simd.emitF64x2PromoteLowF32x4(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"f32x4.demote_f64x2_zero" => try op_simd.emitF32x4DemoteF64x2Zero(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            // §9.7 / 9.7-ae: 2 inline-synth FP convert / trunc-sat
+            // ops. The 4 const-pool-dependent variants
+            // (f64x2.convert_low_i32x4_u, i32x4.trunc_sat_f32x4_u,
+            // i32x4.trunc_sat_f64x2_{s,u}_zero) defer to 9.7-ag
+            // pending ADR-0042 const-pool plumbing.
+            .@"f32x4.convert_i32x4_u" => try op_simd.emitF32x4ConvertI32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.trunc_sat_f32x4_s" => try op_simd.emitI32x4TruncSatF32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             // §9.7 / 9.7-ac: i8x16.swizzle (1 op). 10-instr inline
             // recipe synthesises 0x0F broadcast + PCMPGTB-detect of
             // idx>15 + POR-correct + PSHUFB. No const-pool dep.

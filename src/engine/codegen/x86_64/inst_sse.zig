@@ -612,6 +612,18 @@ pub fn encXorpd(dst: Xmm, src: Xmm) EncodedInsn {
     return encSsePackedIntBinop(0x57, dst, src);
 }
 
+/// `ANDPS xmm, xmm` ([REX?] 0F 54 /r) — SSE bitwise AND of packed
+/// single-precision FP values. Wasm: NaN-mask propagation in
+/// trunc-sat synthesis.
+pub fn encAndps(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSseFpPsBinop(0x54, dst, src);
+}
+
+/// `ANDPD xmm, xmm` (66 [REX?] 0F 54 /r) — SSE2 bitwise AND.
+pub fn encAndpd(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0x54, dst, src);
+}
+
 /// `ANDNPS xmm, xmm` ([REX?] 0F 55 /r) — SSE bitwise AND-NOT:
 /// `dst = ~dst & src`. Wasm: f32x4.fmin/fmax synthesis (mask off
 /// non-canonical NaN payload bits).
@@ -1218,6 +1230,31 @@ pub fn encCvtdq2pd(dst: Xmm, src: Xmm) EncodedInsn {
     return enc;
 }
 
+/// `CVTTPS2DQ xmm, xmm` (F3 [REX?] 0F 5B /r) — SSE2 truncating
+/// convert 4 packed f32 to 4 packed signed i32. Out-of-range
+/// values and NaN both produce 0x80000000 (sentinel for trap-on-
+/// overflow modes; Wasm `i32x4.trunc_sat_f32x4_s` corrects this
+/// downstream via XOR fix-up). Mandatory F3 prefix.
+pub fn encCvttps2dq(dst: Xmm, src: Xmm) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0xF3);
+    if (dst.extBit() != 0 or src.extBit() != 0) {
+        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0x5B);
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    return enc;
+}
+
+/// `PSRAD xmm, imm8` (66 [REX.B?] 0F 72 /4 ib) — SSE2 packed 32-bit
+/// arithmetic shift right by immediate count (sign-fill). Used by
+/// §9.7-ae `i32x4.trunc_sat_f32x4_s` for the bit-31 sign-extend
+/// fix-up step. Distinct from PSRAD-by-reg which lives in shifts.
+pub fn encPsradImm(dst: Xmm, count: u8) EncodedInsn {
+    return encSsePackedShiftImmGroup(0x72, 4, dst, count);
+}
+
 // §9.7-z abs primitives — SSSE3 PABSB/W/D compute per-lane
 // absolute value of signed integers. PABSQ doesn't exist in
 // pre-AVX-512 SSE; i64x2.abs synthesises via sign-mask PXOR/PSUBQ
@@ -1626,6 +1663,14 @@ test "encCvtdq2pd opcode bytes (xmm0, xmm1) — F3 prefix" {
     try testing.expectEqualSlices(u8, &.{ 0xF3, 0x0F, 0xE6, 0xC1 }, encCvtdq2pd(.xmm0, .xmm1).slice());
 }
 
+test "encCvttps2dq: F3 0F 5B /r" {
+    try testing.expectEqualSlices(u8, &.{ 0xF3, 0x0F, 0x5B, 0xC1 }, encCvttps2dq(.xmm0, .xmm1).slice());
+}
+
+test "encPsradImm: PSRAD xmm0, 31 — group /4, opcode=0x72 (D-form)" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x72, 0xE0, 0x1F }, encPsradImm(.xmm0, 31).slice());
+}
+
 test "encPabsb / encPabsw / encPabsd opcode bytes (xmm0, xmm1)" {
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x1C, 0xC1 }, encPabsb(.xmm0, .xmm1).slice());
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x1D, 0xC1 }, encPabsw(.xmm0, .xmm1).slice());
@@ -1714,9 +1759,10 @@ test "encMinpd / encMaxpd opcode bytes (xmm0, xmm1) — SSE2 with 66 prefix" {
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x5F, 0xC1 }, encMaxpd(.xmm0, .xmm1).slice());
 }
 
-test "encOrps / encXorps / encAndnps opcode bytes (xmm0, xmm1) — SSE no 66 prefix" {
+test "encOrps / encXorps / encAndps / encAndnps opcode bytes (xmm0, xmm1) — SSE no 66 prefix" {
     try testing.expectEqualSlices(u8, &.{ 0x0F, 0x56, 0xC1 }, encOrps(.xmm0, .xmm1).slice());
     try testing.expectEqualSlices(u8, &.{ 0x0F, 0x57, 0xC1 }, encXorps(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x0F, 0x54, 0xC1 }, encAndps(.xmm0, .xmm1).slice());
     try testing.expectEqualSlices(u8, &.{ 0x0F, 0x55, 0xC1 }, encAndnps(.xmm0, .xmm1).slice());
 }
 

@@ -2821,3 +2821,95 @@ pub fn emitI64x2Mul(
     try pushed_vregs.append(allocator, result_v);
 }
 
+/// Wasm spec §4.4.4 (f32x4.convert_i32x4_u) — convert 4 unsigned
+/// i32 lanes to f32. SSE has no native CVTUDQ2PS (AVX-512 only);
+/// recipe per cranelift `lower.isle:3811-3831` splits each u32 into
+/// low/high 16-bit halves, converts each via signed CVTDQ2PS, and
+/// recombines: low half is exact, high half is shifted-right-1
+/// then doubled to fit signed conversion's range. 11-instruction
+/// inline recipe, no const-pool dep.
+pub fn emitF32x4ConvertI32x4U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const src_x = try gpr.resolveXmm(alloc, src_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const a_lo = abi.fp_spill_stage_xmms[0]; // XMM14
+    const a_hi = abi.fp_spill_stage_xmms[1]; // XMM15
+
+    // 1-3: a_lo = src masked to low 16 bits per lane.
+    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(a_lo, src_x).slice());
+    try buf.appendSlice(allocator, inst.encPslldImm(a_lo, 16).slice());
+    try buf.appendSlice(allocator, inst.encPsrldImm(a_lo, 16).slice());
+
+    // 4-5: a_hi = src - a_lo gives the high 16 bits in each lane
+    // (still up high; we never shifted them down).
+    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(a_hi, src_x).slice());
+    try buf.appendSlice(allocator, inst.encPsubD(a_hi, a_lo).slice());
+
+    // 6: convert low halves via signed CVTDQ2PS (low halves fit
+    // signed range cleanly — at most 0xFFFF).
+    try buf.appendSlice(allocator, inst.encCvtdq2ps(a_lo, a_lo).slice());
+
+    // 7-9: shift a_hi right by 1 to clear the sign bit so signed
+    // CVTDQ2PS is exact, then double via ADDPS to undo the /2.
+    try buf.appendSlice(allocator, inst.encPsrldImm(a_hi, 1).slice());
+    try buf.appendSlice(allocator, inst.encCvtdq2ps(a_hi, a_hi).slice());
+    try buf.appendSlice(allocator, inst.encAddps(a_hi, a_hi).slice());
+
+    // 10-11: dst = a_hi + a_lo.
+    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, a_hi).slice());
+    try buf.appendSlice(allocator, inst.encAddps(dst_x, a_lo).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// Wasm spec §4.4.4 (i32x4.trunc_sat_f32x4_s) — saturating truncate
+/// f32→i32. CVTTPS2DQ produces 0x80000000 for both NaN and OOR; the
+/// Wasm spec requires NaN→0 and positive-OOR→INT32_MAX. Recipe per
+/// cranelift `lower.isle:3848-3869`: 9-instruction inline path that
+/// uses CMPPS-self-eq to detect NaN, AND-masks NaN to +0.0 before
+/// CVTTPS2DQ, then XOR-corrects positive-OOR's 0x80000000 to
+/// 0x7FFFFFFF via a sign-extend-of-bit-31 derived mask.
+pub fn emitI32x4TruncSatF32x4S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const src_x = try gpr.resolveXmm(alloc, src_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const tmp = abi.fp_spill_stage_xmms[0]; // XMM14
+
+    // 1-2: tmp = CMPPS(src, src, EQ_OQ) → all-1s where lane is not
+    // NaN (since x==x is false only for NaN), 0 elsewhere.
+    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(tmp, src_x).slice());
+    try buf.appendSlice(allocator, inst.encCmpps(tmp, src_x, 0x00).slice());
+
+    // 3-4: dst = src AND tmp → NaN lanes become +0.0, valid lanes
+    // pass through.
+    if (dst_x != src_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, src_x).slice());
+    }
+    try buf.appendSlice(allocator, inst.encAndps(dst_x, tmp).slice());
+
+    // 5: tmp ^= dst — high bit of each lane is (¬NaN) XOR (sign of
+    // src). Captures the "should be MAX" hint for positive OOR.
+    try buf.appendSlice(allocator, inst.encXorps(tmp, dst_x).slice());
+
+    // 6: trunc-saturate. NaN was already zeroed; positive OOR and
+    // negative OOR both produce 0x80000000 (INT_MIN sentinel).
+    try buf.appendSlice(allocator, inst.encCvttps2dq(dst_x, dst_x).slice());
+
+    // 7-9: derive a per-lane mask = (positive-OOR? all-1s : 0),
+    // applied via XOR to flip 0x80000000 → 0x7FFFFFFF without
+    // touching valid or negative-OOR lanes.
+    try buf.appendSlice(allocator, inst.encPand(tmp, dst_x).slice());
+    try buf.appendSlice(allocator, inst.encPsradImm(tmp, 31).slice());
+    try buf.appendSlice(allocator, inst.encPxor(dst_x, tmp).slice());
+
+    try pushed_vregs.append(allocator, result_v);
+}
