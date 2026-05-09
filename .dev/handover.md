@@ -13,52 +13,43 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 9 / §9.9/9.5-c-vii [x] (f32x4/f64x2 lane access); **§9.9/9.5-c-vii-mul NEXT**
+## Current state — Phase 9 / §9.5 [x] (full sub-row chain closed); **§9.6 NEXT**
 
-§9.9/9.5-c-vii adds 4 NEON FP lane-access encoders (DUP-scalar
-S/D + INS-element S/D, src lane 0) and 4 op_simd handlers wired
-through new helper pair `emitV128ExtractLaneFp` /
-`emitV128ReplaceLaneFp` (parallel to the int-side helpers; the
-FP scalar resolves stay on SPILL-EXEMPT alongside the GPR ones).
-
-i64x2.mul defers to 9.5-c-vii-mul because the multi-instr
-synthesis (extract D-lanes via UMOV X / scalar 64-bit MUL /
-insert via INS D from X) introduces a scratch-register
-reservation — ADR-grade design choice that warrants its own
-chunk per LOOP.md granularity.
-
-Per LOOP.md chunk granularity, 9.5 row sub-split:
-- 9.5-a/b/c-i…c-vii [x]: encoder foundation + shape-tag
-  pipeline + Q-form spill + op_simd refactor + i32x4 lane
-  access + ADD/SUB + MUL (16B/8H/4S) + int lane access B/H/D
-  + FP lane access S/D.
-- 9.5-c-vii-mul NEXT: i64x2.mul synthesis (extract X.D-lane /
-  scalar MUL / insert X.D-lane sequence) + scratch-reg
-  reservation convention.
+§9.5 closed. The parent row now `[x]` after 9.5-c-vii-mul wired
+i64x2.mul via per-lane GPR transit (UMOV X.D / scalar X-form MUL
+/ INS X.D, X16/X17 IP0/IP1 scratch reused from existing
+op_alu_int rotl + op_alu_float copysign convention). Same chunk
+also fixed a latent bug: shape_tag walker in
+shared/regalloc.zig was missing the int-arith catalogue beyond
+i32x4.add (closed proactively per bug_fix_survey grep
+discipline; latent only because no fixture spilled v128 vregs
+yet).
 
 Mac gates: zone ✓, file_size ✓, spill ✓, lint ✓; spec
 212/0/20, wast 1158/0/0.
 
-**§9.9/9.5-c-vii-mul NEXT** — i64x2.mul multi-instr synthesis.
-Per lane k ∈ {0, 1}:
-1. `UMOV X<scratch_a>, V<lhs>.D[k]` — `encUmovXFromD`
-2. `UMOV X<scratch_b>, V<rhs>.D[k]`
-3. `MUL X<scratch_c>, X<scratch_a>, X<scratch_b>` — scalar 64-bit
-   MUL (need to verify presence of `encMulXX` in `inst.zig`; add
-   if missing).
-4. `INS V<result>.D[k], X<scratch_c>` — `encInsDFromX`
+**§9.6 NEXT** — ARM64 emit (NEON) pt 2: SIMD comparison +
+shuffle + float arithmetic + conversion. The encoder catalogue
+expands substantially:
+- Float arith: f32x4/f64x2 add/sub/mul/div/min/max/sqrt/abs/neg.
+- Compare: i*x*.eq/ne/lt/gt/le/ge (signed and unsigned for int);
+  f*x*.eq/ne/lt/gt/le/ge (ordered).
+- Shuffle: i8x16.shuffle (16-byte permutation) + swizzle
+  (TBL/TBX-based).
+- Conversion: i32x4.trunc_sat_f32x4_{s,u}, f32x4.convert_i32x4_{s,u},
+  similar for f64x2 ↔ i64x2 (where supported), narrow / extend
+  ops.
 
-Scratch-reg reservation: candidates X16 / X17 (IP0 / IP1 — AAPCS64
-intra-procedure scratch) or a fixed pair from the regalloc-
-reserved range. Survey `gpr.zig` / `regalloc.zig` for existing
-scratch conventions before introducing a new one (Step 0 task).
+Per LOOP.md chunk granularity, expect to split into multiple
+sub-rows similar to §9.5's c-i / c-ii / ... pattern. Step 0
+survey expected — wasmtime / cranelift's NEON emit + Wasm SIMD
+spec §"Comparison" / §"Conversion" / §"Floating-point" sections.
 
-## Active task — §9.9/9.5-c-vii-mul: i64x2.mul synthesis **NEXT**
+## Active task — §9.6: ARM64 NEON emit pt 2 **NEXT**
 
-Single op, multi-instr synthesis. Estimated ~80 src + ~40 tests
-(handler + scratch-reg reservation comment + two-lane unrolled
-codegen test asserting 8 emitted words: 2× UMOV + 2× MUL + 2×
-INS + 2× v128 spill load/store).
+Open the §9.6 chunk plan with Step 0 survey; first sub-chunk
+likely `9.6-a` (float arith — add/sub/mul/div for f32x4/f64x2,
+shape parallel to §9.5-c-iv ADD/SUB family).
 
 After 8b.4: 8b.5 (boundary audit_scaffolding) + 8b.6 (open
 §9.9 inline + flip Phase Status).
