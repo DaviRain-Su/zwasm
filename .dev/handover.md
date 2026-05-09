@@ -16,29 +16,27 @@
 6. `private/notes/p9-9.7-m-survey.md` (gitignored; cranelift recipe +
    adoption data) — only if revisiting the SSE4.2 baseline call.
 
-## Current state — Phase 9 / §9.7 in-flight (9.7-a..ae landed); **9.7-af NEXT**
+## Current state — Phase 9 / §9.7 in-flight (9.7-a..af landed); **9.7-ag NEXT**
 
-9.7-ae: x86_64 inline-synth FP convert + trunc-sat (2 of 6
-candidate ops). f32x4.convert_i32x4_u (11-instr split-and-
-recombine) + i32x4.trunc_sat_f32x4_s (9-instr NaN-mask +
-XOR-fix). 4 new encoders (Cvttps2dq, PsradImm, Andps,
-Andpd). 4 const-pool-dependent variants deferred to 9.7-ag.
-Total SIMD ops handled: 162.
+9.7-af: x86_64 q15mulr_sat_s + dot_i16x8_s (2 ops). 2 new
+encoders (PMULHRSW SSSE3 + PMADDWD SSE2). Both single-instr
+via existing emitV128IntBinop. Total SIMD ops handled: 164.
 
-**9.7-af NEXT** — i*x*.popcnt + i16x8.q15mulr_sat_s +
-i32x4.dot_i16x8_s + i*x*.extadd_pairwise_* (~6 ops). Most
-are inline-synthesisable: popcnt via Mula nibble-LUT or
-PSHUFB-table or shift-and-add (no const-pool with
-shift-and-add; const-pool with PSHUFB); q15mulr_sat via
-PMULHRSW (SSE4.1, 1 instr); dot_i16x8_s via PMADDWD (SSE2,
-1 instr); extadd_pairwise via PMADDUBSW (SSSE3) +
-PMADDWD. Bundle most into one chunk; popcnt may split if
-const-pool dep tipping.
+**9.7-ag NEXT** — i16x8.extmul_{low,high}_i8x16_{s,u} (4 ops):
+3-instr recipe per cranelift `lower.isle:1197-1285` —
+PMULLW dst, src1, src2 (low halves) + PMULHW or PMULHUW tmp,
+src1, src2 (high halves) + PUNPCKLWD or PUNPCKHWD dst, dst,
+tmp. New encoders: PMULHW (SSE2 0F E5) + PMULHUW (SSE2 0F E4)
++ PUNPCKLWD (0F 61) + PUNPCKHWD (0F 69). Reuses XMM14
+scratch. ~120 src + ~120 test, 4 new encoders.
 
-Subsequent: 9.7-ag (ADR-0042 const-pool plumbing + 4
-deferred 9.7-ae u-variants + i8x16.shuffle + v128.const),
-9.7-ah+ (any remaining misc ops; phase 7 close-out at
-9.7-ax pending).
+Subsequent: 9.7-ah (i32x4.extmul_{low,high}_i16x8_{s,u} 4 ops,
+similar shape with PMULLD already from 9.7-c), 9.7-ai
+(i64x2.extmul_{low,high}_i32x4_{s,u} 4 ops, PMULDQ SSE4.1 +
+PMULUDQ already from 9.7-d), 9.7-aj (ADR-0042 const-pool +
+popcnt + 4 extadd_pairwise + 4 deferred 9.7-ae u-variants +
+i8x16.shuffle + v128.const). Phase 7 close-out at 9.7-ax+
+pending.
 
 ## Open structural debt (pointers — full list in `.dev/debt.md`)
 
@@ -58,5 +56,5 @@ reference) live in git: ADRs 0035-0040, lessons indexed in
 
 **Phase**: Phase 9 (SIMD-128, ADR-0041 — SSE4.2 baseline post-9.7-m).
 §9.5 [x] (ARM64 NEON pt 1), §9.6 [x] (ARM64 NEON pt 2),
-§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..ae landed; 9.7-af NEXT).
+§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..af landed; 9.7-ag NEXT).
 **Branch**: `zwasm-from-scratch`。
