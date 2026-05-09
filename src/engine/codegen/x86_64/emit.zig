@@ -813,6 +813,12 @@ pub fn compile(
             .@"i8x16.splat" => try op_simd.emitI8x16Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"i16x8.splat" => try op_simd.emitI16x8Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"i64x2.splat" => try op_simd.emitI64x2Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            // §9.7 / 9.7-i: f32x4 lane access trio. XMM-source
+            // semantics — splat / extract reuse encPshufd; replace
+            // uses the new INSERTPS encoder (SSE4.1 3A 21 /r ib).
+            .@"f32x4.splat" => try op_simd.emitF32x4Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f32x4.extract_lane" => try op_simd.emitF32x4ExtractLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.payload),
+            .@"f32x4.replace_lane" => try op_simd.emitF32x4ReplaceLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.payload),
             .@"memory.size" => {
                 // Wasm spec §4.4.7 — return current memory size in
                 // 64-KiB pages. mem_limit (bytes) lives at

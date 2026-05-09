@@ -264,6 +264,100 @@ pub fn emitI32x4ExtractLane(
     try pushed_vregs.append(allocator, result_v);
 }
 
+/// Wasm spec §4.4.3 (f32x4.splat) — pop scalar f32 (XMM-class
+/// vreg with the value in lane 0), push v128 with all four lanes
+/// equal to the scalar. x86_64 lowering: a single `PSHUFD dst,
+/// src, 0x00` broadcasts source lane 0 across all four 32-bit
+/// destination lanes. Uses the integer-domain shuffle (PSHUFD)
+/// even on FP data — the bit-level operation is identical, and
+/// modern Intel / AMD micro-architectures bypass the FP↔int
+/// domain crossing penalty when the surrounding ops also stay
+/// in one domain.
+pub fn emitF32x4Splat(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const src_x = try gpr.resolveXmm(alloc, src_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+
+    try buf.appendSlice(allocator, inst.encPshufd(dst_x, src_x, 0x00).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// Wasm spec §4.4.3 (f32x4.extract_lane <imm>) — pop v128, push
+/// scalar f32 (XMM-class result with the chosen lane in low 32).
+/// x86_64 lowering: a single `PSHUFD dst, src, lane * 0x55`.
+/// `lane * 0x55` produces 0x00, 0x55, 0xAA, 0xFF — each value
+/// has all four 2-bit fields equal to `lane`, so PSHUFD broadcasts
+/// the source's `lane`-th dword across all four destination lanes
+/// (lane 0 holds the desired value; subsequent FP scalar ops only
+/// read low 32, so the duplication is harmless).
+pub fn emitF32x4ExtractLane(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    payload: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const src_x = try gpr.resolveXmm(alloc, src_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+
+    const lane: u8 = @intCast(payload & 0b11);
+    try buf.appendSlice(allocator, inst.encPshufd(dst_x, src_x, lane *% 0x55).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// Wasm spec §4.4.3 (f32x4.replace_lane <imm>) — pop scalar f32
+/// (XMM low 32), pop v128, push v128 with lane `imm` replaced.
+/// x86_64 lowering: `MOVAPS dst, vec` (elided when aliased) +
+/// `INSERTPS dst, value, (lane << 4)`. The INSERTPS imm encodes
+/// (count_s = 0, count_d = lane, ZMASK = 0): copy lane 0 of
+/// `value` (= the scalar) into lane `lane` of `dst`, leave the
+/// other three lanes untouched.
+pub fn emitF32x4ReplaceLane(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    payload: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
+    const value_v = pushed_vregs.pop().?;
+    const vec_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const value_x = try gpr.resolveXmm(alloc, value_v);
+    const vec_x = try gpr.resolveXmm(alloc, vec_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+
+    if (dst_x != vec_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, vec_x).slice());
+    }
+    const lane: u8 = @intCast(payload & 0b11);
+    const imm8: u8 = lane << 4;
+    try buf.appendSlice(allocator, inst.encInsertps(dst_x, value_x, imm8).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
 /// Wasm spec §4.4.3 (i8x16.splat) — pop scalar i32, push v128
 /// with all 16 byte lanes equal to the low 8 bits of the scalar.
 /// x86_64 lowering: `MOVD xmm_dst, src_gpr` (zero-extends to
@@ -766,6 +860,77 @@ test "emitI8x16Sub: dispatches to encPsubB — opcode 0xF8 reaches the buffer" {
     @memcpy(expected_buf[n..][0..psub.slice().len], psub.slice());
     n += psub.slice().len;
     try testing.expectEqualSlices(u8, expected_buf[0..n], buf.items);
+}
+
+test "emitF32x4Splat: PSHUFD dst, src, 0x00" {
+    var slot_ids = [_]u16{ 0, 1 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 2,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    var next_vreg: u32 = 1;
+
+    try emitF32x4Splat(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    try testing.expectEqualSlices(u8, inst.encPshufd(.xmm9, .xmm8, 0x00).slice(), buf.items);
+}
+
+test "emitF32x4ExtractLane: lane 2 → PSHUFD dst, src, 0xAA" {
+    var slot_ids = [_]u16{ 0, 1 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 2,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    var next_vreg: u32 = 1;
+
+    try emitF32x4ExtractLane(testing.allocator, &buf, alloc, &pushed, &next_vreg, 2);
+
+    // lane 2 → 2 * 0x55 = 0xAA.
+    try testing.expectEqualSlices(u8, inst.encPshufd(.xmm9, .xmm8, 0xAA).slice(), buf.items);
+}
+
+test "emitF32x4ReplaceLane: lane 1 → MOVAPS + INSERTPS imm 0x10" {
+    // vec @ slot 0 (XMM8); value @ slot 1 (XMM9); result @ slot 2
+    // (XMM10). MOVAPS preamble + INSERTPS with count_d=lane=1.
+    var slot_ids = [_]u16{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 3,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0); // vec
+    try pushed.append(testing.allocator, 1); // value
+    var next_vreg: u32 = 2;
+
+    try emitF32x4ReplaceLane(testing.allocator, &buf, alloc, &pushed, &next_vreg, 1);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm10, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encInsertps(.xmm10, .xmm9, 0x10).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
 }
 
 test "emitI8x16Splat: MOVD + PXOR + PSHUFB sequence" {

@@ -778,6 +778,32 @@ pub fn encPunpcklqdq(dst: Xmm, src: Xmm) EncodedInsn {
     return encSsePackedIntBinop(0x6C, dst, src);
 }
 
+/// `INSERTPS xmm, xmm/m32, imm8` (66 [REX?] 0F 3A 21 /r ib) —
+/// SSE4.1 insert scalar single-precision. Per Intel SDM:
+///   imm8[7:6] = count_s (source lane index, 0..3)
+///   imm8[5:4] = count_d (destination lane index, 0..3)
+///   imm8[3:0] = ZMASK (zero-out bits — 1 zeros the corresponding
+///                       destination dword lane)
+/// Used by `f32x4.replace_lane` with `count_s = 0` (the scalar
+/// f32 lives in the source XMM's low 32 bits), `count_d = lane`
+/// (Wasm's lane immediate), and `ZMASK = 0` (no zeroing).
+///
+/// RVMI operand encoding: ModR/M.reg = destination XMM, .r/m =
+/// source XMM. Same orientation as PINSRD.
+pub fn encInsertps(xmm_dst: Xmm, xmm_src: Xmm, imm8: u8) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0x66);
+    if (xmm_dst.extBit() != 0 or xmm_src.extBit() != 0) {
+        enc.push(encodeRex(false, xmm_dst.extBit(), 0, xmm_src.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0x3A);
+    enc.push(0x21);
+    enc.push(encodeModrm(0b11, xmm_dst.low3(), xmm_src.low3()));
+    enc.push(imm8);
+    return enc;
+}
+
 const testing = std.testing;
 
 test "encPaddD: low XMMs (xmm0, xmm1) — no REX, 4 bytes" {
@@ -964,4 +990,14 @@ test "encPunpcklqdq: self-unpack (xmm0, xmm0) — opcode 0x6C" {
 
 test "encPunpcklqdq: REX.R+B (xmm8, xmm8)" {
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x6C, 0xC0 }, encPunpcklqdq(.xmm8, .xmm8).slice());
+}
+
+test "encInsertps: lane 1 with count_s=0, ZMASK=0 (xmm0, xmm1, 0x10)" {
+    // 66 0F 3A 21 C1 10 — imm = (0<<6)|(1<<4)|0 = 0x10.
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x3A, 0x21, 0xC1, 0x10 }, encInsertps(.xmm0, .xmm1, 0x10).slice());
+}
+
+test "encInsertps: REX.R+B (xmm8, xmm9, 0x30) — lane 3" {
+    // 66 45 0F 3A 21 C1 30
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x3A, 0x21, 0xC1, 0x30 }, encInsertps(.xmm8, .xmm9, 0x30).slice());
 }
