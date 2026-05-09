@@ -557,6 +557,48 @@ pub fn encPsllqImm(dst: Xmm, count: u8) EncodedInsn {
     return encSsePackedShiftImmGroup(6, dst, count);
 }
 
+/// `PSHUFD xmm, xmm, imm8` (66 [REX?] 0F 70 /r ib) — SSE2 shuffle
+/// 32-bit lanes from `src` into `dst` per a 4-lane permutation
+/// imm8. Each pair of imm8 bits selects a source lane: bits[1:0]
+/// → dst lane 0, bits[3:2] → lane 1, bits[5:4] → lane 2,
+/// bits[7:6] → lane 3. `imm8 = 0x00` broadcasts source lane 0 to
+/// every destination lane (used by `i32x4.splat` after a MOVD
+/// loads the scalar i32 into the low 32 bits of the XMM).
+pub fn encPshufd(dst: Xmm, src: Xmm, imm8: u8) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0x66);
+    if (dst.extBit() != 0 or src.extBit() != 0) {
+        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0x70);
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    enc.push(imm8);
+    return enc;
+}
+
+/// `PEXTRD r/m32, xmm, imm8` (66 [REX?] 0F 3A 16 /r ib) — SSE4.1
+/// extract a 32-bit lane from `xmm_src` (lane 0..3 selected by
+/// `lane` immediate) into `gpr_dst`. Per Intel SDM the
+/// ModR/M.reg field carries the **source XMM** (not the dst GPR);
+/// ModR/M.r/m carries the destination GPR. REX.R applies to the
+/// XMM (reg field); REX.B applies to the GPR (r/m field).
+///
+/// Used by `i32x4.extract_lane` (Wasm spec §4.4.3 lane access).
+pub fn encPextrD(gpr_dst: Gpr, xmm_src: Xmm, lane: u2) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0x66);
+    if (xmm_src.extBit() != 0 or gpr_dst.extBit() != 0) {
+        enc.push(encodeRex(false, xmm_src.extBit(), 0, gpr_dst.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0x3A);
+    enc.push(0x16);
+    enc.push(encodeModrm(0b11, xmm_src.low3(), gpr_dst.low3()));
+    enc.push(@intCast(lane));
+    return enc;
+}
+
 const testing = std.testing;
 
 test "encPaddD: low XMMs (xmm0, xmm1) — no REX, 4 bytes" {
@@ -639,4 +681,29 @@ test "encPsllqImm: PSLLQ xmm0, 32 — group /6, imm8=0x20" {
 test "encPsllqImm: PSLLQ xmm14, 32 — REX.B + group /6" {
     // 66 41 0F 73 F6 20 — REX.B=0x41, ModR/M = 11 110 110 = 0xF6.
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x41, 0x0F, 0x73, 0xF6, 0x20 }, encPsllqImm(.xmm14, 32).slice());
+}
+
+test "encPshufd: broadcast lane 0 (xmm0, xmm0, 0x00) — 5 bytes no REX" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x70, 0xC0, 0x00 }, encPshufd(.xmm0, .xmm0, 0x00).slice());
+}
+
+test "encPshufd: REX.R+B (xmm8, xmm13, 0x00)" {
+    // 66 45 0F 70 C5 00 — REX = 0x45, ModR/M = 11 000 101 = 0xC5.
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x70, 0xC5, 0x00 }, encPshufd(.xmm8, .xmm13, 0x00).slice());
+}
+
+test "encPextrD: lane 0 (rax, xmm0, 0) — 6 bytes no REX" {
+    // 66 0F 3A 16 C0 00 — ModR/M.reg = xmm_src.low3() = 0,
+    // ModR/M.rm = gpr_dst.low3() = 0 → 0xC0.
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x3A, 0x16, 0xC0, 0x00 }, encPextrD(.rax, .xmm0, 0).slice());
+}
+
+test "encPextrD: lane 3 (rax, xmm0, 3)" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x3A, 0x16, 0xC0, 0x03 }, encPextrD(.rax, .xmm0, 3).slice());
+}
+
+test "encPextrD: REX.R+B (r9, xmm8, 1) — high gpr + high xmm" {
+    // 66 45 0F 3A 16 C1 01 — REX.R for xmm_src (0x44) | REX.B for
+    // gpr_dst (0x41) → 0x45; ModR/M = 11 000 001 = 0xC1.
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x3A, 0x16, 0xC1, 0x01 }, encPextrD(.r9, .xmm8, 1).slice());
 }

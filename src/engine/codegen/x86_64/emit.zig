@@ -787,6 +787,12 @@ pub fn compile(
             // §9.7 / 9.7-d: i64x2.mul synthesis (no native SSE4.1 form;
             // PMULUDQ + shift/add idiom uses XMM14/15 as scratch).
             .@"i64x2.mul" => try op_simd.emitI64x2Mul(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            // §9.7 / 9.7-e: lane access foundation (i32x4 only — other
+            // shapes follow in 9.7-f). Splat broadcasts a scalar i32
+            // across 4 lanes; extract_lane pulls one lane back to
+            // scalar via PEXTRD (SSE4.1).
+            .@"i32x4.splat" => try op_simd.emitI32x4Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i32x4.extract_lane" => try op_simd.emitI32x4ExtractLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
             .@"memory.size" => {
                 // Wasm spec §4.4.7 — return current memory size in
                 // 64-KiB pages. mem_limit (bytes) lives at

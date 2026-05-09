@@ -204,6 +204,66 @@ pub fn emitI32x4Mul(
     return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmullD);
 }
 
+/// Wasm spec §4.4.3 (i32x4.splat) — pop scalar i32, push v128
+/// with all four lanes equal to the scalar. x86_64 lowering:
+/// `MOVD xmm, r32` (zero-extends to 128 bits) followed by
+/// `PSHUFD xmm, xmm, 0x00` to broadcast lane 0 to lanes 1-3.
+///
+/// Mirror of arm64's `emitI32x4Splat` (DUP V<vd>.4S, W<wn>) per
+/// ROADMAP P7. The 2-instruction x86_64 sequence has no native
+/// equivalent until AVX2's VPBROADCASTD; under ADR-0041's SSE4.1
+/// baseline the MOVD + PSHUFD pair is the canonical idiom.
+pub fn emitI32x4Splat(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    spill_base_off: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+
+    try buf.appendSlice(allocator, inst.encMovdXmmFromR32(dst_x, src_r).slice());
+    try buf.appendSlice(allocator, inst.encPshufd(dst_x, dst_x, 0x00).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// Wasm spec §4.4.3 (i32x4.extract_lane <imm>) — pop v128, push
+/// scalar i32 = the lane at the immediate index. x86_64 lowering:
+/// single `PEXTRD r32, xmm, imm8` (SSE4.1, mandated by ADR-0041
+/// §"5. SSE4.1 minimum baseline"). The lane immediate is in
+/// `ins.payload` (§9.4 lower's 1-byte encoding).
+pub fn emitI32x4ExtractLane(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    spill_base_off: u32,
+    payload: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const src_x = try gpr.resolveXmm(alloc, src_v);
+    const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
+
+    const lane: u2 = @intCast(payload & 0b11);
+    try buf.appendSlice(allocator, inst.encPextrD(dst_r, src_x, lane).slice());
+    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
+    try pushed_vregs.append(allocator, result_v);
+}
+
 /// Wasm spec §4.4.4 (i64x2.mul) — pop two v128, push their
 /// element-wise 64-bit product per lane (2 lanes; modular
 /// wraparound at 2^64). x86_64 has **no native instruction**
@@ -387,6 +447,59 @@ test "emitI8x16Sub: dispatches to encPsubB — opcode 0xF8 reaches the buffer" {
     @memcpy(expected_buf[n..][0..psub.slice().len], psub.slice());
     n += psub.slice().len;
     try testing.expectEqualSlices(u8, expected_buf[0..n], buf.items);
+}
+
+test "emitI32x4Splat: GPR slot 0 → XMM slot 0 (RBX → XMM8) — MOVD + PSHUFD" {
+    // SysV alloc: GPR pool starts at RBX (slot 0). XMM pool
+    // starts at XMM8 (slot 0). The handler resolves vreg 0 as
+    // GPR (i32 source) and vreg 1 as XMM (v128 result) — no
+    // class collision because alloc.slot is class-aware.
+    var slot_ids = [_]u16{ 0, 0 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 1,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    var next_vreg: u32 = 1;
+
+    try emitI32x4Splat(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    try expected.appendSlice(testing.allocator, inst.encMovdXmmFromR32(.xmm8, .rbx).slice());
+    try expected.appendSlice(testing.allocator, inst.encPshufd(.xmm8, .xmm8, 0x00).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
+test "emitI32x4ExtractLane: lane 2 — single PEXTRD instruction" {
+    var slot_ids = [_]u16{ 0, 0 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 1,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    var next_vreg: u32 = 1;
+
+    // payload = 2 → lane 2.
+    try emitI32x4ExtractLane(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0, 2);
+
+    // Expected: PEXTRD rbx, xmm8, 2. (vreg 0 v128 at slot 0 →
+    // XMM8; vreg 1 i32 at slot 0 → RBX in the GPR class.)
+    try testing.expectEqualSlices(u8, inst.encPextrD(.rbx, .xmm8, 2).slice(), buf.items);
 }
 
 test "emitI64x2Mul: emits the 11-instruction PMULUDQ synthesis sequence" {
