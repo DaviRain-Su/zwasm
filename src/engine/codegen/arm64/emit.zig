@@ -42,6 +42,7 @@ const std = @import("std");
 
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
+const inst_neon = @import("inst_neon.zig");
 const abi = @import("abi.zig");
 const label_mod = @import("label.zig");
 const regalloc = @import("../shared/regalloc.zig");
@@ -467,6 +468,13 @@ pub fn compile(
     var call_fixups: std.ArrayList(CallFixup) = .empty;
     errdefer call_fixups.deinit(allocator);
 
+    // SIMD const-pool fixups (per ADR-0042). Each LDR-Q-literal
+    // placeholder records (byte_offset, simd_consts index); patched
+    // at function close after the const-pool is appended past the
+    // trap stub.
+    var simd_const_fixups: std.ArrayList(ctx_mod.SimdConstFixup) = .empty;
+    defer simd_const_fixups.deinit(allocator);
+
     // Bundle compile()'s mutable state behind a pointer-based
     // EmitCtx so extracted op-handler modules (op_const, op_alu,
     // …) observe the same backing storage as the still-inlined
@@ -485,6 +493,7 @@ pub fn compile(
         .bounds_fixups = &bounds_fixups,
         .return_fixups = &return_fixups,
         .call_fixups = &call_fixups,
+        .simd_const_fixups = &simd_const_fixups,
         .local_base_off = local_base_off,
         .spill_base_off = spill_base_off,
         .num_imports = num_imports,
@@ -1157,6 +1166,37 @@ pub fn compile(
                         std.mem.writeInt(u32, buf.items[fx_byte..][0..4], new_word, .little);
                     }
                 }
+                // §9.6/9.6-f-ii — SIMD const-pool flush + LDR-Q-literal
+                // imm19 fixups (per ADR-0042). After the trap stub, if
+                // any v128.const / i8x16.shuffle ops emitted LDR-Q-
+                // literal placeholders, append the per-function const-
+                // pool 16-byte aligned and patch each placeholder.
+                if (simd_const_fixups.items.len > 0) {
+                    const consts = func.simd_consts orelse {
+                        std.debug.print("arm64/emit: simd_const_fixups present but func.simd_consts is null\n", .{});
+                        return Error.AllocationMissing;
+                    };
+                    // Pad to 16-byte alignment.
+                    while (buf.items.len % 16 != 0) try buf.append(allocator, 0);
+                    const pool_byte: u32 = @intCast(buf.items.len);
+                    // Append unique simd_consts entries 16-byte aligned.
+                    // For the MVP we append all entries even if some
+                    // are unused by this function; the entry-index ↔
+                    // byte-offset mapping is `pool_byte + idx * 16`.
+                    for (consts) |c| try buf.appendSlice(allocator, &c);
+                    // Patch each LDR-Q-literal's imm19 to point at
+                    // its const-pool entry (signed offset / 4 bytes).
+                    for (simd_const_fixups.items) |fx| {
+                        const target_byte: u32 = pool_byte + fx.const_idx * 16;
+                        const disp_words: i32 = @divExact(
+                            @as(i32, @intCast(target_byte)) - @as(i32, @intCast(fx.byte_offset)),
+                            4,
+                        );
+                        const orig = std.mem.readInt(u32, buf.items[fx.byte_offset..][0..4], .little);
+                        const patched = inst_neon.patchLdrLiteralQImm19(orig, @intCast(disp_words));
+                        std.mem.writeInt(u32, buf.items[fx.byte_offset..][0..4], patched, .little);
+                    }
+                }
                 break;
             },
             // §9.9 / 9.5-b-iii — SIMD-128 MVP catalogue per ADR-0041.
@@ -1315,6 +1355,10 @@ pub fn compile(
             .@"i32x4.trunc_sat_f32x4_u" => try op_simd.emitI32x4TruncSatF32x4U(&ctx, &ins),
             .@"i32x4.trunc_sat_f64x2_s_zero" => try op_simd.emitI32x4TruncSatF64x2SZero(&ctx, &ins),
             .@"i32x4.trunc_sat_f64x2_u_zero" => try op_simd.emitI32x4TruncSatF64x2UZero(&ctx, &ins),
+            // §9.6/9.6-f-ii — v128.const + i8x16.shuffle (per ADR-0042
+            // const-pool with PC-relative LDR-Q-literal + fixup pass).
+            .@"v128.const" => try op_simd.emitV128Const(&ctx, &ins),
+            .@"i8x16.shuffle" => try op_simd.emitI8x16Shuffle(&ctx, &ins),
 
             else => {
                 // §9.7 / 7.5-diag-op: surface the unhandled op

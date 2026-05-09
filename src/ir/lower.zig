@@ -95,7 +95,14 @@ const Lowerer = struct {
     block_stack: [max_control_stack]u32 = undefined,
     block_stack_len: usize = 0,
 
+    /// SIMD 16-byte const-pool builder (per ADR-0042). Each entry is
+    /// the raw immediate of a `v128.const` / `i8x16.shuffle` op.
+    /// Producing ops store the array index in `ZirInstr.payload`.
+    /// Flushed to `out.simd_consts` at `run()` close.
+    simd_consts: std.ArrayList([16]u8) = .empty,
+
     fn run(self: *Lowerer) Error!void {
+        errdefer self.simd_consts.deinit(self.alloc);
         var fn_done = false;
         while (!fn_done) {
             if (self.pos >= self.body.len) return Error.UnexpectedEnd;
@@ -104,6 +111,21 @@ const Lowerer = struct {
             try self.dispatch(op, &fn_done);
         }
         if (self.pos != self.body.len) return Error.TrailingBytes;
+        // Flush SIMD const-pool builder to func.simd_consts (transfer
+        // ownership). If empty, leave func.simd_consts null.
+        if (self.simd_consts.items.len > 0) {
+            self.out.simd_consts = try self.simd_consts.toOwnedSlice(self.alloc);
+        } else {
+            self.simd_consts.deinit(self.alloc);
+        }
+    }
+
+    /// Append a 16-byte SIMD constant to the per-function pool;
+    /// return the index for `ZirInstr.payload` encoding.
+    fn appendSimdConst(self: *Lowerer, bytes: [16]u8) Error!u32 {
+        const idx: u32 = @intCast(self.simd_consts.items.len);
+        try self.simd_consts.append(self.alloc, bytes);
+        return idx;
     }
 
     fn dispatch(self: *Lowerer, op: u8, fn_done: *bool) Error!void {
@@ -497,23 +519,29 @@ const Lowerer = struct {
             93 => try self.emitMemarg(.@"v128.load64_zero"),
 
             12 => {
-                // v128.const: 16 immediate bytes. Record the body
-                // offset in payload so emit can index back; 16 is
-                // implicit in the op.
+                // v128.const: 16 immediate bytes. Per ADR-0042, copy
+                // into per-function simd_consts pool; payload stores
+                // the array index.
                 if (self.pos + 16 > self.body.len) return Error.UnexpectedEnd;
-                const imm_off: u32 = @intCast(self.pos);
+                var bytes: [16]u8 = undefined;
+                @memcpy(&bytes, self.body[self.pos..][0..16]);
                 self.pos += 16;
-                try self.emit(.@"v128.const", imm_off, 0);
+                const idx = try self.appendSimdConst(bytes);
+                try self.emit(.@"v128.const", idx, 0);
             },
             13 => {
                 // i8x16.shuffle: 16 immediate lane bytes (each < 32).
+                // Per ADR-0042, copy into per-function simd_consts pool;
+                // payload stores the array index.
                 if (self.pos + 16 > self.body.len) return Error.UnexpectedEnd;
                 for (self.body[self.pos..][0..16]) |lane| {
                     if (lane >= 32) return Error.BadBlockType;
                 }
-                const imm_off: u32 = @intCast(self.pos);
+                var bytes: [16]u8 = undefined;
+                @memcpy(&bytes, self.body[self.pos..][0..16]);
                 self.pos += 16;
-                try self.emit(.@"i8x16.shuffle", imm_off, 0);
+                const idx = try self.appendSimdConst(bytes);
+                try self.emit(.@"i8x16.shuffle", idx, 0);
             },
             14 => try self.emit(.@"i8x16.swizzle", 0, 0),
 

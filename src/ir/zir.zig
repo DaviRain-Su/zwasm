@@ -664,6 +664,14 @@ pub const ZirFunc = struct {
     // Phase 9+ — SIMD additional state.
     simd_lane_routing: ?LaneRouting = null,
 
+    /// Phase 9+ — SIMD 16-byte literal pool (per ADR-0042). Each
+    /// entry is the raw 16-byte immediate of a `v128.const` or
+    /// `i8x16.shuffle` op. Indexed by the producing op's
+    /// `ZirInstr.payload`. Lower-time owner: `Lowerer.simd_consts`
+    /// builder; flushed to `func.simd_consts` at lower close.
+    /// Caller-owned: freed by `ZirFunc.deinit`.
+    simd_consts: ?[]const [16]u8 = null,
+
     // Phase 10+ — GC / EH / tail-call additional state.
     gc_root_map: ?GcRootMap = null,
     eh_landing_pads: ?[]LandingPad = null,
@@ -703,6 +711,7 @@ pub const ZirFunc = struct {
         self.instrs.deinit(alloc);
         self.blocks.deinit(alloc);
         self.branch_targets.deinit(alloc);
+        if (self.simd_consts) |sc| alloc.free(sc);
     }
 
     /// Total declared-locals count = original `func.locals.len`

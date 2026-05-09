@@ -1067,6 +1067,89 @@ pub fn emitI32x4TruncSatF64x2UZero(ctx: *EmitCtx, _: *const ZirInstr) Error!void
     try emitV128TruncSatF64Zero(ctx, inst_neon.encFcvtzu2D, inst_neon.encUqxtn2S);
 }
 
+// ============================================================
+// §9.6 / 9.6-f-ii — v128.const + i8x16.shuffle (per ADR-0042)
+// ============================================================
+//
+// Both ops materialise a 16-byte literal from the per-function
+// const-pool via PC-relative LDR-Q-literal. The lower pass populates
+// `func.simd_consts` (lower.zig) and stores the array index in
+// `ZirInstr.payload`. The handler emits an LDR-Q-literal placeholder
+// (imm19=0) and records a SimdConstFixup; the per-function emit
+// close (emit.zig) appends the const-pool 16-byte aligned past the
+// trap stub and patches each fixup's imm19.
+
+/// Wasm spec (SIMD) — `v128.const`: push a 16-byte literal as a
+/// v128 value. Lowers to `LDR Q<rt>, <const-pool entry>` (1 insn,
+/// fixup-resolved at function close).
+pub fn emitV128Const(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
+
+    // Emit LDR-Q-literal placeholder (imm19=0) and record fixup.
+    const fixup_byte: u32 = @intCast(ctx.buf.items.len);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encLdrLiteralQ(result_v, 0));
+    try ctx.simd_const_fixups.append(ctx.allocator, .{
+        .byte_offset = fixup_byte,
+        .const_idx = ins.payload,
+    });
+
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
+/// Wasm spec (SIMD) — `i8x16.shuffle`: pop 2 v128 (lhs, rhs), push
+/// v128 result. The 16-byte shuffle mask is materialised from the
+/// const-pool. NEON TBL 2-register form requires a consecutive
+/// V-register pair; we copy lhs → V30 and rhs → V31, then run TBL
+/// with the mask read from the result V register (which receives
+/// the const-pool load + the TBL output in sequence — TBL's
+/// register-level atomic semantics permit Vd == Vm).
+///
+/// Sequence:
+///   MOV V31.16B, V<rhs>.16B
+///   MOV V30.16B, V<lhs>.16B    (after lhs load, before mask load)
+///   LDR Q<result>, <const-pool>  (placeholder; fixup-resolved)
+///   TBL V<result>.16B, { V30.16B, V31.16B }, V<result>.16B
+pub fn emitI8x16Shuffle(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const rhs_vreg = ctx.pushed_vregs.pop().?;
+    const rhs_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, rhs_vreg, 1);
+    // Save rhs to V31 IMMEDIATELY after qLoadSpilled — if rhs was
+    // spilled, rhs_v == V30 (spill stage 1) and we must copy to V31
+    // before V30 is overwritten by the lhs load stage.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(31, rhs_v));
+
+    const lhs_vreg = ctx.pushed_vregs.pop().?;
+    const lhs_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, lhs_vreg, 0);
+    // Save lhs to V30. If lhs was spilled, lhs_v == V29, distinct
+    // from V30 (rhs spill stage which is now overwritten with lhs;
+    // this is fine since rhs is already in V31).
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(30, lhs_v));
+
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
+
+    // Materialise mask into result_v via LDR-Q-literal placeholder.
+    const fixup_byte: u32 = @intCast(ctx.buf.items.len);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encLdrLiteralQ(result_v, 0));
+    try ctx.simd_const_fixups.append(ctx.allocator, .{
+        .byte_offset = fixup_byte,
+        .const_idx = ins.payload,
+    });
+
+    // TBL V<result>.16B, { V30.16B, V31.16B }, V<result>.16B.
+    // result_v serves both as Vd (output) and Vm (mask) — atomic
+    // register read-then-write is well-defined per Arm IHI 0055.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encTbl2Reg(result_v, 30, result_v));
+
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
 pub fn emitI8x16Swizzle(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     const indices_vreg = ctx.pushed_vregs.pop().?;
     const indices_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, indices_vreg, 1);

@@ -513,7 +513,7 @@ test "lower: multivalue block typeidx with non-empty params lowers (D-035 chunk-
 // → ZirOp mapping.
 // ============================================================
 
-test "lower (simd): v128.const records 16-byte immediate offset" {
+test "lower (simd): v128.const records 16-byte immediate via simd_consts pool" {
     var f = newFunc(empty_sig);
     defer f.deinit(testing.allocator);
     // 0xFD 0x0C [16 bytes] 0x0B
@@ -524,8 +524,12 @@ test "lower (simd): v128.const records 16-byte immediate offset" {
     body[18] = 0x0B;
     try lowerFunctionBody(testing.allocator, &body, &f, &.{});
     try testing.expectEqual(ZirOp.@"v128.const", f.instrs.items[0].op);
-    // Payload = byte offset within `body` to the 16 imm bytes (after sub-opcode LEB).
-    try testing.expectEqual(@as(u32, 2), f.instrs.items[0].payload);
+    // Payload per ADR-0042 = index into func.simd_consts pool.
+    try testing.expectEqual(@as(u32, 0), f.instrs.items[0].payload);
+    // simd_consts[0] is the 16-byte literal copied from body bytes [2..18].
+    try testing.expect(f.simd_consts != null);
+    try testing.expectEqual(@as(usize, 1), f.simd_consts.?.len);
+    for (f.simd_consts.?[0]) |b| try testing.expectEqual(@as(u8, 0x42), b);
 }
 
 test "lower (simd): v128.load passes memarg through emitMemarg" {
@@ -585,7 +589,7 @@ test "lower (simd): i32x4.extract_lane stores lane byte in payload" {
     try testing.expectEqual(@as(u32, 2), f.instrs.items[0].payload);
 }
 
-test "lower (simd): i8x16.shuffle records immediate offset" {
+test "lower (simd): i8x16.shuffle records immediate via simd_consts pool" {
     var f = newFunc(empty_sig);
     defer f.deinit(testing.allocator);
     var body: [19]u8 = undefined;
@@ -596,7 +600,11 @@ test "lower (simd): i8x16.shuffle records immediate offset" {
     body[18] = 0x0B;
     try lowerFunctionBody(testing.allocator, &body, &f, &.{});
     try testing.expectEqual(ZirOp.@"i8x16.shuffle", f.instrs.items[0].op);
-    try testing.expectEqual(@as(u32, 2), f.instrs.items[0].payload);
+    // Payload per ADR-0042 = index into func.simd_consts pool.
+    try testing.expectEqual(@as(u32, 0), f.instrs.items[0].payload);
+    try testing.expect(f.simd_consts != null);
+    try testing.expectEqual(@as(usize, 1), f.simd_consts.?.len);
+    for (f.simd_consts.?[0], 0..) |b, idx| try testing.expectEqual(@as(u8, @intCast(idx)), b);
 }
 
 test "lower (simd): i8x16.shuffle rejects lane >= 32" {

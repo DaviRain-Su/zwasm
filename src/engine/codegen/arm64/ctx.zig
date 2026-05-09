@@ -47,6 +47,16 @@ pub const CallFixup = struct {
     target_func_idx: u32,
 };
 
+/// Pending `LDR Q<rt>, <label>` site requiring const-pool patch
+/// (per ADR-0042). At function close, after the trap stub, the
+/// per-function const-pool is appended (16-byte aligned) and the
+/// imm19 field of every SimdConstFixup is patched to the
+/// PC-relative offset of `func.simd_consts[const_idx]`.
+pub const SimdConstFixup = struct {
+    byte_offset: u32, // location of the LDR-Q-literal placeholder
+    const_idx: u32,   // index into func.simd_consts
+};
+
 /// Per-function emit context. Built by `compile()` once after
 /// the function prologue lands; threaded as `*EmitCtx` to every
 /// op-handler module so each handler can append code, manage the
@@ -85,6 +95,12 @@ pub const EmitCtx = struct {
     /// `BL` fixups exposed via `EmitOutput` for the post-emit
     /// linker.
     call_fixups: *std.ArrayList(CallFixup),
+    /// SIMD const-pool fixups (per ADR-0042). Each entry records
+    /// the byte offset of an LDR-Q-literal placeholder and the
+    /// `func.simd_consts` index. Patched at function close after
+    /// the const-pool entries are appended (16-byte aligned) past
+    /// the trap stub.
+    simd_const_fixups: *std.ArrayList(SimdConstFixup),
     /// Absolute SP-relative byte offset of local slot 0.
     /// §9.7 / 7.9-d-11: equals `outgoing_max_bytes`, the bottom-of-
     /// frame region pre-allocated for caller-side stack args. Zero

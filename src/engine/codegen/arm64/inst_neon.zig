@@ -608,6 +608,18 @@ pub fn encTbl1Reg(rd: Vn, rn: Vn, rm: Vn) u32 {
     return 0x4E000000 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
 }
 
+/// `TBL V<rd>.16B, { V<rn>.16B, V<rn+1>.16B }, V<rm>.16B` — table
+/// lookup with 2-register table. Used for `i8x16.shuffle`. The table
+/// occupies 32 bytes; indices 0..31 select; ≥32 → 0 (Wasm validates
+/// this at parse, so OOB shouldn't reach codegen).
+/// Encoding (TBL 2-register form): same base + len=01 (bits 14:13).
+/// Per Arm IHI 0055 §C7.2.299. Rn must pair with Rn+1; the caller
+/// ensures consecutive register placement (per ADR-0042 + audit
+/// recommendation: copy-to-V30/V31 preamble at handler).
+pub fn encTbl2Reg(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E002000 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
 // ---------------------------------------------------------------------
 // §9.6 / 9.6-g-i — SXTL / SXTL2 / UXTL / UXTL2 (extend low/high)
 // ---------------------------------------------------------------------
@@ -816,6 +828,37 @@ pub fn encSqxtn2S(rd: Vn, rn: Vn) u32 {
 /// Used for f64x2.trunc_sat_*_u_zero synthesis. size=10, U=1.
 pub fn encUqxtn2S(rd: Vn, rn: Vn) u32 {
     return 0x2EA14800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+// ---------------------------------------------------------------------
+// §9.6 / 9.6-f-ii — LDR (literal, SIMD&FP) Q-form
+// ---------------------------------------------------------------------
+// Wasm v128.const + i8x16.shuffle materialise their 16-byte immediates
+// from a per-function const-pool (per ADR-0042). The placeholder LDR
+// instruction is patched with the final imm19 (signed offset / 4
+// bytes from PC of LDR to const-pool entry).
+//
+// Encoding (LDR literal, SIMD&FP, Q form):
+//   `10 011 1 00 imm19 Rt`
+// per Arm IHI 0055 §C7.2.198. Base = 0x9C000000 (Rt=0, imm19=0).
+// imm19 range: ±2^18 × 4 = ±1 MiB — sufficient for a single-function
+// const-pool placed immediately after the function body.
+
+/// `LDR Q<rt>, <label>` — PC-relative literal load of 128-bit value.
+/// `imm19` is the signed offset in 4-byte words from LDR to label.
+/// Use `0` as a placeholder; fixup pass patches with the real offset.
+pub fn encLdrLiteralQ(rt: Vn, imm19: i20) u32 {
+    const u_imm19: u32 = @as(u32, @bitCast(@as(i32, imm19))) & 0x7FFFF;
+    return 0x9C000000 | (u_imm19 << 5) | @as(u32, rt);
+}
+
+/// Patch the imm19 field of a previously-emitted LDR-literal-Q
+/// placeholder. Used by the fixup pass after the const-pool has
+/// been appended to the JIT block.
+pub fn patchLdrLiteralQImm19(word: u32, imm19: i20) u32 {
+    const u_imm19: u32 = @as(u32, @bitCast(@as(i32, imm19))) & 0x7FFFF;
+    // Clear bits 23:5 (imm19) then OR new value.
+    return (word & ~@as(u32, 0x00FFFFE0)) | (u_imm19 << 5);
 }
 
 /// `BSL V<d>.16B, V<n>.16B, V<m>.16B` — bitwise select using V<d>
@@ -1506,6 +1549,16 @@ test "encTbl1Reg: V31, V31, V31 (max indices)" {
     try testing.expectEqual(@as(u32, 0x4E1F03FF), encTbl1Reg(31, 31, 31));
 }
 
+test "encTbl2Reg: V0, V30, V2 (TBL with V30:V31 pair)" {
+    // 0x4E002000 | (2 << 16) | (30 << 5) | 0 = 0x4E0223C0
+    try testing.expectEqual(@as(u32, 0x4E0223C0), encTbl2Reg(0, 30, 2));
+}
+
+test "encTbl1Reg vs encTbl2Reg: len field (bits 14:13) differs" {
+    // len=00 (1-reg) vs len=01 (2-reg) → bit 13 differs → 0x2000.
+    try testing.expectEqual(@as(u32, 0x2000), encTbl2Reg(0, 0, 0) ^ encTbl1Reg(0, 0, 0));
+}
+
 // ============================================================
 // §9.6 / 9.6-g-i — SXTL/UXTL extend-low/high
 // ============================================================
@@ -1718,6 +1771,33 @@ test "encUqxtn2S: v0.2s, v0.2d (base)" {
 
 test "Sqxtn2S vs Uqxtn2S: U bit differs" {
     try testing.expectEqual(@as(u32, 0x20000000), encUqxtn2S(0, 0) ^ encSqxtn2S(0, 0));
+}
+
+// ============================================================
+// §9.6 / 9.6-f-ii — LDR (literal, SIMD&FP) Q-form
+// ============================================================
+
+test "encLdrLiteralQ: Q0, imm19=0 (base)" {
+    // 0x9C000000 | (0 << 5) | 0 = 0x9C000000
+    try testing.expectEqual(@as(u32, 0x9C000000), encLdrLiteralQ(0, 0));
+}
+
+test "encLdrLiteralQ: Q31, imm19=8 (fwd 32 bytes)" {
+    // 0x9C000000 | (8 << 5) | 31 = 0x9C00011F
+    try testing.expectEqual(@as(u32, 0x9C00011F), encLdrLiteralQ(31, 8));
+}
+
+test "encLdrLiteralQ: imm19=-1 (back 4 bytes; sign-extended)" {
+    // imm19 = -1 = 0x7FFFF (19-bit sign-extended).
+    // 0x9C000000 | (0x7FFFF << 5) | 0 = 0x9CFFFFE0
+    try testing.expectEqual(@as(u32, 0x9CFFFFE0), encLdrLiteralQ(0, -1));
+}
+
+test "patchLdrLiteralQImm19: replaces imm19 field" {
+    const orig = encLdrLiteralQ(5, 0);
+    const patched = patchLdrLiteralQImm19(orig, 100);
+    // Patched word should equal direct emit with the same imm19 + Rt.
+    try testing.expectEqual(encLdrLiteralQ(5, 100), patched);
 }
 
 test "Int compare shapes: 4 CMEQ encodings pairwise distinct" {
