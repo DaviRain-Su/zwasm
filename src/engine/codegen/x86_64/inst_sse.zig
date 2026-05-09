@@ -1126,6 +1126,50 @@ pub fn encPsubq(dst: Xmm, src: Xmm) EncodedInsn {
     return encSsePackedIntBinop(0xFB, dst, src);
 }
 
+// §9.7-ab FP convert primitives — SSE2 packed FP/int
+// conversions. Wasm `f32x4.convert_i32x4_s`, `f64x2.convert_
+// low_i32x4_s`, `f64x2.promote_low_f32x4`, `f32x4.demote_
+// f64x2_zero`. All single-instruction unary ops with src/dst
+// reg-reg encoding.
+
+/// `CVTDQ2PS xmm, xmm` ([REX?] 0F 5B /r) — SSE2 convert 4
+/// packed signed i32 to 4 packed f32. No mandatory prefix.
+/// Wasm `f32x4.convert_i32x4_s`.
+pub fn encCvtdq2ps(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSseFpPsBinop(0x5B, dst, src);
+}
+
+/// `CVTPS2PD xmm, xmm` ([REX?] 0F 5A /r) — SSE2 convert 2 low
+/// packed f32 (64 bits of src) to 2 packed f64. Wasm
+/// `f64x2.promote_low_f32x4`.
+pub fn encCvtps2pd(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSseFpPsBinop(0x5A, dst, src);
+}
+
+/// `CVTPD2PS xmm, xmm` (66 [REX?] 0F 5A /r) — SSE2 convert 2
+/// packed f64 to 2 low packed f32 (high 64 of dst zeroed).
+/// Wasm `f32x4.demote_f64x2_zero` (the "_zero" suffix matches
+/// CVTPD2PS's high-half zeroing).
+pub fn encCvtpd2ps(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0x5A, dst, src);
+}
+
+/// `CVTDQ2PD xmm, xmm` (F3 [REX?] 0F E6 /r) — SSE2 convert 2
+/// low packed signed i32 (low 64 of src) to 2 packed f64.
+/// Mandatory F3 prefix (different from typical packed-int
+/// 66-prefix family). Wasm `f64x2.convert_low_i32x4_s`.
+pub fn encCvtdq2pd(dst: Xmm, src: Xmm) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0xF3);
+    if (dst.extBit() != 0 or src.extBit() != 0) {
+        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0xE6);
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    return enc;
+}
+
 // §9.7-z abs primitives — SSSE3 PABSB/W/D compute per-lane
 // absolute value of signed integers. PABSQ doesn't exist in
 // pre-AVX-512 SSE; i64x2.abs synthesises via sign-mask PXOR/PSUBQ
@@ -1509,6 +1553,19 @@ test "encPsrawReg / encPsradReg opcode bytes (xmm0, xmm1)" {
 
 test "encPsubq opcode bytes (xmm0, xmm1) — SSE2 packed 64-bit subtract" {
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xFB, 0xC1 }, encPsubq(.xmm0, .xmm1).slice());
+}
+
+test "encCvtdq2ps / encCvtps2pd opcode bytes (xmm0, xmm1) — no 66 prefix" {
+    try testing.expectEqualSlices(u8, &.{ 0x0F, 0x5B, 0xC1 }, encCvtdq2ps(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x0F, 0x5A, 0xC1 }, encCvtps2pd(.xmm0, .xmm1).slice());
+}
+
+test "encCvtpd2ps opcode bytes (xmm0, xmm1) — 66 prefix" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x5A, 0xC1 }, encCvtpd2ps(.xmm0, .xmm1).slice());
+}
+
+test "encCvtdq2pd opcode bytes (xmm0, xmm1) — F3 prefix" {
+    try testing.expectEqualSlices(u8, &.{ 0xF3, 0x0F, 0xE6, 0xC1 }, encCvtdq2pd(.xmm0, .xmm1).slice());
 }
 
 test "encPabsb / encPabsw / encPabsd opcode bytes (xmm0, xmm1)" {

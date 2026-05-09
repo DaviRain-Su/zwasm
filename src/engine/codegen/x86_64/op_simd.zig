@@ -1569,6 +1569,34 @@ pub fn emitI8x16ShrU(
 /// PSRAW preserves the sign bit invariant, and the resulting
 /// magnitude is bounded by the original i8 range). 11
 /// instructions; uses both XMM14 + XMM15 scratches.
+/// Wasm spec §4.4.4 (FP convert family — signed + promote/demote)
+/// — single-instr unaries via emitV128FpUnop:
+///
+///   f32x4.convert_i32x4_s   → CVTDQ2PS (4 i32 → 4 f32)
+///   f64x2.convert_low_i32x4_s → CVTDQ2PD (2 low i32 → 2 f64)
+///   f64x2.promote_low_f32x4 → CVTPS2PD (2 low f32 → 2 f64)
+///   f32x4.demote_f64x2_zero → CVTPD2PS (2 f64 → 2 low f32, high 0)
+///
+/// Unsigned conversions and trunc-sat ops defer to later chunks
+/// (cranelift uses const-pool float magic numbers per
+/// `lower.isle:3761+`; pending ADR-0042 plumbing).
+
+pub fn emitF32x4ConvertI32x4S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpUnop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encCvtdq2ps);
+}
+
+pub fn emitF64x2ConvertLowI32x4S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpUnop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encCvtdq2pd);
+}
+
+pub fn emitF64x2PromoteLowF32x4(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpUnop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encCvtps2pd);
+}
+
+pub fn emitF32x4DemoteF64x2Zero(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpUnop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encCvtpd2ps);
+}
+
 /// Wasm spec §4.4.4 (i*x*.neg) — pop one v128, push v128 with
 /// per-lane signed negation. Computed as `0 - src` via PSUB:
 ///

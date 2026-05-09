@@ -1027,6 +1027,14 @@ pub fn compile(
             .@"i16x8.neg" => try op_simd.emitI16x8Neg(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"i32x4.neg" => try op_simd.emitI32x4Neg(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"i64x2.neg" => try op_simd.emitI64x2Neg(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            // §9.7 / 9.7-ab: FP convert signed + promote/demote
+            // (4 ops). Single-instr unary CVT* via emitV128FpUnop.
+            // u-variants and trunc-sat defer (cranelift uses
+            // const-pool float magic numbers; ADR-0042 pending).
+            .@"f32x4.convert_i32x4_s" => try op_simd.emitF32x4ConvertI32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.convert_low_i32x4_s" => try op_simd.emitF64x2ConvertLowI32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.promote_low_f32x4" => try op_simd.emitF64x2PromoteLowF32x4(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f32x4.demote_f64x2_zero" => try op_simd.emitF32x4DemoteF64x2Zero(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"memory.size" => {
                 // Wasm spec §4.4.7 — return current memory size in
                 // 64-KiB pages. mem_limit (bytes) lives at
