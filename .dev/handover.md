@@ -28,15 +28,36 @@ as-loop-broke FAIL is a HOIST PASS BUG (NOT Rosetta artefact) —
 synthetic-local lifetime / SysV-caller-saved-reg interaction
 around `call $dummy`. Updated D-054 with concrete discharge plan.
 
-**9.7-as NEXT** — D-054 root-cause investigation + fix. The
-hypothesis (synthetic-local clobbered by SysV caller-saved-reg
-spill discipline around calls) is testable via WAT spike +
-lldb -b on OrbStack. Discharge order: (a) WAT replicate of
-the bug shape (loop-with-call-with-br-const) lands as edge-
-case fixture; (b) lldb -b inspects synthetic-local lifetime
-across call boundary; (c) fix in `src/ir/hoist/pass.zig` or
-regalloc spill discipline; (d) D-054 closes; OrbStack gate
-becomes strict (no D-054 carry).
+**9.7-as NEXT** — D-054 root-cause investigation + fix.
+Investigation summary so far: code-read of hoist pass +
+emit's local.set/local.get + SysV vs Win64 abi
+(allocatable_gprs = RBX/R12/R13/R14, all callee-saved on
+both ABIs — so vreg pool is NOT the bug source). Synthetic
+local 0 is at [RBP-16] when uses_runtime_ptr=true; localDisp
+math is correct. RBP non-volatile in both ABIs. So the bug
+is NOT register choice, NOT disp offset, NOT prologue size.
+
+**Action items next cycle (concrete):**
+1. Build a Zig spike at `private/spikes/d054-jit-bytes/`
+   that loads `test/spec/wasm-1.0-assert/unreachable/
+   unreachable.0.wasm`, finds `as-loop-broke` function,
+   compiles via `zwasm.compileWasm`, and dumps the per-
+   function JIT bytes as hex.
+2. Run via `orb run -m my-ubuntu-amd64 zig run …` to get
+   Linux x86_64 bytes. Then run on Mac aarch64 (same code-
+   gen path but different arch) — confirm the bytes are
+   *identical* on Linux x86_64 vs Win x86_64 (windowsmini)
+   to establish whether codegen diverges between ABIs.
+3. If bytes are identical → bug is at execution-time (not
+   codegen); investigate the call/return path for SysV-
+   specific stack effects (e.g., runtime_ptr R15 save/
+   restore around CALL, or ARG marshaling that overwrites
+   a stack region overlapping with [RBP-16]).
+4. If bytes differ → diff the per-ABI emit paths (most
+   likely candidate: shadow-space alloc, or arg marshal
+   stack allocation difference).
+5. Per `.claude/rules/debug_jit.md` Recipe 1 (lldb -b),
+   confirm faulting RIP / stack state on OrbStack.
 
 Subsequent: 9.7-at (i32x4.trunc_sat_f32x4_u — needs 3 scratch
 xmms; ADR-grade scratch-budget extension OR fall back to
