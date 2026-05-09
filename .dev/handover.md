@@ -13,23 +13,26 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 9 / §9.6/9.6-f-i [x] (swizzle); §9.6/9.6-f-ii deferred via D-056; **§9.6/9.6-g NEXT**
+## Current state — Phase 9 / §9.6/9.6-g-i [x] (extend × 12); §9.6/9.6-f-ii deferred via D-056; **§9.6/9.6-g-ii NEXT**
 
-§9.6/9.6-f-i complete. Step 0 cranelift/zware/wasmer survey for
-9.6-f-ii (shuffle) ran 2026-05-09 and surfaced 3 ADR-grade design
-questions (const-pool storage, consecutive-pair strategy,
-simd_consts side-table) — deferred via D-056 to be discharged
-post-§9.6-close v1-audit, which may surface a const-pool pattern
-that informs the design. v128.const codegen has the same
-retrieval problem and bundles into the eventual chunk.
+§9.6/9.6-g-i adds 12 NEON SXTL/UXTL/SXTL2/UXTL2 encoders + 12
+op_simd handlers via existing `emitV128Unop` adapter. Step 0
+cranelift survey cross-checked encoder bases against
+emit_tests.rs:2826-2890 (6 fixture words). Shape-clean:
+single-instruction lowering, no synthesis.
 
 Per LOOP.md chunk granularity, §9.6 sub-row state:
-- 9.6-a/b/c-i/c-ii/d/e/f-i [x]: FP arith / compares / int compares
-  / swizzle.
+- 9.6-a/b/c-i/c-ii/d/e/f-i/g-i [x]: FP arith / compares / int
+  compares / swizzle / extend.
 - 9.6-f-ii deferred (D-056): shuffle + v128.const need const-pool
   ADR; trigger = §9.6 close v1-audit findings.
-- 9.6-g NEXT: conversion family (trunc_sat / convert / narrow /
-  extend / promote / demote — multi-chunk territory).
+- 9.6-g-ii NEXT: narrow (saturating, 4 ops via SQXTN/UQXTN/
+  SQXTN2/UQXTN2).
+- 9.6-g-iii: FP convert (i32x4→f32x4 / i32x4→f64x2 via
+  SCVTF/UCVTF).
+- 9.6-g-iv: promote/demote (FCVTL/FCVTN).
+- 9.6-g-v: trunc_sat with NaN→0 + clamp (most complex; FCVTZS/U
+  + special-value handling).
 
 Mac gates: zone ✓, file_size ✓, spill ✓, lint ✓; spec
 212/0/20, wast 1158/0/0.
@@ -59,26 +62,30 @@ before flipping §9.6 to `[x]`:
   plumbing, ABI quirks) — better to back-fill before x86_64 SIMD
   (§9.7) where the same gaps would compound.
 
-**§9.6/9.6-g NEXT** — SIMD conversion family (~25 ops):
-- trunc_sat: i32x4.trunc_sat_f32x4_{s,u}, i32x4.trunc_sat_f64x2_{s_zero,u_zero}
-- convert: f32x4.convert_i32x4_{s,u}, f64x2.convert_low_i32x4_{s,u}
-- promote/demote: f32x4.demote_f64x2_zero, f64x2.promote_low_f32x4
-- narrow: i8x16.narrow_i16x8_{s,u}, i16x8.narrow_i32x4_{s,u} (saturating)
-- extend: i16x8.extend_{low,high}_i8x16_{s,u},
-  i32x4.extend_{low,high}_i16x8_{s,u},
-  i64x2.extend_{low,high}_i32x4_{s,u}
+**§9.6/9.6-g-ii NEXT** — narrow saturating (4 ops):
+- i8x16.narrow_i16x8_{s,u}: input 2× v128 (32 i16 lanes), output
+  v128 (16 i8 lanes), saturating signed/unsigned.
+- i16x8.narrow_i32x4_{s,u}: input 2× v128 (8 i32 lanes), output
+  v128 (8 i16 lanes), saturating.
 
-NEON encoders: FCVTZS / FCVTZU / SCVTF / UCVTF (vector forms),
-FCVTL / FCVTN (FP narrow/widen), SXTL / UXTL (int extend; aliases
-of SSHLL / USHLL with shift=0), SQXTN / UQXTN (saturating narrow).
+NEON encoders: SQXTN/SQXTN2 (signed saturating narrow), UQXTN/
+UQXTN2 (unsigned saturating narrow). The "2" form writes the
+upper half of the destination; combined with the non-2 form
+this gives full-width narrow from 2 source registers. Per Arm
+IHI 0055 §C7.2.330 (SQXTN) / §C7.2.413 (UQXTN).
 
-Multi-chunk territory. Step 0 mandatory for first sub-chunk —
-cranelift's vec/v128 conversion lowering is non-trivial
-(unsigned trunc_sat needs FCVTZU + clamp; spec NaN handling).
-Likely sub-rows 9.6-g-i (extend low+high — simplest, no FP) →
-9.6-g-ii (narrow saturating) → 9.6-g-iii (FP convert) →
-9.6-g-iv (promote/demote) → 9.6-g-v (trunc_sat with NaN/sat
-handling — most complex).
+Synthesis pattern (per cranelift): given lhs + rhs both 32-byte
+worth of input lanes, emit:
+  SQXTN  V<tmp>.<half>, V<lhs>.<full>   ; lower half of result
+  SQXTN2 V<tmp>.<full>, V<rhs>.<full>   ; upper half of result
+  MOV    V<result>.16B, V<tmp>.16B      ; or use tmp = result_v
+This needs a scratch V or careful aliasing. Since the SQXTN2
+writes only the upper 8 bytes of the destination (preserving
+lower), we can sequence: SQXTN result, lhs (writes lower, zeros
+upper); SQXTN2 result, rhs (writes upper, preserves lower).
+
+Step 0 should confirm cranelift's synthesis pattern + verify
+SQXTN/SQXTN2 destination semantics (lower-write vs in-place).
 
 Estimated ~150 src + ~80 tests; may need a `private/spikes/`
 spike to verify the const-pool / scratch-reg approach before
