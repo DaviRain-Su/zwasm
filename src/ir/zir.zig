@@ -423,6 +423,29 @@ pub const ZirInstr = struct {
     extra: u32 = 0,
 };
 
+/// Returns true if `op` is a SIMD-128 ZirOp (operates on or
+/// produces v128 vregs). Per ADR-0041 §"Decision" / 1
+/// (shape-as-variant), the predicate uses tag-name prefix
+/// matching: any op whose textual name starts with `v128.`,
+/// `i8x16.`, `i16x8.`, `i32x4.`, `i64x2.`, `f32x4.`, or
+/// `f64x2.` is a SIMD op.
+///
+/// Used by `regalloc.compute()` to populate
+/// `Allocation.shape_tags` per ADR-0041 §"Decision" / 2 +
+/// §14 (single_slot_dual_meaning). Emit pass queries the
+/// resulting shape tag to select 16-byte vs 8-byte spill
+/// stride and Q vs D/S register view.
+pub fn isSimdZirOp(op: ZirOp) bool {
+    const name = @tagName(op);
+    return std.mem.startsWith(u8, name, "v128.") or
+        std.mem.startsWith(u8, name, "i8x16.") or
+        std.mem.startsWith(u8, name, "i16x8.") or
+        std.mem.startsWith(u8, name, "i32x4.") or
+        std.mem.startsWith(u8, name, "i64x2.") or
+        std.mem.startsWith(u8, name, "f32x4.") or
+        std.mem.startsWith(u8, name, "f64x2.");
+}
+
 // Forward-declared "slot" types — identities reserved day 1 per
 // P13 / W54 lesson. Fields land in the populating phase
 // (commented at each declaration). Adding fields later is OK;
@@ -851,4 +874,35 @@ test "ZirFunc: pass_diagnostics slot attaches + detaches without leak" {
     // ZirFunc.deinit, same as Liveness / LoopInfo).
     deinitPassDiagnostics(std.testing.allocator, f.pass_diagnostics.?);
     f.pass_diagnostics = null;
+}
+
+// ============================================================
+// §9.9 / 9.5-b — isSimdZirOp predicate tests (per ADR-0041
+// §"Decision" / 1 — shape-as-variant)
+// ============================================================
+
+test "isSimdZirOp: v128.* prefix matches" {
+    try std.testing.expect(isSimdZirOp(.@"v128.load"));
+    try std.testing.expect(isSimdZirOp(.@"v128.store"));
+    try std.testing.expect(isSimdZirOp(.@"v128.const"));
+    try std.testing.expect(isSimdZirOp(.@"v128.not"));
+}
+
+test "isSimdZirOp: per-shape prefixes match" {
+    try std.testing.expect(isSimdZirOp(.@"i8x16.splat"));
+    try std.testing.expect(isSimdZirOp(.@"i16x8.splat"));
+    try std.testing.expect(isSimdZirOp(.@"i32x4.add"));
+    try std.testing.expect(isSimdZirOp(.@"i64x2.splat"));
+    try std.testing.expect(isSimdZirOp(.@"f32x4.splat"));
+    try std.testing.expect(isSimdZirOp(.@"f64x2.splat"));
+}
+
+test "isSimdZirOp: scalar ops do not match" {
+    try std.testing.expect(!isSimdZirOp(.@"i32.const"));
+    try std.testing.expect(!isSimdZirOp(.@"i64.add"));
+    try std.testing.expect(!isSimdZirOp(.@"f32.const"));
+    try std.testing.expect(!isSimdZirOp(.@"f64.add"));
+    try std.testing.expect(!isSimdZirOp(.end));
+    try std.testing.expect(!isSimdZirOp(.@"local.get"));
+    try std.testing.expect(!isSimdZirOp(.@"call"));
 }

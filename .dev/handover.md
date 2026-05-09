@@ -13,29 +13,35 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 9 / §9.9/9.5-a [x] (NEON encoder foundation); **§9.9/9.5-b NEXT**
+## Current state — Phase 9 / §9.9/9.5-b-i [x] (shape-tag populator); **§9.9/9.5-b-ii NEXT**
 
-§9.9/9.5-a lands `src/engine/codegen/arm64/inst_neon.zig` with
-foundational NEON encoders: `encLdrQImm` / `encStrQImm` (128-bit
-load/store, 16-byte stride), `encOrrV16B` + `encMovV16B` alias
-(reg-to-reg move via ORR), `encDup4S` (i32x4.splat from W reg),
-`encAdd4S` (i32x4 vector add). 14 encoder unit tests verify bit
-patterns against Arm IHI 0055 §C7.
+§9.9/9.5-b-i lands the metadata pipeline:
+- `zir.isSimdZirOp(op)` predicate (prefix-match on tag name:
+  `v128.` / `i8x16.` / `i16x8.` / `i32x4.` / `i64x2.` / `f32x4.`
+  / `f64x2.`).
+- `regalloc.populateShapeTags(allocator, func, n_vregs)` walks
+  `func.instrs` simulating liveness's def-order vreg numbering
+  + marks v128-producing ops; returns `null` when no SIMD ops
+  appear (matches the `Allocation.shape_tags = null` default).
+- `regalloc.deinit` extended to free `shape_tags` if present.
 
-Per LOOP.md chunk granularity, the 9.5 row's ~900 LOC scope
-splits into sub-chunks (annotated in the row text). 9.5-a is
-the encoder foundation; 9.5-b wires ZirOp dispatch + populates
-`Allocation.shape_tags` from ZirOp metadata; 9.5-c covers
-extract/replace_lane + remaining int-arith shapes.
+Per LOOP.md chunk granularity, 9.5 row split:
+- 9.5-a [x]: NEON encoder foundation (`inst_neon.zig`)
+- 9.5-b-i [x]: shape-tag predicate + populator (this commit)
+- 9.5-b-ii NEXT: per-op emit handlers + compute() integration
+- 9.5-c: extract/replace_lane + remaining int-arith shapes
 
-**§9.9/9.5-b NEXT** — per-op handlers in `src/engine/codegen/
-arm64/`. Dispatch v128.load / v128.store / i32x4.splat /
-i32x4.add ZirOps to the new NEON encoders + populate
-`Allocation.shape_tags` during `regalloc.compute()` when the
-function's instr stream contains v128 ZirOps. Estimated
-~250 src + ~150 tests.
+8 unit tests cover happy-path (i32x4.splat / v128.const +
+i32x4.add) + extract_lane scalar production + null-on-empty +
+null-on-no-SIMD-ops.
 
-## Active task — §9.9/9.5-b: ARM64 NEON per-op dispatch **NEXT**
+**§9.9/9.5-b-ii NEXT** — per-op handlers in arm64/op_simd.zig
+(or extension to existing op_*.zig). Dispatch v128.load /
+v128.store / i32x4.splat / i32x4.add to the NEON encoders;
+wire `populateShapeTags()` into `regalloc.compute()` so
+emit can query `alloc.shapeTag(vreg)`.
+
+## Active task — §9.9/9.5-b-ii: ARM64 NEON per-op dispatch **NEXT**
 
 Per ADR-0041 + 9.5-a's encoder foundation. Wires the NEON
 encoders into the ZirOp dispatch path in
