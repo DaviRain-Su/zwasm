@@ -1302,6 +1302,11 @@ pub fn compile(
             .@"i8x16.narrow_i16x8_u" => try op_simd.emitI8x16NarrowI16x8U(&ctx, &ins),
             .@"i16x8.narrow_i32x4_s" => try op_simd.emitI16x8NarrowI32x4S(&ctx, &ins),
             .@"i16x8.narrow_i32x4_u" => try op_simd.emitI16x8NarrowI32x4U(&ctx, &ins),
+            // §9.6/9.6-g-iii — i→f FP convert (SCVTF/UCVTF family).
+            .@"f32x4.convert_i32x4_s" => try op_simd.emitF32x4ConvertI32x4S(&ctx, &ins),
+            .@"f32x4.convert_i32x4_u" => try op_simd.emitF32x4ConvertI32x4U(&ctx, &ins),
+            .@"f64x2.convert_low_i32x4_s" => try op_simd.emitF64x2ConvertLowI32x4S(&ctx, &ins),
+            .@"f64x2.convert_low_i32x4_u" => try op_simd.emitF64x2ConvertLowI32x4U(&ctx, &ins),
 
             else => {
                 // §9.7 / 7.5-diag-op: surface the unhandled op

@@ -719,6 +719,36 @@ pub fn encSqxtun2_8H(rd: Vn, rn: Vn) u32 {
     return 0x6E612800 | (@as(u32, rn) << 5) | @as(u32, rd);
 }
 
+// ---------------------------------------------------------------------
+// §9.6 / 9.6-g-iii — SCVTF / UCVTF (vector form, integer → FP)
+// ---------------------------------------------------------------------
+// Wasm spec — `f32x4.convert_i32x4_{s,u}` (single instruction) +
+// `f64x2.convert_low_i32x4_{s,u}` (2-instruction synthesis: extend
+// lower 2 i32 lanes to i64 via SXTL/UXTL .2D, then SCVTF/UCVTF .2D
+// in place — same pattern cranelift uses per lower.isle).
+//
+// Encoding family "Advanced SIMD two-register miscellaneous (FP)":
+//   `0 Q U 01110 0 sz 1 0000 1 11011 0 Rn Rd`
+// Q=1 (vector form), sz=0 (.4S, i32→f32) or sz=1 (.2D, i64→f64).
+// U=0 → SCVTF (signed), U=1 → UCVTF (unsigned).
+// Per Arm IHI 0055 §C7.2.343 (SCVTF) / §C7.2.371 (UCVTF). Bases
+// cross-checked against wasmtime/cranelift emit_tests.rs:5034-5046.
+// IEEE-754 round-to-nearest-even (FPCR RMode=00 default) matches
+// Wasm spec §4.3.2.11-13.
+
+pub fn encScvtf4S(rd: Vn, rn: Vn) u32 {
+    return 0x4E21D800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encScvtf2D(rd: Vn, rn: Vn) u32 {
+    return 0x4E61D800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encUcvtf4S(rd: Vn, rn: Vn) u32 {
+    return 0x6E21D800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encUcvtf2D(rd: Vn, rn: Vn) u32 {
+    return 0x6E61D800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
 /// `BSL V<d>.16B, V<n>.16B, V<m>.16B` — bitwise select using V<d>
 /// as the mask. Element width is irrelevant since BSL is bitwise.
 pub fn encBsl16B(rd: Vn, rn: Vn, rm: Vn) u32 {
@@ -1509,6 +1539,41 @@ test "encSqxtun4H: v0.4h, v0.4s (signed→unsigned narrow base)" {
 test "encSqxtun2_8H: v31.8h, v31.4s (max indices)" {
     // 0x6E612800 | (31 << 5) | 31 = 0x6E612BFF
     try testing.expectEqual(@as(u32, 0x6E612BFF), encSqxtun2_8H(31, 31));
+}
+
+// ============================================================
+// §9.6 / 9.6-g-iii — SCVTF/UCVTF (vector, i→f)
+// ============================================================
+// Cranelift cross-references (wasmtime/cranelift/codegen/src/isa/
+// aarch64/inst/emit_tests.rs:5034-5046):
+//   scvtf v20.4s, v8.4s   → 0x4E21D914
+//   ucvtf v10.2d, v19.2d  → 0x6E61DA6A
+
+test "encScvtf4S: v20.4s, v8.4s (cranelift cross-check)" {
+    // 0x4E21D800 | (8 << 5) | 20 = 0x4E21D914
+    try testing.expectEqual(@as(u32, 0x4E21D914), encScvtf4S(20, 8));
+}
+
+test "encUcvtf2D: v10.2d, v19.2d (cranelift cross-check)" {
+    // 0x6E61D800 | (19 << 5) | 10 = 0x6E61DA6A
+    try testing.expectEqual(@as(u32, 0x6E61DA6A), encUcvtf2D(10, 19));
+}
+
+test "encScvtf2D: v0.2d, v0.2d (base)" {
+    try testing.expectEqual(@as(u32, 0x4E61D800), encScvtf2D(0, 0));
+}
+
+test "encUcvtf4S: v0.4s, v0.4s (base)" {
+    try testing.expectEqual(@as(u32, 0x6E21D800), encUcvtf4S(0, 0));
+}
+
+test "Ucvtf vs Scvtf: U bit (bit 29) differs" {
+    try testing.expectEqual(@as(u32, 0x20000000), encUcvtf4S(0, 0) ^ encScvtf4S(0, 0));
+    try testing.expectEqual(@as(u32, 0x20000000), encUcvtf2D(0, 0) ^ encScvtf2D(0, 0));
+}
+
+test "FP convert sz field: .2D vs .4S differs at bit 22" {
+    try testing.expectEqual(@as(u32, 0x00400000), encScvtf2D(0, 0) ^ encScvtf4S(0, 0));
 }
 
 test "Int compare shapes: 4 CMEQ encodings pairwise distinct" {

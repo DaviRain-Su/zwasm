@@ -954,6 +954,53 @@ pub fn emitI16x8NarrowI32x4U(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     try emitV128NarrowSaturating(ctx, inst_neon.encSqxtun4H, inst_neon.encSqxtun2_8H);
 }
 
+// ============================================================
+// §9.6 / 9.6-g-iii — i→f FP convert (4 ops)
+// ============================================================
+//
+// Wasm spec — `f32x4.convert_i32x4_{s,u}` (single SCVTF/UCVTF .4S
+// instruction) + `f64x2.convert_low_i32x4_{s,u}` (2-instruction
+// synthesis: SXTL/UXTL .2D extends lower 2 i32 lanes to 2 i64,
+// then SCVTF/UCVTF .2D converts in place). FPCR RMode=00 default
+// gives IEEE-754 round-to-nearest-even, matching Wasm spec
+// §4.3.2.11-13.
+
+pub fn emitF32x4ConvertI32x4S(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128Unop(ctx, inst_neon.encScvtf4S);
+}
+pub fn emitF32x4ConvertI32x4U(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128Unop(ctx, inst_neon.encUcvtf4S);
+}
+
+/// Helper: emit `f64x2.convert_low_i32x4_{s,u}` synthesis. Sequence:
+///   1. SXTL/UXTL result.2D, src.2S — extend lower 2 i32 lanes to 2 i64.
+///   2. SCVTF/UCVTF result.2D, result.2D — convert in place.
+fn emitV128ConvertLowI32ToF64(
+    ctx: *EmitCtx,
+    extend_encoder: *const fn (rd: u5, rn: u5) u32,
+    convert_encoder: *const fn (rd: u5, rn: u5) u32,
+) Error!void {
+    const src_vreg = ctx.pushed_vregs.pop().?;
+    const src_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
+
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
+
+    try gpr.writeU32(ctx.allocator, ctx.buf, extend_encoder(result_v, src_v));
+    try gpr.writeU32(ctx.allocator, ctx.buf, convert_encoder(result_v, result_v));
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
+pub fn emitF64x2ConvertLowI32x4S(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128ConvertLowI32ToF64(ctx, inst_neon.encSxtl2D, inst_neon.encScvtf2D);
+}
+pub fn emitF64x2ConvertLowI32x4U(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128ConvertLowI32ToF64(ctx, inst_neon.encUxtl2D, inst_neon.encUcvtf2D);
+}
+
 pub fn emitI8x16Swizzle(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     const indices_vreg = ctx.pushed_vregs.pop().?;
     const indices_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, indices_vreg, 1);
