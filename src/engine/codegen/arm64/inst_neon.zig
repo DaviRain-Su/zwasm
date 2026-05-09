@@ -321,6 +321,61 @@ pub fn encInsDFromX(rd: Vn, rn: Xn, lane: u1) u32 {
     return 0x4E001C00 | (imm5 << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
 }
 
+// ---------------------------------------------------------------------
+// §9.9 / 9.5-c-vii — FP element forms (S = f32x4, D = f64x2 lane access)
+// ---------------------------------------------------------------------
+// Wasm spec (SIMD) — `f32x4.extract_lane` produces an f32 scalar held
+// in an FP register (S-form, low 32 bits of V<rd>); `replace_lane`
+// consumes an f32 scalar at S[0] of an FP register and writes lane k.
+// f64x2 same with D-form.
+//
+// Encoders use DUP-scalar (extract: zeros upper V bits naturally) and
+// INS-element (replace: copies V<rn>.S[0] / V<rn>.D[0] into a V<rd>
+// lane). No GPR transit, so no SPILL-EXEMPT marker needed downstream.
+
+/// `MOV S<rd>, V<n>.S[lane]` (alias of `DUP S<d>, V<n>.S[lane]`)
+/// — extract a 32-bit FP lane into a scalar S register (zeros
+/// upper V bits). Used by `f32x4.extract_lane`. `lane` ∈ 0..3.
+///
+/// Encoding (DUP advanced SIMD scalar, S element form):
+///   `0 1 0 11110 000 [imm5:5] 0 0000 1 [Rn:5] [Rd:5]`
+///   imm5 = (lane << 3) | 0b00100 (S-element discriminator).
+///   Base = `0x5E000400`. Per Arm IHI 0055 §C7.2.85.
+pub fn encMovScalarSFromVlane(rd: Vn, rn: Vn, lane: u2) u32 {
+    const imm5: u32 = (@as(u32, lane) << 3) | 0b00100;
+    return 0x5E000400 | (imm5 << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `MOV D<rd>, V<n>.D[lane]` (alias of `DUP D<d>, V<n>.D[lane]`)
+/// — extract a 64-bit FP lane into a scalar D register. Used by
+/// `f64x2.extract_lane`. `lane` ∈ 0..1. imm5 = (lane << 4) | 0b01000.
+pub fn encMovScalarDFromVlane(rd: Vn, rn: Vn, lane: u1) u32 {
+    const imm5: u32 = (@as(u32, lane) << 4) | 0b01000;
+    return 0x5E000400 | (imm5 << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `MOV V<d>.S[dst_lane], V<n>.S[0]` (alias of `INS (element)` with
+/// src lane 0) — copy the low S of V<n> into the S lane of V<d>.
+/// Used by `f32x4.replace_lane`.
+///
+/// Encoding (INS element, S form, src lane 0):
+///   `0 1 1 01110 000 [imm5:5] 0 [imm4:4] 1 [Rn:5] [Rd:5]`
+///   imm5 = (dst_lane << 3) | 0b00100 (S-element discriminator).
+///   imm4 = src_lane × 4-bytes = 0 when src_lane = 0.
+///   Base = `0x6E000400`. Per Arm IHI 0055 §C7.2.155.
+pub fn encMovVSlaneFromVS0(rd: Vn, dst_lane: u2, rn: Vn) u32 {
+    const imm5: u32 = (@as(u32, dst_lane) << 3) | 0b00100;
+    return 0x6E000400 | (imm5 << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `MOV V<d>.D[dst_lane], V<n>.D[0]` — copy the low D of V<n> into
+/// the D lane of V<d>. Used by `f64x2.replace_lane`. imm5 D form;
+/// imm4 = src_lane × 8-bytes = 0 when src_lane = 0.
+pub fn encMovVDlaneFromVD0(rd: Vn, dst_lane: u1, rn: Vn) u32 {
+    const imm5: u32 = (@as(u32, dst_lane) << 4) | 0b01000;
+    return 0x6E000400 | (imm5 << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
 // =====================================================================
 // Tests
 // =====================================================================
@@ -607,4 +662,56 @@ test "lane access encoders: B/H/S/D element discriminators distinct" {
     try testing.expect(encUmovWFromB(0, 0, 0) != encUmovWFromH(0, 0, 0));
     try testing.expect(encUmovWFromH(0, 0, 0) != encUmovWFromS(0, 0, 0));
     try testing.expect(encUmovWFromS(0, 0, 0) != encUmovXFromD(0, 0, 0));
+}
+
+// ============================================================
+// §9.9 / 9.5-c-vii — FP lane access (DUP scalar + INS element)
+// ============================================================
+
+test "encMovScalarSFromVlane: lane 0 (MOV S0, V0.S[0])" {
+    // imm5 = 4 → 0x40000. Base 0x5E000400 | 0x40000 = 0x5E040400.
+    try testing.expectEqual(@as(u32, 0x5E040400), encMovScalarSFromVlane(0, 0, 0));
+}
+
+test "encMovScalarSFromVlane: lane 3 (MOV S0, V1.S[3])" {
+    // imm5 = (3 << 3) | 4 = 28 = 0x1C → 0x1C0000.
+    // 0x5E000400 | 0x1C0000 | (1 << 5) | 0 = 0x5E1C0420
+    try testing.expectEqual(@as(u32, 0x5E1C0420), encMovScalarSFromVlane(0, 1, 3));
+}
+
+test "encMovScalarDFromVlane: lane 0 (MOV D0, V0.D[0])" {
+    // imm5 = 8 → 0x80000.
+    try testing.expectEqual(@as(u32, 0x5E080400), encMovScalarDFromVlane(0, 0, 0));
+}
+
+test "encMovScalarDFromVlane: lane 1 (MOV D31, V30.D[1])" {
+    // imm5 = (1 << 4) | 8 = 24 = 0x18 → 0x180000.
+    // 0x5E000400 | 0x180000 | (30 << 5) | 31 = 0x5E1807DF
+    try testing.expectEqual(@as(u32, 0x5E1807DF), encMovScalarDFromVlane(31, 30, 1));
+}
+
+test "encMovVSlaneFromVS0: dst lane 0 (MOV V0.S[0], V0.S[0])" {
+    // imm5 = 4 → 0x40000. Base 0x6E000400 | 0x40000 = 0x6E040400.
+    try testing.expectEqual(@as(u32, 0x6E040400), encMovVSlaneFromVS0(0, 0, 0));
+}
+
+test "encMovVSlaneFromVS0: dst lane 2 (MOV V0.S[2], V1.S[0])" {
+    // imm5 = (2 << 3) | 4 = 20 = 0x14 → 0x140000. imm4 = 0.
+    // 0x6E000400 | 0x140000 | (1 << 5) | 0 = 0x6E140420
+    try testing.expectEqual(@as(u32, 0x6E140420), encMovVSlaneFromVS0(0, 2, 1));
+}
+
+test "encMovVDlaneFromVD0: dst lane 1 (MOV V0.D[1], V1.D[0])" {
+    // imm5 = (1 << 4) | 8 = 24 = 0x18 → 0x180000. imm4 = 0.
+    try testing.expectEqual(@as(u32, 0x6E180420), encMovVDlaneFromVD0(0, 1, 1));
+}
+
+test "DUP-scalar vs INS-element: distinct opcode prefixes" {
+    // DUP-scalar: `0_1_0_11110...` (bits 31:24 = 0x5E)
+    // INS-element: `0_1_1_01110...` (bits 31:24 = 0x6E)
+    // Bits 29 (op) AND 28 (asimd-class disambiguator) both differ →
+    // XOR delta = 0x30000000 at identical imm5/Rn/Rd.
+    const dup_word = encMovScalarSFromVlane(0, 0, 0);
+    const ins_word = encMovVSlaneFromVS0(0, 0, 0);
+    try testing.expectEqual(@as(u32, 0x30000000), dup_word ^ ins_word);
 }

@@ -1190,6 +1190,12 @@ pub fn compile(
             .@"i16x8.replace_lane" => try op_simd.emitI16x8ReplaceLane(&ctx, &ins),
             .@"i64x2.extract_lane" => try op_simd.emitI64x2ExtractLane(&ctx, &ins),
             .@"i64x2.replace_lane" => try op_simd.emitI64x2ReplaceLane(&ctx, &ins),
+            // §9.9/9.5-c-vii — f32x4 / f64x2 lane access. i64x2.mul
+            // synthesis defers to 9.5-c-vii-mul (scratch-reg conv).
+            .@"f32x4.extract_lane" => try op_simd.emitF32x4ExtractLane(&ctx, &ins),
+            .@"f32x4.replace_lane" => try op_simd.emitF32x4ReplaceLane(&ctx, &ins),
+            .@"f64x2.extract_lane" => try op_simd.emitF64x2ExtractLane(&ctx, &ins),
+            .@"f64x2.replace_lane" => try op_simd.emitF64x2ReplaceLane(&ctx, &ins),
 
             else => {
                 // §9.7 / 7.5-diag-op: surface the unhandled op

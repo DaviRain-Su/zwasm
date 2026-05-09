@@ -381,3 +381,109 @@ pub fn emitI64x2ExtractLane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 pub fn emitI64x2ReplaceLane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     return emitV128ReplaceLane(ctx, ins, encInsD, 0x1);
 }
+
+// ============================================================
+// §9.9 / 9.5-c-vii — f32x4 / f64x2 lane access
+// ============================================================
+//
+// Wasm spec (SIMD) — `f32x4.extract_lane` / `f64x2.extract_lane`
+// produce a scalar f32 / f64 result held in an FP register.
+// `_replace_lane` consumes a scalar FP at S[0] / D[0] of an FP
+// register. Encoders: DUP-scalar (extract; zeros upper V bits) +
+// INS-element (replace; copies V<n>.S[0] / V<n>.D[0] into a V<rd>
+// lane). FP-side scalar resolves stay on the SPILL-EXEMPT escape
+// hatch alongside the int-side resolveGpr sites — fpLoadSpilled /
+// fpDefSpilled migration is its own follow-on. The v128 spill
+// path remains via `qLoadSpilled` / `qDefSpilled` / `qStoreSpilled`.
+
+/// Helper: emit `extract_lane` for FP-result variants. Mirrors
+/// `emitV128ExtractLane` but resolves the result vreg to a V
+/// register via `gpr.resolveFp` instead of a GPR via `resolveGpr`.
+fn emitV128ExtractLaneFp(
+    ctx: *EmitCtx,
+    ins: *const ZirInstr,
+    encoder: *const fn (rd: u5, rn: u5, lane: u32) u32,
+    lane_mask: u32,
+) Error!void {
+    const src_vreg = ctx.pushed_vregs.pop().?;
+    const src_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
+
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    // SPILL-EXEMPT: FP scalar result; fpDefSpilled (D-form, 8-byte stride) is its own follow-on alongside other FP-side sites.
+    const result_v = try gpr.resolveFp(ctx.alloc, result_vreg);
+
+    const lane = ins.payload & lane_mask;
+    try gpr.writeU32(ctx.allocator, ctx.buf, encoder(result_v, src_v, lane));
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
+/// Helper: emit `replace_lane` for FP-input variants. The new-lane
+/// scalar comes from a V register (S/D form low bits), not a GPR.
+fn emitV128ReplaceLaneFp(
+    ctx: *EmitCtx,
+    ins: *const ZirInstr,
+    encoder: *const fn (rd: u5, dst_lane: u32, rn: u5) u32,
+    lane_mask: u32,
+) Error!void {
+    const new_lane_vreg = ctx.pushed_vregs.pop().?;
+    // SPILL-EXEMPT: FP scalar new-lane; fpLoadSpilled is its own follow-on alongside other FP-side sites.
+    const new_lane_v = try gpr.resolveFp(ctx.alloc, new_lane_vreg);
+
+    const src_vreg = ctx.pushed_vregs.pop().?;
+    const src_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
+
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 1);
+
+    if (src_v != result_v) {
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(result_v, src_v));
+    }
+    const lane = ins.payload & lane_mask;
+    try gpr.writeU32(ctx.allocator, ctx.buf, encoder(result_v, lane, new_lane_v));
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 1);
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
+// Encoder thunks for the FP forms (parallel to the int thunks above).
+fn encDupScalarS(rd: u5, rn: u5, lane: u32) u32 {
+    return inst_neon.encMovScalarSFromVlane(rd, rn, @intCast(lane));
+}
+fn encDupScalarD(rd: u5, rn: u5, lane: u32) u32 {
+    return inst_neon.encMovScalarDFromVlane(rd, rn, @intCast(lane));
+}
+fn encInsElemS(rd: u5, dst_lane: u32, rn: u5) u32 {
+    return inst_neon.encMovVSlaneFromVS0(rd, @intCast(dst_lane), rn);
+}
+fn encInsElemD(rd: u5, dst_lane: u32, rn: u5) u32 {
+    return inst_neon.encMovVDlaneFromVD0(rd, @intCast(dst_lane), rn);
+}
+
+/// Wasm spec (SIMD) — `f32x4.extract_lane`: lane ∈ 0..3; produce a
+/// scalar f32. Lowers to `MOV S<rd>, V<rn>.S[lane]` (DUP scalar S).
+pub fn emitF32x4ExtractLane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    return emitV128ExtractLaneFp(ctx, ins, encDupScalarS, 0x3);
+}
+
+/// Wasm spec (SIMD) — `f32x4.replace_lane`: replace a lane with an
+/// f32 scalar. Lowers to `MOV V<vd>.S[lane], V<vn>.S[0]` (INS
+/// element S form, src lane 0).
+pub fn emitF32x4ReplaceLane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    return emitV128ReplaceLaneFp(ctx, ins, encInsElemS, 0x3);
+}
+
+/// Wasm spec (SIMD) — `f64x2.extract_lane`: lane ∈ 0..1; produce a
+/// scalar f64. Lowers to `MOV D<rd>, V<rn>.D[lane]` (DUP scalar D).
+pub fn emitF64x2ExtractLane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    return emitV128ExtractLaneFp(ctx, ins, encDupScalarD, 0x1);
+}
+
+/// Wasm spec (SIMD) — `f64x2.replace_lane`: replace a lane with an
+/// f64 scalar. Lowers to `MOV V<vd>.D[lane], V<vn>.D[0]` (INS
+/// element D form, src lane 0).
+pub fn emitF64x2ReplaceLane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    return emitV128ReplaceLaneFp(ctx, ins, encInsElemD, 0x1);
+}
