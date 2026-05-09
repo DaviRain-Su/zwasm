@@ -13,42 +13,40 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 9 / §9.7 in-flight (9.7-a..g [x]); **9.7-h NEXT**
+## Current state — Phase 9 / §9.7 in-flight (9.7-a..h [x]); **9.7-i NEXT**
 
-9.7-g landed at b9d91a66: narrow-int extract+replace (6 ops).
-Adds encPextrB (SSE4.1, RMI 3A 14) + encPextrW (SSE2, 0F C5
-RMI but **opposite REX role assignment** — gpr in reg, xmm in
-r/m) + encPinsrB (SSE4.1, RVMI 3A 20) + encPinsrW (SSE2, 0F C4
-RVMI). Parametric extract helper covers signed (PEXTR + MOVSX)
-/ unsigned (zero-extends natively). Total SIMD ops handled: 21.
+9.7-h landed at 9659a6df: integer splat trio (i8x16 / i16x8 /
+i64x2). Adds encPxor (SSE2 0F EF), encPshufb (SSSE3 0F 38 00),
+encPshuflw (F2 0F 70 /r ib), encPunpcklqdq (66 0F 6C /r). i8x16
+uses XMM14 scratch for the all-zero PSHUFB ctrl mask. Total SIMD
+ops handled: 24 (= all 6 splat shapes are now wired except FP).
 
-Three-host gate at b9d91a66: Mac unit 1380/0/12 + gates ✓;
-OrbStack at known D-054 baseline (211/1/20 + 1364/1392);
+Three-host gate at 9659a6df: Mac unit 1389/0/12 + gates ✓;
+OrbStack at known D-054 baseline (211/1/20 + 1373/1401);
 windowsmini full green (212/0/20 + every runner green).
 
-**9.7-h NEXT** — splat siblings (i8x16 / i16x8 / i64x2) + FP
-lane access (f32x4 / f64x2 splat + extract + replace). Encoders
-needed:
-- i8x16.splat: MOVD + PXOR (zero mask) + PSHUFB (broadcast lane
-  0 via zero-index mask). New encoders encPxor (SSE2 0F EF) +
-  encPshufb (SSSE3 0F 38 00). Uses XMM14/15 scratch as zero ctrl.
-- i16x8.splat: MOVD + PSHUFLW (broadcast low word to lanes 0-3)
-  + PSHUFD (broadcast lower 64 to upper). New encoder encPshuflw
-  (F2 0F 70 /r ib).
-- i64x2.splat: MOVQ + PUNPCKLQDQ (broadcast low qword). New
-  encPunpcklqdq (66 0F 6C /r).
-- f32x4.splat: SHUFPS xmm, xmm, 0x00 (or PSHUFD on integer
-  domain — XMM source already, no MOVD needed). encShufps (F-class).
-- f64x2.splat: MOVDDUP (F2 0F 12 /r). Or MOVAPS + UNPCKLPD.
-- f32x4.extract_lane: MOVHLPS / SHUFPS or PEXTRD (XMM result is
-  XMM, not GPR — need to be careful with op_simd's resolution
-  paths). f64x2.extract_lane: MOVHLPS / SHUFPD.
-- f32x4.replace_lane: INSERTPS (66 0F 3A 21 /r ib).
-  f64x2.replace_lane: MOVLHPS / SHUFPD / blend.
+**9.7-i NEXT** — FP lane access (f32x4 / f64x2 splat + extract +
+replace). XMM-source semantics differ from int paths:
+- f32x4.splat: SHUFPS xmm_dst, xmm_src, 0x00 (broadcasts lane 0).
+  Or PSHUFD via integer-domain alias.
+- f64x2.splat: MOVDDUP (F2 0F 12 /r) — broadcasts low qword to
+  both 64-bit lanes. SSE3.
+- f32x4.extract_lane: lane=0 → MOVAPS dst, src; otherwise PSHUFD
+  with imm8 selector to bring the lane into position 0. Result
+  is XMM (f32 in low 32).
+- f64x2.extract_lane: lane=0 → MOVAPS; lane=1 → MOVHLPS or
+  SHUFPD with imm.
+- f32x4.replace_lane: INSERTPS (66 0F 3A 21 /r ib) — SSE4.1.
+  Imm8 encodes both src lane (bits 6-7) and dst lane (bits 4-5).
+- f64x2.replace_lane: MOVAPS preamble + MOVLHPS / MOVHLPS /
+  SHUFPD with appropriate imm depending on lane.
 
-Likely 400-500 LOC; consider splitting into 9.7-h (int splat
-narrow), 9.7-i (FP splat + extract + replace), 9.7-j onwards
-(compare / FP arith / etc.). Step 0 will scope.
+Likely ~250-350 LOC. Step 0 should partition: bundle all 6 FP
+lane ops, OR split splat (3) + extract+replace (3).
+
+Subsequent: 9.7-j (compare family — PCMPEQ*, PCMPGT*), 9.7-k (FP
+arith ADDPS/ADDPD/MULPS/DIVPS), 9.7-l (FP compare CMPPS/PD),
+9.7-m (conversion + shuffle PSHUFB + v128.const via ADR-0042).
 
 ## Open structural debt (pointers — full list in `.dev/debt.md`)
 
