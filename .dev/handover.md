@@ -16,32 +16,36 @@
 6. `private/notes/p9-9.7-m-survey.md` (gitignored; cranelift recipe +
    adoption data) — only if revisiting the SSE4.2 baseline call.
 
-## Current state — Phase 9 / §9.7 in-flight (9.7-a..o landed); **9.7-p NEXT**
+## Current state — Phase 9 / §9.7 in-flight (9.7-a..p landed); **9.7-q NEXT**
 
-9.7-o: x86_64 FP compare eq/ne/lt/gt/le/ge for f32x4 + f64x2
-(12 ops). 2 new encoders encCmpps (SSE 0F C2 /r ib, no 66
-prefix) + encCmppd (SSE2 66 0F C2 /r ib) with imm8 predicate
-per Intel SDM Vol 2A "CMPPS" Table 3-7. New helper
-`emitV128FpCmp(encoder, imm8, swap_operands)` mirrors signed-
-compare shape; cranelift's predicate selection
-(`lower.isle:2149-2176`): eq=0/ne=4/lt=1/le=2 direct, gt/ge
-swap+lt/le. Total SIMD ops handled: 78.
+9.7-p: x86_64 FP arithmetic add/sub/mul/div + sqrt for f32x4
++ f64x2 (10 ops). 10 new encoders (ADDPS/SUBPS/MULPS/DIVPS/
+SQRTPS SSE no-66 + PD variants SSE2 with 66). New factor
+`encSseFpPsBinop` for PS shape; PD reuses
+`encSsePackedIntBinop`. 8 binary ops via emitV128IntBinop +
+2 unary sqrt via new emitV128FpUnop. f32x4/f64x2 min/max
+deferred to 9.7-q (NaN-correction synthesis). Total SIMD
+ops handled: 88.
 
-**9.7-p NEXT** — FP arithmetic for f32x4 + f64x2 (16 ops):
-add/sub/mul/div/min/max/sqrt + abs/neg (where abs/neg are
-unop). Encoders ADDPS/SUBPS/MULPS/DIVPS/MINPS/MAXPS/SQRTPS
-(SSE 0F 58/5C/59/5E/5D/5F/51) + the PD variants (SSE2 with
-66 prefix). abs/neg via PAND / PXOR with sign-mask constants
-(needs const-pool plumbing per ADR-0042). Likely shape: 7-8
-new binary encoders + 1-2 unary + emitV128FpBinop helper +
-shape for abs/neg deferred to const-pool chunk (9.7-r). The
-plain binary 7×2 = 14 ops (add/sub/mul/div/min/max/sqrt-as-
-unop) might bundle; ~150 src + ~150 test. No ADR needed.
+**9.7-q NEXT** — f32x4 + f64x2 min/max with NaN-correction
+synthesis (4 ops). SSE MINPS/MAXPS use "if unordered, return
+src2" semantics that don't match Wasm's IEEE-754-2019
+minimum/maximum (NaN-propagating, signed-zero-aware).
+Cranelift's recipe (`lower.isle` F32X4/F64X2 fmin/fmax) is
+~7 instructions: min1=MINPS(x,y), min2=MINPS(y,x), or=ORPS
+(min1, min2), is_nan_mask=CMPPS(or, min2, UNORD), or2=ORPS
+(or, is_nan_mask), nan_frac_mask=PSRLD(is_nan_mask, 10),
+result=ANDNPS(nan_frac_mask, or2). For F64X2 same shape
+with PD encoders + PSRLQ shift=13. 4 new encoders needed
+(ORPS/ORPD/ANDNPS/ANDNPD; PSRLD/PSRLQ may already exist
+from 9.7-d). 1 new helper `emitV128FpMinMax(...)` taking
+the encoder family + scratch reg. ~150 src + ~80 test
+(complex but mechanical). ADR optional — synthesis is
+cranelift's published recipe, not a load-bearing decision.
 
-Subsequent: 9.7-q (bitwise + select v128.{not, and, or, xor,
-andnot, bitselect, any_true, all_true}), 9.7-r+ (conversion
-+ narrow/extend + shuffle PSHUFB + abs/neg via const-pool),
-9.7-s (v128.const via ADR-0042 const-pool).
+Subsequent: 9.7-r+ (bitwise + select), 9.7-s+ (conversion +
+narrow/extend + shuffle PSHUFB + abs/neg via const-pool),
+9.7-t (v128.const via ADR-0042 const-pool).
 
 ## Open structural debt (pointers — full list in `.dev/debt.md`)
 
@@ -61,5 +65,5 @@ reference) live in git: ADRs 0035-0040, lessons indexed in
 
 **Phase**: Phase 9 (SIMD-128, ADR-0041 — SSE4.2 baseline post-9.7-m).
 §9.5 [x] (ARM64 NEON pt 1), §9.6 [x] (ARM64 NEON pt 2),
-§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..o landed; 9.7-p NEXT).
+§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..p landed; 9.7-q NEXT).
 **Branch**: `zwasm-from-scratch`。
