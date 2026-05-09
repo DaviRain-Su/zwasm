@@ -16,31 +16,27 @@
 6. `private/notes/p9-9.7-m-survey.md` (gitignored; cranelift recipe +
    adoption data) — only if revisiting the SSE4.2 baseline call.
 
-## Current state — Phase 9 / §9.7 in-flight (9.7-a..w landed); **9.7-x NEXT**
+## Current state — Phase 9 / §9.7 in-flight (9.7-a..x landed); **9.7-y NEXT**
 
-9.7-w: x86_64 i8x16.shr_s sign-extension synthesis (1 op).
-encPunpcklbw + encPunpckhbw new encoders + 11-instr recipe
-(PCMPGTB sign-mask + byte→word extend + PSRAW × 2 +
-PACKSSWB). Closes the i*x*.shift family (12 shift ops).
-Total SIMD ops handled: 119.
+9.7-x: x86_64 i*x*.extend_low/high family (12 ops). 6 new
+SSE4.1 PMOVSX*/PMOVZX* encoders + 2 helpers (Low: 1-instr
+direct; High: PSHUFD imm=0xEE + PMOVSX/ZX). 12 wrappers.
+Total SIMD ops handled: 131.
 
-**9.7-x NEXT** — integer extend low/high (12 ops):
-i16x8.extend_{low,high}_i8x16_{s,u} + i32x4.extend_*_i16x8_*
-+ i64x2.extend_*_i32x4_*. SSE4.1 has direct PMOVSXBW
-/PMOVZXBW + PMOVSXWD/PMOVZXWD + PMOVSXDQ/PMOVZXDQ for low
-half (4-byte interleaved memory→reg form, but reg-reg form
-exists too taking low 8 bytes of src). For HIGH half, no
-direct instruction; need PSRLDQ-shift + low-extend OR
-PUNPCKHBW-style trick.
+**9.7-y NEXT** — narrow saturating ops (4 ops):
+i8x16.narrow_i16x8_{s,u} + i16x8.narrow_i32x4_{s,u}.
+Cranelift uses PACKSSWB / PACKSSDW (signed) and PACKUSWB /
+PACKUSDW (unsigned) — all SSE2 except PACKUSDW which is
+SSE4.1. 4 new encoders (PACKSSDW + PACKUSWB + PACKUSDW;
+PACKSSWB already exists from 9.7-s i16x8.bitmask). Each op
+maps to a single instr (binary, dst takes 8 lanes from
+each operand and produces 16 saturated). ~80 src + ~50
+test, no ADR.
 
-Cranelift uses PMOVSX*/PMOVZX* directly for low; for high
-it uses PSHUFD(src, 0xEE) to swap high → low position then
-PMOVSX/ZX. ~6 new encoders (PMOVSXBW/WD/DQ + PMOVZXBW/WD/DQ)
-+ 12 wrappers. ~250 src + ~80 test, no ADR.
-
-Subsequent: 9.7-y+ (narrow saturating + shuffle PSHUFB +
-abs/neg sign-mask synthesis), 9.7-z (FP convert + trunc-
-sat), 9.7-aa (v128.const + ADR-0042 const-pool finalisation).
+Subsequent: 9.7-z+ (i8x16.shuffle PSHUFB + i*x*.abs/neg
+sign-mask synthesis; need const-pool for shuffle imm
+control mask), 9.7-aa+ (FP convert i↔f + trunc-sat),
+9.7-ab (v128.const + ADR-0042 const-pool finalisation).
 
 ## Open structural debt (pointers — full list in `.dev/debt.md`)
 
@@ -60,5 +56,5 @@ reference) live in git: ADRs 0035-0040, lessons indexed in
 
 **Phase**: Phase 9 (SIMD-128, ADR-0041 — SSE4.2 baseline post-9.7-m).
 §9.5 [x] (ARM64 NEON pt 1), §9.6 [x] (ARM64 NEON pt 2),
-§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..w landed; 9.7-x NEXT).
+§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..x landed; 9.7-y NEXT).
 **Branch**: `zwasm-from-scratch`。
