@@ -13,37 +13,43 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 9 / §9.6/9.6-b [x] (FP unary); **§9.6/9.6-c NEXT**
+## Current state — Phase 9 / §9.6/9.6-c-i [x] (FP min/max); **§9.6/9.6-c-ii NEXT**
 
-§9.6/9.6-b adds 14 NEON FP two-register-misc encoders (FABS /
-FNEG / FSQRT / FRINTN / FRINTM / FRINTP / FRINTZ × 4S/2D) +
-14 op_simd handlers via new `emitV128Unop` helper. Wasm-spec
-rounding-mode mapping: ceil→+∞, floor→-∞, trunc→0,
-nearest→ties-to-even.
+§9.6/9.6-c-i adds 4 NEON FMIN/FMAX vector encoders + 4 thin
+emitV128Binop adapters (f32x4/f64x2 min/max). IEEE-754-2008
+NaN-propagating semantics map directly to NEON.
 
 Per LOOP.md chunk granularity, §9.6 sub-row state:
-- 9.6-a/b [x]: FP binary + FP unary.
-- 9.6-c NEXT: FP min/max/pmin/pmax — Wasm-spec NaN handling
-  has known quirks (`min`/`max` propagate NaN per IEEE-754 2008,
-  but `pmin`/`pmax` are zero-on-equal-magnitude pseudo-min/max).
-- 9.6-d: int compare (CMEQ / CMGT / CMHI / CMGE / CMHS).
-- 9.6-e: FP compare (FCMEQ / FCMGT / FCMGE).
-- 9.6-f: shuffle / swizzle (TBL).
-- 9.6-g: conversion (trunc_sat / convert / narrow / extend).
+- 9.6-a/b/c-i [x]: FP binary + FP unary + FMIN/FMAX.
+- 9.6-c-ii NEXT: pmin/pmax synthesis via FCMGT + BSL.
+- 9.6-d: int compare (CMEQ/CMGT/CMHI/CMGE/CMHS).
+- 9.6-e: FP compare (FCMEQ/FCMGT/FCMGE).
+- 9.6-f: shuffle/swizzle (TBL-based).
+- 9.6-g: conversion (trunc_sat/convert/narrow/extend).
 
 Mac gates: zone ✓, file_size ✓, spill ✓, lint ✓; spec
 212/0/20, wast 1158/0/0.
 
-**§9.6/9.6-c NEXT** — f32x4/f64x2 min/max/pmin/pmax (8 ops).
-Wasm spec for `*.min` / `*.max`: IEEE-754-2008 min/max
-(NaN-propagating). Maps cleanly to NEON FMIN / FMAX.
-For `*.pmin` / `*.pmax`: pseudo-min/max — return rhs when
-equal-magnitude (so min(-0,+0)=+0; max(-0,+0)=-0). NEON has
-no direct instruction; synthesise via FCMGT + BSL (bitwise
-select). Bundle constraint check: pmin/pmax cross "instruction
-class" boundary (single FMIN/FMAX vs synthesis with 2 insns
-+ scratch V) — split into 9.6-c-i (min/max) and 9.6-c-ii
-(pmin/pmax) per LOOP.md.
+**§9.6/9.6-c-ii NEXT** — f32x4/f64x2 pmin/pmax synthesis (4
+ops). Wasm-spec semantics:
+- `pmin(x, y)` ≡ `if y < x then y else x` (returns y on
+  equal-magnitude or NaN — opposite of IEEE min's NaN
+  propagation).
+- `pmax(x, y)` ≡ `if x < y then y else x` (returns y when
+  equal-magnitude).
+
+Synthesis: FCMGT generates a per-lane mask (all-1s where the
+condition holds, all-0s otherwise); BSL (bitwise select) picks
+between two operand registers based on the mask. Sequence
+(pmin example):
+  FCMGT V<tmp>.4S, V<lhs>.4S, V<rhs>.4S   ; tmp = lhs > rhs
+  BSL   V<tmp>.16B, V<rhs>.16B, V<lhs>.16B ; tmp ? rhs : lhs
+Result is in V<tmp>.
+
+Need new encoders: encFCmGt4S/2D + encBsl16B (note: BSL is
+class-agnostic — operates on 16 bytes regardless of underlying
+shape). Plus need a tmp v128 vreg for the mask. Estimated
+~150 src + ~80 tests.
 
 After 8b.4: 8b.5 (boundary audit_scaffolding) + 8b.6 (open
 §9.9 inline + flip Phase Status).
