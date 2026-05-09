@@ -16,36 +16,30 @@
 6. `private/notes/p9-9.7-m-survey.md` (gitignored; cranelift recipe +
    adoption data) — only if revisiting the SSE4.2 baseline call.
 
-## Current state — Phase 9 / §9.7 in-flight (9.7-a..u landed); **9.7-v NEXT**
+## Current state — Phase 9 / §9.7 in-flight (9.7-a..v landed); **9.7-w NEXT**
 
-9.7-u: x86_64 i64x2.shr_s synthesis (1 op). encPsubq new
-encoder + 9-instr inline-mask recipe (PCMPEQB+PSLLQ-imm
-sign-bit mask synthesis avoids const-pool dependency).
-Total SIMD ops handled: 116. i8x16 shifts (3 ops) still
-deferred.
+9.7-v: x86_64 i8x16.shl + i8x16.shr_u inline-mask synthesis
+(2 ops). encPsrlwImm new encoder + 9-/10-instr recipes via
+PSLLW/PSRLW + PSHUFB byte-0 broadcast. Avoids const-pool
+dep at cost of ~5 extra instr per call. Total SIMD ops
+handled: 118.
 
-**9.7-v NEXT** — i8x16 shifts shl/shr_u/shr_s (3 ops).
-Cranelift's recipes need count-dependent AND-mask byte
-broadcast. Two paths:
+**9.7-w NEXT** — i8x16.shr_s synthesis (1 op).
+Cranelift's recipe (`lower.isle:846+`) uses byte→word
+sign-extension via PUNPCKLBW + PUNPCKHBW (interleaving
+with sign-mask scratch), then PSRAW on each half by c,
+then PACKSSWB to compress back. Structurally different
+from shl/shr_u (no AND-mask path).
 
-- **(A)** Inline-synth via SHL r8 + PSHUFB-broadcast.
-  Steps: scalar SHL r8 to compute byte-mask value, MOVD
-  scratch_xmm, MOVD ctrl_xmm + PXOR ctrl_xmm,ctrl_xmm
-  to zero-control, PSHUFB scratch_xmm,ctrl_xmm to
-  broadcast byte 0 to 16 lanes, then PSLLW/PSRLW + PAND.
-  ~12-14 instr per shift; no const-pool dep.
-- **(B)** const-pool 8×16-byte mask table + runtime
-  index lookup. ADR-0042 plumbing required first.
-  Cleaner emit (~5 instr) but blocks on const-pool.
+Likely 2 new encoders (encPunpcklbw + encPunpckhbw) +
+~12-15 instr handler. Sign-extension trick: PXOR(zero) +
+PCMPGTB(zero, src) gives sign-bit mask; PUNPCKLBW(src,
+sign_mask) interleaves to produce signed-extended words.
+~150 src + ~80 test, no ADR.
 
-Recommendation: go (A) inline — keeps 9.7-* chunks self-
-contained and mirrors 9.7-u's same trade-off. ~250 src +
-~100 test. Lesson note may be warranted on the const-pool
-deferral pattern.
-
-Subsequent: 9.7-w+ (conversion + narrow/extend + shuffle
-PSHUFB), 9.7-x (abs/neg via PXOR sign-mask), 9.7-y
-(v128.const + ADR-0042 const-pool finalisation).
+Subsequent: 9.7-x+ (conversion + narrow/extend + shuffle
+PSHUFB), 9.7-y (abs/neg via PXOR sign-mask synthesis),
+9.7-z (v128.const + ADR-0042 const-pool finalisation).
 
 ## Open structural debt (pointers — full list in `.dev/debt.md`)
 
@@ -65,5 +59,5 @@ reference) live in git: ADRs 0035-0040, lessons indexed in
 
 **Phase**: Phase 9 (SIMD-128, ADR-0041 — SSE4.2 baseline post-9.7-m).
 §9.5 [x] (ARM64 NEON pt 1), §9.6 [x] (ARM64 NEON pt 2),
-§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..u landed; 9.7-v NEXT).
+§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..v landed; 9.7-w NEXT).
 **Branch**: `zwasm-from-scratch`。
