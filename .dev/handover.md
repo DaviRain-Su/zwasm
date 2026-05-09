@@ -13,38 +13,48 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 9 / §9.7 in-flight (9.7-a..i [x]); **9.7-j NEXT**
+## Current state — Phase 9 / §9.7 in-flight (9.7-a..j [x]); **9.7-k NEXT**
 
-9.7-i landed at bab7c888: f32x4 lane access trio (splat /
-extract / replace). Adds encInsertps (SSE4.1 3A 21 /r ib);
-splat + extract reuse encPshufd (PSHUFD on FP-domain data is
-bit-identical to integer-domain shuffle). Total SIMD ops
-handled: 27.
+9.7-j landed at 28ec5a4d: f64x2 lane access trio. Adds
+encMovsdXmmXmm (F2 0F 10 /r mod=11 — reg-reg form preserves
+upper 64) + encMovlhps (0F 16 /r). Splat + extract reuse
+encPshufd with imm 0x44 (low qword broadcast) / 0xEE (high
+qword to position 0). Replace lane=0 uses MOVSD reg-reg
+(preserves high), lane=1 uses MOVLHPS. Total SIMD ops handled:
+30 — full splat / extract / replace surface for all 6 shapes.
 
-Three-host gate at bab7c888: Mac unit 1394/0/12 + gates ✓;
-OrbStack at known D-054 baseline (211/1/20 + 1378/1406);
+Three-host gate at 28ec5a4d: Mac unit 1402/0/12 + gates ✓;
+OrbStack at known D-054 baseline (211/1/20 + 1386/1414);
 windowsmini full green (212/0/20 + every runner green).
 
-**9.7-j NEXT** — f64x2 lane access trio. Encoders likely needed:
-- f64x2.splat: MOVDDUP (F2 0F 12 /r) for the low-qword broadcast,
-  OR reuse encPunpcklqdq with self-source (already have it).
-- f64x2.extract_lane: lane=0 trivial (MOVAPS dst, src — already
-  have encMovapsXmmXmm); lane=1 needs SHUFPD or MOVHLPS or
-  PSHUFD with imm 0x4E (swap qwords). encPshufd works for the
-  qword-as-2-dwords interpretation.
-- f64x2.replace_lane: MOVAPS preamble + SHUFPD or MOVLHPS /
-  MOVHLPS / encInsertps-equivalent (UNPCKLPD / UNPCKHPD trick).
-  May want SHUFPD (66 0F C6 /r ib) — new encoder.
+**9.7-k NEXT** — int compare family. Wasm ops:
+- i8x16/i16x8/i32x4 eq/ne/lt_s/lt_u/gt_s/gt_u/le_s/le_u/ge_s/ge_u
+  = 30 ops. i64x2 eq/ne/lt_s/gt_s/le_s/ge_s = 6 ops (no _u for i64x2
+  per spec). Total 36 int compare ops.
 
-Step 0 will scope. Likely ~150-200 LOC.
+Native SSE2 / SSE4.1 instructions:
+- PCMPEQB / PCMPEQW / PCMPEQD (SSE2): equal compare per lane.
+- PCMPEQQ (SSE4.1): i64x2 equal.
+- PCMPGTB / PCMPGTW / PCMPGTD (SSE2): signed greater-than.
+- PCMPGTQ (SSE4.2 — beyond ADR-0041 baseline!): i64x2 signed gt.
 
-Subsequent: 9.7-k (compare family — PCMPEQ*, PCMPGT* int + CMPPS
-/ CMPPD FP), 9.7-l (FP arith ADDPS/PD/MULPS/DIVPS/SUBPS/PD),
-9.7-m (FP unary abs/neg/sqrt + min/max/pmin/pmax), 9.7-n (int
-compare extras + select / and / or / xor / not / bitselect),
-9.7-o (conversion + narrow/extend + shuffle PSHUFB),
-9.7-p (v128.const via ADR-0042 const-pool with x86_64
-RIP-relative LEA + MOVDQU).
+i64x2.gt_s needs synthesis when SSE4.2 is unavailable. Cranelift
+idiom: PCMPGTD + AND/swap tricks; or PSUBQ-based MSB extraction.
+
+Unsigned compares synthesise via signed: a <_u b ⇔ (a ^ MSB) <_s
+(b ^ MSB) for integer types. Or use PMINUB / PMAXUB / PMINUW /
+PMAXUW for some cases. Cranelift prefers PXOR-with-sign-mask +
+PCMPGT.
+
+Likely partition: 9.7-k (eq/ne family — clean PCMPEQ + NOT for
+ne), 9.7-l (signed lt/gt/le/ge), 9.7-m (unsigned lt/gt/le/ge
+synthesis), 9.7-n (i64x2 signed compares with SSE4.2 fallback).
+4 sub-chunks. Step 0 will pin down i64x2.gt_s synthesis +
+unsigned compare strategy + ADR-grade decisions if any.
+
+Subsequent: 9.7-o+ (FP compare CMPPS/PD), 9.7-p+ (FP arith),
+9.7-q+ (bitwise ops + select), 9.7-r+ (conversion + narrow/extend
++ shuffle PSHUFB), 9.7-s (v128.const via ADR-0042 const-pool).
 
 ## Open structural debt (pointers — full list in `.dev/debt.md`)
 
