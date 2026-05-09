@@ -767,10 +767,19 @@ pub fn compile(
             .@"memory.copy" => try op_memory.emitMemoryCopy(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, func.func_idx),
             .@"global.get" => try op_globals.emitI32GlobalGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
             .@"global.set" => try op_globals.emitI32GlobalSet(allocator, &buf, alloc, &pushed_vregs, spill_base_off, ins.payload),
-            // §9.7 / 9.7-a: SIMD-128 foundation. Single representative
-            // op (i32x4.add via PADDD) wires the FP-class regalloc +
-            // shape-tag pipeline on x86_64 per ADR-0041.
+            // §9.7 / 9.7-a + 9.7-b: SIMD-128 packed integer add/sub
+            // family (8 ops). Wires the FP-class regalloc +
+            // shape-tag pipeline on x86_64 per ADR-0041; spilled
+            // v128 vregs surface UnsupportedOp until 9.7-c MOVDQU
+            // helpers land.
+            .@"i8x16.add" => try op_simd.emitI8x16Add(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i8x16.sub" => try op_simd.emitI8x16Sub(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.add" => try op_simd.emitI16x8Add(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.sub" => try op_simd.emitI16x8Sub(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"i32x4.add" => try op_simd.emitI32x4Add(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.sub" => try op_simd.emitI32x4Sub(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i64x2.add" => try op_simd.emitI64x2Add(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i64x2.sub" => try op_simd.emitI64x2Sub(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"memory.size" => {
                 // Wasm spec §4.4.7 — return current memory size in
                 // 64-KiB pages. mem_limit (bytes) lives at

@@ -297,7 +297,14 @@ pub const encRoundsd = inst_sse.encRoundsd;
 pub const encUcomiss = inst_sse.encUcomiss;
 pub const encUcomisd = inst_sse.encUcomisd;
 pub const encSseScalarBinary = inst_sse.encSseScalarBinary;
+pub const encPaddB = inst_sse.encPaddB;
+pub const encPaddW = inst_sse.encPaddW;
 pub const encPaddD = inst_sse.encPaddD;
+pub const encPaddQ = inst_sse.encPaddQ;
+pub const encPsubB = inst_sse.encPsubB;
+pub const encPsubW = inst_sse.encPsubW;
+pub const encPsubD = inst_sse.encPsubD;
+pub const encPsubQ = inst_sse.encPsubQ;
 
 // ============================================================
 // Tests

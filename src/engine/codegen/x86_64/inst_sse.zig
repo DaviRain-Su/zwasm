@@ -403,30 +403,77 @@ pub fn encSseScalarBinary(kind: SseScalarKind, opcode: u8, dst: Xmm, src: Xmm) E
     return enc;
 }
 
-/// `PADDD xmm, xmm/m128` (66 [REX?] 0F FE /r) — packed 32-bit
-/// integer add (SSE2). Operates element-wise on the four
-/// 32-bit lanes; dst = dst + src (two-address; the first XMM
-/// is both source-1 and destination).
+/// SSE2 packed integer add/sub family — internal helper. The 8
+/// public per-op encoders below differ only in the opcode byte;
+/// the prefix (0x66), escape (0x0F), and ModR/M shape are
+/// constant. Following ARM64's `inst_neon.encAdd16B/8H/4S/2D`
+/// pattern (per ROADMAP P7 backend parity), each public encoder
+/// is its own self-documenting wrapper rather than a single
+/// parameterised entry point — the call site reads the op family
+/// directly from the function name.
 ///
-/// Wasm spec §4.4.4 (i32x4.add) — packed wraparound add per
-/// SIMD-128. Intel SDM Vol 2 PADDB/W/D/Q description (FE = .d
-/// lane width).
-///
-/// dst occupies ModR/M.reg; src occupies r/m. REX.W is omitted
-/// (ignored for SSE per Intel SDM Vol 3 §2.2.1.2). `encMovapsXmmXmm`
-/// (0F 28 /r) is used by the caller to copy lhs → dst before
-/// emitting PADDD when dst != lhs (NEON's three-address ADD .4S
-/// has no x86_64 equivalent until AVX VPADDD).
-pub fn encPaddD(dst: Xmm, src: Xmm) EncodedInsn {
+/// Wasm spec §4.4.4 (packed integer add/sub) — element-wise
+/// wraparound add/sub per SIMD-128. Intel SDM Vol 2 PADDB / PADDW
+/// / PADDD / PADDQ + PSUBB / PSUBW / PSUBD / PSUBQ descriptions.
+fn encSsePackedIntBinop(opcode: u8, dst: Xmm, src: Xmm) EncodedInsn {
     var enc: EncodedInsn = .{};
     enc.push(0x66);
     if (dst.extBit() != 0 or src.extBit() != 0) {
         enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
     }
     enc.push(0x0F);
-    enc.push(0xFE);
+    enc.push(opcode);
     enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
     return enc;
+}
+
+/// `PADDB xmm, xmm` (66 [REX?] 0F FC /r) — packed 8-bit add (16
+/// lanes). Wasm `i8x16.add`.
+pub fn encPaddB(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xFC, dst, src);
+}
+
+/// `PADDW xmm, xmm` (66 [REX?] 0F FD /r) — packed 16-bit add (8
+/// lanes). Wasm `i16x8.add`.
+pub fn encPaddW(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xFD, dst, src);
+}
+
+/// `PADDD xmm, xmm` (66 [REX?] 0F FE /r) — packed 32-bit add (4
+/// lanes). Wasm `i32x4.add`. dst = dst + src (two-address; the
+/// caller copies `MOVAPS dst, lhs` before this op when dst != lhs).
+pub fn encPaddD(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xFE, dst, src);
+}
+
+/// `PADDQ xmm, xmm` (66 [REX?] 0F D4 /r) — packed 64-bit add (2
+/// lanes). Wasm `i64x2.add`.
+pub fn encPaddQ(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xD4, dst, src);
+}
+
+/// `PSUBB xmm, xmm` (66 [REX?] 0F F8 /r) — packed 8-bit sub.
+/// Wasm `i8x16.sub`.
+pub fn encPsubB(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xF8, dst, src);
+}
+
+/// `PSUBW xmm, xmm` (66 [REX?] 0F F9 /r) — packed 16-bit sub.
+/// Wasm `i16x8.sub`.
+pub fn encPsubW(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xF9, dst, src);
+}
+
+/// `PSUBD xmm, xmm` (66 [REX?] 0F FA /r) — packed 32-bit sub.
+/// Wasm `i32x4.sub`.
+pub fn encPsubD(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xFA, dst, src);
+}
+
+/// `PSUBQ xmm, xmm` (66 [REX?] 0F FB /r) — packed 64-bit sub.
+/// Wasm `i64x2.sub`.
+pub fn encPsubQ(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xFB, dst, src);
 }
 
 const testing = std.testing;
@@ -452,4 +499,21 @@ test "encPaddD: both extended (xmm8, xmm13) — REX.R + REX.B" {
     const enc = encPaddD(.xmm8, .xmm13);
     // 66 45 0F FE C5: REX = 0x45.  ModR/M = mod=11, reg=0, rm=5 → 0xC5.
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0xFE, 0xC5 }, enc.slice());
+}
+
+test "encPaddB / encPaddW / encPaddQ opcode bytes (xmm0, xmm1)" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xFC, 0xC1 }, encPaddB(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xFD, 0xC1 }, encPaddW(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xD4, 0xC1 }, encPaddQ(.xmm0, .xmm1).slice());
+}
+
+test "encPsubB / encPsubW / encPsubD / encPsubQ opcode bytes (xmm0, xmm1)" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xF8, 0xC1 }, encPsubB(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xF9, 0xC1 }, encPsubW(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xFA, 0xC1 }, encPsubD(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xFB, 0xC1 }, encPsubQ(.xmm0, .xmm1).slice());
+}
+
+test "encPsubD: REX.R+B path (xmm8, xmm13) carries opcode 0xFA" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0xFA, 0xC5 }, encPsubD(.xmm8, .xmm13).slice());
 }
