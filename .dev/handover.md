@@ -16,34 +16,30 @@
 6. `private/notes/p9-9.7-m-survey.md` (gitignored; cranelift recipe +
    adoption data) — only if revisiting the SSE4.2 baseline call.
 
-## Current state — Phase 9 / §9.7 in-flight (9.7-a..q landed); **9.7-r NEXT**
+## Current state — Phase 9 / §9.7 in-flight (9.7-a..r landed); **9.7-s NEXT**
 
-9.7-q: x86_64 f32x4/f64x2 min/max via NaN-correction
-synthesis (4 ops). 11 new encoders (MIN/MAX PS+PD;
-OR/XOR/ANDN PS+PD; PSRLD imm via opcode-parametric
-encSsePackedShiftImmGroup). 2 helpers (emitV128FpMin 10
-instr, emitV128FpMax 13 instr) per cranelift
-`lower.isle:2783-2939`. XMM14/XMM15 scratch. Total SIMD
-ops handled: 92.
+9.7-r: x86_64 v128 bitwise ops + any_true (7 ops). 4 new
+encoders (PAND/POR/PANDN SSE2; PTEST SSE4.1). v128.not 3-
+instr synth; and/or/xor via emitV128IntBinop; andnot custom
+2-instr (PANDN's negated-first-operand semantic); bitselect
+5-instr PAND/PANDN/POR chain per cranelift; any_true PTEST +
+SETNE + MOVZX. regalloc produces_vreg list extended for
+5 v128 + 1 scalar new ops. Total SIMD ops handled: 99.
 
-**9.7-r NEXT** — v128 bitwise ops + select (8 ops):
-v128.{not, and, or, xor, andnot, bitselect, any_true,
-all_true}. Encoders mostly exist (ORPS/XORPS/ANDNPS from
-9.7-q; PXOR from 9.7-h; need PAND, PANDN-as-PXOR-then-AND
-or use existing ANDNPS, PBLENDVB for bitselect SSE4.1).
-Wasm `v128.bitselect(c, a, b)` = `(a & c) | (b & ~c)` —
-2-3 instr via PAND/PANDN/POR or use PBLENDVB-with-mask.
-any_true: PTEST + SETcc (SSE4.1) — pop v128, push i32.
-all_true: PCMPEQB + PMOVMSKB + AND-mask + SETcc shape.
-Likely: 3-4 new encoders (PAND, PANDN-int, PTEST,
-PMOVMSKB) + 6 binary wrappers + 2 reduction handlers
-(any_true / all_true with i32 result). ~200 src + ~100
-test. No ADR.
+**9.7-s NEXT** — per-shape all_true + bitmask reductions
+(8 ops): i8x16/i16x8/i32x4/i64x2.{all_true, bitmask}. all_true
+via PCMPEQ_<lane>(xmm, zero) + PMOVMSKB + CMP all-set + SETE
+or via PTEST + AND mask comparison. bitmask via PMOVMSKB
+(i8x16 — direct; PSADBW or PMOVMSK*-equivalent for wider
+lanes). Each shape needs distinct synthesis since the lane-
+mask shapes differ. Likely: 1-2 new encoders (PMOVMSKB SSE2)
++ shape-specific synthesis helpers + 8 wrappers. ~250 src
++ ~120 test. No ADR.
 
-Subsequent: 9.7-s+ (i*x* shifts shl/shr_s/shr_u; abs/neg
-via PXOR sign-mask const-pool), 9.7-t+ (conversion +
-narrow/extend + shuffle PSHUFB), 9.7-u (v128.const via
-ADR-0042 const-pool finalisation).
+Subsequent: 9.7-t+ (i*x* shifts shl/shr_s/shr_u; abs/neg via
+PXOR sign-mask const-pool), 9.7-u+ (conversion + narrow/
+extend + shuffle PSHUFB), 9.7-v (v128.const via ADR-0042
+const-pool finalisation).
 
 ## Open structural debt (pointers — full list in `.dev/debt.md`)
 
@@ -63,5 +59,5 @@ reference) live in git: ADRs 0035-0040, lessons indexed in
 
 **Phase**: Phase 9 (SIMD-128, ADR-0041 — SSE4.2 baseline post-9.7-m).
 §9.5 [x] (ARM64 NEON pt 1), §9.6 [x] (ARM64 NEON pt 2),
-§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..q landed; 9.7-r NEXT).
+§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..r landed; 9.7-s NEXT).
 **Branch**: `zwasm-from-scratch`。
