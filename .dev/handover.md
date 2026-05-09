@@ -16,30 +16,38 @@
 6. `private/notes/p9-9.7-m-survey.md` (gitignored; cranelift recipe +
    adoption data) — only if revisiting the SSE4.2 baseline call.
 
-## Current state — Phase 9 / §9.7 in-flight (9.7-a..ap landed); **9.7-aq NEXT**
+## Current state — Phase 9 / §9.7 in-flight (9.7-a..aq landed); **9.7-ar NEXT**
 
-9.7-ap: x86_64 i32x4.trunc_sat_f64x2_u_zero (1 op, 7-instr
-ROUNDPD+ADDPD-magic+SHUFPS-extract recipe + 2 consts; reuses
-9.7-ao's 2^52 magic via extra_consts dedup). 1 new encoder
-encShufps. Total SIMD ops handled: 185.
+9.7-aq: x86_64 i32x4.extadd_pairwise_i16x8_u (1 op, 11-instr
+inline-synth via sign-flip XOR + PMADDWD+1 + bias-correction).
+Closes the extadd_pairwise family across all 4 variants. 1 new
+encoder encPsllwImm. No const-pool dep. Total SIMD ops handled:
+186.
 
-**9.7-aq NEXT** — `i32x4.extadd_pairwise_i16x8_u` (1 op, closes
-extadd_pairwise family). Per cranelift `lower.isle:4032-4071`:
-PMADDWD reads operands as signed i16, so for unsigned u16 lanes
-we need sign-flip pre-correction. Recipe: XOR src with 0x8000
-sign-flip mask (= u16 - 0x8000 → signed i16 in [-0x8000, 0x7FFF])
-+ PMADDWD with all-1s (+1 per word) → produces (i16+i16) i32
-sums + correction-add (+ 2*0x8000 = 0x10000 per pair = 65536
-per i32) to recover the original u16+u16 sum. 4-5 instr + 2
-consts (sign-flip XOR + correction add). Survey for cleanest
-recipe shape.
+**9.7-ar NEXT** — `i8x16.shuffle` (1 op). Cranelift's recipe
+(`lower.isle:4710+`): PSHUFB(src1, a_mask) | PSHUFB(src2, b_mask)
+where a_mask + b_mask are DERIVED from the original Wasm mask:
+a_mask[i] = mask[i] if mask[i] < 16 else 0x80; b_mask[i] =
+mask[i] - 16 if mask[i] >= 16 else 0x80. Structural challenge:
+ADR-0042's per-instance simd_consts is populated by lower.zig
+with the ORIGINAL mask, but x86_64 needs 2 derived masks.
+Three resolution paths:
+(a) Modify lower.zig to store derived masks for shuffle —
+    changes lower contract used by ARM64.
+(b) Add x86_64 emit-time derivation: handler reads original
+    mask from func.simd_consts[const_idx], derives 2 masks,
+    appends to extra_consts. Cleanest — matches existing
+    extra_consts dedup pattern.
+(c) Per-arch lower hook to emit derived masks at lower-time.
+**Recommend (b)** — minimal change, no cross-arch impact.
+Recipe: ~6 instr (2 MOVUPS-RIP-rel const loads + PSHUFB pair
++ POR-merge), 2 derived consts per call site (no dedup since
+masks are per-instance).
 
-Subsequent: 9.7-ar (i8x16.shuffle — needs derived a-mask/b-mask
-plumbing extension; ADR-grade decision — either change lower
-contract or fork extra_consts to per-fixup derived consts),
-9.7-as (i32x4.trunc_sat_f32x4_u — needs 3 scratch xmms;
-ADR-grade scratch-budget extension). Phase 7 close-out
-approaching: ~2-3 chunks until 7.13 hard gate.
+Subsequent: 9.7-as (i32x4.trunc_sat_f32x4_u — needs 3 scratch
+xmms; ADR-grade scratch-budget extension OR fall back to
+spilling tmp to stack). Phase 7 close-out approaching:
+~2 chunks until 7.13 hard gate.
 
 ## Open structural debt (pointers — full list in `.dev/debt.md`)
 
@@ -59,5 +67,5 @@ reference) live in git: ADRs 0035-0040, lessons indexed in
 
 **Phase**: Phase 9 (SIMD-128, ADR-0041 — SSE4.2 baseline post-9.7-m).
 §9.5 [x] (ARM64 NEON pt 1), §9.6 [x] (ARM64 NEON pt 2),
-§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..ap landed; 9.7-aq NEXT).
+§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..aq landed; 9.7-ar NEXT).
 **Branch**: `zwasm-from-scratch`。
