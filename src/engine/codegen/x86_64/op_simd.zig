@@ -3189,6 +3189,16 @@ pub fn emitI32x4TruncSatF64x2SZero(
     try pushed_vregs.append(allocator, result_v);
 }
 
+/// 16-byte 0x43300000-per-dword broadcast — single-precision
+/// pattern of 0x1.0p+52 used by `f64x2.convert_low_i32x4_u`'s
+/// UNPCKLPS interleave.
+const UINT_MASK_LOW: [16]u8 = [_]u8{ 0x00, 0x00, 0x30, 0x43 } ** 4;
+
+/// 16-byte 0x4330000000000000-per-qword broadcast — f64 value of
+/// 2^52, subtracted to extract the original u32 from the
+/// mantissa-overlay.
+const UINT_MASK_HIGH: [16]u8 = [_]u8{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x43 } ** 2;
+
 /// 16-byte 0x0F-per-byte mask used by popcnt's nibble-split path.
 const NIBBLE_MASK_BROADCAST: [16]u8 = [_]u8{0x0F} ** 16;
 
@@ -3297,6 +3307,57 @@ pub fn emitI8x16Popcnt(
     try buf.appendSlice(allocator, inst.encPshufb(t2, t1).slice());
     // 11: dst = popcount(high) + popcount(low) = popcount(byte).
     try buf.appendSlice(allocator, inst.encPaddB(dst_x, t2).slice());
+
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// Wasm spec §4.4.4 (f64x2.convert_low_i32x4_u) — convert low 2
+/// unsigned i32 lanes to f64. SSE has no native CVTUDQ2PD;
+/// recipe per cranelift `lower.isle:3775-3779` exploits IEEE-754
+/// mantissa placement: interleave each u32 with 0x43300000 (the
+/// f64 exponent for 2^52) to form 0x4330000000000000 + u32, which
+/// as f64 = 2^52 + u32; subtract 2^52 to recover u32 exactly.
+///
+/// 5-instr recipe: load uint_mask_low + UNPCKLPS interleave +
+/// load uint_mask_high + SUBPD.
+pub fn emitF64x2ConvertLowI32x4U(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    simd_const_fixups: *std.ArrayList(@import("types.zig").SimdConstFixup),
+    extra_consts: *std.ArrayList([16]u8),
+    simd_consts_base: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const src_x = try gpr.resolveXmm(alloc, src_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const tmp = abi.fp_spill_stage_xmms[0]; // XMM14
+
+    const low_idx = try lookupOrAppendExtraConst(allocator, extra_consts, simd_consts_base, UINT_MASK_LOW);
+    const high_idx = try lookupOrAppendExtraConst(allocator, extra_consts, simd_consts_base, UINT_MASK_HIGH);
+
+    // 1: dst = src.
+    if (dst_x != src_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, src_x).slice());
+    }
+    // 2: tmp = uint_mask_low (0x43300000-per-dword).
+    try emitConstLoad(allocator, buf, simd_const_fixups, tmp, low_idx);
+    // 3: UNPCKLPS dst, tmp — interleave low 32-bit lanes.
+    // dst.lanes = [dst[0], tmp[0], dst[1], tmp[1]].
+    // After this each qword of dst is 0x4330_0000_<u32_lane>, which
+    // as f64 = 2^52 + u32_lane.
+    try buf.appendSlice(allocator, inst.encUnpcklps(dst_x, tmp).slice());
+    // 4: tmp = uint_mask_high (0x4330000000000000-per-qword = 2^52 as f64).
+    try emitConstLoad(allocator, buf, simd_const_fixups, tmp, high_idx);
+    // 5: SUBPD dst, tmp — dst = (2^52 + u32) - 2^52 = u32 as f64.
+    try buf.appendSlice(allocator, inst.encSubpd(dst_x, tmp).slice());
 
     try pushed_vregs.append(allocator, result_v);
 }

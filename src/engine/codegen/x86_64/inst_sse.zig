@@ -1296,6 +1296,15 @@ pub fn encPsradImm(dst: Xmm, count: u8) EncodedInsn {
     return encSsePackedShiftImmGroup(0x72, 4, dst, count);
 }
 
+/// `UNPCKLPS xmm, xmm` ([REX?] 0F 14 /r) — SSE interleave low
+/// 32-bit (single-precision) lanes from dst and src into dst.
+/// Output lanes: [dst[0], src[0], dst[1], src[1]]. Used by Wasm
+/// `f64x2.convert_low_i32x4_u` synthesis to interleave i32 lanes
+/// with 0x43300000 mask, producing a f64 mantissa-overlay.
+pub fn encUnpcklps(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSseFpPsBinop(0x14, dst, src);
+}
+
 /// `CVTTPD2DQ xmm, xmm` (66 [REX?] 0F E6 /r) — SSE2 truncating
 /// convert 2 packed f64 → 2 packed i32 in low half of dst (high
 /// half of dst zeroed automatically — matches Wasm `_zero` suffix).
@@ -1760,6 +1769,10 @@ test "encPmaddubsw: SSSE3 (xmm0, xmm1) opcode 0x38 0x04" {
 test "encPmulhrsw / encPmaddwd opcode bytes (xmm0, xmm1)" {
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x0B, 0xC1 }, encPmulhrsw(.xmm0, .xmm1).slice());
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xF5, 0xC1 }, encPmaddwd(.xmm0, .xmm1).slice());
+}
+
+test "encUnpcklps: SSE (xmm0, xmm1) opcode 0F 14" {
+    try testing.expectEqualSlices(u8, &.{ 0x0F, 0x14, 0xC1 }, encUnpcklps(.xmm0, .xmm1).slice());
 }
 
 test "encCvttpd2dq: SSE2 (xmm0, xmm1) opcode 66 0F E6" {

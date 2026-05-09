@@ -359,6 +359,7 @@ pub const encPsradImm = inst_sse.encPsradImm;
 pub const encCvttps2dq = inst_sse.encCvttps2dq;
 pub const encMovupsXmmRipRelPlaceholder = inst_sse.encMovupsXmmRipRelPlaceholder;
 pub const encCvttpd2dq = inst_sse.encCvttpd2dq;
+pub const encUnpcklps = inst_sse.encUnpcklps;
 pub const patchRipRelDisp32 = inst_sse.patchRipRelDisp32;
 pub const encPmulhrsw = inst_sse.encPmulhrsw;
 pub const encPmaddwd = inst_sse.encPmaddwd;
