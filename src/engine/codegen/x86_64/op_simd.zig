@@ -3499,6 +3499,86 @@ pub fn emitI32x4ExtaddPairwiseI16x8S(allocator: Allocator, buf: *std.ArrayList(u
     try pushed_vregs.append(allocator, result_v);
 }
 
+/// Wasm spec §4.4.5 (i8x16.shuffle) — pop 2 v128 (lhs, rhs), push
+/// v128 result whose i-th byte = src[mask[i]] for mask[i] in 0..31
+/// (lhs supplies indices 0..15, rhs supplies 16..31).
+///
+/// Recipe per cranelift `lower.isle:4710+`:
+///   PSHUFB(src1, a_mask) | PSHUFB(src2, b_mask)
+/// where a_mask[i] = mask[i]  if mask[i] < 16 else 0x80
+///       b_mask[i] = mask[i]-16 if mask[i] >= 16 else 0x80.
+/// PSHUFB writes 0 to a lane when its control byte's bit 7 is set
+/// (= 0x80), so each side contributes only its valid lanes; POR
+/// merges them.
+///
+/// 9-instr recipe (incl. 2 MOVUPS-RIP-rel const loads for derived
+/// masks): 2 derived masks per call site, appended to extra_consts
+/// (no dedup since masks are per-instance).
+pub fn emitI8x16Shuffle(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    simd_const_fixups: *std.ArrayList(@import("types.zig").SimdConstFixup),
+    extra_consts: *std.ArrayList([16]u8),
+    simd_consts_base: u32,
+    simd_consts: ?[]const [16]u8,
+    const_idx: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
+    const consts = simd_consts orelse return Error.AllocationMissing;
+    if (const_idx >= consts.len) return Error.AllocationMissing;
+    const mask = consts[const_idx];
+
+    const rhs_v = pushed_vregs.pop().?;
+    const lhs_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const lhs_x = try gpr.resolveXmm(alloc, lhs_v);
+    const rhs_x = try gpr.resolveXmm(alloc, rhs_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const t1 = abi.fp_spill_stage_xmms[0]; // XMM14 — mask register
+    const t2 = abi.fp_spill_stage_xmms[1]; // XMM15 — src2 PSHUFB result
+
+    // Derive a_mask + b_mask from the original Wasm mask. PSHUFB's
+    // bit-7 = "zero output" semantics handles the cross-source
+    // selection without a separate compare.
+    var a_mask: [16]u8 = undefined;
+    var b_mask: [16]u8 = undefined;
+    for (mask, 0..) |m, i| {
+        a_mask[i] = if (m < 16) m else 0x80;
+        b_mask[i] = if (m >= 16 and m < 32) m - 16 else 0x80;
+    }
+    // Per-instance — append unconditionally (no dedup; future
+    // instances of i8x16.shuffle land their own pair).
+    const a_idx: u32 = simd_consts_base + @as(u32, @intCast(extra_consts.items.len));
+    try extra_consts.append(allocator, a_mask);
+    const b_idx: u32 = simd_consts_base + @as(u32, @intCast(extra_consts.items.len));
+    try extra_consts.append(allocator, b_mask);
+
+    // 1: t1 = a_mask.
+    try emitConstLoad(allocator, buf, simd_const_fixups, t1, a_idx);
+    // 2: dst = lhs.
+    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, lhs_x).slice());
+    // 3: PSHUFB dst, t1 → dst = lhs[a_mask] (zeros where a_mask
+    // had bit 7 set = lanes that selected from rhs).
+    try buf.appendSlice(allocator, inst.encPshufb(dst_x, t1).slice());
+    // 4: t1 = b_mask.
+    try emitConstLoad(allocator, buf, simd_const_fixups, t1, b_idx);
+    // 5: t2 = rhs.
+    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(t2, rhs_x).slice());
+    // 6: PSHUFB t2, t1 → t2 = rhs[b_mask] (zeros where b_mask had
+    // bit 7 set = lanes that selected from lhs).
+    try buf.appendSlice(allocator, inst.encPshufb(t2, t1).slice());
+    // 7: dst = dst | t2 → merge the two halves.
+    try buf.appendSlice(allocator, inst.encPor(dst_x, t2).slice());
+
+    try pushed_vregs.append(allocator, result_v);
+}
+
 /// Wasm spec §4.4.4 (i32x4.extadd_pairwise_i16x8_u) — pairwise-
 /// add adjacent unsigned i16 lanes, widening to i32. PMADDWD
 /// reads operands as signed i16 so we sign-flip src first

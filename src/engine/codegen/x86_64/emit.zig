@@ -1109,6 +1109,14 @@ pub fn compile(
             // 11-instr inline-synth (no const-pool dep) — closes
             // the extadd_pairwise family.
             .@"i32x4.extadd_pairwise_i16x8_u" => try op_simd.emitI32x4ExtaddPairwiseI16x8U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            // §9.7/9.7-ar — i8x16.shuffle via PSHUFB-pair + POR.
+            // The handler reads the original Wasm mask from
+            // func.simd_consts[ins.payload], derives a-mask /
+            // b-mask, and appends both to extra_consts.
+            .@"i8x16.shuffle" => {
+                const simd_consts_base: u32 = if (func.simd_consts) |sc| @intCast(sc.len) else 0;
+                try op_simd.emitI8x16Shuffle(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &simd_const_fixups, &extra_consts, simd_consts_base, func.simd_consts, ins.payload);
+            },
             // §9.7/9.7-al — v128.const via ADR-0042 const-pool
             // (mirror of ARM64 §9.6/9.6-f-ii). Lower pass stored
             // const_idx in ins.payload pointing into
