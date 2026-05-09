@@ -1196,6 +1196,8 @@ pub fn compile(
             .@"f32x4.replace_lane" => try op_simd.emitF32x4ReplaceLane(&ctx, &ins),
             .@"f64x2.extract_lane" => try op_simd.emitF64x2ExtractLane(&ctx, &ins),
             .@"f64x2.replace_lane" => try op_simd.emitF64x2ReplaceLane(&ctx, &ins),
+            // §9.9/9.5-c-vii-mul — i64x2.mul multi-instr synthesis.
+            .@"i64x2.mul" => try op_simd.emitI64x2Mul(&ctx, &ins),
 
             else => {
                 // §9.7 / 7.5-diag-op: surface the unhandled op

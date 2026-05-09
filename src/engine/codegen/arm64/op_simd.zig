@@ -30,6 +30,7 @@
 const std = @import("std");
 
 const zir = @import("../../../ir/zir.zig");
+const inst = @import("inst.zig");
 const inst_neon = @import("inst_neon.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
@@ -486,4 +487,58 @@ pub fn emitF64x2ExtractLane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// element D form, src lane 0).
 pub fn emitF64x2ReplaceLane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     return emitV128ReplaceLaneFp(ctx, ins, encInsElemD, 0x1);
+}
+
+// ============================================================
+// §9.9 / 9.5-c-vii-mul — i64x2.mul multi-instr synthesis
+// ============================================================
+//
+// Wasm spec (SIMD) — `i64x2.mul`: lane-wise 64-bit multiply.
+// A64 NEON has no `MUL Vd.2D` instruction (the size encoding
+// for MUL Vd.<T>, Vn.<T>, Vm.<T> stops at 4S — bits[23:22]=11
+// is reserved for D form). We synthesise via per-lane GPR
+// transit:
+//   for k in 0..2:
+//     UMOV X16, V<lhs>.D[k]   ; encUmovXFromD
+//     UMOV X17, V<rhs>.D[k]   ; encUmovXFromD
+//     MUL  X16, X16, X17      ; encMulReg (X-form)
+//     INS  V<result>.D[k], X16 ; encInsDFromX
+//
+// X16 (IP0) / X17 (IP1) are AAPCS64 intra-procedure scratch —
+// already used by `op_alu_int.emitI*Rotl` (rotate-left synthesis)
+// and `op_alu_float.emitF*Copysign` (signed-zero bit-mask). No
+// new reservation needed.
+//
+// Aliasing safety: result V can equal lhs V or rhs V (regalloc
+// may reuse a slot whose liveness ended at this op). The
+// per-lane sequence is alias-safe — INS V<result>.D[k] only
+// touches lane k, leaving the other lane intact for the next
+// iteration's UMOV reads.
+
+const i64x2_mul_scratch_a: inst.Xn = 16; // X16 / IP0
+const i64x2_mul_scratch_b: inst.Xn = 17; // X17 / IP1
+
+/// Wasm spec (SIMD) — `i64x2.mul`: 8-word emission per call.
+/// See block comment above for the synthesis rationale.
+pub fn emitI64x2Mul(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    const rhs_vreg = ctx.pushed_vregs.pop().?;
+    const rhs_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, rhs_vreg, 1);
+
+    const lhs_vreg = ctx.pushed_vregs.pop().?;
+    const lhs_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, lhs_vreg, 0);
+
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
+
+    inline for (.{ 0, 1 }) |k| {
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encUmovXFromD(i64x2_mul_scratch_a, lhs_v, k));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encUmovXFromD(i64x2_mul_scratch_b, rhs_v, k));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMulReg(i64x2_mul_scratch_a, i64x2_mul_scratch_a, i64x2_mul_scratch_b));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encInsDFromX(result_v, i64x2_mul_scratch_a, k));
+    }
+
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
 }
