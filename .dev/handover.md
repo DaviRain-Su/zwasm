@@ -13,40 +13,38 @@
 5. `.dev/decisions/0031_zir_hoist_pass.md` (D-053 root-cause amend per 8a.6).
 6. `.dev/optimisation_log.md` (F/R/O ledger; 8b adoption discipline).
 
-## Current state — Phase 9 / §9.7 in-flight (9.7-a..h [x]); **9.7-i NEXT**
+## Current state — Phase 9 / §9.7 in-flight (9.7-a..i [x]); **9.7-j NEXT**
 
-9.7-h landed at 9659a6df: integer splat trio (i8x16 / i16x8 /
-i64x2). Adds encPxor (SSE2 0F EF), encPshufb (SSSE3 0F 38 00),
-encPshuflw (F2 0F 70 /r ib), encPunpcklqdq (66 0F 6C /r). i8x16
-uses XMM14 scratch for the all-zero PSHUFB ctrl mask. Total SIMD
-ops handled: 24 (= all 6 splat shapes are now wired except FP).
+9.7-i landed at bab7c888: f32x4 lane access trio (splat /
+extract / replace). Adds encInsertps (SSE4.1 3A 21 /r ib);
+splat + extract reuse encPshufd (PSHUFD on FP-domain data is
+bit-identical to integer-domain shuffle). Total SIMD ops
+handled: 27.
 
-Three-host gate at 9659a6df: Mac unit 1389/0/12 + gates ✓;
-OrbStack at known D-054 baseline (211/1/20 + 1373/1401);
+Three-host gate at bab7c888: Mac unit 1394/0/12 + gates ✓;
+OrbStack at known D-054 baseline (211/1/20 + 1378/1406);
 windowsmini full green (212/0/20 + every runner green).
 
-**9.7-i NEXT** — FP lane access (f32x4 / f64x2 splat + extract +
-replace). XMM-source semantics differ from int paths:
-- f32x4.splat: SHUFPS xmm_dst, xmm_src, 0x00 (broadcasts lane 0).
-  Or PSHUFD via integer-domain alias.
-- f64x2.splat: MOVDDUP (F2 0F 12 /r) — broadcasts low qword to
-  both 64-bit lanes. SSE3.
-- f32x4.extract_lane: lane=0 → MOVAPS dst, src; otherwise PSHUFD
-  with imm8 selector to bring the lane into position 0. Result
-  is XMM (f32 in low 32).
-- f64x2.extract_lane: lane=0 → MOVAPS; lane=1 → MOVHLPS or
-  SHUFPD with imm.
-- f32x4.replace_lane: INSERTPS (66 0F 3A 21 /r ib) — SSE4.1.
-  Imm8 encodes both src lane (bits 6-7) and dst lane (bits 4-5).
-- f64x2.replace_lane: MOVAPS preamble + MOVLHPS / MOVHLPS /
-  SHUFPD with appropriate imm depending on lane.
+**9.7-j NEXT** — f64x2 lane access trio. Encoders likely needed:
+- f64x2.splat: MOVDDUP (F2 0F 12 /r) for the low-qword broadcast,
+  OR reuse encPunpcklqdq with self-source (already have it).
+- f64x2.extract_lane: lane=0 trivial (MOVAPS dst, src — already
+  have encMovapsXmmXmm); lane=1 needs SHUFPD or MOVHLPS or
+  PSHUFD with imm 0x4E (swap qwords). encPshufd works for the
+  qword-as-2-dwords interpretation.
+- f64x2.replace_lane: MOVAPS preamble + SHUFPD or MOVLHPS /
+  MOVHLPS / encInsertps-equivalent (UNPCKLPD / UNPCKHPD trick).
+  May want SHUFPD (66 0F C6 /r ib) — new encoder.
 
-Likely ~250-350 LOC. Step 0 should partition: bundle all 6 FP
-lane ops, OR split splat (3) + extract+replace (3).
+Step 0 will scope. Likely ~150-200 LOC.
 
-Subsequent: 9.7-j (compare family — PCMPEQ*, PCMPGT*), 9.7-k (FP
-arith ADDPS/ADDPD/MULPS/DIVPS), 9.7-l (FP compare CMPPS/PD),
-9.7-m (conversion + shuffle PSHUFB + v128.const via ADR-0042).
+Subsequent: 9.7-k (compare family — PCMPEQ*, PCMPGT* int + CMPPS
+/ CMPPD FP), 9.7-l (FP arith ADDPS/PD/MULPS/DIVPS/SUBPS/PD),
+9.7-m (FP unary abs/neg/sqrt + min/max/pmin/pmax), 9.7-n (int
+compare extras + select / and / or / xor / not / bitselect),
+9.7-o (conversion + narrow/extend + shuffle PSHUFB),
+9.7-p (v128.const via ADR-0042 const-pool with x86_64
+RIP-relative LEA + MOVDQU).
 
 ## Open structural debt (pointers — full list in `.dev/debt.md`)
 
