@@ -44,6 +44,7 @@ const std = @import("std");
 
 const regalloc = @import("../shared/regalloc.zig");
 const inst = @import("inst.zig");
+const abi = @import("abi.zig");
 const gpr = @import("gpr.zig");
 const types = @import("types.zig");
 
@@ -203,6 +204,87 @@ pub fn emitI32x4Mul(
     return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmullD);
 }
 
+/// Wasm spec §4.4.4 (i64x2.mul) — pop two v128, push their
+/// element-wise 64-bit product per lane (2 lanes; modular
+/// wraparound at 2^64). x86_64 has **no native instruction**
+/// for 64×64→64 packed multiply at the SSE4.1 baseline (AVX-512
+/// VPMULLQ exists but is gated by ADR-0041 §"5. SSE4.1 minimum
+/// baseline").
+///
+/// Synthesis (cranelift idiom — 8 instructions, 2 SIMD scratches):
+///
+/// Let lhs = (a1:a0) and rhs = (b1:b0) per 64-bit lane (a1 / b1
+/// = high 32, a0 / b0 = low 32). The product mod 2^64 is:
+///   a*b ≡ (a_hi * b_lo + a_lo * b_hi) << 32 + a_lo * b_lo
+///
+///   1. MOVAPS s1, lhs              ; s1 = a
+///   2. PSRLQ  s1, 32               ; s1 = (0:a_hi)
+///   3. PMULUDQ s1, rhs             ; s1 = a_hi * b_lo
+///   4. MOVAPS s2, rhs              ; s2 = b
+///   5. PSRLQ  s2, 32               ; s2 = (0:b_hi)
+///   6. PMULUDQ s2, lhs             ; s2 = b_hi * a_lo
+///   7. PADDQ  s1, s2               ; s1 = a_hi*b_lo + a_lo*b_hi
+///   8. PSLLQ  s1, 32               ; (cross terms) << 32
+///   9. MOVAPS dst, lhs (if dst != lhs)
+///  10. PMULUDQ dst, rhs            ; dst = a_lo * b_lo (full 64-bit)
+///  11. PADDQ  dst, s1              ; final = low + (cross<<32)
+///
+/// **Scratch reservation**: reuses `abi.fp_spill_stage_xmms`
+/// (XMM14 / XMM15) as in-handler SIMD scratch. Safe because the
+/// synthesis is atomic — no nested `xmmLoadSpilled` calls
+/// intervene between the MOVAPS s1/s2 setup and the final
+/// PADDQ. Avoids a new ABI reservation; mirrors the principle
+/// from ARM64 op_simd.zig that scratch reuse is preferable to
+/// pool churn (per ROADMAP P3 cold-start; per p9-9.7-d-survey.md
+/// "scratch strategy B").
+pub fn emitI64x2Mul(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+) Error!void {
+    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
+    const rhs_v = pushed_vregs.pop().?;
+    const lhs_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const rhs_x = try gpr.resolveXmm(alloc, rhs_v);
+    const lhs_x = try gpr.resolveXmm(alloc, lhs_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+
+    // SIMD scratch: reuse fp_spill_stage_xmms[0..1]. The spill-
+    // staging path is unused inside this handler (no nested
+    // xmmLoadSpilled), so XMM14 / XMM15 are free to clobber.
+    const s1 = abi.fp_spill_stage_xmms[0]; // XMM14
+    const s2 = abi.fp_spill_stage_xmms[1]; // XMM15
+
+    // 1-3: cross term a_hi * b_lo into s1.
+    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(s1, lhs_x).slice());
+    try buf.appendSlice(allocator, inst.encPsrlqImm(s1, 32).slice());
+    try buf.appendSlice(allocator, inst.encPmuludq(s1, rhs_x).slice());
+
+    // 4-6: cross term a_lo * b_hi into s2.
+    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(s2, rhs_x).slice());
+    try buf.appendSlice(allocator, inst.encPsrlqImm(s2, 32).slice());
+    try buf.appendSlice(allocator, inst.encPmuludq(s2, lhs_x).slice());
+
+    // 7-8: combine cross terms and shift into the high half.
+    try buf.appendSlice(allocator, inst.encPaddQ(s1, s2).slice());
+    try buf.appendSlice(allocator, inst.encPsllqImm(s1, 32).slice());
+
+    // 9-11: low product into dst, then add cross terms.
+    if (dst_x != lhs_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, lhs_x).slice());
+    }
+    try buf.appendSlice(allocator, inst.encPmuludq(dst_x, rhs_x).slice());
+    try buf.appendSlice(allocator, inst.encPaddQ(dst_x, s1).slice());
+
+    try pushed_vregs.append(allocator, result_v);
+}
+
 // ============================================================
 // Tests
 // ============================================================
@@ -305,6 +387,90 @@ test "emitI8x16Sub: dispatches to encPsubB — opcode 0xF8 reaches the buffer" {
     @memcpy(expected_buf[n..][0..psub.slice().len], psub.slice());
     n += psub.slice().len;
     try testing.expectEqualSlices(u8, expected_buf[0..n], buf.items);
+}
+
+test "emitI64x2Mul: emits the 11-instruction PMULUDQ synthesis sequence" {
+    // Synthetic regalloc: lhs at slot 0 (XMM8), rhs at slot 1
+    // (XMM9), dst at slot 2 (XMM10) — none aliased, so the final
+    // MOVAPS dst, lhs is emitted.
+    var slot_ids = [_]u16{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 3,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    try pushed.append(testing.allocator, 1);
+    var next_vreg: u32 = 2;
+
+    try emitI64x2Mul(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    // Build expected sequence verbatim from the encoders (use
+    // the same constants as the handler so encoder churn is
+    // caught here, not at runtime).
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    const s1 = abi.fp_spill_stage_xmms[0];
+    const s2 = abi.fp_spill_stage_xmms[1];
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(s1, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encPsrlqImm(s1, 32).slice());
+    try expected.appendSlice(testing.allocator, inst.encPmuludq(s1, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(s2, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encPsrlqImm(s2, 32).slice());
+    try expected.appendSlice(testing.allocator, inst.encPmuludq(s2, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encPaddQ(s1, s2).slice());
+    try expected.appendSlice(testing.allocator, inst.encPsllqImm(s1, 32).slice());
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm10, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encPmuludq(.xmm10, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encPaddQ(.xmm10, s1).slice());
+
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
+test "emitI64x2Mul: dst aliases lhs — final MOVAPS elided" {
+    var slot_ids = [_]u16{ 0, 1, 0 }; // dst (vreg 2) reuses lhs slot
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 2,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    try pushed.append(testing.allocator, 1);
+    var next_vreg: u32 = 2;
+
+    try emitI64x2Mul(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    // Same sequence minus the `MOVAPS dst, lhs` step (instructions
+    // 1-8 unchanged; step 9 = dst_x == lhs_x = XMM8 → elided).
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    const s1 = abi.fp_spill_stage_xmms[0];
+    const s2 = abi.fp_spill_stage_xmms[1];
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(s1, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encPsrlqImm(s1, 32).slice());
+    try expected.appendSlice(testing.allocator, inst.encPmuludq(s1, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(s2, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encPsrlqImm(s2, 32).slice());
+    try expected.appendSlice(testing.allocator, inst.encPmuludq(s2, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encPaddQ(s1, s2).slice());
+    try expected.appendSlice(testing.allocator, inst.encPsllqImm(s1, 32).slice());
+    // (no MOVAPS dst, lhs — they alias)
+    try expected.appendSlice(testing.allocator, inst.encPmuludq(.xmm8, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encPaddQ(.xmm8, s1).slice());
+
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
 }
 
 test "emitI32x4Mul: dispatches to encPmullD — opcode 0x40 with 0x38 escape reaches the buffer" {

@@ -307,6 +307,9 @@ pub const encPsubD = inst_sse.encPsubD;
 pub const encPsubQ = inst_sse.encPsubQ;
 pub const encPmullW = inst_sse.encPmullW;
 pub const encPmullD = inst_sse.encPmullD;
+pub const encPmuludq = inst_sse.encPmuludq;
+pub const encPsrlqImm = inst_sse.encPsrlqImm;
+pub const encPsllqImm = inst_sse.encPsllqImm;
 
 // ============================================================
 // Tests

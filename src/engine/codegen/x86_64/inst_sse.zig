@@ -507,6 +507,56 @@ pub fn encPmullD(dst: Xmm, src: Xmm) EncodedInsn {
     return encSsePackedIntBinopExt(0x38, 0x40, dst, src);
 }
 
+/// `PMULUDQ xmm, xmm` (66 [REX?] 0F F4 /r) — SSE2 packed unsigned
+/// 32×32 → 64 multiply. Reads the **low 32 bits** of each 64-bit
+/// lane in source and destination; produces a 64-bit unsigned
+/// product per 64-bit lane (2 lanes total). Used by `i64x2.mul`
+/// synthesis (which has no native SSE4.1 instruction; AVX-512
+/// VPMULLQ is beyond ADR-0041's baseline).
+pub fn encPmuludq(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xF4, dst, src);
+}
+
+/// SSE2 packed shift-by-immediate /X-group helper. The
+/// `66 0F 73 /<group> ib` encoding has ModR/M.reg = group code
+/// (selecting the op within the family) and ModR/M.rm = the XMM
+/// being shifted in-place. Group codes used:
+///   /2 = PSRLQ (logical shift right)
+///   /6 = PSLLQ (logical shift left)
+///
+/// REX.B applies when the destination is XMM8..XMM15 (touches
+/// ModR/M.rm). REX.R is unused (group code lives in reg field
+/// but is a constant, not a register). Encoded bytes:
+///   66 [REX.B?] 0F 73 [11 <group> rm.low3] <imm8>
+fn encSsePackedShiftImmGroup(group: u3, dst: Xmm, count: u8) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0x66);
+    if (dst.extBit() != 0) {
+        enc.push(encodeRex(false, 0, 0, dst.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0x73);
+    enc.push(encodeModrm(0b11, group, dst.low3()));
+    enc.push(count);
+    return enc;
+}
+
+/// `PSRLQ xmm, imm8` (66 [REX.B?] 0F 73 /2 ib) — SSE2 packed
+/// 64-bit logical shift right by immediate count. Used by
+/// i64x2.mul synthesis to extract the high 32 bits of each
+/// 64-bit lane into the low half (a_hi → low(scratch)).
+pub fn encPsrlqImm(dst: Xmm, count: u8) EncodedInsn {
+    return encSsePackedShiftImmGroup(2, dst, count);
+}
+
+/// `PSLLQ xmm, imm8` (66 [REX.B?] 0F 73 /6 ib) — SSE2 packed
+/// 64-bit logical shift left by immediate count. Used by
+/// i64x2.mul synthesis to position the cross-term sum in the
+/// high 32 bits before adding to the low product.
+pub fn encPsllqImm(dst: Xmm, count: u8) EncodedInsn {
+    return encSsePackedShiftImmGroup(6, dst, count);
+}
+
 const testing = std.testing;
 
 test "encPaddD: low XMMs (xmm0, xmm1) — no REX, 4 bytes" {
@@ -561,4 +611,32 @@ test "encPmullD: SSE4.1 i32x4.mul (xmm0, xmm1) — 5 bytes with 0x38 escape" {
 test "encPmullD: SSE4.1 with REX.R+B (xmm8, xmm13) — 6 bytes" {
     // 66 45 0F 38 40 C5 — REX = 0x45 between 0x66 and 0x0F.
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x38, 0x40, 0xC5 }, encPmullD(.xmm8, .xmm13).slice());
+}
+
+test "encPmuludq: SSE2 (xmm0, xmm1) opcode 0xF4 — 4 bytes" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xF4, 0xC1 }, encPmuludq(.xmm0, .xmm1).slice());
+}
+
+test "encPmuludq: REX.R+B (xmm8, xmm13) — 5 bytes" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0xF4, 0xC5 }, encPmuludq(.xmm8, .xmm13).slice());
+}
+
+test "encPsrlqImm: PSRLQ xmm0, 32 — group /2, imm8=0x20" {
+    // 66 0F 73 D0 20 — ModR/M = 11 010 000 = 0xD0 (mod=11, reg=2, rm=0).
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x73, 0xD0, 0x20 }, encPsrlqImm(.xmm0, 32).slice());
+}
+
+test "encPsrlqImm: PSRLQ xmm14, 32 — REX.B + group /2" {
+    // 66 41 0F 73 D6 20 — REX.B=0x41, ModR/M = 11 010 110 = 0xD6.
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x41, 0x0F, 0x73, 0xD6, 0x20 }, encPsrlqImm(.xmm14, 32).slice());
+}
+
+test "encPsllqImm: PSLLQ xmm0, 32 — group /6, imm8=0x20" {
+    // 66 0F 73 F0 20 — ModR/M = 11 110 000 = 0xF0 (mod=11, reg=6, rm=0).
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x73, 0xF0, 0x20 }, encPsllqImm(.xmm0, 32).slice());
+}
+
+test "encPsllqImm: PSLLQ xmm14, 32 — REX.B + group /6" {
+    // 66 41 0F 73 F6 20 — REX.B=0x41, ModR/M = 11 110 110 = 0xF6.
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x41, 0x0F, 0x73, 0xF6, 0x20 }, encPsllqImm(.xmm14, 32).slice());
 }
