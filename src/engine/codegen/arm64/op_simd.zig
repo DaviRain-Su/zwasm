@@ -50,14 +50,15 @@ const Error = ctx_mod.Error;
 /// alongside 16-byte spill helpers.
 pub fn emitV128Load(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const addr_vreg = ctx.pushed_vregs.pop().?;
-    // SPILL-EXEMPT: 9.5-b-iii MVP non-spilling path (16-byte v128 Q-form spill defers to 9.5-c per ADR-0041).
+    // SPILL-EXEMPT: i32 addr; GPR spill-aware path is its own follow-on (mirrors 9.5-c-i's v128-only scope).
     const addr_reg = try gpr.resolveGpr(ctx.alloc, addr_vreg);
 
     const result_vreg = ctx.next_vreg.*;
     ctx.next_vreg.* += 1;
     if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
-    // SPILL-EXEMPT: 9.5-b-iii MVP (see addr_reg above).
-    const result_v = try gpr.resolveFp(ctx.alloc, result_vreg);
+    // §9.5-c-ii: v128 result via Q-form def helper. If spilled,
+    // returns V29 stage; otherwise the vreg's V-reg home.
+    const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
 
     const offset = ins.payload;
     if (offset > 65535 or (offset & 0xF) != 0) {
@@ -72,6 +73,8 @@ pub fn emitV128Load(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     }
 
     try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encLdrQImm(result_v, addr_reg, @intCast(offset)));
+    // §9.5-c-ii: flush v128 result to spill slot if spilled.
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
     try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
 }
 
@@ -80,11 +83,11 @@ pub fn emitV128Load(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// constraints as `v128.load`.
 pub fn emitV128Store(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const value_vreg = ctx.pushed_vregs.pop().?;
-    // SPILL-EXEMPT: 9.5-b-iii MVP (16-byte v128 spill defer to 9.5-c).
-    const value_v = try gpr.resolveFp(ctx.alloc, value_vreg);
+    // §9.5-c-ii: v128 operand via Q-form load helper.
+    const value_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, value_vreg, 0);
 
     const addr_vreg = ctx.pushed_vregs.pop().?;
-    // SPILL-EXEMPT: 9.5-b-iii MVP (i32 addr; spill-aware path lands in 9.5-c).
+    // SPILL-EXEMPT: i32 addr; GPR spill-aware path is its own follow-on.
     const addr_reg = try gpr.resolveGpr(ctx.alloc, addr_vreg);
 
     const offset = ins.payload;
@@ -104,16 +107,17 @@ pub fn emitV128Store(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// lanes.
 pub fn emitI32x4Splat(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     const src_vreg = ctx.pushed_vregs.pop().?;
-    // SPILL-EXEMPT: 9.5-b-iii MVP (scalar src; spill defer to 9.5-c).
+    // SPILL-EXEMPT: i32 src; GPR spill-aware path is its own follow-on.
     const src_reg = try gpr.resolveGpr(ctx.alloc, src_vreg);
 
     const result_vreg = ctx.next_vreg.*;
     ctx.next_vreg.* += 1;
     if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
-    // SPILL-EXEMPT: 9.5-b-iii MVP (16-byte v128 spill defer to 9.5-c).
-    const result_v = try gpr.resolveFp(ctx.alloc, result_vreg);
+    // §9.5-c-ii: v128 result via Q-form def + store helpers.
+    const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
 
     try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encDup4S(result_v, src_reg));
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
     try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
 }
 
@@ -121,20 +125,23 @@ pub fn emitI32x4Splat(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 /// (Vd.4S). `ADD V<vd>.4S, V<vn>.4S, V<vm>.4S` does element-wise
 /// 32-bit add across the four lanes.
 pub fn emitI32x4Add(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    // §9.5-c-ii spill-aware binop pattern (mirrors gpr/fp helpers):
+    // - lhs at stage_idx=0 (V29 if spilled, else its V-reg home),
+    // - rhs at stage_idx=1 (V30 if spilled),
+    // - result at stage_idx=0 (V29 — same as lhs which is consumed
+    //   by the binop, or its own V-reg home when not spilled).
     const rhs_vreg = ctx.pushed_vregs.pop().?;
-    // SPILL-EXEMPT: 9.5-b-iii MVP (16-byte v128 spill defer to 9.5-c).
-    const rhs_v = try gpr.resolveFp(ctx.alloc, rhs_vreg);
+    const rhs_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, rhs_vreg, 1);
 
     const lhs_vreg = ctx.pushed_vregs.pop().?;
-    // SPILL-EXEMPT: 9.5-b-iii MVP (16-byte v128 spill defer to 9.5-c).
-    const lhs_v = try gpr.resolveFp(ctx.alloc, lhs_vreg);
+    const lhs_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, lhs_vreg, 0);
 
     const result_vreg = ctx.next_vreg.*;
     ctx.next_vreg.* += 1;
     if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
-    // SPILL-EXEMPT: 9.5-b-iii MVP (16-byte v128 spill defer to 9.5-c).
-    const result_v = try gpr.resolveFp(ctx.alloc, result_vreg);
+    const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
 
     try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encAdd4S(result_v, lhs_v, rhs_v));
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
     try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
 }
