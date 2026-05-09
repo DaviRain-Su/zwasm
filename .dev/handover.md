@@ -56,7 +56,7 @@ bundle per ADR-0042. Implementation chunk per ADR §"chunk plan":
 After 9.6-f-ii: §9.6 fully closes (all sub-rows [x]); §9.6
 parent flips [x]; advance to §9.7 (x86_64 SSE4.1 SIMD emit).
 
-v1-audit done at <SHA-PENDING-COMMIT>.
+v1-audit done at 8cd953a7.
 
 **At §9.6 close (queued)** — fire a broad pre-9.7 v1+OSS audit
 before flipping §9.6 to `[x]`:
