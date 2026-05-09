@@ -1307,6 +1307,9 @@ pub fn compile(
             .@"f32x4.convert_i32x4_u" => try op_simd.emitF32x4ConvertI32x4U(&ctx, &ins),
             .@"f64x2.convert_low_i32x4_s" => try op_simd.emitF64x2ConvertLowI32x4S(&ctx, &ins),
             .@"f64x2.convert_low_i32x4_u" => try op_simd.emitF64x2ConvertLowI32x4U(&ctx, &ins),
+            // §9.6/9.6-g-iv — FP promote/demote (FCVTL/FCVTN).
+            .@"f64x2.promote_low_f32x4" => try op_simd.emitF64x2PromoteLowF32x4(&ctx, &ins),
+            .@"f32x4.demote_f64x2_zero" => try op_simd.emitF32x4DemoteF64x2Zero(&ctx, &ins),
 
             else => {
                 // §9.7 / 7.5-diag-op: surface the unhandled op

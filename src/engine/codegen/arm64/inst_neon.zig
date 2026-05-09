@@ -749,6 +749,30 @@ pub fn encUcvtf2D(rd: Vn, rn: Vn) u32 {
     return 0x6E61D800 | (@as(u32, rn) << 5) | @as(u32, rd);
 }
 
+// ---------------------------------------------------------------------
+// §9.6 / 9.6-g-iv — FCVTL / FCVTN (FP narrow / widen)
+// ---------------------------------------------------------------------
+// Wasm spec — `f64x2.promote_low_f32x4` (FCVTL .2D, .2S — widens
+// lower 2 f32 lanes to 2 f64) + `f32x4.demote_f64x2_zero` (FCVTN
+// .2S, .2D — narrows 2 f64 → lower 2 f32 lanes; Q=0 form zeros
+// upper 64 bits, matching Wasm `_zero` semantic).
+//
+// Encoding family "Advanced SIMD two-register miscellaneous (FP)":
+//   `0 Q U 01110 0 sz 1 0000 1 opcode 0 Rn Rd`
+// FCVTL: opcode = 10111, sz = 01 → .2S source
+// FCVTN: opcode = 10110, sz = 01 → .2D source / .2S dest
+// Per Arm IHI 0055 §C7.2.116 (FCVTL) / §C7.2.118 (FCVTN). Bases
+// cross-checked against wasmtime/cranelift emit_tests.rs:3111-3142.
+// FPCR RMode=00 default → IEEE-754 round-to-nearest-even, matches
+// Wasm spec §4.3.3.
+
+pub fn encFCvtl_2D_2S(rd: Vn, rn: Vn) u32 {
+    return 0x0E617800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encFCvtn_2S_2D(rd: Vn, rn: Vn) u32 {
+    return 0x0E616800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
 /// `BSL V<d>.16B, V<n>.16B, V<m>.16B` — bitwise select using V<d>
 /// as the mask. Element width is irrelevant since BSL is bitwise.
 pub fn encBsl16B(rd: Vn, rn: Vn, rm: Vn) u32 {
@@ -1574,6 +1598,34 @@ test "Ucvtf vs Scvtf: U bit (bit 29) differs" {
 
 test "FP convert sz field: .2D vs .4S differs at bit 22" {
     try testing.expectEqual(@as(u32, 0x00400000), encScvtf2D(0, 0) ^ encScvtf4S(0, 0));
+}
+
+// ============================================================
+// §9.6 / 9.6-g-iv — FCVTL / FCVTN (FP narrow / widen)
+// ============================================================
+
+test "encFCvtn_2S_2D: v2.2s, v7.2d (cranelift cross-check)" {
+    // 0x0E616800 | (7 << 5) | 2 = 0x0E6168E2
+    try testing.expectEqual(@as(u32, 0x0E6168E2), encFCvtn_2S_2D(2, 7));
+}
+
+test "encFCvtl_2D_2S: v16.2d, v1.2s (cranelift cross-check, low form of FCVTL2 v16,v1 high)" {
+    // High-form (FCVTL2) v16,v1 was 0x4E617830 in cranelift.
+    // Low form is bit 30 cleared: 0x0E617830.
+    // 0x0E617800 | (1 << 5) | 16 = 0x0E617830
+    try testing.expectEqual(@as(u32, 0x0E617830), encFCvtl_2D_2S(16, 1));
+}
+
+test "encFCvtn_2S_2D base: v0.2s, v0.2d" {
+    try testing.expectEqual(@as(u32, 0x0E616800), encFCvtn_2S_2D(0, 0));
+}
+
+test "encFCvtl_2D_2S base: v0.2d, v0.2s" {
+    try testing.expectEqual(@as(u32, 0x0E617800), encFCvtl_2D_2S(0, 0));
+}
+
+test "FCVTL vs FCVTN: opcode bit 12 differs (10111 vs 10110)" {
+    try testing.expectEqual(@as(u32, 0x1000), encFCvtl_2D_2S(0, 0) ^ encFCvtn_2S_2D(0, 0));
 }
 
 test "Int compare shapes: 4 CMEQ encodings pairwise distinct" {

@@ -1001,6 +1001,21 @@ pub fn emitF64x2ConvertLowI32x4U(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     try emitV128ConvertLowI32ToF64(ctx, inst_neon.encUxtl2D, inst_neon.encUcvtf2D);
 }
 
+// ============================================================
+// §9.6 / 9.6-g-iv — FCVTL / FCVTN (FP narrow / widen)
+// ============================================================
+//
+// Wasm spec — `f64x2.promote_low_f32x4` (widens lower 2 f32 →
+// 2 f64) + `f32x4.demote_f64x2_zero` (narrows 2 f64 → lower 2
+// f32 lanes; upper 2 zeroed by Q=0 form).
+
+pub fn emitF64x2PromoteLowF32x4(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128Unop(ctx, inst_neon.encFCvtl_2D_2S);
+}
+pub fn emitF32x4DemoteF64x2Zero(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128Unop(ctx, inst_neon.encFCvtn_2S_2D);
+}
+
 pub fn emitI8x16Swizzle(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     const indices_vreg = ctx.pushed_vregs.pop().?;
     const indices_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, indices_vreg, 1);

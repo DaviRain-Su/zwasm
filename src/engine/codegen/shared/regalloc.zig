@@ -513,6 +513,8 @@ pub fn populateShapeTags(allocator: Allocator, func: *const ZirFunc, n_vregs: us
             .@"f32x4.convert_i32x4_u",
             .@"f64x2.convert_low_i32x4_s",
             .@"f64x2.convert_low_i32x4_u",
+            .@"f64x2.promote_low_f32x4",
+            .@"f32x4.demote_f64x2_zero",
             .@"i8x16.replace_lane",
             .@"i16x8.replace_lane",
             .@"i32x4.replace_lane",
