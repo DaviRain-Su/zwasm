@@ -1128,6 +1128,13 @@ pub fn compile(
                 const simd_consts_base: u32 = if (func.simd_consts) |sc| @intCast(sc.len) else 0;
                 try op_simd.emitF64x2ConvertLowI32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &simd_const_fixups, &extra_consts, simd_consts_base);
             },
+            // §9.7/9.7-ap — i32x4.trunc_sat_f64x2_u_zero via the
+            // ROUNDPD + ADDPD-magic + SHUFPS-extract recipe per
+            // cranelift `lower.isle:5061-5093`.
+            .@"i32x4.trunc_sat_f64x2_u_zero" => {
+                const simd_consts_base: u32 = if (func.simd_consts) |sc| @intCast(sc.len) else 0;
+                try op_simd.emitI32x4TruncSatF64x2UZero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &simd_const_fixups, &extra_consts, simd_consts_base);
+            },
             // §9.7 / 9.7-ac: i8x16.swizzle (1 op). 10-instr inline
             // recipe synthesises 0x0F broadcast + PCMPGTB-detect of
             // idx>15 + POR-correct + PSHUFB. No const-pool dep.

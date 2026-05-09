@@ -3189,6 +3189,11 @@ pub fn emitI32x4TruncSatF64x2SZero(
     try pushed_vregs.append(allocator, result_v);
 }
 
+/// 16-byte UINT32_MAX as f64 broadcast (4294967295.0 =
+/// 0x41EFFFFFFFE00000 per qword). Used by `i32x4.trunc_sat_f64x2_u_zero`
+/// to clamp positive OOR before the mantissa-overlay extraction.
+const UINT32_MAX_F64_BROADCAST: [16]u8 = [_]u8{ 0x00, 0x00, 0xE0, 0xFF, 0xFF, 0xFF, 0xEF, 0x41 } ** 2;
+
 /// 16-byte 0x43300000-per-dword broadcast — single-precision
 /// pattern of 0x1.0p+52 used by `f64x2.convert_low_i32x4_u`'s
 /// UNPCKLPS interleave.
@@ -3307,6 +3312,72 @@ pub fn emitI8x16Popcnt(
     try buf.appendSlice(allocator, inst.encPshufb(t2, t1).slice());
     // 11: dst = popcount(high) + popcount(low) = popcount(byte).
     try buf.appendSlice(allocator, inst.encPaddB(dst_x, t2).slice());
+
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// Wasm spec §4.4.4 (i32x4.trunc_sat_f64x2_u_zero) — saturating
+/// truncate low 2 f64 lanes → u32, with high 2 lanes of result
+/// zeroed. Recipe per cranelift `lower.isle:5061-5093`:
+///   1. MOVAPD dst, src
+///   2. XORPD t1, t1                ; clear t1 (zeros)
+///   3. MAXPD dst, t1                ; NaN→0 (MAXPD propagates 2nd
+///      operand on unordered) AND negative-OOR→0
+///   4. MINPD dst, UMAX_f64          ; clamp positive OOR
+///   5. ROUNDPD dst, dst, 0x0B        ; round-to-zero +
+///      precision-suppress (0x08 | 0x03)
+///   6. ADDPD dst, 2^52_f64           ; add magic; mantissa low
+///      32 of each qword is now the truncated u32
+///   7. SHUFPS dst, t1, 0x88          ; gather lane[0..1].low32
+///      into result lanes 0/1, lanes 2/3 zero (from t1=zeros)
+///
+/// Reuses 9.7-ao's UINT_MASK_HIGH (= 2^52 magic) via extra_consts
+/// dedup. New const: UINT32_MAX_F64_BROADCAST.
+pub fn emitI32x4TruncSatF64x2UZero(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    simd_const_fixups: *std.ArrayList(@import("types.zig").SimdConstFixup),
+    extra_consts: *std.ArrayList([16]u8),
+    simd_consts_base: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const src_x = try gpr.resolveXmm(alloc, src_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const t1 = abi.fp_spill_stage_xmms[0]; // XMM14 (zeros + final SHUFPS source)
+    const t2 = abi.fp_spill_stage_xmms[1]; // XMM15 (const loads)
+
+    const umax_idx = try lookupOrAppendExtraConst(allocator, extra_consts, simd_consts_base, UINT32_MAX_F64_BROADCAST);
+    const magic_idx = try lookupOrAppendExtraConst(allocator, extra_consts, simd_consts_base, UINT_MASK_HIGH);
+
+    // 1: dst = src.
+    if (dst_x != src_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, src_x).slice());
+    }
+    // 2: t1 = zeros via PXOR.
+    try buf.appendSlice(allocator, inst.encPxor(t1, t1).slice());
+    // 3: MAXPD dst, t1 — NaN + negative-OOR clamp to 0.
+    try buf.appendSlice(allocator, inst.encMaxpd(dst_x, t1).slice());
+    // 4: MINPD dst, UMAX_f64 — clamp positive OOR.
+    try emitConstLoad(allocator, buf, simd_const_fixups, t2, umax_idx);
+    try buf.appendSlice(allocator, inst.encMinpd(dst_x, t2).slice());
+    // 5: ROUNDPD dst, dst, 0x0B — round-to-zero + suppress
+    // precision exception.
+    try buf.appendSlice(allocator, inst.encRoundpd(dst_x, dst_x, 0x0B).slice());
+    // 6: ADDPD dst, 2^52_f64 — mantissa-overlay; low 32 of each
+    // qword is now the truncated u32.
+    try emitConstLoad(allocator, buf, simd_const_fixups, t2, magic_idx);
+    try buf.appendSlice(allocator, inst.encAddpd(dst_x, t2).slice());
+    // 7: SHUFPS dst, t1, 0x88 — gather low 32 of each qword into
+    // i32x4 lanes 0/1, lanes 2/3 zero (from t1=zeros).
+    try buf.appendSlice(allocator, inst.encShufps(dst_x, t1, 0x88).slice());
 
     try pushed_vregs.append(allocator, result_v);
 }

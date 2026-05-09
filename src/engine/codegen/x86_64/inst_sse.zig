@@ -1296,6 +1296,25 @@ pub fn encPsradImm(dst: Xmm, count: u8) EncodedInsn {
     return encSsePackedShiftImmGroup(0x72, 4, dst, count);
 }
 
+/// `SHUFPS xmm, xmm, imm8` ([REX?] 0F C6 /r ib) — SSE shuffle
+/// 4 packed single-precision lanes per imm8 selector. imm8 bits
+/// [1:0]=lane0_src, [3:2]=lane1_src, [5:4]=lane2_src,
+/// [7:6]=lane3_src; lanes 0-1 of result come from dst, lanes 2-3
+/// from src. Used by Wasm `i32x4.trunc_sat_f64x2_u_zero` to gather
+/// the low 32 of each f64 lane into i32x4 lanes 0/1 with lanes
+/// 2/3 zeroed.
+pub fn encShufps(dst: Xmm, src: Xmm, imm8: u8) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (dst.extBit() != 0 or src.extBit() != 0) {
+        enc.push(encodeRex(false, dst.extBit(), 0, src.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(0xC6);
+    enc.push(encodeModrm(0b11, dst.low3(), src.low3()));
+    enc.push(imm8);
+    return enc;
+}
+
 /// `UNPCKLPS xmm, xmm` ([REX?] 0F 14 /r) — SSE interleave low
 /// 32-bit (single-precision) lanes from dst and src into dst.
 /// Output lanes: [dst[0], src[0], dst[1], src[1]]. Used by Wasm
@@ -1769,6 +1788,10 @@ test "encPmaddubsw: SSSE3 (xmm0, xmm1) opcode 0x38 0x04" {
 test "encPmulhrsw / encPmaddwd opcode bytes (xmm0, xmm1)" {
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x0B, 0xC1 }, encPmulhrsw(.xmm0, .xmm1).slice());
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xF5, 0xC1 }, encPmaddwd(.xmm0, .xmm1).slice());
+}
+
+test "encShufps: SSE (xmm0, xmm1, imm=0x88) opcode 0F C6" {
+    try testing.expectEqualSlices(u8, &.{ 0x0F, 0xC6, 0xC1, 0x88 }, encShufps(.xmm0, .xmm1, 0x88).slice());
 }
 
 test "encUnpcklps: SSE (xmm0, xmm1) opcode 0F 14" {
