@@ -573,6 +573,95 @@ pub fn encBsl16B(rd: Vn, rn: Vn, rm: Vn) u32 {
     return 0x6E601C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
 }
 
+// ---------------------------------------------------------------------
+// §9.6 / 9.6-d — Integer per-lane compares (CMEQ / CMGT / CMGE /
+//                CMHI / CMHS) + NOT for `ne` synthesis
+// ---------------------------------------------------------------------
+// Wasm spec (SIMD) — `i*x*.{eq,ne,lt_s,lt_u,gt_s,gt_u,le_s,le_u,ge_s,ge_u}`.
+// Encoding family: "Advanced SIMD three same":
+//   `0 Q U 01110 size 1 Rm opcode 1 Rn Rd`
+// where size ∈ {00=B, 01=H, 10=S, 11=D}, U distinguishes signed vs
+// unsigned in the GE/GT pair.
+// CMEQ:  U=1, opcode=10001
+// CMGT:  U=0, opcode=00110 (signed greater-than)
+// CMGE:  U=0, opcode=00111 (signed greater-or-equal)
+// CMHI:  U=1, opcode=00110 (unsigned higher)
+// CMHS:  U=1, opcode=00111 (unsigned higher-or-same)
+// Per Arm IHI 0055 §C7.2.51 / §C7.2.69 / §C7.2.66 / §C7.2.71 / §C7.2.73.
+//
+// `lt` / `le` are synthesised by swapping operands at the handler
+// level (lt_s = gt_s with swapped operands; le_s = ge_s swapped;
+// same for unsigned). `ne` uses CMEQ + NOT V16B (`encNotV16B` below).
+// i64x2 has only signed compares per Wasm 2.0 SIMD; CMHI/CMHS .2D
+// encoders are omitted to keep the surface tight.
+
+pub fn encCmEq16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E208C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encCmEq8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E608C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encCmEq4S(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6EA08C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encCmEq2D(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6EE08C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+pub fn encCmGt16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E203400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encCmGt8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E603400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encCmGt4S(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4EA03400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encCmGt2D(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4EE03400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+pub fn encCmGe16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E203C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encCmGe8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E603C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encCmGe4S(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4EA03C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encCmGe2D(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4EE03C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+pub fn encCmHi16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E203400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encCmHi8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E603400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encCmHi4S(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6EA03400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+pub fn encCmHs16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E203C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encCmHs8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E603C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encCmHs4S(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6EA03C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `NOT V<d>.16B, V<n>.16B` — bitwise not. Used for `ne` synthesis
+/// (CMEQ → NOT). Encoding (two-register misc):
+///   `0 Q 1 01110 0 0 1 0000 00101 10 Rn Rd`
+/// Per Arm IHI 0055 §C7.2.225.
+pub fn encNotV16B(rd: Vn, rn: Vn) u32 {
+    return 0x6E205800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
 // =====================================================================
 // Tests
 // =====================================================================
@@ -1080,4 +1169,64 @@ test "encBsl16B: V0, V1, V2 (bitwise select)" {
 test "encBsl16B: V31, V30, V29 (high indices)" {
     // 0x6E601C00 | (29 << 16) | (30 << 5) | 31 = 0x6E7D1FDF
     try testing.expectEqual(@as(u32, 0x6E7D1FDF), encBsl16B(31, 30, 29));
+}
+
+// ============================================================
+// §9.6 / 9.6-d — Int per-lane compare encoders
+// ============================================================
+
+test "encCmEq16B: V0, V1, V2 (i8x16.eq)" {
+    // 0x6E208C00 | (2 << 16) | (1 << 5) | 0 = 0x6E228C20
+    try testing.expectEqual(@as(u32, 0x6E228C20), encCmEq16B(0, 1, 2));
+}
+
+test "encCmEq2D: V31, V31, V31 (max indices)" {
+    // 0x6EE08C00 | (31 << 16) | (31 << 5) | 31 = 0x6EFF8FFF
+    try testing.expectEqual(@as(u32, 0x6EFF8FFF), encCmEq2D(31, 31, 31));
+}
+
+test "encCmGt16B: V0, V1, V2 (i8x16.gt_s)" {
+    // 0x4E203400 | ... = 0x4E223420
+    try testing.expectEqual(@as(u32, 0x4E223420), encCmGt16B(0, 1, 2));
+}
+
+test "encCmGe vs encCmGt: opcode bit 11 differs (00111 vs 00110)" {
+    try testing.expectEqual(@as(u32, 0x800), encCmGe16B(0, 1, 2) ^ encCmGt16B(0, 1, 2));
+}
+
+test "encCmHi vs encCmGt: U bit differs (unsigned vs signed)" {
+    // CMHI U=1, CMGT U=0 → bit 29 → XOR = 0x20000000.
+    try testing.expectEqual(@as(u32, 0x20000000), encCmHi16B(0, 1, 2) ^ encCmGt16B(0, 1, 2));
+}
+
+test "encCmHs vs encCmHi: opcode bit 11 differs" {
+    try testing.expectEqual(@as(u32, 0x800), encCmHs16B(0, 1, 2) ^ encCmHi16B(0, 1, 2));
+}
+
+test "encCmHs4S: V0, V1, V2 (i32x4.ge_u)" {
+    // 0x6EA03C00 | ... = 0x6EA23C20
+    try testing.expectEqual(@as(u32, 0x6EA23C20), encCmHs4S(0, 1, 2));
+}
+
+test "encCmGt2D: V0, V1, V2 (i64x2.gt_s)" {
+    // 0x4EE03400 | ... = 0x4EE23420
+    try testing.expectEqual(@as(u32, 0x4EE23420), encCmGt2D(0, 1, 2));
+}
+
+test "encNotV16B: V0, V1" {
+    // 0x6E205800 | (1 << 5) | 0 = 0x6E205820
+    try testing.expectEqual(@as(u32, 0x6E205820), encNotV16B(0, 1));
+}
+
+test "Int compare shapes: 4 CMEQ encodings pairwise distinct" {
+    // Size field (bits 23:22) varies bit-level: 00/01/10/11 — XOR deltas
+    // alternate between bit 22 (0x400000) and bit 22+23 toggle
+    // (0xC00000) by consecutive pair, so just assert pairwise inequality.
+    const words = [_]u32{
+        encCmEq16B(0, 1, 2), encCmEq8H(0, 1, 2),
+        encCmEq4S(0, 1, 2),  encCmEq2D(0, 1, 2),
+    };
+    for (words, 0..) |a, i| {
+        for (words[i + 1 ..]) |b| try testing.expect(a != b);
+    }
 }

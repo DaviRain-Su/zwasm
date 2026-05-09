@@ -741,3 +741,109 @@ pub fn emitF64x2Pmin(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 pub fn emitF64x2Pmax(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     try emitPminPmaxSynthesis(ctx, inst_neon.encFCmGt2D, true);
 }
+
+// ============================================================
+// §9.6 / 9.6-d — Int per-lane compares
+// ============================================================
+//
+// Wasm spec (SIMD) — `i*x*.{eq,ne,lt_s,lt_u,gt_s,gt_u,le_s,le_u,ge_s,ge_u}`.
+// i64x2 omits the unsigned variants per Wasm 2.0 SIMD.
+//
+// Strategy:
+// - eq: emitV128Binop with CMEQ encoder
+// - ne: CMEQ + NOT V16B (3-instr synthesis using V31 scratch)
+// - gt_s: emitV128Binop with CMGT encoder
+// - gt_u: emitV128Binop with CMHI encoder
+// - ge_s: emitV128Binop with CMGE encoder
+// - ge_u: emitV128Binop with CMHS encoder
+// - lt_*: same encoder as gt_*, but operands swapped at handler level
+// - le_*: same encoder as ge_*, but operands swapped
+
+/// Helper: emit a binop with operands swapped (calls encoder(rd, rhs, lhs)
+/// instead of the default encoder(rd, lhs, rhs)). Used for lt/le → gt/ge
+/// rewrites.
+fn emitV128BinopSwapped(ctx: *EmitCtx, encoder: *const fn (rd: u5, rn: u5, rm: u5) u32) Error!void {
+    const rhs_vreg = ctx.pushed_vregs.pop().?;
+    const rhs_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, rhs_vreg, 1);
+
+    const lhs_vreg = ctx.pushed_vregs.pop().?;
+    const lhs_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, lhs_vreg, 0);
+
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
+
+    // Operand swap — for lt(a,b) we emit gt(b,a).
+    try gpr.writeU32(ctx.allocator, ctx.buf, encoder(result_v, rhs_v, lhs_v));
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
+/// Helper: emit `ne` synthesis. CMEQ → NOT V16B → MOV result, V31.
+fn emitV128Ne(ctx: *EmitCtx, eq_encoder: *const fn (rd: u5, rn: u5, rm: u5) u32) Error!void {
+    const rhs_vreg = ctx.pushed_vregs.pop().?;
+    const rhs_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, rhs_vreg, 1);
+
+    const lhs_vreg = ctx.pushed_vregs.pop().?;
+    const lhs_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, lhs_vreg, 0);
+
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
+
+    // Step 1: CMEQ V31, V<lhs>, V<rhs>
+    try gpr.writeU32(ctx.allocator, ctx.buf, eq_encoder(simd_scratch_v, lhs_v, rhs_v));
+    // Step 2: NOT V31.16B, V31.16B
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encNotV16B(simd_scratch_v, simd_scratch_v));
+    // Step 3: MOV V<result>.16B, V31.16B
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(result_v, simd_scratch_v));
+
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
+// i8x16 compares
+pub fn emitI8x16Eq(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Binop(ctx, inst_neon.encCmEq16B); }
+pub fn emitI8x16Ne(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Ne(ctx, inst_neon.encCmEq16B); }
+pub fn emitI8x16GtS(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Binop(ctx, inst_neon.encCmGt16B); }
+pub fn emitI8x16GtU(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Binop(ctx, inst_neon.encCmHi16B); }
+pub fn emitI8x16GeS(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Binop(ctx, inst_neon.encCmGe16B); }
+pub fn emitI8x16GeU(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Binop(ctx, inst_neon.encCmHs16B); }
+pub fn emitI8x16LtS(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128BinopSwapped(ctx, inst_neon.encCmGt16B); }
+pub fn emitI8x16LtU(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128BinopSwapped(ctx, inst_neon.encCmHi16B); }
+pub fn emitI8x16LeS(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128BinopSwapped(ctx, inst_neon.encCmGe16B); }
+pub fn emitI8x16LeU(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128BinopSwapped(ctx, inst_neon.encCmHs16B); }
+
+// i16x8 compares
+pub fn emitI16x8Eq(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Binop(ctx, inst_neon.encCmEq8H); }
+pub fn emitI16x8Ne(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Ne(ctx, inst_neon.encCmEq8H); }
+pub fn emitI16x8GtS(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Binop(ctx, inst_neon.encCmGt8H); }
+pub fn emitI16x8GtU(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Binop(ctx, inst_neon.encCmHi8H); }
+pub fn emitI16x8GeS(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Binop(ctx, inst_neon.encCmGe8H); }
+pub fn emitI16x8GeU(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Binop(ctx, inst_neon.encCmHs8H); }
+pub fn emitI16x8LtS(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128BinopSwapped(ctx, inst_neon.encCmGt8H); }
+pub fn emitI16x8LtU(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128BinopSwapped(ctx, inst_neon.encCmHi8H); }
+pub fn emitI16x8LeS(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128BinopSwapped(ctx, inst_neon.encCmGe8H); }
+pub fn emitI16x8LeU(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128BinopSwapped(ctx, inst_neon.encCmHs8H); }
+
+// i32x4 compares
+pub fn emitI32x4Eq(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Binop(ctx, inst_neon.encCmEq4S); }
+pub fn emitI32x4Ne(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Ne(ctx, inst_neon.encCmEq4S); }
+pub fn emitI32x4GtS(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Binop(ctx, inst_neon.encCmGt4S); }
+pub fn emitI32x4GtU(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Binop(ctx, inst_neon.encCmHi4S); }
+pub fn emitI32x4GeS(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Binop(ctx, inst_neon.encCmGe4S); }
+pub fn emitI32x4GeU(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Binop(ctx, inst_neon.encCmHs4S); }
+pub fn emitI32x4LtS(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128BinopSwapped(ctx, inst_neon.encCmGt4S); }
+pub fn emitI32x4LtU(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128BinopSwapped(ctx, inst_neon.encCmHi4S); }
+pub fn emitI32x4LeS(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128BinopSwapped(ctx, inst_neon.encCmGe4S); }
+pub fn emitI32x4LeU(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128BinopSwapped(ctx, inst_neon.encCmHs4S); }
+
+// i64x2 compares — signed only per Wasm 2.0 SIMD.
+pub fn emitI64x2Eq(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Binop(ctx, inst_neon.encCmEq2D); }
+pub fn emitI64x2Ne(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Ne(ctx, inst_neon.encCmEq2D); }
+pub fn emitI64x2GtS(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Binop(ctx, inst_neon.encCmGt2D); }
+pub fn emitI64x2GeS(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128Binop(ctx, inst_neon.encCmGe2D); }
+pub fn emitI64x2LtS(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128BinopSwapped(ctx, inst_neon.encCmGt2D); }
+pub fn emitI64x2LeS(ctx: *EmitCtx, _: *const ZirInstr) Error!void { try emitV128BinopSwapped(ctx, inst_neon.encCmGe2D); }
