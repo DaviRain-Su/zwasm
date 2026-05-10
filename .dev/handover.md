@@ -13,35 +13,38 @@
 5. `.dev/decisions/0041_simd_128_design.md` (SSE4.2 baseline post-9.7-m
    amendment).
 
-## Current state — Phase 9 / §9.7 in-flight (9.7-a..aw landed); **9.7-ax v128 memory ops NEXT**
+## Current state — Phase 9 / §9.7 in-flight (9.7-a..ax landed); **9.7-ay v128.load*_splat NEXT**
 
-9.7-aw: 1 op (commit `67333cf1`) — i64x2.extract_lane via
-PEXTRQ (SSE4.1 REX.W=1 variant of PEXTRD). New encoder
-encPextrQ + handler mirror 9.7-e's i32x4 counterpart with u1
-lane. windowsmini D-028 flake fired once (`test runner failed
-to respond for 1m1.34ms`); retry passed per documented
-workaround. 215 SIMD ops handled total. 3-host green.
+9.7-ax: 2 ops (commit `df06b54e`) — v128.load + v128.store
+foundation memory chunk. New encoder encMovupsMemBaseIdx
+(SSE no-prefix MOVUPS, load 0F 10 / store 0F 11 with SIB
+scale=1 base+index). emitV128Load + emitV128Store + shared
+v128MemPrologue helper (RAX/RCX/RDX scratches; bounds_fixups
++ ADR-0028 trace.writeBounds uniformly wired with scalar).
+uses_runtime_ptr prescan extended for v128.load/store. 217
+SIMD ops handled total. 3-host green.
 
-**Next — 9.7-ax**: v128 memory ops (~22 ops). Significant new
-infra needed:
-- Memory-addressing encoders for v128 — MOVUPS / MOVAPS xmm,
-  m128 (load/store), MOVD/Q xmm, m32/m64 (load*_zero), MOVSS/
-  MOVSD memory forms (load*_splat lane=0).
-- ModR/M with SIB + disp encoding (the existing rbpDisp helpers
-  cover RBP-relative; v128 mem ops need full memarg base+offset
-  with R15 = guest memory base register).
-- ZirOp payload that carries memarg (offset + align). Currently
-  the SIMD lower path handles this for non-v128 mem ops; need
-  to thread through for the v128 variants.
-- Bounds check via existing trap stub.
+**Next — 9.7-ay**: v128.load{8,16,32,64}_splat (4 ops). Pattern:
+load N-bit scalar from memory, broadcast to all lanes of the
+v128 result.
+- load8_splat: MOVZX r32, byte [mem]; MOVD xmm, r32; PSHUFB
+  zero-mask broadcast (cranelift: PINSRB lane 0 + PSHUFB
+  zero-broadcast).
+- load16_splat: MOVZX r32, word [mem]; MOVD xmm, r32; PSHUFLW
+  imm 0; PSHUFD imm 0.
+- load32_splat: MOV r32, dword [mem]; MOVD xmm, r32; PSHUFD
+  imm 0 (broadcast lane 0 to all 4 lanes).
+- load64_splat: MOVQ xmm, qword [mem]; MOVDDUP / PSHUFD imm
+  0x44 (broadcast lane 0 to lane 1).
+Reuses 9.7-ax's v128MemPrologue with access_size = 1/2/4/8.
+Foundation encoders mostly exist (PSHUFD/PSHUFB/MOVD/MOVQ);
+likely need PSHUFLW + MOVDDUP encoders.
 
-Sub-chunks likely:
-- 9.7-ax: v128.load + v128.store (2 ops, foundation, defines
-  the memarg pattern + addressing helper).
-- 9.7-ay: load_splat × 4 (load8/16/32/64 splat).
-- 9.7-az: load*_zero × 2 (load32/64 zero).
-- 9.7-ba: load_lane / store_lane × 8 (load/store 8/16/32/64).
-- 9.7-bb: load*x*_s/u extending loads × 6 (8x8/16x4/32x2 × s/u).
+Sub-chunks remaining:
+- 9.7-ay: load_splat × 4
+- 9.7-az: load*_zero × 2 (load32/64 zero)
+- 9.7-ba: load_lane / store_lane × 8 (load/store 8/16/32/64)
+- 9.7-bb: load*x*_s/u extending loads × 6
 
 Once those land, §9.7 row + §9.8 row (overlapping scope)
 close together via §18 ADR or scope merge.
@@ -67,6 +70,6 @@ code in `src/ir/coalesce/`, regalloc.zig LIFO free-pool,
 
 **Phase**: Phase 9 (SIMD-128, ADR-0041 — SSE4.2 baseline).
 §9.5 [x] (ARM64 NEON pt 1), §9.6 [x] (ARM64 NEON pt 2),
-§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..aw landed; 9.7-ax
-NEXT; ~22 v128 memory ops still unhandled before §9.7 close).
+§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..ax landed; 9.7-ay
+NEXT; ~20 v128 memory ops still unhandled before §9.7 close).
 **Branch**: `zwasm-from-scratch`。
