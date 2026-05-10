@@ -172,6 +172,22 @@ pub fn encDup4S(rd: Vn, rn: Xn) u32 {
     return 0x4E040C00 | (@as(u32, rn) << 5) | @as(u32, rd);
 }
 
+/// `DUP V<d>.2D, X<n>` — broadcast a 64-bit GPR value to both
+/// 64-bit lanes. §9.9 / 9.9-d-5 v128 select uses this to widen
+/// CSETM's all-ones / all-zeros result into a 16-byte mask
+/// consumed by BSL.
+///
+/// Encoding (SIMD DUP element from GPR, Q=1, imm5=01000 for
+/// 2D):
+///   `0 1 0 01110 000 [imm5:5] 0 0001 1 [Rn:5] [Rd:5]`
+///   imm5 = 0b01000 (2D shape) → bits[20:16] = 01000
+///   = `0x4E080C00` | (Rn << 5) | Rd
+///
+/// Per Arm IHI 0055 §C7.2.106 (DUP general — element from GPR).
+pub fn encDupGen2D(rd: Vn, rn: Xn) u32 {
+    return 0x4E080C00 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
 // =====================================================================
 // Integer arithmetic (i32x4)
 // =====================================================================
@@ -1106,6 +1122,18 @@ test "encDup4S: V0, W1 (i32x4.splat)" {
 test "encDup4S: V31, W30 (max indices)" {
     // 0x4E040C00 | (30 << 5) | 31 = 0x4E040FDF
     try testing.expectEqual(@as(u32, 0x4E040FDF), encDup4S(31, 30));
+}
+
+test "encDupGen2D: V0, X1 — `dup v0.2d, x1` → 0x4E080C20" {
+    try testing.expectEqual(@as(u32, 0x4E080C20), encDupGen2D(0, 1));
+}
+
+test "encDupGen2D: V0, X0 — `dup v0.2d, x0` → 0x4E080C00" {
+    try testing.expectEqual(@as(u32, 0x4E080C00), encDupGen2D(0, 0));
+}
+
+test "encDupGen2D: V31, X30 — `dup v31.2d, x30` → 0x4E080FDF" {
+    try testing.expectEqual(@as(u32, 0x4E080FDF), encDupGen2D(31, 30));
 }
 
 test "encAdd4S: V0, V1, V2" {

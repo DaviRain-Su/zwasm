@@ -312,6 +312,198 @@ pub fn emitI32x4Splat(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
 }
 
+// ============================================================
+// §9.9 / 9.9-d-5 — v128.{load,store}{8,16,32,64}_lane (8 ops).
+//
+// Wasm spec §4.4.7.4 (v128.loadN_lane) / §4.4.7.5 (v128.storeN_lane):
+// loadN_lane reads N bytes from memory, replaces one lane of an
+// existing v128 (other lanes preserved); storeN_lane extracts one
+// lane of a v128 and writes N bytes to memory. Bounds check is
+// identical to scalar loadN / storeN (offset + N must not exceed
+// mem_limit).
+//
+// Encoding strategy (NEON-canonical, mirrors v1 + Cranelift):
+//   load_lane:  bounds-check prologue → scalar LDR{B,H,W,X} W17 →
+//               INS V<vec>.<sz>[lane], W17 / X17.
+//   store_lane: bounds-check prologue → UMOV W17 / X17,
+//               V<vec>.<sz>[lane] → scalar STR{B,H,W,X} W17.
+//
+// Per-arch divergence vs x86_64 (which PEXTRs *before* the prologue
+// to avoid RCX clobber): ARM64's prologue uses X16 for the
+// effective address and X17 only as a transient (`ADD X17, X16,
+// #access_size` for the limit compare). After the B.HI fixup
+// queues, X17 is free again — so prologue → UMOV/LDR → STR/INS
+// runs cleanly without any extra register reservation. The
+// lane-immediate is masked defensively to its range (the validator
+// per Wasm §3.3.6.4 already rejects out-of-range lanes).
+// ============================================================
+
+fn loadLaneInsEnc(comptime access_size: u12) fn (vd: u5, wn: u5, lane: u32) u32 {
+    return struct {
+        fn enc(vd: u5, wn: u5, lane: u32) u32 {
+            return switch (access_size) {
+                1 => inst_neon.encInsBFromW(vd, wn, @intCast(lane & 0xF)),
+                2 => inst_neon.encInsHFromW(vd, wn, @intCast(lane & 0x7)),
+                4 => inst_neon.encInsSFromW(vd, wn, @intCast(lane & 0x3)),
+                8 => inst_neon.encInsDFromX(vd, wn, @intCast(lane & 0x1)),
+                else => unreachable,
+            };
+        }
+    }.enc;
+}
+
+fn storeLaneUmovEnc(comptime access_size: u12) fn (wd: u5, vn: u5, lane: u32) u32 {
+    return struct {
+        fn enc(wd: u5, vn: u5, lane: u32) u32 {
+            return switch (access_size) {
+                1 => inst_neon.encUmovWFromB(wd, vn, @intCast(lane & 0xF)),
+                2 => inst_neon.encUmovWFromH(wd, vn, @intCast(lane & 0x7)),
+                4 => inst_neon.encUmovWFromS(wd, vn, @intCast(lane & 0x3)),
+                8 => inst_neon.encUmovXFromD(wd, vn, @intCast(lane & 0x1)),
+                else => unreachable,
+            };
+        }
+    }.enc;
+}
+
+fn loadScalarEnc(comptime access_size: u12) fn (rt: u5, rn: u5, rm: u5) u32 {
+    return switch (access_size) {
+        1 => inst.encLdrbWReg,
+        2 => inst.encLdrhWReg,
+        4 => inst.encLdrWReg,
+        8 => inst.encLdrXReg,
+        else => unreachable,
+    };
+}
+
+fn storeScalarEnc(comptime access_size: u12) fn (rt: u5, rn: u5, rm: u5) u32 {
+    return switch (access_size) {
+        1 => inst.encStrbWReg,
+        2 => inst.encStrhWReg,
+        4 => inst.encStrWReg,
+        8 => inst.encStrXReg,
+        else => unreachable,
+    };
+}
+
+/// `v128.loadN_lane`: pop v128 (Vt) + i32 addr (Wn), push v128
+/// result with `lane` replaced by N bytes from `vm_base + ea`.
+/// Wasm spec §4.4.7.4. The handler reuses `v128MemPrologue` so
+/// any future bounds-check refinement (e.g. ADR-0028 M3-a-2 trap
+/// localisation) flows uniformly.
+fn emitV128LoadLane(ctx: *EmitCtx, ins: *const ZirInstr, comptime access_size: u12) Error!void {
+    const vec_vreg = ctx.pushed_vregs.pop().?;
+    const addr_vreg = ctx.pushed_vregs.pop().?;
+
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
+
+    try v128MemPrologue(ctx, addr_vreg, ins.payload, access_size);
+
+    // Source vec at stage 1 (X16 already used by prologue's GPR
+    // staging, but Q stages are independent of X stages).
+    const vec_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, vec_vreg, 1);
+    if (result_v != vec_v) {
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(result_v, vec_v));
+    }
+    // Scalar load into W17 (X17 is a transient, free after the
+    // bounds prologue's `ADD X17, X16, #size` consumed it).
+    try gpr.writeU32(ctx.allocator, ctx.buf, loadScalarEnc(access_size)(17, 28, 16));
+    try gpr.writeU32(ctx.allocator, ctx.buf, loadLaneInsEnc(access_size)(result_v, 17, ins.extra));
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
+/// `v128.storeN_lane`: pop v128 (Vt) + i32 addr (Wn), write N
+/// bytes from `Vt.<sz>[lane]` to `vm_base + ea`. Wasm spec
+/// §4.4.7.5. Order: prologue → UMOV W17 ← V<vt>.<sz>[lane] →
+/// scalar STR W17, [X28, X16]. X17 is free post-prologue.
+fn emitV128StoreLane(ctx: *EmitCtx, ins: *const ZirInstr, comptime access_size: u12) Error!void {
+    const vec_vreg = ctx.pushed_vregs.pop().?;
+    const addr_vreg = ctx.pushed_vregs.pop().?;
+
+    try v128MemPrologue(ctx, addr_vreg, ins.payload, access_size);
+
+    const vec_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, vec_vreg, 0);
+    try gpr.writeU32(ctx.allocator, ctx.buf, storeLaneUmovEnc(access_size)(17, vec_v, ins.extra));
+    try gpr.writeU32(ctx.allocator, ctx.buf, storeScalarEnc(access_size)(17, 28, 16));
+}
+
+pub fn emitV128Load8Lane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    try emitV128LoadLane(ctx, ins, 1);
+}
+pub fn emitV128Load16Lane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    try emitV128LoadLane(ctx, ins, 2);
+}
+pub fn emitV128Load32Lane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    try emitV128LoadLane(ctx, ins, 4);
+}
+pub fn emitV128Load64Lane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    try emitV128LoadLane(ctx, ins, 8);
+}
+pub fn emitV128Store8Lane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    try emitV128StoreLane(ctx, ins, 1);
+}
+pub fn emitV128Store16Lane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    try emitV128StoreLane(ctx, ins, 2);
+}
+pub fn emitV128Store32Lane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    try emitV128StoreLane(ctx, ins, 4);
+}
+pub fn emitV128Store64Lane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    try emitV128StoreLane(ctx, ins, 8);
+}
+
+// ============================================================
+// §9.9 / 9.9-d-5 — v128 select / select_typed.
+//
+// Wasm spec §4.4.4.1 (select / select_typed): pop c (i32),
+// val2 (T), val1 (T); push val1 if c != 0, else val2. T = v128
+// path needs a SIMD-aware mask synthesis since ARM has no
+// SIMD CSEL.
+//
+// Recipe (CSETM + DUP V.2D + BSL):
+//   CMP cond_w, #0
+//   CSETM X17, NE              ; X17 = -1 if cond≠0, else 0
+//   DUP   V<mask>.2D, X17      ; V<mask> = all-1s or all-0s
+//   BSL   V<mask>.16B, V<v1>.16B, V<v2>.16B
+//                              ; V<mask> = (V<mask> & V<v1>)
+//                              ;        | (~V<mask> & V<v2>)
+//
+// BSL writes Vd in place; we reuse the result V slot for the
+// mask so no extra V scratch is needed. The 3-source spill
+// staging (mask=dst at stage 0, val1 at stage 1, val2 at
+// stage 2) needs stage_idx=2 — but qLoadSpilled exposes only
+// stages 0/1 today; for the non-spilled MVP path the SPILL-
+// EXEMPT marker keeps direct gpr.resolveFp semantics.
+// ============================================================
+
+/// `select` / `select_typed` with v128 operand type (Wasm spec
+/// §4.4.4.1). Caller has already popped cond_v / val2_v / val1_v
+/// and verified val1_v's shape_tag is .v128.
+pub fn emitV128Select(ctx: *EmitCtx, cond_v: u32, val1_v: u32, val2_v: u32, result_vreg: u32) Error!void {
+    // SPILL-EXEMPT: cond is i32 (GPR); single-stage load.
+    const cond_w = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, cond_v, 0);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmW(cond_w, 0));
+    // Mask materialisation into X17 (transient). After CSETM the
+    // GPR cond_w is dead.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCsetmX(17, .ne));
+
+    const mask_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encDupGen2D(mask_v, 17));
+    // SPILL-EXEMPT: v128 select needs 3 V regs simultaneously
+    // (mask=dst, val1, val2). qLoadSpilled exposes only stages
+    // 0/1; val2 at stage 2 lifts alongside D-037 spill-stage
+    // extension. For non-spilled SIMD vregs (which fit in
+    // V16-V28) gpr.resolveFp returns the physical V reg directly.
+    const val1_v_phys = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, val1_v, 1);
+    const val2_v_phys = try gpr.resolveFp(ctx.alloc, val2_v);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encBsl16B(mask_v, val1_v_phys, val2_v_phys));
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
+}
+
 /// `i32x4.add`: pop two v128 (Vn.4S, Vm.4S), push v128 sum
 /// (Vd.4S). `ADD V<vd>.4S, V<vn>.4S, V<vm>.4S` does element-wise
 /// 32-bit add across the four lanes.

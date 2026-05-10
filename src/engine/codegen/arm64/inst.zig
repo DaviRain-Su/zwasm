@@ -781,6 +781,19 @@ pub fn encCsetW(rd: Xn, set_if: Cond) u32 {
     return 0x1A9F07E0 | (@as(u32, @intFromEnum(enc)) << 12) | @as(u32, rd);
 }
 
+/// `CSETM Xd, cond` — set Xd to all-ones if cond holds, else 0.
+/// Alias of `CSINV Xd, XZR, XZR, invert(cond)`. The 64-bit CSINV
+/// (sf=1, op=1):
+///   `1 1 0 11010100 [Rm:5] [cond:4] 00 [Rn:5] [Rd:5]`
+/// with Rm = Rn = ZR (31). Base = `0xDA9F03E0` | (enc_cond<<12)
+/// | Rd. §9.9 / 9.9-d-5 v128 select uses CSETM + DUP V.2D + BSL
+/// to materialise an all-ones / all-zeros 16-byte mask. Arm IHI
+/// 0055 §C6.2.59 (CSETM alias of CSINV).
+pub fn encCsetmX(rd: Xn, set_if: Cond) u32 {
+    const enc = invertCond(set_if);
+    return 0xDA9F03E0 | (@as(u32, @intFromEnum(enc)) << 12) | @as(u32, rd);
+}
+
 /// `CLZ Wd, Wn` — count leading zeros (32-bit). The §9.7 / 7.3
 /// sub-b4 i32.clz handler emits this directly.
 /// Encoding (Data Processing 1-source, sf=0):
@@ -1297,6 +1310,21 @@ test "encCsetW w0, eq — `cset w0, eq` → 0x1A9F17E0" {
 test "encCsetW w3, lt — `cset w3, lt` → 0x1A9FA7E3" {
     // invert(LT=0xB) = 0xA = GE; (0xA << 12) = 0xA000; Rd=3.
     try testing.expectEqual(@as(u32, 0x1A9FA7E3), encCsetW(3, .lt));
+}
+
+test "encCsetmX x0, ne — `csetm x0, ne` → 0xDA9F03E0" {
+    // invert(NE) = EQ (0x0); base 0xDA9F03E0; Rd=0; cond field=0.
+    try testing.expectEqual(@as(u32, 0xDA9F03E0), encCsetmX(0, .ne));
+}
+
+test "encCsetmX x17, eq — `csetm x17, eq` → 0xDA9F13F1" {
+    // invert(EQ) = NE (0x1); (0x1<<12) = 0x1000; Rd=17.
+    try testing.expectEqual(@as(u32, 0xDA9F13F1), encCsetmX(17, .eq));
+}
+
+test "encCsetmX x30, ne — `csetm x30, ne` → 0xDA9F03FE" {
+    // Rd=30; cond field=0.
+    try testing.expectEqual(@as(u32, 0xDA9F03FE), encCsetmX(30, .ne));
 }
 
 test "encClzW w0, w1 — `clz w0, w1` → 0x5AC01020" {

@@ -906,18 +906,32 @@ pub fn compile(
                     std.debug.print("arm64/emit: select SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ func.func_idx, result_v, alloc.slots.len });
                     return Error.SlotOverflow;
                 }
-                // D-034 spill-aware: 3 source operands but only 2
-                // stage regs. CMP is encoded first using stage 0 for
-                // cond; after CMP the cond value is dead, so stage 0
-                // is reused for val1 (and result).
-                const cond_w = try gpr.gprLoadSpilled(allocator, &buf, alloc, ctx.spill_base_off, cond_v, 0);
-                try gpr.writeU32(allocator, &buf, inst.encCmpImmW(cond_w, 0));
-                const val1_w = try gpr.gprLoadSpilled(allocator, &buf, alloc, ctx.spill_base_off, val1_v, 0);
-                const val2_w = try gpr.gprLoadSpilled(allocator, &buf, alloc, ctx.spill_base_off, val2_v, 1);
-                const dst_w = try gpr.gprDefSpilled(alloc, result_v, 0);
-                try gpr.writeU32(allocator, &buf, inst.encCselW(dst_w, val1_w, val2_w, .ne));
-                try gpr.gprStoreSpilled(allocator, &buf, alloc, ctx.spill_base_off, result_v, 0);
-                try pushed_vregs.append(allocator, result_v);
+                // §9.9 / 9.9-d-5: dispatch on val1's shape_tag. v128
+                // operands need a SIMD-aware mask synthesis (CSETM +
+                // DUP V.2D + BSL); GPR / FP fall through to CSEL.
+                if (alloc.shapeTag(val1_v) == .v128) {
+                    try op_simd.emitV128Select(&ctx, cond_v, val1_v, val2_v, result_v);
+                    try pushed_vregs.append(allocator, result_v);
+                } else {
+                    // D-034 spill-aware: 3 source operands but only 2
+                    // stage regs. CMP is encoded first using stage 0
+                    // for cond; after CMP the cond value is dead, so
+                    // stage 0 is reused for val1 (and result).
+                    //
+                    // Type assumption: val1 / val2 width is i32 (CSEL
+                    // Wd, 32-bit select). The validator already
+                    // enforces both operands share a single type;
+                    // supporting i64 needs CSEL Xd via type-aware
+                    // dispatch (debt: D-034 / 7.5-select-i64-fp).
+                    const cond_w = try gpr.gprLoadSpilled(allocator, &buf, alloc, ctx.spill_base_off, cond_v, 0);
+                    try gpr.writeU32(allocator, &buf, inst.encCmpImmW(cond_w, 0));
+                    const val1_w = try gpr.gprLoadSpilled(allocator, &buf, alloc, ctx.spill_base_off, val1_v, 0);
+                    const val2_w = try gpr.gprLoadSpilled(allocator, &buf, alloc, ctx.spill_base_off, val2_v, 1);
+                    const dst_w = try gpr.gprDefSpilled(alloc, result_v, 0);
+                    try gpr.writeU32(allocator, &buf, inst.encCselW(dst_w, val1_w, val2_w, .ne));
+                    try gpr.gprStoreSpilled(allocator, &buf, alloc, ctx.spill_base_off, result_v, 0);
+                    try pushed_vregs.append(allocator, result_v);
+                }
             },
             .drop => {
                 // Discard the top operand. Wasm spec §4.4.4: the
@@ -1246,6 +1260,17 @@ pub fn compile(
             .@"v128.load16x4_u" => try op_simd.emitV128Load16x4U(&ctx, &ins),
             .@"v128.load32x2_s" => try op_simd.emitV128Load32x2S(&ctx, &ins),
             .@"v128.load32x2_u" => try op_simd.emitV128Load32x2U(&ctx, &ins),
+            // §9.9 / 9.9-d-5 — v128 lane mem family (load_lane × 4,
+            // store_lane × 4) sharing v128MemPrologue + scalar
+            // load/store + INS/UMOV per Wasm spec §4.4.7.4 / §4.4.7.5.
+            .@"v128.load8_lane" => try op_simd.emitV128Load8Lane(&ctx, &ins),
+            .@"v128.load16_lane" => try op_simd.emitV128Load16Lane(&ctx, &ins),
+            .@"v128.load32_lane" => try op_simd.emitV128Load32Lane(&ctx, &ins),
+            .@"v128.load64_lane" => try op_simd.emitV128Load64Lane(&ctx, &ins),
+            .@"v128.store8_lane" => try op_simd.emitV128Store8Lane(&ctx, &ins),
+            .@"v128.store16_lane" => try op_simd.emitV128Store16Lane(&ctx, &ins),
+            .@"v128.store32_lane" => try op_simd.emitV128Store32Lane(&ctx, &ins),
+            .@"v128.store64_lane" => try op_simd.emitV128Store64Lane(&ctx, &ins),
             .@"i32x4.splat" => try op_simd.emitI32x4Splat(&ctx, &ins),
             .@"i32x4.extract_lane" => try op_simd.emitI32x4ExtractLane(&ctx, &ins),
             .@"i32x4.replace_lane" => try op_simd.emitI32x4ReplaceLane(&ctx, &ins),
