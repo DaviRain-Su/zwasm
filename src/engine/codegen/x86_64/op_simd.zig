@@ -89,10 +89,25 @@ fn emitV128IntBinop(
     const lhs_x = try gpr.resolveXmm(alloc, lhs_v);
     const dst_x = try gpr.resolveXmm(alloc, result_v);
 
+    // Aliasing safety (D-066 mirror for x86_64; D-070 partial
+    // discharge): regalloc's LIFO slot-reuse can assign
+    // `result_v` the same physical XMM as `rhs_v` (when rhs's
+    // last use is here). The naive `MOVAPS dst, lhs; encoder(dst,
+    // rhs)` would overwrite rhs before encoder reads it, yielding
+    // `result = lhs` (silently wrong PAND/POR/PXOR/etc. results
+    // — surfaces as ~4400 simd_assert FAILs on x86_64
+    // simd_bitwise / simd_i*x*_arith). Stash rhs through XMM7
+    // (the project-canonical SIMD scratch — `abi.zig` reserves it
+    // mirroring arm64's V31) when the alias condition holds.
+    var rhs_for_op = rhs_x;
+    if (dst_x != lhs_x and dst_x == rhs_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(.xmm7, rhs_x).slice());
+        rhs_for_op = .xmm7;
+    }
     if (dst_x != lhs_x) {
         try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, lhs_x).slice());
     }
-    try buf.appendSlice(allocator, encoder(dst_x, rhs_x).slice());
+    try buf.appendSlice(allocator, encoder(dst_x, rhs_for_op).slice());
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -1058,17 +1073,28 @@ fn emitV128IntCmpUnsigned(
     const lhs_x = try gpr.resolveXmm(alloc, lhs_v);
     const dst_x = try gpr.resolveXmm(alloc, result_v);
 
+    // Aliasing safety (D-066 mirror; D-070 partial discharge).
+    // The min/max-then-PCMPEQ tail reads `lhs_x` again for ge/le,
+    // so we also need to preserve lhs_x. If dst_x == lhs_x we
+    // overwrite it with the min/max result; the tail still works
+    // because the `.ge/.le` arm reads lhs_x which was the same as
+    // dst before MOVAPS-elision. The risky alias is dst_x == rhs_x.
+    var rhs_for_op = rhs_x;
+    if (dst_x != lhs_x and dst_x == rhs_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(.xmm7, rhs_x).slice());
+        rhs_for_op = .xmm7;
+    }
     if (dst_x != lhs_x) {
         try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, lhs_x).slice());
     }
-    try buf.appendSlice(allocator, encoder_minmax(dst_x, rhs_x).slice());
+    try buf.appendSlice(allocator, encoder_minmax(dst_x, rhs_for_op).slice());
 
     switch (kind) {
         .ge, .le => {
             try buf.appendSlice(allocator, encoder_pcmpeq(dst_x, lhs_x).slice());
         },
         .gt, .lt => {
-            try buf.appendSlice(allocator, encoder_pcmpeq(dst_x, rhs_x).slice());
+            try buf.appendSlice(allocator, encoder_pcmpeq(dst_x, rhs_for_op).slice());
             const ones = abi.fp_spill_stage_xmms[0];
             try buf.appendSlice(allocator, inst.encPcmpeqB(ones, ones).slice());
             try buf.appendSlice(allocator, inst.encPxor(dst_x, ones).slice());
@@ -1237,10 +1263,16 @@ fn emitV128FpCmp(
     const base_x = if (swap_operands) rhs_x else lhs_x;
     const cmp_x = if (swap_operands) lhs_x else rhs_x;
 
+    // Aliasing safety (D-066 mirror; D-070 partial discharge).
+    var cmp_for_op = cmp_x;
+    if (dst_x != base_x and dst_x == cmp_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(.xmm7, cmp_x).slice());
+        cmp_for_op = .xmm7;
+    }
     if (dst_x != base_x) {
         try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, base_x).slice());
     }
-    try buf.appendSlice(allocator, encoder(dst_x, cmp_x, imm8).slice());
+    try buf.appendSlice(allocator, encoder(dst_x, cmp_for_op, imm8).slice());
 
     try pushed_vregs.append(allocator, result_v);
 }
