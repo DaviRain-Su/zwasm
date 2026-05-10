@@ -37,13 +37,14 @@
   1-pop-1-push + lower wiring + ARM64 emit handlers (Step 0
   survey of cranelift NEON bitmask required). Closes
   simd_boolean.0 on both arches.
-- **D-078 (c) simd_bitwise.17 UnsupportedOp** — no x86_64/emit
-  debug print surfaces in /tmp/claude-501/orb-vret.log; the
-  failing op is via op_simd or non-printing rejectUnsupported
-  path. Need to add a print or instrument the runner to
-  identify the exact op. (D-078 (b) x86_64 v128 globals
-  retired — was misdiagnosis; actual gap was return-v128
-  closed at 9.9-g-18.)
+- **D-078 (c) simd_bitwise.17 — root cause: x86_64 v128
+  XMM spill not yet implemented**. `resolveXmm` rejects
+  spilled v128 vregs (handler not XMM-spill-aware). Discharge
+  needs `xmmLoadSpilledV128` / `xmmStoreSpilledV128` using
+  16-byte MOVUPS + handler updates (~100 sites). Substantial
+  refactor; Step 0 survey + co-deliverable with D-057
+  source-split. (D-078 (b) v128 globals retired as
+  misdiagnosis; actual gap was return-v128 closed at 9.9-g-18.)
 - **D-078 (a) f64x2_extract_lane value mismatch** — JIT-disasm
   spike via debug_jit_auto skill (Mac PASSES, x86_64 only).
 - Aggregate `test-spec-simd` into `test-all` (preventive — surfaces
