@@ -1,6 +1,6 @@
 # Skip — `externref-segment.0.wasm` (externref element segment)
 
-- **Status**: Accepted (skip until externref reftype lands)
+- **Status**: Accepted (skip until externref reftype lands); **NOT EFFECTIVE per ADR-0050 D-2 — see "Current effectiveness gap" below**
 - **Date**: 2026-05-04
 - **Author**: zwasm v2 / continue loop
 - **Tags**: phase-6, skip-adr, misc-runtime, externref, reftypes
@@ -64,12 +64,41 @@ deferred-skip list. The ADR itself stays as historical record.
 > `externref-segment.0.wasm` reports PASS in
 > `zig build test-wasmtime-misc-runtime`.
 
+## Current effectiveness gap (2026-05-11)
+
+Per the 2026-05-11 ADR audit
+(`private/20250511_adr_audit/SUMMARY.md` §2.1 +
+`batch_A_findings.md`), this skip-ADR is **not effective** per
+ADR-0050 D-2's three-path test:
+
+- **Path 1 (runner-side classification)**: ❌ no
+  `skip-adr` token recognition in `wast_runtime_runner.zig`.
+- **Path 2 (DEFER mark + runner skip-token)**: ❌ the
+  fixture appears in `manifest_runtime.txt` as plain `module
+  externref-segment.0.wasm` without `# DEFER:` mark.
+- **Path 3 (manifest exclusion)**: ❌ fixture is active in
+  the manifest.
+
+Operational effect: `zig build test-wasmtime-misc-runtime`
+reports `FAIL externref-segment/externref-segment.0.wasm:
+instantiate InstanceAllocFailed`. Same masking as
+`skip_embenchen_emcc_env_imports.md` — `test-wasmtime-misc-
+runtime` is not in `test-all`.
+
+Discharge tracked as **D-072** alongside the embenchen
+skip-ADR. The structural fix (externref reftype landing per
+"What v2 needs to fix this honestly") naturally retires this
+skip-ADR.
+
 ## References
 
 - ADR-0014 §2.1 / 6.K.4 (funcref-only scope for element forms
   5 / 6 / 7)
 - ADR-0014 §2.1 / 6.J (strict-100%-PASS close criterion +
   per-fixture skip-ADR escape clause)
+- ADR-0050 (skip-ADR effectiveness gate that flagged this
+  ADR's not-effective status)
+- D-072 (skip-ADR runner-gate enforcement debt)
 - Wasm 2.0 §3.2.6 (reftype + valtype matching rules)
 - `~/Documents/OSS/wasmtime/tests/misc_testsuite/externref-segment.wast`
   — original .wast source

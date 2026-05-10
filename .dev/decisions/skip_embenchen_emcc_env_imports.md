@@ -1,6 +1,6 @@
 # Skip — `embenchen_*1.wasm` (emscripten `env`-module imports)
 
-- **Status**: Accepted (skip until follow-up — see "Removal plan")
+- **Status**: Accepted (skip until follow-up — see "Removal plan"); **NOT EFFECTIVE per ADR-0050 D-2 — see "Current effectiveness gap" below**
 - **Date**: 2026-05-04
 - **Author**: zwasm v2 / continue loop
 - **Tags**: phase-6, skip-adr, misc-runtime, embenchen, manifest-format
@@ -113,12 +113,56 @@ When both halves of that AND become true, this ADR's skip
 status expires; promote the 4 embenchen fixtures back into
 the runner.
 
+## Current effectiveness gap (2026-05-11)
+
+Per the 2026-05-11 ADR audit
+(`private/20250511_adr_audit/SUMMARY.md` §2.1 +
+`batch_A_findings.md`), this skip-ADR is **not effective** per
+ADR-0050 D-2's three-path test:
+
+- **Path 1 (runner-side classification)**: ❌
+  `wast_runtime_runner.zig` does NOT classify any of the 4
+  fixtures as `skip-adr` — `grep` returns 0 hits for
+  `skip_embenchen` or `embenchen_fannkuch.1` skip handling.
+- **Path 2 (DEFER mark + runner skip-token)**: ❌ the 4
+  fixtures appear in `manifest_runtime.txt` as plain `module
+  embenchen_*.1.wasm` lines without `# DEFER:` marks. The
+  runner has no skip-token machinery.
+- **Path 3 (manifest exclusion)**: ❌ fixtures are active in
+  `manifest_runtime.txt`.
+
+Operational effect: `zig build test-wasmtime-misc-runtime`
+reports **4 honest FAILs** for these fixtures (joined by 1
+from `skip_externref_segment.md` for 5 total). This is masked
+because `test-wasmtime-misc-runtime` is **not aggregated into
+`test-all`** — Phase 6's strict-close gate (ADR-0012 §6.J)
+fired against `test-all` only. The moment the runner enters
+`test-all`, Phase 6's strict-PASS claim collapses.
+
+Discharge path tracked as **D-072** in `.dev/debt.md`. Three
+options the discharge can pick from (per ADR-0050 D-2):
+
+1. Add `skip-adr-<slug>` token recognition to
+   `wast_runtime_runner.zig` (matches Path 1).
+2. Add `# DEFER: skip_embenchen_emcc_env_imports` lines to
+   `manifest_runtime.txt` and runner-side skip handling
+   (matches Path 2).
+3. Land the actual fix from "What v2 needs to fix this
+   honestly" (proper Wasm 2.0 §3.4.10 import-type validation
+   in `src/c_api/instance.zig`); the skip-ADR retires.
+
+The skip-ADR's design intent and Removal condition are
+unchanged; only the runner-side wiring is missing.
+
 ## References
 
 - ADR-0014 §2.1 / 6.K.3 (cross-module imports — implements the
   *kind*-level routing this skip-ADR depends on)
 - ADR-0014 §2.1 / 6.J (strict-100%-PASS close criterion +
   per-fixture skip-ADR escape clause)
+- ADR-0050 (skip-ADR effectiveness gate that flagged this
+  ADR's not-effective status)
+- D-072 (skip-ADR runner-gate enforcement debt)
 - `crates/wast/src/wast.rs:fn module` (wasmtime's auto-
   register reference implementation)
 - Wasm 2.0 §3.4.10 (import-matching sub-typing rules)

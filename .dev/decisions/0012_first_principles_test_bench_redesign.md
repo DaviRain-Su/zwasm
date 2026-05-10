@@ -319,3 +319,43 @@ orchestration, no embedded test logic.
   user explicitly took responsibility for the direct edit (no
   per-edit ADR) to avoid "ADR-of-an-ADR" recursion atop ADR-0011's
   reopen + this ADR's breakdown + ADR-0014's wiring.
+
+- **2026-05-11 (`<backfill>`, post-audit honest record)**: per
+  the 2026-05-11 ADR audit (`private/20250511_adr_audit/SUMMARY.md`
+  §2.3 / batch_A `## ADR-0012_first_principles_test_bench_redesign`),
+  this ADR's §6 work items closed strict at Phase 6 boundary
+  (commit `b569b8f` → `0825794`) but several **§1–§3
+  infrastructure promises remain unimplemented**. Specifically:
+
+  - §1 / §3 "spec testsuite" — no `test/spec/testsuite/` git
+    submodule; no `test/spec/legacy/` directory.
+  - §2 tier-provisioning — no `versions.lock`; no
+    `setup_corpora.sh`; no `install_tools.ps1`; no
+    `-Dwith-realworld-rebuild` / `-Dwith-realworld-diff` /
+    `-Dwith-bench-compare` build flags.
+  - §3 / §7 — no `bench/wat/` / `bench/custom/` /
+    `bench/embenchen/`; no `build_realworld.sh`; no
+    `record_phase_bench.sh`.
+  - §1 self-promise: "`versions.lock` introduced in 6.B
+    inline" — 6.B closed at `1ba505d` without `versions.lock`
+    landing.
+
+  Effect on Phase 6 close: none operationally — the §6.J strict
+  100% PASS gate fired against `test-all`'s actually-aggregated
+  runners (`test-spec`, `test-spec-wasm-2.0`, `test-realworld`,
+  `test-realworld-run`, `test-realworld-diff`, `test-c-api`,
+  `test-wasi-p1`, `test-wasmtime-misc-basic`). The unimplemented
+  pieces are tier-provisioning automation that was planned but
+  never blocked the Phase 6 close gate.
+
+  Re-targeting: rather than supersede this ADR, the residual
+  scope is filed as **D-074** with the structural barrier
+  named ("no Phase row currently scheduled for the tier-
+  provisioning machinery"). Likely Phase 11 (WASI 0.1 full +
+  bench infra) carries the bench-side rebuild; the spec-
+  submodule + versions.lock + install_tools.ps1 work fits
+  the same Phase or a dedicated infra row.
+
+  Status remains `Accepted` because the §6 work items closed
+  per design; the ADR is **honest about its §1–§3 follow-ups
+  not landing** rather than implying full completion.
