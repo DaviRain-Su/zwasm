@@ -34,9 +34,13 @@
 ## Next sub-chunk candidates (names only)
 
 - **D-067 bitmask** — validator route 100/132/164/196 to
-  1-pop-1-push + lower wiring + ARM64 emit handlers (Step 0
-  survey of cranelift NEON bitmask required). Closes
-  simd_boolean.0 on both arches.
+  1-pop-1-push + lower wiring + ARM64 emit handlers. **Step 0
+  survey landed at `private/notes/p9-9.9-g-19-bitmask-neon-
+  survey.md`** (cranelift recipe = SSHR + AND mask + ADDV +
+  UMOV; needs new encoders SSHR/ADDV/UMOV/ZIP1/EXT in
+  inst_neon.zig + 4 const-pool entries + parametric helper +
+  i64x2 scalar-extraction special case). Implementation
+  chunk: 9.9-g-19. Closes simd_boolean.0 on both arches.
 - **D-078 (c) simd_bitwise.17 — root cause: x86_64 v128
   XMM spill not yet implemented**. `resolveXmm` rejects
   spilled v128 vregs (handler not XMM-spill-aware). Discharge
