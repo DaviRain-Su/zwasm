@@ -655,6 +655,11 @@ pub fn emitI32x4Mul(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     try emitV128Binop(ctx, inst_neon.encMul4S);
 }
 
+// `i64x2.mul` handler + dispatch arm live further below near
+// the §9.5-c-vii-mul block; both pre-existed in the codebase
+// but were unreachable from spec corpus until §9.9 / 9.9-f-8
+// added the missing validator binop arm for sub-opcode 213.
+
 /// `i32x4.extract_lane`: pop v128 (Vn.4S), push i32 result (Wd).
 /// `UMOV W<wd>, V<vn>.S[lane]` extracts the 32-bit lane (zero-
 /// extended into Wd). Lane immediate is in `ins.payload`

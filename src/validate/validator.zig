@@ -763,6 +763,7 @@ const Validator = struct {
             184, 185, 186, 187, 188, 189, 190, 191,
             194, 195, 196, 197, 198,
             203, 204, 205, 206, 207, 208, 209, 210, 211,
+            213, // §9.9 / 9.9-f-8 — i64x2.mul (handler-side multi-instr synthesis on ARM64 since NEON has no MUL.2D).
             => try self.opSimdBinop(),
 
             // §9.9 / 9.9-f-5 — split FP arith range. Sub-opcodes
