@@ -307,6 +307,42 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     };
 }
 
+/// Apply active data segments from `wasm_bytes` into `memory`
+/// (a caller-owned buffer, e.g. a fixed-size scratch arena).
+/// Mirrors the data-init half of `setupRuntime` so spec-test
+/// runners can reuse a stable scratch_memory across modules
+/// without paying the full setupRuntime allocation cost. §9.9 /
+/// 9.9-d-7: simd_assert_runner relies on this so its
+/// `scratch_memory` reflects each fixture's data-segment bytes
+/// before assert_return calls fire.
+///
+/// Returns `Error.UnsupportedEntrySignature` if a segment's
+/// offset is negative, the offset+bytes exceeds `memory.len`,
+/// or the offset_expr is not a `i32.const` literal. Passive /
+/// declarative segments are skipped (only `active` is honoured).
+pub fn applyActiveDataSegments(
+    allocator: Allocator,
+    wasm_bytes: []const u8,
+    memory: []u8,
+) Error!void {
+    var temp_arena = std.heap.ArenaAllocator.init(allocator);
+    defer temp_arena.deinit();
+    const ta = temp_arena.allocator();
+    var module = try parser.parse(ta, wasm_bytes);
+    if (module.find(.data)) |s| {
+        var datas = try sections.decodeData(ta, s.body);
+        defer datas.deinit();
+        for (datas.items) |seg| {
+            if (seg.kind != .active) continue;
+            const off = evalConstI32Expr(seg.offset_expr) catch return Error.UnsupportedEntrySignature;
+            if (off < 0) return Error.UnsupportedEntrySignature;
+            const off_u: u64 = @intCast(off);
+            if (off_u + seg.bytes.len > memory.len) return Error.UnsupportedEntrySignature;
+            @memcpy(memory[@intCast(off_u)..][0..seg.bytes.len], seg.bytes);
+        }
+    }
+}
+
 /// Find an exported function by name. Returns its func_idx in
 /// the module's function index space (imports + defined).
 pub fn findExportFunc(allocator: Allocator, wasm_bytes: []const u8, name: []const u8) Error!u32 {

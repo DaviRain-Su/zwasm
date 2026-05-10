@@ -145,6 +145,20 @@ fn runCorpus(
                 continue;
             };
             current_compiled = compiled;
+            // §9.9 / 9.9-d-7: write active data-segment bytes
+            // into `scratch_memory` so subsequent v128.load
+            // fixtures see the fixture-declared bytes (rather
+            // than the all-zero memset baseline). Mirrors
+            // `setupRuntime`'s data-init logic without paying its
+            // full per-module allocation. Without this,
+            // simd_address load_data_N invocations all returned
+            // v128:000... vs the expected data-segment bytes.
+            runner_mod.applyActiveDataSegments(gpa, wasm_bytes, scratch_memory[0..]) catch |err| {
+                try stdout.print("FAIL  {s}/{s} data-init: {s}\n", .{ name, file, @errorName(err) });
+                failed.* += 1;
+                module_bad = true;
+                continue;
+            };
             continue;
         }
 
