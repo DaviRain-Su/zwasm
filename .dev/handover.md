@@ -13,33 +13,39 @@
 5. `.dev/decisions/0041_simd_128_design.md` (SSE4.2 baseline post-9.7-m
    amendment).
 
-## Current state — Phase 9 / §9.9 in-flight; **9.9-f-3 NEXT — v128 merge MOV in `arm64/op_control.zig:emitEndIntra` (unblocks simd_const.386 + scales to multi-arm-result-v128 fixtures)**
+## Current state — Phase 9 / §9.9 in-flight; **9.9-f-4 NEXT — call_indirect Trap when invoking v128-arg target (likely sig-typeidx comparison gap or call_indirect-specific marshal path)**
 
-9.9-f-2 (`a968a84d`): two-line fix — extend `validator.readBlockType`
-+ `lower.readBlockArity` to accept -5 (0x7B) → v128 single
-valtype block result. Per Wasm spec §5.3.5 blocktype encoding;
-was missing in the -1..-4 (i32/i64/f32/f64) switch.
+9.9-f-3 (`80b2f1c5`): three structural ARM64 fixes — (1)
+`emitEndIntra` v128 merge MOV (per-slot `alloc.shapeTag`
+dispatch; replaces 32-bit scalar ORR W with 128-bit
+`encMovV16B` for v128 slots); (2) `marshalCallArgs` v128
+caller-side marshal (V0..V7 + 16-byte-aligned stack overflow
+per AAPCS64 §6.4.2 stage C.4); (3) `captureCallResult` v128
+(callee returns v128 in V0). Unblocks simd_const.386 end-
+to-end.
 
-**Mac aarch64 simd_assert_runner totals after 9.9-f-2**:
-**394 PASS** (was 381, +13) / **3 FAIL** (was 4, -1) /
-325 SKIP. simd_bitwise.17 unblocked. simd_const.386 moved
-past validator into emit-side UnsupportedOp.
+**Mac aarch64 simd_assert_runner totals after 9.9-f-3**:
+**412 PASS** (was 394, +18) / **4 FAIL** (was 3, +1) /
+305 SKIP. The new FAIL is two `as-call_indirect-param()` /
+`-param2()` Traps — call_indirect with v128 arg compiles
+but traps at runtime. Tests: 1552/1564 Mac, 1536/1564
+OrbStack.
 
-Residual 3 fails:
-- simd_const.386 emit UnsupportedOp — `arm64/op_control.zig:
-  emitEndIntra` merge MOV uses GPR helpers; v128 result
-  needs `qLoadSpilled` / `encMovV16B`. Concrete next chunk.
-- simd_const.388 BadValType — separate parse-side gap
+Residual 4 fails:
+- simd_const: as-call_indirect-param() Trap (NEW)
+- simd_const: as-call_indirect-param2() Trap (NEW)
+- simd_const.388 BadValType — parse-side gap
 - simd_const.389 NotImplemented — separate
 
-**Next — 9.9-f-3**: extend `emitEndIntra`'s merge MOV to
-type-aware dispatch. Track the result type per-arity slot
-(via the label or pushed-vreg shape_tag); for v128 slots
-emit `qLoadSpilled(else_result, stage 1)` + `qDefSpilled
-(merge_vreg, stage 0)` + `encMovV16B(merge_reg, else_reg)`
-+ `qStoreSpilled(merge_vreg, 0)`. The same widening must
-apply to br/br_if's branch-fixup result marshal if those
-also touch the merge.
+**Next — 9.9-f-4**: investigate the call_indirect Trap. The
+JIT body emits the v128 marshal (no compile-time error) but
+runtime traps. Likely the call_indirect type-check (compares
+caller's expected typeidx vs callee's published typeidx)
+mismatches when v128 is in the sig — or the table-entry
+typeidx wasn't populated correctly by setupRuntime for
+v128-bearing types. Spike via `debug_jit_auto` skill recipes;
+likely a sig-comparison fix in op_call.zig's emitCallIndirect
+or a setupRuntime gap.
 
 After §9.9: §9.10 (smoke benches + gap analysis), §9.11
 (audit + SHA backfill), §9.12 (open Phase 10).
@@ -63,6 +69,6 @@ code in `src/ir/coalesce/`, regalloc.zig LIFO free-pool,
 §9.5 [x] (ARM64 NEON pt 1), §9.6 [x] (ARM64 NEON pt 2),
 §9.7 [x] (x86_64 SSE4.1+SSE4.2; 9.7-a..bb landed),
 §9.8 [x] (scope absorbed per ADR-0044),
-§9.9 in-flight (9.9-a..c + 9.9-d-1..7 + 9.9-e-1..2 + 9.9-f-1..2
-landed; 9.9-f-3 NEXT — v128 merge MOV in emitEndIntra).
+§9.9 in-flight (9.9-a..c + 9.9-d-1..7 + 9.9-e-1..2 + 9.9-f-1..3
+landed; 9.9-f-4 NEXT — call_indirect v128 Trap investigation).
 **Branch**: `zwasm-from-scratch`。
