@@ -175,7 +175,19 @@ pub fn compile(
     for (func.sig.params) |p| {
         switch (p) {
             .i32, .i64, .f32, .f64 => {},
-            .v128, .funcref, .externref => {
+            .v128 => {
+                // §9.9 / 9.9-e-2: SystemV passes v128 in
+                // XMM0..XMM7. Win64 passes v128 by hidden pointer
+                // (§"Argument Passing" — types > 8 bytes are
+                // referenced); zwasm v2's x86_64 v128 marshal is
+                // SystemV-only today. Win64 v128 punted to a debt
+                // row.
+                if (abi.current_cc == .win64) {
+                    std.debug.print("x86_64/emit: Win64 v128 param unsupported (func_idx={d})\n", .{func.func_idx});
+                    return Error.UnsupportedOp;
+                }
+            },
+            .funcref, .externref => {
                 std.debug.print("x86_64/emit: param type `{s}` unsupported (func_idx={d})\n", .{ @tagName(p), func.func_idx });
                 return Error.UnsupportedOp;
             },
@@ -292,7 +304,16 @@ pub fn compile(
     // (the +8 puts spill slot 0 in the next 8-byte cell below
     // the deepest local). `gpr.zig`'s `rbpDispNegI8` consumes it
     // as `disp = -(spill_base_off + spill_off)`.
-    const locals_bytes: u32 = total_locals * 8;
+    // §9.9 / 9.9-e-2: per-function frame layout (group-by-type).
+    // Mirror of arm64/emit.zig's LocalLayout: scalars at 8-byte
+    // stride, v128 at 16-byte stride. `base_off_for_locals` is
+    // -8 if uses_runtime_ptr (R15 save occupies [RBP-8]) else 0;
+    // disps[i] is the most-negative byte of v128 slot `i` (since
+    // MOVUPS [RBP+disp] writes UPWARD from disp).
+    const base_off_for_locals: i32 = if (uses_runtime_ptr) -8 else 0;
+    var layout = try computeLocalLayout(allocator, func, base_off_for_locals);
+    defer layout.deinit(allocator);
+    const locals_bytes: u32 = layout.total_bytes;
     const spill_bytes: u32 = alloc.spillBytes();
     const r15_save_bytes: u32 = if (uses_runtime_ptr) 8 else 0;
     const spill_base_off: u32 = locals_bytes + r15_save_bytes + 8;
@@ -370,7 +391,6 @@ pub fn compile(
     //         user int args from RDX (max 3)
     // The base index into arg_gprs is set so index 0 of the user
     // params lands on the first non-runtime-ptr arg reg.
-    const base_off_for_locals: i8 = if (uses_runtime_ptr) -8 else 0;
     {
         var p_idx: u32 = 0;
         // Cc-aware arg-reg index counters. SysV (§3.2.3) tracks
@@ -392,13 +412,13 @@ pub fn compile(
         // order — increment per overflowed arg regardless of class.
         var nsaa_idx: u32 = 0;
         while (p_idx < num_params) : (p_idx += 1) {
-            // §9.7 / 7.10-g: i32 disp throughout — auto-helpers
-            // pick disp8 / disp32 form per offset range.
-            const off: i32 = @as(i32, base_off_for_locals) - @as(i32, @intCast((p_idx + 1) * 8));
+            // §9.7 / 7.10-g + §9.9-e-2: per-local disp from layout.
+            // Auto-helpers pick disp8 / disp32 form per offset range.
+            const off: i32 = layout.disps[p_idx];
             const ptype = func.sig.params[p_idx];
             switch (ptype) {
-                .v128, .funcref, .externref => unreachable, // filtered above
-                .i32, .i64, .f32, .f64 => {},
+                .funcref, .externref => unreachable, // filtered above
+                .i32, .i64, .f32, .f64, .v128 => {},
             }
             // Win64 stack-arg fallback for slot >= 4. The shared
             // slot is `int_arg_idx` (== `fp_arg_idx` under Win64).
@@ -423,7 +443,7 @@ pub fn compile(
                         try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .rbp, stack_disp).slice());
                         try buf.appendSlice(allocator, rbpStoreR64(off, .rax).slice());
                     },
-                    .v128, .funcref, .externref => unreachable, // filtered above
+                    .v128, .funcref, .externref => unreachable, // Win64 v128 / refs filtered above
                 }
                 int_arg_idx += 1;
                 fp_arg_idx += 1;
@@ -449,7 +469,7 @@ pub fn compile(
                         try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .rbp, stack_disp).slice());
                         try buf.appendSlice(allocator, rbpStoreR64(off, .rax).slice());
                     },
-                    .v128, .funcref, .externref => unreachable, // filtered above
+                    .v128, .funcref, .externref => unreachable, // Win64 v128 / refs filtered above
                 }
                 nsaa_idx += 1;
                 if (sysv_int_overflow) int_arg_idx += 1 else fp_arg_idx += 1;
@@ -476,7 +496,20 @@ pub fn compile(
                     fp_arg_idx += 1;
                     if (abi.current_cc == .win64) int_arg_idx += 1;
                 },
-                .v128, .funcref, .externref => unreachable, // filtered above
+                .v128 => {
+                    // §9.9 / 9.9-e-2: SysV v128 in XMM0..XMM7
+                    // (AMD64 ABI §3.2.3 SSE class). Win64 v128
+                    // was rejected at type-check above. Stack-arg
+                    // overflow (fp_arg_idx >= 8) is a follow-up
+                    // chunk; surface UnsupportedOp until then.
+                    if (fp_arg_idx >= abi.current.arg_xmms.len) {
+                        std.debug.print("x86_64/emit: SysV v128 stack-arg overflow not yet supported (param={d})\n", .{p_idx});
+                        return Error.UnsupportedOp;
+                    }
+                    try buf.appendSlice(allocator, rbpStoreXmmV128(off, abi.current.arg_xmms[fp_arg_idx]).slice());
+                    fp_arg_idx += 1;
+                },
+                .funcref, .externref => unreachable, // refs filtered above
             }
         }
     }
@@ -491,8 +524,19 @@ pub fn compile(
         try buf.appendSlice(allocator, inst.encXorRR(.d, .rax, .rax).slice());
         var loc_idx: u32 = num_params;
         while (loc_idx < total_locals) : (loc_idx += 1) {
-            const loc_disp = try localDisp(loc_idx, total_locals, uses_runtime_ptr);
-            try buf.appendSlice(allocator, rbpStoreR64(loc_disp, .rax).slice());
+            const loc_disp = layout.disps[loc_idx];
+            const ty = func.localValType(loc_idx);
+            if (ty == .v128) {
+                // §9.9-e-2: zero-init v128 declared local — write
+                // 16 bytes via two STR XZR (RAX, already zeroed
+                // above). MOVUPS-with-zero would need a const
+                // pool constant; the two MOVs are bench-cost
+                // identical and avoid a pool insertion.
+                try buf.appendSlice(allocator, rbpStoreR64(loc_disp, .rax).slice());
+                try buf.appendSlice(allocator, rbpStoreR64(loc_disp + 8, .rax).slice());
+            } else {
+                try buf.appendSlice(allocator, rbpStoreR64(loc_disp, .rax).slice());
+            }
         }
     }
 
@@ -793,9 +837,9 @@ pub fn compile(
             .@"i64.trunc_f32_u",
             .@"i64.trunc_f64_u",
             => try op_convert.emitFpTruncTrapUnsigned(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.op),
-            .@"local.get" => try emitLocalGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, func, num_params, total_locals, uses_runtime_ptr, ins.payload),
-            .@"local.set" => try emitLocalSet(allocator, &buf, alloc, &pushed_vregs, spill_base_off, func, num_params, total_locals, uses_runtime_ptr, ins.payload),
-            .@"local.tee" => try emitLocalTee(allocator, &buf, alloc, &pushed_vregs, spill_base_off, func, num_params, total_locals, uses_runtime_ptr, ins.payload),
+            .@"local.get" => try emitLocalGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, func, num_params, total_locals, layout.disps, ins.payload),
+            .@"local.set" => try emitLocalSet(allocator, &buf, alloc, &pushed_vregs, spill_base_off, func, num_params, total_locals, layout.disps, ins.payload),
+            .@"local.tee" => try emitLocalTee(allocator, &buf, alloc, &pushed_vregs, spill_base_off, func, num_params, total_locals, layout.disps, ins.payload),
             .@"i32.load",
             .@"i32.load8_s",
             .@"i32.load8_u",
@@ -1614,6 +1658,13 @@ fn localValType(func: *const ZirFunc, num_params: u32, local_idx: u32) zir.ValTy
 /// form encoders for slots beyond i8 range; smaller slots stay
 /// on the disp8 form via `rbpStoreR{32,64}` / `rbpLoadR{32,64}`
 /// auto-helpers that pick form per offset.
+///
+/// §9.9 / 9.9-e-2: layout-aware overload via `localDispLayout`.
+/// The pure-formula form below remains for non-v128 callers
+/// (e.g. test fixtures + scalar emit_test_local sites that
+/// hard-code the `(idx+1)*8` shape). v128-aware emit paths must
+/// route through `localDispLayout(layout, idx, ...)` so the
+/// per-type stride is honoured.
 pub fn localDisp(idx: u32, total_locals: u32, uses_runtime_ptr: bool) Error!i32 {
     if (idx >= total_locals) {
         std.debug.print("x86_64/emit: UnsupportedOp[localDisp-idx>=total_locals] (idx={d}, total={d})\n", .{ idx, total_locals });
@@ -1621,6 +1672,79 @@ pub fn localDisp(idx: u32, total_locals: u32, uses_runtime_ptr: bool) Error!i32 
     }
     const base_off: i32 = if (uses_runtime_ptr) -8 else 0;
     return base_off - @as(i32, @intCast((idx + 1) * 8));
+}
+
+/// §9.9 / 9.9-e-2: per-function local-frame layout. Mirror of
+/// `arm64/emit.zig:LocalLayout` (group-by-type strategy C):
+/// scalars at 8-byte stride in the low part of the locals zone,
+/// v128 at 16-byte stride in the high part. RBP-relative
+/// negative-disp coordinate space (frame grows DOWN from RBP).
+///
+/// `disps[i]` is the RBP-relative negative byte offset for Wasm-
+/// local-index `i` (i.e. the value passed to `MOV [RBP+disp]`).
+/// `total_bytes` is the locals-zone size in bytes (used by frame
+/// sizing). The v128-region disp is the most-negative end of
+/// each v128 slot, 16-byte aligned by construction (the scalar
+/// region's tail rounds up to 16 before v128 slots start).
+const LocalLayout = struct {
+    disps: []i32,
+    total_bytes: u32,
+    v128_count: u32,
+
+    fn deinit(self: *LocalLayout, allocator: Allocator) void {
+        if (self.disps.len != 0) allocator.free(self.disps);
+    }
+};
+
+/// Compute `LocalLayout` per `func.sig.params` + `func.locals` (+
+/// synthetic) in declaration order. Two passes: count scalars vs
+/// v128, then assign disps. Caller passes the `base_off_for_locals`
+/// (= -8 if uses_runtime_ptr else 0) so the helper produces the
+/// final RBP-relative disps directly.
+fn computeLocalLayout(allocator: Allocator, func: *const ZirFunc, base_off_for_locals: i32) Error!LocalLayout {
+    const num_params: u32 = @intCast(func.sig.params.len);
+    const num_locals: u32 = func.totalLocalCount();
+    const total_locals: u32 = num_params + num_locals;
+    if (total_locals == 0) {
+        return .{ .disps = &.{}, .total_bytes = 0, .v128_count = 0 };
+    }
+    const disps = try allocator.alloc(i32, total_locals);
+    errdefer allocator.free(disps);
+
+    var scalar_count: u32 = 0;
+    var v128_count: u32 = 0;
+    var i: u32 = 0;
+    while (i < total_locals) : (i += 1) {
+        if (func.localValType(i) == .v128) v128_count += 1 else scalar_count += 1;
+    }
+
+    const scalar_bytes: u32 = scalar_count * 8;
+    // Scalars sit at the low (closer to RBP) end. v128 region
+    // starts at -(scalar_bytes + 16-aligned padding). Since the
+    // base RBP-relative origin (`base_off_for_locals`) is either
+    // 0 or -8 (uses_runtime_ptr), the v128 region's most-positive
+    // disp is `base_off_for_locals - aligned(scalar_bytes, 16)`.
+    const v128_region_off: u32 = if (v128_count == 0) scalar_bytes else (scalar_bytes + 15) & ~@as(u32, 15);
+    const total_bytes: u32 = v128_region_off + v128_count * 16;
+
+    var scalar_within: u32 = 0;
+    var v128_within: u32 = 0;
+    i = 0;
+    while (i < total_locals) : (i += 1) {
+        if (func.localValType(i) == .v128) {
+            // Each v128 occupies 16 bytes; disps point to the
+            // LOW byte (= the most-negative disp, since
+            // `MOVUPS [RBP+disp]` writes 16 bytes upward from
+            // there).
+            disps[i] = base_off_for_locals - @as(i32, @intCast(v128_region_off + (v128_within + 1) * 16));
+            v128_within += 1;
+        } else {
+            disps[i] = base_off_for_locals - @as(i32, @intCast((scalar_within + 1) * 8));
+            scalar_within += 1;
+        }
+    }
+
+    return .{ .disps = disps, .total_bytes = total_bytes, .v128_count = v128_count };
 }
 
 /// `MOV [RBP + disp], r32` — picks disp8 / disp32 form per `disp`
@@ -1673,6 +1797,21 @@ fn rbpLoadXmmF64(dst: inst.Xmm, disp: i32) inst.EncodedInsn {
     return inst.encLoadXmmF64MemRBPDisp32(dst, disp);
 }
 
+/// `MOVUPS [RBP + disp], xmm` — store form auto-helper (v128).
+/// §9.9 / 9.9-e-2 v128 local-store path. MOVUPS chosen over
+/// MOVAPS because v128 local-slot disps depend on the per-
+/// function layout and aren't guaranteed 16-byte aligned.
+fn rbpStoreXmmV128(disp: i32, src: inst.Xmm) inst.EncodedInsn {
+    if (disp >= -128 and disp <= 127) return inst.encStoreXmmV128MemRBP(@intCast(disp), src);
+    return inst.encStoreXmmV128MemRBPDisp32(disp, src);
+}
+
+/// `MOVUPS xmm, [RBP + disp]` — load form auto-helper (v128).
+fn rbpLoadXmmV128(dst: inst.Xmm, disp: i32) inst.EncodedInsn {
+    if (disp >= -128 and disp <= 127) return inst.encLoadXmmV128MemRBP(dst, @intCast(disp));
+    return inst.encLoadXmmV128MemRBPDisp32(dst, disp);
+}
+
 /// `SUB RSP, imm` — picks imm8 / imm32 form per `imm` range. The
 /// caller passes a positive `u32` byte count; encoders consume an
 /// i32 / i8 (zero-extended in practice — frame_bytes is always
@@ -1700,10 +1839,11 @@ fn emitLocalGet(
     func: *const ZirFunc,
     num_params: u32,
     total_locals: u32,
-    uses_runtime_ptr: bool,
+    disps: []const i32,
     idx: u32,
 ) Error!void {
-    const disp = try localDisp(idx, total_locals, uses_runtime_ptr);
+    if (idx >= total_locals) return Error.UnsupportedOp;
+    const disp = disps[idx];
     const vreg = next_vreg.*;
     next_vreg.* += 1;
     if (vreg >= alloc.slots.len) return Error.SlotOverflow;
@@ -1728,7 +1868,17 @@ fn emitLocalGet(
             try buf.appendSlice(allocator, rbpLoadXmmF64(dst_x, disp).slice());
             try gpr.xmmStoreSpilled(allocator, buf, alloc, spill_base_off, vreg, 0);
         },
-        .v128, .funcref, .externref => |t| {
+        .v128 => {
+            // §9.9-e-2: Wasm spec §3.5.3 + §4.4.5.1 — local.get
+            // copies the local's stored value (16 bytes for v128).
+            // MOVUPS xmm, [RBP+disp] reads the full 128-bit lane
+            // group; xmm spill helpers handle XMM-vs-spill-frame
+            // placement.
+            const dst_x = try gpr.xmmDefSpilled(alloc, vreg, 0);
+            try buf.appendSlice(allocator, rbpLoadXmmV128(dst_x, disp).slice());
+            try gpr.xmmStoreSpilled(allocator, buf, alloc, spill_base_off, vreg, 0);
+        },
+        .funcref, .externref => |t| {
             std.debug.print("x86_64/emit: UnsupportedOp[localGet-type-{s}] (idx={d})\n", .{ @tagName(t), idx });
             return Error.UnsupportedOp;
         },
@@ -1737,7 +1887,7 @@ fn emitLocalGet(
 }
 
 /// `local.set K` — pop the top vreg and store its low 32 bits
-/// into [RBP + localDisp(K)].
+/// into [RBP + disp].
 fn emitLocalSet(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
@@ -1747,10 +1897,11 @@ fn emitLocalSet(
     func: *const ZirFunc,
     num_params: u32,
     total_locals: u32,
-    uses_runtime_ptr: bool,
+    disps: []const i32,
     idx: u32,
 ) Error!void {
-    const disp = try localDisp(idx, total_locals, uses_runtime_ptr);
+    if (idx >= total_locals) return Error.UnsupportedOp;
+    const disp = disps[idx];
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const src_v = pushed_vregs.pop().?;
     switch (localValType(func, num_params, idx)) {
@@ -1770,15 +1921,21 @@ fn emitLocalSet(
             const src_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
             try buf.appendSlice(allocator, rbpStoreXmmF64(disp, src_x).slice());
         },
-        .v128, .funcref, .externref => |t| {
+        .v128 => {
+            // §9.9-e-2: Wasm spec §4.4.5.2 — local.set writes 16
+            // bytes via MOVUPS [RBP+disp], xmm.
+            const src_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
+            try buf.appendSlice(allocator, rbpStoreXmmV128(disp, src_x).slice());
+        },
+        .funcref, .externref => |t| {
             std.debug.print("x86_64/emit: UnsupportedOp[localSet-type-{s}] (idx={d})\n", .{ @tagName(t), idx });
             return Error.UnsupportedOp;
         },
     }
 }
 
-/// `local.tee K` — store the top vreg's low 32 bits into
-/// [RBP + localDisp(K)] WITHOUT popping.
+/// `local.tee K` — store the top vreg's value into [RBP + disp]
+/// WITHOUT popping.
 fn emitLocalTee(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
@@ -1788,10 +1945,11 @@ fn emitLocalTee(
     func: *const ZirFunc,
     num_params: u32,
     total_locals: u32,
-    uses_runtime_ptr: bool,
+    disps: []const i32,
     idx: u32,
 ) Error!void {
-    const disp = try localDisp(idx, total_locals, uses_runtime_ptr);
+    if (idx >= total_locals) return Error.UnsupportedOp;
+    const disp = disps[idx];
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const src_v = pushed_vregs.items[pushed_vregs.items.len - 1];
     switch (localValType(func, num_params, idx)) {
@@ -1811,7 +1969,13 @@ fn emitLocalTee(
             const src_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
             try buf.appendSlice(allocator, rbpStoreXmmF64(disp, src_x).slice());
         },
-        .v128, .funcref, .externref => |t| {
+        .v128 => {
+            // §9.9-e-2: Wasm spec §4.4.5.3 — local.tee mirrors
+            // local.set's 16-byte write.
+            const src_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
+            try buf.appendSlice(allocator, rbpStoreXmmV128(disp, src_x).slice());
+        },
+        .funcref, .externref => |t| {
             std.debug.print("x86_64/emit: UnsupportedOp[localTee-type-{s}] (idx={d})\n", .{ @tagName(t), idx });
             return Error.UnsupportedOp;
         },

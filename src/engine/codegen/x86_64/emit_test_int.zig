@@ -857,15 +857,20 @@ test "compile: function with 16 locals compiles (§9.7 / 7.10-g lifts the i8 cap
     defer deinit(testing.allocator, out);
 }
 
-test "compile: function with v128 param → UnsupportedOp (v128 not yet supported)" {
-    // Chunks 6+7 added i32/i64/f32/f64 params. v128/funcref/
-    // externref remain unsupported until SIMD / refs phases.
+test "compile: function with v128 param → SysV compile-success (§9.9 / 9.9-e-2)" {
+    // §9.9-e-2 lifts the SysV v128 param rejection: v128 args
+    // arrive in XMM0..XMM7 and stash via MOVUPS [RBP+disp_v128].
+    // Win64 v128 stays UnsupportedOp (passed by hidden pointer
+    // per Microsoft x64 ABI §"Argument Passing"); enforced
+    // separately by `abi.current_cc == .win64`.
+    if (abi.current_cc == .win64) return;
     const sig: zir.FuncType = .{ .params = &[_]zir.ValType{.v128}, .results = &.{} };
     var f = ZirFunc.init(0, sig, &.{});
     defer f.deinit(testing.allocator);
     f.liveness = .{ .ranges = &.{} };
     const empty_alloc: regalloc.Allocation = .{ .slots = &.{}, .n_slots = 0 };
-    try testing.expectError(Error.UnsupportedOp, compile(testing.allocator, &f, empty_alloc, &.{}, &.{}, 0));
+    const out = try compile(testing.allocator, &f, empty_alloc, &.{}, &.{}, 0);
+    defer deinit(testing.allocator, out);
 }
 
 test "compile: i32 param + local.get + end — params marshal MOV [rbp-8], esi" {

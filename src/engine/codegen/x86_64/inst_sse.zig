@@ -136,6 +136,66 @@ pub fn encLoadXmmF64MemRBPDisp32(dst: Xmm, disp: i32) EncodedInsn {
     return enc;
 }
 
+/// `MOVUPS [RBP + disp8], xmm` (0F 11 /r) — 128-bit unaligned
+/// packed-single store to a stack slot. §9.9 / 9.9-e-2 v128
+/// local-store path; mirror of `encStoreXmmF32MemRBP` minus the
+/// F3 prefix (no prefix → MOVUPS form per Intel SDM Vol 2A).
+/// Use MOVUPS rather than MOVAPS because the v128 local slot's
+/// RBP-relative offset depends on `localDisp` and is not
+/// guaranteed to be 16-byte aligned.
+pub fn encStoreXmmV128MemRBP(disp: i8, src: Xmm) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (src.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
+    enc.push(0x0F);
+    enc.push(0x11);
+    enc.push(encodeModrm(0b01, src.low3(), 0b101));
+    enc.push(@bitCast(disp));
+    return enc;
+}
+
+/// `MOVUPS xmm, [RBP + disp8]` (0F 10 /r) — 128-bit load.
+pub fn encLoadXmmV128MemRBP(dst: Xmm, disp: i8) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (dst.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
+    enc.push(0x0F);
+    enc.push(0x10);
+    enc.push(encodeModrm(0b01, dst.low3(), 0b101));
+    enc.push(@bitCast(disp));
+    return enc;
+}
+
+/// `MOVUPS [RBP + disp32], xmm` — disp32 form of
+/// `encStoreXmmV128MemRBP`.
+pub fn encStoreXmmV128MemRBPDisp32(disp: i32, src: Xmm) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (src.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
+    enc.push(0x0F);
+    enc.push(0x11);
+    enc.push(encodeModrm(0b10, src.low3(), 0b101));
+    const u: u32 = @bitCast(disp);
+    enc.push(@truncate(u));
+    enc.push(@truncate(u >> 8));
+    enc.push(@truncate(u >> 16));
+    enc.push(@truncate(u >> 24));
+    return enc;
+}
+
+/// `MOVUPS xmm, [RBP + disp32]` — disp32 form of
+/// `encLoadXmmV128MemRBP`.
+pub fn encLoadXmmV128MemRBPDisp32(dst: Xmm, disp: i32) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (dst.extBit() == 1) enc.push(encodeRex(false, 1, 0, 0));
+    enc.push(0x0F);
+    enc.push(0x10);
+    enc.push(encodeModrm(0b10, dst.low3(), 0b101));
+    const u: u32 = @bitCast(disp);
+    enc.push(@truncate(u));
+    enc.push(@truncate(u >> 8));
+    enc.push(@truncate(u >> 16));
+    enc.push(@truncate(u >> 24));
+    return enc;
+}
+
 /// `MOVSS [RSP + disp32], xmm` (F3 0F 11 /r). f32 caller-side
 /// stack arg.
 pub fn encStoreXmmF32MemRSPDisp32(src: Xmm, disp: i32) EncodedInsn {
@@ -2355,4 +2415,24 @@ test "encPaddusb / encPaddusw / encPsubusb / encPsubusw opcode bytes — SSE2 un
 test "encPavgb / encPavgw opcode bytes — SSE2 unsigned avgr" {
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xE0, 0xC1 }, encPavgb(.xmm0, .xmm1).slice());
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xE3, 0xC1 }, encPavgw(.xmm0, .xmm1).slice());
+}
+
+test "encStoreXmmV128MemRBP: [RBP-16], xmm0 — `movups [rbp-16], xmm0` → 0F 11 45 F0" {
+    try testing.expectEqualSlices(u8, &.{ 0x0F, 0x11, 0x45, 0xF0 }, encStoreXmmV128MemRBP(-16, .xmm0).slice());
+}
+
+test "encLoadXmmV128MemRBP: xmm0, [RBP-16] — `movups xmm0, [rbp-16]` → 0F 10 45 F0" {
+    try testing.expectEqualSlices(u8, &.{ 0x0F, 0x10, 0x45, 0xF0 }, encLoadXmmV128MemRBP(.xmm0, -16).slice());
+}
+
+test "encStoreXmmV128MemRBP: [RBP+0], xmm0 — disp8=0 form" {
+    try testing.expectEqualSlices(u8, &.{ 0x0F, 0x11, 0x45, 0x00 }, encStoreXmmV128MemRBP(0, .xmm0).slice());
+}
+
+test "encStoreXmmV128MemRBPDisp32: [RBP-1024], xmm15 — REX.R + disp32" {
+    try testing.expectEqualSlices(u8, &.{ 0x44, 0x0F, 0x11, 0xBD, 0x00, 0xFC, 0xFF, 0xFF }, encStoreXmmV128MemRBPDisp32(-1024, .xmm15).slice());
+}
+
+test "encLoadXmmV128MemRBPDisp32: xmm15, [RBP-1024] — REX.R + disp32" {
+    try testing.expectEqualSlices(u8, &.{ 0x44, 0x0F, 0x10, 0xBD, 0x00, 0xFC, 0xFF, 0xFF }, encLoadXmmV128MemRBPDisp32(.xmm15, -1024).slice());
 }
