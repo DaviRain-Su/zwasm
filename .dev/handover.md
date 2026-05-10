@@ -25,10 +25,9 @@
   §9.5 [x], §9.6 [x], §9.7 [x], §9.8 [x] (absorbed per
   ADR-0044), **§9.9 in-flight**.
 - **Branch**: `zwasm-from-scratch`.
-- **Latest §9.9 landing**: `83217ff5` (§9.9 / 9.9-g-17 —
-  `emitI8x16Shuffle` `dst==rhs` alias fix). OrbStack FAIL:
-  9 → 4 (-5 of 6 simd_lane shuffle variants). See commit
-  body for measured deltas.
+- **Latest §9.9 landing**: `324e5fc3` (§9.9 / 9.9-g-18 —
+  x86_64 explicit-`return` v128 marshal closes simd_lane.140
+  compile gap; D-078 partial). OrbStack FAIL: 4 → 3.
 - **Active row**: §9.9 (still `[ ]`). Closes when fail = skip = 0
   on the 3-host gate per the row's exit criterion.
 
@@ -38,11 +37,13 @@
   1-pop-1-push + lower wiring + ARM64 emit handlers (Step 0
   survey of cranelift NEON bitmask required). Closes
   simd_boolean.0 on both arches.
-- **D-078 (b) x86_64 v128 globals** — investigate why ARM64
-  passes simd_lane.140 compile despite same i32-only globals
-  gap; close on both arches.
-- **D-078 (c) simd_bitwise.17 UnsupportedOp** — likely a
-  single dispatch-arm gap; isolate via grep first chunk.
+- **D-078 (c) simd_bitwise.17 UnsupportedOp** — no x86_64/emit
+  debug print surfaces in /tmp/claude-501/orb-vret.log; the
+  failing op is via op_simd or non-printing rejectUnsupported
+  path. Need to add a print or instrument the runner to
+  identify the exact op. (D-078 (b) x86_64 v128 globals
+  retired — was misdiagnosis; actual gap was return-v128
+  closed at 9.9-g-18.)
 - **D-078 (a) f64x2_extract_lane value mismatch** — JIT-disasm
   spike via debug_jit_auto skill (Mac PASSES, x86_64 only).
 - Aggregate `test-spec-simd` into `test-all` (preventive — surfaces
