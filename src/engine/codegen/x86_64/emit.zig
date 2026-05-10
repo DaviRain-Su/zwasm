@@ -1078,6 +1078,33 @@ pub fn compile(
             // gives 3 distinct physical xmms within the existing
             // fp_spill_stage_xmms reservation. No ABI change.
             .@"i32x4.trunc_sat_f32x4_u" => try op_simd.emitI32x4TruncSatF32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            // §9.7 / 9.7-au: int min/max + saturating arith +
+            // avgr_u (22 ops). All single-instruction native
+            // SSE2/SSE4.1 ops; each wrapper dispatches via
+            // emitV128IntBinop with the matching encoder. No new
+            // helpers; cranelift maps 1-to-1 (`inst.isle:2470-2486`).
+            .@"i8x16.min_s" => try op_simd.emitI8x16MinS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i8x16.min_u" => try op_simd.emitI8x16MinU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i8x16.max_s" => try op_simd.emitI8x16MaxS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i8x16.max_u" => try op_simd.emitI8x16MaxU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.min_s" => try op_simd.emitI16x8MinS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.min_u" => try op_simd.emitI16x8MinU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.max_s" => try op_simd.emitI16x8MaxS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.max_u" => try op_simd.emitI16x8MaxU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.min_s" => try op_simd.emitI32x4MinS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.min_u" => try op_simd.emitI32x4MinU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.max_s" => try op_simd.emitI32x4MaxS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.max_u" => try op_simd.emitI32x4MaxU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i8x16.add_sat_s" => try op_simd.emitI8x16AddSatS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i8x16.add_sat_u" => try op_simd.emitI8x16AddSatU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i8x16.sub_sat_s" => try op_simd.emitI8x16SubSatS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i8x16.sub_sat_u" => try op_simd.emitI8x16SubSatU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.add_sat_s" => try op_simd.emitI16x8AddSatS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.add_sat_u" => try op_simd.emitI16x8AddSatU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.sub_sat_s" => try op_simd.emitI16x8SubSatS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.sub_sat_u" => try op_simd.emitI16x8SubSatU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i8x16.avgr_u" => try op_simd.emitI8x16AvgrU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.avgr_u" => try op_simd.emitI16x8AvgrU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             // §9.7 / 9.7-af: native single-instr multiply-and-add
             // pair. PMULHRSW (SSSE3) implements Q15 multiply-round-
             // saturate exactly per Wasm spec; PMADDWD (SSE2)

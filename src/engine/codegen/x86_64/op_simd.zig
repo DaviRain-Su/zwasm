@@ -2999,6 +2999,126 @@ pub fn emitI32x4TruncSatF32x4U(allocator: Allocator, buf: *std.ArrayList(u8), al
     try pushed_vregs.append(allocator, result_v);
 }
 
+// =============================================================
+// §9.7 / 9.7-au — int min/max + saturating arith + avgr_u (22 ops)
+// All single-instruction native SSE2/SSE4.1 ops. Each wrapper
+// dispatches through emitV128IntBinop (2-in 1-out) with the
+// matching encoder. No new helpers; cranelift maps the same way
+// (`inst.isle:2470-2486`).
+// =============================================================
+
+/// Wasm spec §4.4.4 (i8x16.min_s) — packed signed 8-bit min.
+pub fn emitI8x16MinS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminsb);
+}
+
+/// Wasm spec §4.4.4 (i8x16.min_u) — packed unsigned 8-bit min.
+pub fn emitI8x16MinU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminub);
+}
+
+/// Wasm spec §4.4.4 (i8x16.max_s) — packed signed 8-bit max.
+pub fn emitI8x16MaxS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxsb);
+}
+
+/// Wasm spec §4.4.4 (i8x16.max_u) — packed unsigned 8-bit max.
+pub fn emitI8x16MaxU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxub);
+}
+
+/// Wasm spec §4.4.4 (i16x8.min_s) — packed signed 16-bit min.
+pub fn emitI16x8MinS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminsw);
+}
+
+/// Wasm spec §4.4.4 (i16x8.min_u) — packed unsigned 16-bit min.
+pub fn emitI16x8MinU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminuw);
+}
+
+/// Wasm spec §4.4.4 (i16x8.max_s) — packed signed 16-bit max.
+pub fn emitI16x8MaxS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxsw);
+}
+
+/// Wasm spec §4.4.4 (i16x8.max_u) — packed unsigned 16-bit max.
+pub fn emitI16x8MaxU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxuw);
+}
+
+/// Wasm spec §4.4.4 (i32x4.min_s) — packed signed 32-bit min.
+pub fn emitI32x4MinS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminsd);
+}
+
+/// Wasm spec §4.4.4 (i32x4.min_u) — packed unsigned 32-bit min.
+pub fn emitI32x4MinU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminud);
+}
+
+/// Wasm spec §4.4.4 (i32x4.max_s) — packed signed 32-bit max.
+pub fn emitI32x4MaxS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxsd);
+}
+
+/// Wasm spec §4.4.4 (i32x4.max_u) — packed unsigned 32-bit max.
+pub fn emitI32x4MaxU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxud);
+}
+
+/// Wasm spec §4.4.4 (i8x16.add_sat_s) — packed signed saturating add.
+pub fn emitI8x16AddSatS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPaddsb);
+}
+
+/// Wasm spec §4.4.4 (i8x16.add_sat_u) — packed unsigned saturating add.
+pub fn emitI8x16AddSatU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPaddusb);
+}
+
+/// Wasm spec §4.4.4 (i8x16.sub_sat_s) — packed signed saturating sub.
+pub fn emitI8x16SubSatS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPsubsb);
+}
+
+/// Wasm spec §4.4.4 (i8x16.sub_sat_u) — packed unsigned saturating sub.
+pub fn emitI8x16SubSatU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPsubusb);
+}
+
+/// Wasm spec §4.4.4 (i16x8.add_sat_s) — packed signed saturating add.
+pub fn emitI16x8AddSatS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPaddsw);
+}
+
+/// Wasm spec §4.4.4 (i16x8.add_sat_u) — packed unsigned saturating add.
+pub fn emitI16x8AddSatU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPaddusw);
+}
+
+/// Wasm spec §4.4.4 (i16x8.sub_sat_s) — packed signed saturating sub.
+pub fn emitI16x8SubSatS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPsubsw);
+}
+
+/// Wasm spec §4.4.4 (i16x8.sub_sat_u) — packed unsigned saturating sub.
+pub fn emitI16x8SubSatU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPsubusw);
+}
+
+/// Wasm spec §4.4.4 (i8x16.avgr_u) — packed unsigned 8-bit
+/// rounded average: (a+b+1) >> 1 per lane.
+pub fn emitI8x16AvgrU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPavgb);
+}
+
+/// Wasm spec §4.4.4 (i16x8.avgr_u) — packed unsigned 16-bit
+/// rounded average: (a+b+1) >> 1 per lane.
+pub fn emitI16x8AvgrU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPavgw);
+}
+
 /// Wasm spec §4.4.4 (i16x8.q15mulr_sat_s) — Q15-format multiply
 /// with rounding and saturating clamp to i16. PMULHRSW (SSSE3,
 /// `lower.isle:1287-1294`) implements exactly this in 1

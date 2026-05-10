@@ -1600,6 +1600,96 @@ pub fn encPmaxsd(dst: Xmm, src: Xmm) EncodedInsn {
     return encSsePackedIntBinopExt(0x38, 0x3D, dst, src);
 }
 
+/// `PMINSB xmm, xmm` (66 [REX?] 0F 38 38 /r) — SSE4.1 packed
+/// signed 8-bit min (16 lanes).
+pub fn encPminsb(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinopExt(0x38, 0x38, dst, src);
+}
+
+/// `PMAXSB xmm, xmm` (66 [REX?] 0F 38 3C /r) — SSE4.1 packed
+/// signed 8-bit max (16 lanes).
+pub fn encPmaxsb(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinopExt(0x38, 0x3C, dst, src);
+}
+
+/// `PMINSW xmm, xmm` (66 [REX?] 0F EA /r) — SSE2 packed signed
+/// 16-bit min (8 lanes).
+pub fn encPminsw(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xEA, dst, src);
+}
+
+/// `PMAXSW xmm, xmm` (66 [REX?] 0F EE /r) — SSE2 packed signed
+/// 16-bit max (8 lanes).
+pub fn encPmaxsw(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xEE, dst, src);
+}
+
+/// `PMINSD xmm, xmm` (66 [REX?] 0F 38 39 /r) — SSE4.1 packed
+/// signed 32-bit min (4 lanes).
+pub fn encPminsd(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinopExt(0x38, 0x39, dst, src);
+}
+
+/// `PADDSB xmm, xmm` (66 [REX?] 0F EC /r) — SSE2 packed signed
+/// 8-bit saturating add (16 lanes; clamps to [INT8_MIN, INT8_MAX]).
+pub fn encPaddsb(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xEC, dst, src);
+}
+
+/// `PADDSW xmm, xmm` (66 [REX?] 0F ED /r) — SSE2 packed signed
+/// 16-bit saturating add (8 lanes; clamps to [INT16_MIN, INT16_MAX]).
+pub fn encPaddsw(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xED, dst, src);
+}
+
+/// `PSUBSB xmm, xmm` (66 [REX?] 0F E8 /r) — SSE2 packed signed
+/// 8-bit saturating subtract (16 lanes; clamps to [INT8_MIN, INT8_MAX]).
+pub fn encPsubsb(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xE8, dst, src);
+}
+
+/// `PSUBSW xmm, xmm` (66 [REX?] 0F E9 /r) — SSE2 packed signed
+/// 16-bit saturating subtract (8 lanes; clamps to [INT16_MIN, INT16_MAX]).
+pub fn encPsubsw(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xE9, dst, src);
+}
+
+/// `PADDUSB xmm, xmm` (66 [REX?] 0F DC /r) — SSE2 packed unsigned
+/// 8-bit saturating add (16 lanes; clamps to [0, UINT8_MAX]).
+pub fn encPaddusb(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xDC, dst, src);
+}
+
+/// `PADDUSW xmm, xmm` (66 [REX?] 0F DD /r) — SSE2 packed unsigned
+/// 16-bit saturating add (8 lanes; clamps to [0, UINT16_MAX]).
+pub fn encPaddusw(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xDD, dst, src);
+}
+
+/// `PSUBUSB xmm, xmm` (66 [REX?] 0F D8 /r) — SSE2 packed unsigned
+/// 8-bit saturating subtract (16 lanes; clamps to [0, UINT8_MAX]).
+pub fn encPsubusb(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xD8, dst, src);
+}
+
+/// `PSUBUSW xmm, xmm` (66 [REX?] 0F D9 /r) — SSE2 packed unsigned
+/// 16-bit saturating subtract (8 lanes; clamps to [0, UINT16_MAX]).
+pub fn encPsubusw(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xD9, dst, src);
+}
+
+/// `PAVGB xmm, xmm` (66 [REX?] 0F E0 /r) — SSE2 packed unsigned
+/// 8-bit average-rounded (16 lanes; (a+b+1) >> 1 per lane).
+pub fn encPavgb(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xE0, dst, src);
+}
+
+/// `PAVGW xmm, xmm` (66 [REX?] 0F E3 /r) — SSE2 packed unsigned
+/// 16-bit average-rounded (8 lanes; (a+b+1) >> 1 per lane).
+pub fn encPavgw(dst: Xmm, src: Xmm) EncodedInsn {
+    return encSsePackedIntBinop(0xE3, dst, src);
+}
+
 /// `PMINUD xmm, xmm` (66 [REX?] 0F 38 3B /r) — SSE4.1 packed
 /// unsigned 32-bit min (4 lanes).
 pub fn encPminud(dst: Xmm, src: Xmm) EncodedInsn {
@@ -2187,4 +2277,34 @@ test "encPmaxud: REX.R+B (xmm14, xmm15) — covers spill-stage scratch range" {
     // 66 45 0F 38 3F F7 — REX = 0x40 | R(1<<2) | B(1) = 0x45;
     // ModR/M = 11 110 111 = 0xF7 (mod=11, reg=6 [xmm14 low3], rm=7 [xmm15 low3]).
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x38, 0x3F, 0xF7 }, encPmaxud(.xmm14, .xmm15).slice());
+}
+
+test "encPminsb / encPmaxsb / encPminsd opcode bytes — SSE4.1 signed min/max" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x38, 0xC1 }, encPminsb(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x3C, 0xC1 }, encPmaxsb(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0x38, 0x39, 0xC1 }, encPminsd(.xmm0, .xmm1).slice());
+}
+
+test "encPminsw / encPmaxsw opcode bytes — SSE2 signed 16-bit min/max" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xEA, 0xC1 }, encPminsw(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xEE, 0xC1 }, encPmaxsw(.xmm0, .xmm1).slice());
+}
+
+test "encPaddsb / encPaddsw / encPsubsb / encPsubsw opcode bytes — SSE2 signed sat arith" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xEC, 0xC1 }, encPaddsb(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xED, 0xC1 }, encPaddsw(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xE8, 0xC1 }, encPsubsb(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xE9, 0xC1 }, encPsubsw(.xmm0, .xmm1).slice());
+}
+
+test "encPaddusb / encPaddusw / encPsubusb / encPsubusw opcode bytes — SSE2 unsigned sat arith" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xDC, 0xC1 }, encPaddusb(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xDD, 0xC1 }, encPaddusw(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xD8, 0xC1 }, encPsubusb(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xD9, 0xC1 }, encPsubusw(.xmm0, .xmm1).slice());
+}
+
+test "encPavgb / encPavgw opcode bytes — SSE2 unsigned avgr" {
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xE0, 0xC1 }, encPavgb(.xmm0, .xmm1).slice());
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x0F, 0xE3, 0xC1 }, encPavgw(.xmm0, .xmm1).slice());
 }

@@ -416,6 +416,21 @@ pub const encPminuw = inst_sse.encPminuw;
 pub const encPmaxud = inst_sse.encPmaxud;
 pub const encPminud = inst_sse.encPminud;
 pub const encPmaxsd = inst_sse.encPmaxsd;
+pub const encPminsb = inst_sse.encPminsb;
+pub const encPmaxsb = inst_sse.encPmaxsb;
+pub const encPminsw = inst_sse.encPminsw;
+pub const encPmaxsw = inst_sse.encPmaxsw;
+pub const encPminsd = inst_sse.encPminsd;
+pub const encPaddsb = inst_sse.encPaddsb;
+pub const encPaddsw = inst_sse.encPaddsw;
+pub const encPsubsb = inst_sse.encPsubsb;
+pub const encPsubsw = inst_sse.encPsubsw;
+pub const encPaddusb = inst_sse.encPaddusb;
+pub const encPaddusw = inst_sse.encPaddusw;
+pub const encPsubusb = inst_sse.encPsubusb;
+pub const encPsubusw = inst_sse.encPsubusw;
+pub const encPavgb = inst_sse.encPavgb;
+pub const encPavgw = inst_sse.encPavgw;
 
 // ============================================================
 // Tests
