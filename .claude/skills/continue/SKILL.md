@@ -191,6 +191,41 @@ change between iterations.
    ROADMAP for M3 status. Vague barriers ("later", "TBD") were
    forbidden at file creation; if one slipped in, the audit
    `§F.2` rejects the row.
+5b. **Step 0.5b — Live status check (per active phase)**. When
+   the active phase has a registered live-status script
+   (currently `scripts/p9_simd_status.sh` for §9.9; future
+   phases drop their own as patterns recur per
+   `.claude/rules/no_handover_predictions.md`), run it
+   **before** picking the next sub-chunk:
+
+   ```sh
+   bash scripts/p9_simd_status.sh
+   ```
+
+   The script's output is the authoritative answer to "what
+   is failing right now". If anything in handover.md /
+   debt.md narrative disagrees with the live numbers, trust
+   the script and update the stale doc before starting the
+   per-task TDD loop. The next sub-chunk is picked from
+   handover's `Next candidates` list filtered by what the
+   live evidence actually shows is broken.
+
+   **Why this step exists**: §9.9-g-13 surfaced a drift case
+   where prior handover predicted "16 cmp fails are alias
+   case" but live evidence showed they were `i*x*.ne`
+   family. The chunk's preventive value was real but the
+   target framing was wrong. This step prevents
+   recurrence at the structural level — the rule
+   ([`no_handover_predictions.md`](../../rules/no_handover_predictions.md))
+   forbids future predictions; this step verifies whatever
+   handover *does* claim against live measurement before
+   committing scarce session budget to a chunk.
+
+   When no live-status script exists for the active phase
+   (e.g. structural / refactor phases without a fail-count
+   metric), this step is skipped — and the next chunk that
+   introduces measurable failures should drop the script
+   then, not let handover accumulate predictions about it.
 5a. **Step 0.6 — Hard-gate prep awareness**. When the active
    phase has a registered hard-gate row (per the "Exception —
    hard human-in-loop transition gates" section below) and the

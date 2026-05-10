@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# Live SIMD spec test status for §9.9 — single source of truth for
+# "what's failing right now". Re-run any time; output is always
+# authoritative.
+#
+# This exists because handover.md / debt.md should NOT carry numeric
+# predictions about FAIL counts (per .claude/rules/no_handover_predictions.md);
+# the rule was codified after §9.9-g-13 surfaced a drift case where
+# the prior handover predicted "16 cmp fails are alias-case" but the
+# actual fails were `i*x*.ne` family.
+#
+# Usage:
+#   bash scripts/p9_simd_status.sh            # both hosts
+#   bash scripts/p9_simd_status.sh --orb-only # skip Mac (faster)
+#   bash scripts/p9_simd_status.sh --mac-only # skip OrbStack (no VM needed)
+
+set -uo pipefail
+
+LOG_DIR="${TMPDIR:-/tmp}"
+ORB_LOG="${LOG_DIR}/p9-orb-simd.log"
+MAC_LOG="${LOG_DIR}/p9-mac-simd.log"
+
+want_mac=1
+want_orb=1
+case "${1:-}" in
+  --orb-only) want_mac=0 ;;
+  --mac-only) want_orb=0 ;;
+  -h|--help)
+    sed -n '2,15p' "$0"
+    exit 0 ;;
+  "") ;;
+  *)
+    echo "unknown arg: $1" >&2
+    exit 2 ;;
+esac
+
+# Mac aarch64 host (foreground; cheap if cached).
+if [ "$want_mac" = 1 ]; then
+  echo "=== Mac aarch64 simd_assert (host) ==="
+  zig build test-spec-simd > "$MAC_LOG" 2>&1 || true
+  if grep -E "simd_assert_runner:" "$MAC_LOG" > /dev/null; then
+    grep -E "simd_assert_runner:" "$MAC_LOG"
+  else
+    echo "(runner output not found; tail $MAC_LOG below)"
+    tail -5 "$MAC_LOG"
+  fi
+  echo
+fi
+
+# OrbStack Linux x86_64.
+if [ "$want_orb" = 1 ]; then
+  echo "=== OrbStack Linux x86_64 simd_assert ==="
+  if ! command -v orb > /dev/null; then
+    echo "(orb CLI not on PATH; skipping OrbStack section)"
+  else
+    orb run -m my-ubuntu-amd64 bash -c '
+      cd /Users/shota.508/Documents/MyProducts/zwasm_from_scratch &&
+      zig build test-spec-simd 2>&1
+    ' > "$ORB_LOG" 2>&1 || true
+
+    if grep -E "simd_assert_runner:" "$ORB_LOG" > /dev/null; then
+      grep -E "simd_assert_runner:" "$ORB_LOG"
+    else
+      echo "(runner output not found / aborted; tail $ORB_LOG below)"
+      tail -3 "$ORB_LOG"
+    fi
+    echo
+
+    echo "=== OrbStack FAIL breakdown by manifest ==="
+    grep -E "^FAIL " "$ORB_LOG" | awk '{print $2}' | sed 's/:$//' \
+      | sort | uniq -c | sort -rn
+
+    echo
+    echo "=== Sample FAIL per manifest (1 each) ==="
+    for cat in $(grep -E "^FAIL " "$ORB_LOG" | awk '{print $2}' \
+                 | sed 's/:$//' | sort -u); do
+      grep -m1 "^FAIL  ${cat}" "$ORB_LOG"
+    done
+    echo
+  fi
+fi
+
+# Active `now` debt rows (so the loop knows which to discharge).
+# Truncate column 5 (description) to 1 line for at-a-glance scanning;
+# full body lives in .dev/debt.md.
+echo "=== Currently \`now\` debt rows (one-line summaries) ==="
+awk -F'|' '/^\| D-/ {
+  gsub(/^ +| +$/, "", $4)
+  gsub(/^ +| +$/, "", $2)
+  gsub(/^ +/, "", $5)
+  if ($4 == "now") {
+    desc = $5
+    sub(/\. .*$/, ".", desc)
+    if (length(desc) > 140) desc = substr(desc, 1, 137) "..."
+    print $2 ": " desc
+  }
+}' .dev/debt.md
+
+echo
+echo "Logs: Mac=$MAC_LOG OrbStack=$ORB_LOG"
