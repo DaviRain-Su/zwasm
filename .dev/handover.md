@@ -7,7 +7,7 @@
 
 1. `.dev/handover.md` (this file).
 2. `.dev/ROADMAP.md` §9 Phase Status widget + §9.7 row — Phase 9 active.
-3. `.dev/debt.md` — D-054 + D-055 + 9 other rows.
+3. `.dev/debt.md` — D-055 + 9 `blocked-by:` rows (D-054 closed `b80cca3d`).
 4. `.dev/lessons/INDEX.md` — keyword-grep for the active task domain
    (focus: simd compare ops, x86_64 SSE/PCMPGT idioms, ADR-0041 §5
    baseline rationale).
@@ -16,58 +16,39 @@
 6. `private/notes/p9-9.7-m-survey.md` (gitignored; cranelift recipe +
    adoption data) — only if revisiting the SSE4.2 baseline call.
 
-## Current state — Phase 9 / §9.7 in-flight (9.7-a..ar landed); **D-054 SPIKE FOLLOW-UP NEXT**
+## Current state — Phase 9 / §9.7 in-flight (9.7-a..as landed; D-054 closed); **9.7-at NEXT**
 
-9.7-ar: x86_64 i8x16.shuffle via emit-time derived a-mask/b-mask
-+ PSHUFB-pair + POR-merge (1 op, 7-instr recipe). Closes the
-structural blocker from 9.7-al/am. Total SIMD ops handled: 187.
+9.7-as: D-054 close. SysV x86_64 `frame_unaligned` was missing
+`r15_save_bytes` (8). With outgoing_max_bytes=0 (no shadow
+space), local 0 at [RBP-16] sat BELOW RSP and the next CALL's
+pushed return address clobbered it (the 0xFD1BD386 garbage =
+stack residue). Win64's 32-byte shadow space hid it. Fix is a
+1-line + in emit.zig:278. OrbStack now strict 212/0/20 (was
+211/1/20 with D-054 carry). 187 SIMD ops still handled
+(D-054 close orthogonal to SIMD count).
 
-**SIDE-FINDING (this cycle)**: spike confirmed D-054 OrbStack
-as-loop-broke FAIL is a HOIST PASS BUG (NOT Rosetta artefact) —
-`ZWASM_NO_HOIST=1` makes OrbStack 212/0/20 green. Likely a
-synthetic-local lifetime / SysV-caller-saved-reg interaction
-around `call $dummy`. Updated D-054 with concrete discharge plan.
+**9.7-at NEXT** — `i32x4.trunc_sat_f32x4_u` (1 op, last of 4
+deferred 9.7-ae u-variants). Cranelift recipe needs 3 scratch
+xmms, exceeding zwasm's 2-scratch budget (XMM14/15). Two paths:
+(a) ADR-grade extension to reserve a 3rd scratch xmm
+    (e.g., XMM13). Affects regalloc XMM pool, abi.zig,
+    inst.zig spill-aware machinery — broad change.
+(b) Spill one scratch through stack: emit `MOVUPS [RBP-spill],
+    XMM14` then reuse XMM14 + reload. Adds 4-6 instr per call
+    but no infra change.
+Recommend (b) for one-off use; if more 3-scratch ops arrive,
+reconsider (a).
 
-**9.7-as NEXT** — D-054 root-cause investigation + fix.
-Investigation summary so far: code-read of hoist pass +
-emit's local.set/local.get + SysV vs Win64 abi
-(allocatable_gprs = RBX/R12/R13/R14, all callee-saved on
-both ABIs — so vreg pool is NOT the bug source). Synthetic
-local 0 is at [RBP-16] when uses_runtime_ptr=true; localDisp
-math is correct. RBP non-volatile in both ABIs. So the bug
-is NOT register choice, NOT disp offset, NOT prologue size.
-
-**Action items next cycle (concrete):**
-1. Build a Zig spike at `private/spikes/d054-jit-bytes/`
-   that loads `test/spec/wasm-1.0-assert/unreachable/
-   unreachable.0.wasm`, finds `as-loop-broke` function,
-   compiles via `zwasm.compileWasm`, and dumps the per-
-   function JIT bytes as hex.
-2. Run via `orb run -m my-ubuntu-amd64 zig run …` to get
-   Linux x86_64 bytes. Then run on Mac aarch64 (same code-
-   gen path but different arch) — confirm the bytes are
-   *identical* on Linux x86_64 vs Win x86_64 (windowsmini)
-   to establish whether codegen diverges between ABIs.
-3. If bytes are identical → bug is at execution-time (not
-   codegen); investigate the call/return path for SysV-
-   specific stack effects (e.g., runtime_ptr R15 save/
-   restore around CALL, or ARG marshaling that overwrites
-   a stack region overlapping with [RBP-16]).
-4. If bytes differ → diff the per-ABI emit paths (most
-   likely candidate: shadow-space alloc, or arg marshal
-   stack allocation difference).
-5. Per `.claude/rules/debug_jit.md` Recipe 1 (lldb -b),
-   confirm faulting RIP / stack state on OrbStack.
-
-Subsequent: 9.7-at (i32x4.trunc_sat_f32x4_u — needs 3 scratch
-xmms; ADR-grade scratch-budget extension OR fall back to
-spilling tmp to stack). Phase 7 close-out approaching:
-~1-2 chunks + D-054 fix until 7.13 hard gate.
+Subsequent: §9.7 close-out — backfill SHA pointers per phase-
+boundary procedure, then **§9.7 / 7.13 hard gate** triggers
+(per `.dev/phase8_transition_gate.md`). Loop pauses for
+collaborative review.
 
 ## Open structural debt (pointers — full list in `.dev/debt.md`)
 
-- **D-054** (OrbStack-only as-loop-broke) — Rosetta JIT-emulation
-  artefact; baseline 211/1/20 carried as known.
+- **D-054 CLOSED** (`b80cca3d`) — was OrbStack-only `as-loop-broke`
+  FAIL; root cause was SysV x86_64 frame under-allocation; 1-line
+  fix (`frame_unaligned` += `r15_save_bytes`).
 - **D-055** (x86_64 prologue inject) — blocked-by D-052 prologue
   extract.
 - 9 `blocked-by:` rows: D-007/D-010/D-016/D-018/D-020/D-021/D-022/
@@ -82,5 +63,5 @@ reference) live in git: ADRs 0035-0040, lessons indexed in
 
 **Phase**: Phase 9 (SIMD-128, ADR-0041 — SSE4.2 baseline post-9.7-m).
 §9.5 [x] (ARM64 NEON pt 1), §9.6 [x] (ARM64 NEON pt 2),
-§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..ar landed; D-054 fix or 9.7-as NEXT).
+§9.7 in-flight (x86_64 SSE4.1+SSE4.2; 9.7-a..as landed; D-054 closed; 9.7-at NEXT).
 **Branch**: `zwasm-from-scratch`。
