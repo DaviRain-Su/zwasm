@@ -92,7 +92,7 @@ fn runCorpus(
     var dir = try root.openDir(io, name, .{});
     defer dir.close(io);
 
-    const manifest_bytes = dir.readFileAlloc(io, "manifest.txt", gpa, .limited(1 << 18)) catch |err| {
+    const manifest_bytes = dir.readFileAlloc(io, "manifest.txt", gpa, .limited(1 << 22)) catch |err| {
         try stdout.print("FAIL  {s}: manifest read: {s}\n", .{ name, @errorName(err) });
         failed.* += 1;
         return;

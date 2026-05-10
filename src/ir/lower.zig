@@ -665,6 +665,68 @@ const Lowerer = struct {
             209 => try self.emit(.@"i64x2.sub", 0, 0),
             213 => try self.emit(.@"i64x2.mul", 0, 0),
 
+            // §9.9 / 9.9-g-2: SIMD comparison ops. ZirOps + per-arch
+            // emit dispatch pre-existed; only the lower-side
+            // sub-op→ZirOp wiring was missing. Wasm SIMD spec:
+            //   35..44  i8x16.{eq, ne, lt_s, lt_u, gt_s, gt_u,
+            //                  le_s, le_u, ge_s, ge_u}
+            //   45..54  i16x8.{eq, ne, lt_s, lt_u, gt_s, gt_u,
+            //                  le_s, le_u, ge_s, ge_u}
+            //   55..64  i32x4.{eq, ne, lt_s, lt_u, gt_s, gt_u,
+            //                  le_s, le_u, ge_s, ge_u}
+            //   65..70  f32x4.{eq, ne, lt, gt, le, ge}
+            //   71..76  f64x2.{eq, ne, lt, gt, le, ge}
+            //  214..219 i64x2.{eq, ne, lt_s, gt_s, le_s, ge_s}
+            //           — i64x2 only has signed compare per spec
+            35 => try self.emit(.@"i8x16.eq", 0, 0),
+            36 => try self.emit(.@"i8x16.ne", 0, 0),
+            37 => try self.emit(.@"i8x16.lt_s", 0, 0),
+            38 => try self.emit(.@"i8x16.lt_u", 0, 0),
+            39 => try self.emit(.@"i8x16.gt_s", 0, 0),
+            40 => try self.emit(.@"i8x16.gt_u", 0, 0),
+            41 => try self.emit(.@"i8x16.le_s", 0, 0),
+            42 => try self.emit(.@"i8x16.le_u", 0, 0),
+            43 => try self.emit(.@"i8x16.ge_s", 0, 0),
+            44 => try self.emit(.@"i8x16.ge_u", 0, 0),
+            45 => try self.emit(.@"i16x8.eq", 0, 0),
+            46 => try self.emit(.@"i16x8.ne", 0, 0),
+            47 => try self.emit(.@"i16x8.lt_s", 0, 0),
+            48 => try self.emit(.@"i16x8.lt_u", 0, 0),
+            49 => try self.emit(.@"i16x8.gt_s", 0, 0),
+            50 => try self.emit(.@"i16x8.gt_u", 0, 0),
+            51 => try self.emit(.@"i16x8.le_s", 0, 0),
+            52 => try self.emit(.@"i16x8.le_u", 0, 0),
+            53 => try self.emit(.@"i16x8.ge_s", 0, 0),
+            54 => try self.emit(.@"i16x8.ge_u", 0, 0),
+            55 => try self.emit(.@"i32x4.eq", 0, 0),
+            56 => try self.emit(.@"i32x4.ne", 0, 0),
+            57 => try self.emit(.@"i32x4.lt_s", 0, 0),
+            58 => try self.emit(.@"i32x4.lt_u", 0, 0),
+            59 => try self.emit(.@"i32x4.gt_s", 0, 0),
+            60 => try self.emit(.@"i32x4.gt_u", 0, 0),
+            61 => try self.emit(.@"i32x4.le_s", 0, 0),
+            62 => try self.emit(.@"i32x4.le_u", 0, 0),
+            63 => try self.emit(.@"i32x4.ge_s", 0, 0),
+            64 => try self.emit(.@"i32x4.ge_u", 0, 0),
+            65 => try self.emit(.@"f32x4.eq", 0, 0),
+            66 => try self.emit(.@"f32x4.ne", 0, 0),
+            67 => try self.emit(.@"f32x4.lt", 0, 0),
+            68 => try self.emit(.@"f32x4.gt", 0, 0),
+            69 => try self.emit(.@"f32x4.le", 0, 0),
+            70 => try self.emit(.@"f32x4.ge", 0, 0),
+            71 => try self.emit(.@"f64x2.eq", 0, 0),
+            72 => try self.emit(.@"f64x2.ne", 0, 0),
+            73 => try self.emit(.@"f64x2.lt", 0, 0),
+            74 => try self.emit(.@"f64x2.gt", 0, 0),
+            75 => try self.emit(.@"f64x2.le", 0, 0),
+            76 => try self.emit(.@"f64x2.ge", 0, 0),
+            214 => try self.emit(.@"i64x2.eq", 0, 0),
+            215 => try self.emit(.@"i64x2.ne", 0, 0),
+            216 => try self.emit(.@"i64x2.lt_s", 0, 0),
+            217 => try self.emit(.@"i64x2.gt_s", 0, 0),
+            218 => try self.emit(.@"i64x2.le_s", 0, 0),
+            219 => try self.emit(.@"i64x2.ge_s", 0, 0),
+
             else => return Error.NotImplemented,
         }
     }

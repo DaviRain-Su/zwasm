@@ -75,6 +75,17 @@ NAMES=(
   simd_i16x8_arith
   simd_i8x16_arith
   simd_i64x2_arith
+  # §9.9 / 9.9-g-2: scale corpus to int + FP cmp fixtures + lane.
+  # All cmp opcodes (i*x* eq/ne/lt/gt/le/ge {s,u} + f*x* eq/ne/lt/
+  # gt/le/ge) are dispatched in arm64/emit.zig already. Lane access
+  # (splat/extract_lane/replace_lane for all 6 shapes) is wired.
+  simd_i8x16_cmp
+  simd_i16x8_cmp
+  simd_i32x4_cmp
+  simd_i64x2_cmp
+  simd_f32x4_cmp
+  simd_f64x2_cmp
+  simd_lane
 )
 
 mkdir -p "$DEST"

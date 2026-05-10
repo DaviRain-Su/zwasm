@@ -766,6 +766,11 @@ const Validator = struct {
             213, // §9.9 / 9.9-f-8 — i64x2.mul (handler-side multi-instr synthesis on ARM64 since NEON has no MUL.2D).
             => try self.opSimdBinop(),
 
+            // §9.9 / 9.9-g-2 — i64x2 comparison ops 214..219.
+            // i64x2.{eq, ne, lt_s, gt_s, le_s, ge_s}; spec only
+            // defines signed cmp for the 64-bit lane shape.
+            214, 215, 216, 217, 218, 219 => try self.opSimdBinop(),
+
             // §9.9 / 9.9-f-5 — split FP arith range. Sub-opcodes
             // 224..255 cover f32x4 + f64x2 ops; the 9.4 MVP
             // routed all as binop, miscounting unop arms (abs,
