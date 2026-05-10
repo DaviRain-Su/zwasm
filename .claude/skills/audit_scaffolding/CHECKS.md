@@ -218,6 +218,80 @@ Run `bash scripts/check_adr_history.sh` and parse output:
 - `<backfill>` placeholder older than the current phase →
   `soon` ("backfill SHA at phase boundary").
 
+### F.7 Phase-boundary cohort backfill (added 2026-05-11)
+
+At every Phase-close boundary (the same audit invocation that
+flips `Phase Status` widget for `<N> → DONE`), run
+`scripts/check_adr_history.sh --gate` and **batch-backfill all
+`<backfill>` placeholders** for ADRs whose Revision history rows
+fall within the closing Phase's commit window.
+
+Procedure:
+
+1. `git log --oneline --since=<phase-open-SHA> --until=HEAD --
+   .dev/decisions/` → enumerate the ADR-touching commits in the
+   closing phase.
+2. For each ADR with `<backfill>` rows whose dates intersect
+   that window, replace the placeholder with the corresponding
+   commit SHA (use `git log --diff-filter=A --follow` for
+   creation; `git log` over the file for amendments).
+3. Recheck `check_adr_history.sh --gate` exits 0 after the
+   cohort edit; commit as
+   `chore(adr): SHA backfill — <Phase N close cohort>`.
+
+The 2026-05-11 audit (SUMMARY §4.1 / batch_C) flagged 10/13
+ADRs in the 0028..0040 range with un-backfilled rows;
+phase-boundary cohort runs are the structural fix. Per-amend
+"backfill in the same commit" remains optional — the
+phase-boundary cohort is the safety net, not a replacement.
+
+### F.8 ADR Status lifecycle terminals (added 2026-05-11)
+
+For each ADR, verify Status line matches one of the canonical
+forms enumerated in `decisions/README.md` §"Required structure
+/ Status" (per ADR-0050 D-1):
+
+- `Proposed` / `Accepted` /
+  `Accepted (partial — see D-NNN)` /
+  `Accepted (scope downgraded by NNNN)` /
+  `Superseded by NNNN` /
+  `Closed (Phase X DONE)` /
+  `Demoted to .dev/lessons/<file>` /
+  `Rejected` / `Deprecated`
+
+Findings:
+
+- ADR's referenced Phase is `DONE` per ROADMAP `Phase Status`
+  widget AND ADR Status is plain `Accepted` AND no recent
+  commit (last ~3 phases) touches the ADR file → `soon`
+  ("candidate for `Closed (Phase X DONE)` flip per ADR-0050").
+- Status references a debt ID (D-NNN partial) but the debt row
+  is missing or `Discharged` → `block` (Status drift).
+- Status references a successor ADR (`scope downgraded by`,
+  `Superseded by`) but the named successor ADR's References
+  back-link is missing → `soon`.
+
+### F.9 Skip-ADR effectiveness gate (added 2026-05-11)
+
+Per ADR-0050 D-2 + D-3, every `skip_*.md` ADR must be effective
+via one of: (1) runner-side `skip-adr-<slug>` classification,
+(2) DEFER-mark + runner-side skip-token, (3) manifest exclusion.
+
+Run `bash scripts/check_skip_adrs.sh --gate` (when the D-3
+extension lands) and parse output. Until then, manual audit:
+
+- For each `skip_*.md`, locate the manifest(s) that reference
+  the listed fixtures.
+- Verify: fixture appears with `# DEFER:` / `skip-adr-` prefix
+  OR the runner has hardcoded skip-token recognition for the
+  fixture's reason (per ADR-0029 implementation reality, see
+  D-073) OR the fixture is removed from the active manifest.
+- If none holds, the skip-ADR is **not effective** → `block`
+  (skip-ADR drift) AND the audit must verify a debt row
+  exists naming the structural barrier (typically D-072 for
+  the wast_runtime_runner.zig case; create a fresh debt row
+  if a new skip-ADR surfaces this gap).
+
 ## G. Extended-challenge consistency
 
 ### G.1 Workaround pairings
