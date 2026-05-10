@@ -36,6 +36,7 @@ const std = @import("std");
 
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
+const inst_neon = @import("inst_neon.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
 const label_mod = @import("label.zig");
@@ -405,21 +406,37 @@ pub fn emitEndIntra(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
             //   stage 0 = merge dest (def-then-store)
             //   stage 1 = else-arm operand load
             // For the unspilled common case both calls return home
-            // regs and gprStoreSpilled is a no-op. Pop in reverse
+            // regs and the store helper is a no-op. Pop in reverse
             // (top = else_{N-1}); MOVs are independent so order
             // doesn't matter for correctness, but reverse-pop
             // matches the natural top-of-stack consumption.
+            //
+            // §9.9 / 9.9-f-3: per-slot type dispatch — when the
+            // merge target is v128 (per `alloc.shapeTag`), use the
+            // q* helpers + `encMovV16B` so the full 128 bits move.
+            // Pre-9.9-f-3 behaviour was 32-bit ORR W which silently
+            // truncated v128 merges; surfaced via simd_const.386's
+            // `as-block-retval` / `as-if-then-retval` exports.
             var i: u32 = arity;
             while (i > 0) {
                 i -= 1;
                 const else_result = ctx.pushed_vregs.pop().?;
                 const merge_vreg = lbl.merge_top_vregs[i];
-                const else_reg_v = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, else_result, 1);
-                const merge_reg_v = try gpr.gprDefSpilled(ctx.alloc, merge_vreg, 0);
-                if (merge_reg_v != else_reg_v) {
-                    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(merge_reg_v, 31, else_reg_v));
+                if (ctx.alloc.shapeTag(merge_vreg) == .v128) {
+                    const else_reg_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, else_result, 1);
+                    const merge_reg_v = try gpr.qDefSpilled(ctx.alloc, merge_vreg, 0);
+                    if (merge_reg_v != else_reg_v) {
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(merge_reg_v, else_reg_v));
+                    }
+                    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, merge_vreg, 0);
+                } else {
+                    const else_reg_v = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, else_result, 1);
+                    const merge_reg_v = try gpr.gprDefSpilled(ctx.alloc, merge_vreg, 0);
+                    if (merge_reg_v != else_reg_v) {
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(merge_reg_v, 31, else_reg_v));
+                    }
+                    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, merge_vreg, 0);
                 }
-                try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, merge_vreg, 0);
             }
         }
     }

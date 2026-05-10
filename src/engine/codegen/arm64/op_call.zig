@@ -39,6 +39,7 @@ const std = @import("std");
 
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
+const inst_neon = @import("inst_neon.zig");
 const abi = @import("abi.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
@@ -270,7 +271,30 @@ fn marshalCallArgs(ctx: *EmitCtx, callee_sig: FuncType) Error!void {
                     fp_arg_slot += 1;
                 }
             },
-            .v128, .funcref, .externref => |t| {
+            // §9.9 / 9.9-f-3: caller-side v128 arg marshal per
+            // AAPCS64 §6.4 SIMD calling convention. Mirror of
+            // 9.9-e-1's callee-side param-marshal (V0..V7 are
+            // SIMD arg regs; overflow goes to caller's outgoing
+            // args region with 16-byte alignment per §6.4.2
+            // stage C.4).
+            .v128 => {
+                const vs = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
+                if (fp_arg_slot >= 8) {
+                    // Align stack_arg_idx to even (16-byte) before
+                    // placing v128.
+                    if (stack_arg_idx & 1 != 0) stack_arg_idx += 1;
+                    const off_u: u32 = stack_arg_idx * 8;
+                    if (off_u > 65520) return Error.UnsupportedOp;
+                    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encStrQImm(vs, 31, @intCast(off_u)));
+                    stack_arg_idx += 2;
+                } else {
+                    if (vs != fp_arg_slot) {
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(fp_arg_slot, vs));
+                    }
+                    fp_arg_slot += 1;
+                }
+            },
+            .funcref, .externref => |t| {
                 std.debug.print("arm64/op_call: marshal {s} param unsupported\n", .{@tagName(t)});
                 return Error.UnsupportedOp;
             },
@@ -354,7 +378,24 @@ fn captureCallResult(ctx: *EmitCtx, callee_sig: FuncType) Error!void {
                 try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrDImm(0, 31, @intCast(abs_off)));
             },
         },
-        .v128, .funcref, .externref => return Error.UnsupportedOp,
+        // §9.9 / 9.9-f-3: v128 return value capture. AAPCS64
+        // returns v128 in V0; mirror the f64 path but use the
+        // q* helpers / `encMovV16B` / `encStrQImm`.
+        .v128 => switch (ctx.alloc.slot(result, .fpr)) {
+            .reg => |id| {
+                const vd = abi.fpSlotToReg(id) orelse {
+                    std.debug.print("arm64/op_call: captureCallResult.v128 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, id });
+                    return Error.SlotOverflow;
+                };
+                if (vd != 0) try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(vd, 0));
+            },
+            .spill => |off| {
+                const abs_off: u32 = ctx.spill_base_off + off;
+                if (abs_off > 65520 or (abs_off & 0xF) != 0) return Error.SlotOverflow;
+                try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encStrQImm(0, 31, @intCast(abs_off)));
+            },
+        },
+        .funcref, .externref => return Error.UnsupportedOp,
     }
     try ctx.pushed_vregs.append(ctx.allocator, result);
 }
