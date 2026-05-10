@@ -30,8 +30,22 @@
 Use [`0000_template.md`](./0000_template.md) as the starting point. Every
 ADR has:
 
-- **Status**: Proposed / Accepted / Superseded by NNNN / Deprecated /
-  Demoted to `.dev/lessons/<file>` (see lessons-vs-ADR rule)
+- **Status** (per ADR-0050 lifecycle):
+  - `Proposed` — DRAFT or under debate
+  - `Accepted` — steering active code
+  - `Accepted (partial — see D-NNN)` — landed for one
+    arch/host/surface; named debt row carries the remaining
+    structural barrier
+  - `Accepted (scope downgraded by NNNN)` — design retained;
+    exit criterion narrowed by named ADR
+  - `Superseded by NNNN` — entire decision replaced; new ADR
+    carries the lineage
+  - `Closed (Phase X DONE)` — one-shot decision; phase
+    complete; ADR is historical record (terminal — flip via
+    a new ADR if the problem re-opens)
+  - `Demoted to .dev/lessons/<file>` (see lessons-vs-ADR rule)
+  - `Rejected` — proposal debated and rejected
+  - `Deprecated` — no longer recommended; no replacement
 - **Context**: what motivated the decision (constraints, prior art)
 - **Decision**: what was chosen
 - **Alternatives considered**: what was rejected and why — keep
@@ -51,6 +65,20 @@ ADR has:
   if the canonical number isn't confirmed yet.
 - **Supersede**: do not edit a historical ADR. Add a new one and mark
   the old one `Status: Superseded by NNNN`.
+- **Scope-downgrade** (per ADR-0050): when a successor ADR narrows
+  the original's exit criterion but the design itself stays
+  load-bearing, flip the original to
+  `Accepted (scope downgraded by NNNN)`. The full reframe lives in
+  the successor ADR; the Status line names the relationship so a
+  fresh reader hits it before Revision history.
+- **Mark partial** (per ADR-0050): when a decision lands for one
+  arch/host/surface but a structural barrier blocks completion on
+  another, flip to `Accepted (partial — see D-NNN)` and ensure the
+  named debt row carries the remaining barrier.
+- **Close** (per ADR-0050): when a one-shot Phase-bound decision
+  has fully landed and the Phase is `DONE` per ROADMAP §9, flip to
+  `Closed (Phase X DONE)`. Terminal — if the problem re-opens,
+  write a new ADR (e.g. ADR-0010 → ADR-0011 reopen pattern).
 - **Reject after debate**: also add an ADR with `Status: Proposed →
   Rejected`. Records why the path was not taken.
 - **Amend in place**: allowed for **the same decision evolving with
@@ -171,11 +199,36 @@ Per-fixture skip-ADRs (`skip_<fixture>.md`) document a specific
 test fixture v2 declines to fix in the current phase. They are
 ADRs in the same lifecycle but use a non-numeric filename. See
 existing examples (`skip_embenchen_emcc_env_imports.md`,
-`skip_externref_segment.md`) for the required sections (Fixtures
-covered / What v2 does today / Why v2 declines / What v2 needs
-to fix this honestly / Removal plan / Removal condition /
-References).
+`skip_externref_segment.md`, `skip_text_format_parser.md`) for
+the required sections (Fixtures covered / What v2 does today /
+Why v2 declines / What v2 needs to fix this honestly / Removal
+plan / Removal condition / References).
 
-`scripts/check_skip_adrs.sh` (see debt entry D-013) automates
-the Removal condition check. When that lands, every skip-ADR's
-Removal condition becomes machine-verifiable.
+### Effectiveness gate (per ADR-0050)
+
+A skip-ADR is **effective** only when one of these holds:
+
+1. **Runner-side classification** — the runner that consumes the
+   fixture's manifest classifies it via `skip-adr-<ADR-id>` per
+   ADR-0029 vocabulary, separating `skip-impl` from `skip-adr` in
+   its tally.
+2. **DEFER mark + runner skip-token** — the manifest carries
+   `# DEFER: skip_<slug>` (or `skip-adr-<slug>`) and the runner
+   recognises the token, emitting `SKIP-ADR <slug>` instead of
+   running the fixture.
+3. **Manifest exclusion** — the fixture is removed from the
+   active manifest entirely.
+
+If none holds, the skip-ADR is **not effective** and a debt row
+must be filed naming the structural barrier (typically: "runner
+X has no skip-token machinery"). The example case is
+`skip_embenchen_emcc_env_imports.md` and `skip_externref_segment.md`,
+both ineffective vs `wast_runtime_runner.zig` as of 2026-05-11
+(D-072).
+
+`scripts/check_skip_adrs.sh` currently verifies fixture-path
+existence only (D-013 close). The path-only check passes for
+ineffective skip-ADRs — its `--gate` mode is being extended per
+ADR-0050 D-3 to enforce the three effectiveness paths above.
+Until that lands, manual audit (e.g. the 2026-05-11 audit) is
+the enforcement path.
