@@ -2,8 +2,6 @@
 paths:
   - "src/**/*.zig"
   - "build.zig"
-  - ".dev/ROADMAP.md"
-  - ".dev/handover.md"
 ---
 
 # Textbook survey before implementation

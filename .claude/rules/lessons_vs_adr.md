@@ -34,43 +34,29 @@ Is the artifact load-bearing for downstream code/test/build?
          └─ NO  → Don't write either. Trust git log + the codebase.
 ```
 
-## What ADRs are for
+## Roles, with examples
 
-ADRs codify decisions that:
+The TL;DR table above is the test; the role distinction below
+exists so the examples have a frame.
 
-- Change the rules of the project (rules-of-the-game level).
-- Have alternatives that were rejected with reasons we need to
-  remember.
-- Carry a **removal condition** (when does this decision expire?).
-- Are referenced from ROADMAP / handover / other ADRs / commits.
+**ADRs** codify decisions that change project rules
+(rules-of-the-game level), reject named alternatives, carry a
+removal condition, and get cited from ROADMAP / handover / other
+ADRs / commits. Examples:
+`0014_redesign_and_refactoring_before_phase7.md` (6.K block
+scope), `0015_canonical_debug_toolkit.md`
+(`-Dsanitize=address` + `run-repro`),
+`0016_error_diagnostic_system.md` (Diagnostic threadlocal +
+M1..M5), `skip_*.md` (per-fixture exception ADRs).
 
-Examples in this codebase:
-
-- `0014_redesign_and_refactoring_before_phase7.md` — defines the
-  6.K block scope.
-- `0015_canonical_debug_toolkit.md` — picks `-Dsanitize=address` +
-  `run-repro` step.
-- `0016_error_diagnostic_system.md` — Diagnostic threadlocal +
-  M1/M2/M3/M4/M5 phasing.
-- `skip_*.md` — per-fixture skip-ADRs at §9.6 / 6.J's exception
-  clause.
-
-## What lessons are for
-
-Lessons codify learnings that:
-
-- Future sessions / future developers might re-pay if not warned.
-- Don't justify a load-bearing document.
-- Don't change project rules.
-- Are observational rather than prescriptive.
-
-Examples (seeded today):
-
-- `2026-05-04-beta-funcref-encoding-rejected.md` — "Beauty-driven
-  design loses to 10 years of production experience".
-- `2026-05-04-autoregister-spike-regression.md` — "Mirroring
-  wasmtime harness behaviour requires the underlying validator
-  to already match wasmtime strictness".
+**Lessons** codify observational learnings — re-derivable, not
+load-bearing, framed for "future sessions might re-pay this if
+not warned". Don't change project rules. Examples:
+`2026-05-04-beta-funcref-encoding-rejected.md` ("beauty-driven
+design loses to 10 years of production experience"),
+`2026-05-04-autoregister-spike-regression.md` ("mirroring
+wasmtime harness behaviour needs the underlying validator
+already at wasmtime strictness").
 
 ## Lesson alongside ADR amend (both stay)
 

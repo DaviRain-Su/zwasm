@@ -2,6 +2,7 @@
 paths:
   - ".dev/**/*.md"
   - "docs/**/*.md"
+  - ".claude/**/*.md"
   - "README.md"
   - "CLAUDE.md"
 ---

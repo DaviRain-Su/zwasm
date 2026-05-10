@@ -44,31 +44,35 @@ The following are **not** stop conditions. Encountering any of them
 means you continue the loop. If you find yourself reaching for one
 as justification to stop, you are violating this skill.
 
-- A Phase boundary just closed (§9.<N> → §9.<N+1>).
-- The §9.<N> task table is empty and needs to be opened.
-- A previous task ended with a clean commit and the next task is
-  "big".
-- N commits have already landed in this run (any N).
-- Context fill is high or auto-compact seems imminent (the
-  `PostCompact` hook recovers; see "Auto-compact recovery").
-- An `audit_scaffolding` finding is `block` and the fix is local —
-  fix it inline.
-- An `audit_scaffolding` finding is `block` and the fix is *not*
-  local — file an ADR via §18, queue the fix in handover, then
-  continue.
-- The next task requires an Explore / Plan / Bash subagent — fork
-  one and continue.
+**Phase / scaffolding state** — never a stop on its own:
+
+- A Phase boundary just closed (§9.<N> → §9.<N+1>); the §9.<N>
+  table is empty and needs to be opened; multiple `[x]` flips
+  and SHA backfills are pending.
+- The next task is "big" / N commits have already landed / you
+  produced a long status summary and feel like a good stopping
+  point — these are loop-discipline traps, not stop signals.
+- An `audit_scaffolding` finding is `block` — fix locally if the
+  scope is local, else file an ADR via §18 + queue the fix in
+  handover, then continue. Either path continues the loop.
+
+**Delegation / autonomous mechanics** — handle and continue:
+
+- The next task needs an Explore / Plan / Bash subagent — fork
+  and continue.
 - The next task requires `git push` — push and continue (see
   "Push policy" below).
-- A test gate failed on `windowsmini` because the commit is not
-  yet on `origin/zwasm-from-scratch` — push and re-run, then
-  continue.
-- Multiple `[x]` flips and SHA backfills are pending — batch them
-  and continue.
-- You produced a long status summary and feel like a "good place
-  to stop" — that is exactly when you must keep going.
-- The user has not replied for a long time — that is the **point**
-  of the skill.
+- A `windowsmini` gate failed because the commit isn't yet on
+  `origin/zwasm-from-scratch` — push and re-run, then continue.
+- Context fill is high or auto-compact looks imminent — the
+  `PostCompact` hook recovers state (see "Auto-compact
+  recovery"); never a pre-emptive stop.
+
+**User signal** — silence is not intervention:
+
+- The user has not replied for a long time — that is the
+  **point** of the skill. Only an explicit user message stops
+  the loop.
 
 If you are unsure whether to stop, the answer is **don't**. The user
 will interrupt if needed.
