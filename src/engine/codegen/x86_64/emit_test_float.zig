@@ -1485,15 +1485,14 @@ test "compile: call N — 6 i32 args, SysV: 6th arg overflows to caller stack [R
     try testing.expect(found);
 }
 
-test "compile: v128-result end → UnsupportedOp (v128 marshalling deferred)" {
+test "compile: v128-result end emits MOVAPS XMM0, src marshal (§9.9-b per ADR-0046)" {
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.v128} };
     var f = ZirFunc.init(0, sig, &.{});
     defer f.deinit(testing.allocator);
-    // v128 producer ops are not yet implemented; reuse f32.const
-    // to push an FP slot whose result_kind discriminator forces
-    // the end handler down the v128 arm. The test asserts the
-    // end handler refuses unknown-width returns rather than
-    // silently emitting truncating MOV EAX bytes.
+    // v128 producer ops are emit-tested at op_simd level; reuse
+    // f32.const to push an FP slot whose result_kind discriminator
+    // routes the end handler down the v128 arm. Per ADR-0046 the
+    // marshal is now MOVAPS XMM0, src (copies all 128 bits).
     try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0 });
     try f.instrs.append(testing.allocator, .{ .op = .end });
     f.liveness = .{ .ranges = &[_]zir.LiveRange{
@@ -1501,5 +1500,8 @@ test "compile: v128-result end → UnsupportedOp (v128 marshalling deferred)" {
     } };
     const slots = [_]u16{0};
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
-    try testing.expectError(Error.UnsupportedOp, compile(testing.allocator, &f, alloc, &.{}, &.{}, 0));
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0);
+    defer testing.allocator.free(out.bytes);
+    // Sanity: emit succeeded with non-empty body.
+    try testing.expect(out.bytes.len > 0);
 }

@@ -966,7 +966,20 @@ pub fn compile(
                                 try gpr.writeU32(allocator, &buf, base | (@as(u32, src_vn) << 5));
                             }
                         },
-                        .i32, .i64, .v128, .funcref, .externref => {
+                        .v128 => {
+                            // §9.9-b per ADR-0046: v128 return marshal.
+                            // MOV V0.16B, Vn.16B copies all 128 bits
+                            // (Arm IHI 0055 §C7.2.246, alias of ORR
+                            // V0.16B, Vn.16B, Vn.16B). Use resolveVn
+                            // (no spill staging): fpLoadSpilled uses
+                            // 8-byte stride which would truncate the
+                            // upper 64 bits of a spilled v128.
+                            const src_vn = try gpr.resolveFp(alloc, top_vreg);
+                            if (src_vn != 0) {
+                                try gpr.writeU32(allocator, &buf, inst_neon.encMovV16B(0, src_vn));
+                            }
+                        },
+                        .i32, .i64, .funcref, .externref => {
                             const src_xn = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, top_vreg, 0);
                             if (src_xn != 0) {
                                 try gpr.writeU32(allocator, &buf, encOrrZrIntoX0(src_xn));

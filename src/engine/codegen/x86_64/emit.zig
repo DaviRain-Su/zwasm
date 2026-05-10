@@ -1494,15 +1494,25 @@ pub fn compile(
                                 // MOVAPS XMM0, src_xmm — copies the
                                 // full 128-bit XMM. Sufficient for
                                 // both f32 (low 32 used) and f64
-                                // (low 64 used). Mirrors ARM64's
-                                // FMOV S0/D0 marshal at
-                                // arm64/emit.zig:475-503 but does
-                                // not need width discrimination on
-                                // x86_64.
+                                // (low 64 used).
                                 try buf.appendSlice(allocator, inst.encMovapsXmmXmm(abi.return_xmm, src_x).slice());
                             }
                         },
-                        .v128 => return rejectUnsupported("func-end-return-v128", func.func_idx),
+                        .v128 => {
+                            // §9.9-b per ADR-0046: v128 return
+                            // marshal. MOVAPS XMM0, src_x copies
+                            // all 128 bits per Intel SDM Vol 2A.
+                            // Use resolveXmm (no spill staging):
+                            // xmmLoadSpilled uses MOVSD (8-byte
+                            // stride) which would truncate the
+                            // upper 64 bits of a spilled v128 —
+                            // resolveXmm errors UnsupportedOp on
+                            // spill, surfacing the gap explicitly.
+                            const src_x = try gpr.resolveXmm(alloc, top);
+                            if (src_x != abi.return_xmm) {
+                                try buf.appendSlice(allocator, inst.encMovapsXmmXmm(abi.return_xmm, src_x).slice());
+                            }
+                        },
                     }
                 }
                 // Epilogue: ADD RSP, frame ; POP R15? ; POP RBP ; RET.
