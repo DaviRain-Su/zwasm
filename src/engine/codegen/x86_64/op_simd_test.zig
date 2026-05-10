@@ -2537,6 +2537,61 @@ test "emitI32x4TruncSatF32x4U: 14-instr two-path inline-magic recipe" {
     try testing.expectEqualSlices(u8, expected.items, buf.items);
 }
 
+// D-071 part d (simd_lane shuffle cluster): emitI8x16Shuffle's
+// step 2 `MOVAPS dst, lhs` is unconditional. When regalloc's LIFO
+// slot-reuse aliases `dst == rhs` (LIFO-top free slot after the
+// 2-pop is rhs's slot), the MOVAPS clobbers rhs before step 5's
+// `MOVAPS t2, rhs` reads it; t2 gets dst-after-PSHUFB (= zeros if
+// the shuffle takes nothing from lhs, e.g. v8x16_shuffle-2 that
+// selects all from rhs). The final POR(dst, t2) merges 0 with 0
+// and the result is all-zero. Fix mirrors 9.9-g-11..g-16 (D-066
+// family): stash rhs through XMM7 when `dst == rhs`. Test asserts
+// the MOVAPS xmm7, rhs stash is the FIRST emitted instruction in
+// the alias case.
+test "emitI8x16Shuffle: dst aliases rhs — stash rhs to XMM7 (D-071 part d shuffle cluster)" {
+    var slot_ids = [_]u16{ 0, 1, 1 }; // result vreg 2 → XMM9 (== rhs).
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 3,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    try pushed.append(testing.allocator, 1);
+    var next_vreg: u32 = 2;
+
+    var fixups: std.ArrayList(types.SimdConstFixup) = .empty;
+    defer fixups.deinit(testing.allocator);
+    var extras: std.ArrayList([16]u8) = .empty;
+    defer extras.deinit(testing.allocator);
+
+    // A pseudo-mask selecting all 16 lanes from rhs (indices 16..31).
+    const all_rhs: [16]u8 = [_]u8{ 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 };
+    const consts = [_][16]u8{all_rhs};
+
+    try op_simd.emitI8x16Shuffle(
+        testing.allocator,
+        &buf,
+        alloc,
+        &pushed,
+        &next_vreg,
+        &fixups,
+        &extras,
+        @intCast(consts.len), // simd_consts_base = past const-pool
+        consts[0..],
+        0,
+    );
+
+    const stash = inst.encMovapsXmmXmm(.xmm7, .xmm9).slice();
+    try testing.expect(buf.items.len >= stash.len);
+    try testing.expectEqualSlices(u8, stash, buf.items[0..stash.len]);
+}
+
 test "emitF64x2 Ceil/Floor/Trunc/Nearest: ROUNDPD imm bits 0A/09/0B/08" {
     var slot_ids = [_]u16{ 0, 1 };
     const alloc: regalloc.Allocation = .{

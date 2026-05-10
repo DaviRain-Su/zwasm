@@ -4453,6 +4453,19 @@ pub fn emitI8x16Shuffle(
     const b_idx: u32 = simd_consts_base + @as(u32, @intCast(extra_consts.items.len));
     try extra_consts.append(allocator, b_mask);
 
+    // Aliasing safety (D-071 part d shuffle cluster; D-066 mirror).
+    // Step 2's unconditional `MOVAPS dst, lhs` clobbers rhs when
+    // regalloc's LIFO slot-reuse aliases `dst == rhs`. Step 5
+    // would then read the post-MOVAPS dst (= lhs's bytes shuffled
+    // through PSHUFB by step 3) into t2, producing a wrong merge.
+    // Stash rhs through XMM7 (project SIMD scratch — abi.zig:200
+    // reserves it mirroring arm64's V31).
+    var rhs_for_op = rhs_x;
+    if (dst_x == rhs_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(.xmm7, rhs_x).slice());
+        rhs_for_op = .xmm7;
+    }
+
     // 1: t1 = a_mask.
     try emitConstLoad(allocator, buf, simd_const_fixups, t1, a_idx);
     // 2: dst = lhs.
@@ -4462,8 +4475,8 @@ pub fn emitI8x16Shuffle(
     try buf.appendSlice(allocator, inst.encPshufb(dst_x, t1).slice());
     // 4: t1 = b_mask.
     try emitConstLoad(allocator, buf, simd_const_fixups, t1, b_idx);
-    // 5: t2 = rhs.
-    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(t2, rhs_x).slice());
+    // 5: t2 = rhs (from stash if dst aliased rhs).
+    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(t2, rhs_for_op).slice());
     // 6: PSHUFB t2, t1 → t2 = rhs[b_mask] (zeros where b_mask had
     // bit 7 set = lanes that selected from lhs).
     try buf.appendSlice(allocator, inst.encPshufb(t2, t1).slice());
