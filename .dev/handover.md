@@ -13,47 +13,47 @@
 5. `.dev/decisions/0041_simd_128_design.md` (SSE4.2 baseline post-9.7-m
    amendment).
 
-## Current state — Phase 9 / §9.9 in-flight (9.9-a..c landed); **9.9-d iterate to fail=skip=0 NEXT**
+## Current state — Phase 9 / §9.9 in-flight (9.9-a..c + 9.9-d-1 landed); **9.9-d-2 ARM64 v128.load bounds-check + missing emit handlers NEXT**
 
-9.9-c: populate manifest + JIT execution wiring (this commit).
-`scripts/regen_spec_simd_assert.sh` now drives wast2json on the
-lightweight starter set (simd_address, simd_align, simd_const,
-simd_select). Python distillation packs v128 lanes as little-
-endian `lane_size`-byte ints, concats to 16 bytes, emits as
-32-char lower-hex (lane-0-byte-0 first). `simd_assert_runner.zig`
-gains manifest parsing + JIT execution for `() → {i32, i64,
-f32, f64, v128, ()}` and `(i32) → {i32, v128}` shapes. Two new
-entry helpers in `src/engine/codegen/shared/entry.zig`:
-`callV128NoArgs` and `callV128_i32`, both returning `[16]u8` via
-`@Vector(16, u8)` (lowers to V0 on AAPCS64 / XMM0 on SysV).
-Bad-module flag suppresses cascade FAIL on assert_returns under
-a module that failed compile.
+9.9-d-1 (`c0103336`): discharge BadValType + IR-liveness
+UnsupportedOp clusters. `src/parse/sections.zig:readValType`
+accepts 0x7B → `.v128`; the validator already handled v128 in
+type-stack rules per §9.3, so parse-side gate-keep was the
+residual gap. `src/ir/analysis/liveness.zig:stackEffect` gains
+entries for the full v128 op catalogue (~135 LOC, mirrored
+from `src/engine/codegen/shared/regalloc.zig:382-628` shape-tag
+table + `zir.zig:184-288` ZirOp enum). Mac + OrbStack test-all
+green; windowsmini gate fired after push.
 
-**Initial baseline (Mac aarch64)**: 74 passed, 301 failed,
-478 skipped over 4 manifests. Failure breakdown:
-- 158 `compile: UnsupportedOp` — codegen gaps (v128.load8x8_u
-  family, alignment-hint variants).
-- 143 `compile: BadValType` — validator gaps (likely v128 valtype
-  acceptance in some surface; needs Diagnostic surfacing in 9.9-d).
-- 478 skipped: `v128-param-pending` (deferred to 9.9-e),
-  `directive-assert_malformed-text`, assert_invalid surfacing as
-  `SKIP-VALIDATOR-GAP`, and asserts cascaded under bad modules.
+**Per-manifest after 9.9-d-1 (Mac aarch64)**:
+- simd_address: 2 PASS, 3 FAIL, 44 SKIP
+- simd_select:  0 PASS, 1 FAIL, 6 SKIP
+- simd_const:  60 PASS, 158 FAIL, 232 SKIP
+- simd_align:  SEGV mid-run on simd_align.90/91 v128.load
+  invocation. ARM64 `emitV128Load` (`src/engine/codegen/arm64/
+  op_simd.zig:52`) uses `LDR Q,[X<wn>,#imm]` directly without
+  the bounds-checked vm_base translation that scalar
+  `op_memory.emitMemOp` (and x86_64 `v128MemPrologue` per
+  §9.7-ax) perform — wasm-relative addr is treated as host
+  pointer, dereferences SEGV.
 
-**Next — 9.9-d**: iterate to fail=skip=0 on lightweight set.
-- Discharge `compile: BadValType` cluster — surface valtype name
-  in Diagnostic (extend ADR-0016 / 0028 thread-local) so each
-  rejection is actionable; expected to be one or two validator
-  rules accepting v128 in `(global v128 ...)` / `(func (result
-  v128))` / multi-result shapes.
-- Discharge `compile: UnsupportedOp` cluster — populate op_simd
-  + dispatch_table with v128.load8x8_{s,u}, load16x4_{s,u},
-  load32x2_{s,u}, load{8,16,32,64}_lane, load{8,16,32,64}_zero
-  variants per ADR-0041 §5; ARM64 LD1.* / LD1R.* + x86_64 PMOVSX
-  / MOVDQU + insert/extract.
-- Re-check tracking under bad-module: if root cause clusters
-  expose a structural gap, lift to ADR per `lessons_vs_adr.md`.
-- Add `assert_trap` v128-result path (currently `skip
-  assert_trap-v128-pending`).
+**Next — 9.9-d-2**: bring ARM64 v128.load + v128.store up to
+parity with scalar memOp shape (X28 = vm_base / X27 = mem_limit
+prologue + bounds-check + B.HS trap-stub fixup, then
+`LDR Q, [X28, X16]`). Likely involves either factoring the
+existing `emitMemOp` to be access_size-parametric or a sibling
+`emitV128MemOp` helper. Closes the SEGV blocker.
+
+**Subsequent 9.9-d-N chunks**: ARM64 emit gaps surfaced by
+the residual UnsupportedOp cluster (~35 fails on Mac):
+- v128.load8x8_{s,u} / load16x4_{s,u} / load32x2_{s,u} (extend)
+- v128.load{8,16,32,64}_splat (splat-from-mem)
+- v128.load{8,16,32,64}_lane / store{8,16,32,64}_lane
+- v128.load{32,64}_zero
+- select on v128 (simd_select.0)
+Plus simd_const's 158 value-mismatch fails (likely f32x4/f64x2
+NaN canonicalization or specific lane encodings — analyse case
+by case).
 
 Subsequent §9.9 chunks per ADR-0045:
 - 9.9-e: v128 PARAM marshal per ADR-0046 (unblocks multi-arg
@@ -63,10 +63,6 @@ Subsequent §9.9 chunks per ADR-0045:
 
 After §9.9: §9.10 (smoke benches + gap analysis), §9.11
 (audit + SHA backfill), §9.12 (open Phase 10).
-
-Subsequent: §9.9 (simd.wast wired in, fail=skip=0), §9.10
-(smoke benches + gap analysis), §9.11 (audit + SHA backfill),
-§9.12 (open Phase 10).
 
 ## Open structural debt (pointers — full list in `.dev/debt.md`)
 
@@ -87,6 +83,6 @@ code in `src/ir/coalesce/`, regalloc.zig LIFO free-pool,
 §9.5 [x] (ARM64 NEON pt 1), §9.6 [x] (ARM64 NEON pt 2),
 §9.7 [x] (x86_64 SSE4.1+SSE4.2; 9.7-a..bb landed),
 §9.8 [x] (scope absorbed per ADR-0044),
-§9.9 in-flight (9.9-a..b landed; ADR-0045 + ADR-0046; 9.9-c
-NEXT populate manifest + JIT execution wiring).
+§9.9 in-flight (9.9-a..c + 9.9-d-1 landed; 9.9-d-2 NEXT —
+ARM64 v128.load bounds-check translation).
 **Branch**: `zwasm-from-scratch`。
