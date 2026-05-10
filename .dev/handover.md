@@ -15,28 +15,18 @@
    windowsmini reconciles at Phase boundaries. Effective
    from 2026-05-11.
 
-## Current state — Phase 9 / §9.9 in-flight; **9.9-g-12 NEXT — discharge D-071 (x86_64 IntCmpSigned alias mirror) OR i64x2.mul x86_64 multi-instr debug OR D-067 bitmask family**
+## Current state — Phase 9 / §9.9 in-flight; **9.9-g-13 NEXT — D-071 part (b) IntCmp dst==lhs alias OR i8x16.popcnt PSHUFB recipe debug OR i64x2.mul x86_64 PMULUDQ debug**
 
-9.9-g-11 (`<pending-sha>`): x86_64 SIMD binop/cmp aliasing fix
-(D-066 mirror). Three helpers — `emitV128IntBinop`,
-`emitV128FpCmp`, `emitV128IntCmpUnsigned` — had pre-existing
-"Aliasing dst == rhs is not handled" comments based on a
-regalloc assumption invalidated by ADR-0037 (LIFO free-pool).
-Fix: stash aliased operand through XMM7 (project SIMD scratch
-mirror of arm64 V31). OrbStack simd_assert: **4468 → 114 FAIL
-(-4354, -97%)**. Mac aarch64 unchanged at 11263/4.
-
-**Critical surfaced gap**: `test-spec-simd` was NOT aggregated
-into `test-all`, so x86_64 simd_assert had been silently broken
-since Phase 9 opened. ROADMAP §9.9-c claimed "deferred to
-9.9-g" but never landed. Aggregation should follow once
-residual 114 fails clear (or in parallel with a known-fail
-allowlist).
+9.9-g-12 (`<pending-sha>`): x86_64 `emitV128IntCmpSigned` alias
+fix — same shape as 9.9-g-11's three helpers. OrbStack
+simd_assert: **114 → 79 FAIL (-35)**. Cleared most
+simd_i*x*_cmp residuals (52 → 16). Mac aarch64 unchanged at
+11263/4.
 
 **Mac aarch64 simd_assert_runner**: 11263 PASS / **4 FAIL** /
 2476 SKIP (over 26 manifests; unchanged).
 
-**OrbStack simd_assert_runner**: ~11000 PASS / **114 FAIL** /
+**OrbStack simd_assert_runner**: ~11200 PASS / **79 FAIL** /
 ~varying SKIP. Categorized in D-071.
 
 Residual fails (cross-host):
@@ -44,19 +34,19 @@ Residual fails (cross-host):
 - simd_const.388 BadValType (Mac + OrbStack; parse-side gap).
 - simd_boolean.0 StackUnderflow (D-067 bitmask validator-shape;
   both hosts).
-- OrbStack-only: 114 (D-071: i64x2.mul x86_64 + IntCmpSigned
-  alias mirror + simd_lane × 6 + simd_bitwise.17).
+- OrbStack-only: 79 (D-071 buckets a/b/c/d).
 
-**Next 9.9-g-12 candidates** (in priority order):
-- **D-071 part (b)**: apply XMM7-stash to `emitV128IntCmpSigned`
-  — likely closes simd_i*x*_cmp + simd_i8x16_arith2 (~76 fails).
-  Mechanical mirror of 9.9-g-11. Cheap, predictable.
-- **D-067 bitmask family** — wire validator (1-pop arm) +
-  lower + ARM64 emit synthesis. Requires const-pool extension
-  for emit-time mask vectors OR GPR-detour design choice.
-  Substantial chunk.
-- **D-071 part (a)**: i64x2.mul x86_64 PMULUDQ recipe debug.
-  Bounded but unbounded-time.
+**Next 9.9-g-13 candidates** (in priority order):
+- **D-071 part (c)**: IntCmpSigned/Unsigned `dst == lhs` alias
+  (the `.ge/.le` arms read lhs after dst is overwritten by
+  min/max or PCMPGT). Mechanical fix. Targets ~16 fails.
+- **D-071 part (b)**: `i8x16.popcnt` x86_64 PSHUFB synthesis
+  debug. Targets ~25 fails.
+- **D-071 part (a)**: `i64x2.mul` x86_64 PMULUDQ debug.
+  Targets ~27 fails.
+- **D-067 bitmask family** — wire validator + lower + ARM64
+  emit synthesis (const-pool extension OR GPR-detour design
+  choice).
 - **Aggregate test-spec-simd into test-all** with allowlist
   (preventive — avoids future silent x86_64 simd regressions).
 
@@ -66,8 +56,8 @@ After §9.9 closes: §9.10 (smoke benches + gap analysis), §9.11
 ## Open structural debt (pointers — full list in `.dev/debt.md`)
 
 - **D-063** (simd_const call_indirect v128 Trap) — `now`.
-- **D-071** (x86_64 SIMD residuals: IntCmpSigned alias + i64x2.mul
-  + bitwise.17) — `now`. 114 OrbStack FAILs.
+- **D-071** (x86_64 SIMD residuals: i64x2.mul + i8x16.popcnt
+  + IntCmp dst==lhs alias + lane) — `now`. 79 OrbStack FAILs.
 - **D-070** (bitselect/select alias risk; mirror of D-066) —
   blocked-by 3-v128-param runner dispatch + corpus assertion.
 - **D-065** (arm64/inst_neon.zig 2076 LOC > 2000 cap) —
@@ -88,5 +78,5 @@ code in `src/ir/coalesce/`, regalloc.zig LIFO free-pool,
 §9.7 [x] (x86_64 SSE4.1+SSE4.2; 9.7-a..bb landed),
 §9.8 [x] (scope absorbed per ADR-0044),
 §9.9 in-flight (9.9-a..c + 9.9-d-1..7 + 9.9-e-1..2 +
-9.9-f-1..8 + 9.9-g-1..11 landed; 9.9-g-12 NEXT).
+9.9-f-1..8 + 9.9-g-1..12 landed; 9.9-g-13 NEXT).
 **Branch**: `zwasm-from-scratch`。
