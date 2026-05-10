@@ -98,6 +98,34 @@ pub fn encStrQReg(rt: Vn, rn: Xn, rm: Xn) u32 {
     return 0x3CA06800 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rt);
 }
 
+/// `LD1R {Vt.16B}, [Xn]` — load one byte from `[Xn]` and replicate
+/// to all 16 lanes of Vt. Wasm spec §4.4.6.1 `v128.load8_splat`.
+/// LD1R has no register-offset addressing; the emit pass folds
+/// `vm_base + ea` into Xn first via `ADD X16, X28, X16`.
+/// Encoding base 0x4D40C000 (Q=1, size=00, opcode=110, R=0).
+/// Verified via clang-as: `ld1r {v0.16b}, [x28]` → 0x4D40C380.
+pub fn encLd1r16B(rt: Vn, rn: Xn) u32 {
+    return 0x4D40C000 | (@as(u32, rn) << 5) | @as(u32, rt);
+}
+
+/// `LD1R {Vt.8H}, [Xn]` — `v128.load16_splat` (size=01).
+/// Base 0x4D40C400. Verified `ld1r {v0.8h}, [x28]` → 0x4D40C780.
+pub fn encLd1r8H(rt: Vn, rn: Xn) u32 {
+    return 0x4D40C400 | (@as(u32, rn) << 5) | @as(u32, rt);
+}
+
+/// `LD1R {Vt.4S}, [Xn]` — `v128.load32_splat` (size=10).
+/// Base 0x4D40C800. Verified `ld1r {v0.4s}, [x28]` → 0x4D40CB80.
+pub fn encLd1r4S(rt: Vn, rn: Xn) u32 {
+    return 0x4D40C800 | (@as(u32, rn) << 5) | @as(u32, rt);
+}
+
+/// `LD1R {Vt.2D}, [Xn]` — `v128.load64_splat` (size=11).
+/// Base 0x4D40CC00. Verified `ld1r {v0.2d}, [x28]` → 0x4D40CF80.
+pub fn encLd1r2D(rt: Vn, rn: Xn) u32 {
+    return 0x4D40CC00 | (@as(u32, rn) << 5) | @as(u32, rt);
+}
+
 // =====================================================================
 // Register-to-register moves
 // =====================================================================
@@ -1031,6 +1059,26 @@ test "encStrQReg: Q0, [X28, X16] — `str q0, [x28, x16]` → 0x3CB06B80" {
 
 test "encStrQReg: Q31, [X29, X17] — `str q31, [x29, x17]` → 0x3CB16BBF" {
     try testing.expectEqual(@as(u32, 0x3CB16BBF), encStrQReg(31, 29, 17));
+}
+
+test "encLd1r16B: V0, [X28] — `ld1r {v0.16b}, [x28]` → 0x4D40C380" {
+    try testing.expectEqual(@as(u32, 0x4D40C380), encLd1r16B(0, 28));
+}
+
+test "encLd1r8H: V0, [X28] → 0x4D40C780" {
+    try testing.expectEqual(@as(u32, 0x4D40C780), encLd1r8H(0, 28));
+}
+
+test "encLd1r4S: V0, [X28] → 0x4D40CB80" {
+    try testing.expectEqual(@as(u32, 0x4D40CB80), encLd1r4S(0, 28));
+}
+
+test "encLd1r2D: V0, [X28] → 0x4D40CF80" {
+    try testing.expectEqual(@as(u32, 0x4D40CF80), encLd1r2D(0, 28));
+}
+
+test "encLd1r16B: V31, [X29] — `ld1r {v31.16b}, [x29]` → 0x4D40C3BF" {
+    try testing.expectEqual(@as(u32, 0x4D40C3BF), encLd1r16B(31, 29));
 }
 
 test "encOrrV16B: V0, V1, V2" {

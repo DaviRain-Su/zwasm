@@ -27,6 +27,8 @@
 //! Zone 2 (`src/engine/codegen/arm64/`) — must NOT import
 //! `src/engine/codegen/x86_64/` per ROADMAP §A3.
 
+const std = @import("std");
+
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
 const inst_neon = @import("inst_neon.zig");
@@ -123,6 +125,172 @@ pub fn emitV128Store(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     // future use; address marshalling already consumed gpr stage 0.
     const value_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, value_vreg, 1);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encStrQReg(value_v, 28, 16));
+}
+
+// ============================================================
+// §9.9 / 9.9-d-3 — v128 mem op family (12 ops sharing
+// `v128MemPrologue`).
+//
+// Wasm spec §4.4.6.1 (vector load).
+//
+// All handlers follow one of three tail shapes after the prologue
+// puts the effective wasm address in X16:
+//
+//   load_zero (32 / 64):   `LDR S/D Vd, [X28, X16]`
+//                          (scalar load zero-extends upper lanes).
+//   load_extend (8x8 /     `LDR D Vd, [X28, X16]` then SXTL/UXTL
+//      16x4 / 32x2 ×s/u):  `.<arrangement> Vd, Vd.<half>`.
+//   load_splat (8/16/32/   `ADD X16, X28, X16` (LD1R has no
+//      64):                reg-offset addressing) then
+//                          `LD1R {Vd.<arrangement>}, [X16]`.
+//
+// The bounds-check prologue is uniform (X28=vm_base / X27=mem_limit
+// invariants set up in emit.zig prologue per ADR-0017).
+// ============================================================
+
+/// Shared scaffolding: prologue + final NEON encoding + result
+/// spill flush. The caller supplies the access size and a closure
+/// that emits the final encoding given the destination V register.
+fn emitV128LoadFamily(
+    ctx: *EmitCtx,
+    ins: *const ZirInstr,
+    access_size: u12,
+    comptime emit_tail: fn (allocator: std.mem.Allocator, buf: anytype, result_v: u5) Error!void,
+) Error!void {
+    const addr_vreg = ctx.pushed_vregs.pop().?;
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
+
+    try v128MemPrologue(ctx, addr_vreg, ins.payload, access_size);
+    try emit_tail(ctx.allocator, ctx.buf, result_v);
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
+// ----- load_zero: LDR S/D zero-extends upper lanes. -----
+
+pub fn emitV128Load32Zero(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const tail = struct {
+        fn run(allocator: std.mem.Allocator, buf: anytype, result_v: u5) Error!void {
+            try gpr.writeU32(allocator, buf, inst.encLdrSReg(result_v, 28, 16));
+        }
+    }.run;
+    try emitV128LoadFamily(ctx, ins, 4, tail);
+}
+
+pub fn emitV128Load64Zero(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const tail = struct {
+        fn run(allocator: std.mem.Allocator, buf: anytype, result_v: u5) Error!void {
+            try gpr.writeU32(allocator, buf, inst.encLdrDReg(result_v, 28, 16));
+        }
+    }.run;
+    try emitV128LoadFamily(ctx, ins, 8, tail);
+}
+
+// ----- load_splat: ADD X16, X28, X16 then LD1R from X16. -----
+
+pub fn emitV128Load8Splat(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const tail = struct {
+        fn run(allocator: std.mem.Allocator, buf: anytype, result_v: u5) Error!void {
+            try gpr.writeU32(allocator, buf, inst.encAddReg(16, 28, 16));
+            try gpr.writeU32(allocator, buf, inst_neon.encLd1r16B(result_v, 16));
+        }
+    }.run;
+    try emitV128LoadFamily(ctx, ins, 1, tail);
+}
+
+pub fn emitV128Load16Splat(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const tail = struct {
+        fn run(allocator: std.mem.Allocator, buf: anytype, result_v: u5) Error!void {
+            try gpr.writeU32(allocator, buf, inst.encAddReg(16, 28, 16));
+            try gpr.writeU32(allocator, buf, inst_neon.encLd1r8H(result_v, 16));
+        }
+    }.run;
+    try emitV128LoadFamily(ctx, ins, 2, tail);
+}
+
+pub fn emitV128Load32Splat(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const tail = struct {
+        fn run(allocator: std.mem.Allocator, buf: anytype, result_v: u5) Error!void {
+            try gpr.writeU32(allocator, buf, inst.encAddReg(16, 28, 16));
+            try gpr.writeU32(allocator, buf, inst_neon.encLd1r4S(result_v, 16));
+        }
+    }.run;
+    try emitV128LoadFamily(ctx, ins, 4, tail);
+}
+
+pub fn emitV128Load64Splat(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const tail = struct {
+        fn run(allocator: std.mem.Allocator, buf: anytype, result_v: u5) Error!void {
+            try gpr.writeU32(allocator, buf, inst.encAddReg(16, 28, 16));
+            try gpr.writeU32(allocator, buf, inst_neon.encLd1r2D(result_v, 16));
+        }
+    }.run;
+    try emitV128LoadFamily(ctx, ins, 8, tail);
+}
+
+// ----- load_extend: LDR D + SXTL/UXTL .<arrangement>. -----
+
+pub fn emitV128Load8x8S(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const tail = struct {
+        fn run(allocator: std.mem.Allocator, buf: anytype, result_v: u5) Error!void {
+            try gpr.writeU32(allocator, buf, inst.encLdrDReg(result_v, 28, 16));
+            try gpr.writeU32(allocator, buf, inst_neon.encSxtl8H(result_v, result_v));
+        }
+    }.run;
+    try emitV128LoadFamily(ctx, ins, 8, tail);
+}
+
+pub fn emitV128Load8x8U(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const tail = struct {
+        fn run(allocator: std.mem.Allocator, buf: anytype, result_v: u5) Error!void {
+            try gpr.writeU32(allocator, buf, inst.encLdrDReg(result_v, 28, 16));
+            try gpr.writeU32(allocator, buf, inst_neon.encUxtl8H(result_v, result_v));
+        }
+    }.run;
+    try emitV128LoadFamily(ctx, ins, 8, tail);
+}
+
+pub fn emitV128Load16x4S(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const tail = struct {
+        fn run(allocator: std.mem.Allocator, buf: anytype, result_v: u5) Error!void {
+            try gpr.writeU32(allocator, buf, inst.encLdrDReg(result_v, 28, 16));
+            try gpr.writeU32(allocator, buf, inst_neon.encSxtl4S(result_v, result_v));
+        }
+    }.run;
+    try emitV128LoadFamily(ctx, ins, 8, tail);
+}
+
+pub fn emitV128Load16x4U(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const tail = struct {
+        fn run(allocator: std.mem.Allocator, buf: anytype, result_v: u5) Error!void {
+            try gpr.writeU32(allocator, buf, inst.encLdrDReg(result_v, 28, 16));
+            try gpr.writeU32(allocator, buf, inst_neon.encUxtl4S(result_v, result_v));
+        }
+    }.run;
+    try emitV128LoadFamily(ctx, ins, 8, tail);
+}
+
+pub fn emitV128Load32x2S(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const tail = struct {
+        fn run(allocator: std.mem.Allocator, buf: anytype, result_v: u5) Error!void {
+            try gpr.writeU32(allocator, buf, inst.encLdrDReg(result_v, 28, 16));
+            try gpr.writeU32(allocator, buf, inst_neon.encSxtl2D(result_v, result_v));
+        }
+    }.run;
+    try emitV128LoadFamily(ctx, ins, 8, tail);
+}
+
+pub fn emitV128Load32x2U(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const tail = struct {
+        fn run(allocator: std.mem.Allocator, buf: anytype, result_v: u5) Error!void {
+            try gpr.writeU32(allocator, buf, inst.encLdrDReg(result_v, 28, 16));
+            try gpr.writeU32(allocator, buf, inst_neon.encUxtl2D(result_v, result_v));
+        }
+    }.run;
+    try emitV128LoadFamily(ctx, ins, 8, tail);
 }
 
 /// `i32x4.splat`: pop scalar i32 (Wn), push v128 result (Vd.4S).
