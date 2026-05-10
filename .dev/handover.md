@@ -13,32 +13,33 @@
 5. `.dev/decisions/0041_simd_128_design.md` (SSE4.2 baseline post-9.7-m
    amendment).
 
-## Current state — Phase 9 / §9.9 in-flight; **9.9-f-6 NEXT — scale to next fixture set (simd_f64x2_arith / simd_i32x4_arith / simd_i16x8_arith) — established pattern, mostly already wired**
+## Current state — Phase 9 / §9.9 in-flight; **9.9-f-7 NEXT — wire ARM64 emit dispatch for missing int arith ops (i8x16/i16x8 add/sub already-existing-helpers + new neg/abs/popcnt handlers for all 4 shapes)**
 
-9.9-f-5 (`47cf7d0f`): two structural fixes — (1) validator
-split of 224..255 sub-opcodes into per-op unop / binop arms
-(`opSimdUnop` for 224/225/227/236/237/239); (2) lower-side
-wiring of 22 sub-opcodes for f32x4 / f64x2 arith (224..235 +
-236..247). ARM64 + x86_64 emit handlers already existed from
-§9.6 / §9.7; this chunk closes the dispatch gap.
+9.9-f-6 (`56a4209c`): scaled corpus to f64x2/i32x4/i16x8/
+i8x16/i64x2 arith (5 new fixtures, ~7400 assertions); split
+validator's 94..211 range into per-op unop/binop arms; wired
+19 int-arith sub-opcodes in lower.zig.
 
-**Mac aarch64 simd_assert_runner totals after 9.9-f-5**:
-**1628 PASS** (was 443, +1185) / **4 FAIL** (was 7, -3) /
-908 SKIP. Tests: 1552/1564 Mac, 1536/1564 OrbStack.
+**Mac aarch64 simd_assert_runner totals after 9.9-f-6**:
+**2893 PASS** (was 1628, +1265) / **11 FAIL** (was 4, +7) /
+2176 SKIP. Tests: 1552/1564 Mac, 1536/1564 OrbStack.
 
-Residual 4 fails:
-- 2 simd_const call_indirect Traps (D-063)
-- simd_const.388 BadValType
-- simd_const.389 NotImplemented
+Residual 11 fails:
+- 8× UnsupportedOp from int-arith fixtures (i8x16, i16x8,
+  i32x4 modules .0/.12 + i8x16.9): ARM64 emit dispatch
+  missing for several ops.
+- 2× simd_const call_indirect Trap (D-063)
+- simd_const.388 BadValType (parse-side gap)
 
-**Next — 9.9-f-6**: add `simd_f64x2_arith`, `simd_i32x4_arith`,
-`simd_i16x8_arith`, `simd_i8x16_arith` to NAMES — likely most
-ZirOps + emit handlers already wired (since FP / int arith
-landed in §9.6 / §9.7 across both arches). The validator's
-35..76 binop range (cmp ops) already accepts these via
-`opSimdBinop`. Lower-side opcodes for int arith (sub-opcodes
-~98..174) also need wiring per the same pattern as 9.9-f-5.
-Expect +many-thousand PASS per fixture added.
+**Next — 9.9-f-7**: wire ARM64 emit dispatch + emit handlers:
+- Already-existing helpers needing dispatch: `emitI8x16Add`,
+  `emitI8x16Sub`, `emitI16x8Add`, `emitI16x8Sub`. Add 4
+  dispatch arms in arm64/emit.zig.
+- New emit handlers needed (simple SIMD unops): i8x16.{neg,
+  abs,popcnt}, i16x8.{neg,abs}, i32x4.{neg,abs}, i64x2.{neg,
+  abs}. Use NEG / ABS / CNT NEON instructions; encode + add
+  helpers in inst_neon.zig + op_simd.zig.
+- Likely +many-thousand PASS once dispatch wired.
 
 After §9.9: §9.10 (smoke benches + gap analysis), §9.11
 (audit + SHA backfill), §9.12 (open Phase 10).
@@ -64,6 +65,7 @@ code in `src/ir/coalesce/`, regalloc.zig LIFO free-pool,
 §9.5 [x] (ARM64 NEON pt 1), §9.6 [x] (ARM64 NEON pt 2),
 §9.7 [x] (x86_64 SSE4.1+SSE4.2; 9.7-a..bb landed),
 §9.8 [x] (scope absorbed per ADR-0044),
-§9.9 in-flight (9.9-a..c + 9.9-d-1..7 + 9.9-e-1..2 + 9.9-f-1..5
-landed; 9.9-f-6 NEXT — scale to f64x2/i32x4/i16x8/i8x16 arith).
+§9.9 in-flight (9.9-a..c + 9.9-d-1..7 + 9.9-e-1..2 + 9.9-f-1..6
+landed; 9.9-f-7 NEXT — wire ARM64 emit dispatch + new neg/abs
+handlers).
 **Branch**: `zwasm-from-scratch`。
