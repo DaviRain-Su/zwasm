@@ -955,6 +955,17 @@ fn emitV128ExtractLaneFp(
 
 /// Helper: emit `replace_lane` for FP-input variants. The new-lane
 /// scalar comes from a V register (S/D form low bits), not a GPR.
+///
+/// Aliasing safety (D-066 close): the regalloc's LIFO slot-reuse
+/// can assign `result_vreg` the same physical V-reg as
+/// `new_lane_vreg` (e.g. simd_lane.137's
+/// `extract_lane → replace_lane` chain on `(v128, v128) → v128`
+/// — at the replace_lane site, the extracted-lane vreg dies and
+/// its V-reg is the LIFO-top free slot, which is then handed back
+/// to the new result vreg). The naive sequence MOV result_v ←
+/// src_v then INS would clobber `new_lane_v` before INS reads it.
+/// Stash `new_lane_v` through V31 (popcnt scratch — outside any
+/// popcnt sequence here) when the alias condition holds.
 fn emitV128ReplaceLaneFp(
     ctx: *EmitCtx,
     ins: *const ZirInstr,
@@ -973,11 +984,16 @@ fn emitV128ReplaceLaneFp(
     if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
     const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 1);
 
+    var ins_src: u5 = new_lane_v;
+    if (src_v != result_v and new_lane_v == result_v) {
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(simd_scratch_v, new_lane_v));
+        ins_src = simd_scratch_v;
+    }
     if (src_v != result_v) {
         try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(result_v, src_v));
     }
     const lane = ins.payload & lane_mask;
-    try gpr.writeU32(ctx.allocator, ctx.buf, encoder(result_v, lane, new_lane_v));
+    try gpr.writeU32(ctx.allocator, ctx.buf, encoder(result_v, lane, ins_src));
     try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 1);
     try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
 }
