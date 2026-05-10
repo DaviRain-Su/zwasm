@@ -344,6 +344,49 @@ pub fn callF64_f64(
     return result;
 }
 
+/// Wasm spec §4.4 (function invocation, v128 result) — call a no-
+/// argument JIT function returning v128. Per ADR-0046, both backends
+/// emit the v128 result through the SIMD return register (ARM64 V0,
+/// x86_64 XMM0). `@Vector(16, u8)` lowers to that register on both
+/// AAPCS64 and SysV; we then bit-cast to a flat byte array so callers
+/// (notably `simd_assert_runner`) can compare against manifest hex
+/// tokens directly.
+///
+/// Used by §9.9 / 9.9-c spec-assertion-driver to invoke `()→v128`
+/// fixtures (simd_address / simd_align / simd_const). v128 PARAM
+/// marshal is a separate follow-up (§9.9-e).
+pub fn callV128NoArgs(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+) Error![16]u8 {
+    rt.trap_flag = 0;
+    const Vec = @Vector(16, u8);
+    const Fn = *const fn (rt: *const JitRuntime) callconv(.c) Vec;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return @bitCast(result);
+}
+
+/// Wasm spec §4.4 — `(i32) → v128` invocation. The i32 arg follows
+/// the established W1 / ESI ABI (per `callI32_i32`); the v128 result
+/// uses the SIMD return register (per `callV128NoArgs`).
+pub fn callV128_i32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u32,
+) Error![16]u8 {
+    rt.trap_flag = 0;
+    const Vec = @Vector(16, u8);
+    const Fn = *const fn (rt: *const JitRuntime, a0: u32) callconv(.c) Vec;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, a0);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return @bitCast(result);
+}
+
 // ============================================================
 // Tests
 // ============================================================
