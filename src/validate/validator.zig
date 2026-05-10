@@ -719,13 +719,18 @@ const Validator = struct {
             // any_true (sub 83): pop v128, push i32.
             83 => try self.opSimdAllTrueOrAnyTrue(),
 
+            // §9.7 / 9.7-ba — load_lane × 4, store_lane × 4.
+            // memarg + lane byte; load_lane pops (i32, v128) + pushes
+            // v128; store_lane pops (i32, v128) + pushes nothing.
+            84, 85, 86, 87 => try self.opSimdLoadLane(),
+            88, 89, 90, 91 => try self.opSimdStoreLane(),
+
             // Integer arithmetic (i8x16 / i16x8 / i32x4 / i64x2): binop.
-            // 84..211 covers most int unop/binop variants (excluding
+            // 94..211 covers most int unop/binop variants (excluding
             // 92, 93 which are loads handled above); the spec's exact
             // mapping per sub-opcode is encoded inline by 9.4 when
             // ZirOps are activated. MVP: route the ranges to the
             // generic v128-binop helper.
-            84...91 => try self.opSimdBinop(),
             94...211 => try self.opSimdBinop(),
 
             // Float arithmetic (f32x4 / f64x2): binop.
@@ -782,6 +787,29 @@ const Validator = struct {
         try self.popExpect(src);
         try self.popExpect(.v128);
         try self.pushType(.v128);
+    }
+
+    /// SIMD load_lane: memarg (align uleb + offset uleb) + 1-byte
+    /// lane immediate. Pop v128 + i32 idx; push v128 (modified).
+    fn opSimdLoadLane(self: *Validator) Error!void {
+        _ = try leb128.readUleb128(u32, self.body, &self.pos); // align
+        _ = try leb128.readUleb128(u32, self.body, &self.pos); // offset
+        if (self.pos >= self.body.len) return Error.UnexpectedEnd;
+        self.pos += 1; // lane byte
+        try self.popExpect(.v128);
+        try self.popExpect(.i32);
+        try self.pushType(.v128);
+    }
+
+    /// SIMD store_lane: memarg + 1-byte lane immediate. Pop v128 +
+    /// i32 idx; push nothing.
+    fn opSimdStoreLane(self: *Validator) Error!void {
+        _ = try leb128.readUleb128(u32, self.body, &self.pos); // align
+        _ = try leb128.readUleb128(u32, self.body, &self.pos); // offset
+        if (self.pos >= self.body.len) return Error.UnexpectedEnd;
+        self.pos += 1; // lane byte
+        try self.popExpect(.v128);
+        try self.popExpect(.i32);
     }
 
     /// Generic v128 binop (and/or/xor, integer add/sub/mul, shifts,

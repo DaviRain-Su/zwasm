@@ -238,6 +238,15 @@ pub fn compile(
                 // §9.7 / 9.7-az: load*_zero family (2 ops).
                 .@"v128.load32_zero",
                 .@"v128.load64_zero",
+                // §9.7 / 9.7-ba: load_lane / store_lane × 4 sizes.
+                .@"v128.load8_lane",
+                .@"v128.load16_lane",
+                .@"v128.load32_lane",
+                .@"v128.load64_lane",
+                .@"v128.store8_lane",
+                .@"v128.store16_lane",
+                .@"v128.store32_lane",
+                .@"v128.store64_lane",
                 .@"global.get",
                 .@"global.set",
                 .@"memory.size",
@@ -1151,6 +1160,19 @@ pub fn compile(
             // already zero-extends the upper bits per Intel SDM.
             .@"v128.load32_zero" => try op_simd.emitV128Load32Zero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
             .@"v128.load64_zero" => try op_simd.emitV128Load64Zero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
+            // §9.7 / 9.7-ba: v128.load_lane / store_lane × 4 sizes
+            // (8 ops). payload = memarg.offset; extra = lane byte.
+            // Uses GPR roundtrip (MOVZX/MOV + PINSR/PEXTR reg-form);
+            // store_lane PUSH/POPs RCX around the prologue's RCX-
+            // clobbering LEA.
+            .@"v128.load8_lane" => try op_simd.emitV128Load8Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, ins.extra, func.func_idx),
+            .@"v128.load16_lane" => try op_simd.emitV128Load16Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, ins.extra, func.func_idx),
+            .@"v128.load32_lane" => try op_simd.emitV128Load32Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, ins.extra, func.func_idx),
+            .@"v128.load64_lane" => try op_simd.emitV128Load64Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, ins.extra, func.func_idx),
+            .@"v128.store8_lane" => try op_simd.emitV128Store8Lane(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, ins.payload, ins.extra, func.func_idx),
+            .@"v128.store16_lane" => try op_simd.emitV128Store16Lane(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, ins.payload, ins.extra, func.func_idx),
+            .@"v128.store32_lane" => try op_simd.emitV128Store32Lane(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, ins.payload, ins.extra, func.func_idx),
+            .@"v128.store64_lane" => try op_simd.emitV128Store64Lane(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, ins.payload, ins.extra, func.func_idx),
             // §9.7 / 9.7-af: native single-instr multiply-and-add
             // pair. PMULHRSW (SSSE3) implements Q15 multiply-round-
             // saturate exactly per Wasm spec; PMADDWD (SSE2)

@@ -540,6 +540,160 @@ pub fn emitV128Load64Zero(
     try pushed_vregs.append(allocator, result_v);
 }
 
+// =============================================================
+// §9.7 / 9.7-ba — load_lane / store_lane × {8, 16, 32, 64} (8 ops)
+//
+// Wasm spec §4.4.7. load_lane: load N bytes from mem into a GPR
+// then PINSR{B/W/D/Q} reg-form to merge into the input v128 at
+// the lane immediate. store_lane: PEXTR{B/W/D/Q} reg-form to
+// extract lane to a GPR then store N bytes to mem. payload =
+// offset (memarg); extra = lane byte. RAX/RCX/RDX scratches are
+// pool-excluded (same convention as v128MemPrologue).
+//
+// Cranelift recipes (`lower.isle`) use mem-form PINSR/PEXTR for
+// one fewer instruction; zwasm's GPR-roundtrip path matches the
+// existing 9.7-e..g lane-access shape and avoids new mem-form
+// encoders for this chunk. Performance refinement is §9.10 work.
+// =============================================================
+
+fn v128LoadLane(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    bounds_fixups: *std.ArrayList(u32),
+    spill_base_off: u32,
+    offset: u32,
+    lane: u32,
+    func_idx: u32,
+    comptime access_size: i8,
+) Error!void {
+    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
+    const vec_v = pushed_vregs.pop().?;
+    const idx_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
+    const vec_x = try gpr.resolveXmm(alloc, vec_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+
+    try v128MemPrologue(allocator, buf, bounds_fixups, idx_r, offset, access_size, func_idx);
+
+    // Load value into RCX (zero-extended), then merge dst with vec
+    // and PINSR the new lane.
+    const enc_load = switch (access_size) {
+        1 => inst.encMovzxR32_8MemBaseIdx(.rcx, .rax, .rdx),
+        2 => inst.encMovzxR32_16MemBaseIdx(.rcx, .rax, .rdx),
+        4 => inst.encMovR32FromBaseIdx(.rcx, .rax, .rdx),
+        8 => inst.encMovR64FromBaseIdx(.rcx, .rax, .rdx),
+        else => unreachable,
+    };
+    try buf.appendSlice(allocator, enc_load.slice());
+    if (dst_x != vec_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, vec_x).slice());
+    }
+    const enc_pinsr = switch (access_size) {
+        1 => inst.encPinsrB(dst_x, .rcx, @intCast(lane & 0xF)),
+        2 => inst.encPinsrW(dst_x, .rcx, @intCast(lane & 0x7)),
+        4 => inst.encPinsrD(dst_x, .rcx, @intCast(lane & 0x3)),
+        8 => inst.encPinsrQ(dst_x, .rcx, @intCast(lane & 0x1)),
+        else => unreachable,
+    };
+    try buf.appendSlice(allocator, enc_pinsr.slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
+fn v128StoreLane(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    bounds_fixups: *std.ArrayList(u32),
+    spill_base_off: u32,
+    offset: u32,
+    lane: u32,
+    func_idx: u32,
+    comptime access_size: i8,
+) Error!void {
+    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
+    const vec_v = pushed_vregs.pop().?;
+    const idx_v = pushed_vregs.pop().?;
+
+    const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
+    const vec_x = try gpr.resolveXmm(alloc, vec_v);
+
+    // PEXTR the lane to RCX BEFORE the prologue clobbers RCX.
+    const enc_pextr = switch (access_size) {
+        1 => inst.encPextrB(.rcx, vec_x, @intCast(lane & 0xF)),
+        2 => inst.encPextrW(.rcx, vec_x, @intCast(lane & 0x7)),
+        4 => inst.encPextrD(.rcx, vec_x, @intCast(lane & 0x3)),
+        8 => inst.encPextrQ(.rcx, vec_x, @intCast(lane & 0x1)),
+        else => unreachable,
+    };
+    try buf.appendSlice(allocator, enc_pextr.slice());
+
+    // The prologue uses RCX as a scratch (LEA RCX, [RDX+size]) —
+    // we need to preserve our extracted value across that. Push/pop
+    // RCX around the prologue to keep it. RBX is callee-saved,
+    // could be used as a holder, but the simplest path is the
+    // PUSH/POP pair (2 bytes each).
+    try buf.appendSlice(allocator, inst.encPushR(.rcx).slice());
+    try v128MemPrologue(allocator, buf, bounds_fixups, idx_r, offset, access_size, func_idx);
+    try buf.appendSlice(allocator, inst.encPopR(.rcx).slice());
+
+    const enc_store = switch (access_size) {
+        1 => inst.encStoreR8MemBaseIdx(.rcx, .rax, .rdx),
+        2 => inst.encStoreR16MemBaseIdx(.rcx, .rax, .rdx),
+        4 => inst.encStoreR32MemBaseIdx(.rcx, .rax, .rdx),
+        8 => inst.encStoreR64MemBaseIdx(.rcx, .rax, .rdx),
+        else => unreachable,
+    };
+    try buf.appendSlice(allocator, enc_store.slice());
+}
+
+/// Wasm spec §4.4.7 (v128.load8_lane) — load 1 byte; merge into lane.
+pub fn emitV128Load8Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
+    return v128LoadLane(allocator, buf, alloc, pushed_vregs, next_vreg, bounds_fixups, spill_base_off, offset, lane, func_idx, 1);
+}
+
+/// Wasm spec §4.4.7 (v128.load16_lane) — load 2 bytes; merge into lane.
+pub fn emitV128Load16Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
+    return v128LoadLane(allocator, buf, alloc, pushed_vregs, next_vreg, bounds_fixups, spill_base_off, offset, lane, func_idx, 2);
+}
+
+/// Wasm spec §4.4.7 (v128.load32_lane) — load 4 bytes; merge into lane.
+pub fn emitV128Load32Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
+    return v128LoadLane(allocator, buf, alloc, pushed_vregs, next_vreg, bounds_fixups, spill_base_off, offset, lane, func_idx, 4);
+}
+
+/// Wasm spec §4.4.7 (v128.load64_lane) — load 8 bytes; merge into lane.
+pub fn emitV128Load64Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
+    return v128LoadLane(allocator, buf, alloc, pushed_vregs, next_vreg, bounds_fixups, spill_base_off, offset, lane, func_idx, 8);
+}
+
+/// Wasm spec §4.4.7 (v128.store8_lane) — extract lane; store 1 byte.
+pub fn emitV128Store8Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
+    return v128StoreLane(allocator, buf, alloc, pushed_vregs, bounds_fixups, spill_base_off, offset, lane, func_idx, 1);
+}
+
+/// Wasm spec §4.4.7 (v128.store16_lane) — extract lane; store 2 bytes.
+pub fn emitV128Store16Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
+    return v128StoreLane(allocator, buf, alloc, pushed_vregs, bounds_fixups, spill_base_off, offset, lane, func_idx, 2);
+}
+
+/// Wasm spec §4.4.7 (v128.store32_lane) — extract lane; store 4 bytes.
+pub fn emitV128Store32Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
+    return v128StoreLane(allocator, buf, alloc, pushed_vregs, bounds_fixups, spill_base_off, offset, lane, func_idx, 4);
+}
+
+/// Wasm spec §4.4.7 (v128.store64_lane) — extract lane; store 8 bytes.
+pub fn emitV128Store64Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
+    return v128StoreLane(allocator, buf, alloc, pushed_vregs, bounds_fixups, spill_base_off, offset, lane, func_idx, 8);
+}
+
 /// Wasm spec §4.4.3 (i64x2.extract_lane <imm>) — pop v128, push
 /// scalar i64 = the 64-bit lane at the immediate index. Single
 /// `PEXTRQ r64, xmm, imm8` (SSE4.1 REX.W=1; lane is u1 since

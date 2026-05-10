@@ -518,6 +518,19 @@ const Lowerer = struct {
             92 => try self.emitMemarg(.@"v128.load32_zero"),
             93 => try self.emitMemarg(.@"v128.load64_zero"),
 
+            // §9.7 / 9.7-ba — load_lane × 4, store_lane × 4. Memarg +
+            // 1-byte lane immediate. payload = offset; extra = lane.
+            // align is dropped (unused in emit, validator already
+            // consumed it for type-stack tracking).
+            84 => try self.emitMemargLane(.@"v128.load8_lane"),
+            85 => try self.emitMemargLane(.@"v128.load16_lane"),
+            86 => try self.emitMemargLane(.@"v128.load32_lane"),
+            87 => try self.emitMemargLane(.@"v128.load64_lane"),
+            88 => try self.emitMemargLane(.@"v128.store8_lane"),
+            89 => try self.emitMemargLane(.@"v128.store16_lane"),
+            90 => try self.emitMemargLane(.@"v128.store32_lane"),
+            91 => try self.emitMemargLane(.@"v128.store64_lane"),
+
             12 => {
                 // v128.const: 16 immediate bytes. Per ADR-0042, copy
                 // into per-function simd_consts pool; payload stores
@@ -609,6 +622,18 @@ const Lowerer = struct {
         const align_arg = try leb128.readUleb128(u32, self.body, &self.pos);
         const offset = try leb128.readUleb128(u32, self.body, &self.pos);
         try self.emit(op, offset, align_arg);
+    }
+
+    /// memarg+lane op (load_lane / store_lane): payload = offset,
+    /// extra = lane byte. align is dropped (unused in emit; the
+    /// validator consumed it for type-stack tracking).
+    fn emitMemargLane(self: *Lowerer, op: ZirOp) Error!void {
+        _ = try leb128.readUleb128(u32, self.body, &self.pos); // align
+        const offset = try leb128.readUleb128(u32, self.body, &self.pos);
+        if (self.pos >= self.body.len) return Error.UnexpectedEnd;
+        const lane = self.body[self.pos];
+        self.pos += 1;
+        try self.emit(op, offset, lane);
     }
 
     /// memory.size / memory.grow: must be followed by reserved 0x00 byte.

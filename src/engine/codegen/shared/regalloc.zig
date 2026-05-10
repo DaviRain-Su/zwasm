@@ -395,6 +395,11 @@ pub fn populateShapeTags(allocator: Allocator, func: *const ZirFunc, n_vregs: us
             .@"v128.load64_splat",
             .@"v128.load32_zero",
             .@"v128.load64_zero",
+            // §9.7 / 9.7-ba — load_lane: pop idx + v128, push merged v128.
+            .@"v128.load8_lane",
+            .@"v128.load16_lane",
+            .@"v128.load32_lane",
+            .@"v128.load64_lane",
             .@"v128.not",
             .@"v128.and",
             .@"v128.or",
