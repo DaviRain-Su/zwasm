@@ -634,6 +634,36 @@ const Lowerer = struct {
             245 => try self.emit(.@"f64x2.max", 0, 0),
             246 => try self.emit(.@"f64x2.pmin", 0, 0),
             247 => try self.emit(.@"f64x2.pmax", 0, 0),
+            // §9.9 / 9.9-f-6: int arith (i8x16 / i16x8 / i32x4 /
+            // i64x2). Sub-opcodes per Wasm SIMD spec:
+            //   96..98 / 110..113: i8x16 abs/neg/popcnt + add/sub
+            //   128..149: i16x8 abs/neg/q15mulr/all_true/bitmask
+            //             /extend_*/add/add_sat/sub/sub_sat/mul
+            //   160..182: i32x4 abs/neg/all_true/bitmask/extend_*
+            //             /add/sub/mul/min/max/dot
+            //   192..213: i64x2 abs/neg/all_true/bitmask/extend_*
+            //             /shl/shr/add/sub/mul
+            // ZirOps + emit handlers exist from 9.5..9.7; this just
+            // closes the lower-side dispatch.
+            96 => try self.emit(.@"i8x16.abs", 0, 0),
+            97 => try self.emit(.@"i8x16.neg", 0, 0),
+            98 => try self.emit(.@"i8x16.popcnt", 0, 0),
+            110 => try self.emit(.@"i8x16.add", 0, 0),
+            113 => try self.emit(.@"i8x16.sub", 0, 0),
+            128 => try self.emit(.@"i16x8.abs", 0, 0),
+            129 => try self.emit(.@"i16x8.neg", 0, 0),
+            142 => try self.emit(.@"i16x8.add", 0, 0),
+            145 => try self.emit(.@"i16x8.sub", 0, 0),
+            149 => try self.emit(.@"i16x8.mul", 0, 0),
+            160 => try self.emit(.@"i32x4.abs", 0, 0),
+            161 => try self.emit(.@"i32x4.neg", 0, 0),
+            177 => try self.emit(.@"i32x4.sub", 0, 0),
+            181 => try self.emit(.@"i32x4.mul", 0, 0),
+            192 => try self.emit(.@"i64x2.abs", 0, 0),
+            193 => try self.emit(.@"i64x2.neg", 0, 0),
+            206 => try self.emit(.@"i64x2.add", 0, 0),
+            209 => try self.emit(.@"i64x2.sub", 0, 0),
+            213 => try self.emit(.@"i64x2.mul", 0, 0),
 
             else => return Error.NotImplemented,
         }

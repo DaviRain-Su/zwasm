@@ -728,13 +728,42 @@ const Validator = struct {
             84, 85, 86, 87 => try self.opSimdLoadLane(),
             88, 89, 90, 91 => try self.opSimdStoreLane(),
 
-            // Integer arithmetic (i8x16 / i16x8 / i32x4 / i64x2): binop.
-            // 94..211 covers most int unop/binop variants (excluding
-            // 92, 93 which are loads handled above); the spec's exact
-            // mapping per sub-opcode is encoded inline by 9.4 when
-            // ZirOps are activated. MVP: route the ranges to the
-            // generic v128-binop helper.
-            94...211 => try self.opSimdBinop(),
+            // §9.9 / 9.9-f-6 — int arith range (94..211). Split out
+            // unop arms to fix StackUnderflow for `i*.neg / abs /
+            // popcnt / extend_low/high / extadd_pairwise_*` (all
+            // pop 1 v128, push 1 v128). Per Wasm SIMD spec opcode
+            // table:
+            //   96/97/98 i8x16.{abs,neg,popcnt}
+            //   124/125 i16x8.extadd_pairwise_i8x16_{s,u}
+            //   126/127 i32x4.extadd_pairwise_i16x8_{s,u}
+            //   128/129 i16x8.{abs,neg}
+            //   134..137 i16x8.extend_{low,high}_i8x16_{s,u}
+            //   160/161 i32x4.{abs,neg}
+            //   166..169 i32x4.extend_{low,high}_i16x8_{s,u}
+            //   192/193 i64x2.{abs,neg}
+            //   199..202 i64x2.extend_{low,high}_i32x4_{s,u}
+            96, 97, 98,
+            124, 125, 126, 127,
+            128, 129,
+            134, 135, 136, 137,
+            160, 161,
+            166, 167, 168, 169,
+            192, 193,
+            199, 200, 201, 202,
+            => try self.opSimdUnop(),
+            // Everything else in 94..211 stays binop (cmp / arith /
+            // shifts / saturated arith / dot / extmul / etc.).
+            94, 95, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111,
+            112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123,
+            130, 131, 132, 133,
+            138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149,
+            150, 151, 152, 153, 154, 155, 156, 157, 158, 159,
+            162, 163, 164, 165,
+            170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183,
+            184, 185, 186, 187, 188, 189, 190, 191,
+            194, 195, 196, 197, 198,
+            203, 204, 205, 206, 207, 208, 209, 210, 211,
+            => try self.opSimdBinop(),
 
             // §9.9 / 9.9-f-5 — split FP arith range. Sub-opcodes
             // 224..255 cover f32x4 + f64x2 ops; the 9.4 MVP

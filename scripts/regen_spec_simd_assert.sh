@@ -67,6 +67,14 @@ NAMES=(
   # Shapes: (v128, v128) → v128 (add/sub/mul/div), (v128) → v128
   # (neg/sqrt). Float ops already wired in 9.6/9.7 emit chunks.
   simd_f32x4_arith
+  # §9.9 / 9.9-f-6: scale to f64x2 + int arith fixtures.
+  # Same shapes as f32x4; ZirOps + emit handlers exist from
+  # 9.5..9.7 cycles; lower-side wiring lands per chunk.
+  simd_f64x2_arith
+  simd_i32x4_arith
+  simd_i16x8_arith
+  simd_i8x16_arith
+  simd_i64x2_arith
 )
 
 mkdir -p "$DEST"
