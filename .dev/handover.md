@@ -13,38 +13,43 @@
 5. `.dev/decisions/0041_simd_128_design.md` (SSE4.2 baseline post-9.7-m
    amendment).
 
-## Current state — Phase 9 / §9.9 in-flight; **9.9-d-5 NEXT — bundle ARM64 select_v128 + v128.load_lane / v128.store_lane (9 ops) + investigate residual 21 value-mismatches**
+## Current state — Phase 9 / §9.9 in-flight; **9.9-d-6 NEXT — populateShapeTags vreg-numbering gap (D-061) so v128 select / lane mem dispatch reaches new emit handlers from any function shape**
 
-9.9-d-4 (`3aaed99f`): fix arm64 function-level `end` handler's
-v128 return marshal (was missed in 9.9-b). The `.return` op
-handler had the correct `.v128 →` arm but the function-level
-`.end` handler classified v128 as `is_fp = false` and routed
-through the GPR path. Spike via debug prints in the runner +
-disassembling the JIT body confirmed `MOV X0, Xn` was being
-emitted instead of `MOV V0.16B, Vn.16B`. Lesson:
-[`fn-end-vs-return-parallel-handlers`](lessons/2026-05-10-fn-end-vs-return-parallel-handlers.md).
+9.9-d-5 (`618f621d`): ARM64 v128 select + 8 lane mem handlers
+(`v128.{load,store}{8,16,32,64}_lane`) added. New encoders
+`encCsetmX` (X-form CSETM) + `encDupGen2D` (DUP V.2D from X)
+verified against clang-as. The 8 INS/UMOV/scalar load-store
+encoders for lane mem already existed. Per-arch divergence
+(ARM64 prologue → UMOV → STR vs x86_64 PEXTR-before-prologue)
+documented in handler comments.
 
-**Mac aarch64 simd_assert_runner totals after 9.9-d-4**:
-62 → **226 PASS** / 200 → **36 FAIL** / 296 SKIP. PASS +164,
-FAIL -164.
+**Mac aarch64 simd_assert_runner totals after 9.9-d-5**:
+226 PASS / 36 FAIL / 296 SKIP — **unchanged vs 9.9-d-4**. The
+new emit handlers are wired but unreachable for the
+`simd_select.0` fixture today because `populateShapeTags`
+returns null when no SIMD ops appear in the function body —
+bare `local.get v128 / select` therefore routes through the
+.scalar branch. Filed as **D-061**.
 
-Residual 36 fails:
-- 3 compile UnsupportedOp — select_v128 + load_lane / store_lane.
-- 21 value-mismatch (`got v128`) — small enough to inspect
-  case-by-case after 9.9-d-5 lands the missing emit handlers
-  (some may be unblocked by select_v128 wiring; others likely
-  FP NaN canonicalization).
+Residual 36 fails (same as 9.9-d-4):
+- 3 compile UnsupportedOp — `simd_select.0` (D-061), `simd_const.387`
+  (local.tee with v128 type — separate emit gap), `simd_align.90`.
+- 21 value-mismatch (`got v128`) — defer to 9.9-d-7.
 - 3 small validator surfaces (BadBlockType / BadValType /
   NotImplemented).
 - The remaining 9 likely cluster around assert_invalid /
   assert_trap shapes the runner partially supports.
 
-**Next — 9.9-d-5**: bundle the 9 missing emit handlers per
-chunk-granularity rule (same shape — all ARM64 v128
-mem-or-select ops; small, sharing v128MemPrologue or a
-similar scaffold for store_lane / load_lane).
+**Next — 9.9-d-6 (D-061 discharge)**: extend
+`populateShapeTags` (`src/engine/codegen/shared/regalloc.zig`)
+to (a) trigger `any_simd = true` when the function signature
+or local types contain v128, and (b) account for `local.get`
+/ `local.tee` pushes in the vreg-numbering walk, tagging the
+produced vreg with the local's type. This unblocks
+`simd_select.0` end-to-end exercising the 9.9-d-5 emit code.
 
 Subsequent §9.9 chunks per ADR-0045:
+- 9.9-d-7: investigate residual 21 value-mismatches.
 - 9.9-e: v128 PARAM marshal per ADR-0046 (unblocks multi-arg
   spec assertions like simd_select).
 - 9.9-f: scale to FP arith + compares (heavy 9k+ files).
@@ -55,9 +60,11 @@ After §9.9: §9.10 (smoke benches + gap analysis), §9.11
 
 ## Open structural debt (pointers — full list in `.dev/debt.md`)
 
+- **D-061** (populateShapeTags vreg-numbering gap) — `now`;
+  9.9-d-6 discharge target.
 - **D-055** (x86_64 prologue inject) — blocked-by D-052 prologue
   extract.
-- **D-057** (op_simd.zig hard-cap, now ~4070 LOC) — blocked-by
+- **D-057** (op_simd.zig hard-cap, now ~4442 LOC) — blocked-by
   ADR for source-split landing. Discharge requires ADR mirror
   of ADR-0030; deferred until §9.7 row close.
 - 10 `blocked-by:` rows: D-007/D-010/D-016/D-018/D-020/D-021/
@@ -72,6 +79,6 @@ code in `src/ir/coalesce/`, regalloc.zig LIFO free-pool,
 §9.5 [x] (ARM64 NEON pt 1), §9.6 [x] (ARM64 NEON pt 2),
 §9.7 [x] (x86_64 SSE4.1+SSE4.2; 9.7-a..bb landed),
 §9.8 [x] (scope absorbed per ADR-0044),
-§9.9 in-flight (9.9-a..c + 9.9-d-1..4 landed; 9.9-d-5 NEXT —
-ARM64 select_v128 + load_lane / store_lane bundle).
+§9.9 in-flight (9.9-a..c + 9.9-d-1..5 landed; 9.9-d-6 NEXT —
+populateShapeTags vreg-numbering gap / D-061 discharge).
 **Branch**: `zwasm-from-scratch`。
