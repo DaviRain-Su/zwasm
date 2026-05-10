@@ -1757,6 +1757,57 @@ test "emitI64x2Mul: dst aliases lhs — final MOVAPS elided" {
     try testing.expectEqualSlices(u8, expected.items, buf.items);
 }
 
+// D-071 part a: emitI64x2Mul clobbers rhs at step 9
+// (`MOVAPS dst, lhs`) when regalloc's LIFO slot-reuse aliases
+// `dst_x == rhs_x` (and dst != lhs). Step 10's `PMULUDQ dst, rhs`
+// then computes `a_lo * a_lo` (since rhs slot now holds lhs)
+// instead of `a_lo * b_lo`. Symptom on OrbStack simd_i64x2_arith:
+// i64x2.mul(1, 0xFFFFFFFFFFFFFFFF) → 0xFFFFFFFF_00000001
+// (= 1*1 + cross<<32) instead of 0xFFFFFFFFFFFFFFFF (= 1*0xFFFFFFFF
+// + 0xFFFFFFFF<<32). Fix mirrors 9.9-g-11..g-15 (D-066 family):
+// stash rhs through XMM7 when `dst != lhs && dst == rhs`.
+test "emitI64x2Mul: dst aliases rhs — stash rhs to XMM7 (D-071 part a)" {
+    var slot_ids = [_]u16{ 0, 1, 1 }; // dst (vreg 2) reuses rhs slot → XMM9.
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 3,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    try pushed.append(testing.allocator, 1);
+    var next_vreg: u32 = 2;
+
+    try op_simd.emitI64x2Mul(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    const s1 = abi.fp_spill_stage_xmms[0];
+    const s2 = abi.fp_spill_stage_xmms[1];
+    // Stash rhs (XMM9) to XMM7 first; all subsequent rhs reads use
+    // xmm7. dst (XMM9) gets MOVAPS'd from lhs (XMM8) at step 9 (no
+    // alias with lhs), then PMULUDQ dst, xmm7 reads original rhs.
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm7, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(s1, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encPsrlqImm(s1, 32).slice());
+    try expected.appendSlice(testing.allocator, inst.encPmuludq(s1, .xmm7).slice());
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(s2, .xmm7).slice());
+    try expected.appendSlice(testing.allocator, inst.encPsrlqImm(s2, 32).slice());
+    try expected.appendSlice(testing.allocator, inst.encPmuludq(s2, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encPaddQ(s1, s2).slice());
+    try expected.appendSlice(testing.allocator, inst.encPsllqImm(s1, 32).slice());
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm9, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encPmuludq(.xmm9, .xmm7).slice());
+    try expected.appendSlice(testing.allocator, inst.encPaddQ(.xmm9, s1).slice());
+
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
 test "emitI32x4Mul: dispatches to encPmullD — opcode 0x40 with 0x38 escape reaches the buffer" {
     // Sanity guard for the SSE4.1 encoder path: PMULLD's second
     // escape byte (0x38) must land between 0x0F and the opcode.

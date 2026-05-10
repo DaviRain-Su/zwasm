@@ -3368,6 +3368,18 @@ pub fn emitI64x2ReplaceLane(
 /// from ARM64 op_simd.zig that scratch reuse is preferable to
 /// pool churn (per ROADMAP P3 cold-start; per p9-9.7-d-survey.md
 /// "scratch strategy B").
+///
+/// Aliasing safety (D-071 part a; D-066 mirror): regalloc's LIFO
+/// slot-reuse can place `result_v` in the same physical XMM as
+/// `rhs_v` (with `dst != lhs`). Step 9's `MOVAPS dst, lhs` then
+/// overwrites rhs before step 10's `PMULUDQ dst, rhs` reads it,
+/// degenerating step 10 to `a_lo * a_lo`. Symptom on OrbStack
+/// simd_i64x2_arith: i64x2.mul(1, 0xFFFFFFFFFFFFFFFF) →
+/// 0xFFFFFFFF_00000001 (= 1*1 + cross<<32) instead of
+/// 0xFFFFFFFFFFFFFFFF. Stash rhs through XMM7 (project SIMD
+/// scratch — `abi.zig:200` reserves it mirroring arm64's V31)
+/// when the alias is detected; reads at steps 3, 4, and 10 use
+/// the stashed copy.
 pub fn emitI64x2Mul(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
@@ -3392,13 +3404,19 @@ pub fn emitI64x2Mul(
     const s1 = abi.fp_spill_stage_xmms[0]; // XMM14
     const s2 = abi.fp_spill_stage_xmms[1]; // XMM15
 
+    var rhs_for_op = rhs_x;
+    if (dst_x != lhs_x and dst_x == rhs_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(.xmm7, rhs_x).slice());
+        rhs_for_op = .xmm7;
+    }
+
     // 1-3: cross term a_hi * b_lo into s1.
     try buf.appendSlice(allocator, inst.encMovapsXmmXmm(s1, lhs_x).slice());
     try buf.appendSlice(allocator, inst.encPsrlqImm(s1, 32).slice());
-    try buf.appendSlice(allocator, inst.encPmuludq(s1, rhs_x).slice());
+    try buf.appendSlice(allocator, inst.encPmuludq(s1, rhs_for_op).slice());
 
     // 4-6: cross term a_lo * b_hi into s2.
-    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(s2, rhs_x).slice());
+    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(s2, rhs_for_op).slice());
     try buf.appendSlice(allocator, inst.encPsrlqImm(s2, 32).slice());
     try buf.appendSlice(allocator, inst.encPmuludq(s2, lhs_x).slice());
 
@@ -3410,7 +3428,7 @@ pub fn emitI64x2Mul(
     if (dst_x != lhs_x) {
         try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, lhs_x).slice());
     }
-    try buf.appendSlice(allocator, inst.encPmuludq(dst_x, rhs_x).slice());
+    try buf.appendSlice(allocator, inst.encPmuludq(dst_x, rhs_for_op).slice());
     try buf.appendSlice(allocator, inst.encPaddQ(dst_x, s1).slice());
 
     try pushed_vregs.append(allocator, result_v);
