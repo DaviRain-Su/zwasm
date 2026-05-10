@@ -27,80 +27,102 @@
 //! Zone 2 (`src/engine/codegen/arm64/`) — must NOT import
 //! `src/engine/codegen/x86_64/` per ROADMAP §A3.
 
-const std = @import("std");
-
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
 const inst_neon = @import("inst_neon.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
+const trace = @import("../../../diagnostic/trace.zig");
 
 const ZirInstr = zir.ZirInstr;
 const EmitCtx = ctx_mod.EmitCtx;
 const Error = ctx_mod.Error;
 
-/// `v128.load`: pop i32 address (Wn), push v128 result (Vd.16B).
-/// `LDR Q<vd>, [X<wn>, #imm]`. The memarg's offset payload encodes
-/// the byte offset (must be 16-byte aligned for the imm12 form;
-/// for non-aligned offsets we'd need to materialise a base + ADD,
-/// which is a 9.5-c extension).
+/// Wasm spec §4.4.6 (vector mem) common bounds-check prologue —
+/// the v128 mirror of `op_memory.emitMemOp`'s prologue (D-060
+/// discharge). Caller has already popped the addr_vreg from the
+/// operand stack. Emits:
 ///
-/// 9.5-b-iii MVP: only handles the in-V-register path. Spilled
-/// v128 vregs (slot id >= max_reg_slots_fp = 13) return
-/// `UnsupportedOp` via `resolveFp` — 9.5-c lifts this restriction
-/// alongside 16-byte spill helpers.
+///   ORR W16, WZR, W_addr        ; zero-extend wasm addr to ip0
+///   [ADD imm12 or MOVZ/MOVK chain to fold memarg offset into ip0]
+///   ADD X17, X16, #access_size  ; ea + size into ip1
+///   CMP X17, X27                ; vs mem_limit
+///   B.HI <fixup>                ; trap_stub patched at func end
+///   trace.writeBounds(...)      ; ADR-0028 M3-a-1 ringbuffer
+///
+/// After return, X16 holds the effective Wasm address; the caller
+/// emits `LDR/STR Q<vt>, [X28, X16]` (X28 = vm_base) to complete
+/// the access. Mirrors `op_memory.emitMemOp`'s prologue exactly so
+/// any future bounds-check refinement (e.g. ADR-0028 M3-a-2 trap
+/// localisation) flows uniformly across scalar + v128 paths.
+fn v128MemPrologue(ctx: *EmitCtx, addr_vreg: u32, offset_imm: u32, access_size: u12) Error!void {
+    const ip0: inst.Xn = 16;
+    const ip1: inst.Xn = 17;
+    // SPILL-EXEMPT: address staging mirrors op_memory.emitMemOp stage 0.
+    const w_addr = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, addr_vreg, 0);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(ip0, 31, w_addr));
+    if (offset_imm != 0) {
+        if (offset_imm <= 0xFFFFFF) {
+            const off_high: u12 = @intCast((offset_imm >> 12) & 0xFFF);
+            const off_low: u12 = @intCast(offset_imm & 0xFFF);
+            if (off_high != 0) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12Lsl12(ip0, ip0, off_high));
+            if (off_low != 0) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(ip0, ip0, off_low));
+        } else {
+            const lane0: u16 = @truncate(offset_imm & 0xFFFF);
+            const lane1: u16 = @truncate((offset_imm >> 16) & 0xFFFF);
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovzImm16(ip1, lane0));
+            if (lane1 != 0) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(ip1, lane1, 1));
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddReg(ip0, ip0, ip1));
+        }
+    }
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(ip1, ip0, access_size));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(ip1, 27));
+    const fixup_at: u32 = @intCast(ctx.buf.items.len);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hi, 0));
+    try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+    trace.writeBounds(ctx.func.func_idx, fixup_at);
+}
+
+/// `v128.load`: pop i32 address (Wn), push v128 result (Vd.16B).
+/// Wasm spec §4.4.6.1 — vector load: bounds-check `ea + 16 >
+/// mem_limit` traps; alignment is a hint per §2.4.10. Per
+/// `single_slot_dual_meaning.md` the wasm address is purely the
+/// runtime stack-popped value; the static memarg offset folds in
+/// via the prologue. After the prologue X16 holds the effective
+/// Wasm address; `LDR Q<vd>, [X28, X16]` reads the 16 bytes from
+/// `vm_base + ea`.
+///
+/// §9.9 / 9.9-d-2 (D-060) replaces the §9.5-b MVP that emitted
+/// `LDR Q,[X<wn>,#imm]` directly — that path SEGV'd on `simd_align`
+/// modules 90/91 because the wasm-relative addr was treated as a
+/// host pointer. The MVP form was correct only when vm_base
+/// happened to be 0, which never holds in practice.
 pub fn emitV128Load(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const addr_vreg = ctx.pushed_vregs.pop().?;
-    // SPILL-EXEMPT: i32 addr; GPR spill-aware path is its own follow-on (mirrors 9.5-c-i's v128-only scope).
-    const addr_reg = try gpr.resolveGpr(ctx.alloc, addr_vreg);
 
     const result_vreg = ctx.next_vreg.*;
     ctx.next_vreg.* += 1;
     if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
-    // §9.5-c-ii: v128 result via Q-form def helper. If spilled,
-    // returns V29 stage; otherwise the vreg's V-reg home.
     const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
 
-    const offset = ins.payload;
-    if (offset > 65535 or (offset & 0xF) != 0) {
-        // 9.5-b-iii MVP: only 16-byte-aligned imm12 offsets.
-        // Larger or unaligned offsets need a base+ADD sequence
-        // (9.5-c lift).
-        std.debug.print(
-            "arm64/op_simd: v128.load unsupported offset {d} (must be 16-byte-aligned & <= 65520)\n",
-            .{offset},
-        );
-        return Error.UnsupportedOp;
-    }
-
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encLdrQImm(result_v, addr_reg, @intCast(offset)));
-    // §9.5-c-ii: flush v128 result to spill slot if spilled.
+    try v128MemPrologue(ctx, addr_vreg, ins.payload, 16);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encLdrQReg(result_v, 28, 16));
     try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
     try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
 }
 
 /// `v128.store`: pop v128 value (Vt.16B), pop i32 address (Wn).
-/// `STR Q<vt>, [X<wn>, #imm]`. Same alignment + offset
-/// constraints as `v128.load`.
+/// Wasm spec §4.4.6.2 — bounds-check identical to `v128.load`.
+/// `STR Q<vt>, [X28, X16]` writes 16 bytes to `vm_base + ea`.
 pub fn emitV128Store(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const value_vreg = ctx.pushed_vregs.pop().?;
-    // §9.5-c-ii: v128 operand via Q-form load helper.
-    const value_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, value_vreg, 0);
-
     const addr_vreg = ctx.pushed_vregs.pop().?;
-    // SPILL-EXEMPT: i32 addr; GPR spill-aware path is its own follow-on.
-    const addr_reg = try gpr.resolveGpr(ctx.alloc, addr_vreg);
 
-    const offset = ins.payload;
-    if (offset > 65535 or (offset & 0xF) != 0) {
-        std.debug.print(
-            "arm64/op_simd: v128.store unsupported offset {d} (must be 16-byte-aligned & <= 65520)\n",
-            .{offset},
-        );
-        return Error.UnsupportedOp;
-    }
-
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encStrQImm(value_v, addr_reg, @intCast(offset)));
+    try v128MemPrologue(ctx, addr_vreg, ins.payload, 16);
+    // qLoadSpilled at stage 1 keeps the V29 stage[0] free for any
+    // future use; address marshalling already consumed gpr stage 0.
+    const value_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, value_vreg, 1);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encStrQReg(value_v, 28, 16));
 }
 
 /// `i32x4.splat`: pop scalar i32 (Wn), push v128 result (Vd.4S).

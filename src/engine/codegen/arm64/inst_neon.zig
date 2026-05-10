@@ -76,6 +76,28 @@ pub fn encStrQImm(rt: Vn, rn: Xn, byte_offset: u16) u32 {
     return 0x3D800000 | (@as(u32, imm12) << 10) | (@as(u32, rn) << 5) | @as(u32, rt);
 }
 
+/// `LDR Qt, [Xn, Xm]` — 128-bit Q-form load, register-offset
+/// addressing (LSL #0). Wasm spec §4.4.6.1 (vector load): the
+/// emit pass routes `v128.load`'s effective address through
+/// X16 (= wasm-relative addr + memarg offset, zero-extended)
+/// and uses X28 as `vm_base`, mirroring `op_memory.emitMemOp`.
+/// SIMD&FP 128-bit reg-offset base is 0x3CE06800 (opc=11
+/// load, V=1, size_lo=00, option=011 LSL, S=0). Verified
+/// against `clang -arch arm64` of `ldr q0, [x28, x16]` →
+/// 0x3CF06B80. Per Arm IHI 0055 "LDR (register, SIMD&FP)".
+pub fn encLdrQReg(rt: Vn, rn: Xn, rm: Xn) u32 {
+    return 0x3CE06800 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rt);
+}
+
+/// `STR Qt, [Xn, Xm]` — 128-bit Q-form store, register-offset
+/// addressing (LSL #0). Wasm spec §4.4.6.2 (vector store).
+/// SIMD&FP 128-bit reg-offset base is 0x3CA06800 (opc=10 store
+/// vs LDR's opc=11). Used by `v128.store` after the same
+/// bounds-check prologue as scalar `op_memory.emitMemOp`.
+pub fn encStrQReg(rt: Vn, rn: Xn, rm: Xn) u32 {
+    return 0x3CA06800 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rt);
+}
+
 // =====================================================================
 // Register-to-register moves
 // =====================================================================
@@ -991,6 +1013,24 @@ test "encStrQImm: V31, [X1, #(4095*16)]" {
     const imm: u32 = 4095;
     const expected: u32 = 0x3D800000 | (imm << 10) | (1 << 5) | 31;
     try testing.expectEqual(expected, encStrQImm(31, 1, 65520));
+}
+
+test "encLdrQReg: Q0, [X28, X16] — `ldr q0, [x28, x16]` → 0x3CF06B80" {
+    // Verified against `clang -arch arm64 -c` of the asm.
+    try testing.expectEqual(@as(u32, 0x3CF06B80), encLdrQReg(0, 28, 16));
+}
+
+test "encLdrQReg: Q31, [X28, X16] — max Vt index" {
+    // 0x3CE06800 | (16 << 16) | (28 << 5) | 31 = 0x3CF06B9F
+    try testing.expectEqual(@as(u32, 0x3CF06B9F), encLdrQReg(31, 28, 16));
+}
+
+test "encStrQReg: Q0, [X28, X16] — `str q0, [x28, x16]` → 0x3CB06B80" {
+    try testing.expectEqual(@as(u32, 0x3CB06B80), encStrQReg(0, 28, 16));
+}
+
+test "encStrQReg: Q31, [X29, X17] — `str q31, [x29, x17]` → 0x3CB16BBF" {
+    try testing.expectEqual(@as(u32, 0x3CB16BBF), encStrQReg(31, 29, 17));
 }
 
 test "encOrrV16B: V0, V1, V2" {
