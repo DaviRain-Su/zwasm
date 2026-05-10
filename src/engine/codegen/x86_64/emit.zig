@@ -1105,6 +1105,15 @@ pub fn compile(
             .@"i16x8.sub_sat_u" => try op_simd.emitI16x8SubSatU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"i8x16.avgr_u" => try op_simd.emitI8x16AvgrU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"i16x8.avgr_u" => try op_simd.emitI16x8AvgrU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            // §9.7 / 9.7-av: f32x4/f64x2 .pmin/pmax (4 ops). Direct
+            // dispatch to MINPS/MAXPS/MINPD/MAXPD with operands
+            // swapped (dst=c2, src=c1) to align Wasm pseudo-min/max
+            // semantics with x86's "return src on equal/NaN/zero".
+            // Cranelift maps the same way (`lower.isle:1542-1545`).
+            .@"f32x4.pmin" => try op_simd.emitF32x4Pmin(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f32x4.pmax" => try op_simd.emitF32x4Pmax(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.pmin" => try op_simd.emitF64x2Pmin(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.pmax" => try op_simd.emitF64x2Pmax(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             // §9.7 / 9.7-af: native single-instr multiply-and-add
             // pair. PMULHRSW (SSSE3) implements Q15 multiply-round-
             // saturate exactly per Wasm spec; PMADDWD (SSE2)

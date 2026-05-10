@@ -3000,6 +3000,62 @@ pub fn emitI32x4TruncSatF32x4U(allocator: Allocator, buf: *std.ArrayList(u8), al
 }
 
 // =============================================================
+// §9.7 / 9.7-av — FP pseudo-min/max (4 ops: f32x4/f64x2.pmin/pmax)
+// Wasm pmin(c1, c2) = if c2 < c1: c2 else c1. The MINPS/MINPD
+// "return src on equal/NaN/both-zero" behaviour (Intel SDM Vol 2A)
+// matches this exactly — provided we swap operands so dst holds
+// c2 and src holds c1. cranelift `lower.isle:1542-1545` makes the
+// same call via CLIF bitselect-of-fcmp-LT pattern matching MINPS.
+// No new encoders; reuses 9.7-q's encMinps/Maxps/Minpd/Maxpd.
+// =============================================================
+
+fn emitV128FpPseudoBinop(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    encoder: *const fn (dst: inst.Xmm, src: inst.Xmm) inst.EncodedInsn,
+) Error!void {
+    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
+    const rhs_v = pushed_vregs.pop().?;
+    const lhs_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const rhs_x = try gpr.resolveXmm(alloc, rhs_v);
+    const lhs_x = try gpr.resolveXmm(alloc, lhs_v);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+
+    if (dst_x != rhs_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, rhs_x).slice());
+    }
+    try buf.appendSlice(allocator, encoder(dst_x, lhs_x).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// Wasm spec §4.4.4 (f32x4.pmin) — pseudo-min, NaN-propagating c1.
+pub fn emitF32x4Pmin(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpPseudoBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encMinps);
+}
+
+/// Wasm spec §4.4.4 (f32x4.pmax) — pseudo-max, NaN-propagating c1.
+pub fn emitF32x4Pmax(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpPseudoBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encMaxps);
+}
+
+/// Wasm spec §4.4.4 (f64x2.pmin) — pseudo-min, NaN-propagating c1.
+pub fn emitF64x2Pmin(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpPseudoBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encMinpd);
+}
+
+/// Wasm spec §4.4.4 (f64x2.pmax) — pseudo-max, NaN-propagating c1.
+pub fn emitF64x2Pmax(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+    return emitV128FpPseudoBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encMaxpd);
+}
+
+// =============================================================
 // §9.7 / 9.7-au — int min/max + saturating arith + avgr_u (22 ops)
 // All single-instruction native SSE2/SSE4.1 ops. Each wrapper
 // dispatches through emitV128IntBinop (2-in 1-out) with the
