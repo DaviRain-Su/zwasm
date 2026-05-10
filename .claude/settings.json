@@ -82,6 +82,31 @@
   "env": {
     "ZIG_LOCAL_CACHE_DIR": ".zig-cache"
   },
+  "sandbox": {
+    "allowUnsandboxedCommands": false,
+    "excludedCommands": [
+      "orb:*",
+      "ssh:*",
+      "scp:*",
+      "gh:*",
+      "git push:*",
+      "git fetch:*",
+      "git pull:*",
+      "curl:*",
+      "wget:*",
+      "nix:*"
+    ],
+    "network": {
+      "allowedDomains": [
+        "github.com",
+        "api.github.com",
+        "objects.githubusercontent.com",
+        "raw.githubusercontent.com",
+        "ziglang.org",
+        "*.ziglang.org"
+      ]
+    }
+  },
   "autoCompactEnabled": true,
   "hooks": {
     "SessionStart": [
