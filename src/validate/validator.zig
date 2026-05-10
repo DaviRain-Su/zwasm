@@ -736,9 +736,15 @@ const Validator = struct {
             // generic v128-binop helper.
             94...211 => try self.opSimdBinop(),
 
-            // Float arithmetic (f32x4 / f64x2): binop.
-            // 224..255 covers float ops; mirror MVP routing.
-            224...255 => try self.opSimdBinop(),
+            // §9.9 / 9.9-f-5 — split FP arith range. Sub-opcodes
+            // 224..255 cover f32x4 + f64x2 ops; the 9.4 MVP
+            // routed all as binop, miscounting unop arms (abs,
+            // neg, sqrt) that pop only 1 v128.
+            //   224 f32x4.abs / 225 f32x4.neg / 227 f32x4.sqrt
+            //   236 f64x2.abs / 237 f64x2.neg / 239 f64x2.sqrt
+            // are unops; 228..235 + 240..247 stay binops.
+            224, 225, 227, 236, 237, 239 => try self.opSimdUnop(),
+            226, 228...235, 238, 240...255 => try self.opSimdBinop(),
 
             else => return Error.NotImplemented,
         }

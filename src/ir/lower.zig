@@ -602,6 +602,38 @@ const Lowerer = struct {
             80 => try self.emit(.@"v128.or", 0, 0),
             81 => try self.emit(.@"v128.xor", 0, 0),
             82 => try self.emit(.@"v128.bitselect", 0, 0),
+            // §9.9 / 9.9-f-5: f32x4 / f64x2 arith (sub-opcodes
+            // 224..247). Validator already accepts them (binop /
+            // unop split landed alongside this commit); emit
+            // handlers in arm64/op_simd.zig + x86_64/op_simd.zig
+            // are pre-wired in 9.6/9.7. Sub-opcode → ZirOp:
+            //   224..235 → f32x4 (abs/neg/_/sqrt + add/sub/mul/
+            //   div + min/max/pmin/pmax)
+            //   236..247 → f64x2 (abs/neg/_/sqrt + add/sub/mul/
+            //   div + min/max/pmin/pmax)
+            // 226 + 238 are unused gaps in the spec.
+            224 => try self.emit(.@"f32x4.abs", 0, 0),
+            225 => try self.emit(.@"f32x4.neg", 0, 0),
+            227 => try self.emit(.@"f32x4.sqrt", 0, 0),
+            228 => try self.emit(.@"f32x4.add", 0, 0),
+            229 => try self.emit(.@"f32x4.sub", 0, 0),
+            230 => try self.emit(.@"f32x4.mul", 0, 0),
+            231 => try self.emit(.@"f32x4.div", 0, 0),
+            232 => try self.emit(.@"f32x4.min", 0, 0),
+            233 => try self.emit(.@"f32x4.max", 0, 0),
+            234 => try self.emit(.@"f32x4.pmin", 0, 0),
+            235 => try self.emit(.@"f32x4.pmax", 0, 0),
+            236 => try self.emit(.@"f64x2.abs", 0, 0),
+            237 => try self.emit(.@"f64x2.neg", 0, 0),
+            239 => try self.emit(.@"f64x2.sqrt", 0, 0),
+            240 => try self.emit(.@"f64x2.add", 0, 0),
+            241 => try self.emit(.@"f64x2.sub", 0, 0),
+            242 => try self.emit(.@"f64x2.mul", 0, 0),
+            243 => try self.emit(.@"f64x2.div", 0, 0),
+            244 => try self.emit(.@"f64x2.min", 0, 0),
+            245 => try self.emit(.@"f64x2.max", 0, 0),
+            246 => try self.emit(.@"f64x2.pmin", 0, 0),
+            247 => try self.emit(.@"f64x2.pmax", 0, 0),
 
             else => return Error.NotImplemented,
         }
