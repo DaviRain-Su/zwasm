@@ -426,6 +426,68 @@ test "emitI32x4GeU: PMAXUD + PCMPEQD lhs (ge path, no NOT)" {
     try testing.expectEqualSlices(u8, expected.items, buf.items);
 }
 
+// D-071 part (c): IntCmpUnsigned `.ge/.le` reads `lhs_x` after the
+// min/max overwrites dst. When regalloc's LIFO slot-reuse aliases
+// `dst == lhs`, the `MOVAPS dst, lhs` is elided (correctly) but the
+// final `PCMPEQ dst, lhs` then reads dst-after-min/max, which is no
+// longer the original lhs. Stash lhs through XMM7 (project SIMD
+// scratch) before the min/max.
+test "emitI8x16GeU: dst aliases lhs — stash lhs to XMM7 before PMAXUB" {
+    var slot_ids = [_]u16{ 0, 1, 0 }; // vreg 0 → XMM8, vreg 1 → XMM9, vreg 2 (result) → XMM8 (== lhs)
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 3,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    try pushed.append(testing.allocator, 1);
+    var next_vreg: u32 = 2;
+
+    try op_simd.emitI8x16GeU(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    // MOVAPS xmm7, xmm8 (stash lhs). MOVAPS dst, lhs elided. PMAXUB
+    // xmm8, xmm9. PCMPEQB xmm8, xmm7 (original lhs from stash).
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm7, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encPmaxub(.xmm8, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encPcmpeqB(.xmm8, .xmm7).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
+test "emitI16x8LeU: dst aliases lhs — stash lhs to XMM7 before PMINUW" {
+    var slot_ids = [_]u16{ 0, 1, 0 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 3,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    try pushed.append(testing.allocator, 1);
+    var next_vreg: u32 = 2;
+
+    try op_simd.emitI16x8LeU(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+
+    var expected: std.ArrayList(u8) = .empty;
+    defer expected.deinit(testing.allocator);
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm7, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encPminuw(.xmm8, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encPcmpeqW(.xmm8, .xmm7).slice());
+    try testing.expectEqualSlices(u8, expected.items, buf.items);
+}
+
 test "emitF32x4Eq: direct CMPPS imm=0x00 (no swap)" {
     var slot_ids = [_]u16{ 0, 1, 2 };
     const alloc: regalloc.Allocation = .{

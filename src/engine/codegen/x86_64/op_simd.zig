@@ -1083,16 +1083,26 @@ fn emitV128IntCmpUnsigned(
     const lhs_x = try gpr.resolveXmm(alloc, lhs_v);
     const dst_x = try gpr.resolveXmm(alloc, result_v);
 
-    // Aliasing safety (D-066 mirror; D-070 partial discharge).
-    // The min/max-then-PCMPEQ tail reads `lhs_x` again for ge/le,
-    // so we also need to preserve lhs_x. If dst_x == lhs_x we
-    // overwrite it with the min/max result; the tail still works
-    // because the `.ge/.le` arm reads lhs_x which was the same as
-    // dst before MOVAPS-elision. The risky alias is dst_x == rhs_x.
+    // Aliasing safety (D-066 mirror; D-071 part c discharge).
+    // Two independent risky aliases:
+    //   - `dst == rhs`: the min/max overwrites rhs before the
+    //     gt/lt tail reads it again (PCMPEQ dst, rhs_for_op).
+    //     Stash rhs through XMM7.
+    //   - `dst == lhs` (ge/le only): the min/max overwrites lhs
+    //     before the ge/le tail reads it (PCMPEQ dst, lhs_x).
+    //     Stash lhs through XMM7. Mutually exclusive with the
+    //     dst==rhs stash since dst can't equal both unless
+    //     lhs == rhs (degenerate self-compare; behaviour preserved
+    //     either way).
     var rhs_for_op = rhs_x;
+    var lhs_for_tail = lhs_x;
     if (dst_x != lhs_x and dst_x == rhs_x) {
         try buf.appendSlice(allocator, inst.encMovapsXmmXmm(.xmm7, rhs_x).slice());
         rhs_for_op = .xmm7;
+    }
+    if ((kind == .ge or kind == .le) and dst_x == lhs_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(.xmm7, lhs_x).slice());
+        lhs_for_tail = .xmm7;
     }
     if (dst_x != lhs_x) {
         try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, lhs_x).slice());
@@ -1101,7 +1111,7 @@ fn emitV128IntCmpUnsigned(
 
     switch (kind) {
         .ge, .le => {
-            try buf.appendSlice(allocator, encoder_pcmpeq(dst_x, lhs_x).slice());
+            try buf.appendSlice(allocator, encoder_pcmpeq(dst_x, lhs_for_tail).slice());
         },
         .gt, .lt => {
             try buf.appendSlice(allocator, encoder_pcmpeq(dst_x, rhs_for_op).slice());
