@@ -34,12 +34,17 @@
 
 ## Next sub-chunk candidates (names only)
 
-- **simd_lane f64x2_extract_lane** value mismatch (got 0
-  expected NaN-like). Distinct from the shuffle alias cluster.
-- **D-067** — covers simd_bitwise.17 (UnsupportedOp) +
-  simd_boolean.0 (StackUnderflow) + simd_lane.140 (UnsupportedOp).
-  All compile-time / validator gaps; see fail-line strings in
-  /tmp/claude-501/orb-shuf.log for source dispatch.
+- **D-067 bitmask** — validator route 100/132/164/196 to
+  1-pop-1-push + lower wiring + ARM64 emit handlers (Step 0
+  survey of cranelift NEON bitmask required). Closes
+  simd_boolean.0 on both arches.
+- **D-078 (b) x86_64 v128 globals** — investigate why ARM64
+  passes simd_lane.140 compile despite same i32-only globals
+  gap; close on both arches.
+- **D-078 (c) simd_bitwise.17 UnsupportedOp** — likely a
+  single dispatch-arm gap; isolate via grep first chunk.
+- **D-078 (a) f64x2_extract_lane value mismatch** — JIT-disasm
+  spike via debug_jit_auto skill (Mac PASSES, x86_64 only).
 - Aggregate `test-spec-simd` into `test-all` (preventive — surfaces
   silent x86_64 simd regressions in autonomous loop gating).
 
@@ -48,10 +53,13 @@ impossibility check (debt.md `blocked-by:` barriers).
 
 ## Open structural debt (pointers — see `.dev/debt.md`)
 
-- `now`: D-063 (call_indirect v128 Trap), D-071 (x86_64 SIMD
-  residuals — categorised in debt body, NOT here), D-077
-  (simd_assert_runner deinit panic on OrbStack — pre-existing,
-  surfaced 2026-05-11).
+- `now`: D-063 (call_indirect v128 Trap), D-067 (i*x*.bitmask
+  validator-shape + ARM64 emit), D-071 (D-066 mirror cluster
+  fully discharged at 9.9-g-16; row body retained for
+  historical traceability), D-077 (OrbStack simd_assert_runner
+  deinit panic — pre-existing), D-078 (4-fail residual cluster
+  diagnosis: f64x2_extract_lane spike + v128 globals gap +
+  simd_bitwise.17 dispatch).
 - `blocked-by`: D-007 / D-010 / D-016 / D-018 / D-020 / D-021 /
   D-022 / D-026 / D-028 / D-052 / D-055 / D-057 / D-058 / D-059 /
   D-065 / D-070 / D-072 / D-073 / D-074 / D-075 / D-076 — barrier
