@@ -66,7 +66,9 @@ struct CwasmHeader {
     relocs_offset: u32,           // byte offset of relocs section
     relocs_size: u32,             // length of relocs section
 }
-// All u32 fields little-endian. Total header size: 56 bytes.
+// All u32 fields little-endian. Total header size: 60 bytes
+// (4 magic + 14 × u32; Revision 2 corrected the original
+// "56 bytes" miscount).
 
 // Per-func metadata (n_funcs entries):
 struct CwasmFuncMeta {

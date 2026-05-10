@@ -1,10 +1,19 @@
 # 0011 — Reopen Phase 6 and semantically revert Phase 7 progress
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 6 DONE; reopen objective met at §9.6 / 6.J strict close)
 - **Date**: 2026-05-03
 - **Author**: continue loop
 - **Tags**: phase-6, phase-7, scope, deferral-reversal, baseline,
   supersedes-0010
+
+> **Status note (2026-05-11)**: Per ADR-0050 D-1, flipped from
+> `Accepted` to `Closed (Phase 6 DONE; reopen objective met)`.
+> The reopen completed: ROADMAP `Phase Status` widget reads
+> `6 → DONE`; §9.6 / 6.J fired strict close with the v1 baseline
+> restored, `bench/baseline_v1_regression.yaml` migrated per
+> ADR-0012 §6.H, and the deleted Phase 7 work re-derived at
+> `e273149` / `e7ad654` / `4389a50` (per ROADMAP §9.7 / 7.0–7.2).
+> The supersession of ADR-0010 is preserved as historical record.
 
 ## Context
 

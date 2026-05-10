@@ -309,3 +309,29 @@ spill them because the body never modified them; AAPCS64
   sites updated in `src/engine/runner.zig`,
   `src/engine/codegen/shared/{entry,compile}.zig`. SHA:
   `<backfill>`
+
+- 2026-05-11 — **Path migration + head_size sync** (per
+  2026-05-11 ADR audit, SUMMARY §3.2 + §3.3 / batch_B). Two
+  honest records, no design change:
+  1. **Path drift**: this ADR's "Decision §`JitRuntime` struct"
+     header reads `src/runtime/jit_abi.zig` (Zone 1) and the
+     "References" section cites the same path. ADR-0023 §7
+     step 2 relocated the file to
+     `src/engine/codegen/shared/jit_abi.zig`. The original path
+     references are kept verbatim as the "as written at design
+     time" snapshot per ROADMAP §18 ADR-as-frozen-decision; the
+     authoritative current path is the new one.
+  2. **`head_size` 48 → 64 was incomplete**. The 2026-05-06
+     entry above said "48 → 64 bytes (one cache line)" reflecting
+     ADR-0027's globals extension. ADR-0028 (M3-a-1 ringbuffer)
+     added `trap_flag` and ADR-0034 added `jit_executed_flag`,
+     both at the struct tail; the actual `head_size` is currently
+     **88 bytes** (`expectEqual(@as(u32, 88), head_size)` at
+     `src/engine/codegen/shared/jit_abi.zig:198`). The "one
+     cache line (64 bytes)" framing is therefore stale — the
+     struct now spans two 64-byte cache lines on standard
+     x86_64 / aarch64. No load-bearing impact (imm12 budget
+     asserts still hold; `*X0` / `*RDI` calling convention
+     unchanged); honest-recorded so future readers see the
+     current size without scanning the codebase.
+  SHA: `<backfill>`

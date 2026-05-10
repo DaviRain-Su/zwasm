@@ -61,10 +61,14 @@ assert_return load_at_zero () -> i32:0
 assert_return store_at_zero v128:00010203040506070809000102030405 -> ()
 ```
 
-Hex digits in big-endian byte order (matching Wasm SIMD spec
-§4.4.7's `v128` literal text format `i8x16(0 1 2 3 4 5 ...)`
-serialised left-to-right into the 16-byte little-endian
-in-memory layout per Intel + ARM SIMD load semantics).
+Hex digits encode the in-memory little-endian Wasm v128 layout
+**byte-by-byte starting from the lowest-addressed byte (lane 0
+of `i8x16`)**. Example: `v128:00010203...0F` decodes to lane 0
+= 0x00, lane 1 = 0x01, ..., lane 15 = 0x0F — i.e. lower-byte-
+first matching `simd_assert_runner.zig` decoder. This matches
+the Wasm SIMD spec §4.4.7 `v128` literal text format
+`i8x16(0 1 2 ... 15)` written left-to-right and the in-memory
+representation Intel SSE / ARM NEON load instructions produce.
 
 ## Alternatives considered
 
@@ -155,3 +159,4 @@ that catches cross-arch bugs at commit time.
 | Date       | Reason                                                    |
 |------------|-----------------------------------------------------------|
 | 2026-05-10 | Initial — filed at §9.9-a foundation chunk start.        |
+| 2026-05-11 | **Byte-order wording clarified** (per 2026-05-11 ADR audit, SUMMARY §3.5 / batch_D). The original "Hex digits in big-endian byte order" phrasing conflicted with `simd_assert_runner.zig`'s decoder doc ("lower-byte-first to match in-memory little-endian Wasm v128 layout"). Both meant lane-0-first / low-byte-first; the runner's wording is canonical because the decoder is the authoritative parser. ADR Decision § rewritten to use the same "lower-byte-first" framing without changing the format. |

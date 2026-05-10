@@ -1,16 +1,27 @@
 ---
 name: 0007 — Split src/c_api/wasm_c_api.zig along chunk boundaries
 date: 2026-05-02
-status: Accepted
+status: Closed (Phase 5 DONE; split landed at 2b26a07; renamed c_api → api per ADR-0023 §7.5e)
 tags: phase-4, phase-5, c-api, file-size
 ---
 
 # 0007 — Split src/c_api/wasm_c_api.zig along chunk boundaries
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 5 DONE; split landed at `2b26a07`; renamed c_api → api per ADR-0023 §7.5e)
 - **Date**: 2026-05-02
 - **Author**: Claude (autonomous /continue loop)
 - **Tags**: phase-4, phase-5, c-api, file-size
+
+> **Status note (2026-05-11)**: Per ADR-0050 D-1, flipped from
+> `Accepted` to `Closed (Phase 5 DONE; ...)`. ROADMAP §9.5 / 5.0
+> closed `[x] 2b26a07 (split per ADR-0007)`; ADR-0023 §7.5e
+> renamed `src/c_api/` → `src/api/`. Path references in this
+> ADR's "Decision" section read `src/c_api/<file>.zig` and
+> remain as historical context — the on-disk targets are now
+> `src/api/{wasm,trap_surface,vec,instance,wasi,cross_module}.zig`.
+> `src/api/instance.zig` is currently 1418 LOC (under §A2 hard
+> cap 2000); the ADR's "~650 lines" estimate is exceeded but
+> non-blocking.
 
 ## Context
 

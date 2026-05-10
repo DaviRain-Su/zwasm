@@ -1,16 +1,26 @@
 ---
 name: 0001 — Split Phase-1 spec corpus vendoring across §9.1 / 1.8 + 1.9
 date: 2026-05-01
-status: Accepted
+status: Closed (Phase 1 DONE)
 tags: phase-1, spec-corpus, scope
 ---
 
 # 0001 — Split Phase-1 spec corpus vendoring across §9.1 / 1.8 + 1.9
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 1 DONE)
 - **Date**: 2026-05-01
 - **Author**: Claude (autonomous /continue loop)
 - **Tags**: phase-1, spec-corpus, scope
+
+> **Status note (2026-05-11)**: Per ADR-0050 D-1, flipped from
+> `Accepted` to `Closed (Phase 1 DONE)` to honour the original
+> Consequences §"Neutral / follow-ups" promise ("when 1.9 lands,
+> this ADR's Status flips to `Superseded by N/A`"). The actual
+> implementation landed on `test/spec/wasm-1.0/` rather than
+> `test/spec/wat/` (ADR-0002 absorbs the curation; the smoke
+> corpus path drift is harmless historical context). Phase 1 is
+> `DONE` per the §9 Phase Status widget; no further amendment
+> surface.
 
 ## Context
 

@@ -1,16 +1,24 @@
 ---
 name: 0006 — Defer Phase 4's 30+ realworld diff target to Phase 5
 date: 2026-05-02
-status: Accepted
+status: Closed (Phase 6 DONE; target landed at §9.6 / 6.F = ccd537d)
 tags: phase-4, phase-5, wasi, realworld
 ---
 
 # 0006 — Defer Phase 4's 30+ realworld diff target to Phase 5
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 6 DONE; target landed at §9.6 / 6.F = `ccd537d`)
 - **Date**: 2026-05-02
 - **Author**: Claude (autonomous /continue loop)
 - **Tags**: phase-4, phase-5, wasi, realworld
+
+> **Status note (2026-05-11)**: Per ADR-0050 D-1, flipped from
+> `Accepted` to `Closed (Phase 6 DONE; target landed at §9.6 / 6.F
+> = ccd537d)`. The deferral retargeted Phase 4 → Phase 5 (this
+> ADR) → Phase 6 (per ADR-0008's Phase 6 charter); §9.6 / 6.F
+> reports `[x] ccd537d (39/50 matched, 0 mismatched)` — the 30+
+> threshold is exceeded. Phase 6 closed strict per ADR-0012 §6.J.
+> No further amendment surface.
 
 > **Note (2026-05-02 — same day, post-ADR-0008)**: ADR-0008
 > inserted a new "v1 conformance baseline" Phase between the
