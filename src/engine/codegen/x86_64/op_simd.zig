@@ -47,6 +47,8 @@ const inst = @import("inst.zig");
 const abi = @import("abi.zig");
 const gpr = @import("gpr.zig");
 const types = @import("types.zig");
+const jit_abi = @import("../shared/jit_abi.zig");
+const trace = @import("../../../diagnostic/trace.zig");
 
 const Allocator = std.mem.Allocator;
 const Error = types.Error;
@@ -262,6 +264,96 @@ pub fn emitI32x4ExtractLane(
     try buf.appendSlice(allocator, inst.encPextrD(dst_r, src_x, lane).slice());
     try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
+}
+
+/// Wasm spec §4.4.7 (v128.load) — pop i32 idx, push v128 loaded
+/// from `[mem_base + idx + offset]` (16-byte unaligned). Spec
+/// trap iff `idx + offset + 16 > mem_limit`. Mirror of scalar
+/// `op_memory.emitMemOp` shape with access_size = 16 + MOVUPS
+/// final encoding. RAX/RCX/RDX scratches are pool-excluded
+/// (allocatable_caller_saved_scratch_gprs = R10/R11 only).
+pub fn emitV128Load(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    bounds_fixups: *std.ArrayList(u32),
+    spill_base_off: u32,
+    offset: u32,
+    func_idx: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const idx_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+
+    try v128MemPrologue(allocator, buf, bounds_fixups, idx_r, offset, 16, func_idx);
+
+    try buf.appendSlice(allocator, inst.encMovupsMemBaseIdx(false, dst_x, .rax, .rdx).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// Wasm spec §4.4.7 (v128.store) — pop v128 val, pop i32 idx;
+/// store val at `[mem_base + idx + offset]` (16 bytes unaligned).
+/// Spec trap iff `idx + offset + 16 > mem_limit`. Mirror of
+/// emitV128Load with reversed direction (MOVUPS [mem], xmm).
+pub fn emitV128Store(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    bounds_fixups: *std.ArrayList(u32),
+    spill_base_off: u32,
+    offset: u32,
+    func_idx: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
+    const val_v = pushed_vregs.pop().?;
+    const idx_v = pushed_vregs.pop().?;
+
+    const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
+    const val_x = try gpr.resolveXmm(alloc, val_v);
+
+    try v128MemPrologue(allocator, buf, bounds_fixups, idx_r, offset, 16, func_idx);
+
+    try buf.appendSlice(allocator, inst.encMovupsMemBaseIdx(true, val_x, .rax, .rdx).slice());
+}
+
+/// Shared eff-addr + bounds-check prologue for v128 memory ops.
+/// Mirrors op_memory.emitMemOp's prologue exactly with the access
+/// size as a parameter. RAX = vm_base reload, RDX = ea base
+/// (zero-ext idx + offset), RCX = ea+size scratch for the JA
+/// bounds-check fixup.
+fn v128MemPrologue(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    bounds_fixups: *std.ArrayList(u32),
+    idx_r: inst.Gpr,
+    offset: u32,
+    access_size: i8,
+    func_idx: u32,
+) Error!void {
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.vm_base_off).slice());
+    try buf.appendSlice(allocator, inst.encMovRR(.d, .rdx, idx_r).slice());
+    if (offset != 0) {
+        if (offset <= 0x7FFFFFFF) {
+            try buf.appendSlice(allocator, inst.encAddR64Imm32(.rdx, @intCast(offset)).slice());
+        } else {
+            try buf.appendSlice(allocator, inst.encMovImm64Q(.rcx, @as(u64, offset)).slice());
+            try buf.appendSlice(allocator, inst.encAddRR(.q, .rdx, .rcx).slice());
+        }
+    }
+    try buf.appendSlice(allocator, inst.encLeaR64BaseDisp8(.rcx, .rdx, access_size).slice());
+    try buf.appendSlice(allocator, inst.encCmpR64MemDisp32(.rcx, abi.runtime_ptr_save_gpr, jit_abi.mem_limit_off).slice());
+    const fixup_at: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJccRel32(.a, 0).slice());
+    try bounds_fixups.append(allocator, fixup_at);
+    trace.writeBounds(func_idx, fixup_at);
 }
 
 /// Wasm spec §4.4.3 (i64x2.extract_lane <imm>) — pop v128, push

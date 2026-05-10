@@ -226,6 +226,10 @@ pub fn compile(
                 .@"f64.load",
                 .@"f32.store",
                 .@"f64.store",
+                // §9.7 / 9.7-ax: v128 memory ops also touch [R15+...]
+                // for vm_base / mem_limit reload.
+                .@"v128.load",
+                .@"v128.store",
                 .@"global.get",
                 .@"global.set",
                 .@"memory.size",
@@ -1118,6 +1122,13 @@ pub fn compile(
             .@"f32x4.pmax" => try op_simd.emitF32x4Pmax(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"f64x2.pmin" => try op_simd.emitF64x2Pmin(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"f64x2.pmax" => try op_simd.emitF64x2Pmax(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            // §9.7 / 9.7-ax: v128.load + v128.store foundation
+            // memory ops. Mirror scalar emitMemOp shape with
+            // access_size=16 + MOVUPS final encoding. RAX/RCX/RDX
+            // scratches reused (pool-excluded). bounds_fixups +
+            // spill_base_off + ins.payload threading mirrors i32.load.
+            .@"v128.load" => try op_simd.emitV128Load(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
+            .@"v128.store" => try op_simd.emitV128Store(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
             // §9.7 / 9.7-af: native single-instr multiply-and-add
             // pair. PMULHRSW (SSSE3) implements Q15 multiply-round-
             // saturate exactly per Wasm spec; PMADDWD (SSE2)

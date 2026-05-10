@@ -236,6 +236,26 @@ pub fn encMovssMovsdMemBaseIdx(scalar_kind: SseScalarKind, is_store: bool, xmm: 
     return enc;
 }
 
+/// `MOVUPS xmm, [base+idx]` and the store direction — 128-bit
+/// unaligned packed-single load/store with SIB scale=1 (no
+/// displacement). No prefix (SSE base-set MOVUPS is the no-prefix
+/// form per Intel SDM Vol 2A "MOVUPS"; the 66/F2/F3 prefixed
+/// forms are MOVUPD/MOVSD/MOVSS respectively).
+/// `is_store` toggles opcode 0x10 (load) / 0x11 (store).
+/// xmm goes into ModR/M.reg, base into SIB.base, idx into
+/// SIB.index. Used by v128.load / v128.store (Wasm spec §4.4.7).
+pub fn encMovupsMemBaseIdx(is_store: bool, xmm: Xmm, base: Gpr, idx: Gpr) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (xmm.extBit() != 0 or base.extBit() != 0 or idx.extBit() != 0) {
+        enc.push(encodeRex(false, xmm.extBit(), idx.extBit(), base.extBit()));
+    }
+    enc.push(0x0F);
+    enc.push(if (is_store) @as(u8, 0x11) else 0x10);
+    enc.push(encodeModrm(0b00, xmm.low3(), 0b100)); // mod=00, rm=4 → SIB
+    enc.push(encodeSib(0b00, idx.low3(), base.low3())); // scale=1
+    return enc;
+}
+
 /// `CVTTSS2SI r/m32 or r/m64, xmm/m32-or-64` family — scalar
 /// truncating float→signed-int conversion.
 ///   F3 [REX?] 0F 2C /r (CVTTSS2SI; src f32 via prefix)
