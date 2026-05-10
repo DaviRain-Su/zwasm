@@ -482,6 +482,64 @@ pub fn emitV128Load64Splat(
     try pushed_vregs.append(allocator, result_v);
 }
 
+/// Wasm spec §4.4.7 (v128.load32_zero) — load 4 bytes into low
+/// lane; upper 96 bits zeroed. MOVSS xmm, [mem] does this in one
+/// instruction per Intel SDM Vol 2A "MOVSS" (memory-source form
+/// zero-extends the upper 96 bits of dst).
+pub fn emitV128Load32Zero(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    bounds_fixups: *std.ArrayList(u32),
+    spill_base_off: u32,
+    offset: u32,
+    func_idx: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const idx_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+
+    try v128MemPrologue(allocator, buf, bounds_fixups, idx_r, offset, 4, func_idx);
+    try buf.appendSlice(allocator, inst.encMovssMovsdMemBaseIdx(.f32, false, dst_x, .rax, .rdx).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
+/// Wasm spec §4.4.7 (v128.load64_zero) — load 8 bytes into low
+/// 64; upper 64 bits zeroed. MOVSD xmm, [mem] does this in one
+/// instruction per Intel SDM Vol 2A "MOVSD" (memory-source form
+/// zero-extends the upper 64 bits of dst).
+pub fn emitV128Load64Zero(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    bounds_fixups: *std.ArrayList(u32),
+    spill_base_off: u32,
+    offset: u32,
+    func_idx: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const idx_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
+    const dst_x = try gpr.resolveXmm(alloc, result_v);
+
+    try v128MemPrologue(allocator, buf, bounds_fixups, idx_r, offset, 8, func_idx);
+    try buf.appendSlice(allocator, inst.encMovssMovsdMemBaseIdx(.f64, false, dst_x, .rax, .rdx).slice());
+    try pushed_vregs.append(allocator, result_v);
+}
+
 /// Wasm spec §4.4.3 (i64x2.extract_lane <imm>) — pop v128, push
 /// scalar i64 = the 64-bit lane at the immediate index. Single
 /// `PEXTRQ r64, xmm, imm8` (SSE4.1 REX.W=1; lane is u1 since

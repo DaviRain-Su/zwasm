@@ -235,6 +235,9 @@ pub fn compile(
                 .@"v128.load16_splat",
                 .@"v128.load32_splat",
                 .@"v128.load64_splat",
+                // §9.7 / 9.7-az: load*_zero family (2 ops).
+                .@"v128.load32_zero",
+                .@"v128.load64_zero",
                 .@"global.get",
                 .@"global.set",
                 .@"memory.size",
@@ -1143,6 +1146,11 @@ pub fn compile(
             .@"v128.load16_splat" => try op_simd.emitV128Load16Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
             .@"v128.load32_splat" => try op_simd.emitV128Load32Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
             .@"v128.load64_splat" => try op_simd.emitV128Load64Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
+            // §9.7 / 9.7-az: v128.load{32,64}_zero (2 ops). Single-
+            // instruction MOVSS/MOVSD memory load — the scalar form
+            // already zero-extends the upper bits per Intel SDM.
+            .@"v128.load32_zero" => try op_simd.emitV128Load32Zero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
+            .@"v128.load64_zero" => try op_simd.emitV128Load64Zero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
             // §9.7 / 9.7-af: native single-instr multiply-and-add
             // pair. PMULHRSW (SSSE3) implements Q15 multiply-round-
             // saturate exactly per Wasm spec; PMADDWD (SSE2)
