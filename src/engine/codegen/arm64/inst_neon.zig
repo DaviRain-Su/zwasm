@@ -188,6 +188,45 @@ pub fn encDupGen2D(rd: Vn, rn: Xn) u32 {
     return 0x4E080C00 | (@as(u32, rn) << 5) | @as(u32, rd);
 }
 
+/// `AND V<d>.16B, V<n>.16B, V<m>.16B` — bitwise AND across the
+/// full 128 bits. §9.9 / 9.9-f-1 v128.and. Encoding (SIMD AND
+/// vector, U=0, size=00):
+///   `0 1 0 01110 00 1 [Rm:5] 0 0011 1 [Rn:5] [Rd:5]`
+///   = `0x4E201C00 | (Rm << 16) | (Rn << 5) | Rd`.
+/// Per Arm IHI 0055 §C7.2.6.
+pub fn encAnd16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E201C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `BIC V<d>.16B, V<n>.16B, V<m>.16B` — bitwise AND-NOT
+/// (`Vd = Vn AND NOT Vm`); maps directly to Wasm `v128.andnot`.
+/// Encoding (U=0, size=01):
+///   `0 1 0 01110 01 1 [Rm:5] 0 0011 1 [Rn:5] [Rd:5]`
+///   = `0x4E601C00 | (Rm << 16) | (Rn << 5) | Rd`.
+/// Per Arm IHI 0055 §C7.2.34.
+pub fn encBic16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E601C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `EOR V<d>.16B, V<n>.16B, V<m>.16B` — bitwise XOR across the
+/// full 128 bits. §9.9 / 9.9-f-1 v128.xor. Encoding (U=1, size=00):
+///   `0 1 1 01110 00 1 [Rm:5] 0 0011 1 [Rn:5] [Rd:5]`
+///   = `0x6E201C00 | (Rm << 16) | (Rn << 5) | Rd`.
+/// Per Arm IHI 0055 §C7.2.93.
+pub fn encEor16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E201C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `MVN V<d>.16B, V<n>.16B` (alias of `NOT V<d>.16B, V<n>.16B`)
+/// — bitwise NOT. §9.9 / 9.9-f-1 v128.not. Encoding (NOT vector,
+/// U=1, size=00, opcode=00101):
+///   `0 1 1 01110 00 1 00000 0 0101 10 [Rn:5] [Rd:5]`
+///   = `0x6E205800 | (Rn << 5) | Rd`.
+/// Per Arm IHI 0055 §C7.2.244.
+pub fn encMvn16B(rd: Vn, rn: Vn) u32 {
+    return 0x6E205800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
 // =====================================================================
 // Integer arithmetic (i32x4)
 // =====================================================================
@@ -1134,6 +1173,22 @@ test "encDupGen2D: V0, X0 — `dup v0.2d, x0` → 0x4E080C00" {
 
 test "encDupGen2D: V31, X30 — `dup v31.2d, x30` → 0x4E080FDF" {
     try testing.expectEqual(@as(u32, 0x4E080FDF), encDupGen2D(31, 30));
+}
+
+test "encAnd16B: V0, V1, V2 — `and v0.16b, v1.16b, v2.16b` → 0x4E221C20" {
+    try testing.expectEqual(@as(u32, 0x4E221C20), encAnd16B(0, 1, 2));
+}
+
+test "encBic16B: V0, V1, V2 — `bic v0.16b, v1.16b, v2.16b` → 0x4E621C20" {
+    try testing.expectEqual(@as(u32, 0x4E621C20), encBic16B(0, 1, 2));
+}
+
+test "encEor16B: V0, V1, V2 — `eor v0.16b, v1.16b, v2.16b` → 0x6E221C20" {
+    try testing.expectEqual(@as(u32, 0x6E221C20), encEor16B(0, 1, 2));
+}
+
+test "encMvn16B: V0, V1 — `mvn v0.16b, v1.16b` → 0x6E205820" {
+    try testing.expectEqual(@as(u32, 0x6E205820), encMvn16B(0, 1));
 }
 
 test "encAdd4S: V0, V1, V2" {

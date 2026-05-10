@@ -593,6 +593,15 @@ const Lowerer = struct {
             // gap as the emit chunks land.
             174 => try self.emit(.@"i32x4.add", 0, 0),
             77 => try self.emit(.@"v128.not", 0, 0),
+            // §9.9 / 9.9-f-1: bitwise ops 78..82 lower-side wiring.
+            // Validator now accepts these (split out of the 35..82
+            // binop range); arm64 + x86_64 emit dispatch already
+            // handles them via existing op_simd handlers.
+            78 => try self.emit(.@"v128.and", 0, 0),
+            79 => try self.emit(.@"v128.andnot", 0, 0),
+            80 => try self.emit(.@"v128.or", 0, 0),
+            81 => try self.emit(.@"v128.xor", 0, 0),
+            82 => try self.emit(.@"v128.bitselect", 0, 0),
 
             else => return Error.NotImplemented,
         }

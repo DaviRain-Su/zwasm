@@ -387,6 +387,27 @@ pub fn callV128_i32(
     return @bitCast(result);
 }
 
+/// Wasm spec §4.4 — `(v128, v128) → v128` invocation. §9.9 / 9.9-f
+/// scope expansion: enables FP arith / int arith / bitwise binop
+/// fixtures (simd_bitwise, simd_f32x4_arith, simd_i32x4_arith,
+/// etc.). Per ADR-0046 + 9.9-e-1/-2 v128 PARAM marshal: a0 lowers
+/// to V0/XMM0, a1 to V1/XMM1; result is V0/XMM0.
+pub fn callV128_v128v128(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: [16]u8,
+    a1: [16]u8,
+) Error![16]u8 {
+    rt.trap_flag = 0;
+    const Vec = @Vector(16, u8);
+    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: Vec) callconv(.c) Vec;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, @bitCast(a0), @bitCast(a1));
+    if (rt.trap_flag != 0) return Error.Trap;
+    return @bitCast(result);
+}
+
 // ============================================================
 // Tests
 // ============================================================

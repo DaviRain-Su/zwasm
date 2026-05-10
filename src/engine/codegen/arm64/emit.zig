@@ -1441,6 +1441,17 @@ pub fn compile(
             .@"i32x4.splat" => try op_simd.emitI32x4Splat(&ctx, &ins),
             .@"i32x4.extract_lane" => try op_simd.emitI32x4ExtractLane(&ctx, &ins),
             .@"i32x4.replace_lane" => try op_simd.emitI32x4ReplaceLane(&ctx, &ins),
+            // §9.9 / 9.9-f-1 — v128 bitwise (AND / OR / XOR / ANDNOT
+            // / NOT / BITSELECT). Per Wasm spec §4.4 (bitwise SIMD)
+            // + Arm IHI 0055 §C7.2.{6, 34, 39, 93, 244} (NEON
+            // AND/BIC/BSL/EOR/MVN). x86_64 mirror at op_simd.zig
+            // landed in §9.5/9.6.
+            .@"v128.and" => try op_simd.emitV128And(&ctx, &ins),
+            .@"v128.or" => try op_simd.emitV128Or(&ctx, &ins),
+            .@"v128.xor" => try op_simd.emitV128Xor(&ctx, &ins),
+            .@"v128.andnot" => try op_simd.emitV128Andnot(&ctx, &ins),
+            .@"v128.not" => try op_simd.emitV128Not(&ctx, &ins),
+            .@"v128.bitselect" => try op_simd.emitV128Bitselect(&ctx, &ins),
             // §9.9/9.5-c-iv — int-arith ADD/SUB across all 4 shapes.
             .@"i8x16.add" => try op_simd.emitI8x16Add(&ctx, &ins),
             .@"i8x16.sub" => try op_simd.emitI8x16Sub(&ctx, &ins),

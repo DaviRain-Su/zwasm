@@ -58,6 +58,11 @@ NAMES=(
   simd_align
   simd_const
   simd_select
+  # §9.9 / 9.9-f: scale to (v128, v128) → v128 binop fixtures.
+  # simd_bitwise covers v128.{and, or, xor, andnot, not, bitselect}
+  # — single-arch SSE2 instructions on x86_64 + NEON V.16B on ARM64,
+  # all already wired in op_simd.zig dispatch.
+  simd_bitwise
 )
 
 mkdir -p "$DEST"
@@ -155,6 +160,10 @@ SUPPORTED = {
     ((), ()): True,
     (("i32",), ("v128",)): True,
     (("i32",), ("i32",)): True,
+    # §9.9 / 9.9-f: (v128, v128) → v128 binop shape (FP arith /
+    # int arith / bitwise fixtures). Entry helper:
+    # `entry.callV128_v128v128`.
+    (("v128", "v128"), ("v128",)): True,
 }
 
 lines = []

@@ -531,6 +531,69 @@ fn emitV128Binop(
     try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
 }
 
+// §9.9 / 9.9-f-1 — v128 bitwise ops. AND / OR / XOR / ANDNOT /
+// BITSELECT all share the existing `emitV128Binop` /
+// `emitV128Binop3` shape; v128.not consumes a single v128 input
+// (unop). Per Wasm spec §4.4 (bitwise SIMD).
+
+pub fn emitV128And(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128Binop(ctx, inst_neon.encAnd16B);
+}
+pub fn emitV128Or(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128Binop(ctx, inst_neon.encOrrV16B);
+}
+pub fn emitV128Xor(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128Binop(ctx, inst_neon.encEor16B);
+}
+/// Wasm `v128.andnot a b` = `a AND NOT b`. NEON `BIC Vd, Vn, Vm`
+/// computes `Vn AND NOT Vm` — exact match.
+pub fn emitV128Andnot(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    try emitV128Binop(ctx, inst_neon.encBic16B);
+}
+
+/// `v128.not`: pop 1 v128, push 1 v128 with all bits inverted.
+/// `MVN V<d>.16B, V<n>.16B`.
+pub fn emitV128Not(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    const src_vreg = ctx.pushed_vregs.pop().?;
+    const src_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMvn16B(result_v, src_v));
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
+/// `v128.bitselect c v1 v2`: result lanes = `(v1 AND c) | (v2 AND NOT c)`.
+/// Per Wasm spec §4.4.7 — pop 3× v128 (top-of-stack is c), push v128.
+/// `BSL Vd.16B, Vn.16B, Vm.16B` computes `Vd ← (Vd AND Vn) | (Vm AND NOT Vd)`,
+/// so we MOV Vd ← c first then `BSL Vd, v1, v2`. Mask reuses result V slot
+/// (BSL writes Vd in place — same shape as 9.9-d-5's emitV128Select).
+pub fn emitV128Bitselect(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    const c_vreg = ctx.pushed_vregs.pop().?;
+    const v2_vreg = ctx.pushed_vregs.pop().?;
+    const v1_vreg = ctx.pushed_vregs.pop().?;
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+
+    // SPILL-EXEMPT: bitselect needs 3 V regs simultaneously
+    // (mask=dst, v1, v2). Mirrors emitV128Select's 3-source
+    // shape; D-037 stage_idx=2 follow-on lifts this once the
+    // FP-spill scaffold extends.
+    const mask_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
+    const c_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, c_vreg, 1);
+    if (mask_v != c_v) {
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(mask_v, c_v));
+    }
+    const v1_v = try gpr.resolveFp(ctx.alloc, v1_vreg);
+    const v2_v = try gpr.resolveFp(ctx.alloc, v2_vreg);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encBsl16B(mask_v, v1_v, v2_v));
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
 pub fn emitI8x16Add(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     try emitV128Binop(ctx, inst_neon.encAdd16B);
 }

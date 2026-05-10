@@ -707,14 +707,16 @@ const Validator = struct {
             34 => try self.opSimdReplaceLane(.f64), // f64x2.replace_lane
 
             // Comparison ops (relops, sub 35..76): pop 2× v128, push
-            // v128 mask. Bitwise ops (sub 77..82) routed to binop
-            // helper too — `v128.not` (sub 77) is conservatively
-            // typed as binop here (a 9.4 IR refinement will split
-            // it into unop), and `v128.bitselect` (sub 82) needs 3×
-            // v128 → 1× v128, which the MVP under-approximates as
-            // binop (deferred to 9.4 alongside ZirOp lower-pass
-            // catalogue refinement).
-            35...82 => try self.opSimdBinop(),
+            // v128 mask. §9.9 / 9.9-f-1 splits the bitwise unop +
+            // 3-op cases out of the binop range (was approximated
+            // as binop in the 9.4 MVP; rejected the simd_bitwise.0
+            // fixture's `not` / `bitselect` exports with
+            // StackUnderflow because the operand-stack pop count
+            // didn't match).
+            35...76 => try self.opSimdBinop(),
+            77 => try self.opSimdUnop(), // v128.not — pop 1 v128, push 1 v128
+            78, 79, 80, 81 => try self.opSimdBinop(), // v128.{and, or, xor, andnot}
+            82 => try self.opSimdBitselect(), // v128.bitselect — pop 3× v128, push v128
 
             // any_true (sub 83): pop v128, push i32.
             83 => try self.opSimdAllTrueOrAnyTrue(),
@@ -823,6 +825,15 @@ const Validator = struct {
     /// Generic v128 unop (`v128.not`, `i8x16.abs`, etc. — pop 1 v128,
     /// push 1 v128).
     fn opSimdUnop(self: *Validator) Error!void {
+        try self.popExpect(.v128);
+        try self.pushType(.v128);
+    }
+
+    /// `v128.bitselect`: pop 3× v128 (val1, val2, mask), push v128.
+    /// Wasm spec §3.3.6.6 (bitselect).
+    fn opSimdBitselect(self: *Validator) Error!void {
+        try self.popExpect(.v128);
+        try self.popExpect(.v128);
         try self.popExpect(.v128);
         try self.pushType(.v128);
     }
