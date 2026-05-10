@@ -25,15 +25,14 @@
   §9.5 [x], §9.6 [x], §9.7 [x], §9.8 [x] (absorbed per
   ADR-0044), **§9.9 in-flight**.
 - **Branch**: `zwasm-from-scratch`.
-- **Latest §9.9 landing**: `ee126013` (§9.9 / 9.9-g-14 —
-  `emitV128IntNe` `dst==rhs` alias fix; D-071 part c-actual
+- **Latest §9.9 landing**: `252a1355` (§9.9 / 9.9-g-15 —
+  `emitI8x16Popcnt` `dst==src` alias fix; D-071 part b
   discharged). See commit body for measured deltas.
 - **Active row**: §9.9 (still `[ ]`). Closes when fail = skip = 0
   on the 3-host gate per the row's exit criterion.
 
 ## Next sub-chunk candidates (names only)
 
-- **D-071 (b)** — `i8x16.popcnt` x86_64 PSHUFB recipe debug.
 - **D-071 (a)** — `i64x2.mul` x86_64 PMULUDQ recipe debug.
 - **D-067** — bitmask validator-shape (lower + ARM64 emit).
 - **simd_lane residual ×6** on OrbStack — investigate whether
