@@ -1480,6 +1480,28 @@ test "emitI32x4ExtractLane: lane 2 — single PEXTRD instruction" {
     try testing.expectEqualSlices(u8, inst.encPextrD(.rbx, .xmm8, 2).slice(), buf.items);
 }
 
+test "emitI64x2ExtractLane: lane 1 — single PEXTRQ instruction (REX.W)" {
+    var slot_ids = [_]u16{ 0, 0 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slot_ids,
+        .n_slots = 1,
+        .max_reg_slots_gpr = 4,
+        .max_reg_slots_fp = 6,
+    };
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var pushed: std.ArrayList(u32) = .empty;
+    defer pushed.deinit(testing.allocator);
+    try pushed.append(testing.allocator, 0);
+    var next_vreg: u32 = 1;
+
+    // payload = 1 → lane 1.
+    try op_simd.emitI64x2ExtractLane(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0, 1);
+
+    try testing.expectEqualSlices(u8, inst.encPextrQ(.rbx, .xmm8, 1).slice(), buf.items);
+}
+
 test "emitI64x2Mul: emits the 11-instruction PMULUDQ synthesis sequence" {
     // Synthetic regalloc: lhs at slot 0 (XMM8), rhs at slot 1
     // (XMM9), dst at slot 2 (XMM10) — none aliased, so the final

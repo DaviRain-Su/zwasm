@@ -264,6 +264,35 @@ pub fn emitI32x4ExtractLane(
     try pushed_vregs.append(allocator, result_v);
 }
 
+/// Wasm spec §4.4.3 (i64x2.extract_lane <imm>) — pop v128, push
+/// scalar i64 = the 64-bit lane at the immediate index. Single
+/// `PEXTRQ r64, xmm, imm8` (SSE4.1 REX.W=1; lane is u1 since
+/// i64x2 has 2 lanes). Mirror of i32x4.extract_lane (9.7-e) with
+/// the .q-form encoder.
+pub fn emitI64x2ExtractLane(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    spill_base_off: u32,
+    payload: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const src_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const src_x = try gpr.resolveXmm(alloc, src_v);
+    const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
+
+    const lane: u1 = @intCast(payload & 0b1);
+    try buf.appendSlice(allocator, inst.encPextrQ(dst_r, src_x, lane).slice());
+    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
+    try pushed_vregs.append(allocator, result_v);
+}
+
 /// Wasm spec §4.4.4 (signed lt_s/gt_s/le_s/ge_s) — pop two v128,
 /// push v128 with all-ones lanes where the signed compare holds.
 /// PCMPGT_<shape> is SSE2; the four Wasm variants synthesise as:

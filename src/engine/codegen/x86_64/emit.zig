@@ -822,6 +822,10 @@ pub fn compile(
             // scalar via PEXTRD (SSE4.1).
             .@"i32x4.splat" => try op_simd.emitI32x4Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"i32x4.extract_lane" => try op_simd.emitI32x4ExtractLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
+            // §9.7 / 9.7-aw: i64x2.extract_lane via PEXTRQ (SSE4.1
+            // REX.W=1 variant of PEXTRD). Mirror of i32x4.extract_
+            // lane handler with u1 lane (i64x2 has 2 lanes).
+            .@"i64x2.extract_lane" => try op_simd.emitI64x2ExtractLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
             // §9.7 / 9.7-f: replace_lane for the wide-int v128 shapes.
             // PINSRD (32-bit) / PINSRQ (64-bit, REX.W mandatory) plus a
             // MOVAPS preamble when dst doesn't alias the input vec.

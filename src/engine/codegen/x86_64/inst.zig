@@ -313,6 +313,7 @@ pub const encPsrlqImm = inst_sse.encPsrlqImm;
 pub const encPsllqImm = inst_sse.encPsllqImm;
 pub const encPshufd = inst_sse.encPshufd;
 pub const encPextrD = inst_sse.encPextrD;
+pub const encPextrQ = inst_sse.encPextrQ;
 pub const encPinsrD = inst_sse.encPinsrD;
 pub const encPinsrQ = inst_sse.encPinsrQ;
 pub const encPextrB = inst_sse.encPextrB;

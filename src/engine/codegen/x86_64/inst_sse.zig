@@ -697,6 +697,24 @@ pub fn encPextrD(gpr_dst: Gpr, xmm_src: Xmm, lane: u2) EncodedInsn {
     return enc;
 }
 
+/// `PEXTRQ r/m64, xmm, imm8` (66 REX.W 0F 3A 16 /r ib) — SSE4.1
+/// REX.W variant of PEXTRD: extract a 64-bit lane (lane = u1; 0
+/// or 1) from `xmm_src` into `gpr_dst`. Same opcode byte (0x16);
+/// REX.W=1 promotes the operand size.
+///
+/// Used by `i64x2.extract_lane` (Wasm spec §4.4.3 lane access).
+pub fn encPextrQ(gpr_dst: Gpr, xmm_src: Xmm, lane: u1) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0x66);
+    enc.push(encodeRex(true, xmm_src.extBit(), 0, gpr_dst.extBit()));
+    enc.push(0x0F);
+    enc.push(0x3A);
+    enc.push(0x16);
+    enc.push(encodeModrm(0b11, xmm_src.low3(), gpr_dst.low3()));
+    enc.push(@intCast(lane));
+    return enc;
+}
+
 /// `PINSRD xmm, r/m32, imm8` (66 [REX?] 0F 3A 22 /r ib) — SSE4.1
 /// insert a 32-bit value from `gpr_src` into lane `lane` of
 /// `xmm_dst`. The other three lanes of `xmm_dst` are preserved
@@ -2082,6 +2100,16 @@ test "encPextrD: REX.R+B (r9, xmm8, 1) — high gpr + high xmm" {
     // 66 45 0F 3A 16 C1 01 — REX.R for xmm_src (0x44) | REX.B for
     // gpr_dst (0x41) → 0x45; ModR/M = 11 000 001 = 0xC1.
     try testing.expectEqualSlices(u8, &.{ 0x66, 0x45, 0x0F, 0x3A, 0x16, 0xC1, 0x01 }, encPextrD(.r9, .xmm8, 1).slice());
+}
+
+test "encPextrQ: lane 0 (rax, xmm0, 0) — 7 bytes with REX.W" {
+    // 66 48 0F 3A 16 C0 00 — REX = 0x48 (W=1, no extension bits).
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x48, 0x0F, 0x3A, 0x16, 0xC0, 0x00 }, encPextrQ(.rax, .xmm0, 0).slice());
+}
+
+test "encPextrQ: lane 1 + REX.W+R+B (r9, xmm8, 1)" {
+    // 66 4D 0F 3A 16 C1 01 — REX = 0x40 | W(8) | R(4) | B(1) = 0x4D.
+    try testing.expectEqualSlices(u8, &.{ 0x66, 0x4D, 0x0F, 0x3A, 0x16, 0xC1, 0x01 }, encPextrQ(.r9, .xmm8, 1).slice());
 }
 
 test "encPinsrD: lane 0 (xmm0, rax, 0) — 7 bytes no REX" {
