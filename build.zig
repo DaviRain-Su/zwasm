@@ -248,6 +248,28 @@ pub fn build(b: *std.Build) void {
     const test_spec_assert_step = b.step("test-spec-assert", "Run JIT spec assertion runner (all hosts; gate-green at §9.7 / 7.8 close)");
     test_spec_assert_step.dependOn(&run_spec_assert.step);
 
+    // `zig build test-spec-simd` — §9.9 per ADR-0045. SIMD spec
+    // assertion runner (parallel to spec_assert_runner). §9.9-a
+    // foundation: runner skeleton + build.zig wiring + manifest
+    // format spec. NOT YET aggregated into test-all (deferred to
+    // §9.9-e per ADR-0045 Consequences §). Manifest population
+    // begins at §9.9-b.
+    const simd_assert_runner_mod = b.createModule(.{
+        .root_source_file = b.path("test/spec/simd_assert_runner.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    simd_assert_runner_mod.addImport("zwasm", zwasm_lib_mod);
+    applySanitize(simd_assert_runner_mod, sanitize_c, sanitize_thread);
+    const simd_assert_runner_exe = b.addExecutable(.{
+        .name = "zwasm-spec-simd",
+        .root_module = simd_assert_runner_mod,
+    });
+    const run_simd_assert = b.addRunArtifact(simd_assert_runner_exe);
+    run_simd_assert.addArg(b.pathFromRoot("test/spec/wasm-2.0-simd-assert"));
+    const test_spec_simd_step = b.step("test-spec-simd", "Run SIMD spec assertion runner (§9.9 per ADR-0045; foundation: 0 manifests until §9.9-b)");
+    test_spec_simd_step.dependOn(&run_simd_assert.step);
+
     // `zig build test-spec-wasm-2.0` — wast-directive runner
     // (Phase 2 / §9.2 / 2.7). Reads each subdir's manifest.txt
     // and processes module / assert_invalid / assert_malformed
