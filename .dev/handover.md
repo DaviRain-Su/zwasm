@@ -20,9 +20,9 @@ Deliverables: `.dev/phase10_prep/track_{a,b,c}_*.md` +
 Phase: 9 (SIMD-128). §9.5/6/7/8 [x]; §9.9 [ ] (Mac+OrbStack
 11384/0 post-h-14; SKIP=2357; windowsmini reconcile pending).
 
-Latest landed: `e790d2c4` — 9.9-h-17 x86_64 inst_sse.zig 3-way
-encoder split (Track B chunk 3/6, all consumer call sites stay
-byte-identical via inst.zig facade); next chunk `9.9-h-18`.
+Latest landed: `cf7d02da` — 9.9-h-18 arm64 op_simd.zig 4-way
+source split (Track B chunk 4/6, mirrors x86_64 9.9-h-15 via
+Option A call-site updates); next chunk `9.9-h-19`.
 
 ## Implementation queue (matches ROADMAP first `[ ]`)
 
@@ -38,13 +38,12 @@ gate. Specs: `phase10_prep/track_*.md` §6/§7.
    - **9.9-h-16** `[x]` `155afd58` — op_simd_test 4-way mirror
      + transitional re-exports removed.
    - **9.9-h-17** `[x]` `e790d2c4` — inst_sse 3-way encoder split.
-   - **9.9-h-18** **NEXT** — arm64 `op_simd.zig` (2307 LOC)
-     4-way source split + `op_simd_test.zig` mirror (if exists
-     in arm64 tree, else extract from inline tests).
-   - **9.9-h-19** — arm64 `inst_neon.zig` (2323 LOC) 3-way
-     encoder split → `inst_neon` (foundation: mem/reg-move
-     foundation) + `inst_neon_arith` (arith) + `inst_neon_lane_cmp`
-     (lane + cmp).
+   - **9.9-h-18** `[x]` `cf7d02da` — arm64 op_simd 4-way split
+     (no inline tests in arm64 op_simd.zig — no test mirror).
+   - **9.9-h-19** **NEXT** — arm64 `inst_neon.zig` (2323 LOC)
+     3-way encoder split → `inst_neon` (foundation: mem/reg-move)
+     + `inst_neon_arith` (arith) + `inst_neon_lane_cmp`
+     (lane + cmp). Last hard-cap exceeder.
    - **9.9-h-20** — Track B chunk 6/6: flip file_size_check
      warn→gate; remove warn note from gate_commit.sh; close
      D-057 + D-065; file D-081 (legacy emit_test_* rename).
