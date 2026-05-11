@@ -25,15 +25,16 @@
   §9.5 [x], §9.6 [x], §9.7 [x], §9.8 [x] (absorbed per
   ADR-0044), **§9.9 in-flight**.
 - **Branch**: `zwasm-from-scratch`.
-- **Latest §9.9 landing**: §9.9 / 9.9-h-8 — ADR-0053 design
-  for x86_64 v128 XMM spill (D-078 (c) discharge design only;
-  no source change). Three structural barriers identified
-  for simd_bitwise.17 (last named OrbStack FAIL): uniform
-  8-byte spill stride, MOVSD-truncating helpers, 145 hostile
-  `resolveXmm` sites. Design = shape-aware allocator spill
-  + MOVUPS helpers + handler migration + co-deliver D-057
-  source-split. Implementation = chunk family §9.9-h-9..-h-N.
-  Mac unchanged 11270 / 0; OrbStack unchanged 11257 / 1.
+- **Latest §9.9 landing**: §9.9 / 9.9-h-9 — ADR-0053 Part 1
+  (shape-aware spill offsets). `Allocation.spill_offsets:
+  ?[]const u32` table gives v128 slots 16-byte alignment +
+  stride; scalar slots stay 8-byte. Computed post-`compute()`
+  via new `computeSpillOffsets()` helper. Legacy uniform-8
+  formula remains the all-scalar default. +5 new unit tests.
+  No observable behaviour change yet — Parts 2 (MOVUPS
+  helpers) + 3 (handler migration) needed before
+  simd_bitwise.17 flips. Mac 11270 / 0, all test-all green;
+  OrbStack 11257 / 1 unchanged.
 - **Active row**: §9.9 (still `[ ]`). Mac is at FAIL=0 / SKIP>0;
   the exit criterion is fail=skip=0 across the 3-host gate, so
   skips remain (assert_invalid SKIP-VALIDATOR-GAP cluster +
@@ -42,11 +43,6 @@
 
 ## Next sub-chunk candidates (names only)
 
-- **ADR-0053 implementation §9.9-h-9** — Part 1 (allocator
-  shape-aware spill sizing). Smallest standalone chunk;
-  preserves scalar 8-byte stride; extends `Allocation.slot()`
-  to give v128 vregs 16-byte spill stride. No emit-side change
-  yet; unblocks Parts 2 + 3 in subsequent chunks.
 - **ADR-0053 §9.9-h-10** — Part 2 (`xmmLoadSpilledV128` /
   `xmmStoreSpilledV128` / `xmmDefSpilledV128` helpers in
   `gpr.zig`). MOVUPS-based. Mechanical add.
