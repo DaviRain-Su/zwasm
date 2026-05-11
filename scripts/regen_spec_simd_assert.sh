@@ -360,6 +360,10 @@ SUPPORTED = {
     # `v128.store align=16` (address + value, void return). Entry
     # helper: `entry.callVoid_i32v128`.
     (("i32", "v128"), ()): True,
+    # chunk 9.9-h-29 Part A (assert_trap discharge): (i32) → () —
+    # `simd_address` `store_data_6` OOB-trap fixture. Entry
+    # helper: `entry.callVoid_i32`.
+    (("i32",), ()): True,
 }
 
 lines = []
@@ -390,19 +394,15 @@ for c in d["commands"]:
         if bad:
             lines.append(f"skip-impl nan-or-bad-token {a['field']} {' '.join(bad)}")
             continue
-        # The runner's directive parser splits on the first space
-        # to extract `<fn> <args>`; export names containing spaces
-        # (e.g. simd_align's `v128.load align=16`) collide with
-        # that tokenisation and surface as ExportNotFound. The
-        # runner-format extension to handle quoted names is
-        # tracked separately; skip these so the manifest stays
-        # clean.
-        if " " in a["field"]:
-            lines.append(f"skip-impl export-name-has-spaces {a['field']!r}")
-            continue
+        # Export names containing spaces (e.g. simd_align's
+        # `v128.load align=16`) emit as a single-quoted token; the
+        # runner's tokeniser splits on the closing quote so the
+        # space-bearing name reaches `findExportFunc` intact (chunk
+        # 9.9-h-29 Part B discharge).
+        fn_tok = f"'{a['field']}'" if " " in a["field"] else a["field"]
         args_s = " ".join(arg_toks) if arg_toks else "()"
         results_s = " ".join(res_toks) if res_toks else "()"
-        lines.append(f"assert_return {a['field']} {args_s} -> {results_s}")
+        lines.append(f"assert_return {fn_tok} {args_s} -> {results_s}")
     elif t == "assert_invalid":
         lines.append(f"assert_invalid {c['filename']}")
     elif t == "assert_malformed":
@@ -411,12 +411,44 @@ for c in d["commands"]:
             continue
         lines.append(f"assert_malformed {c['filename']}")
     elif t == "assert_trap":
-        # v128-result trap detection is fine (Error.Trap is raised
-        # at the entry helper level regardless of result type), but
-        # the runner needs an `assert_trap` v128-result path. Skip
-        # for §9.9-c; widen in §9.9-d.
+        # Chunk 9.9-h-29 Part A — emit a real `assert_trap` directive
+        # rather than a skip. The entry helpers raise `Error.Trap`
+        # uniformly regardless of declared result type, so the only
+        # call-shape gate is the arg signature; the result-type list
+        # is ignored at dispatch time (a successful invoke with any
+        # value is still a FAIL because no trap fired).
         a = c["action"]
-        lines.append(f"skip-impl assert_trap-v128-pending {a.get('field', '?')}")
+        if a.get("type") != "invoke":
+            lines.append("skip-impl non-invoke-action")
+            continue
+        args = a.get("args", [])
+        # `assert_trap` dispatch is keyed off arg-shape only; the
+        # declared result list determines which `callV*` to invoke
+        # in the runner but Error.Trap propagates uniformly. Apply
+        # the same SUPPORTED gate as assert_return so unsupported
+        # arg shapes (e.g. v128 param) are surfaced specifically.
+        results = c.get("expected", [])
+        sig = (tuple(x["type"] for x in args), tuple(r["type"] for r in results))
+        if sig not in SUPPORTED:
+            if any(t == "v128" for t in sig[0]):
+                lines.append(f"skip-impl v128-param-pending {a['field']}")
+            else:
+                lines.append(f"skip-impl assert_trap-unsupported-shape {sig[0]}->{sig[1]} {a['field']}")
+            continue
+        arg_toks = [fmt_token(x) for x in args]
+        bad = [tok for tok in arg_toks if tok and tok.startswith("!")]
+        if bad:
+            lines.append(f"skip-impl nan-or-bad-token {a['field']} {' '.join(bad)}")
+            continue
+        fn_tok = f"'{a['field']}'" if " " in a["field"] else a["field"]
+        args_s = " ".join(arg_toks) if arg_toks else "()"
+        # Declare the result shape in the directive so the runner
+        # picks the right `callV*` helper (the helper still raises
+        # Trap on OOB regardless of result type, but its calling
+        # convention differs by result kind).
+        res_toks = [r["type"] for r in results]
+        results_s = " ".join(res_toks) if res_toks else "()"
+        lines.append(f"assert_trap {fn_tok} {args_s} -> {results_s}")
     else:
         lines.append(f"skip-impl directive-{t}")
 

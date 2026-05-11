@@ -255,6 +255,30 @@ fn runCorpus(
             continue;
         }
 
+        if (std.mem.startsWith(u8, line, "assert_trap ")) {
+            if (module_bad) {
+                skipped.* += 1;
+                continue;
+            }
+            const compiled = current_compiled orelse {
+                try stdout.print("FAIL  {s}: assert_trap without prior module\n", .{name});
+                failed.* += 1;
+                continue;
+            };
+            const wasm = current_wasm.?;
+            const ok = runAssertTrap(gpa, wasm, &compiled, line[12..], stdout, name) catch |err| {
+                try stdout.print("FAIL  {s}: {s} (error {s})\n", .{ name, line, @errorName(err) });
+                failed.* += 1;
+                continue;
+            };
+            if (ok) {
+                passed.* += 1;
+            } else {
+                failed.* += 1;
+            }
+            continue;
+        }
+
         if (std.mem.startsWith(u8, line, "assert_invalid ")) {
             const file = line[15..];
             const wasm_bytes = dir.readFileAlloc(io, file, gpa, .limited(4 << 20)) catch |err| {
@@ -434,6 +458,24 @@ fn parseArgToken(tok: []const u8) !ArgValue {
     return error.BadValue;
 }
 
+/// Split `<fn> <args>` where `<fn>` may be a bare token OR a
+/// single-quoted string (handles export names containing spaces
+/// per chunk 9.9-h-29 Part B; e.g. `'v128.load align=16'`). Returns
+/// the unquoted fn_name + the args substring.
+fn splitFnAndArgs(lhs: []const u8) !struct { fn_name: []const u8, args_s: []const u8 } {
+    if (lhs.len > 0 and lhs[0] == '\'') {
+        const close = std.mem.findScalarPos(u8, lhs, 1, '\'') orelse return error.BadDirective;
+        // After the closing quote we expect a space then args, or
+        // end-of-lhs (no-args case shouldn't happen for quoted
+        // exports but is mechanically harmless).
+        if (close + 1 >= lhs.len) return error.BadDirective;
+        if (lhs[close + 1] != ' ') return error.BadDirective;
+        return .{ .fn_name = lhs[1..close], .args_s = lhs[close + 2 ..] };
+    }
+    const sp1 = std.mem.findScalar(u8, lhs, ' ') orelse return error.BadDirective;
+    return .{ .fn_name = lhs[0..sp1], .args_s = lhs[sp1 + 1 ..] };
+}
+
 fn runAssertReturn(
     gpa: std.mem.Allocator,
     wasm_bytes: []const u8,
@@ -447,9 +489,9 @@ fn runAssertReturn(
     const lhs = rest[0..arrow];
     const results_s = rest[arrow + 4 ..];
 
-    const sp1 = std.mem.findScalar(u8, lhs, ' ') orelse return error.BadDirective;
-    const fn_name = lhs[0..sp1];
-    const args_s = lhs[sp1 + 1 ..];
+    const fa = try splitFnAndArgs(lhs);
+    const fn_name = fa.fn_name;
+    const args_s = fa.args_s;
 
     const func_idx = runner_mod.findExportFunc(gpa, wasm_bytes, fn_name) catch |err| {
         try stdout.print("FAIL  {s}: findExport({s}): {s}\n", .{ name, fn_name, @errorName(err) });
@@ -540,6 +582,17 @@ fn runAssertReturn(
         // (i32, v128) → () — `simd_align` `v128.store align=16`.
         if (n_args == 2 and args[0] == .i32 and args[1] == .v128) {
             entry.callVoid_i32v128(compiled.module, func_idx, &rt, args[0].i32, args[1].v128) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+                return false;
+            };
+            return true;
+        }
+        // chunk 9.9-h-29 Part A (assert_trap discharge): (i32) → () —
+        // simd_address `store_data_*` shape. Used by both
+        // assert_return (passing-through call) and assert_trap
+        // (must raise Error.Trap on OOB).
+        if (n_args == 1 and args[0] == .i32) {
+            entry.callVoid_i32(compiled.module, func_idx, &rt, args[0].i32) catch |err| {
                 try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
                 return false;
             };
@@ -873,6 +926,140 @@ fn invokeV128(
     }
     try stdout.print("FAIL  {s}: v128-result unsupported (n_args={d}, arg shape) for {s}({s})\n", .{ name, n_args, fn_name, args_s });
     return null;
+}
+
+/// `assert_trap` directive (chunk 9.9-h-29 Part A). Returns `true`
+/// on PASS (the call raised `Error.Trap`) and `false` on FAIL (any
+/// other outcome — successful call, different error, parse error).
+/// Result-type matching is purely a calling-convention selector
+/// (Error.Trap propagates uniformly via the JIT entry helpers); a
+/// successful call with any value is a FAIL.
+fn runAssertTrap(
+    gpa: std.mem.Allocator,
+    wasm_bytes: []const u8,
+    compiled: *const runner_mod.CompiledWasm,
+    rest: []const u8,
+    stdout: *std.Io.Writer,
+    name: []const u8,
+) !bool {
+    // rest = "<fn> <args> -> <result_types>"
+    const arrow = std.mem.find(u8, rest, " -> ") orelse return error.BadDirective;
+    const lhs = rest[0..arrow];
+    const result_types_s = rest[arrow + 4 ..];
+
+    const fa = try splitFnAndArgs(lhs);
+    const fn_name = fa.fn_name;
+    const args_s = fa.args_s;
+
+    const func_idx = runner_mod.findExportFunc(gpa, wasm_bytes, fn_name) catch |err| {
+        try stdout.print("FAIL  {s}: assert_trap findExport({s}): {s}\n", .{ name, fn_name, @errorName(err) });
+        return false;
+    };
+
+    var rt: entry.JitRuntime = .{
+        .vm_base = scratch_memory[0..],
+        .mem_limit = scratch_memory.len,
+        .funcptr_base = &scratch_funcptrs,
+        .table_size = scratch_funcptrs.len,
+        .typeidx_base = &scratch_typeidxs,
+        .trap_flag = 0,
+        .globals_base = @ptrCast(@alignCast(&scratch_globals)),
+        .globals_count = scratch_globals.len / @sizeOf(Value),
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
+    };
+
+    var args: [4]ArgValue = undefined;
+    var n_args: usize = 0;
+    if (!std.mem.eql(u8, args_s, "()")) {
+        var arg_it = std.mem.tokenizeScalar(u8, args_s, ' ');
+        while (arg_it.next()) |tok| {
+            if (n_args >= args.len) {
+                try stdout.print("FAIL  {s}: assert_trap > {d} args unsupported ({s})\n", .{ name, args.len, args_s });
+                return false;
+            }
+            args[n_args] = parseArgToken(tok) catch {
+                try stdout.print("FAIL  {s}: assert_trap unsupported arg token ({s})\n", .{ name, tok });
+                return false;
+            };
+            n_args += 1;
+        }
+    }
+
+    // The `expect` helper takes a single call expression and
+    // converts any successful return into "did NOT trap" FAIL,
+    // `error.Trap` into PASS, and any other error into a
+    // distinct-error FAIL line.
+    const TrapOutcome = enum { trapped, did_not_trap, other_error };
+    var outcome: TrapOutcome = .other_error;
+    var other_err_name: []const u8 = "?";
+
+    if (std.mem.eql(u8, result_types_s, "()")) {
+        // void result.
+        if (n_args == 0) {
+            if (entry.callVoidNoArgs(compiled.module, func_idx, &rt)) |_| {
+                outcome = .did_not_trap;
+            } else |err| {
+                if (err == error.Trap) outcome = .trapped else {
+                    outcome = .other_error;
+                    other_err_name = @errorName(err);
+                }
+            }
+        } else if (n_args == 1 and args[0] == .i32) {
+            if (entry.callVoid_i32(compiled.module, func_idx, &rt, args[0].i32)) |_| {
+                outcome = .did_not_trap;
+            } else |err| {
+                if (err == error.Trap) outcome = .trapped else {
+                    outcome = .other_error;
+                    other_err_name = @errorName(err);
+                }
+            }
+        } else {
+            try stdout.print("FAIL  {s}: assert_trap void-result with {d} args unsupported for {s}\n", .{ name, n_args, fn_name });
+            return false;
+        }
+    } else if (std.mem.eql(u8, result_types_s, "v128")) {
+        // v128 result; dispatch via the same shapes as invokeV128.
+        // Only the shapes actually observed in assert_trap fixtures
+        // are wired here (() and (i32,) — load/store OOB).
+        if (n_args == 0) {
+            if (entry.callV128NoArgs(compiled.module, func_idx, &rt)) |_| {
+                outcome = .did_not_trap;
+            } else |err| {
+                if (err == error.Trap) outcome = .trapped else {
+                    outcome = .other_error;
+                    other_err_name = @errorName(err);
+                }
+            }
+        } else if (n_args == 1 and args[0] == .i32) {
+            if (entry.callV128_i32(compiled.module, func_idx, &rt, args[0].i32)) |_| {
+                outcome = .did_not_trap;
+            } else |err| {
+                if (err == error.Trap) outcome = .trapped else {
+                    outcome = .other_error;
+                    other_err_name = @errorName(err);
+                }
+            }
+        } else {
+            try stdout.print("FAIL  {s}: assert_trap v128-result with {d} args unsupported for {s}\n", .{ name, n_args, fn_name });
+            return false;
+        }
+    } else {
+        try stdout.print("FAIL  {s}: assert_trap unsupported result type '{s}' for {s}\n", .{ name, result_types_s, fn_name });
+        return false;
+    }
+
+    switch (outcome) {
+        .trapped => return true,
+        .did_not_trap => {
+            try stdout.print("FAIL  {s}: assert_trap {s}({s}) did NOT trap\n", .{ name, fn_name, args_s });
+            return false;
+        },
+        .other_error => {
+            try stdout.print("FAIL  {s}: assert_trap {s}({s}) errored {s} (expected Trap)\n", .{ name, fn_name, args_s, other_err_name });
+            return false;
+        },
+    }
 }
 
 fn laneSpecName(spec: LaneSpec) []const u8 {
