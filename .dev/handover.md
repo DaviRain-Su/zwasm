@@ -25,36 +25,39 @@
   §9.5 [x], §9.6 [x], §9.7 [x], §9.8 [x] (absorbed per
   ADR-0044), **§9.9 in-flight**.
 - **Branch**: `zwasm-from-scratch`.
-- **Last 3 commits (top of branch)**: gate-activation set —
-  `chore(fmt): apply zig fmt 0.16 across src/` (43 files,
-  +2079/-948), `chore(hooks): activate gate by renaming
-  pre_{commit,push} → pre-{commit,push}` (1400-commit gate
-  dormancy resolved; file_size_check switched to warn-only
-  pending D-057), `docs(adr): ADR-0052 — v128 globals storage
-  via per-valtype byte offsets` (design rationale for next
-  chunk; implementation queued at §9.9-h-2).
-- **Latest §9.9 landing (pre-gate-prep)**: §9.9 / 9.9-g-20 —
-  parser init_expr opcode-walker per Wasm spec §3.3.2.10.
-  Mac aarch64 simd_assert 11263/3 unchanged. OrbStack test-all
-  green.
+- **Latest §9.9 landing**: §9.9 / 9.9-h-2 — v128 globals JIT
+  path per ADR-0052. `compileWasm` computes per-defined-global
+  byte offsets + valtypes (scalars 8B / v128 16B align 16) and
+  threads through `compileOne` → `emit.compile` → `EmitCtx` on
+  both arches. arm64 `op_globals.zig` adds v128 path via
+  LDR Q [X23, #off]; x86_64 adds MOVUPS [RAX + disp32] via new
+  `encMovupsXmmMemBaseDisp32` in `inst_sse.zig`. Runner-side
+  `applyDefinedGlobalsInit` populates init values; simd_assert_
+  runner switches `scratch_globals` to `[256]u8 align(16)` +
+  calls the new helper. D-078 (b) PARTIALLY DISCHARGED (storage
+  gap closed); residual 4 Mac fails on simd_const.388 cascade
+  from a SKIPPED v128-multi-arg setter invoke (new **D-079**:
+  `((v128,v128,v128,v128),())` entry helper + v128 cross-module
+  imports). FAIL value shape on simd_const.388 changes
+  observably from `2e000000...` (garbage) to init-expr value
+  (`00010203...`).
 - **Active row**: §9.9 (still `[ ]`). Closes when fail = skip = 0
   on the 3-host gate per the row's exit criterion.
 
 ## Next sub-chunk candidates (names only)
 
-- **§9.9-h-2 — implement v128 globals per ADR-0052**. Discharges
-  D-078 (b) on Mac (4 fails) + OrbStack (1 fail). Scope:
-  `Module.globals_offsets: []u32` at parse time;
-  `Runtime.globals_byte_storage: []u8 align(16)`;
-  `JitRuntime.globals_byte_base: [*]u8`;
-  `emitV128GlobalGet/Set` on both arches; dispatch routing on
-  valtype at codegen; `evalConstExprValue` v128.const arm.
-- **D-078 (c) simd_bitwise.17 — root cause: x86_64 v128
-  XMM spill not yet implemented**. `resolveXmm` rejects
-  spilled v128 vregs. Discharge needs `xmmLoadSpilledV128`
-  / `xmmStoreSpilledV128` using 16-byte MOVUPS + handler
-  updates (~100 sites). Substantial refactor; co-deliverable
-  with D-057 source-split.
+- **D-079 (i) v128-multi-arg setter invoke entry helper**.
+  Add `callVoid_v128x4` (or equivalent shape) + manifest-gen
+  SUPPORTED-set extension. Discharges the 4 cascading Mac
+  fails on simd_const.388 (+ symmetric OrbStack fail).
+- **D-079 (ii) v128 cross-module imports**. Extend
+  `Runtime.globals` pointer-per-entry layer + `globals_offsets`
+  plumbing into the import-binding path.
+- **D-078 (c) simd_bitwise.17** — root cause: x86_64 v128 XMM
+  spill not yet implemented. `resolveXmm` rejects spilled v128
+  vregs. Needs `xmmLoadSpilledV128` + `xmmStoreSpilledV128`
+  (16-byte MOVUPS) + ~100 handler updates. Substantial refactor;
+  co-deliverable with D-057 source-split.
 - **D-078 (a) f64x2_extract_lane value mismatch** — JIT-disasm
   spike via debug_jit_auto skill (Mac PASSES, x86_64 only).
 - **D-063 simd_const call_indirect-param Trap** — Mac aarch64
@@ -72,9 +75,9 @@ impossibility check (debt.md `blocked-by:` barriers).
   historical traceability), D-077 (OrbStack simd_assert_runner
   deinit panic — pre-existing), D-078 (residual cluster
   diagnosis: (a) f64x2_extract_lane spike, (b) v128 globals
-  runtime gap — sharpened 9.9-g-20 after simd_const.388 compile
-  flip exposed runtime mismatch on Mac, (c) simd_bitwise.17
-  XMM spill).
+  storage gap PARTIALLY DISCHARGED at 9.9-h-2 — cascading fails
+  now belong to D-079, (c) simd_bitwise.17 XMM spill), D-079
+  (v128 multi-arg setter invoke + v128 imports; new at 9.9-h-2).
 - `blocked-by`: D-007 / D-010 / D-016 / D-018 / D-020 / D-021 /
   D-022 / D-026 / D-028 / D-052 / D-055 / D-057 / D-058 / D-059 /
   D-065 / D-070 / D-072 / D-073 / D-074 / D-075 / D-076 — barrier
