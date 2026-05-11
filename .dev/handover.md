@@ -20,9 +20,9 @@ Deliverables: `.dev/phase10_prep/track_{a,b,c}_*.md` +
 Phase: 9 (SIMD-128). §9.5/6/7/8 [x]; §9.9 [ ] (Mac+OrbStack
 11384/0 post-h-14; SKIP=2357; windowsmini reconcile pending).
 
-Latest landed: `3c73b213` — 9.9-h-19 arm64 inst_neon.zig 3-way
-encoder split (Track B chunk 5/6; **file_size_check hard-cap
-list now 0** — last exceeder closed); next chunk `9.9-h-20`.
+Latest landed: `00f93d24` — 9.9-h-20 Track B chunk 6/6 **COMPLETE**
+(file_size_check warn→gate flip + ADR-0054 + D-057/D-065 close +
+D-081 file). Next: §9.9 close residual (skip-impl reduction).
 
 ## Implementation queue (matches ROADMAP first `[ ]`)
 
@@ -30,22 +30,9 @@ list now 0** — last exceeder closed); next chunk `9.9-h-20`.
 Track A's §9.10 reshape); then §9.12 + Track D wiring; then hard
 gate. Specs: `phase10_prep/track_*.md` §6/§7.
 
-1. **Track B** (9.9-h-15..-20, 6 chunks): 4-way source split +
-   4-way test mirror (`_test.zig` suffix) + 3-way encoder
-   split + ADR-0054 + tiered pub + file_size_check warn→gate
-   + D-081 file + D-057/D-065 close.
-   - **9.9-h-15** `[x]` `280617d9` — x86_64 op_simd source 4-way.
-   - **9.9-h-16** `[x]` `155afd58` — op_simd_test 4-way mirror
-     + transitional re-exports removed.
-   - **9.9-h-17** `[x]` `e790d2c4` — inst_sse 3-way encoder split.
-   - **9.9-h-18** `[x]` `cf7d02da` — arm64 op_simd 4-way split.
-   - **9.9-h-19** `[x]` `3c73b213` — arm64 inst_neon 3-way
-     encoder split; **file_size_check hard-cap list now 0**.
-   - **9.9-h-20** **NEXT** — Track B chunk 6/6: flip
-     `scripts/file_size_check.sh` warn→gate; remove warn note
-     from `scripts/gate_commit.sh`; close D-057 + D-065;
-     file D-081 (legacy `emit_test_int.zig` / `emit_test_float.zig`
-     rename, blocked-by emit.zig source split).
+1. **Track B** (9.9-h-15..-20, 6 chunks) — **COMPLETE** (all
+   `[x]`). file_size_check hard-cap list = 0; warn→gate flipped;
+   ADR-0054 lands; D-057 + D-065 closed; D-081 filed.
 2. **Track C** (9.9-h-21..-24, 4 chunks): Path B prefix-vocab
    migration → ADR-0029 amend + check_skip_adrs.sh pre-commit
    gate + D-082 file + D-072 (a/b) + D-073 close.
