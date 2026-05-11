@@ -144,6 +144,11 @@ pub fn main(init: std.process.Init) !void {
 
     var passed: u32 = 0;
     var failed: u32 = 0;
+    // Per ADR-0029 Path B (chunk 9.9-h-23): twin tally for skip-impl
+    // (implementation gap, counts toward `skip-impl == 0` gate) vs
+    // skip-adr-<ADR-id> (waived per the named skip-ADR).
+    var skipped: u32 = 0;
+    var skipped_adr: u32 = 0;
 
     const cwd = std.Io.Dir.cwd();
     var root = cwd.openDir(io, corpus_root, .{ .iterate = true }) catch |err| {
@@ -156,10 +161,13 @@ pub fn main(init: std.process.Init) !void {
     var it = root.iterate();
     while (try it.next(io)) |entry| {
         if (entry.kind != .directory) continue;
-        try walkCorpusOrCategory(io, gpa, &root, entry.name, stdout, &passed, &failed);
+        try walkCorpusOrCategory(io, gpa, &root, entry.name, stdout, &passed, &failed, &skipped, &skipped_adr);
     }
 
-    try stdout.print("\nwast_runtime_runner: {d} passed, {d} failed\n", .{ passed, failed });
+    try stdout.print(
+        "\nwast_runtime_runner: {d} passed, {d} failed, {d} skipped (= {d} skip-impl + {d} skip-adr)\n",
+        .{ passed, failed, skipped + skipped_adr, skipped, skipped_adr },
+    );
     try stdout.flush();
     if (failed != 0) std.process.exit(1);
 }
@@ -176,9 +184,11 @@ fn walkCorpusOrCategory(
     stdout: *std.Io.Writer,
     passed: *u32,
     failed: *u32,
+    skipped: *u32,
+    skipped_adr: *u32,
 ) !void {
     var dir = root.openDir(io, name, .{ .iterate = true }) catch {
-        try runCorpus(io, gpa, root, name, stdout, passed, failed);
+        try runCorpus(io, gpa, root, name, stdout, passed, failed, skipped, skipped_adr);
         return;
     };
     const has_manifest = blk: {
@@ -192,13 +202,13 @@ fn walkCorpusOrCategory(
     };
     if (has_manifest) {
         dir.close(io);
-        try runCorpus(io, gpa, root, name, stdout, passed, failed);
+        try runCorpus(io, gpa, root, name, stdout, passed, failed, skipped, skipped_adr);
         return;
     }
     var it = dir.iterate();
     while (try it.next(io)) |child| {
         if (child.kind != .directory) continue;
-        try runCorpus(io, gpa, &dir, child.name, stdout, passed, failed);
+        try runCorpus(io, gpa, &dir, child.name, stdout, passed, failed, skipped, skipped_adr);
     }
     dir.close(io);
 }
@@ -211,6 +221,8 @@ fn runCorpus(
     stdout: *std.Io.Writer,
     passed: *u32,
     failed: *u32,
+    skipped: *u32,
+    skipped_adr: *u32,
 ) !void {
     var dir = root.openDir(io, name, .{}) catch |err| {
         try stdout.print("FAIL  {s}/: openDir {s}\n", .{ name, @errorName(err) });
@@ -244,19 +256,26 @@ fn runCorpus(
         if (line.len == 0) continue;
         if (line[0] == '#') continue;
 
-        const ok = handleLine(&ctx, &dir, line, stdout, name) catch |err| {
+        const result = handleLine(&ctx, &dir, line, stdout, name) catch |err| {
             try stdout.print("FAIL  {s}: '{s}' runner error {s}\n", .{ name, line, @errorName(err) });
             failed.* += 1;
             continue;
         };
 
-        if (ok) {
-            passed.* += 1;
-        } else {
-            failed.* += 1;
+        switch (result) {
+            .passed => passed.* += 1,
+            .failed => failed.* += 1,
+            .skipped_impl => skipped.* += 1,
+            .skipped_adr => skipped_adr.* += 1,
         }
     }
 }
+
+/// Per ADR-0029 Path B (chunk 9.9-h-23): every manifest line resolves
+/// to one of these four outcomes. `skipped_impl` counts toward the
+/// `skip-impl == 0` gate; `skipped_adr` is waived per the named
+/// skip-ADR.
+const LineResult = enum { passed, failed, skipped_impl, skipped_adr };
 
 /// Dispatch a single manifest line. Returns true if the directive's
 /// expectation matched, false otherwise. Returns runner-error only
@@ -268,37 +287,53 @@ fn handleLine(
     line: []const u8,
     stdout: *std.Io.Writer,
     corpus_name: []const u8,
-) !bool {
+) !LineResult {
+    // Per ADR-0029 Path B (chunk 9.9-h-23): prefix-aware skip
+    // classification. `skip-impl <reason>` counts toward gate;
+    // `skip-adr-<ADR-id> <reason>` waived per named skip-ADR;
+    // bare `skip <reason>` is back-compat (WARN + count as
+    // skip-impl) until any remaining hand-authored manifest
+    // gets migrated.
+    if (std.mem.startsWith(u8, line, "skip-impl ")) return .skipped_impl;
+    if (std.mem.startsWith(u8, line, "skip-adr-")) return .skipped_adr;
+    if (std.mem.startsWith(u8, line, "skip ")) {
+        try stdout.print("WARN  {s}: bare `skip` line — migrate to `skip-impl` or `skip-adr-<id>`: {s}\n", .{ corpus_name, line });
+        return .skipped_impl;
+    }
+
     var tok_it = std.mem.tokenizeScalar(u8, line, ' ');
-    const directive = tok_it.next() orelse return false;
+    const directive = tok_it.next() orelse return .failed;
     const rest = std.mem.trim(u8, line[directive.len..], " \t");
 
-    if (std.mem.eql(u8, directive, "valid")) {
-        return handleValidMalformedInvalid(ctx, dir, .valid, rest, stdout, corpus_name);
-    } else if (std.mem.eql(u8, directive, "invalid") or std.mem.eql(u8, directive, "assert_invalid")) {
-        return handleValidMalformedInvalid(ctx, dir, .invalid, takeFile(rest), stdout, corpus_name);
-    } else if (std.mem.eql(u8, directive, "malformed") or std.mem.eql(u8, directive, "assert_malformed")) {
-        return handleValidMalformedInvalid(ctx, dir, .malformed, takeFile(rest), stdout, corpus_name);
-    } else if (std.mem.eql(u8, directive, "module")) {
-        return handleModule(ctx, dir, rest, stdout, corpus_name);
-    } else if (std.mem.eql(u8, directive, "register")) {
-        return handleRegister(ctx, rest, stdout, corpus_name);
-    } else if (std.mem.eql(u8, directive, "assert_return")) {
-        return handleAssertReturn(ctx, rest, stdout, corpus_name);
-    } else if (std.mem.eql(u8, directive, "assert_trap")) {
-        return handleAssertTrap(ctx, rest, stdout, corpus_name, .any);
-    } else if (std.mem.eql(u8, directive, "assert_exhaustion")) {
-        return handleAssertTrap(ctx, rest, stdout, corpus_name, .exhaustion);
-    } else if (std.mem.eql(u8, directive, "assert_unlinkable")) {
-        return handleInstantiateExpectFail(ctx, dir, takeFile(rest), stdout, corpus_name, "unlinkable");
-    } else if (std.mem.eql(u8, directive, "assert_uninstantiable")) {
-        return handleInstantiateExpectFail(ctx, dir, takeFile(rest), stdout, corpus_name, "uninstantiable");
-    } else if (std.mem.eql(u8, directive, "invoke") or std.mem.eql(u8, directive, "action")) {
-        return handleInvoke(ctx, rest, stdout, corpus_name);
-    } else {
-        try stdout.print("FAIL  {s}: unknown directive '{s}'\n", .{ corpus_name, directive });
-        return false;
-    }
+    const ok: bool = blk: {
+        if (std.mem.eql(u8, directive, "valid")) {
+            break :blk try handleValidMalformedInvalid(ctx, dir, .valid, rest, stdout, corpus_name);
+        } else if (std.mem.eql(u8, directive, "invalid") or std.mem.eql(u8, directive, "assert_invalid")) {
+            break :blk try handleValidMalformedInvalid(ctx, dir, .invalid, takeFile(rest), stdout, corpus_name);
+        } else if (std.mem.eql(u8, directive, "malformed") or std.mem.eql(u8, directive, "assert_malformed")) {
+            break :blk try handleValidMalformedInvalid(ctx, dir, .malformed, takeFile(rest), stdout, corpus_name);
+        } else if (std.mem.eql(u8, directive, "module")) {
+            break :blk try handleModule(ctx, dir, rest, stdout, corpus_name);
+        } else if (std.mem.eql(u8, directive, "register")) {
+            break :blk try handleRegister(ctx, rest, stdout, corpus_name);
+        } else if (std.mem.eql(u8, directive, "assert_return")) {
+            break :blk try handleAssertReturn(ctx, rest, stdout, corpus_name);
+        } else if (std.mem.eql(u8, directive, "assert_trap")) {
+            break :blk try handleAssertTrap(ctx, rest, stdout, corpus_name, .any);
+        } else if (std.mem.eql(u8, directive, "assert_exhaustion")) {
+            break :blk try handleAssertTrap(ctx, rest, stdout, corpus_name, .exhaustion);
+        } else if (std.mem.eql(u8, directive, "assert_unlinkable")) {
+            break :blk try handleInstantiateExpectFail(ctx, dir, takeFile(rest), stdout, corpus_name, "unlinkable");
+        } else if (std.mem.eql(u8, directive, "assert_uninstantiable")) {
+            break :blk try handleInstantiateExpectFail(ctx, dir, takeFile(rest), stdout, corpus_name, "uninstantiable");
+        } else if (std.mem.eql(u8, directive, "invoke") or std.mem.eql(u8, directive, "action")) {
+            break :blk try handleInvoke(ctx, rest, stdout, corpus_name);
+        } else {
+            try stdout.print("FAIL  {s}: unknown directive '{s}'\n", .{ corpus_name, directive });
+            break :blk false;
+        }
+    };
+    return if (ok) .passed else .failed;
 }
 
 const ParseDirective = enum { valid, invalid, malformed };
