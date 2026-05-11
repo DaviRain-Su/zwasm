@@ -25,45 +25,31 @@
   §9.5 [x], §9.6 [x], §9.7 [x], §9.8 [x] (absorbed per
   ADR-0044), **§9.9 in-flight**.
 - **Branch**: `zwasm-from-scratch`.
-- **Latest §9.9 landing**: `324e5fc3` (§9.9 / 9.9-g-18 —
-  x86_64 explicit-`return` v128 marshal closes simd_lane.140
-  compile gap; D-078 partial). OrbStack FAIL: 4 → 3.
+- **Latest §9.9 landing**: §9.9 / 9.9-g-19 (this commit) —
+  ARM64 `extra_consts` infrastructure (ADR-0051) + 4 bitmask
+  emit handlers; D-067 discharged. Mac aarch64 simd_assert
+  11263/3 (-1 simd_boolean.0 compile flip); OrbStack 2 visible
+  FAILs before pre-existing D-077 runner panic.
 - **Active row**: §9.9 (still `[ ]`). Closes when fail = skip = 0
   on the 3-host gate per the row's exit criterion.
 
 ## Next sub-chunk candidates (names only)
 
-- **D-067 bitmask 9.9-g-19 — BLOCKED on ARM64 const-pool
-  infrastructure (load-bearing tradeoff)**. Survey lands at
-  `private/notes/p9-9.9-g-19-bitmask-neon-survey.md`; encoder
-  bit patterns verified via clang-as in /tmp/claude-501/asm_test
-  (SSHR.16B/8H/4S = 0x4F09/11/21_0420 family; ADDV.16B/8H/4S =
-  0x4E31/71/B1_B820; ZIP1.16B = 0x4E02_3820; EXT.16B #8 =
-  0x6E02_4020). **Blocking gap**: ARM64 `func.simd_consts` only
-  holds user-written v128.const literals; x86_64 has an
-  `extra_consts` + `simd_consts_base` mechanism (per ADR-0042)
-  for emit-handler-injected per-shape masks. Bitmask requires
-  4 per-shape masks (one per i8x16/i16x8/i32x4 — i64x2 takes
-  scalar-extract path, no vector mask). **Design choice needed**:
-  (a) mirror x86_64 ADR-0042 by adding `extra_consts` to ARM64
-  `ctx_mod` + thread through emit close, OR (b) inline mask
-  materialisation via MOVI+MOVK sequences (4-8 instructions per
-  mask, larger code size). ADR required before implementation
-  per ROADMAP §18.2 — touches §4 architecture (ARM64 ctx_mod
-  surface) + §11 layers (const-pool plumbing). Recommended path
-  per autonomous-loop survey: option (a), mirroring x86_64;
-  changes are bounded to arm64/ctx.zig + arm64/emit.zig const-
-  pool flush logic.
 - **D-078 (c) simd_bitwise.17 — root cause: x86_64 v128
   XMM spill not yet implemented**. `resolveXmm` rejects
   spilled v128 vregs (handler not XMM-spill-aware). Discharge
   needs `xmmLoadSpilledV128` / `xmmStoreSpilledV128` using
   16-byte MOVUPS + handler updates (~100 sites). Substantial
   refactor; Step 0 survey + co-deliverable with D-057
-  source-split. (D-078 (b) v128 globals retired as
-  misdiagnosis; actual gap was return-v128 closed at 9.9-g-18.)
+  source-split.
 - **D-078 (a) f64x2_extract_lane value mismatch** — JIT-disasm
   spike via debug_jit_auto skill (Mac PASSES, x86_64 only).
+- **D-063 simd_const call_indirect-param Trap** — Mac aarch64
+  v128 args via call_indirect bounds/sig/BLR sequence; static
+  analysis at 9.9-g-1 ruled out marshal-spill alias; lldb spike
+  next per debt.md.
+- **simd_const.388 BadValType (Mac)** — fresh exposure from
+  9.9-g-19 wider validator coverage; needs investigation.
 - Aggregate `test-spec-simd` into `test-all` (preventive — surfaces
   silent x86_64 simd regressions in autonomous loop gating).
 
@@ -72,13 +58,12 @@ impossibility check (debt.md `blocked-by:` barriers).
 
 ## Open structural debt (pointers — see `.dev/debt.md`)
 
-- `now`: D-063 (call_indirect v128 Trap), D-067 (i*x*.bitmask
-  validator-shape + ARM64 emit), D-071 (D-066 mirror cluster
-  fully discharged at 9.9-g-16; row body retained for
+- `now`: D-063 (call_indirect v128 Trap), D-071 (D-066 mirror
+  cluster fully discharged at 9.9-g-16; row body retained for
   historical traceability), D-077 (OrbStack simd_assert_runner
-  deinit panic — pre-existing), D-078 (4-fail residual cluster
-  diagnosis: f64x2_extract_lane spike + v128 globals gap +
-  simd_bitwise.17 dispatch).
+  deinit panic — pre-existing), D-078 (residual cluster
+  diagnosis: f64x2_extract_lane spike + simd_bitwise.17 dispatch
+  — (b) v128 globals retired as misdiagnosis at 9.9-g-18).
 - `blocked-by`: D-007 / D-010 / D-016 / D-018 / D-020 / D-021 /
   D-022 / D-026 / D-028 / D-052 / D-055 / D-057 / D-058 / D-059 /
   D-065 / D-070 / D-072 / D-073 / D-074 / D-075 / D-076 — barrier
