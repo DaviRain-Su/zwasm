@@ -59,10 +59,14 @@
    (`op_simd.zig` 4554 + `inst_neon.zig` 2249 +
    `op_simd_test.zig` 2624 vs §A2 cap 2000). Output: partition
    table + ADR-0054 draft skeleton. See §"Track B".
-3. **Track C — ADR-0029 path A vs B** (skip-impl/skip-adr
-   vocabulary OR runner-internal classification). Resolves
-   D-072 + D-073 + the §9.9 skip-exit interpretation. See
-   §"Track C".
+3. **Track C — ADR-0029 path A vs B** — **DELIVERABLE LANDED,
+   AWAITING USER DECISION** at
+   `.dev/phase10_prep/track_c_adr_0029_path.md` (Path A = amend
+   ADR-0029 to match runner-internal hardcoded mapping; Path B
+   = migrate manifests to `skip-impl` / `skip-adr-<id>` prefix
+   vocabulary; recommendation Path B for no-drift / Phase 10
+   workflow / D-072 piggyback discharge; 4 implementation
+   chunks if Path B; §8 has 5 open questions).
 4. **Track D — Phase 10 transition gate doc** (draft
    `.dev/phase10_transition_gate.md` so `/continue` hard-gate
    detector halts at Phase 10 entry). See §"Track D".
