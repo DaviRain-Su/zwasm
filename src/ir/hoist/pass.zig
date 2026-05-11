@@ -54,7 +54,6 @@ pub const Error = error{OutOfMemory};
 /// Caller-owned: `func.synthetic_locals` and `func.
 /// hoisted_constants` slices must be freed by `deinit*`
 /// helpers below before `func.deinit`.
-
 pub fn run(allocator: Allocator, func: *ZirFunc) Error!void {
     const li = func.loop_info orelse return;
     if (li.loop_headers.len == 0) return;
@@ -293,9 +292,9 @@ test "run: hoists single i32.const via local-rewrite" {
     defer f.deinit(testing.allocator);
     defer deinitArtifacts(testing.allocator, &f);
 
-    try f.instrs.append(testing.allocator, .{ .op = .@"loop" });
+    try f.instrs.append(testing.allocator, .{ .op = .loop });
     try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 42 });
-    try f.instrs.append(testing.allocator, .{ .op = .@"drop" });
+    try f.instrs.append(testing.allocator, .{ .op = .drop });
     try f.instrs.append(testing.allocator, .{ .op = .end });
     try f.blocks.append(testing.allocator, .{ .kind = .loop, .start_inst = 0, .end_inst = 3 });
 
@@ -311,10 +310,10 @@ test "run: hoists single i32.const via local-rewrite" {
     try testing.expectEqual(@as(u32, 42), f.instrs.items[0].payload);
     try testing.expectEqual(ZirOp.@"local.set", f.instrs.items[1].op);
     try testing.expectEqual(@as(u32, 0), f.instrs.items[1].payload);
-    try testing.expectEqual(ZirOp.@"loop", f.instrs.items[2].op);
+    try testing.expectEqual(ZirOp.loop, f.instrs.items[2].op);
     try testing.expectEqual(ZirOp.@"local.get", f.instrs.items[3].op);
     try testing.expectEqual(@as(u32, 0), f.instrs.items[3].payload);
-    try testing.expectEqual(ZirOp.@"drop", f.instrs.items[4].op);
+    try testing.expectEqual(ZirOp.drop, f.instrs.items[4].op);
     try testing.expectEqual(ZirOp.end, f.instrs.items[5].op);
 
     // Block update: loop now at PC 2..5.
@@ -347,7 +346,7 @@ test "run: const outside any loop is left alone" {
     defer deinitArtifacts(testing.allocator, &f);
 
     try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 99 });
-    try f.instrs.append(testing.allocator, .{ .op = .@"drop" });
+    try f.instrs.append(testing.allocator, .{ .op = .drop });
     try f.instrs.append(testing.allocator, .{ .op = .end });
 
     const li = try loop_info_mod.compute(testing.allocator, &f);
@@ -383,9 +382,9 @@ test "run: leaves branch_targets[] depths invariant across hoist prologue (§9.8
     defer f.deinit(testing.allocator);
     defer deinitArtifacts(testing.allocator, &f);
 
-    try f.instrs.append(testing.allocator, .{ .op = .@"loop" });
+    try f.instrs.append(testing.allocator, .{ .op = .loop });
     try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 7 });
-    try f.instrs.append(testing.allocator, .{ .op = .@"drop" });
+    try f.instrs.append(testing.allocator, .{ .op = .drop });
     try f.instrs.append(testing.allocator, .{ .op = .end });
     try f.blocks.append(testing.allocator, .{ .kind = .loop, .start_inst = 0, .end_inst = 3 });
     try f.branch_targets.append(testing.allocator, 0);
@@ -406,11 +405,11 @@ test "run: multiple consts in same loop allocate distinct locals" {
     defer f.deinit(testing.allocator);
     defer deinitArtifacts(testing.allocator, &f);
 
-    try f.instrs.append(testing.allocator, .{ .op = .@"loop" });
+    try f.instrs.append(testing.allocator, .{ .op = .loop });
     try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 10 });
     try f.instrs.append(testing.allocator, .{ .op = .@"i64.const", .payload = 20 });
-    try f.instrs.append(testing.allocator, .{ .op = .@"drop" });
-    try f.instrs.append(testing.allocator, .{ .op = .@"drop" });
+    try f.instrs.append(testing.allocator, .{ .op = .drop });
+    try f.instrs.append(testing.allocator, .{ .op = .drop });
     try f.instrs.append(testing.allocator, .{ .op = .end });
     try f.blocks.append(testing.allocator, .{ .kind = .loop, .start_inst = 0, .end_inst = 5 });
 

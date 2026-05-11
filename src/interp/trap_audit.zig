@@ -30,8 +30,8 @@ test "call_indirect: selector OOB → OutOfBoundsTableAccess" {
     var caller = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &.{} }, &.{});
     defer caller.deinit(testing.allocator);
     try caller.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 99, .extra = 0 });
-    try caller.instrs.append(testing.allocator, .{ .op = .@"call_indirect", .payload = 0, .extra = 0 });
-    try caller.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
+    try caller.instrs.append(testing.allocator, .{ .op = .call_indirect, .payload = 0, .extra = 0 });
+    try caller.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
 
     var t = DispatchTable.init();
     mvp.register(&t);
@@ -52,8 +52,8 @@ test "call_indirect: null table cell → UninitializedElement" {
     var caller = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &.{} }, &.{});
     defer caller.deinit(testing.allocator);
     try caller.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0, .extra = 0 });
-    try caller.instrs.append(testing.allocator, .{ .op = .@"call_indirect", .payload = 0, .extra = 0 });
-    try caller.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
+    try caller.instrs.append(testing.allocator, .{ .op = .call_indirect, .payload = 0, .extra = 0 });
+    try caller.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
 
     var t = DispatchTable.init();
     mvp.register(&t);
@@ -76,13 +76,13 @@ test "call_indirect: sig mismatch → IndirectCallTypeMismatch" {
     var callee = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &i32_arr }, &.{});
     defer callee.deinit(testing.allocator);
     try callee.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0, .extra = 0 });
-    try callee.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
+    try callee.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
 
     var caller = zir.ZirFunc.init(1, .{ .params = &.{}, .results = &.{} }, &.{});
     defer caller.deinit(testing.allocator);
     try caller.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0, .extra = 0 });
-    try caller.instrs.append(testing.allocator, .{ .op = .@"call_indirect", .payload = 0, .extra = 0 });
-    try caller.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
+    try caller.instrs.append(testing.allocator, .{ .op = .call_indirect, .payload = 0, .extra = 0 });
+    try caller.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
 
     var t = DispatchTable.init();
     mvp.register(&t);
@@ -108,13 +108,13 @@ test "call_indirect: matching sig invokes callee through table" {
     var callee = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &i32_arr }, &.{});
     defer callee.deinit(testing.allocator);
     try callee.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 42, .extra = 0 });
-    try callee.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
+    try callee.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
 
     var caller = zir.ZirFunc.init(1, .{ .params = &.{}, .results = &i32_arr }, &.{});
     defer caller.deinit(testing.allocator);
     try caller.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0, .extra = 0 });
-    try caller.instrs.append(testing.allocator, .{ .op = .@"call_indirect", .payload = 0, .extra = 0 });
-    try caller.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
+    try caller.instrs.append(testing.allocator, .{ .op = .call_indirect, .payload = 0, .extra = 0 });
+    try caller.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
 
     var t = DispatchTable.init();
     mvp.register(&t);
@@ -140,8 +140,8 @@ test "6.K.1: null funcref round-trip — ref.is_null + call_indirect" {
     var caller = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &.{} }, &.{});
     defer caller.deinit(testing.allocator);
     try caller.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0, .extra = 0 });
-    try caller.instrs.append(testing.allocator, .{ .op = .@"call_indirect", .payload = 0, .extra = 0 });
-    try caller.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
+    try caller.instrs.append(testing.allocator, .{ .op = .call_indirect, .payload = 0, .extra = 0 });
+    try caller.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
 
     var t = DispatchTable.init();
     mvp.register(&t);
@@ -170,7 +170,7 @@ test "6.K.1: two runtimes share a table; FuncEntity routes to source" {
     var callee_a = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &i32_arr }, &.{});
     defer callee_a.deinit(testing.allocator);
     try callee_a.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 42, .extra = 0 });
-    try callee_a.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
+    try callee_a.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
 
     var rt_a = Runtime.init(testing.allocator);
     defer rt_a.deinit();
@@ -182,8 +182,8 @@ test "6.K.1: two runtimes share a table; FuncEntity routes to source" {
     var caller = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &i32_arr }, &.{});
     defer caller.deinit(testing.allocator);
     try caller.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0, .extra = 0 });
-    try caller.instrs.append(testing.allocator, .{ .op = .@"call_indirect", .payload = 0, .extra = 0 });
-    try caller.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
+    try caller.instrs.append(testing.allocator, .{ .op = .call_indirect, .payload = 0, .extra = 0 });
+    try caller.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
 
     var t = DispatchTable.init();
     mvp.register(&t);

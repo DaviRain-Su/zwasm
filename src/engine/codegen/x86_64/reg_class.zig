@@ -30,10 +30,22 @@ const std = @import("std");
 /// the AMD64 register encoding (RAX=0, RCX=1, …, R15=15) so
 /// `low3()` is a 3-bit truncation.
 pub const Gpr = enum(u4) {
-    rax = 0, rcx = 1, rdx = 2, rbx = 3,
-    rsp = 4, rbp = 5, rsi = 6, rdi = 7,
-    r8  = 8, r9  = 9, r10 = 10, r11 = 11,
-    r12 = 12, r13 = 13, r14 = 14, r15 = 15,
+    rax = 0,
+    rcx = 1,
+    rdx = 2,
+    rbx = 3,
+    rsp = 4,
+    rbp = 5,
+    rsi = 6,
+    rdi = 7,
+    r8 = 8,
+    r9 = 9,
+    r10 = 10,
+    r11 = 11,
+    r12 = 12,
+    r13 = 13,
+    r14 = 14,
+    r15 = 15,
 
     /// Low 3 bits — the field that fits in ModR/M reg / rm.
     pub fn low3(self: Gpr) u3 {
@@ -53,10 +65,22 @@ pub const Gpr = enum(u4) {
 /// — XMM8..XMM15 require REX.R / REX.B in the same way R8..R15
 /// do for GPR encoding.
 pub const Xmm = enum(u4) {
-    xmm0 = 0, xmm1 = 1, xmm2 = 2, xmm3 = 3,
-    xmm4 = 4, xmm5 = 5, xmm6 = 6, xmm7 = 7,
-    xmm8 = 8, xmm9 = 9, xmm10 = 10, xmm11 = 11,
-    xmm12 = 12, xmm13 = 13, xmm14 = 14, xmm15 = 15,
+    xmm0 = 0,
+    xmm1 = 1,
+    xmm2 = 2,
+    xmm3 = 3,
+    xmm4 = 4,
+    xmm5 = 5,
+    xmm6 = 6,
+    xmm7 = 7,
+    xmm8 = 8,
+    xmm9 = 9,
+    xmm10 = 10,
+    xmm11 = 11,
+    xmm12 = 12,
+    xmm13 = 13,
+    xmm14 = 14,
+    xmm15 = 15,
 
     pub fn low3(self: Xmm) u3 {
         return @truncate(@as(u4, @intFromEnum(self)));

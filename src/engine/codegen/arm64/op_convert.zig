@@ -154,7 +154,7 @@ pub fn emitFloatDemotePromote(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const vn = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
     const vd = try gpr.fpDefSpilled(ctx.alloc, args.result, 0);
     const word: u32 = switch (ins.op) {
-        .@"f32.demote_f64"  => inst.encFcvtSFromD(vd, vn),
+        .@"f32.demote_f64" => inst.encFcvtSFromD(vd, vn),
         .@"f64.promote_f32" => inst.encFcvtDFromS(vd, vn),
         else => unreachable,
     };

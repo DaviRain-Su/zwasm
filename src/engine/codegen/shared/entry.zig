@@ -442,13 +442,13 @@ test "entry: i32.load offset=0 reads memory[0..4] through X28 vm_base" {
         return error.SkipZigTest;
     }
 
-    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{ .i32 } };
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
     var fn0 = ZirFunc.init(0, sig, &.{});
     defer fn0.deinit(testing.allocator);
     // (i32.const 0) (i32.load offset=0) end
     try fn0.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0 });
     try fn0.instrs.append(testing.allocator, .{ .op = .@"i32.load", .payload = 0 });
-    try fn0.instrs.append(testing.allocator, .{ .op = .@"end" });
+    try fn0.instrs.append(testing.allocator, .{ .op = .end });
     fn0.liveness = .{ .ranges = &[_]zir.LiveRange{
         .{ .def_pc = 0, .last_use_pc = 1 },
         .{ .def_pc = 1, .last_use_pc = 2 },
@@ -492,11 +492,11 @@ test "entry: ADR-0018 sub-1c — spilled i32.const returns 42 via STR/LDR round-
     // prologue extends frame by 8 + 16-align = 16 bytes; i32.const
     // emits MOVZ X14,#42 + STR X14,[SP]; end emits LDR X14,[SP] +
     // MOV X0,X14. Calling via the entry-frame returns 42.
-    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{ .i32 } };
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
     var fn0 = ZirFunc.init(0, sig, &.{});
     defer fn0.deinit(testing.allocator);
     try fn0.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 42 });
-    try fn0.instrs.append(testing.allocator, .{ .op = .@"end" });
+    try fn0.instrs.append(testing.allocator, .{ .op = .end });
     fn0.liveness = .{ .ranges = &[_]zir.LiveRange{
         .{ .def_pc = 0, .last_use_pc = 1 },
     } };
@@ -546,11 +546,13 @@ test "entry: ADR-0027 — global.set 0 then global.get 0 (i32) round-trips throu
     try fn0.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 7 });
     try fn0.instrs.append(testing.allocator, .{ .op = .@"global.set", .payload = 0 });
     try fn0.instrs.append(testing.allocator, .{ .op = .@"global.get", .payload = 0 });
-    try fn0.instrs.append(testing.allocator, .{ .op = .@"end" });
-    fn0.liveness = .{ .ranges = &[_]zir.LiveRange{
-        .{ .def_pc = 0, .last_use_pc = 1 }, // const → set
-        .{ .def_pc = 2, .last_use_pc = 3 }, // get → end
-    } };
+    try fn0.instrs.append(testing.allocator, .{ .op = .end });
+    fn0.liveness = .{
+        .ranges = &[_]zir.LiveRange{
+            .{ .def_pc = 0, .last_use_pc = 1 }, // const → set
+            .{ .def_pc = 2, .last_use_pc = 3 }, // get → end
+        },
+    };
     const slots = [_]u16{ 0, 0 };
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const sigs = [_]zir.FuncType{sig};
@@ -592,11 +594,11 @@ test "entry: pure constant function returns 42 (sanity — no memory access)" {
         return error.SkipZigTest;
     }
 
-    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{ .i32 } };
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
     var fn0 = ZirFunc.init(0, sig, &.{});
     defer fn0.deinit(testing.allocator);
     try fn0.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 42 });
-    try fn0.instrs.append(testing.allocator, .{ .op = .@"end" });
+    try fn0.instrs.append(testing.allocator, .{ .op = .end });
     fn0.liveness = .{ .ranges = &[_]zir.LiveRange{
         .{ .def_pc = 0, .last_use_pc = 1 },
     } };
@@ -641,7 +643,7 @@ test "entry: callI32_i32i32 — 2 i32 params summed via i32.add" {
     try fn0.instrs.append(testing.allocator, .{ .op = .@"local.get", .payload = 0 });
     try fn0.instrs.append(testing.allocator, .{ .op = .@"local.get", .payload = 1 });
     try fn0.instrs.append(testing.allocator, .{ .op = .@"i32.add" });
-    try fn0.instrs.append(testing.allocator, .{ .op = .@"end" });
+    try fn0.instrs.append(testing.allocator, .{ .op = .end });
     fn0.liveness = .{ .ranges = &[_]zir.LiveRange{
         .{ .def_pc = 0, .last_use_pc = 2 },
         .{ .def_pc = 1, .last_use_pc = 2 },
@@ -685,7 +687,7 @@ test "entry: callI32_i32 — 1 i32 param echoed through W1 → SP slot 0 → res
     var fn0 = ZirFunc.init(0, sig, &.{});
     defer fn0.deinit(testing.allocator);
     try fn0.instrs.append(testing.allocator, .{ .op = .@"local.get", .payload = 0 });
-    try fn0.instrs.append(testing.allocator, .{ .op = .@"end" });
+    try fn0.instrs.append(testing.allocator, .{ .op = .end });
     fn0.liveness = .{ .ranges = &[_]zir.LiveRange{
         .{ .def_pc = 0, .last_use_pc = 1 },
     } };
@@ -731,7 +733,7 @@ test "entry: f32 local round-trip — local.get 0 of f32 param via V0" {
     var fn0 = ZirFunc.init(0, sig, &.{});
     defer fn0.deinit(testing.allocator);
     try fn0.instrs.append(testing.allocator, .{ .op = .@"local.get", .payload = 0 });
-    try fn0.instrs.append(testing.allocator, .{ .op = .@"end" });
+    try fn0.instrs.append(testing.allocator, .{ .op = .end });
     fn0.liveness = .{ .ranges = &[_]zir.LiveRange{
         .{ .def_pc = 0, .last_use_pc = 1 },
     } };
@@ -778,7 +780,7 @@ test "entry: callI64NoArgs — i64.const 0xDEADBEEFCAFE returns full 64-bit" {
     defer fn0.deinit(testing.allocator);
     // i64.const 0xDEADBEEFCAFE → low32 = 0xBEEFCAFE, high32 = 0xDEAD.
     try fn0.instrs.append(testing.allocator, .{ .op = .@"i64.const", .payload = 0xBEEFCAFE, .extra = 0xDEAD });
-    try fn0.instrs.append(testing.allocator, .{ .op = .@"end" });
+    try fn0.instrs.append(testing.allocator, .{ .op = .end });
     fn0.liveness = .{ .ranges = &[_]zir.LiveRange{
         .{ .def_pc = 0, .last_use_pc = 1 },
     } };

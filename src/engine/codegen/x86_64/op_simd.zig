@@ -1361,7 +1361,6 @@ pub fn emitF64x2Ge(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regallo
 /// with a 7-instruction NaN/zero correction sequence per
 /// `lower.isle` "F32X4 (fmin _ x y)" — deferred to §9.7-q with
 /// proper synthesis.
-
 pub fn emitF32x4Add(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
     return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encAddps);
 }
@@ -1651,7 +1650,6 @@ pub fn emitV128Not(
 /// SSE2 packed-int encoders (PAND / POR / PXOR — int-domain XOR
 /// preferred over XORPS for bit-identical-but-domain-faster
 /// semantics on older microarchitectures).
-
 pub fn emitV128And(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
     return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPand);
 }
@@ -1835,7 +1833,6 @@ pub fn emitI64x2AllTrue(allocator: Allocator, buf: *std.ArrayList(u8), alloc: re
 ///   i16x8: PACKSSWB(src, src) duplicates word high bits into byte
 ///          high bits, then PMOVMSKB extracts 16 bits, SHR 8 keeps
 ///          one half (8-bit mask).
-
 pub fn emitI8x16Bitmask(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
@@ -2361,7 +2358,6 @@ pub fn emitI8x16Swizzle(
 /// Unsigned conversions and trunc-sat ops defer to later chunks
 /// (cranelift uses const-pool float magic numbers per
 /// `lower.isle:3761+`; pending ADR-0042 plumbing).
-
 pub fn emitF32x4ConvertI32x4S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
     return emitV128FpUnop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encCvtdq2ps);
 }
@@ -2440,7 +2436,6 @@ pub fn emitI64x2Neg(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regall
 ///
 /// For src >= 0: sign_mask = 0; result = src.
 /// For src < 0:  sign_mask = -1; result = ~src - (-1) = -src.
-
 pub fn emitI8x16Abs(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
     return emitV128FpUnop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPabsb);
 }
@@ -2494,7 +2489,6 @@ pub fn emitI64x2Abs(
 /// Wasm spec exactly: signed pack saturates to signed half-
 /// width range; unsigned pack clamps signed input to unsigned
 /// half-width range.
-
 pub fn emitI8x16NarrowI16x8S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
     return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPacksswb);
 }
@@ -2689,7 +2683,6 @@ pub fn emitI64x2ShrS(
 /// reuse the shared 9.7-b `emitV128IntBinop` helper unchanged —
 /// equality comparison's structural shape (pop 2, push 1, MOVAPS-
 /// elide when aliased) is identical to int add/sub.
-
 pub fn emitI8x16Eq(
     allocator: Allocator,
     buf: *std.ArrayList(u8),

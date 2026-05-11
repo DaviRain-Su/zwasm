@@ -275,7 +275,6 @@ pub fn encMvn16B(rd: Vn, rn: Vn) u32 {
 ///
 /// Per Arm IHI 0055 §C7.2.5. SUB shares the same encoding shape
 /// with U=1 (bit[29] set; base += 0x20000000).
-
 /// `ADD V<d>.16B, V<n>.16B, V<m>.16B` — i8x16 lanewise add.
 pub fn encAdd16B(rd: Vn, rn: Vn, rm: Vn) u32 {
     return 0x4E208400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
@@ -330,7 +329,6 @@ pub fn encSub2D(rd: Vn, rn: Vn, rm: Vn) u32 {
 /// a multi-instr synthesis (extract / scalar mul / insert) and
 /// defers to §9.9 / 9.5-c-vi alongside the other 64-bit-lane ops
 /// that need synthesis.
-
 /// `MUL V<d>.16B, V<n>.16B, V<m>.16B` — i8x16 lanewise mul.
 pub fn encMul16B(rd: Vn, rn: Vn, rm: Vn) u32 {
     return 0x4E209C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
@@ -355,18 +353,36 @@ pub fn encMul4S(rd: Vn, rn: Vn, rm: Vn) u32 {
 // §C7.2.230.
 // =====================================================================
 
-pub fn encAbs16B(rd: Vn, rn: Vn) u32 { return 0x4E20B800 | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encAbs8H(rd: Vn, rn: Vn) u32  { return 0x4E60B800 | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encAbs4S(rd: Vn, rn: Vn) u32  { return 0x4EA0B800 | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encAbs2D(rd: Vn, rn: Vn) u32  { return 0x4EE0B800 | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encNeg16B(rd: Vn, rn: Vn) u32 { return 0x6E20B800 | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encNeg8H(rd: Vn, rn: Vn) u32  { return 0x6E60B800 | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encNeg4S(rd: Vn, rn: Vn) u32  { return 0x6EA0B800 | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encNeg2D(rd: Vn, rn: Vn) u32  { return 0x6EE0B800 | (@as(u32, rn) << 5) | @as(u32, rd); }
+pub fn encAbs16B(rd: Vn, rn: Vn) u32 {
+    return 0x4E20B800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encAbs8H(rd: Vn, rn: Vn) u32 {
+    return 0x4E60B800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encAbs4S(rd: Vn, rn: Vn) u32 {
+    return 0x4EA0B800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encAbs2D(rd: Vn, rn: Vn) u32 {
+    return 0x4EE0B800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encNeg16B(rd: Vn, rn: Vn) u32 {
+    return 0x6E20B800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encNeg8H(rd: Vn, rn: Vn) u32 {
+    return 0x6E60B800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encNeg4S(rd: Vn, rn: Vn) u32 {
+    return 0x6EA0B800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encNeg2D(rd: Vn, rn: Vn) u32 {
+    return 0x6EE0B800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
 /// `CNT V<d>.16B, V<n>.16B` — per-byte popcount. Byte-only on
 /// NEON (no 8H/4S/2D form). Same opcode field (00101) as MVN/NOT
 /// but U=0 instead of U=1.
-pub fn encCnt16B(rd: Vn, rn: Vn) u32 { return 0x4E205800 | (@as(u32, rn) << 5) | @as(u32, rd); }
+pub fn encCnt16B(rd: Vn, rn: Vn) u32 {
+    return 0x4E205800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
 
 // =====================================================================
 // Integer min/max + rounding-half-add (avgr_u) — Advanced SIMD three-same,
@@ -378,20 +394,48 @@ pub fn encCnt16B(rd: Vn, rn: Vn) u32 { return 0x4E205800 | (@as(u32, rn) << 5) |
 // per the proposal). Constants verified via `clang -arch arm64`.
 // =====================================================================
 
-pub fn encSmin16B(rd: Vn, rn: Vn, rm: Vn) u32 { return 0x4E206C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encSmin8H(rd: Vn, rn: Vn, rm: Vn) u32  { return 0x4E606C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encSmin4S(rd: Vn, rn: Vn, rm: Vn) u32  { return 0x4EA06C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encUmin16B(rd: Vn, rn: Vn, rm: Vn) u32 { return 0x6E206C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encUmin8H(rd: Vn, rn: Vn, rm: Vn) u32  { return 0x6E606C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encUmin4S(rd: Vn, rn: Vn, rm: Vn) u32  { return 0x6EA06C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encSmax16B(rd: Vn, rn: Vn, rm: Vn) u32 { return 0x4E206400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encSmax8H(rd: Vn, rn: Vn, rm: Vn) u32  { return 0x4E606400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encSmax4S(rd: Vn, rn: Vn, rm: Vn) u32  { return 0x4EA06400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encUmax16B(rd: Vn, rn: Vn, rm: Vn) u32 { return 0x6E206400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encUmax8H(rd: Vn, rn: Vn, rm: Vn) u32  { return 0x6E606400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encUmax4S(rd: Vn, rn: Vn, rm: Vn) u32  { return 0x6EA06400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encUrhadd16B(rd: Vn, rn: Vn, rm: Vn) u32 { return 0x6E201400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encUrhadd8H(rd: Vn, rn: Vn, rm: Vn) u32  { return 0x6E601400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
+pub fn encSmin16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E206C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encSmin8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E606C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encSmin4S(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4EA06C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encUmin16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E206C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encUmin8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E606C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encUmin4S(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6EA06C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encSmax16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E206400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encSmax8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E606400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encSmax4S(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4EA06400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encUmax16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E206400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encUmax8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E606400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encUmax4S(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6EA06400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encUrhadd16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E201400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encUrhadd8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E601400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
 
 // =====================================================================
 // Per-element shifts — `USHL Vd.<T>, Vn.<T>, Vm.<T>` (vector form).
@@ -401,15 +445,31 @@ pub fn encUrhadd8H(rd: Vn, rn: Vn, rm: Vn) u32  { return 0x6E601400 | (@as(u32, 
 // arm64`. Per Arm IHI 0055 §C7.2.412 (USHL) / §C7.2.331 (SSHL).
 // =====================================================================
 
-pub fn encUshl16B(rd: Vn, rn: Vn, rm: Vn) u32 { return 0x6E204400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encUshl8H(rd: Vn, rn: Vn, rm: Vn) u32  { return 0x6E604400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encUshl4S(rd: Vn, rn: Vn, rm: Vn) u32  { return 0x6EA04400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encUshl2D(rd: Vn, rn: Vn, rm: Vn) u32  { return 0x6EE04400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
+pub fn encUshl16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E204400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encUshl8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E604400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encUshl4S(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6EA04400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encUshl2D(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6EE04400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
 // SSHL — signed counterpart of USHL (negative amount = arithmetic shift right). U=0.
-pub fn encSshl16B(rd: Vn, rn: Vn, rm: Vn) u32 { return 0x4E204400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encSshl8H(rd: Vn, rn: Vn, rm: Vn) u32  { return 0x4E604400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encSshl4S(rd: Vn, rn: Vn, rm: Vn) u32  { return 0x4EA04400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encSshl2D(rd: Vn, rn: Vn, rm: Vn) u32  { return 0x4EE04400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd); }
+pub fn encSshl16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E204400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encSshl8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E604400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encSshl4S(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4EA04400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encSshl2D(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4EE04400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
 
 // =====================================================================
 // Across-lane reductions (UMAXV / UMINV) — Advanced SIMD across-lanes,
@@ -419,10 +479,18 @@ pub fn encSshl2D(rd: Vn, rn: Vn, rm: Vn) u32  { return 0x4EE04400 | (@as(u32, rm
 // `clang -arch arm64`. Per Arm IHI 0055 §C7.2.387 / §C7.2.394.
 // =====================================================================
 
-pub fn encUmaxv16B(rd: Vn, rn: Vn) u32 { return 0x6E30A800 | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encUminv16B(rd: Vn, rn: Vn) u32 { return 0x6E31A800 | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encUminv8H(rd: Vn, rn: Vn) u32  { return 0x6E71A800 | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encUminv4S(rd: Vn, rn: Vn) u32  { return 0x6EB1A800 | (@as(u32, rn) << 5) | @as(u32, rd); }
+pub fn encUmaxv16B(rd: Vn, rn: Vn) u32 {
+    return 0x6E30A800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encUminv16B(rd: Vn, rn: Vn) u32 {
+    return 0x6E31A800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encUminv8H(rd: Vn, rn: Vn) u32 {
+    return 0x6E71A800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encUminv4S(rd: Vn, rn: Vn) u32 {
+    return 0x6EB1A800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
 
 // =====================================================================
 // Across-lane sum (ADDV) — Advanced SIMD across-lanes, Q=1, U=0,
@@ -432,9 +500,15 @@ pub fn encUminv4S(rd: Vn, rn: Vn) u32  { return 0x6EB1A800 | (@as(u32, rn) << 5)
 // Q-bit-set form of `encAddvB8B` (0x0E31B800 → 0x4E31B800).
 // =====================================================================
 
-pub fn encAddvB16B(rd: Vn, rn: Vn) u32 { return 0x4E31B800 | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encAddvH8H(rd: Vn, rn: Vn) u32  { return 0x4E71B800 | (@as(u32, rn) << 5) | @as(u32, rd); }
-pub fn encAddvS4S(rd: Vn, rn: Vn) u32  { return 0x4EB1B800 | (@as(u32, rn) << 5) | @as(u32, rd); }
+pub fn encAddvB16B(rd: Vn, rn: Vn) u32 {
+    return 0x4E31B800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encAddvH8H(rd: Vn, rn: Vn) u32 {
+    return 0x4E71B800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+pub fn encAddvS4S(rd: Vn, rn: Vn) u32 {
+    return 0x4EB1B800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
 
 // =====================================================================
 // SSHR — Advanced SIMD vector right shift (signed, immediate).
@@ -1810,9 +1884,9 @@ test "encFRintZ2D: V0, V1 (f64x2.trunc)" {
 
 test "FP unary 7 ops × 2 shapes: all distinct at identical operands" {
     const v0_v0_words = [_]u32{
-        encFAbs4S(0, 0),  encFAbs2D(0, 0),
-        encFNeg4S(0, 0),  encFNeg2D(0, 0),
-        encFSqrt4S(0, 0), encFSqrt2D(0, 0),
+        encFAbs4S(0, 0),   encFAbs2D(0, 0),
+        encFNeg4S(0, 0),   encFNeg2D(0, 0),
+        encFSqrt4S(0, 0),  encFSqrt2D(0, 0),
         encFRintN4S(0, 0), encFRintN2D(0, 0),
         encFRintM4S(0, 0), encFRintM2D(0, 0),
         encFRintP4S(0, 0), encFRintP2D(0, 0),

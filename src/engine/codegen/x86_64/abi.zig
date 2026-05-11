@@ -403,8 +403,8 @@ test "arg_gprs covers RDI, RSI, RDX, RCX, R8, R9 in SysV order" {
     try testing.expectEqual(Gpr.rsi, arg_gprs[1]);
     try testing.expectEqual(Gpr.rdx, arg_gprs[2]);
     try testing.expectEqual(Gpr.rcx, arg_gprs[3]);
-    try testing.expectEqual(Gpr.r8,  arg_gprs[4]);
-    try testing.expectEqual(Gpr.r9,  arg_gprs[5]);
+    try testing.expectEqual(Gpr.r8, arg_gprs[4]);
+    try testing.expectEqual(Gpr.r9, arg_gprs[5]);
 }
 
 test "arg_xmms covers XMM0..XMM7" {
@@ -516,8 +516,8 @@ test "win64.arg_gprs covers RCX, RDX, R8, R9 in Win64 order (4 regs vs SysV's 6)
     try testing.expectEqual(@as(usize, 4), win64.arg_gprs.len);
     try testing.expectEqual(Gpr.rcx, win64.arg_gprs[0]);
     try testing.expectEqual(Gpr.rdx, win64.arg_gprs[1]);
-    try testing.expectEqual(Gpr.r8,  win64.arg_gprs[2]);
-    try testing.expectEqual(Gpr.r9,  win64.arg_gprs[3]);
+    try testing.expectEqual(Gpr.r8, win64.arg_gprs[2]);
+    try testing.expectEqual(Gpr.r9, win64.arg_gprs[3]);
 }
 
 test "win64.arg_xmms covers XMM0..XMM3 (4 regs vs SysV's 8)" {

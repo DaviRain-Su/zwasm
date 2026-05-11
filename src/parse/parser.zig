@@ -29,7 +29,7 @@ pub const VERSION: u32 = 1;
 
 pub const SectionId = enum(u8) {
     custom = 0,
-    @"type" = 1,
+    type = 1,
     import = 2,
     function = 3,
     table = 4,
@@ -192,7 +192,7 @@ test "parse: iterates two known sections in order (type, function)" {
     defer m.deinit(testing.allocator);
 
     try testing.expectEqual(@as(usize, 2), m.sections.items.len);
-    try testing.expectEqual(SectionId.@"type", m.sections.items[0].id);
+    try testing.expectEqual(SectionId.type, m.sections.items[0].id);
     try testing.expectEqual(@as(usize, 1), m.sections.items[0].body.len);
     try testing.expectEqual(@as(u8, 0x00), m.sections.items[0].body[0]);
     try testing.expectEqual(SectionId.function, m.sections.items[1].id);
@@ -258,7 +258,7 @@ test "parse: custom sections allowed anywhere; do not affect ordering" {
     defer m.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 5), m.sections.items.len);
     try testing.expectEqual(@as(usize, 3), m.countCustom());
-    try testing.expect(m.find(.@"type") != null);
+    try testing.expect(m.find(.type) != null);
     try testing.expect(m.find(.function) != null);
 }
 
@@ -289,13 +289,13 @@ test "parse: rejects truncated leb128 size" {
 test "Module.find / countCustom on empty module" {
     var m = try parse(testing.allocator, &empty_module_bytes);
     defer m.deinit(testing.allocator);
-    try testing.expectEqual(@as(?Section, null), m.find(.@"type"));
+    try testing.expectEqual(@as(?Section, null), m.find(.type));
     try testing.expectEqual(@as(usize, 0), m.countCustom());
 }
 
 test "SectionId enum tags match Wasm spec ids" {
     try testing.expectEqual(@as(u8, 0), @intFromEnum(SectionId.custom));
-    try testing.expectEqual(@as(u8, 1), @intFromEnum(SectionId.@"type"));
+    try testing.expectEqual(@as(u8, 1), @intFromEnum(SectionId.type));
     try testing.expectEqual(@as(u8, 7), @intFromEnum(SectionId.@"export"));
     try testing.expectEqual(@as(u8, 11), @intFromEnum(SectionId.data));
     try testing.expectEqual(@as(u8, 12), @intFromEnum(SectionId.data_count));

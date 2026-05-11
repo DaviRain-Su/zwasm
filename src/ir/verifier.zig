@@ -81,9 +81,9 @@ fn verifyLoopInfo(func: *const ZirFunc, li: zir.LoopInfo) Error!void {
     const n_instrs: u32 = @intCast(func.instrs.items.len);
     for (li.loop_headers, li.loop_end) |h, e| {
         if (h >= n_instrs) return Error.LoopHeaderOutOfRange;
-        if (func.instrs.items[h].op != .@"loop") return Error.LoopHeaderNotLoopOp;
+        if (func.instrs.items[h].op != .loop) return Error.LoopHeaderNotLoopOp;
         if (e >= n_instrs) return Error.LoopEndOutOfRange;
-        if (func.instrs.items[e].op != .@"end") return Error.LoopEndNotEndOp;
+        if (func.instrs.items[e].op != .end) return Error.LoopEndNotEndOp;
         if (h >= e) return Error.LoopHeaderAfterEnd;
     }
 }
@@ -115,7 +115,7 @@ fn buildFunc(allocator: std.mem.Allocator, ops: []const zir.ZirInstr) !ZirFunc {
 
 test "verify: empty function with no analyses passes" {
     var f = try buildFunc(testing.allocator, &.{
-        .{ .op = .@"end" },
+        .{ .op = .end },
     });
     defer f.deinit(testing.allocator);
     try verify(&f);
@@ -123,10 +123,10 @@ test "verify: empty function with no analyses passes" {
 
 test "verify: well-formed loop_info passes" {
     var f = try buildFunc(testing.allocator, &.{
-        .{ .op = .@"loop" },
+        .{ .op = .loop },
         .{ .op = .nop },
-        .{ .op = .@"end" },
-        .{ .op = .@"end" },
+        .{ .op = .end },
+        .{ .op = .end },
     });
     defer f.deinit(testing.allocator);
     f.loop_info = .{ .loop_headers = &[_]u32{0}, .loop_end = &[_]u32{2} };
@@ -135,8 +135,8 @@ test "verify: well-formed loop_info passes" {
 
 test "verify: loop_info length mismatch fails" {
     var f = try buildFunc(testing.allocator, &.{
-        .{ .op = .@"loop" },
-        .{ .op = .@"end" },
+        .{ .op = .loop },
+        .{ .op = .end },
     });
     defer f.deinit(testing.allocator);
     f.loop_info = .{ .loop_headers = &[_]u32{0}, .loop_end = &[_]u32{} };
@@ -145,7 +145,7 @@ test "verify: loop_info length mismatch fails" {
 
 test "verify: loop_info header out of range fails" {
     var f = try buildFunc(testing.allocator, &.{
-        .{ .op = .@"end" },
+        .{ .op = .end },
     });
     defer f.deinit(testing.allocator);
     f.loop_info = .{ .loop_headers = &[_]u32{99}, .loop_end = &[_]u32{0} };
@@ -155,7 +155,7 @@ test "verify: loop_info header out of range fails" {
 test "verify: loop_info header pointing at non-loop op fails" {
     var f = try buildFunc(testing.allocator, &.{
         .{ .op = .nop }, // not a loop
-        .{ .op = .@"end" },
+        .{ .op = .end },
     });
     defer f.deinit(testing.allocator);
     f.loop_info = .{ .loop_headers = &[_]u32{0}, .loop_end = &[_]u32{1} };
@@ -164,9 +164,9 @@ test "verify: loop_info header pointing at non-loop op fails" {
 
 test "verify: loop_info end pointing at non-end op fails" {
     var f = try buildFunc(testing.allocator, &.{
-        .{ .op = .@"loop" },
+        .{ .op = .loop },
         .{ .op = .nop }, // not an end
-        .{ .op = .@"end" },
+        .{ .op = .end },
     });
     defer f.deinit(testing.allocator);
     f.loop_info = .{ .loop_headers = &[_]u32{0}, .loop_end = &[_]u32{1} };
@@ -175,9 +175,9 @@ test "verify: loop_info end pointing at non-end op fails" {
 
 test "verify: loop_info header after end fails" {
     var f = try buildFunc(testing.allocator, &.{
-        .{ .op = .@"end" },
-        .{ .op = .@"loop" },
-        .{ .op = .@"end" },
+        .{ .op = .end },
+        .{ .op = .loop },
+        .{ .op = .end },
     });
     defer f.deinit(testing.allocator);
     f.loop_info = .{ .loop_headers = &[_]u32{1}, .loop_end = &[_]u32{0} };
@@ -188,7 +188,7 @@ test "verify: well-formed liveness passes" {
     var f = try buildFunc(testing.allocator, &.{
         .{ .op = .@"i32.const", .payload = 1 },
         .{ .op = .drop },
-        .{ .op = .@"end" },
+        .{ .op = .end },
     });
     defer f.deinit(testing.allocator);
     f.liveness = .{ .ranges = &[_]zir.LiveRange{
@@ -199,7 +199,7 @@ test "verify: well-formed liveness passes" {
 
 test "verify: liveness def_pc out of range fails" {
     var f = try buildFunc(testing.allocator, &.{
-        .{ .op = .@"end" },
+        .{ .op = .end },
     });
     defer f.deinit(testing.allocator);
     f.liveness = .{ .ranges = &[_]zir.LiveRange{
@@ -212,17 +212,19 @@ test "verify: liveness def after last_use fails" {
     var f = try buildFunc(testing.allocator, &.{
         .{ .op = .@"i32.const", .payload = 1 },
         .{ .op = .drop },
-        .{ .op = .@"end" },
+        .{ .op = .end },
     });
     defer f.deinit(testing.allocator);
-    f.liveness = .{ .ranges = &[_]zir.LiveRange{
-        .{ .def_pc = 1, .last_use_pc = 0 }, // inverted
-    } };
+    f.liveness = .{
+        .ranges = &[_]zir.LiveRange{
+            .{ .def_pc = 1, .last_use_pc = 0 }, // inverted
+        },
+    };
     try testing.expectError(Error.LivenessDefAfterLastUse, verify(&f));
 }
 
 test "verify: branch_targets within ceiling pass" {
-    var f = try buildFunc(testing.allocator, &.{ .{ .op = .@"end" } });
+    var f = try buildFunc(testing.allocator, &.{.{ .op = .end }});
     defer f.deinit(testing.allocator);
     try f.branch_targets.append(testing.allocator, 0);
     try f.branch_targets.append(testing.allocator, 5);
@@ -231,7 +233,7 @@ test "verify: branch_targets within ceiling pass" {
 }
 
 test "verify: branch_targets exceeding ceiling fail" {
-    var f = try buildFunc(testing.allocator, &.{ .{ .op = .@"end" } });
+    var f = try buildFunc(testing.allocator, &.{.{ .op = .end }});
     defer f.deinit(testing.allocator);
     try f.branch_targets.append(testing.allocator, 999);
     try testing.expectError(Error.BranchTargetOutOfRange, verify(&f));
@@ -239,11 +241,11 @@ test "verify: branch_targets exceeding ceiling fail" {
 
 test "verify: combined loop_info + liveness + branch_targets pass" {
     var f = try buildFunc(testing.allocator, &.{
-        .{ .op = .@"loop" },
+        .{ .op = .loop },
         .{ .op = .@"i32.const", .payload = 7 },
         .{ .op = .drop },
-        .{ .op = .@"end" },
-        .{ .op = .@"end" },
+        .{ .op = .end },
+        .{ .op = .end },
     });
     defer f.deinit(testing.allocator);
     f.loop_info = .{ .loop_headers = &[_]u32{0}, .loop_end = &[_]u32{3} };

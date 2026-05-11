@@ -1005,7 +1005,7 @@ test "populateShapeTags: D-061 — v128 params trigger populate via local.get ta
     try f.instrs.append(testing.allocator, .{ .op = .@"local.get", .payload = 0 });
     try f.instrs.append(testing.allocator, .{ .op = .@"local.get", .payload = 1 });
     try f.instrs.append(testing.allocator, .{ .op = .@"local.get", .payload = 2 });
-    try f.instrs.append(testing.allocator, .{ .op = .@"select" });
+    try f.instrs.append(testing.allocator, .{ .op = .select });
     try f.instrs.append(testing.allocator, .{ .op = .end });
     const tags = try populateShapeTags(testing.allocator, &f, 4);
     try testing.expect(tags != null);

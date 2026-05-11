@@ -57,7 +57,7 @@ pub fn register(table: *DispatchTable) void {
     table.parsers[@intFromEnum(ZirOp.@"i64.const")] = parseI64Const;
     table.parsers[@intFromEnum(ZirOp.@"f32.const")] = parseF32Const;
     table.parsers[@intFromEnum(ZirOp.@"f64.const")] = parseF64Const;
-    table.parsers[@intFromEnum(ZirOp.@"br")] = parseBr;
+    table.parsers[@intFromEnum(ZirOp.br)] = parseBr;
 }
 
 fn parseNoImmediate(_: *ParserCtx, instr: *ZirInstr) anyerror!void {
@@ -142,14 +142,14 @@ test "register: const + br ops are populated" {
     try testing.expect(table.parsers[@intFromEnum(ZirOp.@"i64.const")] != null);
     try testing.expect(table.parsers[@intFromEnum(ZirOp.@"f32.const")] != null);
     try testing.expect(table.parsers[@intFromEnum(ZirOp.@"f64.const")] != null);
-    try testing.expect(table.parsers[@intFromEnum(ZirOp.@"br")] != null);
+    try testing.expect(table.parsers[@intFromEnum(ZirOp.br)] != null);
 }
 
 test "register: untouched slots remain null" {
     var table = DispatchTable.init();
     register(&table);
     // call_indirect is not in MVP scope of 1.7
-    try testing.expect(table.parsers[@intFromEnum(ZirOp.@"call_indirect")] == null);
+    try testing.expect(table.parsers[@intFromEnum(ZirOp.call_indirect)] == null);
     try testing.expect(table.interp[@intFromEnum(ZirOp.@"i32.add")] == null);
     try testing.expect(table.jit_arm64[@intFromEnum(ZirOp.@"i32.add")] == null);
 }
@@ -209,6 +209,6 @@ test "dispatch: parseLocalIndexed reads uleb32" {
 test "dispatch: parseBr reads uleb32 depth" {
     var table = DispatchTable.init();
     register(&table);
-    const inst = try dispatchOp(&table, .@"br", &[_]u8{0x03});
+    const inst = try dispatchOp(&table, .br, &[_]u8{0x03});
     try testing.expectEqual(@as(u32, 3), inst.payload);
 }

@@ -54,7 +54,7 @@ pub const CallFixup = struct {
 /// PC-relative offset of `func.simd_consts[const_idx]`.
 pub const SimdConstFixup = struct {
     byte_offset: u32, // location of the LDR-Q-literal placeholder
-    const_idx: u32,   // index into func.simd_consts
+    const_idx: u32, // index into func.simd_consts
 };
 
 /// Per-function emit context. Built by `compile()` once after

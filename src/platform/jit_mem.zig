@@ -160,7 +160,7 @@ pub fn setExecutable(block: JitBlock) Error!void {
 /// `setExecutable`.
 pub fn setWritable(block: JitBlock) Error!void {
     _ = block; // Mac uses pthread_jit_write_protect_np (no block);
-               // Linux + Windows are no-ops (page is RWX).
+    // Linux + Windows are no-ops (page is RWX).
     if (builtin.os.tag == .macos and builtin.cpu.arch == .aarch64) {
         pthread_jit_write_protect_np(0); // 0 = disable W^X (RW)
         return;

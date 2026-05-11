@@ -133,7 +133,8 @@ test "validate: if/else with matching i32 results" {
         0x04, 0x7F, // if i32
         0x41, 0x0A,
         0x05, // else
-        0x41, 0x14,
+        0x41,
+        0x14,
         0x0B, // end if
         0x0B, // end fn
     };
@@ -146,9 +147,8 @@ test "validate: if/else with mismatched branch types fails" {
         0x41, 0x01,
         0x04, 0x7F,
         0x41, 0x0A,
-        0x05,
-        0x42, 0x14,
-        0x0B,
+        0x05, 0x42,
+        0x14, 0x0B,
         0x0B,
     };
     const r = validateFunction(i32_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
@@ -233,8 +233,7 @@ test "validate: i64.trunc_sat_f64_u (0xFC 07) — pops f64, pushes i64" {
     // f64.const 0.0 ; i64.trunc_sat_f64_u ; end
     const body = [_]u8{
         0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0xFC, 0x07,
-        0x0B,
+        0xFC, 0x07, 0x0B,
     };
     try validateFunction(i64_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
 }
@@ -306,8 +305,7 @@ test "validate: memory.copy (0xFC 10) — pops three i32" {
     // i32.const 0 ; i32.const 0 ; i32.const 0 ; memory.copy ; end
     const body = [_]u8{
         0x41, 0x00, 0x41, 0x00, 0x41, 0x00,
-        0xFC, 0x0A, 0x00, 0x00,
-        0x0B,
+        0xFC, 0x0A, 0x00, 0x00, 0x0B,
     };
     try validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
 }
@@ -315,8 +313,7 @@ test "validate: memory.copy (0xFC 10) — pops three i32" {
 test "validate: memory.fill (0xFC 11) — pops three i32" {
     const body = [_]u8{
         0x41, 0x00, 0x41, 0x00, 0x41, 0x00,
-        0xFC, 0x0B, 0x00,
-        0x0B,
+        0xFC, 0x0B, 0x00, 0x0B,
     };
     try validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
 }
@@ -324,8 +321,7 @@ test "validate: memory.fill (0xFC 11) — pops three i32" {
 test "validate: memory.copy with non-zero reserved byte → BadBlockType" {
     const body = [_]u8{
         0x41, 0x00, 0x41, 0x00, 0x41, 0x00,
-        0xFC, 0x0A, 0x01, 0x00,
-        0x0B,
+        0xFC, 0x0A, 0x01, 0x00, 0x0B,
     };
     const r = validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
     try testing.expectError(Error.BadBlockType, r);
@@ -335,8 +331,7 @@ test "validate: memory.init (0xFC 8) with valid dataidx" {
     // i32.const 0 ; i32.const 0 ; i32.const 0 ; memory.init 0 ; end
     const body = [_]u8{
         0x41, 0x00, 0x41, 0x00, 0x41, 0x00,
-        0xFC, 0x08, 0x00, 0x00,
-        0x0B,
+        0xFC, 0x08, 0x00, 0x00, 0x0B,
     };
     try validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 1, &.{}, 0);
 }
@@ -344,8 +339,7 @@ test "validate: memory.init (0xFC 8) with valid dataidx" {
 test "validate: memory.init dataidx out of range → InvalidFuncIndex" {
     const body = [_]u8{
         0x41, 0x00, 0x41, 0x00, 0x41, 0x00,
-        0xFC, 0x08, 0x05, 0x00,
-        0x0B,
+        0xFC, 0x08, 0x05, 0x00, 0x0B,
     };
     const r = validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 1, &.{}, 0);
     try testing.expectError(Error.InvalidFuncIndex, r);
@@ -399,8 +393,8 @@ test "validate: select_typed (0x1C) — i32 result, two i32 vals + cond" {
         0x41, 0x01,
         0x41, 0x02,
         0x41, 0x00,
-        0x1C, 0x01, 0x7F,
-        0x1A,
+        0x1C, 0x01,
+        0x7F, 0x1A,
         0x0B,
     };
     try validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
@@ -412,8 +406,8 @@ test "validate: select_typed with funcref result" {
         0xD0, 0x70,
         0xD0, 0x70,
         0x41, 0x00,
-        0x1C, 0x01, 0x70,
-        0x1A,
+        0x1C, 0x01,
+        0x70, 0x1A,
         0x0B,
     };
     try validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
@@ -532,7 +526,6 @@ test "validate: 0xFC unknown sub-opcode → NotImplemented" {
     try testing.expectError(Error.NotImplemented, r);
 }
 
-
 // ============================================================
 // §9.9 / 9.3 — SIMD-128 prefix-`0xFD` validator tests
 // (per ADR-0041 + Revision 2). MVP catalogue covers v128.const
@@ -622,18 +615,24 @@ test "validate (simd): v128 binop (sub 110) consumes 2× v128, pushes v128" {
     // v128.const ; v128.const ; 0xFD 110 (in the i32x4-arith range) ; end
     var body: [40]u8 = undefined;
     var i: usize = 0;
-    body[i] = 0xFD; i += 1;
-    body[i] = 0x0C; i += 1;
-    @memset(body[i..i+16], 0);
+    body[i] = 0xFD;
+    i += 1;
+    body[i] = 0x0C;
+    i += 1;
+    @memset(body[i .. i + 16], 0);
     i += 16;
-    body[i] = 0xFD; i += 1;
-    body[i] = 0x0C; i += 1;
-    @memset(body[i..i+16], 0);
+    body[i] = 0xFD;
+    i += 1;
+    body[i] = 0x0C;
+    i += 1;
+    @memset(body[i .. i + 16], 0);
     i += 16;
-    body[i] = 0xFD; i += 1;
+    body[i] = 0xFD;
+    i += 1;
     body[i] = 0x6E; // sub-opcode 110 (LEB128: single byte since < 128)
     i += 1;
-    body[i] = 0x0B; i += 1;
+    body[i] = 0x0B;
+    i += 1;
     try validateFunction(v128_result_sig, &.{}, body[0..i], &.{}, &.{}, &.{}, 0, &.{}, 0);
 }
 

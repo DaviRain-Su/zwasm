@@ -101,14 +101,18 @@ pub fn emitFpConvertSimple(
             const dst_x = try gpr.xmmDefSpilled(alloc, result_v, 0);
             try buf.appendSlice(allocator, inst.encMovqXmmFromR64(dst_x, src_g).slice());
         },
-        .@"f32.convert_i32_s", .@"f32.convert_i64_s",
-        .@"f64.convert_i32_s", .@"f64.convert_i64_s",
-        .@"f32.convert_i32_u", .@"f64.convert_i32_u",
+        .@"f32.convert_i32_s",
+        .@"f32.convert_i64_s",
+        .@"f64.convert_i32_s",
+        .@"f64.convert_i64_s",
+        .@"f32.convert_i32_u",
+        .@"f64.convert_i32_u",
         => {
             const src_g = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
             const dst_x = try gpr.xmmDefSpilled(alloc, result_v, 0);
             const scalar_kind: inst.SseScalarKind = switch (op) {
-                .@"f32.convert_i32_s", .@"f32.convert_i64_s",
+                .@"f32.convert_i32_s",
+                .@"f32.convert_i64_s",
                 .@"f32.convert_i32_u",
                 => .f32,
                 else => .f64,

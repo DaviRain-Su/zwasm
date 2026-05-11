@@ -82,7 +82,7 @@ pub fn run(allocator: Allocator, func: *ZirFunc, slots: []const u16) Error!void 
 /// in one place (this function), not split per arch.
 pub fn isCoalesceCandidate(op: zir.ZirOp) bool {
     return switch (op) {
-        .@"local.tee", .@"local.get", .@"local.set", .@"select" => true,
+        .@"local.tee", .@"local.get", .@"local.set", .select => true,
         else => false,
     };
 }
@@ -134,12 +134,12 @@ test "isCoalesceCandidate: MVP catalogue accepts local.tee/get/set + select" {
     try testing.expect(isCoalesceCandidate(.@"local.tee"));
     try testing.expect(isCoalesceCandidate(.@"local.get"));
     try testing.expect(isCoalesceCandidate(.@"local.set"));
-    try testing.expect(isCoalesceCandidate(.@"select"));
+    try testing.expect(isCoalesceCandidate(.select));
     try testing.expect(!isCoalesceCandidate(.@"i32.const"));
     try testing.expect(!isCoalesceCandidate(.end));
     try testing.expect(!isCoalesceCandidate(.@"i32.add"));
-    try testing.expect(!isCoalesceCandidate(.@"call"));
-    try testing.expect(!isCoalesceCandidate(.@"br_table"));
+    try testing.expect(!isCoalesceCandidate(.call));
+    try testing.expect(!isCoalesceCandidate(.br_table));
 }
 
 test "coalesce.deinitArtifacts: frees populated records" {

@@ -59,7 +59,7 @@ pub fn frontendValidate(alloc: std.mem.Allocator, binary: []const u8) bool {
     var module = parser.parse(alloc, binary) catch return false;
     defer module.deinit(alloc);
 
-    const type_section = module.find(.@"type") orelse return validateNoCode(alloc, &module);
+    const type_section = module.find(.type) orelse return validateNoCode(alloc, &module);
     const code_section = module.find(.code) orelse return true;
 
     var types_owned = sections.decodeTypes(alloc, type_section.body) catch return false;
@@ -216,7 +216,7 @@ pub fn buildExportTypes(
     // Decode the type section once (used for func sig resolution).
     var types_owned: ?sections.Types = null;
     defer if (types_owned) |*t| t.deinit();
-    if (module.find(.@"type")) |s| {
+    if (module.find(.type)) |s| {
         types_owned = try sections.decodeTypes(a, s.body);
     }
     var func_section_funcs: ?[]u32 = null;
@@ -252,8 +252,7 @@ pub fn buildExportTypes(
                         if (it.kind != .func) continue;
                         if (idx == exp.idx) {
                             const tidx = it.payload.func_typeidx;
-                            const ft = if (types_owned) |t| t.items[tidx] else
-                                return error.UnsupportedImport;
+                            const ft = if (types_owned) |t| t.items[tidx] else return error.UnsupportedImport;
                             break :blk .{ .func = ft };
                         }
                         idx += 1;
@@ -265,8 +264,7 @@ pub fn buildExportTypes(
                 const fs = func_section_funcs orelse return error.UnsupportedImport;
                 if (def_idx >= fs.len) return error.UnsupportedImport;
                 const tidx = fs[def_idx];
-                const ft = if (types_owned) |t| t.items[tidx] else
-                    return error.UnsupportedImport;
+                const ft = if (types_owned) |t| t.items[tidx] else return error.UnsupportedImport;
                 break :blk .{ .func = ft };
             },
             .table => blk: {
@@ -457,7 +455,7 @@ pub fn instantiateRuntime(
     // that only re-export imports.
     const code_section_opt = module.find(.code);
     const func_section = module.find(.function);
-    const type_section_opt = module.find(.@"type");
+    const type_section_opt = module.find(.type);
 
     const types = if (type_section_opt) |s|
         try sections.decodeTypes(a, s.body)
@@ -715,7 +713,7 @@ fn checkImportTypeMatches(
     switch (it.kind) {
         .func => {
             const want_tidx = it.payload.func_typeidx;
-            const type_sec = module.find(.@"type") orelse return error.ImportTypeMismatch;
+            const type_sec = module.find(.type) orelse return error.ImportTypeMismatch;
             var types = try sections.decodeTypes(a, type_sec.body);
             defer types.deinit();
             if (want_tidx >= types.items.len) return error.ImportTypeMismatch;

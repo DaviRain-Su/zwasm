@@ -77,16 +77,30 @@ pub fn compute(allocator: Allocator, func: *const ZirFunc) !ConstantPool {
                 sim_len += 1;
             },
             // Trap-free i32 binops
-            .@"i32.add", .@"i32.sub", .@"i32.mul",
-            .@"i32.and", .@"i32.or", .@"i32.xor",
-            .@"i32.shl", .@"i32.shr_s", .@"i32.shr_u",
-            .@"i32.rotl", .@"i32.rotr",
+            .@"i32.add",
+            .@"i32.sub",
+            .@"i32.mul",
+            .@"i32.and",
+            .@"i32.or",
+            .@"i32.xor",
+            .@"i32.shl",
+            .@"i32.shr_s",
+            .@"i32.shr_u",
+            .@"i32.rotl",
+            .@"i32.rotr",
             => try foldI32(allocator, &folds, &sim_stack, &sim_len, pc, instr.op),
             // Trap-free i64 binops
-            .@"i64.add", .@"i64.sub", .@"i64.mul",
-            .@"i64.and", .@"i64.or", .@"i64.xor",
-            .@"i64.shl", .@"i64.shr_s", .@"i64.shr_u",
-            .@"i64.rotl", .@"i64.rotr",
+            .@"i64.add",
+            .@"i64.sub",
+            .@"i64.mul",
+            .@"i64.and",
+            .@"i64.or",
+            .@"i64.xor",
+            .@"i64.shl",
+            .@"i64.shr_s",
+            .@"i64.shr_u",
+            .@"i64.rotl",
+            .@"i64.rotr",
             => try foldI64(allocator, &folds, &sim_stack, &sim_len, pc, instr.op),
             // Anything else: stop analysis. The folds collected
             // so far are still valid; the consumer decides what
@@ -224,7 +238,7 @@ test "compute: i32.const 5 + i32.const 7 + i32.add folds to 12" {
         .{ .op = .@"i32.const", .payload = 5 },
         .{ .op = .@"i32.const", .payload = 7 },
         .{ .op = .@"i32.add" },
-        .{ .op = .@"end" },
+        .{ .op = .end },
     });
     defer f.deinit(testing.allocator);
 
@@ -245,7 +259,7 @@ test "compute: i32.add wraps modulo 2^32" {
         .{ .op = .@"i32.const", .payload = lhs },
         .{ .op = .@"i32.const", .payload = 1 },
         .{ .op = .@"i32.add" },
-        .{ .op = .@"end" },
+        .{ .op = .end },
     });
     defer f.deinit(testing.allocator);
 
@@ -261,7 +275,7 @@ test "compute: i32.shl masks shift to 5 bits" {
         .{ .op = .@"i32.const", .payload = 1 },
         .{ .op = .@"i32.const", .payload = 33 }, // 33 mod 32 = 1
         .{ .op = .@"i32.shl" },
-        .{ .op = .@"end" },
+        .{ .op = .end },
     });
     defer f.deinit(testing.allocator);
 
@@ -277,7 +291,7 @@ test "compute: i64.add folds across low/high split" {
         .{ .op = .@"i64.const", .payload = 0, .extra = 1 }, // 1 << 32
         .{ .op = .@"i64.const", .payload = 1, .extra = 0 }, // 1
         .{ .op = .@"i64.add" },
-        .{ .op = .@"end" },
+        .{ .op = .end },
     });
     defer f.deinit(testing.allocator);
 
@@ -297,7 +311,7 @@ test "compute: chained constants fold transitively" {
         .{ .op = .@"i32.add" },
         .{ .op = .@"i32.const", .payload = 3 },
         .{ .op = .@"i32.mul" },
-        .{ .op = .@"end" },
+        .{ .op = .end },
     });
     defer f.deinit(testing.allocator);
 
@@ -325,7 +339,7 @@ test "compute: non-constant operand prevents fold but analysis continues" {
         .{ .op = .@"i32.const", .payload = 7 },
         .{ .op = .@"i32.const", .payload = 8 },
         .{ .op = .@"i32.mul" },
-        .{ .op = .@"end" },
+        .{ .op = .end },
     });
     defer f.deinit(testing.allocator);
 
@@ -343,7 +357,7 @@ test "compute: skips trap-emitting div_s and stops analysis" {
         .{ .op = .@"i32.const", .payload = 10 },
         .{ .op = .@"i32.const", .payload = 2 },
         .{ .op = .@"i32.div_s" }, // not in fold set; analysis stops here.
-        .{ .op = .@"end" },
+        .{ .op = .end },
     });
     defer f.deinit(testing.allocator);
 
@@ -358,7 +372,7 @@ test "compute: install onto ZirFunc.constant_pool round-trips" {
         .{ .op = .@"i32.const", .payload = 4 },
         .{ .op = .@"i32.const", .payload = 6 },
         .{ .op = .@"i32.add" },
-        .{ .op = .@"end" },
+        .{ .op = .end },
     });
     defer f.deinit(testing.allocator);
 

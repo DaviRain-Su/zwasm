@@ -116,7 +116,7 @@ const StubHandlers = struct {
 
 fn buildSmokeTable() DispatchTable {
     var t = DispatchTable.init();
-    t.interp[@intFromEnum(ZirOp.@"nop")] = StubHandlers.nop;
+    t.interp[@intFromEnum(ZirOp.nop)] = StubHandlers.nop;
     t.interp[@intFromEnum(ZirOp.@"i32.const")] = StubHandlers.pushI32Const;
     return t;
 }
@@ -149,7 +149,7 @@ test "run: walks sequence, leaves operand stack with the const sequence" {
     const instrs = [_]ZirInstr{
         .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 1)), .extra = 0 },
         .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 2)), .extra = 0 },
-        .{ .op = .@"nop", .payload = 0, .extra = 0 },
+        .{ .op = .nop, .payload = 0, .extra = 0 },
         .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 3)), .extra = 0 },
     };
     try run(&rt, &table, &instrs);
@@ -183,7 +183,7 @@ test "trace_cb: receives one event per dispatched instruction" {
 
     const instrs = [_]ZirInstr{
         .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 11)), .extra = 0 },
-        .{ .op = .@"nop", .payload = 0, .extra = 0 },
+        .{ .op = .nop, .payload = 0, .extra = 0 },
         .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 22)), .extra = 0 },
     };
     try run(&rt, &table, &instrs);
@@ -191,7 +191,7 @@ test "trace_cb: receives one event per dispatched instruction" {
     try testing.expectEqual(@as(u32, 3), sink.len);
     try testing.expectEqual(ZirOp.@"i32.const", sink.events[0].op);
     try testing.expectEqual(@as(i32, 11), sink.events[0].operand_top.?.i32);
-    try testing.expectEqual(ZirOp.@"nop", sink.events[1].op);
+    try testing.expectEqual(ZirOp.nop, sink.events[1].op);
     try testing.expectEqual(@as(i32, 11), sink.events[1].operand_top.?.i32);
     try testing.expectEqual(ZirOp.@"i32.const", sink.events[2].op);
     try testing.expectEqual(@as(i32, 22), sink.events[2].operand_top.?.i32);
@@ -219,7 +219,7 @@ test "run: bubbles handler trap and stops iteration" {
 
     const instrs = [_]ZirInstr{
         .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 7)), .extra = 0 },
-        .{ .op = .@"nop", .payload = 0, .extra = 0 },
+        .{ .op = .nop, .payload = 0, .extra = 0 },
         .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 99)), .extra = 0 },
     };
     try testing.expectError(Trap.Unreachable, run(&rt, &t, &instrs));

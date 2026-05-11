@@ -347,10 +347,10 @@ test "Trap: error set carries the spec-conformant trap conditions" {
     // error set. Returning each value would discard it; storing into
     // an `anyerror` slot keeps the code path live.
     const traps: [9]anyerror = .{
-        Trap.Unreachable,            Trap.DivByZero,
-        Trap.IntOverflow,            Trap.InvalidConversionToInt,
-        Trap.OutOfBoundsLoad,        Trap.OutOfBoundsStore,
-        Trap.OutOfBoundsTableAccess, Trap.UninitializedElement,
+        Trap.Unreachable,              Trap.DivByZero,
+        Trap.IntOverflow,              Trap.InvalidConversionToInt,
+        Trap.OutOfBoundsLoad,          Trap.OutOfBoundsStore,
+        Trap.OutOfBoundsTableAccess,   Trap.UninitializedElement,
         Trap.IndirectCallTypeMismatch,
     };
     try testing.expectEqual(@as(usize, 9), traps.len);

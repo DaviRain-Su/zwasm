@@ -321,9 +321,7 @@ pub fn initFromEnv(value: ?[]const u8) void {
     var it = std.mem.tokenizeScalar(u8, v, ',');
     while (it.next()) |raw_tok| {
         const tok = std.mem.trim(u8, raw_tok, " \t");
-        if (std.mem.eql(u8, tok, "passes")) channels.passes = true
-        else if (std.mem.eql(u8, tok, "jit_exec")) channels.jit_exec = true
-        else if (std.mem.eql(u8, tok, "bench")) channels.bench = true;
+        if (std.mem.eql(u8, tok, "passes")) channels.passes = true else if (std.mem.eql(u8, tok, "jit_exec")) channels.jit_exec = true else if (std.mem.eql(u8, tok, "bench")) channels.bench = true;
         // Unknown tokens silently ignored — keeps forward-compat
         // with future channel additions.
     }
@@ -555,7 +553,7 @@ test "trace: JIT emit invokes writeBounds for i32.load (integration, both backen
     defer f.deinit(testing.allocator);
     try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0 });
     try f.instrs.append(testing.allocator, .{ .op = .@"i32.load", .payload = 0 });
-    try f.instrs.append(testing.allocator, .{ .op = .@"end" });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
     f.liveness = .{ .ranges = &[_]zir.LiveRange{
         .{ .def_pc = 0, .last_use_pc = 1 },
         .{ .def_pc = 1, .last_use_pc = 2 },

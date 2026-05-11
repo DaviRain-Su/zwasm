@@ -857,7 +857,13 @@ test "decodeTypes: single () -> ()" {
 test "decodeTypes: (i32, i64) -> (f32, f64)" {
     const body = [_]u8{
         0x01, // count=1
-        0x60, 0x02, 0x7F, 0x7E, 0x02, 0x7D, 0x7C,
+        0x60,
+        0x02,
+        0x7F,
+        0x7E,
+        0x02,
+        0x7D,
+        0x7C,
     };
     var t = try decodeTypes(testing.allocator, &body);
     defer t.deinit();
@@ -1050,9 +1056,16 @@ test "decodeImports: single function import" {
     // count=1; mod="env"; name="abs"; desc=0x00 typeidx=2
     const body = [_]u8{
         0x01,
-        0x03, 'e', 'n', 'v',
-        0x03, 'a', 'b', 's',
-        0x00, 0x02,
+        0x03,
+        'e',
+        'n',
+        'v',
+        0x03,
+        'a',
+        'b',
+        's',
+        0x00,
+        0x02,
     };
     var i = try decodeImports(testing.allocator, &body);
     defer i.deinit();
@@ -1066,9 +1079,14 @@ test "decodeImports: single function import" {
 test "decodeImports: single global import (immutable i32)" {
     const body = [_]u8{
         0x01,
-        0x02, 'm', 'm',
-        0x01, 'g',
-        0x03, 0x7F, 0x00,
+        0x02,
+        'm',
+        'm',
+        0x01,
+        'g',
+        0x03,
+        0x7F,
+        0x00,
     };
     var i = try decodeImports(testing.allocator, &body);
     defer i.deinit();
@@ -1102,15 +1120,24 @@ test "decodeGlobals: v128 init_expr whose lane byte equals 0x0B (simd_const.388)
         // global 0
         0x7B, 0x01, // v128 mut
         0xFD, 0x0C,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x00,
         0x00, 0x00, 0x00, 0x0B, // lane 11 = 0x0B (the trap byte)
         0x00, 0x00, 0x00, 0x00,
         0x0B, // end
         // global 1
         0x7B, 0x01, // v128 mut
         0xFD, 0x0C,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x00,
+        0x00, 0x00,
         0x0B, // end
     };
     var g = try decodeGlobals(testing.allocator, &body);
@@ -1139,9 +1166,13 @@ test "decodeData: single active segment with i32.const 0 offset + 3 bytes" {
     const body = [_]u8{
         0x01,
         0x00,
-        0x41, 0x00, 0x0B,
+        0x41,
+        0x00,
+        0x0B,
         0x03,
-        0xAA, 0xBB, 0xCC,
+        0xAA,
+        0xBB,
+        0xCC,
     };
     var d = try decodeData(testing.allocator, &body);
     defer d.deinit();
@@ -1169,9 +1200,12 @@ test "decodeData: active form 2 with explicit memidx" {
         0x01,
         0x02,
         0x00,
-        0x41, 0x10, 0x0B,
+        0x41,
+        0x10,
+        0x0B,
         0x02,
-        0xDE, 0xAD,
+        0xDE,
+        0xAD,
     };
     var d = try decodeData(testing.allocator, &body);
     defer d.deinit();
@@ -1196,9 +1230,12 @@ test "decodeElement: single active form 0 with two funcidxs" {
     const body = [_]u8{
         0x01,
         0x00,
-        0x41, 0x05, 0x0B,
+        0x41,
+        0x05,
+        0x0B,
         0x02,
-        0x00, 0x01,
+        0x00,
+        0x01,
     };
     var e = try decodeElement(testing.allocator, &body);
     defer e.deinit();
@@ -1233,9 +1270,13 @@ test "decodeElement: active form 2 with explicit tableidx" {
         0x01,
         0x02,
         0x01,
-        0x41, 0x00, 0x0B,
+        0x41,
         0x00,
-        0x02, 0x00, 0x01,
+        0x0B,
+        0x00,
+        0x02,
+        0x00,
+        0x01,
     };
     var e = try decodeElement(testing.allocator, &body);
     defer e.deinit();
@@ -1253,8 +1294,12 @@ test "decodeElement: passive form 5 (reftype + expr-vec)" {
         0x05,
         0x70,
         0x02,
-        0xD2, 0x07, 0x0B,
-        0xD0, 0x70, 0x0B,
+        0xD2,
+        0x07,
+        0x0B,
+        0xD0,
+        0x70,
+        0x0B,
     };
     var e = try decodeElement(testing.allocator, &body);
     defer e.deinit();
@@ -1272,10 +1317,14 @@ test "decodeElement: active form 6 (tableidx + offset + reftype + expr-vec)" {
         0x01,
         0x06,
         0x02,
-        0x41, 0x04, 0x0B,
+        0x41,
+        0x04,
+        0x0B,
         0x70,
         0x01,
-        0xD2, 0x03, 0x0B,
+        0xD2,
+        0x03,
+        0x0B,
     };
     var e = try decodeElement(testing.allocator, &body);
     defer e.deinit();
@@ -1293,7 +1342,9 @@ test "decodeElement: declarative form 7 (reftype + expr-vec)" {
         0x07,
         0x70,
         0x01,
-        0xD2, 0x00, 0x0B,
+        0xD2,
+        0x00,
+        0x0B,
     };
     var e = try decodeElement(testing.allocator, &body);
     defer e.deinit();

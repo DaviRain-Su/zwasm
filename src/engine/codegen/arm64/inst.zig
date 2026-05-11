@@ -764,18 +764,18 @@ pub fn encNegsRegX(rm: Xn) u32 {
 pub const Cond = enum(u4) {
     eq = 0x0,
     ne = 0x1,
-    hs = 0x2,  // unsigned >=
-    lo = 0x3,  // unsigned <
+    hs = 0x2, // unsigned >=
+    lo = 0x3, // unsigned <
     mi = 0x4,
     pl = 0x5,
     vs = 0x6,
     vc = 0x7,
-    hi = 0x8,  // unsigned >
-    ls = 0x9,  // unsigned <=
-    ge = 0xA,  // signed >=
-    lt = 0xB,  // signed <
-    gt = 0xC,  // signed >
-    le = 0xD,  // signed <=
+    hi = 0x8, // unsigned >
+    ls = 0x9, // unsigned <=
+    ge = 0xA, // signed >=
+    lt = 0xB, // signed <
+    gt = 0xC, // signed >
+    le = 0xD, // signed <=
 };
 
 /// Invert the lowest bit of a `Cond` — the relationship between
@@ -925,25 +925,53 @@ pub fn encFCmpD(vn: Vn, vm: Vn) u32 {
 // S-form (type=00) bases; D-form flips bit 22 → +0x400000.
 // ============================================================
 
-pub fn encFAbsS(vd: Vn, vn: Vn) u32 { return 0x1E20C000 | (@as(u32, vn) << 5) | @as(u32, vd); }
-pub fn encFNegS(vd: Vn, vn: Vn) u32 { return 0x1E214000 | (@as(u32, vn) << 5) | @as(u32, vd); }
-pub fn encFSqrtS(vd: Vn, vn: Vn) u32 { return 0x1E21C000 | (@as(u32, vn) << 5) | @as(u32, vd); }
+pub fn encFAbsS(vd: Vn, vn: Vn) u32 {
+    return 0x1E20C000 | (@as(u32, vn) << 5) | @as(u32, vd);
+}
+pub fn encFNegS(vd: Vn, vn: Vn) u32 {
+    return 0x1E214000 | (@as(u32, vn) << 5) | @as(u32, vd);
+}
+pub fn encFSqrtS(vd: Vn, vn: Vn) u32 {
+    return 0x1E21C000 | (@as(u32, vn) << 5) | @as(u32, vd);
+}
 /// FRINTP — round toward +∞ (Wasm `f32.ceil` / `f64.ceil`).
-pub fn encFRintPS(vd: Vn, vn: Vn) u32 { return 0x1E24C000 | (@as(u32, vn) << 5) | @as(u32, vd); }
+pub fn encFRintPS(vd: Vn, vn: Vn) u32 {
+    return 0x1E24C000 | (@as(u32, vn) << 5) | @as(u32, vd);
+}
 /// FRINTM — round toward -∞ (Wasm `floor`).
-pub fn encFRintMS(vd: Vn, vn: Vn) u32 { return 0x1E254000 | (@as(u32, vn) << 5) | @as(u32, vd); }
+pub fn encFRintMS(vd: Vn, vn: Vn) u32 {
+    return 0x1E254000 | (@as(u32, vn) << 5) | @as(u32, vd);
+}
 /// FRINTZ — round toward zero (Wasm `trunc`).
-pub fn encFRintZS(vd: Vn, vn: Vn) u32 { return 0x1E25C000 | (@as(u32, vn) << 5) | @as(u32, vd); }
+pub fn encFRintZS(vd: Vn, vn: Vn) u32 {
+    return 0x1E25C000 | (@as(u32, vn) << 5) | @as(u32, vd);
+}
 /// FRINTN — round to nearest even (Wasm `nearest`).
-pub fn encFRintNS(vd: Vn, vn: Vn) u32 { return 0x1E244000 | (@as(u32, vn) << 5) | @as(u32, vd); }
+pub fn encFRintNS(vd: Vn, vn: Vn) u32 {
+    return 0x1E244000 | (@as(u32, vn) << 5) | @as(u32, vd);
+}
 
-pub fn encFAbsD(vd: Vn, vn: Vn) u32 { return 0x1E60C000 | (@as(u32, vn) << 5) | @as(u32, vd); }
-pub fn encFNegD(vd: Vn, vn: Vn) u32 { return 0x1E614000 | (@as(u32, vn) << 5) | @as(u32, vd); }
-pub fn encFSqrtD(vd: Vn, vn: Vn) u32 { return 0x1E61C000 | (@as(u32, vn) << 5) | @as(u32, vd); }
-pub fn encFRintPD(vd: Vn, vn: Vn) u32 { return 0x1E64C000 | (@as(u32, vn) << 5) | @as(u32, vd); }
-pub fn encFRintMD(vd: Vn, vn: Vn) u32 { return 0x1E654000 | (@as(u32, vn) << 5) | @as(u32, vd); }
-pub fn encFRintZD(vd: Vn, vn: Vn) u32 { return 0x1E65C000 | (@as(u32, vn) << 5) | @as(u32, vd); }
-pub fn encFRintND(vd: Vn, vn: Vn) u32 { return 0x1E644000 | (@as(u32, vn) << 5) | @as(u32, vd); }
+pub fn encFAbsD(vd: Vn, vn: Vn) u32 {
+    return 0x1E60C000 | (@as(u32, vn) << 5) | @as(u32, vd);
+}
+pub fn encFNegD(vd: Vn, vn: Vn) u32 {
+    return 0x1E614000 | (@as(u32, vn) << 5) | @as(u32, vd);
+}
+pub fn encFSqrtD(vd: Vn, vn: Vn) u32 {
+    return 0x1E61C000 | (@as(u32, vn) << 5) | @as(u32, vd);
+}
+pub fn encFRintPD(vd: Vn, vn: Vn) u32 {
+    return 0x1E64C000 | (@as(u32, vn) << 5) | @as(u32, vd);
+}
+pub fn encFRintMD(vd: Vn, vn: Vn) u32 {
+    return 0x1E654000 | (@as(u32, vn) << 5) | @as(u32, vd);
+}
+pub fn encFRintZD(vd: Vn, vn: Vn) u32 {
+    return 0x1E65C000 | (@as(u32, vn) << 5) | @as(u32, vd);
+}
+pub fn encFRintND(vd: Vn, vn: Vn) u32 {
+    return 0x1E644000 | (@as(u32, vn) << 5) | @as(u32, vd);
+}
 
 /// FMIN / FMAX — NaN-propagating per Wasm spec semantics.
 pub fn encFMinS(vd: Vn, vn: Vn, vm: Vn) u32 {
@@ -1125,24 +1153,60 @@ test "encLdrWRegLsl2 w16, [x24, x17, lsl #2] → 0xB8717B10" {
 test "encSxtw x9, w10 — `sxtw x9, w10` → 0x93407D49" {
     try testing.expectEqual(@as(u32, 0x93407D49), encSxtw(9, 10));
 }
-test "encScvtfSFromW s9, w10 → 0x1E220149" { try testing.expectEqual(@as(u32, 0x1E220149), encScvtfSFromW(9, 10)); }
-test "encScvtfSFromX s9, x10 → 0x9E220149" { try testing.expectEqual(@as(u32, 0x9E220149), encScvtfSFromX(9, 10)); }
-test "encUcvtfSFromW s9, w10 → 0x1E230149" { try testing.expectEqual(@as(u32, 0x1E230149), encUcvtfSFromW(9, 10)); }
-test "encUcvtfSFromX s9, x10 → 0x9E230149" { try testing.expectEqual(@as(u32, 0x9E230149), encUcvtfSFromX(9, 10)); }
-test "encScvtfDFromW d9, w10 → 0x1E620149" { try testing.expectEqual(@as(u32, 0x1E620149), encScvtfDFromW(9, 10)); }
-test "encScvtfDFromX d9, x10 → 0x9E620149" { try testing.expectEqual(@as(u32, 0x9E620149), encScvtfDFromX(9, 10)); }
-test "encUcvtfDFromW d9, w10 → 0x1E630149" { try testing.expectEqual(@as(u32, 0x1E630149), encUcvtfDFromW(9, 10)); }
-test "encUcvtfDFromX d9, x10 → 0x9E630149" { try testing.expectEqual(@as(u32, 0x9E630149), encUcvtfDFromX(9, 10)); }
-test "encFcvtSFromD s9, d10 → 0x1E624149" { try testing.expectEqual(@as(u32, 0x1E624149), encFcvtSFromD(9, 10)); }
-test "encFcvtDFromS d9, s10 → 0x1E22C149" { try testing.expectEqual(@as(u32, 0x1E22C149), encFcvtDFromS(9, 10)); }
-test "encFcvtzsWFromS w9, s10 → 0x1E380149" { try testing.expectEqual(@as(u32, 0x1E380149), encFcvtzsWFromS(9, 10)); }
-test "encFcvtzsWFromD w9, d10 → 0x1E780149" { try testing.expectEqual(@as(u32, 0x1E780149), encFcvtzsWFromD(9, 10)); }
-test "encFcvtzuWFromS w9, s10 → 0x1E390149" { try testing.expectEqual(@as(u32, 0x1E390149), encFcvtzuWFromS(9, 10)); }
-test "encFcvtzuWFromD w9, d10 → 0x1E790149" { try testing.expectEqual(@as(u32, 0x1E790149), encFcvtzuWFromD(9, 10)); }
-test "encFcvtzsXFromS x9, s10 → 0x9E380149" { try testing.expectEqual(@as(u32, 0x9E380149), encFcvtzsXFromS(9, 10)); }
-test "encFcvtzsXFromD x9, d10 → 0x9E780149" { try testing.expectEqual(@as(u32, 0x9E780149), encFcvtzsXFromD(9, 10)); }
-test "encFcvtzuXFromS x9, s10 → 0x9E390149" { try testing.expectEqual(@as(u32, 0x9E390149), encFcvtzuXFromS(9, 10)); }
-test "encFcvtzuXFromD x9, d10 → 0x9E790149" { try testing.expectEqual(@as(u32, 0x9E790149), encFcvtzuXFromD(9, 10)); }
+test "encScvtfSFromW s9, w10 → 0x1E220149" {
+    try testing.expectEqual(@as(u32, 0x1E220149), encScvtfSFromW(9, 10));
+}
+test "encScvtfSFromX s9, x10 → 0x9E220149" {
+    try testing.expectEqual(@as(u32, 0x9E220149), encScvtfSFromX(9, 10));
+}
+test "encUcvtfSFromW s9, w10 → 0x1E230149" {
+    try testing.expectEqual(@as(u32, 0x1E230149), encUcvtfSFromW(9, 10));
+}
+test "encUcvtfSFromX s9, x10 → 0x9E230149" {
+    try testing.expectEqual(@as(u32, 0x9E230149), encUcvtfSFromX(9, 10));
+}
+test "encScvtfDFromW d9, w10 → 0x1E620149" {
+    try testing.expectEqual(@as(u32, 0x1E620149), encScvtfDFromW(9, 10));
+}
+test "encScvtfDFromX d9, x10 → 0x9E620149" {
+    try testing.expectEqual(@as(u32, 0x9E620149), encScvtfDFromX(9, 10));
+}
+test "encUcvtfDFromW d9, w10 → 0x1E630149" {
+    try testing.expectEqual(@as(u32, 0x1E630149), encUcvtfDFromW(9, 10));
+}
+test "encUcvtfDFromX d9, x10 → 0x9E630149" {
+    try testing.expectEqual(@as(u32, 0x9E630149), encUcvtfDFromX(9, 10));
+}
+test "encFcvtSFromD s9, d10 → 0x1E624149" {
+    try testing.expectEqual(@as(u32, 0x1E624149), encFcvtSFromD(9, 10));
+}
+test "encFcvtDFromS d9, s10 → 0x1E22C149" {
+    try testing.expectEqual(@as(u32, 0x1E22C149), encFcvtDFromS(9, 10));
+}
+test "encFcvtzsWFromS w9, s10 → 0x1E380149" {
+    try testing.expectEqual(@as(u32, 0x1E380149), encFcvtzsWFromS(9, 10));
+}
+test "encFcvtzsWFromD w9, d10 → 0x1E780149" {
+    try testing.expectEqual(@as(u32, 0x1E780149), encFcvtzsWFromD(9, 10));
+}
+test "encFcvtzuWFromS w9, s10 → 0x1E390149" {
+    try testing.expectEqual(@as(u32, 0x1E390149), encFcvtzuWFromS(9, 10));
+}
+test "encFcvtzuWFromD w9, d10 → 0x1E790149" {
+    try testing.expectEqual(@as(u32, 0x1E790149), encFcvtzuWFromD(9, 10));
+}
+test "encFcvtzsXFromS x9, s10 → 0x9E380149" {
+    try testing.expectEqual(@as(u32, 0x9E380149), encFcvtzsXFromS(9, 10));
+}
+test "encFcvtzsXFromD x9, d10 → 0x9E780149" {
+    try testing.expectEqual(@as(u32, 0x9E780149), encFcvtzsXFromD(9, 10));
+}
+test "encFcvtzuXFromS x9, s10 → 0x9E390149" {
+    try testing.expectEqual(@as(u32, 0x9E390149), encFcvtzuXFromS(9, 10));
+}
+test "encFcvtzuXFromD x9, d10 → 0x9E790149" {
+    try testing.expectEqual(@as(u32, 0x9E790149), encFcvtzuXFromD(9, 10));
+}
 test "encBLR x17 — `blr x17` → 0xD63F0220" {
     try testing.expectEqual(@as(u32, 0xD63F0220), encBLR(17));
 }
@@ -1156,19 +1220,45 @@ test "encStrXReg x0, [x28, x16] — `str x0, [x28, x16]` → 0xF8306B80" {
     try testing.expectEqual(@as(u32, 0xF8306B80), encStrXReg(0, 28, 16));
 }
 
-test "encLdrbWReg w0, [x28, x16] → 0x38706B80" { try testing.expectEqual(@as(u32, 0x38706B80), encLdrbWReg(0, 28, 16)); }
-test "encLdrsbWReg w0, [x28, x16] → 0x38F06B80" { try testing.expectEqual(@as(u32, 0x38F06B80), encLdrsbWReg(0, 28, 16)); }
-test "encLdrsbXReg x0, [x28, x16] → 0x38B06B80" { try testing.expectEqual(@as(u32, 0x38B06B80), encLdrsbXReg(0, 28, 16)); }
-test "encLdrhWReg w0, [x28, x16] → 0x78706B80" { try testing.expectEqual(@as(u32, 0x78706B80), encLdrhWReg(0, 28, 16)); }
-test "encLdrshWReg w0, [x28, x16] → 0x78F06B80" { try testing.expectEqual(@as(u32, 0x78F06B80), encLdrshWReg(0, 28, 16)); }
-test "encLdrshXReg x0, [x28, x16] → 0x78B06B80" { try testing.expectEqual(@as(u32, 0x78B06B80), encLdrshXReg(0, 28, 16)); }
-test "encLdrswXReg x0, [x28, x16] → 0xB8B06B80" { try testing.expectEqual(@as(u32, 0xB8B06B80), encLdrswXReg(0, 28, 16)); }
-test "encStrbWReg w0, [x28, x16] → 0x38306B80" { try testing.expectEqual(@as(u32, 0x38306B80), encStrbWReg(0, 28, 16)); }
-test "encStrhWReg w0, [x28, x16] → 0x78306B80" { try testing.expectEqual(@as(u32, 0x78306B80), encStrhWReg(0, 28, 16)); }
-test "encLdrSReg s0, [x28, x16] → 0xBC706B80" { try testing.expectEqual(@as(u32, 0xBC706B80), encLdrSReg(0, 28, 16)); }
-test "encStrSReg s0, [x28, x16] → 0xBC306B80" { try testing.expectEqual(@as(u32, 0xBC306B80), encStrSReg(0, 28, 16)); }
-test "encLdrDReg d0, [x28, x16] → 0xFC706B80" { try testing.expectEqual(@as(u32, 0xFC706B80), encLdrDReg(0, 28, 16)); }
-test "encStrDReg d0, [x28, x16] → 0xFC306B80" { try testing.expectEqual(@as(u32, 0xFC306B80), encStrDReg(0, 28, 16)); }
+test "encLdrbWReg w0, [x28, x16] → 0x38706B80" {
+    try testing.expectEqual(@as(u32, 0x38706B80), encLdrbWReg(0, 28, 16));
+}
+test "encLdrsbWReg w0, [x28, x16] → 0x38F06B80" {
+    try testing.expectEqual(@as(u32, 0x38F06B80), encLdrsbWReg(0, 28, 16));
+}
+test "encLdrsbXReg x0, [x28, x16] → 0x38B06B80" {
+    try testing.expectEqual(@as(u32, 0x38B06B80), encLdrsbXReg(0, 28, 16));
+}
+test "encLdrhWReg w0, [x28, x16] → 0x78706B80" {
+    try testing.expectEqual(@as(u32, 0x78706B80), encLdrhWReg(0, 28, 16));
+}
+test "encLdrshWReg w0, [x28, x16] → 0x78F06B80" {
+    try testing.expectEqual(@as(u32, 0x78F06B80), encLdrshWReg(0, 28, 16));
+}
+test "encLdrshXReg x0, [x28, x16] → 0x78B06B80" {
+    try testing.expectEqual(@as(u32, 0x78B06B80), encLdrshXReg(0, 28, 16));
+}
+test "encLdrswXReg x0, [x28, x16] → 0xB8B06B80" {
+    try testing.expectEqual(@as(u32, 0xB8B06B80), encLdrswXReg(0, 28, 16));
+}
+test "encStrbWReg w0, [x28, x16] → 0x38306B80" {
+    try testing.expectEqual(@as(u32, 0x38306B80), encStrbWReg(0, 28, 16));
+}
+test "encStrhWReg w0, [x28, x16] → 0x78306B80" {
+    try testing.expectEqual(@as(u32, 0x78306B80), encStrhWReg(0, 28, 16));
+}
+test "encLdrSReg s0, [x28, x16] → 0xBC706B80" {
+    try testing.expectEqual(@as(u32, 0xBC706B80), encLdrSReg(0, 28, 16));
+}
+test "encStrSReg s0, [x28, x16] → 0xBC306B80" {
+    try testing.expectEqual(@as(u32, 0xBC306B80), encStrSReg(0, 28, 16));
+}
+test "encLdrDReg d0, [x28, x16] → 0xFC706B80" {
+    try testing.expectEqual(@as(u32, 0xFC706B80), encLdrDReg(0, 28, 16));
+}
+test "encStrDReg d0, [x28, x16] → 0xFC306B80" {
+    try testing.expectEqual(@as(u32, 0xFC306B80), encStrDReg(0, 28, 16));
+}
 
 test "encLsrImmX x0, x0, #63 → 0xD37FFC00" {
     try testing.expectEqual(@as(u32, 0xD37FFC00), encLsrImmX(0, 0, 63));
@@ -1416,29 +1506,73 @@ test "encFCmpD d1, d2 — `fcmp d1, d2` → 0x1E622020" {
     try testing.expectEqual(@as(u32, 0x1E622020), encFCmpD(1, 2));
 }
 
-test "encFAbsS s0, s1 → 0x1E20C020" { try testing.expectEqual(@as(u32, 0x1E20C020), encFAbsS(0, 1)); }
-test "encFNegS s0, s1 → 0x1E214020" { try testing.expectEqual(@as(u32, 0x1E214020), encFNegS(0, 1)); }
-test "encFSqrtS s0, s1 → 0x1E21C020" { try testing.expectEqual(@as(u32, 0x1E21C020), encFSqrtS(0, 1)); }
-test "encFRintPS s0, s1 → 0x1E24C020" { try testing.expectEqual(@as(u32, 0x1E24C020), encFRintPS(0, 1)); }
-test "encFRintMS s0, s1 → 0x1E254020" { try testing.expectEqual(@as(u32, 0x1E254020), encFRintMS(0, 1)); }
-test "encFRintZS s0, s1 → 0x1E25C020" { try testing.expectEqual(@as(u32, 0x1E25C020), encFRintZS(0, 1)); }
-test "encFRintNS s0, s1 → 0x1E244020" { try testing.expectEqual(@as(u32, 0x1E244020), encFRintNS(0, 1)); }
-test "encFAbsD d0, d1 → 0x1E60C020" { try testing.expectEqual(@as(u32, 0x1E60C020), encFAbsD(0, 1)); }
-test "encFNegD d0, d1 → 0x1E614020" { try testing.expectEqual(@as(u32, 0x1E614020), encFNegD(0, 1)); }
-test "encFSqrtD d0, d1 → 0x1E61C020" { try testing.expectEqual(@as(u32, 0x1E61C020), encFSqrtD(0, 1)); }
-test "encFRintPD d0, d1 → 0x1E64C020" { try testing.expectEqual(@as(u32, 0x1E64C020), encFRintPD(0, 1)); }
-test "encFRintMD d0, d1 → 0x1E654020" { try testing.expectEqual(@as(u32, 0x1E654020), encFRintMD(0, 1)); }
-test "encFRintZD d0, d1 → 0x1E65C020" { try testing.expectEqual(@as(u32, 0x1E65C020), encFRintZD(0, 1)); }
-test "encFRintND d0, d1 → 0x1E644020" { try testing.expectEqual(@as(u32, 0x1E644020), encFRintND(0, 1)); }
-test "encFMinS s0, s1, s2 → 0x1E225820" { try testing.expectEqual(@as(u32, 0x1E225820), encFMinS(0, 1, 2)); }
-test "encFMaxS s0, s1, s2 → 0x1E224820" { try testing.expectEqual(@as(u32, 0x1E224820), encFMaxS(0, 1, 2)); }
-test "encFMinD d0, d1, d2 → 0x1E625820" { try testing.expectEqual(@as(u32, 0x1E625820), encFMinD(0, 1, 2)); }
-test "encFMaxD d0, d1, d2 → 0x1E624820" { try testing.expectEqual(@as(u32, 0x1E624820), encFMaxD(0, 1, 2)); }
+test "encFAbsS s0, s1 → 0x1E20C020" {
+    try testing.expectEqual(@as(u32, 0x1E20C020), encFAbsS(0, 1));
+}
+test "encFNegS s0, s1 → 0x1E214020" {
+    try testing.expectEqual(@as(u32, 0x1E214020), encFNegS(0, 1));
+}
+test "encFSqrtS s0, s1 → 0x1E21C020" {
+    try testing.expectEqual(@as(u32, 0x1E21C020), encFSqrtS(0, 1));
+}
+test "encFRintPS s0, s1 → 0x1E24C020" {
+    try testing.expectEqual(@as(u32, 0x1E24C020), encFRintPS(0, 1));
+}
+test "encFRintMS s0, s1 → 0x1E254020" {
+    try testing.expectEqual(@as(u32, 0x1E254020), encFRintMS(0, 1));
+}
+test "encFRintZS s0, s1 → 0x1E25C020" {
+    try testing.expectEqual(@as(u32, 0x1E25C020), encFRintZS(0, 1));
+}
+test "encFRintNS s0, s1 → 0x1E244020" {
+    try testing.expectEqual(@as(u32, 0x1E244020), encFRintNS(0, 1));
+}
+test "encFAbsD d0, d1 → 0x1E60C020" {
+    try testing.expectEqual(@as(u32, 0x1E60C020), encFAbsD(0, 1));
+}
+test "encFNegD d0, d1 → 0x1E614020" {
+    try testing.expectEqual(@as(u32, 0x1E614020), encFNegD(0, 1));
+}
+test "encFSqrtD d0, d1 → 0x1E61C020" {
+    try testing.expectEqual(@as(u32, 0x1E61C020), encFSqrtD(0, 1));
+}
+test "encFRintPD d0, d1 → 0x1E64C020" {
+    try testing.expectEqual(@as(u32, 0x1E64C020), encFRintPD(0, 1));
+}
+test "encFRintMD d0, d1 → 0x1E654020" {
+    try testing.expectEqual(@as(u32, 0x1E654020), encFRintMD(0, 1));
+}
+test "encFRintZD d0, d1 → 0x1E65C020" {
+    try testing.expectEqual(@as(u32, 0x1E65C020), encFRintZD(0, 1));
+}
+test "encFRintND d0, d1 → 0x1E644020" {
+    try testing.expectEqual(@as(u32, 0x1E644020), encFRintND(0, 1));
+}
+test "encFMinS s0, s1, s2 → 0x1E225820" {
+    try testing.expectEqual(@as(u32, 0x1E225820), encFMinS(0, 1, 2));
+}
+test "encFMaxS s0, s1, s2 → 0x1E224820" {
+    try testing.expectEqual(@as(u32, 0x1E224820), encFMaxS(0, 1, 2));
+}
+test "encFMinD d0, d1, d2 → 0x1E625820" {
+    try testing.expectEqual(@as(u32, 0x1E625820), encFMinD(0, 1, 2));
+}
+test "encFMaxD d0, d1, d2 → 0x1E624820" {
+    try testing.expectEqual(@as(u32, 0x1E624820), encFMaxD(0, 1, 2));
+}
 
-test "encBicRegW w0, w1, w2 → 0x0A220020" { try testing.expectEqual(@as(u32, 0x0A220020), encBicRegW(0, 1, 2)); }
-test "encBicRegX x0, x1, x2 → 0x8A220020" { try testing.expectEqual(@as(u32, 0x8A220020), encBicRegX(0, 1, 2)); }
-test "encFmovWFromS w0, s1 → 0x1E260020" { try testing.expectEqual(@as(u32, 0x1E260020), encFmovWFromS(0, 1)); }
-test "encFmovXFromD x0, d1 → 0x9E660020" { try testing.expectEqual(@as(u32, 0x9E660020), encFmovXFromD(0, 1)); }
+test "encBicRegW w0, w1, w2 → 0x0A220020" {
+    try testing.expectEqual(@as(u32, 0x0A220020), encBicRegW(0, 1, 2));
+}
+test "encBicRegX x0, x1, x2 → 0x8A220020" {
+    try testing.expectEqual(@as(u32, 0x8A220020), encBicRegX(0, 1, 2));
+}
+test "encFmovWFromS w0, s1 → 0x1E260020" {
+    try testing.expectEqual(@as(u32, 0x1E260020), encFmovWFromS(0, 1));
+}
+test "encFmovXFromD x0, d1 → 0x9E660020" {
+    try testing.expectEqual(@as(u32, 0x9E660020), encFmovXFromD(0, 1));
+}
 
 // V-register encodings cross-checked via `clang -target
 // arm64-apple-darwin` assembler. See verifier session in

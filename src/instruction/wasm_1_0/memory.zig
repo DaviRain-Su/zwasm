@@ -259,7 +259,6 @@ fn memoryGrow(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
     try rt.pushOperand(.{ .u32 = old_pages });
 }
 
-
 // ============================================================
 // Tests
 // ============================================================
@@ -337,4 +336,3 @@ test "memory.grow grows by 1 page; size reflects update" {
     try driveOne(&rt, &t, .@"memory.size", 0, 0);
     try testing.expectEqual(@as(u32, 1), rt.popOperand().u32);
 }
-

@@ -59,7 +59,7 @@ pub fn emitI64Binary(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         .@"i64.sub" => inst.encSubReg(xd, xn, xm),
         .@"i64.mul" => inst.encMulReg(xd, xn, xm),
         .@"i64.and" => inst.encAndReg(xd, xn, xm),
-        .@"i64.or"  => inst.encOrrReg(xd, xn, xm),
+        .@"i64.or" => inst.encOrrReg(xd, xn, xm),
         .@"i64.xor" => inst.encEorReg(xd, xn, xm),
         else => unreachable,
     };
@@ -76,8 +76,8 @@ pub fn emitI64Compare(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const xm = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.rhs, 1);
     const wd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
     const cond: inst.Cond = switch (ins.op) {
-        .@"i64.eq"   => .eq,
-        .@"i64.ne"   => .ne,
+        .@"i64.eq" => .eq,
+        .@"i64.ne" => .ne,
         .@"i64.lt_s" => .lt,
         .@"i64.lt_u" => .lo,
         .@"i64.gt_s" => .gt,
@@ -112,10 +112,10 @@ pub fn emitI64Shift(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const xm = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.rhs, 1);
     const xd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
     const word: u32 = switch (ins.op) {
-        .@"i64.shl"   => inst.encLslvRegX(xd, xn, xm),
+        .@"i64.shl" => inst.encLslvRegX(xd, xn, xm),
         .@"i64.shr_s" => inst.encAsrvRegX(xd, xn, xm),
         .@"i64.shr_u" => inst.encLsrvRegX(xd, xn, xm),
-        .@"i64.rotr"  => inst.encRorvRegX(xd, xn, xm),
+        .@"i64.rotr" => inst.encRorvRegX(xd, xn, xm),
         else => unreachable,
     };
     try gpr.writeU32(ctx.allocator, ctx.buf, word);
@@ -192,13 +192,13 @@ pub fn emitI32Binary(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const wm = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.rhs, 1);
     const wd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
     const word: u32 = switch (ins.op) {
-        .@"i32.add"   => inst.encAddRegW(wd, wn, wm),
-        .@"i32.sub"   => inst.encSubRegW(wd, wn, wm),
-        .@"i32.mul"   => inst.encMulRegW(wd, wn, wm),
-        .@"i32.and"   => inst.encAndRegW(wd, wn, wm),
-        .@"i32.or"    => inst.encOrrRegW(wd, wn, wm),
-        .@"i32.xor"   => inst.encEorRegW(wd, wn, wm),
-        .@"i32.shl"   => inst.encLslvRegW(wd, wn, wm),
+        .@"i32.add" => inst.encAddRegW(wd, wn, wm),
+        .@"i32.sub" => inst.encSubRegW(wd, wn, wm),
+        .@"i32.mul" => inst.encMulRegW(wd, wn, wm),
+        .@"i32.and" => inst.encAndRegW(wd, wn, wm),
+        .@"i32.or" => inst.encOrrRegW(wd, wn, wm),
+        .@"i32.xor" => inst.encEorRegW(wd, wn, wm),
+        .@"i32.shl" => inst.encLslvRegW(wd, wn, wm),
         .@"i32.shr_s" => inst.encAsrvRegW(wd, wn, wm),
         .@"i32.shr_u" => inst.encLsrvRegW(wd, wn, wm),
         else => unreachable,
@@ -241,8 +241,8 @@ pub fn emitI32Compare(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const wm = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.rhs, 1);
     const wd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
     const cond: inst.Cond = switch (ins.op) {
-        .@"i32.eq"   => .eq,
-        .@"i32.ne"   => .ne,
+        .@"i32.eq" => .eq,
+        .@"i32.ne" => .ne,
         .@"i32.lt_s" => .lt,
         .@"i32.lt_u" => .lo,
         .@"i32.gt_s" => .gt,

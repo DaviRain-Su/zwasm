@@ -132,13 +132,13 @@ const Lowerer = struct {
         switch (op) {
             0x00 => try self.emit(.@"unreachable", 0, 0),
             0x01 => try self.emit(.nop, 0, 0),
-            0x02 => try self.openBlock(.block, .@"block"),
-            0x03 => try self.openBlock(.loop, .@"loop"),
+            0x02 => try self.openBlock(.block, .block),
+            0x03 => try self.openBlock(.loop, .loop),
             0x04 => try self.openBlock(.if_then, .@"if"),
             0x05 => try self.emitElse(),
             0x0B => {
                 if (self.block_stack_len == 0) {
-                    try self.emit(.@"end", 0, 0);
+                    try self.emit(.end, 0, 0);
                     fn_done.* = true;
                 } else {
                     try self.closeBlock();
@@ -146,10 +146,10 @@ const Lowerer = struct {
             },
             0x0C => {
                 const depth = try leb128.readUleb128(u32, self.body, &self.pos);
-                try self.emit(.@"br", depth, 0);
+                try self.emit(.br, depth, 0);
             },
             0x0F => try self.emit(.@"return", 0, 0),
-            0x1A => try self.emit(.@"drop", 0, 0),
+            0x1A => try self.emit(.drop, 0, 0),
             0x20 => try self.emitLocalIndexed(.@"local.get"),
             0x21 => try self.emitLocalIndexed(.@"local.set"),
             0x22 => try self.emitLocalIndexed(.@"local.tee"),
@@ -179,13 +179,13 @@ const Lowerer = struct {
                 try self.emit(.@"f64.const", lo, hi);
             },
             // Control flow continued
-            0x0D => try self.emitUlebPayload(.@"br_if"),
+            0x0D => try self.emitUlebPayload(.br_if),
             0x0E => try self.emitBrTable(),
-            0x10 => try self.emitUlebPayload(.@"call"),
+            0x10 => try self.emitUlebPayload(.call),
             0x11 => try self.emitCallIndirect(),
 
             // Parametric
-            0x1B => try self.emit(.@"select", 0, 0),
+            0x1B => try self.emit(.select, 0, 0),
             0x1C => {
                 // select_typed: count valtype*. Wasm 2.0 requires
                 // count = 1; consume + emit select_typed (runtime
@@ -199,7 +199,7 @@ const Lowerer = struct {
                     0x7F, 0x7E, 0x7D, 0x7C, 0x70, 0x6F => {},
                     else => return Error.BadBlockType,
                 }
-                try self.emit(.@"select_typed", 0, t);
+                try self.emit(.select_typed, 0, t);
             },
 
             // Globals
@@ -862,7 +862,7 @@ const Lowerer = struct {
     fn emitCallIndirect(self: *Lowerer) Error!void {
         const type_idx = try leb128.readUleb128(u32, self.body, &self.pos);
         const table_idx = try leb128.readUleb128(u32, self.body, &self.pos);
-        try self.emit(.@"call_indirect", type_idx, table_idx);
+        try self.emit(.call_indirect, type_idx, table_idx);
     }
 
     /// br_table: emit ZirOp.br_table with payload = count of labels.
@@ -880,7 +880,7 @@ const Lowerer = struct {
         }
         const default = try leb128.readUleb128(u32, self.body, &self.pos);
         try self.out.branch_targets.append(self.alloc, default);
-        try self.emit(.@"br_table", count, start);
+        try self.emit(.br_table, count, start);
     }
 
     fn openBlock(self: *Lowerer, kind: BlockKind, op: ZirOp) Error!void {
@@ -934,7 +934,7 @@ const Lowerer = struct {
         const block_idx = self.block_stack[self.block_stack_len - 1];
         self.block_stack_len -= 1;
         const end_inst: u32 = @intCast(self.out.instrs.items.len);
-        try self.emit(.@"end", block_idx, 0);
+        try self.emit(.end, block_idx, 0);
         self.out.blocks.items[block_idx].end_inst = end_inst;
     }
 
@@ -947,4 +947,3 @@ const Lowerer = struct {
         try self.emit(.@"else", block_idx, 0);
     }
 };
-

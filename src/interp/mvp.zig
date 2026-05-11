@@ -65,20 +65,20 @@ pub fn register(table: *DispatchTable) void {
     table.interp[op(.@"unreachable")] = unreachableOp;
     table.interp[op(.nop)] = nopOp;
     table.interp[op(.select)] = selectOp;
-    table.interp[op(.@"select_typed")] = selectOp;
+    table.interp[op(.select_typed)] = selectOp;
 
     // Control flow
-    table.interp[op(.@"block")] = blockOp;
-    table.interp[op(.@"loop")] = loopOp;
+    table.interp[op(.block)] = blockOp;
+    table.interp[op(.loop)] = loopOp;
     table.interp[op(.@"if")] = ifOp;
     table.interp[op(.@"else")] = elseOp;
-    table.interp[op(.@"end")] = endOp;
-    table.interp[op(.@"br")] = brOp;
-    table.interp[op(.@"br_if")] = brIfOp;
-    table.interp[op(.@"br_table")] = brTableOp;
+    table.interp[op(.end)] = endOp;
+    table.interp[op(.br)] = brOp;
+    table.interp[op(.br_if)] = brIfOp;
+    table.interp[op(.br_table)] = brTableOp;
     table.interp[op(.@"return")] = returnOp;
-    table.interp[op(.@"call")] = callOp;
-    table.interp[op(.@"call_indirect")] = callIndirectOp;
+    table.interp[op(.call)] = callOp;
+    table.interp[op(.call_indirect)] = callIndirectOp;
 
     // Parametric
     table.interp[op(.drop)] = drop;
@@ -508,15 +508,15 @@ test "call: invokes callee, args pop and result push round-trip" {
     try callee.instrs.append(testing.allocator, .{ .op = .@"local.get", .payload = 0, .extra = 0 });
     try callee.instrs.append(testing.allocator, .{ .op = .@"local.get", .payload = 1, .extra = 0 });
     try callee.instrs.append(testing.allocator, .{ .op = .@"i32.add", .payload = 0, .extra = 0 });
-    try callee.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
+    try callee.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
 
     // caller: fn () -> i32 { i32.const 5 ; i32.const 7 ; call 0 ; end }
     var caller = zir.ZirFunc.init(1, .{ .params = &.{}, .results = &result_arr }, &.{});
     defer caller.deinit(testing.allocator);
     try caller.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 5, .extra = 0 });
     try caller.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 7, .extra = 0 });
-    try caller.instrs.append(testing.allocator, .{ .op = .@"call", .payload = 0, .extra = 0 });
-    try caller.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
+    try caller.instrs.append(testing.allocator, .{ .op = .call, .payload = 0, .extra = 0 });
+    try caller.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
 
     var t = DispatchTable.init();
     register(&t);
@@ -539,11 +539,11 @@ test "block + end: arity=0, operand stack restored" {
     var fnz = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &.{} }, &.{});
     defer fnz.deinit(testing.allocator);
     try fnz.blocks.append(testing.allocator, .{ .kind = .block, .start_inst = 0, .end_inst = 2 });
-    try fnz.instrs.append(testing.allocator, .{ .op = .@"block", .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .block, .payload = 0, .extra = 0 });
     try fnz.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 7)), .extra = 0 });
-    try fnz.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
     try fnz.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 99)), .extra = 0 });
-    try fnz.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
 
     var t = DispatchTable.init();
     register(&t);
@@ -565,13 +565,13 @@ test "br 0 from inside block: jumps past end" {
     defer fnz.deinit(testing.allocator);
     try fnz.blocks.append(testing.allocator, .{ .kind = .block, .start_inst = 0, .end_inst = 4 });
     // block; i32.const 1; br 0; i32.const 2 (skipped); end; i32.const 3; end
-    try fnz.instrs.append(testing.allocator, .{ .op = .@"block", .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .block, .payload = 0, .extra = 0 });
     try fnz.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 1, .extra = 0 });
-    try fnz.instrs.append(testing.allocator, .{ .op = .@"br", .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .br, .payload = 0, .extra = 0 });
     try fnz.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 99, .extra = 0 });
-    try fnz.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
     try fnz.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 3, .extra = 0 });
-    try fnz.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
 
     var t = DispatchTable.init();
     register(&t);
@@ -599,8 +599,8 @@ test "if cond=0 skips to end; cond=1 runs then-branch" {
     try fnz.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 11, .extra = 0 });
     try fnz.instrs.append(testing.allocator, .{ .op = .@"else", .payload = 0, .extra = 0 });
     try fnz.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 22, .extra = 0 });
-    try fnz.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
-    try fnz.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
 
     var t = DispatchTable.init();
     register(&t);
@@ -621,7 +621,7 @@ test "return: ends function execution and produces sig.results" {
     try fnz.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 7, .extra = 0 });
     try fnz.instrs.append(testing.allocator, .{ .op = .@"return", .payload = 0, .extra = 0 });
     try fnz.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 99, .extra = 0 });
-    try fnz.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
 
     var t = DispatchTable.init();
     register(&t);
@@ -640,11 +640,11 @@ test "block + end: arity=2 multivalue — both results survive" {
     var fnz = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &.{} }, &.{});
     defer fnz.deinit(testing.allocator);
     try fnz.blocks.append(testing.allocator, .{ .kind = .block, .start_inst = 0, .end_inst = 3 });
-    try fnz.instrs.append(testing.allocator, .{ .op = .@"block", .payload = 0, .extra = 2 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .block, .payload = 0, .extra = 2 });
     try fnz.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 11, .extra = 0 });
     try fnz.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 22, .extra = 0 });
-    try fnz.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
-    try fnz.instrs.append(testing.allocator, .{ .op = .@"end", .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
 
     var t = DispatchTable.init();
     register(&t);
@@ -710,7 +710,7 @@ test "select_typed: same runtime semantics as select" {
     try rt.pushOperand(.{ .ref = 7 });
     try rt.pushOperand(.{ .ref = runtime.Value.null_ref });
     try rt.pushOperand(.{ .i32 = 1 }); // cond=true → pick first
-    try driveOne(&rt, &t, .@"select_typed", 0, 0x70);
+    try driveOne(&rt, &t, .select_typed, 0, 0x70);
     try testing.expectEqual(@as(u64, 7), rt.popOperand().ref);
 }
 

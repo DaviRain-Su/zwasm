@@ -233,15 +233,14 @@ test "zwasm_wasi_config_delete: null-arg discipline" {
 
 test "lookupWasiThunk: every supported WASI 0.1 import resolves" {
     const names = [_][]const u8{
-        "fd_write",        "proc_exit",
-        "args_get",        "args_sizes_get",
-        "environ_get",     "environ_sizes_get",
-        "clock_time_get",  "random_get",
-        "poll_oneoff",
-        "fd_read",         "fd_close",
-        "fd_seek",         "fd_tell",
-        "fd_fdstat_get",   "fd_fdstat_set_flags",
-        "path_open",
+        "fd_write",            "proc_exit",
+        "args_get",            "args_sizes_get",
+        "environ_get",         "environ_sizes_get",
+        "clock_time_get",      "random_get",
+        "poll_oneoff",         "fd_read",
+        "fd_close",            "fd_seek",
+        "fd_tell",             "fd_fdstat_get",
+        "fd_fdstat_set_flags", "path_open",
     };
     inline for (names) |n| {
         try testing.expect(lookupWasiThunk(n) != null);

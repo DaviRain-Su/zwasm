@@ -222,15 +222,15 @@ test "link: 2-function module — fn0 calls fn1, returns 7" {
         return error.SkipZigTest;
     }
     const sigs = [_]zir.FuncType{
-        .{ .params = &.{}, .results = &.{ .i32 } }, // fn0
-        .{ .params = &.{}, .results = &.{ .i32 } }, // fn1
+        .{ .params = &.{}, .results = &.{.i32} }, // fn0
+        .{ .params = &.{}, .results = &.{.i32} }, // fn1
     };
 
     // fn0: () → i32  { call 1 ; end }
     var fn0 = ZirFunc.init(0, sigs[0], &.{});
     defer fn0.deinit(testing.allocator);
-    try fn0.instrs.append(testing.allocator, .{ .op = .@"call", .payload = 1 });
-    try fn0.instrs.append(testing.allocator, .{ .op = .@"end" });
+    try fn0.instrs.append(testing.allocator, .{ .op = .call, .payload = 1 });
+    try fn0.instrs.append(testing.allocator, .{ .op = .end });
     fn0.liveness = .{ .ranges = &[_]zir.LiveRange{
         .{ .def_pc = 0, .last_use_pc = 1 },
     } };
@@ -241,7 +241,7 @@ test "link: 2-function module — fn0 calls fn1, returns 7" {
     var fn1 = ZirFunc.init(1, sigs[1], &.{});
     defer fn1.deinit(testing.allocator);
     try fn1.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 7 });
-    try fn1.instrs.append(testing.allocator, .{ .op = .@"end" });
+    try fn1.instrs.append(testing.allocator, .{ .op = .end });
     fn1.liveness = .{ .ranges = &[_]zir.LiveRange{
         .{ .def_pc = 0, .last_use_pc = 1 },
     } };

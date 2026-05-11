@@ -285,7 +285,7 @@ test "produceCwasm: two-func with reloc round-trips bytes + reloc rebase" {
 
 test "produceCwasm: alignment pads code section to 4 bytes" {
     const fn0 = [_]u8{ 0x01, 0x02, 0x03 }; // 3 bytes — not 4-aligned
-    const fn1 = [_]u8{ 0xFF };
+    const fn1 = [_]u8{0xFF};
     const input: Input = .{
         .arch = format.arch_arm64,
         .bytes_per_func = &.{ &fn0, &fn1 },
