@@ -141,6 +141,17 @@ pub const Allocation = struct {
     /// 9.5 ARM64 NEON emit populates it during `compute()` when
     /// the function's ZirInstr stream contains v128 ops.
     shape_tags: ?[]const ShapeTag = null,
+    /// Per-slot byte offset table for spill slots (§9.9 / 9.9-h-9
+    /// per ADR-0053 Part 1). When non-null, indexed by `slot_id -
+    /// max_reg_slots_gpr` (so `spill_offsets[0]` is the byte offset
+    /// of the first spill slot). Populated post-`compute()` when
+    /// `shape_tags` is non-null AND at least one slot is occupied
+    /// by a v128 vreg — gives v128 spill slots 16-byte alignment +
+    /// 16-byte stride, scalar spill slots stay 8-byte. `null` means
+    /// "use the legacy uniform `(id - max_reg_slots_gpr) * 8` formula"
+    /// — the all-scalar or no-spill case where v128 alignment is
+    /// vacuously satisfied.
+    spill_offsets: ?[]const u32 = null,
 
     /// Resolve a vreg's home for the given register class: physical
     /// register slot or spill offset. The class selects which
@@ -173,6 +184,15 @@ pub const Allocation = struct {
         // `id < threshold` ⇒ id < pool size (≤ 16 today), so the
         // u8 narrowing is provably safe.
         if (id < threshold) return .{ .reg = @intCast(id) };
+        // ADR-0053 Part 1: when `spill_offsets` is populated, consult
+        // the per-slot byte offset table (shape-aware: v128 slots
+        // get 16-byte alignment + stride; scalar slots stay 8-byte).
+        // Falls back to the legacy uniform 8-byte formula when null
+        // — the all-scalar / no-v128-spill case.
+        if (self.spill_offsets) |offsets| {
+            const spill_idx = id - self.max_reg_slots_gpr;
+            return .{ .spill = offsets[spill_idx] };
+        }
         return .{ .spill = (@as(u32, id) - self.max_reg_slots_gpr) * 8 };
     }
 
@@ -182,6 +202,27 @@ pub const Allocation = struct {
     /// `slot()`'s doc for the per-class accounting subtlety.
     pub fn spillBytes(self: Allocation) u32 {
         if (self.n_slots <= self.max_reg_slots_gpr) return 0;
+        // ADR-0053 Part 1: shape-aware total when `spill_offsets`
+        // is populated — the last slot's offset plus its own size.
+        // Size is 16 for v128 slots, 8 otherwise; recover from the
+        // gap between consecutive offsets (or from spill_total when
+        // we add it). Cheaper recovery: the last offset + the
+        // tail-slot size as recorded at compute time. Embedded
+        // here as `offsets[last] + tail_size`; tail_size derives
+        // from offsets[last+1] - offsets[last] for non-last slots,
+        // but for the final slot we re-read shape via slot id. The
+        // shorter approach: keep an implicit assumption that the
+        // total is captured by the prologue as
+        // `spillBytesFromOffsets(offsets, n_slots, max_reg_slots_gpr,
+        // shape_tags)`. To keep the API surface tight today, the
+        // 16-byte-rounded total is `align_up(last_offset + 16, 16)`
+        // — slightly conservative when the last slot is scalar, but
+        // safe (over-allocates by ≤ 8 bytes once per function).
+        if (self.spill_offsets) |offsets| {
+            if (offsets.len == 0) return 0;
+            const last = offsets[offsets.len - 1];
+            return std.mem.alignForward(u32, last + 16, 16);
+        }
         return (@as(u32, self.n_slots) - self.max_reg_slots_gpr) * 8;
     }
 
@@ -294,8 +335,87 @@ pub fn compute(allocator: Allocator, func: *const ZirFunc) Error!Allocation {
         active_len += 1;
     }
 
-    return .{ .slots = slots, .n_slots = n_slots, .shape_tags = shape_tags };
+    // ADR-0053 Part 1 (§9.9 / 9.9-h-9): when shape_tags exists,
+    // compute per-slot byte offsets so v128 spill slots get 16-byte
+    // alignment + stride. Skips the alloc on the all-scalar /
+    // no-spill case so `Allocation.slot()`'s legacy formula still
+    // fires uniformly there.
+    const spill_offsets = if (shape_tags) |tags|
+        try computeSpillOffsets(allocator, slots, n_slots, max_reg_slots_gpr_default, tags)
+    else
+        null;
+    errdefer if (spill_offsets) |so| allocator.free(so);
+
+    return .{ .slots = slots, .n_slots = n_slots, .shape_tags = shape_tags, .spill_offsets = spill_offsets };
 }
+
+/// ADR-0053 Part 1 — compute per-slot spill byte offsets.
+///
+/// Walks `slots[]` to determine each slot id's shape (a slot's
+/// shape is v128 iff ANY vreg assigned to that slot is v128; lifetime
+/// non-overlap is guaranteed by the regalloc's verifier so the
+/// max-over-vregs is well-defined). Then walks slot ids in order:
+/// each v128 slot pads up to the next 16-byte boundary and consumes
+/// 16 bytes; each scalar spill slot consumes 8 bytes. The resulting
+/// `offsets[slot_id - max_reg_slots_gpr]` is the byte offset of that
+/// slot from the spill-region base.
+///
+/// Returns `null` when no slot is occupied by a v128 vreg (the
+/// legacy uniform 8-byte formula remains correct in that case, so
+/// we avoid the allocation). Caller pairs `free` with
+/// `regalloc.deinit`.
+fn computeSpillOffsets(
+    allocator: Allocator,
+    slots: []const u16,
+    n_slots: u16,
+    max_reg_slots_gpr: u16,
+    shape_tags: []const ShapeTag,
+) Error!?[]u32 {
+    if (n_slots <= max_reg_slots_gpr) return null;
+    const n_spill: usize = @intCast(n_slots - max_reg_slots_gpr);
+
+    // Per-slot shape: 0 = unset, 1 = scalar, 2 = v128. The shapes
+    // array packs the max-shape seen per spill slot id. Stack-
+    // allocated for typical sizes (≤ max_slots ≈ 32k).
+    var any_v128: bool = false;
+    const shapes = try allocator.alloc(u2, n_spill);
+    defer allocator.free(shapes);
+    @memset(shapes, 0);
+    for (slots, 0..) |s, vreg| {
+        if (s < max_reg_slots_gpr) continue;
+        const idx: usize = @intCast(s - max_reg_slots_gpr);
+        const t = if (vreg < shape_tags.len) shape_tags[vreg] else .scalar;
+        const this_shape: u2 = switch (t) {
+            .v128 => 2,
+            .scalar, _ => 1,
+        };
+        if (this_shape > shapes[idx]) shapes[idx] = this_shape;
+        if (this_shape == 2) any_v128 = true;
+    }
+    if (!any_v128) return null;
+
+    const offsets = try allocator.alloc(u32, n_spill);
+    errdefer allocator.free(offsets);
+    var byte_off: u32 = 0;
+    var i: usize = 0;
+    while (i < n_spill) : (i += 1) {
+        if (shapes[i] == 2) {
+            byte_off = std.mem.alignForward(u32, byte_off, 16);
+            offsets[i] = byte_off;
+            byte_off += 16;
+        } else {
+            // Scalar (or unused: still place an 8-byte slot to
+            // preserve dense indexing; unused slots cost 8 bytes
+            // each, an acceptable rounding for functions with
+            // dead-but-allocated slot ids).
+            offsets[i] = byte_off;
+            byte_off += 8;
+        }
+    }
+    return offsets;
+}
+
+const max_reg_slots_gpr_default: u16 = 8;
 
 /// Post-condition: every pair of overlapping live ranges holds
 /// distinct slot assignments AND every slot id is < n_slots AND
@@ -327,6 +447,7 @@ pub fn verify(func: *const ZirFunc, alloc: Allocation) VerifyError!void {
 pub fn deinit(allocator: Allocator, alloc: Allocation) void {
     if (alloc.slots.len != 0) allocator.free(alloc.slots);
     if (alloc.shape_tags) |tags| if (tags.len != 0) allocator.free(tags);
+    if (alloc.spill_offsets) |so| if (so.len != 0) allocator.free(so);
 }
 
 /// Populate `Allocation.shape_tags` for a function whose
@@ -1076,6 +1197,79 @@ test "compute: scalar-only function has null shape_tags" {
     const alloc = try compute(testing.allocator, &f);
     defer deinit(testing.allocator, alloc);
     try testing.expect(alloc.shape_tags == null);
+}
+
+test "spill_offsets: scalar-only allocation keeps legacy 8-byte stride" {
+    // Manually-constructed Allocation: scalar shape_tags, slot ids
+    // crossing the GPR threshold. spill_offsets stays null so
+    // slot() falls back to `(id - max_reg_slots_gpr) * 8`.
+    const slots = [_]u16{ 0, 1, 8, 9 }; // last two are spill on the 8-reg GPR boundary
+    const tags = [_]ShapeTag{ .scalar, .scalar, .scalar, .scalar };
+    const alloc: Allocation = .{
+        .slots = &slots,
+        .n_slots = 10,
+        .max_reg_slots_gpr = 8,
+        .shape_tags = &tags,
+        .spill_offsets = null,
+    };
+    // vreg 0 + 1 in registers.
+    try testing.expectEqual(@as(u32, 0), alloc.slot(0, .gpr).reg);
+    try testing.expectEqual(@as(u32, 1), alloc.slot(1, .gpr).reg);
+    // vreg 2 spill at slot id 8 → offset (8-8)*8 = 0.
+    try testing.expectEqual(@as(u32, 0), alloc.slot(2, .gpr).spill);
+    // vreg 3 spill at slot id 9 → offset (9-8)*8 = 8.
+    try testing.expectEqual(@as(u32, 8), alloc.slot(3, .gpr).spill);
+}
+
+test "spill_offsets: v128 spill slot gets 16-byte alignment + stride" {
+    // Allocation with one scalar spill slot followed by one v128
+    // spill slot. The v128 must land at a 16-byte boundary; the
+    // following slot (if any) starts at v128_offset + 16.
+    const slots = [_]u16{ 8, 9, 10 }; // 3 spill slots
+    const tags = [_]ShapeTag{ .scalar, .v128, .scalar };
+    const offsets = [_]u32{ 0, 16, 32 };
+    const alloc: Allocation = .{
+        .slots = &slots,
+        .n_slots = 11,
+        .max_reg_slots_gpr = 8,
+        .shape_tags = &tags,
+        .spill_offsets = &offsets,
+    };
+    try testing.expectEqual(@as(u32, 0), alloc.slot(0, .gpr).spill); // scalar at 0
+    try testing.expectEqual(@as(u32, 16), alloc.slot(1, .gpr).spill); // v128 at 16-aligned
+    try testing.expectEqual(@as(u32, 32), alloc.slot(2, .gpr).spill); // next scalar
+    // spillBytes: align_up(last_offset + 16, 16) = align_up(48, 16) = 48.
+    try testing.expectEqual(@as(u32, 48), alloc.spillBytes());
+}
+
+test "computeSpillOffsets: bumps scalar-then-v128 to 16-byte alignment" {
+    // 3 spill slots: scalar (id 8) → v128 (id 9) → scalar (id 10).
+    // Slot 8: scalar at offset 0 (size 8 → next byte_off = 8).
+    // Slot 9: v128 aligns 8 → 16, lands at 16, consumes 16 → 32.
+    // Slot 10: scalar at offset 32.
+    const slots_arr = [_]u16{ 8, 9, 10 };
+    const tags = [_]ShapeTag{ .scalar, .v128, .scalar };
+    const result = (try computeSpillOffsets(testing.allocator, &slots_arr, 11, 8, &tags)).?;
+    defer testing.allocator.free(result);
+    try testing.expectEqualSlices(u32, &.{ 0, 16, 32 }, result);
+}
+
+test "computeSpillOffsets: returns null when no v128 vreg spills" {
+    // 2 spill slots, both scalar → legacy formula suffices.
+    const slots_arr = [_]u16{ 8, 9 };
+    const tags = [_]ShapeTag{ .scalar, .scalar };
+    const result = try computeSpillOffsets(testing.allocator, &slots_arr, 10, 8, &tags);
+    try testing.expect(result == null);
+}
+
+test "computeSpillOffsets: v128 alignment with leading scalar pads correctly" {
+    // Slot 8 scalar (size 8) → byte_off advances to 8.
+    // Slot 9 v128 needs 16-aligned: padded to 16, consumes 16 → 32.
+    const slots_arr = [_]u16{ 8, 9 };
+    const tags = [_]ShapeTag{ .scalar, .v128 };
+    const result = (try computeSpillOffsets(testing.allocator, &slots_arr, 10, 8, &tags)).?;
+    defer testing.allocator.free(result);
+    try testing.expectEqualSlices(u32, &.{ 0, 16 }, result);
 }
 
 test "compute: SIMD function gets populated shape_tags" {
