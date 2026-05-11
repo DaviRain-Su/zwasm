@@ -17,14 +17,14 @@ Prep mode complete 2026-05-11..2026-05-12; 4 tracks decided.
 Deliverables: `.dev/phase10_prep/track_{a,b,c}_*.md` +
 `.dev/phase10_transition_gate.md`. Normal `/continue` resumes.
 
-Phase: 9 (SIMD-128). §9.5/6/7/8 [x]; §9.9 [ ] (Mac+OrbStack
-11384/0 post-h-14; SKIP=2357; windowsmini reconcile pending).
+Phase: 9 (SIMD-128). §9.5/6/7/8 [x]; §9.9 [ ] (Mac
+**12606/0/1135** = 745 skip-impl + 390 skip-adr post-h-25;
+windowsmini reconcile pending).
 
-Latest landed: `c49e856c` — 9.9-h-24 Track C chunk 4/4
-**COMPLETE** (ADR-0029 Path B closure + 3 skip-ADR §Implementation
-+ check_skip_adrs.sh prefix coherence gate wired into gate_commit
-+ D-072/D-073 deleted). Next: §9.9 close residual (skip-impl
-reduction toward `failed=skip-impl=0` on 2-host).
+Latest landed: `01db6434` — 9.9-h-25 NaN-pattern lane support
+(`v128_lanes:` token; discharge 1222 skip-impl, +1222 PASS, 0
+FAIL). Next chunk: §9.9 close residual continues — largest
+remaining skip-impl category is `v128-param-pending` (674).
 
 ## Implementation queue (matches ROADMAP first `[ ]`)
 
@@ -40,12 +40,18 @@ gate. Specs: `phase10_prep/track_*.md` §6/§7.
    operationally effective; D-072 + D-073 closed; D-082 carries
    the (c)-path actual fixture fixes. `check_skip_adrs --gate`
    wired into `gate_commit.sh`.
-3. **§9.9 close residual** (h-25..-N, count TBD by live
-   status post-Track-C): `p9_simd_status.sh` surfaces
-   `skip-impl` count (currently ~1967 = nan-or-bad-token 1222
-   + v128-param-pending 788 + assert_trap-v128 18 +
-   export-name 3). Loop picks largest category per resume;
-   chunks until `failed=skip-impl=0` on 2-host; windowsmini
+3. **§9.9 close residual** (h-25..-N): live skip-impl breakdown
+   per-resume; loop picks largest category. Current post-h-25:
+   - `v128-param-pending`: **674** (NEXT — needs additional
+     v128 PARAM marshal entry helpers for non-binop shapes,
+     e.g. `(v128, i32) → v128` lane ops).
+   - `assert_trap-v128-pending`: 18 (needs v128-result trap
+     detection in runner).
+   - `export-name-has-spaces`: 3 (needs quoted-name parser).
+   - `nan-or-bad-token`: 0 — discharged at 9.9-h-25.
+   - **9.9-h-25** `[x]` `01db6434` — NaN-pattern lane
+     comparator (1222 → 0 skip-impl).
+   Chunks until `failed = skip-impl = 0` on 2-host; windowsmini
    reconcile at Phase boundary close. §9.9 row flips `[x]`.
 4. **§9.11 + Track A bundled** (1 chunk): audit_scaffolding
    Phase-9 pass + SHA backfill §9.9 `[x]` rows + §9.10
