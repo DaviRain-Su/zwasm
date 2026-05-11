@@ -25,16 +25,17 @@
   §9.5 [x], §9.6 [x], §9.7 [x], §9.8 [x] (absorbed per
   ADR-0044), **§9.9 in-flight**.
 - **Branch**: `zwasm-from-scratch`.
-- **Latest §9.9 landing**: §9.9 / 9.9-h-10 — ADR-0053 Part 2
-  (v128 XMM spill helpers). Three new MOVUPS-based helpers
-  in `x86_64/gpr.zig` (`xmmLoadSpilledV128` /
-  `xmmStoreSpilledV128` / `xmmDefSpilledV128`) mirror the
-  existing MOVSD-based xmm helpers but write 16 bytes via
-  `encLoadXmmV128MemRBP*` / `encStoreXmmV128MemRBP*`. Stage
-  pool unchanged (XMM14/XMM15). +4 unit tests. No callers
-  yet — pure addition; simd_bitwise.17 awaits Part 3
-  migration. Mac 11270 / 0 + all test-all green; OrbStack
-  11257 / 1 unchanged.
+- **Latest §9.9 landing**: §9.9 / 9.9-h-11 — ADR-0053 Part 3a
+  (binop+not+andnot+any_true spill migration). 53 ops via
+  shared `emitV128IntBinop` helper + Not/Andnot/AnyTrue
+  migrated from `resolveXmm` to the §9.9-h-10 MOVUPS-based
+  helpers. One test rewrite (the old "spilled rhs surfaces
+  UnsupportedOp" assertion is now obsolete). Mac 11270 / 0
+  unchanged; OrbStack 11257 / 1 unchanged — simd_bitwise.17
+  still fails because `emitV128Bitselect` (3 v128 operand
+  inputs + 1 v128 result = 4 operands but only 2 stage
+  XMMs) is **deferred to §9.9-h-12** with a scratch-
+  reservation extension.
 - **Active row**: §9.9 (still `[ ]`). Mac is at FAIL=0 / SKIP>0;
   the exit criterion is fail=skip=0 across the 3-host gate, so
   skips remain (assert_invalid SKIP-VALIDATOR-GAP cluster +
@@ -43,13 +44,17 @@
 
 ## Next sub-chunk candidates (names only)
 
-- **ADR-0053 §9.9-h-11..-N** — Part 3 (handler migration in
-  `op_simd.zig`). Switch ~145 `resolveXmm` call sites that
-  handle v128 vregs to the new `xmmLoadSpilledV128` / etc.
-  helpers. Interleaved with D-057 source-split when LOC
-  ratchet trips §A2 cap. Likely several sub-chunks per
-  op family (binop / unop / cmp / lane / mem / shuffle).
-  Discharges D-078 (c).
+- **ADR-0053 §9.9-h-12** — Part 3b (Bitselect spill +
+  3rd-stage reservation). 3 v128 operand inputs + 1 v128
+  result = 4 operands; need a 3rd stage XMM (candidate:
+  reclaim XMM7 from D-066 alias-stash for this one handler,
+  or extend `abi.fp_spill_stage_xmms` to a 3-tuple). When
+  this lands, simd_bitwise.17 should flip on OrbStack →
+  D-078 (c) FULLY discharged.
+- **ADR-0053 §9.9-h-13..-N** — Part 3c+ (remaining
+  v128-class `resolveXmm` sites). Lane extract/replace,
+  splat, shifts, load/store, compares — interleaved with
+  D-057 source-split as LOC ratchets.
 - Aggregate `test-spec-simd` into `test-all` (preventive — surfaces
   silent x86_64 simd regressions in autonomous loop gating).
 - **D-066 alias-stash pattern audit** — `bug_fix_survey.md` grep
