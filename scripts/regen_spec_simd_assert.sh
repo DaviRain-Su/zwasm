@@ -310,16 +310,14 @@ SUPPORTED = {
     # whose body does `(any_true|all_true)(v128 op v128)` and
     # returns i32. Entry helper: `entry.callI32_v128v128`.
     (("v128", "v128"), ("i32",)): True,
-    # (v128, v128, i32) → v128 (`select_v128_i32`) — chunk
-    # 9.9-h-30 landed the arm64 fix (D-083 part 1: V31
-    # alias-stash in `arm64/op_simd.emitV128Select`; mirror
-    # class of D-066 / D-070). x86_64 still has no v128
-    # dispatch in its `select` handler — it routes v128 vregs
-    # through the GPR CMOV path which produces wrong results
-    # (returns val2 regardless of cond ≠ 0). D-083 part 2
-    # tracks the x86_64 v128-aware select emit (mask-based
-    # PAND/PANDN/POR or branching MOVAPS). SUPPORTED entry
-    # stays deferred until part 2 lands.
+    # chunk 9.9-h-31 (D-083 part 2 close): (v128, v128, i32) →
+    # v128 — `select_v128_i32`. Entry helper:
+    # `entry.callV128_v128v128i32`. arm64 fix landed at h-30
+    # (V31 alias-stash in `arm64/op_simd.emitV128Select`);
+    # x86_64 fix lands at h-31 (mask-based PAND/PXOR sequence
+    # in `x86_64/op_simd.emitV128Select` with XMM7 mask + XMM14
+    # tmp + XOR-trick to handle dst==val1 / dst==val2 aliases).
+    (("v128", "v128", "i32"), ("v128",)): True,
     # chunk 9.9-h-28 (v128-param-pending residual discharge):
     # (v128, v128, v128) → i32 — `simd_boolean`
     # `*_with_v128.bitselect` (any_true/all_true of bitselect).

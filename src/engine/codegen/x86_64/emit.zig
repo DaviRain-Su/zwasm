@@ -1386,6 +1386,13 @@ pub fn compile(
                 const result_v = next_vreg;
                 next_vreg += 1;
                 if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+                if (alloc.shapeTag(val1_v) == .v128) {
+                    // D-083 part 2: v128 select → mask-based emit
+                    // (mirror of arm64/emit.zig dispatch).
+                    try op_simd.emitV128Select(allocator, &buf, alloc, spill_base_off, cond_v, val1_v, val2_v, result_v);
+                    try pushed_vregs.append(allocator, result_v);
+                    continue;
+                }
                 // D-045 chunk 13b spill staging: cond is consumed
                 // first by TEST + Jcc, so its stage reg is dead
                 // before val1/val2 load. Use stage 0 for cond and

@@ -838,6 +838,85 @@ pub fn emitV128Bitselect(
 ///
 /// PTEST is SSE4.1 (66 0F 38 17 /r). Per ADR-0041 §5 (post-9.7-m
 /// SSE4.2 baseline), SSE4.1 + SSE4.2 are both available.
+/// `select` / `select_typed` with v128 operand type (Wasm spec
+/// §4.4.5). Mirror of `arm64/op_simd.emitV128Select`. Caller has
+/// already popped cond_v / val2_v / val1_v from the operand stack
+/// and verified `val1_v.shapeTag == .v128` (dispatch lives at
+/// `x86_64/emit.zig`'s scalar `.select` arm). §9.9 / 9.9-h-31 —
+/// D-083 part 2 (mirror of arm64's 9.9-h-30 part 1 fix).
+///
+/// **Mask-based recipe** (x86_64 has no direct `CSETM` / `DUP`
+/// equivalent, so synthesise the same all-bits mask via
+/// `SETcc`-then-broadcast):
+///
+///   TEST cond_r, cond_r       ; ZF = (cond == 0)
+///   XOR R10d, R10d             ; R10 = 0
+///   MOV R11d, 0xFFFFFFFF       ; R11 = -1 (32-bit, zero-extended)
+///   CMOVNE R10, R11            ; R10 = (cond != 0) ? -1 : 0
+///   MOVQ XMM7, R10              ; XMM7.lo64 = R10 (sign-extended via 32-bit lane)
+///   PSHUFD XMM7, XMM7, 0x00    ; broadcast lane 0 → all 4 lanes = mask
+///
+///   ; Bit-select via XOR-trick (`dst = b ^ (mask & (a ^ b))`):
+///   MOVAPS XMM14, val1_xmm      ; tmp = val1
+///   PXOR   XMM14, val2_xmm      ; tmp = val1 ^ val2
+///   PAND   XMM14, XMM7           ; tmp = mask & (val1 ^ val2)
+///   MOVAPS dst_xmm, val2_xmm    ; dst = val2 (self-MOV when dst==val2)
+///   PXOR   dst_xmm, XMM14        ; dst = val2 ^ tmp = cond ? val1 : val2
+///
+/// **SPILL-EXEMPT** (mirror of arm64 emitV128Select): result_v
+/// resolves via `xmmDefSpilledV128(stage 0)`, val1 via
+/// `xmmLoadSpilledV128(stage 1)`, val2 via `resolveXmm` (rejects
+/// spilled with `Error.UnsupportedOp`). XMM14 (= fp spill stage
+/// 0) doubles as the scratch tmp here — safe because result is
+/// SPILL-EXEMPT (so XMM14 won't be the dst home) and val1 uses
+/// stage 1 (XMM15). XMM7 is the project-canonical SIMD scratch
+/// (`abi.zig:200`), out of the regalloc pool.
+///
+/// **Aliasing safety**: regalloc's LIFO slot-reuse can give
+/// `result_v` the same physical XMM as `val1_v` or `val2_v`. The
+/// XOR-trick handles both alias cases naturally — XMM14 holds the
+/// tmp value across the final `MOVAPS dst, val2`, so `dst==val1`
+/// (val1 read at the first MOVAPS while still intact) and
+/// `dst==val2` (self-MOV) both work. val1==val2 is impossible
+/// (distinct Wasm operands).
+pub fn emitV128Select(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    spill_base_off: u32,
+    cond_v: u32,
+    val1_v: u32,
+    val2_v: u32,
+    result_vreg: u32,
+) Error!void {
+    // Stage the two scratch GPR values FIRST (XOR / MOV-imm both
+    // clobber EFLAGS) so the TEST → CMOVcc pair sees a clean ZF.
+    const r_mask = abi.spill_stage_gprs[0];
+    const r_neg1 = abi.spill_stage_gprs[1];
+    const cond_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, cond_v, 0);
+    try buf.appendSlice(allocator, inst.encXorRR(.q, r_mask, r_mask).slice());
+    try buf.appendSlice(allocator, inst.encMovImm32W(r_neg1, 0xFFFFFFFF).slice());
+    try buf.appendSlice(allocator, inst.encTestRR(.d, cond_r, cond_r).slice());
+    try buf.appendSlice(allocator, inst.encCmovccRR(.q, .ne, r_mask, r_neg1).slice());
+
+    const xmm_mask: inst.Xmm = .xmm7;
+    try buf.appendSlice(allocator, inst.encMovqXmmFromR64(xmm_mask, r_mask).slice());
+    try buf.appendSlice(allocator, inst.encPshufd(xmm_mask, xmm_mask, 0x00).slice());
+
+    const val1_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, val1_v, 1);
+    const val2_x = try gpr.resolveXmm(alloc, val2_v);
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_vreg, 0);
+
+    const xmm_tmp: inst.Xmm = abi.fp_spill_stage_xmms[0];
+    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(xmm_tmp, val1_x).slice());
+    try buf.appendSlice(allocator, inst.encPxor(xmm_tmp, val2_x).slice());
+    try buf.appendSlice(allocator, inst.encPand(xmm_tmp, xmm_mask).slice());
+    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, val2_x).slice());
+    try buf.appendSlice(allocator, inst.encPxor(dst_x, xmm_tmp).slice());
+
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_vreg, 0);
+}
+
 pub fn emitV128AnyTrue(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
