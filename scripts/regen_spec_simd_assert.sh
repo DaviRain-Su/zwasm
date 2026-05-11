@@ -310,13 +310,16 @@ SUPPORTED = {
     # whose body does `(any_true|all_true)(v128 op v128)` and
     # returns i32. Entry helper: `entry.callI32_v128v128`.
     (("v128", "v128"), ("i32",)): True,
-    # (v128, v128, i32) → v128 (`select_v128_i32`) intentionally
-    # NOT in SUPPORTED — chunk 9.9-h-27 surfaced a runtime bug in
-    # the v128 `select` op handler (got=0 expected=val2 when
-    # cond=0). The entry helper `callV128_v128v128i32` + runner
-    # arm are wired (mechanical), but the SUPPORTED entry is
-    # deliberately deferred until the handler bug is fixed.
-    # See D-083 for the investigation hand-off.
+    # (v128, v128, i32) → v128 (`select_v128_i32`) — chunk
+    # 9.9-h-30 landed the arm64 fix (D-083 part 1: V31
+    # alias-stash in `arm64/op_simd.emitV128Select`; mirror
+    # class of D-066 / D-070). x86_64 still has no v128
+    # dispatch in its `select` handler — it routes v128 vregs
+    # through the GPR CMOV path which produces wrong results
+    # (returns val2 regardless of cond ≠ 0). D-083 part 2
+    # tracks the x86_64 v128-aware select emit (mask-based
+    # PAND/PANDN/POR or branching MOVAPS). SUPPORTED entry
+    # stays deferred until part 2 lands.
     # chunk 9.9-h-28 (v128-param-pending residual discharge):
     # (v128, v128, v128) → i32 — `simd_boolean`
     # `*_with_v128.bitselect` (any_true/all_true of bitselect).

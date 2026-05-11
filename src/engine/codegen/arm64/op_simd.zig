@@ -487,16 +487,43 @@ pub fn emitV128Select(ctx: *EmitCtx, cond_v: u32, val1_v: u32, val2_v: u32, resu
     // GPR cond_w is dead.
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCsetmX(17, .ne));
 
-    const mask_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encDupGen2D(mask_v, 17));
     // SPILL-EXEMPT: v128 select needs 3 V regs simultaneously
     // (mask=dst, val1, val2). qLoadSpilled exposes only stages
     // 0/1; val2 at stage 2 lifts alongside D-037 spill-stage
     // extension. For non-spilled SIMD vregs (which fit in
     // V16-V28) gpr.resolveFp returns the physical V reg directly.
+    //
+    // D-083 (§9.9 / 9.9-h-30 close): resolve mask_v / val1 / val2
+    // physical regs BEFORE writing DUP. The regalloc's LIFO slot-
+    // reuse can place `result_vreg` (= mask_v) at the same physical
+    // V reg as `val1_v` or `val2_v` (when both are non-spilled
+    // home regs in V16..V28). The subsequent `DUP mask_v.2D, X17`
+    // would then clobber the aliased operand's value before `BSL`
+    // reads it. With `cond = 0` and the val2-alias case, the BSL
+    // computes `(0 & val1) | (~0 & 0) = 0` — observed as the
+    // `got v128:00…00, expected v128:<val2>` FAIL on the
+    // `select_v128_i32` fixture. Mirror class of D-066 / D-070.
+    // Fix: detect the alias and stash the colliding operand through
+    // V31 (project-canonical SIMD scratch per abi.zig:200 /
+    // ADR-0041) BEFORE the DUP. At most one of val1/val2 can
+    // alias mask_v (val1 and val2 are distinct Wasm values, so
+    // they cannot share a physical V reg).
+    const mask_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
     const val1_v_phys = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, val1_v, 1);
     const val2_v_phys = try gpr.resolveFp(ctx.alloc, val2_v);
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encBsl16B(mask_v, val1_v_phys, val2_v_phys));
+
+    var val1_for_bsl = val1_v_phys;
+    var val2_for_bsl = val2_v_phys;
+    if (val1_v_phys == mask_v) {
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(simd_scratch_v, val1_v_phys));
+        val1_for_bsl = simd_scratch_v;
+    } else if (val2_v_phys == mask_v) {
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(simd_scratch_v, val2_v_phys));
+        val2_for_bsl = simd_scratch_v;
+    }
+
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encDupGen2D(mask_v, 17));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encBsl16B(mask_v, val1_for_bsl, val2_for_bsl));
     try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
 }
 
