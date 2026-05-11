@@ -20,10 +20,11 @@ Deliverables: `.dev/phase10_prep/track_{a,b,c}_*.md` +
 Phase: 9 (SIMD-128). §9.5/6/7/8 [x]; §9.9 [ ] (Mac+OrbStack
 11384/0 post-h-14; SKIP=2357; windowsmini reconcile pending).
 
-Latest landed: `d39697ce` — 9.9-h-21 Track C chunk 1/4 (runners
-gain prefix-aware `skip-impl` / `skip-adr-<id>` vocab; bare-`skip`
-back-compat with WARN); next chunk `9.9-h-22` (regen scripts +
-manifest sweep).
+Latest landed: `1c7f5e6d` — 9.9-h-22 Track C chunk 2/4 (regen
+scripts emit prefix vocab; 31 manifests swept; bare-skip in
+test/spec/ → 0; tally skip-impl 1967 + skip-adr 390 simd-only);
+next chunk `9.9-h-23` (wast_runtime_runner + hand-migrate
+wasmtime_misc manifests + D-072 (a/b) discharge + D-082 file).
 
 ## Implementation queue (matches ROADMAP first `[ ]`)
 
@@ -39,12 +40,10 @@ gate. Specs: `phase10_prep/track_*.md` §6/§7.
    gate + D-082 file + D-072 (a/b) + D-073 close.
    - **9.9-h-21** `[x]` `d39697ce` — runners prefix-aware
      (spec_assert + simd_assert).
-   - **9.9-h-22** **NEXT** — update
-     `scripts/regen_spec_simd_assert.sh` + `regen_spec_1_0_assert.sh`
-     to emit prefix-vocab lines; re-run regen; commit
-     manifest deltas (~500 LOC auto-generated).
-   - **9.9-h-23** — wast_runtime_runner prefix-aware + hand-
-     migrate `wasmtime_misc/wast/{embenchen,reftypes}/manifest_runtime.txt`;
+   - **9.9-h-22** `[x]` `1c7f5e6d` — regen scripts + manifest
+     sweep (bare-skip in test/spec/ → 0).
+   - **9.9-h-23** **NEXT** — wast_runtime_runner prefix-aware
+     + hand-migrate `wasmtime_misc/wast/{embenchen,reftypes}/manifest_runtime.txt`;
      D-072 (a/b) discharge; file D-082 (D-072 (c)-path actual
      fixture fixes, blocked-by Phase 11 embenchen + externref
      segment work).
