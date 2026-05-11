@@ -1173,7 +1173,7 @@ of each phase advances it.
 | 8     | DONE        | JIT optimisation foundation 🔒 (per ADR-0019)                  |
 | 9     | IN-PROGRESS | SIMD-128                                                       |
 | 10    | PENDING     | GC, EH, Tail call, memory64 (Wasm 3.0 完備) 🔒                 |
-| 11    | PENDING     | WASI 0.1 full + bench infra                                    |
+| 11    | PENDING     | WASI 0.1 full + bench infra (incl. SIMD per-op gap analysis, moved from §9.10 per Track A) |
 | 12    | PENDING     | AOT compilation mode                                           |
 | 13    | PENDING     | C API full (wasm-c-api conformance) 🔒                         |
 | 14    | PENDING     | CI matrix infrastructure                                       |
@@ -1646,8 +1646,8 @@ via the three-way differential carried forward from Phase 7.11.
 | 9.7  | x86_64 emit (SSE4.1+SSE4.2 baseline per ADR-0041 §5 amend at 9.7-m): SIMD load/store + lane access + integer arithmetic. Sub-chunks 9.7-a..* recorded in [`.dev/phase_log/phase9.md`](../phase_log/phase9.md#row-97--x8664-emit-sse41sse42-baseline) (extracted 2026-05-11; ROADMAP per §18 stays a now-snapshot). | [x]            |
 | 9.8  | x86_64 emit (SSE4.1): SIMD comparison + shuffle + float arithmetic + conversion. **Scope absorbed by §9.7 per ADR-0044** — these op families landed inside §9.7's progressive expansion (9.7-k..n compares; 9.7-o FP compares; 9.7-p..q FP arith; 9.7-ab..ae conversions; 9.7-ar shuffle; 9.7-aj..aq pairwise extadd; etc.). All 237 v128 ZirOps now have x86_64 handlers (verified by zir.zig:184-288 vs emit.zig grep). Closing as scope-merged routine status update. | [x] (per ADR-0044) |
 | 9.9  | `simd.wast` spec test wired in; fail=skip=0 across both backends (3-host gate). Sub-chunks 9.9-a..* recorded in [`.dev/phase_log/phase9.md`](../phase_log/phase9.md#row-99--simdwast-spec-test-wiring) (extracted 2026-05-11; ROADMAP per §18 stays a now-snapshot). | [ ]            |
-| 9.10 | SIMD smoke benches against wasmtime + wazero + wasmer; recorded to `bench/results/history.yaml` per ADR-0012. **Per-op gap analysis required**: identify ops where v2 lags by > 3× the median of (wasmtime, wazero, wasmer) and file Phase 15 debt entries naming the candidate optimisation (AVX path adoption gated on CPUID, MOVAPS preamble peephole at op_simd binop sites, SIMD-specific coalescing). v1 reached "adequate for embedded" but explicitly accepted ~43× gap to wasmtime (D122); v2 inherits this gap as starting point and §9.10 produces the gap profile that drives Phase 15 SIMD-specific work scope beyond v1 W43/W44/W45 porting. | [ ]            |
-| 9.11 | Phase-9 boundary `audit_scaffolding` pass + SHA backfill. | [ ]            |
+| 9.10 | **Moved to Phase 11** per Phase 10 prep Track A Option (3) (see `.dev/phase10_prep/track_a_9.10_scope.md` §3.3 + §7 + ADR-0043 Revision history 2026-05-12 row). SIMD per-op gap analysis (3× threshold; v1 D122 ≈ 43× gap reference; AVX / MOVAPS-peephole / SIMD-coalescing candidate list) folds into Phase 11's bench-infra cohort alongside D-074's `-Dwith-bench-compare` flag + wazero/wasmer flake additions — the natural carrier per D-074 barrier statement. Row number preserved (no §9 renumber per ADR-0014). | [~] moved to Phase 11 |
+| 9.11 | Phase-9 boundary `audit_scaffolding` pass + SHA backfill. | [x] (this commit) |
 | 9.12 | Open §9.10 inline + flip phase tracker. | [ ]            |
 
 ### Phase 10 — GC, EH, Tail call, memory64 (Wasm 3.0 完備) 🔒
@@ -1678,6 +1678,21 @@ via the three-way differential carried forward from Phase 7.11.
   natively, Linux via OrbStack, and Windows via `windowsmini` SSH
   (`scripts/run_remote_windows.sh`).
 - `bash scripts/run_bench.sh --quick` works locally.
+- **SIMD per-op gap analysis vs (wasmtime, wazero, wasmer)** —
+  carried over from §9.10 per Track A Option (3) (see
+  `.dev/phase10_prep/track_a_9.10_scope.md` + ADR-0043 Revision
+  history 2026-05-12 row): identify ops where v2 lags by > 3× the
+  median of (wasmtime, wazero, wasmer) and file Phase 15 debt
+  entries naming the candidate optimisation (AVX path adoption
+  gated on CPUID, MOVAPS preamble peephole at op_simd binop
+  sites, SIMD-specific coalescing). v1 reached "adequate for
+  embedded" but explicitly accepted ~43× gap to wasmtime (D122);
+  v2 inherits this gap as starting point and Phase 11's gap
+  analysis produces the profile that drives Phase 15
+  SIMD-specific work scope beyond v1 W43/W44/W45 porting. Folds
+  into the D-074 bench-infra cohort (`-Dwith-bench-compare` build
+  flag, wazero/wasmer in `flake.nix`, per-op SIMD micro-bench
+  corpus, gap-analysis script) — single design pass.
 
 **🔒 gate**: no.
 
@@ -1748,15 +1763,17 @@ produce}.zig` + `src/cli/compile.zig`) are the loader's contract.
 ### Phase 15 — Performance parity with v1 + ClojureWasm migration
 
 **Goal**: zwasm v2 matches v1's bench performance and runs
-ClojureWasm. **Per ADR-0043**: Phase 15 SIMD work absorbs (a) v1
-W43/W44/W45 ports onto the v2 substrate as documented below and
-(b) bench-driven SIMD-specific optimisations surfaced by §9.10's
-per-op gap analysis (AVX path adoption gated on CPUID, MOVAPS
-preamble peephole at op_simd binop sites, SIMD-specific
-coalescing — concrete candidates filed as debt entries by
-§9.10). The "v1 parity" target is the floor, not the ceiling:
-exceeding v1's ~43× gap to wasmtime (per v1 D122 self-assessment)
-is in scope where §9.10's gap profile + a feasibility-supported
+ClojureWasm. **Per ADR-0043** (2026-05-12 Track A migration —
+§9.10's gap-analysis carrier moved to Phase 11): Phase 15 SIMD
+work absorbs (a) v1 W43/W44/W45 ports onto the v2 substrate as
+documented below and (b) bench-driven SIMD-specific
+optimisations surfaced by Phase 11's per-op gap analysis (AVX
+path adoption gated on CPUID, MOVAPS preamble peephole at
+op_simd binop sites, SIMD-specific coalescing — concrete
+candidates filed as debt entries by Phase 11). The "v1 parity"
+target is the floor, not the ceiling: exceeding v1's ~43× gap
+to wasmtime (per v1 D122 self-assessment) is in scope where
+Phase 11's gap profile + a feasibility-supported
 debt entry name a candidate.
 
 **Substrate inherited from §9.8b/8b.1 + 8b.2** (per ADR-0040

@@ -42,10 +42,11 @@ isn't looking for them.
 
 ## Decision
 
-Refine the §9.10 task and the Phase 15 SIMD-perf scope as
-follows.
+Refine the Phase 11 SIMD-perf-evaluation task and the Phase 15
+SIMD-perf scope as follows.
 
-**§9.10 amendment** (this ADR):
+**Phase 11 amendment** (this ADR; per 2026-05-12 Track A Option
+(3) migration — see Amendment log row):
 
 > SIMD smoke benches against wasmtime + wazero + wasmer;
 > recorded to `bench/results/history.yaml` per ADR-0012.
@@ -56,8 +57,23 @@ follows.
 > op_simd binop sites, SIMD-specific coalescing). v1 reached
 > "adequate for embedded" but explicitly accepted ~43× gap to
 > wasmtime (D122); v2 inherits this gap as starting point and
-> §9.10 produces the gap profile that drives Phase 15
-> SIMD-specific work scope beyond v1 W43/W44/W45 porting.
+> Phase 11's gap-analysis run produces the profile that drives
+> Phase 15 SIMD-specific work scope beyond v1 W43/W44/W45
+> porting.
+
+> **Migration history** — this clause originally lived in §9.10
+> (Phase 9 row). Track A Phase 10 prep (see
+> `.dev/phase10_prep/track_a_9.10_scope.md` §3.3 Option (3)
+> + §7) folded it into Phase 11's existing bench-infra cohort
+> (D-074 alignment: D-074's barrier names "Phase 11 (WASI 0.1
+> full + bench infra)" as the natural carrier for
+> `-Dwith-bench-compare` + wazero/wasmer in `flake.nix` etc.,
+> which are the prerequisites of the per-op gap analysis).
+> §9.10's row stays in place with `[~] moved to Phase 11`
+> marker (no §9 renumber per ADR-0014). The 3× threshold, the
+> v1 D122 reference, and the AVX / MOVAPS / coalescing
+> candidate list are unchanged — only the carrier phase
+> moved.
 
 **Phase 15 amendment** (this ADR):
 
@@ -65,9 +81,9 @@ Add a sentence to Phase 15's Goal+Exit:
 
 > Phase 15 SIMD work absorbs (a) v1 W43/W44/W45 ports onto the
 > v2 substrate as documented and (b) bench-driven SIMD-specific
-> optimisations surfaced by §9.10's gap analysis. The "v1
+> optimisations surfaced by Phase 11's gap analysis. The "v1
 > parity" target is the floor, not the ceiling — exceeding v1's
-> 43× gap to wasmtime is in scope where §9.10 surfaces a
+> 43× gap to wasmtime is in scope where Phase 11 surfaces a
 > candidate with a feasibility-supported debt entry.
 
 The 3× threshold is conservative (one full octave of
@@ -131,6 +147,7 @@ AVX upgrade is worth filing as a Phase 15 amendment**.
 
 ## Revision history
 
-| Date       | Commit       | Note                                                |
-|------------|--------------|-----------------------------------------------------|
-| 2026-05-09 | `<backfill>` | Initial draft (Accepted). Refines §9.10 + Phase 15. |
+| Date       | Commit       | Note                                                                                                                                                                                                                                                                                                                                                                                |
+|------------|--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 2026-05-09 | `221acd4d` | Initial draft (Accepted). Refines §9.10 + Phase 15.                                                                                                                                                                                                                                                                                                                                 |
+| 2026-05-12 | `<backfill>` | Per Phase 10 prep Track A Option (3) decision (`.dev/phase10_prep/track_a_9.10_scope.md` §3.3 + §7), §9.10's gap-analysis clause migrates to Phase 11's bench-infra cohort (D-074 alignment). §9.10 row keeps `[~] moved to Phase 11` marker (no §9 renumber per ADR-0014). 3× threshold, D122 reference, AVX/MOVAPS/coalescing candidate list unchanged. Discharges D-076 in same chunk. |
