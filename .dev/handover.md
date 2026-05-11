@@ -70,9 +70,16 @@
    Track C §6.1). `check_skip_adrs.sh` becomes pre-commit gate
    at chunk 9.9-h-24. Deliverable:
    `.dev/phase10_prep/track_c_adr_0029_path.md` §9.
-4. **Track D — Phase 10 transition gate doc** (draft
-   `.dev/phase10_transition_gate.md` so `/continue` hard-gate
-   detector halts at Phase 10 entry). See §"Track D".
+4. **Track D — Phase 10 transition gate doc** — **DELIVERABLE
+   LANDED, AWAITING USER REVIEW** at
+   `.dev/phase10_transition_gate.md` (gate-checklist mirror of
+   phase8_transition_gate.md structure; §3 per-subsystem ADR
+   gating for the 4 Wasm 3.0 subsystems; §4a Phase 10 → 11
+   deferral DAG visualised; §4b cross-subsystem cooperation
+   matrix; §6 ROADMAP wiring spec for §9.12 row text update +
+   SKILL.md hard-gate list extension; §9 has 5 open questions
+   on Phase 10 scope / subsystem ordering / ADR numbering /
+   D-082 sub-row (b) early-discharge / gate-doc granularity).
 
 After all 4 tracks land + user reviews, normal autonomous
 `/continue` resumes; this file's `Active state` flips back
