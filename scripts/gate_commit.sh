@@ -20,11 +20,8 @@ fi
 echo "[gate_commit] zone_check --gate ..."
 bash scripts/zone_check.sh --gate
 
-# file_size_check temporarily warn-only (no --gate) — D-057 source-split
-# is the live work to bring 5 hard-cap-violating files back under 2000
-# lines. Switch back to `--gate` when D-057 closes.
-echo "[gate_commit] file_size_check (warn-only, see D-057) ..."
-bash scripts/file_size_check.sh
+echo "[gate_commit] file_size_check --gate ..."
+bash scripts/file_size_check.sh --gate
 
 if [ ! -f build.zig ]; then
     echo "[gate_commit] (no build.zig — skipping zig build test)"
