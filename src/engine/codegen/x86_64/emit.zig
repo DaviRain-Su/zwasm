@@ -1031,7 +1031,7 @@ pub fn compile(
             .@"v128.or" => try op_simd.emitV128Or(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"v128.xor" => try op_simd.emitV128Xor(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"v128.andnot" => try op_simd.emitV128Andnot(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"v128.bitselect" => try op_simd.emitV128Bitselect(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"v128.bitselect" => try op_simd.emitV128Bitselect(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"v128.any_true" => try op_simd.emitV128AnyTrue(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             // §9.7 / 9.7-s: per-shape all_true + bitmask reductions
             // (8 ops). all_true via SSE4.1 PXOR + PCMPEQ_<lane> +
@@ -1282,7 +1282,7 @@ pub fn compile(
             // (mirror of ARM64 §9.6/9.6-f-ii). Lower pass stored
             // const_idx in ins.payload pointing into
             // func.simd_consts.
-            .@"v128.const" => try op_simd.emitV128Const(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &simd_const_fixups, ins.payload),
+            .@"v128.const" => try op_simd.emitV128Const(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &simd_const_fixups, ins.payload, spill_base_off),
             // §9.7/9.7-am — i32x4.trunc_sat_f64x2_s_zero. Recipe
             // needs a shared INT32_MAX_f64-broadcast const; placed
             // into per-emit-pass extra_consts.

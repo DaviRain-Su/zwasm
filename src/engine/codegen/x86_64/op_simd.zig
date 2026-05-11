@@ -324,11 +324,15 @@ pub fn emitV128Load(
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // ADR-0053 Part 3c: dst v128 takes stage 0 (XMM14); the
+    // subsequent MOVUPS-from-memory writes into dst directly, then
+    // xmmStoreSpilledV128 flushes to the spill slot when needed.
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 0);
 
     try v128MemPrologue(allocator, buf, bounds_fixups, idx_r, offset, 16, func_idx);
 
     try buf.appendSlice(allocator, inst.encMovupsMemBaseIdx(false, dst_x, .rax, .rdx).slice());
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -351,7 +355,8 @@ pub fn emitV128Store(
     const idx_v = pushed_vregs.pop().?;
 
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
-    const val_x = try gpr.resolveXmm(alloc, val_v);
+    // ADR-0053 Part 3c: val v128 loads via MOVUPS when spilled.
+    const val_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, val_v, 0);
 
     try v128MemPrologue(allocator, buf, bounds_fixups, idx_r, offset, 16, func_idx);
 
@@ -1740,6 +1745,7 @@ pub fn emitV128Bitselect(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
     if (pushed_vregs.items.len < 3) return Error.AllocationMissing;
     const c_v = pushed_vregs.pop().?;
@@ -1749,19 +1755,75 @@ pub fn emitV128Bitselect(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const c_x = try gpr.resolveXmm(alloc, c_v);
-    const b_x = try gpr.resolveXmm(alloc, b_v);
-    const a_x = try gpr.resolveXmm(alloc, a_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
-    const scratch_x = abi.fp_spill_stage_xmms[0]; // XMM14
+    // ADR-0053 Part 3b (§9.9 / 9.9-h-12): Bitselect has 3 v128
+    // operand inputs + 1 v128 result = 4 operands but only 2
+    // standard stage XMMs (XMM14 / XMM15) exist. Reclaim XMM7
+    // (the D-066 alias-stash scratch — free in this handler since
+    // we don't run an alias check) as a 3rd staging slot for `a`
+    // and the spilled-result dst. Stage layout:
+    //   c → stage 0 → XMM14 (also serves as the final scratch
+    //                          since PANDN destroys it after c is dead).
+    //   b → stage 1 → XMM15.
+    //   a → XMM7 (custom; a is dead after MOVAPS dst, a).
+    //   dst → result's home if in-reg; XMM7 if spilled (= same
+    //          physical XMM as a; the MOVAPS-from-a is then a
+    //          no-op).
+    const c_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, c_v, 0);
+    const b_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, b_v, 1);
 
+    // Custom load for `a` → XMM7 (a 3rd staging slot, free for the
+    // bitselect handler).
+    var a_x: inst.Xmm = undefined;
+    switch (alloc.slot(a_v, .fpr)) {
+        .reg => |id| a_x = abi.fpSlotToReg(id) orelse return Error.SlotOverflow,
+        .spill => |off| {
+            const abs_off = spill_base_off + off;
+            if (abs_off > 0x7FFF_FFFF) return Error.SlotOverflow;
+            const disp: i32 = -@as(i32, @intCast(abs_off));
+            try buf.appendSlice(allocator, inst.encLoadXmmV128MemRBPDisp32(.xmm7, disp).slice());
+            a_x = .xmm7;
+        },
+    }
+
+    // dst: in-reg → home; spilled → XMM7 (re-using a's physical
+    // slot after a is consumed by the MOVAPS).
+    const result_slot = alloc.slot(result_v, .fpr);
+    const dst_x: inst.Xmm = switch (result_slot) {
+        .reg => |id| abi.fpSlotToReg(id) orelse return Error.SlotOverflow,
+        .spill => .xmm7,
+    };
+
+    // Step 1: dst = MOVAPS(a). Skipped when dst already equals a
+    // (in-reg alias OR both-spilled-and-routed-through-XMM7).
     if (dst_x != a_x) {
         try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, a_x).slice());
     }
+    // Step 2: dst = PAND(dst, c). c persists in c_x past this.
     try buf.appendSlice(allocator, inst.encPand(dst_x, c_x).slice());
-    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(scratch_x, c_x).slice());
+
+    // Steps 3-4: scratch = c; scratch = PANDN(scratch, b). Reuse
+    // XMM14 as scratch — when c is spilled, c_x is already XMM14
+    // and the MOVAPS folds out. When c is in-reg, copy c into
+    // XMM14 first so the PANDN doesn't destroy c's home register
+    // (the in-reg c might still be needed by a downstream
+    // consumer in the same function — paranoia preserves the
+    // host's regalloc lifetime assumption).
+    const scratch_x: inst.Xmm = .xmm14;
+    if (c_x != scratch_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(scratch_x, c_x).slice());
+    }
     try buf.appendSlice(allocator, inst.encPandn(scratch_x, b_x).slice());
+    // Step 5: dst = POR(dst, scratch).
     try buf.appendSlice(allocator, inst.encPor(dst_x, scratch_x).slice());
+
+    // Store if result is spilled.
+    if (result_slot == .spill) {
+        const off = result_slot.spill;
+        const abs_off = spill_base_off + off;
+        if (abs_off > 0x7FFF_FFFF) return Error.SlotOverflow;
+        const disp: i32 = -@as(i32, @intCast(abs_off));
+        try buf.appendSlice(allocator, inst.encStoreXmmV128MemRBPDisp32(disp, .xmm7).slice());
+    }
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -4396,12 +4458,15 @@ pub fn emitV128Const(
     next_vreg: *u32,
     simd_const_fixups: *std.ArrayList(@import("types.zig").SimdConstFixup),
     const_idx: u32,
+    spill_base_off: u32,
 ) Error!void {
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // ADR-0053 Part 3c: dst v128 takes stage 0 (XMM14); MOVUPS-
+    // RIP-rel writes into it, then store to spill if needed.
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 0);
     const enc = inst.encMovupsXmmRipRelPlaceholder(dst_x);
     const start_byte: u32 = @intCast(buf.items.len);
     try buf.appendSlice(allocator, enc.slice());
@@ -4411,6 +4476,7 @@ pub fn emitV128Const(
         .post_insn_byte = start_byte + enc_len,
         .const_idx = const_idx,
     });
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 

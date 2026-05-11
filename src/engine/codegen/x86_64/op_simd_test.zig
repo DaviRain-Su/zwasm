@@ -925,7 +925,7 @@ test "emitV128Bitselect: 5-instr PAND/PANDN/POR chain" {
     try pushed.append(testing.allocator, 2); // c (top)
     var next_vreg: u32 = 3;
 
-    try op_simd.emitV128Bitselect(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd.emitV128Bitselect(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
