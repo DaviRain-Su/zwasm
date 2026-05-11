@@ -25,16 +25,16 @@
   §9.5 [x], §9.6 [x], §9.7 [x], §9.8 [x] (absorbed per
   ADR-0044), **§9.9 in-flight**.
 - **Branch**: `zwasm-from-scratch`.
-- **Latest §9.9 landing**: §9.9 / 9.9-h-6 — D-077 discharge.
-  Root cause: `linker.link`'s empty-module early-exit returned
-  `block.bytes = &[_:0]u8{}` sentinel; `jit_mem.free` then
-  called munmap on it. Linux `std.posix.munmap` panics INVAL →
-  `unreachable`; macOS silently discards the return. Fix: one-
-  line `if (block.bytes.len == 0) return;` guard. OrbStack now
-  prints structured summary: **11232 passed / 3 failed / 2509
-  skipped** (vs Mac 11270/0/2471). Mac unchanged. The +3 OrbStack
-  FAILs surface a previously-masked x86_64 compile gap on
-  simd_const.386 + .388 — tracked as new D-080.
+- **Latest §9.9 landing**: §9.9 / 9.9-h-7 — D-080 discharge.
+  Three x86_64 v128 emit gaps fixed in one chunk:
+  (a) `marshalCallArgs.v128` (SysV XMM0..XMM7 register path);
+  (b) `captureCallResult.v128` (MOVAPS from XMM0);
+  (c) `emitEndIntra` if-else merge MOV shapeTag-dispatched
+  (was GPR-32 uniformly, truncating v128 to 32 bits). All
+  three mirror existing ARM64 paths. **OrbStack: 11232 / 3 →
+  11257 / 1** (+25 PASS, -2 FAIL). Mac unchanged 11270 / 0.
+  Last OrbStack FAIL = simd_bitwise.17 (D-078 c — v128 XMM
+  spill). Win64 + ≥9 v128-arg overflow remain D-062.
 - **Active row**: §9.9 (still `[ ]`). Mac is at FAIL=0 / SKIP>0;
   the exit criterion is fail=skip=0 across the 3-host gate, so
   skips remain (assert_invalid SKIP-VALIDATOR-GAP cluster +
@@ -43,18 +43,12 @@
 
 ## Next sub-chunk candidates (names only)
 
-- **D-080 simd_const.386/.388 x86_64 compile UnsupportedOp** —
-  newly surfaced post-9.9-h-6. Both pass on Mac through the
-  §9.9-h-2..-h-4 chain; x86_64 hits UnsupportedOp at compile.
-  Spike: capture the exact `compileWasm: func[N]` debug-print
-  on a focused OrbStack run, identify the op family, walk the
-  x86_64 dispatch.
 - **D-078 (c) simd_bitwise.17** — x86_64 v128 XMM spill not yet
   implemented. `resolveXmm` rejects spilled v128 vregs. Needs
   `xmmLoadSpilledV128` + `xmmStoreSpilledV128` (16-byte MOVUPS)
   + ~100 handler updates. Substantial refactor; co-deliverable
-  with D-057 source-split. Possibly the same root cause as
-  D-080 (spike will tell).
+  with D-057 source-split. **Last remaining OrbStack visible
+  FAIL** — closing this puts OrbStack at 0 FAIL alongside Mac.
 - Aggregate `test-spec-simd` into `test-all` (preventive — surfaces
   silent x86_64 simd regressions in autonomous loop gating).
 - **D-066 alias-stash pattern audit** — `bug_fix_survey.md` grep
