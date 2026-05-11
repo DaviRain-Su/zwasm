@@ -18,15 +18,14 @@ Deliverables: `.dev/phase10_prep/track_{a,b,c}_*.md` +
 `.dev/phase10_transition_gate.md`. Normal `/continue` resumes.
 
 Phase: 9 (SIMD-128). §9.5/6/7/8 [x]; §9.9 [ ] (Mac+OrbStack
-**13241/0/500** = 110 skip-impl + 390 skip-adr post-h-27;
+**13273/0/468** = 78 skip-impl + 390 skip-adr post-h-28;
 windowsmini reconcile pending).
 
-Latest landed: `2c5cb3e9` — 9.9-h-27 3 new v128-mixed-arg
-entry helpers (+136 PASS, 0 FAIL); D-083 filed (v128 select
-op runtime bug; 6 select_v128_i32 lines re-skipped pending
-fix). Residual skip-impl 110: v128-param-pending 39 (6
-select D-083-deferred + 33 other unsupported shapes) +
-assert_trap-v128 18 + export-name 3.
+Latest landed: `b85c07da` — 9.9-h-28 11 new v128-mixed-arg
+entry helpers (+32 PASS, 0 FAIL). Residual skip-impl 78:
+v128-param-pending 6 (all D-083-deferred select_v128_i32) +
+assert_trap-v128 18 + export-name 4 (+1 reclassified from
+v128.store align=16 now-shape-supported).
 
 ## Implementation queue (matches ROADMAP first `[ ]`)
 
@@ -49,15 +48,15 @@ gate. Specs: `phase10_prep/track_*.md` §6/§7.
      (674 → 175).
    - **9.9-h-27** `[x]` `2c5cb3e9` — 3 more shapes (175 → 39);
      D-083 deferred select_v128_i32 bug.
-   - **9.9-h-28** **NEXT** — residual v128-param-pending 33
-     (non-select shapes): `(v128, v128, v128) → i32`
-     *_with_v128.bitselect 12 + `(v128, i32) → i32`
-     *_replace_lane-{s,u} 8 + ~13 one-off composites
-     (`as-*`, `swizzle-as-*`, etc.). Same mechanical extension.
-   - Then: assert_trap-v128-pending 18 + export-name-has-spaces
-     3 (separate small chunks).
-   - D-083 v128 select op bug — investigate spike when capacity
-     allows; restore SUPPORTED + regen + flip +6 PASS.
+   - **9.9-h-28** `[x]` `b85c07da` — 11 more shapes (39 → 6;
+     residual = D-083-deferred select).
+   - **9.9-h-29** **NEXT** — assert_trap-v128-pending 18 +
+     export-name-has-spaces 4 (both small, separate chunks
+     OR bundled). assert_trap-v128 needs v128-result trap
+     detection path in runner; export-name-has-spaces needs
+     quoted-name tokenisation in directive parser.
+   - D-083 v128 select op bug — investigate spike when
+     capacity allows; restore SUPPORTED + regen + flip +6 PASS.
    Chunks until `failed = skip-impl = 0` on 2-host; windowsmini
    reconcile at Phase boundary close. §9.9 row flips `[x]`.
 4. **§9.11 + Track A bundled** (1 chunk): audit_scaffolding
