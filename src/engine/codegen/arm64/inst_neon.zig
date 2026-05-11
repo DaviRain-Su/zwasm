@@ -425,6 +425,67 @@ pub fn encUminv8H(rd: Vn, rn: Vn) u32  { return 0x6E71A800 | (@as(u32, rn) << 5)
 pub fn encUminv4S(rd: Vn, rn: Vn) u32  { return 0x6EB1A800 | (@as(u32, rn) << 5) | @as(u32, rd); }
 
 // =====================================================================
+// Across-lane sum (ADDV) — Advanced SIMD across-lanes, Q=1, U=0,
+// opcode=11011, size selects lane: 00=.16B, 01=.8H, 10=.4S. NEON
+// has NO 2D form (i64x2 reductions take the scalar UMOV path).
+// Per Arm IHI 0055 §C7.2.8. Constants verified by computing the
+// Q-bit-set form of `encAddvB8B` (0x0E31B800 → 0x4E31B800).
+// =====================================================================
+
+pub fn encAddvB16B(rd: Vn, rn: Vn) u32 { return 0x4E31B800 | (@as(u32, rn) << 5) | @as(u32, rd); }
+pub fn encAddvH8H(rd: Vn, rn: Vn) u32  { return 0x4E71B800 | (@as(u32, rn) << 5) | @as(u32, rd); }
+pub fn encAddvS4S(rd: Vn, rn: Vn) u32  { return 0x4EB1B800 | (@as(u32, rn) << 5) | @as(u32, rd); }
+
+// =====================================================================
+// SSHR — Advanced SIMD vector right shift (signed, immediate).
+// Encoding: `0 Q 0 011110 immh immb 0000 0 1 Rn Rd` with Q=1,
+// immh:immb = (2*lane_width - shift). The high bits of immh
+// discriminate lane width: 0001 → .16B, 001x → .8H, 01xx → .4S,
+// 1xxx → .2D. Per Arm IHI 0055 §C7.2.325.
+//
+// Verified via the survey at private/notes/p9-9.9-g-19-bitmask-
+// neon-survey.md (clang-as on Mac aarch64):
+//   sshr v0.16b, v1.16b, #7  → 0x4F090420
+//   sshr v0.8h,  v1.8h,  #15 → 0x4F110420
+//   sshr v0.4s,  v1.4s,  #31 → 0x4F210420
+// =====================================================================
+
+pub fn encSshrV16B(rd: Vn, rn: Vn, shift: u4) u32 {
+    // shift ∈ 1..8. immh:immb = 16 - shift; immh = 0001, immb = (16-shift) & 7.
+    const v: u32 = 16 - @as(u32, shift);
+    return 0x4F000400 | (v << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+pub fn encSshrV8H(rd: Vn, rn: Vn, shift: u5) u32 {
+    // shift ∈ 1..16. immh:immb = 32 - shift (occupies bits 22..16).
+    const v: u32 = 32 - @as(u32, shift);
+    return 0x4F000400 | (v << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+pub fn encSshrV4S(rd: Vn, rn: Vn, shift: u6) u32 {
+    // shift ∈ 1..32. immh:immb = 64 - shift (occupies bits 22..16).
+    const v: u32 = 64 - @as(u32, shift);
+    return 0x4F000400 | (v << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+// =====================================================================
+// ZIP1 (vector, byte form) + EXT (vector, byte form). Used by the
+// i8x16.bitmask recipe to fold 16 byte-mask lanes into 8 halfword
+// reduction inputs. Per Arm IHI 0055 §C7.2.424 (ZIP1) / §C7.2.119
+// (EXT). Constants verified via clang-as in the survey notes:
+//   zip1 v0.16b, v1.16b, v2.16b   → 0x4E023820
+//   ext  v0.16b, v1.16b, v2.16b, #8 → 0x6E024020
+// =====================================================================
+
+pub fn encZip1V16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E003800 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+pub fn encExtV16B(rd: Vn, rn: Vn, rm: Vn, imm4: u4) u32 {
+    return 0x6E000000 | (@as(u32, rm) << 16) | (@as(u32, imm4) << 11) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+// =====================================================================
 // Lane access (extract / replace)
 // =====================================================================
 
@@ -1355,6 +1416,41 @@ test "encAbs vs encNeg: U bit (29) is the only difference" {
 test "encLdrQImm vs encStrQImm: distinct opcode bits" {
     // Sanity: load and store at same operands differ.
     try testing.expect(encLdrQImm(0, 1, 0) != encStrQImm(0, 1, 0));
+}
+
+// ============================================================
+// §9.9 / 9.9-g-19 — ADDV / SSHR / ZIP1 / EXT encoder tests
+// (i*x*.bitmask recipe). Bit patterns cross-checked against
+// clang-as on Mac aarch64; see private/notes/p9-9.9-g-19-bitmask-
+// neon-survey.md for the raw assembly verification.
+// ============================================================
+
+test "encAddvB16B: B0 ← addv V0.16B → 0x4E31B800" {
+    try testing.expectEqual(@as(u32, 0x4E31B800), encAddvB16B(0, 0));
+}
+test "encAddvH8H: H0 ← addv V0.8H → 0x4E71B800" {
+    try testing.expectEqual(@as(u32, 0x4E71B800), encAddvH8H(0, 0));
+}
+test "encAddvS4S: S0 ← addv V0.4S → 0x4EB1B800" {
+    try testing.expectEqual(@as(u32, 0x4EB1B800), encAddvS4S(0, 0));
+}
+
+test "encSshrV16B: sshr v0.16b, v1.16b, #7 → 0x4F090420" {
+    try testing.expectEqual(@as(u32, 0x4F090420), encSshrV16B(0, 1, 7));
+}
+test "encSshrV8H: sshr v0.8h, v1.8h, #15 → 0x4F110420" {
+    try testing.expectEqual(@as(u32, 0x4F110420), encSshrV8H(0, 1, 15));
+}
+test "encSshrV4S: sshr v0.4s, v1.4s, #31 → 0x4F210420" {
+    try testing.expectEqual(@as(u32, 0x4F210420), encSshrV4S(0, 1, 31));
+}
+
+test "encZip1V16B: zip1 v0.16b, v1.16b, v2.16b → 0x4E023820" {
+    try testing.expectEqual(@as(u32, 0x4E023820), encZip1V16B(0, 1, 2));
+}
+
+test "encExtV16B: ext v0.16b, v1.16b, v2.16b, #8 → 0x6E024020" {
+    try testing.expectEqual(@as(u32, 0x6E024020), encExtV16B(0, 1, 2, 8));
 }
 
 // ============================================================

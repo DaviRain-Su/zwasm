@@ -751,14 +751,19 @@ const Lowerer = struct {
             218 => try self.emit(.@"i64x2.le_s", 0, 0),
             219 => try self.emit(.@"i64x2.ge_s", 0, 0),
 
-            // §9.9 / 9.9-g-3 — v128 → i32 reductions (any_true,
-            // all_true). Wasm SIMD spec §4.4 (vector reductions).
-            // bitmask family (100/132/164/196) deferred to 9.9-g-4.
+            // §9.9 / 9.9-g-3 + 9.9-g-19 — v128 → i32 reductions
+            // (any_true, all_true, bitmask). Wasm SIMD spec §4.4
+            // (vector reductions). Bitmask family wired per
+            // ADR-0051 (arm64 extra_consts infrastructure).
             83 => try self.emit(.@"v128.any_true", 0, 0),
             99 => try self.emit(.@"i8x16.all_true", 0, 0),
             131 => try self.emit(.@"i16x8.all_true", 0, 0),
             163 => try self.emit(.@"i32x4.all_true", 0, 0),
             195 => try self.emit(.@"i64x2.all_true", 0, 0),
+            100 => try self.emit(.@"i8x16.bitmask", 0, 0),
+            132 => try self.emit(.@"i16x8.bitmask", 0, 0),
+            164 => try self.emit(.@"i32x4.bitmask", 0, 0),
+            196 => try self.emit(.@"i64x2.bitmask", 0, 0),
 
             // §9.9 / 9.9-g-6 — int extend ops. Per Wasm SIMD spec
             // (BinarySIMD.md authoritative numbering, NOT the

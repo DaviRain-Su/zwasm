@@ -96,11 +96,27 @@ pub const EmitCtx = struct {
     /// linker.
     call_fixups: *std.ArrayList(CallFixup),
     /// SIMD const-pool fixups (per ADR-0042). Each entry records
-    /// the byte offset of an LDR-Q-literal placeholder and the
-    /// `func.simd_consts` index. Patched at function close after
-    /// the const-pool entries are appended (16-byte aligned) past
-    /// the trap stub.
+    /// the byte offset of an LDR-Q-literal placeholder and a
+    /// global const_idx into the flat per-function pool. The pool
+    /// concatenates `func.simd_consts` (lower-time literals) and
+    /// `extra_consts` (emit-time derived constants per ADR-0051);
+    /// const_idx ∈ [0, simd_consts_base) addresses the former,
+    /// const_idx ∈ [simd_consts_base, ...) the latter. Patched at
+    /// function close after both lists are appended (16-byte
+    /// aligned) past the trap stub.
     simd_const_fixups: *std.ArrayList(SimdConstFixup),
+    /// Emit-time-derived 16-byte SIMD constants discovered by
+    /// per-op handlers (per ADR-0051; mirror of x86_64's
+    /// `extra_consts`). Per-shape masks, magic constants, LUTs.
+    /// Appended to the flat const-pool *after* lower-time entries
+    /// at function close. Handlers register entries via
+    /// `op_simd.lookupOrAppendExtraConst`.
+    extra_consts: *std.ArrayList([16]u8),
+    /// Number of lower-time entries in the flat const-pool.
+    /// Equals `func.simd_consts.?.len` when non-null, 0 otherwise.
+    /// Handlers compute global const_idx as `simd_consts_base +
+    /// position-in-extra_consts`.
+    simd_consts_base: u32,
     /// Absolute SP-relative byte offset of local slot 0.
     /// §9.7 / 7.9-d-11: equals `outgoing_max_bytes`, the bottom-of-
     /// frame region pre-allocated for caller-side stack args. Zero

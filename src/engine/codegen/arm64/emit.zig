@@ -599,6 +599,24 @@ pub fn compile(
     var simd_const_fixups: std.ArrayList(ctx_mod.SimdConstFixup) = .empty;
     defer simd_const_fixups.deinit(allocator);
 
+    // Emit-time-derived 16-byte SIMD constants (per ADR-0051;
+    // mirror of x86_64's `extra_consts`). Per-op handlers append
+    // shape masks / magic constants here; at function close the
+    // list is concatenated after `func.simd_consts` in the flat
+    // pool so fixups address both sources via a single global
+    // const_idx.
+    var extra_consts: std.ArrayList([16]u8) = .empty;
+    defer extra_consts.deinit(allocator);
+
+    // Base offset into the flat const-pool that extra_consts
+    // entries map to. Lower-time entries occupy
+    // `[0, simd_consts_base)`; extra_consts occupy
+    // `[simd_consts_base, ...)`. Immutable for the function.
+    const simd_consts_base: u32 = if (func.simd_consts) |sc|
+        @intCast(sc.len)
+    else
+        0;
+
     // Bundle compile()'s mutable state behind a pointer-based
     // EmitCtx so extracted op-handler modules (op_const, op_alu,
     // …) observe the same backing storage as the still-inlined
@@ -618,6 +636,8 @@ pub fn compile(
         .return_fixups = &return_fixups,
         .call_fixups = &call_fixups,
         .simd_const_fixups = &simd_const_fixups,
+        .extra_consts = &extra_consts,
+        .simd_consts_base = simd_consts_base,
         .local_base_off = local_base_off,
         .spill_base_off = spill_base_off,
         .num_imports = num_imports,
@@ -1375,24 +1395,28 @@ pub fn compile(
                         std.mem.writeInt(u32, buf.items[fx_byte..][0..4], new_word, .little);
                     }
                 }
-                // §9.6/9.6-f-ii — SIMD const-pool flush + LDR-Q-literal
-                // imm19 fixups (per ADR-0042). After the trap stub, if
-                // any v128.const / i8x16.shuffle ops emitted LDR-Q-
-                // literal placeholders, append the per-function const-
-                // pool 16-byte aligned and patch each placeholder.
+                // §9.6/9.6-f-ii + §9.9-g-19 — SIMD const-pool flush +
+                // LDR-Q-literal imm19 fixups (per ADR-0042 + ADR-0051).
+                // After the trap stub, if any v128.const / i8x16.shuffle
+                // / emit-time-derived ops emitted LDR-Q-literal
+                // placeholders, append the per-function const-pool
+                // 16-byte aligned and patch each placeholder. The pool
+                // is the concatenation of `func.simd_consts`
+                // (lower-time) followed by `extra_consts` (emit-time);
+                // const_idx is a flat index across both ranges with
+                // `simd_consts_base` as the boundary.
                 if (simd_const_fixups.items.len > 0) {
-                    const consts = func.simd_consts orelse {
-                        std.debug.print("arm64/emit: simd_const_fixups present but func.simd_consts is null\n", .{});
+                    if (func.simd_consts == null and extra_consts.items.len == 0) {
+                        std.debug.print("arm64/emit: simd_const_fixups present but both simd_consts and extra_consts are empty\n", .{});
                         return Error.AllocationMissing;
-                    };
+                    }
                     // Pad to 16-byte alignment.
                     while (buf.items.len % 16 != 0) try buf.append(allocator, 0);
                     const pool_byte: u32 = @intCast(buf.items.len);
-                    // Append unique simd_consts entries 16-byte aligned.
-                    // For the MVP we append all entries even if some
-                    // are unused by this function; the entry-index ↔
-                    // byte-offset mapping is `pool_byte + idx * 16`.
-                    for (consts) |c| try buf.appendSlice(allocator, &c);
+                    if (func.simd_consts) |consts| {
+                        for (consts) |c| try buf.appendSlice(allocator, &c);
+                    }
+                    for (extra_consts.items) |c| try buf.appendSlice(allocator, &c);
                     // Patch each LDR-Q-literal's imm19 to point at
                     // its const-pool entry (signed offset / 4 bytes).
                     for (simd_const_fixups.items) |fx| {
@@ -1507,6 +1531,12 @@ pub fn compile(
             .@"i16x8.all_true" => try op_simd.emitI16x8AllTrue(&ctx, &ins),
             .@"i32x4.all_true" => try op_simd.emitI32x4AllTrue(&ctx, &ins),
             .@"i64x2.all_true" => try op_simd.emitI64x2AllTrue(&ctx, &ins),
+            // §9.9 / 9.9-g-19 — i*x*.bitmask (per ADR-0051; uses
+            // emit-time-derived per-shape masks via extra_consts).
+            .@"i8x16.bitmask" => try op_simd.emitI8x16Bitmask(&ctx, &ins),
+            .@"i16x8.bitmask" => try op_simd.emitI16x8Bitmask(&ctx, &ins),
+            .@"i32x4.bitmask" => try op_simd.emitI32x4Bitmask(&ctx, &ins),
+            .@"i64x2.bitmask" => try op_simd.emitI64x2Bitmask(&ctx, &ins),
             // §9.9/9.9-f-7 — int unops (abs / neg / popcnt).
             .@"i8x16.abs" => try op_simd.emitI8x16Abs(&ctx, &ins),
             .@"i8x16.neg" => try op_simd.emitI8x16Neg(&ctx, &ins),

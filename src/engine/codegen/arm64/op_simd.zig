@@ -1346,6 +1346,176 @@ pub fn emitI64x2AllTrue(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 }
 
 // ============================================================
+// §9.9 / 9.9-g-19 — i*x*.bitmask (per ADR-0051 + ADR-0042)
+//
+// Wasm spec §4.4.4: pop v128, push i32 where bit i = sign bit
+// (high bit) of lane i. The recipe (per cranelift `aarch64/
+// lower.isle:2883-2943`) for vector shapes:
+//
+//   SSHR Vt, V<src>, #(lane_width-1)   ; broadcast sign bit
+//   LDR  Q<mask>, <pool>                ; per-shape 1<<lane mask
+//   AND  Vt, Vt, V<mask>
+//   <reduce> Vt → low byte/halfword/word
+//   UMOV W<dst>, V<t>.<elem>[0]
+//
+// i8x16 needs an extra fold (NEON ADDV.16B reduces to byte 0 but
+// the byte cap is 255 — 16 mask values up to 128 each would
+// overflow into byte arithmetic that ADDV does NOT widen). The
+// recipe rearranges via EXT (swap halves) + ZIP1 (interleave
+// pairs into halfwords) then ADDV.8H, so each halfword sees only
+// 2 mask values summed (max 0xFF + 0x80) which the H-form
+// accumulates without overflow.
+//
+// i64x2 has no NEON 2D-form ADDV — synthesise via scalar UMOV +
+// LSR #63 per lane + ADD.
+// ============================================================
+
+/// Per-shape position-mask literals for the bitmask recipe. Each
+/// lane holds `1 << (lane_index % bits_per_byte_group)`; ADDV
+/// across the AND'd vector then packs all marked bits into a
+/// single low byte/halfword/word.
+const I8X16_BITMASK_MASK: [16]u8 = [_]u8{
+    1, 2, 4, 8, 16, 32, 64, 128,
+    1, 2, 4, 8, 16, 32, 64, 128,
+};
+/// i16x8: little-endian halfwords [1, 2, 4, 8, 16, 32, 64, 128].
+const I16X8_BITMASK_MASK: [16]u8 = [_]u8{
+    1, 0, 2, 0, 4, 0, 8, 0,
+    16, 0, 32, 0, 64, 0, 128, 0,
+};
+/// i32x4: little-endian words [1, 2, 4, 8].
+const I32X4_BITMASK_MASK: [16]u8 = [_]u8{
+    1, 0, 0, 0, 2, 0, 0, 0,
+    4, 0, 0, 0, 8, 0, 0, 0,
+};
+
+/// Append `value` to `ctx.extra_consts` if not already present
+/// (linear scan dedup), returning the global const_idx (i.e.
+/// `simd_consts_base + position-in-extra_consts`). Mirrors x86_64's
+/// `op_simd.lookupOrAppendExtraConst` per ADR-0051.
+fn lookupOrAppendExtraConst(ctx: *EmitCtx, value: [16]u8) Error!u32 {
+    for (ctx.extra_consts.items, 0..) |c, i| {
+        if (std.mem.eql(u8, &c, &value)) {
+            return ctx.simd_consts_base + @as(u32, @intCast(i));
+        }
+    }
+    const idx: u32 = ctx.simd_consts_base +
+        @as(u32, @intCast(ctx.extra_consts.items.len));
+    try ctx.extra_consts.append(ctx.allocator, value);
+    return idx;
+}
+
+/// Emit an `LDR Q<rt>, <const-pool entry>` placeholder for the
+/// given global const_idx, recording a SimdConstFixup. Matches
+/// the shape used by emitV128Const / emitI8x16Shuffle.
+fn emitLdrLiteralQForConst(ctx: *EmitCtx, rt: u5, const_idx: u32) Error!void {
+    const fixup_byte: u32 = @intCast(ctx.buf.items.len);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encLdrLiteralQ(rt, 0));
+    try ctx.simd_const_fixups.append(ctx.allocator, .{
+        .byte_offset = fixup_byte,
+        .const_idx = const_idx,
+    });
+}
+
+// Scratch V registers usable inside a unary v128 → i32 handler.
+// `qLoadSpilled(..., 0)` returns V29 (fp_spill_stage[0]) when the
+// source is spilled. V30 / V31 are free in a unary op (V30 is
+// fp_spill_stage[1] which only fires on qLoadSpilled(..., 1);
+// V31 is popcnt-pipeline-reserved but this handler is not part
+// of a popcnt sequence).
+const bitmask_scratch_v_t: u5 = 30;
+const bitmask_scratch_v_mask: u5 = 31;
+
+pub fn emitI8x16Bitmask(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    const src_vreg = ctx.pushed_vregs.pop().?;
+    const src_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
+
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const result_w = try gpr.resolveGpr(ctx.alloc, result_vreg);
+
+    const mask_idx = try lookupOrAppendExtraConst(ctx, I8X16_BITMASK_MASK);
+    // V<t> = SSHR src.16B, #7  — broadcast sign bit (0x00 or 0xFF per lane).
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encSshrV16B(bitmask_scratch_v_t, src_v, 7));
+    // V<mask> ← LDR Q literal — per-shape 1<<(lane%8) mask.
+    try emitLdrLiteralQForConst(ctx, bitmask_scratch_v_mask, mask_idx);
+    // V<t> = V<t> AND V<mask>  — each lane: 0 or 1<<(lane%8).
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encAnd16B(bitmask_scratch_v_t, bitmask_scratch_v_t, bitmask_scratch_v_mask));
+    // V<mask> = EXT V<t>, V<t>, #8  — swap halves of V<t> into V<mask>.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encExtV16B(bitmask_scratch_v_mask, bitmask_scratch_v_t, bitmask_scratch_v_t, 8));
+    // V<t> = ZIP1 V<t>, V<mask>  — viewed as .8H, each halfword
+    // packs lane[k] (low byte) + lane[k+8] (high byte).
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encZip1V16B(bitmask_scratch_v_t, bitmask_scratch_v_t, bitmask_scratch_v_mask));
+    // ADDV H<t>, V<t>.8H — sum 8 halfwords into halfword 0.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encAddvH8H(bitmask_scratch_v_t, bitmask_scratch_v_t));
+    // UMOV W<result>, V<t>.H[0]  — extract 16-bit result.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encUmovWFromH(result_w, bitmask_scratch_v_t, 0));
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
+pub fn emitI16x8Bitmask(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    const src_vreg = ctx.pushed_vregs.pop().?;
+    const src_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
+
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const result_w = try gpr.resolveGpr(ctx.alloc, result_vreg);
+
+    const mask_idx = try lookupOrAppendExtraConst(ctx, I16X8_BITMASK_MASK);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encSshrV8H(bitmask_scratch_v_t, src_v, 15));
+    try emitLdrLiteralQForConst(ctx, bitmask_scratch_v_mask, mask_idx);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encAnd16B(bitmask_scratch_v_t, bitmask_scratch_v_t, bitmask_scratch_v_mask));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encAddvH8H(bitmask_scratch_v_t, bitmask_scratch_v_t));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encUmovWFromH(result_w, bitmask_scratch_v_t, 0));
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
+pub fn emitI32x4Bitmask(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    const src_vreg = ctx.pushed_vregs.pop().?;
+    const src_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
+
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const result_w = try gpr.resolveGpr(ctx.alloc, result_vreg);
+
+    const mask_idx = try lookupOrAppendExtraConst(ctx, I32X4_BITMASK_MASK);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encSshrV4S(bitmask_scratch_v_t, src_v, 31));
+    try emitLdrLiteralQForConst(ctx, bitmask_scratch_v_mask, mask_idx);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encAnd16B(bitmask_scratch_v_t, bitmask_scratch_v_t, bitmask_scratch_v_mask));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encAddvS4S(bitmask_scratch_v_t, bitmask_scratch_v_t));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encUmovWFromS(result_w, bitmask_scratch_v_t, 0));
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
+/// `i64x2.bitmask`: NEON has no .2D form for ADDV / SSHR-followed-
+/// by-reduce, so synthesise via two D-lane scalar extracts + LSR
+/// #63 + combine. 6 instructions, no const-pool entry needed.
+pub fn emitI64x2Bitmask(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    const src_vreg = ctx.pushed_vregs.pop().?;
+    const src_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
+
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const result_w = try gpr.resolveGpr(ctx.alloc, result_vreg);
+
+    // X16 = src.D[0]; X17 = src.D[1].
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encUmovXFromD(reduce_scratch_x_a, src_v, 0));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encUmovXFromD(reduce_scratch_x_b, src_v, 1));
+    // X16 >>= 63; X17 >>= 63  — each becomes 0 or 1 (sign bit).
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLsrImmX(reduce_scratch_x_a, reduce_scratch_x_a, 63));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLsrImmX(reduce_scratch_x_b, reduce_scratch_x_b, 63));
+    // X17 += X17  — X17 = lane1_sign << 1.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddReg(reduce_scratch_x_b, reduce_scratch_x_b, reduce_scratch_x_b));
+    // W<result> = W16 | W17  — combine into result's low 2 bits.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(result_w, reduce_scratch_x_a, reduce_scratch_x_b));
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
+// ============================================================
 // §9.6 / 9.6-a — f32x4 / f64x2 binary FP arithmetic
 // ============================================================
 //

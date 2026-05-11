@@ -757,15 +757,17 @@ const Validator = struct {
             => try self.opSimdUnop(),
             // Everything else in 94..211 stays binop (cmp / arith /
             // shifts / saturated arith / dot / extmul / etc.).
-            94, 95, 100, 101, 102, 103, 104, 105, 106, 110, 111,
+            // bitmask sub-ops 100/132/164/196 routed above to
+            // opSimdAllTrueOrAnyTrue (1-pop v128, push i32).
+            94, 95, 101, 102, 103, 104, 105, 106, 110, 111,
             112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123,
-            130, 132, 133, 134,
+            130, 133, 134,
             142, 143, 144, 145, 146, 147, 148, 149,
             150, 151, 152, 153, 154, 155, 156, 157, 158, 159,
-            162, 164, 165, 166,
+            162, 165, 166,
             174, 175, 176, 177, 178, 179, 180, 181, 182, 183,
             184, 185, 186, 187, 188, 189, 190, 191,
-            194, 196, 197, 198,
+            194, 197, 198,
             206, 207, 208, 209, 210, 211, // i64x2 add/.../sub etc.
             // 213 i64x2.mul (per §9.9 / 9.9-f-8).
             213, // §9.9 / 9.9-f-8 — i64x2.mul (handler-side multi-instr synthesis on ARM64 since NEON has no MUL.2D).
@@ -792,14 +794,15 @@ const Validator = struct {
             203, 204, 205,
             => try self.opSimdShift(),
 
-            // §9.9 / 9.9-g-3 — int all_true reductions (sub-ops 99 /
-            // 131 / 163 / 195). i*x*.all_true pops v128, pushes i32.
-            // bitmask (100/132/164/196) shares the same shape but
-            // stays in the surrounding binop list until 9.9-g-4
-            // wires its emit handlers — moving it here without
-            // emit-side support would just shift the failure error
-            // class without flipping any test.
-            99, 131, 163, 195 => try self.opSimdAllTrueOrAnyTrue(),
+            // §9.9 / 9.9-g-3 + 9.9-g-19 — int reductions to i32.
+            //   all_true (99/131/163/195): every-lane-non-zero predicate.
+            //   bitmask (100/132/164/196): high-bit-of-each-lane → bitmask.
+            // All 8 share the same validator shape (pop v128, push i32);
+            // bitmask emit handlers land per ADR-0051 (arm64) + cranelift
+            // PMOVMSKB recipe (x86_64).
+            99, 131, 163, 195,
+            100, 132, 164, 196,
+            => try self.opSimdAllTrueOrAnyTrue(),
 
             // §9.9 / 9.9-f-5 — split FP arith range. Sub-opcodes
             // 224..255 cover f32x4 + f64x2 ops; the 9.4 MVP
