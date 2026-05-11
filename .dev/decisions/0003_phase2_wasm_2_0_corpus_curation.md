@@ -140,5 +140,18 @@ feature work.
 - ROADMAP §A10 — spec test fail=0 / skip=0 release gate
 - ADR 0002 — §9.1 / 1.9 MVP corpus curation (mirrored
   curation pattern)
+- ADR 0056 — Phase 9 scope extension absorbs the
+  "Phase 15 final corpus-completeness pass" clause from this
+  ADR's §"Consequences / Negative" for the Wasm 2.0 corpus
+  cohort. Post-Wasm-2.0 corpus widening (typed function refs /
+  GC / EH / tail-call / threads / multi-memory) remains a
+  Phase 10+ scope.
 - `scripts/regen_test_data_2_0.sh` — NAMES list = curation set
 - `test/spec/wast_runner.zig` — manifest-driven runner
+
+## Revision history
+
+| Date       | SHA          | Note                                                                                                                                                                                                                                                                                                                       |
+|------------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 2026-05-02 | `<backfill>` | Initial. Phase-2 Wasm 2.0 curated corpus (50 corpora / 1158 modules). §"Consequences / Negative" deferred final corpus-completeness pass to "Phase 15".                                                                                                                                                                          |
+| 2026-05-12 | `<backfill>` | Per ADR-0056 §"Decision" — the deferred "Phase 15 final corpus-completeness pass" clause is amended: for the Wasm 2.0 corpus (incl. SIMD), the completeness pass is absorbed into Phase 9 close (this is the Phase 9 / Wasm 2.0 completion phase by design). Phase 15 retains responsibility for post-Wasm-2.0 corpus widening only. |
