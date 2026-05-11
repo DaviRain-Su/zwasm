@@ -20,12 +20,11 @@ Deliverables: `.dev/phase10_prep/track_{a,b,c}_*.md` +
 Phase: 9 (SIMD-128). §9.5/6/7/8 [x]; §9.9 [ ] (Mac+OrbStack
 11384/0 post-h-14; SKIP=2357; windowsmini reconcile pending).
 
-Latest landed: `d254ed56` — 9.9-h-23 Track C chunk 3/4
-(wast_runtime_runner prefix-aware + 5 wasmtime_misc manifests
-migrated; test-wasmtime-misc-runtime now 266/0/5 = 0 skip-impl
-+ 5 skip-adr; D-072 (a/b) discharged; D-082 filed). Next chunk
-`9.9-h-24` (ADR-0029 §"Amendment log" + check_skip_adrs.sh +
-D-072/D-073 close).
+Latest landed: `c49e856c` — 9.9-h-24 Track C chunk 4/4
+**COMPLETE** (ADR-0029 Path B closure + 3 skip-ADR §Implementation
++ check_skip_adrs.sh prefix coherence gate wired into gate_commit
++ D-072/D-073 deleted). Next: §9.9 close residual (skip-impl
+reduction toward `failed=skip-impl=0` on 2-host).
 
 ## Implementation queue (matches ROADMAP first `[ ]`)
 
@@ -36,21 +35,11 @@ gate. Specs: `phase10_prep/track_*.md` §6/§7.
 1. **Track B** (9.9-h-15..-20, 6 chunks) — **COMPLETE** (all
    `[x]`). file_size_check hard-cap list = 0; warn→gate flipped;
    ADR-0054 lands; D-057 + D-065 closed; D-081 filed.
-2. **Track C** (9.9-h-21..-24, 4 chunks): Path B prefix-vocab
-   migration → ADR-0029 amend + check_skip_adrs.sh pre-commit
-   gate + D-082 file + D-072 (a/b) + D-073 close.
-   - **9.9-h-21** `[x]` `d39697ce` — runners prefix-aware
-     (spec_assert + simd_assert).
-   - **9.9-h-22** `[x]` `1c7f5e6d` — regen scripts + manifest
-     sweep (bare-skip in test/spec/ → 0).
-   - **9.9-h-23** `[x]` `d254ed56` — wast_runtime_runner
-     prefix-aware + 5 wasmtime_misc manifests migrated +
-     D-072 (a/b) discharged + D-082 filed.
-   - **9.9-h-24** **NEXT** — ADR-0029 §"Amendment log" Path B
-     closure row + update 3 skip-ADRs with §"Implementation"
-     subsection (drop "NOT EFFECTIVE" warning on 2 of them) +
-     extend `scripts/check_skip_adrs.sh` as `.githooks/pre-commit`-invoked
-     gate + delete D-072 + delete D-073.
+2. **Track C** (9.9-h-21..-24, 4 chunks) — **COMPLETE** (all
+   `[x]`). ADR-0029 Path B prefix vocab end-to-end; 3 skip-ADRs
+   operationally effective; D-072 + D-073 closed; D-082 carries
+   the (c)-path actual fixture fixes. `check_skip_adrs --gate`
+   wired into `gate_commit.sh`.
 3. **§9.9 close residual** (h-25..-N, count TBD by live
    status post-Track-C): `p9_simd_status.sh` surfaces
    `skip-impl` count (currently ~1967 = nan-or-bad-token 1222
