@@ -277,6 +277,26 @@ SUPPORTED = {
     (("v128",), ()): True,
     (("v128", "v128"), ()): True,
     (("v128", "v128", "v128", "v128"), ()): True,
+    # chunk 9.9-h-26 (v128-param-pending discharge):
+    # (v128,) → i32 — i*x*.all_true / any_true / bitmask /
+    # i*x*.extract_lane.{s,u}. Entry helper: `entry.callI32_v128`.
+    (("v128",), ("i32",)): True,
+    # chunk 9.9-h-26: (v128,) → f32 — f32x4.extract_lane.
+    # Entry helper: `entry.callF32_v128`.
+    (("v128",), ("f32",)): True,
+    # chunk 9.9-h-26: (v128,) → f64 — f64x2.extract_lane.
+    # Entry helper: `entry.callF64_v128`.
+    (("v128",), ("f64",)): True,
+    # chunk 9.9-h-26: (v128, i32) → v128 — i*x*.shl / shr_s /
+    # shr_u AND i*x*.replace_lane (value = i32, lane in opcode).
+    # Entry helper: `entry.callV128_v128i32`.
+    (("v128", "i32"), ("v128",)): True,
+    # chunk 9.9-h-26: (v128, f32) → v128 — f32x4.replace_lane.
+    # Entry helper: `entry.callV128_v128f32`.
+    (("v128", "f32"), ("v128",)): True,
+    # chunk 9.9-h-26: (v128, f64) → v128 — f64x2.replace_lane.
+    # Entry helper: `entry.callV128_v128f64`.
+    (("v128", "f64"), ("v128",)): True,
 }
 
 lines = []

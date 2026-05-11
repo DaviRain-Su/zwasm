@@ -1,48 +1,48 @@
 module simd_lane.0.wasm
-skip-impl v128-param-pending i8x16_extract_lane_s-first
-skip-impl v128-param-pending i8x16_extract_lane_s-first
-skip-impl v128-param-pending i8x16_extract_lane_s-first
-skip-impl v128-param-pending i8x16_extract_lane_s-first
-skip-impl v128-param-pending i8x16_extract_lane_u-first
-skip-impl v128-param-pending i8x16_extract_lane_u-first
-skip-impl v128-param-pending i8x16_extract_lane_s-last
-skip-impl v128-param-pending i8x16_extract_lane_s-last
-skip-impl v128-param-pending i8x16_extract_lane_u-last
-skip-impl v128-param-pending i8x16_extract_lane_u-last
-skip-impl v128-param-pending i8x16_extract_lane_u-last
-skip-impl v128-param-pending i8x16_extract_lane_u-last
-skip-impl v128-param-pending i16x8_extract_lane_s-first
-skip-impl v128-param-pending i16x8_extract_lane_s-first
-skip-impl v128-param-pending i16x8_extract_lane_s-first
-skip-impl v128-param-pending i16x8_extract_lane_s-first
-skip-impl v128-param-pending i16x8_extract_lane_s-first
-skip-impl v128-param-pending i16x8_extract_lane_s-first
-skip-impl v128-param-pending i16x8_extract_lane_u-first
-skip-impl v128-param-pending i16x8_extract_lane_u-first
-skip-impl v128-param-pending i16x8_extract_lane_u-first
-skip-impl v128-param-pending i16x8_extract_lane_u-first
-skip-impl v128-param-pending i16x8_extract_lane_s-last
-skip-impl v128-param-pending i16x8_extract_lane_s-last
-skip-impl v128-param-pending i16x8_extract_lane_s-last
-skip-impl v128-param-pending i16x8_extract_lane_s-last
-skip-impl v128-param-pending i16x8_extract_lane_u-last
-skip-impl v128-param-pending i16x8_extract_lane_u-last
-skip-impl v128-param-pending i16x8_extract_lane_u-last
-skip-impl v128-param-pending i16x8_extract_lane_u-last
-skip-impl v128-param-pending i16x8_extract_lane_u-last
-skip-impl v128-param-pending i16x8_extract_lane_u-last
-skip-impl v128-param-pending i32x4_extract_lane-first
-skip-impl v128-param-pending i32x4_extract_lane-first
-skip-impl v128-param-pending i32x4_extract_lane-first
-skip-impl v128-param-pending i32x4_extract_lane-first
-skip-impl v128-param-pending i32x4_extract_lane-first
-skip-impl v128-param-pending i32x4_extract_lane-first
-skip-impl v128-param-pending i32x4_extract_lane-last
-skip-impl v128-param-pending i32x4_extract_lane-last
-skip-impl v128-param-pending i32x4_extract_lane-last
-skip-impl v128-param-pending i32x4_extract_lane-last
-skip-impl v128-param-pending i32x4_extract_lane-last
-skip-impl v128-param-pending i32x4_extract_lane-last
+assert_return i8x16_extract_lane_s-first v128:7f000000000000000000000000000000 -> i32:127
+assert_return i8x16_extract_lane_s-first v128:7f000000000000000000000000000000 -> i32:127
+assert_return i8x16_extract_lane_s-first v128:ff000000000000000000000000000000 -> i32:4294967295
+assert_return i8x16_extract_lane_s-first v128:ff000000000000000000000000000000 -> i32:4294967295
+assert_return i8x16_extract_lane_u-first v128:ff000000000000000000000000000000 -> i32:255
+assert_return i8x16_extract_lane_u-first v128:ff000000000000000000000000000000 -> i32:255
+assert_return i8x16_extract_lane_s-last v128:00000000000000000000000000000080 -> i32:4294967168
+assert_return i8x16_extract_lane_s-last v128:00000000000000000000000000000080 -> i32:4294967168
+assert_return i8x16_extract_lane_u-last v128:000000000000000000000000000000ff -> i32:255
+assert_return i8x16_extract_lane_u-last v128:000000000000000000000000000000ff -> i32:255
+assert_return i8x16_extract_lane_u-last v128:00000000000000000000000000000080 -> i32:128
+assert_return i8x16_extract_lane_u-last v128:00000000000000000000000000000080 -> i32:128
+assert_return i16x8_extract_lane_s-first v128:ff7f0000000000000000000000000000 -> i32:32767
+assert_return i16x8_extract_lane_s-first v128:ff7f0000000000000000000000000000 -> i32:32767
+assert_return i16x8_extract_lane_s-first v128:ffff0000000000000000000000000000 -> i32:4294967295
+assert_return i16x8_extract_lane_s-first v128:ffff0000000000000000000000000000 -> i32:4294967295
+assert_return i16x8_extract_lane_s-first v128:39300000000000000000000000000000 -> i32:12345
+assert_return i16x8_extract_lane_s-first v128:cced0000000000000000000000000000 -> i32:4294962636
+assert_return i16x8_extract_lane_u-first v128:ffff0000000000000000000000000000 -> i32:65535
+assert_return i16x8_extract_lane_u-first v128:ffff0000000000000000000000000000 -> i32:65535
+assert_return i16x8_extract_lane_u-first v128:39300000000000000000000000000000 -> i32:12345
+assert_return i16x8_extract_lane_u-first v128:cced0000000000000000000000000000 -> i32:60876
+assert_return i16x8_extract_lane_s-last v128:00000000000000000000000000000080 -> i32:4294934528
+assert_return i16x8_extract_lane_s-last v128:00000000000000000000000000000080 -> i32:4294934528
+assert_return i16x8_extract_lane_s-last v128:0000000000000000000000000000851a -> i32:6789
+assert_return i16x8_extract_lane_s-last v128:00000000000000000000000000007798 -> i32:4294940791
+assert_return i16x8_extract_lane_u-last v128:0000000000000000000000000000ffff -> i32:65535
+assert_return i16x8_extract_lane_u-last v128:0000000000000000000000000000ffff -> i32:65535
+assert_return i16x8_extract_lane_u-last v128:00000000000000000000000000000080 -> i32:32768
+assert_return i16x8_extract_lane_u-last v128:00000000000000000000000000000080 -> i32:32768
+assert_return i16x8_extract_lane_u-last v128:0000000000000000000000000000851a -> i32:6789
+assert_return i16x8_extract_lane_u-last v128:00000000000000000000000000007798 -> i32:39031
+assert_return i32x4_extract_lane-first v128:ffffff7f000000000000000000000000 -> i32:2147483647
+assert_return i32x4_extract_lane-first v128:ffffff7f000000000000000000000000 -> i32:2147483647
+assert_return i32x4_extract_lane-first v128:ffffffff000000000000000000000000 -> i32:4294967295
+assert_return i32x4_extract_lane-first v128:ffffffff000000000000000000000000 -> i32:4294967295
+assert_return i32x4_extract_lane-first v128:d2029649000000000000000000000000 -> i32:1234567890
+assert_return i32x4_extract_lane-first v128:88a9cbed000000000000000000000000 -> i32:3989547400
+assert_return i32x4_extract_lane-last v128:00000000000000000000000000000080 -> i32:2147483648
+assert_return i32x4_extract_lane-last v128:00000000000000000000000000000080 -> i32:2147483648
+assert_return i32x4_extract_lane-last v128:000000000000000000000000ffffffff -> i32:4294967295
+assert_return i32x4_extract_lane-last v128:000000000000000000000000ffffffff -> i32:4294967295
+assert_return i32x4_extract_lane-last v128:000000000000000000000000b168de3a -> i32:987654321
+assert_return i32x4_extract_lane-last v128:00000000000000000000000088a9cbed -> i32:3989547400
 skip-impl v128-param-pending i64x2_extract_lane-first
 skip-impl v128-param-pending i64x2_extract_lane-first
 skip-impl v128-param-pending i64x2_extract_lane-first
@@ -58,105 +58,105 @@ skip-impl v128-param-pending i64x2_extract_lane-last
 skip-impl v128-param-pending i64x2_extract_lane-last
 skip-impl v128-param-pending i64x2_extract_lane-last
 skip-impl v128-param-pending i64x2_extract_lane-last
-skip-impl v128-param-pending f32x4_extract_lane-first
-skip-impl v128-param-pending f32x4_extract_lane-first
-skip-impl v128-param-pending f32x4_extract_lane-first
-skip-impl v128-param-pending f32x4_extract_lane-first
-skip-impl v128-param-pending f32x4_extract_lane-first
-skip-impl v128-param-pending f32x4_extract_lane-first
-skip-impl v128-param-pending f32x4_extract_lane-first
-skip-impl v128-param-pending f32x4_extract_lane-first
-skip-impl v128-param-pending f32x4_extract_lane-last
-skip-impl v128-param-pending f32x4_extract_lane-last
-skip-impl v128-param-pending f32x4_extract_lane-last
-skip-impl v128-param-pending f32x4_extract_lane-last
-skip-impl v128-param-pending f32x4_extract_lane-last
-skip-impl v128-param-pending f32x4_extract_lane-last
-skip-impl v128-param-pending f32x4_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-first
-skip-impl v128-param-pending f64x2_extract_lane-first
-skip-impl v128-param-pending f64x2_extract_lane-first
-skip-impl v128-param-pending f64x2_extract_lane-first
-skip-impl v128-param-pending f64x2_extract_lane-first
-skip-impl v128-param-pending f64x2_extract_lane-first
-skip-impl v128-param-pending f64x2_extract_lane-first
-skip-impl v128-param-pending f64x2_extract_lane-first
-skip-impl v128-param-pending f64x2_extract_lane-first
-skip-impl v128-param-pending f64x2_extract_lane-first
-skip-impl v128-param-pending f64x2_extract_lane-first
-skip-impl v128-param-pending f64x2_extract_lane-first
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending f64x2_extract_lane-last
-skip-impl v128-param-pending i8x16_replace_lane-first
-skip-impl v128-param-pending i8x16_replace_lane-first
-skip-impl v128-param-pending i8x16_replace_lane-first
-skip-impl v128-param-pending i8x16_replace_lane-first
-skip-impl v128-param-pending i8x16_replace_lane-last
-skip-impl v128-param-pending i8x16_replace_lane-last
-skip-impl v128-param-pending i8x16_replace_lane-last
-skip-impl v128-param-pending i8x16_replace_lane-last
-skip-impl v128-param-pending i16x8_replace_lane-first
-skip-impl v128-param-pending i16x8_replace_lane-first
-skip-impl v128-param-pending i16x8_replace_lane-first
-skip-impl v128-param-pending i16x8_replace_lane-first
-skip-impl v128-param-pending i16x8_replace_lane-first
-skip-impl v128-param-pending i16x8_replace_lane-first
-skip-impl v128-param-pending i16x8_replace_lane-last
-skip-impl v128-param-pending i16x8_replace_lane-last
-skip-impl v128-param-pending i16x8_replace_lane-last
-skip-impl v128-param-pending i16x8_replace_lane-last
-skip-impl v128-param-pending i16x8_replace_lane-last
-skip-impl v128-param-pending i16x8_replace_lane-last
-skip-impl v128-param-pending i32x4_replace_lane-first
-skip-impl v128-param-pending i32x4_replace_lane-first
-skip-impl v128-param-pending i32x4_replace_lane-first
-skip-impl v128-param-pending i32x4_replace_lane-first
-skip-impl v128-param-pending i32x4_replace_lane-last
-skip-impl v128-param-pending i32x4_replace_lane-last
-skip-impl v128-param-pending i32x4_replace_lane-last
-skip-impl v128-param-pending i32x4_replace_lane-last
-skip-impl v128-param-pending f32x4_replace_lane-first
-skip-impl v128-param-pending f32x4_replace_lane-first
-skip-impl v128-param-pending f32x4_replace_lane-first
-skip-impl v128-param-pending f32x4_replace_lane-first
-skip-impl v128-param-pending f32x4_replace_lane-first
-skip-impl v128-param-pending f32x4_replace_lane-first
-skip-impl v128-param-pending f32x4_replace_lane-first
-skip-impl v128-param-pending f32x4_replace_lane-first
-skip-impl v128-param-pending f32x4_replace_lane-first
-skip-impl v128-param-pending f32x4_replace_lane-first
-skip-impl v128-param-pending f32x4_replace_lane-first
-skip-impl v128-param-pending f32x4_replace_lane-first
-skip-impl v128-param-pending f32x4_replace_lane-last
-skip-impl v128-param-pending f32x4_replace_lane-last
-skip-impl v128-param-pending f32x4_replace_lane-last
-skip-impl v128-param-pending f32x4_replace_lane-last
-skip-impl v128-param-pending f32x4_replace_lane-last
-skip-impl v128-param-pending f32x4_replace_lane-last
-skip-impl v128-param-pending f32x4_replace_lane-last
-skip-impl v128-param-pending f32x4_replace_lane-last
-skip-impl v128-param-pending f32x4_replace_lane-last
-skip-impl v128-param-pending f32x4_replace_lane-last
-skip-impl v128-param-pending f32x4_replace_lane-last
-skip-impl v128-param-pending f32x4_replace_lane-last
+assert_return f32x4_extract_lane-first v128:0000a0c0000000000000000000000000 -> f32:3231711232
+assert_return f32x4_extract_lane-first v128:9976967e000000000000000000000000 -> f32:2123789977
+assert_return f32x4_extract_lane-first v128:ffff7f7f000000000000000000000000 -> f32:2139095039
+assert_return f32x4_extract_lane-first v128:0000007f000000000000000000000000 -> f32:2130706432
+assert_return f32x4_extract_lane-first v128:0000807f000000000000000000000000 -> f32:2139095040
+assert_return f32x4_extract_lane-first v128:0000c07f0000807f0000000000000000 -> f32:2143289344
+assert_return f32x4_extract_lane-first v128:7b4d7f6c000000000000000000000000 -> f32:1820282235
+assert_return f32x4_extract_lane-first v128:b4a21152000000000000000000000000 -> f32:1376887476
+assert_return f32x4_extract_lane-last v128:000000000000000000000000997696fe -> f32:4271273625
+assert_return f32x4_extract_lane-last v128:000000000000000000000000ffff7fff -> f32:4286578687
+assert_return f32x4_extract_lane-last v128:000000000000000000000000000000ff -> f32:4278190080
+assert_return f32x4_extract_lane-last v128:000000000000000000000000000080ff -> f32:4286578688
+assert_return f32x4_extract_lane-last v128:0000000000000000000080ff0000c07f -> f32:2143289344
+assert_return f32x4_extract_lane-last v128:000000000000000000000000a379eb4c -> f32:1290500515
+assert_return f32x4_extract_lane-last v128:000000000000000000000000b4a2915b -> f32:1536271028
+assert_return f64x2_extract_lane-first v128:000000000000f8bf0000000000000000 -> f64:13832806255468478464
+assert_return f64x2_extract_lane-first v128:000000000000f83f0000000000000000 -> f64:4609434218613702656
+assert_return f64x2_extract_lane-first v128:9d5d88ec42ed0c800000000000000000 -> f64:9227010608267287965
+assert_return f64x2_extract_lane-first v128:9d5d88ec42ed0c000000000000000000 -> f64:3638571412512157
+assert_return f64x2_extract_lane-first v128:ffffffffffff0f800000000000000000 -> f64:9227875636482146303
+assert_return f64x2_extract_lane-first v128:ffffffffffff0f000000000000000000 -> f64:4503599627370495
+assert_return f64x2_extract_lane-first v128:000000000000f0ff0000000000000000 -> f64:18442240474082181120
+assert_return f64x2_extract_lane-first v128:000000000000f07f0000000000000000 -> f64:9218868437227405312
+assert_return f64x2_extract_lane-first v128:000000000000f8ff0000000000000080 -> f64:18444492273895866368
+assert_return f64x2_extract_lane-first v128:000000000000f87f0000000000000000 -> f64:9221120237041090560
+assert_return f64x2_extract_lane-first v128:d5cb6b5bafe98f450000000000000000 -> f64:5012481849648991189
+assert_return f64x2_extract_lane-first v128:dfbc9a785634c2430000000000000000 -> f64:4882522492018277599
+assert_return f64x2_extract_lane-last v128:00000000000000000000000000000240 -> f64:4612248968380809216
+assert_return f64x2_extract_lane-last v128:000000000000000000000000000002c0 -> f64:13835621005235585024
+assert_return f64x2_extract_lane-last v128:0000000000000000ffffffffffffefff -> f64:18442240474082181119
+assert_return f64x2_extract_lane-last v128:0000000000000000ffffffffffffef7f -> f64:9218868437227405311
+assert_return f64x2_extract_lane-last v128:0000000000000000ffffffffffffefff -> f64:18442240474082181119
+assert_return f64x2_extract_lane-last v128:0000000000000000ffffffffffffef7f -> f64:9218868437227405311
+assert_return f64x2_extract_lane-last v128:0000000000000080000000000000f0ff -> f64:18442240474082181120
+assert_return f64x2_extract_lane-last v128:0000000000000000000000000000f07f -> f64:9218868437227405312
+assert_return f64x2_extract_lane-last v128:0000000000000080000000000000f8ff -> f64:18444492273895866368
+assert_return f64x2_extract_lane-last v128:0000000000000000000000000000f87f -> f64:9221120237041090560
+assert_return f64x2_extract_lane-last v128:000000000000000000000054346f9d41 -> f64:4728057454347157504
+assert_return f64x2_extract_lane-last v128:0000000000000000dfbc9a785634f244 -> f64:4968090884938317023
+assert_return f64x2_extract_lane-last v128:00000000000000000000000000000000 -> f64:0
+assert_return f64x2_extract_lane-last v128:00000000000000000000000000000080 -> f64:9223372036854775808
+assert_return f64x2_extract_lane-last v128:00000000000000000000000000000040 -> f64:4611686018427387904
+assert_return f64x2_extract_lane-last v128:000000000000000000000000000000c0 -> f64:13835058055282163712
+assert_return f64x2_extract_lane-last v128:0000000000000000ffffffffffffef7f -> f64:9218868437227405311
+assert_return f64x2_extract_lane-last v128:00000000000000000000000000001000 -> f64:4503599627370496
+assert_return f64x2_extract_lane-last v128:0000000000000000ffffffffffff0f00 -> f64:4503599627370495
+assert_return f64x2_extract_lane-last v128:00000000000000000100000000000000 -> f64:1
+assert_return i8x16_replace_lane-first v128:00000000000000000000000000000000 i32:127 -> v128:7f000000000000000000000000000000
+assert_return i8x16_replace_lane-first v128:00000000000000000000000000000000 i32:128 -> v128:80000000000000000000000000000000
+assert_return i8x16_replace_lane-first v128:00000000000000000000000000000000 i32:255 -> v128:ff000000000000000000000000000000
+assert_return i8x16_replace_lane-first v128:00000000000000000000000000000000 i32:256 -> v128:00000000000000000000000000000000
+assert_return i8x16_replace_lane-last v128:00000000000000000000000000000000 i32:4294967168 -> v128:00000000000000000000000000000080
+assert_return i8x16_replace_lane-last v128:00000000000000000000000000000000 i32:4294967167 -> v128:0000000000000000000000000000007f
+assert_return i8x16_replace_lane-last v128:00000000000000000000000000000000 i32:32767 -> v128:000000000000000000000000000000ff
+assert_return i8x16_replace_lane-last v128:00000000000000000000000000000000 i32:4294934528 -> v128:00000000000000000000000000000000
+assert_return i16x8_replace_lane-first v128:00000000000000000000000000000000 i32:32767 -> v128:ff7f0000000000000000000000000000
+assert_return i16x8_replace_lane-first v128:00000000000000000000000000000000 i32:32768 -> v128:00800000000000000000000000000000
+assert_return i16x8_replace_lane-first v128:00000000000000000000000000000000 i32:65535 -> v128:ffff0000000000000000000000000000
+assert_return i16x8_replace_lane-first v128:00000000000000000000000000000000 i32:65536 -> v128:00000000000000000000000000000000
+assert_return i16x8_replace_lane-first v128:00000000000000000000000000000000 i32:12345 -> v128:39300000000000000000000000000000
+assert_return i16x8_replace_lane-first v128:00000000000000000000000000000000 i32:4294962636 -> v128:cced0000000000000000000000000000
+assert_return i16x8_replace_lane-last v128:00000000000000000000000000000000 i32:4294934528 -> v128:00000000000000000000000000000080
+assert_return i16x8_replace_lane-last v128:00000000000000000000000000000000 i32:4294934527 -> v128:0000000000000000000000000000ff7f
+assert_return i16x8_replace_lane-last v128:00000000000000000000000000000000 i32:2147483647 -> v128:0000000000000000000000000000ffff
+assert_return i16x8_replace_lane-last v128:00000000000000000000000000000000 i32:2147483648 -> v128:00000000000000000000000000000000
+assert_return i16x8_replace_lane-last v128:00000000000000000000000000000000 i32:54321 -> v128:000000000000000000000000000031d4
+assert_return i16x8_replace_lane-last v128:00000000000000000000000000000000 i32:4294950111 -> v128:0000000000000000000000000000dfbc
+assert_return i32x4_replace_lane-first v128:00000000000000000000000000000000 i32:2147483647 -> v128:ffffff7f000000000000000000000000
+assert_return i32x4_replace_lane-first v128:00000000000000000000000000000000 i32:4294967295 -> v128:ffffffff000000000000000000000000
+assert_return i32x4_replace_lane-first v128:00000000000000000000000000000000 i32:1234567890 -> v128:d2029649000000000000000000000000
+assert_return i32x4_replace_lane-first v128:00000000000000000000000000000000 i32:3989547400 -> v128:88a9cbed000000000000000000000000
+assert_return i32x4_replace_lane-last v128:00000000000000000000000000000000 i32:2147483648 -> v128:00000000000000000000000000000080
+assert_return i32x4_replace_lane-last v128:00000000000000000000000000000000 i32:2147483648 -> v128:00000000000000000000000000000080
+assert_return i32x4_replace_lane-last v128:00000000000000000000000000000000 i32:1234567890 -> v128:000000000000000000000000d2029649
+assert_return i32x4_replace_lane-last v128:00000000000000000000000000000000 i32:3989547400 -> v128:00000000000000000000000088a9cbed
+assert_return f32x4_replace_lane-first v128:00000000000000000000000000000000 f32:1112801280 -> v128:00005442000000000000000000000000
+assert_return f32x4_replace_lane-first v128:00000000000000000000000000000000 f32:1112801280 -> v128:00005442000000000000000000000000
+assert_return f32x4_replace_lane-first v128:00000000000000000000000000000000 f32:2143289344 -> v128:0000c07f000000000000000000000000
+assert_return f32x4_replace_lane-first v128:00000000000000000000000000000000 f32:2139095040 -> v128:0000807f000000000000000000000000
+assert_return f32x4_replace_lane-first v128:0000c07f000000000000000000000000 f32:1078523331 -> v128:c3f54840000000000000000000000000
+assert_return f32x4_replace_lane-first v128:0000807f000000000000000000000000 f32:2123789977 -> v128:9976967e000000000000000000000000
+assert_return f32x4_replace_lane-first v128:0000807f000000000000000000000000 f32:2139095039 -> v128:ffff7f7f000000000000000000000000
+assert_return f32x4_replace_lane-first v128:0000807f000000000000000000000000 f32:2130706432 -> v128:0000007f000000000000000000000000
+assert_return f32x4_replace_lane-first v128:00000000000000000000000000000000 f32:1290500515 -> v128:a379eb4c000000000000000000000000
+assert_return f32x4_replace_lane-first v128:00000000000000000000000000000000 f32:1290500515 -> v128:a379eb4c000000000000000000000000
+assert_return f32x4_replace_lane-first v128:00000000000000000000000000000000 f32:1536271028 -> v128:b4a2915b000000000000000000000000
+assert_return f32x4_replace_lane-first v128:00000000000000000000000000000000 f32:1536271028 -> v128:b4a2915b000000000000000000000000
+assert_return f32x4_replace_lane-last v128:00000000000000000000000000000000 f32:3260284928 -> v128:000000000000000000000000000054c2
+assert_return f32x4_replace_lane-last v128:00000000000000000000000000000000 f32:3260284928 -> v128:000000000000000000000000000054c2
+assert_return f32x4_replace_lane-last v128:00000000000000000000000000000000 f32:2143289344 -> v128:0000000000000000000000000000c07f
+assert_return f32x4_replace_lane-last v128:00000000000000000000000000000000 f32:4286578688 -> v128:000000000000000000000000000080ff
+assert_return f32x4_replace_lane-last v128:0000000000000000000000000000c07f f32:1078523331 -> v128:000000000000000000000000c3f54840
+assert_return f32x4_replace_lane-last v128:000000000000000000000000000080ff f32:4271273625 -> v128:000000000000000000000000997696fe
+assert_return f32x4_replace_lane-last v128:000000000000000000000000000080ff f32:4286578687 -> v128:000000000000000000000000ffff7fff
+assert_return f32x4_replace_lane-last v128:000000000000000000000000000080ff f32:4278190080 -> v128:000000000000000000000000000000ff
+assert_return f32x4_replace_lane-last v128:00000000000000000000000000000000 f32:1820282235 -> v128:0000000000000000000000007b4d7f6c
+assert_return f32x4_replace_lane-last v128:00000000000000000000000000000000 f32:1820282235 -> v128:0000000000000000000000007b4d7f6c
+assert_return f32x4_replace_lane-last v128:00000000000000000000000000000000 f32:1695654580 -> v128:000000000000000000000000b4a21165
+assert_return f32x4_replace_lane-last v128:00000000000000000000000000000000 f32:1376887476 -> v128:000000000000000000000000b4a21152
 skip-impl v128-param-pending i64x2_replace_lane-first
 skip-impl v128-param-pending i64x2_replace_lane-first
 skip-impl v128-param-pending i64x2_replace_lane-first
@@ -165,38 +165,38 @@ skip-impl v128-param-pending i64x2_replace_lane-last
 skip-impl v128-param-pending i64x2_replace_lane-last
 skip-impl v128-param-pending i64x2_replace_lane-last
 skip-impl v128-param-pending i64x2_replace_lane-last
-skip-impl v128-param-pending f64x2_replace_lane-first
-skip-impl v128-param-pending f64x2_replace_lane-first
-skip-impl v128-param-pending f64x2_replace_lane-first
-skip-impl v128-param-pending f64x2_replace_lane-first
-skip-impl v128-param-pending f64x2_replace_lane-first
-skip-impl v128-param-pending f64x2_replace_lane-first
-skip-impl v128-param-pending f64x2_replace_lane-first
-skip-impl v128-param-pending f64x2_replace_lane-first
-skip-impl v128-param-pending f64x2_replace_lane-first
-skip-impl v128-param-pending f64x2_replace_lane-first
-skip-impl v128-param-pending f64x2_replace_lane-first
-skip-impl v128-param-pending f64x2_replace_lane-first
-skip-impl v128-param-pending f64x2_replace_lane-first
-skip-impl v128-param-pending f64x2_replace_lane-first
-skip-impl v128-param-pending f64x2_replace_lane-first
-skip-impl v128-param-pending f64x2_replace_lane-first
-skip-impl v128-param-pending f64x2_replace_lane-last
-skip-impl v128-param-pending f64x2_replace_lane-last
-skip-impl v128-param-pending f64x2_replace_lane-last
-skip-impl v128-param-pending f64x2_replace_lane-last
-skip-impl v128-param-pending f64x2_replace_lane-last
-skip-impl v128-param-pending f64x2_replace_lane-last
-skip-impl v128-param-pending f64x2_replace_lane-last
-skip-impl v128-param-pending f64x2_replace_lane-last
-skip-impl v128-param-pending f64x2_replace_lane-last
-skip-impl v128-param-pending f64x2_replace_lane-last
-skip-impl v128-param-pending f64x2_replace_lane-last
-skip-impl v128-param-pending f64x2_replace_lane-last
-skip-impl v128-param-pending f64x2_replace_lane-last
-skip-impl v128-param-pending f64x2_replace_lane-last
-skip-impl v128-param-pending f64x2_replace_lane-last
-skip-impl v128-param-pending f64x2_replace_lane-last
+assert_return f64x2_replace_lane-first v128:000000000000f03f000000000000f03f f64:0 -> v128:0000000000000000000000000000f03f
+assert_return f64x2_replace_lane-first v128:000000000000f0bf000000000000f0bf f64:9223372036854775808 -> v128:0000000000000080000000000000f0bf
+assert_return f64x2_replace_lane-first v128:00000000000000000000000000000000 f64:4608308318706860032 -> v128:000000000000f43f0000000000000000
+assert_return f64x2_replace_lane-first v128:00000000000000000000000000000000 f64:13831680355561635840 -> v128:000000000000f4bf0000000000000000
+assert_return f64x2_replace_lane-first v128:000000000000f8ff0000000000000000 f64:18442240474082181119 -> v128:ffffffffffffefff0000000000000000
+assert_return f64x2_replace_lane-first v128:000000000000f87f0000000000000000 f64:9218868437227405311 -> v128:ffffffffffffef7f0000000000000000
+assert_return f64x2_replace_lane-first v128:000000000000f0ff0000000000000000 f64:9227875636482146303 -> v128:ffffffffffff0f800000000000000000
+assert_return f64x2_replace_lane-first v128:000000000000f07f0000000000000000 f64:4503599627370495 -> v128:ffffffffffff0f000000000000000000
+assert_return f64x2_replace_lane-first v128:00000000000000000000000000000000 f64:18444492273895866368 -> v128:000000000000f8ff0000000000000000
+assert_return f64x2_replace_lane-first v128:00000000000000000000000000000000 f64:9221120237041090560 -> v128:000000000000f87f0000000000000000
+assert_return f64x2_replace_lane-first v128:00000000000000000000000000000000 f64:18442240474082181120 -> v128:000000000000f0ff0000000000000000
+assert_return f64x2_replace_lane-first v128:00000000000000000000000000000000 f64:9218868437227405312 -> v128:000000000000f07f0000000000000000
+assert_return f64x2_replace_lane-first v128:00000000000000000000000000000000 f64:4728057454347157504 -> v128:00000054346f9d410000000000000000
+assert_return f64x2_replace_lane-first v128:00000000000000000000000000000000 f64:4728057454347157504 -> v128:00000054346f9d410000000000000000
+assert_return f64x2_replace_lane-first v128:00000000000000000000000000000000 f64:4968090884938317023 -> v128:dfbc9a785634f2440000000000000000
+assert_return f64x2_replace_lane-first v128:00000000000000000000000000000000 f64:4968090884938317023 -> v128:dfbc9a785634f2440000000000000000
+assert_return f64x2_replace_lane-last v128:00000000000000400000000000000040 f64:0 -> v128:00000000000000400000000000000000
+assert_return f64x2_replace_lane-last v128:00000000000000c000000000000000c0 f64:9223372036854775808 -> v128:00000000000000c00000000000000080
+assert_return f64x2_replace_lane-last v128:00000000000000000000000000000000 f64:4612248968380809216 -> v128:00000000000000000000000000000240
+assert_return f64x2_replace_lane-last v128:00000000000000000000000000000000 f64:13835621005235585024 -> v128:000000000000000000000000000002c0
+assert_return f64x2_replace_lane-last v128:0000000000000000000000000000f8ff f64:18442240474082181119 -> v128:0000000000000000ffffffffffffefff
+assert_return f64x2_replace_lane-last v128:0000000000000000000000000000f87f f64:9218868437227405311 -> v128:0000000000000000ffffffffffffef7f
+assert_return f64x2_replace_lane-last v128:0000000000000000000000000000f0ff f64:9227875636482146303 -> v128:0000000000000000ffffffffffff0f80
+assert_return f64x2_replace_lane-last v128:0000000000000000000000000000f07f f64:4503599627370495 -> v128:0000000000000000ffffffffffff0f00
+assert_return f64x2_replace_lane-last v128:00000000000000000000000000000000 f64:18444492273895866368 -> v128:0000000000000000000000000000f8ff
+assert_return f64x2_replace_lane-last v128:00000000000000000000000000000000 f64:9221120237041090560 -> v128:0000000000000000000000000000f87f
+assert_return f64x2_replace_lane-last v128:00000000000000000000000000000000 f64:18442240474082181120 -> v128:0000000000000000000000000000f0ff
+assert_return f64x2_replace_lane-last v128:00000000000000000000000000000000 f64:9218868437227405312 -> v128:0000000000000000000000000000f07f
+assert_return f64x2_replace_lane-last v128:00000000000000000000000000000000 f64:5012481849648092922 -> v128:0000000000000000fa165e5bafe98f45
+assert_return f64x2_replace_lane-last v128:00000000000000000000000000000000 f64:5012481849648092922 -> v128:0000000000000000fa165e5bafe98f45
+assert_return f64x2_replace_lane-last v128:00000000000000000000000000000000 f64:5012481849648092922 -> v128:0000000000000000fa165e5bafe98f45
+assert_return f64x2_replace_lane-last v128:00000000000000000000000000000000 f64:4443687238071173905 -> v128:000000000000000011432bd6ff25ab3d
 assert_return v8x16_swizzle v128:101112131415161718191a1b1c1d1e1f v128:000102030405060708090a0b0c0d0e0f -> v128:101112131415161718191a1b1c1d1e1f
 assert_return v8x16_swizzle v128:f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff v128:f8f9fafbfcfdfeff1011121314151617 -> v128:00000000000000000000000000000000
 assert_return v8x16_swizzle v128:6465666768696a6b6c6d6e6f70717273 v128:0f0e0d0c0b0a09080706050403020100 -> v128:737271706f6e6d6c6b6a696867666564
@@ -398,21 +398,21 @@ skip-impl v128-param-pending swizzle-as-i8x16_all_true-operands
 skip-impl v128-param-pending swizzle-as-i8x16_all_true-operands
 skip-impl v128-param-pending shuffle-as-i8x16_any_true-operands
 module simd_lane.139.wasm
-skip-impl v128-param-pending as-v128_store-operand-1
-skip-impl v128-param-pending as-v128_store-operand-2
-skip-impl v128-param-pending as-v128_store-operand-3
-skip-impl v128-param-pending as-v128_store-operand-4
+assert_return as-v128_store-operand-1 v128:00000000000000000000000000000000 i32:1 -> v128:01000000000000000000000000000000
+assert_return as-v128_store-operand-2 v128:00000000000000000000000000000000 i32:256 -> v128:00010000000000000000000000000000
+assert_return as-v128_store-operand-3 v128:00000000000000000000000000000000 i32:4294967295 -> v128:ffffffff000000000000000000000000
+assert_return as-v128_store-operand-4 v128:00000000000000000000000000000000 f32:1078523331 -> v128:c3f54840000000000000000000000000
 skip-impl v128-param-pending as-v128_store-operand-5
-skip-impl v128-param-pending as-v128_store-operand-6
+assert_return as-v128_store-operand-6 v128:00000000000000000000000000000000 f64:4614253070214989087 -> v128:1f85eb51b81e09400000000000000000
 module simd_lane.140.wasm
-skip-impl v128-param-pending as-if-condition-value
-skip-impl v128-param-pending as-return-value-1
-skip-impl v128-param-pending as-local_set-value
-skip-impl v128-param-pending as-global_set-value-1
+assert_return as-if-condition-value v128:00000000000000000000000000000000 -> i32:0
+assert_return as-return-value-1 v128:00000000000000000000000000000000 i32:1 -> v128:01000000000000000000000000000000
+assert_return as-local_set-value v128:ffffffffffffffffffffffffffffffff -> i32:4294967295
+assert_return as-global_set-value-1 v128:00000000000000000000000000000000 f32:1078523331 -> v128:c3f54840000000000000000000000000
 assert_return as-return-value-2 v128:f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff v128:0f0e0d0c0b0a09080706050403020100 -> v128:fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0
 assert_return as-global_set-value-2 v128:f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff v128:100f0e0d0c0b0a090807060504030201 -> v128:f0f1f2f3f4f5f6f70807060504030201
 skip-impl v128-param-pending as-local_set-value-1
-skip-impl v128-param-pending as-global_set-value-3
+assert_return as-global_set-value-3 v128:00000000000000000000000000000000 f64:4614253070214989087 -> v128:1f85eb51b81e09400000000000000000
 skip-adr-skip_text_format_parser directive-assert_malformed-text
 skip-adr-skip_text_format_parser directive-assert_malformed-text
 skip-adr-skip_text_format_parser directive-assert_malformed-text

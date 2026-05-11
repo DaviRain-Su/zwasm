@@ -643,6 +643,30 @@ fn runAssertReturn(
                 return false;
             });
         }
+        // chunk 9.9-h-26 (v128-param-pending discharge): (v128) → i32
+        // for i*x*.all_true / any_true / bitmask / extract_lane.{s,u}.
+        if (n_args == 1 and args[0] == .v128 and result_kind == .i32) {
+            break :blk @as(u64, entry.callI32_v128(compiled.module, func_idx, &rt, args[0].v128) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+                return false;
+            });
+        }
+        // chunk 9.9-h-26: (v128) → f32 for f32x4.extract_lane.
+        if (n_args == 1 and args[0] == .v128 and result_kind == .f32) {
+            const r = entry.callF32_v128(compiled.module, func_idx, &rt, args[0].v128) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+                return false;
+            };
+            break :blk @as(u64, @as(u32, @bitCast(r)));
+        }
+        // chunk 9.9-h-26: (v128) → f64 for f64x2.extract_lane.
+        if (n_args == 1 and args[0] == .v128 and result_kind == .f64) {
+            const r = entry.callF64_v128(compiled.module, func_idx, &rt, args[0].v128) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+                return false;
+            };
+            break :blk @as(u64, @bitCast(r));
+        }
         try stdout.print("FAIL  {s}: scalar-result unsupported (n_args={d}, shape) for {s}({s}) -> {s}\n", .{ name, n_args, fn_name, args_s, results_s });
         return false;
     };
@@ -698,6 +722,30 @@ fn invokeV128(
             try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
             return null;
         };
+    }
+    // chunk 9.9-h-26 (v128-param-pending discharge):
+    // (v128, i32) → v128 — i*x*.shl/shr_s/shr_u + i*x*.replace_lane.
+    if (n_args == 2 and args[0] == .v128 and args[1] == .i32) {
+        return entry.callV128_v128i32(compiled.module, func_idx, rt, args[0].v128, args[1].i32) catch |err| {
+            try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+            return null;
+        };
+    }
+    // chunk 9.9-h-26: (v128, f32) → v128 — f32x4.replace_lane.
+    if (n_args == 2 and args[0] == .v128 and args[1] == .f32) {
+        const r = entry.callV128_v128f32(compiled.module, func_idx, rt, args[0].v128, @as(f32, @bitCast(args[1].f32))) catch |err| {
+            try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+            return null;
+        };
+        return r;
+    }
+    // chunk 9.9-h-26: (v128, f64) → v128 — f64x2.replace_lane.
+    if (n_args == 2 and args[0] == .v128 and args[1] == .f64) {
+        const r = entry.callV128_v128f64(compiled.module, func_idx, rt, args[0].v128, @as(f64, @bitCast(args[1].f64))) catch |err| {
+            try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+            return null;
+        };
+        return r;
     }
     try stdout.print("FAIL  {s}: v128-result unsupported (n_args={d}, arg shape) for {s}({s})\n", .{ name, n_args, fn_name, args_s });
     return null;

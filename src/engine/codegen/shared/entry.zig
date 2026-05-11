@@ -509,6 +509,133 @@ pub fn callV128_v128v128v128(
     return @bitCast(result);
 }
 
+/// Wasm spec §4.4 — `(v128) → i32` invocation. §9.9 / 9.9-h-26
+/// (v128-param-pending discharge): enables i*x*.all_true /
+/// any_true / bitmask / i*x*.extract_lane.{s,u} fixtures whose
+/// `(args, results)` is `((v128,), (i32,))`. a0 lowers to
+/// V0/XMM0; the i32 result returns in W0/EAX per AAPCS64 / SysV.
+pub fn callI32_v128(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: [16]u8,
+) Error!u32 {
+    rt.trap_flag = 0;
+    const Vec = @Vector(16, u8);
+    const Fn = *const fn (rt: *const JitRuntime, a0: Vec) callconv(.c) u32;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, @bitCast(a0));
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+/// Wasm spec §4.4 — `(v128) → f32` invocation. §9.9 / 9.9-h-26
+/// (v128-param-pending discharge): enables f32x4.extract_lane
+/// fixtures whose `(args, results)` is `((v128,), (f32,))`. a0
+/// lowers to V0/XMM0; the f32 result returns in S0/XMM0 per
+/// AAPCS64 / SysV.
+pub fn callF32_v128(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: [16]u8,
+) Error!f32 {
+    rt.trap_flag = 0;
+    const Vec = @Vector(16, u8);
+    const Fn = *const fn (rt: *const JitRuntime, a0: Vec) callconv(.c) f32;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, @bitCast(a0));
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+/// Wasm spec §4.4 — `(v128) → f64` invocation. §9.9 / 9.9-h-26
+/// (v128-param-pending discharge): enables f64x2.extract_lane
+/// fixtures whose `(args, results)` is `((v128,), (f64,))`. a0
+/// lowers to V0/XMM0; the f64 result returns in D0/XMM0 per
+/// AAPCS64 / SysV.
+pub fn callF64_v128(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: [16]u8,
+) Error!f64 {
+    rt.trap_flag = 0;
+    const Vec = @Vector(16, u8);
+    const Fn = *const fn (rt: *const JitRuntime, a0: Vec) callconv(.c) f64;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, @bitCast(a0));
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+/// Wasm spec §4.4 — `(v128, i32) → v128` invocation. §9.9 /
+/// 9.9-h-26 (v128-param-pending discharge): enables i*x*.shl /
+/// shr_s / shr_u (shift count = i32) AND i*x*.replace_lane
+/// (replacement value = i32, lane index baked into the opcode).
+/// Per AAPCS64 / SysV: a0 → V0/XMM0 (vector arg goes to the
+/// first FP/vector register), a1 → W1/ESI (i32 arg goes to the
+/// first GPR after `rt`); result returns in V0/XMM0.
+pub fn callV128_v128i32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: [16]u8,
+    a1: u32,
+) Error![16]u8 {
+    rt.trap_flag = 0;
+    const Vec = @Vector(16, u8);
+    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: u32) callconv(.c) Vec;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, @bitCast(a0), a1);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return @bitCast(result);
+}
+
+/// Wasm spec §4.4 — `(v128, f32) → v128` invocation. §9.9 /
+/// 9.9-h-26 (v128-param-pending discharge): enables
+/// f32x4.replace_lane fixtures (replacement value = f32, lane
+/// index baked into the opcode). Per AAPCS64 / SysV: a0 →
+/// V0/XMM0, a1 → V1/XMM1 (both FP/vector args use the FP
+/// register file in declaration order); result returns in
+/// V0/XMM0.
+pub fn callV128_v128f32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: [16]u8,
+    a1: f32,
+) Error![16]u8 {
+    rt.trap_flag = 0;
+    const Vec = @Vector(16, u8);
+    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: f32) callconv(.c) Vec;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, @bitCast(a0), a1);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return @bitCast(result);
+}
+
+/// Wasm spec §4.4 — `(v128, f64) → v128` invocation. §9.9 /
+/// 9.9-h-26 (v128-param-pending discharge): enables
+/// f64x2.replace_lane fixtures (replacement value = f64, lane
+/// index baked into the opcode). Per AAPCS64 / SysV: a0 →
+/// V0/XMM0, a1 → V1/XMM1; result returns in V0/XMM0.
+pub fn callV128_v128f64(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: [16]u8,
+    a1: f64,
+) Error![16]u8 {
+    rt.trap_flag = 0;
+    const Vec = @Vector(16, u8);
+    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: f64) callconv(.c) Vec;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, @bitCast(a0), a1);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return @bitCast(result);
+}
+
 // ============================================================
 // Tests
 // ============================================================
