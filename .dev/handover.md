@@ -20,9 +20,9 @@ Deliverables: `.dev/phase10_prep/track_{a,b,c}_*.md` +
 Phase: 9 (SIMD-128). §9.5/6/7/8 [x]; §9.9 [ ] (Mac+OrbStack
 11384/0 post-h-14; SKIP=2357; windowsmini reconcile pending).
 
-Latest landed: `cf7d02da` — 9.9-h-18 arm64 op_simd.zig 4-way
-source split (Track B chunk 4/6, mirrors x86_64 9.9-h-15 via
-Option A call-site updates); next chunk `9.9-h-19`.
+Latest landed: `3c73b213` — 9.9-h-19 arm64 inst_neon.zig 3-way
+encoder split (Track B chunk 5/6; **file_size_check hard-cap
+list now 0** — last exceeder closed); next chunk `9.9-h-20`.
 
 ## Implementation queue (matches ROADMAP first `[ ]`)
 
@@ -38,15 +38,14 @@ gate. Specs: `phase10_prep/track_*.md` §6/§7.
    - **9.9-h-16** `[x]` `155afd58` — op_simd_test 4-way mirror
      + transitional re-exports removed.
    - **9.9-h-17** `[x]` `e790d2c4` — inst_sse 3-way encoder split.
-   - **9.9-h-18** `[x]` `cf7d02da` — arm64 op_simd 4-way split
-     (no inline tests in arm64 op_simd.zig — no test mirror).
-   - **9.9-h-19** **NEXT** — arm64 `inst_neon.zig` (2323 LOC)
-     3-way encoder split → `inst_neon` (foundation: mem/reg-move)
-     + `inst_neon_arith` (arith) + `inst_neon_lane_cmp`
-     (lane + cmp). Last hard-cap exceeder.
-   - **9.9-h-20** — Track B chunk 6/6: flip file_size_check
-     warn→gate; remove warn note from gate_commit.sh; close
-     D-057 + D-065; file D-081 (legacy emit_test_* rename).
+   - **9.9-h-18** `[x]` `cf7d02da` — arm64 op_simd 4-way split.
+   - **9.9-h-19** `[x]` `3c73b213` — arm64 inst_neon 3-way
+     encoder split; **file_size_check hard-cap list now 0**.
+   - **9.9-h-20** **NEXT** — Track B chunk 6/6: flip
+     `scripts/file_size_check.sh` warn→gate; remove warn note
+     from `scripts/gate_commit.sh`; close D-057 + D-065;
+     file D-081 (legacy `emit_test_int.zig` / `emit_test_float.zig`
+     rename, blocked-by emit.zig source split).
 2. **Track C** (9.9-h-21..-24, 4 chunks): Path B prefix-vocab
    migration → ADR-0029 amend + check_skip_adrs.sh pre-commit
    gate + D-082 file + D-072 (a/b) + D-073 close.
