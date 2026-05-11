@@ -11,7 +11,7 @@
 //!                     JIT backend. Does NOT run the entry yet
 //!                     (chunks 7.9-c onward wire WASI host
 //!                     dispatch + JitRuntime memory init).
-//!   COMPILE-IMPORTS — `error.UnsupportedImports`. The wasm
+//!   COMPILE-IMPORTS — `error.UnsupportedImport`. The wasm
 //!                     module imports at least one host
 //!                     function (typically WASI). The
 //!                     compileWasm import-reject lifts in
@@ -331,13 +331,13 @@ pub fn main(init: std.process.Init) !void {
                 try stdout.print("COMPILE-PASS  {s}\n", .{entry.name});
             }
         } else |err| switch (err) {
-            error.UnsupportedImports => {
+            error.UnsupportedImport => {
                 try stdout.print("COMPILE-IMPORTS  {s} (host imports — chunk 7.9-b will lift)\n", .{entry.name});
                 compile_imports += 1;
             },
             error.UnsupportedOp,
             error.UnsupportedControlFlow,
-            // Chunk 7.9-b unhid these by lifting UnsupportedImports:
+            // Chunk 7.9-b unhid these by lifting UnsupportedImport:
             // SlotOverflow = regalloc pool exhaustion (post-MVP
             // spill ratchet, ROADMAP §A12), surfaces same shape as
             // UnsupportedOp in the COMPILE / RUN classification.

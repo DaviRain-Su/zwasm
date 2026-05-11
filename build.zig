@@ -532,6 +532,31 @@ pub fn build(b: *std.Build) void {
     // windowsmini reconciliation runs at phase boundary
     // separately per ADR-0049.
     test_all_step.dependOn(&run_simd_assert.step);
+    // §9.9 / 9.9-j-2 (per ADR-0056 §9.9 scope extension): wire two
+    // runners that were "documented exit criterion measurement
+    // points" but never CI-gated.
+    //
+    // test-realworld-run-jit reports RUN-PASS / FAIL
+    // classifications; its 40+ RUN-PASS floor is §9.7 / 7.9-a's
+    // exit criterion.
+    //
+    // test-wasmtime-misc-runtime (today 266/0/0 with panics
+    // resolved) is the only runtime-asserting runner for non-SIMD
+    // wasm-2.0 features — ADR-0056's discovery #1 ("non-SIMD spec
+    // coverage is fake green") surfaces it as the bridge until
+    // 9.9-l-1 lands the non-SIMD spec_assert_runner. The block at
+    // line 333-343 above (NOT in test-all) is now historical; the
+    // panic gap referenced there has closed.
+    //
+    // test-edge-cases wiring deferred to 9.9-j-2b — wiring surfaced
+    // a real JIT bug at `idiv_overflow/i32_rem_intmin_neg1.wasm`
+    // (`i32.rem_s(INT_MIN, -1)` returns INT_MIN instead of 0 per
+    // Wasm spec §4.4.1.1 "if i_2 == -1 and i_1 == INT_MIN the
+    // remainder is 0"). i64 path correctly returns 0; i32 path
+    // surfaces a JIT-only bug not currently caught by any other
+    // runner. Filed as D-085; discharge target = 9.9-j-2b chunk.
+    test_all_step.dependOn(&run_realworld_run_jit.step);
+    test_all_step.dependOn(&run_wasmtime_misc_runtime.step);
 
     // `zig build run-repro -Dtask=<name>` — discover
     // `private/dbg/<task>/repro.zig`, link it against the zwasm

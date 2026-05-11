@@ -48,9 +48,21 @@ preserved long-term.
   warmup: 3
   benches:
     - name: <bench-name>
-      median_ms: 12.34
+      mean_ms: 12.34
       stddev_ms: 0.45
+      min_ms: 11.80
+      max_ms: 13.10
 ```
+
+The recorded values are `mean / stddev / min / max` as produced
+by hyperfine's `--export-json`. Earlier drafts of this README
+documented a `median_ms` field; the script never wrote one. Use
+`mean_ms` as the primary central-tendency field (rationale:
+hyperfine reports mean, and we keep tool fidelity rather than
+compute a derivative). For sub-millisecond fixtures, treat
+`mean_ms` as ordinal — `min_ms / max_ms` give the dispersion
+shape. (Schema clarification 2026-05-12 / §9.9-j-2 per
+ADR-0056.)
 
 `bench/results/history.yaml` is append-only (ROADMAP §A9). Rows
 are added by `scripts/run_bench.sh --phase-record` (manual /

@@ -182,12 +182,18 @@ for entry in "${BENCHES[@]}"; do
     fi
     echo "[run_bench] $name ($wasm)"
     json=$(mktemp)
-    hyperfine --warmup "$WARMUP" --runs "$RUNS" \
-        --shell=none \
-        --export-json "$json" \
-        "$ZWASM run $wasm" >/dev/null 2>&1 || {
-        echo "    (failed; logging null)" >&2
-        rm -f "$json"
+    err=$(mktemp)
+    # §9.9 / 9.9-j-2 (per ADR-0056): capture stderr to $err for
+    # diagnostic surfacing on failure — was `>/dev/null 2>&1` which
+    # silently swallowed hyperfine + zwasm error messages, making
+    # bench-script failures opaque.
+    if ! hyperfine --warmup "$WARMUP" --runs "$RUNS" \
+            --shell=none \
+            --export-json "$json" \
+            "$ZWASM run $wasm" >/dev/null 2>"$err"; then
+        echo "    (failed; first stderr lines:)" >&2
+        head -5 "$err" | sed 's/^/      /' >&2
+        rm -f "$json" "$err"
         cat <<EOF >> "$RECENT"
     - name: $name
       mean_ms: null
@@ -196,18 +202,32 @@ for entry in "${BENCHES[@]}"; do
       max_ms: null
 EOF
         continue
-    }
-    mean=$(grep -oE '"mean": [0-9.]+' "$json" | head -1 | awk '{print $2 * 1000}')
-    stddev=$(grep -oE '"stddev": [0-9.]+' "$json" | head -1 | awk '{print $2 * 1000}')
-    min=$(grep -oE '"min": [0-9.]+' "$json" | head -1 | awk '{print $2 * 1000}')
-    max=$(grep -oE '"max": [0-9.]+' "$json" | head -1 | awk '{print $2 * 1000}')
+    fi
+    rm -f "$err"
+    # §9.9 / 9.9-j-2 (per ADR-0056 + Agent Y finding #1): use python
+    # to parse hyperfine's JSON. Prior `grep -oE '[0-9.]+'`
+    # regex did not match scientific notation (e.g. `8.31753e-06`),
+    # captured `8.31753`, then awk `* 1000 = 8317.53` — mathematically
+    # impossible alongside its own `min_ms=2.12 / max_ms=2.13`.
+    # Multiple `bench/results/history.yaml` entries were already
+    # contaminated (commit c27f74da and prior); see annotation in
+    # history.yaml flagging affected rows.
+    metrics=$(python3 - "$json" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    d = json.load(f)
+r = d["results"][0]
+print(f"{r['mean']*1000:.2f} {r['stddev']*1000:.2f} {r['min']*1000:.2f} {r['max']*1000:.2f}")
+PY
+)
+    read -r mean stddev min max <<<"$metrics"
     rm -f "$json"
     cat <<EOF >> "$RECENT"
     - name: $name
-      mean_ms: $(printf "%.2f" "$mean")
-      stddev_ms: $(printf "%.2f" "$stddev")
-      min_ms: $(printf "%.2f" "$min")
-      max_ms: $(printf "%.2f" "$max")
+      mean_ms: $mean
+      stddev_ms: $stddev
+      min_ms: $min
+      max_ms: $max
 EOF
     ran_any=1
 done

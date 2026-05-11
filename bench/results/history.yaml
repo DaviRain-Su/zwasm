@@ -37,6 +37,22 @@
 # Phase 11+ when scripts/run_bench.sh + record_merge_bench.sh
 # finish their stub→hyperfine wiring (currently their TODO p11
 # markers).
+#
+# **NOTE: tool-bug contamination flagged 2026-05-12 / §9.9-j-2**
+# (per ADR-0056 Agent Y finding #1). All entries with `arch:
+# x86_64-linux` recorded by `bench/ci.yml` between commits
+# 88de3f17 (first ci-recorded) and c27f74da (this row's date of
+# discovery) had their `mean_ms / stddev_ms / min_ms / max_ms`
+# values inflated by a factor of ~1e3 due to a scientific-notation
+# parse bug in `scripts/run_bench.sh` (the `grep -oE '[0-9.]+'`
+# regex did not match hyperfine's `8.31753e-06` form, capturing
+# only the leading `8.31753` and then awk-multiplying by 1000).
+# Symptom: `stddev_ms: 8317.53` next to `min_ms: 2.12 / max_ms:
+# 2.13` — physically impossible. **Affected x86_64-linux rows
+# are kept as historical records (append-only per ROADMAP §A9)
+# but should be treated as "tool-bug-affected; treat numerics
+# as ordinal/qualitative only".** The fix lands in 9.9-j-2;
+# subsequent rows are correct.
 
 - date: 2026-05-03T04:39:31Z
   commit: ba2f8cb916c65c341f7b4011aea5302394126bc8

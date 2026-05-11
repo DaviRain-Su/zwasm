@@ -37,7 +37,14 @@ pub const Error = error{
     /// does NOT raise this — function imports are accepted, indexed
     /// into the wasm-space func table, and emit a trap-stub branch
     /// at every call site.
-    UnsupportedImports,
+    ///
+    /// Naming: singular, matching the actual raise sites at
+    /// `runtime/instance/instantiate.zig:{255,264,265,267,285,…}`.
+    /// (Was misnamed `UnsupportedImports` plural pre-9.9-j-2 —
+    /// declared but unraised; `test/realworld/run_runner_jit.zig`
+    /// caught the plural shape and silently classified zero
+    /// COMPILE-IMPORTS as a result. Fixed in this row.)
+    UnsupportedImport,
     MissingTypeSection,
     MissingFunctionSection,
     MissingCodeSection,
