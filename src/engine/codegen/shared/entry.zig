@@ -406,6 +406,65 @@ pub fn callV128_v128(
     return @bitCast(result);
 }
 
+/// Wasm spec §4.4 — `(v128) → ()` invocation. §9.9 / 9.9-h-3
+/// (D-079 (i) discharge): enables single-v128-param setter
+/// fixtures (simd_const `as-global.set_value_$g0` etc.). a0
+/// lowers to V0/XMM0; no result. Per ADR-0046's PARAM marshal
+/// shape, identical to `callV128_v128` minus the return.
+pub fn callVoid_v128(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: [16]u8,
+) Error!void {
+    rt.trap_flag = 0;
+    const Vec = @Vector(16, u8);
+    const Fn = *const fn (rt: *const JitRuntime, a0: Vec) callconv(.c) void;
+    const f = module.entry(func_idx, Fn);
+    f(rt, @bitCast(a0));
+    if (rt.trap_flag != 0) return Error.Trap;
+}
+
+/// Wasm spec §4.4 — `(v128, v128) → ()` invocation. §9.9 / 9.9-h-3
+/// (D-079 (i) discharge): two-v128-param setter fixtures
+/// (simd_const `as-global.set_value_$g1_$g2` etc.).
+pub fn callVoid_v128v128(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: [16]u8,
+    a1: [16]u8,
+) Error!void {
+    rt.trap_flag = 0;
+    const Vec = @Vector(16, u8);
+    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: Vec) callconv(.c) void;
+    const f = module.entry(func_idx, Fn);
+    f(rt, @bitCast(a0), @bitCast(a1));
+    if (rt.trap_flag != 0) return Error.Trap;
+}
+
+/// Wasm spec §4.4 — `(v128, v128, v128, v128) → ()` invocation.
+/// §9.9 / 9.9-h-3 (D-079 (i) discharge): four-v128-param setter
+/// fixtures (simd_const `as-global.set_value_$g0_$g1_$g2_$g3`).
+/// Per AAPCS64 / SysV ABI: a0..a3 lower to V0..V3 (ARM64) /
+/// XMM0..XMM3 (x86_64); RDI/X0 stays the runtime ptr.
+pub fn callVoid_v128v128v128v128(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: [16]u8,
+    a1: [16]u8,
+    a2: [16]u8,
+    a3: [16]u8,
+) Error!void {
+    rt.trap_flag = 0;
+    const Vec = @Vector(16, u8);
+    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: Vec, a2: Vec, a3: Vec) callconv(.c) void;
+    const f = module.entry(func_idx, Fn);
+    f(rt, @bitCast(a0), @bitCast(a1), @bitCast(a2), @bitCast(a3));
+    if (rt.trap_flag != 0) return Error.Trap;
+}
+
 /// Wasm spec §4.4 — `(v128, v128) → v128` invocation. §9.9 / 9.9-f
 /// scope expansion: enables FP arith / int arith / bitwise binop
 /// fixtures (simd_bitwise, simd_f32x4_arith, simd_i32x4_arith,

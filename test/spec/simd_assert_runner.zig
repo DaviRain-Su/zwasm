@@ -369,6 +369,38 @@ fn runAssertReturn(
             };
             return true;
         }
+        // §9.9 / 9.9-h-3 (D-079 (i)) — v128 multi-arg setter shapes.
+        // Drives simd_const fixtures like `as-global.set_value_$g0`
+        // (1 v128 param) and `_$g0_$g1_$g2_$g3` (4 v128 params).
+        if (n_args == 1 and args[0] == .v128) {
+            entry.callVoid_v128(compiled.module, func_idx, &rt, args[0].v128) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+                return false;
+            };
+            return true;
+        }
+        if (n_args == 2 and args[0] == .v128 and args[1] == .v128) {
+            entry.callVoid_v128v128(compiled.module, func_idx, &rt, args[0].v128, args[1].v128) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+                return false;
+            };
+            return true;
+        }
+        if (n_args == 4 and args[0] == .v128 and args[1] == .v128 and args[2] == .v128 and args[3] == .v128) {
+            entry.callVoid_v128v128v128v128(
+                compiled.module,
+                func_idx,
+                &rt,
+                args[0].v128,
+                args[1].v128,
+                args[2].v128,
+                args[3].v128,
+            ) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+                return false;
+            };
+            return true;
+        }
         try stdout.print("FAIL  {s}: void-result with {d} args unsupported for {s}\n", .{ name, n_args, fn_name });
         return false;
     }
