@@ -206,6 +206,9 @@ test {
     _ = @import("engine/codegen/arm64/emit_test.zig");
     _ = @import("engine/codegen/x86_64/reg_class.zig");
     _ = @import("engine/codegen/x86_64/inst.zig");
+    _ = @import("engine/codegen/x86_64/inst_sse.zig");
+    _ = @import("engine/codegen/x86_64/inst_sse_packed.zig");
+    _ = @import("engine/codegen/x86_64/inst_sse_scalar.zig");
     _ = @import("engine/codegen/x86_64/abi.zig");
     _ = @import("engine/codegen/x86_64/types.zig");
     _ = @import("engine/codegen/x86_64/label.zig");
