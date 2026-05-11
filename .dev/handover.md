@@ -1,19 +1,15 @@
 # Session handover
 
-> Read at session start. **Replace** (not append) the `Active
-> state` block at session end. Keep ≤ 80 lines.
->
-> Per [`.claude/rules/no_handover_predictions.md`](../.claude/rules/no_handover_predictions.md):
-> **no numeric predictions** in this file.
+> ≤ 80 lines. No numeric predictions (per
+> [`no_handover_predictions.md`](../.claude/rules/no_handover_predictions.md)).
 
 ## Cold-start procedure
 
 1. `git log --oneline -5`.
-2. `bash scripts/p9_simd_status.sh` — live SIMD FAIL/SKIP
-   breakdown. Authoritative; if anything below disagrees, trust
-   the script.
-3. `cat .dev/debt.md | head -60` — `now` rows + `blocked-by:`.
-4. Open ROADMAP §9 Phase Status widget + §9.9 row.
+2. `bash scripts/p9_simd_status.sh` — live SIMD FAIL/SKIP.
+   Authoritative; trust the script if anything disagrees.
+3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
+4. ROADMAP §9 Phase Status widget + §9.9 row.
 
 ## Active state — **PHASE 10 PREP CLOSED ✅ → §9.9 close work**
 
@@ -27,27 +23,36 @@ Phase: 9 (SIMD-128). §9.5/9.6/9.7/9.8 [x]; §9.9 still `[ ]`
 (Mac + OrbStack 11384/0 simd_assert post-§9.9-h-14; SKIP=2357
 each; windowsmini phase-boundary reconciliation pending).
 
-## Implementation queue (sequenced; pick top-down)
+## Implementation queue (chunk-number monotonic; pick top-down)
 
-1. **Track A impl** (1 chunk): §9.10 `[~] moved to Phase 11` +
-   Phase 11 row prose expansion + ADR-0043 amend + D-074
-   barrier update + D-076 close. Spec:
-   `phase10_prep/track_a_9.10_scope.md` §7.
-2. **Track C impl** (9.9-h-21..-24): Path B prefix-vocab
-   migration (runner → regen → wast_runtime_runner + D-082
-   file → ADR-0029 amend + check_skip_adrs.sh pre-commit gate
-   + D-073 close). Spec: `track_c_adr_0029_path.md` §6.
-3. **Track B impl** (9.9-h-15..-20): 4-way source split +
-   4-way test mirror (`<source>_test.zig` suffix) + 3-way
-   encoder split + ADR-0054 + tiered pub + file_size_check
-   warn→gate flip + D-081 file + D-057/D-065 close. Spec:
-   `track_b_source_split.md` §6.
-4. **Phase 9 close cluster**: §9.11 audit_scaffolding +
-   §9.9 SHA backfill; §9.12 row text update + Track D gate
-   finalization + SKILL.md hard-gate list extension.
-5. **Phase 10 entry hard gate STOP**: autonomous loop
-   surfaces with `phase10_transition_gate.md` checklist for
-   collaborative review. No `ScheduleWakeup`.
+Per-track full specs at `.dev/phase10_prep/track_*.md` §6/§7.
+
+1. **Track A** (1 chunk, no h-N — §9.10 row reshape):
+   ROADMAP §9.10 `[~] moved to Phase 11` + Phase 11 row prose
+   + ADR-0043 amend + D-074 update + D-076 close.
+2. **Track B** (9.9-h-15..-20, 6 chunks): 4-way source split +
+   4-way test mirror (`_test.zig` suffix) + 3-way encoder
+   split + ADR-0054 + tiered pub + file_size_check warn→gate
+   + D-081 file + D-057/D-065 close.
+3. **Track C** (9.9-h-21..-24, 4 chunks): Path B prefix-vocab
+   migration → ADR-0029 amend + check_skip_adrs.sh pre-commit
+   gate + D-082 file + D-072 (a/b) + D-073 close.
+4. **§9.9 close residual** (h-25..-N, count TBD by live
+   status): after Track C, `p9_simd_status.sh` surfaces
+   `skip-impl` count (currently ~1967 = nan-or-bad-token
+   1222 + v128-param-pending 788 + assert_trap-v128 18 +
+   export-name 3). Loop picks largest category per resume;
+   chunks until `failed=skip-impl=0` on 2-host; windowsmini
+   reconcile at Phase boundary.
+5. **§9.11** (1 chunk): `audit_scaffolding` Phase-9 boundary
+   + SHA backfill for §9.9 `[x]` rows.
+6. **§9.12 + Track D wiring** (1 chunk): §9.12 row text →
+   `🔒 Phase 10 entry gate review
+   (.dev/phase10_transition_gate.md)`; add Phase 9→10 entry
+   to SKILL.md "Currently registered hard gates" list.
+7. **Phase 10 entry HARD GATE STOP** — loop surfaces with
+   `phase10_transition_gate.md` for collaborative review. No
+   `ScheduleWakeup`.
 
 ## Phase 10 design ADR slots (Track D §9 Q3)
 
@@ -63,18 +68,13 @@ ADR-0055 memory64 → 0056 Tail Call → 0057 EH → 0058 WasmGC.
   Prep impl discharges **D-057 / D-065 / D-072 (a/b) / D-073 /
   D-076**; D-074 updated; **D-081 / D-082** newly filed.
 
-## Sandbox quirks (Mac aarch64, 2026-05-12)
+## Sandbox quirks + hook scope
 
 - `~/.cache/zig` not write-allowed → prefix `zig build*` with
   `ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig-cache`.
-- `bash scripts/p9_simd_status.sh` OrbStack branch fails on
-  daemon log-rotation; use top-level
-  `orb run -m my-ubuntu-amd64 bash -c '...'` directly.
-
-## Pre-push hook scope
-
-`.githooks/pre-push` → `scripts/gate_commit.sh` (light gate).
-Full 3-host `scripts/gate_merge.sh` invoked **manually** at
-Phase boundary + before push to `main`. Per-chunk loop is
-2-host (Mac + OrbStack) per ADR-0049; windowsmini
-phase-boundary only.
+- `p9_simd_status.sh` OrbStack branch fails on daemon log-rotation;
+  use top-level `orb run -m my-ubuntu-amd64 bash -c '...'` directly.
+- `.githooks/pre-push` → `gate_commit.sh` (light); full 3-host
+  `gate_merge.sh` manual at Phase boundary + before push to main.
+  Per-chunk loop is 2-host (Mac+OrbStack) per ADR-0049;
+  windowsmini phase-boundary only.
