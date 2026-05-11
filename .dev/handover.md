@@ -25,36 +25,45 @@
   §9.5 [x], §9.6 [x], §9.7 [x], §9.8 [x] (absorbed per
   ADR-0044), **§9.9 in-flight**.
 - **Branch**: `zwasm-from-scratch`.
-- **Latest §9.9 landing**: §9.9 / 9.9-h-3 — D-079 (i) discharge.
-  Three new entry helpers (`callVoid_v128`, `callVoid_v128v128`,
-  `callVoid_v128v128v128v128`) in `engine/codegen/shared/
-  entry.zig`; simd_assert_runner void-result dispatch extended
-  to handle 1 / 2 / 4 v128 args; `regen_spec_simd_assert.sh`
-  SUPPORTED set adds the three setter shapes; manifests
-  regenerated. simd_const.388 Mac fails 4 → 0 cleared (the 4
-  setter-cascade fails). Mac aarch64 simd_assert:
-  **11263 PASS / 6 FAIL → 11268 PASS / 2 FAIL** (-4). Residual
-  2 fails are D-063 (call_indirect v128 args Trap). OrbStack
-  visible FAILs unchanged (D-078 a + c + D-077 panic — all
-  pre-existing).
-- **Active row**: §9.9 (still `[ ]`). Closes when fail = skip = 0
-  on the 3-host gate per the row's exit criterion.
+- **Latest §9.9 landing**: §9.9 / 9.9-h-4 — D-063 discharge.
+  Root cause: `simd_assert_runner.zig` left
+  `funcptr_base / typeidx_base = undefined, table_size = 0`,
+  so the call_indirect bounds check always trapped. NOT a JIT
+  emit bug. New `runner.applyTableInit` helper walks element
+  segments + populates caller-owned scratch funcptrs/typeidxs
+  (parallel to 9.9-h-2's globals-init helper). Mac aarch64
+  simd_assert: **11268 PASS / 2 FAIL → 11270 PASS / 0 FAIL**.
+  OrbStack visible FAILs unchanged (D-078 a + c + D-077 panic
+  — all pre-existing). Mac unit 1575/1587 (12 skip); lint
+  clean.
+- **Active row**: §9.9 (still `[ ]`). Mac is at FAIL=0 / SKIP>0;
+  the exit criterion is fail=skip=0 across the 3-host gate, so
+  skips remain (assert_invalid SKIP-VALIDATOR-GAP cluster +
+  cascading-skipped under bad modules). OrbStack still has 2
+  visible FAILs (D-078 a + c) blocked on x86_64-specific work.
 
 ## Next sub-chunk candidates (names only)
 
-- **D-063 simd_const call_indirect-param Trap** — Mac aarch64
-  v128 args via call_indirect; lldb spike per debt.md. 2 of the
-  current Mac fails (`as-call_indirect-param()` /
-  `-param2()`).
 - **D-078 (a) f64x2_extract_lane value mismatch** — JIT-disasm
   spike via debug_jit_auto skill (Mac PASSES, x86_64 only).
+  Only Mac-visible blocker is now non-FAIL skips; OrbStack
+  carries this as 1 of its 2 remaining visible FAILs.
 - **D-078 (c) simd_bitwise.17** — root cause: x86_64 v128 XMM
   spill not yet implemented. `resolveXmm` rejects spilled v128
   vregs. Needs `xmmLoadSpilledV128` + `xmmStoreSpilledV128`
   (16-byte MOVUPS) + ~100 handler updates. Substantial refactor;
-  co-deliverable with D-057 source-split.
+  co-deliverable with D-057 source-split. The other of the
+  OrbStack 2 visible FAILs.
+- **D-077 OrbStack runner deinit panic** — `jit_mem.free` munmap
+  INVAL. Pre-existing. Cleaning this restores the structured
+  `simd_assert_runner: P passed, F failed, S skipped` summary
+  line on OrbStack (currently suppressed by panic; counts must
+  be derived via `grep -c ^FAIL`).
 - Aggregate `test-spec-simd` into `test-all` (preventive — surfaces
   silent x86_64 simd regressions in autonomous loop gating).
+- §9.9 exit-criterion narrowing: with Mac at 0 FAIL, the
+  remaining gate work is OrbStack-only (2 FAILs) plus the
+  SKIP-cluster review.
 
 Pick by: live evidence from Step 2's script + structural
 impossibility check (debt.md `blocked-by:` barriers).
