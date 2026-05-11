@@ -19,6 +19,8 @@
 
 const zir = @import("../../../ir/zir.zig");
 const inst_neon = @import("inst_neon.zig");
+const inst_neon_arith = @import("inst_neon_arith.zig");
+const inst_neon_lane_cmp = @import("inst_neon_lane_cmp.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
 const op_simd = @import("op_simd.zig");
@@ -145,16 +147,16 @@ fn emitV128ReplaceLaneFp(
 // Encoder thunks for the FP forms (parallel to the int thunks in
 // `op_simd_int_cmp_lane.zig`).
 fn encDupScalarS(rd: u5, rn: u5, lane: u32) u32 {
-    return inst_neon.encMovScalarSFromVlane(rd, rn, @intCast(lane));
+    return inst_neon_lane_cmp.encMovScalarSFromVlane(rd, rn, @intCast(lane));
 }
 fn encDupScalarD(rd: u5, rn: u5, lane: u32) u32 {
-    return inst_neon.encMovScalarDFromVlane(rd, rn, @intCast(lane));
+    return inst_neon_lane_cmp.encMovScalarDFromVlane(rd, rn, @intCast(lane));
 }
 fn encInsElemS(rd: u5, dst_lane: u32, rn: u5) u32 {
-    return inst_neon.encMovVSlaneFromVS0(rd, @intCast(dst_lane), rn);
+    return inst_neon_lane_cmp.encMovVSlaneFromVS0(rd, @intCast(dst_lane), rn);
 }
 fn encInsElemD(rd: u5, dst_lane: u32, rn: u5) u32 {
-    return inst_neon.encMovVDlaneFromVD0(rd, @intCast(dst_lane), rn);
+    return inst_neon_lane_cmp.encMovVDlaneFromVD0(rd, @intCast(dst_lane), rn);
 }
 
 /// Wasm spec (SIMD) — `f32x4.extract_lane`: lane ∈ 0..3; produce a
@@ -198,28 +200,28 @@ pub fn emitF64x2ReplaceLane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 // per-shape encoder.
 
 pub fn emitF32x4Add(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encFAdd4S);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encFAdd4S);
 }
 pub fn emitF32x4Sub(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encFSub4S);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encFSub4S);
 }
 pub fn emitF32x4Mul(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encFMul4S);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encFMul4S);
 }
 pub fn emitF32x4Div(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encFDiv4S);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encFDiv4S);
 }
 pub fn emitF64x2Add(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encFAdd2D);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encFAdd2D);
 }
 pub fn emitF64x2Sub(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encFSub2D);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encFSub2D);
 }
 pub fn emitF64x2Mul(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encFMul2D);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encFMul2D);
 }
 pub fn emitF64x2Div(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encFDiv2D);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encFDiv2D);
 }
 
 // ============================================================
@@ -231,46 +233,46 @@ pub fn emitF64x2Div(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 // FRINTN / FRINTM / FRINTP / FRINTZ with 4S or 2D shape.
 
 pub fn emitF32x4Abs(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encFAbs4S);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encFAbs4S);
 }
 pub fn emitF32x4Neg(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encFNeg4S);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encFNeg4S);
 }
 pub fn emitF32x4Sqrt(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encFSqrt4S);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encFSqrt4S);
 }
 pub fn emitF32x4Ceil(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encFRintP4S);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encFRintP4S);
 }
 pub fn emitF32x4Floor(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encFRintM4S);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encFRintM4S);
 }
 pub fn emitF32x4Trunc(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encFRintZ4S);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encFRintZ4S);
 }
 pub fn emitF32x4Nearest(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encFRintN4S);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encFRintN4S);
 }
 pub fn emitF64x2Abs(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encFAbs2D);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encFAbs2D);
 }
 pub fn emitF64x2Neg(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encFNeg2D);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encFNeg2D);
 }
 pub fn emitF64x2Sqrt(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encFSqrt2D);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encFSqrt2D);
 }
 pub fn emitF64x2Ceil(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encFRintP2D);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encFRintP2D);
 }
 pub fn emitF64x2Floor(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encFRintM2D);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encFRintM2D);
 }
 pub fn emitF64x2Trunc(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encFRintZ2D);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encFRintZ2D);
 }
 pub fn emitF64x2Nearest(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encFRintN2D);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encFRintN2D);
 }
 
 // ============================================================
@@ -282,16 +284,16 @@ pub fn emitF64x2Nearest(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 // with zero-on-equal-magnitude semantics) defer to 9.6-c-ii.
 
 pub fn emitF32x4Min(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encFMin4S);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encFMin4S);
 }
 pub fn emitF32x4Max(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encFMax4S);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encFMax4S);
 }
 pub fn emitF64x2Min(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encFMin2D);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encFMin2D);
 }
 pub fn emitF64x2Max(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encFMax2D);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encFMax2D);
 }
 
 // ============================================================
@@ -351,16 +353,16 @@ fn emitPminPmaxSynthesis(
 }
 
 pub fn emitF32x4Pmin(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitPminPmaxSynthesis(ctx, inst_neon.encFCmGt4S, false);
+    try emitPminPmaxSynthesis(ctx, inst_neon_lane_cmp.encFCmGt4S, false);
 }
 pub fn emitF32x4Pmax(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitPminPmaxSynthesis(ctx, inst_neon.encFCmGt4S, true);
+    try emitPminPmaxSynthesis(ctx, inst_neon_lane_cmp.encFCmGt4S, true);
 }
 pub fn emitF64x2Pmin(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitPminPmaxSynthesis(ctx, inst_neon.encFCmGt2D, false);
+    try emitPminPmaxSynthesis(ctx, inst_neon_lane_cmp.encFCmGt2D, false);
 }
 pub fn emitF64x2Pmax(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitPminPmaxSynthesis(ctx, inst_neon.encFCmGt2D, true);
+    try emitPminPmaxSynthesis(ctx, inst_neon_lane_cmp.encFCmGt2D, true);
 }
 
 // ============================================================
@@ -374,41 +376,41 @@ pub fn emitF64x2Pmax(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 // added in 9.6-c-ii; FCMEQ + FCMGE land here.
 
 pub fn emitF32x4Eq(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encFCmEq4S);
+    try op_simd.emitV128Binop(ctx, inst_neon_lane_cmp.encFCmEq4S);
 }
 pub fn emitF32x4Ne(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Ne(ctx, inst_neon.encFCmEq4S);
+    try op_simd.emitV128Ne(ctx, inst_neon_lane_cmp.encFCmEq4S);
 }
 pub fn emitF32x4Gt(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encFCmGt4S);
+    try op_simd.emitV128Binop(ctx, inst_neon_lane_cmp.encFCmGt4S);
 }
 pub fn emitF32x4Ge(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encFCmGe4S);
+    try op_simd.emitV128Binop(ctx, inst_neon_lane_cmp.encFCmGe4S);
 }
 pub fn emitF32x4Lt(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128BinopSwapped(ctx, inst_neon.encFCmGt4S);
+    try op_simd.emitV128BinopSwapped(ctx, inst_neon_lane_cmp.encFCmGt4S);
 }
 pub fn emitF32x4Le(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128BinopSwapped(ctx, inst_neon.encFCmGe4S);
+    try op_simd.emitV128BinopSwapped(ctx, inst_neon_lane_cmp.encFCmGe4S);
 }
 
 pub fn emitF64x2Eq(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encFCmEq2D);
+    try op_simd.emitV128Binop(ctx, inst_neon_lane_cmp.encFCmEq2D);
 }
 pub fn emitF64x2Ne(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Ne(ctx, inst_neon.encFCmEq2D);
+    try op_simd.emitV128Ne(ctx, inst_neon_lane_cmp.encFCmEq2D);
 }
 pub fn emitF64x2Gt(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encFCmGt2D);
+    try op_simd.emitV128Binop(ctx, inst_neon_lane_cmp.encFCmGt2D);
 }
 pub fn emitF64x2Ge(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encFCmGe2D);
+    try op_simd.emitV128Binop(ctx, inst_neon_lane_cmp.encFCmGe2D);
 }
 pub fn emitF64x2Lt(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128BinopSwapped(ctx, inst_neon.encFCmGt2D);
+    try op_simd.emitV128BinopSwapped(ctx, inst_neon_lane_cmp.encFCmGt2D);
 }
 pub fn emitF64x2Le(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128BinopSwapped(ctx, inst_neon.encFCmGe2D);
+    try op_simd.emitV128BinopSwapped(ctx, inst_neon_lane_cmp.encFCmGe2D);
 }
 
 // ============================================================
@@ -423,10 +425,10 @@ pub fn emitF64x2Le(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 // §4.3.2.11-13.
 
 pub fn emitF32x4ConvertI32x4S(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encScvtf4S);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encScvtf4S);
 }
 pub fn emitF32x4ConvertI32x4U(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encUcvtf4S);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encUcvtf4S);
 }
 
 /// Helper: emit `f64x2.convert_low_i32x4_{s,u}` synthesis. Sequence:
@@ -452,10 +454,10 @@ fn emitV128ConvertLowI32ToF64(
 }
 
 pub fn emitF64x2ConvertLowI32x4S(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitV128ConvertLowI32ToF64(ctx, inst_neon.encSxtl2D, inst_neon.encScvtf2D);
+    try emitV128ConvertLowI32ToF64(ctx, inst_neon_arith.encSxtl2D, inst_neon_arith.encScvtf2D);
 }
 pub fn emitF64x2ConvertLowI32x4U(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitV128ConvertLowI32ToF64(ctx, inst_neon.encUxtl2D, inst_neon.encUcvtf2D);
+    try emitV128ConvertLowI32ToF64(ctx, inst_neon_arith.encUxtl2D, inst_neon_arith.encUcvtf2D);
 }
 
 // ============================================================
@@ -467,10 +469,10 @@ pub fn emitF64x2ConvertLowI32x4U(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 // f32 lanes; upper 2 zeroed by Q=0 form).
 
 pub fn emitF64x2PromoteLowF32x4(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encFCvtl_2D_2S);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encFCvtl_2D_2S);
 }
 pub fn emitF32x4DemoteF64x2Zero(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encFCvtn_2S_2D);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encFCvtn_2S_2D);
 }
 
 // ============================================================
@@ -486,10 +488,10 @@ pub fn emitF32x4DemoteF64x2Zero(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 // matching Wasm `_zero` semantic).
 
 pub fn emitI32x4TruncSatF32x4S(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encFcvtzs4S);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encFcvtzs4S);
 }
 pub fn emitI32x4TruncSatF32x4U(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encFcvtzu4S);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encFcvtzu4S);
 }
 
 /// Helper: emit `i32x4.trunc_sat_f64x2_*_zero` synthesis. Sequence:
@@ -518,8 +520,8 @@ fn emitV128TruncSatF64Zero(
 }
 
 pub fn emitI32x4TruncSatF64x2SZero(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitV128TruncSatF64Zero(ctx, inst_neon.encFcvtzs2D, inst_neon.encSqxtn2S);
+    try emitV128TruncSatF64Zero(ctx, inst_neon_arith.encFcvtzs2D, inst_neon_arith.encSqxtn2S);
 }
 pub fn emitI32x4TruncSatF64x2UZero(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitV128TruncSatF64Zero(ctx, inst_neon.encFcvtzu2D, inst_neon.encUqxtn2S);
+    try emitV128TruncSatF64Zero(ctx, inst_neon_arith.encFcvtzu2D, inst_neon_arith.encUqxtn2S);
 }

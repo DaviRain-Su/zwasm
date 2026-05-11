@@ -200,6 +200,8 @@ test {
     _ = @import("engine/codegen/shared/regalloc.zig");
     _ = @import("engine/codegen/arm64/inst.zig");
     _ = @import("engine/codegen/arm64/inst_neon.zig");
+    _ = @import("engine/codegen/arm64/inst_neon_arith.zig");
+    _ = @import("engine/codegen/arm64/inst_neon_lane_cmp.zig");
     _ = @import("engine/codegen/arm64/op_simd.zig");
     _ = @import("engine/codegen/arm64/op_simd_int_arith.zig");
     _ = @import("engine/codegen/arm64/op_simd_int_cmp_lane.zig");

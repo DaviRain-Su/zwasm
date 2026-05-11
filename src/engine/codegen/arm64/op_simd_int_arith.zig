@@ -16,6 +16,8 @@
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
 const inst_neon = @import("inst_neon.zig");
+const inst_neon_arith = @import("inst_neon_arith.zig");
+const inst_neon_lane_cmp = @import("inst_neon_lane_cmp.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
 const op_simd = @import("op_simd.zig");
@@ -25,28 +27,28 @@ const EmitCtx = ctx_mod.EmitCtx;
 const Error = ctx_mod.Error;
 
 pub fn emitI8x16Add(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encAdd16B);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encAdd16B);
 }
 pub fn emitI8x16Sub(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encSub16B);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encSub16B);
 }
 pub fn emitI16x8Add(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encAdd8H);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encAdd8H);
 }
 pub fn emitI16x8Sub(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encSub8H);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encSub8H);
 }
 pub fn emitI32x4Add(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encAdd4S);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encAdd4S);
 }
 pub fn emitI32x4Sub(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encSub4S);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encSub4S);
 }
 pub fn emitI64x2Add(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encAdd2D);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encAdd2D);
 }
 pub fn emitI64x2Sub(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encSub2D);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encSub2D);
 }
 
 // §9.9 / 9.9-f-7 — int unops (abs / neg / popcnt). Wasm SIMD
@@ -54,40 +56,40 @@ pub fn emitI64x2Sub(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 // two-register-misc encoding with size selecting lane shape;
 // CNT is byte-only (16B) and exists only for `i8x16.popcnt`.
 pub fn emitI8x16Abs(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encAbs16B);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encAbs16B);
 }
 pub fn emitI8x16Neg(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encNeg16B);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encNeg16B);
 }
 pub fn emitI8x16Popcnt(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encCnt16B);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encCnt16B);
 }
 pub fn emitI16x8Abs(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encAbs8H);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encAbs8H);
 }
 pub fn emitI16x8Neg(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encNeg8H);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encNeg8H);
 }
 pub fn emitI32x4Abs(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encAbs4S);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encAbs4S);
 }
 pub fn emitI32x4Neg(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encNeg4S);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encNeg4S);
 }
 pub fn emitI64x2Abs(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encAbs2D);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encAbs2D);
 }
 pub fn emitI64x2Neg(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Unop(ctx, inst_neon.encNeg2D);
+    try op_simd.emitV128Unop(ctx, inst_neon_arith.encNeg2D);
 }
 // Note: Wasm SIMD has no `i8x16.mul` (only i16x8/i32x4/i64x2). The
 // underlying NEON `MUL Vd.16B` encoding (encMul16B) is preserved
 // in inst_neon.zig for completeness but no ZirOp dispatches to it.
 pub fn emitI16x8Mul(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encMul8H);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encMul8H);
 }
 pub fn emitI32x4Mul(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encMul4S);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encMul4S);
 }
 
 // ============================================================
@@ -101,46 +103,46 @@ pub fn emitI32x4Mul(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 // URHADD); all share the existing `op_simd.emitV128Binop` helper.
 
 pub fn emitI8x16MinS(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encSmin16B);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encSmin16B);
 }
 pub fn emitI8x16MinU(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encUmin16B);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encUmin16B);
 }
 pub fn emitI8x16MaxS(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encSmax16B);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encSmax16B);
 }
 pub fn emitI8x16MaxU(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encUmax16B);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encUmax16B);
 }
 pub fn emitI8x16AvgrU(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encUrhadd16B);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encUrhadd16B);
 }
 pub fn emitI16x8MinS(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encSmin8H);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encSmin8H);
 }
 pub fn emitI16x8MinU(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encUmin8H);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encUmin8H);
 }
 pub fn emitI16x8MaxS(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encSmax8H);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encSmax8H);
 }
 pub fn emitI16x8MaxU(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encUmax8H);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encUmax8H);
 }
 pub fn emitI16x8AvgrU(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encUrhadd8H);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encUrhadd8H);
 }
 pub fn emitI32x4MinS(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encSmin4S);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encSmin4S);
 }
 pub fn emitI32x4MinU(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encUmin4S);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encUmin4S);
 }
 pub fn emitI32x4MaxS(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encSmax4S);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encSmax4S);
 }
 pub fn emitI32x4MaxU(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try op_simd.emitV128Binop(ctx, inst_neon.encUmax4S);
+    try op_simd.emitV128Binop(ctx, inst_neon_arith.encUmax4S);
 }
 
 // ============================================================
@@ -187,10 +189,10 @@ pub fn emitI64x2Mul(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
 
     inline for (.{ 0, 1 }) |k| {
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encUmovXFromD(i64x2_mul_scratch_a, lhs_v, k));
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encUmovXFromD(i64x2_mul_scratch_b, rhs_v, k));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon_lane_cmp.encUmovXFromD(i64x2_mul_scratch_a, lhs_v, k));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon_lane_cmp.encUmovXFromD(i64x2_mul_scratch_b, rhs_v, k));
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMulReg(i64x2_mul_scratch_a, i64x2_mul_scratch_a, i64x2_mul_scratch_b));
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encInsDFromX(result_v, i64x2_mul_scratch_a, k));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon_lane_cmp.encInsDFromX(result_v, i64x2_mul_scratch_a, k));
     }
 
     try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
@@ -265,16 +267,16 @@ fn emitV128IntShift(
 }
 
 pub fn emitI8x16Shl(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitV128IntShift(ctx, 7, false, false, inst_neon.encDup16B, inst_neon.encUshl16B);
+    try emitV128IntShift(ctx, 7, false, false, inst_neon.encDup16B, inst_neon_arith.encUshl16B);
 }
 pub fn emitI16x8Shl(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitV128IntShift(ctx, 15, false, false, inst_neon.encDup8H, inst_neon.encUshl8H);
+    try emitV128IntShift(ctx, 15, false, false, inst_neon.encDup8H, inst_neon_arith.encUshl8H);
 }
 pub fn emitI32x4Shl(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitV128IntShift(ctx, 31, false, false, inst_neon.encDup4S, inst_neon.encUshl4S);
+    try emitV128IntShift(ctx, 31, false, false, inst_neon.encDup4S, inst_neon_arith.encUshl4S);
 }
 pub fn emitI64x2Shl(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitV128IntShift(ctx, 63, true, false, inst_neon.encDupGen2D, inst_neon.encUshl2D);
+    try emitV128IntShift(ctx, 63, true, false, inst_neon.encDupGen2D, inst_neon_arith.encUshl2D);
 }
 
 // ============================================================
@@ -298,28 +300,28 @@ pub fn emitI64x2Shl(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 
 // shr_u — USHL with negative (masked) amount.
 pub fn emitI8x16ShrU(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitV128IntShift(ctx, 7, false, true, inst_neon.encDup16B, inst_neon.encUshl16B);
+    try emitV128IntShift(ctx, 7, false, true, inst_neon.encDup16B, inst_neon_arith.encUshl16B);
 }
 pub fn emitI16x8ShrU(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitV128IntShift(ctx, 15, false, true, inst_neon.encDup8H, inst_neon.encUshl8H);
+    try emitV128IntShift(ctx, 15, false, true, inst_neon.encDup8H, inst_neon_arith.encUshl8H);
 }
 pub fn emitI32x4ShrU(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitV128IntShift(ctx, 31, false, true, inst_neon.encDup4S, inst_neon.encUshl4S);
+    try emitV128IntShift(ctx, 31, false, true, inst_neon.encDup4S, inst_neon_arith.encUshl4S);
 }
 pub fn emitI64x2ShrU(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitV128IntShift(ctx, 63, true, true, inst_neon.encDupGen2D, inst_neon.encUshl2D);
+    try emitV128IntShift(ctx, 63, true, true, inst_neon.encDupGen2D, inst_neon_arith.encUshl2D);
 }
 
 // shr_s — SSHL with negative (masked) amount (arithmetic sign extension).
 pub fn emitI8x16ShrS(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitV128IntShift(ctx, 7, false, true, inst_neon.encDup16B, inst_neon.encSshl16B);
+    try emitV128IntShift(ctx, 7, false, true, inst_neon.encDup16B, inst_neon_arith.encSshl16B);
 }
 pub fn emitI16x8ShrS(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitV128IntShift(ctx, 15, false, true, inst_neon.encDup8H, inst_neon.encSshl8H);
+    try emitV128IntShift(ctx, 15, false, true, inst_neon.encDup8H, inst_neon_arith.encSshl8H);
 }
 pub fn emitI32x4ShrS(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitV128IntShift(ctx, 31, false, true, inst_neon.encDup4S, inst_neon.encSshl4S);
+    try emitV128IntShift(ctx, 31, false, true, inst_neon.encDup4S, inst_neon_arith.encSshl4S);
 }
 pub fn emitI64x2ShrS(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
-    try emitV128IntShift(ctx, 63, true, true, inst_neon.encDupGen2D, inst_neon.encSshl2D);
+    try emitV128IntShift(ctx, 63, true, true, inst_neon.encDupGen2D, inst_neon_arith.encSshl2D);
 }

@@ -34,6 +34,8 @@ const std = @import("std");
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
 const inst_neon = @import("inst_neon.zig");
+const inst_neon_arith = @import("inst_neon_arith.zig");
+const inst_neon_lane_cmp = @import("inst_neon_lane_cmp.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
 const trace = @import("../../../diagnostic/trace.zig");
@@ -250,7 +252,7 @@ pub fn emitV128Load8x8S(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const tail = struct {
         fn run(allocator: std.mem.Allocator, buf: anytype, result_v: u5) Error!void {
             try gpr.writeU32(allocator, buf, inst.encLdrDReg(result_v, 28, 16));
-            try gpr.writeU32(allocator, buf, inst_neon.encSxtl8H(result_v, result_v));
+            try gpr.writeU32(allocator, buf, inst_neon_arith.encSxtl8H(result_v, result_v));
         }
     }.run;
     try emitV128LoadFamily(ctx, ins, 8, tail);
@@ -260,7 +262,7 @@ pub fn emitV128Load8x8U(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const tail = struct {
         fn run(allocator: std.mem.Allocator, buf: anytype, result_v: u5) Error!void {
             try gpr.writeU32(allocator, buf, inst.encLdrDReg(result_v, 28, 16));
-            try gpr.writeU32(allocator, buf, inst_neon.encUxtl8H(result_v, result_v));
+            try gpr.writeU32(allocator, buf, inst_neon_arith.encUxtl8H(result_v, result_v));
         }
     }.run;
     try emitV128LoadFamily(ctx, ins, 8, tail);
@@ -270,7 +272,7 @@ pub fn emitV128Load16x4S(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const tail = struct {
         fn run(allocator: std.mem.Allocator, buf: anytype, result_v: u5) Error!void {
             try gpr.writeU32(allocator, buf, inst.encLdrDReg(result_v, 28, 16));
-            try gpr.writeU32(allocator, buf, inst_neon.encSxtl4S(result_v, result_v));
+            try gpr.writeU32(allocator, buf, inst_neon_arith.encSxtl4S(result_v, result_v));
         }
     }.run;
     try emitV128LoadFamily(ctx, ins, 8, tail);
@@ -280,7 +282,7 @@ pub fn emitV128Load16x4U(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const tail = struct {
         fn run(allocator: std.mem.Allocator, buf: anytype, result_v: u5) Error!void {
             try gpr.writeU32(allocator, buf, inst.encLdrDReg(result_v, 28, 16));
-            try gpr.writeU32(allocator, buf, inst_neon.encUxtl4S(result_v, result_v));
+            try gpr.writeU32(allocator, buf, inst_neon_arith.encUxtl4S(result_v, result_v));
         }
     }.run;
     try emitV128LoadFamily(ctx, ins, 8, tail);
@@ -290,7 +292,7 @@ pub fn emitV128Load32x2S(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const tail = struct {
         fn run(allocator: std.mem.Allocator, buf: anytype, result_v: u5) Error!void {
             try gpr.writeU32(allocator, buf, inst.encLdrDReg(result_v, 28, 16));
-            try gpr.writeU32(allocator, buf, inst_neon.encSxtl2D(result_v, result_v));
+            try gpr.writeU32(allocator, buf, inst_neon_arith.encSxtl2D(result_v, result_v));
         }
     }.run;
     try emitV128LoadFamily(ctx, ins, 8, tail);
@@ -300,7 +302,7 @@ pub fn emitV128Load32x2U(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const tail = struct {
         fn run(allocator: std.mem.Allocator, buf: anytype, result_v: u5) Error!void {
             try gpr.writeU32(allocator, buf, inst.encLdrDReg(result_v, 28, 16));
-            try gpr.writeU32(allocator, buf, inst_neon.encUxtl2D(result_v, result_v));
+            try gpr.writeU32(allocator, buf, inst_neon_arith.encUxtl2D(result_v, result_v));
         }
     }.run;
     try emitV128LoadFamily(ctx, ins, 8, tail);
@@ -336,10 +338,10 @@ fn loadLaneInsEnc(comptime access_size: u12) fn (vd: u5, wn: u5, lane: u32) u32 
     return struct {
         fn enc(vd: u5, wn: u5, lane: u32) u32 {
             return switch (access_size) {
-                1 => inst_neon.encInsBFromW(vd, wn, @intCast(lane & 0xF)),
-                2 => inst_neon.encInsHFromW(vd, wn, @intCast(lane & 0x7)),
-                4 => inst_neon.encInsSFromW(vd, wn, @intCast(lane & 0x3)),
-                8 => inst_neon.encInsDFromX(vd, wn, @intCast(lane & 0x1)),
+                1 => inst_neon_lane_cmp.encInsBFromW(vd, wn, @intCast(lane & 0xF)),
+                2 => inst_neon_lane_cmp.encInsHFromW(vd, wn, @intCast(lane & 0x7)),
+                4 => inst_neon_lane_cmp.encInsSFromW(vd, wn, @intCast(lane & 0x3)),
+                8 => inst_neon_lane_cmp.encInsDFromX(vd, wn, @intCast(lane & 0x1)),
                 else => unreachable,
             };
         }
@@ -350,10 +352,10 @@ fn storeLaneUmovEnc(comptime access_size: u12) fn (wd: u5, vn: u5, lane: u32) u3
     return struct {
         fn enc(wd: u5, vn: u5, lane: u32) u32 {
             return switch (access_size) {
-                1 => inst_neon.encUmovWFromB(wd, vn, @intCast(lane & 0xF)),
-                2 => inst_neon.encUmovWFromH(wd, vn, @intCast(lane & 0x7)),
-                4 => inst_neon.encUmovWFromS(wd, vn, @intCast(lane & 0x3)),
-                8 => inst_neon.encUmovXFromD(wd, vn, @intCast(lane & 0x1)),
+                1 => inst_neon_lane_cmp.encUmovWFromB(wd, vn, @intCast(lane & 0xF)),
+                2 => inst_neon_lane_cmp.encUmovWFromH(wd, vn, @intCast(lane & 0x7)),
+                4 => inst_neon_lane_cmp.encUmovWFromS(wd, vn, @intCast(lane & 0x3)),
+                8 => inst_neon_lane_cmp.encUmovXFromD(wd, vn, @intCast(lane & 0x1)),
                 else => unreachable,
             };
         }
@@ -707,8 +709,8 @@ pub fn emitV128AnyTrue(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     const result_w = try gpr.resolveGpr(ctx.alloc, result_vreg);
 
     // Reduce into V29 (lane 0 holds the max byte).
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encUmaxv16B(any_true_scratch_v, src_v));
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encUmovWFromB(any_true_scratch_x_a, any_true_scratch_v, 0));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon_arith.encUmaxv16B(any_true_scratch_v, src_v));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon_lane_cmp.encUmovWFromB(any_true_scratch_x_a, any_true_scratch_v, 0));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmW(any_true_scratch_x_a, 0));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCsetW(result_w, .ne));
     try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
