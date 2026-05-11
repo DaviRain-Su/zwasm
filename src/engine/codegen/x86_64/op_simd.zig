@@ -65,17 +65,21 @@ const Error = types.Error;
 /// AVX VPADD* (out of scope per ADR-0041 §"5. SSE4.1 minimum
 /// baseline").
 ///
-/// Spilled v128 vregs surface as `Error.UnsupportedOp` from
-/// `gpr.resolveXmm` — the 16-byte MOVDQU spill helpers land in
-/// 9.7-c. Until then, functions whose v128 vregs all fit in
-/// `abi.allocatable_xmms` (XMM8..XMM13, 6 slots) compile cleanly;
-/// over-pressure functions return early.
+/// ADR-0053 Part 3 (§9.9 / 9.9-h-11) — spill-aware via the v128
+/// helpers from gpr.zig. rhs loads to stage 0 (XMM14) when
+/// spilled, lhs to stage 1 (XMM15), result also uses stage 1 so
+/// the MOVAPS-from-lhs writes to the same physical XMM the
+/// subsequent store flushes from. The 2-stage pool stays
+/// conflict-free because the MOVAPS-from-lhs is the only write
+/// to the lhs/result stage before the encoder reads rhs from
+/// stage 0.
 fn emitV128IntBinop(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     encoder: *const fn (dst: inst.Xmm, src: inst.Xmm) inst.EncodedInsn,
 ) Error!void {
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
@@ -85,9 +89,9 @@ fn emitV128IntBinop(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const rhs_x = try gpr.resolveXmm(alloc, rhs_v);
-    const lhs_x = try gpr.resolveXmm(alloc, lhs_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const rhs_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, rhs_v, 0);
+    const lhs_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, lhs_v, 1);
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 1);
 
     // Aliasing safety (D-066 mirror for x86_64; D-070 partial
     // discharge): regalloc's LIFO slot-reuse can assign
@@ -99,6 +103,10 @@ fn emitV128IntBinop(
     // simd_bitwise / simd_i*x*_arith). Stash rhs through XMM7
     // (the project-canonical SIMD scratch — `abi.zig` reserves it
     // mirroring arm64's V31) when the alias condition holds.
+    //
+    // ADR-0053 Part 3 note: spilled rhs / spilled result use
+    // different stages (XMM14 vs XMM15) by construction, so the
+    // alias check only fires for in-reg-pool collisions.
     var rhs_for_op = rhs_x;
     if (dst_x != lhs_x and dst_x == rhs_x) {
         try buf.appendSlice(allocator, inst.encMovapsXmmXmm(.xmm7, rhs_x).slice());
@@ -108,6 +116,7 @@ fn emitV128IntBinop(
         try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, lhs_x).slice());
     }
     try buf.appendSlice(allocator, encoder(dst_x, rhs_for_op).slice());
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 1);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -121,8 +130,9 @@ pub fn emitI8x16Add(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPaddB);
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPaddB);
 }
 
 pub fn emitI8x16Sub(
@@ -131,8 +141,9 @@ pub fn emitI8x16Sub(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPsubB);
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsubB);
 }
 
 pub fn emitI16x8Add(
@@ -141,8 +152,9 @@ pub fn emitI16x8Add(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPaddW);
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPaddW);
 }
 
 pub fn emitI16x8Sub(
@@ -151,8 +163,9 @@ pub fn emitI16x8Sub(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPsubW);
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsubW);
 }
 
 pub fn emitI32x4Add(
@@ -161,8 +174,9 @@ pub fn emitI32x4Add(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPaddD);
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPaddD);
 }
 
 pub fn emitI32x4Sub(
@@ -171,8 +185,9 @@ pub fn emitI32x4Sub(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPsubD);
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsubD);
 }
 
 pub fn emitI64x2Add(
@@ -181,8 +196,9 @@ pub fn emitI64x2Add(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPaddQ);
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPaddQ);
 }
 
 pub fn emitI64x2Sub(
@@ -191,8 +207,9 @@ pub fn emitI64x2Sub(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPsubQ);
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsubQ);
 }
 
 // §9.7-c: native multiply ops. i16x8.mul reaches PMULLW (SSE2);
@@ -207,8 +224,9 @@ pub fn emitI16x8Mul(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmullW);
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmullW);
 }
 
 pub fn emitI32x4Mul(
@@ -217,8 +235,9 @@ pub fn emitI32x4Mul(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmullD);
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmullD);
 }
 
 /// Wasm spec §4.4.3 (i32x4.splat) — pop scalar i32, push v128
@@ -1361,36 +1380,36 @@ pub fn emitF64x2Ge(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regallo
 /// with a 7-instruction NaN/zero correction sequence per
 /// `lower.isle` "F32X4 (fmin _ x y)" — deferred to §9.7-q with
 /// proper synthesis.
-pub fn emitF32x4Add(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encAddps);
+pub fn emitF32x4Add(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encAddps);
 }
 
-pub fn emitF32x4Sub(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encSubps);
+pub fn emitF32x4Sub(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encSubps);
 }
 
-pub fn emitF32x4Mul(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encMulps);
+pub fn emitF32x4Mul(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encMulps);
 }
 
-pub fn emitF32x4Div(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encDivps);
+pub fn emitF32x4Div(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encDivps);
 }
 
-pub fn emitF64x2Add(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encAddpd);
+pub fn emitF64x2Add(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encAddpd);
 }
 
-pub fn emitF64x2Sub(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encSubpd);
+pub fn emitF64x2Sub(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encSubpd);
 }
 
-pub fn emitF64x2Mul(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encMulpd);
+pub fn emitF64x2Mul(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encMulpd);
 }
 
-pub fn emitF64x2Div(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encDivpd);
+pub fn emitF64x2Div(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encDivpd);
 }
 
 /// Wasm spec §4.4.4 (f*x*.sqrt) — pop one v128, push v128 with
@@ -1625,6 +1644,7 @@ pub fn emitV128Not(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const src_v = pushed_vregs.pop().?;
@@ -1632,8 +1652,12 @@ pub fn emitV128Not(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const src_x = try gpr.resolveXmm(alloc, src_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // ADR-0053 Part 3: src loads to stage 1 (XMM15) so the
+    // "ones" scratch at stage 0 (XMM14) stays available for
+    // PCMPEQ. dst defs at stage 1 (XMM15); the MOVAPS dst,src
+    // copies before PCMPEQ overwrites XMM14.
+    const src_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, src_v, 1);
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 1);
     const ones = abi.fp_spill_stage_xmms[0]; // XMM14
 
     if (dst_x != src_x) {
@@ -1641,6 +1665,7 @@ pub fn emitV128Not(
     }
     try buf.appendSlice(allocator, inst.encPcmpeqB(ones, ones).slice());
     try buf.appendSlice(allocator, inst.encPxor(dst_x, ones).slice());
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 1);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -1650,16 +1675,16 @@ pub fn emitV128Not(
 /// SSE2 packed-int encoders (PAND / POR / PXOR — int-domain XOR
 /// preferred over XORPS for bit-identical-but-domain-faster
 /// semantics on older microarchitectures).
-pub fn emitV128And(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPand);
+pub fn emitV128And(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPand);
 }
 
-pub fn emitV128Or(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPor);
+pub fn emitV128Or(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPor);
 }
 
-pub fn emitV128Xor(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPxor);
+pub fn emitV128Xor(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPxor);
 }
 
 /// Wasm spec §4.4.4 (v128.andnot) — `andnot(a, b) = a & ~b`. SSE
@@ -1672,6 +1697,7 @@ pub fn emitV128Andnot(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
     const rhs_v = pushed_vregs.pop().?;
@@ -1680,14 +1706,18 @@ pub fn emitV128Andnot(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const rhs_x = try gpr.resolveXmm(alloc, rhs_v);
-    const lhs_x = try gpr.resolveXmm(alloc, lhs_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // ADR-0053 Part 3: rhs stage 0 (XMM14), lhs stage 1 (XMM15),
+    // result stage 0 (XMM14 — same as rhs's load location: the
+    // MOVAPS dst,rhs preserves rhs's value while writing to dst).
+    const rhs_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, rhs_v, 0);
+    const lhs_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, lhs_v, 1);
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 0);
 
     if (dst_x != rhs_x) {
         try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, rhs_x).slice());
     }
     try buf.appendSlice(allocator, inst.encPandn(dst_x, lhs_x).slice());
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -1759,7 +1789,10 @@ pub fn emitV128AnyTrue(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const src_x = try gpr.resolveXmm(alloc, src_v);
+    // ADR-0053 Part 3: src loaded via MOVUPS into stage 0 (XMM14)
+    // when spilled. The result is a GPR (i32 boolean), so no
+    // XMM/spill interaction on the dst side.
+    const src_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, src_v, 0);
     const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
 
     try buf.appendSlice(allocator, inst.encPtest(src_x, src_x).slice());
@@ -2489,20 +2522,20 @@ pub fn emitI64x2Abs(
 /// Wasm spec exactly: signed pack saturates to signed half-
 /// width range; unsigned pack clamps signed input to unsigned
 /// half-width range.
-pub fn emitI8x16NarrowI16x8S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPacksswb);
+pub fn emitI8x16NarrowI16x8S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPacksswb);
 }
 
-pub fn emitI8x16NarrowI16x8U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPackuswb);
+pub fn emitI8x16NarrowI16x8U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPackuswb);
 }
 
-pub fn emitI16x8NarrowI32x4S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPackssdw);
+pub fn emitI16x8NarrowI32x4S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPackssdw);
 }
 
-pub fn emitI16x8NarrowI32x4U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPackusdw);
+pub fn emitI16x8NarrowI32x4U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPackusdw);
 }
 
 /// Wasm spec §4.4.4 (i*x*.extend_low / extend_high) — pop one
@@ -2689,8 +2722,9 @@ pub fn emitI8x16Eq(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPcmpeqB);
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPcmpeqB);
 }
 
 pub fn emitI16x8Eq(
@@ -2699,8 +2733,9 @@ pub fn emitI16x8Eq(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPcmpeqW);
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPcmpeqW);
 }
 
 pub fn emitI32x4Eq(
@@ -2709,8 +2744,9 @@ pub fn emitI32x4Eq(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPcmpeqD);
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPcmpeqD);
 }
 
 pub fn emitI64x2Eq(
@@ -2719,8 +2755,9 @@ pub fn emitI64x2Eq(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPcmpeqQ);
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPcmpeqQ);
 }
 
 /// Wasm spec §4.4.4 (i*x*.ne variants) — invert PCMPEQ via XOR
@@ -3693,123 +3730,123 @@ pub fn emitF64x2Pmax(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regal
 // =============================================================
 
 /// Wasm spec §4.4.4 (i8x16.min_s) — packed signed 8-bit min.
-pub fn emitI8x16MinS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminsb);
+pub fn emitI8x16MinS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPminsb);
 }
 
 /// Wasm spec §4.4.4 (i8x16.min_u) — packed unsigned 8-bit min.
-pub fn emitI8x16MinU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminub);
+pub fn emitI8x16MinU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPminub);
 }
 
 /// Wasm spec §4.4.4 (i8x16.max_s) — packed signed 8-bit max.
-pub fn emitI8x16MaxS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxsb);
+pub fn emitI8x16MaxS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmaxsb);
 }
 
 /// Wasm spec §4.4.4 (i8x16.max_u) — packed unsigned 8-bit max.
-pub fn emitI8x16MaxU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxub);
+pub fn emitI8x16MaxU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmaxub);
 }
 
 /// Wasm spec §4.4.4 (i16x8.min_s) — packed signed 16-bit min.
-pub fn emitI16x8MinS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminsw);
+pub fn emitI16x8MinS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPminsw);
 }
 
 /// Wasm spec §4.4.4 (i16x8.min_u) — packed unsigned 16-bit min.
-pub fn emitI16x8MinU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminuw);
+pub fn emitI16x8MinU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPminuw);
 }
 
 /// Wasm spec §4.4.4 (i16x8.max_s) — packed signed 16-bit max.
-pub fn emitI16x8MaxS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxsw);
+pub fn emitI16x8MaxS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmaxsw);
 }
 
 /// Wasm spec §4.4.4 (i16x8.max_u) — packed unsigned 16-bit max.
-pub fn emitI16x8MaxU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxuw);
+pub fn emitI16x8MaxU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmaxuw);
 }
 
 /// Wasm spec §4.4.4 (i32x4.min_s) — packed signed 32-bit min.
-pub fn emitI32x4MinS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminsd);
+pub fn emitI32x4MinS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPminsd);
 }
 
 /// Wasm spec §4.4.4 (i32x4.min_u) — packed unsigned 32-bit min.
-pub fn emitI32x4MinU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminud);
+pub fn emitI32x4MinU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPminud);
 }
 
 /// Wasm spec §4.4.4 (i32x4.max_s) — packed signed 32-bit max.
-pub fn emitI32x4MaxS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxsd);
+pub fn emitI32x4MaxS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmaxsd);
 }
 
 /// Wasm spec §4.4.4 (i32x4.max_u) — packed unsigned 32-bit max.
-pub fn emitI32x4MaxU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxud);
+pub fn emitI32x4MaxU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmaxud);
 }
 
 /// Wasm spec §4.4.4 (i8x16.add_sat_s) — packed signed saturating add.
-pub fn emitI8x16AddSatS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPaddsb);
+pub fn emitI8x16AddSatS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPaddsb);
 }
 
 /// Wasm spec §4.4.4 (i8x16.add_sat_u) — packed unsigned saturating add.
-pub fn emitI8x16AddSatU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPaddusb);
+pub fn emitI8x16AddSatU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPaddusb);
 }
 
 /// Wasm spec §4.4.4 (i8x16.sub_sat_s) — packed signed saturating sub.
-pub fn emitI8x16SubSatS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPsubsb);
+pub fn emitI8x16SubSatS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsubsb);
 }
 
 /// Wasm spec §4.4.4 (i8x16.sub_sat_u) — packed unsigned saturating sub.
-pub fn emitI8x16SubSatU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPsubusb);
+pub fn emitI8x16SubSatU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsubusb);
 }
 
 /// Wasm spec §4.4.4 (i16x8.add_sat_s) — packed signed saturating add.
-pub fn emitI16x8AddSatS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPaddsw);
+pub fn emitI16x8AddSatS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPaddsw);
 }
 
 /// Wasm spec §4.4.4 (i16x8.add_sat_u) — packed unsigned saturating add.
-pub fn emitI16x8AddSatU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPaddusw);
+pub fn emitI16x8AddSatU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPaddusw);
 }
 
 /// Wasm spec §4.4.4 (i16x8.sub_sat_s) — packed signed saturating sub.
-pub fn emitI16x8SubSatS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPsubsw);
+pub fn emitI16x8SubSatS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsubsw);
 }
 
 /// Wasm spec §4.4.4 (i16x8.sub_sat_u) — packed unsigned saturating sub.
-pub fn emitI16x8SubSatU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPsubusw);
+pub fn emitI16x8SubSatU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsubusw);
 }
 
 /// Wasm spec §4.4.4 (i8x16.avgr_u) — packed unsigned 8-bit
 /// rounded average: (a+b+1) >> 1 per lane.
-pub fn emitI8x16AvgrU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPavgb);
+pub fn emitI8x16AvgrU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPavgb);
 }
 
 /// Wasm spec §4.4.4 (i16x8.avgr_u) — packed unsigned 16-bit
 /// rounded average: (a+b+1) >> 1 per lane.
-pub fn emitI16x8AvgrU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPavgw);
+pub fn emitI16x8AvgrU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPavgw);
 }
 
 /// Wasm spec §4.4.4 (i16x8.q15mulr_sat_s) — Q15-format multiply
 /// with rounding and saturating clamp to i16. PMULHRSW (SSSE3,
 /// `lower.isle:1287-1294`) implements exactly this in 1
 /// instruction; reuses emitV128IntBinop.
-pub fn emitI16x8Q15mulrSatS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmulhrsw);
+pub fn emitI16x8Q15mulrSatS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmulhrsw);
 }
 
 /// Wasm spec §4.4.4 (i32x4.dot_i16x8_s) — pairwise dot product
@@ -3817,8 +3854,8 @@ pub fn emitI16x8Q15mulrSatS(allocator: Allocator, buf: *std.ArrayList(u8), alloc
 /// `lower.isle:4073-4078`) implements exactly this in 1
 /// instruction. Wrapping i32 accumulation matches Wasm spec
 /// (INT16_MIN^2 + INT16_MIN^2 wraps modulo 2^32).
-pub fn emitI32x4DotI16x8S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaddwd);
+pub fn emitI32x4DotI16x8S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmaddwd);
 }
 
 /// Wasm spec §4.4.4 (i16x8.extmul_low_i8x16_{s,u}) — extend low 8
