@@ -20,9 +20,10 @@ Deliverables: `.dev/phase10_prep/track_{a,b,c}_*.md` +
 Phase: 9 (SIMD-128). §9.5/6/7/8 [x]; §9.9 [ ] (Mac+OrbStack
 11384/0 post-h-14; SKIP=2357; windowsmini reconcile pending).
 
-Latest landed: `00f93d24` — 9.9-h-20 Track B chunk 6/6 **COMPLETE**
-(file_size_check warn→gate flip + ADR-0054 + D-057/D-065 close +
-D-081 file). Next: §9.9 close residual (skip-impl reduction).
+Latest landed: `d39697ce` — 9.9-h-21 Track C chunk 1/4 (runners
+gain prefix-aware `skip-impl` / `skip-adr-<id>` vocab; bare-`skip`
+back-compat with WARN); next chunk `9.9-h-22` (regen scripts +
+manifest sweep).
 
 ## Implementation queue (matches ROADMAP first `[ ]`)
 
@@ -36,6 +37,21 @@ gate. Specs: `phase10_prep/track_*.md` §6/§7.
 2. **Track C** (9.9-h-21..-24, 4 chunks): Path B prefix-vocab
    migration → ADR-0029 amend + check_skip_adrs.sh pre-commit
    gate + D-082 file + D-072 (a/b) + D-073 close.
+   - **9.9-h-21** `[x]` `d39697ce` — runners prefix-aware
+     (spec_assert + simd_assert).
+   - **9.9-h-22** **NEXT** — update
+     `scripts/regen_spec_simd_assert.sh` + `regen_spec_1_0_assert.sh`
+     to emit prefix-vocab lines; re-run regen; commit
+     manifest deltas (~500 LOC auto-generated).
+   - **9.9-h-23** — wast_runtime_runner prefix-aware + hand-
+     migrate `wasmtime_misc/wast/{embenchen,reftypes}/manifest_runtime.txt`;
+     D-072 (a/b) discharge; file D-082 (D-072 (c)-path actual
+     fixture fixes, blocked-by Phase 11 embenchen + externref
+     segment work).
+   - **9.9-h-24** — ADR-0029 §"Amendment log" Path B closure
+     row; extend `scripts/check_skip_adrs.sh` as
+     `.githooks/pre-commit`-invoked gate; close D-073 +
+     D-072 (a/b) status update.
 3. **§9.9 close residual** (h-25..-N, count TBD by live
    status post-Track-C): `p9_simd_status.sh` surfaces
    `skip-impl` count (currently ~1967 = nan-or-bad-token 1222
