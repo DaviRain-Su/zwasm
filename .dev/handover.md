@@ -25,18 +25,16 @@
   §9.5 [x], §9.6 [x], §9.7 [x], §9.8 [x] (absorbed per
   ADR-0044), **§9.9 in-flight**.
 - **Branch**: `zwasm-from-scratch`.
-- **Latest §9.9 landing**: §9.9 / 9.9-h-5 — D-078 (a) discharge.
-  Root cause was in `emitF64x2ReplaceLane`, NOT extract_lane
-  (debt narrative's static-analysis was right that extract was
-  correct; the fixture body uses both, exported under
-  extract_lane name). D-066 mirror class: `dst == value &&
-  dst != vec` aliasing → MOVAPS-from-vec clobbered value before
-  MOVSD/MOVLHPS read. Fix stashes value via XMM7. Sibling
-  `emitF32x4ReplaceLane` got the same fix (per bug_fix_survey
-  grep). 2 new alias regression tests added. OrbStack visible
-  FAILs: simd_lane f64x2_extract_lane cleared; only
-  simd_bitwise.17 (D-078 c) + D-077 panic remain. Mac
-  unchanged at 11270/0 FAIL. Mac unit 1577/1589.
+- **Latest §9.9 landing**: §9.9 / 9.9-h-6 — D-077 discharge.
+  Root cause: `linker.link`'s empty-module early-exit returned
+  `block.bytes = &[_:0]u8{}` sentinel; `jit_mem.free` then
+  called munmap on it. Linux `std.posix.munmap` panics INVAL →
+  `unreachable`; macOS silently discards the return. Fix: one-
+  line `if (block.bytes.len == 0) return;` guard. OrbStack now
+  prints structured summary: **11232 passed / 3 failed / 2509
+  skipped** (vs Mac 11270/0/2471). Mac unchanged. The +3 OrbStack
+  FAILs surface a previously-masked x86_64 compile gap on
+  simd_const.386 + .388 — tracked as new D-080.
 - **Active row**: §9.9 (still `[ ]`). Mac is at FAIL=0 / SKIP>0;
   the exit criterion is fail=skip=0 across the 3-host gate, so
   skips remain (assert_invalid SKIP-VALIDATOR-GAP cluster +
@@ -45,17 +43,18 @@
 
 ## Next sub-chunk candidates (names only)
 
+- **D-080 simd_const.386/.388 x86_64 compile UnsupportedOp** —
+  newly surfaced post-9.9-h-6. Both pass on Mac through the
+  §9.9-h-2..-h-4 chain; x86_64 hits UnsupportedOp at compile.
+  Spike: capture the exact `compileWasm: func[N]` debug-print
+  on a focused OrbStack run, identify the op family, walk the
+  x86_64 dispatch.
 - **D-078 (c) simd_bitwise.17** — x86_64 v128 XMM spill not yet
   implemented. `resolveXmm` rejects spilled v128 vregs. Needs
   `xmmLoadSpilledV128` + `xmmStoreSpilledV128` (16-byte MOVUPS)
   + ~100 handler updates. Substantial refactor; co-deliverable
-  with D-057 source-split. **Last remaining OrbStack visible
-  FAIL** modulo the D-077 panic.
-- **D-077 OrbStack runner deinit panic** — `jit_mem.free` munmap
-  INVAL. Pre-existing. Cleaning this restores the structured
-  `simd_assert_runner: P passed, F failed, S skipped` summary
-  line on OrbStack (currently suppressed by panic; counts must
-  be derived via `grep -c ^FAIL`).
+  with D-057 source-split. Possibly the same root cause as
+  D-080 (spike will tell).
 - Aggregate `test-spec-simd` into `test-all` (preventive — surfaces
   silent x86_64 simd regressions in autonomous loop gating).
 - **D-066 alias-stash pattern audit** — `bug_fix_survey.md` grep
