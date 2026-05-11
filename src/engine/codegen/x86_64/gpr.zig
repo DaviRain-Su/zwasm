@@ -86,6 +86,21 @@ fn rbpStoreXmmF64Auto(disp: i32, src: inst.Xmm) inst.EncodedInsn {
     if (disp >= -128 and disp <= 127) return inst.encStoreXmmF64MemRBP(@intCast(disp), src);
     return inst.encStoreXmmF64MemRBPDisp32(disp, src);
 }
+/// ADR-0053 Part 2 (§9.9 / 9.9-h-10) — 128-bit unaligned packed-
+/// single load `MOVUPS xmm, [RBP + disp]`. Picks the disp8 form
+/// when the offset fits in -128..127, else the disp32 form, mirror
+/// of the F64 variant. Used by `xmmLoadSpilledV128`. The MOVUPS
+/// instruction itself is unaligned-tolerant; alignment matters
+/// only for the allocator's spill-region layout (16-byte stride
+/// for v128 slots per `Allocation.spill_offsets`).
+fn rbpLoadXmmV128Auto(dst: inst.Xmm, disp: i32) inst.EncodedInsn {
+    if (disp >= -128 and disp <= 127) return inst.encLoadXmmV128MemRBP(dst, @intCast(disp));
+    return inst.encLoadXmmV128MemRBPDisp32(dst, disp);
+}
+fn rbpStoreXmmV128Auto(disp: i32, src: inst.Xmm) inst.EncodedInsn {
+    if (disp >= -128 and disp <= 127) return inst.encStoreXmmV128MemRBP(@intCast(disp), src);
+    return inst.encStoreXmmV128MemRBPDisp32(disp, src);
+}
 
 /// Resolve a vreg's home register (GPR class). Returns the
 /// allocated reg or `Error.UnsupportedOp` for spilled vregs
@@ -225,6 +240,77 @@ pub fn xmmDefSpilled(
         .reg => |id| abi.fpSlotToReg(id) orelse Error.SlotOverflow,
         .spill => abi.fp_spill_stage_xmms[stage_idx],
     };
+}
+
+/// ADR-0053 Part 2 (§9.9 / 9.9-h-10) — v128 counterpart of
+/// `xmmLoadSpilled`. If the FP vreg is in an XMM register,
+/// returns that reg directly. If spilled, emits
+/// `MOVUPS xmm, [RBP - (spill_base_off + spill_off)]` staging
+/// through `abi.fp_spill_stage_xmms[stage_idx]` (XMM14/XMM15)
+/// and returns the stage reg.
+///
+/// MOVUPS reads/writes a full 128-bit chunk; the allocator's
+/// `Allocation.spill_offsets` table (ADR-0053 Part 1) gives the
+/// v128 vreg's spill slot 16-byte stride so the resulting access
+/// never overlaps a neighbouring slot.
+///
+/// Distinct from `xmmLoadSpilled` (which uses MOVSD's 8-byte
+/// stride and is correct for f32/f64 only) — Part 3 handler
+/// migration switches v128-class call sites from `resolveXmm`
+/// to this helper.
+pub fn xmmLoadSpilledV128(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    spill_base_off: u32,
+    vreg: usize,
+    stage_idx: u8,
+) Error!Xmm {
+    return switch (alloc.slot(vreg, .fpr)) {
+        .reg => |id| abi.fpSlotToReg(id) orelse Error.SlotOverflow,
+        .spill => |off| blk: {
+            const stage = abi.fp_spill_stage_xmms[stage_idx];
+            const disp = try rbpDispNegI32(spill_base_off, off);
+            try writeBytes(allocator, buf, rbpLoadXmmV128Auto(stage, disp));
+            break :blk stage;
+        },
+    };
+}
+
+/// ADR-0053 Part 2 — v128 counterpart of `xmmDefSpilled`. Returns
+/// the home XMM when not spilled, else the stage reg (caller
+/// encodes the op writing into it, then calls
+/// `xmmStoreSpilledV128` to flush).
+pub fn xmmDefSpilledV128(
+    alloc: regalloc.Allocation,
+    vreg: usize,
+    stage_idx: u8,
+) Error!Xmm {
+    return switch (alloc.slot(vreg, .fpr)) {
+        .reg => |id| abi.fpSlotToReg(id) orelse Error.SlotOverflow,
+        .spill => abi.fp_spill_stage_xmms[stage_idx],
+    };
+}
+
+/// ADR-0053 Part 2 — pair of `xmmDefSpilledV128`. Emits
+/// `MOVUPS [RBP - (spill_base_off + spill_off)], xmm` from the
+/// stage reg. No-op for in-XMM-reg vregs.
+pub fn xmmStoreSpilledV128(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    spill_base_off: u32,
+    vreg: usize,
+    stage_idx: u8,
+) Error!void {
+    switch (alloc.slot(vreg, .fpr)) {
+        .reg => {},
+        .spill => |off| {
+            const stage = abi.fp_spill_stage_xmms[stage_idx];
+            const disp = try rbpDispNegI32(spill_base_off, off);
+            try writeBytes(allocator, buf, rbpStoreXmmV128Auto(disp, stage));
+        },
+    }
 }
 
 /// Pair of `xmmDefSpilled`. Emits `MOVSD [RBP - (spill_base_off
@@ -396,4 +482,78 @@ test "xmmStoreSpilled: spilled vreg emits MOVSD [rbp+disp], xmm14" {
     const expected = inst.encStoreXmmF64MemRBP(-8, .xmm14);
     try testing.expectEqual(@as(usize, expected.len), buf.items.len);
     try testing.expectEqualSlices(u8, expected.bytes[0..expected.len], buf.items);
+}
+
+test "xmmLoadSpilledV128: spilled vreg emits MOVUPS xmm14, [rbp+disp]" {
+    // ADR-0053 Part 2: v128 spill-aware load emits MOVUPS (16
+    // bytes, 0F 10) — contrast with `xmmLoadSpilled` (MOVSD, F2 0F
+    // 10, 8 bytes). The disp here is small (-16) so we get the
+    // disp8 form.
+    const pool_len: u8 = abi.allocatable_xmms.len;
+    const slots = [_]u16{pool_len};
+    const alloc: regalloc.Allocation = .{
+        .slots = &slots,
+        .n_slots = pool_len + 1,
+        .max_reg_slots_gpr = pool_len,
+        .max_reg_slots_fp = pool_len,
+    };
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    const r = try xmmLoadSpilledV128(testing.allocator, &buf, alloc, 16, 0, 0);
+    try testing.expectEqual(Xmm.xmm14, r);
+    const expected = inst.encLoadXmmV128MemRBP(.xmm14, -16);
+    try testing.expectEqual(@as(usize, expected.len), buf.items.len);
+    try testing.expectEqualSlices(u8, expected.bytes[0..expected.len], buf.items);
+}
+
+test "xmmStoreSpilledV128: spilled vreg emits MOVUPS [rbp+disp], xmm14" {
+    const pool_len: u8 = abi.allocatable_xmms.len;
+    const slots = [_]u16{pool_len};
+    const alloc: regalloc.Allocation = .{
+        .slots = &slots,
+        .n_slots = pool_len + 1,
+        .max_reg_slots_gpr = pool_len,
+        .max_reg_slots_fp = pool_len,
+    };
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    try xmmStoreSpilledV128(testing.allocator, &buf, alloc, 16, 0, 0);
+    const expected = inst.encStoreXmmV128MemRBP(-16, .xmm14);
+    try testing.expectEqual(@as(usize, expected.len), buf.items.len);
+    try testing.expectEqualSlices(u8, expected.bytes[0..expected.len], buf.items);
+}
+
+test "xmmDefSpilledV128: spilled vreg returns xmm14 stage; in-reg returns home" {
+    // Spilled case
+    {
+        const pool_len: u8 = abi.allocatable_xmms.len;
+        const slots = [_]u16{pool_len};
+        const alloc: regalloc.Allocation = .{
+            .slots = &slots,
+            .n_slots = pool_len + 1,
+            .max_reg_slots_gpr = pool_len,
+            .max_reg_slots_fp = pool_len,
+        };
+        try testing.expectEqual(Xmm.xmm14, try xmmDefSpilledV128(alloc, 0, 0));
+        try testing.expectEqual(Xmm.xmm15, try xmmDefSpilledV128(alloc, 0, 1));
+    }
+    // In-reg case: vreg 0 → slot 0 → first allocatable XMM.
+    {
+        const slots = [_]u16{0};
+        const alloc: regalloc.Allocation = .{
+            .slots = &slots,
+            .n_slots = 1,
+        };
+        try testing.expectEqual(abi.allocatable_xmms[0], try xmmDefSpilledV128(alloc, 0, 0));
+    }
+}
+
+test "xmmLoadSpilledV128: in-reg vreg returns home XMM without emitting bytes" {
+    const slots = [_]u16{0};
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    const r = try xmmLoadSpilledV128(testing.allocator, &buf, alloc, 0, 0, 0);
+    try testing.expectEqual(abi.allocatable_xmms[0], r);
+    try testing.expectEqual(@as(usize, 0), buf.items.len);
 }
