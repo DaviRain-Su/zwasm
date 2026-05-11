@@ -20,8 +20,9 @@ Deliverables: `.dev/phase10_prep/track_{a,b,c}_*.md` +
 Phase: 9 (SIMD-128). §9.5/6/7/8 [x]; §9.9 [ ] (Mac+OrbStack
 11384/0 post-h-14; SKIP=2357; windowsmini reconcile pending).
 
-Latest landed: `280617d9` — 9.9-h-15 x86_64 op_simd.zig 4-way
-source split (Track B chunk 1/6); next chunk `9.9-h-16`.
+Latest landed: `155afd58` — 9.9-h-16 op_simd_test 4-way mirror
++ transitional re-exports removed (Track B chunk 2/6); next
+chunk `9.9-h-17`.
 
 ## Implementation queue (matches ROADMAP first `[ ]`)
 
@@ -34,9 +35,12 @@ gate. Specs: `phase10_prep/track_*.md` §6/§7.
    split + ADR-0054 + tiered pub + file_size_check warn→gate
    + D-081 file + D-057/D-065 close.
    - **9.9-h-15** `[x]` `280617d9` — x86_64 op_simd source 4-way.
-   - **9.9-h-16** **NEXT** — x86_64 op_simd_test.zig 4-way
-     mirror; removes the 206 transitional re-exports from
-     op_simd.zig.
+   - **9.9-h-16** `[x]` `155afd58` — op_simd_test 4-way mirror
+     + transitional re-exports removed.
+   - **9.9-h-17** **NEXT** — x86_64 `inst_sse.zig` (2464 LOC)
+     3-way encoder split → `inst_sse` (foundation: mem/MOV
+     reg-shape/scalar cvt) + `inst_sse_packed` (encP* packed
+     binary) + `inst_sse_scalar` (SSE scalar + FP packed).
 2. **Track C** (9.9-h-21..-24, 4 chunks): Path B prefix-vocab
    migration → ADR-0029 amend + check_skip_adrs.sh pre-commit
    gate + D-082 file + D-072 (a/b) + D-073 close.
