@@ -18,13 +18,15 @@ Deliverables: `.dev/phase10_prep/track_{a,b,c}_*.md` +
 `.dev/phase10_transition_gate.md`. Normal `/continue` resumes.
 
 Phase: 9 (SIMD-128). §9.5/6/7/8 [x]; §9.9 [ ] (Mac+OrbStack
-**13105/0/636** = 246 skip-impl + 390 skip-adr post-h-26;
+**13241/0/500** = 110 skip-impl + 390 skip-adr post-h-27;
 windowsmini reconcile pending).
 
-Latest landed: `4de24200` — 9.9-h-26 6 new v128-mixed-arg entry
-helpers (+499 PASS, 0 FAIL). Residual skip-impl 246: v128-param-pending
-175 (i64-result + v128+i64-arg + 3-arg-mixed composite shapes,
-not in h-26 scope) + nan/v128-trap 18 + export-name 3.
+Latest landed: `2c5cb3e9` — 9.9-h-27 3 new v128-mixed-arg
+entry helpers (+136 PASS, 0 FAIL); D-083 filed (v128 select
+op runtime bug; 6 select_v128_i32 lines re-skipped pending
+fix). Residual skip-impl 110: v128-param-pending 39 (6
+select D-083-deferred + 33 other unsupported shapes) +
+assert_trap-v128 18 + export-name 3.
 
 ## Implementation queue (matches ROADMAP first `[ ]`)
 
@@ -42,18 +44,20 @@ gate. Specs: `phase10_prep/track_*.md` §6/§7.
    wired into `gate_commit.sh`.
 3. **§9.9 close residual** (h-25..-N): live skip-impl breakdown
    per-resume; loop picks largest category. Current post-h-26:
-   - **9.9-h-25** `[x]` `01db6434` — NaN-pattern lane
-     comparator (1222 → 0 skip-impl).
-   - **9.9-h-26** `[x]` `4de24200` — 6 new v128-mixed-arg
-     entry helpers (674 → 175 skip-impl on v128-param-pending).
-   - **9.9-h-27** **NEXT** — residual v128-param-pending 175:
-     `(v128) → i64` i64x2.extract_lane (15) + `(v128, i64) → v128`
-     i64x2.replace_lane (8) + `(v128, v128, i32) → v128`
-     select_v128_i32 (6) + `(v128, v128) → i32` composites
-     (~140 `_as_i32` / `_as_select_cond` / `_as_if_cond` /
-     `_as_br_if_cond`). Same mechanical extension as h-26.
+   - **9.9-h-25** `[x]` `01db6434` — NaN-pattern lane (1222→0).
+   - **9.9-h-26** `[x]` `4de24200` — 6 v128-mixed-arg helpers
+     (674 → 175).
+   - **9.9-h-27** `[x]` `2c5cb3e9` — 3 more shapes (175 → 39);
+     D-083 deferred select_v128_i32 bug.
+   - **9.9-h-28** **NEXT** — residual v128-param-pending 33
+     (non-select shapes): `(v128, v128, v128) → i32`
+     *_with_v128.bitselect 12 + `(v128, i32) → i32`
+     *_replace_lane-{s,u} 8 + ~13 one-off composites
+     (`as-*`, `swizzle-as-*`, etc.). Same mechanical extension.
    - Then: assert_trap-v128-pending 18 + export-name-has-spaces
      3 (separate small chunks).
+   - D-083 v128 select op bug — investigate spike when capacity
+     allows; restore SUPPORTED + regen + flip +6 PASS.
    Chunks until `failed = skip-impl = 0` on 2-host; windowsmini
    reconcile at Phase boundary close. §9.9 row flips `[x]`.
 4. **§9.11 + Track A bundled** (1 chunk): audit_scaffolding
