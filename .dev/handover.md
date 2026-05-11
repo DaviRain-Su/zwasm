@@ -18,14 +18,15 @@ Deliverables: `.dev/phase10_prep/track_{a,b,c}_*.md` +
 `.dev/phase10_transition_gate.md`. Normal `/continue` resumes.
 
 Phase: 9 (SIMD-128). §9.5/6/7/8 [x]; §9.9 [ ] (Mac+OrbStack
-**13273/0/468** = 78 skip-impl + 390 skip-adr post-h-28;
+**13295/0/446** = 56 skip-impl + 390 skip-adr post-h-29;
 windowsmini reconcile pending).
 
-Latest landed: `b85c07da` — 9.9-h-28 11 new v128-mixed-arg
-entry helpers (+32 PASS, 0 FAIL). Residual skip-impl 78:
-v128-param-pending 6 (all D-083-deferred select_v128_i32) +
-assert_trap-v128 18 + export-name 4 (+1 reclassified from
-v128.store align=16 now-shape-supported).
+Latest landed: `2f1e75f1` — 9.9-h-29 assert_trap + quoted-name
+(+22 PASS, 0 FAIL). **Manifest-line skip-impl is now only the
+6 D-083-deferred `select_v128_i32` lines**; the other ~50
+runner-tally skip-impl are runner-classified SKIP-VALIDATOR-GAP /
+SKIP-PARSER-GAP on assert_invalid/assert_malformed compile-clean
+cases (Phase-10+ concern).
 
 ## Implementation queue (matches ROADMAP first `[ ]`)
 
@@ -50,13 +51,16 @@ gate. Specs: `phase10_prep/track_*.md` §6/§7.
      D-083 deferred select_v128_i32 bug.
    - **9.9-h-28** `[x]` `b85c07da` — 11 more shapes (39 → 6;
      residual = D-083-deferred select).
-   - **9.9-h-29** **NEXT** — assert_trap-v128-pending 18 +
-     export-name-has-spaces 4 (both small, separate chunks
-     OR bundled). assert_trap-v128 needs v128-result trap
-     detection path in runner; export-name-has-spaces needs
-     quoted-name tokenisation in directive parser.
-   - D-083 v128 select op bug — investigate spike when
-     capacity allows; restore SUPPORTED + regen + flip +6 PASS.
+   - **9.9-h-29** `[x]` `2f1e75f1` — assert_trap + quoted-name
+     (manifest skip-impl now 6 = D-083 only).
+   - **9.9-h-30** **NEXT** — D-083 v128 select op spike. Last
+     manifest-line skip-impl. Hypotheses in D-083 row: (a)
+     i32-param-marshal W0/W1; (b) populateShapeTags for select
+     cond; (c) entry-helper sig mismatch. Flip + 6 PASS when
+     fixed. Or, if spike is non-trivial (> 1 chunk), promote
+     deferral to skip-ADR per ADR-0029 and §9.9 can close.
+   - Then: §9.11 (audit + SHA backfill) + §9.12 (Track D wiring
+     for Phase 10 hard gate).
    Chunks until `failed = skip-impl = 0` on 2-host; windowsmini
    reconcile at Phase boundary close. §9.9 row flips `[x]`.
 4. **§9.11 + Track A bundled** (1 chunk): audit_scaffolding
