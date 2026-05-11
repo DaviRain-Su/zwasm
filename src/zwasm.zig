@@ -216,6 +216,9 @@ test {
     _ = @import("engine/codegen/x86_64/op_simd_int_cmp_lane.zig");
     _ = @import("engine/codegen/x86_64/op_simd_float.zig");
     _ = @import("engine/codegen/x86_64/op_simd_test.zig");
+    _ = @import("engine/codegen/x86_64/op_simd_int_arith_test.zig");
+    _ = @import("engine/codegen/x86_64/op_simd_int_cmp_lane_test.zig");
+    _ = @import("engine/codegen/x86_64/op_simd_float_test.zig");
     _ = @import("engine/codegen/x86_64/emit.zig");
     _ = @import("engine/codegen/x86_64/emit_test.zig");
     _ = @import("platform/jit_mem.zig");
