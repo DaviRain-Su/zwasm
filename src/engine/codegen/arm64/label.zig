@@ -89,4 +89,16 @@ pub const Label = struct {
     /// results). Default 0; emitBlock / emitLoop / emitIf set
     /// the live value before pushing the Label.
     entry_stack_depth: u32 = 0,
+
+    /// D-093 (d-6) — Wasm 2.0 multi-value block param count
+    /// (typeidx blocktype's `ft.params.len`). The K params are
+    /// already on the operand stack at block-open (validator's
+    /// stack discipline) and get consumed by the block body.
+    /// emitEndIntra computes `new_len = entry_stack_depth -
+    /// param_arity + result_arity` so the truncate is correct
+    /// when the body actually consumed the params and replaced
+    /// them with results. Default 0; emitBlock / emitLoop /
+    /// emitIf unpack from `ZirInstr.extra`'s high byte
+    /// (`(params << 8) | results`).
+    param_arity: u8 = 0,
 };

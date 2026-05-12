@@ -998,7 +998,16 @@ const Lowerer = struct {
         const idx: u32 = @intCast(sleb);
         if (idx >= self.module_types.len) return Error.BadBlockType;
         const ft = self.module_types[idx];
-        return @intCast(ft.results.len);
+        // D-093 (d-6): pack param_arity into the high byte so
+        // per-arch emit can compute the correct end-of-block
+        // operand-stack height (= entry - params + results). The
+        // Wasm 2.0 typeidx blocktype admits both params and
+        // results; the single-byte negative forms have 0 params.
+        // 8-bit per arity matches `Label.merge_top_vregs_cap`.
+        const params: u32 = @intCast(ft.params.len);
+        const results: u32 = @intCast(ft.results.len);
+        if (params > 0xFF or results > 0xFF) return Error.BadBlockType;
+        return (params << 8) | results;
     }
 
     fn closeBlock(self: *Lowerer) Error!void {

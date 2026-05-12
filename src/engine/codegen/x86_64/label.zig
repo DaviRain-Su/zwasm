@@ -74,4 +74,8 @@ pub const Label = struct {
     /// results). Default 0; emitBlock / emitLoop / emitIf set
     /// the live value before pushing the Label.
     entry_stack_depth: u32 = 0,
+
+    /// D-093 (d-6) — Wasm 2.0 multi-value block param count.
+    /// Mirrors `arm64/label.zig:Label.param_arity`.
+    param_arity: u8 = 0,
 };

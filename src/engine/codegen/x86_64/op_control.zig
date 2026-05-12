@@ -42,6 +42,16 @@ const ZirFunc = zir.ZirFunc;
 /// `arm64/op_control.zig:merge_top_vregs_cap`.
 const merge_top_vregs_cap: u8 = 8;
 
+/// Unpack `(param_arity, result_arity)` from a block-open
+/// ZirInstr's `extra`. Mirrors
+/// `arm64/op_control.zig:unpackBlockArity`.
+fn unpackBlockArity(extra: u32) struct { params: u8, results: u8 } {
+    return .{
+        .params = @intCast((extra >> 8) & 0xFF),
+        .results = @intCast(extra & 0xFF),
+    };
+}
+
 /// Block-merge mechanism for forward `br` / `br_if` to a
 /// `block (result T..)` target. Mirrors
 /// `arm64/op_control.zig:captureOrEmitBlockMergeMov`
@@ -109,12 +119,14 @@ pub fn emitBlock(
     pushed_vregs: *const std.ArrayList(u32),
     arity_u32: u32,
 ) Error!void {
-    const arity: u8 = std.math.cast(u8, arity_u32) orelse return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:emitBlock-arity", arity_u32);
+    const ar = unpackBlockArity(arity_u32);
+    if (ar.results > merge_top_vregs_cap) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:emitBlock-arity", arity_u32);
     try labels.append(allocator, .{
         .kind = .block,
         .target_byte_offset = 0,
         .pending = .empty,
-        .result_arity = arity,
+        .result_arity = ar.results,
+        .param_arity = ar.params,
         .entry_stack_depth = @intCast(pushed_vregs.items.len),
     });
 }
@@ -130,12 +142,14 @@ pub fn emitLoop(
     pushed_vregs: *const std.ArrayList(u32),
     arity_u32: u32,
 ) Error!void {
-    const arity: u8 = std.math.cast(u8, arity_u32) orelse return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:emitLoop-arity", arity_u32);
+    const ar = unpackBlockArity(arity_u32);
+    if (ar.results > merge_top_vregs_cap) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:emitLoop-arity", arity_u32);
     try labels.append(allocator, .{
         .kind = .loop,
         .target_byte_offset = @intCast(buf.items.len),
         .pending = .empty,
-        .result_arity = arity,
+        .result_arity = ar.results,
+        .param_arity = ar.params,
         .entry_stack_depth = @intCast(pushed_vregs.items.len),
     });
 }
@@ -423,8 +437,8 @@ pub fn emitIf(
     arity_extra: u32,
 ) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
-    const arity: u8 = std.math.cast(u8, arity_extra) orelse return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:216", 0);
-    if (arity > merge_top_vregs_cap) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:217", 0);
+    const ar = unpackBlockArity(arity_extra);
+    if (ar.results > merge_top_vregs_cap) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:217", 0);
     const cond_v = pushed_vregs.pop().?;
     const cond_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, cond_v, 0);
     try buf.appendSlice(allocator, inst.encTestRR(.d, cond_r, cond_r).slice());
@@ -435,7 +449,8 @@ pub fn emitIf(
         .target_byte_offset = 0,
         .pending = .empty,
         .if_skip_byte = skip_at,
-        .result_arity = arity,
+        .result_arity = ar.results,
+        .param_arity = ar.params,
         // D-093 (d-1): measured AFTER popping cond_v, matches
         // the depth a subsequent br would target.
         .entry_stack_depth = @intCast(pushed_vregs.items.len),
@@ -515,7 +530,9 @@ pub fn emitEndIntra(
     // `arm64/op_control.zig:emitEndIntra` block-merge branch.
     if (lbl.kind == .block and lbl.merge_captured and lbl.result_arity > 0) {
         const arity: u32 = lbl.result_arity;
-        const entry: usize = lbl.entry_stack_depth;
+        // D-093 (d-6): account for Wasm 2.0 block params (mirror
+        // of arm64).
+        const entry: usize = @as(usize, lbl.entry_stack_depth) -| @as(usize, lbl.param_arity);
         // Three shapes (see `arm64/op_control.zig:emitEndIntra`
         // for the canonical comment). Case (c) — stack emptied
         // by intervening loop/if truncate — surfaced by
@@ -651,21 +668,25 @@ pub fn emitEndIntra(
     // `arm64/op_control.zig:emitEndIntra` final block; see that
     // file for the rationale (br inside block leaves extras on
     // operand stack that downstream consumers must not see).
-    const new_len: usize = @as(usize, lbl.entry_stack_depth) + @as(usize, lbl.result_arity);
+    // D-093 (d-6): account for Wasm 2.0 block params (mirror
+    // of arm64). new_len = entry - param_arity + result_arity.
+    const entry_base: usize = @as(usize, lbl.entry_stack_depth) -| @as(usize, lbl.param_arity);
+    const new_len: usize = entry_base + @as(usize, lbl.result_arity);
     if (pushed_vregs.items.len > new_len and lbl.result_arity > 0) {
         const top_start = pushed_vregs.items.len - lbl.result_arity;
         var i: usize = 0;
         while (i < lbl.result_arity) : (i += 1) {
-            pushed_vregs.items[lbl.entry_stack_depth + i] = pushed_vregs.items[top_start + i];
+            pushed_vregs.items[entry_base + i] = pushed_vregs.items[top_start + i];
         }
     }
     if (pushed_vregs.items.len > new_len) {
         pushed_vregs.shrinkRetainingCapacity(new_len);
     }
     // D-093 (d-5): pad with placeholder vreg 0 when loop fall-
-    // through is dead. See `arm64/op_control.zig:emitEndIntra`
-    // for the rationale (`loop.wast:cont-inner`).
-    while (pushed_vregs.items.len < new_len) {
-        try pushed_vregs.append(allocator, 0);
+    // through is dead. Restricted to `.loop` (mirror of arm64).
+    if (lbl.kind == .loop) {
+        while (pushed_vregs.items.len < new_len) {
+            try pushed_vregs.append(allocator, 0);
+        }
     }
 }

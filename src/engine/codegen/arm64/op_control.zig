@@ -117,18 +117,26 @@ fn captureOrEmitBlockMergeMov(ctx: *EmitCtx, tgt_idx: usize) Error!bool {
     return true;
 }
 
+/// Unpack `(param_arity, result_arity)` from a block-open
+/// ZirInstr's `extra` field. Per lower.zig's `readBlockArity`
+/// the packing is `(params << 8) | results`, both u8.
+fn unpackBlockArity(extra: u32) struct { params: u8, results: u8 } {
+    return .{
+        .params = @intCast((extra >> 8) & 0xFF),
+        .results = @intCast(extra & 0xFF),
+    };
+}
+
 /// `block` — push a forward-resolving label frame.
 pub fn emitBlock(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
-    // D-093 (d-1): record result_arity (from ZirInstr.extra,
-    // per lower.zig:openBlock) + entry_stack_depth so
-    // emitEndIntra can truncate the operand stack at block
-    // close.
-    const arity: u8 = std.math.cast(u8, ins.extra) orelse return Error.UnsupportedOp;
+    const ar = unpackBlockArity(ins.extra);
+    if (ar.results > merge_top_vregs_cap) return Error.UnsupportedOp;
     try ctx.labels.append(ctx.allocator, .{
         .kind = .block,
         .target_byte_offset = 0, // unknown until matching `end`
         .pending = .empty,
-        .result_arity = arity,
+        .result_arity = ar.results,
+        .param_arity = ar.params,
         .entry_stack_depth = @intCast(ctx.pushed_vregs.items.len),
     });
 }
@@ -136,12 +144,14 @@ pub fn emitBlock(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// `loop` — push a backward-resolving label frame; capture the
 /// current buf offset as the loop entry.
 pub fn emitLoop(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
-    const arity: u8 = std.math.cast(u8, ins.extra) orelse return Error.UnsupportedOp;
+    const ar = unpackBlockArity(ins.extra);
+    if (ar.results > merge_top_vregs_cap) return Error.UnsupportedOp;
     try ctx.labels.append(ctx.allocator, .{
         .kind = .loop,
         .target_byte_offset = @intCast(ctx.buf.items.len),
         .pending = .empty,
-        .result_arity = arity,
+        .result_arity = ar.results,
+        .param_arity = ar.params,
         .entry_stack_depth = @intCast(ctx.pushed_vregs.items.len),
     });
 }
@@ -400,8 +410,8 @@ pub fn emitBrTable(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// `UnsupportedOp`.
 pub fn emitIf(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     if (ctx.pushed_vregs.items.len < 1) return Error.AllocationMissing;
-    const arity: u8 = std.math.cast(u8, ins.extra) orelse return Error.UnsupportedOp;
-    if (arity > merge_top_vregs_cap) return Error.UnsupportedOp;
+    const ar = unpackBlockArity(ins.extra);
+    if (ar.results > merge_top_vregs_cap) return Error.UnsupportedOp;
     const cond = ctx.pushed_vregs.pop().?;
     const wn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, cond, 0);
     const skip_byte: u32 = @intCast(ctx.buf.items.len);
@@ -411,7 +421,8 @@ pub fn emitIf(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         .target_byte_offset = 0,
         .pending = .empty,
         .if_skip_byte = skip_byte,
-        .result_arity = arity,
+        .result_arity = ar.results,
+        .param_arity = ar.params,
         // D-093 (d-1): entry_stack_depth measured AFTER popping
         // the if's condition vreg (matches the depth a
         // subsequent br would target).
@@ -494,7 +505,10 @@ pub fn emitEndIntra(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     // ran at runtime.
     if (lbl.kind == .block and lbl.merge_captured and lbl.result_arity > 0) {
         const arity: u32 = lbl.result_arity;
-        const entry: usize = lbl.entry_stack_depth;
+        // D-093 (d-6): block-with-params consumed `param_arity`
+        // entry-time values; canonical post-block stack base
+        // is `entry - param_arity`.
+        const entry: usize = @as(usize, lbl.entry_stack_depth) -| @as(usize, lbl.param_arity);
         // Three shapes at block-end fall-through:
         //   (a) Live fall-through  — pushed_vregs.len >= entry +
         //       arity and top arity differ from merge_top_vregs.
@@ -686,30 +700,35 @@ pub fn emitEndIntra(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     // canonical merge target vregs, so this final truncation
     // collapses the redundant else-arm slots into a single
     // result slot.
-    const new_len: usize = @as(usize, lbl.entry_stack_depth) + @as(usize, lbl.result_arity);
+    // D-093 (d-6): account for Wasm 2.0 block params. The
+    // block's body consumed `param_arity` values from the
+    // entry-time operand stack (they were on top at block-open),
+    // so the post-block height is
+    // `entry_stack_depth - param_arity + result_arity`. Pre-d-6
+    // the truncate used `entry + result`, which over-counted
+    // when the block had params (block:param tests).
+    const entry_base: usize = @as(usize, lbl.entry_stack_depth) -| @as(usize, lbl.param_arity);
+    const new_len: usize = entry_base + @as(usize, lbl.result_arity);
     if (ctx.pushed_vregs.items.len > new_len and lbl.result_arity > 0) {
         const top_start = ctx.pushed_vregs.items.len - lbl.result_arity;
         var i: usize = 0;
         while (i < lbl.result_arity) : (i += 1) {
-            ctx.pushed_vregs.items[lbl.entry_stack_depth + i] = ctx.pushed_vregs.items[top_start + i];
+            ctx.pushed_vregs.items[entry_base + i] = ctx.pushed_vregs.items[top_start + i];
         }
     }
     if (ctx.pushed_vregs.items.len > new_len) {
         ctx.pushed_vregs.shrinkRetainingCapacity(new_len);
     }
-    // D-093 (d-5): `.loop` fall-through is dead when the loop body
-    // ends with a backward `br` (= unconditional continue). The
-    // operand stack reaches loop-end with `< entry + arity`
-    // entries; the validator accepts via polymorphic-stack but
-    // emit's downstream pops need `arity` placeholder slots.
-    // Surfaced by `loop.wast:cont-inner` (`loop (result i32)
-    // (br 0)` shape inside `i32.add` operand position; post-loop
-    // i32.add pops the loop's result but pushed_vregs is empty
-    // → AllocationMissing). Vreg 0 is always allocatable per
-    // regalloc invariants; the generated post-loop code reading
-    // these placeholders is unreachable at runtime so the values
-    // don't matter.
-    while (ctx.pushed_vregs.items.len < new_len) {
-        try ctx.pushed_vregs.append(ctx.allocator, 0);
+    // D-093 (d-5): `.loop` fall-through dead — pad with
+    // placeholder vreg 0 so the downstream post-loop pop
+    // doesn't underflow. Restricted to `.loop` because
+    // block/if dead-fall-through is already handled by the
+    // merge-MOV mechanism (d-2 / d-4 cases) or by the natural
+    // operand-stack invariant (live fall-through always
+    // produces exactly `new_len` entries).
+    if (lbl.kind == .loop) {
+        while (ctx.pushed_vregs.items.len < new_len) {
+            try ctx.pushed_vregs.append(ctx.allocator, 0);
+        }
     }
 }

@@ -614,9 +614,11 @@ test "lower: multivalue block typeidx with non-empty params lowers (D-035 chunk-
     const types = [_]FuncType{.{ .params = &i32_arr_local, .results = &i32_arr_local }};
     const body = [_]u8{ 0x02, 0x00, 0x0B, 0x0B };
     try lowerFunctionBody(testing.allocator, &body, &f, &types);
-    // arity slot still communicates only the result count.
+    // D-093 (d-6): extra now packs both arities — high byte =
+    // param_arity, low byte = result_arity. For this typeidx
+    // (params = [i32], results = [i32]), expect (1<<8)|1 = 257.
     try testing.expectEqual(ZirOp.block, f.instrs.items[0].op);
-    try testing.expectEqual(@as(u32, 1), f.instrs.items[0].extra);
+    try testing.expectEqual(@as(u32, (1 << 8) | 1), f.instrs.items[0].extra);
 }
 
 // ============================================================
