@@ -42,6 +42,8 @@ const inst = @import("inst.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
 const trace = @import("../../../diagnostic/trace.zig");
+const abi = @import("abi.zig");
+const jit_abi = @import("../shared/jit_abi.zig");
 
 const ZirInstr = zir.ZirInstr;
 const EmitCtx = ctx_mod.EmitCtx;
@@ -488,5 +490,126 @@ pub fn emitMemoryCopy(ctx: *EmitCtx) Error!void {
             4,
         );
         std.mem.writeInt(u32, ctx.buf.items[bwd_end_jmp_at..][0..4], inst.encB(disp_words), .little);
+    }
+}
+
+/// Wasm spec §4.5.3.10 (memory.init dataidx) — copy `n` bytes from
+/// data segment `dataidx` at offset `src` into linear memory at
+/// offset `dst`. Traps OutOfBoundsMemoryAccess on `src+n > seg.len`
+/// or `dst+n > mem_limit`. When the segment was dropped, the spec
+/// treats its length as 0 (any `n > 0` traps).
+///
+/// Register layout (caller-saved scratch only — no calls):
+///   X17 = dst (then dst_p = vm_base + dst)
+///   X16 = src (then src_p = seg.ptr + src)
+///   X14 = n   (counter)
+///   X11 = seg.ptr (preserved across bounds check)
+///   X15 = seg.len (overridden to 0 if dropped)
+///   X9, X10, X12 = ad-hoc temps
+pub fn emitMemoryInit(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const dataidx = ins.payload;
+    // imm12 budget: LDR X-form scaled byte_off ≤ 32760 → idx ≤ 2047
+    // (stride 16). LDRB imm12 ≤ 4095 → idx ≤ 4095. The 2047 bound
+    // is the tighter one. Validator already bounds idx vs the
+    // module's segment count; this guard only rejects encoding-
+    // budget overflow.
+    if (dataidx >= 2048) return Error.UnsupportedOp;
+
+    if (ctx.pushed_vregs.items.len < 3) return Error.AllocationMissing;
+    const n_v = ctx.pushed_vregs.pop().?;
+    const src_v = ctx.pushed_vregs.pop().?;
+    const dst_v = ctx.pushed_vregs.pop().?;
+
+    // Step A: capture operands into X17 / X16 / X14 (W-form copies
+    // zero-extend to 64-bit; safe since Wasm i32 ops never set bit 32+).
+    const w_dst_src = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, dst_v, 0);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(17, 31, w_dst_src));
+    const w_src_src = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_v, 0);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(16, 31, w_src_src));
+    const w_n_src = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, n_v, 0);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(14, 31, w_n_src));
+
+    // Step B: read seg.ptr (X11) + seg.len (X15) from data_segments_ptr.
+    //   LDR  X10, [X19, #data_segments_ptr_off]    ; seg table base
+    //   LDR  X11, [X10, #(idx*16)]                  ; seg.ptr
+    //   LDR  X15, [X10, #(idx*16)+8]                ; seg.len
+    const seg_byte_off: u15 = @intCast(@as(u32, dataidx) * 16);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(10, abi.runtime_ptr_save_gpr, jit_abi.data_segments_ptr_off));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(11, 10, seg_byte_off));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(15, 10, seg_byte_off + 8));
+
+    // Step C: dropped flag override. If dropped == 1, seg.len → 0.
+    //   LDR  X10, [X19, #data_dropped_ptr_off]
+    //   LDRB W12, [X10, #idx]
+    //   CMP  W12, #0
+    //   CSEL X15, X15, XZR, EQ      ; keep len when not dropped (W12==0)
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(10, abi.runtime_ptr_save_gpr, jit_abi.data_dropped_ptr_off));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrbImm(12, 10, @intCast(dataidx)));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmW(12, 0));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCselX(15, 15, 31, .eq));
+
+    // Step D1: bounds — src + n > seg.len → trap.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddReg(12, 16, 14));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(12, 15));
+    {
+        const fixup_at: u32 = @intCast(ctx.buf.items.len);
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hi, 0));
+        try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+        trace.writeBounds(ctx.func.func_idx, fixup_at);
+    }
+
+    // Step D2: bounds — dst + n > mem_limit (X27) → trap.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddReg(12, 17, 14));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(12, 27));
+    {
+        const fixup_at: u32 = @intCast(ctx.buf.items.len);
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hi, 0));
+        try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+        trace.writeBounds(ctx.func.func_idx, fixup_at);
+    }
+
+    // Step E: if n == 0, skip the copy (CBZ on W14 — Wasm n is i32).
+    const skip_zero_at: u32 = @intCast(ctx.buf.items.len);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCbzW(14, 0));
+
+    // Step F: compute absolute pointers.
+    //   X17 = X28 + X17  ; dst_p = vm_base + dst
+    //   X16 = X11 + X16  ; src_p = seg.ptr + src
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddReg(17, 28, 17));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddReg(16, 11, 16));
+
+    // Step G: forward byte loop. memory.init's spec allows the source
+    // (data segment) and destination (linear memory) to be disjoint
+    // by construction — data segments live in module-owned host
+    // storage, never overlapping linear memory — so a forward-only
+    // copy is sufficient (unlike memory.copy which must handle
+    // overlap).
+    // .loop:
+    //   LDRB W12, [X16]
+    //   STRB W12, [X17]
+    //   ADD  X16, X16, #1
+    //   ADD  X17, X17, #1
+    //   SUB  X14, X14, #1
+    //   CBNZ W14, .loop
+    const loop_start: u32 = @intCast(ctx.buf.items.len);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrbImm(12, 16, 0));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrbImm(12, 17, 0));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(16, 16, 1));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(17, 17, 1));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encSubImm12(14, 14, 1));
+    const back_disp_words: i32 = @divExact(
+        @as(i32, @intCast(loop_start)) - @as(i32, @intCast(ctx.buf.items.len)),
+        4,
+    );
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCbnzW(14, back_disp_words));
+
+    // .end: patch the n==0 skip.
+    const end_byte: u32 = @intCast(ctx.buf.items.len);
+    {
+        const disp_words: i19 = @intCast(@divExact(
+            @as(i32, @intCast(end_byte)) - @as(i32, @intCast(skip_zero_at)),
+            4,
+        ));
+        std.mem.writeInt(u32, ctx.buf.items[skip_zero_at..][0..4], inst.encCbzW(14, disp_words), .little);
     }
 }

@@ -261,6 +261,12 @@ pub fn stackEffect(op: ZirOp) ?StackEffect {
         // Wasm spec §4.4.7 (bulk memory) — pop dst, src/val, n.
         // No result is pushed.
         .@"memory.copy", .@"memory.fill" => .{ .pops = 3, .pushes = 0 },
+        // §9.9 / 9.9-m-3b: memory.init pops dst, src, n (3) and
+        // pushes nothing; dataidx is in `payload`. data.drop /
+        // elem.drop are 0 → 0 (no operand stack effect; dropped
+        // flag is JIT-handled via `payload`).
+        .@"memory.init" => .{ .pops = 3, .pushes = 0 },
+        .@"data.drop", .@"elem.drop" => .{ .pops = 0, .pushes = 0 },
         // ============================================================
         // Wasm 2.0 SIMD (v128) — §9.9 / 9.9-d.
         // Wasm spec §4.4.6 (vector instructions).

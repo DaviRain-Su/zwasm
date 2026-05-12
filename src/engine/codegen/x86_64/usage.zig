@@ -93,6 +93,9 @@ pub fn usesRuntimePtr(func: *const ZirFunc) bool {
             .@"memory.grow",
             .@"memory.copy",
             .@"memory.fill",
+            // §9.9 / 9.9-m-3b: memory.init reads data_segments_ptr +
+            // data_dropped_ptr + mem_limit + vm_base from [r15+off].
+            .@"memory.init",
             .call,
             .call_indirect,
             // Trap-stub emitters: unreachable + div / rem (i32/i64

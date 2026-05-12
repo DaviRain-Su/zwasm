@@ -511,3 +511,143 @@ pub fn emitMemoryCopy(
         @memcpy(buf.items[bwd_end_jmp_at..][0..5], &word);
     }
 }
+
+/// Wasm spec §4.5.3.10 (memory.init dataidx) — copy `n` bytes from
+/// data segment `dataidx` at offset `src` into linear memory at
+/// offset `dst`. Traps OutOfBoundsMemoryAccess on `src+n > seg.len`
+/// (with `len = 0` when dropped) or `dst+n > mem_limit`.
+///
+/// Register layout (caller-saved scratch only):
+///   RCX = dst (then dst_p = vm_base + dst)
+///   RDX = src (then src_p = seg.ptr + src)
+///   R10 = n   (counter)
+///   R9  = seg.ptr (preserved across bounds checks)
+///   R8  = seg.len (zeroed if dropped)
+///   RAX, R11, RDI = ad-hoc scratch (RDI repurposed since the
+///                   JIT body never re-uses arg0 mid-function)
+pub fn emitMemoryInit(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    bounds_fixups: *std.ArrayList(u32),
+    spill_base_off: u32,
+    func_idx: u32,
+    dataidx: u32,
+) Error!void {
+    // Encoding-budget guard: 16-byte stride means disp32 always
+    // suffices for realistic segment counts. Match the arm64 path's
+    // 2048 cap for cross-arch consistency (validator already rejects
+    // out-of-range dataidx).
+    if (dataidx >= 2048) return Error.UnsupportedOp;
+
+    if (pushed_vregs.items.len < 3) return Error.AllocationMissing;
+    const n_v = pushed_vregs.pop().?;
+    const src_v = pushed_vregs.pop().?;
+    const dst_v = pushed_vregs.pop().?;
+
+    // Step A: capture pop'd operands into RCX, RDX, R10 (private
+    // holders that survive subsequent spill-aware loads).
+    const dst_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, dst_v, 0);
+    try buf.appendSlice(allocator, inst.encMovRR(.d, .rcx, dst_r).slice());
+    const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
+    try buf.appendSlice(allocator, inst.encMovRR(.d, .rdx, src_r).slice());
+    const n_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, n_v, 0);
+    try buf.appendSlice(allocator, inst.encMovRR(.d, .r10, n_r).slice());
+
+    // Step B: read seg.ptr (R9) + seg.len (R8) from data_segments_ptr.
+    //   MOV RAX, [R15 + data_segments_ptr_off]    ; seg table base
+    //   MOV R9,  [RAX + idx*16 + 0]                ; seg.ptr
+    //   MOV R8,  [RAX + idx*16 + 8]                ; seg.len
+    const seg_byte_off: i32 = @intCast(@as(u64, dataidx) * 16);
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.data_segments_ptr_off).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r9, .rax, seg_byte_off).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r8, .rax, seg_byte_off + 8).slice());
+
+    // Step C: dropped flag override. dropped != 0 → seg.len = 0.
+    //   MOV R11, [R15 + data_dropped_ptr_off]
+    //   ADD R11, idx                               ; &dropped[idx]
+    //   XOR EDI, EDI                                ; zero idx (one-shot)
+    //   MOVZX R11d, byte [R11 + RDI]                ; R11 = dropped (R11 clobbered)
+    //   XOR EAX, EAX                                ; zero source for CMOVNE
+    //   TEST R11, R11                               ; ZF=1 when NOT dropped
+    //   CMOVNE R8, RAX                              ; if dropped → R8 = 0
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r11, abi.runtime_ptr_save_gpr, jit_abi.data_dropped_ptr_off).slice());
+    try buf.appendSlice(allocator, inst.encAddR64Imm32(.r11, @intCast(dataidx)).slice());
+    try buf.appendSlice(allocator, inst.encXorRR(.d, .rdi, .rdi).slice());
+    try buf.appendSlice(allocator, inst.encMovzxR32_8MemBaseIdx(.r11, .r11, .rdi).slice());
+    try buf.appendSlice(allocator, inst.encXorRR(.d, .rax, .rax).slice());
+    try buf.appendSlice(allocator, inst.encTestRR(.q, .r11, .r11).slice());
+    try buf.appendSlice(allocator, inst.encCmovccRR(.q, .ne, .r8, .rax).slice());
+
+    // Step D1: bounds — src + n > seg.len → trap.
+    //   MOV RAX, RDX
+    //   ADD RAX, R10
+    //   CMP RAX, R8
+    //   JA trap
+    try buf.appendSlice(allocator, inst.encMovRR(.d, .rax, .rdx).slice());
+    try buf.appendSlice(allocator, inst.encAddRR(.q, .rax, .r10).slice());
+    try buf.appendSlice(allocator, inst.encCmpRR(.q, .rax, .r8).slice());
+    {
+        const fixup_at: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.a, 0).slice());
+        try bounds_fixups.append(allocator, fixup_at);
+        trace.writeBounds(func_idx, fixup_at);
+    }
+
+    // Step D2: bounds — dst + n > mem_limit → trap.
+    try buf.appendSlice(allocator, inst.encMovRR(.d, .rax, .rcx).slice());
+    try buf.appendSlice(allocator, inst.encAddRR(.q, .rax, .r10).slice());
+    try buf.appendSlice(allocator, inst.encCmpR64MemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.mem_limit_off).slice());
+    {
+        const fixup_at: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.a, 0).slice());
+        try bounds_fixups.append(allocator, fixup_at);
+        trace.writeBounds(func_idx, fixup_at);
+    }
+
+    // Step E: if n == 0, skip the copy.
+    try buf.appendSlice(allocator, inst.encTestRR(.q, .r10, .r10).slice());
+    const skip_zero_at: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
+
+    // Step F: compute absolute pointers.
+    //   MOV RAX, [R15 + vm_base_off]
+    //   ADD RCX, RAX                                ; dst_p = vm_base + dst
+    //   ADD RDX, R9                                 ; src_p = seg.ptr + src
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.vm_base_off).slice());
+    try buf.appendSlice(allocator, inst.encAddRR(.q, .rcx, .rax).slice());
+    try buf.appendSlice(allocator, inst.encAddRR(.q, .rdx, .r9).slice());
+
+    // Step G: forward byte loop. Data segments live in host-owned
+    // storage; linear memory is disjoint, so no overlap concern
+    // (unlike memory.copy).
+    //   XOR EAX, EAX                                ; zero idx
+    // .loop:
+    //   MOVZX R11d, byte [RDX + RAX]
+    //   MOV   byte [RCX + RAX], R11B
+    //   ADD   RCX, 1
+    //   ADD   RDX, 1
+    //   ADD   R10, -1
+    //   JNE   .loop
+    try buf.appendSlice(allocator, inst.encXorRR(.d, .rax, .rax).slice());
+    const loop_start: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encMovzxR32_8MemBaseIdx(.r11, .rdx, .rax).slice());
+    try buf.appendSlice(allocator, inst.encStoreR8MemBaseIdx(.r11, .rcx, .rax).slice());
+    try buf.appendSlice(allocator, inst.encAddR64Imm32(.rcx, 1).slice());
+    try buf.appendSlice(allocator, inst.encAddR64Imm32(.rdx, 1).slice());
+    try buf.appendSlice(allocator, inst.encAddR64Imm32(.r10, -1).slice());
+    {
+        const after_jnz: i32 = @as(i32, @intCast(buf.items.len)) + 6;
+        const disp: i32 = @as(i32, @intCast(loop_start)) - after_jnz;
+        try buf.appendSlice(allocator, inst.encJccRel32(.ne, disp).slice());
+    }
+
+    // .end: patch the n==0 skip JE.
+    const end_byte: u32 = @intCast(buf.items.len);
+    {
+        const disp: i32 = @as(i32, @intCast(end_byte)) - (@as(i32, @intCast(skip_zero_at)) + 6);
+        const word: [6]u8 = inst.encJccRel32(.e, disp).slice()[0..6].*;
+        @memcpy(buf.items[skip_zero_at..][0..6], &word);
+    }
+}

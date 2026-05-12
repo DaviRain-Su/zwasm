@@ -32,6 +32,21 @@ const FuncEntity = @import("../../../runtime/instance/func.zig").FuncEntity;
 /// picked up automatically.
 pub const func_entity_size: u32 = @sizeOf(FuncEntity);
 
+/// §9.9 / 9.9-m-3b (per ADR-0056): per-data-segment slice
+/// descriptor exposed to JIT `memory.init`. Layout is a fixed
+/// 16-byte (ptr, len) pair so the JIT body indexes the
+/// `data_segments_ptr` array with a stride of `segment_slice_size`.
+/// `len = 0` when the host has dropped the segment OR when the
+/// module declared no bytes for it — the JIT's seg_len read uses
+/// `data_dropped_ptr[idx]` to override `len` to 0, mirroring the
+/// interp's `if (dropped) seg_len = 0` arm.
+pub const SegmentSlice = extern struct {
+    ptr: [*]const u8,
+    len: u64,
+};
+
+pub const segment_slice_size: u32 = @sizeOf(SegmentSlice);
+
 /// Pointer-and-counter bundle the JIT body relies on. Layout
 /// extends only at the tail (Phase 8+: trap_buf, host-call
 /// dispatch table, gc_root_set ptr) so existing prologue
@@ -148,6 +163,14 @@ pub const JitRuntime = extern struct {
     elem_dropped_ptr: [*]u8 = undefined,
     elem_dropped_count: u32 = 0,
     _pad7: u32 = 0,
+    /// §9.9 / 9.9-m-3b (per ADR-0056): per-data-segment slice
+    /// descriptor array. Each entry is a `SegmentSlice` (16 bytes:
+    /// `ptr` + `len`). JIT `memory.init dataidx` indexes this with
+    /// stride `segment_slice_size` to read the segment's source
+    /// bytes, then memcpy n bytes into linear memory at dst.
+    data_segments_ptr: [*]const SegmentSlice = undefined,
+    data_segments_count: u32 = 0,
+    _pad8: u32 = 0,
 };
 
 // ============================================================
@@ -179,6 +202,8 @@ pub const data_dropped_ptr_off: u12 = @offsetOf(JitRuntime, "data_dropped_ptr");
 pub const data_dropped_count_off: u12 = @offsetOf(JitRuntime, "data_dropped_count");
 pub const elem_dropped_ptr_off: u12 = @offsetOf(JitRuntime, "elem_dropped_ptr");
 pub const elem_dropped_count_off: u12 = @offsetOf(JitRuntime, "elem_dropped_count");
+pub const data_segments_ptr_off: u12 = @offsetOf(JitRuntime, "data_segments_ptr");
+pub const data_segments_count_off: u12 = @offsetOf(JitRuntime, "data_segments_count");
 
 /// Total size of the head section consumed by the prologue.
 pub const head_size: u32 = @sizeOf(JitRuntime);
@@ -233,6 +258,15 @@ comptime {
     if ((elem_dropped_count_off & 3) != 0) @compileError("elem_dropped_count_off not 4-aligned");
     if (elem_dropped_ptr_off > 32760) @compileError("elem_dropped_ptr_off exceeds X-form imm12 budget");
     if (elem_dropped_count_off > 16380) @compileError("elem_dropped_count_off exceeds W-form imm12 budget");
+    // §9.9 / 9.9-m-3b: data_segments_ptr is X-form (8-byte pointer); count is W-form.
+    if ((data_segments_ptr_off & 7) != 0) @compileError("data_segments_ptr_off not 8-aligned");
+    if ((data_segments_count_off & 3) != 0) @compileError("data_segments_count_off not 4-aligned");
+    if (data_segments_ptr_off > 32760) @compileError("data_segments_ptr_off exceeds X-form imm12 budget");
+    if (data_segments_count_off > 16380) @compileError("data_segments_count_off exceeds W-form imm12 budget");
+    // SegmentSlice layout: 16 bytes (ptr + u64 len). JIT relies on
+    // this for `LDR Xn, [seg_base, #(idx*16)+0]` (ptr) and
+    // `LDR Xn, [seg_base, #(idx*16)+8]` (len).
+    if (@sizeOf(SegmentSlice) != 16) @compileError("SegmentSlice size != 16; JIT memory.init stride assumption broken");
 }
 
 // ============================================================
@@ -253,17 +287,19 @@ test "JitRuntime: layout offsets match documented prologue load sequence" {
     try testing.expectEqual(@as(u12, 80), jit_executed_flag_off);
 }
 
-test "JitRuntime: total size = 136 bytes (post-§9.9 / 9.9-m-3a data/elem dropped tail)" {
-    try testing.expectEqual(@as(u32, 136), head_size);
+test "JitRuntime: total size = 152 bytes (post-§9.9 / 9.9-m-3b data_segments tail)" {
+    try testing.expectEqual(@as(u32, 152), head_size);
 }
 
-test "JitRuntime: §9.9 / 9.9-m-1b + 9.9-m-3a new field offsets" {
+test "JitRuntime: §9.9 / 9.9-m-1b + 9.9-m-3a + 9.9-m-3b new field offsets" {
     try testing.expectEqual(@as(u12, 88), func_entities_ptr_off);
     try testing.expectEqual(@as(u12, 96), func_entities_count_off);
     try testing.expectEqual(@as(u12, 104), data_dropped_ptr_off);
     try testing.expectEqual(@as(u12, 112), data_dropped_count_off);
     try testing.expectEqual(@as(u12, 120), elem_dropped_ptr_off);
     try testing.expectEqual(@as(u12, 128), elem_dropped_count_off);
+    try testing.expectEqual(@as(u12, 136), data_segments_ptr_off);
+    try testing.expectEqual(@as(u12, 144), data_segments_count_off);
 }
 
 test "JitRuntime: round-trip construction + field reads" {

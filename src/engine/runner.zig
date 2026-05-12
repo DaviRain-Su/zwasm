@@ -657,6 +657,13 @@ const RuntimeOwned = struct {
     // layout the JIT expects).
     data_dropped: []u8,
     elem_dropped: []u8,
+    // §9.9 / 9.9-m-3b: per-data-segment SegmentSlice descriptors
+    // backing JIT `memory.init`. Each entry's `ptr` aliases the
+    // module's parsed `.data` section bytes (held by the caller
+    // via `wasm_bytes`); the lifetime contract is that
+    // `wasm_bytes` outlives `RuntimeOwned` (callers pass module
+    // bytes that persist across the call).
+    data_segments: []entry.SegmentSlice,
 
     fn deinit(self: *RuntimeOwned, allocator: Allocator) void {
         if (self.memory.len > 0) allocator.free(self.memory);
@@ -667,6 +674,7 @@ const RuntimeOwned = struct {
         if (self.func_entities.len > 0) allocator.free(self.func_entities);
         if (self.data_dropped.len > 0) allocator.free(self.data_dropped);
         if (self.elem_dropped.len > 0) allocator.free(self.elem_dropped);
+        if (self.data_segments.len > 0) allocator.free(self.data_segments);
     }
 };
 
@@ -827,11 +835,28 @@ fn setupRuntime(
     // / elem.drop write byte stores; JIT memory.init (m-3b) reads
     // before computing seg_len. For modules without segments, the
     // arrays are zero-length (no allocation, ptr = undefined).
+    // §9.9 / 9.9-m-3b: parallel data_segments descriptor array.
+    // Each entry's `ptr` aliases the parsed module's `.data`
+    // section bytes via the resident `wasm_bytes` slice — the
+    // segment's `bytes` field already points into that buffer
+    // (no copy). `len` is the segment's byte count; the JIT
+    // overrides to 0 via the `data_dropped_ptr` flag.
     var data_dropped_count: u32 = 0;
+    var data_segments_buf: []entry.SegmentSlice = &.{};
+    errdefer if (data_segments_buf.len > 0) allocator.free(data_segments_buf);
     if (module.find(.data)) |s| {
         var datas_buf = try sections.decodeData(ta, s.body);
         defer datas_buf.deinit();
         data_dropped_count = @intCast(datas_buf.items.len);
+        if (data_dropped_count > 0) {
+            data_segments_buf = try allocator.alloc(entry.SegmentSlice, data_dropped_count);
+            for (datas_buf.items, 0..) |seg, i| {
+                data_segments_buf[i] = .{
+                    .ptr = if (seg.bytes.len == 0) @as([*]const u8, undefined) else seg.bytes.ptr,
+                    .len = seg.bytes.len,
+                };
+            }
+        }
     }
     const data_dropped = try allocator.alloc(u8, data_dropped_count);
     errdefer allocator.free(data_dropped);
@@ -865,6 +890,8 @@ fn setupRuntime(
             .data_dropped_count = data_dropped_count,
             .elem_dropped_ptr = elem_dropped.ptr,
             .elem_dropped_count = elem_dropped_count,
+            .data_segments_ptr = if (data_segments_buf.len == 0) @as([*]const entry.SegmentSlice, undefined) else data_segments_buf.ptr,
+            .data_segments_count = @intCast(data_segments_buf.len),
         },
         .memory = memory,
         .dispatch = dispatch,
@@ -874,6 +901,7 @@ fn setupRuntime(
         .func_entities = func_entities,
         .data_dropped = data_dropped,
         .elem_dropped = elem_dropped,
+        .data_segments = data_segments_buf,
     };
 }
 

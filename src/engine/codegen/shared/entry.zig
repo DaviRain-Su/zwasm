@@ -20,6 +20,7 @@ const linker = @import("linker.zig");
 const jit_abi = @import("jit_abi.zig");
 
 pub const JitRuntime = jit_abi.JitRuntime;
+pub const SegmentSlice = jit_abi.SegmentSlice;
 
 pub const Error = error{
     /// The JIT body trapped — its trap stub stored 1 to

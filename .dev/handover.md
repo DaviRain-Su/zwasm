@@ -13,31 +13,34 @@
    per-chunk pickup chain (recipes, file paths, ADR notes) for
    the queue below. Authoritative for next session continuation.
 
-## Active state — **Phase 9 extended; session-end checkpoint 2026-05-12**
+## Active state — **Phase 9 extended; m-3b landed 2026-05-12**
 
 §9.11 [x]; §9.10 [~] Phase 11; §9.12 [ ] 🔒 (waits §9.9);
 **§9.9 [ ]** scope = full Wasm 2.0 PASS on Mac+OrbStack per
-ADR-0056. Mac aarch64 + OrbStack x86_64 bit-identical green
-on test-all; SIMD 13301/0/440 + edge-cases 35/0.
+ADR-0056. m-3b adds JIT `memory.init` end-to-end (3rd-gen
+JitRuntime ABI extension: `SegmentSlice` + `data_segments_ptr`).
+Mac aarch64 test-all green incl. 5 new edge_cases fixtures
+(init_happy/n_zero/oob_src/oob_dst/dropped); OrbStack
+reconciles on this commit. Live counts in
+`bash scripts/p9_simd_status.sh`.
 
-10 chunks landed this session (see pickup doc §"Landed").
-7 debt rows discharged (D-076, D-084..D-089).
+11 chunks landed across the prior session + this session
+(see pickup doc §"Landed" + this commit). 7 debt rows
+discharged across the same window.
 2 ADRs (ADR-0055, ADR-0056) accepted. ADR-0003 amended.
 
 ## Implementation queue (sequential — pickup detail in pickup doc)
 
-Next session picks up at **m-3b**. Order:
+Next session picks up at **m-2**. Order:
 
-1. **m-3b NEXT** — memory.init (data_segments slice + bounds
-   checks + memcpy). JitRuntime extension; pickup doc §"m-3b".
-2. m-2 — table.* full 7-op family. ~3000 LOC; ADR-0058. Split
-   candidate (m-2a/b/c per pickup doc §"m-2").
-3. m-4c — untyped .select (0x1B) lower-time type inference.
-4. l-1 — non-SIMD spec_assert_runner. ADR-0057 expected.
-5. k-1 — Wasm 2.0 non-SIMD wast vendor (~30 files).
-6. k-2 — SIMD wast vendor (33 files).
-7. n-1 — fib2 41-second perf root cause.
-8. j-3b — SKIP gate real enforcement (last).
+1. **m-2 NEXT** — table.* full 7-op family. Likely ADR-0058
+   scope. Split candidate (m-2a/b/c per pickup doc §"m-2").
+2. m-4c — untyped .select (0x1B) lower-time type inference.
+3. l-1 — non-SIMD spec_assert_runner. ADR-0057 expected.
+4. k-1 — Wasm 2.0 non-SIMD wast vendor (~30 files).
+5. k-2 — SIMD wast vendor (33 files).
+6. n-1 — fib2 perf root cause.
+7. j-3b — SKIP gate real enforcement (last).
 
 ## Sandbox quirks + hook scope
 

@@ -17,8 +17,6 @@
 //! consumed by body-emission paths (local.get / local.set /
 //! op_simd_*.zig) just as much as by the prologue/marshal.
 
-const std = @import("std");
-
 const inst = @import("inst.zig");
 
 /// `MOV [RBP + disp], r32` — picks disp8 / disp32 form per `disp`

@@ -1353,6 +1353,7 @@ pub fn compile(
             => try op_memory.emitMemOp(&ctx, &ins),
             .@"memory.fill" => try op_memory.emitMemoryFill(&ctx),
             .@"memory.copy" => try op_memory.emitMemoryCopy(&ctx),
+            .@"memory.init" => try op_memory.emitMemoryInit(&ctx, &ins),
             // §9.9 / 9.9-m-3a: data.drop / elem.drop — write 1 to
             // the dropped-flag byte at `[r15+ptr_off]+idx`. No
             // operands consumed; no result pushed. validator already
