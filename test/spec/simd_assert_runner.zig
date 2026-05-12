@@ -65,12 +65,12 @@ pub fn main(init: std.process.Init) !void {
     const corpus_root = try gpa.dupe(u8, corpus_root_arg);
     defer gpa.free(corpus_root);
 
-    var passed: u32 = 0;
-    var failed: u32 = 0;
-    // Per ADR-0029 Path B (chunk 9.9-h-21): twin tally of
-    // `skip-impl` (counts toward gate) vs `skip-adr-<id>` (waived).
-    var skipped: u32 = 0;
-    var skipped_adr: u32 = 0;
+    // Per ADR-0029 Path B (chunk 9.9-h-21): the tally carries twin
+    // `skip-impl` (counts toward gate) vs `skip-adr-<id>` (waived)
+    // counters. Per §9.9 / 9.9-l-1a stage 4 (ADR-0057), the dispatch
+    // loop lives in `base.runCorpus`; this runner contributes only the
+    // SIMD-specific module-init + assertion handlers via `simd_callbacks`.
+    var tally: base.AssertTally = .{};
     var manifest_count: u32 = 0;
 
     const cwd = std.Io.Dir.cwd();
@@ -89,241 +89,81 @@ pub fn main(init: std.process.Init) !void {
     while (try iter.next(io)) |dir_entry| {
         if (dir_entry.kind != .directory) continue;
         manifest_count += 1;
-        try runCorpus(io, gpa, &root, dir_entry.name, stdout, &passed, &failed, &skipped, &skipped_adr);
+        try base.runCorpus(io, gpa, &root, dir_entry.name, stdout, &tally, simd_callbacks);
     }
 
     try stdout.print(
         "\nsimd_assert_runner: {d} passed, {d} failed, {d} skipped (= {d} skip-impl + {d} skip-adr) (over {d} manifests)\n",
-        .{ passed, failed, skipped + skipped_adr, skipped, skipped_adr, manifest_count },
+        .{ tally.passed, tally.failed, tally.skipped + tally.skipped_adr, tally.skipped, tally.skipped_adr, manifest_count },
     );
     try stdout.flush();
 
-    if (failed > 0) std.process.exit(1);
+    if (tally.failed > 0) std.process.exit(1);
 }
 
-fn runCorpus(
-    io: std.Io,
+/// `RunnerCallbacks.on_module_loaded` implementation: repopulates
+/// the SIMD runner's shared scratch buffers from the just-loaded
+/// module so the JIT sees the fixture-declared memory / globals /
+/// table state. Resets memory + globals to zero first so a previous
+/// module's bytes don't bleed through.
+///
+/// On error prints the init-specific FAIL line (data-init vs
+/// globals-init vs table-init) so the diagnostic is precise; base
+/// then marks `module_bad` and suppresses subsequent asserts.
+fn simdOnModuleLoaded(
     gpa: std.mem.Allocator,
-    root: *std.Io.Dir,
-    name: []const u8,
+    wasm_bytes: []const u8,
+    compiled: *const runner_mod.CompiledWasm,
     stdout: *std.Io.Writer,
-    passed: *u32,
-    failed: *u32,
-    skipped: *u32,
-    skipped_adr: *u32,
-) !void {
-    var dir = try root.openDir(io, name, .{});
-    defer dir.close(io);
+    name: []const u8,
+) anyerror!void {
+    @memset(scratch_memory[0..], 0);
+    @memset(scratch_globals[0..], 0);
 
-    const manifest_bytes = dir.readFileAlloc(io, "manifest.txt", gpa, .limited(1 << 22)) catch |err| {
-        try stdout.print("FAIL  {s}: manifest read: {s}\n", .{ name, @errorName(err) });
-        failed.* += 1;
-        return;
+    // §9.9 / 9.9-d-7: write active data-segment bytes so subsequent
+    // v128.load fixtures see the fixture-declared bytes instead of
+    // the all-zero memset baseline.
+    runner_mod.applyActiveDataSegments(gpa, wasm_bytes, scratch_memory[0..]) catch |err| {
+        try stdout.print("FAIL  {s} data-init: {s}\n", .{ name, @errorName(err) });
+        return err;
     };
-    defer gpa.free(manifest_bytes);
-
-    var current_wasm: ?[]u8 = null;
-    var current_compiled: ?runner_mod.CompiledWasm = null;
-    // `module_bad` distinguishes "no module yet" from "module declared
-    // but compile rejected it"; subsequent asserts under a bad module
-    // are silently skipped (counted) rather than each cascading as a
-    // separate FAIL — the compile failure is the load-bearing signal.
-    var module_bad: bool = false;
-    defer {
-        if (current_wasm) |b| gpa.free(b);
-        if (current_compiled) |*c| c.deinit(gpa);
-    }
-
-    var line_it = std.mem.splitScalar(u8, manifest_bytes, '\n');
-    while (line_it.next()) |raw| {
-        const line = std.mem.trim(u8, raw, " \r\t");
-        if (line.len == 0) continue;
-
-        // Per ADR-0029 Path B (chunk 9.9-h-21): prefix-aware
-        // classification via base.classifySkipLine (§9.9-l-1a stage 2).
-        switch (base.classifySkipLine(line)) {
-            .skip_impl => {
-                skipped.* += 1;
-                continue;
-            },
-            .skip_adr => {
-                skipped_adr.* += 1;
-                continue;
-            },
-            .bare_legacy => {
-                try stdout.print("WARN  {s}: bare `skip` line — migrate to `skip-impl` or `skip-adr-<id>` (chunk 9.9-h-22 regen sweep): {s}\n", .{ name, line });
-                skipped.* += 1;
-                continue;
-            },
-            .other => {},
-        }
-
-        if (std.mem.startsWith(u8, line, "module ")) {
-            const file = line[7..];
-            if (current_compiled) |*c| c.deinit(gpa);
-            current_compiled = null;
-            if (current_wasm) |b| gpa.free(b);
-            current_wasm = null;
-            module_bad = false;
-            @memset(scratch_memory[0..], 0);
-            @memset(scratch_globals[0..], 0);
-
-            const wasm_bytes = dir.readFileAlloc(io, file, gpa, .limited(4 << 20)) catch |err| {
-                try stdout.print("FAIL  {s}/{s} module read: {s}\n", .{ name, file, @errorName(err) });
-                failed.* += 1;
-                module_bad = true;
-                continue;
-            };
-            current_wasm = wasm_bytes;
-            const compiled = runner_mod.compileWasm(gpa, wasm_bytes) catch |err| {
-                try stdout.print("FAIL  {s}/{s} compile: {s}\n", .{ name, file, @errorName(err) });
-                failed.* += 1;
-                module_bad = true;
-                continue;
-            };
-            current_compiled = compiled;
-            // §9.9 / 9.9-d-7: write active data-segment bytes
-            // into `scratch_memory` so subsequent v128.load
-            // fixtures see the fixture-declared bytes (rather
-            // than the all-zero memset baseline). Mirrors
-            // `setupRuntime`'s data-init logic without paying its
-            // full per-module allocation. Without this,
-            // simd_address load_data_N invocations all returned
-            // v128:000... vs the expected data-segment bytes.
-            runner_mod.applyActiveDataSegments(gpa, wasm_bytes, scratch_memory[0..]) catch |err| {
-                try stdout.print("FAIL  {s}/{s} data-init: {s}\n", .{ name, file, @errorName(err) });
-                failed.* += 1;
-                module_bad = true;
-                continue;
-            };
-            // ADR-0052 §9.9 / 9.9-h-2 — write defined-globals
-            // init values into the shared scratch buffer at the
-            // module-specific per-global byte offsets the JIT
-            // emit baked in. Without this, v128 globals start at
-            // zero and assert_return on `global.get` returns
-            // garbage (the prior 4-fail cluster on Mac).
-            runner_mod.applyDefinedGlobalsInit(
-                gpa,
-                wasm_bytes,
-                compiled.globals_offsets,
-                compiled.globals_valtypes,
-                scratch_globals[0..],
-            ) catch |err| {
-                try stdout.print("FAIL  {s}/{s} globals-init: {s}\n", .{ name, file, @errorName(err) });
-                failed.* += 1;
-                module_bad = true;
-                continue;
-            };
-            // D-063 discharge (§9.9 / 9.9-h-4) — populate the
-            // funcref table from active element segments. Without
-            // this, `call_indirect` traps on every call because
-            // `table_size = 0` makes the bounds check (`CMP idx,
-            // W25=0` → HS) always branch into the trap stub.
-            runner_mod.applyTableInit(
-                gpa,
-                wasm_bytes,
-                &compiled,
-                scratch_funcptrs[0..],
-                scratch_typeidxs[0..],
-            ) catch |err| {
-                try stdout.print("FAIL  {s}/{s} table-init: {s}\n", .{ name, file, @errorName(err) });
-                failed.* += 1;
-                module_bad = true;
-                continue;
-            };
-            continue;
-        }
-
-        if (std.mem.startsWith(u8, line, "assert_return ")) {
-            if (module_bad) {
-                skipped.* += 1;
-                continue;
-            }
-            const compiled = current_compiled orelse {
-                try stdout.print("FAIL  {s}: assert_return without prior module\n", .{name});
-                failed.* += 1;
-                continue;
-            };
-            const wasm = current_wasm.?;
-            const ok = runAssertReturn(gpa, wasm, &compiled, line[14..], stdout, name) catch |err| {
-                try stdout.print("FAIL  {s}: {s} (error {s})\n", .{ name, line, @errorName(err) });
-                failed.* += 1;
-                continue;
-            };
-            if (ok) {
-                passed.* += 1;
-            } else {
-                failed.* += 1;
-            }
-            continue;
-        }
-
-        if (std.mem.startsWith(u8, line, "assert_trap ")) {
-            if (module_bad) {
-                skipped.* += 1;
-                continue;
-            }
-            const compiled = current_compiled orelse {
-                try stdout.print("FAIL  {s}: assert_trap without prior module\n", .{name});
-                failed.* += 1;
-                continue;
-            };
-            const wasm = current_wasm.?;
-            const ok = runAssertTrap(gpa, wasm, &compiled, line[12..], stdout, name) catch |err| {
-                try stdout.print("FAIL  {s}: {s} (error {s})\n", .{ name, line, @errorName(err) });
-                failed.* += 1;
-                continue;
-            };
-            if (ok) {
-                passed.* += 1;
-            } else {
-                failed.* += 1;
-            }
-            continue;
-        }
-
-        if (std.mem.startsWith(u8, line, "assert_invalid ")) {
-            const file = line[15..];
-            const wasm_bytes = dir.readFileAlloc(io, file, gpa, .limited(4 << 20)) catch |err| {
-                try stdout.print("FAIL  {s}/{s} (assert_invalid) read: {s}\n", .{ name, file, @errorName(err) });
-                failed.* += 1;
-                continue;
-            };
-            if (runner_mod.compileWasm(gpa, wasm_bytes)) |compiled_ok| {
-                var c = compiled_ok;
-                c.deinit(gpa);
-                try stdout.print("SKIP-VALIDATOR-GAP  {s}: assert_invalid {s}\n", .{ name, file });
-                skipped.* += 1;
-            } else |_| {
-                passed.* += 1;
-            }
-            gpa.free(wasm_bytes);
-            continue;
-        }
-
-        if (std.mem.startsWith(u8, line, "assert_malformed ")) {
-            const file = line[17..];
-            const wasm_bytes = dir.readFileAlloc(io, file, gpa, .limited(4 << 20)) catch |err| {
-                try stdout.print("FAIL  {s}/{s} (assert_malformed) read: {s}\n", .{ name, file, @errorName(err) });
-                failed.* += 1;
-                continue;
-            };
-            if (runner_mod.compileWasm(gpa, wasm_bytes)) |compiled_ok| {
-                var c = compiled_ok;
-                c.deinit(gpa);
-                try stdout.print("SKIP-PARSER-GAP  {s}: assert_malformed {s}\n", .{ name, file });
-                skipped.* += 1;
-            } else |_| {
-                passed.* += 1;
-            }
-            gpa.free(wasm_bytes);
-            continue;
-        }
-
-        try stdout.print("FAIL  {s}: unknown directive '{s}'\n", .{ name, line });
-        failed.* += 1;
-    }
+    // ADR-0052 §9.9 / 9.9-h-2 — write defined-globals init values
+    // into the shared scratch buffer at the module-specific
+    // per-global byte offsets the JIT emit baked in.
+    runner_mod.applyDefinedGlobalsInit(
+        gpa,
+        wasm_bytes,
+        compiled.globals_offsets,
+        compiled.globals_valtypes,
+        scratch_globals[0..],
+    ) catch |err| {
+        try stdout.print("FAIL  {s} globals-init: {s}\n", .{ name, @errorName(err) });
+        return err;
+    };
+    // D-063 discharge (§9.9 / 9.9-h-4) — populate the funcref table
+    // from active element segments so `call_indirect` finds entries.
+    runner_mod.applyTableInit(
+        gpa,
+        wasm_bytes,
+        compiled,
+        scratch_funcptrs[0..],
+        scratch_typeidxs[0..],
+    ) catch |err| {
+        try stdout.print("FAIL  {s} table-init: {s}\n", .{ name, @errorName(err) });
+        return err;
+    };
 }
+
+/// SIMD specialisation of `base.RunnerCallbacks` per ADR-0057 §"Decision".
+/// `runAssertReturn` / `runAssertTrap` retain their existing signatures
+/// (defined further below); they parse SIMD-aware result tokens,
+/// dispatch via `invokeV128`, and compare per-lane NaN patterns —
+/// none of which the non-SIMD specialisation will need.
+const simd_callbacks: base.RunnerCallbacks = .{
+    .on_module_loaded = simdOnModuleLoaded,
+    .handle_assert_return = runAssertReturn,
+    .handle_assert_trap = runAssertTrap,
+};
 
 // Scalar token parsers moved to spec_assert_runner_base.zig per
 // ADR-0057. Re-exported here as local aliases so the body of this

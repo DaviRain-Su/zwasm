@@ -17,6 +17,9 @@
 
 const std = @import("std");
 
+const zwasm = @import("zwasm");
+const runner_mod = zwasm.engine.runner;
+
 /// Parse a decimal integer token into its u32 bit pattern. Wasm
 /// asserts emit i32 results as decimal strings; signed values may
 /// appear (negative literals in the source ⇒ negative decimal here).
@@ -132,6 +135,221 @@ pub fn classifyDirective(line: []const u8) ClassifiedDirective {
         return .{ .kind = .assert_malformed, .body = line[17..] };
     }
     return .{ .kind = .unknown, .body = line };
+}
+
+/// Per-runner callbacks invoked by `runCorpus()`. Specialisations
+/// (currently only `simd_assert_runner`; later `spec_assert_runner_non_simd`
+/// per l-1b) provide function pointers that handle the type-specific
+/// argument parsing, JIT invocation, and result comparison.
+///
+/// `on_module_loaded` runs after the base loop reads + compiles a
+/// new module. Specialisations use it to repopulate any scratch
+/// state the JIT will read from (memory bytes via active data
+/// segments, defined-globals byte buffer, funcref table). On error
+/// the base loop prints `FAIL` and sets `module_bad = true` so
+/// subsequent asserts under the broken module silently skip
+/// instead of cascading. The callback prints its own FAIL line
+/// before returning the error (so the diagnostic carries
+/// init-specific context — data-init vs globals-init vs table-init).
+///
+/// `handle_assert_return` / `handle_assert_trap` return `true` on
+/// pass, `false` on a fixture mismatch (caller increments
+/// `failed`). Returning an error is also a failure path; caller
+/// prints a generic FAIL line with the error name.
+pub const RunnerCallbacks = struct {
+    on_module_loaded: *const fn (
+        gpa: std.mem.Allocator,
+        wasm_bytes: []const u8,
+        compiled: *const runner_mod.CompiledWasm,
+        stdout: *std.Io.Writer,
+        name: []const u8,
+    ) anyerror!void,
+    handle_assert_return: *const fn (
+        gpa: std.mem.Allocator,
+        wasm_bytes: []const u8,
+        compiled: *const runner_mod.CompiledWasm,
+        body: []const u8,
+        stdout: *std.Io.Writer,
+        name: []const u8,
+    ) anyerror!bool,
+    handle_assert_trap: *const fn (
+        gpa: std.mem.Allocator,
+        wasm_bytes: []const u8,
+        compiled: *const runner_mod.CompiledWasm,
+        body: []const u8,
+        stdout: *std.Io.Writer,
+        name: []const u8,
+    ) anyerror!bool,
+};
+
+/// Run one corpus manifest end-to-end: open the directory, read
+/// `manifest.txt`, classify and dispatch every line. Module / assert
+/// behaviour is delegated to the callbacks; skip classification,
+/// `assert_invalid` / `assert_malformed` SKIP-VALIDATOR-GAP /
+/// SKIP-PARSER-GAP wiring, and tally bookkeeping stay in base
+/// (uniform across SIMD + non-SIMD specialisations).
+pub fn runCorpus(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    root: *std.Io.Dir,
+    name: []const u8,
+    stdout: *std.Io.Writer,
+    tally: *AssertTally,
+    callbacks: RunnerCallbacks,
+) !void {
+    var dir = try root.openDir(io, name, .{});
+    defer dir.close(io);
+
+    const manifest_bytes = dir.readFileAlloc(io, "manifest.txt", gpa, .limited(1 << 22)) catch |err| {
+        try stdout.print("FAIL  {s}: manifest read: {s}\n", .{ name, @errorName(err) });
+        tally.failed += 1;
+        return;
+    };
+    defer gpa.free(manifest_bytes);
+
+    var current_wasm: ?[]u8 = null;
+    var current_compiled: ?runner_mod.CompiledWasm = null;
+    // `module_bad` distinguishes "no module yet" from "module declared
+    // but compile (or init) rejected it"; subsequent asserts under a
+    // bad module are silently skipped (counted) rather than each
+    // cascading as a separate FAIL.
+    var module_bad: bool = false;
+    defer {
+        if (current_wasm) |b| gpa.free(b);
+        if (current_compiled) |*c| c.deinit(gpa);
+    }
+
+    var line_it = std.mem.splitScalar(u8, manifest_bytes, '\n');
+    while (line_it.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \r\t");
+        if (line.len == 0) continue;
+
+        switch (classifySkipLine(line)) {
+            .skip_impl => {
+                tally.skipped += 1;
+                continue;
+            },
+            .skip_adr => {
+                tally.skipped_adr += 1;
+                continue;
+            },
+            .bare_legacy => {
+                try stdout.print("WARN  {s}: bare `skip` line — migrate to `skip-impl` or `skip-adr-<id>` (chunk 9.9-h-22 regen sweep): {s}\n", .{ name, line });
+                tally.skipped += 1;
+                continue;
+            },
+            .other => {},
+        }
+
+        const classified = classifyDirective(line);
+        switch (classified.kind) {
+            .module => {
+                const file = classified.body;
+                if (current_compiled) |*c| c.deinit(gpa);
+                current_compiled = null;
+                if (current_wasm) |b| gpa.free(b);
+                current_wasm = null;
+                module_bad = false;
+
+                const wasm_bytes = dir.readFileAlloc(io, file, gpa, .limited(4 << 20)) catch |err| {
+                    try stdout.print("FAIL  {s}/{s} module read: {s}\n", .{ name, file, @errorName(err) });
+                    tally.failed += 1;
+                    module_bad = true;
+                    continue;
+                };
+                current_wasm = wasm_bytes;
+                const compiled = runner_mod.compileWasm(gpa, wasm_bytes) catch |err| {
+                    try stdout.print("FAIL  {s}/{s} compile: {s}\n", .{ name, file, @errorName(err) });
+                    tally.failed += 1;
+                    module_bad = true;
+                    continue;
+                };
+                current_compiled = compiled;
+                callbacks.on_module_loaded(gpa, wasm_bytes, &compiled, stdout, name) catch {
+                    // The callback printed its own init-specific FAIL line
+                    // before returning the error; base just records the
+                    // failure and marks module_bad to suppress cascade.
+                    tally.failed += 1;
+                    module_bad = true;
+                    continue;
+                };
+            },
+            .assert_return => {
+                if (module_bad) {
+                    tally.skipped += 1;
+                    continue;
+                }
+                const compiled_ptr: *const runner_mod.CompiledWasm = if (current_compiled) |*c| c else {
+                    try stdout.print("FAIL  {s}: assert_return without prior module\n", .{name});
+                    tally.failed += 1;
+                    continue;
+                };
+                const wasm = current_wasm.?;
+                const ok = callbacks.handle_assert_return(gpa, wasm, compiled_ptr, classified.body, stdout, name) catch |err| {
+                    try stdout.print("FAIL  {s}: {s} (error {s})\n", .{ name, line, @errorName(err) });
+                    tally.failed += 1;
+                    continue;
+                };
+                if (ok) tally.passed += 1 else tally.failed += 1;
+            },
+            .assert_trap => {
+                if (module_bad) {
+                    tally.skipped += 1;
+                    continue;
+                }
+                const compiled_ptr: *const runner_mod.CompiledWasm = if (current_compiled) |*c| c else {
+                    try stdout.print("FAIL  {s}: assert_trap without prior module\n", .{name});
+                    tally.failed += 1;
+                    continue;
+                };
+                const wasm = current_wasm.?;
+                const ok = callbacks.handle_assert_trap(gpa, wasm, compiled_ptr, classified.body, stdout, name) catch |err| {
+                    try stdout.print("FAIL  {s}: {s} (error {s})\n", .{ name, line, @errorName(err) });
+                    tally.failed += 1;
+                    continue;
+                };
+                if (ok) tally.passed += 1 else tally.failed += 1;
+            },
+            .assert_invalid => {
+                const file = classified.body;
+                const wasm_bytes = dir.readFileAlloc(io, file, gpa, .limited(4 << 20)) catch |err| {
+                    try stdout.print("FAIL  {s}/{s} (assert_invalid) read: {s}\n", .{ name, file, @errorName(err) });
+                    tally.failed += 1;
+                    continue;
+                };
+                if (runner_mod.compileWasm(gpa, wasm_bytes)) |compiled_ok| {
+                    var c = compiled_ok;
+                    c.deinit(gpa);
+                    try stdout.print("SKIP-VALIDATOR-GAP  {s}: assert_invalid {s}\n", .{ name, file });
+                    tally.skipped += 1;
+                } else |_| {
+                    tally.passed += 1;
+                }
+                gpa.free(wasm_bytes);
+            },
+            .assert_malformed => {
+                const file = classified.body;
+                const wasm_bytes = dir.readFileAlloc(io, file, gpa, .limited(4 << 20)) catch |err| {
+                    try stdout.print("FAIL  {s}/{s} (assert_malformed) read: {s}\n", .{ name, file, @errorName(err) });
+                    tally.failed += 1;
+                    continue;
+                };
+                if (runner_mod.compileWasm(gpa, wasm_bytes)) |compiled_ok| {
+                    var c = compiled_ok;
+                    c.deinit(gpa);
+                    try stdout.print("SKIP-PARSER-GAP  {s}: assert_malformed {s}\n", .{ name, file });
+                    tally.skipped += 1;
+                } else |_| {
+                    tally.passed += 1;
+                }
+                gpa.free(wasm_bytes);
+            },
+            .unknown => {
+                try stdout.print("FAIL  {s}: unknown directive '{s}'\n", .{ name, line });
+                tally.failed += 1;
+            },
+        }
+    }
 }
 
 // ============================================================
