@@ -13,21 +13,21 @@
    per-chunk pickup chain (recipes, file paths, ADR notes) for
    the queue below. Authoritative for next session continuation.
 
-## Active state — **Phase 9 extended; l-1a stages 1-5 landed 2026-05-12**
-
-**Read first on next session**: `private/l-1a-next-session-pickup.md`
-— full recipe + stage state for resuming the spec_assert_runner
-factoring at stage 6 (or jumping straight to l-1b if stage 6
-optional hoist isn't load-bearing for the non-SIMD runner).
+## Active state — **Phase 9 extended; l-1a COMPLETE (stages 1-6 landed) 2026-05-12**
 
 ### One-line state
 
-l-1a stages 1-5 (base extraction + runCorpus/RunnerCallbacks +
-arg-parser hoist) landed; simd_assert_runner.zig down to 868 LOC.
-Stage 6 (scratch-buffer + makeJitRuntime hoist) is the trigger-fired
-optional cleanup since simd > 800 LOC; l-1b can begin in parallel.
-SIMD test gate stays at 13301/0/440 bit-identical pre/post each
-stage.
+l-1a all stages landed; `spec_assert_runner_base.zig` (618 LOC)
+now owns scalar+v128 token parsing, tally, classification, the
+manifest-loop dispatch with `RunnerCallbacks`, and
+`makeJitRuntime` helper. `simd_assert_runner.zig` down to 846 LOC
+(SIMD-specific result decoding + entry-helper ladder only). SIMD
+test gate stayed at 13301/0/440 bit-identical pre/post every
+stage. Ready to begin **l-1b**: new
+`spec_assert_runner_non_simd.zig` + curated
+`test/spec/wasm-2.0-assert/` corpus (sign-ext, sat-trunc,
+multi-value, call_indirect, etc.) + `test-spec-wasm-2.0-assert`
+build step wired into `test-all`.
 
 ### Original m-2 cluster state (earlier this session)
 
@@ -53,14 +53,13 @@ m-2c-init ElemSlice).
 
 ## Implementation queue (sequential — pickup detail in pickup docs)
 
-Next session picks up at **l-1a stage 6** (scratch buffer +
-`makeJitRuntime` hoist into base; trigger-fired since simd > 800
-LOC at 868). Alternative path: skip stage 6 and start l-1b's
-`spec_assert_runner_non_simd.zig` directly — the scratch-buffer
-move is "mechanical" per pickup doc, can defer until l-1b actually
-needs to share them.
+Next session picks up at **l-1b** (new
+`spec_assert_runner_non_simd.zig` consuming base.runCorpus +
+RunnerCallbacks + parseAssertReturnArgs + makeJitRuntime;
+curated wasm-2.0 corpus subset; `test-spec-wasm-2.0-assert`
+build step + `test-all` wiring).
 
-Per-stage state of l-1a:
+Per-stage state of l-1a (all complete):
 
 | Stage | Status | What |
 |---|---|---|
@@ -69,7 +68,7 @@ Per-stage state of l-1a:
 | 3 | [x] 4727fc02 | DirectiveKind + classifyDirective (types only) |
 | 4 | [x] d8157857 | runCorpus + RunnerCallbacks trait in base |
 | 5 | [x] d9a1fff1 | parseAssertReturnArgs + ArgValue/parseArgToken/parseV128Token in base |
-| **6** | **NEXT (optional)** | **scratch buffer + makeJitRuntime hoist** |
+| 6 | [x] 8e52a241 | makeJitRuntime helper hoist to base |
 
 Then l-1b (new spec_assert_runner_non_simd.zig + curated wasm-2.0
 corpus + test-spec-wasm-2.0-assert build step).
