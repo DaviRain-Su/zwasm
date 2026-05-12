@@ -515,41 +515,56 @@ pub fn emitEndIntra(
     // `arm64/op_control.zig:emitEndIntra` block-merge branch.
     if (lbl.kind == .block and lbl.merge_captured and lbl.result_arity > 0) {
         const arity: u32 = lbl.result_arity;
-        if (pushed_vregs.items.len < arity) {
-            return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:emitEndIntra-block-merge", 0);
-        }
-        const top_base = pushed_vregs.items.len - arity;
-        const dead_fallthrough = blk: {
-            var i: u32 = 0;
-            while (i < arity) : (i += 1) {
-                if (pushed_vregs.items[top_base + i] != lbl.merge_top_vregs[i]) break :blk false;
+        const entry: usize = lbl.entry_stack_depth;
+        // Three shapes (see `arm64/op_control.zig:emitEndIntra`
+        // for the canonical comment). Case (c) — stack emptied
+        // by intervening loop/if truncate — surfaced by
+        // `labels.wast:loop1`.
+        if (pushed_vregs.items.len < entry + arity) {
+            if (pushed_vregs.items.len > entry) {
+                pushed_vregs.shrinkRetainingCapacity(entry);
             }
-            break :blk true;
-        };
-        if (!dead_fallthrough) {
+            while (pushed_vregs.items.len < entry) {
+                try pushed_vregs.append(allocator, lbl.merge_top_vregs[0]);
+            }
             var i: u32 = 0;
             while (i < arity) : (i += 1) {
-                const src_vreg = pushed_vregs.items[top_base + i];
-                const merge_vreg = lbl.merge_top_vregs[i];
-                if (alloc.shapeTag(merge_vreg) == .v128) {
-                    const src_x = try gpr.resolveXmm(alloc, src_vreg);
-                    const merge_x = try gpr.resolveXmm(alloc, merge_vreg);
-                    if (merge_x != src_x) {
-                        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(merge_x, src_x).slice());
+                try pushed_vregs.append(allocator, lbl.merge_top_vregs[i]);
+            }
+        } else {
+            const top_base = pushed_vregs.items.len - arity;
+            const dead_fallthrough = blk: {
+                var i: u32 = 0;
+                while (i < arity) : (i += 1) {
+                    if (pushed_vregs.items[top_base + i] != lbl.merge_top_vregs[i]) break :blk false;
+                }
+                break :blk true;
+            };
+            if (!dead_fallthrough) {
+                var i: u32 = 0;
+                while (i < arity) : (i += 1) {
+                    const src_vreg = pushed_vregs.items[top_base + i];
+                    const merge_vreg = lbl.merge_top_vregs[i];
+                    if (alloc.shapeTag(merge_vreg) == .v128) {
+                        const src_x = try gpr.resolveXmm(alloc, src_vreg);
+                        const merge_x = try gpr.resolveXmm(alloc, merge_vreg);
+                        if (merge_x != src_x) {
+                            try buf.appendSlice(allocator, inst.encMovapsXmmXmm(merge_x, src_x).slice());
+                        }
+                    } else {
+                        const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
+                        const merge_r = try gpr.gprDefSpilled(alloc, merge_vreg, 1);
+                        if (merge_r != src_r) {
+                            try buf.appendSlice(allocator, inst.encMovRR(.d, merge_r, src_r).slice());
+                        }
+                        try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, merge_vreg, 1);
                     }
-                } else {
-                    const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
-                    const merge_r = try gpr.gprDefSpilled(alloc, merge_vreg, 1);
-                    if (merge_r != src_r) {
-                        try buf.appendSlice(allocator, inst.encMovRR(.d, merge_r, src_r).slice());
-                    }
-                    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, merge_vreg, 1);
                 }
             }
-        }
-        var i: u32 = 0;
-        while (i < arity) : (i += 1) {
-            pushed_vregs.items[top_base + i] = lbl.merge_top_vregs[i];
+            var i: u32 = 0;
+            while (i < arity) : (i += 1) {
+                pushed_vregs.items[top_base + i] = lbl.merge_top_vregs[i];
+            }
         }
     }
 

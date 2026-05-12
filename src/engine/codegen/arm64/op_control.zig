@@ -494,46 +494,82 @@ pub fn emitEndIntra(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     // ran at runtime.
     if (lbl.kind == .block and lbl.merge_captured and lbl.result_arity > 0) {
         const arity: u32 = lbl.result_arity;
-        if (ctx.pushed_vregs.items.len < arity) {
-            std.debug.print("arm64/op_control: emitEndIntra (block merge) needs >={d} pushed_vregs, got {d} (func_idx={d})\n", .{ arity, ctx.pushed_vregs.items.len, ctx.func.func_idx });
-            return Error.UnsupportedOp;
-        }
-        const top_base = ctx.pushed_vregs.items.len - arity;
-        const dead_fallthrough = blk: {
-            var i: u32 = 0;
-            while (i < arity) : (i += 1) {
-                if (ctx.pushed_vregs.items[top_base + i] != lbl.merge_top_vregs[i]) break :blk false;
+        const entry: usize = lbl.entry_stack_depth;
+        // Three shapes at block-end fall-through:
+        //   (a) Live fall-through  — pushed_vregs.len >= entry +
+        //       arity and top arity differ from merge_top_vregs.
+        //       Emit MOVs from top → merge regs.
+        //   (b) Dead fall-through  — pushed_vregs.len >= entry +
+        //       arity and top arity == merge_top_vregs (the br
+        //       that captured the merge target left them on top).
+        //       Skip MOVs.
+        //   (c) Dead fall-through with operand-stack emptied —
+        //       pushed_vregs.len < entry + arity. An intervening
+        //       end (loop / if) truncated below the block's
+        //       fall-through height. The br that captured the
+        //       merge already populated merge_top_vregs's slots
+        //       at runtime (via fresh emit of source-vreg-into-
+        //       merge-slot or by the first-br capture being its
+        //       own merge); no MOV emit needed. Grow
+        //       pushed_vregs to [...entry, merge_top_vregs] so
+        //       post-block consumers see the canonical result.
+        //       Surfaced by `labels.wast:loop1` (br $exit inside
+        //       if-then inside loop inside block; loop's truncate
+        //       emptied the stack at loop-end, leaving block-end
+        //       with 0 entries but arity=1).
+        if (ctx.pushed_vregs.items.len < entry + arity) {
+            if (ctx.pushed_vregs.items.len > entry) {
+                ctx.pushed_vregs.shrinkRetainingCapacity(entry);
             }
-            break :blk true;
-        };
-        if (!dead_fallthrough) {
+            // Pad up to entry with merge_top_vregs[0] as filler
+            // when the stack is shorter than entry (a deeper-
+            // than-expected truncate happened upstream; preserves
+            // entry-base invariant for the post-block consumer).
+            while (ctx.pushed_vregs.items.len < entry) {
+                try ctx.pushed_vregs.append(ctx.allocator, lbl.merge_top_vregs[0]);
+            }
             var i: u32 = 0;
             while (i < arity) : (i += 1) {
-                const src_vreg = ctx.pushed_vregs.items[top_base + i];
-                const merge_vreg = lbl.merge_top_vregs[i];
-                if (ctx.alloc.shapeTag(merge_vreg) == .v128) {
-                    const src_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 1);
-                    const merge_v = try gpr.qDefSpilled(ctx.alloc, merge_vreg, 0);
-                    if (merge_v != src_v) {
-                        try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(merge_v, src_v));
+                try ctx.pushed_vregs.append(ctx.allocator, lbl.merge_top_vregs[i]);
+            }
+        } else {
+            const top_base = ctx.pushed_vregs.items.len - arity;
+            const dead_fallthrough = blk: {
+                var i: u32 = 0;
+                while (i < arity) : (i += 1) {
+                    if (ctx.pushed_vregs.items[top_base + i] != lbl.merge_top_vregs[i]) break :blk false;
+                }
+                break :blk true;
+            };
+            if (!dead_fallthrough) {
+                var i: u32 = 0;
+                while (i < arity) : (i += 1) {
+                    const src_vreg = ctx.pushed_vregs.items[top_base + i];
+                    const merge_vreg = lbl.merge_top_vregs[i];
+                    if (ctx.alloc.shapeTag(merge_vreg) == .v128) {
+                        const src_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 1);
+                        const merge_v = try gpr.qDefSpilled(ctx.alloc, merge_vreg, 0);
+                        if (merge_v != src_v) {
+                            try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(merge_v, src_v));
+                        }
+                        try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, merge_vreg, 0);
+                    } else {
+                        const src_r = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 1);
+                        const merge_r = try gpr.gprDefSpilled(ctx.alloc, merge_vreg, 0);
+                        if (merge_r != src_r) {
+                            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(merge_r, 31, src_r));
+                        }
+                        try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, merge_vreg, 0);
                     }
-                    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, merge_vreg, 0);
-                } else {
-                    const src_r = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 1);
-                    const merge_r = try gpr.gprDefSpilled(ctx.alloc, merge_vreg, 0);
-                    if (merge_r != src_r) {
-                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(merge_r, 31, src_r));
-                    }
-                    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, merge_vreg, 0);
                 }
             }
-        }
-        // Overwrite top arity slots with merge_top_vregs so the
-        // downstream truncate (and consumers reading via
-        // pushed_vregs) see the canonical merge result.
-        var i: u32 = 0;
-        while (i < arity) : (i += 1) {
-            ctx.pushed_vregs.items[top_base + i] = lbl.merge_top_vregs[i];
+            // Overwrite top arity slots with merge_top_vregs so the
+            // downstream truncate (and consumers reading via
+            // pushed_vregs) see the canonical merge result.
+            var i: u32 = 0;
+            while (i < arity) : (i += 1) {
+                ctx.pushed_vregs.items[top_base + i] = lbl.merge_top_vregs[i];
+            }
         }
     }
 
