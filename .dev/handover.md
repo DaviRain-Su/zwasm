@@ -14,36 +14,33 @@
 
 §9.11 [x]; §9.10 [~] Phase 11; §9.12 [ ] 🔒 (waits §9.9);
 **§9.9 [ ]** scope = full Wasm 2.0 PASS on Mac+OrbStack per
-ADR-0056. Mode change 2026-05-12: parallel-agent fanout for
-implementation showed diminishing returns; main thread now
-drives sub-chunks sequentially. Investigation agents X/Y/Z +
-worktree Agent W (Win64 v128 marshal) all completed.
+ADR-0056. Mode: SEQUENTIAL (no parallel impl agents).
 
-**Win64 v128 marshal DONE** (Agent W): windowsmini 41 FAIL →
-0 first iteration; 13301/0/440 bit-identical with Mac+OrbStack.
-Feature branch `feature/p9-win64-v128-marshal` (commits
-`7b550038` impl + `00ca0e6c` ADR/debt/tests) merging into
-main now. ADR-0055 Accepted; D-084 discharged.
+## Implementation queue
 
-## Implementation queue (sequential)
+Stage A — Foundation [done]:
+- j-1 (`171bbd36`) ADR-0056 scope extension
+- j-2 (`a254ba50`) test-all wiring (2/3) + bench fixes
+- i-1 (`7a7e387c`) Win64 v128 marshal (Agent W)
 
-Stage A: [x] j-1 ADR-0056 (`6654435c`); [x] j-2 test-all 2/3
-wirings + bench fixes (`a254ba50`).
+Stage B — JIT op completion:
+- m-4a [x] (`b620cfcd`) select_typed GPR-types
+- m-4b [x] (`9c2644c7`) select_typed f32/f64
+- j-2b [x] (`fd9ca8db`) rem_s alias bug (D-085) + edge-cases
+  gate (D-086); surfaced D-087/088/089
+- **9.9-m-5 NEXT** — x86_64 trap gaps cohort (D-087 trunc, D-088
+  div_s, D-089 ld.so) + re-wire test-edge-cases into test-all
+- 9.9-m-4c — untyped .select (0x1B) lower-time type inference
+- 9.9-m-1 ref.null / ref.func / ref.is_null both arches
+- 9.9-m-3 memory.init / data.drop / elem.drop both arches
+- 9.9-m-2 table.* full 7-op family (ADR-0058 likely)
 
-Stage B — JIT op completion (小→大):
-- **9.9-i-1 INTEGRATING** Win64 v128 marshal (cherry-pick)
-- **9.9-m-4 NEXT** JIT select_typed type dispatch (non-i32)
-- 9.9-j-2b D-085 rem_s + D-086 mac-only gate + test-edge-cases
-- 9.9-m-1 ref.null / ref.func / ref.is_null
-- 9.9-m-3 memory.init / data.drop / elem.drop
-- 9.9-m-2 table.* full 7-op family (~3000 LOC, ADR-0058)
-
-Stage C:
+Stage C — Runner + corpus vendor:
 - 9.9-l-1 non-SIMD spec_assert_runner (ADR-0057)
 - 9.9-k-1 Wasm 2.0 non-SIMD wast vendor (~30 files)
 - 9.9-k-2 SIMD wast vendor (33 files)
 
-Stage D:
+Stage D — Cleanup:
 - 9.9-n-1 fib2 perf root cause
 - 9.9-j-3b SKIP gate real enforce (last)
 
@@ -55,13 +52,13 @@ Stage D:
 - `scripts/run_remote_windows.sh` `windowsmini.local` mDNS
   intermittently; workaround direct `ssh windowsmini ...`.
 - Per-chunk 2-host (Mac+OrbStack) per ADR-0049; windowsmini at
-  §9.9 close (already done via Agent W feature branch).
+  §9.9 close (Win64 already done via i-1).
 
 ## Open debt pointers — see `.dev/debt.md`
 
-- `now`: D-085 (i32.rem_s alias — j-2b), D-086 (edge-cases
-  mac-only gate — j-2b).
-- `blocked-by`: D-007/010/016/018/020/021/022/026/028/052(partial-discharged)/
+- `now`: D-087 (x86_64 trunc trap), D-088 (x86_64 div_s
+  overflow trap), D-089 (Linux ld.so dl-fini), filed at j-2b.
+- `blocked-by`: D-007/010/016/018/020/021/022/026/028/052(partial)/
   055/057/058/059/062(partial)/065/072/073/074/075/079(ii)/081/082.
 
 ## Investigation reports (gitignored)
