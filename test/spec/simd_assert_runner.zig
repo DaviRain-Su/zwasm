@@ -167,21 +167,14 @@ const simd_callbacks: base.RunnerCallbacks = .{
 
 // Scalar token parsers moved to spec_assert_runner_base.zig per
 // ADR-0057. Re-exported here as local aliases so the body of this
-// runner doesn't need to know about the base file path.
+// runner doesn't need to know about the base file path. §9.9 /
+// 9.9-l-1a stage 5 (ADR-0057): v128 token parser + ArgKind/ArgValue
+// hoisted to base since they are token-level (l-1b non-SIMD won't
+// see v128 tokens but reuses the same union so the arg-buffer type
+// flows through both runners).
 const parseI32Token = base.parseI32Token;
 const parseI64Token = base.parseI64Token;
-
-fn parseV128Token(tok: []const u8) ![16]u8 {
-    if (tok.len != 32) return error.BadValue;
-    var out: [16]u8 = undefined;
-    var i: usize = 0;
-    while (i < 16) : (i += 1) {
-        const hi = try std.fmt.charToDigit(tok[i * 2], 16);
-        const lo = try std.fmt.charToDigit(tok[i * 2 + 1], 16);
-        out[i] = (hi << 4) | lo;
-    }
-    return out;
-}
+const parseV128Token = base.parseV128Token;
 
 // Per-lane NaN-pattern result decoder (chunk 9.9-h-25). The
 // canonical / arithmetic checks match Wasm spec §A.2 "Result
@@ -258,14 +251,10 @@ fn matchLaneF64(got_bits: u64, spec: LaneSpec) bool {
     };
 }
 
-const ArgKind = enum { i32, i64, f32, f64, v128 };
-const ArgValue = union(ArgKind) {
-    i32: u32,
-    i64: u64,
-    f32: u32,
-    f64: u64,
-    v128: [16]u8,
-};
+// §9.9 / 9.9-l-1a stage 5 — ArgKind/ArgValue moved to base.
+// Re-aliased so existing call sites keep their local names.
+const ArgKind = base.ArgKind;
+const ArgValue = base.ArgValue;
 
 /// 64 KB scratch heap shared by every assertion. Mirrors the
 /// `spec_assert_runner` shape exactly so the SIMD runner sees the
@@ -288,14 +277,10 @@ const scratch_table_capacity = 32;
 var scratch_funcptrs: [scratch_table_capacity]u64 = undefined;
 var scratch_typeidxs: [scratch_table_capacity]u32 = undefined;
 
-fn parseArgToken(tok: []const u8) !ArgValue {
-    if (std.mem.startsWith(u8, tok, "i32:")) return .{ .i32 = try parseI32Token(tok[4..]) };
-    if (std.mem.startsWith(u8, tok, "i64:")) return .{ .i64 = try parseI64Token(tok[4..]) };
-    if (std.mem.startsWith(u8, tok, "f32:")) return .{ .f32 = try parseI32Token(tok[4..]) };
-    if (std.mem.startsWith(u8, tok, "f64:")) return .{ .f64 = try parseI64Token(tok[4..]) };
-    if (std.mem.startsWith(u8, tok, "v128:")) return .{ .v128 = try parseV128Token(tok[5..]) };
-    return error.BadValue;
-}
+// §9.9 / 9.9-l-1a stage 5 — parseArgToken moved to base. Alias
+// retained so runAssertReturn / runAssertTrap (and any later
+// helpers) read the local name.
+const parseArgToken = base.parseArgToken;
 
 /// Split `<fn> <args>` where `<fn>` may be a bare token OR a
 // splitFnAndArgs moved to spec_assert_runner_base.zig per ADR-0057.
@@ -347,21 +332,14 @@ fn runAssertReturn(
     };
 
     var args: [4]ArgValue = undefined;
-    var n_args: usize = 0;
-    if (!std.mem.eql(u8, args_s, "()")) {
-        var arg_it = std.mem.tokenizeScalar(u8, args_s, ' ');
-        while (arg_it.next()) |tok| {
-            if (n_args >= args.len) {
-                try stdout.print("FAIL  {s}: > {d} args unsupported ({s})\n", .{ name, args.len, args_s });
-                return false;
-            }
-            args[n_args] = parseArgToken(tok) catch {
-                try stdout.print("FAIL  {s}: unsupported arg token ({s})\n", .{ name, tok });
-                return false;
-            };
-            n_args += 1;
+    const n_args = base.parseAssertReturnArgs(args_s, &args) catch |err| {
+        if (err == error.TooManyArgs) {
+            try stdout.print("FAIL  {s}: > {d} args unsupported ({s})\n", .{ name, args.len, args_s });
+        } else {
+            try stdout.print("FAIL  {s}: unsupported arg token ({s})\n", .{ name, args_s });
         }
-    }
+        return false;
+    };
 
     // void result.
     if (std.mem.eql(u8, results_s, "()")) {
@@ -796,21 +774,14 @@ fn runAssertTrap(
     };
 
     var args: [4]ArgValue = undefined;
-    var n_args: usize = 0;
-    if (!std.mem.eql(u8, args_s, "()")) {
-        var arg_it = std.mem.tokenizeScalar(u8, args_s, ' ');
-        while (arg_it.next()) |tok| {
-            if (n_args >= args.len) {
-                try stdout.print("FAIL  {s}: assert_trap > {d} args unsupported ({s})\n", .{ name, args.len, args_s });
-                return false;
-            }
-            args[n_args] = parseArgToken(tok) catch {
-                try stdout.print("FAIL  {s}: assert_trap unsupported arg token ({s})\n", .{ name, tok });
-                return false;
-            };
-            n_args += 1;
+    const n_args = base.parseAssertReturnArgs(args_s, &args) catch |err| {
+        if (err == error.TooManyArgs) {
+            try stdout.print("FAIL  {s}: assert_trap > {d} args unsupported ({s})\n", .{ name, args.len, args_s });
+        } else {
+            try stdout.print("FAIL  {s}: assert_trap unsupported arg token ({s})\n", .{ name, args_s });
         }
-    }
+        return false;
+    };
 
     // The `expect` helper takes a single call expression and
     // converts any successful return into "did NOT trap" FAIL,

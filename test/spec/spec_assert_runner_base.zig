@@ -137,6 +137,71 @@ pub fn classifyDirective(line: []const u8) ClassifiedDirective {
     return .{ .kind = .unknown, .body = line };
 }
 
+/// Parse a 32-character hex token into 16 little-endian bytes —
+/// the in-memory Wasm v128 layout (lane-0-byte-0 first). The
+/// manifest format uses this for both v128 arguments and v128
+/// result tokens (the `v128:<32 hex>` prefix is stripped by the
+/// caller).
+pub fn parseV128Token(tok: []const u8) ![16]u8 {
+    if (tok.len != 32) return error.BadValue;
+    var out: [16]u8 = undefined;
+    var i: usize = 0;
+    while (i < 16) : (i += 1) {
+        const hi = try std.fmt.charToDigit(tok[i * 2], 16);
+        const lo = try std.fmt.charToDigit(tok[i * 2 + 1], 16);
+        out[i] = (hi << 4) | lo;
+    }
+    return out;
+}
+
+/// Wasm scalar + SIMD argument kinds visible in the manifest's
+/// `assert_return` arg-list tokens. The non-SIMD specialisation
+/// (l-1b) shares the enum + union so a single arg-buffer type
+/// flows through both runners; the v128 variant is simply
+/// unreachable in non-SIMD corpora.
+pub const ArgKind = enum { i32, i64, f32, f64, v128 };
+pub const ArgValue = union(ArgKind) {
+    i32: u32,
+    i64: u64,
+    f32: u32,
+    f64: u64,
+    v128: [16]u8,
+};
+
+/// Parse one `<kind>:<value>` token into an ArgValue. FP tokens
+/// reuse the integer parsers since the manifest emits FP values
+/// as their bit-pattern integer (matches the runner harness's
+/// `@bitCast` invocation pattern).
+pub fn parseArgToken(tok: []const u8) !ArgValue {
+    if (std.mem.startsWith(u8, tok, "i32:")) return .{ .i32 = try parseI32Token(tok[4..]) };
+    if (std.mem.startsWith(u8, tok, "i64:")) return .{ .i64 = try parseI64Token(tok[4..]) };
+    if (std.mem.startsWith(u8, tok, "f32:")) return .{ .f32 = try parseI32Token(tok[4..]) };
+    if (std.mem.startsWith(u8, tok, "f64:")) return .{ .f64 = try parseI64Token(tok[4..]) };
+    if (std.mem.startsWith(u8, tok, "v128:")) return .{ .v128 = try parseV128Token(tok[5..]) };
+    return error.BadValue;
+}
+
+/// Tokenise an `assert_return` arg-list into `args_buf`. Returns
+/// the count of parsed args. `"()"` is the zero-arg form (returns
+/// 0 with no parsing).
+///
+/// Errors: `error.TooManyArgs` when the corpus exceeds the
+/// caller-supplied buffer length (caller decides how to surface
+/// it; the SIMD runner's buffer is `[4]ArgValue` per chunk
+/// 9.9-h-3 / 9.9-h-28 / 9.9-h-29 dispatch ladder). `error.BadValue`
+/// propagates from `parseArgToken` for an unrecognised prefix.
+pub fn parseAssertReturnArgs(args_s: []const u8, args_buf: []ArgValue) !usize {
+    if (std.mem.eql(u8, args_s, "()")) return 0;
+    var n: usize = 0;
+    var it = std.mem.tokenizeScalar(u8, args_s, ' ');
+    while (it.next()) |tok| {
+        if (n >= args_buf.len) return error.TooManyArgs;
+        args_buf[n] = try parseArgToken(tok);
+        n += 1;
+    }
+    return n;
+}
+
 /// Per-runner callbacks invoked by `runCorpus()`. Specialisations
 /// (currently only `simd_assert_runner`; later `spec_assert_runner_non_simd`
 /// per l-1b) provide function pointers that handle the type-specific
@@ -453,4 +518,65 @@ test "classifyDirective: unknown returns the full line in body" {
     const r = classifyDirective("garbage_line foo");
     try testing.expectEqual(DirectiveKind.unknown, r.kind);
     try testing.expectEqualStrings("garbage_line foo", r.body);
+}
+
+test "parseV128Token: 32 hex chars → 16 little-endian bytes" {
+    const bytes = try parseV128Token("0102030405060708090a0b0c0d0e0f10");
+    try testing.expectEqual(@as(u8, 0x01), bytes[0]);
+    try testing.expectEqual(@as(u8, 0x10), bytes[15]);
+}
+
+test "parseV128Token: wrong length rejects" {
+    try testing.expectError(error.BadValue, parseV128Token("0102"));
+}
+
+test "parseArgToken: scalar prefixes route to correct ArgKind" {
+    const a = try parseArgToken("i32:42");
+    try testing.expect(a == .i32);
+    try testing.expectEqual(@as(u32, 42), a.i32);
+
+    const b = try parseArgToken("i64:-1");
+    try testing.expect(b == .i64);
+    try testing.expectEqual(@as(u64, @bitCast(@as(i64, -1))), b.i64);
+
+    const c = try parseArgToken("f32:0");
+    try testing.expect(c == .f32);
+
+    const d = try parseArgToken("f64:0");
+    try testing.expect(d == .f64);
+}
+
+test "parseArgToken: v128 returns 16-byte payload" {
+    const a = try parseArgToken("v128:000102030405060708090a0b0c0d0e0f");
+    try testing.expect(a == .v128);
+    try testing.expectEqual(@as(u8, 0x00), a.v128[0]);
+    try testing.expectEqual(@as(u8, 0x0f), a.v128[15]);
+}
+
+test "parseArgToken: unrecognised prefix rejects" {
+    try testing.expectError(error.BadValue, parseArgToken("xyz:42"));
+}
+
+test "parseAssertReturnArgs: zero-arg form returns 0" {
+    var buf: [4]ArgValue = undefined;
+    try testing.expectEqual(@as(usize, 0), try parseAssertReturnArgs("()", &buf));
+}
+
+test "parseAssertReturnArgs: space-separated tokens" {
+    var buf: [4]ArgValue = undefined;
+    const n = try parseAssertReturnArgs("i32:1 i32:2 i32:3", &buf);
+    try testing.expectEqual(@as(usize, 3), n);
+    try testing.expectEqual(@as(u32, 1), buf[0].i32);
+    try testing.expectEqual(@as(u32, 2), buf[1].i32);
+    try testing.expectEqual(@as(u32, 3), buf[2].i32);
+}
+
+test "parseAssertReturnArgs: TooManyArgs when buffer overflows" {
+    var buf: [2]ArgValue = undefined;
+    try testing.expectError(error.TooManyArgs, parseAssertReturnArgs("i32:1 i32:2 i32:3", &buf));
+}
+
+test "parseAssertReturnArgs: bad token propagates BadValue" {
+    var buf: [4]ArgValue = undefined;
+    try testing.expectError(error.BadValue, parseAssertReturnArgs("i32:1 xyz:2", &buf));
 }
