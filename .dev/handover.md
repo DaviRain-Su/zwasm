@@ -37,21 +37,26 @@ m-2c-init ElemSlice).
 
 ## Implementation queue (sequential — pickup detail in pickup doc)
 
-Next session picks up at **m-4c**. Order:
+Next session picks up at **l-1** (m-4c deferred to D-090 in
+this session, see `.dev/debt.md`). Order:
 
-1. **m-4c NEXT** — untyped .select (0x1B) lower-time type
-   inference. Add type-stack tracking to lower.zig so 0x1B
-   select with non-i32 operands becomes `.select_typed` with
-   proper extra. Without this, untyped `.select i64` silently
-   miscompiles via i32 dispatch.
-2. m-2d — table.grow JIT with allocator-helper infrastructure.
-   Deferred during m-2 cluster work; needs `*const Allocator`
+1. **l-1 NEXT** — non-SIMD spec_assert_runner. ADR-0057
+   expected. Per Agent X recommendation: factor a shared
+   `spec_assert_runner_base.zig` with SIMD + non-SIMD
+   specialisations. Needed before k-1 wast vendors can be
+   exercised end-to-end.
+2. k-1 — Wasm 2.0 non-SIMD wast vendor (~30 files).
+3. k-2 — SIMD wast vendor (33 files).
+4. m-4c (= D-090) — untyped .select non-i32 type inference.
+   Needs lower.zig type-stack walker mirroring the validator's
+   per-op type tracking. Filed as debt D-090 with concrete
+   discharge plan.
+5. m-2d — table.grow JIT with allocator-helper infrastructure.
+   Last piece of the m-2 cluster; needs `*const Allocator`
    surfacing into JitRuntime via opaque-state pointer + helper
    function pointer.
-3. l-1 — non-SIMD spec_assert_runner. ADR-0057 expected.
-4. k-1 — Wasm 2.0 non-SIMD wast vendor (~30 files).
-5. k-2 — SIMD wast vendor (33 files).
-6. n-1 — fib2 perf root cause.
+6. n-1 — fib2 perf root cause (22KB Rust-WASI binary; 41s/run
+   on Mac). Requires JIT profiling infra; investigation chunk.
 7. j-3b — SKIP gate real enforcement (last).
 
 ## Sandbox quirks + hook scope
