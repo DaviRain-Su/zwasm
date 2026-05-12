@@ -69,6 +69,19 @@ pub fn encMovR64FromBaseIdxLsl3(dst: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
     return enc;
 }
 
+/// `MOV [base + idx*8], r64` (REX.W + opcode 0x89 with SIB
+/// scale=3 → ×8). Mirror of `encMovR64FromBaseIdxLsl3` for the
+/// store direction. Used by §9.9 / 9.9-m-2a's `table.set`:
+/// `MOV [Rrefs + Ridx*8], Rval` writes `table.refs[idx]`.
+pub fn encStoreR64MemBaseIdxLsl3(src: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(encodeRex(true, src.extBit(), idx.extBit(), base.extBit()));
+    enc.push(0x89);
+    enc.push(encodeModrm(0b00, src.low3(), 0b100));
+    enc.push(encodeSib(0b11, idx.low3(), base.low3())); // scale = ×8
+    return enc;
+}
+
 /// `MOVSXD r64, r/m32` (REX.W + 0x63 /r) — sign-extend 32-bit
 /// source into 64-bit destination. Used by `i64.extend_i32_s`.
 /// dst occupies ModR/M.reg, src occupies r/m (IMUL-style

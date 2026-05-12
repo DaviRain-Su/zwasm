@@ -56,6 +56,7 @@ const op_memory = @import("op_memory.zig");
 const op_control = @import("op_control.zig");
 const op_call = @import("op_call.zig");
 const op_globals = @import("op_globals.zig");
+const op_table = @import("op_table.zig");
 const op_simd = @import("op_simd.zig");
 const op_simd_int_arith = @import("op_simd_int_arith.zig");
 const op_simd_int_cmp_lane = @import("op_simd_int_cmp_lane.zig");
@@ -898,6 +899,12 @@ pub fn compile(
             .@"memory.init" => try op_memory.emitMemoryInit(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, func.func_idx, ins.payload),
             .@"global.get" => try op_globals.emitGlobalGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload, globals_offsets, globals_valtypes),
             .@"global.set" => try op_globals.emitGlobalSet(allocator, &buf, alloc, &pushed_vregs, spill_base_off, ins.payload, globals_offsets, globals_valtypes),
+            // §9.9 / 9.9-m-2a (per ADR-0058): table.get / table.set
+            // / table.size — bounds-checked load/store against the
+            // per-table TableSlice descriptor in JitRuntime.
+            .@"table.get" => try op_table.emitTableGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, func.func_idx, ins.payload),
+            .@"table.set" => try op_table.emitTableSet(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, func.func_idx, ins.payload),
+            .@"table.size" => try op_table.emitTableSize(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
             // §9.7 / 9.7-a + 9.7-b: SIMD-128 packed integer add/sub
             // family (8 ops). Wires the FP-class regalloc +
             // shape-tag pipeline on x86_64 per ADR-0041; spilled

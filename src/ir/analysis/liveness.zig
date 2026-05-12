@@ -267,6 +267,25 @@ pub fn stackEffect(op: ZirOp) ?StackEffect {
         // flag is JIT-handled via `payload`).
         .@"memory.init" => .{ .pops = 3, .pushes = 0 },
         .@"data.drop", .@"elem.drop" => .{ .pops = 0, .pushes = 0 },
+        // §9.9 / 9.9-m-2a (per ADR-0058): table.* family stack
+        // effects. Wasm spec §4.4.10–§4.4.16 (table instructions).
+        //   table.get x: 1 → 1 (pop i32 idx; push reftype value)
+        //   table.set x: 2 → 0 (pop reftype val; pop i32 idx)
+        //   table.size x: 0 → 1 (push i32 current length)
+        //   table.grow x: 2 → 1 (pop init reftype + n i32; push i32 prev_size or -1)
+        //   table.fill x: 3 → 0 (pop dst i32, val reftype, n i32)
+        //   table.copy x y / table.init x y: 3 → 0 (pop dst, src, n)
+        .@"table.get" => .{ .pops = 1, .pushes = 1 },
+        .@"table.set" => .{ .pops = 2, .pushes = 0 },
+        .@"table.size" => .{ .pops = 0, .pushes = 1 },
+        .@"table.grow" => .{ .pops = 2, .pushes = 1 },
+        .@"table.fill", .@"table.copy", .@"table.init" => .{ .pops = 3, .pushes = 0 },
+        // §9.9 / 9.9-m-1a/b (per ADR-0056): reference-typed ops.
+        //   ref.null t: 0 → 1 (pushes a null reftype)
+        //   ref.is_null: 1 → 1 (pop reftype, push i32 test result)
+        //   ref.func x: 0 → 1 (pushes funcref for func x)
+        .@"ref.null", .@"ref.func" => .{ .pops = 0, .pushes = 1 },
+        .@"ref.is_null" => .{ .pops = 1, .pushes = 1 },
         // ============================================================
         // Wasm 2.0 SIMD (v128) — §9.9 / 9.9-d.
         // Wasm spec §4.4.6 (vector instructions).

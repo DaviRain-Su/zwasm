@@ -664,6 +664,12 @@ const RuntimeOwned = struct {
     // `wasm_bytes` outlives `RuntimeOwned` (callers pass module
     // bytes that persist across the call).
     data_segments: []entry.SegmentSlice,
+    // §9.9 / 9.9-m-2a: per-table descriptors + contiguous refs
+    // arena backing JIT `table.get` / `table.set` / `table.size`.
+    // `tables_descriptors[k].refs` points into `table_refs`; the
+    // two slices have matching lifetimes (both freed at deinit).
+    tables_descriptors: []entry.TableSlice,
+    table_refs: []u64,
 
     fn deinit(self: *RuntimeOwned, allocator: Allocator) void {
         if (self.memory.len > 0) allocator.free(self.memory);
@@ -675,6 +681,8 @@ const RuntimeOwned = struct {
         if (self.data_dropped.len > 0) allocator.free(self.data_dropped);
         if (self.elem_dropped.len > 0) allocator.free(self.elem_dropped);
         if (self.data_segments.len > 0) allocator.free(self.data_segments);
+        allocator.free(self.tables_descriptors);
+        allocator.free(self.table_refs);
     }
 };
 
@@ -749,12 +757,24 @@ fn setupRuntime(
         defer globals_buf.deinit();
         globals_count = @intCast(globals_buf.items.len);
     }
+    // §9.9 / 9.9-m-2a: parse the table section into per-table
+    // descriptors. `table_size` is retained as the table-0 entry
+    // count (call_indirect's `funcptrs_buf` + `typeidxs_buf` are
+    // table-0-only specialisations); the new `tables_descs` array
+    // generalises this to all declared tables for `table.get` /
+    // `table.set` / `table.size` (m-2a) and later m-2b/c ops.
     var table_size: u32 = 0;
+    const TableMeta = struct { min: u32, max: ?u32 };
+    var table_metas: []TableMeta = &.{};
     if (module.find(.table)) |s| {
         var tables_buf = try sections.decodeTables(ta, s.body);
         defer tables_buf.deinit();
         if (tables_buf.items.len > 0) {
             table_size = tables_buf.items[0].min;
+            table_metas = try ta.alloc(TableMeta, tables_buf.items.len);
+            for (tables_buf.items, 0..) |t, i| {
+                table_metas[i] = .{ .min = t.min, .max = t.max };
+            }
         }
     }
     // Cap to keep allocator pressure bounded; fixtures with large
@@ -778,6 +798,58 @@ fn setupRuntime(
     // bounds_fixups path instead of through a NULL `blr`.
     @memset(typeidxs_buf, std.math.maxInt(u32));
 
+    // §9.9 / 9.9-m-2a (per ADR-0058): generalised per-table storage.
+    // Each declared table gets a `TableSlice` descriptor with `refs`
+    // pointing into a single contiguous `table_refs` arena. Each
+    // entry is `Value.ref`-encoded u64 (FuncEntity pointer for
+    // funcref, host handle for externref, or `null_ref` sentinel).
+    // Initialised to `null_ref`; the element-section loop below
+    // mirrors writes from `funcptrs_buf` into the corresponding
+    // `table_refs` slot (using the FuncEntity-ptr encoding, NOT
+    // the native-code-ptr encoding used by `funcptrs_buf`).
+    var total_table_refs: usize = 0;
+    for (table_metas) |tm| total_table_refs += tm.min;
+    const tables_descs = try allocator.alloc(entry.TableSlice, if (table_metas.len == 0) 1 else table_metas.len);
+    errdefer allocator.free(tables_descs);
+    const table_refs = try allocator.alloc(u64, if (total_table_refs == 0) 1 else total_table_refs);
+    errdefer allocator.free(table_refs);
+    @memset(table_refs, Value.null_ref);
+    {
+        var ref_offset: usize = 0;
+        for (table_metas, 0..) |tm, i| {
+            tables_descs[i] = .{
+                .refs = table_refs.ptr + ref_offset,
+                .len = tm.min,
+                .max = tm.max orelse entry.table_no_max,
+            };
+            ref_offset += tm.min;
+        }
+        // For modules without a declared table section, leave the
+        // single placeholder descriptor pointing at the sentinel
+        // refs slot. table.get with tableidx=0 against such a
+        // module would already have been rejected by the validator
+        // (no table declared → InvalidFuncIndex).
+        if (table_metas.len == 0) {
+            tables_descs[0] = .{ .refs = table_refs.ptr, .len = 0, .max = entry.table_no_max };
+        }
+    }
+
+    // §9.9 / 9.9-m-1b: per-module FuncEntity array for JIT
+    // ref.func. Size = total functions (imports + defined).
+    // Allocated unconditionally so JIT-emitted ref.func reads
+    // a stable, distinct address per funcidx. Moved above the
+    // element-section loop (§9.9 / 9.9-m-2a) so the loop can
+    // populate `table_refs` with FuncEntity-ptr encoding in
+    // the same pass that populates `funcptrs_buf` with the
+    // native-code-ptr encoding.
+    const FuncEntity = @import("../runtime/instance/func.zig").FuncEntity;
+    const total_funcs = compiled.func_sigs.len;
+    const func_entities = try allocator.alloc(FuncEntity, total_funcs);
+    errdefer allocator.free(func_entities);
+    for (func_entities, 0..) |*fe, i| {
+        fe.* = .{ .runtime = undefined, .func_idx = @intCast(i) };
+    }
+
     // Wasm spec §4.5.7 (table.init / element-segment instantiation)
     // — populate the table with funcref entries from the element
     // section. Without this, `call_indirect` loads a NULL funcptr
@@ -785,48 +857,58 @@ fn setupRuntime(
     // passive / declarative segments live in the runtime element
     // index space, not the table itself, and reach the runtime via
     // `table.init` ops which v0.1.0's JIT path doesn't emit yet.
+    //
+    // §9.9 / 9.9-m-2a: the same loop populates `tables_descs[k].refs`
+    // (`table_refs` arena slice) with `Value.fromFuncRef` encoding
+    // (`@intFromPtr(&func_entities[fidx])`) for JIT `table.get`.
+    // `funcptrs_buf` keeps the native-code-ptr encoding for
+    // `call_indirect`'s fast path; the two views are coherent at
+    // setup time but diverge if `table.set` runs post-instantiation
+    // (a known follow-up tracked as part of the m-2 cluster).
     if (module.find(.element)) |s| {
         var elems = try sections.decodeElement(ta, s.body);
         defer elems.deinit();
         for (elems.items) |seg| {
             if (seg.kind != .active) continue;
-            if (seg.tableidx != 0) continue;
+            if (seg.tableidx >= tables_descs.len) continue;
             const off = evalConstI32Expr(seg.offset_expr) catch return Error.UnsupportedEntrySignature;
             if (off < 0) return Error.UnsupportedEntrySignature;
             const base: usize = @intCast(off);
-            if (base + seg.funcidxs.len > funcptrs_buf.len) return Error.UnsupportedEntrySignature;
+            const tbl = tables_descs[seg.tableidx];
+            if (base + seg.funcidxs.len > tbl.len) return Error.UnsupportedEntrySignature;
+            // Table-0-only fast-path arrays stay in sync only for
+            // table 0 (call_indirect always uses table 0). For
+            // tables > 0 we still populate `tbl.refs` but skip
+            // `funcptrs_buf` / `typeidxs_buf` (those would index
+            // out of range for table 0's `funcptrs_buf.len`).
+            const sync_table0 = (seg.tableidx == 0);
+            if (sync_table0 and base + seg.funcidxs.len > funcptrs_buf.len) {
+                return Error.UnsupportedEntrySignature;
+            }
             for (seg.funcidxs, 0..) |fidx, i| {
                 if (fidx == std.math.maxInt(u32)) {
                     // ref.null funcref — leave the slot null + sentinel typeidx.
+                    tbl.refs[base + i] = Value.null_ref;
                     continue;
                 }
                 if (fidx >= compiled.func_sigs.len) return Error.UnsupportedEntrySignature;
-                const f_off = compiled.module.func_offsets[fidx];
-                typeidxs_buf[base + i] = compiled.func_typeidxs[fidx];
-                if (f_off == linker.IMPORT_SENTINEL_OFFSET) {
-                    // Imported function in a table — host-call dispatch
-                    // through `host_dispatch_base` is required to invoke
-                    // it. v0.1.0's JIT call_indirect path doesn't emit
-                    // that trampoline; leave funcptr null so an attempt
-                    // to call it traps via NULL deref instead of running
-                    // arbitrary host code.
-                    continue;
+                tbl.refs[base + i] = @intFromPtr(&func_entities[fidx]);
+                if (sync_table0) {
+                    const f_off = compiled.module.func_offsets[fidx];
+                    typeidxs_buf[base + i] = compiled.func_typeidxs[fidx];
+                    if (f_off == linker.IMPORT_SENTINEL_OFFSET) {
+                        // Imported function in a table — host-call dispatch
+                        // through `host_dispatch_base` is required to invoke
+                        // it. v0.1.0's JIT call_indirect path doesn't emit
+                        // that trampoline; leave funcptr null so an attempt
+                        // to call it traps via NULL deref instead of running
+                        // arbitrary host code.
+                        continue;
+                    }
+                    funcptrs_buf[base + i] = @intFromPtr(compiled.module.block.bytes.ptr + f_off);
                 }
-                funcptrs_buf[base + i] = @intFromPtr(compiled.module.block.bytes.ptr + f_off);
             }
         }
-    }
-
-    // §9.9 / 9.9-m-1b: per-module FuncEntity array for JIT
-    // ref.func. Size = total functions (imports + defined).
-    // Allocated unconditionally so JIT-emitted ref.func reads
-    // a stable, distinct address per funcidx.
-    const FuncEntity = @import("../runtime/instance/func.zig").FuncEntity;
-    const total_funcs = compiled.func_sigs.len;
-    const func_entities = try allocator.alloc(FuncEntity, total_funcs);
-    errdefer allocator.free(func_entities);
-    for (func_entities, 0..) |*fe, i| {
-        fe.* = .{ .runtime = undefined, .func_idx = @intCast(i) };
     }
 
     // §9.9 / 9.9-m-3a: data / elem segment dropped-flag arrays.
@@ -892,6 +974,8 @@ fn setupRuntime(
             .elem_dropped_count = elem_dropped_count,
             .data_segments_ptr = if (data_segments_buf.len == 0) @as([*]const entry.SegmentSlice, undefined) else data_segments_buf.ptr,
             .data_segments_count = @intCast(data_segments_buf.len),
+            .tables_ptr = tables_descs.ptr,
+            .tables_count = @intCast(table_metas.len),
         },
         .memory = memory,
         .dispatch = dispatch,
@@ -902,6 +986,8 @@ fn setupRuntime(
         .data_dropped = data_dropped,
         .elem_dropped = elem_dropped,
         .data_segments = data_segments_buf,
+        .tables_descriptors = tables_descs,
+        .table_refs = table_refs,
     };
 }
 

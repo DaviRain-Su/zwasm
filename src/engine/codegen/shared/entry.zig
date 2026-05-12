@@ -21,6 +21,8 @@ const jit_abi = @import("jit_abi.zig");
 
 pub const JitRuntime = jit_abi.JitRuntime;
 pub const SegmentSlice = jit_abi.SegmentSlice;
+pub const TableSlice = jit_abi.TableSlice;
+pub const table_no_max: u32 = jit_abi.table_no_max;
 
 pub const Error = error{
     /// The JIT body trapped — its trap stub stored 1 to

@@ -200,8 +200,11 @@ pub fn build(b: *std.Build) void {
     });
     const run_edge_p7 = b.addRunArtifact(edge_runner_exe);
     run_edge_p7.addArg(b.pathFromRoot("test/edge_cases/p7"));
-    const test_edge_step = b.step("test-edge-cases", "Run edge-case fixture runner (Mac aarch64 only)");
+    const run_edge_p9 = b.addRunArtifact(edge_runner_exe);
+    run_edge_p9.addArg(b.pathFromRoot("test/edge_cases/p9"));
+    const test_edge_step = b.step("test-edge-cases", "Run edge-case fixture runner (all hosts post §9.9 / 9.9-j-2b)");
     test_edge_step.dependOn(&run_edge_p7.step);
+    test_edge_step.dependOn(&run_edge_p9.step);
 
     // `zig build test-spec-jit-compile` — §9.7 / 7.5 first
     // sub-chunk. Walks spec corpora and reports whether each

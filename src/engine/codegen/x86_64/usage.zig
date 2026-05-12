@@ -110,6 +110,14 @@ pub fn usesRuntimePtr(func: *const ZirFunc) bool {
             // dropped_ptr from [r15+off] then byte-store 1.
             .@"data.drop",
             .@"elem.drop",
+            // §9.9 / 9.9-m-2a (per ADR-0058): table.get / table.set
+            // / table.size load tables_ptr from [r15+off] then index
+            // the TableSlice array (refs / len reads). table.get
+            // and table.set also emit trap-stub fixups for the
+            // bounds check; all three require R15 initialised.
+            .@"table.get",
+            .@"table.set",
+            .@"table.size",
             .@"i32.div_s",
             .@"i32.div_u",
             .@"i32.rem_s",

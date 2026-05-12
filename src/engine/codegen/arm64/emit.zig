@@ -57,6 +57,7 @@ const op_memory = @import("op_memory.zig");
 const op_control = @import("op_control.zig");
 const op_call = @import("op_call.zig");
 const op_globals = @import("op_globals.zig");
+const op_table = @import("op_table.zig");
 const op_simd = @import("op_simd.zig");
 const op_simd_int_arith = @import("op_simd_int_arith.zig");
 const op_simd_int_cmp_lane = @import("op_simd_int_cmp_lane.zig");
@@ -1370,6 +1371,12 @@ pub fn compile(
                 try gpr.writeU32(allocator, &buf, inst.encMovzImm16(17, 1));
                 try gpr.writeU32(allocator, &buf, inst.encStrbImm(17, 16, @intCast(ins.payload)));
             },
+            // §9.9 / 9.9-m-2a (per ADR-0058): table.get / table.set /
+            // table.size — bounds-checked load/store against the
+            // per-table TableSlice descriptor in JitRuntime.
+            .@"table.get" => try op_table.emitTableGet(&ctx, &ins),
+            .@"table.set" => try op_table.emitTableSet(&ctx, &ins),
+            .@"table.size" => try op_table.emitTableSize(&ctx, &ins),
             .br_table => try op_control.emitBrTable(&ctx, &ins),
             .@"if" => try op_control.emitIf(&ctx, &ins),
             .@"else" => try op_control.emitElse(&ctx, &ins),

@@ -174,6 +174,15 @@ pub fn encLdrWRegLsl2(rt: Xn, rn: Xn, rm: Xn) u32 {
     return 0xB8607800 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rt);
 }
 
+/// `STR Xt, [Xn, Xm, LSL #3]` — 64-bit store with X-register
+/// offset scaled by element size (8 bytes). Mirror of
+/// `encLdrXRegLsl3` for table-style array stores. Used by §9.9 /
+/// 9.9-m-2a's `table.set`: `STR Xval, [Xrefs, Xidx, LSL #3]`
+/// writes `table.refs[idx]`.
+pub fn encStrXRegLsl3(rt: Xn, rn: Xn, rm: Xn) u32 {
+    return 0xF8207800 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rt);
+}
+
 /// `SXTW Xd, Wn` — sign-extend 32-bit Wn into 64-bit Xd. Alias
 /// for `SBFM Xd, Xn, #0, #31`. Used by `i64.extend_i32_s`.
 /// Encoding base 0x93407C00.
@@ -1171,6 +1180,9 @@ test "encLdrXReg x0, [x28, x16] — `ldr x0, [x28, x16]` → 0xF8706B80" {
 }
 test "encLdrXRegLsl3 x0, [x28, x16, lsl #3] → 0xF8707B80" {
     try testing.expectEqual(@as(u32, 0xF8707B80), encLdrXRegLsl3(0, 28, 16));
+}
+test "encStrXRegLsl3 x0, [x11, x17, lsl #3] → 0xF8317960" {
+    try testing.expectEqual(@as(u32, 0xF8317960), encStrXRegLsl3(0, 11, 17));
 }
 test "encLdrWRegLsl2 w16, [x24, x17, lsl #2] → 0xB8717B10" {
     try testing.expectEqual(@as(u32, 0xB8717B10), encLdrWRegLsl2(16, 24, 17));

@@ -47,6 +47,37 @@ pub const SegmentSlice = extern struct {
 
 pub const segment_slice_size: u32 = @sizeOf(SegmentSlice);
 
+/// §9.9 / 9.9-m-2a (per ADR-0058): per-table slice descriptor
+/// exposed to JIT `table.get` / `table.set` / `table.size` (m-2a),
+/// `table.grow` / `table.fill` (m-2b), `table.copy` / `table.init`
+/// (m-2c). Layout is a fixed 16-byte stride so the JIT body indexes
+/// the `tables_ptr` array with `tableidx * table_slice_size`.
+///
+/// `refs` points to the table's storage as `[*]u64` raw Value bits
+/// (each entry is a `Value.ref`-encoded u64; for funcref tables
+/// that means `@intFromPtr(&rt.func_entities[funcidx])` or
+/// `Value.null_ref` sentinel; for externref tables, host-supplied
+/// u64 handles). The interpretation is identical to interp's
+/// `TableInstance.refs: []Value`; the JIT loads/stores raw u64
+/// without re-tagging.
+///
+/// `max` is `std.math.maxInt(u32)` when the module's table type
+/// has no explicit max (matches interp's `?u32` `null` semantics);
+/// otherwise it's the declared upper bound used by `table.grow`'s
+/// max-cap check.
+pub const TableSlice = extern struct {
+    refs: [*]u64,
+    len: u32,
+    max: u32,
+};
+
+pub const table_slice_size: u32 = @sizeOf(TableSlice);
+
+/// Sentinel for `TableSlice.max` indicating "no explicit max" (per
+/// Wasm spec §3.2.1: tables without an explicit max field accept
+/// growth up to u32 range). Mirrors interp's `?u32` `null` arm.
+pub const table_no_max: u32 = std.math.maxInt(u32);
+
 /// Pointer-and-counter bundle the JIT body relies on. Layout
 /// extends only at the tail (Phase 8+: trap_buf, host-call
 /// dispatch table, gc_root_set ptr) so existing prologue
@@ -171,6 +202,16 @@ pub const JitRuntime = extern struct {
     data_segments_ptr: [*]const SegmentSlice = undefined,
     data_segments_count: u32 = 0,
     _pad8: u32 = 0,
+    /// §9.9 / 9.9-m-2a (per ADR-0058): per-table slice descriptor
+    /// array. Each entry is a `TableSlice` (16 bytes: `refs`,
+    /// `len`, `max`). JIT `table.get` / `table.set` / `table.size`
+    /// (m-2a) index this with stride `table_slice_size`. m-2b's
+    /// `table.grow` reads `max` for the cap check; m-2c's
+    /// `table.copy` / `table.init` consume both source and
+    /// destination slices.
+    tables_ptr: [*]const TableSlice = undefined,
+    tables_count: u32 = 0,
+    _pad9: u32 = 0,
 };
 
 // ============================================================
@@ -204,6 +245,8 @@ pub const elem_dropped_ptr_off: u12 = @offsetOf(JitRuntime, "elem_dropped_ptr");
 pub const elem_dropped_count_off: u12 = @offsetOf(JitRuntime, "elem_dropped_count");
 pub const data_segments_ptr_off: u12 = @offsetOf(JitRuntime, "data_segments_ptr");
 pub const data_segments_count_off: u12 = @offsetOf(JitRuntime, "data_segments_count");
+pub const tables_ptr_off: u12 = @offsetOf(JitRuntime, "tables_ptr");
+pub const tables_count_off: u12 = @offsetOf(JitRuntime, "tables_count");
 
 /// Total size of the head section consumed by the prologue.
 pub const head_size: u32 = @sizeOf(JitRuntime);
@@ -267,6 +310,16 @@ comptime {
     // this for `LDR Xn, [seg_base, #(idx*16)+0]` (ptr) and
     // `LDR Xn, [seg_base, #(idx*16)+8]` (len).
     if (@sizeOf(SegmentSlice) != 16) @compileError("SegmentSlice size != 16; JIT memory.init stride assumption broken");
+    // §9.9 / 9.9-m-2a: tables_ptr is X-form (8-byte pointer); count is W-form.
+    if ((tables_ptr_off & 7) != 0) @compileError("tables_ptr_off not 8-aligned");
+    if ((tables_count_off & 3) != 0) @compileError("tables_count_off not 4-aligned");
+    if (tables_ptr_off > 32760) @compileError("tables_ptr_off exceeds X-form imm12 budget");
+    if (tables_count_off > 16380) @compileError("tables_count_off exceeds W-form imm12 budget");
+    // TableSlice layout: 16 bytes (refs ptr + u32 len + u32 max). JIT
+    // relies on this for `LDR Xn, [tbl_base, #(idx*16)+0]` (refs),
+    // `LDR Wn, [tbl_base, #(idx*16)+8]` (len), and m-2b's
+    // `LDR Wn, [tbl_base, #(idx*16)+12]` (max).
+    if (@sizeOf(TableSlice) != 16) @compileError("TableSlice size != 16; JIT table.get stride assumption broken");
 }
 
 // ============================================================
@@ -287,11 +340,11 @@ test "JitRuntime: layout offsets match documented prologue load sequence" {
     try testing.expectEqual(@as(u12, 80), jit_executed_flag_off);
 }
 
-test "JitRuntime: total size = 152 bytes (post-§9.9 / 9.9-m-3b data_segments tail)" {
-    try testing.expectEqual(@as(u32, 152), head_size);
+test "JitRuntime: total size = 168 bytes (post-§9.9 / 9.9-m-2a tables tail)" {
+    try testing.expectEqual(@as(u32, 168), head_size);
 }
 
-test "JitRuntime: §9.9 / 9.9-m-1b + 9.9-m-3a + 9.9-m-3b new field offsets" {
+test "JitRuntime: §9.9 / 9.9-m-1b + 9.9-m-3a + 9.9-m-3b + 9.9-m-2a new field offsets" {
     try testing.expectEqual(@as(u12, 88), func_entities_ptr_off);
     try testing.expectEqual(@as(u12, 96), func_entities_count_off);
     try testing.expectEqual(@as(u12, 104), data_dropped_ptr_off);
@@ -300,6 +353,15 @@ test "JitRuntime: §9.9 / 9.9-m-1b + 9.9-m-3a + 9.9-m-3b new field offsets" {
     try testing.expectEqual(@as(u12, 128), elem_dropped_count_off);
     try testing.expectEqual(@as(u12, 136), data_segments_ptr_off);
     try testing.expectEqual(@as(u12, 144), data_segments_count_off);
+    try testing.expectEqual(@as(u12, 152), tables_ptr_off);
+    try testing.expectEqual(@as(u12, 160), tables_count_off);
+}
+
+test "TableSlice: layout is 16 bytes with refs/len/max at expected offsets" {
+    try testing.expectEqual(@as(u32, 16), table_slice_size);
+    try testing.expectEqual(@as(usize, 0), @offsetOf(TableSlice, "refs"));
+    try testing.expectEqual(@as(usize, 8), @offsetOf(TableSlice, "len"));
+    try testing.expectEqual(@as(usize, 12), @offsetOf(TableSlice, "max"));
 }
 
 test "JitRuntime: round-trip construction + field reads" {
