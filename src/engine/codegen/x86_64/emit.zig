@@ -695,6 +695,21 @@ pub fn compile(
             .@"i64.ge_u",
             => try op_alu_int.emitI64Compare(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.op),
             .@"i64.eqz" => try op_alu_int.emitI64Eqz(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            // §9.9 / 9.9-m-1a (per ADR-0056): Wasm 2.0 reference-types
+            // partial — null + is_null. ref.func deferred to m-1b
+            // (needs JitRuntime extension). ref.null = push 0
+            // (XOR r,r zeroes the 64-bit reg via implicit upper-32
+            // clear on 32-bit ops). ref.is_null = reuse i64.eqz.
+            .@"ref.null" => {
+                const vreg = next_vreg;
+                next_vreg += 1;
+                if (vreg >= alloc.slots.len) return Error.SlotOverflow;
+                const dst_r = try gpr.gprDefSpilled(alloc, vreg, 0);
+                try buf.appendSlice(allocator, inst.encXorRR(.d, dst_r, dst_r).slice());
+                try gpr.gprStoreSpilled(allocator, &buf, alloc, spill_base_off, vreg, 0);
+                try pushed_vregs.append(allocator, vreg);
+            },
+            .@"ref.is_null" => try op_alu_int.emitI64Eqz(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"i64.shl",
             .@"i64.shr_s",
             .@"i64.shr_u",

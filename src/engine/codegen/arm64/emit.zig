@@ -729,6 +729,24 @@ pub fn compile(
             .@"i64.ge_u",
             => try op_alu_int.emitI64Compare(&ctx, &ins),
             .@"i64.eqz" => try op_alu_int.emitI64Eqz(&ctx, &ins),
+            // §9.9 / 9.9-m-1a (per ADR-0056): Wasm 2.0 reference-types
+            // partial — null + is_null. ref.func deferred to m-1b
+            // (needs JitRuntime extension for `func_entities_ptr`).
+            // ref.null: push 0 (null_ref sentinel per ADR-0014 §2.1
+            // / 6.K.1; Value.null_ref == 0). MOVZ Xd, #0 = 0x00000000
+            // → zeroes both halves of X (W form implicitly).
+            // ref.is_null: semantically identical to i64.eqz (pop
+            // 64-bit, push i32=1 if zero else 0) — reuse handler.
+            .@"ref.null" => {
+                const vreg = next_vreg;
+                next_vreg += 1;
+                if (vreg >= alloc.slots.len) return Error.SlotOverflow;
+                const xd = try gpr.gprDefSpilled(alloc, vreg, 0);
+                try gpr.writeU32(allocator, &buf, inst.encMovzImm16(xd, 0));
+                try gpr.gprStoreSpilled(allocator, &buf, alloc, ctx.spill_base_off, vreg, 0);
+                try pushed_vregs.append(allocator, vreg);
+            },
+            .@"ref.is_null" => try op_alu_int.emitI64Eqz(&ctx, &ins),
             .@"i64.shl",
             .@"i64.shr_s",
             .@"i64.shr_u",
