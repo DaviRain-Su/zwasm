@@ -13,24 +13,28 @@
    per-chunk pickup chain (recipes, file paths, ADR notes) for
    the queue below. Authoritative for next session continuation.
 
-## Active state — **Phase 9 extended; l-1b-trap-widen landed 2026-05-12**
+## Active state — **Phase 9 extended; k-1 first expand landed 2026-05-12**
 
 ### One-line state
 
-l-1b-trap-widen extended assert_trap dispatch with (f32) / (f64)
-arms + added the missing (i64) → i32 wrap shape +
-`entry.callI32_i64`. Mac + OrbStack `test-spec-wasm-2.0-assert`:
-**567 / 0 / 51 bit-identical** (**0 skip-impl** + 51 skip-adr).
-ADR-0029 Path B release gate clean on the conversions corpus —
-the only waivers are D-091's x86_64 trapping-trunc precision
-boundary cases, named in a single skip-ADR. simd_assert
-13301/0/440 + spec_assert 212/0/20 unchanged.
+k-1 first expansion + 6 new 2-arg dispatch shapes landed: 7
+new wasts vendored (i32, i64, f32_cmp, f64_cmp, int_exprs,
+int_literals, float_literals), 6 entry helpers
+(`callI64_i64i64`, `callI32_i64i64`, `callF32_f32f32`,
+`callI32_f32f32`, `callF64_f64f64`, `callI32_f64f64`) +
+matching dispatch arms. Mac + OrbStack `test-spec-wasm-2.0-assert`:
+**6467 / 0 / 153 bit-identical** (**0 skip-impl** + 153
+skip-adr — all D-091). simd_assert 13301/0/440 + spec_assert
+212/0/20 unchanged. f32 / f64 wasts deferred to **D-092**:
+x86_64 compileWasm rejects f32.0.wasm / f64.0.wasm with
+UnsupportedOp (Mac aarch64 accepts).
 
-Next: **k-1 corpus expansion** (vendor more wasm-2.0 .wast
-files into `wasm-2.0-assert/` — non-SIMD non-reftype-heavy ones
-like `i32.wast` / `i64.wast` / `f32.wast` / `f64.wast` /
-sign-extend variants if separated / etc.) **OR** **D-091
-discharge** (retires the 51 skip-adr).
+Next: choose between **D-091 discharge** (x86_64
+trapping-trunc precision fix; retires 153 skip-adr) OR
+**D-092 investigation** (identify the x86_64 FP-op gap;
+re-add f32 / f64 to NAMES) OR **further k-1 expansion**
+(`block` / `loop` / `call` need multi-result;
+`select` / `ref_*` / `local_init` need reftype runtime).
 
 ### Original m-2 cluster state (earlier this session)
 
@@ -57,20 +61,20 @@ m-2c-init ElemSlice).
 ## Implementation queue (sequential — pickup detail in pickup docs)
 
 Next session picks up at **one of**:
-  - **k-1 corpus expansion**: add more .wast files to
-    `regen_spec_2_0_assert.sh`'s NAMES list and re-regen.
-    Candidates that should mostly green out today: `i32.wast`,
-    `i64.wast`, `f32.wast`, `f64.wast`, `f32_cmp.wast`,
-    `f64_cmp.wast`, `int_exprs.wast`, `int_literals.wast`,
-    `float_literals.wast`. Each adds 100s of PASS lines.
-    `block.wast` / `loop.wast` / `call.wast` need
-    multi-result support; reftype-heavy `select.wast` /
-    `ref_*.wast` need their own runner extension.
   - **D-091**: x86_64 trapping-trunc precision fix per
     `skip_x86_64_trunc_precision.md`; rewrite `op_convert.zig`
     with a range-aware predicate before CVTTSD2SI / CVTTSS2SI;
     delete the regen-script filter + the skip-ADR; re-regen
-    the manifest. Retires the 51 skip-adr.
+    the manifest. Retires the 153 skip-adr.
+  - **D-092**: identify the x86_64 FP-op gap in `f32.0.wasm` /
+    `f64.0.wasm`. Run `wasm-objdump -d` + targeted compileWasm
+    trace to pinpoint the rejected op. Either patch the
+    handler or file a per-op skip-ADR. Re-add `f32` / `f64`
+    to `regen_spec_2_0_assert.sh` NAMES list.
+  - **k-1 further expand**: needs runner extensions for the
+    next-tier corpora — `block` / `loop` / `call` (multi-result
+    return marshalling); `select` / `ref_*` (reftype runtime);
+    `local_init` (some modules reftype-flavoured).
 
 Per-stage state of l-1 (l-1a all complete; l-1b in progress):
 
@@ -82,8 +86,10 @@ Per-stage state of l-1 (l-1a all complete; l-1b in progress):
 | l-1b-widen  | [x] 774ae3c8 | 10 cross-type entry helpers + dispatch arms + boundary skip-adr (493/0/125) |
 | l-1b-nan    | [x] 207330be | scalar NaN-pattern result matcher in base (501/0/117) |
 | l-1b-trap-widen | [x] a7bf59d8 | assert_trap f32/f64 arms + i32.wrap_i64 shape (567/0/51; **skip-impl 0**) |
-| **k-1 corpus expand** | **NEXT (option A)** | **i32 / i64 / f32 / f64 .wast vendor + manifest regen** |
-| **D-091** | **NEXT (option B)** | **x86_64 trapping-trunc precision fix (retires 51 skip-adr)** |
+| k-1-expand-1 | [x] 894e0e00 | 6 binop helpers + 7 wasts (i32/i64/f32_cmp/f64_cmp/int_exprs/int_literals/float_literals); 6467/0/153 (**skip-impl 0**); D-092 filed for f32/f64 deferral |
+| **D-091** | **NEXT (option A)** | **x86_64 trapping-trunc precision fix (retires 153 skip-adr)** |
+| **D-092** | **NEXT (option B)** | **x86_64 f32/f64 wasm-2.0 module UnsupportedOp investigation** |
+| **k-1-expand-2** | **NEXT (option C)** | **next-tier wasts (multi-result block/loop/call OR reftype runtime)** |
 
 Then l-1b (new spec_assert_runner_non_simd.zig + curated wasm-2.0
 corpus + test-spec-wasm-2.0-assert build step).
