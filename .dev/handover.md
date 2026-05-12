@@ -13,16 +13,17 @@
    per-chunk pickup chain (recipes, file paths, ADR notes) for
    the queue below. Authoritative for next session continuation.
 
-## Active state — **Phase 9 extended; l-1a stages 1-3 landed 2026-05-12**
+## Active state — **Phase 9 extended; l-1a stages 1-4 landed 2026-05-12**
 
 **Read first on next session**: `private/l-1a-next-session-pickup.md`
 — full recipe + stage state for resuming the spec_assert_runner
-factoring at stage 4.
+factoring at stage 5.
 
 ### One-line state
 
-l-1a stages 1-3 (base extraction) landed; stages 4-5 (runCorpus +
-runAssertReturn split) pending. SIMD test gate stays at 13301/0/440
+l-1a stages 1-4 (base extraction + runCorpus + RunnerCallbacks)
+landed; stage 5 (runAssertReturn / runAssertTrap argument-parsing
+split for l-1b reuse) pending. SIMD test gate stays at 13301/0/440
 bit-identical pre/post each stage.
 
 ### Original m-2 cluster state (earlier this session)
@@ -49,9 +50,10 @@ m-2c-init ElemSlice).
 
 ## Implementation queue (sequential — pickup detail in pickup docs)
 
-Next session picks up at **l-1a stage 4** (runCorpus extraction
-with RunnerCallbacks trait). See
-`private/l-1a-next-session-pickup.md` for the full recipe.
+Next session picks up at **l-1a stage 5** (runAssertReturn /
+runAssertTrap argument-parsing split — `parseAssertReturnArgs`
+hoisted into base so l-1b can reuse the scalar arg-list parser).
+See `private/l-1a-next-session-pickup.md` for the full recipe.
 
 Per-stage state of l-1a:
 
@@ -60,8 +62,8 @@ Per-stage state of l-1a:
 | 1 | [x] 06c3bfdc | scalar token parsers + splitFnAndArgs |
 | 2 | [x] dc7bc047 | AssertTally + classifySkipLine |
 | 3 | [x] 4727fc02 | DirectiveKind + classifyDirective (types only) |
-| **4** | **NEXT** | **runCorpus extraction with RunnerCallbacks** |
-| 5 | pending | runAssertReturn / runAssertTrap split |
+| 4 | [x] d8157857 | runCorpus + RunnerCallbacks trait in base |
+| **5** | **NEXT** | **runAssertReturn / runAssertTrap arg-parser split** |
 | 6 | optional | scratch buffer move (only if simd > 800 LOC after 5) |
 
 Then l-1b (new spec_assert_runner_non_simd.zig + curated wasm-2.0
