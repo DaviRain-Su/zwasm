@@ -211,16 +211,19 @@ for c in d['commands']:
         # `base.parseScalarFpExpected` + `matchScalarF32/F64`. No
         # filter needed — the runner compares per the Wasm spec §A.2
         # NaN classes.
-        # Skip ADR — `skip_x86_64_trunc_precision.md`. The trapping
-        # `*.trunc_f{32,64}_{s,u}` family on x86_64 mishandles inputs
-        # in the half-step range immediately outside the target
-        # integer's representable range. ARM64 PASSes; the host
-        # differential blocks the gate. D-091 tracks the x86_64
-        # fix; until then those boundary inputs are waived per the
-        # ADR.
-        if len(args) == 1 and trunc_arg_in_edge(a["field"], args[0]):
-            lines.append(f'skip-adr-x86_64_trunc_precision {a["field"]} edge-input')
-            continue
+        # D-091 closed (§9.9 / 9.9-l-1b-d091-close): the x86_64
+        # `i32.trunc_f64_s` lower-bound check now uses
+        # `-(2^31 + 1.0)` with `JBE` instead of `-2^31` with `JB`,
+        # correctly distinguishing boundary inputs (e.g. -2^31 - 0.5)
+        # that `trunc` rounds to INT_MIN (in range) from genuine
+        # out-of-range inputs. The other 3 trapping-trunc variants
+        # (i32_s f32, i64_s f32, i64_s f64) were never affected —
+        # FP precision at their boundaries is coarser than the
+        # half-step gap, so the original `-2^N` / `JB` shape is
+        # spec-conformant. The regen-time `skip-adr-x86_64_trunc_precision`
+        # filter is removed; `trunc_arg_in_edge` is unused (kept
+        # for potential reuse if future skips need range-edge
+        # detection).
         args_s = ' '.join(fmt(x) for x in args) if args else '()'
         results_s = ' '.join(fmt(x) for x in results) if results else '()'
         lines.append(f'assert_return {a["field"]} {args_s} -> {results_s}')
@@ -249,12 +252,8 @@ for c in d['commands']:
                 f'({" ".join(arg_kinds) or "()"}) {a["field"]}'
             )
             continue
-        # Honour the same x86_64 trunc-precision skip ADR for trap
-        # cases — failing fixture is value-edge dependent regardless
-        # of whether the wast originally expected a result or a trap.
-        if len(args) == 1 and trunc_arg_in_edge(a["field"], args[0]):
-            lines.append(f'skip-adr-x86_64_trunc_precision {a["field"]} trap-edge')
-            continue
+        # D-091 closed: trap-mode skip-adr removed in lockstep
+        # with the assert_return arm above.
         args_s = ' '.join(fmt(x) for x in args) if args else '()'
         lines.append(f'assert_trap {a["field"]} {args_s}')
     elif t == 'assert_invalid':

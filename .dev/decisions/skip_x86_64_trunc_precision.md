@@ -1,10 +1,20 @@
 ---
-status: Accepted
+status: Superseded
 ---
 
 # Skip — x86_64 trunc precision at INT_MIN/INT_MAX boundary
 
-Status: Accepted 2026-05-12 (§9.9 / 9.9-l-1b-widen surfaced).
+Status: **Superseded** 2026-05-12 by §9.9 / 9.9-l-1b-d091-close
+(D-091 fix landed in `src/engine/codegen/x86_64/op_convert.zig` —
+the `i32.trunc_f64_s` lower-bound threshold now uses
+`-(2^31 + 1.0) = 0xC1E0000000200000` with `JBE` instead of
+`-2^31` with `JB`, correctly distinguishing boundary half-step
+inputs from genuine out-of-range. Re-derivation in
+`.dev/debt.md` D-091 discharge note. The regen-script
+`skip-adr-x86_64_trunc_precision` filter is purged in the
+same commit; no manifest lines reference this ADR anymore.).
+
+Originally accepted 2026-05-12 (§9.9 / 9.9-l-1b-widen surfaced).
 
 ## Context
 

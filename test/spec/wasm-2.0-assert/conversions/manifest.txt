@@ -36,8 +36,8 @@ assert_return i32.trunc_f32_s f32:3217031168 -> i32:4294967295
 assert_return i32.trunc_f32_s f32:3220386611 -> i32:4294967295
 assert_return i32.trunc_f32_s f32:3221225472 -> i32:4294967294
 assert_return i32.trunc_f32_s f32:1325400063 -> i32:2147483520
-skip-adr-x86_64_trunc_precision i32.trunc_f32_s edge-input
-skip-adr-x86_64_trunc_precision i32.trunc_f32_s trap-edge
+assert_return i32.trunc_f32_s f32:3472883712 -> i32:2147483648
+assert_trap i32.trunc_f32_s f32:1325400064
 assert_trap i32.trunc_f32_s f32:3472883713
 assert_trap i32.trunc_f32_s f32:2139095040
 assert_trap i32.trunc_f32_s f32:4286578688
@@ -45,21 +45,21 @@ assert_trap i32.trunc_f32_s f32:2143289344
 assert_trap i32.trunc_f32_s f32:2141192192
 assert_trap i32.trunc_f32_s f32:4290772992
 assert_trap i32.trunc_f32_s f32:4288675840
-skip-adr-x86_64_trunc_precision i32.trunc_f32_u edge-input
-skip-adr-x86_64_trunc_precision i32.trunc_f32_u edge-input
-skip-adr-x86_64_trunc_precision i32.trunc_f32_u edge-input
-skip-adr-x86_64_trunc_precision i32.trunc_f32_u edge-input
-skip-adr-x86_64_trunc_precision i32.trunc_f32_u edge-input
+assert_return i32.trunc_f32_u f32:0 -> i32:0
+assert_return i32.trunc_f32_u f32:2147483648 -> i32:0
+assert_return i32.trunc_f32_u f32:1 -> i32:0
+assert_return i32.trunc_f32_u f32:2147483649 -> i32:0
+assert_return i32.trunc_f32_u f32:1065353216 -> i32:1
 assert_return i32.trunc_f32_u f32:1066192077 -> i32:1
 assert_return i32.trunc_f32_u f32:1069547520 -> i32:1
 assert_return i32.trunc_f32_u f32:1072902963 -> i32:1
 assert_return i32.trunc_f32_u f32:1073741824 -> i32:2
 assert_return i32.trunc_f32_u f32:1325400064 -> i32:2147483648
 assert_return i32.trunc_f32_u f32:1333788671 -> i32:4294967040
-skip-adr-x86_64_trunc_precision i32.trunc_f32_u edge-input
-skip-adr-x86_64_trunc_precision i32.trunc_f32_u edge-input
-skip-adr-x86_64_trunc_precision i32.trunc_f32_u trap-edge
-skip-adr-x86_64_trunc_precision i32.trunc_f32_u trap-edge
+assert_return i32.trunc_f32_u f32:3211159142 -> i32:0
+assert_return i32.trunc_f32_u f32:3212836863 -> i32:0
+assert_trap i32.trunc_f32_u f32:1333788672
+assert_trap i32.trunc_f32_u f32:3212836864
 assert_trap i32.trunc_f32_u f32:2139095040
 assert_trap i32.trunc_f32_u f32:4286578688
 assert_trap i32.trunc_f32_u f32:2143289344
@@ -78,36 +78,36 @@ assert_return i32.trunc_f64_s f64:13831004815617530266 -> i32:4294967295
 assert_return i32.trunc_f64_s f64:13832806255468478464 -> i32:4294967295
 assert_return i32.trunc_f64_s f64:13834607695319426662 -> i32:4294967295
 assert_return i32.trunc_f64_s f64:13835058055282163712 -> i32:4294967294
-skip-adr-x86_64_trunc_precision i32.trunc_f64_s edge-input
-skip-adr-x86_64_trunc_precision i32.trunc_f64_s edge-input
-skip-adr-x86_64_trunc_precision i32.trunc_f64_s edge-input
-skip-adr-x86_64_trunc_precision i32.trunc_f64_s edge-input
-skip-adr-x86_64_trunc_precision i32.trunc_f64_s trap-edge
-skip-adr-x86_64_trunc_precision i32.trunc_f64_s trap-edge
+assert_return i32.trunc_f64_s f64:4746794007244308480 -> i32:2147483647
+assert_return i32.trunc_f64_s f64:13970166044103278592 -> i32:2147483648
+assert_return i32.trunc_f64_s f64:13970166044105166029 -> i32:2147483648
+assert_return i32.trunc_f64_s f64:4746794007248083354 -> i32:2147483647
+assert_trap i32.trunc_f64_s f64:4746794007248502784
+assert_trap i32.trunc_f64_s f64:13970166044105375744
 assert_trap i32.trunc_f64_s f64:9218868437227405312
 assert_trap i32.trunc_f64_s f64:18442240474082181120
 assert_trap i32.trunc_f64_s f64:9221120237041090560
 assert_trap i32.trunc_f64_s f64:9219994337134247936
 assert_trap i32.trunc_f64_s f64:18444492273895866368
 assert_trap i32.trunc_f64_s f64:18443366373989023744
-skip-adr-x86_64_trunc_precision i32.trunc_f64_u edge-input
-skip-adr-x86_64_trunc_precision i32.trunc_f64_u edge-input
-skip-adr-x86_64_trunc_precision i32.trunc_f64_u edge-input
-skip-adr-x86_64_trunc_precision i32.trunc_f64_u edge-input
-skip-adr-x86_64_trunc_precision i32.trunc_f64_u edge-input
+assert_return i32.trunc_f64_u f64:0 -> i32:0
+assert_return i32.trunc_f64_u f64:9223372036854775808 -> i32:0
+assert_return i32.trunc_f64_u f64:1 -> i32:0
+assert_return i32.trunc_f64_u f64:9223372036854775809 -> i32:0
+assert_return i32.trunc_f64_u f64:4607182418800017408 -> i32:1
 assert_return i32.trunc_f64_u f64:4607632778762754458 -> i32:1
 assert_return i32.trunc_f64_u f64:4609434218613702656 -> i32:1
 assert_return i32.trunc_f64_u f64:4611235658464650854 -> i32:1
 assert_return i32.trunc_f64_u f64:4611686018427387904 -> i32:2
 assert_return i32.trunc_f64_u f64:4746794007248502784 -> i32:2147483648
-skip-adr-x86_64_trunc_precision i32.trunc_f64_u edge-input
-skip-adr-x86_64_trunc_precision i32.trunc_f64_u edge-input
-skip-adr-x86_64_trunc_precision i32.trunc_f64_u edge-input
+assert_return i32.trunc_f64_u f64:4751297606873776128 -> i32:4294967295
+assert_return i32.trunc_f64_u f64:13829653735729319117 -> i32:0
+assert_return i32.trunc_f64_u f64:13830554455654793215 -> i32:0
 assert_return i32.trunc_f64_u f64:4726483295884279808 -> i32:100000000
-skip-adr-x86_64_trunc_precision i32.trunc_f64_u edge-input
-skip-adr-x86_64_trunc_precision i32.trunc_f64_u edge-input
-skip-adr-x86_64_trunc_precision i32.trunc_f64_u trap-edge
-skip-adr-x86_64_trunc_precision i32.trunc_f64_u trap-edge
+assert_return i32.trunc_f64_u f64:13829653735729319117 -> i32:0
+assert_return i32.trunc_f64_u f64:4751297606875663565 -> i32:4294967295
+assert_trap i32.trunc_f64_u f64:4751297606875873280
+assert_trap i32.trunc_f64_u f64:13830554455654793216
 assert_trap i32.trunc_f64_u f64:4846369599423283200
 assert_trap i32.trunc_f64_u f64:5055640609639927018
 assert_trap i32.trunc_f64_u f64:4890909195324358656
@@ -132,8 +132,8 @@ assert_return i64.trunc_f32_s f32:3221225472 -> i64:18446744073709551614
 assert_return i64.trunc_f32_s f32:1333788672 -> i64:4294967296
 assert_return i64.trunc_f32_s f32:3481272320 -> i64:18446744069414584320
 assert_return i64.trunc_f32_s f32:1593835519 -> i64:9223371487098961920
-skip-adr-x86_64_trunc_precision i64.trunc_f32_s edge-input
-skip-adr-x86_64_trunc_precision i64.trunc_f32_s trap-edge
+assert_return i64.trunc_f32_s f32:3741319168 -> i64:9223372036854775808
+assert_trap i64.trunc_f32_s f32:1593835520
 assert_trap i64.trunc_f32_s f32:3741319169
 assert_trap i64.trunc_f32_s f32:2139095040
 assert_trap i64.trunc_f32_s f32:4286578688
@@ -141,19 +141,19 @@ assert_trap i64.trunc_f32_s f32:2143289344
 assert_trap i64.trunc_f32_s f32:2141192192
 assert_trap i64.trunc_f32_s f32:4290772992
 assert_trap i64.trunc_f32_s f32:4288675840
-skip-adr-x86_64_trunc_precision i64.trunc_f32_u edge-input
-skip-adr-x86_64_trunc_precision i64.trunc_f32_u edge-input
-skip-adr-x86_64_trunc_precision i64.trunc_f32_u edge-input
-skip-adr-x86_64_trunc_precision i64.trunc_f32_u edge-input
-skip-adr-x86_64_trunc_precision i64.trunc_f32_u edge-input
+assert_return i64.trunc_f32_u f32:0 -> i64:0
+assert_return i64.trunc_f32_u f32:2147483648 -> i64:0
+assert_return i64.trunc_f32_u f32:1 -> i64:0
+assert_return i64.trunc_f32_u f32:2147483649 -> i64:0
+assert_return i64.trunc_f32_u f32:1065353216 -> i64:1
 assert_return i64.trunc_f32_u f32:1066192077 -> i64:1
 assert_return i64.trunc_f32_u f32:1069547520 -> i64:1
 assert_return i64.trunc_f32_u f32:1333788672 -> i64:4294967296
 assert_return i64.trunc_f32_u f32:1602224127 -> i64:18446742974197923840
-skip-adr-x86_64_trunc_precision i64.trunc_f32_u edge-input
-skip-adr-x86_64_trunc_precision i64.trunc_f32_u edge-input
-skip-adr-x86_64_trunc_precision i64.trunc_f32_u trap-edge
-skip-adr-x86_64_trunc_precision i64.trunc_f32_u trap-edge
+assert_return i64.trunc_f32_u f32:3211159142 -> i64:0
+assert_return i64.trunc_f32_u f32:3212836863 -> i64:0
+assert_trap i64.trunc_f32_u f32:1602224128
+assert_trap i64.trunc_f32_u f32:3212836864
 assert_trap i64.trunc_f32_u f32:2139095040
 assert_trap i64.trunc_f32_u f32:4286578688
 assert_trap i64.trunc_f32_u f32:2143289344
@@ -175,8 +175,8 @@ assert_return i64.trunc_f64_s f64:13835058055282163712 -> i64:184467440737095516
 assert_return i64.trunc_f64_s f64:4751297606875873280 -> i64:4294967296
 assert_return i64.trunc_f64_s f64:13974669643730649088 -> i64:18446744069414584320
 assert_return i64.trunc_f64_s f64:4890909195324358655 -> i64:9223372036854774784
-skip-adr-x86_64_trunc_precision i64.trunc_f64_s edge-input
-skip-adr-x86_64_trunc_precision i64.trunc_f64_s trap-edge
+assert_return i64.trunc_f64_s f64:14114281232179134464 -> i64:9223372036854775808
+assert_trap i64.trunc_f64_s f64:4890909195324358656
 assert_trap i64.trunc_f64_s f64:14114281232179134465
 assert_trap i64.trunc_f64_s f64:9218868437227405312
 assert_trap i64.trunc_f64_s f64:18442240474082181120
@@ -184,23 +184,23 @@ assert_trap i64.trunc_f64_s f64:9221120237041090560
 assert_trap i64.trunc_f64_s f64:9219994337134247936
 assert_trap i64.trunc_f64_s f64:18444492273895866368
 assert_trap i64.trunc_f64_s f64:18443366373989023744
-skip-adr-x86_64_trunc_precision i64.trunc_f64_u edge-input
-skip-adr-x86_64_trunc_precision i64.trunc_f64_u edge-input
-skip-adr-x86_64_trunc_precision i64.trunc_f64_u edge-input
-skip-adr-x86_64_trunc_precision i64.trunc_f64_u edge-input
-skip-adr-x86_64_trunc_precision i64.trunc_f64_u edge-input
+assert_return i64.trunc_f64_u f64:0 -> i64:0
+assert_return i64.trunc_f64_u f64:9223372036854775808 -> i64:0
+assert_return i64.trunc_f64_u f64:1 -> i64:0
+assert_return i64.trunc_f64_u f64:9223372036854775809 -> i64:0
+assert_return i64.trunc_f64_u f64:4607182418800017408 -> i64:1
 assert_return i64.trunc_f64_u f64:4607632778762754458 -> i64:1
 assert_return i64.trunc_f64_u f64:4609434218613702656 -> i64:1
 assert_return i64.trunc_f64_u f64:4751297606873776128 -> i64:4294967295
 assert_return i64.trunc_f64_u f64:4751297606875873280 -> i64:4294967296
 assert_return i64.trunc_f64_u f64:4895412794951729151 -> i64:18446744073709549568
-skip-adr-x86_64_trunc_precision i64.trunc_f64_u edge-input
-skip-adr-x86_64_trunc_precision i64.trunc_f64_u edge-input
+assert_return i64.trunc_f64_u f64:13829653735729319117 -> i64:0
+assert_return i64.trunc_f64_u f64:13830554455654793215 -> i64:0
 assert_return i64.trunc_f64_u f64:4726483295884279808 -> i64:100000000
 assert_return i64.trunc_f64_u f64:4846369599423283200 -> i64:10000000000000000
 assert_return i64.trunc_f64_u f64:4890909195324358656 -> i64:9223372036854775808
-skip-adr-x86_64_trunc_precision i64.trunc_f64_u trap-edge
-skip-adr-x86_64_trunc_precision i64.trunc_f64_u trap-edge
+assert_trap i64.trunc_f64_u f64:4895412794951729152
+assert_trap i64.trunc_f64_u f64:13830554455654793216
 assert_trap i64.trunc_f64_u f64:9218868437227405312
 assert_trap i64.trunc_f64_u f64:18442240474082181120
 assert_trap i64.trunc_f64_u f64:9221120237041090560

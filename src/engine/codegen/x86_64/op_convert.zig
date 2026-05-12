@@ -643,10 +643,29 @@ pub fn emitFpTruncTrapSigned(
         (if (is_f64_src) @as(u64, 0x43E0000000000000) else 0x5F000000)
     else
         (if (is_f64_src) @as(u64, 0x41E0000000000000) else 0x4F000000);
-    const lower_bits: u64 = if (is_i64_dst)
+    // D-091 close — lower-bound threshold for `i32.trunc_f64_s`
+    // (f64 → i32 signed). f64 represents the boundary half-step
+    // values (e.g. -2147483648.9) which `trunc` rounds to INT_MIN
+    // (in range). The naive threshold `-2^31` with strict `JB`
+    // wrongly traps these. Use `-(2^31 + 1) = -2147483649.0` and
+    // `JBE` so:
+    //   x = -2^31           → JBE off, no trap; CVTTSD2SI → INT_MIN. ✓
+    //   x = -2^31 - 0.5     → JBE off (> -2147483649), no trap;
+    //                          CVTTSD2SI → INT_MIN. ✓
+    //   x = -2147483649.0   → JBE on (= -2147483649), trap. ✓
+    //   x = -2^31 - 2.0     → JBE on (< -2147483649), trap. ✓
+    // Other variants (i32_s f32, i64_s f32, i64_s f64) have FP
+    // precision coarser than the boundary gap (f32 step at 2^31
+    // is 256; f64 step at 2^63 is 2048), so no half-step values
+    // exist between INT_MIN and the next-representable below, and
+    // the original `-2^N` / `JB` shape stays correct.
+    const i32_s_f64 = !is_i64_dst and is_f64_src;
+    const lower_bits: u64 = if (i32_s_f64)
+        @as(u64, 0xC1E0000000200000) // -2147483649.0 (f64)
+    else if (is_i64_dst)
         (if (is_f64_src) @as(u64, 0xC3E0000000000000) else 0xDF000000)
     else
-        (if (is_f64_src) @as(u64, 0xC1E0000000000000) else 0xCF000000);
+        @as(u64, 0xCF000000); // i32_s f32: -2^31 unchanged
 
     // 1. UCOMI src, src ; JP trap.
     if (is_f64_src) {
@@ -673,7 +692,10 @@ pub fn emitFpTruncTrapSigned(
         try bounds_fixups.append(allocator, fixup_at);
     }
 
-    // 3. Lower bound: load INT_MIN into xmm7, UCOMI, JB trap.
+    // 3. Lower bound: load INT_MIN (or -(INT_MIN+1) for i32_s f64,
+    // see lower_bits comment) into xmm7, UCOMI, conditional trap.
+    // i32_s f64 uses `JBE` (≤) against -2147483649; all other
+    // variants use `JB` (<) against -2^N. See lower_bits derivation.
     try materialiseFpThreshold(allocator, buf, is_f64_src, lower_bits);
     if (is_f64_src) {
         try buf.appendSlice(allocator, inst.encUcomisd(src_x, .xmm7).slice());
@@ -682,7 +704,8 @@ pub fn emitFpTruncTrapSigned(
     }
     {
         const fixup_at: u32 = @intCast(buf.items.len);
-        try buf.appendSlice(allocator, inst.encJccRel32(.b, 0).slice());
+        const lower_cc: inst.Cond = if (i32_s_f64) .be else .b;
+        try buf.appendSlice(allocator, inst.encJccRel32(lower_cc, 0).slice());
         try bounds_fixups.append(allocator, fixup_at);
     }
 
