@@ -89,6 +89,51 @@ pub fn classifySkipLine(line: []const u8) SkipKind {
     return .other;
 }
 
+/// Non-skip directive kinds in the manifest format. The caller
+/// dispatches on this enum; `.unknown` lets specialisations decide
+/// what to do (warn, ignore, fail) for unrecognised lines.
+pub const DirectiveKind = enum {
+    module,
+    assert_return,
+    assert_trap,
+    assert_invalid,
+    assert_malformed,
+    unknown,
+};
+
+/// Pair returned by `classifyDirective` — the directive kind and
+/// the body (= line content after the prefix + single space).
+pub const ClassifiedDirective = struct {
+    kind: DirectiveKind,
+    body: []const u8,
+};
+
+/// Inverse of `classifySkipLine` for the non-skip half: identify
+/// which assert/module directive a line carries and return the
+/// trailing body. Caller MUST have already routed through
+/// `classifySkipLine` and seen `.other` before invoking this.
+///
+/// For `.unknown` the body is the full line (no prefix was
+/// stripped); the caller can quote it back into a WARN/FAIL.
+pub fn classifyDirective(line: []const u8) ClassifiedDirective {
+    if (std.mem.startsWith(u8, line, "module ")) {
+        return .{ .kind = .module, .body = line[7..] };
+    }
+    if (std.mem.startsWith(u8, line, "assert_return ")) {
+        return .{ .kind = .assert_return, .body = line[14..] };
+    }
+    if (std.mem.startsWith(u8, line, "assert_trap ")) {
+        return .{ .kind = .assert_trap, .body = line[12..] };
+    }
+    if (std.mem.startsWith(u8, line, "assert_invalid ")) {
+        return .{ .kind = .assert_invalid, .body = line[15..] };
+    }
+    if (std.mem.startsWith(u8, line, "assert_malformed ")) {
+        return .{ .kind = .assert_malformed, .body = line[17..] };
+    }
+    return .{ .kind = .unknown, .body = line };
+}
+
 // ============================================================
 // Tests
 // ============================================================
@@ -166,4 +211,28 @@ test "AssertTally: defaults are zero" {
     try testing.expectEqual(@as(u32, 0), t.failed);
     try testing.expectEqual(@as(u32, 0), t.skipped);
     try testing.expectEqual(@as(u32, 0), t.skipped_adr);
+}
+
+test "classifyDirective: module strips `module ` prefix" {
+    const r = classifyDirective("module test.wasm");
+    try testing.expectEqual(DirectiveKind.module, r.kind);
+    try testing.expectEqualStrings("test.wasm", r.body);
+}
+
+test "classifyDirective: assert_return strips prefix" {
+    const r = classifyDirective("assert_return foo i32:42");
+    try testing.expectEqual(DirectiveKind.assert_return, r.kind);
+    try testing.expectEqualStrings("foo i32:42", r.body);
+}
+
+test "classifyDirective: assert_trap / assert_invalid / assert_malformed all routed" {
+    try testing.expectEqual(DirectiveKind.assert_trap, classifyDirective("assert_trap bar").kind);
+    try testing.expectEqual(DirectiveKind.assert_invalid, classifyDirective("assert_invalid baz").kind);
+    try testing.expectEqual(DirectiveKind.assert_malformed, classifyDirective("assert_malformed qux").kind);
+}
+
+test "classifyDirective: unknown returns the full line in body" {
+    const r = classifyDirective("garbage_line foo");
+    try testing.expectEqual(DirectiveKind.unknown, r.kind);
+    try testing.expectEqualStrings("garbage_line foo", r.body);
 }
