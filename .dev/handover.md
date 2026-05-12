@@ -13,20 +13,26 @@
    per-chunk pickup chain (recipes, file paths, ADR notes) for
    the queue below. Authoritative for next session continuation.
 
-## Active state — **Phase 9 extended; l-1b runner half landed 2026-05-12**
+## Active state — **Phase 9 extended; l-1b corpus starter landed 2026-05-12**
 
 ### One-line state
 
-l-1a (6 stages) + l-1b runner half landed: new
-`spec_assert_runner_non_simd.zig` (~430 LOC) consumes the
-shared base, `test-spec-wasm-2.0-assert` build step wired into
-`test-all` (reports "0 manifests" cleanly until corpus lands).
-Mac + OrbStack: simd_assert 13301/0/440 + spec_assert 212/0/20
-bit-identical. Next: **l-1b corpus** — write
-`scripts/regen_spec_2_0_assert.sh` + curate wasm-2.0 wasts
-(sign-ext, sat-trunc, multi-value, call_indirect, table_init,
-elem_drop, ref_*) into `test/spec/wasm-2.0-assert/`; the
-runner already handles them.
+l-1a (6 stages) + l-1b runner half + l-1b corpus starter
+landed. `scripts/regen_spec_2_0_assert.sh` distills upstream
+WebAssembly/spec `conversions.wast` into 27 .wasm fixtures +
+manifest under `test/spec/wasm-2.0-assert/conversions/`.
+test-spec-wasm-2.0-assert: **Mac + OrbStack 37 / 0 / 581
+bit-identical** (581 skip-impl flags runner-shape gaps in
+`spec_assert_runner_non_simd.dispatchScalarResult` — every
+cross-type conversion shape is missing). simd_assert 13301/0/440
+and spec_assert 212/0/20 unchanged.
+
+Next: **widen the runner ladder** with cross-type entry
+helpers — `entry.callI32_f32` / `callI32_f64` / `callI64_f32` /
+`callI64_f64` (trunc-family) + `callF32_i32` / `callF32_i64` /
+`callF64_i32` / `callF64_i64` (convert-family) + `callF32_f64`
+/ `callF64_f32` (promote/demote) + the corresponding dispatch
+arms. Should collapse the 581 skip-impl substantially.
 
 ### Original m-2 cluster state (earlier this session)
 
@@ -52,14 +58,14 @@ m-2c-init ElemSlice).
 
 ## Implementation queue (sequential — pickup detail in pickup docs)
 
-Next session picks up at **l-1b corpus**: write
-`scripts/regen_spec_2_0_assert.sh` mirroring
-`regen_spec_1_0_assert.sh`'s `wast2json` → manifest pattern
-but pointing at the wasm-2.0 wast subset (sign-ext, sat-trunc,
-multi-value, call_indirect, table_init, elem_drop, ref_func,
-ref_null, ref_is_null). Distillation produces
-`test/spec/wasm-2.0-assert/<dir>/manifest.txt` + `*.wasm`
-fixtures consumed by the already-wired runner.
+Next session picks up at **l-1b dispatch widen**: extend
+`spec_assert_runner_non_simd.zig`'s `dispatchScalarResult` /
+`dispatchVoidResult` ladders with the cross-type shapes
+`conversions.wast` needs — `(f32) → i32`, `(f64) → i64`,
+`(i32) → f64`, etc. Each new arm needs a matching `entry.callXX`
+helper in `src/engine/codegen/shared/entry.zig`. Then re-run
+the regen script (filter set in the script must mirror the
+runner ladder) to confirm 581 skip-impl shrinks.
 
 Per-stage state of l-1 (l-1a all complete; l-1b in progress):
 
@@ -72,7 +78,8 @@ Per-stage state of l-1 (l-1a all complete; l-1b in progress):
 | l-1a-5 | [x] d9a1fff1 | parseAssertReturnArgs / ArgValue / parseArgToken / parseV128Token in base |
 | l-1a-6 | [x] 8e52a241 | makeJitRuntime helper hoist to base |
 | l-1b-runner | [x] bff477f5 | new spec_assert_runner_non_simd.zig + test-spec-wasm-2.0-assert step + test-all wiring |
-| **l-1b-corpus** | **NEXT** | **regen_spec_2_0_assert.sh + curated wasm-2.0 wast vendor** |
+| l-1b-corpus | [x] 3b92bed6 | regen_spec_2_0_assert.sh + conversions starter (37/0/581) |
+| **l-1b-widen** | **NEXT** | **cross-type entry helpers + dispatch arms (collapse 581 skip-impl)** |
 
 Then l-1b (new spec_assert_runner_non_simd.zig + curated wasm-2.0
 corpus + test-spec-wasm-2.0-assert build step).
