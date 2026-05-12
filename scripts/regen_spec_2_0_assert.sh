@@ -56,15 +56,18 @@ fi
 # Expansion candidates listed in the file header (table_*, ref_*,
 # bulk-memory) need runner extensions or refnull handling that are
 # out of l-1b scope (k-1 row in the autonomous queue).
-# f32 / f64 deferred: x86_64 compileWasm fails on f32.0.wasm /
-# f64.0.wasm with UnsupportedOp (some FP op missing in JIT; Mac
-# aarch64 succeeds → real host differential). Queued as D-092
-# investigation; the cmp wasts are safe (no FP arithmetic in
-# the module body, only comparison).
+# f32 / f64 re-enabled at D-092 close (§9.9 / 9.9-l-1b-d092-close):
+# the x86_64 `emitFpMinMax` path rejected the regalloc-issued
+# `dst == rhs and dst != lhs` case where `emitFpBinary` handled
+# it (commutative-swap). Fix: min/max are commutative across all
+# three branches (UCOMI / MINSS-MAXSS / ORPS-ANDPS / ADDSS), so
+# swap lhs/rhs when dst aliases rhs. Three-host gate bit-identical.
 NAMES=(
   conversions
   i32
   i64
+  f32
+  f64
   f32_cmp
   f64_cmp
   int_exprs
@@ -100,47 +103,11 @@ for n in "${NAMES[@]}"; do
   mkdir -p "$out_dir"
 
   python3 - "$TMP/$n.json" "$out_dir/manifest.txt" <<'PY'
-import json, struct, sys
+import json, sys
 src, dst = sys.argv[1], sys.argv[2]
 d = json.load(open(src))
 def fmt(v):
     return f"{v['type']}:{v['value']}"
-# Trapping-trunc family for the x86_64 precision skip-ADR
-# (`skip_x86_64_trunc_precision.md`). Used by both assert_return
-# and assert_trap arms; per ADR-0029 Path B the skip-adr token
-# routes to the same tally regardless of the original directive.
-TRUNC_TRAP_OPS = {
-    ('i32.trunc_f32_s', 32, True),
-    ('i32.trunc_f64_s', 32, True),
-    ('i32.trunc_f32_u', 32, False),
-    ('i32.trunc_f64_u', 32, False),
-    ('i64.trunc_f32_s', 64, True),
-    ('i64.trunc_f64_s', 64, True),
-    ('i64.trunc_f32_u', 64, False),
-    ('i64.trunc_f64_u', 64, False),
-}
-def trunc_arg_in_edge(field, arg):
-    """Return True iff `field` is in the trapping-trunc family AND
-    the arg's decoded f-value lies in the half-step boundary range
-    around the target integer's representable range. Boundary
-    inputs are waived per skip_x86_64_trunc_precision.md until
-    D-091 lands."""
-    op_match = next((m for m in TRUNC_TRAP_OPS if m[0] == field), None)
-    if op_match is None or arg['type'] not in ('f32', 'f64'):
-        return False
-    tok_u = int(arg['value'])
-    if arg['type'] == 'f32':
-        fval = struct.unpack('f', struct.pack('I', tok_u & 0xFFFFFFFF))[0]
-    else:
-        fval = struct.unpack('d', struct.pack('Q', tok_u))[0]
-    if fval != fval:  # NaN: not an edge case, let it pass
-        return False
-    _, bits, signed = op_match
-    if signed:
-        lo, hi = -(2 ** (bits - 1)), 2 ** (bits - 1)
-        return (lo - 1.0 <= fval <= lo + 1.0) or (hi - 1.0 <= fval <= hi + 1.0)
-    hi = 2 ** bits
-    return (-1.0 <= fval <= 1.0) or ((hi - 1.0) <= fval <= (hi + 1.0))
 lines = []
 for c in d['commands']:
     t = c.get('type')
@@ -211,19 +178,12 @@ for c in d['commands']:
         # `base.parseScalarFpExpected` + `matchScalarF32/F64`. No
         # filter needed — the runner compares per the Wasm spec §A.2
         # NaN classes.
-        # D-091 closed (§9.9 / 9.9-l-1b-d091-close): the x86_64
-        # `i32.trunc_f64_s` lower-bound check now uses
-        # `-(2^31 + 1.0)` with `JBE` instead of `-2^31` with `JB`,
-        # correctly distinguishing boundary inputs (e.g. -2^31 - 0.5)
-        # that `trunc` rounds to INT_MIN (in range) from genuine
-        # out-of-range inputs. The other 3 trapping-trunc variants
-        # (i32_s f32, i64_s f32, i64_s f64) were never affected —
-        # FP precision at their boundaries is coarser than the
-        # half-step gap, so the original `-2^N` / `JB` shape is
-        # spec-conformant. The regen-time `skip-adr-x86_64_trunc_precision`
-        # filter is removed; `trunc_arg_in_edge` is unused (kept
-        # for potential reuse if future skips need range-edge
-        # detection).
+        # Trapping-trunc family flows through unfiltered. D-091
+        # (§9.9 / 9.9-l-1b-d091-close) fixed the only x86_64
+        # boundary-precision miscompile (`i32.trunc_f64_s`); the
+        # other 3 signed variants' FP-precision step is coarser
+        # than the half-step gap so the original `-2^N` / `JB`
+        # bound is spec-conformant.
         args_s = ' '.join(fmt(x) for x in args) if args else '()'
         results_s = ' '.join(fmt(x) for x in results) if results else '()'
         lines.append(f'assert_return {a["field"]} {args_s} -> {results_s}')

@@ -609,6 +609,38 @@ test "compile: f32.min — branch-based emit (UCOMISS + JP/JE + 3 paths)" {
     try testing.expectEqual(@as(i32, 54 - 34 - 6), je_disp);
 }
 
+test "compile: f32.min — dst aliasing rhs slot is handled via commutative swap (D-092)" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0x40400000 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.const", .payload = 0x3F800000 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"f32.min" });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 2 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+        .{ .def_pc = 2, .last_use_pc = 3 },
+    } };
+    // Force dst (vreg 2) into rhs's slot (XMM9). lhs (vreg 0) is XMM8.
+    // Before D-092 this surfaced UnsupportedOp at op_alu_float.zig:105.
+    const slots = [_]u16{ 0, 1, 1 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 2 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+    // After the swap, lhs↔rhs roles are exchanged, so the emit
+    // produces: UCOMISS XMM9,XMM8 ; ... ; MOVAPS XMM9,XMM9 (no-op,
+    // skipped) ; MINSS XMM9,XMM8. Verify the swap landed by
+    // asserting UCOMISS XMM9,XMM8 (rather than the pre-swap
+    // XMM8,XMM9 shape).
+    const expected_ucomi = inst.encUcomiss(.xmm9, .xmm8);
+    try testing.expectEqualSlices(u8, expected_ucomi.slice(), out.bytes[24 .. 24 + expected_ucomi.len]);
+    // Common-path MINSS lands at byte 40 (post-swap, the MOVAPS
+    // dst,lhs is elided because dst == new-lhs == XMM9).
+    const expected_minss = inst.encSseScalarBinary(.f32, 0x5D, .xmm9, .xmm8);
+    try testing.expectEqualSlices(u8, expected_minss.slice(), out.bytes[40 .. 40 + expected_minss.len]);
+}
+
 test "compile: f64.max — eq path uses ANDPD, common uses MAXSD" {
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f64} };
     var f = ZirFunc.init(0, sig, &.{});

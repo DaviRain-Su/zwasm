@@ -99,10 +99,23 @@ pub fn emitFpMinMax(
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-    const lhs_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
-    const rhs_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
+    var lhs_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, lhs_v, 0);
+    var rhs_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
     const dst = try gpr.xmmDefSpilled(alloc, result_v, 0);
-    if (dst == rhs_x and dst != lhs_x) return types.rejectUnsupported("src/engine/codegen/x86_64/op_alu_float.zig:105", 0);
+    // min/max are commutative across all three emitted branches —
+    // UCOMI's PF/ZF flags are symmetric, MINSS/MAXSS in the
+    // common (non-NaN, non-equal) path is mathematically
+    // commutative, ORPS/ANDPS in the eq path is commutative, and
+    // ADDSS in the NaN path propagates NaN regardless of operand
+    // order. When the regalloc gives dst == rhs (the case
+    // emitFpBinary handles via its commutative branch), swap
+    // operand roles so MOVAPS dst,lhs becomes a no-op (dst now
+    // already holds rhs after the swap → MOVAPS dst,dst skipped).
+    if (dst == rhs_x and dst != lhs_x) {
+        const tmp = lhs_x;
+        lhs_x = rhs_x;
+        rhs_x = tmp;
+    }
 
     const is_f64 = switch (op) {
         .@"f64.min", .@"f64.max" => true,
