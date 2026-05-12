@@ -216,19 +216,50 @@ fn nonSimdRunAssertReturn(
         return false;
     };
     const exp_s = results_s[4..];
-    const expected: u64 = switch (result_kind) {
-        .i32, .f32 => @as(u64, try base.parseI32Token(exp_s)),
-        .i64, .f64 => try base.parseI64Token(exp_s),
-        .v128 => unreachable, // rejected above
-    };
 
     const got: u64 = (try dispatchScalarResult(compiled, func_idx, &rt, fn_name, args_s, args[0..n_args], result_kind, stdout, name)) orelse return false;
 
-    if (got != expected) {
-        try stdout.print("FAIL  {s}: {s}({s}) → got {d}, expected {d}\n", .{ name, fn_name, args_s, got, expected });
-        return false;
+    // FP results: parse expected via `parseScalarFpExpected` so
+    // `nan:canonical` / `nan:arithmetic` tokens compare via the
+    // NaN-class matcher (Wasm spec §A.2). Integer results stay on
+    // the bit-pattern equality path.
+    switch (result_kind) {
+        .f32 => {
+            const spec = base.parseScalarFpExpected(exp_s, 32) catch {
+                try stdout.print("FAIL  {s}: bad f32 result '{s}'\n", .{ name, results_s });
+                return false;
+            };
+            const got_bits: u32 = @intCast(got & 0xffffffff);
+            if (!base.matchScalarF32(got_bits, spec)) {
+                try stdout.print("FAIL  {s}: {s}({s}) → got f32:0x{x:0>8}, expected {s}\n", .{ name, fn_name, args_s, got_bits, exp_s });
+                return false;
+            }
+            return true;
+        },
+        .f64 => {
+            const spec = base.parseScalarFpExpected(exp_s, 64) catch {
+                try stdout.print("FAIL  {s}: bad f64 result '{s}'\n", .{ name, results_s });
+                return false;
+            };
+            if (!base.matchScalarF64(got, spec)) {
+                try stdout.print("FAIL  {s}: {s}({s}) → got f64:0x{x:0>16}, expected {s}\n", .{ name, fn_name, args_s, got, exp_s });
+                return false;
+            }
+            return true;
+        },
+        .i32, .i64 => {
+            const expected: u64 = if (result_kind == .i32)
+                @as(u64, try base.parseI32Token(exp_s))
+            else
+                try base.parseI64Token(exp_s);
+            if (got != expected) {
+                try stdout.print("FAIL  {s}: {s}({s}) → got {d}, expected {d}\n", .{ name, fn_name, args_s, got, expected });
+                return false;
+            }
+            return true;
+        },
+        .v128 => unreachable,
     }
-    return true;
 }
 
 /// Void-result dispatch ladder. Returns `false` on shape-unsupported

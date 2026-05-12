@@ -482,10 +482,10 @@ assert_return f64.promote_f32 f32:67108864 -> f64:4071254063142928384
 assert_return f64.promote_f32 f32:2118632255 -> f64:5172657297058430976
 assert_return f64.promote_f32 f32:2139095040 -> f64:9218868437227405312
 assert_return f64.promote_f32 f32:4286578688 -> f64:18442240474082181120
-skip-impl nan-pattern-result f64.promote_f32
-skip-impl nan-pattern-result f64.promote_f32
-skip-impl nan-pattern-result f64.promote_f32
-skip-impl nan-pattern-result f64.promote_f32
+assert_return f64.promote_f32 f32:2143289344 -> f64:nan:canonical
+assert_return f64.promote_f32 f32:2141192192 -> f64:nan:arithmetic
+assert_return f64.promote_f32 f32:4290772992 -> f64:nan:canonical
+assert_return f64.promote_f32 f32:4288675840 -> f64:nan:arithmetic
 assert_return f32.demote_f64 f64:0 -> f32:0
 assert_return f32.demote_f64 f64:9223372036854775808 -> f32:2147483648
 assert_return f32.demote_f64 f64:1 -> f32:0
@@ -528,10 +528,10 @@ assert_return f32.demote_f64 f64:4101111194527827589 -> f32:122722105
 assert_return f32.demote_f64 f64:4038806939559600639 -> f32:7529997
 assert_return f32.demote_f64 f64:13836913116900734306 -> f32:3224680794
 assert_return f32.demote_f64 f64:14338315240173327556 -> f32:4158615026
-skip-impl nan-pattern-result f32.demote_f64
-skip-impl nan-pattern-result f32.demote_f64
-skip-impl nan-pattern-result f32.demote_f64
-skip-impl nan-pattern-result f32.demote_f64
+assert_return f32.demote_f64 f64:9221120237041090560 -> f32:nan:canonical
+assert_return f32.demote_f64 f64:9219994337134247936 -> f32:nan:arithmetic
+assert_return f32.demote_f64 f64:18444492273895866368 -> f32:nan:canonical
+assert_return f32.demote_f64 f64:18443366373989023744 -> f32:nan:arithmetic
 assert_return f32.demote_f64 f64:4503599627370496 -> f32:0
 assert_return f32.demote_f64 f64:9227875636482146304 -> f32:2147483648
 assert_return f32.demote_f64 f64:3931642474694443008 -> f32:0

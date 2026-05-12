@@ -150,16 +150,11 @@ for c in d['commands']:
                 f'({" ".join(arg_kinds) or "()"}, {result_kind}) {a["field"]}'
             )
             continue
-        # NaN-pattern result tokens (`nan:canonical` / `nan:arithmetic`)
-        # need bit-pattern matching like the simd runner's `matchLaneF*`
-        # helpers — not a literal `parseI64Token`. Skip until the
-        # non-simd runner grows the equivalent. Same FP-NaN-aware
-        # comparison Wasm spec §A.2 mandates for FP-producing ops.
-        if results:
-            v = results[0]['value']
-            if isinstance(v, str) and v.startswith('nan:'):
-                lines.append(f'skip-impl nan-pattern-result {a["field"]}')
-                continue
+        # 9.9-l-1b-nan: NaN-pattern result tokens
+        # (`nan:canonical` / `nan:arithmetic`) flow through via
+        # `base.parseScalarFpExpected` + `matchScalarF32/F64`. No
+        # filter needed — the runner compares per the Wasm spec §A.2
+        # NaN classes.
         # Skip ADR — `skip_x86_64_trunc_precision.md`. The trapping
         # `*.trunc_f{32,64}_{s,u}` family on x86_64 mishandles inputs
         # in the half-step range immediately outside the target

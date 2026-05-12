@@ -238,6 +238,59 @@ pub fn parseAssertReturnArgs(args_s: []const u8, args_buf: []ArgValue) !usize {
     return n;
 }
 
+/// FP-result expectation per Wasm spec §A.2 "Result types"
+/// + the testsuite's `nan:canonical` / `nan:arithmetic` tokens.
+/// `exact` carries a literal bit pattern (caller decides u32 / u64
+/// width); the two NaN variants accept any bit pattern matching
+/// the spec-defined NaN class on the result FP width.
+pub const ScalarFpSpec = union(enum) {
+    exact: u64,
+    canonical,
+    arithmetic,
+};
+
+/// Parse the `<value>` portion of a `f32:` / `f64:` result token
+/// (the runner has already stripped the `f32:` / `f64:` prefix).
+/// Recognises `nan:canonical` / `nan:arithmetic` literals as the
+/// corresponding `ScalarFpSpec` variants; falls back to
+/// `parseI32Token` (for f32 results) / `parseI64Token` (for f64
+/// results) via `bits` for any decimal bit-pattern literal.
+///
+/// `bits` chooses the integer parser. Pass `32` for f32 results,
+/// `64` for f64. Mismatches surface as `error.BadValue`.
+pub fn parseScalarFpExpected(value_s: []const u8, bits: u8) !ScalarFpSpec {
+    if (std.mem.eql(u8, value_s, "nan:canonical")) return .canonical;
+    if (std.mem.eql(u8, value_s, "nan:arithmetic")) return .arithmetic;
+    switch (bits) {
+        32 => return .{ .exact = @as(u64, try parseI32Token(value_s)) },
+        64 => return .{ .exact = try parseI64Token(value_s) },
+        else => return error.BadValue,
+    }
+}
+
+/// Compare a f32 result's bit pattern against the expected spec.
+/// Canonical NaN: sign-agnostic ±0x7fc00000. Arithmetic NaN:
+/// exponent all-1s + mantissa MSB = 1 (= any quiet NaN, includes
+/// canonical). Exact: u32 bit-pattern equality.
+pub fn matchScalarF32(got_bits: u32, spec: ScalarFpSpec) bool {
+    return switch (spec) {
+        .canonical => got_bits == 0x7fc00000 or got_bits == 0xffc00000,
+        .arithmetic => (got_bits & 0x7fc00000) == 0x7fc00000,
+        .exact => |bits| got_bits == @as(u32, @intCast(bits & 0xffffffff)),
+    };
+}
+
+/// f64 mirror of `matchScalarF32`. Canonical NaN bit pattern is
+/// `±0x7ff8000000000000`; arithmetic is any quiet NaN
+/// (exp all-1s + mantissa MSB = 1).
+pub fn matchScalarF64(got_bits: u64, spec: ScalarFpSpec) bool {
+    return switch (spec) {
+        .canonical => got_bits == 0x7ff8000000000000 or got_bits == 0xfff8000000000000,
+        .arithmetic => (got_bits & 0x7ff8000000000000) == 0x7ff8000000000000,
+        .exact => |bits| got_bits == bits,
+    };
+}
+
 /// Per-runner callbacks invoked by `runCorpus()`. Specialisations
 /// (currently only `simd_assert_runner`; later `spec_assert_runner_non_simd`
 /// per l-1b) provide function pointers that handle the type-specific
@@ -615,4 +668,42 @@ test "parseAssertReturnArgs: TooManyArgs when buffer overflows" {
 test "parseAssertReturnArgs: bad token propagates BadValue" {
     var buf: [4]ArgValue = undefined;
     try testing.expectError(error.BadValue, parseAssertReturnArgs("i32:1 xyz:2", &buf));
+}
+
+test "parseScalarFpExpected: nan:canonical / nan:arithmetic" {
+    try testing.expectEqual(ScalarFpSpec.canonical, try parseScalarFpExpected("nan:canonical", 32));
+    try testing.expectEqual(ScalarFpSpec.arithmetic, try parseScalarFpExpected("nan:arithmetic", 64));
+}
+
+test "parseScalarFpExpected: literal decimal routes to exact" {
+    const got = try parseScalarFpExpected("42", 32);
+    try testing.expect(got == .exact);
+    try testing.expectEqual(@as(u64, 42), got.exact);
+}
+
+test "matchScalarF32: canonical NaN sign-agnostic" {
+    try testing.expect(matchScalarF32(0x7fc00000, .canonical));
+    try testing.expect(matchScalarF32(0xffc00000, .canonical));
+    try testing.expect(!matchScalarF32(0x7fc00001, .canonical));
+}
+
+test "matchScalarF32: arithmetic NaN accepts any quiet NaN" {
+    try testing.expect(matchScalarF32(0x7fc00000, .arithmetic));
+    try testing.expect(matchScalarF32(0x7fc00001, .arithmetic));
+    try testing.expect(matchScalarF32(0xffc00010, .arithmetic));
+    // signalling NaN (mantissa MSB=0): rejected
+    try testing.expect(!matchScalarF32(0x7f800001, .arithmetic));
+}
+
+test "matchScalarF32: exact bit-pattern equality" {
+    try testing.expect(matchScalarF32(42, .{ .exact = 42 }));
+    try testing.expect(!matchScalarF32(42, .{ .exact = 43 }));
+}
+
+test "matchScalarF64: canonical / arithmetic / exact" {
+    try testing.expect(matchScalarF64(0x7ff8000000000000, .canonical));
+    try testing.expect(matchScalarF64(0xfff8000000000000, .canonical));
+    try testing.expect(matchScalarF64(0x7ff8000000000001, .arithmetic));
+    try testing.expect(!matchScalarF64(0x7ff0000000000001, .arithmetic));
+    try testing.expect(matchScalarF64(0xdeadbeef, .{ .exact = 0xdeadbeef }));
 }
