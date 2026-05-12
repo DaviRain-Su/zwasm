@@ -13,7 +13,19 @@
    per-chunk pickup chain (recipes, file paths, ADR notes) for
    the queue below. Authoritative for next session continuation.
 
-## Active state — **Phase 9 extended; m-2 base scope landed 2026-05-12**
+## Active state — **Phase 9 extended; l-1a stages 1-3 landed 2026-05-12**
+
+**Read first on next session**: `private/l-1a-next-session-pickup.md`
+— full recipe + stage state for resuming the spec_assert_runner
+factoring at stage 4.
+
+### One-line state
+
+l-1a stages 1-3 (base extraction) landed; stages 4-5 (runCorpus +
+runAssertReturn split) pending. SIMD test gate stays at 13301/0/440
+bit-identical pre/post each stage.
+
+### Original m-2 cluster state (earlier this session)
 
 §9.11 [x]; §9.10 [~] Phase 11; §9.12 [ ] 🔒 (waits §9.9);
 **§9.9 [ ]** scope = full Wasm 2.0 PASS on Mac+OrbStack per
@@ -35,20 +47,34 @@ amendment) accepted; ADR-0003 amended; ADR-0017 implicit
 Revision extensions x6 (m-1a, m-1b, m-3a, m-3b, m-2a TableSlice,
 m-2c-init ElemSlice).
 
-## Implementation queue (sequential — pickup detail in pickup doc)
+## Implementation queue (sequential — pickup detail in pickup docs)
 
-Next session picks up at **l-1a** (survey done this session;
-see `private/notes/p9-99-l-1-spec-assert-survey.md`).
-ADR-0057 design = Option B (base + specialisations). Order:
+Next session picks up at **l-1a stage 4** (runCorpus extraction
+with RunnerCallbacks trait). See
+`private/l-1a-next-session-pickup.md` for the full recipe.
 
-1. **l-1a NEXT** — extract `spec_assert_runner_base.zig` from
-   simd_assert_runner.zig (1071 LOC → ~550 base + ~500 SIMD).
-   Pure refactor; RunnerCallbacks trait pattern; SIMD test
-   gate stays at 13301/0/440 verifies. File ADR-0057 in
-   same commit per §18.2.
-2. l-1b — new `spec_assert_runner_non_simd.zig` (~450 LOC) +
-   new `test-spec-wasm-2.0-assert` build step + curated
-   wasm-2.0 non-SIMD corpus.
+Per-stage state of l-1a:
+
+| Stage | Status | What |
+|---|---|---|
+| 1 | [x] 06c3bfdc | scalar token parsers + splitFnAndArgs |
+| 2 | [x] dc7bc047 | AssertTally + classifySkipLine |
+| 3 | [x] 4727fc02 | DirectiveKind + classifyDirective (types only) |
+| **4** | **NEXT** | **runCorpus extraction with RunnerCallbacks** |
+| 5 | pending | runAssertReturn / runAssertTrap split |
+| 6 | optional | scratch buffer move (only if simd > 800 LOC after 5) |
+
+Then l-1b (new spec_assert_runner_non_simd.zig + curated wasm-2.0
+corpus + test-spec-wasm-2.0-assert build step).
+
+Other queued chunks (post-l-1):
+- k-1 — Wasm 2.0 non-SIMD wast vendor (~30 files); blocked by l-1b runner.
+- k-2 — SIMD wast vendor (33 files); standalone after l-1.
+- m-4c (= D-090) — untyped .select non-i32 type inference; needs
+  lower.zig type-stack walker.
+- m-2d — table.grow JIT with allocator-helper infrastructure.
+- n-1 — fib2 perf root cause (22KB Rust-WASI binary; 41s/run).
+- j-3b — SKIP gate real enforcement (last).
 2. k-1 — Wasm 2.0 non-SIMD wast vendor (~30 files).
 3. k-2 — SIMD wast vendor (33 files).
 4. m-4c (= D-090) — untyped .select non-i32 type inference.
@@ -82,13 +108,23 @@ ADR-0057 design = Option B (base + specialisations). Order:
 
 ## Reference chain for next /continue
 
-- `private/p9-close-next-session-pickup.md` — **read first**
-  on next session. Per-chunk recipes, file paths, design notes,
-  edge cases, test fixture suggestions.
-- `private/d084-phase10-scope.md` — Win64 ABI agent (history).
-- `private/p9-x-wasm2-non-simd-coverage.md` — coverage audit.
-- `private/p9-y-tests-bench-audit.md` — bench/tests audit.
-- `private/p9-z-realworld-v1-parity.md` — realworld + v1 parity.
+- **`private/l-1a-next-session-pickup.md`** — **read first on
+  next session**. l-1a stages 1-3 done; stage 4 (runCorpus
+  extraction) recipe inline. Mandatory for resuming.
+- `.dev/decisions/0057_spec_assert_runner_factoring.md` — ADR
+  for the factoring design (Option B accepted).
+- `.dev/decisions/0058_table_ops_jit_design.md` — m-2 cluster
+  TableSlice + ElemSlice ABI design + amendment.
+- `private/notes/p9-99-l-1-spec-assert-survey.md` — factoring
+  boundary survey for spec_assert_runner.
+- `private/notes/p9-99-m-2-table-survey.md` — m-2 cluster survey.
+- `private/p9-close-next-session-pickup.md` — original §9.9
+  close pickup (now superseded by l-1a pickup for the
+  active chunk; still useful for the broader queue context).
+- `private/d084-phase10-scope.md`, `private/p9-x-wasm2-non-simd-
+  coverage.md`, `private/p9-y-tests-bench-audit.md`,
+  `private/p9-z-realworld-v1-parity.md` — Agent W/X/Y/Z
+  investigation reports.
 
 TaskList state in CLI mirrors this queue (#5 m-2d + new m-4c
 pending; #2/#3/#4/#6 m-2a/b/c/c-init completed).
