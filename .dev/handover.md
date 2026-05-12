@@ -13,28 +13,24 @@
    per-chunk pickup chain (recipes, file paths, ADR notes) for
    the queue below. Authoritative for next session continuation.
 
-## Active state — **Phase 9 extended; k-1 first expand landed 2026-05-12**
+## Active state — **Phase 9 extended; D-091 discharged 2026-05-12**
 
 ### One-line state
 
-k-1 first expansion + 6 new 2-arg dispatch shapes landed: 7
-new wasts vendored (i32, i64, f32_cmp, f64_cmp, int_exprs,
-int_literals, float_literals), 6 entry helpers
-(`callI64_i64i64`, `callI32_i64i64`, `callF32_f32f32`,
-`callI32_f32f32`, `callF64_f64f64`, `callI32_f64f64`) +
-matching dispatch arms. Mac + OrbStack `test-spec-wasm-2.0-assert`:
-**6467 / 0 / 153 bit-identical** (**0 skip-impl** + 153
-skip-adr — all D-091). simd_assert 13301/0/440 + spec_assert
-212/0/20 unchanged. f32 / f64 wasts deferred to **D-092**:
-x86_64 compileWasm rejects f32.0.wasm / f64.0.wasm with
-UnsupportedOp (Mac aarch64 accepts).
+D-091 closed: x86_64 `i32.trunc_f64_s` lower-bound predicate
+now uses `-(2^31 + 1.0)` with `JBE` instead of `-2^31` with
+`JB`, correctly distinguishing boundary half-step inputs from
+overflow. Mac + OrbStack `test-spec-wasm-2.0-assert`:
+**6518 / 0 / 102 bit-identical** (0 skip-impl + 102
+skip-adr-skip_text_format_parser — the only remaining skip
+class is `assert_malformed` text-form parser ADRs, unrelated
+to D-091). simd_assert 13301/0/440 + spec_assert 212/0/20
+unchanged. f32 / f64 wasts still deferred to **D-092**.
 
-Next: choose between **D-091 discharge** (x86_64
-trapping-trunc precision fix; retires 153 skip-adr) OR
-**D-092 investigation** (identify the x86_64 FP-op gap;
-re-add f32 / f64 to NAMES) OR **further k-1 expansion**
-(`block` / `loop` / `call` need multi-result;
-`select` / `ref_*` / `local_init` need reftype runtime).
+Next: **D-092 investigation** (identify the x86_64 FP-op gap
+on f32.0.wasm / f64.0.wasm; re-add to NAMES) OR
+**k-1-expand-2** (multi-result for block/loop/call OR reftype
+runtime for select/ref_*).
 
 ### Original m-2 cluster state (earlier this session)
 
@@ -61,17 +57,16 @@ m-2c-init ElemSlice).
 ## Implementation queue (sequential — pickup detail in pickup docs)
 
 Next session picks up at **one of**:
-  - **D-091**: x86_64 trapping-trunc precision fix per
-    `skip_x86_64_trunc_precision.md`; rewrite `op_convert.zig`
-    with a range-aware predicate before CVTTSD2SI / CVTTSS2SI;
-    delete the regen-script filter + the skip-ADR; re-regen
-    the manifest. Retires the 153 skip-adr.
   - **D-092**: identify the x86_64 FP-op gap in `f32.0.wasm` /
-    `f64.0.wasm`. Run `wasm-objdump -d` + targeted compileWasm
-    trace to pinpoint the rejected op. Either patch the
-    handler or file a per-op skip-ADR. Re-add `f32` / `f64`
-    to `regen_spec_2_0_assert.sh` NAMES list.
-  - **k-1 further expand**: needs runner extensions for the
+    `f64.0.wasm`. Strategy: add f32/f64 to NAMES, re-regen, run
+    on OrbStack, capture exact `compileWasm` error. The 11 ops
+    in f32.0.wasm (add/sub/mul/div/sqrt/min/max/ceil/floor/
+    trunc/nearest) all have x86_64 handler refs per grep, so
+    the gap is likely in a specific code path (e.g. f32 param
+    marshal, or a specific MOV/MOVSS encoder rejecting a
+    case). Once identified, patch the handler and re-add
+    `f32` / `f64` to NAMES.
+  - **k-1-expand-2**: needs runner extensions for the
     next-tier corpora — `block` / `loop` / `call` (multi-result
     return marshalling); `select` / `ref_*` (reftype runtime);
     `local_init` (some modules reftype-flavoured).
@@ -87,9 +82,9 @@ Per-stage state of l-1 (l-1a all complete; l-1b in progress):
 | l-1b-nan    | [x] 207330be | scalar NaN-pattern result matcher in base (501/0/117) |
 | l-1b-trap-widen | [x] a7bf59d8 | assert_trap f32/f64 arms + i32.wrap_i64 shape (567/0/51; **skip-impl 0**) |
 | k-1-expand-1 | [x] 894e0e00 | 6 binop helpers + 7 wasts (i32/i64/f32_cmp/f64_cmp/int_exprs/int_literals/float_literals); 6467/0/153 (**skip-impl 0**); D-092 filed for f32/f64 deferral |
-| **D-091** | **NEXT (option A)** | **x86_64 trapping-trunc precision fix (retires 153 skip-adr)** |
-| **D-092** | **NEXT (option B)** | **x86_64 f32/f64 wasm-2.0 module UnsupportedOp investigation** |
-| **k-1-expand-2** | **NEXT (option C)** | **next-tier wasts (multi-result block/loop/call OR reftype runtime)** |
+| D-091-close | [x] f22acf6c | x86_64 i32.trunc_f64_s lower-bound `-(2^31+1)` + JBE; 6518/0/102 (**skip-impl 0**, **D-091 boundary skip-adr → 0**) |
+| **D-092** | **NEXT (option A)** | **x86_64 f32/f64 wasm-2.0 module UnsupportedOp investigation** |
+| **k-1-expand-2** | **NEXT (option B)** | **next-tier wasts (multi-result block/loop/call OR reftype runtime)** |
 
 Then l-1b (new spec_assert_runner_non_simd.zig + curated wasm-2.0
 corpus + test-spec-wasm-2.0-assert build step).
