@@ -37,14 +37,18 @@ m-2c-init ElemSlice).
 
 ## Implementation queue (sequential — pickup detail in pickup doc)
 
-Next session picks up at **l-1** (m-4c deferred to D-090 in
-this session, see `.dev/debt.md`). Order:
+Next session picks up at **l-1a** (survey done this session;
+see `private/notes/p9-99-l-1-spec-assert-survey.md`).
+ADR-0057 design = Option B (base + specialisations). Order:
 
-1. **l-1 NEXT** — non-SIMD spec_assert_runner. ADR-0057
-   expected. Per Agent X recommendation: factor a shared
-   `spec_assert_runner_base.zig` with SIMD + non-SIMD
-   specialisations. Needed before k-1 wast vendors can be
-   exercised end-to-end.
+1. **l-1a NEXT** — extract `spec_assert_runner_base.zig` from
+   simd_assert_runner.zig (1071 LOC → ~550 base + ~500 SIMD).
+   Pure refactor; RunnerCallbacks trait pattern; SIMD test
+   gate stays at 13301/0/440 verifies. File ADR-0057 in
+   same commit per §18.2.
+2. l-1b — new `spec_assert_runner_non_simd.zig` (~450 LOC) +
+   new `test-spec-wasm-2.0-assert` build step + curated
+   wasm-2.0 non-SIMD corpus.
 2. k-1 — Wasm 2.0 non-SIMD wast vendor (~30 files).
 3. k-2 — SIMD wast vendor (33 files).
 4. m-4c (= D-090) — untyped .select non-i32 type inference.
