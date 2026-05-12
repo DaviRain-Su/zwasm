@@ -88,11 +88,47 @@ for n in "${NAMES[@]}"; do
   mkdir -p "$out_dir"
 
   python3 - "$TMP/$n.json" "$out_dir/manifest.txt" <<'PY'
-import json, sys
+import json, struct, sys
 src, dst = sys.argv[1], sys.argv[2]
 d = json.load(open(src))
 def fmt(v):
     return f"{v['type']}:{v['value']}"
+# Trapping-trunc family for the x86_64 precision skip-ADR
+# (`skip_x86_64_trunc_precision.md`). Used by both assert_return
+# and assert_trap arms; per ADR-0029 Path B the skip-adr token
+# routes to the same tally regardless of the original directive.
+TRUNC_TRAP_OPS = {
+    ('i32.trunc_f32_s', 32, True),
+    ('i32.trunc_f64_s', 32, True),
+    ('i32.trunc_f32_u', 32, False),
+    ('i32.trunc_f64_u', 32, False),
+    ('i64.trunc_f32_s', 64, True),
+    ('i64.trunc_f64_s', 64, True),
+    ('i64.trunc_f32_u', 64, False),
+    ('i64.trunc_f64_u', 64, False),
+}
+def trunc_arg_in_edge(field, arg):
+    """Return True iff `field` is in the trapping-trunc family AND
+    the arg's decoded f-value lies in the half-step boundary range
+    around the target integer's representable range. Boundary
+    inputs are waived per skip_x86_64_trunc_precision.md until
+    D-091 lands."""
+    op_match = next((m for m in TRUNC_TRAP_OPS if m[0] == field), None)
+    if op_match is None or arg['type'] not in ('f32', 'f64'):
+        return False
+    tok_u = int(arg['value'])
+    if arg['type'] == 'f32':
+        fval = struct.unpack('f', struct.pack('I', tok_u & 0xFFFFFFFF))[0]
+    else:
+        fval = struct.unpack('d', struct.pack('Q', tok_u))[0]
+    if fval != fval:  # NaN: not an edge case, let it pass
+        return False
+    _, bits, signed = op_match
+    if signed:
+        lo, hi = -(2 ** (bits - 1)), 2 ** (bits - 1)
+        return (lo - 1.0 <= fval <= lo + 1.0) or (hi - 1.0 <= fval <= hi + 1.0)
+    hi = 2 ** bits
+    return (-1.0 <= fval <= 1.0) or ((hi - 1.0) <= fval <= (hi + 1.0))
 lines = []
 for c in d['commands']:
     t = c.get('type')
@@ -125,7 +161,7 @@ for c in d['commands']:
         supported = {
             ((), 'i32'), ((), 'i64'), ((), 'f32'), ((), 'f64'),
             (('i32',), 'i32'), (('i32',), 'i64'),
-            (('i64',), 'i64'),
+            (('i64',), 'i64'), (('i64',), 'i32'),
             (('f32',), 'f32'),
             (('f64',), 'f64'),
             (('i32', 'i32'), 'i32'),
@@ -158,48 +194,13 @@ for c in d['commands']:
         # Skip ADR — `skip_x86_64_trunc_precision.md`. The trapping
         # `*.trunc_f{32,64}_{s,u}` family on x86_64 mishandles inputs
         # in the half-step range immediately outside the target
-        # integer's representable range (CVTTSD2SI returns the
-        # sentinel result indistinguishable from a legitimate
-        # INT_MIN, and the trap stub raises a trap). ARM64 PASSes;
-        # the host differential blocks the gate. D-091 tracks the
-        # x86_64 fix; until then those specific boundary inputs are
-        # waived per the ADR.
-        TRUNC_TRAP_OPS = {
-            ('i32.trunc_f32_s', 32, True),
-            ('i32.trunc_f64_s', 32, True),
-            ('i32.trunc_f32_u', 32, False),
-            ('i32.trunc_f64_u', 32, False),
-            ('i64.trunc_f32_s', 64, True),
-            ('i64.trunc_f64_s', 64, True),
-            ('i64.trunc_f32_u', 64, False),
-            ('i64.trunc_f64_u', 64, False),
-        }
-        op_match = next((m for m in TRUNC_TRAP_OPS if m[0] == a["field"]), None)
-        if op_match is not None and len(args) == 1 and args[0]['type'] in ('f32', 'f64'):
-            import struct as _struct
-            tok_u = int(args[0]['value'])
-            if args[0]['type'] == 'f32':
-                fval = _struct.unpack('f', _struct.pack('I', tok_u & 0xFFFFFFFF))[0]
-            else:
-                fval = _struct.unpack('d', _struct.pack('Q', tok_u))[0]
-            _, bits, signed = op_match
-            if signed:
-                lo, hi = -(2 ** (bits - 1)), 2 ** (bits - 1)
-                edge_lo_lo, edge_lo_hi = lo - 1.0, lo + 1.0
-                edge_hi_lo, edge_hi_hi = hi - 1.0, hi + 1.0
-                # Includes NaN check via != on math operators (NaN comparisons always false).
-                if (fval == fval) and (
-                    (edge_lo_lo <= fval <= edge_lo_hi) or (edge_hi_lo <= fval <= edge_hi_hi)
-                ):
-                    lines.append(f'skip-adr-x86_64_trunc_precision {a["field"]} edge-input')
-                    continue
-            else:
-                hi = 2 ** bits
-                if (fval == fval) and (
-                    (-1.0 <= fval <= 1.0) or ((hi - 1.0) <= fval <= (hi + 1.0))
-                ):
-                    lines.append(f'skip-adr-x86_64_trunc_precision {a["field"]} edge-input')
-                    continue
+        # integer's representable range. ARM64 PASSes; the host
+        # differential blocks the gate. D-091 tracks the x86_64
+        # fix; until then those boundary inputs are waived per the
+        # ADR.
+        if len(args) == 1 and trunc_arg_in_edge(a["field"], args[0]):
+            lines.append(f'skip-adr-x86_64_trunc_precision {a["field"]} edge-input')
+            continue
         args_s = ' '.join(fmt(x) for x in args) if args else '()'
         results_s = ' '.join(fmt(x) for x in results) if results else '()'
         lines.append(f'assert_return {a["field"]} {args_s} -> {results_s}')
@@ -209,14 +210,29 @@ for c in d['commands']:
             lines.append('skip-impl trap-non-invoke')
             continue
         args = a.get('args', [])
-        # Runner's assert_trap dispatch handles 0-arg + (i32) +
-        # (i64) + (i32,i32) only at l-1b; widen later as fixtures
-        # demand.
-        if any(x['type'] not in ('i32', 'i64') for x in args):
-            lines.append(f'skip-impl trap-non-int-arg {a["field"]}')
+        # 9.9-l-1b-trap-widen: assert_trap dispatch covers
+        # 0-arg + (i32) + (i64) + (i32,i32) + (f32) + (f64) shapes.
+        # 2+-arg FP shapes still skip-impl until they surface in
+        # a corpus that needs them.
+        trap_supported = {
+            (), ('i32',), ('i64',), ('f32',), ('f64',),
+            ('i32', 'i32'),
+        }
+        arg_kinds = tuple(x['type'] for x in args)
+        if any(x['type'] not in ('i32', 'i64', 'f32', 'f64') for x in args):
+            lines.append(f'skip-impl trap-non-scalar-arg {a["field"]}')
             continue
-        if len(args) > 2:
-            lines.append(f'skip-impl trap-more-than-2-args {a["field"]}')
+        if arg_kinds not in trap_supported:
+            lines.append(
+                f'skip-impl trap-shape-gap '
+                f'({" ".join(arg_kinds) or "()"}) {a["field"]}'
+            )
+            continue
+        # Honour the same x86_64 trunc-precision skip ADR for trap
+        # cases — failing fixture is value-edge dependent regardless
+        # of whether the wast originally expected a result or a trap.
+        if len(args) == 1 and trunc_arg_in_edge(a["field"], args[0]):
+            lines.append(f'skip-adr-x86_64_trunc_precision {a["field"]} trap-edge')
             continue
         args_s = ' '.join(fmt(x) for x in args) if args else '()'
         lines.append(f'assert_trap {a["field"]} {args_s}')

@@ -406,6 +406,23 @@ pub fn callI64_f32(
     return result;
 }
 
+/// Wasm spec §4.4.1 (i32.wrap_i64) — (i64) → i32 entry. The
+/// 32-bit wrap is performed inside the JIT body (`AND eax, eax`
+/// / equivalent); this entry just adapts the calling convention.
+pub fn callI32_i64(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u64,
+) Error!u32 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: u64) callconv(.c) u32;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, a0);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
 /// Wasm spec §4.4.1 (i64.trunc_f64_s / _u, i64.trunc_sat_f64_s / _u,
 /// i64.reinterpret_f64) — (f64) → i64 entry.
 pub fn callI64_f64(

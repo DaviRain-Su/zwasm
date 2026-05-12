@@ -413,6 +413,12 @@ fn dispatchScalarResult(
     // §9.9 / 9.9-l-1b-widen: cross-type scalar shapes from
     // conversions.wast — trunc / trunc_sat (FP→int), convert
     // (int→FP), promote / demote / reinterpret across FP widths.
+    if (args.len == 1 and args[0] == .i64 and result_kind == .i32) {
+        return @as(u64, entry.callI32_i64(compiled.module, func_idx, rt, args[0].i64) catch |err| {
+            try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+            return null;
+        });
+    }
     if (args.len == 1 and args[0] == .f32 and result_kind == .i32) {
         const a0: f32 = @bitCast(args[0].f32);
         return @as(u64, entry.callI32_f32(compiled.module, func_idx, rt, a0) catch |err| {
@@ -582,6 +588,24 @@ fn nonSimdRunAssertTrap(
         }
         if (n_args == 2 and args[0] == .i32 and args[1] == .i32) {
             _ = entry.callI32_i32i32(compiled.module, func_idx, &rt, args[0].i32, args[1].i32) catch |err| {
+                break :blk err == entry.Error.Trap;
+            };
+            break :blk false;
+        }
+        // §9.9 / 9.9-l-1b-trap-widen — f32 / f64 arg shapes.
+        // Trap-result type is immaterial; reuse the cross-type
+        // entry helpers added at widen (callI32_f32 / callI64_f64
+        // etc.) since they share the same FP-arg ABI lane.
+        if (n_args == 1 and args[0] == .f32) {
+            const a0: f32 = @bitCast(args[0].f32);
+            _ = entry.callI32_f32(compiled.module, func_idx, &rt, a0) catch |err| {
+                break :blk err == entry.Error.Trap;
+            };
+            break :blk false;
+        }
+        if (n_args == 1 and args[0] == .f64) {
+            const a0: f64 = @bitCast(args[0].f64);
+            _ = entry.callI32_f64(compiled.module, func_idx, &rt, a0) catch |err| {
                 break :blk err == entry.Error.Trap;
             };
             break :blk false;
