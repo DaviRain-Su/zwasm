@@ -169,3 +169,90 @@ pub fn emitTableSize(
     try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
+
+/// Wasm spec §4.4.14 (table.fill x) — pop n (i32), val (reftype),
+/// dst (i32); write `n` copies of `val` into `tables[x][dst..dst+n]`.
+/// Traps `OutOfBoundsTableAccess` if `dst+n > tables[x].len`.
+///
+/// Holder regs after Step A:
+///   RDX = dst (zero-ext u32),
+///   R8  = val (full 64-bit ref),
+///   R10 = n   (zero-ext u32, used as loop counter).
+pub fn emitTableFill(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    bounds_fixups: *std.ArrayList(u32),
+    spill_base_off: u32,
+    func_idx: u32,
+    tableidx: u32,
+) Error!void {
+    if (tableidx >= 1024) return Error.UnsupportedOp;
+    const tbl_disp: i32 = @intCast(tableidx * 16);
+
+    if (pushed_vregs.items.len < 3) return Error.AllocationMissing;
+    const n_v = pushed_vregs.pop().?;
+    const val_v = pushed_vregs.pop().?;
+    const dst_v = pushed_vregs.pop().?;
+
+    // Step A: capture operands into private holders. The x86_64
+    // allocatable pool {RBX, R12, R13, R14} is disjoint from the
+    // {RAX, RCX, RDX, R8, R9, R10, R11} scratch we use here, so
+    // this snapshot pass is technically unnecessary for safety;
+    // doing it explicitly mirrors the arm64 path's invariant.
+    const dst_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, dst_v, 0);
+    try buf.appendSlice(allocator, inst.encMovRR(.d, .rdx, dst_r).slice());
+    const val_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, val_v, 1);
+    try buf.appendSlice(allocator, inst.encMovRR(.q, .r8, val_r).slice());
+    const n_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, n_v, 0);
+    try buf.appendSlice(allocator, inst.encMovRR(.d, .r10, n_r).slice());
+
+    // Step B: read TableSlice[tableidx]. RAX = tables_ptr; R11 = refs;
+    // R9d = len (using R9 since R10/R11/RDX/R8 are already in use).
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r11, .rax, tbl_disp).slice());
+    try buf.appendSlice(allocator, inst.encMovR32FromMemDisp32(.r9, .rax, tbl_disp + 8).slice());
+
+    // Step C: bounds check — RAX = dst + n; CMP RAX, R9; JA trap.
+    //   MOV  RAX, RDX
+    //   ADD  RAX, R10
+    //   CMP  RAX, R9
+    //   JA   trap_stub
+    try buf.appendSlice(allocator, inst.encMovRR(.q, .rax, .rdx).slice());
+    try buf.appendSlice(allocator, inst.encAddRR(.q, .rax, .r10).slice());
+    try buf.appendSlice(allocator, inst.encCmpRR(.q, .rax, .r9).slice());
+    {
+        const fixup_at: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.a, 0).slice());
+        try bounds_fixups.append(allocator, fixup_at);
+        trace.writeBounds(func_idx, fixup_at);
+    }
+
+    // Step D: if n == 0, skip the loop. TEST R10, R10 ; JE end.
+    try buf.appendSlice(allocator, inst.encTestRR(.q, .r10, .r10).slice());
+    const skip_at: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
+
+    // Step E: loop body.
+    //   .loop:
+    //     MOV [R11 + RDX*8], R8       ; refs[dst] = val (8-byte)
+    //     ADD RDX, 1                   ; dst++
+    //     ADD R10, -1                  ; n--
+    //     JNE .loop
+    const loop_start: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst_mem.encStoreR64MemBaseIdxLsl3(.r8, .r11, .rdx).slice());
+    try buf.appendSlice(allocator, inst.encAddR64Imm32(.rdx, 1).slice());
+    try buf.appendSlice(allocator, inst.encAddR64Imm32(.r10, -1).slice());
+    {
+        const after_jne: i32 = @as(i32, @intCast(buf.items.len)) + 6;
+        const disp: i32 = @as(i32, @intCast(loop_start)) - after_jne;
+        try buf.appendSlice(allocator, inst.encJccRel32(.ne, disp).slice());
+    }
+
+    // Step F: patch the skip JE target.
+    const end_byte: u32 = @intCast(buf.items.len);
+    const skip_disp: i32 = @as(i32, @intCast(end_byte)) - (@as(i32, @intCast(skip_at)) + 6);
+    const patch_enc = inst.encJccRel32(.e, skip_disp);
+    @memcpy(buf.items[skip_at..][0..6], patch_enc.slice()[0..6]);
+}

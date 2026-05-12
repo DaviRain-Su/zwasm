@@ -1377,6 +1377,9 @@ pub fn compile(
             .@"table.get" => try op_table.emitTableGet(&ctx, &ins),
             .@"table.set" => try op_table.emitTableSet(&ctx, &ins),
             .@"table.size" => try op_table.emitTableSize(&ctx, &ins),
+            // §9.9 / 9.9-m-2b (per ADR-0058): table.fill — inline
+            // loop writing N copies of val into refs[dst..dst+n].
+            .@"table.fill" => try op_table.emitTableFill(&ctx, &ins),
             .br_table => try op_control.emitBrTable(&ctx, &ins),
             .@"if" => try op_control.emitIf(&ctx, &ins),
             .@"else" => try op_control.emitElse(&ctx, &ins),

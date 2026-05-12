@@ -34,6 +34,8 @@
 //!
 //! Zone 2 (`src/engine/codegen/arm64/`).
 
+const std = @import("std");
+
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
 const ctx_mod = @import("ctx.zig");
@@ -155,4 +157,81 @@ pub fn emitTableSize(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(wd, 10, len_off));
     try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result, 0);
     try ctx.pushed_vregs.append(ctx.allocator, result);
+}
+
+/// Wasm spec §4.4.14 (table.fill x) — pop n (i32), val (reftype),
+/// dst (i32); write `n` copies of `val` into `tables[x][dst..dst+n]`.
+/// Traps `OutOfBoundsTableAccess` if `dst+n > tables[x].len`.
+///
+/// Operand-capture discipline (per ADR-0058 §"Operand-capture"):
+/// snapshot all three operands into intra-procedure scratch
+/// (W17 = dst, X16 = val, W14 = n) BEFORE touching X10/X11/X12 for
+/// the TableSlice prologue load. Skipping this surfaces as silent
+/// miscompile (m-2a class bug).
+pub fn emitTableFill(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const tableidx = ins.payload;
+    if (tableidx >= 1024) return Error.UnsupportedOp;
+    const tbl_off: u15 = @intCast(@as(u32, tableidx) * 16);
+
+    if (ctx.pushed_vregs.items.len < 3) return Error.AllocationMissing;
+    const n_v = ctx.pushed_vregs.pop().?;
+    const val_v = ctx.pushed_vregs.pop().?;
+    const dst_v = ctx.pushed_vregs.pop().?;
+
+    // Step A: snapshot operands into private holders.
+    //   W17 ← dst (zero-ext from i32 home)
+    //   X16 ← val (full 64-bit ref)
+    //   W14 ← n   (zero-ext from i32 home, used as loop counter)
+    const w_dst_src = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, dst_v, 0);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(17, 31, w_dst_src));
+    const x_val_src = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, val_v, 1);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(16, 31, x_val_src));
+    const w_n_src = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, n_v, 0);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(14, 31, w_n_src));
+
+    // Step B: read TableSlice[tableidx]. Safe to clobber X10..X12.
+    //   X10 = tables_ptr; X11 = refs; W12 = len.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(10, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(11, 10, tbl_off));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(12, 10, @intCast(@as(u32, tbl_off) + 8)));
+
+    // Step C: bounds check — trap if dst + n > len.
+    //   X13 = X17 + X14  (both upper-bits zero → result fits in u33)
+    //   CMP X13, X12
+    //   B.HI trap
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddReg(13, 17, 14));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(13, 12));
+    {
+        const fixup_at: u32 = @intCast(ctx.buf.items.len);
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hi, 0));
+        try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+        trace.writeBounds(ctx.func.func_idx, fixup_at);
+    }
+
+    // Step D: if n == 0, skip the loop entirely.
+    const skip_at: u32 = @intCast(ctx.buf.items.len);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCbzW(14, 0));
+
+    // Step E: forward loop. Each iteration:
+    //   STR X16, [X11, X17, LSL #3]   ; refs[dst] = val
+    //   ADD W17, W17, #1               ; dst++
+    //   SUB W14, W14, #1               ; n--
+    //   CBNZ W14, .loop
+    const loop_start: u32 = @intCast(ctx.buf.items.len);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrXRegLsl3(16, 11, 17));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(17, 17, 1));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encSubImm12(14, 14, 1));
+    const back_disp_words: i32 = @divExact(
+        @as(i32, @intCast(loop_start)) - @as(i32, @intCast(ctx.buf.items.len)),
+        4,
+    );
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCbnzW(14, back_disp_words));
+
+    // Step F: patch the n==0 skip target.
+    const end_byte: u32 = @intCast(ctx.buf.items.len);
+    const skip_disp_words: i19 = @intCast(@divExact(
+        @as(i32, @intCast(end_byte)) - @as(i32, @intCast(skip_at)),
+        4,
+    ));
+    std.mem.writeInt(u32, ctx.buf.items[skip_at..][0..4], inst.encCbzW(14, skip_disp_words), .little);
 }

@@ -905,6 +905,9 @@ pub fn compile(
             .@"table.get" => try op_table.emitTableGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, func.func_idx, ins.payload),
             .@"table.set" => try op_table.emitTableSet(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, func.func_idx, ins.payload),
             .@"table.size" => try op_table.emitTableSize(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
+            // §9.9 / 9.9-m-2b (per ADR-0058): table.fill — inline
+            // loop. Mirror of arm64 path.
+            .@"table.fill" => try op_table.emitTableFill(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, func.func_idx, ins.payload),
             // §9.7 / 9.7-a + 9.7-b: SIMD-128 packed integer add/sub
             // family (8 ops). Wires the FP-class regalloc +
             // shape-tag pipeline on x86_64 per ADR-0041; spilled
