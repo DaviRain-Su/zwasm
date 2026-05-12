@@ -13,27 +13,24 @@
    per-chunk pickup chain (recipes, file paths, ADR notes) for
    the queue below. Authoritative for next session continuation.
 
-## Active state — **Phase 9 extended; l-1b-nan landed 2026-05-12**
+## Active state — **Phase 9 extended; l-1b-trap-widen landed 2026-05-12**
 
 ### One-line state
 
-l-1b-nan added scalar NaN-pattern matcher to base
-(`ScalarFpSpec` + `parseScalarFpExpected` + `matchScalarF32/F64`).
-Mac + OrbStack `test-spec-wasm-2.0-assert`: **501 / 0 / 117
-bit-identical** (79 skip-impl + 38 skip-adr; +8 PASS, −8
-skip-impl from widen baseline). simd_assert 13301/0/440 +
-spec_assert 212/0/20 unchanged.
+l-1b-trap-widen extended assert_trap dispatch with (f32) / (f64)
+arms + added the missing (i64) → i32 wrap shape +
+`entry.callI32_i64`. Mac + OrbStack `test-spec-wasm-2.0-assert`:
+**567 / 0 / 51 bit-identical** (**0 skip-impl** + 51 skip-adr).
+ADR-0029 Path B release gate clean on the conversions corpus —
+the only waivers are D-091's x86_64 trapping-trunc precision
+boundary cases, named in a single skip-ADR. simd_assert
+13301/0/440 + spec_assert 212/0/20 unchanged.
 
-Skip-impl breakdown (79): 67 `trap-non-int-arg` (assert_trap
-dispatch ladder only covers 0 / i32 / i64 / (i32,i32) — widening
-to f32 / f64 trap-arg dispatch is a clean follow-up since the
-entry helpers exist) + 12 `runner-shape-gap`. Skip-adr (38) all
-waiting on D-091.
-
-Next: **l-1b-trap-widen** (extend assert_trap dispatch with
-f32 / f64 args; should collapse 67 of 79 skip-impl) OR
-**D-091 discharge** (x86_64 trapping-trunc precision fix;
-retires 38 skip-adr).
+Next: **k-1 corpus expansion** (vendor more wasm-2.0 .wast
+files into `wasm-2.0-assert/` — non-SIMD non-reftype-heavy ones
+like `i32.wast` / `i64.wast` / `f32.wast` / `f64.wast` /
+sign-extend variants if separated / etc.) **OR** **D-091
+discharge** (retires the 51 skip-adr).
 
 ### Original m-2 cluster state (earlier this session)
 
@@ -60,16 +57,20 @@ m-2c-init ElemSlice).
 ## Implementation queue (sequential — pickup detail in pickup docs)
 
 Next session picks up at **one of**:
-  - **l-1b-trap-widen**: extend `nonSimdRunAssertTrap`'s
-    dispatch ladder with f32 / f64 arg shapes (the cross-type
-    entry helpers from widen are already available — just need
-    new dispatch arms + filter widening in regen). Collapses
-    67 `trap-non-int-arg` skip-impl.
+  - **k-1 corpus expansion**: add more .wast files to
+    `regen_spec_2_0_assert.sh`'s NAMES list and re-regen.
+    Candidates that should mostly green out today: `i32.wast`,
+    `i64.wast`, `f32.wast`, `f64.wast`, `f32_cmp.wast`,
+    `f64_cmp.wast`, `int_exprs.wast`, `int_literals.wast`,
+    `float_literals.wast`. Each adds 100s of PASS lines.
+    `block.wast` / `loop.wast` / `call.wast` need
+    multi-result support; reftype-heavy `select.wast` /
+    `ref_*.wast` need their own runner extension.
   - **D-091**: x86_64 trapping-trunc precision fix per
     `skip_x86_64_trunc_precision.md`; rewrite `op_convert.zig`
     with a range-aware predicate before CVTTSD2SI / CVTTSS2SI;
     delete the regen-script filter + the skip-ADR; re-regen
-    the manifest. Retires the 38 skip-adr.
+    the manifest. Retires the 51 skip-adr.
 
 Per-stage state of l-1 (l-1a all complete; l-1b in progress):
 
@@ -80,8 +81,9 @@ Per-stage state of l-1 (l-1a all complete; l-1b in progress):
 | l-1b-corpus | [x] 3b92bed6 | regen_spec_2_0_assert.sh + conversions starter (37/0/581) |
 | l-1b-widen  | [x] 774ae3c8 | 10 cross-type entry helpers + dispatch arms + boundary skip-adr (493/0/125) |
 | l-1b-nan    | [x] 207330be | scalar NaN-pattern result matcher in base (501/0/117) |
-| **l-1b-trap-widen** | **NEXT (option A)** | **assert_trap f32 / f64 dispatch arms (collapses 67 skip-impl)** |
-| **D-091** | **NEXT (option B)** | **x86_64 trapping-trunc precision fix (retires 38 skip-adr)** |
+| l-1b-trap-widen | [x] a7bf59d8 | assert_trap f32/f64 arms + i32.wrap_i64 shape (567/0/51; **skip-impl 0**) |
+| **k-1 corpus expand** | **NEXT (option A)** | **i32 / i64 / f32 / f64 .wast vendor + manifest regen** |
+| **D-091** | **NEXT (option B)** | **x86_64 trapping-trunc precision fix (retires 51 skip-adr)** |
 
 Then l-1b (new spec_assert_runner_non_simd.zig + curated wasm-2.0
 corpus + test-spec-wasm-2.0-assert build step).
