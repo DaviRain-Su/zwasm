@@ -19,6 +19,8 @@ const std = @import("std");
 
 const zwasm = @import("zwasm");
 const runner_mod = zwasm.engine.runner;
+const entry = zwasm.engine.codegen.shared.entry;
+const Value = zwasm.runtime.Value;
 
 /// Parse a decimal integer token into its u32 bit pattern. Wasm
 /// asserts emit i32 results as decimal strings; signed values may
@@ -135,6 +137,40 @@ pub fn classifyDirective(line: []const u8) ClassifiedDirective {
         return .{ .kind = .assert_malformed, .body = line[17..] };
     }
     return .{ .kind = .unknown, .body = line };
+}
+
+/// Construct a `JitRuntime` from caller-owned scratch buffers
+/// (memory + globals + funcref table). The buffer ownership lives
+/// in the runner specialisation (since v128 globals demand
+/// 16-byte alignment that scalar runners don't need); base only
+/// stamps the `JitRuntime` struct shape so both runners produce
+/// byte-identical layouts when handing off to the JIT entry
+/// helpers.
+///
+/// Per ADR-0045 (scratch-buffer-direct path): spec runners bypass
+/// `setupRuntime`'s per-module allocation; this helper is the
+/// uniform construction point. Per ADR-0052: `globals_base` is a
+/// `[*]Value` so the existing 8-byte-stride field type keeps
+/// compiling; actual access width per global is decided by the
+/// JIT emit (8 B scalars vs 16 B v128 via MOVUPS / LDR-Q).
+pub fn makeJitRuntime(
+    memory: []u8,
+    globals: []u8,
+    funcptrs: []u64,
+    typeidxs: []u32,
+) entry.JitRuntime {
+    return .{
+        .vm_base = memory.ptr,
+        .mem_limit = memory.len,
+        .funcptr_base = funcptrs.ptr,
+        .table_size = @intCast(funcptrs.len),
+        .typeidx_base = typeidxs.ptr,
+        .trap_flag = 0,
+        .globals_base = @ptrCast(@alignCast(globals.ptr)),
+        .globals_count = @intCast(globals.len / @sizeOf(Value)),
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
+    };
 }
 
 /// Parse a 32-character hex token into 16 little-endian bytes —

@@ -263,7 +263,6 @@ const ArgValue = base.ArgValue;
 /// directive.
 var scratch_memory: [65536]u8 = undefined;
 
-const Value = zwasm.runtime.Value;
 /// Globals byte buffer. ADR-0052 — v128 globals live in 16-byte
 /// slots (with 16-byte alignment); scalar globals in 8-byte
 /// slots. 256 bytes accommodates up to 16 v128 globals or 32
@@ -309,27 +308,12 @@ fn runAssertReturn(
         return false;
     };
 
-    var rt: entry.JitRuntime = .{
-        .vm_base = scratch_memory[0..],
-        .mem_limit = scratch_memory.len,
-        // D-063 discharge — point at the call_indirect-ready
-        // scratch funcref table populated by `applyTableInit` on
-        // each `module` directive.
-        .funcptr_base = &scratch_funcptrs,
-        .table_size = scratch_funcptrs.len,
-        .typeidx_base = &scratch_typeidxs,
-        .trap_flag = 0,
-        // ADR-0052 — JIT emit (`global.get/set` for both scalar
-        // and v128 globals) addresses storage by byte offset off
-        // `globals_base`. Cast the byte buffer as `[*]Value` so
-        // the existing 8-byte-stride field type keeps compiling;
-        // the actual access width depends on the global's valtype
-        // (8B for scalars, 16B for v128 via MOVUPS/LDR-Q).
-        .globals_base = @ptrCast(@alignCast(&scratch_globals)),
-        .globals_count = scratch_globals.len / @sizeOf(Value),
-        .host_dispatch_base = undefined,
-        .host_dispatch_count = 0,
-    };
+    var rt = base.makeJitRuntime(
+        scratch_memory[0..],
+        scratch_globals[0..],
+        scratch_funcptrs[0..],
+        scratch_typeidxs[0..],
+    );
 
     var args: [4]ArgValue = undefined;
     const n_args = base.parseAssertReturnArgs(args_s, &args) catch |err| {
@@ -760,18 +744,12 @@ fn runAssertTrap(
         return false;
     };
 
-    var rt: entry.JitRuntime = .{
-        .vm_base = scratch_memory[0..],
-        .mem_limit = scratch_memory.len,
-        .funcptr_base = &scratch_funcptrs,
-        .table_size = scratch_funcptrs.len,
-        .typeidx_base = &scratch_typeidxs,
-        .trap_flag = 0,
-        .globals_base = @ptrCast(@alignCast(&scratch_globals)),
-        .globals_count = scratch_globals.len / @sizeOf(Value),
-        .host_dispatch_base = undefined,
-        .host_dispatch_count = 0,
-    };
+    var rt = base.makeJitRuntime(
+        scratch_memory[0..],
+        scratch_globals[0..],
+        scratch_funcptrs[0..],
+        scratch_typeidxs[0..],
+    );
 
     var args: [4]ArgValue = undefined;
     const n_args = base.parseAssertReturnArgs(args_s, &args) catch |err| {
