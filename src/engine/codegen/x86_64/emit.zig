@@ -1402,28 +1402,7 @@ pub fn compile(
                 try gpr.gprStoreSpilled(allocator, &buf, alloc, spill_base_off, result_v, 0);
                 try pushed_vregs.append(allocator, result_v);
             },
-            .@"memory.grow" => {
-                // Skeleton: emit MOV r32, -1 (grow-failed). Real
-                // grow needs a runtime callout that allocates new
-                // pages + updates mem_limit. Mirrors arm64's
-                // skeleton (always returns -1) at this chunk; the
-                // failure-only behaviour is spec-conformant for
-                // any host that refuses growth. spec_assert's
-                // unreachable.wast has memory.grow inside dead
-                // code; handcrafted_mem doesn't grow.
-                if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
-                _ = pushed_vregs.pop().?; // delta arg, unused
-                const result_v = next_vreg;
-                next_vreg += 1;
-                if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-                const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
-                // MOV r32, 0xFFFFFFFF  → upper 32 bits of r64 are
-                // implicitly zero, but Wasm i32 reads only the low
-                // 32 — value = -1 as i32.
-                try buf.appendSlice(allocator, inst.encMovImm32W(dst_r, 0xFFFFFFFF).slice());
-                try gpr.gprStoreSpilled(allocator, &buf, alloc, spill_base_off, result_v, 0);
-                try pushed_vregs.append(allocator, result_v);
-            },
+            .@"memory.grow" => try op_call.emitMemoryGrow(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, outgoing_max_bytes),
             .select, .select_typed => {
                 // Wasm spec §4.4.4 / §3.3.2.2 — pop c, val2, val1;
                 // push val1 if c != 0 else val2. x86_64: TEST c,c

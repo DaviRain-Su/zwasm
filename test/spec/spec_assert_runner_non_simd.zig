@@ -78,12 +78,13 @@ pub fn main(init: std.process.Init) !void {
     if (tally.failed > 0) std.process.exit(1);
 }
 
-/// 64 KB scratch heap — mirror of simd / wasm-1.0 runners. Each
-/// `module` directive resets to zero; per-fixture in-fixture state
-/// (memory.store + memory.load round-trips) is preserved across
-/// asserts within one fixture.
-var scratch_memory: [65536]u8 = undefined;
-
+/// Linear-memory scratch lives in `base.growable_memory` (per
+/// ADR-0059 / §9.9 / 9.9-l-1b-d093-d8c) so `memory.grow` callouts
+/// can extend the in-use region within a fixed 16-page pool.
+/// Each `module` directive calls `base.resetGrowableMemory(1)` to
+/// reset to 1 page initial; per-fixture state (memory.store /
+/// memory.load round-trips + memory.grow accumulation) is preserved
+/// across asserts within one fixture.
 /// 256-byte globals buffer — ADR-0052 byte-offset layout. Scalar
 /// globals occupy 8 bytes each; up to 32 globals supported per
 /// fixture. 16-byte alignment kept (not strictly required without
@@ -112,10 +113,10 @@ fn nonSimdOnModuleLoaded(
     stdout: *std.Io.Writer,
     name: []const u8,
 ) anyerror!void {
-    @memset(scratch_memory[0..], 0);
+    base.resetGrowableMemory(1);
     @memset(scratch_globals[0..], 0);
 
-    runner_mod.applyActiveDataSegments(gpa, wasm_bytes, scratch_memory[0..]) catch |err| {
+    runner_mod.applyActiveDataSegments(gpa, wasm_bytes, base.growable_memory[0..@intCast(base.current_mem_bytes)]) catch |err| {
         try stdout.print("FAIL  {s} data-init: {s}\n", .{ name, @errorName(err) });
         return err;
     };
@@ -169,7 +170,7 @@ fn nonSimdRunAssertReturn(
     };
 
     var rt = base.makeJitRuntime(
-        scratch_memory[0..],
+        base.growable_memory[0..@intCast(base.current_mem_bytes)],
         scratch_globals[0..],
         scratch_funcptrs[0..],
         scratch_typeidxs[0..],
@@ -590,7 +591,7 @@ fn nonSimdRunAssertTrap(
     };
 
     var rt = base.makeJitRuntime(
-        scratch_memory[0..],
+        base.growable_memory[0..@intCast(base.current_mem_bytes)],
         scratch_globals[0..],
         scratch_funcptrs[0..],
         scratch_typeidxs[0..],

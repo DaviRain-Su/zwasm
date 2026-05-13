@@ -178,6 +178,44 @@ pub fn emitShadowFree(allocator: Allocator, buf: *std.ArrayList(u8), outgoing_ma
     try buf.appendSlice(allocator, inst.encAddRSpImm8(@intCast(abi.current.shadow_space_bytes)).slice());
 }
 
+/// §9.9 / 9.9-l-1b-d093-d8c (per ADR-0059) — `memory.grow`
+/// callout via `JitRuntime.memory_grow_fn`. C-ABI args:
+/// `entry_arg0 = rt`, `arg1 = delta_pages`; result in EAX.
+/// x86_64 reads `vm_base` / `mem_limit` from `[R15+off]` on
+/// every memory op (no prologue cache; per ADR-0017 asymmetry),
+/// so no post-call invariant reload is needed.
+pub fn emitMemoryGrow(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    spill_base_off: u32,
+    outgoing_max_bytes: u32,
+) Error!void {
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const delta_v = pushed_vregs.pop().?;
+    const second_arg = abi.current.arg_gprs[1];
+    const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, delta_v, 0);
+    if (src_r != second_arg) {
+        try buf.appendSlice(allocator, inst.encMovRR(.d, second_arg, src_r).slice());
+    }
+    try buf.appendSlice(allocator, inst.encMovRR(.q, abi.current.entry_arg0_gpr, abi.runtime_ptr_save_gpr).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.memory_grow_fn_off).slice());
+    try emitShadowAlloc(allocator, buf, outgoing_max_bytes);
+    try buf.appendSlice(allocator, inst.encCallReg(.rax).slice());
+    try emitShadowFree(allocator, buf, outgoing_max_bytes);
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+    const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
+    if (dst_r != abi.return_gpr) {
+        try buf.appendSlice(allocator, inst.encMovRR(.d, dst_r, abi.return_gpr).slice());
+    }
+    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
+    try pushed_vregs.append(allocator, result_v);
+}
+
 /// Wasm spec §3.4.7 (call_indirect type_idx) — pops the index,
 /// marshals args, runs bounds + sig checks (both branch to the
 /// shared trap stub via bounds_fixups), loads the funcptr from

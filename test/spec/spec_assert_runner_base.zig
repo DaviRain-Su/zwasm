@@ -153,6 +153,14 @@ pub fn classifyDirective(line: []const u8) ClassifiedDirective {
 /// `[*]Value` so the existing 8-byte-stride field type keeps
 /// compiling; actual access width per global is decided by the
 /// JIT emit (8 B scalars vs 16 B v128 via MOVUPS / LDR-Q).
+///
+/// Per ADR-0059 (§9.9 / 9.9-l-1b-d093-d8c): `memory_grow_fn` is
+/// wired to `growableMemoryGrowFn` (below) so spec corpora that
+/// exercise `memory.grow` (nop/block/loop/local_tee
+/// `as-memory.grow-*` fixtures) see real growth within the
+/// `growable_memory` pool. Callers must use `growable_memory[0..
+/// current_mem_bytes]` as the `memory` arg (the runner's
+/// on_module_loaded hook calls `resetGrowableMemory(1)` first).
 pub fn makeJitRuntime(
     memory: []u8,
     globals: []u8,
@@ -170,7 +178,57 @@ pub fn makeJitRuntime(
         .globals_count = @intCast(globals.len / @sizeOf(Value)),
         .host_dispatch_base = undefined,
         .host_dispatch_count = 0,
+        .memory_grow_fn = growableMemoryGrowFn,
     };
+}
+
+/// §9.9 / 9.9-l-1b-d093-d8c (per ADR-0059): growable memory pool
+/// for spec runners. 64 pages (4 MiB) covers all current spec
+/// corpus growth patterns (the largest single delta observed is
+/// 40 pages in `local_tee:as-memory.grow-size`; the worst-case
+/// accumulator across `nop:as-memory.grow-*` is 1 + 0 + 2 + 12 =
+/// 15 pages). 16-byte-aligned so the same pool serves both the
+/// scalar non-simd runner and the simd runner (the latter needs
+/// 16-byte alignment for `MOVUPS` / `LDR Q`).
+pub const GROWABLE_MEMORY_CAPACITY: usize = 64 * 65536;
+pub var growable_memory: [GROWABLE_MEMORY_CAPACITY]u8 align(16) = undefined;
+
+/// Module-scoped current memory size in bytes. Persists across
+/// `assert_return` invocations within one module (so `memory.grow`
+/// growth is observable by subsequent asserts) and resets on
+/// module load via `resetGrowableMemory`.
+pub var current_mem_bytes: u64 = 65536;
+
+/// Reset the growable pool to `initial_pages` (Wasm-1.0 64 KiB pages).
+/// Called from each runner's `on_module_loaded` callback. Zeros the
+/// in-use region so prior module state doesn't leak into this one.
+pub fn resetGrowableMemory(initial_pages: u32) void {
+    current_mem_bytes = @as(u64, initial_pages) * 65536;
+    if (current_mem_bytes > GROWABLE_MEMORY_CAPACITY) {
+        // Pathological declared initial size — clamp + log. Spec
+        // corpus is well under this cap; if a future module trips
+        // this we'd surface as a bounds error on first load.
+        current_mem_bytes = GROWABLE_MEMORY_CAPACITY;
+    }
+    @memset(growable_memory[0..@intCast(current_mem_bytes)], 0);
+}
+
+/// §9.9 / 9.9-l-1b-d093-d8c (per ADR-0059): `memory.grow` callout
+/// for spec runners. Updates `current_mem_bytes` (module-scoped
+/// persistent state) AND `rt.mem_limit` (per-call cached value)
+/// so subsequent asserts within the same module see the grown
+/// size. Returns -1 when growth would exceed `GROWABLE_MEMORY_CAPACITY`,
+/// matching Wasm 1.0 spec §4.4.7.6 host-refuses-growth semantics.
+pub fn growableMemoryGrowFn(rt: *entry.JitRuntime, delta_pages: u32) callconv(.c) i32 {
+    const page_size: u64 = 65536;
+    const old_bytes = current_mem_bytes;
+    const old_pages: u32 = @intCast(old_bytes / page_size);
+    const new_bytes = old_bytes + @as(u64, delta_pages) * page_size;
+    if (new_bytes > GROWABLE_MEMORY_CAPACITY) return -1;
+    @memset(growable_memory[@intCast(old_bytes)..@intCast(new_bytes)], 0);
+    current_mem_bytes = new_bytes;
+    rt.mem_limit = new_bytes;
+    return @intCast(old_pages);
 }
 
 /// Parse a 32-character hex token into 16 little-endian bytes —

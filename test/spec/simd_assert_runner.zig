@@ -117,13 +117,13 @@ fn simdOnModuleLoaded(
     stdout: *std.Io.Writer,
     name: []const u8,
 ) anyerror!void {
-    @memset(scratch_memory[0..], 0);
+    base.resetGrowableMemory(1);
     @memset(scratch_globals[0..], 0);
 
     // §9.9 / 9.9-d-7: write active data-segment bytes so subsequent
     // v128.load fixtures see the fixture-declared bytes instead of
     // the all-zero memset baseline.
-    runner_mod.applyActiveDataSegments(gpa, wasm_bytes, scratch_memory[0..]) catch |err| {
+    runner_mod.applyActiveDataSegments(gpa, wasm_bytes, base.growable_memory[0..@intCast(base.current_mem_bytes)]) catch |err| {
         try stdout.print("FAIL  {s} data-init: {s}\n", .{ name, @errorName(err) });
         return err;
     };
@@ -260,8 +260,9 @@ const ArgValue = base.ArgValue;
 /// `spec_assert_runner` shape exactly so the SIMD runner sees the
 /// same `vm_base` / `mem_limit` semantics; data segments still
 /// flow through `compileWasm`'s setupRuntime path on each `module`
-/// directive.
-var scratch_memory: [65536]u8 = undefined;
+/// directive. Backing storage moved to `base.growable_memory` per
+/// ADR-0059 / §9.9 / 9.9-l-1b-d093-d8c so `memory.grow` callouts
+/// can extend the in-use region within a 16-page pool.
 
 /// Globals byte buffer. ADR-0052 — v128 globals live in 16-byte
 /// slots (with 16-byte alignment); scalar globals in 8-byte
@@ -309,7 +310,7 @@ fn runAssertReturn(
     };
 
     var rt = base.makeJitRuntime(
-        scratch_memory[0..],
+        base.growable_memory[0..@intCast(base.current_mem_bytes)],
         scratch_globals[0..],
         scratch_funcptrs[0..],
         scratch_typeidxs[0..],
@@ -745,7 +746,7 @@ fn runAssertTrap(
     };
 
     var rt = base.makeJitRuntime(
-        scratch_memory[0..],
+        base.growable_memory[0..@intCast(base.current_mem_bytes)],
         scratch_globals[0..],
         scratch_funcptrs[0..],
         scratch_typeidxs[0..],
