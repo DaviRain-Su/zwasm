@@ -1489,47 +1489,10 @@ pub fn compile(
                 // ARM64 where return_fixups consolidate to a single
                 // epilogue). Subsequent ops in the same body may
                 // emit dead bytes that are unreachable at runtime.
-                if (pushed_vregs.items.len > 0 and func.sig.results.len > 0) {
-                    const top = pushed_vregs.items[pushed_vregs.items.len - 1];
-                    if (top >= alloc.slots.len) return Error.SlotOverflow;
-                    switch (func.sig.results[0]) {
-                        .i32, .funcref, .externref => {
-                            const src = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, top, 0);
-                            if (src != abi.return_gpr) {
-                                try buf.appendSlice(allocator, inst.encMovRR(.d, abi.return_gpr, src).slice());
-                            }
-                        },
-                        .i64 => {
-                            const src = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, top, 0);
-                            if (src != abi.return_gpr) {
-                                try buf.appendSlice(allocator, inst.encMovRR(.q, abi.return_gpr, src).slice());
-                            }
-                        },
-                        .f32, .f64 => {
-                            const src_x = try gpr.xmmLoadSpilled(allocator, &buf, alloc, spill_base_off, top, 0);
-                            if (src_x != abi.return_xmm) {
-                                try buf.appendSlice(allocator, inst.encMovapsXmmXmm(abi.return_xmm, src_x).slice());
-                            }
-                        },
-                        .v128 => {
-                            // Mirror the function-level `end` v128 case
-                            // below (per ADR-0046 / §9.9-b). MOVAPS XMM0,
-                            // src_x copies all 128 bits per Intel SDM
-                            // Vol 2A. resolveXmm avoids spill-staging's
-                            // MOVSD truncation; spilled v128 surfaces
-                            // UnsupportedOp explicitly. The ARM64
-                            // counterpart at `arm64/emit.zig:1150`
-                            // already lands the same shape; this arm
-                            // closes the x86_64 gap for explicit
-                            // `return` opcodes (vs implicit
-                            // function-level end already wired).
-                            const src_x = try gpr.resolveXmm(alloc, top);
-                            if (src_x != abi.return_xmm) {
-                                try buf.appendSlice(allocator, inst.encMovapsXmmXmm(abi.return_xmm, src_x).slice());
-                            }
-                        },
-                    }
-                }
+                // D-093 (d-11): multi-result return marshal via the
+                // shared op_control helper (mirrors arm64's
+                // `marshalFunctionReturn`).
+                try op_control.marshalReturnRegs(allocator, &buf, alloc, &pushed_vregs, spill_base_off, func);
                 if (frame_bytes > 0) {
                     try buf.appendSlice(allocator, rspAdd(frame_bytes).slice());
                 }
@@ -1569,56 +1532,10 @@ pub fn compile(
                 // (`loop.wast:cont-inner` shape). The marshal is
                 // unreachable at runtime; skip when top_vreg has
                 // no slot entry.
-                if (pushed_vregs.items.len > 0 and func.sig.results.len > 0 and
-                    pushed_vregs.items[pushed_vregs.items.len - 1] < alloc.slots.len)
-                {
-                    const top = pushed_vregs.items[pushed_vregs.items.len - 1];
-                    switch (func.sig.results[0]) {
-                        .i32, .funcref, .externref => {
-                            const src = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, top, 0);
-                            if (src != abi.return_gpr) {
-                                // MOV EAX, src — Width.d zero-extends
-                                // the upper 32 bits of RAX, matching
-                                // the SysV i32 / 32-bit-pointer ABI.
-                                try buf.appendSlice(allocator, inst.encMovRR(.d, abi.return_gpr, src).slice());
-                            }
-                        },
-                        .i64 => {
-                            const src = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, top, 0);
-                            if (src != abi.return_gpr) {
-                                // MOV RAX, src — Width.q preserves
-                                // the full 64 bits; .d would silently
-                                // truncate (D-032 root cause).
-                                try buf.appendSlice(allocator, inst.encMovRR(.q, abi.return_gpr, src).slice());
-                            }
-                        },
-                        .f32, .f64 => {
-                            const src_x = try gpr.xmmLoadSpilled(allocator, &buf, alloc, spill_base_off, top, 0);
-                            if (src_x != abi.return_xmm) {
-                                // MOVAPS XMM0, src_xmm — copies the
-                                // full 128-bit XMM. Sufficient for
-                                // both f32 (low 32 used) and f64
-                                // (low 64 used).
-                                try buf.appendSlice(allocator, inst.encMovapsXmmXmm(abi.return_xmm, src_x).slice());
-                            }
-                        },
-                        .v128 => {
-                            // §9.9-b per ADR-0046: v128 return
-                            // marshal. MOVAPS XMM0, src_x copies
-                            // all 128 bits per Intel SDM Vol 2A.
-                            // Use resolveXmm (no spill staging):
-                            // xmmLoadSpilled uses MOVSD (8-byte
-                            // stride) which would truncate the
-                            // upper 64 bits of a spilled v128 —
-                            // resolveXmm errors UnsupportedOp on
-                            // spill, surfacing the gap explicitly.
-                            const src_x = try gpr.resolveXmm(alloc, top);
-                            if (src_x != abi.return_xmm) {
-                                try buf.appendSlice(allocator, inst.encMovapsXmmXmm(abi.return_xmm, src_x).slice());
-                            }
-                        },
-                    }
-                }
+                // D-093 (d-11): multi-result return marshal via the
+                // shared op_control helper. Same shape as the
+                // `.return` op path above.
+                try op_control.marshalReturnRegs(allocator, &buf, alloc, &pushed_vregs, spill_base_off, func);
                 // Epilogue: ADD RSP, frame ; POP R15? ; POP RBP ; RET.
                 if (frame_bytes > 0) {
                     try buf.appendSlice(allocator, rspAdd(frame_bytes).slice());

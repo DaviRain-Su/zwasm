@@ -637,8 +637,22 @@ pub fn compute(
     const Frame = struct {
         entry_depth: u32,
         param_arity: u8,
+        result_arity: u8,
         is_if: bool,
+        merge_captured: bool,
         param_vregs: [8]u32,
+        // D-093 (d-11) — if-frame result-merge survival. emit's
+        // per-arch `.else` captures the top `result_arity` vregs
+        // as the merge target; the matching `.end` MOVs the else-
+        // arm's results into the captured slot. Without liveness
+        // tracking the captured vreg's last_use_pc stops at .else
+        // (the truncate-and-not-extend point), so regalloc may
+        // alias its slot with subsequent pushes and the post-if
+        // consumer reads garbage. Pre-d-11 surfaced as
+        // `if.wast:as-binary-operands` got 16/expected 12 (two
+        // composed `(if (result i32))`s in i32.mul; both merge
+        // slots collapsed onto the second if's else-arm vreg).
+        merge_vregs: [8]u32,
     };
     var block_stack: [max_control_stack]Frame = undefined;
     var block_stack_len: usize = 0;
@@ -667,6 +681,14 @@ pub fn compute(
                 }
             } else if (block_stack_len > 0) {
                 // D-093 (d-9): pop the matching block frame.
+                // D-093 (d-11) NOTE: experimental sim_stack
+                // merge-vreg replacement attempted here was net-
+                // neutral (it broke the regalloc slot-share that
+                // makes the single-result if-merge MOV a no-op on
+                // the then-arm path). The structural fix needs
+                // emit-side coalescing of V_then_i and V_else_i
+                // onto canonical merge slots; deferred to a
+                // follow-up chunk.
                 block_stack_len -= 1;
             }
             // Mid-function `end` (block/loop/if frame closer) is
@@ -685,11 +707,20 @@ pub fn compute(
         // boundary.)
         if (instr.op == .block or instr.op == .loop) {
             if (block_stack_len == max_control_stack) return Error.UnsupportedOp;
+            // block/loop store result_arity for completeness;
+            // merge mechanism here is fall-through-only so
+            // merge_vregs are not captured (block-with-br is
+            // handled by emit's captureOrEmitBlockMergeMov).
+            const result_arity_u: u32 = instr.extra & 0xFF;
+            if (result_arity_u > 8) return Error.UnsupportedOp;
             block_stack[block_stack_len] = .{
                 .entry_depth = @intCast(sim_len),
                 .param_arity = 0,
+                .result_arity = @intCast(result_arity_u),
                 .is_if = false,
+                .merge_captured = false,
                 .param_vregs = undefined,
+                .merge_vregs = undefined,
             };
             block_stack_len += 1;
             continue;
@@ -702,7 +733,7 @@ pub fn compute(
         // Wasm spec §3.4.4 — only valid inside an if_then frame.
         if (instr.op == .@"else") {
             if (block_stack_len > 0) {
-                const fr = block_stack[block_stack_len - 1];
+                const fr = &block_stack[block_stack_len - 1];
                 if (fr.is_if) {
                     sim_len = fr.entry_depth;
                     var i: u32 = 0;
@@ -735,8 +766,10 @@ pub fn compute(
             // can re-push them; cap at 8 to fit Frame.param_vregs.
             if (block_stack_len == max_control_stack) return Error.UnsupportedOp;
             const param_arity_u: u32 = (instr.extra >> 8) & 0xFF;
-            if (param_arity_u > 8) return Error.UnsupportedOp;
+            const result_arity_u: u32 = instr.extra & 0xFF;
+            if (param_arity_u > 8 or result_arity_u > 8) return Error.UnsupportedOp;
             const param_arity: u8 = @intCast(param_arity_u);
+            const result_arity: u8 = @intCast(result_arity_u);
             var param_vregs: [8]u32 = undefined;
             if (param_arity > 0 and sim_len >= @as(usize, param_arity)) {
                 const base = sim_len - @as(usize, param_arity);
@@ -748,8 +781,11 @@ pub fn compute(
             block_stack[block_stack_len] = .{
                 .entry_depth = @intCast(sim_len),
                 .param_arity = param_arity,
+                .result_arity = result_arity,
                 .is_if = true,
+                .merge_captured = false,
                 .param_vregs = param_vregs,
+                .merge_vregs = undefined,
             };
             block_stack_len += 1;
             continue;

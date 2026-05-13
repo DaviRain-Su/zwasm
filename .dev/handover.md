@@ -10,53 +10,51 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **Phase 9 extended; D-093 (d-10) landed 2026-05-13**
+## Active state — **Phase 9 extended; D-093 (d-11) landed 2026-05-14**
 
 ### One-line state
 
-D-093 (d-10) landed: `(if (param T1..TK) (result U1..UN))`
-support across validator + arm64/x86_64 emit + liveness. Per
-Wasm spec §3.4.4: validator `opElse` re-pushes start (param)
-types so else-arm sees the same shape as then-arm; emit
-captures top param_arity vregs at `emitIf` into Label's new
-`param_top_vregs[8]`; `emitElse` truncates to entry_base +
-re-pushes captured params; `emitEndIntra` else_open path adds
-single-arity merge for the param-bearing case (mirrors the
-existing 2*arity path for param=0). Liveness `block_stack`
-upgrades from u32 to Frame struct tracking `(entry_depth,
-param_arity, is_if, param_vregs)`; `.else` truncates sim_stack
-to entry_depth + re-pushes captured params so regalloc keeps
-the param slots live across both arms. Mac + OrbStack
-`test-spec-wasm-2.0-assert` 12262 / 0 / 143 unchanged
-(`if` deferred from NAMES until multi-result func call support
-lands — `add64_u_{with_carry,saturated}` in if.0.wasm exposes
-2-result returns + 2-result captures). simd unchanged
-13301/0/440. Two regression fixtures under
-`test/edge_cases/p9/if/` (`param_then.wasm = 3`,
-`param_else.wasm = -1`).
+D-093 (d-11) landed: multi-result function call support across
+arm64 + x86_64 (captureCallResult + function-end marshal).
+arm64: results map to X0..X7 (GPR class) and V0..V7 (FP / SIMD
+class) per AAPCS64 §6.5; independent class counters; cap 8
+per class. x86_64 SysV: RAX/RDX + XMM0/XMM1 (cap 2 per class
+per §3.2.3); Win64: cap 1 per class (§3.2.4). Shared
+`marshalFunctionReturn` (arm64) and `marshalReturnRegs`
+(x86_64) helpers replace the previous single-result inline
+marshal blocks at `.return` op + function-level `.end` op +
+`emitBr`/`emitBrIf` fn-depth paths. **No parallel-move
+hazard**: allocatable pools exclude the result regs by design.
+Edge-case fixture `test/edge_cases/p9/call/multi_result_
+i64_i32.wasm = 1253` verifies the multi-result path on both
+arches. Mac + OrbStack `test-spec-wasm-2.0-assert` 12262 / 0 /
+143 unchanged (`if` deferred — adding it surfaces a separate
+if-merge slot-share invariant gap; see d-12 in queue). simd
+unchanged 13301/0/440.
 
 ### Standing reminder for the autonomous loop
 
 **Project tone is `.claude/rules/no_workaround.md`: fix root
 causes, never work around.**
 
-### Next task — D-093 multi-result func call + runner-skip-impl
+### Next task — D-093 if-merge canonical-slot + runner-skip-impl
 
-Clusters (a) + (b) + (c) of D-093 ALL DISCHARGED at d-8c + d-9 +
-d-10. Remaining gating §9.9 close:
+Clusters (a) + (b) + (c) of D-093 ALL DISCHARGED. Multi-result
+func calls (d-11) DISCHARGED. Remaining gating §9.9 close:
 
-- **Multi-result function calls (d-11)** — `if.wast:add64_u_*`
-  funcs declare `(result i64 i32)` (Wasm 2.0 multi-value).
-  Currently `op_call.captureCallResult` rejects `>1` results
-  via `Error.UnsupportedOp`; function-end marshal in
-  emit.zig only writes `results[0]`. Implement:
-  (a) captureCallResult extends to N results: walk
-  `callee_sig.results`, map each to AAPCS64 result reg
-  (X0/X1/... for GPR class, V0/V1/... for FP), push N
-  vregs. (b) Function-end marshal: walk `func.sig.results`,
-  MOV each home reg → AAPCS64 result reg. (c) x86_64
-  mirrors via SysV (RAX/RDX for GPR, XMM0/XMM1 for FP) +
-  Win64. (d) Add `if` to NAMES + verify.
+- **if-merge canonical-slot (d-12)** — Adding `if` to NAMES
+  surfaces 9 failures on `if.wast` exposing a design gap:
+  emit's if-result merge mechanism relies on regalloc luck for
+  V_then_i and V_else_i to share a slot (so the .end merge
+  MOV is a no-op). Single-result single-if works by accident
+  (free-list first-fit picks the freed V_then slot for V_else);
+  multi-result OR compose-of-2-ifs breaks the assumption.
+  Proper fix: emit pre-allocates canonical merge slots at
+  `.if`; both arms MOV their results into the canonical slots
+  before transferring control to .end; .end is a no-op.
+  Failures observed: `as-binary-operands`,
+  `as-compare-operand[s]`, `as-mixed-operands`, `param-break`,
+  `params-break`, `add64_u_saturated`. ~9 fails clears.
 
 Runner-side skip-impl backlog (7 total, in `nop / loop /
 local_tee`):
@@ -92,8 +90,9 @@ Other queued post-D-093 names: `address`, `align`, `br_table`,
 | D-093 (d-8b) | [x] 2e04b925 | arm64 `.memory.grow` BLR-via-fn-ptr emit + X28/X27 reload + safe default fn |
 | D-093 (d-8c) | [x] 0b3d7dea | x86_64 `.memory.grow` CALL-via-fn-ptr emit + spec-runner growable_memory pool + NAMES (nop/loop/local_tee; block deferred for (c)) |
 | D-093 (d-9) (c) | [x] a38890da | liveness br target-depth-aware close (block_stack) + block NAMES |
-| D-093 (d-10) (b) | [x] (this commit) | if-with-params validator opElse + emit param_top_vregs capture/restore + liveness if-frame + edge-case fixtures |
-| **D-093 (d-11)** | **NEXT** | multi-result function calls (captureCallResult + function-end marshal) + add `if` to NAMES |
+| D-093 (d-10) (b) | [x] 1df7acc5 | if-with-params validator opElse + emit param_top_vregs capture/restore + liveness if-frame + edge-case fixtures |
+| D-093 (d-11) | [x] (this commit) | multi-result function calls (arm64 + x86_64 captureCallResult + marshalReturn shared helpers) + edge-case fixture |
+| **D-093 (d-12)** | **NEXT** | if-merge canonical-slot (emit pre-allocates merge slots; both arms MOV into them; .end no-op) + add `if` to NAMES |
 
 Other queued chunks (post-l-1): k-1, k-2, m-4c (= D-090),
 m-2d, n-1, j-3b.

@@ -1443,52 +1443,10 @@ pub fn compile(
                 // allocation entry. The marshal code would
                 // be unreachable at runtime regardless, so skip
                 // when top_vreg has no slot entry.
-                if (pushed_vregs.items.len > 0 and func.sig.results.len > 0 and
-                    pushed_vregs.items[pushed_vregs.items.len - 1] < alloc.slots.len)
-                {
-                    const top_vreg = pushed_vregs.items[pushed_vregs.items.len - 1];
-                    const result_kind = func.sig.results[0];
-                    switch (result_kind) {
-                        .f32, .f64 => {
-                            const src_vn = try gpr.fpLoadSpilled(allocator, &buf, alloc, spill_base_off, top_vreg, 0);
-                            if (src_vn != 0) {
-                                // FMOV S0, Sn or FMOV D0, Dn — encoded
-                                // via the FP-FP move (FMOV reg-reg).
-                                // Encoding: `0 0 0 11110 type 1 0000 0 10 0000 [Rn:5] [Rd:5]`
-                                // type = 00 single → 0x1E204000
-                                // type = 01 double → 0x1E604000
-                                const base: u32 = if (result_kind == .f64) 0x1E604000 else 0x1E204000;
-                                try gpr.writeU32(allocator, &buf, base | (@as(u32, src_vn) << 5));
-                            }
-                        },
-                        .v128 => {
-                            // §9.9 / 9.9-d-4 — mirror of the `.return`
-                            // handler's v128 arm (added in 9.9-b but
-                            // missed here): the AAPCS64 + ADR-0046
-                            // v128 return convention puts the result
-                            // in V0. `MOV V0.16B, Vn.16B` (alias of
-                            // `ORR V0.16B, Vn.16B, Vn.16B`) copies
-                            // the full 128 bits. resolveFp (no spill
-                            // staging) — fpLoadSpilled uses 8-byte
-                            // stride which would truncate the upper
-                            // 64 bits of a spilled v128.
-                            const src_vn = try gpr.resolveFp(alloc, top_vreg);
-                            if (src_vn != 0) {
-                                try gpr.writeU32(allocator, &buf, inst_neon.encMovV16B(0, src_vn));
-                            }
-                        },
-                        .i32, .i64, .funcref, .externref => {
-                            // GPR result: spill-aware load (sub-1c). For
-                            // an in-reg vreg, returns the home reg; for
-                            // a spilled vreg, emits LDR X14, [SP, #off]
-                            // and returns X14. Then MOV X0, Xsrc.
-                            const src_xn = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, top_vreg, 0);
-                            if (src_xn != 0) {
-                                try gpr.writeU32(allocator, &buf, encOrrZrIntoX0(src_xn));
-                            }
-                        },
-                    }
-                }
+                // D-093 (d-11): multi-result function return marshal
+                // via shared op_control helper (mirrors the per-arch
+                // X0..X7 / V0..V7 AAPCS64 ABI).
+                try op_control.marshalFunctionReturn(&ctx);
                 // Capture the byte offset of the frame teardown.
                 // `return` ops emitted earlier B-fixup placeholders
                 // here (their result marshal already ran inline);

@@ -205,6 +205,83 @@ pub fn emitBr(
     try labels.items[tgt_idx].pending.append(allocator, .{ .byte_offset = at, .insn_size = 5 });
 }
 
+/// D-093 (d-11) — marshal the top N result vregs into the C-ABI
+/// result registers (SysV: RAX/RDX for GPR, XMM0/XMM1 for XMM;
+/// Win64: ≤1 of each). Walks `func.sig.results` in order; per-
+/// class index maps the i-th result to the corresponding result
+/// register. Multi-result overflow surfaces as UnsupportedOp.
+/// **No parallel-move hazard** — allocatable_gprs / xmms exclude
+/// the result regs, so per-result MOV emit is safe.
+pub fn marshalReturnRegs(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    spill_base_off: u32,
+    func: *const ZirFunc,
+) Error!void {
+    if (func.sig.results.len == 0) return;
+    if (pushed_vregs.items.len < func.sig.results.len) return;
+    const gpr_result_regs = [_]abi.Gpr{ .rax, .rdx };
+    const xmm_result_regs = [_]abi.Xmm{ .xmm0, .xmm1 };
+    const gpr_cap: u8 = switch (abi.current_cc) {
+        .sysv => 2,
+        .win64 => 1,
+    };
+    const xmm_cap: u8 = switch (abi.current_cc) {
+        .sysv => 2,
+        .win64 => 1,
+    };
+    var n_gpr_cap: u8 = 0;
+    var n_xmm_cap: u8 = 0;
+    for (func.sig.results) |rt| switch (rt) {
+        .i32, .i64, .funcref, .externref => n_gpr_cap += 1,
+        .f32, .f64, .v128 => n_xmm_cap += 1,
+    };
+    if (n_gpr_cap > gpr_cap or n_xmm_cap > xmm_cap) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:marshalReturnRegs-cap", 0);
+
+    var gpr_used: u8 = 0;
+    var xmm_used: u8 = 0;
+    const result_base = pushed_vregs.items.len - func.sig.results.len;
+    for (func.sig.results, 0..) |result_kind, i| {
+        const src_vreg = pushed_vregs.items[result_base + i];
+        if (src_vreg >= alloc.slots.len) {
+            // D-093 (d-5): dead placeholder; skip.
+            switch (result_kind) {
+                .i32, .i64, .funcref, .externref => gpr_used += 1,
+                .f32, .f64, .v128 => xmm_used += 1,
+            }
+            continue;
+        }
+        switch (result_kind) {
+            .i32 => {
+                const dst = gpr_result_regs[gpr_used];
+                gpr_used += 1;
+                const src = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
+                if (src != dst) try buf.appendSlice(allocator, inst.encMovRR(.d, dst, src).slice());
+            },
+            .i64, .funcref, .externref => {
+                const dst = gpr_result_regs[gpr_used];
+                gpr_used += 1;
+                const src = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
+                if (src != dst) try buf.appendSlice(allocator, inst.encMovRR(.q, dst, src).slice());
+            },
+            .f32, .f64 => {
+                const dst = xmm_result_regs[xmm_used];
+                xmm_used += 1;
+                const src_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
+                if (src_x != dst) try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst, src_x).slice());
+            },
+            .v128 => {
+                const dst = xmm_result_regs[xmm_used];
+                xmm_used += 1;
+                const src_x = try gpr.resolveXmm(alloc, src_vreg);
+                if (src_x != dst) try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst, src_x).slice());
+            },
+        }
+    }
+}
+
 /// Marshal the top vreg as the function's result + emit the
 /// regular epilogue (ADD RSP, frame ; POP R15? ; POP RBP ; RET).
 /// Shared between `emitBr`'s function-depth path and `emitBrIf`'s
@@ -222,31 +299,7 @@ pub fn emitFunctionReturn(
     frame_bytes: u32,
     uses_runtime_ptr: bool,
 ) Error!void {
-    if (pushed_vregs.items.len > 0 and func.sig.results.len > 0) {
-        const top = pushed_vregs.items[pushed_vregs.items.len - 1];
-        if (top >= alloc.slots.len) return Error.SlotOverflow;
-        switch (func.sig.results[0]) {
-            .i32, .funcref, .externref => {
-                const src = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, top, 0);
-                if (src != abi.return_gpr) {
-                    try buf.appendSlice(allocator, inst.encMovRR(.d, abi.return_gpr, src).slice());
-                }
-            },
-            .i64 => {
-                const src = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, top, 0);
-                if (src != abi.return_gpr) {
-                    try buf.appendSlice(allocator, inst.encMovRR(.q, abi.return_gpr, src).slice());
-                }
-            },
-            .f32, .f64 => {
-                const src_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, top, 0);
-                if (src_x != abi.return_xmm) {
-                    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(abi.return_xmm, src_x).slice());
-                }
-            },
-            .v128 => return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:emitFunctionReturn-v128", 0),
-        }
-    }
+    try marshalReturnRegs(allocator, buf, alloc, pushed_vregs, spill_base_off, func);
     if (frame_bytes > 0) {
         // Inline imm8/imm32 SUB-form selection mirroring emit.zig's
         // `rspAdd` helper. Kept inline here to avoid a Zone-internal

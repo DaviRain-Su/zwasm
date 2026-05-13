@@ -156,6 +156,71 @@ pub fn emitLoop(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     });
 }
 
+/// D-093 (d-11) — marshal function results into AAPCS64 result
+/// registers (X0..X7 / V0..V7) before a function-level
+/// br / br_if / end. Walks `func.sig.results` in order; per-
+/// class index maps the i-th result to Xi/Vi (independent
+/// GPR / FP counters). Top N vregs on pushed_vregs are the
+/// results (deepest = result[0], top = result[N-1]). Stack
+/// overflow (>8 results per class) → UnsupportedOp.
+///
+/// **No parallel-move hazard**: allocatable pool excludes
+/// X0..X7 and V0..V7 by ADR-0017's reservation, so MOV-in-
+/// order is correct.
+pub fn marshalFunctionReturn(ctx: *EmitCtx) Error!void {
+    if (ctx.func.sig.results.len == 0) return;
+    if (ctx.pushed_vregs.items.len < ctx.func.sig.results.len) return;
+    var n_gpr_cap: u8 = 0;
+    var n_fp_cap: u8 = 0;
+    for (ctx.func.sig.results) |rt| switch (rt) {
+        .i32, .i64, .funcref, .externref => n_gpr_cap += 1,
+        .f32, .f64, .v128 => n_fp_cap += 1,
+    };
+    if (n_gpr_cap > 8 or n_fp_cap > 8) return Error.UnsupportedOp;
+
+    var n_gpr: u8 = 0;
+    var n_fp: u8 = 0;
+    const result_base = ctx.pushed_vregs.items.len - ctx.func.sig.results.len;
+    for (ctx.func.sig.results, 0..) |result_kind, i| {
+        const src_vreg = ctx.pushed_vregs.items[result_base + i];
+        if (src_vreg >= ctx.alloc.slots.len) {
+            // D-093 (d-5): dead-fall-through placeholder; skip.
+            switch (result_kind) {
+                .i32, .i64, .funcref, .externref => n_gpr += 1,
+                .f32, .f64, .v128 => n_fp += 1,
+            }
+            continue;
+        }
+        switch (result_kind) {
+            .f32, .f64 => {
+                const dst: inst.Vn = @intCast(n_fp);
+                n_fp += 1;
+                const src_vn = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
+                if (src_vn != dst) {
+                    const base: u32 = if (result_kind == .f64) 0x1E604000 else 0x1E204000;
+                    try gpr.writeU32(ctx.allocator, ctx.buf, base | (@as(u32, src_vn) << 5) | @as(u32, dst));
+                }
+            },
+            .v128 => {
+                const dst: inst_neon.Vn = @intCast(n_fp);
+                n_fp += 1;
+                const src_vn = try gpr.resolveFp(ctx.alloc, src_vreg);
+                if (src_vn != dst) {
+                    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(dst, src_vn));
+                }
+            },
+            .i32, .i64, .funcref, .externref => {
+                const dst: inst.Xn = @intCast(n_gpr);
+                n_gpr += 1;
+                const src_xn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
+                if (src_xn != dst) {
+                    try gpr.writeU32(ctx.allocator, ctx.buf, 0xAA0003E0 | (@as(u32, src_xn) << 16) | @as(u32, dst));
+                }
+            },
+        }
+    }
+}
+
 /// `br N` — unconditional branch to label at depth N (0 =
 /// innermost). Backward (loop) targets resolve to a concrete
 /// disp now; forward targets emit a placeholder + append a
@@ -167,37 +232,9 @@ pub fn emitLoop(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 pub fn emitBr(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     if (ins.payload == ctx.labels.items.len) {
         // br <function-depth>: equivalent to `return`.
-        // Marshal the top-of-stack value as the function's
-        // result (if the signature has one) and emit a B-fixup
-        // pointing at the function epilogue.
-        if (ctx.pushed_vregs.items.len > 0 and ctx.func.sig.results.len > 0) {
-            const top_vreg = ctx.pushed_vregs.items[ctx.pushed_vregs.items.len - 1];
-            const result_kind = ctx.func.sig.results[0];
-            switch (result_kind) {
-                .f32, .f64 => {
-                    const src_vn = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, top_vreg, 0);
-                    if (src_vn != 0) {
-                        const base: u32 = if (result_kind == .f64) 0x1E604000 else 0x1E204000;
-                        try gpr.writeU32(ctx.allocator, ctx.buf, base | (@as(u32, src_vn) << 5));
-                    }
-                },
-                .i32, .i64, .v128, .funcref, .externref => {
-                    const src_xn = try gpr.gprLoadSpilled(
-                        ctx.allocator,
-                        ctx.buf,
-                        ctx.alloc,
-                        ctx.spill_base_off,
-                        top_vreg,
-                        0,
-                    );
-                    if (src_xn != 0) {
-                        // ORR Xd, XZR, Xs — alias for MOV X0, Xs.
-                        const orr_word: u32 = 0xAA0003E0 | (@as(u32, src_xn) << 16);
-                        try gpr.writeU32(ctx.allocator, ctx.buf, orr_word);
-                    }
-                },
-            }
-        }
+        // Marshal top N result vregs into AAPCS64 result regs, emit
+        // a B-fixup pointing at the function epilogue.
+        try marshalFunctionReturn(ctx);
         const fixup_at: u32 = @intCast(ctx.buf.items.len);
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encB(0));
         try ctx.return_fixups.append(ctx.allocator, fixup_at);
@@ -237,33 +274,7 @@ pub fn emitBrIf(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         // epilogue ; skip:
         const cbz_at: u32 = @intCast(ctx.buf.items.len);
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCbzW(wn, 0));
-        if (ctx.pushed_vregs.items.len > 0 and ctx.func.sig.results.len > 0) {
-            const top_vreg = ctx.pushed_vregs.items[ctx.pushed_vregs.items.len - 1];
-            const result_kind = ctx.func.sig.results[0];
-            switch (result_kind) {
-                .f32, .f64 => {
-                    const src_vn = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, top_vreg, 0);
-                    if (src_vn != 0) {
-                        const base: u32 = if (result_kind == .f64) 0x1E604000 else 0x1E204000;
-                        try gpr.writeU32(ctx.allocator, ctx.buf, base | (@as(u32, src_vn) << 5));
-                    }
-                },
-                .i32, .i64, .v128, .funcref, .externref => {
-                    const src_xn = try gpr.gprLoadSpilled(
-                        ctx.allocator,
-                        ctx.buf,
-                        ctx.alloc,
-                        ctx.spill_base_off,
-                        top_vreg,
-                        0,
-                    );
-                    if (src_xn != 0) {
-                        const orr_word: u32 = 0xAA0003E0 | (@as(u32, src_xn) << 16);
-                        try gpr.writeU32(ctx.allocator, ctx.buf, orr_word);
-                    }
-                },
-            }
-        }
+        try marshalFunctionReturn(ctx);
         const b_at: u32 = @intCast(ctx.buf.items.len);
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encB(0));
         try ctx.return_fixups.append(ctx.allocator, b_at);

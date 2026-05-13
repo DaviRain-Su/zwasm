@@ -81,16 +81,14 @@ NAMES=(
   block
   loop
   local_tee
-  # NOTE: `if` deferred — the upstream module declares
-  # `add64_u_{with_carry,saturated}` which expose 2-result
-  # function returns + 2-result call captures (Wasm 2.0
-  # multi-value). The runner's `captureCallResult` + the
-  # arm64/x86_64 function-end marshal currently support
-  # single-result only; the entire if.0.wasm module fails
-  # to compile because `add64_u_saturated` calls
-  # `add64_u_with_carry`. Added in the follow-up chunk that
-  # extends call-result capture + function-end marshal to
-  # multi-result.
+  # NOTE: `if` deferred — adding it surfaces a separate if-merge
+  # slot-share invariant gap. Single-result `(if (result T))` works
+  # by regalloc luck (V_then_i and V_else_i happen to share a slot,
+  # making emit's merge MOV a no-op). Multi-result + compose-of-2
+  # patterns expose the dependency; proper fix needs emit-side
+  # coalescing of V_then_i / V_else_i onto canonical merge slots.
+  # Lands in a follow-up chunk (d-12) once the canonical-slot
+  # approach is designed.
 )
 
 mkdir -p "$DEST"

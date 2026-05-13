@@ -528,50 +528,73 @@ pub fn captureCallResult(
     callee_sig: zir.FuncType,
 ) Error!void {
     if (callee_sig.results.len == 0) return;
-    if (callee_sig.results.len > 1) return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig:261", 0);
 
-    const result = next_vreg.*;
-    next_vreg.* += 1;
-    if (result >= alloc.slots.len) return Error.AllocationMissing;
+    // D-093 (d-11) — multi-result capture. SysV §3.2.3: GPR results
+    // in RAX, RDX (≤2); FP / SIMD results in XMM0, XMM1 (≤2).
+    // Win64 §3.2.4: ≤1 result per class. Overflow → UnsupportedOp.
+    const gpr_result_regs = [_]abi.Gpr{ .rax, .rdx };
+    const xmm_result_regs = [_]abi.Xmm{ .xmm0, .xmm1 };
+    const gpr_cap: u8 = switch (abi.current_cc) {
+        .sysv => 2,
+        .win64 => 1,
+    };
+    const xmm_cap: u8 = switch (abi.current_cc) {
+        .sysv => 2,
+        .win64 => 1,
+    };
 
-    switch (callee_sig.results[0]) {
-        .i32 => {
-            const dst = try gpr.gprDefSpilled(alloc, result, 0);
-            if (dst != abi.return_gpr) {
-                try buf.appendSlice(allocator, inst.encMovRR(.d, dst, abi.return_gpr).slice());
-            }
-            try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result, 0);
-        },
-        .i64 => {
-            // §9.7 / 7.10-c: i64 result via .q-form MOV from RAX.
-            const dst = try gpr.gprDefSpilled(alloc, result, 0);
-            if (dst != abi.return_gpr) {
-                try buf.appendSlice(allocator, inst.encMovRR(.q, dst, abi.return_gpr).slice());
-            }
-            try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result, 0);
-        },
-        .f32, .f64 => {
-            // §9.7 / 7.10-e: f32/f64 result via MOVAPS from XMM0
-            // (= return_xmm). Same MOVAPS-preserves-128-bit shape
-            // as marshalCallArgs's f32/f64 widening. Spilled result
-            // vregs flush via xmmStoreSpilled.
-            const dst = try gpr.xmmDefSpilled(alloc, result, 0);
-            if (dst != abi.return_xmm) {
-                try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst, abi.return_xmm).slice());
-            }
-            try gpr.xmmStoreSpilled(allocator, buf, alloc, spill_base_off, result, 0);
-        },
-        // §9.9 / 9.9-h-7 (D-080 discharge): v128 result via MOVAPS
-        // from XMM0 (= return_xmm). Mirrors the ARM64
-        // `captureCallResult.v128` path. Register-only — spilled
-        // v128 result vregs trip D-078 (c) via `resolveXmm`.
-        .v128 => {
-            const dst = try gpr.resolveXmm(alloc, result);
-            if (dst != abi.return_xmm) {
-                try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst, abi.return_xmm).slice());
-            }
-        },
-        .funcref, .externref => return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig:capture-funcref-externref", 0),
+    var n_gpr: u8 = 0;
+    var n_xmm: u8 = 0;
+    for (callee_sig.results) |rt| switch (rt) {
+        .i32, .i64, .funcref, .externref => n_gpr += 1,
+        .f32, .f64, .v128 => n_xmm += 1,
+    };
+    if (n_gpr > gpr_cap or n_xmm > xmm_cap) return types.rejectUnsupported("src/engine/codegen/x86_64/op_call.zig:capture-multi-result-cap", 0);
+
+    var gpr_used: u8 = 0;
+    var xmm_used: u8 = 0;
+    for (callee_sig.results) |result_kind| {
+        const result = next_vreg.*;
+        next_vreg.* += 1;
+        if (result >= alloc.slots.len) return Error.AllocationMissing;
+
+        switch (result_kind) {
+            .i32 => {
+                const src = gpr_result_regs[gpr_used];
+                gpr_used += 1;
+                const dst = try gpr.gprDefSpilled(alloc, result, 0);
+                if (dst != src) {
+                    try buf.appendSlice(allocator, inst.encMovRR(.d, dst, src).slice());
+                }
+                try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result, 0);
+            },
+            .i64, .funcref, .externref => {
+                const src = gpr_result_regs[gpr_used];
+                gpr_used += 1;
+                const dst = try gpr.gprDefSpilled(alloc, result, 0);
+                if (dst != src) {
+                    try buf.appendSlice(allocator, inst.encMovRR(.q, dst, src).slice());
+                }
+                try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result, 0);
+            },
+            .f32, .f64 => {
+                const src = xmm_result_regs[xmm_used];
+                xmm_used += 1;
+                const dst = try gpr.xmmDefSpilled(alloc, result, 0);
+                if (dst != src) {
+                    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst, src).slice());
+                }
+                try gpr.xmmStoreSpilled(allocator, buf, alloc, spill_base_off, result, 0);
+            },
+            .v128 => {
+                const src = xmm_result_regs[xmm_used];
+                xmm_used += 1;
+                const dst = try gpr.resolveXmm(alloc, result);
+                if (dst != src) {
+                    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst, src).slice());
+                }
+            },
+        }
+        try pushed_vregs.append(allocator, result);
     }
-    try pushed_vregs.append(allocator, result);
 }
