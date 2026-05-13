@@ -113,7 +113,13 @@ fn nonSimdOnModuleLoaded(
     stdout: *std.Io.Writer,
     name: []const u8,
 ) anyerror!void {
-    base.resetGrowableMemory(1);
+    // d-20: derive `(min, max)` from the module's memory section
+    // so `memory.size` reflects the declared initial count AND
+    // `memory.grow` respects the module's max-pages cap. Returns
+    // `{min: 0, max: null}` when no memory section is present.
+    const mem_limits = base.extractMemoryLimits(gpa, wasm_bytes);
+    base.resetGrowableMemory(mem_limits.min);
+    base.current_mem_max_pages = mem_limits.max;
     @memset(scratch_globals[0..], 0);
 
     runner_mod.applyActiveDataSegments(gpa, wasm_bytes, base.growable_memory[0..@intCast(base.current_mem_bytes)]) catch |err| {

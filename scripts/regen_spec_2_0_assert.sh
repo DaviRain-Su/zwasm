@@ -93,6 +93,20 @@ NAMES=(
   load
   store
   traps
+  # d-20 batch: FP-bitwise + memory_size + structural surfaces.
+  # `fac` deferred: `fac-ssa` uses `loop (param i64 i64)
+  # (result i64)` — Wasm 2.0 multi-value loop params surface a
+  # latent codegen bug (returns 24 instead of 25! = i64-fold-
+  # of-loop-iteration). Tracked as D-099. `br_table` deferred:
+  # br_table.0.wasm carries `meet-externref` / `meet-funcref-N`
+  # exports — reftype, Phase 10+. d-20 also lands the runner's
+  # module-aware `memory.size` + `memory.grow` max-pages reset
+  # (`base.extractMemoryLimits` → `current_mem_max_pages`).
+  f32_bitwise
+  f64_bitwise
+  memory_size
+  switch
+  type
 )
 
 mkdir -p "$DEST"

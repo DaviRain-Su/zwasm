@@ -10,36 +10,34 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **Phase 9 extended; D-093 (d-19) NAMES expansion (+5 names) landed 2026-05-14**
+## Active state — **Phase 9 extended; D-093 (d-20) NAMES +5 + runner memory_limits landed 2026-05-14**
 
 ### One-line state
 
-D-093 (d-19) expands `regen_spec_2_0_assert.sh` NAMES with
-five mechanically-covered names: `address`, `const`, `load`,
-`store`, `traps`. `select` deferred (select.0.wasm's
-externref / funcref selects trip BadValType, reftype is
-Phase 10+); `align` rejected by wast2json. Both hosts at
-13191/0/281 on `test-spec-wasm-2.0-assert` (was 12460/0/185
-post-d-18; +731 PASS / +96 SKIP). `test-all` green; simd
-13301/0/440 unchanged.
+D-093 (d-20) adds five more names (`f32_bitwise`, `f64_bitwise`,
+`memory_size`, `switch`, `type`) and wires runner's
+`on_module_loaded` to read the module's `(memory min max)`
+declaration via `base.extractMemoryLimits`. Reset uses module-
+declared min pages; `current_mem_max_pages` is consulted by
+`growableMemoryGrowFn` so `memory.grow` returns -1 past the
+declared max. `fac` deferred → D-099 (fac-ssa's loop with two
+i64 params returns 24 instead of 25!). `br_table` deferred
+(reftype-bearing meet-externref / meet-funcref). Both hosts
+at 13982/0/283 on `test-spec-wasm-2.0-assert` (was 13191/0/281
+post-d-19). simd 13301/0/440 unchanged.
 
 ### Standing reminder for the autonomous loop
 
 **Project tone is `.claude/rules/no_workaround.md`: fix root
 causes, never work around.**
 
-### Next task — d-20 NAMES expansion
+### Next task — d-21 NAMES expansion
 
-D-095 + D-096 + D-097 ALL DISCHARGED. With d-19 batch landed
-both hosts at 13191/0/281.
-
-- **d-20 NEXT** — next NAMES bundle. Remaining queue
-  (post-d-19): `br_table`, `call`, `call_indirect`, `data`,
-  `elem`, `f32_bitwise`, `f64_bitwise`, `fac`, `func`,
-  `func_ptrs`, `global`, `memory`, `memory_grow`,
-  `memory_size`, `start`, `switch`, `table`, `type`,
-  `unwind`. Prefer mechanically-covered names first (no
-  new ops introduced).
+- **d-21 NEXT** — next NAMES bundle. Remaining queue (post-d-20):
+  `call`, `call_indirect`, `data`, `elem`, `func`, `func_ptrs`,
+  `global`, `memory`, `memory_grow`, `start`, `table`, `unwind`.
+  Also deferred until separate fix: `br_table` (reftype), `fac`
+  (D-099, loop param), `select` (reftype), `align` (wast2json).
 
 Runner-side skip-impl backlog (7 total, in `nop / loop /
 local_tee`):
@@ -84,8 +82,9 @@ Other queued post-D-093 names: `address`, `align`, `br_table`,
 | D-093 (d-16) | [x] 5ccae2cd | ADR-0060: regalloc `computeWith` force-spill call-crossing vregs (slot ≥ per-arch max(GPR, FP)) + compose_with_call edge fixture + D-095 partial discharge + D-096 / D-097 filed |
 | D-093 (d-17) | [x] eca69183 | unified `emitMergeMov` (FP-class dispatch + 64-bit GPR MOV) + br-into-if-frame merge capture (D-096 discharged) + br_inside_arm edge fixture |
 | D-093 (d-18) | [x] 4a4e0a22 | x86_64 select alias-aware cmov + call_indirect idx load order (D-097 discharged) + select_spilled_operands / select_with_if_call / select_with_if_no_call edge fixtures |
-| D-093 (d-19) | [x] (this commit) | NAMES +5 (`address`, `const`, `load`, `store`, `traps`); `select` deferred (reftype), `align` rejected by wast2json |
-| **D-093 (d-20)** | **NEXT** | NAMES bundle (queue: `br_table`/`call`/`call_indirect`/`data`/`elem`/...) |
+| D-093 (d-19) | [x] c41b0868 | NAMES +5 (`address`, `const`, `load`, `store`, `traps`); `select` deferred (reftype), `align` rejected by wast2json |
+| D-093 (d-20) | [x] (this commit) | NAMES +5 (`f32_bitwise`, `f64_bitwise`, `memory_size`, `switch`, `type`) + runner memory_limits reset + D-099 (fac-ssa loop param) filed |
+| **D-093 (d-21)** | **NEXT** | NAMES bundle (queue: `call`/`call_indirect`/`data`/`elem`/`func`/`global`/`memory`/`memory_grow`/`start`/`table`/`unwind`) |
 
 Other queued chunks (post-l-1): k-1, k-2, m-4c (= D-090),
 m-2d, n-1, j-3b.

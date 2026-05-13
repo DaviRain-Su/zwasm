@@ -199,6 +199,13 @@ pub var growable_memory: [GROWABLE_MEMORY_CAPACITY]u8 align(16) = undefined;
 /// module load via `resetGrowableMemory`.
 pub var current_mem_bytes: u64 = 65536;
 
+/// d-20: module-scoped max-pages cap. Wasm 1.0 §4.2.8 says
+/// `memory.grow` returns -1 when the declared module-level max
+/// would be exceeded. `null` means no max (= `GROWABLE_MEMORY_CAPACITY`
+/// is the effective cap). Reset by `resetGrowableMemoryWithMax`
+/// from each runner's `on_module_loaded`.
+pub var current_mem_max_pages: ?u32 = null;
+
 /// Reset the growable pool to `initial_pages` (Wasm-1.0 64 KiB pages).
 /// Called from each runner's `on_module_loaded` callback. Zeros the
 /// in-use region so prior module state doesn't leak into this one.
@@ -213,6 +220,24 @@ pub fn resetGrowableMemory(initial_pages: u32) void {
     @memset(growable_memory[0..@intCast(current_mem_bytes)], 0);
 }
 
+/// d-20: parse the wasm bytes' memory section to discover the
+/// module-declared `(min, max)` pages. Returns `{min: 0, max:
+/// null}` when no memory section exists or parsing fails.
+/// Used by runners' `on_module_loaded` to seed
+/// `resetGrowableMemory` + `current_mem_max_pages` from the
+/// module's own declaration — matters for `memory_size.wast`
+/// and `memory_grow.wast` where the max-pages cap gates whether
+/// a `memory.grow` succeeds vs returns -1.
+pub fn extractMemoryLimits(allocator: std.mem.Allocator, wasm_bytes: []const u8) struct { min: u32, max: ?u32 } {
+    var module = zwasm.parse.parser.parse(allocator, wasm_bytes) catch return .{ .min = 0, .max = null };
+    defer module.deinit(allocator);
+    const sec = module.find(.memory) orelse return .{ .min = 0, .max = null };
+    var memories = zwasm.parse.sections.decodeMemory(allocator, sec.body) catch return .{ .min = 0, .max = null };
+    defer memories.deinit();
+    if (memories.items.len == 0) return .{ .min = 0, .max = null };
+    return .{ .min = memories.items[0].min, .max = memories.items[0].max };
+}
+
 /// §9.9 / 9.9-l-1b-d093-d8c (per ADR-0059): `memory.grow` callout
 /// for spec runners. Updates `current_mem_bytes` (module-scoped
 /// persistent state) AND `rt.mem_limit` (per-call cached value)
@@ -223,7 +248,14 @@ pub fn growableMemoryGrowFn(rt: *entry.JitRuntime, delta_pages: u32) callconv(.c
     const page_size: u64 = 65536;
     const old_bytes = current_mem_bytes;
     const old_pages: u32 = @intCast(old_bytes / page_size);
-    const new_bytes = old_bytes + @as(u64, delta_pages) * page_size;
+    const new_pages: u64 = @as(u64, old_pages) + @as(u64, delta_pages);
+    // d-20: respect module-declared max-pages. Wasm 1.0 §4.4.7.6 —
+    // grow returns -1 when the result would exceed the declared
+    // max. The pool capacity is a secondary cap.
+    if (current_mem_max_pages) |max| {
+        if (new_pages > max) return -1;
+    }
+    const new_bytes = new_pages * page_size;
     if (new_bytes > GROWABLE_MEMORY_CAPACITY) return -1;
     @memset(growable_memory[@intCast(old_bytes)..@intCast(new_bytes)], 0);
     current_mem_bytes = new_bytes;
