@@ -78,12 +78,9 @@ NAMES=(
   local_set
   return
   nop
+  block
   loop
   local_tee
-  # NOTE: `block` deferred — its `break-inner` fixture exercises
-  # the D-093 residual cluster (c) (nested-br value off-by-one,
-  # `block:break-inner → got 16, expected 15`). Added in the
-  # follow-up chunk that lands the root-cause fix.
 )
 
 mkdir -p "$DEST"

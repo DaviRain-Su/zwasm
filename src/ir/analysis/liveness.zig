@@ -48,6 +48,7 @@ pub const Error = error{
 /// validator's `max_operand_stack` so a function the validator
 /// accepts cannot exceed this depth at runtime.
 const max_simulated_stack: usize = 1024;
+const max_control_stack: usize = 256;
 
 pub const StackEffect = struct { pops: u8, pushes: u8 };
 
@@ -619,6 +620,15 @@ pub fn compute(
     var sim_stack: [max_simulated_stack]u32 = undefined;
     var sim_len: usize = 0;
 
+    // D-093 (d-9) — `block` / `loop` / `if` entry depths so `.br N`
+    // can close only vregs ABOVE the target's entry, leaving lower
+    // values live for post-block consumers. Per Wasm spec §3.4.4:
+    // br N pops the target label's arity values + discards
+    // intermediate values pushed inside nested blocks; values
+    // BELOW target's entry stack-depth are preserved.
+    var block_stack: [max_control_stack]u32 = undefined;
+    var block_stack_len: usize = 0;
+
     // Sub-7.5c-iv: after an unconditional branch (br / return /
     // unreachable) the rest of the block body is dead code per
     // Wasm's polymorphic-stack rule. Dead-code liveness does
@@ -641,6 +651,9 @@ pub fn compute(
                     const vreg = sim_stack[sim_len];
                     ranges.items[vreg].last_use_pc = pc;
                 }
+            } else if (block_stack_len > 0) {
+                // D-093 (d-9): pop the matching block frame.
+                block_stack_len -= 1;
             }
             // Mid-function `end` (block/loop/if frame closer) is
             // transparent at the liveness level — values produced
@@ -651,8 +664,17 @@ pub fn compute(
             continue;
         }
 
-        // block / loop / else: structural markers, transparent.
-        if (instr.op == .block or instr.op == .loop or instr.op == .@"else") {
+        // block / loop: structural markers — push current sim_len
+        // onto block_stack so `.br N` can resolve target depth.
+        // `.else` is a continuation of the same `.if` frame so it
+        // stays transparent (doesn't touch block_stack).
+        if (instr.op == .block or instr.op == .loop) {
+            if (block_stack_len == max_control_stack) return Error.UnsupportedOp;
+            block_stack[block_stack_len] = @intCast(sim_len);
+            block_stack_len += 1;
+            continue;
+        }
+        if (instr.op == .@"else") {
             continue;
         }
 
@@ -667,6 +689,12 @@ pub fn compute(
                 const cond_vreg = sim_stack[sim_len];
                 ranges.items[cond_vreg].last_use_pc = pc;
             }
+            // D-093 (d-9): push block_stack AFTER popping the
+            // condition so the if-frame's entry depth matches the
+            // body's view of the operand stack.
+            if (block_stack_len == max_control_stack) return Error.UnsupportedOp;
+            block_stack[block_stack_len] = @intCast(sim_len);
+            block_stack_len += 1;
             continue;
         }
 
@@ -693,8 +721,34 @@ pub fn compute(
         // exists per Wasm validator rules); subsequent ops may
         // re-push fresh vregs they themselves define, which we
         // treat conservatively.
-        if (instr.op == .br or instr.op == .@"return" or instr.op == .@"unreachable") {
+        if (instr.op == .@"return" or instr.op == .@"unreachable") {
             while (sim_len > 0) {
+                sim_len -= 1;
+                const vreg = sim_stack[sim_len];
+                ranges.items[vreg].last_use_pc = pc;
+            }
+            continue;
+        }
+        if (instr.op == .br) {
+            // D-093 (d-9): close only vregs ABOVE the target
+            // label's entry depth. Per Wasm spec §3.4.4 br N
+            // discards the intermediate values pushed inside
+            // nested blocks (and pops the target's arity at
+            // emit-time via merge_top_vregs), but preserves
+            // values BELOW the target's entry — those flow to
+            // post-block consumers. Pre-d-9, the unconditional
+            // drain closed lower values too, causing regalloc
+            // to alias their slots with subsequent pushes
+            // (e.g. `block:break-inner` got 16/expected 15
+            // because V_local0 was killed at a br inside an
+            // inner void block then its slot was reused by the
+            // `i32.const 0x2` that followed).
+            const depth: u32 = instr.payload;
+            const target_depth: u32 = if (depth >= block_stack_len)
+                0
+            else
+                block_stack[block_stack_len - 1 - @as(usize, depth)];
+            while (sim_len > @as(usize, target_depth)) {
                 sim_len -= 1;
                 const vreg = sim_stack[sim_len];
                 ranges.items[vreg].last_use_pc = pc;

@@ -10,43 +10,34 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **Phase 9 extended; D-093 (d-8c) landed 2026-05-13**
+## Active state — **Phase 9 extended; D-093 (d-9) landed 2026-05-13**
 
 ### One-line state
 
-D-093 (d-8c) landed: x86_64 `.memory.grow` CALL-via-fn-ptr emit
-(SysV: RDI=rt, ESI=delta; Win64 via `entry_arg0_gpr` + shadow
-alloc) + spec-runner restructure (`base.growable_memory: [64 ×
-65536]u8` pool replaces per-runner `scratch_memory[65536]`;
-`base.current_mem_bytes` tracks module-scoped persistent size;
-`base.growableMemoryGrowFn` is the callout that updates both
-`current_mem_bytes` + `rt.mem_limit` in place) + NAMES expansion
-to `nop / loop / local_tee` (block deferred — see Next). All 5
-memory.grow cluster (a) fixtures clear: Mac + OrbStack
-`test-spec-wasm-2.0-assert` 11773/0/106 → **12056 / 0 / 127**
-bit-identical (+283 PASS, 0 FAIL, +21 skip = 6 runner-shape-gap
-skip-impls (3-arg + multi-value-break) + 15 skip-adr). cluster
-(a) DISCHARGED.
+D-093 (d-9) landed: liveness `block_stack` + br target-depth-
+aware close. Pre-d-9 `.br` drained ALL live vregs (matching
+`return`/`unreachable` semantics); Wasm spec §3.4.4 preserves
+values BELOW target's entry depth. `liveness.zig` gains a
+control-stack tracking `.block` / `.loop` / `.if` entry-time
+`sim_len`; `.br N` now closes only vregs at indices ≥
+target_depth. Fixes `block:break-inner` (got 16 → expected 15)
+without regressing any other corpus. Two regression fixtures
+under `test/edge_cases/p9/block/`. NAMES expanded to include
+`block` (4th of 4 candidates). Mac + OrbStack
+`test-spec-wasm-2.0-assert` 12056/0/127 → **12262 / 0 / 143**
+bit-identical (+206 PASS, 0 FAIL, +16 skip = 1 runner-shape-gap
+skip-impl + 15 skip-adr). simd unchanged 13301/0/440. Clusters
+(a) + (c) of D-093 DISCHARGED.
 
 ### Standing reminder for the autonomous loop
 
 **Project tone is `.claude/rules/no_workaround.md`: fix root
 causes, never work around.**
 
-### Next task — D-093 residual sub-clusters
+### Next task — D-093 cluster (b) + runner-skip-impl backlog
 
-Cluster (a) memory.grow DISCHARGED at d-8c. Remaining:
+Clusters (a) + (c) DISCHARGED at d-8c + d-9. Remaining:
 
-- **block:break-inner off-by-one (cluster (c))** — adding
-  `block` to NAMES surfaces `break-inner → got 16,
-  expected 15`. The fixture chains 4 `(block (result i32)
-  ... (br N (i32.const X)))` patterns + an inner-vs-outer
-  br depth alternation; one block's contribution is +1
-  too high. Likely a residual case of multi-nested
-  br-value propagation (D-093 d-2 / d-4 / d-7 family).
-  Investigation: write minimal repro (one of the 4 chunks
-  in isolation), disassemble Mac arm64 output, trace
-  the +1 source. Localise + fix + add `block` to NAMES.
 - **if-with-params validator + emit gap (cluster (b))** —
   `if.wast:param` (func[42]) is `(if (param i32) (result
   i32) ...)`. Validator's `opElse` doesn't re-push params
@@ -57,16 +48,18 @@ Cluster (a) memory.grow DISCHARGED at d-8c. Remaining:
   chunk: (a) validator opElse re-push, (b) emit Label
   param_top_vregs capture at emitIf + restore at emitElse,
   (c) liveness if-frame stack to extend param vreg ranges
-  across both arms.
+  across both arms. Adding `if` to NAMES surfaces this.
 
-Runner-side skip-impl backlog (6, all in `nop / loop`):
+Runner-side skip-impl backlog (7 total, in `nop / loop /
+local_tee`):
 - 5× nop:as-call-{first,mid1,mid2,last,everywhere} —
-  manifest-side rejection: `(i32 i32 i32, i32)` is 3-arg
-  i32 dispatch, runner's `[5]ArgValue` matrix dispatches
-  ≤ 2 args + result. Extend dispatch table.
+  manifest filter: `(i32 i32 i32, i32)` is 3-arg i32
+  dispatch, runner's `[5]ArgValue` matrix dispatches ≤ 2
+  args + result. Extend dispatch table.
 - 1× loop:break-multi-value — multi-result loop blocks.
-  Path B exit requires this resolved at Phase 11+
-  (per ADR-0029 follow-up).
+  Path B exit requires this resolved at Phase 11+ (per
+  ADR-0029 follow-up).
+- 1× from local_tee or block — verify.
 
 Other queued post-D-093 names: `address`, `align`, `br_table`,
 `call`, `call_indirect`, `const`, `data`, `elem`, `f32_bitwise`,
@@ -89,9 +82,9 @@ Other queued post-D-093 names: `address`, `align`, `br_table`,
 | D-093 (d-7) | [x] ad78ce45 | br_table per-case forward-block merge |
 | D-093 (d-8a) | [x] 13c46792 | ADR-0059 + JitRuntime callout ABI tail extension |
 | D-093 (d-8b) | [x] 2e04b925 | arm64 `.memory.grow` BLR-via-fn-ptr emit + X28/X27 reload + safe default fn |
-| D-093 (d-8c) | [x] (this commit) | x86_64 `.memory.grow` CALL-via-fn-ptr emit + spec-runner growable_memory pool + NAMES (nop/loop/local_tee; block deferred for (c)) |
-| **D-093 (d-9) (c)** | **NEXT** | block:break-inner off-by-one localisation + fix + add `block` to NAMES |
-| D-093 (d-10) (b) | queued | if-with-params validator opElse re-push + emit Label param_top_vregs + liveness if-frame stack |
+| D-093 (d-8c) | [x] 0b3d7dea | x86_64 `.memory.grow` CALL-via-fn-ptr emit + spec-runner growable_memory pool + NAMES (nop/loop/local_tee; block deferred for (c)) |
+| D-093 (d-9) (c) | [x] (this commit) | liveness br target-depth-aware close (block_stack) + block NAMES |
+| **D-093 (d-10) (b)** | **NEXT** | if-with-params validator opElse re-push + emit Label param_top_vregs + liveness if-frame stack + add `if` to NAMES |
 
 Other queued chunks (post-l-1): k-1, k-2, m-4c (= D-090),
 m-2d, n-1, j-3b.
