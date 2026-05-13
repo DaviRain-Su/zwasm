@@ -81,15 +81,13 @@ NAMES=(
   block
   loop
   local_tee
-  # NOTE: `if` deferred — 7 residual failures across 4 structural
-  # gaps: (1) compose-of-2 single-result if (as-compare-operand
-  # 0,0 / 1,0); (2) multi-result if compose (as-compare-operands
-  # 0); (3) br-inside-if-arm (param-break / params-break); (4)
-  # arm64-specific add64_u_saturated regression vs x86_64 (the
-  # x86_64 implicit-else handler works; arm64 needs investigation
-  # — runtime debug per `extended_challenge.md` Step 4 spike).
-  # d-13 lands the implicit-else marshal foundation; per-gap
-  # fixes split into d-14+.
+  # NOTE: `if` deferred — 5 residual failures across 3 structural
+  # gaps: (1) compose-of-2 single-result if (`as-compare-operand
+  # 0,0` / `1,0`); (2) multi-result if compose (`as-compare-
+  # operands 0`); (3) br-inside-if-arm (`param-break` /
+  # `params-break`). d-14 cleared the arm64 `.return` multi-
+  # result marshal (add64_u_saturated × 2 cases); the other gaps
+  # need per-chunk fixes — d-15 begins with (1).
 )
 
 mkdir -p "$DEST"

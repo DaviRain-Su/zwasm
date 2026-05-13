@@ -10,28 +10,32 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **Phase 9 extended; D-093 (d-13) landed 2026-05-14**
+## Active state — **Phase 9 extended; D-093 (d-14) landed 2026-05-14**
 
 ### One-line state
 
-D-093 (d-13) landed: implicit-else marshal for `(if (param T)
-(result T)) (then ...)` without `.else`. arm64 + x86_64
-emitEndIntra gain `.if_then + param_arity > 0` path: MOVs top
-result_arity vregs into captured param_top_vregs slots BEFORE
-the .end target_byte so cond=0 CBZ/Jcc jumps past the MOVs
-(preserving param.slot's def value) and cond=1 falls through
-the MOVs (writing then-arm result into param.slot). arm64 uses
-X-form ORR (preserves all 64 bits for i64 results); the
-parallel else_open path's W-form ORR is quietly wrong for i64
-merges but unaffected by current corpus — separate chunk.
-Liveness `.end` handler adds implicit-else mirror of the
-else_open replacement so post-if consumers' pops extend
-V_param's liveness. Mac + OrbStack `test-spec-wasm-2.0-assert`
-12262 / 0 / 143 unchanged (`if` deferred — 7 residual failures
-split across 4 structural gaps for d-14+). 3 edge-case
-fixtures verify: `implicit_else_param = 1253`,
-`implicit_else_param_then_branch = 7`,
-`implicit_else_after_call = 1253` — all PASS both arches.
+D-093 (d-14) landed: arm64 `.return` op multi-result marshal.
+Pre-d-14 the arm64 `.return` handler in `src/engine/codegen/
+arm64/emit.zig` had a stale inline single-result marshal that
+my d-11 multi-result refactor missed (d-11 only updated the
+function-level `.end` path; x86_64's `.return` was already
+extracted). For multi-result `(return X Y)` the i32 second
+result wasn't marshalled to X1, leaving X1 with garbage from
+the prior call's caller-saved-reg state. Caller's
+captureCallResult read the garbage as i32 carry → wrong cond
+→ if-frame took wrong arm. Fix: arm64 `.return` now calls
+`op_control.marshalFunctionReturn(&ctx)`; dead
+`encOrrZrIntoX0` helper removed. Edge fixture `add64_u_saturated_exact.wasm = 1253` PASS on
+both arches (the wast version's exact shape — 2-i64-param
+caller + multi-result callee + implicit-else if with i64
+param/result + i32.wrap_i64 entry). Mac + OrbStack
+`test-spec-wasm-2.0-assert` 12262 / 0 / 143 unchanged (`if`
+deferred — adding it surfaces 5 residual failures across 3
+structural gaps: compose-of-2 single-result if
+(as-compare-operand), multi-result if compose
+(as-compare-operands), br-inside-if-arm (param-break /
+params-break) — each split into d-15+ chunks). simd
+unchanged 13301/0/440.
 
 ### Standing reminder for the autonomous loop
 
@@ -94,8 +98,9 @@ Other queued post-D-093 names: `address`, `align`, `br_table`,
 | D-093 (d-10) (b) | [x] 1df7acc5 | if-with-params validator opElse + emit param_top_vregs capture/restore + liveness if-frame + edge-case fixtures |
 | D-093 (d-11) | [x] 9b48592e | multi-result function calls (arm64 + x86_64 captureCallResult + marshalReturn shared helpers) + edge-case fixture |
 | D-093 (d-12) | [x] 7d1c71f8 | liveness if-frame merge tracking + x86_64 cap silent-truncate (D-094 debt) + multi_result_compose edge fixture |
-| D-093 (d-13) | [x] (this commit) | implicit-else marshal (arm64 + x86_64) + 3 edge fixtures (param/then-branch/after-call) |
-| **D-093 (d-14)** | **NEXT** | arm64 add64_u_saturated regression spike (x86_64 passes; arm64 returns wrong value despite identical liveness/emit logic) |
+| D-093 (d-13) | [x] 15cfa288 | implicit-else marshal (arm64 + x86_64) + 3 edge fixtures |
+| D-093 (d-14) | [x] (this commit) | arm64 `.return` op multi-result marshal (d-11 stale-inline cleanup) + add64_u_saturated_exact edge fixture (`if` NAMES deferred — 5 residuals) |
+| **D-093 (d-15)** | **NEXT** | compose-of-2 single-result if (`as-compare-operand`); investigate slot-share regression vs d-12 liveness merge tracking |
 
 Other queued chunks (post-l-1): k-1, k-2, m-4c (= D-090),
 m-2d, n-1, j-3b.

@@ -1237,45 +1237,17 @@ pub fn compile(
             },
             .@"return" => {
                 // Wasm spec §4.4.7: pop the function's results and
-                // exit. We replicate the function-level `end`'s
-                // result-marshal logic inline (move top vreg into
-                // W0/X0/S0/D0 per result_kind), then emit an
-                // unconditional B placeholder pointing at the
-                // function epilogue. All `return` placeholders are
-                // patched in one pass at the end-handler so they
-                // share the single epilogue + RET sequence.
-                if (pushed_vregs.items.len > 0 and func.sig.results.len > 0) {
-                    const top_vreg = pushed_vregs.items[pushed_vregs.items.len - 1];
-                    const result_kind = func.sig.results[0];
-                    switch (result_kind) {
-                        .f32, .f64 => {
-                            const src_vn = try gpr.fpLoadSpilled(allocator, &buf, alloc, spill_base_off, top_vreg, 0);
-                            if (src_vn != 0) {
-                                const base: u32 = if (result_kind == .f64) 0x1E604000 else 0x1E204000;
-                                try gpr.writeU32(allocator, &buf, base | (@as(u32, src_vn) << 5));
-                            }
-                        },
-                        .v128 => {
-                            // §9.9-b per ADR-0046: v128 return marshal.
-                            // MOV V0.16B, Vn.16B copies all 128 bits
-                            // (Arm IHI 0055 §C7.2.246, alias of ORR
-                            // V0.16B, Vn.16B, Vn.16B). Use resolveVn
-                            // (no spill staging): fpLoadSpilled uses
-                            // 8-byte stride which would truncate the
-                            // upper 64 bits of a spilled v128.
-                            const src_vn = try gpr.resolveFp(alloc, top_vreg);
-                            if (src_vn != 0) {
-                                try gpr.writeU32(allocator, &buf, inst_neon.encMovV16B(0, src_vn));
-                            }
-                        },
-                        .i32, .i64, .funcref, .externref => {
-                            const src_xn = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, top_vreg, 0);
-                            if (src_xn != 0) {
-                                try gpr.writeU32(allocator, &buf, encOrrZrIntoX0(src_xn));
-                            }
-                        },
-                    }
-                }
+                // exit. D-093 (d-14) — use shared
+                // `marshalFunctionReturn` helper so multi-result
+                // signatures (Wasm 2.0 multi-value) marshal all N
+                // results to AAPCS64 X0..X7 / V0..V7. Pre-d-14
+                // inline only handled results[0], silently
+                // dropping further results (= garbage in X1 etc.)
+                // — surfaced as `if.wast:add64_u_saturated`
+                // returning the wrong value because the i32 carry
+                // wasn't written, leaving X1 garbage that the
+                // caller's if-frame cond pop read as truthy.
+                try op_control.marshalFunctionReturn(&ctx);
                 const fixup_at: u32 = @intCast(buf.items.len);
                 try gpr.writeU32(allocator, &buf, inst.encB(0));
                 try return_fixups.append(allocator, fixup_at);
@@ -1874,12 +1846,4 @@ fn encLdpFpLrPostIdx() u32 {
 fn encMovSpToFp() u32 {
     // 0x910003FD = mov x29, sp
     return 0x910003FD;
-}
-
-/// `MOV X0, Xsrc` — encoded as `ORR X0, XZR, Xsrc` (the
-/// canonical 64-bit register-to-register MOV).
-/// Encoding: `1 01 01010 00 0 [Rm:5] 000000 11111 [Rd:5]`
-/// = 0xAA0003E0 | (Rm << 16).
-fn encOrrZrIntoX0(rm: Xn) u32 {
-    return 0xAA0003E0 | (@as(u32, rm) << 16);
 }
