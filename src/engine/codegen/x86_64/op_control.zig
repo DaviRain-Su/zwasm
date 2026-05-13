@@ -384,9 +384,21 @@ fn emitBrTableJmp(
     labels: *std.ArrayList(Label),
     spill_base_off: u32,
     func: *const ZirFunc,
+    frame_bytes: u32,
+    uses_runtime_ptr: bool,
     depth: u32,
 ) Error!void {
-    if (depth >= labels.items.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:104", 0);
+    // d-23 (D-107 discharge): `br_table 0` at function scope (= no
+    // enclosing block) targets depth == labels.items.len = the
+    // implicit function-level block. arm64's emitBranchToDepth has
+    // this case (mirror of emitBr's function-depth path); x86_64
+    // pre-d-23 rejected it. unwind.wast's `func-unwind-by-br_table`
+    // shape is the surfacing fixture.
+    if (depth == labels.items.len) {
+        try emitFunctionReturn(allocator, buf, alloc, pushed_vregs, spill_base_off, func, frame_bytes, uses_runtime_ptr);
+        return;
+    }
+    if (depth > labels.items.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:104", 0);
     const tgt_idx = labels.items.len - 1 - depth;
     if (labels.items[tgt_idx].kind == .loop) {
         const at: u32 = @intCast(buf.items.len);
@@ -431,6 +443,8 @@ pub fn emitBrTable(
     pushed_vregs: *std.ArrayList(u32),
     labels: *std.ArrayList(Label),
     spill_base_off: u32,
+    frame_bytes: u32,
+    uses_runtime_ptr: bool,
     count: u32,
     start: u32,
 ) Error!void {
@@ -451,13 +465,13 @@ pub fn emitBrTable(
         const jne_at: usize = buf.items.len;
         try buf.appendSlice(allocator, inst.encJccRel8(.ne, 0).slice());
         const jne_size: usize = 2;
-        try emitBrTableJmp(allocator, buf, alloc, pushed_vregs, labels, spill_base_off, func, targets[start + i]);
+        try emitBrTableJmp(allocator, buf, alloc, pushed_vregs, labels, spill_base_off, func, frame_bytes, uses_runtime_ptr, targets[start + i]);
         const after: usize = buf.items.len;
         const disp: usize = after - (jne_at + jne_size);
         if (disp > 127) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:jne-rel8-overflow", @intCast(disp));
         buf.items[jne_at + 1] = @intCast(disp);
     }
-    try emitBrTableJmp(allocator, buf, alloc, pushed_vregs, labels, spill_base_off, func, targets[start + count]);
+    try emitBrTableJmp(allocator, buf, alloc, pushed_vregs, labels, spill_base_off, func, frame_bytes, uses_runtime_ptr, targets[start + count]);
 }
 
 /// Wasm spec §3.4.5 (br_if N) — pop cond, branch to label at

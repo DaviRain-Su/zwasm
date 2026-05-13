@@ -10,37 +10,34 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **Phase 9 extended; D-093 (d-22) start invoke infra + D-108..D-110 filed 2026-05-14**
+## Active state — **Phase 9 extended; D-093 (d-23) NAMES +1 (unwind) via D-107 discharge 2026-05-14**
 
 ### One-line state
 
-D-093 (d-22) bisected next NAMES batch (`call_indirect`, `func`,
-`func_ptrs`, `memory`, `table`); all defer (D-108/D-109/D-110
-plus wast2json-rejects for memory + table). Added
-`base.extractStartFunc` + `nonSimdOnModuleLoaded`-side invoke
-helper (D-106 discharge scaffolding); D-106 narrowed to
-"undefined-memory-pattern SEGV inside JIT body" (suspect
-runtime field unset by `makeJitRuntime`'s `undefined`
-host_dispatch_base or similar). Runner code stays as no-op
-for non-start modules. Both hosts 13982/0/283 unchanged.
+D-093 (d-23) discharges D-107: x86_64's `emitBrTableJmp` now
+handles `depth == labels.items.len` (function-scope `br_table 0`)
+by calling `emitFunctionReturn`, mirroring arm64's
+`emitBranchToDepth`. `frame_bytes` + `uses_runtime_ptr` threaded
+through `emitBrTable` → `emitBrTableJmp`. `unwind` lands clean
+on both hosts. Both hosts at 14031/0/283 on
+`test-spec-wasm-2.0-assert` (was 13982/0/283 post-d-22; +49 PASS,
++1 manifest). simd 13301/0/440 unchanged.
 
 ### Standing reminder for the autonomous loop
 
 **Project tone is `.claude/rules/no_workaround.md`: fix root
 causes, never work around.**
 
-### Next task — d-23 discharge candidate
+### Next task — d-24 discharge candidate
 
-Active debts blocking NAMES expansion. Cheap candidates:
-- D-099 fac-ssa loop-param multi-value bug (~50 LOC).
-- D-107 unwind x86_64 emit divergence (~50 LOC).
-- D-106 start-fn-invoke (scaffolding landed d-22; SEGV root
-  cause investigation ≈ 1 hour debug).
-- D-108 call_indirect UnsupportedOp (~30 LOC once op named).
+Active debts: D-099 fac-ssa loop param (~50 LOC), D-101 call
+UnsupportedOp (~30 LOC once op named), D-106 start-invoke
+SEGV (needs lldb trace), D-108 call_indirect UnsupportedOp,
+D-109 func validate, D-102/D-103/D-110 (call_indirect family).
 
-- **d-23 NEXT** — pick one of the above. D-099 is the most
-  self-contained; D-107 is arch-divergence (well-scoped); D-106
-  needs lldb / gdb to trace which prologue load SEGVs.
+- **d-24 NEXT** — D-099 fac-ssa is the most self-contained.
+  Add a minimal loop-param multi-value edge fixture, bisect
+  the bug, fix in `op_control.zig:emitLoop`.
 
 Runner-side skip-impl backlog (7 total, in `nop / loop /
 local_tee`):
@@ -88,8 +85,9 @@ Other queued post-D-093 names: `address`, `align`, `br_table`,
 | D-093 (d-19) | [x] c41b0868 | NAMES +5 (`address`, `const`, `load`, `store`, `traps`); `select` deferred (reftype), `align` rejected by wast2json |
 | D-093 (d-20) | [x] 18f93d91 | NAMES +5 (`f32_bitwise`, `f64_bitwise`, `memory_size`, `switch`, `type`) + runner memory_limits reset + D-099 (fac-ssa loop param) filed |
 | D-093 (d-21) | [x] 834fd332 | NAMES batch bisect (call/data/elem/global/memory_grow/start/unwind each → its own debt D-101..D-107) + GROWABLE_MEMORY_CAPACITY 64 → 1024 pages |
-| D-093 (d-22) | [x] (this commit) | NAMES batch bisect (call_indirect/func/func_ptrs/memory/table → D-108..D-110 + wast2json-reject) + D-106 discharge scaffolding (extractStartFunc + invoke helper; SEGV root-cause now narrowed) |
-| **D-093 (d-23)** | **NEXT** | discharge candidate: D-099 fac-ssa, D-107 x86_64 unwind, or D-106 SEGV trace |
+| D-093 (d-22) | [x] 404a8477 | NAMES batch bisect (call_indirect/func/func_ptrs/memory/table → D-108..D-110 + wast2json-reject) + D-106 discharge scaffolding (extractStartFunc + invoke helper; SEGV root-cause now narrowed) |
+| D-093 (d-23) | [x] (this commit) | D-107 discharged: x86_64 emitBrTableJmp function-depth (mirror arm64); `unwind` lands +49 PASS |
+| **D-093 (d-24)** | **NEXT** | discharge candidate: D-099 fac-ssa loop param (most self-contained) |
 
 Other queued chunks (post-l-1): k-1, k-2, m-4c (= D-090),
 m-2d, n-1, j-3b.

@@ -1534,7 +1534,7 @@ pub fn compile(
                 dead_code = true;
             },
             .br_if => try op_control.emitBrIf(allocator, &buf, alloc, &pushed_vregs, &labels, spill_base_off, func, frame_bytes, uses_runtime_ptr, ins.payload),
-            .br_table => try op_control.emitBrTable(allocator, &buf, func, alloc, &pushed_vregs, &labels, spill_base_off, ins.payload, ins.extra),
+            .br_table => try op_control.emitBrTable(allocator, &buf, func, alloc, &pushed_vregs, &labels, spill_base_off, frame_bytes, uses_runtime_ptr, ins.payload, ins.extra),
             .@"if" => try op_control.emitIf(allocator, &buf, alloc, &pushed_vregs, &labels, spill_base_off, ins.extra),
             .@"else" => try op_control.emitElse(allocator, &buf, &pushed_vregs, &labels),
             .end => {
