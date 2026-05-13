@@ -802,6 +802,42 @@ pub fn emitEndIntra(
         }
     }
 
+    // D-093 (d-13) — implicit-else marshal (mirror of arm64).
+    // `(if (param T1..TK) (result T1..TK)) (then ...)` without
+    // `.else` validates per Wasm spec §3.4.4 (param == result).
+    // cond=0 path takes the implicit identity else; post-frame
+    // result is the original param. MOV top result_arity vregs
+    // into captured param_top_vregs slots BEFORE the target so
+    // cond=1 path executes the MOVs and cond=0's Jcc skips them.
+    if (lbl.kind == .if_then and lbl.param_arity > 0 and !lbl.merge_captured) {
+        if (lbl.param_arity != lbl.result_arity) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:implicit-else-arity-mismatch", 0);
+        const arity: u32 = lbl.result_arity;
+        if (pushed_vregs.items.len < arity) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:implicit-else-short-stack", 0);
+        const top_base = pushed_vregs.items.len - arity;
+        var i: u32 = 0;
+        while (i < arity) : (i += 1) {
+            const src_vreg = pushed_vregs.items[top_base + i];
+            const dst_vreg = lbl.param_top_vregs[i];
+            if (alloc.shapeTag(dst_vreg) == .v128) {
+                const src_x = try gpr.resolveXmm(alloc, src_vreg);
+                const dst_x = try gpr.resolveXmm(alloc, dst_vreg);
+                if (dst_x != src_x) {
+                    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, src_x).slice());
+                }
+            } else {
+                const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
+                const dst_r = try gpr.gprDefSpilled(alloc, dst_vreg, 1);
+                if (dst_r != src_r) {
+                    try buf.appendSlice(allocator, inst.encMovRR(.q, dst_r, src_r).slice());
+                }
+                try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, dst_vreg, 1);
+            }
+        }
+        var j: u32 = 0;
+        while (j < arity) : (j += 1) {
+            pushed_vregs.items[top_base + j] = lbl.param_top_vregs[j];
+        }
+    }
     const target: u32 = @intCast(buf.items.len);
     // Patch the if-then's skip-Jcc if it's still pending (no
     // `else` was encountered).

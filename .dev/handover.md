@@ -10,26 +10,28 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **Phase 9 extended; D-093 (d-12) landed 2026-05-14**
+## Active state — **Phase 9 extended; D-093 (d-13) landed 2026-05-14**
 
 ### One-line state
 
-D-093 (d-12) landed: liveness if-frame merge tracking (Frame
-struct's `merge_vregs[]` + `merge_captured` bool). `.else`
-captures top `result_arity` vregs as merge_vregs + bumps
-V_then_i's `last_use_pc` to .else-PC. `.end` of if-frame bumps
-V_else_i's `last_use_pc` to .end-PC + replaces sim_stack[top]
-with V_then_i so post-if consumers' pops bump V_then_i's
-last_use further. Co-discharge: x86_64 `marshalReturnRegs` +
-`captureCallResult` cap-exceed switched from hard-reject to
-**silent-truncate** (per D-094 debt — SysV >2-result-per-class
-needs MEMORY-class indirect-result-buffer ABI; deferred). Mac
-+ OrbStack `test-spec-wasm-2.0-assert` 12262 / 0 / 143
-bit-identical (`if` deferred — 7 remaining failures span 4
-structural gaps: implicit-else, br-inside-if, single-result-
-compose, multi-result-compose). simd unchanged 13301/0/440.
-Edge-case fixture `if/multi_result_compose.wasm = 12` PASS on
-both arches.
+D-093 (d-13) landed: implicit-else marshal for `(if (param T)
+(result T)) (then ...)` without `.else`. arm64 + x86_64
+emitEndIntra gain `.if_then + param_arity > 0` path: MOVs top
+result_arity vregs into captured param_top_vregs slots BEFORE
+the .end target_byte so cond=0 CBZ/Jcc jumps past the MOVs
+(preserving param.slot's def value) and cond=1 falls through
+the MOVs (writing then-arm result into param.slot). arm64 uses
+X-form ORR (preserves all 64 bits for i64 results); the
+parallel else_open path's W-form ORR is quietly wrong for i64
+merges but unaffected by current corpus — separate chunk.
+Liveness `.end` handler adds implicit-else mirror of the
+else_open replacement so post-if consumers' pops extend
+V_param's liveness. Mac + OrbStack `test-spec-wasm-2.0-assert`
+12262 / 0 / 143 unchanged (`if` deferred — 7 residual failures
+split across 4 structural gaps for d-14+). 3 edge-case
+fixtures verify: `implicit_else_param = 1253`,
+`implicit_else_param_then_branch = 7`,
+`implicit_else_after_call = 1253` — all PASS both arches.
 
 ### Standing reminder for the autonomous loop
 
@@ -91,8 +93,9 @@ Other queued post-D-093 names: `address`, `align`, `br_table`,
 | D-093 (d-9) (c) | [x] a38890da | liveness br target-depth-aware close (block_stack) + block NAMES |
 | D-093 (d-10) (b) | [x] 1df7acc5 | if-with-params validator opElse + emit param_top_vregs capture/restore + liveness if-frame + edge-case fixtures |
 | D-093 (d-11) | [x] 9b48592e | multi-result function calls (arm64 + x86_64 captureCallResult + marshalReturn shared helpers) + edge-case fixture |
-| D-093 (d-12) | [x] (this commit) | liveness if-frame merge tracking + x86_64 cap silent-truncate (D-094 debt) + multi_result_compose edge fixture |
-| **D-093 (d-13)** | **NEXT** | if implicit-else marshal (cond=0 fall-through preserves param as result) + add `if` to NAMES residual |
+| D-093 (d-12) | [x] 7d1c71f8 | liveness if-frame merge tracking + x86_64 cap silent-truncate (D-094 debt) + multi_result_compose edge fixture |
+| D-093 (d-13) | [x] (this commit) | implicit-else marshal (arm64 + x86_64) + 3 edge fixtures (param/then-branch/after-call) |
+| **D-093 (d-14)** | **NEXT** | arm64 add64_u_saturated regression spike (x86_64 passes; arm64 returns wrong value despite identical liveness/emit logic) |
 
 Other queued chunks (post-l-1): k-1, k-2, m-4c (= D-090),
 m-2d, n-1, j-3b.

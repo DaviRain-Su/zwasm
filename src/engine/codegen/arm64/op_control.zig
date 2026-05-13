@@ -769,6 +769,58 @@ pub fn emitEndIntra(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
             }
         }
     }
+    // D-093 (d-13) — implicit-else marshal. `(if (param T1..TK)
+    // (result T1..TK)) (then ...)` without an `.else` validates
+    // per Wasm spec §3.4.4 (params == results required). The
+    // cond=0 path takes an implicit identity else; the
+    // post-frame result is the original param. To honour this
+    // at runtime: MOV the then-body's top `result_arity` vregs
+    // into the captured `param_top_vregs` slots BEFORE the
+    // target_byte. cond=1 path falls through the MOVs (writing
+    // V_param.slot with the new value); cond=0 path's CBZ
+    // jumps to `target_byte` AFTER the MOVs (V_param.slot still
+    // has its def value).
+    if (lbl.kind == .if_then and lbl.param_arity > 0 and !lbl.merge_captured) {
+        if (lbl.param_arity != lbl.result_arity) return Error.UnsupportedOp;
+        const arity: u32 = lbl.result_arity;
+        if (ctx.pushed_vregs.items.len < arity) return Error.UnsupportedOp;
+        const top_base = ctx.pushed_vregs.items.len - arity;
+        var i: u32 = 0;
+        while (i < arity) : (i += 1) {
+            const src_vreg = ctx.pushed_vregs.items[top_base + i];
+            const dst_vreg = lbl.param_top_vregs[i];
+            if (ctx.alloc.shapeTag(dst_vreg) == .v128) {
+                const src_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 1);
+                const dst_v = try gpr.qDefSpilled(ctx.alloc, dst_vreg, 0);
+                if (dst_v != src_v) {
+                    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(dst_v, src_v));
+                }
+                try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, dst_vreg, 0);
+            } else {
+                // X-form (.q) ORR — preserves all 64 bits. W-form
+                // (.d) would truncate upper 32 bits on i64 vregs;
+                // for i32 the upper bits are don't-care so X-form
+                // is safe for both. (Pre-d-13 the else_open merge
+                // path uses W-form throughout — that's load-bearing
+                // for i32 corpus but quietly wrong for i64. Fixing
+                // the symmetric else_open bug is a separate chunk;
+                // implicit-else here uses X-form so add64_u_*
+                // returns its full i64 value.)
+                const src_r = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 1);
+                const dst_r = try gpr.gprDefSpilled(ctx.alloc, dst_vreg, 0);
+                if (dst_r != src_r) {
+                    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(dst_r, 31, src_r));
+                }
+                try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, dst_vreg, 0);
+            }
+        }
+        // Replace top arity vregs with param_top_vregs so post-if
+        // consumers read the canonical merged slot.
+        var j: u32 = 0;
+        while (j < arity) : (j += 1) {
+            ctx.pushed_vregs.items[top_base + j] = lbl.param_top_vregs[j];
+        }
+    }
     const target_byte: u32 = @intCast(ctx.buf.items.len);
     // Patch the if-then's skip-CBZ if it's still pending (no
     // `else` was encountered).

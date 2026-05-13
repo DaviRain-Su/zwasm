@@ -82,12 +82,14 @@ NAMES=(
   loop
   local_tee
   # NOTE: `if` deferred — 7 residual failures across 4 structural
-  # gaps (compose-of-2 single-result if, implicit-else with
-  # if-param, br-inside-if-arm with param, multi-result if +
-  # compose). d-12 landed the if-frame liveness merge tracking
-  # (fixes `as-binary-operands` / `as-mixed-operands` multi-
-  # result cases); remaining gaps are tracked as d-13+ with
-  # per-gap edge-case fixtures pending.
+  # gaps: (1) compose-of-2 single-result if (as-compare-operand
+  # 0,0 / 1,0); (2) multi-result if compose (as-compare-operands
+  # 0); (3) br-inside-if-arm (param-break / params-break); (4)
+  # arm64-specific add64_u_saturated regression vs x86_64 (the
+  # x86_64 implicit-else handler works; arm64 needs investigation
+  # — runtime debug per `extended_challenge.md` Step 4 spike).
+  # d-13 lands the implicit-else marshal foundation; per-gap
+  # fixes split into d-14+.
 )
 
 mkdir -p "$DEST"

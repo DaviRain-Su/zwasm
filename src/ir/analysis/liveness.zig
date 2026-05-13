@@ -710,6 +710,23 @@ pub fn compute(
                             sim_stack[base + i] = fr.merge_vregs[i];
                         }
                     }
+                } else if (fr.is_if and !fr.merge_captured and fr.param_arity > 0 and fr.result_arity > 0) {
+                    // D-093 (d-13) — implicit-else (no `.else`).
+                    // Canonical post-if vreg is `param_vregs[i]`
+                    // (Wasm spec §3.4.4 requires param == result
+                    // for valid implicit-else). Bump then-body
+                    // result vregs' last_use_pc and replace
+                    // sim_stack with param_vregs so the post-if
+                    // consumer pops the canonical vreg, extending
+                    // its liveness.
+                    if (sim_len >= @as(usize, fr.result_arity)) {
+                        const base = sim_len - @as(usize, fr.result_arity);
+                        var i: u32 = 0;
+                        while (i < fr.result_arity) : (i += 1) {
+                            ranges.items[sim_stack[base + i]].last_use_pc = pc;
+                            sim_stack[base + i] = fr.param_vregs[i];
+                        }
+                    }
                 }
                 block_stack_len -= 1;
             }
