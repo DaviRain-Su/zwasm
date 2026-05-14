@@ -10,56 +10,55 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **Phase 9 extended; D-093 (d-36) invoke-action distillation + start enabled 2026-05-15**
+## Active state — **Phase 9 extended; D-093 (d-37) elem enabled via cross-module-imports skip-adr 2026-05-15**
 
 ### One-line state
 
-D-093 (d-36) introduces a new manifest directive
-`invoke-action FN ARGS` for bare `(invoke …)` actions
-(previously SKIPped at distillation), plus the runner
-plumbing — DirectiveKind extension, classifyDirective arm,
-`handle_invoke_action` callback + dispatch in runCorpus,
-nonSimdRunInvokeAction reusing dispatchVoidResult's shape
-ladder. Bare-action traps are PASS per Wasm spec semantics
-(no assertion to violate); start-fn traps at instantiation
-return new `error.SkipModule` so the base loop tallies SKIP
-+ `module_bad`. `start` re-enabled in NAMES — start.wast's
-$main side-effects (3× `(call $inc)`) now run and post-
-`(invoke "inc")` `(invoke "get")` asserts see the
-incremented memory. spec_assert 14393/0/386 → 14404/0/392
-(+11 PASS, 0 FAIL, +1 manifest); simd 13301/0/440
-unchanged.
+D-093 (d-37) unblocks `elem` in NAMES via three coordinated
+mechanisms: (1) runner-base helper `hasUnbindableImports`
+parses imports + pre-filters modules whose imports the spec
+runner cannot bind (non-`spectest` modules + `spectest`
+table/memory/global imports — all Track-D scope) to
+SKIP-CROSS-MODULE-IMPORTS; (2) distiller emits
+`skip-adr-cross-module-action` for `(invoke $module FN …)`
+assertions targeting registered modules the runner doesn't
+model; (3) engine `evalConstScalarRaw` gains `0xD2 ref.func
+funcidx` for funcref-global init exprs (Wasm 2.0 §5.4.3).
+spec_assert 14404/0/392 → 14413/0/465 (+9 PASS, 0 FAIL,
++73 SKIP, +1 manifest); simd 13301/0/440 unchanged.
 
 ### Standing reminder for the autonomous loop
 
 **Project tone is `.claude/rules/no_workaround.md`: fix root
 causes, never work around.**
 
-### Next task — d-37 elem skip-adr cross-module-imports mechanism
+### Next task — d-38 probe remaining wast names + close out §9.9-l-1b
 
-Active `now` debts (post-d-36):
+Active `now` debts (post-d-37):
 - D-093 (parent), D-095 (regalloc partial).
 - D-104 fully discharged at d-33.
-- D-106 fully discharged (d-35 + d-36 close the start corpus
-  cleanly — the previously-quoted "1× StackTypeMismatch
-  sub-fixture" from the d-35 probe disappeared after the
-  d-36 invoke-action plumbing landed and the wg-2.0 pin
-  flushed the offending sub-fixture).
-- D-103: blocked-by D-079.
-- D-102/D-105/D-079: cross-module-imports family (Phase 10+
-  Instance-aware refactor).
+- D-106 fully discharged at d-35 + d-36.
+- D-103: discharged effectively at d-37 (elem now lands as
+  SKIP-CROSS-MODULE-IMPORTS for the import-dependent
+  fixtures; the d-29 SEGV handler still load-bearing for
+  any remaining elem trap-asserts).
+- D-102/D-105/D-079: cross-module-imports family — still
+  the structural barrier for Track-D host binding; surface
+  remains SKIP under the d-37 pre-filter.
 
-- **d-37 NEXT** — `elem` NAMES re-enablement. Pre-d-36 probe
-  (with reftype reftype landed at d-33) showed 12 D-079
-  cross-module-imports FAILs blocking enablement. Discharge:
-  add a per-module skip-adr mechanism that recognises
-  cross-module function imports (any non-host import) at
-  manifest distillation OR at module-load time, emitting
-  `SKIP-CROSS-MODULE-IMPORTS` instead of FAIL for the
-  affected modules. Pattern mirrors the d-36
-  `error.SkipModule` path. After d-37, `elem` lands ~+22
-  PASS net (the 22 reftype fixtures unblocked by d-32/d-33).
-- **d-38+** — Instance-aware refactor (Phase 9 ↔ Phase 10
+- **d-38 NEXT** — survey remaining `<n>.wast` corpus names
+  not yet in NAMES. Candidates from the `private/wasm2-
+  completion-plan/` M-1 hygiene catalogue: `align`,
+  `br_table`, `data`, `endianness`, `globals` (sic
+  `global` already in), `imports`, `linking`, `select`,
+  `table`, etc. For each, probe individually + classify
+  failures (BadValType / cross-module / runner-shape-gap /
+  real codegen gap). The d-37 pre-filter + cross-module
+  action skip + d-36 invoke-action should already cover the
+  Track-D-blocked majority; remaining FAILs are likely
+  per-name codegen sub-tasks worth their own chunks.
+- **d-39+** — anything d-38 surfaces.
+- **d-40+** — Instance-aware refactor (Phase 9 ↔ Phase 10
   transition prep per ADR-0061 alternatives).
 - **d-34** — re-enable `elem` in NAMES, verify post-d-32+d-33
   the FAIL count dropped from 34 (= 22 reftype-fixed + 12
@@ -129,8 +128,9 @@ Other queued post-D-093 names: `address`, `align`, `br_table`,
 | D-093 (d-33) | [x] 8e63d933 | D-104 part 2: reftype-class codegen plumbing — alias funcref/externref onto the i64 8-byte gpr-class scalar path per ADR-0061 across `op_globals.{get,set}`, function-entry param marshal, `local.{get,set,tee}`, and `op_call.zig::marshalCallArgs` on both archs. Edge fixture `funcref_externref_local_isnull.{wat,wasm,expect}` lands and JIT-executes end-to-end (i32:1) on Mac aarch64 + OrbStack x86_64. D-104 fully discharged. spec_assert 14399/0/385, simd 13301/0/440 unchanged. |
 | D-093 (d-34) | [x] 3694bc6d | wg-2.0 spec pin alignment per ADR-0061. OSS `WebAssembly/spec` clone checked out from `main` (wg-3.0) → `wg-2.0` tag; regen flushes residual 3.0 syntax from func / local_tee / loop / address manifests. `elem` re-enablement attempted-then-reverted (post-pin elem produces 12 D-079-family cross-module-imports FAILs). spec_assert 14399/0/385 → 14393/0/386 (-6 PASS lost are honest Wasm 3.0-out-of-scope assertions). simd 13301/0/440 unchanged. |
 | D-093 (d-35) | [x] 467e311b | D-106 SEGV → trap-stub wiring. `host_dispatch_base` (was `undefined` = 0xaa…aa) now points at a static stub table whose every slot is `hostImportTrapStub` (sets `trap_flag = 1`). `start.wast` modules with `(import …) (func $main (call $import_fn)) (start $main)` no longer SEGV at the JIT's host-dispatch trampoline LDR chain; the trap stub fires cleanly + propagates `Error.Trap`. `start` NOT yet added to NAMES (deferred to d-36). spec_assert 14393/0/386, simd 13301/0/440 unchanged. |
-| D-093 (d-36) | [x] (this commit) | invoke-action distillation + `start` enabled. Regen distiller emits `invoke-action FN ARGS` for bare-action commands; runner adds `DirectiveKind.invoke_action` + `handle_invoke_action` callback + dispatch. Bare-action traps are PASS per spec (no assertion to violate); unbound-import start-fn traps return `error.SkipModule` (new base-loop path) so they tally SKIP not FAIL. `start` lands. spec_assert 14393/0/386 → 14404/0/392 (+11 PASS, 0 FAIL, +1 manifest); simd unchanged. |
-| **D-093 (d-37)** | **NEXT** | `elem` NAMES re-enablement: per-module skip-adr mechanism for cross-module function imports (D-079 family); 12 fails currently blocked by missing host-import binding. |
+| D-093 (d-36) | [x] 9fc5b18a | invoke-action distillation + `start` enabled. Regen distiller emits `invoke-action FN ARGS` for bare-action commands; runner adds `DirectiveKind.invoke_action` + `handle_invoke_action` callback + dispatch. Bare-action traps are PASS per spec (no assertion to violate); unbound-import start-fn traps return `error.SkipModule` (new base-loop path) so they tally SKIP not FAIL. `start` lands. spec_assert 14393/0/386 → 14404/0/392 (+11 PASS, 0 FAIL, +1 manifest); simd unchanged. |
+| D-093 (d-37) | [x] (this commit) | `elem` NAMES enable via cross-module-imports skip-adr. New `hasUnbindableImports` helper pre-filters modules at the base loop's `.module` arm → SKIP-CROSS-MODULE-IMPORTS for any module importing non-spectest module names OR spectest tables/memories/globals. Distiller skips `action.module`-targeted assertions (registered-module dispatch is Track D). Engine adds `0xD2 ref.func` to `evalConstScalarRaw`. spec_assert 14404/0/392 → 14413/0/465 (+9 PASS, 0 FAIL, +73 SKIP, +1 manifest); simd unchanged. |
+| **D-093 (d-38)** | **NEXT** | Survey remaining `<n>.wast` corpus names not yet in NAMES (candidates from `private/wasm2-completion-plan/`); probe each + classify failures; chunk per-name as needed. |
 
 Other queued chunks (post-l-1): k-1, k-2, m-4c (= D-090),
 m-2d, n-1, j-3b.
