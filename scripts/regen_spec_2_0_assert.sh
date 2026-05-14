@@ -183,7 +183,15 @@ NAMES=(
   # `select` deferred — 4× call_indirect-context traps (D-NNN).
   # `ref_is_null` deferred — SEGV in funcref-elem/externref-elem
   # (reftype param/result ABI + table.get reftype; D-NNN).
-  # `memory_trap` deferred — 4× load OOB-check FAILs (D-NNN).
+  # d-41 enable: `memory_trap` — D-114 discharged. The 4× load
+  # FAILs were not load-bounds-check bugs; they were caused by a
+  # skipped `(assert_return (invoke "i64.store" 0xfff8 0))`
+  # zero-store + missing `(i32, i64)` / `(i32, f32)` / `(i32, f64)`
+  # assert_trap store shapes. Distiller's trap_supported /
+  # supported sets + the runner's dispatchVoidResult /
+  # nonSimdRunAssertTrap / invokeActionShape ladders all plumbed
+  # the three shapes end-to-end at d-41.
+  memory_trap
   # d-40 enable: `float_exprs` — D-116 discharged. The distiller's
   # `action_supported` shape set + the runner's `dispatchVoidResult`
   # / `invokeActionShape` ladders previously omitted `(i32, f32)` /
@@ -354,6 +362,10 @@ for c in d['commands']:
             # 0 16 32))`) that have no expected value.
             (('i32', 'f32'), 'void'), (('i32', 'f64'), 'void'),
             (('i32', 'i32', 'i32'), 'void'),
+            # d-41 (D-114): memory_trap.wast assert_return on
+            # `(invoke "i64.store" 0xfff8 0)` zero-store between
+            # the trap asserts and follow-up loads.
+            (('i32', 'i64'), 'void'),
             (('i64', 'f32', 'f64', 'i32', 'i32'), 'void'),
         }
         if (arg_kinds, result_kind) not in supported:
@@ -389,10 +401,13 @@ for c in d['commands']:
         # 0-arg + (i32) + (i64) + (i32,i32) + (f32) + (f64) shapes.
         # 2+-arg FP shapes still skip-impl until they surface in
         # a corpus that needs them.
+        # d-41 (D-114): extend with the `(i32, <T>)` store shapes
+        # memory_trap.wast traps at OOB addresses.
         trap_supported = {
             (), ('i32',), ('i64',), ('f32',), ('f64',),
             ('i32', 'i32'),
             ('i64', 'i64'),
+            ('i32', 'i64'), ('i32', 'f32'), ('i32', 'f64'),
         }
         arg_kinds = tuple(x['type'] for x in args)
         if any(x['type'] not in ('i32', 'i64', 'f32', 'f64') for x in args):

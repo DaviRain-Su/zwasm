@@ -21,11 +21,11 @@ skip-impl runner-shape-gap (i32 i64, i64) dispatch
 skip-impl runner-shape-gap (i32 i64, i64) dispatch
 skip-impl runner-shape-gap (i32 i64, i64) dispatch
 skip-impl runner-shape-gap (i32 i64, i64) dispatch
-skip-impl trap-shape-gap (i32 i64) dispatch
-skip-impl trap-shape-gap (i32 i64) dispatch
-skip-impl trap-shape-gap (i32 i64) dispatch
-skip-impl trap-shape-gap (i32 i64) dispatch
-skip-impl trap-shape-gap (i32 i64) dispatch
+assert_trap dispatch i32:0 i64:2
+assert_trap dispatch i32:15 i64:2
+assert_trap dispatch i32:32 i64:2
+assert_trap dispatch i32:4294967295 i64:2
+assert_trap dispatch i32:1213432423 i64:2
 assert_return dispatch-structural-i64 i32:5 -> i64:9
 assert_return dispatch-structural-i64 i32:12 -> i64:362880
 assert_return dispatch-structural-i64 i32:13 -> i64:55

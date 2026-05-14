@@ -171,6 +171,25 @@ pub fn callVoid_f32(
     if (rt.trap_flag != 0) return Error.Trap;
 }
 
+/// D-114 / d-41: `(i32, i64)` void-returning. Used by
+/// memory_trap.wast's `i64.store` / `i64.store8` / `i64.store16` /
+/// `i64.store32` exports (`(param i32) (param i64)` — addr + value);
+/// both the assert_return form (`(invoke "i64.store" 0xfff8 0)`) and
+/// the assert_trap form (`(invoke "i64.store" 0xfff9 …)`) need it.
+pub fn callVoid_i32i64(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u32,
+    a1: u64,
+) Error!void {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: u64) callconv(.c) void;
+    const f = module.entry(func_idx, Fn);
+    f(rt, a0, a1);
+    if (rt.trap_flag != 0) return Error.Trap;
+}
+
 /// D-116: `(i32, f32)` void-returning. Used by float_exprs.wast's
 /// `init` exports — `(func (param i32) (param f32) (f32.store ...))`
 /// — so the `(invoke "init" ...)` bare actions actually execute and

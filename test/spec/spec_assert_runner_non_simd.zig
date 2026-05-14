@@ -383,6 +383,18 @@ fn dispatchVoidResult(
         };
         return true;
     }
+    // D-114 / d-41: `(i32, i64)` — memory_trap.wast's `i64.store`
+    // exports (addr + value). Without this shape, the
+    // `(invoke "i64.store" 0xfff8 0)` zero-store between the trap
+    // asserts and follow-up loads is skipped; the loads then read
+    // the original "abcdefgh" data instead of 0.
+    if (args.len == 2 and args[0] == .i32 and args[1] == .i64) {
+        entry.callVoid_i32i64(compiled.module, func_idx, rt, args[0].i32, args[1].i64) catch |err| {
+            try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+            return false;
+        };
+        return true;
+    }
     // D-116: `(i32, f32)` and `(i32, f64)` — float_exprs.wast's
     // `init (param i32) (param f<32,64>)` exports invoked bare to
     // populate memory[i] = x. Without these shapes, the action
@@ -781,6 +793,31 @@ fn nonSimdRunAssertTrap(
             };
             break :blk false;
         }
+        // D-114 / d-41 — assert_trap shapes for store traps:
+        // memory_trap.wast traps `(invoke "i64.store" addr v)`,
+        // `f32.store`, `f64.store` at OOB addresses. Trap-result
+        // type is immaterial; reuse callVoid_* helpers (void
+        // function ABI is a superset of the JIT's emit assumption).
+        if (n_args == 2 and args[0] == .i32 and args[1] == .i64) {
+            entry.callVoid_i32i64(compiled.module, func_idx, &rt, args[0].i32, args[1].i64) catch |err| {
+                break :blk err == entry.Error.Trap;
+            };
+            break :blk false;
+        }
+        if (n_args == 2 and args[0] == .i32 and args[1] == .f32) {
+            const a1: f32 = @bitCast(args[1].f32);
+            entry.callVoid_i32f32(compiled.module, func_idx, &rt, args[0].i32, a1) catch |err| {
+                break :blk err == entry.Error.Trap;
+            };
+            break :blk false;
+        }
+        if (n_args == 2 and args[0] == .i32 and args[1] == .f64) {
+            const a1: f64 = @bitCast(args[1].f64);
+            entry.callVoid_i32f64(compiled.module, func_idx, &rt, args[0].i32, a1) catch |err| {
+                break :blk err == entry.Error.Trap;
+            };
+            break :blk false;
+        }
         try stdout.print("FAIL  {s}: assert_trap unsupported shape n_args={d} for {s}({s})\n", .{ name, n_args, fn_name, args_s });
         return false;
     };
@@ -885,6 +922,12 @@ fn invokeActionShape(
     }
     if (args.len == 2 and args[0] == .i32 and args[1] == .i32) {
         return entry.callVoid_i32i32(compiled.module, func_idx, rt, args[0].i32, args[1].i32);
+    }
+    // D-114 / d-41: `(i32, i64)` invoke-action — memory_trap-like
+    // stores via bare invoke (none in current corpus but plumbed
+    // alongside dispatchVoidResult / assert_trap for consistency).
+    if (args.len == 2 and args[0] == .i32 and args[1] == .i64) {
+        return entry.callVoid_i32i64(compiled.module, func_idx, rt, args[0].i32, args[1].i64);
     }
     // D-116: `(i32, f32)` / `(i32, f64)` / `(i32, i32, i32)` —
     // mirror the `dispatchVoidResult` shape ladder. float_exprs.wast
