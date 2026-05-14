@@ -10,44 +10,41 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **Phase 9 extended; D-093 (d-27) structural typeidx + NAMES +3 (call_indirect/func/func_ptrs) via D-111 discharge 2026-05-14**
+## Active state — **Phase 9 extended; D-093 (d-28) D-102 root cause = imports → reclassify blocked-by D-105 2026-05-14**
 
 ### One-line state
 
-D-093 (d-27) discharges D-111 (+ D-109 moot + D-110 cascade):
-new `canonical_type.zig` shared helper computes the canonical
-(lowest-index) typeidx for a given FuncType shape; emit's
-`emitCallIndirect` (both archs) substitutes `canonical[ins.payload]`
-for the runtime CMP immediate; runner's `applyTableInit` +
-`setupRuntime` write `canonical[func_typeidxs[fidx]]` into the
-table entry's stored typeidx. Bytewise compare now implements
-structural FuncType equivalence (Wasm spec §3.4.6 + §4.4.10.1).
-NAMES +3: `call_indirect` / `func` / `func_ptrs` all land clean.
-Both hosts at 14399/0/385 on `test-spec-wasm-2.0-assert` (was
-14119/0/292 post-d-26; +280 PASS, +3 manifests). simd 13301/0/440
-unchanged. edge fixture `p9/call_indirect/structural_duplicate`
-exercises the canonical case (= 36).
+D-093 (d-28) reclassifies D-102 to blocked-by D-105 (cross-
+module memory imports). d-21's hypothesis (passive segments)
+was wrong. d-28 stderr-diagnostic at `applyActiveDataSegments`
+proves the 19 `data.wast` module-load failures all root in
+imports: 15× memory imported → `current_mem_bytes=0`; 1× offset_
+expr `global.get $imp`; 4× `InvalidFunctype` at imports decoder.
+Corpus's 47 import-free modules contribute 0 incremental PASS
+(all-assert_trap filtered by dispatch ladder), so `data` NAMES
+deferred — full discharge requires Phase 10+. spec_assert
+14399/0/385 unchanged (no code change beyond regen-script
+comment). simd 13301/0/440 unchanged.
 
 ### Standing reminder for the autonomous loop
 
 **Project tone is `.claude/rules/no_workaround.md`: fix root
 causes, never work around.**
 
-### Next task — d-28 discharge candidate
+### Next task — d-29 discharge candidate
 
-Active debts (post-d-27):
-- D-102/D-103: data-init UnsupportedEntrySignature / elem-SEGV
-  (bulk segments family).
-- D-106 start-invoke SEGV (lldb trace needed for prologue load).
-- D-104/D-105: reftype + cross-module memory imports (Phase 10+).
+Active debts (post-d-28):
+- D-103 elem-SEGV (SIGSEGV-handler spike; multi-chunk).
+- D-106 start-invoke SEGV (lldb trace on prologue load).
+- D-102/D-104/D-105: blocked-by Phase 10+ (cross-module memory
+  imports + reftype runtime).
 
-- **d-28 NEXT** — D-102 (data.wast UnsupportedEntrySignature) is
-  the structurally simplest residual debt. Solo-enable `data`,
-  bisect the offending segment shape, identify whether the
-  rejection is at `applyActiveDataSegments` (bulk data segments
-  with passive/declarative kind not yet emitted) or at compile
-  (data.drop / memory.init lower path). D-103 (elem SEGV) is
-  next in line — needs SIGSEGV-handler spike per `debug_jit_auto`.
+- **d-29 NEXT** — D-103 (elem.wast SIGSEGV in JIT body). Per
+  ADR-0048 + `.claude/skills/debug_jit_auto/SKILL.md`, install
+  a SIGSEGV handler in `spec_assert_runner_base.zig` that maps
+  to `error.Trap` so `assert_trap` lines see the result. Then
+  bisect which elem.wast module crashes + identify the null-
+  deref root cause. Multi-chunk effort.
 
 Runner-side skip-impl backlog (7 total, in `nop / loop /
 local_tee`):
@@ -100,8 +97,9 @@ Other queued post-D-093 names: `address`, `align`, `br_table`,
 | D-093 (d-24) | [x] 4c4d7309 | D-099 discharged: emitLoop captures param_top_vregs + backward br/br_if/br_table emit param MOVs before back-branch; `fac` lands +6 PASS |
 | D-093 (d-25) | [x] ed05169b | D-101 discharged: max_args cap 64 → 128 (call.wast func[77] has 100-arg call); `call` lands +82 PASS |
 | D-093 (d-26) | [x] 1815e624 | D-108 discharged: i64/f32/f64 scalar `global.get/set` on both archs + edge fixtures (3 new). D-111 filed for call_indirect structural-typing. NAMES unchanged. |
-| D-093 (d-27) | [x] (this commit) | D-111 discharged: `canonical_type.zig` + emit/runner canonicalization. NAMES +3 (call_indirect/func/func_ptrs); 14119/0/292 → 14399/0/385 (+280 PASS, +3 manifests). Cascade discharge: D-109 moot, D-110. |
-| **D-093 (d-28)** | **NEXT** | discharge candidate: D-102 (data.wast UnsupportedEntrySignature) |
+| D-093 (d-27) | [x] 77ef4a06 | D-111 discharged: `canonical_type.zig` + emit/runner canonicalization. NAMES +3 (call_indirect/func/func_ptrs); 14119/0/292 → 14399/0/385 (+280 PASS, +3 manifests). Cascade discharge: D-109 moot, D-110. |
+| D-093 (d-28) | [x] (this commit) | D-102 reclassified blocked-by D-105: stderr-diagnostic proves 19 `data.wast` module-load failures are all import-dependent (15× imported memory; 1× imported-global const-expr; 4× InvalidFunctype on import shape). `data` NAMES deferred. No code change beyond regen-script comment. spec_assert 14399/0/385 unchanged. |
+| **D-093 (d-29)** | **NEXT** | discharge candidate: D-103 (elem.wast SIGSEGV) — install SIGSEGV handler in spec_assert_runner_base per ADR-0048. |
 
 Other queued chunks (post-l-1): k-1, k-2, m-4c (= D-090),
 m-2d, n-1, j-3b.

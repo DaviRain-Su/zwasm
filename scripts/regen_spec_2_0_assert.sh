@@ -155,6 +155,17 @@ NAMES=(
   # d-27 probe: D-110 func_ptrs.wast callt/callu 7 trap-asserts —
   # hypothesised as cascade from D-111.
   func_ptrs
+  # d-28: `data` deferred. Probe found 19 module-load failures
+  # are all import-dependent: 15× `applyActiveDataSegments`
+  # rejects (memory imported → `current_mem_bytes=0`; or
+  # offset_expr uses `global.get $imp` which our 3-byte LEB
+  # const-expr decoder rejects) + 4× `InvalidFunctype` at the
+  # imports decoder. D-102 reclassified blocked-by D-105 (cross-
+  # module memory/global imports; Phase 10+ scope). The
+  # corpus's 47 import-free modules contribute 0 incremental
+  # PASS (they're all assert_trap and the dispatch ladder
+  # already filters out the runtime shapes) — enabling `data`
+  # would land 19 FAIL + 0 useful coverage. Defer.
 )
 
 mkdir -p "$DEST"
