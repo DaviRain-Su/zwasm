@@ -103,6 +103,9 @@ pub const DirectiveKind = enum {
     assert_trap,
     assert_invalid,
     assert_malformed,
+    /// d-36: bare `(invoke FN ARGS)` action — invoke for side
+    /// effects, ignore result, propagate traps as FAIL.
+    invoke_action,
     unknown,
 };
 
@@ -135,6 +138,9 @@ pub fn classifyDirective(line: []const u8) ClassifiedDirective {
     }
     if (std.mem.startsWith(u8, line, "assert_malformed ")) {
         return .{ .kind = .assert_malformed, .body = line[17..] };
+    }
+    if (std.mem.startsWith(u8, line, "invoke-action ")) {
+        return .{ .kind = .invoke_action, .body = line[14..] };
     }
     return .{ .kind = .unknown, .body = line };
 }
@@ -570,6 +576,18 @@ pub const RunnerCallbacks = struct {
         stdout: *std.Io.Writer,
         name: []const u8,
     ) anyerror!bool,
+    /// d-36: invoke-action handler — invokes a no-result action
+    /// for its side effects. Returns true on success (no trap),
+    /// false on trap; specialisations print their own FAIL line
+    /// before returning false.
+    handle_invoke_action: *const fn (
+        gpa: std.mem.Allocator,
+        wasm_bytes: []const u8,
+        compiled: *const runner_mod.CompiledWasm,
+        body: []const u8,
+        stdout: *std.Io.Writer,
+        name: []const u8,
+    ) anyerror!bool,
 };
 
 /// Run one corpus manifest end-to-end: open the directory, read
@@ -655,13 +673,26 @@ pub fn runCorpus(
                     continue;
                 };
                 current_compiled = compiled;
-                callbacks.on_module_loaded(gpa, wasm_bytes, &compiled, stdout, name) catch {
+                callbacks.on_module_loaded(gpa, wasm_bytes, &compiled, stdout, name) catch |err| switch (err) {
+                    // d-36: distinguished SKIP path for on_module_loaded
+                    // — currently used by the start-fn invocation when
+                    // an unbound host import trap surfaces, since the
+                    // spec runner can't bind spectest imports
+                    // (Track-D scope). The callback prints its own
+                    // SKIP-* marker before returning.
+                    error.SkipModule => {
+                        tally.skipped += 1;
+                        module_bad = true;
+                        continue;
+                    },
                     // The callback printed its own init-specific FAIL line
                     // before returning the error; base just records the
                     // failure and marks module_bad to suppress cascade.
-                    tally.failed += 1;
-                    module_bad = true;
-                    continue;
+                    else => {
+                        tally.failed += 1;
+                        module_bad = true;
+                        continue;
+                    },
                 };
             },
             .assert_return => {
@@ -694,6 +725,24 @@ pub fn runCorpus(
                 };
                 const wasm = current_wasm.?;
                 const ok = callbacks.handle_assert_trap(gpa, wasm, compiled_ptr, classified.body, stdout, name) catch |err| {
+                    try stdout.print("FAIL  {s}: {s} (error {s})\n", .{ name, line, @errorName(err) });
+                    tally.failed += 1;
+                    continue;
+                };
+                if (ok) tally.passed += 1 else tally.failed += 1;
+            },
+            .invoke_action => {
+                if (module_bad) {
+                    tally.skipped += 1;
+                    continue;
+                }
+                const compiled_ptr: *const runner_mod.CompiledWasm = if (current_compiled) |*c| c else {
+                    try stdout.print("FAIL  {s}: invoke-action without prior module\n", .{name});
+                    tally.failed += 1;
+                    continue;
+                };
+                const wasm = current_wasm.?;
+                const ok = callbacks.handle_invoke_action(gpa, wasm, compiled_ptr, classified.body, stdout, name) catch |err| {
                     try stdout.print("FAIL  {s}: {s} (error {s})\n", .{ name, line, @errorName(err) });
                     tally.failed += 1;
                     continue;

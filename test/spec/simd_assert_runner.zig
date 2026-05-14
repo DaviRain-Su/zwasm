@@ -164,7 +164,23 @@ const simd_callbacks: base.RunnerCallbacks = .{
     .on_module_loaded = simdOnModuleLoaded,
     .handle_assert_return = runAssertReturn,
     .handle_assert_trap = runAssertTrap,
+    // d-36: SIMD corpora don't emit `invoke-action` lines today;
+    // surface a FAIL if one ever appears so the gap is discoverable
+    // instead of silently swallowed.
+    .handle_invoke_action = simdRunInvokeAction,
 };
+
+fn simdRunInvokeAction(
+    _: std.mem.Allocator,
+    _: []const u8,
+    _: *const runner_mod.CompiledWasm,
+    rest: []const u8,
+    stdout: *std.Io.Writer,
+    name: []const u8,
+) anyerror!bool {
+    try stdout.print("FAIL  {s}: invoke-action not implemented for SIMD runner ({s})\n", .{ name, rest });
+    return false;
+}
 
 // Scalar token parsers moved to spec_assert_runner_base.zig per
 // ADR-0057. Re-exported here as local aliases so the body of this

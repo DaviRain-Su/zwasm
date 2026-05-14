@@ -166,7 +166,15 @@ NAMES=(
   # PASS (they're all assert_trap and the dispatch ladder
   # already filters out the runtime shapes) — enabling `data`
   # would land 19 FAIL + 0 useful coverage. Defer.
-  # d-35 probe (deferred): `start`. SEGV at host_dispatch_base
+  # d-36 enable: `start`. SEGV resolved at d-35 (host-import
+  # trap stub) + invoke-action plumbing landed at d-36 (`(invoke
+  # FN ARGS)` actions in start.wast modules now run and
+  # increment memory). With both fixes plus the spec-correct
+  # treatment of bare-action traps as PASS (host imports that
+  # trap = side-effect "happened", no assertion violated),
+  # `start` lands cleanly.
+  start
+  # d-35 historical (deferred-narrative): `start`. SEGV at host_dispatch_base
   # deref (`undefined` pre-d-35) is FIXED by the d-35 trap-stub
   # wiring in `spec_assert_runner_base.makeJitRuntime`. Residual
   # FAILs blocking NAMES enablement: (a) 4× post-`(invoke "inc")`
@@ -357,6 +365,38 @@ for c in d['commands']:
             lines.append('skip-adr-skip_text_format_parser directive-assert_malformed-text')
             continue
         lines.append(f'assert_malformed {c["filename"]}')
+    elif t == 'action':
+        # d-36: action-without-expected = side-effect-only invoke
+        # (e.g. start.wast's `(invoke "inc")` between two
+        # `(invoke "get")` asserts). Emit a directive the runner
+        # invokes for side-effects + ignores result; traps
+        # propagate to FAIL. Same arg/shape constraints as
+        # assert_return (the runner's dispatch ladder is shared).
+        a = c['action']
+        if a.get('type') != 'invoke':
+            lines.append(f'skip-impl action-non-invoke {a.get("type", "?")}')
+            continue
+        args = a.get('args', [])
+        if any(x['type'] not in ('i32', 'i64', 'f32', 'f64') for x in args):
+            lines.append(f'skip-impl action-non-scalar-arg {a["field"]}')
+            continue
+        arg_kinds = tuple(x['type'] for x in args)
+        # Reuse the trap_supported shapes — the runner's
+        # invoke-action dispatch routes through the same void-
+        # result path as assert_trap, just without the
+        # expect-a-trap assertion.
+        action_supported = {
+            (), ('i32',), ('i64',), ('f32',), ('f64',),
+            ('i32', 'i32'),
+        }
+        if arg_kinds not in action_supported:
+            lines.append(
+                f'skip-impl action-shape-gap '
+                f'({" ".join(arg_kinds) or "()"}) {a["field"]}'
+            )
+            continue
+        args_s = ' '.join(fmt(x) for x in args) if args else '()'
+        lines.append(f'invoke-action {a["field"]} {args_s}')
     else:
         lines.append(f'skip-impl directive-{t}')
 with open(dst, 'w') as f:

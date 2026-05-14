@@ -2,7 +2,7 @@ module func_ptrs.0.wasm
 assert_return one () -> i32:13
 assert_return two i32:13 -> i32:14
 assert_return three i32:13 -> i32:11
-skip-impl directive-action
+invoke-action four i32:83
 assert_invalid func_ptrs.1.wasm
 assert_invalid func_ptrs.2.wasm
 assert_invalid func_ptrs.3.wasm
