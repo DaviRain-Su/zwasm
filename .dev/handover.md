@@ -10,55 +10,59 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **Phase 9 extended; D-093 (d-31) Wasm 3.0 scope hygiene + debt re-classification per ADR-0061 2026-05-14**
+## Active state — **Phase 9 extended; D-093 (d-32) D-104 part 1 readValType reftype parse-layer 2026-05-14**
 
 ### One-line state
 
-D-093 (d-31) lands per `private/wasm2-completion-plan/`'s M-1
-hygiene: drop the 4 `--enable-{function-references, tail-call,
-extended-const, multi-memory}` flags from
-`scripts/regen_spec_2_0_assert.sh` (wabt default-on already
-matches Wasm 2.0). ADR-0061 codifies the Wasm 3.0 deferral
-policy across tool / corpus / reference-clones layers.
-**Debt re-classification**: D-104 (`global.{0,50}.wasm`
-BadValType) flipped `blocked-by Phase 10+ reftype runtime` →
-`now`; pre-d-31 narrative cited "D-075 reftype umbrella" but
-D-075 is actually about the ADR-0025 Zig library facade,
-unrelated to reftype. D-103's barrier likewise corrected to
-`blocked-by: D-104 discharge + D-079` (the actual barriers
-for full `elem` enablement). spec_assert 14399/0/385
-unchanged. simd 13301/0/440 unchanged.
+D-093 (d-32) discharges D-104 part 1: `parse/sections.zig::
+readValType` now accepts the Wasm 2.0 §5.3.1 reftype byte
+encodings (0x70 funcref / 0x6F externref). The function is the
+central type-slot decoder traversed by functype params/results,
+globaltype, imported globaltype, and code-section local decls,
+so the two new switch arms unlock reftype parse acceptance
+across every section simultaneously. 6 new + 1 updated unit
+tests; existing `decodeCodes: rejects bad valtype` sentinel
+flipped 0x6F → 0x5F. Edge fixture deferred to d-33 (end-to-end
+exercise needs reftype-class codegen plumbing — `local.get
+funcref`, `op_globals` reftype, call-arg marshal all still
+UnsupportedOp pre-d-33); rationale in
+`private/notes/p9-edge-case-rationale.md`. spec_assert
+14399/0/385, simd 13301/0/440 — both unchanged.
 
 ### Standing reminder for the autonomous loop
 
 **Project tone is `.claude/rules/no_workaround.md`: fix root
 causes, never work around.**
 
-### Next task — d-32 readValType reftype parse-layer
+### Next task — d-33 op_globals reftype + reftype-class codegen plumbing
 
-Active `now` debts (post-d-31):
-- D-093 (parent), D-095 (regalloc partial), D-104 (reftype
-  parse-layer + op_globals reftype = d-32 + d-33 plan),
-  D-106 (start-fn invoke SEGV).
-- D-103: blocked-by D-104 + D-079 (re-classified d-31).
+Active `now` debts (post-d-32):
+- D-093 (parent), D-095 (regalloc partial), D-104 (parse-layer
+  done; codegen plumbing = d-33), D-106 (start-fn invoke SEGV).
+- D-103: blocked-by D-104 + D-079.
 - D-102/D-105/D-079: cross-module-imports family (Phase 10+
   Instance-aware refactor — REPORT d-36+).
 
-- **d-32 NEXT** — D-104 part 1: `parse/sections.zig::readValType`
-  2-byte extension. Currently accepts only numeric valtypes
-  (i32/i64/f32/f64 + v128). Reftype encoding per Wasm 2.0 spec
-  §5.3.1: `0x70 = funcref`, `0x6F = externref`. Add the two
-  cases + edge fixture under `test/edge_cases/p9/global_reftype/`
-  exercising `(global externref) (ref.null extern)` →
-  `ref.is_null` returns i32:1. Compile-only at d-32 (the actual
-  `op_globals.zig` reftype dispatch is d-33). After d-32, the
-  parse-layer barrier for the 22 elem reftype + 2 global
-  reftype + reftype-select fixtures dissolves.
-
-- **d-33** — D-104 part 2: `op_globals.zig` reftype-class
-  dispatch (funcref/externref get/set; scalar 8-byte slot
-  shape, same as i64) on arm64 + x86_64. `select-typed`
-  reftype path (`select extra` carries valtype byte).
+- **d-33 NEXT** — D-104 part 2: reftype-class codegen plumbing.
+  Three sites currently return `Error.UnsupportedOp` for
+  funcref/externref:
+  - `arm64/op_globals.zig` lines 60, 73 + `x86_64/op_globals.zig`
+    lines 62, 83 — global.get/set reftype dispatch (scalar
+    8-byte slot, same shape as i64 per handover narrative).
+  - `arm64/op_call.zig:306-309` + x86_64 mirror — call-arg
+    marshal for reftype params (treat as gpr class, AAPCS64 §6.4
+    / SysV §3.2.3 integer class — already handled in
+    `captureCallResult` line 376).
+  - `arm64/emit.zig` (search `local.get type .* unsupported`) +
+    x86_64 mirror — `local.get` / `local.set` / `local.tee` for
+    reftype locals (i64-shaped slot).
+  - `select-typed` reftype path (`select extra` carries valtype
+    byte — validator already accepts).
+  After d-33, the d-32-deferred edge fixture under
+  `test/edge_cases/p9/global_reftype/funcref_externref_local_
+  isnull.{wat,wasm,expect}` lands; see
+  `private/notes/p9-edge-case-rationale.md` for the deferred
+  fixture spec.
 - **d-34** — re-enable `elem` in NAMES, verify post-d-32+d-33
   the FAIL count dropped from 34 (= 22 reftype-fixed + 12
   remaining D-079).
@@ -122,8 +126,9 @@ Other queued post-D-093 names: `address`, `align`, `br_table`,
 | D-093 (d-28) | [x] fda102aa | D-102 reclassified blocked-by D-105: stderr-diagnostic proves 19 `data.wast` module-load failures are all import-dependent (15× imported memory; 1× imported-global const-expr; 4× InvalidFunctype on import shape). `data` NAMES deferred. No code change beyond regen-script comment. spec_assert 14399/0/385 unchanged. |
 | D-093 (d-29) | [x] d5a25a1b | D-103 part (a): SIGSEGV / SIGBUS recovery installed in `spec_assert_runner_base` (`sigsetjmp` / `siglongjmp` via libc; `__sigsetjmp` on Linux, `sigsetjmp` on Mac) + inline-armed in `nonSimdRunAssertTrap` dispatch ladder + 2 unit tests + handler install in non_simd runner main. NAMES unchanged. |
 | D-093 (d-30) | [x] 5aa141bc | D-103 parts (a)+(b) close. Handler IS load-bearing (handler-removed probe aborts at `callI32NoArgs:55` null deref). Bisect identified 2 SEGV-recovery cases: elem.75 + elem.76 `init ()` trap-asserts. D-103 (c) optional per Wasm spec §A.2. NAMES unchanged. |
-| D-093 (d-31) | [x] (this commit) | M-1 scope hygiene per `private/wasm2-completion-plan/` + ADR-0061. Drop 4 Wasm 3.0 `--enable-*` flags from `wast2json` invocation in `regen_spec_2_0_assert.sh`. `.dev/reference_clones.md` `wg-2.0` pin note. **Debt re-classification**: D-104 `blocked-by Phase 10+ reftype` → `now` (pre-d-31 narrative cited D-075 as reftype umbrella; D-075 is actually about ADR-0025 Zig library facade — broken alias). D-103 barrier corrected to `D-104 discharge + D-079`. `p9_simd_status.sh` awk fix to surface `now (annotation)` rows (D-106 was being missed). spec_assert 14399/0/385 unchanged. |
-| **D-093 (d-32)** | **NEXT** | D-104 part 1: `parse/sections.zig::readValType` accepts `0x70 = funcref` / `0x6F = externref` per Wasm 2.0 spec §5.3.1; edge fixture under `test/edge_cases/p9/global_reftype/`. Compile-only (op_globals reftype = d-33). |
+| D-093 (d-31) | [x] b92fa06c | M-1 scope hygiene per `private/wasm2-completion-plan/` + ADR-0061. Drop 4 Wasm 3.0 `--enable-*` flags from `wast2json` invocation in `regen_spec_2_0_assert.sh`. `.dev/reference_clones.md` `wg-2.0` pin note. **Debt re-classification**: D-104 `blocked-by Phase 10+ reftype` → `now` (pre-d-31 narrative cited D-075 as reftype umbrella; D-075 is actually about ADR-0025 Zig library facade — broken alias). D-103 barrier corrected to `D-104 discharge + D-079`. `p9_simd_status.sh` awk fix to surface `now (annotation)` rows (D-106 was being missed). spec_assert 14399/0/385 unchanged. |
+| D-093 (d-32) | [x] cfaf6623 | D-104 part 1: `parse/sections.zig::readValType` accepts `0x70 = funcref` / `0x6F = externref` per Wasm 2.0 §5.3.1; 6 new + 1 updated unit tests cover decodeTypes/decodeCodes/decodeGlobals reftype acceptance. Edge fixture deferred to d-33 (local.get / op_globals / call-arg marshal still UnsupportedOp pre-d-33). spec_assert 14399/0/385, simd 13301/0/440 unchanged. |
+| **D-093 (d-33)** | **NEXT** | D-104 part 2: reftype-class codegen plumbing — `op_globals.{get,set}` reftype dispatch (both archs), `op_call.zig::marshalCallArgs` reftype param, `local.{get,set,tee}` reftype, `select-typed` reftype. Lands deferred edge fixture under `test/edge_cases/p9/global_reftype/`. |
 
 Other queued chunks (post-l-1): k-1, k-2, m-4c (= D-090),
 m-2d, n-1, j-3b.
