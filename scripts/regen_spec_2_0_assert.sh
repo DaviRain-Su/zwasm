@@ -184,16 +184,16 @@ NAMES=(
   # `ref_is_null` deferred — SEGV in funcref-elem/externref-elem
   # (reftype param/result ABI + table.get reftype; D-NNN).
   # `memory_trap` deferred — 4× load OOB-check FAILs (D-NNN).
-  # `float_exprs` deferred — d-39 discharged the FP-select FCSEL
-  # half of D-115 (validator now collects per-untyped-select valtype
-  # bytes; lower populates `ZirInstr.extra`; emit routes FCSEL S/D
-  # on arm64 + op_alu_float.emitFpSelect on x86_64). Trial-enable
-  # probe showed +619 PASS but 22 residual FAILs are a separate
-  # bug class: multi-action modules where `(assert_return (invoke
-  # "write" ...))` followed by `(assert_return (invoke "read" ...))`
-  # sees memory cleared between invokes (every FAIL is a `check` /
-  # `f*.load` returning 0). Memory-persistence-across-invokes is
-  # D-116; NAMES enable waits for that.
+  # d-40 enable: `float_exprs` — D-116 discharged. The distiller's
+  # `action_supported` shape set + the runner's `dispatchVoidResult`
+  # / `invokeActionShape` ladders previously omitted `(i32, f32)` /
+  # `(i32, f64)` / `(i32, i32, i32)`. Bare `(invoke "init" 0 15.1)`
+  # etc. were therefore distilled as `skip-impl action-shape-gap`
+  # and never executed; the follow-up `(assert_return (invoke
+  # "check" ...))` then read 0 from never-initialised memory.
+  # d-40 plumbs the missing shapes end-to-end (entry.zig new
+  # helpers + runner ladder + distiller set), and float_exprs lands.
+  float_exprs
   # d-37 enable: `elem`. Reftype parse + codegen plumbing (d-32,
   # d-33) covered the BadValType class; cross-module + spectest-
   # host-state imports (12 fails at the d-34 probe baseline) are
@@ -349,6 +349,11 @@ for c in d['commands']:
             (('i32',), 'void'), (('i64',), 'void'),
             (('f32',), 'void'), (('f64',), 'void'),
             (('i32', 'i32'), 'void'),
+            # D-116: float_exprs.wast assert_returns on void-returning
+            # actions (`(assert_return (invoke "f<32,64>.simple_x4_sum"
+            # 0 16 32))`) that have no expected value.
+            (('i32', 'f32'), 'void'), (('i32', 'f64'), 'void'),
+            (('i32', 'i32', 'i32'), 'void'),
             (('i64', 'f32', 'f64', 'i32', 'i32'), 'void'),
         }
         if (arg_kinds, result_kind) not in supported:
@@ -433,9 +438,14 @@ for c in d['commands']:
         # invoke-action dispatch routes through the same void-
         # result path as assert_trap, just without the
         # expect-a-trap assertion.
+        # D-116: extend to cover float_exprs.wast's `init` (i32, f<32,64>)
+        # and `f<32,64>.simple_x4_sum` (i32, i32, i32). Both are
+        # bare-invoke actions that populate memory for subsequent
+        # `(assert_return (invoke "check"/"f*.load" ...))` reads.
         action_supported = {
             (), ('i32',), ('i64',), ('f32',), ('f64',),
-            ('i32', 'i32'),
+            ('i32', 'i32'), ('i32', 'f32'), ('i32', 'f64'),
+            ('i32', 'i32', 'i32'),
         }
         if arg_kinds not in action_supported:
             lines.append(

@@ -383,6 +383,38 @@ fn dispatchVoidResult(
         };
         return true;
     }
+    // D-116: `(i32, f32)` and `(i32, f64)` — float_exprs.wast's
+    // `init (param i32) (param f<32,64>)` exports invoked bare to
+    // populate memory[i] = x. Without these shapes, the action
+    // skipped (distiller side); follow-up assert_return checks
+    // read 0 from the never-initialised memory cell.
+    if (args.len == 2 and args[0] == .i32 and args[1] == .f32) {
+        const a1: f32 = @bitCast(args[1].f32);
+        entry.callVoid_i32f32(compiled.module, func_idx, rt, args[0].i32, a1) catch |err| {
+            try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+            return false;
+        };
+        return true;
+    }
+    if (args.len == 2 and args[0] == .i32 and args[1] == .f64) {
+        const a1: f64 = @bitCast(args[1].f64);
+        entry.callVoid_i32f64(compiled.module, func_idx, rt, args[0].i32, a1) catch |err| {
+            try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+            return false;
+        };
+        return true;
+    }
+    // D-116: `(i32, i32, i32)` — float_exprs.wast's
+    // `f<32,64>.simple_x4_sum (param i32 i32 i32)` exports
+    // (i / j / k offsets); bare-invoked to fold sum into memory[k]
+    // for the subsequent `(invoke "f<32,64>.load" k)` to read.
+    if (args.len == 3 and args[0] == .i32 and args[1] == .i32 and args[2] == .i32) {
+        entry.callVoid_i32i32i32(compiled.module, func_idx, rt, args[0].i32, args[1].i32, args[2].i32) catch |err| {
+            try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+            return false;
+        };
+        return true;
+    }
     if (args.len == 5 and args[0] == .i64 and args[1] == .f32 and args[2] == .f64 and args[3] == .i32 and args[4] == .i32) {
         const a1: f32 = @bitCast(args[1].f32);
         const a2: f64 = @bitCast(args[2].f64);
@@ -853,6 +885,20 @@ fn invokeActionShape(
     }
     if (args.len == 2 and args[0] == .i32 and args[1] == .i32) {
         return entry.callVoid_i32i32(compiled.module, func_idx, rt, args[0].i32, args[1].i32);
+    }
+    // D-116: `(i32, f32)` / `(i32, f64)` / `(i32, i32, i32)` —
+    // mirror the `dispatchVoidResult` shape ladder. float_exprs.wast
+    // memory-init patterns hit these.
+    if (args.len == 2 and args[0] == .i32 and args[1] == .f32) {
+        const a1: f32 = @bitCast(args[1].f32);
+        return entry.callVoid_i32f32(compiled.module, func_idx, rt, args[0].i32, a1);
+    }
+    if (args.len == 2 and args[0] == .i32 and args[1] == .f64) {
+        const a1: f64 = @bitCast(args[1].f64);
+        return entry.callVoid_i32f64(compiled.module, func_idx, rt, args[0].i32, a1);
+    }
+    if (args.len == 3 and args[0] == .i32 and args[1] == .i32 and args[2] == .i32) {
+        return entry.callVoid_i32i32i32(compiled.module, func_idx, rt, args[0].i32, args[1].i32, args[2].i32);
     }
     return error.ShapeNotSupported;
 }

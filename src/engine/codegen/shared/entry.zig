@@ -171,6 +171,60 @@ pub fn callVoid_f32(
     if (rt.trap_flag != 0) return Error.Trap;
 }
 
+/// D-116: `(i32, f32)` void-returning. Used by float_exprs.wast's
+/// `init` exports — `(func (param i32) (param f32) (f32.store ...))`
+/// — so the `(invoke "init" ...)` bare actions actually execute and
+/// leave their f32 in linear memory for subsequent `(invoke "check"
+/// ...)` reads.
+pub fn callVoid_i32f32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u32,
+    a1: f32,
+) Error!void {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: f32) callconv(.c) void;
+    const f = module.entry(func_idx, Fn);
+    f(rt, a0, a1);
+    if (rt.trap_flag != 0) return Error.Trap;
+}
+
+/// D-116: `(i32, f64)` void-returning. f64 sibling of the
+/// `callVoid_i32f32` shape used by float_exprs.wast's f64-typed
+/// `init` exports.
+pub fn callVoid_i32f64(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u32,
+    a1: f64,
+) Error!void {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: f64) callconv(.c) void;
+    const f = module.entry(func_idx, Fn);
+    f(rt, a0, a1);
+    if (rt.trap_flag != 0) return Error.Trap;
+}
+
+/// D-116: `(i32, i32, i32)` void-returning. Used by float_exprs.wast's
+/// `f<32,64>.simple_x4_sum` exports (`(param i32) (param i32) (param
+/// i32)` — i / j / k offset triple).
+pub fn callVoid_i32i32i32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u32,
+    a1: u32,
+    a2: u32,
+) Error!void {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: u32, a2: u32) callconv(.c) void;
+    const f = module.entry(func_idx, Fn);
+    f(rt, a0, a1, a2);
+    if (rt.trap_flag != 0) return Error.Trap;
+}
+
 /// 5-arg helpers for the `(i64 f32 f64 i32 i32)` family that
 /// covers the upstream `local_get`/`local_set` mixed-type
 /// fixtures (`type-mixed`, `read`, `write`). Per AAPCS64 / SysV

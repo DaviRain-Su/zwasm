@@ -1,0 +1,927 @@
+module float_exprs.0.wasm
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_contraction
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_contraction
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_contraction
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_contraction
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_contraction
+module float_exprs.1.wasm
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_fma
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_fma
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_fma
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_fma
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_fma
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_fma
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_fma
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_fma
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_fma
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_fma
+module float_exprs.2.wasm
+assert_return f32.no_fold_add_zero f32:2147483648 -> f32:0
+assert_return f64.no_fold_add_zero f64:9223372036854775808 -> f64:0
+assert_return f32.no_fold_add_zero f32:2141192192 -> f32:nan:arithmetic
+assert_return f64.no_fold_add_zero f64:9219994337134247936 -> f64:nan:arithmetic
+module float_exprs.3.wasm
+assert_return f32.no_fold_zero_sub f32:0 -> f32:0
+assert_return f64.no_fold_zero_sub f64:0 -> f64:0
+assert_return f32.no_fold_zero_sub f32:2141192192 -> f32:nan:arithmetic
+assert_return f64.no_fold_zero_sub f64:9219994337134247936 -> f64:nan:arithmetic
+module float_exprs.4.wasm
+assert_return f32.no_fold_sub_zero f32:2141192192 -> f32:nan:arithmetic
+assert_return f64.no_fold_sub_zero f64:9219994337134247936 -> f64:nan:arithmetic
+module float_exprs.5.wasm
+assert_return f32.no_fold_mul_zero f32:2147483648 -> f32:2147483648
+assert_return f32.no_fold_mul_zero f32:3212836864 -> f32:2147483648
+assert_return f32.no_fold_mul_zero f32:3221225472 -> f32:2147483648
+assert_return f32.no_fold_mul_zero f32:2141192192 -> f32:nan:arithmetic
+assert_return f64.no_fold_mul_zero f64:9223372036854775808 -> f64:9223372036854775808
+assert_return f64.no_fold_mul_zero f64:13830554455654793216 -> f64:9223372036854775808
+assert_return f64.no_fold_mul_zero f64:13835058055282163712 -> f64:9223372036854775808
+assert_return f64.no_fold_mul_zero f64:9219994337134247936 -> f64:nan:arithmetic
+module float_exprs.6.wasm
+assert_return f32.no_fold_mul_one f32:2141192192 -> f32:nan:arithmetic
+assert_return f64.no_fold_mul_one f64:9219994337134247936 -> f64:nan:arithmetic
+module float_exprs.7.wasm
+assert_return f32.no_fold_zero_div f32:0 -> f32:nan:canonical
+assert_return f32.no_fold_zero_div f32:2147483648 -> f32:nan:canonical
+assert_return f32.no_fold_zero_div f32:2143289344 -> f32:nan:canonical
+assert_return f32.no_fold_zero_div f32:2141192192 -> f32:nan:arithmetic
+assert_return f64.no_fold_zero_div f64:0 -> f64:nan:canonical
+assert_return f64.no_fold_zero_div f64:9223372036854775808 -> f64:nan:canonical
+assert_return f64.no_fold_zero_div f64:9221120237041090560 -> f64:nan:canonical
+assert_return f64.no_fold_zero_div f64:9219994337134247936 -> f64:nan:arithmetic
+module float_exprs.8.wasm
+assert_return f32.no_fold_div_one f32:2141192192 -> f32:nan:arithmetic
+assert_return f64.no_fold_div_one f64:9219994337134247936 -> f64:nan:arithmetic
+module float_exprs.9.wasm
+assert_return f32.no_fold_div_neg1 f32:2141192192 -> f32:nan:arithmetic
+assert_return f64.no_fold_div_neg1 f64:9219994337134247936 -> f64:nan:arithmetic
+module float_exprs.10.wasm
+assert_return f32.no_fold_neg0_sub f32:2141192192 -> f32:nan:arithmetic
+assert_return f64.no_fold_neg0_sub f64:9219994337134247936 -> f64:nan:arithmetic
+module float_exprs.11.wasm
+assert_return f32.no_fold_neg1_mul f32:2141192192 -> f32:nan:arithmetic
+assert_return f64.no_fold_neg1_mul f64:9219994337134247936 -> f64:nan:arithmetic
+module float_exprs.12.wasm
+assert_return f32.no_fold_eq_self f32:2143289344 -> i32:0
+assert_return f64.no_fold_eq_self f64:9221120237041090560 -> i32:0
+module float_exprs.13.wasm
+assert_return f32.no_fold_ne_self f32:2143289344 -> i32:1
+assert_return f64.no_fold_ne_self f64:9221120237041090560 -> i32:1
+module float_exprs.14.wasm
+assert_return f32.no_fold_sub_self f32:2139095040 -> f32:nan:canonical
+assert_return f32.no_fold_sub_self f32:2143289344 -> f32:nan:canonical
+assert_return f64.no_fold_sub_self f64:9218868437227405312 -> f64:nan:canonical
+assert_return f64.no_fold_sub_self f64:9221120237041090560 -> f64:nan:canonical
+module float_exprs.15.wasm
+assert_return f32.no_fold_div_self f32:2139095040 -> f32:nan:canonical
+assert_return f32.no_fold_div_self f32:2143289344 -> f32:nan:canonical
+assert_return f32.no_fold_div_self f32:0 -> f32:nan:canonical
+assert_return f32.no_fold_div_self f32:2147483648 -> f32:nan:canonical
+assert_return f64.no_fold_div_self f64:9218868437227405312 -> f64:nan:canonical
+assert_return f64.no_fold_div_self f64:9221120237041090560 -> f64:nan:canonical
+assert_return f64.no_fold_div_self f64:0 -> f64:nan:canonical
+assert_return f64.no_fold_div_self f64:9223372036854775808 -> f64:nan:canonical
+module float_exprs.16.wasm
+assert_return f32.no_fold_div_3 f32:3634023955 -> f32:3620628505
+assert_return f32.no_fold_div_3 f32:4000459555 -> f32:3986780695
+assert_return f32.no_fold_div_3 f32:2517965963 -> f32:2504446137
+assert_return f32.no_fold_div_3 f32:2173683100 -> f32:2160046629
+assert_return f32.no_fold_div_3 f32:2750097330 -> f32:2736571681
+assert_return f64.no_fold_div_3 f64:16679796490173820099 -> f64:16672802667330368301
+assert_return f64.no_fold_div_3 f64:13081777497422760306 -> f64:13074664638073319671
+assert_return f64.no_fold_div_3 f64:674365394458900388 -> f64:667250911628840899
+assert_return f64.no_fold_div_3 f64:18365700772251870524 -> f64:18358201936817915643
+assert_return f64.no_fold_div_3 f64:6476267216527259981 -> f64:6468791534604471399
+module float_exprs.17.wasm
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_factor
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_factor
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_factor
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_factor
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_factor
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_factor
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_factor
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_factor
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_factor
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_factor
+module float_exprs.18.wasm
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_distribute
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_distribute
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_distribute
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_distribute
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_distribute
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_distribute
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_distribute
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_distribute
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_distribute
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_distribute
+module float_exprs.19.wasm
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_regroup_div_mul
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_regroup_div_mul
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_regroup_div_mul
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_regroup_div_mul
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_regroup_div_mul
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_regroup_div_mul
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_regroup_div_mul
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_regroup_div_mul
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_regroup_div_mul
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_regroup_div_mul
+module float_exprs.20.wasm
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_regroup_mul_div
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_regroup_mul_div
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_regroup_mul_div
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_regroup_mul_div
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_regroup_mul_div
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_regroup_mul_div
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_regroup_mul_div
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_regroup_mul_div
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_regroup_mul_div
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_regroup_mul_div
+module float_exprs.21.wasm
+skip-impl runner-shape-gap (f32 f32 f32 f32, f32) f32.no_reassociate_add
+skip-impl runner-shape-gap (f32 f32 f32 f32, f32) f32.no_reassociate_add
+skip-impl runner-shape-gap (f32 f32 f32 f32, f32) f32.no_reassociate_add
+skip-impl runner-shape-gap (f32 f32 f32 f32, f32) f32.no_reassociate_add
+skip-impl runner-shape-gap (f32 f32 f32 f32, f32) f32.no_reassociate_add
+skip-impl runner-shape-gap (f64 f64 f64 f64, f64) f64.no_reassociate_add
+skip-impl runner-shape-gap (f64 f64 f64 f64, f64) f64.no_reassociate_add
+skip-impl runner-shape-gap (f64 f64 f64 f64, f64) f64.no_reassociate_add
+skip-impl runner-shape-gap (f64 f64 f64 f64, f64) f64.no_reassociate_add
+skip-impl runner-shape-gap (f64 f64 f64 f64, f64) f64.no_reassociate_add
+module float_exprs.22.wasm
+skip-impl runner-shape-gap (f32 f32 f32 f32, f32) f32.no_reassociate_mul
+skip-impl runner-shape-gap (f32 f32 f32 f32, f32) f32.no_reassociate_mul
+skip-impl runner-shape-gap (f32 f32 f32 f32, f32) f32.no_reassociate_mul
+skip-impl runner-shape-gap (f32 f32 f32 f32, f32) f32.no_reassociate_mul
+skip-impl runner-shape-gap (f32 f32 f32 f32, f32) f32.no_reassociate_mul
+skip-impl runner-shape-gap (f64 f64 f64 f64, f64) f64.no_reassociate_mul
+skip-impl runner-shape-gap (f64 f64 f64 f64, f64) f64.no_reassociate_mul
+skip-impl runner-shape-gap (f64 f64 f64 f64, f64) f64.no_reassociate_mul
+skip-impl runner-shape-gap (f64 f64 f64 f64, f64) f64.no_reassociate_mul
+skip-impl runner-shape-gap (f64 f64 f64 f64, f64) f64.no_reassociate_mul
+module float_exprs.23.wasm
+assert_return f32.no_fold_div_0 f32:1065353216 -> f32:2139095040
+assert_return f32.no_fold_div_0 f32:3212836864 -> f32:4286578688
+assert_return f32.no_fold_div_0 f32:2139095040 -> f32:2139095040
+assert_return f32.no_fold_div_0 f32:4286578688 -> f32:4286578688
+assert_return f32.no_fold_div_0 f32:0 -> f32:nan:canonical
+assert_return f32.no_fold_div_0 f32:2147483648 -> f32:nan:canonical
+assert_return f32.no_fold_div_0 f32:2141192192 -> f32:nan:arithmetic
+assert_return f32.no_fold_div_0 f32:2143289344 -> f32:nan:canonical
+assert_return f64.no_fold_div_0 f64:4607182418800017408 -> f64:9218868437227405312
+assert_return f64.no_fold_div_0 f64:13830554455654793216 -> f64:18442240474082181120
+assert_return f64.no_fold_div_0 f64:9218868437227405312 -> f64:9218868437227405312
+assert_return f64.no_fold_div_0 f64:18442240474082181120 -> f64:18442240474082181120
+assert_return f64.no_fold_div_0 f64:0 -> f64:nan:canonical
+assert_return f64.no_fold_div_0 f64:9223372036854775808 -> f64:nan:canonical
+assert_return f64.no_fold_div_0 f64:9221120237041090560 -> f64:nan:canonical
+assert_return f64.no_fold_div_0 f64:9219994337134247936 -> f64:nan:arithmetic
+module float_exprs.24.wasm
+assert_return f32.no_fold_div_neg0 f32:1065353216 -> f32:4286578688
+assert_return f32.no_fold_div_neg0 f32:3212836864 -> f32:2139095040
+assert_return f32.no_fold_div_neg0 f32:2139095040 -> f32:4286578688
+assert_return f32.no_fold_div_neg0 f32:4286578688 -> f32:2139095040
+assert_return f32.no_fold_div_neg0 f32:0 -> f32:nan:canonical
+assert_return f32.no_fold_div_neg0 f32:2147483648 -> f32:nan:canonical
+assert_return f32.no_fold_div_neg0 f32:2141192192 -> f32:nan:arithmetic
+assert_return f32.no_fold_div_neg0 f32:2143289344 -> f32:nan:canonical
+assert_return f64.no_fold_div_neg0 f64:4607182418800017408 -> f64:18442240474082181120
+assert_return f64.no_fold_div_neg0 f64:13830554455654793216 -> f64:9218868437227405312
+assert_return f64.no_fold_div_neg0 f64:9218868437227405312 -> f64:18442240474082181120
+assert_return f64.no_fold_div_neg0 f64:18442240474082181120 -> f64:9218868437227405312
+assert_return f64.no_fold_div_neg0 f64:0 -> f64:nan:canonical
+assert_return f64.no_fold_div_neg0 f64:9223372036854775808 -> f64:nan:canonical
+assert_return f64.no_fold_div_neg0 f64:9221120237041090560 -> f64:nan:canonical
+assert_return f64.no_fold_div_neg0 f64:9219994337134247936 -> f64:nan:arithmetic
+module float_exprs.25.wasm
+assert_return f32.no_fold_to_hypot f32:392264092 f32:497028527 -> f32:497028710
+assert_return f32.no_fold_to_hypot f32:2623653512 f32:2317012712 -> f32:476165425
+assert_return f32.no_fold_to_hypot f32:2261577829 f32:2641790518 -> f32:494307108
+assert_return f32.no_fold_to_hypot f32:3255678581 f32:1210720351 -> f32:1210720352
+assert_return f32.no_fold_to_hypot f32:432505039 f32:2618036612 -> f32:470544734
+assert_return f64.no_fold_to_hypot f64:1743351192697472785 f64:2202602366606243153 -> f64:2202599296765198670
+assert_return f64.no_fold_to_hypot f64:6389333765198869657 f64:15677343373020056630 -> f64:6453971336171062178
+assert_return f64.no_fold_to_hypot f64:2195337108264055819 f64:10384237061545402288 -> f64:2195504818343116800
+assert_return f64.no_fold_to_hypot f64:11486582223361829725 f64:1308532122426122043 -> f64:2263210186506929210
+assert_return f64.no_fold_to_hypot f64:1591440107418864392 f64:11515806374387309036 -> f64:2292434337532533215
+module float_exprs.26.wasm
+assert_return f32.no_approximate_reciprocal f32:3130294363 -> f32:3294406762
+assert_return f32.no_approximate_reciprocal f32:2138280080 -> f32:2204223
+assert_return f32.no_approximate_reciprocal f32:2434880051 -> f32:3989512051
+assert_return f32.no_approximate_reciprocal f32:1705936409 -> f32:423346609
+assert_return f32.no_approximate_reciprocal f32:2528120561 -> f32:3896123071
+module float_exprs.27.wasm
+assert_return f32.no_approximate_reciprocal_sqrt f32:708147349 -> f32:1243088746
+assert_return f32.no_approximate_reciprocal_sqrt f32:1005852643 -> f32:1094279611
+assert_return f32.no_approximate_reciprocal_sqrt f32:517799246 -> f32:1338168541
+assert_return f32.no_approximate_reciprocal_sqrt f32:704281251 -> f32:1245118689
+assert_return f32.no_approximate_reciprocal_sqrt f32:347001813 -> f32:1423641701
+assert_return f64.no_fuse_reciprocal_sqrt f64:8611259114887405475 -> f64:2604695339663988000
+assert_return f64.no_fuse_reciprocal_sqrt f64:6008428610859539631 -> f64:3906084647186679832
+assert_return f64.no_fuse_reciprocal_sqrt f64:5077495674931581012 -> f64:4371518865190387497
+assert_return f64.no_fuse_reciprocal_sqrt f64:7616219057857077123 -> f64:3102407657946187309
+assert_return f64.no_fuse_reciprocal_sqrt f64:5267858027841559467 -> f64:4276321761661248681
+module float_exprs.28.wasm
+assert_return f32.no_approximate_sqrt_reciprocal f32:1574069443 -> f32:810003811
+assert_return f32.no_approximate_sqrt_reciprocal f32:992487567 -> f32:1100869283
+assert_return f32.no_approximate_sqrt_reciprocal f32:1644769121 -> f32:774822585
+assert_return f32.no_approximate_sqrt_reciprocal f32:1180509736 -> f32:1007269771
+assert_return f32.no_approximate_sqrt_reciprocal f32:1940205041 -> f32:627137240
+module float_exprs.29.wasm
+assert_return i32.no_fold_f32_s i32:16777216 -> i32:16777216
+assert_return i32.no_fold_f32_s i32:16777217 -> i32:16777216
+assert_return i32.no_fold_f32_s i32:4026531856 -> i32:4026531856
+assert_return i32.no_fold_f32_u i32:16777216 -> i32:16777216
+assert_return i32.no_fold_f32_u i32:16777217 -> i32:16777216
+assert_return i32.no_fold_f32_u i32:4026531856 -> i32:4026531840
+assert_return i64.no_fold_f64_s i64:9007199254740992 -> i64:9007199254740992
+assert_return i64.no_fold_f64_s i64:9007199254740993 -> i64:9007199254740992
+assert_return i64.no_fold_f64_s i64:17293822569102705664 -> i64:17293822569102705664
+assert_return i64.no_fold_f64_u i64:9007199254740992 -> i64:9007199254740992
+assert_return i64.no_fold_f64_u i64:9007199254740993 -> i64:9007199254740992
+assert_return i64.no_fold_f64_u i64:17293822569102705664 -> i64:17293822569102704640
+module float_exprs.30.wasm
+assert_return f32.no_fold_add_sub f32:677030386 f32:2998136214 -> f32:677380096
+assert_return f32.no_fold_add_sub f32:3025420904 f32:913921807 -> f32:3025420912
+assert_return f32.no_fold_add_sub f32:3908960888 f32:4063404061 -> f32:3909091328
+assert_return f32.no_fold_add_sub f32:415467473 f32:602055819 -> f32:415236096
+assert_return f32.no_fold_add_sub f32:2307650739 f32:2511328013 -> f32:2315255808
+assert_return f64.no_fold_add_sub f64:9894695622864460712 f64:747900745977727688 -> f64:9894695622864404480
+assert_return f64.no_fold_add_sub f64:2152218683357821298 f64:2238360073507307376 -> f64:2152218683357790208
+assert_return f64.no_fold_add_sub f64:13697521605206502242 f64:13818850255013161909 -> f64:13697521605247238144
+assert_return f64.no_fold_add_sub f64:12298280617237492384 f64:3233965342858558382 -> f64:12298280617463775232
+assert_return f64.no_fold_add_sub f64:11043298296128683688 f64:11182857345495207592 -> f64:11043298296775835648
+module float_exprs.31.wasm
+assert_return f32.no_fold_sub_add f32:3291029084 f32:1137280182 -> f32:3291029085
+assert_return f32.no_fold_sub_add f32:2287045896 f32:272248696 -> f32:2287075328
+assert_return f32.no_fold_sub_add f32:1285466516 f32:1361849144 -> f32:1285466624
+assert_return f32.no_fold_sub_add f32:740009747 f32:2989707904 -> f32:740007936
+assert_return f32.no_fold_sub_add f32:1041827798 f32:3335914317 -> f32:1041891328
+assert_return f64.no_fold_sub_add f64:5758126085282503565 f64:14997141603873875659 -> f64:5758126085282503568
+assert_return f64.no_fold_sub_add f64:1609380455481879691 f64:1695875689930159213 -> f64:1609380455482130432
+assert_return f64.no_fold_sub_add f64:5738179408840599949 f64:15186085143903012996 -> f64:5738148875223433216
+assert_return f64.no_fold_sub_add f64:4492841470376833908 f64:13773869588765591068 -> f64:4492841470376837120
+assert_return f64.no_fold_sub_add f64:2955729038738127538 f64:12208627806665035010 -> f64:2955729038738127552
+module float_exprs.32.wasm
+assert_return f32.no_fold_mul_div f32:3672556237 f32:674649243 -> f32:3672556236
+assert_return f32.no_fold_mul_div f32:2995104604 f32:178524966 -> f32:2995104594
+assert_return f32.no_fold_mul_div f32:2817764014 f32:3620253920 -> f32:2817764013
+assert_return f32.no_fold_mul_div f32:1507152519 f32:3723483599 -> f32:1507152518
+assert_return f32.no_fold_mul_div f32:2442510077 f32:2906531411 -> f32:2442510079
+assert_return f64.no_fold_mul_div f64:10062123074470382106 f64:12910565991996555404 -> f64:10062123074470422078
+assert_return f64.no_fold_mul_div f64:6340937764684870564 f64:7244253720027059594 -> f64:6340937764684870565
+assert_return f64.no_fold_mul_div f64:14905228263410157971 f64:11346251643264732732 -> f64:14905228263410157970
+assert_return f64.no_fold_mul_div f64:3862352046163709780 f64:531112307488385734 -> f64:3862079437827029803
+assert_return f64.no_fold_mul_div f64:16807035693954817236 f64:12360222454864961326 -> f64:16807035693954817237
+module float_exprs.33.wasm
+assert_return f32.no_fold_div_mul f32:3538825650 f32:1315641462 -> f32:3538825649
+assert_return f32.no_fold_div_mul f32:2777664539 f32:3062588018 -> f32:2777664540
+assert_return f32.no_fold_div_mul f32:14863254 f32:3278582479 -> f32:14863367
+assert_return f32.no_fold_div_mul f32:2593594703 f32:3709508810 -> f32:2593594656
+assert_return f32.no_fold_div_mul f32:250394049 f32:1296755844 -> f32:250394050
+assert_return f64.no_fold_div_mul f64:665690489208775809 f64:14660005164454413124 -> f64:665690577722002880
+assert_return f64.no_fold_div_mul f64:10617267697387344269 f64:4370684778829606254 -> f64:10617267697387344270
+assert_return f64.no_fold_div_mul f64:13179336828827425934 f64:6536345148565138764 -> f64:13179336828827425933
+assert_return f64.no_fold_div_mul f64:12582623625647949669 f64:15106746174896642041 -> f64:12582623625647949668
+assert_return f64.no_fold_div_mul f64:16624217782795067216 f64:9062205521150975866 -> f64:16624217782795067215
+module float_exprs.34.wasm
+assert_return f32.no_fold_div2_mul2 f32:16777215 -> f32:16777216
+assert_return f64.no_fold_div2_mul2 f64:9007199254740991 -> f64:9007199254740992
+module float_exprs.35.wasm
+assert_return no_fold_demote_promote f64:13235495337234861917 -> f64:13235495326728585216
+assert_return no_fold_demote_promote f64:13448204151038380655 -> f64:13448204151146151936
+assert_return no_fold_demote_promote f64:5090364081358261697 -> f64:5090364081378951168
+assert_return no_fold_demote_promote f64:13436295269174285872 -> f64:13436295269301878784
+assert_return no_fold_demote_promote f64:5076240020598306430 -> f64:5076240020759642112
+module float_exprs.36.wasm
+assert_return no_fold_promote_demote f32:2141192192 -> f32:nan:arithmetic
+assert_return no_fold_promote_demote f32:0 -> f32:0
+assert_return no_fold_promote_demote f32:2147483648 -> f32:2147483648
+assert_return no_fold_promote_demote f32:1 -> f32:1
+assert_return no_fold_promote_demote f32:2147483649 -> f32:2147483649
+assert_return no_fold_promote_demote f32:8388607 -> f32:8388607
+assert_return no_fold_promote_demote f32:2155872255 -> f32:2155872255
+assert_return no_fold_promote_demote f32:8388608 -> f32:8388608
+assert_return no_fold_promote_demote f32:2155872256 -> f32:2155872256
+assert_return no_fold_promote_demote f32:2139095039 -> f32:2139095039
+assert_return no_fold_promote_demote f32:4286578687 -> f32:4286578687
+assert_return no_fold_promote_demote f32:2139095040 -> f32:2139095040
+assert_return no_fold_promote_demote f32:4286578688 -> f32:4286578688
+module float_exprs.37.wasm
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_add
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_add
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_add
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_add
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_add
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_add_commuted
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_add_commuted
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_add_commuted
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_add_commuted
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_add_commuted
+module float_exprs.38.wasm
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_sub
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_sub
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_sub
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_sub
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_sub
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_sub_commuted
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_sub_commuted
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_sub_commuted
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_sub_commuted
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_sub_commuted
+module float_exprs.39.wasm
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_mul
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_mul
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_mul
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_mul
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_mul
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_mul_commuted
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_mul_commuted
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_mul_commuted
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_mul_commuted
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_mul_commuted
+module float_exprs.40.wasm
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_div
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_div
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_div
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_div
+skip-impl runner-shape-gap (f64 f32, f32) no_demote_mixed_div
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_div_commuted
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_div_commuted
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_div_commuted
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_div_commuted
+skip-impl runner-shape-gap (f32 f64, f32) no_demote_mixed_div_commuted
+module float_exprs.41.wasm
+assert_return f32.i32.no_fold_trunc_s_convert_s f32:1069547520 -> f32:1065353216
+assert_return f32.i32.no_fold_trunc_s_convert_s f32:3217031168 -> f32:3212836864
+assert_return f32.i32.no_fold_trunc_u_convert_s f32:1069547520 -> f32:1065353216
+assert_return f32.i32.no_fold_trunc_u_convert_s f32:3204448256 -> f32:0
+assert_return f32.i32.no_fold_trunc_s_convert_u f32:1069547520 -> f32:1065353216
+assert_return f32.i32.no_fold_trunc_s_convert_u f32:3217031168 -> f32:1333788672
+assert_return f32.i32.no_fold_trunc_u_convert_u f32:1069547520 -> f32:1065353216
+assert_return f32.i32.no_fold_trunc_u_convert_u f32:3204448256 -> f32:0
+assert_return f64.i32.no_fold_trunc_s_convert_s f64:4609434218613702656 -> f64:4607182418800017408
+assert_return f64.i32.no_fold_trunc_s_convert_s f64:13832806255468478464 -> f64:13830554455654793216
+assert_return f64.i32.no_fold_trunc_u_convert_s f64:4609434218613702656 -> f64:4607182418800017408
+assert_return f64.i32.no_fold_trunc_u_convert_s f64:13826050856027422720 -> f64:0
+assert_return f64.i32.no_fold_trunc_s_convert_u f64:4609434218613702656 -> f64:4607182418800017408
+assert_return f64.i32.no_fold_trunc_s_convert_u f64:13832806255468478464 -> f64:4751297606873776128
+assert_return f64.i32.no_fold_trunc_u_convert_u f64:4609434218613702656 -> f64:4607182418800017408
+assert_return f64.i32.no_fold_trunc_u_convert_u f64:13826050856027422720 -> f64:0
+assert_return f32.i64.no_fold_trunc_s_convert_s f32:1069547520 -> f32:1065353216
+assert_return f32.i64.no_fold_trunc_s_convert_s f32:3217031168 -> f32:3212836864
+assert_return f32.i64.no_fold_trunc_u_convert_s f32:1069547520 -> f32:1065353216
+assert_return f32.i64.no_fold_trunc_u_convert_s f32:3204448256 -> f32:0
+assert_return f32.i64.no_fold_trunc_s_convert_u f32:1069547520 -> f32:1065353216
+assert_return f32.i64.no_fold_trunc_s_convert_u f32:3217031168 -> f32:1602224128
+assert_return f32.i64.no_fold_trunc_u_convert_u f32:1069547520 -> f32:1065353216
+assert_return f32.i64.no_fold_trunc_u_convert_u f32:3204448256 -> f32:0
+assert_return f64.i64.no_fold_trunc_s_convert_s f64:4609434218613702656 -> f64:4607182418800017408
+assert_return f64.i64.no_fold_trunc_s_convert_s f64:13832806255468478464 -> f64:13830554455654793216
+assert_return f64.i64.no_fold_trunc_u_convert_s f64:4609434218613702656 -> f64:4607182418800017408
+assert_return f64.i64.no_fold_trunc_u_convert_s f64:13826050856027422720 -> f64:0
+assert_return f64.i64.no_fold_trunc_s_convert_u f64:4609434218613702656 -> f64:4607182418800017408
+assert_return f64.i64.no_fold_trunc_s_convert_u f64:13832806255468478464 -> f64:4895412794951729152
+assert_return f64.i64.no_fold_trunc_u_convert_u f64:4609434218613702656 -> f64:4607182418800017408
+assert_return f64.i64.no_fold_trunc_u_convert_u f64:13826050856027422720 -> f64:0
+module float_exprs.42.wasm
+invoke-action init i32:0 f32:1097963930
+invoke-action init i32:4 f32:1098068787
+invoke-action init i32:8 f32:1098173645
+invoke-action init i32:12 f32:1098278502
+assert_return check i32:0 -> f32:1097963930
+assert_return check i32:4 -> f32:1098068787
+assert_return check i32:8 -> f32:1098173645
+assert_return check i32:12 -> f32:1098278502
+invoke-action run i32:16 f32:1077936128
+assert_return check i32:0 -> f32:1084297489
+assert_return check i32:4 -> f32:1084367394
+assert_return check i32:8 -> f32:1084437299
+assert_return check i32:12 -> f32:1084507204
+module float_exprs.43.wasm
+invoke-action init i32:0 f64:4624690162351420211
+invoke-action init i32:8 f64:4624746457346762342
+invoke-action init i32:16 f64:4624802752342104474
+invoke-action init i32:24 f64:4624859047337446605
+assert_return check i32:0 -> f64:4624690162351420211
+assert_return check i32:8 -> f64:4624746457346762342
+assert_return check i32:16 -> f64:4624802752342104474
+assert_return check i32:24 -> f64:4624859047337446605
+invoke-action run i32:32 f64:4613937818241073152
+assert_return check i32:0 -> f64:4617353047958495778
+assert_return check i32:8 -> f64:4617390577955390532
+assert_return check i32:16 -> f64:4617428107952285287
+assert_return check i32:24 -> f64:4617465637949180041
+module float_exprs.44.wasm
+assert_return f32.ult f32:1077936128 f32:1073741824 -> i32:0
+assert_return f32.ult f32:1073741824 f32:1073741824 -> i32:0
+assert_return f32.ult f32:1073741824 f32:1077936128 -> i32:1
+assert_return f32.ult f32:1073741824 f32:2143289344 -> i32:1
+assert_return f32.ule f32:1077936128 f32:1073741824 -> i32:0
+assert_return f32.ule f32:1073741824 f32:1073741824 -> i32:1
+assert_return f32.ule f32:1073741824 f32:1077936128 -> i32:1
+assert_return f32.ule f32:1073741824 f32:2143289344 -> i32:1
+assert_return f32.ugt f32:1077936128 f32:1073741824 -> i32:1
+assert_return f32.ugt f32:1073741824 f32:1073741824 -> i32:0
+assert_return f32.ugt f32:1073741824 f32:1077936128 -> i32:0
+assert_return f32.ugt f32:1073741824 f32:2143289344 -> i32:1
+assert_return f32.uge f32:1077936128 f32:1073741824 -> i32:1
+assert_return f32.uge f32:1073741824 f32:1073741824 -> i32:1
+assert_return f32.uge f32:1073741824 f32:1077936128 -> i32:0
+assert_return f32.uge f32:1073741824 f32:2143289344 -> i32:1
+assert_return f64.ult f64:4613937818241073152 f64:4611686018427387904 -> i32:0
+assert_return f64.ult f64:4611686018427387904 f64:4611686018427387904 -> i32:0
+assert_return f64.ult f64:4611686018427387904 f64:4613937818241073152 -> i32:1
+assert_return f64.ult f64:4611686018427387904 f64:9221120237041090560 -> i32:1
+assert_return f64.ule f64:4613937818241073152 f64:4611686018427387904 -> i32:0
+assert_return f64.ule f64:4611686018427387904 f64:4611686018427387904 -> i32:1
+assert_return f64.ule f64:4611686018427387904 f64:4613937818241073152 -> i32:1
+assert_return f64.ule f64:4611686018427387904 f64:9221120237041090560 -> i32:1
+assert_return f64.ugt f64:4613937818241073152 f64:4611686018427387904 -> i32:1
+assert_return f64.ugt f64:4611686018427387904 f64:4611686018427387904 -> i32:0
+assert_return f64.ugt f64:4611686018427387904 f64:4613937818241073152 -> i32:0
+assert_return f64.ugt f64:4611686018427387904 f64:9221120237041090560 -> i32:1
+assert_return f64.uge f64:4613937818241073152 f64:4611686018427387904 -> i32:1
+assert_return f64.uge f64:4611686018427387904 f64:4611686018427387904 -> i32:1
+assert_return f64.uge f64:4611686018427387904 f64:4613937818241073152 -> i32:0
+assert_return f64.uge f64:4611686018427387904 f64:9221120237041090560 -> i32:1
+module float_exprs.45.wasm
+assert_return f32.no_fold_lt_select f32:0 f32:2143289344 -> f32:2143289344
+assert_return f32.no_fold_lt_select f32:2143289344 f32:0 -> f32:0
+assert_return f32.no_fold_lt_select f32:0 f32:2147483648 -> f32:2147483648
+assert_return f32.no_fold_lt_select f32:2147483648 f32:0 -> f32:0
+assert_return f32.no_fold_le_select f32:0 f32:2143289344 -> f32:2143289344
+assert_return f32.no_fold_le_select f32:2143289344 f32:0 -> f32:0
+assert_return f32.no_fold_le_select f32:0 f32:2147483648 -> f32:0
+assert_return f32.no_fold_le_select f32:2147483648 f32:0 -> f32:2147483648
+assert_return f32.no_fold_gt_select f32:0 f32:2143289344 -> f32:2143289344
+assert_return f32.no_fold_gt_select f32:2143289344 f32:0 -> f32:0
+assert_return f32.no_fold_gt_select f32:0 f32:2147483648 -> f32:2147483648
+assert_return f32.no_fold_gt_select f32:2147483648 f32:0 -> f32:0
+assert_return f32.no_fold_ge_select f32:0 f32:2143289344 -> f32:2143289344
+assert_return f32.no_fold_ge_select f32:2143289344 f32:0 -> f32:0
+assert_return f32.no_fold_ge_select f32:0 f32:2147483648 -> f32:0
+assert_return f32.no_fold_ge_select f32:2147483648 f32:0 -> f32:2147483648
+assert_return f64.no_fold_lt_select f64:0 f64:9221120237041090560 -> f64:9221120237041090560
+assert_return f64.no_fold_lt_select f64:9221120237041090560 f64:0 -> f64:0
+assert_return f64.no_fold_lt_select f64:0 f64:9223372036854775808 -> f64:9223372036854775808
+assert_return f64.no_fold_lt_select f64:9223372036854775808 f64:0 -> f64:0
+assert_return f64.no_fold_le_select f64:0 f64:9221120237041090560 -> f64:9221120237041090560
+assert_return f64.no_fold_le_select f64:9221120237041090560 f64:0 -> f64:0
+assert_return f64.no_fold_le_select f64:0 f64:9223372036854775808 -> f64:0
+assert_return f64.no_fold_le_select f64:9223372036854775808 f64:0 -> f64:9223372036854775808
+assert_return f64.no_fold_gt_select f64:0 f64:9221120237041090560 -> f64:9221120237041090560
+assert_return f64.no_fold_gt_select f64:9221120237041090560 f64:0 -> f64:0
+assert_return f64.no_fold_gt_select f64:0 f64:9223372036854775808 -> f64:9223372036854775808
+assert_return f64.no_fold_gt_select f64:9223372036854775808 f64:0 -> f64:0
+assert_return f64.no_fold_ge_select f64:0 f64:9221120237041090560 -> f64:9221120237041090560
+assert_return f64.no_fold_ge_select f64:9221120237041090560 f64:0 -> f64:0
+assert_return f64.no_fold_ge_select f64:0 f64:9223372036854775808 -> f64:0
+assert_return f64.no_fold_ge_select f64:9223372036854775808 f64:0 -> f64:9223372036854775808
+module float_exprs.46.wasm
+assert_return f32.no_fold_lt_if f32:0 f32:2143289344 -> f32:2143289344
+assert_return f32.no_fold_lt_if f32:2143289344 f32:0 -> f32:0
+assert_return f32.no_fold_lt_if f32:0 f32:2147483648 -> f32:2147483648
+assert_return f32.no_fold_lt_if f32:2147483648 f32:0 -> f32:0
+assert_return f32.no_fold_le_if f32:0 f32:2143289344 -> f32:2143289344
+assert_return f32.no_fold_le_if f32:2143289344 f32:0 -> f32:0
+assert_return f32.no_fold_le_if f32:0 f32:2147483648 -> f32:0
+assert_return f32.no_fold_le_if f32:2147483648 f32:0 -> f32:2147483648
+assert_return f32.no_fold_gt_if f32:0 f32:2143289344 -> f32:2143289344
+assert_return f32.no_fold_gt_if f32:2143289344 f32:0 -> f32:0
+assert_return f32.no_fold_gt_if f32:0 f32:2147483648 -> f32:2147483648
+assert_return f32.no_fold_gt_if f32:2147483648 f32:0 -> f32:0
+assert_return f32.no_fold_ge_if f32:0 f32:2143289344 -> f32:2143289344
+assert_return f32.no_fold_ge_if f32:2143289344 f32:0 -> f32:0
+assert_return f32.no_fold_ge_if f32:0 f32:2147483648 -> f32:0
+assert_return f32.no_fold_ge_if f32:2147483648 f32:0 -> f32:2147483648
+assert_return f64.no_fold_lt_if f64:0 f64:9221120237041090560 -> f64:9221120237041090560
+assert_return f64.no_fold_lt_if f64:9221120237041090560 f64:0 -> f64:0
+assert_return f64.no_fold_lt_if f64:0 f64:9223372036854775808 -> f64:9223372036854775808
+assert_return f64.no_fold_lt_if f64:9223372036854775808 f64:0 -> f64:0
+assert_return f64.no_fold_le_if f64:0 f64:9221120237041090560 -> f64:9221120237041090560
+assert_return f64.no_fold_le_if f64:9221120237041090560 f64:0 -> f64:0
+assert_return f64.no_fold_le_if f64:0 f64:9223372036854775808 -> f64:0
+assert_return f64.no_fold_le_if f64:9223372036854775808 f64:0 -> f64:9223372036854775808
+assert_return f64.no_fold_gt_if f64:0 f64:9221120237041090560 -> f64:9221120237041090560
+assert_return f64.no_fold_gt_if f64:9221120237041090560 f64:0 -> f64:0
+assert_return f64.no_fold_gt_if f64:0 f64:9223372036854775808 -> f64:9223372036854775808
+assert_return f64.no_fold_gt_if f64:9223372036854775808 f64:0 -> f64:0
+assert_return f64.no_fold_ge_if f64:0 f64:9221120237041090560 -> f64:9221120237041090560
+assert_return f64.no_fold_ge_if f64:9221120237041090560 f64:0 -> f64:0
+assert_return f64.no_fold_ge_if f64:0 f64:9223372036854775808 -> f64:0
+assert_return f64.no_fold_ge_if f64:9223372036854775808 f64:0 -> f64:9223372036854775808
+module float_exprs.47.wasm
+assert_return f32.no_fold_lt_select_to_abs f32:2141192192 -> f32:2141192192
+assert_return f32.no_fold_lt_select_to_abs f32:4290772992 -> f32:4290772992
+assert_return f32.no_fold_lt_select_to_abs f32:0 -> f32:0
+assert_return f32.no_fold_lt_select_to_abs f32:2147483648 -> f32:2147483648
+assert_return f32.no_fold_le_select_to_abs f32:2141192192 -> f32:2141192192
+assert_return f32.no_fold_le_select_to_abs f32:4290772992 -> f32:4290772992
+assert_return f32.no_fold_le_select_to_abs f32:0 -> f32:2147483648
+assert_return f32.no_fold_le_select_to_abs f32:2147483648 -> f32:0
+assert_return f32.no_fold_gt_select_to_abs f32:2141192192 -> f32:4288675840
+assert_return f32.no_fold_gt_select_to_abs f32:4290772992 -> f32:2143289344
+assert_return f32.no_fold_gt_select_to_abs f32:0 -> f32:2147483648
+assert_return f32.no_fold_gt_select_to_abs f32:2147483648 -> f32:0
+assert_return f32.no_fold_ge_select_to_abs f32:2141192192 -> f32:4288675840
+assert_return f32.no_fold_ge_select_to_abs f32:4290772992 -> f32:2143289344
+assert_return f32.no_fold_ge_select_to_abs f32:0 -> f32:0
+assert_return f32.no_fold_ge_select_to_abs f32:2147483648 -> f32:2147483648
+assert_return f64.no_fold_lt_select_to_abs f64:9219994337134247936 -> f64:9219994337134247936
+assert_return f64.no_fold_lt_select_to_abs f64:18444492273895866368 -> f64:18444492273895866368
+assert_return f64.no_fold_lt_select_to_abs f64:0 -> f64:0
+assert_return f64.no_fold_lt_select_to_abs f64:9223372036854775808 -> f64:9223372036854775808
+assert_return f64.no_fold_le_select_to_abs f64:9219994337134247936 -> f64:9219994337134247936
+assert_return f64.no_fold_le_select_to_abs f64:18444492273895866368 -> f64:18444492273895866368
+assert_return f64.no_fold_le_select_to_abs f64:0 -> f64:9223372036854775808
+assert_return f64.no_fold_le_select_to_abs f64:9223372036854775808 -> f64:0
+assert_return f64.no_fold_gt_select_to_abs f64:9219994337134247936 -> f64:18443366373989023744
+assert_return f64.no_fold_gt_select_to_abs f64:18444492273895866368 -> f64:9221120237041090560
+assert_return f64.no_fold_gt_select_to_abs f64:0 -> f64:9223372036854775808
+assert_return f64.no_fold_gt_select_to_abs f64:9223372036854775808 -> f64:0
+assert_return f64.no_fold_ge_select_to_abs f64:9219994337134247936 -> f64:18443366373989023744
+assert_return f64.no_fold_ge_select_to_abs f64:18444492273895866368 -> f64:9221120237041090560
+assert_return f64.no_fold_ge_select_to_abs f64:0 -> f64:0
+assert_return f64.no_fold_ge_select_to_abs f64:9223372036854775808 -> f64:9223372036854775808
+module float_exprs.48.wasm
+assert_return f32.no_fold_lt_if_to_abs f32:2141192192 -> f32:2141192192
+assert_return f32.no_fold_lt_if_to_abs f32:4290772992 -> f32:4290772992
+assert_return f32.no_fold_lt_if_to_abs f32:0 -> f32:0
+assert_return f32.no_fold_lt_if_to_abs f32:2147483648 -> f32:2147483648
+assert_return f32.no_fold_le_if_to_abs f32:2141192192 -> f32:2141192192
+assert_return f32.no_fold_le_if_to_abs f32:4290772992 -> f32:4290772992
+assert_return f32.no_fold_le_if_to_abs f32:0 -> f32:2147483648
+assert_return f32.no_fold_le_if_to_abs f32:2147483648 -> f32:0
+assert_return f32.no_fold_gt_if_to_abs f32:2141192192 -> f32:4288675840
+assert_return f32.no_fold_gt_if_to_abs f32:4290772992 -> f32:2143289344
+assert_return f32.no_fold_gt_if_to_abs f32:0 -> f32:2147483648
+assert_return f32.no_fold_gt_if_to_abs f32:2147483648 -> f32:0
+assert_return f32.no_fold_ge_if_to_abs f32:2141192192 -> f32:4288675840
+assert_return f32.no_fold_ge_if_to_abs f32:4290772992 -> f32:2143289344
+assert_return f32.no_fold_ge_if_to_abs f32:0 -> f32:0
+assert_return f32.no_fold_ge_if_to_abs f32:2147483648 -> f32:2147483648
+assert_return f64.no_fold_lt_if_to_abs f64:9219994337134247936 -> f64:9219994337134247936
+assert_return f64.no_fold_lt_if_to_abs f64:18444492273895866368 -> f64:18444492273895866368
+assert_return f64.no_fold_lt_if_to_abs f64:0 -> f64:0
+assert_return f64.no_fold_lt_if_to_abs f64:9223372036854775808 -> f64:9223372036854775808
+assert_return f64.no_fold_le_if_to_abs f64:9219994337134247936 -> f64:9219994337134247936
+assert_return f64.no_fold_le_if_to_abs f64:18444492273895866368 -> f64:18444492273895866368
+assert_return f64.no_fold_le_if_to_abs f64:0 -> f64:9223372036854775808
+assert_return f64.no_fold_le_if_to_abs f64:9223372036854775808 -> f64:0
+assert_return f64.no_fold_gt_if_to_abs f64:9219994337134247936 -> f64:18443366373989023744
+assert_return f64.no_fold_gt_if_to_abs f64:18444492273895866368 -> f64:9221120237041090560
+assert_return f64.no_fold_gt_if_to_abs f64:0 -> f64:9223372036854775808
+assert_return f64.no_fold_gt_if_to_abs f64:9223372036854775808 -> f64:0
+assert_return f64.no_fold_ge_if_to_abs f64:9219994337134247936 -> f64:18443366373989023744
+assert_return f64.no_fold_ge_if_to_abs f64:18444492273895866368 -> f64:9221120237041090560
+assert_return f64.no_fold_ge_if_to_abs f64:0 -> f64:0
+assert_return f64.no_fold_ge_if_to_abs f64:9223372036854775808 -> f64:9223372036854775808
+module float_exprs.49.wasm
+assert_return f32.incorrect_correction () -> f32:872415232
+assert_return f64.incorrect_correction () -> f64:13596367275031527424
+module float_exprs.50.wasm
+assert_return calculate () -> f32:3286857379
+module float_exprs.51.wasm
+assert_return calculate () -> f64:13870293918930799763
+module float_exprs.52.wasm
+assert_return llvm_pr26746 f32:2147483648 -> f32:0
+module float_exprs.53.wasm
+assert_return llvm_pr27153 i32:33554434 -> f32:1270874112
+module float_exprs.54.wasm
+skip-impl runner-shape-gap (i32 i32, f32) llvm_pr27036
+module float_exprs.55.wasm
+skip-impl runner-shape-gap (f64 f64 f64 f64, f64) thepast0
+skip-impl runner-shape-gap (f64 f64 f64, f64) thepast1
+skip-impl runner-shape-gap (f32 f32 f32, f32) thepast2
+module float_exprs.56.wasm
+assert_return inverse f32:1119879168 -> f32:1009429163
+module float_exprs.57.wasm
+assert_return f32_sqrt_minus_2 f32:1082130432 -> f32:0
+assert_return f64_sqrt_minus_2 f64:4616189618054758400 -> f64:0
+module float_exprs.58.wasm
+assert_return f32.no_fold_recip_recip f32:3765723020 -> f32:3765723019
+assert_return f32.no_fold_recip_recip f32:426844452 -> f32:426844451
+assert_return f32.no_fold_recip_recip f32:535132276 -> f32:535132277
+assert_return f32.no_fold_recip_recip f32:3253941441 -> f32:3253941442
+assert_return f32.no_fold_recip_recip f32:1660734603 -> f32:1660734602
+assert_return f32.no_fold_recip_recip f32:2147483648 -> f32:2147483648
+assert_return f32.no_fold_recip_recip f32:0 -> f32:0
+assert_return f32.no_fold_recip_recip f32:4286578688 -> f32:4286578688
+assert_return f32.no_fold_recip_recip f32:2139095040 -> f32:2139095040
+assert_return f64.no_fold_recip_recip f64:14500888369201570768 -> f64:14500888369201570769
+assert_return f64.no_fold_recip_recip f64:14132092565459057123 -> f64:14132092565459057122
+assert_return f64.no_fold_recip_recip f64:5359183527603521526 -> f64:5359183527603521525
+assert_return f64.no_fold_recip_recip f64:1521566147669375634 -> f64:1521566147669375633
+assert_return f64.no_fold_recip_recip f64:8671785631545870379 -> f64:8671785631545870378
+assert_return f64.no_fold_recip_recip f64:9223372036854775808 -> f64:9223372036854775808
+assert_return f64.no_fold_recip_recip f64:0 -> f64:0
+assert_return f64.no_fold_recip_recip f64:18442240474082181120 -> f64:18442240474082181120
+assert_return f64.no_fold_recip_recip f64:9218868437227405312 -> f64:9218868437227405312
+module float_exprs.59.wasm
+assert_return f32.no_algebraic_factoring f32:2759308231 f32:618704988 -> f32:2315864577
+assert_return f32.no_algebraic_factoring f32:3415653214 f32:1274676302 -> f32:3625675853
+assert_return f32.no_algebraic_factoring f32:1446924633 f32:3607373982 -> f32:4000155759
+assert_return f32.no_algebraic_factoring f32:1212067608 f32:3278094810 -> f32:1359874131
+assert_return f32.no_algebraic_factoring f32:3278732464 f32:3379389272 -> f32:3546030359
+assert_return f64.no_algebraic_factoring f64:2467435761933928117 f64:2526113756828458004 -> f64:9668435399096543331
+assert_return f64.no_algebraic_factoring f64:2911983657790464931 f64:2814431682419759911 -> f64:1217162942843921803
+assert_return f64.no_algebraic_factoring f64:12131637044948792058 f64:12170782965730311956 -> f64:10511676135434922533
+assert_return f64.no_algebraic_factoring f64:14639789466354372633 f64:5456963169336729236 -> f64:15530333405173431543
+assert_return f64.no_algebraic_factoring f64:5121779675912507154 f64:14237286623175920791 -> f64:5636689734063865714
+module float_exprs.60.wasm
+assert_return f32.no_algebraic_factoring f32:684135946 f32:744319693 -> f32:2571075368
+assert_return f32.no_algebraic_factoring f32:3560929481 f32:3496840229 -> f32:1762604185
+assert_return f32.no_algebraic_factoring f32:968841772 f32:3106497100 -> f32:870712803
+assert_return f32.no_algebraic_factoring f32:697514723 f32:2834753933 -> f32:327914662
+assert_return f32.no_algebraic_factoring f32:1498230729 f32:3650453580 -> f32:4080583891
+assert_return f64.no_algebraic_factoring f64:6212515167506370409 f64:15348474890798978273 -> f64:7818515589337550196
+assert_return f64.no_algebraic_factoring f64:15222970140370015722 f64:15325207139996136125 -> f64:16819892485880140289
+assert_return f64.no_algebraic_factoring f64:4797439202963874050 f64:14009643534571442918 -> f64:4987747999326390045
+assert_return f64.no_algebraic_factoring f64:14653559129294038194 f64:14581996260169223461 -> f64:6253339631158964222
+assert_return f64.no_algebraic_factoring f64:12768321634751930140 f64:12767602092732820937 -> f64:2473652960990319032
+module float_exprs.61.wasm
+assert_return f32.simple_x4_sum i32:0 i32:16 i32:32 -> ()
+assert_return f32.load i32:32 -> f32:2
+assert_return f32.load i32:36 -> f32:0
+assert_return f32.load i32:40 -> f32:1
+assert_return f32.load i32:44 -> f32:2147483649
+module float_exprs.62.wasm
+assert_return f64.simple_x4_sum i32:0 i32:32 i32:64 -> ()
+assert_return f64.load i32:64 -> f64:2
+assert_return f64.load i32:72 -> f64:0
+assert_return f64.load i32:80 -> f64:1
+assert_return f64.load i32:88 -> f64:9223372036854775809
+module float_exprs.63.wasm
+skip-impl runner-shape-gap (i32 i32, f32) f32.kahan_sum
+skip-impl runner-shape-gap (i32 i32, f32) f32.plain_sum
+module float_exprs.64.wasm
+skip-impl runner-shape-gap (i32 i32, f64) f64.kahan_sum
+skip-impl runner-shape-gap (i32 i32, f64) f64.plain_sum
+module float_exprs.65.wasm
+assert_return f32.no_fold_neg_sub f32:2147483648 f32:2147483648 -> f32:2147483648
+assert_return f32.no_fold_neg_sub f32:0 f32:2147483648 -> f32:2147483648
+assert_return f32.no_fold_neg_sub f32:2147483648 f32:0 -> f32:0
+assert_return f32.no_fold_neg_sub f32:0 f32:0 -> f32:2147483648
+assert_return f64.no_fold_neg_sub f64:9223372036854775808 f64:9223372036854775808 -> f64:9223372036854775808
+assert_return f64.no_fold_neg_sub f64:0 f64:9223372036854775808 -> f64:9223372036854775808
+assert_return f64.no_fold_neg_sub f64:9223372036854775808 f64:0 -> f64:0
+assert_return f64.no_fold_neg_sub f64:0 f64:0 -> f64:9223372036854775808
+module float_exprs.66.wasm
+assert_return f32.no_fold_neg_add f32:2147483648 f32:2147483648 -> f32:0
+assert_return f32.no_fold_neg_add f32:0 f32:2147483648 -> f32:2147483648
+assert_return f32.no_fold_neg_add f32:2147483648 f32:0 -> f32:2147483648
+assert_return f32.no_fold_neg_add f32:0 f32:0 -> f32:2147483648
+assert_return f64.no_fold_neg_add f64:9223372036854775808 f64:9223372036854775808 -> f64:0
+assert_return f64.no_fold_neg_add f64:0 f64:9223372036854775808 -> f64:9223372036854775808
+assert_return f64.no_fold_neg_add f64:9223372036854775808 f64:0 -> f64:9223372036854775808
+assert_return f64.no_fold_neg_add f64:0 f64:0 -> f64:9223372036854775808
+module float_exprs.67.wasm
+assert_return f32.no_fold_add_neg_neg f32:2147483648 f32:2147483648 -> f32:0
+assert_return f32.no_fold_add_neg_neg f32:0 f32:2147483648 -> f32:0
+assert_return f32.no_fold_add_neg_neg f32:2147483648 f32:0 -> f32:0
+assert_return f32.no_fold_add_neg_neg f32:0 f32:0 -> f32:2147483648
+assert_return f64.no_fold_add_neg_neg f64:9223372036854775808 f64:9223372036854775808 -> f64:0
+assert_return f64.no_fold_add_neg_neg f64:0 f64:9223372036854775808 -> f64:0
+assert_return f64.no_fold_add_neg_neg f64:9223372036854775808 f64:0 -> f64:0
+assert_return f64.no_fold_add_neg_neg f64:0 f64:0 -> f64:9223372036854775808
+module float_exprs.68.wasm
+assert_return f32.no_fold_add_neg f32:0 -> f32:0
+assert_return f32.no_fold_add_neg f32:2147483648 -> f32:0
+assert_return f32.no_fold_add_neg f32:2139095040 -> f32:nan:canonical
+assert_return f32.no_fold_add_neg f32:4286578688 -> f32:nan:canonical
+assert_return f64.no_fold_add_neg f64:0 -> f64:0
+assert_return f64.no_fold_add_neg f64:9223372036854775808 -> f64:0
+assert_return f64.no_fold_add_neg f64:9218868437227405312 -> f64:nan:canonical
+assert_return f64.no_fold_add_neg f64:18442240474082181120 -> f64:nan:canonical
+module float_exprs.69.wasm
+assert_return f32.no_fold_6x_via_add f32:4046243078 -> f32:4068578245
+assert_return f32.no_fold_6x_via_add f32:2573857750 -> f32:2595190497
+assert_return f32.no_fold_6x_via_add f32:419462401 -> f32:440449921
+assert_return f32.no_fold_6x_via_add f32:2955475482 -> f32:2977789734
+assert_return f32.no_fold_6x_via_add f32:3883931973 -> f32:3904906727
+assert_return f64.no_fold_6x_via_add f64:14137662215323058150 -> f64:14149352706895019994
+assert_return f64.no_fold_6x_via_add f64:11424134044545165748 -> f64:11435767596137037638
+assert_return f64.no_fold_6x_via_add f64:15055410132664937138 -> f64:15066699987142021125
+assert_return f64.no_fold_6x_via_add f64:7991451501228919438 -> f64:8003319959635773419
+assert_return f64.no_fold_6x_via_add f64:14886926859367497770 -> f64:14898679235615764511
+module float_exprs.70.wasm
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_fold_div_div
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_fold_div_div
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_fold_div_div
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_fold_div_div
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_fold_div_div
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_fold_div_div
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_fold_div_div
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_fold_div_div
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_fold_div_div
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_fold_div_div
+module float_exprs.71.wasm
+skip-impl runner-shape-gap (f32 f32 f32 f32, f32) f32.no_fold_mul_divs
+skip-impl runner-shape-gap (f32 f32 f32 f32, f32) f32.no_fold_mul_divs
+skip-impl runner-shape-gap (f32 f32 f32 f32, f32) f32.no_fold_mul_divs
+skip-impl runner-shape-gap (f32 f32 f32 f32, f32) f32.no_fold_mul_divs
+skip-impl runner-shape-gap (f32 f32 f32 f32, f32) f32.no_fold_mul_divs
+skip-impl runner-shape-gap (f64 f64 f64 f64, f64) f64.no_fold_mul_divs
+skip-impl runner-shape-gap (f64 f64 f64 f64, f64) f64.no_fold_mul_divs
+skip-impl runner-shape-gap (f64 f64 f64 f64, f64) f64.no_fold_mul_divs
+skip-impl runner-shape-gap (f64 f64 f64 f64, f64) f64.no_fold_mul_divs
+skip-impl runner-shape-gap (f64 f64 f64 f64, f64) f64.no_fold_mul_divs
+module float_exprs.72.wasm
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_fold_add_divs
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_fold_add_divs
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_fold_add_divs
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_fold_add_divs
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_fold_add_divs
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_fold_add_divs
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_fold_add_divs
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_fold_add_divs
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_fold_add_divs
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_fold_add_divs
+module float_exprs.73.wasm
+assert_return f32.no_fold_sqrt_square f32:2662226315 -> f32:514742673
+assert_return f32.no_fold_sqrt_square f32:2606267634 -> f32:458819801
+assert_return f32.no_fold_sqrt_square f32:2624528574 -> f32:477049564
+assert_return f32.no_fold_sqrt_square f32:347235385 -> f32:0
+assert_return f32.no_fold_sqrt_square f32:1978715378 -> f32:2139095040
+assert_return f64.no_fold_sqrt_square f64:2225189009770021885 -> f64:2225189011649283571
+assert_return f64.no_fold_sqrt_square f64:11517048459773840771 -> f64:2293676422919064961
+assert_return f64.no_fold_sqrt_square f64:11484764485761855006 -> f64:2261392448906973069
+assert_return f64.no_fold_sqrt_square f64:11056484744549647728 -> f64:0
+assert_return f64.no_fold_sqrt_square f64:8465406758332488378 -> f64:9218868437227405312
+module float_exprs.74.wasm
+assert_return f32.no_fold_mul_sqrts f32:24047316 f32:2517821717 -> f32:nan:canonical
+assert_return f32.no_fold_mul_sqrts f32:295749258 f32:803416494 -> f32:549395357
+assert_return f32.no_fold_mul_sqrts f32:329708528 f32:1120042892 -> f32:724841268
+assert_return f32.no_fold_mul_sqrts f32:1916535951 f32:994115420 -> f32:1455324620
+assert_return f32.no_fold_mul_sqrts f32:598482176 f32:990534933 -> f32:794443079
+assert_return f64.no_fold_mul_sqrts f64:10974446854152441278 f64:13797896470155574122 -> f64:nan:canonical
+assert_return f64.no_fold_mul_sqrts f64:1712959863583927241 f64:2792003944717853898 -> f64:2252469008297979510
+assert_return f64.no_fold_mul_sqrts f64:4208351758938831157 f64:497361189565243603 -> f64:2352856462697312748
+assert_return f64.no_fold_mul_sqrts f64:2976792199849816182 f64:2030444188042608984 -> f64:2503613111125550255
+assert_return f64.no_fold_mul_sqrts f64:4717634334691577101 f64:6919598687070693285 -> f64:5818898567902921651
+module float_exprs.75.wasm
+assert_return f32.no_fold_div_sqrts f32:3428799709 f32:2733489079 -> f32:nan:canonical
+assert_return f32.no_fold_div_sqrts f32:1339867611 f32:1296568207 -> f32:1086203643
+assert_return f32.no_fold_div_sqrts f32:65679161 f32:1196795110 -> f32:498959746
+assert_return f32.no_fold_div_sqrts f32:1566143010 f32:816694667 -> f32:1439333972
+assert_return f32.no_fold_div_sqrts f32:130133331 f32:208189588 -> f32:1025844032
+assert_return f64.no_fold_div_sqrts f64:10629913473787695463 f64:12991130264919696663 -> f64:nan:canonical
+assert_return f64.no_fold_div_sqrts f64:1966780663211935584 f64:7043916066229883379 -> f64:2068364230648818889
+assert_return f64.no_fold_div_sqrts f64:6965599900716272009 f64:4118781927977980600 -> f64:6030491425828883991
+assert_return f64.no_fold_div_sqrts f64:962551478168675351 f64:5918292176617055751 -> f64:2129092583060403799
+assert_return f64.no_fold_div_sqrts f64:1056821405580891413 f64:8865548665903786673 -> f64:702724841785532050
+module float_exprs.76.wasm
+assert_return f32.no_fold_mul_sqrt_div f32:3900330981 f32:1843416431 -> f32:4286578688
+assert_return f32.no_fold_mul_sqrt_div f32:2210946958 f32:256302916 -> f32:2147483648
+assert_return f32.no_fold_mul_sqrt_div f32:1312995444 f32:2371494 -> f32:1849105549
+assert_return f32.no_fold_mul_sqrt_div f32:3576537897 f32:2010442638 -> f32:3104219421
+assert_return f32.no_fold_mul_sqrt_div f32:3284697858 f32:1124488329 -> f32:3255461622
+assert_return f64.no_fold_mul_sqrt_div f64:7751219282814906463 f64:8023732701704228537 -> f64:9218868437227405312
+assert_return f64.no_fold_mul_sqrt_div f64:10108528314069607083 f64:1595930056995453707 -> f64:9223372036854775808
+assert_return f64.no_fold_mul_sqrt_div f64:2695209648295623224 f64:7133480874314061811 -> f64:1432338140829931582
+assert_return f64.no_fold_mul_sqrt_div f64:15416524255949334213 f64:2434442666062773630 -> f64:16502590179898118478
+assert_return f64.no_fold_mul_sqrt_div f64:5076901024782455083 f64:8399438310541178654 -> f64:3180744754328846996
+module float_exprs.77.wasm
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.no_flush_intermediate_subnormal
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.no_flush_intermediate_subnormal
+module float_exprs.78.wasm
+assert_return f32.recoding_eq f32:4286578688 f32:1077936128 -> i32:1
+assert_return f32.recoding_le f32:4286578688 f32:1077936128 -> i32:1
+assert_return f32.recoding_lt f32:4286578688 f32:1077936128 -> i32:0
+assert_return f32.recoding_eq f32:0 f32:1065353216 -> i32:1
+assert_return f32.recoding_le f32:0 f32:1065353216 -> i32:1
+assert_return f32.recoding_lt f32:0 f32:1065353216 -> i32:0
+assert_return f64.recoding_eq f64:18442240474082181120 f64:4613937818241073152 -> i32:1
+assert_return f64.recoding_le f64:18442240474082181120 f64:4613937818241073152 -> i32:1
+assert_return f64.recoding_lt f64:18442240474082181120 f64:4613937818241073152 -> i32:0
+assert_return f64.recoding_eq f64:0 f64:4607182418800017408 -> i32:1
+assert_return f64.recoding_le f64:0 f64:4607182418800017408 -> i32:1
+assert_return f64.recoding_lt f64:0 f64:4607182418800017408 -> i32:0
+skip-impl runner-shape-gap (f64 f32, f32) recoding_demote
+module float_exprs.79.wasm
+skip-impl runner-shape-gap (f32 f32 f32, i32) f32.no_extended_precision_div
+skip-impl runner-shape-gap (f64 f64 f64, i32) f64.no_extended_precision_div
+module float_exprs.80.wasm
+assert_return f32.no_distribute_exact f32:2147483648 -> f32:0
+assert_return f64.no_distribute_exact f64:9223372036854775808 -> f64:0
+module float_exprs.81.wasm
+assert_return f32.sqrt f32:1073741824 -> f32:1068827891
+skip-impl runner-shape-gap (f32 f32 f32 f32, f32) f32.xkcd_sqrt_2
+assert_return f32.sqrt f32:1077936128 -> f32:1071494103
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.xkcd_sqrt_3
+assert_return f32.sqrt f32:1084227584 -> f32:1074731965
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.xkcd_sqrt_5
+skip-impl runner-shape-gap (f32 f32 f32 f32, f32) f32.xkcd_better_sqrt_5
+assert_return f64.sqrt f64:4611686018427387904 -> f64:4609047870845172685
+skip-impl runner-shape-gap (f64 f64 f64 f64, f64) f64.xkcd_sqrt_2
+assert_return f64.sqrt f64:4613937818241073152 -> f64:4610479282544200874
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.xkcd_sqrt_3
+assert_return f64.sqrt f64:4617315517961601024 -> f64:4612217596255138984
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.xkcd_sqrt_5
+skip-impl runner-shape-gap (f64 f64 f64 f64, f64) f64.xkcd_better_sqrt_5
+module float_exprs.82.wasm
+assert_return f32.compute_radix f32:1065353216 f32:1065353216 -> f32:1073741824
+assert_return f64.compute_radix f64:4607182418800017408 f64:4607182418800017408 -> f64:4611686018427387904
+module float_exprs.83.wasm
+assert_return f32.no_fold_sub1_mul_add f32:796917760 f32:1065353216 -> f32:0
+assert_return f64.no_fold_sub1_mul_add f64:4318952042648305664 f64:4607182418800017408 -> f64:0
+module float_exprs.84.wasm
+skip-impl runner-shape-gap (f32 f32 f32, i32) f32.no_fold_add_le_monotonicity
+skip-impl runner-shape-gap (f32 f32 f32, i32) f32.no_fold_add_le_monotonicity
+skip-impl runner-shape-gap (f64 f64 f64, i32) f64.no_fold_add_le_monotonicity
+skip-impl runner-shape-gap (f64 f64 f64, i32) f64.no_fold_add_le_monotonicity
+module float_exprs.85.wasm
+assert_return f32.not_lt f32:2143289344 f32:0 -> i32:1
+assert_return f32.not_le f32:2143289344 f32:0 -> i32:1
+assert_return f32.not_gt f32:2143289344 f32:0 -> i32:1
+assert_return f32.not_ge f32:2143289344 f32:0 -> i32:1
+assert_return f64.not_lt f64:9221120237041090560 f64:0 -> i32:1
+assert_return f64.not_le f64:9221120237041090560 f64:0 -> i32:1
+assert_return f64.not_gt f64:9221120237041090560 f64:0 -> i32:1
+assert_return f64.not_ge f64:9221120237041090560 f64:0 -> i32:1
+module float_exprs.86.wasm
+assert_return f32.epsilon () -> f32:3019898880
+assert_return f64.epsilon () -> f64:4372995238176751616
+module float_exprs.87.wasm
+assert_return f32.epsilon () -> f32:872415232
+assert_return f64.epsilon () -> f64:4372995238176751616
+module float_exprs.88.wasm
+assert_return f32.no_trichotomy_lt f32:0 f32:2143289344 -> i32:0
+assert_return f32.no_trichotomy_le f32:0 f32:2143289344 -> i32:0
+assert_return f32.no_trichotomy_gt f32:0 f32:2143289344 -> i32:0
+assert_return f32.no_trichotomy_ge f32:0 f32:2143289344 -> i32:0
+assert_return f64.no_trichotomy_lt f64:0 f64:9221120237041090560 -> i32:0
+assert_return f64.no_trichotomy_le f64:0 f64:9221120237041090560 -> i32:0
+assert_return f64.no_trichotomy_gt f64:0 f64:9221120237041090560 -> i32:0
+assert_return f64.no_trichotomy_ge f64:0 f64:9221120237041090560 -> i32:0
+module float_exprs.89.wasm
+assert_return f32.arithmetic_nan_bitpattern i32:2139107856 i32:2139107856 -> i32:2143289344
+assert_return f32.canonical_nan_bitpattern i32:0 i32:0 -> i32:2143289344
+assert_return f32.canonical_nan_bitpattern i32:2143289344 i32:2143289344 -> i32:2143289344
+assert_return f32.canonical_nan_bitpattern i32:4290772992 i32:2143289344 -> i32:2143289344
+assert_return f32.canonical_nan_bitpattern i32:2143289344 i32:4290772992 -> i32:2143289344
+assert_return f32.canonical_nan_bitpattern i32:4290772992 i32:4290772992 -> i32:2143289344
+assert_return f32.nonarithmetic_nan_bitpattern i32:2143302160 -> i32:4290785808
+assert_return f32.nonarithmetic_nan_bitpattern i32:4290785808 -> i32:2143302160
+assert_return f32.nonarithmetic_nan_bitpattern i32:2139107856 -> i32:4286591504
+assert_return f32.nonarithmetic_nan_bitpattern i32:4286591504 -> i32:2139107856
+assert_return f64.arithmetic_nan_bitpattern i64:9218868437227418128 i64:9218868437227418128 -> i64:9221120237041090560
+assert_return f64.canonical_nan_bitpattern i64:0 i64:0 -> i64:9221120237041090560
+assert_return f64.canonical_nan_bitpattern i64:9221120237041090560 i64:9221120237041090560 -> i64:9221120237041090560
+assert_return f64.canonical_nan_bitpattern i64:18444492273895866368 i64:9221120237041090560 -> i64:9221120237041090560
+assert_return f64.canonical_nan_bitpattern i64:9221120237041090560 i64:18444492273895866368 -> i64:9221120237041090560
+assert_return f64.canonical_nan_bitpattern i64:18444492273895866368 i64:18444492273895866368 -> i64:9221120237041090560
+assert_return f64.nonarithmetic_nan_bitpattern i64:9221120237041103376 -> i64:18444492273895879184
+assert_return f64.nonarithmetic_nan_bitpattern i64:18444492273895879184 -> i64:9221120237041103376
+assert_return f64.nonarithmetic_nan_bitpattern i64:9218868437227418128 -> i64:18442240474082193936
+assert_return f64.nonarithmetic_nan_bitpattern i64:18442240474082193936 -> i64:9218868437227418128
+assert_return f32.no_fold_sub_zero i32:2141192192 -> i32:2143289344
+assert_return f32.no_fold_neg0_sub i32:2141192192 -> i32:2143289344
+assert_return f32.no_fold_mul_one i32:2141192192 -> i32:2143289344
+assert_return f32.no_fold_neg1_mul i32:2141192192 -> i32:2143289344
+assert_return f32.no_fold_div_one i32:2141192192 -> i32:2143289344
+assert_return f32.no_fold_div_neg1 i32:2141192192 -> i32:2143289344
+assert_return f64.no_fold_sub_zero i64:9219994337134247936 -> i64:9221120237041090560
+assert_return f64.no_fold_neg0_sub i64:9219994337134247936 -> i64:9221120237041090560
+assert_return f64.no_fold_mul_one i64:9219994337134247936 -> i64:9221120237041090560
+assert_return f64.no_fold_neg1_mul i64:9219994337134247936 -> i64:9221120237041090560
+assert_return f64.no_fold_div_one i64:9219994337134247936 -> i64:9221120237041090560
+assert_return f64.no_fold_div_neg1 i64:9219994337134247936 -> i64:9221120237041090560
+assert_return no_fold_promote_demote i32:2141192192 -> i32:2143289344
+module float_exprs.90.wasm
+skip-impl runner-shape-gap (f64 f64 f64 f64 f64 f64 f64 f64, f64) dot_product_example
+skip-impl runner-shape-gap (f64 f64 f64 f64 f64 f64 f64 f64, f64) with_binary_sum_collapse
+module float_exprs.91.wasm
+assert_return f32.contract2fma f32:1065353216 f32:1065353216 -> f32:0
+assert_return f32.contract2fma f32:1066192077 f32:1066192077 -> f32:0
+assert_return f32.contract2fma f32:1067030937 f32:1067030937 -> f32:0
+assert_return f64.contract2fma f64:4607182418800017408 f64:4607182418800017408 -> f64:0
+assert_return f64.contract2fma f64:4607632778762754458 f64:4607632778762754458 -> f64:0
+assert_return f64.contract2fma f64:4608083138725491507 f64:4608083138725491507 -> f64:0
+module float_exprs.92.wasm
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.division_by_small_number
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.division_by_small_number
+module float_exprs.93.wasm
+skip-impl runner-shape-gap (f32 f32 f32, f32) f32.golden_ratio
+skip-impl runner-shape-gap (f64 f64 f64, f64) f64.golden_ratio
+module float_exprs.94.wasm
+assert_return f32.silver_means f32:0 -> f32:1065353216
+assert_return f32.silver_means f32:1065353216 -> f32:1070537661
+assert_return f32.silver_means f32:1073741824 -> f32:1075479162
+assert_return f32.silver_means f32:1077936128 -> f32:1079206061
+assert_return f32.silver_means f32:1082130432 -> f32:1082625502
+assert_return f32.silver_means f32:1084227584 -> f32:1084631458
+assert_return f64.silver_means f64:0 -> f64:4607182418800017408
+assert_return f64.silver_means f64:4607182418800017408 -> f64:4609965796441453736
+assert_return f64.silver_means f64:4611686018427387904 -> f64:4612618744449965542
+assert_return f64.silver_means f64:4613937818241073152 -> f64:4614619608365706490
+assert_return f64.silver_means f64:4616189618054758400 -> f64:4616455406968633940
+assert_return f64.silver_means f64:4617315517961601024 -> f64:4617532346471836922
+module float_exprs.95.wasm
+assert_return point_four f64:4616189618054758400 f64:4621819117588971520 -> i32:0
+module float_exprs.96.wasm
+assert_return tau i32:10 -> f64:4618760256179416340
+assert_return tau i32:11 -> f64:4618760256179416344
+module float_exprs.97.wasm
+assert_return f32.no_fold_conditional_inc f32:2147483648 f32:3212836864 -> f32:2147483648
+assert_return f64.no_fold_conditional_inc f64:9223372036854775808 f64:13830554455654793216 -> f64:9223372036854775808
