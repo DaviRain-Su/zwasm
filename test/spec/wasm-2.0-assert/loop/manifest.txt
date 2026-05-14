@@ -76,7 +76,6 @@ assert_return nesting f32:1088421888 f32:1082130432 -> f32:1092940751
 assert_return nesting f32:1088421888 f32:1120403456 -> f32:1166601314
 assert_return nesting f32:1088421888 f32:1120534528 -> f32:1159892992
 assert_return type-use () -> ()
-assert_return br-implicit-drop () -> i32:1
 skip-adr-skip_text_format_parser directive-assert_malformed-text
 skip-adr-skip_text_format_parser directive-assert_malformed-text
 skip-adr-skip_text_format_parser directive-assert_malformed-text

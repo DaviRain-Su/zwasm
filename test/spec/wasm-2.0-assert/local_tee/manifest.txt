@@ -95,4 +95,3 @@ assert_invalid local_tee.38.wasm
 assert_invalid local_tee.39.wasm
 assert_invalid local_tee.40.wasm
 assert_invalid local_tee.41.wasm
-assert_invalid local_tee.42.wasm

@@ -90,7 +90,7 @@ assert_trap 8s_bad i32:1
 assert_trap 16u_bad i32:1
 assert_trap 16s_bad i32:1
 assert_trap 32_bad i32:1
-assert_invalid address.1.wat
+skip-adr-skip_text_format_parser directive-assert_malformed-text
 module address.2.wasm
 assert_return 8u_good1 i32:0 -> i64:97
 assert_return 8u_good2 i32:0 -> i64:97

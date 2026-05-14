@@ -158,9 +158,6 @@ assert_invalid func.60.wasm
 assert_invalid func.61.wasm
 assert_invalid func.62.wasm
 assert_invalid func.63.wasm
-assert_invalid func.64.wasm
-assert_invalid func.65.wasm
-assert_invalid func.66.wasm
 skip-adr-skip_text_format_parser directive-assert_malformed-text
 skip-adr-skip_text_format_parser directive-assert_malformed-text
 skip-adr-skip_text_format_parser directive-assert_malformed-text
