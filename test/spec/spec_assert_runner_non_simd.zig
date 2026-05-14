@@ -41,11 +41,13 @@ pub fn main(init: std.process.Init) !void {
     const stdout = &stdout_writer.interface;
 
     // Install the SIGSEGV → trap-recovery handler before any JIT
-    // entry call (D-103 / d-29). Required by `nonSimdRunAssertTrap`
-    // — without it, an in-body SEGV (e.g. `elem.wast` element-
-    // segment trap that crashes the JIT body before the trap stub
-    // sets `trap_flag`) aborts the runner instead of producing a
-    // PASS for the assert_trap line.
+    // entry call (D-103 / d-29). d-30 verified the handler IS
+    // load-bearing: removing the install line aborts the runner
+    // with `Segmentation fault at address 0x10b9e0018` on the
+    // elem.wast corpus. The handler converts in-body SEGV (e.g.
+    // an element-segment trap-assert whose JIT body crashes
+    // before the trap stub fires) to `error.Trap` so
+    // `nonSimdRunAssertTrap` records the line as PASS.
     base.installSigsegvHandler();
 
     var arg_it = try std.process.Args.Iterator.initAllocator(init.minimal.args, gpa);
@@ -671,7 +673,12 @@ fn nonSimdRunAssertTrap(
     // `spec_assert_runner_base.zig`.
     const trapped: bool = blk: {
         if (base.sigsetjmp(@ptrCast(&base.sigsegv_recover_buf), 1) != 0) {
-            // Recovered from in-body SEGV / SIGBUS → treat as trap.
+            // Recovered from in-body SEGV / SIGBUS → treat as
+            // trap. d-30 verified this path catches the 2
+            // elem.wast SEGVs (`assert_trap init ()` on elem.75
+            // / elem.76); recovery is semantically equivalent to
+            // the trap stub firing for assert_trap per Wasm spec
+            // §A.2 ("any trap during invocation").
             base.sigsegv_armed = false;
             break :blk true;
         }

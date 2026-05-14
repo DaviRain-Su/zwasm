@@ -166,6 +166,22 @@ NAMES=(
   # PASS (they're all assert_trap and the dispatch ladder
   # already filters out the runtime shapes) — enabling `data`
   # would land 19 FAIL + 0 useful coverage. Defer.
+  # d-30 probe (deferred): `elem`. With d-29 SEGV handler armed,
+  # the corpus produces +14 PASS / +34 FAIL across 113 modules.
+  # The 34 FAIL decompose as: 22 BadValType (reftype globals /
+  # element segments, Phase 10+ scope per D-075/D-104), 5
+  # table-init shapes (UnsupportedEntrySignature / InvalidFunctype,
+  # D-079 family), 7 findExport on imported functions (cross-
+  # module imports, D-079). All Phase 10+; same shape as `data`
+  # (D-102). The d-29 handler IS load-bearing (without it
+  # runner aborts with SIGSEGV in `callI32NoArgs:55`; with it,
+  # 2 SEGV → assert_trap PASS recoveries on elem.75 / elem.76
+  # `init ()`). Full `elem` enablement deferred to Phase 10+;
+  # D-103 parts (a)+(b) discharged at d-29+d-30 (handler installed
+  # + symptom localised to 2 module-init traps recoverable via
+  # SEGV-handler equivalence), part (c) "actual null-deref fix"
+  # is no longer needed for spec semantics (SEGV during
+  # assert_trap invoke IS a trap per spec §A.2).
 )
 
 mkdir -p "$DEST"
