@@ -166,6 +166,26 @@ NAMES=(
   # PASS (they're all assert_trap and the dispatch ladder
   # already filters out the runtime shapes) — enabling `data`
   # would land 19 FAIL + 0 useful coverage. Defer.
+  # d-38 batch probe (in-flight bisect).
+  br
+  br_if
+  endianness
+  forward
+  labels
+  left-to-right
+  stack
+  ref_null
+  ref_func
+  memory
+  memory_redundancy
+  float_misc
+  float_memory
+  # `select` deferred — 4× call_indirect-context traps (D-NNN).
+  # `ref_is_null` deferred — SEGV in funcref-elem/externref-elem
+  # (reftype param/result ABI + table.get reftype; D-NNN).
+  # `memory_trap` deferred — 4× load OOB-check FAILs (D-NNN).
+  # `float_exprs` deferred — ~30 FP fold/select-to-abs FAILs
+  # (D-NNN; FP select sign-bit issues).
   # d-37 enable: `elem`. Reftype parse + codegen plumbing (d-32,
   # d-33) covered the BadValType class; cross-module + spectest-
   # host-state imports (12 fails at the d-34 probe baseline) are

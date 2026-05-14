@@ -1,0 +1,7 @@
+module stack.0.wasm
+assert_return fac-expr i64:25 -> i64:7034535277573963776
+assert_return fac-stack i64:25 -> i64:7034535277573963776
+assert_return fac-mixed i64:25 -> i64:7034535277573963776
+assert_return not-quite-a-tree () -> i32:3
+assert_return not-quite-a-tree () -> i32:9
+module stack.1.wasm
