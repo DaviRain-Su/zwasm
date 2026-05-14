@@ -195,12 +195,17 @@ for n in "${NAMES[@]}"; do
   TMP=$(mktemp -d)
   trap "rm -rf '$TMP'" EXIT
 
-  if ! ( cd "$TMP" && wast2json \
-      --enable-function-references \
-      --enable-tail-call \
-      --enable-extended-const \
-      --enable-multi-memory \
-      "$src" -o "$n.json" >/dev/null 2>&1 ); then
+  # §9.9 / 9.9-l-1b-d093-d31 (per ADR-0061): no Wasm 3.0 enables.
+  # wabt's default-on set (sign-extension, saturating-float-to-int,
+  # bulk-memory-opt, reference-types, multi-value, SIMD) is the
+  # Wasm 2.0 baseline. Previously this command passed
+  # `--enable-function-references / --enable-tail-call /
+  # --enable-extended-const / --enable-multi-memory`, all four of
+  # which are Wasm 3.0 proposals. The script's name (`2_0`)
+  # demands the parse layer NOT accept 3.0 syntax — those flags
+  # were a scope leak. Removing them is M-1 hygiene per the
+  # Wasm-2.0 completion plan (`private/wasm2-completion-plan/`).
+  if ! ( cd "$TMP" && wast2json "$src" -o "$n.json" >/dev/null 2>&1 ); then
     echo "[regen_spec_2_0_assert] skip $n (wast2json rejected)" >&2
     rm -rf "$TMP"
     trap - EXIT

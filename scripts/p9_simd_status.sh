@@ -88,7 +88,10 @@ awk -F'|' '/^\| D-/ {
   gsub(/^ +| +$/, "", $4)
   gsub(/^ +| +$/, "", $2)
   gsub(/^ +/, "", $5)
-  if ($4 == "now") {
+  # Match "now" exactly OR "now <annotation>" (e.g. "now (d-22
+  # attempted; ...)" — the annotation is narrative context, the
+  # underlying status is still now).
+  if ($4 == "now" || $4 ~ /^now[ (]/) {
     desc = $5
     sub(/\. .*$/, ".", desc)
     if (length(desc) > 140) desc = substr(desc, 1, 137) "..."
