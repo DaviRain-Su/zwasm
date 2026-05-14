@@ -10,41 +10,50 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **Phase 9 extended; D-093 (d-28) D-102 root cause = imports → reclassify blocked-by D-105 2026-05-14**
+## Active state — **Phase 9 extended; D-093 (d-29) D-103 part (a) — SIGSEGV→trap handler installed 2026-05-14**
 
 ### One-line state
 
-D-093 (d-28) reclassifies D-102 to blocked-by D-105 (cross-
-module memory imports). d-21's hypothesis (passive segments)
-was wrong. d-28 stderr-diagnostic at `applyActiveDataSegments`
-proves the 19 `data.wast` module-load failures all root in
-imports: 15× memory imported → `current_mem_bytes=0`; 1× offset_
-expr `global.get $imp`; 4× `InvalidFunctype` at imports decoder.
-Corpus's 47 import-free modules contribute 0 incremental PASS
-(all-assert_trap filtered by dispatch ladder), so `data` NAMES
-deferred — full discharge requires Phase 10+. spec_assert
-14399/0/385 unchanged (no code change beyond regen-script
-comment). simd 13301/0/440 unchanged.
+D-093 (d-29) lands part (a) of the D-103 three-step plan: a
+`sigsetjmp` / `siglongjmp` recovery path in
+`spec_assert_runner_base.zig` so in-body SEGV / SIGBUS inside
+the JIT-compiled function (= the `elem.wast` symptom: trap
+stub never fires, process aborts) maps to "trapped" at the
+`nonSimdRunAssertTrap` callsite. `installSigsegvHandler` wires
+SIGSEGV + SIGBUS via `std.posix.sigaction`; the handler
+`siglongjmp`s back to the inline `sigsetjmp` in the dispatch
+ladder when `sigsegv_armed`, else `_exit(139)`. Comptime
+linkage rename picks `__sigsetjmp` on Linux glibc and
+`sigsetjmp` on macOS / BSD. Two unit tests exercise the raise
+→ handler → longjmp path. NAMES unchanged (`elem` still
+deferred — d-30+ bisects which `elem.wast` module crashes,
+d-31+ fixes the underlying null-deref). spec_assert
+14399/0/385 unchanged. simd 13301/0/440 unchanged.
 
 ### Standing reminder for the autonomous loop
 
 **Project tone is `.claude/rules/no_workaround.md`: fix root
 causes, never work around.**
 
-### Next task — d-29 discharge candidate
+### Next task — d-30 discharge candidate
 
-Active debts (post-d-28):
-- D-103 elem-SEGV (SIGSEGV-handler spike; multi-chunk).
+Active debts (post-d-29):
+- D-103 elem-SEGV — part (a) handler installed; (b) bisect
+  which `elem.wast` module / op crashes still pending; (c)
+  root-cause null deref + fix.
 - D-106 start-invoke SEGV (lldb trace on prologue load).
 - D-102/D-104/D-105: blocked-by Phase 10+ (cross-module memory
   imports + reftype runtime).
 
-- **d-29 NEXT** — D-103 (elem.wast SIGSEGV in JIT body). Per
-  ADR-0048 + `.claude/skills/debug_jit_auto/SKILL.md`, install
-  a SIGSEGV handler in `spec_assert_runner_base.zig` that maps
-  to `error.Trap` so `assert_trap` lines see the result. Then
-  bisect which elem.wast module crashes + identify the null-
-  deref root cause. Multi-chunk effort.
+- **d-30 NEXT** — D-103 part (b): enable `elem` in NAMES (so
+  the manifest dispatches into the new SEGV-guarded
+  `nonSimdRunAssertTrap` path), capture per-module PASS/FAIL
+  with the handler armed, and bisect to the specific
+  `elem.wast` module + op family that triggers the in-body
+  null deref. Per `.claude/skills/debug_jit_auto/SKILL.md`
+  Recipe 1 (`lldb -b`) on a one-shot run pre-enabled with the
+  d-29 handler removed, so the lldb fault address +
+  disassembly localise the crash to one emit-pass site.
 
 Runner-side skip-impl backlog (7 total, in `nop / loop /
 local_tee`):
@@ -98,8 +107,9 @@ Other queued post-D-093 names: `address`, `align`, `br_table`,
 | D-093 (d-25) | [x] ed05169b | D-101 discharged: max_args cap 64 → 128 (call.wast func[77] has 100-arg call); `call` lands +82 PASS |
 | D-093 (d-26) | [x] 1815e624 | D-108 discharged: i64/f32/f64 scalar `global.get/set` on both archs + edge fixtures (3 new). D-111 filed for call_indirect structural-typing. NAMES unchanged. |
 | D-093 (d-27) | [x] 77ef4a06 | D-111 discharged: `canonical_type.zig` + emit/runner canonicalization. NAMES +3 (call_indirect/func/func_ptrs); 14119/0/292 → 14399/0/385 (+280 PASS, +3 manifests). Cascade discharge: D-109 moot, D-110. |
-| D-093 (d-28) | [x] (this commit) | D-102 reclassified blocked-by D-105: stderr-diagnostic proves 19 `data.wast` module-load failures are all import-dependent (15× imported memory; 1× imported-global const-expr; 4× InvalidFunctype on import shape). `data` NAMES deferred. No code change beyond regen-script comment. spec_assert 14399/0/385 unchanged. |
-| **D-093 (d-29)** | **NEXT** | discharge candidate: D-103 (elem.wast SIGSEGV) — install SIGSEGV handler in spec_assert_runner_base per ADR-0048. |
+| D-093 (d-28) | [x] fda102aa | D-102 reclassified blocked-by D-105: stderr-diagnostic proves 19 `data.wast` module-load failures are all import-dependent (15× imported memory; 1× imported-global const-expr; 4× InvalidFunctype on import shape). `data` NAMES deferred. No code change beyond regen-script comment. spec_assert 14399/0/385 unchanged. |
+| D-093 (d-29) | [x] (this commit) | D-103 part (a): SIGSEGV / SIGBUS recovery installed in `spec_assert_runner_base` (`sigsetjmp` / `siglongjmp` via libc; `__sigsetjmp` on Linux, `sigsetjmp` on Mac) + inline-armed in `nonSimdRunAssertTrap` dispatch ladder + 2 unit tests + handler install in non_simd runner main. NAMES unchanged (`elem` still deferred until parts (b) bisect + (c) null-deref fix). spec_assert 14399/0/385 unchanged. |
+| **D-093 (d-30)** | **NEXT** | D-103 part (b): enable `elem` in NAMES + per-module bisect with d-29 handler armed; localise the crashing elem.wast module + op. |
 
 Other queued chunks (post-l-1): k-1, k-2, m-4c (= D-090),
 m-2d, n-1, j-3b.

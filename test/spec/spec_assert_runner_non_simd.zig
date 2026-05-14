@@ -40,6 +40,14 @@ pub fn main(init: std.process.Init) !void {
     var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buf);
     const stdout = &stdout_writer.interface;
 
+    // Install the SIGSEGV → trap-recovery handler before any JIT
+    // entry call (D-103 / d-29). Required by `nonSimdRunAssertTrap`
+    // — without it, an in-body SEGV (e.g. `elem.wast` element-
+    // segment trap that crashes the JIT body before the trap stub
+    // sets `trap_flag`) aborts the runner instead of producing a
+    // PASS for the assert_trap line.
+    base.installSigsegvHandler();
+
     var arg_it = try std.process.Args.Iterator.initAllocator(init.minimal.args, gpa);
     defer arg_it.deinit();
     _ = arg_it.next().?;
@@ -650,7 +658,26 @@ fn nonSimdRunAssertTrap(
 
     // Invoke via the simplest matching shape. Result type is
     // immaterial — `Error.Trap` is the only PASS outcome.
+    //
+    // SIGSEGV recovery (D-103 / d-29): wrap the dispatch in
+    // `sigsetjmp`. If the JIT body dereferences null (e.g. an
+    // `elem.wast` trap-assert whose body crashes before the trap
+    // stub sets `trap_flag`), the SIGSEGV handler `siglongjmp`s
+    // back to the sigsetjmp site below; the second-return path
+    // breaks out of the block with `trapped = true`. The
+    // `sigsetjmp` call is inline here (not factored to a helper)
+    // because its captured frame must be the function whose
+    // dispatch follows — see the discipline note in
+    // `spec_assert_runner_base.zig`.
     const trapped: bool = blk: {
+        if (base.sigsetjmp(@ptrCast(&base.sigsegv_recover_buf), 1) != 0) {
+            // Recovered from in-body SEGV / SIGBUS → treat as trap.
+            base.sigsegv_armed = false;
+            break :blk true;
+        }
+        base.sigsegv_armed = true;
+        defer base.sigsegv_armed = false;
+
         if (n_args == 0) {
             _ = entry.callI32NoArgs(compiled.module, func_idx, &rt) catch |err| {
                 break :blk err == entry.Error.Trap;

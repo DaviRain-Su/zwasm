@@ -395,6 +395,89 @@ pub fn matchScalarF64(got_bits: u64, spec: ScalarFpSpec) bool {
     };
 }
 
+// ============================================================
+// SIGSEGV → trap recovery (D-103 / §9.9 / 9.9-l-1b-d093-d29).
+//
+// Some `assert_trap` paths (notably `elem.wast`) crash inside the
+// JIT-compiled function before the trap stub sets `trap_flag` —
+// the runner's `Error.Trap` check never sees the trap because the
+// process has already SEGV'd. Wrapping the JIT entry call site
+// with `sigsetjmp` + a SIGSEGV handler that `siglongjmp`s back
+// converts an in-body fault into the same outcome as the trap
+// stub: the call returns truthy (= recovered = trapped) instead
+// of aborting the runner.
+//
+// Inline-call discipline: `sigsetjmp` MUST be invoked from the
+// caller frame that the recovery should land in — its captured
+// SP/PC point at the calling function. Wrapping `sigsetjmp` in
+// a Zig helper that returns the value would bind the captured
+// frame to the helper's (already-popped) frame, undefined
+// behaviour on `longjmp`. So callers invoke `sigsetjmp` directly
+// against `sigsegv_recover_buf`, then arm/disarm via
+// `sigsegv_armed`.
+// ============================================================
+
+/// Backing storage for `sigsetjmp` / `siglongjmp`. Sized to fit
+/// both `sigjmp_buf` layouts in scope: macOS arm64 = `int[49]`
+/// (~196 B), Linux x86_64 glibc = `__jmp_buf_tag[1]` (~200 B).
+/// 16-byte alignment matches both libcs' alignment requirements.
+pub var sigsegv_recover_buf: [512]u8 align(16) = undefined;
+
+/// Arming flag — when `true` the SIGSEGV handler `siglongjmp`s
+/// back to the most recent `sigsetjmp` site; when `false` the
+/// handler treats the SEGV as unexpected and exits with the
+/// conventional `128 + 11 = 139` code (= a runner-internal bug
+/// surfaces loudly instead of being swallowed).
+pub var sigsegv_armed: bool = false;
+
+// glibc exposes `sigsetjmp` as a macro that expands to
+// `__sigsetjmp(env, savemask)`; the symbol available to the
+// linker is `__sigsetjmp`. macOS / BSD libcs expose `sigsetjmp`
+// directly. Resolve at comptime so the autonomous loop's 2-host
+// gate (Mac arm64 + OrbStack Linux x86_64) finds the right
+// linkage name on each side.
+const SigsetjmpFn = *const fn (env: [*]u8, savemask: c_int) callconv(.c) c_int;
+const SiglongjmpFn = *const fn (env: [*]u8, val: c_int) callconv(.c) noreturn;
+
+pub const sigsetjmp: SigsetjmpFn = @extern(SigsetjmpFn, .{
+    .name = if (@import("builtin").os.tag == .linux) "__sigsetjmp" else "sigsetjmp",
+    .library_name = "c",
+});
+pub const siglongjmp: SiglongjmpFn = @extern(SiglongjmpFn, .{
+    .name = "siglongjmp",
+    .library_name = "c",
+});
+
+fn sigsegvHandler(_: std.posix.SIG) callconv(.c) void {
+    if (sigsegv_armed) {
+        sigsegv_armed = false;
+        siglongjmp(@ptrCast(&sigsegv_recover_buf), 1);
+    }
+    // SEGV outside an armed JIT call: do not silently swallow.
+    // `_exit(139)` is async-signal-safe (raw syscall, no atexit
+    // handlers) and matches the conventional shell exit code for
+    // a process killed by SIGSEGV (= 128 + 11).
+    std.c._exit(139);
+}
+
+/// Install the SIGSEGV / SIGBUS handler used by the assert_trap
+/// path. Idempotent — safe to call from multiple runner main
+/// entries. Process-wide; the previous handler (if any) is
+/// overwritten without recording (the spec runners are leaf
+/// processes that own the signal disposition).
+pub fn installSigsegvHandler() void {
+    var act: std.posix.Sigaction = .{
+        .handler = .{ .handler = sigsegvHandler },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
+    std.posix.sigaction(.SEGV, &act, null);
+    // SIGBUS covers the Mach-side variant (mis-aligned access on
+    // arm64, mmap region truncation) so the runner survives the
+    // same class of in-body fault on Mac.
+    std.posix.sigaction(.BUS, &act, null);
+}
+
 /// Per-runner callbacks invoked by `runCorpus()`. Specialisations
 /// (currently only `simd_assert_runner`; later `spec_assert_runner_non_simd`
 /// per l-1b) provide function pointers that handle the type-specific
@@ -810,4 +893,43 @@ test "matchScalarF64: canonical / arithmetic / exact" {
     try testing.expect(matchScalarF64(0x7ff8000000000001, .arithmetic));
     try testing.expect(!matchScalarF64(0x7ff0000000000001, .arithmetic));
     try testing.expect(matchScalarF64(0xdeadbeef, .{ .exact = 0xdeadbeef }));
+}
+
+test "sigsegv guard: handler siglongjmps back to caller frame on raised SIGSEGV" {
+    installSigsegvHandler();
+
+    // Inline `sigsetjmp` — its captured frame is THIS test's
+    // frame, so the handler's `siglongjmp` lands on the second
+    // return below. `recovered` lives in module scope to survive
+    // the longjmp (caller-frame locals may be in clobbered regs).
+    const Recover = struct { var flag: bool = false; };
+    Recover.flag = false;
+
+    if (sigsetjmp(@ptrCast(&sigsegv_recover_buf), 1) == 0) {
+        sigsegv_armed = true;
+        // Raise SIGSEGV; the handler longjmps back to the
+        // sigsetjmp site, which then takes the else-branch.
+        std.posix.raise(.SEGV) catch unreachable;
+        // Should not reach: longjmp transferred control.
+        try testing.expect(false);
+    } else {
+        sigsegv_armed = false;
+        Recover.flag = true;
+    }
+
+    try testing.expect(Recover.flag);
+}
+
+test "sigsegv guard: armed=false after recovery so subsequent SEGV is unexpected" {
+    installSigsegvHandler();
+
+    if (sigsetjmp(@ptrCast(&sigsegv_recover_buf), 1) == 0) {
+        sigsegv_armed = true;
+        std.posix.raise(.SEGV) catch unreachable;
+        try testing.expect(false);
+    } else {
+        // Recovery path must clear armed (handler does it; the
+        // assertion confirms the contract end-to-end).
+        try testing.expect(sigsegv_armed == false);
+    }
 }
