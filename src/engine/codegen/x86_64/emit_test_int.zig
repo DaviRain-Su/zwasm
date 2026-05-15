@@ -490,7 +490,13 @@ test "compile: br_table — single case + default both → block end" {
     try testing.expectEqualSlices(u8, &expected, out.bytes);
 }
 
-test "compile: br_table count > 127 → UnsupportedOp (i8 cap)" {
+test "compile: br_table count > 127 — wide case path (rel32 / imm32) compiles" {
+    // §9.9 / 9.9-l-1b-d093-d45 (D-118): pre-d-45 the x86_64
+    // emitBrTable rejected `count > 127` outright (CMP imm8 / JNE
+    // rel8 limits). br_table.wast `large` declares 16149 targets;
+    // d-45 dispatches per-case on `i ≤ 127`: small cases keep the
+    // imm8/rel8 fast path, large cases use `CMP r32, imm32` +
+    // `Jcc rel32`. Test confirms the wide path compiles.
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
     var f = ZirFunc.init(0, sig, &.{});
     defer f.deinit(testing.allocator);
@@ -506,7 +512,9 @@ test "compile: br_table count > 127 → UnsupportedOp (i8 cap)" {
     } };
     const slots = [_]u16{0};
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
-    try testing.expectError(Error.UnsupportedOp, compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}));
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
+    defer testing.allocator.free(out.bytes);
+    try testing.expect(out.bytes.len > 0);
 }
 
 test "compile: (i32.const 0) i32.load offset=0 end — ADR-0026 prologue + bounds check + load" {

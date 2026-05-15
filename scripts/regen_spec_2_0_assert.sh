@@ -191,9 +191,17 @@ NAMES=(
   # this end-to-end.
   select
   ref_is_null
-  # d-44 batch: green-bisected names. `br_table` (SlotOverflow at
-  # compile), `bulk` (SEGV), `memory_init` (value-mismatch +
-  # missing-trap) deferred per d-44 bisect (= D-118, D-119, D-120).
+  # d-45: br_table enabled. D-118 closed via per-case CMP dispatch
+  # in both arch emitBrTable (CMP imm12 vs MOVZ+MOVK+CMP-reg on
+  # arm64; CMP imm8/imm32 + Jcc rel8/rel32 on x86_64) + reftype
+  # block-type acceptance in validator readBlockType + lower
+  # readBlockArity (Wasm 2.0 §5.3.5 -16/-17 = funcref/externref).
+  # br_table.wast's `large` func declares 16149 targets, well past
+  # the prior 4096 (arm64) / 127 (x86_64) caps.
+  br_table
+  # d-44 batch: green-bisected names. `bulk` (SEGV),
+  # `memory_init` (value-mismatch + missing-trap) deferred per
+  # d-44 bisect (= D-119, D-120).
   # The d-37 cross-module-imports pre-filter handles `data` /
   # `global`-class modules whose imports the runner can't bind.
   data

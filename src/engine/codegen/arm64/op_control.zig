@@ -535,13 +535,29 @@ pub fn emitBrTable(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const wn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, idx_vreg, 0);
     const count = ins.payload;
     const start = ins.extra;
-    if (count >= (@as(u32, 1) << 12)) return Error.SlotOverflow;
     const targets = ctx.func.branch_targets.items;
     if (start + count >= targets.len) return Error.UnsupportedOp;
 
     var i: u32 = 0;
     while (i < count) : (i += 1) {
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmW(wn, @intCast(i)));
+        // §9.9 / 9.9-l-1b-d093-d45 (D-118): per-case CMP. Cases
+        // i < 4096 fit `CMP Wn, #imm12` directly; for the wider
+        // range (Wasm spec §3.4.5 br_table has no upper bound on
+        // case count — br_table.wast `large` declares 16149
+        // targets), materialise the imm into W16 via MOVZ + MOVK
+        // and CMP Wn, W16. W16 / X16 is an intra-procedure scratch
+        // outside the regalloc pool, safe to clobber here.
+        if (i < (@as(u32, 1) << 12)) {
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmW(wn, @intCast(i)));
+        } else {
+            const lo16: u16 = @intCast(i & 0xFFFF);
+            const hi16: u16 = @intCast((i >> 16) & 0xFFFF);
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovzImm16(16, lo16));
+            if (hi16 != 0) {
+                try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(16, hi16, 1));
+            }
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegW(wn, 16));
+        }
         // D-093 (d-7): emitBranchToDepth may now emit MOVs +
         // B (when forward target is `.block` with merge
         // already captured). Patch B.NE-skip's disp after the

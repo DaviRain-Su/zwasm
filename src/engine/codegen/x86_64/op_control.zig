@@ -489,7 +489,6 @@ pub fn emitBrTable(
     start: u32,
 ) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
-    if (count > 127) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:147", 0);
     const idx_v = pushed_vregs.pop().?;
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
     const targets = func.branch_targets.items;
@@ -497,19 +496,40 @@ pub fn emitBrTable(
 
     var i: u32 = 0;
     while (i < count) : (i += 1) {
-        try buf.appendSlice(allocator, inst.encCmpRImm8(.d, idx_r, @intCast(i)).slice());
+        // §9.9 / 9.9-l-1b-d093-d45 (D-118): per-case CMP. Cases
+        // i ≤ 127 fit `CMP r32, imm8`; for the wider range
+        // (Wasm spec §3.4.5 br_table has no upper bound — br_table.
+        // wast `large` declares 16149 targets), use `CMP r32, imm32`
+        // + `Jcc rel32`. The JNE-skip's reach grows from imm8
+        // (±127) to imm32 (±2 GiB), comfortable for any realistic
+        // per-case payload.
+        const jne_size: usize = if (i <= 127) 2 else 6;
+        if (i <= 127) {
+            try buf.appendSlice(allocator, inst.encCmpRImm8(.d, idx_r, @intCast(i)).slice());
+        } else {
+            try buf.appendSlice(allocator, inst.encCmpRImm32(idx_r, i).slice());
+        }
         // D-093 (d-7): variable-disp JNE-skip. emitBrTableJmp may
         // emit MOVs + JMP (when forward target is `.block` with
         // merge captured). Pre-d-7 used fixed disp = 5 (= skip a
         // single 5-byte JMP). Patch after emitBrTableJmp returns.
         const jne_at: usize = buf.items.len;
-        try buf.appendSlice(allocator, inst.encJccRel8(.ne, 0).slice());
-        const jne_size: usize = 2;
+        if (i <= 127) {
+            try buf.appendSlice(allocator, inst.encJccRel8(.ne, 0).slice());
+        } else {
+            try buf.appendSlice(allocator, inst.encJccRel32(.ne, 0).slice());
+        }
         try emitBrTableJmp(allocator, buf, alloc, pushed_vregs, labels, spill_base_off, func, frame_bytes, uses_runtime_ptr, targets[start + i]);
         const after: usize = buf.items.len;
         const disp: usize = after - (jne_at + jne_size);
-        if (disp > 127) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:jne-rel8-overflow", @intCast(disp));
-        buf.items[jne_at + 1] = @intCast(disp);
+        if (i <= 127) {
+            if (disp > 127) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:jne-rel8-overflow", @intCast(disp));
+            buf.items[jne_at + 1] = @intCast(disp);
+        } else {
+            // rel32 (Jcc 0F 8X rel32) — disp32 patched into bytes [2..6].
+            const disp32: u32 = @intCast(disp);
+            std.mem.writeInt(u32, buf.items[jne_at + 2 ..][0..4], disp32, .little);
+        }
     }
     try emitBrTableJmp(allocator, buf, alloc, pushed_vregs, labels, spill_base_off, func, frame_bytes, uses_runtime_ptr, targets[start + count]);
 }

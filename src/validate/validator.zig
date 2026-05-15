@@ -384,6 +384,15 @@ const Validator = struct {
                 -3 => .{ .single = .f32 }, // 0x7D
                 -4 => .{ .single = .f64 }, // 0x7C
                 -5 => .{ .single = .v128 }, // 0x7B (§9.9 / 9.9-f-2)
+                // §9.9 / 9.9-l-1b-d093-d45 (D-118): reftype block-
+                // results per Wasm 2.0 §5.3.5 (`valtype` for block
+                // types includes funcref / externref). `br_table.wast`'s
+                // `meet-funcref` / `meet-externref` exports declare
+                // `(block (result <ref>) ...)` blocks. Reftype-class
+                // codegen plumbing (d-33) aliases these onto the
+                // i64 8-byte gpr-class scalar path.
+                -16 => .{ .single = .funcref }, // 0x70
+                -17 => .{ .single = .externref }, // 0x6F
                 else => return Error.BadBlockType,
             };
             return .{ .start = .empty, .end = end };

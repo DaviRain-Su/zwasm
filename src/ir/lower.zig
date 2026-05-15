@@ -1015,8 +1015,10 @@ const Lowerer = struct {
             return switch (sleb) {
                 -64 => @as(u32, 0), // 0x40 empty
                 // §9.9 / 9.9-f-2: -5 (0x7B) = v128 single valtype
-                // (Wasm 2.0 SIMD per spec §5.3.5).
-                -1, -2, -3, -4, -5 => @as(u32, 1), // single valtype
+                // (Wasm 2.0 SIMD per spec §5.3.5). §9.9 /
+                // 9.9-l-1b-d093-d45 (D-118): -16/-17 = funcref/externref
+                // reftype single valtypes (Wasm 2.0 §5.3.5).
+                -1, -2, -3, -4, -5, -16, -17 => @as(u32, 1), // single valtype
                 else => Error.BadBlockType,
             };
         }
