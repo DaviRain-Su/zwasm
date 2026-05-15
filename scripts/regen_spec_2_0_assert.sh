@@ -220,6 +220,15 @@ NAMES=(
   table
   table_set
   table_fill
+  # d-47 close: D-121 table_get externref-OOB discharged via
+  # fix-makeJitRuntime-clobber of scratch_tables_descriptor[0]
+  # (the harness's pre-d-47 makeJitRuntime reset .len = 32 on
+  # every assert, clobbering the setupMultiTableScratch's
+  # module-derived len). D-124 table_copy + D-123 table_init
+  # remain — table_copy.19 (no-import 2-table module) trips
+  # populate-side UnsupportedEntrySignature; table_init still
+  # SEGVs. Both deferred.
+  table_get
   # d-41 enable: `memory_trap` — D-114 discharged. The 4× load
   # FAILs were not load-bounds-check bugs; they were caused by a
   # skipped `(assert_return (invoke "i64.store" 0xfff8 0))`

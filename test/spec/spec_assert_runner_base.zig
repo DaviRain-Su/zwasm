@@ -181,13 +181,20 @@ pub fn makeJitRuntime(
     // count. JIT call_indirect with `ins.extra > 0` will read
     // through `tables_jit_ci_ptr[k]` for tables 1..N.
     scratch_table_jit_ci[0] = .{ .funcptr_base = funcptrs.ptr, .typeidx_base = typeidxs.ptr };
-    // Default entry-0 TableSlice keeps the runner's pre-multi-
-    // table semantics for modules whose `setupMultiTableScratch`
-    // hasn't run (e.g. tests below + manifest lines that haven't
-    // bound a module yet). Once `setupMultiTableScratch` runs,
-    // entry 0 is rebound to the module's real table-0 size +
-    // refs slice.
-    scratch_tables_descriptor[0] = .{ .refs = &scratch_table_refs[0], .len = @intCast(funcptrs.len), .max = entry.table_no_max };
+    // §9.9 / 9.9-l-1b-d093-d47 (D-121 fix): do NOT reset
+    // scratch_tables_descriptor[0] here. The d-42b / d-43
+    // pre-d-47 version overwrote `.len` to `funcptrs.len`
+    // (= harness scratch capacity 32) on every makeJitRuntime
+    // call, clobbering the module-derived `tbl_min` that
+    // `setupMultiTableScratch` populated at on_module_loaded.
+    // The bug surfaced as `table_get.wast: get-externref(2)`
+    // not trapping — the JIT's bounds check saw len=32 instead
+    // of the declared 2 for the externref table. setupMulti's
+    // table-0 bind at on_module_loaded is authoritative for
+    // the lifetime of the module; spec_assert harness's
+    // module-switch sequence (on_module_loaded fires before
+    // any assert) guarantees setupMulti has run before any
+    // makeJitRuntime that consumes the descriptor.
     return .{
         .vm_base = memory.ptr,
         .mem_limit = memory.len,
@@ -358,7 +365,21 @@ pub fn setupMultiTableScratch(
     }
     var k: u32 = 0;
     while (k < num_tables) : (k += 1) {
-        const tbl_min = if (k == 0) @as(u32, @intCast(table0_funcptrs.len)) else runner_mod.declaredTableMin(gpa, wasm_bytes, k);
+        // §9.9 / 9.9-l-1b-d093-d47 (D-121 fix): table 0's actual
+        // declared min — NOT `table0_funcptrs.len` (= the harness's
+        // fixed scratch_table_capacity 32). Pre-d-47 used the
+        // scratch capacity for table 0, so `table.get`'s bounds
+        // check on table 0 (e.g. `table_get.wast` `get-externref(2)`
+        // with a `(table 2 externref)`-declared table) passed
+        // through bounds (2 < 32) instead of trapping (2 >= 2).
+        // The legacy `JitRuntime.table_size` scalar (consumed by
+        // `call_indirect`'s W25 bounds check) stays at
+        // scratch capacity — call_indirect's sig check still
+        // traps on OOB indices because the typeidx slot is
+        // sentinel-filled (maxInt = always-mismatch); the trap
+        // reason is sig-mismatch instead of out-of-bounds, which
+        // spec assert_trap accepts.
+        const tbl_min = runner_mod.declaredTableMin(gpa, wasm_bytes, k);
         if (tbl_min > SCRATCH_EXTRA_TABLE_CAPACITY) return error.UnsupportedEntrySignature;
         if (k > 0) {
             const fp_slice = scratch_extra_funcptrs[k - 1][0..tbl_min];
