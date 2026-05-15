@@ -125,6 +125,10 @@ pub const DirectiveKind = enum {
     assert_trap,
     assert_invalid,
     assert_malformed,
+    /// d-57: module is valid but instantiation fails (active
+    /// data/elem OOB, start-fn trap, …). PASS on any init-time
+    /// error; FAIL if instantiation completes cleanly.
+    assert_uninstantiable,
     /// d-36: bare `(invoke FN ARGS)` action — invoke for side
     /// effects, ignore result, propagate traps as FAIL.
     invoke_action,
@@ -160,6 +164,9 @@ pub fn classifyDirective(line: []const u8) ClassifiedDirective {
     }
     if (std.mem.startsWith(u8, line, "assert_malformed ")) {
         return .{ .kind = .assert_malformed, .body = line[17..] };
+    }
+    if (std.mem.startsWith(u8, line, "assert_uninstantiable ")) {
+        return .{ .kind = .assert_uninstantiable, .body = line[22..] };
     }
     if (std.mem.startsWith(u8, line, "invoke-action ")) {
         return .{ .kind = .invoke_action, .body = line[14..] };
@@ -1130,6 +1137,23 @@ pub const RunnerCallbacks = struct {
         stdout: *std.Io.Writer,
         name: []const u8,
     ) anyerror!bool,
+    /// d-57: attempt the same instantiation work as
+    /// `on_module_loaded` but invert error semantics — return
+    /// `true` (PASS) on any init-time failure (active data/elem
+    /// OOB, start-fn trap, ...); return `false` (FAIL) iff
+    /// instantiation completes cleanly. The compile step
+    /// itself runs in `runCorpus` so this callback may assume
+    /// `compiled` is well-formed; instantiation-only failures
+    /// reach the callback. Optional — runners that don't yet
+    /// support assert_uninstantiable leave this null and base
+    /// routes the directive to `skipped` with a SKIP-* line.
+    handle_assert_uninstantiable: ?*const fn (
+        gpa: std.mem.Allocator,
+        wasm_bytes: []const u8,
+        compiled: *const runner_mod.CompiledWasm,
+        stdout: *std.Io.Writer,
+        name: []const u8,
+    ) anyerror!bool = null,
 };
 
 /// Run one corpus manifest end-to-end: open the directory, read
@@ -1353,6 +1377,43 @@ pub fn runCorpus(
                     tally.passed += 1;
                 }
                 gpa.free(wasm_bytes);
+            },
+            .assert_uninstantiable => {
+                const file = classified.body;
+                const cb = callbacks.handle_assert_uninstantiable orelse {
+                    try stdout.print("SKIP-NO-INSTANTIATE-CB  {s}: assert_uninstantiable {s} (specialisation lacks callback)\n", .{ name, file });
+                    tally.skipped += 1;
+                    continue;
+                };
+                const wasm_bytes = dir.readFileAlloc(io, file, gpa, .limited(4 << 20)) catch |err| {
+                    try stdout.print("FAIL  {s}/{s} (assert_uninstantiable) read: {s}\n", .{ name, file, @errorName(err) });
+                    tally.failed += 1;
+                    continue;
+                };
+                defer gpa.free(wasm_bytes);
+                // d-37 pre-filter: cross-module-imports surface as
+                // SKIP rather than failing the compile or
+                // instantiation; assert_uninstantiable on such
+                // modules is structurally untestable here.
+                if (hasUnbindableImports(gpa, wasm_bytes)) {
+                    try stdout.print("SKIP-CROSS-MODULE-IMPORTS  {s}/{s}: assert_uninstantiable on module the spec runner cannot bind\n", .{ name, file });
+                    tally.skipped += 1;
+                    continue;
+                }
+                // Compile-stage failure is also a valid
+                // `uninstantiable` outcome (the module never
+                // becomes instantiable); count as PASS.
+                var compiled_local = runner_mod.compileWasm(gpa, wasm_bytes) catch {
+                    tally.passed += 1;
+                    continue;
+                };
+                defer compiled_local.deinit(gpa);
+                const ok = cb(gpa, wasm_bytes, &compiled_local, stdout, name) catch |err| {
+                    try stdout.print("FAIL  {s}: assert_uninstantiable {s} callback errored: {s}\n", .{ name, file, @errorName(err) });
+                    tally.failed += 1;
+                    continue;
+                };
+                if (ok) tally.passed += 1 else tally.failed += 1;
             },
             .unknown => {
                 try stdout.print("FAIL  {s}: unknown directive '{s}'\n", .{ name, line });

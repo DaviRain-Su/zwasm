@@ -1079,9 +1079,77 @@ fn invokeActionShape(
     return error.ShapeNotSupported;
 }
 
+/// `RunnerCallbacks.handle_assert_uninstantiable` — mirrors
+/// `nonSimdOnModuleLoaded`'s init pipeline but inverts the
+/// outcome: any error during data/elem/start init is the
+/// expected behaviour (PASS = `true`); only a clean
+/// instantiation is a FAIL. Run via the
+/// `assert_uninstantiable` directive arm in `runCorpus` for
+/// modules whose source-level shape was
+/// `(assert_uninstantiable (module ...) "...")`.
+fn nonSimdHandleAssertUninstantiable(
+    gpa: std.mem.Allocator,
+    wasm_bytes: []const u8,
+    compiled: *const runner_mod.CompiledWasm,
+    stdout: *std.Io.Writer,
+    name: []const u8,
+) anyerror!bool {
+    const mem_limits = base.extractMemoryLimits(gpa, wasm_bytes);
+    base.resetGrowableMemory(mem_limits.min);
+    base.current_mem_max_pages = mem_limits.max;
+    @memset(scratch_globals[0..], 0);
+
+    runner_mod.applyActiveDataSegments(
+        gpa,
+        wasm_bytes,
+        base.growable_memory[0..@intCast(base.current_mem_bytes)],
+    ) catch return true;
+    runner_mod.applyDefinedGlobalsInit(
+        gpa,
+        wasm_bytes,
+        compiled.globals_offsets,
+        compiled.globals_valtypes,
+        scratch_globals[0..],
+    ) catch return true;
+    runner_mod.applyTableInit(
+        gpa,
+        wasm_bytes,
+        compiled,
+        scratch_funcptrs[0..],
+        scratch_typeidxs[0..],
+    ) catch return true;
+    base.setupMultiTableScratch(
+        gpa,
+        wasm_bytes,
+        compiled,
+        scratch_funcptrs[0..],
+        scratch_typeidxs[0..],
+    ) catch return true;
+
+    if (base.extractStartFunc(gpa, wasm_bytes)) |start_funcidx| {
+        if (start_funcidx < compiled.module.func_offsets.len and
+            compiled.module.func_offsets[start_funcidx] != @import("zwasm").engine.codegen.shared.linker.IMPORT_SENTINEL_OFFSET)
+        {
+            var rt = base.makeJitRuntime(
+                base.growable_memory[0..@intCast(base.current_mem_bytes)],
+                scratch_globals[0..],
+                scratch_funcptrs[0..],
+                scratch_typeidxs[0..],
+            );
+            entry.callVoidNoArgs(compiled.module, start_funcidx, &rt) catch |err| switch (err) {
+                error.Trap => return true,
+            };
+        }
+    }
+
+    try stdout.print("FAIL  {s}: assert_uninstantiable but module instantiated cleanly\n", .{name});
+    return false;
+}
+
 const non_simd_callbacks: base.RunnerCallbacks = .{
     .on_module_loaded = nonSimdOnModuleLoaded,
     .handle_assert_return = nonSimdRunAssertReturn,
     .handle_assert_trap = nonSimdRunAssertTrap,
     .handle_invoke_action = nonSimdRunInvokeAction,
+    .handle_assert_uninstantiable = nonSimdHandleAssertUninstantiable,
 };

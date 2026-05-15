@@ -593,6 +593,16 @@ for c in d['commands']:
         lines.append(f'assert_trap {quote_field(a["field"])} {args_s}')
     elif t == 'assert_invalid':
         lines.append(f'assert_invalid {c["filename"]}')
+    elif t == 'assert_uninstantiable':
+        # §9.9 / 9.9-l-1b-d093-d57: module is valid (compiles) but
+        # instantiation fails — typically OOB active data/elem
+        # segment, or start fn traps. Runner attempts the same
+        # init path as `module` directive and PASSes if any step
+        # fails, FAILs if instantiation succeeds.
+        if c.get('module_type') != 'binary' or 'filename' not in c:
+            lines.append('skip-impl directive-assert_uninstantiable-non-binary')
+            continue
+        lines.append(f'assert_uninstantiable {c["filename"]}')
     elif t == 'assert_malformed':
         if c.get('module_type') != 'binary' or 'filename' not in c:
             lines.append('skip-adr-skip_text_format_parser directive-assert_malformed-text')
@@ -657,10 +667,11 @@ with open(dst, 'w') as f:
     f.write('\n'.join(lines) + '\n')
 PY
 
-  # Copy referenced .wasm files (module, assert_invalid, assert_malformed).
+  # Copy referenced .wasm files (module, assert_invalid, assert_malformed,
+  # assert_uninstantiable).
   while read -r line; do
     set -- $line
-    if [ "$1" = "module" ] || [ "$1" = "assert_invalid" ] || [ "$1" = "assert_malformed" ]; then
+    if [ "$1" = "module" ] || [ "$1" = "assert_invalid" ] || [ "$1" = "assert_malformed" ] || [ "$1" = "assert_uninstantiable" ]; then
       if [ -f "$TMP/$2" ]; then
         cp "$TMP/$2" "$out_dir/"
       fi

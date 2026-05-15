@@ -16,5 +16,5 @@ assert_return get () -> i32:70
 module start.5.wasm
 module start.6.wasm
 module start.7.wasm
-skip-impl directive-assert_uninstantiable
+assert_uninstantiable start.8.wasm
 skip-adr-skip_text_format_parser directive-assert_malformed-text
