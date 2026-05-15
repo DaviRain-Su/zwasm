@@ -783,11 +783,24 @@ Currently registered hard gates:
      re-engages by working through the gate checklist, marking
      ☑ as items resolve, and finally asking for the gate to
      be cleared (= flipping 7.13 to `[x]`).
+- **§9.9 → Substrate audit (Phase 9 完備 review)** — anchored
+  at row §9.9 / 9.12 (per ADR-0062), document
+  `.dev/phase9_completion_substrate_audit.md`. Triggers when
+  the next-task lookup resolves to row 9.12. The loop must:
+  1. Skip `ScheduleWakeup` (do **not** re-arm).
+  2. Surface a one-sentence handoff: "Phase 9 完備 substrate
+     audit (`.dev/phase9_completion_substrate_audit.md`) needs
+     collaborative review; pausing autonomous mode."
+  3. Treat resumption as bucket-1 user intervention — the user
+     re-engages by working through the gate checklist (Q2 /
+     Q3 / Q4 decisions + cascading ADRs), marking ☑ as items
+     resolve, and finally flipping 9.12 to `[x]`. Phase 10
+     entry gate (9.13) only opens after substrate audit clears.
 - **§9.9 → Phase 10 (Phase 9 → Phase 10)** — anchored at row
-  §9.9 / 9.12, document `.dev/phase10_transition_gate.md`
-  (Track D prep deliverable). Triggers when the next-task
-  lookup resolves to row 9.12 OR to "open Phase 10". The loop
-  must:
+  §9.9 / 9.13 (was 9.12 pre-ADR-0062 renumber), document
+  `.dev/phase10_transition_gate.md` (Track D prep deliverable).
+  Triggers when the next-task lookup resolves to row 9.13 OR
+  to "open Phase 10". The loop must:
   1. Skip `ScheduleWakeup` (do **not** re-arm).
   2. Surface a one-sentence handoff: "Phase 10 entry gate
      (`.dev/phase10_transition_gate.md`) needs collaborative
@@ -795,7 +808,7 @@ Currently registered hard gates:
   3. Treat resumption as bucket-1 user intervention — the user
      re-engages by working through the gate checklist, marking
      ☑ as items resolve, and finally asking for the gate to
-     be cleared (= flipping 9.12 to `[x]`).
+     be cleared (= flipping 9.13 to `[x]`).
 
 **Detection rule** — the loop scans for hard gates at **two**
 checkpoints:
@@ -804,9 +817,11 @@ checkpoints:
    including fresh manual sessions and `ScheduleWakeup`-fired
    wake-ups). When reading §9.<active>'s task table to identify
    the first `[ ]` row, check whether that row's body contains
-   `🔒` AND a `phase<N>_transition_gate.md` reference. If yes,
-   this is a hard gate — surface to user immediately with a
-   one-sentence handoff and the gate doc path. **Do not enter
+   `🔒` AND a reference to a `.dev/phase*.md` gate document
+   (canonical patterns: `phase<N>_transition_gate.md`,
+   `phase<N>_completion_*.md`). If yes, this is a hard gate —
+   surface to user immediately with a one-sentence handoff and
+   the gate doc path. **Do not enter
    the per-task TDD loop**.
 2. **Step 7 re-target** (after a per-task close, before the
    final `ScheduleWakeup`). Scan the next `[ ]` row in

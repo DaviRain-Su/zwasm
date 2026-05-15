@@ -10,35 +10,21 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **Phase 9 extended; D-093 (d-47) D-121 closed + table_get 2026-05-16. Phase 9 完備条件議論セッション保留中 — autonomy 一時停止。**
+## Active state — **Phase 9 extended; ADR-0062 + §9.9 / 9.12 substrate-audit hard gate installed 2026-05-16**
 
 ### One-line state
 
-D-093 (d-47) closes D-121. Pre-d-47 spec_assert harness's
-`makeJitRuntime` reset `scratch_tables_descriptor[0].len`
-to scratch capacity (32) on every per-assert call,
-clobbering `setupMultiTableScratch`'s module-derived
-`tbl_min`. Surfaced as `table_get.wast: get-externref(2)`
-not trapping. Fix: drop the clobber + use real
-`declaredTableMin` for k=0. spec_assert non-simd
-**20918/0/1213 → 20927/0/1219** (+9 PASS, 0 FAIL, +1
-manifest = `table_get`); simd 13301/0/440 unchanged.
-
-### Open discussion thread (user-paused 2026-05-16)
-
-User raised structural concern (post-d-47): **CLI option /
-build flag → spec-level gating** (`-Dwasm=1.0|2.0|3.0` +
-per-proposal toggles). ROADMAP §4.5 / §4.6 specify
-dispatch-table-based feature modules (no pervasive
-`if (build_options.wasm)` branching — v1 anti-pattern). But
-**implementation has diverged**: `WasmLevel` is parsed +
-displayed but **never consulted as a gate**; the per-feature
-`pub fn register(*DispatchTable)` stubs exist as no-ops; the
-real op→handler binding lives in switch arms in `lower.zig`
-/ `validator.zig` / `emit.zig` etc. The Phase 9 完備 sign-off
-must address the gap before further op enabling cements the
-anti-pattern. Autonomy paused; loop will re-arm at user
-go-ahead.
+User-directed sequence resumed: **(1) Phase 9 = 100% PASS in
+current trajectory; (2) Phase 9 完備直後 substrate
+re-examination が構造的に発火**. ADR-0062 files the new gate
+row 9.12 (`🔒` + `.dev/phase9_completion_substrate_audit.md`)
+between Phase 9 close and Phase 10 entry; existing Phase 10
+entry gate renumbered 9.12 → 9.13. SKILL.md hard-gate
+detection rule extended to match the new gate-doc filename
+pattern. Loop continues to drive d-48+ Wasm 2.0 PASS
+chunks until 9.9 `[x]`; substrate audit fires automatically
+at next resume thereafter. spec_assert non-simd 20927/0/1219,
+simd 13301/0/440 (unchanged from d-47).
 
 ### Standing reminder for the autonomous loop
 
@@ -143,7 +129,7 @@ Other queued post-D-093 names: `address`, `align`, `br_table`,
 | D-093 (d-45) | [x] 50237a0e | D-118 close. Root cause was NOT regalloc vreg overflow but our hardcoded br_table target caps (arm64: `count >= 4096` reused Error.SlotOverflow; x86_64: `count > 127` from imm8/rel8). `br_table.wast` `large` declares 16149 targets. d-45 introduces per-case CMP dispatch on i magnitude (arm64 MOVZ+MOVK+CMP-reg; x86_64 CMP-imm32 + Jcc-rel32) and accepts reftype block-types (-16/-17 per Wasm 2.0 §5.3.5) in validator readBlockType + lower readBlockArity (br_table.wast `meet-funcref` / `meet-externref` exports). spec_assert non-simd 20728/0/1150 → 20898/0/1153 (+170 PASS, 0 FAIL, +1 manifest); simd 13301/0/440 unchanged. |
 | D-093 (d-46) | [x] 469c50cf | Batch enable +3 table_* NAMES (table, table_set, table_fill) via per-corpus isolated bisect. 5 deferred to new debt: D-121 table_get externref-OOB, D-122 table_size UnsupportedOp, D-123 table_init SEGV, D-124 table_copy bounds-trap, D-125 table_grow UnsupportedOp. spec_assert non-simd 20898/0/1153 → 20918/0/1213 (+20 PASS, 0 FAIL, +3 manifests); simd 13301/0/440 unchanged. |
 | D-093 (d-47) | [x] 664b3fa4 | D-121 close. Pre-d-47 `makeJitRuntime` reset `scratch_tables_descriptor[0].len` to scratch capacity on every per-assert call, overriding setupMultiTableScratch's module-derived `tbl_min`. Drop the clobber + use `declaredTableMin` for k=0 too. `table_get` lands. spec_assert non-simd 20918/0/1213 → 20927/0/1219 (+9 PASS, 0 FAIL, +1 manifest); simd 13301/0/440 unchanged. |
-| **(paused)** | discussion | **Phase 9 完備 sign-off blocked on dispatch-table substrate**. Resume after user-led design review (see "Open discussion thread" above). Next candidate row after gate dissolves: D-122 / D-125 (`table_size` / `table_grow` UnsupportedOp — both need `table.grow` runtime callout = ADR-grade ABI extension). |
+| d-48 | **NEXT** | D-122 + D-125 paired — `table_size` / `table_grow` both UnsupportedOp at compile. Root cause is `table.grow` emit gap on both arches. Discharge needs `table_grow_fn` runtime callout (mirror of ADR-0059 `memory_grow_fn`) + per-arch BLR/CALL emit + harness `growTableImpl` resize for `scratch_table_refs[k]`. Substrate-audit gate (9.12) is installed; this chunk continues current trajectory. |
 
 Other queued chunks (post-l-1): k-1, k-2, m-4c (= D-090),
 m-2d, n-1, j-3b.
