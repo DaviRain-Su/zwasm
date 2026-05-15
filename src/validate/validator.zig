@@ -1273,6 +1273,14 @@ const Validator = struct {
     fn opBrTable(self: *Validator) Error!void {
         const n = try leb128.readUleb128(u32, self.body, &self.pos);
         try self.popExpect(.i32); // selector
+        // Wasm 2.0 §3.3.5.8: in **unreachable** code (polymorphic
+        // stack after `unreachable` / `br` / `return`), the joined
+        // label type collapses to `bot` and target types may
+        // differ — the `meet-bottom` test in `unreached-valid.wast`
+        // exercises a br_table whose two targets have non-unifiable
+        // result types (`block f32` vs `block f64`). In reachable
+        // code we still enforce the strict labelTypesEq rule.
+        const polymorphic = self.topFrame().unreachable_flag;
         var first: ?BlockType = null;
         var i: u32 = 0;
         while (i <= n) : (i += 1) {
@@ -1280,10 +1288,15 @@ const Validator = struct {
             const target = self.frameAt(depth) orelse return Error.InvalidBranchDepth;
             const lt = target.labelType();
             if (first) |prev| {
-                if (!labelTypesEq(prev, lt)) return Error.ArityMismatch;
+                if (!polymorphic and !labelTypesEq(prev, lt)) return Error.ArityMismatch;
             } else first = lt;
         }
-        if (first) |lt| try self.popLabelTypes(lt);
+        if (first) |lt| {
+            // In unreachable code, popping the joined type is
+            // satisfied by the bottom-stack synthesiser; in
+            // reachable code, lt is the strict shared type.
+            if (!polymorphic) try self.popLabelTypes(lt);
+        }
         self.markUnreachable();
     }
 

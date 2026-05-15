@@ -957,11 +957,12 @@ pub fn emitEndIntra(
     if (pushed_vregs.items.len > new_len) {
         pushed_vregs.shrinkRetainingCapacity(new_len);
     }
-    // D-093 (d-5): pad with placeholder vreg 0 when loop fall-
-    // through is dead. Restricted to `.loop` (mirror of arm64).
-    if (lbl.kind == .loop) {
-        while (pushed_vregs.items.len < new_len) {
-            try pushed_vregs.append(allocator, 0);
-        }
+    // D-093 (d-5): pad with placeholder vreg 0 when fall-
+    // through is dead. d-52 (D-130) extended to all block kinds
+    // (was `.loop`-only) — block can become dead via in-body
+    // `unreachable` / `br_table` without any merge-capturing
+    // `br` (e.g. `unreached-valid.wast` `meet-bottom`).
+    while (pushed_vregs.items.len < new_len) {
+        try pushed_vregs.append(allocator, 0);
     }
 }

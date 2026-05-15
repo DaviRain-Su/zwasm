@@ -969,14 +969,16 @@ pub fn emitEndIntra(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     }
     // D-093 (d-5): `.loop` fall-through dead — pad with
     // placeholder vreg 0 so the downstream post-loop pop
-    // doesn't underflow. Restricted to `.loop` because
-    // block/if dead-fall-through is already handled by the
-    // merge-MOV mechanism (d-2 / d-4 cases) or by the natural
-    // operand-stack invariant (live fall-through always
-    // produces exactly `new_len` entries).
-    if (lbl.kind == .loop) {
-        while (ctx.pushed_vregs.items.len < new_len) {
-            try ctx.pushed_vregs.append(ctx.allocator, 0);
-        }
+    // doesn't underflow. Extended at d-52 (D-130) to all
+    // block kinds: a block can become dead via `unreachable`
+    // / `br_table` inside its body without any `br` having
+    // captured a merge target (e.g. `unreached-valid.wast`
+    // `meet-bottom`: br_table-in-dead-code emits nothing, the
+    // merge-MOV mechanism never fires, and the block's `.end`
+    // sees pushed_vregs.len < entry + result_arity). Pad with
+    // vreg 0 (recognised as the d-5 dead-fall-through
+    // placeholder by marshalFunctionReturn / `.drop` etc.).
+    while (ctx.pushed_vregs.items.len < new_len) {
+        try ctx.pushed_vregs.append(ctx.allocator, 0);
     }
 }

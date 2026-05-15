@@ -130,7 +130,19 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     // defined functions; that case also returns an empty
     // JitModule — call-by-export to an import-only function is
     // unreachable from JIT-compiled code today.)
-    const func_section_opt = module.find(.function);
+    // D-127 (d-52): Wasm spec allows an EMPTY Function section
+    // (count=0) without a corresponding Type section
+    // (binary.60.wasm). Treat empty function section like absent
+    // function section — both bypass the type-section requirement
+    // since neither contributes defined funcs.
+    const func_section_opt = blk: {
+        const opt = module.find(.function);
+        if (opt) |s| {
+            // Empty function section body = single LEB128 0x00 byte.
+            if (s.body.len == 1 and s.body[0] == 0x00) break :blk null;
+        }
+        break :blk opt;
+    };
     if (func_section_opt == null) {
         const empty_results = try allocator.alloc(compile_func.FuncResult, 0);
         // Build func_sigs from import-only function entries (if any)
