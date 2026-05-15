@@ -10,22 +10,21 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-54 closed: D-129 discharged via host-import-trap sentinel routing; names + imports land**
+## Active state — **d-55 closed: drain runner-shape-gap backlog (+11 dispatch shapes, +467 PASS)**
 
 ### One-line state
 
-d-54 closes D-129. `hostImportTrapStub` writes
-`HOST_IMPORT_TRAP_SENTINEL = 0xBADC0DE` into `rt.trap_flag`;
-runner's new `printCallTrap` helper detects the sentinel
-post-Error.Trap, prints `SKIP-HOST-IMPORT`, and sets the
-`pending_host_import_skip` side-channel; `runCorpus` routes
-ok=false-with-flag to `tally.skipped_adr++` (vs failed) on
-both assert_return and invoke-action paths. names + imports
-re-enabled in NAMES; the +483 PASS that was waiting on D-129
-lands. spec_assert non-simd 22498/0/2916 → 22981/0/3089
-(+483 PASS, 0 FAIL, +2 manifests). simd 13301/0/440 unchanged.
-Loop continues toward 9.9 `[x]`; substrate audit hard gate
-(9.12) fires automatically when next chunk would resolve to it.
+d-55 adds 11 new `entry.callXXX_yyy` helpers + matching dispatch
+arms in `dispatchScalarResult` + 11 entries to the distiller's
+`supported` set, draining the top runner-shape-gap skip-impl
+families: `(i32 i32 i32, i32)` × 275, `(f64×N, f64)` ×46+18,
+`(f32×N, f32)` ×41+17, mixed FP `(f32 f64,f32)` etc. Previously
+manifest entries `skip-impl runner-shape-gap (...)` reclassify
+as `assert_return` and execute. spec_assert non-simd 22981/0/3089
+→ 23448/0/2622 (+467 PASS, 0 FAIL; skip-impl 2437 → 1970).
+simd 13301/0/440 unchanged. Loop continues toward 9.9 `[x]`;
+substrate audit hard gate (9.12) fires automatically when next
+chunk would resolve to it.
 
 ### Standing reminder for the autonomous loop
 
@@ -52,11 +51,14 @@ refactor, the closing path is the runner-side skip-impl backlog
 considering whether to flip 9.9 `[x]` based on "active corpora
 green" rather than "every assertion classified".
 
-- **d-55** — Tackle the 7 runner-side skip-impl entries (nop
-  3-arg dispatch + loop multi-result params + 1 verify) OR
-  attempt 9.9 close once skip-impl is at the irreducible Phase
-  10+ floor (D-126 / D-079 / multi-value loop). Substrate
-  audit hard gate (9.12) auto-fires after 9.9 `[x]`.
+- **d-56** — Continue draining skip-impl. Next biggest classes
+  by reason: `directive-assert_unlinkable` × 83 (link-time
+  error directive — needs runner directive support),
+  `multi-result` × 48 (Phase 11+ scope per ADR-0029 follow-up),
+  `directive-assert_uninstantiable` × 34, `trap-shape-gap` × 30
+  (mirror of d-55 fix on the trap path), `directive-register`
+  × 21, `directive-assert_exhaustion` × 15. The trap-shape-gap
+  set is the next mechanical win (mirrors d-55's pattern).
 
 Runner-side skip-impl backlog (7 total, in `nop / loop /
 local_tee`):
@@ -131,6 +133,7 @@ Other queued post-D-093 names: `address`, `align`, `br_table`,
 | D-093 (d-45) | [x] 50237a0e | D-118 close. Root cause was NOT regalloc vreg overflow but our hardcoded br_table target caps (arm64: `count >= 4096` reused Error.SlotOverflow; x86_64: `count > 127` from imm8/rel8). `br_table.wast` `large` declares 16149 targets. d-45 introduces per-case CMP dispatch on i magnitude (arm64 MOVZ+MOVK+CMP-reg; x86_64 CMP-imm32 + Jcc-rel32) and accepts reftype block-types (-16/-17 per Wasm 2.0 §5.3.5) in validator readBlockType + lower readBlockArity (br_table.wast `meet-funcref` / `meet-externref` exports). spec_assert non-simd 20728/0/1150 → 20898/0/1153 (+170 PASS, 0 FAIL, +1 manifest); simd 13301/0/440 unchanged. |
 | D-093 (d-46) | [x] 469c50cf | Batch enable +3 table_* NAMES (table, table_set, table_fill) via per-corpus isolated bisect. 5 deferred to new debt: D-121 table_get externref-OOB, D-122 table_size UnsupportedOp, D-123 table_init SEGV, D-124 table_copy bounds-trap, D-125 table_grow UnsupportedOp. spec_assert non-simd 20898/0/1153 → 20918/0/1213 (+20 PASS, 0 FAIL, +3 manifests); simd 13301/0/440 unchanged. |
 | D-093 (d-47) | [x] 664b3fa4 | D-121 close. Pre-d-47 `makeJitRuntime` reset `scratch_tables_descriptor[0].len` to scratch capacity on every per-assert call, overriding setupMultiTableScratch's module-derived `tbl_min`. Drop the clobber + use `declaredTableMin` for k=0 too. `table_get` lands. spec_assert non-simd 20918/0/1213 → 20927/0/1219 (+9 PASS, 0 FAIL, +1 manifest); simd 13301/0/440 unchanged. |
+| D-093 (d-55) | [x] `65e5bacb` | Drain runner-shape-gap skip-impl backlog. Manifest skip-impl had 483 of 748 lines as `runner-shape-gap` (multi-arg dispatch shapes the runner ladder doesn't yet handle). d-55 adds 11 new entry helpers (`callI32_i32i32i32`, `callI64_i32i64`, `callI64_i64i64i32`, `callF32_f32f32f32`, `callF32_f32f32f32f32`, `callF32_f32f32i32`, `callF32_f32f64`, `callF32_f64f32`, `callF64_f64f64f64`, `callF64_f64f64f64f64`, `callF64_f64f64i32`) in `src/engine/codegen/shared/entry.zig` mirroring the established AAPCS64/SysV convention; matching arms in `dispatchScalarResult` + 11 entries in the distiller's `supported` set so the previously-skipped asserts re-classify as `assert_return`. Top families unblocked: `(i32 i32 i32, i32)` × 275, `(f64 f64 f64, f64)` × 46, `(f32 f32 f32, f32)` × 41, 4-arg FP families × 18+17, mixed FP/i32 × 10+10, etc. spec_assert non-simd 22981/0/3089 → **23448/0/2622** (+467 PASS, 0 FAIL; skip-impl 2437 → 1970 = -467 ⇒ each unblocked shape ran an existing assert that now passes); simd 13301/0/440 unchanged. Mac aarch64 + OrbStack `test-all` both green. |
 | D-093 (d-54) | [x] `1d59c587` | D-129 close via runtime-side host-import-trap sentinel routing. `hostImportTrapStub` writes `HOST_IMPORT_TRAP_SENTINEL = 0xBADC0DE` into `rt.trap_flag` (was the JIT-body-standard `1`); new `printCallTrap` helper in spec_assert_runner_base detects the sentinel post-Error.Trap, prints `SKIP-HOST-IMPORT  …` (instead of FAIL), and sets `pending_host_import_skip` side-channel; `runCorpus` routes ok=false-with-flag to `tally.skipped_adr++` instead of `tally.failed++` on both assert_return + invoke-action paths (assert_trap doesn't need it — host-import trap satisfies the spec's expected-trap contract). 40 FAIL-print sites in spec_assert_runner_non_simd.zig consolidated to `base.printCallTrap()`. names + imports re-enabled in NAMES (+483 PASS that was waiting on D-129). spec_assert non-simd 22498/0/2916 → **22981/0/3089** (+483 PASS, 0 FAIL, +2 manifests); simd 13301/0/440 unchanged. Mac aarch64 + OrbStack `test-all` both green. |
 | D-093 (d-53) | [x] `b347cb80` | D-128 partial close (manifest-parse-split half). Distiller `quote_field()` emits `:hex:<utf8-hex>` for export names containing control chars / whitespace / quotes / colon (e.g. `:hex:0a09` for `\n\t`, `:hex:c385` for `Å`). Runner-side `decodeFnName(fn_name, buf)` reverses this — wired into all 3 fn_name-extraction sites in `spec_assert_runner_non_simd.zig` (assert_return, assert_trap, invoke-action). 6 new unit tests cover decodeFnName edge cases (empty, multi-byte UTF-8, odd-hex reject, buffer overflow). SCRATCH_MAX_FUNCS bumped 256 → 1024 (names.2.wasm declares 479 funcs). `names` + `imports` re-deferred to D-129: trial-enable showed 22981 PASS / 2 FAIL (the 2 spectest-import-wrapper traps); +577 PASS waits on D-129 reachability analysis. spec_assert non-simd 22498/0/2916 unchanged (d-53 ships infrastructure with no enabled-corpus impact yet). simd 13301/0/440 unchanged. Mac aarch64 + OrbStack `test-all` both green. |
 | D-093 (d-52) | [x] `9a601838` | D-127 + D-130 close. D-127: `compileWasm` early-out for absent function section now also fires when section is present-but-empty (binary.60.wasm `03 01 00`). D-130: `validator.zig::opBrTable` skips strict `labelTypesEq` when `topFrame.unreachable_flag` per Wasm 2.0 §3.3.5.8 (joined label type collapses to bottom in unreachable code). Companion emit fix: lower's `closeBlock` for inner-dead block doesn't push merge result vregs; the d-5 `.loop` fall-through placeholder pad (vreg 0 sentinel) is extended at d-52 to all block kinds in both arm64 + x86_64 `emitEndIntra` (was `.loop`-only). Edge fixture `test/edge_cases/p9/br_table/meet_bottom_unreachable.{wat,wasm,expect}`. binary + unreached-valid corpora land in NAMES. spec_assert non-simd 22404/0/2889 → **22498/0/2916** (+94 PASS, 0 FAIL, +2 manifests); simd 13301/0/440 unchanged. Mac aarch64 + OrbStack `test-all` both green. |
