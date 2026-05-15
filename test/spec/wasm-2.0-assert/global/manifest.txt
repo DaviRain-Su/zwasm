@@ -22,41 +22,41 @@ assert_return get-8 () -> f64:4621256167635550208
 assert_return set-7 f32:1090519040 -> ()
 assert_return set-8 f64:4621256167635550208 -> ()
 skip-impl non-scalar-arg set-mr
-skip-adr-host-state-diverged assert_return on field=get-x
-skip-adr-host-state-diverged assert_return on field=get-y
-skip-adr-host-state-diverged assert_return on field=get-7
-skip-adr-host-state-diverged assert_return on field=get-8
-skip-adr-host-state-diverged assert_return on field=get-mr
-skip-adr-host-state-diverged assert_return on field=as-select-first
-skip-adr-host-state-diverged assert_return on field=as-select-mid
-skip-adr-host-state-diverged assert_return on field=as-select-last
-skip-adr-host-state-diverged assert_return on field=as-loop-first
-skip-adr-host-state-diverged assert_return on field=as-loop-mid
-skip-adr-host-state-diverged assert_return on field=as-loop-last
-skip-adr-host-state-diverged assert_return on field=as-if-condition
-skip-adr-host-state-diverged assert_return on field=as-if-then
-skip-adr-host-state-diverged assert_return on field=as-if-else
-skip-adr-host-state-diverged assert_return on field=as-br_if-first
-skip-adr-host-state-diverged assert_return on field=as-br_if-last
-skip-adr-host-state-diverged assert_return on field=as-br_table-first
-skip-adr-host-state-diverged assert_return on field=as-br_table-last
-skip-adr-host-state-diverged assert_return on field=as-call_indirect-first
-skip-adr-host-state-diverged assert_return on field=as-call_indirect-mid
+skip-adr-skip_host_state_diverged assert_return on field=get-x
+skip-adr-skip_host_state_diverged assert_return on field=get-y
+skip-adr-skip_host_state_diverged assert_return on field=get-7
+skip-adr-skip_host_state_diverged assert_return on field=get-8
+skip-adr-skip_host_state_diverged assert_return on field=get-mr
+skip-adr-skip_host_state_diverged assert_return on field=as-select-first
+skip-adr-skip_host_state_diverged assert_return on field=as-select-mid
+skip-adr-skip_host_state_diverged assert_return on field=as-select-last
+skip-adr-skip_host_state_diverged assert_return on field=as-loop-first
+skip-adr-skip_host_state_diverged assert_return on field=as-loop-mid
+skip-adr-skip_host_state_diverged assert_return on field=as-loop-last
+skip-adr-skip_host_state_diverged assert_return on field=as-if-condition
+skip-adr-skip_host_state_diverged assert_return on field=as-if-then
+skip-adr-skip_host_state_diverged assert_return on field=as-if-else
+skip-adr-skip_host_state_diverged assert_return on field=as-br_if-first
+skip-adr-skip_host_state_diverged assert_return on field=as-br_if-last
+skip-adr-skip_host_state_diverged assert_return on field=as-br_table-first
+skip-adr-skip_host_state_diverged assert_return on field=as-br_table-last
+skip-adr-skip_host_state_diverged assert_return on field=as-call_indirect-first
+skip-adr-skip_host_state_diverged assert_return on field=as-call_indirect-mid
 assert_trap as-call_indirect-last ()
-skip-adr-host-state-diverged assert_return on field=as-store-first
-skip-adr-host-state-diverged assert_return on field=as-store-last
-skip-adr-host-state-diverged assert_return on field=as-load-operand
-skip-adr-host-state-diverged assert_return on field=as-memory.grow-value
-skip-adr-host-state-diverged assert_return on field=as-call-value
-skip-adr-host-state-diverged assert_return on field=as-return-value
-skip-adr-host-state-diverged assert_return on field=as-drop-operand
-skip-adr-host-state-diverged assert_return on field=as-br-value
-skip-adr-host-state-diverged assert_return on field=as-local.set-value
-skip-adr-host-state-diverged assert_return on field=as-local.tee-value
-skip-adr-host-state-diverged assert_return on field=as-global.set-value
-skip-adr-host-state-diverged assert_return on field=as-unary-operand
-skip-adr-host-state-diverged assert_return on field=as-binary-operand
-skip-adr-host-state-diverged assert_return on field=as-compare-operand
+skip-adr-skip_host_state_diverged assert_return on field=as-store-first
+skip-adr-skip_host_state_diverged assert_return on field=as-store-last
+skip-adr-skip_host_state_diverged assert_return on field=as-load-operand
+skip-adr-skip_host_state_diverged assert_return on field=as-memory.grow-value
+skip-adr-skip_host_state_diverged assert_return on field=as-call-value
+skip-adr-skip_host_state_diverged assert_return on field=as-return-value
+skip-adr-skip_host_state_diverged assert_return on field=as-drop-operand
+skip-adr-skip_host_state_diverged assert_return on field=as-br-value
+skip-adr-skip_host_state_diverged assert_return on field=as-local.set-value
+skip-adr-skip_host_state_diverged assert_return on field=as-local.tee-value
+skip-adr-skip_host_state_diverged assert_return on field=as-global.set-value
+skip-adr-skip_host_state_diverged assert_return on field=as-unary-operand
+skip-adr-skip_host_state_diverged assert_return on field=as-binary-operand
+skip-adr-skip_host_state_diverged assert_return on field=as-compare-operand
 assert_invalid global.1.wasm
 assert_invalid global.2.wasm
 module global.3.wasm

@@ -424,7 +424,7 @@ lines = []
 # by the next module load OR by a successful (non-skipped)
 # `invoke-action`. While set, subsequent `assert_return` lines
 # within the same module-state segment skip cleanly as
-# `skip-adr-host-state-diverged` — their expected results depend
+# `skip-adr-skip_host_state_diverged` — their expected results depend
 # on the skipped action's side effects, so the JIT-observed
 # values would be a function of the divergent state (e.g.
 # `ref_is_null.wast`'s `externref-elem(1) -> 0` requires `init`
@@ -439,13 +439,13 @@ for c in d['commands']:
         a = c['action']
         # §9.9 / 9.9-l-1b-d093-d43: divergent module state ⇒ skip.
         if module_state_diverged:
-            lines.append(f'skip-adr-host-state-diverged assert_return on field={a.get("field","?")!s}')
+            lines.append(f'skip-adr-skip_host_state_diverged assert_return on field={a.get("field","?")!s}')
             continue
         # d-37: cross-module action (`(invoke $mod "fn" ...)`)
         # targets a registered module the spec runner does not
         # model (Track-D scope). Skip cleanly.
         if 'module' in a:
-            lines.append(f'skip-adr-cross-module-action assert_return on module={a["module"]!s} field={a.get("field","?")!s}')
+            lines.append(f'skip-adr-skip_cross_module_action assert_return on module={a["module"]!s} field={a.get("field","?")!s}')
             continue
         if a.get('type') != 'invoke':
             lines.append('skip-impl non-invoke-action')
@@ -555,7 +555,7 @@ for c in d['commands']:
     elif t == 'assert_trap':
         a = c['action']
         if 'module' in a:
-            lines.append(f'skip-adr-cross-module-action assert_trap on module={a["module"]!s} field={a.get("field","?")!s}')
+            lines.append(f'skip-adr-skip_cross_module_action assert_trap on module={a["module"]!s} field={a.get("field","?")!s}')
             continue
         if a.get('type') != 'invoke':
             lines.append('skip-impl trap-non-invoke')
@@ -628,7 +628,7 @@ for c in d['commands']:
         # assert_return (the runner's dispatch ladder is shared).
         a = c['action']
         if 'module' in a:
-            lines.append(f'skip-adr-cross-module-action action on module={a["module"]!s} field={a.get("field","?")!s}')
+            lines.append(f'skip-adr-skip_cross_module_action action on module={a["module"]!s} field={a.get("field","?")!s}')
             continue
         if a.get('type') != 'invoke':
             lines.append(f'skip-impl action-non-invoke {a.get("type", "?")}')

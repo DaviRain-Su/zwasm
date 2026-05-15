@@ -11,10 +11,10 @@ module exports.9.wasm
 module exports.10.wasm
 module exports.11.wasm
 assert_return e i32:42 -> i32:43
-skip-adr-cross-module-action assert_return on module=$Func field=e
+skip-adr-skip_cross_module_action assert_return on module=$Func field=e
 module exports.12.wasm
 module exports.13.wasm
-skip-adr-cross-module-action assert_return on module=$Func field=e
+skip-adr-skip_cross_module_action assert_return on module=$Func field=e
 module exports.14.wasm
 assert_return a () -> i32:42
 assert_return b () -> i32:42
@@ -38,10 +38,10 @@ module exports.30.wasm
 module exports.31.wasm
 module exports.32.wasm
 skip-impl non-invoke-action
-skip-adr-cross-module-action assert_return on module=$Global field=e
+skip-adr-skip_cross_module_action assert_return on module=$Global field=e
 module exports.33.wasm
 module exports.34.wasm
-skip-adr-cross-module-action assert_return on module=$Global field=e
+skip-adr-skip_cross_module_action assert_return on module=$Global field=e
 assert_invalid exports.35.wasm
 assert_invalid exports.36.wasm
 assert_invalid exports.37.wasm
