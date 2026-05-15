@@ -106,7 +106,12 @@ var scratch_globals: [256]u8 align(16) = undefined;
 /// Funcref table for `call_indirect` — Wasm 2.0 spec fixtures
 /// (call_indirect, table_get / set, table_init, etc.) need this
 /// populated from active element segments per D-063's pattern.
-const scratch_table_capacity = 32;
+// §9.9 / 9.9-l-1b-d093-d49 (D-124): bumped 32 → 1024 to satisfy
+// `table_copy.wast` no-import variants that declare 128-entry
+// tables (e.g. table_copy.50.wasm `(table 128 128 funcref)` with
+// elem write at offset 112 + len 16 = range 112..128). Mirror of
+// d-21's GROWABLE_MEMORY_CAPACITY bump.
+const scratch_table_capacity = 1024;
 var scratch_funcptrs: [scratch_table_capacity]u64 = undefined;
 var scratch_typeidxs: [scratch_table_capacity]u32 = undefined;
 

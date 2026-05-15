@@ -226,6 +226,16 @@ pub fn makeJitRuntime(
         .host_dispatch_count = HOST_DISPATCH_STUB_CAPACITY,
         .memory_grow_fn = growableMemoryGrowFn,
         .table_grow_fn = growableTableGrowFn,
+        // §9.9 / 9.9-l-1b-d093-d49 (D-123): elem-segment scratch
+        // populated by `setupElemSegments` (called from
+        // `setupMultiTableScratch`). JIT `table.init` indexes
+        // `elem_segments_ptr` with stride 16; `elem.drop` /
+        // `table.init` consult `elem_dropped_ptr[idx]` to
+        // override seg.len = 0 when the segment was dropped.
+        .elem_segments_ptr = if (active_elem_segments_count == 0) @as([*]const entry.ElemSlice, undefined) else &scratch_elem_segments,
+        .elem_segments_count = active_elem_segments_count,
+        .elem_dropped_ptr = &scratch_elem_dropped,
+        .elem_dropped_count = active_elem_segments_count,
     };
 }
 
@@ -301,6 +311,20 @@ pub var scratch_table_refs: [SCRATCH_MAX_TABLES][SCRATCH_EXTRA_TABLE_CAPACITY]u6
 /// ref.is_null / ref.eq semantics).
 pub const SCRATCH_MAX_FUNCS: u32 = 256;
 pub var scratch_func_entities: [SCRATCH_MAX_FUNCS]@import("zwasm").runtime.FuncEntity = undefined;
+
+/// §9.9 / 9.9-l-1b-d093-d49 (D-123): per-elem-segment slice
+/// descriptors backing JIT `table.init`. Populated per-module
+/// load by `setupElemSegmentScratch`; consumed via
+/// `JitRuntime.elem_segments_ptr`. Pre-d-49 these were
+/// `undefined` — JIT `table.init` SEGV'd on first deref. Sized
+/// to a generous upper bound; modules exceeding it surface as
+/// `UnsupportedEntrySignature`.
+pub const SCRATCH_MAX_ELEM_SEGMENTS: u32 = 128;
+pub const SCRATCH_ELEM_REFS_CAPACITY: u32 = 4096;
+pub var scratch_elem_segments: [SCRATCH_MAX_ELEM_SEGMENTS]entry.ElemSlice = undefined;
+pub var scratch_elem_refs_arena: [SCRATCH_ELEM_REFS_CAPACITY]u64 = undefined;
+pub var scratch_elem_dropped: [SCRATCH_MAX_ELEM_SEGMENTS]u8 = undefined;
+pub var active_elem_segments_count: u32 = 0;
 
 /// Number of `scratch_table_jit_ci` entries that are live for
 /// the currently-loaded module. Updated by `setupMultiTableScratch`
@@ -407,6 +431,70 @@ pub fn setupMultiTableScratch(
         };
     }
     active_table_count = num_tables;
+
+    // §9.9 / 9.9-l-1b-d093-d49 (D-123): populate elem-segment
+    // descriptor + refs arena + dropped flag table so JIT
+    // `table.init` / `elem.drop` can index them via
+    // `JitRuntime.elem_segments_ptr` / `elem_dropped_ptr`.
+    // Mirrors `runner.zig::setupRuntime`'s elem_segments_buf
+    // path. Pre-d-49 these were `undefined` and JIT body SEGV'd
+    // on first deref.
+    try populateElemSegments(gpa, wasm_bytes, compiled);
+}
+
+/// §9.9 / 9.9-l-1b-d093-d49 (D-123): mirror of
+/// `runner.zig::setupRuntime`'s elem_segments_buf population.
+/// Walks the element section, writes per-segment `ElemSlice`
+/// descriptors into `scratch_elem_segments`, packs the
+/// `Value.ref`-encoded funcref pointers into a flat
+/// `scratch_elem_refs_arena`, and zero-inits the dropped flags.
+/// Externref segments and `ref.null` entries leave the slot at
+/// `Value.null_ref` (the spec runner can't bind host externrefs).
+fn populateElemSegments(
+    gpa: std.mem.Allocator,
+    wasm_bytes: []const u8,
+    compiled: *const runner_mod.CompiledWasm,
+) anyerror!void {
+    @memset(scratch_elem_dropped[0..], 0);
+    active_elem_segments_count = 0;
+
+    var temp_arena = std.heap.ArenaAllocator.init(gpa);
+    defer temp_arena.deinit();
+    const ta = temp_arena.allocator();
+    var module = try @import("zwasm").parse.parser.parse(ta, wasm_bytes);
+    const sec = module.find(.element) orelse return;
+    var elems = try @import("zwasm").parse.sections.decodeElement(ta, sec.body);
+    defer elems.deinit();
+
+    if (elems.items.len > SCRATCH_MAX_ELEM_SEGMENTS) return error.UnsupportedEntrySignature;
+
+    var off: usize = 0;
+    for (elems.items, 0..) |seg, i| {
+        const seg_len: u32 = @intCast(seg.funcidxs.len);
+        if (off + seg_len > SCRATCH_ELEM_REFS_CAPACITY) return error.UnsupportedEntrySignature;
+        scratch_elem_segments[i] = .{
+            .refs = scratch_elem_refs_arena[off..].ptr,
+            .len = seg_len,
+        };
+        for (seg.funcidxs, 0..) |fidx, k| {
+            if (fidx == std.math.maxInt(u32)) {
+                scratch_elem_refs_arena[off + k] = Value.null_ref;
+            } else if (fidx >= compiled.func_sigs.len) {
+                return error.UnsupportedEntrySignature;
+            } else {
+                scratch_elem_refs_arena[off + k] = @intFromPtr(&scratch_func_entities[fidx]);
+            }
+        }
+        // Wasm 2.0 §4.5.4: active elem segments are consumed at
+        // instantiation — their effective size becomes 0 for any
+        // subsequent `table.init`. Mark them dropped so the JIT's
+        // `elem_dropped[i]`-driven `seg_len → 0` CSEL fires.
+        // Declarative segments are also effectively-dropped.
+        // Passive segments stay live until an explicit `elem.drop`.
+        if (seg.kind != .passive) scratch_elem_dropped[i] = 1;
+        off += seg_len;
+    }
+    active_elem_segments_count = @intCast(elems.items.len);
 }
 
 /// §9.9 / 9.9-l-1b-d093-d43 (D-113): populate `refs_out` with

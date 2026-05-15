@@ -304,7 +304,10 @@ var scratch_globals: [256]u8 align(16) = undefined;
 /// D-063 discharge (§9.9 / 9.9-h-4) — funcref table for
 /// `call_indirect`. Populated via `applyTableInit`. Sized for
 /// realistic spec-fixture tables; simd_const.386 uses 2 entries.
-const scratch_table_capacity = 32;
+// §9.9 / 9.9-l-1b-d093-d49 (D-124): bumped 32 → 1024 to mirror
+// the non_simd runner's bump (table_copy.wast no-import 128-entry
+// table variants).
+const scratch_table_capacity = 1024;
 var scratch_funcptrs: [scratch_table_capacity]u64 = undefined;
 var scratch_typeidxs: [scratch_table_capacity]u32 = undefined;
 

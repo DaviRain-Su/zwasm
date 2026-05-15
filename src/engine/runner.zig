@@ -1183,6 +1183,18 @@ fn setupRuntime(
     const elem_dropped = try allocator.alloc(u8, elem_dropped_count);
     errdefer allocator.free(elem_dropped);
     @memset(elem_dropped, 0);
+    // Wasm 2.0 §4.5.4: active + declarative elem segments are
+    // consumed at instantiation — their effective size becomes 0
+    // for any subsequent `table.init`. Re-walk the section to
+    // mark them dropped. Passive segments stay live until an
+    // explicit `elem.drop`.
+    if (module.find(.element)) |s_drop| {
+        var elems_drop = try sections.decodeElement(ta, s_drop.body);
+        defer elems_drop.deinit();
+        for (elems_drop.items, 0..) |seg, i| {
+            if (seg.kind != .passive) elem_dropped[i] = 1;
+        }
+    }
 
     return .{
         .rt = .{

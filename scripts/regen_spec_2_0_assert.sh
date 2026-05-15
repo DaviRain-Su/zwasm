@@ -241,6 +241,8 @@ NAMES=(
   # exports, not a table.size-specific issue).
   table_size
   table_grow
+  table_copy
+  table_init
   # d-41 enable: `memory_trap` — D-114 discharged. The 4× load
   # FAILs were not load-bounds-check bugs; they were caused by a
   # skipped `(assert_return (invoke "i64.store" 0xfff8 0))`
