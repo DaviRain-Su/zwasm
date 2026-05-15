@@ -1161,7 +1161,7 @@ invoke-action test ()
 module table_copy.40.wasm
 assert_trap test ()
 module table_copy.41.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:24 i32:0 i32:16
 assert_return test i32:0 -> i32:0
 assert_return test i32:1 -> i32:1
 assert_return test i32:2 -> i32:2
@@ -1195,7 +1195,7 @@ assert_trap test i32:29
 assert_trap test i32:30
 assert_trap test i32:31
 module table_copy.42.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:23 i32:0 i32:15
 assert_return test i32:0 -> i32:0
 assert_return test i32:1 -> i32:1
 assert_return test i32:2 -> i32:2
@@ -1229,7 +1229,7 @@ assert_trap test i32:29
 assert_trap test i32:30
 assert_trap test i32:31
 module table_copy.43.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:0 i32:24 i32:16
 assert_trap test i32:0
 assert_trap test i32:1
 assert_trap test i32:2
@@ -1263,7 +1263,7 @@ assert_return test i32:29 -> i32:5
 assert_return test i32:30 -> i32:6
 assert_return test i32:31 -> i32:7
 module table_copy.44.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:0 i32:23 i32:15
 assert_trap test i32:0
 assert_trap test i32:1
 assert_trap test i32:2
@@ -1297,7 +1297,7 @@ assert_return test i32:29 -> i32:6
 assert_return test i32:30 -> i32:7
 assert_return test i32:31 -> i32:8
 module table_copy.45.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:24 i32:11 i32:16
 assert_trap test i32:0
 assert_trap test i32:1
 assert_trap test i32:2
@@ -1331,7 +1331,7 @@ assert_trap test i32:29
 assert_trap test i32:30
 assert_trap test i32:31
 module table_copy.46.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:11 i32:24 i32:16
 assert_trap test i32:0
 assert_trap test i32:1
 assert_trap test i32:2
@@ -1365,7 +1365,7 @@ assert_return test i32:29 -> i32:5
 assert_return test i32:30 -> i32:6
 assert_return test i32:31 -> i32:7
 module table_copy.47.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:24 i32:21 i32:16
 assert_trap test i32:0
 assert_trap test i32:1
 assert_trap test i32:2
@@ -1399,7 +1399,7 @@ assert_trap test i32:29
 assert_trap test i32:30
 assert_trap test i32:31
 module table_copy.48.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:21 i32:24 i32:16
 assert_trap test i32:0
 assert_trap test i32:1
 assert_trap test i32:2
@@ -1433,7 +1433,7 @@ assert_return test i32:29 -> i32:5
 assert_return test i32:30 -> i32:6
 assert_return test i32:31 -> i32:7
 module table_copy.49.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:21 i32:21 i32:16
 assert_trap test i32:0
 assert_trap test i32:1
 assert_trap test i32:2
@@ -1467,7 +1467,7 @@ assert_return test i32:29 -> i32:8
 assert_return test i32:30 -> i32:9
 assert_return test i32:31 -> i32:10
 module table_copy.50.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:0 i32:112 i32:4294967264
 assert_trap test i32:0
 assert_trap test i32:1
 assert_trap test i32:2
@@ -1597,7 +1597,7 @@ assert_return test i32:125 -> i32:13
 assert_return test i32:126 -> i32:14
 assert_return test i32:127 -> i32:15
 module table_copy.51.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:112 i32:0 i32:4294967264
 assert_return test i32:0 -> i32:0
 assert_return test i32:1 -> i32:1
 assert_return test i32:2 -> i32:2

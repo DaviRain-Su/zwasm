@@ -938,6 +938,18 @@ fn nonSimdRunAssertTrap(
             };
             break :blk false;
         }
+        // §9.9 / 9.9-l-1b-d093-d56 — `(i32, i32, i32)` covers
+        // memory_copy / memory_fill / memory_init `run` style
+        // assert_traps (3-i32 dest/src/len) and call.wast's
+        // `as-call-{first,mid1,mid2,last}` 3-arg trap variants.
+        // The d-55 callI32_i32i32i32 helper is reused; result
+        // type immaterial for trap detection.
+        if (n_args == 3 and args[0] == .i32 and args[1] == .i32 and args[2] == .i32) {
+            _ = entry.callI32_i32i32i32(compiled.module, func_idx, &rt, args[0].i32, args[1].i32, args[2].i32) catch |err| {
+                break :blk err == entry.Error.Trap;
+            };
+            break :blk false;
+        }
         try stdout.print("FAIL  {s}: assert_trap unsupported shape n_args={d} for {s}({s})\n", .{ name, n_args, fn_name, args_s });
         return false;
     };

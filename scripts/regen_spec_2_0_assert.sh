@@ -567,11 +567,15 @@ for c in d['commands']:
         # a corpus that needs them.
         # d-41 (D-114): extend with the `(i32, <T>)` store shapes
         # memory_trap.wast traps at OOB addresses.
+        # d-56: `(i32, i32, i32)` covers memory_copy / memory_fill /
+        # memory_init / call.wast 3-arg trap shapes (mirror of d-55
+        # runner-shape-gap fix on the trap path).
         trap_supported = {
             (), ('i32',), ('i64',), ('f32',), ('f64',),
             ('i32', 'i32'),
             ('i64', 'i64'),
             ('i32', 'i64'), ('i32', 'f32'), ('i32', 'f64'),
+            ('i32', 'i32', 'i32'),
         }
         arg_kinds = tuple(x['type'] for x in args)
         if any(x['type'] not in ('i32', 'i64', 'f32', 'f64') for x in args):

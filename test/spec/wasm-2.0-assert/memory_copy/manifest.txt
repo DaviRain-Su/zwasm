@@ -255,7 +255,7 @@ assert_return load8_u i32:27 -> i32:0
 assert_return load8_u i32:28 -> i32:0
 assert_return load8_u i32:29 -> i32:0
 module memory_copy.8.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:65516 i32:0 i32:40
 assert_return load8_u i32:0 -> i32:0
 assert_return load8_u i32:1 -> i32:1
 assert_return load8_u i32:2 -> i32:2
@@ -606,7 +606,7 @@ assert_return load8_u i32:65092 -> i32:0
 assert_return load8_u i32:65291 -> i32:0
 assert_return load8_u i32:65490 -> i32:0
 module memory_copy.9.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:65515 i32:0 i32:39
 assert_return load8_u i32:0 -> i32:0
 assert_return load8_u i32:1 -> i32:1
 assert_return load8_u i32:2 -> i32:2
@@ -958,7 +958,7 @@ assert_return load8_u i32:65093 -> i32:0
 assert_return load8_u i32:65292 -> i32:0
 assert_return load8_u i32:65491 -> i32:0
 module memory_copy.10.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:0 i32:65516 i32:40
 assert_return load8_u i32:198 -> i32:0
 assert_return load8_u i32:397 -> i32:0
 assert_return load8_u i32:596 -> i32:0
@@ -1309,7 +1309,7 @@ assert_return load8_u i32:65533 -> i32:17
 assert_return load8_u i32:65534 -> i32:18
 assert_return load8_u i32:65535 -> i32:19
 module memory_copy.11.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:0 i32:65515 i32:39
 assert_return load8_u i32:198 -> i32:0
 assert_return load8_u i32:397 -> i32:0
 assert_return load8_u i32:596 -> i32:0
@@ -1661,7 +1661,7 @@ assert_return load8_u i32:65533 -> i32:18
 assert_return load8_u i32:65534 -> i32:19
 assert_return load8_u i32:65535 -> i32:20
 module memory_copy.12.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:65516 i32:65486 i32:40
 assert_return load8_u i32:198 -> i32:0
 assert_return load8_u i32:397 -> i32:0
 assert_return load8_u i32:596 -> i32:0
@@ -2012,7 +2012,7 @@ assert_return load8_u i32:65503 -> i32:17
 assert_return load8_u i32:65504 -> i32:18
 assert_return load8_u i32:65505 -> i32:19
 module memory_copy.13.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:65486 i32:65516 i32:40
 assert_return load8_u i32:198 -> i32:0
 assert_return load8_u i32:397 -> i32:0
 assert_return load8_u i32:596 -> i32:0
@@ -2363,7 +2363,7 @@ assert_return load8_u i32:65533 -> i32:17
 assert_return load8_u i32:65534 -> i32:18
 assert_return load8_u i32:65535 -> i32:19
 module memory_copy.14.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:65516 i32:65506 i32:40
 assert_return load8_u i32:198 -> i32:0
 assert_return load8_u i32:397 -> i32:0
 assert_return load8_u i32:596 -> i32:0
@@ -2714,7 +2714,7 @@ assert_return load8_u i32:65523 -> i32:17
 assert_return load8_u i32:65524 -> i32:18
 assert_return load8_u i32:65525 -> i32:19
 module memory_copy.15.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:65506 i32:65516 i32:40
 assert_return load8_u i32:198 -> i32:0
 assert_return load8_u i32:397 -> i32:0
 assert_return load8_u i32:596 -> i32:0
@@ -3065,7 +3065,7 @@ assert_return load8_u i32:65533 -> i32:17
 assert_return load8_u i32:65534 -> i32:18
 assert_return load8_u i32:65535 -> i32:19
 module memory_copy.16.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:65516 i32:65516 i32:40
 assert_return load8_u i32:198 -> i32:0
 assert_return load8_u i32:397 -> i32:0
 assert_return load8_u i32:596 -> i32:0
@@ -3416,7 +3416,7 @@ assert_return load8_u i32:65533 -> i32:17
 assert_return load8_u i32:65534 -> i32:18
 assert_return load8_u i32:65535 -> i32:19
 module memory_copy.17.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:0 i32:65516 i32:4294963200
 assert_return load8_u i32:198 -> i32:0
 assert_return load8_u i32:397 -> i32:0
 assert_return load8_u i32:596 -> i32:0
@@ -3767,7 +3767,7 @@ assert_return load8_u i32:65533 -> i32:17
 assert_return load8_u i32:65534 -> i32:18
 assert_return load8_u i32:65535 -> i32:19
 module memory_copy.18.wasm
-skip-impl trap-shape-gap (i32 i32 i32) run
+assert_trap run i32:65516 i32:61440 i32:4294967040
 assert_return load8_u i32:198 -> i32:0
 assert_return load8_u i32:397 -> i32:0
 assert_return load8_u i32:596 -> i32:0
