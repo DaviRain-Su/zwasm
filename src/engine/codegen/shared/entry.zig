@@ -894,6 +894,147 @@ pub fn callF64_f64f64i32(
     return result;
 }
 
+// §9.9 / 9.9-l-1b-d093-d61: residual `runner-shape-gap` shapes
+// surfaced after the d-55 batch. Same AAPCS64/SysV calling-
+// convention pattern; result + arg classes are scalar (no
+// reftype / v128).
+
+pub fn callF32_i32i32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u32,
+    a1: u32,
+) Error!f32 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: u32) callconv(.c) f32;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, a0, a1);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+pub fn callF64_i32i32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u32,
+    a1: u32,
+) Error!f64 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: u32) callconv(.c) f64;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, a0, a1);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+pub fn callI32_f32f32f32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: f32,
+    a1: f32,
+    a2: f32,
+) Error!u32 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: f32, a1: f32, a2: f32) callconv(.c) u32;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, a0, a1, a2);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+pub fn callI32_f64f64f64(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: f64,
+    a1: f64,
+    a2: f64,
+) Error!u32 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: f64, a1: f64, a2: f64) callconv(.c) u32;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, a0, a1, a2);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+pub fn callI32_i32f64i32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u32,
+    a1: f64,
+    a2: u32,
+) Error!u32 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: f64, a2: u32) callconv(.c) u32;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, a0, a1, a2);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+pub fn callF64_f64f64f64f64f64f64f64f64(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: f64,
+    a1: f64,
+    a2: f64,
+    a3: f64,
+    a4: f64,
+    a5: f64,
+    a6: f64,
+    a7: f64,
+) Error!f64 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (
+        rt: *const JitRuntime,
+        a0: f64,
+        a1: f64,
+        a2: f64,
+        a3: f64,
+        a4: f64,
+        a5: f64,
+        a6: f64,
+        a7: f64,
+    ) callconv(.c) f64;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, a0, a1, a2, a3, a4, a5, a6, a7);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+pub fn callF64_f32i32i64i32f64i32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: f32,
+    a1: u32,
+    a2: u64,
+    a3: u32,
+    a4: f64,
+    a5: u32,
+) Error!f64 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (
+        rt: *const JitRuntime,
+        a0: f32,
+        a1: u32,
+        a2: u64,
+        a3: u32,
+        a4: f64,
+        a5: u32,
+    ) callconv(.c) f64;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, a0, a1, a2, a3, a4, a5);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
 /// Wasm spec §4.4 (function invocation, v128 result) — call a no-
 /// argument JIT function returning v128. Per ADR-0046, both backends
 /// emit the v128 result through the SIMD return register (ARM64 V0,

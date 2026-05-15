@@ -258,7 +258,10 @@ fn nonSimdRunAssertReturn(
         scratch_typeidxs[0..],
     );
 
-    var args: [5]ArgValue = undefined;
+    // §9.9 / 9.9-l-1b-d093-d61: capacity 5 → 8 to fit the
+    // 8-arg `(f64 ×8, f64)` + 6-arg `(f32 i32 i64 i32 f64 i32, f64)`
+    // shapes added in d-61's runner-shape-gap drain.
+    var args: [8]ArgValue = undefined;
     const n_args = base.parseAssertReturnArgs(args_s, &args) catch |err| {
         if (err == error.TooManyArgs) {
             try stdout.print("FAIL  {s}: > {d} args unsupported ({s})\n", .{ name, args.len, args_s });
@@ -786,6 +789,72 @@ fn dispatchScalarResult(
         };
         return @as(u64, @bitCast(r));
     }
+    // §9.9 / 9.9-l-1b-d093-d61: residual runner-shape-gap drain
+    // (FP-result 2-arg-i32 + i32-result 3-arg-FP + mixed-arg shapes
+    // surfaced post-d-55).
+    if (args.len == 2 and args[0] == .i32 and args[1] == .i32 and result_kind == .f32) {
+        const r = entry.callF32_i32i32(compiled.module, func_idx, rt, args[0].i32, args[1].i32) catch |err| {
+            try base.printCallTrap(rt, name, fn_name, args_s, err, stdout);
+            return null;
+        };
+        return @as(u64, @as(u32, @bitCast(r)));
+    }
+    if (args.len == 2 and args[0] == .i32 and args[1] == .i32 and result_kind == .f64) {
+        const r = entry.callF64_i32i32(compiled.module, func_idx, rt, args[0].i32, args[1].i32) catch |err| {
+            try base.printCallTrap(rt, name, fn_name, args_s, err, stdout);
+            return null;
+        };
+        return @as(u64, @bitCast(r));
+    }
+    if (args.len == 3 and args[0] == .f32 and args[1] == .f32 and args[2] == .f32 and result_kind == .i32) {
+        const a0: f32 = @bitCast(args[0].f32);
+        const a1: f32 = @bitCast(args[1].f32);
+        const a2: f32 = @bitCast(args[2].f32);
+        return @as(u64, entry.callI32_f32f32f32(compiled.module, func_idx, rt, a0, a1, a2) catch |err| {
+            try base.printCallTrap(rt, name, fn_name, args_s, err, stdout);
+            return null;
+        });
+    }
+    if (args.len == 3 and args[0] == .f64 and args[1] == .f64 and args[2] == .f64 and result_kind == .i32) {
+        const a0: f64 = @bitCast(args[0].f64);
+        const a1: f64 = @bitCast(args[1].f64);
+        const a2: f64 = @bitCast(args[2].f64);
+        return @as(u64, entry.callI32_f64f64f64(compiled.module, func_idx, rt, a0, a1, a2) catch |err| {
+            try base.printCallTrap(rt, name, fn_name, args_s, err, stdout);
+            return null;
+        });
+    }
+    if (args.len == 3 and args[0] == .i32 and args[1] == .f64 and args[2] == .i32 and result_kind == .i32) {
+        const a1: f64 = @bitCast(args[1].f64);
+        return @as(u64, entry.callI32_i32f64i32(compiled.module, func_idx, rt, args[0].i32, a1, args[2].i32) catch |err| {
+            try base.printCallTrap(rt, name, fn_name, args_s, err, stdout);
+            return null;
+        });
+    }
+    if (args.len == 8 and args[0] == .f64 and args[1] == .f64 and args[2] == .f64 and args[3] == .f64 and args[4] == .f64 and args[5] == .f64 and args[6] == .f64 and args[7] == .f64 and result_kind == .f64) {
+        const a0: f64 = @bitCast(args[0].f64);
+        const a1: f64 = @bitCast(args[1].f64);
+        const a2: f64 = @bitCast(args[2].f64);
+        const a3: f64 = @bitCast(args[3].f64);
+        const a4: f64 = @bitCast(args[4].f64);
+        const a5: f64 = @bitCast(args[5].f64);
+        const a6: f64 = @bitCast(args[6].f64);
+        const a7: f64 = @bitCast(args[7].f64);
+        const r = entry.callF64_f64f64f64f64f64f64f64f64(compiled.module, func_idx, rt, a0, a1, a2, a3, a4, a5, a6, a7) catch |err| {
+            try base.printCallTrap(rt, name, fn_name, args_s, err, stdout);
+            return null;
+        };
+        return @as(u64, @bitCast(r));
+    }
+    if (args.len == 6 and args[0] == .f32 and args[1] == .i32 and args[2] == .i64 and args[3] == .i32 and args[4] == .f64 and args[5] == .i32 and result_kind == .f64) {
+        const a0: f32 = @bitCast(args[0].f32);
+        const a4: f64 = @bitCast(args[4].f64);
+        const r = entry.callF64_f32i32i64i32f64i32(compiled.module, func_idx, rt, a0, args[1].i32, args[2].i64, args[3].i32, a4, args[5].i32) catch |err| {
+            try base.printCallTrap(rt, name, fn_name, args_s, err, stdout);
+            return null;
+        };
+        return @as(u64, @bitCast(r));
+    }
     try stdout.print("FAIL  {s}: unsupported shape n_args={d} result_kind={s} for {s}({s})\n", .{ name, args.len, @tagName(result_kind), fn_name, args_s });
     return null;
 }
@@ -821,7 +890,10 @@ fn nonSimdRunAssertTrap(
         scratch_typeidxs[0..],
     );
 
-    var args: [5]ArgValue = undefined;
+    // §9.9 / 9.9-l-1b-d093-d61: capacity 5 → 8 to fit the
+    // 8-arg `(f64 ×8, f64)` + 6-arg `(f32 i32 i64 i32 f64 i32, f64)`
+    // shapes added in d-61's runner-shape-gap drain.
+    var args: [8]ArgValue = undefined;
     const n_args = base.parseAssertReturnArgs(args_s, &args) catch |err| {
         if (err == error.TooManyArgs) {
             try stdout.print("FAIL  {s}: assert_trap > {d} args unsupported ({s})\n", .{ name, args.len, args_s });
@@ -999,7 +1071,10 @@ fn nonSimdRunInvokeAction(
         scratch_typeidxs[0..],
     );
 
-    var args: [5]ArgValue = undefined;
+    // §9.9 / 9.9-l-1b-d093-d61: capacity 5 → 8 to fit the
+    // 8-arg `(f64 ×8, f64)` + 6-arg `(f32 i32 i64 i32 f64 i32, f64)`
+    // shapes added in d-61's runner-shape-gap drain.
+    var args: [8]ArgValue = undefined;
     const n_args = base.parseAssertReturnArgs(args_s, &args) catch |err| {
         if (err == error.TooManyArgs) {
             try stdout.print("FAIL  {s}: invoke-action > {d} args unsupported ({s})\n", .{ name, args.len, args_s });

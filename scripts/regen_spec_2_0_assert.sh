@@ -531,6 +531,16 @@ for c in d['commands']:
             # the trap asserts and follow-up loads.
             (('i32', 'i64'), 'void'),
             (('i64', 'f32', 'f64', 'i32', 'i32'), 'void'),
+            # §9.9 / 9.9-l-1b-d093-d61: residual runner-shape-gap
+            # drain (FP-result 2-arg-i32 + i32-result 3-arg-FP +
+            # mixed-arg shapes surfaced after d-55).
+            (('i32', 'i32'), 'f32'),
+            (('i32', 'i32'), 'f64'),
+            (('f32', 'f32', 'f32'), 'i32'),
+            (('f64', 'f64', 'f64'), 'i32'),
+            (('i32', 'f64', 'i32'), 'i32'),
+            (('f64', 'f64', 'f64', 'f64', 'f64', 'f64', 'f64', 'f64'), 'f64'),
+            (('f32', 'i32', 'i64', 'i32', 'f64', 'i32'), 'f64'),
         }
         if (arg_kinds, result_kind) not in supported:
             lines.append(
