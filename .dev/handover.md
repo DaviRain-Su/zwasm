@@ -10,29 +10,24 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **Phase 9 extended; D-093 (d-42) JIT multi-table call_indirect lands 2026-05-15**
+## Active state — **Phase 9 extended; D-093 (d-42b) D-112 closed + select lands 2026-05-15**
 
 ### One-line state
 
-D-093 (d-42) introduces JIT multi-table `call_indirect`
-dispatch (Wasm 2.0 / spec §3.4.6 + §4.4.10.1). Pre-d-42
-`emitCallIndirect` ignored `ZirInstr.extra` (table_idx)
-and always loaded table 0's `funcptr_base` / `typeidx_base`
-/ `table_size` from JitRuntime scalar fields. d-42 adds
-`TableJitCallInfo` (extern {funcptr_base, typeidx_base},
-16-byte stride) as a parallel `tables_jit_ci_ptr` array
-in JitRuntime (head_size 200 → 216). Entry 0 reuses table
-0's flat funcptrs/typeidxs so legacy scalar fast path
-(X24/X25/X26 reload on arm64, [R15+scalar_off] on x86_64)
-stays unchanged; entries `k > 0` back a per-call slow path
-that loads bases via `tables_ptr[k].len` (size) +
-`tables_jit_ci_ptr[k].{funcptr,typeidx}_base` (data).
-`src/engine/runner.zig::setupRuntime` allocates per-table
-arenas; elem-section loop drops the table-0-only gate. Edge
-fixture `multi_table_dispatch.wat` (2-table, call_indirect
-$t1) flips FAIL→PASS. spec_assert / simd / wast / realworld
-all unchanged (no regressions). **D-112 spec_assert harness
-wire-up + `select` NAMES enable deferred to d-42b**.
+D-093 (d-42b) closes D-112. d-42 landed the JIT side
+(per-table TableJitCallInfo + emit dispatch on `ins.extra`);
+d-42b wires the spec_assert static-scratch harness so
+`select.wast`'s 2-table modules execute end-to-end. New
+runner helpers `applyTableInitForTable` /
+`countDeclaredTables` / `declaredTableMin` parameterise
+table-init by table_idx without re-parsing. Harness adds
+`scratch_extra_funcptrs/typeidxs` (per non-zero table),
+`scratch_table_jit_ci`, `scratch_tables_descriptor`, +
+`setupMultiTableScratch` called from each on_module_loaded.
+`makeJitRuntime` wires JitRuntime.tables_ptr + tables_jit_ci_ptr
+with module-derived count. `select` enabled in NAMES.
+spec_assert non-simd **16276/0/679 → 16369/0/732** (+93 PASS,
+0 FAIL, +1 manifest); simd 13301/0/440 unchanged.
 
 ### Standing reminder for the autonomous loop
 
@@ -41,19 +36,14 @@ causes, never work around.**
 
 ### Next sub-chunk candidates (names only, NO predictions)
 
-Active `now` debts (post-d-42):
+Active `now` debts (post-d-42b):
 - D-093 (parent), D-095 (regalloc partial).
-- D-115 d-39 / D-116 d-40 / D-114 d-41 discharged.
-- **D-112** — JIT side done at d-42; spec_assert harness
-  wire-up + select NAMES enable remain.
+- D-112 / D-114 / D-115 / D-116 discharged.
 - **D-113** (ref_is_null SEGV).
 - D-103: discharged at d-37 via cross-module-imports skip.
 - D-102/D-105/D-079: cross-module-imports family — surface
   remains SKIP under d-37 pre-filter.
 
-- **d-42b** — D-112 close: extend `spec_assert_runner_base
-  .makeJitRuntime` + per-table `applyTableInit` →
-  trial-enable `select` NAMES; flips its 4 FAILs.
 - **d-43** — D-113 ref_is_null SEGV (needs lldb +
   debug-print investigation).
 - **d-44+** — remaining wast names (table_*, data,
@@ -127,7 +117,8 @@ Other queued post-D-093 names: `address`, `align`, `br_table`,
 | D-093 (d-40) | [x] e7e1f01f | D-116 discharged. Mis-diagnosed framing was "memory persistence across invokes lost"; actual root cause was distiller `action_supported` / `assert_return supported` shape sets + runner `dispatchVoidResult` / `invokeActionShape` ladders missing `(i32, f32)` / `(i32, f64)` / `(i32, i32, i32)`. d-40 adds three new `entry.callVoid_*` helpers + ladder arms + distiller shape entries. `float_exprs` lands in NAMES. spec_assert 15438 → 16091 PASS. |
 | D-093 (d-41) | [x] a31fec49 | D-114 discharged. Same shape-gap class as D-116 but on the assert_trap + assert_return-void axes. d-41 adds `entry.callVoid_i32i64` + arms for `(i32, i64)` / `(i32, f32)` / `(i32, f64)` across `dispatchVoidResult` / `nonSimdRunAssertTrap` / `invokeActionShape`; distiller `trap_supported` + `supported` sets extended. `memory_trap` lands in NAMES. spec_assert non-simd 16091/0/684 → 16276/0/679 (+185 PASS, 0 FAIL, +1 manifest); simd 13301/0/440 unchanged. |
 | D-093 (d-42) | [x] ebe2a992 | D-112 JIT side: multi-table call_indirect dispatch. New `TableJitCallInfo` (extern { funcptr_base, typeidx_base }, 16-byte stride) in JitRuntime as parallel `tables_jit_ci_ptr` array (head_size 200 → 216). Entry 0 reuses table-0 flat arrays so legacy X24/X25/X26 (arm64) + [R15+scalar_off] (x86_64) fast path stays unchanged; entries `k > 0` back per-call slow path via `tables_ptr[k].len` + `tables_jit_ci_ptr[k]`. `setupRuntime` allocates per-table arenas; elem-section loop drops table-0-only gate. Edge fixture `multi_table_dispatch.wat` flips FAIL→PASS=42. spec_assert / simd / wast / realworld unchanged (no regressions). |
-| **D-093 (d-42b)** | **NEXT** | D-112 close: extend `spec_assert_runner_base.makeJitRuntime` + per-table `applyTableInit` (mirror of d-42's `setupRuntime` work, applied to the static-scratch harness path); then trial-enable `select` in NAMES so the harness exercises multi-table dispatch on `select.wast`'s 4 FAILs (table 0 = `$tab` / `$dummy`; table 1 = `$t` / `$func`). |
+| D-093 (d-42b) | [x] e0bc2ef8 | D-112 close. Spec_assert static-scratch harness wires multi-table call_indirect: `applyTableInit` is now a thin wrapper over `applyTableInitForTable(tableidx, ...)`; runner adds `countDeclaredTables` + `declaredTableMin` helpers. Harness `scratch_extra_funcptrs/typeidxs` + `scratch_table_jit_ci` + `scratch_tables_descriptor` populated by new `setupMultiTableScratch`; `makeJitRuntime` wires `JitRuntime.tables_ptr` + `tables_jit_ci_ptr` + counts. `select` lands in NAMES. spec_assert non-simd 16276/0/679 → 16369/0/732 (+93 PASS, 0 FAIL, +1 manifest); simd 13301/0/440 unchanged. |
+| **D-093 (d-43)** | **NEXT** | D-113: `ref_is_null.wast` SEGV (exit 139). d-38 probe — enabling `ref_is_null` crashes spec runner outside any armed sigsetjmp. Suspect: reftype-result call (`callI32_<reftype-arg>`) shape not in entry helpers, OR `table.get` reftype emit gap on funcref/externref class. Needs lldb (or debug-print) investigation. |
 
 Other queued chunks (post-l-1): k-1, k-2, m-4c (= D-090),
 m-2d, n-1, j-3b.
