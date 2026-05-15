@@ -10,27 +10,19 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **Phase 9 extended; D-093 (d-43) D-113 closed + ref_is_null lands 2026-05-15**
+## Active state — **Phase 9 extended; D-093 (d-44) +5 NAMES batch lands 2026-05-15**
 
 ### One-line state
 
-D-093 (d-43) closes D-113. Pre-d-43 spec_assert harness's
-`scratch_tables_descriptor[k].refs` was `undefined`, so
-JIT `table.get` on any table SEGV'd. d-43 mirrors
-`setupRuntime`'s table_refs arena into the static-scratch
-harness via new `scratch_table_refs[SCRATCH_MAX_TABLES]
-[SCRATCH_EXTRA_TABLE_CAPACITY]u64` + `scratch_func_entities
-[SCRATCH_MAX_FUNCS]FuncEntity` + `active_func_count`.
-`makeJitRuntime` wires `func_entities_ptr/count` + `tables_
-ptr[0].refs`; `setupMultiTableScratch` walks elem sections
-via new `populateTableRefs` to write `Value.ref`-encoded
-FuncEntity pointers. Distiller adds `module_state_diverged`
-flag (set on `skip-impl action-non-scalar-arg`, cleared by
-next `invoke-action`); while set, subsequent assert_returns
-emit `skip-adr-host-state-diverged` (covers `ref_is_null`'s
-single `externref-elem(i32:1) -> 0` precondition-dependent
-assert). spec_assert non-simd **16369/0/732 → 16376/0/740**
-(+7 PASS, 0 FAIL, +1 manifest = `ref_is_null`); simd
+D-093 (d-44) batch-enables 5 NAMES under the multi-table +
+refs scratch infrastructure from d-42/d-42b/d-43: `data`,
+`global`, `memory_copy`, `memory_fill`, `memory_grow`. 8
+candidates trial-enabled with per-corpus isolated bisect;
+`br_table` (SlotOverflow at compile), `bulk` (SEGV
+mid-corpus), `memory_init` (1 value-mismatch + 1
+missing-trap) deferred to new debt rows D-118, D-119, D-120
+respectively. spec_assert non-simd **16376/0/740 →
+20728/0/1150** (+4352 PASS, 0 FAIL, +5 manifests); simd
 13301/0/440 unchanged.
 
 ### Standing reminder for the autonomous loop
@@ -40,16 +32,22 @@ causes, never work around.**
 
 ### Next sub-chunk candidates (names only, NO predictions)
 
-Active `now` debts (post-d-43):
+Active `now` debts (post-d-44):
 - D-093 (parent), D-095 (regalloc partial).
 - D-112 / D-113 / D-114 / D-115 / D-116 discharged.
+- **D-118** br_table SlotOverflow at compile.
+- **D-119** bulk SEGV mid-corpus.
+- **D-120** memory_init 1 value-mismatch + 1 missing-trap.
 - D-103: discharged at d-37 via cross-module-imports skip.
 - D-102/D-105/D-079: cross-module-imports family — surface
   remains SKIP under d-37 pre-filter.
 
-- **d-44+** — remaining wast names (table_*, data,
-  memory_grow, memory_copy/fill/init, bulk, etc).
-- **d-45+** — Instance-aware refactor (Phase 10 transition).
+- **d-45** — D-118 br_table SlotOverflow investigation.
+- **d-46+** — table_* family (table.get / set / size / grow
+  / fill / copy / init bounds + reftype semantics; pre-d-42
+  D-090 tracked separately).
+- **d-47+** — D-119 bulk SEGV; D-120 memory_init FAILs.
+- **d-48+** — Instance-aware refactor (Phase 10 transition).
 
 Runner-side skip-impl backlog (7 total, in `nop / loop /
 local_tee`):
@@ -120,7 +118,8 @@ Other queued post-D-093 names: `address`, `align`, `br_table`,
 | D-093 (d-42) | [x] ebe2a992 | D-112 JIT side: multi-table call_indirect dispatch. New `TableJitCallInfo` (extern { funcptr_base, typeidx_base }, 16-byte stride) in JitRuntime as parallel `tables_jit_ci_ptr` array (head_size 200 → 216). Entry 0 reuses table-0 flat arrays so legacy X24/X25/X26 (arm64) + [R15+scalar_off] (x86_64) fast path stays unchanged; entries `k > 0` back per-call slow path via `tables_ptr[k].len` + `tables_jit_ci_ptr[k]`. `setupRuntime` allocates per-table arenas; elem-section loop drops table-0-only gate. Edge fixture `multi_table_dispatch.wat` flips FAIL→PASS=42. spec_assert / simd / wast / realworld unchanged (no regressions). |
 | D-093 (d-42b) | [x] e0bc2ef8 | D-112 close. Spec_assert static-scratch harness wires multi-table call_indirect: `applyTableInit` is now a thin wrapper over `applyTableInitForTable(tableidx, ...)`; runner adds `countDeclaredTables` + `declaredTableMin` helpers. Harness `scratch_extra_funcptrs/typeidxs` + `scratch_table_jit_ci` + `scratch_tables_descriptor` populated by new `setupMultiTableScratch`; `makeJitRuntime` wires `JitRuntime.tables_ptr` + `tables_jit_ci_ptr` + counts. `select` lands in NAMES. spec_assert non-simd 16276/0/679 → 16369/0/732 (+93 PASS, 0 FAIL, +1 manifest); simd 13301/0/440 unchanged. |
 | D-093 (d-43) | [x] 077ca871 | D-113 close. Pre-d-43 `scratch_tables_descriptor[k].refs` was `undefined` → SEGV on JIT `table.get`. d-43 adds `scratch_table_refs[SCRATCH_MAX_TABLES][SCRATCH_EXTRA_TABLE_CAPACITY]u64` + `scratch_func_entities[SCRATCH_MAX_FUNCS]FuncEntity` + `active_func_count`; `makeJitRuntime` wires `func_entities_ptr/count` + `tables_ptr[0].refs`; `setupMultiTableScratch` walks elem sections via new `populateTableRefs` writing `Value.ref`-encoded FuncEntity pointers. Distiller adds `module_state_diverged` flag (set on `skip-impl action-non-scalar-arg`, cleared by next `invoke-action`); while set, subsequent assert_returns emit `skip-adr-host-state-diverged` so host-action-dependent asserts skip cleanly. spec_assert non-simd 16369/0/732 → 16376/0/740 (+7 PASS, 0 FAIL, +1 manifest = `ref_is_null`); simd 13301/0/440 unchanged. |
-| **D-093 (d-44)** | **NEXT** | Remaining wast names — bisect/enable next NAMES batch (`table` / `table_*` / `data` / `memory_grow` / `memory_copy` / `memory_fill` / `memory_init` / `bulk` etc.). |
+| D-093 (d-44) | [x] 24d875ce | Batch enable 5 NAMES via per-corpus isolated bisect: `data`, `global`, `memory_copy`, `memory_fill`, `memory_grow`. 3 candidates deferred to new debt rows: `br_table` SlotOverflow (D-118), `bulk` SEGV (D-119), `memory_init` value-mismatch + missing-trap (D-120). spec_assert non-simd 16376/0/740 → 20728/0/1150 (+4352 PASS, 0 FAIL, +5 manifests); simd 13301/0/440 unchanged. |
+| **D-093 (d-45)** | **NEXT** | D-118 br_table SlotOverflow investigation. Bisect probe: enabling `br_table` NAMES surfaces `FAIL br_table/br_table.0.wasm compile: SlotOverflow` — the JIT's regalloc slot budget exceeded by br_table.0's func. Suspect: vreg count overruns `Allocation.slots.len` (= `max_reg_slots` default). Likely needs allocator-side investigation (lower-vreg pressure recipe OR raised slot cap). |
 
 Other queued chunks (post-l-1): k-1, k-2, m-4c (= D-090),
 m-2d, n-1, j-3b.
