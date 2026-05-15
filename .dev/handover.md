@@ -10,20 +10,22 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-52 closed: D-127 + D-130 discharged; binary + unreached-valid lands**
+## Active state — **d-53 closed: D-128 discharged (distiller :hex: + runner decoder); names/imports still blocked on D-129**
 
 ### One-line state
 
-d-52 closes D-127 (`compileWasm` early-out for empty Function
-section — binary.60.wasm `03 01 00`) + D-130 (validator
-`opBrTable` skips strict labelTypesEq when topFrame is
-unreachable per Wasm 2.0 §3.3.5.8; companion emit fix extends
-d-5 placeholder pad to all block kinds in both
-arm64+x86_64 `emitEndIntra`). binary + unreached-valid corpora
-land. spec_assert non-simd 22404/0/2889 → 22498/0/2916 (+94
-PASS, +2 manifests). simd 13301/0/440 unchanged. Loop continues
-toward 9.9 `[x]`; substrate audit hard gate (9.12) fires
-automatically when next chunk would resolve to it.
+d-53 closes D-128 (the manifest-parse-split half) via distiller
+`quote_field()` emitting `:hex:<utf8-hex>` for export names with
+control chars / whitespace / quotes / colon, plus runner-side
+`decodeFnName()` decoder (6 unit tests). 8 of 9 names FAILs
+clear via this fix; the 9th + the imports FAIL are spectest-
+import-call traps (D-129) so names + imports stay deferred.
+SCRATCH_MAX_FUNCS bumped 256 → 1024 (names.2.wasm has 479
+funcs). Net spec_assert non-simd 22498/0/2916 unchanged (the
++577 PASS lands when D-129 closes; d-53 ships infrastructure
+only). simd 13301/0/440 unchanged. Loop continues toward 9.9
+`[x]`; substrate audit hard gate (9.12) fires automatically
+when next chunk would resolve to it.
 
 ### Standing reminder for the autonomous loop
 
@@ -32,22 +34,24 @@ causes, never work around.**
 
 ### Next sub-chunk candidates (names only, NO predictions)
 
-Active `now` debts (post-d-52):
+Active `now` debts (post-d-53):
 - D-093 (parent), D-095 (regalloc partial).
 - D-112 / D-113 / D-114 / D-115 / D-116 / D-118 / D-119 /
   D-120 / D-121 / D-122 / D-123 / D-124 / D-125 / D-127 /
-  D-130 discharged.
+  D-128 / D-130 discharged.
 - **D-126** bulk corpus residual: funcptr_base / refs divergence
   (Phase 10+ instance-aware refactor scope).
-- **D-128** names distiller char escaping.
-- **D-129** imports spectest-import-call trap-vs-success.
+- **D-129** imports spectest-import-call trap-vs-success
+  (blocks names + imports re-enable; +577 PASS waiting).
 - D-103: discharged at d-37 via cross-module-imports skip.
 - D-102/D-105/D-079: cross-module-imports family — surface
   remains SKIP under d-37 pre-filter.
 
-- **d-53** — D-128 distiller char-escape fix.
-- **d-54** — D-129 reachability analysis (mark assert_returns
-  whose action transitively calls a spectest import).
+- **d-54** — D-129 distiller-side reachability analysis: parse
+  the wasm bytes per module, walk the export table, find each
+  exported function's body, detect calls to spectest-import
+  funcidxs, mark matching assert_returns as
+  `skip-adr-spectest-import-call`.
 - **d-55+** — D-126 funcptr_base/refs unification OR Phase 10
   instance-aware refactor.
 
@@ -124,6 +128,7 @@ Other queued post-D-093 names: `address`, `align`, `br_table`,
 | D-093 (d-45) | [x] 50237a0e | D-118 close. Root cause was NOT regalloc vreg overflow but our hardcoded br_table target caps (arm64: `count >= 4096` reused Error.SlotOverflow; x86_64: `count > 127` from imm8/rel8). `br_table.wast` `large` declares 16149 targets. d-45 introduces per-case CMP dispatch on i magnitude (arm64 MOVZ+MOVK+CMP-reg; x86_64 CMP-imm32 + Jcc-rel32) and accepts reftype block-types (-16/-17 per Wasm 2.0 §5.3.5) in validator readBlockType + lower readBlockArity (br_table.wast `meet-funcref` / `meet-externref` exports). spec_assert non-simd 20728/0/1150 → 20898/0/1153 (+170 PASS, 0 FAIL, +1 manifest); simd 13301/0/440 unchanged. |
 | D-093 (d-46) | [x] 469c50cf | Batch enable +3 table_* NAMES (table, table_set, table_fill) via per-corpus isolated bisect. 5 deferred to new debt: D-121 table_get externref-OOB, D-122 table_size UnsupportedOp, D-123 table_init SEGV, D-124 table_copy bounds-trap, D-125 table_grow UnsupportedOp. spec_assert non-simd 20898/0/1153 → 20918/0/1213 (+20 PASS, 0 FAIL, +3 manifests); simd 13301/0/440 unchanged. |
 | D-093 (d-47) | [x] 664b3fa4 | D-121 close. Pre-d-47 `makeJitRuntime` reset `scratch_tables_descriptor[0].len` to scratch capacity on every per-assert call, overriding setupMultiTableScratch's module-derived `tbl_min`. Drop the clobber + use `declaredTableMin` for k=0 too. `table_get` lands. spec_assert non-simd 20918/0/1213 → 20927/0/1219 (+9 PASS, 0 FAIL, +1 manifest); simd 13301/0/440 unchanged. |
+| D-093 (d-53) | [x] `b347cb80` | D-128 partial close (manifest-parse-split half). Distiller `quote_field()` emits `:hex:<utf8-hex>` for export names containing control chars / whitespace / quotes / colon (e.g. `:hex:0a09` for `\n\t`, `:hex:c385` for `Å`). Runner-side `decodeFnName(fn_name, buf)` reverses this — wired into all 3 fn_name-extraction sites in `spec_assert_runner_non_simd.zig` (assert_return, assert_trap, invoke-action). 6 new unit tests cover decodeFnName edge cases (empty, multi-byte UTF-8, odd-hex reject, buffer overflow). SCRATCH_MAX_FUNCS bumped 256 → 1024 (names.2.wasm declares 479 funcs). `names` + `imports` re-deferred to D-129: trial-enable showed 22981 PASS / 2 FAIL (the 2 spectest-import-wrapper traps); +577 PASS waits on D-129 reachability analysis. spec_assert non-simd 22498/0/2916 unchanged (d-53 ships infrastructure with no enabled-corpus impact yet). simd 13301/0/440 unchanged. Mac aarch64 + OrbStack `test-all` both green. |
 | D-093 (d-52) | [x] `9a601838` | D-127 + D-130 close. D-127: `compileWasm` early-out for absent function section now also fires when section is present-but-empty (binary.60.wasm `03 01 00`). D-130: `validator.zig::opBrTable` skips strict `labelTypesEq` when `topFrame.unreachable_flag` per Wasm 2.0 §3.3.5.8 (joined label type collapses to bottom in unreachable code). Companion emit fix: lower's `closeBlock` for inner-dead block doesn't push merge result vregs; the d-5 `.loop` fall-through placeholder pad (vreg 0 sentinel) is extended at d-52 to all block kinds in both arm64 + x86_64 `emitEndIntra` (was `.loop`-only). Edge fixture `test/edge_cases/p9/br_table/meet_bottom_unreachable.{wat,wasm,expect}`. binary + unreached-valid corpora land in NAMES. spec_assert non-simd 22404/0/2889 → **22498/0/2916** (+94 PASS, 0 FAIL, +2 manifests); simd 13301/0/440 unchanged. Mac aarch64 + OrbStack `test-all` both green. |
 | D-093 (d-51) | [x] `f7b2aabe` | Batch enable +11 NAMES via per-corpus trial: `binary-leb128` / `comments` / `custom` / `inline-module` / `obsolete-keywords` / `token` / `unreached-invalid` (validator-only assert_invalid/malformed) + `exports` / `linking` / `table-sub` / `skip-stack-guard-page` (mostly cross-module-imports SKIP). 4 corpora deferred via new debt rows: D-127 binary (validator MissingTypeSection on empty-fn-section), D-128 names (distiller char escaping for special export names), D-129 imports (spectest-import-call traps but spec asserts succeed; needs reachability analysis), D-130 unreached-valid (validator ArityMismatch on .1.wasm). spec_assert non-simd 22259/0/2638 → **22404/0/2889** (+145 PASS, 0 FAIL, +11 manifests); simd 13301/0/440 unchanged. No source code change beyond regen-script NAMES expansion + commentary citing the new debt rows. |
 | D-093 (d-50) | [x] `c781e6e9` | D-119 + D-120 close (mirror of d-49 elem-segment fix for data segments). New `scratch_data_segments[128]SegmentSlice` + `scratch_data_arena[64KB]u8` + `scratch_data_dropped[128]u8` globals + `populateDataSegments` called from `setupMultiTableScratch`. Active data segments marked dropped at instantiation per Wasm 2.0 §4.5.5. setupRuntime patched in lockstep (standalone runner had the same gap; surfaced via new edge fixture `memory_ops/init_active_consumed.{wat,wasm,expect}`). Bug found: setupMultiTableScratch's `if (num_tables == 0) return;` early-return skipped both populate calls — fixed (do both first then return). memory_init lands; bulk DEFERRED to D-126 (4 residual FAILs surface a separate funcptr_base/refs divergence after table.copy). spec_assert non-simd 22049/0/2632 → **22259/0/2638** (+210 PASS, 0 FAIL, +1 manifest); simd 13301/0/440 unchanged. |
