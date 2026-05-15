@@ -209,6 +209,17 @@ NAMES=(
   memory_copy
   memory_fill
   memory_grow
+  # d-46 batch: green-bisected table_* family. 3 of 8 candidates
+  # land cleanly. Deferred per-corpus to debt:
+  # - `table_get` 1 FAIL (externref OOB get not trapping) — D-121.
+  # - `table_size` 1 FAIL (UnsupportedOp at compile) — D-122.
+  # - `table_init` SEGV mid-corpus — D-123.
+  # - `table_copy` 8 FAIL (assert_trap not trapping; bounds-check
+  #   gap?) — D-124.
+  # - `table_grow` 6 FAIL (UnsupportedOp at compile) — D-125.
+  table
+  table_set
+  table_fill
   # d-41 enable: `memory_trap` — D-114 discharged. The 4× load
   # FAILs were not load-bounds-check bugs; they were caused by a
   # skipped `(assert_return (invoke "i64.store" 0xfff8 0))`

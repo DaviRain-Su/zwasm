@@ -1,0 +1,45 @@
+module table_fill.0.wasm
+skip-impl non-scalar-result get
+skip-impl non-scalar-result get
+skip-impl non-scalar-result get
+skip-impl non-scalar-result get
+skip-impl non-scalar-result get
+skip-impl non-scalar-arg fill
+skip-impl non-scalar-result get
+skip-impl non-scalar-result get
+skip-impl non-scalar-result get
+skip-impl non-scalar-result get
+skip-impl non-scalar-result get
+skip-impl non-scalar-arg fill
+skip-impl non-scalar-result get
+skip-impl non-scalar-result get
+skip-impl non-scalar-result get
+skip-impl non-scalar-result get
+skip-impl non-scalar-arg fill
+skip-impl non-scalar-result get
+skip-impl non-scalar-result get
+skip-impl non-scalar-result get
+skip-impl non-scalar-arg fill
+skip-impl non-scalar-result get
+skip-impl non-scalar-result get
+skip-impl non-scalar-result get
+skip-impl non-scalar-arg fill-abbrev
+skip-impl non-scalar-result get
+skip-impl non-scalar-result get
+skip-impl non-scalar-arg fill
+skip-impl non-scalar-result get
+skip-impl trap-non-scalar-arg fill
+skip-impl non-scalar-result get
+skip-impl non-scalar-result get
+skip-impl non-scalar-result get
+skip-impl trap-non-scalar-arg fill
+skip-impl trap-non-scalar-arg fill
+assert_invalid table_fill.1.wasm
+assert_invalid table_fill.2.wasm
+assert_invalid table_fill.3.wasm
+assert_invalid table_fill.4.wasm
+assert_invalid table_fill.5.wasm
+assert_invalid table_fill.6.wasm
+assert_invalid table_fill.7.wasm
+assert_invalid table_fill.8.wasm
+assert_invalid table_fill.9.wasm

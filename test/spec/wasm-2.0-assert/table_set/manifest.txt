@@ -1,0 +1,26 @@
+module table_set.0.wasm
+skip-impl non-scalar-result get-externref
+skip-impl non-scalar-arg set-externref
+skip-impl non-scalar-result get-externref
+skip-impl non-scalar-arg set-externref
+skip-impl non-scalar-result get-externref
+skip-impl non-scalar-result get-funcref
+assert_return set-funcref-from i32:0 i32:1 -> ()
+assert_return is_null-funcref i32:0 -> i32:0
+skip-impl non-scalar-arg set-funcref
+skip-impl non-scalar-result get-funcref
+skip-impl trap-non-scalar-arg set-externref
+skip-impl trap-non-scalar-arg set-funcref
+skip-impl trap-non-scalar-arg set-externref
+skip-impl trap-non-scalar-arg set-funcref
+skip-impl trap-non-scalar-arg set-externref
+assert_trap set-funcref-from i32:3 i32:1
+skip-impl trap-non-scalar-arg set-externref
+assert_trap set-funcref-from i32:4294967295 i32:1
+assert_invalid table_set.1.wasm
+assert_invalid table_set.2.wasm
+assert_invalid table_set.3.wasm
+assert_invalid table_set.4.wasm
+assert_invalid table_set.5.wasm
+assert_invalid table_set.6.wasm
+assert_invalid table_set.7.wasm
