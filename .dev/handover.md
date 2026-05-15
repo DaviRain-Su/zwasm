@@ -10,25 +10,20 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-60 closed: D-131 discharge — prefix-vocab gate green**
+## Active state — **d-61 closed: drain runner-shape-gap residual (+16 PASS)**
 
 ### One-line state
 
-d-60 renames the pre-existing `skip-adr-cross-module-action`
-(d-37) and `skip-adr-host-state-diverged` (d-43) distiller
-emits to the gate-conforming `skip-adr-skip_<id>` form
-(110 + 181 = 291 manifest lines across 13 corpora) and adds
-the paired ADR docs `.dev/decisions/skip_cross_module_action.md`
-and `.dev/decisions/skip_host_state_diverged.md` per ADR-0029
-Path B's `check_skip_adrs.sh` prefix-vocab rule. Result:
-**Prefix-vocab violations: 0** (was 291 baseline); gate
-`bash scripts/check_skip_adrs.sh --gate` exits 0. D-131
-discharged. spec_assert non-simd 23576/0/2494 unchanged at
-the tally level (vocab rename is bit-identical to
-classifySkipLine's prefix match). simd 13301/0/440 unchanged.
-Mac aarch64 + OrbStack `test-all` both green. Loop continues
-toward 9.9 `[x]`; substrate audit hard gate (9.12) auto-fires
-when next chunk would resolve to it.
+d-61 extends d-55's runner-shape-gap drain to the 7 residual
+dispatch shapes (FP-result 2-arg-i32 ×2, i32-result 3-arg-FP
+×2, mixed 3-arg, 8-arg f64, mixed 6-arg). Adds 7 new
+`entry.callXxx_yyy` helpers; bumps `args: [5]ArgValue` →
+`[8]` at 3 call sites to fit the 6/8-arg shapes; extends
+distiller's `supported` set with 7 new tuples. spec_assert
+non-simd 23576/0/2494 → **23592/0/2478** (+16 PASS, 0 FAIL;
+skip-impl 1817 → 1801). simd 13301/0/440 unchanged. Loop
+continues toward 9.9 `[x]`; substrate audit hard gate (9.12)
+auto-fires when next chunk would resolve to it.
 
 ### Standing reminder for the autonomous loop
 
@@ -55,18 +50,19 @@ refactor, the closing path is the runner-side skip-impl backlog
 considering whether to flip 9.9 `[x]` based on "active corpora
 green" rather than "every assertion classified".
 
-- **d-61** — Candidates for the next chunk (post-D-131):
-  - **directive-assert_exhaustion** (~15 entries) — needs JIT
+- **d-62** — Candidates for the next chunk (live tally post-d-61):
+  - **directive-assert_exhaustion** (~15) — needs JIT
     stack-overflow detection (real implementation work; not
     a reclassification).
-  - **trap-non-scalar-arg / non-scalar-arg** (~12+7 entries)
-    — needs reftype-arg dispatch in the runner ladder
-    (extends `[5]ArgValue` matrix with `ref` variant per
-    ADR-0061). Companion benefit: dissolves the
-    `host_state_diverged` barrier upstream (skip-ADR retires
-    naturally; see `skip_host_state_diverged.md`).
-  - **multi-result** (~48 entries) — Phase 11+ scope per
-    ADR-0029 follow-up; architecturally blocked.
+  - **trap-non-scalar-arg / non-scalar-arg / action-non-scalar-arg
+    / non-scalar-result** (~12+7+2+12) — needs reftype-arg/result
+    dispatch in the runner ladder (extends `ArgValue` matrix
+    with `ref` variant per ADR-0061). Companion benefit:
+    dissolves the `host_state_diverged` barrier upstream
+    (skip-ADR retires naturally).
+  - **multi-result** (~48) — Phase 11+ scope per ADR-0029
+    follow-up; architecturally blocked.
+  - **non-invoke-action** (~1) — `ref_is_null` corpus oddity.
 
 Runner-side skip-impl backlog (7 total, in `nop / loop /
 local_tee`):
@@ -151,6 +147,7 @@ Other queued post-D-093 names: `address`, `align`, `br_table`,
 | D-093 (d-48) | [x] `323b0046` | D-122 + D-125 close. table_grow callout + table_size land. spec_assert non-simd 20927/0/1219 → 20925/0/1311 (+2 manifests). |
 | D-093 (d-59) | [x] `0815e94e` | drain directive-register (21 entries) — distiller emits `skip-adr-skip_cross_module_register as={name}`; new ADR `skip_cross_module_register.md`. D-131 filed (pre-existing prefix-vocab violations). spec_assert non-simd 23576/0/2494 (skip-impl 1838→1817, skip-adr 656→677). |
 | D-093 (d-60) | [x] `310476bd` | D-131 discharge — rename pre-existing `cross-module-action` + `host-state-diverged` vocabs to gate-conforming form + 2 new ADRs. `check_skip_adrs --gate` exits 0 (was 291 violations). spec_assert non-simd 23576/0/2494 unchanged (bit-identical at runner level). |
+| D-093 (d-61) | [x] `31e076a6` | drain runner-shape-gap residual — 7 new `entry.callXxx_yyy` helpers + 7 new dispatch arms + `[5]ArgValue`→`[8]` cap bump + 7 distiller supported tuples. spec_assert non-simd 23576/0/2494 → **23592/0/2478** (+16 PASS, 0 FAIL; skip-impl 1817→1801). |
 
 Other queued chunks (post-l-1): k-1, k-2, m-4c (= D-090),
 m-2d, n-1, j-3b.
@@ -168,7 +165,8 @@ m-2d, n-1, j-3b.
 - `now`: **D-093** (residual sub-clusters above), D-095
   (partial — x86_64 residuals tracked as D-097), D-126
   (bulk corpus residual — Phase 10+ scope).
-- `discharged d-60`: D-131 (prefix-vocab gate green).
+- `discharged`: D-131 at d-60 (prefix-vocab gate green); none
+  at d-61.
 - `blocked-by`: D-007/010/016/018/020/021/022/026/028/052(partial)/
   055/057/058/059/062(partial)/065/072/073/074/075/079(ii)/
   081/082/090.
