@@ -10,25 +10,29 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **Phase 9 extended; D-093 (d-41) D-114 discharged + memory_trap lands 2026-05-15**
+## Active state — **Phase 9 extended; D-093 (d-42) JIT multi-table call_indirect lands 2026-05-15**
 
 ### One-line state
 
-D-093 (d-41) discharges D-114. The original framing was
-"load OOB-check off-by-one"; d-41 disproved that — the 4
-FAILing `i*.load` / `f*.load` calls were correctly
-returning the data-segment bytes "abcdefgh" because the
-preceding `(invoke "i64.store" 0xfff8 0)` zero-store was
-silently skipped as `skip-impl runner-shape-gap`. Same
-`(i32, <T>)` shape-gap class as D-116 (d-40) but extended
-to the assert_trap and assert_return void axes. d-41 adds
-the `(i32, i64)` void helper + ladder arms for `(i32,
-i64)` / `(i32, f32)` / `(i32, f64)` across
-`dispatchVoidResult` + `nonSimdRunAssertTrap` +
-`invokeActionShape`; distiller `trap_supported` and
-`supported` sets extended. `memory_trap` lands in NAMES.
-spec_assert non-simd 16091/0/684 → 16276/0/679 (+185 PASS,
-0 FAIL, +1 manifest); simd 13301/0/440 unchanged.
+D-093 (d-42) introduces JIT multi-table `call_indirect`
+dispatch (Wasm 2.0 / spec §3.4.6 + §4.4.10.1). Pre-d-42
+`emitCallIndirect` ignored `ZirInstr.extra` (table_idx)
+and always loaded table 0's `funcptr_base` / `typeidx_base`
+/ `table_size` from JitRuntime scalar fields. d-42 adds
+`TableJitCallInfo` (extern {funcptr_base, typeidx_base},
+16-byte stride) as a parallel `tables_jit_ci_ptr` array
+in JitRuntime (head_size 200 → 216). Entry 0 reuses table
+0's flat funcptrs/typeidxs so legacy scalar fast path
+(X24/X25/X26 reload on arm64, [R15+scalar_off] on x86_64)
+stays unchanged; entries `k > 0` back a per-call slow path
+that loads bases via `tables_ptr[k].len` (size) +
+`tables_jit_ci_ptr[k].{funcptr,typeidx}_base` (data).
+`src/engine/runner.zig::setupRuntime` allocates per-table
+arenas; elem-section loop drops the table-0-only gate. Edge
+fixture `multi_table_dispatch.wat` (2-table, call_indirect
+$t1) flips FAIL→PASS. spec_assert / simd / wast / realworld
+all unchanged (no regressions). **D-112 spec_assert harness
+wire-up + `select` NAMES enable deferred to d-42b**.
 
 ### Standing reminder for the autonomous loop
 
@@ -37,16 +41,19 @@ causes, never work around.**
 
 ### Next sub-chunk candidates (names only, NO predictions)
 
-Active `now` debts (post-d-41):
+Active `now` debts (post-d-42):
 - D-093 (parent), D-095 (regalloc partial).
 - D-115 d-39 / D-116 d-40 / D-114 d-41 discharged.
-- **D-112** (select call_indirect-context 4× Trap).
+- **D-112** — JIT side done at d-42; spec_assert harness
+  wire-up + select NAMES enable remain.
 - **D-113** (ref_is_null SEGV).
 - D-103: discharged at d-37 via cross-module-imports skip.
 - D-102/D-105/D-079: cross-module-imports family — surface
   remains SKIP under d-37 pre-filter.
 
-- **d-42** — D-112 select call_indirect-context.
+- **d-42b** — D-112 close: extend `spec_assert_runner_base
+  .makeJitRuntime` + per-table `applyTableInit` →
+  trial-enable `select` NAMES; flips its 4 FAILs.
 - **d-43** — D-113 ref_is_null SEGV (needs lldb +
   debug-print investigation).
 - **d-44+** — remaining wast names (table_*, data,
@@ -119,7 +126,8 @@ Other queued post-D-093 names: `address`, `align`, `br_table`,
 | D-093 (d-39) | [x] c54d1ab0 | D-115 FP-select half discharged: validator → lower → emit untyped-`select` valtype byte plumbing. New `validateFunctionAndCollectSelectTypes` entry point collects per-0x1B resolved valtype byte in body-walk order; `compileOne(..., select_types)` + `lowerFunctionBody(..., select_types)` thread the slice; lower consumes one byte per 0x1B to populate `ZirInstr.extra`. Existing emit dispatch (0x7D/0x7C ⇒ arm64 FCSEL S/D + x86_64 `op_alu_float.emitFpSelect`) fires correctly. Edge fixtures `test/edge_cases/p9/select_fp/select_f<32,64>_negzero.{wat,wasm,expect}`. |
 | D-093 (d-40) | [x] e7e1f01f | D-116 discharged. Mis-diagnosed framing was "memory persistence across invokes lost"; actual root cause was distiller `action_supported` / `assert_return supported` shape sets + runner `dispatchVoidResult` / `invokeActionShape` ladders missing `(i32, f32)` / `(i32, f64)` / `(i32, i32, i32)`. d-40 adds three new `entry.callVoid_*` helpers + ladder arms + distiller shape entries. `float_exprs` lands in NAMES. spec_assert 15438 → 16091 PASS. |
 | D-093 (d-41) | [x] a31fec49 | D-114 discharged. Same shape-gap class as D-116 but on the assert_trap + assert_return-void axes. d-41 adds `entry.callVoid_i32i64` + arms for `(i32, i64)` / `(i32, f32)` / `(i32, f64)` across `dispatchVoidResult` / `nonSimdRunAssertTrap` / `invokeActionShape`; distiller `trap_supported` + `supported` sets extended. `memory_trap` lands in NAMES. spec_assert non-simd 16091/0/684 → 16276/0/679 (+185 PASS, 0 FAIL, +1 manifest); simd 13301/0/440 unchanged. |
-| **D-093 (d-42)** | **NEXT** | D-112 select.wast call_indirect multi-table dispatch. d-42 partial investigation (commit `8ad7b181`, no code change) traced the 4 FAILs to `emitCallIndirect` ignoring `ZirInstr.extra` (table_idx). Module declares `$tab` (table 0, $dummy) + `$t` (table 1, $func); call_indirect dispatches `$t` but our emit reads from the single runtime view at table 0 → sig mismatch trap. See D-112 narrative in `.dev/debt.md` for full hypothesis + discharge plan. |
+| D-093 (d-42) | [x] ebe2a992 | D-112 JIT side: multi-table call_indirect dispatch. New `TableJitCallInfo` (extern { funcptr_base, typeidx_base }, 16-byte stride) in JitRuntime as parallel `tables_jit_ci_ptr` array (head_size 200 → 216). Entry 0 reuses table-0 flat arrays so legacy X24/X25/X26 (arm64) + [R15+scalar_off] (x86_64) fast path stays unchanged; entries `k > 0` back per-call slow path via `tables_ptr[k].len` + `tables_jit_ci_ptr[k]`. `setupRuntime` allocates per-table arenas; elem-section loop drops table-0-only gate. Edge fixture `multi_table_dispatch.wat` flips FAIL→PASS=42. spec_assert / simd / wast / realworld unchanged (no regressions). |
+| **D-093 (d-42b)** | **NEXT** | D-112 close: extend `spec_assert_runner_base.makeJitRuntime` + per-table `applyTableInit` (mirror of d-42's `setupRuntime` work, applied to the static-scratch harness path); then trial-enable `select` in NAMES so the harness exercises multi-table dispatch on `select.wast`'s 4 FAILs (table 0 = `$tab` / `$dummy`; table 1 = `$t` / `$func`). |
 
 Other queued chunks (post-l-1): k-1, k-2, m-4c (= D-090),
 m-2d, n-1, j-3b.
