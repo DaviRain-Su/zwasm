@@ -242,7 +242,8 @@ fn nonSimdRunAssertReturn(
     const results_s = rest[arrow + 4 ..];
 
     const fa = try base.splitFnAndArgs(lhs);
-    const fn_name = fa.fn_name;
+    var fn_name_buf: [512]u8 = undefined;
+    const fn_name = try base.decodeFnName(fa.fn_name, &fn_name_buf);
     const args_s = fa.args_s;
 
     const func_idx = runner_mod.findExportFunc(gpa, wasm_bytes, fn_name) catch |err| {
@@ -707,7 +708,8 @@ fn nonSimdRunAssertTrap(
     name: []const u8,
 ) anyerror!bool {
     const fa = try base.splitFnAndArgs(rest);
-    const fn_name = fa.fn_name;
+    var fn_name_buf: [512]u8 = undefined;
+    const fn_name = try base.decodeFnName(fa.fn_name, &fn_name_buf);
     const args_s = fa.args_s;
 
     const func_idx = runner_mod.findExportFunc(gpa, wasm_bytes, fn_name) catch |err| {
@@ -872,7 +874,8 @@ fn nonSimdRunInvokeAction(
     name: []const u8,
 ) anyerror!bool {
     const fa = try base.splitFnAndArgs(rest);
-    const fn_name = fa.fn_name;
+    var fn_name_buf: [512]u8 = undefined;
+    const fn_name = try base.decodeFnName(fa.fn_name, &fn_name_buf);
     const args_s = fa.args_s;
 
     const func_idx = runner_mod.findExportFunc(gpa, wasm_bytes, fn_name) catch |err| {

@@ -57,6 +57,28 @@ pub fn splitFnAndArgs(lhs: []const u8) !struct { fn_name: []const u8, args_s: []
     return .{ .fn_name = lhs[0..sp1], .args_s = lhs[sp1 + 1 ..] };
 }
 
+/// §9.9 / 9.9-l-1b-d093-d53 (D-128): when an export name contains
+/// control chars / quotes / whitespace, the distiller emits it as
+/// `:hex:<utf8-hex>` (e.g. `:hex:0a09` for `\n\t`). This decoder
+/// reverses the hex into raw bytes (UTF-8). Callers pass a stack
+/// buffer; the slice returned aliases either `fn_name` directly
+/// (when no `:hex:` prefix) or the buffer's first N bytes.
+pub fn decodeFnName(fn_name: []const u8, buf: []u8) ![]const u8 {
+    const HEX_PREFIX = ":hex:";
+    if (!std.mem.startsWith(u8, fn_name, HEX_PREFIX)) return fn_name;
+    const hex = fn_name[HEX_PREFIX.len..];
+    if (hex.len % 2 != 0) return error.BadDirective;
+    const decoded_len = hex.len / 2;
+    if (decoded_len > buf.len) return error.BadDirective;
+    var i: usize = 0;
+    while (i < hex.len) : (i += 2) {
+        const hi = std.fmt.charToDigit(hex[i], 16) catch return error.BadDirective;
+        const lo = std.fmt.charToDigit(hex[i + 1], 16) catch return error.BadDirective;
+        buf[i / 2] = (hi << 4) | lo;
+    }
+    return buf[0..decoded_len];
+}
+
 /// Per-runner tally of assertion outcomes. Per ADR-0029 Path B
 /// (chunk 9.9-h-21): twin counters for `skip-impl` (counts toward
 /// release gate) and `skip-adr-<id>` (waived per the named ADR).
@@ -316,7 +338,7 @@ pub var scratch_table_refs: [SCRATCH_MAX_TABLES][SCRATCH_EXTRA_TABLE_CAPACITY]u6
 /// `undefined` in the spec runner (the spec runner has no
 /// full Runtime; only the FuncEntity's address matters for
 /// ref.is_null / ref.eq semantics).
-pub const SCRATCH_MAX_FUNCS: u32 = 256;
+pub const SCRATCH_MAX_FUNCS: u32 = 1024;
 pub var scratch_func_entities: [SCRATCH_MAX_FUNCS]@import("zwasm").runtime.FuncEntity = undefined;
 
 /// §9.9 / 9.9-l-1b-d093-d49 (D-123): per-elem-segment slice
@@ -1306,6 +1328,40 @@ test "parseI64Token: signed/unsigned both roundtrip" {
     try testing.expectEqual(@as(u64, 42), try parseI64Token("42"));
     try testing.expectEqual(@as(u64, @bitCast(@as(i64, -1))), try parseI64Token("-1"));
     try testing.expectEqual(@as(u64, 0x8000000000000000), try parseI64Token("-9223372036854775808"));
+}
+
+test "decodeFnName: no :hex: prefix passes through" {
+    var buf: [16]u8 = undefined;
+    const r = try decodeFnName("foo", &buf);
+    try testing.expectEqualStrings("foo", r);
+}
+
+test "decodeFnName: :hex: empty → empty" {
+    var buf: [16]u8 = undefined;
+    const r = try decodeFnName(":hex:", &buf);
+    try testing.expectEqual(@as(usize, 0), r.len);
+}
+
+test "decodeFnName: :hex:0a09 → \\n\\t" {
+    var buf: [16]u8 = undefined;
+    const r = try decodeFnName(":hex:0a09", &buf);
+    try testing.expectEqualSlices(u8, &[_]u8{ 0x0a, 0x09 }, r);
+}
+
+test "decodeFnName: :hex: utf8 multibyte (Å = 0xC3 0x85)" {
+    var buf: [16]u8 = undefined;
+    const r = try decodeFnName(":hex:c385", &buf);
+    try testing.expectEqualSlices(u8, &[_]u8{ 0xC3, 0x85 }, r);
+}
+
+test "decodeFnName: :hex: with odd hex length rejects" {
+    var buf: [16]u8 = undefined;
+    try testing.expectError(error.BadDirective, decodeFnName(":hex:abc", &buf));
+}
+
+test "decodeFnName: :hex: overflow buf rejects" {
+    var buf: [2]u8 = undefined;
+    try testing.expectError(error.BadDirective, decodeFnName(":hex:00112233", &buf));
 }
 
 test "splitFnAndArgs: unquoted name + args" {

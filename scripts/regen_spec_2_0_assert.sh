@@ -266,6 +266,14 @@ NAMES=(
   binary
   binary-leb128
   unreached-valid
+  # `names` + `imports` re-deferred to D-129: distiller char-escape
+  # fix (d-53) closes 8 of 12 names FAILs but `names: call
+  # print32(i32 i32): Trap` + `imports: call print_i32(i32): Trap`
+  # remain — both invoke export wrappers around spectest imports
+  # which the d-35 hostImportTrapStub correctly traps; spec asserts
+  # expect succeed (side-effect-only). Needs reachability analysis
+  # to mark assert_returns transitively calling spectest imports as
+  # skip-adr-spectest-import-call.
   comments
   custom
   inline-module
@@ -395,6 +403,18 @@ src, dst = sys.argv[1], sys.argv[2]
 d = json.load(open(src))
 def fmt(v):
     return f"{v['type']}:{v['value']}"
+# §9.9 / 9.9-l-1b-d093-d53 (D-128): export names that contain
+# control chars / whitespace / quotes / colon are emitted as
+# `:hex:<utf8-hex>` so the manifest parser (whitespace-split)
+# stays single-line + token-aligned. The runner's `decodeFnName`
+# reverses this before passing to `findExportFunc`.
+def quote_field(name):
+    if not name:
+        return ':hex:'
+    safe = all(0x21 <= ord(c) <= 0x7E and c not in ("'", ':') for c in name)
+    if safe:
+        return name
+    return ':hex:' + name.encode('utf-8').hex()
 lines = []
 # §9.9 / 9.9-l-1b-d093-d43 (D-113): module-scoped "state diverged"
 # flag. Set when a bare-action `invoke` is skipped because of a
@@ -516,7 +536,7 @@ for c in d['commands']:
         # bound is spec-conformant.
         args_s = ' '.join(fmt(x) for x in args) if args else '()'
         results_s = ' '.join(fmt(x) for x in results) if results else '()'
-        lines.append(f'assert_return {a["field"]} {args_s} -> {results_s}')
+        lines.append(f'assert_return {quote_field(a["field"])} {args_s} -> {results_s}')
     elif t == 'assert_trap':
         a = c['action']
         if 'module' in a:
@@ -551,7 +571,7 @@ for c in d['commands']:
         # D-091 closed: trap-mode skip-adr removed in lockstep
         # with the assert_return arm above.
         args_s = ' '.join(fmt(x) for x in args) if args else '()'
-        lines.append(f'assert_trap {a["field"]} {args_s}')
+        lines.append(f'assert_trap {quote_field(a["field"])} {args_s}')
     elif t == 'assert_invalid':
         lines.append(f'assert_invalid {c["filename"]}')
     elif t == 'assert_malformed':
@@ -611,7 +631,7 @@ for c in d['commands']:
         # cleanly relative to the previous skipped action, so
         # subsequent assert_returns can proceed.
         module_state_diverged = False
-        lines.append(f'invoke-action {a["field"]} {args_s}')
+        lines.append(f'invoke-action {quote_field(a["field"])} {args_s}')
     else:
         lines.append(f'skip-impl directive-{t}')
 with open(dst, 'w') as f:
