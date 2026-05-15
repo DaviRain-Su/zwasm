@@ -190,8 +190,17 @@ NAMES=(
   # `call_indirect $t1`-class assertion; per-table dispatch fixes
   # this end-to-end.
   select
-  # d-43 trial: re-enable ref_is_null to see current crash shape.
   ref_is_null
+  # d-44 batch: green-bisected names. `br_table` (SlotOverflow at
+  # compile), `bulk` (SEGV), `memory_init` (value-mismatch +
+  # missing-trap) deferred per d-44 bisect (= D-118, D-119, D-120).
+  # The d-37 cross-module-imports pre-filter handles `data` /
+  # `global`-class modules whose imports the runner can't bind.
+  data
+  global
+  memory_copy
+  memory_fill
+  memory_grow
   # d-41 enable: `memory_trap` — D-114 discharged. The 4× load
   # FAILs were not load-bounds-check bugs; they were caused by a
   # skipped `(assert_return (invoke "i64.store" 0xfff8 0))`
