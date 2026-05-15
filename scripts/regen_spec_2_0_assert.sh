@@ -603,6 +603,17 @@ for c in d['commands']:
             lines.append('skip-impl directive-assert_uninstantiable-non-binary')
             continue
         lines.append(f'assert_uninstantiable {c["filename"]}')
+    elif t == 'assert_unlinkable':
+        # §9.9 / 9.9-l-1b-d093-d58: module fails to link due to
+        # `unknown import` or `incompatible import type`. Runner
+        # PASSes if either compileWasm rejects the module OR
+        # hasUnbindableImports filter trips (any non-spectest
+        # module name OR any non-function spectest import — both
+        # structurally unlinkable in our spec scaffold).
+        if c.get('module_type') != 'binary' or 'filename' not in c:
+            lines.append('skip-impl directive-assert_unlinkable-non-binary')
+            continue
+        lines.append(f'assert_unlinkable {c["filename"]}')
     elif t == 'assert_malformed':
         if c.get('module_type') != 'binary' or 'filename' not in c:
             lines.append('skip-adr-skip_text_format_parser directive-assert_malformed-text')
@@ -671,7 +682,7 @@ PY
   # assert_uninstantiable).
   while read -r line; do
     set -- $line
-    if [ "$1" = "module" ] || [ "$1" = "assert_invalid" ] || [ "$1" = "assert_malformed" ] || [ "$1" = "assert_uninstantiable" ]; then
+    if [ "$1" = "module" ] || [ "$1" = "assert_invalid" ] || [ "$1" = "assert_malformed" ] || [ "$1" = "assert_uninstantiable" ] || [ "$1" = "assert_unlinkable" ]; then
       if [ -f "$TMP/$2" ]; then
         cp "$TMP/$2" "$out_dir/"
       fi
