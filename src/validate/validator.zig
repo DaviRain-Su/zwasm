@@ -1407,14 +1407,34 @@ const Validator = struct {
     fn opBrTable(self: *Validator) Error!void {
         const n = try leb128.readUleb128(u32, self.body, &self.pos);
         try self.popExpect(.i32); // selector
-        // Wasm 2.0 §3.3.5.8: in **unreachable** code (polymorphic
-        // stack after `unreachable` / `br` / `return`), the joined
-        // label type collapses to `bot` and target types may
-        // differ — the `meet-bottom` test in `unreached-valid.wast`
-        // exercises a br_table whose two targets have non-unifiable
-        // result types (`block f32` vs `block f64`). In reachable
-        // code we still enforce the strict labelTypesEq rule.
+        // Wasm 2.0 §3.3.5.8 (br_table):
+        //   - All targets' label types must have the same arity
+        //     (§9.9 / 9.9-l-1b-d093-d85 — even in polymorphic
+        //     stack mode, arity mismatch cannot unify via .bot).
+        //   - Numeric-type equality across targets is enforced in
+        //     reachable code only; in polymorphic (post-
+        //     unreachable / br / return) code the joined type
+        //     collapses to `bot` so per-target type may differ
+        //     (the `meet-bottom` fixture in `unreached-valid.wast`
+        //     exercises `block f32` vs `block f64` targets).
+        //   - The label-type pop happens unconditionally — in
+        //     polymorphic code the operand stack may still carry
+        //     concrete values pushed AFTER unreachable, and those
+        //     must match the joined label type just as in
+        //     reachable code (drains `unreached-invalid.85` =
+        //     `block (result i32); unreachable; f32.const 0;
+        //     i32.const 1; br_table 0; end` where the f32 must
+        //     reject against the inner block's i32 result type).
         const polymorphic = self.topFrame().unreachable_flag;
+        const arityOf = struct {
+            fn f(bt: BlockType) usize {
+                return switch (bt) {
+                    .empty => 0,
+                    .single => 1,
+                    .multi => |ts| ts.len,
+                };
+            }
+        }.f;
         var first: ?BlockType = null;
         var i: u32 = 0;
         while (i <= n) : (i += 1) {
@@ -1422,15 +1442,11 @@ const Validator = struct {
             const target = self.frameAt(depth) orelse return Error.InvalidBranchDepth;
             const lt = target.labelType();
             if (first) |prev| {
-                if (!polymorphic and !labelTypesEq(prev, lt)) return Error.ArityMismatch;
+                if (arityOf(prev) != arityOf(lt)) return Error.ArityMismatch;
+                if (!polymorphic and !labelTypesEq(prev, lt)) return Error.StackTypeMismatch;
             } else first = lt;
         }
-        if (first) |lt| {
-            // In unreachable code, popping the joined type is
-            // satisfied by the bottom-stack synthesiser; in
-            // reachable code, lt is the strict shared type.
-            if (!polymorphic) try self.popLabelTypes(lt);
-        }
+        if (first) |lt| try self.popLabelTypes(lt);
         self.markUnreachable();
     }
 
@@ -1616,26 +1632,51 @@ const Validator = struct {
             .single => 1,
             .multi => |ts| ts.len,
         };
-        if (frame.unreachable_flag and self.operand_len <= frame.height + expected_len) {
-            // Unreachable region: missing values are synthesised on read.
-            return;
+        const have: usize = self.operand_len - frame.height;
+        // §9.9 / 9.9-l-1b-d093-d85 — Wasm spec §3.3.5
+        // (polymorphic stack): in unreachable code, MISSING values
+        // are synthesised on read (i.e. `have < expected_len` is
+        // OK), but PRESENT values must still type-check against
+        // the corresponding expected slot. Excess values (`have >
+        // expected_len`) is an unconsumed-result error even in
+        // unreachable code (spec §3.3.5.4: "the validator must
+        // ensure that no unused values remain on the stack"). The
+        // pre-d-85 form bailed out entirely whenever
+        // `unreachable_flag` was set, which silently accepted
+        // unreached-invalid.{5,18,20,22,28,30,32,40,42,44,82,85,86,115}
+        // — concrete pushes after `unreachable` that contradicted
+        // the surrounding function / block's declared result
+        // types.
+        if (frame.unreachable_flag) {
+            if (have > expected_len) return Error.StackTypeMismatch;
+        } else {
+            if (have != expected_len) return Error.ArityMismatch;
         }
-        if (self.operand_len != frame.height + expected_len) return Error.ArityMismatch;
+        // The `have` present values occupy the TOP of the
+        // conceptual full result tuple. With expected types
+        // `[e_0, ..., e_{N-1}]` (e_0 = bottom, e_{N-1} = top), the
+        // first present slot (operand_buf[frame.height]) maps to
+        // expected[N - have].
+        const offset = expected_len - have;
         switch (end) {
             .empty => {},
             .single => |t| {
-                const top = self.operand_buf[self.operand_len - 1];
-                switch (top) {
-                    .bot => {},
-                    .known => |k| if (k != t) return Error.StackTypeMismatch,
+                if (have == 1) {
+                    const top = self.operand_buf[frame.height];
+                    switch (top) {
+                        .bot => {},
+                        .known => |k| if (k != t) return Error.StackTypeMismatch,
+                    }
                 }
             },
             .multi => |ts| {
-                for (ts, 0..) |t, idx| {
-                    const slot = self.operand_buf[frame.height + idx];
+                var i: usize = 0;
+                while (i < have) : (i += 1) {
+                    const slot = self.operand_buf[frame.height + i];
+                    const expected_t = ts[offset + i];
                     switch (slot) {
                         .bot => {},
-                        .known => |k| if (k != t) return Error.StackTypeMismatch,
+                        .known => |k| if (k != expected_t) return Error.StackTypeMismatch,
                     }
                 }
             },
