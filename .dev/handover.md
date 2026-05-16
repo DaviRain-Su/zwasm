@@ -10,62 +10,66 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-67 closed: D-134 probe — single_threaded rules out cross-thread siglongjmp (negative result)**
+## Active state — **d-68 closed: D-134 DISCHARGED — `std_options.enable_segfault_handler = false`**
 
 ### One-line state
 
-d-67 sets `.single_threaded = true` on `non_simd_assert_runner_mod`
-in `build.zig` to probe d-65's leading hypothesis (cross-thread
-`siglongjmp` from `std.Io.Threaded` worker). Building with
-`-fsingle-threaded` makes `std.Io.Threaded.init` return
-`.init_single_threaded` per `~/Documents/OSS/zig/lib/std/Io/
-Threaded.zig:127`, so no worker threads can spawn. Mac
-`test-spec-wasm-2.0-assert` 23784/0/2286 **unchanged** (build
-flag is semantically a no-op on the runner's sequential
-pipeline). OrbStack `test-all` SEGV **still reproduces** at
-`zwasm-spec-wasm-2-0-assert` → cross-thread `siglongjmp` is
-**refuted**. Build flag retained (not reverted): the runner
-walks corpora purely sequentially — no `async` / `concurrent`
-use — so single-threaded is the correct execution shape
-regardless, and keeping it permanently removes cross-thread
-from D-134's hypothesis space.
+d-68 lands `pub const std_options: std.Options = .{
+.enable_segfault_handler = false };` in
+`test/spec/spec_assert_runner_non_simd.zig`. d-65's
+retrospective claimed this disable was already set but a
+d-68 resume-time repo-wide grep showed **no `std_options`
+declaration existed anywhere** — the disable was aspirational,
+never landed (lesson at
+`.dev/lessons/2026-05-16-narrative-claim-vs-landed-state.md`).
+Actually landing it makes our `installSigsegvHandler` the
+sole sigaction for SEGV/BUS (was competing with Zig startup's
+`attachSegfaultHandler` + `SA.RESETHAND`-flagged install of
+the recursive `handleSegfaultPosix` chain — ziglang/zig#14658).
+OrbStack `zig build test-all` now **exits 0** (was non-deterministic
+SEGV across d-64 through d-67). spec_assert_runner_non_simd
+23784/0/2286, simd_assert_runner 13301/0/440 — bit-identical
+Mac aarch64 + OrbStack Linux x86_64. **D-134 discharged**;
+D-134 row removed from `.dev/debt.md`.
 
-**Hypothesis space narrowed to** (post-d-67):
-- (i) **libc-context SEGV** — d-65 valgrind captured RIP in
-  the libc.so.6 region (addr=0x1, NULL+1 deref pattern).
-  Something inside libc dereferences a small pointer and the
-  SEGV fires outside any context our handler can service.
-- (ii) **Zig's `std.debug.handleSegfaultPosix` chain still
-  firing despite our sigaction** (D-134 candidate path (d) —
-  toolchain PR #25227 / ziglang/zig#14658 "panic/segfault
-  handler not signal-safe"). Our `installSigsegvHandler`
-  installs via `std.posix.sigaction(.SEGV, &act, null)` —
-  if Zig's startup or some std lib path re-installs SEGV
-  after our install, the kernel routes the fault through
-  Zig's chain (which recursively faults in
-  `mem.Alignment.toByteUnits` per d-65 valgrind) rather
-  than through our handler.
+### §9.9 closing path — now unblocked
 
-### Next sub-chunk candidates (d-68+)
+The handover's previous "9.9 `[x]` flip path blocked by D-134
+(OrbStack per-chunk gate unreliable)" predicate is now false.
+Remaining `now` debts: **D-093** (residual sub-clusters), **D-095**
+(partial — x86_64 residuals tracked as D-097), **D-126** (bulk
+corpus residual — Phase 10+ scope), **D-133** (remaining
+≥3-scratch op_table/op_memory sites — substrate audit Q5
+scope), **D-135** (empty-fn-section leak — narrative claim;
+should re-verify per the d-68 lesson).
 
-- **D-134 (ii) probe**: install our `installSigsegvHandler`
-  **later** (after first stdlib touch) and verify it
-  survives, OR install via raw `std.c.sigaction` to bypass
-  any Zig wrapper layering. If our handler still doesn't
-  fire on the real SEGV after a verified-late install, the
-  fault is hypothesis (i) (libc-context).
-- **D-134 (i) probe**: capture the SEGV addr's
-  surrounding-libc-context — gdb-batch with breakpoints at
-  `__sigsetjmp` and the first parser/sections read; check
-  if a specific module byte-offset triggers it.
-- **D-135 discharge**: identify which corpus's last module
-  hits the empty-function-section path and isn't freed
-  before runCorpus's defer; structural fix may be
-  end-of-corpus tail-guard pattern.
-- **D-133 remaining sites** (≥3-scratch slots) — queued for
-  Phase 9 完備 substrate audit's unified comptime mechanism.
-- Phase 9 completion path: 9.9 `[x]` flip path blocked by
-  D-134 (OrbStack per-chunk gate unreliable until discharged).
+§9.9 row text per ROADMAP: "Wasm 2.0 (incl. SIMD) 100% PASS
+on Mac+OrbStack" — now met. Closing 9.9 `[x]` triggers:
+(1) Substrate audit hard gate at 9.12 fires next, surfacing
+to user per `/continue` Detection rule; (2) Phase Status
+widget update (Phase 9 still IN-PROGRESS until 9.12 / 9.13
+clear); (3) Windows reconciliation per ADR-0049
+(`bash scripts/run_remote_windows.sh test-all`).
+
+### Next sub-chunk candidates (d-69+)
+
+- **§9.9 closure path**: run Windows reconciliation,
+  audit_scaffolding phase-boundary fire, then flip 9.9 to
+  `[x]` — at which point the **Phase 9 完備 substrate audit
+  hard gate (row 9.12)** surfaces and the autonomous loop
+  pauses for collaborative review per the `/continue`
+  hard-gate detection rule.
+- **D-135 narrative-vs-state re-verification** per the d-68
+  lesson: the debt entry claims 4 leak sites trace to
+  `compileWasm` empty-fn path; with d-68's actual fix
+  shipped, run `zig build test-spec-wasm-2.0-assert` on
+  OrbStack and check whether DebugAllocator still reports
+  the leak. If it does, pursue D-135 discharge per its
+  existing plan. If it doesn't, D-135 may have been a
+  symptom of D-134's process-corrupting crash, not a
+  separate leak.
+- **D-133 remaining sites** — still queued for substrate
+  audit unified mechanism.
 
 ## Previous state — **d-63 closed: drain non-scalar-arg/result via reftype-alias-to-i64 (+176 PASS)**
 
