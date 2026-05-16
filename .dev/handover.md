@@ -10,28 +10,27 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-81 closed: select-reftype + if-missing-else validation, +5 PASS**
+## Active state — **d-82 closed: ref.func declared-set validation, +3 PASS**
 
 ### One-line state
 
-d-81 closes two corpora fully: (a) untyped select rejects
-reftype operands; (b) `if` block without else requires
-`start_type == end_type`. Result: spec_assert 23958/0/2112
-→ **23963/0/2107** (+5 PASS, 0 FAIL). Per-corpus full
-drains: select 1→0, if 4→0. Total VALIDATOR-GAP 24→19.
+d-82 drains `ref_func` 3→0: validator's opRefFunc now enforces
+Wasm §3.4.7.3 / §3.4.10 declared-funcrefs set; runner builds the
+set from globals' ref.func init-exprs + elements' funcidxs +
+exports' func entries (NOT start, NOT function bodies). Also
+threads total_funcs into validateGlobalInitExpr for the ref.func
+out-of-range check (ref_func.2). Result: spec_assert 23963/0/2107
+→ **23966/0/2104** (+3 PASS, 0 FAIL). Total VALIDATOR-GAP 19→16.
 
-**Cumulative d-74 → d-81 (9 chunks)**: **+179 PASS**
-(23784 → 23963).
+**Cumulative d-74 → d-82 (10 chunks)**: **+182 PASS**
+(23784 → 23966).
 
-### Skip-impl drainage roadmap (post-d-81)
+### Skip-impl drainage roadmap (post-d-82)
 
-Remaining VALIDATOR-GAP (19): unreached-invalid 14
-(deferred — polymorphic stack refactor), ref_func 3,
-elem 1, call_indirect 1.
+Remaining VALIDATOR-GAP (16): unreached-invalid 14
+(deferred — polymorphic stack refactor), elem 1,
+call_indirect 1.
 
-- **d-82** — `ref_func` (3): "undeclared function
-  reference" — needs func-declaration tracking
-  (elem section + exports + start + imports).
 - **d-83** — elem / call_indirect residuals (2): needs
   funcidx-out-of-range check in elem.funcidxs or
   deeper per-element init-expr decode.
