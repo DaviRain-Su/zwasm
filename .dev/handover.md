@@ -10,19 +10,24 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-70 closed: debt cleanup (D-093 + D-097 + D-099 deleted)**
+## Active state — **d-71 closed: D-134 disambiguation — our handler does NOT fire**
 
 ### One-line state
 
-d-70 prunes 3 stale debt rows per `/continue` Step 0.5
-discipline. **D-093** (`wasm-2.0 spec corpus failures
-surfaced by k-1-expand-2 bisection`): all 4 named bug
-clusters (a-d) discharged through d-1..d-69. **D-097** had
-`discharged-by: ADR-0060 d-18` (stale). **D-099** had
-`discharged-by: d-24` (stale). D-095 narrative tweaked.
-Doc-only; `zig build` rc=0. Handover trimmed (was 272
-lines, well past the 80-line cap; stale prose deleted —
-all preserved in git log / phase_log).
+d-71 changes `sigsegvHandler`'s unarmed-SEGV `_exit`
+from 139 → 142 to disambiguate "handler fired" from
+"kernel-delivered raw SIGSEGV" in zig build's failure
+report. OrbStack `test-all` reproduced D-134 SEGV and
+reported `signal SEGV` — NOT `exit code 142`. **Our
+handler is not running for the real D-134 SEGV.** With
+Zig's startup handler already disabled (d-68) and no
+other stdlib `sigaction(.SEGV)` callers, the remaining
+hypothesis space narrows to: (iii-a) `sigaltstack`
+silently fails → SA.ONSTACK has no stack → kernel
+falls back to SIG_DFL; (iii-b) signal mask blocks
+SIGSEGV at delivery; (iii-c) handler replaced by some
+unenumerated path between install and SEGV. Mac
+aarch64 unaffected (23784/0/2286 unchanged).
 
 ### Phase 9 / §9.9 status
 
@@ -46,14 +51,22 @@ all preserved in git log / phase_log).
   d-68 disabled Zig's startup SEGV handler but the
   heisenbug still reproduces at low rate).
 
-### Next sub-chunk candidates (d-71+)
+### Next sub-chunk candidates (d-72+)
 
-- **D-134 deeper investigation**: enumerate non-stdlib
-  sigaction(.SEGV) callers reachable from the runner
-  (DebugAllocator diagnostic / panic paths). Per
-  `.claude/rules/extended_challenge.md` Step 4: WebFetch
-  Zig issue tracker for "SEGV handler reinstall during
-  Debug builds" + "DebugAllocator double-free SEGV".
+- **D-134 / hypothesis (iii-a)**: replace
+  `installSigsegvHandler`'s `std.posix.sigaltstack(...)
+  catch {}` swallow with explicit error reporting
+  (raw-write errno to stderr OR @panic with diagnostic).
+  If sigaltstack is silently failing on OrbStack Linux
+  x86_64, the probe surfaces it — and the fix is then
+  either fall back to no-altstack (works for non-stack-
+  overflow SEGVs) or fix the altstack-size / alignment
+  issue.
+- **D-134 / hypothesis (iii-b/c)**: after (iii-a) is
+  ruled out, probe signal-mask at signal-delivery
+  context (raw sigprocmask readback at sigsetjmp arm)
+  and verify our handler is still installed at runCorpus
+  entry (re-readback via `sigaction(SEGV, null, &oact)`).
 - **D-133 remaining sites** — still queued for substrate
   audit unified comptime-disjointness mechanism (Q5).
 - §9.9 closure via "active corpora green" interpretation
