@@ -10,34 +10,45 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-83 closed: elem-funcidx-range + table.init reftype-match, +2 PASS**
+## Active state — **d-84 closed: PARSER-GAP full drain (19→0) + Mac/OrbStack bit-identical, +19 PASS**
 
 ### One-line state
 
-d-83 drains the last 2 non-deferred VALIDATOR-GAP entries:
-(a) runner rejects elem segments with out-of-range funcidx
-(call_indirect.36); (b) validator's opTableInit enforces
-elem-vs-table reftype match via new `elem_types` slice
-(elem.63). Result: spec_assert 23966/0/2104 → **23968/0/2102**
-(+2 PASS, 0 FAIL). Per-corpus full drains: call_indirect 1→0,
-elem 1→0. Total VALIDATOR-GAP 16→14 (all remaining are deferred
-unreached-invalid).
+d-84 bundles 5 spec-rule tightenings to drain all 19
+SKIP-PARSER-GAP entries: (a) eager type-section decode catches
+canonical-LEB issues in modules with no imports/funcs; (b)
+function-vs-code count consistency for the "code without
+function section" case; (c) data_count section value vs data
+section count match; (d) memory.init/data.drop require
+data_count section present (Validator.data_count_section_present
+field); (e) table-limits flag canonical (bit 0 only); (f)
+custom-section name LEB validation at parse time. Result:
+spec_assert 23968/0/2102 → **23987/0/2083** (+19 PASS, 0 FAIL).
+**Mac + OrbStack bit-identical** (D-134 silent this run —
+first clean OrbStack since d-65).
 
-**Cumulative d-74 → d-83 (11 chunks)**: **+184 PASS**
-(23784 → 23968).
+**Cumulative d-74 → d-84 (12 chunks)**: **+203 PASS**
+(23784 → 23987).
 
-### Skip-impl drainage roadmap (post-d-83)
+### Skip-impl drainage roadmap (post-d-84)
 
-VALIDATOR-GAP fully drained EXCEPT deferred unreached-invalid 14
-(polymorphic stack pop-with-expected-type refactor; ~200 LOC
-across popExpect / popAny / opSelect; complexity-to-drainage
-ratio poor — leaving for substrate audit / collaborative review).
+Both VALIDATOR-GAP (except deferred unreached-invalid 14) AND
+PARSER-GAP (full drain) are now zero. The remaining skip-impl
+floor is structural:
 
-- **d-84** — PARSER-GAP drainage start. PARSER-GAP (19):
-  binary 8, binary-leb128 7, custom 4. Needs LEB128 over-long
-  encoding rejection (spec §5.2.2: `readUleb128` accepts
-  over-long encodings like `82 80 80 80 00` for u32 which is
-  malformed per spec). Tractable but spec-text-sensitive.
+- SKIP-CROSS-MODULE-IMPORTS 136 (Phase 10+ scope; cross-module
+  registry / instance plumbing not yet on the runtime side).
+- SKIP-NO-LINK-TYPECHECK 4 (cross-module signature check —
+  Phase 10+).
+- SKIP-START-TRAP 2 + SKIP-HOST-IMPORT 2.
+- deferred VALIDATOR-GAP unreached-invalid 14 (polymorphic
+  stack refactor; substrate audit scope).
+
+Next chunks pick from these structural fronts OR survey
+remaining skip-impl reasons (memory_grow, simd skip-impl, etc.)
+for tractable mid-difficulty targets. The §9.9 row text exit
+criterion "skip-impl == 0" remains gated by the substrate
+audit interpretation (ADR-0062 hard gate at 9.12).
 
 PARSER-GAP (19): binary 8, binary-leb128 7, custom 4 —
 needs LEB128 over-long encoding rejection. Tractable but
