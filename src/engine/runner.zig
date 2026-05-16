@@ -76,6 +76,20 @@ pub const Error = error{
     /// memory that does not exist (no memory section + no
     /// memory imports, or memidx out of range).
     DataSegmentRequiresMemory,
+    /// Wasm spec §3.4.5: table limits must satisfy `min ≤ max`
+    /// when max is specified.
+    InvalidTableLimit,
+    /// Wasm spec §3.4.6: an active element segment references
+    /// a tableidx outside the [0, total_tables) range.
+    ElemSegmentRequiresTable,
+    /// Wasm spec §3.2.9 / §3.4.9: a function import's
+    /// `typeidx` references a type not defined in the type
+    /// section.
+    ImportTypeIdxOutOfRange,
+    /// Wasm spec §3.4.8: the start function must have
+    /// signature `[] → []` (no params, no results) AND its
+    /// funcidx must be in range.
+    InvalidStartFunction,
     UnsupportedEntrySignature,
 } || compile_func.Error || parser.Error || sections.Error || linker.Error || entry.Error || validator_mod.Error;
 
@@ -199,6 +213,79 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
                     }
                     if (seg.memidx >= num_memory_imports + defined_memories) {
                         return Error.DataSegmentRequiresMemory;
+                    }
+                }
+            }
+        }
+    }
+
+    // §9.9 / 9.9-l-1b-d093-d76 (skip-impl drainage):
+    // Wasm spec §3.4.5 table + §3.4.6 element validation.
+    //   (a) §3.4.5 Table limits: `min ≤ max` if max specified.
+    //       (Unlike memory, table doesn't have a hard cap on
+    //       count in spec text — Wasm 2.0 §A.3 limits to one
+    //       table at-instance-time only; we keep that as a
+    //       Phase-10+ refinement.)
+    //   (b) §3.4.6 Element segment table reference: an active
+    //       elem segment's tableidx must reference an existing
+    //       table (import + defined).
+    // Also §3.4.9 import typeidx validation: each function
+    // import's `typeidx` must reference a defined type.
+    // Drains `table` (size mins/max + unknown table) and
+    // portions of `elem` (unknown table) SKIP-VALIDATOR-GAP.
+    {
+        var num_table_imports: u32 = 0;
+        if (imports_buf) |ib| {
+            for (ib.items) |imp| if (imp.kind == .table) {
+                num_table_imports += 1;
+            };
+        }
+        var defined_tables: u32 = 0;
+        if (module.find(.table)) |ts| {
+            var ts_buf = try sections.decodeTables(a, ts.body);
+            defer ts_buf.deinit();
+            defined_tables = @intCast(ts_buf.items.len);
+            for (ts_buf.items) |tbl_entry| {
+                if (tbl_entry.max) |max| {
+                    if (max < tbl_entry.min) return Error.InvalidTableLimit;
+                }
+            }
+        }
+        const total_tables = num_table_imports + defined_tables;
+        // Active elem segments require a referenced table.
+        if (module.find(.element)) |es| {
+            var es_buf = try sections.decodeElement(a, es.body);
+            defer es_buf.deinit();
+            for (es_buf.items) |seg| {
+                if (seg.kind == .active) {
+                    if (seg.tableidx >= total_tables) {
+                        return Error.ElemSegmentRequiresTable;
+                    }
+                }
+            }
+        }
+        // §3.4.9 / §3.2.9 import typeidx range: `(import "x" "y"
+        // (func (type N)))` requires `N < types.len`. The main
+        // path already enforces this at line ~250 via the
+        // tidx-vs-types-len check, but only when sig_count > 0
+        // hits that branch. Mirror the check here so it fires
+        // unconditionally regardless of the empty-fn vs main
+        // path.
+        if (imports_buf) |ib| {
+            // Skip when no type section AND no function imports
+            // (nothing to validate).
+            const has_func_imports = blk: {
+                for (ib.items) |imp| if (imp.kind == .func) break :blk true;
+                break :blk false;
+            };
+            if (has_func_imports) {
+                const type_section = module.find(.type) orelse return Error.MissingTypeSection;
+                var types_buf = try sections.decodeTypes(a, type_section.body);
+                defer types_buf.deinit();
+                for (ib.items) |imp| {
+                    if (imp.kind != .func) continue;
+                    if (imp.payload.func_typeidx >= types_buf.items.len) {
+                        return Error.ImportTypeIdxOutOfRange;
                     }
                 }
             }
@@ -393,6 +480,24 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         if (type_idx >= types.items.len) return Error.MissingTypeSection;
         func_sigs[num_imports + i] = types.items[type_idx];
         func_typeidxs[num_imports + i] = type_idx;
+    }
+
+    // §9.9 / 9.9-l-1b-d093-d76 (skip-impl drainage):
+    // Wasm spec §3.4.8 start function validation. A start
+    // section (id=8) carries a single funcidx; the referenced
+    // function must (a) exist in the function index space and
+    // (b) have signature `[] → []` (no params, no results).
+    // Drains `start.wast` SKIP-VALIDATOR-GAP for "unknown
+    // function" / "start function must be [] → []".
+    if (module.find(.start)) |ss| {
+        var pos: usize = 0;
+        const start_funcidx = try leb128.readUleb128(u32, ss.body, &pos);
+        if (pos != ss.body.len) return Error.UnsupportedEntrySignature; // trailing bytes in start section
+        if (start_funcidx >= total_funcs) return Error.InvalidStartFunction;
+        const start_sig = func_sigs[start_funcidx];
+        if (start_sig.params.len != 0 or start_sig.results.len != 0) {
+            return Error.InvalidStartFunction;
+        }
     }
 
     // 7.5-close-d042-prep: decode globals / tables / data /
