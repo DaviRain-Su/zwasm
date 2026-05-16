@@ -144,7 +144,22 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         break :blk opt;
     };
     if (func_section_opt == null) {
+        // §9.9 / 9.9-l-1b-d093-d69 (D-135 discharge): each
+        // allocation below was previously uncovered by errdefer.
+        // The downstream `Error.MissingTypeSection` paths (at the
+        // `module.find(.type) orelse return` site below and at
+        // the `tidx >= types.items.len` check) leaked the
+        // already-made allocations under the runCorpus
+        // `.assert_invalid` arm on OrbStack Linux x86_64 (4 leak
+        // sites per process exit per d-65 valgrind / d-69 stack
+        // traces). The fix is structural: pair each `alloc` with
+        // an `errdefer free` so an error return after the alloc
+        // unwinds cleanly. The success-path `return` does not
+        // fire errdefers, so the returned `CompiledWasm` still
+        // owns the allocations and the caller's `c.deinit(gpa)`
+        // path remains correct.
         const empty_results = try allocator.alloc(compile_func.FuncResult, 0);
+        errdefer allocator.free(empty_results);
         // Build func_sigs from import-only function entries (if any)
         // so `findExportFunc` → wasm-space idx → func_sigs[idx]
         // resolution remains valid for export-import re-exports.
@@ -154,11 +169,16 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
                 if (imp.kind == .func) sig_count += 1;
             }
         }
-        const empty_module = try linker.link(allocator, &.{}, sig_count);
+        var empty_module = try linker.link(allocator, &.{}, sig_count);
+        errdefer empty_module.deinit(allocator);
         const sigs = try allocator.alloc(FuncType, sig_count);
+        errdefer allocator.free(sigs);
         const typeidxs = try allocator.alloc(u32, sig_count);
+        errdefer allocator.free(typeidxs);
         const empty_global_offsets = try allocator.alloc(u32, 0);
+        errdefer allocator.free(empty_global_offsets);
         const empty_global_valtypes = try allocator.alloc(zir.ValType, 0);
+        errdefer allocator.free(empty_global_valtypes);
         if (imports_buf) |ib| {
             // Need a type section to resolve func imports' typeidx.
             if (sig_count > 0) {
@@ -169,11 +189,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
                 for (ib.items) |imp| {
                     if (imp.kind != .func) continue;
                     const tidx = imp.payload.func_typeidx;
-                    if (tidx >= types.items.len) {
-                        allocator.free(sigs);
-                        allocator.free(typeidxs);
-                        return Error.MissingTypeSection;
-                    }
+                    if (tidx >= types.items.len) return Error.MissingTypeSection;
                     sigs[w] = types.items[tidx];
                     typeidxs[w] = tidx;
                     w += 1;
@@ -1386,12 +1402,59 @@ test "runI32Export: trunc_f32_s/nan traps (sub-7.5b-ii trap_flag detection)" {
 }
 
 test "compileWasm: empty module (header only) compiles to empty CompiledWasm" {
-    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
-        return error.SkipZigTest;
-    }
-    // Bare module header — magic + version, no sections at all.
-    // Per Wasm spec this is a valid empty module.
+    // §9.9 / 9.9-l-1b-d093-d69: ungated (was Mac-only) so the
+    // testing.allocator (DebugAllocator) leak gate runs on all
+    // hosts. D-135 documents 4 leak sites traced to compileWasm's
+    // empty-fn-section path on OrbStack Linux x86_64 under the
+    // runCorpus `.assert_invalid` arm; this Mac-host test passes,
+    // so the leak class (if real) is either Linux x86_64-specific
+    // or runCorpus-lifecycle-specific (not reproducible via a
+    // single compileWasm + deinit cycle).
     const bytes = [_]u8{ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
+    var compiled = try compileWasm(testing.allocator, &bytes);
+    defer compiled.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 0), compiled.func_sigs.len);
+    try testing.expectEqual(@as(usize, 0), compiled.func_results.len);
+}
+
+test "compileWasm: empty function section (count=0) — binary.60.wasm shape (D-135 path)" {
+    // §9.9 / 9.9-l-1b-d093-d69 (D-135 path discriminator): a
+    // function section that is present-but-empty (body = single
+    // LEB128 0x00 byte → count=0). This is the wasm shape D-127
+    // (d-52) added explicit handling for. Per the empty-fn
+    // early-return at runner.zig:138-194, this path converges
+    // with the bare-header path into the `func_section_opt ==
+    // null` branch — same allocations, same deinit. If this test
+    // is leak-clean under testing.allocator on Mac aarch64, the
+    // D-135 leak is NOT a structural deinit bug but something
+    // specific to the runCorpus lifecycle (e.g. the
+    // assert_invalid arm's `var c = compiled_ok; c.deinit(gpa)`
+    // pattern) OR Linux x86_64-specific.
+    //
+    // Module bytes (binary.60.wasm exact): magic + version +
+    // section 03 (function) of size 1 with body=[0x00] (count=0).
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x03, 0x01, 0x00,
+    };
+    var compiled = try compileWasm(testing.allocator, &bytes);
+    defer compiled.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 0), compiled.func_sigs.len);
+    try testing.expectEqual(@as(usize, 0), compiled.func_results.len);
+}
+
+test "compileWasm: empty code section (count=0) — binary.61.wasm shape (D-135 path)" {
+    // §9.9 / 9.9-l-1b-d093-d69 (D-135 path discriminator):
+    // mirror of the binary.60 test but with the empty body in
+    // the CODE section instead of the function section. binary.61
+    // declares code section size=1 body=[0x00] but no function
+    // section. compileWasm's `module.find(.function) == null`
+    // branch fires directly (no need for the d-52 empty-body
+    // check). Same downstream allocations + deinit.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x0a, 0x01, 0x00,
+    };
     var compiled = try compileWasm(testing.allocator, &bytes);
     defer compiled.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 0), compiled.func_sigs.len);
