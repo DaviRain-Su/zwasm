@@ -10,46 +10,42 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-74 closed: Wasm spec §3.4.10 export validation, +37 PASS**
+## Active state — **d-75 closed: Wasm §3.4.4 memory + §3.4.7 data validation, +42 PASS**
 
 ### One-line state
 
-User re-engaged the autonomous loop ("Phase 9 はまだまだ
-完備ではないと思っています") and pointed at solvable
-skip-impl drainage. d-74 lands the §3.4.10 export
-validator (idx-in-range + duplicate-name checks) in
-`compileWasm`'s main + empty-fn early-return paths.
-Result: spec_assert non-simd 23784/0/2286 →
-**23821/0/2249** (+37 PASS, 0 FAIL). Per-corpus
-SKIP-VALIDATOR-GAP drop: exports 31→0 full drain; global
-18→17; unreached-invalid 14→13. Total VALIDATOR-GAP
-154→123. OrbStack hit known D-134 SEGV (orthogonal to
-validator addition; no signal-handling impact).
+d-75 lands the §3.4.4 memory section validator
+(multi-memory rejection + limits range checks) and
+§3.4.7 data segment validator (memidx range) in
+`compileWasm`. Result: spec_assert non-simd
+23821/0/2249 → **23863/0/2207** (+42 PASS). Per-corpus
+SKIP-VALIDATOR-GAP drop: memory 18→6, data 22→12.
+Total VALIDATOR-GAP 123→89. Cumulative since d-74
+start: **+79 PASS** (23784 → 23863). OrbStack hit
+known D-134 SEGV (validator addition orthogonal).
 
-### Skip-impl drainage roadmap (post-d-74)
+### Skip-impl drainage roadmap (post-d-75)
 
-Remaining SKIP-VALIDATOR-GAP by corpus (123 total):
-elem 24, data 22, memory 18, global 17, unreached-invalid
-13, func_ptrs 5, table 4, if 4, start 3, ref_func 3,
-imports 3, call_indirect 2, select 1, memory_fill 1.
-SKIP-PARSER-GAP (63): binary-leb128 33, binary 24,
-custom 4, global 2. SKIP-CROSS-MODULE-IMPORTS (136) is
-D-079 Phase 10+ scope.
+Remaining SKIP-VALIDATOR-GAP (89): elem 24, global 18,
+unreached-invalid 13, data 12, memory 6, func_ptrs 5,
+table 4, if 4, start 3, ref_func 3, imports 3,
+call_indirect 2, select 1, memory_fill 1. Next chunks:
 
-Each VALIDATOR-GAP corpus needs spec-rule-specific
-validator additions. Concrete candidate chunks:
-
-- **d-75** — `data` / `memory` corpora (40 entries): data
-  segment offset validation, memory limits validation per
-  §3.4.4 / §3.4.5.
 - **d-76** — `elem` corpus (24 entries): elem segment
-  validation per §3.4.6.
-- **d-77** — `global` corpus (17 entries): global type +
-  init expression validation per §3.4.3.
+  validation per §3.4.6 (memidx-equiv for tableidx,
+  reftype matching, init-expr type).
+- **d-77** — `global` corpus (18 entries): global type
+  + init expression validation per §3.4.3.
 - **d-78** — `unreached-invalid` (13 entries): polymorphic
   stack typing in validator dead-code (interacts with
   D-093's gap-1 unreachable-tracking).
-- **d-79+** — long tail (func_ptrs / table / if / etc.).
+- Residual `data` (12) + `memory` (6): validator-layer
+  cases (memory ops in func body with no memory; data
+  offset_expr type errors) → `validateFunction`
+  extensions.
+- **d-79+** — long tail (func_ptrs / table / if / start /
+  ref_func / imports / call_indirect / select /
+  memory_fill).
 
 ## Outstanding (now-resumed) `now` debts
 
