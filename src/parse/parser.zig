@@ -86,6 +86,16 @@ pub fn parse(alloc: Allocator, input: []const u8) Error!Module {
         pos += size_usize;
 
         if (id_byte == 0) {
+            // Wasm spec §5.5.4: a custom section body must start
+            // with a LEB128-prefixed UTF-8 name. The name LEB
+            // itself must be canonical (no over-long encoding,
+            // no overflow). §9.9 / 9.9-l-1b-d093-d84 drains
+            // custom.{4,5} (name LEB missing / truncated) and
+            // binary-leb128.{30,55} (name LEB over-long /
+            // overflow).
+            var cpos: usize = 0;
+            const name_len = try leb128.readUleb128(u32, body, &cpos);
+            if (name_len > body.len - cpos) return Error.SectionTooLarge;
             try sections.append(alloc, .{ .id = .custom, .body = body });
             continue;
         }
@@ -248,11 +258,11 @@ test "parse: rejects data_count after code (out of order)" {
 test "parse: custom sections allowed anywhere; do not affect ordering" {
     const bytes = [_]u8{
         0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
-        0x00, 0x01, 0xff, // custom before type
+        0x00, 0x02, 0x00, 0xff, // custom before type (empty name, 1-byte content)
         0x01, 0x00, // type
-        0x00, 0x00, // custom (empty body)
+        0x00, 0x01, 0x00, // custom (empty name, no content) between sections
         0x03, 0x00, // function
-        0x00, 0x02, 0xaa, 0xbb, // custom after function
+        0x00, 0x03, 0x00, 0xaa, 0xbb, // custom after function (empty name, 2-byte content)
     };
     var m = try parse(testing.allocator, &bytes);
     defer m.deinit(testing.allocator);

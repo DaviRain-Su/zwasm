@@ -94,6 +94,10 @@ pub const Error = error{
     /// signature `[] → []` (no params, no results) AND its
     /// funcidx must be in range.
     InvalidStartFunction,
+    /// Wasm spec §5.5.13: when a data count section is
+    /// present, its value must equal the data section's entry
+    /// count. Triggered by `binary.{62,63,64}.wasm`.
+    DataCountMismatch,
     /// Wasm spec §3.4.3 / §3.3.2: a global section entry's
     /// init expression is not a valid constant expression
     /// for its declared type. Triggers: a non-const opcode,
@@ -171,6 +175,20 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     var imports_buf: ?sections.Imports = null;
     defer if (imports_buf) |*ib| ib.deinit();
     if (module.find(.import)) |s| imports_buf = try sections.decodeImports(allocator, s.body);
+
+    // §9.9 / 9.9-l-1b-d093-d84 (skip-impl drainage):
+    // Wasm spec §5.5.3 type section canonical encoding. Eager
+    // decode catches malformed LEB128 (over-long / overflow) in
+    // count / param_count / result_count, non-0x60 functype
+    // tags, malformed valtype bytes, and trailing bytes. Without
+    // this proactive decode, modules with type section but no
+    // imports / function section silently passed (the type
+    // section's content was never read). Drains
+    // binary-leb128.{31,32,56,57,90} + binary.74.
+    if (module.find(.type)) |ts| {
+        var t = try sections.decodeTypes(a, ts.body);
+        t.deinit();
+    }
 
     // §9.9 / 9.9-l-1b-d093-d75 (skip-impl drainage):
     // Wasm spec §3.4.4 memory section validation. Three rules:
@@ -380,6 +398,37 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         }
         break :blk opt;
     };
+    // §9.9 / 9.9-l-1b-d093-d84 (skip-impl drainage):
+    // Wasm spec §5.5.6: function and code sections must be
+    // present together and have equal entry counts. The
+    // function-section + code-section count match is enforced
+    // in the main path below; this mirror catches "code
+    // section without function section" (binary.57.wasm).
+    if (func_section_opt == null) {
+        if (module.find(.code)) |cs| {
+            // Decode the code section and reject when non-empty.
+            var c_buf = try sections.decodeCodes(a, cs.body);
+            defer c_buf.deinit();
+            if (c_buf.items.len != 0) return Error.MissingFunctionSection;
+        }
+    }
+    // §9.9 / 9.9-l-1b-d093-d84 (skip-impl drainage):
+    // Wasm spec §5.5.13 data count section: when present, its
+    // value must equal the number of data segments in the data
+    // section. Absence of data section with non-zero
+    // data_count, or count mismatch, is malformed.
+    // Drains binary.{62,63,64}.
+    if (module.find(.data_count)) |dcs| {
+        var pos: usize = 0;
+        const dc_value = try leb128.readUleb128(u32, dcs.body, &pos);
+        if (pos != dcs.body.len) return Error.TrailingBytes;
+        const data_seg_count: u32 = if (module.find(.data)) |ds| blk: {
+            var ds_buf = try sections.decodeData(a, ds.body);
+            defer ds_buf.deinit();
+            break :blk @intCast(ds_buf.items.len);
+        } else 0;
+        if (dc_value != data_seg_count) return Error.DataCountMismatch;
+    }
     if (func_section_opt == null) {
         // §9.9 / 9.9-l-1b-d093-d69 (D-135 discharge): each
         // allocation below was previously uncovered by errdefer.
@@ -561,6 +610,15 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     defer codes.deinit();
 
     if (codes.items.len != defined_func_typeidx.len) return Error.MissingCodeSection;
+
+    // §9.9 / 9.9-l-1b-d093-d84 (skip-impl drainage): track
+    // whether the optional data_count section is present. Wasm
+    // spec §5.5.10 requires the section whenever any function
+    // body uses `memory.init` (0xFC 0x08) or `data.drop` (0xFC
+    // 0x09). The validator enforces this via its
+    // `data_count_section_present` field during opcode walk
+    // (drains binary.{66,67}).
+    const data_count_section_present: bool = module.find(.data_count) != null;
 
     // Count function imports (memory / table / global imports do
     // not extend the function index space).
@@ -879,6 +937,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             validator_memory_count,
             declared_funcs,
             elem_types_slice,
+            data_count_section_present,
             &select_types,
         ) catch |err| {
             std.debug.print("compileWasm: func[{d}] params={d} results={d} → validate {s}\n", .{

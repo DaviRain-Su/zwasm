@@ -255,6 +255,11 @@ pub fn decodeTables(parent_alloc: Allocator, body: []const u8) Error!Tables {
         if (pos >= body.len) return Error.UnexpectedEnd;
         const flag = body[pos];
         pos += 1;
+        // Wasm spec §5.3.1: table-type limits encoding flag
+        // must be 0 (min only) or 1 (min + max). Any other
+        // value is malformed (binary.87.wasm asserts this for
+        // flag=0x08).
+        if (flag != 0 and flag != 1) return Error.InvalidFunctype;
         const min = try leb128.readUleb128(u32, body, &pos);
         const max: ?u32 = if (flag & 1 != 0)
             try leb128.readUleb128(u32, body, &pos)

@@ -261,6 +261,7 @@ pub fn validateFunctionAndCollectSelectTypesWithMemory(
     memory_count: u32,
     declared_funcs: []const bool,
     elem_types: []const ValType,
+    data_count_section_present: bool,
     out_select_types: *std.ArrayList(u8),
 ) Error!void {
     var v = Validator{
@@ -277,6 +278,7 @@ pub fn validateFunctionAndCollectSelectTypesWithMemory(
         .memory_count = memory_count,
         .declared_funcs = declared_funcs,
         .elem_types = elem_types,
+        .data_count_section_present = data_count_section_present,
         .out_select_types = out_select_types,
         .out_allocator = allocator,
     };
@@ -328,6 +330,14 @@ const Validator = struct {
     /// callers retain prior behaviour (chunk 5d-2 era accepted
     /// any in-range elemidx/tableidx pair).
     elem_types: []const ValType = &.{},
+    /// §9.9 / 9.9-l-1b-d093-d84 — Wasm spec §5.5.10: when any
+    /// function body uses `memory.init` (0xFC 0x08) or
+    /// `data.drop` (0xFC 0x09), the module MUST contain the
+    /// optional `data count` section (id 12). False ↔ section
+    /// absent; the two opcodes' validation paths reject.
+    /// Default `true` keeps legacy callers / unit tests
+    /// unaffected.
+    data_count_section_present: bool = true,
 
     operand_buf: [max_operand_stack]TypeOrBot = undefined,
     operand_len: usize = 0,
@@ -1236,6 +1246,7 @@ const Validator = struct {
     /// less than the module's data segment count.
     fn opMemoryInit(self: *Validator) Error!void {
         if (self.memory_count == 0) return Error.UnknownMemory;
+        if (!self.data_count_section_present) return Error.UnknownMemory;
         const dataidx = try leb128.readUleb128(u32, self.body, &self.pos);
         if (dataidx >= self.data_count) return Error.InvalidFuncIndex;
         if (self.pos >= self.body.len) return Error.UnexpectedEnd;
@@ -1248,6 +1259,7 @@ const Validator = struct {
 
     /// data.drop: 0xFC 9 dataidx. No operand stack effects.
     fn opDataDrop(self: *Validator) Error!void {
+        if (!self.data_count_section_present) return Error.UnknownMemory;
         const dataidx = try leb128.readUleb128(u32, self.body, &self.pos);
         if (dataidx >= self.data_count) return Error.InvalidFuncIndex;
     }
