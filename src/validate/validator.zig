@@ -658,6 +658,18 @@ const Validator = struct {
 
     fn opEnd(self: *Validator) Error!void {
         const frame = self.topFrame().*;
+        // §9.9 / 9.9-l-1b-d093-d81 — Wasm spec §3.3.5
+        // "ifelse" validation: an `if` block without an `else`
+        // is equivalent to an empty `else` body. For the empty
+        // else to be type-correct, the `if`'s start type
+        // (params) must equal its end type (results). Drains
+        // `if` corpus SKIP-VALIDATOR-GAP entries where
+        // `if (result T)` lacks an else branch.
+        if (frame.kind == .if_then) {
+            if (!labelTypesEq(frame.start_type, frame.end_type)) {
+                return Error.StackTypeMismatch;
+            }
+        }
         try self.expectFrameEndTypes(frame);
         self.control_len -= 1;
         // Restore stack height to entry, then push the frame's end types.
@@ -1419,9 +1431,32 @@ const Validator = struct {
     fn opSelect(self: *Validator) Error!void {
         // select (untyped, MVP): pop i32 cond; pop t2; pop t1; require
         // t1 == t2 (numeric); push t1.
+        // §9.9 / 9.9-l-1b-d093-d81 — Wasm spec §3.3.2.2:
+        // untyped `select` requires the value operands to have
+        // a *numeric* type (i32/i64/f32/f64/v128). Reftype
+        // operands (funcref / externref) must use `select_typed`
+        // (0x1C). Rejecting reftype operands here drains the
+        // `select.4` SKIP-VALIDATOR-GAP case where untyped select
+        // appears with externref params.
         try self.popExpect(.i32);
         const a = try self.popAny();
         const b = try self.popAny();
+        const isNumeric = struct {
+            fn check(t: ValType) bool {
+                return switch (t) {
+                    .i32, .i64, .f32, .f64, .v128 => true,
+                    .funcref, .externref => false,
+                };
+            }
+        }.check;
+        switch (a) {
+            .known => |ka| if (!isNumeric(ka)) return Error.StackTypeMismatch,
+            .bot => {},
+        }
+        switch (b) {
+            .known => |kb| if (!isNumeric(kb)) return Error.StackTypeMismatch,
+            .bot => {},
+        }
         const result: TypeOrBot = blk: {
             switch (a) {
                 .bot => break :blk b,
