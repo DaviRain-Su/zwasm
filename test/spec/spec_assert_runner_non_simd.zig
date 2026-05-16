@@ -566,11 +566,47 @@ fn dispatchMultiResult(
         return true;
     }
 
-    // Phase 9 Cat II chunk (b)-2: 2-result no-arg shapes with mixed
-    // width — both FuncRet fields >= 8 bytes after C-ABI padding,
-    // so the struct return uses X0+X1 / RAX+RDX matching the JIT
-    // epilogue's per-result-slot convention. Same-width int and
-    // mixed int+float shapes deferred per D-137.
+    // Phase 9 Cat II chunk (b)-2 + (b)-3: 2-result int shapes.
+    // FuncRet_* structs are u64-padded so each field gets its own
+    // X0/X1 / RAX/RDX register, matching the JIT epilogue's
+    // per-result-slot convention. Mixed int+float shapes deferred
+    // per D-137 residual.
+    // `(i32) -> (i32, i32)` — if.wast `multi`, etc. (chunk (b)-3)
+    if (args.len == 1 and args[0] == .i32 and
+        n_rtoks == 2 and std.mem.startsWith(u8, rtoks[0], "i32:") and std.mem.startsWith(u8, rtoks[1], "i32:"))
+    {
+        const exp_r0 = base.parseI32Token(rtoks[0][4..]) catch return failBadResult(stdout, name, rtoks[0]);
+        const exp_r1 = base.parseI32Token(rtoks[1][4..]) catch return failBadResult(stdout, name, rtoks[1]);
+        const got = entry.callI32i32_i32(compiled.module, func_idx, rt, args[0].i32) catch |err| {
+            try base.printCallTrap(rt, name, fn_name, args_s, err, stdout);
+            return false;
+        };
+        const got_r0: u32 = @intCast(got.r0 & 0xffffffff);
+        const got_r1: u32 = @intCast(got.r1 & 0xffffffff);
+        if (got_r0 != exp_r0 or got_r1 != exp_r1) {
+            try stdout.print("FAIL  {s}: {s}({s}) → got (i32:{d}, i32:{d}), expected (i32:{d}, i32:{d})\n", .{ name, fn_name, args_s, got_r0, got_r1, exp_r0, exp_r1 });
+            return false;
+        }
+        return true;
+    }
+    // `() -> (i32, i32)`. (chunk (b)-3)
+    if (args.len == 0 and
+        n_rtoks == 2 and std.mem.startsWith(u8, rtoks[0], "i32:") and std.mem.startsWith(u8, rtoks[1], "i32:"))
+    {
+        const exp_r0 = base.parseI32Token(rtoks[0][4..]) catch return failBadResult(stdout, name, rtoks[0]);
+        const exp_r1 = base.parseI32Token(rtoks[1][4..]) catch return failBadResult(stdout, name, rtoks[1]);
+        const got = entry.callI32i32NoArgs(compiled.module, func_idx, rt) catch |err| {
+            try base.printCallTrap(rt, name, fn_name, args_s, err, stdout);
+            return false;
+        };
+        const got_r0: u32 = @intCast(got.r0 & 0xffffffff);
+        const got_r1: u32 = @intCast(got.r1 & 0xffffffff);
+        if (got_r0 != exp_r0 or got_r1 != exp_r1) {
+            try stdout.print("FAIL  {s}: {s}({s}) → got (i32:{d}, i32:{d}), expected (i32:{d}, i32:{d})\n", .{ name, fn_name, args_s, got_r0, got_r1, exp_r0, exp_r1 });
+            return false;
+        }
+        return true;
+    }
     // `() -> (i32, i64)`.
     if (args.len == 0 and
         n_rtoks == 2 and std.mem.startsWith(u8, rtoks[0], "i32:") and std.mem.startsWith(u8, rtoks[1], "i64:"))

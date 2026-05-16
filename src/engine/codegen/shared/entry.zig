@@ -792,11 +792,32 @@ pub const FuncRet_i32i64 = extern struct {
     r1: u64,
 };
 
-// Note: `FuncRet_i32i32` (same-width 2× i32) and `FuncRet_i32f64`
-// (mixed int+float) deferred per D-137: their C-ABI return layout
-// (single packed X0 / mixed FP+int register routing) diverges from
-// the JIT epilogue's per-result-slot convention. Bridge work
-// scheduled as chunk (b)-3.
+/// Multi-result return for `(i32, i32)`. Spec `multi` /
+/// `type-all-i32-i32` / `value-i32-i32` families.
+///
+/// **Layout convention** (entry.zig multi-result): each field is
+/// u64-padded so the struct's total size is ≥ 16 bytes, forcing
+/// AAPCS64 / SysV to return via the X0+X1 (RAX+RDX on SysV)
+/// register-pair path instead of packing two fields into a single
+/// register. This aligns the Zig C-ABI struct return layout with
+/// the JIT epilogue's per-result-slot register convention
+/// (result[0]→X0/W0, result[1]→X1/W1). Each `r_i: u64` holds the
+/// i32 result zero-extended to 64 bits (matching the W-form
+/// zero-extension that the JIT epilogue's `MOV Wi, Wj` produces).
+/// Future same-width 2× int FuncRet_* structs follow this
+/// convention. Mixed int+float multi-result remains D-137 scope
+/// (FP results route through V/XMM registers, not the GPR pair).
+pub const FuncRet_i32i32 = extern struct {
+    r0: u64,
+    r1: u64,
+};
+
+// Note: `FuncRet_i32f64` (mixed int+float) still deferred per
+// D-137 residual — FP results route through V0 (AAPCS64) /
+// XMM0 (SysV) on the JIT side but C-ABI extern struct of
+// {int, float} packs both into the GPR pair X0+X1. Bridge work
+// requires either JIT epilogue convention change or Zig-side
+// inline-asm thunk.
 
 /// Call a `(i64, i64, i32) -> (i64, i32)` JIT function. Used by the
 /// spec_assert non-simd runner to invoke the `add64_u_with_carry`
@@ -842,6 +863,35 @@ pub fn callI64i32NoArgs(
     const Fn = *const fn (rt: *const JitRuntime) callconv(.c) FuncRet_i64i32;
     const f = module.entry(func_idx, Fn);
     const result = f(rt);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+/// `() -> (i32, i32)` — uses `FuncRet_i32i32` (u64-padded layout).
+pub fn callI32i32NoArgs(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+) Error!FuncRet_i32i32 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime) callconv(.c) FuncRet_i32i32;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+/// `(i32) -> (i32, i32)` — if.wast `multi`, etc.
+pub fn callI32i32_i32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u32,
+) Error!FuncRet_i32i32 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: u32) callconv(.c) FuncRet_i32i32;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, a0);
     if (rt.trap_flag != 0) return Error.Trap;
     return result;
 }

@@ -79,10 +79,10 @@ assert_return break-br_table-nested-num i32:0 -> i32:52
 assert_return break-br_table-nested-num i32:1 -> i32:50
 assert_return break-br_table-nested-num i32:2 -> i32:52
 assert_return break-br_table-nested-num i32:4294967293 -> i32:52
-skip-impl multi-result break-br_table-nested-num-num
-skip-impl multi-result break-br_table-nested-num-num
-skip-impl multi-result break-br_table-nested-num-num
-skip-impl multi-result break-br_table-nested-num-num
+assert_return break-br_table-nested-num-num i32:0 -> i32:101 i32:52
+assert_return break-br_table-nested-num-num i32:1 -> i32:50 i32:51
+assert_return break-br_table-nested-num-num i32:2 -> i32:101 i32:52
+assert_return break-br_table-nested-num-num i32:4294967293 -> i32:101 i32:52
 skip-impl multi-result large-sig
 assert_return init-local-i32 () -> i32:0
 assert_return init-local-i64 () -> i64:0

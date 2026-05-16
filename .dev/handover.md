@@ -26,42 +26,39 @@
 
 ### One-line state
 
-Step (b) Cat II in progress: (b)-1 landed `(i64,i64,i32)→(i64,i32)`
-(8 PASS); (b)-2 landed `()→(i32,i64)` + `()→(i64,i32)` (+6 PASS).
-D-137 filed: same-width 2× int + mixed int+float multi-result
-shapes hit a JIT-epilogue ↔ C-ABI struct-return mismatch (JIT
-writes per-result-slot W0/W1 or W0+D0; Zig extern struct expects
-single packed X0 or X0+X1 int-pair). Next chunk = D-137 ABI
-bridge.
+Step (b) Cat II in progress: (b)-1..(b)-3 landed cumulative +24
+PASS (24001→24025). (b)-3 narrowed D-137: same-width 2× int
+solved via u64-padded `FuncRet_*` layout. ARM64 `br_table`→
+function-depth multi-result marshal bug fixed inline (was
+hand-rolling single-result marshal; now delegates to
+`marshalFunctionReturn`). D-137 residual = mixed int+float
+multi-result only.
 
 **Current spec_assert tally** (Mac aarch64 + OrbStack
-bit-identical post-(b)-2; live via
+bit-identical post-(b)-3; live via
 `bash scripts/p9_simd_status.sh`):
 
-- spec_assert non-simd: **24015 / 0 / 2055** (+14 PASS / -14
+- spec_assert non-simd: **24025 / 0 / 2045** (+24 PASS / -24
   skip-impl vs 2026-05-17 baseline 24001/0/2069)
 - simd_assert: **13301 / 0 / 440** (unchanged)
 
 ### Next-session active task
 
-**Chunk (b)-3 — D-137 ABI bridge for multi-result entry helpers**.
-Discharges the JIT-epilogue ↔ C-ABI mismatch surfaced at (b)-2
-PoC. Decide between:
+**Chunk (b)-4 — D-137 residual: mixed int+float multi-result**.
+~12 remaining FAIL/skip lines for shapes like `()→(i32, f64)`,
+`()→(f64, i32)` (spec `type-all-i32-f64`, `value-i32-f64`,
+`return-i32-f64`, `break-i32-f64`). Discharge via either:
 
-- (a) JIT epilogue emits C-ABI-compatible multi-result returns
-  (pack 2× i32 into single GPR; route FP via V/XMM per
-  AAPCS64/SysV HFA / SysV class rules).
-- (b) Zig-side thunk wraps the JIT body and shuffles its per-
-  slot register convention into C-ABI struct shape.
+- (a) JIT-side: extend epilogue to route FP results via C-ABI
+  HFA / mixed-class register layout for entry-helper-bound
+  functions.
+- (b) Zig-side: inline-asm thunk capturing result[0] from X0/RAX
+  and result[1] from V0/XMM0 into a Zig-owned struct.
 
-ADR-grade design choice; file `.dev/decisions/0066_*.md`
-before implementation. Once landed, re-introduce
-`FuncRet_i32i32` + `FuncRet_i32f64` + the dropped (b)-2 arms
-to drain the remaining ~16 2-result fixture lines (if/multi 4,
-call/type-all-i32-i32 1, call type-all-i32-f64 1, call
-type-all-f64-i32 1, call as-call-all-operands 1, call_indirect
-type-all-i32-f64 1, func value-i32-f64 1, func return-i32-f64
-1, func break-i32-f64 1, func break-br_table-nested-num-num 4).
+ADR-grade design; file `.dev/decisions/0066_*.md`. After (b)-4,
+remaining shapes are 3-result (`(i32, i32, i32)`,
+`(i32, i32, i64)`) which need indirect-result-pointer ABI
+(C-ABI returns 24+ byte struct via X8 pointer on AAPCS64).
 
 ### Discipline reminders
 

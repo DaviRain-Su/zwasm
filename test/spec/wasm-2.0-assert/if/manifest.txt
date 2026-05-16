@@ -7,10 +7,10 @@ assert_return singular i32:0 -> i32:8
 assert_return singular i32:1 -> i32:7
 assert_return singular i32:10 -> i32:7
 assert_return singular i32:4294967286 -> i32:7
-skip-impl multi-result multi
-skip-impl multi-result multi
-skip-impl multi-result multi
-skip-impl multi-result multi
+assert_return multi i32:0 -> i32:9 i32:4294967295
+assert_return multi i32:1 -> i32:8 i32:1
+assert_return multi i32:13 -> i32:8 i32:1
+assert_return multi i32:4294967291 -> i32:8 i32:1
 assert_return nested i32:0 i32:0 -> i32:11
 assert_return nested i32:1 i32:0 -> i32:10
 assert_return nested i32:0 i32:1 -> i32:10

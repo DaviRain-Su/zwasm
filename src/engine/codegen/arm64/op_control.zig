@@ -448,38 +448,17 @@ pub fn emitBrIf(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// the default tail). Backward (loop) → direct disp; forward →
 /// placeholder + Fixup append. When `depth == labs.len` the
 /// branch targets the implicit function-level block (= return);
-/// marshal the function's result and append to return_fixups.
+/// marshal the function's results and append to return_fixups.
 fn emitBranchToDepth(ctx: *EmitCtx, depth: u32) Error!void {
     if (depth == ctx.labels.items.len) {
         // br_table case targeting function-depth: same shape as
-        // emitBr's return path.
-        if (ctx.pushed_vregs.items.len > 0 and ctx.func.sig.results.len > 0) {
-            const top_vreg = ctx.pushed_vregs.items[ctx.pushed_vregs.items.len - 1];
-            const result_kind = ctx.func.sig.results[0];
-            switch (result_kind) {
-                .f32, .f64 => {
-                    const src_vn = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, top_vreg, 0);
-                    if (src_vn != 0) {
-                        const base: u32 = if (result_kind == .f64) 0x1E604000 else 0x1E204000;
-                        try gpr.writeU32(ctx.allocator, ctx.buf, base | (@as(u32, src_vn) << 5));
-                    }
-                },
-                .i32, .i64, .v128, .funcref, .externref => {
-                    const src_xn = try gpr.gprLoadSpilled(
-                        ctx.allocator,
-                        ctx.buf,
-                        ctx.alloc,
-                        ctx.spill_base_off,
-                        top_vreg,
-                        0,
-                    );
-                    if (src_xn != 0) {
-                        const orr_word: u32 = 0xAA0003E0 | (@as(u32, src_xn) << 16);
-                        try gpr.writeU32(ctx.allocator, ctx.buf, orr_word);
-                    }
-                },
-            }
-        }
+        // emitBr's return path. Wasm spec §3.4.5 br_table to
+        // function-level transfers the labelled result list (the
+        // function's result type) onto the result registers;
+        // delegate to marshalFunctionReturn so multi-result
+        // functions (e.g. `(result i32 i32)`) marshal both
+        // result vregs into X0+X1 rather than just the first.
+        try marshalFunctionReturn(ctx);
         const fixup_at: u32 = @intCast(ctx.buf.items.len);
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encB(0));
         try ctx.return_fixups.append(ctx.allocator, fixup_at);
