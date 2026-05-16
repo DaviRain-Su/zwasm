@@ -82,6 +82,10 @@ pub const Error = error{
     /// Wasm spec §3.4.6: an active element segment references
     /// a tableidx outside the [0, total_tables) range.
     ElemSegmentRequiresTable,
+    /// Wasm spec §3.4.6: an active element segment's
+    /// `elem_type` (funcref / externref) does not match the
+    /// referenced table's `elem_type`.
+    ElemSegmentTypeMismatch,
     /// Wasm spec §3.2.9 / §3.4.9: a function import's
     /// `typeidx` references a type not defined in the type
     /// section.
@@ -241,6 +245,10 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     // Drains `table` (size mins/max + unknown table) and
     // portions of `elem` (unknown table) SKIP-VALIDATOR-GAP.
     {
+        // Build a combined table reftype map (imports + defined)
+        // so the elem-segment validation can check reftype
+        // compatibility (§3.4.6 — active elem.elem_type must
+        // match its target table's elem_type).
         var num_table_imports: u32 = 0;
         if (imports_buf) |ib| {
             for (ib.items) |imp| if (imp.kind == .table) {
@@ -248,6 +256,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             };
         }
         var defined_tables: u32 = 0;
+        var defined_tables_reftypes: []const zir.ValType = &.{};
         if (module.find(.table)) |ts| {
             var ts_buf = try sections.decodeTables(a, ts.body);
             defer ts_buf.deinit();
@@ -257,9 +266,16 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
                     if (max < tbl_entry.min) return Error.InvalidTableLimit;
                 }
             }
+            // Copy reftypes into arena-allocated slice that
+            // outlives the local `ts_buf`.
+            const reftypes_mut = try a.alloc(zir.ValType, ts_buf.items.len);
+            for (ts_buf.items, 0..) |t, i| reftypes_mut[i] = t.elem_type;
+            defined_tables_reftypes = reftypes_mut;
         }
         const total_tables = num_table_imports + defined_tables;
-        // Active elem segments require a referenced table.
+        // Active elem segments require a referenced table AND
+        // their elem_type must match the table's elem_type
+        // (§9.9 / 9.9-l-1b-d093-d80 elem reftype check).
         if (module.find(.element)) |es| {
             var es_buf = try sections.decodeElement(a, es.body);
             defer es_buf.deinit();
@@ -267,6 +283,26 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
                 if (seg.kind == .active) {
                     if (seg.tableidx >= total_tables) {
                         return Error.ElemSegmentRequiresTable;
+                    }
+                    // Look up the referenced table's reftype.
+                    const tbl_reftype: zir.ValType = blk: {
+                        if (seg.tableidx < num_table_imports) {
+                            // Walk imports to find the N-th table import.
+                            var seen: u32 = 0;
+                            const ib = imports_buf orelse return Error.ElemSegmentRequiresTable;
+                            for (ib.items) |imp| {
+                                if (imp.kind != .table) continue;
+                                if (seen == seg.tableidx) break :blk imp.payload.table.elem_type;
+                                seen += 1;
+                            }
+                            return Error.ElemSegmentRequiresTable;
+                        } else {
+                            const di = seg.tableidx - num_table_imports;
+                            break :blk defined_tables_reftypes[di];
+                        }
+                    };
+                    if (seg.elem_type != tbl_reftype) {
+                        return Error.ElemSegmentTypeMismatch;
                     }
                 }
             }

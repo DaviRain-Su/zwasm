@@ -1399,6 +1399,11 @@ const Validator = struct {
         // encoded a single 0x00 byte which decodes as uleb32(0).
         const table_idx = try leb128.readUleb128(u32, self.body, &self.pos);
         if (table_idx >= self.tables.len) return Error.InvalidFuncIndex;
+        // §9.9 / 9.9-l-1b-d093-d80 — Wasm spec §3.3.5.6:
+        // call_indirect requires the referenced table to have
+        // reftype `funcref`. Externref tables cannot back
+        // call_indirect.
+        if (self.tables[table_idx].elem_type != .funcref) return Error.InvalidFuncIndex;
         if (type_idx >= self.module_types.len) return Error.InvalidFuncIndex;
         const callee = self.module_types[type_idx];
         // Pop the function-table index (i32), then args in reverse.
