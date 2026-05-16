@@ -134,6 +134,58 @@ Three hypotheses (from 2026-05-16 thread):
 - **Required deliverable**: explicit scope statement in this
   doc's "Outcome" section.
 
+### Q5 — Substrate hygiene: invariants encoded as code, not prose
+
+Accumulated **investigation triggers** surfaced during Phase 9
+that point at the same class of substrate weakness — invariants
+asserted in comments / docstrings without code-level
+enforcement, drifting silently as the codebase grows. The audit
+should walk these and decide on a unified enforcement strategy
+(comptime assertions / lint scripts / audit_scaffolding §G
+extensions / typed pool abstractions). Each entry below names
+the originating chunk and the lesson record.
+
+- **D-132 / regalloc-pool-scratch-overlap** (2026-05-16,
+  [`lessons/2026-05-16-regalloc-pool-scratch-overlap.md`](lessons/2026-05-16-regalloc-pool-scratch-overlap.md)):
+  `op_table.zig` hardcoded X10/X11/X12 as scratch while those
+  slots were in `abi.allocatable_caller_saved_scratch_gprs`.
+  Latent since regalloc landed; surfaced only when corpus
+  pressure + nested table-op pattern aligned at d-63/d-64.
+  Lesson's 4-angle retrospective (no-workaround / debug
+  ergonomics / future-proofing / design issues) names the
+  remediation surface. Investigation tasks the audit should
+  enumerate:
+  - Extend `abi.zig`'s existing comptime disjointness check
+    (`spill_stage_gprs` ∩ `allocatable_gprs == ∅`) to ALL
+    op-internal hardcoded scratch via named-constant arrays
+    (`table_emit_scratch_gprs`, `memory_emit_scratch_gprs`,
+    …). Magic-numeral register references in emit code become
+    a comptime / lint violation.
+  - Add `audit_scaffolding` §G grep for `encLdrImm\([0-9]+,
+    abi\.runtime_ptr_save_gpr` (and analogous x86_64 sites)
+    that flags ANY hardcoded register numeral as drift-prone.
+  - Decide whether `bug_fix_survey.md` ([`.claude/rules/`](../.claude/rules/bug_fix_survey.md))
+    discipline should be enforced via a self-review checklist
+    in `/continue` Step 4 (the d-64 retrospective recorded a
+    self-observed lapse — TableGet/TableSet fixed, but the
+    same-shape sites at TableFill/Grow/Copy/Init +
+    op_memory's emitMemoryInit/DataDrop were not swept).
+  - Codify a "comment-as-invariant" anti-pattern rule
+    (`.claude/rules/` or extension of `no_workaround.md`):
+    prose invariants in docstrings must either be (a) paired
+    with comptime / runtime enforcement, or (b) deleted.
+    `op_table.zig`'s "X10/X11/X12 are private scratch within
+    the handler" comment was authoritative-looking but false.
+  - Reconsider test-design "stress axes" — register
+    pressure, call-crossing, nested ops — as explicit corpus
+    requirements rather than incidental side-effects of
+    natural fixture growth. Coverage-growth masking is what
+    let D-132 live latent for so long.
+
+- *(Append future trigger entries here. The audit walks all
+  entries under Q5 at gate-fire time and produces one or more
+  ADRs / rule files / debt rows per resolved item.)*
+
 ## Deliverables required to close the gate
 
 1. **ADR-0063** (or sequential) recording the chosen
@@ -151,9 +203,16 @@ Three hypotheses (from 2026-05-16 thread):
    refactor lands before Wasm 3.0 feature work" — or split
    into a new Phase 9.5 implementation phase.
 5. **This doc's "Decisions" section** filled in with
-   the four Q resolutions.
+   the four Q resolutions plus Q5's enumerated trigger
+   resolutions.
 6. **Audit summary** at the top of this doc — a 5-10 line
    abstract for future readers.
+7. **Q5 outputs**: per trigger entry under Q5, one of
+   {comptime assertion landed in code, `.claude/rules/` file
+   created, `audit_scaffolding` §G amended, debt row filed
+   with named structural barrier, ADR amending a §2
+   principle}. Q5 should NOT close with "deferred" — each
+   entry needs a concrete artifact.
 
 ## Decisions (fill at gate close)
 
@@ -198,6 +257,20 @@ Three hypotheses (from 2026-05-16 thread):
 - [ ] Decision + minimal POC (one op)
 - [ ] Decision + full skeleton (all ops, no behaviour change)
 - ADR ref:
+
+### Q5 — Substrate hygiene triggers (one row per accumulated trigger)
+
+> Each Q5 trigger entry above (under "Open questions") gets a
+> resolution row here at audit close. Add rows as triggers
+> accrue during the rest of Phase 9.
+
+- **D-132 / regalloc-pool-scratch-overlap**
+  - [ ] Comptime disjointness extended to op-internal scratch
+  - [ ] `audit_scaffolding` §G magic-numeral lint added
+  - [ ] `bug_fix_survey.md` enforcement in `/continue` Step 4
+  - [ ] "Comment-as-invariant" rule filed
+  - [ ] Test-design stress-axis requirement codified
+  - ADR / rule / debt refs:
 
 ## Outcome (audit summary — fill at close)
 
