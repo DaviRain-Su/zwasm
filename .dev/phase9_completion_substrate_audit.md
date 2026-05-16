@@ -186,6 +186,109 @@ the originating chunk and the lesson record.
   entries under Q5 at gate-fire time and produces one or more
   ADRs / rule files / debt rows per resolved item.)*
 
+### Q6 — libc dependency boundary (Pre-Phase-10 hygiene)
+
+Surfaced 2026-05-16 during the d-65 D-134 investigation
+(SIGSEGV recovery via `sigsetjmp`/`siglongjmp` is libc-only),
+combined with a wider audit of `std.c.*` call sites across
+the codebase. Zig 0.16's stdlib direction (`std.Io` /
+`std.posix` / `std.Threaded`) explicitly aims at
+**buildable-without-libc**; zwasm v2 is currently moving in
+the opposite direction with `flake.nix` / `build.zig`
+hard-requiring `-lc` and the signal-handling core fanned out
+through libc. Phase 10 + (AOT mode, embedded distribution,
+Windows-native compatibility) make the cost of unwinding
+libc fanout much higher post-Phase 10 than now.
+
+**Current libc dependency surface** (concrete inventory):
+
+1. **Signal recovery core** — `sigsetjmp` / `siglongjmp` via
+   `@extern(.{ .library_name = "c" })` in
+   `test/spec/spec_assert_runner_base.zig` (D-103 → d-29 →
+   d-62 → d-65 lineage). Zig stdlib has no equivalent.
+   **Class: necessary** until Zig adds stdlib `sigsetjmp`.
+2. **`std.c.munmap` / `std.c.write` / `std.c._exit` /
+   `std.c.getenv` / `gettid()`** — JIT block release,
+   async-signal-safe handler writes, diagnostic output,
+   `hostImportTrapStub` etc. Broadly used.
+   **Class: mechanically replaceable** with `std.posix.write`
+   / `std.posix.exit` / `std.posix.munmap` / `process.Environ`
+   / `linux.gettid` syscall wrapper. Estimated <100 sites.
+3. **`pthread_jit_write_protect_np` / `sys_icache_invalidate`**
+   — Mac aarch64 W^X toggle in `src/platform/jit_mem.zig`.
+   Darwin libc-specific API.
+   **Class: necessary** on Darwin; no kernel-direct
+   equivalent.
+4. **Build configuration** — `zig build-exe ... -lc ...`
+   threaded across the entire test runner family
+   (verified via `zig build test-spec-wasm-2.0-assert
+   --verbose`). Loss of `-lc` would require resolving every
+   `@extern("c")` symbol first.
+   **Class: structural** — flips only after the per-symbol
+   work above lands.
+5. **`std.heap.DebugAllocator` (= `init.gpa` under Debug)**
+   — start.zig's `use_debug_allocator` selection requires
+   libc on Linux. Without libc, falls back to
+   `std.heap.smp_allocator` (no leak detection).
+   **Class: convenience** — losing leak detection is a real
+   regression for development; OK to keep libc-dependent
+   under Debug.
+
+**Why this question matters before Phase 10**:
+
+- Phase 10's GC / EH / Tail call / memory64 features need
+  cross-platform signal handling stories. Trying to unwind
+  libc-coupled signal recovery while simultaneously adding
+  new ZirOps and runtime entries multiplies risk.
+- AOT mode (Phase 12) wants minimal-dependency output
+  binaries. Every `std.c.*` call in shared code becomes an
+  AOT-target requirement.
+- Windows-native compatibility (Phase 13+) — `sigsetjmp` /
+  `pthread_jit_write_protect_np` are POSIX/Darwin-specific;
+  the abstraction boundary must be ready before Phase 13.
+
+**Required audit deliverables for Q6**:
+
+1. An **ADR** (likely `00NN_libc_dependency_policy.md`)
+   spelling out:
+   - The **necessary** set (signal recovery primitives,
+     Darwin W^X toggles) with rationale + Zig issue links
+     for "if upstream stdlib adds X, migrate".
+   - The **replaceable** set with a migration plan (one
+     debt row per migration cluster, or a single sweep
+     chunk in Phase 10 prep).
+   - The **convenience** set (DebugAllocator) — explicitly
+     allowed under specific build modes.
+   - A clear rule: **new `std.c.*` call sites are rejected
+     by default** unless they fall into the necessary set
+     OR an ADR amendment expands the boundary.
+2. **`.claude/rules/libc_boundary.md`** project rule that
+   auto-loads when editing Zig source. Codifies:
+   - Before writing `std.c.<name>`, check
+     `std.posix.<name>` / `std.Io.<name>` /
+     `process.Environ` first.
+   - Cite the ADR.
+   - Reviewer checklist for grep-able anti-patterns:
+     `grep -nE 'std\.c\.(write|_exit|getenv|munmap)\b' src/ test/`.
+3. **ROADMAP §14 amendment** — add one line:
+   "Unconscious libc fanout (new `std.c.*` calls without
+   ADR justification or rule exception)" to the forbidden
+   list, with cite to the new ADR.
+4. **`audit_scaffolding` §I extension** (or new §J) — the
+   grep above runs as a recurring check, surfacing new
+   `std.c.*` sites in diffs against `main`.
+5. **One initial mechanical-replacement chunk** (Phase 10
+   prep, NOT Phase 9 — the boundary work itself is Phase
+   10+ scope): convert the easy `std.c.write` /
+   `std.c._exit` / `std.c.getenv` / `std.c.munmap` sites
+   to `std.posix.*` equivalents. This is the "proof the
+   rule has teeth" deliverable.
+
+The audit MUST NOT close Q6 with "deferred" — each of the
+five items above lands as a concrete artifact (ADR / rule
+file / ROADMAP edit / audit script / migration chunk).
+Items can be batched into one PR if scope allows.
+
 ## Deliverables required to close the gate
 
 1. **ADR-0063** (or sequential) recording the chosen
@@ -203,8 +306,8 @@ the originating chunk and the lesson record.
    refactor lands before Wasm 3.0 feature work" — or split
    into a new Phase 9.5 implementation phase.
 5. **This doc's "Decisions" section** filled in with
-   the four Q resolutions plus Q5's enumerated trigger
-   resolutions.
+   the four Q resolutions plus Q5's + Q6's enumerated
+   trigger / artifact resolutions.
 6. **Audit summary** at the top of this doc — a 5-10 line
    abstract for future readers.
 7. **Q5 outputs**: per trigger entry under Q5, one of
@@ -213,6 +316,11 @@ the originating chunk and the lesson record.
    with named structural barrier, ADR amending a §2
    principle}. Q5 should NOT close with "deferred" — each
    entry needs a concrete artifact.
+8. **Q6 outputs**: ADR (`00NN_libc_dependency_policy.md`),
+   `.claude/rules/libc_boundary.md`, ROADMAP §14 amendment
+   line, `audit_scaffolding` grep extension, and one
+   mechanical-replacement chunk landing in Phase 10 prep.
+   Q6 MUST NOT close with "deferred".
 
 ## Decisions (fill at gate close)
 
@@ -271,6 +379,16 @@ the originating chunk and the lesson record.
   - [ ] "Comment-as-invariant" rule filed
   - [ ] Test-design stress-axis requirement codified
   - ADR / rule / debt refs:
+
+### Q6 — libc dependency boundary decisions
+
+- [ ] ADR `00NN_libc_dependency_policy.md` authored
+      (necessary / replaceable / convenience classification)
+- [ ] `.claude/rules/libc_boundary.md` filed
+- [ ] ROADMAP §14 amendment line added (with ADR cite)
+- [ ] `audit_scaffolding` grep extension landed
+- [ ] Mechanical-replacement chunk scheduled in Phase 10 prep
+- ADR / rule / debt refs:
 
 ## Outcome (audit summary — fill at close)
 

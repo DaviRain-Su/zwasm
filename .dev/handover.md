@@ -39,6 +39,15 @@ leak in `runner.compileWasm` empty-function-section early-
 return path (4 leaks per process exit; D-127 / d-52 fix
 introduced the path without freeing its allocations on the
 process-end path).
+**Phase 9 完備 substrate audit §Q6 added** (libc dependency
+boundary, pre-Phase-10 hygiene) — current code has
+deepening libc fanout (`sigsetjmp`/`siglongjmp` core +
+many `std.c.*` callsites) while Zig 0.16 stdlib aims at
+buildable-without-libc. §Q6 enumerates necessary /
+replaceable / convenience classes, queues an ADR
++ `.claude/rules/libc_boundary.md` + ROADMAP §14 amendment
++ `audit_scaffolding` grep extension + one mechanical-
+replacement chunk as Phase 10 prep deliverables.
 
 ### Next sub-chunk candidates (d-66+)
 
