@@ -32,6 +32,33 @@ const base = @import("spec_assert_runner_base.zig");
 const ArgKind = base.ArgKind;
 const ArgValue = base.ArgValue;
 
+/// §9.9 / 9.9-l-1b-d093-d68 (D-134 probe): disable Zig's default
+/// SEGV/ILL/BUS/FPE handler so it cannot compete with our own
+/// `installSigsegvHandler` install. In Debug builds (runtime_safety
+/// = true), `std.options.enable_segfault_handler` defaults to
+/// `true` per `~/Documents/OSS/zig/lib/std/debug.zig`:
+/// `default_enable_segfault_handler = runtime_safety and
+/// have_segfault_handling_support`, and the startup path's
+/// `maybeEnableSegfaultHandler()` then calls `attachSegfaultHandler()`
+/// → `updateSegfaultHandler(act)` → `posix.sigaction(.SEGV, .ILL,
+/// .BUS, .FPE, ...)` installing Zig's 3-arg `handleSegfaultPosix`
+/// (= the recursive `mem.Alignment.toByteUnits` chain valgrind
+/// captured in d-65). The d-65 narrative claimed this was
+/// "disabled via `std_options.enable_segfault_handler = false`"
+/// but a repo-wide grep at d-68 resume showed **no `std_options`
+/// declaration existed** — the disable was aspirational, never
+/// landed. Without it, our handler may install correctly but get
+/// shadowed by Zig's `RESETHAND`-flagged install at some later
+/// std-lib touch (Debug-mode allocator panic paths, for instance,
+/// can re-route through Zig's panic + sigaction). Setting this
+/// explicitly to `false` makes our `installSigsegvHandler` the
+/// sole sigaction for SEGV/BUS, so a real SEGV must dispatch
+/// through `sigsegvHandler` (or fail to dispatch entirely, which
+/// is itself diagnostic).
+pub const std_options: std.Options = .{
+    .enable_segfault_handler = false,
+};
+
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const gpa = init.gpa;
