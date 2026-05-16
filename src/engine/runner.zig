@@ -389,17 +389,37 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         // only (no function/code), so they take this branch.
         // Without this check the global init-expr validator
         // would never fire on them.
+        var num_global_imports_empty: u32 = 0;
+        if (imports_buf) |ib| {
+            for (ib.items) |imp| if (imp.kind == .global) {
+                num_global_imports_empty += 1;
+            };
+        }
         if (module.find(.global)) |gs| {
             var gs_buf = try sections.decodeGlobals(a, gs.body);
             defer gs_buf.deinit();
-            var num_global_imports: u32 = 0;
-            if (imports_buf) |ib| {
-                for (ib.items) |imp| if (imp.kind == .global) {
-                    num_global_imports += 1;
-                };
-            }
             for (gs_buf.items) |gd| {
-                try validateGlobalInitExpr(gd.init_expr, gd.valtype, num_global_imports, imports_buf);
+                try validateGlobalInitExpr(gd.init_expr, gd.valtype, num_global_imports_empty, imports_buf);
+            }
+        }
+        // §9.9 / 9.9-l-1b-d093-d78 mirror — empty-fn path
+        // elem + data active-offset_expr validation.
+        if (module.find(.data)) |ds| {
+            var ds_buf = try sections.decodeData(a, ds.body);
+            defer ds_buf.deinit();
+            for (ds_buf.items) |seg| {
+                if (seg.kind == .active) {
+                    try validateGlobalInitExpr(seg.offset_expr, .i32, num_global_imports_empty, imports_buf);
+                }
+            }
+        }
+        if (module.find(.element)) |es| {
+            var es_buf = try sections.decodeElement(a, es.body);
+            defer es_buf.deinit();
+            for (es_buf.items) |seg| {
+                if (seg.kind == .active) {
+                    try validateGlobalInitExpr(seg.offset_expr, .i32, num_global_imports_empty, imports_buf);
+                }
             }
         }
 
@@ -554,15 +574,40 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     // global.get of an *imported* *immutable* global)
     // followed by `end (0x0B)`, AND the result type must
     // match the declared valtype.
+    // Count global imports once for d-77 + d-78 const-expr
+    // checks (init-expr `global.get` must reference an
+    // imported immutable global).
+    var num_global_imports_main: u32 = 0;
+    if (imports_buf) |ib| {
+        for (ib.items) |imp| if (imp.kind == .global) {
+            num_global_imports_main += 1;
+        };
+    }
     if (globals_buf) |g| {
-        var num_global_imports: u32 = 0;
-        if (imports_buf) |ib| {
-            for (ib.items) |imp| if (imp.kind == .global) {
-                num_global_imports += 1;
-            };
-        }
         for (g.items) |gd| {
-            try validateGlobalInitExpr(gd.init_expr, gd.valtype, num_global_imports, imports_buf);
+            try validateGlobalInitExpr(gd.init_expr, gd.valtype, num_global_imports_main, imports_buf);
+        }
+    }
+
+    // §9.9 / 9.9-l-1b-d093-d78 (skip-impl drainage):
+    // Wasm spec §3.4.6 / §3.4.7 — active elem/data segment
+    // **offset expressions** must be `i32`-typed constant
+    // expressions per §3.3.2. Drains `elem` + `data`
+    // SKIP-VALIDATOR-GAP entries with "type mismatch",
+    // "constant expression required", "unknown global" in
+    // offset positions.
+    if (datas_buf) |d| {
+        for (d.items) |seg| {
+            if (seg.kind == .active) {
+                try validateGlobalInitExpr(seg.offset_expr, .i32, num_global_imports_main, imports_buf);
+            }
+        }
+    }
+    if (elems_buf) |e| {
+        for (e.items) |seg| {
+            if (seg.kind == .active) {
+                try validateGlobalInitExpr(seg.offset_expr, .i32, num_global_imports_main, imports_buf);
+            }
         }
     }
 
@@ -813,16 +858,25 @@ pub fn applyDefinedGlobalsInit(
 /// `runtime/instance/instantiate.zig:evalConstExprValue` but
 /// stays in this module so the engine layer can run const-expr
 /// evaluation without crossing into the runtime-instance Zone.
-/// §9.9 / 9.9-l-1b-d093-d77 — Wasm spec §3.4.3 / §3.3.2
-/// validation of a defined global's init-expression. Per
-/// spec, a const expression is one of:
+/// §9.9 / 9.9-l-1b-d093-d77 — Wasm spec §3.3.2 constant
+/// expression validation, reused for defined-global
+/// init-expressions (§3.4.3), active elem-segment offset
+/// expressions (§3.4.6), and active data-segment offset
+/// expressions (§3.4.7). A constant expression is exactly
+/// one of:
 ///   - `t.const c` (i32/i64/f32/f64.const) for numeric `t`
 ///   - `ref.null t` for reftype `t`
 ///   - `ref.func x` (Wasm 2.0)
+///   - `v128.const` (SIMD prefix `0xFD 0x0C` + 16 bytes)
 ///   - `global.get x` where x refers to an *imported*
 ///     global AND that global is *immutable* (mut == const)
 /// followed by the terminating `end` (0x0B). The result
 /// type must match `want_valtype`.
+///
+/// Naming retained as `validateGlobalInitExpr` for git
+/// blame continuity; semantically a generic
+/// `validateConstExpr` helper. d-78 callers pass
+/// `.i32` for active offset expressions.
 ///
 /// Returns `Error.InvalidGlobalInitExpr` for any non-const
 /// opcode, out-of-range global index, mutable-global
