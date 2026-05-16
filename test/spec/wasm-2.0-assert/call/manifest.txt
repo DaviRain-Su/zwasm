@@ -40,8 +40,8 @@ assert_return odd i64:0 -> i32:99
 assert_return odd i64:1 -> i32:44
 assert_return odd i64:200 -> i32:99
 assert_return odd i64:77 -> i32:44
-skip-impl directive-assert_exhaustion
-skip-impl directive-assert_exhaustion
+assert_exhaustion runaway ()
+assert_exhaustion mutual-runaway ()
 assert_return as-select-first () -> i32:306
 assert_return as-select-mid () -> i32:2
 assert_return as-select-last () -> i32:2

@@ -135,6 +135,13 @@ pub const DirectiveKind = enum {
     /// rejects OR hasUnbindableImports trips; FAIL if the module
     /// resolves cleanly under our scaffolding.
     assert_unlinkable,
+    /// d-62: module traps due to call-stack exhaustion (runaway
+    /// recursion). Same dispatch as assert_trap from our scaffold's
+    /// perspective — native stack-guard-page SIGSEGV is converted
+    /// to `Error.Trap` by the d-29 sigsetjmp/siglongjmp handler,
+    /// and trap_flag=set or recovery=true both PASS. The distinct
+    /// directive name is preserved for manifest auditability.
+    assert_exhaustion,
     /// d-36: bare `(invoke FN ARGS)` action — invoke for side
     /// effects, ignore result, propagate traps as FAIL.
     invoke_action,
@@ -176,6 +183,9 @@ pub fn classifyDirective(line: []const u8) ClassifiedDirective {
     }
     if (std.mem.startsWith(u8, line, "assert_unlinkable ")) {
         return .{ .kind = .assert_unlinkable, .body = line[18..] };
+    }
+    if (std.mem.startsWith(u8, line, "assert_exhaustion ")) {
+        return .{ .kind = .assert_exhaustion, .body = line[18..] };
     }
     if (std.mem.startsWith(u8, line, "invoke-action ")) {
         return .{ .kind = .invoke_action, .body = line[14..] };
@@ -1041,7 +1051,16 @@ pub var sigsegv_recover_buf: [512]u8 align(16) = undefined;
 /// handler treats the SEGV as unexpected and exits with the
 /// conventional `128 + 11 = 139` code (= a runner-internal bug
 /// surfaces loudly instead of being swallowed).
-pub var sigsegv_armed: bool = false;
+///
+/// §9.9 / 9.9-l-1b-d093-d62: typed as `std.atomic.Value(bool)`
+/// (was plain `bool`) — under SA.ONSTACK the SIGSEGV handler
+/// runs on a different stack from the dispatcher, and the Zig
+/// 0.16 compiler can legitimately fold the BSS load when the
+/// handler is invisible to its dataflow analysis (observed
+/// under OrbStack `test-all` Debug builds even with `*volatile
+/// bool` casts). `std.atomic.Value(bool)` forces a real memory
+/// access via the canonical atomic intrinsics.
+pub var sigsegv_armed: std.atomic.Value(bool) = .init(false);
 
 // glibc exposes `sigsetjmp` as a macro that expands to
 // `__sigsetjmp(env, savemask)`; the symbol available to the
@@ -1062,8 +1081,14 @@ pub const siglongjmp: SiglongjmpFn = @extern(SiglongjmpFn, .{
 });
 
 fn sigsegvHandler(_: std.posix.SIG) callconv(.c) void {
-    if (sigsegv_armed) {
-        sigsegv_armed = false;
+    // §9.9 / 9.9-l-1b-d093-d62: `std.atomic.Value` access pairs
+    // with the release-store at the dispatch site and forces a
+    // real memory access. The flag was plain `bool` pre-d-62 but
+    // started getting elided under SA.ONSTACK once the handler
+    // moved to the altstack — see the type-level docstring at
+    // `sigsegv_armed`.
+    if (sigsegv_armed.load(.acquire)) {
+        sigsegv_armed.store(false, .release);
         siglongjmp(@ptrCast(&sigsegv_recover_buf), 1);
     }
     // SEGV outside an armed JIT call: do not silently swallow.
@@ -1078,11 +1103,41 @@ fn sigsegvHandler(_: std.posix.SIG) callconv(.c) void {
 /// entries. Process-wide; the previous handler (if any) is
 /// overwritten without recording (the spec runners are leaf
 /// processes that own the signal disposition).
+// §9.9 / 9.9-l-1b-d093-d62: alternate signal stack used by the
+// SIGSEGV/SIGBUS handler when the JIT body exhausts the native
+// stack (assert_exhaustion fixtures — runaway recursion hits the
+// stack-guard page, and without SA.ONSTACK the handler itself
+// would crash for lack of stack). 256 KB matches Zig's
+// `std.options.signal_stack_size` default. The buffer is a
+// page-aligned static byte array — `sigaltstack` only requires
+// the region be writable and at least `MINSIGSTKSZ` bytes, and
+// 256 KB is comfortably larger than the per-OS minimum (16 KB on
+// Linux, 32 KB on Darwin) plus our handler's modest frame use
+// (`siglongjmp` + the trivial dispatcher in `sigsegvHandler`).
+const SIGNAL_STACK_SIZE: usize = 1 << 18;
+var signal_stack: [SIGNAL_STACK_SIZE]u8 align(std.heap.page_size_max) = undefined;
+
 pub fn installSigsegvHandler() void {
+    // Explicitly install our own alternate signal stack rather than
+    // relying on Zig's start-up code: `Thread.maybeAttachSignalStack`
+    // installs a *threadlocal* altstack, which works on Mac aarch64
+    // (`MAC=0` post-d-62) but on Linux x86_64 the spec_assert runner
+    // observed a hard SIGSEGV at the second-level handler invocation
+    // (test-all bg task exit 1). Owning the altstack install at the
+    // runner level removes the host-specific behavioural divergence.
+    // siglongjmp restores the saved SP from `sigsegv_recover_buf`,
+    // so jumping from the altstack back to the dispatch frame on
+    // the main stack is sound regardless of which stack the handler
+    // ran on.
+    std.posix.sigaltstack(&.{
+        .sp = &signal_stack,
+        .flags = 0,
+        .size = SIGNAL_STACK_SIZE,
+    }, null) catch {};
     var act: std.posix.Sigaction = .{
         .handler = .{ .handler = sigsegvHandler },
         .mask = std.posix.sigemptyset(),
-        .flags = 0,
+        .flags = std.posix.SA.ONSTACK,
     };
     std.posix.sigaction(.SEGV, &act, null);
     // SIGBUS covers the Mach-side variant (mis-aligned access on
@@ -1317,6 +1372,29 @@ pub fn runCorpus(
                 }
                 const compiled_ptr: *const runner_mod.CompiledWasm = if (current_compiled) |*c| c else {
                     try stdout.print("FAIL  {s}: assert_trap without prior module\n", .{name});
+                    tally.failed += 1;
+                    continue;
+                };
+                const wasm = current_wasm.?;
+                const ok = callbacks.handle_assert_trap(gpa, wasm, compiled_ptr, classified.body, stdout, name) catch |err| {
+                    try stdout.print("FAIL  {s}: {s} (error {s})\n", .{ name, line, @errorName(err) });
+                    tally.failed += 1;
+                    continue;
+                };
+                if (ok) tally.passed += 1 else tally.failed += 1;
+            },
+            .assert_exhaustion => {
+                // d-62: same dispatch as assert_trap (the
+                // PASS criterion — "invocation trapped" via
+                // Error.Trap or SEGV-recovery — is identical
+                // for our scaffold; trap-reason classification
+                // is out of scope per D-022).
+                if (module_bad) {
+                    tally.skipped += 1;
+                    continue;
+                }
+                const compiled_ptr: *const runner_mod.CompiledWasm = if (current_compiled) |*c| c else {
+                    try stdout.print("FAIL  {s}: assert_exhaustion without prior module\n", .{name});
                     tally.failed += 1;
                     continue;
                 };
@@ -1716,14 +1794,14 @@ test "sigsegv guard: handler siglongjmps back to caller frame on raised SIGSEGV"
     Recover.flag = false;
 
     if (sigsetjmp(@ptrCast(&sigsegv_recover_buf), 1) == 0) {
-        sigsegv_armed = true;
+        sigsegv_armed.store(true, .release);
         // Raise SIGSEGV; the handler longjmps back to the
         // sigsetjmp site, which then takes the else-branch.
         std.posix.raise(.SEGV) catch unreachable;
         // Should not reach: longjmp transferred control.
         try testing.expect(false);
     } else {
-        sigsegv_armed = false;
+        sigsegv_armed.store(false, .release);
         Recover.flag = true;
     }
 
@@ -1734,12 +1812,12 @@ test "sigsegv guard: armed=false after recovery so subsequent SEGV is unexpected
     installSigsegvHandler();
 
     if (sigsetjmp(@ptrCast(&sigsegv_recover_buf), 1) == 0) {
-        sigsegv_armed = true;
+        sigsegv_armed.store(true, .release);
         std.posix.raise(.SEGV) catch unreachable;
         try testing.expect(false);
     } else {
         // Recovery path must clear armed (handler does it; the
         // assertion confirms the contract end-to-end).
-        try testing.expect(sigsegv_armed == false);
+        try testing.expect(sigsegv_armed.load(.acquire) == false);
     }
 }

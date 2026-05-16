@@ -931,11 +931,17 @@ fn nonSimdRunAssertTrap(
             // / elem.76); recovery is semantically equivalent to
             // the trap stub firing for assert_trap per Wasm spec
             // §A.2 ("any trap during invocation").
-            base.sigsegv_armed = false;
+            base.sigsegv_armed.store(false, .release);
             break :blk true;
         }
-        base.sigsegv_armed = true;
-        defer base.sigsegv_armed = false;
+        // §9.9 / 9.9-l-1b-d093-d62: `sigsegv_armed` is now an
+        // `std.atomic.Value(bool)` — release-store pairs with the
+        // handler's acquire-load to defeat compiler folding under
+        // SA.ONSTACK altstack delivery (Linux x86_64 was observed
+        // eliding the BSS read once the handler frame became
+        // dataflow-invisible to the dispatcher).
+        base.sigsegv_armed.store(true, .release);
+        defer base.sigsegv_armed.store(false, .release);
 
         if (n_args == 0) {
             _ = entry.callI32NoArgs(compiled.module, func_idx, &rt) catch |err| {

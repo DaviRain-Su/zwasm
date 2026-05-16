@@ -601,6 +601,46 @@ for c in d['commands']:
         # with the assert_return arm above.
         args_s = ' '.join(fmt(x) for x in args) if args else '()'
         lines.append(f'assert_trap {quote_field(a["field"])} {args_s}')
+    elif t == 'assert_exhaustion':
+        # §9.9 / 9.9-l-1b-d093-d62: spec assertion that the module
+        # traps due to call-stack exhaustion (runaway recursion).
+        # In our JIT, recursion accumulates native AAPCS64/SysV
+        # stack frames until the kernel's stack guard page is hit;
+        # the resulting SIGSEGV is converted to `Error.Trap` by the
+        # d-29 sigsetjmp/siglongjmp handler installed in
+        # `spec_assert_runner_base.installSigsegvHandler`. From the
+        # runner's perspective, the PASS criterion ("invocation
+        # trapped") is identical to assert_trap; the directive name
+        # is preserved here for manifest auditability + traceability
+        # to the originating .wast directive. Arg-shape filter
+        # mirrors the assert_trap arm — keep the two in lockstep.
+        a = c['action']
+        if 'module' in a:
+            lines.append(f'skip-adr-skip_cross_module_action assert_exhaustion on module={a["module"]!s} field={a.get("field","?")!s}')
+            continue
+        if a.get('type') != 'invoke':
+            lines.append('skip-impl exhaustion-non-invoke')
+            continue
+        args = a.get('args', [])
+        if any(x['type'] not in ('i32', 'i64', 'f32', 'f64') for x in args):
+            lines.append(f'skip-impl exhaustion-non-scalar-arg {a["field"]}')
+            continue
+        exhaustion_supported = {
+            (), ('i32',), ('i64',), ('f32',), ('f64',),
+            ('i32', 'i32'),
+            ('i64', 'i64'),
+            ('i32', 'i64'), ('i32', 'f32'), ('i32', 'f64'),
+            ('i32', 'i32', 'i32'),
+        }
+        arg_kinds = tuple(x['type'] for x in args)
+        if arg_kinds not in exhaustion_supported:
+            lines.append(
+                f'skip-impl exhaustion-shape-gap '
+                f'({" ".join(arg_kinds) or "()"}) {a["field"]}'
+            )
+            continue
+        args_s = ' '.join(fmt(x) for x in args) if args else '()'
+        lines.append(f'assert_exhaustion {quote_field(a["field"])} {args_s}')
     elif t == 'assert_invalid':
         lines.append(f'assert_invalid {c["filename"]}')
     elif t == 'assert_uninstantiable':
