@@ -10,36 +10,39 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-78 closed: §3.4.6/§3.4.7 active offset-expr validation, +25 PASS**
+## Active state — **d-79 closed: §3.4.4 memory-op validation in func bodies, +8 PASS**
 
 ### One-line state
 
-d-78 reuses the d-77 const-expr helper with
-`want_valtype = .i32` for active elem + data segment
-offset_expr validation. Result: spec_assert non-simd
-23923/0/2147 → **23948/0/2122** (+25 PASS, 0 FAIL).
-`data` corpus **fully drained** (12→0); `elem`
-near-drained (14→2; residual = per-element init-expr
-reftype-matching). Mac + OrbStack **bit-identical**
-(OrbStack `test-all` exit 0).
+d-79 adds `Validator.memory_count` field +
+`Error.UnknownMemory` guard at opLoad / opStore /
+opMemorySize / opMemoryGrow / opMemoryFill /
+opMemoryCopy / opMemoryInit. New `WithMemory` wrapper
+for production callers; legacy callers default to 1.
+Result: spec_assert 23948/0/2122 → **23956/0/2114**
+(+8 PASS). Full drains: **memory 6→0, memory_fill 1→0,
+memory_copy + memory_init** residuals → 0. Total
+VALIDATOR-GAP 32→26.
 
-**Cumulative d-74 → d-78 (5 chunks)**: **+164 PASS**
-(23784 → 23948).
+**Cumulative d-74 → d-79 (6 chunks)**: **+172 PASS**
+(23784 → 23956). `unreached-invalid` corpus was tried
+but requires polymorphic-stack pop-with-expected-type
+refactor — **deferred** (would need ~200 LOC across
+opSelect / popExpect / popAny APIs).
 
-### Skip-impl drainage roadmap (post-d-78)
+### Skip-impl drainage roadmap (post-d-79)
 
-Remaining SKIP-VALIDATOR-GAP (~32): unreached-invalid
-13, memory 6, if 4, ref_func 3, elem 2,
-call_indirect 2, select 1, memory_fill 1. Next:
+Remaining VALIDATOR-GAP (26): unreached-invalid 14
+(deferred — needs polymorphic-stack refactor),
+if 4, ref_func 3, elem 2, call_indirect 2, select 1.
 
-- **d-79** — `unreached-invalid` (13): polymorphic
-  stack typing in validator dead-code. Interacts with
-  D-093's gap-1 unreachable-tracking work.
-- **d-80** — `memory` (6) residual + `memory_fill` (1):
-  validator-layer (memory ops in func body without
-  memory) → needs `validateFunction` extension.
-- **d-81+** — long tail (if 4 / ref_func 3 / elem
-  per-element 2 / call_indirect 2 / select 1).
+- **d-80** — long tail (if / ref_func / elem / call_indirect / select)
+  — most need spec-rule-specific validator extensions
+  (likely each 1-3 lines of validator change).
+- **deferred** — `unreached-invalid` (14): polymorphic
+  stack pop-with-expected refactor; complexity high
+  for the count of cases drained. Revisit if other
+  blockers clear.
 
 ## Outstanding (now-resumed) `now` debts
 
