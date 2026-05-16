@@ -10,27 +10,20 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-72 closed: D-134 probe — sigaltstack + sigaction readback both clean (OrbStack PASSED this run)**
+## Active state — **d-73 closed: debt cleanup (24 stale `discharged-by:` rows pruned)**
 
 ### One-line state
 
-d-72 replaces `installSigsegvHandler`'s
-`std.posix.sigaltstack(...) catch {}` silent swallow
-with explicit error reporting AND adds a sigaction
-readback verifying our `sigsegvHandler` is the active
-SEGV disposition post-install (both prints fire only
-on failure). OrbStack `zig build test-all` exit 0 this
-run — no diagnostic prints; sigaltstack succeeds AND
-handler is correctly installed at the readback point.
-**Hypothesis (iii-a)** (sigaltstack silent failure) and
-**(iii-c)** (handler replaced at install time) **mostly
-ruled out** for the happy-install path. D-134 is now an
-"instrumented flake" — the diagnostic remains in place
-for the next OrbStack run that surfaces the SEGV.
-Heisenbug context: d-71 hit SEGV, d-72 passes;
-structurally the d-72 source change is compile-time
-only but perturbs binary layout, possibly accounting
-for the run-to-run difference.
+d-73 prunes 24 stale `discharged-by:` rows from the
+Active section of `.dev/debt.md` per Step 0.5 "when
+discharged, delete the row". Removed: D-101 / D-107 /
+D-108 / D-109 / D-110 / D-111 / D-112 / D-113 / D-114 /
+D-115 / D-116 / D-118 / D-119 / D-120 / D-121 / D-122 /
+D-123 / D-124 / D-125 / D-127 / D-128 / D-129 / D-130
+(+1 straggler). Active D-rows 52 → 28. Recently-
+discharged section untouched. `zig build` rc=0.
+D-72's D-134 instrumentation remains in place awaiting
+the next failing OrbStack run.
 
 ### Phase 9 / §9.9 status
 
