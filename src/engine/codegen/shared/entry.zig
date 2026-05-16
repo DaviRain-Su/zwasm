@@ -769,6 +769,41 @@ pub fn callI64_i64i64i32(
     return result;
 }
 
+/// Multi-result return struct for `(i64, i32)` shape. Wasm spec §4.5.3
+/// allows function results of arbitrary length; Zig's `extern struct`
+/// produces the AAPCS64 / SysV "small-struct returned via X0/RAX +
+/// X1/RDX (Win64: hidden-ptr in RCX)" ABI layout that matches what
+/// the JIT body's epilogue marshals into the result registers.
+/// Field order matches Wasm result order (r0 = first result).
+///
+/// Phase 9 Cat II entry-helper cohort per ADR-0065; this is the first
+/// multi-result `FuncRet_*` struct. Subsequent shapes follow the same
+/// naming convention `FuncRet_<concat-result-types>` (no separator).
+pub const FuncRet_i64i32 = extern struct {
+    r0: u64,
+    r1: u32,
+};
+
+/// Call a `(i64, i64, i32) -> (i64, i32)` JIT function. Used by the
+/// spec_assert non-simd runner to invoke the `add64_u_with_carry`
+/// family (spec `if.wast` / `func.wast` / etc.). Multi-result ABI
+/// per `FuncRet_i64i32`.
+pub fn callI64i32_i64i64i32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u64,
+    a1: u64,
+    a2: u32,
+) Error!FuncRet_i64i32 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: u64, a1: u64, a2: u32) callconv(.c) FuncRet_i64i32;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, a0, a1, a2);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
 pub fn callF32_f32f32f32(
     module: linker.JitModule,
     func_idx: u32,

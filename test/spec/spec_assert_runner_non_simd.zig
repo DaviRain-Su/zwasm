@@ -313,6 +313,14 @@ fn nonSimdRunAssertReturn(
         return dispatchVoidResult(compiled, func_idx, &rt, fn_name, args_s, args[0..n_args], stdout, name);
     }
 
+    // Multi-result dispatch (results_s contains a space separator
+    // between `<kind>:<value>` tokens). Phase 9 Cat II per ADR-0065;
+    // shapes drained one at a time matching the close-plan §6 step (b)
+    // priority order.
+    if (std.mem.indexOfScalar(u8, results_s, ' ') != null) {
+        return dispatchMultiResult(compiled, func_idx, &rt, fn_name, args_s, args[0..n_args], results_s, stdout, name);
+    }
+
     // v128 result token unreachable here.
     if (std.mem.startsWith(u8, results_s, "v128") or std.mem.startsWith(u8, results_s, "v128_lanes:")) {
         try stdout.print("FAIL  {s}: v128 result in non-SIMD runner ({s})\n", .{ name, results_s });
@@ -498,6 +506,66 @@ fn dispatchVoidResult(
         return true;
     }
     try stdout.print("FAIL  {s}: void-result unsupported (n_args={d}) for {s}({s})\n", .{ name, args.len, fn_name, args_s });
+    return false;
+}
+
+/// Multi-result dispatch ladder. Wasm spec §4.5.3 allows arbitrary
+/// result arity; this ladder grows shape-by-shape as the close-plan
+/// §6 step (b) drains the multi-result `skip-impl` backlog. The
+/// distiller's `supported_multi` set in `regen_spec_2_0_assert.sh`
+/// gates which shapes ever reach the runner, so the FAIL at the
+/// bottom of this function fires only on a distiller/runner sync gap.
+fn dispatchMultiResult(
+    compiled: *const runner_mod.CompiledWasm,
+    func_idx: u32,
+    rt: *entry.JitRuntime,
+    fn_name: []const u8,
+    args_s: []const u8,
+    args: []const ArgValue,
+    results_s: []const u8,
+    stdout: *std.Io.Writer,
+    name: []const u8,
+) anyerror!bool {
+    // Shape: `(i64, i64, i32) -> (i64, i32)` — `add64_u_with_carry`
+    // family across if / func / call / loop / block / br /
+    // call_indirect corpora. Phase 9 Cat II chunk (b)-1.
+    if (args.len == 3 and args[0] == .i64 and args[1] == .i64 and args[2] == .i32) {
+        var it = std.mem.tokenizeScalar(u8, results_s, ' ');
+        const r0_s = it.next() orelse {
+            try stdout.print("FAIL  {s}: malformed multi-result '{s}'\n", .{ name, results_s });
+            return false;
+        };
+        const r1_s = it.next() orelse {
+            try stdout.print("FAIL  {s}: malformed multi-result '{s}'\n", .{ name, results_s });
+            return false;
+        };
+        if (it.next() != null) {
+            try stdout.print("FAIL  {s}: extra multi-result tokens '{s}'\n", .{ name, results_s });
+            return false;
+        }
+        if (!std.mem.startsWith(u8, r0_s, "i64:") or !std.mem.startsWith(u8, r1_s, "i32:")) {
+            try stdout.print("FAIL  {s}: result shape mismatch '{s}' (want i64 i32)\n", .{ name, results_s });
+            return false;
+        }
+        const exp_r0 = base.parseI64Token(r0_s[4..]) catch {
+            try stdout.print("FAIL  {s}: bad i64 result '{s}'\n", .{ name, r0_s });
+            return false;
+        };
+        const exp_r1 = base.parseI32Token(r1_s[4..]) catch {
+            try stdout.print("FAIL  {s}: bad i32 result '{s}'\n", .{ name, r1_s });
+            return false;
+        };
+        const got = entry.callI64i32_i64i64i32(compiled.module, func_idx, rt, args[0].i64, args[1].i64, args[2].i32) catch |err| {
+            try base.printCallTrap(rt, name, fn_name, args_s, err, stdout);
+            return false;
+        };
+        if (got.r0 != exp_r0 or got.r1 != exp_r1) {
+            try stdout.print("FAIL  {s}: {s}({s}) → got (i64:{d}, i32:{d}), expected (i64:{d}, i32:{d})\n", .{ name, fn_name, args_s, got.r0, got.r1, exp_r0, exp_r1 });
+            return false;
+        }
+        return true;
+    }
+    try stdout.print("FAIL  {s}: multi-result unsupported for {s}({s}) -> {s}\n", .{ name, fn_name, args_s, results_s });
     return false;
 }
 

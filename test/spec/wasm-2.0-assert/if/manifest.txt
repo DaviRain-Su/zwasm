@@ -107,14 +107,14 @@ assert_return params-id-break i32:0 -> i32:3
 assert_return params-id-break i32:1 -> i32:3
 assert_return effects i32:1 -> i32:4294967282
 assert_return effects i32:0 -> i32:4294967290
-skip-impl multi-result add64_u_with_carry
-skip-impl multi-result add64_u_with_carry
-skip-impl multi-result add64_u_with_carry
-skip-impl multi-result add64_u_with_carry
-skip-impl multi-result add64_u_with_carry
-skip-impl multi-result add64_u_with_carry
-skip-impl multi-result add64_u_with_carry
-skip-impl multi-result add64_u_with_carry
+assert_return add64_u_with_carry i64:0 i64:0 i32:0 -> i64:0 i32:0
+assert_return add64_u_with_carry i64:100 i64:124 i32:0 -> i64:224 i32:0
+assert_return add64_u_with_carry i64:18446744073709551615 i64:0 i32:0 -> i64:18446744073709551615 i32:0
+assert_return add64_u_with_carry i64:18446744073709551615 i64:1 i32:0 -> i64:0 i32:1
+assert_return add64_u_with_carry i64:18446744073709551615 i64:18446744073709551615 i32:0 -> i64:18446744073709551614 i32:1
+assert_return add64_u_with_carry i64:18446744073709551615 i64:0 i32:1 -> i64:0 i32:1
+assert_return add64_u_with_carry i64:18446744073709551615 i64:1 i32:1 -> i64:1 i32:1
+assert_return add64_u_with_carry i64:9223372036854775808 i64:9223372036854775808 i32:0 -> i64:0 i32:1
 assert_return add64_u_saturated i64:0 i64:0 -> i64:0
 assert_return add64_u_saturated i64:1230 i64:23 -> i64:1253
 assert_return add64_u_saturated i64:18446744073709551615 i64:0 -> i64:18446744073709551615

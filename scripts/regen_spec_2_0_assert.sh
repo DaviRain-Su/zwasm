@@ -499,8 +499,27 @@ for c in d['commands']:
             lines.append(f'skip-impl non-scalar-arg {a["field"]}')
             module_state_diverged = True
             continue
+        # Multi-result handling (Phase 9 Cat II per ADR-0065). The
+        # `supported_multi` set names every `(arg-kinds, result-kinds)`
+        # tuple the runner's `dispatchMultiResult` ladder currently
+        # accepts; un-listed shapes still emit `skip-impl multi-result`
+        # and surface in subsequent Cat II chunks.
         if len(results) > 1:
-            lines.append(f'skip-impl multi-result {a["field"]}')
+            if not all(allowed_scalar(x) for x in results):
+                lines.append(f'skip-impl non-scalar-result {a["field"]}')
+                continue
+            arg_kinds = tuple(kind_alias(x['type']) for x in args)
+            result_kinds = tuple(kind_alias(x['type']) for x in results)
+            supported_multi = {
+                # Phase 9 Cat II chunk (b)-1 — add64_u_with_carry family.
+                (('i64', 'i64', 'i32'), ('i64', 'i32')),
+            }
+            if (arg_kinds, result_kinds) not in supported_multi:
+                lines.append(f'skip-impl multi-result {a["field"]}')
+                continue
+            args_s = ' '.join(fmt(x) for x in args) if args else '()'
+            results_s = ' '.join(fmt(x) for x in results)
+            lines.append(f'assert_return {quote_field(a["field"])} {args_s} -> {results_s}')
             continue
         if results and not allowed_scalar(results[0]):
             lines.append(f'skip-impl non-scalar-result {a["field"]}')
