@@ -46,6 +46,12 @@ pub const Error = error{
     InvalidFuncIndex,
     InvalidGlobalIndex,
     ImmutableGlobal,
+    /// Wasm spec §3.4.4 / §3.3.5.7-8: a memory op (load/store/
+    /// memory.size / memory.grow / memory.fill / memory.copy /
+    /// memory.init) appears in a function body but the module
+    /// declares no memory (no memory section and no memory
+    /// import).
+    UnknownMemory,
     InvalidBranchDepth,
     UnclosedFrames,
     TrailingBytes,
@@ -225,6 +231,46 @@ pub fn validateFunctionAndCollectSelectTypes(
     try v.run();
 }
 
+/// §9.9 / 9.9-l-1b-d093-d79 — variant that also threads
+/// `memory_count` so the validator can reject memory ops
+/// (load/store/size/grow/fill/copy/init) in function bodies
+/// when the module declares no memory. Production callers
+/// in `compileWasm` use this variant; the original
+/// `validateFunctionAndCollectSelectTypes` keeps the
+/// legacy default (`memory_count = 0`) for tests that
+/// don't exercise memory ops.
+pub fn validateFunctionAndCollectSelectTypesWithMemory(
+    allocator: std.mem.Allocator,
+    sig: FuncType,
+    locals: []const ValType,
+    body: []const u8,
+    func_types: []const FuncType,
+    globals: []const GlobalEntry,
+    module_types: []const FuncType,
+    data_count: u32,
+    tables: []const zir.TableEntry,
+    elem_count: u32,
+    memory_count: u32,
+    out_select_types: *std.ArrayList(u8),
+) Error!void {
+    var v = Validator{
+        .sig = sig,
+        .locals = locals,
+        .body = body,
+        .pos = 0,
+        .func_types = func_types,
+        .globals = globals,
+        .module_types = module_types,
+        .data_count = data_count,
+        .tables = tables,
+        .elem_count = elem_count,
+        .memory_count = memory_count,
+        .out_select_types = out_select_types,
+        .out_allocator = allocator,
+    };
+    try v.run();
+}
+
 const Validator = struct {
     sig: FuncType,
     locals: []const ValType,
@@ -236,6 +282,21 @@ const Validator = struct {
     data_count: u32,
     tables: []const zir.TableEntry,
     elem_count: u32,
+    /// §9.9 / 9.9-l-1b-d093-d79 — count of memories (imports +
+    /// defined) reachable at function-body validation time.
+    /// Wasm 2.0 §3.4.4 caps total memories at 1; this is
+    /// either 0 or 1 in practice. Memory ops in function bodies
+    /// (load/store/size/grow + bulk variants) require memory_count
+    /// >= 1; absent memory → `Error.UnknownMemory`.
+    ///
+    /// Default = 1: legacy `validateFunction` /
+    /// `validateFunctionAndCollectSelectTypes` callers (unit
+    /// tests, wast_runner) don't thread memory_count and
+    /// assume memory ops are valid — preserving pre-d-79
+    /// behaviour. Production `compileWasm` uses
+    /// `validateFunctionAndCollectSelectTypesWithMemory`
+    /// which sets memory_count explicitly per module.
+    memory_count: u32 = 1,
 
     operand_buf: [max_operand_stack]TypeOrBot = undefined,
     operand_len: usize = 0,
@@ -1116,6 +1177,7 @@ const Validator = struct {
     /// memory.copy: 0xFC 10 0x00 0x00 (two reserved memidx bytes).
     /// Pops three i32 (n, src, dst); pushes nothing.
     fn opMemoryCopy(self: *Validator) Error!void {
+        if (self.memory_count == 0) return Error.UnknownMemory;
         if (self.pos + 2 > self.body.len) return Error.UnexpectedEnd;
         if (self.body[self.pos] != 0x00 or self.body[self.pos + 1] != 0x00) {
             return Error.BadBlockType; // reserved bytes must be zero
@@ -1130,6 +1192,7 @@ const Validator = struct {
     /// Pops three i32 (n, src, dst); pushes nothing. dataidx must be
     /// less than the module's data segment count.
     fn opMemoryInit(self: *Validator) Error!void {
+        if (self.memory_count == 0) return Error.UnknownMemory;
         const dataidx = try leb128.readUleb128(u32, self.body, &self.pos);
         if (dataidx >= self.data_count) return Error.InvalidFuncIndex;
         if (self.pos >= self.body.len) return Error.UnexpectedEnd;
@@ -1262,6 +1325,7 @@ const Validator = struct {
     /// memory.fill: 0xFC 11 0x00 (one reserved memidx byte).
     /// Pops three i32 (n, val, dst); pushes nothing.
     fn opMemoryFill(self: *Validator) Error!void {
+        if (self.memory_count == 0) return Error.UnknownMemory;
         if (self.pos >= self.body.len) return Error.UnexpectedEnd;
         if (self.body[self.pos] != 0x00) return Error.BadBlockType;
         self.pos += 1;
@@ -1413,18 +1477,21 @@ const Validator = struct {
     }
 
     fn opLoad(self: *Validator, t: ValType) Error!void {
+        if (self.memory_count == 0) return Error.UnknownMemory;
         try self.skipMemarg();
         try self.popExpect(.i32); // address
         try self.pushType(t);
     }
 
     fn opStore(self: *Validator, t: ValType) Error!void {
+        if (self.memory_count == 0) return Error.UnknownMemory;
         try self.skipMemarg();
         try self.popExpect(t); // value
         try self.popExpect(.i32); // address
     }
 
     fn opMemorySize(self: *Validator) Error!void {
+        if (self.memory_count == 0) return Error.UnknownMemory;
         if (self.pos >= self.body.len) return Error.UnexpectedEnd;
         if (self.body[self.pos] != 0x00) return Error.InvalidOpcode;
         self.pos += 1;
@@ -1432,6 +1499,7 @@ const Validator = struct {
     }
 
     fn opMemoryGrow(self: *Validator) Error!void {
+        if (self.memory_count == 0) return Error.UnknownMemory;
         if (self.pos >= self.body.len) return Error.UnexpectedEnd;
         if (self.body[self.pos] != 0x00) return Error.InvalidOpcode;
         self.pos += 1;

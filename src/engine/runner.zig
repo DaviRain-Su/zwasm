@@ -715,6 +715,22 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     // captures this via `2>&1 > /tmp/<host>.log` so root-cause
     // bisection (which fixture, which function) is visible
     // without re-running the gate.
+    // §9.9 / 9.9-l-1b-d093-d79: count memories (imports +
+    // defined) so the validator can reject memory ops
+    // (load/store/size/grow/fill/copy/init) in function bodies
+    // when the module has no memory.
+    var validator_memory_count: u32 = 0;
+    if (imports_buf) |ib| {
+        for (ib.items) |imp| if (imp.kind == .memory) {
+            validator_memory_count += 1;
+        };
+    }
+    if (module.find(.memory)) |ms| {
+        var ms_buf = try sections.decodeMemory(a, ms.body);
+        defer ms_buf.deinit();
+        validator_memory_count += @intCast(ms_buf.items.len);
+    }
+
     const results = try allocator.alloc(compile_func.FuncResult, defined_func_typeidx.len);
     errdefer allocator.free(results);
     var compiled: usize = 0;
@@ -734,7 +750,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         // dispatch (FCSEL / FpSelect vs gpr32 CSEL).
         var select_types: std.ArrayList(u8) = .empty;
         defer select_types.deinit(allocator);
-        validator_mod.validateFunctionAndCollectSelectTypes(
+        validator_mod.validateFunctionAndCollectSelectTypesWithMemory(
             allocator,
             sig,
             code.locals,
@@ -745,6 +761,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             validator_data_count,
             validator_tables,
             validator_elem_count,
+            validator_memory_count,
             &select_types,
         ) catch |err| {
             std.debug.print("compileWasm: func[{d}] params={d} results={d} → validate {s}\n", .{
