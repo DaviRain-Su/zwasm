@@ -57,8 +57,8 @@ assert_return break-br_if-empty i32:0 -> ()
 assert_return break-br_if-empty i32:2 -> ()
 assert_return break-br_if-num i32:0 -> i32:51
 assert_return break-br_if-num i32:1 -> i32:50
-skip-impl multi-result break-br_if-num-num
-skip-impl multi-result break-br_if-num-num
+assert_return break-br_if-num-num i32:0 -> i32:51 i64:52
+assert_return break-br_if-num-num i32:1 -> i32:50 i64:51
 assert_return break-br_table-empty i32:0 -> ()
 assert_return break-br_table-empty i32:1 -> ()
 assert_return break-br_table-empty i32:5 -> ()
@@ -67,10 +67,10 @@ assert_return break-br_table-num i32:0 -> i32:50
 assert_return break-br_table-num i32:1 -> i32:50
 assert_return break-br_table-num i32:10 -> i32:50
 assert_return break-br_table-num i32:4294967196 -> i32:50
-skip-impl multi-result break-br_table-num-num
-skip-impl multi-result break-br_table-num-num
-skip-impl multi-result break-br_table-num-num
-skip-impl multi-result break-br_table-num-num
+assert_return break-br_table-num-num i32:0 -> i32:50 i64:51
+assert_return break-br_table-num-num i32:1 -> i32:50 i64:51
+assert_return break-br_table-num-num i32:10 -> i32:50 i64:51
+assert_return break-br_table-num-num i32:4294967196 -> i32:50 i64:51
 assert_return break-br_table-nested-empty i32:0 -> ()
 assert_return break-br_table-nested-empty i32:1 -> ()
 assert_return break-br_table-nested-empty i32:3 -> ()

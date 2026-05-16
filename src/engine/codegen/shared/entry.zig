@@ -896,6 +896,22 @@ pub fn callI32i32_i32(
     return result;
 }
 
+/// `(i32) -> (i32, i64)` — break-br_if-num-num / break-br_table-num-num.
+/// Uses `FuncRet_i32i64` (16-byte struct, X0+X1 register pair).
+pub fn callI32i64_i32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u32,
+) Error!FuncRet_i32i64 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime, a0: u32) callconv(.c) FuncRet_i32i64;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt, a0);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
 pub fn callF32_f32f32f32(
     module: linker.JitModule,
     func_idx: u32,

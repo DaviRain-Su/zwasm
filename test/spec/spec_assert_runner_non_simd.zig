@@ -623,6 +623,22 @@ fn dispatchMultiResult(
         }
         return true;
     }
+    // `(i32) -> (i32, i64)` — break-br_if-num-num / break-br_table-num-num.
+    if (args.len == 1 and args[0] == .i32 and
+        n_rtoks == 2 and std.mem.startsWith(u8, rtoks[0], "i32:") and std.mem.startsWith(u8, rtoks[1], "i64:"))
+    {
+        const exp_r0 = base.parseI32Token(rtoks[0][4..]) catch return failBadResult(stdout, name, rtoks[0]);
+        const exp_r1 = base.parseI64Token(rtoks[1][4..]) catch return failBadResult(stdout, name, rtoks[1]);
+        const got = entry.callI32i64_i32(compiled.module, func_idx, rt, args[0].i32) catch |err| {
+            try base.printCallTrap(rt, name, fn_name, args_s, err, stdout);
+            return false;
+        };
+        if (got.r0 != exp_r0 or got.r1 != exp_r1) {
+            try stdout.print("FAIL  {s}: {s}({s}) → got (i32:{d}, i64:{d}), expected (i32:{d}, i64:{d})\n", .{ name, fn_name, args_s, got.r0, got.r1, exp_r0, exp_r1 });
+            return false;
+        }
+        return true;
+    }
     // `() -> (i64, i32)`.
     if (args.len == 0 and
         n_rtoks == 2 and std.mem.startsWith(u8, rtoks[0], "i64:") and std.mem.startsWith(u8, rtoks[1], "i32:"))

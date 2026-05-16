@@ -26,39 +26,40 @@
 
 ### One-line state
 
-Step (b) Cat II in progress: (b)-1..(b)-3 landed cumulative +24
-PASS (24001→24025). (b)-3 narrowed D-137: same-width 2× int
-solved via u64-padded `FuncRet_*` layout. ARM64 `br_table`→
-function-depth multi-result marshal bug fixed inline (was
-hand-rolling single-result marshal; now delegates to
-`marshalFunctionReturn`). D-137 residual = mixed int+float
-multi-result only.
+Step (b) Cat II in progress: (b)-1..(b)-4 landed cumulative +30
+PASS (24001→24031). (b)-4 added `(i32)→(i32,i64)` shape
+(break-br_if-num-num / break-br_table-num-num, 6 lines).
+Remaining Cat II: 18 multi-result skip lines = ~10 mixed
+int+float (D-137 residual) + ~8 3-result/large-sig.
 
 **Current spec_assert tally** (Mac aarch64 + OrbStack
-bit-identical post-(b)-3; live via
+bit-identical post-(b)-4; live via
 `bash scripts/p9_simd_status.sh`):
 
-- spec_assert non-simd: **24025 / 0 / 2045** (+24 PASS / -24
+- spec_assert non-simd: **24031 / 0 / 2039** (+30 PASS / -30
   skip-impl vs 2026-05-17 baseline 24001/0/2069)
 - simd_assert: **13301 / 0 / 440** (unchanged)
 
 ### Next-session active task
 
-**Chunk (b)-4 — D-137 residual: mixed int+float multi-result**.
-~12 remaining FAIL/skip lines for shapes like `()→(i32, f64)`,
-`()→(f64, i32)` (spec `type-all-i32-f64`, `value-i32-f64`,
-`return-i32-f64`, `break-i32-f64`). Discharge via either:
+**Choice point** between:
 
-- (a) JIT-side: extend epilogue to route FP results via C-ABI
-  HFA / mixed-class register layout for entry-helper-bound
-  functions.
-- (b) Zig-side: inline-asm thunk capturing result[0] from X0/RAX
-  and result[1] from V0/XMM0 into a Zig-owned struct.
+- **Continue Cat II** — (b)-5 = mixed int+float D-137 bridge
+  (ADR-grade, ~10 lines PASS) OR (b)-6 = 3-result via X8
+  indirect-result-ptr ABI bridge (ADR-grade, ~8 lines PASS).
+  Long-tail diminishing returns.
+- **Pivot to Cat III** per close-plan §6 step (c) — Wasm 1.0
+  instance / store / linker (~144 lines PASS, much higher
+  impact). Start with Step 0 survey: read v1 zwasm
+  `src/runtime/`, wasmtime `crates/runtime/`, zware `src/`,
+  `~/zwasm/private/v2-investigation/` for instance/store/
+  linker shape; produce `private/notes/p9-cat3-instance-
+  survey.md`. Then sub-chunk 1 = Store + Instance registry
+  per `phase9_close_plan.md` §6 step (c).
 
-ADR-grade design; file `.dev/decisions/0066_*.md`. After (b)-4,
-remaining shapes are 3-result (`(i32, i32, i32)`,
-`(i32, i32, i64)`) which need indirect-result-pointer ABI
-(C-ABI returns 24+ byte struct via X8 pointer on AAPCS64).
+**Recommended**: Cat III (Step (c)-1) — bigger PASS impact +
+moves the close-plan toward the next major scope chunk.
+Cat II residual stays open as background work.
 
 ### Discipline reminders
 

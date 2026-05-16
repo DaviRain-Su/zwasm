@@ -525,6 +525,9 @@ for c in d['commands']:
                 # D-137 residual.
                 ((), ('i32', 'i32')),
                 (('i32',), ('i32', 'i32')),
+                # Phase 9 Cat II chunk (b)-4 — break-br_if-num-num,
+                # break-br_table-num-num.
+                (('i32',), ('i32', 'i64')),
             }
             if (arg_kinds, result_kinds) not in supported_multi:
                 lines.append(f'skip-impl multi-result {a["field"]}')
