@@ -44,13 +44,13 @@ on which they land is the correct one — not the inherited
 The audit must keep all five axes in mind and choose
 architecture that maximises them jointly:
 
-| Axis              | Translation                                              |
-|-------------------|----------------------------------------------------------|
-| 構造的にきれい    | Source organisation by op / by feature is navigable      |
-| 高速              | Hot paths (interp inner loop; per-op JIT emit dispatch) free of avoidable indirection |
-| 小さい            | `-Dwasm=1.0` build excludes 2.0/3.0 code (binary + comptime) |
-| 教科書的          | A reader can pick up one file and understand one op family |
-| 実用的            | Hot ABI invariants (ZirOp slot count, dispatch shape) survive future Wasm proposal merges without further substrate redesign |
+| Axis           | Translation                                                                                                                  |
+|----------------|------------------------------------------------------------------------------------------------------------------------------|
+| 構造的にきれい | Source organisation by op / by feature is navigable                                                                          |
+| 高速           | Hot paths (interp inner loop; per-op JIT emit dispatch) free of avoidable indirection                                        |
+| 小さい         | `-Dwasm=1.0` build excludes 2.0/3.0 code (binary + comptime)                                                                 |
+| 教科書的       | A reader can pick up one file and understand one op family                                                                   |
+| 実用的         | Hot ABI invariants (ZirOp slot count, dispatch shape) survive future Wasm proposal merges without further substrate redesign |
 
 **Anti-axis**: "ship now" cost. Per user directive: cost is
 not a constraint.
@@ -133,6 +133,19 @@ Three hypotheses (from 2026-05-16 thread):
   architecture (e.g. `i32.add`) as a working reference.
 - **Required deliverable**: explicit scope statement in this
   doc's "Outcome" section.
+- **Cat III (Wasm 1.0 instance / store / linker) caveat**
+  (2026-05-17, per [ADR-0065](decisions/0065_wasm_1_0_instance_work_phase9_rescope.md)):
+  the §9.9-III Cat III work is **structurally independent**
+  of Q3's per-op-dispatch architecture decision and proceeds
+  in **parallel** during the Phase 9 close-readiness cycle —
+  Store / Instance / linker / cross-module dispatch / host-
+  import binding code lives in `src/runtime/instance/` +
+  `src/runtime/` + c_api layers, none of which are touched
+  by Q3's A/B/C/D opcode-dispatch architecture choices. Cat
+  III chunks DO need to follow Q5 hygiene anchors (above)
+  during implementation, since the substrate-audit's
+  hygiene rules will be retroactively applied to the
+  instance-layer code at audit close.
 
 ### Q5 — Substrate hygiene: invariants encoded as code, not prose
 
@@ -181,6 +194,42 @@ the originating chunk and the lesson record.
     requirements rather than incidental side-effects of
     natural fixture growth. Coverage-growth masking is what
     let D-132 live latent for so long.
+
+- **Cat III runtime/instance/store/linker hygiene anchor**
+  (2026-05-17, per [ADR-0065](decisions/0065_wasm_1_0_instance_work_phase9_rescope.md)):
+  the Phase 9 close-readiness cycle absorbed Wasm 1.0
+  cross-module instance binding / host imports / start-trap /
+  link-typecheck work into §9.9-III scope. That work touches a
+  layer (`src/runtime/instance/`, `src/runtime/`, c_api cross-
+  module dispatch) the substrate-audit Q3 decision is
+  **structurally independent of** — Q3 picks the per-op
+  opcode-dispatch architecture; the runtime/instance/store
+  layer is orthogonal. The risk during Cat III work is
+  **re-deriving** Q5-class hygiene violations (comment-as-
+  invariant, single-slot-dual-meaning, copy-from-v1) in the
+  new instance-layer code before the audit lands a unified
+  enforcement strategy. Investigation tasks the audit should
+  enumerate, expanding from the existing 4 D-132 bullets:
+  - Verify the invariant-comment lint (per `.claude/rules/`
+    extension under discussion) applies uniformly to
+    `src/runtime/instance/*.zig` once Cat III chunks land —
+    instance-layer docstrings naming invariants ("this slot
+    is owned by the originating module's Store") need
+    code-level enforcement, not prose.
+  - Audit Cat III's emergent ABI invariants (funcref carries
+    originating-instance pointer; host-bound closure
+    lifetime tied to runner session) for single-slot-dual-
+    meaning violations (per `single_slot_dual_meaning.md`).
+  - Confirm `no_copy_from_v1.md` discipline is enforced
+    during Cat III chunk Step 0 surveys; v1's Store /
+    Instance / linker shape is well-developed and tempts
+    direct port — Cat III chunks must re-derive in v2
+    vocabulary.
+  - This anchor's discharge is **bundled with the audit's
+    Q3 decision** — whatever architecture (A/B/C/D) lands
+    for opcode dispatch carries instance-layer hygiene
+    enforcement uniformly. No separate Cat III hygiene ADR
+    is expected.
 
 - *(Append future trigger entries here. The audit walks all
   entries under Q5 at gate-fire time and produces one or more
