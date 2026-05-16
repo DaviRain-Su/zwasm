@@ -52,6 +52,14 @@ pub const Error = error{
     /// declares no memory (no memory section and no memory
     /// import).
     UnknownMemory,
+    /// Wasm spec §3.4.7.3 / §3.4.10: a `ref.func x` in a function
+    /// body names a function index x that is not in the module's
+    /// declared-funcrefs set (= the set of funcidxs that appear
+    /// in any global initializer, element segment, or export, but
+    /// excluding occurrences inside function code bodies and the
+    /// start function). Spec error text: "undeclared function
+    /// reference".
+    UndeclaredFuncRef,
     InvalidBranchDepth,
     UnclosedFrames,
     TrailingBytes,
@@ -251,6 +259,7 @@ pub fn validateFunctionAndCollectSelectTypesWithMemory(
     tables: []const zir.TableEntry,
     elem_count: u32,
     memory_count: u32,
+    declared_funcs: []const bool,
     out_select_types: *std.ArrayList(u8),
 ) Error!void {
     var v = Validator{
@@ -265,6 +274,7 @@ pub fn validateFunctionAndCollectSelectTypesWithMemory(
         .tables = tables,
         .elem_count = elem_count,
         .memory_count = memory_count,
+        .declared_funcs = declared_funcs,
         .out_select_types = out_select_types,
         .out_allocator = allocator,
     };
@@ -297,6 +307,16 @@ const Validator = struct {
     /// `validateFunctionAndCollectSelectTypesWithMemory`
     /// which sets memory_count explicitly per module.
     memory_count: u32 = 1,
+    /// §9.9 / 9.9-l-1b-d093-d82 — declared-funcrefs bitset per
+    /// Wasm spec §3.4.10. Length = total funcs (imports +
+    /// defined); entry `true` iff that funcidx appears in some
+    /// global initializer, element segment (funcidx or init expr),
+    /// or export (kind=func). Function code bodies and the start
+    /// function do NOT contribute. Empty slice (default) disables
+    /// enforcement so legacy callers (unit tests, wast_runner)
+    /// keep prior behaviour; production `compileWasm` passes a
+    /// populated slice.
+    declared_funcs: []const bool = &.{},
 
     operand_buf: [max_operand_stack]TypeOrBot = undefined,
     operand_len: usize = 0,
@@ -1246,13 +1266,21 @@ const Validator = struct {
         try self.pushType(.i32);
     }
 
-    /// ref.func funcidx: read funcidx, validate it's within the
-    /// module's function index space, push funcref. The strict
-    /// declaration-scope check (§5.4.1.4) is deferred — chunk 5
-    /// allows any valid funcidx.
+    /// Wasm spec §3.4.7.3 / §3.4.10 (ref.func x): read funcidx,
+    /// validate it's within the module's function index space and
+    /// — when the caller supplied a non-empty `declared_funcs`
+    /// bitset — that the funcidx is in the module's declared set.
+    /// The declared set captures funcidxs referenced from globals
+    /// / elements / exports but NOT from other function bodies or
+    /// the start function. Pushes funcref.
     fn opRefFunc(self: *Validator) Error!void {
         const idx = try leb128.readUleb128(u32, self.body, &self.pos);
         if (idx >= self.func_types.len) return Error.InvalidFuncIndex;
+        if (self.declared_funcs.len != 0) {
+            if (idx >= self.declared_funcs.len or !self.declared_funcs[idx]) {
+                return Error.UndeclaredFuncRef;
+            }
+        }
         try self.pushType(.funcref);
     }
 

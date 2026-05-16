@@ -431,11 +431,17 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
                 num_global_imports_empty += 1;
             };
         }
+        // §9.9 / 9.9-l-1b-d093-d82 — total_funcs for empty-fn
+        // path = number of function imports only (no defined
+        // functions). Used by validateGlobalInitExpr's ref.func
+        // arm for range-checking funcidxs in global / offset
+        // const-exprs.
+        const total_funcs_empty_for_init: u32 = sig_count;
         if (module.find(.global)) |gs| {
             var gs_buf = try sections.decodeGlobals(a, gs.body);
             defer gs_buf.deinit();
             for (gs_buf.items) |gd| {
-                try validateGlobalInitExpr(gd.init_expr, gd.valtype, num_global_imports_empty, imports_buf);
+                try validateGlobalInitExpr(gd.init_expr, gd.valtype, num_global_imports_empty, imports_buf, total_funcs_empty_for_init);
             }
         }
         // §9.9 / 9.9-l-1b-d093-d78 mirror — empty-fn path
@@ -445,7 +451,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             defer ds_buf.deinit();
             for (ds_buf.items) |seg| {
                 if (seg.kind == .active) {
-                    try validateGlobalInitExpr(seg.offset_expr, .i32, num_global_imports_empty, imports_buf);
+                    try validateGlobalInitExpr(seg.offset_expr, .i32, num_global_imports_empty, imports_buf, total_funcs_empty_for_init);
                 }
             }
         }
@@ -454,7 +460,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             defer es_buf.deinit();
             for (es_buf.items) |seg| {
                 if (seg.kind == .active) {
-                    try validateGlobalInitExpr(seg.offset_expr, .i32, num_global_imports_empty, imports_buf);
+                    try validateGlobalInitExpr(seg.offset_expr, .i32, num_global_imports_empty, imports_buf, total_funcs_empty_for_init);
                 }
             }
         }
@@ -621,7 +627,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     }
     if (globals_buf) |g| {
         for (g.items) |gd| {
-            try validateGlobalInitExpr(gd.init_expr, gd.valtype, num_global_imports_main, imports_buf);
+            try validateGlobalInitExpr(gd.init_expr, gd.valtype, num_global_imports_main, imports_buf, total_funcs);
         }
     }
 
@@ -635,14 +641,14 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     if (datas_buf) |d| {
         for (d.items) |seg| {
             if (seg.kind == .active) {
-                try validateGlobalInitExpr(seg.offset_expr, .i32, num_global_imports_main, imports_buf);
+                try validateGlobalInitExpr(seg.offset_expr, .i32, num_global_imports_main, imports_buf, total_funcs);
             }
         }
     }
     if (elems_buf) |e| {
         for (e.items) |seg| {
             if (seg.kind == .active) {
-                try validateGlobalInitExpr(seg.offset_expr, .i32, num_global_imports_main, imports_buf);
+                try validateGlobalInitExpr(seg.offset_expr, .i32, num_global_imports_main, imports_buf, total_funcs);
             }
         }
     }
@@ -767,6 +773,44 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         validator_memory_count += @intCast(ms_buf.items.len);
     }
 
+    // §9.9 / 9.9-l-1b-d093-d82 (skip-impl drainage):
+    // Wasm spec §3.4.7.3 / §3.4.10 declared-funcrefs set. A
+    // funcidx is "declared" iff it appears in some global
+    // initializer, element segment (funcidx or init-expr), or
+    // export (kind=func). Function code bodies and the start
+    // function do NOT contribute. Used by the validator's
+    // `opRefFunc` to reject `ref.func N` when N is not in the
+    // declared set ("undeclared function reference").
+    const declared_funcs = try a.alloc(bool, total_funcs);
+    @memset(declared_funcs, false);
+    if (globals_buf) |g| {
+        for (g.items) |gd| {
+            if (initExprRefFunc(gd.init_expr)) |fidx| {
+                if (fidx < total_funcs) declared_funcs[fidx] = true;
+            }
+        }
+    }
+    if (elems_buf) |e| {
+        for (e.items) |seg| {
+            for (seg.funcidxs) |fidx| {
+                // ref.null entries are encoded as maxInt(u32);
+                // skip those.
+                if (fidx != std.math.maxInt(u32) and fidx < total_funcs) {
+                    declared_funcs[fidx] = true;
+                }
+            }
+        }
+    }
+    if (module.find(.@"export")) |s| {
+        var exports = try sections.decodeExports(a, s.body);
+        defer exports.deinit();
+        for (exports.items) |e| {
+            if (e.kind == .func and e.idx < total_funcs) {
+                declared_funcs[e.idx] = true;
+            }
+        }
+    }
+
     const results = try allocator.alloc(compile_func.FuncResult, defined_func_typeidx.len);
     errdefer allocator.free(results);
     var compiled: usize = 0;
@@ -798,6 +842,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             validator_tables,
             validator_elem_count,
             validator_memory_count,
+            declared_funcs,
             &select_types,
         ) catch |err| {
             std.debug.print("compileWasm: func[{d}] params={d} results={d} → validate {s}\n", .{
@@ -934,11 +979,29 @@ pub fn applyDefinedGlobalsInit(
 /// Returns `Error.InvalidGlobalInitExpr` for any non-const
 /// opcode, out-of-range global index, mutable-global
 /// reference, type mismatch, or missing trailing `end`.
+/// §9.9 / 9.9-l-1b-d093-d82 — extract the funcidx from a global
+/// init-expression of shape `ref.func N; end`. Returns `null` for
+/// any other shape (i32.const, ref.null, global.get of import,
+/// SIMD v128.const, or a malformed expression). Used by
+/// `compileWasm` to seed the declared-funcrefs bitset per Wasm
+/// spec §3.4.10. The full validity check (range, trailing `end`,
+/// type match) still lives in `validateGlobalInitExpr`; this
+/// helper is best-effort extraction only.
+fn initExprRefFunc(expr: []const u8) ?u32 {
+    if (expr.len < 3) return null;
+    if (expr[0] != 0xD2) return null;
+    var pos: usize = 1;
+    const idx = leb128.readUleb128(u32, expr, &pos) catch return null;
+    if (pos >= expr.len or expr[pos] != 0x0B) return null;
+    return idx;
+}
+
 fn validateGlobalInitExpr(
     expr: []const u8,
     want_valtype: zir.ValType,
     num_global_imports: u32,
     imports_opt: ?sections.Imports,
+    total_funcs: u32,
 ) Error!void {
     if (expr.len < 2) return Error.InvalidGlobalInitExpr;
     var pos: usize = 1;
@@ -972,7 +1035,12 @@ fn validateGlobalInitExpr(
             };
         },
         0xD2 => blk: { // ref.func funcidx (Wasm 2.0)
-            _ = leb128.readUleb128(u32, expr, &pos) catch return Error.InvalidGlobalInitExpr;
+            const idx = leb128.readUleb128(u32, expr, &pos) catch return Error.InvalidGlobalInitExpr;
+            // Wasm spec §3.4.3: ref.func init-expr funcidx must
+            // be in [0, total_funcs). ref_func.2.wasm asserts
+            // rejection of `(global funcref (ref.func 7))` when
+            // only 2 funcs exist.
+            if (idx >= total_funcs) return Error.InvalidGlobalInitExpr;
             break :blk .funcref;
         },
         0xFD => blk: { // SIMD prefix — only v128.const (0x0C) is valid in const-expr
