@@ -10,20 +10,30 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-61 closed: drain runner-shape-gap residual (+16 PASS)**
+## Active state — **d-62 closed: drain directive-assert_exhaustion + altstack landing (+15 PASS)**
 
 ### One-line state
 
-d-61 extends d-55's runner-shape-gap drain to the 7 residual
-dispatch shapes (FP-result 2-arg-i32 ×2, i32-result 3-arg-FP
-×2, mixed 3-arg, 8-arg f64, mixed 6-arg). Adds 7 new
-`entry.callXxx_yyy` helpers; bumps `args: [5]ArgValue` →
-`[8]` at 3 call sites to fit the 6/8-arg shapes; extends
-distiller's `supported` set with 7 new tuples. spec_assert
-non-simd 23576/0/2494 → **23592/0/2478** (+16 PASS, 0 FAIL;
-skip-impl 1817 → 1801). simd 13301/0/440 unchanged. Loop
-continues toward 9.9 `[x]`; substrate audit hard gate (9.12)
-auto-fires when next chunk would resolve to it.
+d-62 adds `assert_exhaustion` directive support — wast asserts
+the module traps due to call-stack exhaustion (recursion);
+distiller emits `assert_exhaustion {field} {args}` (mirrors
+assert_trap), runner classifies + delegates to
+`handle_assert_trap`. **Altstack landing**: `installSigsegvHandler`
+now installs an explicit alt signal stack (256 KB static
+page-aligned) via `sigaltstack` + adds `SA.ONSTACK` so the
+handler can run when JIT body exhausts native stack. **Atomic
+flag**: `sigsegv_armed` upgraded from plain `bool` to
+`std.atomic.Value(bool)` (release-store / acquire-load) —
+plain bool and `*volatile bool` casts were both observed
+elided by Zig 0.16 under OrbStack test-all builds once the
+handler moved to the altstack. 15 reclassified entries (call,
+call_indirect, fac, skip-stack-guard-page) all PASS via
+SIGSEGV → altstack handler → siglongjmp → Error.Trap.
+spec_assert non-simd 23592/0/2478 → **23607/0/2463** (+15
+PASS, 0 FAIL; skip-impl 1801 → 1786). simd 13301/0/440
+unchanged. Loop continues toward 9.9 `[x]`; substrate audit
+hard gate (9.12) auto-fires when next chunk would resolve to
+it.
 
 ### Standing reminder for the autonomous loop
 
@@ -50,10 +60,7 @@ refactor, the closing path is the runner-side skip-impl backlog
 considering whether to flip 9.9 `[x]` based on "active corpora
 green" rather than "every assertion classified".
 
-- **d-62** — Candidates for the next chunk (live tally post-d-61):
-  - **directive-assert_exhaustion** (~15) — needs JIT
-    stack-overflow detection (real implementation work; not
-    a reclassification).
+- **d-63** — Candidates for the next chunk (live tally post-d-62):
   - **trap-non-scalar-arg / non-scalar-arg / action-non-scalar-arg
     / non-scalar-result** (~12+7+2+12) — needs reftype-arg/result
     dispatch in the runner ladder (extends `ArgValue` matrix
@@ -148,6 +155,7 @@ Other queued post-D-093 names: `address`, `align`, `br_table`,
 | D-093 (d-59) | [x] `0815e94e` | drain directive-register (21 entries) — distiller emits `skip-adr-skip_cross_module_register as={name}`; new ADR `skip_cross_module_register.md`. D-131 filed (pre-existing prefix-vocab violations). spec_assert non-simd 23576/0/2494 (skip-impl 1838→1817, skip-adr 656→677). |
 | D-093 (d-60) | [x] `310476bd` | D-131 discharge — rename pre-existing `cross-module-action` + `host-state-diverged` vocabs to gate-conforming form + 2 new ADRs. `check_skip_adrs --gate` exits 0 (was 291 violations). spec_assert non-simd 23576/0/2494 unchanged (bit-identical at runner level). |
 | D-093 (d-61) | [x] `31e076a6` | drain runner-shape-gap residual — 7 new `entry.callXxx_yyy` helpers + 7 new dispatch arms + `[5]ArgValue`→`[8]` cap bump + 7 distiller supported tuples. spec_assert non-simd 23576/0/2494 → **23592/0/2478** (+16 PASS, 0 FAIL; skip-impl 1817→1801). |
+| D-093 (d-62) | [x] `da18faae` | drain directive-assert_exhaustion — new directive + altstack landing (`sigaltstack` + `SA.ONSTACK`) + `sigsegv_armed` upgraded to `std.atomic.Value(bool)` to defeat Zig 0.16 BSS-load elision under SA.ONSTACK. spec_assert non-simd 23592/0/2478 → **23607/0/2463** (+15 PASS, 0 FAIL; skip-impl 1801→1786). |
 
 Other queued chunks (post-l-1): k-1, k-2, m-4c (= D-090),
 m-2d, n-1, j-3b.
