@@ -819,6 +819,20 @@ pub const FuncRet_i32i32 = extern struct {
 // requires either JIT epilogue convention change or Zig-side
 // inline-asm thunk.
 
+/// Multi-result return for `(f64, f64)`. Spec `type-f64-f64-value`.
+///
+/// Homogeneous Floating-point Aggregate (HFA): per AAPCS64 §6.8.2
+/// a 2-element HFA<double> returns via the V0+V1 register pair
+/// (each lane in its own V/D register). SysV similarly routes
+/// each double to XMM0 / XMM1 sequentially. This matches the
+/// JIT epilogue's FP-class-indexed convention naturally —
+/// result[0]→V0/XMM0, result[1]→V1/XMM1 — so no padding trick
+/// is required.
+pub const FuncRet_f64f64 = extern struct {
+    r0: f64,
+    r1: f64,
+};
+
 /// Call a `(i64, i64, i32) -> (i64, i32)` JIT function. Used by the
 /// spec_assert non-simd runner to invoke the `add64_u_with_carry`
 /// family (spec `if.wast` / `func.wast` / etc.). Multi-result ABI
@@ -908,6 +922,20 @@ pub fn callI32i64_i32(
     const Fn = *const fn (rt: *const JitRuntime, a0: u32) callconv(.c) FuncRet_i32i64;
     const f = module.entry(func_idx, Fn);
     const result = f(rt, a0);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+/// `() -> (f64, f64)` — HFA returned via V0+V1 / XMM0+XMM1.
+pub fn callF64f64NoArgs(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+) Error!FuncRet_f64f64 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime) callconv(.c) FuncRet_f64f64;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt);
     if (rt.trap_flag != 0) return Error.Trap;
     return result;
 }

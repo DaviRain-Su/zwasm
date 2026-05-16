@@ -639,6 +639,24 @@ fn dispatchMultiResult(
         }
         return true;
     }
+    // `() -> (f64, f64)` — HFA via V0+V1 / XMM0+XMM1; NaN-aware compare.
+    if (args.len == 0 and
+        n_rtoks == 2 and std.mem.startsWith(u8, rtoks[0], "f64:") and std.mem.startsWith(u8, rtoks[1], "f64:"))
+    {
+        const exp_r0_spec = base.parseScalarFpExpected(rtoks[0][4..], 64) catch return failBadResult(stdout, name, rtoks[0]);
+        const exp_r1_spec = base.parseScalarFpExpected(rtoks[1][4..], 64) catch return failBadResult(stdout, name, rtoks[1]);
+        const got = entry.callF64f64NoArgs(compiled.module, func_idx, rt) catch |err| {
+            try base.printCallTrap(rt, name, fn_name, args_s, err, stdout);
+            return false;
+        };
+        const r0_bits: u64 = @bitCast(got.r0);
+        const r1_bits: u64 = @bitCast(got.r1);
+        if (!base.matchScalarF64(r0_bits, exp_r0_spec) or !base.matchScalarF64(r1_bits, exp_r1_spec)) {
+            try stdout.print("FAIL  {s}: {s}({s}) → got (f64:0x{x:0>16}, f64:0x{x:0>16}), expected ({s}, {s})\n", .{ name, fn_name, args_s, r0_bits, r1_bits, rtoks[0], rtoks[1] });
+            return false;
+        }
+        return true;
+    }
     // `() -> (i64, i32)`.
     if (args.len == 0 and
         n_rtoks == 2 and std.mem.startsWith(u8, rtoks[0], "i64:") and std.mem.startsWith(u8, rtoks[1], "i32:"))

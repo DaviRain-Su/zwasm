@@ -528,6 +528,9 @@ for c in d['commands']:
                 # Phase 9 Cat II chunk (b)-4 — break-br_if-num-num,
                 # break-br_table-num-num.
                 (('i32',), ('i32', 'i64')),
+                # Phase 9 Cat II chunk (b)-5 — HFA<f64,f64> return:
+                # type-f64-f64-value (f64.wast `(result f64 f64)`).
+                ((), ('f64', 'f64')),
             }
             if (arg_kinds, result_kinds) not in supported_multi:
                 lines.append(f'skip-impl multi-result {a["field"]}')

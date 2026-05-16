@@ -11,7 +11,7 @@ assert_return type-i32-value () -> i32:1
 assert_return type-i64-value () -> i64:2
 assert_return type-f32-value () -> f32:1077936128
 assert_return type-f64-value () -> f64:4616189618054758400
-skip-impl multi-result type-f64-f64-value
+assert_return type-f64-f64-value () -> f64:4616189618054758400 f64:4617315517961601024
 assert_return as-block-first () -> ()
 assert_return as-block-mid () -> ()
 assert_return as-block-last () -> ()

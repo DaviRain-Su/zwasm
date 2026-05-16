@@ -26,40 +26,59 @@
 
 ### One-line state
 
-Step (b) Cat II in progress: (b)-1..(b)-4 landed cumulative +30
-PASS (24001→24031). (b)-4 added `(i32)→(i32,i64)` shape
-(break-br_if-num-num / break-br_table-num-num, 6 lines).
-Remaining Cat II: 18 multi-result skip lines = ~10 mixed
-int+float (D-137 residual) + ~8 3-result/large-sig.
+Step (b) Cat II largely drained: (b)-1..(b)-5 landed cumulative
++31 PASS (24001→24032). (b)-5 validated HFA<f64,f64> path
+(naturally aligns with JIT FP-class V-reg sequencing). Remaining
+Cat II: ~17 lines = ~9 mixed int+float (D-137) + ~7 3-result
+(needs X8 indirect-result-ptr bridge) + 1 large-sig outlier.
 
 **Current spec_assert tally** (Mac aarch64 + OrbStack
-bit-identical post-(b)-4; live via
+bit-identical post-(b)-5; live via
 `bash scripts/p9_simd_status.sh`):
 
-- spec_assert non-simd: **24031 / 0 / 2039** (+30 PASS / -30
+- spec_assert non-simd: **24032 / 0 / 2038** (+31 PASS / -31
   skip-impl vs 2026-05-17 baseline 24001/0/2069)
 - simd_assert: **13301 / 0 / 440** (unchanged)
 
+**D-134 note** (re-confirmed this session): the OrbStack
+heisenbug remains layout-sensitive — chunk (b)-5 surfaced a
+binary that reliably SEGV'd on 5/5 incremental-build direct
+runs, but a clean rebuild (`rm -rf .zig-cache/o .zig-cache/h`)
+produced a different layout that runs green bit-identical.
+Rate-reduction tactic confirmed; root-cause investigation
+remains the D-134 plan.
+
 ### Next-session active task
 
-**Choice point** between:
+**Pivot to Cat III per close-plan §6 step (c)**. Cat II
+remaining shapes need ABI bridge ADR work (D-137 mixed
+int+float + 3-result via X8 indirect) which is diminishing-
+returns vs the ~144-line Cat III scope.
 
-- **Continue Cat II** — (b)-5 = mixed int+float D-137 bridge
-  (ADR-grade, ~10 lines PASS) OR (b)-6 = 3-result via X8
-  indirect-result-ptr ABI bridge (ADR-grade, ~8 lines PASS).
-  Long-tail diminishing returns.
-- **Pivot to Cat III** per close-plan §6 step (c) — Wasm 1.0
-  instance / store / linker (~144 lines PASS, much higher
-  impact). Start with Step 0 survey: read v1 zwasm
-  `src/runtime/`, wasmtime `crates/runtime/`, zware `src/`,
-  `~/zwasm/private/v2-investigation/` for instance/store/
-  linker shape; produce `private/notes/p9-cat3-instance-
-  survey.md`. Then sub-chunk 1 = Store + Instance registry
-  per `phase9_close_plan.md` §6 step (c).
+**Step (c)-1 — Store + Instance registry**:
+1. Step 0 survey: read v1 zwasm `src/runtime/`,
+   `~/Documents/OSS/wasmtime/crates/runtime/`,
+   `~/Documents/OSS/zware/src/` (instance/store/linker),
+   `~/zwasm/private/v2-investigation/` (prior framing).
+   Produce `private/notes/p9-cat3-instance-survey.md`.
+2. Add `Store.register(name, *Instance)` API + name→Instance
+   hashmap to `src/runtime/store.zig` (today's Store has
+   `engine` + `wasi_host` + `zombies` — no registry).
+3. Add `spec_assert_runner_base` directive handler for
+   `(register "M" $inst)` lines (currently skip-adr per
+   `skip_cross_module_register.md`).
 
-**Recommended**: Cat III (Step (c)-1) — bigger PASS impact +
-moves the close-plan toward the next major scope chunk.
-Cat II residual stays open as background work.
+Sub-chunk (c)-1 is foundational — no PASS gain expected; it
+enables (c)-2 (cross-module import linker) which converts
+~144 lines to PASS.
+
+**Note on runtime skip-impl tally**: 1542 skip-impl includes
+many *runtime-classified* host-import-trap fixtures
+(`SKIP-HOST-IMPORT` printouts incrementing `tally.skipped`),
+not just the 18 manifest-level `skip-impl` lines. Step (c)-4
+"host import binding (spectest)" is therefore the biggest
+single PASS win — it converts unbound `import "spectest"
+"print_*"` from trap to resolved call.
 
 ### Discipline reminders
 
