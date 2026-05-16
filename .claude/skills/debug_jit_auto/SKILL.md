@@ -190,6 +190,76 @@ Each step → compile → invoke → check exit code. The op family
 that flips from "exit 0" to "SIGSEGV" is the regression source.
 Bisection cost: log₂(N) compiles to localise to ≤ 1 op family.
 
+## Recipe 7 — crash-time JIT context dump (async-signal-safe)
+
+When a SEGV reproduces inside the JIT body and you want fault
+context (faulting address, surrounding bytes, RIP) WITHOUT a
+debugger attached, install a `SA.SIGINFO` handler that writes
+raw bytes via async-signal-safe primitives only. Reference
+implementation: `test/spec/spec_assert_runner_base.zig`
+(`sigsegvHandler` + `installSigsegvHandler`). The pattern:
+
+```zig
+const std = @import("std");
+
+fn handler(sig: c_int, info: *const std.posix.siginfo_t, _: ?*const anyopaque) callconv(.c) noreturn {
+    _ = sig;
+    // siginfo.fields.sigfault.addr is the faulting address.
+    // Async-signal-safe: only raw writes; no allocator, no
+    // formatted std.debug.print (which acquires a mutex).
+    const fault_addr = @intFromPtr(info.fields.sigfault.addr);
+    var buf: [128]u8 = undefined;
+    const n = std.fmt.bufPrint(&buf, "SEGV at 0x{x}\n", .{fault_addr}) catch buf[0..0];
+    _ = std.posix.write(std.posix.STDERR_FILENO, n) catch {};
+    std.c._exit(142);  // 142 distinct from 139 to disambiguate
+                       // "our handler ran" vs "kernel killed us".
+}
+
+// In main, before invoking the JIT:
+const SS = 1 << 18;  // 256 KB altstack — required for stack-
+                     // exhaustion SEGV cases (assert_exhaustion).
+var stack: [SS]u8 align(std.heap.page_size_max) = undefined;
+std.posix.sigaltstack(&.{ .sp = &stack, .flags = 0, .size = SS }, null) catch {};
+var act: std.posix.Sigaction = .{
+    .handler = .{ .sigaction = &handler },
+    .mask = std.posix.sigemptyset(),
+    .flags = std.posix.SA.ONSTACK | std.posix.SA.SIGINFO,
+};
+std.posix.sigaction(.SEGV, &act, null);
+// Optionally also SIGBUS for Mach-side mis-aligned access:
+std.posix.sigaction(.BUS, &act, null);
+```
+
+**Don't do** in a signal handler:
+- `std.debug.print` (acquires a mutex, deadlocks if interrupted
+  thread held it).
+- Allocator calls (likewise re-entrant).
+- `std.fs` / `std.Io` non-raw paths.
+- Any libc function not in the POSIX async-signal-safe list
+  (`man 7 signal-safety`).
+
+**Do**:
+- `std.posix.write` to a fixed-size stack buffer.
+- `std.c._exit` (not `exit` — atexit handlers may not be
+  async-signal-safe).
+- `siglongjmp` to a previously-set `sigsetjmp` recovery point
+  (use only when the saved frame is provably alive).
+
+**Exit-code disambiguation** (d-71 lesson): pick an exit code
+DIFFERENT from `139` (= 128 + SIGSEGV, the kernel's default
+exit code when no handler installed). Otherwise a
+`zig build` report of "exited with code 139" is ambiguous
+between "your handler ran and chose 139" and "the kernel
+killed the process before your handler installed". The
+spec_assert runner uses `142` for this reason.
+
+**When to factor out**: while only one site uses this pattern
+today, the second site (e.g. a JIT-execution sentinel runner
+for cross-host differential diagnosis per ADR-0034) should
+extract a `src/diagnostic/jit_dump.zig` module rather than
+duplicate. Until then, copy the pattern from spec_assert and
+adapt the recovery target.
+
 ## When to invoke each recipe (decision tree)
 
 ```
