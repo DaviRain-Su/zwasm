@@ -10,32 +10,34 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-82 closed: ref.func declared-set validation, +3 PASS**
+## Active state — **d-83 closed: elem-funcidx-range + table.init reftype-match, +2 PASS**
 
 ### One-line state
 
-d-82 drains `ref_func` 3→0: validator's opRefFunc now enforces
-Wasm §3.4.7.3 / §3.4.10 declared-funcrefs set; runner builds the
-set from globals' ref.func init-exprs + elements' funcidxs +
-exports' func entries (NOT start, NOT function bodies). Also
-threads total_funcs into validateGlobalInitExpr for the ref.func
-out-of-range check (ref_func.2). Result: spec_assert 23963/0/2107
-→ **23966/0/2104** (+3 PASS, 0 FAIL). Total VALIDATOR-GAP 19→16.
+d-83 drains the last 2 non-deferred VALIDATOR-GAP entries:
+(a) runner rejects elem segments with out-of-range funcidx
+(call_indirect.36); (b) validator's opTableInit enforces
+elem-vs-table reftype match via new `elem_types` slice
+(elem.63). Result: spec_assert 23966/0/2104 → **23968/0/2102**
+(+2 PASS, 0 FAIL). Per-corpus full drains: call_indirect 1→0,
+elem 1→0. Total VALIDATOR-GAP 16→14 (all remaining are deferred
+unreached-invalid).
 
-**Cumulative d-74 → d-82 (10 chunks)**: **+182 PASS**
-(23784 → 23966).
+**Cumulative d-74 → d-83 (11 chunks)**: **+184 PASS**
+(23784 → 23968).
 
-### Skip-impl drainage roadmap (post-d-82)
+### Skip-impl drainage roadmap (post-d-83)
 
-Remaining VALIDATOR-GAP (16): unreached-invalid 14
-(deferred — polymorphic stack refactor), elem 1,
-call_indirect 1.
+VALIDATOR-GAP fully drained EXCEPT deferred unreached-invalid 14
+(polymorphic stack pop-with-expected-type refactor; ~200 LOC
+across popExpect / popAny / opSelect; complexity-to-drainage
+ratio poor — leaving for substrate audit / collaborative review).
 
-- **d-83** — elem / call_indirect residuals (2): needs
-  funcidx-out-of-range check in elem.funcidxs or
-  deeper per-element init-expr decode.
-- **deferred** — `unreached-invalid` (14): polymorphic
-  stack refactor.
+- **d-84** — PARSER-GAP drainage start. PARSER-GAP (19):
+  binary 8, binary-leb128 7, custom 4. Needs LEB128 over-long
+  encoding rejection (spec §5.2.2: `readUleb128` accepts
+  over-long encodings like `82 80 80 80 00` for u32 which is
+  malformed per spec). Tractable but spec-text-sensitive.
 
 PARSER-GAP (19): binary 8, binary-leb128 7, custom 4 —
 needs LEB128 over-long encoding rejection. Tractable but
