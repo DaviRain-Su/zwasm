@@ -10,46 +10,51 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-64 closed: D-132 partial discharge (arm64 op_table X10/X11/X12 → X14/X15) + D-133 / D-134 filed**
+## Active state — **d-65 closed: D-134 deep investigation (no fix, doc-only) + D-135 filed**
 
 ### One-line state
 
-d-64 root-causes D-132: arm64 `op_table.zig::emitTableGet` /
-`emitTableSet` hardcoded X10/X11/X12 as intra-op scratch
-while those slots were in `abi.allocatable_caller_saved_scratch_gprs`.
-Re-targeted to X14/X15 (spill-stage regs, non-allocatable);
-removed regen-script targeted-skip for the surfaced assert.
-spec_assert non-simd 23783/0/2287 → **23784/0/2286** on Mac
-(+1 PASS = `is_null-funcref(2)` unblocked). Regression
-fixture: `test/edge_cases/p9/table_ops/funcref_roundtrip.*`.
-**D-132 discharged**. **D-133 filed** for the same-shape
-latent sites left untouched at emitTableSize / emitTableFill /
-emitTableGrow / emitTableCopy / emitTableInit / emitElemDrop +
-op_memory.zig's emitMemoryInit / emitDataDrop (current corpus
-doesn't trigger). **D-134 filed** for an OrbStack `test-spec-
-wasm-2.0-assert` SEGV flake — d-62-class signal-handler /
-atomic-load issue that re-emerged today (verified d-63 source
-`b4e11a86` reproduces same SEGV today; NOT a d-64 regression).
-**Substrate-hygiene retrospective** at
-[`lessons/2026-05-16-regalloc-pool-scratch-overlap.md`](lessons/2026-05-16-regalloc-pool-scratch-overlap.md)
-+ Phase 9 完備 substrate audit gate
-([`.dev/phase9_completion_substrate_audit.md`](phase9_completion_substrate_audit.md)
-§Q5) queued the 5 enforcement actions (comptime disjointness
-extension / `audit_scaffolding` §G magic-numeral lint /
-`bug_fix_survey` enforcement / "comment-as-invariant" rule /
-test-design stress-axis requirement).
+d-65 investigated D-134 OrbStack SEGV flake. **No source
+change landed** — investigation chunk, doc-only commit.
+Confirmed concrete repro (heisenbug, strace masks it),
+captured RIP/RSP via 3-arg SA.SIGINFO probe handler in
+spec_assert_runner_base.zig (now reverted), ran `zig build`
++ direct-binary + valgrind + setarch -R, web-surveyed Zig
+upstream issues via subagent. **Three concrete findings**:
+(1) handler installs OK + fires on intentional null deref,
+but NOT on the actual SEGV → SEGV reaches a context where
+our handler cannot run (worker thread? signal masked?);
+(2) valgrind captured recursive Zig-default-handler chain
+faulting in `mem.Alignment.toByteUnits` safety panic from
+inside `writeCurrentStackTrace` (ziglang/zig#14658);
+(3) RIP at SEGV is in libc.so.6 region, addr is NULL+1 or
+stack-guard-adjacent. **Two distinct triggers**: `assert_return
+as-binary-right` in call_indirect AND `assert_exhaustion
+runaway`. Web survey points at cross-thread siglongjmp (POSIX-
+undefined when sigsetjmp's thread ≠ SEGV thread) as primary
+hypothesis. Full retrospective at
+[`lessons/2026-05-16-zig-sigsegv-recovery-flake.md`](lessons/2026-05-16-zig-sigsegv-recovery-flake.md).
+**D-135 filed** for a concurrent (distinct) DebugAllocator
+leak in `runner.compileWasm` empty-function-section early-
+return path (4 leaks per process exit; D-127 / d-52 fix
+introduced the path without freeing its allocations on the
+process-end path).
 
-### Next sub-chunk candidates (live tally post-d-64)
+### Next sub-chunk candidates (d-66+)
 
-- **D-134 root-cause** (OrbStack flake) — likely d-65; without
-  this, OrbStack's per-chunk gate is unreliable.
+- **D-134 next step**: add `pthread_self()` logging to the
+  handler + sigsetjmp site to confirm/refute cross-thread
+  siglongjmp; OR try `Threaded.init_single_threaded` for the
+  spec runner main and re-measure flake rate.
+- **D-135 discharge**: identify which corpus's last module
+  hits the empty-function-section path and isn't freed
+  before runCorpus's defer; structural fix may be
+  end-of-corpus tail-guard pattern.
 - **D-133 sweep** (apply X14/X15 refactor to remaining
-  op_table/op_memory sites) — mechanical; can defer to the
-  substrate audit's unified comptime-assertion mechanism.
-- Phase 9 completion path: skip-impl backlog tally still
-  shows 48 multi-result (Phase 11+ blocked) + 1 non-invoke-
-  action; 9.9 `[x]` flip path mostly clear except for D-134's
-  OrbStack flake.
+  op_table/op_memory sites) — mechanical; still deferrable
+  to Phase 9 完備 substrate audit's unified comptime mechanism.
+- Phase 9 completion path: 9.9 `[x]` flip path blocked by
+  D-134 (OrbStack per-chunk gate unreliable until discharged).
 
 ## Previous state — **d-63 closed: drain non-scalar-arg/result via reftype-alias-to-i64 (+176 PASS)**
 
