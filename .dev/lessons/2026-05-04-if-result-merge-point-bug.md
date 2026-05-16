@@ -8,8 +8,10 @@ type: feedback
 
 - **Date**: 2026-05-04
 - **Phase**: Phase 7 / §9.7 / 7.5 sub-7.5c-v
-- **Citing**: commit `<backfill>` body; debt entry D-NEW-merge-point;
-  `test/edge_cases/p7/if_then_else/*.wat` (workaround pattern)
+- **Citing**: lesson landed at `a58a2ba5` (sub-7.5c-v op-coverage
+  expansion); D-027 fix landed at `87783496` (sub-7.5c-vi —
+  merge-aware label stack); `test/edge_cases/p7/if_then_else/*.wat`
+  (workaround pattern)
 
 ## What was tried
 
