@@ -814,21 +814,15 @@ PY
   trap - EXIT
 done
 
-# §9.9 / 9.9-l-1b-d093-d63: targeted skip for a known JIT bug in
-# the funcref-table.set/get roundtrip surfaced when reftype aliasing
-# enabled table_get's `is_null-funcref(2)` assertion. The wast
-# fixture's `init` body has `(table.set $t3 2 (table.get $t3 1))`
-# (copy $t3[1] to $t3[2]). Elem-init populates $t3[1] = $dummy
-# correctly (`is_null-funcref(1) → 0` PASSes). Post-init the read
-# of $t3[2] returns null (`is_null-funcref(2) → got 1, expected
-# 0`). The arm64 codegen for both ops uses the same
-# `tables_ptr[k].refs[idx]` storage, so the write/read divergence
-# is unexplained — root cause investigation deferred to d-64.
-# Tracked as a `now` debt.
-if [ -f "$DEST/table_get/manifest.txt" ]; then
-  sed -i.bak 's|^assert_return is_null-funcref i32:2 -> i32:0$|skip-impl funcref-table-roundtrip-bug is_null-funcref(2) — D-132|' \
-    "$DEST/table_get/manifest.txt"
-  rm -f "$DEST/table_get/manifest.txt.bak"
-fi
+# §9.9 / 9.9-l-1b-d093-d64 (D-132): targeted skip removed. The
+# d-63 funcref-table.set/get roundtrip bug was root-caused at
+# d-64 to arm64 `op_table.zig` hardcoding X10/X11/X12 as scratch
+# while those registers were in `allocatable_caller_saved_scratch_gprs`
+# (= a regalloc-pool / emit-internal-scratch contract mismatch
+# that clobbered any vreg landed on X10/X11/X12 whose live range
+# crossed a table.get / table.set). Fix in
+# `src/engine/codegen/arm64/abi.zig`: shrink the allocatable
+# pool to `[9, 13]` (removed 10, 11, 12). Regression test:
+# `test/edge_cases/p9/table_ops/funcref_roundtrip.{wat,wasm,expect}`.
 
 echo "[regen_spec_2_0_assert] re-baked: ${NAMES[*]} → $DEST/"

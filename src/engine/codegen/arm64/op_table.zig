@@ -70,18 +70,24 @@ pub fn emitTableGet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const idx_v = ctx.pushed_vregs.pop().?;
 
     // Step A: snapshot idx into W17 (intra-procedure scratch, never
-    // in the regalloc pool — survives the X10/X11/X12 clobbering
-    // below).
+    // in the regalloc pool).
     const w_idx_src = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, idx_v, 0);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(17, 31, w_idx_src));
 
-    // Step B: read TableSlice[tableidx]. Safe to clobber X10/X11/X12.
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(10, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off));
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(11, 10, tbl_off));
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(12, 10, @intCast(@as(u32, tbl_off) + 8)));
+    // Step B: read TableSlice[tableidx]. Use X14 / X15 (spill-
+    // stage regs, non-allocatable) as scratch — they are free
+    // after Step A's load completed. §9.9 / 9.9-l-1b-d093-d64
+    // (D-132): pre-d-64 used X10 / X11 / X12 which are in
+    // `allocatable_caller_saved_scratch_gprs`, so vregs landed
+    // on those slots got silently clobbered when their live
+    // range crossed a table.get / table.set. The fix re-targets
+    // the intra-op scratch to the non-allocatable pool.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(14, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(15, 14, @intCast(@as(u32, tbl_off) + 8)));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(14, 14, tbl_off));
 
-    // Step C: CMP W17, W12 ; B.HS trap.
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegW(17, 12));
+    // Step C: CMP W17, W15 ; B.HS trap.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegW(17, 15));
     {
         const fixup_at: u32 = @intCast(ctx.buf.items.len);
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hs, 0));
@@ -95,8 +101,8 @@ pub fn emitTableGet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     if (result >= ctx.alloc.slots.len) return Error.SlotOverflow;
     const xd = try gpr.gprDefSpilled(ctx.alloc, result, 0);
 
-    // LDR Xd, [X11, X17, LSL #3]
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrXRegLsl3(xd, 11, 17));
+    // LDR Xd, [X14, X17, LSL #3] — X14 now holds refs ptr.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrXRegLsl3(xd, 14, 17));
     try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result, 0);
     try ctx.pushed_vregs.append(ctx.allocator, result);
 }
@@ -113,21 +119,26 @@ pub fn emitTableSet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const val_v = ctx.pushed_vregs.pop().?;
     const idx_v = ctx.pushed_vregs.pop().?;
 
-    // Step A: snapshot operands into intra-procedure scratch BEFORE
-    // touching X10/X11/X12 (regalloc may park operand vregs in
-    // X9..X13). idx → W17; val → X16 (full 64-bit ref).
+    // Step A: snapshot operands into intra-procedure scratch
+    // (X16/X17, never in the regalloc pool). idx → W17; val →
+    // X16 (full 64-bit ref).
     const w_idx_src = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, idx_v, 0);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(17, 31, w_idx_src));
     const x_val_src = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, val_v, 1);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(16, 31, x_val_src));
 
-    // Step B: read TableSlice[tableidx].
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(10, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off));
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(11, 10, tbl_off));
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(12, 10, @intCast(@as(u32, tbl_off) + 8)));
+    // Step B: read TableSlice[tableidx]. §9.9 / 9.9-l-1b-d093-d64
+    // (D-132): use X14 / X15 (spill-stage regs, non-allocatable)
+    // as scratch — pre-d-64 used X10 / X11 / X12 which collide
+    // with the regalloc pool, silently clobbering vregs whose
+    // live range crossed the op. See emitTableGet for the
+    // detailed rationale.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(14, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(15, 14, @intCast(@as(u32, tbl_off) + 8)));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(14, 14, tbl_off));
 
-    // Step C: CMP W17, W12 ; B.HS trap.
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegW(17, 12));
+    // Step C: CMP W17, W15 ; B.HS trap.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegW(17, 15));
     {
         const fixup_at: u32 = @intCast(ctx.buf.items.len);
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hs, 0));
@@ -135,8 +146,8 @@ pub fn emitTableSet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         trace.writeBounds(ctx.func.func_idx, fixup_at);
     }
 
-    // Step D: STR X16 (val), [X11 + X17 * 8] — write refs[idx].
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrXRegLsl3(16, 11, 17));
+    // Step D: STR X16 (val), [X14 + X17 * 8] — write refs[idx].
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrXRegLsl3(16, 14, 17));
 }
 
 /// Wasm spec §4.4.12 (table.size) — push current `tables[x].len`
