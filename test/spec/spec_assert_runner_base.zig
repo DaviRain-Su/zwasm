@@ -1129,6 +1129,15 @@ const SIGNAL_STACK_SIZE: usize = 1 << 18;
 var signal_stack: [SIGNAL_STACK_SIZE]u8 align(std.heap.page_size_max) = undefined;
 
 pub fn installSigsegvHandler() void {
+    // Windows: POSIX signals don't apply; `std.posix.Sigaction` is
+    // `void` on Win64. Surfaced by windowsmini test-all
+    // (`type 'void' does not support struct initialization syntax`
+    // at `.handler = .{ ... }` below) when D-084 reconcile ran
+    // 2026-05-17. Early-return preserves the runner's structural
+    // shape on Windows; the SEGV-recovery contract is POSIX-only
+    // by design (no Mach exception ports / SEH bridge implemented).
+    if (@import("builtin").os.tag == .windows) return;
+
     // Explicitly install our own alternate signal stack rather than
     // relying on Zig's start-up code: `Thread.maybeAttachSignalStack`
     // installs a *threadlocal* altstack, which works on Mac aarch64
