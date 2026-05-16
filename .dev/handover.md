@@ -10,46 +10,40 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-65 closed: D-134 deep investigation (no fix, doc-only) + D-135 filed**
+## Active state — **d-66 closed: D-133 partial — emitTableSize X10 → X14**
 
 ### One-line state
 
-d-65 investigated D-134 OrbStack SEGV flake. **No source
-change landed** — investigation chunk, doc-only commit.
-Confirmed concrete repro (heisenbug, strace masks it),
-captured RIP/RSP via 3-arg SA.SIGINFO probe handler in
-spec_assert_runner_base.zig (now reverted), ran `zig build`
-+ direct-binary + valgrind + setarch -R, web-surveyed Zig
-upstream issues via subagent. **Three concrete findings**:
-(1) handler installs OK + fires on intentional null deref,
-but NOT on the actual SEGV → SEGV reaches a context where
-our handler cannot run (worker thread? signal masked?);
-(2) valgrind captured recursive Zig-default-handler chain
-faulting in `mem.Alignment.toByteUnits` safety panic from
-inside `writeCurrentStackTrace` (ziglang/zig#14658);
-(3) RIP at SEGV is in libc.so.6 region, addr is NULL+1 or
-stack-guard-adjacent. **Two distinct triggers**: `assert_return
-as-binary-right` in call_indirect AND `assert_exhaustion
-runaway`. Web survey points at cross-thread siglongjmp (POSIX-
-undefined when sigsetjmp's thread ≠ SEGV thread) as primary
-hypothesis. Full retrospective at
-[`lessons/2026-05-16-zig-sigsegv-recovery-flake.md`](lessons/2026-05-16-zig-sigsegv-recovery-flake.md).
-**D-135 filed** for a concurrent (distinct) DebugAllocator
-leak in `runner.compileWasm` empty-function-section early-
-return path (4 leaks per process exit; D-127 / d-52 fix
-introduced the path without freeing its allocations on the
-process-end path).
-**Phase 9 完備 substrate audit §Q6 added** (libc dependency
-boundary, pre-Phase-10 hygiene) — current code has
-deepening libc fanout (`sigsetjmp`/`siglongjmp` core +
-many `std.c.*` callsites) while Zig 0.16 stdlib aims at
-buildable-without-libc. §Q6 enumerates necessary /
-replaceable / convenience classes, queues an ADR
-+ `.claude/rules/libc_boundary.md` + ROADMAP §14 amendment
-+ `audit_scaffolding` grep extension + one mechanical-
-replacement chunk as Phase 10 prep deliverables.
+d-66 applies the d-64 X14 scratch-rename pattern to one
+more op_table site: `emitTableSize` (`src/engine/codegen/
+arm64/op_table.zig:166`). Pre-d-66 the handler used X10
+(in `abi.allocatable_caller_saved_scratch_gprs`) for the
+`tables_ptr` pre-load — same latent vreg-clobber class as
+the D-132 bug d-64 surfaced for `emitTableGet` / `emitTableSet`.
+emitTableSize is the simplest sweep target (single
+scratch register) so the rename is mechanical: line 161 +
+line 168 swap `10` → `14`. Header comment + per-function
+docstring updated to cite §9.9-l-1b-d093-d64/d66 +
+D-132/D-133 + the substrate-audit Q5 unification trigger.
+**No new edge fixture**: edge_case_testing.md "Implementation
+details that aren't observable from Wasm" exemption applies
+— the rename is internal regalloc-pool hygiene; the existing
+`size_initial` happy-path fixture + the table.size spec
+corpus already exercise the post-fix path. Remaining D-133
+sites (emitTableFill / emitTableGrow / emitTableCopy /
+emitTableInit + op_memory.zig's emitMemoryInit / inline
+data.drop / elem.drop in emit.zig) need ≥3 scratch slots
+simultaneously — out of scope for the 2-slot X14/X15 pattern
+and queued for the Phase 9 完備 substrate audit's
+comptime-disjointness mechanism (Q5). Mac aarch64
+`zig build test` + `test-edge-cases` + `test-spec-wasm-2.0-assert`
+green (spec_assert 23784/0/2286 unchanged — emitTableSize
+sites currently latent on the corpus). OrbStack `test-all`
+SEGV reproduces in `zwasm-spec-wasm-2-0-assert` —
+**pre-existing D-134 flake**, not a d-66 regression; all
+other OrbStack test exes pass (1603/1631 in Build Summary).
 
-### Next sub-chunk candidates (d-66+)
+### Next sub-chunk candidates (d-67+)
 
 - **D-134 next step**: add `pthread_self()` logging to the
   handler + sigsetjmp site to confirm/refute cross-thread
@@ -59,9 +53,8 @@ replacement chunk as Phase 10 prep deliverables.
   hits the empty-function-section path and isn't freed
   before runCorpus's defer; structural fix may be
   end-of-corpus tail-guard pattern.
-- **D-133 sweep** (apply X14/X15 refactor to remaining
-  op_table/op_memory sites) — mechanical; still deferrable
-  to Phase 9 完備 substrate audit's unified comptime mechanism.
+- **D-133 remaining sites** (≥3-scratch slots) — queued for
+  Phase 9 完備 substrate audit's unified comptime mechanism.
 - Phase 9 completion path: 9.9 `[x]` flip path blocked by
   D-134 (OrbStack per-chunk gate unreliable until discharged).
 
