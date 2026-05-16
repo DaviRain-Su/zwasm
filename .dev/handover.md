@@ -10,38 +10,36 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-77 closed: §3.4.3 global init-expr validation, +34 PASS**
+## Active state — **d-78 closed: §3.4.6/§3.4.7 active offset-expr validation, +25 PASS**
 
 ### One-line state
 
-d-77 adds `validateGlobalInitExpr` helper to check
-per-global init-expressions per Wasm §3.4.3 / §3.3.2:
-const-opcode-only, type match, trailing `end`. Called
-in both empty-fn early-return AND main paths. Mid-
-cycle fix: added `0xFD → v128.const` branch after SIMD
-modules regressed. Result: spec_assert non-simd
-23889/0/2181 → **23923/0/2147** (+34 PASS). `global`
-corpus fully drained (17→0). simd unchanged
-(13301/0/440). **Cumulative d-74 → d-77 (4 chunks):
-+139 PASS** (23784 → 23923). OrbStack: SIMD green;
-D-134 flake hit `zwasm-spec-wasm-2-0-assert`.
+d-78 reuses the d-77 const-expr helper with
+`want_valtype = .i32` for active elem + data segment
+offset_expr validation. Result: spec_assert non-simd
+23923/0/2147 → **23948/0/2122** (+25 PASS, 0 FAIL).
+`data` corpus **fully drained** (12→0); `elem`
+near-drained (14→2; residual = per-element init-expr
+reftype-matching). Mac + OrbStack **bit-identical**
+(OrbStack `test-all` exit 0).
 
-### Skip-impl drainage roadmap (post-d-77)
+**Cumulative d-74 → d-78 (5 chunks)**: **+164 PASS**
+(23784 → 23948).
 
-Remaining SKIP-VALIDATOR-GAP (~53): elem 14,
-unreached-invalid 13, data 12, memory 5, if 4,
-ref_func 3, call_indirect 2, select 1. Next:
+### Skip-impl drainage roadmap (post-d-78)
 
-- **d-78** — `elem` remaining (14): init-expr type
-  validation, reftype-matching with table type.
+Remaining SKIP-VALIDATOR-GAP (~32): unreached-invalid
+13, memory 6, if 4, ref_func 3, elem 2,
+call_indirect 2, select 1, memory_fill 1. Next:
+
 - **d-79** — `unreached-invalid` (13): polymorphic
-  stack typing in validator dead-code.
-- **d-80** — `data` (12) / `memory` (5) residual:
-  validator-layer (memory ops in func body with no
-  memory; data offset_expr type errors) → needs
-  `validateFunction` extensions.
-- **d-81+** — long tail (if 4 / ref_func 3 /
-  call_indirect 2 / select 1).
+  stack typing in validator dead-code. Interacts with
+  D-093's gap-1 unreachable-tracking work.
+- **d-80** — `memory` (6) residual + `memory_fill` (1):
+  validator-layer (memory ops in func body without
+  memory) → needs `validateFunction` extension.
+- **d-81+** — long tail (if 4 / ref_func 3 / elem
+  per-element 2 / call_indirect 2 / select 1).
 
 ## Outstanding (now-resumed) `now` debts
 
