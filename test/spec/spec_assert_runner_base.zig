@@ -1101,6 +1101,17 @@ else
 /// runs through to completion; if a SEGV happens, the OS
 /// terminates the process (default Windows behavior, same as
 /// pre-d-62 baseline). Never called on POSIX targets.
+///
+/// TODO(D-136): this stub is a Windows-compat workaround, not a
+/// real SEGV-recovery implementation. spec_assert_runner_non_simd
+/// crashes mid-corpus on assert_trap fixtures because the OS
+/// kills the process instead of returning to the assert harness.
+/// Discharge requires either a Win64 SEH bridge (`__try`/
+/// `__except`) producing equivalent recovery semantics, or
+/// Windows-side per-directive skipping of assert_trap, or
+/// scoping windowsmini reconcile to "build + non-assert_trap
+/// runners" via ADR-0056 amend. See `.dev/debt.md` D-136 for
+/// the full decision tree.
 fn sigsetjmpWindowsStub(env: [*]u8, savemask: c_int) callconv(.c) c_int {
     _ = env;
     _ = savemask;
@@ -1113,6 +1124,9 @@ fn sigsetjmpWindowsStub(env: [*]u8, savemask: c_int) callconv(.c) c_int {
 /// in `sigsegvHandler` never calls this. The stub satisfies the
 /// linker's symbol reference; it would only be hit if the design
 /// invariant breaks (= regression).
+///
+/// TODO(D-136): paired with `sigsetjmpWindowsStub` above; same
+/// discharge plan.
 fn siglongjmpWindowsStub(env: [*]u8, val: c_int) callconv(.c) noreturn {
     _ = env;
     _ = val;
@@ -1175,6 +1189,13 @@ pub fn installSigsegvHandler() void {
     // 2026-05-17. Early-return preserves the runner's structural
     // shape on Windows; the SEGV-recovery contract is POSIX-only
     // by design (no Mach exception ports / SEH bridge implemented).
+    //
+    // TODO(D-136): early-return is a Windows-compat workaround,
+    // not a real SEGV-recovery implementation. `assert_trap`
+    // fixtures crash spec_assert_runner_non_simd mid-corpus on
+    // Windows because the OS terminates the process instead of
+    // returning to the harness via siglongjmp. Discharge requires
+    // a Win64 SEH bridge equivalent. See `.dev/debt.md` D-136.
     if (@import("builtin").os.tag == .windows) return;
 
     // Explicitly install our own alternate signal stack rather than
