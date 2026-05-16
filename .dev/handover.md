@@ -10,45 +10,78 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-84 closed: PARSER-GAP full drain (19→0) + Mac/OrbStack bit-identical, +19 PASS**
+## Active state — **d-85 closed: VALIDATOR-GAP full drain (polymorphic-stack tightening) + Mac/OrbStack bit-identical, +14 PASS**
 
 ### One-line state
 
-d-84 bundles 5 spec-rule tightenings to drain all 19
-SKIP-PARSER-GAP entries: (a) eager type-section decode catches
-canonical-LEB issues in modules with no imports/funcs; (b)
-function-vs-code count consistency for the "code without
-function section" case; (c) data_count section value vs data
-section count match; (d) memory.init/data.drop require
-data_count section present (Validator.data_count_section_present
-field); (e) table-limits flag canonical (bit 0 only); (f)
-custom-section name LEB validation at parse time. Result:
-spec_assert 23968/0/2102 → **23987/0/2083** (+19 PASS, 0 FAIL).
-**Mac + OrbStack bit-identical** (D-134 silent this run —
-first clean OrbStack since d-65).
+d-85 tightens Wasm §3.3.5 polymorphic-stack type-checking: (a)
+`expectFrameEndTypes` now type-checks concrete present values in
+unreachable mode (was bailing out entirely) — drains 12 cases;
+(b) `opBrTable` enforces label-type arity equality across all
+targets even in polymorphic mode AND always pops label types
+to type-check post-unreachable concrete values — drains
+remaining 2 cases. Result: spec_assert 23987/0/2083 →
+**24001/0/2069** (+14 PASS, 0 FAIL). **Mac + OrbStack
+bit-identical** (D-134 silent run #2). VALIDATOR-GAP 14→0 —
+**both VALIDATOR-GAP and PARSER-GAP corpora now fully drained**.
 
-**Cumulative d-74 → d-84 (12 chunks)**: **+203 PASS**
-(23784 → 23987).
+**Cumulative d-74 → d-85 (13 chunks)**: **+217 PASS**
+(23784 → 24001).
 
-### Skip-impl drainage roadmap (post-d-84)
+### Skip-impl drainage roadmap (post-d-85)
 
-Both VALIDATOR-GAP (except deferred unreached-invalid 14) AND
-PARSER-GAP (full drain) are now zero. The remaining skip-impl
-floor is structural:
+**Remaining skip-impl 1573 is now PURELY structural**. All
+solvable VALIDATOR-GAP / PARSER-GAP entries drained. What's
+left blocks on Phase 10+/11+ scope decisions:
 
-- SKIP-CROSS-MODULE-IMPORTS 136 (Phase 10+ scope; cross-module
-  registry / instance plumbing not yet on the runtime side).
-- SKIP-NO-LINK-TYPECHECK 4 (cross-module signature check —
-  Phase 10+).
-- SKIP-START-TRAP 2 + SKIP-HOST-IMPORT 2.
-- deferred VALIDATOR-GAP unreached-invalid 14 (polymorphic
-  stack refactor; substrate audit scope).
+- **SKIP-CROSS-MODULE-IMPORTS** 136 — Phase 10+ instance-aware
+  runtime + cross-module registry.
+- **multi-result family** ~1400 directives covered by manifest
+  `skip-impl multi-result` lines (br/block/call/exports/func/
+  if/loop) — Phase 11+ multi-value entry helpers + runner
+  dispatch ladder extension. JIT-side multi-result return
+  marshal already supports it per D-093 (ARM64 emit.zig
+  marshalFunctionReturn); the bottleneck is runner-side
+  entry.zig helpers + distiller's `supported` set.
+- **SKIP-NO-LINK-TYPECHECK** 4 / **SKIP-START-TRAP** 2 /
+  **SKIP-HOST-IMPORT** 2 — Phase 10+ cross-module host-import
+  binding.
 
-Next chunks pick from these structural fronts OR survey
-remaining skip-impl reasons (memory_grow, simd skip-impl, etc.)
-for tractable mid-difficulty targets. The §9.9 row text exit
-criterion "skip-impl == 0" remains gated by the substrate
-audit interpretation (ADR-0062 hard gate at 9.12).
+### Next loop candidates
+
+Genuinely productive next-chunk options when /continue resumes:
+
+- **Multi-result entry helpers** (Phase 11 scope per handover
+  but technically Wasm 2.0 → §9.9 scope per ADR-0056):
+  bundle ~6 new entry helpers `callI32I32_void`,
+  `callI32I32_i32`, `callI64I32_i64i32`, ... + runner dispatch
+  arms + distiller `supported` set expansion. Single chunk
+  could drain ~50-100 directives.
+- **D-052** (x86_64 prologue.zig extract) — barrier dissolved
+  (emit.zig at 1991 LOC > 1000 soft cap), discharge path
+  spelled out in D-055 (~50 test-site migration alongside
+  prologue extract + 5-line emit.zig sentinel wire-up). Sets
+  up D-081 rename + Linux/Windows x86_64 differential signal.
+- **D-095** regalloc call-crossing — ~150 LOC + ADR for the
+  policy decision (callee-saved bias for call-crossing
+  vregs).
+- **D-133 mechanical sweep** — non-trivial since several sites
+  use >2 simultaneous scratch regs; needs ABI extension to
+  add another non-allocatable emit-scratch slot (X16/X17 are
+  reserved for intra-proc-call). Risk: latent issue, no
+  current trigger.
+- **D-134 OrbStack heisenbug** — TWO consecutive D-134-silent
+  runs (d-84 + d-85) suggest the d-72 instrumentation + d-68
+  Zig-handler disable may have actually fixed the root cause
+  via cumulative layout-related rate reduction. Discharge
+  candidate after a few more clean runs (criterion: 5+
+  consecutive zwasm-spec-wasm-2-0-assert exit-0 on OrbStack).
+
+§9.9 row text "skip-impl == 0" exit criterion is now blocked
+strictly by Phase 10+/11+ scope per ADR-0056. The substrate-
+audit hard gate at row 9.12 (ADR-0062) is the natural
+collaborative re-engagement point for §9.9 exit interpretation
+— that conversation is the right next user dialogue.
 
 PARSER-GAP (19): binary 8, binary-leb128 7, custom 4 —
 needs LEB128 over-long encoding rejection. Tractable but
