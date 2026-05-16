@@ -51,6 +51,17 @@ pub const Error = error{
     MissingCodeSection,
     ExportNotFound,
     ExportIsNotFunction,
+    /// Wasm spec §3.4.10: an export's idx must reference a
+    /// defined entity (funcidx < total_funcs, tableidx <
+    /// total_tables, memidx < total_memories, globalidx <
+    /// total_globals). Surfaced at compile time by the export
+    /// validation pass so `assert_invalid` modules with
+    /// out-of-range export targets reject at compileWasm.
+    ExportIdxOutOfRange,
+    /// Wasm spec §3.4.10: within a module, all exported names
+    /// must be pairwise distinct. Two exports sharing the same
+    /// name string is an invalid module.
+    DuplicateExport,
     UnsupportedEntrySignature,
 } || compile_func.Error || parser.Error || sections.Error || linker.Error || entry.Error || validator_mod.Error;
 
@@ -196,6 +207,63 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
                 }
             }
         }
+        // §9.9 / 9.9-l-1b-d093-d74 export validation (empty-fn path
+        // mirror of the main-path check below). Wasm spec §3.4.10:
+        // each export's idx must reference a defined entity AND
+        // names must be pairwise distinct. Many `assert_invalid`
+        // modules in `exports.wast` lack a function section (e.g.
+        // `(module (export "a" (func 0)))` with zero funcs) so
+        // they take this empty-fn early-return path; without this
+        // check they'd compileWasm-accept and surface as
+        // SKIP-VALIDATOR-GAP.
+        if (module.find(.@"export")) |es| {
+            var exports = try sections.decodeExports(a, es.body);
+            defer exports.deinit();
+            var num_table_imports: u32 = 0;
+            var num_memory_imports: u32 = 0;
+            var num_global_imports: u32 = 0;
+            if (imports_buf) |ib| {
+                for (ib.items) |imp| switch (imp.kind) {
+                    .func => {},
+                    .table => num_table_imports += 1,
+                    .memory => num_memory_imports += 1,
+                    .global => num_global_imports += 1,
+                };
+            }
+            const defined_tables: u32 = if (module.find(.table)) |ts| blk: {
+                var ts_buf = try sections.decodeTables(a, ts.body);
+                defer ts_buf.deinit();
+                break :blk @intCast(ts_buf.items.len);
+            } else 0;
+            const defined_memories: u32 = if (module.find(.memory)) |ms| blk: {
+                var ms_buf = try sections.decodeMemory(a, ms.body);
+                defer ms_buf.deinit();
+                break :blk @intCast(ms_buf.items.len);
+            } else 0;
+            const defined_globals_section: u32 = if (module.find(.global)) |gs| blk: {
+                var gs_buf = try sections.decodeGlobals(a, gs.body);
+                defer gs_buf.deinit();
+                break :blk @intCast(gs_buf.items.len);
+            } else 0;
+            const total_tables_empty: u32 = num_table_imports + defined_tables;
+            const total_memories_empty: u32 = num_memory_imports + defined_memories;
+            const total_globals_empty: u32 = num_global_imports + defined_globals_section;
+            const total_funcs_empty: u32 = sig_count;
+            var seen_names: std.StringHashMap(void) = .init(a);
+            defer seen_names.deinit();
+            try seen_names.ensureTotalCapacity(@intCast(exports.items.len));
+            for (exports.items) |e| {
+                const gop = try seen_names.getOrPut(e.name);
+                if (gop.found_existing) return Error.DuplicateExport;
+                const ok = switch (e.kind) {
+                    .func => e.idx < total_funcs_empty,
+                    .table => e.idx < total_tables_empty,
+                    .memory => e.idx < total_memories_empty,
+                    .global => e.idx < total_globals_empty,
+                };
+                if (!ok) return Error.ExportIdxOutOfRange;
+            }
+        }
         return .{
             .module = empty_module,
             .func_results = empty_results,
@@ -312,6 +380,65 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     const validator_tables: []const zir.TableEntry = if (tables_buf) |t| t.items else &.{};
     const validator_data_count: u32 = if (datas_buf) |d| @intCast(d.items.len) else 0;
     const validator_elem_count: u32 = if (elems_buf) |e| @intCast(e.items.len) else 0;
+
+    // §9.9 / 9.9-l-1b-d093-d74 (skip-impl drainage):
+    // Wasm spec §3.4.10 export validation. Decode the export
+    // section (when present) and verify:
+    //   (a) Each export's idx references a defined entity in
+    //       its kind's index space (func / table / memory /
+    //       global).
+    //   (b) All exported names within a module are pairwise
+    //       distinct (no duplicates).
+    // Drains `assert_invalid` modules whose validity hinges on
+    // these spec rules — previously SKIP-VALIDATOR-GAP at the
+    // `.assert_invalid` runner arm because compileWasm
+    // accepted them.
+    if (module.find(.@"export")) |s| {
+        var exports = try sections.decodeExports(a, s.body);
+        defer exports.deinit();
+
+        // Count imports per kind (memory / table / global
+        // imports occupy slots 0..N before any defined entity).
+        var num_table_imports: u32 = 0;
+        var num_memory_imports: u32 = 0;
+        var num_global_imports: u32 = 0;
+        if (imports_buf) |ib| {
+            for (ib.items) |imp| switch (imp.kind) {
+                .func => {},
+                .table => num_table_imports += 1,
+                .memory => num_memory_imports += 1,
+                .global => num_global_imports += 1,
+            };
+        }
+        const total_tables: u32 = num_table_imports + @as(u32, @intCast(if (tables_buf) |t| t.items.len else 0));
+        const total_globals: u32 = num_global_imports + defined_globals_count;
+        // Memory section: at most one memory in Wasm 2.0
+        // (multi-memory is a Wasm 3.0 proposal; out of scope).
+        const defined_memories: u32 = if (module.find(.memory)) |ms| blk: {
+            var ms_buf = try sections.decodeMemory(a, ms.body);
+            defer ms_buf.deinit();
+            break :blk @intCast(ms_buf.items.len);
+        } else 0;
+        const total_memories: u32 = num_memory_imports + defined_memories;
+
+        // Track names for duplicate detection. Backed by the
+        // arena `a` (function-local), released on compileWasm
+        // return.
+        var seen_names: std.StringHashMap(void) = .init(a);
+        defer seen_names.deinit();
+        try seen_names.ensureTotalCapacity(@intCast(exports.items.len));
+        for (exports.items) |e| {
+            const gop = try seen_names.getOrPut(e.name);
+            if (gop.found_existing) return Error.DuplicateExport;
+            const ok = switch (e.kind) {
+                .func => e.idx < total_funcs,
+                .table => e.idx < total_tables,
+                .memory => e.idx < total_memories,
+                .global => e.idx < total_globals,
+            };
+            if (!ok) return Error.ExportIdxOutOfRange;
+        }
+    }
 
     // Compile each defined function. On failure, log the
     // offending func_idx to stderr — the spec-jit-compile runner
