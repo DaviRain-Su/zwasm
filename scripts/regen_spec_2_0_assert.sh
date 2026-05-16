@@ -513,6 +513,14 @@ for c in d['commands']:
             supported_multi = {
                 # Phase 9 Cat II chunk (b)-1 — add64_u_with_carry family.
                 (('i64', 'i64', 'i32'), ('i64', 'i32')),
+                # Phase 9 Cat II chunk (b)-2 — 2-result mixed-width shapes
+                # where the extern-struct layout naturally maps to the JIT
+                # epilogue's 2-register convention (each field >= 8 bytes
+                # forces X0+X1 / RAX+RDX register-pair return on AAPCS64
+                # / SysV). Same-width 2×i32 / mixed int+float deferred
+                # to (b)-3 pending ABI bridge (see D-NNN debt entry).
+                ((), ('i32', 'i64')),
+                ((), ('i64', 'i32')),
             }
             if (arg_kinds, result_kinds) not in supported_multi:
                 lines.append(f'skip-impl multi-result {a["field"]}')

@@ -15,7 +15,7 @@ assert_return type-second-f32 () -> f32:1107296256
 assert_return type-second-f64 () -> f64:4634211053438658150
 skip-impl multi-result type-all-f64-i32
 skip-impl multi-result type-all-i32-f64
-skip-impl multi-result type-all-i32-i64
+assert_return type-all-i32-i64 () -> i64:2 i32:1
 assert_return dispatch i32:5 i64:2 -> i64:2
 assert_return dispatch i32:5 i64:5 -> i64:5
 assert_return dispatch i32:12 i64:5 -> i64:120

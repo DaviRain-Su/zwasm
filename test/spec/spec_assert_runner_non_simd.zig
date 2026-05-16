@@ -526,33 +526,33 @@ fn dispatchMultiResult(
     stdout: *std.Io.Writer,
     name: []const u8,
 ) anyerror!bool {
+    // Parse result tokens once; downstream arms re-use.
+    var rtoks: [4][]const u8 = undefined;
+    var n_rtoks: usize = 0;
+    {
+        var it = std.mem.tokenizeScalar(u8, results_s, ' ');
+        while (it.next()) |tok| {
+            if (n_rtoks == rtoks.len) {
+                try stdout.print("FAIL  {s}: > {d} result tokens '{s}'\n", .{ name, rtoks.len, results_s });
+                return false;
+            }
+            rtoks[n_rtoks] = tok;
+            n_rtoks += 1;
+        }
+    }
+
     // Shape: `(i64, i64, i32) -> (i64, i32)` — `add64_u_with_carry`
     // family across if / func / call / loop / block / br /
     // call_indirect corpora. Phase 9 Cat II chunk (b)-1.
-    if (args.len == 3 and args[0] == .i64 and args[1] == .i64 and args[2] == .i32) {
-        var it = std.mem.tokenizeScalar(u8, results_s, ' ');
-        const r0_s = it.next() orelse {
-            try stdout.print("FAIL  {s}: malformed multi-result '{s}'\n", .{ name, results_s });
+    if (args.len == 3 and args[0] == .i64 and args[1] == .i64 and args[2] == .i32 and
+        n_rtoks == 2 and std.mem.startsWith(u8, rtoks[0], "i64:") and std.mem.startsWith(u8, rtoks[1], "i32:"))
+    {
+        const exp_r0 = base.parseI64Token(rtoks[0][4..]) catch {
+            try stdout.print("FAIL  {s}: bad i64 result '{s}'\n", .{ name, rtoks[0] });
             return false;
         };
-        const r1_s = it.next() orelse {
-            try stdout.print("FAIL  {s}: malformed multi-result '{s}'\n", .{ name, results_s });
-            return false;
-        };
-        if (it.next() != null) {
-            try stdout.print("FAIL  {s}: extra multi-result tokens '{s}'\n", .{ name, results_s });
-            return false;
-        }
-        if (!std.mem.startsWith(u8, r0_s, "i64:") or !std.mem.startsWith(u8, r1_s, "i32:")) {
-            try stdout.print("FAIL  {s}: result shape mismatch '{s}' (want i64 i32)\n", .{ name, results_s });
-            return false;
-        }
-        const exp_r0 = base.parseI64Token(r0_s[4..]) catch {
-            try stdout.print("FAIL  {s}: bad i64 result '{s}'\n", .{ name, r0_s });
-            return false;
-        };
-        const exp_r1 = base.parseI32Token(r1_s[4..]) catch {
-            try stdout.print("FAIL  {s}: bad i32 result '{s}'\n", .{ name, r1_s });
+        const exp_r1 = base.parseI32Token(rtoks[1][4..]) catch {
+            try stdout.print("FAIL  {s}: bad i32 result '{s}'\n", .{ name, rtoks[1] });
             return false;
         };
         const got = entry.callI64i32_i64i64i32(compiled.module, func_idx, rt, args[0].i64, args[1].i64, args[2].i32) catch |err| {
@@ -565,7 +565,50 @@ fn dispatchMultiResult(
         }
         return true;
     }
+
+    // Phase 9 Cat II chunk (b)-2: 2-result no-arg shapes with mixed
+    // width — both FuncRet fields >= 8 bytes after C-ABI padding,
+    // so the struct return uses X0+X1 / RAX+RDX matching the JIT
+    // epilogue's per-result-slot convention. Same-width int and
+    // mixed int+float shapes deferred per D-137.
+    // `() -> (i32, i64)`.
+    if (args.len == 0 and
+        n_rtoks == 2 and std.mem.startsWith(u8, rtoks[0], "i32:") and std.mem.startsWith(u8, rtoks[1], "i64:"))
+    {
+        const exp_r0 = base.parseI32Token(rtoks[0][4..]) catch return failBadResult(stdout, name, rtoks[0]);
+        const exp_r1 = base.parseI64Token(rtoks[1][4..]) catch return failBadResult(stdout, name, rtoks[1]);
+        const got = entry.callI32i64NoArgs(compiled.module, func_idx, rt) catch |err| {
+            try base.printCallTrap(rt, name, fn_name, args_s, err, stdout);
+            return false;
+        };
+        if (got.r0 != exp_r0 or got.r1 != exp_r1) {
+            try stdout.print("FAIL  {s}: {s}({s}) → got (i32:{d}, i64:{d}), expected (i32:{d}, i64:{d})\n", .{ name, fn_name, args_s, got.r0, got.r1, exp_r0, exp_r1 });
+            return false;
+        }
+        return true;
+    }
+    // `() -> (i64, i32)`.
+    if (args.len == 0 and
+        n_rtoks == 2 and std.mem.startsWith(u8, rtoks[0], "i64:") and std.mem.startsWith(u8, rtoks[1], "i32:"))
+    {
+        const exp_r0 = base.parseI64Token(rtoks[0][4..]) catch return failBadResult(stdout, name, rtoks[0]);
+        const exp_r1 = base.parseI32Token(rtoks[1][4..]) catch return failBadResult(stdout, name, rtoks[1]);
+        const got = entry.callI64i32NoArgs(compiled.module, func_idx, rt) catch |err| {
+            try base.printCallTrap(rt, name, fn_name, args_s, err, stdout);
+            return false;
+        };
+        if (got.r0 != exp_r0 or got.r1 != exp_r1) {
+            try stdout.print("FAIL  {s}: {s}({s}) → got (i64:{d}, i32:{d}), expected (i64:{d}, i32:{d})\n", .{ name, fn_name, args_s, got.r0, got.r1, exp_r0, exp_r1 });
+            return false;
+        }
+        return true;
+    }
     try stdout.print("FAIL  {s}: multi-result unsupported for {s}({s}) -> {s}\n", .{ name, fn_name, args_s, results_s });
+    return false;
+}
+
+inline fn failBadResult(stdout: *std.Io.Writer, name: []const u8, tok: []const u8) bool {
+    stdout.print("FAIL  {s}: bad multi-result token '{s}'\n", .{ name, tok }) catch {};
     return false;
 }
 

@@ -3,7 +3,7 @@ assert_return type-i32 () -> i32:306
 assert_return type-i64 () -> i64:356
 assert_return type-f32 () -> f32:1165172736
 assert_return type-f64 () -> f64:4660882566700597248
-skip-impl multi-result type-i32-i64
+assert_return type-i32-i64 () -> i32:306 i64:356
 assert_return type-first-i32 () -> i32:32
 assert_return type-first-i64 () -> i64:64
 assert_return type-first-f32 () -> f32:1068037571

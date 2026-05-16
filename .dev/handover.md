@@ -26,37 +26,42 @@
 
 ### One-line state
 
-Step (b) Cat II in progress: chunk (b)-1 landed the first
-multi-result shape `(i64,i64,i32)→(i64,i32)` (add64_u_with_carry
-family, 8 lines in if/manifest.txt). Infrastructure now in place:
-`FuncRet_*` extern struct convention + `dispatchMultiResult`
-ladder + distiller `supported_multi` set. Next shapes follow the
-same recipe.
+Step (b) Cat II in progress: (b)-1 landed `(i64,i64,i32)→(i64,i32)`
+(8 PASS); (b)-2 landed `()→(i32,i64)` + `()→(i64,i32)` (+6 PASS).
+D-137 filed: same-width 2× int + mixed int+float multi-result
+shapes hit a JIT-epilogue ↔ C-ABI struct-return mismatch (JIT
+writes per-result-slot W0/W1 or W0+D0; Zig extern struct expects
+single packed X0 or X0+X1 int-pair). Next chunk = D-137 ABI
+bridge.
 
 **Current spec_assert tally** (Mac aarch64 + OrbStack
-bit-identical post-chunk (b)-1; live via
+bit-identical post-(b)-2; live via
 `bash scripts/p9_simd_status.sh`):
 
-- spec_assert non-simd: **24009 / 0 / 2061** (+8 PASS / -8
+- spec_assert non-simd: **24015 / 0 / 2055** (+14 PASS / -14
   skip-impl vs 2026-05-17 baseline 24001/0/2069)
 - simd_assert: **13301 / 0 / 440** (unchanged)
 
 ### Next-session active task
 
-**Step (b) chunk (b)-2 — next multi-result shape(s)** per
-[`phase9_close_plan.md`](phase9_close_plan.md) §6 step (b).
-The (b)-1 chunk drained add64_u_with_carry; remaining shapes
-(per `grep skip-impl multi-result test/spec/wasm-2.0-assert/
-*/manifest.txt`):
+**Chunk (b)-3 — D-137 ABI bridge for multi-result entry helpers**.
+Discharges the JIT-epilogue ↔ C-ABI mismatch surfaced at (b)-2
+PoC. Decide between:
 
-- br=2, block=1, call=6, call_indirect=4, func=20, if=6, loop=1
-  (= 40 lines across 7 manifests; ~7-8 distinct shapes)
+- (a) JIT epilogue emits C-ABI-compatible multi-result returns
+  (pack 2× i32 into single GPR; route FP via V/XMM per
+  AAPCS64/SysV HFA / SysV class rules).
+- (b) Zig-side thunk wraps the JIT body and shuffles its per-
+  slot register convention into C-ABI struct shape.
 
-Pick by `grep -A0 "skip-impl multi-result" test/spec/wasm-2.0-
-assert/*/manifest.txt | sort | uniq -c | sort -rn` to identify
-the next-highest-impact shape (typically `()→(i32,i32)` "multi"
-family next). Add `FuncRet_<shape>` + helper + runner arm +
-distiller `supported_multi` entry; re-bake; gate.
+ADR-grade design choice; file `.dev/decisions/0066_*.md`
+before implementation. Once landed, re-introduce
+`FuncRet_i32i32` + `FuncRet_i32f64` + the dropped (b)-2 arms
+to drain the remaining ~16 2-result fixture lines (if/multi 4,
+call/type-all-i32-i32 1, call type-all-i32-f64 1, call
+type-all-f64-i32 1, call as-call-all-operands 1, call_indirect
+type-all-i32-f64 1, func value-i32-f64 1, func return-i32-f64
+1, func break-i32-f64 1, func break-br_table-nested-num-num 4).
 
 ### Discipline reminders
 

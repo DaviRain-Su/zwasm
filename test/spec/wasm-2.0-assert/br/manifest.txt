@@ -27,7 +27,7 @@ assert_return as-br_table-index () -> ()
 assert_return as-br_table-value () -> i32:10
 assert_return as-br_table-value-index () -> i32:11
 assert_return as-return-value () -> i64:7
-skip-impl multi-result as-return-values
+assert_return as-return-values () -> i32:2 i64:7
 assert_return as-if-cond () -> i32:2
 assert_return as-if-then i32:1 i32:6 -> i32:3
 assert_return as-if-then i32:0 i32:6 -> i32:6

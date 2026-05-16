@@ -784,6 +784,20 @@ pub const FuncRet_i64i32 = extern struct {
     r1: u32,
 };
 
+/// Multi-result return for `(i32, i64)`. Spec `value-block-i32-i64` /
+/// `type-i32-i64` families. AAPCS64 / SysV pack via X0+X1 register
+/// pair (16-byte struct with 4-byte padding after `r0`).
+pub const FuncRet_i32i64 = extern struct {
+    r0: u32,
+    r1: u64,
+};
+
+// Note: `FuncRet_i32i32` (same-width 2× i32) and `FuncRet_i32f64`
+// (mixed int+float) deferred per D-137: their C-ABI return layout
+// (single packed X0 / mixed FP+int register routing) diverges from
+// the JIT epilogue's per-result-slot convention. Bridge work
+// scheduled as chunk (b)-3.
+
 /// Call a `(i64, i64, i32) -> (i64, i32)` JIT function. Used by the
 /// spec_assert non-simd runner to invoke the `add64_u_with_carry`
 /// family (spec `if.wast` / `func.wast` / etc.). Multi-result ABI
@@ -800,6 +814,34 @@ pub fn callI64i32_i64i64i32(
     const Fn = *const fn (rt: *const JitRuntime, a0: u64, a1: u64, a2: u32) callconv(.c) FuncRet_i64i32;
     const f = module.entry(func_idx, Fn);
     const result = f(rt, a0, a1, a2);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+/// `() -> (i32, i64)` family — value-block-i32-i64 etc.
+pub fn callI32i64NoArgs(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+) Error!FuncRet_i32i64 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime) callconv(.c) FuncRet_i32i64;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+/// `() -> (i64, i32)` family — call_indirect `type-all-i32-i64` shape.
+pub fn callI64i32NoArgs(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+) Error!FuncRet_i64i32 {
+    rt.trap_flag = 0;
+    const Fn = *const fn (rt: *const JitRuntime) callconv(.c) FuncRet_i64i32;
+    const f = module.entry(func_idx, Fn);
+    const result = f(rt);
     if (rt.trap_flag != 0) return Error.Trap;
     return result;
 }
