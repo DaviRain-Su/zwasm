@@ -10,30 +10,30 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-62 closed: drain directive-assert_exhaustion + altstack landing (+15 PASS)**
+## Active state — **d-63 closed: drain non-scalar-arg/result via reftype-alias-to-i64 (+176 PASS)**
 
 ### One-line state
 
-d-62 adds `assert_exhaustion` directive support — wast asserts
-the module traps due to call-stack exhaustion (recursion);
-distiller emits `assert_exhaustion {field} {args}` (mirrors
-assert_trap), runner classifies + delegates to
-`handle_assert_trap`. **Altstack landing**: `installSigsegvHandler`
-now installs an explicit alt signal stack (256 KB static
-page-aligned) via `sigaltstack` + adds `SA.ONSTACK` so the
-handler can run when JIT body exhausts native stack. **Atomic
-flag**: `sigsegv_armed` upgraded from plain `bool` to
-`std.atomic.Value(bool)` (release-store / acquire-load) —
-plain bool and `*volatile bool` casts were both observed
-elided by Zig 0.16 under OrbStack test-all builds once the
-handler moved to the altstack. 15 reclassified entries (call,
-call_indirect, fac, skip-stack-guard-page) all PASS via
-SIGSEGV → altstack handler → siglongjmp → Error.Trap.
-spec_assert non-simd 23592/0/2478 → **23607/0/2463** (+15
-PASS, 0 FAIL; skip-impl 1801 → 1786). simd 13301/0/440
-unchanged. Loop continues toward 9.9 `[x]`; substrate audit
-hard gate (9.12) auto-fires when next chunk would resolve to
-it.
+d-63 leverages ADR-0061's reftype-aliases-i64 codegen
+plumbing to accept `externref` / `funcref` as i64-aliased
+scalars at the manifest + runner level. Distiller adds
+`kind_alias`, encodes reftype values as
+`i64:(0x8000_0000_0000_0000 | (N+1))` to avoid externref-0
+collisions with `ref.null` and FuncEntity-ptr collisions,
+and extends `allowed_scalar` across all 4 arms (assert_return
+/ assert_trap / assert_exhaustion / action). 3 new entry
+helpers + 5 new dispatch arms (`(i32, i64) → i32`, `(i32,
+i32) → i64`, `(i32, i64, i32) → void`, trap variant, invoke-
+action variant). **D-132 filed** for a residual funcref
+table.set/get roundtrip bug in `table_get:is_null-funcref(2)`
+(targeted post-process skip in distiller; surrounding 9
+assertions in table_get PASS). spec_assert non-simd
+23607/0/2463 → **23783/0/2287** (+176 PASS, 0 FAIL; skip-impl
+1786 → 1791; skip-adr 677 → 496 = -181 because the
+`skip_host_state_diverged` ADR no longer fires when reftype
+actions succeed). simd 13301/0/440 unchanged. Loop continues
+toward 9.9 `[x]`; substrate audit hard gate (9.12) auto-fires
+when next chunk would resolve to it.
 
 ### Standing reminder for the autonomous loop
 
@@ -60,13 +60,15 @@ refactor, the closing path is the runner-side skip-impl backlog
 considering whether to flip 9.9 `[x]` based on "active corpora
 green" rather than "every assertion classified".
 
-- **d-63** — Candidates for the next chunk (live tally post-d-62):
-  - **trap-non-scalar-arg / non-scalar-arg / action-non-scalar-arg
-    / non-scalar-result** (~12+7+2+12) — needs reftype-arg/result
-    dispatch in the runner ladder (extends `ArgValue` matrix
-    with `ref` variant per ADR-0061). Companion benefit:
-    dissolves the `host_state_diverged` barrier upstream
-    (skip-ADR retires naturally).
+- **d-64** — Candidates for the next chunk (live tally post-d-63):
+  - **D-132 root-cause investigation** — funcref-table.set/get
+    roundtrip bug surfaced in `table_get:is_null-funcref(2)`.
+    Currently target-skipped via distiller post-process. Both
+    `table.set $t3 2 ...` and `table.get $t3 2` operate on
+    the same `tables_ptr[k].refs[]` storage at the arm64 emit
+    level, but the write isn't observable on subsequent read.
+    Likely a regalloc/spill aliasing or lower.zig sequencing
+    issue with nested `(table.set ... (table.get ...))`.
   - **multi-result** (~48) — Phase 11+ scope per ADR-0029
     follow-up; architecturally blocked.
   - **non-invoke-action** (~1) — `ref_is_null` corpus oddity.
@@ -156,6 +158,7 @@ Other queued post-D-093 names: `address`, `align`, `br_table`,
 | D-093 (d-60) | [x] `310476bd` | D-131 discharge — rename pre-existing `cross-module-action` + `host-state-diverged` vocabs to gate-conforming form + 2 new ADRs. `check_skip_adrs --gate` exits 0 (was 291 violations). spec_assert non-simd 23576/0/2494 unchanged (bit-identical at runner level). |
 | D-093 (d-61) | [x] `31e076a6` | drain runner-shape-gap residual — 7 new `entry.callXxx_yyy` helpers + 7 new dispatch arms + `[5]ArgValue`→`[8]` cap bump + 7 distiller supported tuples. spec_assert non-simd 23576/0/2494 → **23592/0/2478** (+16 PASS, 0 FAIL; skip-impl 1817→1801). |
 | D-093 (d-62) | [x] `da18faae` | drain directive-assert_exhaustion — new directive + altstack landing (`sigaltstack` + `SA.ONSTACK`) + `sigsegv_armed` upgraded to `std.atomic.Value(bool)` to defeat Zig 0.16 BSS-load elision under SA.ONSTACK. spec_assert non-simd 23592/0/2478 → **23607/0/2463** (+15 PASS, 0 FAIL; skip-impl 1801→1786). |
+| D-093 (d-63) | [x] `b4e11a86` | drain non-scalar-arg/result via reftype-alias-to-i64 — distiller `kind_alias` + bit-63-encoded host externrefs (avoids `i64:0 == null` collision); 3 new entry helpers + 5 new dispatch arms. D-132 filed (funcref table.set/get roundtrip bug; targeted skip). spec_assert non-simd 23607/0/2463 → **23783/0/2287** (+176 PASS, 0 FAIL; skip-impl 1786→1791; skip-adr 677→496 = -181 host-state-diverged retired). |
 
 Other queued chunks (post-l-1): k-1, k-2, m-4c (= D-090),
 m-2d, n-1, j-3b.
@@ -172,9 +175,11 @@ m-2d, n-1, j-3b.
 
 - `now`: **D-093** (residual sub-clusters above), D-095
   (partial — x86_64 residuals tracked as D-097), D-126
-  (bulk corpus residual — Phase 10+ scope).
+  (bulk corpus residual — Phase 10+ scope), **D-132** (filed
+  d-63 — funcref table.set/get roundtrip bug; target-skipped
+  pending root-cause).
 - `discharged`: D-131 at d-60 (prefix-vocab gate green); none
-  at d-61.
+  at d-61/d-62/d-63.
 - `blocked-by`: D-007/010/016/018/020/021/022/026/028/052(partial)/
   055/057/058/059/062(partial)/065/072/073/074/075/079(ii)/
   081/082/090.
