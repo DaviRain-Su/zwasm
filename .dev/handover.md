@@ -10,20 +10,64 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-73 closed: debt cleanup (24 stale `discharged-by:` rows pruned)**
+## Active state — **autonomous loop pause at d-73; awaiting bucket-2 collaborative input**
 
 ### One-line state
 
-d-73 prunes 24 stale `discharged-by:` rows from the
-Active section of `.dev/debt.md` per Step 0.5 "when
-discharged, delete the row". Removed: D-101 / D-107 /
-D-108 / D-109 / D-110 / D-111 / D-112 / D-113 / D-114 /
-D-115 / D-116 / D-118 / D-119 / D-120 / D-121 / D-122 /
-D-123 / D-124 / D-125 / D-127 / D-128 / D-129 / D-130
-(+1 straggler). Active D-rows 52 → 28. Recently-
-discharged section untouched. `zig build` rc=0.
-D-72's D-134 instrumentation remains in place awaiting
-the next failing OrbStack run.
+d-73 prunes 24 stale `discharged-by:` rows from active
+section (52→28). Following d-65→d-73's nine-chunk arc
+(2 real source fixes at d-66 + d-69; the rest probes /
+investigation / bookkeeping), the autonomous loop has
+genuinely converged on its limits for §9.9. The
+`/continue` bucket-2 stop condition fires.
+
+## Open questions / blockers (bucket-2; need collaborative input)
+
+1. **D-134 OrbStack `zwasm-spec-wasm-2-0-assert` flake
+   root cause unclear after investigation**. d-65 / d-67
+   / d-69 partial / d-71 / d-72 probed and progressively
+   narrowed hypotheses (cross-thread `siglongjmp`
+   refuted; Zig startup handler refuted; sigaltstack +
+   sigaction-readback both clean). Remaining unprobed:
+   hypothesis (iii-b) signal-mask blocks SIGSEGV at
+   delivery, which needs a failing OrbStack run to
+   inspect sigprocmask state — the d-72 instrumentation
+   is in place for the next surfaced failure. Continued
+   proactive probing without new evidence is
+   wheel-spinning.
+2. **§9.9 closure needs load-bearing ADR for exit-
+   criterion relaxation**. ROADMAP §9.9 row text per
+   ADR-0056 specifies `ADR-0029 Path B \`skip-impl == 0\`
+   enforcement real`. Current spec_assert non-simd
+   reports 1790 skip-impl (~all multi-result, Phase 11+
+   scope per ADR-0029 follow-up). Closing 9.9 with this
+   skip-impl count requires either (a) eliminating
+   skip-impl (structurally Phase 11+) or (b) relaxing
+   the exit criterion via ADR per §18.2 (deviation from
+   §9 phase scope/exit). Path (b) is the natural
+   collaborative-review point.
+3. **All other `now` debts blocked**: D-095 / D-133
+   substrate audit Q5 scope; D-126 Phase 10+ scope.
+   Substrate audit (hard gate at §9.9 / 9.12) is the
+   natural unblock; it can't fire until 9.9 flips
+   `[x]`.
+
+### Phase 9 / §9.9 status
+
+- spec_assert non-simd: 23784/0/2286 Mac aarch64
+  (1790 skip-impl + 496 skip-adr).
+- simd_assert: 13301/0/440 Mac + OrbStack
+  (bit-identical).
+- §9.9 row text exit criterion **not literally met**
+  (skip-impl ≠ 0); needs ADR (above).
+
+### Active `now` debts (28)
+
+- **D-095** partial — substrate audit Q5 scope.
+- **D-126** — Phase 10+ instance-aware refactor scope.
+- **D-133** — substrate audit Q5 scope.
+- **D-134** — instrumented heisenbug; awaits next
+  failure with d-72 diagnostic in place.
 
 ### Phase 9 / §9.9 status
 
@@ -47,23 +91,28 @@ the next failing OrbStack run.
   d-68 disabled Zig's startup SEGV handler but the
   heisenbug still reproduces at low rate).
 
-### Next sub-chunk candidates (d-73+)
+### Resume paths (user-initiated)
 
-- **D-134 awaits next failure**: d-72 instrumentation is
-  in place; the autonomous loop should pivot to other
-  work and let D-134 surface evidence on its own
-  schedule. The remaining unprobed hypothesis (iii-b)
-  (signal mask blocks SIGSEGV at delivery) needs a
-  failing run to verify; doing more proactive probes
-  before the flake fires is wheel-spinning.
-- **D-133 remaining sites** — still queued for substrate
-  audit unified comptime-disjointness mechanism (Q5).
-- **D-095 partial / D-126 / D-133** are all substrate-
-  audit-scope or Phase 10+ scope; no autonomous-loop
-  progress without ADR / gate clearance.
-- §9.9 closure via "active corpora green" interpretation
-  requires ADR per §18.2 (skip-impl ≠ 0 vs ADR-0029 Path
-  B exit text); not autonomous-loop scope.
+When the user is ready to re-engage:
+
+- **Path A — relax §9.9 exit criterion**: write
+  `.dev/decisions/NNNN_<slug>.md` per §18.2 amending the
+  `skip-impl == 0` clause to "active-corpora green AND
+  all skip-impls structurally Phase 11+ multi-result OR
+  documented per skip-ADR". Once that ADR lands, the
+  loop can flip 9.9 `[x]` autonomously, fire the
+  Windows reconciliation, and hand off to the substrate
+  audit hard gate at 9.12.
+- **Path B — fix D-134 root cause**: a failing OrbStack
+  run with d-72 diagnostics in place is the next
+  evidence-producing event. Sit on the bug; next
+  surfaced failure will narrow hypothesis (iii-b)
+  (signal mask) or surface a new mode.
+- **Path C — pivot to substrate audit prep**: open
+  `.dev/phase9_completion_substrate_audit.md` and
+  pre-work Q2/Q3/Q4/Q5/Q6 sections. The audit's
+  outcome should reshape D-095 / D-133 (the substrate-
+  scope debts) into concrete chunks.
 
 ## Sandbox quirks + hook scope
 
