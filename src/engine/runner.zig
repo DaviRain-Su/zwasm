@@ -62,6 +62,20 @@ pub const Error = error{
     /// must be pairwise distinct. Two exports sharing the same
     /// name string is an invalid module.
     DuplicateExport,
+    /// Wasm spec §3.4.4: at most one memory in Wasm 2.0
+    /// (multi-memory is a Wasm 3.0 proposal). Modules with
+    /// `(memory 0) (memory 0)` or `(memory (import …)) (memory 0)`
+    /// are invalid.
+    MultipleMemories,
+    /// Wasm spec §3.4.4: memory limits must satisfy
+    /// `min ≤ max` (when max specified) and `max ≤ 65536`
+    /// (4 GiB cap). Modules with `(memory 1 0)`,
+    /// `(memory 65537)`, `(memory 0 65537)`, etc. are invalid.
+    InvalidMemoryLimit,
+    /// Wasm spec §3.4.7: an active data segment references a
+    /// memory that does not exist (no memory section + no
+    /// memory imports, or memidx out of range).
+    DataSegmentRequiresMemory,
     UnsupportedEntrySignature,
 } || compile_func.Error || parser.Error || sections.Error || linker.Error || entry.Error || validator_mod.Error;
 
@@ -132,6 +146,64 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     var imports_buf: ?sections.Imports = null;
     defer if (imports_buf) |*ib| ib.deinit();
     if (module.find(.import)) |s| imports_buf = try sections.decodeImports(allocator, s.body);
+
+    // §9.9 / 9.9-l-1b-d093-d75 (skip-impl drainage):
+    // Wasm spec §3.4.4 memory section validation. Three rules:
+    //   (a) Total memories (import + defined) ≤ 1 in Wasm 2.0
+    //       (multi-memory is a Wasm 3.0 proposal; rejected).
+    //   (b) For each memory's limits: min ≤ 65536 (4 GiB cap),
+    //       max ≤ 65536 if specified, AND max ≥ min if both
+    //       specified.
+    //   (c) Data segments require a memory to exist (active
+    //       segments with memidx≥mem_count, or any data segment
+    //       in a module with zero memories, are invalid).
+    // Drains the `memory` + portions of `data` SKIP-VALIDATOR-GAP
+    // families — previously compileWasm accepted these shapes
+    // and the runner surfaced SKIP-VALIDATOR-GAP at the
+    // `.assert_invalid` arm.
+    {
+        const max_mem_pages: u32 = 65536;
+        var num_memory_imports: u32 = 0;
+        if (imports_buf) |ib| {
+            for (ib.items) |imp| if (imp.kind == .memory) {
+                num_memory_imports += 1;
+            };
+        }
+        var defined_memories: u32 = 0;
+        if (module.find(.memory)) |ms| {
+            var ms_buf = try sections.decodeMemory(a, ms.body);
+            defer ms_buf.deinit();
+            defined_memories = @intCast(ms_buf.items.len);
+            for (ms_buf.items) |mem_entry| {
+                if (mem_entry.min > max_mem_pages) return Error.InvalidMemoryLimit;
+                if (mem_entry.max) |max| {
+                    if (max > max_mem_pages) return Error.InvalidMemoryLimit;
+                    if (max < mem_entry.min) return Error.InvalidMemoryLimit;
+                }
+            }
+        }
+        if (num_memory_imports + defined_memories > 1) return Error.MultipleMemories;
+        // Data section requires a memory to exist (Wasm 2.0
+        // §3.4.7 — `C.mems[memidx]` must be defined). With our
+        // memidx fixed at 0 (single-memory MVP), the requirement
+        // collapses to "≥ 1 memory exists".
+        if (module.find(.data)) |ds| {
+            var ds_buf = try sections.decodeData(a, ds.body);
+            defer ds_buf.deinit();
+            for (ds_buf.items) |seg| {
+                if (seg.kind != .passive) {
+                    // Active or active-with-memidx (kind 0 / 2):
+                    // segment requires a memory.
+                    if (num_memory_imports + defined_memories == 0) {
+                        return Error.DataSegmentRequiresMemory;
+                    }
+                    if (seg.memidx >= num_memory_imports + defined_memories) {
+                        return Error.DataSegmentRequiresMemory;
+                    }
+                }
+            }
+        }
+    }
 
     // Per Wasm spec: type / function / code sections are all
     // OPTIONAL — a module with no defined functions is valid
