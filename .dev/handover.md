@@ -10,66 +10,58 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-68 closed: D-134 DISCHARGED — `std_options.enable_segfault_handler = false`**
+## Active state — **d-69 closed: D-135 DISCHARGED (errdefer fix); D-134 re-instated as `now` (d-68 reduced rate, didn't fix)**
 
 ### One-line state
 
-d-68 lands `pub const std_options: std.Options = .{
-.enable_segfault_handler = false };` in
-`test/spec/spec_assert_runner_non_simd.zig`. d-65's
-retrospective claimed this disable was already set but a
-d-68 resume-time repo-wide grep showed **no `std_options`
-declaration existed anywhere** — the disable was aspirational,
-never landed (lesson at
-`.dev/lessons/2026-05-16-narrative-claim-vs-landed-state.md`).
-Actually landing it makes our `installSigsegvHandler` the
-sole sigaction for SEGV/BUS (was competing with Zig startup's
-`attachSegfaultHandler` + `SA.RESETHAND`-flagged install of
-the recursive `handleSegfaultPosix` chain — ziglang/zig#14658).
-OrbStack `zig build test-all` now **exits 0** (was non-deterministic
-SEGV across d-64 through d-67). spec_assert_runner_non_simd
-23784/0/2286, simd_assert_runner 13301/0/440 — bit-identical
-Mac aarch64 + OrbStack Linux x86_64. **D-134 discharged**;
-D-134 row removed from `.dev/debt.md`.
+d-69 fixes D-135 at the root: `compileWasm`'s empty-fn-section
+early-return path had 6 allocations whose downstream
+`Error.MissingTypeSection` returns leaked them (only `arena`
+was errdefer-covered). Adding `errdefer free` after each
+alloc unwinds cleanly on error returns; success returns
+retain ownership. Two new path-discriminator tests at
+`src/engine/runner.zig` (binary.60.wasm shape + binary.61.wasm
+shape) prove the deinit was structurally correct — the leak
+was inside compileWasm's error path, not the caller's deinit.
+Mac aarch64 + OrbStack Linux x86_64 `zig build test` both
+rc=0; no DebugAllocator leak reports on OrbStack.
 
-### §9.9 closing path — now unblocked
+**D-134 status retrospective**: d-68's
+`std_options.enable_segfault_handler = false` was the right
+direction (Zig's competing `handleSegfaultPosix` install
+must not race with our sigaction) but the heisenbug
+reappeared on d-69's `zig build test-all` despite d-68's
+disable still being in place. The d-68 fix likely reduced
+the rate via binary layout perturbation rather than
+addressing the root cause; d-69's errdefer additions (also
+binary-layout perturbing, compile-time only) re-triggered
+the flake. **D-134 re-instated** as `now` debt with refined
+narrative.
 
-The handover's previous "9.9 `[x]` flip path blocked by D-134
-(OrbStack per-chunk gate unreliable)" predicate is now false.
-Remaining `now` debts: **D-093** (residual sub-clusters), **D-095**
-(partial — x86_64 residuals tracked as D-097), **D-126** (bulk
-corpus residual — Phase 10+ scope), **D-133** (remaining
-≥3-scratch op_table/op_memory sites — substrate audit Q5
-scope), **D-135** (empty-fn-section leak — narrative claim;
-should re-verify per the d-68 lesson).
+### §9.9 closing path — STILL blocked by D-134 flake
 
-§9.9 row text per ROADMAP: "Wasm 2.0 (incl. SIMD) 100% PASS
-on Mac+OrbStack" — now met. Closing 9.9 `[x]` triggers:
-(1) Substrate audit hard gate at 9.12 fires next, surfacing
-to user per `/continue` Detection rule; (2) Phase Status
-widget update (Phase 9 still IN-PROGRESS until 9.12 / 9.13
-clear); (3) Windows reconciliation per ADR-0049
-(`bash scripts/run_remote_windows.sh test-all`).
+The d-68 closing-path optimism is retracted. Until D-134 is
+genuinely fixed (or the §9.9 exit criterion is relaxed via
+ADR per §18.2), OrbStack per-chunk gating remains
+non-deterministic.
 
-### Next sub-chunk candidates (d-69+)
+### Next sub-chunk candidates (d-70+)
 
-- **§9.9 closure path**: run Windows reconciliation,
-  audit_scaffolding phase-boundary fire, then flip 9.9 to
-  `[x]` — at which point the **Phase 9 完備 substrate audit
-  hard gate (row 9.12)** surfaces and the autonomous loop
-  pauses for collaborative review per the `/continue`
-  hard-gate detection rule.
-- **D-135 narrative-vs-state re-verification** per the d-68
-  lesson: the debt entry claims 4 leak sites trace to
-  `compileWasm` empty-fn path; with d-68's actual fix
-  shipped, run `zig build test-spec-wasm-2.0-assert` on
-  OrbStack and check whether DebugAllocator still reports
-  the leak. If it does, pursue D-135 discharge per its
-  existing plan. If it doesn't, D-135 may have been a
-  symptom of D-134's process-corrupting crash, not a
-  separate leak.
+- **D-134 deeper investigation**: now that
+  `enable_segfault_handler = false` is in place AND d-65 +
+  d-67 + d-69 evidence agree the flake is layout-sensitive
+  + handler-install-race-sensitive, the next probe is to
+  enumerate what other code path could install or restore a
+  SEGV handler. Candidates: `std.heap.DebugAllocator`'s
+  diagnostic paths; `std.posix.sigaction` calls in std lib;
+  `signal_stack_size` interaction. Per
+  `.claude/rules/extended_challenge.md` Step 4: WebFetch /
+  Zig issue tracker survey for "sigaction reinstall during
+  Debug builds" patterns.
 - **D-133 remaining sites** — still queued for substrate
   audit unified mechanism.
+- **D-095 partial** — substrate audit scope.
+- **D-093 residual sub-clusters** — substrate audit scope.
 
 ## Previous state — **d-63 closed: drain non-scalar-arg/result via reftype-alias-to-i64 (+176 PASS)**
 
