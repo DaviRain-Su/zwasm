@@ -10,35 +10,37 @@
 3. `cat .dev/debt.md | head -60` — `now` + `blocked-by:`.
 4. ROADMAP §9 Phase Status widget + §9.9 row text (ADR-0056).
 
-## Active state — **d-80 closed: reftype-matching validation, +2 PASS**
+## Active state — **d-81 closed: select-reftype + if-missing-else validation, +5 PASS**
 
 ### One-line state
 
-d-80 adds two small reftype-matching validators:
-(a) call_indirect requires funcref table (not externref);
-(b) active elem segment's elem_type matches table's
-elem_type. Result: spec_assert 23956/0/2114 →
-**23958/0/2112** (+2 PASS, 0 FAIL). Per-corpus:
-call_indirect 2→1, elem 2→1. Total VALIDATOR-GAP 26→24.
-Mac + OrbStack bit-identical.
+d-81 closes two corpora fully: (a) untyped select rejects
+reftype operands; (b) `if` block without else requires
+`start_type == end_type`. Result: spec_assert 23958/0/2112
+→ **23963/0/2107** (+5 PASS, 0 FAIL). Per-corpus full
+drains: select 1→0, if 4→0. Total VALIDATOR-GAP 24→19.
 
-**Cumulative d-74 → d-80 (7 chunks)**: **+174 PASS**
-(23784 → 23958).
+**Cumulative d-74 → d-81 (9 chunks)**: **+179 PASS**
+(23784 → 23963).
 
-### Skip-impl drainage roadmap (post-d-80)
+### Skip-impl drainage roadmap (post-d-81)
 
-Remaining VALIDATOR-GAP (24): unreached-invalid 14
-(deferred — polymorphic stack refactor), if 4,
-ref_func 3, select 1, elem 1, call_indirect 1.
+Remaining VALIDATOR-GAP (19): unreached-invalid 14
+(deferred — polymorphic stack refactor), ref_func 3,
+elem 1, call_indirect 1.
 
-- **d-81** — `ref_func` (3): "undeclared function
+- **d-82** — `ref_func` (3): "undeclared function
   reference" — needs func-declaration tracking
   (elem section + exports + start + imports).
-- **d-82** — `if` (4) + `select` (1): specific
-  type-mismatch shapes; need investigation.
-- **d-83** — call_indirect / elem residuals: need
-  deeper elem-decode + funcidx-out-of-range checks.
-- **deferred** — `unreached-invalid` (14).
+- **d-83** — elem / call_indirect residuals (2): needs
+  funcidx-out-of-range check in elem.funcidxs or
+  deeper per-element init-expr decode.
+- **deferred** — `unreached-invalid` (14): polymorphic
+  stack refactor.
+
+PARSER-GAP (19): binary 8, binary-leb128 7, custom 4 —
+needs LEB128 over-long encoding rejection. Tractable but
+spec-text-sensitive.
 
 ## Outstanding (now-resumed) `now` debts
 
