@@ -90,6 +90,13 @@ pub const Error = error{
     /// signature `[] → []` (no params, no results) AND its
     /// funcidx must be in range.
     InvalidStartFunction,
+    /// Wasm spec §3.4.3 / §3.3.2: a global section entry's
+    /// init expression is not a valid constant expression
+    /// for its declared type. Triggers: a non-const opcode,
+    /// a `global.get` of a non-imported / non-immutable
+    /// global, an init-expr whose result type doesn't match
+    /// the declared valtype.
+    InvalidGlobalInitExpr,
     UnsupportedEntrySignature,
 } || compile_func.Error || parser.Error || sections.Error || linker.Error || entry.Error || validator_mod.Error;
 
@@ -375,6 +382,27 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         // they take this empty-fn early-return path; without this
         // check they'd compileWasm-accept and surface as
         // SKIP-VALIDATOR-GAP.
+
+        // §9.9 / 9.9-l-1b-d093-d77 mirror — empty-fn path
+        // global init-expr validation. Most `global.wast`
+        // assert_invalid modules consist of a global section
+        // only (no function/code), so they take this branch.
+        // Without this check the global init-expr validator
+        // would never fire on them.
+        if (module.find(.global)) |gs| {
+            var gs_buf = try sections.decodeGlobals(a, gs.body);
+            defer gs_buf.deinit();
+            var num_global_imports: u32 = 0;
+            if (imports_buf) |ib| {
+                for (ib.items) |imp| if (imp.kind == .global) {
+                    num_global_imports += 1;
+                };
+            }
+            for (gs_buf.items) |gd| {
+                try validateGlobalInitExpr(gd.init_expr, gd.valtype, num_global_imports, imports_buf);
+            }
+        }
+
         if (module.find(.@"export")) |es| {
             var exports = try sections.decodeExports(a, es.body);
             defer exports.deinit();
@@ -517,6 +545,26 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     if (module.find(.table)) |s| tables_buf = try sections.decodeTables(allocator, s.body);
     if (module.find(.data)) |s| datas_buf = try sections.decodeData(allocator, s.body);
     if (module.find(.element)) |s| elems_buf = try sections.decodeElement(allocator, s.body);
+
+    // §9.9 / 9.9-l-1b-d093-d77 (skip-impl drainage):
+    // Wasm spec §3.4.3 / §3.3.2 global init-expression
+    // validation. Per spec, a defined global's init_expr
+    // must be a "constant expression": single const opcode
+    // (i32/i64/f32/f64.const, ref.null, ref.func, or
+    // global.get of an *imported* *immutable* global)
+    // followed by `end (0x0B)`, AND the result type must
+    // match the declared valtype.
+    if (globals_buf) |g| {
+        var num_global_imports: u32 = 0;
+        if (imports_buf) |ib| {
+            for (ib.items) |imp| if (imp.kind == .global) {
+                num_global_imports += 1;
+            };
+        }
+        for (g.items) |gd| {
+            try validateGlobalInitExpr(gd.init_expr, gd.valtype, num_global_imports, imports_buf);
+        }
+    }
 
     const validator_globals = try a.alloc(validator_mod.GlobalEntry, if (globals_buf) |g| g.items.len else 0);
     if (globals_buf) |g| {
@@ -765,6 +813,100 @@ pub fn applyDefinedGlobalsInit(
 /// `runtime/instance/instantiate.zig:evalConstExprValue` but
 /// stays in this module so the engine layer can run const-expr
 /// evaluation without crossing into the runtime-instance Zone.
+/// §9.9 / 9.9-l-1b-d093-d77 — Wasm spec §3.4.3 / §3.3.2
+/// validation of a defined global's init-expression. Per
+/// spec, a const expression is one of:
+///   - `t.const c` (i32/i64/f32/f64.const) for numeric `t`
+///   - `ref.null t` for reftype `t`
+///   - `ref.func x` (Wasm 2.0)
+///   - `global.get x` where x refers to an *imported*
+///     global AND that global is *immutable* (mut == const)
+/// followed by the terminating `end` (0x0B). The result
+/// type must match `want_valtype`.
+///
+/// Returns `Error.InvalidGlobalInitExpr` for any non-const
+/// opcode, out-of-range global index, mutable-global
+/// reference, type mismatch, or missing trailing `end`.
+fn validateGlobalInitExpr(
+    expr: []const u8,
+    want_valtype: zir.ValType,
+    num_global_imports: u32,
+    imports_opt: ?sections.Imports,
+) Error!void {
+    if (expr.len < 2) return Error.InvalidGlobalInitExpr;
+    var pos: usize = 1;
+    const produced: zir.ValType = switch (expr[0]) {
+        0x41 => blk: { // i32.const
+            _ = leb128.readSleb128(i32, expr, &pos) catch return Error.InvalidGlobalInitExpr;
+            break :blk .i32;
+        },
+        0x42 => blk: { // i64.const
+            _ = leb128.readSleb128(i64, expr, &pos) catch return Error.InvalidGlobalInitExpr;
+            break :blk .i64;
+        },
+        0x43 => blk: { // f32.const
+            if (pos + 4 > expr.len) return Error.InvalidGlobalInitExpr;
+            pos += 4;
+            break :blk .f32;
+        },
+        0x44 => blk: { // f64.const
+            if (pos + 8 > expr.len) return Error.InvalidGlobalInitExpr;
+            pos += 8;
+            break :blk .f64;
+        },
+        0xD0 => blk: { // ref.null reftype
+            if (pos >= expr.len) return Error.InvalidGlobalInitExpr;
+            const rt_byte = expr[pos];
+            pos += 1;
+            break :blk switch (rt_byte) {
+                0x70 => zir.ValType.funcref,
+                0x6F => zir.ValType.externref,
+                else => return Error.InvalidGlobalInitExpr,
+            };
+        },
+        0xD2 => blk: { // ref.func funcidx (Wasm 2.0)
+            _ = leb128.readUleb128(u32, expr, &pos) catch return Error.InvalidGlobalInitExpr;
+            break :blk .funcref;
+        },
+        0xFD => blk: { // SIMD prefix — only v128.const (0x0C) is valid in const-expr
+            const sub = leb128.readUleb128(u32, expr, &pos) catch return Error.InvalidGlobalInitExpr;
+            if (sub != 0x0C) return Error.InvalidGlobalInitExpr;
+            if (pos + 16 > expr.len) return Error.InvalidGlobalInitExpr;
+            pos += 16;
+            break :blk .v128;
+        },
+        0x23 => blk: { // global.get N
+            const idx = leb128.readUleb128(u32, expr, &pos) catch return Error.InvalidGlobalInitExpr;
+            // Init-expr global.get can only reference imported
+            // globals (§3.4.2). Defined-global self/forward
+            // references are not constant expressions.
+            if (idx >= num_global_imports) return Error.InvalidGlobalInitExpr;
+            // The referenced import must be immutable.
+            const imports = imports_opt orelse return Error.InvalidGlobalInitExpr;
+            var seen: u32 = 0;
+            for (imports.items) |imp| {
+                if (imp.kind != .global) continue;
+                if (seen == idx) {
+                    const g = imp.payload.global;
+                    if (g.mutable) return Error.InvalidGlobalInitExpr;
+                    break :blk g.valtype;
+                }
+                seen += 1;
+            }
+            // Should be unreachable given the idx < num_global_imports
+            // check; fail conservatively.
+            return Error.InvalidGlobalInitExpr;
+        },
+        else => return Error.InvalidGlobalInitExpr,
+    };
+    // Result type must match the declared valtype. Reftype
+    // sub-typing (funcref is not a supertype of externref or
+    // vice-versa) is enforced; numeric types are exact match.
+    if (produced != want_valtype) return Error.InvalidGlobalInitExpr;
+    if (pos >= expr.len or expr[pos] != 0x0B) return Error.InvalidGlobalInitExpr;
+    if (pos + 1 != expr.len) return Error.InvalidGlobalInitExpr;
+}
+
 fn evalConstScalarRaw(expr: []const u8) Error!u64 {
     if (expr.len < 2) return Error.UnsupportedEntrySignature;
     var pos: usize = 1;
