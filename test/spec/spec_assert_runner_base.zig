@@ -1417,18 +1417,20 @@ pub fn hasUnbindableImports(
                 // D-142 fix (A) chain (`d543c646`/`4e7a4646`/
                 // `6044e8f4`/`b89c2d45`) structurally closed
                 // the cross-module bridge thunk's X19/R15
-                // corruption. A γ-4 relax probe on Mac aarch64
-                // (2026-05-18) ran cleanly through the thunks
+                // corruption. A γ-4 relax probe (cycles 1+2,
+                // 2026-05-18) ran cleanly through the thunks
                 // — NO crashes — but surfaced 113 functional
-                // FAILs in the spec corpus (66 table_copy /
-                // 6 ref_func / 5 table_init / 1 imports).
-                // These are cross-module ROUTING gaps in the
-                // γ-1/γ-2/γ-3 per-exporter backing wiring,
-                // separate from the X19/R15 ABI bug D-142
-                // (A) fixed. Tracked as D-143. Until those
-                // routing fixes land, keep `hasUnbindableImports`
-                // strict for non-spectest func imports so the
-                // gate stays green at 24034/0/2015 etc.
+                // FAILs. Cycle-2 bisect (this commit `_TBA_`)
+                // identified root cause as the dual-view
+                // table-0 storage bug: `funcptr_base` (=
+                // `scratch_funcptrs`, read by call_indirect)
+                // and `tables_ptr[0].refs` (=
+                // `scratch_table_refs[0]`, written by
+                // table.copy/table.init/table.set) point at
+                // SEPARATE memory regions and are NOT synced
+                // by mutating ops. Tracked as D-143 with
+                // updated root cause. Keep strict until the
+                // fix lands.
                 if (is_spectest) continue;
                 return true;
             },
