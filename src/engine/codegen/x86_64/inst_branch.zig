@@ -111,6 +111,25 @@ pub fn encJccRel8(cc: Cond, disp: i8) EncodedInsn {
     return enc;
 }
 
+/// `JMP r/m64` (opcode 0xFF /4) — indirect near jump (tail-call)
+/// through a 64-bit register. JMP is implicitly 64-bit on x86_64;
+/// REX.W is NOT required. REX.B is set if `target` is R8..R15.
+/// Per Intel SDM Vol 2 §3.2 JMP. Used by ADR-0066 cross-module
+/// bridge thunks: after the caller's RIP is preserved on the
+/// stack by the importer's CALL, the thunk replaces RDI with
+/// the callee's JitRuntime pointer and JMPs to the callee's
+/// entry — the callee's eventual RET pops the importer's RIP
+/// and returns directly to the importer's call site.
+pub fn encJmpReg(target: Gpr) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (target.extBit() != 0) {
+        enc.push(encodeRex(false, 0, 0, target.extBit()));
+    }
+    enc.push(0xFF);
+    enc.push(encodeModrm(0b11, 4, target.low3())); // /4 = JMP
+    return enc;
+}
+
 /// `JMP rel32` (opcode 0xE9) — unconditional near jump with
 /// 32-bit signed displacement. Disp is relative to the byte
 /// AFTER the 5-byte instruction. Use `encJmpRel32(0)` as a

@@ -28,13 +28,15 @@
 
 Step (b) Cat II drained (+31 PASS to 24032). Cat III in progress:
 (c)-1a Store registry foundation; (c)-1b spectest host-import
-no-op (+2 PASS); (c)-1c runner `register` directive flow (-21
-skip-adr; 0 PASS gain — registry write-only until (c)-2 import
-linker consumes it). (c)-2 attempt hung on naive relaxation →
-reverted, D-138 filed; **(c)-2.0 design landed as ADR-0066 (this
-session): per-import bridge thunks, unchanged caller-side emit**.
-Current: 24034 / 0 / 2015 (= 1542 skip-impl + 473 skip-adr),
-Mac+OrbStack bit-identical.
+no-op (+2 PASS); (c)-1c runner `register` directive flow; (c)-2.0
+ADR-0066 design (per-import bridge thunks); **(c)-2.1 encoder
+skeleton landed (this session): `shared/thunk.zig` facade,
+`arm64/thunk.zig` (32-byte ADR+LDR+LDR+BR), `x86_64/thunk.zig`
+(22-byte MOVabs RDI+RAX+JMP); `encAdr` / `encJmpReg` new in
+arch inst.zig; +12 unit tests; pre-existing `indexOfScalar` →
+`findScalar` warning fixed inline**. Current: 24034 / 0 / 2015
+(= 1542 skip-impl + 473 skip-adr), Mac+OrbStack bit-identical
+— encoder-only diff, PASS counts unchanged by design.
 
 **Session-close wiring** (2026-05-17): new debts D-139 (c_api
 Instance bypass test coverage gap), D-140 (large-sig 16-result
@@ -62,22 +64,23 @@ remains the D-134 plan.
 
 ### Next-session active task
 
-**Step (c)-2.1 — `shared/thunk.zig` skeleton + per-arch
-encoder unit tests** per ADR-0066 §"Consequences /
-Implementation chunk plan" + close-plan §6 step (c)-2.
+**Step (c)-2.2 — Per-instance thunk arena lifecycle** per
+ADR-0066 §Consequences /  Implementation chunk plan.
 
-The byte layout is opcode-pinned (ARM64: 4 instructions +
-16 bytes literal pool; x86_64: 3 instructions). First chunk
-lands the encoder API + unit tests; no resolver wiring,
-no Instance integration yet. Subsequent chunks: (c)-2.2
-thunk arena allocation; (c)-2.3 resolver wire-up in
+(c)-2.1 landed the encoder API; (c)-2.2 plumbs an
+RX-mappable arena into the per-instance `JitModule` (or
+sibling block) so resolved imports can plant thunks. Pattern
+mirror: `platform/jit_mem.zig` for the mmap/mprotect cycle;
+the existing `JitBlock` for body code is the closest
+analogue. Sized at instantiate time to `num_func_imports *
+shared.thunk.thunk_bytes` (rounded to page); zero-allocation
+when an instance has no Wasm-cross-module imports (host C fn
+imports keep the existing direct-pointer slot).
+
+Subsequent chunks: (c)-2.3 resolver wire-up in
 `instantiateRuntime`; (c)-2.4 spec_assert cross-module
 integration test (discharges D-138; incidentally exercises
 D-079 v128 sub-gap ii).
-
-ADR-0066 supersedes the pre-survey targets from the prior
-handover; Step 0 survey for (c)-2.1 is narrow (encoder shape
-only — see ADR-0066 §Decision for the byte layout).
 
 **Cat II residual** (background): D-137 mixed int+float
 multi-result + 3-result via X8 indirect-result-ptr. Both

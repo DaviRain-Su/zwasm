@@ -234,6 +234,9 @@ test {
     _ = @import("engine/codegen/shared/entry.zig");
     _ = @import("engine/codegen/shared/jit_abi.zig");
     _ = @import("engine/codegen/shared/compile.zig");
+    _ = @import("engine/codegen/shared/thunk.zig");
+    _ = @import("engine/codegen/arm64/thunk.zig");
+    _ = @import("engine/codegen/x86_64/thunk.zig");
     _ = @import("engine/runner.zig");
     _ = @import("ir/analysis/loop_info.zig");
     _ = @import("ir/analysis/liveness.zig");

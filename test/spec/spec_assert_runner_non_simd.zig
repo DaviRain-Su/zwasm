@@ -317,7 +317,7 @@ fn nonSimdRunAssertReturn(
     // between `<kind>:<value>` tokens). Phase 9 Cat II per ADR-0065;
     // shapes drained one at a time matching the close-plan §6 step (b)
     // priority order.
-    if (std.mem.indexOfScalar(u8, results_s, ' ') != null) {
+    if (std.mem.findScalar(u8, results_s, ' ') != null) {
         return dispatchMultiResult(compiled, func_idx, &rt, fn_name, args_s, args[0..n_args], results_s, stdout, name);
     }
 

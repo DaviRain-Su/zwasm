@@ -608,6 +608,21 @@ pub fn encBL(disp_words: i32) u32 {
     return 0x94000000 | masked;
 }
 
+/// `ADR Xd, label` — PC-relative address. Forms `Xd = PC + imm21`
+/// where `imm21` is a signed 21-bit byte offset (range
+/// ±1 MiB). Per Arm IHI 0055 §C6.2.10. Encoding:
+/// `0 immlo[2] 10000 immhi[19] Rd[5]` — bit 31 = 0 (ADR, not
+/// ADRP), bits 30..29 = immlo (low 2 bits of imm21), bits
+/// 28..24 = 10000, bits 23..5 = immhi (high 19 bits of imm21),
+/// bits 4..0 = Rd. Used by ADR-0066 cross-module bridge thunks
+/// to compute the in-thunk literal-pool base.
+pub fn encAdr(rd: Xn, byte_offset: i21) u32 {
+    const u: u32 = @as(u32, @bitCast(@as(i32, byte_offset))) & 0x1FFFFF;
+    const immlo: u32 = u & 0x3;
+    const immhi: u32 = (u >> 2) & 0x7FFFF;
+    return 0x10000000 | (immlo << 29) | (immhi << 5) | @as(u32, rd);
+}
+
 /// `CBZ Wn, disp` — branch when Wn == 0; 19-bit signed
 /// instruction-unit offset (range ±1 MiB).
 /// Encoding: `0 011010 0 [imm19:19] [Rt:5]` = `0x34000000`.
@@ -1327,6 +1342,23 @@ test "encB -1 — backward branch by 1 word → 0x17FFFFFF" {
 
 test "encBL +1 — `bl 1f` (next instr) → 0x94000001" {
     try testing.expectEqual(@as(u32, 0x94000001), encBL(1));
+}
+
+test "encAdr x16, +16 — `adr x16, .+16` → 0x10000090 (cross-module thunk literal pool base)" {
+    try testing.expectEqual(@as(u32, 0x10000090), encAdr(16, 16));
+}
+
+test "encAdr x0, 0 — `adr x0, .` → 0x10000000" {
+    try testing.expectEqual(@as(u32, 0x10000000), encAdr(0, 0));
+}
+
+test "encAdr x1, +3 — odd byte offset packs immlo correctly" {
+    // imm21 = 3 = 0b11. immlo = 0b11 → bits 30..29 = 0b11.
+    // immhi = 0, Rd = 1. Pack:
+    //   bit 31 = 0, bits 30..29 = 11, bits 28..24 = 10000,
+    //   bits 23..5 = 0, bits 4..0 = 00001.
+    // = 0_11_10000_0000000000000000000_00001 = 0x70000001.
+    try testing.expectEqual(@as(u32, 0x70000001), encAdr(1, 3));
 }
 
 test "encCbnzW w0, +1 — `cbnz w0, 1f` → 0x35000020" {

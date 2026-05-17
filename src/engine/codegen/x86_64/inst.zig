@@ -267,6 +267,7 @@ pub const encCmovccRR = inst_branch.encCmovccRR;
 pub const encCallRel32 = inst_branch.encCallRel32;
 pub const encCallReg = inst_branch.encCallReg;
 pub const encJccRel8 = inst_branch.encJccRel8;
+pub const encJmpReg = inst_branch.encJmpReg;
 pub const encJmpRel32 = inst_branch.encJmpRel32;
 pub const encJccRel32 = inst_branch.encJccRel32;
 pub const patchRel32 = inst_branch.patchRel32;
@@ -999,6 +1000,16 @@ test "encCallReg: call rax → ff d0 (no REX)" {
 test "encCallReg: call r10 → 41 ff d2 (REX.B)" {
     const enc = encCallReg(.r10);
     try testing.expectEqualSlices(u8, &.{ 0x41, 0xFF, 0xD2 }, enc.slice());
+}
+
+test "encJmpReg: jmp rax → ff e0 (no REX, /4 = JMP, ADR-0066 thunk tail-call)" {
+    const enc = encJmpReg(.rax);
+    try testing.expectEqualSlices(u8, &.{ 0xFF, 0xE0 }, enc.slice());
+}
+
+test "encJmpReg: jmp r10 → 41 ff e2 (REX.B)" {
+    const enc = encJmpReg(.r10);
+    try testing.expectEqualSlices(u8, &.{ 0x41, 0xFF, 0xE2 }, enc.slice());
 }
 
 test "encCmpRImm32: cmp eax, 0 → 81 f8 00 00 00 00 (no REX)" {
