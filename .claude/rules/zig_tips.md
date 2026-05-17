@@ -75,7 +75,24 @@ Five rules: `no_deprecated`, `no_orelse_unreachable`,
   inferred-error-set issues with recursion.
 - **`std.Io.File.stdout()`**: requires `io` from `std.process.Init`
   (Juicy Main) or `Runtime.io`; remember `try stdout.flush()`.
-- **`undefined`** is canonical for fixed-size stack buffers.
+- **`undefined`** is canonical for fixed-size stack buffers
+  (the caller writes before reading).
+- **`undefined` in extern struct fields shared across an ABI
+  boundary is a time bomb** (D-142, 2026-05-17). Zig fills
+  `undefined` with `0xAA` poison bytes in Debug. If the struct
+  is read by JIT-emitted code or a signal handler, the
+  poisoned field is dereferenced FAR from the construction
+  site; the fault address `0xAA...AA + offset` reveals it but
+  the call stack doesn't point at the originating struct init.
+  **For pointer / slice fields in `extern struct`s that will be
+  read by JIT-emitted code, signal handlers, or any code you
+  did not write yourself**, use safe sentinels:
+  `[*]const T = @ptrFromInt(0x1000)` (a stub address) or an
+  empty static array's `.ptr` (always non-null, dereferences
+  cleanly to zero if accidentally read), NOT `undefined`. See
+  `RegisteredExporter.ensureCompiledAndRt` in
+  `test/spec/spec_assert_runner_base.zig` for the v2-side
+  pattern this rule was extracted from.
 - **Short identifiers** (`i`, `n`, `rt`, `ea`) are fine — math
   conventions in WebAssembly / IR / regalloc code.
 - **Inferred error sets** at the implementation layer (`anyerror!T`)

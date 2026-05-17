@@ -150,6 +150,56 @@ retrospective surfaced this gap as a session-end observation
 (see `.dev/decisions/0022_post_session_retrospective.md`'s
 "Process improvements" §).
 
+### Step 5 — Hard-bug investigation: prefer permanent diagnostic infra over throwaway probes
+
+When the bug requires **more than 1 cycle** of the `/continue`
+loop to bisect, every cycle that adds a **permanent** piece
+of diagnostic infrastructure compounds value into future
+cycles. Throwaway probes get reverted; the next cycle has
+to re-derive the same observations.
+
+The D-142 chain (2026-05-17, 6 cycles to root-cause) proved
+this empirically. Each cycle landed one permanent piece:
+
+- Cycle 1: PAC hypothesis ruling-out via `otool -tv` on the
+  Debug binary (no new code, but the technique cited in the
+  lesson is permanent).
+- Cycle 4: `sigsegv_handler_entry_count` +
+  `sigsegv_last_armed_entry` + `formatU32Decimal` helper
+  (commits `4f082cb0`).
+- Cycle 5: SA_SIGINFO upgrade + `siginfo.addr` emission +
+  `formatU64Hex` helper (commit `dd0cd332`).
+- Cycle 6: byte-dump + body-probe technique (probes
+  reverted, but the lesson + extended `debug_jit_auto`
+  Recipe 8 / poison-pattern cheatsheet are permanent).
+
+Cycle 6's root-cause discovery happened in under a minute
+once the SA_SIGINFO fault-address fired with the `0xAA`
+poison pattern — the prior 5 cycles' infra was load-bearing
+for that minute.
+
+**Rule**: when a bug requires multi-cycle investigation,
+each cycle SHOULD aim to land at least one of:
+
+- A new permanent diagnostic primitive (signal-handler
+  counter, fault-address capture, instruction-stream
+  dumper, structured stderr emitter).
+- A `debug_jit_auto` SKILL.md recipe entry (e.g., a new row
+  in the poison-pattern cheatsheet).
+- A `.claude/rules/` rule that captures the bug class
+  (when the lesson is generalisable beyond this specific
+  bug).
+- An eliminated hypothesis in the
+  [`hypothesis_enumeration.md`](hypothesis_enumeration.md)
+  list with the rejecting probe explicitly named.
+
+The opposite anti-pattern (observed across D-142 cycles 3-4
+before the discipline was named): add a 20-line stderr-dump
+probe, run, learn one fact, revert it, repeat next cycle
+with a slightly different probe. Five cycles of this leave
+nothing in git but the chat transcript (which auto-compacts
+away).
+
 ## Forbidden anti-patterns
 
 - **"It might not work, so I'll skip"** — the only valid skip is

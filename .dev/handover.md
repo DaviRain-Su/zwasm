@@ -75,16 +75,25 @@ Sub-chunking progress (Cat III (c)-2.3):
   caller's X19 (ADR-0066 amendment, ~48-byte thunk);
   (B) replace `undefined` field inits with safe stubs.
   See lesson for full diagnostic chain.
-- **NEXT options** (loop should pick one):
-  (1) Deep D-142 investigation (SA_SIGINFO + ucontext_t to
-      capture fault PC + address; hypotheses 1 and 2 are
-      already rejected, 3/4/5 remain).
-  (2) D-055 sentinel wire-up (now partially unblocked by
-      D-052 helper landing; test-site migration to
-      `body_start_offset()`-relative pattern still needed).
-  (3) D-126 bulk.wast table.copy post-mutation (Cat III
-      scope per ADR-0065; needs unification ADR).
-- (c)-2.4 (distiller) follows once γ-4 lands (gated on D-142).
+- **NEXT (D-142 fix landing)**:
+  (B) FIRST — `ensureCompiledAndRt` undefined-field audit +
+      replace with safe stub pointers (smaller atomic chunk,
+      no ADR, ~30 LOC). Removes the poison that surfaces the
+      X19-corruption bug.
+  (A) SECOND — ADR-0066 amendment + bridge thunk redesign
+      (BL/RET pattern with caller-X19 stack save). Both
+      arm64 and x86_64 thunk encoders + thunk_bytes constant
+      update. ~50 LOC per arch + ADR. Load-bearing ABI
+      change.
+  After both land, γ-4 (relax `hasUnbindableImports`) can
+  finally land, unblocking (c)-2.4 distiller + D-079 (ii) +
+  D-105 + D-126 Cat-III-dependent pieces.
+- This-session scaffolding deliverables landed:
+  `.claude/rules/abi_callee_saved_pinning.md`,
+  `.claude/rules/hypothesis_enumeration.md`, +
+  `zig_tips.md` undefined-extern entry +
+  `debug_jit_auto` Recipe 8 (poison cheatsheet) +
+  `extended_challenge.md` Step 5 (permanent-infra discipline).
 
 (c)-2.4 = corpus distiller's `supported` set extension + new
 fixture rebuild; discharges D-138 fully + D-079 sub-gap ii.

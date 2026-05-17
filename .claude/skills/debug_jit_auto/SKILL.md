@@ -275,6 +275,52 @@ extract a `src/diagnostic/jit_dump.zig` module rather than
 duplicate. Until then, copy the pattern from spec_assert and
 adapt the recovery target.
 
+## Recipe 8 — fault-address poison-pattern decoding (FIRST step on every SEGV)
+
+Per D-142 cycle 6 (2026-05-17): **the very first action on any
+SEGV is to capture the fault address from `siginfo_t.addr`
+via SA_SIGINFO and decode its pattern**. The pattern usually
+identifies the bug class in seconds, narrowing which recipe
+above to invoke next.
+
+The infrastructure is already in place at
+`test/spec/spec_assert_runner_base.zig::sigsegvHandler`
+(SA_SIGINFO upgrade landed in commit `dd0cd332`); the
+unarmed-branch trace emits
+`(handler-entry=N last-armed=M fault-addr=0xNNNN...)`
+automatically. For new SEGV-prone code paths, install the same
+sa_sigaction + `siginfo.addr` emission pattern.
+
+### Pattern cheatsheet
+
+| Fault address pattern | Likely cause | Decode example |
+|---|---|---|
+| `0xAA...AA` ± small offset | Zig `undefined` poison (Debug only) — uninitialised memory dereferenced. The low byte reveals the offset from the poison base: `0xB2 = 0xAA + 8`, `0xCC = 0xAA + 0x22`, etc. | `0xaaaaaaaaaaaaaab2` ⇒ uninit pointer deref at `+8`. Trace back: which field is at offset 8 of an extern struct that was constructed with `.foo = undefined`? See `.claude/rules/zig_tips.md` `undefined in extern struct` entry. |
+| `0xCC...CC` ± small offset | x86 INT3 / Zig safety-stub remnant. Often inside a freed or de-init'd region. | grep for `@memset(buf, 0xCC)` or look for use-after-free. |
+| `0xDEADBEEF` / `0xDEAD_DEAD` | Sentinel value. Check `linker.IMPORT_SENTINEL_OFFSET` (`0xFFFF_FFFF`), `@ptrFromInt(0xDEADBEEF)` patterns. | grep `0xDEAD` / `IMPORT_SENTINEL`. |
+| `0xFFFF_FFFF` / `0xFFFF_FFFF_FFFF_FFFF` | sentinel "no value"; for slices, `len = maxInt(u32)` etc. | check the slice's len/cap fields. |
+| Near current SP (within 8 KB of `mov sp, sp`) | Stack-guard hit (stack overflow). | compare against pthread stack info via `pthread_attr_getstack`; check for deep recursion. |
+| Mac aarch64 `0x1xx_xxxxxx` | `.text` or MAP_JIT region. Cross-check `otool -tv <binary>` (Recipe 1 / 2). | likely a code-address fault (bad function pointer load or RX page that wasn't mapped X). |
+| Linux x86_64 `0x40_xxxx_xxxx` / `0x55_xxxx_xxxx` | `.text` or MAP_JIT region. | `/proc/self/maps` cross-check. |
+| `0x0` or low (< 0x1000) | NULL deref. | trivially `*null`; check optional unwrap sites. |
+| Large random-looking address (e.g. `0x7fff_xxxx_xxxx`) | Likely valid stack / heap area but wrong contents. | use Recipe 1 to capture register state + check pointer provenance. |
+
+### Why first-step
+
+Without the fault address, every SEGV investigation starts by
+guessing the bug class from the symptom. The address narrows
+the search **before** committing to a specific recipe. D-142
+spent 5 cycles rejecting hypotheses (PAC, siglongjmp re-entry,
+altstack, layout, MAP_JIT-flip) before the fault-address
+emission landed; cycle 6 identified the poison pattern in
+under a minute.
+
+### When the pattern doesn't match the cheatsheet
+
+Capture the address anyway and add a row to this table in
+the same commit that closes the bug. The cheatsheet's
+value is cumulative.
+
 ## When to invoke each recipe (decision tree)
 
 ```
