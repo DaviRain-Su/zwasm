@@ -294,7 +294,6 @@ const ArgValue = base.ArgValue;
 /// directive. Backing storage moved to `base.growable_memory` per
 /// ADR-0059 / §9.9 / 9.9-l-1b-d093-d8c so `memory.grow` callouts
 /// can extend the in-use region within a 16-page pool.
-
 /// Globals byte buffer. ADR-0052 — v128 globals live in 16-byte
 /// slots (with 16-byte alignment); scalar globals in 8-byte
 /// slots. 256 bytes accommodates up to 16 v128 globals or 32
@@ -348,6 +347,7 @@ fn runAssertReturn(
         scratch_globals[0..],
         scratch_funcptrs[0..],
         scratch_typeidxs[0..],
+        null,
     );
 
     var args: [4]ArgValue = undefined;
@@ -784,6 +784,7 @@ fn runAssertTrap(
         scratch_globals[0..],
         scratch_funcptrs[0..],
         scratch_typeidxs[0..],
+        null,
     );
 
     var args: [4]ArgValue = undefined;

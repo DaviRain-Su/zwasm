@@ -231,6 +231,17 @@ pub fn makeJitRuntime(
     globals: []u8,
     funcptrs: []u64,
     typeidxs: []u32,
+    // §9.9-III (c)-2.3-β-1 per ADR-0066: optional per-module
+    // dispatch override. When `dispatch_override` is non-null,
+    // `host_dispatch_base` points at the caller-provided slice
+    // (typically: trap stubs initially, with some slots
+    // overwritten by `shared.thunk.emitThunk` addresses for
+    // cross-module-resolved imports). When null, falls back to
+    // the static `host_dispatch_stubs` global (the pre-(c)-2.3
+    // shape — all imports route to the host-trap stub). The
+    // length of the slice (or HOST_DISPATCH_STUB_CAPACITY in
+    // the null case) populates `host_dispatch_count`.
+    dispatch_override: ?[]const usize,
 ) entry.JitRuntime {
     // §9.9 / 9.9-l-1b-d093-d42b (D-112): always wire entry 0 of
     // the multi-table descriptor to point at the (funcptrs,
@@ -281,8 +292,8 @@ pub fn makeJitRuntime(
         // any realistic module's import count); unused slots also
         // point to the trap stub so out-of-range indices remain
         // safe.
-        .host_dispatch_base = &host_dispatch_stubs,
-        .host_dispatch_count = HOST_DISPATCH_STUB_CAPACITY,
+        .host_dispatch_base = if (dispatch_override) |d| d.ptr else &host_dispatch_stubs,
+        .host_dispatch_count = if (dispatch_override) |d| @intCast(d.len) else HOST_DISPATCH_STUB_CAPACITY,
         .memory_grow_fn = growableMemoryGrowFn,
         .table_grow_fn = growableTableGrowFn,
         // §9.9 / 9.9-l-1b-d093-d49 (D-123): elem-segment scratch
