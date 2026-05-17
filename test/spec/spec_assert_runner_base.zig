@@ -1502,16 +1502,13 @@ pub fn hasUnbindableImports(
         const is_spectest = std.mem.eql(u8, imp.module, "spectest");
         switch (imp.kind) {
             .func => {
-                // §9.9-III (c)-2.3-γ-4 strict (pending γ.3 relax).
-                // ADR-0068 chunks α/β/γ/γ.2 structurally fixed
-                // D-126's dual-view storage bug (refs + funcptrs +
-                // typeidx mirror writes on both arm64 and x86_64).
-                // A pre-relax probe (chunk γ.2 close) showed 25305
-                // passed / 3 failed when γ-4 was relaxed; the 3
-                // residuals (imports / ref_func cross-module
-                // fixtures) are NOT typeidx-related and need
-                // separate investigation. Chunk γ.3 will land the
-                // relax once those clear.
+                // §9.9-III (c)-2.3-γ-4 strict pending γ.4. ADR-0068
+                // chunks α/β/γ/γ.2 + γ.3 funcref-global resolver
+                // discharged the dual-view storage class; γ.2 close
+                // probe at γ-4-relax = 25307/1 (1 residual on
+                // imports.1.wasm's i64 cross-module call path, not
+                // typeidx-related). γ.4 lands relax once that
+                // cross-module i64-arg debug is closed.
                 if (is_spectest) continue;
                 return true;
             },

@@ -167,6 +167,19 @@ fn simdOnModuleLoaded(
         try stdout.print("FAIL  {s} multi-table-init: {s}\n", .{ name, @errorName(err) });
         return err;
     };
+    // §9.9-III γ.3 (ADR-0068 follow-up): see non_simd runner —
+    // resolve ref.func funcref globals after func_entities exists.
+    runner_mod.resolveFuncrefGlobals(
+        gpa,
+        wasm_bytes,
+        compiled.globals_offsets,
+        compiled.globals_valtypes,
+        scratch_globals[0..],
+        base.scratch_func_entities[0..base.active_func_count],
+    ) catch |err| {
+        try stdout.print("FAIL  {s} resolve-funcref-globals: {s}\n", .{ name, @errorName(err) });
+        return err;
+    };
     // §9.9-III (c)-2.3-γ-5 per ADR-0066: mirror of the non-SIMD
     // patch — substitute resolved bridge-thunk addrs into
     // table-0 funcptr entries whose source funcidx is an import.

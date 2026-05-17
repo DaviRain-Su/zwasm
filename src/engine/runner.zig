@@ -994,18 +994,9 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
 }
 
 /// ADR-0052 — write each defined global's init-expression value
-/// into `globals_buf` at the per-global byte offset (i.e. the
-/// same offset the JIT-emitted `global.get/set` ops bake in).
-/// Scalar globals (i32/i64/f32/f64/refs) write 8 bytes;
-/// v128 globals write 16 bytes. Mirrors `applyActiveDataSegments`
-/// for spec-test runners that build their JitRuntime around a
-/// caller-owned globals byte buffer instead of going through the
-/// full `setupRuntime` allocation path.
-///
-/// The caller's buffer MUST be at least `compiled.globals_byte_size`
-/// bytes; v128 access requires 16-byte alignment per the
-/// MOVUPS/LDR-Q layout. Buffers smaller than required are rejected
-/// with `Error.UnsupportedEntrySignature`.
+/// into `globals_buf` at the per-global byte offset. Scalar
+/// globals (i32/i64/f32/f64/refs) → 8 bytes; v128 → 16 bytes.
+/// Buffers smaller than `compiled.globals_byte_size` are rejected.
 pub fn applyDefinedGlobalsInit(
     allocator: Allocator,
     wasm_bytes: []const u8,
@@ -1041,21 +1032,39 @@ pub fn applyDefinedGlobalsInit(
     }
 }
 
-/// D-063 discharge (§9.9 / 9.9-h-4) — walk the module's active
-/// element segments and populate caller-owned `funcptrs_buf` +
-/// `typeidxs_buf` with table entries that match the c_api
-/// `setupRuntime` shape. Without this, the JIT-emitted
-/// `call_indirect` bounds-check (`CMP W17, W25 (=table_size)`)
-/// and sig-check (`LDR W16, [X24 (=typeidx_base), X17, LSL #2]`)
-/// see uninitialised state and trap on every call.
-///
-/// Caller passes `funcptrs_buf.len == typeidxs_buf.len ==
-/// max_table_entries` (i.e. the runner's fixed-size scratch);
-/// segments writing past that bound surface
-/// `UnsupportedEntrySignature`. `typeidxs_buf` is pre-seeded to
-/// `maxInt(u32)` (the "no func here" sentinel — the JIT
-/// sig-check's CMP-against-typeidx never matches, traps cleanly
-/// rather than dereferencing NULL).
+/// §9.9-III γ.3 (ADR-0068 follow-up): resolve ref.func-initialised
+/// funcref globals from raw funcidx (placeholder) to FuncEntity*.
+/// Runs AFTER applyDefinedGlobalsInit + func_entities allocation.
+pub fn resolveFuncrefGlobals(
+    allocator: Allocator,
+    wasm_bytes: []const u8,
+    globals_offsets: []const u32,
+    globals_valtypes: []const zir.ValType,
+    globals_buf: []u8,
+    func_entities: []const @import("../runtime/instance/func.zig").FuncEntity,
+) Error!void {
+    if (globals_offsets.len == 0) return;
+    var temp_arena = std.heap.ArenaAllocator.init(allocator);
+    defer temp_arena.deinit();
+    const ta = temp_arena.allocator();
+    var module = try parser.parse(ta, wasm_bytes);
+    const section = module.find(.global) orelse return;
+    var globals_decoded = try sections.decodeGlobals(ta, section.body);
+    defer globals_decoded.deinit();
+    if (globals_decoded.items.len != globals_offsets.len) return Error.UnsupportedEntrySignature;
+    for (globals_decoded.items, 0..) |gd, gi| {
+        if (globals_valtypes[gi] != .funcref) continue;
+        const fidx = rv.initExprRefFunc(gd.init_expr) orelse continue;
+        if (fidx >= func_entities.len) continue;
+        const off = globals_offsets[gi];
+        if (off + 8 > globals_buf.len) return Error.UnsupportedEntrySignature;
+        std.mem.writeInt(u64, globals_buf[off..][0..8], @intFromPtr(&func_entities[fidx]), .little);
+    }
+}
+
+/// D-063 (§9.9 / 9.9-h-4) — populate caller-owned funcptrs+typeidxs
+/// from active element segments. Mirrors c_api `setupRuntime` shape.
+/// `typeidxs_buf` is pre-seeded to maxInt(u32) (no-func sentinel).
 pub fn applyTableInit(
     allocator: Allocator,
     wasm_bytes: []const u8,
@@ -1208,17 +1217,10 @@ pub fn declaredTableMax(allocator: Allocator, wasm_bytes: []const u8, tableidx: 
 
 /// Apply active data segments from `wasm_bytes` into `memory`
 /// (a caller-owned buffer, e.g. a fixed-size scratch arena).
-/// Mirrors the data-init half of `setupRuntime` so spec-test
-/// runners can reuse a stable scratch_memory across modules
-/// without paying the full setupRuntime allocation cost. §9.9 /
-/// 9.9-d-7: simd_assert_runner relies on this so its
-/// `scratch_memory` reflects each fixture's data-segment bytes
-/// before assert_return calls fire.
-///
-/// Returns `Error.UnsupportedEntrySignature` if a segment's
-/// offset is negative, the offset+bytes exceeds `memory.len`,
-/// or the offset_expr is not a `i32.const` literal. Passive /
-/// declarative segments are skipped (only `active` is honoured).
+/// Mirrors the data-init half of `setupRuntime` (§9.9 / 9.9-d-7)
+/// so spec-test runners reuse a stable scratch_memory across
+/// modules. Rejects: negative offset, offset+bytes > memory.len,
+/// non-const offset_expr. Passive / declarative skipped.
 pub fn applyActiveDataSegments(
     allocator: Allocator,
     wasm_bytes: []const u8,

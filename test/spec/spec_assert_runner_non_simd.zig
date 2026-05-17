@@ -205,6 +205,21 @@ fn nonSimdOnModuleLoaded(
         try stdout.print("FAIL  {s} multi-table-init: {s}\n", .{ name, @errorName(err) });
         return err;
     };
+    // §9.9-III γ.3 (ADR-0068 follow-up): resolve ref.func-initialised
+    // funcref globals from raw funcidx (placeholder) to FuncEntity
+    // pointer. `applyDefinedGlobalsInit` ran before `func_entities`
+    // existed; this fixup pass closes the gap.
+    runner_mod.resolveFuncrefGlobals(
+        gpa,
+        wasm_bytes,
+        compiled.globals_offsets,
+        compiled.globals_valtypes,
+        scratch_globals[0..],
+        base.scratch_func_entities[0..base.active_func_count],
+    ) catch |err| {
+        try stdout.print("FAIL  {s} resolve-funcref-globals: {s}\n", .{ name, @errorName(err) });
+        return err;
+    };
     // §9.9-III (c)-2.3-γ-5 per ADR-0066: for table-0 entries whose
     // source funcidx is an IMPORT, `applyTableInit` left funcptr
     // at 0; patch it to the resolved bridge-thunk address from
