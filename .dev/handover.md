@@ -6,14 +6,14 @@
 ## Cold-start procedure
 
 1. **READ FIRST** [`.dev/phase9_close_plan.md`](phase9_close_plan.md)
-   §6. Cat III dispatch — (c)-1/(c)-2.0/(c)-2.1/(c)-2.2 +
-   (c)-2.3-α/β-1/β-2a/β-2b/γ-1/γ-2/γ-3/γ-3.b-arm/γ-3.b-i/γ-3.b-ii
-   landed; **next = γ-3.c** (per-exporter multi-table
-   `tables_ptr` / `tables_jit_ci_ptr`); then γ-4 relax retry.
-2. `git log --oneline -10`. Latest: `7d35ff26` γ-4 post-γ-3.b-ii
-   dry-run + revert (still SEGVs; γ-3.c next). γ-3.b-ii
-   `84f62398` (elem+data segments). γ-3.b-i `3b003b9e`
-   (func_entities). Prior β/γ chain via
+   §6. Cat III dispatch — through γ-3.b-ii landed. γ-4 retry
+   diagnosed as layout-sensitive (lesson
+   `gamma4-stdout-buf-layout-sensitivity`). **Next = γ-4
+   diagnostic instrumentation** (last-module-name trace in
+   `sigsegvHandler`) before γ-3.c attempt.
+2. `git log --oneline -10`. Latest: `f01f51f7` γ-4 retry +
+   layout-sensitivity lesson. γ-3.b-ii `84f62398`, γ-3.b-i
+   `3b003b9e`. Prior β/γ chain via
    `git log --grep="9.9-III"`.
 3. `bash scripts/p9_simd_status.sh` — live SIMD via ubuntunote
    native x86_64 (ADR-0067).
@@ -40,23 +40,24 @@ Read `private/notes/p9-9.9-III-c-2.3-gamma-survey.md` FIRST
 (corpus taxonomy + 5-step ramp; γ-3.b note appended below).
 
 Sub-chunking progress (Cat III (c)-2.3):
-- α/β-1/β-2a/β-2b/γ-1/γ-2/γ-3/γ-3.b-arm/γ-3.b-i/γ-3.b-ii SHAs:
-  `git log --grep="9.9-III"`.
-- γ-3.b-i `3b003b9e`: per-exporter `scratch_func_entities`
-  for `ref.func`.
-- γ-3.b-ii `84f62398`: per-exporter elem + data segments.
-- γ-4 dry-run post-γ-3.b-ii still SEGVs (full test-all corpus)
-  past the elem buffered-stdout flush horizon. Per-corpus
-  bisect ran each of 84 subdirs cleanly — regression is
-  iteration-order / shared-state dependent.
-- **γ-3.c NEXT**: per-exporter multi-table `tables_ptr` +
-  `tables_jit_ci_ptr` (mirror of `setupMultiTableScratch`'s
-  loop body for tables 1..N + descriptor). Heavier — likely
-  ~150 LOC. After γ-3.c, γ-4 retry; if still SEGVs, the
-  remaining gap needs deeper trace (e.g. small stdout buffer
-  or stderr-tagged per-module diagnostic to pinpoint the
-  crash fixture).
-- γ-5 module-qualified invoke + (c)-2.4 distiller after γ-4.
+- SHAs through γ-3.b-ii: `git log --grep="9.9-III"`.
+- γ-4 retry post-γ-3.b-ii `f01f51f7`: still `_exit(142)`.
+  `stdout_buf` bisect (16/32/.../4096) flipped between green
+  and crashing across rebuilds with same source — verdict:
+  layout-sensitive, not deterministic-per-source. Per-corpus
+  bisect ran all 84 subdirs cleanly. Lesson recorded as
+  `2026-05-17-gamma4-stdout-buf-layout-sensitivity`.
+- **γ-4 DIAG NEXT**: instrument `sigsegvHandler` (line ~1384
+  in `spec_assert_runner_base.zig`) with async-signal-safe
+  last-module-name trace before `_exit(142)`:
+  `pub var last_module_name: [256]u8 = undefined;` +
+  `pub var last_module_name_len: u32 = 0;` updated at the
+  `.module` arm of `runCorpus`; handler writes to stderr via
+  `write(2)`. Then re-attempt γ-4 relax — the trace pinpoints
+  the crash fixture, which informs whether γ-3.c (multi-
+  table) is the real gap or something else.
+- γ-3.c (per-exporter multi-table) + γ-5 (module-qualified
+  invoke) + (c)-2.4 (distiller) follow once γ-4 lands.
 
 (c)-2.4 = corpus distiller's `supported` set extension + new
 fixture rebuild; discharges D-138 fully + D-079 sub-gap ii.
