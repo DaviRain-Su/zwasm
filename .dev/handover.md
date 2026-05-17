@@ -51,32 +51,29 @@ remains the D-134 plan.
 
 ### Next-session active task
 
-**Step (c)-2 — Cross-module import linker** per close-plan §6
-step (c) sub-chunk 2. The (c)-1c chunk landed the runner-side
-`registered` registry (alias → owned wasm bytes); now the
-runner needs to consume it when compiling a module that
-imports from a registered alias:
+**Step (c)-2 — Cross-module import linker (per-import bound
+dispatch)** per close-plan §6 step (c) sub-chunk 2 + D-138.
+A naive relaxation attempted this session HUNG the runner
+(D-138 documented). The proper path requires per-import slot
+indexing in `host_dispatch_base` + a bridge thunk from
+caller's JIT-arg convention to callee's entry-helper
+convention.
 
-1. Identify modules whose imports name a registered alias
-   (the distiller already filters via `hasUnbindableImports`;
-   need to RELAX that filter for known-registered aliases).
-2. At compile/instantiate time, look up the import's module
-   name in `registered`. If present, bind the import to a
-   function in the registered module's exports (need to
-   compile or pre-compile the registered module to extract
-   its exports).
-3. Compile cross-module-action invokes (currently
-   `skip-adr-skip_cross_module_action`) — emit
-   `assert_return $mod fn ...` and have the runner dispatch.
+Pre-work survey: read
+- v1 zwasm `src/c_api/cross_module.zig` (existing cross-module
+  func dispatch in v1)
+- `~/Documents/OSS/wasmtime/crates/runtime/src/instance.rs`
+  Func ImportedFunction binding
+- `~/Documents/OSS/zware/src/instance/instance.zig` import
+  resolution
 
-This is substantial — needs to either expose
-`*runner_mod.CompiledWasm`'s exports for late binding OR
-compile the registered modules once at register time.
-Likely 200-400 LOC + design decision on which path.
+Likely an ADR (`.dev/decisions/0066_*`) for the design
+decision: late-bind vs pre-compile-at-register-time, plus
+per-import-slot mechanism.
 
-**Cat II residual** (lower priority): D-137 mixed int+float
-multi-result + 3-result via X8 indirect-result-ptr. Both need
-ABI bridge ADRs. ~17 lines.
+**Cat II residual** (background): D-137 mixed int+float
+multi-result + 3-result via X8 indirect-result-ptr. Both
+need ABI bridge ADRs. ~17 lines.
 
 ### Discipline reminders
 
