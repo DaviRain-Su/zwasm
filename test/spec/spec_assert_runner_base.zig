@@ -1363,26 +1363,28 @@ pub fn hasUnbindableImports(
         switch (imp.kind) {
             .func => {
                 // §9.9-III (c)-2.3-β-2b BISECT NARROW (still in
-                // effect post-γ-3.b-arm): non-spectest =
-                // unbindable. γ-1/γ-2/γ-3 backed globals / memory
-                // / table-0; γ-3.b-arm armed sigsegv around start-
-                // fn invocations so unbacked-state SEGVs surface
-                // as SkipModule. But γ-4 relaxation still
-                // regressed `ref_func.1`'s `is_null-v` (returned
-                // wrong VALUE, not SEGV) — confirming that
-                // cross-module callees read state beyond what
-                // γ-3 backs (`func_entities_ptr` for ref.func is
-                // the prime suspect; see `private/notes/p9-9.9-
-                // III-c-2.3-gamma-survey.md`). γ-3.b proper
-                // (back the remaining JitRuntime state) precedes
-                // the γ-4 retry.
+                // effect post-γ-3.b-ii): non-spectest =
+                // unbindable. γ-1/γ-2/γ-3/γ-3.b-i/γ-3.b-ii
+                // backed globals / memory / table-0 /
+                // func_entities / elem + data segments per-
+                // exporter. γ-4 dry-run on this set still
+                // SEGV-crashes through `_exit(142)` somewhere
+                // past elem.27's last-visible SKIP — multi-
+                // table (`tables_ptr` / `tables_jit_ci_ptr` —
+                // γ-3.c) is the next punch-list item, plus
+                // possibly something else not yet identified
+                // (the buffered-stdout flush horizon hides the
+                // crash point). γ-3.b-arm armed sigsegv was
+                // observed to catch the elem corpus when run
+                // in isolation but the full corpus still
+                // crashes — investigation continues.
                 if (is_spectest) continue;
                 return true;
             },
             // Tables / memories / globals from any module need
             // cross-module table / memory / global IMPORT wiring
             // (separate from the func-import bridge thunks);
-            // γ-3.c / γ-3.d scope.
+            // γ-3.d scope.
             .table, .memory, .global => return true,
         }
     }
