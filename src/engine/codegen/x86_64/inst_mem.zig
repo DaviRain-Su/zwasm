@@ -82,6 +82,24 @@ pub fn encStoreR64MemBaseIdxLsl3(src: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
     return enc;
 }
 
+/// `MOV [base + idx*4], r32` (opcode 0x89 with SIB scale=2 →
+/// ×4). 32-bit store with 4-scaled index — mirror of
+/// `encMovR32FromBaseIdxLsl2`. Used by ADR-0068 emitTableCopy
+/// typeidx mirror: `MOV [Xdst_ti + Xidx*4], Wsrc_ti`.
+pub fn encStoreR32MemBaseIdxLsl2(src: Gpr, base: Gpr, idx: Gpr) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    const r = src.extBit();
+    const x = idx.extBit();
+    const b = base.extBit();
+    if (r != 0 or x != 0 or b != 0) {
+        enc.push(encodeRex(false, r, x, b));
+    }
+    enc.push(0x89);
+    enc.push(encodeModrm(0b00, src.low3(), 0b100));
+    enc.push(encodeSib(0b10, idx.low3(), base.low3())); // scale = ×4
+    return enc;
+}
+
 /// `MOVSXD r64, r/m32` (REX.W + 0x63 /r) — sign-extend 32-bit
 /// source into 64-bit destination. Used by `i64.extend_i32_s`.
 /// dst occupies ModR/M.reg, src occupies r/m (IMUL-style

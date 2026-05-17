@@ -47,9 +47,43 @@ const trace = @import("../../../diagnostic/trace.zig");
 const op_call = @import("op_call.zig");
 const emitShadowAlloc = op_call.emitShadowAlloc;
 const emitShadowFree = op_call.emitShadowFree;
+const func_mod = @import("../../../runtime/instance/func.zig");
 
 const Allocator = std.mem.Allocator;
 const Error = types.Error;
+
+/// TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
+/// Emit the "derive funcptr from funcref value with null check"
+/// sequence for x86_64. Result lands in `dst`; `val` is the
+/// FuncEntity pointer register (Value.null_ref == 0 for null).
+/// Mirror of arm64's `emitDeriveFuncptrFromFuncref`.
+///   TEST val, val
+///   JZ .null
+///   MOV dst, [val + funcentity_funcptr_offset]
+///   JMP .end
+///   .null: XOR dst, dst (zero-extends u64)
+///   .end:
+fn emitDeriveFuncptrFromFuncref(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    dst: inst.Gpr,
+    val: inst.Gpr,
+) Error!void {
+    try buf.appendSlice(allocator, inst.encTestRR(.q, val, val).slice());
+    const jz_at: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
+    try buf.appendSlice(allocator, inst_mem.encMovR64FromMemDisp32(dst, val, @intCast(func_mod.funcentity_funcptr_offset)).slice());
+    const jmp_at: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJmpRel32(0).slice());
+    const null_arm: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encXorRR(.d, dst, dst).slice());
+    const end_byte: u32 = @intCast(buf.items.len);
+
+    const jz_disp: i32 = @as(i32, @intCast(null_arm)) - (@as(i32, @intCast(jz_at)) + 6);
+    @memcpy(buf.items[jz_at..][0..6], inst.encJccRel32(.e, jz_disp).slice()[0..6]);
+    const jmp_disp: i32 = @as(i32, @intCast(end_byte)) - (@as(i32, @intCast(jmp_at)) + 5);
+    @memcpy(buf.items[jmp_at..][0..5], inst.encJmpRel32(jmp_disp).slice()[0..5]);
+}
 
 /// Wasm spec §4.4.10 (table.get) — pop i32 idx, push tables[x][idx]
 /// as a reference Value (8-byte). Traps `OutOfBoundsTableAccess` on
@@ -146,6 +180,21 @@ pub fn emitTableSet(
     const val_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, val_v, 1);
     // MOV [R11 + RDX*8], Rval
     try buf.appendSlice(allocator, inst_mem.encStoreR64MemBaseIdxLsl3(val_r, .r11, .rdx).slice());
+
+    // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
+    // Mirror funcptrs view, guarded on null funcptrs base (externref
+    // tables): RAX = funcptrs base; TEST/JZ skip; derive funcptr from
+    // val_r into RCX; STR RCX into funcptrs[idx].
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .rax, tbl_disp + 16).slice());
+    try buf.appendSlice(allocator, inst.encTestRR(.q, .rax, .rax).slice());
+    const skip_at: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
+    try emitDeriveFuncptrFromFuncref(allocator, buf, .rcx, val_r);
+    try buf.appendSlice(allocator, inst_mem.encStoreR64MemBaseIdxLsl3(.rcx, .rax, .rdx).slice());
+    const end_byte: u32 = @intCast(buf.items.len);
+    const skip_disp: i32 = @as(i32, @intCast(end_byte)) - (@as(i32, @intCast(skip_at)) + 6);
+    @memcpy(buf.items[skip_at..][0..6], inst.encJccRel32(.e, skip_disp).slice()[0..6]);
 }
 
 /// Wasm spec §4.4.12 (table.size) — push tables[x].len as i32.
@@ -300,19 +349,46 @@ pub fn emitTableFill(
         trace.writeBounds(func_idx, fixup_at);
     }
 
+    // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
+    // Pre-loop: R9 = funcptrs base (0 = externref → skip mirror).
+    // For funcref tables, derive funcptr from R8 (val) into RCX.
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r9, .rax, tbl_disp + 16).slice());
+    try buf.appendSlice(allocator, inst.encTestRR(.q, .r9, .r9).slice());
+    const derive_skip_at: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
+    try emitDeriveFuncptrFromFuncref(allocator, buf, .rcx, .r8);
+    {
+        const after: u32 = @intCast(buf.items.len);
+        const disp: i32 = @as(i32, @intCast(after)) - (@as(i32, @intCast(derive_skip_at)) + 6);
+        @memcpy(buf.items[derive_skip_at..][0..6], inst.encJccRel32(.e, disp).slice()[0..6]);
+    }
+
     // Step D: if n == 0, skip the loop. TEST R10, R10 ; JE end.
     try buf.appendSlice(allocator, inst.encTestRR(.q, .r10, .r10).slice());
     const skip_at: u32 = @intCast(buf.items.len);
     try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
 
-    // Step E: loop body.
+    // Step E: loop body with mirror.
     //   .loop:
     //     MOV [R11 + RDX*8], R8       ; refs[dst] = val (8-byte)
-    //     ADD RDX, 1                   ; dst++
-    //     ADD R10, -1                  ; n--
+    //     TEST R9, R9 ; JZ .skip_fp   ; externref → skip funcptrs mirror
+    //     MOV [R9 + RDX*8], RCX       ; funcptrs[dst] = derived
+    //     .skip_fp:
+    //     ADD RDX, 1
+    //     ADD R10, -1
     //     JNE .loop
     const loop_start: u32 = @intCast(buf.items.len);
     try buf.appendSlice(allocator, inst_mem.encStoreR64MemBaseIdxLsl3(.r8, .r11, .rdx).slice());
+    try buf.appendSlice(allocator, inst.encTestRR(.q, .r9, .r9).slice());
+    const fill_skip_fp_at: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
+    try buf.appendSlice(allocator, inst_mem.encStoreR64MemBaseIdxLsl3(.rcx, .r9, .rdx).slice());
+    {
+        const after: u32 = @intCast(buf.items.len);
+        const disp: i32 = @as(i32, @intCast(after)) - (@as(i32, @intCast(fill_skip_fp_at)) + 6);
+        @memcpy(buf.items[fill_skip_fp_at..][0..6], inst.encJccRel32(.e, disp).slice()[0..6]);
+    }
     try buf.appendSlice(allocator, inst.encAddR64Imm32(.rdx, 1).slice());
     try buf.appendSlice(allocator, inst.encAddR64Imm32(.r10, -1).slice());
     {
@@ -397,6 +473,16 @@ pub fn emitTableCopy(
         trace.writeBounds(func_idx, fixup_at);
     }
 
+    // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
+    // Load funcptrs bases for the mirror: RSI = dst_funcptrs_base
+    // (long-lived). For different-tables case also RDI =
+    // src_funcptrs_base. RAX still holds tables_ptr from Step B.
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rsi, .rax, dst_tbl_disp + 16).slice());
+    if (!same_table) {
+        try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rdi, .rax, src_tbl_disp + 16).slice());
+    }
+
     // Step D: if n == 0, skip.
     try buf.appendSlice(allocator, inst.encTestRR(.q, .r10, .r10).slice());
     const skip_at: u32 = @intCast(buf.items.len);
@@ -416,6 +502,17 @@ pub fn emitTableCopy(
         try buf.appendSlice(allocator, inst.encAddR64Imm32(.r8, -1).slice());
         try buf.appendSlice(allocator, inst_mem.encMovR64FromBaseIdxLsl3(.r9, .rcx, .r8).slice());
         try buf.appendSlice(allocator, inst_mem.encStoreR64MemBaseIdxLsl3(.r9, .r11, .rdx).slice());
+        // Mirror funcptrs (same-table: src=dst funcptrs base = RSI).
+        try buf.appendSlice(allocator, inst.encTestRR(.q, .rsi, .rsi).slice());
+        const bwd_fp_skip_at: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
+        try buf.appendSlice(allocator, inst_mem.encMovR64FromBaseIdxLsl3(.r9, .rsi, .r8).slice());
+        try buf.appendSlice(allocator, inst_mem.encStoreR64MemBaseIdxLsl3(.r9, .rsi, .rdx).slice());
+        {
+            const after: u32 = @intCast(buf.items.len);
+            const disp: i32 = @as(i32, @intCast(after)) - (@as(i32, @intCast(bwd_fp_skip_at)) + 6);
+            @memcpy(buf.items[bwd_fp_skip_at..][0..6], inst.encJccRel32(.e, disp).slice()[0..6]);
+        }
         try buf.appendSlice(allocator, inst.encAddR64Imm32(.r10, -1).slice());
         {
             const after_jne: i32 = @as(i32, @intCast(buf.items.len)) + 6;
@@ -436,6 +533,17 @@ pub fn emitTableCopy(
         const fwd_loop_start: u32 = @intCast(buf.items.len);
         try buf.appendSlice(allocator, inst_mem.encMovR64FromBaseIdxLsl3(.r9, .rcx, .r8).slice());
         try buf.appendSlice(allocator, inst_mem.encStoreR64MemBaseIdxLsl3(.r9, .r11, .rdx).slice());
+        // Mirror funcptrs (same-table forward).
+        try buf.appendSlice(allocator, inst.encTestRR(.q, .rsi, .rsi).slice());
+        const fwd_fp_skip_at: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
+        try buf.appendSlice(allocator, inst_mem.encMovR64FromBaseIdxLsl3(.r9, .rsi, .r8).slice());
+        try buf.appendSlice(allocator, inst_mem.encStoreR64MemBaseIdxLsl3(.r9, .rsi, .rdx).slice());
+        {
+            const after: u32 = @intCast(buf.items.len);
+            const disp: i32 = @as(i32, @intCast(after)) - (@as(i32, @intCast(fwd_fp_skip_at)) + 6);
+            @memcpy(buf.items[fwd_fp_skip_at..][0..6], inst.encJccRel32(.e, disp).slice()[0..6]);
+        }
         try buf.appendSlice(allocator, inst.encAddR64Imm32(.rdx, 1).slice());
         try buf.appendSlice(allocator, inst.encAddR64Imm32(.r8, 1).slice());
         try buf.appendSlice(allocator, inst.encAddR64Imm32(.r10, -1).slice());
@@ -450,10 +558,30 @@ pub fn emitTableCopy(
         const jmp_disp: i32 = @as(i32, @intCast(end_byte)) - (@as(i32, @intCast(bwd_end_jmp_at)) + 5);
         std.mem.writeInt(i32, buf.items[bwd_end_jmp_at + 1 ..][0..4], jmp_disp, .little);
     } else {
-        // Different tables: forward only.
+        // Different tables: forward only, with funcptrs + typeidx mirror.
+        if (jit_abi.table_jit_ci_size != 16) @compileError("x86_64 emitTableCopy assumes TableJitCallInfo stride 16");
         const fwd_loop_start: u32 = @intCast(buf.items.len);
         try buf.appendSlice(allocator, inst_mem.encMovR64FromBaseIdxLsl3(.r9, .rcx, .r8).slice());
         try buf.appendSlice(allocator, inst_mem.encStoreR64MemBaseIdxLsl3(.r9, .r11, .rdx).slice());
+        // Mirror funcptrs + typeidx (different-tables case; reloads
+        // tables_jit_ci_ptr each iter for typeidx bases — RAX-only
+        // scratch budget).
+        try buf.appendSlice(allocator, inst.encTestRR(.q, .rsi, .rsi).slice());
+        const xt_skip_at: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
+        try buf.appendSlice(allocator, inst_mem.encMovR64FromBaseIdxLsl3(.r9, .rdi, .r8).slice());
+        try buf.appendSlice(allocator, inst_mem.encStoreR64MemBaseIdxLsl3(.r9, .rsi, .rdx).slice());
+        // typeidx: reload bases per iter.
+        try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_jit_ci_ptr_off).slice());
+        try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r9, .rax, @intCast(dst_tbl * 16 + 8)).slice());
+        try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .rax, @intCast(src_tbl * 16 + 8)).slice());
+        try buf.appendSlice(allocator, inst_mem.encMovR32FromBaseIdxLsl2(.rax, .rax, .r8).slice());
+        try buf.appendSlice(allocator, inst_mem.encStoreR32MemBaseIdxLsl2(.rax, .r9, .rdx).slice());
+        {
+            const after: u32 = @intCast(buf.items.len);
+            const disp: i32 = @as(i32, @intCast(after)) - (@as(i32, @intCast(xt_skip_at)) + 6);
+            @memcpy(buf.items[xt_skip_at..][0..6], inst.encJccRel32(.e, disp).slice()[0..6]);
+        }
         try buf.appendSlice(allocator, inst.encAddR64Imm32(.rdx, 1).slice());
         try buf.appendSlice(allocator, inst.encAddR64Imm32(.r8, 1).slice());
         try buf.appendSlice(allocator, inst.encAddR64Imm32(.r10, -1).slice());
@@ -553,22 +681,40 @@ pub fn emitTableInit(
         trace.writeBounds(func_idx, fixup_at);
     }
 
+    // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
+    // Load dst funcptrs base into RDI — long-lived through loop.
+    // (RAX currently holds elem_dropped_ptr from Step B3; reload
+    // tables_ptr first.)
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rdi, .rax, tbl_disp + 16).slice());
+
     // Step D: if n == 0, skip.
     try buf.appendSlice(allocator, inst.encTestRR(.q, .r10, .r10).slice());
     const skip_at: u32 = @intCast(buf.items.len);
     try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
 
-    // Step E: forward loop — elem_refs[src] → tbl.refs[dst].
+    // Step E: forward loop — elem_refs[src] → tbl.refs[dst] + mirror funcptrs.
     //   .loop:
-    //     MOV R9, [RCX + R8*8]
-    //     MOV [R11 + RDX*8], R9
-    //     ADD RDX, 1
-    //     ADD R8, 1
-    //     ADD R10, -1
-    //     JNE .loop
+    //     MOV R9, [RCX + R8*8]       ; elem_refs[src] (FuncEntity ptr / null)
+    //     MOV [R11 + RDX*8], R9      ; tbl.refs[dst]
+    //     TEST RDI, RDI ; JZ .skip_fp ; externref → skip mirror
+    //     emitDeriveFuncptrFromFuncref(.rsi, .r9)
+    //     MOV [RDI + RDX*8], RSI
+    //     .skip_fp:
+    //     ADD RDX, 1 / ADD R8, 1 / ADD R10, -1 / JNE .loop
     const loop_start: u32 = @intCast(buf.items.len);
     try buf.appendSlice(allocator, inst_mem.encMovR64FromBaseIdxLsl3(.r9, .rcx, .r8).slice());
     try buf.appendSlice(allocator, inst_mem.encStoreR64MemBaseIdxLsl3(.r9, .r11, .rdx).slice());
+    try buf.appendSlice(allocator, inst.encTestRR(.q, .rdi, .rdi).slice());
+    const init_skip_fp_at: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
+    try emitDeriveFuncptrFromFuncref(allocator, buf, .rsi, .r9);
+    try buf.appendSlice(allocator, inst_mem.encStoreR64MemBaseIdxLsl3(.rsi, .rdi, .rdx).slice());
+    {
+        const after: u32 = @intCast(buf.items.len);
+        const disp: i32 = @as(i32, @intCast(after)) - (@as(i32, @intCast(init_skip_fp_at)) + 6);
+        @memcpy(buf.items[init_skip_fp_at..][0..6], inst.encJccRel32(.e, disp).slice()[0..6]);
+    }
     try buf.appendSlice(allocator, inst.encAddR64Imm32(.rdx, 1).slice());
     try buf.appendSlice(allocator, inst.encAddR64Imm32(.r8, 1).slice());
     try buf.appendSlice(allocator, inst.encAddR64Imm32(.r10, -1).slice());
