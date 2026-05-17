@@ -1130,6 +1130,34 @@ pub fn applyTableInitForTable(
     }
 }
 
+/// §9.9-III (c)-2.3-γ-5 per ADR-0066: for `tableidx`'s active
+/// element segments, substitute `dispatch[fidx]` (bridge-thunk
+/// addr from β-2b's resolver) into `funcptrs_buf` for any
+/// import entry (fidx < num_imports). Discharges the
+/// `applyTableInitForTable` IMPORT_SENTINEL → funcptr=0 path
+/// that would SEGV on `call_indirect`. No-op when `dispatch`
+/// is empty.
+pub fn patchTableImportFuncptrs(allocator: Allocator, wasm_bytes: []const u8, num_imports: u32, tableidx: u32, dispatch: []const usize, funcptrs_buf: []u64) Error!void {
+    if (num_imports == 0 or dispatch.len == 0) return;
+    var ta = std.heap.ArenaAllocator.init(allocator);
+    defer ta.deinit();
+    const a = ta.allocator();
+    var module = try parser.parse(a, wasm_bytes);
+    const sec = module.find(.element) orelse return;
+    var elems = try sections.decodeElement(a, sec.body);
+    defer elems.deinit();
+    for (elems.items) |seg| {
+        if (seg.kind != .active or seg.tableidx != tableidx) continue;
+        const off = rv.evalConstI32Expr(seg.offset_expr) catch return Error.UnsupportedEntrySignature;
+        if (off < 0) return Error.UnsupportedEntrySignature;
+        const base: usize = @intCast(off);
+        for (seg.funcidxs, 0..) |fidx, i| {
+            if (fidx >= num_imports or fidx >= dispatch.len or base + i >= funcptrs_buf.len) continue;
+            funcptrs_buf[base + i] = dispatch[fidx];
+        }
+    }
+}
+
 /// §9.9 / 9.9-l-1b-d093-d42b (D-112): count the number of
 /// declared tables in `wasm_bytes`. Used by spec_assert harness
 /// to decide whether multi-table scratch needs to be wired.

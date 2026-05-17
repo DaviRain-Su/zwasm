@@ -167,6 +167,22 @@ fn simdOnModuleLoaded(
         try stdout.print("FAIL  {s} multi-table-init: {s}\n", .{ name, @errorName(err) });
         return err;
     };
+    // §9.9-III (c)-2.3-γ-5 per ADR-0066: mirror of the non-SIMD
+    // patch — substitute resolved bridge-thunk addrs into
+    // table-0 funcptr entries whose source funcidx is an import.
+    if (base.current_dispatch) |disp| {
+        runner_mod.patchTableImportFuncptrs(
+            gpa,
+            wasm_bytes,
+            compiled.num_imports,
+            0,
+            disp,
+            scratch_funcptrs[0..],
+        ) catch |err| {
+            try stdout.print("FAIL  {s} patch table import funcptrs: {s}\n", .{ name, @errorName(err) });
+            return err;
+        };
+    }
 }
 
 /// SIMD specialisation of `base.RunnerCallbacks` per ADR-0057 §"Decision".

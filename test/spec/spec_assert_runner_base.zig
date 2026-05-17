@@ -570,6 +570,21 @@ pub fn setupMultiTableScratch(
             const ti_slice = scratch_extra_typeidxs[k - 1][0..tbl_min];
             if (tbl_min > 0) {
                 try runner_mod.applyTableInitForTable(gpa, wasm_bytes, compiled, k, fp_slice, ti_slice);
+                // §9.9-III (c)-2.3-γ-5 multi-table extension: patch
+                // import-bearing entries in table k's funcptr slice
+                // with resolved bridge-thunk addresses from
+                // `current_dispatch`. Mirrors the table-0 patch in
+                // each on_module_loaded; here for tables 1..N.
+                if (current_dispatch) |disp| {
+                    try runner_mod.patchTableImportFuncptrs(
+                        gpa,
+                        wasm_bytes,
+                        compiled.num_imports,
+                        k,
+                        disp,
+                        fp_slice,
+                    );
+                }
             }
             scratch_table_jit_ci[k] = .{
                 .funcptr_base = if (tbl_min == 0) @as([*]const u64, undefined) else fp_slice.ptr,
@@ -1362,24 +1377,14 @@ pub fn hasUnbindableImports(
         const is_spectest = std.mem.eql(u8, imp.module, "spectest");
         switch (imp.kind) {
             .func => {
-                // §9.9-III (c)-2.3-β-2b BISECT NARROW (post-γ-4
-                // DIAG): non-spectest = unbindable. γ-4 DIAG
-                // handler trace identified
-                // `table_init/table_init.1.wasm` as the SEGV
-                // fixture — the importer's element segments
-                // place imported funcs into a table; the
-                // table's funcptr entry is 0 (`IMPORT_SENTINEL`
-                // path in `applyTableInitForTable` line ~1127),
-                // so `call_indirect` BLRs 0 once the table is
-                // exercised. The fix isn't in
-                // `RegisteredExporter` backing — it's in the
-                // active-module path's `applyTableInit` (or in
-                // a new resolver hook that emits a thunk
-                // address into the importer's funcptr slot when
-                // the cross-module import is resolved). γ-3.d
-                // scope or a new γ-5 sub-chunk; see the
-                // `2026-05-17-gamma4-stdout-buf-layout-
-                // sensitivity` lesson + γ-survey for context.
+                // γ-5 partial: bisect-narrow remains in effect
+                // (relax retry will follow γ-3.c / γ-3.d state-
+                // backing for tables 1..N + memory/global
+                // imports). γ-5's table-import funcptr patch
+                // unblocks table_init/.1/.2/.3 conceptually
+                // (verified mid-cycle); next SEGV after relax
+                // moved to imports/imports.1.wasm — separate
+                // gap. See γ-survey for ramp.
                 if (is_spectest) continue;
                 return true;
             },

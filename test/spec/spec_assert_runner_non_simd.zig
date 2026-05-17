@@ -205,6 +205,28 @@ fn nonSimdOnModuleLoaded(
         try stdout.print("FAIL  {s} multi-table-init: {s}\n", .{ name, @errorName(err) });
         return err;
     };
+    // §9.9-III (c)-2.3-γ-5 per ADR-0066: for table-0 entries whose
+    // source funcidx is an IMPORT, `applyTableInit` left funcptr
+    // at 0; patch it to the resolved bridge-thunk address from
+    // `current_dispatch[fidx]` so `call_indirect` through the
+    // table entry routes via β-2b's thunk to the registered
+    // exporter. No-op when no per-module dispatch was wired
+    // (e.g. spectest-only imports — those keep the 0 funcptr +
+    // trap on call_indirect, consistent with the d-35 trap
+    // stub).
+    if (base.current_dispatch) |disp| {
+        runner_mod.patchTableImportFuncptrs(
+            gpa,
+            wasm_bytes,
+            compiled.num_imports,
+            0,
+            disp,
+            scratch_funcptrs[0..],
+        ) catch |err| {
+            try stdout.print("FAIL  {s} patch table import funcptrs: {s}\n", .{ name, @errorName(err) });
+            return err;
+        };
+    }
     // d-22 (D-106 discharge): Wasm spec §4.5.5.2 — the module's
     // start function (if declared) runs at instantiation, before
     // any export is invoked. Spec corpus `start.wast` exercises
@@ -1478,6 +1500,16 @@ fn nonSimdHandleAssertUninstantiable(
         scratch_funcptrs[0..],
         scratch_typeidxs[0..],
     ) catch return true;
+    if (base.current_dispatch) |disp| {
+        runner_mod.patchTableImportFuncptrs(
+            gpa,
+            wasm_bytes,
+            compiled.num_imports,
+            0,
+            disp,
+            scratch_funcptrs[0..],
+        ) catch return true;
+    }
 
     if (base.extractStartFunc(gpa, wasm_bytes)) |start_funcidx| {
         if (start_funcidx < compiled.module.func_offsets.len and
