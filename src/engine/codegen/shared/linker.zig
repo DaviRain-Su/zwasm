@@ -96,6 +96,36 @@ pub const JitModule = struct {
         }
         return @ptrCast(@alignCast(self.block.bytes.ptr + off));
     }
+
+    /// Return the raw byte address of function `idx`'s entry —
+    /// equivalent to `@intFromPtr(entry(idx, fn() callconv(.c) void))`
+    /// but without forcing a concrete signature. Used by ADR-0066
+    /// cross-module bridge thunks: the thunk's literal pool
+    /// embeds the callee's entry address verbatim, and the per-
+    /// import slot in `host_dispatch_base` then points at the
+    /// thunk (which tail-jumps to this address).
+    ///
+    /// Same `IMPORT_SENTINEL_OFFSET` guard as `entry` — calling
+    /// `entryAddr` for an unresolved import slot is a structural
+    /// bug; the resolver must populate `host_dispatch_base[i]`
+    /// without ever reaching for the importer's own JIT module's
+    /// entry().
+    pub fn entryAddr(self: JitModule, idx: u32) usize {
+        if (idx >= self.func_offsets.len) {
+            std.debug.panic(
+                "JitModule.entryAddr: idx {d} >= func_offsets.len {d}",
+                .{ idx, self.func_offsets.len },
+            );
+        }
+        const off = self.func_offsets[idx];
+        if (off == IMPORT_SENTINEL_OFFSET) {
+            std.debug.panic(
+                "JitModule.entryAddr: idx {d} resolves to IMPORT_SENTINEL_OFFSET — caller asked for an unresolved import's entry address",
+                .{idx},
+            );
+        }
+        return @intFromPtr(self.block.bytes.ptr) + off;
+    }
 };
 
 /// Sentinel value stored in `func_offsets` for import slots. The
@@ -282,4 +312,15 @@ test "link: 2-function module — fn0 calls fn1, returns 7" {
     const f = module.entry(0, Fn);
     try testing.expectEqual(@as(u32, 7), f(&rt));
     try testing.expect(rt.jit_executed_flag != 0);
+
+    // ADR-0066 (c)-2.3 enabling: `entryAddr` returns the raw byte
+    // address of function `idx`'s entry. Cross-module bridge thunks
+    // embed this verbatim in their literal pool (the thunk's
+    // tail-jump target). Verify parity with `entry()` cast to
+    // `usize`: both must point at the same first instruction.
+    try testing.expectEqual(@intFromPtr(f), module.entryAddr(0));
+    const f1 = module.entry(1, Fn);
+    try testing.expectEqual(@intFromPtr(f1), module.entryAddr(1));
+    // Distinct functions live at distinct offsets.
+    try testing.expect(module.entryAddr(0) != module.entryAddr(1));
 }
