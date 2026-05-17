@@ -1749,7 +1749,23 @@ fn formatU32Decimal(value: u32, buf: []u8) []u8 {
     return buf[i..];
 }
 
-fn sigsegvHandler(_: std.posix.SIG) callconv(.c) void {
+/// Async-signal-safe usize → 16-hex-digit ASCII formatter (fixed
+/// width, leading zeros preserved for alignment). `buf` MUST be
+/// at least 16 bytes. Used by the SA_SIGINFO handler to emit
+/// fault addresses for D-142 investigation.
+fn formatU64Hex(value: u64, buf: []u8) []u8 {
+    const hex_digits = "0123456789abcdef";
+    var v = value;
+    var i: usize = 16;
+    while (i > 0) {
+        i -= 1;
+        buf[i] = hex_digits[v & 0xf];
+        v >>= 4;
+    }
+    return buf[0..16];
+}
+
+fn sigsegvHandler(_: std.posix.SIG, info: ?*const std.posix.siginfo_t, _: ?*anyopaque) callconv(.c) void {
     // D-142 probe: count every handler entry so the unarmed
     // branch can disambiguate "first SEGV with flag already
     // false" from "second entry after siglongjmp re-faulted".
@@ -1814,6 +1830,22 @@ fn sigsegvHandler(_: std.posix.SIG) callconv(.c) void {
         _ = write(2, ce_str.ptr, ce_str.len);
         _ = write(2, tail2, tail2.len);
         _ = write(2, ae_str.ptr, ae_str.len);
+        // D-142 probe: emit the fault address from siginfo_t.addr
+        // (POSIX-standard `si_addr` field). Mac aarch64 specific
+        // (Zig's Linux siginfo_t routes through a union that's
+        // non-trivial to navigate from a signal handler context).
+        // Comparing against the stack-guard region, MAP_JIT ranges,
+        // or the `callbacks.on_module_loaded` text address narrows
+        // hypotheses (3) stack-guard hit vs (5) BLR-target near
+        // MAP_JIT flip vs (4) layout coincidence.
+        if (@import("builtin").os.tag == .macos and info != null) {
+            const addr_int: u64 = @intFromPtr(info.?.addr);
+            var fa_buf: [16]u8 = undefined;
+            const fa_str = formatU64Hex(addr_int, &fa_buf);
+            const tail3 = " fault-addr=0x";
+            _ = write(2, tail3, tail3.len);
+            _ = write(2, fa_str.ptr, fa_str.len);
+        }
         _ = write(2, ")\n", 2);
     }
     // SEGV outside an armed JIT call: do not silently swallow.
@@ -1892,10 +1924,16 @@ pub fn installSigsegvHandler() void {
     }, null) catch |err| {
         std.debug.print("installSigsegvHandler: sigaltstack failed: {s}\n", .{@errorName(err)});
     };
+    // D-142 probe (2026-05-17): switch to the sa_sigaction form
+    // (SA.SIGINFO flag) so the handler receives `siginfo_t*` and
+    // can surface the fault address via `siginfo.addr` (POSIX
+    // §"Signal Concepts"). Cross-platform safe: the union member
+    // `.sigaction` is the standard POSIX `sa_sigaction` callback
+    // form supported on every Sigaction layout.
     var act: std.posix.Sigaction = .{
-        .handler = .{ .handler = sigsegvHandler },
+        .handler = .{ .sigaction = sigsegvHandler },
         .mask = std.posix.sigemptyset(),
-        .flags = std.posix.SA.ONSTACK,
+        .flags = std.posix.SA.ONSTACK | std.posix.SA.SIGINFO,
     };
     std.posix.sigaction(.SEGV, &act, null);
     // SIGBUS covers the Mach-side variant (mis-aligned access on
@@ -1912,9 +1950,12 @@ pub fn installSigsegvHandler() void {
     // hypothesis (iii-c).
     var oact: std.posix.Sigaction = undefined;
     std.posix.sigaction(.SEGV, null, &oact);
-    const installed_fn = oact.handler.handler;
+    // D-142 probe: handler is now the sa_sigaction form
+    // (`.sigaction` union member) per the SA.SIGINFO upgrade
+    // above; the readback compares against the same union slot.
+    const installed_fn = oact.handler.sigaction;
     if (installed_fn != sigsegvHandler) {
-        std.debug.print("installSigsegvHandler: SEGV disposition is NOT our handler (oact.handler.handler={?*})\n", .{installed_fn});
+        std.debug.print("installSigsegvHandler: SEGV disposition is NOT our handler (oact.handler.sigaction={?*})\n", .{installed_fn});
     }
 }
 

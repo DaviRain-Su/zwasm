@@ -90,29 +90,45 @@ mechanism, and it failed on this specific call site.
    imports.1 SEGV is a **fresh, unrecovered fault** — handler
    entered with sigsegv_armed=false (correctly cleared by all
    prior recoveries), siglongjmp re-entry is not the cause.
-3. **Altstack interaction** (still open): the handler runs on
-   the altstack (SA.ONSTACK set per
-   `spec_assert_runner_base.zig` line ~1773); altstack itself
-   works for the unarmed branch (we observe its `write(2)`
-   output), but the SEGV's _origin_ might be a stack guard
-   page hit when the on_module_loaded indirect call needs more
-   stack than is available. runCorpus's own frame is ~14.5 KB
-   (`sub sp, sp, #0x3, lsl #12; sub sp, sp, #0xa40`); cumulative
-   stack across the resolver + on_module_loaded body could
-   push past the main thread's guard page.
-4. **Layout-coincidence between dispatch heap and `callbacks`
-   stack slot** (still open): observed `new_dispatch.ptr=
-   0x111880000`, `arena.bytes.ptr=0x108be8000`; stack lives
-   much higher. Direct overlap unlikely.
-5. **Fresh hypothesis after rejecting (1)/(2)**: the SEGV
-   happens at the BLR instruction's target — the function-
-   pointer load + call sequence touches a page that was just
-   `setExecutable`-flipped by `finalizeArena`. If the
-   pthread_jit_write_protect_np cycle leaves the thread in a
-   transient state that traps regular .text reads on the same
-   I-cache line as the freshly-flipped MAP_JIT page, this
-   would manifest as a SEGV at the call boundary with no
-   recovery possible.
+3. ~~**Altstack interaction / stack-guard hit**~~ —
+   **REJECTED 2026-05-17** by SA_SIGINFO upgrade. The fault
+   address captured via `siginfo.addr` is `0xaaaaaaaaaaaaaab2`
+   — Zig's `0xAA` poison pattern for uninitialised memory.
+   Not a stack-guard hit (would be in the SP-vs-guard range)
+   and not a MAP_JIT range (those are at 0x10x... in our
+   observations).
+4. ~~**Layout-coincidence**~~ — implicitly **REJECTED**: the
+   fault address pattern rules out the dispatch-heap or
+   `callbacks` stack overlap explanation.
+5. ~~**BLR target near MAP_JIT flip**~~ — **REJECTED**: same
+   reasoning — fault address is poison, not text/MAP_JIT.
+
+**NEW LEADING HYPOTHESIS (post-SA_SIGINFO probe 2026-05-17)**:
+**uninitialised pointer dereference at offset +8**. The fault
+address `0xaaaaaaaaaaaaaab2` decomposes as `0xAA` × 7 + `0xB2`,
+where `0xB2 = 0xAA + 8`. This is the classic signature of
+`*((uninit_ptr) + 8)`: a base pointer that was Zig-poisoned
+to `0xAA...AA`, plus an offset of 8 bytes, dereferenced as a
+pointer load. Suspect: a slot somewhere in the path between
+the resolver completing and the `callbacks.on_module_loaded`
+vtable indirect-call. Candidate sites:
+
+- `RunnerCallbacks` is a 5-pointer struct (40 bytes); offset 8
+  is `.handle_assert_return`. If the by-value callbacks
+  argument is passed via a Zig-poisoned by-reference slot,
+  the compiler might end up loading the wrong field.
+- The setup-block's `setup_ok` branch may leak a poisoned
+  pointer into runCorpus's stack frame that gets read on
+  the on_module_loaded call path.
+- `compiled.module.entryAddr(...)` returns from a poisoned
+  `JitModule` field if the resolver's `ensureCompiledAndRt`
+  short-circuited unexpectedly.
+
+Next probe (when a session has bandwidth): print the byte
+contents of `callbacks` (40 bytes) at the runCorpus call
+site for `.module imports/imports.1.wasm` to localise which
+field holds the `0xAA` value. Also: read `compiled.module`
+fields and check for `0xAA` patterns.
 
 ## Steps the next investigator should take
 
