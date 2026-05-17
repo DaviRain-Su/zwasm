@@ -7,10 +7,13 @@
 
 1. **READ FIRST** [`.dev/phase9_close_plan.md`](phase9_close_plan.md)
    §6. Cat III dispatch — (c)-1/(c)-2.0/(c)-2.1/(c)-2.2 landed;
-   (c)-2.3-α/β-1/β-2a/β-2b/γ-1/γ-2 landed; **next = (c)-2.3-γ-3
-   per-exporter table state (funcptrs / typeidxs / multi-table)**.
-2. `git log --oneline -10`. Latest: `413d9b57` (c)-2.3-γ-2
-   per-exporter `scratch_memory` + `EXPORTER_MEMORY_CAPACITY`.
+   (c)-2.3-α/β-1/β-2a/β-2b/γ-1/γ-2/γ-3 landed; γ-4 attempt
+   surfaced unmet state (elem / data / func_entities / multi-
+   table) — **next = (c)-2.3-γ-3.b** (back the remaining
+   JitRuntime state) before γ-4 relax retries.
+2. `git log --oneline -10`. Latest: `33d1da17` (c)-2.3-γ-3
+   per-exporter table-0 funcptrs/typeidxs + γ-survey gap
+   discovery in the comment block at `hasUnbindableImports`.
    Prior β/γ chain via `git log --grep="9.9-III"`.
 3. `bash scripts/p9_simd_status.sh` — live SIMD via ubuntunote
    native x86_64 (ADR-0067).
@@ -31,35 +34,29 @@ strict — exercising the dispatch+arena infra via spectest-
 import modules, but pre-existing cross-module fixtures still
 SKIP-CROSS-MODULE-IMPORTS until γ lands per-exporter backing).
 
-### Next-session active task — (c)-2.3-γ-3 per-exporter table
+### Next-session active task — (c)-2.3-γ-3.b remaining state
 
 Read `private/notes/p9-9.9-III-c-2.3-gamma-survey.md` FIRST
-(corpus taxonomy + 5-step γ-1..γ-5 ramp). The static-scratch
-isolation finding from the β survey still applies for
-funcptrs / typeidxs / multi-table descriptors.
+(corpus taxonomy + 5-step ramp; γ-3.b note appended below).
 
 Sub-chunking progress (Cat III (c)-2.3):
-- α/β-1/β-2a/β-2b/γ-1/γ-2 — see `git log --grep="9.9-III"`.
-- β-2b: W^X gap fixed in `allocArena` (lesson
-  `2026-05-17-mac-aarch64-thread-rx-mode-survives-alloc`).
-- γ-1 `9518eb4d`: `RegisteredExporter.scratch_globals` +
-  `applyDefinedGlobalsInit` + `rt.globals_base` wiring + unit
-  test.
-- γ-2 `413d9b57`: `RegisteredExporter.scratch_memory` +
-  `applyActiveDataSegments` + `rt.vm_base` / `rt.mem_limit`
-  wiring + `EXPORTER_MEMORY_CAPACITY = 1 MiB` cap + unit test.
-- **γ-3 NEXT**: per-exporter table state. Add
-  `scratch_funcptrs: ?[]u64` + `scratch_typeidxs: ?[]u32` +
-  per-exporter multi-table descriptor + jit_ci scratch.
-  Populate via `applyTableInit` + `setupMultiTableScratch`
-  against the exporter's wasm bytes; wire `rt.funcptr_base` /
-  `rt.typeidx_base` / `rt.table_size` / `rt.tables_ptr` /
-  `rt.tables_jit_ci_ptr`. ~150 LOC per γ-survey §γ-3. Unit test
-  with a `(module (table 1 funcref) (elem (i32.const 0) 0)
-  (func ...))` payload.
-- γ-4 / γ-5 LATER: relax `hasUnbindableImports` (β-2b code
-  already takes the param via `_ = registered;`); module-
-  qualified invoke directive. See γ-survey for ramp.
+- α/β-1/β-2a/β-2b/γ-1/γ-2/γ-3 SHAs: `git log --grep="9.9-III"`.
+- γ-4 attempt (relax `hasUnbindableImports`) regressed
+  Mac+ubuntunote: elem corpus callees still SEGV via
+  `_exit(142)` — they touch JitRuntime state γ-1/γ-2/γ-3
+  didn't back. Reverted; bisect-narrow comment at
+  `hasUnbindableImports` enumerates the unmet fields.
+- **γ-3.b NEXT**: back remaining `RegisteredExporter` state
+  on `RegisteredExporter` + wire into rt:
+  * elem_segments + elem_dropped (`table.init` / `elem.drop`)
+  * data_segments + data_dropped (`memory.init` / `data.drop`)
+  * func_entities (`ref.func`)
+  * tables_ptr + tables_jit_ci_ptr (multi-table
+    `call_indirect`) — via `setupMultiTableScratch` +
+    `setupElemSegments` against per-exporter buffers.
+- γ-4 / γ-5 retry after γ-3.b: relax
+  `hasUnbindableImports` (∼5 LOC); module-qualified invoke
+  directive.
 
 (c)-2.4 = corpus distiller's `supported` set extension + new
 fixture rebuild; discharges D-138 fully + D-079 sub-gap ii.

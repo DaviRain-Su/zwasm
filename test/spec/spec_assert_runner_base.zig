@@ -1187,24 +1187,28 @@ pub fn hasUnbindableImports(
         const is_spectest = std.mem.eql(u8, imp.module, "spectest");
         switch (imp.kind) {
             .func => {
-                // §9.9-III (c)-2.3-β-2b BISECT NARROW: temporarily
-                // keep the pre-(c)-2.3 strictness (non-spectest =
-                // unbindable). Even though the resolver could
-                // wire a thunk against a registered alias, the
-                // β-2 scope (zero-state callee JitRuntime) doesn't
-                // bound the callee's state access; corpora that
-                // exercise the start fn or table-init crash with
-                // SIGSEGV on memory / global / table dereference.
-                // (c)-2.3-γ relaxes this once per-exporter backing
-                // buffers exist. The dispatch + arena infrastructure
-                // is exercised today via spectest-import modules
-                // (resolver no-ops; arena allocation verifies the
-                // W^X pairing on Mac aarch64).
+                // §9.9-III (c)-2.3-β-2b BISECT NARROW (still in
+                // effect post-γ-3): non-spectest = unbindable.
+                // γ-1/γ-2/γ-3 wired per-exporter globals / memory /
+                // table-0 buffers into `RegisteredExporter`, but
+                // attempting to relax this check still crashes the
+                // spec runner with `_exit(142)` in the elem
+                // corpus: callees touch state `RegisteredExporter`
+                // doesn't yet back — concretely, the JitRuntime
+                // fields `elem_segments_ptr` / `data_segments_ptr` /
+                // `func_entities_ptr` / `tables_ptr` /
+                // `tables_jit_ci_ptr` remain `undefined`, and any
+                // exporter doing `table.init` / `data.drop` /
+                // `ref.func` / multi-table `call_indirect` blows up
+                // dereferencing those pointers. γ-3.b lands the
+                // missing state; until then the bisect-narrow
+                // protects the gate.
                 if (is_spectest) continue;
                 return true;
             },
             // Tables / memories / globals from any module need
-            // host-state binding; not available in the spec runner.
+            // cross-module table / memory / global IMPORT wiring
+            // (separate from the func-import bridge thunks).
             .table, .memory, .global => return true,
         }
     }
