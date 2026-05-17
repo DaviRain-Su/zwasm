@@ -101,7 +101,10 @@ esac
 prev_streak=0
 prev_outcome=""
 if [ -f "$log" ]; then
+  # Defensive: malformed last line (e.g. truncated) yields empty
+  # $4; default to 0 so arithmetic doesn't fail under `set -u`.
   prev_streak=$(tail -1 "$log" | awk '{print $4}')
+  prev_streak=${prev_streak:-0}
   prev_outcome=$(tail -1 "$log" | awk '{print $2}')
 fi
 

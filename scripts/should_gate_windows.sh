@@ -65,7 +65,19 @@ else
 fi
 
 # How many commits ahead of the last windowsmini-tested SHA?
-COMMIT_COUNT=$(git rev-list --count "${LAST}..HEAD" 2>/dev/null || echo 999)
+# `|| echo 999` is fail-safe (over-gates rather than under-gates)
+# but masks the underlying error. Capture stderr to a temp so a
+# real `git rev-list` failure (missing ref / corrupt object DB)
+# surfaces on stderr while still defaulting to gate-required.
+gitrev_err=$(mktemp)
+if COMMIT_COUNT=$(git rev-list --count "${LAST}..HEAD" 2>"$gitrev_err"); then
+    :
+else
+    COMMIT_COUNT=999
+    echo "WARN: git rev-list --count ${LAST}..HEAD failed (likely missing ref); defaulting to gate-required." >&2
+    cat "$gitrev_err" >&2
+fi
+rm -f "$gitrev_err"
 
 DIFF_FILES=$(git diff --name-only "${LAST}..HEAD" 2>/dev/null || echo '')
 

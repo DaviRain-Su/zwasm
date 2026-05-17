@@ -37,11 +37,18 @@ esac
 # Mac aarch64 host (foreground; cheap if cached).
 if [ "$want_mac" = 1 ]; then
   echo "=== Mac aarch64 simd_assert (host) ==="
-  zig build test-spec-simd > "$MAC_LOG" 2>&1 || true
+  if zig build test-spec-simd > "$MAC_LOG" 2>&1; then
+    mac_rc=0
+  else
+    mac_rc=$?
+  fi
+  if [ "$mac_rc" -ne 0 ]; then
+    echo "(zig build test-spec-simd exited $mac_rc — compile or runner failure; tail below)"
+  fi
   if grep -E "simd_assert_runner:" "$MAC_LOG" > /dev/null; then
     grep -E "simd_assert_runner:" "$MAC_LOG"
   else
-    echo "(runner output not found; tail $MAC_LOG below)"
+    echo "(runner output not found in log — likely compile failure; tail $MAC_LOG below)"
     tail -5 "$MAC_LOG"
   fi
   echo
@@ -53,7 +60,14 @@ if [ "$want_ubuntu" = 1 ]; then
   if ! ssh -o ConnectTimeout=3 -o BatchMode=yes ubuntunote true 2>/dev/null; then
     echo "(ubuntunote unreachable; skipping ubuntunote section)"
   else
-    bash scripts/run_remote_ubuntu.sh test-spec-simd > "$UBUNTU_LOG" 2>&1 || true
+    if bash scripts/run_remote_ubuntu.sh test-spec-simd > "$UBUNTU_LOG" 2>&1; then
+      ubuntu_rc=0
+    else
+      ubuntu_rc=$?
+    fi
+    if [ "$ubuntu_rc" -ne 0 ]; then
+      echo "(run_remote_ubuntu.sh test-spec-simd exited $ubuntu_rc — see [run_remote_ubuntu] FAIL line in tail)"
+    fi
 
     if grep -E "simd_assert_runner:" "$UBUNTU_LOG" > /dev/null; then
       grep -E "simd_assert_runner:" "$UBUNTU_LOG"
