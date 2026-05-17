@@ -7,14 +7,17 @@
 
 1. **READ FIRST** [`.dev/phase9_close_plan.md`](phase9_close_plan.md)
    §6. Cat III dispatch — γ-5 landed (`552a2b6d` /
-   `e902e531`). γ-4 DIAG with γ-5 advanced from
-   `table_init/table_init.1.wasm` to
-   `imports/imports.1.wasm` — different gap. **Next = γ-3.d**
-   (spectest table/memory/global imports — separate from
-   func-import bridges).
-2. `git log --oneline -10`. Latest: `552a2b6d` γ-5 import
-   funcptr patch. γ-4 DIAG `6b0d8ec4`. γ-3.b-ii `84f62398`,
-   γ-3.b-i `3b003b9e`. Prior β/γ chain via
+   `e902e531`). γ-3.d bisect this session refuted the
+   "spectest table/memory/global gap" handover prediction:
+   `imports/imports.1.wasm` has only `.func` imports. See
+   [`lessons/2026-05-17-gamma3d-dispatch-write-segv-bisect.md`](lessons/2026-05-17-gamma3d-dispatch-write-segv-bisect.md).
+   **Next = γ-3.d root-cause investigation** (dispatch-slot
+   write triggers SEGV in subsequent vtable call; sigsetjmp
+   arming does NOT recover — needs PAC / signal-delivery
+   investigation; consider running on ubuntunote first to
+   confirm Mac-aarch64 specificity).
+2. `git log --oneline -10`. Latest: handover-only refresh.
+   γ-5 `552a2b6d`. γ-4 DIAG `6b0d8ec4`. Prior β/γ chain via
    `git log --grep="9.9-III"`.
 3. `bash scripts/p9_simd_status.sh` — live SIMD via ubuntunote
    native x86_64 (ADR-0067).
@@ -45,21 +48,24 @@ Sub-chunking progress (Cat III (c)-2.3):
 - γ-5 `552a2b6d`: `runner_mod.patchTableImportFuncptrs` helper +
   wire into nonSimd/simd on_module_loaded, assert_uninstantiable,
   and `setupMultiTableScratch` (multi-table). Resolves the
-  `table_init/table_init.1.wasm` crash (the prior γ-4 DIAG
-  fixture).
-- γ-4 DIAG retry post-γ-5 advanced past table_init to
-  `imports/imports.1.wasm`. Different gap: importer with
-  spectest table/memory/global imports — currently
-  hasUnbindableImports trips on `.table/.memory/.global =>
-  return true`. Likely a subsequent fixture that does compile
-  + runs into another unbacked path; bisect needed.
-- **γ-3.d NEXT**: investigate post-γ-5 `imports/imports.1`
-  SEGV — likely spectest table/memory/global binding gap or
-  another unbacked field. Re-run γ-4 DIAG to pinpoint.
+  `table_init/table_init.1.wasm` crash.
+- γ-3.d session this turn: bisect via `wasm-objdump -x` +
+  per-step DIAG probes inside `resolveCrossModuleImports`.
+  Refuted handover prediction (imports.1 has 0
+  table/memory/global imports — all 18 imports are `.func`).
+  Localised the SEGV to the heap write
+  `new_dispatch[i] = @intFromPtr(slot.ptr)`. The subsequent
+  vtable call `callbacks.on_module_loaded(...)` SEGVs before
+  the function body runs; `sigsetjmp` arm around the call
+  does NOT recover (handler takes unarmed branch). Full
+  evidence in [`lessons/.../gamma3d-dispatch-write-segv-bisect.md`](lessons/2026-05-17-gamma3d-dispatch-write-segv-bisect.md).
+- **γ-3.d NEXT**: run probe on ubuntunote to confirm/refute
+  Mac-aarch64 specificity, then investigate PAC / signal-
+  delivery race per the lesson's hypotheses §.
 - `src/engine/runner.zig` is at 1996 / 2000 LOC — split
-  before next addition (cross-module patch helpers / table
+  before next γ landing (cross-module patch helpers / table
   init family extraction).
-- (c)-2.4 (distiller) follows once γ-4 lands.
+- (c)-2.4 (distiller) follows once γ resolution lands.
 
 (c)-2.4 = corpus distiller's `supported` set extension + new
 fixture rebuild; discharges D-138 fully + D-079 sub-gap ii.
