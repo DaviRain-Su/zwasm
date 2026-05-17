@@ -1711,9 +1711,49 @@ fn siglongjmpWindowsStub(env: [*]u8, val: c_int) callconv(.c) noreturn {
 pub var last_module_name: [256]u8 = undefined;
 pub var last_module_name_len: u32 = 0;
 
+/// D-142 probe: count handler entries across the process lifetime.
+/// Incremented unconditionally at handler entry (before the armed-
+/// branch check), so re-entries triggered by a SEGV-during-
+/// siglongjmp path show as count > 1. The unarmed branch emits
+/// the count alongside the last-module trace. Permanent
+/// infrastructure (like `last_module_name`); zero overhead in
+/// the happy path.
+pub var sigsegv_handler_entry_count: std.atomic.Value(u32) = .init(0);
+
+/// D-142 probe: the most recent handler-entry serial that took
+/// the armed branch (= just before its siglongjmp call). If a
+/// subsequent unarmed entry has serial == armed_serial + 1, the
+/// armed branch's siglongjmp itself re-faulted (since no other
+/// SEGV intervened between the armed entry and the unarmed
+/// entry). Initial value 0 means "no armed entry yet".
+pub var sigsegv_last_armed_entry: std.atomic.Value(u32) = .init(0);
+
 extern "c" fn write(fd: c_int, buf: [*]const u8, count: usize) isize;
 
+/// Async-signal-safe u32 → decimal-ASCII formatter. Writes digits
+/// at the end of `buf` and returns the slice that holds them.
+/// `buf` MUST be at least 10 bytes (u32 max = 4_294_967_295). No
+/// allocation, no stdio. Safe to call from a signal handler.
+fn formatU32Decimal(value: u32, buf: []u8) []u8 {
+    if (value == 0) {
+        buf[buf.len - 1] = '0';
+        return buf[buf.len - 1 ..];
+    }
+    var v = value;
+    var i: usize = buf.len;
+    while (v > 0) {
+        i -= 1;
+        buf[i] = @intCast('0' + (v % 10));
+        v /= 10;
+    }
+    return buf[i..];
+}
+
 fn sigsegvHandler(_: std.posix.SIG) callconv(.c) void {
+    // D-142 probe: count every handler entry so the unarmed
+    // branch can disambiguate "first SEGV with flag already
+    // false" from "second entry after siglongjmp re-faulted".
+    const this_entry = sigsegv_handler_entry_count.fetchAdd(1, .monotonic) + 1;
     // §9.9 / 9.9-l-1b-d093-d62: `std.atomic.Value` access pairs
     // with the release-store at the dispatch site and forces a
     // real memory access. The flag was plain `bool` pre-d-62 but
@@ -1721,6 +1761,15 @@ fn sigsegvHandler(_: std.posix.SIG) callconv(.c) void {
     // moved to the altstack — see the type-level docstring at
     // `sigsegv_armed`.
     if (sigsegv_armed.load(.acquire)) {
+        // D-142 probe (2026-05-17): record the last armed-entry
+        // serial so the unarmed branch can format `last-armed=N`
+        // for re-entry analysis. Cheap (one swap); permanent
+        // infrastructure — unlike the spammy stderr marker that
+        // confirmed there's no siglongjmp re-entry at imports.1
+        // (the unarmed entry is a fresh unrecovered SEGV, not a
+        // re-fault from longjmp), this counter helps any future
+        // SEGV-class investigation distinguish the two modes.
+        _ = sigsegv_last_armed_entry.swap(this_entry, .release);
         sigsegv_armed.store(false, .release);
         siglongjmp(@ptrCast(&sigsegv_recover_buf), 1);
     }
@@ -1738,10 +1787,34 @@ fn sigsegvHandler(_: std.posix.SIG) callconv(.c) void {
         const prefix = "[γ-4 DIAG] SEGV after .module ";
         _ = write(2, prefix, prefix.len);
         _ = write(2, &last_module_name, len);
-        _ = write(2, "\n", 1);
     } else {
-        const msg = "[γ-4 DIAG] SEGV before any .module directive\n";
+        const msg = "[γ-4 DIAG] SEGV before any .module directive";
         _ = write(2, msg, msg.len);
+    }
+    // D-142 probe: emit handler-entry-count + last-armed-entry.
+    // Re-entry from siglongjmp manifests as `this == armed + 1`
+    // (= this unarmed entry follows the most recent armed entry
+    // with no intervening SEGV, i.e. siglongjmp itself re-faulted
+    // and the same SIGSEGV got delivered to the handler again
+    // with the flag now `false`).
+    {
+        var ce_buf: [10]u8 = undefined;
+        var ae_buf: [10]u8 = undefined;
+        const ce_str = formatU32Decimal(
+            sigsegv_handler_entry_count.load(.monotonic),
+            &ce_buf,
+        );
+        const ae_str = formatU32Decimal(
+            sigsegv_last_armed_entry.load(.acquire),
+            &ae_buf,
+        );
+        const tail1 = " (handler-entry=";
+        const tail2 = " last-armed=";
+        _ = write(2, tail1, tail1.len);
+        _ = write(2, ce_str.ptr, ce_str.len);
+        _ = write(2, tail2, tail2.len);
+        _ = write(2, ae_str.ptr, ae_str.len);
+        _ = write(2, ")\n", 2);
     }
     // SEGV outside an armed JIT call: do not silently swallow.
     // `_exit(142)` is async-signal-safe (raw syscall, no atexit

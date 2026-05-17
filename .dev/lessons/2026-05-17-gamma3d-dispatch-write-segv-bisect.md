@@ -72,26 +72,47 @@ mechanism, and it failed on this specific call site.
 
 ## Hypotheses to pursue next
 
-1. **Mac aarch64 Pointer Authentication (PAC)**: the indirect
-   call via `callbacks.on_module_loaded` (a `*const fn` value
-   on runCorpus's stack frame) might be auth-failing somehow
-   after the heap-side write. If true, the SEGV is a PAC trap
-   delivered before the call lands, and the handler's
-   `sigsegv_armed.load(.acquire)` might be reading false because
-   of when the trap fires vs the arm store ordering.
-2. **siglongjmp restore-to-fork**: if the SIGSEGV is delivered
-   on the altstack (`SA.ONSTACK` is set on this runner per
-   `spec_assert_runner_base.zig` line ~1773) AND the trap site
-   is mid-call-instruction, restoring registers may corrupt the
-   thread state such that `sigsegv_armed.store(true)`'s
-   effect is invisible. The d-65 → d-68 D-134 lesson chain
-   noted cross-thread siglongjmp as POSIX-undefined; here the
-   thread is the same but the call boundary is the suspect.
-3. **Layout-coincidence between dispatch heap and `callbacks`
-   stack slot**: `new_dispatch.ptr=0x111880000`,
-   `arena.bytes.ptr=0x108be8000`, stack lives much higher.
-   Direct overlap unlikely, but a JIT-MAP guard page or page-
-   level interaction might still be at play.
+1. ~~**Mac aarch64 Pointer Authentication (PAC)**~~ — **REJECTED
+   2026-05-17 commit `11bb5d76`** via `otool -tv` on the Debug
+   binary: zero `blraa`/`blrab`/`blra ` instructions emitted.
+   PAC is not active for the indirect call site that's SEGVing.
+2. ~~**siglongjmp restore-to-fork / re-entry race**~~ —
+   **REJECTED 2026-05-17** by the handler-entry counter probe.
+   Permanent infra added (`sigsegv_handler_entry_count`,
+   `sigsegv_last_armed_entry`, `formatU32Decimal` helper); the
+   unarmed trace now formats `(handler-entry=N last-armed=M)`.
+   Empirical run shows armed entries #7-13 ALL occurred in
+   `skip-stack-guard-page/skip-stack-guard-page.0.wasm` (the
+   stack-overflow recovery fixture); between #13 and #14
+   (the imports.1 unarmed entry) MANY corpus directives ran
+   without firing the handler at all (assert_traps caught via
+   JIT-detected `Error.Trap`, no SIGSEGV needed). The unarmed
+   imports.1 SEGV is a **fresh, unrecovered fault** — handler
+   entered with sigsegv_armed=false (correctly cleared by all
+   prior recoveries), siglongjmp re-entry is not the cause.
+3. **Altstack interaction** (still open): the handler runs on
+   the altstack (SA.ONSTACK set per
+   `spec_assert_runner_base.zig` line ~1773); altstack itself
+   works for the unarmed branch (we observe its `write(2)`
+   output), but the SEGV's _origin_ might be a stack guard
+   page hit when the on_module_loaded indirect call needs more
+   stack than is available. runCorpus's own frame is ~14.5 KB
+   (`sub sp, sp, #0x3, lsl #12; sub sp, sp, #0xa40`); cumulative
+   stack across the resolver + on_module_loaded body could
+   push past the main thread's guard page.
+4. **Layout-coincidence between dispatch heap and `callbacks`
+   stack slot** (still open): observed `new_dispatch.ptr=
+   0x111880000`, `arena.bytes.ptr=0x108be8000`; stack lives
+   much higher. Direct overlap unlikely.
+5. **Fresh hypothesis after rejecting (1)/(2)**: the SEGV
+   happens at the BLR instruction's target — the function-
+   pointer load + call sequence touches a page that was just
+   `setExecutable`-flipped by `finalizeArena`. If the
+   pthread_jit_write_protect_np cycle leaves the thread in a
+   transient state that traps regular .text reads on the same
+   I-cache line as the freshly-flipped MAP_JIT page, this
+   would manifest as a SEGV at the call boundary with no
+   recovery possible.
 
 ## Steps the next investigator should take
 
