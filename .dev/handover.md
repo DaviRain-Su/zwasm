@@ -7,17 +7,10 @@
 
 1. **READ FIRST** [`.dev/phase9_close_plan.md`](phase9_close_plan.md)
    §6. Cat III dispatch — γ-5 landed (`552a2b6d` /
-   `e902e531`). γ-3.d bisect (`e5c91aef` + this session)
-   established: imports.1 SEGV is **Mac-aarch64 specific**
-   (D-142 filed); ubuntunote runs cleanly to 25196/112/705
-   with 112 functional FAILs (table_copy 65 / table_init 39
-   / ref_func 6) addressed by γ-1/γ-2/γ-3 per-exporter
-   backing. **Next = γ-1** (per-exporter globals — behavior-
-   neutral; doesn't depend on D-142 since no fixture
-   exercises it until γ-4 lands).
-2. `git log --oneline -10`. Latest: γ-3.d findings refresh.
-   γ-5 `552a2b6d`. Prior β/γ chain via
-   `git log --grep="9.9-III"`.
+   `e902e531`). D-142 fix (B) landed (`d543c646`); (A) is
+   next.
+2. `git log --oneline -10`. Latest: D-142 fix (B). Prior β/γ
+   chain via `git log --grep="9.9-III"`.
 3. `bash scripts/p9_simd_status.sh` — live SIMD via ubuntunote
    native x86_64 (ADR-0067).
 4. `cat .dev/debt.md | head -90`. Cat III sub-chunks tracked
@@ -25,78 +18,52 @@
 
 ## Active state — Phase 9 close-plan Step (c)-2.3
 
-D-134 closed structurally (Rosetta race; ubuntunote native
-host eliminates). Cat III JIT dispatch infra: registry
-(c)-1a/b/c; ADR-0066 design (c)-2.0; arm64 32-byte /
-x86_64 22-byte opcode-pinned thunk encoders (c)-2.1;
-`shared/thunk.zig` arena lifecycle (c)-2.2; resolver substrate
-+ wire-up (c)-2.3-α/β-1/β-2a/β-2b. Counts unchanged with
-γ-relaxation deferred: 24034/0/2015 + 13301/0/440 + 212/0/20
-Mac+ubuntunote bit-identical (β-2b kept hasUnbindableImports
-strict — exercising the dispatch+arena infra via spectest-
-import modules, but pre-existing cross-module fixtures still
-SKIP-CROSS-MODULE-IMPORTS until γ lands per-exporter backing).
+D-134 closed structurally. Cat III JIT dispatch infra:
+registry (c)-1a/b/c; ADR-0066 design (c)-2.0; arm64 32-byte
+/ x86_64 22-byte opcode-pinned thunk encoders (c)-2.1;
+`shared/thunk.zig` arena lifecycle (c)-2.2; resolver
+substrate + wire-up (c)-2.3-α/β-1/β-2a/β-2b. γ-1/γ-2/γ-3/
+γ-3.b-i/γ-3.b-ii/γ-5 all landed
+(`9518eb4d`/`413d9b57`/`33d1da17`/`3b003b9e`/`84f62398`/
+`e902e531`). Counts unchanged with γ-relaxation deferred:
+24034/0/2015 + 13301/0/440 + 212/0/20.
 
-### Next-session active task — (c)-2.3-γ-3.b remaining state
+### Next-session active task — D-142 fix (A)
 
-Read `private/notes/p9-9.9-III-c-2.3-gamma-survey.md` FIRST
-(corpus taxonomy + 5-step ramp; γ-3.b note appended below).
+D-142 root cause is two interacting bugs (cycle 6, see
+lesson `2026-05-17-gamma3d-dispatch-write-segv-bisect.md`):
 
-Sub-chunking progress (Cat III (c)-2.3):
-- SHAs through γ-5: `git log --grep="9.9-III"`.
-- γ-1/γ-2/γ-3/γ-3.b-i/γ-3.b-ii/γ-5 **all landed**
-  (`9518eb4d` / `413d9b57` / `33d1da17` / `3b003b9e` /
-  `84f62398` / `e902e531`). `RegisteredExporter` carries
-  scratch_globals / scratch_memory / scratch_funcptrs /
-  scratch_typeidxs / scratch_func_entities /
-  scratch_elem_segments / scratch_data_segments, all wired
-  into per-exporter rt. **Prior handover's "γ-1 NEXT" was
-  stale**.
-- γ-3.d bisect (`e5c91aef` + `2d37c925`) established that
-  γ-4 (the `hasUnbindableImports` relaxation) is the only
-  remaining gating step — and it's **blocked by D-142**
-  (Mac aarch64 SEGV at the cross-module dispatch-slot write
-  boundary). ubuntunote runs cleanly to 25196/112/705 under
-  the relaxation; the 112 FAILs are functional (table_copy
-  65 / table_init 39 / ref_func 6) — γ-1/2/3 backing is
-  populated but does not yet route correctly in some
-  cross-module shapes. This is the residual γ work.
-- **D-142 ROOT CAUSE IDENTIFIED (cycle 6)**: bridge
-  thunk corrupts X19 across cross-module call. Two
-  interacting bugs: (A) v2 arm64 prologue overwrites X19
-  (`runtime_ptr_save_gpr`) without saving caller's value
-  (AAPCS64 §6.4.1 violation); (B) `ensureCompiledAndRt`
-  inits callee_rt with `host_dispatch_base = undefined`
-  (`0xAA` poison in Debug). After cross-module call
-  returns, importer's X19 = callee_rt; next host-import
-  call loads imports.0's poison `host_dispatch_base =
-  0xAA`; LDR at +8 faults at `0xAA + 8 = 0xB2`. Both
-  fixes needed: (A) bridge thunk → BL/RET pattern saving
-  caller's X19 (ADR-0066 amendment, ~48-byte thunk);
-  (B) replace `undefined` field inits with safe stubs.
-  See lesson for full diagnostic chain.
-- **NEXT (D-142 fix landing)**:
-  (B) FIRST — `ensureCompiledAndRt` undefined-field audit +
-      replace with safe stub pointers (smaller atomic chunk,
-      no ADR, ~30 LOC). Removes the poison that surfaces the
-      X19-corruption bug.
-  (A) SECOND — ADR-0066 amendment + bridge thunk redesign
-      (BL/RET pattern with caller-X19 stack save). Both
-      arm64 and x86_64 thunk encoders + thunk_bytes constant
-      update. ~50 LOC per arch + ADR. Load-bearing ABI
-      change.
-  After both land, γ-4 (relax `hasUnbindableImports`) can
-  finally land, unblocking (c)-2.4 distiller + D-079 (ii) +
-  D-105 + D-126 Cat-III-dependent pieces.
-- This-session scaffolding deliverables landed:
-  `.claude/rules/abi_callee_saved_pinning.md`,
-  `.claude/rules/hypothesis_enumeration.md`, +
-  `zig_tips.md` undefined-extern entry +
-  `debug_jit_auto` Recipe 8 (poison cheatsheet) +
-  `extended_challenge.md` Step 5 (permanent-infra discipline).
+- **(A) bridge thunk corrupts X19** across cross-module call
+  (AAPCS64 §6.4.1 violation: v2 arm64 prologue overwrites
+  `runtime_ptr_save_gpr` without saving caller's value).
+- **(B) `ensureCompiledAndRt` leaves `host_dispatch_base`
+  poison-initialised** — once (A) corrupted X19 to point at
+  the wrong rt, the next host-import call dereferenced 0xAA
+  poison at offset +8 → fault at `0xAA + 8 = 0xB2`.
 
-(c)-2.4 = corpus distiller's `supported` set extension + new
-fixture rebuild; discharges D-138 fully + D-079 sub-gap ii.
+(B) **landed** (`d543c646`): `SAFE_STUB_PTR_ADDR = 0x1000`
+constant + all 8 absent-backing `[*]const T` fields recast
+to `@ptrFromInt(stub_ptr)`. Attendant test-wiring discharged
+orphan γ-1/γ-2/γ-3/γ-3.b-i tests (now `zig build test` runs
+them); γ-1 wasm + deinit alignment fixes paid down
+pre-existing rot the wiring exposed.
+
+**NEXT — D-142 fix (A)**: bridge thunk redesign so X19 is
+preserved across cross-module BLR. Requires ADR-0066
+amendment (load-bearing ABI change → file
+`.dev/decisions/NNNN_bridge_thunk_x19_save.md` per §18
+FIRST, then implementation). Both arm64 + x86_64 thunk
+encoders need updates; `thunk_bytes` constant grows from 32
+(arm64) / 22 (x86_64). Estimated shape: BL/RET pattern
+saving caller's X19 (arm64) / RBX (x86_64) on the thunk's
+own stack frame. After (A) lands, γ-4 (relax
+`hasUnbindableImports`) can finally land, unblocking
+(c)-2.4 distiller + D-079 (ii) + D-105 + D-126
+Cat-III-dependent pieces.
+
+(c)-2.4 = corpus distiller's `supported` set extension +
+new fixture rebuild; discharges D-138 fully + D-079 sub-gap
+ii.
 
 ### Discipline reminders
 
@@ -111,7 +78,7 @@ background. D-134 closed; future heisenbugs use 5-streak +
 D-016(applySanitize wrapper); D-052(x86_64 prologue extract);
 D-079(v128 cross-module → (c)-2.4); D-126(bulk.wast post-
 mutation per ADR-0065); D-133(arm64 op_table scratch sweep);
-D-142(Mac aarch64 SEGV at cross-module dispatch boundary).
+D-142(Mac aarch64 SEGV — (B) closed, (A) remaining).
 
 `blocked-by` rides (corresponding chunks):
 D-103/D-105 → (c)-2.3/2.4; D-138 → (c)-2.4;
@@ -129,4 +96,5 @@ ADRs: [`0065`](decisions/0065_wasm_1_0_instance_work_phase9_rescope.md)
 / [`0066`](decisions/0066_cross_module_import_bridge_thunks.md)
 / [`0067`](decisions/0067_ubuntunote_native_x86_64_gate_host.md).
 [`ubuntunote_setup.md`](ubuntunote_setup.md) ·
-[`lessons/2026-05-17-d134-rosetta-2-signal-translation-limit.md`](lessons/2026-05-17-d134-rosetta-2-signal-translation-limit.md).
+[`lessons/2026-05-17-d134-rosetta-2-signal-translation-limit.md`](lessons/2026-05-17-d134-rosetta-2-signal-translation-limit.md)
+· [`lessons/2026-05-17-gamma3d-dispatch-write-segv-bisect.md`](lessons/2026-05-17-gamma3d-dispatch-write-segv-bisect.md).
