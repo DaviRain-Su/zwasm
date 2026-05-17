@@ -35,10 +35,14 @@ const arch_thunk = switch (builtin.target.cpu.arch) {
 };
 
 /// Bridge thunk byte count for the current target architecture.
-/// 32 bytes on AArch64 (4 instructions + 16-byte literal pool);
-/// 22 bytes on x86_64 (3 instructions, literals embedded in
-/// MOV imm64). Stable across all callee signatures — every
-/// thunk has the same shape; only the embedded literals differ.
+/// Per ADR-0066 Amendment §A1 (D-142 fix (A)):
+/// - 56 bytes on AArch64 (9 instructions + 4-byte alignment pad
+///   + 16-byte literal pool); call-and-return shape preserving
+///   caller's X19 across the BLR.
+/// - 22 bytes on x86_64 still (A.3 will extend; tail-call shape
+///   remains in place until x86_64 mirror lands).
+/// Stable across all callee signatures — every thunk has the
+/// same shape; only the embedded literals differ.
 pub const thunk_bytes: usize = arch_thunk.thunk_bytes;
 
 /// Emit one bridge thunk into `buf[0..thunk_bytes]`. `buf` MUST
@@ -182,7 +186,7 @@ const testing = std.testing;
 
 test "thunk_bytes: matches arch-specific constant" {
     switch (builtin.target.cpu.arch) {
-        .aarch64 => try testing.expectEqual(@as(usize, 32), thunk_bytes),
+        .aarch64 => try testing.expectEqual(@as(usize, 56), thunk_bytes),
         .x86_64 => try testing.expectEqual(@as(usize, 22), thunk_bytes),
         else => return error.SkipZigTest,
     }

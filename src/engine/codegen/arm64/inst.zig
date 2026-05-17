@@ -592,6 +592,48 @@ pub fn encBr(rn: Xn) u32 {
     return 0xD61F0000 | (@as(u32, rn) << 5);
 }
 
+/// `BLR Xn` — branch-with-link to register (= CALL Xn). Sets
+/// X30 (LR) to PC+4 then branches. Used by ADR-0066 Amendment
+/// §A1 bridge thunks to invoke the callee's JIT entry while
+/// preserving the importer's return address so the thunk can
+/// restore caller-saved state before its own RET.
+/// Encoding: `1101 0110 0011 1111 0000 00 [Rn:5] 00000`
+/// = `0xD63F0000` | (rn << 5).
+pub fn encBlr(rn: Xn) u32 {
+    return 0xD63F0000 | (@as(u32, rn) << 5);
+}
+
+/// `STP Xt, Xt2, [Xn, #imm]!` — store-pair 64-bit, pre-indexed
+/// (writeback). `byte_offset` MUST be 8-byte-aligned and within
+/// [-512, +504]; encoder shifts by 3 to produce the 7-bit signed
+/// imm7 field. Used by ADR-0066 Amendment §A1 bridge thunks to
+/// allocate the thunk's own stack frame (`STP X29, X30, [SP, #-32]!`)
+/// in one instruction.
+/// Encoding (STP 64-bit pre-indexed): `1010 1001 10 [imm7:7]
+/// [Rt2:5] [Rn:5] [Rt:5]` = `0xA9800000` | (imm7 << 15) | …
+pub fn encStpPreIdx(rt: Xn, rt2: Xn, rn: Xn, byte_offset: i10) u32 {
+    std.debug.assert(@mod(byte_offset, 8) == 0);
+    std.debug.assert(byte_offset >= -512 and byte_offset <= 504);
+    const imm7_signed: i7 = @intCast(@divExact(byte_offset, 8));
+    const imm7: u32 = @as(u32, @as(u7, @bitCast(imm7_signed)));
+    return 0xA9800000 | (imm7 << 15) | (@as(u32, rt2) << 10) | (@as(u32, rn) << 5) | @as(u32, rt);
+}
+
+/// `LDP Xt, Xt2, [Xn], #imm` — load-pair 64-bit, post-indexed
+/// (writeback). Same alignment + range constraints as
+/// `encStpPreIdx`. Used by ADR-0066 Amendment §A1 bridge
+/// thunks to restore the thunk frame in one instruction
+/// (`LDP X29, X30, [SP], #32`).
+/// Encoding (LDP 64-bit post-indexed): `1010 1000 11 [imm7:7]
+/// [Rt2:5] [Rn:5] [Rt:5]` = `0xA8C00000` | (imm7 << 15) | …
+pub fn encLdpPostIdx(rt: Xn, rt2: Xn, rn: Xn, byte_offset: i10) u32 {
+    std.debug.assert(@mod(byte_offset, 8) == 0);
+    std.debug.assert(byte_offset >= -512 and byte_offset <= 504);
+    const imm7_signed: i7 = @intCast(@divExact(byte_offset, 8));
+    const imm7: u32 = @as(u32, @as(u7, @bitCast(imm7_signed)));
+    return 0xA8C00000 | (imm7 << 15) | (@as(u32, rt2) << 10) | (@as(u32, rn) << 5) | @as(u32, rt);
+}
+
 /// `B disp` — unconditional 26-bit-signed-offset branch (PC-relative,
 /// in instruction units = 4 bytes). Range ±128 MiB.
 /// Encoding: `0 00101 [imm26:26]` = `0x14000000`.
@@ -1728,4 +1770,23 @@ test "encMsubRegW w0, w1, w2, w3 → 0x1B028C20" {
 }
 test "encMsubRegX x0, x1, x2, x3 → 0x9B028C20" {
     try testing.expectEqual(@as(u32, 0x9B028C20), encMsubRegX(0, 1, 2, 3));
+}
+test "encBlr x16 → 0xD63F0200" {
+    try testing.expectEqual(@as(u32, 0xD63F0200), encBlr(16));
+}
+test "encBlr x30 → 0xD63F03C0" {
+    try testing.expectEqual(@as(u32, 0xD63F03C0), encBlr(30));
+}
+test "encStpPreIdx x29, x30, [sp, #-32]! → 0xA9BE7BFD" {
+    try testing.expectEqual(@as(u32, 0xA9BE7BFD), encStpPreIdx(29, 30, sp_reg, -32));
+}
+test "encStpPreIdx x29, x30, [sp, #-16]! → 0xA9BF7BFD" {
+    // imm7 = -16/8 = -2 → u7 0x7E → bits 21:15 = 1111110
+    try testing.expectEqual(@as(u32, 0xA9BF7BFD), encStpPreIdx(29, 30, sp_reg, -16));
+}
+test "encLdpPostIdx x29, x30, [sp], #32 → 0xA8C27BFD" {
+    try testing.expectEqual(@as(u32, 0xA8C27BFD), encLdpPostIdx(29, 30, sp_reg, 32));
+}
+test "encLdpPostIdx x29, x30, [sp], #16 → 0xA8C17BFD" {
+    try testing.expectEqual(@as(u32, 0xA8C17BFD), encLdpPostIdx(29, 30, sp_reg, 16));
 }
