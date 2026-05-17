@@ -228,25 +228,44 @@ fn nonSimdOnModuleLoaded(
                 scratch_typeidxs[0..],
                 base.currentDispatchView(),
             );
-            entry.callVoidNoArgs(compiled.module, start_funcidx, &rt) catch |err| switch (err) {
-                error.Trap => {
-                    // d-36: a trap during start-init is most
-                    // likely an unbound host import surfaced via
-                    // the d-35 trap stub (start.wast modules 5/6
-                    // have `(import "spectest" "print_i32")` +
-                    // `(start $main)` where $main calls the
-                    // import; binding spectest is Track D scope).
-                    // The trap may also be a genuine `(unreachable)`
-                    // start fn; spec corpus puts those in
-                    // `assert_uninstantiable` wrappers (handled
-                    // separately) — only bare-instantiation start
-                    // traps reach here. Propagate as SKIP per
-                    // ADR-0061 (Wasm 2.0 scope, no host-import
-                    // binding).
-                    try stdout.print("SKIP-START-TRAP  {s}: start-init trapped (likely unbound host import)\n", .{name});
-                    return error.SkipModule;
-                },
+            // §9.9-III (c)-2.3-γ-3.b-arm per ADR-0066: arm
+            // `sigsegv_armed` before the JIT call so a SIGSEGV
+            // inside a cross-module callee (which may touch
+            // exporter state γ-1/γ-2/γ-3 didn't back —
+            // elem_segments / data_segments / func_entities /
+            // multi-table) lands on `siglongjmp` and surfaces as
+            // SKIP-CROSS-MODULE-CALLEE-STATE instead of taking
+            // the runner out via `_exit(142)`. Mirrors the
+            // assert_return/assert_trap arming pattern at line
+            // ~1163. The `sigsetjmp` call MUST stay inline in
+            // the caller frame (see discipline note in
+            // `spec_assert_runner_base.zig` lines ~1281–1290).
+            const segv_trapped: bool = blk: {
+                if (base.sigsetjmp(@ptrCast(&base.sigsegv_recover_buf), 1) != 0) {
+                    base.sigsegv_armed.store(false, .release);
+                    break :blk true;
+                }
+                base.sigsegv_armed.store(true, .release);
+                defer base.sigsegv_armed.store(false, .release);
+                entry.callVoidNoArgs(compiled.module, start_funcidx, &rt) catch |err| switch (err) {
+                    error.Trap => break :blk true,
+                };
+                break :blk false;
             };
+            if (segv_trapped) {
+                // d-36 + γ-3.b-arm: a trap (or recovered SEGV)
+                // during start-init has three plausible sources:
+                // (1) unbound host-import trap stub (d-35 path —
+                // start.wast modules 5/6 import `spectest.print_i32`),
+                // (2) genuine `(unreachable)` start fn (spec
+                // wraps those in `assert_uninstantiable`),
+                // (3) γ-4: cross-module callee touching unbacked
+                // exporter state — SEGV-recovered here. All three
+                // propagate as SKIP per ADR-0061 (no host-import
+                // binding) + ADR-0066 (β-2/γ scope).
+                try stdout.print("SKIP-START-TRAP  {s}: start-init trapped or segv-recovered (host-import or cross-module callee state)\n", .{name});
+                return error.SkipModule;
+            }
         }
     }
 }
@@ -1471,6 +1490,17 @@ fn nonSimdHandleAssertUninstantiable(
                 scratch_typeidxs[0..],
                 base.currentDispatchView(),
             );
+            // §9.9-III (c)-2.3-γ-3.b-arm: SEGV during a cross-
+            // module callee's state access is also a valid
+            // "uninstantiable" outcome (the module never finishes
+            // start-init cleanly). Arm sigsegv + treat recovered
+            // SEGV identically to error.Trap → return true.
+            if (base.sigsetjmp(@ptrCast(&base.sigsegv_recover_buf), 1) != 0) {
+                base.sigsegv_armed.store(false, .release);
+                return true;
+            }
+            base.sigsegv_armed.store(true, .release);
+            defer base.sigsegv_armed.store(false, .release);
             entry.callVoidNoArgs(compiled.module, start_funcidx, &rt) catch |err| switch (err) {
                 error.Trap => return true,
             };

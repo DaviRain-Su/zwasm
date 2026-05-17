@@ -1070,6 +1070,14 @@ pub fn resolveCrossModuleImports(
         // Lazy-compile + lazy-rt. Failure surfaces as
         // ExporterCompileFailed so caller can fall back to the
         // trap-stub slot (not handled here — caller decides).
+        // `ensureCompiledAndRt` triggers `runner_mod.compileWasm`
+        // which on Mac aarch64 ends in RX mode (linker.linkBlock
+        // closes with `setExecutable`). The next `emitThunk` write
+        // would SEGV against the importer's MAP_JIT arena page —
+        // reflip the current thread back to writable BEFORE the
+        // emit, regardless of how many ensures fire. `setWritable`
+        // is a per-thread global flag toggle; idempotent and cheap.
+        // No-op on Linux/Windows where pages are RWX.
         entry_ptr.ensureCompiledAndRt(allocator) catch return ResolverError.ExporterCompileFailed;
         const compiled = &entry_ptr.compiled.?;
         const callee_rt = entry_ptr.rt.?;
@@ -1083,6 +1091,11 @@ pub fn resolveCrossModuleImports(
         // Emit thunk into the arena's next slot.
         if (slot_idx >= arena_slot_count) return ResolverError.OutOfMemory;
         const slot = shared_thunk.thunkSlot(thunk_arena, slot_idx);
+        // §9.9-III (c)-2.3-γ-3.b-arm-fix: see ensureCompiledAndRt
+        // comment above. Re-flip thread to writable in case the
+        // exporter compile left us in RX. Safe on empty arena
+        // (caller-checked slot_idx<arena_slot_count, so arena.len>0).
+        jit_mem.setWritable(thunk_arena) catch return ResolverError.OutOfMemory;
         shared_thunk.emitThunk(slot, @intFromPtr(callee_rt), callee_entry_addr);
 
         // Plant the thunk's address into the importer's dispatch
@@ -1188,27 +1201,26 @@ pub fn hasUnbindableImports(
         switch (imp.kind) {
             .func => {
                 // §9.9-III (c)-2.3-β-2b BISECT NARROW (still in
-                // effect post-γ-3): non-spectest = unbindable.
-                // γ-1/γ-2/γ-3 wired per-exporter globals / memory /
-                // table-0 buffers into `RegisteredExporter`, but
-                // attempting to relax this check still crashes the
-                // spec runner with `_exit(142)` in the elem
-                // corpus: callees touch state `RegisteredExporter`
-                // doesn't yet back — concretely, the JitRuntime
-                // fields `elem_segments_ptr` / `data_segments_ptr` /
-                // `func_entities_ptr` / `tables_ptr` /
-                // `tables_jit_ci_ptr` remain `undefined`, and any
-                // exporter doing `table.init` / `data.drop` /
-                // `ref.func` / multi-table `call_indirect` blows up
-                // dereferencing those pointers. γ-3.b lands the
-                // missing state; until then the bisect-narrow
-                // protects the gate.
+                // effect post-γ-3.b-arm): non-spectest =
+                // unbindable. γ-1/γ-2/γ-3 backed globals / memory
+                // / table-0; γ-3.b-arm armed sigsegv around start-
+                // fn invocations so unbacked-state SEGVs surface
+                // as SkipModule. But γ-4 relaxation still
+                // regressed `ref_func.1`'s `is_null-v` (returned
+                // wrong VALUE, not SEGV) — confirming that
+                // cross-module callees read state beyond what
+                // γ-3 backs (`func_entities_ptr` for ref.func is
+                // the prime suspect; see `private/notes/p9-9.9-
+                // III-c-2.3-gamma-survey.md`). γ-3.b proper
+                // (back the remaining JitRuntime state) precedes
+                // the γ-4 retry.
                 if (is_spectest) continue;
                 return true;
             },
             // Tables / memories / globals from any module need
             // cross-module table / memory / global IMPORT wiring
-            // (separate from the func-import bridge thunks).
+            // (separate from the func-import bridge thunks);
+            // γ-3.c / γ-3.d scope.
             .table, .memory, .global => return true,
         }
     }
