@@ -11,8 +11,9 @@
 2. `git log --oneline -15`. 2026-05-17 batch:
    `58e69207` Ubuntu pivot + D-134 closure (ADR-0067) →
    `bdb47eb9` review fix-ups → `ab973f56` (c)-2.2 thunk arena →
-   `3c13c65c` D-016 close → `3b1a4301` (c)-2.3 prep
-   `JitModule.entryAddr` accessor.
+   `3c13c65c` D-016 close → `3b1a4301` entryAddr accessor →
+   `cf8c25f7` thunk re-export + survey detail → `4a805856`
+   (c)-2.3-α `RegisteredExporter` struct + map shape.
 3. `bash scripts/p9_simd_status.sh` — live SIMD via ubuntunote
    native x86_64 (ADR-0067).
 4. `cat .dev/debt.md | head -90`. D-016 newly flipped `now`
@@ -30,36 +31,37 @@ x86_64 22-byte opcode-pinned thunk encoders (c)-2.1;
 (arena uncalled until resolver): 24034/0/2015 + 13301/0/440
 + 212/0/20 Mac+ubuntunote bit-identical.
 
-### Next-session active task — (c)-2.3 Resolver wire-up (cont.)
+### Next-session active task — (c)-2.3-β resolver minimal
 
 Read `private/notes/p9-9.9-III-c-2.3-resolver-survey.md`
-FIRST — has the architecture decision recorded
-(2026-05-17): spec runner's `makeJitRuntime` uses a STATIC
-`host_dispatch_stubs` global; option (B) per-module dispatch
-override extension to `makeJitRuntime` is the chosen path.
+FIRST. Two architecture findings recorded:
+1. `makeJitRuntime` static `host_dispatch_stubs` requires
+   option (B) per-module dispatch override.
+2. Static-scratch (`growable_memory`, `scratch_globals`,
+   `scratch_funcptrs`, `scratch_func_entities` etc.) means
+   per-module STATE isolation also needed for any cross-
+   module callee that touches memory / globals / tables.
 
-Remaining work for (c)-2.3 (next chunk):
-1. Add `RegisteredExporter` struct + lazy-compile cache; replace
-   `registered: StringHashMap([]u8)` shape in
-   `spec_assert_runner_base.zig` (file already at 2007 LOC —
-   if growth concerning, split per ADR-0064 pattern).
-2. Add `findExportFuncIdx` + `resolveCrossModuleImports` helpers
-   (in spec runner base or split to a new
-   `test/spec/cross_module_resolver.zig`).
-3. Extend `makeJitRuntime` signature to accept optional
-   `dispatch_override: ?[]const usize`. Default = static global;
-   override = per-module slice planted by resolver.
-4. Relax `hasUnbindableImports` for non-spectest imports whose
-   alias is in `registered`.
-5. Wire resolver into per-fixture flow (probably at module-load
-   point, before any assert directive fires).
-6. Test gate: expect possibly +N PASS (cross-module fixtures
-   become bindable); D-138 hang regression watch via the
-   180-second SIGALRM ceiling.
+Revised sub-chunking:
+- **(c)-2.3-α DONE** (`4a805856`): RegisteredExporter struct +
+  map shape, behavior-neutral.
+- **(c)-2.3-β NEXT**: minimal resolver supporting cross-module
+  func calls where the callee touches NO memory / globals /
+  tables / further imports. Static-scratch preserved; only
+  per-fixture dispatch override. Use `runner_mod.findExportFunc`
+  + `JitModule.entryAddr` + `shared.thunk.{allocArena,emitThunk,
+  thunkSlot,finalizeArena}`. Extend `makeJitRuntime` for
+  per-fixture `dispatch_override: ?[]const usize`. Relax
+  `hasUnbindableImports` for registered aliases. Discharges
+  D-138 partial.
+- **(c)-2.3-γ LATER**: per-exporter backing buffers (memory +
+  globals + tables). Required if `linking.wast` corpus uses
+  any callee with state access; survey corpus first to confirm
+  scope. Larger refactor; possibly Phase 9 close-plan step (e)
+  or its own ADR.
 
 (c)-2.4 = corpus distiller's `supported` set extension + new
-fixture rebuild; discharges D-138 + incidentally D-079
-sub-gap ii (v128 cross-module).
+fixture rebuild; discharges D-138 fully + D-079 sub-gap ii.
 
 ### Discipline reminders
 
