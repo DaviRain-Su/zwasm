@@ -1414,21 +1414,28 @@ pub fn hasUnbindableImports(
         const is_spectest = std.mem.eql(u8, imp.module, "spectest");
         switch (imp.kind) {
             .func => {
-                // γ-5 partial: bisect-narrow remains in effect
-                // (relax retry will follow γ-3.c / γ-3.d state-
-                // backing for tables 1..N + memory/global
-                // imports). γ-5's table-import funcptr patch
-                // unblocks table_init/.1/.2/.3 conceptually
-                // (verified mid-cycle); next SEGV after relax
-                // moved to imports/imports.1.wasm — separate
-                // gap. See γ-survey for ramp.
+                // D-142 fix (A) chain (`d543c646`/`4e7a4646`/
+                // `6044e8f4`/`b89c2d45`) structurally closed
+                // the cross-module bridge thunk's X19/R15
+                // corruption. A γ-4 relax probe on Mac aarch64
+                // (2026-05-18) ran cleanly through the thunks
+                // — NO crashes — but surfaced 113 functional
+                // FAILs in the spec corpus (66 table_copy /
+                // 6 ref_func / 5 table_init / 1 imports).
+                // These are cross-module ROUTING gaps in the
+                // γ-1/γ-2/γ-3 per-exporter backing wiring,
+                // separate from the X19/R15 ABI bug D-142
+                // (A) fixed. Tracked as D-143. Until those
+                // routing fixes land, keep `hasUnbindableImports`
+                // strict for non-spectest func imports so the
+                // gate stays green at 24034/0/2015 etc.
                 if (is_spectest) continue;
                 return true;
             },
             // Tables / memories / globals from any module need
             // cross-module table / memory / global IMPORT wiring
             // (separate from the func-import bridge thunks);
-            // γ-3.d scope.
+            // γ-3.c / γ-3.d scope. Also kept strict per D-143.
             .table, .memory, .global => return true,
         }
     }
