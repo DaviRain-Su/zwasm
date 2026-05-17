@@ -50,9 +50,16 @@ Test fixture (this or (c)-2.4): smallest `(register "M" $inst)`
 return → discharges D-138; v128 result fixture covers D-079
 sub-gap ii.
 
-Open Qs: `Store.instances` is `*anyopaque`-keyed (D-139
-spec-runner-bypass) — confirm cast shape early;
-`Instance.exports` findExport API vs runner walk.
+Open Qs resolved (see survey note below): spec runner's
+`registered` is bytes-keyed (`StringHashMap([]u8)`), NOT
+`Store.instances` (`*anyopaque`-keyed). Resolver in spec
+context needs its own lazy-compile + lifetime-extended
+exporter cache. Pre-work survey written to
+`private/notes/p9-9.9-III-c-2.3-resolver-survey.md`
+(gitignored; read at start of (c)-2.3 work). Likely sub-
+split: (c)-2.3 = code path only (counts unchanged);
+(c)-2.4 = corpus distiller + new fixtures (discharges D-138
++ D-079 sub-gap ii).
 
 ### Discipline reminders
 
