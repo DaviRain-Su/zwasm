@@ -892,8 +892,33 @@ pub const RegisteredExporter = struct {
     /// doesn't materialise a `Runtime`; only the FuncEntity
     /// address matters for funcref encoding.
     scratch_func_entities: ?[]@import("zwasm").runtime.FuncEntity = null,
+    /// §9.9-III (c)-2.3-γ-3.b-ii: per-exporter element-segment
+    /// state. `scratch_elem_segments[i]` carries `{refs, len}`
+    /// pointing into `scratch_elem_refs_arena` (flat
+    /// funcref-encoded u64s); `scratch_elem_dropped[i]` is the
+    /// 0/1 dropped flag consumed by JIT `table.init` /
+    /// `elem.drop`. Active + declarative segments are marked
+    /// dropped at instantiation per Wasm 2.0 §4.5.4. Null when
+    /// the exporter has no element section.
+    scratch_elem_segments: ?[]entry.ElemSlice = null,
+    scratch_elem_dropped: ?[]u8 = null,
+    scratch_elem_refs_arena: ?[]u64 = null,
+    /// §9.9-III (c)-2.3-γ-3.b-ii: per-exporter data-segment
+    /// state (mirror of elem). `scratch_data_segments[i].ptr`
+    /// points into `scratch_data_bytes_arena`; active segments
+    /// are dropped at instantiation per Wasm 2.0 §4.5.5. Null
+    /// when the exporter has no data section.
+    scratch_data_segments: ?[]entry.SegmentSlice = null,
+    scratch_data_dropped: ?[]u8 = null,
+    scratch_data_bytes_arena: ?[]u8 = null,
 
     pub fn deinit(self: *RegisteredExporter, allocator: std.mem.Allocator) void {
+        if (self.scratch_data_bytes_arena) |a| allocator.free(a);
+        if (self.scratch_data_dropped) |d| allocator.free(d);
+        if (self.scratch_data_segments) |s| allocator.free(s);
+        if (self.scratch_elem_refs_arena) |a| allocator.free(a);
+        if (self.scratch_elem_dropped) |d| allocator.free(d);
+        if (self.scratch_elem_segments) |s| allocator.free(s);
         if (self.scratch_func_entities) |fe| allocator.free(fe);
         if (self.scratch_typeidxs) |t| allocator.free(t);
         if (self.scratch_funcptrs) |f| allocator.free(f);
@@ -974,6 +999,12 @@ pub const RegisteredExporter = struct {
                 self.scratch_func_entities = fe;
             }
         }
+        if (self.scratch_elem_segments == null) {
+            try self.populateElemSegments(allocator);
+        }
+        if (self.scratch_data_segments == null) {
+            try self.populateDataSegments(allocator);
+        }
         if (self.rt == null) {
             const rt_ptr = try allocator.create(entry.JitRuntime);
             const globals_buf = self.scratch_globals.?;
@@ -981,6 +1012,10 @@ pub const RegisteredExporter = struct {
             const funcptrs_buf: ?[]u64 = self.scratch_funcptrs;
             const typeidxs_buf: ?[]u32 = self.scratch_typeidxs;
             const fe_buf = self.scratch_func_entities;
+            const elem_segs = self.scratch_elem_segments;
+            const elem_drop = self.scratch_elem_dropped;
+            const data_segs = self.scratch_data_segments;
+            const data_drop = self.scratch_data_dropped;
             rt_ptr.* = .{
                 .vm_base = if (memory_buf) |m| m.ptr else @ptrFromInt(@as(usize, 0x1000)),
                 .mem_limit = if (memory_buf) |m| m.len else 0,
@@ -994,9 +1029,108 @@ pub const RegisteredExporter = struct {
                 .host_dispatch_count = 0,
                 .func_entities_ptr = if (fe_buf) |fe| @ptrCast(fe.ptr) else undefined,
                 .func_entities_count = if (fe_buf) |fe| @intCast(fe.len) else 0,
+                .elem_segments_ptr = if (elem_segs) |es| es.ptr else undefined,
+                .elem_segments_count = if (elem_segs) |es| @intCast(es.len) else 0,
+                .elem_dropped_ptr = if (elem_drop) |ed| ed.ptr else undefined,
+                .elem_dropped_count = if (elem_drop) |ed| @intCast(ed.len) else 0,
+                .data_segments_ptr = if (data_segs) |ds| ds.ptr else undefined,
+                .data_segments_count = if (data_segs) |ds| @intCast(ds.len) else 0,
+                .data_dropped_ptr = if (data_drop) |dd| dd.ptr else undefined,
+                .data_dropped_count = if (data_drop) |dd| @intCast(dd.len) else 0,
             };
             self.rt = rt_ptr;
         }
+    }
+
+    /// §9.9-III (c)-2.3-γ-3.b-ii: mirror of the active-module
+    /// `populateElemSegments` helper (lines ~640) — walks the
+    /// exporter's element section + writes per-segment
+    /// `ElemSlice` descriptors into the exporter's own
+    /// `scratch_elem_segments` array. Each funcref entry encodes
+    /// `@intFromPtr(&self.scratch_func_entities[fidx])` (γ-3.b-i
+    /// guarantees that array is non-null before this runs).
+    /// Active + declarative segments mark `scratch_elem_dropped[i]
+    /// = 1` per Wasm 2.0 §4.5.4.
+    fn populateElemSegments(self: *RegisteredExporter, allocator: std.mem.Allocator) !void {
+        var temp = std.heap.ArenaAllocator.init(allocator);
+        defer temp.deinit();
+        const ta = temp.allocator();
+        var module = zwasm.parse.parser.parse(ta, self.bytes_owned) catch return;
+        const sec = module.find(.element) orelse return;
+        var elems = zwasm.parse.sections.decodeElement(ta, sec.body) catch return;
+        defer elems.deinit();
+        if (elems.items.len == 0) return;
+
+        var total_refs: usize = 0;
+        for (elems.items) |seg| total_refs += seg.funcidxs.len;
+
+        const segments = try allocator.alloc(entry.ElemSlice, elems.items.len);
+        errdefer allocator.free(segments);
+        const dropped = try allocator.alloc(u8, elems.items.len);
+        errdefer allocator.free(dropped);
+        @memset(dropped, 0);
+        const refs_arena = try allocator.alloc(u64, @max(total_refs, 1));
+        errdefer allocator.free(refs_arena);
+
+        const fe = self.scratch_func_entities orelse return error.UnsupportedEntrySignature;
+        var off: usize = 0;
+        for (elems.items, 0..) |seg, i| {
+            const seg_len: u32 = @intCast(seg.funcidxs.len);
+            segments[i] = .{ .refs = refs_arena[off..].ptr, .len = seg_len };
+            for (seg.funcidxs, 0..) |fidx, k| {
+                if (fidx == std.math.maxInt(u32)) {
+                    refs_arena[off + k] = Value.null_ref;
+                } else if (fidx >= fe.len) {
+                    return error.UnsupportedEntrySignature;
+                } else {
+                    refs_arena[off + k] = @intFromPtr(&fe[fidx]);
+                }
+            }
+            if (seg.kind != .passive) dropped[i] = 1;
+            off += seg_len;
+        }
+
+        self.scratch_elem_segments = segments;
+        self.scratch_elem_dropped = dropped;
+        self.scratch_elem_refs_arena = refs_arena;
+    }
+
+    /// §9.9-III (c)-2.3-γ-3.b-ii: mirror of `populateDataSegments`
+    /// — walks the exporter's data section + packs segment bytes
+    /// into `scratch_data_bytes_arena`. Active segments mark
+    /// `scratch_data_dropped[i] = 1` per Wasm 2.0 §4.5.5.
+    fn populateDataSegments(self: *RegisteredExporter, allocator: std.mem.Allocator) !void {
+        var temp = std.heap.ArenaAllocator.init(allocator);
+        defer temp.deinit();
+        const ta = temp.allocator();
+        var module = zwasm.parse.parser.parse(ta, self.bytes_owned) catch return;
+        const sec = module.find(.data) orelse return;
+        var datas = zwasm.parse.sections.decodeData(ta, sec.body) catch return;
+        defer datas.deinit();
+        if (datas.items.len == 0) return;
+
+        var total_bytes: usize = 0;
+        for (datas.items) |seg| total_bytes += seg.bytes.len;
+
+        const segments = try allocator.alloc(entry.SegmentSlice, datas.items.len);
+        errdefer allocator.free(segments);
+        const dropped = try allocator.alloc(u8, datas.items.len);
+        errdefer allocator.free(dropped);
+        @memset(dropped, 0);
+        const bytes_arena = try allocator.alloc(u8, @max(total_bytes, 1));
+        errdefer allocator.free(bytes_arena);
+
+        var off: usize = 0;
+        for (datas.items, 0..) |seg, i| {
+            @memcpy(bytes_arena[off..][0..seg.bytes.len], seg.bytes);
+            segments[i] = .{ .ptr = bytes_arena[off..].ptr, .len = @intCast(seg.bytes.len) };
+            if (seg.kind == .active) dropped[i] = 1;
+            off += seg.bytes.len;
+        }
+
+        self.scratch_data_segments = segments;
+        self.scratch_data_dropped = dropped;
+        self.scratch_data_bytes_arena = bytes_arena;
     }
 };
 
