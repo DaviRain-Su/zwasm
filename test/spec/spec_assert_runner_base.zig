@@ -865,8 +865,24 @@ pub const RegisteredExporter = struct {
     /// (instead of the importer's static `growable_memory`).
     /// Null when the exporter has no memory section.
     scratch_memory: ?[]u8 = null,
+    /// §9.9-III (c)-2.3-γ-3: per-exporter table-0 funcptrs /
+    /// typeidxs. Allocated lazily in `ensureCompiledAndRt`
+    /// sized to the declared `(table min funcref)` count, capped
+    /// at `EXPORTER_TABLE_CAPACITY`. Populated via
+    /// `runner_mod.applyTableInit` (table-0 only); wired into
+    /// `rt.funcptr_base` / `rt.typeidx_base` / `rt.table_size`
+    /// so a cross-module callee doing `call_indirect` against
+    /// table-0 reads the exporter's own funcref entries +
+    /// canonical typeidxs (instead of the importer's static
+    /// `scratch_funcptrs`). Null when the exporter has no
+    /// table section. Multi-table (tables 1..N) support is
+    /// γ-3.b — deferred until a corpus fixture demands it.
+    scratch_funcptrs: ?[]u64 = null,
+    scratch_typeidxs: ?[]u32 = null,
 
     pub fn deinit(self: *RegisteredExporter, allocator: std.mem.Allocator) void {
+        if (self.scratch_typeidxs) |t| allocator.free(t);
+        if (self.scratch_funcptrs) |f| allocator.free(f);
         if (self.scratch_memory) |m| allocator.free(m);
         if (self.scratch_globals) |g| allocator.free(g);
         if (self.rt) |r| allocator.destroy(r);
@@ -914,16 +930,37 @@ pub const RegisteredExporter = struct {
                 self.scratch_memory = buf;
             }
         }
+        if (self.scratch_funcptrs == null) {
+            const table_min = extractTable0Min(allocator, self.bytes_owned);
+            if (table_min > 0) {
+                const capped: usize = @min(table_min, EXPORTER_TABLE_CAPACITY);
+                const funcptrs = try allocator.alloc(u64, capped);
+                errdefer allocator.free(funcptrs);
+                const typeidxs = try allocator.alloc(u32, capped);
+                errdefer allocator.free(typeidxs);
+                try runner_mod.applyTableInit(
+                    allocator,
+                    self.bytes_owned,
+                    compiled,
+                    funcptrs,
+                    typeidxs,
+                );
+                self.scratch_funcptrs = funcptrs;
+                self.scratch_typeidxs = typeidxs;
+            }
+        }
         if (self.rt == null) {
             const rt_ptr = try allocator.create(entry.JitRuntime);
             const globals_buf = self.scratch_globals.?;
             const memory_buf: ?[]u8 = self.scratch_memory;
+            const funcptrs_buf: ?[]u64 = self.scratch_funcptrs;
+            const typeidxs_buf: ?[]u32 = self.scratch_typeidxs;
             rt_ptr.* = .{
                 .vm_base = if (memory_buf) |m| m.ptr else @ptrFromInt(@as(usize, 0x1000)),
                 .mem_limit = if (memory_buf) |m| m.len else 0,
-                .funcptr_base = undefined,
-                .table_size = 0,
-                .typeidx_base = undefined,
+                .funcptr_base = if (funcptrs_buf) |f| f.ptr else undefined,
+                .table_size = if (funcptrs_buf) |f| @intCast(f.len) else 0,
+                .typeidx_base = if (typeidxs_buf) |t| t.ptr else undefined,
                 .trap_flag = 0,
                 .globals_base = @ptrCast(@alignCast(globals_buf.ptr)),
                 .globals_count = @intCast(globals_buf.len / @sizeOf(Value)),
@@ -943,6 +980,30 @@ pub const RegisteredExporter = struct {
 /// Cross-module exporters that exercise `memory.grow` would need
 /// γ-2.b growth-aware sizing; deferred until a fixture demands it.
 pub const EXPORTER_MEMORY_CAPACITY: usize = 1 << 20;
+
+/// §9.9-III (c)-2.3-γ-3: per-exporter table-0 cap. Matches the
+/// importer-side `scratch_table_capacity = 1024` for parity
+/// with `table_copy.wast`-class fixtures (those run in
+/// active-module mode and declare 128-entry tables; the 1024
+/// ceiling has headroom for the few cross-module exporters
+/// that exercise call_indirect).
+pub const EXPORTER_TABLE_CAPACITY: usize = 1024;
+
+/// §9.9-III (c)-2.3-γ-3: parse the wasm bytes' table section
+/// (id=4) and return table-0's declared `min` count. Returns 0
+/// when no table section exists or table-0 is absent (in which
+/// case `ensureCompiledAndRt` skips allocating per-exporter
+/// table buffers). Parse-error paths also return 0 — downstream
+/// `compileWasm` will surface the real error.
+pub fn extractTable0Min(allocator: std.mem.Allocator, wasm_bytes: []const u8) u32 {
+    var module = zwasm.parse.parser.parse(allocator, wasm_bytes) catch return 0;
+    defer module.deinit(allocator);
+    const sec = module.find(.table) orelse return 0;
+    var tables = zwasm.parse.sections.decodeTables(allocator, sec.body) catch return 0;
+    defer tables.deinit();
+    if (tables.items.len == 0) return 0;
+    return tables.items[0].min;
+}
 
 /// §9.9-III (c)-2.3-β-2 per ADR-0066: walk an importer's import
 /// section, for each `(import "M" "f" (func ...))` whose alias
@@ -2367,6 +2428,54 @@ test "sigsegv guard: armed=false after recovery so subsequent SEGV is unexpected
         // assertion confirms the contract end-to-end).
         try testing.expect(sigsegv_armed.load(.acquire) == false);
     }
+}
+
+test "RegisteredExporter γ-3: ensureCompiledAndRt populates scratch_funcptrs + wires rt.funcptr_base" {
+    // Minimal module exercising table-0 with one elem entry:
+    //   (module
+    //     (type (func))
+    //     (func)              ;; func 0
+    //     (table 1 funcref)
+    //     (elem (i32.const 0) func 0))
+    //   magic + version : 00 61 73 6d 01 00 00 00
+    //   type section    : id=01 size=04 count=01 func=60 nparams=00 nresults=00
+    //   func section    : id=03 size=02 count=01 typeidx=00
+    //   table section   : id=04 size=04 count=01 funcref=70 flag=00 min=01
+    //   elem section    : id=09 size=07 count=01 kind=00 offset=41 00 0b vec_count=01 funcidx=00
+    //   code section    : id=0a size=04 count=01 body_size=02 nlocals=00 end=0b
+    const wasm_bytes_const = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        // type
+        0x01, 0x04, 0x01, 0x60, 0x00, 0x00,
+        // function
+        0x03, 0x02, 0x01, 0x00,
+        // table
+        0x04, 0x04, 0x01, 0x70, 0x00, 0x01,
+        // element
+        0x09, 0x07, 0x01, 0x00, 0x41, 0x00, 0x0b, 0x01, 0x00,
+        // code
+        0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b,
+    };
+    const gpa = testing.allocator;
+    var exporter: RegisteredExporter = .{ .bytes_owned = try gpa.dupe(u8, &wasm_bytes_const) };
+    defer exporter.deinit(gpa);
+
+    try exporter.ensureCompiledAndRt(gpa);
+
+    const funcptrs = exporter.scratch_funcptrs orelse return error.MissingScratchFuncptrs;
+    const typeidxs = exporter.scratch_typeidxs orelse return error.MissingScratchTypeidxs;
+    try testing.expectEqual(@as(usize, 1), funcptrs.len);
+    try testing.expectEqual(@as(usize, 1), typeidxs.len);
+    // Table-0 entry 0 was initialised by the elem segment to func 0,
+    // so its funcptr must be non-zero (= address inside the JIT
+    // block) and the canonical typeidx for `(func)` is 0.
+    try testing.expect(funcptrs[0] != 0);
+    try testing.expectEqual(@as(u32, 0), typeidxs[0]);
+
+    const rt = exporter.rt orelse return error.MissingRt;
+    try testing.expectEqual(@as(usize, @intFromPtr(funcptrs.ptr)), @intFromPtr(rt.funcptr_base));
+    try testing.expectEqual(@as(usize, @intFromPtr(typeidxs.ptr)), @intFromPtr(rt.typeidx_base));
+    try testing.expectEqual(@as(u32, 1), rt.table_size);
 }
 
 test "RegisteredExporter γ-2: ensureCompiledAndRt populates scratch_memory + wires rt.vm_base" {
