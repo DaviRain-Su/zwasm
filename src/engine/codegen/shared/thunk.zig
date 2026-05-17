@@ -39,8 +39,9 @@ const arch_thunk = switch (builtin.target.cpu.arch) {
 /// - 56 bytes on AArch64 (9 instructions + 4-byte alignment pad
 ///   + 16-byte literal pool); call-and-return shape preserving
 ///   caller's X19 across the BLR.
-/// - 22 bytes on x86_64 still (A.3 will extend; tail-call shape
-///   remains in place until x86_64 mirror lands).
+/// - 27 bytes on x86_64 (PUSH R15 + 2× MOV imm64 + CALL RAX +
+///   POP R15 + RET); call-and-return shape preserving caller's
+///   R15 across the CALL.
 /// Stable across all callee signatures — every thunk has the
 /// same shape; only the embedded literals differ.
 pub const thunk_bytes: usize = arch_thunk.thunk_bytes;
@@ -187,7 +188,7 @@ const testing = std.testing;
 test "thunk_bytes: matches arch-specific constant" {
     switch (builtin.target.cpu.arch) {
         .aarch64 => try testing.expectEqual(@as(usize, 56), thunk_bytes),
-        .x86_64 => try testing.expectEqual(@as(usize, 22), thunk_bytes),
+        .x86_64 => try testing.expectEqual(@as(usize, 27), thunk_bytes),
         else => return error.SkipZigTest,
     }
 }
