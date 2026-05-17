@@ -6,11 +6,12 @@
 ## Cold-start procedure
 
 1. **READ FIRST** [`.dev/phase9_close_plan.md`](phase9_close_plan.md)
-   §6. Cat III dispatch — γ-5 landed (`552a2b6d` /
-   `e902e531`). D-142 fix (B) landed (`d543c646`); (A) is
+   §6. Cat III dispatch — D-142 fix (B) `d543c646` + (A.1)
+   ADR-0066 amendment `4e7a4646` + (A.2) arm64 thunk
+   redesign `6044e8f4` all landed. (A.3) x86_64 mirror is
    next.
-2. `git log --oneline -10`. Latest: D-142 fix (B). Prior β/γ
-   chain via `git log --grep="9.9-III"`.
+2. `git log --oneline -10`. Latest: D-142 (A.2) arm64 thunk
+   redesign. Prior β/γ chain via `git log --grep="9.9-III"`.
 3. `bash scripts/p9_simd_status.sh` — live SIMD via ubuntunote
    native x86_64 (ADR-0067).
 4. `cat .dev/debt.md | head -90`. Cat III sub-chunks tracked
@@ -28,36 +29,42 @@ substrate + wire-up (c)-2.3-α/β-1/β-2a/β-2b. γ-1/γ-2/γ-3/
 `e902e531`). Counts unchanged with γ-relaxation deferred:
 24034/0/2015 + 13301/0/440 + 212/0/20.
 
-### Next-session active task — D-142 fix (A)
+### Next-session active task — D-142 fix (A.3) x86_64 mirror
 
-D-142 root cause is two interacting bugs (cycle 6, see
-lesson `2026-05-17-gamma3d-dispatch-write-segv-bisect.md`):
+D-142 progress (cycle 6 root-cause + 3 fix sub-chunks):
 
-- **(A) bridge thunk corrupts X19** across cross-module call
-  (AAPCS64 §6.4.1 violation: v2 arm64 prologue overwrites
-  `runtime_ptr_save_gpr` without saving caller's value).
-- **(B) `ensureCompiledAndRt` leaves `host_dispatch_base`
-  poison-initialised** — once (A) corrupted X19 to point at
-  the wrong rt, the next host-import call dereferenced 0xAA
-  poison at offset +8 → fault at `0xAA + 8 = 0xB2`.
+- **(B) `d543c646`** — `ensureCompiledAndRt`
+  `SAFE_STUB_PTR_ADDR = 0x1000` for all 8 absent-backing
+  `[*]const T` fields (closed the poison-init half).
+- **(A.1) `4e7a4646`** — ADR-0066 Amendment §A1 landing the
+  bridge-thunk-saves-caller-X19 design contract (docs-only).
+- **(A.2) `6044e8f4`** — arm64 thunk redesign per §A1:
+  56-byte STP/STR/BLR/LDR/LDP/RET shape + 3 new encoders
+  (`encBlr`, `encStpPreIdx`, `encLdpPostIdx`). Closes the
+  X19-corruption half of D-142 on Mac aarch64.
 
-(B) **landed** (`d543c646`): `SAFE_STUB_PTR_ADDR = 0x1000`
-constant + all 8 absent-backing `[*]const T` fields recast
-to `@ptrFromInt(stub_ptr)`. Attendant test-wiring discharged
-orphan γ-1/γ-2/γ-3/γ-3.b-i tests (now `zig build test` runs
-them); γ-1 wasm + deinit alignment fixes paid down
-pre-existing rot the wiring exposed.
+**NEXT — D-142 fix (A.3)**: x86_64 mirror of A.2. Replace
+`src/engine/codegen/x86_64/thunk.zig`'s tail-call shape
+(MOV imm64 + JMP RAX, 22 bytes) with a call-and-return
+shape that PUSHes R15 (= x86_64 `runtime_ptr_save_gpr` per
+ADR-0026 Cc-pivot) before the CALL and POPs after. Target
+shape per ADR-0066 §A1:
 
-**NEXT — D-142 fix (A)**: bridge thunk redesign so X19 is
-preserved across cross-module BLR. Requires ADR-0066
-amendment (load-bearing ABI change → file
-`.dev/decisions/NNNN_bridge_thunk_x19_save.md` per §18
-FIRST, then implementation). Both arm64 + x86_64 thunk
-encoders need updates; `thunk_bytes` constant grows from 32
-(arm64) / 22 (x86_64). Estimated shape: BL/RET pattern
-saving caller's X19 (arm64) / RBX (x86_64) on the thunk's
-own stack frame. After (A) lands, γ-4 (relax
-`hasUnbindableImports`) can finally land, unblocking
+  PUSH R15                       ; save caller's R15 = caller_rt
+  MOV  RDI, <callee_rt imm64>    ; SysV arg0
+  MOV  RAX, <callee_entry imm64>
+  CALL RAX                       ; SysV CALL (not JMP)
+  POP  R15                       ; RESTORE caller's R15
+  RET
+
+`thunk_bytes` grows from 22 to 27. Likely new encoders:
+`encPushReg64`, `encPopReg64`, `encCallReg64` (SysV `0x41 0x57`
+/ `0x41 0x5F` / `0xFF 0xD0` family). Mirror the test shape
+A.2 used (byte-exact + structural PUSH/POP-bracket-CALL
+assertion).
+
+After A.3 lands, γ-4 (relax `hasUnbindableImports` in
+`spec_assert_runner_base.zig`) can finally land, unblocking
 (c)-2.4 distiller + D-079 (ii) + D-105 + D-126
 Cat-III-dependent pieces.
 
@@ -78,7 +85,7 @@ background. D-134 closed; future heisenbugs use 5-streak +
 D-016(applySanitize wrapper); D-052(x86_64 prologue extract);
 D-079(v128 cross-module → (c)-2.4); D-126(bulk.wast post-
 mutation per ADR-0065); D-133(arm64 op_table scratch sweep);
-D-142(Mac aarch64 SEGV — (B) closed, (A) remaining).
+D-142(Mac aarch64 SEGV — (B) + (A.1) + (A.2) landed, (A.3) x86_64 remaining).
 
 `blocked-by` rides (corresponding chunks):
 D-103/D-105 → (c)-2.3/2.4; D-138 → (c)-2.4;
