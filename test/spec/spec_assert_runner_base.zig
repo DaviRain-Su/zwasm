@@ -294,32 +294,42 @@ pub fn makeJitRuntime(
     };
 }
 
-/// Spec-runner import-trap stub. Invoked via the
-/// `host_dispatch_base` table when a module's defined function
-/// calls an imported function (e.g. start.wast's modules with
-/// `(import "spectest" "print_i32")`). Sets `trap_flag` and
-/// returns; the JIT body continues to its epilogue, and the
-/// runner's post-call check surfaces `Error.Trap`.
+/// Spec-runner import binding stub for `spectest.*` per Phase 9
+/// Cat III chunk (c)-1b (per ADR-0065). The Wasm spectest module
+/// (defined by the spec testsuite host contract) exposes only
+/// **void-return** functions (`print_i32(i32)→()`, `print_f32(f32)
+/// →()`, etc.) plus non-function globals/table/memory. The print
+/// family is pure side-effect for human-observable test output;
+/// per Wasm spec §A.2 the assert-return semantics check return
+/// values, not host-side prints, so a no-op stub that doesn't set
+/// `trap_flag` is semantically equivalent to a real spectest binding
+/// **for fixtures that only assert return values**.
 ///
-/// The signature is the minimum viable shape — most arches' C
-/// ABIs let a callee with `fn(rt) → void` legally consume args /
-/// produce no return when the actual import-site shape was
-/// `fn(rt, ...args) → result`. Caller cleans the stack on x86_64
-/// SysV / arm64 AAPCS64; the unread arg registers don't affect
-/// the callee. Spec runners never need the import's real return,
-/// since `trap_flag` short-circuits before any caller reads it.
-/// §9.9 / 9.9-l-1b-d093-d54 (D-129): sentinel written into
-/// `rt.trap_flag` by the host-import trap stub. The JIT body's
-/// own trap stubs always write `1`; any other non-zero value
-/// observed by the runner post-call is the host-import path,
-/// which the spec assert wants treated as `skip-adr-spectest-
-/// import-call` (the wrapper function calls a spectest import
-/// the runner can't bind, so the side-effect-only invoke can't
-/// produce the spec-expected outcome).
+/// Architecture: a single `host_dispatch_base` slot points at this
+/// stub; all imports route through it. The stub takes the minimum
+/// viable shape (`fn(rt)→void`) — most arches' C ABIs let a callee
+/// with this shape legally consume args / produce no return when
+/// the actual import-site shape was `fn(rt, ...args)→result`. Caller
+/// cleans the stack on x86_64 SysV / arm64 AAPCS64; the unread arg
+/// registers don't affect the callee, and the void return matches
+/// every spectest function in the testsuite.
+///
+/// `HOST_IMPORT_TRAP_SENTINEL` (0xBADC0DE) is kept as historical
+/// reference for the pre-(c)-1b trap-stub-set-flag behaviour; it
+/// is no longer written by the live stub but `printCallTrap` /
+/// `dispatchVoidResult` still recognise it for back-compat in any
+/// stale binary path that hasn't been re-baked. Once Cat III sub-
+/// chunks (c)-2 (cross-module import linker) and (c)-4 (per-import
+/// resolved binding) land, this stub can be replaced by per-import
+/// dispatch.
 pub const HOST_IMPORT_TRAP_SENTINEL: u32 = 0xBADC0DE;
 
 fn hostImportTrapStub(rt: *entry.JitRuntime) callconv(.c) void {
-    rt.trap_flag = HOST_IMPORT_TRAP_SENTINEL;
+    // Phase 9 Cat III chunk (c)-1b: no-op return for spectest void
+    // imports. Side-effect prints are skipped (they were never
+    // observable from spec_assert); per Wasm spec §A.2 the assert
+    // checks return values which spectest.print_* doesn't produce.
+    _ = rt;
 }
 
 /// §9.9 / 9.9-l-1b-d093-d54 (D-129): callback-set side channel

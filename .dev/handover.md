@@ -26,12 +26,14 @@
 
 ### One-line state
 
-Step (b) Cat II largely drained (+31 PASS to 24032). Cat III
-Step (c)-1a landed: Store name→Instance registry foundation
-(`Store.register` / `Store.lookup` API; `*anyopaque` opaque to
-avoid store↔instance circular import; freed in
-`wasm_store_delete`). 2 unit tests + 0 PASS gain (consumers in
-follow-up chunks). Cat II residual stays open as background.
+Step (b) Cat II drained (+31 PASS to 24032). Cat III Step (c)-1a
+landed Store registry foundation. Step (c)-1b landed: spectest
+host-import stub converted from trap-flag-set to no-op return
+(spectest functions are all void-return; spec asserts check
+return values not host-side prints, so no-op stub is semantically
+correct for fixtures whose only spectest call is side-effect).
++2 PASS (24032→24034), -2 skip-impl, -2 skip-adr on both hosts
+bit-identical.
 
 **Current spec_assert tally** (Mac aarch64 + OrbStack
 bit-identical post-(b)-5; live via
@@ -51,28 +53,28 @@ remains the D-134 plan.
 
 ### Next-session active task
 
-**Step (c)-1b — Wire `(register "M" $inst)` directive handler**
-in `test/spec/spec_assert_runner_base.zig` (currently the
-distiller emits `skip-adr-skip_cross_module_register` per
-`skip_cross_module_register.md` — the runner-side handler
-calls `store.register(alloc, name, instance_ptr)` from the
-just-instantiated runtime's `Instance`). Convert the
-distiller skip rule to emit a `register` line that the
-runner parses; updates `skip_cross_module_register.md`
-Status (Accepted → Superseded by registry path).
+**Step (c)-1c onward — runner registers loaded modules in Store**
+(prerequisite for (c)-2 cross-module import linker): the
+`runCorpus` loop currently maintains one `current_compiled` at
+a time and drops it on next module. To enable
+cross-module imports, the runner needs to:
+1. Maintain a session-level `Store` across the corpus.
+2. Promote each successfully-compiled+instantiated module to a
+   `*Instance` parked in `store.zombies` (so its lifetime
+   spans the whole corpus, not just until next module load).
+3. Track current-module aliases as `(register "M" $inst)`
+   directives arrive (distiller currently emits
+   `skip-adr-skip_cross_module_register`; change distiller
+   to emit a `register <name>` line + runner parses → calls
+   `store.register(alloc, name, instance_opaque)`).
 
-**Step (c)-2 — Cross-module import linker** (per close-plan
-§6 step (c) sub-chunk 2): at instantiate time, when an
-`import "M" "f"` resolves, look up `store.lookup("M")` and
-bind to the registered instance's export. Validates import
-type ≡ export type (`link-typecheck` cases).
+This is structural runner work (~150-250 LOC). Once landed,
+(c)-2 = import linker resolves `import "M" "f"` against the
+Store registry at compile/instantiate time.
 
-**Step (c)-4 = biggest single PASS win** (per close-plan §6
-step (c)): host import binding (spectest). The runtime
-skip-impl tally includes many `SKIP-HOST-IMPORT` printouts
-incrementing `tally.skipped`. Binding `import "spectest"
-"print_*"` to runner-provided functions converts each from
-trap → resolved call. Order: (c)-1b → (c)-2 → (c)-4.
+**Cat II residual** (lower priority): D-137 mixed int+float
+multi-result + 3-result via X8 indirect-result-ptr. Both need
+ABI bridge ADRs. ~17 lines.
 
 ### Discipline reminders
 
