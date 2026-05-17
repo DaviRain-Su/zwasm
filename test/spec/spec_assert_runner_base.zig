@@ -1362,22 +1362,22 @@ pub fn hasUnbindableImports(
         const is_spectest = std.mem.eql(u8, imp.module, "spectest");
         switch (imp.kind) {
             .func => {
-                // §9.9-III (c)-2.3-β-2b BISECT NARROW (still in
-                // effect post-γ-3.b-ii): non-spectest =
-                // unbindable. γ-1/γ-2/γ-3/γ-3.b-i/γ-3.b-ii
-                // backed globals / memory / table-0 /
-                // func_entities / elem + data segments per-
-                // exporter. γ-4 dry-run on this set still
-                // SEGV-crashes through `_exit(142)` somewhere
-                // past elem.27's last-visible SKIP — multi-
-                // table (`tables_ptr` / `tables_jit_ci_ptr` —
-                // γ-3.c) is the next punch-list item, plus
-                // possibly something else not yet identified
-                // (the buffered-stdout flush horizon hides the
-                // crash point). γ-3.b-arm armed sigsegv was
-                // observed to catch the elem corpus when run
-                // in isolation but the full corpus still
-                // crashes — investigation continues.
+                // §9.9-III (c)-2.3-β-2b BISECT NARROW (post-γ-3.b-ii
+                // + heisenbug investigation): non-spectest =
+                // unbindable. γ-1..γ-3.b-ii backed globals / memory
+                // / table-0 / func_entities / elem + data segments
+                // per-exporter; γ-3.b-arm armed sigsegv. γ-4 relax
+                // attempt observed layout-sensitive `_exit(142)` —
+                // buf=16 stdout_buf one binary ran clean (b0548a),
+                // larger sizes (1024 / 4096) consistently crash,
+                // and a re-build at buf=16 itself reverted to
+                // crashing (7a4eb1c). Verdict: the SEGV is not
+                // from a single unbacked field but from stack /
+                // ASLR layout interacting with some other path —
+                // needs deeper investigation (stderr-tagged
+                // per-module trace, `lldb` on a crashing binary,
+                // or SIGSEGV-handler enhancement to print the
+                // last-loaded module name before `_exit`).
                 if (is_spectest) continue;
                 return true;
             },
