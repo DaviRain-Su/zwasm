@@ -69,6 +69,19 @@ pub const TableSlice = extern struct {
     refs: [*]u64,
     len: u32,
     max: u32,
+    /// TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
+    /// Parallel funcptr-view for the same table slot. `refs[i]` carries
+    /// the FuncEntity-ptr encoding (per reftype semantics); `funcptrs[i]`
+    /// carries the raw native code entry point that `call_indirect`'s
+    /// X26 fast path reads (via `funcptr_base` for table 0 / via the
+    /// per-table fast path bind for k > 0). The two views encode the
+    /// same logical entry in two shapes; ADR-0068's `mirrorWrite`
+    /// helper keeps them in sync after every table-mutating op
+    /// (`table.set` / `table.copy` / `table.init` / `table.grow` /
+    /// `table.fill`). Stride changed from 16 → 24 bytes; all JIT
+    /// `tables_ptr` indexers (op_table.zig / op_call.zig per-arch)
+    /// dereference via `table_slice_size` rather than a literal.
+    funcptrs: [*]u64,
 };
 
 pub const table_slice_size: u32 = @sizeOf(TableSlice);
@@ -438,11 +451,18 @@ comptime {
     if ((tables_count_off & 3) != 0) @compileError("tables_count_off not 4-aligned");
     if (tables_ptr_off > 32760) @compileError("tables_ptr_off exceeds X-form imm12 budget");
     if (tables_count_off > 16380) @compileError("tables_count_off exceeds W-form imm12 budget");
-    // TableSlice layout: 16 bytes (refs ptr + u32 len + u32 max). JIT
-    // relies on this for `LDR Xn, [tbl_base, #(idx*16)+0]` (refs),
-    // `LDR Wn, [tbl_base, #(idx*16)+8]` (len), and m-2b's
-    // `LDR Wn, [tbl_base, #(idx*16)+12]` (max).
-    if (@sizeOf(TableSlice) != 16) @compileError("TableSlice size != 16; JIT table.get stride assumption broken");
+    // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
+    // TableSlice layout: 24 bytes after ADR-0068 stride extension
+    // (refs ptr + u32 len + u32 max + funcptrs ptr). JIT relies on
+    // `LDR Xn, [tbl_base, #(idx*24)+0]` (refs),
+    // `LDR Wn, [tbl_base, #(idx*24)+8]` (len),
+    // `LDR Wn, [tbl_base, #(idx*24)+12]` (max),
+    // `LDR Xn, [tbl_base, #(idx*24)+16]` (funcptrs).
+    if (@sizeOf(TableSlice) != 24) @compileError("TableSlice size != 24; JIT table.get stride assumption broken");
+    if (@offsetOf(TableSlice, "refs") != 0) @compileError("TableSlice.refs offset != 0");
+    if (@offsetOf(TableSlice, "len") != 8) @compileError("TableSlice.len offset != 8");
+    if (@offsetOf(TableSlice, "max") != 12) @compileError("TableSlice.max offset != 12");
+    if (@offsetOf(TableSlice, "funcptrs") != 16) @compileError("TableSlice.funcptrs offset != 16");
     // §9.9 / 9.9-m-2c-init: elem_segments_ptr is X-form; count is W-form.
     if ((elem_segments_ptr_off & 7) != 0) @compileError("elem_segments_ptr_off not 8-aligned");
     if ((elem_segments_count_off & 3) != 0) @compileError("elem_segments_count_off not 4-aligned");
@@ -528,11 +548,12 @@ test "JitRuntime: §9.9 / 9.9-m-1b + 9.9-m-3a + 9.9-m-3b + 9.9-m-2a + 9.9-m-2c-i
     try testing.expectEqual(@as(u12, 176), elem_segments_count_off);
 }
 
-test "TableSlice: layout is 16 bytes with refs/len/max at expected offsets" {
-    try testing.expectEqual(@as(u32, 16), table_slice_size);
+test "TableSlice: layout is 24 bytes with refs/len/max/funcptrs at expected offsets (ADR-0068)" {
+    try testing.expectEqual(@as(u32, 24), table_slice_size);
     try testing.expectEqual(@as(usize, 0), @offsetOf(TableSlice, "refs"));
     try testing.expectEqual(@as(usize, 8), @offsetOf(TableSlice, "len"));
     try testing.expectEqual(@as(usize, 12), @offsetOf(TableSlice, "max"));
+    try testing.expectEqual(@as(usize, 16), @offsetOf(TableSlice, "funcptrs"));
 }
 
 test "ElemSlice: layout is 16 bytes with refs/len at expected offsets" {

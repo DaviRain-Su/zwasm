@@ -513,8 +513,25 @@ pub fn setupMultiTableScratch(
     // populate consume this).
     const num_funcs = compiled.func_sigs.len;
     if (num_funcs > SCRATCH_MAX_FUNCS) return error.UnsupportedEntrySignature;
+    // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
+    // Populate `FuncEntity.funcptr` per ADR-0068 chunk α: spec-runner
+    // scratch uses the same locals-vs-imports split as production
+    // setup (runner.zig). Locals point at the compiled body inside
+    // `compiled.module.block.bytes`; imports point at the current
+    // dispatch slot. `current_dispatch` may be null on first-load
+    // before cross-module resolution — in that case imports get 0,
+    // matching the pre-(c)-2.3 trap-stub fallback shape.
     for (0..num_funcs) |i| {
-        scratch_func_entities[i] = .{ .runtime = undefined, .func_idx = @intCast(i) };
+        const f_off = compiled.module.func_offsets[i];
+        const funcptr: usize = if (f_off == zwasm.engine.codegen.shared.linker.IMPORT_SENTINEL_OFFSET)
+            (if (current_dispatch) |d| (if (i < d.len) d[i] else 0) else 0)
+        else
+            @intFromPtr(compiled.module.block.bytes.ptr + f_off);
+        scratch_func_entities[i] = .{
+            .runtime = undefined,
+            .func_idx = @intCast(i),
+            .funcptr = funcptr,
+        };
     }
     active_func_count = @intCast(num_funcs);
 
@@ -594,10 +611,24 @@ pub fn setupMultiTableScratch(
         const refs_slice = scratch_table_refs[k][0..tbl_min];
         @memset(refs_slice, Value.null_ref);
         try populateTableRefs(gpa, wasm_bytes, compiled, k, refs_slice);
+        // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
+        // `funcptrs` view: for k = 0 the caller-passed
+        // `table0_funcptrs` slice is the authoritative backing (same
+        // memory as the JitRuntime scalar `funcptr_base`). For k > 0
+        // the per-table row of `scratch_extra_funcptrs` is the
+        // backing. Chunk β/γ wires the JIT-emit mirror writes that
+        // keep these views in sync with `refs`.
+        const fp_slice: [*]u64 = if (k == 0)
+            table0_funcptrs.ptr
+        else blk: {
+            const slice = scratch_extra_funcptrs[k - 1][0..tbl_min];
+            break :blk if (tbl_min == 0) @as([*]u64, undefined) else slice.ptr;
+        };
         scratch_tables_descriptor[k] = .{
             .refs = if (tbl_min == 0) @as([*]u64, undefined) else refs_slice.ptr,
             .len = tbl_min,
             .max = tbl_max orelse entry.table_no_max,
+            .funcptrs = fp_slice,
         };
     }
     active_table_count = num_tables;
@@ -1022,8 +1053,23 @@ pub const RegisteredExporter = struct {
             if (num_funcs > 0) {
                 const FuncEntity = @import("zwasm").runtime.FuncEntity;
                 const fe = try allocator.alloc(FuncEntity, num_funcs);
+                // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
+                // RegisteredExporter scratch path — mirror the
+                // setupMultiTableScratch funcptr split (locals vs
+                // imports). `dispatch_override` is not yet plumbed here,
+                // so imports default to 0; the chunk β/γ wire-up
+                // refreshes this once cross-module resolution lands.
                 for (fe, 0..) |*slot, i| {
-                    slot.* = .{ .runtime = undefined, .func_idx = @intCast(i) };
+                    const f_off = compiled.module.func_offsets[i];
+                    const funcptr: usize = if (f_off == zwasm.engine.codegen.shared.linker.IMPORT_SENTINEL_OFFSET)
+                        0
+                    else
+                        @intFromPtr(compiled.module.block.bytes.ptr + f_off);
+                    slot.* = .{
+                        .runtime = undefined,
+                        .func_idx = @intCast(i),
+                        .funcptr = funcptr,
+                    };
                 }
                 self.scratch_func_entities = fe;
             }

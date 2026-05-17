@@ -522,6 +522,11 @@ pub fn instantiateRuntime(
         for (0..total_funcs) |i| entities[i] = .{
             .runtime = rt,
             .func_idx = @intCast(i),
+            // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
+            // Interp instantiate path; the JIT path's emitTableSet
+            // mirror-write reads this. 0 is the "not JIT-resolved"
+            // sentinel — interp-only round-trip never dereferences it.
+            .funcptr = 0,
         };
         if (imp_func_count > 0) {
             var imp_idx: u32 = 0;
@@ -533,6 +538,7 @@ pub fn instantiateRuntime(
                         entities[imp_idx] = .{
                             .runtime = cm.source_runtime,
                             .func_idx = cm.source_funcidx,
+                            .funcptr = 0,
                         };
                     },
                     .wasi => {

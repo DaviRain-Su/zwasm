@@ -197,15 +197,17 @@ pub fn emitCallIndirect(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         // The runtime_ptr lives in X19 (= abi.runtime_ptr_save_gpr).
         const rt_reg: inst.Xn = abi.runtime_ptr_save_gpr;
 
+        // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
         // Bounds: load size from tables_ptr[table_idx].len (TableSlice
-        // offset 8 within the 16-byte stride). Reject if table_idx
-        // exceeds the per-call imm12 budget (16-byte stride * 16 tables
-        // = 256 < 4095 max, so realistic modules never hit this).
-        const tbl_slice_byte_off: u32 = (table_idx * 16) + 8;
+        // offset 8 within the `table_slice_size` stride — 16 pre-ADR-
+        // 0068, 24 after). Reject if table_idx exceeds the per-call
+        // imm12 budget; the @intCast on the encoded W-form imm12
+        // catches out-of-range at codegen time.
+        const tbl_slice_byte_off: u32 = (table_idx * jit_abi.table_slice_size) + 8;
         if (tbl_slice_byte_off > 16380) return Error.UnsupportedOp;
         // LDR X16, [rt, #tables_ptr_off]
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(16, rt_reg, jit_abi.tables_ptr_off));
-        // LDR W16, [X16, #(table_idx*16 + 8)]
+        // LDR W16, [X16, #(table_idx*table_slice_size + 8)]
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(16, 16, @intCast(tbl_slice_byte_off)));
         // CMP W17, W16
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegW(17, 16));

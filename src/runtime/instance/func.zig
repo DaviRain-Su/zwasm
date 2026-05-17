@@ -28,4 +28,16 @@ pub const FuncEntity = struct {
     runtime: *runtime_mod.Runtime,
     /// Index into `runtime.funcs`.
     func_idx: u32,
+    /// TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
+    /// Native code entry point for this function. JIT `emitTableSet`
+    /// reads this via `LDR Xfp, [Xref, #funcptr_offset]` to mirror
+    /// the funcref input into the dual-view funcptr storage (per
+    /// ADR-0068 §A1). For local funcs:
+    /// `@intFromPtr(compiled.module.block.bytes.ptr + func_offsets[i])`.
+    /// For imports: `dispatch[i]` (host-call trampoline / cross-module
+    /// bridge thunk). `0` when the entity is interp-only and no JIT
+    /// dispatch slot has been populated; downstream JIT paths that
+    /// would dereference this MUST coordinate via the dispatch
+    /// machinery that produced the funcref in the first place.
+    funcptr: usize,
 };

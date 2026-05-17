@@ -1514,6 +1514,9 @@ fn setupRuntime(
     const table_refs = try allocator.alloc(u64, if (total_table_refs == 0) 1 else total_table_refs);
     errdefer allocator.free(table_refs);
     @memset(table_refs, Value.null_ref);
+    // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
+    // tables_descs[k].funcptrs aliases funcptrs_buf for k=0;
+    // tables 1+ get rebound to extra_funcptrs_buf slices below.
     {
         var ref_offset: usize = 0;
         for (table_metas, 0..) |tm, i| {
@@ -1521,27 +1524,23 @@ fn setupRuntime(
                 .refs = table_refs.ptr + ref_offset,
                 .len = tm.min,
                 .max = tm.max orelse entry.table_no_max,
+                .funcptrs = funcptrs_buf.ptr,
             };
             ref_offset += tm.min;
         }
-        // For modules without a declared table section, leave the
-        // single placeholder descriptor pointing at the sentinel
-        // refs slot. table.get with tableidx=0 against such a
-        // module would already have been rejected by the validator
-        // (no table declared → InvalidFuncIndex).
         if (table_metas.len == 0) {
-            tables_descs[0] = .{ .refs = table_refs.ptr, .len = 0, .max = entry.table_no_max };
+            tables_descs[0] = .{
+                .refs = table_refs.ptr,
+                .len = 0,
+                .max = entry.table_no_max,
+                .funcptrs = funcptrs_buf.ptr,
+            };
         }
     }
 
     // §9.9 / 9.9-l-1b-d093-d42 (D-112): per-table call_indirect
-    // dispatch descriptors. Table 0 reuses `funcptrs_buf` /
-    // `typeidxs_buf` so the legacy JitRuntime scalar fields stay
-    // backed by identical memory. Tables 1..N get their funcptr /
-    // typeidx storage from a contiguous `extra_funcptrs` /
-    // `extra_typeidxs` arena, sized by the sum of those tables'
-    // declared `min` entry counts. The descriptor array indexes
-    // by table_idx (Wasm spec §3.4.6 call_indirect tableidx byte).
+    // dispatch descriptors — table 0 reuses funcptrs_buf/typeidxs_buf;
+    // tables 1+ point into extra_funcptrs/extra_typeidxs arenas.
     var extra_total_slots: usize = 0;
     if (table_metas.len > 1) {
         for (table_metas[1..]) |tm| extra_total_slots += tm.min;
@@ -1563,6 +1562,8 @@ fn setupRuntime(
                     .funcptr_base = extra_funcptrs_buf.ptr + off,
                     .typeidx_base = extra_typeidxs_buf.ptr + off,
                 };
+                // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
+                tables_descs[k].funcptrs = extra_funcptrs_buf.ptr + off;
                 off += tm.min;
             }
         }
@@ -1584,19 +1585,22 @@ fn setupRuntime(
     }
 
     // §9.9 / 9.9-m-1b: per-module FuncEntity array for JIT
-    // ref.func. Size = total functions (imports + defined).
-    // Allocated unconditionally so JIT-emitted ref.func reads
-    // a stable, distinct address per funcidx. Moved above the
-    // element-section loop (§9.9 / 9.9-m-2a) so the loop can
-    // populate `table_refs` with FuncEntity-ptr encoding in
-    // the same pass that populates `funcptrs_buf` with the
-    // native-code-ptr encoding.
+    // ref.func. Allocated above the element-section loop so
+    // the loop can populate refs with FuncEntity-ptr encoding
+    // in the same pass that populates funcptrs_buf.
     const FuncEntity = @import("../runtime/instance/func.zig").FuncEntity;
     const total_funcs = compiled.func_sigs.len;
     const func_entities = try allocator.alloc(FuncEntity, total_funcs);
     errdefer allocator.free(func_entities);
+    // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
+    // funcptr: locals → module body addr; imports → dispatch[i].
     for (func_entities, 0..) |*fe, i| {
-        fe.* = .{ .runtime = undefined, .func_idx = @intCast(i) };
+        const f_off = compiled.module.func_offsets[i];
+        const funcptr: usize = if (f_off == linker.IMPORT_SENTINEL_OFFSET)
+            (if (i < dispatch.len) dispatch[i] else 0)
+        else
+            @intFromPtr(compiled.module.block.bytes.ptr + f_off);
+        fe.* = .{ .runtime = undefined, .func_idx = @intCast(i), .funcptr = funcptr };
     }
 
     // Wasm spec §4.5.7 (table.init / element-segment instantiation)

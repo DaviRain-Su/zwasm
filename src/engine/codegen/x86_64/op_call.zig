@@ -315,12 +315,16 @@ pub fn emitCallIndirect(
         // load reloads the array pointer.
         if (jit_abi.table_jit_ci_size != 16) @compileError("multi-table x86_64 emit assumes TableJitCallInfo stride 16");
 
-        const tbl_slice_disp: i32 = @intCast((table_idx * 16) + 8);
+        // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
+        // TableSlice stride is `table_slice_size` (= 16 pre-ADR-0068,
+        // 24 after the dual-view extension). TableJitCallInfo stride
+        // stays 16 (no extension yet).
+        const tbl_slice_disp: i32 = @intCast((table_idx * jit_abi.table_slice_size) + 8);
         const ci_funcptr_disp: i32 = @intCast(table_idx * 16);
         const ci_typeidx_disp: i32 = @intCast((table_idx * 16) + 8);
 
         // Bounds: MOV RAX, [R15 + tables_ptr_off]
-        //         MOV EAX, [RAX + (table_idx*16 + 8)]  ; TableSlice.len
+        //         MOV EAX, [RAX + (table_idx*table_slice_size + 8)]  ; TableSlice.len
         //         CMP idx_r, EAX ; JAE trap.
         try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off).slice());
         try buf.appendSlice(allocator, inst.encMovR32FromMemDisp32(.rax, .rax, tbl_slice_disp).slice());

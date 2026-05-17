@@ -2,7 +2,9 @@
 //! handlers (§9.9 / 9.9-m-2a per ADR-0058).
 //!
 //! Each declared table has a `TableSlice` descriptor in the JIT
-//! runtime's `tables_ptr` array (stride 16 bytes per ADR-0058);
+//! runtime's `tables_ptr` array (stride `jit_abi.table_slice_size`
+//! bytes — 16 per ADR-0058, then 24 after ADR-0068's dual-view
+//! `funcptrs: [*]u64` extension);
 //! the JIT body loads `refs` + `len` from the indexed descriptor
 //! then performs a bounds-checked load/store against
 //! `refs[idx]` (8-byte ref slot).
@@ -66,12 +68,13 @@ const Error = ctx_mod.Error;
 /// stub R15 prescan bug).
 pub fn emitTableGet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const tableidx = ins.payload;
-    // imm12 budget for X-form LDR: byte_off scaled by 8 → max
-    // tableidx for the X-form refs load = 32760/16 = 2047. For
-    // the W-form len load (scaled by 4), max byte_off = 16380 →
-    // tableidx ≤ (16380-8)/16 = 1023. The W-form path is tighter.
-    if (tableidx >= 1024) return Error.UnsupportedOp;
-    const tbl_off: u15 = @intCast(@as(u32, tableidx) * 16);
+    // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
+    // imm12 budget reshaped by stride 16 → 24: W-form len/max
+    // (byte_off ≤ 16380, scaled by 4) caps tableidx at (16380-12)/24
+    // = 682. Cap 512 leaves comfortable margin while remaining far
+    // above any realistic Wasm module's table count.
+    if (tableidx >= 512) return Error.UnsupportedOp;
+    const tbl_off: u15 = @intCast(@as(u32, tableidx) * jit_abi.table_slice_size);
 
     if (ctx.pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const idx_v = ctx.pushed_vregs.pop().?;
@@ -119,8 +122,8 @@ pub fn emitTableGet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// idx >= table.len.
 pub fn emitTableSet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const tableidx = ins.payload;
-    if (tableidx >= 1024) return Error.UnsupportedOp;
-    const tbl_off: u15 = @intCast(@as(u32, tableidx) * 16);
+    if (tableidx >= 512) return Error.UnsupportedOp;
+    const tbl_off: u15 = @intCast(@as(u32, tableidx) * jit_abi.table_slice_size);
 
     if (ctx.pushed_vregs.items.len < 2) return Error.AllocationMissing;
     const val_v = ctx.pushed_vregs.pop().?;
@@ -172,8 +175,8 @@ pub fn emitTableSet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// `emitTableSet` via the `funcref_roundtrip` reproducer.
 pub fn emitTableSize(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const tableidx = ins.payload;
-    if (tableidx >= 1024) return Error.UnsupportedOp;
-    const len_off: u14 = @intCast(@as(u32, tableidx) * 16 + 8);
+    if (tableidx >= 512) return Error.UnsupportedOp;
+    const len_off: u14 = @intCast(@as(u32, tableidx) * jit_abi.table_slice_size + 8);
 
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(14, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off));
 
@@ -202,7 +205,7 @@ pub fn emitTableSize(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// touch linear memory.
 pub fn emitTableGrow(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const tableidx = ins.payload;
-    if (tableidx >= 1024) return Error.UnsupportedOp;
+    if (tableidx >= 512) return Error.UnsupportedOp;
 
     if (ctx.pushed_vregs.items.len < 2) return Error.AllocationMissing;
     const delta_v = ctx.pushed_vregs.pop().?;
@@ -253,8 +256,8 @@ pub fn emitTableGrow(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// miscompile (m-2a class bug).
 pub fn emitTableFill(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const tableidx = ins.payload;
-    if (tableidx >= 1024) return Error.UnsupportedOp;
-    const tbl_off: u15 = @intCast(@as(u32, tableidx) * 16);
+    if (tableidx >= 512) return Error.UnsupportedOp;
+    const tbl_off: u15 = @intCast(@as(u32, tableidx) * jit_abi.table_slice_size);
 
     if (ctx.pushed_vregs.items.len < 3) return Error.AllocationMissing;
     const n_v = ctx.pushed_vregs.pop().?;
@@ -339,9 +342,9 @@ pub fn emitTableFill(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 pub fn emitTableCopy(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const dst_tbl = ins.payload;
     const src_tbl = ins.extra;
-    if (dst_tbl >= 1024 or src_tbl >= 1024) return Error.UnsupportedOp;
-    const dst_tbl_off: u15 = @intCast(@as(u32, dst_tbl) * 16);
-    const src_tbl_off: u15 = @intCast(@as(u32, src_tbl) * 16);
+    if (dst_tbl >= 512 or src_tbl >= 512) return Error.UnsupportedOp;
+    const dst_tbl_off: u15 = @intCast(@as(u32, dst_tbl) * jit_abi.table_slice_size);
+    const src_tbl_off: u15 = @intCast(@as(u32, src_tbl) * jit_abi.table_slice_size);
     const same_table = (dst_tbl == src_tbl);
 
     if (ctx.pushed_vregs.items.len < 3) return Error.AllocationMissing;
@@ -488,9 +491,12 @@ pub fn emitTableCopy(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 pub fn emitTableInit(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const elemidx = ins.payload;
     const tableidx = ins.extra;
-    if (elemidx >= 1024 or tableidx >= 1024) return Error.UnsupportedOp;
-    const tbl_off: u15 = @intCast(@as(u32, tableidx) * 16);
-    const elem_off: u15 = @intCast(@as(u32, elemidx) * 16);
+    // tableidx cap = 512 (TableSlice stride 24, see ADR-0068 +
+    // emitTableGet rationale). elemidx cap stays 1024 because
+    // ElemSlice stride is still 16.
+    if (elemidx >= 1024 or tableidx >= 512) return Error.UnsupportedOp;
+    const tbl_off: u15 = @intCast(@as(u32, tableidx) * jit_abi.table_slice_size);
+    const elem_off: u15 = @intCast(@as(u32, elemidx) * jit_abi.elem_slice_size);
 
     if (ctx.pushed_vregs.items.len < 3) return Error.AllocationMissing;
     const n_v = ctx.pushed_vregs.pop().?;

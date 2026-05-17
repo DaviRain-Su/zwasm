@@ -3,7 +3,8 @@
 //!
 //! Mirror of `arm64/op_table.zig`. The JIT body reads the
 //! per-table `TableSlice` descriptor from `[R15 + tables_ptr_off]`,
-//! indexes by `tableidx * 16` (stride matches SegmentSlice m-3b),
+//! indexes by `tableidx * jit_abi.table_slice_size` (= 16 pre-ADR-
+//! 0068, 24 post-ADR-0068 dual-view extension),
 //! and performs a bounds-checked load/store against `refs[idx]`.
 //!
 //! Per-op shape (Wasm spec §4.4.10–12):
@@ -64,11 +65,12 @@ pub fn emitTableGet(
     func_idx: u32,
     tableidx: u32,
 ) Error!void {
-    // Encoding-budget guard. The disp32 form always suffices for
-    // realistic table counts; match the arm64 path's 1024 cap so the
-    // two arches reject the same module shapes.
-    if (tableidx >= 1024) return Error.UnsupportedOp;
-    const tbl_disp: i32 = @intCast(tableidx * 16);
+    // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
+    // Encoding-budget guard. disp32 always suffices; cap matches
+    // arm64's 512 (lowered from 1024 when TableSlice stride moved
+    // from 16 → 24 per ADR-0068).
+    if (tableidx >= 512) return Error.UnsupportedOp;
+    const tbl_disp: i32 = @intCast(tableidx * jit_abi.table_slice_size);
 
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const idx_v = pushed_vregs.pop().?;
@@ -115,8 +117,8 @@ pub fn emitTableSet(
     func_idx: u32,
     tableidx: u32,
 ) Error!void {
-    if (tableidx >= 1024) return Error.UnsupportedOp;
-    const tbl_disp: i32 = @intCast(tableidx * 16);
+    if (tableidx >= 512) return Error.UnsupportedOp;
+    const tbl_disp: i32 = @intCast(tableidx * jit_abi.table_slice_size);
 
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
     const val_v = pushed_vregs.pop().?;
@@ -157,8 +159,8 @@ pub fn emitTableSize(
     spill_base_off: u32,
     tableidx: u32,
 ) Error!void {
-    if (tableidx >= 1024) return Error.UnsupportedOp;
-    const len_disp: i32 = @intCast(tableidx * 16 + 8);
+    if (tableidx >= 512) return Error.UnsupportedOp;
+    const len_disp: i32 = @intCast(tableidx * jit_abi.table_slice_size + 8);
 
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off).slice());
 
@@ -190,7 +192,7 @@ pub fn emitTableGrow(
     outgoing_max_bytes: u32,
     tableidx: u32,
 ) Error!void {
-    if (tableidx >= 1024) return Error.UnsupportedOp;
+    if (tableidx >= 512) return Error.UnsupportedOp;
 
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
     const delta_v = pushed_vregs.pop().?;
@@ -257,8 +259,8 @@ pub fn emitTableFill(
     func_idx: u32,
     tableidx: u32,
 ) Error!void {
-    if (tableidx >= 1024) return Error.UnsupportedOp;
-    const tbl_disp: i32 = @intCast(tableidx * 16);
+    if (tableidx >= 512) return Error.UnsupportedOp;
+    const tbl_disp: i32 = @intCast(tableidx * jit_abi.table_slice_size);
 
     if (pushed_vregs.items.len < 3) return Error.AllocationMissing;
     const n_v = pushed_vregs.pop().?;
@@ -345,9 +347,9 @@ pub fn emitTableCopy(
     dst_tbl: u32,
     src_tbl: u32,
 ) Error!void {
-    if (dst_tbl >= 1024 or src_tbl >= 1024) return Error.UnsupportedOp;
-    const dst_tbl_disp: i32 = @intCast(dst_tbl * 16);
-    const src_tbl_disp: i32 = @intCast(src_tbl * 16);
+    if (dst_tbl >= 512 or src_tbl >= 512) return Error.UnsupportedOp;
+    const dst_tbl_disp: i32 = @intCast(dst_tbl * jit_abi.table_slice_size);
+    const src_tbl_disp: i32 = @intCast(src_tbl * jit_abi.table_slice_size);
     const same_table = (dst_tbl == src_tbl);
 
     if (pushed_vregs.items.len < 3) return Error.AllocationMissing;
@@ -486,9 +488,11 @@ pub fn emitTableInit(
     elemidx: u32,
     tableidx: u32,
 ) Error!void {
-    if (elemidx >= 1024 or tableidx >= 1024) return Error.UnsupportedOp;
-    const tbl_disp: i32 = @intCast(tableidx * 16);
-    const elem_disp: i32 = @intCast(elemidx * 16);
+    // tableidx cap = 512 (TableSlice stride 24 per ADR-0068);
+    // elemidx cap stays 1024 (ElemSlice stride still 16).
+    if (elemidx >= 1024 or tableidx >= 512) return Error.UnsupportedOp;
+    const tbl_disp: i32 = @intCast(tableidx * jit_abi.table_slice_size);
+    const elem_disp: i32 = @intCast(elemidx * jit_abi.elem_slice_size);
 
     if (pushed_vregs.items.len < 3) return Error.AllocationMissing;
     const n_v = pushed_vregs.pop().?;
