@@ -6,15 +6,17 @@
 ## Cold-start procedure
 
 1. **READ FIRST** [`.dev/phase9_close_plan.md`](phase9_close_plan.md)
-   §6. Cat III dispatch — through γ-3.b-ii landed. γ-4 retry
-   diagnosed as layout-sensitive (lesson
-   `gamma4-stdout-buf-layout-sensitivity`). **Next = γ-4
-   diagnostic instrumentation** (last-module-name trace in
-   `sigsegvHandler`) before γ-3.c attempt.
-2. `git log --oneline -10`. Latest: `f01f51f7` γ-4 retry +
-   layout-sensitivity lesson. γ-3.b-ii `84f62398`, γ-3.b-i
-   `3b003b9e`. Prior β/γ chain via
-   `git log --grep="9.9-III"`.
+   §6. Cat III dispatch — through γ-3.b-ii landed; γ-4 DIAG
+   handler (`6b0d8ec4`) identified crash at
+   `table_init/table_init.1.wasm`. Root cause: importer's
+   element segments leave funcptr=0 for imported funcs in
+   tables → `call_indirect` BLRs 0. **Next = γ-5 import-in-
+   table thunk patch** (post-`applyTableInit` hook in the spec
+   runner that substitutes `current_dispatch[N]` thunk addrs
+   for entries with fidx < num_imports).
+2. `git log --oneline -10`. Latest: `6b0d8ec4` γ-4 DIAG
+   handler trace. γ-3.b-ii `84f62398`, γ-3.b-i `3b003b9e`.
+   Prior β/γ chain via `git log --grep="9.9-III"`.
 3. `bash scripts/p9_simd_status.sh` — live SIMD via ubuntunote
    native x86_64 (ADR-0067).
 4. `cat .dev/debt.md | head -90`. Cat III sub-chunks tracked
@@ -40,24 +42,27 @@ Read `private/notes/p9-9.9-III-c-2.3-gamma-survey.md` FIRST
 (corpus taxonomy + 5-step ramp; γ-3.b note appended below).
 
 Sub-chunking progress (Cat III (c)-2.3):
-- SHAs through γ-3.b-ii: `git log --grep="9.9-III"`.
-- γ-4 retry post-γ-3.b-ii `f01f51f7`: still `_exit(142)`.
-  `stdout_buf` bisect (16/32/.../4096) flipped between green
-  and crashing across rebuilds with same source — verdict:
-  layout-sensitive, not deterministic-per-source. Per-corpus
-  bisect ran all 84 subdirs cleanly. Lesson recorded as
-  `2026-05-17-gamma4-stdout-buf-layout-sensitivity`.
-- **γ-4 DIAG NEXT**: instrument `sigsegvHandler` (line ~1384
-  in `spec_assert_runner_base.zig`) with async-signal-safe
-  last-module-name trace before `_exit(142)`:
-  `pub var last_module_name: [256]u8 = undefined;` +
-  `pub var last_module_name_len: u32 = 0;` updated at the
-  `.module` arm of `runCorpus`; handler writes to stderr via
-  `write(2)`. Then re-attempt γ-4 relax — the trace pinpoints
-  the crash fixture, which informs whether γ-3.c (multi-
-  table) is the real gap or something else.
-- γ-3.c (per-exporter multi-table) + γ-5 (module-qualified
-  invoke) + (c)-2.4 (distiller) follow once γ-4 lands.
+- SHAs through γ-4 DIAG: `git log --grep="9.9-III"`.
+- γ-4 DIAG `6b0d8ec4`: in-handler `last_module_name` trace
+  surfaces SEGV-fixture before `_exit(142)`. Permanent
+  infrastructure for future γ-4 retries.
+- γ-4 DIAG run finding: SEGV at
+  `table_init/table_init.1.wasm`. Importer's element segments
+  place imported funcs (a.ef0..a.ef4) into tables; for
+  funcidx < num_imports, `applyTableInitForTable`
+  (`src/engine/runner.zig` ~line 1127) `continue`s without
+  writing funcptr (leaves it 0). `call_indirect` BLRs 0 →
+  SEGV. Verdict: the gap is NOT `RegisteredExporter` state-
+  backing — it's import-in-table dispatch.
+- **γ-5 NEXT**: in the spec runner, after `applyTableInit` /
+  `setupMultiTableScratch`, patch the importer's funcptr
+  table entries whose corresponding source funcidx is an
+  import — substitute the resolved thunk address from
+  `current_dispatch[N]` (which β-2b's resolver wrote). Run γ-4
+  retry afterward; the DIAG trace will identify the next
+  gap if any remains.
+- γ-3.c (per-exporter multi-table) + (c)-2.4 (distiller)
+  follow once γ-4 lands.
 
 (c)-2.4 = corpus distiller's `supported` set extension + new
 fixture rebuild; discharges D-138 fully + D-079 sub-gap ii.
