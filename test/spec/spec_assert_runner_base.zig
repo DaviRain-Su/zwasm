@@ -348,12 +348,22 @@ pub fn makeJitRuntime(
 /// dispatch.
 pub const HOST_IMPORT_TRAP_SENTINEL: u32 = 0xBADC0DE;
 
+/// §9.9-III D-144 γ.4 cycle 2 — permanent diagnostic counter for
+/// hostImportTrapStub fires. Increments per stub invocation;
+/// pairs with `host_import_stub_trap_flag_at_entry` to localise
+/// which call sets trap_flag during cross-module fixture runs.
+/// Reset per assert dispatch (D-129 pending_host_import_skip
+/// pattern). Per `hypothesis_enumeration.md` step-4 discipline
+/// (permanent diagnostic infra per multi-cycle debug).
+pub var host_import_stub_call_count: u32 = 0;
+pub var host_import_stub_last_trap_flag: u32 = 0;
+
 fn hostImportTrapStub(rt: *entry.JitRuntime) callconv(.c) void {
     // Phase 9 Cat III chunk (c)-1b: no-op return for spectest void
-    // imports. Side-effect prints are skipped (they were never
-    // observable from spec_assert); per Wasm spec §A.2 the assert
-    // checks return values which spectest.print_* doesn't produce.
-    _ = rt;
+    // imports. Side-effect prints skipped (per Wasm spec §A.2 the
+    // assert checks return values, not side prints).
+    host_import_stub_call_count += 1;
+    host_import_stub_last_trap_flag = rt.trap_flag;
 }
 
 /// §9.9 / 9.9-l-1b-d093-d54 (D-129): callback-set side channel
@@ -384,10 +394,20 @@ pub fn printCallTrap(
         try stdout.print("SKIP-HOST-IMPORT  {s}: {s}({s}) host-import stub trap\n", .{ name, fn_name, args_s });
         return;
     }
+    // §9.9-III D-144 γ.4 cycle 2: emit stub-fire counter alongside
+    // FAIL so cross-module-import-bearing fixtures localise their
+    // trap source. `host_import_stub_call_count` increments per
+    // hostImportTrapStub invocation; `last_trap_flag` snapshots
+    // rt.trap_flag at the entry of the most-recent stub fire.
+    // For a fixture whose body chains spectest-only no-op stubs +
+    // exactly one cross-module call, the counter delta tells us
+    // whether the trap happened before or after the cross-module
+    // call. Per `hypothesis_enumeration.md` step-4 (permanent
+    // diagnostic infra over throwaway probes).
     if (std.mem.eql(u8, args_s, "()") or args_s.len == 0) {
-        try stdout.print("FAIL  {s}: call {s}(): {s}\n", .{ name, fn_name, @errorName(err) });
+        try stdout.print("FAIL  {s}: call {s}(): {s} [stubs={d} last_tf={d}]\n", .{ name, fn_name, @errorName(err), host_import_stub_call_count, host_import_stub_last_trap_flag });
     } else {
-        try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+        try stdout.print("FAIL  {s}: call {s}({s}): {s} [stubs={d} last_tf={d}]\n", .{ name, fn_name, args_s, @errorName(err), host_import_stub_call_count, host_import_stub_last_trap_flag });
     }
 }
 
@@ -1502,13 +1522,10 @@ pub fn hasUnbindableImports(
         const is_spectest = std.mem.eql(u8, imp.module, "spectest");
         switch (imp.kind) {
             .func => {
-                // §9.9-III (c)-2.3-γ-4 strict pending γ.4. ADR-0068
-                // chunks α/β/γ/γ.2 + γ.3 funcref-global resolver
-                // discharged the dual-view storage class; γ.2 close
-                // probe at γ-4-relax = 25307/1 (1 residual on
-                // imports.1.wasm's i64 cross-module call path, not
-                // typeidx-related). γ.4 lands relax once that
-                // cross-module i64-arg debug is closed.
+                // §9.9-III (c)-2.3-γ-4 strict pending D-144 close.
+                // The γ-4 relax probe at γ.2/γ.3/γ.4 cycle 2 shows
+                // 1 residual fail (imports.1.wasm print64
+                // call_indirect sig-check trap, see D-144 row).
                 if (is_spectest) continue;
                 return true;
             },
@@ -2411,6 +2428,8 @@ pub fn runCorpus(
                 };
                 const wasm = current_wasm.?;
                 pending_host_import_skip = false;
+                host_import_stub_call_count = 0;
+                host_import_stub_last_trap_flag = 0;
                 const ok = callbacks.handle_assert_return(gpa, wasm, compiled_ptr, classified.body, stdout, name) catch |err| {
                     try stdout.print("FAIL  {s}: {s} (error {s})\n", .{ name, line, @errorName(err) });
                     tally.failed += 1;
@@ -2477,6 +2496,8 @@ pub fn runCorpus(
                 };
                 const wasm = current_wasm.?;
                 pending_host_import_skip = false;
+                host_import_stub_call_count = 0;
+                host_import_stub_last_trap_flag = 0;
                 const ok = callbacks.handle_invoke_action(gpa, wasm, compiled_ptr, classified.body, stdout, name) catch |err| {
                     try stdout.print("FAIL  {s}: {s} (error {s})\n", .{ name, line, @errorName(err) });
                     tally.failed += 1;
