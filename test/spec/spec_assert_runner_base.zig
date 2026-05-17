@@ -876,11 +876,25 @@ pub const RegisteredExporter = struct {
     /// canonical typeidxs (instead of the importer's static
     /// `scratch_funcptrs`). Null when the exporter has no
     /// table section. Multi-table (tables 1..N) support is
-    /// γ-3.b — deferred until a corpus fixture demands it.
+    /// γ-3.c — deferred until a corpus fixture demands it.
     scratch_funcptrs: ?[]u64 = null,
     scratch_typeidxs: ?[]u32 = null,
+    /// §9.9-III (c)-2.3-γ-3.b-i: per-exporter `FuncEntity` array.
+    /// `ref.func i` encodes `@intFromPtr(&func_entities[i])` so
+    /// the JIT emit needs a stable `func_entities_ptr` that the
+    /// callee can index into. Allocated lazily in
+    /// `ensureCompiledAndRt` sized to `compiled.func_sigs.len`
+    /// (covers both imports and defined funcs in wasm-space).
+    /// Populated identically to the importer-side
+    /// `scratch_func_entities` in `setupMultiTableScratch`:
+    /// `{runtime = undefined, func_idx = i}`. The `runtime`
+    /// field is a `*Runtime` placeholder — the spec runner
+    /// doesn't materialise a `Runtime`; only the FuncEntity
+    /// address matters for funcref encoding.
+    scratch_func_entities: ?[]@import("zwasm").runtime.FuncEntity = null,
 
     pub fn deinit(self: *RegisteredExporter, allocator: std.mem.Allocator) void {
+        if (self.scratch_func_entities) |fe| allocator.free(fe);
         if (self.scratch_typeidxs) |t| allocator.free(t);
         if (self.scratch_funcptrs) |f| allocator.free(f);
         if (self.scratch_memory) |m| allocator.free(m);
@@ -949,12 +963,24 @@ pub const RegisteredExporter = struct {
                 self.scratch_typeidxs = typeidxs;
             }
         }
+        if (self.scratch_func_entities == null) {
+            const num_funcs = compiled.func_sigs.len;
+            if (num_funcs > 0) {
+                const FuncEntity = @import("zwasm").runtime.FuncEntity;
+                const fe = try allocator.alloc(FuncEntity, num_funcs);
+                for (fe, 0..) |*slot, i| {
+                    slot.* = .{ .runtime = undefined, .func_idx = @intCast(i) };
+                }
+                self.scratch_func_entities = fe;
+            }
+        }
         if (self.rt == null) {
             const rt_ptr = try allocator.create(entry.JitRuntime);
             const globals_buf = self.scratch_globals.?;
             const memory_buf: ?[]u8 = self.scratch_memory;
             const funcptrs_buf: ?[]u64 = self.scratch_funcptrs;
             const typeidxs_buf: ?[]u32 = self.scratch_typeidxs;
+            const fe_buf = self.scratch_func_entities;
             rt_ptr.* = .{
                 .vm_base = if (memory_buf) |m| m.ptr else @ptrFromInt(@as(usize, 0x1000)),
                 .mem_limit = if (memory_buf) |m| m.len else 0,
@@ -966,6 +992,8 @@ pub const RegisteredExporter = struct {
                 .globals_count = @intCast(globals_buf.len / @sizeOf(Value)),
                 .host_dispatch_base = undefined,
                 .host_dispatch_count = 0,
+                .func_entities_ptr = if (fe_buf) |fe| @ptrCast(fe.ptr) else undefined,
+                .func_entities_count = if (fe_buf) |fe| @intCast(fe.len) else 0,
             };
             self.rt = rt_ptr;
         }
@@ -2444,6 +2472,38 @@ test "sigsegv guard: armed=false after recovery so subsequent SEGV is unexpected
         // assertion confirms the contract end-to-end).
         try testing.expect(sigsegv_armed.load(.acquire) == false);
     }
+}
+
+test "RegisteredExporter γ-3.b-i: ensureCompiledAndRt populates scratch_func_entities + wires rt.func_entities_ptr" {
+    // Minimal module with two defined functions so num_funcs > 0:
+    //   (module (type (func)) (func) (func))
+    //   magic + version : 00 61 73 6d 01 00 00 00
+    //   type section    : id=01 size=04 count=01 func=60 0 params 0 results
+    //   func section    : id=03 size=03 count=02 typeidx 00 00
+    //   code section    : id=0a size=07 count=02 body0=(size=02 nlocals=00 end=0b) body1=same
+    const wasm_bytes_const = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        // type
+        0x01, 0x04, 0x01, 0x60, 0x00, 0x00,
+        // function
+        0x03, 0x03, 0x02, 0x00, 0x00,
+        // code
+        0x0a, 0x07, 0x02, 0x02, 0x00, 0x0b, 0x02, 0x00, 0x0b,
+    };
+    const gpa = testing.allocator;
+    var exporter: RegisteredExporter = .{ .bytes_owned = try gpa.dupe(u8, &wasm_bytes_const) };
+    defer exporter.deinit(gpa);
+
+    try exporter.ensureCompiledAndRt(gpa);
+
+    const fe = exporter.scratch_func_entities orelse return error.MissingScratchFuncEntities;
+    try testing.expectEqual(@as(usize, 2), fe.len);
+    try testing.expectEqual(@as(u32, 0), fe[0].func_idx);
+    try testing.expectEqual(@as(u32, 1), fe[1].func_idx);
+
+    const rt = exporter.rt orelse return error.MissingRt;
+    try testing.expectEqual(@as(usize, @intFromPtr(fe.ptr)), @intFromPtr(rt.func_entities_ptr));
+    try testing.expectEqual(@as(u32, 2), rt.func_entities_count);
 }
 
 test "RegisteredExporter γ-3: ensureCompiledAndRt populates scratch_funcptrs + wires rt.funcptr_base" {
