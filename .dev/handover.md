@@ -7,11 +7,11 @@
 
 1. **READ FIRST** [`.dev/phase9_close_plan.md`](phase9_close_plan.md)
    §6. Cat III dispatch — (c)-1/(c)-2.0/(c)-2.1/(c)-2.2 landed;
-   (c)-2.3-α/β-1/β-2a/β-2b landed; **next = (c)-2.3-γ
-   per-exporter backing buffers**.
-2. `git log --oneline -10`. Latest: `982f4fbf` (c)-2.3-β-2b
-   wire-up (+ thunk.zig W^X fix). Prior β chain in
-   `git log --grep="9.9-III"`.
+   (c)-2.3-α/β-1/β-2a/β-2b/γ-1/γ-2 landed; **next = (c)-2.3-γ-3
+   per-exporter table state (funcptrs / typeidxs / multi-table)**.
+2. `git log --oneline -10`. Latest: `413d9b57` (c)-2.3-γ-2
+   per-exporter `scratch_memory` + `EXPORTER_MEMORY_CAPACITY`.
+   Prior β/γ chain via `git log --grep="9.9-III"`.
 3. `bash scripts/p9_simd_status.sh` — live SIMD via ubuntunote
    native x86_64 (ADR-0067).
 4. `cat .dev/debt.md | head -90`. Cat III sub-chunks tracked
@@ -31,31 +31,35 @@ strict — exercising the dispatch+arena infra via spectest-
 import modules, but pre-existing cross-module fixtures still
 SKIP-CROSS-MODULE-IMPORTS until γ lands per-exporter backing).
 
-### Next-session active task — (c)-2.3-γ per-exporter state
+### Next-session active task — (c)-2.3-γ-3 per-exporter table
 
-Read `private/notes/p9-9.9-III-c-2.3-resolver-survey.md`
-FIRST (§"SECOND finding" + γ scope notes). Two architecture
-findings remain load-bearing:
-1. `makeJitRuntime` static `host_dispatch_stubs` resolved via
-   `dispatch_override` (β-1). β-2b now per-module dispatch.
-2. Static-scratch (`growable_memory`, `scratch_globals`,
-   `scratch_funcptrs`, `scratch_func_entities`, ...) means
-   per-module STATE isolation needed for any cross-module
-   callee touching memory / globals / tables — γ scope.
+Read `private/notes/p9-9.9-III-c-2.3-gamma-survey.md` FIRST
+(corpus taxonomy + 5-step γ-1..γ-5 ramp). The static-scratch
+isolation finding from the β survey still applies for
+funcptrs / typeidxs / multi-table descriptors.
 
 Sub-chunking progress (Cat III (c)-2.3):
-- α `4a805856` / β-1 `48143417` / β-2a `28f52ad3` /
-  β-2b `982f4fbf` — see `git log --grep="9.9-III"`.
-- β-2b discovery: thunk.zig W^X gap closed in `allocArena`
-  (`alloc + setWritable` pair, mirrors `linker.linkBlock`).
-  See lesson `2026-05-17-mac-aarch64-thread-rx-mode-survives-alloc`.
-- **γ NEXT**: per-exporter backing buffers (memory / globals /
-  tables) so `RegisteredExporter.rt` can carry real state.
-  Survey `linking.wast` + `imports.wast` corpora to size the
-  buffer contract. Then flip `hasUnbindableImports` to consult
-  `registered` (β-2b already takes the param; today it just
-  `_ = registered;`s). Expect +N PASS from cross-module
-  fixtures whose callees touch state.
+- α/β-1/β-2a/β-2b/γ-1/γ-2 — see `git log --grep="9.9-III"`.
+- β-2b: W^X gap fixed in `allocArena` (lesson
+  `2026-05-17-mac-aarch64-thread-rx-mode-survives-alloc`).
+- γ-1 `9518eb4d`: `RegisteredExporter.scratch_globals` +
+  `applyDefinedGlobalsInit` + `rt.globals_base` wiring + unit
+  test.
+- γ-2 `413d9b57`: `RegisteredExporter.scratch_memory` +
+  `applyActiveDataSegments` + `rt.vm_base` / `rt.mem_limit`
+  wiring + `EXPORTER_MEMORY_CAPACITY = 1 MiB` cap + unit test.
+- **γ-3 NEXT**: per-exporter table state. Add
+  `scratch_funcptrs: ?[]u64` + `scratch_typeidxs: ?[]u32` +
+  per-exporter multi-table descriptor + jit_ci scratch.
+  Populate via `applyTableInit` + `setupMultiTableScratch`
+  against the exporter's wasm bytes; wire `rt.funcptr_base` /
+  `rt.typeidx_base` / `rt.table_size` / `rt.tables_ptr` /
+  `rt.tables_jit_ci_ptr`. ~150 LOC per γ-survey §γ-3. Unit test
+  with a `(module (table 1 funcref) (elem (i32.const 0) 0)
+  (func ...))` payload.
+- γ-4 / γ-5 LATER: relax `hasUnbindableImports` (β-2b code
+  already takes the param via `_ = registered;`); module-
+  qualified invoke directive. See γ-survey for ramp.
 
 (c)-2.4 = corpus distiller's `supported` set extension + new
 fixture rebuild; discharges D-138 fully + D-079 sub-gap ii.
