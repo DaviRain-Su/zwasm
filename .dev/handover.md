@@ -12,8 +12,11 @@
    `58e69207` Ubuntu pivot + D-134 closure (ADR-0067) →
    `bdb47eb9` review fix-ups → `ab973f56` (c)-2.2 thunk arena →
    `3c13c65c` D-016 close → `3b1a4301` entryAddr accessor →
-   `cf8c25f7` thunk re-export + survey detail → `4a805856`
-   (c)-2.3-α `RegisteredExporter` struct + map shape.
+   `cf8c25f7` thunk re-export → `4a805856` (c)-2.3-α
+   RegisteredExporter struct → `48143417` (c)-2.3-β-1
+   makeJitRuntime dispatch_override param → `28f52ad3`
+   (c)-2.3-β-2a resolveCrossModuleImports helper +
+   RegisteredExporter.rt.
 3. `bash scripts/p9_simd_status.sh` — live SIMD via ubuntunote
    native x86_64 (ADR-0067).
 4. `cat .dev/debt.md | head -90`. D-016 newly flipped `now`
@@ -42,23 +45,22 @@ FIRST. Two architecture findings recorded:
    per-module STATE isolation also needed for any cross-
    module callee that touches memory / globals / tables.
 
-Revised sub-chunking:
-- **(c)-2.3-α DONE** (`4a805856`): RegisteredExporter struct +
-  map shape, behavior-neutral.
-- **(c)-2.3-β NEXT**: minimal resolver supporting cross-module
-  func calls where the callee touches NO memory / globals /
-  tables / further imports. Static-scratch preserved; only
-  per-fixture dispatch override. Use `runner_mod.findExportFunc`
-  + `JitModule.entryAddr` + `shared.thunk.{allocArena,emitThunk,
-  thunkSlot,finalizeArena}`. Extend `makeJitRuntime` for
-  per-fixture `dispatch_override: ?[]const usize`. Relax
-  `hasUnbindableImports` for registered aliases. Discharges
-  D-138 partial.
-- **(c)-2.3-γ LATER**: per-exporter backing buffers (memory +
-  globals + tables). Required if `linking.wast` corpus uses
-  any callee with state access; survey corpus first to confirm
-  scope. Larger refactor; possibly Phase 9 close-plan step (e)
-  or its own ADR.
+Sub-chunking progress:
+- α DONE `4a805856`: RegisteredExporter struct.
+- β-1 DONE `48143417`: makeJitRuntime dispatch_override param.
+- β-2a DONE `28f52ad3`: resolveCrossModuleImports helper +
+  `RegisteredExporter.rt` + `ensureCompiledAndRt`. Resolver is
+  defined, tested behavior-neutral (uncalled).
+- **β-2b NEXT**: WIRE-UP + GATE RELAXATION. **D-138 hang
+  risk** — Mac FOREGROUND gate first. 6-step recipe in the
+  survey note (`private/notes/p9-9.9-III-c-2.3-resolver-survey.md`
+  §"Sub-chunking proposal"): add module-scope current_dispatch
+  + current_thunk_arena, allocate at `.module` directive
+  between compileWasm + on_module_loaded, free at module-switch
+  + runCorpus deinit, update 7 makeJitRuntime callers, relax
+  hasUnbindableImports for registered aliases, gate.
+- γ LATER: per-exporter backing buffers (memory / globals /
+  tables) if `linking.wast` corpus needs them. Survey first.
 
 (c)-2.4 = corpus distiller's `supported` set extension + new
 fixture rebuild; discharges D-138 fully + D-079 sub-gap ii.
