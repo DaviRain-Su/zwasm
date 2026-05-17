@@ -22,7 +22,7 @@
 5. ROADMAP §9 task table — `[ ]` on 9.9 (umbrella) + 9.9-II +
    9.9-III + 9.9-IV (4-category discharge rows; new this session).
 
-## Active state — **Phase 9 close-plan Step (b) — Cat II**
+## Active state — **Phase 9 close-plan Step (c)-2 — Cat III dispatch**
 
 ### One-line state
 
@@ -31,8 +31,10 @@ Step (b) Cat II drained (+31 PASS to 24032). Cat III in progress:
 no-op (+2 PASS); (c)-1c runner `register` directive flow (-21
 skip-adr; 0 PASS gain — registry write-only until (c)-2 import
 linker consumes it). (c)-2 attempt hung on naive relaxation →
-reverted, D-138 filed. Current: 24034 / 0 / 2015 (= 1542 skip-impl
-+ 473 skip-adr), Mac+OrbStack bit-identical.
+reverted, D-138 filed; **(c)-2.0 design landed as ADR-0066 (this
+session): per-import bridge thunks, unchanged caller-side emit**.
+Current: 24034 / 0 / 2015 (= 1542 skip-impl + 473 skip-adr),
+Mac+OrbStack bit-identical.
 
 **Session-close wiring** (2026-05-17): new debts D-139 (c_api
 Instance bypass test coverage gap), D-140 (large-sig 16-result
@@ -60,25 +62,26 @@ remains the D-134 plan.
 
 ### Next-session active task
 
-**Step (c)-2 — Cross-module import linker (per-import bound
-dispatch)** per close-plan §6 step (c) sub-chunk 2 + D-138.
-A naive relaxation attempted this session HUNG the runner
-(D-138 documented). The proper path requires per-import slot
-indexing in `host_dispatch_base` + a bridge thunk from
-caller's JIT-arg convention to callee's entry-helper
-convention.
+**Step (c)-2.1 — `shared/thunk.zig` skeleton + per-arch
+encoder unit tests** per ADR-0066 §"Consequences /
+Implementation chunk plan" + close-plan §6 step (c)-2.
 
-Pre-work survey: read
-- v1 zwasm `src/c_api/cross_module.zig` (existing cross-module
-  func dispatch in v1)
-- `~/Documents/OSS/wasmtime/crates/runtime/src/instance.rs`
-  Func ImportedFunction binding
-- `~/Documents/OSS/zware/src/instance/instance.zig` import
-  resolution
+The byte layout is opcode-pinned (ARM64: 4 instructions +
+16 bytes literal pool; x86_64: 3 instructions). First chunk
+lands the encoder API + unit tests; no resolver wiring,
+no Instance integration yet. Subsequent chunks: (c)-2.2
+thunk arena allocation; (c)-2.3 resolver wire-up in
+`instantiateRuntime`; (c)-2.4 spec_assert cross-module
+integration test (discharges D-138; incidentally exercises
+D-079 v128 sub-gap ii).
 
-Likely an ADR (`.dev/decisions/0066_*`) for the design
-decision: late-bind vs pre-compile-at-register-time, plus
-per-import-slot mechanism.
+ADR-0066 supersedes the pre-survey targets from the prior
+handover; Step 0 survey for (c)-2.1 is narrow (encoder shape
+only — see ADR-0066 §Decision for the byte layout).
+
+**Cat II residual** (background): D-137 mixed int+float
+multi-result + 3-result via X8 indirect-result-ptr. Both
+need ABI bridge ADRs. ~17 lines.
 
 **Cat II residual** (background): D-137 mixed int+float
 multi-result + 3-result via X8 indirect-result-ptr. Both
@@ -134,7 +137,9 @@ need ABI bridge ADRs. ~17 lines.
 - **PRIMARY**: [`.dev/phase9_close_plan.md`](phase9_close_plan.md)
   — the authoritative plan; this handover is the pointer
 - [`.dev/decisions/0065_wasm_1_0_instance_work_phase9_rescope.md`](decisions/0065_wasm_1_0_instance_work_phase9_rescope.md)
-  — Cat III Phase 9 absorption (new this session)
+  — Cat III Phase 9 absorption (prior session)
+- [`.dev/decisions/0066_cross_module_import_bridge_thunks.md`](decisions/0066_cross_module_import_bridge_thunks.md)
+  — (c)-2 per-import bridge thunk design (NEW this session)
 - [`.dev/decisions/0056_phase9_scope_extension_to_wasm2_full.md`](decisions/0056_phase9_scope_extension_to_wasm2_full.md)
   — 4-category exit predicate amend (2026-05-17 Revision row)
 - [`.dev/decisions/0062_phase9_substrate_audit_gate.md`](decisions/0062_phase9_substrate_audit_gate.md)
