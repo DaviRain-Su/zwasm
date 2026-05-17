@@ -11,21 +11,24 @@
 
 ## Parallel test gate — file-logged pipeline
 
-**Per ADR-0049**: the autonomous loop's per-chunk gate is
-**two-host** (Mac aarch64 + OrbStack Ubuntu x86_64). The
-windowsmini Windows x86_64 gate is **deferred to a Phase-
-boundary "Windows reconciliation" batch step** — autonomous
-chunks must NOT fire `bash scripts/run_remote_windows.sh test-
-all`, regardless of `should_gate_windows.sh`'s output. The
-script remains as an informational heuristic only.
+**Per ADR-0049 + ADR-0067**: the autonomous loop's per-chunk
+gate is **two-host** (Mac aarch64 + `ubuntunote` native Linux
+x86_64 via SSH). The windowsmini Windows x86_64 gate is
+**deferred to a Phase-boundary "Windows reconciliation" batch
+step** — autonomous chunks must NOT fire
+`bash scripts/run_remote_windows.sh test-all`, regardless of
+`should_gate_windows.sh`'s output. The script remains as an
+informational heuristic only.
 
 The two cost shapes:
 
 - **Mac**: native, fast (≤ 60 s typical). Run synchronously and
   fail-fast — there is no value in backgrounding it because the
   next steps (commit / push) need its result inline.
-- **OrbStack**: cross-machine, slow (~3-5 min typical). Run
-  per-chunk in the background. SysV x86_64 ground truth.
+- **ubuntunote**: SSH-remote to native x86_64, ~3-5 min
+  typical. Run per-chunk in the background. SysV x86_64 ground
+  truth, no Rosetta abstraction (D-134 absent here per
+  ADR-0067).
 
 A13 release-tag pushes (to `main`) still require full 3-host
 green via `scripts/gate_merge.sh` — that's user-driven, not
@@ -34,9 +37,9 @@ autonomous-loop scope.
 ### Mandatory shape of the gate
 
 This shape is **load-bearing**. A loop iteration that runs
-windowsmini per-chunk (or that re-invokes `orb run …` to
-re-read its output) is in violation of this skill, even when
-the run happens to succeed.
+windowsmini per-chunk (or that re-invokes
+`scripts/run_remote_ubuntu.sh` just to re-read its log) is in
+violation of this skill, even when the run happens to succeed.
 
 ```bash
 # 1. Mac local: lint + unit tests (cheap, fast-fail). FOREGROUND.
@@ -56,15 +59,15 @@ git commit -m "<conventional commit>"
 git pull --rebase --autostash origin zwasm-from-scratch
 git push origin zwasm-from-scratch
 
-# 4. Kick OrbStack only (windowsmini deferred per ADR-0049).
-orb run -m my-ubuntu-amd64 bash -c \
-  'cd /Users/shota.508/Documents/MyProducts/zwasm_from_scratch && zig build test-all' \
-  > /tmp/orb.log 2>&1                                           # run_in_background: true
+# 4. Kick ubuntunote (native x86_64 Linux) only — windowsmini
+#    deferred per ADR-0049; OrbStack retired per ADR-0067 (D-134
+#    closed: Rosetta translation race absent on native host).
+bash scripts/run_remote_ubuntu.sh test-all > /tmp/ubuntu.log 2>&1   # run_in_background: true
 
 # 5. WAIT for completion notification (do NOT poll). When it
-#    fires, Read /tmp/orb.log to inspect the tail. NEVER
-#    re-invoke `orb run …` just to extract output — the log
-#    file already has everything.
+#    fires, Read /tmp/ubuntu.log to inspect the tail. NEVER
+#    re-invoke `scripts/run_remote_ubuntu.sh` just to extract
+#    output — the log file already has everything.
 
 # (windowsmini steps moved to the Phase-boundary "Windows
 #  reconciliation" sub-step per ADR-0049.)
@@ -72,17 +75,18 @@ orb run -m my-ubuntu-amd64 bash -c \
 
 **Why this exact shape:**
 
-1. **OrbStack backgrounding is non-negotiable.** The command
-   takes long enough (3-5 min) that running it in the
-   foreground blocks the loop. Run it with
-   `run_in_background: true`. The harness sends a single
-   completion notification; that is the signal to inspect
-   the log.
-2. **All output → log file.** OrbStack redirects stdout+stderr
-   to `/tmp/orb.log`. The log is the single source of truth
-   — read it with the Read tool when the notification fires.
-   Re-running `orb run …` to re-read output is forbidden
-   regardless of how convenient grep would have been.
+1. **ubuntunote backgrounding is non-negotiable.** The command
+   takes long enough (3-5 min including remote `git fetch` +
+   incremental `zig build`) that running it in the foreground
+   blocks the loop. Run it with `run_in_background: true`. The
+   harness sends a single completion notification; that is the
+   signal to inspect the log.
+2. **All output → log file.** SSH redirects stdout+stderr to
+   `/tmp/ubuntu.log`. The log is the single source of truth —
+   read it with the Read tool when the notification fires.
+   Re-running `scripts/run_remote_ubuntu.sh` to re-read output
+   is forbidden regardless of how convenient grep would have
+   been.
 3. **No polling, no sleep.** Once backgrounded, the harness
    notifies on completion. Sleep loops, retry-on-blank-output
    loops, and eager `tail` re-runs are all loop-discipline
@@ -91,13 +95,18 @@ orb run -m my-ubuntu-amd64 bash -c \
    once per Phase-boundary "Windows reconciliation" sub-step,
    not per chunk. The autonomous loop ignores
    `should_gate_windows.sh`'s gate-required output entirely.
+5. **OrbStack is NOT a gate host** per ADR-0067 — D-134
+   Rosetta-translation SIGSEGV race retired it. OrbStack stays
+   as a Mac-local interactive scratch host
+   (`.dev/orbstack_setup.md`); the autonomous loop never
+   invokes `orb run …`.
 
 ### When to skip the parallel pattern (rare)
 
 Stay strictly serial only when:
 
 - The diff touches load-bearing infra (build.zig, runner glue,
-  zone deps, ROADMAP) AND a regression on OrbStack is
+  zone deps, ROADMAP) AND a regression on ubuntunote is
   plausible enough that you want a clean serial baseline.
 - You are mid-incident (debugging a known regression) — running
   a clean serial baseline once is acceptable to localise.
@@ -110,13 +119,14 @@ log-loss never forces a rerun.
 If a host's log shows a result you cannot interpret (truncated,
 ambiguous, missing the failure line), the response is **Read
 the log file again with offset/limit, or grep the file** —
-never `orb run …` a second time hoping for cleaner output.
+never `scripts/run_remote_ubuntu.sh` a second time hoping for
+cleaner output.
 
 ### Recovery on failure
 
-- Mac green + OrbStack red → land a fix-up commit on top
+- Mac green + ubuntunote red → land a fix-up commit on top
   (`fix(p<N>): <one-line> — fixes <prev-sha>`) and re-run the
-  OrbStack gate (one round). Do not amend the pushed commit —
+  ubuntunote gate (one round). Do not amend the pushed commit —
   `git push --force` is forbidden (§14).
 - After fix-up lands, optionally squash the chain to a single
   meaningful commit on the next chunk's pre-push (`git rebase
@@ -125,16 +135,21 @@ never `orb run …` a second time hoping for cleaner output.
 
 ### Heisenbug streak tracking (per chunk)
 
-For every active heisenbug debt row (currently D-134 OrbStack
-`zwasm-spec-wasm-2-0-assert` SEGV; future flakes filed under
-the same shape), record each per-chunk OrbStack outcome:
+D-134 (the canonical heisenbug example since d-64) was **closed
+2026-05-17** by Ubuntu pivot per ADR-0067 — the Rosetta-
+translation race that drove it is structurally absent on the
+native `ubuntunote` host. Future heisenbug debt rows continue
+to use the per-chunk streak-tracking discipline below.
+
+For every active heisenbug debt row, record each per-chunk
+ubuntunote outcome:
 
 ```bash
-# After OrbStack /tmp/orb.log shows the outcome:
-if grep -q '0 failed' /tmp/orb.log; then
-    bash scripts/track_heisenbug.sh d134 silent
+# After ubuntunote /tmp/ubuntu.log shows the outcome:
+if grep -q '0 failed' /tmp/ubuntu.log; then
+    bash scripts/track_heisenbug.sh <name> silent
 else
-    bash scripts/track_heisenbug.sh d134 segv
+    bash scripts/track_heisenbug.sh <name> segv   # or `fail` for non-SEGV
 fi
 ```
 
@@ -148,10 +163,11 @@ ADR-rate-reduction), then surface to the user.
 
 ### Step 7 integration
 
-The Step 6 source-commit + push happens **before** the OrbStack
-gate starts. Step 7's handover update + ROADMAP `[x]` flip
-lands as a follow-up commit + push **after** OrbStack returns
-green. This keeps the gate's reference state fresh and
+The Step 6 source-commit + push happens **before** the
+ubuntunote gate starts. Step 7's handover update + ROADMAP
+`[x]` flip lands as a follow-up commit + push **after**
+ubuntunote returns green. This keeps the gate's reference
+state fresh and
 amortises bookkeeping over the gate wait.
 
 ### Phase-boundary "Windows reconciliation" (per ADR-0049)

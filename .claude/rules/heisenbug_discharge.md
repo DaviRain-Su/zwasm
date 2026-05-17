@@ -9,11 +9,23 @@ paths:
 
 Auto-loaded when editing `.dev/debt.md` or `.dev/lessons/`.
 Codifies the closing procedure for layout-sensitive / non-
-deterministic flakes (D-134 OrbStack `zwasm-spec-wasm-2-0-assert`
-SEGV being the canonical case at filing time). Pairs with
+deterministic flakes (D-134 was the original case study —
+OrbStack `zwasm-spec-wasm-2-0-assert` SEGV; root cause
+identified 2026-05-17 as Apple Rosetta 2 signal-translation
+race and **closed by ADR-0067 ubuntunote-native-x86_64 host
+pivot** rather than empirical-streak discharge). Pairs with
 `scripts/track_heisenbug.sh` for state and
 `.dev/lessons/2026-05-16-narrative-claim-vs-landed-state.md` for
 the failure-mode this rule exists to prevent.
+
+The streak-based discharge below applies to **future**
+heisenbug rows. D-134's actual closure is the canonical example
+of "root-cause identified → environmental fix" — see
+[`2026-05-17-d134-rosetta-2-signal-translation-limit.md`](../../.dev/lessons/2026-05-17-d134-rosetta-2-signal-translation-limit.md)
+for the investigation pattern (LD_PRELOAD sigaction shim +
+handler-entry probe + dmesg `print-fatal-signals` + vanilla C
+reproducer) that revealed the cause faster than waiting for a
+silent streak.
 
 ## The rule
 
@@ -22,12 +34,13 @@ A heisenbug debt row may be **discharged** when ALL hold:
 1. **Streak**: ≥ **5 consecutive `silent` outcomes** (no
    reproduction of the original symptom) under the conditions the
    bug was originally reported under. "Silent" is defined per-bug
-   in the debt row's `Discharge plan` § — e.g. for D-134, exit
-   code 0 from `zig build test-spec-wasm-2.0-assert` on OrbStack.
+   in the debt row's `Discharge plan` § — e.g. for a future
+   ubuntunote-side flake, exit code 0 from
+   `bash scripts/run_remote_ubuntu.sh test-all`.
 2. **Diversity of binary layouts**: the 5 silent runs must span
    ≥ 3 distinct commit SHAs that **structurally differ** in code
    touched by the heisenbug's suspected root cause area. A run of
-   5 silent OrbStack passes from the same compile artifact is not
+   5 silent passes from the same compile artifact is not
    evidence of fix — heisenbugs are by construction
    layout-sensitive.
 3. **Instrumentation in place at the time of streak**: if the

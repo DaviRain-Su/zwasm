@@ -18,7 +18,7 @@ to debt accumulation and workarounds. Most "absent" conditions are
 
 Before invoking the **stop / surface-to-user** path because:
 
-- a required external host (`my-ubuntu-amd64`, `windowsmini`)
+- a required external host (`ubuntunote`, `windowsmini`)
   appears to lack a tool / clone / file / binary, or
 - a build / test / runner step is failing for a reason that
   looks like missing infrastructure rather than a code bug,
@@ -34,7 +34,7 @@ is a violation of this rule.
 A single command, no guessing.
 
 - Tool absent: `ssh windowsmini "command -v <tool>"` /
-  `orb run -m my-ubuntu-amd64 bash -c 'command -v <tool>'` /
+  `ssh ubuntunote 'command -v <tool>'` /
   `which <tool>` locally.
 - Path absent: `ssh ... "test -e <path> && echo present || echo absent"`.
 - Binary stub vs real: `ssh ... "<tool> --version"` — succeeds
@@ -56,10 +56,10 @@ within scope?
   - `git clone` a missing repo into a path the loop already knows
     about (e.g. `~/Documents/MyProducts/...`).
   - `nix profile install` / `apt install` a missing tool **on a
-    project-managed environment** (OrbStack VM, dev shell).
+    project-managed environment** (ubuntunote via SSH, dev shell).
   - `mkdir` / `cp` / `chmod` to create missing scaffolding inside
     the project tree or its known subordinate dirs.
-  - Re-run a setup script (`.dev/orbstack_setup.md` /
+  - Re-run a setup script (`.dev/ubuntunote_setup.md` /
     `.dev/windows_ssh_setup.md` / `scripts/setup_*.sh`) to verify
     the documented procedure still works.
 - **Out of scope (ask user)**:
@@ -190,7 +190,7 @@ mandatory. The current state is a debt entry (D-008).
 
 The `/continue` skill's `LOOP.md` defines stop bucket 2:
 
-> A required external host (`my-ubuntu-amd64`, `windowsmini`) is
+> A required external host (`ubuntunote`, `windowsmini`) is
 > provably absent.
 
 The keyword is **"provably"**. This rule defines what
@@ -218,6 +218,6 @@ self-audit)
   command doesn't work in the dev shell, the rule itself is
   stale; fix it.
 - `audit_scaffolding` skill periodically re-runs the example
-  Step 1 commands (`ssh windowsmini "command -v zig"`, `orb run
-  ... "command -v zig"`) to verify the rule's anchor commands
-  still apply.
+  Step 1 commands (`ssh windowsmini "command -v zig"`,
+  `ssh ubuntunote 'command -v nix'`) to verify the rule's
+  anchor commands still apply.

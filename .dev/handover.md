@@ -7,149 +7,114 @@
 
 1. **READ FIRST**:
    [`.dev/phase9_close_plan.md`](phase9_close_plan.md) §6 work
-   sequence. Step (a) amendment cycle **landed** in this session;
-   the current active task is **Step (b) — Cat II multi-result
-   entry helpers**.
-2. `git log --oneline -15` — most recent commit is the step (a)
-   bundle (ROADMAP §9.9 4-category rescope + ADR-0065 + ADR-0056
-   amend + debt re-eval + substrate audit Q5 extension).
-3. `bash scripts/p9_simd_status.sh` — live SIMD FAIL/SKIP.
-4. `cat .dev/debt.md | head -90` — `now` + `blocked-by:`. Note
-   **D-079 flipped to `now` 2026-05-17** (barrier dissolved per
-   ADR-0065 Cat III absorption); D-105 / D-102 / D-103 barrier
-   text updated to point at §9.9-III; D-126 / D-136 body cite
-   ADR-0065.
-5. ROADMAP §9 task table — `[ ]` on 9.9 (umbrella) + 9.9-II +
-   9.9-III + 9.9-IV (4-category discharge rows; new this session).
+   sequence. Step (c) Cat III dispatch in progress; (c)-1/(c)-2.0/
+   (c)-2.1 landed in earlier commits.
+2. `git log --oneline -15` — the 2026-05-17 consolidation
+   commit lands **D-134 closed (ADR-0067 ubuntunote pivot)** +
+   project-wide host references updated.
+3. `bash scripts/p9_simd_status.sh` — live status via ubuntunote
+   per ADR-0067.
+4. `cat .dev/debt.md | head -90` — `now` + `blocked-by:`.
+5. ROADMAP §9 task table — Cat III sub-chunks tracked in
+   close-plan §6 step (c), not granular ROADMAP rows.
 
 ## Active state — **Phase 9 close-plan Step (c)-2 — Cat III dispatch**
 
 ### One-line state
 
-Step (b) Cat II drained (+31 PASS to 24032). Cat III in progress:
-(c)-1a Store registry foundation; (c)-1b spectest host-import
-no-op (+2 PASS); (c)-1c runner `register` directive flow; (c)-2.0
-ADR-0066 design (per-import bridge thunks); **(c)-2.1 encoder
-skeleton landed (this session): `shared/thunk.zig` facade,
-`arm64/thunk.zig` (32-byte ADR+LDR+LDR+BR), `x86_64/thunk.zig`
-(22-byte MOVabs RDI+RAX+JMP); `encAdr` / `encJmpReg` new in
-arch inst.zig; +12 unit tests; pre-existing `indexOfScalar` →
-`findScalar` warning fixed inline**. Current: 24034 / 0 / 2015
-(= 1542 skip-impl + 473 skip-adr), Mac+OrbStack bit-identical
-— encoder-only diff, PASS counts unchanged by design.
-
-**Session-close wiring** (2026-05-17): new debts D-139 (c_api
-Instance bypass test coverage gap), D-140 (large-sig 16-result
-indirect-result-ptr ABI), D-141 (file_size_check WARN
-proliferation, 20 files). New lessons:
-`2026-05-17-cross-module-noop-stub-controlflow-hang.md` (D-138
-case study) + `2026-05-17-funcret-u64-padding-aligns-jit-epilogue.md`
-(Cat II layout convention).
-
-**Current spec_assert tally** (Mac aarch64 + OrbStack
-bit-identical post-(b)-5; live via
-`bash scripts/p9_simd_status.sh`):
-
-- spec_assert non-simd: **24032 / 0 / 2038** (+31 PASS / -31
-  skip-impl vs 2026-05-17 baseline 24001/0/2069)
-- simd_assert: **13301 / 0 / 440** (unchanged)
-
-**D-134 note** (re-confirmed this session): the OrbStack
-heisenbug remains layout-sensitive — chunk (b)-5 surfaced a
-binary that reliably SEGV'd on 5/5 incremental-build direct
-runs, but a clean rebuild (`rm -rf .zig-cache/o .zig-cache/h`)
-produced a different layout that runs green bit-identical.
-Rate-reduction tactic confirmed; root-cause investigation
-remains the D-134 plan.
+**D-134 closed 2026-05-17 by ADR-0067**: root cause was Apple
+Rosetta 2 signal-translation race on OrbStack `my-ubuntu-amd64`;
+per-chunk Linux x86_64 gate host pivoted to native
+`ubuntunote.local` (Ubuntu 24.04 LTS, 8c / 31GB, NOPASSWD sudo,
+Determinate Nix, direnv+nix-direnv pinned via `flake.nix`).
+Bit-identical 24034/0/2015 + 13301/0/440 with Mac aarch64;
+5/5 deterministic-green on `test-spec-wasm-2.0-assert`. Cat III
+progress unchanged by this commit: (c)-1a/b/c registry
+foundation done; (c)-2.0 ADR-0066 design; (c)-2.1 thunk encoders
+landed. **(c)-2.2 thunk arena lifecycle is WIP locally**
+(`src/engine/codegen/shared/thunk.zig` `allocArena` / etc.
+written + Mac+ubuntunote test gate green, but NOT committed in
+this Ubuntu pivot commit — pending post-pivot review pass).
 
 ### Next-session active task
 
-**Step (c)-2.2 — Per-instance thunk arena lifecycle** per
-ADR-0066 §Consequences /  Implementation chunk plan.
+**Either (a) review + commit (c)-2.2 thunk arena (WIP in
+working tree), then (b) Step (c)-2.3 resolver wire-up** per
+ADR-0066 §Consequences / Implementation chunk plan.
 
-(c)-2.1 landed the encoder API; (c)-2.2 plumbs an
-RX-mappable arena into the per-instance `JitModule` (or
-sibling block) so resolved imports can plant thunks. Pattern
-mirror: `platform/jit_mem.zig` for the mmap/mprotect cycle;
-the existing `JitBlock` for body code is the closest
-analogue. Sized at instantiate time to `num_func_imports *
-shared.thunk.thunk_bytes` (rounded to page); zero-allocation
-when an instance has no Wasm-cross-module imports (host C fn
-imports keep the existing direct-pointer slot).
+(c)-2.3 walks the importer's import section; for each func
+import where `Store.lookup(import.module)` finds a registered
+exporter, finds the named export's JIT entry, emits a bridge
+thunk into the per-instance arena via
+`shared.thunk.emitThunk` + `thunkSlot`, plants
+`@intFromPtr(&thunk_slot)` into `host_dispatch_base[idx]`.
+Imports without a registered exporter keep the existing
+`hostImportTrapStub` / `hostDispatchTrap` pointer.
 
-Subsequent chunks: (c)-2.3 resolver wire-up in
-`instantiateRuntime`; (c)-2.4 spec_assert cross-module
-integration test (discharges D-138; incidentally exercises
-D-079 v128 sub-gap ii).
+Open questions for (c)-2.3:
+- Arena lifetime owner — extend `JitModule` with an optional
+  `thunk_block` field, or attach to the `setupRuntime` return
+  struct alongside `dispatch`?
+- Resolver finding the named export's JIT entry —
+  `Instance.exports` indexing into `JitModule.func_offsets`
+  (confirm `*anyopaque`-erased Instance cast given D-139's
+  spec-runner-bypass caveat).
 
-**Cat II residual** (background): D-137 mixed int+float
-multi-result + 3-result via X8 indirect-result-ptr. Both
-need ABI bridge ADRs. ~17 lines.
-
-**Cat II residual** (background): D-137 mixed int+float
-multi-result + 3-result via X8 indirect-result-ptr. Both
-need ABI bridge ADRs. ~17 lines.
+Subsequent: (c)-2.4 spec_assert cross-module integration
+fixture (discharges D-138; incidentally covers D-079 sub-gap
+ii v128 cross-module imports).
 
 ### Discipline reminders
 
 - Pre-commit hook active (`.githooks/pre-commit` →
   `scripts/gate_commit.sh`). **No `--no-verify`** per ROADMAP
   §14. `core.hooksPath` auto-set by `flake.nix` shellHook.
-- `.claude/rules/heisenbug_discharge.md` — D-134 streak counter
-  at `private/heisenbug-d134.log`; record per OrbStack run via
-  `bash scripts/track_heisenbug.sh d134 silent|segv`.
-- `.claude/skills/audit_scaffolding/CHECKS.md` §F.3a / §G.3 /
-  §G.4 — new lints; invoke at phase boundary.
+- 2-host gate per chunk: Mac (foreground) +
+  `bash scripts/run_remote_ubuntu.sh test-all > /tmp/ubuntu.log 2>&1`
+  (background) per ADR-0049 + ADR-0067. OrbStack retired from
+  gate; retained as Mac-local scratch only.
+- `.claude/rules/heisenbug_discharge.md` — D-134 closed
+  structurally (not via streak). Future heisenbugs use the
+  5-streak + 3-SHA-diversity rule.
 - TODO(D-136) markers in `test/spec/spec_assert_runner_base.zig`
-  flag Windows-compat stubs as workarounds; SEH bridge work
-  discharges them in Step (d).
-- **Substrate audit Q5 / Q4 carry Cat III hygiene anchors** —
-  `src/runtime/instance/` and c_api cross-module code written
-  during Cat III must follow `no_copy_from_v1.md` +
-  `single_slot_dual_meaning.md` + invariant-comment lint
-  discipline; the audit retroactively applies its enforcement
-  strategy to that layer at 9.12 close.
+  flag Windows-compat stubs; SEH bridge discharges them at
+  Cat IV (close-plan Step (d)).
+- Substrate audit Q5 / Q4 carry Cat III hygiene anchors
+  (`no_copy_from_v1.md` + `single_slot_dual_meaning.md` +
+  invariant-comment lint) for instance-layer code.
 
-### Outstanding `now` debts (post-2026-05-17 step (a) cycle)
+### Outstanding `now` debts
 
-- **D-052** (now): x86_64 prologue.zig extract; barrier
-  dissolved 2026-05-17. D-081 follows.
-- **D-079** (now, newly flipped): v128 cross-module imports
-  (sub-gap ii); rides §9.9-III Cat III work.
+- **D-052** (now): x86_64 prologue.zig extract.
+- **D-079** (now): v128 cross-module imports sub-gap ii;
+  rides §9.9-III work.
 - **D-126** (now): bulk.wast call_indirect post-table-mutation;
   Phase 9 §9.9-III scope per ADR-0065.
-- **D-133** (now): arm64 op_table / op_memory hardcoded scratch;
-  substrate audit Q5 anchor.
-- **D-134** (now): OrbStack heisenbug; streak counter armed.
-- **D-135** (blocked-by entry.zig cap / new ABI variant): ADR-0063
-  Alt B comptime entry helper generation.
+- **D-133** (now): arm64 op_table / op_memory hardcoded
+  scratch; substrate audit Q5 anchor.
+- **D-135** (blocked-by entry.zig cap / new ABI variant):
+  ADR-0063 Alt B comptime entry helper generation.
 - **D-136** (blocked-by Win64 SEH bridge): assert_trap recovery
-  on Windows. Cat IV scope; discharged at Step (d).
+  on Windows. Cat IV scope.
+- **D-138** (blocked-by per-import bound dispatch): cross-
+  module no-op stub hang. Discharged at (c)-2.4 landing.
+- **D-141** (blocked-by substrate audit Q3): file_size_check
+  WARN proliferation.
 
 ## Sandbox quirks + hook scope
 
 - `~/.cache/zig` → `ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig-cache`.
-- OrbStack daemon log-rotation panic — restart via
-  `pkill -9 -f OrbStack && open -a OrbStack`.
-- Per-chunk 2-host (Mac+OrbStack) per ADR-0049; windowsmini
-  reconcile is **Step (d) batch**, not per-chunk.
+- Per-chunk 2-host (Mac + ubuntunote) per ADR-0049 + ADR-0067;
+  windowsmini reconcile is Phase-boundary batch.
 - Pre-commit hook failures must be fixed at root, not bypassed.
 
 ## Reference chain
 
 - **PRIMARY**: [`.dev/phase9_close_plan.md`](phase9_close_plan.md)
-  — the authoritative plan; this handover is the pointer
 - [`.dev/decisions/0065_wasm_1_0_instance_work_phase9_rescope.md`](decisions/0065_wasm_1_0_instance_work_phase9_rescope.md)
-  — Cat III Phase 9 absorption (prior session)
 - [`.dev/decisions/0066_cross_module_import_bridge_thunks.md`](decisions/0066_cross_module_import_bridge_thunks.md)
-  — (c)-2 per-import bridge thunk design (NEW this session)
-- [`.dev/decisions/0056_phase9_scope_extension_to_wasm2_full.md`](decisions/0056_phase9_scope_extension_to_wasm2_full.md)
-  — 4-category exit predicate amend (2026-05-17 Revision row)
-- [`.dev/decisions/0062_phase9_substrate_audit_gate.md`](decisions/0062_phase9_substrate_audit_gate.md)
-  — substrate audit gate at 9.12 (post-Phase-9 close)
-- [`.dev/phase9_completion_substrate_audit.md`](phase9_completion_substrate_audit.md)
-  — 9.12 hard gate doc (Q4/Q5 extended for Cat III parallelism)
-- [`.dev/phase_log/phase9.md`](phase_log/phase9.md) — per-chunk
-  historical record (d-1..d-85 complete)
-- [`.dev/lessons/2026-05-16-narrative-claim-vs-landed-state.md`](lessons/2026-05-16-narrative-claim-vs-landed-state.md)
-  — discipline anchor for "claim ≠ landed state"
+- [`.dev/decisions/0067_ubuntunote_native_x86_64_gate_host.md`](decisions/0067_ubuntunote_native_x86_64_gate_host.md)
+  — D-134 closure + Linux x86_64 gate host pivot (this commit)
+- [`.dev/ubuntunote_setup.md`](ubuntunote_setup.md) — gate host setup
+- [`.dev/lessons/2026-05-17-d134-rosetta-2-signal-translation-limit.md`](lessons/2026-05-17-d134-rosetta-2-signal-translation-limit.md)
+- [`.dev/phase_log/phase9.md`](phase_log/phase9.md)

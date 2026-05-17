@@ -10,20 +10,20 @@
 # actual fails were `i*x*.ne` family.
 #
 # Usage:
-#   bash scripts/p9_simd_status.sh            # both hosts
-#   bash scripts/p9_simd_status.sh --orb-only # skip Mac (faster)
-#   bash scripts/p9_simd_status.sh --mac-only # skip OrbStack (no VM needed)
+#   bash scripts/p9_simd_status.sh               # both hosts
+#   bash scripts/p9_simd_status.sh --ubuntu-only # skip Mac (faster)
+#   bash scripts/p9_simd_status.sh --mac-only    # skip ubuntunote (local-only)
 
 set -uo pipefail
 
 LOG_DIR="${TMPDIR:-/tmp}"
-ORB_LOG="${LOG_DIR}/p9-orb-simd.log"
+ORB_LOG="${LOG_DIR}/p9-ubuntu-simd.log"
 MAC_LOG="${LOG_DIR}/p9-mac-simd.log"
 
 want_mac=1
 want_orb=1
 case "${1:-}" in
-  --orb-only) want_mac=0 ;;
+  --ubuntu-only|--orb-only) want_mac=0 ;;
   --mac-only) want_orb=0 ;;
   -h|--help)
     sed -n '2,15p' "$0"
@@ -47,16 +47,13 @@ if [ "$want_mac" = 1 ]; then
   echo
 fi
 
-# OrbStack Linux x86_64.
+# ubuntunote (native Linux x86_64 via SSH per ADR-0067).
 if [ "$want_orb" = 1 ]; then
-  echo "=== OrbStack Linux x86_64 simd_assert ==="
-  if ! command -v orb > /dev/null; then
-    echo "(orb CLI not on PATH; skipping OrbStack section)"
+  echo "=== ubuntunote Linux x86_64 simd_assert ==="
+  if ! ssh -o ConnectTimeout=3 -o BatchMode=yes ubuntunote true 2>/dev/null; then
+    echo "(ubuntunote unreachable; skipping ubuntunote section)"
   else
-    orb run -m my-ubuntu-amd64 bash -c '
-      cd /Users/shota.508/Documents/MyProducts/zwasm_from_scratch &&
-      zig build test-spec-simd 2>&1
-    ' > "$ORB_LOG" 2>&1 || true
+    bash scripts/run_remote_ubuntu.sh test-spec-simd > "$ORB_LOG" 2>&1 || true
 
     if grep -E "simd_assert_runner:" "$ORB_LOG" > /dev/null; then
       grep -E "simd_assert_runner:" "$ORB_LOG"
@@ -66,7 +63,7 @@ if [ "$want_orb" = 1 ]; then
     fi
     echo
 
-    echo "=== OrbStack FAIL breakdown by manifest ==="
+    echo "=== ubuntunote FAIL breakdown by manifest ==="
     grep -E "^FAIL " "$ORB_LOG" | awk '{print $2}' | sed 's/:$//' \
       | sort | uniq -c | sort -rn
 
@@ -100,4 +97,4 @@ awk -F'|' '/^\| D-/ {
 }' .dev/debt.md
 
 echo
-echo "Logs: Mac=$MAC_LOG OrbStack=$ORB_LOG"
+echo "Logs: Mac=$MAC_LOG ubuntunote=$ORB_LOG"

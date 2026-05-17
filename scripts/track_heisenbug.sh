@@ -2,10 +2,12 @@
 # Track per-run outcomes for a named heisenbug, accumulate streak
 # state, and surface discharge candidacy when the threshold is met.
 #
-# Designed for D-134 (OrbStack `zwasm-spec-wasm-2-0-assert` layout-
-# sensitive SEGV) and any future flake that requires "did the bug
-# stop reproducing?" empirical evidence rather than narrative claim
-# (cf. `.dev/lessons/2026-05-16-narrative-claim-vs-landed-state.md`).
+# Originally designed for D-134 (OrbStack `zwasm-spec-wasm-2-0-assert`
+# layout-sensitive SEGV — closed 2026-05-17 by ADR-0067 ubuntunote
+# pivot, root cause Rosetta 2). Retained for any future flake that
+# requires "did the bug stop reproducing?" empirical evidence
+# rather than narrative claim (cf.
+# `.dev/lessons/2026-05-16-narrative-claim-vs-landed-state.md`).
 #
 # Storage: `private/heisenbug-<name>.log` — gitignored. Each run
 # appends one line:
@@ -24,7 +26,10 @@
 # `.claude/rules/heisenbug_discharge.md`. Default: N consecutive
 # `silent` outcomes since the last `fail`/`segv` → discharge
 # candidate. The autonomous /continue loop checks this each resume
-# for active heisenbug debt rows (D-134 today).
+# for active heisenbug debt rows. (D-134 — the original
+# canonical case — was closed without using this script's streak
+# threshold; root-cause investigation outpaced empirical
+# discharge.)
 
 set -uo pipefail
 

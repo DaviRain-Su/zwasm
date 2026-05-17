@@ -340,10 +340,12 @@ report, and grades:
   via the SSH default shell? Expected (post-D-008 discharge):
   yes (`wasmtime 42.0.1 (...)`). **If this starts failing**, a
   windowsmini-side regression occurred — flag `block`.
-- `orb run -m my-ubuntu-amd64 bash -c 'command -v zig'` — Linux
-  reachable + zig present.
-- `orb run -m my-ubuntu-amd64 bash -c 'zig version'` — version
-  parity vs Mac (mismatch = the OrbStack VM drifted).
+- `ssh ubuntunote 'command -v nix && bash -lc "nix develop --command zig version"'`
+  — Linux x86_64 host reachable + Nix dev shell + zig 0.16.0
+  present. Per ADR-0067, this replaces the prior OrbStack
+  invocation (D-134 retired the Rosetta path).
+- `ssh ubuntunote 'whoami; sudo -n true && echo sudo-ok'` —
+  NOPASSWD sudo working (autonomous setup invariant).
 
 Each command's outcome:
 
@@ -353,7 +355,7 @@ Each command's outcome:
   may have changed; flip Status to `now` and re-evaluate").
 - Command itself fails to even run (host unreachable) → `block`
   finding ("the audit's anchor is broken; fix host setup
-  per `.dev/{orbstack,windows_ssh}_setup.md`").
+  per `.dev/{ubuntunote,windows_ssh}_setup.md`").
 
 This is the "mandatory walking" of `extended_challenge.md`
 Step 1 that was missing in Phase 6 — the audit now fires it

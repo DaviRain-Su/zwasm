@@ -142,3 +142,10 @@ Concretely:
   driven), ADR-0047 (scaffolding audit cadence)
 - Initial discussion: 2026-05-11 between project owner + loop
   during §9.9 / 9.9-g-8 close cycle.
+
+## Revision history
+
+| Date       | SHA          | Note                                    |
+|------------|--------------|-----------------------------------------|
+| 2026-05-11 | (filing)     | Initial accepted version.               |
+| 2026-05-17 | `<backfill>` | Linux x86_64 gate host pivoted from OrbStack `my-ubuntu-amd64` (Rosetta-translated, D-134 root cause) to native `ubuntunote.local` per ADR-0067. windowsmini Phase-boundary reconcile shape unchanged. |

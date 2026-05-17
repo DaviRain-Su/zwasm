@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Pre-merge gate. Runs the commit gate plus three-host test:
 #   - zig build test-all on Mac native
-#   - zig build test-all on OrbStack Ubuntu x86_64 (if available)
+#   - zig build test-all on `ubuntunote` Linux x86_64 SSH host
+#     (per ADR-0067; native, not OrbStack-Rosetta)
 #   - zig build test-all on `windowsmini` SSH host (if reachable)
 #
-# Phase 0 / early phases: missing OrbStack VM or unreachable
+# Phase 0 / early phases: missing ubuntunote SSH or unreachable
 # windowsmini → WARN and continue (the local Mac gate is the firm
 # floor; the other hosts are belt-and-braces while the project
 # bootstraps).
@@ -37,18 +38,14 @@ bash scripts/gate_commit.sh
 echo "[gate_merge] zig build test-all on Mac native ..."
 zig build test-all
 
-# ---- OrbStack Ubuntu x86_64 ----
-if command -v orb >/dev/null 2>&1; then
-    if orb info my-ubuntu-amd64 >/dev/null 2>&1; then
-        echo "[gate_merge] zig build test-all on OrbStack Ubuntu x86_64 ..."
-        orb run -m my-ubuntu-amd64 bash -c "cd '$PWD' && zig build test-all"
-    else
-        echo "[gate_merge] WARN: OrbStack VM 'my-ubuntu-amd64' not found." >&2
-        echo "             Set up via .dev/orbstack_setup.md, then retry." >&2
-        echo "             (Phase 0 / early: WARN only; Phase 8+ this is required.)" >&2
-    fi
+# ---- ubuntunote (native Linux x86_64) via SSH ----
+if ssh -o ConnectTimeout=5 -o BatchMode=yes ubuntunote "echo ok" >/dev/null 2>&1; then
+    echo "[gate_merge] zig build test-all on ubuntunote (native x86_64) ..."
+    bash scripts/run_remote_ubuntu.sh test-all
 else
-    echo "[gate_merge] WARN: orb not installed; skipping Linux native gate." >&2
+    echo "[gate_merge] WARN: ubuntunote SSH unreachable; skipping Linux gate." >&2
+    echo "             See .dev/ubuntunote_setup.md." >&2
+    echo "             (Phase 0 / early: WARN only; Phase 8+ this is required.)" >&2
 fi
 
 # ---- Windows x86_64 via SSH (windowsmini) ----

@@ -1,12 +1,24 @@
-# OrbStack Ubuntu x86_64 VM Setup
+# OrbStack Ubuntu x86_64 VM Setup (DEV-SCRATCH ONLY post-2026-05-17)
+
+> **STATUS**: Retired from the per-chunk autonomous gate per
+> [ADR-0067](decisions/0067_ubuntunote_native_x86_64_gate_host.md).
+> Root cause: Apple Rosetta 2 signal-translation race for
+> long-running JIT workloads — see
+> [`lessons/2026-05-17-d134-rosetta-2-signal-translation-limit.md`](lessons/2026-05-17-d134-rosetta-2-signal-translation-limit.md).
+> The Linux x86_64 gate host is now `ubuntunote.local` (native);
+> see [`ubuntunote_setup.md`](ubuntunote_setup.md).
+>
+> This document is retained for **Mac-local interactive dev
+> scratch** (`orb run -m my-ubuntu-amd64 …` ad-hoc commands,
+> quick experiments). Do NOT use OrbStack for any gate path
+> (autonomous loop, A13 merge gate, phase-boundary
+> reconciliation).
 
 One-time setup for local Ubuntu x86_64 testing via OrbStack on
 Apple Silicon. The VM runs x86_64 Ubuntu under Rosetta translation;
 this catches most arch-asymmetric regressions (W54-class) at the
-ELF / SystemV-ABI / x86 ISA level. For deepest validation against
-**native** x86_64 hardware, use the `windowsmini` SSH host (see
-`.dev/windows_ssh_setup.md`); CI matrix ubuntu-22.04 (Phase 14+)
-also runs on native x86_64.
+ELF / SystemV-ABI / x86 ISA level **for interactive dev scratch
+only**. For per-chunk gate use, see `.dev/ubuntunote_setup.md`.
 
 ## VM Creation
 

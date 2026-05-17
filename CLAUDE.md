@@ -72,14 +72,18 @@ load-bearing ROADMAP deviations only — see ROADMAP §18).
   [`.claude/rules/no_copy_from_v1.md`](.claude/rules/no_copy_from_v1.md)
   is load-bearing. Read v1; re-derive in v2.
 - **3-host gate** (`zig build test` + `test-all` etc.) on Mac
-  aarch64 + OrbStack Ubuntu x86_64 + `windowsmini` SSH.
-  Per-chunk autonomous loop runs the **2-host subset (Mac +
-  OrbStack)** per ADR-0049; windowsmini is reconciled at phase
-  boundaries. Canonical invocation discipline (parallel,
-  background, file-logged, no re-rerun for re-grep) lives in
+  aarch64 + `ubuntunote` native Linux x86_64 (SSH) +
+  `windowsmini` SSH. Per-chunk autonomous loop runs the
+  **2-host subset (Mac + ubuntunote)** per ADR-0049 + ADR-0067;
+  windowsmini is reconciled at phase boundaries. Canonical
+  invocation discipline (parallel, background, file-logged, no
+  re-rerun for re-grep) lives in
   [`.claude/skills/continue/LOOP.md` §"Parallel test gate"](.claude/skills/continue/LOOP.md).
-  Setup: [`.dev/orbstack_setup.md`](.dev/orbstack_setup.md),
+  Setup: [`.dev/ubuntunote_setup.md`](.dev/ubuntunote_setup.md),
   [`.dev/windows_ssh_setup.md`](.dev/windows_ssh_setup.md).
+  OrbStack is **retired from the per-chunk gate** per ADR-0067
+  (D-134 Rosetta translation race); retained as a Mac-local
+  scratch host — see [`.dev/orbstack_setup.md`](.dev/orbstack_setup.md).
 - Commit at the natural granularity of code changes.
   `private/notes/` is optional scratch.
 - Subagent fork is the default for: Step 0 surveys, large test
@@ -157,8 +161,9 @@ local gate (`zig build test`, `zone_check`, `file_size_check`,
 loop runs it per-task; manual commits should call it before
 `git commit`.
 
-Per-chunk parallel host gate is two-host (Mac + OrbStack) per
-ADR-0049; windowsmini reconciliation is phase-boundary only.
+Per-chunk parallel host gate is two-host (Mac + ubuntunote) per
+ADR-0049 + ADR-0067; windowsmini reconciliation is phase-boundary
+only.
 The strict three-host `test-all` is the **A13 merge gate** —
 required for any push to `main` and automated by
 `scripts/gate_merge.sh`.

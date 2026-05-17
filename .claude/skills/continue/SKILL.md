@@ -33,7 +33,7 @@ going.
 2. **A genuinely unsolvable problem is identified** — root cause
    unclear after investigation; OR a load-bearing trade-off is
    needed that conflicts with ROADMAP §2 (P/A) or §14 (forbidden
-   list); OR a required external host (`my-ubuntu-amd64`,
+   list); OR a required external host (`ubuntunote`,
    `windowsmini`) is provably absent. Document the blocker in
    `handover.md` "Open questions / blockers", then stop. Do not
    stop on a hunch — only after investigation.
@@ -525,8 +525,8 @@ zig build lint -- --max-warnings 0
 If this fails, the diff used a deprecated stdlib API. Fix at the
 call site (consult `.claude/rules/zig_tips.md` for the canonical
 0.16 replacement) and re-run before Step 5. The lint gate is
-Mac-only — it is **not** repeated on OrbStack / windowsmini, since
-deprecation findings are platform-independent.
+Mac-only — it is **not** repeated on ubuntunote / windowsmini,
+since deprecation findings are platform-independent.
 
 ### Step 5 — Test gate (three hosts)
 
@@ -545,28 +545,36 @@ restated here so they cannot be missed:
 
 1. **Mac runs foreground** (cheap, fail-fast). The next steps
    (commit / push) need its result inline.
-2. **OrbStack runs in the background** with `run_in_background:
-   true` and `> /tmp/orb.log 2>&1`. **windowsmini is deferred
-   per ADR-0049** — autonomous chunks must NOT fire
-   `bash scripts/run_remote_windows.sh test-all`, regardless
-   of `should_gate_windows.sh`'s output. windowsmini runs once
-   at Phase boundary as the "Windows reconciliation" sub-step.
-3. **OrbStack's stdout+stderr redirects to `/tmp/orb.log`**.
+2. **ubuntunote runs in the background** with
+   `run_in_background: true` and `> /tmp/ubuntu.log 2>&1`.
+   **windowsmini is deferred per ADR-0049** — autonomous chunks
+   must NOT fire `bash scripts/run_remote_windows.sh test-all`,
+   regardless of `should_gate_windows.sh`'s output. windowsmini
+   runs once at Phase boundary as the "Windows reconciliation"
+   sub-step. **OrbStack is retired** from the per-chunk gate
+   per ADR-0067 (D-134 Rosetta race; native ubuntunote replaces
+   it).
+3. **ubuntunote's stdout+stderr redirects to `/tmp/ubuntu.log`**.
    The log is the single source of truth. When the completion
    notification fires, **Read the log file** to inspect the
-   tail. **Re-running `orb run …` just to re-grep its output
-   is forbidden** — these builds take many minutes, and a
-   second invocation purely to read output again is nonsense.
-   If the log is hard to scan, Read it again with offset/limit
-   or grep the file; never rerun the build.
+   tail. **Re-running `scripts/run_remote_ubuntu.sh` just to
+   re-grep its output is forbidden** — these builds take
+   minutes, and a second invocation purely to read output
+   again is nonsense. If the log is hard to scan, Read it
+   again with offset/limit or grep the file; never rerun the
+   build.
 
 Per-chunk commands (used inside the file-logged pipeline):
 
 - `zig build <step> > /tmp/mac.log 2>&1` (Mac aarch64 host,
   foreground)
-- `orb run -m my-ubuntu-amd64 bash -c 'cd /Users/shota.508/Documents/MyProducts/zwasm_from_scratch && zig build <step>' > /tmp/orb.log 2>&1`
-  (Linux x86_64 via OrbStack — Bash timeout ≥ 600000 ms for
-  cold builds; **`run_in_background: true`**)
+- `bash scripts/run_remote_ubuntu.sh <step> > /tmp/ubuntu.log 2>&1`
+  (Linux x86_64 via SSH to ubuntunote — Bash timeout
+  ≥ 600000 ms for cold builds; **`run_in_background: true`**).
+  The wrapper does `git fetch + reset --hard
+  origin/zwasm-from-scratch` on the remote clone, then runs
+  `nix develop --command zig build <step>` to ensure the
+  pinned Zig 0.16.0 from `flake.nix` is in use.
 
 Phase-boundary windowsmini reconciliation (NOT per-chunk):
 
@@ -578,16 +586,20 @@ Phase-boundary windowsmini reconciliation (NOT per-chunk):
   `bash scripts/should_gate_windows.sh --record`. See
   `LOOP.md` §"Phase-boundary Windows reconciliation".
 
-Both hosts (Mac + OrbStack) must be green per chunk to proceed;
-windowsmini must be green per Phase. The Read tool inspects
-the log tail when a completion notification fires; if the log
-exceeds ~200 lines and inline reading would crowd context,
-delegate the failure-line extraction to a Bash subagent —
-**always against the log file, never by re-invoking the gate**.
+Both hosts (Mac + ubuntunote) must be green per chunk to
+proceed; windowsmini must be green per Phase. The Read tool
+inspects the log tail when a completion notification fires;
+if the log exceeds ~200 lines and inline reading would crowd
+context, delegate the failure-line extraction to a Bash
+subagent — **always against the log file, never by re-invoking
+the gate**.
 
-OrbStack VM setup: `.dev/orbstack_setup.md`. Windows SSH:
-`.dev/windows_ssh_setup.md`. If a host appears absent (`error:
-machine not found` for OrbStack; `ssh: connection refused` for
+ubuntunote SSH setup: `.dev/ubuntunote_setup.md` (mDNS
+`ubuntunote.local`, key auth, NOPASSWD sudo, Determinate Nix +
+flake-pinned Zig). Windows SSH: `.dev/windows_ssh_setup.md`.
+OrbStack scratch: `.dev/orbstack_setup.md` (interactive dev
+only; NOT per-chunk gate). If a host appears absent (`ssh:
+connection refused` / no DNS resolution for ubuntunote or
 windowsmini), the bucket-2 stop whitelist requires "provably
 absent" — and what counts as "provable" is defined by
 `.claude/rules/extended_challenge.md`. Walk the 3-step procedure
@@ -934,11 +946,11 @@ beats inventing new ways to stop.
   language as a per-loop gate. Forbidden — push policy is
   autonomous inside this skill.
 - **"windowsmini gate not exercised, defer"** — declaring local
-  Mac + OrbStack good and stopping until next session. **Per
+  Mac + ubuntunote good and stopping until next session. **Per
   ADR-0049 this anti-pattern is now reversed**: deferring
   windowsmini per-chunk is the policy. The autonomous loop
-  runs Mac + OrbStack only and reconciles windowsmini at Phase
-  boundaries.
+  runs Mac + ubuntunote only and reconciles windowsmini at
+  Phase boundaries.
 - **"User can /continue when ready"** — the closing line that
   re-introduces babysitting. Forbidden — the closing line is the
   `ScheduleWakeup` and one short sentence.

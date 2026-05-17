@@ -27,28 +27,42 @@ is the **how** for runtime-debug spikes — the catalogue of tools that
 already exist locally + the recipe shapes that fit the autonomous
 loop.
 
-## Tool inventory (post-7.10-l)
+## Tool inventory (post-7.10-l, ubuntunote-updated 2026-05-17)
 
-| Tool | Mac (nix `flake.nix`) | OrbStack Ubuntu (`apt`) | Purpose |
+| Tool | Mac (nix `flake.nix`) | ubuntunote (`apt` / `nix profile`) | Purpose |
 |---|---|---|---|
-| `lldb` | `pkgs.lldb` (21.x) | `apt install lldb` (20.x) | batch-mode debugger; primary autonomous tool |
-| `gdb` | not in flake (darwin gdb is finicky — codesign required) | `apt install gdb` (16.x) | Linux-side alternative to lldb |
-| `ndisasm` | `pkgs.nasm` (3.x) | `apt install nasm` | raw byte stream → x86_64 disasm |
+| `lldb` | `pkgs.lldb` (21.x) | Nix dev-shell via `flake.nix` (21.x) | batch-mode debugger; primary autonomous tool |
+| `gdb` | not in flake (darwin gdb is finicky — codesign required) | `apt install gdb` (15.x) | Linux-side alternative to lldb |
+| `ndisasm` / `nasm` | `pkgs.nasm` (3.x) | `apt install nasm` (2.16.x) | raw byte stream → x86_64 disasm |
 | `objdump` | clang's (in nix shell) | `apt install binutils` (default) | ELF / Mach-O disasm |
-| `strace` | not on Mac (use `dtruss` Apple-native) | `apt install strace` | mmap / mprotect syscall trace (catches RWX page issues) |
+| `strace` | not on Mac (use `dtruss` Apple-native) | `apt install strace` (6.8) | mmap / mprotect syscall trace (catches RWX page issues) |
+| `ltrace` | n/a | `apt install ltrace` (0.7.3) | libc / dynamic library call trace |
+| `valgrind` | `pkgs.valgrind` (Linux only at flake level) | `apt install valgrind` (3.22) | heap analysis when DebugAllocator isn't enough |
+| `bpftrace` | n/a (macOS lacks eBPF) | `apt install bpftrace` (0.20) + `bpfcc-tools` | kernel-level dynamic tracing (sigaction / SEGV path investigation; D-134 used `print-fatal-signals` + dmesg in lieu — `bpftrace` is the next-level escalation) |
+| `perf` | n/a | `apt install linux-tools-generic` | CPU profiling, branch / cache analysis |
+| `qemu-x86_64` | n/a | `apt install qemu-user-static` | cross-arch verification (run an x86_64 ELF under emulation) — useful for sanity-checking what the *native* x86_64 hardware does vs an emulator |
 | `readelf` / `nm` | clang's | binutils default | ELF inspection |
 | `xxd` | available | available | hex dump / patch |
+| `file` | available | `apt install file` | quick arch / format identification |
 
-**Not viable in OrbStack**: `rr` (record-and-replay) — VM doesn't
-expose perf counters; `ptrace EIO` on every `rr record`. If true
-record-replay is needed, run on a bare-metal Linux x86_64 box.
+**Not viable / out of scope**: `rr` (record-and-replay) — needs
+perf counters that virtualised hosts often don't expose
+correctly; not yet installed on ubuntunote. If true record-
+replay is needed on the native x86_64 host, run on bare metal
+with `rr record` directly. **D-134's investigation** (LD_PRELOAD
+sigaction shim + handler-entry probe + dmesg
+`print-fatal-signals` + vanilla C reproducer) is documented in
+the canonical pattern at
+[`.dev/lessons/2026-05-17-d134-rosetta-2-signal-translation-limit.md`](../../.dev/lessons/2026-05-17-d134-rosetta-2-signal-translation-limit.md);
+the same shape applies to future SIGSEGV / signal-handling
+oddities.
 
-**Not in scope here**: `valgrind` (overkill for JIT), `radare2`
-(too heavy; `ndisasm` covers raw bytes), `pwntools` (not yet
-needed).
-
-The `.dev/orbstack_setup.md` document carries the canonical
-`apt install` line for the OrbStack VM provisioning.
+The `.dev/ubuntunote_setup.md` document carries the canonical
+apt-vs-nix decision table (system-level vs project-pinned).
+`.dev/orbstack_setup.md` is retained but reflects OrbStack's
+**dev-scratch-only** role per ADR-0067 — debug tools listed
+there are duplicates of the ubuntunote inventory at a slightly
+older version.
 
 ## Autonomous recipe 1 — `lldb -b` first triage
 
@@ -104,9 +118,10 @@ When suspecting JIT block protection (e.g. RWX → RX transition
 not happening, or `PROT_EXEC` not applied):
 
 ```bash
-# OrbStack only (Mac uses dtruss):
-strace -f -e trace=mmap,mprotect,munmap \
-  ./binary 2>&1 | grep -E "^mmap|^mprotect" | tail -20
+# ubuntunote only (Mac uses dtruss):
+ssh ubuntunote 'cd ~/Documents/MyProducts/zwasm_from_scratch &&
+    strace -f -e trace=mmap,mprotect,munmap \
+        ./<binary> 2>&1' | grep -E "^mmap|^mprotect" | tail -20
 ```
 
 Look for:
@@ -311,12 +326,13 @@ covered. Concretely:
   that auto-extracts JIT bytes around a crash, or a `strace`
   filter that catches a particular runtime quirk)? Add it as
   a numbered Recipe with a copy-paste block.
-- **Tried-and-rejected tool** (e.g. `rr` failed on OrbStack)?
-  Note it in **Not viable in OrbStack** / **Not in scope** so
-  the next session doesn't re-pay the trial cost.
+- **Tried-and-rejected tool** (e.g. `rr` requires perf counters
+  that aren't exposed everywhere)? Note it in **Not viable** /
+  **Not in scope** so the next session doesn't re-pay the trial
+  cost.
 - **Tool installation gap discovered** (e.g. ndisasm missing
-  on a host)? Update `.dev/orbstack_setup.md` / `flake.nix` AND
-  the inventory table here in the same commit.
+  on a host)? Update `.dev/ubuntunote_setup.md` / `flake.nix`
+  AND the inventory table here in the same commit.
 
 **Edit triggers** (when this skill is loaded, scan for these):
 - Are you about to debug a SEGV / miscompile / runtime crash?
@@ -339,8 +355,10 @@ incantation" not "this reads like documentation".
 - `lessons_vs_adr.md` — where to land the FINDINGS (lesson vs
   ADR vs production code).
 - `bug_fix_survey.md` — once root-caused, grep for siblings.
-- `.dev/orbstack_setup.md` — canonical apt install line for the
-  OrbStack VM.
+- `.dev/ubuntunote_setup.md` — canonical apt/Nix install lines
+  for the native x86_64 Linux gate host (post-ADR-0067).
+- `.dev/orbstack_setup.md` — retained for dev-scratch use only
+  (no longer the per-chunk gate host per ADR-0067).
 - `.dev/windows_ssh_setup.md` — windowsmini setup (no JIT debug
   workflow yet — Windows-side JIT crashes need their own
   recipes; add when first encountered).

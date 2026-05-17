@@ -3,12 +3,16 @@
 # gate run, or can defer to the next checkpoint.
 #
 # Background: the autonomous loop's per-chunk 3-host gate (Mac +
-# OrbStack + windowsmini) was empirically over-gating for the
+# Linux x86_64 + windowsmini) was empirically over-gating for the
 # §9.7 / §9.9 chunk shapes (encoder + handler additions). Across
 # the ~15 chunks in the 9.7-at..9.9-b run, windowsmini surfaced
-# zero unique findings vs Mac + OrbStack but added ~2-3 min wall-
+# zero unique findings vs Mac + Linux but added ~2-3 min wall-
 # clock per chunk, dominating cycle time. See lesson
 # `.dev/lessons/2026-05-10-loop-overgating-retro.md`.
+#
+# Post-ADR-0067: Linux x86_64 host is now ubuntunote (native);
+# OrbStack retired from gate per D-134 Rosetta closure. This
+# heuristic's logic is unchanged.
 #
 # This script's heuristic: run windowsmini when the diff plausibly
 # triggers Win64-specific code paths (ABI / calling convention /

@@ -3,11 +3,11 @@
 # differential gate.
 #
 # Verifies that the same critical runner totals appear on all
-# three hosts (Mac aarch64, OrbStack Ubuntu x86_64, windowsmini
-# x86_64) by reading the most-recent test-all log files at
-# /tmp/{mac,orb,win}.log. Each runner's total line is grep'd
-# from each log; the script flags any host whose total deviates
-# from the consensus.
+# three hosts (Mac aarch64, ubuntunote native Linux x86_64,
+# windowsmini x86_64) by reading the most-recent test-all log
+# files at /tmp/{mac,ubuntu,win}.log. Each runner's total line is
+# grep'd from each log; the script flags any host whose total
+# deviates from the consensus.
 #
 # This implements the cross-host engine-differential check
 # called for by ROADMAP §9.7 / 7.11 ("interp == jit_arm64 ==
@@ -27,12 +27,12 @@
 # Refresh logs first if needed (see CLAUDE.md three-host
 # pattern):
 #     zig build test-all > /tmp/mac.log 2>&1
-#     orb run -m my-ubuntu-amd64 ... > /tmp/orb.log 2>&1
+#     bash scripts/run_remote_ubuntu.sh test-all > /tmp/ubuntu.log 2>&1
 #     bash scripts/run_remote_windows.sh test-all > /tmp/win.log 2>&1
 
 set -uo pipefail
 
-LOGS=(mac orb win)
+LOGS=(mac ubuntu win)
 LOG_DIR=/tmp
 
 # Critical runner totals that MUST be identical across all three
@@ -49,7 +49,7 @@ declare -a EXPECTED=(
 # x86_64-only anchors (Mac arm64 has different compile-pass
 # count; Mac doesn't run realworld_run_jit_runner via test-all).
 declare -a EXPECTED_X86=(
-    "realworld_run_jit_runner: 45/55 compile-pass"
+    "realworld_run_jit_runner: 46/55 compile-pass"
 )
 
 err=0
@@ -82,9 +82,9 @@ for pattern in "${EXPECTED[@]}"; do
 done
 
 echo ""
-echo "[7.11 diff] x86_64-only anchors (orb + win):"
+echo "[7.11 diff] x86_64-only anchors (ubuntu + win):"
 for pattern in "${EXPECTED_X86[@]}"; do
-    for host in orb win; do
+    for host in ubuntu win; do
         check_log "$host" "$pattern" || err=1
     done
 done
