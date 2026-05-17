@@ -44,24 +44,38 @@ Read `private/notes/p9-9.9-III-c-2.3-gamma-survey.md` FIRST
 
 Sub-chunking progress (Cat III (c)-2.3):
 - SHAs through γ-5: `git log --grep="9.9-III"`.
-- γ-5 `552a2b6d`: `runner_mod.patchTableImportFuncptrs` helper +
-  wire into nonSimd/simd on_module_loaded, assert_uninstantiable,
-  and `setupMultiTableScratch` (multi-table). Resolves the
-  `table_init/table_init.1.wasm` crash.
-- γ-3.d (closed this session): bisect confirmed Mac-aarch64
-  SEGV is host-specific (D-142). ubuntunote relax-probe runs
-  to 25196/112/705; functional FAILs map to γ-1/γ-2/γ-3
-  per-exporter state work. Lesson updated with ubuntunote
-  evidence; see
-  [`lessons/2026-05-17-gamma3d-dispatch-write-segv-bisect.md`](lessons/2026-05-17-gamma3d-dispatch-write-segv-bisect.md).
-- **γ-1 NEXT**: per-exporter `globals_base` + `globals_count`
-  in `RegisteredExporter`. Behavior-neutral (no fixture
-  exercises it until γ-4 relaxes hasUnbindableImports, which
-  is gated on D-142). Tests via unit test of
-  `RegisteredExporter.ensureCompiledAndRt`. ~70 LOC. Per
-  γ-survey §"γ sub-chunking proposal" 1.
-- `src/engine/runner.zig` is at 1996 / 2000 LOC — split
-  may be needed before γ-2/γ-3 land state-buffer plumbing.
+- γ-1/γ-2/γ-3/γ-3.b-i/γ-3.b-ii/γ-5 **all landed**
+  (`9518eb4d` / `413d9b57` / `33d1da17` / `3b003b9e` /
+  `84f62398` / `e902e531`). `RegisteredExporter` carries
+  scratch_globals / scratch_memory / scratch_funcptrs /
+  scratch_typeidxs / scratch_func_entities /
+  scratch_elem_segments / scratch_data_segments, all wired
+  into per-exporter rt. **Prior handover's "γ-1 NEXT" was
+  stale**.
+- γ-3.d bisect (`e5c91aef` + `2d37c925`) established that
+  γ-4 (the `hasUnbindableImports` relaxation) is the only
+  remaining gating step — and it's **blocked by D-142**
+  (Mac aarch64 SEGV at the cross-module dispatch-slot write
+  boundary). ubuntunote runs cleanly to 25196/112/705 under
+  the relaxation; the 112 FAILs are functional (table_copy
+  65 / table_init 39 / ref_func 6) — γ-1/2/3 backing is
+  populated but does not yet route correctly in some
+  cross-module shapes. This is the residual γ work.
+- **D-142 investigation this session**: PAC hypothesis
+  REJECTED (`otool -tv` shows no `blraa`/`blrab`/`blra`
+  in the binary; PAC is not enabled for the call). Active
+  hypotheses remain: signal-delivery race (handler enters
+  armed branch then nested SEGV during siglongjmp leaves
+  flag false on re-entry), altstack interaction, layout
+  coincidence. Next investigator: instrument the handler
+  to record "entered armed N times" before exit; OR run
+  `lldb` with SIP relaxed to capture fault address + PC.
+- **NEXT options** (loop should pick one):
+  (1) Deep D-142 investigation (siglongjmp re-entry probe).
+  (2) D-052 x86_64 prologue extract (mechanical refactor,
+      unblocks D-055 + D-081; ~200-400 LOC reduction).
+  (3) D-126 bulk.wast table.copy post-mutation (Cat III
+      scope per ADR-0065; needs unification ADR).
 - (c)-2.4 (distiller) follows once γ-4 lands (gated on D-142).
 
 (c)-2.4 = corpus distiller's `supported` set extension + new
