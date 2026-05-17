@@ -10,7 +10,9 @@
    **next = (c)-2.3 resolver wire-up**.
 2. `git log --oneline -15`. 2026-05-17 batch:
    `58e69207` Ubuntu pivot + D-134 closure (ADR-0067) →
-   `bdb47eb9` review fix-ups → `ab973f56` (c)-2.2 thunk arena.
+   `bdb47eb9` review fix-ups → `ab973f56` (c)-2.2 thunk arena →
+   `3c13c65c` D-016 close → `3b1a4301` (c)-2.3 prep
+   `JitModule.entryAddr` accessor.
 3. `bash scripts/p9_simd_status.sh` — live SIMD via ubuntunote
    native x86_64 (ADR-0067).
 4. `cat .dev/debt.md | head -90`. D-016 newly flipped `now`
@@ -28,38 +30,36 @@ x86_64 22-byte opcode-pinned thunk encoders (c)-2.1;
 (arena uncalled until resolver): 24034/0/2015 + 13301/0/440
 + 212/0/20 Mac+ubuntunote bit-identical.
 
-### Next-session active task — (c)-2.3 Resolver wire-up
+### Next-session active task — (c)-2.3 Resolver wire-up (cont.)
 
-Per ADR-0066 §Implementation: in `setupRuntime`
-(`src/engine/runner.zig`) walk `compiled.module.imports`; for
-each func import, `store.lookup(import.module)` → registered
-`*Instance` (cast from `*anyopaque`); resolve named export to
-exporter's JIT entry via `JitModule.entry` + capture
-`*JitRuntime`; allocate arena once
-(`shared.thunk.allocArena`, empty-arena sentinel for zero
-cross-module imports); emit per slot
-(`shared.thunk.emitThunk(thunkSlot(...), callee_rt,
-callee_entry)`); plant `host_dispatch_base[idx] =
-@intFromPtr(slot.ptr)`; `finalizeArena` after all slots.
-Extend `JitModule` with `thunk_block: jit_mem.JitBlock` +
-`freeArena` in `deinit`. Unresolved imports keep existing
-`hostImportTrapStub` / `hostDispatchTrap`.
+Read `private/notes/p9-9.9-III-c-2.3-resolver-survey.md`
+FIRST — has the architecture decision recorded
+(2026-05-17): spec runner's `makeJitRuntime` uses a STATIC
+`host_dispatch_stubs` global; option (B) per-module dispatch
+override extension to `makeJitRuntime` is the chosen path.
 
-Test fixture (this or (c)-2.4): smallest `(register "M" $inst)`
-+ cross-module call mutating exporter state with non-zero
-return → discharges D-138; v128 result fixture covers D-079
-sub-gap ii.
+Remaining work for (c)-2.3 (next chunk):
+1. Add `RegisteredExporter` struct + lazy-compile cache; replace
+   `registered: StringHashMap([]u8)` shape in
+   `spec_assert_runner_base.zig` (file already at 2007 LOC —
+   if growth concerning, split per ADR-0064 pattern).
+2. Add `findExportFuncIdx` + `resolveCrossModuleImports` helpers
+   (in spec runner base or split to a new
+   `test/spec/cross_module_resolver.zig`).
+3. Extend `makeJitRuntime` signature to accept optional
+   `dispatch_override: ?[]const usize`. Default = static global;
+   override = per-module slice planted by resolver.
+4. Relax `hasUnbindableImports` for non-spectest imports whose
+   alias is in `registered`.
+5. Wire resolver into per-fixture flow (probably at module-load
+   point, before any assert directive fires).
+6. Test gate: expect possibly +N PASS (cross-module fixtures
+   become bindable); D-138 hang regression watch via the
+   180-second SIGALRM ceiling.
 
-Open Qs resolved (see survey note below): spec runner's
-`registered` is bytes-keyed (`StringHashMap([]u8)`), NOT
-`Store.instances` (`*anyopaque`-keyed). Resolver in spec
-context needs its own lazy-compile + lifetime-extended
-exporter cache. Pre-work survey written to
-`private/notes/p9-9.9-III-c-2.3-resolver-survey.md`
-(gitignored; read at start of (c)-2.3 work). Likely sub-
-split: (c)-2.3 = code path only (counts unchanged);
-(c)-2.4 = corpus distiller + new fixtures (discharges D-138
-+ D-079 sub-gap ii).
+(c)-2.4 = corpus distiller's `supported` set extension + new
+fixture rebuild; discharges D-138 + incidentally D-079
+sub-gap ii (v128 cross-module).
 
 ### Discipline reminders
 
