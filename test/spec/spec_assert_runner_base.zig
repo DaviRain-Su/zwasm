@@ -840,15 +840,22 @@ pub const RegisteredExporter = struct {
     /// so the pointer remains stable across `registered`
     /// HashMap rehashes (struct-field pointers would invalidate
     /// on rehash). Embedded as `callee_rt` in every thunk that
-    /// targets an export of this module. Zero-initialised state
-    /// is safe for (c)-2.3-β scope: callees that never read
-    /// memory / globals / tables (pure-arithmetic exports) only
-    /// need `trap_flag` + `jit_executed_flag` backing — both
-    /// are u32 fields in the JitRuntime struct that work in any
-    /// zero-state.
+    /// targets an export of this module.
     rt: ?*entry.JitRuntime = null,
+    /// §9.9-III (c)-2.3-γ-1: per-exporter globals byte buffer.
+    /// Allocated lazily in `ensureCompiledAndRt` sized to the
+    /// exporter's `compiled.globals_byte_size`, populated via
+    /// `runner_mod.applyDefinedGlobalsInit`. The pointer is
+    /// then wired into `rt.globals_base` so a cross-module
+    /// callee touching `global.get` / `global.set` reads /
+    /// writes the exporter's own globals (instead of the
+    /// importer's static `scratch_globals`). Null until
+    /// `ensureCompiledAndRt` runs; empty slice when the
+    /// exporter has no defined globals.
+    scratch_globals: ?[]u8 = null,
 
     pub fn deinit(self: *RegisteredExporter, allocator: std.mem.Allocator) void {
+        if (self.scratch_globals) |g| allocator.free(g);
         if (self.rt) |r| allocator.destroy(r);
         if (self.compiled) |*c| c.deinit(allocator);
         allocator.free(self.bytes_owned);
@@ -863,8 +870,26 @@ pub const RegisteredExporter = struct {
         if (self.compiled == null) {
             self.compiled = try runner_mod.compileWasm(allocator, self.bytes_owned);
         }
+        const compiled = &self.compiled.?;
+        if (self.scratch_globals == null) {
+            // 16-byte align so v128 globals' MOVUPS / LDR Q
+            // reads / writes match the JIT alignment contract,
+            // mirroring the importer-side `scratch_globals: [256]u8
+            // align(16)` shape in spec_assert_runner_non_simd.
+            const buf = try allocator.alignedAlloc(u8, .of(u128), compiled.globals_byte_size);
+            @memset(buf, 0);
+            try runner_mod.applyDefinedGlobalsInit(
+                allocator,
+                self.bytes_owned,
+                compiled.globals_offsets,
+                compiled.globals_valtypes,
+                buf,
+            );
+            self.scratch_globals = buf;
+        }
         if (self.rt == null) {
             const rt_ptr = try allocator.create(entry.JitRuntime);
+            const globals_buf = self.scratch_globals.?;
             rt_ptr.* = .{
                 .vm_base = @ptrFromInt(@as(usize, 0x1000)),
                 .mem_limit = 0,
@@ -872,8 +897,8 @@ pub const RegisteredExporter = struct {
                 .table_size = 0,
                 .typeidx_base = undefined,
                 .trap_flag = 0,
-                .globals_base = undefined,
-                .globals_count = 0,
+                .globals_base = @ptrCast(@alignCast(globals_buf.ptr)),
+                .globals_count = @intCast(globals_buf.len / @sizeOf(Value)),
                 .host_dispatch_base = undefined,
                 .host_dispatch_count = 0,
             };
@@ -2305,4 +2330,32 @@ test "sigsegv guard: armed=false after recovery so subsequent SEGV is unexpected
         // assertion confirms the contract end-to-end).
         try testing.expect(sigsegv_armed.load(.acquire) == false);
     }
+}
+
+test "RegisteredExporter γ-1: ensureCompiledAndRt populates scratch_globals + wires rt.globals_base" {
+    // Minimal module: `(module (global i32 (i32.const 42)))`. The
+    // global section is the only payload; no functions, no
+    // imports, no exports. Bytes built directly to avoid taking
+    // a runtime dependency on a fixture file.
+    //   magic + version : 00 61 73 6d 01 00 00 00
+    //   global section  : id=06 size=06 count=01 i32=7f mut=00
+    //                     init_expr=41 2a 0b
+    const wasm_bytes_const = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x06, 0x06, 0x01, 0x7f, 0x00, 0x41, 0x2a, 0x0b,
+    };
+    const gpa = testing.allocator;
+    var exporter: RegisteredExporter = .{ .bytes_owned = try gpa.dupe(u8, &wasm_bytes_const) };
+    defer exporter.deinit(gpa);
+
+    try exporter.ensureCompiledAndRt(gpa);
+
+    const buf = exporter.scratch_globals orelse return error.MissingScratchGlobals;
+    // Per ADR-0052 the i32 global occupies 8 bytes; check the
+    // populated init value rather than just the buffer size.
+    try testing.expect(buf.len >= 8);
+    try testing.expectEqual(@as(u64, 42), std.mem.readInt(u64, buf[0..8], .little));
+
+    const rt = exporter.rt orelse return error.MissingRt;
+    try testing.expectEqual(@as(usize, @intFromPtr(buf.ptr)), @intFromPtr(rt.globals_base));
 }
