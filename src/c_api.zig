@@ -18,6 +18,34 @@ const types = @import("types.zig");
 const WasmModule = types.WasmModule;
 const WasiOptions = types.WasiOptions;
 
+// On arm64_32-apple-watchos (ILP32) Zig 0.16's default panic / std.debug
+// machinery and std.log.defaultLog both route through std.Io.Threaded
+// (lockStderr → std_options.debug_io → debug_threaded_io.io()), which
+// fails to compile under ILP32 because of u64 → usize narrowing in
+// dirReadDarwin / pwrite. On 64-bit targets the stdlib defaults work
+// fine, so the override is scoped to ILP32 only — keeping panic
+// messages and log output intact for every other C-API consumer
+// (macOS / iOS / Linux / Windows static & shared libs).
+const ilp32 = @sizeOf(usize) < 8;
+
+pub const panic = if (ilp32)
+    std.debug.no_panic
+else
+    std.debug.FullPanic(std.debug.defaultPanic);
+
+fn noopLog(
+    comptime _: std.log.Level,
+    comptime _: @EnumLiteral(),
+    comptime _: []const u8,
+    _: anytype,
+) void {}
+
+pub const std_options: std.Options = if (ilp32) .{
+    .allow_stack_tracing = false,
+    .networking = false,
+    .logFn = noopLog,
+} else .{};
+
 /// Convert isize (C intptr_t) to platform File.Handle.
 fn isizeToHandle(v: isize) std.Io.File.Handle {
     if (builtin.os.tag == .windows) {

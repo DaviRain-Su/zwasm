@@ -468,8 +468,24 @@ pub const WasmModule = struct {
         // stand up a private `std.Io.Threaded` owned by this module.
         // Acquired early — applyWasiOptions's addPreopenPath needs io to open
         // host directories cross-platform (Zig 0.16's `std.Io.Dir.openDir`).
+        //
+        // On ILP32 targets (arm64_32-apple-watchos) `std.Io.Threaded` itself
+        // doesn't compile (u64 syscall returns vs 32-bit usize), so we cannot
+        // auto-construct one. If the caller asked for any feature that
+        // reaches into the io vtable (WASI host preopens, deadline timeout)
+        // they must supply config.io themselves; otherwise loadCore would
+        // dereference an undefined vtable at runtime. Wasm modules that
+        // execute `memory.atomic.wait/notify` reach io too — those embedders
+        // must also pass config.io, but we cannot detect that statically.
         const io: std.Io = blk: {
             if (config.io) |io_val| break :blk io_val;
+            if (@sizeOf(usize) < 8) {
+                if (config.wasi or config.timeout_ms != null) {
+                    return error.MissingIo;
+                }
+                self.owned_io = null;
+                break :blk @as(std.Io, undefined);
+            }
             const threaded = try allocator.create(std.Io.Threaded);
             errdefer allocator.destroy(threaded);
             threaded.* = std.Io.Threaded.init(allocator, .{});

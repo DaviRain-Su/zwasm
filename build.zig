@@ -194,11 +194,20 @@ pub fn build(b: *std.Build) void {
     lib_shared.installHeader(b.path("include/zwasm.h"), "zwasm.h");
 
     // Static library (libzwasm.a)
+    //
+    // single_threaded is forced on ILP32 targets (arm64_32-apple-watchos)
+    // because std.Io.Threaded fails to compile under that ABI (u64 → usize
+    // narrowing in dirReadDarwin / pwrite). On 64-bit targets the static
+    // lib keeps the default (multi-threaded), so wasm-threads
+    // atomic.wait/notify continues to work for Linux / macOS / Windows
+    // C-API consumers.
+    const lib_static_single_threaded: ?bool = if (target.result.ptrBitWidth() < 64) true else null;
     const lib_static_mod = b.createModule(.{
         .root_source_file = b.path("src/c_api.zig"),
         .target = target,
         .optimize = if (lib_optimize) optimize else if (optimize == .Debug) .ReleaseSafe else optimize,
         .link_libc = true,
+        .single_threaded = lib_static_single_threaded,
         .pic = if (enable_pic) true else null,
     });
     lib_static_mod.addOptions("build_options", options);
