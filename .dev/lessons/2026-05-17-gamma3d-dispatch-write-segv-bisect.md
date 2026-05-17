@@ -95,16 +95,28 @@ mechanism, and it failed on this specific call site.
 
 ## Steps the next investigator should take
 
-1. Run **on ubuntunote (Linux x86_64)** with the same probe patch.
-   If imports.1 also SEGVs there → it's a generic resolver/
-   dispatch bug. If not → confirms Mac aarch64 specificity (PAC
-   / JIT W^X / signal-delivery race).
+1. ~~Run **on ubuntunote (Linux x86_64)** with the same probe
+   patch.~~ **DONE 2026-05-17**: ubuntunote runs the same
+   source cleanly to **25196 passed / 112 failed / 705
+   skipped** (exit 1, no SEGV). The 112 FAILs are functional
+   cross-module-callee-state gaps (table_copy 65 / table_init
+   39 / ref_func 6), exactly the γ-1/γ-2/γ-3 per-exporter
+   backing scope. **The SEGV is Mac-aarch64 specific** (filed
+   as D-142). The bridge thunk mechanism + dispatch wiring
+   are structurally sound on Linux x86_64.
 2. Run **with `lldb`** to capture the actual fault address +
    PC at the SEGV (requires SIP workaround on Mac; or
    alternatively use `LLDB_FREE_ROOT_CONFIG` / `csrutil`).
 3. Add a `printf` of the dispatch SLICE before AND after the
    write (read it back), and the on_module_loaded function-
    pointer slot's bytes, to verify nothing else mutated.
+4. **Operational consequence** (drives the loop's next picks):
+   γ-1/γ-2/γ-3 (per-exporter globals/memory/table backing)
+   are independently landable as behavior-neutral preparation
+   (no fixture exercises them until γ-4's permanent
+   `hasUnbindableImports` relaxation, which itself is gated
+   on D-142 closure). The autonomous loop should proceed with
+   γ-1 while D-142 stays open.
 
 ## Why this lesson matters
 

@@ -7,17 +7,16 @@
 
 1. **READ FIRST** [`.dev/phase9_close_plan.md`](phase9_close_plan.md)
    §6. Cat III dispatch — γ-5 landed (`552a2b6d` /
-   `e902e531`). γ-3.d bisect this session refuted the
-   "spectest table/memory/global gap" handover prediction:
-   `imports/imports.1.wasm` has only `.func` imports. See
-   [`lessons/2026-05-17-gamma3d-dispatch-write-segv-bisect.md`](lessons/2026-05-17-gamma3d-dispatch-write-segv-bisect.md).
-   **Next = γ-3.d root-cause investigation** (dispatch-slot
-   write triggers SEGV in subsequent vtable call; sigsetjmp
-   arming does NOT recover — needs PAC / signal-delivery
-   investigation; consider running on ubuntunote first to
-   confirm Mac-aarch64 specificity).
-2. `git log --oneline -10`. Latest: handover-only refresh.
-   γ-5 `552a2b6d`. γ-4 DIAG `6b0d8ec4`. Prior β/γ chain via
+   `e902e531`). γ-3.d bisect (`e5c91aef` + this session)
+   established: imports.1 SEGV is **Mac-aarch64 specific**
+   (D-142 filed); ubuntunote runs cleanly to 25196/112/705
+   with 112 functional FAILs (table_copy 65 / table_init 39
+   / ref_func 6) addressed by γ-1/γ-2/γ-3 per-exporter
+   backing. **Next = γ-1** (per-exporter globals — behavior-
+   neutral; doesn't depend on D-142 since no fixture
+   exercises it until γ-4 lands).
+2. `git log --oneline -10`. Latest: γ-3.d findings refresh.
+   γ-5 `552a2b6d`. Prior β/γ chain via
    `git log --grep="9.9-III"`.
 3. `bash scripts/p9_simd_status.sh` — live SIMD via ubuntunote
    native x86_64 (ADR-0067).
@@ -49,23 +48,21 @@ Sub-chunking progress (Cat III (c)-2.3):
   wire into nonSimd/simd on_module_loaded, assert_uninstantiable,
   and `setupMultiTableScratch` (multi-table). Resolves the
   `table_init/table_init.1.wasm` crash.
-- γ-3.d session this turn: bisect via `wasm-objdump -x` +
-  per-step DIAG probes inside `resolveCrossModuleImports`.
-  Refuted handover prediction (imports.1 has 0
-  table/memory/global imports — all 18 imports are `.func`).
-  Localised the SEGV to the heap write
-  `new_dispatch[i] = @intFromPtr(slot.ptr)`. The subsequent
-  vtable call `callbacks.on_module_loaded(...)` SEGVs before
-  the function body runs; `sigsetjmp` arm around the call
-  does NOT recover (handler takes unarmed branch). Full
-  evidence in [`lessons/.../gamma3d-dispatch-write-segv-bisect.md`](lessons/2026-05-17-gamma3d-dispatch-write-segv-bisect.md).
-- **γ-3.d NEXT**: run probe on ubuntunote to confirm/refute
-  Mac-aarch64 specificity, then investigate PAC / signal-
-  delivery race per the lesson's hypotheses §.
+- γ-3.d (closed this session): bisect confirmed Mac-aarch64
+  SEGV is host-specific (D-142). ubuntunote relax-probe runs
+  to 25196/112/705; functional FAILs map to γ-1/γ-2/γ-3
+  per-exporter state work. Lesson updated with ubuntunote
+  evidence; see
+  [`lessons/2026-05-17-gamma3d-dispatch-write-segv-bisect.md`](lessons/2026-05-17-gamma3d-dispatch-write-segv-bisect.md).
+- **γ-1 NEXT**: per-exporter `globals_base` + `globals_count`
+  in `RegisteredExporter`. Behavior-neutral (no fixture
+  exercises it until γ-4 relaxes hasUnbindableImports, which
+  is gated on D-142). Tests via unit test of
+  `RegisteredExporter.ensureCompiledAndRt`. ~70 LOC. Per
+  γ-survey §"γ sub-chunking proposal" 1.
 - `src/engine/runner.zig` is at 1996 / 2000 LOC — split
-  before next γ landing (cross-module patch helpers / table
-  init family extraction).
-- (c)-2.4 (distiller) follows once γ resolution lands.
+  may be needed before γ-2/γ-3 land state-buffer plumbing.
+- (c)-2.4 (distiller) follows once γ-4 lands (gated on D-142).
 
 (c)-2.4 = corpus distiller's `supported` set extension + new
 fixture rebuild; discharges D-138 fully + D-079 sub-gap ii.
@@ -78,11 +75,12 @@ per §14. 2-host gate per chunk: Mac foreground +
 background. D-134 closed; future heisenbugs use 5-streak +
 3-SHA rule.
 
-### Outstanding `now` debts (5)
+### Outstanding `now` debts (6)
 
 D-016(applySanitize wrapper); D-052(x86_64 prologue extract);
 D-079(v128 cross-module → (c)-2.4); D-126(bulk.wast post-
-mutation per ADR-0065); D-133(arm64 op_table scratch sweep).
+mutation per ADR-0065); D-133(arm64 op_table scratch sweep);
+D-142(Mac aarch64 SEGV at cross-module dispatch boundary).
 
 `blocked-by` rides (corresponding chunks):
 D-103/D-105 → (c)-2.3/2.4; D-138 → (c)-2.4;
