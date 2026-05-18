@@ -652,6 +652,135 @@ consumer materialises.
 - ADR-0021 (emit-split sub-gate)
 - ROADMAP §4 / §5 / §A1 / §A2 / §A3 / §14 / §18
 
+## §4.5 amend — per-op file migration plan (added 2026-05-19)
+
+> Added by the 2026-05-19 Phase 9 completion substrate audit cycle, per
+> ADR-0071 Q3 (Hypothesis C adoption) + ADR-0073 (all-layer build-option
+> DCE substrate). This subsection extends the original §4.5 design
+> (DispatchTable feature modules) with the per-op file pattern that
+> §9.12-B implements.
+
+### Sharpening of §4.5
+
+The original ADR-0023 §3 reference table placed instruction handlers
+at `instruction/wasm_X_Y/<category>.zig` (one file per category — `numeric.zig`,
+`memory.zig`, `control.zig`, etc.). The 2026-05-19 substrate audit re-shapes
+this to **`instruction/wasm_X_Y/<op>.zig` (one file per op)**, with each op file
+exporting the canonical 5-axis handler aggregate:
+
+```zig
+// Canonical per-op file shape — src/instruction/wasm_X_Y/<op>.zig
+const std = @import("std");
+const ir = @import("../../ir.zig");
+const WasmLevel = @import("../../build_options.zig").WasmLevel;
+
+pub const op_tag: ir.ZirOp = .i32_add;
+pub const wasm_level: WasmLevel = .v1_0;
+pub const wasi_level: ?@import("../../build_options.zig").WasiLevel = null;
+pub const enable_features: []const Feature = &.{};
+
+pub const handlers = .{
+    .validate = validate_i32_add,
+    .lower    = lower_i32_add,
+    .arm64    = emit_arm64_i32_add,
+    .x86_64   = emit_x86_64_i32_add,
+    .interp   = interp_i32_add,
+};
+
+fn validate_i32_add(ctx: *ValidatorCtx) !void { ... }
+fn lower_i32_add(ctx: *LowerCtx) !void { ... }
+fn emit_arm64_i32_add(ctx: *Arm64EmitCtx) !void { ... }
+fn emit_x86_64_i32_add(ctx: *X86_64EmitCtx) !void { ... }
+fn interp_i32_add(ctx: *InterpCtx) !void { ... }
+```
+
+The 4 dispatcher files (`validator.zig`, `lower.zig`,
+`engine/codegen/arm64/emit.zig`, `engine/codegen/x86_64/emit.zig`)
+become 5-line `inline switch` consumers (one per axis); the 5th axis
+(`engine/interp/dispatch.zig`) is already in the central-table shape
+and gains the same `inline switch + comptime filter` pattern.
+
+### Source of truth: `dispatch_collector.zig`
+
+A new file `src/ir/dispatch_collector.zig` is the single comptime
+collector. It imports every op file at comptime, validates the
+per-op-file completeness invariants (exported `op_tag` / `wasm_level` /
+`handlers`; all 5 axes present; non-stub bodies), filters by
+`build_options.wasm_level` / `wasi_level` / `enable_features`, and
+returns the inline-switch dispatcher per axis.
+
+```zig
+// Sketch — src/ir/dispatch_collector.zig
+pub fn dispatcher(comptime axis: AxisTag) AxisHandler(axis) {
+    return struct {
+        fn dispatch(op: ir.ZirOp, ctx: *AxisCtx(axis)) !void {
+            return inline switch (op) {
+                inline else => |tag| blk: {
+                    const op_mod = comptime opModuleFor(tag);
+                    if (comptime op_mod.wasm_level > build_options.wasm_level)
+                        return error.UnsupportedOpForBuildLevel;
+                    break :blk @field(op_mod.handlers, @tagName(axis))(ctx);
+                },
+            };
+        }
+    }.dispatch;
+}
+```
+
+Build-option DCE works because the `comptime` guard at the head of each
+inline arm is statically false for filtered-out ops; Zig 0.16 elides
+the corresponding switch-arm body (verified by spike `q3-build-option-
+dce-poc/`).
+
+### Migration plan (per-op file landing, §9.12-B)
+
+The migration from the current state (4 dispatcher monoliths × 581
+arms each, plus the half-state `src/instruction/wasm_X_Y/<category>.zig`
+files) to the per-op file shape proceeds in §9.12-B as follows:
+
+1. **Bootstrap `dispatch_collector.zig`** with the comptime per-op-file
+   completeness check. Initially the check `@compileError`s on every
+   ZirOp because no op file exists yet. Land this in a single
+   commit alongside the first migrated op (`i32_add`, the spike
+   reference).
+2. **Migrate ops in cohorts grouped by category** (existing
+   `<category>.zig` content → N per-op files). Each cohort is one
+   chunk; chunk close requires the cohort's ops to compile-and-pass
+   under the new dispatch_collector path.
+3. **Switch each dispatcher** (validator → lower → arm64 emit →
+   x86_64 emit) to `dispatch_collector.dispatcher(...)` lookup once
+   all ops are migrated. This is 4 small commits.
+4. **Delete the legacy `src/instruction/wasm_X_Y/<category>.zig`
+   files** in a sweep commit at §9.12-B close; the per-op files
+   replace them.
+5. **`src/feature/<feature>/register.zig`** — the placeholder
+   feature modules remain in place but only carry the interp-axis
+   `register()` (DispatchTable.interp population for runtime-late
+   features like GC slot routing). validator / lower / emit axes
+   for those features live in `src/instruction/wasm_X_Y/<op>.zig`
+   (= the per-op files), not in `feature/`. This is the new
+   division of labour.
+
+The §9.12-B exit criterion includes "all 581 ZirOp tags have a
+corresponding `src/instruction/wasm_X_Y/<op>.zig` file passing
+`dispatch_collector.zig`'s comptime check". Phase 10's first Wasm
+3.0 feature work then proceeds by adding files; no dispatcher edit
+is needed.
+
+### Why this differs from the original §3 reference-table
+
+Original (2026-05-04): `instruction/wasm_X_Y/<category>.zig` with the
+implicit assumption that each category file holds a `switch`
+internally over ops in that category, called from the dispatcher.
+
+Amended (2026-05-19): no category file. Each op gets its own file
+(naming pattern `<op_lowercase>.zig`). The category-level grouping
+exists only as a directory subdivision (optional) under
+`wasm_X_Y/`, not as a code-bearing file. The original mistake was
+treating "category" as a code-organisation unit; "op" is the right
+unit because it matches the 5-axis-per-op concept and gives 1-file =
+1-op = full lifecycle visibility.
+
 ## Revision history
 
 | Date       | Commit       | Why-class | Summary                                                                                                                                                                                                                                                                                                                          |
@@ -659,4 +788,4 @@ consumer materialises.
 | 2026-05-04 | `<backfill>` | initial   | Adopted; consolidated Q1-Q10 design dialogue.                                                                                                                                                                                                                                                                                    |
 | 2026-05-05 | `<backfill>` | gap       | Amended by ADR-0024 (post-implementation): the §3 reference-table row for `api/lib_export.zig` is removed, `main.zig` moves to `src/cli/main.zig`, and a new `src/zwasm.zig` library root is added. ADR-0024 explains why the original ADR's directory shape couldn't serve as a Zig 0.16 lib `Module.root_source_file` directly. |
 | 2026-05-11 | `<backfill>` | gap       | **`interp/loop.zig` rename was withdrawn** (per 2026-05-11 ADR audit, SUMMARY §3.3 / batch_B). Decision §"The src/ tree" listed `interp/loop.zig` as the new name (motivated by avoiding collision with `ir/dispatch.zig`). Implementation kept the original `interp/dispatch.zig` because `ir/dispatch.zig` was simultaneously renamed to `ir/dispatch_table.zig`, removing the collision. `src/zwasm.zig`'s test-discovery block imports `interp/dispatch.zig`. Honest record only; no design change. |
-| 2026-05-19 | `<backfill>` | scope     | **§4.5 amend (per-op file pattern formally adopted — Phase 9 completion substrate audit Q3 adoption; per ADR-0071 + ADR-0073)**. §4.5 (DispatchTable feature modules) sharpened as follows: (a) `DispatchTable.interp` axis = required (already complete in `mvp/mod.zig`; other features complete in §9.12-B); (b) `validator` / `lower` / `arm64/emit` / `x86_64/emit` axes = per-op file pattern (each `src/instruction/wasm_X_Y/<op>.zig` exports `pub const handlers = .{ .validate, .lower, .arm64, .x86_64, .interp }`); (c) central dispatcher is `src/ir/dispatch_collector.zig` (newly added; lands in §9.12-B), which at comptime imports all op files, filters them, and generates an `inline switch` dispatch; (d) `comptime` filter via `build_options.wasm_level` / `wasi_level` (build-option DCE; per ADR-0073). `src/feature/<feature>/register.zig` registers the interp axis only; the placeholders for the other 9 features are specified as interp-axis-only in §9.12-B. Skeleton; details in §9.12-pre / §9.12-B. |
+| 2026-05-19 | `<backfill>` | scope     | **§4.5 amend — per-op file pattern formally adopted** (Phase 9 completion substrate audit Q3 adoption; per ADR-0071 + ADR-0073). See dedicated section "§4.5 amend — per-op file migration plan" above. Key change: `instruction/wasm_X_Y/<category>.zig` → `instruction/wasm_X_Y/<op>.zig` (one file per op), each exporting `op_tag` / `wasm_level` / `wasi_level` / `enable_features` / `handlers = .{ .validate, .lower, .arm64, .x86_64, .interp }`. Central `src/ir/dispatch_collector.zig` (new) generates the `inline switch` dispatcher per axis with comptime build-option filter. `src/feature/<f>/register.zig` retains only the interp-axis registration. |

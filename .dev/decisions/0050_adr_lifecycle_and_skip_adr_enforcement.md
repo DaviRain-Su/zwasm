@@ -174,6 +174,102 @@ This is a documentation nudge, not a load-bearing rule —
 trivial single-commit ADRs are fine without a Revision
 history.
 
+### D-5 — Skip-impl one-way ratchet substrate
+
+Amend per 2026-05-19 Phase 9 completion substrate audit (per
+ADR-0071) to integrate the **skip-impl count ratchet** into
+the ADR lifecycle. Background: the 2026-05-19 measurement
+exposed that the prior handover claim "skip-impl == 0" was
+inaccurate — 243 directives remained (193 non-simd + 50
+SIMD). The drift was undetected because no commit-gate
+checked skip-impl monotonicity. D-5 codifies the structural
+fix.
+
+**Substrate**:
+
+- **`bench/results/skip_impl_history.yaml`** is the ratchet
+  substrate. It is git-tracked and gets one new row per
+  PR that touches skip-impl counts. Schema:
+
+  ```yaml
+  - sha: <commit-sha>
+    date: <YYYY-MM-DD>
+    non_simd: <count>
+    simd: <count>
+    total: <sum>
+    runner_versions:
+      spec_assert_runner_non_simd: <stamp>
+      simd_assert_runner: <stamp>
+    exempt: <ADR-NNNN or null>   # only when delta > 0
+    notes: <one-line summary>
+  ```
+
+  Seed row at 2026-05-19 records 193 / 50 / 243 as the baseline.
+
+- **Ratchet invariant**: for any non-`exempt` PR, the new
+  row's `total` MUST be `<=` the previous row's `total`. PRs
+  whose `total` rises require an explicit `exempt: <ADR-NNNN>`
+  citation; otherwise the gate fails (D-6 enforces).
+
+- **Exemption mechanism**: when a legitimate skip-impl increase
+  is needed (e.g. a new spec corpus arrives with previously-
+  unseen unsupported constructs), the PR carries a new ADR
+  amendment or a skip-ADR file justifying the increase, and the
+  yaml row sets `exempt: <ADR-NNNN>`. Without an explicit ADR
+  reference, the increase is rejected.
+
+- **Reading order**: a fresh reader can `tail bench/results/
+  skip_impl_history.yaml` to see the historical trajectory and
+  the `exempt:` field to understand each upward bump.
+
+### D-6 — Pre-push gate: `scripts/check_skip_impl_ratchet.sh`
+
+Amend to register the pre-push gate that enforces D-5.
+
+**Behaviour**:
+
+1. Read the last row of `bench/results/skip_impl_history.yaml`
+   as the previous baseline (`prev_total`).
+2. Run `zig build test-spec-wasm-2.0-assert` and the SIMD
+   counterpart to measure current `cur_total` (or read the
+   most-recent measurement artifact if a fresh run is too
+   slow for pre-push — script chooses the cheapest valid
+   signal).
+3. If `cur_total > prev_total` and the current commit does
+   not contain a new yaml row with `exempt: <ADR-NNNN>`, fail
+   with message:
+   ```
+   skip-impl ratchet violation: prev=<N> cur=<M>; delta=<+K>
+   No exempt ADR cited in this PR. Either fix the regression
+   or add a skip-ADR + yaml exempt row.
+   ```
+4. If the commit's diff modifies `bench/results/skip_impl_
+   history.yaml`, verify the new row's `total` matches a
+   fresh measurement (catches manually-fudged rows).
+
+**Installation**: the gate is registered in `scripts/gate_merge.sh`
+(the strict A13 merge gate) and as an optional pre-push hook
+in `scripts/gate_commit.sh`'s extended config. The autonomous
+`/continue` loop's per-chunk Mac + ubuntunote gate does NOT
+fire D-6 (pre-chunk is too aggressive); D-6 fires at push time
+and at A13 merge time.
+
+**Landing**: D-6 lands in §9.12-A (alongside the rest of the
+master-plan Chapter 7 enforcement layer). Until then, the
+ratchet is an honour-system invariant — the yaml exists but
+the script's `--gate` exit code is a no-op.
+
+### D-5 / D-6 interaction with skip-ADR effectiveness (D-2)
+
+D-5 / D-6 are **additive** to D-2's skip-ADR effectiveness
+discipline. A skip-ADR that classifies a fixture as `skip-adr`
+(per ADR-0029) removes that fixture from `skip-impl` count;
+those fixtures DO NOT contribute to the ratchet total. The
+ratchet tracks only true `skip-impl` (unimplemented spec /
+runner / validator capabilities), which is the user-
+requirement-i exit criterion ("skip-impl 100% is the primary
+exit").
+
 ## Alternatives considered
 
 ### Alternative A — Add `Closed` only; leave skip-ADR enforcement as-is

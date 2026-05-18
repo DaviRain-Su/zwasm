@@ -5,12 +5,6 @@
 - **Author**: continue loop §9.9 close + 2026-05-19 substrate audit design session
 - **Tags**: phase-9, substrate-audit, dispatch-architecture, build-option-dce, scope-amendment
 
-> **Status**: skeleton. This ADR will be expanded to a full draft in §9.12-pre.
-> This file is a placeholder that satisfies the §18.2 prior-ADR requirement for
-> the §9.12 sub-row expansion (ROADMAP §9 amend). The skeleton of Context /
-> Decision is already in place; Alternatives / Consequences / implementation
-> details will be populated in §9.12-pre.
-
 ## Context
 
 The Phase 9 completion substrate audit (ROADMAP §9.12; per ADR-0062) was originally
@@ -101,46 +95,161 @@ Phase 9 completion**.
 
 ## Alternatives considered
 
-> Skeleton stage. Detailed expansion to be done in §9.12-pre.
+The three architectural hypotheses (A, B, C) plus the current half-state (D-1) and the original
+narrow-scope reading of §9.12 were each measured against the user's design-quality axes
+(structural cleanliness / resistance to latent bugs / ease of root-cause isolation;
+explicitly **not** wall-clock cost or implementation effort, per the 2026-05-19 feedback
+that those axes induce compromise).
 
-### Alternative A — Hypothesis A complete (all DispatchTable axes populated)
+### Alternative A — Complete §4.5 as originally written (function-pointer DispatchTable)
 
-- Sketch: Implement 9 features × register() + convert validator/lower/emit to table consumption
-- Rejected: **True DCE via build-option is not possible** (the table is populated at runtime). Falls below the other proposals in the Q3 adoption evaluation.
+- **Sketch**: Implement all 9 features × `register(*DispatchTable)`; populate
+  `DispatchTable.validate[op] / .lower[op] / .interp[op] / .arm64[op] / .x86_64[op]` at
+  runtime startup. Validator / lower / emit dispatch sites become 5-axis table lookups
+  (`return table.interp[@intFromEnum(op)](state)`). Per-op handler bodies live in
+  `src/feature/<feature>/<op>.zig` and are registered by `register.zig` per feature.
+- **Strengths**: source organisation by feature is clean; one table-cell-flip per
+  feature toggle (runtime); zware-influenced; the existing `DispatchTable` scaffold
+  in `src/ir/` already half-supports this shape.
+- **Why rejected**: **build-option DCE is structurally impossible** — the table is a
+  *runtime data structure* populated at program startup, so the LLVM linker cannot
+  prove which entries are unreached. A `-Dwasm=v1_0` build would still link the
+  v2.0/v3.0 `register_*` functions and all their referenced handler bodies. The
+  `.text` section would not shrink. This violates user requirement (iii) — "in a
+  `-Dwasm=v1_0` build, Wasm 2.0+ code / CLI arguments / c_api / WASI must be
+  literally absent". Falls short on "small" + "literal absence" + "1 op = 1 file
+  (handlers across 5 axes are scattered across `src/feature/<f>/<op>.zig` × 5
+  feature subdirs, not co-located)".
 
-### Alternative B — comptime-gated switch (wrap the existing switch with `if (comptime ...)`)
+### Alternative B — Comptime-gated exhaustive switch (wrap existing arms)
 
-- Sketch: Abolish DispatchTable + revert from `src/instruction/` to validator/lower/emit
-- Rejected: `validator.zig` etc. remain as monoliths; the "1 op = 1 file" organization cannot be achieved. Inferior to C on the design quality axes.
+- **Sketch**: Abolish `DispatchTable` and `src/instruction/wasm_X_Y/` placeholders.
+  Each of the 5 dispatcher files (`validator.zig`, `lower.zig`, `arm64/emit.zig`,
+  `x86_64/emit.zig`, `interp/dispatch.zig`) keeps its single exhaustive `switch
+  (ZirOp)`; each Wasm-2.0+ arm is wrapped in
+  `if (comptime build_options.wasm_level >= .v2_0) { ... } else
+   return Error.UnsupportedOpForBuildLevel;`. LLVM DCE deletes unreachable
+  arms.
+- **Strengths**: build-option DCE works (the arm bodies are statically unreachable
+  and get stripped); validator and emit each remain a single self-contained file
+  (good for grep + readability); minimal disruption to the existing §9.9 code path;
+  the current §2 P14 wording can be sharpened to permit this idiom rather than
+  rewritten.
+- **Why rejected**: each dispatcher remains a **monolith**. `validator.zig` already
+  sits at 1699 LOC with the switch at line 515; the same op's validate-arm,
+  lower-arm, arm64-emit-arm, x86_64-emit-arm, and interp-arm live in 5 distinct
+  files, so understanding the full lifecycle of one op requires 5 file reads + 5
+  grep operations. This violates user requirement (4) "modular preparation" and the
+  master plan's design-axis priority "1 op = 1 file / consistent across all layers".
+  Bug localisation (D-126 / D-132 / D-148 class) gets harder, not easier, as ZirOp
+  grows toward Phase 10's 581 tags.
 
-### Alternative D-1 — Hybrid (maintain the current half-A + half-C state)
+### Alternative D-1 — Hybrid (maintain current half-A + half-C state)
 
-- Sketch: Minimal finishing in §9.12-B (fill in 4 placeholders) + add build-option consultation
-- Rejected: True DCE via build-option not addressed; the design continues in a half-finished state.
+- **Sketch**: Fill in the 4 placeholder feature `register.zig` files so
+  `DispatchTable` is fully populated (Hypothesis A's surface), but keep the
+  exhaustive switches in the 5 dispatcher files as the actual binding (current
+  reality). Add build-option consultation at 2-3 high-level entry points (e.g.
+  `cli/main.zig` rejecting `--enable-gc` on a v1_0 build).
+- **Strengths**: smallest delta from current state; §9.9 momentum preserved; no
+  spike risk on `inline switch` compile-time.
+- **Why rejected**: this is the existing latent-debt state. It violates user
+  requirement (iii) "literal absence" (build-option DCE doesn't reach the
+  dispatchers; v2.0+ code stays in the binary). It violates requirement (4)
+  ("modular preparation so Phase 10 proceeds without friction") because Phase 10's
+  GC / EH / tail-call additions would extend the same monolithic switches by
+  another 100+ arms each. The 2026-05-19 feedback explicitly names "any change in
+  the direction of compromise" as physically blocked — D-1 IS the compromise.
 
-### Keep §9.12 scope narrow as design decisions only (= as originally per ADR-0062)
+### Alternative E — Keep §9.12 scope narrow (decisions only, no implementation)
 
-- Sketch: §9.12 = decisions; implementation moves to Phase 10
-- Rejected: The user's requirements (7 items for Phase 9 completion) explicitly state they cannot be carried over to Phase 10; "starting Phase 10 with the ground prepared" is a requirement.
+- **Sketch**: §9.12 closes with ADRs + spike measurements; the per-op file
+  migration / DCE substrate work moves entirely into Phase 10's first sub-rows.
+- **Why rejected**: user requirement (3) "incorporate insights sparing no effort"
+  + (4) "Phase 10 starts with ground fully prepared" + (6) "drastic reorganization"
+  are stated as Phase 9 deliverables, not Phase 10's. Splitting the substrate work
+  across the phase boundary means Phase 10 cannot start adding Wasm 3.0 features
+  until the substrate lands — so it's substrate-first regardless of which Phase
+  owns the work. Owning it in Phase 9 makes the "Phase 10 entry gate clean" claim
+  literal.
+
+### Alternative F — Hypothesis C with central-collector ONLY (no per-layer DCE)
+
+- **Sketch**: Adopt the per-op file pattern + `dispatch_collector.zig` for
+  ZirOp / validator / lower / emit / interp, but keep CLI / c_api / WASI as
+  current (no declarative form, no build-option DCE on those layers).
+- **Why rejected**: the master plan's Chapter 4 cross-layer consistency goal
+  treats the substrate as 4 parallel applications of the same pattern. Adopting
+  it only at the IR/codegen layer leaves 3 layers in the legacy shape, and the
+  user's "consistent pattern across every layer" requirement (additional
+  feedback iii) is not satisfied. ADR-0073 codifies the full 4-layer
+  application; this ADR-0071 entry adopts it by reference.
 
 ## Consequences
 
-- **Positive**:
-  - All 5 axes are localized in 1 op = 1 file (= the root cause of a bug is immediately identifiable)
-  - `-Dwasm=v1_0` build literally does not include Wasm 2.0+ code in the binary (size + attack surface reduction)
-  - CLI / c_api / WASI are feature-gated with a consistent pattern across all layers
-  - Phase 9 completion exit can be literally verified by "skip-impl == 0 + 4 exhaustive test families green"
+### Positive
 
-- **Negative**:
-  - §9.12-B has a large implementation scope (rewriting all 5 dispatchers into the inline switch + collector form)
-  - The compile-time wall of the 581-tag `inline switch` in Zig 0.16 awaits spike measurement
-  - §9.12 sub-rows balloon to 11 rows → ROADMAP §9 table becomes vertically long (price of visibility)
+- **1 op = 1 file across 5 axes**: validate / lower / arm64 / x86_64 / interp handlers
+  for a single op live in `src/instruction/wasm_X_Y/<op>.zig`. Root-cause of a bug
+  (e.g. D-126 / D-132 / D-148 class) localises to one file rather than requiring 5
+  parallel grep operations across `validator.zig` / `lower.zig` / `arm64/emit.zig` /
+  `x86_64/emit.zig` / `interp/dispatch.zig`.
+- **Literal absence under `-Dwasm=v1_0`**: Wasm 2.0+ handler bodies, CLI args
+  (`--enable-gc`), c_api exports (`wasm_v128_extract` ELF symbol), and WASI p2
+  syscalls are not in the binary — confirmed by `nm` + `size` in spike
+  `q3-build-option-dce-poc/`. Attack-surface and binary-size both shrink.
+- **Cross-layer consistency**: the same declarative-metadata + comptime-filter
+  pattern applies to 4 layers (IR, CLI, c_api, WASI). Adding a new layer in the
+  future (e.g. proposed `-Dtarget=embedded` minimal build) reuses the same
+  boilerplate.
+- **Phase 9 completion exit is literal**: `skip-impl == 0` across spec /
+  edge_cases / realworld / differential corpora + 4 test tracks green is a
+  measurable PASS criterion, not a narrative one.
+- **§2 P14 sharpening clarifies intent**: the pre-amendment wording was being
+  read by both authors as forbidding `if (comptime build_options.X)` —
+  blocking the build-option DCE substrate. The amendment names the
+  failure-mode it actually targets (runtime if-branching on feature flags,
+  per Wasmer/Cranelift's runtime-toggle style) and explicitly permits the
+  comptime form.
 
-- **Neutral / follow-ups**:
-  - File ADR-0073 (build-option DCE substrate) separately as a new ADR
-  - Amend ADR-0023 §4.5 separately (formal adoption of per-op file pattern)
-  - Amend ADR-0050 separately (skip-impl one-way ratchet)
-  - Phase Status widget wording update will be done in a commit after this ADR is Accepted
+### Negative
+
+- **§9.12-B implementation scope is large**: all 5 dispatchers must be
+  rewritten into the `inline switch + collector` form, and all 581 ZirOp
+  tags need a corresponding `src/instruction/wasm_X_Y/<op>.zig` file.
+  Per-op file completeness is enforced by a comptime check in
+  `dispatch_collector.zig` (cannot be silently skipped).
+- **Zig 0.16 `inline switch` compile-time wall**: 581 tags is on the upper
+  edge of what Zig 0.16's sema has been exercised against. Spike
+  `q3-zig-inline-switch/` measures the wall position and the
+  `@setEvalBranchQuota` knob; if the wall is hit, the master plan
+  Chapter 8 §8.3 specifies a tag-range split (Cranelift `isle-split-match`
+  equivalent) as the workaround. Wall position is not a reason to
+  compromise on the design.
+- **§9.12 ROADMAP table grows to 11 sub-rows**: vertical real estate is a
+  price paid for visibility. Each sub-row is a real deliverable; the
+  table is not padded.
+- **CLI / c_api / WASI reshape touches user-facing surfaces**: the
+  declarative-form rewrite affects API stability, though all 3 are
+  pre-1.0 (zwasm v2 has not shipped) so no compatibility break is paid.
+  The `include/wasm.h` upstream is preprocessor-gated by build-option;
+  consumers building against zwasm c_api now control feature surface
+  via the same `ZWASM_WASM_LEVEL` macro.
+
+### Neutral / follow-ups
+
+- **ADR-0073** carries the build-option DCE substrate detail (all 4 layers,
+  declarative-metadata shape, central collector form, spike results).
+- **ADR-0023 §4.5 amend** formalises the per-op file pattern in the directory-
+  structure ADR.
+- **ADR-0050 amend** adds the skip-impl one-way ratchet (D-5 + D-6 sub-decisions).
+- **Phase Status widget wording** flips in a commit landing after the §9.12
+  collab gate Accepts this ADR (master plan Chapter 6.2).
+- **ROADMAP §14** gains forbidden-list entries (`Unconscious libc fanout` via
+  ADR-0070; `Skip-impl count regressions` via ADR-0050 amend).
+- **The 9-item enforcement layer** (master plan Chapter 7) lands in §9.12-A
+  before any §9.12-B implementation begins; this prevents the substrate from
+  silently sliding back to D-1 during the migration cycle.
 
 ## References
 
