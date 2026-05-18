@@ -230,25 +230,26 @@ Sub-steps (chunk-granularity each; can land as multiple commits):
 6. **handover.md refresh** — point at Cat II / Cat III / Cat IV
    chunk progression after amendment cycle closes.
 
-### Step (b) — Cat II: multi-result entry helpers [PARTIAL]
+### Step (b) — Cat II: multi-result entry helpers [DONE 2026-05-18]
 
-**Status**: chunks b-1..b-5 landed (2-result int + HFA f64+f64
-shapes covered). Manifest-level skip-impl multi-result dropped
-from 48 → 17 lines. Residual 17 lines all blocked by the
-D-094 + D-137 + D-140 ABI cohort:
+**Status**: drained. `skip-impl multi-result` count = 0.
+Closure chain (commit-order):
 
-- 7 lines: pure 3-int-result `(i32,i32,i32)` / `(i32,i32,i64)`
-  shapes — D-094 (SysV >2 GPR truncation) + the arm64 sibling
-  `extern struct` ≥ 24 B → X8 indirect-result-ptr gap.
-- 8+ lines: mixed int+float 2-result — D-137 (callconv(.c)
-  packs i32+f64 into GPR pair but JIT writes i32→W0 + f64→D0;
-  HFA/mixed-class register layout needed).
-- 1 line: `large-sig` 16-result — D-140 (indirect-result-ptr
-  ABI for >16-byte struct returns; AAPCS64 X8 / SysV RDI).
+- b-1..b-5 cycles: 2-result int + HFA `f64+f64` shapes
+  (48 → 17 manifest lines).
+- ADR-0069 §Phase 2 chunks (b)-d-* + (b)-e-* (commits up to
+  `4e4ecaa7`): Class B mixed int+float + Class C 3-int-result
+  via AAPCS64 X8 / SysV indirect-result-ptr (17 → 1 line).
+- ADR-0069 §Phase 3 / D-140 large-sig 16-result via
+  ADR-0026 Convention Swap (x86_64 SysV §3.2.3 standard
+  RDI=&buffer / RSI=rt) + arm64 Apple natural-size stack
+  packing (lesson `2026-05-18-apple-arm64-natural-packing.md`)
+  + LLVM-backend workaround for the upstream Zig bug at
+  [Codeberg ziglang/zig#35343](https://codeberg.org/ziglang/zig/issues/35343)
+  (D-148 blocked-by-upstream; workaround commit `a8474d1a`).
+  Last line drained at commit `fb063b09`.
 
-§9.9-II row close requires discharging the D-094 + D-137 +
-D-140 cohort (multi-commit project: ADR amendment +
-caller/callee marshal + entry-helper bridge). Schedule TBD.
+§9.9-II row [x] eligible; carried into Step (e) §9.9 close.
 
 **Goal (historical)**: drain ~1400 multi-result directives to 0.
 

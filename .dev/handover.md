@@ -6,78 +6,86 @@
 ## Cold-start procedure
 
 1. **READ FIRST** [`.dev/phase9_close_plan.md`](phase9_close_plan.md)
-   §6 (revised 2026-05-18). ADR-0069 §Phase 2 + §Phase 3 partial
-   close: Cat II Class C residual = D-148 (large-sig x86_64 SysV
-   regalloc-pressure mis-marshal; Mac aarch64 PASSES).
-2. **READ NEXT** D-148 row in `.dev/debt.md` + lesson
-   [`2026-05-18-apple-arm64-natural-packing.md`](lessons/2026-05-18-apple-arm64-natural-packing.md).
-3. `git log --oneline -10`. Latest: D-148 defer commit (manifest
-   revert to skip-impl) after D-140 Mac green / x86_64 fail.
-4. `bash scripts/p9_simd_status.sh` — live status.
-5. `cat .dev/debt.md`. `now`: D-079, D-133, **D-148**.
+   §6 Step (e) — Phase 9 close sequence. Step (b) Cat II + (c)
+   Cat III + (d) Cat IV-relocation all DONE; only Step (e) tasks
+   remain before §9.9 row flips `[x]`.
+2. `git log --oneline -10`. Latest:
+   `fb063b09 chore(p9): D-148 → blocked-by upstream; workaround
+   landed, 2-host bit-identical at 25325/0/688`.
+3. `bash scripts/p9_simd_status.sh` — live status (SIMD 13301/0/440
+   bit-identical Mac + ubuntunote; non-simd 25325/0/688 bit-identical).
+4. `cat .dev/debt.md`. `now`: D-079, D-133 (both blocked-by §9.12
+   audit cleanup).
 
-## Active state — D-140 partial close: Mac green, x86_64 deferred to D-148
+## Active state — §9.9 [x] flip ready; Cat I+II+III all closed
 
-D-140 landed on Mac aarch64 (`func.wast::large-sig` 17 params /
-16 mixed Class C results PASSES). Two ABI fixes shipped:
+- Cat I (SIMD): 13301/0/440 bit-identical (D-145 cycle 10 close).
+- Cat II (multi-result entry helpers): drained. `skip-impl
+  multi-result` count = 0. Last gap was D-140 large-sig
+  (17 params / 16 mixed Class C results); closed via
+  ADR-0026 Convention Swap + arm64 Apple natural-size stack
+  packing + LLVM-backend workaround for one upstream Zig bug.
+- Cat III (Wasm 1.0 instance / cross-module / host imports /
+  start-trap): DONE 2026-05-18 (cycle 5, commit `2dbd3f15`).
+- Cat IV (windowsmini SEH bridge + reconcile): relocated to
+  §9.13-0 per ADR-0049 + ADR-0056 + ADR-0065 (2026-05-18).
 
-- **ADR-0026 amend (Convention Swap)**: x86_64 SysV MEMORY-class
-  returns now use standard SysV §3.2.3 (RDI=&buffer, RSI=rt).
-  Entry helpers revert to native `callconv(.c)` — no inline-asm.
-- **arm64 Apple natural-size stack packing** (lesson
-  `2026-05-18-apple-arm64-natural-packing.md`): Mac arm64 packs
-  stack overflow args at natural size, not standard AAPCS64
-  8-byte stride. Cursor logic now branches on
-  `builtin.target.os.tag == .macos|.ios|.watchos|.tvos`.
+## Outstanding upstream blocker
 
-**x86_64 SysV regalloc-pressure mis-marshal (D-148, now)**:
-ubuntunote large-sig fails at slots r10..r15 (8 FP + 8 INT result
-vregs vs 6 XMM + 4 GPR allocatable on x86_64). Manifest reverted
-to `skip-impl multi-result large-sig` so the 2-host gate stays
-bit-identical **25324/0/689**.
+D-148 (Zig 0.16 self-hosted x86_64 Debug backend miscompile for
+`callconv(.c)` 9-FP-scalar + MEMORY-class return) is filed at
+[Codeberg ziglang/zig#35343](https://codeberg.org/ziglang/zig/issues/35343).
+Workaround in `build.zig` (`.use_llvm = true` on the non-simd
+spec_assert runner exe; commit `a8474d1a`); minimal Zig-only
+repro at `private/spikes/d148-zig-sysv-fp-args/`. Removal
+condition: upstream fix lands → drop the override.
 
-Cat II skip-impl multi-result residual: 1× `large-sig` (D-148).
+## Next-session active task — §9.9 close per close-plan Step (e)
 
-### Next-session active task — D-148 x86_64 regalloc fix
+Execute Step (e) of [`phase9_close_plan.md`](phase9_close_plan.md):
 
-Dependency chain to §9.9 [x]:
+1. `audit_scaffolding` invocation (Phase 9 boundary mandatory).
+2. SHA backfill for §9.9 sub-task rows.
+3. Flip ROADMAP §9.9 row `[ ]` → `[x]`.
+4. Phase Status widget: leave Phase 9 as IN-PROGRESS (clears on
+   §9.13 [x] per close plan Step (g)).
+5. **HARD GATE STOP**: per `.claude/skills/continue/SKILL.md`
+   §"Exception — hard human-in-loop transition gates", the loop
+   detects §9.12 (`🔒` + `phase9_completion_substrate_audit.md`)
+   as the next `[ ]` row, skips `ScheduleWakeup`, and surfaces a
+   one-sentence handoff for collaborative review.
 
-```
-D-148 — instrument x86_64 marshalReturnRegs MEMORY-class to dump
-        per-result (src_vreg, slot, home/spill). Identify the
-        spill-aliasing or vreg-mis-resolve pattern. Candidate
-        fixes: raise allocatable_xmms cap (free XMM6/XMM7 per
-        abi.zig TODO(p7-7.7)) or audit spill-slot uniqueness
-        across the function-return live range. Re-promote
-        large-sig to `assert_return` in regen_spec_2_0_assert.sh
-        once green on both hosts.
-  ↓
-§9.9 [x]  →  §9.12 substrate audit (USER GATE)  →
-§9.13-0 windowsmini reconcile (LOOP)  →
-§9.13 Phase 10 entry gate (USER GATE)
-```
+Substrate audit doc reachable at
+[`phase9_completion_substrate_audit.md`](phase9_completion_substrate_audit.md);
+filed per ADR-0062 to decide §2 P13/P14 + §4.5/§4.6 alignment
+(DispatchTable completion vs comptime-switch vs hybrid) BEFORE
+Phase 10 features land.
 
 ### Discipline reminders
 
 No `--no-verify`. 2-host per chunk (Mac + ubuntunote);
-windowsmini at §9.13-0 (post-§9.12). After D-148, §9.9 [x]
-flips and Phase 9 enters the §9.12 substrate-audit hard gate.
+windowsmini reconcile stays at §9.13-0 (post-§9.12).
 
 ### Outstanding `now` debts
 
-D-079; D-133 (blocked by §9.12 audit cleanup); **D-148**
-(active — large-sig x86_64). Relocated to §9.13-0: D-084 /
-D-028 / D-136.
+- D-079: v128 cross-module imports (blocked-by §9.12 audit
+  cleanup cohort).
+- D-133: arm64 op_table / op_memory hardcoded X10/X11/X12
+  scratch sweep (blocked-by §9.12 audit cleanup cohort).
+- D-148: blocked-by upstream Zig fix; workaround in place.
+- §9.13-0 cohort: D-084 / D-028 / D-136 (windowsmini SEH).
 
 ## Sandbox + References
 
 `~/.cache/zig` → `ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig-cache`.
-Per-chunk 2-host; windowsmini Phase-boundary batch.
+Per-chunk 2-host; windowsmini at §9.13-0.
 
-PRIMARY: [`phase9_close_plan.md`](phase9_close_plan.md).
-ADRs: [`0017`](decisions/0017_jit_runtime_abi.md) (2026-05-18
-amend) / **[`0026`](decisions/0026_x86_64_runtime_invariant_strategy.md)**
-(2026-05-18 Convention Swap) / [`0069`](decisions/0069_multi_result_return_abi.md)
-§Phase 3 (D-140 partial close).
-Lessons: [`2026-05-18-apple-arm64-natural-packing.md`](lessons/2026-05-18-apple-arm64-natural-packing.md)
-(Apple arm64 ABI fix); previous D-140 / D-147 lessons remain.
+PRIMARY: [`phase9_close_plan.md`](phase9_close_plan.md) §6 Step
+(e). Hard gate target:
+[`phase9_completion_substrate_audit.md`](phase9_completion_substrate_audit.md).
+ADRs: [`0062`](decisions/0062_phase9_completion_substrate_audit.md)
+(gate doc anchor), [`0026`](decisions/0026_x86_64_runtime_invariant_strategy.md)
+(Convention Swap), [`0069`](decisions/0069_multi_result_return_abi.md)
+(multi-result ABI).
+Lessons: [`2026-05-18-apple-arm64-natural-packing.md`](lessons/2026-05-18-apple-arm64-natural-packing.md);
+[`2026-05-18-parallel-move-cycle-in-if-merge.md`](lessons/2026-05-18-parallel-move-cycle-in-if-merge.md).
