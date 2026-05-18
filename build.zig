@@ -323,9 +323,18 @@ pub fn build(b: *std.Build) void {
         .single_threaded = true,
     });
     non_simd_assert_runner_mod.addImport("zwasm", zwasm_lib_mod);
+    // D-148 workaround: force LLVM backend for this binary. The
+    // self-hosted x86_64 backend miscompiles `callconv(.c)` calls
+    // with 9 FP scalar args + MEMORY-class return (`callLargesig`
+    // in entry.zig hits it; large-sig spec fixture is the only
+    // affected test). See Codeberg ziglang/zig#35343 (also #35329
+    // for the related aggregate-arg miscompile). Mac aarch64
+    // already defaults to LLVM, so the override only changes
+    // x86_64 hosts in Debug. Revert once upstream lands the fix.
     const non_simd_assert_runner_exe = b.addExecutable(.{
         .name = "zwasm-spec-wasm-2-0-assert",
         .root_module = non_simd_assert_runner_mod,
+        .use_llvm = true,
     });
     const run_non_simd_assert = b.addRunArtifact(non_simd_assert_runner_exe);
     run_non_simd_assert.addArg(b.pathFromRoot("test/spec/wasm-2.0-assert"));
