@@ -417,9 +417,20 @@ pub fn marshalReturnRegs(
         const slot_disp: i32 = -@as(i32, @intCast(indirect_result_slot_neg_off));
         try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .rbp, slot_disp).slice());
         const result_base = pushed_vregs.items.len - func.sig.results.len;
+        // DEBUG TEMP (D-148): dump per-result vreg/slot/spill info
+        // for large-sig only (17→16 sig shape).
+        const debug_dump: bool = func.sig.params.len == 17 and func.sig.results.len == 16;
+        if (debug_dump) {
+            std.debug.print("=== x86_64 marshalReturnRegs MEMORY-class func[{d}] spill_base_off={d} ===\n", .{ func.func_idx, spill_base_off });
+        }
         var byte_off: i32 = 0;
         for (func.sig.results, 0..) |result_kind, i| {
             const src_vreg = pushed_vregs.items[result_base + i];
+            if (debug_dump and src_vreg < alloc.slots.len) {
+                const gpr_slot = alloc.slot(src_vreg, .gpr);
+                const fpr_slot = alloc.slot(src_vreg, .fpr);
+                std.debug.print("  r{d}: byte_off={d} kind={s} vreg={d} gpr_slot={any} fpr_slot={any}\n", .{ i, byte_off, @tagName(result_kind), src_vreg, gpr_slot, fpr_slot });
+            }
             if (src_vreg < alloc.slots.len) {
                 switch (result_kind) {
                     .i32, .i64, .funcref, .externref => {

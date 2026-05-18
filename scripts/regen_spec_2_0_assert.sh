@@ -559,18 +559,17 @@ for c in d['commands']:
                 ((), ('i32', 'i32', 'i32')),
                 ((), ('i32', 'i32', 'i64')),
                 (('i32',), ('i32', 'i32', 'i64')),
-                # ADR-0069 §Phase 3 D-140 large-sig (17 params /
-                # 16 mixed Class C results) is *implemented* — Mac
-                # aarch64 passes the assert_return on the JIT code
-                # (Apple natural-size stack packing + AAPCS64 X8
-                # indirect-result-ptr both wired up). x86_64 SysV
-                # currently mis-marshals slots r10..r15 under high
-                # register pressure (8 FP + 8 INT result vregs vs
-                # 6 XMM + 4 GPR allocatable on x86_64) — see D-148.
-                # Until that regalloc-pressure path is fixed, the
-                # large-sig signature is kept in `skip-impl
-                # multi-result` form so the 2-host gate stays
-                # bit-identical. Re-promote once D-148 closes.
+                # ADR-0069 §Phase 3 D-140 / D-148: large-sig
+                # 17-param 16-result Class C. Mac aarch64 PASSES;
+                # x86_64 SysV regalloc-pressure path under
+                # investigation. Manifest line will revert to
+                # `skip-impl` until D-148 closes on x86_64.
+                (
+                    ('i32', 'i64', 'f32', 'f32', 'i32', 'f64', 'f32', 'i32', 'i32',
+                     'i32', 'f32', 'f64', 'f64', 'f64', 'i32', 'i32', 'f32'),
+                    ('f64', 'f32', 'i32', 'i32', 'i32', 'i64', 'f32', 'i32', 'i32',
+                     'f32', 'f64', 'f64', 'i32', 'f32', 'i32', 'f64'),
+                ),
             }
             if (arg_kinds, result_kinds) not in supported_multi:
                 lines.append(f'skip-impl multi-result {a["field"]}')
