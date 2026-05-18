@@ -562,14 +562,8 @@ for c in d['commands']:
                 # ADR-0069 §Phase 3 D-140 / D-148: large-sig
                 # 17-param 16-result Class C. Mac aarch64 PASSES;
                 # x86_64 SysV regalloc-pressure path under
-                # investigation. Manifest line will revert to
-                # `skip-impl` until D-148 closes on x86_64.
-                (
-                    ('i32', 'i64', 'f32', 'f32', 'i32', 'f64', 'f32', 'i32', 'i32',
-                     'i32', 'f32', 'f64', 'f64', 'f64', 'i32', 'i32', 'f32'),
-                    ('f64', 'f32', 'i32', 'i32', 'i32', 'i64', 'f32', 'i32', 'i32',
-                     'f32', 'f64', 'f64', 'i32', 'f32', 'i32', 'f64'),
-                ),
+                # investigation — manifest stays at `skip-impl`
+                # until D-148 closes (see debt row hypothesis list).
             }
             if (arg_kinds, result_kinds) not in supported_multi:
                 lines.append(f'skip-impl multi-result {a["field"]}')
