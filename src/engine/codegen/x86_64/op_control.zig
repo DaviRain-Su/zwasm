@@ -417,6 +417,19 @@ pub fn marshalReturnRegs(
         const slot_disp: i32 = -@as(i32, @intCast(indirect_result_slot_neg_off));
         try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .rbp, slot_disp).slice());
         const result_base = pushed_vregs.items.len - func.sig.results.len;
+        // DEBUG TEMP (D-148 cycle 2): dump raw slots[vreg] IDs +
+        // class-resolved offsets to verify hypothesis 4 (regalloc
+        // liveness-driven slot REUSE — same id assigned to two
+        // vregs whose live ranges look disjoint to the allocator
+        // but aren't).
+        const debug_dump: bool = func.sig.params.len == 17 and func.sig.results.len == 16;
+        if (debug_dump) {
+            std.debug.print("=== D-148 cycle 2 func[{d}] max_reg_slots_gpr={d} max_reg_slots_fp={d} n_slots={d} ===\n", .{ func.func_idx, alloc.max_reg_slots_gpr, alloc.max_reg_slots_fp, alloc.n_slots });
+            for (0..16) |vreg| {
+                const raw_id = if (vreg < alloc.slots.len) alloc.slots[vreg] else 0xFFFF;
+                std.debug.print("  vreg[{d}] slots[]={d} gpr={any} fpr={any}\n", .{ vreg, raw_id, alloc.slot(vreg, .gpr), alloc.slot(vreg, .fpr) });
+            }
+        }
         var byte_off: i32 = 0;
         for (func.sig.results, 0..) |result_kind, i| {
             const src_vreg = pushed_vregs.items[result_base + i];
