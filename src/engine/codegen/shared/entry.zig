@@ -894,10 +894,13 @@ pub const FuncRet_f64i32 = extern struct {
 /// writes f64→D0/V0 + f32→S1/V1 in FP-class slots — X0/X1 GPR
 /// pair read garbage. Inline-asm thunk captures via FMOV (D0→r0,
 /// S1→r1).
+// No explicit u32 pad after r1: that would mix INTEGER into
+// eightbyte 1 on SysV (post-merge → INTEGER → RDX), but JIT
+// writes f32 to XMM1. Implicit alignment pad has NO_CLASS so
+// eightbyte 1 stays SSE → XMM1 → matches.
 pub const FuncRet_f64f32 = extern struct {
     r0: f64,
     r1: f32,
-    _pad0: u32 = 0, // ensure 16-byte total for AAPCS64 X0+X1 routing
 };
 
 /// Multi-result return for `(f64, f64)`. Spec `type-f64-f64-value`.
