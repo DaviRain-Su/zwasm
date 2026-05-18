@@ -426,28 +426,24 @@ pub fn marshalReturnRegs(
         // memory location than [RBP-192].
         const debug_dump: bool = func.sig.params.len == 17 and func.sig.results.len == 16;
         if (debug_dump) {
-            // Sentinel ALL post-slot-40 spill slots so we can tell
-            // which LDR is mis-addressed at runtime. Sentinel
-            // pattern: 0xAABBCCDD<slot> per slot. Slot 48=0xAA48,
-            // 56=0xAA56, 64=0xAA64, 72=0xAA72, 80=0xAA80, 88=0xAA88.
-            const Sentinel = struct { disp_lo: u8, marker: u8 };
-            const sentinels = [_]Sentinel{
-                .{ .disp_lo = 0x40, .marker = 0x48 }, // slot 48 → disp -192
-                .{ .disp_lo = 0x38, .marker = 0x56 }, // slot 56 → disp -200
-                .{ .disp_lo = 0x30, .marker = 0x64 }, // slot 64 → disp -208
-                .{ .disp_lo = 0x28, .marker = 0x72 }, // slot 72 → disp -216
-                .{ .disp_lo = 0x20, .marker = 0x80 }, // slot 80 → disp -224
-                .{ .disp_lo = 0x18, .marker = 0x88 }, // slot 88 → disp -232
-            };
-            for (sentinels) |s| {
-                // MOV R11, imm64 = 0x<marker>BADCAFE_DEADBEEF
-                try buf.appendSlice(allocator, &.{ 0x49, 0xBB, 0xEF, 0xBE, 0xAD, 0xDE, 0xFE, 0xCA, 0xAD, s.marker });
-                // MOV [RBP+disp32], R11   (4c 89 9d <disp32-LE>)
-                try buf.appendSlice(allocator, &.{ 0x4c, 0x89, 0x9d, s.disp_lo, 0xff, 0xff, 0xff });
-            }
+            // Cycle-3c: redirect r10..r15 stores to read DIRECTLY
+            // from local slots (bypass spill region). If r10..r15
+            // come back correct, the spill region was corrupted
+            // between body STR and marshal LDR. If they're STILL
+            // wrong, the local slots themselves are wrong
+            // (prologue mis-routed).
+            //
+            // Plan: emit normal r0..r9 stores via the loop below,
+            // then OVERWRITE r10..r15 with direct local reads.
         }
         var byte_off: i32 = 0;
         for (func.sig.results, 0..) |result_kind, i| {
+            // Cycle-3c: skip r10..r15 in normal loop; we'll
+            // overwrite them after.
+            if (debug_dump and i >= 10) {
+                byte_off += 8;
+                continue;
+            }
             const src_vreg = pushed_vregs.items[result_base + i];
             if (src_vreg < alloc.slots.len) {
                 switch (result_kind) {
@@ -478,6 +474,22 @@ pub fn marshalReturnRegs(
                 }
             }
             byte_off += 8;
+        }
+        if (debug_dump) {
+            // Cycle-3c: OVERWRITE r10..r15 with direct local reads.
+            // Pattern: MOV R11, [RBP+disp8]; MOV [RAX+buf_off], R11.
+            const direct_writes = [_]struct { local_disp: i8, buf_off: u8 }{
+                .{ .local_disp = -112, .buf_off = 0x50 }, // local 13 → r10
+                .{ .local_disp = -96, .buf_off = 0x58 }, // local 11 → r11
+                .{ .local_disp = -128, .buf_off = 0x60 }, // local 15 → r12
+                .{ .local_disp = -136, .buf_off = 0x68 }, // local 16 → r13
+                .{ .local_disp = -120, .buf_off = 0x70 }, // local 14 → r14
+                .{ .local_disp = -104, .buf_off = 0x78 }, // local 12 → r15
+            };
+            for (direct_writes) |d| {
+                try buf.appendSlice(allocator, &.{ 0x4c, 0x8b, 0x5d, @as(u8, @bitCast(d.local_disp)) });
+                try buf.appendSlice(allocator, &.{ 0x4c, 0x89, 0x58, d.buf_off });
+            }
         }
         return;
     }
