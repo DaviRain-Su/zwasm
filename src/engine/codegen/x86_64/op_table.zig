@@ -544,12 +544,21 @@ pub fn emitTableCopy(
         try buf.appendSlice(allocator, inst.encAddR64Imm32(.r8, -1).slice());
         try buf.appendSlice(allocator, inst_mem.encMovR64FromBaseIdxLsl3(.r9, .rcx, .r8).slice());
         try buf.appendSlice(allocator, inst_mem.encStoreR64MemBaseIdxLsl3(.r9, .r11, .rdx).slice());
-        // Mirror funcptrs (same-table: src=dst funcptrs base = RSI).
+        // Mirror funcptrs + typeidx (same-table: src=dst base = RSI;
+        // typeidx_base reloaded per-iter via RAX → RDI scratch).
+        // D-145 fix: typeidx mirror was missing pre-cycle-10, causing
+        // ubuntu 24 fails on table_init/table_copy `check(N)` calls.
+        // arm64 sibling (op_table.zig:540-554) already mirrors both.
         try buf.appendSlice(allocator, inst.encTestRR(.q, .rsi, .rsi).slice());
         const bwd_fp_skip_at: u32 = @intCast(buf.items.len);
         try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
         try buf.appendSlice(allocator, inst_mem.encMovR64FromBaseIdxLsl3(.r9, .rsi, .r8).slice());
         try buf.appendSlice(allocator, inst_mem.encStoreR64MemBaseIdxLsl3(.r9, .rsi, .rdx).slice());
+        // typeidx mirror: reload typeidx_base via RAX, copy ESI[src]→[dst].
+        try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_jit_ci_ptr_off).slice());
+        try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .rax, @intCast(dst_tbl * 16 + 8)).slice());
+        try buf.appendSlice(allocator, inst_mem.encMovR32FromBaseIdxLsl2(.rdi, .rax, .r8).slice());
+        try buf.appendSlice(allocator, inst_mem.encStoreR32MemBaseIdxLsl2(.rdi, .rax, .rdx).slice());
         {
             const after: u32 = @intCast(buf.items.len);
             const disp: i32 = @as(i32, @intCast(after)) - (@as(i32, @intCast(bwd_fp_skip_at)) + 6);
@@ -575,12 +584,17 @@ pub fn emitTableCopy(
         const fwd_loop_start: u32 = @intCast(buf.items.len);
         try buf.appendSlice(allocator, inst_mem.encMovR64FromBaseIdxLsl3(.r9, .rcx, .r8).slice());
         try buf.appendSlice(allocator, inst_mem.encStoreR64MemBaseIdxLsl3(.r9, .r11, .rdx).slice());
-        // Mirror funcptrs (same-table forward).
+        // Mirror funcptrs + typeidx (same-table forward; D-145 fix).
         try buf.appendSlice(allocator, inst.encTestRR(.q, .rsi, .rsi).slice());
         const fwd_fp_skip_at: u32 = @intCast(buf.items.len);
         try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
         try buf.appendSlice(allocator, inst_mem.encMovR64FromBaseIdxLsl3(.r9, .rsi, .r8).slice());
         try buf.appendSlice(allocator, inst_mem.encStoreR64MemBaseIdxLsl3(.r9, .rsi, .rdx).slice());
+        // typeidx mirror via RAX (typeidx_base) + RDI (u32 scratch).
+        try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_jit_ci_ptr_off).slice());
+        try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .rax, @intCast(dst_tbl * 16 + 8)).slice());
+        try buf.appendSlice(allocator, inst_mem.encMovR32FromBaseIdxLsl2(.rdi, .rax, .r8).slice());
+        try buf.appendSlice(allocator, inst_mem.encStoreR32MemBaseIdxLsl2(.rdi, .rax, .rdx).slice());
         {
             const after: u32 = @intCast(buf.items.len);
             const disp: i32 = @as(i32, @intCast(after)) - (@as(i32, @intCast(fwd_fp_skip_at)) + 6);
