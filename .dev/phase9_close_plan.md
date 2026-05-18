@@ -230,9 +230,27 @@ Sub-steps (chunk-granularity each; can land as multiple commits):
 6. **handover.md refresh** — point at Cat II / Cat III / Cat IV
    chunk progression after amendment cycle closes.
 
-### Step (b) — Cat II: multi-result entry helpers
+### Step (b) — Cat II: multi-result entry helpers [PARTIAL]
 
-**Goal**: drain ~1400 multi-result directives to 0.
+**Status**: chunks b-1..b-5 landed (2-result int + HFA f64+f64
+shapes covered). Manifest-level skip-impl multi-result dropped
+from 48 → 17 lines. Residual 17 lines all blocked by the
+D-094 + D-137 + D-140 ABI cohort:
+
+- 7 lines: pure 3-int-result `(i32,i32,i32)` / `(i32,i32,i64)`
+  shapes — D-094 (SysV >2 GPR truncation) + the arm64 sibling
+  `extern struct` ≥ 24 B → X8 indirect-result-ptr gap.
+- 8+ lines: mixed int+float 2-result — D-137 (callconv(.c)
+  packs i32+f64 into GPR pair but JIT writes i32→W0 + f64→D0;
+  HFA/mixed-class register layout needed).
+- 1 line: `large-sig` 16-result — D-140 (indirect-result-ptr
+  ABI for >16-byte struct returns; AAPCS64 X8 / SysV RDI).
+
+§9.9-II row close requires discharging the D-094 + D-137 +
+D-140 cohort (multi-commit project: ADR amendment +
+caller/callee marshal + entry-helper bridge). Schedule TBD.
+
+**Goal (historical)**: drain ~1400 multi-result directives to 0.
 
 Pre-work survey already done (2026-05-17):
 - 48 manifest-level `skip-impl multi-result` lines
@@ -266,10 +284,23 @@ Per-chunk gates: Mac+ubuntunote file-logged parallel pipeline
 (per ADR-0049 + ADR-0067) + verify simd_assert / wast_runner
 remain green / spec_assert PASS-count delta as expected.
 
-### Step (c) — Cat III: Wasm 1.0 instance work
+### Step (c) — Cat III: Wasm 1.0 instance work [DONE 2026-05-18]
 
-**Goal**: drain 136 + 4 + 2 + 2 = 144 cross-module / host /
-start-trap / link-typecheck directives to 0.
+**Status**: §9.9-III row `[x]` cycle 5 (commit `2dbd3f15`).
+Drain target satisfied: Mac aarch64 25308/0, ubuntunote x86_64
+24034/0 (= 0 FAIL across 144 directives) with γ-4 relax
+PERMANENT.
+
+Closure chain (commit-order):
+- α/β/γ/γ.2/γ.3 (ADR-0068 chunks) — dual-view table storage
+  fix; D-126 closure
+- γ.4 cycle 4 (commit `b137a44b`) — bridge thunk 56 → 96 B
+  (ADR-0066 §A2; full pinned reserved-invariant cohort save);
+  D-144 closure
+- cycle 5 (commit `2dbd3f15`) — §9.9-III `[x]` flip
+
+**Goal (historical)**: drain 136 + 4 + 2 + 2 = 144 cross-module /
+host / start-trap / link-typecheck directives to 0.
 
 Pre-survey BEFORE implementation (Step 0 per /continue
 discipline):
