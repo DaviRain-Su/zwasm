@@ -426,10 +426,25 @@ pub fn marshalReturnRegs(
         // memory location than [RBP-192].
         const debug_dump: bool = func.sig.params.len == 17 and func.sig.results.len == 16;
         if (debug_dump) {
-            // MOV R11, 0xCAFEBABEDEADBEEF (10-byte imm64)
-            try buf.appendSlice(allocator, &.{ 0x49, 0xBB, 0xEF, 0xBE, 0xAD, 0xDE, 0xBE, 0xBA, 0xFE, 0xCA });
-            // MOV [RBP-192], R11   (4c 89 9d 40 ff ff ff)
-            try buf.appendSlice(allocator, &.{ 0x4c, 0x89, 0x9d, 0x40, 0xff, 0xff, 0xff });
+            // Sentinel ALL post-slot-40 spill slots so we can tell
+            // which LDR is mis-addressed at runtime. Sentinel
+            // pattern: 0xAABBCCDD<slot> per slot. Slot 48=0xAA48,
+            // 56=0xAA56, 64=0xAA64, 72=0xAA72, 80=0xAA80, 88=0xAA88.
+            const Sentinel = struct { disp_lo: u8, marker: u8 };
+            const sentinels = [_]Sentinel{
+                .{ .disp_lo = 0x40, .marker = 0x48 }, // slot 48 → disp -192
+                .{ .disp_lo = 0x38, .marker = 0x56 }, // slot 56 → disp -200
+                .{ .disp_lo = 0x30, .marker = 0x64 }, // slot 64 → disp -208
+                .{ .disp_lo = 0x28, .marker = 0x72 }, // slot 72 → disp -216
+                .{ .disp_lo = 0x20, .marker = 0x80 }, // slot 80 → disp -224
+                .{ .disp_lo = 0x18, .marker = 0x88 }, // slot 88 → disp -232
+            };
+            for (sentinels) |s| {
+                // MOV R11, imm64 = 0x<marker>BADCAFE_DEADBEEF
+                try buf.appendSlice(allocator, &.{ 0x49, 0xBB, 0xEF, 0xBE, 0xAD, 0xDE, 0xFE, 0xCA, 0xAD, s.marker });
+                // MOV [RBP+disp32], R11   (4c 89 9d <disp32-LE>)
+                try buf.appendSlice(allocator, &.{ 0x4c, 0x89, 0x9d, s.disp_lo, 0xff, 0xff, 0xff });
+            }
         }
         var byte_off: i32 = 0;
         for (func.sig.results, 0..) |result_kind, i| {
