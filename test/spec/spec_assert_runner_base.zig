@@ -412,10 +412,16 @@ pub fn printCallTrap(
     // div-by-zero / etc.). Pairs with `last_tf` (= pre-stub
     // snapshot) to tell us whether the trap fired *during* a
     // stub or in JIT code between stubs / after the last stub.
+    // §9.9-III D-144 γ.4 cycle 4 also emit `trap_kind` so callers
+    // see WHICH JIT trap source fired:
+    //   1  = generic (memory bounds / unreachable / NaN / range)
+    //   2  = call_indirect bounds (B.HS)
+    //   3  = call_indirect sig (B.NE)
+    //   0  = unknown (SIGSEGV-recovered or pre-cycle-4 binary)
     if (std.mem.eql(u8, args_s, "()") or args_s.len == 0) {
-        try stdout.print("FAIL  {s}: call {s}(): {s} [stubs={d} last_tf={d} tf={d}]\n", .{ name, fn_name, @errorName(err), host_import_stub_call_count, host_import_stub_last_trap_flag, rt.trap_flag });
+        try stdout.print("FAIL  {s}: call {s}(): {s} [stubs={d} last_tf={d} tf={d} kind={d}]\n", .{ name, fn_name, @errorName(err), host_import_stub_call_count, host_import_stub_last_trap_flag, rt.trap_flag, rt.trap_kind });
     } else {
-        try stdout.print("FAIL  {s}: call {s}({s}): {s} [stubs={d} last_tf={d} tf={d}]\n", .{ name, fn_name, args_s, @errorName(err), host_import_stub_call_count, host_import_stub_last_trap_flag, rt.trap_flag });
+        try stdout.print("FAIL  {s}: call {s}({s}): {s} [stubs={d} last_tf={d} tf={d} kind={d}]\n", .{ name, fn_name, args_s, @errorName(err), host_import_stub_call_count, host_import_stub_last_trap_flag, rt.trap_flag, rt.trap_kind });
     }
 }
 
@@ -1525,16 +1531,12 @@ pub fn hasUnbindableImports(
     const sec = module.find(.import) orelse return false;
     var imports = zwasm.parse.sections.decodeImports(allocator, sec.body) catch return false;
     defer imports.deinit();
-    _ = registered;
     for (imports.items) |imp| {
         const is_spectest = std.mem.eql(u8, imp.module, "spectest");
         switch (imp.kind) {
             .func => {
-                // §9.9-III (c)-2.3-γ-4 strict pending D-144 close.
-                // The γ-4 relax probe at γ.2/γ.3/γ.4 cycle 2 shows
-                // 1 residual fail (imports.1.wasm print64
-                // call_indirect sig-check trap, see D-144 row).
                 if (is_spectest) continue;
+                if (registered.contains(imp.module)) continue;
                 return true;
             },
             .table, .memory, .global => return true,

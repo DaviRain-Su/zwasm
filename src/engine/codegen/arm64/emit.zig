@@ -577,6 +577,16 @@ pub fn compile(
     var bounds_fixups: std.ArrayList(u32) = .empty;
     defer bounds_fixups.deinit(allocator);
 
+    // §9.9-III D-144 γ.4 cycle 4 — dedicated fixup lists for
+    // call_indirect bounds (B.HS) + sig (B.NE) checks. Routed to
+    // their own trap stubs that write distinct `trap_kind` codes
+    // (2 / 3) so a post-mortem `printCallTrap` can disambiguate
+    // call_indirect trap source from memory bounds / unreachable.
+    var cind_bounds_fixups: std.ArrayList(u32) = .empty;
+    defer cind_bounds_fixups.deinit(allocator);
+    var cind_sig_fixups: std.ArrayList(u32) = .empty;
+    defer cind_sig_fixups.deinit(allocator);
+
     // Return fixup list (§9.7 / 7.5-return-op): each `return` op
     // emits its result marshal inline and an unconditional B
     // placeholder; the byte_offset of the placeholder lives here.
@@ -636,6 +646,8 @@ pub fn compile(
         .next_vreg = &next_vreg,
         .labels = &labels,
         .bounds_fixups = &bounds_fixups,
+        .cind_bounds_fixups = &cind_bounds_fixups,
+        .cind_sig_fixups = &cind_sig_fixups,
         .return_fixups = &return_fixups,
         .call_fixups = &call_fixups,
         .simd_const_fixups = &simd_const_fixups,
@@ -1442,6 +1454,11 @@ pub fn compile(
                     const trap_byte: u32 = @intCast(buf.items.len);
                     try gpr.writeU32(allocator, &buf, inst.encMovzImm16(17, 1));
                     try gpr.writeU32(allocator, &buf, inst.encStrImmW(17, abi.runtime_ptr_save_gpr, jit_abi.trap_flag_off));
+                    // §9.9-III D-144 γ.4 cycle 4 — generic kind=1
+                    // mirror (every trap variant writes trap_kind so
+                    // stale values from earlier invocations cannot
+                    // poison the next FAIL's diagnostic).
+                    try gpr.writeU32(allocator, &buf, inst.encStrImmW(17, abi.runtime_ptr_save_gpr, jit_abi.trap_kind_off));
                     try gpr.writeU32(allocator, &buf, inst.encMovzImm16(0, 0));
                     if (frame_bytes > 0) {
                         const fb_high: u12 = @intCast((frame_bytes >> 12) & 0xFFF);
@@ -1471,6 +1488,51 @@ pub fn compile(
                         std.mem.writeInt(u32, buf.items[fx_byte..][0..4], new_word, .little);
                     }
                 }
+
+                // §9.9-III D-144 γ.4 cycle 4 — dedicated trap stubs
+                // for call_indirect bounds (kind=2) + sig (kind=3).
+                // Each stub mirrors the generic trap stub's shape
+                // (set trap_flag=1, return 0) plus a STR of the kind
+                // code to `trap_kind_off`. Permanent diagnostic infra
+                // per hypothesis_enumeration.md step-4: every future
+                // call_indirect trap localises to bounds vs sig vs
+                // SIGSEGV-recovery without per-bug instrumentation.
+                const EmitCindStub = struct {
+                    fn emit(
+                        a: std.mem.Allocator,
+                        b: *std.ArrayList(u8),
+                        fixups: []const u32,
+                        kind: u16,
+                        fb: u32,
+                    ) !void {
+                        if (fixups.len == 0) return;
+                        const stub_byte: u32 = @intCast(b.items.len);
+                        try gpr.writeU32(a, b, inst.encMovzImm16(17, 1));
+                        try gpr.writeU32(a, b, inst.encStrImmW(17, abi.runtime_ptr_save_gpr, jit_abi.trap_flag_off));
+                        try gpr.writeU32(a, b, inst.encMovzImm16(17, kind));
+                        try gpr.writeU32(a, b, inst.encStrImmW(17, abi.runtime_ptr_save_gpr, jit_abi.trap_kind_off));
+                        try gpr.writeU32(a, b, inst.encMovzImm16(0, 0));
+                        if (fb > 0) {
+                            const fb_high: u12 = @intCast((fb >> 12) & 0xFFF);
+                            const fb_low: u12 = @intCast(fb & 0xFFF);
+                            if (fb_high != 0) try gpr.writeU32(a, b, inst.encAddImm12Lsl12(31, 31, fb_high));
+                            if (fb_low != 0) try gpr.writeU32(a, b, inst.encAddImm12(31, 31, fb_low));
+                        }
+                        try gpr.writeU32(a, b, encLdpFpLrPostIdx());
+                        try gpr.writeU32(a, b, inst.encRet(abi.link_register));
+                        for (fixups) |fx_byte| {
+                            const disp_words: i32 = @divExact(
+                                @as(i32, @intCast(stub_byte)) - @as(i32, @intCast(fx_byte)),
+                                4,
+                            );
+                            const orig = std.mem.readInt(u32, b.items[fx_byte..][0..4], .little);
+                            const cond: inst.Cond = @enumFromInt(@as(u4, @intCast(orig & 0xF)));
+                            std.mem.writeInt(u32, b.items[fx_byte..][0..4], inst.encBCond(cond, disp_words), .little);
+                        }
+                    }
+                };
+                try EmitCindStub.emit(allocator, &buf, cind_bounds_fixups.items, 2, frame_bytes);
+                try EmitCindStub.emit(allocator, &buf, cind_sig_fixups.items, 3, frame_bytes);
                 // §9.6/9.6-f-ii + §9.9-g-19 — SIMD const-pool flush +
                 // LDR-Q-literal imm19 fixups (per ADR-0042 + ADR-0051).
                 // After the trap stub, if any v128.const / i8x16.shuffle

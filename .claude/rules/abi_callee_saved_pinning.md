@@ -31,10 +31,17 @@ called function MUST preserve them across the call. The v2
 project pins some of these regs for project-specific invariant
 use:
 
-- **arm64**: X19 = `runtime_ptr_save_gpr` (per ADR-0017 sub-2d-ii)
-- **x86_64**: R15 = runtime-ptr save (per ADR-0026 Cc-pivot)
-- (plus X20..X23 / RBX..R14 callee-saved invariant cohort —
-  audit `abi.zig::reserved_invariant_gprs` + `runtime_ptr_save_gpr`)
+- **arm64**: X19 (runtime_ptr) + X24..X28 (typeidx_base /
+  table_size / funcptr_base / mem_limit / vm_base) per
+  ADR-0017 + ADR-0018. **Full six-register cohort** —
+  D-144 (2026-05-18) found §A1's X19-only thunk fix was
+  insufficient because X24-X28 are equally pinned-callee-
+  saved and equally violated by the same prologue shape.
+  The cohort is canonical in `abi.zig::reserved_invariant_gprs`.
+- **x86_64**: R15 = runtime-ptr save (per ADR-0026 Cc-pivot).
+  Single-register pinning — other invariants reload from
+  `[R15 + offset]` at point of use (so cross-module bridge
+  thunks only need to save/restore R15; D-144 does not apply).
 
 The trap: same-module-call hides the violation. Both caller
 and callee use the same `*JitRuntime` value, so the callee's
@@ -75,23 +82,48 @@ callee's:
 
 ### Option A: bridge thunk does call-and-return + saves caller's pinned regs
 
-The bridge thunk grows from a 4-instr tail-jump
-(`BR X16`) to a save-call-restore sequence:
+The bridge thunk wraps the cross-module call with a save-
+restore block for the full pinned-callee-saved cohort:
 
 ```text
-arm64 (~48 bytes, was 32):
-   STP X29, X30, [SP, #-32]!         ; save FP/LR
-   STR X19, [SP, #16]                ; save caller's X19 = caller_rt
-   LDR X0,  =callee_rt               ; load callee_rt literal
-   LDR X16, =callee_entry            ; load callee_entry literal
-   BLR X16                           ; call callee (callee's prologue does MOV X19, X0 = callee_rt; callee's epilogue does NOT restore)
-   LDR X19, [SP, #16]                ; RESTORE caller's X19
-   LDP X29, X30, [SP], #32           ; restore FP/LR, pop frame
+arm64 (96 bytes per ADR-0066 §A2 amendment, D-144 cycle 4 —
+was 56 in §A1):
+   STP X29, X30, [SP, #-80]!          ; save FP/LR + alloc frame
+   STR X19, [SP, #16]                 ; save caller's X19
+   STR X24, [SP, #24]                 ; save caller's X24
+   STR X25, [SP, #32]                 ; save caller's X25
+   STR X26, [SP, #40]                 ; save caller's X26
+   STR X27, [SP, #48]                 ; save caller's X27
+   STR X28, [SP, #56]                 ; save caller's X28
+   ADR X16, +<offset>                 ; literal pool ptr
+   LDR X0, [X16]                      ; X0 ← callee_rt
+   LDR X16, [X16, #8]                 ; X16 ← callee_entry
+   BLR X16                            ; CALL
+   LDR X19, [SP, #16]                 ; restore X19
+   LDR X24, [SP, #24]                 ; ... X24
+   LDR X25, [SP, #32]                 ; ... X25
+   LDR X26, [SP, #40]                 ; ... X26
+   LDR X27, [SP, #48]                 ; ... X27
+   LDR X28, [SP, #56]                 ; ... X28
+   LDP X29, X30, [SP], #80            ; restore FP/LR, pop
    RET
+   (4-byte pad + 16-byte literal pool follow)
 ```
 
-ADR-0066 amendment required (load-bearing ABI change to the
-bridge thunk shape).
+ADR-0066 §A2 amendment (D-144 cycle 4) — the §A1 fix
+addressed only X19; §A2 extended to the full reserved-
+invariant cohort once `imports.1.wasm` print64
+call_indirect sig-mismatch surfaced the gap.
+
+```text
+x86_64 (27 bytes — single pinned reg R15 per ADR-0026):
+   PUSH R15                ; save caller's R15
+   MOV  RDI, callee_rt
+   MOV  RAX, callee_entry
+   CALL RAX
+   POP  R15                ; restore R15
+   RET
+```
 
 ### Option B: callee prologue saves pinned reg
 

@@ -168,7 +168,18 @@ pub const JitRuntime = extern struct {
     /// mismatch, idx OOB, NaN, integer overflow, etc.) +
     /// optional trap-site PC for source-location surfacing.
     trap_flag: u32,
-    _pad1: u32 = 0,
+    /// §9.9-III D-144 γ.4 cycle 4 — trap kind marker. Repurposed
+    /// from `_pad1`. Per-fixup-class trap stubs (arm64 emit.zig)
+    /// pre-set W18 with a distinct ID; the trap stub STR's W18
+    /// here so `printCallTrap` can disambiguate bounds vs sig vs
+    /// other JIT traps. Sentinel `0` = unmarked (legacy trap stub
+    /// path; treat as generic). Codes:
+    ///   1  = generic (memory bounds, NaN, range, unreachable, …)
+    ///   2  = call_indirect bounds (B.HS)
+    ///   3  = call_indirect sig (B.NE)
+    /// Layout-stable: replaces the existing 4-byte pad after
+    /// `trap_flag`. All offsets in this struct unchanged.
+    trap_kind: u32 = 0,
     /// Globals array base pointer (ADR-0027). Each entry is one
     /// `runtime.value.Value` = 8 bytes. JIT body's `global.get`
     /// emits `LDR Rd, [X23, Ridx, LSL #3]` (ARM64) or
@@ -365,6 +376,7 @@ pub const funcptr_base_off: u12 = @offsetOf(JitRuntime, "funcptr_base");
 pub const table_size_off: u12 = @offsetOf(JitRuntime, "table_size");
 pub const typeidx_base_off: u12 = @offsetOf(JitRuntime, "typeidx_base");
 pub const trap_flag_off: u12 = @offsetOf(JitRuntime, "trap_flag");
+pub const trap_kind_off: u12 = @offsetOf(JitRuntime, "trap_kind");
 pub const globals_base_off: u12 = @offsetOf(JitRuntime, "globals_base");
 pub const globals_count_off: u12 = @offsetOf(JitRuntime, "globals_count");
 pub const host_dispatch_base_off: u12 = @offsetOf(JitRuntime, "host_dispatch_base");

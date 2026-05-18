@@ -89,6 +89,16 @@ pub const EmitCtx = struct {
     /// Memory-bounds-trap fixups awaiting trap-stub emission at
     /// function-final `end`.
     bounds_fixups: *std.ArrayList(u32),
+    /// §9.9-III D-144 γ.4 cycle 4 — call_indirect bounds-check
+    /// (B.HS) fixups. Patched to a dedicated trap stub that writes
+    /// `trap_kind = 2`. Permanent diagnostic infra: every future
+    /// call_indirect bounds trap localises its source via
+    /// `printCallTrap`'s `kind=` emit.
+    cind_bounds_fixups: *std.ArrayList(u32),
+    /// §9.9-III D-144 γ.4 cycle 4 — call_indirect sig-mismatch
+    /// (B.NE) fixups. Patched to a dedicated trap stub that
+    /// writes `trap_kind = 3`. See `cind_bounds_fixups`.
+    cind_sig_fixups: *std.ArrayList(u32),
     /// `return` / `br <function-depth>` placeholders; patched at
     /// function-final `end` to share the regular epilogue path.
     return_fixups: *std.ArrayList(u32),

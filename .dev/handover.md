@@ -6,53 +6,51 @@
 ## Cold-start procedure
 
 1. **READ FIRST** [`.dev/phase9_close_plan.md`](phase9_close_plan.md)
-   §6. Cat III dispatch — chunks α/β/γ-partial/γ.2/γ.3 of
-   D-126 fix all landed. γ.4 is **blocked on D-144** (print64
-   i64 cross-module trap, needs interactive lldb).
-2. **READ NEXT** [`.dev/decisions/0068_dual_view_table_storage_fix.md`](decisions/0068_dual_view_table_storage_fix.md);
-   [`.claude/rules/dual_view_table_sync.md`](../.claude/rules/dual_view_table_sync.md);
-   `.dev/debt.md` D-144 row (hypothesis enumeration).
-3. `git log --oneline -10`. Latest: D-144 debt filed (7f9fcd9f).
+   §6. Cat III dispatch — D-126 + D-144 CLOSED 2026-05-18. γ-4
+   permanent relax landed.
+2. **READ NEXT** ADR-0066 §A2 amendment (bridge thunk 56 → 96 B
+   for full pinned cohort);
+   [`.dev/lessons/2026-05-18-thunk-pinned-cohort-not-just-x19.md`](lessons/2026-05-18-thunk-pinned-cohort-not-just-x19.md).
+3. `git log --oneline -10`. Latest: γ.4 cycle 4 close.
 4. `bash scripts/p9_simd_status.sh` — live SIMD status.
-5. `cat .dev/debt.md | head -90`. D-126 + D-144 rows have plan.
+5. `cat .dev/debt.md | head -90`. Next candidates: D-079, D-133.
 
-## Active state — γ.4 = D-144 print64 cross-module i64 debug
+## Active state — Cat III dispatch CLOSED
 
-ADR-0068 chunks landed:
-- α (3053f91d ancestor): FuncEntity.funcptr + TableSlice 16→24
-  + null sentinel for externref + setup wiring + 5 contract
-  fixtures.
-- β: arm64 mirror of refs+funcptrs+typeidx (Copy).
-- γ-partial: x86_64 mirror + SIB-byte fix.
-- γ.2: typeidx mirror in Set/Fill/Init/Grow on both arches.
-- γ.3: resolveFuncrefGlobals fixup for ref.func globals.
+D-126 (dual-view table) + D-144 (print64 cross-module trap)
+both closed 2026-05-18 cycle 4.
 
-2-host gate at HEAD=7f9fcd9f: Mac + ubuntunote `zig build
-test-all` EXIT=0. Edge-case runner 51 PASS on both. The 5
-contract fixtures under `test/edge_cases/p9/table_storage_sync/`
-all PASS.
+D-144 root cause: arm64 bridge thunk's ADR-0066 §A1 saved
+only X19, missing X24-X28 (the full reserved-invariant
+cohort per `abi.zig::reserved_invariant_gprs`). Cross-module
+BLR return left caller's X24 holding callee's typeidx_base
+→ `call_indirect sig` mismatch (`kind=3`).
 
-γ-4 relax probe (re-applied locally cycle 3, reverted): 1
-residual `imports: call print64`; see D-144.
+Fix: ADR-0066 §A2 grows arm64 thunk 56 → 96 B for full
+cohort save/restore. x86_64 unchanged (R15 only pin per
+ADR-0026; other invariants reload from `[R15+off]`).
 
-### Next-session active task — D-144 cycle 4
+2-host gate after fix: Mac 25308/0, ubuntunote 24034/0
+with γ-4 relax PERMANENT.
 
-Cycle 3 (2026-05-18) added `tf=` diag to `printCallTrap`.
-Mac observation `[stubs=5 last_tf=0 tf=1]` (relax applied
-locally, reverted before commit) localizes trap to JIT code
-**between stub #5 ($print_f64-2) return and `call_indirect`'s
-BLR** — call_indirect's bounds/sig/funcptr-load sets trap_flag=1
-(generic JIT trap; arm64 emit.zig:1444 shares one stub).
-Sibling print32 uses same `(elem $print_i32 $print_f64)`
-table at idx 0; passes. print64 differs only by idx (0→1)
-+ expected sig (func(i32)→func(f64)). See D-144 hypothesis
-list cycle 3 update (#5/#6).
+### Permanent diagnostic infra landed in γ.4
 
-Cycle 4 plan: either (a) lldb breakpoint at trap stub addr +
-dump tables_jit_ci_ptr[0].{typeidx_base,funcptr_base}[0..2]
-and call_indirect's loaded typeidx; OR (b) add per-fixup-kind
-W17 marker pre-B.cond at op_call.zig call_indirect emit sites
-+ new JitRuntime.last_trap_kind field (permanent infra).
+- Cycle 2/3: `host_import_stub_call_count` / `_last_trap_flag`
+  globals + `tf=` (rt.trap_flag) — `[stubs=N last_tf=M tf=K]`.
+- Cycle 4: `JitRuntime.trap_kind` (replaces `_pad1`) +
+  per-fixup-class arm64 trap stubs (1=generic, 2=cind
+  bounds, 3=cind sig). `printCallTrap` emits `kind=N`.
+
+### Next-session active task
+
+Cat III (c)-2 batch is structurally closed. Candidates for
+next session (from `now`-status debt + ROADMAP §9.9):
+
+- D-079: v128 cross-module imports (residual sub-gaps).
+- D-133: arm64 op_table / op_memory hardcoded scratch
+  sweep (latent).
+- §9.9-III close + §9.9-IV start (Cat IV sweep —
+  windowsmini reconcile per ADR-0056).
 
 ### Discipline reminders
 
@@ -61,9 +59,7 @@ windowsmini batch at Phase 9 close.
 
 ### Outstanding `now` debts
 
-D-079; **D-126** (α/β/γ/γ.2/γ.3 landed; γ.4 blocked on D-144);
-**D-144** (print64 i64 cross-module trap, root-cause pending);
-D-133.
+D-079; D-133.
 
 ## Sandbox + References
 
@@ -72,9 +68,9 @@ Per-chunk 2-host; windowsmini Phase-boundary batch.
 
 PRIMARY: [`phase9_close_plan.md`](phase9_close_plan.md).
 ADRs: [`0065`](decisions/0065_wasm_1_0_instance_work_phase9_rescope.md)
-/ [`0066`](decisions/0066_cross_module_import_bridge_thunks.md)
+/ **[`0066`](decisions/0066_cross_module_import_bridge_thunks.md)** §A2
 / [`0067`](decisions/0067_ubuntunote_native_x86_64_gate_host.md)
-/ **[`0068`](decisions/0068_dual_view_table_storage_fix.md)**.
-Auto-loaded rules: [`dual_view_table_sync.md`](../.claude/rules/dual_view_table_sync.md);
-[`hypothesis_enumeration.md`](../.claude/rules/hypothesis_enumeration.md)
-(D-144 multi-cycle investigation).
+/ [`0068`](decisions/0068_dual_view_table_storage_fix.md).
+Auto-loaded rules: [`abi_callee_saved_pinning.md`](../.claude/rules/abi_callee_saved_pinning.md)
+(full cohort discipline); [`dual_view_table_sync.md`](../.claude/rules/dual_view_table_sync.md);
+[`hypothesis_enumeration.md`](../.claude/rules/hypothesis_enumeration.md).

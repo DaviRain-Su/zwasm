@@ -167,7 +167,7 @@ pub fn emitCallIndirect(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         {
             const fixup_at: u32 = @intCast(ctx.buf.items.len);
             try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hs, 0));
-            try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+            try ctx.cind_bounds_fixups.append(ctx.allocator, fixup_at);
         }
 
         // Sig: LDR W16, [X24, X17, LSL #2] ; CMP W16, #canonical ;
@@ -181,7 +181,7 @@ pub fn emitCallIndirect(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         {
             const fixup_at: u32 = @intCast(ctx.buf.items.len);
             try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.ne, 0));
-            try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+            try ctx.cind_sig_fixups.append(ctx.allocator, fixup_at);
         }
 
         // Funcptr load + BLR. Restore X0 = runtime_ptr (ADR-0017
@@ -214,7 +214,7 @@ pub fn emitCallIndirect(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         {
             const fixup_at: u32 = @intCast(ctx.buf.items.len);
             try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hs, 0));
-            try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+            try ctx.cind_bounds_fixups.append(ctx.allocator, fixup_at);
         }
 
         // Sig: load typeidx_base = tables_jit_ci_ptr[table_idx].typeidx_base.
@@ -230,7 +230,7 @@ pub fn emitCallIndirect(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         {
             const fixup_at: u32 = @intCast(ctx.buf.items.len);
             try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.ne, 0));
-            try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+            try ctx.cind_sig_fixups.append(ctx.allocator, fixup_at);
         }
 
         // Funcptr: load funcptr_base = tables_jit_ci_ptr[table_idx].funcptr_base.

@@ -187,7 +187,7 @@ const testing = std.testing;
 
 test "thunk_bytes: matches arch-specific constant" {
     switch (builtin.target.cpu.arch) {
-        .aarch64 => try testing.expectEqual(@as(usize, 56), thunk_bytes),
+        .aarch64 => try testing.expectEqual(@as(usize, 96), thunk_bytes),
         .x86_64 => try testing.expectEqual(@as(usize, 27), thunk_bytes),
         else => return error.SkipZigTest,
     }
