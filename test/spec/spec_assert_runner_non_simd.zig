@@ -731,6 +731,44 @@ fn dispatchMultiResult(
         }
         return true;
     }
+    // Class B mixed int+float per ADR-0069. `(i32, f64)` shape.
+    // arm64 uses inline-asm thunk; x86_64 SysV uses native
+    // callconv(.c) (per-eightbyte INTEGER+SSE classification).
+    if (args.len == 0 and
+        n_rtoks == 2 and std.mem.startsWith(u8, rtoks[0], "i32:") and std.mem.startsWith(u8, rtoks[1], "f64:"))
+    {
+        const exp_r0 = base.parseI32Token(rtoks[0][4..]) catch return failBadResult(stdout, name, rtoks[0]);
+        const exp_r1_spec = base.parseScalarFpExpected(rtoks[1][4..], 64) catch return failBadResult(stdout, name, rtoks[1]);
+        const got = entry.callI32f64NoArgs(compiled.module, func_idx, rt) catch |err| {
+            try base.printCallTrap(rt, name, fn_name, args_s, err, stdout);
+            return false;
+        };
+        const got_r0: u32 = @intCast(got.r0 & 0xffffffff);
+        const got_r1_bits: u64 = @bitCast(got.r1);
+        if (got_r0 != exp_r0 or !base.matchScalarF64(got_r1_bits, exp_r1_spec)) {
+            try stdout.print("FAIL  {s}: {s}({s}) → got (i32:{d}, f64:0x{x:0>16}), expected (i32:{d}, {s})\n", .{ name, fn_name, args_s, got_r0, got_r1_bits, exp_r0, rtoks[1] });
+            return false;
+        }
+        return true;
+    }
+    // Class B mixed `(f64, i32)` shape.
+    if (args.len == 0 and
+        n_rtoks == 2 and std.mem.startsWith(u8, rtoks[0], "f64:") and std.mem.startsWith(u8, rtoks[1], "i32:"))
+    {
+        const exp_r0_spec = base.parseScalarFpExpected(rtoks[0][4..], 64) catch return failBadResult(stdout, name, rtoks[0]);
+        const exp_r1 = base.parseI32Token(rtoks[1][4..]) catch return failBadResult(stdout, name, rtoks[1]);
+        const got = entry.callF64i32NoArgs(compiled.module, func_idx, rt) catch |err| {
+            try base.printCallTrap(rt, name, fn_name, args_s, err, stdout);
+            return false;
+        };
+        const got_r0_bits: u64 = @bitCast(got.r0);
+        const got_r1: u32 = @intCast(got.r1 & 0xffffffff);
+        if (!base.matchScalarF64(got_r0_bits, exp_r0_spec) or got_r1 != exp_r1) {
+            try stdout.print("FAIL  {s}: {s}({s}) → got (f64:0x{x:0>16}, i32:{d}), expected ({s}, i32:{d})\n", .{ name, fn_name, args_s, got_r0_bits, got_r1, rtoks[0], exp_r1 });
+            return false;
+        }
+        return true;
+    }
     try stdout.print("FAIL  {s}: multi-result unsupported for {s}({s}) -> {s}\n", .{ name, fn_name, args_s, results_s });
     return false;
 }

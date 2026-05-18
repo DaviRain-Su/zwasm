@@ -812,12 +812,35 @@ pub const FuncRet_i32i32 = extern struct {
     r1: u64,
 };
 
-// Note: `FuncRet_i32f64` (mixed int+float) still deferred per
-// D-137 residual — FP results route through V0 (AAPCS64) /
-// XMM0 (SysV) on the JIT side but C-ABI extern struct of
-// {int, float} packs both into the GPR pair X0+X1. Bridge work
-// requires either JIT epilogue convention change or Zig-side
-// inline-asm thunk.
+/// Multi-result return for `(i32, f64)`. Class B mixed int+float
+/// per ADR-0069.
+///
+/// Layout chosen to MATCH JIT epilogue + SysV per-eightbyte ABI:
+/// `r0: u64` (i32 zero-ext) in eightbyte 0 → RAX (SysV INTEGER
+/// class) / X0 (AAPCS64 first GPR-pair slot). `r1: f64` in
+/// eightbyte 1 → XMM0 (SysV SSE class) / X1 (AAPCS64 second
+/// GPR-pair slot — but JIT writes D0, not X1, so AAPCS64 needs
+/// the inline-asm thunk in `callI32f64NoArgs`).
+pub const FuncRet_i32f64 = extern struct {
+    r0: u64,
+    r1: f64,
+};
+
+/// Multi-result return for `(f64, i32)`. Class B mixed.
+///
+/// Mirror of `FuncRet_i32f64` with order swapped. SysV per-
+/// eightbyte: eightbyte 0 = f64 (SSE → XMM0); eightbyte 1 = i32
+/// (INTEGER → RAX — first INTEGER eightbyte per the per-class
+/// register pool rule). JIT writes f64→XMM0 (n_fp=0) + i32→RAX
+/// (n_gpr=0). MATCH on SysV. AAPCS64 same shape needs inline-
+/// asm thunk because AAPCS64 routes the whole non-HFA composite
+/// through X0+X1 GPR pair, expecting eightbyte-0 (= f64 bits)
+/// in X0 and eightbyte-1 (= i32) in X1 — but JIT writes f64→D0
+/// + i32→X0 sequentially per class.
+pub const FuncRet_f64i32 = extern struct {
+    r0: f64,
+    r1: u64, // i32 zero-ext; u64 ensures 16-byte total + AAPCS64 X0/X1 layout
+};
 
 /// Multi-result return for `(f64, f64)`. Spec `type-f64-f64-value`.
 ///
@@ -924,6 +947,155 @@ pub fn callI32i64_i32(
     const result = f(rt, a0);
     if (rt.trap_flag != 0) return Error.Trap;
     return result;
+}
+
+/// `() -> (i32, f64)` — Class B mixed int+float per ADR-0069.
+///
+/// On x86_64 SysV: native `extern struct { u64, f64 }` C-ABI
+/// return matches the JIT's RAX+XMM0 sequential per-class write
+/// (eightbyte 0 = INTEGER → RAX; eightbyte 1 = SSE → XMM0).
+///
+/// On AAPCS64 (arm64): non-HFA composite ≤ 16 B routes through
+/// the X0+X1 GPR pair (eightbyte 0 → X0; eightbyte 1 → X1).
+/// JIT writes i32→X0 + f64→D0 sequentially per class — X0
+/// matches but X1 reads garbage. Inline-asm thunk pre-loads
+/// X0=rt, does BLR, captures X0 (i32) + D0 (f64 bits via
+/// FMOV) into the return struct.
+///
+/// Win64: NOT YET SUPPORTED. Win64 returns ≤ 8-byte composites
+/// in RAX; larger composites via hidden RCX ptr (= D-094 / D-140
+/// indirect-result-ptr ABI). Inline-asm thunk would need the
+/// same shape as AAPCS64 but with x86_64 register conventions;
+/// deferred to Cat IV per ADR-0069 implementation chunked plan.
+pub fn callI32f64NoArgs(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+) Error!FuncRet_i32f64 {
+    rt.trap_flag = 0;
+    if (comptime builtin.target.cpu.arch == .aarch64) {
+        const Fn = *const fn (rt: *const JitRuntime) callconv(.c) void;
+        const f = module.entry(func_idx, Fn);
+        var r0_raw: u64 = undefined;
+        var r1_raw: u64 = undefined;
+        asm volatile (
+            \\ blr %[callee]
+            \\ fmov %[r1_bits], d0
+            : [r0_out] "={x0}" (r0_raw),
+              [r1_bits] "=r" (r1_raw),
+            : [callee] "r" (f),
+              [rt_arg] "{x0}" (rt),
+            : .{
+              .x1 = true,
+              .x2 = true,
+              .x3 = true,
+              .x4 = true,
+              .x5 = true,
+              .x6 = true,
+              .x7 = true,
+              .x8 = true,
+              .x9 = true,
+              .x10 = true,
+              .x11 = true,
+              .x12 = true,
+              .x13 = true,
+              .x14 = true,
+              .x15 = true,
+              .x16 = true,
+              .x17 = true,
+              .x30 = true,
+              .z0 = true,
+              .z1 = true,
+              .z2 = true,
+              .z3 = true,
+              .z4 = true,
+              .z5 = true,
+              .z6 = true,
+              .z7 = true,
+              .memory = true,
+            });
+        if (rt.trap_flag != 0) return Error.Trap;
+        return .{ .r0 = r0_raw, .r1 = @bitCast(r1_raw) };
+    } else if (comptime builtin.target.cpu.arch == .x86_64 and builtin.target.os.tag != .windows) {
+        const Fn = *const fn (rt: *const JitRuntime) callconv(.c) FuncRet_i32f64;
+        const f = module.entry(func_idx, Fn);
+        const result = f(rt);
+        if (rt.trap_flag != 0) return Error.Trap;
+        return result;
+    } else {
+        return Error.UnsupportedEntrySignature;
+    }
+}
+
+/// `() -> (f64, i32)` — Class B mixed (FP-first ordering) per
+/// ADR-0069.
+///
+/// On x86_64 SysV: native `extern struct { f64, u64 }` C-ABI
+/// matches JIT's XMM0 (eightbyte 0 SSE) + RAX (eightbyte 1
+/// INTEGER, going to first INTEGER reg in the per-class pool).
+///
+/// On AAPCS64: as with `(i32, f64)`, JIT's sequential per-
+/// class assignment puts f64→D0 + i32→X0, while AAPCS64's
+/// GPR-pair expects eightbyte 0 (= f64 bits) in X0 and
+/// eightbyte 1 (= i32) in X1. Inline-asm thunk captures both.
+pub fn callF64i32NoArgs(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+) Error!FuncRet_f64i32 {
+    rt.trap_flag = 0;
+    if (comptime builtin.target.cpu.arch == .aarch64) {
+        const Fn = *const fn (rt: *const JitRuntime) callconv(.c) void;
+        const f = module.entry(func_idx, Fn);
+        var r0_raw: u64 = undefined;
+        var r1_raw: u64 = undefined;
+        asm volatile (
+            \\ blr %[callee]
+            \\ fmov %[r0_bits], d0
+            : [r0_bits] "=r" (r0_raw),
+              [r1_out] "={x0}" (r1_raw),
+            : [callee] "r" (f),
+              [rt_arg] "{x0}" (rt),
+            : .{
+              .x1 = true,
+              .x2 = true,
+              .x3 = true,
+              .x4 = true,
+              .x5 = true,
+              .x6 = true,
+              .x7 = true,
+              .x8 = true,
+              .x9 = true,
+              .x10 = true,
+              .x11 = true,
+              .x12 = true,
+              .x13 = true,
+              .x14 = true,
+              .x15 = true,
+              .x16 = true,
+              .x17 = true,
+              .x30 = true,
+              .z0 = true,
+              .z1 = true,
+              .z2 = true,
+              .z3 = true,
+              .z4 = true,
+              .z5 = true,
+              .z6 = true,
+              .z7 = true,
+              .memory = true,
+            });
+        if (rt.trap_flag != 0) return Error.Trap;
+        return .{ .r0 = @bitCast(r0_raw), .r1 = r1_raw };
+    } else if (comptime builtin.target.cpu.arch == .x86_64 and builtin.target.os.tag != .windows) {
+        const Fn = *const fn (rt: *const JitRuntime) callconv(.c) FuncRet_f64i32;
+        const f = module.entry(func_idx, Fn);
+        const result = f(rt);
+        if (rt.trap_flag != 0) return Error.Trap;
+        return result;
+    } else {
+        return Error.UnsupportedEntrySignature;
+    }
 }
 
 /// `() -> (f64, f64)` — HFA returned via V0+V1 / XMM0+XMM1.

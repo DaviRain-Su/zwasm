@@ -42,13 +42,14 @@ with γ-4 relax PERMANENT.
   per-fixup-class arm64 trap stubs (1=generic, 2=cind
   bounds, 3=cind sig). `printCallTrap` emits `kind=N`.
 
-### Next-session active task
+### Next-session active task — D-145 x86_64 D-126 mirror gap
 
-§9.9 umbrella row still [ ] — needs §9.9-II + §9.9-IV [x].
-Candidates: §9.9-II Cat II multi-result (~1400 skip-impl;
-start with add64_u_with_carry family); §9.9-IV Cat IV
-windowsmini reconcile (D-084 / D-136 / D-028); D-079 v128
-cross-module sub-gap (ii); D-133 arm64 scratch sweep.
+Cycle 9 landed Class B (i32,f64)/(f64,i32) helpers (Mac
+25316/0; ubuntu re-baseline surfaced 24 pre-existing
+table_init/copy fails — D-145). Highest priority: discharge
+D-145 (audit x86_64/op_table.zig mirror code, extend
+trap_kind to x86_64 trap stubs). After D-145: §9.9-II Class C
+or §9.9-IV per ADR-0069 chunked plan.
 
 ### Discipline reminders
 
@@ -57,7 +58,9 @@ windowsmini batch at Phase 9 close.
 
 ### Outstanding `now` debts
 
-D-079; D-133.
+D-079; D-133; **D-145** (x86_64 D-126 mirror gap surfaced
+cycle 9 — 24 ubuntu table_init/table_copy fails; cycle-4
+closure claim of ubuntu 24034/0 was mis-measured).
 
 ## Sandbox + References
 

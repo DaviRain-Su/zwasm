@@ -30,7 +30,7 @@ assert_return value-i32 () -> i32:77
 assert_return value-i64 () -> i64:7777
 assert_return value-f32 () -> f32:1117480550
 assert_return value-f64 () -> f64:4635172994171566817
-skip-impl multi-result value-i32-f64
+assert_return value-i32-f64 () -> i32:77 f64:4619567317775286272
 skip-impl multi-result value-i32-i32-i32
 assert_return value-block-void () -> ()
 assert_return value-block-i32 () -> i32:77
@@ -40,7 +40,7 @@ assert_return return-i32 () -> i32:78
 assert_return return-i64 () -> i64:7878
 assert_return return-f32 () -> f32:1117611622
 assert_return return-f64 () -> f64:4635244066603186258
-skip-impl multi-result return-i32-f64
+assert_return return-i32-f64 () -> i32:78 f64:4635244066603186258
 skip-impl multi-result return-i32-i32-i32
 assert_return return-block-i32 () -> i32:77
 assert_return return-block-i32-i64 () -> i32:1 i64:2
@@ -49,7 +49,7 @@ assert_return break-i32 () -> i32:79
 assert_return break-i64 () -> i64:7979
 assert_return break-f32 () -> f32:1117768909
 assert_return break-f64 () -> f64:4635315139034805699
-skip-impl multi-result break-i32-f64
+assert_return break-i32-f64 () -> i32:79 f64:4635315139034805699
 skip-impl multi-result break-i32-i32-i32
 assert_return break-block-i32 () -> i32:77
 assert_return break-block-i32-i64 () -> i32:1 i64:2

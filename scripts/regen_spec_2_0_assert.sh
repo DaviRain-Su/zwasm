@@ -531,6 +531,12 @@ for c in d['commands']:
                 # Phase 9 Cat II chunk (b)-5 — HFA<f64,f64> return:
                 # type-f64-f64-value (f64.wast `(result f64 f64)`).
                 ((), ('f64', 'f64')),
+                # Phase 9 Cat II chunk (b)-d-1 — Class B mixed
+                # int+float per ADR-0069. `(i32, f64)` + `(f64,
+                # i32)` shapes. arm64 inline-asm thunk; x86_64
+                # SysV native per-eightbyte ABI; Win64 deferred.
+                ((), ('i32', 'f64')),
+                ((), ('f64', 'i32')),
             }
             if (arg_kinds, result_kinds) not in supported_multi:
                 lines.append(f'skip-impl multi-result {a["field"]}')
