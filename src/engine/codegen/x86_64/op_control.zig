@@ -476,23 +476,26 @@ pub fn marshalReturnRegs(
             byte_off += 8;
         }
         if (debug_dump) {
-            // Cycle-3c: OVERWRITE r10..r15 with direct local reads.
-            // Pattern: MOV R11, [RBP+disp8]; MOV [RAX+buf_off], R11.
-            const direct_writes = [_]struct { local_disp: i32, buf_off: u8 }{
-                .{ .local_disp = -112, .buf_off = 0x50 }, // local 13 → r10
-                .{ .local_disp = -96, .buf_off = 0x58 }, // local 11 → r11
-                .{ .local_disp = -128, .buf_off = 0x60 }, // local 15 → r12
-                .{ .local_disp = -136, .buf_off = 0x68 }, // local 16 → r13
-                .{ .local_disp = -120, .buf_off = 0x70 }, // local 14 → r14
-                .{ .local_disp = -104, .buf_off = 0x78 }, // local 12 → r15
-            };
-            for (direct_writes) |d| {
-                // MOV R11, [RBP+disp32]:  4c 8b 9d <disp32-LE>
-                const lb = std.mem.toBytes(d.local_disp);
-                try buf.appendSlice(allocator, &.{ 0x4c, 0x8b, 0x9d, lb[0], lb[1], lb[2], lb[3] });
-                // MOV [RAX+disp8], R11:  4c 89 58 <disp8>
-                try buf.appendSlice(allocator, &.{ 0x4c, 0x89, 0x58, d.buf_off });
-            }
+            // Cycle-3d: dump XMM5/6/7 + stack args at [RBP+16..+56]
+            // to buffer slots to inspect what Zig actually passed.
+            // Replaces r10..r15 output with diagnostic values.
+            //
+            // r10 (8 B) ← XMM5 via MOVSD: f2 0f 11 68 50 (MOVSD [RAX+0x50], XMM5)
+            try buf.appendSlice(allocator, &.{ 0xf2, 0x0f, 0x11, 0x68, 0x50 });
+            // r11 ← XMM6:  f2 0f 11 70 58
+            try buf.appendSlice(allocator, &.{ 0xf2, 0x0f, 0x11, 0x70, 0x58 });
+            // r12 (low 4) ← XMM7's bits via MOVSD + MOV
+            try buf.appendSlice(allocator, &.{ 0xf2, 0x0f, 0x11, 0x78, 0x60 });
+            // r13 (low 4) ← bytes at [RBP+32] (Zig stack-arg slot for a14):
+            // MOV R11, [RBP+0x20]; MOV [RAX+0x68], R11
+            try buf.appendSlice(allocator, &.{ 0x4c, 0x8b, 0x5d, 0x20 });
+            try buf.appendSlice(allocator, &.{ 0x4c, 0x89, 0x58, 0x68 });
+            // r14 ← bytes at [RBP+40] (a15 expected): MOV R11, [RBP+0x28]; MOV [RAX+0x70], R11
+            try buf.appendSlice(allocator, &.{ 0x4c, 0x8b, 0x5d, 0x28 });
+            try buf.appendSlice(allocator, &.{ 0x4c, 0x89, 0x58, 0x70 });
+            // r15 ← bytes at [RBP+48] (a16 expected): MOV R11, [RBP+0x30]; MOV [RAX+0x78], R11
+            try buf.appendSlice(allocator, &.{ 0x4c, 0x8b, 0x5d, 0x30 });
+            try buf.appendSlice(allocator, &.{ 0x4c, 0x89, 0x58, 0x78 });
         }
         return;
     }
