@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # scripts/check_skip_impl_ratchet.sh — Skip-impl one-way ratchet (skeleton)
 #
-# pre-push hook + CI で fire。現 commit の skip-impl 数を
-# `bench/results/skip_impl_history.yaml` の前 commit 値と比較し、
-# **増えていたら FAIL**。例外は ADR で justify + yaml に `exempt:
-# <ADR-NNNN>` 登録。
+# Fires on pre-push hook + CI. Compares the current commit's
+# skip-impl count against the previous commit value in
+# `bench/results/skip_impl_history.yaml`, and **FAILs if it has
+# increased**. Exceptions must be justified via ADR + registered
+# in yaml as `exempt: <ADR-NNNN>`.
 #
-# Phase 9 完備 マスター計画書 §7.3 / ADR-0050 amend (D-3 / D-4) 着地点。
+# Landing point for Phase 9 completeness master plan §7.3 / ADR-0050
+# amend (D-3 / D-4).
 #
-# 完成: §9.12-A enforcement layer 構築フェーズ。
-# 現状: skeleton — `--help` + no-op invocation で usage 表示のみ。
+# Completion: §9.12-A enforcement layer construction phase.
+# Current state: skeleton — `--help` + no-op invocation only shows usage.
 
 set -uo pipefail
 

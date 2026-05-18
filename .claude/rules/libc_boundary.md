@@ -1,39 +1,39 @@
 ---
-description: "libc 依存境界 — `std.c.*` 呼び出しは ADR-0070 の 3 区分 (necessary/replaceable/convenience) に該当しないと禁止。新規 `std.c.*` 追加は ADR justification 必須。"
+description: "libc dependency boundary — `std.c.*` calls are forbidden unless they fall into one of the 3 categories (necessary/replaceable/convenience) defined in ADR-0070. New `std.c.*` additions require an ADR justification."
 paths:
   - "src/**/*.zig"
 ---
 
 # libc dependency boundary
 
-> **状態**: skeleton (2026-05-19)。ADR-0070 (Proposed) で justify。§9.12-D で完成。
+> **Status**: skeleton (2026-05-19). Justified by ADR-0070 (Proposed). Completed in §9.12-D.
 
 ## The rule
 
-Zig source で `std.c.*` 呼び出しを新規追加するときは、ADR-0070 の 3 区分の
-いずれかに該当しなければならない:
+When adding a new `std.c.*` call site in Zig source, it must fall into one of
+the 3 categories defined in ADR-0070:
 
-| 区分 | 例 | 取扱 |
+| Category | Example | Handling |
 |---|---|---|
-| necessary | `sigsetjmp` / `siglongjmp` / `pthread_jit_write_protect_np` | OK; Zig stdlib 追加待ち issue link 推奨 |
-| replaceable | `std.c.write` / `_exit` / `getenv` / `munmap` | NG — `std.posix.*` / `process.Environ` 使用 |
-| convenience | `std.heap.DebugAllocator` (Debug only) | Debug build のみ OK |
+| necessary | `sigsetjmp` / `siglongjmp` / `pthread_jit_write_protect_np` | OK; linking the upstream Zig stdlib issue is recommended |
+| replaceable | `std.c.write` / `_exit` / `getenv` / `munmap` | NG — use `std.posix.*` / `process.Environ` |
+| convenience | `std.heap.DebugAllocator` (Debug only) | OK only in Debug builds |
 
-新規 site が必要なら、ADR-0070 への amend (新 site を necessary 区分に追加) 必須。
+If a new site is required, an amendment to ADR-0070 (adding the new site to the necessary category) is mandatory.
 
 ## Before writing `std.c.<name>`, check first
 
-- `std.posix.<name>` — POSIX 抽象が存在するか
-- `std.Io.<name>` — Zig 0.16 の Io abstraction
-- `process.Environ` — env var 取得
-- 該当する `std.os.linux.*` / `std.os.darwin.*` syscall wrapper
+- `std.posix.<name>` — whether a POSIX abstraction exists
+- `std.Io.<name>` — Zig 0.16's Io abstraction
+- `process.Environ` — for retrieving env vars
+- The corresponding `std.os.linux.*` / `std.os.darwin.*` syscall wrapper
 
 ## Enforcement
 
-- `scripts/check_libc_boundary.sh` (§9.12-D で実装): grep ベース新規 std.c.*
-  site 検出 + ADR-0070 必須区分 cross-check
-- `audit_scaffolding §G.5` 拡張
-- ROADMAP §14 forbidden list "Unconscious libc fanout" (§9.12-D で追加)
+- `scripts/check_libc_boundary.sh` (to be implemented in §9.12-D): grep-based
+  detection of new std.c.* sites + cross-check against ADR-0070's required categories
+- `audit_scaffolding §G.5` extension
+- ROADMAP §14 forbidden list "Unconscious libc fanout" (added in §9.12-D)
 
 ## Grep-able anti-patterns
 
@@ -43,7 +43,7 @@ grep -nE 'std\.c\.(write|_exit|getenv|munmap)\b' src/ test/
 
 ## Related
 
-- ADR-0070 (libc dependency policy; 3 区分の根拠)
-- ADR-0067 (ubuntunote pivot; D-134 Rosetta — libc 信頼性問題の発端)
-- ADR-0071 §Q6 (Phase 9 完備 libc boundary resolution)
-- マスター計画書 §3.6 / §5.3 §9.12-D
+- ADR-0070 (libc dependency policy; rationale for the 3 categories)
+- ADR-0067 (ubuntunote pivot; D-134 Rosetta — origin of libc reliability issues)
+- ADR-0071 §Q6 (Phase 9 complete libc boundary resolution)
+- Master plan §3.6 / §5.3 §9.12-D

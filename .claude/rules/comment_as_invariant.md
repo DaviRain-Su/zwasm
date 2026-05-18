@@ -1,31 +1,31 @@
 ---
-description: "Prose-only invariant comments (= `Y は X scratch / Y は alignment N / Y は private` 等) を禁止。必ず comptime/runtime assert または lint で強制する。D-132/D-133 failure mode 予防。"
+description: "Forbid prose-only invariant comments (e.g. `Y is X scratch / Y has alignment N / Y is private`). Always pair them with a comptime/runtime assert or a lint check. Prevents the D-132/D-133 failure mode."
 paths:
   - "src/**/*.zig"
 ---
 
 # Comment-as-invariant rule
 
-> **状態**: skeleton (2026-05-19)。ADR-0072 (Proposed) で justify。§9.12-C で完成。
+> **Status**: skeleton (2026-05-19). Justified by ADR-0072 (Proposed). Completed in §9.12-C.
 
 ## The rule
 
-ソース comment で **不変条件 (invariant)** を述べるときは、必ず以下のいずれかと組:
+When a source comment states an **invariant**, it MUST be paired with one of the following:
 
-(a) `comptime assert` (`std.debug.assert` を `comptime` 文脈で)
+(a) `comptime assert` (`std.debug.assert` used in a `comptime` context)
 (b) runtime `std.debug.assert`
-(c) lint script (`audit_scaffolding §G grep` 経由)
-(d) 削除 (= 不要なら書かない)
+(c) a lint script (via `audit_scaffolding §G grep`)
+(d) removal (= don't write it if it isn't needed)
 
-違反例 (D-132 / D-133 failure mode の元):
+Violation example (the source of the D-132 / D-133 failure mode):
 
 ```zig
-// X10 / X11 / X12 は handler 内の private scratch (= 違反 — prose only)
+// X10 / X11 / X12 are private scratch within the handler (= violation — prose only)
 const tmp_a = encXR(10);
 const tmp_b = encXR(11);
 ```
 
-修正例:
+Fixed example:
 
 ```zig
 // abi.zig:
@@ -43,31 +43,33 @@ const tmp_b = encXR(abi.table_emit_scratch_gprs[1]);
 
 ## Why
 
-`op_table.zig` のコメント "X10/X11/X12 are private scratch within the handler"
-は prose-only invariant でコード強制無し。regalloc が同 slot を allocatable
-scratch として使い、特定 corpus + nested-table-op で silent corruption (D-132)。
+The `op_table.zig` comment "X10/X11/X12 are private scratch within the handler"
+was a prose-only invariant with no code-level enforcement. Regalloc used the
+same slots as allocatable scratch, leading to silent corruption on a specific
+corpus + nested-table-op (D-132).
 
 Lesson: `.dev/lessons/2026-05-16-regalloc-pool-scratch-overlap.md`
 
-「コメントは documentation; 不変条件は code で強制」が substrate hygiene の柱。
+"Comments are documentation; invariants must be enforced in code" is a pillar
+of substrate hygiene.
 
 ## Enforcement
 
-- 本 rule auto-load on `src/**/*.zig` (claude が編集時に awareness 持つ)
-- `audit_scaffolding §G` grep 強化 (§9.12-C; encStrXRegLsl3 等 + register
-  numeral hardcode 検出)
-- D-133 sweep (§9.12-C): 残存 site を named-constant 経由に置換
+- This rule auto-loads on `src/**/*.zig` (so Claude has awareness when editing)
+- Strengthen `audit_scaffolding §G` grep (§9.12-C; detect `encStrXRegLsl3` etc.
+  + hardcoded register numerals)
+- D-133 sweep (§9.12-C): replace remaining sites with named-constant references
 
-## Detection patterns (audit grep の対象)
+## Detection patterns (targets for audit grep)
 
-- `// X[0-9]+ は|are` プロセ comment
-- `// .*scratch.*private` プロセ comment
+- `// X[0-9]+ are` prose comments
+- `// .*scratch.*private` prose comments
 - `encStrXRegLsl3\([0-9]+,` / `encLdrImm\([0-9]+,` (hardcoded register numeral)
 
 ## Related
 
-- ADR-0072 (本 rule の根拠)
-- ADR-0018 (regalloc reserved set; comptime check の先例)
-- ADR-0071 §Q5 (Phase 9 完備 hygiene resolution)
+- ADR-0072 (the basis for this rule)
+- ADR-0018 (regalloc reserved set; precedent for the comptime check)
+- ADR-0071 §Q5 (Phase 9 complete hygiene resolution)
 - D-132 / D-133 (failure mode + discharge plan)
 - `.dev/lessons/2026-05-16-regalloc-pool-scratch-overlap.md`

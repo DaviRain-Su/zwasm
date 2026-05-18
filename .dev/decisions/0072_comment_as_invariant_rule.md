@@ -5,64 +5,70 @@
 - **Author**: continue loop §9.12 substrate audit cycle
 - **Tags**: phase-9, hygiene, rules, comment-discipline, regression-prevention
 
-> **状態**: skeleton。§9.12-pre で full draft に展開。
+> **Status**: skeleton. To be expanded into a full draft in §9.12-pre.
 
 ## Context
 
-D-132 / D-133 (arm64 `op_table.zig` の hardcoded X10/X11/X12 scratch register) が
-顕在化した経緯 (詳細: `.dev/lessons/2026-05-16-regalloc-pool-scratch-overlap.md`):
+How D-132 / D-133 (arm64 `op_table.zig` hardcoded X10/X11/X12 scratch registers)
+came to light (details: `.dev/lessons/2026-05-16-regalloc-pool-scratch-overlap.md`):
 
-- `op_table.zig` のコメントに「X10/X11/X12 are private scratch within the handler」
-  と書かれていたが、これは prose-only invariant でコード強制無し
-- regalloc は同 register slot を allocatable scratch として使用
-- ある corpus + nested-table-op の組合せで両者が同時に同 slot を要求し latent な
-  silent corruption (D-132 root cause)
-- Lesson が示唆: prose invariant が **comment-as-invariant** という anti-pattern を
-  作っている
+- `op_table.zig` carried a comment stating "X10/X11/X12 are private scratch
+  within the handler", but this was a prose-only invariant with no code-level
+  enforcement
+- regalloc used the same register slots as allocatable scratch
+- A certain combination of corpus + nested-table-op led both parties to demand
+  the same slot simultaneously, producing latent silent corruption (D-132 root
+  cause)
+- The lesson suggests that the prose invariant created an anti-pattern called
+  **comment-as-invariant**
 
-これは Phase 9 完備 substrate audit Q5 (substrate hygiene) で識別された 5 つの
-trigger の 1 つ。詳細: `.dev/phase9_completion_substrate_audit.md` §Q5。
+This is one of the 5 triggers identified in the Phase 9 completion substrate
+audit Q5 (substrate hygiene). Details: `.dev/phase9_completion_substrate_audit.md`
+§Q5.
 
 ## Decision
 
-`.claude/rules/comment_as_invariant.md` 新設 (auto-load on `src/**/*.zig`):
+Introduce `.claude/rules/comment_as_invariant.md` (auto-load on `src/**/*.zig`):
 
-> プロセに不変条件 (= "X は常に Y" / "X は private scratch" / "X は alignment N"
-> 等) を書くときは、必ず以下のいずれかと組:
+> When writing an invariant in prose (i.e. "X is always Y" / "X is private
+> scratch" / "X has alignment N", etc.), it MUST be paired with one of the
+> following:
 > (a) `comptime assert`
 > (b) runtime `std.debug.assert`
 > (c) lint script (`audit_scaffolding §G grep`)
-> (d) 削除 (= 不要なら書かない)
+> (d) deletion (= don't write it if it isn't needed)
 >
-> 違反例: `op_table.zig` の "X10/X11/X12 are private scratch" コメント (D-132 /
-> D-133 failure mode の元)。修正例: 該当の register を `abi.zig` に named
-> constant 化 + comptime disjointness check 拡張。
+> Violation example: the "X10/X11/X12 are private scratch" comment in
+> `op_table.zig` (the origin of the D-132 / D-133 failure mode). Fix example:
+> promote the relevant registers to named constants in `abi.zig` + extend the
+> comptime disjointness check.
 
 ### Enforcement
 
 - `.claude/rules/comment_as_invariant.md` (auto-load rule)
-- `audit_scaffolding §G` grep 拡張 (D-132 / D-133 検出強化)
-- §9.12-C で D-133 sweep (op_table / op_memory の hardcoded register-numeral を
-  named-constant 経由に置換)
+- Extend `audit_scaffolding §G` grep (strengthen D-132 / D-133 detection)
+- D-133 sweep in §9.12-C (replace hardcoded register-numerals in op_table /
+  op_memory with references via named constants)
 
 ## Alternatives considered
 
-> Skeleton — §9.12-pre で展開。
+> Skeleton — to be expanded in §9.12-pre.
 
 ## Consequences
 
-- **Positive**: 同 class の latent bug を予防 (= regalloc / ABI 不変条件が code-level
-  で強制される)
-- **Negative**: 既存コメントの sweep 必要 (D-133 で実施)
-- **Neutral / follow-ups**: `bug_fix_survey` 規律 (sibling sites grep) と組み合わせて
-  catch coverage を上げる
+- **Positive**: prevents latent bugs of the same class (= regalloc / ABI
+  invariants are enforced at the code level)
+- **Negative**: existing comments need to be swept (carried out in D-133)
+- **Neutral / follow-ups**: combine with the `bug_fix_survey` discipline
+  (sibling sites grep) to raise catch coverage
 
 ## References
 
 - `.dev/lessons/2026-05-16-regalloc-pool-scratch-overlap.md` (D-132 root cause)
-- D-133 (op_table sweep — §9.12-C で discharge)
-- ADR-0071 (Phase 9 substrate audit resolution; Q5 deliverable の 1 つ)
-- ADR-0018 (regalloc reserved set; 同 class の comptime check の先例)
+- D-133 (op_table sweep — discharged in §9.12-C)
+- ADR-0071 (Phase 9 substrate audit resolution; one of the Q5 deliverables)
+- ADR-0018 (regalloc reserved set; prior art for comptime checks of the same
+  class)
 - `.dev/phase9_completion_substrate_audit.md` §Q5
 
 ## Revision history

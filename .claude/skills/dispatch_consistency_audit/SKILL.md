@@ -1,69 +1,75 @@
 ---
 name: dispatch_consistency_audit
-description: Audit Q3 C 採択の dispatch substrate 整合性 — ZirOp tag count = per-op file count = 5 軸 handler 実装 count の三位一致; `wasm_level` / `wasi_level` metadata 整合; build-option DCE が期待通り効くかサンプリング確認. §9.12-B 完成後 + 定期 audit_scaffolding boundary 時に fire.
+description: Audit Q3 C adoption's dispatch substrate consistency — three-way match of ZirOp tag count = per-op file count = 5-axis handler implementation count; `wasm_level` / `wasi_level` metadata consistency; sampling check that build-option DCE works as expected. Fires after §9.12-B completion and at periodic audit_scaffolding boundaries.
 ---
 
 # dispatch_consistency_audit
 
-> **状態**: skeleton (2026-05-19)。ADR-0071 §Q3 + ADR-0073 で justify。
-> §9.12-A で initial wire-up、§9.12-B 完成後に full 機能化。
+> **Status**: skeleton (2026-05-19). Justified by ADR-0071 §Q3 + ADR-0073.
+> Initial wire-up in §9.12-A; full functionality after §9.12-B completion.
 
-## 目的
+## Purpose
 
-Q3 C 採択 (per-op file + comptime collector + build-option DCE) の **整合性**
-を自動 audit する。マスター計画書 §7.7 (Q3 C 設計整合性 audit) の skeleton。
+Automatically audit the **consistency** of Q3 C adoption (per-op file +
+comptime collector + build-option DCE). Skeleton of master plan §7.7
+(Q3 C design consistency audit).
 
-dispatch substrate は以下の 3 軸で整合していなければならない:
+The dispatch substrate must be consistent along the following 3 axes:
 
-1. **ZirOp tag count = per-op file count** — `src/ir/zir.zig` の ZirOp enum
-   tag 数と、`src/instruction/wasm_X_Y/**/*.zig` の per-op file 数が一致する
-   (placeholder ファイルは除く)
-2. **5 軸 handler 完全性** — 各 op file が `pub const handlers = .{ .validate,
-   .lower, .arm64, .x86_64, .interp }` の 5 軸全部を持つ
-3. **feature_level metadata 整合** — 各 op の `wasm_level` が spec 定義と一致
-   (Wasm 1.0 op は `.v1_0`、Wasm 2.0 SIMD op は `.v2_0` etc.)
+1. **ZirOp tag count = per-op file count** — The number of ZirOp enum
+   tags in `src/ir/zir.zig` matches the per-op file count under
+   `src/instruction/wasm_X_Y/**/*.zig` (excluding placeholder files)
+2. **5-axis handler completeness** — Each op file has all 5 axes of
+   `pub const handlers = .{ .validate, .lower, .arm64, .x86_64, .interp }`
+3. **feature_level metadata consistency** — Each op's `wasm_level` matches
+   the spec definition (Wasm 1.0 ops are `.v1_0`, Wasm 2.0 SIMD ops are
+   `.v2_0`, etc.)
 
-加えて:
+In addition:
 
-4. **build-option DCE 確認** — `-Dwasm=v1_0` build に Wasm 2.0+ シンボルが
-   含まれない (= `scripts/check_build_dce.sh` のサンプリング)
+4. **build-option DCE verification** — No Wasm 2.0+ symbols are included
+   in a `-Dwasm=v1_0` build (= sampling via `scripts/check_build_dce.sh`)
 
 ## When to invoke
 
-- §9.12-B (Q3 C 採択完成) 直後
-- 各 §9.12-* chunk close 時の sanity check
-- `audit_scaffolding` boundary mandatory invocation に統合 (§H 拡張)
-- Phase boundary (= ROADMAP §9.13 [x] flip 直前)
+- Immediately after §9.12-B (Q3 C adoption completion)
+- Sanity check at each §9.12-* chunk close
+- Integrated into `audit_scaffolding` boundary mandatory invocation
+  (§H extension)
+- Phase boundary (= just before ROADMAP §9.13 [x] flip)
 
-ユーザーが手動で `/dispatch_consistency_audit` 起動も可。
+Users may also manually invoke `/dispatch_consistency_audit`.
 
 ## Procedure
 
-> §9.12-B 完成後に実装。skeleton stage の現在は概要のみ。
+> Implementation after §9.12-B completion. Currently in skeleton stage,
+> only the overview is provided.
 
-1. ZirOp tag enumeration 取得 (`zig build` + comptime export 経由)
-2. `src/instruction/wasm_X_Y/**/*.zig` の populated file (≥ 30 LOC 等 heuristic)
-   をリストアップ
+1. Retrieve ZirOp tag enumeration (via `zig build` + comptime export)
+2. List populated files (≥ 30 LOC and similar heuristics) under
+   `src/instruction/wasm_X_Y/**/*.zig`
 3. Set diff: tag set vs file set; missing report
-4. 各 file の `pub const handlers` field 確認 (5 軸; 欠落 report)
-5. 各 file の `wasm_level` 値を spec 対応表 (`.dev/wasm_3_0_zirop_mapping.md`
-   等) と照合 (drift report)
-6. `bash scripts/check_build_dce.sh --sample 5` 実行; PASS 確認
-7. 上記 4 check の結果を `private/dispatch_audit-YYYY-MM-DD.md` に出力
+4. Verify each file's `pub const handlers` field (5 axes; report missing)
+5. Cross-check each file's `wasm_level` value against the spec
+   correspondence table (e.g. `.dev/wasm_3_0_zirop_mapping.md`)
+   (drift report)
+6. Run `bash scripts/check_build_dce.sh --sample 5`; verify PASS
+7. Write the results of the 4 checks above to
+   `private/dispatch_audit-YYYY-MM-DD.md`
 
 ## Severity
 
-- ZirOp tag に対応 file 無し → `block`
-- 5 軸の handler 欠落 → `block`
-- feature_level metadata と spec 不一致 → `block`
-- build-option DCE サンプリング fail → `block`
+- No corresponding file for a ZirOp tag → `block`
+- Missing handler on any of the 5 axes → `block`
+- feature_level metadata mismatch with spec → `block`
+- build-option DCE sampling fail → `block`
 
-すべて `block`。Q3 C 採用は dispatch consistency が前提だから。
+All `block`. Because Q3 C adoption presupposes dispatch consistency.
 
 ## Related
 
-- ADR-0071 §Q3 (Phase 9 完備 substrate audit resolution)
+- ADR-0071 §Q3 (Phase 9 complete substrate audit resolution)
 - ADR-0073 (build-option DCE substrate)
-- マスター計画書 §7.7
-- `scripts/check_build_dce.sh` (§9.12-A で skeleton)
-- `audit_scaffolding §H` (§9.12-A で新規)
+- Master plan §7.7
+- `scripts/check_build_dce.sh` (skeleton in §9.12-A)
+- `audit_scaffolding §H` (new in §9.12-A)
