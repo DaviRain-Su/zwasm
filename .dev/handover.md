@@ -42,14 +42,19 @@ with γ-4 relax PERMANENT.
   per-fixup-class arm64 trap stubs (1=generic, 2=cind
   bounds, 3=cind sig). `printCallTrap` emits `kind=N`.
 
-### Next-session active task — D-145 x86_64 D-126 mirror gap
+### Next-session active task
 
-Cycle 9 landed Class B (i32,f64)/(f64,i32) helpers (Mac
-25316/0; ubuntu re-baseline surfaced 24 pre-existing
-table_init/copy fails — D-145). Highest priority: discharge
-D-145 (audit x86_64/op_table.zig mirror code, extend
-trap_kind to x86_64 trap stubs). After D-145: §9.9-II Class C
-or §9.9-IV per ADR-0069 chunked plan.
+D-145 closed cycle 10 — x86_64 `emitTableCopy` same-table
+branch was missing typeidx mirror (only mirrored funcptrs;
+arm64 sibling already mirrored both). Fix added 4 instrs
+(RAX = typeidx_base reload + RDI = u32 scratch) inside the
+existing JE-skip-fp guard, both BWD and FWD loops.
+Both hosts now bit-identical at **25316/0/697**.
+
+Next candidates: §9.9-II Class C (D-094/D-140 indirect-
+result-pointer ABI per ADR-0069); §9.9-II Class B residual
+`(f32, f64)` shape (1 line: type-all-f32-f64); §9.9-IV
+windowsmini reconcile.
 
 ### Discipline reminders
 
@@ -58,9 +63,7 @@ windowsmini batch at Phase 9 close.
 
 ### Outstanding `now` debts
 
-D-079; D-133; **D-145** (x86_64 D-126 mirror gap surfaced
-cycle 9 — 24 ubuntu table_init/table_copy fails; cycle-4
-closure claim of ubuntu 24034/0 was mis-measured).
+D-079; D-133. (D-145 closed cycle 10.)
 
 ## Sandbox + References
 
