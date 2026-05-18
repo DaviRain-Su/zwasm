@@ -40,7 +40,7 @@ assert_return as-compare-operands () -> i32:0
 assert_return as-mixed-operands () -> i32:27
 assert_return break-bare () -> i32:19
 assert_return break-value () -> i32:18
-skip-impl multi-result break-multi-value
+assert_return break-multi-value () -> i32:18 i32:4294967278 i64:18
 assert_return break-repeated () -> i32:18
 assert_return break-inner () -> i32:15
 assert_return param () -> i32:3

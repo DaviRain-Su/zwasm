@@ -763,6 +763,30 @@ pub const FuncRet_i32i32 = extern struct {
     r1: u64,
 };
 
+/// Multi-result return for `(i32, i32, i32)`. Class C MEMORY-class
+/// per ADR-0069 §Phase 2 + AAPCS64 §6.8.2 / SysV §3.2.3 — struct
+/// > 16 B (3 × 8 = 24 B) routes via the indirect-result-pointer
+/// hidden first-arg (X8 on arm64; R11 on x86_64 per ADR-0026
+/// 2026-05-18 amend zwasm-internal convention). Each field u64-
+/// padded per the Class A convention; zwasm JIT writes i32→W0..W2
+/// (arm64) / EAX/ECX/EDX-via-buffer (x86_64) zero-extended.
+pub const FuncRet_i32i32i32 = extern struct {
+    r0: u64,
+    r1: u64,
+    r2: u64,
+};
+
+/// Multi-result return for `(i32, i32, i64)`. Class C MEMORY-class.
+/// Same 24 B u64-padded layout as `FuncRet_i32i32i32`; the JIT
+/// epilogue writes i32→W-form (low 32 of slot 0/1) + i64→full 8 B
+/// (slot 2). Spec corpus: `break-multi-value` family in block /
+/// loop / if (also (i32) → (i32,i32,i64) variant in if.wast).
+pub const FuncRet_i32i32i64 = extern struct {
+    r0: u64,
+    r1: u64,
+    r2: u64,
+};
+
 /// Multi-result return for `(i32, f64)`. Class B mixed int+float
 /// per ADR-0069.
 ///
@@ -879,6 +903,129 @@ pub fn callI32i32NoArgs(
 ) Error!FuncRet_i32i32 {
     const Fn = *const fn (*const JitRuntime) callconv(.c) FuncRet_i32i32;
     return invokeAndCheck(rt, FuncRet_i32i32, module.entry(func_idx, Fn), .{});
+}
+
+/// `() -> (i32, i32, i32)` — Class C MEMORY-class per ADR-0069
+/// §Phase 2.
+///
+/// On arm64: Zig's `extern struct` of 24 B routes via AAPCS64
+/// §6.8.2 indirect-result-pointer in X8. The JIT-emitted callee
+/// captures X8 in its prologue, writes results via `[X8, #(i*8)]`
+/// in the epilogue. Standard `callconv(.c)` matches the JIT
+/// emit shape — no thunk needed.
+///
+/// On x86_64 SysV: Zig's `callconv(.c)` would emit `RDI=&buffer,
+/// RSI=runtime_ptr` per SysV §3.2.3, but zwasm's internal JIT
+/// convention is `R11=&buffer, RDI=runtime_ptr` per ADR-0026
+/// 2026-05-18 amend (RDI stays as runtime_ptr to avoid an arg-
+/// reg shift across Class A/B/C function emit paths). Inline-asm
+/// thunk re-pins RDI/R11 via input constraints before CALL.
+///
+/// Win64: NOT YET SUPPORTED — Win64 indirect-result uses RCX-as-
+/// hidden-arg per Microsoft x64; deferred to §9.13-0 per
+/// ADR-0049 + ADR-0056 + ADR-0065 amendments.
+pub fn callI32i32i32NoArgs(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+) Error!FuncRet_i32i32i32 {
+    rt.trap_flag = 0;
+    if (comptime builtin.target.cpu.arch == .aarch64) {
+        const Fn = *const fn (*const JitRuntime) callconv(.c) FuncRet_i32i32i32;
+        const result = module.entry(func_idx, Fn)(rt);
+        if (rt.trap_flag != 0) return Error.Trap;
+        return result;
+    } else if (comptime builtin.target.cpu.arch == .x86_64 and builtin.target.os.tag != .windows) {
+        const Fn = *const fn (rt: *const JitRuntime) callconv(.c) void;
+        const f = module.entry(func_idx, Fn);
+        var r: FuncRet_i32i32i32 = undefined;
+        asm volatile (
+            \\ callq *%[callee]
+            :
+            : [callee] "r" (f),
+              [rt_arg] "{rdi}" (rt),
+              [buf] "{r11}" (&r),
+            : x86_64_sysv_call_clobbers);
+        if (rt.trap_flag != 0) return Error.Trap;
+        return r;
+    } else {
+        return Error.UnsupportedEntrySignature;
+    }
+}
+
+/// `() -> (i32, i32, i64)` — Class C MEMORY-class per ADR-0069
+/// §Phase 2. Spec corpus: `break-multi-value` in block.wast +
+/// loop.wast.
+///
+/// Layout + ABI identical to `callI32i32i32NoArgs`; only the third
+/// result's width differs (W-form vs X-form on arm64 / 32 vs 64
+/// of buffer slot 2 on both arches). Per the u64-padded
+/// `FuncRet_i32i32i64` layout, each slot is 8 B regardless.
+pub fn callI32i32i64NoArgs(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+) Error!FuncRet_i32i32i64 {
+    rt.trap_flag = 0;
+    if (comptime builtin.target.cpu.arch == .aarch64) {
+        const Fn = *const fn (*const JitRuntime) callconv(.c) FuncRet_i32i32i64;
+        const result = module.entry(func_idx, Fn)(rt);
+        if (rt.trap_flag != 0) return Error.Trap;
+        return result;
+    } else if (comptime builtin.target.cpu.arch == .x86_64 and builtin.target.os.tag != .windows) {
+        const Fn = *const fn (rt: *const JitRuntime) callconv(.c) void;
+        const f = module.entry(func_idx, Fn);
+        var r: FuncRet_i32i32i64 = undefined;
+        asm volatile (
+            \\ callq *%[callee]
+            :
+            : [callee] "r" (f),
+              [rt_arg] "{rdi}" (rt),
+              [buf] "{r11}" (&r),
+            : x86_64_sysv_call_clobbers);
+        if (rt.trap_flag != 0) return Error.Trap;
+        return r;
+    } else {
+        return Error.UnsupportedEntrySignature;
+    }
+}
+
+/// `(i32) -> (i32, i32, i64)` — Class C MEMORY-class with one
+/// user arg. Spec corpus: `break-multi-value` in if.wast (two
+/// fixture occurrences).
+///
+/// arg0 (i32) goes in arm64's X1 / x86_64-SysV's RSI per zwasm
+/// calling convention (ADR-0017). The x86_64 thunk pins RSI via
+/// input constraint, layered on top of the RDI/R11 pinning.
+pub fn callI32i32i64_i32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u32,
+) Error!FuncRet_i32i32i64 {
+    rt.trap_flag = 0;
+    if (comptime builtin.target.cpu.arch == .aarch64) {
+        const Fn = *const fn (*const JitRuntime, u32) callconv(.c) FuncRet_i32i32i64;
+        const result = module.entry(func_idx, Fn)(rt, a0);
+        if (rt.trap_flag != 0) return Error.Trap;
+        return result;
+    } else if (comptime builtin.target.cpu.arch == .x86_64 and builtin.target.os.tag != .windows) {
+        const Fn = *const fn (rt: *const JitRuntime, a0: u32) callconv(.c) void;
+        const f = module.entry(func_idx, Fn);
+        var r: FuncRet_i32i32i64 = undefined;
+        asm volatile (
+            \\ callq *%[callee]
+            :
+            : [callee] "r" (f),
+              [rt_arg] "{rdi}" (rt),
+              [arg0] "{rsi}" (a0),
+              [buf] "{r11}" (&r),
+            : x86_64_sysv_call_clobbers);
+        if (rt.trap_flag != 0) return Error.Trap;
+        return r;
+    } else {
+        return Error.UnsupportedEntrySignature;
+    }
 }
 
 /// `(i32) -> (i32, i32)` — if.wast `multi`, etc.

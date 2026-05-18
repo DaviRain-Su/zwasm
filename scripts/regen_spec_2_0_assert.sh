@@ -544,6 +544,23 @@ for c in d['commands']:
                 # mixed-eightbyte SSE struct return). arm64
                 # inline-asm thunk via FMOV D0/D1.
                 ((), ('f64', 'f32')),
+                # Phase 9 Cat II chunk (b)-e-4 — Class C MEMORY-
+                # class 3-int-result shapes. ADR-0069 §Phase 2.
+                # arm64: X8 hidden-result-ptr (AAPCS64 §6.8.2);
+                # x86_64 SysV: R11 zwasm-internal hidden-result-ptr
+                # (ADR-0026 2026-05-18 amend; entry helpers thunk
+                # Zig's RDI/RSI convention into RDI/R11). Spec
+                # fixtures: value-i32-i32-i32 / return-i32-i32-i32
+                # / break-i32-i32-i32 (func.wast) + 2×
+                # break-multi-value (block/loop). The if.wast
+                # (i32) → (i32, i32, i64) shape (2 fixtures)
+                # remains skip-impl pending D-147 — the if-arm
+                # merge truncates i64.const-with-high-bits-set
+                # to W-form somewhere along the lowering path
+                # (zero-extended i32). Surfaces only with
+                # negative i64 const in if-else merge.
+                ((), ('i32', 'i32', 'i32')),
+                ((), ('i32', 'i32', 'i64')),
             }
             if (arg_kinds, result_kinds) not in supported_multi:
                 lines.append(f'skip-impl multi-result {a["field"]}')

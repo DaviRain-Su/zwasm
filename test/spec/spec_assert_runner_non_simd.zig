@@ -787,6 +787,66 @@ fn dispatchMultiResult(
         }
         return true;
     }
+    // Class C MEMORY-class 3-int-result shapes (chunk (b)-e-4
+    // per ADR-0069 §Phase 2): `() → (i32, i32, i32)` +
+    // `() → (i32, i32, i64)` + `(i32) → (i32, i32, i64)`.
+    if (args.len == 0 and
+        n_rtoks == 3 and std.mem.startsWith(u8, rtoks[0], "i32:") and std.mem.startsWith(u8, rtoks[1], "i32:") and std.mem.startsWith(u8, rtoks[2], "i32:"))
+    {
+        const exp_r0 = base.parseI32Token(rtoks[0][4..]) catch return failBadResult(stdout, name, rtoks[0]);
+        const exp_r1 = base.parseI32Token(rtoks[1][4..]) catch return failBadResult(stdout, name, rtoks[1]);
+        const exp_r2 = base.parseI32Token(rtoks[2][4..]) catch return failBadResult(stdout, name, rtoks[2]);
+        const got = entry.callI32i32i32NoArgs(compiled.module, func_idx, rt) catch |err| {
+            try base.printCallTrap(rt, name, fn_name, args_s, err, stdout);
+            return false;
+        };
+        const got_r0: u32 = @intCast(got.r0 & 0xffffffff);
+        const got_r1: u32 = @intCast(got.r1 & 0xffffffff);
+        const got_r2: u32 = @intCast(got.r2 & 0xffffffff);
+        if (got_r0 != exp_r0 or got_r1 != exp_r1 or got_r2 != exp_r2) {
+            try stdout.print("FAIL  {s}: {s}({s}) → got (i32:{d}, i32:{d}, i32:{d}), expected (i32:{d}, i32:{d}, i32:{d})\n", .{ name, fn_name, args_s, got_r0, got_r1, got_r2, exp_r0, exp_r1, exp_r2 });
+            return false;
+        }
+        return true;
+    }
+    if (args.len == 0 and
+        n_rtoks == 3 and std.mem.startsWith(u8, rtoks[0], "i32:") and std.mem.startsWith(u8, rtoks[1], "i32:") and std.mem.startsWith(u8, rtoks[2], "i64:"))
+    {
+        const exp_r0 = base.parseI32Token(rtoks[0][4..]) catch return failBadResult(stdout, name, rtoks[0]);
+        const exp_r1 = base.parseI32Token(rtoks[1][4..]) catch return failBadResult(stdout, name, rtoks[1]);
+        const exp_r2 = base.parseI64Token(rtoks[2][4..]) catch return failBadResult(stdout, name, rtoks[2]);
+        const got = entry.callI32i32i64NoArgs(compiled.module, func_idx, rt) catch |err| {
+            try base.printCallTrap(rt, name, fn_name, args_s, err, stdout);
+            return false;
+        };
+        const got_r0: u32 = @intCast(got.r0 & 0xffffffff);
+        const got_r1: u32 = @intCast(got.r1 & 0xffffffff);
+        const got_r2: u64 = got.r2;
+        if (got_r0 != exp_r0 or got_r1 != exp_r1 or got_r2 != exp_r2) {
+            try stdout.print("FAIL  {s}: {s}({s}) → got (i32:{d}, i32:{d}, i64:{d}), expected (i32:{d}, i32:{d}, i64:{d})\n", .{ name, fn_name, args_s, got_r0, got_r1, got_r2, exp_r0, exp_r1, exp_r2 });
+            return false;
+        }
+        return true;
+    }
+    if (args.len == 1 and args[0] == .i32 and
+        n_rtoks == 3 and std.mem.startsWith(u8, rtoks[0], "i32:") and std.mem.startsWith(u8, rtoks[1], "i32:") and std.mem.startsWith(u8, rtoks[2], "i64:"))
+    {
+        const exp_r0 = base.parseI32Token(rtoks[0][4..]) catch return failBadResult(stdout, name, rtoks[0]);
+        const exp_r1 = base.parseI32Token(rtoks[1][4..]) catch return failBadResult(stdout, name, rtoks[1]);
+        const exp_r2 = base.parseI64Token(rtoks[2][4..]) catch return failBadResult(stdout, name, rtoks[2]);
+        const got = entry.callI32i32i64_i32(compiled.module, func_idx, rt, args[0].i32) catch |err| {
+            try base.printCallTrap(rt, name, fn_name, args_s, err, stdout);
+            return false;
+        };
+        const got_r0: u32 = @intCast(got.r0 & 0xffffffff);
+        const got_r1: u32 = @intCast(got.r1 & 0xffffffff);
+        const got_r2: u64 = got.r2;
+        if (got_r0 != exp_r0 or got_r1 != exp_r1 or got_r2 != exp_r2) {
+            try stdout.print("FAIL  {s}: {s}({s}) → got (i32:{d}, i32:{d}, i64:{d}), expected (i32:{d}, i32:{d}, i64:{d})\n", .{ name, fn_name, args_s, got_r0, got_r1, got_r2, exp_r0, exp_r1, exp_r2 });
+            return false;
+        }
+        return true;
+    }
     try stdout.print("FAIL  {s}: multi-result unsupported for {s}({s}) -> {s}\n", .{ name, fn_name, args_s, results_s });
     return false;
 }
