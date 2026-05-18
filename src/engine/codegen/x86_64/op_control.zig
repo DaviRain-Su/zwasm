@@ -223,10 +223,12 @@ pub fn emitBr(
     func: *const ZirFunc,
     frame_bytes: u32,
     uses_runtime_ptr: bool,
+    return_is_memory_class: bool,
+    indirect_result_slot_neg_off: u32,
     depth: u32,
 ) Error!void {
     if (depth == labels.items.len) {
-        try emitFunctionReturn(allocator, buf, alloc, pushed_vregs, spill_base_off, func, frame_bytes, uses_runtime_ptr);
+        try emitFunctionReturn(allocator, buf, alloc, pushed_vregs, spill_base_off, func, frame_bytes, uses_runtime_ptr, return_is_memory_class, indirect_result_slot_neg_off);
         return;
     }
     if (depth > labels.items.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:78", 0);
@@ -280,9 +282,42 @@ pub fn marshalReturnRegs(
     pushed_vregs: *std.ArrayList(u32),
     spill_base_off: u32,
     func: *const ZirFunc,
+    return_is_memory_class: bool,
+    indirect_result_slot_neg_off: u32,
 ) Error!void {
     if (func.sig.results.len == 0) return;
     if (pushed_vregs.items.len < func.sig.results.len) return;
+    // ADR-0026 2026-05-18 amend / ADR-0069 §Phase 2 chunk (b)-e-3:
+    // MEMORY-class returns — caller passed the hidden indirect-
+    // result-pointer in R11; the prologue captured it to
+    // `[RBP - indirect_result_slot_neg_off]`. Load it back into
+    // RAX (caller-saved scratch + SysV §3.2.3 compliance bonus —
+    // RAX returns the buffer address on MEMORY-class) and write
+    // each result to `[RAX + i*8]`. R10/R11 stay reserved as
+    // `gprLoadSpilled` spill stage; RAX is outside that cohort.
+    // f32/f64/v128 results in MEMORY-class are deferred — no spec
+    // fixture in the 3-int-result cohort exercises them; Phase 3
+    // large-sig 16-result extension adds mixed-class support.
+    if (return_is_memory_class) {
+        const slot_disp: i32 = -@as(i32, @intCast(indirect_result_slot_neg_off));
+        try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .rbp, slot_disp).slice());
+        const result_base = pushed_vregs.items.len - func.sig.results.len;
+        var byte_off: i32 = 0;
+        for (func.sig.results, 0..) |result_kind, i| {
+            const src_vreg = pushed_vregs.items[result_base + i];
+            if (src_vreg < alloc.slots.len) {
+                switch (result_kind) {
+                    .i32, .i64, .funcref, .externref => {
+                        const src = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_vreg, 0);
+                        try buf.appendSlice(allocator, inst.encStoreR64MemDisp32(src, .rax, byte_off).slice());
+                    },
+                    .f32, .f64, .v128 => return Error.UnsupportedOp,
+                }
+            }
+            byte_off += 8;
+        }
+        return;
+    }
     const gpr_result_regs = [_]abi.Gpr{ .rax, .rdx };
     const xmm_result_regs = [_]abi.Xmm{ .xmm0, .xmm1 };
     const gpr_cap: u8 = switch (abi.current_cc) {
@@ -380,8 +415,10 @@ pub fn emitFunctionReturn(
     func: *const ZirFunc,
     frame_bytes: u32,
     uses_runtime_ptr: bool,
+    return_is_memory_class: bool,
+    indirect_result_slot_neg_off: u32,
 ) Error!void {
-    try marshalReturnRegs(allocator, buf, alloc, pushed_vregs, spill_base_off, func);
+    try marshalReturnRegs(allocator, buf, alloc, pushed_vregs, spill_base_off, func, return_is_memory_class, indirect_result_slot_neg_off);
     if (frame_bytes > 0) {
         // Inline imm8/imm32 SUB-form selection mirroring emit.zig's
         // `rspAdd` helper. Kept inline here to avoid a Zone-internal
@@ -413,6 +450,8 @@ fn emitBrTableJmp(
     func: *const ZirFunc,
     frame_bytes: u32,
     uses_runtime_ptr: bool,
+    return_is_memory_class: bool,
+    indirect_result_slot_neg_off: u32,
     depth: u32,
 ) Error!void {
     // d-23 (D-107 discharge): `br_table 0` at function scope (= no
@@ -422,7 +461,7 @@ fn emitBrTableJmp(
     // pre-d-23 rejected it. unwind.wast's `func-unwind-by-br_table`
     // shape is the surfacing fixture.
     if (depth == labels.items.len) {
-        try emitFunctionReturn(allocator, buf, alloc, pushed_vregs, spill_base_off, func, frame_bytes, uses_runtime_ptr);
+        try emitFunctionReturn(allocator, buf, alloc, pushed_vregs, spill_base_off, func, frame_bytes, uses_runtime_ptr, return_is_memory_class, indirect_result_slot_neg_off);
         return;
     }
     if (depth > labels.items.len) return types.rejectUnsupported("src/engine/codegen/x86_64/op_control.zig:104", 0);
@@ -485,6 +524,8 @@ pub fn emitBrTable(
     spill_base_off: u32,
     frame_bytes: u32,
     uses_runtime_ptr: bool,
+    return_is_memory_class: bool,
+    indirect_result_slot_neg_off: u32,
     count: u32,
     start: u32,
 ) Error!void {
@@ -519,7 +560,7 @@ pub fn emitBrTable(
         } else {
             try buf.appendSlice(allocator, inst.encJccRel32(.ne, 0).slice());
         }
-        try emitBrTableJmp(allocator, buf, alloc, pushed_vregs, labels, spill_base_off, func, frame_bytes, uses_runtime_ptr, targets[start + i]);
+        try emitBrTableJmp(allocator, buf, alloc, pushed_vregs, labels, spill_base_off, func, frame_bytes, uses_runtime_ptr, return_is_memory_class, indirect_result_slot_neg_off, targets[start + i]);
         const after: usize = buf.items.len;
         const disp: usize = after - (jne_at + jne_size);
         if (i <= 127) {
@@ -531,7 +572,7 @@ pub fn emitBrTable(
             std.mem.writeInt(u32, buf.items[jne_at + 2 ..][0..4], disp32, .little);
         }
     }
-    try emitBrTableJmp(allocator, buf, alloc, pushed_vregs, labels, spill_base_off, func, frame_bytes, uses_runtime_ptr, targets[start + count]);
+    try emitBrTableJmp(allocator, buf, alloc, pushed_vregs, labels, spill_base_off, func, frame_bytes, uses_runtime_ptr, return_is_memory_class, indirect_result_slot_neg_off, targets[start + count]);
 }
 
 /// Wasm spec §3.4.5 (br_if N) — pop cond, branch to label at
@@ -553,6 +594,8 @@ pub fn emitBrIf(
     func: *const ZirFunc,
     frame_bytes: u32,
     uses_runtime_ptr: bool,
+    return_is_memory_class: bool,
+    indirect_result_slot_neg_off: u32,
     depth: u32,
 ) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
@@ -567,7 +610,7 @@ pub fn emitBrIf(
         try buf.appendSlice(allocator, inst.encTestRR(.d, cond_r, cond_r).slice());
         const je_at: u32 = @intCast(buf.items.len);
         try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
-        try emitFunctionReturn(allocator, buf, alloc, pushed_vregs, spill_base_off, func, frame_bytes, uses_runtime_ptr);
+        try emitFunctionReturn(allocator, buf, alloc, pushed_vregs, spill_base_off, func, frame_bytes, uses_runtime_ptr, return_is_memory_class, indirect_result_slot_neg_off);
         // Patch the JE rel32 to land on the byte AFTER the
         // emitFunctionReturn block.
         const skip_byte: u32 = @intCast(buf.items.len);

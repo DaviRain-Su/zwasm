@@ -82,6 +82,30 @@ const CallFixup = types.CallFixup;
 /// **Scope**: i32 args + i32 / void return only. f32/f64/i64
 /// args + return surface as UnsupportedOp (lifted alongside
 /// 7.7-fp / globals i64 chunks).
+/// ADR-0069 §Phase 2 chunk (b)-e-3 SysV-only helper. Mirror of
+/// arm64's `computeCallOverflowBytes`: returns the size of THIS
+/// call's overflow-args region at the bottom of the outgoing-args
+/// footprint, so the MEMORY-class return buffer can be placed
+/// immediately above. SysV §3.2.3 only — Win64 MEMORY-class is
+/// deferred per ADR-0049 + ADR-0056 + ADR-0065. v128 args
+/// excluded (mirrors `computeOutgoingMaxBytes` SysV branch's
+/// scope; v128 overflow into outgoing args is rare and adds
+/// 16 B alignment complications).
+fn computeSysvCallOverflowBytes(callee_sig: zir.FuncType) u32 {
+    var n_int: u32 = 0;
+    var n_fp: u32 = 0;
+    for (callee_sig.params) |p| {
+        switch (p) {
+            .i32, .i64, .funcref, .externref => n_int += 1,
+            .f32, .f64 => n_fp += 1,
+            .v128 => {},
+        }
+    }
+    const n_int_overflow: u32 = if (n_int > 5) n_int - 5 else 0;
+    const n_fp_overflow: u32 = if (n_fp > 8) n_fp - 8 else 0;
+    return (n_int_overflow + n_fp_overflow) * 8;
+}
+
 pub fn emitCall(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
@@ -99,6 +123,23 @@ pub fn emitCall(
     const callee_sig = func_sigs[callee_idx];
 
     try marshalCallArgs(allocator, buf, alloc, pushed_vregs, spill_base_off, callee_sig);
+
+    // ADR-0026 2026-05-18 amend / ADR-0069 §Phase 2 chunk (b)-e-3:
+    // when callee returns MEMORY-class (SysV §3.2.3; v2 trigger
+    // `results.len > 2`), LEA the per-call return buffer's
+    // address into R11 just before CALL. Emitted after
+    // `marshalCallArgs` because the arg shuffle may stage spilled
+    // values through R10/R11; the LEA happens after the last
+    // stage use. Buffer lives at the top of THIS call's outgoing-
+    // args footprint (= `[RSP + per_call_overflow_bytes]`).
+    // Win64 deferred to §9.13-0 — MEMORY-class on Win64 surfaces
+    // as UnsupportedOp from the callee's epilogue branch (no
+    // caller-side emit here).
+    const memory_class_return: bool = callee_sig.results.len > 2 and abi.current_cc == .sysv;
+    const return_buffer_off: u32 = if (memory_class_return) computeSysvCallOverflowBytes(callee_sig) else 0;
+    if (memory_class_return) {
+        try buf.appendSlice(allocator, inst.encLeaR64BaseRspDisp32(.r11, @intCast(return_buffer_off)).slice());
+    }
 
     if (callee_idx < num_imports) {
         // Chunk 7.9-d: host-import dispatch via JitRuntime.
@@ -125,7 +166,7 @@ pub fn emitCall(
         try buf.appendSlice(allocator, inst.encCallReg(.rax).slice());
         try emitShadowFree(allocator, buf, outgoing_max_bytes);
 
-        try captureCallResult(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, callee_sig);
+        try captureCallResult(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, callee_sig, memory_class_return, return_buffer_off);
         return;
     }
 
@@ -158,7 +199,7 @@ pub fn emitCall(
 
     try emitShadowFree(allocator, buf, outgoing_max_bytes);
 
-    try captureCallResult(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, callee_sig);
+    try captureCallResult(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, callee_sig, memory_class_return, return_buffer_off);
 }
 
 /// Reserve Win64 shadow space below the upcoming CALL. No-op when
@@ -357,6 +398,18 @@ pub fn emitCallIndirect(
         try buf.appendSlice(allocator, inst.encMovR64FromBaseIdxLsl3(.rax, .rax, idx_r).slice());
     }
 
+    // ADR-0026 2026-05-18 amend / ADR-0069 §Phase 2 chunk (b)-e-3:
+    // mirror of `emitCall` — for MEMORY-class callees, LEA the
+    // return buffer's address into R11 before transferring
+    // control. Placed AFTER the bounds/sig/funcptr load (which
+    // uses RAX as scratch) but BEFORE the `entry_arg0` restore
+    // + CALL.
+    const memory_class_return: bool = callee_sig.results.len > 2 and abi.current_cc == .sysv;
+    const return_buffer_off: u32 = if (memory_class_return) computeSysvCallOverflowBytes(callee_sig) else 0;
+    if (memory_class_return) {
+        try buf.appendSlice(allocator, inst.encLeaR64BaseRspDisp32(.r11, @intCast(return_buffer_off)).slice());
+    }
+
     // Restore <entry_arg0> = runtime_ptr (callee's prologue reads
     // it as its inbound JitRuntime ptr per ADR-0026: RDI on SysV,
     // RCX on Win64).
@@ -371,7 +424,7 @@ pub fn emitCallIndirect(
 
     try emitShadowFree(allocator, buf, outgoing_max_bytes);
 
-    try captureCallResult(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, callee_sig);
+    try captureCallResult(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, callee_sig, memory_class_return, return_buffer_off);
 }
 
 /// Marshal call arguments per SysV x86_64 §3.2.3 / Microsoft x64
@@ -603,8 +656,43 @@ pub fn captureCallResult(
     next_vreg: *u32,
     spill_base_off: u32,
     callee_sig: zir.FuncType,
+    memory_class: bool,
+    buffer_off: u32,
 ) Error!void {
     if (callee_sig.results.len == 0) return;
+
+    // ADR-0026 2026-05-18 amend / ADR-0069 §Phase 2 chunk (b)-e-3:
+    // MEMORY-class capture — callee wrote each result via the
+    // caller-supplied R11 buffer pointer. Read each slot back
+    // from `[RSP + buffer_off + i*8]` into the next result vreg
+    // (direct MOV-to-home when in-pool; LDR-then-spill-store
+    // via R10 stage when spilled). f32/f64/v128 deferred (no
+    // spec fixture in 3-int-result cohort).
+    if (memory_class) {
+        var byte_off: u32 = 0;
+        for (callee_sig.results) |result_kind| {
+            const result = next_vreg.*;
+            next_vreg.* += 1;
+            if (result >= alloc.slots.len) return Error.AllocationMissing;
+            const abs_off: i32 = @intCast(buffer_off + byte_off);
+            switch (result_kind) {
+                .i32 => {
+                    const dst = try gpr.gprDefSpilled(alloc, result, 0);
+                    try buf.appendSlice(allocator, inst.encMovR32FromMemDisp32(dst, .rsp, abs_off).slice());
+                    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result, 0);
+                },
+                .i64, .funcref, .externref => {
+                    const dst = try gpr.gprDefSpilled(alloc, result, 0);
+                    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(dst, .rsp, abs_off).slice());
+                    try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result, 0);
+                },
+                .f32, .f64, .v128 => return Error.UnsupportedOp,
+            }
+            byte_off += 8;
+            try pushed_vregs.append(allocator, result);
+        }
+        return;
+    }
 
     // D-093 (d-11) — multi-result capture. SysV §3.2.3: GPR results
     // in RAX, RDX (≤2); FP / SIMD results in XMM0, XMM1 (≤2).

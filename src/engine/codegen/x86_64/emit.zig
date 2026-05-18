@@ -152,7 +152,21 @@ fn computeOutgoingMaxBytes(
                 const n_int_overflow: u32 = if (n_int > 5) n_int - 5 else 0;
                 const n_fp_total = n_fp + 2 * n_v128;
                 const n_fp_overflow: u32 = if (n_fp_total > 8) n_fp_total - 8 else 0;
-                break :blk (n_int_overflow + n_fp_overflow) * 8;
+                const overflow_bytes: u32 = (n_int_overflow + n_fp_overflow) * 8;
+                // ADR-0069 §Phase 2 chunk (b)-e-3 + ADR-0026
+                // 2026-05-18 amend: MEMORY-class return reserves
+                // an N×8 B buffer slot at the top of THIS call's
+                // outgoing-args footprint. The caller LEAs R11
+                // = &buffer immediately before CALL; the callee
+                // captures R11 into its own frame slot. Mirrors
+                // arm64's `indirect_result_slot_bytes` accounting.
+                // Win64 deferred (RCX hidden-arg shape stays on
+                // §9.13-0 sweep).
+                const return_buf_bytes: u32 = if (callee_sig.results.len > 2)
+                    @as(u32, @intCast(callee_sig.results.len)) * 8
+                else
+                    0;
+                break :blk overflow_bytes + return_buf_bytes;
             },
             .win64 => blk: {
                 const n_int_w = n_int + n_v128;
@@ -253,7 +267,24 @@ pub fn compile(
     const locals_bytes: u32 = layout.total_bytes;
     const spill_bytes: u32 = alloc.spillBytes();
     const r15_save_bytes: u32 = if (uses_runtime_ptr) 8 else 0;
+    // ADR-0026 2026-05-18 amend / ADR-0069 §Phase 2 chunk (b)-e-3:
+    // MEMORY-class returns (struct > 16 B per SysV §3.2.3; v2
+    // trigger = `sig.results.len > 2`) receive the hidden
+    // indirect-result-pointer in R11 at entry (zwasm-internal
+    // convention — RDI stays as runtime_ptr per ADR-0026). The
+    // prologue captures R11 into an 8-byte frame slot positioned
+    // BELOW the spill region; the epilogue (`marshalReturnRegs`)
+    // loads it back into RAX (caller-saved scratch, also SysV
+    // §3.2.3 RAX=&buffer compliance bonus) and writes each
+    // result to `[RAX, #(i*8)]`. Win64 deferred to §9.13-0.
+    const return_is_memory_class: bool = func.sig.results.len > 2 and abi.current_cc == .sysv;
+    const indirect_result_slot_bytes: u32 = if (return_is_memory_class) 8 else 0;
     const spill_base_off: u32 = locals_bytes + r15_save_bytes + 8;
+    // R11-capture slot lives BELOW the spill region (deeper into
+    // the frame, larger RBP-negative offset). Slot anchored at
+    // `[RBP - (spill_base_off + spill_bytes)]`; the +8 below
+    // gives the slot its own 8-byte cell.
+    const indirect_result_slot_neg_off: u32 = spill_base_off + spill_bytes;
     // §9.7 / 7.10-f: outgoing-args region pre-allocated at the
     // BOTTOM of the frame (`[RSP, #0]` upward). For SysV this is
     // pure overflow bytes; for Win64 it includes the 32-byte
@@ -271,7 +302,7 @@ pub fn compile(
     // pushed return address lands on local 0 at [RBP-16]. Win64's
     // 32-byte shadow_space inflates the frame enough that it hid
     // this bug until OrbStack runs (= Linux x86_64 SysV).
-    const frame_unaligned: u32 = outgoing_max_bytes + locals_bytes + spill_bytes + r15_save_bytes;
+    const frame_unaligned: u32 = outgoing_max_bytes + locals_bytes + spill_bytes + indirect_result_slot_bytes + r15_save_bytes;
     const frame_bytes: u32 = if (uses_runtime_ptr)
         ((frame_unaligned + 7) & ~@as(u32, 15)) + 8
     else
@@ -318,6 +349,21 @@ pub fn compile(
         // §9.7 / 7.10-g: pick imm8 / imm32 form per range.
         // imm8 form is 4 bytes; imm32 is 7 bytes.
         try buf.appendSlice(allocator, rspSub(frame_bytes).slice());
+    }
+    // ADR-0026 2026-05-18 amend / ADR-0069 §Phase 2 chunk (b)-e-3:
+    // MEMORY-class returns — capture the caller-supplied R11
+    // hidden indirect-result-pointer into the frame slot just
+    // below the spill region. Emitted AFTER `SUB RSP, frame_bytes`
+    // so the slot offset is RBP-relative and stable through
+    // the body. Param shuffle below uses RSI/RDX/RCX/R8/R9 +
+    // XMM0..XMM7 (SysV); R11 isn't an arg reg so the capture
+    // doesn't fight arg marshalling. The body's
+    // `gprLoadSpilled` staging through R10/R11 is safe because
+    // the captured value lives in the frame slot, not in R11
+    // itself.
+    if (return_is_memory_class) {
+        const disp: i32 = -@as(i32, @intCast(indirect_result_slot_neg_off));
+        try buf.appendSlice(allocator, inst.encStoreR64MemRBPDisp32(disp, .r11).slice());
     }
 
     // §9.7 / 7.8-x86-params: marshal i32 params from arg regs to
@@ -1511,7 +1557,7 @@ pub fn compile(
                 // D-093 (d-11): multi-result return marshal via the
                 // shared op_control helper (mirrors arm64's
                 // `marshalFunctionReturn`).
-                try op_control.marshalReturnRegs(allocator, &buf, alloc, &pushed_vregs, spill_base_off, func);
+                try op_control.marshalReturnRegs(allocator, &buf, alloc, &pushed_vregs, spill_base_off, func, return_is_memory_class, indirect_result_slot_neg_off);
                 if (frame_bytes > 0) {
                     try buf.appendSlice(allocator, rspAdd(frame_bytes).slice());
                 }
@@ -1525,14 +1571,14 @@ pub fn compile(
             .block => try op_control.emitBlock(allocator, &labels, &pushed_vregs, ins.extra),
             .loop => try op_control.emitLoop(allocator, &buf, &labels, &pushed_vregs, ins.extra),
             .br => {
-                try op_control.emitBr(allocator, &buf, alloc, &pushed_vregs, &labels, spill_base_off, func, frame_bytes, uses_runtime_ptr, ins.payload);
+                try op_control.emitBr(allocator, &buf, alloc, &pushed_vregs, &labels, spill_base_off, func, frame_bytes, uses_runtime_ptr, return_is_memory_class, indirect_result_slot_neg_off, ins.payload);
                 // br is an unconditional control transfer; subsequent
                 // ops in the same body are unreachable until the
                 // matching `end` re-enters live emission.
                 dead_code = true;
             },
-            .br_if => try op_control.emitBrIf(allocator, &buf, alloc, &pushed_vregs, &labels, spill_base_off, func, frame_bytes, uses_runtime_ptr, ins.payload),
-            .br_table => try op_control.emitBrTable(allocator, &buf, func, alloc, &pushed_vregs, &labels, spill_base_off, frame_bytes, uses_runtime_ptr, ins.payload, ins.extra),
+            .br_if => try op_control.emitBrIf(allocator, &buf, alloc, &pushed_vregs, &labels, spill_base_off, func, frame_bytes, uses_runtime_ptr, return_is_memory_class, indirect_result_slot_neg_off, ins.payload),
+            .br_table => try op_control.emitBrTable(allocator, &buf, func, alloc, &pushed_vregs, &labels, spill_base_off, frame_bytes, uses_runtime_ptr, return_is_memory_class, indirect_result_slot_neg_off, ins.payload, ins.extra),
             .@"if" => try op_control.emitIf(allocator, &buf, alloc, &pushed_vregs, &labels, spill_base_off, ins.extra),
             .@"else" => try op_control.emitElse(allocator, &buf, &pushed_vregs, &labels),
             .end => {
@@ -1554,7 +1600,7 @@ pub fn compile(
                 // D-093 (d-11): multi-result return marshal via the
                 // shared op_control helper. Same shape as the
                 // `.return` op path above.
-                try op_control.marshalReturnRegs(allocator, &buf, alloc, &pushed_vregs, spill_base_off, func);
+                try op_control.marshalReturnRegs(allocator, &buf, alloc, &pushed_vregs, spill_base_off, func, return_is_memory_class, indirect_result_slot_neg_off);
                 // Epilogue: ADD RSP, frame ; POP R15? ; POP RBP ; RET.
                 if (frame_bytes > 0) {
                     try buf.appendSlice(allocator, rspAdd(frame_bytes).slice());
