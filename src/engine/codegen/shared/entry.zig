@@ -22,6 +22,44 @@ const builtin = @import("builtin");
 const linker = @import("linker.zig");
 const jit_abi = @import("jit_abi.zig");
 
+/// Shared clobber set for the AAPCS64 inline-asm BLR thunks used by
+/// the Class B entry helpers (ADR-0069). Lists all caller-saved
+/// integer + FP registers the JIT body may touch. Outputs that pin a
+/// specific register (e.g. `={x0}`) are still listed here — Zig's
+/// asm machinery accepts the overlap silently. Factored to one
+/// const to avoid repeating ~30 lines per helper.
+const aarch64_blr_clobbers: if (builtin.target.cpu.arch == .aarch64) std.builtin.assembly.Clobbers else void =
+    if (builtin.target.cpu.arch == .aarch64) .{
+        .x0 = true,
+        .x1 = true,
+        .x2 = true,
+        .x3 = true,
+        .x4 = true,
+        .x5 = true,
+        .x6 = true,
+        .x7 = true,
+        .x8 = true,
+        .x9 = true,
+        .x10 = true,
+        .x11 = true,
+        .x12 = true,
+        .x13 = true,
+        .x14 = true,
+        .x15 = true,
+        .x16 = true,
+        .x17 = true,
+        .x30 = true,
+        .z0 = true,
+        .z1 = true,
+        .z2 = true,
+        .z3 = true,
+        .z4 = true,
+        .z5 = true,
+        .z6 = true,
+        .z7 = true,
+        .memory = true,
+    } else {};
+
 pub const JitRuntime = jit_abi.JitRuntime;
 pub const SegmentSlice = jit_abi.SegmentSlice;
 pub const TableSlice = jit_abi.TableSlice;
@@ -842,6 +880,26 @@ pub const FuncRet_f64i32 = extern struct {
     r1: u64, // i32 zero-ext; u64 ensures 16-byte total + AAPCS64 X0/X1 layout
 };
 
+/// Multi-result return for `(f64, f32)`. Class B heterogeneous-FP
+/// per ADR-0069 (NOT HFA: AAPCS64 §6.8.2 requires all elements
+/// the same FP type for HFA classification).
+///
+/// SysV: eightbyte 0 = f64 → SSE → XMM0; eightbyte 1 = f32 → SSE
+/// → XMM1. Native callconv(.c) works because JIT writes f64→V0/
+/// XMM0 + f32→V1/XMM1 in per-class slot order matching the SysV
+/// per-eightbyte classification.
+///
+/// AAPCS64: not HFA, so routes to X0+X1 GPR pair (eightbyte 0 =
+/// f64 bits in X0; eightbyte 1 = f32 bits in low 32 of X1). JIT
+/// writes f64→D0/V0 + f32→S1/V1 in FP-class slots — X0/X1 GPR
+/// pair read garbage. Inline-asm thunk captures via FMOV (D0→r0,
+/// S1→r1).
+pub const FuncRet_f64f32 = extern struct {
+    r0: f64,
+    r1: f32,
+    _pad0: u32 = 0, // ensure 16-byte total for AAPCS64 X0+X1 routing
+};
+
 /// Multi-result return for `(f64, f64)`. Spec `type-f64-f64-value`.
 ///
 /// Homogeneous Floating-point Aggregate (HFA): per AAPCS64 §6.8.2
@@ -985,35 +1043,7 @@ pub fn callI32f64NoArgs(
               [r1_bits] "=r" (r1_raw),
             : [callee] "r" (f),
               [rt_arg] "{x0}" (rt),
-            : .{
-              .x1 = true,
-              .x2 = true,
-              .x3 = true,
-              .x4 = true,
-              .x5 = true,
-              .x6 = true,
-              .x7 = true,
-              .x8 = true,
-              .x9 = true,
-              .x10 = true,
-              .x11 = true,
-              .x12 = true,
-              .x13 = true,
-              .x14 = true,
-              .x15 = true,
-              .x16 = true,
-              .x17 = true,
-              .x30 = true,
-              .z0 = true,
-              .z1 = true,
-              .z2 = true,
-              .z3 = true,
-              .z4 = true,
-              .z5 = true,
-              .z6 = true,
-              .z7 = true,
-              .memory = true,
-            });
+            : aarch64_blr_clobbers);
         if (rt.trap_flag != 0) return Error.Trap;
         return .{ .r0 = r0_raw, .r1 = @bitCast(r1_raw) };
     } else if (comptime builtin.target.cpu.arch == .x86_64 and builtin.target.os.tag != .windows) {
@@ -1056,39 +1086,49 @@ pub fn callF64i32NoArgs(
               [r1_out] "={x0}" (r1_raw),
             : [callee] "r" (f),
               [rt_arg] "{x0}" (rt),
-            : .{
-              .x1 = true,
-              .x2 = true,
-              .x3 = true,
-              .x4 = true,
-              .x5 = true,
-              .x6 = true,
-              .x7 = true,
-              .x8 = true,
-              .x9 = true,
-              .x10 = true,
-              .x11 = true,
-              .x12 = true,
-              .x13 = true,
-              .x14 = true,
-              .x15 = true,
-              .x16 = true,
-              .x17 = true,
-              .x30 = true,
-              .z0 = true,
-              .z1 = true,
-              .z2 = true,
-              .z3 = true,
-              .z4 = true,
-              .z5 = true,
-              .z6 = true,
-              .z7 = true,
-              .memory = true,
-            });
+            : aarch64_blr_clobbers);
         if (rt.trap_flag != 0) return Error.Trap;
         return .{ .r0 = @bitCast(r0_raw), .r1 = r1_raw };
     } else if (comptime builtin.target.cpu.arch == .x86_64 and builtin.target.os.tag != .windows) {
         const Fn = *const fn (rt: *const JitRuntime) callconv(.c) FuncRet_f64i32;
+        const f = module.entry(func_idx, Fn);
+        const result = f(rt);
+        if (rt.trap_flag != 0) return Error.Trap;
+        return result;
+    } else {
+        return Error.UnsupportedEntrySignature;
+    }
+}
+
+/// `() -> (f64, f32)` — Class B heterogeneous-FP per ADR-0069.
+/// arm64 inline-asm thunk captures D0 (f64) + S1 (f32); x86_64
+/// SysV uses native callconv(.c).
+pub fn callF64f32NoArgs(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+) Error!FuncRet_f64f32 {
+    rt.trap_flag = 0;
+    if (comptime builtin.target.cpu.arch == .aarch64) {
+        const Fn = *const fn (rt: *const JitRuntime) callconv(.c) void;
+        const f = module.entry(func_idx, Fn);
+        var r0_raw: u64 = undefined;
+        var r1_raw: u64 = undefined;
+        // fmov reads 64-bit D1 (low 32 = S1 = f32 value; high 32 is
+        // whatever the JIT epilogue left there). Truncate in Zig.
+        asm volatile (
+            \\ blr %[callee]
+            \\ fmov %[r0_bits], d0
+            \\ fmov %[r1_bits], d1
+            : [r0_bits] "=r" (r0_raw),
+              [r1_bits] "=r" (r1_raw),
+            : [callee] "r" (f),
+              [rt_arg] "{x0}" (rt),
+            : aarch64_blr_clobbers);
+        if (rt.trap_flag != 0) return Error.Trap;
+        return .{ .r0 = @bitCast(r0_raw), .r1 = @bitCast(@as(u32, @truncate(r1_raw))) };
+    } else if (comptime builtin.target.cpu.arch == .x86_64 and builtin.target.os.tag != .windows) {
+        const Fn = *const fn (rt: *const JitRuntime) callconv(.c) FuncRet_f64f32;
         const f = module.entry(func_idx, Fn);
         const result = f(rt);
         if (rt.trap_flag != 0) return Error.Trap;
