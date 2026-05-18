@@ -53,16 +53,20 @@ D-140 (large-sig 16-result) — ADR-0069 §Phase 3 trivial
 §9.13 Phase 10 entry gate (USER GATE)
 ```
 
-**Next concrete task**: D-147 investigation. Compile the
-if.wast `break-multi-value` function on Mac aarch64; dump
-the JIT-body bytes around the i64.const + if-else merge;
-disassemble with `otool -tv` or local script; pinpoint
-where the high 32 bits of `i64.const -18` get lost. The
-op_const.zig MOVZ/MOVK chain encoder is X-form-correct in
-isolation; bug is likely in vreg-shape propagation or a
-W-form spill-load somewhere in the merge path. Re-enable
-`(('i32',), ('i32', 'i32', 'i64'))` in
-`regen_spec_2_0_assert.sh` supported_multi on close.
+**Next concrete task**: D-147 fix — implement parallel-move
+algorithm in `op_control.zig::captureOrEmitBlockMergeMov`
+(arm64) + x86_64 mirror. Root cause confirmed via byte-dump
+at `33a3eee3`: 3-cycle (X9←X10, X10←X11, X11←X9) destroys
+the i64 source on step 1. Discharge plan (per lesson
+`2026-05-18-parallel-move-cycle-in-if-merge.md` + D-147
+row): pre-spill all sources to a `merge_scratch` region in
+the frame (N×8 B; reuse outgoing-args slot when free, else
+grow `frame_bytes` like `indirect_result_slot_bytes`); load
++ store from there to dest's home. Doubles MOV count for
+affected multi-value merges; cold path. Symmetric fix
+needed on x86_64 (LIFO slot reuse + sequential merge MOVs
+same shape). Re-enable `(('i32',), ('i32', 'i32', 'i64'))`
+in supported_multi → +2 PASS.
 
 ### Discipline reminders
 
