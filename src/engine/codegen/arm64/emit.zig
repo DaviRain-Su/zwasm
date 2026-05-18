@@ -137,7 +137,19 @@ fn computeOutgoingMaxBytes(
         // X1..X7 (7 slots). FP args use V0..V7 (8 slots).
         const n_int_overflow: u32 = if (n_int > 7) n_int - 7 else 0;
         const n_fp_overflow: u32 = if (n_fp > 8) n_fp - 8 else 0;
-        const bytes = (n_int_overflow + n_fp_overflow) * 8;
+        const overflow_bytes: u32 = (n_int_overflow + n_fp_overflow) * 8;
+        // ADR-0069 §Phase 2 chunk (b)-e-2: when callee returns
+        // MEMORY-class (struct > 16 B per AAPCS64 §6.8.2; v2
+        // trigger = `results.len > 2`), reserve a per-result
+        // 8-byte buffer slot at the top of THIS call's outgoing-
+        // args footprint. Buffer follows the overflow-args block:
+        // `[SP, #0..overflow_bytes-1]` overflow + `[SP, #overflow_
+        // bytes..overflow_bytes + n_results*8 - 1]` return buf.
+        const return_buf_bytes: u32 = if (callee_sig.results.len > 2)
+            @as(u32, @intCast(callee_sig.results.len)) * 8
+        else
+            0;
+        const bytes: u32 = overflow_bytes + return_buf_bytes;
         if (bytes > max_bytes) max_bytes = bytes;
     }
     return max_bytes;
@@ -296,6 +308,16 @@ pub fn compile(
     // spill slot 0 lives; `gprLoadSpilled`/`gprStoreSpilled`
     // consume it via byte_offset = spill_base_off + slot.spill.
     const spill_bytes: u32 = alloc.spillBytes();
+    // ADR-0017 2026-05-18 amend / ADR-0069 §Phase 2 chunk (b)-e-1:
+    // when this function's return tuple is MEMORY-class per AAPCS64
+    // §6.8.2 (v2 trigger = `sig.results.len > 2`), caller passes the
+    // hidden indirect-result-pointer in X8 at entry. Prologue
+    // captures X8 to an 8 B slot above the spill region; epilogue
+    // (`marshalFunctionReturn`) loads it into X16 and writes each
+    // result to `[X16, #(i*8)]` (X16 chosen over X14 to dodge the
+    // `gprLoadSpilled` spill-stage clobber).
+    const return_is_memory_class: bool = func.sig.results.len > 2;
+    const indirect_result_slot_bytes: u32 = if (return_is_memory_class) 8 else 0;
     // §9.7 / 7.9-d-11: outgoing args (caller-side stack args)
     // occupy the BOTTOM of the frame so the callee reads them at
     // `[X29, #16 + 8*K]` (per AAPCS64 §6.4.2 stage C.13/C.14).
@@ -313,8 +335,11 @@ pub fn compile(
     const outgoing_max_bytes: u32 = if (layout.v128_count > 0) (outgoing_max_raw + 15) & ~@as(u32, 15) else outgoing_max_raw;
     const local_base_off: u32 = outgoing_max_bytes;
     const spill_base_off: u32 = local_base_off + locals_bytes;
-    const frame_bytes_unaligned: u32 = outgoing_max_bytes + locals_bytes + spill_bytes;
+    const frame_bytes_unaligned: u32 = outgoing_max_bytes + locals_bytes + spill_bytes + indirect_result_slot_bytes;
     const frame_bytes: u32 = (frame_bytes_unaligned + 15) & ~@as(u32, 15);
+    // SP-relative offset of the captured X8 slot (top of locals +
+    // spill region, just below the 16-byte alignment pad).
+    const indirect_result_slot_off: u32 = spill_base_off + spill_bytes;
     try gpr.writeU32(allocator, &buf, encStpFpLrPreIdx());
     try gpr.writeU32(allocator, &buf, encMovSpToFp());
     // ADR-0017 prologue: 5 LDRs from X0 = `*const JitRuntime`
@@ -370,6 +395,16 @@ pub fn compile(
         const fb_low: u12 = @intCast(frame_bytes & 0xFFF);
         if (fb_high != 0) try gpr.writeU32(allocator, &buf, inst.encSubImm12Lsl12(31, 31, fb_high));
         if (fb_low != 0) try gpr.writeU32(allocator, &buf, inst.encSubImm12(31, 31, fb_low));
+    }
+    // ADR-0017 2026-05-18 amend / ADR-0069 §Phase 2 chunk (b)-e-1:
+    // capture the caller-supplied hidden indirect-result-pointer
+    // (X8) into the frame slot above the spill region. Emitted
+    // AFTER frame-SUB (so SP sits at the function's stack bottom)
+    // and BEFORE param shuffle (which uses X1..X7 + V0..V7 only —
+    // X8 is safe until captured). The epilogue reads it back at
+    // `marshalFunctionReturn`'s MEMORY-class branch.
+    if (return_is_memory_class) {
+        try gpr.writeU32(allocator, &buf, inst.encStrImm(8, 31, @intCast(indirect_result_slot_off)));
     }
 
     // Multi-arg entry: store params from X1..X{num_params} into
@@ -655,6 +690,8 @@ pub fn compile(
         .simd_consts_base = simd_consts_base,
         .local_base_off = local_base_off,
         .spill_base_off = spill_base_off,
+        .return_is_memory_class = return_is_memory_class,
+        .indirect_result_slot_off = indirect_result_slot_off,
         .num_imports = num_imports,
         .globals_offsets = globals_offsets,
         .globals_valtypes = globals_valtypes,

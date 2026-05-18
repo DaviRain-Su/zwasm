@@ -240,6 +240,45 @@ pub fn emitLoop(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 pub fn marshalFunctionReturn(ctx: *EmitCtx) Error!void {
     if (ctx.func.sig.results.len == 0) return;
     if (ctx.pushed_vregs.items.len < ctx.func.sig.results.len) return;
+    // ADR-0017 2026-05-18 amend / ADR-0069 §Phase 2 chunk (b)-e-1:
+    // MEMORY-class returns (struct > 16 B per AAPCS64 §6.8.2;
+    // v2 trigger = `sig.results.len > 2`) write each result to
+    // `*(X8 + i*8)` instead of marshalling into X0..X7 / V0..V7.
+    // Prologue captured X8 to `ctx.indirect_result_slot_off`;
+    // load it into X16 (IP0 intra-procedure scratch, AAPCS64
+    // §6.4 caller-saved, outside regalloc pool AND
+    // `abi.spill_stage_gprs` X14/X15) and emit per-result
+    // indirect stores. X16 chosen over X14 because
+    // `gprLoadSpilled` clobbers X14/X15 when staging spilled
+    // source vregs. v128 results deferred (no spec fixture in
+    // the 3-int-result / large-sig cohort).
+    if (ctx.return_is_memory_class) {
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(16, 31, @intCast(ctx.indirect_result_slot_off)));
+        const result_base = ctx.pushed_vregs.items.len - ctx.func.sig.results.len;
+        var byte_off: u32 = 0;
+        for (ctx.func.sig.results, 0..) |result_kind, i| {
+            const src_vreg = ctx.pushed_vregs.items[result_base + i];
+            if (src_vreg < ctx.alloc.slots.len) {
+                switch (result_kind) {
+                    .i32, .i64, .funcref, .externref => {
+                        const src_xn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImm(src_xn, 16, @intCast(byte_off)));
+                    },
+                    .f32 => {
+                        const src_vn = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrSImm(src_vn, 16, @intCast(byte_off)));
+                    },
+                    .f64 => {
+                        const src_vn = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrDImm(src_vn, 16, @intCast(byte_off)));
+                    },
+                    .v128 => return Error.UnsupportedOp,
+                }
+            }
+            byte_off += 8;
+        }
+        return;
+    }
     var n_gpr_cap: u8 = 0;
     var n_fp_cap: u8 = 0;
     for (ctx.func.sig.results) |rt| switch (rt) {

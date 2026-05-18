@@ -140,6 +140,20 @@ pub const EmitCtx = struct {
     /// outgoing-args region. Read by `gprLoadSpilled` /
     /// `gprStoreSpilled` to address spill slots.
     spill_base_off: u32,
+    /// §9.9 / 9.9-II chunk (b)-e-1/2 (ADR-0017 2026-05-18 amend;
+    /// ADR-0069 §Phase 2): true iff this function's return tuple
+    /// is MEMORY-class per AAPCS64 §6.8.2 — caller passes a hidden
+    /// indirect-result-pointer in X8 which the prologue captures
+    /// to `[SP, #indirect_result_slot_off]` and the epilogue
+    /// (`marshalFunctionReturn`) writes each result to
+    /// `[X8, #(i*8)]` via X16. v2 classifies MEMORY-class as
+    /// `sig.results.len > 2` (each FuncRet_* field 8 B per
+    /// ADR-0069 Class A convention; 3+ results force struct > 16 B).
+    return_is_memory_class: bool,
+    /// SP-relative byte offset of the captured X8 slot when
+    /// `return_is_memory_class` is true; meaningless otherwise.
+    /// Slot sits above the spill region inside the function frame.
+    indirect_result_slot_off: u32,
     /// Leading wasm-space function indices that name imports
     /// (chunk 7.9-b foundation). `op_call.emitCall` checks
     /// `ins.payload < num_imports` to decide between a normal

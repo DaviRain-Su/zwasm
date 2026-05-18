@@ -54,6 +54,16 @@ pub fn body_start_offset(has_frame: bool) u32 {
     return if (has_frame) 44 else 40;
 }
 
+/// Body-start offset for MEMORY-class returns (AAPCS64 §6.8.2;
+/// ADR-0017 2026-05-18 amend + ADR-0069 §Phase 2 chunk (b)-e-1).
+/// MEMORY-class functions emit a `STR X8, [SP, #slot]` (4 B)
+/// after `SUB SP, SP, #frame_bytes` to capture the caller's
+/// hidden indirect-result-pointer. The slot itself forces
+/// `frame_bytes > 0`, so the base is `body_start_offset(true)`.
+pub fn body_start_offset_memory_return() u32 {
+    return body_start_offset(true) + 4;
+}
+
 /// Read a u32 word at `byte_offset` in `bytes` (little-endian).
 /// Convenience wrapper for the common test pattern
 /// `std.mem.readInt(u32, bytes[off..][0..4], .little)`.
@@ -79,6 +89,10 @@ const testing = std.testing;
 test "body_start_offset: 40 bytes no frame, 44 bytes with frame (post-§9.8a/8a.2 sentinel)" {
     try testing.expectEqual(@as(u32, 40), body_start_offset(false));
     try testing.expectEqual(@as(u32, 44), body_start_offset(true));
+}
+
+test "body_start_offset_memory_return: 48 bytes (MEMORY-class STR X8 after frame-SUB)" {
+    try testing.expectEqual(@as(u32, 48), body_start_offset_memory_return());
 }
 
 test "wordAt reads u32 little-endian at offset" {

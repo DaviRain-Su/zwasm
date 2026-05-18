@@ -343,3 +343,105 @@ test "compile: call_indirect — bounds (CMP/B.HS) + sig (LDR/CMP/B.NE) + funcpt
     try testing.expectEqual(@as(u32, inst.encBLR(17)), std.mem.readInt(u32, out.bytes[body0 + 36 ..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encOrrRegW(9, 31, 0)), std.mem.readInt(u32, out.bytes[body0 + 40 ..][0..4], .little));
 }
+
+test "compile: bundled Class C MEMORY-class — caller LEA X8 + callee STR X8 + buffer capture (ADR-0069 §Phase 2 chunks (b)-e-1 + (b)-e-2)" {
+    // Wasm spec §3.4.5 multi-value + AAPCS64 §6.8.2 Composite Type
+    // return. The test function `() -> (i32, i32, i32)` is itself
+    // MEMORY-class (3 × 8 B = 24 B > 16 B), and it calls func[0]
+    // which has the SAME signature → caller-side also goes through
+    // the MEMORY-class path. One commit exercises:
+    //   - callee prologue: STR X8, [SP, #slot] to save caller's
+    //     hidden indirect-result-pointer.
+    //   - caller: ADD X8, SP, #buffer_off LEA before BL.
+    //   - caller capture: LDR W from buffer × 3 (since the func's
+    //     own result slots receive func[0]'s output).
+    //   - callee epilogue: LDR X16, [SP, #slot] + STR Xn, [X16,
+    //     #(i*8)] × 3 — drains the operand stack into the caller's
+    //     buffer via X16.
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{ .i32, .i32, .i32 } };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .call, .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+        .{ .def_pc = 0, .last_use_pc = 1 },
+        .{ .def_pc = 0, .last_use_pc = 1 },
+    } };
+    const slots = [_]u16{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 3 };
+    const sigs = [_]zir.FuncType{.{ .params = &.{}, .results = &.{ .i32, .i32, .i32 } }};
+    const out = try compile(testing.allocator, &f, alloc, &sigs, &.{}, 0, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+
+    // Frame layout:
+    //   outgoing_max = 24 (caller's return buffer for the 3-result
+    //     sub-call; no overflow args), locals = 0, spill = 0,
+    //     indirect_result_slot_bytes = 8 (callee MEMORY-class).
+    //   frame_unaligned = 24 + 0 + 0 + 8 = 32 → frame_bytes = 32.
+    //   local_base_off = outgoing_max = 24
+    //   spill_base_off = local_base_off + locals_bytes = 24
+    //   indirect_result_slot_off = spill_base_off + spill_bytes = 24
+    //   Layout:
+    //     [SP+0..23]  = outgoing-args region (used during sub-call
+    //                    as the caller-allocated return buffer)
+    //     [SP+24..31] = THIS function's own X8 capture slot
+    //                    (set by prologue, read by epilogue)
+    // Body starts at body_start_offset_memory_return() = 48.
+    try testing.expectEqual(@as(u32, 48), prologue.body_start_offset_memory_return());
+
+    // STR X8, [SP, #24]  at byte 44..48  (post-SUB-SP, just before body)
+    try testing.expectEqual(
+        @as(u32, inst.encStrImm(8, 31, 24)),
+        std.mem.readInt(u32, out.bytes[44..][0..4], .little),
+    );
+
+    // Caller-side prologue at body0 = 48:
+    //   [48..52] ADD X8, SP, #0   ; LEA outgoing buffer
+    //   [52..56] ORR X0, XZR, X19 ; restore runtime_ptr
+    //   [56..60] BL 0             ; call fixup
+    //   [60..72] LDR W?, [SP, #0/8/16]  ; capture 3 results
+    try testing.expectEqual(
+        @as(u32, inst.encAddImm12(8, 31, 0)),
+        std.mem.readInt(u32, out.bytes[48..][0..4], .little),
+    );
+    try testing.expectEqual(
+        @as(u32, inst.encOrrReg(0, 31, abi.runtime_ptr_save_gpr)),
+        std.mem.readInt(u32, out.bytes[52..][0..4], .little),
+    );
+    try testing.expectEqual(
+        @as(u32, inst.encBL(0)),
+        std.mem.readInt(u32, out.bytes[56..][0..4], .little),
+    );
+    // LDR W unsigned-offset: 0xB9400000 | (imm12<<10) | (rn<<5) | rt
+    // imm12 = byte_off >> 2. rn = 31 (SP). opcode prefix = 0x2E5
+    // (= 0xB9400000 >> 22 = 0x2E5).
+    for ([_]u32{ 0, 8, 16 }, 0..) |abs_off, i| {
+        const w = std.mem.readInt(u32, out.bytes[60 + @as(u32, @intCast(i)) * 4 ..][0..4], .little);
+        try testing.expectEqual(@as(u32, abs_off >> 2), (w >> 10) & 0xFFF);
+        try testing.expectEqual(@as(u32, 31), (w >> 5) & 0x1F);
+        try testing.expectEqual(@as(u32, 0x2E5), w >> 22);
+    }
+
+    // Callee-side epilogue: scan post-capture for `LDR X16, [SP, #24]`
+    // (loads captured X8 buffer-ptr from THIS function's slot)
+    // followed by 3 × STR Xn, [X16, #i*8].
+    const ldr_x16 = inst.encLdrImm(16, 31, 24);
+    var found_ldr_at: ?usize = null;
+    var scan: usize = 72; // post the 3 LDR-W capture words
+    while (scan + 4 <= out.bytes.len) : (scan += 4) {
+        const word = std.mem.readInt(u32, out.bytes[scan..][0..4], .little);
+        if (word == ldr_x16) {
+            found_ldr_at = scan;
+            break;
+        }
+    }
+    try testing.expect(found_ldr_at != null);
+    const epi = found_ldr_at.?;
+    for (0..3) |i| {
+        const w = std.mem.readInt(u32, out.bytes[epi + 4 + i * 4 ..][0..4], .little);
+        try testing.expectEqual(@as(u32, @intCast(i)), (w >> 10) & 0xFFF); // imm12 = byte_off >> 3
+        try testing.expectEqual(@as(u32, 16), (w >> 5) & 0x1F); // rn = X16
+        try testing.expectEqual(@as(u32, 0x3E4), w >> 22); // STR Xt opcode prefix
+    }
+}

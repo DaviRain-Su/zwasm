@@ -53,6 +53,29 @@ const EmitCtx = ctx_mod.EmitCtx;
 const Error = ctx_mod.Error;
 const CallFixup = ctx_mod.CallFixup;
 
+/// ADR-0069 §Phase 2 chunk (b)-e-2: per-call overflow-args byte
+/// count, mirroring `marshalCallArgs`'s allocation logic. Returns
+/// the size of the `[SP, #0..N-1]` overflow region this call's
+/// stack args occupy. The MEMORY-class return buffer (when the
+/// callee triggers it) sits immediately above at
+/// `[SP, #N..N + n_results*8 - 1]`. v128 args are excluded
+/// (current callees' v128 args ride V0..V7 in-pool; future
+/// overflow-v128 needs its own 16 B aligned slot accounting).
+fn computeCallOverflowBytes(callee_sig: FuncType) u32 {
+    var n_int: u32 = 0;
+    var n_fp: u32 = 0;
+    for (callee_sig.params) |p| {
+        switch (p) {
+            .i32, .i64, .funcref, .externref => n_int += 1,
+            .f32, .f64 => n_fp += 1,
+            .v128 => {},
+        }
+    }
+    const n_int_overflow: u32 = if (n_int > 7) n_int - 7 else 0;
+    const n_fp_overflow: u32 = if (n_fp > 8) n_fp - 8 else 0;
+    return (n_int_overflow + n_fp_overflow) * 8;
+}
+
 /// Wasm spec §3.4.7 (call N) — direct call. Looks up
 /// `func_sigs[N]` for the callee signature, marshals args, emits
 /// BL placeholder + CallFixup, captures the result.
@@ -72,6 +95,21 @@ pub fn emitCall(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const callee_sig: FuncType = ctx.func_sigs[ins.payload];
 
     try marshalCallArgs(ctx, callee_sig);
+
+    // ADR-0017 2026-05-18 amend / ADR-0069 §Phase 2 chunk (b)-e-2:
+    // when callee returns MEMORY-class (struct > 16 B per AAPCS64
+    // §6.8.2; v2 trigger = `results.len > 2`), allocate a buffer
+    // at the top of THIS call's outgoing-args footprint and LEA
+    // its address into X8 before the BL. The callee's prologue
+    // saves X8 to its own frame slot; the epilogue writes each
+    // result via `[X8, #(i*8)]`. After return, this caller reads
+    // results back from the same buffer in `captureCallResult`.
+    const memory_class_return: bool = callee_sig.results.len > 2;
+    const return_buffer_off: u32 = if (memory_class_return) computeCallOverflowBytes(callee_sig) else 0;
+    if (memory_class_return) {
+        if (return_buffer_off > 4095) return Error.UnsupportedOp; // imm12 budget
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(8, 31, @intCast(return_buffer_off)));
+    }
 
     if (ins.payload < ctx.num_imports) {
         // Chunk 7.9-d: host-import dispatch. Indirect call via
@@ -99,7 +137,7 @@ pub fn emitCall(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(0, 31, abi.runtime_ptr_save_gpr));
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBLR(16));
 
-        try captureCallResult(ctx, callee_sig);
+        try captureCallResult(ctx, callee_sig, memory_class_return, return_buffer_off);
         return;
     }
 
@@ -117,7 +155,7 @@ pub fn emitCall(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         .target_func_idx = ins.payload,
     });
 
-    try captureCallResult(ctx, callee_sig);
+    try captureCallResult(ctx, callee_sig, memory_class_return, return_buffer_off);
 }
 
 /// Indirect call: `call_indirect type_idx tableidx`. Pops the
@@ -146,6 +184,19 @@ pub fn emitCallIndirect(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const idx_vreg = ctx.pushed_vregs.pop().?;
 
     try marshalCallArgs(ctx, callee_sig);
+
+    // ADR-0017 2026-05-18 amend / ADR-0069 §Phase 2 chunk (b)-e-2:
+    // Mirror of `emitCall`'s MEMORY-class LEA — when callee returns
+    // > 16 B composite, the caller hands a buffer pointer in X8.
+    // Emitted post-marshalCallArgs so the buffer LEA doesn't fight
+    // X1..X7 / V0..V7 arg shuffling; X16/X17 used later for sig +
+    // funcptr work are caller-saved scratch disjoint from X8.
+    const memory_class_return: bool = callee_sig.results.len > 2;
+    const return_buffer_off: u32 = if (memory_class_return) computeCallOverflowBytes(callee_sig) else 0;
+    if (memory_class_return) {
+        if (return_buffer_off > 4095) return Error.UnsupportedOp;
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(8, 31, @intCast(return_buffer_off)));
+    }
 
     // Bounds + sig check using the trap-stub at function tail
     // (shared with memory bounds — single trap reason today;
@@ -247,7 +298,7 @@ pub fn emitCallIndirect(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(0, 31, abi.runtime_ptr_save_gpr));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBLR(17));
 
-    try captureCallResult(ctx, callee_sig);
+    try captureCallResult(ctx, callee_sig, memory_class_return, return_buffer_off);
 }
 
 /// Wasm spec §3.4.7 (call N) — marshal call arguments per AAPCS64
@@ -411,8 +462,86 @@ fn marshalCallArgs(ctx: *EmitCtx, callee_sig: FuncType) Error!void {
 /// X0..X7 / V0..V7 source regs are NOT in the allocatable pool,
 /// so capturing in order (result[0] from X0, result[1] from X1,
 /// …) never overwrites a still-unread source.
-fn captureCallResult(ctx: *EmitCtx, callee_sig: FuncType) Error!void {
+fn captureCallResult(ctx: *EmitCtx, callee_sig: FuncType, memory_class: bool, buffer_off: u32) Error!void {
     if (callee_sig.results.len == 0) return;
+
+    // ADR-0017 2026-05-18 amend / ADR-0069 §Phase 2 chunk (b)-e-2:
+    // MEMORY-class returns — callee wrote each result to
+    // `[X8, #(i*8)]` where X8 was our LEA into the outgoing-args
+    // return buffer at `[SP, #buffer_off + i*8]`. Read each slot
+    // back into the next result vreg. X14 (`abi.spill_stage_gprs[0]`)
+    // serves as the load-into-then-store-to-spill stage when the
+    // result vreg is spilled; in-pool result vregs receive the LDR
+    // directly. v128 results deferred (no spec fixture in the
+    // 3-int-result / large-sig cohort).
+    if (memory_class) {
+        var byte_off: u32 = 0;
+        for (callee_sig.results) |result_type| {
+            const result = ctx.next_vreg.*;
+            ctx.next_vreg.* += 1;
+            if (result >= ctx.alloc.slots.len) return Error.AllocationMissing;
+            const abs_off: u32 = buffer_off + byte_off;
+            switch (result_type) {
+                .i32 => switch (ctx.alloc.slot(result, .gpr)) {
+                    .reg => |id| {
+                        const wd = abi.slotToReg(id) orelse return Error.SlotOverflow;
+                        if (abs_off > 16380) return Error.SlotOverflow;
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(wd, 31, @intCast(abs_off)));
+                    },
+                    .spill => |off| {
+                        const dst_off: u32 = ctx.spill_base_off + off;
+                        if (abs_off > 16380 or dst_off > 16380) return Error.SlotOverflow;
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(14, 31, @intCast(abs_off)));
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(14, 31, @intCast(dst_off)));
+                    },
+                },
+                .i64, .funcref, .externref => switch (ctx.alloc.slot(result, .gpr)) {
+                    .reg => |id| {
+                        const xd = abi.slotToReg(id) orelse return Error.SlotOverflow;
+                        if (abs_off > 32760) return Error.SlotOverflow;
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(xd, 31, @intCast(abs_off)));
+                    },
+                    .spill => |off| {
+                        const dst_off: u32 = ctx.spill_base_off + off;
+                        if (abs_off > 32760 or dst_off > 32760) return Error.SlotOverflow;
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(14, 31, @intCast(abs_off)));
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImm(14, 31, @intCast(dst_off)));
+                    },
+                },
+                .f32 => switch (ctx.alloc.slot(result, .fpr)) {
+                    .reg => |id| {
+                        const vd = abi.fpSlotToReg(id) orelse return Error.SlotOverflow;
+                        if (abs_off > 16380) return Error.SlotOverflow;
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrSImm(vd, 31, @intCast(abs_off)));
+                    },
+                    .spill => |off| {
+                        const dst_off: u32 = ctx.spill_base_off + off;
+                        if (abs_off > 16380 or dst_off > 16380) return Error.SlotOverflow;
+                        // Stage via V29 (fp_spill_stage_vregs[0]).
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrSImm(29, 31, @intCast(abs_off)));
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrSImm(29, 31, @intCast(dst_off)));
+                    },
+                },
+                .f64 => switch (ctx.alloc.slot(result, .fpr)) {
+                    .reg => |id| {
+                        const vd = abi.fpSlotToReg(id) orelse return Error.SlotOverflow;
+                        if (abs_off > 32760) return Error.SlotOverflow;
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrDImm(vd, 31, @intCast(abs_off)));
+                    },
+                    .spill => |off| {
+                        const dst_off: u32 = ctx.spill_base_off + off;
+                        if (abs_off > 32760 or dst_off > 32760) return Error.SlotOverflow;
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrDImm(29, 31, @intCast(abs_off)));
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrDImm(29, 31, @intCast(dst_off)));
+                    },
+                },
+                .v128 => return Error.UnsupportedOp,
+            }
+            byte_off += 8;
+            try ctx.pushed_vregs.append(ctx.allocator, result);
+        }
+        return;
+    }
 
     // Pre-check class capacities.
     {
