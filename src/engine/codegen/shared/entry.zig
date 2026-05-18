@@ -63,6 +63,46 @@ const aarch64_blr_clobbers: if (builtin.target.cpu.arch == .aarch64) std.builtin
         // const's value collapses to void, which the linker discards.
     };
 
+/// Shared clobber set for the x86_64 SysV inline-asm CALL thunk used
+/// by Class B `(f64, f32)` mixed-eightbyte FP-class return (ADR-0069
+/// D-146). Zig 0.16's `splitType` doesn't yet generate the call-site
+/// disassembly for two same-class (SSE) eightbytes of different widths,
+/// so the helper performs the CALL in inline-asm and captures XMM0 /
+/// XMM1 directly. Lists every SysV caller-saved GPR + the full XMM
+/// register bank.
+const x86_64_sysv_call_clobbers: if (builtin.target.cpu.arch == .x86_64 and builtin.target.os.tag != .windows) std.builtin.assembly.Clobbers else void =
+    if (builtin.target.cpu.arch == .x86_64 and builtin.target.os.tag != .windows) .{
+        .rax = true,
+        .rcx = true,
+        .rdx = true,
+        .rsi = true,
+        .rdi = true,
+        .r8 = true,
+        .r9 = true,
+        .r10 = true,
+        .r11 = true,
+        .xmm0 = true,
+        .xmm1 = true,
+        .xmm2 = true,
+        .xmm3 = true,
+        .xmm4 = true,
+        .xmm5 = true,
+        .xmm6 = true,
+        .xmm7 = true,
+        .xmm8 = true,
+        .xmm9 = true,
+        .xmm10 = true,
+        .xmm11 = true,
+        .xmm12 = true,
+        .xmm13 = true,
+        .xmm14 = true,
+        .xmm15 = true,
+        .cc = true,
+        .memory = true,
+    } else {
+        // non-x86_64-SysV hosts: const value collapses to void.
+    };
+
 pub const JitRuntime = jit_abi.JitRuntime;
 pub const SegmentSlice = jit_abi.SegmentSlice;
 pub const TableSlice = jit_abi.TableSlice;
@@ -753,12 +793,33 @@ pub const FuncRet_f64i32 = extern struct {
     r1: u64, // i32 zero-ext; u64 ensures 16-byte total + AAPCS64 X0/X1 layout
 };
 
-// FuncRet_f64f32 + callF64f32NoArgs deferred per D-146:
-// arm64 inline-asm thunk works, but x86_64 SysV native path
-// hits Zig 0.16 `splitType` compiler TODO. Re-add when either
-// (a) Zig 0.16+ implements splitType for mixed-eightbyte FP
-// returns, or (b) cycle adds an x86_64 inline-asm thunk
-// (requires entry.zig cap relief).
+/// Multi-result return for `(f64, f32)`. Class B heterogeneous-FP
+/// per ADR-0069 D-146.
+///
+/// SysV: eightbyte 0 = f64 → SSE → XMM0; eightbyte 1 = f32 → SSE
+/// → XMM1. Zig 0.16's `splitType` cannot yet generate the
+/// call-site disassembly for two SSE eightbytes of different
+/// widths, so `callF64f32NoArgs` uses an inline-asm thunk and
+/// the FuncRet struct just carries the bit-packed result.
+///
+/// AAPCS64: not HFA (different element types), so routes to X0+
+/// X1 GPR pair. JIT writes f64→D0 + f32→S1 (FP-class slots), so
+/// X0/X1 read garbage. Inline-asm thunk captures D0 + S1 via
+/// FMOV.
+///
+/// Layout note: no explicit u32 pad after r1. The earlier cycle
+/// added `_pad0: u32 = 0` to force 16-byte total for AAPCS64
+/// routing, but that gave eightbyte 1 `{f32 (SSE), u32 (INTEGER)}`
+/// — SysV post-merge rule "SSE + INTEGER → INTEGER" then routed
+/// eightbyte 1 to RDX, while JIT writes f32 to XMM1. With the
+/// pad dropped, Zig's implicit alignment pad has NO_CLASS so
+/// eightbyte 1 stays pure SSE → XMM1 (irrelevant for the
+/// inline-asm thunk, which captures XMM1 directly, but matches
+/// the natural SysV classification).
+pub const FuncRet_f64f32 = extern struct {
+    r0: f64,
+    r1: f32,
+};
 
 /// Multi-result return for `(f64, f64)`. Spec `type-f64-f64-value`.
 ///
@@ -936,7 +997,66 @@ pub fn callF64i32NoArgs(
     }
 }
 
-// callF64f32NoArgs deferred per D-146; see decl comment above.
+/// `() -> (f64, f32)` — Class B heterogeneous-FP per ADR-0069
+/// D-146.
+///
+/// On AAPCS64: not HFA (different element types) so routes to
+/// X0+X1 GPR pair; JIT writes f64→D0 + f32→S1 in FP-class slots.
+/// Inline-asm thunk performs the BLR and captures D0 + S1 via
+/// FMOV — same shape as `callI32f64NoArgs` / `callF64i32NoArgs`.
+///
+/// On x86_64 SysV: both eightbytes are SSE class but of
+/// different widths. Zig 0.16 cannot yet code-gen the call-site
+/// disassembly (`error: TODO implement splitType(2,
+/// FuncRet_f64f32)`), so the helper uses an inline-asm thunk
+/// that performs `callq *fn` with rdi=rt and captures XMM0
+/// (f64) + XMM1 (f32) directly.
+///
+/// Win64: NOT YET SUPPORTED. Win64 returns ≤ 8-byte composites
+/// in RAX; larger composites via hidden RCX ptr (= D-094 /
+/// D-140 indirect-result-ptr ABI). Deferred to §9.13-0 per
+/// ADR-0069 implementation chunked plan.
+pub fn callF64f32NoArgs(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+) Error!FuncRet_f64f32 {
+    rt.trap_flag = 0;
+    if (comptime builtin.target.cpu.arch == .aarch64) {
+        const Fn = *const fn (rt: *const JitRuntime) callconv(.c) void;
+        const f = module.entry(func_idx, Fn);
+        var r0_raw: u64 = undefined;
+        var r1_raw: u64 = undefined;
+        asm volatile (
+            \\ blr %[callee]
+            \\ fmov %[r0_bits], d0
+            \\ fmov %[r1_bits], d1
+            : [r0_bits] "=r" (r0_raw),
+              [r1_bits] "=r" (r1_raw),
+            : [callee] "r" (f),
+              [rt_arg] "{x0}" (rt),
+            : aarch64_blr_clobbers);
+        if (rt.trap_flag != 0) return Error.Trap;
+        const r1_f32: f32 = @bitCast(@as(u32, @truncate(r1_raw)));
+        return .{ .r0 = @bitCast(r0_raw), .r1 = r1_f32 };
+    } else if (comptime builtin.target.cpu.arch == .x86_64 and builtin.target.os.tag != .windows) {
+        const Fn = *const fn (rt: *const JitRuntime) callconv(.c) void;
+        const f = module.entry(func_idx, Fn);
+        var r0_raw: f64 = undefined;
+        var r1_raw: f32 = undefined;
+        asm volatile (
+            \\ callq *%[callee]
+            : [r0_out] "={xmm0}" (r0_raw),
+              [r1_out] "={xmm1}" (r1_raw),
+            : [callee] "r" (f),
+              [rt_arg] "{rdi}" (rt),
+            : x86_64_sysv_call_clobbers);
+        if (rt.trap_flag != 0) return Error.Trap;
+        return .{ .r0 = r0_raw, .r1 = r1_raw };
+    } else {
+        return Error.UnsupportedEntrySignature;
+    }
+}
 
 /// `() -> (f64, f64)` — HFA returned via V0+V1 / XMM0+XMM1.
 pub fn callF64f64NoArgs(
