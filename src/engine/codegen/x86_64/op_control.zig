@@ -417,33 +417,8 @@ pub fn marshalReturnRegs(
         const slot_disp: i32 = -@as(i32, @intCast(indirect_result_slot_neg_off));
         try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .rbp, slot_disp).slice());
         const result_base = pushed_vregs.items.len - func.sig.results.len;
-        // DEBUG TEMP (D-148 cycle 3): emit a SENTINEL write to
-        // slot 48 (RBP-192 = vreg 10's f64 spill slot) right
-        // before per-result reads. If r10 reads the sentinel,
-        // its LDR addressing is correct and the corruption is
-        // upstream (write side). If r10 still reads stale,
-        // either RAX is wrong or LDR addresses a different
-        // memory location than [RBP-192].
-        const debug_dump: bool = func.sig.params.len == 17 and func.sig.results.len == 16;
-        if (debug_dump) {
-            // Cycle-3c: redirect r10..r15 stores to read DIRECTLY
-            // from local slots (bypass spill region). If r10..r15
-            // come back correct, the spill region was corrupted
-            // between body STR and marshal LDR. If they're STILL
-            // wrong, the local slots themselves are wrong
-            // (prologue mis-routed).
-            //
-            // Plan: emit normal r0..r9 stores via the loop below,
-            // then OVERWRITE r10..r15 with direct local reads.
-        }
         var byte_off: i32 = 0;
         for (func.sig.results, 0..) |result_kind, i| {
-            // Cycle-3c: skip r10..r15 in normal loop; we'll
-            // overwrite them after.
-            if (debug_dump and i >= 10) {
-                byte_off += 8;
-                continue;
-            }
             const src_vreg = pushed_vregs.items[result_base + i];
             if (src_vreg < alloc.slots.len) {
                 switch (result_kind) {
@@ -474,28 +449,6 @@ pub fn marshalReturnRegs(
                 }
             }
             byte_off += 8;
-        }
-        if (debug_dump) {
-            // Cycle-3d: dump XMM5/6/7 + stack args at [RBP+16..+56]
-            // to buffer slots to inspect what Zig actually passed.
-            // Replaces r10..r15 output with diagnostic values.
-            //
-            // r10 (8 B) ← XMM5 via MOVSD: f2 0f 11 68 50 (MOVSD [RAX+0x50], XMM5)
-            try buf.appendSlice(allocator, &.{ 0xf2, 0x0f, 0x11, 0x68, 0x50 });
-            // r11 ← XMM6:  f2 0f 11 70 58
-            try buf.appendSlice(allocator, &.{ 0xf2, 0x0f, 0x11, 0x70, 0x58 });
-            // r12 (low 4) ← XMM7's bits via MOVSD + MOV
-            try buf.appendSlice(allocator, &.{ 0xf2, 0x0f, 0x11, 0x78, 0x60 });
-            // r13 (low 4) ← bytes at [RBP+32] (Zig stack-arg slot for a14):
-            // MOV R11, [RBP+0x20]; MOV [RAX+0x68], R11
-            try buf.appendSlice(allocator, &.{ 0x4c, 0x8b, 0x5d, 0x20 });
-            try buf.appendSlice(allocator, &.{ 0x4c, 0x89, 0x58, 0x68 });
-            // r14 ← bytes at [RBP+40] (a15 expected): MOV R11, [RBP+0x28]; MOV [RAX+0x70], R11
-            try buf.appendSlice(allocator, &.{ 0x4c, 0x8b, 0x5d, 0x28 });
-            try buf.appendSlice(allocator, &.{ 0x4c, 0x89, 0x58, 0x70 });
-            // r15 ← bytes at [RBP+48] (a16 expected): MOV R11, [RBP+0x30]; MOV [RAX+0x78], R11
-            try buf.appendSlice(allocator, &.{ 0x4c, 0x8b, 0x5d, 0x30 });
-            try buf.appendSlice(allocator, &.{ 0x4c, 0x89, 0x58, 0x78 });
         }
         return;
     }
