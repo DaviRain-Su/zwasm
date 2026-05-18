@@ -1,0 +1,38 @@
+# Skip-impl one-way ratchet history — ADR-0050 amend (D-3 / D-4).
+#
+# Append one row per chunk-close commit. `scripts/check_skip_impl_ratchet.sh`
+# (skeleton at this seed; completed in §9.12-A) reads this file at pre-push
+# time and FAILs the push if the current commit's skip-impl count is
+# strictly greater than the most recent committed row, unless an `exempt`
+# field cites an Accepted ADR.
+#
+# Schema (per row):
+#   commit:               git SHA of the chunk-close commit (or "(baseline)")
+#   timestamp:            ISO-8601 (UTC)
+#   non_simd_skip_impl:   integer; `spec_assert_runner_non_simd` skip-impl
+#   simd_skip_impl:       integer; `simd_assert_runner` skip-impl
+#   total:                non_simd_skip_impl + simd_skip_impl
+#   note:                 short human note (optional)
+#   exempt:               ADR-NNNN slug if this row legitimately increases
+#                         the count (must reference an Accepted ADR)
+#
+# Phase 9 completion master plan §7.3 + ADR-0050 (Amend; D-3 / D-4 pending
+# §9.12 collab Accept).
+
+entries:
+  - commit: "(baseline)"
+    timestamp: "2026-05-19T00:00:00Z"
+    non_simd_skip_impl: 193
+    simd_skip_impl: 50
+    total: 243
+    note: |
+      Seed baseline at §9.12-A enforcement layer landing. Live measurement
+      via `zig build test-spec-wasm-2.0-assert` and `zig build test-spec-simd`.
+      Breakdown captured in `private/notes/p9-close-skip-impl-inventory.md`:
+        - SKIP-CROSS-MODULE-IMPORTS: 100 modules + ~66 cascade
+        - SKIP-NO-LINK-TYPECHECK: 26
+        - SKIP-VALIDATOR-GAP (SIMD): 50
+        - exports/manifest.txt skip-impl: 1
+      Phase 9 完備 exit criterion = drain this to 0 at §9.12-E (master plan
+      §5.3).
+    exempt: null
