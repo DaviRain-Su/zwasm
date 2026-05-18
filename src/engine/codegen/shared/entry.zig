@@ -58,7 +58,10 @@ const aarch64_blr_clobbers: if (builtin.target.cpu.arch == .aarch64) std.builtin
         .z6 = true,
         .z7 = true,
         .memory = true,
-    } else {};
+    } else {
+        // non-aarch64 hosts have no Class B inline-asm thunk; the
+        // const's value collapses to void, which the linker discards.
+    };
 
 pub const JitRuntime = jit_abi.JitRuntime;
 pub const SegmentSlice = jit_abi.SegmentSlice;
@@ -74,6 +77,37 @@ pub const Error = error{
     /// this to per-trap-kind reasons.
     Trap,
 };
+
+/// Body shared by the ~97 Class A / Class C entry helpers.
+/// `R` is the return type; `f` is the typed function pointer
+/// produced by `module.entry(func_idx, FnPtr)`; `args` is a
+/// tuple of the JIT-side parameters (without `rt`, which is
+/// prepended here). Per ADR-0017 trap discipline: zero
+/// `trap_flag` before the call, raise `Error.Trap` if it
+/// becomes non-zero. D-135 discharge — collapses the 6-line
+/// boilerplate that previously appeared in every helper.
+inline fn invokeAndCheck(
+    rt: *JitRuntime,
+    comptime R: type,
+    f: anytype,
+    args: anytype,
+) Error!R {
+    rt.trap_flag = 0;
+    const result = @call(.auto, f, .{rt} ++ args);
+    if (rt.trap_flag != 0) return Error.Trap;
+    return result;
+}
+
+/// Void-return sibling of `invokeAndCheck`.
+inline fn invokeAndCheckVoid(
+    rt: *JitRuntime,
+    f: anytype,
+    args: anytype,
+) Error!void {
+    rt.trap_flag = 0;
+    @call(.auto, f, .{rt} ++ args);
+    if (rt.trap_flag != 0) return Error.Trap;
+}
 
 /// Call a no-argument JIT function returning i32.
 ///
@@ -91,12 +125,8 @@ pub fn callI32NoArgs(
     func_idx: u32,
     rt: *JitRuntime,
 ) Error!u32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime) callconv(.c) u32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime) callconv(.c) u32;
+    return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{});
 }
 
 /// Call a single-i32-argument JIT function returning i32.
@@ -110,12 +140,8 @@ pub fn callI32_i32(
     rt: *JitRuntime,
     a0: u32,
 ) Error!u32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32) callconv(.c) u32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u32) callconv(.c) u32;
+    return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{a0});
 }
 
 /// Call a two-i32-argument JIT function returning i32. ABI puts
@@ -128,12 +154,8 @@ pub fn callI32_i32i32(
     a0: u32,
     a1: u32,
 ) Error!u32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: u32) callconv(.c) u32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u32, u32) callconv(.c) u32;
+    return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
 /// Call a no-argument void-returning JIT function (results.len == 0).
@@ -148,11 +170,8 @@ pub fn callVoidNoArgs(
     func_idx: u32,
     rt: *JitRuntime,
 ) Error!void {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime) callconv(.c) void;
-    const f = module.entry(func_idx, Fn);
-    f(rt);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime) callconv(.c) void;
+    return invokeAndCheckVoid(rt, module.entry(func_idx, Fn), .{});
 }
 
 /// Call a single-i32-argument void-returning JIT function.
@@ -162,11 +181,8 @@ pub fn callVoid_i32(
     rt: *JitRuntime,
     a0: u32,
 ) Error!void {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32) callconv(.c) void;
-    const f = module.entry(func_idx, Fn);
-    f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, u32) callconv(.c) void;
+    return invokeAndCheckVoid(rt, module.entry(func_idx, Fn), .{a0});
 }
 
 /// Call a two-i32-argument void-returning JIT function.
@@ -177,11 +193,8 @@ pub fn callVoid_i32i32(
     a0: u32,
     a1: u32,
 ) Error!void {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: u32) callconv(.c) void;
-    const f = module.entry(func_idx, Fn);
-    f(rt, a0, a1);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, u32, u32) callconv(.c) void;
+    return invokeAndCheckVoid(rt, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
 /// Call a single-i64-argument void-returning JIT function.
@@ -191,11 +204,8 @@ pub fn callVoid_i64(
     rt: *JitRuntime,
     a0: u64,
 ) Error!void {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u64) callconv(.c) void;
-    const f = module.entry(func_idx, Fn);
-    f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, u64) callconv(.c) void;
+    return invokeAndCheckVoid(rt, module.entry(func_idx, Fn), .{a0});
 }
 
 /// Call a single-f32-argument void-returning JIT function.
@@ -206,11 +216,8 @@ pub fn callVoid_f32(
     rt: *JitRuntime,
     a0: f32,
 ) Error!void {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f32) callconv(.c) void;
-    const f = module.entry(func_idx, Fn);
-    f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, f32) callconv(.c) void;
+    return invokeAndCheckVoid(rt, module.entry(func_idx, Fn), .{a0});
 }
 
 /// D-114 / d-41: `(i32, i64)` void-returning. Used by
@@ -225,11 +232,8 @@ pub fn callVoid_i32i64(
     a0: u32,
     a1: u64,
 ) Error!void {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: u64) callconv(.c) void;
-    const f = module.entry(func_idx, Fn);
-    f(rt, a0, a1);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, u32, u64) callconv(.c) void;
+    return invokeAndCheckVoid(rt, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
 /// D-116: `(i32, f32)` void-returning. Used by float_exprs.wast's
@@ -244,11 +248,8 @@ pub fn callVoid_i32f32(
     a0: u32,
     a1: f32,
 ) Error!void {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: f32) callconv(.c) void;
-    const f = module.entry(func_idx, Fn);
-    f(rt, a0, a1);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, u32, f32) callconv(.c) void;
+    return invokeAndCheckVoid(rt, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
 /// D-116: `(i32, f64)` void-returning. f64 sibling of the
@@ -261,11 +262,8 @@ pub fn callVoid_i32f64(
     a0: u32,
     a1: f64,
 ) Error!void {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: f64) callconv(.c) void;
-    const f = module.entry(func_idx, Fn);
-    f(rt, a0, a1);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, u32, f64) callconv(.c) void;
+    return invokeAndCheckVoid(rt, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
 /// D-116: `(i32, i32, i32)` void-returning. Used by float_exprs.wast's
@@ -279,11 +277,8 @@ pub fn callVoid_i32i32i32(
     a1: u32,
     a2: u32,
 ) Error!void {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: u32, a2: u32) callconv(.c) void;
-    const f = module.entry(func_idx, Fn);
-    f(rt, a0, a1, a2);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, u32, u32, u32) callconv(.c) void;
+    return invokeAndCheckVoid(rt, module.entry(func_idx, Fn), .{ a0, a1, a2 });
 }
 
 /// 5-arg helpers for the `(i64 f32 f64 i32 i32)` family that
@@ -302,11 +297,8 @@ pub fn callVoid_i64f32f64i32i32(
     a3: u32,
     a4: u32,
 ) Error!void {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u64, a1: f32, a2: f64, a3: u32, a4: u32) callconv(.c) void;
-    const f = module.entry(func_idx, Fn);
-    f(rt, a0, a1, a2, a3, a4);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, u64, f32, f64, u32, u32) callconv(.c) void;
+    return invokeAndCheckVoid(rt, module.entry(func_idx, Fn), .{ a0, a1, a2, a3, a4 });
 }
 
 pub fn callI64_i64f32f64i32i32(
@@ -319,12 +311,8 @@ pub fn callI64_i64f32f64i32i32(
     a3: u32,
     a4: u32,
 ) Error!u64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u64, a1: f32, a2: f64, a3: u32, a4: u32) callconv(.c) u64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1, a2, a3, a4);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u64, f32, f64, u32, u32) callconv(.c) u64;
+    return invokeAndCheck(rt, u64, module.entry(func_idx, Fn), .{ a0, a1, a2, a3, a4 });
 }
 
 pub fn callF64_i64f32f64i32i32(
@@ -337,12 +325,8 @@ pub fn callF64_i64f32f64i32i32(
     a3: u32,
     a4: u32,
 ) Error!f64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u64, a1: f32, a2: f64, a3: u32, a4: u32) callconv(.c) f64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1, a2, a3, a4);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u64, f32, f64, u32, u32) callconv(.c) f64;
+    return invokeAndCheck(rt, f64, module.entry(func_idx, Fn), .{ a0, a1, a2, a3, a4 });
 }
 
 /// Call a single-f64-argument void-returning JIT function.
@@ -352,11 +336,8 @@ pub fn callVoid_f64(
     rt: *JitRuntime,
     a0: f64,
 ) Error!void {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f64) callconv(.c) void;
-    const f = module.entry(func_idx, Fn);
-    f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, f64) callconv(.c) void;
+    return invokeAndCheckVoid(rt, module.entry(func_idx, Fn), .{a0});
 }
 
 /// Call a no-argument JIT function returning i64. ARM64 epilogue
@@ -367,12 +348,8 @@ pub fn callI64NoArgs(
     func_idx: u32,
     rt: *JitRuntime,
 ) Error!u64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime) callconv(.c) u64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime) callconv(.c) u64;
+    return invokeAndCheck(rt, u64, module.entry(func_idx, Fn), .{});
 }
 
 /// Call a single-i32-argument JIT function returning i64.
@@ -382,12 +359,8 @@ pub fn callI64_i32(
     rt: *JitRuntime,
     a0: u32,
 ) Error!u64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32) callconv(.c) u64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u32) callconv(.c) u64;
+    return invokeAndCheck(rt, u64, module.entry(func_idx, Fn), .{a0});
 }
 
 /// Call a single-i64-argument JIT function returning i64.
@@ -397,12 +370,8 @@ pub fn callI64_i64(
     rt: *JitRuntime,
     a0: u64,
 ) Error!u64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u64) callconv(.c) u64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u64) callconv(.c) u64;
+    return invokeAndCheck(rt, u64, module.entry(func_idx, Fn), .{a0});
 }
 
 /// Call a no-argument JIT function returning f32.
@@ -411,12 +380,8 @@ pub fn callF32NoArgs(
     func_idx: u32,
     rt: *JitRuntime,
 ) Error!f32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime) callconv(.c) f32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime) callconv(.c) f32;
+    return invokeAndCheck(rt, f32, module.entry(func_idx, Fn), .{});
 }
 
 /// Call a single-f32-argument JIT function returning f32.
@@ -426,12 +391,8 @@ pub fn callF32_f32(
     rt: *JitRuntime,
     a0: f32,
 ) Error!f32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f32) callconv(.c) f32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f32) callconv(.c) f32;
+    return invokeAndCheck(rt, f32, module.entry(func_idx, Fn), .{a0});
 }
 
 /// Call a no-argument JIT function returning f64.
@@ -440,12 +401,8 @@ pub fn callF64NoArgs(
     func_idx: u32,
     rt: *JitRuntime,
 ) Error!f64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime) callconv(.c) f64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime) callconv(.c) f64;
+    return invokeAndCheck(rt, f64, module.entry(func_idx, Fn), .{});
 }
 
 /// Call a single-f64-argument JIT function returning f64.
@@ -455,12 +412,8 @@ pub fn callF64_f64(
     rt: *JitRuntime,
     a0: f64,
 ) Error!f64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f64) callconv(.c) f64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f64) callconv(.c) f64;
+    return invokeAndCheck(rt, f64, module.entry(func_idx, Fn), .{a0});
 }
 
 // §9.9 / 9.9-l-1b-widen — cross-type scalar entry helpers
@@ -481,12 +434,8 @@ pub fn callI32_f32(
     rt: *JitRuntime,
     a0: f32,
 ) Error!u32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f32) callconv(.c) u32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f32) callconv(.c) u32;
+    return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{a0});
 }
 
 /// Wasm spec §4.4.1 (i32.trunc_f64_s / _u, i32.trunc_sat_f64_s / _u)
@@ -497,12 +446,8 @@ pub fn callI32_f64(
     rt: *JitRuntime,
     a0: f64,
 ) Error!u32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f64) callconv(.c) u32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f64) callconv(.c) u32;
+    return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{a0});
 }
 
 /// Wasm spec §4.4.1 (i64.trunc_f32_s / _u, i64.trunc_sat_f32_s / _u)
@@ -513,12 +458,8 @@ pub fn callI64_f32(
     rt: *JitRuntime,
     a0: f32,
 ) Error!u64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f32) callconv(.c) u64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f32) callconv(.c) u64;
+    return invokeAndCheck(rt, u64, module.entry(func_idx, Fn), .{a0});
 }
 
 /// Wasm spec §4.4.1 (i32.wrap_i64) — (i64) → i32 entry. The
@@ -530,12 +471,8 @@ pub fn callI32_i64(
     rt: *JitRuntime,
     a0: u64,
 ) Error!u32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u64) callconv(.c) u32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u64) callconv(.c) u32;
+    return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{a0});
 }
 
 /// Wasm spec §4.4.1 (i64.trunc_f64_s / _u, i64.trunc_sat_f64_s / _u,
@@ -546,12 +483,8 @@ pub fn callI64_f64(
     rt: *JitRuntime,
     a0: f64,
 ) Error!u64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f64) callconv(.c) u64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f64) callconv(.c) u64;
+    return invokeAndCheck(rt, u64, module.entry(func_idx, Fn), .{a0});
 }
 
 /// Wasm spec §4.4.1 (f32.convert_i32_s / _u, f32.reinterpret_i32)
@@ -562,12 +495,8 @@ pub fn callF32_i32(
     rt: *JitRuntime,
     a0: u32,
 ) Error!f32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32) callconv(.c) f32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u32) callconv(.c) f32;
+    return invokeAndCheck(rt, f32, module.entry(func_idx, Fn), .{a0});
 }
 
 /// Wasm spec §4.4.1 (f32.convert_i64_s / _u) — (i64) → f32 entry.
@@ -577,12 +506,8 @@ pub fn callF32_i64(
     rt: *JitRuntime,
     a0: u64,
 ) Error!f32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u64) callconv(.c) f32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u64) callconv(.c) f32;
+    return invokeAndCheck(rt, f32, module.entry(func_idx, Fn), .{a0});
 }
 
 /// Wasm spec §4.4.1 (f64.convert_i32_s / _u) — (i32) → f64 entry.
@@ -592,12 +517,8 @@ pub fn callF64_i32(
     rt: *JitRuntime,
     a0: u32,
 ) Error!f64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32) callconv(.c) f64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u32) callconv(.c) f64;
+    return invokeAndCheck(rt, f64, module.entry(func_idx, Fn), .{a0});
 }
 
 /// Wasm spec §4.4.1 (f64.convert_i64_s / _u, f64.reinterpret_i64)
@@ -608,12 +529,8 @@ pub fn callF64_i64(
     rt: *JitRuntime,
     a0: u64,
 ) Error!f64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u64) callconv(.c) f64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u64) callconv(.c) f64;
+    return invokeAndCheck(rt, f64, module.entry(func_idx, Fn), .{a0});
 }
 
 /// Wasm spec §4.4.1 (f32.demote_f64) — (f64) → f32 entry.
@@ -623,12 +540,8 @@ pub fn callF32_f64(
     rt: *JitRuntime,
     a0: f64,
 ) Error!f32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f64) callconv(.c) f32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f64) callconv(.c) f32;
+    return invokeAndCheck(rt, f32, module.entry(func_idx, Fn), .{a0});
 }
 
 /// Wasm spec §4.4.1 (f64.promote_f32) — (f32) → f64 entry.
@@ -638,12 +551,8 @@ pub fn callF64_f32(
     rt: *JitRuntime,
     a0: f32,
 ) Error!f64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f32) callconv(.c) f64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f32) callconv(.c) f64;
+    return invokeAndCheck(rt, f64, module.entry(func_idx, Fn), .{a0});
 }
 
 // §9.9 / 9.9-l-1b-binop — 2-arg scalar entry helpers covering the
@@ -661,12 +570,8 @@ pub fn callI64_i64i64(
     a0: u64,
     a1: u64,
 ) Error!u64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u64, a1: u64) callconv(.c) u64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u64, u64) callconv(.c) u64;
+    return invokeAndCheck(rt, u64, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
 /// Wasm spec §4.4.1 (i64.eq / ne / lt_s / lt_u / gt_s / gt_u /
@@ -678,12 +583,8 @@ pub fn callI32_i64i64(
     a0: u64,
     a1: u64,
 ) Error!u32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u64, a1: u64) callconv(.c) u32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u64, u64) callconv(.c) u32;
+    return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
 /// Wasm spec §4.4.1 (f32.add / sub / mul / div / min / max /
@@ -695,12 +596,8 @@ pub fn callF32_f32f32(
     a0: f32,
     a1: f32,
 ) Error!f32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f32, a1: f32) callconv(.c) f32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f32, f32) callconv(.c) f32;
+    return invokeAndCheck(rt, f32, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
 /// Wasm spec §4.4.1 (f32.eq / ne / lt / gt / le / ge) —
@@ -712,12 +609,8 @@ pub fn callI32_f32f32(
     a0: f32,
     a1: f32,
 ) Error!u32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f32, a1: f32) callconv(.c) u32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f32, f32) callconv(.c) u32;
+    return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
 /// Wasm spec §4.4.1 (f64.add / sub / mul / div / min / max /
@@ -729,12 +622,8 @@ pub fn callF64_f64f64(
     a0: f64,
     a1: f64,
 ) Error!f64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f64, a1: f64) callconv(.c) f64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f64, f64) callconv(.c) f64;
+    return invokeAndCheck(rt, f64, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
 /// Wasm spec §4.4.1 (f64.eq / ne / lt / gt / le / ge) —
@@ -746,12 +635,8 @@ pub fn callI32_f64f64(
     a0: f64,
     a1: f64,
 ) Error!u32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f64, a1: f64) callconv(.c) u32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f64, f64) callconv(.c) u32;
+    return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
 // §9.9 / 9.9-l-1b-d093-d55: 3+/4+-arg + mixed scalar entry shapes
@@ -768,12 +653,8 @@ pub fn callI32_i32i32i32(
     a1: u32,
     a2: u32,
 ) Error!u32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: u32, a2: u32) callconv(.c) u32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1, a2);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u32, u32, u32) callconv(.c) u32;
+    return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{ a0, a1, a2 });
 }
 
 pub fn callI64_i32i64(
@@ -783,12 +664,8 @@ pub fn callI64_i32i64(
     a0: u32,
     a1: u64,
 ) Error!u64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: u64) callconv(.c) u64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u32, u64) callconv(.c) u64;
+    return invokeAndCheck(rt, u64, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
 pub fn callI64_i64i64i32(
@@ -799,12 +676,8 @@ pub fn callI64_i64i64i32(
     a1: u64,
     a2: u32,
 ) Error!u64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u64, a1: u64, a2: u32) callconv(.c) u64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1, a2);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u64, u64, u32) callconv(.c) u64;
+    return invokeAndCheck(rt, u64, module.entry(func_idx, Fn), .{ a0, a1, a2 });
 }
 
 /// Multi-result return struct for `(i64, i32)` shape. Wasm spec §4.5.3
@@ -913,12 +786,8 @@ pub fn callI64i32_i64i64i32(
     a1: u64,
     a2: u32,
 ) Error!FuncRet_i64i32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u64, a1: u64, a2: u32) callconv(.c) FuncRet_i64i32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1, a2);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u64, u64, u32) callconv(.c) FuncRet_i64i32;
+    return invokeAndCheck(rt, FuncRet_i64i32, module.entry(func_idx, Fn), .{ a0, a1, a2 });
 }
 
 /// `() -> (i32, i64)` family — value-block-i32-i64 etc.
@@ -927,12 +796,8 @@ pub fn callI32i64NoArgs(
     func_idx: u32,
     rt: *JitRuntime,
 ) Error!FuncRet_i32i64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime) callconv(.c) FuncRet_i32i64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime) callconv(.c) FuncRet_i32i64;
+    return invokeAndCheck(rt, FuncRet_i32i64, module.entry(func_idx, Fn), .{});
 }
 
 /// `() -> (i64, i32)` family — call_indirect `type-all-i32-i64` shape.
@@ -941,12 +806,8 @@ pub fn callI64i32NoArgs(
     func_idx: u32,
     rt: *JitRuntime,
 ) Error!FuncRet_i64i32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime) callconv(.c) FuncRet_i64i32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime) callconv(.c) FuncRet_i64i32;
+    return invokeAndCheck(rt, FuncRet_i64i32, module.entry(func_idx, Fn), .{});
 }
 
 /// `() -> (i32, i32)` — uses `FuncRet_i32i32` (u64-padded layout).
@@ -955,12 +816,8 @@ pub fn callI32i32NoArgs(
     func_idx: u32,
     rt: *JitRuntime,
 ) Error!FuncRet_i32i32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime) callconv(.c) FuncRet_i32i32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime) callconv(.c) FuncRet_i32i32;
+    return invokeAndCheck(rt, FuncRet_i32i32, module.entry(func_idx, Fn), .{});
 }
 
 /// `(i32) -> (i32, i32)` — if.wast `multi`, etc.
@@ -970,12 +827,8 @@ pub fn callI32i32_i32(
     rt: *JitRuntime,
     a0: u32,
 ) Error!FuncRet_i32i32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32) callconv(.c) FuncRet_i32i32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u32) callconv(.c) FuncRet_i32i32;
+    return invokeAndCheck(rt, FuncRet_i32i32, module.entry(func_idx, Fn), .{a0});
 }
 
 /// `(i32) -> (i32, i64)` — break-br_if-num-num / break-br_table-num-num.
@@ -986,12 +839,8 @@ pub fn callI32i64_i32(
     rt: *JitRuntime,
     a0: u32,
 ) Error!FuncRet_i32i64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32) callconv(.c) FuncRet_i32i64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u32) callconv(.c) FuncRet_i32i64;
+    return invokeAndCheck(rt, FuncRet_i32i64, module.entry(func_idx, Fn), .{a0});
 }
 
 /// `() -> (i32, f64)` — Class B mixed int+float per ADR-0069.
@@ -1095,12 +944,8 @@ pub fn callF64f64NoArgs(
     func_idx: u32,
     rt: *JitRuntime,
 ) Error!FuncRet_f64f64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime) callconv(.c) FuncRet_f64f64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime) callconv(.c) FuncRet_f64f64;
+    return invokeAndCheck(rt, FuncRet_f64f64, module.entry(func_idx, Fn), .{});
 }
 
 pub fn callF32_f32f32f32(
@@ -1111,12 +956,8 @@ pub fn callF32_f32f32f32(
     a1: f32,
     a2: f32,
 ) Error!f32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f32, a1: f32, a2: f32) callconv(.c) f32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1, a2);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f32, f32, f32) callconv(.c) f32;
+    return invokeAndCheck(rt, f32, module.entry(func_idx, Fn), .{ a0, a1, a2 });
 }
 
 pub fn callF32_f32f32f32f32(
@@ -1128,12 +969,8 @@ pub fn callF32_f32f32f32f32(
     a2: f32,
     a3: f32,
 ) Error!f32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f32, a1: f32, a2: f32, a3: f32) callconv(.c) f32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1, a2, a3);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f32, f32, f32, f32) callconv(.c) f32;
+    return invokeAndCheck(rt, f32, module.entry(func_idx, Fn), .{ a0, a1, a2, a3 });
 }
 
 pub fn callF32_f32f32i32(
@@ -1144,12 +981,8 @@ pub fn callF32_f32f32i32(
     a1: f32,
     a2: u32,
 ) Error!f32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f32, a1: f32, a2: u32) callconv(.c) f32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1, a2);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f32, f32, u32) callconv(.c) f32;
+    return invokeAndCheck(rt, f32, module.entry(func_idx, Fn), .{ a0, a1, a2 });
 }
 
 pub fn callF32_f32f64(
@@ -1159,12 +992,8 @@ pub fn callF32_f32f64(
     a0: f32,
     a1: f64,
 ) Error!f32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f32, a1: f64) callconv(.c) f32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f32, f64) callconv(.c) f32;
+    return invokeAndCheck(rt, f32, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
 pub fn callF32_f64f32(
@@ -1174,12 +1003,8 @@ pub fn callF32_f64f32(
     a0: f64,
     a1: f32,
 ) Error!f32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f64, a1: f32) callconv(.c) f32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f64, f32) callconv(.c) f32;
+    return invokeAndCheck(rt, f32, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
 pub fn callF64_f64f64f64(
@@ -1190,12 +1015,8 @@ pub fn callF64_f64f64f64(
     a1: f64,
     a2: f64,
 ) Error!f64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f64, a1: f64, a2: f64) callconv(.c) f64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1, a2);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f64, f64, f64) callconv(.c) f64;
+    return invokeAndCheck(rt, f64, module.entry(func_idx, Fn), .{ a0, a1, a2 });
 }
 
 pub fn callF64_f64f64f64f64(
@@ -1207,12 +1028,8 @@ pub fn callF64_f64f64f64f64(
     a2: f64,
     a3: f64,
 ) Error!f64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f64, a1: f64, a2: f64, a3: f64) callconv(.c) f64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1, a2, a3);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f64, f64, f64, f64) callconv(.c) f64;
+    return invokeAndCheck(rt, f64, module.entry(func_idx, Fn), .{ a0, a1, a2, a3 });
 }
 
 pub fn callF64_f64f64i32(
@@ -1223,12 +1040,8 @@ pub fn callF64_f64f64i32(
     a1: f64,
     a2: u32,
 ) Error!f64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f64, a1: f64, a2: u32) callconv(.c) f64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1, a2);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f64, f64, u32) callconv(.c) f64;
+    return invokeAndCheck(rt, f64, module.entry(func_idx, Fn), .{ a0, a1, a2 });
 }
 
 // §9.9 / 9.9-l-1b-d093-d61: residual `runner-shape-gap` shapes
@@ -1243,12 +1056,8 @@ pub fn callF32_i32i32(
     a0: u32,
     a1: u32,
 ) Error!f32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: u32) callconv(.c) f32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u32, u32) callconv(.c) f32;
+    return invokeAndCheck(rt, f32, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
 pub fn callF64_i32i32(
@@ -1258,12 +1067,8 @@ pub fn callF64_i32i32(
     a0: u32,
     a1: u32,
 ) Error!f64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: u32) callconv(.c) f64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u32, u32) callconv(.c) f64;
+    return invokeAndCheck(rt, f64, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
 pub fn callI32_f32f32f32(
@@ -1274,12 +1079,8 @@ pub fn callI32_f32f32f32(
     a1: f32,
     a2: f32,
 ) Error!u32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f32, a1: f32, a2: f32) callconv(.c) u32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1, a2);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f32, f32, f32) callconv(.c) u32;
+    return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{ a0, a1, a2 });
 }
 
 pub fn callI32_f64f64f64(
@@ -1290,12 +1091,8 @@ pub fn callI32_f64f64f64(
     a1: f64,
     a2: f64,
 ) Error!u32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: f64, a1: f64, a2: f64) callconv(.c) u32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1, a2);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, f64, f64, f64) callconv(.c) u32;
+    return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{ a0, a1, a2 });
 }
 
 pub fn callI32_i32f64i32(
@@ -1306,12 +1103,8 @@ pub fn callI32_i32f64i32(
     a1: f64,
     a2: u32,
 ) Error!u32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: f64, a2: u32) callconv(.c) u32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1, a2);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u32, f64, u32) callconv(.c) u32;
+    return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{ a0, a1, a2 });
 }
 
 pub fn callF64_f64f64f64f64f64f64f64f64(
@@ -1327,22 +1120,18 @@ pub fn callF64_f64f64f64f64f64f64f64f64(
     a6: f64,
     a7: f64,
 ) Error!f64 {
-    rt.trap_flag = 0;
     const Fn = *const fn (
-        rt: *const JitRuntime,
-        a0: f64,
-        a1: f64,
-        a2: f64,
-        a3: f64,
-        a4: f64,
-        a5: f64,
-        a6: f64,
-        a7: f64,
+        *const JitRuntime,
+        f64,
+        f64,
+        f64,
+        f64,
+        f64,
+        f64,
+        f64,
+        f64,
     ) callconv(.c) f64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1, a2, a3, a4, a5, a6, a7);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    return invokeAndCheck(rt, f64, module.entry(func_idx, Fn), .{ a0, a1, a2, a3, a4, a5, a6, a7 });
 }
 
 pub fn callF64_f32i32i64i32f64i32(
@@ -1356,20 +1145,16 @@ pub fn callF64_f32i32i64i32f64i32(
     a4: f64,
     a5: u32,
 ) Error!f64 {
-    rt.trap_flag = 0;
     const Fn = *const fn (
-        rt: *const JitRuntime,
-        a0: f32,
-        a1: u32,
-        a2: u64,
-        a3: u32,
-        a4: f64,
-        a5: u32,
+        *const JitRuntime,
+        f32,
+        u32,
+        u64,
+        u32,
+        f64,
+        u32,
     ) callconv(.c) f64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1, a2, a3, a4, a5);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    return invokeAndCheck(rt, f64, module.entry(func_idx, Fn), .{ a0, a1, a2, a3, a4, a5 });
 }
 
 // §9.9 / 9.9-l-1b-d093-d63: reftype-aliased dispatch shapes
@@ -1385,12 +1170,8 @@ pub fn callI32_i32i64(
     a0: u32,
     a1: u64,
 ) Error!u32 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: u64) callconv(.c) u32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u32, u64) callconv(.c) u32;
+    return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
 pub fn callI64_i32i32(
@@ -1400,12 +1181,8 @@ pub fn callI64_i32i32(
     a0: u32,
     a1: u32,
 ) Error!u64 {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: u32) callconv(.c) u64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0, a1);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, u32, u32) callconv(.c) u64;
+    return invokeAndCheck(rt, u64, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
 pub fn callVoid_i32i64i32(
@@ -1416,11 +1193,8 @@ pub fn callVoid_i32i64i32(
     a1: u64,
     a2: u32,
 ) Error!void {
-    rt.trap_flag = 0;
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: u64, a2: u32) callconv(.c) void;
-    const f = module.entry(func_idx, Fn);
-    f(rt, a0, a1, a2);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, u32, u64, u32) callconv(.c) void;
+    return invokeAndCheckVoid(rt, module.entry(func_idx, Fn), .{ a0, a1, a2 });
 }
 
 /// Wasm spec §4.4 (function invocation, v128 result) — call a no-
@@ -1439,12 +1213,9 @@ pub fn callV128NoArgs(
     func_idx: u32,
     rt: *JitRuntime,
 ) Error![16]u8 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime) callconv(.c) Vec;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime) callconv(.c) Vec;
+    const result = try invokeAndCheck(rt, Vec, module.entry(func_idx, Fn), .{});
     return @bitCast(result);
 }
 
@@ -1457,12 +1228,9 @@ pub fn callV128_i32(
     rt: *JitRuntime,
     a0: u32,
 ) Error![16]u8 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32) callconv(.c) Vec;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, a0);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, u32) callconv(.c) Vec;
+    const result = try invokeAndCheck(rt, Vec, module.entry(func_idx, Fn), .{a0});
     return @bitCast(result);
 }
 
@@ -1476,12 +1244,9 @@ pub fn callV128_v128(
     rt: *JitRuntime,
     a0: [16]u8,
 ) Error![16]u8 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec) callconv(.c) Vec;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0));
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, Vec) callconv(.c) Vec;
+    const result = try invokeAndCheck(rt, Vec, module.entry(func_idx, Fn), .{@as(Vec, @bitCast(a0))});
     return @bitCast(result);
 }
 
@@ -1496,12 +1261,9 @@ pub fn callVoid_v128(
     rt: *JitRuntime,
     a0: [16]u8,
 ) Error!void {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec) callconv(.c) void;
-    const f = module.entry(func_idx, Fn);
-    f(rt, @bitCast(a0));
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, Vec) callconv(.c) void;
+    return invokeAndCheckVoid(rt, module.entry(func_idx, Fn), .{@as(Vec, @bitCast(a0))});
 }
 
 /// Wasm spec §4.4 — `(v128, v128) → ()` invocation. §9.9 / 9.9-h-3
@@ -1514,12 +1276,9 @@ pub fn callVoid_v128v128(
     a0: [16]u8,
     a1: [16]u8,
 ) Error!void {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: Vec) callconv(.c) void;
-    const f = module.entry(func_idx, Fn);
-    f(rt, @bitCast(a0), @bitCast(a1));
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, Vec, Vec) callconv(.c) void;
+    return invokeAndCheckVoid(rt, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), @as(Vec, @bitCast(a1)) });
 }
 
 /// Wasm spec §4.4 — `(v128, v128, v128, v128) → ()` invocation.
@@ -1536,12 +1295,9 @@ pub fn callVoid_v128v128v128v128(
     a2: [16]u8,
     a3: [16]u8,
 ) Error!void {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: Vec, a2: Vec, a3: Vec) callconv(.c) void;
-    const f = module.entry(func_idx, Fn);
-    f(rt, @bitCast(a0), @bitCast(a1), @bitCast(a2), @bitCast(a3));
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, Vec, Vec, Vec, Vec) callconv(.c) void;
+    return invokeAndCheckVoid(rt, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), @as(Vec, @bitCast(a1)), @as(Vec, @bitCast(a2)), @as(Vec, @bitCast(a3)) });
 }
 
 /// Wasm spec §4.4 — `(v128, v128) → v128` invocation. §9.9 / 9.9-f
@@ -1556,12 +1312,9 @@ pub fn callV128_v128v128(
     a0: [16]u8,
     a1: [16]u8,
 ) Error![16]u8 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: Vec) callconv(.c) Vec;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0), @bitCast(a1));
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, Vec, Vec) callconv(.c) Vec;
+    const result = try invokeAndCheck(rt, Vec, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), @as(Vec, @bitCast(a1)) });
     return @bitCast(result);
 }
 
@@ -1579,12 +1332,9 @@ pub fn callV128_v128v128v128(
     a1: [16]u8,
     a2: [16]u8,
 ) Error![16]u8 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: Vec, a2: Vec) callconv(.c) Vec;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0), @bitCast(a1), @bitCast(a2));
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, Vec, Vec, Vec) callconv(.c) Vec;
+    const result = try invokeAndCheck(rt, Vec, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), @as(Vec, @bitCast(a1)), @as(Vec, @bitCast(a2)) });
     return @bitCast(result);
 }
 
@@ -1599,13 +1349,9 @@ pub fn callI32_v128(
     rt: *JitRuntime,
     a0: [16]u8,
 ) Error!u32 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec) callconv(.c) u32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0));
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, Vec) callconv(.c) u32;
+    return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{@as(Vec, @bitCast(a0))});
 }
 
 /// Wasm spec §4.4 — `(v128) → f32` invocation. §9.9 / 9.9-h-26
@@ -1619,13 +1365,9 @@ pub fn callF32_v128(
     rt: *JitRuntime,
     a0: [16]u8,
 ) Error!f32 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec) callconv(.c) f32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0));
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, Vec) callconv(.c) f32;
+    return invokeAndCheck(rt, f32, module.entry(func_idx, Fn), .{@as(Vec, @bitCast(a0))});
 }
 
 /// Wasm spec §4.4 — `(v128) → f64` invocation. §9.9 / 9.9-h-26
@@ -1639,13 +1381,9 @@ pub fn callF64_v128(
     rt: *JitRuntime,
     a0: [16]u8,
 ) Error!f64 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec) callconv(.c) f64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0));
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, Vec) callconv(.c) f64;
+    return invokeAndCheck(rt, f64, module.entry(func_idx, Fn), .{@as(Vec, @bitCast(a0))});
 }
 
 /// Wasm spec §4.4 — `(v128, i32) → v128` invocation. §9.9 /
@@ -1662,12 +1400,9 @@ pub fn callV128_v128i32(
     a0: [16]u8,
     a1: u32,
 ) Error![16]u8 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: u32) callconv(.c) Vec;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0), a1);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, Vec, u32) callconv(.c) Vec;
+    const result = try invokeAndCheck(rt, Vec, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), a1 });
     return @bitCast(result);
 }
 
@@ -1685,12 +1420,9 @@ pub fn callV128_v128f32(
     a0: [16]u8,
     a1: f32,
 ) Error![16]u8 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: f32) callconv(.c) Vec;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0), a1);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, Vec, f32) callconv(.c) Vec;
+    const result = try invokeAndCheck(rt, Vec, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), a1 });
     return @bitCast(result);
 }
 
@@ -1706,12 +1438,9 @@ pub fn callV128_v128f64(
     a0: [16]u8,
     a1: f64,
 ) Error![16]u8 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: f64) callconv(.c) Vec;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0), a1);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, Vec, f64) callconv(.c) Vec;
+    const result = try invokeAndCheck(rt, Vec, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), a1 });
     return @bitCast(result);
 }
 
@@ -1727,13 +1456,9 @@ pub fn callI64_v128(
     rt: *JitRuntime,
     a0: [16]u8,
 ) Error!u64 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec) callconv(.c) u64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0));
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, Vec) callconv(.c) u64;
+    return invokeAndCheck(rt, u64, module.entry(func_idx, Fn), .{@as(Vec, @bitCast(a0))});
 }
 
 /// Wasm spec §4.4 — `(v128, i64) → v128` invocation. §9.9 /
@@ -1749,12 +1474,9 @@ pub fn callV128_v128i64(
     a0: [16]u8,
     a1: u64,
 ) Error![16]u8 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: u64) callconv(.c) Vec;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0), a1);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, Vec, u64) callconv(.c) Vec;
+    const result = try invokeAndCheck(rt, Vec, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), a1 });
     return @bitCast(result);
 }
 
@@ -1773,13 +1495,9 @@ pub fn callI32_v128v128(
     a0: [16]u8,
     a1: [16]u8,
 ) Error!u32 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: Vec) callconv(.c) u32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0), @bitCast(a1));
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, Vec, Vec) callconv(.c) u32;
+    return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), @as(Vec, @bitCast(a1)) });
 }
 
 /// Wasm spec §4.4 — `(v128, v128, i32) → v128` invocation. §9.9
@@ -1797,12 +1515,9 @@ pub fn callV128_v128v128i32(
     a1: [16]u8,
     a2: u32,
 ) Error![16]u8 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: Vec, a2: u32) callconv(.c) Vec;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0), @bitCast(a1), a2);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, Vec, Vec, u32) callconv(.c) Vec;
+    const result = try invokeAndCheck(rt, Vec, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), @as(Vec, @bitCast(a1)), a2 });
     return @bitCast(result);
 }
 
@@ -1820,13 +1535,9 @@ pub fn callI32_v128v128v128(
     a1: [16]u8,
     a2: [16]u8,
 ) Error!u32 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: Vec, a2: Vec) callconv(.c) u32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0), @bitCast(a1), @bitCast(a2));
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, Vec, Vec, Vec) callconv(.c) u32;
+    return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), @as(Vec, @bitCast(a1)), @as(Vec, @bitCast(a2)) });
 }
 
 /// Wasm spec §4.4 — `(v128, i32) → i32` invocation. §9.9 / 9.9-h-28
@@ -1843,13 +1554,9 @@ pub fn callI32_v128i32(
     a0: [16]u8,
     a1: u32,
 ) Error!u32 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: u32) callconv(.c) u32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0), a1);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, Vec, u32) callconv(.c) u32;
+    return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), a1 });
 }
 
 /// Wasm spec §4.4 — `(v128, i64) → i32` invocation. §9.9 / 9.9-h-28
@@ -1865,13 +1572,9 @@ pub fn callI32_v128i64(
     a0: [16]u8,
     a1: u64,
 ) Error!u32 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: u64) callconv(.c) u32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0), a1);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, Vec, u64) callconv(.c) u32;
+    return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), a1 });
 }
 
 /// Wasm spec §4.4 — `(v128, i64) → i64` invocation. §9.9 / 9.9-h-28
@@ -1886,13 +1589,9 @@ pub fn callI64_v128i64(
     a0: [16]u8,
     a1: u64,
 ) Error!u64 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: u64) callconv(.c) u64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0), a1);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, Vec, u64) callconv(.c) u64;
+    return invokeAndCheck(rt, u64, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), a1 });
 }
 
 /// Wasm spec §4.4 — `(v128, f32) → f32` invocation. §9.9 / 9.9-h-28
@@ -1908,13 +1607,9 @@ pub fn callF32_v128f32(
     a0: [16]u8,
     a1: f32,
 ) Error!f32 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: f32) callconv(.c) f32;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0), a1);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, Vec, f32) callconv(.c) f32;
+    return invokeAndCheck(rt, f32, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), a1 });
 }
 
 /// Wasm spec §4.4 — `(v128, f64) → f64` invocation. §9.9 / 9.9-h-28
@@ -1928,13 +1623,9 @@ pub fn callF64_v128f64(
     a0: [16]u8,
     a1: f64,
 ) Error!f64 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: f64) callconv(.c) f64;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0), a1);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    const Fn = *const fn (*const JitRuntime, Vec, f64) callconv(.c) f64;
+    return invokeAndCheck(rt, f64, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), a1 });
 }
 
 /// Wasm spec §4.4 — `(v128, v128, v128, v128) → v128` invocation.
@@ -1953,12 +1644,9 @@ pub fn callV128_v128v128v128v128(
     a2: [16]u8,
     a3: [16]u8,
 ) Error![16]u8 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: Vec, a2: Vec, a3: Vec) callconv(.c) Vec;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0), @bitCast(a1), @bitCast(a2), @bitCast(a3));
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, Vec, Vec, Vec, Vec) callconv(.c) Vec;
+    const result = try invokeAndCheck(rt, Vec, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), @as(Vec, @bitCast(a1)), @as(Vec, @bitCast(a2)), @as(Vec, @bitCast(a3)) });
     return @bitCast(result);
 }
 
@@ -1977,12 +1665,9 @@ pub fn callV128_v128i32v128(
     a1: u32,
     a2: [16]u8,
 ) Error![16]u8 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: u32, a2: Vec) callconv(.c) Vec;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0), a1, @bitCast(a2));
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, Vec, u32, Vec) callconv(.c) Vec;
+    const result = try invokeAndCheck(rt, Vec, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), a1, @as(Vec, @bitCast(a2)) });
     return @bitCast(result);
 }
 
@@ -2002,12 +1687,9 @@ pub fn callV128_v128i32v128i32(
     a2: [16]u8,
     a3: u32,
 ) Error![16]u8 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: u32, a2: Vec, a3: u32) callconv(.c) Vec;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0), a1, @bitCast(a2), a3);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, Vec, u32, Vec, u32) callconv(.c) Vec;
+    const result = try invokeAndCheck(rt, Vec, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), a1, @as(Vec, @bitCast(a2)), a3 });
     return @bitCast(result);
 }
 
@@ -2027,12 +1709,9 @@ pub fn callV128_v128i64v128i64(
     a2: [16]u8,
     a3: u64,
 ) Error![16]u8 {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: Vec, a1: u64, a2: Vec, a3: u64) callconv(.c) Vec;
-    const f = module.entry(func_idx, Fn);
-    const result = f(rt, @bitCast(a0), a1, @bitCast(a2), a3);
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, Vec, u64, Vec, u64) callconv(.c) Vec;
+    const result = try invokeAndCheck(rt, Vec, module.entry(func_idx, Fn), .{ @as(Vec, @bitCast(a0)), a1, @as(Vec, @bitCast(a2)), a3 });
     return @bitCast(result);
 }
 
@@ -2050,12 +1729,9 @@ pub fn callVoid_i32v128(
     a0: u32,
     a1: [16]u8,
 ) Error!void {
-    rt.trap_flag = 0;
     const Vec = @Vector(16, u8);
-    const Fn = *const fn (rt: *const JitRuntime, a0: u32, a1: Vec) callconv(.c) void;
-    const f = module.entry(func_idx, Fn);
-    f(rt, a0, @bitCast(a1));
-    if (rt.trap_flag != 0) return Error.Trap;
+    const Fn = *const fn (*const JitRuntime, u32, Vec) callconv(.c) void;
+    return invokeAndCheckVoid(rt, module.entry(func_idx, Fn), .{ a0, @as(Vec, @bitCast(a1)) });
 }
 
 // ============================================================
