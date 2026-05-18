@@ -42,6 +42,68 @@ const ZirFunc = zir.ZirFunc;
 /// `arm64/op_control.zig:merge_top_vregs_cap`.
 const merge_top_vregs_cap: u8 = 8;
 
+/// D-147 / lesson `2026-05-18-parallel-move-cycle-in-if-merge.md`:
+/// x86_64 mirror of arm64's `resolveAndEmitMergeMovsRegBatch`.
+/// Resolves a batch of GPR register-to-register merge moves with
+/// cycle detection; breaks cycles via **RAX** (caller-saved return
+/// reg, outside both the regalloc pool and `abi.spill_stage_gprs`
+/// R10/R11 — safe scratch for the duration of the merge batch
+/// since no calls fire between MOVs). Algorithm + correctness
+/// argument identical to the arm64 helper.
+fn resolveAndEmitMergeMovsRegBatchX86(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    moves: []ParallelMoveX86,
+) Error!void {
+    var pending: u32 = 0;
+    for (moves) |m| {
+        if (!m.done) pending += 1;
+    }
+    while (pending > 0) {
+        var leaf_idx: ?usize = null;
+        for (moves, 0..) |m, i| {
+            if (m.done) continue;
+            var has_user = false;
+            for (moves, 0..) |o, j| {
+                if (i == j or o.done) continue;
+                if (m.dst_reg == o.src_reg) {
+                    has_user = true;
+                    break;
+                }
+            }
+            if (!has_user) {
+                leaf_idx = i;
+                break;
+            }
+        }
+        if (leaf_idx) |idx| {
+            const m = moves[idx];
+            try buf.appendSlice(allocator, inst.encMovRR(.q, m.dst_reg, m.src_reg).slice());
+            moves[idx].done = true;
+            pending -= 1;
+        } else {
+            // Cycle. Save first pending move's dst to RAX; rewrite
+            // any pending move whose src is that register to use RAX.
+            for (moves, 0..) |m, i| {
+                if (m.done) continue;
+                const cycle_dst = m.dst_reg;
+                try buf.appendSlice(allocator, inst.encMovRR(.q, .rax, cycle_dst).slice());
+                for (moves, 0..) |o, j| {
+                    if (o.done or j == i) continue;
+                    if (o.src_reg == cycle_dst) moves[j].src_reg = .rax;
+                }
+                break;
+            }
+        }
+    }
+}
+
+const ParallelMoveX86 = struct {
+    src_reg: abi.Gpr,
+    dst_reg: abi.Gpr,
+    done: bool,
+};
+
 /// D-097 / d-17: unified merge-MOV dispatcher (x86_64 counterpart
 /// of `arm64/op_control.zig:emitMergeMov`). See that file for the
 /// rationale; behaviour is identical modulo the per-arch encoder
@@ -132,11 +194,63 @@ fn captureOrEmitBlockMergeMov(
     }
 
     const base = pushed_vregs.items.len - arity;
-    var i: u32 = 0;
-    while (i < arity) : (i += 1) {
-        const src_vreg = pushed_vregs.items[base + i];
-        const merge_vreg = labels.items[tgt_idx].merge_top_vregs[i];
-        try emitMergeMov(allocator, buf, alloc, spill_base_off, func, src_vreg, merge_vreg);
+    // D-147 / lesson `2026-05-18-parallel-move-cycle-in-if-merge.md`
+    // (arm64 mirror): when all moves are GPR reg-to-reg, route them
+    // through the cycle-aware parallel-move resolver so LIFO slot
+    // reuse + sequential emit don't clobber still-needed sources.
+    var moves_buf: [merge_top_vregs_cap]ParallelMoveX86 = undefined;
+    var n_moves: u32 = 0;
+    var all_gpr_reg_to_reg = true;
+    {
+        var k: u32 = 0;
+        while (k < arity) : (k += 1) {
+            const src_vreg = pushed_vregs.items[base + k];
+            const merge_vreg = labels.items[tgt_idx].merge_top_vregs[k];
+            if (src_vreg == merge_vreg) continue;
+            if (alloc.shapeTag(merge_vreg) == .v128) {
+                all_gpr_reg_to_reg = false;
+                break;
+            }
+            if (regalloc.vregClassByDef(func, merge_vreg) == .fpr) {
+                all_gpr_reg_to_reg = false;
+                break;
+            }
+            const src_slot = alloc.slot(src_vreg, .gpr);
+            const merge_slot = alloc.slot(merge_vreg, .gpr);
+            const src_reg: abi.Gpr = switch (src_slot) {
+                .reg => |id| abi.slotToReg(id) orelse {
+                    all_gpr_reg_to_reg = false;
+                    break;
+                },
+                .spill => {
+                    all_gpr_reg_to_reg = false;
+                    break;
+                },
+            };
+            const dst_reg: abi.Gpr = switch (merge_slot) {
+                .reg => |id| abi.slotToReg(id) orelse {
+                    all_gpr_reg_to_reg = false;
+                    break;
+                },
+                .spill => {
+                    all_gpr_reg_to_reg = false;
+                    break;
+                },
+            };
+            if (src_reg == dst_reg) continue;
+            moves_buf[n_moves] = .{ .src_reg = src_reg, .dst_reg = dst_reg, .done = false };
+            n_moves += 1;
+        }
+    }
+    if (all_gpr_reg_to_reg) {
+        try resolveAndEmitMergeMovsRegBatchX86(allocator, buf, moves_buf[0..n_moves]);
+    } else {
+        var i: u32 = 0;
+        while (i < arity) : (i += 1) {
+            const src_vreg = pushed_vregs.items[base + i];
+            const merge_vreg = labels.items[tgt_idx].merge_top_vregs[i];
+            try emitMergeMov(allocator, buf, alloc, spill_base_off, func, src_vreg, merge_vreg);
+        }
     }
     return true;
 }

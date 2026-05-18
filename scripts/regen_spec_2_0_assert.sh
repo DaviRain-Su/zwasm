@@ -551,16 +551,14 @@ for c in d['commands']:
                 # (ADR-0026 2026-05-18 amend; entry helpers thunk
                 # Zig's RDI/RSI convention into RDI/R11). Spec
                 # fixtures: value-i32-i32-i32 / return-i32-i32-i32
-                # / break-i32-i32-i32 (func.wast) + 2×
-                # break-multi-value (block/loop). The if.wast
-                # (i32) → (i32, i32, i64) shape (2 fixtures)
-                # remains skip-impl pending D-147 — the if-arm
-                # merge truncates i64.const-with-high-bits-set
-                # to W-form somewhere along the lowering path
-                # (zero-extended i32). Surfaces only with
-                # negative i64 const in if-else merge.
+                # / break-i32-i32-i32 (func.wast) + 4×
+                # break-multi-value (block/loop/if×2). The if.wast
+                # `(i32) → (i32,i32,i64)` was gated behind D-147
+                # (parallel-move cycle in multi-value if-merge);
+                # closed at the parallel-move resolver chunk.
                 ((), ('i32', 'i32', 'i32')),
                 ((), ('i32', 'i32', 'i64')),
+                (('i32',), ('i32', 'i32', 'i64')),
             }
             if (arg_kinds, result_kinds) not in supported_multi:
                 lines.append(f'skip-impl multi-result {a["field"]}')

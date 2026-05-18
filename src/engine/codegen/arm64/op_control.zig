@@ -37,6 +37,7 @@ const std = @import("std");
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
 const inst_neon = @import("inst_neon.zig");
+const abi = @import("abi.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
 const label_mod = @import("label.zig");
@@ -53,6 +54,73 @@ const Allocator = std.mem.Allocator;
 /// imposes no tight limit but production guests typically use
 /// ≤ 4. 8 is generous and keeps the Label struct compact.
 const merge_top_vregs_cap: u8 = 8;
+
+/// D-147 / lesson `2026-05-18-parallel-move-cycle-in-if-merge.md`:
+/// resolve a batch of GPR register-to-register merge moves
+/// (cycle-aware), breaking any cycle via X16 (IP0; caller-saved,
+/// outside the regalloc pool and outside the `abi.spill_stage_gprs`
+/// X14/X15 cohort — safe scratch for the duration of the merge
+/// batch).
+///
+/// Algorithm: iterate until empty. At each step, find a LEAF (a
+/// pending move whose destination register is no other pending
+/// move's source). Emit it and remove. If no leaf exists →
+/// CYCLE: save one pending move's dst to X16, rewrite all pending
+/// sources that referred to that register to use X16 instead.
+/// Re-iterate (a leaf will now exist because the cycle is broken).
+///
+/// Cost: 1 extra MOV per cycle (regardless of cycle length).
+/// O(N²) loop is fine for N ≤ `merge_top_vregs_cap` = 8.
+fn resolveAndEmitMergeMovsRegBatch(ctx: *EmitCtx, moves: []ParallelMove) Error!void {
+    var pending: u32 = 0;
+    for (moves) |m| {
+        if (!m.done) pending += 1;
+    }
+    while (pending > 0) {
+        var leaf_idx: ?usize = null;
+        for (moves, 0..) |m, i| {
+            if (m.done) continue;
+            var has_user = false;
+            for (moves, 0..) |o, j| {
+                if (i == j or o.done) continue;
+                if (m.dst_reg == o.src_reg) {
+                    has_user = true;
+                    break;
+                }
+            }
+            if (!has_user) {
+                leaf_idx = i;
+                break;
+            }
+        }
+        if (leaf_idx) |idx| {
+            const m = moves[idx];
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(m.dst_reg, 31, m.src_reg));
+            moves[idx].done = true;
+            pending -= 1;
+        } else {
+            // Cycle. Save first pending move's dst to X16; rewrite
+            // any pending move whose src is that register to use X16.
+            for (moves, 0..) |m, i| {
+                if (m.done) continue;
+                const cycle_dst = m.dst_reg;
+                try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(16, 31, cycle_dst));
+                for (moves, 0..) |o, j| {
+                    if (o.done or j == i) continue;
+                    if (o.src_reg == cycle_dst) moves[j].src_reg = 16;
+                }
+                break;
+            }
+            // No move removed this iteration; loop will find the leaf next.
+        }
+    }
+}
+
+const ParallelMove = struct {
+    src_reg: inst.Xn,
+    dst_reg: inst.Xn,
+    done: bool,
+};
 
 /// D-097 / d-17 (ADR-0060 follow-up): unified merge-MOV dispatcher.
 ///
@@ -162,11 +230,67 @@ fn captureOrEmitBlockMergeMov(ctx: *EmitCtx, tgt_idx: usize) Error!bool {
     }
 
     const base = ctx.pushed_vregs.items.len - arity;
-    var i: u32 = 0;
-    while (i < arity) : (i += 1) {
-        const src_vreg = ctx.pushed_vregs.items[base + i];
-        const merge_vreg = ctx.labels.items[tgt_idx].merge_top_vregs[i];
-        try emitMergeMov(ctx, src_vreg, merge_vreg, 1, 0);
+    // D-147 / lesson `2026-05-18-parallel-move-cycle-in-if-merge.md`:
+    // if all moves are GPR reg-to-reg (no FP / v128 / spilled
+    // participants), route them through the parallel-move resolver
+    // so cyclic dependencies via LIFO slot reuse don't clobber
+    // still-needed sources. Otherwise fall back to per-move
+    // sequential emit (existing behaviour; FP / spill paths
+    // historically passed because their cycle patterns weren't
+    // exercised by the spec corpus).
+    var moves_buf: [merge_top_vregs_cap]ParallelMove = undefined;
+    var n_moves: u32 = 0;
+    var all_gpr_reg_to_reg = true;
+    {
+        var k: u32 = 0;
+        while (k < arity) : (k += 1) {
+            const src_vreg = ctx.pushed_vregs.items[base + k];
+            const merge_vreg = ctx.labels.items[tgt_idx].merge_top_vregs[k];
+            if (src_vreg == merge_vreg) continue;
+            if (ctx.alloc.shapeTag(merge_vreg) == .v128) {
+                all_gpr_reg_to_reg = false;
+                break;
+            }
+            if (regalloc.vregClassByDef(ctx.func, merge_vreg) == .fpr) {
+                all_gpr_reg_to_reg = false;
+                break;
+            }
+            const src_slot = ctx.alloc.slot(src_vreg, .gpr);
+            const merge_slot = ctx.alloc.slot(merge_vreg, .gpr);
+            const src_reg: inst.Xn = switch (src_slot) {
+                .reg => |id| abi.slotToReg(id) orelse {
+                    all_gpr_reg_to_reg = false;
+                    break;
+                },
+                .spill => {
+                    all_gpr_reg_to_reg = false;
+                    break;
+                },
+            };
+            const dst_reg: inst.Xn = switch (merge_slot) {
+                .reg => |id| abi.slotToReg(id) orelse {
+                    all_gpr_reg_to_reg = false;
+                    break;
+                },
+                .spill => {
+                    all_gpr_reg_to_reg = false;
+                    break;
+                },
+            };
+            if (src_reg == dst_reg) continue;
+            moves_buf[n_moves] = .{ .src_reg = src_reg, .dst_reg = dst_reg, .done = false };
+            n_moves += 1;
+        }
+    }
+    if (all_gpr_reg_to_reg) {
+        try resolveAndEmitMergeMovsRegBatch(ctx, moves_buf[0..n_moves]);
+    } else {
+        var i: u32 = 0;
+        while (i < arity) : (i += 1) {
+            const src_vreg = ctx.pushed_vregs.items[base + i];
+            const merge_vreg = ctx.labels.items[tgt_idx].merge_top_vregs[i];
+            try emitMergeMov(ctx, src_vreg, merge_vreg, 1, 0);
+        }
     }
     return true;
 }
