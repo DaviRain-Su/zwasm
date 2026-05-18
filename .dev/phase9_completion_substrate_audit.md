@@ -323,9 +323,10 @@ libc fanout much higher post-Phase 10 than now.
    "Unconscious libc fanout (new `std.c.*` calls without
    ADR justification or rule exception)" to the forbidden
    list, with cite to the new ADR.
-4. **`audit_scaffolding` §I extension** (or new §J) — the
-   grep above runs as a recurring check, surfacing new
-   `std.c.*` sites in diffs against `main`.
+4. **`audit_scaffolding` §G.5 extension** (lives under
+   existing §G Extended-challenge consistency; settled by
+   ADR-0070) — the grep above runs as a recurring check,
+   surfacing new `std.c.*` sites in diffs against `main`.
 5. **One initial mechanical-replacement chunk** (Phase 10
    prep, NOT Phase 9 — the boundary work itself is Phase
    10+ scope): convert the easy `std.c.write` /

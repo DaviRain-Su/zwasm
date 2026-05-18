@@ -87,7 +87,7 @@ metadata and are DCE'd by build-option.
 ### Enforcement (aligned with ADR-0071)
 
 - `scripts/check_build_dce.sh` — verify symbol table grep + size across 6 build-option combinations
-- `audit_scaffolding §H` (new) — flag signs that DCE has broken
+- `audit_scaffolding §K.1` (new section — Phase 9 completion enforcement) — flag signs that DCE has broken
 - `test/build_completeness/` — E2E test (verify in each build that the feature is "absent")
 
 ## Alternatives considered

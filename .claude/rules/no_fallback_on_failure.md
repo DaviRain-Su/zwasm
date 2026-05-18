@@ -46,7 +46,7 @@ primary exit criterion of Phase 9 completeness is "skip-impl == 0"
 - `scripts/check_fallback_patterns.sh` (to be implemented in §9.12-A):
   grep-based detection
 - `audit_scaffolding §G.6` (to land in §9.12-A)
-- ADR-0050 D-3 (skip-impl one-way ratchet): any increase in runtime SKIP-*
+- ADR-0050 D-5 (skip-impl one-way ratchet): any increase in runtime SKIP-*
   requires an ADR
 
 ## Exceptions
@@ -63,7 +63,7 @@ grep change. Liveness is verified by `audit_scaffolding §G.6`.
 
 ## Related
 
-- ADR-0050 amend (D-3 / D-4 skip-impl one-way ratchet)
+- ADR-0050 amend (D-5 / D-6 skip-impl one-way ratchet)
 - ADR-0071 §Q3 (Phase 9 completeness substrate audit resolution)
 - Master plan §7.4
 - `.claude/rules/no_workaround.md` (sibling rule; SKIP-* increase

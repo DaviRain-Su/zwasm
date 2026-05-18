@@ -35,7 +35,7 @@ In addition:
 - Immediately after §9.12-B (Q3 C adoption completion)
 - Sanity check at each §9.12-* chunk close
 - Integrated into `audit_scaffolding` boundary mandatory invocation
-  (§H extension)
+  (§K.7 — Phase 9 completion enforcement section)
 - Phase boundary (= just before ROADMAP §9.13 [x] flip)
 
 Users may also manually invoke `/dispatch_consistency_audit`.
@@ -72,4 +72,4 @@ All `block`. Because Q3 C adoption presupposes dispatch consistency.
 - ADR-0073 (build-option DCE substrate)
 - Master plan §7.7
 - `scripts/check_build_dce.sh` (skeleton in §9.12-A)
-- `audit_scaffolding §H` (new in §9.12-A)
+- `audit_scaffolding §K.1` / `§K.7` (new section — Phase 9 completion enforcement; lands in §9.12-A)

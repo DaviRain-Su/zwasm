@@ -33,6 +33,6 @@ entries:
         - SKIP-NO-LINK-TYPECHECK: 26
         - SKIP-VALIDATOR-GAP (SIMD): 50
         - exports/manifest.txt skip-impl: 1
-      Phase 9 完備 exit criterion = drain this to 0 at §9.12-E (master plan
+      Phase 9 completion exit criterion = drain this to 0 at §9.12-E (master plan
       §5.3).
     exempt: null

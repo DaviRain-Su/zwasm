@@ -1,11 +1,9 @@
 ---
-description: "Cat III runtime/instance/store/linker layer zone-rule + hygiene anchor. Prevents invariant comments / silent fallback / cross-zone imports when editing `src/runtime/instance/` + `src/api/instance.zig`."
+description: "Cat III runtime/instance/store/linker layer (Zone 2) zone-rule + hygiene anchor. Prevents invariant comments / silent fallback / cross-zone imports when editing `src/runtime/instance/`. Zone 3 wrappers (`src/api/instance.zig`, `src/api/cross_module.zig`) are out of scope here — their Zone 3 → Zone 2 imports are normal."
 paths:
   - "src/runtime/instance/**/*.zig"
   - "src/runtime/store.zig"
   - "src/runtime/runtime.zig"
-  - "src/api/instance.zig"
-  - "src/api/cross_module.zig"
 ---
 
 # Runtime / instance / store / linker layer hygiene

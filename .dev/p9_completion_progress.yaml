@@ -38,7 +38,7 @@ sub_rows:
       - "private/spikes/q3-zig-inline-switch/README.md with measurement"
       - "private/spikes/q3-interp-dispatch-bench/README.md with measurement"
       - "private/spikes/q3-build-option-dce-poc/README.md with measurement"
-    notes: "Next autonomous task. Skeleton ADRs landed in 15df00bd."
+    notes: "Next autonomous task. Skeleton ADRs landed in bdd433d5."
 
   - id: "9.12-A"
     title: "Scaffolding compression + enforcement layer 9 items"

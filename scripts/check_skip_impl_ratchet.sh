@@ -8,7 +8,7 @@
 # in yaml as `exempt: <ADR-NNNN>`.
 #
 # Landing point for Phase 9 completeness master plan §7.3 / ADR-0050
-# amend (D-3 / D-4).
+# amend (D-5 / D-6).
 #
 # Completion: §9.12-A enforcement layer construction phase.
 # Current state: skeleton — `--help` + no-op invocation only shows usage.

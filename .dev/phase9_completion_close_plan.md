@@ -531,14 +531,14 @@ After amendment (applied in a commit after ADR-0071 is Accepted at the §9.12 co
 | New | **ADR-0073** | `build_option_dce_substrate.md` (the principle of establishing build-option DCE consistently across all layers) |
 | Amend | ADR-0023 §4.5 | Formal adoption of the per-op file pattern; DispatchTable interp axis required, validator/lower/emit/jit axes = per-op file |
 | Amend | ADR-0056 / ADR-0065 | Add revision history |
-| Amend | ADR-0050 | Add skip-impl one-way ratchet (D-3 / D-4) |
+| Amend | ADR-0050 | Add skip-impl one-way ratchet (D-5 / D-6) |
 | Amend | ADR-0062 §9.12 row text | Explicitly note that implementation sub-rows 9.12-A..I have been split out of §9.12 |
 
 ### 6.4 ROADMAP §14 forbidden-list amendment
 
 Added item: "Unconscious libc fanout (new `std.c.*` calls without ADR justification or rule exception)" with cite to ADR-0070.
 
-Added item: "Changes in the direction of increasing skip-impl counts (unless justified by ADR)" with cite to ADR-0050 D-3.
+Added item: "Changes in the direction of increasing skip-impl counts (unless justified by ADR)" with cite to ADR-0050 D-5.
 
 ### 6.5 §18 amendment-policy applicability
 
@@ -558,7 +558,7 @@ A substrate where "changes in the direction of giving up" are **physically block
 | Deliverable | Landing | Fire timing |
 |---|---|---|
 | `scripts/check_build_dce.sh` | gate_commit + gate_merge | pre-commit (subset) + pre-push (full) |
-| `audit_scaffolding §H` (new) | extension of existing skill | periodic audit |
+| `audit_scaffolding §K.1` (new section — Phase 9 completion enforcement) | extension of existing skill | periodic audit |
 | `test/build_completeness/` + `test-build-completeness` step | build.zig + test-all | per chunk gate |
 
 Content: build the 6 build-option combinations (`-Dwasm={v1_0,v2_0,v3_0}` × `-Dwasi={p1,p2}`) + grep the symbol table + confirm binary size. If `wasm_2_0_*` symbols remain in the `-Dwasm=v1_0` build, FAIL.
@@ -608,7 +608,7 @@ Content: spikes have Status ∈ {running, merged-into-prod, rejected, archived};
 |---|---|---|
 | `scripts/check_subrow_exit.sh` (new) | pre-push hook | pre-push when an `[x]` flip is included |
 | Exit criteria for each ROADMAP §9.12-X sub-row | spelled out (automated-checkable form) | edits to existing |
-| `audit_scaffolding §K` (new) | extension of existing skill | periodic audit |
+| `audit_scaffolding §K.6` (Phase 9 completion enforcement section) | extension of existing skill | periodic audit |
 
 Content: commits that include a sub-row `[x]` flip are checked for literal satisfaction of the exit criteria. Example: the §9.12-E close commit physically confirms skip-impl == 0; the §9.12-B close commit confirms all build_completeness is green.
 
@@ -617,7 +617,7 @@ Content: commits that include a sub-row `[x]` flip are checked for literal satis
 | Deliverable | Landing | Fire timing |
 |---|---|---|
 | `.claude/skills/dispatch_consistency_audit/SKILL.md` (new) | slash-command-capable skill | arbitrary invocation |
-| Include in `audit_scaffolding §H` | extension of existing skill | periodic audit (fires at boundaries) |
+| Include in `audit_scaffolding §K.7` (Phase 9 completion enforcement section) | extension of existing skill | periodic audit (fires at boundaries) |
 
 Content: confirm the three-way match of ZirOp tag count = per-op file count = 5-axis handler implementation count; feature_level metadata consistency; sample-check whether DCE per build option works as expected.
 

@@ -7,9 +7,10 @@
 
 1. **READ FIRST** [`.dev/phase9_completion_close_plan.md`](phase9_completion_close_plan.md)
    = Phase 9 completion master plan (v2; finalized). `§9.12-pre` is the next `[ ]` task.
-2. `git log --oneline -10`. 2026-05-19 setup commit group: `15df00bd` (ADR
-   skeletons) + commit 2 (master plan + ROADMAP §9.12 sub-row expansion +
-   handover + substrate audit doc) + commit 3 (enforcement scaffold).
+2. `git log --oneline -10`. 2026-05-19 setup commit group: `bdd433d5` (ADR
+   skeletons) + `31411280` (master plan + ROADMAP §9.12 sub-row expansion
+   + handover + substrate audit doc) + `05377cf6` (enforcement scaffold) +
+   `4259b6b6` (JA → EN translation) + cleanup commit (this commit).
 3. `bash scripts/p9_simd_status.sh` — live SIMD status (13301/0/440 Mac+ubuntu
    bit-identical). non-simd live: 25325/0/688 via `zig build test-spec-wasm-2.0-assert`
    (193 skip-impl + 495 skip-adr).
