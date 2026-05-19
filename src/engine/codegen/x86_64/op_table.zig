@@ -37,6 +37,8 @@
 const std = @import("std");
 
 const regalloc = @import("../shared/regalloc.zig");
+const ctx_mod = @import("ctx.zig");
+const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
 const inst_mem = @import("inst_mem.zig");
 const abi = @import("abi.zig");
@@ -47,6 +49,104 @@ const trace = @import("../../../diagnostic/trace.zig");
 const op_call = @import("op_call.zig");
 const emitShadowAlloc = op_call.emitShadowAlloc;
 const emitShadowFree = op_call.emitShadowFree;
+
+/// §9.12-B / B63 (ADR-0075) — `(ctx, ins)` adapters for the
+/// table ops cohort (7 ops). Seven distinct adapters
+/// (heterogeneous signatures — most take func_idx+tableidx;
+/// table.copy/init use both `ins.payload` (dst) + `ins.extra`
+/// (src)). Decomposes per-op at the B6x+1 cutover.
+pub fn emitTableGetCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitTableGet(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.bounds_fixups,
+        ctx.spill_base_off,
+        ctx.func_idx,
+        ins.payload,
+    );
+}
+
+pub fn emitTableSetCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitTableSet(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.bounds_fixups,
+        ctx.spill_base_off,
+        ctx.func_idx,
+        ins.payload,
+    );
+}
+
+pub fn emitTableSizeCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitTableSize(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.spill_base_off,
+        ins.payload,
+    );
+}
+
+pub fn emitTableGrowCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitTableGrow(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.spill_base_off,
+        ctx.outgoing_max_bytes,
+        ins.payload,
+    );
+}
+
+pub fn emitTableFillCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitTableFill(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.bounds_fixups,
+        ctx.spill_base_off,
+        ctx.func_idx,
+        ins.payload,
+    );
+}
+
+pub fn emitTableCopyCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitTableCopy(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.bounds_fixups,
+        ctx.spill_base_off,
+        ctx.func_idx,
+        ins.payload,
+        ins.extra,
+    );
+}
+
+pub fn emitTableInitCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitTableInit(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.bounds_fixups,
+        ctx.spill_base_off,
+        ctx.func_idx,
+        ins.payload,
+        ins.extra,
+    );
+}
 const func_mod = @import("../../../runtime/instance/func.zig");
 
 const Allocator = std.mem.Allocator;

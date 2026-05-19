@@ -993,23 +993,17 @@ pub fn compile(
             .@"memory.init" => try op_memory.emitMemoryInitCtx(&ctx, &ins),
             .@"global.get" => try op_globals.emitGlobalGetCtx(&ctx, &ins),
             .@"global.set" => try op_globals.emitGlobalSetCtx(&ctx, &ins),
-            // §9.9 / 9.9-m-2a (per ADR-0058): table.get / table.set
-            // / table.size — bounds-checked load/store against the
-            // per-table TableSlice descriptor in JitRuntime.
-            .@"table.get" => try op_table.emitTableGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, func.func_idx, ins.payload),
-            .@"table.set" => try op_table.emitTableSet(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, func.func_idx, ins.payload),
-            .@"table.size" => try op_table.emitTableSize(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
-            .@"table.grow" => try op_table.emitTableGrow(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, outgoing_max_bytes, ins.payload),
-            // §9.9 / 9.9-m-2b (per ADR-0058): table.fill — inline
-            // loop. Mirror of arm64 path.
-            .@"table.fill" => try op_table.emitTableFill(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, func.func_idx, ins.payload),
-            // §9.9 / 9.9-m-2c (per ADR-0058): table.copy — element-
-            // typed memmove with same-table backward arm.
-            .@"table.copy" => try op_table.emitTableCopy(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, func.func_idx, ins.payload, ins.extra),
-            // §9.9 / 9.9-m-2c-init (per ADR-0058 amendment):
-            // table.init — copy elem segment to table; honours
-            // elem_dropped flag.
-            .@"table.init" => try op_table.emitTableInit(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, func.func_idx, ins.payload, ins.extra),
+            // §9.9 (per ADR-0058) + §9.12-B / B63: table ops cohort
+            // — `(ctx, ins)` per-op adapters bundle the unified
+            // bounds-checked load/store + grow/fill/copy/init paths
+            // against the per-table TableSlice descriptor.
+            .@"table.get" => try op_table.emitTableGetCtx(&ctx, &ins),
+            .@"table.set" => try op_table.emitTableSetCtx(&ctx, &ins),
+            .@"table.size" => try op_table.emitTableSizeCtx(&ctx, &ins),
+            .@"table.grow" => try op_table.emitTableGrowCtx(&ctx, &ins),
+            .@"table.fill" => try op_table.emitTableFillCtx(&ctx, &ins),
+            .@"table.copy" => try op_table.emitTableCopyCtx(&ctx, &ins),
+            .@"table.init" => try op_table.emitTableInitCtx(&ctx, &ins),
             // §9.7 / 9.7-a + 9.7-b: SIMD-128 packed integer add/sub
             // family (8 ops). Wires the FP-class regalloc +
             // shape-tag pipeline on x86_64 per ADR-0041; spilled

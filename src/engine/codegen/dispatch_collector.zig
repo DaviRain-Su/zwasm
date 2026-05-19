@@ -784,6 +784,13 @@ const x86_64_memory_copy = @import("x86_64/ops/wasm_1_0/memory_copy.zig");
 const x86_64_memory_init = @import("x86_64/ops/wasm_1_0/memory_init.zig");
 const x86_64_global_get = @import("x86_64/ops/wasm_1_0/global_get.zig");
 const x86_64_global_set = @import("x86_64/ops/wasm_1_0/global_set.zig");
+const x86_64_table_get = @import("x86_64/ops/wasm_1_0/table_get.zig");
+const x86_64_table_set = @import("x86_64/ops/wasm_1_0/table_set.zig");
+const x86_64_table_size = @import("x86_64/ops/wasm_1_0/table_size.zig");
+const x86_64_table_grow = @import("x86_64/ops/wasm_1_0/table_grow.zig");
+const x86_64_table_fill = @import("x86_64/ops/wasm_1_0/table_fill.zig");
+const x86_64_table_copy = @import("x86_64/ops/wasm_1_0/table_copy.zig");
+const x86_64_table_init = @import("x86_64/ops/wasm_1_0/table_init.zig");
 
 const x86_64_i32_add = @import("x86_64/ops/wasm_1_0/i32_add.zig");
 const x86_64_i32_sub = @import("x86_64/ops/wasm_1_0/i32_sub.zig");
@@ -1578,6 +1585,13 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_memory_init,
     x86_64_global_get,
     x86_64_global_set,
+    x86_64_table_get,
+    x86_64_table_set,
+    x86_64_table_size,
+    x86_64_table_grow,
+    x86_64_table_fill,
+    x86_64_table_copy,
+    x86_64_table_init,
 };
 
 comptime {
@@ -1661,9 +1675,11 @@ test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // +23 = 61). B61: bulk-memory cohort (3 new per-op files for
     // memory.fill/copy/init, +3 = 64; data.drop / elem.drop deferred
     // — Zone 1 meta files don't exist yet). B62: globals cohort
-    // (global.get/set, 2 new per-op files, +2 = 66). The B6x+1
-    // cutover folds this tuple back into `collected_x86_64_ops`.
-    try std.testing.expectEqual(@as(usize, 66), collected_x86_64_ctx_ops.len);
+    // (global.get/set, 2 new per-op files, +2 = 66). B63: table
+    // ops cohort (7 new per-op files: table.get/set/size/grow/
+    // fill/copy/init, +7 = 73). The B6x+1 cutover folds this
+    // tuple back into `collected_x86_64_ops`.
+    try std.testing.expectEqual(@as(usize, 73), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would
