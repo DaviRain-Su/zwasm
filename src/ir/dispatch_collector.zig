@@ -226,6 +226,17 @@ const v128_xor = @import("../instruction/wasm_2_0/v128_xor.zig");
 const v128_andnot = @import("../instruction/wasm_2_0/v128_andnot.zig");
 const v128_bitselect = @import("../instruction/wasm_2_0/v128_bitselect.zig");
 
+const i8x16_add = @import("../instruction/wasm_2_0/i8x16_add.zig");
+const i8x16_sub = @import("../instruction/wasm_2_0/i8x16_sub.zig");
+const i16x8_add = @import("../instruction/wasm_2_0/i16x8_add.zig");
+const i16x8_sub = @import("../instruction/wasm_2_0/i16x8_sub.zig");
+const i16x8_mul = @import("../instruction/wasm_2_0/i16x8_mul.zig");
+const i32x4_add = @import("../instruction/wasm_2_0/i32x4_add.zig");
+const i32x4_sub = @import("../instruction/wasm_2_0/i32x4_sub.zig");
+const i32x4_mul = @import("../instruction/wasm_2_0/i32x4_mul.zig");
+const i64x2_add = @import("../instruction/wasm_2_0/i64x2_add.zig");
+const i64x2_sub = @import("../instruction/wasm_2_0/i64x2_sub.zig");
+
 const i32_div_s = @import("../instruction/wasm_1_0/i32_div_s.zig");
 const i32_div_u = @import("../instruction/wasm_1_0/i32_div_u.zig");
 const i32_rem_s = @import("../instruction/wasm_1_0/i32_rem_s.zig");
@@ -436,6 +447,16 @@ pub const collected_ops = .{
     v128_xor,
     v128_andnot,
     v128_bitselect,
+    i8x16_add,
+    i8x16_sub,
+    i16x8_add,
+    i16x8_sub,
+    i16x8_mul,
+    i32x4_add,
+    i32x4_sub,
+    i32x4_mul,
+    i64x2_add,
+    i64x2_sub,
 };
 
 comptime {
@@ -587,9 +608,9 @@ test "zirOpTagCount matches the ZirOp enum field count" {
     try std.testing.expect(n >= 200);
 }
 
-test "migratedOpCount tracks collected_ops length (134 after §9.12-B / B29 v128 logical)" {
-    // Running tally: 128 + v128 logical 6 = 134.
-    try std.testing.expectEqual(@as(usize, 134), migratedOpCount());
+test "migratedOpCount tracks collected_ops length (144 after §9.12-B / B30 SIMD int arith)" {
+    // Running tally: 134 + SIMD int arith 10 = 144.
+    try std.testing.expectEqual(@as(usize, 144), migratedOpCount());
 }
 
 test "migrationComplete is false until §9.12-B migrates all 581 ops" {
