@@ -32,7 +32,8 @@
 | A5b | SKILL.md compression via LOOP.md (-90 LOC SKILL net; 4 ref sections + chunk-granularity detail moved) | `5d4c5583` |
 | A5c | ROADMAP Phase 0-8 narrative archive (-384 LOC) | `f58a3b7a` |
 | A6 | Gate consolidation study (8 of 15 gates timed; recs for A7) | `e731db90` |
-| A7 | gate_commit / pre-push wiring + A6 follow-ups (docs-only short-circuit, WARN-delta caching, --quiet flag, A1 wiring) | **NEXT** |
+| A7 | gate_commit docs-only short-circuit + A1 info wiring (docs-only 29s → 0.45s, -98%) | `f9752a1f` |
+| A8 | §9.12-A close: pre-push wiring (skip_impl_ratchet + subrow_exit) + WARN-delta caching + --quiet flag (deferred) | **NEXT** |
 
 ## Active state — §9.12 [x]; §9.12-A autonomous
 
