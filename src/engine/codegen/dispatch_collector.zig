@@ -795,6 +795,10 @@ const x86_64_call = @import("x86_64/ops/wasm_1_0/call.zig");
 const x86_64_call_indirect = @import("x86_64/ops/wasm_1_0/call_indirect.zig");
 const x86_64_block = @import("x86_64/ops/wasm_1_0/block.zig");
 const x86_64_loop = @import("x86_64/ops/wasm_1_0/loop.zig");
+const x86_64_i32_const = @import("x86_64/ops/wasm_1_0/i32_const.zig");
+const x86_64_i64_const = @import("x86_64/ops/wasm_1_0/i64_const.zig");
+const x86_64_f32_const = @import("x86_64/ops/wasm_1_0/f32_const.zig");
+const x86_64_f64_const = @import("x86_64/ops/wasm_1_0/f64_const.zig");
 
 const x86_64_i32_add = @import("x86_64/ops/wasm_1_0/i32_add.zig");
 const x86_64_i32_sub = @import("x86_64/ops/wasm_1_0/i32_sub.zig");
@@ -1600,6 +1604,10 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_call_indirect,
     x86_64_block,
     x86_64_loop,
+    x86_64_i32_const,
+    x86_64_i64_const,
+    x86_64_f32_const,
+    x86_64_f64_const,
 };
 
 comptime {
@@ -1687,11 +1695,12 @@ test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // ops cohort (7 new per-op files: table.get/set/size/grow/
     // fill/copy/init, +7 = 73). B64: call cohort (call +
     // call_indirect, 2 new per-op files, +2 = 75). B65: control
-    // structure cohort (block + loop, 2 new per-op files, +2 = 77;
-    // br/br_if/br_table/if/else/end/return/unreachable deferred —
-    // no Zone 1 meta files). The B6x+1 cutover folds this tuple
-    // back into `collected_x86_64_ops`.
-    try std.testing.expectEqual(@as(usize, 77), collected_x86_64_ctx_ops.len);
+    // structure cohort (block + loop, 2 new per-op files, +2 = 77).
+    // B66: Zone 1 meta backfill (no Zone 2 change). B67: const
+    // cohort (i32/i64/f32/f64.const, 4 new per-op files, +4 = 81).
+    // The B6x+1 cutover folds this tuple back into
+    // `collected_x86_64_ops`.
+    try std.testing.expectEqual(@as(usize, 81), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would

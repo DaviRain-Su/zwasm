@@ -847,3 +847,35 @@ pub fn emitI64DivS(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
 pub const emitI64DivU = emitI64DivS;
 pub const emitI64RemS = emitI64DivS;
 pub const emitI64RemU = emitI64DivS;
+
+/// §9.12-B / B67 (ADR-0075) — `(ctx, ins)` adapter for `i32.const`.
+/// Allocates a fresh vreg, emits `MOV r32, imm32`, stores to spill.
+/// Extracted from emit.zig's prior inline body.
+///
+/// Wasm spec §4.4.1.1 (i32.const).
+pub fn emitI32Const(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    const vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const dst = try gpr.gprDefSpilled(ctx.alloc, vreg, 0);
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm32W(dst, ins.payload).slice());
+    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, vreg, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, vreg);
+}
+
+/// §9.12-B / B67 (ADR-0075) — `(ctx, ins)` adapter for `i64.const`.
+/// Allocates a fresh vreg, emits `MOVABS r64, imm64` (10 bytes),
+/// stores to spill. Extracted from emit.zig's prior inline body.
+///
+/// Wasm spec §4.4.1.1 (i64.const). The 64-bit immediate is packed
+/// into `(ins.extra << 32) | ins.payload` per the ZIR encoding.
+pub fn emitI64Const(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    const vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const dst = try gpr.gprDefSpilled(ctx.alloc, vreg, 0);
+    const value: u64 = (@as(u64, ins.extra) << 32) | @as(u64, ins.payload);
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm64Q(dst, value).slice());
+    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, vreg, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, vreg);
+}

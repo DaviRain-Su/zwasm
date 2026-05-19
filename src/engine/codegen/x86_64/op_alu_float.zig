@@ -24,6 +24,7 @@ const std = @import("std");
 
 const zir = @import("../../../ir/zir.zig");
 const regalloc = @import("../shared/regalloc.zig");
+const ctx_mod = @import("ctx.zig");
 const inst = @import("inst.zig");
 const abi = @import("abi.zig");
 const gpr = @import("gpr.zig");
@@ -31,6 +32,26 @@ const types = @import("types.zig");
 
 const Allocator = std.mem.Allocator;
 const Error = types.Error;
+
+/// §9.12-B / B67 (ADR-0075) — `(ctx, ins)` adapters for the FP
+/// const cohort (`f32.const`, `f64.const`). Both wrap
+/// `emitFpConst` (which dispatches on `ins.op` internally). Per-op
+/// aliases preserve the per-op-file shape; decomposes per-op at
+/// the B6x+1 cutover.
+pub fn emitF32Const(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitFpConst(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.spill_base_off,
+        ins.op,
+        ins.payload,
+        ins.extra,
+    );
+}
+pub const emitF64Const = emitF32Const;
 
 /// Wasm spec §4.4.1.5 (f32.const / f64.const) — push the literal
 /// onto the operand stack. Materialises the IEEE-754 bit pattern

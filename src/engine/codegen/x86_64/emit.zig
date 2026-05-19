@@ -723,31 +723,10 @@ pub fn compile(
             continue;
         }
         switch (ins.op) {
-            .@"i32.const" => {
-                const vreg = next_vreg;
-                next_vreg += 1;
-                if (vreg >= alloc.slots.len) return Error.SlotOverflow;
-                const dst = try gpr.gprDefSpilled(alloc, vreg, 0);
-                try buf.appendSlice(allocator, inst.encMovImm32W(dst, ins.payload).slice());
-                try gpr.gprStoreSpilled(allocator, &buf, alloc, spill_base_off, vreg, 0);
-                try pushed_vregs.append(allocator, vreg);
-            },
-            .@"i64.const" => {
-                // Wasm spec §4.4.1.1 (i64.const) — push a 64-bit
-                // immediate. Encoded as MOVABS r64, imm64
-                // (REX.W + 0xB8+rd + 8-byte imm = 10 bytes).
-                // Mirrors arm64 emitI64Const which uses 4×16-bit
-                // MOVZ/MOVK chunks; x86_64's MOVABS-form is a
-                // single instruction, simpler to emit.
-                const vreg = next_vreg;
-                next_vreg += 1;
-                if (vreg >= alloc.slots.len) return Error.SlotOverflow;
-                const dst = try gpr.gprDefSpilled(alloc, vreg, 0);
-                const value: u64 = (@as(u64, ins.extra) << 32) | @as(u64, ins.payload);
-                try buf.appendSlice(allocator, inst.encMovImm64Q(dst, value).slice());
-                try gpr.gprStoreSpilled(allocator, &buf, alloc, spill_base_off, vreg, 0);
-                try pushed_vregs.append(allocator, vreg);
-            },
+            // §9.12-B / B67: i32.const + i64.const inline bodies
+            // extracted into `op_alu_int.emitI{32,64}Const` adapters.
+            .@"i32.const" => try op_alu_int.emitI32Const(&ctx, &ins),
+            .@"i64.const" => try op_alu_int.emitI64Const(&ctx, &ins),
             .@"i32.add",
             .@"i32.sub",
             .@"i32.mul",
@@ -871,9 +850,8 @@ pub fn compile(
             .@"i64.rem_u" => try op_alu_int.emitI64RemU(&ctx, &ins),
             .call => try op_call.emitCallCtx(&ctx, &ins),
             .call_indirect => try op_call.emitCallIndirectCtx(&ctx, &ins),
-            .@"f32.const",
-            .@"f64.const",
-            => try op_alu_float.emitFpConst(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.op, ins.payload, ins.extra),
+            .@"f32.const" => try op_alu_float.emitF32Const(&ctx, &ins),
+            .@"f64.const" => try op_alu_float.emitF64Const(&ctx, &ins),
             .@"f32.add",
             .@"f32.sub",
             .@"f32.mul",
