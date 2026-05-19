@@ -15,8 +15,8 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
    `chore(p9b):` / `feat(p9b):` prefix. Last source commit
-   `89261705` (B59 — reinterpret + promote/demote cohort migrated
-   to `(ctx, ins)`; existing B28 stubs converted in place).
+   `18ac9b49` (B60 — scalar load/store 23 ops migrated to
+   `(ctx, ins)`; 23 new per-op files added directly to ctx tuple).
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -84,38 +84,38 @@
 | B57 | Cohort migration: Wasm 2.0 trunc_sat cohort (`i{32,64}.trunc_sat_f{32,64}_{s,u}`, 8 ops) to `(ctx, ins)`. Existing B27 7-arg stubs converted in place; moved from `collected_x86_64_ops` (314 → 306) to `collected_x86_64_ctx_ops` (16 → 24). Three group aliases per consumer (`emitFpTruncSatSigned` / `U32` / `U64`). | `3877b3cf` |
 | B58 | Cohort migration: Wasm 1.0 int→float convert cohort (`f{32,64}.convert_i{32,64}_{s,u}`, 8 ops) to `(ctx, ins)`. Existing B26 7-arg stubs converted in place; moved from `collected_x86_64_ops` (306 → 298) to `collected_x86_64_ctx_ops` (24 → 32). Two group aliases (`emitFpConvertSimple` for 6 of 8, `emitFpConvertI64Unsigned` for i64_u pair). | `8c8d849d` |
 | B59 | Cohort migration: reinterpret + promote/demote cohort (`i{32,64}.reinterpret_f{32,64}`, `f{32,64}.reinterpret_i{32,64}`, `f64.promote_f32`, `f32.demote_f64`, 6 ops) to `(ctx, ins)`. B28 7-arg stubs converted in place; moved from `collected_x86_64_ops` (298 → 292) to `_ctx_ops` (32 → 38). Single `emitFpConvertSimple` consumer (1 primary + 5 aliases). | `89261705` |
-| **B60** | **Cohort migration: scalar load/store cohort (24 ops via `op_memory.emitMemOp` — `i{32,64}.load*`, `i{32,64}.store*`, `f{32,64}.load`/`store`)** to `(ctx, ins)`. Single legacy consumer. Existing per-op stubs at `x86_64/ops/wasm_1_0/` (likely from earlier B-series) — convert in place per B57/B58/B59 pattern. May exceed 800 LOC threshold — split into load (12) + store (12) sub-chunks if needed. | **NEXT** |
-| B60..B6x | Bulk migrate remaining x86_64 emit fns in cohorts (5–15 ops/chunk per LOOP.md). Suggested order: scalar load/store → memory.{fill,copy,init} → table ops → globals → const → call → local. | |
+| B60 | Cohort migration: scalar load/store cohort (23 ops via `op_memory.emitMemOp`) to `(ctx, ins)`. 23 NEW per-op files (these ops were never in legacy tuple — only emit.zig's grouped switch arm). Single primary `emitI32Load` + 22 aliases. `collected_x86_64_ctx_ops` 38 → 61; legacy tuple unchanged at 292. | `18ac9b49` |
+| **B61** | **Cohort migration: bulk memory + drop cohort (`memory.fill`, `memory.copy`, `memory.init`, `data.drop`, `elem.drop`, 5 ops)** to `(ctx, ins)`. Heterogeneous consumers (`emitMemoryFill` / `emitMemoryCopy` / `emitMemoryInit` + inline `data.drop` / `elem.drop` arms in emit.zig). Per-op signature differs (some take only func_idx, others take payload+func_idx). New per-op files. | **NEXT** |
+| B61..B6x | Bulk migrate remaining x86_64 emit fns in cohorts (5–15 ops/chunk per LOOP.md). Suggested order: bulk memory + drop → table ops → globals → const → call → local. | |
 | B6x+1 | Inline-switch dispatcher cutover per ADR-0073 — both arches' `emit.zig` giant switch replaced by `inline for (collected_X_ops) |op_mod| { if (op_mod.op_tag == ins.op) return op_mod.emit(ctx, ins); }`. Moment per-op files become load-bearing. | |
 
-## Active state — §9.12-B mid-flight; B59 reinterpret cohort landed 2026-05-20
+## Active state — §9.12-B mid-flight; B60 scalar load/store cohort landed 2026-05-20
 
-**B60 is the active task** — cohort migrate the scalar load/store
-variants (~24 ops via `op_memory.emitMemOp` — `i32/i64.load*`,
-`i32/i64.store*`, `f32/f64.load`/`store`) to the `(ctx, ins)`
-shape. B59 closed the reinterpret/promote/demote cohort at
-`89261705` (`collected_x86_64_ctx_ops` 32 → 38;
-`collected_x86_64_ops` 298 → 292 by moving B28 stubs).
+**B61 is the active task** — cohort migrate the bulk-memory +
+drop variants (`memory.fill`, `memory.copy`, `memory.init`,
+`data.drop`, `elem.drop`, 5 ops) to `(ctx, ins)`. B60 closed
+the scalar load/store cohort at `18ac9b49`
+(`collected_x86_64_ctx_ops` 38 → 61; legacy tuple unchanged
+at 292 because B60 ops were never legacy-registered).
 
-The loop for B60 mirrors B57-B59:
+The loop for B61:
 
-1. Survey `op_memory.emitMemOp` signature — it likely takes
-   `bounds_fixups` + `ins.payload` + `func.func_idx`; the ctx
-   adapter unpacks all from `*EmitCtx`.
-2. Add `(ctx, ins)` adapter in op_memory.zig (or wrapper in
-   op_convert/separate file); aliases for all 24 variants.
-3. Replace the grouped arm in emit.zig (lines ~962-985) with
-   24 per-op arms calling `(ctx, ins)` adapters via `&ctx`.
-4. Convert existing per-op stub files in place (likely
-   `i32_load.zig`, `i32_load8_s.zig`, etc — check first).
-5. Update `collected_x86_64_ctx_ops` (38 → 62) + legacy tuple
-   (292 → 268) + both assertion tests.
-6. If diff > 800 LOC: split into load-only (12) + store-only
-   (12) sub-chunks per LOOP.md chunk granularity.
-7. Verify 2-host green; commit + push.
+1. Examine emit.zig lines ~979-1000 (`memory.fill`,
+   `data.drop`, `elem.drop`, `memory.copy`, `memory.init`) —
+   `memory.fill`/`copy`/`init` route to `op_memory.emit*`
+   helpers; `data.drop`/`elem.drop` are inline 2-instruction
+   sequences. The inline ones may be too small to be worth
+   per-op-file extraction.
+2. Add per-op `(ctx, ins)` adapters in op_memory.zig for
+   memory.fill / memory.copy / memory.init. Inline data.drop
+   / elem.drop bodies may move into per-op files (single
+   primary each).
+3. Create 5 NEW per-op files.
+4. Update collector (61 → 66) + emit.zig switch arms.
+5. Verify 2-host green; commit + push.
 
-Note: op_convert.zig is now 1009 LOC (soft cap warn at 1000) —
-the file may need a split plan in §9.12-D cleanup. Not blocking.
+Note: op_convert.zig at 1009 LOC; op_memory.zig now likely
+above 1000 too — file split plan deferred to §9.12-D cleanup.
 
 §9.12-B exit criterion stays as ROADMAP §9.12-B specifies (6 build
 combos green + DCE 0 + completeness comptime check). Per-op file
