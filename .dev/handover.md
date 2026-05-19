@@ -47,9 +47,10 @@
 | B23 | f32/f64 compare cohort: 12 ops × 2 arches (eq/ne/lt/gt/le/ge). 36 new files | `32e3efb8` |
 | B24 | f32/f64 unary cohort: 14 ops × 2 arches (abs/neg/sqrt/ceil/floor/trunc/nearest). 42 new files | `14e4b959` |
 | B25 | f32/f64 min/max + copysign cohort: 6 ops × 2 arches. 18 new files | `c91aa0de` |
-| B26 | int→float convert cohort: f32/f64.convert_i32/i64_{s,u} = 8 ops × 2 arches. 24 new files | `<backfill>` |
-| B27 | trunc_sat cohort (Wasm 2.0 nontrap conv): i32/i64.trunc_sat_f32/f64_{s,u} = 8 ops × 2 arches. arm64 emitTruncSat; x86_64 split (emitFpTruncSatSigned/U32/U64). ~24 files | **NEXT** |
-| B28..Bn | reinterpret + demote/promote (6 ops); then x86_64 EmitCtx consolidation for trapping-trunc + const/load/store/call/local/global + div/rem; then Wasm 2.0 SIMD cohort (~400 ops). IR-axis migration still deferred | |
+| B26 | int→float convert cohort: f32/f64.convert_i32/i64_{s,u} = 8 ops × 2 arches. 24 new files | `d4059669` |
+| B27 | Wasm 2.0 trunc_sat cohort: i32/i64.trunc_sat_f32/f64_{s,u} = 8 ops × 2 arches. 24 new files. arm64 122/581 + x86_64 114/581 | `<backfill>` |
+| B28 | reinterpret + demote/promote cohort: i32/i64.reinterpret_f32/f64 + f32/f64.reinterpret_i32/i64 (4 ops) + f32.demote_f64 + f64.promote_f32 (2 ops) = 6 ops × 2 arches. arm64 has per-op reinterpret fns + emitFloatDemotePromote; x86_64 all go through emitFpConvertSimple | **NEXT** |
+| B29..Bn | x86_64 EmitCtx consolidation for trapping-trunc + const/load/store/call/local/global + div/rem; then Wasm 2.0 SIMD cohort (~400 ops). IR-axis migration still deferred | |
 
 ## Active state — §9.12-A [x]; §9.12-B autonomous (HUGE row)
 
