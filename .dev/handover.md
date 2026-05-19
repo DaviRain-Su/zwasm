@@ -30,8 +30,8 @@
 | A4 | dispatch_collector.zig bootstrap (§7.2 / 7.9 comptime check) | `e5deef12` |
 | A5a | Archive moves (phase8 gate + private/audits/spikes) | `6057e408` |
 | A5b | SKILL.md compression via LOOP.md (-90 LOC SKILL net; 4 ref sections + chunk-granularity detail moved) | `5d4c5583` |
-| A5c | ROADMAP Phase 0-8 narrative archive (~800-1000 LOC) | **NEXT** |
-| A6 | 8 existing gates wall-time measurement + consolidation study |  |
+| A5c | ROADMAP Phase 0-8 narrative archive (-384 LOC) | `f58a3b7a` |
+| A6 | 8 existing gates wall-time measurement + consolidation study | **NEXT** |
 | A7 | gate_commit / pre-push wiring of A1 scripts (after §9.12-C / §9.12-D land their preconditions) |  |
 
 ## Active state — §9.12 [x]; §9.12-A autonomous
