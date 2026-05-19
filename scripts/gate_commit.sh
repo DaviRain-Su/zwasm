@@ -109,14 +109,17 @@ fi
 # When those preconditions clear, swap each invocation to --gate mode.
 
 if [ "$DOCS_ONLY" -eq 0 ]; then
+    # NOTE: `awk '... exit'` would SIGPIPE the upstream pipe, which with
+    # `set -o pipefail` aborts gate_commit.sh. Use `grep | head` instead
+    # (head reads exactly one line; the pipe closes cleanly).
     if [ -x scripts/check_libc_boundary.sh ]; then
-        n=$(bash scripts/check_libc_boundary.sh 2>&1 | awk '/^replaceable:/{print $2; exit}')
+        n=$(bash scripts/check_libc_boundary.sh 2>&1 | grep -E '^replaceable:' | head -1 | awk '{print $2}') || true
         if [ -n "${n:-}" ] && [ "$n" != "0" ]; then
             echo "[gate_commit] (info) check_libc_boundary: $n replaceable site(s) — migration in §9.12-D"
         fi
     fi
     if [ -x scripts/check_fallback_patterns.sh ]; then
-        n=$(bash scripts/check_fallback_patterns.sh 2>&1 | awk '/^fail:/{print $2; exit}')
+        n=$(bash scripts/check_fallback_patterns.sh 2>&1 | grep -E '^fail:' | head -1 | awk '{print $2}') || true
         if [ -n "${n:-}" ] && [ "$n" != "0" ]; then
             echo "[gate_commit] (info) check_fallback_patterns: $n fail site(s) — cleanup in §9.12-A follow-up"
         fi
