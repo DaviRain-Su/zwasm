@@ -260,6 +260,13 @@ const f64_floor = @import("../instruction/wasm_1_0/f64_floor.zig");
 const f64_trunc = @import("../instruction/wasm_1_0/f64_trunc.zig");
 const f64_nearest = @import("../instruction/wasm_1_0/f64_nearest.zig");
 
+const f32_min = @import("../instruction/wasm_1_0/f32_min.zig");
+const f32_max = @import("../instruction/wasm_1_0/f32_max.zig");
+const f64_min = @import("../instruction/wasm_1_0/f64_min.zig");
+const f64_max = @import("../instruction/wasm_1_0/f64_max.zig");
+const f32_copysign = @import("../instruction/wasm_1_0/f32_copysign.zig");
+const f64_copysign = @import("../instruction/wasm_1_0/f64_copysign.zig");
+
 /// Tuple of all migrated per-op modules. Order is not load-bearing;
 /// `dispatcher` uses `op_tag` for routing.
 pub const collected_ops = .{
@@ -363,6 +370,12 @@ pub const collected_ops = .{
     f64_floor,
     f64_trunc,
     f64_nearest,
+    f32_min,
+    f32_max,
+    f64_min,
+    f64_max,
+    f32_copysign,
+    f64_copysign,
 };
 
 comptime {
@@ -514,9 +527,9 @@ test "zirOpTagCount matches the ZirOp enum field count" {
     try std.testing.expect(n >= 200);
 }
 
-test "migratedOpCount tracks collected_ops length (100 after §9.12-B / B24 float unary cohort)" {
-    // Running tally: 86 + float unary 14 = 100.
-    try std.testing.expectEqual(@as(usize, 100), migratedOpCount());
+test "migratedOpCount tracks collected_ops length (106 after §9.12-B / B25 float min/max+copysign)" {
+    // Running tally: 100 + min/max/copysign 6 = 106.
+    try std.testing.expectEqual(@as(usize, 106), migratedOpCount());
 }
 
 test "migrationComplete is false until §9.12-B migrates all 581 ops" {
