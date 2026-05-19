@@ -23,8 +23,14 @@
 | Sub-chunk | Description | SHA |
 |---|---|---|
 | B1 | i32_add per-op file foundation (template + collector wire; stubs only; legacy dispatch retains authority) | `bb85b918` |
-| B2 | dispatcher(comptime axis: Axis) function in dispatch_collector (no validator wiring yet) | `3660e3fa` |
-| B3 | Wire validator.zig to route via dispatcher(.validate) with NotMigrated → legacy fallback | **NEXT** |
+| B2 | dispatcher(comptime axis: Axis) function in dispatch_collector | `3660e3fa` |
+| B3 | Dispatcher wire design note (`.dev/dispatcher_wire_design.md`); B-sequence revised per bytecode-vs-ZirOp layer findings | `19f3e04c` |
+| B4 | arm64/emit.zig wire (cleanest; ZirOp + switch; i32.add proof-of-pattern) | **NEXT** |
+| B5 | x86_64/emit.zig wire (mirror) |  |
+| B6 | interp populateDispatchTable |  |
+| B7 | byteToZirOp helper + validator.zig wire |  |
+| B8 | lower.zig wire |  |
+| B9..Bn | per-op-file body migrations (5-15 ops/chunk) |  |
 
 ## Active state — §9.12-A [x]; §9.12-B autonomous (HUGE row)
 
