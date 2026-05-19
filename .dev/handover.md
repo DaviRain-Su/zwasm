@@ -15,7 +15,7 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
    `chore(p9b):` / `feat(p9b):` prefix. Last source commit
-   `952e1a33` (B53 — ADR-0075 Accepted + EmitCtx substrate).
+   `f1f62ba8` (B54 — i32.div_s PoC migrated to `(ctx, ins)`).
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -77,34 +77,33 @@
 | B51 | arm64 trapping trunc cohort: 8 ops, arm64-only. 16 new files | `<backfill>` |
 | B52 | SIMD splats + ref.is_null cohort (7 ops, both arches): i{8x16,16x8,32x4,64x2}.splat + f{32x4,64x2}.splat + ref.is_null. 21 new files. 374/348/314 of 581 | `<backfill>` |
 | B53 | ADR-0075 Accepted + x86_64 EmitCtx substrate. New file `src/engine/codegen/x86_64/ctx.zig` mirrors arm64's shape; `EmitCtx.init(args: InitArgs)` factory keeps emit.zig under the 2000-line hard cap. Initialised once at the top of `compile()`'s body-loop; `_ = &ctx;` keeps it inert until B54. No behaviour change. | `952e1a33` |
-| **B54** | **PoC: migrate `i32.div_s` end-to-end to `(ctx, ins)` shape** (exercises `bounds_fixups`). New x86_64 emit fn sig at `op_alu_int.emitI32DivS(ctx, ins)`; dispatch arm at `x86_64/emit.zig` updated; per-op file `x86_64/ops/wasm_1_0/i32_div_s.zig` migrates from arm64-only to both arches; collector x86_64 count test +1. | **NEXT** |
+| B54 | PoC: migrate `i32.div_s` end-to-end to `(ctx, ins)`. New `op_alu_int.emitI32DivS(ctx, ins)` adapter; emit.zig dispatch arm splits div_s from div_u/rem_s/rem_u; new per-op file `x86_64/ops/wasm_1_0/i32_div_s.zig`; parallel `collected_x86_64_ctx_ops` tracks the migration (legacy tuple stays 314 until B6x+1 cutover). | `f1f62ba8` |
+| **B55** | **Cohort migration: remaining div / rem variants (`i32.div_u` / `i32.rem_s` / `i32.rem_u` + i64 family)** to `(ctx, ins)`. Mirror of B54 pattern × 7 ops; same `bounds_fixups` consumer. Add per-op files + update `collected_x86_64_ctx_ops`. | **NEXT** |
 | B55..B6x | Bulk migrate remaining ~70 x86_64 emit fns in cohorts (5–15 ops/chunk per LOOP.md). Same pattern as B11..B12 was for arm64 i32.add but applied at scale. Migration order suggestion: trapping trunc 8 → div/rem 8 → table ops → globals → memory load/store → const → call → local — bottom up by dependency. | |
 | B6x+1 | Inline-switch dispatcher cutover per ADR-0073 — both arches' `emit.zig` giant switch replaced by `inline for (collected_X_ops) |op_mod| { if (op_mod.op_tag == ins.op) return op_mod.emit(ctx, ins); }`. Moment per-op files become load-bearing. | |
 
-## Active state — §9.12-B mid-flight; ADR-0075 Accepted 2026-05-19
+## Active state — §9.12-B mid-flight; B54 PoC landed 2026-05-19
 
-**B54 is the active task** — PoC migrate `i32.div_s` end-to-end to the
-`(ctx, ins)` shape. B53 landed the substrate (`x86_64/ctx.zig` +
-`EmitCtx.init(InitArgs)` factory; initialised inert at the top of
-`compile()`'s body-loop). 2-host green at `952e1a33`.
+**B55 is the active task** — cohort migrate the remaining div / rem
+variants (`i32.div_u` / `i32.rem_s` / `i32.rem_u` + i64 family) to the
+`(ctx, ins)` shape. B54 proved the wire end-to-end at `f1f62ba8`.
 
-The loop for B54:
+The loop for B55:
 
-1. Re-signature `op_alu_int.emitI32DivS` (x86_64) to
-   `(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void`.
-2. Update `compile()`'s dispatch arm for `.@"i32.div_s"` to call
-   the new shape.
-3. Create / migrate `x86_64/ops/wasm_1_0/i32_div_s.zig` so the
-   per-op file owns the x86_64 wire (arm64 already does).
-4. Update `dispatch_collector.zig` x86_64 collected_ops + tests.
+1. Add `op_alu_int.emitI32DivU` / `emitI32RemS` / `emitI32RemU` +
+   `emitI64DivS` / `emitI64DivU` / `emitI64RemS` / `emitI64RemU`
+   adapters in x86_64/op_alu_int.zig (mirror of B54's pattern).
+2. Split each variant off the legacy 4-op `=>` arm in emit.zig;
+   call adapters via `&ctx`.
+3. Create per-op files for each at
+   `x86_64/ops/wasm_1_0/<op>.zig` (mirror of i32_div_s.zig).
+4. Update `collected_x86_64_ctx_ops` to track 8 ops; assertion
+   test bumps to 8.
 5. Verify 2-host green; commit + push.
 
 §9.12-B exit criterion stays as ROADMAP §9.12-B specifies (6 build
 combos green + DCE 0 + completeness comptime check). Per-op file
 substrate becomes load-bearing at B6x+1 (inline-switch cutover).
-
-Discipline: B53 was substrate-only (no per-op file changes); B54
-re-enters the 5-15 ops/chunk default starting after this PoC.
 
 ## Outstanding upstream / Phase-10 blockers
 
