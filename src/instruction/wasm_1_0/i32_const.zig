@@ -9,23 +9,23 @@ const WasmLevel = collector.WasmLevel;
 const WasiLevel = collector.WasiLevel;
 const Feature = collector.Feature;
 
-pub const op_tag: ZirOp = .@"if";
+pub const op_tag: ZirOp = .@"i32.const";
 pub const wasm_level: ?WasmLevel = .v1_0;
 pub const wasi_level: ?WasiLevel = null;
 pub const enable_features: []const Feature = &.{};
 
 pub const handlers = .{
-    .validate = validate_if_,
-    .lower = lower_if_,
-    .interp = interp_if_,
+    .validate = validate_i32_const,
+    .lower = lower_i32_const,
+    .interp = interp_i32_const,
 };
 
-fn validate_if_() collector.DispatchError!void {
+fn validate_i32_const() collector.DispatchError!void {
     return error.NotMigrated;
 }
-fn lower_if_() collector.DispatchError!void {
+fn lower_i32_const() collector.DispatchError!void {
     return error.NotMigrated;
 }
-fn interp_if_() collector.DispatchError!void {
+fn interp_i32_const() collector.DispatchError!void {
     return error.NotMigrated;
 }
