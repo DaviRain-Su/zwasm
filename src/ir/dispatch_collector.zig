@@ -145,13 +145,19 @@ pub fn enabledByBuild(comptime mod: type) bool {
 // silently regress.
 // ---------------------------------------------------------------------
 
+// Per-op module imports. As §9.12-B sub-chunks migrate ops, each new
+// per-op file is added below and appended to `collected_ops`.
+const i32_add = @import("../instruction/wasm_1_0/i32_add.zig");
+
 /// Tuple of all migrated per-op modules. Order is not load-bearing;
 /// `dispatcher` uses `op_tag` for routing.
-pub const collected_ops = .{};
+pub const collected_ops = .{
+    i32_add,
+};
 
 comptime {
     for (collected_ops) |op_mod| {
-        validateOpModule(@TypeOf(op_mod));
+        validateOpModule(op_mod);
     }
 }
 
@@ -161,7 +167,7 @@ pub fn migratedOpCount() usize {
     return comptime blk: {
         var n: usize = 0;
         for (collected_ops) |op_mod| {
-            if (enabledByBuild(@TypeOf(op_mod))) {
+            if (enabledByBuild(op_mod)) {
                 n += 1;
             }
         }
@@ -206,12 +212,14 @@ pub const DispatchError = error{
 };
 
 /// Look up the per-op module for `tag` at comptime; returns null when
-/// no migrated module matches.
+/// no migrated module matches. The returned `type` is the imported
+/// namespace (`@import("instruction/wasm_X_Y/<op>.zig")` — a `type`
+/// value in Zig); callers can read `.op_tag` / `.handlers.*` off it.
 pub fn opModuleFor(comptime tag: ZirOp) ?type {
     comptime {
         for (collected_ops) |op_mod| {
             if (op_mod.op_tag == tag) {
-                return @TypeOf(op_mod);
+                return op_mod;
             }
         }
         return null;
@@ -229,16 +237,27 @@ test "zirOpTagCount matches the ZirOp enum field count" {
     try std.testing.expect(n >= 200);
 }
 
-test "migratedOpCount is 0 in §9.12-A bootstrap (empty collected_ops)" {
-    try std.testing.expectEqual(@as(usize, 0), migratedOpCount());
+test "migratedOpCount tracks collected_ops length (1 after §9.12-B / B1)" {
+    // After B1 migrated i32.add as the canonical per-op template; remains
+    // 1 until B2 begins appending more ops. Update the literal alongside
+    // each B-sub-chunk that lands new per-op files.
+    try std.testing.expectEqual(@as(usize, 1), migratedOpCount());
 }
 
-test "migrationComplete is false during §9.12-A (no per-op files yet)" {
+test "migrationComplete is false until §9.12-B migrates all 581 ops" {
     try std.testing.expect(!migrationComplete());
 }
 
-test "opModuleFor returns null for any tag (no ops migrated yet)" {
-    // Use a comptime-known tag from the ZirOp enum.
+test "opModuleFor returns the registered op_mod for migrated ops" {
+    // i32.add is the first per-op module migrated in §9.12-B / B1.
+    const result = comptime opModuleFor(.@"i32.add");
+    try std.testing.expect(result != null);
+}
+
+test "opModuleFor returns null for not-yet-migrated tags" {
+    // Use a tag that's still in the legacy dispatch path. `unreachable`
+    // is in the Wasm 1.0 control category — migrates in a later
+    // §9.12-B sub-chunk.
     const result = comptime opModuleFor(.@"unreachable");
     try std.testing.expectEqual(@as(?type, null), result);
 }
