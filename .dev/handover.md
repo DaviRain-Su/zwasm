@@ -29,8 +29,8 @@
 | B5 | x86_64/emit.zig wire (mirror of B4 pattern) | `a9f6b499` |
 | B6 | interp populateDispatchTable (table-population scaffolding; activates when per-op handlers gain InterpFn signature) | `02925324` |
 | B7 | wasm_byte_map.byteToZirOp helper + validator.zig wire (3 bytes mapped: i32.add/sub/mul) | `6eb27fe0` |
-| B8 | lower.zig wire (extract byteToZirOp wholesale or wire payload-construction routing) | **NEXT** |
-| B9..Bn | per-op-file body migrations (5-15 ops/chunk) |  |
+| B8 | lower.zig wire (mirror of B7; closes 5-of-5 dispatcher wires) | `bc7cde3d` |
+| B9..Bn | per-op-file body migrations (5-15 ops/chunk; each activates the corresponding wire as real handlers replace stubs) | **NEXT** |
 
 ## Active state — §9.12-A [x]; §9.12-B autonomous (HUGE row)
 
