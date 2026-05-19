@@ -28,8 +28,8 @@
 | B4 | arm64/emit.zig wire (cleanest; ZirOp + switch; i32.add proof-of-pattern; dispatcher narrowed to DispatchError) | `a33b6eb7` |
 | B5 | x86_64/emit.zig wire (mirror of B4 pattern) | `a9f6b499` |
 | B6 | interp populateDispatchTable (table-population scaffolding; activates when per-op handlers gain InterpFn signature) | `02925324` |
-| B7 | byteToZirOp helper + validator.zig wire | **NEXT** |
-| B8 | lower.zig wire |  |
+| B7 | wasm_byte_map.byteToZirOp helper + validator.zig wire (3 bytes mapped: i32.add/sub/mul) | `6eb27fe0` |
+| B8 | lower.zig wire (extract byteToZirOp wholesale or wire payload-construction routing) | **NEXT** |
 | B9..Bn | per-op-file body migrations (5-15 ops/chunk) |  |
 
 ## Active state — §9.12-A [x]; §9.12-B autonomous (HUGE row)
