@@ -22,6 +22,8 @@ const std = @import("std");
 
 const leb128 = @import("../support/leb128.zig");
 const zir = @import("../ir/zir.zig");
+const dispatch_collector = @import("../ir/dispatch_collector.zig");
+const wasm_byte_map = @import("../ir/wasm_byte_map.zig");
 
 const ValType = zir.ValType;
 const FuncType = zir.FuncType;
@@ -513,6 +515,22 @@ const Validator = struct {
     // ----------------------------------------------------------------
 
     fn dispatch(self: *Validator, op: u8) Error!void {
+        // §9.12-B / B7: route through dispatch_collector before the
+        // legacy switch. Per ADR-0073 + `.dev/dispatcher_wire_design.md`
+        // §2.1 option B: `wasm_byte_map.byteToZirOp(op)` translates the
+        // Wasm bytecode to the ZirOp tag; then
+        // `dispatch_collector.dispatcher(.validate)` routes to per-op
+        // file. NotMigrated / UnsupportedOpForBuildLevel → fall
+        // through to legacy switch. Bytes not yet in the map (null
+        // return) also fall through silently.
+        if (wasm_byte_map.byteToZirOp(op)) |zir_tag| {
+            if (dispatch_collector.dispatcher(.validate)(zir_tag, .{})) |_| {
+                // Migrated op handled by per-op file.
+                return;
+            } else |err| switch (err) {
+                error.NotMigrated, error.UnsupportedOpForBuildLevel => {},
+            }
+        }
         switch (op) {
             // Control flow
             0x00 => try self.opUnreachable(),
