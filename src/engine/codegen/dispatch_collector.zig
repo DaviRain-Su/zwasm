@@ -159,6 +159,18 @@ const arm64_f64_add = @import("arm64/ops/wasm_1_0/f64_add.zig");
 const arm64_f64_sub = @import("arm64/ops/wasm_1_0/f64_sub.zig");
 const arm64_f64_mul = @import("arm64/ops/wasm_1_0/f64_mul.zig");
 const arm64_f64_div = @import("arm64/ops/wasm_1_0/f64_div.zig");
+const arm64_f32_eq = @import("arm64/ops/wasm_1_0/f32_eq.zig");
+const arm64_f32_ne = @import("arm64/ops/wasm_1_0/f32_ne.zig");
+const arm64_f32_lt = @import("arm64/ops/wasm_1_0/f32_lt.zig");
+const arm64_f32_gt = @import("arm64/ops/wasm_1_0/f32_gt.zig");
+const arm64_f32_le = @import("arm64/ops/wasm_1_0/f32_le.zig");
+const arm64_f32_ge = @import("arm64/ops/wasm_1_0/f32_ge.zig");
+const arm64_f64_eq = @import("arm64/ops/wasm_1_0/f64_eq.zig");
+const arm64_f64_ne = @import("arm64/ops/wasm_1_0/f64_ne.zig");
+const arm64_f64_lt = @import("arm64/ops/wasm_1_0/f64_lt.zig");
+const arm64_f64_gt = @import("arm64/ops/wasm_1_0/f64_gt.zig");
+const arm64_f64_le = @import("arm64/ops/wasm_1_0/f64_le.zig");
+const arm64_f64_ge = @import("arm64/ops/wasm_1_0/f64_ge.zig");
 
 const x86_64_f32_add = @import("x86_64/ops/wasm_1_0/f32_add.zig");
 const x86_64_f32_sub = @import("x86_64/ops/wasm_1_0/f32_sub.zig");
@@ -168,6 +180,18 @@ const x86_64_f64_add = @import("x86_64/ops/wasm_1_0/f64_add.zig");
 const x86_64_f64_sub = @import("x86_64/ops/wasm_1_0/f64_sub.zig");
 const x86_64_f64_mul = @import("x86_64/ops/wasm_1_0/f64_mul.zig");
 const x86_64_f64_div = @import("x86_64/ops/wasm_1_0/f64_div.zig");
+const x86_64_f32_eq = @import("x86_64/ops/wasm_1_0/f32_eq.zig");
+const x86_64_f32_ne = @import("x86_64/ops/wasm_1_0/f32_ne.zig");
+const x86_64_f32_lt = @import("x86_64/ops/wasm_1_0/f32_lt.zig");
+const x86_64_f32_gt = @import("x86_64/ops/wasm_1_0/f32_gt.zig");
+const x86_64_f32_le = @import("x86_64/ops/wasm_1_0/f32_le.zig");
+const x86_64_f32_ge = @import("x86_64/ops/wasm_1_0/f32_ge.zig");
+const x86_64_f64_eq = @import("x86_64/ops/wasm_1_0/f64_eq.zig");
+const x86_64_f64_ne = @import("x86_64/ops/wasm_1_0/f64_ne.zig");
+const x86_64_f64_lt = @import("x86_64/ops/wasm_1_0/f64_lt.zig");
+const x86_64_f64_gt = @import("x86_64/ops/wasm_1_0/f64_gt.zig");
+const x86_64_f64_le = @import("x86_64/ops/wasm_1_0/f64_le.zig");
+const x86_64_f64_ge = @import("x86_64/ops/wasm_1_0/f64_ge.zig");
 
 const x86_64_i32_wrap_i64 = @import("x86_64/ops/wasm_1_0/i32_wrap_i64.zig");
 const x86_64_i64_extend_i32_s = @import("x86_64/ops/wasm_1_0/i64_extend_i32_s.zig");
@@ -305,6 +329,18 @@ pub const collected_arm64_ops = .{
     arm64_f64_sub,
     arm64_f64_mul,
     arm64_f64_div,
+    arm64_f32_eq,
+    arm64_f32_ne,
+    arm64_f32_lt,
+    arm64_f32_gt,
+    arm64_f32_le,
+    arm64_f32_ge,
+    arm64_f64_eq,
+    arm64_f64_ne,
+    arm64_f64_lt,
+    arm64_f64_gt,
+    arm64_f64_le,
+    arm64_f64_ge,
 };
 
 /// Tuple of all migrated x86_64 per-op modules.
@@ -375,6 +411,18 @@ pub const collected_x86_64_ops = .{
     x86_64_f64_sub,
     x86_64_f64_mul,
     x86_64_f64_div,
+    x86_64_f32_eq,
+    x86_64_f32_ne,
+    x86_64_f32_lt,
+    x86_64_f32_gt,
+    x86_64_f32_le,
+    x86_64_f32_ge,
+    x86_64_f64_eq,
+    x86_64_f64_ne,
+    x86_64_f64_lt,
+    x86_64_f64_gt,
+    x86_64_f64_le,
+    x86_64_f64_ge,
 };
 
 comptime {
@@ -433,10 +481,10 @@ test "ArchAxis enum has exactly 2 variants per ADR-0074 (Zone 2 arch-axes)" {
     try std.testing.expectEqual(@as(usize, 2), @typeInfo(ArchAxis).@"enum".fields.len);
 }
 
-test "migratedArchOpCount tracks collected per-arch tuples (B22: arm64=74, x86_64=66)" {
-    // arm64 = 66 + float arith 8; x86_64 = 58 + float arith 8.
-    try std.testing.expectEqual(@as(usize, 74), migratedArchOpCount(.arm64));
-    try std.testing.expectEqual(@as(usize, 66), migratedArchOpCount(.x86_64));
+test "migratedArchOpCount tracks collected per-arch tuples (B23: arm64=86, x86_64=78)" {
+    // arm64 = 74 + float cmp 12; x86_64 = 66 + float cmp 12.
+    try std.testing.expectEqual(@as(usize, 86), migratedArchOpCount(.arm64));
+    try std.testing.expectEqual(@as(usize, 78), migratedArchOpCount(.x86_64));
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would

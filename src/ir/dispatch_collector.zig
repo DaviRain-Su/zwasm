@@ -232,6 +232,19 @@ const f64_sub = @import("../instruction/wasm_1_0/f64_sub.zig");
 const f64_mul = @import("../instruction/wasm_1_0/f64_mul.zig");
 const f64_div = @import("../instruction/wasm_1_0/f64_div.zig");
 
+const f32_eq = @import("../instruction/wasm_1_0/f32_eq.zig");
+const f32_ne = @import("../instruction/wasm_1_0/f32_ne.zig");
+const f32_lt = @import("../instruction/wasm_1_0/f32_lt.zig");
+const f32_gt = @import("../instruction/wasm_1_0/f32_gt.zig");
+const f32_le = @import("../instruction/wasm_1_0/f32_le.zig");
+const f32_ge = @import("../instruction/wasm_1_0/f32_ge.zig");
+const f64_eq = @import("../instruction/wasm_1_0/f64_eq.zig");
+const f64_ne = @import("../instruction/wasm_1_0/f64_ne.zig");
+const f64_lt = @import("../instruction/wasm_1_0/f64_lt.zig");
+const f64_gt = @import("../instruction/wasm_1_0/f64_gt.zig");
+const f64_le = @import("../instruction/wasm_1_0/f64_le.zig");
+const f64_ge = @import("../instruction/wasm_1_0/f64_ge.zig");
+
 /// Tuple of all migrated per-op modules. Order is not load-bearing;
 /// `dispatcher` uses `op_tag` for routing.
 pub const collected_ops = .{
@@ -309,6 +322,18 @@ pub const collected_ops = .{
     f64_sub,
     f64_mul,
     f64_div,
+    f32_eq,
+    f32_ne,
+    f32_lt,
+    f32_gt,
+    f32_le,
+    f32_ge,
+    f64_eq,
+    f64_ne,
+    f64_lt,
+    f64_gt,
+    f64_le,
+    f64_ge,
 };
 
 comptime {
@@ -460,9 +485,9 @@ test "zirOpTagCount matches the ZirOp enum field count" {
     try std.testing.expect(n >= 200);
 }
 
-test "migratedOpCount tracks collected_ops length (74 after §9.12-B / B22 float arith cohort)" {
-    // Running tally: 66 + float arith 8 = 74.
-    try std.testing.expectEqual(@as(usize, 74), migratedOpCount());
+test "migratedOpCount tracks collected_ops length (86 after §9.12-B / B23 float cmp cohort)" {
+    // Running tally: 74 + float cmp 12 = 86.
+    try std.testing.expectEqual(@as(usize, 86), migratedOpCount());
 }
 
 test "migrationComplete is false until §9.12-B migrates all 581 ops" {
