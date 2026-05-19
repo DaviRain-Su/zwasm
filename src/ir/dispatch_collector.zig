@@ -286,6 +286,23 @@ const i64x2_gt_s = @import("../instruction/wasm_2_0/i64x2_gt_s.zig");
 const i64x2_le_s = @import("../instruction/wasm_2_0/i64x2_le_s.zig");
 const i64x2_ge_s = @import("../instruction/wasm_2_0/i64x2_ge_s.zig");
 
+const f32x4_add = @import("../instruction/wasm_2_0/f32x4_add.zig");
+const f32x4_sub = @import("../instruction/wasm_2_0/f32x4_sub.zig");
+const f32x4_mul = @import("../instruction/wasm_2_0/f32x4_mul.zig");
+const f32x4_div = @import("../instruction/wasm_2_0/f32x4_div.zig");
+const f32x4_min = @import("../instruction/wasm_2_0/f32x4_min.zig");
+const f32x4_max = @import("../instruction/wasm_2_0/f32x4_max.zig");
+const f32x4_pmin = @import("../instruction/wasm_2_0/f32x4_pmin.zig");
+const f32x4_pmax = @import("../instruction/wasm_2_0/f32x4_pmax.zig");
+const f64x2_add = @import("../instruction/wasm_2_0/f64x2_add.zig");
+const f64x2_sub = @import("../instruction/wasm_2_0/f64x2_sub.zig");
+const f64x2_mul = @import("../instruction/wasm_2_0/f64x2_mul.zig");
+const f64x2_div = @import("../instruction/wasm_2_0/f64x2_div.zig");
+const f64x2_min = @import("../instruction/wasm_2_0/f64x2_min.zig");
+const f64x2_max = @import("../instruction/wasm_2_0/f64x2_max.zig");
+const f64x2_pmin = @import("../instruction/wasm_2_0/f64x2_pmin.zig");
+const f64x2_pmax = @import("../instruction/wasm_2_0/f64x2_pmax.zig");
+
 const i8x16_add_sat_s = @import("../instruction/wasm_2_0/i8x16_add_sat_s.zig");
 const i8x16_add_sat_u = @import("../instruction/wasm_2_0/i8x16_add_sat_u.zig");
 const i8x16_sub_sat_s = @import("../instruction/wasm_2_0/i8x16_sub_sat_s.zig");
@@ -621,6 +638,22 @@ pub const collected_ops = .{
     i16x8_sub_sat_s,
     i16x8_sub_sat_u,
     i16x8_avgr_u,
+    f32x4_add,
+    f32x4_sub,
+    f32x4_mul,
+    f32x4_div,
+    f32x4_min,
+    f32x4_max,
+    f32x4_pmin,
+    f32x4_pmax,
+    f64x2_add,
+    f64x2_sub,
+    f64x2_mul,
+    f64x2_div,
+    f64x2_min,
+    f64x2_max,
+    f64x2_pmin,
+    f64x2_pmax,
 };
 
 comptime {
@@ -774,9 +807,9 @@ test "zirOpTagCount matches the ZirOp enum field count" {
     try std.testing.expect(n >= 200);
 }
 
-test "migratedOpCount tracks collected_ops length (222 after §9.12-B / B38 SIMD sat+avgr)" {
+test "migratedOpCount tracks collected_ops length (238 after §9.12-B / B39 SIMD float arith)" {
     // Running tally: 162 + i16x8 cmp 10 = 172.
-    try std.testing.expectEqual(@as(usize, 222), migratedOpCount());
+    try std.testing.expectEqual(@as(usize, 238), migratedOpCount());
 }
 
 test "migrationComplete is false until §9.12-B migrates all 581 ops" {

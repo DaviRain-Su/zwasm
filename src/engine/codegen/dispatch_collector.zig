@@ -226,6 +226,23 @@ const arm64_i64x2_ge_s = @import("arm64/ops/wasm_2_0/i64x2_ge_s.zig");
 const arm64_i8x16_avgr_u = @import("arm64/ops/wasm_2_0/i8x16_avgr_u.zig");
 const arm64_i16x8_avgr_u = @import("arm64/ops/wasm_2_0/i16x8_avgr_u.zig");
 
+const arm64_f32x4_add = @import("arm64/ops/wasm_2_0/f32x4_add.zig");
+const arm64_f32x4_sub = @import("arm64/ops/wasm_2_0/f32x4_sub.zig");
+const arm64_f32x4_mul = @import("arm64/ops/wasm_2_0/f32x4_mul.zig");
+const arm64_f32x4_div = @import("arm64/ops/wasm_2_0/f32x4_div.zig");
+const arm64_f32x4_min = @import("arm64/ops/wasm_2_0/f32x4_min.zig");
+const arm64_f32x4_max = @import("arm64/ops/wasm_2_0/f32x4_max.zig");
+const arm64_f32x4_pmin = @import("arm64/ops/wasm_2_0/f32x4_pmin.zig");
+const arm64_f32x4_pmax = @import("arm64/ops/wasm_2_0/f32x4_pmax.zig");
+const arm64_f64x2_add = @import("arm64/ops/wasm_2_0/f64x2_add.zig");
+const arm64_f64x2_sub = @import("arm64/ops/wasm_2_0/f64x2_sub.zig");
+const arm64_f64x2_mul = @import("arm64/ops/wasm_2_0/f64x2_mul.zig");
+const arm64_f64x2_div = @import("arm64/ops/wasm_2_0/f64x2_div.zig");
+const arm64_f64x2_min = @import("arm64/ops/wasm_2_0/f64x2_min.zig");
+const arm64_f64x2_max = @import("arm64/ops/wasm_2_0/f64x2_max.zig");
+const arm64_f64x2_pmin = @import("arm64/ops/wasm_2_0/f64x2_pmin.zig");
+const arm64_f64x2_pmax = @import("arm64/ops/wasm_2_0/f64x2_pmax.zig");
+
 const arm64_i8x16_min_s = @import("arm64/ops/wasm_2_0/i8x16_min_s.zig");
 const arm64_i8x16_min_u = @import("arm64/ops/wasm_2_0/i8x16_min_u.zig");
 const arm64_i8x16_max_s = @import("arm64/ops/wasm_2_0/i8x16_max_s.zig");
@@ -280,6 +297,23 @@ const x86_64_i64x2_lt_s = @import("x86_64/ops/wasm_2_0/i64x2_lt_s.zig");
 const x86_64_i64x2_gt_s = @import("x86_64/ops/wasm_2_0/i64x2_gt_s.zig");
 const x86_64_i64x2_le_s = @import("x86_64/ops/wasm_2_0/i64x2_le_s.zig");
 const x86_64_i64x2_ge_s = @import("x86_64/ops/wasm_2_0/i64x2_ge_s.zig");
+
+const x86_64_f32x4_add = @import("x86_64/ops/wasm_2_0/f32x4_add.zig");
+const x86_64_f32x4_sub = @import("x86_64/ops/wasm_2_0/f32x4_sub.zig");
+const x86_64_f32x4_mul = @import("x86_64/ops/wasm_2_0/f32x4_mul.zig");
+const x86_64_f32x4_div = @import("x86_64/ops/wasm_2_0/f32x4_div.zig");
+const x86_64_f32x4_min = @import("x86_64/ops/wasm_2_0/f32x4_min.zig");
+const x86_64_f32x4_max = @import("x86_64/ops/wasm_2_0/f32x4_max.zig");
+const x86_64_f32x4_pmin = @import("x86_64/ops/wasm_2_0/f32x4_pmin.zig");
+const x86_64_f32x4_pmax = @import("x86_64/ops/wasm_2_0/f32x4_pmax.zig");
+const x86_64_f64x2_add = @import("x86_64/ops/wasm_2_0/f64x2_add.zig");
+const x86_64_f64x2_sub = @import("x86_64/ops/wasm_2_0/f64x2_sub.zig");
+const x86_64_f64x2_mul = @import("x86_64/ops/wasm_2_0/f64x2_mul.zig");
+const x86_64_f64x2_div = @import("x86_64/ops/wasm_2_0/f64x2_div.zig");
+const x86_64_f64x2_min = @import("x86_64/ops/wasm_2_0/f64x2_min.zig");
+const x86_64_f64x2_max = @import("x86_64/ops/wasm_2_0/f64x2_max.zig");
+const x86_64_f64x2_pmin = @import("x86_64/ops/wasm_2_0/f64x2_pmin.zig");
+const x86_64_f64x2_pmax = @import("x86_64/ops/wasm_2_0/f64x2_pmax.zig");
 
 const x86_64_i8x16_add_sat_s = @import("x86_64/ops/wasm_2_0/i8x16_add_sat_s.zig");
 const x86_64_i8x16_add_sat_u = @import("x86_64/ops/wasm_2_0/i8x16_add_sat_u.zig");
@@ -753,6 +787,22 @@ pub const collected_arm64_ops = .{
     arm64_i32x4_max_u,
     arm64_i8x16_avgr_u,
     arm64_i16x8_avgr_u,
+    arm64_f32x4_add,
+    arm64_f32x4_sub,
+    arm64_f32x4_mul,
+    arm64_f32x4_div,
+    arm64_f32x4_min,
+    arm64_f32x4_max,
+    arm64_f32x4_pmin,
+    arm64_f32x4_pmax,
+    arm64_f64x2_add,
+    arm64_f64x2_sub,
+    arm64_f64x2_mul,
+    arm64_f64x2_div,
+    arm64_f64x2_min,
+    arm64_f64x2_max,
+    arm64_f64x2_pmin,
+    arm64_f64x2_pmax,
 };
 
 /// Tuple of all migrated x86_64 per-op modules.
@@ -971,6 +1021,22 @@ pub const collected_x86_64_ops = .{
     x86_64_i16x8_sub_sat_s,
     x86_64_i16x8_sub_sat_u,
     x86_64_i16x8_avgr_u,
+    x86_64_f32x4_add,
+    x86_64_f32x4_sub,
+    x86_64_f32x4_mul,
+    x86_64_f32x4_div,
+    x86_64_f32x4_min,
+    x86_64_f32x4_max,
+    x86_64_f32x4_pmin,
+    x86_64_f32x4_pmax,
+    x86_64_f64x2_add,
+    x86_64_f64x2_sub,
+    x86_64_f64x2_mul,
+    x86_64_f64x2_div,
+    x86_64_f64x2_min,
+    x86_64_f64x2_max,
+    x86_64_f64x2_pmin,
+    x86_64_f64x2_pmax,
 };
 
 comptime {
@@ -1031,10 +1097,10 @@ test "ArchAxis enum has exactly 2 variants per ADR-0074 (Zone 2 arch-axes)" {
     try std.testing.expectEqual(@as(usize, 2), @typeInfo(ArchAxis).@"enum".fields.len);
 }
 
-test "migratedArchOpCount tracks collected per-arch tuples (B38: arm64=214, x86_64=214)" {
+test "migratedArchOpCount tracks collected per-arch tuples (B39: arm64=230, x86_64=230)" {
     // arm64 = 162 + 10 i16x8 cmp; x86_64 = 154 + 10.
-    try std.testing.expectEqual(@as(usize, 214), migratedArchOpCount(.arm64));
-    try std.testing.expectEqual(@as(usize, 214), migratedArchOpCount(.x86_64));
+    try std.testing.expectEqual(@as(usize, 230), migratedArchOpCount(.arm64));
+    try std.testing.expectEqual(@as(usize, 230), migratedArchOpCount(.x86_64));
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would
