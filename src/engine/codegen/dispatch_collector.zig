@@ -756,6 +756,29 @@ const x86_64_i32_trunc_f32_u = @import("x86_64/ops/wasm_1_0/i32_trunc_f32_u.zig"
 const x86_64_i32_trunc_f64_u = @import("x86_64/ops/wasm_1_0/i32_trunc_f64_u.zig");
 const x86_64_i64_trunc_f32_u = @import("x86_64/ops/wasm_1_0/i64_trunc_f32_u.zig");
 const x86_64_i64_trunc_f64_u = @import("x86_64/ops/wasm_1_0/i64_trunc_f64_u.zig");
+const x86_64_i32_load = @import("x86_64/ops/wasm_1_0/i32_load.zig");
+const x86_64_i32_load8_s = @import("x86_64/ops/wasm_1_0/i32_load8_s.zig");
+const x86_64_i32_load8_u = @import("x86_64/ops/wasm_1_0/i32_load8_u.zig");
+const x86_64_i32_load16_s = @import("x86_64/ops/wasm_1_0/i32_load16_s.zig");
+const x86_64_i32_load16_u = @import("x86_64/ops/wasm_1_0/i32_load16_u.zig");
+const x86_64_i32_store = @import("x86_64/ops/wasm_1_0/i32_store.zig");
+const x86_64_i32_store8 = @import("x86_64/ops/wasm_1_0/i32_store8.zig");
+const x86_64_i32_store16 = @import("x86_64/ops/wasm_1_0/i32_store16.zig");
+const x86_64_i64_load = @import("x86_64/ops/wasm_1_0/i64_load.zig");
+const x86_64_i64_load8_s = @import("x86_64/ops/wasm_1_0/i64_load8_s.zig");
+const x86_64_i64_load8_u = @import("x86_64/ops/wasm_1_0/i64_load8_u.zig");
+const x86_64_i64_load16_s = @import("x86_64/ops/wasm_1_0/i64_load16_s.zig");
+const x86_64_i64_load16_u = @import("x86_64/ops/wasm_1_0/i64_load16_u.zig");
+const x86_64_i64_load32_s = @import("x86_64/ops/wasm_1_0/i64_load32_s.zig");
+const x86_64_i64_load32_u = @import("x86_64/ops/wasm_1_0/i64_load32_u.zig");
+const x86_64_i64_store = @import("x86_64/ops/wasm_1_0/i64_store.zig");
+const x86_64_i64_store8 = @import("x86_64/ops/wasm_1_0/i64_store8.zig");
+const x86_64_i64_store16 = @import("x86_64/ops/wasm_1_0/i64_store16.zig");
+const x86_64_i64_store32 = @import("x86_64/ops/wasm_1_0/i64_store32.zig");
+const x86_64_f32_load = @import("x86_64/ops/wasm_1_0/f32_load.zig");
+const x86_64_f64_load = @import("x86_64/ops/wasm_1_0/f64_load.zig");
+const x86_64_f32_store = @import("x86_64/ops/wasm_1_0/f32_store.zig");
+const x86_64_f64_store = @import("x86_64/ops/wasm_1_0/f64_store.zig");
 
 const x86_64_i32_add = @import("x86_64/ops/wasm_1_0/i32_add.zig");
 const x86_64_i32_sub = @import("x86_64/ops/wasm_1_0/i32_sub.zig");
@@ -1522,6 +1545,29 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_f64_reinterpret_i64,
     x86_64_f64_promote_f32,
     x86_64_f32_demote_f64,
+    x86_64_i32_load,
+    x86_64_i32_load8_s,
+    x86_64_i32_load8_u,
+    x86_64_i32_load16_s,
+    x86_64_i32_load16_u,
+    x86_64_i32_store,
+    x86_64_i32_store8,
+    x86_64_i32_store16,
+    x86_64_i64_load,
+    x86_64_i64_load8_s,
+    x86_64_i64_load8_u,
+    x86_64_i64_load16_s,
+    x86_64_i64_load16_u,
+    x86_64_i64_load32_s,
+    x86_64_i64_load32_u,
+    x86_64_i64_store,
+    x86_64_i64_store8,
+    x86_64_i64_store16,
+    x86_64_i64_store32,
+    x86_64_f32_load,
+    x86_64_f64_load,
+    x86_64_f32_store,
+    x86_64_f64_store,
 };
 
 comptime {
@@ -1588,7 +1634,9 @@ test "ArchAxis enum has exactly 2 variants per ADR-0074 (Zone 2 arch-axes)" {
 test "migratedArchOpCount tracks collected per-arch tuples (B59: arm64=348, x86_64=292)" {
     // arm64 = 162 + 10 i16x8 cmp; x86_64 = 154 + 10 - 8 trunc_sat
     // (B57) - 8 int→float convert (B58) - 6 reinterpret/promote/demote
-    // (B59 moved B28 stubs to ctx tuple).
+    // (B59 moved B28 stubs to ctx tuple). B60 added 23 NEW scalar
+    // load/store per-op files directly to ctx tuple (not in legacy
+    // tuple before, so x86_64 count unchanged).
     try std.testing.expectEqual(@as(usize, 348), migratedArchOpCount(.arm64));
     try std.testing.expectEqual(@as(usize, 292), migratedArchOpCount(.x86_64));
 }
@@ -1599,9 +1647,10 @@ test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // trunc_sat cohort moved from legacy tuple (+8 = 24). B58: Wasm
     // 1.0 int→float convert cohort moved from legacy tuple (+8 = 32).
     // B59: reinterpret + promote/demote moved from legacy tuple
-    // (+6 = 38). The B6x+1 cutover folds this tuple back into
+    // (+6 = 38). B60: scalar load/store cohort (23 new per-op files,
+    // +23 = 61). The B6x+1 cutover folds this tuple back into
     // `collected_x86_64_ops`.
-    try std.testing.expectEqual(@as(usize, 38), collected_x86_64_ctx_ops.len);
+    try std.testing.expectEqual(@as(usize, 61), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would

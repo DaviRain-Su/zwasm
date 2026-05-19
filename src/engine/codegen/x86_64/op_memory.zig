@@ -28,6 +28,7 @@ const std = @import("std");
 
 const zir = @import("../../../ir/zir.zig");
 const regalloc = @import("../shared/regalloc.zig");
+const ctx_mod = @import("ctx.zig");
 const inst = @import("inst.zig");
 const abi = @import("abi.zig");
 const gpr = @import("gpr.zig");
@@ -223,6 +224,49 @@ pub fn emitMemOp(
         try pushed_vregs.append(allocator, result_v);
     }
 }
+
+/// §9.12-B / B60 (ADR-0075) — `(ctx, ins)` adapter for the
+/// scalar load/store cohort (23 ops via the shared `emitMemOp`
+/// helper). Single primary + 22 aliases (all variants share the
+/// same body — the legacy impl dispatches on `ins.op` internally
+/// to pick MOV / MOVZX / MOVSX shapes). Decomposes per-op at the
+/// B6x+1 cutover.
+pub fn emitI32Load(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitMemOp(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.bounds_fixups,
+        ctx.spill_base_off,
+        ins.op,
+        ins.payload,
+        ctx.func_idx,
+    );
+}
+pub const emitI32Load8S = emitI32Load;
+pub const emitI32Load8U = emitI32Load;
+pub const emitI32Load16S = emitI32Load;
+pub const emitI32Load16U = emitI32Load;
+pub const emitI32Store = emitI32Load;
+pub const emitI32Store8 = emitI32Load;
+pub const emitI32Store16 = emitI32Load;
+pub const emitI64Load = emitI32Load;
+pub const emitI64Load8S = emitI32Load;
+pub const emitI64Load8U = emitI32Load;
+pub const emitI64Load16S = emitI32Load;
+pub const emitI64Load16U = emitI32Load;
+pub const emitI64Load32S = emitI32Load;
+pub const emitI64Load32U = emitI32Load;
+pub const emitI64Store = emitI32Load;
+pub const emitI64Store8 = emitI32Load;
+pub const emitI64Store16 = emitI32Load;
+pub const emitI64Store32 = emitI32Load;
+pub const emitF32Load = emitI32Load;
+pub const emitF64Load = emitI32Load;
+pub const emitF32Store = emitI32Load;
+pub const emitF64Store = emitI32Load;
 
 // ============================================================
 // Bulk-memory ops (Wasm 2.0 §4.4.7 — memory.fill / memory.copy)
