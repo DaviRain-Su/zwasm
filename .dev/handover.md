@@ -25,8 +25,8 @@
 | Sub-chunk | Description | SHA |
 |---|---|---|
 | A1 | 5 enforcement scripts + progress tracker (master plan §7.1/7.3/7.4/7.6/7.8 + Q6 boundary) | `f3626d77` |
-| A2 | Rule body fills (no_fallback / spike_lifecycle / libc_boundary / runtime_instance_layer) | **NEXT** |
-| A3 | dispatch_consistency_audit skill body |  |
+| A2 | Rule body fills (no_fallback / spike_lifecycle / libc_boundary / runtime_instance_layer) | `31b913a6` |
+| A3 | dispatch_consistency_audit skill body | **NEXT** |
 | A4 | dispatch_collector.zig bootstrap (§7.2 / 7.9 comptime check) |  |
 | A5 | Scaffolding compression (ROADMAP Phase 0-8 archive + SKILL.md compression + private/audit-* archive) |  |
 | A6 | 8 existing gates wall-time measurement + consolidation study |  |
