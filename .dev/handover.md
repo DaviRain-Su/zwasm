@@ -25,8 +25,8 @@
 | B1 | i32_add per-op file foundation (template + collector wire; stubs only; legacy dispatch retains authority) | `bb85b918` |
 | B2 | dispatcher(comptime axis: Axis) function in dispatch_collector | `3660e3fa` |
 | B3 | Dispatcher wire design note (`.dev/dispatcher_wire_design.md`); B-sequence revised per bytecode-vs-ZirOp layer findings | `19f3e04c` |
-| B4 | arm64/emit.zig wire (cleanest; ZirOp + switch; i32.add proof-of-pattern) | **NEXT** |
-| B5 | x86_64/emit.zig wire (mirror) |  |
+| B4 | arm64/emit.zig wire (cleanest; ZirOp + switch; i32.add proof-of-pattern; dispatcher narrowed to DispatchError) | `a33b6eb7` |
+| B5 | x86_64/emit.zig wire (mirror) | **NEXT** |
 | B6 | interp populateDispatchTable |  |
 | B7 | byteToZirOp helper + validator.zig wire |  |
 | B8 | lower.zig wire |  |
