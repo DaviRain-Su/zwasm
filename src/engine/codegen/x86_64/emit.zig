@@ -42,6 +42,7 @@
 const std = @import("std");
 
 const zir = @import("../../../ir/zir.zig");
+const dispatch_collector = @import("../../../ir/dispatch_collector.zig");
 const regalloc = @import("../shared/regalloc.zig");
 const inst = @import("inst.zig");
 const usage = @import("usage.zig");
@@ -681,6 +682,15 @@ pub fn compile(
                 else => {},
             }
             continue;
+        }
+        // §9.12-B / B5: route through dispatch_collector before the
+        // legacy switch — mirror of arm64/emit.zig B4 wire. Per
+        // ADR-0073 + ADR-0023 §4.5 amend + `.dev/dispatcher_wire_design.md`
+        // §2.3 (x86_64 mirror of B4 arm64 pattern).
+        if (dispatch_collector.dispatcher(.x86_64)(ins.op, .{})) |_| {
+            continue;
+        } else |err| switch (err) {
+            error.NotMigrated, error.UnsupportedOpForBuildLevel => {},
         }
         switch (ins.op) {
             .@"i32.const" => {
