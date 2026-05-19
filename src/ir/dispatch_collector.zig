@@ -286,6 +286,18 @@ const i64x2_gt_s = @import("../instruction/wasm_2_0/i64x2_gt_s.zig");
 const i64x2_le_s = @import("../instruction/wasm_2_0/i64x2_le_s.zig");
 const i64x2_ge_s = @import("../instruction/wasm_2_0/i64x2_ge_s.zig");
 
+const i8x16_swizzle = @import("../instruction/wasm_2_0/i8x16_swizzle.zig");
+const i8x16_popcnt = @import("../instruction/wasm_2_0/i8x16_popcnt.zig");
+const i32x4_dot_i16x8_s = @import("../instruction/wasm_2_0/i32x4_dot_i16x8_s.zig");
+const i16x8_q15mulr_sat_s = @import("../instruction/wasm_2_0/i16x8_q15mulr_sat_s.zig");
+const f32x4_convert_i32x4_s = @import("../instruction/wasm_2_0/f32x4_convert_i32x4_s.zig");
+const f32x4_convert_i32x4_u = @import("../instruction/wasm_2_0/f32x4_convert_i32x4_u.zig");
+const f64x2_convert_low_i32x4_s = @import("../instruction/wasm_2_0/f64x2_convert_low_i32x4_s.zig");
+const f64x2_promote_low_f32x4 = @import("../instruction/wasm_2_0/f64x2_promote_low_f32x4.zig");
+const f32x4_demote_f64x2_zero = @import("../instruction/wasm_2_0/f32x4_demote_f64x2_zero.zig");
+const i32x4_trunc_sat_f32x4_s = @import("../instruction/wasm_2_0/i32x4_trunc_sat_f32x4_s.zig");
+const i32x4_trunc_sat_f32x4_u = @import("../instruction/wasm_2_0/i32x4_trunc_sat_f32x4_u.zig");
+
 const i16x8_extmul_low_i8x16_s = @import("../instruction/wasm_2_0/i16x8_extmul_low_i8x16_s.zig");
 const i16x8_extmul_high_i8x16_s = @import("../instruction/wasm_2_0/i16x8_extmul_high_i8x16_s.zig");
 const i16x8_extmul_low_i8x16_u = @import("../instruction/wasm_2_0/i16x8_extmul_low_i8x16_u.zig");
@@ -793,6 +805,17 @@ pub const collected_ops = .{
     i16x8_extadd_pairwise_i8x16_u,
     i32x4_extadd_pairwise_i16x8_s,
     i32x4_extadd_pairwise_i16x8_u,
+    i8x16_swizzle,
+    i8x16_popcnt,
+    i32x4_dot_i16x8_s,
+    i16x8_q15mulr_sat_s,
+    f32x4_convert_i32x4_s,
+    f32x4_convert_i32x4_u,
+    f64x2_convert_low_i32x4_s,
+    f64x2_promote_low_f32x4,
+    f32x4_demote_f64x2_zero,
+    i32x4_trunc_sat_f32x4_s,
+    i32x4_trunc_sat_f32x4_u,
 };
 
 comptime {
@@ -946,9 +969,9 @@ test "zirOpTagCount matches the ZirOp enum field count" {
     try std.testing.expect(n >= 200);
 }
 
-test "migratedOpCount tracks collected_ops length (305 after §9.12-B / B44 SIMD extmul+extadd)" {
+test "migratedOpCount tracks collected_ops length (316 after §9.12-B / B45 SIMD misc)" {
     // Running tally: 162 + i16x8 cmp 10 = 172.
-    try std.testing.expectEqual(@as(usize, 305), migratedOpCount());
+    try std.testing.expectEqual(@as(usize, 316), migratedOpCount());
 }
 
 test "migrationComplete is false until §9.12-B migrates all 581 ops" {
