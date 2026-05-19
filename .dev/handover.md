@@ -30,9 +30,9 @@
 | B6 | interp populateDispatchTable (table-population scaffolding; activates when per-op handlers gain InterpFn signature) | `02925324` |
 | B7 | wasm_byte_map.byteToZirOp helper + validator.zig wire (3 bytes mapped: i32.add/sub/mul) | `6eb27fe0` |
 | B8 | lower.zig wire (mirror of B7; closes 5-of-5 dispatcher wires) | `bc7cde3d` |
-| B9 | ADR-0074 — per-op file zone split along axis boundary (Zone 1: validate/lower/interp; Zone 2: arm64/x86_64). Amends ADR-0023 §4.5. Design-only; no code change | `<backfill>` |
-| B10 | i32_add.zig prunes arm64/x86_64 handlers from `handlers` aggregate; new `src/engine/codegen/<arch>/ops/wasm_1_0/i32_add.zig` per-arch files (stubs) + Zone 2 collector skeleton at `src/engine/codegen/dispatch_collector.zig`; retarget arm64/x86_64 wires to Zone 2 collector | **NEXT** |
-| B11..Bn | per-op-file body migrations (5-15 ops/chunk; each activates the corresponding wire as real handlers replace stubs) | |
+| B9 | ADR-0074 — per-op file zone split along axis boundary (Zone 1: validate/lower/interp; Zone 2: arm64/x86_64). Amends ADR-0023 §4.5. Design-only; no code change | `5b42f526` |
+| B10 | Zone 2 collector at `src/engine/codegen/dispatch_collector.zig` (ArchAxis = arm64/x86_64) + per-arch i32_add stubs at `src/engine/codegen/<arch>/ops/wasm_1_0/i32_add.zig`. i32_add.zig handlers aggregate narrowed to 3 IR-axes. arm64/x86_64 emit.zig wires retargeted to Zone 2 collector | `<backfill>` |
+| B11..Bn | per-op-file body migrations (5-15 ops/chunk; each activates the corresponding wire as real handlers replace stubs). **B11 NEXT**: migrate i32.add's `validate` axis real body — first IR-axis handler migration, establishes per-op validate body template | **NEXT** |
 
 ## Active state — §9.12-A [x]; §9.12-B autonomous (HUGE row)
 
