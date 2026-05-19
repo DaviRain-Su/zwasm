@@ -26,3 +26,20 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
 bash scripts/gate_commit.sh
+
+# Per §9.12-A enforcement-layer wiring (master plan §7.3 + §7.6):
+# fire the chunk-close exit gate + skip-impl ratchet on pre-push so
+# the rare-but-load-bearing checks run before the commit becomes
+# visible on origin. Both are cheap when they have nothing to do:
+# subrow_exit only checks when HEAD contains a §9.12-X `[x]` flip;
+# ratchet uses cached test logs (or warns if absent).
+
+if [ -x scripts/check_subrow_exit.sh ]; then
+    echo "[pre-push] check_subrow_exit --gate ..."
+    bash scripts/check_subrow_exit.sh --gate
+fi
+
+if [ -x scripts/check_skip_impl_ratchet.sh ]; then
+    echo "[pre-push] check_skip_impl_ratchet --gate ..."
+    bash scripts/check_skip_impl_ratchet.sh --gate
+fi
