@@ -18,16 +18,28 @@
 //!     (Zone 2). Each arch op file in turn imports the Zone 1
 //!     identity anchor for `op_tag` / `wasm_level` / `wasi_level`.
 //!
-//! The two collectors share `WasmLevel` / `WasiLevel` / `DispatchError`
-//! / `enabledByBuild` (re-exported from Zone 1) so the build-option
-//! filter applies uniformly across all 5 axes.
+//! The two collectors share `WasmLevel` / `WasiLevel` / `enabledByBuild`
+//! (re-exported from Zone 1) so the build-option filter applies
+//! uniformly across all 5 axes.
 //!
-//! Per-arch op file shape (the contract):
+//! ## Dispatch contract (B11 refactor)
+//!
+//! `dispatch(axis, op, args)` returns `!bool`:
+//!   - `true`: the per-arch handler for `op` ran (errors propagated
+//!     via the `try`-propagating inferred error set).
+//!   - `false`: no per-arch op file is registered for `op` (= legacy
+//!     switch in `<arch>/emit.zig` retains authority).
+//!   - error: whatever the per-arch handler raised; the caller's
+//!     enclosing fn's `Error` set must include it (per-arch handlers
+//!     return `arm64/ctx.Error!void` or `x86_64/ctx.Error!void`,
+//!     matching the wire-call's enclosing fn).
+//!
+//! Per-arch op file shape:
 //!
 //!   pub const op_tag: ZirOp = ...;        // mirrored from Zone 1
 //!   pub const wasm_level: ?WasmLevel = ...;
 //!   pub const wasi_level: ?WasiLevel = ...;
-//!   pub fn emit(...) DispatchError!void { ... }
+//!   pub fn emit(...) Error!void { ... }   // real body; per-arch ctx
 //!
 //! Zone 2 (`src/engine/codegen/`).
 
@@ -39,7 +51,6 @@ const ZirOp = zir.ZirOp;
 
 pub const WasmLevel = ir_collector.WasmLevel;
 pub const WasiLevel = ir_collector.WasiLevel;
-pub const DispatchError = ir_collector.DispatchError;
 pub const enabledByBuild = ir_collector.enabledByBuild;
 
 /// Per-arch codegen axes (per ADR-0074). The IR-axis counterparts
@@ -59,7 +70,7 @@ pub fn validateArchOpModule(comptime mod: type) void {
             @compileError("per-arch op file missing `pub const wasm_level: ?WasmLevel = ...;`");
         }
         if (!@hasDecl(mod, "emit")) {
-            @compileError("per-arch op file missing `pub fn emit(...) DispatchError!void { ... }`");
+            @compileError("per-arch op file missing `pub fn emit(...) Error!void { ... }`");
         }
     }
 }
@@ -67,12 +78,12 @@ pub fn validateArchOpModule(comptime mod: type) void {
 // ---------------------------------------------------------------------
 // Per-arch collected op modules.
 //
-// B10 bootstrap: a single arch-pair (i32.add) for each axis to prove
-// the wire-in shape. B11..Bn append additional ops via cohort migration.
+// B11: arm64 i32.add has a real body (migrated from `op_alu_int.zig`).
+// x86_64 i32.add stub deferred to B12 (per-arch file absent ⇒
+// dispatch returns false ⇒ legacy switch authoritative).
 // ---------------------------------------------------------------------
 
 const arm64_i32_add = @import("arm64/ops/wasm_1_0/i32_add.zig");
-const x86_64_i32_add = @import("x86_64/ops/wasm_1_0/i32_add.zig");
 
 /// Tuple of all migrated arm64 per-op modules.
 pub const collected_arm64_ops = .{
@@ -80,9 +91,7 @@ pub const collected_arm64_ops = .{
 };
 
 /// Tuple of all migrated x86_64 per-op modules.
-pub const collected_x86_64_ops = .{
-    x86_64_i32_add,
-};
+pub const collected_x86_64_ops = .{};
 
 comptime {
     for (collected_arm64_ops) |op_mod| {
@@ -111,26 +120,25 @@ pub fn migratedArchOpCount(comptime axis: ArchAxis) usize {
     };
 }
 
-/// Per-arch axis dispatcher. Mirrors the Zone 1 IR-axis dispatcher
-/// shape (see `src/ir/dispatch_collector.zig::dispatcher`). Returns
-/// `error.NotMigrated` when the op has no per-arch handler yet (=
-/// legacy switch in `<arch>/emit.zig` retains authority).
-pub fn dispatcher(comptime axis: ArchAxis) fn (op: ZirOp, args: anytype) DispatchError!void {
-    return struct {
-        fn dispatch(op: ZirOp, args: anytype) DispatchError!void {
-            const ops = comptime switch (axis) {
-                .arm64 => collected_arm64_ops,
-                .x86_64 => collected_x86_64_ops,
-            };
-            inline for (ops) |op_mod| {
-                if (comptime !enabledByBuild(op_mod)) continue;
-                if (op == op_mod.op_tag) {
-                    return @call(.auto, op_mod.emit, args);
-                }
-            }
-            return DispatchError.NotMigrated;
+/// Per-arch dispatch. Returns `true` if the per-arch handler ran;
+/// `false` if no per-arch op file is registered (legacy switch should
+/// take over). Handler errors propagate via the inferred error set.
+///
+/// `args` is a tuple matching the per-arch `emit` function's signature
+/// (per-arch ctx types are Zone 2 concerns).
+pub fn dispatch(comptime axis: ArchAxis, op: ZirOp, args: anytype) !bool {
+    const ops = comptime switch (axis) {
+        .arm64 => collected_arm64_ops,
+        .x86_64 => collected_x86_64_ops,
+    };
+    inline for (ops) |op_mod| {
+        if (comptime !enabledByBuild(op_mod)) continue;
+        if (op == op_mod.op_tag) {
+            try @call(.auto, op_mod.emit, args);
+            return true;
         }
-    }.dispatch;
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------
@@ -141,22 +149,15 @@ test "ArchAxis enum has exactly 2 variants per ADR-0074 (Zone 2 arch-axes)" {
     try std.testing.expectEqual(@as(usize, 2), @typeInfo(ArchAxis).@"enum".fields.len);
 }
 
-test "migratedArchOpCount tracks collected per-arch tuples (1 after B10)" {
+test "migratedArchOpCount tracks collected per-arch tuples (B11: arm64=1, x86_64=0)" {
     try std.testing.expectEqual(@as(usize, 1), migratedArchOpCount(.arm64));
-    try std.testing.expectEqual(@as(usize, 1), migratedArchOpCount(.x86_64));
+    try std.testing.expectEqual(@as(usize, 0), migratedArchOpCount(.x86_64));
 }
 
-test "dispatcher(.arm64) routes i32.add to its per-arch stub (NotMigrated by design)" {
-    const result = dispatcher(.arm64)(.@"i32.add", .{});
-    try std.testing.expectError(error.NotMigrated, result);
-}
-
-test "dispatcher(.x86_64) routes i32.add to its per-arch stub (NotMigrated by design)" {
-    const result = dispatcher(.x86_64)(.@"i32.add", .{});
-    try std.testing.expectError(error.NotMigrated, result);
-}
-
-test "dispatcher returns NotMigrated for not-yet-migrated tags (both arches)" {
-    try std.testing.expectError(error.NotMigrated, dispatcher(.arm64)(.@"unreachable", .{}));
-    try std.testing.expectError(error.NotMigrated, dispatcher(.x86_64)(.@"unreachable", .{}));
-}
+// Note: a `dispatch(.arm64, tag, args)` test at this layer would
+// fail to compile because `inline for` expands the `@call(.auto,
+// op_mod.emit, args)` at comptime against every registered per-arch
+// handler — handlers require their real ctx tuples, not a smoke
+// `.{}`. The dispatcher's wire contract is covered by integration
+// tests at `arm64/emit.zig` (and `x86_64/emit.zig` once B12 lands)
+// going through real spec-driven fixtures.

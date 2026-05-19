@@ -806,20 +806,15 @@ pub fn compile(
             }
             continue;
         }
-        // §9.12-B / B4: route through dispatch_collector before the
-        // legacy switch. Migrated per-op modules' `.handlers.arm64` get
-        // first crack; NotMigrated means the legacy switch below
-        // retains authority. Per ADR-0073 + ADR-0023 §4.5 amend +
-        // `.dev/dispatcher_wire_design.md` §2.3.
-        if (dispatch_collector.dispatcher(.arm64)(ins.op, .{})) |_| {
-            // Migrated op handled; skip the legacy switch.
+        // §9.12-B / B4..B11: route through dispatch_collector before
+        // the legacy switch. Returns true → per-arch handler ran,
+        // skip legacy. Returns false → no per-arch op file for this
+        // tag, legacy switch authoritative. Handler errors propagate
+        // via the inferred error set (per-arch handlers return
+        // `Error!void` matching the enclosing compile fn).
+        // Per ADR-0074 + `.dev/dispatcher_wire_design.md` §2.3.
+        if (try dispatch_collector.dispatch(.arm64, ins.op, .{ &ctx, &ins })) {
             continue;
-        } else |err| switch (err) {
-            // DispatchError exhaustively covered — both arms fall
-            // through to the legacy switch below. Per-op handlers in
-            // §9.12-B / B-pre return `DispatchError!void`; once real
-            // bodies land the dispatcher widens and this switch grows.
-            error.NotMigrated, error.UnsupportedOpForBuildLevel => {},
         }
         switch (ins.op) {
             .@"i32.const" => try op_const.emitI32Const(&ctx, &ins),

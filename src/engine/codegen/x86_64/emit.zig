@@ -683,14 +683,16 @@ pub fn compile(
             }
             continue;
         }
-        // §9.12-B / B5: route through dispatch_collector before the
-        // legacy switch — mirror of arm64/emit.zig B4 wire. Per
-        // ADR-0073 + ADR-0023 §4.5 amend + `.dev/dispatcher_wire_design.md`
-        // §2.3 (x86_64 mirror of B4 arm64 pattern).
-        if (dispatch_collector.dispatcher(.x86_64)(ins.op, .{})) |_| {
+        // §9.12-B / B5..B11: route through dispatch_collector before
+        // the legacy switch — mirror of arm64/emit.zig wire (B11
+        // refactor to bool-return + inferred-error pattern). No per-arch
+        // op files for x86_64 yet (B12 lands i32.add); dispatch always
+        // returns false → legacy switch authoritative.
+        // Per ADR-0074 + `.dev/dispatcher_wire_design.md` §2.3.
+        if (try dispatch_collector.dispatch(.x86_64, ins.op, .{
+            allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.op,
+        })) {
             continue;
-        } else |err| switch (err) {
-            error.NotMigrated, error.UnsupportedOpForBuildLevel => {},
         }
         switch (ins.op) {
             .@"i32.const" => {
