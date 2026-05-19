@@ -44,9 +44,10 @@
 | B20 | i32/i64 divide+remainder cohort: 8 ops, arm64-only migration (x86_64 deferred due to bounds_fixups arg). 16 new files | `ec83e434` |
 | B21 | width-conversion cohort: 3 ops × 2 arches (i32.wrap_i64 + i64.extend_i32_{s,u}). 9 new files | `413d5278` |
 | B22 | f32/f64 arithmetic cohort: 8 ops × 2 arches (add/sub/mul/div). 24 new files | `bf4f6453` |
-| B23 | f32/f64 compare cohort: 12 ops × 2 arches (eq/ne/lt/gt/le/ge). 36 new files | `<backfill>` |
-| B24 | f32/f64 unary cohort: abs/neg/sqrt/ceil/floor/trunc/nearest × 2 widths = 14 ops × 2 arches. arm64 emitFloatUnary; x86_64 emitFpUnary (7-arg). ~42 files | **NEXT** |
-| B25..Bn | f32/f64.min/max (4 ops); f32/f64.copysign (2 ops); float convert ops (i32.trunc_f*, f64.promote_f32, f32.demote_f64, etc.); then x86_64 EmitCtx consolidation for const/load/store/call/local/global ops + div/rem completion; then Wasm 2.0 SIMD cohort (~400 ops). IR-axis migration still deferred | |
+| B23 | f32/f64 compare cohort: 12 ops × 2 arches (eq/ne/lt/gt/le/ge). 36 new files | `32e3efb8` |
+| B24 | f32/f64 unary cohort: 14 ops × 2 arches (abs/neg/sqrt/ceil/floor/trunc/nearest). 42 new files. 100/92 of 581 | `<backfill>` |
+| B25 | f32/f64.min/max + copysign cohort: 6 ops × 2 arches. arm64 specific delegates; x86_64 emitFpMinMax + emitFpCopysign (need to verify sig) | **NEXT** |
+| B26..Bn | float convert ops (i32.trunc_f*, f64.promote_f32, f32.demote_f64, etc.); then x86_64 EmitCtx consolidation for const/load/store/call/local/global ops + div/rem completion; then Wasm 2.0 SIMD cohort (~400 ops). IR-axis migration still deferred | |
 
 ## Active state — §9.12-A [x]; §9.12-B autonomous (HUGE row)
 
