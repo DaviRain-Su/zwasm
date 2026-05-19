@@ -286,6 +286,19 @@ const i64x2_gt_s = @import("../instruction/wasm_2_0/i64x2_gt_s.zig");
 const i64x2_le_s = @import("../instruction/wasm_2_0/i64x2_le_s.zig");
 const i64x2_ge_s = @import("../instruction/wasm_2_0/i64x2_ge_s.zig");
 
+const i8x16_min_s = @import("../instruction/wasm_2_0/i8x16_min_s.zig");
+const i8x16_min_u = @import("../instruction/wasm_2_0/i8x16_min_u.zig");
+const i8x16_max_s = @import("../instruction/wasm_2_0/i8x16_max_s.zig");
+const i8x16_max_u = @import("../instruction/wasm_2_0/i8x16_max_u.zig");
+const i16x8_min_s = @import("../instruction/wasm_2_0/i16x8_min_s.zig");
+const i16x8_min_u = @import("../instruction/wasm_2_0/i16x8_min_u.zig");
+const i16x8_max_s = @import("../instruction/wasm_2_0/i16x8_max_s.zig");
+const i16x8_max_u = @import("../instruction/wasm_2_0/i16x8_max_u.zig");
+const i32x4_min_s = @import("../instruction/wasm_2_0/i32x4_min_s.zig");
+const i32x4_min_u = @import("../instruction/wasm_2_0/i32x4_min_u.zig");
+const i32x4_max_s = @import("../instruction/wasm_2_0/i32x4_max_s.zig");
+const i32x4_max_u = @import("../instruction/wasm_2_0/i32x4_max_u.zig");
+
 const i8x16_shl = @import("../instruction/wasm_2_0/i8x16_shl.zig");
 const i8x16_shr_s = @import("../instruction/wasm_2_0/i8x16_shr_s.zig");
 const i8x16_shr_u = @import("../instruction/wasm_2_0/i8x16_shr_u.zig");
@@ -575,9 +588,22 @@ pub const collected_ops = .{
     i64x2_shl,
     i64x2_shr_s,
     i64x2_shr_u,
+    i8x16_min_s,
+    i8x16_min_u,
+    i8x16_max_s,
+    i8x16_max_u,
+    i16x8_min_s,
+    i16x8_min_u,
+    i16x8_max_s,
+    i16x8_max_u,
+    i32x4_min_s,
+    i32x4_min_u,
+    i32x4_max_s,
+    i32x4_max_u,
 };
 
 comptime {
+    @setEvalBranchQuota(10_000);
     for (collected_ops) |op_mod| {
         validateOpModule(op_mod);
     }
@@ -587,6 +613,7 @@ comptime {
 /// All comptime-resolved; returns a constant for the current build.
 pub fn migratedOpCount() usize {
     return comptime blk: {
+        @setEvalBranchQuota(10_000);
         var n: usize = 0;
         for (collected_ops) |op_mod| {
             if (enabledByBuild(op_mod)) {
@@ -726,9 +753,9 @@ test "zirOpTagCount matches the ZirOp enum field count" {
     try std.testing.expect(n >= 200);
 }
 
-test "migratedOpCount tracks collected_ops length (200 after §9.12-B / B36 SIMD int shifts)" {
+test "migratedOpCount tracks collected_ops length (212 after §9.12-B / B37 SIMD int min/max)" {
     // Running tally: 162 + i16x8 cmp 10 = 172.
-    try std.testing.expectEqual(@as(usize, 200), migratedOpCount());
+    try std.testing.expectEqual(@as(usize, 212), migratedOpCount());
 }
 
 test "migrationComplete is false until §9.12-B migrates all 581 ops" {
