@@ -15,8 +15,8 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
    `chore(p9b):` / `feat(p9b):` prefix. Last source commit
-   `c6eccb2b` (B64 — call cohort: call+call_indirect migrated;
-   2 new per-op files; ctx 73 → 75).
+   `e81266f4` (B65 — block + loop control cohort migrated;
+   2 new per-op files; ctx 75 → 77).
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -89,35 +89,38 @@
 | B62 | Cohort migration: globals cohort (`global.get` / `global.set`, 2 ops) to `(ctx, ins)`. 2 distinct adapters (set has no `next_vreg`). 2 NEW per-op files. `_ctx_ops` 64 → 66; legacy unchanged at 292. | `f4aac465` |
 | B63 | Cohort migration: table ops cohort (`table.{get,set,size,grow,fill,copy,init}`, 7 ops) to `(ctx, ins)`. 7 distinct adapters (heterogeneous — table.copy/init use ins.extra; table.grow uses outgoing_max_bytes). 7 NEW per-op files. `_ctx_ops` 66 → 73; legacy unchanged at 292. | `344e1d29` |
 | B64 | Cohort migration: call cohort (`call`, `call_indirect`, 2 ops) to `(ctx, ins)`. 2 distinct adapters in op_call.zig. 2 NEW per-op files. `_ctx_ops` 73 → 75; legacy unchanged at 292. Scalar `*.const` + `ref.{null,func}` cohort deferred (Zone 1 meta files missing). | `c6eccb2b` |
-| **B65** | **Cohort migration: local ops cohort (`local.get`, `local.set`, `local.tee`, 3 ops)** to `(ctx, ins)`. Three distinct adapters (signatures take func + num_params + total_locals + layout.disps + ins.payload). Existing per-op stubs may or may not exist — check first. | **NEXT** |
-| B65..B6x | Bulk migrate remaining x86_64 emit fns in cohorts (5–15 ops/chunk per LOOP.md). Suggested order: local → control → const+ref (after Zone 1 meta) → ALU rewires of legacy tuple ops. | |
+| B65 | Cohort migration: control-structure cohort (`block`, `loop`, 2 ops) to `(ctx, ins)`. 2 distinct adapters in op_control.zig. 2 NEW per-op files. `_ctx_ops` 75 → 77; legacy unchanged at 292. local.{get,set,tee} + br/br_if/br_table/if/else/end/return/unreachable deferred (Zone 1 meta files missing OR emit.zig private helpers need extraction). | `e81266f4` |
+| **B66** | **Zone 1 meta-file backfill chunk** — author 12 missing Zone 1 meta files (`local_{get,set,tee}.zig`, `br.zig`, `br_if.zig`, `br_table.zig`, `if.zig`, `else.zig`, `end.zig`, `return.zig`, `unreachable.zig`, `select.zig`?). Mirror the shape of `block.zig` / `loop.zig` (Zone 1 stubs with `op_tag`/`wasm_level`/`wasi_level` + `NotMigrated` Zone 1 handlers). Pure scaffolding — no behaviour change; unblocks B67+ per-arch migration. | **NEXT** |
+| B66..B6x | After B66 lands, resume per-op migration: control flow (br/if/end family) → local ops → const + ref family. Followed by B6x+1 inline-switch cutover folding ctx tuple back into the unified `collected_x86_64_ops`. | |
 | B6x+1 | Inline-switch dispatcher cutover per ADR-0073 — both arches' `emit.zig` giant switch replaced by `inline for (collected_X_ops) |op_mod| { if (op_mod.op_tag == ins.op) return op_mod.emit(ctx, ins); }`. Moment per-op files become load-bearing. | |
 
-## Active state — §9.12-B mid-flight; B64 call cohort landed 2026-05-20
+## Active state — §9.12-B mid-flight; B65 block+loop cohort landed 2026-05-20
 
-**B65 is the active task** — cohort migrate local ops
-(`local.get`, `local.set`, `local.tee`, 3 ops) to `(ctx, ins)`.
-B64 closed the call cohort at `c6eccb2b`
-(`collected_x86_64_ctx_ops` 73 → 75).
+**B66 is the active task** — Zone 1 meta-file backfill chunk.
+Multiple recent migrations have surfaced the same blocker:
+control-flow ops (br/br_if/br_table/if/else/end/return/
+unreachable), local.{get,set,tee}, and scalar *.const +
+ref.{null,func} all lack Zone 1 meta files
+(`src/instruction/wasm_1_0/<op>.zig`). Without these stubs,
+per-op file creation fails at the `@import("../../../instruction/...")`
+step. Authoring the ~12-15 missing meta files unblocks 3+
+future cohorts at once.
 
-The loop for B65:
+The loop for B66:
 
-1. Survey emit.zig dispatch arms (lines ~959-961) for
-   local.get/set/tee. They take `func` + `num_params` +
-   `total_locals` + `layout.disps` + `ins.payload`. None of
-   these are currently in EmitCtx — may need to add fields
-   to ctx_mod (substrate change → distinct from pure
-   adapter migration).
-2. If ctx extension needed: add `num_params`, `total_locals`,
-   `local_disps` fields to EmitCtx; wire init args.
-3. Add per-op `(ctx, ins)` adapters in op_locals.zig (check
-   if exists; else op_alu_int.zig or new file).
-4. Create 3 per-op files; update collector; bump assertion.
-5. Verify 2-host green; commit + push.
+1. Survey `src/instruction/wasm_1_0/` to enumerate missing
+   per-op meta files vs ZirOp tags that have no stub.
+2. Author each missing file mirroring `block.zig`/`loop.zig`
+   shape: `pub const op_tag`, `wasm_level: ?WasmLevel`,
+   `wasi_level: ?WasiLevel`, `enable_features: []const Feature`,
+   `handlers = .{ .validate, .lower, .interp }` returning
+   `NotMigrated`. Pure scaffolding — no behaviour change.
+3. No emit.zig / collector edits in B66 (Zone 2 stays put).
+4. Verify 2-host green (just compile check).
+5. Commit + push.
 
-Note: op_convert.zig at 1009 LOC — file split plan deferred to
-§9.12-D cleanup. Const + ref.* cohort still blocked on Zone 1
-meta files; pick up after B65.
+Note: op_convert.zig at 1009 LOC + op_control.zig at 1169 LOC —
+file split plan deferred to §9.12-D cleanup.
 
 §9.12-B exit criterion stays as ROADMAP §9.12-B specifies (6 build
 combos green + DCE 0 + completeness comptime check). Per-op file
