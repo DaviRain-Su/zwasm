@@ -286,6 +286,19 @@ const i64x2_gt_s = @import("../instruction/wasm_2_0/i64x2_gt_s.zig");
 const i64x2_le_s = @import("../instruction/wasm_2_0/i64x2_le_s.zig");
 const i64x2_ge_s = @import("../instruction/wasm_2_0/i64x2_ge_s.zig");
 
+const i8x16_shl = @import("../instruction/wasm_2_0/i8x16_shl.zig");
+const i8x16_shr_s = @import("../instruction/wasm_2_0/i8x16_shr_s.zig");
+const i8x16_shr_u = @import("../instruction/wasm_2_0/i8x16_shr_u.zig");
+const i16x8_shl = @import("../instruction/wasm_2_0/i16x8_shl.zig");
+const i16x8_shr_s = @import("../instruction/wasm_2_0/i16x8_shr_s.zig");
+const i16x8_shr_u = @import("../instruction/wasm_2_0/i16x8_shr_u.zig");
+const i32x4_shl = @import("../instruction/wasm_2_0/i32x4_shl.zig");
+const i32x4_shr_s = @import("../instruction/wasm_2_0/i32x4_shr_s.zig");
+const i32x4_shr_u = @import("../instruction/wasm_2_0/i32x4_shr_u.zig");
+const i64x2_shl = @import("../instruction/wasm_2_0/i64x2_shl.zig");
+const i64x2_shr_s = @import("../instruction/wasm_2_0/i64x2_shr_s.zig");
+const i64x2_shr_u = @import("../instruction/wasm_2_0/i64x2_shr_u.zig");
+
 const i32_div_s = @import("../instruction/wasm_1_0/i32_div_s.zig");
 const i32_div_u = @import("../instruction/wasm_1_0/i32_div_u.zig");
 const i32_rem_s = @import("../instruction/wasm_1_0/i32_rem_s.zig");
@@ -550,6 +563,18 @@ pub const collected_ops = .{
     i64x2_gt_s,
     i64x2_le_s,
     i64x2_ge_s,
+    i8x16_shl,
+    i8x16_shr_s,
+    i8x16_shr_u,
+    i16x8_shl,
+    i16x8_shr_s,
+    i16x8_shr_u,
+    i32x4_shl,
+    i32x4_shr_s,
+    i32x4_shr_u,
+    i64x2_shl,
+    i64x2_shr_s,
+    i64x2_shr_u,
 };
 
 comptime {
@@ -701,9 +726,9 @@ test "zirOpTagCount matches the ZirOp enum field count" {
     try std.testing.expect(n >= 200);
 }
 
-test "migratedOpCount tracks collected_ops length (188 after §9.12-B / B35 i64x2 cmp)" {
+test "migratedOpCount tracks collected_ops length (200 after §9.12-B / B36 SIMD int shifts)" {
     // Running tally: 162 + i16x8 cmp 10 = 172.
-    try std.testing.expectEqual(@as(usize, 188), migratedOpCount());
+    try std.testing.expectEqual(@as(usize, 200), migratedOpCount());
 }
 
 test "migrationComplete is false until §9.12-B migrates all 581 ops" {
