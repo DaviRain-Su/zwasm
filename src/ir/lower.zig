@@ -38,6 +38,8 @@ const std = @import("std");
 
 const leb128 = @import("../support/leb128.zig");
 const zir = @import("zir.zig");
+const dispatch_collector = @import("dispatch_collector.zig");
+const wasm_byte_map = @import("wasm_byte_map.zig");
 
 const Allocator = std.mem.Allocator;
 const ValType = zir.ValType;
@@ -158,6 +160,22 @@ const Lowerer = struct {
     }
 
     fn dispatch(self: *Lowerer, op: u8, fn_done: *bool) Error!void {
+        // §9.12-B / B8: route through dispatch_collector when the
+        // bytecode maps to a migrated ZirOp. Same shape as the B7
+        // validator wire — per ADR-0073 +
+        // `.dev/dispatcher_wire_design.md` §2.2 (lower wire = "after
+        // the byte-tag mapping is decided, route the payload-emit
+        // through the dispatcher"). When the per-op file's `lower`
+        // handler is a stub returning NotMigrated, the legacy
+        // switch below retains authority. Mid-cycle migrations
+        // (B9..Bn) activate per-op routing as real lower bodies land.
+        if (wasm_byte_map.byteToZirOp(op)) |zir_tag| {
+            if (dispatch_collector.dispatcher(.lower)(zir_tag, .{})) |_| {
+                return;
+            } else |err| switch (err) {
+                error.NotMigrated, error.UnsupportedOpForBuildLevel => {},
+            }
+        }
         switch (op) {
             0x00 => {
                 try self.emit(.@"unreachable", 0, 0);
