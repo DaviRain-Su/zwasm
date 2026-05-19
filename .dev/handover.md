@@ -71,9 +71,10 @@
 | B47 | arm64 scalar load/store cohort (23 ops, arm64-only). 46 new files | `<backfill>` |
 | B48 | arm64 memory.{fill,copy,init} cohort (3 ops, arm64-only). 6 new files | `<backfill>` |
 | B49 | arm64 call cohort: 2 ops, arm64-only. 4 new files | `<backfill>` |
-| B50 | arm64 control flow scalar cohort (pure-delegate): block/loop/if/else/br_if/br_table = 6 ops, arm64-only. 12 new files. 359/333/307 of 581 | `<backfill>` |
-| B51 | arm64 conversion residuals: width conv / int-to-float / trunc_sat fns not yet migrated (assess emit fns) | **NEXT** |
-| B52..Bn | arm64 control flow residuals (br/end/return/unreachable — need helper extraction or dispatcher cutover); **x86_64 EmitCtx consolidation** (ADR amending ADR-0074, ~80 ops); arm64 SIMD deferred backlog (sat arith + extmul + extadd_pairwise + dot + q15mulr = 26 ops); Wasm 3.0 placeholder shape (28 ops); IR-axis migration | |
+| B50 | arm64 control flow scalar cohort (6 ops, arm64-only). 12 new files | `<backfill>` |
+| B51 | arm64 trapping trunc cohort: i{32,64}.trunc_f{32,64}_{s,u} = 8 ops, arm64-only. 16 new files. 367/341/307 of 581 | `<backfill>` |
+| B52 | x86_64 SIMD deferred backlog (sat arith 8 + extmul 12 + extadd_pairwise 4 = 24 ops) — wait, these are already migrated; reconsider scope. Try ref.is_null (both arches via emitI64Eqz alias; 1 op) + scalar misc | **NEXT** |
+| B53..Bn | arm64 control flow residuals (br/end/return/unreachable — need helper extraction or dispatcher cutover); **x86_64 EmitCtx consolidation** (ADR amending ADR-0074, ~80 ops: globals/table/memory/const/load_store/call/local/global/etc.); arm64 SIMD deferred backlog (sat arith + extmul + extadd_pairwise + dot + q15mulr = 26 ops — need new NEON emit fns); Wasm 3.0 placeholder shape (28 ops); IR-axis migration | |
 
 ## Active state — §9.12-A [x]; §9.12-B autonomous (HUGE row)
 
