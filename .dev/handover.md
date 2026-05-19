@@ -29,8 +29,8 @@
 | A3 | dispatch_consistency_audit skill body | `c00af257` |
 | A4 | dispatch_collector.zig bootstrap (§7.2 / 7.9 comptime check) | `e5deef12` |
 | A5a | Archive moves (phase8 gate + private/audits/spikes) | `6057e408` |
-| A5b | SKILL.md compression via LOOP.md (~300 LOC) | **NEXT** |
-| A5c | ROADMAP Phase 0-8 narrative archive (~800-1000 LOC) |  |
+| A5b | SKILL.md compression via LOOP.md (-90 LOC SKILL net; 4 ref sections + chunk-granularity detail moved) | `5d4c5583` |
+| A5c | ROADMAP Phase 0-8 narrative archive (~800-1000 LOC) | **NEXT** |
 | A6 | 8 existing gates wall-time measurement + consolidation study |  |
 | A7 | gate_commit / pre-push wiring of A1 scripts (after §9.12-C / §9.12-D land their preconditions) |  |
 
