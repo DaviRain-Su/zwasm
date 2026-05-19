@@ -226,6 +226,37 @@ pub fn opModuleFor(comptime tag: ZirOp) ?type {
     }
 }
 
+/// Per-axis dispatch. Walks `collected_ops` at comptime, picks the
+/// arm matching `op`'s tag, applies the build-option filter, and
+/// invokes the axis handler with `ctx`.
+///
+/// Returns `error.NotMigrated` when no migrated op_mod matches the
+/// tag (= the legacy dispatcher in validator/lower/emit/interp is
+/// still authoritative for that op). Returns
+/// `error.UnsupportedOpForBuildLevel` when a migrated op exists but
+/// is filtered out by the current `-Dwasm=` / `-Dwasi=` build.
+/// Otherwise propagates whatever the axis handler returned.
+///
+/// §9.12-B / B2 lands this function with `anyerror!void` shape; the
+/// validator / lower / emit / interp call sites (B3..Bn) wrap their
+/// per-axis ctx types into the call. At each axis-migration sub-chunk,
+/// the legacy dispatcher in that file becomes a thin call to
+/// `dispatcher(.<axis>)(op, &ctx)` that falls through to a residual
+/// legacy switch only when `error.NotMigrated` is returned.
+pub fn dispatcher(comptime axis: Axis) fn (op: ZirOp, ctx: anytype) anyerror!void {
+    return struct {
+        fn dispatch(op: ZirOp, ctx: anytype) anyerror!void {
+            inline for (collected_ops) |op_mod| {
+                if (comptime !enabledByBuild(op_mod)) continue;
+                if (op == op_mod.op_tag) {
+                    return @field(op_mod.handlers, @tagName(axis))(ctx);
+                }
+            }
+            return DispatchError.NotMigrated;
+        }
+    }.dispatch;
+}
+
 // ---------------------------------------------------------------------
 // Tests — exercise the framework (Step 5 gate coverage).
 // ---------------------------------------------------------------------
@@ -264,4 +295,30 @@ test "opModuleFor returns null for not-yet-migrated tags" {
 
 test "Axis enum has exactly 5 variants per ADR-0023 §4.5 amend" {
     try std.testing.expectEqual(@as(usize, 5), @typeInfo(Axis).@"enum".fields.len);
+}
+
+test "dispatcher(.validate) routes i32.add to its per-op stub (returns NotMigrated by design)" {
+    // i32_add's validate handler is a B1 stub that returns
+    // error.NotMigrated. The dispatcher finds the matching op_mod and
+    // invokes the stub; the err propagates back to the caller. Once
+    // B-sub-chunks implement real validate bodies, this same call
+    // shape will return `void` on success.
+    const result = dispatcher(.validate)(.@"i32.add", {});
+    try std.testing.expectError(error.NotMigrated, result);
+}
+
+test "dispatcher(.validate) returns NotMigrated for not-yet-migrated tags" {
+    // `unreachable` is not migrated; collector returns NotMigrated so
+    // the legacy validator switch retains authority.
+    const result = dispatcher(.validate)(.@"unreachable", {});
+    try std.testing.expectError(error.NotMigrated, result);
+}
+
+test "dispatcher returns a callable function value per axis" {
+    // Smoke: every Axis variant resolves to a non-null fn pointer.
+    inline for (@typeInfo(Axis).@"enum".fields) |f| {
+        const axis: Axis = @enumFromInt(f.value);
+        const fn_ref = dispatcher(axis);
+        _ = fn_ref;
+    }
 }
