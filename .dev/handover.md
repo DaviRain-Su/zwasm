@@ -58,9 +58,10 @@
 | B34 | SIMD i32x4 compare cohort: 10 ops × 2 arches. 30 new files | `<backfill>` |
 | B35 | SIMD i64x2 compare cohort: 6 ops × 2 arches (no _u variants). 18 new files | `<backfill>` |
 | B36 | SIMD int shifts cohort: 12 ops × 2 arches. 36 new files | `<backfill>` |
-| B37 | SIMD int min/max cohort: i{8x16,16x8,32x4}.{min_s,min_u,max_s,max_u} = 12 ops × 2 arches. 36 new files + @setEvalBranchQuota bump. 212/204 of 581 | `<backfill>` |
-| B38 | SIMD int saturating arith + avgr cohort: i{8x16,16x8}.{add_sat_s,add_sat_u,sub_sat_s,sub_sat_u,avgr_u} = 10 ops × 2 arches | **NEXT** |
-| B39..Bn | SIMD splat/extract_lane/replace_lane (immediates needed → defer); SIMD float arith; SIMD bool reductions; i64x2.mul; SIMD swizzle/shuffle; SIMD load/store; x86_64 EmitCtx consolidation; IR-axis migration | |
+| B37 | SIMD int min/max cohort: 12 ops × 2 arches. 36 new files + @setEvalBranchQuota bump | `<backfill>` |
+| B38 | SIMD int sat arith + avgr_u cohort (heterogeneous): Zone 1 × 10 + x86_64 × 10 + arm64 avgr_u × 2 (sat arith arm64-deferred). 22 new files. 222/214/214 of 581 (Zone1/arm64/x86_64) | `<backfill>` |
+| B39 | SIMD float arith cohort: f{32x4,64x2}.{add,sub,mul,div,min,max,pmin,pmax} = 16 ops × 2 arches (if all delegate fns exist) | **NEXT** |
+| B40..Bn | SIMD float unary (abs/neg/sqrt/ceil/floor/trunc/nearest); SIMD float compare; i64x2.mul; SIMD bool reductions (any_true/all_true/bitmask); SIMD swizzle/shuffle; SIMD splat/extract_lane/replace_lane (defer for immediates); SIMD load/store; x86_64 EmitCtx consolidation (div/rem, trapping-trunc, const, load/store, call, local/global); arm64 saturating arith backfill; IR-axis migration | |
 
 ## Active state — §9.12-A [x]; §9.12-B autonomous (HUGE row)
 
