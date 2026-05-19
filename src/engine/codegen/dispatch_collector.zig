@@ -191,6 +191,14 @@ const arm64_f64_min = @import("arm64/ops/wasm_1_0/f64_min.zig");
 const arm64_f64_max = @import("arm64/ops/wasm_1_0/f64_max.zig");
 const arm64_f32_copysign = @import("arm64/ops/wasm_1_0/f32_copysign.zig");
 const arm64_f64_copysign = @import("arm64/ops/wasm_1_0/f64_copysign.zig");
+const arm64_f32_convert_i32_s = @import("arm64/ops/wasm_1_0/f32_convert_i32_s.zig");
+const arm64_f32_convert_i32_u = @import("arm64/ops/wasm_1_0/f32_convert_i32_u.zig");
+const arm64_f32_convert_i64_s = @import("arm64/ops/wasm_1_0/f32_convert_i64_s.zig");
+const arm64_f32_convert_i64_u = @import("arm64/ops/wasm_1_0/f32_convert_i64_u.zig");
+const arm64_f64_convert_i32_s = @import("arm64/ops/wasm_1_0/f64_convert_i32_s.zig");
+const arm64_f64_convert_i32_u = @import("arm64/ops/wasm_1_0/f64_convert_i32_u.zig");
+const arm64_f64_convert_i64_s = @import("arm64/ops/wasm_1_0/f64_convert_i64_s.zig");
+const arm64_f64_convert_i64_u = @import("arm64/ops/wasm_1_0/f64_convert_i64_u.zig");
 
 const x86_64_f32_add = @import("x86_64/ops/wasm_1_0/f32_add.zig");
 const x86_64_f32_sub = @import("x86_64/ops/wasm_1_0/f32_sub.zig");
@@ -232,6 +240,14 @@ const x86_64_f64_min = @import("x86_64/ops/wasm_1_0/f64_min.zig");
 const x86_64_f64_max = @import("x86_64/ops/wasm_1_0/f64_max.zig");
 const x86_64_f32_copysign = @import("x86_64/ops/wasm_1_0/f32_copysign.zig");
 const x86_64_f64_copysign = @import("x86_64/ops/wasm_1_0/f64_copysign.zig");
+const x86_64_f32_convert_i32_s = @import("x86_64/ops/wasm_1_0/f32_convert_i32_s.zig");
+const x86_64_f32_convert_i32_u = @import("x86_64/ops/wasm_1_0/f32_convert_i32_u.zig");
+const x86_64_f32_convert_i64_s = @import("x86_64/ops/wasm_1_0/f32_convert_i64_s.zig");
+const x86_64_f32_convert_i64_u = @import("x86_64/ops/wasm_1_0/f32_convert_i64_u.zig");
+const x86_64_f64_convert_i32_s = @import("x86_64/ops/wasm_1_0/f64_convert_i32_s.zig");
+const x86_64_f64_convert_i32_u = @import("x86_64/ops/wasm_1_0/f64_convert_i32_u.zig");
+const x86_64_f64_convert_i64_s = @import("x86_64/ops/wasm_1_0/f64_convert_i64_s.zig");
+const x86_64_f64_convert_i64_u = @import("x86_64/ops/wasm_1_0/f64_convert_i64_u.zig");
 
 const x86_64_i32_wrap_i64 = @import("x86_64/ops/wasm_1_0/i32_wrap_i64.zig");
 const x86_64_i64_extend_i32_s = @import("x86_64/ops/wasm_1_0/i64_extend_i32_s.zig");
@@ -401,6 +417,14 @@ pub const collected_arm64_ops = .{
     arm64_f64_max,
     arm64_f32_copysign,
     arm64_f64_copysign,
+    arm64_f32_convert_i32_s,
+    arm64_f32_convert_i32_u,
+    arm64_f32_convert_i64_s,
+    arm64_f32_convert_i64_u,
+    arm64_f64_convert_i32_s,
+    arm64_f64_convert_i32_u,
+    arm64_f64_convert_i64_s,
+    arm64_f64_convert_i64_u,
 };
 
 /// Tuple of all migrated x86_64 per-op modules.
@@ -503,6 +527,14 @@ pub const collected_x86_64_ops = .{
     x86_64_f64_max,
     x86_64_f32_copysign,
     x86_64_f64_copysign,
+    x86_64_f32_convert_i32_s,
+    x86_64_f32_convert_i32_u,
+    x86_64_f32_convert_i64_s,
+    x86_64_f32_convert_i64_u,
+    x86_64_f64_convert_i32_s,
+    x86_64_f64_convert_i32_u,
+    x86_64_f64_convert_i64_s,
+    x86_64_f64_convert_i64_u,
 };
 
 comptime {
@@ -561,10 +593,10 @@ test "ArchAxis enum has exactly 2 variants per ADR-0074 (Zone 2 arch-axes)" {
     try std.testing.expectEqual(@as(usize, 2), @typeInfo(ArchAxis).@"enum".fields.len);
 }
 
-test "migratedArchOpCount tracks collected per-arch tuples (B25: arm64=106, x86_64=98)" {
-    // arm64 = 100 + min/max/copysign 6; x86_64 = 92 + 6.
-    try std.testing.expectEqual(@as(usize, 106), migratedArchOpCount(.arm64));
-    try std.testing.expectEqual(@as(usize, 98), migratedArchOpCount(.x86_64));
+test "migratedArchOpCount tracks collected per-arch tuples (B26: arm64=114, x86_64=106)" {
+    // arm64 = 106 + convert 8; x86_64 = 98 + 8.
+    try std.testing.expectEqual(@as(usize, 114), migratedArchOpCount(.arm64));
+    try std.testing.expectEqual(@as(usize, 106), migratedArchOpCount(.x86_64));
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would
