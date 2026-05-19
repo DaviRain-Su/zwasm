@@ -75,6 +75,18 @@ Cleanest wire targets — both already key on `ZirOp` via switch.
 Replace each arm with `try dispatcher(.<axis>)(op_tag, &emit_ctx)`
 with NotMigrated → legacy switch fallback.
 
+**Per-axis collector split (per ADR-0074, B9 amend)**: the arm64 /
+x86_64 axes are dispatched from a **Zone 2** collector at
+`src/engine/codegen/dispatch_collector.zig` (new in B10+), not from
+the Zone 1 `src/ir/dispatch_collector.zig`. The two collectors share
+the `Axis` enum + `enabledByBuild` filter (both at Zone 1). The wire
+shape at `arm64/emit.zig` / `x86_64/emit.zig` is the same; only the
+import path changes (from `ir/dispatch_collector` to
+`engine/codegen/dispatch_collector`). The B4/B5 wires currently
+target the Zone 1 collector — they stay valid through B9 (i32.add
+stubs still resolve via the Zone 1 collector); they retarget to the
+Zone 2 collector when B10 lands the per-arch op files.
+
 ### §2.4 `interp` (via DispatchTable)
 
 The runtime interpreter loop uses `DispatchTable.interp[op]` (a

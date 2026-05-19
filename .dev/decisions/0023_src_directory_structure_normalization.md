@@ -781,6 +781,38 @@ treating "category" as a code-organisation unit; "op" is the right
 unit because it matches the 5-axis-per-op concept and gives 1-file =
 1-op = full lifecycle visibility.
 
+### Per-axis zone resolution — ADR-0074 (added 2026-05-19, §9.12-B / B9)
+
+The "1-file = 1-op = full 5-axis lifecycle" framing above conflicts
+with the zone direction invariant (Zone 1 cannot import Zone 2).
+The arm64 / x86_64 emit handlers' bodies need Zone 2 codegen ctx
+types (`Arm64EmitCtx`, `X86_64EmitCtx`) which cannot be referenced
+from `src/instruction/` (Zone 1). ADR-0074 resolves this by
+**splitting the per-op file along the axis boundary**:
+
+| Axis     | Zone | Path                                                            |
+|----------|------|-----------------------------------------------------------------|
+| validate | 1    | `src/instruction/wasm_X_Y/<op>.zig`                             |
+| lower    | 1    | `src/instruction/wasm_X_Y/<op>.zig`                             |
+| interp   | 1    | `src/instruction/wasm_X_Y/<op>.zig`                             |
+| arm64    | 2    | `src/engine/codegen/arm64/ops/wasm_X_Y/<op>.zig`                |
+| x86_64   | 2    | `src/engine/codegen/x86_64/ops/wasm_X_Y/<op>.zig`               |
+
+The Zone 1 file remains the **identity anchor** (exports `op_tag`,
+`wasm_level`, `wasi_level`, `enable_features`, IR-axis handlers).
+Zone 2 sibling files import the Zone 1 file for `op_tag` metadata.
+Comptime DCE is preserved on all 5 axes because each collector
+(Zone 1 IR-axis collector + Zone 2 codegen collector) sees its
+handler bodies at the same zone. See ADR-0074 for full alternatives
+analysis.
+
+The `handlers = .{ .validate, .lower, .arm64, .x86_64, .interp }`
+aggregate shown in the §4.5 amend sketch above is REVISED:
+- Zone 1 per-op file: `handlers = .{ .validate, .lower, .interp }`
+  (IR-axis handlers only).
+- Zone 2 per-arch op file: `pub fn emit(ctx: *ArchEmitCtx) !void`
+  (single arch handler per file).
+
 ## Revision history
 
 | Date       | Commit       | Why-class | Summary                                                                                                                                                                                                                                                                                                                          |
@@ -789,3 +821,4 @@ unit because it matches the 5-axis-per-op concept and gives 1-file =
 | 2026-05-05 | `<backfill>` | gap       | Amended by ADR-0024 (post-implementation): the §3 reference-table row for `api/lib_export.zig` is removed, `main.zig` moves to `src/cli/main.zig`, and a new `src/zwasm.zig` library root is added. ADR-0024 explains why the original ADR's directory shape couldn't serve as a Zig 0.16 lib `Module.root_source_file` directly. |
 | 2026-05-11 | `<backfill>` | gap       | **`interp/loop.zig` rename was withdrawn** (per 2026-05-11 ADR audit, SUMMARY §3.3 / batch_B). Decision §"The src/ tree" listed `interp/loop.zig` as the new name (motivated by avoiding collision with `ir/dispatch.zig`). Implementation kept the original `interp/dispatch.zig` because `ir/dispatch.zig` was simultaneously renamed to `ir/dispatch_table.zig`, removing the collision. `src/zwasm.zig`'s test-discovery block imports `interp/dispatch.zig`. Honest record only; no design change. |
 | 2026-05-19 | `<backfill>` | scope     | **§4.5 amend — per-op file pattern formally adopted** (Phase 9 completion substrate audit Q3 adoption; per ADR-0071 + ADR-0073). See dedicated section "§4.5 amend — per-op file migration plan" above. Key change: `instruction/wasm_X_Y/<category>.zig` → `instruction/wasm_X_Y/<op>.zig` (one file per op), each exporting `op_tag` / `wasm_level` / `wasi_level` / `enable_features` / `handlers = .{ .validate, .lower, .arm64, .x86_64, .interp }`. Central `src/ir/dispatch_collector.zig` (new) generates the `inline switch` dispatcher per axis with comptime build-option filter. `src/feature/<f>/register.zig` retains only the interp-axis registration. |
+| 2026-05-19 | `<backfill>` | gap       | **Per-axis zone resolution sub-section added** (§9.12-B / B9). The 5-axis-in-one-file sketch from the same-day amend above conflicts with the Zone 1 ↔ Zone 2 boundary (per-op file at `src/instruction/` is Zone 1; `Arm64EmitCtx` / `X86_64EmitCtx` live at Zone 2). [ADR-0074](0074_per_op_file_zone_split.md) (Accepted 2026-05-19) splits the per-op file along the axis boundary: Zone 1 keeps validate / lower / interp; Zone 2 gets per-arch per-op files at `src/engine/codegen/<arch>/ops/wasm_X_Y/<op>.zig`. The §4.5 amend section above is updated with the revised `handlers` aggregate shape. Comptime DCE on all 5 axes is preserved. |
