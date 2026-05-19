@@ -883,6 +883,54 @@ pub const emitI32TruncF64U = emitI32TruncF32U;
 pub const emitI64TruncF32U = emitI32TruncF32U;
 pub const emitI64TruncF64U = emitI32TruncF32U;
 
+/// §9.12-B / B57 (ADR-0075) — `(ctx, ins)` adapters for the Wasm
+/// 2.0 saturating trunc cohort. No `bounds_fixups` (saturating,
+/// not trapping). Three legacy consumers — signed family
+/// (`emitFpTruncSatSigned`), unsigned-to-i32 (`emitFpTruncSatU32`),
+/// unsigned-to-i64 (`emitFpTruncSatU64`) — each gets a primary
+/// `(ctx, ins)` adapter and per-op aliases (legacy impls dispatch
+/// on `ins.op` internally). Decomposes per-op at the B6x+1 cutover.
+pub fn emitI32TruncSatF32S(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitFpTruncSatSigned(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.spill_base_off,
+        ins.op,
+    );
+}
+pub const emitI32TruncSatF64S = emitI32TruncSatF32S;
+pub const emitI64TruncSatF32S = emitI32TruncSatF32S;
+pub const emitI64TruncSatF64S = emitI32TruncSatF32S;
+
+pub fn emitI32TruncSatF32U(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitFpTruncSatU32(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.spill_base_off,
+        ins.op,
+    );
+}
+pub const emitI32TruncSatF64U = emitI32TruncSatF32U;
+
+pub fn emitI64TruncSatF32U(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitFpTruncSatU64(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.spill_base_off,
+        ins.op,
+    );
+}
+pub const emitI64TruncSatF64U = emitI64TruncSatF32U;
+
 /// Materialise an FP bit pattern into XMM7 via RAX scratch.
 /// Used by the FP trunc-trap helpers above. Module-private —
 /// `emitFpTruncSatU64` inlines its own copy because it also needs

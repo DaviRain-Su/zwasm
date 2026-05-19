@@ -1,26 +1,28 @@
-//! x86_64 emit handler for `i32.trunc_sat_f32_u` — Zone 2 per ADR-0074.
-//! Delegates to op_convert.emitFpTruncSatU32.
-
-const std = @import("std");
+//! x86_64 emit handler for `i32.trunc_sat_f32_u` — Zone 2
+//! per-arch op file per ADR-0074 + ADR-0075 (B57 cohort migration
+//! to `(ctx, ins)`).
+//!
+//! Identity anchor at `src/instruction/wasm_2_0/i32_trunc_sat_f32_u.zig`.
+//! Delegates to `op_convert.emitI32TruncSatF32U`, which wraps the
+//! unsigned-to-i32 helper (`emitFpTruncSatU32` — CVTTSS2SI .q form
+//! covers [0, 2^32) directly).
+//!
+//! Wasm spec §4.3 (i32.trunc_sat_f32_u) — non-trapping saturating
+//! unsigned f32→i32. NaN→0, ≤-1→0, ≥2^32→UINT_MAX.
+//!
+//! Registered in `dispatch_collector.collected_x86_64_ctx_ops`.
+//!
+//! Zone 2 (`src/engine/codegen/x86_64/ops/`).
 
 const meta = @import("../../../../../instruction/wasm_2_0/i32_trunc_sat_f32_u.zig");
+const ctx_mod = @import("../../ctx.zig");
 const op_convert = @import("../../op_convert.zig");
-const regalloc = @import("../../../shared/regalloc.zig");
-const types = @import("../../types.zig");
 const zir = @import("../../../../../ir/zir.zig");
 
 pub const op_tag = meta.op_tag;
 pub const wasm_level = meta.wasm_level;
 pub const wasi_level = meta.wasi_level;
 
-pub fn emit(
-    allocator: std.mem.Allocator,
-    buf: *std.ArrayList(u8),
-    alloc: regalloc.Allocation,
-    pushed_vregs: *std.ArrayList(u32),
-    next_vreg: *u32,
-    spill_base_off: u32,
-    op: zir.ZirOp,
-) types.Error!void {
-    return op_convert.emitFpTruncSatU32(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, op);
+pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
+    return op_convert.emitI32TruncSatF32U(ctx, ins);
 }
