@@ -857,19 +857,18 @@ pub fn compile(
             .@"i64.extend32_s",
             => try op_alu_int.emitSignExtend(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.op),
             // §9.7 / 7.9 chunk c: integer divide / remainder.
-            // §9.12-B / B54 (ADR-0075) PoC: i32.div_s migrated to
-            // `(ctx, ins)` shape; remaining div / rem variants
-            // follow in B55+.
+            // §9.12-B / B54+B55 (ADR-0075): full i32+i64 div/rem
+            // cohort migrated to the `(ctx, ins)` shape; each
+            // op file delegates to the corresponding ctx
+            // adapter in op_alu_int.
             .@"i32.div_s" => try op_alu_int.emitI32DivS(&ctx, &ins),
-            .@"i32.div_u",
-            .@"i32.rem_s",
-            .@"i32.rem_u",
-            => try op_alu_int.emitI32DivRem(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.op),
-            .@"i64.div_s",
-            .@"i64.div_u",
-            .@"i64.rem_s",
-            .@"i64.rem_u",
-            => try op_alu_int.emitI64DivRem(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.op),
+            .@"i32.div_u" => try op_alu_int.emitI32DivU(&ctx, &ins),
+            .@"i32.rem_s" => try op_alu_int.emitI32RemS(&ctx, &ins),
+            .@"i32.rem_u" => try op_alu_int.emitI32RemU(&ctx, &ins),
+            .@"i64.div_s" => try op_alu_int.emitI64DivS(&ctx, &ins),
+            .@"i64.div_u" => try op_alu_int.emitI64DivU(&ctx, &ins),
+            .@"i64.rem_s" => try op_alu_int.emitI64RemS(&ctx, &ins),
+            .@"i64.rem_u" => try op_alu_int.emitI64RemU(&ctx, &ins),
             .call => try op_call.emitCall(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &call_fixups, spill_base_off, outgoing_max_bytes, func_sigs, num_imports, ins.payload),
             .call_indirect => try op_call.emitCallIndirect(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, outgoing_max_bytes, module_types, ins.payload, ins.extra),
             .@"f32.const",

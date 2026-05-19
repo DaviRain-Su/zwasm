@@ -805,13 +805,14 @@ pub fn emitConvertWidth(
     try pushed_vregs.append(allocator, result_v);
 }
 
-/// §9.12-B / B54 (ADR-0075) PoC — `(ctx, ins)` adapter for
-/// `i32.div_s`. Unpacks `ctx.*` fields into the existing 8-arg
-/// `emitI32DivRem` positional impl. Once B55+ migrates the
-/// remaining div / rem ops, this adapter shrinks (and the
-/// legacy `emitI32DivRem` decomposes per-op); the inline-switch
-/// cutover at B6x+1 makes the per-op file at
-/// `x86_64/ops/wasm_1_0/i32_div_s.zig` load-bearing.
+/// §9.12-B / B54+B55 (ADR-0075) — `(ctx, ins)` adapters for the
+/// i32 div/rem cohort. Unpack `ctx.*` fields into the existing
+/// 8-arg `emitI32DivRem` positional impl, which dispatches on
+/// `ins.op` internally. All four variants share the same body —
+/// per-op aliases preserve the per-op-file shape expected by
+/// the dispatch-collector contract (each per-op file's `emit`
+/// fn names a distinct symbol). The legacy `emitI32DivRem`
+/// decomposes per-op at the B6x+1 cutover.
 pub fn emitI32DivS(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     return emitI32DivRem(
         ctx.allocator,
@@ -824,3 +825,25 @@ pub fn emitI32DivS(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
         ins.op,
     );
 }
+pub const emitI32DivU = emitI32DivS;
+pub const emitI32RemS = emitI32DivS;
+pub const emitI32RemU = emitI32DivS;
+
+/// `(ctx, ins)` adapter for the i64 div/rem cohort. Same shape
+/// as the i32 cohort; dispatches into `emitI64DivRem` on
+/// `ins.op`.
+pub fn emitI64DivS(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitI64DivRem(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.bounds_fixups,
+        ctx.spill_base_off,
+        ins.op,
+    );
+}
+pub const emitI64DivU = emitI64DivS;
+pub const emitI64RemS = emitI64DivS;
+pub const emitI64RemU = emitI64DivS;
