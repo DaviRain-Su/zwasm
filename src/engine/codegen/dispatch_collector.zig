@@ -779,6 +779,9 @@ const x86_64_f32_load = @import("x86_64/ops/wasm_1_0/f32_load.zig");
 const x86_64_f64_load = @import("x86_64/ops/wasm_1_0/f64_load.zig");
 const x86_64_f32_store = @import("x86_64/ops/wasm_1_0/f32_store.zig");
 const x86_64_f64_store = @import("x86_64/ops/wasm_1_0/f64_store.zig");
+const x86_64_memory_fill = @import("x86_64/ops/wasm_1_0/memory_fill.zig");
+const x86_64_memory_copy = @import("x86_64/ops/wasm_1_0/memory_copy.zig");
+const x86_64_memory_init = @import("x86_64/ops/wasm_1_0/memory_init.zig");
 
 const x86_64_i32_add = @import("x86_64/ops/wasm_1_0/i32_add.zig");
 const x86_64_i32_sub = @import("x86_64/ops/wasm_1_0/i32_sub.zig");
@@ -1568,6 +1571,9 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_f64_load,
     x86_64_f32_store,
     x86_64_f64_store,
+    x86_64_memory_fill,
+    x86_64_memory_copy,
+    x86_64_memory_init,
 };
 
 comptime {
@@ -1648,9 +1654,11 @@ test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // 1.0 int→float convert cohort moved from legacy tuple (+8 = 32).
     // B59: reinterpret + promote/demote moved from legacy tuple
     // (+6 = 38). B60: scalar load/store cohort (23 new per-op files,
-    // +23 = 61). The B6x+1 cutover folds this tuple back into
-    // `collected_x86_64_ops`.
-    try std.testing.expectEqual(@as(usize, 61), collected_x86_64_ctx_ops.len);
+    // +23 = 61). B61: bulk-memory cohort (3 new per-op files for
+    // memory.fill/copy/init, +3 = 64; data.drop / elem.drop deferred
+    // — Zone 1 meta files don't exist yet). The B6x+1 cutover folds
+    // this tuple back into `collected_x86_64_ops`.
+    try std.testing.expectEqual(@as(usize, 64), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would

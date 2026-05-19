@@ -268,6 +268,51 @@ pub const emitF64Load = emitI32Load;
 pub const emitF32Store = emitI32Load;
 pub const emitF64Store = emitI32Load;
 
+/// §9.12-B / B61 (ADR-0075) — `(ctx, ins)` adapters for the
+/// bulk-memory cohort (`memory.fill`, `memory.copy`,
+/// `memory.init`). Three distinct adapters — fill/copy share
+/// the same 7-arg legacy signature but init takes an extra
+/// `dataidx` (= `ins.payload`). No aliases possible (each
+/// dispatches to a distinct legacy helper body).
+pub fn emitMemoryFillCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitMemoryFill(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.bounds_fixups,
+        ctx.spill_base_off,
+        ctx.func_idx,
+    );
+}
+
+pub fn emitMemoryCopyCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitMemoryCopy(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.bounds_fixups,
+        ctx.spill_base_off,
+        ctx.func_idx,
+    );
+}
+
+pub fn emitMemoryInitCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitMemoryInit(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.bounds_fixups,
+        ctx.spill_base_off,
+        ctx.func_idx,
+        ins.payload,
+    );
+}
+
 // ============================================================
 // Bulk-memory ops (Wasm 2.0 §4.4.7 — memory.fill / memory.copy)
 //

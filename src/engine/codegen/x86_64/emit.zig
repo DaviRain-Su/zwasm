@@ -975,7 +975,7 @@ pub fn compile(
             .@"f64.load" => try op_memory.emitF64Load(&ctx, &ins),
             .@"f32.store" => try op_memory.emitF32Store(&ctx, &ins),
             .@"f64.store" => try op_memory.emitF64Store(&ctx, &ins),
-            .@"memory.fill" => try op_memory.emitMemoryFill(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, func.func_idx),
+            .@"memory.fill" => try op_memory.emitMemoryFillCtx(&ctx, &ins),
             // §9.9 / 9.9-m-3a: data.drop / elem.drop — write 1 to
             // the dropped-flag byte. No operands; no result. The
             // validator already bounds-checks idx.
@@ -989,8 +989,8 @@ pub fn compile(
                 try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r10, abi.runtime_ptr_save_gpr, jit_abi.elem_dropped_ptr_off).slice());
                 try buf.appendSlice(allocator, inst.encStoreImm8MemBaseDisp32(.r10, @intCast(ins.payload), 1).slice());
             },
-            .@"memory.copy" => try op_memory.emitMemoryCopy(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, func.func_idx),
-            .@"memory.init" => try op_memory.emitMemoryInit(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, func.func_idx, ins.payload),
+            .@"memory.copy" => try op_memory.emitMemoryCopyCtx(&ctx, &ins),
+            .@"memory.init" => try op_memory.emitMemoryInitCtx(&ctx, &ins),
             .@"global.get" => try op_globals.emitGlobalGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload, globals_offsets, globals_valtypes),
             .@"global.set" => try op_globals.emitGlobalSet(allocator, &buf, alloc, &pushed_vregs, spill_base_off, ins.payload, globals_offsets, globals_valtypes),
             // §9.9 / 9.9-m-2a (per ADR-0058): table.get / table.set
