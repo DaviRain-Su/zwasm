@@ -41,9 +41,10 @@
 | B17 | i32/i64 eqz + shift cohort: 12 ops × 2 arches; heterogeneous delegates per arch. 36 new files | `c485f445` |
 | B18 | i32/i64 bitcount cohort: clz/ctz/popcnt × 2 widths = 6 ops × 2 arches. 18 new files | `ca1ffb46` |
 | B19 | i32/i64 sign-extension cohort: 5 ops × 2 arches (first wasm_2_0/ files). 15 new files | `4fb99ff1` |
-| B20 | i32/i64 divide+remainder cohort: 8 ops, arm64-only migration (x86_64 deferred due to bounds_fixups arg). 16 new files | `<backfill>` |
-| B21 | width-conversion cohort: i32.wrap_i64 / i64.extend_i32_s / i64.extend_i32_u = 3 ops × 2 arches. arm64 emitWrap32 + emitExtendI32S; x86_64 likely op_convert too. ~9 files | **NEXT** |
-| B22..Bn | i32.const / i64.const / f32.const / f64.const (4 ops; immediate-payload handlers); float arith / cmp / convert ops; x86_64 div/rem after wire widening; then Wasm 2.0 SIMD cohort (~400 ops). IR-axis migration still deferred | |
+| B20 | i32/i64 divide+remainder cohort: 8 ops, arm64-only migration (x86_64 deferred due to bounds_fixups arg). 16 new files | `ec83e434` |
+| B21 | width-conversion cohort: 3 ops × 2 arches (i32.wrap_i64 + i64.extend_i32_{s,u}). 9 new files | `<backfill>` |
+| B22 | i32.const / i64.const cohort: 2 ops × 2 arches. Existing emit fns are per-op (emitI32Const / emitI64Const on arm64; inline-bodies on x86_64). ~6 files | **NEXT** |
+| B23..Bn | float const + arith + cmp + convert ops; x86_64 div/rem after wire widening; then Wasm 2.0 SIMD cohort (~400 ops). IR-axis migration still deferred | |
 
 ## Active state — §9.12-A [x]; §9.12-B autonomous (HUGE row)
 
