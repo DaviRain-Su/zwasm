@@ -29,6 +29,7 @@ const std = @import("std");
 
 const zir = @import("../../../ir/zir.zig");
 const regalloc = @import("../shared/regalloc.zig");
+const ctx_mod = @import("ctx.zig");
 const inst = @import("inst.zig");
 const abi = @import("abi.zig");
 const gpr = @import("gpr.zig");
@@ -62,6 +63,43 @@ fn win64V128ScratchBase(callee_sig: zir.FuncType) u32 {
 const Allocator = std.mem.Allocator;
 const Error = types.Error;
 const CallFixup = types.CallFixup;
+
+/// §9.12-B / B64 (ADR-0075) — `(ctx, ins)` adapters for the call
+/// cohort (`call`, `call_indirect`). Two distinct adapters
+/// (heterogeneous — call uses func_sigs+num_imports;
+/// call_indirect uses module_types+bounds_fixups+ins.extra).
+/// Decomposes per-op at the B6x+1 cutover.
+pub fn emitCallCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitCall(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.call_fixups,
+        ctx.spill_base_off,
+        ctx.outgoing_max_bytes,
+        ctx.func_sigs,
+        ctx.num_imports,
+        ins.payload,
+    );
+}
+
+pub fn emitCallIndirectCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitCallIndirect(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.bounds_fixups,
+        ctx.spill_base_off,
+        ctx.outgoing_max_bytes,
+        ctx.module_types,
+        ins.payload,
+        ins.extra,
+    );
+}
 
 /// Wasm spec §3.4.7 (call N) — direct call. Mirrors
 /// `arm64/op_call.zig:emitCall`: marshals args into per-CC arg
