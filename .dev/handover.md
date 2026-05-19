@@ -63,9 +63,10 @@
 | B39 | SIMD float arith cohort: 16 ops × 2 arches. 48 new files | `<backfill>` |
 | B40 | SIMD float unary cohort: 14 ops × 2 arches. 42 new files | `<backfill>` |
 | B41 | SIMD float compare cohort: 12 ops × 2 arches. 36 new files | `<backfill>` |
-| B42 | SIMD bool reductions cohort: v128.any_true + i{8x16,16x8,32x4,64x2}.{all_true,bitmask} = 9 ops × 2 arches. 27 new files. 273/265/265 of 581 | `<backfill>` |
-| B43 | SIMD narrow + extend cohort: i{8x16,16x8,32x4}.{narrow_*_s,narrow_*_u} + i{16x8,32x4,64x2}.extend_{low,high}_*_{s,u} (assess fns first) | **NEXT** |
-| B44..Bn | i64x2.mul; SIMD swizzle/shuffle; SIMD splat/extract_lane/replace_lane (defer for immediates); SIMD load/store; SIMD extmul/extadd; x86_64 EmitCtx consolidation; arm64 saturating arith backfill; IR-axis migration | |
+| B42 | SIMD bool reductions cohort: 9 ops × 2 arches. 27 new files | `<backfill>` |
+| B43 | SIMD narrow + extend cohort: 4 narrow + 12 extend = 16 ops × 2 arches. 48 new files. 289/281/281 of 581 | `<backfill>` |
+| B44 | SIMD extmul + extadd_pairwise cohort: i{16x8,32x4,64x2}.extmul_{low,high}_*_{s,u} + i{16x8,32x4}.extadd_pairwise_*_{s,u} = 16 ops × 2 arches (assess fns first) | **NEXT** |
+| B45..Bn | i64x2.mul; SIMD swizzle/shuffle; SIMD splat/extract_lane/replace_lane (defer for immediates); SIMD load/store; x86_64 EmitCtx consolidation (div/rem, trapping-trunc, const, load/store, call, local/global); arm64 saturating arith backfill; IR-axis migration | |
 
 ## Active state — §9.12-A [x]; §9.12-B autonomous (HUGE row)
 
