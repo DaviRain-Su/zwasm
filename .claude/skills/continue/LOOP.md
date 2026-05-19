@@ -318,3 +318,139 @@ End-of-turn checklist (every turn that ends with the task closed):
 5. Final user-facing text is **one sentence** stating what just
    landed and what fires next. Do not write a long progress
    summary — it invites pause.
+
+## Chunk granularity — when to bundle vs split
+
+> Detail block extracted from SKILL.md at §9.12-A / A5b. SKILL.md
+> retains a 6-line "Default + bundle/split criteria" summary; the
+> historical examples and full criteria live here.
+
+**Default chunk size for established-pattern emit/handler chunks:
+5–15 ops.** Sub-1-op chunks are reserved for ADR-grade design
+changes (new ABI surface, new scratch reservation, new shared
+helper). The 7.7-fp + §9.7 / §9.9 retrospectives both surfaced
+over-split anti-patterns where 1–4 op chunks dominated commit
+overhead despite mechanical implementation; the §9.7 / §9.9
+run alone landed ~25 chunks where ~6 would have served the same
+purpose with materially less wall-clock per delivered op.
+
+**Bundle into one chunk when ALL hold:**
+
+- Same **dispatch helper consumer** (e.g. all `v128MemPrologue`
+  consumers — load + load_splat + load_zero + load_lane +
+  load_extend = ~24 ops in one chunk; all `emitV128IntBinop`
+  consumers — int min/max + sat arith + avgr ~22 ops in one
+  chunk). The criterion is "do these wrappers share the same
+  shared helper?", not "do they share the same encoder family"
+  — the latter is too narrow and was the binding constraint
+  driving the over-split run.
+- Same handler shape (only `op` field differs; switch arms
+  inside the handler).
+- Total source diff ≤ 800 LOC, total test diff ≤ 400 LOC (was
+  400 / 250 — raised to match the actual cap above which
+  reviewability deteriorates rather than the median chunk size).
+- Boundary semantics across variants are coordinated (one ADR /
+  one rationale comment covers the family).
+
+**Split when ANY hold:**
+
+- Implementation crosses an instruction class (GPR vs XMM
+  pipeline, ALU vs memory, scalar vs SIMD).
+- One variant requires a structurally different recipe
+  (e.g. trunc-sat-u64's 2^63 split vs trunc-sat-u32's direct
+  .q-form, or fmin/fmax NaN-correction vs pmin/pmax direct
+  MINPS).
+- ADR-grade design choice for one variant only (e.g. chunk
+  introduces a new scratch-register reservation, new ABI
+  contract, new shared helper that didn't exist before).
+- Mid-cycle ratchet would push the diff > 1200 LOC including
+  tests.
+
+**Concrete examples (looking back at §9.7 + §9.9):**
+
+| Group                                | Should have been | Was             |
+|--------------------------------------|------------------|-----------------|
+| 7.7-alu (i32 add/sub/mul/and/or/xor) | 1 chunk          | 1 chunk ✓       |
+| 7.7-cmp + 7.7-eqz                    | 1 chunk          | 2 chunks (over) |
+| trunc-sat-u32 + trunc-sat-u64        | 1 chunk          | 2 chunks (over) |
+| trunc-trap-signed + trunc-sat-signed | 2 chunks         | 2 chunks ✓ (semantics differ) |
+| fp-convert-simple + fp-convert-unsigned | 1 chunk       | 2 chunks (over) |
+| 9.7-au (int min/max + sat + avgr 22 ops) | 1 chunk      | 1 chunk ✓       |
+| 9.7-ax..bb (v128 mem family 22 ops)  | 1–2 chunks      | 5 chunks (over: ax/ay/az/ba/bb) |
+| 9.9-a + 9.9-b (foundation + v128 ABI) | 1 chunk        | 2 chunks (over: ABI was small) |
+
+When in doubt, **bundle**: the chunk-table row in handover.md
+is a status marker, not a unit of work. One commit covering
+"f32/f64 convert + reinterpret + promote/demote (10 ops)" or
+"v128 memory family (load + store + splat ×4 + zero ×2 + lane
+×8 + extend ×6 = 22 ops)" is more readable in `git log` than
+ten 2-op commits, and the cumulative test-gate wall-clock
+shrinks proportionally.
+
+**Anti-pattern: "1 op = 1 chunk"** for ops that follow an
+established pattern (existing helper, single-instruction
+mapping, or copy of an immediately-adjacent variant). Each
+extra commit adds ~5-10 min of wall-clock (test gate + push +
+windowsmini if gated + handover + chore + re-arm) for ~1 min
+of marginal review value when the implementation is mechanical.
+
+## Subagent delegation cheatsheet
+
+| Trigger                               | Action                                              |
+|---------------------------------------|-----------------------------------------------------|
+| Survey ≥ 1 reference codebase / OSS   | Step 0 — Explore subagent                           |
+| Test output > 200 lines               | Step 5 — Bash subagent (run_in_background if long)  |
+| Search across > 5 files               | Explore subagent                                    |
+| Single-file edit, < 200 lines context | Stay in main                                        |
+
+Default rule: **subagent fork on context isolation, not on
+importance**.
+
+## What NOT to invoke during the loop
+
+- `simplify` per source commit — overkill; queue for occasional
+  passes.
+- `review` (PR-style) per commit — overkill; reserve for pre-push
+  or pre-tag.
+- `audit_scaffolding` per task — adaptive cadence (when scaffolding
+  feels off, when refactors land, before release tags).
+
+## Model selection (dual-model)
+
+- **Per-task TDD loop (Steps 1–6)**: current session's model — Opus
+  4.7 is fine.
+- **Phase boundary chain (multi-agent fan-out, when invoked)**:
+  prefer **Opus 4.6** for the long-context audit / simplify
+  subagents — Opus 4.7's MRCR v2 retrieval is known to degrade
+  above ~100k tokens versus 4.6. Sonnet 4.6 is a viable
+  cost-efficient alternative.
+
+When unsure, default to subagent inheriting the parent model; flip
+to Opus 4.6 only if a long-context task underperforms.
+
+## Anti-patterns observed in past sessions (do not repeat)
+
+These are concrete failure modes from prior runs. Reading them once
+beats inventing new ways to stop.
+
+- **"Big next task, natural stop"** — picking up that the next
+  task looks bigger and ending the turn so the user can issue
+  another `/continue`. Forbidden — the whole point is no
+  babysitting. Push the commit, re-arm, continue.
+- **"N commits is enough"** — landing several tasks then writing
+  a progress summary as a soft pause. Forbidden — write one
+  sentence and re-arm.
+- **"Push needs approval"** — interpreting CLAUDE.md's push
+  language as a per-loop gate. Forbidden — push policy is
+  autonomous inside this skill.
+- **"windowsmini gate not exercised, defer"** — declaring local
+  Mac + ubuntunote good and stopping until next session. **Per
+  ADR-0049 this anti-pattern is now reversed**: deferring
+  windowsmini per-chunk is the policy. The autonomous loop
+  runs Mac + ubuntunote only and reconciles windowsmini at
+  Phase boundaries.
+- **"User can /continue when ready"** — the closing line that
+  re-introduces babysitting. Forbidden — the closing line is the
+  `ScheduleWakeup` and one short sentence.
+- **"Auto-compact might be coming, safer to stop"** — forbidden;
+  PostCompact recovers, the loop continues.
