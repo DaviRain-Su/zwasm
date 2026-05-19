@@ -37,6 +37,7 @@ const inst = @import("inst.zig");
 const abi = @import("abi.zig");
 const gpr = @import("gpr.zig");
 const types = @import("types.zig");
+const ctx_mod = @import("ctx.zig");
 
 const Allocator = std.mem.Allocator;
 const Error = types.Error;
@@ -802,4 +803,24 @@ pub fn emitConvertWidth(
 
     try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
+}
+
+/// §9.12-B / B54 (ADR-0075) PoC — `(ctx, ins)` adapter for
+/// `i32.div_s`. Unpacks `ctx.*` fields into the existing 8-arg
+/// `emitI32DivRem` positional impl. Once B55+ migrates the
+/// remaining div / rem ops, this adapter shrinks (and the
+/// legacy `emitI32DivRem` decomposes per-op); the inline-switch
+/// cutover at B6x+1 makes the per-op file at
+/// `x86_64/ops/wasm_1_0/i32_div_s.zig` load-bearing.
+pub fn emitI32DivS(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitI32DivRem(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.bounds_fixups,
+        ctx.spill_base_off,
+        ins.op,
+    );
 }

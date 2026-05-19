@@ -736,6 +736,12 @@ const x86_64_i32_wrap_i64 = @import("x86_64/ops/wasm_1_0/i32_wrap_i64.zig");
 const x86_64_i64_extend_i32_s = @import("x86_64/ops/wasm_1_0/i64_extend_i32_s.zig");
 const x86_64_i64_extend_i32_u = @import("x86_64/ops/wasm_1_0/i64_extend_i32_u.zig");
 
+// §9.12-B / B54 (ADR-0075) — x86_64 per-op files migrated to the
+// `(ctx, ins)` shape. Tracked in `collected_x86_64_ctx_ops` (see
+// below). Not in `collected_x86_64_ops` until the B6x+1 dispatcher
+// cutover renames the ctx tuple to the unified one.
+const x86_64_i32_div_s = @import("x86_64/ops/wasm_1_0/i32_div_s.zig");
+
 const x86_64_i32_add = @import("x86_64/ops/wasm_1_0/i32_add.zig");
 const x86_64_i32_sub = @import("x86_64/ops/wasm_1_0/i32_sub.zig");
 const x86_64_i32_mul = @import("x86_64/ops/wasm_1_0/i32_mul.zig");
@@ -1462,12 +1468,26 @@ pub const collected_x86_64_ops = .{
     x86_64_i32x4_trunc_sat_f32x4_u,
 };
 
+/// §9.12-B / B54 (ADR-0075) — x86_64 per-op modules migrated to
+/// the `(ctx, ins)` emit signature. Separate from
+/// `collected_x86_64_ops` because the legacy dispatcher's `args`
+/// tuple shape is incompatible at comptime. At B6x+1 cutover
+/// (per ADR-0075 §Implementation plan) the legacy tuple is
+/// removed and this constant is renamed to the unified
+/// `collected_x86_64_ops`.
+pub const collected_x86_64_ctx_ops = .{
+    x86_64_i32_div_s,
+};
+
 comptime {
     @setEvalBranchQuota(10_000);
     for (collected_arm64_ops) |op_mod| {
         validateArchOpModule(op_mod);
     }
     for (collected_x86_64_ops) |op_mod| {
+        validateArchOpModule(op_mod);
+    }
+    for (collected_x86_64_ctx_ops) |op_mod| {
         validateArchOpModule(op_mod);
     }
 }
@@ -1524,6 +1544,12 @@ test "migratedArchOpCount tracks collected per-arch tuples (B52: arm64=348, x86_
     // arm64 = 162 + 10 i16x8 cmp; x86_64 = 154 + 10.
     try std.testing.expectEqual(@as(usize, 348), migratedArchOpCount(.arm64));
     try std.testing.expectEqual(@as(usize, 314), migratedArchOpCount(.x86_64));
+}
+
+test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
+    // B54: i32.div_s PoC. Increments per cohort in B55+. The B6x+1
+    // cutover folds this tuple back into `collected_x86_64_ops`.
+    try std.testing.expectEqual(@as(usize, 1), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would

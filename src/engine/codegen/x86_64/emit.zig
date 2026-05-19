@@ -650,8 +650,8 @@ pub fn compile(
     // `as-memory.grow-size`). Mirror of arm64 7.5-emit-deadcode.
     var dead_code: bool = false;
 
-    // §9.12-B / B53 (ADR-0075) — per-function emit context.
-    // Substrate landing: B54+ migrates per-op handlers to `*ctx`.
+    // §9.12-B / B53+ (ADR-0075) — per-function emit context.
+    // B53 substrate; B54 wires the first consumer (`i32.div_s`).
     var ctx = ctx_mod.EmitCtx.init(.{
         .allocator = allocator,
         .buf = &buf,
@@ -675,7 +675,6 @@ pub fn compile(
         .globals_offsets = globals_offsets,
         .globals_valtypes = globals_valtypes,
     });
-    _ = &ctx;
 
     for (func.instrs.items) |ins| {
         // `end` / `else` always exit the dead region — emit's own
@@ -858,7 +857,10 @@ pub fn compile(
             .@"i64.extend32_s",
             => try op_alu_int.emitSignExtend(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.op),
             // §9.7 / 7.9 chunk c: integer divide / remainder.
-            .@"i32.div_s",
+            // §9.12-B / B54 (ADR-0075) PoC: i32.div_s migrated to
+            // `(ctx, ins)` shape; remaining div / rem variants
+            // follow in B55+.
+            .@"i32.div_s" => try op_alu_int.emitI32DivS(&ctx, &ins),
             .@"i32.div_u",
             .@"i32.rem_s",
             .@"i32.rem_u",
