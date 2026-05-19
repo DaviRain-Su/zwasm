@@ -1265,20 +1265,17 @@ pub const collected_x86_64_ops = .{
     x86_64_f64_max,
     x86_64_f32_copysign,
     x86_64_f64_copysign,
-    x86_64_f32_convert_i32_s,
-    x86_64_f32_convert_i32_u,
-    x86_64_f32_convert_i64_s,
-    x86_64_f32_convert_i64_u,
-    x86_64_f64_convert_i32_s,
-    x86_64_f64_convert_i32_u,
-    x86_64_f64_convert_i64_s,
-    x86_64_f64_convert_i64_u,
     // B57: i{32,64}.trunc_sat_f{32,64}_{s,u} migrated from
     // `collected_x86_64_ops` (314 → 306) to
     // `collected_x86_64_ctx_ops` (16 → 24) as part of the
     // ADR-0075 `(ctx, ins)` migration. The per-op files at
     // `x86_64/ops/wasm_2_0/i{32,64}_trunc_sat_*.zig` now ship
     // the 2-arg `emit(*EmitCtx, *const ZirInstr)` shape.
+    // B58: f{32,64}.convert_i{32,64}_{s,u} migrated from
+    // `collected_x86_64_ops` (306 → 298) to `_ctx_ops`
+    // (24 → 32). The B26 7-arg stubs at
+    // `x86_64/ops/wasm_1_0/f{32,64}_convert_*.zig` rewritten
+    // in place to the 2-arg shape.
     x86_64_i32_reinterpret_f32,
     x86_64_i64_reinterpret_f64,
     x86_64_f32_reinterpret_i32,
@@ -1513,6 +1510,14 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_i32_trunc_sat_f64_u,
     x86_64_i64_trunc_sat_f32_u,
     x86_64_i64_trunc_sat_f64_u,
+    x86_64_f32_convert_i32_s,
+    x86_64_f32_convert_i64_s,
+    x86_64_f64_convert_i32_s,
+    x86_64_f64_convert_i64_s,
+    x86_64_f32_convert_i32_u,
+    x86_64_f64_convert_i32_u,
+    x86_64_f32_convert_i64_u,
+    x86_64_f64_convert_i64_u,
 };
 
 comptime {
@@ -1576,20 +1581,20 @@ test "ArchAxis enum has exactly 2 variants per ADR-0074 (Zone 2 arch-axes)" {
     try std.testing.expectEqual(@as(usize, 2), @typeInfo(ArchAxis).@"enum".fields.len);
 }
 
-test "migratedArchOpCount tracks collected per-arch tuples (B57: arm64=348, x86_64=306)" {
+test "migratedArchOpCount tracks collected per-arch tuples (B58: arm64=348, x86_64=298)" {
     // arm64 = 162 + 10 i16x8 cmp; x86_64 = 154 + 10 - 8 trunc_sat
-    // (B57 moved Wasm 2.0 trunc_sat cohort from legacy tuple to
-    // `collected_x86_64_ctx_ops`).
+    // (B57) - 8 int→float convert (B58 moved B26 stubs to ctx tuple).
     try std.testing.expectEqual(@as(usize, 348), migratedArchOpCount(.arm64));
-    try std.testing.expectEqual(@as(usize, 306), migratedArchOpCount(.x86_64));
+    try std.testing.expectEqual(@as(usize, 298), migratedArchOpCount(.x86_64));
 }
 
 test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // B54: i32.div_s PoC (1). B55: full i32+i64 div/rem cohort (+7 = 8).
     // B56: Wasm 1.0 trapping trunc cohort (+8 = 16). B57: Wasm 2.0
-    // trunc_sat cohort moved from legacy tuple (+8 = 24). The B6x+1
-    // cutover folds this tuple back into `collected_x86_64_ops`.
-    try std.testing.expectEqual(@as(usize, 24), collected_x86_64_ctx_ops.len);
+    // trunc_sat cohort moved from legacy tuple (+8 = 24). B58: Wasm
+    // 1.0 int→float convert cohort moved from legacy tuple (+8 = 32).
+    // The B6x+1 cutover folds this tuple back into `collected_x86_64_ops`.
+    try std.testing.expectEqual(@as(usize, 32), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would

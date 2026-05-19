@@ -931,6 +931,44 @@ pub fn emitI64TruncSatF32U(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Erro
 }
 pub const emitI64TruncSatF64U = emitI64TruncSatF32U;
 
+/// §9.12-B / B58 (ADR-0075) — `(ctx, ins)` adapters for the
+/// int→float convert cohort. Two legacy consumers — simple-path
+/// (`emitFpConvertSimple`, also serves f64.promote_f32 /
+/// f32.demote_f64 / reinterpret family, but only the 6 signed
+/// convert + i32_u convert variants migrate here) and the
+/// branched i64_u path (`emitFpConvertI64Unsigned`). Each gets
+/// one primary `(ctx, ins)` adapter; per-op aliases preserve
+/// the per-op-file shape. Decomposes per-op at the B6x+1 cutover.
+pub fn emitF32ConvertI32S(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitFpConvertSimple(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.spill_base_off,
+        ins.op,
+    );
+}
+pub const emitF32ConvertI64S = emitF32ConvertI32S;
+pub const emitF64ConvertI32S = emitF32ConvertI32S;
+pub const emitF64ConvertI64S = emitF32ConvertI32S;
+pub const emitF32ConvertI32U = emitF32ConvertI32S;
+pub const emitF64ConvertI32U = emitF32ConvertI32S;
+
+pub fn emitF32ConvertI64U(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitFpConvertI64Unsigned(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.spill_base_off,
+        ins.op,
+    );
+}
+pub const emitF64ConvertI64U = emitF32ConvertI64U;
+
 /// Materialise an FP bit pattern into XMM7 via RAX scratch.
 /// Used by the FP trunc-trap helpers above. Module-private —
 /// `emitFpTruncSatU64` inlines its own copy because it also needs
