@@ -15,8 +15,8 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
    `chore(p9b):` / `feat(p9b):` prefix. Last source commit
-   `18ac9b49` (B60 — scalar load/store 23 ops migrated to
-   `(ctx, ins)`; 23 new per-op files added directly to ctx tuple).
+   `84abd51e` (B61 — bulk-memory cohort: memory.fill/copy/init
+   3 ops migrated to `(ctx, ins)`; 3 new per-op files).
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -85,37 +85,35 @@
 | B58 | Cohort migration: Wasm 1.0 int→float convert cohort (`f{32,64}.convert_i{32,64}_{s,u}`, 8 ops) to `(ctx, ins)`. Existing B26 7-arg stubs converted in place; moved from `collected_x86_64_ops` (306 → 298) to `collected_x86_64_ctx_ops` (24 → 32). Two group aliases (`emitFpConvertSimple` for 6 of 8, `emitFpConvertI64Unsigned` for i64_u pair). | `8c8d849d` |
 | B59 | Cohort migration: reinterpret + promote/demote cohort (`i{32,64}.reinterpret_f{32,64}`, `f{32,64}.reinterpret_i{32,64}`, `f64.promote_f32`, `f32.demote_f64`, 6 ops) to `(ctx, ins)`. B28 7-arg stubs converted in place; moved from `collected_x86_64_ops` (298 → 292) to `_ctx_ops` (32 → 38). Single `emitFpConvertSimple` consumer (1 primary + 5 aliases). | `89261705` |
 | B60 | Cohort migration: scalar load/store cohort (23 ops via `op_memory.emitMemOp`) to `(ctx, ins)`. 23 NEW per-op files (these ops were never in legacy tuple — only emit.zig's grouped switch arm). Single primary `emitI32Load` + 22 aliases. `collected_x86_64_ctx_ops` 38 → 61; legacy tuple unchanged at 292. | `18ac9b49` |
-| **B61** | **Cohort migration: bulk memory + drop cohort (`memory.fill`, `memory.copy`, `memory.init`, `data.drop`, `elem.drop`, 5 ops)** to `(ctx, ins)`. Heterogeneous consumers (`emitMemoryFill` / `emitMemoryCopy` / `emitMemoryInit` + inline `data.drop` / `elem.drop` arms in emit.zig). Per-op signature differs (some take only func_idx, others take payload+func_idx). New per-op files. | **NEXT** |
-| B61..B6x | Bulk migrate remaining x86_64 emit fns in cohorts (5–15 ops/chunk per LOOP.md). Suggested order: bulk memory + drop → table ops → globals → const → call → local. | |
+| B61 | Cohort migration: bulk-memory cohort (`memory.fill` / `memory.copy` / `memory.init`, 3 ops) to `(ctx, ins)`. 3 distinct adapters (no aliases — fill/copy/init use distinct legacy helpers). 3 NEW per-op files. `_ctx_ops` 61 → 64; legacy unchanged at 292. data.drop / elem.drop deferred (no Zone 1 meta files). | `84abd51e` |
+| **B62** | **Cohort migration: globals cohort (`global.get`, `global.set`, 2 ops)** to `(ctx, ins)`. Two distinct adapters (different signatures — set has no result vreg). New per-op files. Adapter must thread `globals_offsets` + `globals_valtypes` from ctx (already in EmitCtx fields). | **NEXT** |
+| B62..B6x | Bulk migrate remaining x86_64 emit fns in cohorts (5–15 ops/chunk per LOOP.md). Suggested order: globals → table ops → const → call → local → control → drop ops (after Zone 1 meta). | |
 | B6x+1 | Inline-switch dispatcher cutover per ADR-0073 — both arches' `emit.zig` giant switch replaced by `inline for (collected_X_ops) |op_mod| { if (op_mod.op_tag == ins.op) return op_mod.emit(ctx, ins); }`. Moment per-op files become load-bearing. | |
 
-## Active state — §9.12-B mid-flight; B60 scalar load/store cohort landed 2026-05-20
+## Active state — §9.12-B mid-flight; B61 bulk-memory cohort landed 2026-05-20
 
-**B61 is the active task** — cohort migrate the bulk-memory +
-drop variants (`memory.fill`, `memory.copy`, `memory.init`,
-`data.drop`, `elem.drop`, 5 ops) to `(ctx, ins)`. B60 closed
-the scalar load/store cohort at `18ac9b49`
-(`collected_x86_64_ctx_ops` 38 → 61; legacy tuple unchanged
-at 292 because B60 ops were never legacy-registered).
+**B62 is the active task** — cohort migrate `global.get` /
+`global.set` (2 ops) to `(ctx, ins)`. B61 closed the bulk-memory
+cohort at `84abd51e` (`collected_x86_64_ctx_ops` 61 → 64;
+legacy unchanged at 292; data.drop / elem.drop deferred —
+Zone 1 meta files missing).
 
-The loop for B61:
+The loop for B62:
 
-1. Examine emit.zig lines ~979-1000 (`memory.fill`,
-   `data.drop`, `elem.drop`, `memory.copy`, `memory.init`) —
-   `memory.fill`/`copy`/`init` route to `op_memory.emit*`
-   helpers; `data.drop`/`elem.drop` are inline 2-instruction
-   sequences. The inline ones may be too small to be worth
-   per-op-file extraction.
-2. Add per-op `(ctx, ins)` adapters in op_memory.zig for
-   memory.fill / memory.copy / memory.init. Inline data.drop
-   / elem.drop bodies may move into per-op files (single
-   primary each).
-3. Create 5 NEW per-op files.
-4. Update collector (61 → 66) + emit.zig switch arms.
-5. Verify 2-host green; commit + push.
+1. Survey `op_globals.emitGlobalGet` / `emitGlobalSet` in
+   x86_64/op_globals.zig. Both take `globals_offsets` +
+   `globals_valtypes` (already in `ctx.globals_offsets` /
+   `ctx.globals_valtypes`) + `ins.payload` as global idx.
+2. Add 2 `(ctx, ins)` adapters in op_globals.zig.
+3. Replace 2 emit.zig arms with `(ctx, ins)` adapter calls.
+4. Create 2 NEW per-op files at
+   `x86_64/ops/wasm_1_0/global_{get,set}.zig` (check Zone 1
+   meta files exist first — they likely do for global.get/set).
+5. Update collector (64 → 66) + assertion.
+6. Verify 2-host green; commit + push.
 
-Note: op_convert.zig at 1009 LOC; op_memory.zig now likely
-above 1000 too — file split plan deferred to §9.12-D cleanup.
+Note: op_convert.zig at 1009 LOC, op_memory.zig + ctx growing —
+file split plan deferred to §9.12-D cleanup.
 
 §9.12-B exit criterion stays as ROADMAP §9.12-B specifies (6 build
 combos green + DCE 0 + completeness comptime check). Per-op file
