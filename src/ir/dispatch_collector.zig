@@ -211,6 +211,37 @@ pub const DispatchError = error{
     UnsupportedOpForBuildLevel,
 };
 
+/// Populate a `DispatchTable.interp` slot from each migrated op_mod
+/// whose `handlers.interp` matches the `dispatch_table.InterpFn`
+/// signature. Per ADR-0073 + `.dev/dispatcher_wire_design.md` §2.4:
+/// the interp axis is structurally **table-population** (function
+/// pointer table indexed by ZirOp) rather than per-call switch.
+///
+/// At §9.12-B / B6 this function is a no-op installer: i32_add and
+/// any subsequent stubs use the zero-arg `fn() DispatchError!void`
+/// shape — installing them as `InterpFn` would require a wrapper
+/// that returns `error.NotMigrated` to the runtime, breaking
+/// real-op interp paths. The function exists so the wire-in shape
+/// is in place; later B-handler-migration sub-chunks (when per-op
+/// interp handlers gain the proper `(ctx, instr) anyerror!void`
+/// signature) will install them here. Comptime check via
+/// `@TypeOf(op_mod.handlers.interp) == @import("dispatch_table.zig").InterpFn`
+/// gates each installation; stubs remain skipped.
+pub fn populateDispatchTable(table: *@import("dispatch_table.zig").DispatchTable) void {
+    const InterpFn = @import("dispatch_table.zig").InterpFn;
+    inline for (collected_ops) |op_mod| {
+        if (comptime !enabledByBuild(op_mod)) continue;
+        const handler = @field(op_mod.handlers, "interp");
+        if (comptime @TypeOf(handler) == InterpFn) {
+            // Install; per-op handler is real, matches the runtime
+            // dispatch signature.
+            table.interp[@intFromEnum(op_mod.op_tag)] = handler;
+        }
+        // Else: per-op handler is still a stub. Skip installation;
+        // legacy interp slot retains authority.
+    }
+}
+
 /// Look up the per-op module for `tag` at comptime; returns null when
 /// no migrated module matches. The returned `type` is the imported
 /// namespace (`@import("instruction/wasm_X_Y/<op>.zig")` — a `type`
@@ -317,6 +348,16 @@ test "dispatcher(.validate) returns NotMigrated for not-yet-migrated tags" {
     // the legacy validator switch retains authority.
     const result = dispatcher(.validate)(.@"unreachable", .{});
     try std.testing.expectError(error.NotMigrated, result);
+}
+
+test "populateDispatchTable is callable + no-op for current stubs" {
+    // i32_add's interp handler is a zero-arg DispatchError!void stub —
+    // signature doesn't match InterpFn, so populateDispatchTable
+    // intentionally skips it. The table's interp slots remain all
+    // null after this call.
+    var table = @import("dispatch_table.zig").DispatchTable.init();
+    populateDispatchTable(&table);
+    try std.testing.expect(table.interp[@intFromEnum(ZirOp.@"i32.add")] == null);
 }
 
 test "dispatcher returns a callable function value per axis" {
