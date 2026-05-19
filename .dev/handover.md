@@ -38,9 +38,10 @@
 | B14 | i64 binary ALU cohort migration: i64.add/sub/mul/and/or/xor × 2 arches. 18 new files | `0df0c44c` |
 | B15 | i32 compare cohort: eq/ne/lt_s/lt_u/gt_s/gt_u/le_s/le_u/ge_s/ge_u × 2 arches. 30 new files | `0ac5c145` |
 | B16 | i64 compare cohort: 10 ops at i64 width × 2 arches with emitI64Compare. 30 new files | `66dcd8d2` |
-| B17 | i32/i64 eqz + shift cohort: 12 ops × 2 arches; heterogeneous delegates per arch. 36 new files | `<backfill>` |
-| B18 | i32/i64 bitcount cohort: clz/ctz/popcnt × 2 widths = 6 ops × 2 arches. arm64 has emitI32Clz/Ctz/Popcnt + emitI64* separate; x86_64 bundles via emitI{32,64}Bitcount | **NEXT** |
-| B19..Bn | sign-extension ops (extend8_s/16_s/32_s); divide/remainder; i32.wrap_i64; i64.extend_i32_{s,u}; i32.const/i64.const; then Wasm 2.0 SIMD cohort (~400 ops). IR-axis migration deferred | |
+| B17 | i32/i64 eqz + shift cohort: 12 ops × 2 arches; heterogeneous delegates per arch. 36 new files | `c485f445` |
+| B18 | i32/i64 bitcount cohort: clz/ctz/popcnt × 2 widths = 6 ops × 2 arches. 18 new files | `<backfill>` |
+| B19 | i32/i64 sign-extension cohort: i32.extend{8,16}_s + i64.extend{8,16,32}_s = 5 ops × 2 arches. arm64 has per-op emitI32Extend8S etc.; x86_64 likely per-op too (need check). ~15 new files | **NEXT** |
+| B20..Bn | divide/remainder (8 ops); i32.wrap_i64 / i64.extend_i32_{s,u} (3 ops); i32.const / i64.const (2 ops); then Wasm 2.0 SIMD cohort (~400 ops). IR-axis migration still deferred | |
 
 ## Active state — §9.12-A [x]; §9.12-B autonomous (HUGE row)
 
