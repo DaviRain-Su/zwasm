@@ -11,63 +11,72 @@
 
 ## Parallel test gate — file-logged pipeline
 
-**Per ADR-0049 + ADR-0067**: the autonomous loop's per-chunk
-gate is **two-host** (Mac aarch64 + `ubuntunote` native Linux
-x86_64 via SSH). The windowsmini Windows x86_64 gate is
-**deferred to a Phase-boundary "Windows reconciliation" batch
-step** — autonomous chunks must NOT fire
+**Per ADR-0049 + ADR-0067 + ADR-0076**: the autonomous loop's
+per-chunk gate is **two-host** (Mac aarch64 foreground +
+`ubuntunote` native Linux x86_64 background via SSH). Scope is
+adaptive per ADR-0076 D1 — substrate chunks gate at `zig build
+test`, logic/cohort chunks at `zig build test-all`. The
+windowsmini gate is **deferred to Phase-boundary
+"Windows reconciliation"** — autonomous chunks must NOT fire
 `bash scripts/run_remote_windows.sh test-all`, regardless of
-`should_gate_windows.sh`'s output. The script remains as an
-informational heuristic only.
+`should_gate_windows.sh`'s output.
+
+ubuntu does NOT block the current cycle (ADR-0076 D3): it runs
+in background after the single push and is verified at the NEXT
+cycle's Resume Step 0.7.
 
 The two cost shapes:
 
-- **Mac**: native, fast (≤ 60 s typical). Run synchronously and
-  fail-fast — there is no value in backgrounding it because the
-  next steps (commit / push) need its result inline.
-- **ubuntunote**: SSH-remote to native x86_64, ~3-5 min
-  typical. Run per-chunk in the background. SysV x86_64 ground
-  truth, no Rosetta abstraction (D-134 absent here per
-  ADR-0067).
+- **Mac**: native, fast (≤ 60 s for `test`, ~2-3 min for
+  `test-all`). Foreground; fail-fast.
+- **ubuntunote**: SSH-remote to native x86_64, ~2-3 min for
+  `test`, ~3-5 min for `test-all`. Background; verified next
+  cycle.
 
 A13 release-tag pushes (to `main`) still require full 3-host
-green via `scripts/gate_merge.sh` — that's user-driven, not
+green via `scripts/gate_merge.sh` — user-driven, not
 autonomous-loop scope.
 
 ### Mandatory shape of the gate
 
 This shape is **load-bearing**. A loop iteration that runs
-windowsmini per-chunk (or that re-invokes
-`scripts/run_remote_ubuntu.sh` just to re-read its log) is in
-violation of this skill, even when the run happens to succeed.
+windowsmini per-chunk, re-invokes `scripts/run_remote_ubuntu.sh`
+just to re-read its log, or pushes twice per chunk (legacy
+2-push cycle pre-ADR-0076) is in violation of this skill.
 
 ```bash
-# 1. Mac local: lint + unit tests (cheap, fast-fail). FOREGROUND.
-zig build test                         > /tmp/mac.log     2>&1
+# 1. Classify scope (ADR-0076 D1). Single source of truth.
+CLASS=$(bash scripts/classify_chunk_scope.sh)
+case "$CLASS" in
+    substrate) GATE_STEP="test" ;;
+    logic|cohort|unclear) GATE_STEP="test-all" ;;
+esac
+
+# 2. Mac local. FOREGROUND, fail-fast.
+zig build $GATE_STEP                   > /tmp/mac.log     2>&1
 zig build lint -- --max-warnings 0     > /tmp/mac-lint.log 2>&1
 
-# 2. Source commit (Step 6).
+# 3. Source commit (Step 6+7 sub-step 1).
 git add <source-files>
 git commit -m "<conventional commit>"
 
-# 3. Sync the bench CI bot's commits, then push.
-#    The bot pushes `bench(ci): record <sha> [skip ci]` to
-#    zwasm-from-scratch asynchronously after every loop push;
-#    `--rebase --autostash` integrates those commits with zero
-#    conflict (bench/results/*.yaml is disjoint from loop diffs)
-#    and avoids the per-chunk non-fast-forward reject cycle.
+# 4. Handover update + commit (Step 6+7 sub-steps 2-5).
+#    Edit .dev/handover.md, ROADMAP §9, optionally debt.md /
+#    lessons. Then:
+git add .dev/handover.md .dev/ROADMAP.md [.dev/debt.md] [.dev/lessons/...]
+git commit -m "chore(p<N>): mark §9.<N> / N.M done; retarget handover at N.M+1"
+
+# 5. SINGLE push (ADR-0076 D2). Source + handover land together.
 git pull --rebase --autostash origin zwasm-from-scratch
 git push origin zwasm-from-scratch
 
-# 4. Kick ubuntunote (native x86_64 Linux) only — windowsmini
-#    deferred per ADR-0049; OrbStack retired per ADR-0067 (D-134
-#    closed: Rosetta translation race absent on native host).
-bash scripts/run_remote_ubuntu.sh test-all > /tmp/ubuntu.log 2>&1   # run_in_background: true
+# 6. Kick ubuntu (background, AFTER push, against just-pushed HEAD).
+#    Scope-matched to Step 1's classification.
+bash scripts/run_remote_ubuntu.sh $GATE_STEP > /tmp/ubuntu.log 2>&1   # run_in_background: true
 
-# 5. WAIT for completion notification (do NOT poll). When it
-#    fires, Read /tmp/ubuntu.log to inspect the tail. NEVER
-#    re-invoke `scripts/run_remote_ubuntu.sh` just to extract
-#    output — the log file already has everything.
+# 7. DO NOT WAIT. Re-arm and proceed to next chunk's Step 0.
+#    Prior cycle's ubuntu result is verified at the NEXT cycle's
+#    Resume Step 0.7 (ADR-0076 D3).
 
 # (windowsmini steps moved to the Phase-boundary "Windows
 #  reconciliation" sub-step per ADR-0049.)
@@ -122,16 +131,35 @@ the log file again with offset/limit, or grep the file** —
 never `scripts/run_remote_ubuntu.sh` a second time hoping for
 cleaner output.
 
-### Recovery on failure
+### Recovery on failure (ADR-0076 D3)
 
-- Mac green + ubuntunote red → land a fix-up commit on top
-  (`fix(p<N>): <one-line> — fixes <prev-sha>`) and re-run the
-  ubuntunote gate (one round). Do not amend the pushed commit —
-  `git push --force` is forbidden (§14).
-- After fix-up lands, optionally squash the chain to a single
-  meaningful commit on the next chunk's pre-push (`git rebase
-  -i` locally, then push) — only when the squash is
-  mechanical. Skip when in doubt.
+The prior cycle's ubuntu result is verified at the **next**
+cycle's Resume Step 0.7, NOT inline within the cycle that ran
+ubuntu. Two recovery paths:
+
+- **Mac red (current cycle)**: fix in place before committing.
+  Mac is foreground, fail-fast — recovery is "edit + re-run
+  `zig build $GATE_STEP`".
+- **ubuntu red (detected at next cycle's Step 0.7)**: the
+  prior commit pair is already on origin (force-push forbidden
+  by §14). The current cycle:
+
+  ```sh
+  git reset --mixed HEAD~2     # source + handover commits
+  # diff stays in worktree; fix in place
+  ```
+
+  Then re-run the test gate (Step 5) and the commit pair
+  (Step 6+7). The single push lands the fix as a follow-up
+  commit pair. The broken state is visible in `git log` but
+  not in working state — `main` is protected by
+  `scripts/gate_merge.sh`'s strict 3-host gate (release-tag
+  scope).
+
+If ubuntu was killed / network dropped / log is incomplete,
+treat as "result unknown" → reset+re-run ubuntu via
+`run_remote_ubuntu.sh` (foreground this one time) before
+proceeding.
 
 ### Heisenbug streak tracking (per chunk)
 
@@ -161,14 +189,16 @@ walk the 4-condition checklist in the rule (streak, structural
 commit diversity, instrumentation in place, root cause OR
 ADR-rate-reduction), then surface to the user.
 
-### Step 7 integration
+### Step 6+7 integration (ADR-0076 D2)
 
-The Step 6 source-commit + push happens **before** the
-ubuntunote gate starts. Step 7's handover update + ROADMAP
-`[x]` flip lands as a follow-up commit + push **after**
-ubuntunote returns green. This keeps the gate's reference
-state fresh and
-amortises bookkeeping over the gate wait.
+Source commit and handover commit land back-to-back locally,
+then a **single** push fires. ubuntu test kicks off after the
+push, in background, against the just-pushed HEAD. Verification
+is deferred one cycle (next cycle's Resume Step 0.7).
+
+The legacy 2-push cycle ("Step 6 push → wait for ubuntu →
+Step 7 push") is superseded — bench-CI bot rebases halve, and
+the loop is no longer pinned to ubuntu's wall-clock.
 
 ### Phase-boundary "Windows reconciliation" (per ADR-0049)
 
@@ -195,13 +225,13 @@ option per ADR-0049's Alternative C rejection.
 approval inside this skill. The loop pushes its own commits.
 Specifically:
 
-- Every commit lands on the local `zwasm-from-scratch` branch via
-  the per-task TDD loop (Step 6).
-- Push happens at the end of every Step 7, after `[x]` flip
-  + handover update — push so the gone-from-local risk is
-  bounded by one task. (Per ADR-0049 the windowsmini gate is
-  deferred to Phase boundaries, so there's no per-chunk pre-
-  push for windowsmini's git-fetch sync.)
+- Source commit + handover commit land back-to-back locally
+  via per-task TDD Step 6+7.
+- **One push per chunk** (ADR-0076 D2) — after both commits.
+  Pre-ADR-0076 the loop pushed twice per chunk (once after
+  source, once after handover); the single-push cycle halves
+  bench-CI bot rebase incidence and removes the
+  ubuntu-wall-clock pin from the loop.
 - **Pre-push rebase is the default**. Always run `git pull
   --rebase --autostash origin zwasm-from-scratch` immediately
   before `git push`. The bench CI bot pushes

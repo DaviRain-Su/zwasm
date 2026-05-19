@@ -285,6 +285,55 @@ change between iterations.
    ≥ 7.10, the loop reads `.dev/phase8_transition_gate.md`
    §3a (deferred-work DAG) + §3 (design cleanliness) and
    reconciles their checkboxes with `.dev/debt.md`.
+5c. **Step 0.7 — Prior cycle ubuntu verification (ADR-0076 D3)**.
+   The previous cycle pushed source+handover in one commit pair
+   and kicked `bash scripts/run_remote_ubuntu.sh` in background
+   (per ADR-0076 D2/D3). The result is verified HERE, mechanically.
+
+   Either Bash:
+
+   ```sh
+   tail -3 /tmp/ubuntu.log
+   ```
+
+   or `Read /tmp/ubuntu.log` (Read tool with a small offset
+   from end) — both are equivalent. Choose whichever fits
+   context budget; the file is the single source of truth.
+
+   Expected: a line `[run_remote_ubuntu] OK (HEAD=<sha>)` whose
+   `<sha>` matches `git log -1 --format=%h origin/zwasm-from-scratch~0`
+   (= the just-tested commit). If matched → proceed to Step 6.
+
+   If FAIL OR if the log is stale (HEAD mismatch / log missing /
+   abort marker): **revert the prior cycle's commit pair**.
+
+   ```sh
+   git reset --mixed HEAD~2   # source + handover commits
+   ```
+
+   The diff stays in the worktree. Investigate the named failure
+   (Read the log tail; `grep -i 'FAIL\|error' /tmp/ubuntu.log`),
+   fix in place, re-run Step 5 (test gate), then resume Step 6.
+   The commit pair gets re-built atop the fix; one push lands
+   the corrected chunk plus the fix as one cycle.
+
+   **First-resume exception**: when `/tmp/ubuntu.log` doesn't
+   exist (first cycle after the rule landed, or the log was
+   cleared), skip this step silently.
+
+   **Force-push is forbidden** by §14, so the failing commit
+   pair WAS already on origin. After local revert + fix, the
+   next cycle's single push lands as a follow-up commit pair
+   — the broken state is visible in `git log` but not in
+   working state. This is acceptable because
+   `zwasm-from-scratch` is the development branch; the
+   `main` merge gate (`scripts/gate_merge.sh`) re-runs the
+   strict 3-host `test-all` before any `main` push.
+
+   This step joins the mechanical-checkpoint family alongside
+   Step 3 (`git log`), Step 0.5 (debt sweep), Step 0.5b (live
+   status check). It is a runnable command in the loop's
+   procedure, not a "remember to check" rule.
 6. `zig build test` (Phase 0+) — confirm the build is green. From
    Phase 1, also run `zig build test-spec`. From Phase 7, also run
    the differential subset. **If output is large (>200 lines), run
@@ -479,41 +528,53 @@ call site (consult `.claude/rules/zig_tips.md` for the canonical
 Mac-only — it is **not** repeated on ubuntunote / windowsmini,
 since deprecation findings are platform-independent.
 
-### Step 5 — Test gate (three hosts)
+### Step 5 — Test gate (scope-adaptive; ADR-0076 D1)
 
-The gate command is whatever the active §9.<N>.<task>'s exit
-criterion specifies. The defaults are:
+**Classify first**:
 
-- Phase 0 / 0.1, 0.2, 0.3 — `zig build` only (build verify).
-- Phase 0 / 0.5 onward and Phase 1+ — `zig build test-all` (or the
-  narrower `zig build test` plus phase-relevant `test-spec` /
-  `test-e2e` / etc. as they land).
+```sh
+bash scripts/classify_chunk_scope.sh
+```
 
-**Default: file-logged parallel pipeline** — canonical form is in
-[`LOOP.md` §"Parallel test gate"](LOOP.md). The shape is
-load-bearing; **do not** improvise variations. Three rules
-restated here so they cannot be missed:
+Map the printed class to the gate command (ADR-0076 D1):
 
-1. **Mac runs foreground** (cheap, fail-fast). The next steps
-   (commit / push) need its result inline.
-2. **ubuntunote runs in the background** with
-   `run_in_background: true` and `> /tmp/ubuntu.log 2>&1`.
-   **windowsmini is deferred per ADR-0049** — autonomous chunks
+| Class       | Mac gate (foreground) | ubuntu gate (background, kicked AFTER push) |
+|-------------|-----------------------|---------------------------------------------|
+| `substrate` | `zig build test`      | `zig build test`                            |
+| `logic`     | `zig build test-all`  | `zig build test-all`                        |
+| `cohort`    | `zig build test-all`  | `zig build test-all`                        |
+| `unclear`   | `zig build test-all`  | `zig build test-all`                        |
+
+The script IS the rule. When the heuristic is wrong, edit
+`scripts/classify_chunk_scope.sh` (mirroring `gate_commit.sh` /
+`zone_check.sh` discipline). LOOP.md does NOT maintain the
+judgement table in prose.
+
+Phase-0 sub-steps 0.1 / 0.2 / 0.3 stay at `zig build` only
+(build verify; predates this rule and is unaffected).
+
+**Pipeline (ADR-0076 D2 + D3)**:
+
+1. **Mac runs foreground** with the gate from the class column.
+   Fail-fast — the next steps (commit pair / push) need its
+   result inline.
+2. **ubuntu does NOT run here.** It is kicked off after the
+   single push in Step 6+7 (per ADR-0076 D2), against the
+   just-pushed HEAD. Verification of the prior cycle's ubuntu
+   happens at the NEXT cycle's Resume Step 0.7 (per ADR-0076
+   D3).
+3. **windowsmini is deferred per ADR-0049** — autonomous chunks
    must NOT fire `bash scripts/run_remote_windows.sh test-all`,
    regardless of `should_gate_windows.sh`'s output. windowsmini
    runs once at Phase boundary as the "Windows reconciliation"
    sub-step. **OrbStack is retired** from the per-chunk gate
    per ADR-0067 (D-134 Rosetta race; native ubuntunote replaces
    it).
-3. **ubuntunote's stdout+stderr redirects to `/tmp/ubuntu.log`**.
-   The log is the single source of truth. When the completion
-   notification fires, **Read the log file** to inspect the
-   tail. **Re-running `scripts/run_remote_ubuntu.sh` just to
-   re-grep its output is forbidden** — these builds take
-   minutes, and a second invocation purely to read output
-   again is nonsense. If the log is hard to scan, Read it
-   again with offset/limit or grep the file; never rerun the
-   build.
+4. **ubuntunote's stdout+stderr redirects to `/tmp/ubuntu.log`**.
+   The log is the single source of truth. **Re-running
+   `scripts/run_remote_ubuntu.sh` just to re-grep its output is
+   forbidden** — these builds take minutes; Read the log file
+   instead.
 
 Per-chunk commands (used inside the file-logged pipeline):
 
@@ -537,13 +598,11 @@ Phase-boundary windowsmini reconciliation (NOT per-chunk):
   `bash scripts/should_gate_windows.sh --record`. See
   `LOOP.md` §"Phase-boundary Windows reconciliation".
 
-Both hosts (Mac + ubuntunote) must be green per chunk to
-proceed; windowsmini must be green per Phase. The Read tool
-inspects the log tail when a completion notification fires;
-if the log exceeds ~200 lines and inline reading would crowd
-context, delegate the failure-line extraction to a Bash
-subagent — **always against the log file, never by re-invoking
-the gate**.
+**Mac must be green per chunk to proceed to Step 6+7**;
+ubuntu's result is verified one cycle later (ADR-0076 D3) at
+Resume Step 0.7; windowsmini must be green per Phase boundary.
+If a prior cycle's ubuntu fails the Step 0.7 check, the current
+cycle reverts the prior commit pair and switches to fix mode.
 
 ubuntunote SSH setup: `.dev/ubuntunote_setup.md` (mDNS
 `ubuntunote.local`, key auth, NOPASSWD sudo, Determinate Nix +
@@ -600,72 +659,78 @@ in §9.8 / 8.4 cycles that landing optimisations without
 measuring per-pass effect produces "implemented but unmeasured"
 work; ADR-0032 codifies the bench-driven sequencing.
 
-### Step 6 — Source commit
+### Step 6+7 — Commit pair, single push, ubuntu kick, re-arm (ADR-0076 D2)
 
-`git add` only the source files; `git commit -m "<type>(<scope>):
-<one line>"`. The pre-commit gate runs. If the gate blocks for a
-genuine reason, fix and re-stage.
+The legacy "source commit → push → handover commit → push" two-push
+cycle is replaced by a single-push commit pair per ADR-0076 D2.
+Sequence (run in order; no waits between, no per-step approval):
 
-Never `git commit --no-verify` (forbidden by ROADMAP §14).
+1. **Source commit**. `git add <source files>; git commit -m
+   "<type>(<scope>): <one line>"`. The pre-commit gate runs. If
+   the gate blocks for a genuine reason, fix and re-stage.
+   Never `git commit --no-verify` (forbidden by ROADMAP §14).
 
-### Step 7 — Handover update + push + re-arm
+2. **Update `.dev/handover.md`** (replace, do not append):
+   - `Current state`: 5 lines max — Phase, last commit SHA +
+     one-line gist, next task id. **Delete** any per-task prose
+     older than the active task (already in `git log
+     --grep="§9.<N> / N.M"`, the canonical lookup).
+   - `Active task`: refresh the chunk progress table so the
+     **next** chunk is marked `**NEXT**`.
+   - Keep the file ≤ 100 lines. Anything stable across phases
+     belongs in `CLAUDE.md` or a skill / rule file, not here.
 
-1. **Replace** (do not append to) `.dev/handover.md`'s `Current
-   state` block + `Active task` table:
-   - `Current state`: 5 lines max — Phase, last commit SHA + one-
-     line gist, next task id. **Delete** any per-task prose older
-     than the active task (it's already in `git log --grep="§9.<N>
-     / N.M"`, the canonical lookup; do not duplicate).
-   - `Active task`: refresh the chunk progress table (or
-     equivalent) so the **next** chunk is marked `**NEXT**`.
-   - Keep the whole file ≤ 100 lines. Anything stable across
-     phases (file shape, skill catalogue, layout) belongs in
-     `CLAUDE.md` or the relevant skill / rule file, not here.
+   This is the only mandatory documentation step (zwasm v2 does
+   not maintain the per-task / per-concept chapter cadence — P9).
 
-   This is the only mandatory documentation step — zwasm v2 does
-   not maintain the per-task / per-concept chapter cadence (P9).
-2. Mark `[x]` for the just-completed task in ROADMAP §9.<N>.
-   Leave the Status column SHA blank (`[x]`) — the SHA pointer
-   is **batch-backfilled at phase close**. The commit message
-   itself references `§9.<N> / N.M`, so `git log --grep="§9.<N>
-   / N.M"` is the canonical lookup; the Status SHA is convenience,
-   not load-bearing.
+3. **Mark `[x]` for the just-completed task in ROADMAP §9.<N>**.
+   Leave the Status column SHA blank (`[x]`) — SHA is
+   **batch-backfilled at phase close**. The commit message
+   references `§9.<N> / N.M`; `git log --grep` is the lookup.
 
-   **§18 self-check before this edit** (the PreToolUse hook will
-   also re-print this when you save): `[x]` flips and SHA
-   backfills are *routine status updates*, no ADR needed. But if
-   the same commit also touches §9 phase scope, exit criteria,
-   §11 layers, §14 forbidden list, or any §1/§2/§4/§5 text — that
+   **§18 self-check before this edit** (PreToolUse hook
+   re-prints): `[x]` flips + SHA backfills are routine status
+   updates, no ADR needed. If the same commit touches §9 phase
+   scope, exit criteria, §11, §14, or §1/§2/§4/§5 text — that
    part is a *deviation*; file `.dev/decisions/NNNN_<slug>.md`
-   first per ROADMAP §18.2 and reference it in the commit
-   message.
-3. **Append new debt entries to `.dev/debt.md`**. Any debt
-   observation surfaced during Step 4 that wasn't discharged
-   inline gets a row here, with `Status: now` (default) or
-   `Status: blocked-by: <specific structural barrier>`. New
-   debts are appended at task close, not mid-task — this keeps
-   the active task's diff clean. If `.dev/debt.md` was modified,
-   include it in the next git add. Update `.dev/lessons/INDEX.md`
-   + add lesson files if a learning emerged (per
-   `.claude/rules/lessons_vs_adr.md`).
-4. `git add .dev/ROADMAP.md .dev/handover.md [.dev/debt.md]
-   [.dev/lessons/...]` and commit (`chore(p<N>): mark §9.<N> /
-   N.M [x]; retarget handover at N.M+1`).
-5. **Push**. `git pull --rebase --autostash origin
-   zwasm-from-scratch && git push origin zwasm-from-scratch`. The
-   pre-push rebase integrates the bench CI bot's
-   `bench(ci): record <sha> [skip ci]` commits (always disjoint
-   from loop diffs); see LOOP.md "Push policy" for the rationale.
-   No approval needed. If the rebase raises a conflict, that is
-   bucket 2 of the stop whitelist (history work needs user
-   input); a plain non-fast-forward after rebase means a parallel
-   non-bench commit landed — retry the same `pull --rebase +
-   push` once before stopping.
-6. **Re-arm** the loop with `ScheduleWakeup(delaySeconds=60,
+   first per ROADMAP §18.2.
+
+4. **Append new debt entries to `.dev/debt.md`**. Any Step-4 debt
+   observation not discharged inline gets a row with `Status:
+   now` (default) or `Status: blocked-by: <barrier>`. Update
+   `.dev/lessons/INDEX.md` + add lesson files if a learning
+   emerged.
+
+5. **Handover commit**. `git add .dev/ROADMAP.md
+   .dev/handover.md [.dev/debt.md] [.dev/lessons/...] && git
+   commit -m "chore(p<N>): mark §9.<N> / N.M [x]; retarget
+   handover at N.M+1"`. Pre-commit gate is docs-skip path.
+
+6. **Single push (ADR-0076 D2)**. `git pull --rebase --autostash
+   origin zwasm-from-scratch && git push origin
+   zwasm-from-scratch`. The rebase integrates the bench-CI bot's
+   `bench(ci): record <sha> [skip ci]` commits (disjoint from
+   loop diffs). The single push lands both commits atomically;
+   the rebase-against-bench count halves vs the old 2-push cycle.
+   If rebase conflicts (bucket-2 of the stop whitelist, history
+   work needs user input), stop. If non-fast-forward after
+   rebase (parallel non-bench commit landed), retry `pull
+   --rebase + push` once before stopping.
+
+7. **ubuntu test kick (background; ADR-0076 D3)**. Fire
+   `bash scripts/run_remote_ubuntu.sh <step> > /tmp/ubuntu.log 2>&1`
+   with `run_in_background: true`, where `<step>` matches the
+   Step-5 scope class (`test` for substrate; `test-all`
+   otherwise). The wrapper does `git fetch + reset --hard
+   origin/zwasm-from-scratch` on the remote, so it tests the
+   commit pair just pushed. **Do NOT wait** for completion;
+   verification happens at next cycle's Resume Step 0.7.
+
+8. **Re-arm** with `ScheduleWakeup(delaySeconds=60,
    prompt="/continue")`. Always 60s — see LOOP.md
-   "Self-perpetuation" for the full call shape. This is
-   mandatory.
-7. Final user-facing text: one sentence. State the closed task
+   "Self-perpetuation". Mandatory.
+
+9. Final user-facing text: one sentence. State the closed task
    id and the next task id. Do not write a status table.
 
 (Per-task notes in `private/notes/` are **optional and not
