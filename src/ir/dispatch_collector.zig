@@ -184,6 +184,19 @@ const i64_le_u = @import("../instruction/wasm_1_0/i64_le_u.zig");
 const i64_ge_s = @import("../instruction/wasm_1_0/i64_ge_s.zig");
 const i64_ge_u = @import("../instruction/wasm_1_0/i64_ge_u.zig");
 
+const i32_eqz = @import("../instruction/wasm_1_0/i32_eqz.zig");
+const i64_eqz = @import("../instruction/wasm_1_0/i64_eqz.zig");
+const i32_shl = @import("../instruction/wasm_1_0/i32_shl.zig");
+const i32_shr_s = @import("../instruction/wasm_1_0/i32_shr_s.zig");
+const i32_shr_u = @import("../instruction/wasm_1_0/i32_shr_u.zig");
+const i32_rotl = @import("../instruction/wasm_1_0/i32_rotl.zig");
+const i32_rotr = @import("../instruction/wasm_1_0/i32_rotr.zig");
+const i64_shl = @import("../instruction/wasm_1_0/i64_shl.zig");
+const i64_shr_s = @import("../instruction/wasm_1_0/i64_shr_s.zig");
+const i64_shr_u = @import("../instruction/wasm_1_0/i64_shr_u.zig");
+const i64_rotl = @import("../instruction/wasm_1_0/i64_rotl.zig");
+const i64_rotr = @import("../instruction/wasm_1_0/i64_rotr.zig");
+
 /// Tuple of all migrated per-op modules. Order is not load-bearing;
 /// `dispatcher` uses `op_tag` for routing.
 pub const collected_ops = .{
@@ -219,6 +232,18 @@ pub const collected_ops = .{
     i64_le_u,
     i64_ge_s,
     i64_ge_u,
+    i32_eqz,
+    i64_eqz,
+    i32_shl,
+    i32_shr_s,
+    i32_shr_u,
+    i32_rotl,
+    i32_rotr,
+    i64_shl,
+    i64_shr_s,
+    i64_shr_u,
+    i64_rotl,
+    i64_rotr,
 };
 
 comptime {
@@ -370,9 +395,10 @@ test "zirOpTagCount matches the ZirOp enum field count" {
     try std.testing.expect(n >= 200);
 }
 
-test "migratedOpCount tracks collected_ops length (32 after §9.12-B / B16 i64 cmp cohort)" {
-    // B1+B13+B14: 12 ALU; B15: + i32 cmp (10); B16: + i64 cmp (10).
-    try std.testing.expectEqual(@as(usize, 32), migratedOpCount());
+test "migratedOpCount tracks collected_ops length (44 after §9.12-B / B17 eqz+shift cohort)" {
+    // B1+B13+B14: 12 ALU; B15: +i32 cmp (10); B16: +i64 cmp (10);
+    // B17: +eqz/shift (12).
+    try std.testing.expectEqual(@as(usize, 44), migratedOpCount());
 }
 
 test "migrationComplete is false until §9.12-B migrates all 581 ops" {
