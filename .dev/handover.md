@@ -49,9 +49,10 @@
 | B25 | f32/f64 min/max + copysign cohort: 6 ops × 2 arches. 18 new files | `c91aa0de` |
 | B26 | int→float convert cohort: f32/f64.convert_i32/i64_{s,u} = 8 ops × 2 arches. 24 new files | `d4059669` |
 | B27 | Wasm 2.0 trunc_sat cohort: 8 ops × 2 arches. 24 new files | `caefc955` |
-| B28 | reinterpret + demote/promote cohort: 6 ops × 2 arches. 18 new files. 128/581 arm64 + 120/581 x86_64 | `<backfill>` |
-| B29 | SIMD i8x16 simple arith cohort: add/sub/mul (NO mul for i8x16 — only 12 ops actually). Try: v128.not/and/or/xor/andnot (5 v128 ops) + i8x16.add/sub (2) + i16x8.add/sub/mul (3) — pick a small cohort to start SIMD. Per-arch lookup TBD (op_simd_int_arith vs op_simd_int_cmp_lane) | **NEXT** |
-| B30..Bn | continue SIMD cohorts (~400 ops in total Wasm 2.0 SIMD); x86_64 EmitCtx consolidation for trapping-trunc + const/load/store/call/local/global + div/rem; then IR-axis migration | |
+| B28 | reinterpret + demote/promote cohort: 6 ops × 2 arches. 18 new files | `208f62b1` |
+| B29 | SIMD v128 logical cohort: v128.{not,and,or,xor,andnot,bitselect} = 6 ops × 2 arches. 18 new files. First SIMD chunk. 134/126 of 581 | `<backfill>` |
+| B30 | SIMD i8x16/i16x8/i32x4/i64x2 binary arith cohort: add/sub × 4 widths = 8 ops + mul × {i16x8,i32x4,i64x2} = 3 ops = 11 ops × 2 arches. Likely op_simd_int_arith.emit family | **NEXT** |
+| B31..Bn | SIMD splat/extract_lane/replace_lane; SIMD cmp; SIMD shifts; SIMD float arith/cmp; SIMD bool reductions; SIMD swizzle/shuffle; SIMD load/store (defer for x86_64 EmitCtx); x86_64 EmitCtx consolidation for trapping-trunc + const/load/store/call/local/global + div/rem; IR-axis migration | |
 
 ## Active state — §9.12-A [x]; §9.12-B autonomous (HUGE row)
 
