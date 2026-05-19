@@ -727,8 +727,12 @@ Sequence (run in order; no waits between, no per-step approval):
    verification happens at next cycle's Resume Step 0.7.
 
 8. **Re-arm** with `ScheduleWakeup(delaySeconds=60,
-   prompt="/continue")`. Always 60s — see LOOP.md
-   "Self-perpetuation". Mandatory.
+   prompt="/continue")`. The literal `60` is the **harness
+   runtime floor** (= shortest heartbeat the harness allows;
+   the tool clamps to `[60, 3600]`). Do NOT take the
+   `ScheduleWakeup` tool description's "default 1200–1800s
+   for idle ticks" guidance — see LOOP.md "Self-perpetuation"
+   for the 5 reasons. Mandatory.
 
 9. Final user-facing text: one sentence. State the closed task
    id and the next task id. Do not write a status table.
@@ -822,7 +826,9 @@ that point:
    expand §9.<N+1>'s task table inline (mirror §9.<N>'s structure:
    a numbered `[ ]` table with the same Status column shape);
    update handover.md to point at §9.<N+1>'s first task.
-5. Push, re-arm via `ScheduleWakeup`, and resume §9.<N+1>'s Step
+5. Push, re-arm via `ScheduleWakeup(delaySeconds=60,
+   prompt="/continue")` (literal `60` = harness floor; see
+   Step 8 + LOOP.md "Self-perpetuation"), and resume §9.<N+1>'s Step
    0 immediately. If the harness compacts mid-transition, the
    PostCompact brief recovers state.
 

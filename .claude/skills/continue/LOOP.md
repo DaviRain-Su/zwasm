@@ -308,7 +308,11 @@ of the turn is to schedule the next iteration so the loop survives
 without a fresh user message. **This is mandatory** — skipping it
 silently re-introduces user-babysitting.
 
-Use `ScheduleWakeup` with **`delaySeconds = 60` always**:
+Use `ScheduleWakeup` with **`delaySeconds = 60`** — the literal
+60 is the **harness runtime floor** (see the tool description:
+"runtime clamps to [60, 3600]"). The skill wants the **shortest
+possible heartbeat the harness allows**, not 60s for its own
+sake; if the floor ever drops, this value drops with it.
 
 ```
 ScheduleWakeup(
@@ -318,36 +322,41 @@ ScheduleWakeup(
 )
 ```
 
-**Override notice — the `ScheduleWakeup` tool description
-contradicts this skill on purpose.** The tool's docs advocate
-1200–1800s defaults and warn "Don't pick 300s" + cache-cost
-arguments against short polls. Those defaults are correct for
-general autonomous loops that don't have ADR-0076 D3's deferred-
-verification structure. **This skill overrides them.** Reasons:
+**Why shortest, not longest** — the `ScheduleWakeup` tool
+description advocates **1200–1800s** defaults for "idle ticks
+with no specific signal to watch" and warns against short polls
+on cache-warmth grounds. **That guidance does not apply inside
+`/continue`.** This skill is not an idle poller; it is a
+work-cycle restarter. Reasons the floor (60s) is correct:
 
-1. ADR-0076 D3 makes each cycle's ubuntu test a background
-   job whose result is verified at the **next** cycle's Step
-   0.7. The wait is not "polling" — it's a structural one-cycle
-   lag. Bigger delay just postpones B-row progress without
-   buying anything.
-2. The harness re-invokes you immediately when a
-   `task-notification` arrives (e.g. the ubuntu bg bash
-   completes). 60s vs 1200s is **irrelevant** to that path —
-   notifications cut through any wakeup.
-3. Cache-warmth optimization the tool docs cite is dominated
-   by the per-cycle commit / push / git fetch latency. The
-   "5-minute cache window" framing is not load-bearing for
-   this loop's economics.
-4. The user invoked `/continue` for **autonomy**, not for
-   throughput optimization. A 60s heartbeat means manual
-   `/continue` resumes from the user feel instant; a 1200s
-   heartbeat means the user wonders "is the loop still
-   running?" and pre-empts it.
+1. **Work cycle dominates wall-clock, not wait.** Each /continue
+   iteration commits, pushes, kicks ubuntu bg, then ends. The
+   actual work (build + test-all + commit + push) is minutes.
+   Wakeup delay is a heartbeat between cycles, not throttle.
+2. **Task notifications preempt the wakeup.** When the ubuntu
+   bg bash completes, the harness re-invokes /continue
+   immediately regardless of wakeup. 60s vs 1200s only matters
+   on the path where no notification fires — i.e. the loop
+   ran out of work but didn't realize it. Shorter heartbeat =
+   faster recovery from that pathological case.
+3. **ADR-0076 D3 structures verification as a one-cycle lag.**
+   The wait is not polling; it is the deferred-verification
+   window. Lengthening it just postpones the next cycle's
+   Step 0.7 check.
+4. **Cache-warmth argument is dominated by per-cycle git
+   latency.** The tool docs' "5-minute cache window" is real
+   but irrelevant — the commit + push + git fetch round trip
+   already evicts whatever the cache was holding.
+5. **User autonomy ≠ throughput optimization.** The user
+   invoked /continue to walk away; a 60s heartbeat means
+   manual `/continue` from the user feels instant, and a
+   1200s heartbeat invites pre-emption ("is the loop still
+   running?"). Autonomy wins over LLM cost optimization.
 
-If you find yourself reaching for 300s / 1200s / 1800s
-because the tool description recommends it, **stop**.
-Re-read this section. The mandate is 60s. The tool
-description's defaults do not apply inside `/continue`.
+If you find yourself reaching for 300s / 1200s / 1800s because
+the tool description recommends it, **stop**. The literal
+value here is `60` because that's the floor; not because 60
+seconds is meaningful.
 
 `prompt = "/continue"` re-fires this skill from the resume
 procedure on the next wakeup. (Do **not** pass
@@ -375,7 +384,9 @@ End-of-turn checklist (every turn that ends with the task closed):
 1. Step 6 commit landed.
 2. Step 7 handover update + ROADMAP `[x]` flip committed.
 3. `git push` succeeded.
-4. `ScheduleWakeup` armed for the next iteration.
+4. `ScheduleWakeup(delaySeconds=60, prompt="/continue")` armed
+   for the next iteration (literal `60` = harness floor; not
+   the tool description's "default 1200–1800s").
 5. Final user-facing text is **one sentence** stating what just
    landed and what fires next. Do not write a long progress
    summary — it invites pause.
