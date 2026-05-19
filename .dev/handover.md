@@ -23,7 +23,8 @@
 | Sub-chunk | Description | SHA |
 |---|---|---|
 | B1 | i32_add per-op file foundation (template + collector wire; stubs only; legacy dispatch retains authority) | `bb85b918` |
-| B2 | Wire dispatch_collector.dispatcher(.validate) into validator.zig (single-op route via collected_ops; rest via legacy switch) | **NEXT** |
+| B2 | dispatcher(comptime axis: Axis) function in dispatch_collector (no validator wiring yet) | `3660e3fa` |
+| B3 | Wire validator.zig to route via dispatcher(.validate) with NotMigrated → legacy fallback | **NEXT** |
 
 ## Active state — §9.12-A [x]; §9.12-B autonomous (HUGE row)
 
