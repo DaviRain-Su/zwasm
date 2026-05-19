@@ -5,18 +5,19 @@
 
 ## Cold-start procedure
 
-1. **READ FIRST** [`.dev/phase9_completion_master_plan.md`](phase9_completion_master_plan.md)
-   (master plan v2). §9.12-A `[x]` 2026-05-19; **§9.12-B is the next
-   active row** (the biggest sub-row in the §9.12 cohort).
-2. `git log --oneline -10` — recent autonomous-loop chunks under
-   `chore(p9b):` prefix. §9.12-A subchunks A1..A7 landed in commits
-   `f3626d77` (A1) through `8871f7ed` (close). Hotfix at `3461823a`.
-3. `bash scripts/p9_completion_status.sh` — live progress per the
-   enforcement-layer scripts; cites `bench/results/skip_impl_history.yaml`
-   baseline 243.
-4. `bash scripts/p9_simd_status.sh` — live SIMD status (13301/0/440
-   Mac+ubuntu bit-identical).
-5. `.dev/debt.md` `now` rows: none.
+1. **READ FIRST** [`.dev/decisions/0075_x86_64_emitctx_ctx_passing_unification.md`](decisions/0075_x86_64_emitctx_ctx_passing_unification.md)
+   (Status: Proposed — user-confirmed 2026-05-19; flip to Accepted in
+   the B53 commit per ROADMAP §18.2). This ADR drives B53..B6x. Its
+   §"Implementation plan" lists concrete steps; execute B53 first.
+2. **READ NEXT** [`.dev/phase9_completion_master_plan.md`](phase9_completion_master_plan.md)
+   (master plan v2). §9.12-A `[x]` 2026-05-19; §9.12-B is the active
+   row. **B30..B52 covered the dispatcher-signature-compatible cohort
+   (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
+3. `git log --oneline -10` — recent autonomous-loop chunks under
+   `chore(p9b):` prefix. Last source commit `fbf6d338` (B52).
+4. `bash scripts/p9_completion_status.sh` — live progress.
+5. `bash scripts/p9_simd_status.sh` — live SIMD status.
+6. `.dev/debt.md` `now` rows: none.
 
 ## §9.12-B progress (sub-chunks)
 
@@ -74,44 +75,32 @@
 | B50 | arm64 control flow scalar cohort (6 ops, arm64-only). 12 new files | `<backfill>` |
 | B51 | arm64 trapping trunc cohort: 8 ops, arm64-only. 16 new files | `<backfill>` |
 | B52 | SIMD splats + ref.is_null cohort (7 ops, both arches): i{8x16,16x8,32x4,64x2}.splat + f{32x4,64x2}.splat + ref.is_null. 21 new files. 374/348/314 of 581 | `<backfill>` |
-| B53 | **substrate-required from here onward** — handover backlog item. Remaining migratable ops all need dispatcher widening (payload/extra/bounds_fixups/EmitCtx access). Suggested next chunk: ADR amending ADR-0074 to extend per-arch dispatcher signature, then bulk migration of extract_lane / replace_lane (28 ops), const/load_store/local/global (50+ ops). | **DESIGN** |
+| **B53** | **ADR-0075 acceptance + x86_64 EmitCtx struct extension** — flip ADR-0075 Status: Proposed → Accepted in same commit. Add fields to `src/engine/codegen/x86_64/ctx.zig::EmitCtx`: `bounds_fixups`, `simd_const_fixups`, `extra_consts`, `func_idx`, `globals_offsets`, `globals_valtypes`, `tableidx` (and any others surfaced by the audit). Initialise in `x86_64/emit.zig::emitFunction`. NO behaviour change. 2-host green expected. | **NEXT** |
+| B54 | PoC: migrate `i32.div_s` end-to-end to `(ctx, ins)` shape (exercises `bounds_fixups`). New x86_64 emit fn sig at `op_alu_int.emitI32DivS(ctx, ins)`; dispatch arm at `x86_64/emit.zig` updated; per-op file `x86_64/ops/wasm_1_0/i32_div_s.zig` migrates from arm64-only to both arches; collector x86_64 count test +1. | |
+| B55..B6x | Bulk migrate remaining ~70 x86_64 emit fns in cohorts (5–15 ops/chunk per LOOP.md). Same pattern as B11..B12 was for arm64 i32.add but applied at scale. Migration order suggestion: trapping trunc 8 → div/rem 8 → table ops → globals → memory load/store → const → call → local — bottom up by dependency. | |
+| B6x+1 | Inline-switch dispatcher cutover per ADR-0073 — both arches' `emit.zig` giant switch replaced by `inline for (collected_X_ops) |op_mod| { if (op_mod.op_tag == ins.op) return op_mod.emit(ctx, ins); }`. Moment per-op files become load-bearing. | |
 
-## Active state — §9.12-A [x]; §9.12-B autonomous (HUGE row)
+## Active state — §9.12-B mid-flight; ADR-0075 confirmed 2026-05-19
 
-§9.12-B Q3 C adoption completion + build-option DCE extension across
-all 4 layers (IR/CLI/c_api/WASI):
+**B53 is the active task.** ADR-0075 Status: Proposed — user-confirmed
+direction (`1a`: mirror arm64's `(ctx, ins)` shape on x86_64). The
+loop should:
 
-1. Per-op file migration of all 581 ZirOp handlers from monolithic
-   switches in `validator.zig` / `lower.zig` / `arm64/emit.zig` /
-   `x86_64/emit.zig` / `interp/dispatch.zig` into
-   `src/instruction/wasm_X_Y/<op>.zig` per ADR-0023 §4.5 amend +
-   ADR-0073.
-2. `dispatch_collector.zig` (A4 bootstrap; currently `collected_ops =
-   {}`) gains the 581 op imports + the 5 dispatcher rewrites.
-3. **CLI** declarative `args = .{ ... }` form with `wasm_level` /
-   `wasi_level` metadata + comptime filter (per ADR-0073 §Layer 2).
-4. **c_api** `exports = .{ ... }` form with `comptime @export` filter
-   + `include/wasm.h` preprocessor gate (per ADR-0073 §Layer 3).
-5. **WASI** `syscalls = .{ ... }` form with `wasi_level` metadata
-   (per ADR-0073 §Layer 4).
-6. Exit: `zig build -Dwasm={v1_0,v2_0,v3_0} -Dwasi={p1,p2} test-all`
-   green for all 6 combinations; `scripts/check_build_dce.sh --gate`
-   = 0; per-op file completeness comptime check passes.
+1. Flip ADR-0075 Status: Proposed → Accepted in the B53 commit.
+2. Extend `src/engine/codegen/x86_64/ctx.zig::EmitCtx` with the
+   missing fields (see ADR-0075 §Implementation plan B53).
+3. Initialise the new fields at the top of
+   `src/engine/codegen/x86_64/emit.zig::emitFunction`.
+4. Verify 2-host green; commit + push.
+5. Proceed to B54 (PoC migrate `i32.div_s`) per the chunk table above.
 
-This is a multi-week / multi-chunk row. Suggested chunking:
+§9.12-B exit criterion stays as ROADMAP §9.12-B specifies (6 build
+combos green + DCE 0 + completeness comptime check). The per-op file
+substrate becomes load-bearing at B6x+1 (inline-switch cutover).
 
-| Sub-chunk | Description |
-|---|---|
-| B1 | First batch of per-op file migrations (Wasm 1.0 control/numeric/parametric subset; ~50 ops) + dispatch_collector validate-axis wired |
-| B2 | Wasm 1.0 memory/variable/table subset (~80 ops); validator + interp axes wired |
-| B3 | Wasm 1.0 closing batch (control, refs, etc.); arm64-emit + x86_64-emit axes wired; lower.zig axis wired |
-| B4 | Wasm 2.0 (SIMD + bulk-memory + nontrap-conv + sign-ext) per-op file migration |
-| B5 | Wasm 3.0 placeholder stubs (all return `error.NotMigrated`) |
-| B6 | CLI / c_api / WASI declarative form (3 layers) |
-| B7 | check_build_dce all-6 combinations green + comptime check enforcement enabled |
-
-Default chunk size per `LOOP.md` §Chunk granularity = 5-15 ops or
-substrate change.
+Discipline: B53 itself is substrate-only (no per-op file changes), so
+chunk size is "1 op equivalent = ADR-grade substrate change" per
+LOOP.md exception. B54+ resume the 5-15 ops/chunk default.
 
 ## Outstanding upstream / Phase-10 blockers
 
@@ -136,7 +125,9 @@ Substrate audit doc: [`phase9_completion_substrate_audit.md`](phase9_completion_
 Accepted ADRs: [`0070`](decisions/0070_libc_dependency_policy.md) /
 [`0071`](decisions/0071_phase9_substrate_audit_resolution.md) /
 [`0072`](decisions/0072_comment_as_invariant_rule.md) /
-[`0073`](decisions/0073_build_option_dce_substrate.md);
+[`0073`](decisions/0073_build_option_dce_substrate.md) /
+[`0074`](decisions/0074_per_op_file_zone_split.md);
+Proposed (active, B53 will flip): [`0075`](decisions/0075_x86_64_emitctx_ctx_passing_unification.md);
 amends [`0023`](decisions/0023_src_directory_structure_normalization.md) §4.5
 + [`0050`](decisions/0050_adr_lifecycle_and_skip_adr_enforcement.md) D-5/D-6.
 Enforcement: [`scripts/p9_completion_status.sh`](../scripts/p9_completion_status.sh)
