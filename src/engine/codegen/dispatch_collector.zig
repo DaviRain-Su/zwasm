@@ -139,6 +139,15 @@ const arm64_i64_extend8_s = @import("arm64/ops/wasm_2_0/i64_extend8_s.zig");
 const arm64_i64_extend16_s = @import("arm64/ops/wasm_2_0/i64_extend16_s.zig");
 const arm64_i64_extend32_s = @import("arm64/ops/wasm_2_0/i64_extend32_s.zig");
 
+const arm64_i32_div_s = @import("arm64/ops/wasm_1_0/i32_div_s.zig");
+const arm64_i32_div_u = @import("arm64/ops/wasm_1_0/i32_div_u.zig");
+const arm64_i32_rem_s = @import("arm64/ops/wasm_1_0/i32_rem_s.zig");
+const arm64_i32_rem_u = @import("arm64/ops/wasm_1_0/i32_rem_u.zig");
+const arm64_i64_div_s = @import("arm64/ops/wasm_1_0/i64_div_s.zig");
+const arm64_i64_div_u = @import("arm64/ops/wasm_1_0/i64_div_u.zig");
+const arm64_i64_rem_s = @import("arm64/ops/wasm_1_0/i64_rem_s.zig");
+const arm64_i64_rem_u = @import("arm64/ops/wasm_1_0/i64_rem_u.zig");
+
 const x86_64_i32_add = @import("x86_64/ops/wasm_1_0/i32_add.zig");
 const x86_64_i32_sub = @import("x86_64/ops/wasm_1_0/i32_sub.zig");
 const x86_64_i32_mul = @import("x86_64/ops/wasm_1_0/i32_mul.zig");
@@ -252,6 +261,14 @@ pub const collected_arm64_ops = .{
     arm64_i64_extend8_s,
     arm64_i64_extend16_s,
     arm64_i64_extend32_s,
+    arm64_i32_div_s,
+    arm64_i32_div_u,
+    arm64_i32_rem_s,
+    arm64_i32_rem_u,
+    arm64_i64_div_s,
+    arm64_i64_div_u,
+    arm64_i64_rem_s,
+    arm64_i64_rem_u,
 };
 
 /// Tuple of all migrated x86_64 per-op modules.
@@ -369,8 +386,9 @@ test "ArchAxis enum has exactly 2 variants per ADR-0074 (Zone 2 arch-axes)" {
     try std.testing.expectEqual(@as(usize, 2), @typeInfo(ArchAxis).@"enum".fields.len);
 }
 
-test "migratedArchOpCount tracks collected per-arch tuples (B19: arm64=55, x86_64=55)" {
-    try std.testing.expectEqual(@as(usize, 55), migratedArchOpCount(.arm64));
+test "migratedArchOpCount tracks collected per-arch tuples (B20: arm64=63, x86_64=55)" {
+    // arm64 = 55 + div/rem 8; x86_64 div/rem deferred (bounds_fixups arg).
+    try std.testing.expectEqual(@as(usize, 63), migratedArchOpCount(.arm64));
     try std.testing.expectEqual(@as(usize, 55), migratedArchOpCount(.x86_64));
 }
 
