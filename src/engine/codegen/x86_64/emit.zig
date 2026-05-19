@@ -49,6 +49,7 @@ const usage = @import("usage.zig");
 const abi = @import("abi.zig");
 const jit_abi = @import("../shared/jit_abi.zig");
 const types = @import("types.zig");
+const ctx_mod = @import("ctx.zig");
 const label_mod = @import("label.zig");
 const op_alu_int = @import("op_alu_int.zig");
 const op_alu_float = @import("op_alu_float.zig");
@@ -648,6 +649,34 @@ pub fn compile(
     // like memory.grow inside dead code (e.g. unreachable.wast's
     // `as-memory.grow-size`). Mirror of arm64 7.5-emit-deadcode.
     var dead_code: bool = false;
+
+    // §9.12-B / B53 (ADR-0075) — per-function emit context.
+    // Substrate landing: B54+ migrates per-op handlers to `*ctx`.
+    var ctx = ctx_mod.EmitCtx.init(.{
+        .allocator = allocator,
+        .buf = &buf,
+        .func = func,
+        .alloc = alloc,
+        .func_sigs = func_sigs,
+        .module_types = module_types,
+        .pushed_vregs = &pushed_vregs,
+        .next_vreg = &next_vreg,
+        .labels = &labels,
+        .bounds_fixups = &bounds_fixups,
+        .unreach_fixups = &unreach_fixups,
+        .call_fixups = &call_fixups,
+        .simd_const_fixups = &simd_const_fixups,
+        .extra_consts = &extra_consts,
+        .spill_base_off = spill_base_off,
+        .outgoing_max_bytes = outgoing_max_bytes,
+        .return_is_memory_class = return_is_memory_class,
+        .indirect_result_slot_neg_off = indirect_result_slot_neg_off,
+        .num_imports = num_imports,
+        .globals_offsets = globals_offsets,
+        .globals_valtypes = globals_valtypes,
+    });
+    _ = &ctx;
+
     for (func.instrs.items) |ins| {
         // `end` / `else` always exit the dead region — emit's own
         // bookkeeping (label-stack pop / arm switch) must run.

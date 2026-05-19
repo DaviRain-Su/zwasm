@@ -1,6 +1,6 @@
 # 0075 — Mirror arm64's `(*EmitCtx, *const ZirInstr)` shape on x86_64 per-op handlers
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-05-19
 - **Author**: Shota Kudo
 - **Tags**: phase9, substrate, dispatcher, zone2
@@ -97,10 +97,9 @@ See Decision above.
 - `src/engine/codegen/arm64/ctx.zig` — reference shape
 - `src/engine/codegen/x86_64/ctx.zig` — target of extension
 
-<!--
 ## Revision history
 
-| Date       | SHA          | Note                                    |
-|------------|--------------|-----------------------------------------|
-| 2026-05-19 | `<backfill>` | Initial proposed version.               |
--->
+| Date       | SHA          | Note                                                            |
+|------------|--------------|-----------------------------------------------------------------|
+| 2026-05-19 | `4a6303d2`   | Initial proposed version (docs wire-up commit).                 |
+| 2026-05-19 | `<backfill>` | Accepted at §9.12-B / B53 — EmitCtx struct + init landed.       |
