@@ -286,6 +286,19 @@ const i64x2_gt_s = @import("../instruction/wasm_2_0/i64x2_gt_s.zig");
 const i64x2_le_s = @import("../instruction/wasm_2_0/i64x2_le_s.zig");
 const i64x2_ge_s = @import("../instruction/wasm_2_0/i64x2_ge_s.zig");
 
+const f32x4_eq = @import("../instruction/wasm_2_0/f32x4_eq.zig");
+const f32x4_ne = @import("../instruction/wasm_2_0/f32x4_ne.zig");
+const f32x4_lt = @import("../instruction/wasm_2_0/f32x4_lt.zig");
+const f32x4_gt = @import("../instruction/wasm_2_0/f32x4_gt.zig");
+const f32x4_le = @import("../instruction/wasm_2_0/f32x4_le.zig");
+const f32x4_ge = @import("../instruction/wasm_2_0/f32x4_ge.zig");
+const f64x2_eq = @import("../instruction/wasm_2_0/f64x2_eq.zig");
+const f64x2_ne = @import("../instruction/wasm_2_0/f64x2_ne.zig");
+const f64x2_lt = @import("../instruction/wasm_2_0/f64x2_lt.zig");
+const f64x2_gt = @import("../instruction/wasm_2_0/f64x2_gt.zig");
+const f64x2_le = @import("../instruction/wasm_2_0/f64x2_le.zig");
+const f64x2_ge = @import("../instruction/wasm_2_0/f64x2_ge.zig");
+
 const f32x4_abs = @import("../instruction/wasm_2_0/f32x4_abs.zig");
 const f32x4_neg = @import("../instruction/wasm_2_0/f32x4_neg.zig");
 const f32x4_sqrt = @import("../instruction/wasm_2_0/f32x4_sqrt.zig");
@@ -683,6 +696,18 @@ pub const collected_ops = .{
     f64x2_floor,
     f64x2_trunc,
     f64x2_nearest,
+    f32x4_eq,
+    f32x4_ne,
+    f32x4_lt,
+    f32x4_gt,
+    f32x4_le,
+    f32x4_ge,
+    f64x2_eq,
+    f64x2_ne,
+    f64x2_lt,
+    f64x2_gt,
+    f64x2_le,
+    f64x2_ge,
 };
 
 comptime {
@@ -836,9 +861,9 @@ test "zirOpTagCount matches the ZirOp enum field count" {
     try std.testing.expect(n >= 200);
 }
 
-test "migratedOpCount tracks collected_ops length (252 after §9.12-B / B40 SIMD float unary)" {
+test "migratedOpCount tracks collected_ops length (264 after §9.12-B / B41 SIMD float cmp)" {
     // Running tally: 162 + i16x8 cmp 10 = 172.
-    try std.testing.expectEqual(@as(usize, 252), migratedOpCount());
+    try std.testing.expectEqual(@as(usize, 264), migratedOpCount());
 }
 
 test "migrationComplete is false until §9.12-B migrates all 581 ops" {
