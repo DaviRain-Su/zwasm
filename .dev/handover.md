@@ -6,42 +6,52 @@
 ## Cold-start procedure
 
 1. **READ FIRST** [`.dev/phase9_completion_master_plan.md`](phase9_completion_master_plan.md)
-   (master plan v2; finalized). §9.12 = hard gate (next row).
-2. **READ NEXT** [`.dev/phase9_completion_substrate_audit.md`](phase9_completion_substrate_audit.md)
-   — Q1-Q6 with tentative answers ([T] marks). §9.12 collab review confirms
-   each answer + flips the cited ADRs to `Accepted`.
-3. ADRs ready for collab review (`Status: Proposed`):
-   - [`0070`](decisions/0070_libc_dependency_policy.md) — Q6 libc policy + 16-site inventory.
-   - [`0071`](decisions/0071_phase9_substrate_audit_resolution.md) — keystone (Q2/Q3/Q4 + ROADMAP §9.12 scope amend).
-   - [`0072`](decisions/0072_comment_as_invariant_rule.md) — Q5 comment rule + violation catalog.
-   - [`0073`](decisions/0073_build_option_dce_substrate.md) — all-layer build-option DCE substrate + 3 spike summaries.
-   - [`0023`](decisions/0023_src_directory_structure_normalization.md) §4.5 amend — per-op file pattern (2026-05-19 Revision history row + dedicated subsection).
-   - [`0050`](decisions/0050_adr_lifecycle_and_skip_adr_enforcement.md) amend — D-5 + D-6 (skip-impl ratchet substrate + pre-push gate).
-4. Spike reports (gitignored; load-bearing conclusions absorbed into ADR-0073):
-   - `private/spikes/q3-zig-inline-switch/` — 581-tag `inline switch` compile-time wall measurement (no wall hit).
-   - `private/spikes/q3-build-option-dce-poc/` — DCE substrate end-to-end PoC (literal absence confirmed).
-   - `private/spikes/q3-interp-dispatch-bench/` — dispatch shape cycle bench.
+   (master plan v2; finalized). §9.12 hard gate CLEARED 2026-05-19.
+2. **NEXT TASK = §9.12-A** (autonomous): scaffolding compression + 9-item
+   enforcement-layer construction (master plan §5.3 §"§9.12-A" + Chapter 7).
+3. `git log --oneline -10` — 2026-05-19 collab-gate commit group: `bdd433d5`
+   (ADR skeletons) + `31411280` (master plan + ROADMAP §9.12 expansion) +
+   `05377cf6` (enforcement scaffold) + `4259b6b6` (JA→EN) + `072d39cd`
+   (consistency cleanup) + `f7b43d2b` (ADR drafts populate) + `dc6986df`
+   (§9.12-pre [x]) + **this commit** (§9.12 collab gate cleared).
+4. `bash scripts/p9_simd_status.sh` — live SIMD status (13301/0/440 Mac+ubuntu
+   bit-identical). non-simd live: 25325/0/688.
+5. `.dev/debt.md` `now` rows: (none — all 6 prior `now` debts re-classified to
+   `blocked-by: §9.12-X` since their discharge is embedded in §9.12-C / §9.12-E
+   / §9.12-I work).
 
-## Active state — §9.12-pre [x]; §9.12 HARD GATE active
+## Active state — §9.12 [x]; §9.12-A autonomous
 
-- §9.12-pre `[x]` (this commit) — 4 new ADRs (0070/0071/0072/0073) + 2 amends
-  (0023 §4.5 + 0050 D-5/D-6) populated; 3 spikes ran with measurement reports.
-- §9.12 (🔒) — Phase 9 completion substrate re-examination = HARD GATE.
-  Autonomous /continue loop must suspend; user-collaborative review session
-  is required to flip the cited ADRs from `Proposed` → `Accepted` and to fill
-  the `[T]` marks in `phase9_completion_substrate_audit.md` §Decisions.
-- Phase Status widget: Phase 9 IN-PROGRESS (becomes DONE when §9.13 [x]).
-  Widget wording update is deferred until §9.12 Accepts ADR-0071 (per master
-  plan Chapter 6.2).
+- §9.9 / §9.12-pre / §9.12 all `[x]`. ADRs 0070 / 0071 / 0072 / 0073 are
+  Accepted (collab gate cleared); ADR-0023 §4.5 amend + ADR-0050 D-5/D-6
+  amend confirmed.
+- ROADMAP §14 amended: "Unconscious libc fanout" + "Skip-impl regression
+  without exempt ADR" added; the old "Pervasive `if (build_options.X)`"
+  line reworded to match Q2 P14 sharpening.
+- Phase Status widget §9 wording updated to "literal 100% + Phase 10
+  substrate readiness".
+- `phase9_completion_substrate_audit.md` §Decisions filled; §Outcome
+  abstract written.
 
-## Next session — depends on user direction at §9.12 collab gate
+## Next-session active task = §9.12-A (autonomous, no hard gate)
 
-After §9.12 [x] flips, the autonomous loop resumes at §9.12-A (Scaffolding
-compression + enforcement-layer construction; master plan Chapter 5.3 +
-Chapter 7). The hard-gate detector in `.claude/skills/continue/SKILL.md`
-§"Exception — hard human-in-loop transition gates" fires on the 🔒 marker
-in §9.12; on next `/continue` invocation the loop will detect the gate and
-re-surface unless §9.12 is already `[x]`.
+Master plan §5.3 §"§9.12-A":
+
+- ROADMAP Phase 0-8 narrative → `.dev/archive/roadmap_phase0_8.md` (-800-1000 LOC)
+- `.claude/skills/continue/SKILL.md` compression via `LOOP.md` (-300 LOC)
+- Closed `.dev/phase8_transition_gate.md` → `.dev/archive/phase_gates/`
+- Inventory `.dev/next-session-agenda.md`; archive 5 old `private/audit-*.md`
+- Measure 8 existing gates' wall time; study consolidation
+- Implement all 9 enforcement-layer items (master plan Chapter 7): build-DCE
+  gate / per-op completeness comptime / skip-impl ratchet / give-up detector
+  / spike lifecycle / chunk-close exit gate / Q3 C consistency audit /
+  progress tracker / feature-level metadata comptime check
+- Seed `bench/results/skip_impl_history.yaml` baseline = 243; seed
+  `.dev/p9_completion_progress.yaml` initial state
+
+Exit: cold-start read guide -40%; gate_commit time -20%; all 9 enforcement
+items hooked into pre-commit / pre-push; ratchet history + progress tracker
+yaml seeded.
 
 ## Outstanding upstream / Phase-10 blockers
 
@@ -55,20 +65,16 @@ re-surface unless §9.12 is already `[x]`.
 
 - No `--no-verify`. 2-host per chunk (Mac + ubuntunote); windowsmini deferred
   to §9.13-0 per ADR-0049.
-- **HARD GATE active at §9.12**: NO ScheduleWakeup re-arm. Resumption is
-  bucket-1 user intervention only.
+- §9.12-A onward: normal autonomous loop with `ScheduleWakeup` re-arm at
+  Step 7. **No more hard gates until §9.13** (Phase 10 entry).
 
-## Sandbox + References
+## References
 
-PRIMARY: [`phase9_completion_master_plan.md`](phase9_completion_master_plan.md)
-(master plan v2).
-Gate doc: [`phase9_completion_substrate_audit.md`](phase9_completion_substrate_audit.md)
-(Q1-Q6 + tentative answers).
-ADRs (Proposed, awaiting §9.12 Accept):
-[`0071`](decisions/0071_phase9_substrate_audit_resolution.md) (keystone),
-[`0070`](decisions/0070_libc_dependency_policy.md),
-[`0072`](decisions/0072_comment_as_invariant_rule.md),
-[`0073`](decisions/0073_build_option_dce_substrate.md).
-Amends: [`0023`](decisions/0023_src_directory_structure_normalization.md) §4.5
+PRIMARY: [`phase9_completion_master_plan.md`](phase9_completion_master_plan.md).
+Gate-closed doc: [`phase9_completion_substrate_audit.md`](phase9_completion_substrate_audit.md).
+Accepted ADRs (this collab gate): [`0070`](decisions/0070_libc_dependency_policy.md)
+/ [`0071`](decisions/0071_phase9_substrate_audit_resolution.md)
+/ [`0072`](decisions/0072_comment_as_invariant_rule.md)
+/ [`0073`](decisions/0073_build_option_dce_substrate.md);
+amends [`0023`](decisions/0023_src_directory_structure_normalization.md) §4.5
 + [`0050`](decisions/0050_adr_lifecycle_and_skip_adr_enforcement.md) D-5/D-6.
-Spike scratch (gitignored): `private/spikes/q3-{zig-inline-switch,build-option-dce-poc,interp-dispatch-bench}/`.

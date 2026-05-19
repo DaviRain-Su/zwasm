@@ -372,84 +372,114 @@ Items can be batched into one PR if scope allows.
    mechanical-replacement chunk landing in Phase 10 prep.
    Q6 MUST NOT close with "deferred".
 
-## Decisions (fill at gate close)
+## Decisions (gate closed 2026-05-19)
 
-> Filled by the user-led review session. Each Q gets an
-> explicit answer + cross-reference to the relevant ADR.
->
-> **Tentative answers landed 2026-05-19** per
-> [`phase9_completion_master_plan.md`](phase9_completion_master_plan.md)
-> master plan + ADR-0071 (Proposed) + ADR-0070 / 0072 / 0073 (Proposed).
-> Marked `tentative` (T) until §9.12 collab gate Accepts these ADRs.
+> Filled by user-led collab review session 2026-05-19. ADRs 0070 / 0071 /
+> 0072 / 0073 flipped to `Status: Accepted`; ADR-0023 §4.5 amend +
+> ADR-0050 D-5/D-6 amend confirmed. ROADMAP §9.12 = `[x]`.
 
 ### Q2 — Scope decisions
 
 - **P13** (ZirOp enum sized for full target):
-  - [T] **Accept as-is** — Day-1 ZIR has 581 tags declared, Wasm 3.0 slots in place
-  - ADR ref: ADR-0071 §Q2 (Proposed)
+  - **Accept as-is** — Day-1 ZIR has 581 tags declared, Wasm 3.0 slots in place.
+    Re-evaluate at §9.12-B implementation if op-surface gaps emerge (user note:
+    "実装段階で不足判明したら amend").
+  - ADR ref: ADR-0071 §Q2 (Accepted).
 - **P14** (no pervasive build-time if-branching):
-  - [T] **Amend (sharpen)** — "only runtime if-branching on feature flags is forbidden;
-    `if (comptime build_options.X)` in `comptime` contexts and build-option DCE
-    use cases are permitted"
-  - ADR ref: ADR-0071 §Q2 (Proposed) + ADR-0073 (Proposed)
+  - **Amend (sharpen)** — "only runtime if-branching on feature flags is
+    forbidden; `if (comptime build_options.X)` in `comptime` contexts and
+    build-option DCE use cases are permitted". Plus **Structural cohesion
+    caveat** (per ADR-0071 §"Structural cohesion caveat"): prefer block /
+    module-level cohesion over inline scatter; inline `if (comptime ...)` is
+    the fallback. User note: "コードが読みにくくなる懸念。責務分解を最善で。"
+  - ADR ref: ADR-0071 §Q2 + ADR-0073 (Accepted).
 - **§4.5** (dispatch-table feature modules):
-  - [T] **Amend** — DispatchTable interp axis = required (mvp complete; other features
+  - **Amend** — DispatchTable interp axis = required (mvp complete; other features
     in §9.12-B); validator/lower/emit/jit axes = per-op file pattern
-    (`src/instruction/wasm_X_Y/<op>.zig` + `dispatch_collector.zig`)
-  - ADR ref: ADR-0071 §Q2 + ADR-0023 §4.5 amend (2026-05-19 Revision history)
+    (`src/instruction/wasm_X_Y/<op>.zig` + `dispatch_collector.zig`).
+  - ADR ref: ADR-0071 §Q2 + ADR-0023 §4.5 amend (2026-05-19 Revision history).
 - **§4.6** (build flags `-Dwasm=` / `-Denable=`):
-  - [T] **Accept (consistent with Q3; leverage build-option DCE uniformly across all layers)**
-  - ADR ref: ADR-0071 §Q2 + ADR-0073 (Proposed)
+  - **Accept** — leverage build-option DCE uniformly across all 4 layers
+    (IR / CLI / c_api / WASI). User note: "妥協なしで取り組みたい".
+  - ADR ref: ADR-0071 §Q2 + ADR-0073 (Accepted).
 
 ### Q3 — Architecture decision
 
-- [T] **Hypothesis C — per-op file + comptime collector + build-option DCE**
-  - Reason for adoption: design quality (1 op = 1 file; 5-axis aggregation; consistent across all layers); true DCE
-    via build-option; bug root-cause is immediately localized
-- ADR ref: ADR-0071 §Q3 + ADR-0073 (Proposed; all-layer DCE implementation detail)
-- Spike evidence path(s) (create + measure in §9.12-pre):
-  - `private/spikes/q3-zig-inline-switch/` (581-tag `inline switch` Zig 0.16 compile-time wall measurement)
-  - `private/spikes/q3-interp-dispatch-bench/` (DispatchTable interp vs `.always_tail` cycle difference)
-  - `private/spikes/q3-build-option-dce-poc/` (representative op `i32.add` in C pattern verified for symbol/size/test across 6 build option combinations)
+- **Hypothesis C** — per-op file + comptime collector + build-option DCE.
+  - Adoption rationale: design quality (1 op = 1 file; 5-axis aggregation;
+    consistent across all layers); true DCE via build-option (verified by
+    spike); bug root-cause localised. **Perf is null at production N=581**
+    (spike `q3-interp-dispatch-bench`), so adoption is on design-quality axes
+    only — confirmed acceptable.
+  - ADR ref: ADR-0071 §Q3 + ADR-0073 (Accepted; all-layer DCE implementation detail).
+  - Spike evidence (measured 2026-05-19; reports under `private/spikes/q3-*/`,
+    gitignored scratch with load-bearing conclusions absorbed into ADR-0073):
+    - `q3-zig-inline-switch/` — no compile-time wall at 581 tags
+      (9.4 s wall, +1.9% `.text` vs plain switch).
+    - `q3-interp-dispatch-bench/` — 3 dispatch shapes tie within ±1.5 %
+      at N=581.
+    - `q3-build-option-dce-poc/` — DCE substrate works literally per
+      `nm` + `xxd` evidence on 6-build matrix.
 
 ### Q4 — Audit boundary
 
-- [T] **Decision + minimal POC (one op)** — representative op `i32.add` implemented in C pattern,
-  passes tests across the 6 builds of `-Dwasm=v1_0/v2_0/v3_0` × `-Dwasi=p1/p2`. Full migration of
-  the remaining ops happens in §9.12-B (no carryover to Phase 10).
-- ADR ref: ADR-0071 §Q4 (Proposed)
+- **Decision + minimal PoC (representative op)** — `i32.add` implemented in
+  C pattern, passes across 6 builds (`-Dwasm=v1_0/v2_0/v3_0` × `-Dwasi=p1/p2`).
+  Full migration of remaining 580 ops + 4-layer DCE roll-out happens in
+  §9.12-B (no carryover to Phase 10).
+- ADR ref: ADR-0071 §Q4 (Accepted).
 
-### Q5 — Substrate hygiene triggers (one row per accumulated trigger)
-
-> Each Q5 trigger entry above (under "Open questions") gets a
-> resolution row here at audit close. Add rows as triggers
-> accrue during the rest of Phase 9.
+### Q5 — Substrate hygiene triggers + existing-artifact dedup sweep
 
 - **D-132 / regalloc-pool-scratch-overlap**
-  - [T] Comptime disjointness extended to op-internal scratch (§9.12-C: convert `abi.zig` to named-constant arrays)
-  - [T] `audit_scaffolding` §G magic-numeral lint added (§9.12-C; D-133 sweep)
-  - [T] `bug_fix_survey.md` enforcement in `/continue` Step 4 (§9.12-C)
-  - [T] **"Comment-as-invariant" rule filed** — `.claude/rules/comment_as_invariant.md` (lands in ADR-0072 §9.12-C)
-  - [T] Test-design stress-axis requirement codified (add "stress axes" section to `.claude/rules/edge_case_testing.md`; §9.12-C)
-  - ADR / rule / debt refs: ADR-0071 §Q5 + ADR-0072 (Proposed) + D-133 (discharge at §9.12-C)
-
+  - Comptime disjointness extended to op-internal scratch (§9.12-C: convert
+    `abi.zig` to named-constant arrays).
+  - `audit_scaffolding §G` magic-numeral lint added (§9.12-C; D-133 sweep).
+  - `bug_fix_survey.md` enforcement in `/continue` Step 4 (§9.12-C).
+  - **"Comment-as-invariant" rule** — `.claude/rules/comment_as_invariant.md`
+    (= ADR-0072) lands in §9.12-C.
+  - Test-design stress-axis requirement codified (add "stress axes" section
+    to `.claude/rules/edge_case_testing.md`; §9.12-C).
 - **Cat III runtime/instance/store/linker hygiene anchor**
-  - [T] New `.claude/rules/runtime_instance_layer.md` created (§9.12-C)
-  - ADR / rule / debt refs: ADR-0071 §Q5
+  - New `.claude/rules/runtime_instance_layer.md` (§9.12-C).
+- **Dedup sweep** (user-added at collab gate)
+  - When §9.12-C lands the new rules / lints, **also** sweep existing
+    `no_workaround.md` / `bug_fix_survey.md` / `audit_scaffolding §G` greps
+    for overlap / staleness — coherent post-sweep set, no new-plus-old hybrid.
+  - Recorded in ROADMAP §9.12-C exit criterion + ADR-0071 §Q5 note.
+- ADR / rule / debt refs: ADR-0071 §Q5 + ADR-0072 (Accepted) + D-133
+  (discharge at §9.12-C).
 
-### Q6 — libc dependency boundary decisions
+### Q6 — libc dependency boundary
 
-- [T] **ADR-0070** `libc_dependency_policy.md` authored
-      (necessary / replaceable / convenience classification — Proposed)
-- [T] `.claude/rules/libc_boundary.md` (lands in §9.12-D)
-- [T] ROADMAP §14 amendment line added (§9.12-D; "Unconscious libc fanout" with cite to ADR-0070)
-- [T] `audit_scaffolding §G.5` extension (§9.12-D)
-- [T] Mechanical-replacement chunk scheduled (§9.12-D Sample migration: std.c.{write,_exit,getenv,munmap} → std.posix.*)
-- ADR / rule / debt refs: ADR-0071 §Q6 + ADR-0070 (Proposed)
+- **ADR-0070** `libc_dependency_policy.md` Accepted — 3-category classification
+  + 16-site inventory (necessary 6 / replaceable 10 / convenience 0).
+- `.claude/rules/libc_boundary.md` lands in §9.12-D.
+- ROADMAP §14 amendment **landed in this commit**: "Unconscious libc fanout"
+  forbidden with ADR-0070 cite.
+- `audit_scaffolding §G.5` extension (§9.12-D).
+- Mechanical-replacement chunk scheduled (§9.12-D sample migration:
+  `std.c.{munmap,_exit,getenv,kill,fork,alarm,waitpid,pid_t}` → `std.posix.*`).
+- User intent: 管理下に置く・見据える (forward-looking management toward Phase 10+
+  AOT / 組込 / Windows native), not immediate libc-elimination.
+- ADR / rule / debt refs: ADR-0071 §Q6 + ADR-0070 (Accepted).
 
-## Outcome (audit summary — fill at close)
+## Outcome (audit summary)
 
-> 5-10 line abstract for future readers.
+Phase 9 完備 substrate audit closed 2026-05-19. Q3 architecture adopted as
+**Hypothesis C** (per-op file + comptime `dispatch_collector` + `inline switch`
++ 4-layer build-option DCE), backed by 3 spike measurements showing (a) no
+compile-time wall at 581 tags, (b) per-axis literal absence under
+`-Dwasm=v1_0` / `-Dwasi=p1` builds, (c) perf-null at production N=581 — so the
+substrate decision rests on design-quality axes only. Q2 P14 sharpened to permit
+comptime DCE idioms with a structural-cohesion caveat (block / module-level
+preferred over inline scatter). Q5 lands new comment-as-invariant rule
+(ADR-0072) + 4 other Q5 deliverables + a **dedup sweep** of existing rules in
+§9.12-C. Q6 introduces a 3-category libc policy (ADR-0070) under-management for
+Phase 10+ visibility, with a 10-site sweep in §9.12-D. ROADMAP §14 gains two
+forbidden-list entries (unconscious libc fanout / skip-impl regression without
+ADR exempt). Phase Status widget wording updated. The 11 implementation sub-rows
+(§9.12-A..I + §9.13-0 + §9.13) proceed autonomously from §9.12-A.
 
 ## Reference
 

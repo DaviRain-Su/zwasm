@@ -1,6 +1,6 @@
 # 0070 — libc dependency policy
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-05-19
 - **Author**: continue loop §9.12 substrate audit cycle
 - **Tags**: phase-9, libc, dependency-boundary, posix, hygiene
@@ -189,3 +189,4 @@ later selected on Linux Debug builds for leak detection).
 | Date       | SHA          | Note                                                          |
 |------------|--------------|---------------------------------------------------------------|
 | 2026-05-19 | `<backfill>` | Initial draft — Q6 deliverable with full inventory + 3-category policy. |
+| 2026-05-19 | `<backfill>` | **Accepted** at §9.12 collab gate. User intent: libc 依存サーフェスを Phase 10+ (AOT / 組込 / Windows native) 着手前に管理下に置き見据える。3-category 分類 + 5 deliverable 着地は §9.12-D で実施。 |

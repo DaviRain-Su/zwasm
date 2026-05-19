@@ -1,6 +1,6 @@
 # 0071 — Phase 9 substrate audit resolution + §9.12 scope amendment
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-05-19
 - **Author**: continue loop §9.9 close + 2026-05-19 substrate audit design session
 - **Tags**: phase-9, substrate-audit, dispatch-architecture, build-option-dce, scope-amendment
@@ -43,10 +43,29 @@ it into the implementation stage in the sub-rows §9.12-pre / §9.12-A..I.
 
 | Clause | Adoption |
 |---|---|
-| §2 P13 | Accept (maintain) — Day-1 ZIR sized for full target |
-| **§2 P14** | **Amend (sharpen)** — "Only **runtime** if-branching on feature flags is forbidden. `if (comptime build_options.X)` in `comptime` contexts is permitted; recommended for build-option DCE purposes." |
+| §2 P13 | Accept (maintain) — Day-1 ZIR sized for full target. **Re-evaluate at §9.12-B implementation if op-surface gaps emerge** (collab-gate user note: "実装段階で不足判明したら amend"). |
+| **§2 P14** | **Amend (sharpen)** — "Only **runtime** if-branching on feature flags is forbidden. `if (comptime build_options.X)` in `comptime` contexts is permitted; recommended for build-option DCE purposes." See **Structural cohesion caveat** below. |
 | §4.5 | Amend — DispatchTable interp axis = required (mvp complete); validator/lower/emit/jit axes = per-op file pattern (= consistent with ADR-0023 §4.5 amend; per `0023` Revision history) |
 | §4.6 | Accept (consistent with Q3) — Leverage `-Dwasm=` / `-Dwasi=` build flags consistently across all layers for DCE |
+
+#### Structural cohesion caveat (Q2 P14 sharpening)
+
+The sharpening permits `if (comptime build_options.X)` and `inline for + continue`
+DCE idioms; this is NOT a license for ad-hoc inline branching. The original
+intent of P14 was **responsibility decomposition** — runtime feature branching
+was always closer to "experimental escape hatch" than "required capability".
+
+Therefore:
+
+- **Prefer block-level or module-level cohesion** when a comptime branch can be
+  hoisted to a single declaration / collector / dispatcher. The dispatch_collector
+  pattern (per ADR-0073) is the canonical shape.
+- **Inline `if (comptime ...)` is the fallback**, used only when no block/module-
+  level rewrite is cleaner.
+- Code review (and `audit_scaffolding §K.1`) flags scattered comptime branches
+  that could be consolidated.
+- If an inline branch persists, the reviewer must articulate why a block/module-
+  level rewrite would be worse — the burden is on inline, not on consolidation.
 
 ### Q3 — Architecture adoption = **Hypothesis C** (per-op file + comptime collector + build-option DCE)
 
@@ -73,6 +92,28 @@ migration of the remaining ops + DCE extension across all layers is handled in
 §9.12-B. Q5 / Q6 are in §9.12-C / §9.12-D. The Wasm 2.0 100% drainage
 (skip-impl 243 → 0) is in §9.12-E, which is the **main exit criterion for
 Phase 9 completion**.
+
+### Q5 — Substrate hygiene + existing-artifact dedup sweep (note)
+
+The Q5 deliverables (per ADR-0072 + §9.12-C) include the new `comment_as_invariant`
+rule, `audit_scaffolding §G` extensions, D-133 register-numeral sweep, `runtime_
+instance_layer.md` rule, and edge_case_testing "stress axes" section. In
+addition, **§9.12-C MUST conduct a dedup sweep** of existing rules / lints
+whose role becomes redundant or stale upon landing the new ones — concretely
+`no_workaround.md`, `bug_fix_survey.md`, and any `audit_scaffolding §G` grep
+that overlaps with the new comment-as-invariant lint. The goal is that a
+reader hitting `.claude/rules/` after §9.12-C sees a coherent set, not a new-
+plus-old hybrid in which the same advice is restated in two places. This is
+recorded in §9.12-C's ROADMAP exit criterion (added at §9.12 Accept).
+
+### Q6 — libc dependency boundary (note)
+
+Adopt ADR-0070 (3-category policy + 16-site inventory + 5 deliverables) in
+§9.12-D. User intent at §9.12 collab gate: this is **about putting the libc
+surface under management for forward visibility into Phase 10+** (AOT / 組込
+/ Windows native), not about eliminating libc immediately. The `necessary`
+set keeps stable until upstream Zig stdlib closes the gap; the `replaceable`
+set sweeps to `std.posix.*` in §9.12-D as proof the policy has teeth.
 
 ### §9.12 ROADMAP scope amendment
 
@@ -272,3 +313,5 @@ that those axes induce compromise).
 | Date       | SHA          | Note                                                                              |
 |------------|--------------|-----------------------------------------------------------------------------------|
 | 2026-05-19 | `<backfill>` | Initial skeleton — §9.12 scope amendment justification; full draft in §9.12-pre.  |
+| 2026-05-19 | `<backfill>` | Full draft populated in §9.12-pre — Alternatives A/B/D-1/E/F + Consequences + Structural cohesion caveat (Q2 P14). |
+| 2026-05-19 | `<backfill>` | **Accepted** at §9.12 collab gate. Q2 P13 = Accept (re-evaluate at §9.12-B if op gaps) / Q2 P14 = Amend with structural cohesion caveat / Q2 §4.5 = Amend (interp required; 4 axes per-op file) / Q2 §4.6 = Accept (4-layer DCE) / Q3 = Hypothesis C / Q4 = Decision + minimal PoC / Q5 = 5 deliverables + dedup sweep / Q6 = under-management forward-looking policy. ROADMAP §9.12 → [x]; §14 forbidden list amended; Phase Status widget wording updated. |
