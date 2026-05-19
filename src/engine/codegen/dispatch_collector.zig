@@ -748,6 +748,14 @@ const x86_64_i64_div_s = @import("x86_64/ops/wasm_1_0/i64_div_s.zig");
 const x86_64_i64_div_u = @import("x86_64/ops/wasm_1_0/i64_div_u.zig");
 const x86_64_i64_rem_s = @import("x86_64/ops/wasm_1_0/i64_rem_s.zig");
 const x86_64_i64_rem_u = @import("x86_64/ops/wasm_1_0/i64_rem_u.zig");
+const x86_64_i32_trunc_f32_s = @import("x86_64/ops/wasm_1_0/i32_trunc_f32_s.zig");
+const x86_64_i32_trunc_f64_s = @import("x86_64/ops/wasm_1_0/i32_trunc_f64_s.zig");
+const x86_64_i64_trunc_f32_s = @import("x86_64/ops/wasm_1_0/i64_trunc_f32_s.zig");
+const x86_64_i64_trunc_f64_s = @import("x86_64/ops/wasm_1_0/i64_trunc_f64_s.zig");
+const x86_64_i32_trunc_f32_u = @import("x86_64/ops/wasm_1_0/i32_trunc_f32_u.zig");
+const x86_64_i32_trunc_f64_u = @import("x86_64/ops/wasm_1_0/i32_trunc_f64_u.zig");
+const x86_64_i64_trunc_f32_u = @import("x86_64/ops/wasm_1_0/i64_trunc_f32_u.zig");
+const x86_64_i64_trunc_f64_u = @import("x86_64/ops/wasm_1_0/i64_trunc_f64_u.zig");
 
 const x86_64_i32_add = @import("x86_64/ops/wasm_1_0/i32_add.zig");
 const x86_64_i32_sub = @import("x86_64/ops/wasm_1_0/i32_sub.zig");
@@ -1491,6 +1499,14 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_i64_div_u,
     x86_64_i64_rem_s,
     x86_64_i64_rem_u,
+    x86_64_i32_trunc_f32_s,
+    x86_64_i32_trunc_f64_s,
+    x86_64_i64_trunc_f32_s,
+    x86_64_i64_trunc_f64_s,
+    x86_64_i32_trunc_f32_u,
+    x86_64_i32_trunc_f64_u,
+    x86_64_i64_trunc_f32_u,
+    x86_64_i64_trunc_f64_u,
 };
 
 comptime {
@@ -1562,9 +1578,10 @@ test "migratedArchOpCount tracks collected per-arch tuples (B52: arm64=348, x86_
 
 test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // B54: i32.div_s PoC (1). B55: full i32+i64 div/rem cohort (+7 = 8).
-    // Increments per cohort in B56+. The B6x+1 cutover folds this
-    // tuple back into `collected_x86_64_ops`.
-    try std.testing.expectEqual(@as(usize, 8), collected_x86_64_ctx_ops.len);
+    // B56: Wasm 1.0 trapping trunc cohort (+8 = 16). Increments per
+    // cohort in B57+. The B6x+1 cutover folds this tuple back into
+    // `collected_x86_64_ops`.
+    try std.testing.expectEqual(@as(usize, 16), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would

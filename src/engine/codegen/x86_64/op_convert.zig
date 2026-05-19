@@ -33,6 +33,7 @@ const std = @import("std");
 
 const zir = @import("../../../ir/zir.zig");
 const regalloc = @import("../shared/regalloc.zig");
+const ctx_mod = @import("ctx.zig");
 const inst = @import("inst.zig");
 const gpr = @import("gpr.zig");
 const types = @import("types.zig");
@@ -841,6 +842,46 @@ pub fn emitFpTruncTrapUnsigned(
     try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
+
+/// §9.12-B / B56 (ADR-0075) — `(ctx, ins)` adapters for the Wasm
+/// 1.0 trapping trunc cohort. Unpack `ctx.*` fields into the
+/// existing 8-arg `emitFpTruncTrapSigned` / `emitFpTruncTrapUnsigned`
+/// positional impls, which dispatch on `ins.op` internally. All
+/// four variants per family share the same body — per-op aliases
+/// preserve the per-op-file shape required by the dispatch-collector
+/// contract (each per-op file's `emit` fn names a distinct symbol).
+/// The legacy positional impls decompose per-op at the B6x+1 cutover.
+pub fn emitI32TruncF32S(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitFpTruncTrapSigned(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.bounds_fixups,
+        ctx.spill_base_off,
+        ins.op,
+    );
+}
+pub const emitI32TruncF64S = emitI32TruncF32S;
+pub const emitI64TruncF32S = emitI32TruncF32S;
+pub const emitI64TruncF64S = emitI32TruncF32S;
+
+pub fn emitI32TruncF32U(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitFpTruncTrapUnsigned(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.bounds_fixups,
+        ctx.spill_base_off,
+        ins.op,
+    );
+}
+pub const emitI32TruncF64U = emitI32TruncF32U;
+pub const emitI64TruncF32U = emitI32TruncF32U;
+pub const emitI64TruncF64U = emitI32TruncF32U;
 
 /// Materialise an FP bit pattern into XMM7 via RAX scratch.
 /// Used by the FP trunc-trap helpers above. Module-private —
