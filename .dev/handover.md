@@ -51,9 +51,10 @@
 | B27 | Wasm 2.0 trunc_sat cohort: 8 ops × 2 arches. 24 new files | `caefc955` |
 | B28 | reinterpret + demote/promote cohort: 6 ops × 2 arches. 18 new files | `208f62b1` |
 | B29 | SIMD v128 logical cohort: 6 ops × 2 arches. 18 new files | `97880b4e` |
-| B30 | SIMD int binary arith cohort (8 add/sub + 2 mul) = 10 ops × 2 arches. 30 new files. i64x2.mul deferred (x86_64 5-arg sig mismatch) | `<backfill>` |
-| B31 | SIMD int neg/abs cohort: i8x16/i16x8/i32x4/i64x2.{neg,abs} = 8 ops × 2 arches (per-op fns) | **NEXT** |
-| B32..Bn | SIMD cmp (eq/ne/lt/gt/le/ge × widths); SIMD shifts (shl/shr_s/shr_u × widths); SIMD splat/extract_lane/replace_lane (immediates needed → defer or extend); SIMD min/max/avgr; SIMD float arith; SIMD bool reductions; i64x2.mul (5-arg x86_64 sig); SIMD swizzle/shuffle; SIMD load/store; x86_64 EmitCtx consolidation for trapping-trunc + const/load/store/call/local/global + div/rem; IR-axis migration | |
+| B30 | SIMD int binary arith cohort: 10 ops × 2 arches | `8277c1e1` |
+| B31 | SIMD int neg/abs cohort: 8 ops × 2 arches; 5-arg x86_64 sig (discard spill_base_off+op) | `<backfill>` |
+| B32 | SIMD int cmp cohort: i8x16/i16x8/i32x4.{eq,ne,lt_s,lt_u,gt_s,gt_u,le_s,le_u,ge_s,ge_u} (30 ops) + i64x2.{eq,ne,lt_s,gt_s,le_s,ge_s} (6 ops) = 36 ops. May split if too large | **NEXT** |
+| B33..Bn | SIMD shifts; SIMD splat/extract_lane/replace_lane (immediates needed → defer or extend); SIMD min/max/avgr; SIMD float arith; SIMD bool reductions; i64x2.mul; SIMD swizzle/shuffle; SIMD load/store; x86_64 EmitCtx consolidation; IR-axis migration | |
 
 ## Active state — §9.12-A [x]; §9.12-B autonomous (HUGE row)
 
