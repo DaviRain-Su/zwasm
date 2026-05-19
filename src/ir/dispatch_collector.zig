@@ -427,6 +427,15 @@ const i64x2_shr_u = @import("../instruction/wasm_2_0/i64x2_shr_u.zig");
 const call = @import("../instruction/wasm_1_0/call.zig");
 const call_indirect = @import("../instruction/wasm_1_0/call_indirect.zig");
 
+const i32_trunc_f32_s = @import("../instruction/wasm_1_0/i32_trunc_f32_s.zig");
+const i32_trunc_f32_u = @import("../instruction/wasm_1_0/i32_trunc_f32_u.zig");
+const i64_trunc_f32_s = @import("../instruction/wasm_1_0/i64_trunc_f32_s.zig");
+const i64_trunc_f32_u = @import("../instruction/wasm_1_0/i64_trunc_f32_u.zig");
+const i32_trunc_f64_s = @import("../instruction/wasm_1_0/i32_trunc_f64_s.zig");
+const i32_trunc_f64_u = @import("../instruction/wasm_1_0/i32_trunc_f64_u.zig");
+const i64_trunc_f64_s = @import("../instruction/wasm_1_0/i64_trunc_f64_s.zig");
+const i64_trunc_f64_u = @import("../instruction/wasm_1_0/i64_trunc_f64_u.zig");
+
 const block = @import("../instruction/wasm_1_0/block.zig");
 const loop = @import("../instruction/wasm_1_0/loop.zig");
 const br_if = @import("../instruction/wasm_1_0/br_if.zig");
@@ -907,6 +916,14 @@ pub const collected_ops = .{
     br_table,
     if_,
     else_,
+    i32_trunc_f32_s,
+    i32_trunc_f32_u,
+    i64_trunc_f32_s,
+    i64_trunc_f32_u,
+    i32_trunc_f64_s,
+    i32_trunc_f64_u,
+    i64_trunc_f64_s,
+    i64_trunc_f64_u,
 };
 
 comptime {
@@ -1060,9 +1077,9 @@ test "zirOpTagCount matches the ZirOp enum field count" {
     try std.testing.expect(n >= 200);
 }
 
-test "migratedOpCount tracks collected_ops length (359 after §9.12-B / B50 arm64 control flow)" {
+test "migratedOpCount tracks collected_ops length (367 after §9.12-B / B51 arm64 trapping trunc)" {
     // Running tally: 162 + i16x8 cmp 10 = 172.
-    try std.testing.expectEqual(@as(usize, 359), migratedOpCount());
+    try std.testing.expectEqual(@as(usize, 367), migratedOpCount());
 }
 
 test "migrationComplete is false until §9.12-B migrates all 581 ops" {
