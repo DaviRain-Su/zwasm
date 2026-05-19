@@ -78,12 +78,12 @@ pub fn validateArchOpModule(comptime mod: type) void {
 // ---------------------------------------------------------------------
 // Per-arch collected op modules.
 //
-// B11: arm64 i32.add has a real body (migrated from `op_alu_int.zig`).
-// x86_64 i32.add stub deferred to B12 (per-arch file absent ⇒
-// dispatch returns false ⇒ legacy switch authoritative).
+// B11: arm64 i32.add real body.
+// B12: x86_64 i32.add real body.
 // ---------------------------------------------------------------------
 
 const arm64_i32_add = @import("arm64/ops/wasm_1_0/i32_add.zig");
+const x86_64_i32_add = @import("x86_64/ops/wasm_1_0/i32_add.zig");
 
 /// Tuple of all migrated arm64 per-op modules.
 pub const collected_arm64_ops = .{
@@ -91,7 +91,9 @@ pub const collected_arm64_ops = .{
 };
 
 /// Tuple of all migrated x86_64 per-op modules.
-pub const collected_x86_64_ops = .{};
+pub const collected_x86_64_ops = .{
+    x86_64_i32_add,
+};
 
 comptime {
     for (collected_arm64_ops) |op_mod| {
@@ -149,9 +151,9 @@ test "ArchAxis enum has exactly 2 variants per ADR-0074 (Zone 2 arch-axes)" {
     try std.testing.expectEqual(@as(usize, 2), @typeInfo(ArchAxis).@"enum".fields.len);
 }
 
-test "migratedArchOpCount tracks collected per-arch tuples (B11: arm64=1, x86_64=0)" {
+test "migratedArchOpCount tracks collected per-arch tuples (B12: arm64=1, x86_64=1)" {
     try std.testing.expectEqual(@as(usize, 1), migratedArchOpCount(.arm64));
-    try std.testing.expectEqual(@as(usize, 0), migratedArchOpCount(.x86_64));
+    try std.testing.expectEqual(@as(usize, 1), migratedArchOpCount(.x86_64));
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would
