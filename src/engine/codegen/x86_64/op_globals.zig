@@ -22,6 +22,7 @@ const std = @import("std");
 
 const zir = @import("../../../ir/zir.zig");
 const regalloc = @import("../shared/regalloc.zig");
+const ctx_mod = @import("ctx.zig");
 const inst = @import("inst.zig");
 const abi = @import("abi.zig");
 const gpr = @import("gpr.zig");
@@ -30,6 +31,37 @@ const types = @import("types.zig");
 
 const Allocator = std.mem.Allocator;
 const Error = types.Error;
+
+/// §9.12-B / B62 (ADR-0075) — `(ctx, ins)` adapters for the
+/// globals cohort (`global.get`, `global.set`). Two distinct
+/// adapters (different legacy signatures — set has no
+/// `next_vreg`). Decomposes per-op at the B6x+1 cutover.
+pub fn emitGlobalGetCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitGlobalGet(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.spill_base_off,
+        ins.payload,
+        ctx.globals_offsets,
+        ctx.globals_valtypes,
+    );
+}
+
+pub fn emitGlobalSetCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitGlobalSet(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.spill_base_off,
+        ins.payload,
+        ctx.globals_offsets,
+        ctx.globals_valtypes,
+    );
+}
 
 fn lookupGlobalShape(
     idx: u32,

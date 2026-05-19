@@ -991,8 +991,8 @@ pub fn compile(
             },
             .@"memory.copy" => try op_memory.emitMemoryCopyCtx(&ctx, &ins),
             .@"memory.init" => try op_memory.emitMemoryInitCtx(&ctx, &ins),
-            .@"global.get" => try op_globals.emitGlobalGet(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload, globals_offsets, globals_valtypes),
-            .@"global.set" => try op_globals.emitGlobalSet(allocator, &buf, alloc, &pushed_vregs, spill_base_off, ins.payload, globals_offsets, globals_valtypes),
+            .@"global.get" => try op_globals.emitGlobalGetCtx(&ctx, &ins),
+            .@"global.set" => try op_globals.emitGlobalSetCtx(&ctx, &ins),
             // §9.9 / 9.9-m-2a (per ADR-0058): table.get / table.set
             // / table.size — bounds-checked load/store against the
             // per-table TableSlice descriptor in JitRuntime.
