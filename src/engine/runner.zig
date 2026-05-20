@@ -737,35 +737,17 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         }
     }
 
-    // ADR-0052 §9.9 / 9.9-h-2 — per-defined-global byte offsets.
-    // Scalar globals (i32/i64/f32/f64/ref) occupy 8 bytes; v128
-    // globals occupy 16 bytes with 16-byte alignment padding.
-    // Indexed by defined-global idx (i.e. import-globals are NOT
-    // counted; the JIT emit path keys off this same indexing via
-    // its `payload < imp_globals` branch — out of scope this chunk,
-    // tracked under D-079).
-    const defined_globals_count: u32 = if (globals_buf) |g| @intCast(g.items.len) else 0;
-    const globals_offsets = try allocator.alloc(u32, defined_globals_count);
+    // ADR-0052 §9.9 / 9.9-h-2 — per-global byte offsets via
+    // export_lookup helper (§9.12-E / B154; mirrors the empty-fn
+    // path). Result indexed by FULL wasm global index space:
+    // imports prefix at [0..nm_global_imports), defined at
+    // [nm_global_imports..total).
+    const elay = try @import("export_lookup.zig").computeGlobalsLayout(allocator, wasm_bytes);
+    const globals_offsets = elay.offsets;
     errdefer allocator.free(globals_offsets);
-    const globals_valtypes = try allocator.alloc(zir.ValType, defined_globals_count);
+    const globals_valtypes = elay.valtypes;
     errdefer allocator.free(globals_valtypes);
-    var globals_byte_size: u32 = 0;
-    if (globals_buf) |g| {
-        var off: u32 = 0;
-        for (g.items, 0..) |gd, gi| {
-            globals_valtypes[gi] = gd.valtype;
-            const size_align: struct { size: u32, alignv: u32 } = switch (gd.valtype) {
-                .v128 => .{ .size = 16, .alignv = 16 },
-                .i32, .i64, .f32, .f64, .funcref, .externref => .{ .size = 8, .alignv = 8 },
-            };
-            off = std.mem.alignForward(u32, off, size_align.alignv);
-            globals_offsets[gi] = off;
-            off += size_align.size;
-        }
-        // Round total up to 16 bytes so the byte buffer is safe to
-        // address as v128 from any starting position.
-        globals_byte_size = std.mem.alignForward(u32, off, 16);
-    }
+    const globals_byte_size = elay.byte_size;
     const validator_tables: []const zir.TableEntry = if (tables_buf) |t| t.items else &.{};
     const validator_data_count: u32 = if (datas_buf) |d| @intCast(d.items.len) else 0;
     const validator_elem_count: u32 = if (elems_buf) |e| @intCast(e.items.len) else 0;
@@ -800,7 +782,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             };
         }
         const total_tables: u32 = num_table_imports + @as(u32, @intCast(if (tables_buf) |t| t.items.len else 0));
-        const total_globals: u32 = num_global_imports + defined_globals_count;
+        const total_globals: u32 = num_global_imports + @as(u32, @intCast(if (globals_buf) |g| g.items.len else 0));
         // Memory section: at most one memory in Wasm 2.0
         // (multi-memory is a Wasm 3.0 proposal; out of scope).
         const defined_memories: u32 = if (module.find(.memory)) |ms| blk: {
