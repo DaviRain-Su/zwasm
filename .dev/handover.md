@@ -15,9 +15,8 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
    `chore(p9b):` / `feat(p9b):` prefix. Last source commit
-   `03959b75` (B113 — abi.zig named-constant scratch pools
-   `table_emit_scratch_gprs` + `memory_emit_scratch_gprs` + comptime
-   disjointness assert; D-133 sweep substrate prep).
+   `c139c5af` (B114 — added stress axes section to
+   edge_case_testing.md; 8 named axes for boundary-fixture coverage).
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -139,18 +138,22 @@
 | B111 | §9.12-B exit check ran `check_build_dce.sh --gate`. 4/6 combos clean; **2/6 FAIL**: v1_0:p1 and v1_0:p2 contain `_instruction.wasm_2_0.*` symbols. Filed D-150. | (debt-only) |
 | B112 | D-150 closed: `wasm_2_0_enabled` comptime gate in src/api/instance.zig (imports + register calls). All 6 DCE combos now clean. v1_0 binary -7.5KB. §9.12-B flipped to [x]. | `59bde111` |
 | B113 | §9.12-C substrate prep: abi.zig adds `table_emit_scratch_gprs` + `memory_emit_scratch_gprs` named-constant pools + extended comptime disjointness assert. | `03959b75` |
-| **B114** | **D-133 sweep — route hardcoded X10/X11/X12 sites through named constants**: op_table.zig (emitTableFill, emitTableGrow, emitTableCopy, emitTableInit, emitElemDrop) + op_memory.zig (emitMemoryInit, emitDataDrop). Mechanical refactor. Each site needs a regression fixture per dual_view_table_sync.md. | **NEXT** |
+| B114 | §9.12-C docs: added "Stress axes" section to `.claude/rules/edge_case_testing.md` (8 named axes: numeric range / alignment / register pressure / dispatch shape / ABI boundary / control flow / validator strictness / cross-module). | `c139c5af` |
+| **B115** | **D-133 sweep — route hardcoded X10/X11/X12 sites through named constants**: op_table.zig (emitTableFill, emitTableGrow, emitTableCopy, emitTableInit, emitElemDrop) + op_memory.zig (emitMemoryInit, emitDataDrop). NOTE: table_emit_scratch_gprs has only 2 slots (X14/X15) but some sites use 3 simultaneous scratch (e.g., emitTableCopy). Either (a) expand pool size or (b) restructure code to reuse X14 (load-then-overwrite pattern from d-64). Each site needs a regression fixture per dual_view_table_sync.md. | **NEXT** |
 
 ## Active state — §9.12-C mid-flight (B113 substrate prep landed) 2026-05-20
 
-**B114 is the active task** — D-133 sweep: route the hardcoded
-`encLdrImm(10/11/12, ...)` patterns in op_table.zig + op_memory.zig
-through the new `abi.table_emit_scratch_gprs` / `memory_emit_scratch_gprs`
-constants. Sites enumerated in D-133 row + handover chunk table.
+**B115 is the active task** — D-133 sweep. Each site uses 3
+simultaneous scratch registers (X10/X11/X12) but
+`table_emit_scratch_gprs` reserves only 2 ({14, 15}). Choose:
+(a) expand pool to 3 (need to coordinate with regalloc to ensure
+disjointness), or (b) restructure code to load-then-overwrite a
+single scratch (d-64 pattern). Either approach needs a
+register-pressure-class regression fixture per dual_view_table_sync.md.
 
-After B114, the remaining §9.12-C sub-items: stress axes section
-in edge_case_testing.md, audit §G grep strengthening,
-bug_fix_survey.md tightening, dedup sweep. Then §9.12-D/E.
+After B115, remaining §9.12-C sub-items: audit §G grep
+strengthening, bug_fix_survey.md tightening, dedup sweep.
+Then §9.12-D (libc-boundary sample migration) and §9.12-E.
 
 §9.12-B exit criterion stays as ROADMAP §9.12-B specifies (6 build
 combos green + DCE 0 + completeness comptime check). Per-op file
