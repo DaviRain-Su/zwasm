@@ -376,6 +376,24 @@ structural barrier:
 - Workaround whose paired debt row was discharged but the
   workaround code still exists → `soon`.
 
+#### G.1.1 SKIP-* taxonomy currency (added 2026-05-21; ADR-0078 / D-155)
+
+```sh
+bash scripts/check_skip_taxonomy.sh --gate
+```
+
+Validates that every `SKIP-<TOKEN>` emission in `test/spec/`
+source has a row in ADR-0078's canonical token-class table. The
+script exits non-zero (`block` finding) if any emitted token
+lacks a classification entry. Catches the close-plan C3 anti-
+pattern: a new SKIP-* token landing in the runner without a
+paired ADR/debt artifact.
+
+- Script exit 1 (emitted token missing from table) → `block`.
+- Inventory-only tokens (in ADR-0078 but not emitted) → info,
+  no finding (the table is forward-looking; specialisation
+  overrides may emit them).
+
 ### G.2 Anchor-command currency
 
 Re-run the diagnostic anchor commands the loop has been silently
