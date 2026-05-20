@@ -1539,13 +1539,9 @@ pub fn compile(
                 // Wasm spec §4.4.6.2 (nop) — do nothing. No machine
                 // bytes; no stack change. Mirrors arm64/emit.zig.
             },
-            .drop => {
-                // Wasm spec §4.4.4 (drop) — pop top operand without
-                // storage. No machine bytes; only the operand-stack
-                // tracker advances. Mirrors arm64/emit.zig.
-                if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
-                _ = pushed_vregs.pop().?;
-            },
+            // §9.12-B / B69: drop inline body extracted into
+            // `op_control.emitDropCtx` `(ctx, ins)` adapter.
+            .drop => try op_control.emitDropCtx(&ctx, &ins),
             .@"return" => {
                 // Wasm spec §4.4.7 (return) — pop the function's
                 // result(s) and exit. We inline the same marshal +

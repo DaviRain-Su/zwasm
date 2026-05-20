@@ -1167,3 +1167,15 @@ pub fn emitEndIntra(
         try pushed_vregs.append(allocator, 0);
     }
 }
+
+/// §9.12-B / B69 (ADR-0075) — `(ctx, ins)` adapter for `drop`.
+/// Pops the top operand without emitting any machine bytes;
+/// only the operand-stack tracker advances. Extracted from
+/// emit.zig's prior inline body.
+///
+/// Wasm spec §4.4.4 (drop).
+pub fn emitDropCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    if (ctx.pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    _ = ctx.pushed_vregs.pop().?;
+}
