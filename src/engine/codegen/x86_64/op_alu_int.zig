@@ -163,6 +163,20 @@ pub fn emitI32Binary(
 /// Total ~10 bytes per compare (3 instr × 3-4 bytes each with
 /// REX). Signed vs unsigned distinction is the cc code only —
 /// operand encoding is identical.
+/// §9.12-B / B81 (ADR-0075) — `(ctx, ins)` adapter for the i32
+/// compare cohort (eq/ne/lt_s/lt_u/gt_s/gt_u/le_s/le_u/ge_s/ge_u).
+pub fn emitI32CompareCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitI32Compare(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.spill_base_off,
+        ins.op,
+    );
+}
+
 pub fn emitI32Compare(
     allocator: Allocator,
     buf: *std.ArrayList(u8),

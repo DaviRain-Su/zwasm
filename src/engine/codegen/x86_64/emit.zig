@@ -745,6 +745,7 @@ pub fn compile(
             .@"i32.or",
             .@"i32.xor",
             => try op_alu_int.emitI32BinaryCtx(&ctx, &ins),
+            // §9.12-B / B81: i32 compare cohort migrated to ctx tuple.
             .@"i32.eq",
             .@"i32.ne",
             .@"i32.lt_s",
@@ -755,7 +756,7 @@ pub fn compile(
             .@"i32.le_u",
             .@"i32.ge_s",
             .@"i32.ge_u",
-            => try op_alu_int.emitI32Compare(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.op),
+            => try op_alu_int.emitI32CompareCtx(&ctx, &ins),
             .@"i32.eqz" => try op_alu_int.emitI32Eqz(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"i32.shl",
             .@"i32.shr_s",
