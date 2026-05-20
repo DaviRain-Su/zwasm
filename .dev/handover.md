@@ -15,8 +15,9 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
    `chore(p9b):` / `feat(p9b):` prefix. Last source commit
-   `c139c5af` (B114 — added stress axes section to
-   edge_case_testing.md; 8 named axes for boundary-fixture coverage).
+   `c67d3e35` (B115 — extended audit §G.3 grep with forbidden-phrase
+   patterns from single_slot_dual_meaning.md; 0 hits in current
+   corpus).
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -139,7 +140,8 @@
 | B112 | D-150 closed: `wasm_2_0_enabled` comptime gate in src/api/instance.zig (imports + register calls). All 6 DCE combos now clean. v1_0 binary -7.5KB. §9.12-B flipped to [x]. | `59bde111` |
 | B113 | §9.12-C substrate prep: abi.zig adds `table_emit_scratch_gprs` + `memory_emit_scratch_gprs` named-constant pools + extended comptime disjointness assert. | `03959b75` |
 | B114 | §9.12-C docs: added "Stress axes" section to `.claude/rules/edge_case_testing.md` (8 named axes: numeric range / alignment / register pressure / dispatch shape / ABI boundary / control flow / validator strictness / cross-module). | `c139c5af` |
-| **B115** | **D-133 sweep — route hardcoded X10/X11/X12 sites through named constants**: op_table.zig (emitTableFill, emitTableGrow, emitTableCopy, emitTableInit, emitElemDrop) + op_memory.zig (emitMemoryInit, emitDataDrop). NOTE: table_emit_scratch_gprs has only 2 slots (X14/X15) but some sites use 3 simultaneous scratch (e.g., emitTableCopy). Either (a) expand pool size or (b) restructure code to reuse X14 (load-then-overwrite pattern from d-64). Each site needs a regression fixture per dual_view_table_sync.md. | **NEXT** |
+| B115 | §9.12-C audit §G.3 strengthening: `check_invariant_comments.sh` now also greps forbidden-phrase patterns from single_slot_dual_meaning.md. Combined --strict gate. | `c67d3e35` |
+| **B116** | **D-133 sweep — route hardcoded X10/X11/X12 sites through named constants**. NOTE: 3-simultaneous-scratch caveat (table_emit_scratch_gprs has 2 slots; some sites use 3). Either expand pool or restructure code (load-then-overwrite d-64 pattern). Each site needs register-pressure-class fixture per stress axes (B114). | **NEXT** |
 
 ## Active state — §9.12-C mid-flight (B113 substrate prep landed) 2026-05-20
 
