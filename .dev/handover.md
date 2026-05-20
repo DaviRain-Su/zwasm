@@ -144,21 +144,23 @@
 | B116 | §9.12-C bug_fix_survey.md tightening: inlined 4-item Step 4 checklist (same-class-cases grep / multi-tag arm audit / §14 re-read / boundary fixture). B109's select_typed regression now named as case study. | `7d894171` |
 | B117 | Lesson capture: `2026-05-20-inline-switch-cutover-dce-substrate-coupling.md` documents B108-B112 retrospective (use-site DCE gating requirement + B109 select_typed regression). | `c356d5ae` |
 | B118 | abi.zig overlap rationale documented inline (spill_stage/table_emit X14/X15 share is intentional + d-64 pattern keeps simultaneous use ≤ 2). Sets the contract for the D-133 sweep. | `c3652994` |
-| **B119** | **D-133 sweep — actual rename**. Mechanical edit of `op_table.zig` (emitTableFill / emitTableGrow / emitTableCopy / emitTableInit / emitElemDrop) + `op_memory.zig` (emitMemoryInit / emitDataDrop) hardcoded `encLdrImm(10/11/12, ...)` to `abi.table_emit_scratch_gprs[N]` / `abi.memory_emit_scratch_gprs[N]`. Reorder load operations where needed to fit ≤ 2 simultaneous scratch (d-64 pattern). Each site needs a register-pressure-class regression fixture per stress axes. | **NEXT** |
+| B119 | D-133 sweep investigation **BLOCKED**: B118's "≤ 2 simultaneous scratch" claim holds only for trivial single-load ops (already discharged at d-64/d-66). The 5 remaining bulk handlers (`emitTableFill` / `emitTableCopy` / `emitTableInit` / `emitMemoryInit`) hold ≥ 4 simultaneously-live scratches in their loop bodies that cannot map to {X14, X15} or even {X14..X17}. `emitTableGrow` re-classified — not a D-133 site (uses AAPCS64 args). Three resolution paths enumerated in updated D-133 body (per-handler stack save/restore / pool extension / live-vreg fence) — ADR-required. Lesson at `.dev/lessons/2026-05-20-d133-sweep-pool-size-insufficient.md`. Latent count stays at 55 (no corpus trigger; deferral acceptable). | (debt+lesson only) |
 
-## Active state — §9.12-C mid-flight (B113 substrate prep landed) 2026-05-20
+## Active state — §9.12-C mid-flight 2026-05-20
 
-**B115 is the active task** — D-133 sweep. Each site uses 3
-simultaneous scratch registers (X10/X11/X12) but
-`table_emit_scratch_gprs` reserves only 2 ({14, 15}). Choose:
-(a) expand pool to 3 (need to coordinate with regalloc to ensure
-disjointness), or (b) restructure code to load-then-overwrite a
-single scratch (d-64 pattern). Either approach needs a
-register-pressure-class regression fixture per dual_view_table_sync.md.
+**D-133 sweep deferred** pending ADR for resolution-path
+choice. B119 surfaced that the 5 bulk handlers
+(emitTableFill/Copy/Init + emitMemoryInit; emitTableGrow not a
+site) need ≥ 4 simultaneous scratches beyond the operand
+holders, which exceeds the {14, 15} pool size declared by B118.
+Three options live in the updated D-133 body. The latent
+count stays at 55 — no corpus trigger today, so the deferral
+fits the no_workaround.md gate (paired with debt-row + lesson
+naming the structural barrier).
 
-After B115, remaining §9.12-C sub-items: audit §G grep
-strengthening, bug_fix_survey.md tightening, dedup sweep.
-Then §9.12-D (libc-boundary sample migration) and §9.12-E.
+Next §9.12-C sub-items: audit §G grep strengthening (already
+mostly landed via B115), dedup sweep. Then §9.12-D
+(libc-boundary sample migration) and §9.12-E.
 
 §9.12-B exit criterion stays as ROADMAP §9.12-B specifies (6 build
 combos green + DCE 0 + completeness comptime check). Per-op file
