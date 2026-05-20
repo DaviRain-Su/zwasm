@@ -15,8 +15,8 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
    `chore(p9b):` / `feat(p9b):` prefix. Last source commit
-   `2166c0a8` (B74 — return migrated with ctx frame_bytes +
-   uses_runtime_ptr substrate ext; ctx 89 → 90).
+   `a19573c8` (B75 — br/br_if/br_table migrated; ctx 90 → 93;
+   no ctx ext needed).
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -99,39 +99,35 @@
 | B72 | Single-op migration: `nop` (1 op) to `(ctx, ins)` + Zone 1 meta backfill. Zero-bytes adapter at op_control.emitNopCtx. 1 NEW per-op file. `_ctx_ops` 87 → 88. atomic.fence deferred (UnsupportedOp on x86_64); unreachable deferred (ctx ext for `dead_code` local needed). | `095ea19d` |
 | B73 | Single-op migration: `unreachable` to `(ctx, ins)` with ctx extension (added `dead_code: *bool` field to EmitCtx, mirrors existing pointer-to-local pattern). 1 NEW per-op file. `_ctx_ops` 88 → 89. | `608e8f45` |
 | B74 | Single-op migration: `return` to `(ctx, ins)` with ctx extension (added `frame_bytes: u32` + `uses_runtime_ptr: bool` set-once fields). Marshal + epilogue + RET sequence extracted. 1 NEW per-op file. `_ctx_ops` 89 → 90. | `2166c0a8` |
-| **B75** | **Cohort migration: `br` + `br_if` + `br_table` (3 ops)** to `(ctx, ins)`. All three route through `op_control.emitBr* / emitBrIf / emitBrTable` helpers — same signature shape (alloc, pushed_vregs, labels, spill_base_off, func, frame_bytes, uses_runtime_ptr, return_is_memory_class, indirect_result_slot_neg_off, payload). All ctx fields already exist post-B74. 3 NEW per-op files. | **NEXT** |
-| B75..B6x | After B75: if / else / end (need new ctx extension for if_skip_byte? — survey first) → local ops (local.get/set/tee with layout.disps threading — needs emit.zig private helper extraction). Then B6x+1 inline-switch cutover folding ctx tuple into unified `collected_x86_64_ops`. | |
+| B75 | Cohort migration: br family (`br` + `br_if` + `br_table`, 3 ops) to `(ctx, ins)`. All ctx fields already present post-B74 (no extension). emitBrCtx sets dead_code; br_if / br_table fall through. 3 NEW per-op files. `_ctx_ops` 90 → 93. | `a19573c8` |
+| **B76** | **Cohort migration: `if` + `else` + `end` + `end_intra` (4 ops)** to `(ctx, ins)`. All route through op_control helpers. `if` / `else` need labels + dead_code; `end` distinguishes inter/intra and resets dead_code via op_control.emitEndIntra path. Survey emit.zig arms first; may need ctx extension. 4 NEW per-op files. | **NEXT** |
+| B76..B6x | After B76: local ops (local.get/set/tee with layout.disps threading — needs emit.zig private helper extraction + ctx ext for num_params/total_locals/layout). Then B6x+1 inline-switch cutover folding ctx tuple into unified `collected_x86_64_ops`. | |
 | B6x+1 | Inline-switch dispatcher cutover per ADR-0073 — both arches' `emit.zig` giant switch replaced by `inline for (collected_X_ops) |op_mod| { if (op_mod.op_tag == ins.op) return op_mod.emit(ctx, ins); }`. Moment per-op files become load-bearing. | |
 
-## Active state — §9.12-B mid-flight; B74 return landed 2026-05-20
+## Active state — §9.12-B mid-flight; B75 br family landed 2026-05-20
 
-**B75 is the active task** — migrate `br` + `br_if` + `br_table`
-(3 ops) to `(ctx, ins)`. All ctx fields already exist post-B74.
-B74 closed return at `2166c0a8` (`collected_x86_64_ctx_ops`
-89 → 90).
+**B76 is the active task** — migrate `if` + `else` + `end` (3 ops,
+maybe 4 with end_intra) to `(ctx, ins)`. B75 closed br family at
+`a19573c8` (`collected_x86_64_ctx_ops` 90 → 93).
 
-The loop for B75:
+The loop for B76:
 
-1. Survey emit.zig br* arms (~lines 1480-1488). All three route
-   through op_control helpers with identical sigs (alloc,
-   pushed_vregs, labels, spill_base_off, func, frame_bytes,
-   uses_runtime_ptr, return_is_memory_class,
-   indirect_result_slot_neg_off, ins.payload + maybe ins.extra
-   for br_table).
-2. Add 3 `(ctx, ins)` adapters in op_control.zig wrapping the
-   existing emitBr / emitBrIf / emitBrTable. br sets
-   `ctx.dead_code = true` (mirrors emit.zig); br_if/br_table
-   don't (conditional / table jumps may fall through).
-3. Replace 3 emit.zig arms with adapter calls via `&ctx`.
-4. Create 3 NEW per-op files. (br_if + br_table meta already
-   exist; br meta exists at wasm_1_0/br.zig — check.)
-5. Update collector (90 → 93) + assertion.
+1. Survey emit.zig arms ~lines 1472-1477 (.@"if", .@"else",
+   .end). All route through op_control helpers (emitIf / emitElse
+   / emitEnd or emitEndIntra). `end` may need dispatching between
+   inter (function-end with marshal+RET) vs intra (label-end with
+   fixup-patching).
+2. Identify ctx field needs. emitIf likely takes labels +
+   spill_base_off + ins.extra (blocktype/arity).
+3. Add 3-4 `(ctx, ins)` adapters in op_control.zig.
+4. Replace emit.zig arms; create per-op files.
+5. Update collector + assertion.
 6. Verify 2-host green; commit + push.
 
-Note: op_convert.zig 1009 LOC, op_control.zig 1237 LOC (growing
-each ctx-adapter chunk). After B75: if / else / end (may need
-if_skip_byte ctx ext) → local ops (extract emit.zig private
-helpers). Then B6x+1 inline-switch cutover.
+Note: op_convert.zig 1009 LOC, op_control.zig 1295 LOC.
+Remaining after B76: local ops (local.get/set/tee with
+layout.disps — needs ctx ext for num_params/total_locals).
+Then B6x+1 inline-switch cutover.
 
 §9.12-B exit criterion stays as ROADMAP §9.12-B specifies (6 build
 combos green + DCE 0 + completeness comptime check). Per-op file
