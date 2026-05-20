@@ -102,4 +102,4 @@ See Decision above.
 | Date       | SHA          | Note                                                            |
 |------------|--------------|-----------------------------------------------------------------|
 | 2026-05-19 | `4a6303d2`   | Initial proposed version (docs wire-up commit).                 |
-| 2026-05-19 | `<backfill>` | Accepted at §9.12-B / B53 — EmitCtx struct + init landed.       |
+| 2026-05-19 | `952e1a33` | Accepted at §9.12-B / B53 — EmitCtx struct + init landed.       |
