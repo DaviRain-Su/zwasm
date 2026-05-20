@@ -34,10 +34,13 @@ cd "$ROOT"
 
 # --- ADR-0070 classification (keep in sync with the ADR) ----------------
 
-# necessary tokens (any-match on the line). ADR-0070 §B131 (2026-05-20)
-# amendment reclassified `_exit` / `fork` / `waitpid` / `alarm` from
-# replaceable → necessary because Zig 0.16 `std.posix` does not expose
-# them and `std.process.exit` is not async-signal-safe.
+# necessary tokens (any-match on the line). ADR-0070 amendments:
+# - B131 (2026-05-20): reclassified `_exit` / `fork` / `waitpid` /
+#   `alarm` from replaceable → necessary; Zig 0.16 std.posix lacks
+#   all four, and std.process.exit is not async-signal-safe.
+# - B132 (2026-05-20): reclassified `getenv` from replaceable →
+#   necessary; c_api exports (wasm_engine_new) lack std.process.Init,
+#   so std.process.Environ.getPosix is structurally unavailable.
 NECESSARY=(
   "pthread_jit_write_protect_np"
   "sys_icache_invalidate"
@@ -51,26 +54,19 @@ NECESSARY=(
   "std.c.fork"
   "std.c.waitpid"
   "std.c.alarm"
+  "std.c.getenv"
 )
 
-# replaceable: symbol → suggested target (Bash 3 doesn't have assoc on macOS by
-# default, but Bash 4+ from nix-shell does; fall back to parallel arrays).
-# Post-B131 amendment (4 symbols moved to NECESSARY above); post-B130
-# (munmap migrated). Remaining: getenv (needs std.process plumbing
-# through c_api) + pid_t + kill (working std.posix equivalents).
+# replaceable: symbol → suggested target. Post-B132 the working
+# stdlib equivalents are all migrated (`munmap`, `pid_t`, `kill`).
+# Remaining classification entries cover future libc additions that
+# may be flagged; the array is intentionally non-empty so the gate
+# stays informative if new replaceable patterns surface.
 REPLACEABLE_SYMS=(
-  "std.c.munmap"
-  "std.c.getenv"
-  "std.c.pid_t"
-  "std.c.kill"
   "std.c.write"
 )
 REPLACEABLE_HINTS=(
-  "std.posix.munmap"
-  "std.process.Environ / std.process.getEnvVarOwned"
-  "std.posix.pid_t"
-  "std.posix.kill"
-  "std.posix.write"
+  "std.posix.write (or std.Io.Writer when an Init is available)"
 )
 
 # convenience: allowed in Debug build only

@@ -59,17 +59,22 @@ call site in zwasm v2 into one of three categories, and gate new additions to
 | `std.c.MAP_FAILED` | `src/platform/jit_mem.zig` (mmap return-value check) | Mmap sentinel. Tied to `std.c.mmap` use. | Resolved when `std.c.mmap` is replaced. |
 | `std.c._exit` (signal-handler context) | `test/spec/spec_assert_runner_base.zig:2034` (SIGSEGV handler) | Reclassified from Replaceable 2026-05-20 (§9.12-D / B131 amendment). `std.posix.exit` does not exist in Zig 0.16; `std.process.exit` routes through `std.c.exit` which runs atexit handlers and is **not async-signal-safe**. The signal-handler context REQUIRES the raw `_exit` syscall to avoid re-entry into stdio buffers. No working stdlib equivalent. | Zig stdlib: watch for `std.posix.exit` (raw syscall variant). |
 | `std.c.fork` / `waitpid` / `alarm` | `test/realworld/run_runner_jit.zig:137,165,167,168` (4 sites) | Reclassified from Replaceable 2026-05-20 (§9.12-D / B131 amendment). Zig 0.16's `std.posix` does NOT expose `fork`, `waitpid`, or `alarm` — verified by grep of `lib/std/posix.zig`. The runner already documents this inline (`run_runner_jit.zig:134-136`). No working stdlib equivalent in current Zig. | Zig stdlib: watch for posix process-control additions (`std.posix.fork`/`waitpid`/`alarm`). Until then, libc shims are the only path. |
+| `std.c.getenv` (c_api context) | `src/api/instance.zig:212` (`wasm_engine_new` C ABI export) | Reclassified from Replaceable 2026-05-20 (§9.12-D / B132 amendment). `wasm_engine_new` is a C ABI export called from arbitrary C host code; it does NOT receive a `std.process.Init` (the Juicy Main mechanism is for Zig binaries' `main`). `std.process.Environ.getPosix` requires an `Environ` value that can only be constructed from `std.process.Init.io.environ` or by reading `std.c.environ` directly (still libc). On POSIX, `std.c.getenv` is the canonical one-shot env-var read for code that doesn't own `main` — same constraint as `sigsetjmp`/`siglongjmp` for c_api signal handlers. | Zig stdlib: watch for a "Init-free Environ.fromGlobal()" addition. Until then, c_api entry points use `std.c.getenv`. |
 
-#### Replaceable set (3 unique symbols, ~3 sites — post-B131)
+#### Replaceable set (0 unique symbols, 0 sites — post-B132)
 
-| Symbol | Sites | Migrate to | Migration note |
-|---|---|---|---|
-| `std.c.munmap` | ~~`src/platform/jit_mem.zig:122`~~ | `std.posix.munmap` | **DONE B130** — both macOS+Linux branches use `std.posix.munmap` now; the `bytes.len == 0` guard prevents the INVAL→unreachable panic that motivated the original macOS carve-out. |
-| `std.c.getenv` | `src/api/instance.zig:212` (`wasm_engine_new` C ABI export) | `std.process.getEnvVarOwned` / `std.process.Environ` | Zone 3 c_api entry; the env var read is one-shot at engine init. Care: c_api exports cannot easily allocate; provide a small POSIX-only `getenv` shim in `src/platform/env.zig`. |
-| `std.c.pid_t` | `test/realworld/run_runner_jit.zig:91` | `std.posix.pid_t` | Type alias rename — Zig 0.16 std.posix.pid_t is `system.pid_t` re-export. |
-| `std.c.kill` | `test/realworld/run_runner_jit.zig:101` | `std.posix.kill` | Async-signal-safe context preserved. Returns `KillError!void`; the SIGALRM handler can use `catch {}` with `EXEMPT-FALLBACK` marker per `no_fallback_on_failure.md`'s signal-handler exception. |
+§9.12-D close: the 9 symbols originally classified as Replaceable
+have resolved as follows:
 
-Total replaceable sites: **3 remaining** (post-B130: 8 → after B131 reclassify of 4 → 3). The §9.12-D close requires migrating `pid_t` + `kill` + `getenv` (the 3 with working stdlib equivalents).
+- 1 migrated to `std.posix.*` (`munmap` — B130).
+- 2 migrated to `std.posix.*` (`pid_t`, `kill` — B132 with
+  EXEMPT-FALLBACK marker on the signal-handler `kill` site).
+- 6 reclassified to Necessary (4 in B131: `_exit` / `fork` /
+  `waitpid` / `alarm`; 1 in B132: `getenv`; `write` was already
+  unused — no actual site in current code).
+
+`scripts/check_libc_boundary.sh --gate` returns 0. §9.12-D's
+literal exit met.
 
 #### Convenience set (0 active sites)
 
@@ -187,4 +192,5 @@ later selected on Linux Debug builds for leak detection).
 |------------|--------------|---------------------------------------------------------------|
 | 2026-05-19 | `<backfill>` | Initial draft — Q6 deliverable with full inventory + 3-category policy. |
 | 2026-05-20 | `<backfill>` | §9.12-D / B131 amendment — reclassify `_exit` / `fork` / `waitpid` / `alarm` from Replaceable → Necessary. Zig 0.16 `std.posix` lacks all four; the originally-claimed `std.posix.{exit,fork,waitpid,alarm}` targets do not exist (verified via `lib/std/posix.zig` grep). Necessary set grows from 6 → 7 (counting fork/waitpid/alarm as one row); Replaceable shrinks from 8 → 4 (post-B130 munmap → 3). D-151 (the gap-naming row in `debt.md`) is discharged by this amendment. |
+| 2026-05-20 | `<backfill>` | §9.12-D / B132 close — migrated `std.c.kill` → `std.posix.kill` (with EXEMPT-FALLBACK marker on the SIGALRM-handler `catch {}`) and `std.c.pid_t` → `std.posix.pid_t`. Reclassified `std.c.getenv` from Replaceable → Necessary because the `wasm_engine_new` c_api export is called from C code without `std.process.Init`, so `std.process.Environ.getPosix` is structurally unavailable. Replaceable set 3 → 0; §9.12-D `[ ]` → `[x]`. |
 | 2026-05-19 | `<backfill>` | **Accepted** at §9.12 collab gate. User intent: libc 依存サーフェスを Phase 10+ (AOT / 組込 / Windows native) 着手前に管理下に置き見据える。3-category 分類 + 5 deliverable 着地は §9.12-D で実施。 |

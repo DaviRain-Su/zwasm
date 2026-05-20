@@ -88,7 +88,7 @@ const RunResult = enum {
 // SIGALRM handler state — read by `sigalrmHandler` (async-signal
 // context, can only touch volatile globals + call async-safe
 // libc primitives).
-var child_pid_for_alarm: std.c.pid_t = 0;
+var child_pid_for_alarm: std.posix.pid_t = 0;
 var alarm_fired: bool = false;
 
 fn sigalrmHandler(_: std.posix.SIG) callconv(.c) void {
@@ -97,8 +97,14 @@ fn sigalrmHandler(_: std.posix.SIG) callconv(.c) void {
         // SIGKILL — guarantees termination even if the child is
         // in an uninterruptible kernel state (mmap during JIT
         // page allocation, futex during a hung loop, etc.).
-        // `std.c.kill` is async-signal-safe.
-        _ = std.c.kill(child_pid_for_alarm, .KILL);
+        // `std.posix.kill` resolves to the async-signal-safe
+        // libc kill via std.posix's per-target dispatch.
+        // EXEMPT-FALLBACK: ADR-0070 §B132 + no_fallback_on_failure.md
+        // signal-handler exception — process is being aborted;
+        // ESRCH (child already exited) is the desired terminal
+        // state, PermissionDenied cannot occur for our own child.
+        // Mirrors the prior `_ = std.c.kill(...)` discard.
+        std.posix.kill(child_pid_for_alarm, .KILL) catch {};
     }
 }
 
