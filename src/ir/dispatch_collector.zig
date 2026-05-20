@@ -581,6 +581,14 @@ const br_on_null = @import("../instruction/wasm_3_0/br_on_null.zig");
 const br_on_non_null = @import("../instruction/wasm_3_0/br_on_non_null.zig");
 const ref_as_non_null = @import("../instruction/wasm_3_0/ref_as_non_null.zig");
 
+// Wasm 3.0 GC — struct cohort. Same wasm_level: .v3_0 shape.
+const struct_new = @import("../instruction/wasm_3_0/struct_new.zig");
+const struct_new_default = @import("../instruction/wasm_3_0/struct_new_default.zig");
+const struct_get = @import("../instruction/wasm_3_0/struct_get.zig");
+const struct_get_s = @import("../instruction/wasm_3_0/struct_get_s.zig");
+const struct_get_u = @import("../instruction/wasm_3_0/struct_get_u.zig");
+const struct_set = @import("../instruction/wasm_3_0/struct_set.zig");
+
 /// Tuple of all migrated per-op modules. Order is not load-bearing;
 /// `dispatcher` uses `op_tag` for routing.
 pub const collected_ops = .{
@@ -974,6 +982,14 @@ pub const collected_ops = .{
     br_on_null,
     br_on_non_null,
     ref_as_non_null,
+
+    // Wasm 3.0 GC struct cohort (§9.12-G Phase 10 prep).
+    struct_new,
+    struct_new_default,
+    struct_get,
+    struct_get_s,
+    struct_get_u,
+    struct_set,
 };
 
 comptime {
@@ -1146,15 +1162,26 @@ test "zirOpTagCount matches the ZirOp enum field count" {
     try std.testing.expect(n >= 200);
 }
 
-test "migratedOpCount tracks collected_ops length (384 after §9.12-G EH + typed-func-refs stubs)" {
+test "migratedOpCount tracks collected_ops length (390 after §9.12-G GC struct cohort)" {
     // Running tally:
     //   374 §9.12-B / B52 baseline
     // +   3 Wasm 3.0 tail-call (return_call / _indirect / _ref)
     // +   3 Wasm 3.0 EH (try_table / throw / throw_ref)
     // +   4 Wasm 3.0 typed-func-refs (call_ref / br_on_null /
     //         br_on_non_null / ref.as_non_null)
-    // = 384.
-    try std.testing.expectEqual(@as(usize, 384), migratedOpCount());
+    // +   6 Wasm 3.0 GC struct (.new / .new_default / .get /
+    //         .get_s / .get_u / .set)
+    // = 390.
+    try std.testing.expectEqual(@as(usize, 390), migratedOpCount());
+}
+
+test "opModuleFor resolves GC struct cohort stubs" {
+    try std.testing.expect(comptime opModuleFor(.@"struct.new") != null);
+    try std.testing.expect(comptime opModuleFor(.@"struct.new_default") != null);
+    try std.testing.expect(comptime opModuleFor(.@"struct.get") != null);
+    try std.testing.expect(comptime opModuleFor(.@"struct.get_s") != null);
+    try std.testing.expect(comptime opModuleFor(.@"struct.get_u") != null);
+    try std.testing.expect(comptime opModuleFor(.@"struct.set") != null);
 }
 
 test "opModuleFor resolves Phase 10 Wasm 3.0 stubs (tail-call + EH + typed-func-refs)" {
