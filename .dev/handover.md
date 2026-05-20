@@ -15,8 +15,8 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
    `chore(p9b):` / `feat(p9b):` prefix. Last source commit
-   `ee5d604b` (B67 — const cohort: i32/i64/f32/f64.const migrated
-   to `(ctx, ins)`; ctx 77 → 81; 4 new per-op files).
+   `7a6c6a77` (B68 — ref cohort: ref.null + ref.func migrated
+   to `(ctx, ins)`; ctx 81 → 83; 2 new per-op files).
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -92,33 +92,36 @@
 | B65 | Cohort migration: control-structure cohort (`block`, `loop`, 2 ops) to `(ctx, ins)`. 2 distinct adapters in op_control.zig. 2 NEW per-op files. `_ctx_ops` 75 → 77; legacy unchanged at 292. local.{get,set,tee} + br/br_if/br_table/if/else/end/return/unreachable deferred (Zone 1 meta files missing OR emit.zig private helpers need extraction). | `e81266f4` |
 | B66 | Zone 1 meta-file backfill: 16 NEW meta files at `src/instruction/wasm_1_0/` (br/if_/end_/return_/unreachable_/select/drop/local_{get,set,tee}/{i32,i64,f32,f64}_const/ref_{null,func}). Substrate chunk — no Zone 2 / collector changes. Unblocks 3+ future cohorts. | `750191e5` |
 | B67 | Cohort migration: const cohort (`i32.const`, `i64.const`, `f32.const`, `f64.const`, 4 ops) to `(ctx, ins)`. Extracted i32/i64.const inline bodies into op_alu_int helpers; f32/f64.const wrap existing `emitFpConst` via op_alu_float aliases. 4 NEW per-op files. `_ctx_ops` 77 → 81; legacy unchanged at 292. | `ee5d604b` |
-| **B68** | **Cohort migration: ref cohort (`ref.null`, `ref.func`, 2 ops)** to `(ctx, ins)`. Now unblocked by B66. Inline emit.zig bodies (ref.null = XOR r,r; ref.func = MOV + ADD imm32). Extract into op_ref.zig (new) or add to existing op_alu_int.zig. 2 NEW per-op files. | **NEXT** |
-| B68..B6x | After B68: drop+select (scalar) → control flow (br/if/end family) → local ops. Followed by B6x+1 inline-switch cutover. | |
+| B68 | Cohort migration: ref cohort (`ref.null`, `ref.func`, 2 ops) to `(ctx, ins)`. Extracted inline bodies into `op_alu_int.emit{RefNull,RefFunc}` adapters. 2 NEW per-op files. `_ctx_ops` 81 → 83; legacy unchanged at 292. | `7a6c6a77` |
+| **B69** | **Cohort migration: drop + select cohort (`drop`, `select`, 2 ops)** to `(ctx, ins)`. Now unblocked by B66 (select / drop meta files landed). Inline emit.zig bodies — drop = pop a vreg (no codegen); select = cond pop + cmov. Extract into op_alu_int.zig helpers; 2 NEW per-op files. | **NEXT** |
+| B69..B6x | After B69: control flow (br/if/end family) → local ops. Followed by B6x+1 inline-switch cutover folding ctx tuple into unified `collected_x86_64_ops`. | |
 | B6x+1 | Inline-switch dispatcher cutover per ADR-0073 — both arches' `emit.zig` giant switch replaced by `inline for (collected_X_ops) |op_mod| { if (op_mod.op_tag == ins.op) return op_mod.emit(ctx, ins); }`. Moment per-op files become load-bearing. | |
 
-## Active state — §9.12-B mid-flight; B67 const cohort landed 2026-05-20
+## Active state — §9.12-B mid-flight; B68 ref cohort landed 2026-05-20
 
-**B68 is the active task** — cohort migrate the ref cohort
-(`ref.null`, `ref.func`, 2 ops) to `(ctx, ins)`. Unblocked by
-B66 meta backfill. B67 closed the const cohort at `ee5d604b`
-(`collected_x86_64_ctx_ops` 77 → 81).
+**B69 is the active task** — cohort migrate `drop` + `select`
+(2 ops) to `(ctx, ins)`. Unblocked by B66 meta backfill. B68
+closed the ref cohort at `7a6c6a77` (`collected_x86_64_ctx_ops`
+81 → 83).
 
-The loop for B68:
+The loop for B69:
 
-1. Survey emit.zig inline bodies for ref.null (line ~804) and
-   ref.func (line ~819). ref.null = single XOR-zero; ref.func
-   loads func_entities_ptr from R15 then ADD imm32.
-2. Extract inline bodies into op_alu_int.zig helper functions
-   `emitRefNull` / `emitRefFunc` (or new op_ref.zig); add
-   `(ctx, ins)` shape directly (no legacy wrapper needed).
+1. Survey emit.zig dispatch arms for drop + select. drop = pop
+   pushed_vreg (no instruction emit). select = pop cond, then
+   cond pop + materialise via CMOV / branch.
+2. Extract inline bodies into op_alu_int.zig helpers; add
+   `(ctx, ins)` adapters directly.
 3. Replace 2 emit.zig arms with adapter calls via `&ctx`.
-4. Create 2 NEW per-op files at `x86_64/ops/wasm_1_0/ref_{null,
-   func}.zig`.
-5. Update collector (81 → 83) + assertion.
+4. Create 2 NEW per-op files at `x86_64/ops/wasm_1_0/
+   {drop,select}.zig`.
+5. Update collector (83 → 85) + assertion.
 6. Verify 2-host green; commit + push.
 
 Note: op_convert.zig 1009 LOC, op_control.zig 1169 LOC — split
-plan deferred to §9.12-D cleanup.
+plan deferred to §9.12-D cleanup. After B69: control-flow
+(br/br_if/br_table/if/else/end/return/unreachable) + local
+ops (local.get/set/tee) — both need extraction from emit.zig
+private helpers.
 
 §9.12-B exit criterion stays as ROADMAP §9.12-B specifies (6 build
 combos green + DCE 0 + completeness comptime check). Per-op file
