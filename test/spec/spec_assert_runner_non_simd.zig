@@ -164,12 +164,16 @@ fn nonSimdOnModuleLoaded(
     stdout: *std.Io.Writer,
     name: []const u8,
 ) anyerror!void {
-    // d-20: derive `(min, max)` from the module's memory section
-    // so `memory.size` reflects the declared initial count AND
-    // `memory.grow` respects the module's max-pages cap. Returns
-    // `{min: 0, max: null}` when no memory section is present.
+    // Close-plan §6 (j) Step B cohort 1-residual — when memory-0 is
+    // imported, use the EXPORTER's actual min (registered fallback
+    // to importer-declared min). Defined memory uses declared min
+    // exactly as before. Without this, `(import "spectest" "memory"
+    // (memory 1))` left current_mem_bytes=0 and active data segments
+    // OOB'd → 15 spurious data-init UES (data.2/.4/.6/.8/.12/.21-.26
+    // + imports.95/.96 + linking.31/.32).
+    const mem_min_pages = base.effectiveMemory0Min(gpa, wasm_bytes, base.current_registered);
     const mem_limits = base.extractMemoryLimits(gpa, wasm_bytes);
-    base.resetGrowableMemory(mem_limits.min);
+    base.resetGrowableMemory(mem_min_pages);
     base.current_mem_max_pages = mem_limits.max;
     @memset(scratch_globals[0..], 0);
 
@@ -179,6 +183,7 @@ fn nonSimdOnModuleLoaded(
     // any const-exprs that may `global.get N` against those slots.
     // Order matters: data / elem / defined-global init exprs all
     // observe the populated slots via `GlobalsCtx`.
+    const fixture = base.current_module_file orelse "?";
     if (base.current_registered) |reg| {
         base.applyImportedGlobalsFromRegistered(
             gpa,
@@ -189,7 +194,7 @@ fn nonSimdOnModuleLoaded(
             compiled.num_global_imports,
             reg,
         ) catch |err| {
-            try stdout.print("FAIL  {s} imported-globals-init: {s}\n", .{ name, @errorName(err) });
+            try stdout.print("FAIL  {s}/{s} imported-globals-init: {s}\n", .{ name, fixture, @errorName(err) });
             return err;
         };
     }
@@ -207,7 +212,7 @@ fn nonSimdOnModuleLoaded(
         base.growable_memory[0..@intCast(base.current_mem_bytes)],
         gctx_runtime,
     ) catch |err| {
-        try stdout.print("FAIL  {s} data-init: {s}\n", .{ name, @errorName(err) });
+        try stdout.print("FAIL  {s}/{s} data-init: {s}\n", .{ name, fixture, @errorName(err) });
         return err;
     };
     runner_mod.applyDefinedGlobalsInit(
@@ -218,7 +223,7 @@ fn nonSimdOnModuleLoaded(
         scratch_globals[0..],
         compiled.num_global_imports,
     ) catch |err| {
-        try stdout.print("FAIL  {s} globals-init: {s}\n", .{ name, @errorName(err) });
+        try stdout.print("FAIL  {s}/{s} globals-init: {s}\n", .{ name, fixture, @errorName(err) });
         return err;
     };
     // close-plan §6 (j) Step B cohort 4 — bound the funcptrs/typeidxs
@@ -237,7 +242,7 @@ fn nonSimdOnModuleLoaded(
         scratch_typeidxs[0..table0_cap],
         gctx_runtime,
     ) catch |err| {
-        try stdout.print("FAIL  {s} table-init: {s}\n", .{ name, @errorName(err) });
+        try stdout.print("FAIL  {s}/{s} table-init: {s}\n", .{ name, fixture, @errorName(err) });
         return err;
     };
     // §9.9 / 9.9-l-1b-d093-d42b (D-112): populate per-non-zero-
@@ -1759,8 +1764,9 @@ fn nonSimdHandleAssertUninstantiable(
     stdout: *std.Io.Writer,
     name: []const u8,
 ) anyerror!bool {
+    const u_mem_min_pages = base.effectiveMemory0Min(gpa, wasm_bytes, base.current_registered);
     const mem_limits = base.extractMemoryLimits(gpa, wasm_bytes);
-    base.resetGrowableMemory(mem_limits.min);
+    base.resetGrowableMemory(u_mem_min_pages);
     base.current_mem_max_pages = mem_limits.max;
     @memset(scratch_globals[0..], 0);
 

@@ -935,6 +935,15 @@ pub var current_thunk_arena: jit_mem.JitBlock = .{ .bytes = &[_:0]u8{} };
 // reset to null at runCorpus deinit.
 pub var current_registered: ?*std.StringHashMapUnmanaged(RegisteredExporter) = null;
 
+// Close-plan §6 (j) Step B cohort 1-residual — current `.wasm`
+// filename within the active manifest, so per-module FAIL lines
+// (data-init / table-init / multi-table-init / patch-funcptrs /
+// resolve-funcref-globals / imported-globals-init) can identify
+// the specific fixture instead of bisecting across the whole
+// manifest. Set in runCorpus's `module` directive arm; reset to
+// `null` at the next directive.
+pub var current_module_file: ?[]const u8 = null;
+
 /// Const view of `current_dispatch` for passing to
 /// `makeJitRuntime`'s `dispatch_override` parameter.
 pub fn currentDispatchView() ?[]const usize {
@@ -1523,6 +1532,75 @@ pub fn effectiveTable0Min(
         }
     }
     return runner_mod.declaredTableMin(allocator, importer_wasm, 0);
+}
+
+/// Close-plan §6 (j) Step B cohort 1-residual — effective memory-0
+/// min in pages (each page = 64 KiB). Mirror of `effectiveTable0Min`:
+/// imported memory resolves to the exporter's actual min (the
+/// importer's declared min is a lower bound), defined memory uses
+/// its declared min, no memory returns 0.
+pub fn effectiveMemory0Min(
+    allocator: std.mem.Allocator,
+    importer_wasm: []const u8,
+    registered: ?*const std.StringHashMapUnmanaged(RegisteredExporter),
+) u32 {
+    var temp_arena = std.heap.ArenaAllocator.init(allocator);
+    defer temp_arena.deinit();
+    const ta = temp_arena.allocator();
+    var module = zwasm.parse.parser.parse(ta, importer_wasm) catch return 0;
+    if (module.find(.import)) |s| {
+        var imports = zwasm.parse.sections.decodeImports(ta, s.body) catch return 0;
+        defer imports.deinit();
+        for (imports.items) |imp| {
+            if (imp.kind != .memory) continue;
+            if (registered) |reg| {
+                if (reg.getPtr(imp.module)) |exp| {
+                    return extractExporterMemoryMin(allocator, exp.bytes_owned, imp.name) orelse imp.payload.memory.min;
+                }
+            }
+            return imp.payload.memory.min;
+        }
+    }
+    const limits = extractMemoryLimits(allocator, importer_wasm);
+    return limits.min;
+}
+
+fn extractExporterMemoryMin(
+    allocator: std.mem.Allocator,
+    exporter_wasm: []const u8,
+    export_name: []const u8,
+) ?u32 {
+    var temp_arena = std.heap.ArenaAllocator.init(allocator);
+    defer temp_arena.deinit();
+    const ta = temp_arena.allocator();
+    var module = zwasm.parse.parser.parse(ta, exporter_wasm) catch return null;
+    const export_sec = module.find(.@"export") orelse return null;
+    var exports = zwasm.parse.sections.decodeExports(ta, export_sec.body) catch return null;
+    defer exports.deinit();
+    var exp_mem_idx: ?u32 = null;
+    for (exports.items) |e| {
+        if (e.kind != .memory) continue;
+        if (!std.mem.eql(u8, e.name, export_name)) continue;
+        exp_mem_idx = e.idx;
+        break;
+    }
+    const midx = exp_mem_idx orelse return null;
+    var seen: u32 = 0;
+    if (module.find(.import)) |s| {
+        var imports = zwasm.parse.sections.decodeImports(ta, s.body) catch return null;
+        defer imports.deinit();
+        for (imports.items) |imp| {
+            if (imp.kind != .memory) continue;
+            if (seen == midx) return imp.payload.memory.min;
+            seen += 1;
+        }
+    }
+    const m_sec = module.find(.memory) orelse return null;
+    var mems = zwasm.parse.sections.decodeMemory(ta, m_sec.body) catch return null;
+    defer mems.deinit();
+    const defined_idx = midx - seen;
+    if (defined_idx >= mems.items.len) return null;
+    return mems.items[defined_idx].min;
 }
 
 fn extractExporterTableMin(
@@ -2710,6 +2788,7 @@ pub fn runCorpus(
                     continue;
                 };
                 current_wasm = wasm_bytes;
+                current_module_file = file;
 
                 // d-37: skip modules whose imports the spec runner
                 // cannot satisfy. `spectest.<fn>` function imports
