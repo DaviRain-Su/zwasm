@@ -1049,11 +1049,11 @@ pub fn compile(
             // §9.12-B / B93: SIMD i8x16 compare cohort migrated to ctx tuple.
             .@"i8x16.eq" => try op_simd_int_cmp_lane.emitI8x16EqCtx(&ctx, &ins),
             .@"i16x8.eq" => try op_simd_int_cmp_lane.emitI16x8EqCtx(&ctx, &ins),
-            .@"i32x4.eq" => try op_simd_int_cmp_lane.emitI32x4Eq(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i32x4.eq" => try op_simd_int_cmp_lane.emitI32x4EqCtx(&ctx, &ins),
             .@"i64x2.eq" => try op_simd_int_cmp_lane.emitI64x2Eq(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"i8x16.ne" => try op_simd_int_cmp_lane.emitI8x16NeCtx(&ctx, &ins),
             .@"i16x8.ne" => try op_simd_int_cmp_lane.emitI16x8NeCtx(&ctx, &ins),
-            .@"i32x4.ne" => try op_simd_int_cmp_lane.emitI32x4Ne(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.ne" => try op_simd_int_cmp_lane.emitI32x4NeCtx(&ctx, &ins),
             .@"i64x2.ne" => try op_simd_int_cmp_lane.emitI64x2Ne(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             // §9.7 / 9.7-l: signed lt/gt/le/ge for 8/16/32-bit shapes
             // (12 ops). PCMPGT_<shape> direct for gt; operand swap for
@@ -1067,10 +1067,10 @@ pub fn compile(
             .@"i16x8.lt_s" => try op_simd_int_cmp_lane.emitI16x8LtSCtx(&ctx, &ins),
             .@"i16x8.le_s" => try op_simd_int_cmp_lane.emitI16x8LeSCtx(&ctx, &ins),
             .@"i16x8.ge_s" => try op_simd_int_cmp_lane.emitI16x8GeSCtx(&ctx, &ins),
-            .@"i32x4.gt_s" => try op_simd_int_cmp_lane.emitI32x4GtS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i32x4.lt_s" => try op_simd_int_cmp_lane.emitI32x4LtS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i32x4.le_s" => try op_simd_int_cmp_lane.emitI32x4LeS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i32x4.ge_s" => try op_simd_int_cmp_lane.emitI32x4GeS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.gt_s" => try op_simd_int_cmp_lane.emitI32x4GtSCtx(&ctx, &ins),
+            .@"i32x4.lt_s" => try op_simd_int_cmp_lane.emitI32x4LtSCtx(&ctx, &ins),
+            .@"i32x4.le_s" => try op_simd_int_cmp_lane.emitI32x4LeSCtx(&ctx, &ins),
+            .@"i32x4.ge_s" => try op_simd_int_cmp_lane.emitI32x4GeSCtx(&ctx, &ins),
             // §9.7 / 9.7-m: i64x2 signed compare lt_s/gt_s/le_s/ge_s
             // (4 ops). PCMPGTQ (SSE4.2 0F 38 37) threaded through
             // 9.7-l's emitV128IntCmpSigned helper. Per ADR-0041 §5
@@ -1094,10 +1094,10 @@ pub fn compile(
             .@"i16x8.lt_u" => try op_simd_int_cmp_lane.emitI16x8LtUCtx(&ctx, &ins),
             .@"i16x8.le_u" => try op_simd_int_cmp_lane.emitI16x8LeUCtx(&ctx, &ins),
             .@"i16x8.ge_u" => try op_simd_int_cmp_lane.emitI16x8GeUCtx(&ctx, &ins),
-            .@"i32x4.gt_u" => try op_simd_int_cmp_lane.emitI32x4GtU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i32x4.lt_u" => try op_simd_int_cmp_lane.emitI32x4LtU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i32x4.le_u" => try op_simd_int_cmp_lane.emitI32x4LeU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i32x4.ge_u" => try op_simd_int_cmp_lane.emitI32x4GeU(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.gt_u" => try op_simd_int_cmp_lane.emitI32x4GtUCtx(&ctx, &ins),
+            .@"i32x4.lt_u" => try op_simd_int_cmp_lane.emitI32x4LtUCtx(&ctx, &ins),
+            .@"i32x4.le_u" => try op_simd_int_cmp_lane.emitI32x4LeUCtx(&ctx, &ins),
+            .@"i32x4.ge_u" => try op_simd_int_cmp_lane.emitI32x4GeUCtx(&ctx, &ins),
             // §9.7 / 9.7-o: FP compare eq/ne/lt/gt/le/ge for f32x4 +
             // f64x2 (12 ops). CMPPS (SSE 0F C2 /r ib) + CMPPD (SSE2
             // 66 0F C2 /r ib) with imm8 predicate per Intel SDM Vol
