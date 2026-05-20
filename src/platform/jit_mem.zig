@@ -110,16 +110,17 @@ pub fn alloc(size: usize) Error!JitBlock {
 /// modules (`func_bodies.len == 0` at link time) carry an
 /// empty static sentinel slice (`&[_:0]u8{}`) instead of an
 /// mmap-backed region. Calling munmap on a zero-length /
-/// non-page-aligned pointer returns `EINVAL`. macOS hid this
-/// because the platform's `std.c.munmap` discards the return;
-/// Linux's `std.posix.munmap` asserts INVAL → `unreachable`
-/// and the entire process panics. The guard short-circuits at
-/// `bytes.len == 0` on every platform — there is nothing to
-/// release.
+/// non-page-aligned pointer returns `EINVAL`; `std.posix.munmap`
+/// asserts INVAL → `unreachable` on Linux, panicking the
+/// process. The guard short-circuits at `bytes.len == 0` on
+/// every platform — there is nothing to release. With the guard
+/// in place, both macOS and Linux use `std.posix.munmap`
+/// (§9.12-D / ADR-0070 migration; previously the macOS branch
+/// used `std.c.munmap` to discard the return out of caution).
 pub fn free(block: JitBlock) void {
     if (block.bytes.len == 0) return;
     if (builtin.os.tag == .macos and builtin.cpu.arch == .aarch64) {
-        _ = std.c.munmap(@ptrCast(block.bytes.ptr), block.bytes.len);
+        std.posix.munmap(block.bytes);
         return;
     }
     if (builtin.os.tag == .linux and builtin.cpu.arch == .x86_64) {

@@ -78,8 +78,12 @@ CONVENIENCE=("std.heap.DebugAllocator")
 
 PATTERN='std\.c\.[A-Za-z_]+|@extern\(\.\{[[:space:]]*\.library_name[[:space:]]*=[[:space:]]*"c"|pthread_[A-Za-z_]+|sigsetjmp|siglongjmp|sys_icache_invalidate'
 
-# grep src/ + test/ + build.zig. Exclude comments-only lines (`//`).
-RAW=$(grep -rnE "$PATTERN" src/ test/ build.zig 2>/dev/null || true)
+# grep src/ + test/ + build.zig. Exclude comments-only lines (`//`)
+# and gitignored build artifacts (`.zig-cache/`, `zig-out/`) which
+# contain libc/header text that's not project source.
+RAW=$(grep -rnE "$PATTERN" \
+  --exclude-dir=.zig-cache --exclude-dir=zig-out \
+  src/ test/ build.zig 2>/dev/null || true)
 
 # Filter comment-only lines (loose; the file:line:body shape always splits at first 2 colons)
 SITES=()
