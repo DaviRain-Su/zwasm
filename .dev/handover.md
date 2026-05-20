@@ -15,8 +15,8 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
    `chore(p9b):` / `feat(p9b):` prefix. Last source commit
-   `10f18f43` (B94 — SIMD i16x8 compare (10 ops) moved from
-   legacy to ctx; legacy 160 → 150; ctx 231 → 241).
+   `840e15f2` (B95 — SIMD i32x4 compare (10 ops) moved from
+   legacy to ctx; legacy 150 → 140; ctx 241 → 251).
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -118,22 +118,24 @@
 | B91 | Legacy → ctx SIMD cohort move: int binary arith (10 ops; i64x2.mul deferred). Legacy 188 → 178; ctx 203 → 213. | `8f6d0c83` |
 | B92 | Legacy → ctx SIMD cohort move: int neg/abs (8 ops). Legacy 178 → 170; ctx 213 → 221. | `f66ed1f9` |
 | B93 | Legacy → ctx SIMD cohort move: i8x16 compare (10 ops). Legacy 170 → 160; ctx 221 → 231. | `ba509a26` |
-| B94 | Legacy → ctx SIMD cohort move: i16x8 compare (10 ops). Mirror of B93. Legacy 160 → 150; ctx 231 → 241. | `10f18f43` |
-| **B95** | **Legacy → ctx SIMD cohort: i32x4 compare (10 ops).** Same pattern; 10 per-op ctx adapters in op_simd_int_cmp_lane.zig; regenerate 10 per-op files; legacy 150 → 140; ctx 241 → 251. | **NEXT** |
-| B95..B9x | After B95: i64x2 compare (6 — no _u variants; B35), SIMD shifts (12), min/max (12), sat arith (10), float arith (16), float unary (14), float compare (12), bool reductions (9), narrow/extend (16), extmul (16), swizzle/popcnt/dot/q15mulr/fp-conv (11), splats (6). Eventually inline-switch cutover (ADR-0073). | |
+| B94 | Legacy → ctx SIMD cohort move: i16x8 compare (10 ops). Legacy 160 → 150; ctx 231 → 241. | `10f18f43` |
+| B95 | Legacy → ctx SIMD cohort move: i32x4 compare (10 ops). Legacy 150 → 140; ctx 241 → 251. | `840e15f2` |
+| **B96** | **Legacy → ctx SIMD cohort: i64x2 compare (6 ops — no _u variants).** Same pattern; 6 per-op ctx adapters in op_simd_int_cmp_lane.zig; regenerate 6 per-op files; legacy 140 → 134; ctx 251 → 257. | **NEXT** |
+| B96..B9x | After B96: SIMD shifts (12), min/max (12), sat arith (10), float arith (16), float unary (14), float compare (12), bool reductions (9), narrow/extend (16), extmul (16), swizzle/popcnt/dot/q15mulr/fp-conv (11), splats (6). Eventually inline-switch cutover (ADR-0073). | |
 | B6x+1 | Inline-switch dispatcher cutover per ADR-0073 — both arches' `emit.zig` giant switch replaced by `inline for (collected_X_ops) |op_mod| { if (op_mod.op_tag == ins.op) return op_mod.emit(ctx, ins); }`. Moment per-op files become load-bearing. | |
 
-## Active state — §9.12-B mid-flight; B94 SIMD i16x8 compare landed 2026-05-20
+## Active state — §9.12-B mid-flight; B95 SIMD i32x4 compare landed 2026-05-20
 
-**B95 is the active task** — SIMD i32x4 compare cohort (10 ops).
-B94 closed at `10f18f43` (legacy 160 → 150; ctx 231 → 241).
+**B96 is the active task** — SIMD i64x2 compare cohort (6 ops:
+eq/ne/lt_s/gt_s/le_s/ge_s — no _u variants per Wasm SIMD spec).
+B95 closed at `840e15f2` (legacy 150 → 140; ctx 241 → 251).
 
-The loop for B95 (same pattern as B93/B94):
+The loop for B96:
 
-1. Add 10 i32x4 ctx adapters in op_simd_int_cmp_lane.zig.
-2. Regenerate 10 per-op files at wasm_2_0/i32x4_{eq,ne,lt_s,lt_u,
-   gt_s,gt_u,le_s,le_u,ge_s,ge_u}.zig.
-3. Move 10 entries from legacy (150 → 140) to ctx (241 → 251).
+1. Add 6 i64x2 ctx adapters in op_simd_int_cmp_lane.zig.
+2. Regenerate 6 per-op files at wasm_2_0/i64x2_{eq,ne,lt_s,gt_s,
+   le_s,ge_s}.zig.
+3. Move 6 entries from legacy (140 → 134) to ctx (251 → 257).
 4. Update emit.zig arms.
 5. Verify 2-host green; commit + push.
 
