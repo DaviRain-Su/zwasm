@@ -1759,6 +1759,26 @@ pub fn dispatch(comptime axis: ArchAxis, op: ZirOp, args: anytype) !bool {
     return false;
 }
 
+/// §9.12-B / B108 (ADR-0073 + ADR-0075) — inline-switch dispatcher
+/// cutover for the x86_64 `(ctx, ins)` migrated cohort. Walks
+/// `collected_x86_64_ctx_ops` and dispatches to the matching per-op
+/// file's `emit(ctx, ins)`. Returns `true` if handled; `false` lets
+/// the giant switch in `x86_64/emit.zig` take over for ops outside
+/// the ctx tuple (extract_lane / replace_lane / shuffle / i64x2.mul
+/// / v128.const / load_lane / store_lane / popcnt / trunc_sat_f64x2
+/// / convert_low_i32x4_u — payload-laden or no-Zone-1-meta).
+pub fn dispatchX86_64Ctx(op: ZirOp, ctx_ptr: anytype, ins_ptr: anytype) !bool {
+    @setEvalBranchQuota(20_000);
+    inline for (collected_x86_64_ctx_ops) |op_mod| {
+        if (comptime !enabledByBuild(op_mod)) continue;
+        if (op == op_mod.op_tag) {
+            try op_mod.emit(ctx_ptr, ins_ptr);
+            return true;
+        }
+    }
+    return false;
+}
+
 // ---------------------------------------------------------------------
 // Tests.
 // ---------------------------------------------------------------------

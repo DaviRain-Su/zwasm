@@ -728,6 +728,16 @@ pub fn compile(
         })) {
             continue;
         }
+        // §9.12-B / B108 (ADR-0073 + ADR-0075) — inline-switch
+        // dispatcher cutover for x86_64 ctx cohort. Walks
+        // collected_x86_64_ctx_ops (391 ops post-B107); the giant
+        // switch below now only handles ops outside the ctx tuple
+        // (extract_lane / replace_lane / shuffle / i64x2.mul /
+        // v128.const / load_lane / store_lane / popcnt /
+        // trunc_sat_f64x2 / convert_low_i32x4_u).
+        if (try dispatch_collector.dispatchX86_64Ctx(ins.op, &ctx, &ins)) {
+            continue;
+        }
         switch (ins.op) {
             // §9.12-B / B67: i32.const + i64.const inline bodies
             // extracted into `op_alu_int.emitI{32,64}Const` adapters.
