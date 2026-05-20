@@ -10,9 +10,9 @@
    `/continue` Step 1a の override を発火させ、ROADMAP
    §9.<N> task より先に §6 Work sequence を実行する。
 2. **READ NEXT** [`.dev/lessons/2026-05-20-refactor-tradeoffs-honest-accounting.md`](lessons/2026-05-20-refactor-tradeoffs-honest-accounting.md) — 経緯記録。
-3. `git log --oneline -10` — last code commit: `72a87509`
-   (close-plan §6 (j) Step B cohort 1-residual: effectiveMemory0Min
-   + fixture filename in FAIL line)。
+3. `git log --oneline -10` — last code commit: `4090d7da`
+   (close-plan §6 (j) Step B cohort 5: effectiveMemory0Max で
+   imported memory grow cap)。
 4. **Live status**: `zig build test-spec-wasm-2.0-assert >
    /tmp/spec.log 2>&1 || true; grep "^FAIL " /tmp/spec.log |
    sort | uniq -c | sort -rn` — current breakdown is the
@@ -27,17 +27,24 @@
   `global.get N` for imported globals + importer-side
   `scratch_globals` の `[0..num_imports)` を registered
   exporter から populate。
-- §6 (j) Step B cohort 3 完 (`45bc96d3`)。cohort 4 完 (`ce67cd4a`)。
-  cohort 1-residual 完 (`72a87509`): imported memory の effective
-  size を spectest exporter の actual min から取得。FAIL line に
-  fixture 名を入れる軽量改修も同時に land。
-- 次: 残 3 件
-  - cohort 5 (imports: grow × 2) — `grow(i32:0) → got 3, expected 2`
-    + `grow(i32:1) → got 2, expected 4294967295`。imported memory
-    grow の state 蓄積 / max-pages cap 判定。
-  - cohort 6 (elem: call_imported_elem trap) — global.get funcref
-    runtime resolution (elem-form 4 の `global.get N` を null
-    sentinel として decode した結果)。
+- §6 (j) Step B cohort 3-5 完 (`45bc96d3` / `ce67cd4a` /
+  `72a87509` / `4090d7da`)。
+- 次: 残 1 件 — **cohort 6** (elem.68 `call_imported_elem`
+  trap)。`(elem (i32.const 0) funcref (global.get 0))` を decoder
+  が null sentinel で受理し、call_indirect 0 が trap する。
+  作業内容:
+  1. `readFuncrefInitExpr` の 0x23 arm を改修。null sentinel
+     ではなく `0x80000000 | N` を funcidxs に格納。
+  2. `applyTableInitForTableCtx` / `populateTableRefs` で
+     marker を検出、`ctx.buf[ctx.offsets[N]]` (= 8-byte
+     FuncEntity ptr) を deref して funcptr+typeidx を抽出。
+  3. `RegisteredExporter.ensureCompiledAndRt` で scratch_func_
+     entities allocate 後に `runner_mod.resolveFuncrefGlobals`
+     を呼び exporter の scratch_globals 内 funcref globals を
+     FuncEntity ptr に resolve。
+  4. `applyImportedGlobalsFromRegistered` は既に bytes copy
+     するので、importer の scratch_globals[offset] に
+     resolve 済み FuncEntity ptr が入る。
 
 ## Step B 再開時の手順 (cold-start)
 

@@ -229,19 +229,29 @@ D-153 (12 cycle 経過時点で skip-impl 不動) はそれ自体が
      ため、runtime call_indirect が table[null entry] で trap。
      imported funcref global の runtime resolution が必要。
 
-Discharge 累計 (`72a87509` 時点):
-- 25308 → 25397 PASS (+89)
-- 43 → 3 failed (-40)
+Discharge 累計 (`4090d7da` 時点):
+- 25308 → 25399 PASS (+91)
+- 43 → 1 failed (-42)
 - 80 → 1 runtime-skip
 
 Cohort 1-residual (data data-init UES × 15) 完 (`72a87509`):
 真の root cause は cohort 4 と同じく "imported entity の actual
 size を取得していなかった" 。`base.effectiveMemory0Min(importer,
 registered)` を追加し、imported memory の場合 exporter の actual
-min から `growable_memory` を sizing。pre-fix は
-`extractMemoryLimits` が defined memory しか見ないため、
-imports.95/.96, data.{2,4,6,8,12,21-26}, linking.{31,32} などが
-spurious UES に。FAIL line に fixture 名を入れる軽量改修も同時に。
+min から `growable_memory` を sizing。FAIL line に fixture 名を
+入れる軽量改修も同時に。
+
+Cohort 5 (imports.grow × 2) 完 (`4090d7da`):
+`effectiveMemory0Max(importer, registered)` で imported memory
+の grow cap を MIN(exporter actual max, importer declared max)
+に。pre-fix は `extractMemoryLimits` が defined memory のみで
+imported memory に対し max=null を返し、grow が pool capacity
+まで無限ratchet → spec testsuite の grow assertion が連鎖失敗。
+
+残 cohort: cohort 6 (elem.68 call_imported_elem trap × 1) —
+cross-module funcref runtime resolution。`(elem (global.get N))`
+を decoder が null sentinel で受理しているため、call_indirect が
+trap。handover.md §"次" に作業手順 4 step を記載。
 
 各 cohort は 1-2 cycle で discharge 想定。Step B 完了基準:
 runtime-skip ≤ 20 OR 残 failures 全消化。
