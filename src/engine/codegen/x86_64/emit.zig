@@ -1466,8 +1466,10 @@ pub fn compile(
             .br => try op_control.emitBrCtx(&ctx, &ins),
             .br_if => try op_control.emitBrIfCtx(&ctx, &ins),
             .br_table => try op_control.emitBrTableCtx(&ctx, &ins),
-            .@"if" => try op_control.emitIf(allocator, &buf, alloc, &pushed_vregs, &labels, spill_base_off, ins.extra),
-            .@"else" => try op_control.emitElse(allocator, &buf, &pushed_vregs, &labels),
+            // §9.12-B / B76: if + else extracted into `(ctx, ins)`
+            // adapters in op_control.
+            .@"if" => try op_control.emitIfCtx(&ctx, &ins),
+            .@"else" => try op_control.emitElseCtx(&ctx, &ins),
             .end => {
                 // Two distinct forms (mirrors arm64/emit.zig):
                 // (A) Intra-function `end`: pops a label, patches

@@ -1193,6 +1193,31 @@ pub fn emitUnreachableCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error
     ctx.dead_code.* = true;
 }
 
+/// §9.12-B / B76 (ADR-0075) — `(ctx, ins)` adapters for `if` +
+/// `else` ops. All ctx fields already present (labels +
+/// pushed_vregs + spill_base_off); no ctx extension needed.
+pub fn emitIfCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitIf(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.labels,
+        ctx.spill_base_off,
+        ins.extra,
+    );
+}
+
+pub fn emitElseCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitElse(
+        ctx.allocator,
+        ctx.buf,
+        ctx.pushed_vregs,
+        ctx.labels,
+    );
+}
+
 /// §9.12-B / B75 (ADR-0075) — `(ctx, ins)` adapters for the
 /// br family (`br`, `br_if`, `br_table`). All ctx fields already
 /// exist post-B74. `br` sets `ctx.dead_code = true` (mirrors

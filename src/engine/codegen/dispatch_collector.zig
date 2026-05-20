@@ -811,6 +811,8 @@ const x86_64_return = @import("x86_64/ops/wasm_1_0/return_.zig");
 const x86_64_br = @import("x86_64/ops/wasm_1_0/br.zig");
 const x86_64_br_if = @import("x86_64/ops/wasm_1_0/br_if.zig");
 const x86_64_br_table = @import("x86_64/ops/wasm_1_0/br_table.zig");
+const x86_64_if = @import("x86_64/ops/wasm_1_0/if_.zig");
+const x86_64_else = @import("x86_64/ops/wasm_1_0/else_.zig");
 
 const x86_64_i32_add = @import("x86_64/ops/wasm_1_0/i32_add.zig");
 const x86_64_i32_sub = @import("x86_64/ops/wasm_1_0/i32_sub.zig");
@@ -1632,6 +1634,8 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_br,
     x86_64_br_if,
     x86_64_br_table,
+    x86_64_if,
+    x86_64_else,
 };
 
 comptime {
@@ -1735,8 +1739,10 @@ test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // per-op file; ctx extended with `frame_bytes: u32` +
     // `uses_runtime_ptr: bool`, +1 = 90). B75: br family
     // (br + br_if + br_table, all ctx fields exist; 3 new per-op
-    // files, +3 = 93).
-    try std.testing.expectEqual(@as(usize, 93), collected_x86_64_ctx_ops.len);
+    // files, +3 = 93). B76: if + else (2 new per-op files,
+    // +2 = 95; end deferred — function-level form pulls in
+    // trap-stub + bounds-fixup epilogue).
+    try std.testing.expectEqual(@as(usize, 95), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would
