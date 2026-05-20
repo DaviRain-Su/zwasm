@@ -818,17 +818,18 @@ pub fn compile(
             .@"i64.ctz",
             .@"i64.popcnt",
             => try op_alu_int.emitI64BitcountCtx(&ctx, &ins),
+            // §9.12-B / B85: width-conversion cohort migrated.
             .@"i32.wrap_i64",
             .@"i64.extend_i32_u",
             .@"i64.extend_i32_s",
-            => try op_alu_int.emitConvertWidth(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.op),
-            // §9.7 / 7.9 chunk c: Wasm 2.0 sign-extension ops.
+            => try op_alu_int.emitConvertWidthCtx(&ctx, &ins),
+            // §9.12-B / B85: sign-extension cohort migrated.
             .@"i32.extend8_s",
             .@"i32.extend16_s",
             .@"i64.extend8_s",
             .@"i64.extend16_s",
             .@"i64.extend32_s",
-            => try op_alu_int.emitSignExtend(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.op),
+            => try op_alu_int.emitSignExtendCtx(&ctx, &ins),
             // §9.7 / 7.9 chunk c: integer divide / remainder.
             // §9.12-B / B54+B55 (ADR-0075): full i32+i64 div/rem
             // cohort migrated to the `(ctx, ins)` shape; each

@@ -1236,14 +1236,7 @@ pub const collected_x86_64_ops = .{
     // i64 compare cohort moved at B82 (10 ops; emitI64CompareCtx).
     // i32+i64 shift cohorts moved at B83 (10 ops; emitI{32,64}ShiftCtx).
     // bitcount + eqz cohorts moved at B84 (8 ops; emitI{32,64}{Bitcount,Eqz}Ctx).
-    x86_64_i32_extend8_s,
-    x86_64_i32_extend16_s,
-    x86_64_i64_extend8_s,
-    x86_64_i64_extend16_s,
-    x86_64_i64_extend32_s,
-    x86_64_i32_wrap_i64,
-    x86_64_i64_extend_i32_s,
-    x86_64_i64_extend_i32_u,
+    // sign-extension (5) + width-conversion (3) = 8 ops moved at B85.
     x86_64_f32_add,
     x86_64_f32_sub,
     x86_64_f32_mul,
@@ -1658,6 +1651,15 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_i64_popcnt,
     x86_64_i32_eqz,
     x86_64_i64_eqz,
+    // B85: sign-extension + width-conversion cohorts moved.
+    x86_64_i32_extend8_s,
+    x86_64_i32_extend16_s,
+    x86_64_i64_extend8_s,
+    x86_64_i64_extend16_s,
+    x86_64_i64_extend32_s,
+    x86_64_i32_wrap_i64,
+    x86_64_i64_extend_i32_s,
+    x86_64_i64_extend_i32_u,
 };
 
 comptime {
@@ -1728,8 +1730,8 @@ test "migratedArchOpCount tracks collected per-arch tuples (B59: arm64=348, x86_
     // load/store per-op files directly to ctx tuple (not in legacy
     // tuple before, so x86_64 count unchanged).
     try std.testing.expectEqual(@as(usize, 348), migratedArchOpCount(.arm64));
-    // B79..B83 walked cohorts; B84 bitcount(6) + eqz(2) = 8.
-    try std.testing.expectEqual(@as(usize, 242), migratedArchOpCount(.x86_64));
+    // B79..B84 walked cohorts; B85 sign-ext(5) + width-conv(3) = 8.
+    try std.testing.expectEqual(@as(usize, 234), migratedArchOpCount(.x86_64));
 }
 
 test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
@@ -1779,7 +1781,9 @@ test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // from legacy (+10 = 131). B83: i32+i64 shift cohorts (10 ops;
     // emitI{32,64}ShiftCtx) moved from legacy (+10 = 141).
     // B84: bitcount(6) + eqz(2) = 8 ops moved from legacy (+8 = 149).
-    try std.testing.expectEqual(@as(usize, 149), collected_x86_64_ctx_ops.len);
+    // B85: sign-extension(5) + width-conversion(3) = 8 ops moved
+    // (+8 = 157).
+    try std.testing.expectEqual(@as(usize, 157), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would

@@ -691,6 +691,20 @@ pub fn emitI64Bitcount(
 /// MOVSX r32/r64, r/m8/16 (Intel SDM Vol 2 §3.2 MOVSX); the
 /// `i64.extend32_s` arm uses MOVSXD (REX.W + 0x63 /r). Mirrors
 /// arm64's SXTB/SXTH/SXTW (Arm IHI 0055 §C6.2.220).
+/// §9.12-B / B85 (ADR-0075) — `(ctx, ins)` adapter for the
+/// sign-extension cohort (5 ops).
+pub fn emitSignExtendCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitSignExtend(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.spill_base_off,
+        ins.op,
+    );
+}
+
 pub fn emitSignExtend(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
@@ -922,6 +936,20 @@ pub fn emitI64DivRem(
 /// destination's 64-bit slot, matching Wasm's value-class
 /// representation). `i64.extend_i32_s` lowers to MOVSXD.
 /// Mirrors arm64/op_convert.zig's emitWrap32 / emitExtendI32S.
+/// §9.12-B / B85 (ADR-0075) — `(ctx, ins)` adapter for the
+/// width-conversion cohort (i32.wrap_i64, i64.extend_i32_{s,u}).
+pub fn emitConvertWidthCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitConvertWidth(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.spill_base_off,
+        ins.op,
+    );
+}
+
 pub fn emitConvertWidth(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
