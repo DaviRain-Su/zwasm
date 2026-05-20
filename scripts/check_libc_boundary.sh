@@ -34,7 +34,10 @@ cd "$ROOT"
 
 # --- ADR-0070 classification (keep in sync with the ADR) ----------------
 
-# necessary tokens (any-match on the line)
+# necessary tokens (any-match on the line). ADR-0070 §B131 (2026-05-20)
+# amendment reclassified `_exit` / `fork` / `waitpid` / `alarm` from
+# replaceable → necessary because Zig 0.16 `std.posix` does not expose
+# them and `std.process.exit` is not async-signal-safe.
 NECESSARY=(
   "pthread_jit_write_protect_np"
   "sys_icache_invalidate"
@@ -44,30 +47,29 @@ NECESSARY=(
   "std.c.MAP"
   "std.c.MAP_FAILED"
   "std.c.vm_prot_t"
+  "std.c._exit"
+  "std.c.fork"
+  "std.c.waitpid"
+  "std.c.alarm"
 )
 
 # replaceable: symbol → suggested target (Bash 3 doesn't have assoc on macOS by
 # default, but Bash 4+ from nix-shell does; fall back to parallel arrays).
+# Post-B131 amendment (4 symbols moved to NECESSARY above); post-B130
+# (munmap migrated). Remaining: getenv (needs std.process plumbing
+# through c_api) + pid_t + kill (working std.posix equivalents).
 REPLACEABLE_SYMS=(
   "std.c.munmap"
   "std.c.getenv"
-  "std.c._exit"
   "std.c.pid_t"
   "std.c.kill"
-  "std.c.fork"
-  "std.c.alarm"
-  "std.c.waitpid"
   "std.c.write"
 )
 REPLACEABLE_HINTS=(
   "std.posix.munmap"
   "std.process.Environ / std.process.getEnvVarOwned"
-  "std.posix.exit"
   "std.posix.pid_t"
   "std.posix.kill"
-  "std.posix.fork"
-  "std.posix.alarm"
-  "std.posix.waitpid"
   "std.posix.write"
 )
 
