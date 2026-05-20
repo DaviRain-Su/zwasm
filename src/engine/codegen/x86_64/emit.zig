@@ -1160,21 +1160,22 @@ pub fn compile(
             .@"v128.xor" => try op_simd.emitV128XorCtx(&ctx, &ins),
             .@"v128.andnot" => try op_simd.emitV128AndnotCtx(&ctx, &ins),
             .@"v128.bitselect" => try op_simd.emitV128BitselectCtx(&ctx, &ins),
-            .@"v128.any_true" => try op_simd.emitV128AnyTrue(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            // §9.12-B / B104: SIMD bool reductions cohort migrated to ctx tuple.
+            .@"v128.any_true" => try op_simd.emitV128AnyTrueCtx(&ctx, &ins),
             // §9.7 / 9.7-s: per-shape all_true + bitmask reductions
             // (8 ops). all_true via SSE4.1 PXOR + PCMPEQ_<lane> +
             // PTEST + SETZ + MOVZX (5 instr per cranelift
             // `lower.isle:4936`). bitmask via PMOVMSKB / MOVMSKPS /
             // MOVMSKPD direct for i8/i32/i64; i16x8 needs PACKSSWB
             // + PMOVMSKB + SHR 8 (cranelift `lower.isle:4977`).
-            .@"i8x16.all_true" => try op_simd_int_cmp_lane.emitI8x16AllTrue(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i16x8.all_true" => try op_simd_int_cmp_lane.emitI16x8AllTrue(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i32x4.all_true" => try op_simd_int_cmp_lane.emitI32x4AllTrue(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i64x2.all_true" => try op_simd_int_cmp_lane.emitI64x2AllTrue(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i8x16.bitmask" => try op_simd_int_cmp_lane.emitI8x16Bitmask(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i16x8.bitmask" => try op_simd_int_cmp_lane.emitI16x8Bitmask(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i32x4.bitmask" => try op_simd_int_cmp_lane.emitI32x4Bitmask(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i64x2.bitmask" => try op_simd_int_cmp_lane.emitI64x2Bitmask(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i8x16.all_true" => try op_simd_int_cmp_lane.emitI8x16AllTrueCtx(&ctx, &ins),
+            .@"i16x8.all_true" => try op_simd_int_cmp_lane.emitI16x8AllTrueCtx(&ctx, &ins),
+            .@"i32x4.all_true" => try op_simd_int_cmp_lane.emitI32x4AllTrueCtx(&ctx, &ins),
+            .@"i64x2.all_true" => try op_simd_int_cmp_lane.emitI64x2AllTrueCtx(&ctx, &ins),
+            .@"i8x16.bitmask" => try op_simd_int_cmp_lane.emitI8x16BitmaskCtx(&ctx, &ins),
+            .@"i16x8.bitmask" => try op_simd_int_cmp_lane.emitI16x8BitmaskCtx(&ctx, &ins),
+            .@"i32x4.bitmask" => try op_simd_int_cmp_lane.emitI32x4BitmaskCtx(&ctx, &ins),
+            .@"i64x2.bitmask" => try op_simd_int_cmp_lane.emitI64x2BitmaskCtx(&ctx, &ins),
             // §9.7 / 9.7-t: i*x* packed shifts shl/shr_s/shr_u for
             // i16x8 + i32x4 + i64x2 (8 ops; i8x16 + i64x2.shr_s
             // synthesis defer to 9.7-u). 5-instr emit per shift:

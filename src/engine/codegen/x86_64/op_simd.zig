@@ -665,6 +665,13 @@ pub fn emitV128BitselectCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Err
     return emitV128Bitselect(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
+// §9.12-B / B104 (ADR-0075) — `(ctx, ins)` adapter for v128.any_true.
+
+pub fn emitV128AnyTrueCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitV128AnyTrue(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
+}
+
 pub fn emitV128Not(
     allocator: Allocator,
     buf: *std.ArrayList(u8),

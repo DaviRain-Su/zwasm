@@ -1279,15 +1279,7 @@ pub const collected_x86_64_ops = .{
     x86_64_i64x2_splat,
     x86_64_f32x4_splat,
     x86_64_f64x2_splat,
-    x86_64_v128_any_true,
-    x86_64_i8x16_all_true,
-    x86_64_i16x8_all_true,
-    x86_64_i32x4_all_true,
-    x86_64_i64x2_all_true,
-    x86_64_i8x16_bitmask,
-    x86_64_i16x8_bitmask,
-    x86_64_i32x4_bitmask,
-    x86_64_i64x2_bitmask,
+    // SIMD bool reductions cohort moved at B104 (9 ops; all 6-arg).
     x86_64_i8x16_narrow_i16x8_s,
     x86_64_i8x16_narrow_i16x8_u,
     x86_64_i16x8_narrow_i32x4_s,
@@ -1698,6 +1690,16 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_f64x2_gt,
     x86_64_f64x2_le,
     x86_64_f64x2_ge,
+    // B104: SIMD bool reductions cohort moved from legacy.
+    x86_64_v128_any_true,
+    x86_64_i8x16_all_true,
+    x86_64_i16x8_all_true,
+    x86_64_i32x4_all_true,
+    x86_64_i64x2_all_true,
+    x86_64_i8x16_bitmask,
+    x86_64_i16x8_bitmask,
+    x86_64_i32x4_bitmask,
+    x86_64_i64x2_bitmask,
 };
 
 comptime {
@@ -1768,8 +1770,8 @@ test "migratedArchOpCount tracks collected per-arch tuples (B59: arm64=348, x86_
     // load/store per-op files directly to ctx tuple (not in legacy
     // tuple before, so x86_64 count unchanged).
     try std.testing.expectEqual(@as(usize, 348), migratedArchOpCount(.arm64));
-    // B79..B102 walked cohorts; B103 SIMD float compare (12 ops).
-    try std.testing.expectEqual(@as(usize, 58), migratedArchOpCount(.x86_64));
+    // B79..B103 walked cohorts; B104 SIMD bool reductions (9 ops).
+    try std.testing.expectEqual(@as(usize, 49), migratedArchOpCount(.x86_64));
 }
 
 test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
@@ -1842,8 +1844,9 @@ test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // pmin/pmax 5-arg) moved (+8 = 299). B101: SIMD f64x2 arith
     // (8 ops; mirror) moved (+8 = 307). B102: SIMD float unary
     // (14 ops; all 5-arg) moved (+14 = 321). B103: SIMD float
-    // compare (12 ops; all 5-arg) moved (+12 = 333).
-    try std.testing.expectEqual(@as(usize, 333), collected_x86_64_ctx_ops.len);
+    // compare (12 ops; all 5-arg) moved (+12 = 333). B104: SIMD
+    // bool reductions (9 ops; all 6-arg) moved (+9 = 342).
+    try std.testing.expectEqual(@as(usize, 342), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would
