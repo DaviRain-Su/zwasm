@@ -103,6 +103,56 @@ inline fn slotForbidden(mask: u16, slot_id: u16, force_spill_threshold: u16) boo
     return (mask & (@as(u16, 1) << @intCast(slot_id))) != 0;
 }
 
+/// Comptime validator for a per-arch op_scratch_reservation_table
+/// (ADR-0077). Per-arch tables (`arm64/abi.zig::op_scratch_
+/// reservation_table` + future x86_64 mirror) call this from a
+/// `comptime` block right after the table literal. The function
+/// emits `@compileError` on any violation; the call is a no-op
+/// at runtime.
+///
+/// Asserts, for every op's reservation slice:
+///
+/// 1. Every reserved slot id is `< force_spill_threshold`. A slot
+///    id ≥ threshold names spill region, which is unreachable via
+///    op-internal clobber (the spill stage regs are X14/X15 on
+///    arm64 / RAX/R11 on x86_64, both outside `allocatable_gprs`)
+///    — so listing them is a silent no-op.
+/// 2. No duplicate slot ids within a single op's reservation
+///    set. Duplicates indicate copy-paste error in the per-arch
+///    table; the regalloc fence treats them as a single forbidden
+///    bit either way, but the duplicate is a hint of a sibling
+///    slot that was *meant* to be reserved.
+///
+/// `table` accepts `anytype` so per-arch callers can pass the
+/// fixed-size `[N][]const u16` array directly without explicit
+/// coercion.
+pub fn validateRegallocOpScratchReservation(
+    comptime table: anytype,
+    comptime force_spill_threshold: u16,
+) void {
+    comptime {
+        for (table, 0..) |reservation, op_idx| {
+            for (reservation, 0..) |sid, sid_idx| {
+                if (sid >= force_spill_threshold) {
+                    @compileError(std.fmt.comptimePrint(
+                        "ADR-0077: op_scratch_reservation_table[{d}][{d}] = slot {d} >= force_spill_threshold {d} (no-op declaration)",
+                        .{ op_idx, sid_idx, sid, force_spill_threshold },
+                    ));
+                }
+                var earlier_idx: usize = 0;
+                while (earlier_idx < sid_idx) : (earlier_idx += 1) {
+                    if (reservation[earlier_idx] == sid) {
+                        @compileError(std.fmt.comptimePrint(
+                            "ADR-0077: op_scratch_reservation_table[{d}] contains duplicate slot id {d}",
+                            .{ op_idx, sid },
+                        ));
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Cap on distinct slots before `compute` returns `SlotOverflow`.
 /// Mirrors the validator's `max_operand_stack` (1024) — bounded
 /// in straight-line code. Slot ids are u16 so the hard cap reaches
@@ -1667,6 +1717,32 @@ test "fence is PC-local: non-crossing vreg keeps slot 0 even with fence active" 
     try testing.expectEqual(@as(u16, 0), alloc.slots[0]);
     try testing.expectEqual(@as(u16, 0), alloc.slots[1]);
     try verify(&f, alloc);
+}
+
+test "validateRegallocOpScratchReservation: well-formed table compiles" {
+    // Mirror of arm64's actual shape: 5 slot reservation for one
+    // op-tag-index, empty for the rest. force_spill_threshold = 8
+    // matches arm64's allocatable_gprs.len.
+    comptime {
+        var t: [16][]const u16 = .{&.{}} ** 16;
+        t[3] = &.{ 0, 1, 2, 3, 4 };
+        validateRegallocOpScratchReservation(t, 8);
+    }
+}
+
+test "validateRegallocOpScratchReservation: empty table compiles" {
+    comptime {
+        const t: [4][]const u16 = .{&.{}} ** 4;
+        validateRegallocOpScratchReservation(t, 8);
+    }
+}
+
+test "validateRegallocOpScratchReservation: edge case — single-slot reservation at threshold-1" {
+    comptime {
+        var t: [2][]const u16 = .{&.{}} ** 2;
+        t[0] = &.{7}; // = allocatable_gprs.len - 1 = max legal slot id.
+        validateRegallocOpScratchReservation(t, 8);
+    }
 }
 
 test "fence: boundary PC (vreg ending AT reserving op) is safe on slot 0" {

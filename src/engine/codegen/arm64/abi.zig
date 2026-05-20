@@ -30,6 +30,7 @@ const std = @import("std");
 
 const inst = @import("inst.zig");
 const zir = @import("../../../ir/zir.zig");
+const regalloc = @import("../shared/regalloc.zig");
 const Xn = inst.Xn;
 
 /// First 8 X-registers carry function arguments + return values
@@ -283,19 +284,14 @@ pub const op_scratch_reservation_table: [zir_op_count][]const u16 = blk: {
     break :blk t;
 };
 
-// Comptime sanity: every declared reservation slot id is in the
-// regalloc allocatable range. A reservation for a slot id ≥
-// `allocatable_gprs.len` would be a silent no-op (regalloc never
-// assigns past that threshold to a non-spill vreg). The full
-// `validateRegallocOpScratchReservation` check lands at B124.
+// Comptime validation (ADR-0077 / B124). Delegates to the shared
+// regalloc validator so the arm64 + future x86_64 tables stay in
+// lockstep on what counts as a well-formed reservation.
 comptime {
-    for (op_scratch_reservation_table) |reservation| {
-        for (reservation) |sid| {
-            if (sid >= allocatable_gprs.len) {
-                @compileError("ADR-0077: op_scratch_reservation_table references non-allocatable slot id (= no-op declaration)");
-            }
-        }
-    }
+    regalloc.validateRegallocOpScratchReservation(
+        op_scratch_reservation_table,
+        allocatable_gprs.len,
+    );
 }
 
 /// `shared/regalloc.zig::ScratchReservationFn` compatible accessor.
@@ -487,7 +483,6 @@ test "opScratchReservation: shape matches shared.ScratchReservationFn" {
     // assignable to the shared regalloc's ScratchReservationFn.
     // If the shared type drifts (renames its arg or return), this
     // line fails to compile.
-    const regalloc = @import("../shared/regalloc.zig");
     const fp: regalloc.ScratchReservationFn = &opScratchReservation;
     _ = fp;
 }
