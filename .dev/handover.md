@@ -37,10 +37,10 @@
   doc, include/wasm.h byte-identical, zone_check --gate
   enforced. Remaining: Phase-10-feature ZirOp comptime reject
   infra (substantial), c_api Instance tests (D-139 blocked).
-- **§9.12-I partial** (`0ceed353` + `4cb46274`): D-149
-  mechanical SHA backfill 42/100 + `--multi-report` tooling.
-  Remaining 57 placeholders: 46 multi-match (narrative pass),
-  5 zero-match, 6 inline-no-date.
+- **§9.12-I partial** (`0ceed353` + `4cb46274` + `7be15f0d`):
+  D-149 SHA backfill 61/100 (42 mechanical + 19 Initial-row
+  earliest-commit). Remaining 38: multi-match narrative-pass
+  + zero-match + inline-no-date residuals.
 
 ## Next-cycle candidates (high-yield only)
 
