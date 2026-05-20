@@ -1237,14 +1237,7 @@ pub const collected_x86_64_ops = .{
     // i32+i64 shift cohorts moved at B83 (10 ops; emitI{32,64}ShiftCtx).
     // bitcount + eqz cohorts moved at B84 (8 ops; emitI{32,64}{Bitcount,Eqz}Ctx).
     // sign-extension (5) + width-conversion (3) = 8 ops moved at B85.
-    x86_64_f32_add,
-    x86_64_f32_sub,
-    x86_64_f32_mul,
-    x86_64_f32_div,
-    x86_64_f64_add,
-    x86_64_f64_sub,
-    x86_64_f64_mul,
-    x86_64_f64_div,
+    // FP arith cohort (8 ops; emitFpBinaryCtx) moved at B86.
     x86_64_f32_eq,
     x86_64_f32_ne,
     x86_64_f32_lt,
@@ -1660,6 +1653,15 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_i32_wrap_i64,
     x86_64_i64_extend_i32_s,
     x86_64_i64_extend_i32_u,
+    // B86: FP arith cohort moved from legacy.
+    x86_64_f32_add,
+    x86_64_f32_sub,
+    x86_64_f32_mul,
+    x86_64_f32_div,
+    x86_64_f64_add,
+    x86_64_f64_sub,
+    x86_64_f64_mul,
+    x86_64_f64_div,
 };
 
 comptime {
@@ -1730,8 +1732,8 @@ test "migratedArchOpCount tracks collected per-arch tuples (B59: arm64=348, x86_
     // load/store per-op files directly to ctx tuple (not in legacy
     // tuple before, so x86_64 count unchanged).
     try std.testing.expectEqual(@as(usize, 348), migratedArchOpCount(.arm64));
-    // B79..B84 walked cohorts; B85 sign-ext(5) + width-conv(3) = 8.
-    try std.testing.expectEqual(@as(usize, 234), migratedArchOpCount(.x86_64));
+    // B79..B85 walked cohorts; B86 FP arith (8 ops).
+    try std.testing.expectEqual(@as(usize, 226), migratedArchOpCount(.x86_64));
 }
 
 test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
@@ -1782,8 +1784,9 @@ test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // emitI{32,64}ShiftCtx) moved from legacy (+10 = 141).
     // B84: bitcount(6) + eqz(2) = 8 ops moved from legacy (+8 = 149).
     // B85: sign-extension(5) + width-conversion(3) = 8 ops moved
-    // (+8 = 157).
-    try std.testing.expectEqual(@as(usize, 157), collected_x86_64_ctx_ops.len);
+    // (+8 = 157). B86: FP arith (8 ops; emitFpBinaryCtx) moved
+    // (+8 = 165).
+    try std.testing.expectEqual(@as(usize, 165), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would

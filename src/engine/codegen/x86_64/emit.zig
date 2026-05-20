@@ -847,6 +847,7 @@ pub fn compile(
             .call_indirect => try op_call.emitCallIndirectCtx(&ctx, &ins),
             .@"f32.const" => try op_alu_float.emitF32Const(&ctx, &ins),
             .@"f64.const" => try op_alu_float.emitF64Const(&ctx, &ins),
+            // §9.12-B / B86: FP arith cohort migrated to ctx tuple.
             .@"f32.add",
             .@"f32.sub",
             .@"f32.mul",
@@ -855,7 +856,7 @@ pub fn compile(
             .@"f64.sub",
             .@"f64.mul",
             .@"f64.div",
-            => try op_alu_float.emitFpBinary(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.op),
+            => try op_alu_float.emitFpBinaryCtx(&ctx, &ins),
             .@"f32.eq",
             .@"f32.ne",
             .@"f32.lt",

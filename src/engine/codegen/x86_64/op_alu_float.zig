@@ -455,6 +455,20 @@ pub fn emitFpCompare(
 /// clobber rhs before OP reads it). With fresh-vreg-per-op
 /// allocation this never fires; surfaces as `UnsupportedOp` —
 /// same shape as `emitI32Binary`.
+/// §9.12-B / B86 (ADR-0075) — `(ctx, ins)` adapter for the FP
+/// arithmetic cohort (f32/f64.add/sub/mul/div, 8 ops).
+pub fn emitFpBinaryCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitFpBinary(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.spill_base_off,
+        ins.op,
+    );
+}
+
 pub fn emitFpBinary(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
