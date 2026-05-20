@@ -1281,18 +1281,7 @@ pub const collected_x86_64_ops = .{
     x86_64_f64x2_splat,
     // SIMD bool reductions cohort moved at B104 (9 ops; all 6-arg).
     // SIMD narrow+extend cohort moved at B105 (16 ops; 4 narrow 6-arg + 12 extend 5-arg).
-    x86_64_i16x8_extmul_low_i8x16_s,
-    x86_64_i16x8_extmul_high_i8x16_s,
-    x86_64_i16x8_extmul_low_i8x16_u,
-    x86_64_i16x8_extmul_high_i8x16_u,
-    x86_64_i32x4_extmul_low_i16x8_s,
-    x86_64_i32x4_extmul_high_i16x8_s,
-    x86_64_i32x4_extmul_low_i16x8_u,
-    x86_64_i32x4_extmul_high_i16x8_u,
-    x86_64_i64x2_extmul_low_i32x4_s,
-    x86_64_i64x2_extmul_high_i32x4_s,
-    x86_64_i64x2_extmul_low_i32x4_u,
-    x86_64_i64x2_extmul_high_i32x4_u,
+    // SIMD extmul cohort moved at B106 (12 ops; all 5-arg).
     x86_64_i16x8_extadd_pairwise_i8x16_s,
     x86_64_i16x8_extadd_pairwise_i8x16_u,
     x86_64_i32x4_extadd_pairwise_i16x8_s,
@@ -1702,6 +1691,18 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_i8x16_narrow_i16x8_u,
     x86_64_i16x8_narrow_i32x4_s,
     x86_64_i16x8_narrow_i32x4_u,
+    x86_64_i16x8_extmul_low_i8x16_s,
+    x86_64_i16x8_extmul_high_i8x16_s,
+    x86_64_i16x8_extmul_low_i8x16_u,
+    x86_64_i16x8_extmul_high_i8x16_u,
+    x86_64_i32x4_extmul_low_i16x8_s,
+    x86_64_i32x4_extmul_high_i16x8_s,
+    x86_64_i32x4_extmul_low_i16x8_u,
+    x86_64_i32x4_extmul_high_i16x8_u,
+    x86_64_i64x2_extmul_low_i32x4_s,
+    x86_64_i64x2_extmul_high_i32x4_s,
+    x86_64_i64x2_extmul_low_i32x4_u,
+    x86_64_i64x2_extmul_high_i32x4_u,
 };
 
 comptime {
@@ -1772,8 +1773,8 @@ test "migratedArchOpCount tracks collected per-arch tuples (B59: arm64=348, x86_
     // load/store per-op files directly to ctx tuple (not in legacy
     // tuple before, so x86_64 count unchanged).
     try std.testing.expectEqual(@as(usize, 348), migratedArchOpCount(.arm64));
-    // B79..B104 walked cohorts; B105 SIMD narrow+extend (16 ops).
-    try std.testing.expectEqual(@as(usize, 33), migratedArchOpCount(.x86_64));
+    // B79..B105 walked cohorts; B106 SIMD extmul (12 ops).
+    try std.testing.expectEqual(@as(usize, 21), migratedArchOpCount(.x86_64));
 }
 
 test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
@@ -1849,8 +1850,9 @@ test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // compare (12 ops; all 5-arg) moved (+12 = 333). B104: SIMD
     // bool reductions (9 ops; all 6-arg) moved (+9 = 342). B105:
     // SIMD narrow+extend (16 ops; 4 narrow 6-arg + 12 extend
-    // 5-arg) moved (+16 = 358).
-    try std.testing.expectEqual(@as(usize, 358), collected_x86_64_ctx_ops.len);
+    // 5-arg) moved (+16 = 358). B106: SIMD extmul (12 ops; all
+    // 5-arg) moved (+12 = 370).
+    try std.testing.expectEqual(@as(usize, 370), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would

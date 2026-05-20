@@ -350,6 +350,66 @@ pub fn emitI16x8NarrowI32x4UCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr)
     return emitI16x8NarrowI32x4U(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
+pub fn emitI16x8ExtmulLowI8x16SCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI16x8ExtmulLowI8x16S(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+}
+
+pub fn emitI16x8ExtmulHighI8x16SCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI16x8ExtmulHighI8x16S(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+}
+
+pub fn emitI16x8ExtmulLowI8x16UCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI16x8ExtmulLowI8x16U(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+}
+
+pub fn emitI16x8ExtmulHighI8x16UCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI16x8ExtmulHighI8x16U(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+}
+
+pub fn emitI32x4ExtmulLowI16x8SCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI32x4ExtmulLowI16x8S(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+}
+
+pub fn emitI32x4ExtmulHighI16x8SCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI32x4ExtmulHighI16x8S(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+}
+
+pub fn emitI32x4ExtmulLowI16x8UCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI32x4ExtmulLowI16x8U(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+}
+
+pub fn emitI32x4ExtmulHighI16x8UCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI32x4ExtmulHighI16x8U(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+}
+
+pub fn emitI64x2ExtmulLowI32x4SCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI64x2ExtmulLowI32x4S(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+}
+
+pub fn emitI64x2ExtmulHighI32x4SCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI64x2ExtmulHighI32x4S(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+}
+
+pub fn emitI64x2ExtmulLowI32x4UCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI64x2ExtmulLowI32x4U(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+}
+
+pub fn emitI64x2ExtmulHighI32x4UCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI64x2ExtmulHighI32x4U(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+}
+
 /// Wasm spec §4.4.3 (i32x4.splat) — pop scalar i32, push v128
 /// with all four lanes equal to the scalar. x86_64 lowering:
 /// `MOVD xmm, r32` (zero-extends to 128 bits) followed by

@@ -1369,25 +1369,25 @@ pub fn compile(
             // (extend i8→i16) + PMULLW. High variants prefix
             // PSHUFD imm=0xEE to swap upper 64 bits down before
             // extending. No new encoders.
-            .@"i16x8.extmul_low_i8x16_s" => try op_simd_int_cmp_lane.emitI16x8ExtmulLowI8x16S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i16x8.extmul_high_i8x16_s" => try op_simd_int_cmp_lane.emitI16x8ExtmulHighI8x16S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i16x8.extmul_low_i8x16_u" => try op_simd_int_cmp_lane.emitI16x8ExtmulLowI8x16U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i16x8.extmul_high_i8x16_u" => try op_simd_int_cmp_lane.emitI16x8ExtmulHighI8x16U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i16x8.extmul_low_i8x16_s" => try op_simd_int_cmp_lane.emitI16x8ExtmulLowI8x16SCtx(&ctx, &ins),
+            .@"i16x8.extmul_high_i8x16_s" => try op_simd_int_cmp_lane.emitI16x8ExtmulHighI8x16SCtx(&ctx, &ins),
+            .@"i16x8.extmul_low_i8x16_u" => try op_simd_int_cmp_lane.emitI16x8ExtmulLowI8x16UCtx(&ctx, &ins),
+            .@"i16x8.extmul_high_i8x16_u" => try op_simd_int_cmp_lane.emitI16x8ExtmulHighI8x16UCtx(&ctx, &ins),
             // §9.7 / 9.7-ah: i32x4.extmul × 4 (i16x8 → i32x4).
             // Same recipe as 9.7-ag with PMOVSXWD/PMOVZXWD +
             // PMULLD substituted; helpers reused unchanged.
-            .@"i32x4.extmul_low_i16x8_s" => try op_simd_int_cmp_lane.emitI32x4ExtmulLowI16x8S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i32x4.extmul_high_i16x8_s" => try op_simd_int_cmp_lane.emitI32x4ExtmulHighI16x8S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i32x4.extmul_low_i16x8_u" => try op_simd_int_cmp_lane.emitI32x4ExtmulLowI16x8U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i32x4.extmul_high_i16x8_u" => try op_simd_int_cmp_lane.emitI32x4ExtmulHighI16x8U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.extmul_low_i16x8_s" => try op_simd_int_cmp_lane.emitI32x4ExtmulLowI16x8SCtx(&ctx, &ins),
+            .@"i32x4.extmul_high_i16x8_s" => try op_simd_int_cmp_lane.emitI32x4ExtmulHighI16x8SCtx(&ctx, &ins),
+            .@"i32x4.extmul_low_i16x8_u" => try op_simd_int_cmp_lane.emitI32x4ExtmulLowI16x8UCtx(&ctx, &ins),
+            .@"i32x4.extmul_high_i16x8_u" => try op_simd_int_cmp_lane.emitI32x4ExtmulHighI16x8UCtx(&ctx, &ins),
             // §9.7 / 9.7-ai: i64x2.extmul × 4 (i32x4 → i64x2).
             // Different shape: PMULDQ/PMULUDQ already widen
             // i32→i64, so PSHUFD imm=0x{50,FA} is the only
             // positioning needed (no PMOVSX/ZX prefix).
-            .@"i64x2.extmul_low_i32x4_s" => try op_simd_int_cmp_lane.emitI64x2ExtmulLowI32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i64x2.extmul_high_i32x4_s" => try op_simd_int_cmp_lane.emitI64x2ExtmulHighI32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i64x2.extmul_low_i32x4_u" => try op_simd_int_cmp_lane.emitI64x2ExtmulLowI32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i64x2.extmul_high_i32x4_u" => try op_simd_int_cmp_lane.emitI64x2ExtmulHighI32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i64x2.extmul_low_i32x4_s" => try op_simd_int_cmp_lane.emitI64x2ExtmulLowI32x4SCtx(&ctx, &ins),
+            .@"i64x2.extmul_high_i32x4_s" => try op_simd_int_cmp_lane.emitI64x2ExtmulHighI32x4SCtx(&ctx, &ins),
+            .@"i64x2.extmul_low_i32x4_u" => try op_simd_int_cmp_lane.emitI64x2ExtmulLowI32x4UCtx(&ctx, &ins),
+            .@"i64x2.extmul_high_i32x4_u" => try op_simd_int_cmp_lane.emitI64x2ExtmulHighI32x4UCtx(&ctx, &ins),
             // §9.7 / 9.7-aj: i16x8.extadd_pairwise_i8x16 × 2.
             // PCMPEQB + PABSB synthesises a 0x01-per-byte vector;
             // PMADDUBSW (SSSE3) reduces to pairwise add. No
