@@ -1063,10 +1063,28 @@ pub fn opModuleFor(comptime tag: ZirOp) ?type {
 /// `dispatcher(.<axis>)(op, &ctx)` that falls through to a residual
 /// legacy switch only when `error.NotMigrated` is returned.
 pub fn dispatcher(comptime axis: IRAxis) fn (op: ZirOp, args: anytype) DispatchError!void {
+    return dispatcherOver(axis, collected_ops);
+}
+
+/// Parametrised dispatcher backing `dispatcher()` + test entry-point.
+/// Walks `ops` and returns:
+///   - `UnsupportedOpForBuildLevel` — tag matches a registered op_mod
+///     but the current `-Dwasm=` / `-Dwasi=` build filters it out.
+///     The disabled op_mod's handler body is NOT instantiated (DCE
+///     preserved); only the tag comparison + error return is emitted.
+///   - `NotMigrated` — tag not present in `ops`. Legacy dispatcher
+///     remains authoritative.
+///   - whatever the axis handler returns — tag matches AND build-enabled.
+fn dispatcherOver(comptime axis: IRAxis, comptime ops: anytype) fn (op: ZirOp, args: anytype) DispatchError!void {
     return struct {
         fn dispatch(op: ZirOp, args: anytype) DispatchError!void {
-            inline for (collected_ops) |op_mod| {
-                if (comptime !enabledByBuild(op_mod)) continue;
+            inline for (ops) |op_mod| {
+                if (comptime !enabledByBuild(op_mod)) {
+                    if (op == op_mod.op_tag) {
+                        return DispatchError.UnsupportedOpForBuildLevel;
+                    }
+                    continue;
+                }
                 if (op == op_mod.op_tag) {
                     // Per-op handlers in B-sub-chunks (until they migrate
                     // to real bodies) only return DispatchError values.
@@ -1117,6 +1135,42 @@ test "opModuleFor returns null for not-yet-migrated tags" {
 
 test "IRAxis enum has exactly 3 variants per ADR-0074 (Zone 1 IR-axes only)" {
     try std.testing.expectEqual(@as(usize, 3), @typeInfo(IRAxis).@"enum".fields.len);
+}
+
+test "dispatcherOver returns UnsupportedOpForBuildLevel for build-filtered op tag (Phase 10 prep)" {
+    // §9.12-G prep: when a Phase 10 / Wasm 3.0 op_mod is registered
+    // but the current build's -Dwasm= / -Dwasi= filters it out, the
+    // dispatcher must distinguish "tag matched but disabled" from
+    // "tag not registered". The former → UnsupportedOpForBuildLevel,
+    // the latter → NotMigrated. Caller code in validator.zig /
+    // lower.zig pattern-matches both as "fall through to legacy
+    // switch" today; future Phase 10 paths can surface the disabled-
+    // op case explicitly as an error.
+    //
+    // Synthetic op_mod with wasi_level: .p2 is filtered under the
+    // default -Dwasi=p1 build (p2 > p1 and current != .both).
+    const synthetic = struct {
+        pub const op_tag: ZirOp = .@"unreachable";
+        pub const wasm_level: ?WasmLevel = null;
+        pub const wasi_level: ?WasiLevel = .p2;
+        pub const handlers = .{
+            .validate = unreachable_axis_stub,
+            .lower = unreachable_axis_stub,
+            .interp = unreachable_axis_stub,
+        };
+
+        fn unreachable_axis_stub() DispatchError!void {
+            return error.NotMigrated;
+        }
+    };
+
+    const disp = dispatcherOver(.validate, .{synthetic});
+
+    // Tag matches → build-filtered → UnsupportedOpForBuildLevel.
+    try std.testing.expectError(error.UnsupportedOpForBuildLevel, disp(.@"unreachable", .{}));
+
+    // Tag does NOT match → fall through to NotMigrated.
+    try std.testing.expectError(error.NotMigrated, disp(.@"i32.add", .{}));
 }
 
 test "dispatcher(.validate) routes i32.add to its per-op stub (returns NotMigrated by design)" {
