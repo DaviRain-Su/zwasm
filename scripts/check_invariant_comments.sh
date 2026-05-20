@@ -96,7 +96,22 @@ done
 echo ""
 echo "Total: $total latent overlap site(s) (D-133 tracks this; substrate audit Q5 anchor)."
 
-if [ "$strict" -eq 1 ] && [ "$total" -gt 0 ]; then
+# Forbidden-phrase patterns per .claude/rules/single_slot_dual_meaning.md.
+# Code comments using "the same X is reused" or "for now we share X"
+# normalise the dual-axis-merge anti-pattern. Flag occurrences.
+echo ""
+echo "Forbidden-phrase patterns in code comments (single_slot_dual_meaning.md):"
+forbidden_phrases='the same field is reused|for now we share|reusing the same slot for both|share this field for both'
+phrase_hits=$(grep -rEn --include='*.zig' "//.*($forbidden_phrases)" src/ 2>/dev/null || true)
+phrase_total=0
+if [ -n "$phrase_hits" ]; then
+  phrase_total=$(echo "$phrase_hits" | wc -l | tr -d ' ')
+  echo "$phrase_hits" | sed 's/^/  /'
+fi
+echo "Forbidden-phrase site(s): $phrase_total"
+
+grand_total=$((total + phrase_total))
+if [ "$strict" -eq 1 ] && [ "$grand_total" -gt 0 ]; then
   exit 1
 fi
 exit 0
