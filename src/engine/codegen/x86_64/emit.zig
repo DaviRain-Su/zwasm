@@ -776,6 +776,7 @@ pub fn compile(
             .@"i64.or",
             .@"i64.xor",
             => try op_alu_int.emitI64BinaryCtx(&ctx, &ins),
+            // §9.12-B / B82: i64 compare cohort migrated to ctx tuple.
             .@"i64.eq",
             .@"i64.ne",
             .@"i64.lt_s",
@@ -786,7 +787,7 @@ pub fn compile(
             .@"i64.le_u",
             .@"i64.ge_s",
             .@"i64.ge_u",
-            => try op_alu_int.emitI64Compare(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.op),
+            => try op_alu_int.emitI64CompareCtx(&ctx, &ins),
             .@"i64.eqz" => try op_alu_int.emitI64Eqz(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             // §9.9 / 9.9-m-1a (per ADR-0056): Wasm 2.0 reference-types
             // partial — null + is_null. ref.func deferred to m-1b

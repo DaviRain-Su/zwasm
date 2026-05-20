@@ -1233,16 +1233,7 @@ pub const collected_x86_64_ops = .{
     // i64 binary ALU cohort moved at B80 (i64.add/sub/mul/and/or/xor;
     // same emitI64BinaryCtx adapter).
     // i32 compare cohort moved at B81 (10 ops; emitI32CompareCtx).
-    x86_64_i64_eq,
-    x86_64_i64_ne,
-    x86_64_i64_lt_s,
-    x86_64_i64_lt_u,
-    x86_64_i64_gt_s,
-    x86_64_i64_gt_u,
-    x86_64_i64_le_s,
-    x86_64_i64_le_u,
-    x86_64_i64_ge_s,
-    x86_64_i64_ge_u,
+    // i64 compare cohort moved at B82 (10 ops; emitI64CompareCtx).
     x86_64_i32_eqz,
     x86_64_i64_eqz,
     x86_64_i32_shl,
@@ -1652,6 +1643,17 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_i32_le_u,
     x86_64_i32_ge_s,
     x86_64_i32_ge_u,
+    // B82: i64 compare cohort moved from legacy tuple.
+    x86_64_i64_eq,
+    x86_64_i64_ne,
+    x86_64_i64_lt_s,
+    x86_64_i64_lt_u,
+    x86_64_i64_gt_s,
+    x86_64_i64_gt_u,
+    x86_64_i64_le_s,
+    x86_64_i64_le_u,
+    x86_64_i64_ge_s,
+    x86_64_i64_ge_u,
 };
 
 comptime {
@@ -1722,8 +1724,9 @@ test "migratedArchOpCount tracks collected per-arch tuples (B59: arm64=348, x86_
     // load/store per-op files directly to ctx tuple (not in legacy
     // tuple before, so x86_64 count unchanged).
     try std.testing.expectEqual(@as(usize, 348), migratedArchOpCount(.arm64));
-    // B79 i32 binary (6); B80 i64 binary (6); B81 i32 compare (10).
-    try std.testing.expectEqual(@as(usize, 270), migratedArchOpCount(.x86_64));
+    // B79 i32 binary (6); B80 i64 binary (6); B81 i32 compare (10);
+    // B82 i64 compare (10).
+    try std.testing.expectEqual(@as(usize, 260), migratedArchOpCount(.x86_64));
 }
 
 test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
@@ -1769,7 +1772,9 @@ test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // B80: i64 binary ALU cohort (6 ops; emitI64BinaryCtx) moved
     // from legacy (+6 = 111). B81: i32 compare cohort (10 ops;
     // emitI32CompareCtx) moved from legacy (+10 = 121).
-    try std.testing.expectEqual(@as(usize, 121), collected_x86_64_ctx_ops.len);
+    // B82: i64 compare cohort (10 ops; emitI64CompareCtx) moved
+    // from legacy (+10 = 131).
+    try std.testing.expectEqual(@as(usize, 131), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would

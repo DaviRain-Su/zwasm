@@ -443,6 +443,20 @@ pub fn emitI64Binary(
 /// le_{s,u} / ge_{s,u}) — 64-bit comparison; result is i32 0/1.
 /// CMP becomes 64-bit (.q) but SETcc + MOVZX stay 8/32-bit since
 /// the result is i32.
+/// §9.12-B / B82 (ADR-0075) — `(ctx, ins)` adapter for the i64
+/// compare cohort (10 ops; same shape as i32 compare).
+pub fn emitI64CompareCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitI64Compare(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.spill_base_off,
+        ins.op,
+    );
+}
+
 pub fn emitI64Compare(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
