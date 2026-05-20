@@ -1491,6 +1491,79 @@ pub fn resolveCrossModuleImports(
     return slot_idx;
 }
 
+/// Close-plan §6 (j) Step B cohort 4 — compute the effective
+/// table-0 size as the spec sees it during instantiation. When
+/// table-0 is imported and the exporter is registered, the
+/// EXPORTER's actual table min is used (the importer's declared
+/// min is just a lower bound). When table-0 is imported but no
+/// exporter is registered, fall back to the importer's declared
+/// min. When table-0 is defined locally, return the declared min.
+/// Returns 0 when no table-0 exists at all.
+pub fn effectiveTable0Min(
+    allocator: std.mem.Allocator,
+    importer_wasm: []const u8,
+    registered: ?*const std.StringHashMapUnmanaged(RegisteredExporter),
+) u32 {
+    var temp_arena = std.heap.ArenaAllocator.init(allocator);
+    defer temp_arena.deinit();
+    const ta = temp_arena.allocator();
+    var module = zwasm.parse.parser.parse(ta, importer_wasm) catch return 0;
+    if (module.find(.import)) |s| {
+        var imports = zwasm.parse.sections.decodeImports(ta, s.body) catch return 0;
+        defer imports.deinit();
+        for (imports.items) |imp| {
+            if (imp.kind != .table) continue;
+            // First table import = table-0.
+            if (registered) |reg| {
+                if (reg.getPtr(imp.module)) |exp| {
+                    return extractExporterTableMin(allocator, exp.bytes_owned, imp.name) orelse imp.payload.table.min;
+                }
+            }
+            return imp.payload.table.min;
+        }
+    }
+    return runner_mod.declaredTableMin(allocator, importer_wasm, 0);
+}
+
+fn extractExporterTableMin(
+    allocator: std.mem.Allocator,
+    exporter_wasm: []const u8,
+    export_name: []const u8,
+) ?u32 {
+    var temp_arena = std.heap.ArenaAllocator.init(allocator);
+    defer temp_arena.deinit();
+    const ta = temp_arena.allocator();
+    var module = zwasm.parse.parser.parse(ta, exporter_wasm) catch return null;
+    const export_sec = module.find(.@"export") orelse return null;
+    var exports = zwasm.parse.sections.decodeExports(ta, export_sec.body) catch return null;
+    defer exports.deinit();
+    var exp_table_idx: ?u32 = null;
+    for (exports.items) |e| {
+        if (e.kind != .table) continue;
+        if (!std.mem.eql(u8, e.name, export_name)) continue;
+        exp_table_idx = e.idx;
+        break;
+    }
+    const tidx = exp_table_idx orelse return null;
+    // Walk imports first (imports prefix in exporter's table index space).
+    var seen: u32 = 0;
+    if (module.find(.import)) |s| {
+        var imports = zwasm.parse.sections.decodeImports(ta, s.body) catch return null;
+        defer imports.deinit();
+        for (imports.items) |imp| {
+            if (imp.kind != .table) continue;
+            if (seen == tidx) return imp.payload.table.min;
+            seen += 1;
+        }
+    }
+    const t_sec = module.find(.table) orelse return null;
+    var tables = zwasm.parse.sections.decodeTables(ta, t_sec.body) catch return null;
+    defer tables.deinit();
+    const defined_idx = tidx - seen;
+    if (defined_idx >= tables.items.len) return null;
+    return tables.items[defined_idx].min;
+}
+
 /// Close-plan §6 (j) Step B cohort 1 — walk the importer's global
 /// imports and write each resolved value into the importer's
 /// `scratch_globals` byte buffer at the import-slot offset.

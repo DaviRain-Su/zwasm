@@ -221,12 +221,20 @@ fn nonSimdOnModuleLoaded(
         try stdout.print("FAIL  {s} globals-init: {s}\n", .{ name, @errorName(err) });
         return err;
     };
+    // close-plan §6 (j) Step B cohort 4 — bound the funcptrs/typeidxs
+    // slice by the EFFECTIVE table-0 min (exporter actual for imported
+    // tables; declared min for local) so active elem segments writing
+    // past the actual size surface as OOB (UES). Importer-declared
+    // min on an imported table is just a lower bound and is NOT the
+    // table's true size — that's the exporter's table min.
+    const table0_min = base.effectiveTable0Min(gpa, wasm_bytes, base.current_registered);
+    const table0_cap = @min(@as(usize, table0_min), scratch_funcptrs.len);
     runner_mod.applyTableInitCtx(
         gpa,
         wasm_bytes,
         compiled,
-        scratch_funcptrs[0..],
-        scratch_typeidxs[0..],
+        scratch_funcptrs[0..table0_cap],
+        scratch_typeidxs[0..table0_cap],
         gctx_runtime,
     ) catch |err| {
         try stdout.print("FAIL  {s} table-init: {s}\n", .{ name, @errorName(err) });
@@ -1769,19 +1777,29 @@ fn nonSimdHandleAssertUninstantiable(
         scratch_globals[0..],
         compiled.num_global_imports,
     ) catch return true;
-    runner_mod.applyTableInit(
+    const u_table0_min = base.effectiveTable0Min(gpa, wasm_bytes, base.current_registered);
+    const u_table0_cap = @min(@as(usize, u_table0_min), scratch_funcptrs.len);
+    const u_gctx = @import("zwasm").engine.runner_validate.GlobalsCtx{
+        .offsets = compiled.globals_offsets,
+        .valtypes = compiled.globals_valtypes,
+        .buf = scratch_globals[0..],
+        .num_imports = compiled.num_global_imports,
+    };
+    runner_mod.applyTableInitCtx(
         gpa,
         wasm_bytes,
         compiled,
-        scratch_funcptrs[0..],
-        scratch_typeidxs[0..],
+        scratch_funcptrs[0..u_table0_cap],
+        scratch_typeidxs[0..u_table0_cap],
+        u_gctx,
     ) catch return true;
-    base.setupMultiTableScratch(
+    base.setupMultiTableScratchCtx(
         gpa,
         wasm_bytes,
         compiled,
-        scratch_funcptrs[0..],
-        scratch_typeidxs[0..],
+        scratch_funcptrs[0..u_table0_cap],
+        scratch_typeidxs[0..u_table0_cap],
+        u_gctx,
     ) catch return true;
     if (base.current_dispatch) |disp| {
         runner_mod.patchTableImportFuncptrs(
