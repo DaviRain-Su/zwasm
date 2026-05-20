@@ -5,9 +5,9 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit: `c3e391f9`
-   (ADR-0079 Steps 2+3: compileWasm + helpers → compile.zig)。
-   runner.zig 1577 → 397 LOC (ADR-0079 全 Step 完了)。
+1. `git log --oneline -10` — last commit: `39f1dc15`
+   (docs §9.12-G partial: Wasm 3.0 ZirOp mapping table)。
+   直近 code: `c3e391f9` (ADR-0079 Steps 2+3 close)。
 2. **Live status**: `zig build test-spec-wasm-2.0-assert >
    /tmp/spec.log 2>&1 || true; grep "passed\\|^FAIL " /tmp/spec.log`
    — Mac aarch64 baseline expected at HEAD `7b2e1b02`:
@@ -67,12 +67,21 @@
 - D-141 row partial discharge: runner.zig now under 1000 soft cap。
   WARN list 残: validator.zig / lower.zig / liveness.zig /
   emit.zig (arm64+x86_64) / inst.zig (arm64+x86_64) / op_simd_*。
-- 次 cycle: §9.12-F / §9.12-G / §9.12-H / §9.12-I のいずれかへ
-  進む。最も yield 高い候補:
-  - §9.12-I (D-149 ADR SHA backfill 75 → 0; 機械的だが量
-    multiple)
-  - §9.12-G の Wasm 3.0 ZirOp mapping table 起草 (Phase 10 prep)
-  - 別 file の per-file ADR + 分割 (D-141 残)
+- §9.12-G partial discharge (`39f1dc15`):
+  - .dev/wasm_3_0_zirop_mapping.md 起草 (proposal × opcode 全
+    エントリ手書き; Phase 10 open 時に dispatch_collector 経由で
+    machine-regenerate 想定)
+  - include/wasm.h byte-identical with wasm-c-api upstream 検証
+  - zone_check --gate 既に enforced (前 cycle 確認済)
+- 次 cycle 候補:
+  - §9.12-G 残: all-Phase-10-feature-ZirOp comptime reject
+    infrastructure (大きい), c_api Instance test (D-139 blocked)
+  - §9.12-H bench baseline (Mac-only Wasm 2.0 + wasmtime
+    comparison)
+  - §9.12-I D-149 ADR SHA backfill (tedious mechanical, 75
+    entries)
+  - D-141 残 per-file ADR (validator.zig / lower.zig / emit.zig
+    × 2 archs / inst.zig × 2 archs / liveness.zig)
 
 ## Ubuntu mirror verification
 
