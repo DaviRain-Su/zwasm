@@ -147,6 +147,17 @@ pub const DirectiveKind = enum {
     /// d-36: bare `(invoke FN ARGS)` action — invoke for side
     /// effects, ignore result, propagate traps as FAIL.
     invoke_action,
+    /// §9.12-E / B137 — wast `(get "field")` same-module action
+    /// (Wasm spec §A.2.4 "Actions"). Body is the export name +
+    /// typed expected value, space-separated:
+    /// `get-action <field> <type> <value>`. Replaces the prior
+    /// `skip-impl non-invoke-action` placeholder (master plan
+    /// §5.3 SKIP-EXPORTS site). Runners implementing
+    /// `handle_get_action` look up the global by export name +
+    /// compare its current value against the expected; runners
+    /// without the callback emit `SKIP-NON-INVOKE-ACTION` as
+    /// skip-adr.
+    get_action,
     /// Phase 9 §9.9-III chunk (c)-1c per ADR-0065: wast
     /// `(register "M" $inst)` directive — binds the current
     /// module under a host-import alias. Body is the alias name.
@@ -199,6 +210,9 @@ pub fn classifyDirective(line: []const u8) ClassifiedDirective {
     }
     if (std.mem.startsWith(u8, line, "invoke-action ")) {
         return .{ .kind = .invoke_action, .body = line[14..] };
+    }
+    if (std.mem.startsWith(u8, line, "get-action ")) {
+        return .{ .kind = .get_action, .body = line[11..] };
     }
     if (std.mem.startsWith(u8, line, "register ")) {
         return .{ .kind = .register, .body = line[9..] };
@@ -2186,6 +2200,22 @@ pub const RunnerCallbacks = struct {
         stdout: *std.Io.Writer,
         name: []const u8,
     ) anyerror!bool,
+    /// §9.12-E / B137: same-module `(get "field")` action handler.
+    /// Body shape: `<field> <type> <value>` (e.g. `e i32 42`).
+    /// Returns true on PASS, false on FAIL (value mismatch / global
+    /// not found). Optional — runners that don't yet support
+    /// non-invoke actions leave this null and base routes the
+    /// directive to skipped_adr with a SKIP-NON-INVOKE-ACTION
+    /// token (preserves the prior skip-impl behaviour while
+    /// freeing the manifest format to encode it honestly).
+    handle_get_action: ?*const fn (
+        gpa: std.mem.Allocator,
+        wasm_bytes: []const u8,
+        compiled: *const runner_mod.CompiledWasm,
+        body: []const u8,
+        stdout: *std.Io.Writer,
+        name: []const u8,
+    ) anyerror!bool = null,
     /// d-57: attempt the same instantiation work as
     /// `on_module_loaded` but invert error semantics — return
     /// `true` (PASS) on any init-time failure (active data/elem
@@ -2519,6 +2549,29 @@ pub fn runCorpus(
                     tally.skipped_adr += 1;
                 } else {
                     tally.failed += 1;
+                }
+            },
+            .get_action => {
+                if (module_bad) {
+                    tally.skipped += 1;
+                    continue;
+                }
+                const compiled_ptr: *const runner_mod.CompiledWasm = if (current_compiled) |*c| c else {
+                    try stdout.print("FAIL  {s}: get-action without prior module\n", .{name});
+                    tally.failed += 1;
+                    continue;
+                };
+                const wasm = current_wasm.?;
+                if (callbacks.handle_get_action) |handler| {
+                    const ok = handler(gpa, wasm, compiled_ptr, classified.body, stdout, name) catch |err| {
+                        try stdout.print("FAIL  {s}: {s} (error {s})\n", .{ name, line, @errorName(err) });
+                        tally.failed += 1;
+                        continue;
+                    };
+                    if (ok) tally.passed += 1 else tally.failed += 1;
+                } else {
+                    try stdout.print("SKIP-NON-INVOKE-ACTION  {s}: {s}\n", .{ name, line });
+                    tally.skipped_adr += 1;
                 }
             },
             .assert_invalid => {

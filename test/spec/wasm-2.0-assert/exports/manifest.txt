@@ -37,7 +37,7 @@ module exports.29.wasm
 module exports.30.wasm
 module exports.31.wasm
 module exports.32.wasm
-skip-impl non-invoke-action
+get-action e i32 42
 skip-adr-skip_cross_module_action assert_return on module=$Global field=e
 module exports.33.wasm
 module exports.34.wasm

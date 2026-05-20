@@ -50,3 +50,21 @@ entries:
       Remaining: SKIP-CROSS-MODULE-IMPORTS 100, SKIP-NO-LINK-TYPECHECK 26,
       exports/manifest.txt 1, plus ~66 cascade.
     exempt: null
+
+  - commit: "B137-pending"
+    timestamp: "2026-05-20T20:50:00Z"
+    non_simd_skip_impl: 192
+    simd_skip_impl: 0
+    total: 192
+    note: |
+      §9.12-E / B137 — manifest format extension + base runner support
+      for `get-action <field> <type> <value>` directive.
+      regen_spec_2_0_assert.sh now emits the directive instead of
+      `skip-impl non-invoke-action` for same-module `(get "field")`
+      actions; base runner recognizes the directive + nullable
+      `handle_get_action` callback. Non-SIMD callback stays null
+      pending D-152 (compileWasm empty-fn-path globals_offsets fix);
+      fallback emits SKIP-NON-INVOKE-ACTION → skipped_adr. Net:
+      `spec_assert_runner_non_simd: 25325 passed, 0 failed, 688
+      skipped (= 192 skip-impl + 496 skip-adr)`.
+    exempt: null

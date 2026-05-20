@@ -481,6 +481,23 @@ for c in d['commands']:
         if 'module' in a:
             lines.append(f'skip-adr-skip_cross_module_action assert_return on module={a["module"]!s} field={a.get("field","?")!s}')
             continue
+        if a.get('type') == 'get':
+            # §9.12-E / B137: same-module `(get "field")` action.
+            # Emit `get-action <field> <type> <value>` so the runner's
+            # handle_get_action callback can look up the global by
+            # export name + compare its current value vs expected.
+            # `c.get("expected")` is a singleton list for `get`.
+            expected = c.get('expected', [])
+            if len(expected) == 1 and expected[0].get('type') in ('i32', 'i64', 'f32', 'f64'):
+                etype = expected[0]['type']
+                eval_ = expected[0].get('value', '0')
+                lines.append(f'get-action {a["field"]} {etype} {eval_}')
+                continue
+            # Other get-action shapes (v128, externref result, missing
+            # value) still skip-impl until the relevant callback shape
+            # lands. Conservative; matches the prior behaviour.
+            lines.append('skip-impl non-invoke-action')
+            continue
         if a.get('type') != 'invoke':
             lines.append('skip-impl non-invoke-action')
             continue

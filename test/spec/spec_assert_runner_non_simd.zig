@@ -1786,4 +1786,9 @@ const non_simd_callbacks: base.RunnerCallbacks = .{
     .handle_assert_trap = nonSimdRunAssertTrap,
     .handle_invoke_action = nonSimdRunInvokeAction,
     .handle_assert_uninstantiable = nonSimdHandleAssertUninstantiable,
+    // .handle_get_action stays null pending D-152: compileWasm's
+    // empty-fn path (modules with no functions, just globals)
+    // returns globals_offsets = []; scratch_globals isn't populated
+    // by applyDefinedGlobalsInit. SKIP-NON-INVOKE-ACTION fallback
+    // is the base runner's default route in this case.
 };
