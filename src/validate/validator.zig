@@ -75,6 +75,13 @@ pub const Error = error{
     /// i64x2 / f32x4 / f64x2). Per spec, this is a validation-time
     /// reject (`assert_invalid`), not a deferred runtime trap.
     InvalidLaneIndex,
+    /// Wasm spec §3.3.7 (memarg alignment): a memory op's
+    /// alignment immediate (log2 of byte alignment) exceeds the
+    /// op's natural alignment. For SIMD specifically: v128.load /
+    /// store ≤ 4 (16-byte natural); v128.load64_splat / load64_lane
+    /// / store64_lane / load64_zero / loadXxY ≤ 3 (8-byte);
+    /// 32-bit ≤ 2; 16-bit ≤ 1; 8-bit ≤ 0. Validation-time reject.
+    InvalidSimdAlignment,
     NotImplemented,
     OutOfMemory,
 } || leb128.Error;
@@ -893,13 +900,19 @@ const Validator = struct {
     fn dispatchPrefixFD(self: *Validator) Error!void {
         const sub = try leb128.readUleb128(u32, self.body, &self.pos);
         switch (sub) {
-            // Loads (memarg → align uleb32 + offset uleb32; pop i32 addr; push v128).
-            0 => try self.opLoad(.v128), // v128.load
-            1, 2, 3, 4, 5, 6, 7, 8, 9, 10 => try self.opLoad(.v128), // load{8x8,16x4,32x2}_{s,u} + load{8,16,32,64}_splat
-            92, 93 => try self.opLoad(.v128), // v128.load32_zero, v128.load64_zero
+            // Loads — natural alignment per Wasm SIMD spec §3.3.7.
+            // align_log2 ≤ log2(natural_bytes); Error.InvalidSimdAlignment otherwise.
+            0 => try self.opSimdLoad(4), // v128.load (16 bytes → log2=4)
+            1, 2, 3, 4, 5, 6 => try self.opSimdLoad(3), // load{8x8,16x4,32x2}_{s,u} (8 bytes → log2=3)
+            7 => try self.opSimdLoad(0), // v128.load8_splat (1 byte)
+            8 => try self.opSimdLoad(1), // v128.load16_splat (2 bytes)
+            9 => try self.opSimdLoad(2), // v128.load32_splat (4 bytes)
+            10 => try self.opSimdLoad(3), // v128.load64_splat (8 bytes)
+            92 => try self.opSimdLoad(2), // v128.load32_zero (4 bytes)
+            93 => try self.opSimdLoad(3), // v128.load64_zero (8 bytes)
 
             // Store: pop v128 + i32 addr (memarg).
-            11 => try self.opStore(.v128), // v128.store
+            11 => try self.opSimdStore(4), // v128.store (16 bytes → log2=4)
 
             // v128.const: 16 immediate bytes; push v128.
             12 => try self.opSimdConst(),
@@ -952,16 +965,20 @@ const Validator = struct {
             // §9.7 / 9.7-ba — load_lane × 4, store_lane × 4.
             // memarg + lane byte; load_lane pops (i32, v128) + pushes
             // v128; store_lane pops (i32, v128) + pushes nothing.
-            // Lane count per access width: load/store{8}=16,
-            // {16}=8, {32}=4, {64}=2 (Wasm SIMD spec §4.3.4).
-            84 => try self.opSimdLoadLane(16), // v128.load8_lane
-            85 => try self.opSimdLoadLane(8), // v128.load16_lane
-            86 => try self.opSimdLoadLane(4), // v128.load32_lane
-            87 => try self.opSimdLoadLane(2), // v128.load64_lane
-            88 => try self.opSimdStoreLane(16), // v128.store8_lane
-            89 => try self.opSimdStoreLane(8), // v128.store16_lane
-            90 => try self.opSimdStoreLane(4), // v128.store32_lane
-            91 => try self.opSimdStoreLane(2), // v128.store64_lane
+            // Lane count + max align_log2 per access width:
+            //   load/store8  → 16 lanes, align ≤ 0 (1 byte natural)
+            //   load/store16 → 8  lanes, align ≤ 1 (2 bytes)
+            //   load/store32 → 4  lanes, align ≤ 2 (4 bytes)
+            //   load/store64 → 2  lanes, align ≤ 3 (8 bytes)
+            // (Wasm SIMD spec §4.3.4 + §3.3.7).
+            84 => try self.opSimdLoadLane(16, 0), // v128.load8_lane
+            85 => try self.opSimdLoadLane(8, 1), // v128.load16_lane
+            86 => try self.opSimdLoadLane(4, 2), // v128.load32_lane
+            87 => try self.opSimdLoadLane(2, 3), // v128.load64_lane
+            88 => try self.opSimdStoreLane(16, 0), // v128.store8_lane
+            89 => try self.opSimdStoreLane(8, 1), // v128.store16_lane
+            90 => try self.opSimdStoreLane(4, 2), // v128.store32_lane
+            91 => try self.opSimdStoreLane(2, 3), // v128.store64_lane
 
             // §9.9 / 9.9-f-6 — int arith range (94..211). Split out
             // unop arms to fix StackUnderflow for `i*.neg / abs /
@@ -1194,6 +1211,37 @@ const Validator = struct {
         if (lane_idx >= lane_count) return Error.InvalidLaneIndex;
     }
 
+    /// Read + range-check a SIMD memarg's alignment immediate.
+    /// Wasm spec §3.3.7: align uleb is the log2 of the alignment
+    /// in bytes and MUST be ≤ log2(natural_alignment_bytes).
+    /// Validation-time reject (Error.InvalidSimdAlignment).
+    /// §9.12-E / B134: SIMD-only enforcement; non-SIMD opLoad /
+    /// opStore still uses skipMemarg (separate workstream).
+    fn readSimdMemarg(self: *Validator, max_align_log2: u8) Error!void {
+        const align_log2 = try leb128.readUleb128(u32, self.body, &self.pos);
+        if (align_log2 > max_align_log2) return Error.InvalidSimdAlignment;
+        _ = try leb128.readUleb128(u32, self.body, &self.pos); // offset
+    }
+
+    /// SIMD v128.load family — natural alignment varies per op
+    /// (load=16, loadXxY=8, load*_splat per element width). Pop
+    /// i32 addr, push v128.
+    fn opSimdLoad(self: *Validator, max_align_log2: u8) Error!void {
+        if (self.memory_count == 0) return Error.UnknownMemory;
+        try self.readSimdMemarg(max_align_log2);
+        try self.popExpect(.i32);
+        try self.pushType(.v128);
+    }
+
+    /// SIMD v128.store — 16-byte natural alignment (max_align_log2=4).
+    /// Pop v128 + i32 addr.
+    fn opSimdStore(self: *Validator, max_align_log2: u8) Error!void {
+        if (self.memory_count == 0) return Error.UnknownMemory;
+        try self.readSimdMemarg(max_align_log2);
+        try self.popExpect(.v128);
+        try self.popExpect(.i32);
+    }
+
     /// SIMD extract_lane (`i8x16.extract_lane_s`, `f32x4.extract_lane`,
     /// …): read 1-byte lane immediate; pop v128; push scalar.
     fn opSimdExtractLane(self: *Validator, dst: ValType, lane_count: u8) Error!void {
@@ -1213,9 +1261,10 @@ const Validator = struct {
 
     /// SIMD load_lane: memarg (align uleb + offset uleb) + 1-byte
     /// lane immediate. Pop v128 + i32 idx; push v128 (modified).
-    fn opSimdLoadLane(self: *Validator, lane_count: u8) Error!void {
-        _ = try leb128.readUleb128(u32, self.body, &self.pos); // align
-        _ = try leb128.readUleb128(u32, self.body, &self.pos); // offset
+    /// `max_align_log2` enforces per-access-width natural alignment
+    /// (load8=0, load16=1, load32=2, load64=3).
+    fn opSimdLoadLane(self: *Validator, lane_count: u8, max_align_log2: u8) Error!void {
+        try self.readSimdMemarg(max_align_log2);
         try self.readLaneIdx(lane_count);
         try self.popExpect(.v128);
         try self.popExpect(.i32);
@@ -1224,9 +1273,8 @@ const Validator = struct {
 
     /// SIMD store_lane: memarg + 1-byte lane immediate. Pop v128 +
     /// i32 idx; push nothing.
-    fn opSimdStoreLane(self: *Validator, lane_count: u8) Error!void {
-        _ = try leb128.readUleb128(u32, self.body, &self.pos); // align
-        _ = try leb128.readUleb128(u32, self.body, &self.pos); // offset
+    fn opSimdStoreLane(self: *Validator, lane_count: u8, max_align_log2: u8) Error!void {
+        try self.readSimdMemarg(max_align_log2);
         try self.readLaneIdx(lane_count);
         try self.popExpect(.v128);
         try self.popExpect(.i32);
