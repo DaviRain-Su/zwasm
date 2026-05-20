@@ -5,8 +5,8 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last commit: `39f1dc15`
-   (docs §9.12-G partial: Wasm 3.0 ZirOp mapping table)。
+1. `git log --oneline -10` — last commit: `0ceed353`
+   (D-149 partial: 42/100 ADR SHA backfills + helper script)。
    直近 code: `c3e391f9` (ADR-0079 Steps 2+3 close)。
 2. **Live status**: `zig build test-spec-wasm-2.0-assert >
    /tmp/spec.log 2>&1 || true; grep "passed\\|^FAIL " /tmp/spec.log`
@@ -67,12 +67,13 @@
 - D-141 row partial discharge: runner.zig now under 1000 soft cap。
   WARN list 残: validator.zig / lower.zig / liveness.zig /
   emit.zig (arm64+x86_64) / inst.zig (arm64+x86_64) / op_simd_*。
-- §9.12-G partial discharge (`39f1dc15`):
-  - .dev/wasm_3_0_zirop_mapping.md 起草 (proposal × opcode 全
-    エントリ手書き; Phase 10 open 時に dispatch_collector 経由で
-    machine-regenerate 想定)
-  - include/wasm.h byte-identical with wasm-c-api upstream 検証
-  - zone_check --gate 既に enforced (前 cycle 確認済)
+- §9.12-G partial discharge (`39f1dc15`): Wasm 3.0 ZirOp mapping
+  doc + wasm.h byte-identical + zone_check --gate enforced。
+- §9.12-I partial discharge (`0ceed353`): D-149 mechanical
+  SHA backfill 42/100 (= 42% drop in pending), helper script
+  `scripts/backfill_adr_shas.sh` permanent。残 57 placeholders
+  は multi-match (46) + zero-match (5) + race-against-itself
+  guard hits — narrative-context-pass で discharge。
 - 次 cycle 候補:
   - §9.12-G 残: all-Phase-10-feature-ZirOp comptime reject
     infrastructure (大きい), c_api Instance test (D-139 blocked)
