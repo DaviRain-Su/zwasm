@@ -1,6 +1,6 @@
 # Class C callee-only landing SEGVs fac/fac.0.wasm via internal helper func[6]
 
-**Citing**: `<backfill>` (revert / re-scope commit)
+**Citing**: `341e3f74` (ADR-0017 amend + Class C re-scope to bundled (b)-e-1+(b)-e-2), `9feba977` (x86_64 Class C bundled (b)-e-3)
 
 ## Trigger
 
