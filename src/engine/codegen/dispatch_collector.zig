@@ -1264,12 +1264,7 @@ pub const collected_x86_64_ops = .{
     // SIMD i8x16 compare cohort moved at B93 (10 ops).
     // SIMD i16x8 compare cohort moved at B94 (10 ops).
     // SIMD i32x4 compare cohort moved at B95 (10 ops).
-    x86_64_i64x2_eq,
-    x86_64_i64x2_ne,
-    x86_64_i64x2_lt_s,
-    x86_64_i64x2_gt_s,
-    x86_64_i64x2_le_s,
-    x86_64_i64x2_ge_s,
+    // SIMD i64x2 compare cohort moved at B96 (6 ops; no _u variants).
     x86_64_i8x16_shl,
     x86_64_i8x16_shr_s,
     x86_64_i8x16_shr_u,
@@ -1682,6 +1677,13 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_i32x4_le_u,
     x86_64_i32x4_ge_s,
     x86_64_i32x4_ge_u,
+    // B96: SIMD i64x2 compare cohort moved from legacy.
+    x86_64_i64x2_eq,
+    x86_64_i64x2_ne,
+    x86_64_i64x2_lt_s,
+    x86_64_i64x2_gt_s,
+    x86_64_i64x2_le_s,
+    x86_64_i64x2_ge_s,
 };
 
 comptime {
@@ -1752,8 +1754,8 @@ test "migratedArchOpCount tracks collected per-arch tuples (B59: arm64=348, x86_
     // load/store per-op files directly to ctx tuple (not in legacy
     // tuple before, so x86_64 count unchanged).
     try std.testing.expectEqual(@as(usize, 348), migratedArchOpCount(.arm64));
-    // B79..B94 walked cohorts; B95 SIMD i32x4 compare (10 ops).
-    try std.testing.expectEqual(@as(usize, 140), migratedArchOpCount(.x86_64));
+    // B79..B95 walked cohorts; B96 SIMD i64x2 compare (6 ops).
+    try std.testing.expectEqual(@as(usize, 134), migratedArchOpCount(.x86_64));
 }
 
 test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
@@ -1817,8 +1819,9 @@ test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // i8x16 compare cohort (10 ops; eq is 6-arg, others 5-arg)
     // moved (+10 = 231). B94: SIMD i16x8 compare cohort (10 ops)
     // moved (+10 = 241). B95: SIMD i32x4 compare cohort (10 ops)
-    // moved (+10 = 251).
-    try std.testing.expectEqual(@as(usize, 251), collected_x86_64_ctx_ops.len);
+    // moved (+10 = 251). B96: SIMD i64x2 compare cohort (6 ops;
+    // no _u variants) moved (+6 = 257).
+    try std.testing.expectEqual(@as(usize, 257), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would

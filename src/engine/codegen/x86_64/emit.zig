@@ -1050,11 +1050,11 @@ pub fn compile(
             .@"i8x16.eq" => try op_simd_int_cmp_lane.emitI8x16EqCtx(&ctx, &ins),
             .@"i16x8.eq" => try op_simd_int_cmp_lane.emitI16x8EqCtx(&ctx, &ins),
             .@"i32x4.eq" => try op_simd_int_cmp_lane.emitI32x4EqCtx(&ctx, &ins),
-            .@"i64x2.eq" => try op_simd_int_cmp_lane.emitI64x2Eq(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i64x2.eq" => try op_simd_int_cmp_lane.emitI64x2EqCtx(&ctx, &ins),
             .@"i8x16.ne" => try op_simd_int_cmp_lane.emitI8x16NeCtx(&ctx, &ins),
             .@"i16x8.ne" => try op_simd_int_cmp_lane.emitI16x8NeCtx(&ctx, &ins),
             .@"i32x4.ne" => try op_simd_int_cmp_lane.emitI32x4NeCtx(&ctx, &ins),
-            .@"i64x2.ne" => try op_simd_int_cmp_lane.emitI64x2Ne(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i64x2.ne" => try op_simd_int_cmp_lane.emitI64x2NeCtx(&ctx, &ins),
             // §9.7 / 9.7-l: signed lt/gt/le/ge for 8/16/32-bit shapes
             // (12 ops). PCMPGT_<shape> direct for gt; operand swap for
             // lt; PXOR-with-all-ones NOT for le/ge. i64x2 signed
@@ -1076,10 +1076,10 @@ pub fn compile(
             // 9.7-l's emitV128IntCmpSigned helper. Per ADR-0041 §5
             // amend at 9.7-m — x86_64 baseline raised SSE4.1 →
             // SSE4.2 (Steam Apr 2026 98.18% adoption).
-            .@"i64x2.gt_s" => try op_simd_int_cmp_lane.emitI64x2GtS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i64x2.lt_s" => try op_simd_int_cmp_lane.emitI64x2LtS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i64x2.le_s" => try op_simd_int_cmp_lane.emitI64x2LeS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i64x2.ge_s" => try op_simd_int_cmp_lane.emitI64x2GeS(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i64x2.gt_s" => try op_simd_int_cmp_lane.emitI64x2GtSCtx(&ctx, &ins),
+            .@"i64x2.lt_s" => try op_simd_int_cmp_lane.emitI64x2LtSCtx(&ctx, &ins),
+            .@"i64x2.le_s" => try op_simd_int_cmp_lane.emitI64x2LeSCtx(&ctx, &ins),
+            .@"i64x2.ge_s" => try op_simd_int_cmp_lane.emitI64x2GeSCtx(&ctx, &ins),
             // §9.7 / 9.7-n: unsigned compares lt_u/gt_u/le_u/ge_u for
             // 8/16/32-bit shapes (12 ops). PMINU/PMAXU + PCMPEQ
             // (cranelift `lower.isle:2016-2080`): gt/lt = NOT eq(min/max,
