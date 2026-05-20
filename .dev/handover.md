@@ -15,8 +15,8 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
    `chore(p9b):` / `feat(p9b):` prefix. Last source commit
-   `095ea19d` (B72 — nop migrated; ctx 87 → 88; atomic.fence
-   deferred (UnsupportedOp), unreachable defers (ctx ext needed)).
+   `608e8f45` (B73 — unreachable migrated with ctx.dead_code
+   substrate ext; ctx 88 → 89).
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -97,38 +97,37 @@
 | B70 | Single-op migration: `select` (+ `select_typed` shares emit arm) to `(ctx, ins)`. ~70-line 3-path body extracted into `op_alu_int.emitSelectCtx` (added op_simd + op_alu_float imports to op_alu_int; no cycle). 1 NEW per-op file. `_ctx_ops` 84 → 85. | `74734076` |
 | B71 | Cohort migration: `memory.size` + `memory.grow` (2 ops) to `(ctx, ins)`. Inline meta backfill (memory_size.zig + memory_grow.zig at Zone 1). memory.size body extracted to op_call.emitMemorySizeCtx; memory.grow wraps existing emitMemoryGrow. 2 NEW per-op files. `_ctx_ops` 85 → 87. | `aa7455d9` |
 | B72 | Single-op migration: `nop` (1 op) to `(ctx, ins)` + Zone 1 meta backfill. Zero-bytes adapter at op_control.emitNopCtx. 1 NEW per-op file. `_ctx_ops` 87 → 88. atomic.fence deferred (UnsupportedOp on x86_64); unreachable deferred (ctx ext for `dead_code` local needed). | `095ea19d` |
-| **B73** | **Cohort migration: control-flow `unreachable` + `return` + br family** — requires ctx extension to expose `dead_code` (`bool`), `unreach_fixups` already in ctx, and `labels` for br. May need ADR for ctx-field additions. Larger scope; survey first to determine if it's bundled or split. | **NEXT** |
-| B73..B6x | After B73: br_if / br_table / if / else / end (label-touching ops) → local ops (local.get/set/tee with layout.disps threading). Then B6x+1 inline-switch cutover folding ctx tuple into unified `collected_x86_64_ops`. | |
+| B73 | Single-op migration: `unreachable` to `(ctx, ins)` with ctx extension (added `dead_code: *bool` field to EmitCtx, mirrors existing pointer-to-local pattern). 1 NEW per-op file. `_ctx_ops` 88 → 89. | `608e8f45` |
+| **B74** | **Single-op migration: `return` to `(ctx, ins)`** — ~80-line emit.zig inline body covering marshal + epilogue + RET. Requires further ctx extensions (frame_bytes, uses_runtime_ptr; both already in ctx via field `outgoing_max_bytes` etc.? Check first). Extract into op_control.emitReturnCtx. 1 NEW per-op file. | **NEXT** |
+| B74..B6x | After B74: br / br_if / br_table / if / else / end (label-touching ops) → local ops (local.get/set/tee). Then B6x+1 inline-switch cutover folding ctx tuple into unified `collected_x86_64_ops`. | |
 | B6x+1 | Inline-switch dispatcher cutover per ADR-0073 — both arches' `emit.zig` giant switch replaced by `inline for (collected_X_ops) |op_mod| { if (op_mod.op_tag == ins.op) return op_mod.emit(ctx, ins); }`. Moment per-op files become load-bearing. | |
 
-## Active state — §9.12-B mid-flight; B72 nop landed 2026-05-20
+## Active state — §9.12-B mid-flight; B73 unreachable landed 2026-05-20
 
-**B73 is the active task** — migrate control-flow `unreachable`
-(and possibly `return` + br family) to `(ctx, ins)`. Requires
-ctx extension to expose currently-local state. B72 closed nop
-at `095ea19d` (`collected_x86_64_ctx_ops` 87 → 88).
+**B74 is the active task** — migrate `return` (1 op) to
+`(ctx, ins)`. ~80-line inline body covering marshal + epilogue
++ RET. B73 closed unreachable at `608e8f45`
+(`collected_x86_64_ctx_ops` 88 → 89).
 
-The loop for B73:
+The loop for B74:
 
-1. Survey emit.zig dispatch arms for `unreachable` (line ~1443),
-   `return` (line ~1549), and br family (br, br_if, br_table).
-2. Identify ctx fields needed:
-   - `unreachable`: needs `unreach_fixups` (already in ctx) +
-     `dead_code: *bool` (NEW field).
-   - `return`: needs func / frame_bytes / uses_runtime_ptr /
-     return_is_memory_class / indirect_result_slot_neg_off (most
-     already in ctx; check).
-   - br family: needs `labels` (already in ctx) + ditto.
-3. Extend ctx_mod with missing fields (if any) — substrate
-   change, file ADR if it crosses ROADMAP §4/§5.
-4. Add adapters; create per-op files; update collector.
-5. Verify 2-host green; commit + push.
+1. Survey emit.zig return arm (line ~1549). Identify locals
+   consumed (frame_bytes, uses_runtime_ptr, etc.) and check
+   which are already in ctx vs need extension.
+2. Extend ctx if needed (same pattern as B73 dead_code:
+   pointer-to-local).
+3. Add `emitReturnCtx(ctx, ins)` adapter in op_control.zig.
+4. Replace emit.zig arm; create per-op file.
+5. Update collector (89 → 90) + assertion.
+6. Verify 2-host green; commit + push.
 
-Note: op_convert.zig 1009 LOC, op_control.zig 1188 LOC,
+Note: op_convert.zig 1009 LOC, op_control.zig 1205 LOC,
 op_alu_int.zig hosts cross-deps to op_simd + op_alu_float
-(B70). After B73: local ops (local.get/set/tee with
-layout.disps threading — needs emit.zig private helper
-extraction). Then B6x+1 inline-switch cutover.
+(B70). After B74: br/br_if/br_table/if/else/end label-touching
+ops → local ops (local.get/set/tee). Then B6x+1 inline-switch
+cutover. ctx is gaining fields per chunk — when B73+ pattern
+crosses ~8-10 new fields, consider whether the substrate has
+matured enough for cutover even before all ops migrate.
 
 §9.12-B exit criterion stays as ROADMAP §9.12-B specifies (6 build
 combos green + DCE 0 + completeness comptime check). Per-op file
