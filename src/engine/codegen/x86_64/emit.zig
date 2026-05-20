@@ -1149,9 +1149,13 @@ pub fn compile(
             // suppression (bit 3 set).
             // §9.12-B / B102: SIMD float unary cohort migrated to ctx tuple.
             // §9.12-B / B71: memory.size + memory.grow migrated.
-            // §9.12-B / B70: select + select_typed inline body
-            // extracted into `op_alu_int.emitSelectCtx` `(ctx, ins)`
+            // §9.12-B / B70: select + select_typed share emitSelectCtx.
+            // `.select` is in `collected_x86_64_ctx_ops`; `.select_typed`
+            // has no Zone 1 meta yet so it stays as an inline switch arm
+            // (B109 dead-arm prune oversight: select_typed needs its own
+            // arm since it wasn't covered by the dispatcher path).
             // adapter (handles v128 / fp / GPR 3-path dispatch).
+            .select_typed => try op_alu_int.emitSelectCtx(&ctx, &ins),
             // §9.12-B / B73: unreachable inline body extracted into
             // `op_control.emitUnreachableCtx` `(ctx, ins)` adapter
             // (ctx extended with `dead_code: *bool` field).
