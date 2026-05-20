@@ -1177,14 +1177,15 @@ pub fn compile(
             // synthesis defer to 9.7-u). 5-instr emit per shift:
             // AND mask (lane_width - 1), MOVD count→xmm, MOVAPS
             // dst,vec (skip-elide), <shift> dst,scratch.
-            .@"i16x8.shl" => try op_simd_int_arith.emitI16x8Shl(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i16x8.shr_s" => try op_simd_int_arith.emitI16x8ShrS(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i16x8.shr_u" => try op_simd_int_arith.emitI16x8ShrU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i32x4.shl" => try op_simd_int_arith.emitI32x4Shl(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i32x4.shr_s" => try op_simd_int_arith.emitI32x4ShrS(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i32x4.shr_u" => try op_simd_int_arith.emitI32x4ShrU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i64x2.shl" => try op_simd_int_arith.emitI64x2Shl(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i64x2.shr_u" => try op_simd_int_arith.emitI64x2ShrU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            // §9.12-B / B97: SIMD int shifts cohort migrated to ctx tuple.
+            .@"i16x8.shl" => try op_simd_int_arith.emitI16x8ShlCtx(&ctx, &ins),
+            .@"i16x8.shr_s" => try op_simd_int_arith.emitI16x8ShrSCtx(&ctx, &ins),
+            .@"i16x8.shr_u" => try op_simd_int_arith.emitI16x8ShrUCtx(&ctx, &ins),
+            .@"i32x4.shl" => try op_simd_int_arith.emitI32x4ShlCtx(&ctx, &ins),
+            .@"i32x4.shr_s" => try op_simd_int_arith.emitI32x4ShrSCtx(&ctx, &ins),
+            .@"i32x4.shr_u" => try op_simd_int_arith.emitI32x4ShrUCtx(&ctx, &ins),
+            .@"i64x2.shl" => try op_simd_int_arith.emitI64x2ShlCtx(&ctx, &ins),
+            .@"i64x2.shr_u" => try op_simd_int_arith.emitI64x2ShrUCtx(&ctx, &ins),
             // §9.7 / 9.7-u: i64x2.shr_s synthesis (no native PSRAQ
             // in SSE; runtime-mask sign-bit fixup recipe per
             // cranelift `lower.isle:943-951` — 9 instr, no
@@ -1192,20 +1193,20 @@ pub fn compile(
             // PCMPEQB+PSLLQ-imm-synthesised inline). i8x16 shifts
             // defer to 9.7-v (count-dependent broadcast mask
             // synthesis or const-pool dependency per ADR-0042).
-            .@"i64x2.shr_s" => try op_simd_int_arith.emitI64x2ShrS(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i64x2.shr_s" => try op_simd_int_arith.emitI64x2ShrSCtx(&ctx, &ins),
             // §9.7 / 9.7-v: i8x16.shl + i8x16.shr_u via inline-mask
             // synthesis (no const-pool dep). 9-/10-instr recipes
             // using PSLLW/PSRLW + PCMPEQB-derived all-ones + PSHUFB
             // broadcast of byte-0 of the shifted-mask word.
             // i8x16.shr_s defers to 9.7-w (byte→word extension via
             // PUNPCKLBW + PSRAW + PACKSSWB — structurally different).
-            .@"i8x16.shl" => try op_simd_int_arith.emitI8x16Shl(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i8x16.shr_u" => try op_simd_int_arith.emitI8x16ShrU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i8x16.shl" => try op_simd_int_arith.emitI8x16ShlCtx(&ctx, &ins),
+            .@"i8x16.shr_u" => try op_simd_int_arith.emitI8x16ShrUCtx(&ctx, &ins),
             // §9.7 / 9.7-w: i8x16.shr_s via cranelift sign-extension
             // synthesis (`lower.isle:846+`). 11-instr: PCMPGTB sign-
             // mask + PUNPCKL/HBW byte→word extension + PSRAW per
             // half + PACKSSWB pack.
-            .@"i8x16.shr_s" => try op_simd_int_arith.emitI8x16ShrS(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i8x16.shr_s" => try op_simd_int_arith.emitI8x16ShrSCtx(&ctx, &ins),
             // §9.7 / 9.7-x: i*x*.extend_{low,high}_*_{s,u} (12 ops).
             // Low half: 1-instr SSE4.1 PMOVSX*/PMOVZX* direct.
             // High half: PSHUFD imm=0xEE swaps upper qword to lower
