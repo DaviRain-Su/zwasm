@@ -192,4 +192,4 @@ handover.md as documented.
 
 | Date       | Commit       | Why-class    | Summary                                     |
 |------------|--------------|--------------|---------------------------------------------|
-| 2026-05-04 | `<backfill>` | initial      | Retrospective ADR for the 2026-05-04 cycle. |
+| 2026-05-04 | `b12f3622` | initial      | Retrospective ADR for the 2026-05-04 cycle. |
