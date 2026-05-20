@@ -229,10 +229,15 @@ D-153 (12 cycle 経過時点で skip-impl 不動) はそれ自体が
      ため、runtime call_indirect が table[null entry] で trap。
      imported funcref global の runtime resolution が必要。
 
-Discharge 累計 (`4090d7da` 時点):
-- 25308 → 25399 PASS (+91)
-- 43 → 1 failed (-42)
+Discharge 累計 (`b11314ff` 時点 = Step B 完了):
+- 25308 → 25400 PASS (+92)
+- 43 → **0 failed** (-43, ALL discharged)
 - 80 → 1 runtime-skip
+
+**Step B Exit 判定**: runtime-skip ≤ 20 ✓ AND 43 failures 全消化 ✓。
+Step B 完了基準を達成。残 runtime-skip 1 は
+skip_text_format_parser 由来の text-format-only fixture で、
+spec corpus の構造的制約。
 
 Cohort 1-residual (data data-init UES × 15) 完 (`72a87509`):
 真の root cause は cohort 4 と同じく "imported entity の actual
@@ -248,10 +253,13 @@ Cohort 5 (imports.grow × 2) 完 (`4090d7da`):
 imported memory に対し max=null を返し、grow が pool capacity
 まで無限ratchet → spec testsuite の grow assertion が連鎖失敗。
 
-残 cohort: cohort 6 (elem.68 call_imported_elem trap × 1) —
-cross-module funcref runtime resolution。`(elem (global.get N))`
-を decoder が null sentinel で受理しているため、call_indirect が
-trap。handover.md §"次" に作業手順 4 step を記載。
+Cohort 6 (elem.68 call_imported_elem trap × 1) 完 (`b11314ff`):
+elem-form 4 の `(global.get N)` を `0x80000000 | N` marker で
+decode し、table-init 時に `ctx.buf[ctx.offsets[N]]` を deref
+して FuncEntity ptr を resolve。exporter 側 ensureCompiledAndRt
+で resolveFuncrefGlobals を呼び `ref.func F` init expr を
+`&scratch_func_entities[F]` に resolve、importer 側は byte-copy
+だけで FuncEntity ptr を取得。
 
 各 cohort は 1-2 cycle で discharge 想定。Step B 完了基準:
 runtime-skip ≤ 20 OR 残 failures 全消化。
