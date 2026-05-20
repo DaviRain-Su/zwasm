@@ -22,14 +22,14 @@
 ## Active state
 
 - Phase 9.12-E。close-plan §6 work sequence 実行中。
-- 完了: (a)〜(f)。直近 (f) は ADR-0078 (Proposed) で
-  19 SKIP-* token を 3 class (debt-trackable / ADR-required /
-  runner-internal) に分類。D-155 で ratchet + audit script
-  follow-up を起票。
-- 次: **(g) D-141 runner.zig split ADR** — `engine/runner.zig`
-  (現 1995 行) を 2-3 file に分割する ADR を Proposed まで。
-  D-141 row の `blocked-by: substrate audit Q3` を新 ADR
-  番号に更新して解除する (B1 構造的歪みの最終止め)。
+- 完了: (a)〜(g)。直近 (g) は ADR-0079 (Proposed) で
+  `runner.zig` 1995 行 → driver / compile / setup 3-file split
+  を設計。D-141 の `blocked-by:` を旧 "substrate audit Q3"
+  → "per-file split ADRs Accept + impl" に更新。
+- 次: **(h) blocked-by escalation** — `audit_scaffolding
+  §F` 拡張: `blocked-by:` row の Last reviewed が 3 cycles
+  経過 → 自動 escalate、5 cycles → ADR or lesson 必須。
+  現状 33 blocked-by rows をこの基準で再評価。
 - D-153 は close-plan §6 (j) まで凍結。
 
 ## §9.12-B progress chunks
