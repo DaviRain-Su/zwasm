@@ -20,14 +20,14 @@ sub_phase: "9.12 completion + 9.13-0 windowsmini + 9.13 entry gate"
 sub_rows:
   - id: "9.12"
     title: "Substrate audit decision gate (collab)"
-    status: pending
+    status: done
     exit_criteria:
       - "Q2/Q3/Q4/Q5/Q6 ADRs accepted (collab)"
     notes: "Hard gate; resumes after §9.12-pre lands all drafts."
 
   - id: "9.12-pre"
     title: "ADR drafts + 3 Q3 spikes (autonomous)"
-    status: pending
+    status: done
     exit_criteria:
       - "ADR-0070 full draft (Status: Proposed → Accept-ready)"
       - "ADR-0071 full draft (Status: Proposed → Accept-ready)"
@@ -42,7 +42,7 @@ sub_rows:
 
   - id: "9.12-A"
     title: "Scaffolding compression + enforcement layer 9 items"
-    status: pending
+    status: done
     exit_criteria:
       - "ROADMAP Phase 0-8 narrative archived to .dev/archive/"
       - "continue/SKILL.md compressed by ~300 LOC"
@@ -59,7 +59,7 @@ sub_rows:
 
   - id: "9.12-B"
     title: "Q3 C completion + build-option DCE across all layers"
-    status: pending
+    status: done
     exit_criteria:
       - "Wasm 1.0 placeholders (control/parametric/variable) populated"
       - "Wasm 2.0 multi_value populated"
@@ -75,7 +75,7 @@ sub_rows:
 
   - id: "9.12-C"
     title: "Q5 hygiene landings"
-    status: pending
+    status: done
     exit_criteria:
       - ".claude/rules/comment_as_invariant.md body filled"
       - "abi.zig comptime disjointness check extended"
@@ -87,7 +87,7 @@ sub_rows:
 
   - id: "9.12-D"
     title: "Q6 libc boundary"
-    status: pending
+    status: done
     exit_criteria:
       - "ADR-0070 accepted"
       - ".claude/rules/libc_boundary.md body filled"
@@ -97,7 +97,7 @@ sub_rows:
 
   - id: "9.12-E"
     title: "★ Wasm 2.0 100% completion — skip-impl 243 → 0 + comprehensive testsuite"
-    status: pending
+    status: in_progress
     exit_criteria:
       - "SKIP-CROSS-MODULE-IMPORTS: 100 → 0 (8 corpora cleared)"
       - "SKIP-NO-LINK-TYPECHECK: 26 → 0 (assert_unlinkable type check)"
