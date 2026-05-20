@@ -344,6 +344,22 @@ pub fn emitI32Bitcount(
 /// 64-bit counterpart of `emitI32Binary`. Identical handler shape;
 /// only the encoder Width changes from `.d` to `.q` (REX.W set
 /// → 64-bit operands).
+/// §9.12-B / B80 (ADR-0075) — `(ctx, ins)` adapter for the i64
+/// binary ALU cohort (i64.add/sub/mul/and/or/xor). Threads
+/// `ins.op` into emitI64Binary's internal op dispatch. No
+/// semantics change.
+pub fn emitI64BinaryCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitI64Binary(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.spill_base_off,
+        ins.op,
+    );
+}
+
 pub fn emitI64Binary(
     allocator: Allocator,
     buf: *std.ArrayList(u8),

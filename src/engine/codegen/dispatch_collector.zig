@@ -1230,12 +1230,8 @@ pub const collected_arm64_ops = .{
 pub const collected_x86_64_ops = .{
     // i32 binary ALU cohort moved to collected_x86_64_ctx_ops at B79
     // (i32.add/sub/mul/and/or/xor; same emitI32BinaryCtx adapter).
-    x86_64_i64_add,
-    x86_64_i64_sub,
-    x86_64_i64_mul,
-    x86_64_i64_and,
-    x86_64_i64_or,
-    x86_64_i64_xor,
+    // i64 binary ALU cohort moved at B80 (i64.add/sub/mul/and/or/xor;
+    // same emitI64BinaryCtx adapter).
     x86_64_i32_eq,
     x86_64_i32_ne,
     x86_64_i32_lt_s,
@@ -1647,6 +1643,13 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_i32_and,
     x86_64_i32_or,
     x86_64_i32_xor,
+    // B80: i64 binary ALU cohort moved from legacy tuple.
+    x86_64_i64_add,
+    x86_64_i64_sub,
+    x86_64_i64_mul,
+    x86_64_i64_and,
+    x86_64_i64_or,
+    x86_64_i64_xor,
 };
 
 comptime {
@@ -1717,8 +1720,8 @@ test "migratedArchOpCount tracks collected per-arch tuples (B59: arm64=348, x86_
     // load/store per-op files directly to ctx tuple (not in legacy
     // tuple before, so x86_64 count unchanged).
     try std.testing.expectEqual(@as(usize, 348), migratedArchOpCount(.arm64));
-    // B79 moved i32 binary ALU cohort (6 ops) from legacy to ctx.
-    try std.testing.expectEqual(@as(usize, 286), migratedArchOpCount(.x86_64));
+    // B79 moved i32 binary ALU (6 ops); B80 moved i64 binary ALU (6 ops).
+    try std.testing.expectEqual(@as(usize, 280), migratedArchOpCount(.x86_64));
 }
 
 test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
@@ -1761,7 +1764,9 @@ test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // + local_disps). B79: i32 binary ALU cohort (i32.add/sub/
     // mul/and/or/xor, 6 ops) moved from legacy tuple (+6 = 105;
     // emitI32BinaryCtx adapter wraps existing emitI32Binary).
-    try std.testing.expectEqual(@as(usize, 105), collected_x86_64_ctx_ops.len);
+    // B80: i64 binary ALU cohort (6 ops; emitI64BinaryCtx) moved
+    // from legacy (+6 = 111).
+    try std.testing.expectEqual(@as(usize, 111), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would
