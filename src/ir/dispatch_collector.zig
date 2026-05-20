@@ -570,6 +570,17 @@ const return_call = @import("../instruction/wasm_3_0/return_call.zig");
 const return_call_indirect = @import("../instruction/wasm_3_0/return_call_indirect.zig");
 const return_call_ref = @import("../instruction/wasm_3_0/return_call_ref.zig");
 
+// Wasm 3.0 exception-handling (EH) ops — same wasm_level: .v3_0 shape.
+const try_table = @import("../instruction/wasm_3_0/try_table.zig");
+const throw = @import("../instruction/wasm_3_0/throw.zig");
+const throw_ref = @import("../instruction/wasm_3_0/throw_ref.zig");
+
+// Wasm 3.0 typed function references — same wasm_level: .v3_0 shape.
+const call_ref = @import("../instruction/wasm_3_0/call_ref.zig");
+const br_on_null = @import("../instruction/wasm_3_0/br_on_null.zig");
+const br_on_non_null = @import("../instruction/wasm_3_0/br_on_non_null.zig");
+const ref_as_non_null = @import("../instruction/wasm_3_0/ref_as_non_null.zig");
+
 /// Tuple of all migrated per-op modules. Order is not load-bearing;
 /// `dispatcher` uses `op_tag` for routing.
 pub const collected_ops = .{
@@ -952,6 +963,17 @@ pub const collected_ops = .{
     return_call,
     return_call_indirect,
     return_call_ref,
+
+    // Wasm 3.0 exception-handling (§9.12-G Phase 10 prep).
+    try_table,
+    throw,
+    throw_ref,
+
+    // Wasm 3.0 typed function references (§9.12-G Phase 10 prep).
+    call_ref,
+    br_on_null,
+    br_on_non_null,
+    ref_as_non_null,
 };
 
 comptime {
@@ -1124,22 +1146,36 @@ test "zirOpTagCount matches the ZirOp enum field count" {
     try std.testing.expect(n >= 200);
 }
 
-test "migratedOpCount tracks collected_ops length (377 after §9.12-G tail-call stubs)" {
-    // Running tally: 374 (§9.12-B / B52 baseline) + 3 Wasm 3.0
-    // tail-call stubs (return_call / return_call_indirect /
-    // return_call_ref) = 377.
-    try std.testing.expectEqual(@as(usize, 377), migratedOpCount());
+test "migratedOpCount tracks collected_ops length (384 after §9.12-G EH + typed-func-refs stubs)" {
+    // Running tally:
+    //   374 §9.12-B / B52 baseline
+    // +   3 Wasm 3.0 tail-call (return_call / _indirect / _ref)
+    // +   3 Wasm 3.0 EH (try_table / throw / throw_ref)
+    // +   4 Wasm 3.0 typed-func-refs (call_ref / br_on_null /
+    //         br_on_non_null / ref.as_non_null)
+    // = 384.
+    try std.testing.expectEqual(@as(usize, 384), migratedOpCount());
 }
 
-test "opModuleFor resolves Phase 10 tail-call stubs (return_call / _indirect / _ref)" {
-    // §9.12-G Phase 10 prep: tail-call ops registered with
-    // `wasm_level: .v3_0` so the dispatcher's comptime build-option
-    // filter rejects them under -Dwasm=v2_0 (per the synthetic
-    // build-filter test above). Under the default -Dwasm=v3_0
-    // they pass the filter; the stub handler returns NotMigrated.
+test "opModuleFor resolves Phase 10 Wasm 3.0 stubs (tail-call + EH + typed-func-refs)" {
+    // §9.12-G Phase 10 prep: Wasm 3.0 ops registered with
+    // `wasm_level: .v3_0`. Under default -Dwasm=v3_0 they pass
+    // the build filter; stub handlers return NotMigrated. Under
+    // -Dwasm=v2_0 the dispatcher returns UnsupportedOpForBuildLevel
+    // (per the synthetic build-filter test above).
+    // Tail-call cohort.
     try std.testing.expect(comptime opModuleFor(.return_call) != null);
     try std.testing.expect(comptime opModuleFor(.return_call_indirect) != null);
     try std.testing.expect(comptime opModuleFor(.return_call_ref) != null);
+    // EH cohort.
+    try std.testing.expect(comptime opModuleFor(.try_table) != null);
+    try std.testing.expect(comptime opModuleFor(.throw) != null);
+    try std.testing.expect(comptime opModuleFor(.throw_ref) != null);
+    // Typed-func-refs cohort.
+    try std.testing.expect(comptime opModuleFor(.call_ref) != null);
+    try std.testing.expect(comptime opModuleFor(.br_on_null) != null);
+    try std.testing.expect(comptime opModuleFor(.br_on_non_null) != null);
+    try std.testing.expect(comptime opModuleFor(.@"ref.as_non_null") != null);
 }
 
 test "migrationComplete is false until §9.12-B migrates all 581 ops" {
