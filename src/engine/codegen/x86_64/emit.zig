@@ -56,10 +56,6 @@ const op_alu_float = @import("op_alu_float.zig");
 const op_convert = @import("op_convert.zig");
 const op_memory = @import("op_memory.zig");
 const op_control = @import("op_control.zig");
-const op_call = @import("op_call.zig");
-const op_globals = @import("op_globals.zig");
-const op_table = @import("op_table.zig");
-const op_locals = @import("op_locals.zig");
 const op_simd = @import("op_simd.zig");
 const op_simd_int_arith = @import("op_simd_int_arith.zig");
 const op_simd_int_cmp_lane = @import("op_simd_int_cmp_lane.zig");
@@ -748,58 +744,10 @@ pub fn compile(
             // dispatches via the inline-for path (TBD B79+1 cutover).
             // For now, manual ctx adapter call here keeps dual-path
             // dispatch consistent with sibling cohorts.
-            .@"i32.add",
-            .@"i32.sub",
-            .@"i32.mul",
-            .@"i32.and",
-            .@"i32.or",
-            .@"i32.xor",
-            => try op_alu_int.emitI32BinaryCtx(&ctx, &ins),
             // §9.12-B / B81: i32 compare cohort migrated to ctx tuple.
-            .@"i32.eq",
-            .@"i32.ne",
-            .@"i32.lt_s",
-            .@"i32.lt_u",
-            .@"i32.gt_s",
-            .@"i32.gt_u",
-            .@"i32.le_s",
-            .@"i32.le_u",
-            .@"i32.ge_s",
-            .@"i32.ge_u",
-            => try op_alu_int.emitI32CompareCtx(&ctx, &ins),
-            .@"i32.eqz" => try op_alu_int.emitI32EqzCtx(&ctx, &ins),
             // §9.12-B / B83: i32 shift cohort migrated to ctx tuple.
-            .@"i32.shl",
-            .@"i32.shr_s",
-            .@"i32.shr_u",
-            .@"i32.rotl",
-            .@"i32.rotr",
-            => try op_alu_int.emitI32ShiftCtx(&ctx, &ins),
-            .@"i32.clz",
-            .@"i32.ctz",
-            .@"i32.popcnt",
-            => try op_alu_int.emitI32BitcountCtx(&ctx, &ins),
             // §9.12-B / B80: i64 binary ALU cohort migrated to ctx tuple.
-            .@"i64.add",
-            .@"i64.sub",
-            .@"i64.mul",
-            .@"i64.and",
-            .@"i64.or",
-            .@"i64.xor",
-            => try op_alu_int.emitI64BinaryCtx(&ctx, &ins),
             // §9.12-B / B82: i64 compare cohort migrated to ctx tuple.
-            .@"i64.eq",
-            .@"i64.ne",
-            .@"i64.lt_s",
-            .@"i64.lt_u",
-            .@"i64.gt_s",
-            .@"i64.gt_u",
-            .@"i64.le_s",
-            .@"i64.le_u",
-            .@"i64.ge_s",
-            .@"i64.ge_u",
-            => try op_alu_int.emitI64CompareCtx(&ctx, &ins),
-            .@"i64.eqz" => try op_alu_int.emitI64EqzCtx(&ctx, &ins),
             // §9.9 / 9.9-m-1a (per ADR-0056): Wasm 2.0 reference-types
             // partial — null + is_null. ref.func deferred to m-1b
             // (needs JitRuntime extension). ref.null = push 0
@@ -808,7 +756,6 @@ pub fn compile(
             // §9.12-B / B68: ref.null inline body extracted into
             // `op_alu_int.emitRefNull` `(ctx, ins)` adapter.
             .@"ref.null" => try op_alu_int.emitRefNull(&ctx, &ins),
-            .@"ref.is_null" => try op_alu_int.emitI64EqzCtx(&ctx, &ins),
             // §9.9 / 9.9-m-1b: ref.func idx — load
             // func_entities_ptr from JitRuntime, add idx * size.
             // Recipe:
@@ -818,28 +765,8 @@ pub fn compile(
             // `op_alu_int.emitRefFunc` `(ctx, ins)` adapter.
             .@"ref.func" => try op_alu_int.emitRefFunc(&ctx, &ins),
             // §9.12-B / B83: i64 shift cohort migrated to ctx tuple.
-            .@"i64.shl",
-            .@"i64.shr_s",
-            .@"i64.shr_u",
-            .@"i64.rotl",
-            .@"i64.rotr",
-            => try op_alu_int.emitI64ShiftCtx(&ctx, &ins),
-            .@"i64.clz",
-            .@"i64.ctz",
-            .@"i64.popcnt",
-            => try op_alu_int.emitI64BitcountCtx(&ctx, &ins),
             // §9.12-B / B85: width-conversion cohort migrated.
-            .@"i32.wrap_i64",
-            .@"i64.extend_i32_u",
-            .@"i64.extend_i32_s",
-            => try op_alu_int.emitConvertWidthCtx(&ctx, &ins),
             // §9.12-B / B85: sign-extension cohort migrated.
-            .@"i32.extend8_s",
-            .@"i32.extend16_s",
-            .@"i64.extend8_s",
-            .@"i64.extend16_s",
-            .@"i64.extend32_s",
-            => try op_alu_int.emitSignExtendCtx(&ctx, &ins),
             // §9.7 / 7.9 chunk c: integer divide / remainder.
             // §9.12-B / B54+B55 (ADR-0075): full i32+i64 div/rem
             // cohort migrated to the `(ctx, ins)` shape; each
@@ -853,59 +780,12 @@ pub fn compile(
             .@"i64.div_u" => try op_alu_int.emitI64DivU(&ctx, &ins),
             .@"i64.rem_s" => try op_alu_int.emitI64RemS(&ctx, &ins),
             .@"i64.rem_u" => try op_alu_int.emitI64RemU(&ctx, &ins),
-            .call => try op_call.emitCallCtx(&ctx, &ins),
-            .call_indirect => try op_call.emitCallIndirectCtx(&ctx, &ins),
             .@"f32.const" => try op_alu_float.emitF32Const(&ctx, &ins),
             .@"f64.const" => try op_alu_float.emitF64Const(&ctx, &ins),
             // §9.12-B / B86: FP arith cohort migrated to ctx tuple.
-            .@"f32.add",
-            .@"f32.sub",
-            .@"f32.mul",
-            .@"f32.div",
-            .@"f64.add",
-            .@"f64.sub",
-            .@"f64.mul",
-            .@"f64.div",
-            => try op_alu_float.emitFpBinaryCtx(&ctx, &ins),
             // §9.12-B / B87: FP compare cohort migrated to ctx tuple.
-            .@"f32.eq",
-            .@"f32.ne",
-            .@"f32.lt",
-            .@"f32.gt",
-            .@"f32.le",
-            .@"f32.ge",
-            .@"f64.eq",
-            .@"f64.ne",
-            .@"f64.lt",
-            .@"f64.gt",
-            .@"f64.le",
-            .@"f64.ge",
-            => try op_alu_float.emitFpCompareCtx(&ctx, &ins),
             // §9.12-B / B88: FP unary cohort migrated to ctx tuple.
-            .@"f32.abs",
-            .@"f32.neg",
-            .@"f32.sqrt",
-            .@"f32.ceil",
-            .@"f32.floor",
-            .@"f32.trunc",
-            .@"f32.nearest",
-            .@"f64.abs",
-            .@"f64.neg",
-            .@"f64.sqrt",
-            .@"f64.ceil",
-            .@"f64.floor",
-            .@"f64.trunc",
-            .@"f64.nearest",
-            => try op_alu_float.emitFpUnaryCtx(&ctx, &ins),
             // §9.12-B / B89: FP copysign + min/max migrated to ctx tuple.
-            .@"f32.copysign",
-            .@"f64.copysign",
-            => try op_alu_float.emitFpCopysignCtx(&ctx, &ins),
-            .@"f32.min",
-            .@"f32.max",
-            .@"f64.min",
-            .@"f64.max",
-            => try op_alu_float.emitFpMinMaxCtx(&ctx, &ins),
             .@"f64.promote_f32" => try op_convert.emitF64PromoteF32(&ctx, &ins),
             .@"f32.demote_f64" => try op_convert.emitF32DemoteF64(&ctx, &ins),
             .@"i32.reinterpret_f32" => try op_convert.emitI32ReinterpretF32(&ctx, &ins),
@@ -936,9 +816,6 @@ pub fn compile(
             .@"i32.trunc_f64_u" => try op_convert.emitI32TruncF64U(&ctx, &ins),
             .@"i64.trunc_f32_u" => try op_convert.emitI64TruncF32U(&ctx, &ins),
             .@"i64.trunc_f64_u" => try op_convert.emitI64TruncF64U(&ctx, &ins),
-            .@"local.get" => try op_locals.emitLocalGetCtx(&ctx, &ins),
-            .@"local.set" => try op_locals.emitLocalSetCtx(&ctx, &ins),
-            .@"local.tee" => try op_locals.emitLocalTeeCtx(&ctx, &ins),
             .@"i32.load" => try op_memory.emitI32Load(&ctx, &ins),
             .@"i32.load8_s" => try op_memory.emitI32Load8S(&ctx, &ins),
             .@"i32.load8_u" => try op_memory.emitI32Load8U(&ctx, &ins),
@@ -962,7 +839,6 @@ pub fn compile(
             .@"f64.load" => try op_memory.emitF64Load(&ctx, &ins),
             .@"f32.store" => try op_memory.emitF32Store(&ctx, &ins),
             .@"f64.store" => try op_memory.emitF64Store(&ctx, &ins),
-            .@"memory.fill" => try op_memory.emitMemoryFillCtx(&ctx, &ins),
             // §9.9 / 9.9-m-3a: data.drop / elem.drop — write 1 to
             // the dropped-flag byte. No operands; no result. The
             // validator already bounds-checks idx.
@@ -976,37 +852,16 @@ pub fn compile(
                 try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r10, abi.runtime_ptr_save_gpr, jit_abi.elem_dropped_ptr_off).slice());
                 try buf.appendSlice(allocator, inst.encStoreImm8MemBaseDisp32(.r10, @intCast(ins.payload), 1).slice());
             },
-            .@"memory.copy" => try op_memory.emitMemoryCopyCtx(&ctx, &ins),
-            .@"memory.init" => try op_memory.emitMemoryInitCtx(&ctx, &ins),
-            .@"global.get" => try op_globals.emitGlobalGetCtx(&ctx, &ins),
-            .@"global.set" => try op_globals.emitGlobalSetCtx(&ctx, &ins),
             // §9.9 (per ADR-0058) + §9.12-B / B63: table ops cohort
             // — `(ctx, ins)` per-op adapters bundle the unified
             // bounds-checked load/store + grow/fill/copy/init paths
             // against the per-table TableSlice descriptor.
-            .@"table.get" => try op_table.emitTableGetCtx(&ctx, &ins),
-            .@"table.set" => try op_table.emitTableSetCtx(&ctx, &ins),
-            .@"table.size" => try op_table.emitTableSizeCtx(&ctx, &ins),
-            .@"table.grow" => try op_table.emitTableGrowCtx(&ctx, &ins),
-            .@"table.fill" => try op_table.emitTableFillCtx(&ctx, &ins),
-            .@"table.copy" => try op_table.emitTableCopyCtx(&ctx, &ins),
-            .@"table.init" => try op_table.emitTableInitCtx(&ctx, &ins),
             // §9.7 / 9.7-a + 9.7-b: SIMD-128 packed integer add/sub
             // family (8 ops). Wires the FP-class regalloc +
             // shape-tag pipeline on x86_64 per ADR-0041; spilled
             // v128 vregs surface UnsupportedOp until 9.7-c MOVDQU
             // helpers land.
             // §9.12-B / B91: SIMD int binary arith cohort migrated to ctx tuple.
-            .@"i8x16.add" => try op_simd_int_arith.emitI8x16AddCtx(&ctx, &ins),
-            .@"i8x16.sub" => try op_simd_int_arith.emitI8x16SubCtx(&ctx, &ins),
-            .@"i16x8.add" => try op_simd_int_arith.emitI16x8AddCtx(&ctx, &ins),
-            .@"i16x8.sub" => try op_simd_int_arith.emitI16x8SubCtx(&ctx, &ins),
-            .@"i32x4.add" => try op_simd_int_arith.emitI32x4AddCtx(&ctx, &ins),
-            .@"i32x4.sub" => try op_simd_int_arith.emitI32x4SubCtx(&ctx, &ins),
-            .@"i64x2.add" => try op_simd_int_arith.emitI64x2AddCtx(&ctx, &ins),
-            .@"i64x2.sub" => try op_simd_int_arith.emitI64x2SubCtx(&ctx, &ins),
-            .@"i16x8.mul" => try op_simd_int_arith.emitI16x8MulCtx(&ctx, &ins),
-            .@"i32x4.mul" => try op_simd_int_arith.emitI32x4MulCtx(&ctx, &ins),
             // §9.7 / 9.7-d: i64x2.mul synthesis (no native SSE4.1 form;
             // PMULUDQ + shift/add idiom uses XMM14/15 as scratch).
             .@"i64x2.mul" => try op_simd_int_arith.emitI64x2Mul(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
@@ -1014,7 +869,6 @@ pub fn compile(
             // shapes follow in 9.7-f). Splat broadcasts a scalar i32
             // across 4 lanes; extract_lane pulls one lane back to
             // scalar via PEXTRD (SSE4.1).
-            .@"i32x4.splat" => try op_simd_int_cmp_lane.emitI32x4SplatCtx(&ctx, &ins),
             .@"i32x4.extract_lane" => try op_simd_int_cmp_lane.emitI32x4ExtractLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
             // §9.7 / 9.7-aw: i64x2.extract_lane via PEXTRQ (SSE4.1
             // REX.W=1 variant of PEXTRD). Mirror of i32x4.extract_
@@ -1037,77 +891,36 @@ pub fn compile(
             // §9.7 / 9.7-h: integer splat siblings (i32x4 already
             // landed in 9.7-e). i8x16 via PSHUFB-broadcast; i16x8
             // via PSHUFLW + PSHUFD; i64x2 via PUNPCKLQDQ.
-            .@"i8x16.splat" => try op_simd_int_cmp_lane.emitI8x16SplatCtx(&ctx, &ins),
-            .@"i16x8.splat" => try op_simd_int_cmp_lane.emitI16x8SplatCtx(&ctx, &ins),
-            .@"i64x2.splat" => try op_simd_int_cmp_lane.emitI64x2SplatCtx(&ctx, &ins),
             // §9.7 / 9.7-i: f32x4 lane access trio. XMM-source
             // semantics — splat / extract reuse encPshufd; replace
             // uses the new INSERTPS encoder (SSE4.1 3A 21 /r ib).
-            .@"f32x4.splat" => try op_simd_float.emitF32x4SplatCtx(&ctx, &ins),
             .@"f32x4.extract_lane" => try op_simd_float.emitF32x4ExtractLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.payload),
             .@"f32x4.replace_lane" => try op_simd_float.emitF32x4ReplaceLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.payload),
             // §9.7 / 9.7-j: f64x2 lane access trio. splat + extract_lane
             // reuse encPshufd (imm 0x44 / 0xEE for low/high qword).
             // replace_lane uses MOVAPS preamble + MOVSD (lane=0) /
             // MOVLHPS (lane=1).
-            .@"f64x2.splat" => try op_simd_float.emitF64x2SplatCtx(&ctx, &ins),
             .@"f64x2.extract_lane" => try op_simd_float.emitF64x2ExtractLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.payload),
             .@"f64x2.replace_lane" => try op_simd_float.emitF64x2ReplaceLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.payload),
             // §9.7 / 9.7-k: int compare eq/ne family. PCMPEQ B/W/D
             // (SSE2) + PCMPEQQ (SSE4.1); ne paths apply NOT via
             // PXOR with an all-ones mask (PCMPEQB scratch, scratch).
             // §9.12-B / B93: SIMD i8x16 compare cohort migrated to ctx tuple.
-            .@"i8x16.eq" => try op_simd_int_cmp_lane.emitI8x16EqCtx(&ctx, &ins),
-            .@"i16x8.eq" => try op_simd_int_cmp_lane.emitI16x8EqCtx(&ctx, &ins),
-            .@"i32x4.eq" => try op_simd_int_cmp_lane.emitI32x4EqCtx(&ctx, &ins),
-            .@"i64x2.eq" => try op_simd_int_cmp_lane.emitI64x2EqCtx(&ctx, &ins),
-            .@"i8x16.ne" => try op_simd_int_cmp_lane.emitI8x16NeCtx(&ctx, &ins),
-            .@"i16x8.ne" => try op_simd_int_cmp_lane.emitI16x8NeCtx(&ctx, &ins),
-            .@"i32x4.ne" => try op_simd_int_cmp_lane.emitI32x4NeCtx(&ctx, &ins),
-            .@"i64x2.ne" => try op_simd_int_cmp_lane.emitI64x2NeCtx(&ctx, &ins),
             // §9.7 / 9.7-l: signed lt/gt/le/ge for 8/16/32-bit shapes
             // (12 ops). PCMPGT_<shape> direct for gt; operand swap for
             // lt; PXOR-with-all-ones NOT for le/ge. i64x2 signed
             // compares defer to 9.7-m (PCMPGTQ is SSE4.2 — needs ADR).
-            .@"i8x16.gt_s" => try op_simd_int_cmp_lane.emitI8x16GtSCtx(&ctx, &ins),
-            .@"i8x16.lt_s" => try op_simd_int_cmp_lane.emitI8x16LtSCtx(&ctx, &ins),
-            .@"i8x16.le_s" => try op_simd_int_cmp_lane.emitI8x16LeSCtx(&ctx, &ins),
-            .@"i8x16.ge_s" => try op_simd_int_cmp_lane.emitI8x16GeSCtx(&ctx, &ins),
-            .@"i16x8.gt_s" => try op_simd_int_cmp_lane.emitI16x8GtSCtx(&ctx, &ins),
-            .@"i16x8.lt_s" => try op_simd_int_cmp_lane.emitI16x8LtSCtx(&ctx, &ins),
-            .@"i16x8.le_s" => try op_simd_int_cmp_lane.emitI16x8LeSCtx(&ctx, &ins),
-            .@"i16x8.ge_s" => try op_simd_int_cmp_lane.emitI16x8GeSCtx(&ctx, &ins),
-            .@"i32x4.gt_s" => try op_simd_int_cmp_lane.emitI32x4GtSCtx(&ctx, &ins),
-            .@"i32x4.lt_s" => try op_simd_int_cmp_lane.emitI32x4LtSCtx(&ctx, &ins),
-            .@"i32x4.le_s" => try op_simd_int_cmp_lane.emitI32x4LeSCtx(&ctx, &ins),
-            .@"i32x4.ge_s" => try op_simd_int_cmp_lane.emitI32x4GeSCtx(&ctx, &ins),
             // §9.7 / 9.7-m: i64x2 signed compare lt_s/gt_s/le_s/ge_s
             // (4 ops). PCMPGTQ (SSE4.2 0F 38 37) threaded through
             // 9.7-l's emitV128IntCmpSigned helper. Per ADR-0041 §5
             // amend at 9.7-m — x86_64 baseline raised SSE4.1 →
             // SSE4.2 (Steam Apr 2026 98.18% adoption).
-            .@"i64x2.gt_s" => try op_simd_int_cmp_lane.emitI64x2GtSCtx(&ctx, &ins),
-            .@"i64x2.lt_s" => try op_simd_int_cmp_lane.emitI64x2LtSCtx(&ctx, &ins),
-            .@"i64x2.le_s" => try op_simd_int_cmp_lane.emitI64x2LeSCtx(&ctx, &ins),
-            .@"i64x2.ge_s" => try op_simd_int_cmp_lane.emitI64x2GeSCtx(&ctx, &ins),
             // §9.7 / 9.7-n: unsigned compares lt_u/gt_u/le_u/ge_u for
             // 8/16/32-bit shapes (12 ops). PMINU/PMAXU + PCMPEQ
             // (cranelift `lower.isle:2016-2080`): gt/lt = NOT eq(min/max,
             // rhs); ge/le = eq(lhs, max/min). PMAXUB/PMINUB SSE2;
             // PMAXU{W,D} / PMINU{W,D} SSE4.1. i64x2 unsigned not in
             // Wasm SIMD spec.
-            .@"i8x16.gt_u" => try op_simd_int_cmp_lane.emitI8x16GtUCtx(&ctx, &ins),
-            .@"i8x16.lt_u" => try op_simd_int_cmp_lane.emitI8x16LtUCtx(&ctx, &ins),
-            .@"i8x16.le_u" => try op_simd_int_cmp_lane.emitI8x16LeUCtx(&ctx, &ins),
-            .@"i8x16.ge_u" => try op_simd_int_cmp_lane.emitI8x16GeUCtx(&ctx, &ins),
-            .@"i16x8.gt_u" => try op_simd_int_cmp_lane.emitI16x8GtUCtx(&ctx, &ins),
-            .@"i16x8.lt_u" => try op_simd_int_cmp_lane.emitI16x8LtUCtx(&ctx, &ins),
-            .@"i16x8.le_u" => try op_simd_int_cmp_lane.emitI16x8LeUCtx(&ctx, &ins),
-            .@"i16x8.ge_u" => try op_simd_int_cmp_lane.emitI16x8GeUCtx(&ctx, &ins),
-            .@"i32x4.gt_u" => try op_simd_int_cmp_lane.emitI32x4GtUCtx(&ctx, &ins),
-            .@"i32x4.lt_u" => try op_simd_int_cmp_lane.emitI32x4LtUCtx(&ctx, &ins),
-            .@"i32x4.le_u" => try op_simd_int_cmp_lane.emitI32x4LeUCtx(&ctx, &ins),
-            .@"i32x4.ge_u" => try op_simd_int_cmp_lane.emitI32x4GeUCtx(&ctx, &ins),
             // §9.7 / 9.7-o: FP compare eq/ne/lt/gt/le/ge for f32x4 +
             // f64x2 (12 ops). CMPPS (SSE 0F C2 /r ib) + CMPPD (SSE2
             // 66 0F C2 /r ib) with imm8 predicate per Intel SDM Vol
@@ -1115,18 +928,6 @@ pub fn compile(
             // 0/4/1/2; gt/ge swap operands + imm 1/2 per cranelift
             // `lower.isle:2169-2172`.
             // §9.12-B / B103: SIMD float compare cohort migrated to ctx tuple.
-            .@"f32x4.eq" => try op_simd_float.emitF32x4EqCtx(&ctx, &ins),
-            .@"f32x4.ne" => try op_simd_float.emitF32x4NeCtx(&ctx, &ins),
-            .@"f32x4.lt" => try op_simd_float.emitF32x4LtCtx(&ctx, &ins),
-            .@"f32x4.gt" => try op_simd_float.emitF32x4GtCtx(&ctx, &ins),
-            .@"f32x4.le" => try op_simd_float.emitF32x4LeCtx(&ctx, &ins),
-            .@"f32x4.ge" => try op_simd_float.emitF32x4GeCtx(&ctx, &ins),
-            .@"f64x2.eq" => try op_simd_float.emitF64x2EqCtx(&ctx, &ins),
-            .@"f64x2.ne" => try op_simd_float.emitF64x2NeCtx(&ctx, &ins),
-            .@"f64x2.lt" => try op_simd_float.emitF64x2LtCtx(&ctx, &ins),
-            .@"f64x2.gt" => try op_simd_float.emitF64x2GtCtx(&ctx, &ins),
-            .@"f64x2.le" => try op_simd_float.emitF64x2LeCtx(&ctx, &ins),
-            .@"f64x2.ge" => try op_simd_float.emitF64x2GeCtx(&ctx, &ins),
             // §9.7 / 9.7-p: FP arithmetic add/sub/mul/div + sqrt
             // for f32x4 + f64x2 (10 ops). ADDPS/SUBPS/MULPS/DIVPS/
             // SQRTPS (SSE 0F 58/5C/59/5E/51) + PD variants (SSE2 66
@@ -1135,17 +936,7 @@ pub fn compile(
             // (NaN-correction synthesis ~7 instr per cranelift
             // `lower.isle` F32X4/F64X2 fmin/fmax).
             // §9.12-B / B100: SIMD f32x4 arith migrated to ctx tuple.
-            .@"f32x4.add" => try op_simd_float.emitF32x4AddCtx(&ctx, &ins),
-            .@"f32x4.sub" => try op_simd_float.emitF32x4SubCtx(&ctx, &ins),
-            .@"f32x4.mul" => try op_simd_float.emitF32x4MulCtx(&ctx, &ins),
-            .@"f32x4.div" => try op_simd_float.emitF32x4DivCtx(&ctx, &ins),
-            .@"f32x4.sqrt" => try op_simd_float.emitF32x4SqrtCtx(&ctx, &ins),
             // §9.12-B / B101: SIMD f64x2 arith migrated to ctx tuple.
-            .@"f64x2.add" => try op_simd_float.emitF64x2AddCtx(&ctx, &ins),
-            .@"f64x2.sub" => try op_simd_float.emitF64x2SubCtx(&ctx, &ins),
-            .@"f64x2.mul" => try op_simd_float.emitF64x2MulCtx(&ctx, &ins),
-            .@"f64x2.div" => try op_simd_float.emitF64x2DivCtx(&ctx, &ins),
-            .@"f64x2.sqrt" => try op_simd_float.emitF64x2SqrtCtx(&ctx, &ins),
             // §9.7 / 9.7-q: f32x4 + f64x2 min/max NaN-correction
             // synthesis (4 ops). MINPS/MAXPS / MINPD/MAXPD wrapped
             // with cranelift's 10-instr (fmin) / 13-instr (fmax)
@@ -1154,52 +945,25 @@ pub fn compile(
             // zero-aware) where naive MIN/MAX would return src2 on
             // unordered inputs (off-spec). XMM14 + XMM15 used as
             // scratch.
-            .@"f32x4.min" => try op_simd_float.emitF32x4MinCtx(&ctx, &ins),
-            .@"f32x4.max" => try op_simd_float.emitF32x4MaxCtx(&ctx, &ins),
-            .@"f64x2.min" => try op_simd_float.emitF64x2MinCtx(&ctx, &ins),
-            .@"f64x2.max" => try op_simd_float.emitF64x2MaxCtx(&ctx, &ins),
             // §9.7 / 9.7-r: v128 bitwise ops + v128.any_true (7 ops).
             // PAND/POR/PXOR/PANDN (SSE2) for and/or/xor/andnot;
             // 3-instr synthesis for not (PCMPEQB ones,ones + PXOR);
             // 5-instr PAND/PANDN/POR chain for bitselect; PTEST +
             // SETNE + MOVZX for any_true (SSE4.1 PTEST).
             // §9.12-B / B90: v128 logical cohort migrated to ctx tuple.
-            .@"v128.not" => try op_simd.emitV128NotCtx(&ctx, &ins),
-            .@"v128.and" => try op_simd.emitV128AndCtx(&ctx, &ins),
-            .@"v128.or" => try op_simd.emitV128OrCtx(&ctx, &ins),
-            .@"v128.xor" => try op_simd.emitV128XorCtx(&ctx, &ins),
-            .@"v128.andnot" => try op_simd.emitV128AndnotCtx(&ctx, &ins),
-            .@"v128.bitselect" => try op_simd.emitV128BitselectCtx(&ctx, &ins),
             // §9.12-B / B104: SIMD bool reductions cohort migrated to ctx tuple.
-            .@"v128.any_true" => try op_simd.emitV128AnyTrueCtx(&ctx, &ins),
             // §9.7 / 9.7-s: per-shape all_true + bitmask reductions
             // (8 ops). all_true via SSE4.1 PXOR + PCMPEQ_<lane> +
             // PTEST + SETZ + MOVZX (5 instr per cranelift
             // `lower.isle:4936`). bitmask via PMOVMSKB / MOVMSKPS /
             // MOVMSKPD direct for i8/i32/i64; i16x8 needs PACKSSWB
             // + PMOVMSKB + SHR 8 (cranelift `lower.isle:4977`).
-            .@"i8x16.all_true" => try op_simd_int_cmp_lane.emitI8x16AllTrueCtx(&ctx, &ins),
-            .@"i16x8.all_true" => try op_simd_int_cmp_lane.emitI16x8AllTrueCtx(&ctx, &ins),
-            .@"i32x4.all_true" => try op_simd_int_cmp_lane.emitI32x4AllTrueCtx(&ctx, &ins),
-            .@"i64x2.all_true" => try op_simd_int_cmp_lane.emitI64x2AllTrueCtx(&ctx, &ins),
-            .@"i8x16.bitmask" => try op_simd_int_cmp_lane.emitI8x16BitmaskCtx(&ctx, &ins),
-            .@"i16x8.bitmask" => try op_simd_int_cmp_lane.emitI16x8BitmaskCtx(&ctx, &ins),
-            .@"i32x4.bitmask" => try op_simd_int_cmp_lane.emitI32x4BitmaskCtx(&ctx, &ins),
-            .@"i64x2.bitmask" => try op_simd_int_cmp_lane.emitI64x2BitmaskCtx(&ctx, &ins),
             // §9.7 / 9.7-t: i*x* packed shifts shl/shr_s/shr_u for
             // i16x8 + i32x4 + i64x2 (8 ops; i8x16 + i64x2.shr_s
             // synthesis defer to 9.7-u). 5-instr emit per shift:
             // AND mask (lane_width - 1), MOVD count→xmm, MOVAPS
             // dst,vec (skip-elide), <shift> dst,scratch.
             // §9.12-B / B97: SIMD int shifts cohort migrated to ctx tuple.
-            .@"i16x8.shl" => try op_simd_int_arith.emitI16x8ShlCtx(&ctx, &ins),
-            .@"i16x8.shr_s" => try op_simd_int_arith.emitI16x8ShrSCtx(&ctx, &ins),
-            .@"i16x8.shr_u" => try op_simd_int_arith.emitI16x8ShrUCtx(&ctx, &ins),
-            .@"i32x4.shl" => try op_simd_int_arith.emitI32x4ShlCtx(&ctx, &ins),
-            .@"i32x4.shr_s" => try op_simd_int_arith.emitI32x4ShrSCtx(&ctx, &ins),
-            .@"i32x4.shr_u" => try op_simd_int_arith.emitI32x4ShrUCtx(&ctx, &ins),
-            .@"i64x2.shl" => try op_simd_int_arith.emitI64x2ShlCtx(&ctx, &ins),
-            .@"i64x2.shr_u" => try op_simd_int_arith.emitI64x2ShrUCtx(&ctx, &ins),
             // §9.7 / 9.7-u: i64x2.shr_s synthesis (no native PSRAQ
             // in SSE; runtime-mask sign-bit fixup recipe per
             // cranelift `lower.isle:943-951` — 9 instr, no
@@ -1207,123 +971,62 @@ pub fn compile(
             // PCMPEQB+PSLLQ-imm-synthesised inline). i8x16 shifts
             // defer to 9.7-v (count-dependent broadcast mask
             // synthesis or const-pool dependency per ADR-0042).
-            .@"i64x2.shr_s" => try op_simd_int_arith.emitI64x2ShrSCtx(&ctx, &ins),
             // §9.7 / 9.7-v: i8x16.shl + i8x16.shr_u via inline-mask
             // synthesis (no const-pool dep). 9-/10-instr recipes
             // using PSLLW/PSRLW + PCMPEQB-derived all-ones + PSHUFB
             // broadcast of byte-0 of the shifted-mask word.
             // i8x16.shr_s defers to 9.7-w (byte→word extension via
             // PUNPCKLBW + PSRAW + PACKSSWB — structurally different).
-            .@"i8x16.shl" => try op_simd_int_arith.emitI8x16ShlCtx(&ctx, &ins),
-            .@"i8x16.shr_u" => try op_simd_int_arith.emitI8x16ShrUCtx(&ctx, &ins),
             // §9.7 / 9.7-w: i8x16.shr_s via cranelift sign-extension
             // synthesis (`lower.isle:846+`). 11-instr: PCMPGTB sign-
             // mask + PUNPCKL/HBW byte→word extension + PSRAW per
             // half + PACKSSWB pack.
-            .@"i8x16.shr_s" => try op_simd_int_arith.emitI8x16ShrSCtx(&ctx, &ins),
             // §9.7 / 9.7-x: i*x*.extend_{low,high}_*_{s,u} (12 ops).
             // Low half: 1-instr SSE4.1 PMOVSX*/PMOVZX* direct.
             // High half: PSHUFD imm=0xEE swaps upper qword to lower
             // position + PMOVSX/ZX. 2 instr per high-extend.
             // §9.12-B / B105: SIMD narrow + extend cohort migrated to ctx tuple.
-            .@"i16x8.extend_low_i8x16_s" => try op_simd_int_cmp_lane.emitI16x8ExtendLowI8x16SCtx(&ctx, &ins),
-            .@"i16x8.extend_low_i8x16_u" => try op_simd_int_cmp_lane.emitI16x8ExtendLowI8x16UCtx(&ctx, &ins),
-            .@"i16x8.extend_high_i8x16_s" => try op_simd_int_cmp_lane.emitI16x8ExtendHighI8x16SCtx(&ctx, &ins),
-            .@"i16x8.extend_high_i8x16_u" => try op_simd_int_cmp_lane.emitI16x8ExtendHighI8x16UCtx(&ctx, &ins),
-            .@"i32x4.extend_low_i16x8_s" => try op_simd_int_cmp_lane.emitI32x4ExtendLowI16x8SCtx(&ctx, &ins),
-            .@"i32x4.extend_low_i16x8_u" => try op_simd_int_cmp_lane.emitI32x4ExtendLowI16x8UCtx(&ctx, &ins),
-            .@"i32x4.extend_high_i16x8_s" => try op_simd_int_cmp_lane.emitI32x4ExtendHighI16x8SCtx(&ctx, &ins),
-            .@"i32x4.extend_high_i16x8_u" => try op_simd_int_cmp_lane.emitI32x4ExtendHighI16x8UCtx(&ctx, &ins),
-            .@"i64x2.extend_low_i32x4_s" => try op_simd_int_cmp_lane.emitI64x2ExtendLowI32x4SCtx(&ctx, &ins),
-            .@"i64x2.extend_low_i32x4_u" => try op_simd_int_cmp_lane.emitI64x2ExtendLowI32x4UCtx(&ctx, &ins),
-            .@"i64x2.extend_high_i32x4_s" => try op_simd_int_cmp_lane.emitI64x2ExtendHighI32x4SCtx(&ctx, &ins),
-            .@"i64x2.extend_high_i32x4_u" => try op_simd_int_cmp_lane.emitI64x2ExtendHighI32x4UCtx(&ctx, &ins),
             // §9.7 / 9.7-y: i*x*.narrow_*_{s,u} (4 ops). PACKSSWB
             // (SSE2) + PACKUSWB (SSE2) for i8x16; PACKSSDW (SSE2)
             // + PACKUSDW (SSE4.1) for i16x8. All single-instr via
             // emitV128IntBinop.
-            .@"i8x16.narrow_i16x8_s" => try op_simd_int_cmp_lane.emitI8x16NarrowI16x8SCtx(&ctx, &ins),
-            .@"i8x16.narrow_i16x8_u" => try op_simd_int_cmp_lane.emitI8x16NarrowI16x8UCtx(&ctx, &ins),
-            .@"i16x8.narrow_i32x4_s" => try op_simd_int_cmp_lane.emitI16x8NarrowI32x4SCtx(&ctx, &ins),
-            .@"i16x8.narrow_i32x4_u" => try op_simd_int_cmp_lane.emitI16x8NarrowI32x4UCtx(&ctx, &ins),
             // §9.7 / 9.7-z: i*x*.abs (4 ops). PABSB/W/D (SSSE3
             // 0F 38 1C/1D/1E) for 8/16/32-bit lanes — single-instr
             // unary via emitV128FpUnop. i64x2.abs synthesises via
             // 5-instr sign-mask + PXOR + PSUBQ recipe (no PABSQ
             // in SSE; SSE4.2 PCMPGTQ available per ADR-0041).
             // §9.12-B / B92: SIMD int abs cohort migrated to ctx tuple.
-            .@"i8x16.abs" => try op_simd_int_arith.emitI8x16AbsCtx(&ctx, &ins),
-            .@"i16x8.abs" => try op_simd_int_arith.emitI16x8AbsCtx(&ctx, &ins),
-            .@"i32x4.abs" => try op_simd_int_arith.emitI32x4AbsCtx(&ctx, &ins),
-            .@"i64x2.abs" => try op_simd_int_arith.emitI64x2AbsCtx(&ctx, &ins),
             // §9.7 / 9.7-aa: i*x*.neg (4 ops). 3-instr recipe via
             // emitV128IntNeg helper: PXOR XMM14,XMM14 + PSUB_<shape>
             // XMM14, src + MOVAPS dst, XMM14. Aliasing-safe.
             // §9.12-B / B92: SIMD int neg cohort migrated to ctx tuple.
-            .@"i8x16.neg" => try op_simd_int_arith.emitI8x16NegCtx(&ctx, &ins),
-            .@"i16x8.neg" => try op_simd_int_arith.emitI16x8NegCtx(&ctx, &ins),
-            .@"i32x4.neg" => try op_simd_int_arith.emitI32x4NegCtx(&ctx, &ins),
-            .@"i64x2.neg" => try op_simd_int_arith.emitI64x2NegCtx(&ctx, &ins),
             // §9.7 / 9.7-ab: FP convert signed + promote/demote
             // (4 ops). Single-instr unary CVT* via emitV128FpUnop.
             // u-variants and trunc-sat defer (cranelift uses
             // const-pool float magic numbers; ADR-0042 pending).
-            .@"f32x4.convert_i32x4_s" => try op_simd_float.emitF32x4ConvertI32x4SCtx(&ctx, &ins),
-            .@"f64x2.convert_low_i32x4_s" => try op_simd_float.emitF64x2ConvertLowI32x4SCtx(&ctx, &ins),
-            .@"f64x2.promote_low_f32x4" => try op_simd_float.emitF64x2PromoteLowF32x4Ctx(&ctx, &ins),
-            .@"f32x4.demote_f64x2_zero" => try op_simd_float.emitF32x4DemoteF64x2ZeroCtx(&ctx, &ins),
             // §9.7 / 9.7-ae: 2 inline-synth FP convert / trunc-sat
             // ops. The 4 const-pool-dependent variants
             // (f64x2.convert_low_i32x4_u, i32x4.trunc_sat_f32x4_u,
             // i32x4.trunc_sat_f64x2_{s,u}_zero) defer to 9.7-ag
             // pending ADR-0042 const-pool plumbing.
-            .@"f32x4.convert_i32x4_u" => try op_simd_float.emitF32x4ConvertI32x4UCtx(&ctx, &ins),
-            .@"i32x4.trunc_sat_f32x4_s" => try op_simd_float.emitI32x4TruncSatF32x4SCtx(&ctx, &ins),
             // §9.7 / 9.7-at: i32x4.trunc_sat_f32x4_u closes the
             // last of the 4 deferred 9.7-ae u-variants. The
             // "3-scratch" framing turned out to be a non-issue:
             // dst (regalloc'd from XMM8..XMM13) + XMM14 + XMM15
             // gives 3 distinct physical xmms within the existing
             // fp_spill_stage_xmms reservation. No ABI change.
-            .@"i32x4.trunc_sat_f32x4_u" => try op_simd_float.emitI32x4TruncSatF32x4UCtx(&ctx, &ins),
             // §9.7 / 9.7-au: int min/max + saturating arith +
             // avgr_u (22 ops). All single-instruction native
             // SSE2/SSE4.1 ops; each wrapper dispatches via
             // emitV128IntBinop with the matching encoder. No new
             // helpers; cranelift maps 1-to-1 (`inst.isle:2470-2486`).
             // §9.12-B / B98: SIMD int min/max cohort migrated to ctx tuple.
-            .@"i8x16.min_s" => try op_simd_int_arith.emitI8x16MinSCtx(&ctx, &ins),
-            .@"i8x16.min_u" => try op_simd_int_arith.emitI8x16MinUCtx(&ctx, &ins),
-            .@"i8x16.max_s" => try op_simd_int_arith.emitI8x16MaxSCtx(&ctx, &ins),
-            .@"i8x16.max_u" => try op_simd_int_arith.emitI8x16MaxUCtx(&ctx, &ins),
-            .@"i16x8.min_s" => try op_simd_int_arith.emitI16x8MinSCtx(&ctx, &ins),
-            .@"i16x8.min_u" => try op_simd_int_arith.emitI16x8MinUCtx(&ctx, &ins),
-            .@"i16x8.max_s" => try op_simd_int_arith.emitI16x8MaxSCtx(&ctx, &ins),
-            .@"i16x8.max_u" => try op_simd_int_arith.emitI16x8MaxUCtx(&ctx, &ins),
-            .@"i32x4.min_s" => try op_simd_int_arith.emitI32x4MinSCtx(&ctx, &ins),
-            .@"i32x4.min_u" => try op_simd_int_arith.emitI32x4MinUCtx(&ctx, &ins),
-            .@"i32x4.max_s" => try op_simd_int_arith.emitI32x4MaxSCtx(&ctx, &ins),
-            .@"i32x4.max_u" => try op_simd_int_arith.emitI32x4MaxUCtx(&ctx, &ins),
             // §9.12-B / B99: SIMD int sat arith cohort migrated to ctx tuple.
-            .@"i8x16.add_sat_s" => try op_simd_int_arith.emitI8x16AddSatSCtx(&ctx, &ins),
-            .@"i8x16.add_sat_u" => try op_simd_int_arith.emitI8x16AddSatUCtx(&ctx, &ins),
-            .@"i8x16.sub_sat_s" => try op_simd_int_arith.emitI8x16SubSatSCtx(&ctx, &ins),
-            .@"i8x16.sub_sat_u" => try op_simd_int_arith.emitI8x16SubSatUCtx(&ctx, &ins),
-            .@"i16x8.add_sat_s" => try op_simd_int_arith.emitI16x8AddSatSCtx(&ctx, &ins),
-            .@"i16x8.add_sat_u" => try op_simd_int_arith.emitI16x8AddSatUCtx(&ctx, &ins),
-            .@"i16x8.sub_sat_s" => try op_simd_int_arith.emitI16x8SubSatSCtx(&ctx, &ins),
-            .@"i16x8.sub_sat_u" => try op_simd_int_arith.emitI16x8SubSatUCtx(&ctx, &ins),
-            .@"i8x16.avgr_u" => try op_simd_int_arith.emitI8x16AvgrUCtx(&ctx, &ins),
-            .@"i16x8.avgr_u" => try op_simd_int_arith.emitI16x8AvgrUCtx(&ctx, &ins),
             // §9.7 / 9.7-av: f32x4/f64x2 .pmin/pmax (4 ops). Direct
             // dispatch to MINPS/MAXPS/MINPD/MAXPD with operands
             // swapped (dst=c2, src=c1) to align Wasm pseudo-min/max
             // semantics with x86's "return src on equal/NaN/zero".
             // Cranelift maps the same way (`lower.isle:1542-1545`).
-            .@"f32x4.pmin" => try op_simd_float.emitF32x4PminCtx(&ctx, &ins),
-            .@"f32x4.pmax" => try op_simd_float.emitF32x4PmaxCtx(&ctx, &ins),
-            .@"f64x2.pmin" => try op_simd_float.emitF64x2PminCtx(&ctx, &ins),
-            .@"f64x2.pmax" => try op_simd_float.emitF64x2PmaxCtx(&ctx, &ins),
             // §9.7 / 9.7-ax: v128.load + v128.store foundation
             // memory ops. Mirror scalar emitMemOp shape with
             // access_size=16 + MOVUPS final encoding. RAX/RCX/RDX
@@ -1372,49 +1075,31 @@ pub fn compile(
             // saturate exactly per Wasm spec; PMADDWD (SSE2)
             // implements pairwise dot product with wrapping i32
             // accumulation matching the Wasm spec.
-            .@"i16x8.q15mulr_sat_s" => try op_simd_int_arith.emitI16x8Q15mulrSatSCtx(&ctx, &ins),
-            .@"i32x4.dot_i16x8_s" => try op_simd_int_arith.emitI32x4DotI16x8SCtx(&ctx, &ins),
             // §9.7 / 9.7-ag: i16x8.extmul × 4. Cranelift recipe
             // `lower.isle:1197-1285` — PMOVSX/ZX BW each operand
             // (extend i8→i16) + PMULLW. High variants prefix
             // PSHUFD imm=0xEE to swap upper 64 bits down before
             // extending. No new encoders.
-            .@"i16x8.extmul_low_i8x16_s" => try op_simd_int_cmp_lane.emitI16x8ExtmulLowI8x16SCtx(&ctx, &ins),
-            .@"i16x8.extmul_high_i8x16_s" => try op_simd_int_cmp_lane.emitI16x8ExtmulHighI8x16SCtx(&ctx, &ins),
-            .@"i16x8.extmul_low_i8x16_u" => try op_simd_int_cmp_lane.emitI16x8ExtmulLowI8x16UCtx(&ctx, &ins),
-            .@"i16x8.extmul_high_i8x16_u" => try op_simd_int_cmp_lane.emitI16x8ExtmulHighI8x16UCtx(&ctx, &ins),
             // §9.7 / 9.7-ah: i32x4.extmul × 4 (i16x8 → i32x4).
             // Same recipe as 9.7-ag with PMOVSXWD/PMOVZXWD +
             // PMULLD substituted; helpers reused unchanged.
-            .@"i32x4.extmul_low_i16x8_s" => try op_simd_int_cmp_lane.emitI32x4ExtmulLowI16x8SCtx(&ctx, &ins),
-            .@"i32x4.extmul_high_i16x8_s" => try op_simd_int_cmp_lane.emitI32x4ExtmulHighI16x8SCtx(&ctx, &ins),
-            .@"i32x4.extmul_low_i16x8_u" => try op_simd_int_cmp_lane.emitI32x4ExtmulLowI16x8UCtx(&ctx, &ins),
-            .@"i32x4.extmul_high_i16x8_u" => try op_simd_int_cmp_lane.emitI32x4ExtmulHighI16x8UCtx(&ctx, &ins),
             // §9.7 / 9.7-ai: i64x2.extmul × 4 (i32x4 → i64x2).
             // Different shape: PMULDQ/PMULUDQ already widen
             // i32→i64, so PSHUFD imm=0x{50,FA} is the only
             // positioning needed (no PMOVSX/ZX prefix).
-            .@"i64x2.extmul_low_i32x4_s" => try op_simd_int_cmp_lane.emitI64x2ExtmulLowI32x4SCtx(&ctx, &ins),
-            .@"i64x2.extmul_high_i32x4_s" => try op_simd_int_cmp_lane.emitI64x2ExtmulHighI32x4SCtx(&ctx, &ins),
-            .@"i64x2.extmul_low_i32x4_u" => try op_simd_int_cmp_lane.emitI64x2ExtmulLowI32x4UCtx(&ctx, &ins),
-            .@"i64x2.extmul_high_i32x4_u" => try op_simd_int_cmp_lane.emitI64x2ExtmulHighI32x4UCtx(&ctx, &ins),
             // §9.7 / 9.7-aj: i16x8.extadd_pairwise_i8x16 × 2.
             // PCMPEQB + PABSB synthesises a 0x01-per-byte vector;
             // PMADDUBSW (SSSE3) reduces to pairwise add. No
             // const-pool dep.
-            .@"i16x8.extadd_pairwise_i8x16_s" => try op_simd_int_cmp_lane.emitI16x8ExtaddPairwiseI8x16SCtx(&ctx, &ins),
-            .@"i16x8.extadd_pairwise_i8x16_u" => try op_simd_int_cmp_lane.emitI16x8ExtaddPairwiseI8x16UCtx(&ctx, &ins),
             // §9.7 / 9.7-ak: i32x4.extadd_pairwise_i16x8_s.
             // Inline-synth 0x00010001-per-dword mask + PMADDWD.
             // The _u variant is deferred (PMADDWD reads i16 as
             // signed; u16 inputs need pre-correction via ADR-0042
             // const-pool sign-flip + post-add fixup).
-            .@"i32x4.extadd_pairwise_i16x8_s" => try op_simd_int_cmp_lane.emitI32x4ExtaddPairwiseI16x8SCtx(&ctx, &ins),
             // §9.7/9.7-aq — i32x4.extadd_pairwise_i16x8_u via
             // sign-flip XOR + PMADDWD-with-+1 + bias-correction-add.
             // 11-instr inline-synth (no const-pool dep) — closes
             // the extadd_pairwise family.
-            .@"i32x4.extadd_pairwise_i16x8_u" => try op_simd_int_cmp_lane.emitI32x4ExtaddPairwiseI16x8UCtx(&ctx, &ins),
             // §9.7/9.7-ar — i8x16.shuffle via PSHUFB-pair + POR.
             // The handler reads the original Wasm mask from
             // func.simd_consts[ins.payload], derives a-mask /
@@ -1457,58 +1142,31 @@ pub fn compile(
             // §9.7 / 9.7-ac: i8x16.swizzle (1 op). 10-instr inline
             // recipe synthesises 0x0F broadcast + PCMPGTB-detect of
             // idx>15 + POR-correct + PSHUFB. No const-pool dep.
-            .@"i8x16.swizzle" => try op_simd_int_cmp_lane.emitI8x16SwizzleCtx(&ctx, &ins),
             // §9.7 / 9.7-ad: FP unop family (12 ops). abs / neg
             // via inline sign-mask synthesis (PCMPEQB ones +
             // PSLL{D,Q}-imm 31/63); ceil/floor/trunc/nearest via
             // SSE4.1 ROUNDPS/ROUNDPD imm with precision-exception
             // suppression (bit 3 set).
             // §9.12-B / B102: SIMD float unary cohort migrated to ctx tuple.
-            .@"f32x4.abs" => try op_simd_float.emitF32x4AbsCtx(&ctx, &ins),
-            .@"f64x2.abs" => try op_simd_float.emitF64x2AbsCtx(&ctx, &ins),
-            .@"f32x4.neg" => try op_simd_float.emitF32x4NegCtx(&ctx, &ins),
-            .@"f64x2.neg" => try op_simd_float.emitF64x2NegCtx(&ctx, &ins),
-            .@"f32x4.ceil" => try op_simd_float.emitF32x4CeilCtx(&ctx, &ins),
-            .@"f32x4.floor" => try op_simd_float.emitF32x4FloorCtx(&ctx, &ins),
-            .@"f32x4.trunc" => try op_simd_float.emitF32x4TruncCtx(&ctx, &ins),
-            .@"f32x4.nearest" => try op_simd_float.emitF32x4NearestCtx(&ctx, &ins),
-            .@"f64x2.ceil" => try op_simd_float.emitF64x2CeilCtx(&ctx, &ins),
-            .@"f64x2.floor" => try op_simd_float.emitF64x2FloorCtx(&ctx, &ins),
-            .@"f64x2.trunc" => try op_simd_float.emitF64x2TruncCtx(&ctx, &ins),
-            .@"f64x2.nearest" => try op_simd_float.emitF64x2NearestCtx(&ctx, &ins),
             // §9.12-B / B71: memory.size + memory.grow migrated.
-            .@"memory.size" => try op_call.emitMemorySizeCtx(&ctx, &ins),
-            .@"memory.grow" => try op_call.emitMemoryGrowCtx(&ctx, &ins),
             // §9.12-B / B70: select + select_typed inline body
             // extracted into `op_alu_int.emitSelectCtx` `(ctx, ins)`
             // adapter (handles v128 / fp / GPR 3-path dispatch).
-            .select, .select_typed => try op_alu_int.emitSelectCtx(&ctx, &ins),
             // §9.12-B / B73: unreachable inline body extracted into
             // `op_control.emitUnreachableCtx` `(ctx, ins)` adapter
             // (ctx extended with `dead_code: *bool` field).
-            .@"unreachable" => try op_control.emitUnreachableCtx(&ctx, &ins),
             // §9.12-B / B72: nop inline body extracted into
             // `op_control.emitNopCtx` `(ctx, ins)` adapter.
-            .nop => try op_control.emitNopCtx(&ctx, &ins),
             // §9.12-B / B69: drop inline body extracted into
             // `op_control.emitDropCtx` `(ctx, ins)` adapter.
-            .drop => try op_control.emitDropCtx(&ctx, &ins),
             // §9.12-B / B74: return inline body extracted into
             // `op_control.emitReturnCtx` `(ctx, ins)` adapter
             // (ctx extended with `frame_bytes` + `uses_runtime_ptr`).
-            .@"return" => try op_control.emitReturnCtx(&ctx, &ins),
-            .block => try op_control.emitBlockCtx(&ctx, &ins),
-            .loop => try op_control.emitLoopCtx(&ctx, &ins),
             // §9.12-B / B75: br family extracted into `(ctx, ins)`
             // adapters in op_control. emitBrCtx sets dead_code
             // (br is unconditional); br_if / br_table fall through.
-            .br => try op_control.emitBrCtx(&ctx, &ins),
-            .br_if => try op_control.emitBrIfCtx(&ctx, &ins),
-            .br_table => try op_control.emitBrTableCtx(&ctx, &ins),
             // §9.12-B / B76: if + else extracted into `(ctx, ins)`
             // adapters in op_control.
-            .@"if" => try op_control.emitIfCtx(&ctx, &ins),
-            .@"else" => try op_control.emitElseCtx(&ctx, &ins),
             .end => {
                 // §9.12-B / B77 (ADR-0075): both forms route
                 // through op_control.emitEndCtx. Function-level
