@@ -15,6 +15,11 @@
 //!   run <path.wasm>           Drive a WASI module's `_start` / `main`
 //!                             export; exit with the guest's
 //!                             `proc_exit` code.
+//!   run --invoke <name>       Invoke the named func export (zero-args)
+//!     <path.wasm>             instead of the default `_start` / `main`
+//!                             selection. Phase 11 bench prerequisite
+//!                             per §9.12-G; arg marshalling + result
+//!                             printing remain Phase 11 scope.
 //!   compile <path.wasm>       Produce a `.cwasm` v0.1 artifact (per
 //!     -o <out.cwasm>          ADR-0039). Generator pipeline only —
 //!                             Phase 12's loader executes the artifact.
@@ -54,8 +59,22 @@ pub fn main(init: std.process.Init) !void {
 
     if (subcmd_opt) |subcmd| {
         if (std.mem.eql(u8, subcmd, "run")) {
-            const path_arg = arg_it.next() orelse {
-                try printlnErr(io, "usage: zwasm run <path.wasm> [args...]");
+            // Parse `--invoke <name>` ahead of the positional path. The
+            // flag must precede the path so the trailing argv (= WASI
+            // guest argv) is unambiguous.
+            var invoke_name: ?[]const u8 = null;
+            var next_arg = arg_it.next();
+            if (next_arg) |a| {
+                if (std.mem.eql(u8, a, "--invoke")) {
+                    invoke_name = arg_it.next() orelse {
+                        try printlnErr(io, "usage: zwasm run --invoke <name> <path.wasm> [args...]");
+                        std.process.exit(2);
+                    };
+                    next_arg = arg_it.next();
+                }
+            }
+            const path_arg = next_arg orelse {
+                try printlnErr(io, "usage: zwasm run [--invoke <name>] <path.wasm> [args...]");
                 std.process.exit(2);
             };
             const path = try gpa.dupe(u8, path_arg);
@@ -79,7 +98,7 @@ pub fn main(init: std.process.Init) !void {
             try argv_list.append(gpa, path);
             while (arg_it.next()) |a| try argv_list.append(gpa, a);
 
-            const code = cli_run.runWasm(gpa, io, bytes, argv_list.items) catch |err| {
+            const code = cli_run.runWasmCaptured(gpa, io, bytes, argv_list.items, null, invoke_name) catch |err| {
                 // Per ADR-0016 phase 1: prefer the structured
                 // diagnostic when one was set; fall back to the
                 // legacy `@errorName` form for unwired sites.

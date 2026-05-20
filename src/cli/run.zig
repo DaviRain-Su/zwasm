@@ -27,7 +27,7 @@ pub fn runWasm(
     bytes: []const u8,
     argv: []const []const u8,
 ) !u8 {
-    return runWasmCaptured(alloc, io, bytes, argv, null);
+    return runWasmCaptured(alloc, io, bytes, argv, null, null);
 }
 
 /// Like `runWasm` but routes guest stdout writes (`fd_write`
@@ -41,12 +41,19 @@ pub fn runWasm(
 /// WASI guests expect `argv[0]` to be the program name (matching
 /// wasmtime's default of using the wasm filename). Pass `&.{}` for
 /// "no args" — empty argv yields argc=0.
+///
+/// `invoke_name` overrides the entry-point selection (default
+/// `_start` → `main` → first func export). When non-null, the
+/// runner locates the func export with that exact name and calls
+/// it with zero args. Phase 11 bench prerequisite per §9.12-G;
+/// arg marshalling + result printing remain Phase 11 scope.
 pub fn runWasmCaptured(
     alloc: std.mem.Allocator,
     io: std.Io,
     bytes: []const u8,
     argv: []const []const u8,
     stdout_capture: ?*std.ArrayList(u8),
+    invoke_name: ?[]const u8,
 ) !u8 {
     _ = alloc; // engine + store own their own c_allocator paths
 
@@ -98,11 +105,19 @@ pub fn runWasmCaptured(
     };
     defer wasm_c_api.wasm_instance_delete(instance);
 
-    // Locate the entry export. WASI guests conventionally export
-    // `_start`; our fixtures + hand-rolled hello-worlds also use
-    // `main`. Prefer `_start` when present; otherwise fall back
-    // to the first export.
+    // Locate the entry export. When `invoke_name` is non-null the
+    // caller has picked a specific export by name (Phase 11 bench
+    // prerequisite per §9.12-G); otherwise WASI guests
+    // conventionally export `_start` and our fixtures + hand-rolled
+    // hello-worlds also use `main`.
     const entry_idx = blk: {
+        if (invoke_name) |name| {
+            for (instance.exports_storage, 0..) |exp, i| {
+                if (exp.kind == .func and std.mem.eql(u8, exp.name, name)) break :blk i;
+            }
+            diagnostic.setDiag(.instantiate, .no_func_export, .unknown, "--invoke: named func export not found", .{});
+            return error.NoFuncExport;
+        }
         for (instance.exports_storage, 0..) |exp, i| {
             if (exp.kind == .func and std.mem.eql(u8, exp.name, "_start")) break :blk i;
         }
@@ -231,6 +246,24 @@ test "runWasm: malformed wasm produces an instantiate-phase diagnostic" {
     try testing.expectEqual(diagnostic.Phase.instantiate, diag.phase);
     try testing.expectEqual(diagnostic.Kind.module_alloc_failed, diag.kind);
     try testing.expect(std.mem.startsWith(u8, diag.message(), "module decode/validate failed"));
+}
+
+test "runWasmCaptured: --invoke 'main' on proc_exit_42 fixture returns exit code 42" {
+    // Phase 11 bench prerequisite (§9.12-G): named-export entry-point
+    // selection. The proc_exit_42 fixture exports `main`; invoking it
+    // by name returns the same exit code as the default `main` fallback.
+    const code = try runWasmCaptured(testing.allocator, testing.io, &proc_exit_42_wasm, &.{}, null, "main");
+    try testing.expectEqual(@as(u8, 42), code);
+}
+
+test "runWasmCaptured: --invoke <bogus> on proc_exit_42 fixture returns NoFuncExport" {
+    const result = runWasmCaptured(testing.allocator, testing.io, &proc_exit_42_wasm, &.{}, null, "bogus_export_name");
+    try testing.expectError(error.NoFuncExport, result);
+
+    const diag = diagnostic.lastDiagnostic().?;
+    try testing.expectEqual(diagnostic.Phase.instantiate, diag.phase);
+    try testing.expectEqual(diagnostic.Kind.no_func_export, diag.kind);
+    try testing.expect(std.mem.startsWith(u8, diag.message(), "--invoke:"));
 }
 
 test "runWasm: clearDiag is invoked on entry — fresh call clears prior state" {

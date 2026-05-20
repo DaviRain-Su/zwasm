@@ -124,7 +124,7 @@ pub fn main(init: std.process.Init) !void {
         // so guests like `c_hello_wasi` that print argv[0] produce
         // identical bytes.
         const v2_argv: [1][]const u8 = .{entry.name};
-        const v2_result = cli_run.runWasmCaptured(gpa, io, bytes, &v2_argv, &v2_stdout);
+        const v2_result = cli_run.runWasmCaptured(gpa, io, bytes, &v2_argv, &v2_stdout, null);
         if (v2_result) |_| {
             // Continue to byte compare.
         } else |err| switch (err) {

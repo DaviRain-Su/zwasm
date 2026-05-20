@@ -96,7 +96,7 @@ pub fn main(init: std.process.Init) !void {
         const stdout_capture_ptr: ?*std.ArrayList(u8) = if (expected_stdout_opt != null) &stdout_capture else null;
 
         const wasi_argv: [1][]const u8 = .{entry.name};
-        const actual = cli_run.runWasmCaptured(gpa, io, wasm_bytes, &wasi_argv, stdout_capture_ptr) catch |err| {
+        const actual = cli_run.runWasmCaptured(gpa, io, wasm_bytes, &wasi_argv, stdout_capture_ptr, null) catch |err| {
             try stdout.print("FAIL  {s}: runtime error {s}\n", .{ entry.name, @errorName(err) });
             failed += 1;
             continue;
