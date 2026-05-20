@@ -1289,16 +1289,17 @@ pub fn compile(
             .@"i32x4.min_u" => try op_simd_int_arith.emitI32x4MinUCtx(&ctx, &ins),
             .@"i32x4.max_s" => try op_simd_int_arith.emitI32x4MaxSCtx(&ctx, &ins),
             .@"i32x4.max_u" => try op_simd_int_arith.emitI32x4MaxUCtx(&ctx, &ins),
-            .@"i8x16.add_sat_s" => try op_simd_int_arith.emitI8x16AddSatS(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i8x16.add_sat_u" => try op_simd_int_arith.emitI8x16AddSatU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i8x16.sub_sat_s" => try op_simd_int_arith.emitI8x16SubSatS(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i8x16.sub_sat_u" => try op_simd_int_arith.emitI8x16SubSatU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i16x8.add_sat_s" => try op_simd_int_arith.emitI16x8AddSatS(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i16x8.add_sat_u" => try op_simd_int_arith.emitI16x8AddSatU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i16x8.sub_sat_s" => try op_simd_int_arith.emitI16x8SubSatS(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i16x8.sub_sat_u" => try op_simd_int_arith.emitI16x8SubSatU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i8x16.avgr_u" => try op_simd_int_arith.emitI8x16AvgrU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i16x8.avgr_u" => try op_simd_int_arith.emitI16x8AvgrU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            // §9.12-B / B99: SIMD int sat arith cohort migrated to ctx tuple.
+            .@"i8x16.add_sat_s" => try op_simd_int_arith.emitI8x16AddSatSCtx(&ctx, &ins),
+            .@"i8x16.add_sat_u" => try op_simd_int_arith.emitI8x16AddSatUCtx(&ctx, &ins),
+            .@"i8x16.sub_sat_s" => try op_simd_int_arith.emitI8x16SubSatSCtx(&ctx, &ins),
+            .@"i8x16.sub_sat_u" => try op_simd_int_arith.emitI8x16SubSatUCtx(&ctx, &ins),
+            .@"i16x8.add_sat_s" => try op_simd_int_arith.emitI16x8AddSatSCtx(&ctx, &ins),
+            .@"i16x8.add_sat_u" => try op_simd_int_arith.emitI16x8AddSatUCtx(&ctx, &ins),
+            .@"i16x8.sub_sat_s" => try op_simd_int_arith.emitI16x8SubSatSCtx(&ctx, &ins),
+            .@"i16x8.sub_sat_u" => try op_simd_int_arith.emitI16x8SubSatUCtx(&ctx, &ins),
+            .@"i8x16.avgr_u" => try op_simd_int_arith.emitI8x16AvgrUCtx(&ctx, &ins),
+            .@"i16x8.avgr_u" => try op_simd_int_arith.emitI16x8AvgrUCtx(&ctx, &ins),
             // §9.7 / 9.7-av: f32x4/f64x2 .pmin/pmax (4 ops). Direct
             // dispatch to MINPS/MAXPS/MINPD/MAXPD with operands
             // swapped (dst=c2, src=c1) to align Wasm pseudo-min/max
