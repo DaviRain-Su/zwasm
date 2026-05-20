@@ -5,9 +5,9 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit: `d0da6e21`
-   (CLI `run --invoke <name>` mode; Phase 11 bench prerequisite
-   per §9.12-G).
+1. `git log --oneline -10` — last code commit: `bf13981c`
+   (Wasm 3.0 tail-call per-op stubs × 3 — return_call /
+   return_call_indirect / return_call_ref; §9.12-G Phase 10 prep).
 2. **Live status** (when uncertain):
    `bash scripts/p9_completion_status.sh` —
    `bash scripts/check_skip_impl_ratchet.sh --report` —
@@ -32,18 +32,20 @@
     (4 discharge-SHA citations + D-157 file + SKIP-EXPORTS
     inventory-only mark); ADR Decision § class column
     unchanged (still Proposed pending user Accept).
-- **§9.12-G partial** (`39f1dc15` + `d641dcd8` + `d0da6e21`):
-  Wasm 3.0 ZirOp mapping doc, include/wasm.h byte-identical,
-  zone_check --gate enforced, dispatcher emits
+- **§9.12-G partial** (`39f1dc15` + `d641dcd8` + `d0da6e21` +
+  `bf13981c`): Wasm 3.0 ZirOp mapping doc; include/wasm.h byte-
+  identical; zone_check --gate enforced; dispatcher emits
   UnsupportedOpForBuildLevel for build-filtered ops (Phase 10
-  comptime-reject infra; DCE-safe), **CLI `run --invoke <name>`
-  mode** (Phase 11 bench prerequisite). Remaining: Phase 10
-  ZirOp tags in `src/ir/zir.zig` (GC / EH / tail-call / memory64
-  / multi-memory / typed func refs); per-op files in
-  `src/instruction/wasm_3_0/<feature>_<op>.zig` with
-  `wasm_level: .v3_0`; `src/api/instance.zig` (1424 LOC) health
-  + helper extraction (batch-session); c_api Instance tests
-  (D-139 blocked).
+  comptime-reject infra; DCE-safe); CLI `run --invoke <name>`
+  mode (Phase 11 bench prerequisite); **Wasm 3.0 tail-call per-op
+  stubs landed** (return_call / return_call_indirect /
+  return_call_ref under `src/instruction/wasm_3_0/`). Remaining
+  Phase 10 ZirOp stub coverage: GC (struct.*/array.*/ref.test/
+  ref.cast/i31), EH (try_table/throw/throw_ref), memory64,
+  multi-memory, typed-func-refs (call_ref/br_on_null/
+  ref.as_non_null — existing tags); `src/api/instance.zig`
+  (1424 LOC) health + helper extraction (batch-session); c_api
+  Instance tests (D-139 blocked).
 - **§9.12-F partial** (active debt 24; "< 15" target needs
   multi-cycle): Dissolved-barrier closures so far: D-149/153/
   154/156/102/103/105/155 (across `3ace7fb4` + `129c66c5` +
@@ -61,11 +63,14 @@
   - D-141 per-file ADRs (validator.zig 1790 / dispatch_
     collector 1887 / regalloc 1851 / inst.zig × 2 archs / …).
 - **autonomous-cycle-eligible**:
-  - §9.12-G Phase 10 ZirOp tag stubs in `src/ir/zir.zig` for
-    GC / EH / tail-call / memory64 / multi-memory / typed
-    func refs (paired with per-op `wasm_3_0/` files set to
-    `wasm_level: .v3_0`; comptime-reject infra at `d641dcd8`
-    will then surface UnsupportedOpForBuildLevel for them).
+  - §9.12-G Wasm 3.0 EH per-op stubs (try_table / throw /
+    throw_ref) — same pattern as tail-call (`bf13981c`).
+  - §9.12-G Wasm 3.0 typed-func-refs per-op stubs (call_ref /
+    br_on_null / br_on_non_null / ref.as_non_null) — tags
+    already exist in zir.zig:572-575.
+  - §9.12-G Wasm 3.0 GC ZirOp stubs (struct.* / array.* /
+    ref.test / ref.cast / i31) — large cohort, can be
+    bundled by sub-feature (struct ops first, array ops next).
 
 Loop has reached equilibrium for single-cycle-tractable work;
 remaining items need batch-session or multi-cycle architectural
