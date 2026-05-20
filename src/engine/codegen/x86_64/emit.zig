@@ -1454,10 +1454,9 @@ pub fn compile(
                 try unreach_fixups.append(allocator, fixup_at);
                 dead_code = true;
             },
-            .nop => {
-                // Wasm spec §4.4.6.2 (nop) — do nothing. No machine
-                // bytes; no stack change. Mirrors arm64/emit.zig.
-            },
+            // §9.12-B / B72: nop inline body extracted into
+            // `op_control.emitNopCtx` `(ctx, ins)` adapter.
+            .nop => try op_control.emitNopCtx(&ctx, &ins),
             // §9.12-B / B69: drop inline body extracted into
             // `op_control.emitDropCtx` `(ctx, ins)` adapter.
             .drop => try op_control.emitDropCtx(&ctx, &ins),

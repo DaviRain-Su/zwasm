@@ -1168,6 +1168,13 @@ pub fn emitEndIntra(
     }
 }
 
+/// §9.12-B / B72 (ADR-0075) — `(ctx, ins)` adapter for `nop`.
+/// Wasm spec §4.4.6.2 — emits no machine bytes; no stack change.
+pub fn emitNopCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ctx;
+    _ = ins;
+}
+
 /// §9.12-B / B69 (ADR-0075) — `(ctx, ins)` adapter for `drop`.
 /// Pops the top operand without emitting any machine bytes;
 /// only the operand-stack tracker advances. Extracted from
