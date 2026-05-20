@@ -14,10 +14,10 @@
    row. **B30..B52 covered the dispatcher-signature-compatible cohort
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
-   `chore(p9c):` / `feat(p9c):` prefix. Last code commit `bd13e546`
-   (B124 shared validator). **Loop active at B125 — wire compile.zig
-   + verifier post-condition, step 4 of ADR-0077 8-step plan
-   (load-bearing wire that activates the fence in production).**
+   `chore(p9c):` / `feat(p9c):` prefix. Last code commit `6bc39358`
+   (B125 load-bearing wire). **Loop active at B126 — handler sweep,
+   step 5 of ADR-0077 8-step plan (replace magic numerals with
+   named pool indices in the 5 bulk handlers).**
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -149,24 +149,22 @@
 | B121 | Spike validation. `private/spikes/regalloc-live-fence/fence.zig` (gitignored) — 7-test self-contained harness validates ADR-0077 end-to-end (API shape + walker integration + verifier). All 7 tests green. ADR-0077 needs no amendment. Findings captured at `.dev/lessons/2026-05-20-regalloc-fence-design-validation.md`. | `e6bc9cff` |
 | B122 | Regalloc walker fence plumbing. `ScratchReservationFn` type + `forbiddenMaskForVreg` / `slotForbidden` helpers + 4th param on `computeWith` (null = no-op fence). `compile.zig` passes null; bit-for-bit identical to pre-fence path until B125. 4 new tests cover null-fence regression, crossing-vreg force, PC-locality, boundary PC. Mac test-all green. | `1f470ce3` |
 | B123 | arm64 op_scratch_reservation_table — `src/engine/codegen/arm64/abi.zig` declares the comptime `[zir_op_count][]const u16` table with bulk-handler reservation {0..4} populated for table.fill/copy/init + memory.init. Exposes `opScratchReservation(op)` as a `ScratchReservationFn`-compatible accessor. Comptime allocatable-range check; 5 unit tests including shape-assignment to shared regalloc's type. NO wire to compile.zig yet (B125). | `d90b22ce` |
-| B124 | `validateRegallocOpScratchReservation` shared validator at `shared/regalloc.zig`. arm64/abi.zig replaces inline comptime check with delegated call. Asserts: every reserved slot id < force_spill_threshold, no duplicates within an op's set. 3 happy-path comptime tests. Future x86_64 mirror reuses without duplication. | `<this commit>` |
-| **B125** | Wire `compile.zig` to pass `&arm64.abi.opScratchReservation` as the 4th arg to `computeWith` (replaces `null` placeholder). Add `VerifyError.OpScratchOverlap` post-condition scan in `regalloc.verify()`. Step 4 of ADR-0077 8-step plan — the wire is the **load-bearing step** that activates the fence in production. | **NEXT** |
+| B124 | `validateRegallocOpScratchReservation` shared validator at `shared/regalloc.zig`. arm64/abi.zig replaces inline comptime check with delegated call. Asserts: every reserved slot id < force_spill_threshold, no duplicates within an op's set. 3 happy-path comptime tests. Future x86_64 mirror reuses without duplication. | `bd13e546` |
+| B125 | **Load-bearing wire**. compile.zig comptime arch dispatch supplies `&arm64.abi.opScratchReservation` (x86_64 stays null). VerifyError gains `OpScratchOverlap`; `verifyWith` extension keeps `verify`'s back-compat signature stable. test-all green ⟹ no regressions from fence activation. | `<this commit>` |
+| **B126** | Sweep the 5 hardcoded arm64 bulk handlers (op_table.zig: emitTableFill/Copy/Init + op_memory.zig: emitMemoryInit + emitTableGrow re-classification check) to reference named `allocatable_caller_saved_scratch_gprs` indices instead of magic register numerals — regalloc now guarantees the slots are free, so the d-64 load-then-overwrite contract is upheld at the substrate level. Step 5 of ADR-0077 8-step plan. | **NEXT** |
 
 ## Active state — §9.12-C mid-flight; ADR-0077 Accepted + spike-validated; impl in progress
 
-**Loop active at B125** — wire compile.zig + verifier post-condition
-(step 4 of ADR-0077's 8-step post-spike plan). **Load-bearing step**:
-this is what activates the fence in production code.
+**Loop active at B126** — sweep the 5 D-133 bulk handlers
+(step 5 of ADR-0077's 8-step post-spike plan).
 
 ### Remaining steps (per `private/spikes/regalloc-live-fence/README.md` §"Post-spike implementation plan")
 
 1. ~~**B122**: regalloc walker fence plumbing~~ — DONE `1f470ce3`.
 2. ~~**B123**: arm64 per-arch reservation table~~ — DONE `d90b22ce`.
 3. ~~**B124**: `validateRegallocOpScratchReservation`~~ — DONE `bd13e546`.
-4. **B125 (NEXT)**: wire `compile.zig` to pass the arm64 reservation
-   lookup (replaces the `null` placeholder) + `VerifyError.OpScratchOverlap`
-   post-condition scan in `verify()`.
-5. **B126+**: Sweep 5 hardcoded handlers (op_table + op_memory) to
+4. ~~**B125**: load-bearing wire (fence active in production)~~ — DONE `6bc39358`.
+5. **B126 (NEXT)**: Sweep 5 hardcoded handlers (op_table + op_memory) to
    use the named constants (no functional change — regalloc now
    guarantees safety).
 6. **B127**: Boundary fixtures under `test/edge_cases/p9/regalloc/`
