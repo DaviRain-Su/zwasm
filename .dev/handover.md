@@ -24,40 +24,37 @@
 - **ADR-0079 fully closed** (`166cb319` + `c3e391f9`):
   runner.zig 2051 → 397 LOC across 3 files (setup.zig 555,
   compile.zig 1225, runner.zig 397).
-- **§9.12-F partial** (active debt 31 → 25):
-  - Dissolved-barrier closures: D-153/154/156/102/103/105
-    (`3ace7fb4`).
-  - Remaining 25 split into: speculative-preventive (D-090 /
+- **§9.12-F partial** (active debt 24; "< 15" target needs
+  multi-cycle):
+  - Dissolved-barrier closures so far: D-149/153/154/156/102/
+    103/105 (across `3ace7fb4` + `129c66c5`).
+  - Remaining 24 split into: speculative-preventive (D-090 /
     D-094 / D-062 — defer per karpathy-guidelines), multi-
     cycle architectural (D-141 per-file ADRs / D-081 / D-055),
     external blocker (D-010/021/028/148), Phase-future-row
-    blocked (13 rows), now-status (D-155). "< 15" target needs
-    multi-cycle work; not autonomous-cycle-achievable.
-- **§9.12-G partial** (`39f1dc15`): Wasm 3.0 ZirOp mapping
-  doc, include/wasm.h byte-identical, zone_check --gate
-  enforced. Remaining: Phase-10-feature ZirOp comptime reject
-  infra (substantial), c_api Instance tests (D-139 blocked).
-- **§9.12-I partial** (`0ceed353` + `4cb46274` + `7be15f0d`):
-  D-149 CLOSED (98/100; remaining 2 are template + README literals) (42 mechanical + 19 Initial-row
-  earliest-commit). D-149 closed; active debt 25 → 24
-  + zero-match + inline-no-date residuals.
+    blocked (~12 rows), now-status (D-155 ADR-0078 follow-up).
+- **§9.12-G partial** (`39f1dc15`): Wasm 3.0 ZirOp mapping doc,
+  include/wasm.h byte-identical, zone_check --gate enforced.
+  Remaining: Phase-10-feature ZirOp comptime reject infra,
+  c_api Instance tests (D-139 blocked).
+- **§9.12-I [x]** (D-149 CLOSED `fe11e289`): 98/100 ADR SHA
+  backfills mechanical + narrative; 2 literals (template +
+  README) intentionally retained.
 
 ## Next-cycle candidates (high-yield only)
 
 - **batch-session work** (not single-autonomous-cycle):
   - §9.12-H bench baseline (Mac Wasm 2.0 + wasmtime × 26
     fixtures × hyperfine; script extension + ~hours run).
-  - §9.12-I D-149 narrative pass (46 multi-match × per-ADR
-    prose read).
   - D-141 per-file ADRs (validator.zig 1790 / dispatch_
     collector 1887 / regalloc 1851 / inst.zig × 2 archs / …)
     + their actual splits (each ~ ADR-0079-sized).
 - **autonomous-cycle-eligible**:
   - Phase 10 ZirOp comptime-reject infra (§9.12-G残).
 
-Most remaining work is either user-input-dependent or
-needs focused multi-cycle attention beyond the diminishing-
-returns territory the loop has entered.
+Loop has reached equilibrium for single-cycle-tractable work;
+remaining items need batch-session or multi-cycle architectural
+focus.
 
 ## Open questions / blockers
 
@@ -66,7 +63,7 @@ returns territory the loop has entered.
 ## See
 
 - [ROADMAP](./ROADMAP.md) §9.12 — next `[ ]` = §9.12-F.
-- [`debt.md`](./debt.md) — 25 active rows.
+- [`debt.md`](./debt.md) — 24 active rows.
 - [`phase9_structural_debt_close_plan.md`](./phase9_structural_debt_close_plan.md)
-  — CLOSED 2026-05-21 (full execution log preserved).
+  — CLOSED 2026-05-21.
 - [`lessons/INDEX.md`](./lessons/INDEX.md).
