@@ -14,11 +14,10 @@
    row. **B30..B52 covered the dispatcher-signature-compatible cohort
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
-   `chore(p9b):` / `feat(p9b):` prefix. Last code commit `c3652994`
-   (B118 abi.zig overlap rationale). B119 `7321a94b` (D-133 sweep
-   blocker), B120 (ADR-0077 Proposed → **Accepted**). **Loop ready
-   for fresh-session pickup at B121 — spike-then-impl per
-   ADR-0077.**
+   `chore(p9c):` / `feat(p9c):` prefix. Last code commit `c3652994`
+   (B118 abi.zig overlap rationale). B119..B121 are docs/spike
+   chunks (no src/ change). **Loop active at B122 —
+   regalloc walker fence impl, step 1 of ADR-0077 8-step plan.**
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -146,53 +145,39 @@
 | B117 | Lesson capture: `2026-05-20-inline-switch-cutover-dce-substrate-coupling.md` documents B108-B112 retrospective (use-site DCE gating requirement + B109 select_typed regression). | `c356d5ae` |
 | B118 | abi.zig overlap rationale documented inline (spill_stage/table_emit X14/X15 share is intentional + d-64 pattern keeps simultaneous use ≤ 2). Sets the contract for the D-133 sweep. | `c3652994` |
 | B119 | D-133 sweep investigation **BLOCKED**: B118's "≤ 2 simultaneous scratch" claim holds only for trivial single-load ops (already discharged at d-64/d-66). The 5 remaining bulk handlers (`emitTableFill` / `emitTableCopy` / `emitTableInit` / `emitMemoryInit`) hold ≥ 4 simultaneously-live scratches in their loop bodies that cannot map to {X14, X15} or even {X14..X17}. `emitTableGrow` re-classified — not a D-133 site (uses AAPCS64 args). Three resolution paths enumerated in updated D-133 body (per-handler stack save/restore / pool extension / live-vreg fence) — ADR-required. Lesson at `.dev/lessons/2026-05-20-d133-sweep-pool-size-insufficient.md`. Latent count stays at 55 (no corpus trigger; deferral acceptable). | (debt+lesson only) |
-| B120 | ADR-0077 Proposed → **Accepted** (user-confirmed 2026-05-20). Path (c) regalloc op-internal scratch reservation. Spike skeleton `private/spikes/regalloc-live-fence/` scaffolded with hypothesis + setup + 8-step post-spike implementation plan. D-133 row updated to `blocked-by: ADR-0077 implementation`. | `<this commit>` |
-| **B121** | **(fresh session)** Run the regalloc-live-fence spike per `private/spikes/regalloc-live-fence/README.md`. Validate API shape, then promote: amend ADR-0077 or merge spike code. Then walk the 8-step post-spike plan: regalloc walker fence + per-arch reservation tables + verifier + D-133 sweep + boundary fixtures. | **NEXT** |
+| B120 | ADR-0077 Proposed → **Accepted** (user-confirmed 2026-05-20). Path (c) regalloc op-internal scratch reservation. Spike skeleton `private/spikes/regalloc-live-fence/` scaffolded with hypothesis + setup + 8-step post-spike implementation plan. D-133 row updated to `blocked-by: ADR-0077 implementation`. | `1bc9c09b` |
+| B121 | Spike validation. `private/spikes/regalloc-live-fence/fence.zig` (gitignored) — 7-test self-contained harness validates ADR-0077 end-to-end (API shape + walker integration + verifier). All 7 tests green. ADR-0077 needs no amendment. Findings captured at `.dev/lessons/2026-05-20-regalloc-fence-design-validation.md`. | `<this commit>` |
+| **B122** | Regalloc walker fence — `src/engine/codegen/shared/regalloc.zig::computeWith` gains `forbiddenMaskForVreg` helper + LIFO/mint integration. Per-arch reservation table parameter (default empty for callers not yet wired). No abi.zig table populated yet (B125). Step 1 of ADR-0077 8-step impl plan. | **NEXT** |
 
-## Active state — §9.12-C mid-flight; ADR-0077 Accepted; READY FOR FRESH-SESSION PICKUP 2026-05-20
+## Active state — §9.12-C mid-flight; ADR-0077 Accepted + spike-validated; impl in progress
 
-**Loop paused — clean handoff state**. ADR-0077 Status: **Accepted**.
-Spike skeleton at `private/spikes/regalloc-live-fence/README.md` is
-pre-populated with hypothesis + setup + post-spike implementation plan
-(8-step sequence).
+**Loop active at B122** — regalloc walker fence (step 1 of ADR-0077's
+8-step post-spike plan).
 
-### Fresh-session entry path
+### Remaining steps (per `private/spikes/regalloc-live-fence/README.md` §"Post-spike implementation plan")
 
-The next `/continue` (or manual fresh session) should:
+1. **B122 (NEXT)**: regalloc walker fence in
+   `src/engine/codegen/shared/regalloc.zig::computeWith`.
+2. **B123**: per-arch reservation tables in
+   `src/engine/codegen/arm64/abi.zig` (5 D-133 bulk handlers).
+3. **B124**: `validateRegallocOpScratchReservation` comptime check.
+4. **B125**: `VerifyError.OpScratchOverlap` + post-condition scan.
+5. **B126+**: Sweep 5 hardcoded handlers (op_table + op_memory) to
+   use the named constants (no functional change — regalloc now
+   guarantees safety).
+6. **B127**: Boundary fixtures under `test/edge_cases/p9/regalloc/`
+   (register-pressure-class trigger).
+7. **B128**: `check_invariant_comments.sh --strict` → 0.
+8. **B129**: D-133 → close. §9.12-C exit met.
 
-1. **Read** (in this order):
-   - `.dev/decisions/0077_regalloc_op_scratch_reservation.md`
-     (Accepted, full design)
-   - `private/spikes/regalloc-live-fence/README.md` (Hypothesis +
-     Setup + post-spike plan)
-   - `.dev/lessons/2026-05-20-d133-sweep-pool-size-insufficient.md`
-     (B119 live-scratch census per handler — informs the
-     reservation table contents)
-2. **Spike** (≤ 1 day per `.claude/rules/extended_challenge.md` Step
-   4): validate the API shape inside
-   `private/spikes/regalloc-live-fence/` without touching `src/`.
-3. **Promote**: amend ADR-0077 with validated shape (or land
-   spike code as impl skeleton).
-4. **Implement** per the 8-step post-spike plan in the spike README.
-5. **Close D-133**: sweep the 5 bulk handlers, add boundary fixtures
-   under `test/edge_cases/p9/regalloc/`, run
-   `check_invariant_comments.sh --strict` → 0.
-6. **§9.12-C close** (D-133 done → exit criterion met).
-7. **§9.12-D + §9.12-E** proceed sequentially.
+### Spike validation summary (B121)
 
-### Anchor commands for a fresh session
-
-```sh
-cd ~/Documents/MyProducts/zwasm_from_scratch
-git log --oneline -10                                      # Step 3 of resume procedure
-cat .dev/decisions/0077_regalloc_op_scratch_reservation.md
-cat private/spikes/regalloc-live-fence/README.md
-cat .dev/lessons/2026-05-20-d133-sweep-pool-size-insufficient.md
-```
-
-§9.12-B exit criterion stays as ROADMAP §9.12-B specifies (6 build
-combos green + DCE 0 + completeness comptime check). Per-op file
-substrate becomes load-bearing at B6x+1 (inline-switch cutover).
+- 7-test self-contained Zig harness at
+  `private/spikes/regalloc-live-fence/fence.zig` validates LIFO
+  pool integration, strict-strict PC shape, and verifier
+  post-condition. ADR-0077 needs no amendment.
+- Findings captured at
+  [`.dev/lessons/2026-05-20-regalloc-fence-design-validation.md`](lessons/2026-05-20-regalloc-fence-design-validation.md).
 
 ## Outstanding upstream / Phase-10 blockers
 
