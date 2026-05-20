@@ -149,10 +149,15 @@ plan C3 failure mode).
     `Proposed` Status acknowledges that the user-collaborative
     Accept may re-classify a few entries.
 - **Neutral / follow-ups**:
-  - `scripts/check_skip_impl_ratchet.sh` extension to ingest the
-    token-class mapping (per close-plan §6 (f) bullet 4). Filed
-    as `D-NNN` (`now`) in this commit's debt update — separate
-    cycle.
+  - ~~`scripts/check_skip_impl_ratchet.sh` extension to ingest the
+    token-class mapping (per close-plan §6 (f) bullet 4).~~
+    LANDED at D-155 part 1: script now greps `SKIP-<TOKEN>` lines
+    from cached spec-runner logs, classifies each via this ADR's
+    canonical table, and gates on `manifest_total +
+    runtime_debt_trackable + runtime_adr_required`
+    (`runner_internal` informational). YAML schema extended with
+    three per-class fields; pre-extension rows default missing
+    fields to 0 (backward compat).
   - `audit_scaffolding §G.1` grep-against-table extension (per
     the workaround-pairings check). Also `D-NNN` follow-up.
 

@@ -7,14 +7,23 @@
 # field cites an Accepted ADR.
 #
 # Schema (per row):
-#   commit:               git SHA of the chunk-close commit (or "(baseline)")
-#   timestamp:            ISO-8601 (UTC)
-#   non_simd_skip_impl:   integer; `spec_assert_runner_non_simd` skip-impl
-#   simd_skip_impl:       integer; `simd_assert_runner` skip-impl
-#   total:                non_simd_skip_impl + simd_skip_impl
-#   note:                 short human note (optional)
-#   exempt:               ADR-NNNN slug if this row legitimately increases
-#                         the count (must reference an Accepted ADR)
+#   commit:                  git SHA of the chunk-close commit (or "(baseline)")
+#   timestamp:               ISO-8601 (UTC)
+#   non_simd_skip_impl:      integer; `spec_assert_runner_non_simd` manifest skip-impl
+#   simd_skip_impl:          integer; `simd_assert_runner` manifest skip-impl
+#   total:                   non_simd_skip_impl + simd_skip_impl (manifest sum)
+#   runtime_debt_trackable:  integer; ADR-0078 class `debt-trackable` SKIP-* count
+#   runtime_adr_required:    integer; ADR-0078 class `ADR-required` SKIP-* count
+#   runtime_internal:        integer; ADR-0078 class `runner-internal` SKIP-* count
+#                            (informational; never gates)
+#   note:                    short human note (optional)
+#   exempt:                  ADR-NNNN slug if this row legitimately increases
+#                            the count (must reference an Accepted ADR)
+#
+# Gate semantics (per ADR-0078 / D-155 part 1):
+#   gated_total = total + runtime_debt_trackable + runtime_adr_required
+# Per-class runtime fields are missing on pre-D-155-part-1 rows; the script
+# defaults them to 0 for backward compat.
 #
 # Phase 9 completion master plan §7.3 + ADR-0050 (Amend; D-3 / D-4 pending
 # §9.12 collab Accept).
@@ -91,3 +100,28 @@ entries:
       they are NOT re-extracted because we can't re-run those
       commits.
     exempt: null
+
+  - commit: "D-155 part 1 — per-class semantic shift"
+    timestamp: "2026-05-21T07:30:00Z"
+    non_simd_skip_impl: 0
+    simd_skip_impl: 0
+    total: 0
+    runtime_debt_trackable: 56
+    runtime_adr_required: 0
+    runtime_internal: 0
+    note: |
+      D-155 part 1 — `check_skip_impl_ratchet.sh` per-class semantic
+      shift per ADR-0078. The ratchet now classifies each runtime
+      `SKIP-<TOKEN>` log emission via ADR-0078's canonical taxonomy
+      table and gates on `debt-trackable + ADR-required` (only);
+      `runner-internal` counts are reported but never gate.
+      Initial snapshot from Mac aarch64 cached logs (/tmp/non-simd-
+      full.log, /tmp/p9-mac-simd.log):
+        SKIP-NO-LINK-TYPECHECK ×56 → `debt-trackable`
+      This is the only emitted token in the current corpus; matches
+      assert_unlinkable cases needing non-func import-type checking
+      (Track-D scope). The 56 count was previously visible only in
+      raw stderr (routed to `tally.skipped_adr` internally per
+      `spec_assert_runner_base.zig:3243`) — the per-class ratchet
+      now surfaces it explicitly.
+    exempt: ADR-0078

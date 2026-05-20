@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
 # scripts/check_skip_impl_ratchet.sh — Skip-impl one-way ratchet gate.
 #
-# Compares the current commit's skip-impl count against the previous entry
+# Compares the current commit's gated skip-count against the previous entry
 # in `bench/results/skip_impl_history.yaml`. FAILs if the count strictly
 # increased AND the current commit's diff does not introduce a new yaml
 # row whose `exempt:` field cites an ADR.
 #
-# Phase 9 completion master plan §7.3 / ADR-0050 amend (D-5 + D-6).
+# Per-class semantics (ADR-0078; D-155 part 1):
+#   gated_total = manifest_total + runtime_debt_trackable + runtime_adr_required
+# `runtime_internal` counts are reported but never gate.
+#
+# Manifest counts come from runner summary lines:
+#   "<runner>: ... (= N skip-impl + M runtime-skip + K skip-adr) ..."
+# Runtime SKIP-<TOKEN> emissions are grep'd from the per-fixture log lines
+# and classified via the canonical table in
+#   .dev/decisions/0078_spec_runner_skip_token_taxonomy.md
 #
 # Modes:
 #   --gate    : exit non-zero on regression without exempt (pre-push hook)
@@ -21,7 +29,7 @@
 set -uo pipefail
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-  sed -n '2,20p' "$0"
+  sed -n '2,30p' "$0"
   exit 0
 fi
 
@@ -30,26 +38,32 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 YAML="$ROOT/bench/results/skip_impl_history.yaml"
+ADR="$ROOT/.dev/decisions/0078_spec_runner_skip_token_taxonomy.md"
 
-# --- previous baseline (last yaml entry's total) -------------------------
+# --- ADR-0078 taxonomy ---------------------------------------------------
 
-# Parse YAML without external deps. Each entry starts with "  - commit:"
-# and has non_simd_skip_impl / simd_skip_impl / total fields. Take the
-# last `total:` value as the baseline.
-prev_total=$(awk '
-  /^  - commit:/ { in_entry=1 }
-  in_entry && /^[[:space:]]+total:[[:space:]]+/ {
-    t=$2; gsub(/[^0-9]/, "", t); if (t != "") last=t
-  }
-  END { print last }
-' "$YAML" 2>/dev/null)
+# Emit one "TOKEN<TAB>CLASS" line per row in ADR-0078's canonical table.
+# Table rows look like:
+#   | `SKIP-CROSS-MODULE-IMPORTS`    | `debt-trackable`  | D-153 ...
+load_taxonomy() {
+  [ -f "$ADR" ] || return 1
+  awk -F'|' '
+    /^\|[[:space:]]*`SKIP-/ {
+      tok=$2; cls=$3
+      gsub(/[`[:space:]]/, "", tok)
+      gsub(/[`[:space:]]/, "", cls)
+      if (tok ~ /^SKIP-/ && (cls == "debt-trackable" || cls == "ADR-required" || cls == "runner-internal"))
+        printf "%s\t%s\n", tok, cls
+    }
+  ' "$ADR"
+}
 
-if [ -z "$prev_total" ]; then
-  echo "[check_skip_impl_ratchet] WARN — no prior baseline in $YAML; nothing to ratchet"
-  exit 0
+TAXONOMY="$(load_taxonomy)"
+if [ -z "$TAXONOMY" ]; then
+  echo "[check_skip_impl_ratchet] WARN — ADR-0078 taxonomy table not parseable; runtime classification skipped"
 fi
 
-# --- current measurement (cached preferred) ------------------------------
+# --- log freshness + measurement -----------------------------------------
 
 NS_LOG="/tmp/non-simd-full.log"
 SI_LOG="/tmp/p9-mac-simd.log"
@@ -57,8 +71,6 @@ SI_LOG="/tmp/p9-mac-simd.log"
 log_fresh() {
   local f="$1"
   [ -f "$f" ] || return 1
-  # Portable mtime read: `date -r <file> +%s` works on macOS BSD `date`
-  # AND GNU `date`. Avoid `stat -f`/`stat -c` which differ across platforms.
   local mtime now age
   now=$(date +%s)
   mtime=$(date -r "$f" +%s 2>/dev/null || echo 0)
@@ -75,8 +87,10 @@ if [ "$MODE" = "--measure" ] || ! log_fresh "$NS_LOG" || ! log_fresh "$SI_LOG"; 
   zig build test-spec-simd > "$SI_LOG" 2>&1 || true
 fi
 
-# Extract skip-impl from runner output. The canonical format is:
-#   "<runner>: N passed, M failed, K skipped (= <impl> skip-impl + <adr> skip-adr) (over ...)"
+# --- current measurement: manifest counts --------------------------------
+
+# Extract manifest skip-impl from runner summary line. The canonical format is:
+#   "<runner>: N passed, M failed, K skipped (= <impl> skip-impl + ...) (over ...)"
 extract_skip_impl() {
   local log="$1"
   [ -f "$log" ] || { echo 0; return; }
@@ -84,22 +98,105 @@ extract_skip_impl() {
   v=$(grep -oE '\(=[[:space:]]*[0-9]+[[:space:]]+skip-impl' "$log" 2>/dev/null \
       | head -1 | grep -oE '[0-9]+' | head -1)
   if [ -z "$v" ]; then
-    # Fallback for terse formats
     v=$(grep -oE 'skip-impl[[:space:]:]+[0-9]+' "$log" 2>/dev/null \
         | head -1 | grep -oE '[0-9]+' | head -1)
   fi
   echo "${v:-0}"
 }
 
-ns_now=$(extract_skip_impl "$NS_LOG")
-si_now=$(extract_skip_impl "$SI_LOG")
-cur_total=$((ns_now + si_now))
-delta=$((cur_total - prev_total))
+ns_manifest=$(extract_skip_impl "$NS_LOG")
+si_manifest=$(extract_skip_impl "$SI_LOG")
+manifest_total=$((ns_manifest + si_manifest))
 
-echo "=== skip-impl ratchet (per ADR-0050 D-5 + D-6) ==="
-echo "prev_total:  $prev_total"
-echo "cur_total:   $cur_total (non_simd=$ns_now + simd=$si_now)"
-echo "delta:       $delta"
+# --- current measurement: per-class runtime SKIP-* counts ----------------
+
+# Greps both logs for SKIP-<TOKEN> emissions and counts per ADR-0078 class.
+# Output: three integers (debt-trackable, ADR-required, runner-internal).
+classify_runtime_skips() {
+  if [ -z "$TAXONOMY" ]; then
+    echo "0 0 0"
+    return
+  fi
+  local tmp
+  tmp=$(mktemp -t skipratchet.XXXXXX)
+  { grep -hoE 'SKIP-[A-Za-z0-9_-]+' "$NS_LOG" 2>/dev/null
+    grep -hoE 'SKIP-[A-Za-z0-9_-]+' "$SI_LOG" 2>/dev/null; } > "$tmp"
+
+  awk -v taxonomy="$TAXONOMY" '
+    BEGIN {
+      n = split(taxonomy, lines, "\n")
+      for (i = 1; i <= n; i++) {
+        split(lines[i], pair, "\t")
+        if (pair[1] != "") cls[pair[1]] = pair[2]
+      }
+    }
+    {
+      tok = $0
+      c = (tok in cls) ? cls[tok] : "UNKNOWN"
+      counts[c]++
+      if (c == "UNKNOWN") unknowns[tok]++
+    }
+    END {
+      printf "%d %d %d", counts["debt-trackable"]+0, counts["ADR-required"]+0, counts["runner-internal"]+0
+      if (length(unknowns) > 0) {
+        printf "\n"
+        for (t in unknowns) printf "UNKNOWN-TOKEN %s %d\n", t, unknowns[t]
+      }
+    }
+  ' "$tmp"
+  rm -f "$tmp"
+}
+
+classify_out=$(classify_runtime_skips)
+# First line is the count triple; subsequent UNKNOWN-TOKEN lines are warnings.
+read -r cur_debt cur_adr_req cur_internal < <(printf '%s' "$classify_out" | head -1)
+cur_debt=${cur_debt:-0}; cur_adr_req=${cur_adr_req:-0}; cur_internal=${cur_internal:-0}
+unknown_lines=$(printf '%s' "$classify_out" | awk 'NR>1')
+
+cur_gated=$((manifest_total + cur_debt + cur_adr_req))
+
+# --- previous baseline ---------------------------------------------------
+
+# Pull the last entry's per-class fields. Missing fields default to 0
+# (backward compat for pre-D-155-part-1 rows).
+read_last_field() {
+  local field="$1"
+  awk -v field="$field" '
+    /^  - commit:/ { in_entry=1 }
+    in_entry {
+      pat = "^[[:space:]]+" field ":[[:space:]]+"
+      if ($0 ~ pat) {
+        v=$2; gsub(/[^0-9]/, "", v); if (v != "") last=v
+      }
+    }
+    END { if (last == "") print 0; else print last }
+  ' "$YAML" 2>/dev/null
+}
+
+prev_manifest=$(read_last_field "total")
+prev_debt=$(read_last_field "runtime_debt_trackable")
+prev_adr_req=$(read_last_field "runtime_adr_required")
+prev_internal=$(read_last_field "runtime_internal")
+prev_gated=$((prev_manifest + prev_debt + prev_adr_req))
+
+delta=$((cur_gated - prev_gated))
+
+# --- report --------------------------------------------------------------
+
+echo "=== skip-impl ratchet (per ADR-0050 D-5 + D-6, ADR-0078 D-155 part 1) ==="
+printf "%-28s %-8s %-8s %s\n" "metric" "prev" "cur" "note"
+printf "%-28s %-8s %-8s %s\n" "manifest_total"        "$prev_manifest" "$manifest_total" "gated"
+printf "%-28s %-8s %-8s %s\n" "runtime_debt_trackable" "$prev_debt"    "$cur_debt"       "gated"
+printf "%-28s %-8s %-8s %s\n" "runtime_adr_required"   "$prev_adr_req" "$cur_adr_req"    "gated"
+printf "%-28s %-8s %-8s %s\n" "runtime_internal"       "$prev_internal" "$cur_internal"  "informational"
+printf "%-28s %-8s %-8s %s\n" "gated_total"            "$prev_gated"   "$cur_gated"      "= manifest + debt + ADR-req"
+echo "delta (gated): $delta"
+if [ -n "$unknown_lines" ]; then
+  echo ""
+  echo "WARN — runtime SKIP-* tokens not in ADR-0078 table:"
+  printf '%s\n' "$unknown_lines" | sed 's/^/  /'
+  echo "Fix: add a row to ADR-0078's canonical table OR remove the runner emission."
+fi
 echo ""
 
 if [ "$delta" -le 0 ]; then
@@ -121,7 +218,7 @@ if has_exempt_in_diff "--cached" || has_exempt_in_diff "HEAD~1..HEAD"; then
 fi
 
 if [ "$MODE" = "--gate" ]; then
-  echo "[check_skip_impl_ratchet] FAIL — skip-impl rose by +$delta without exempt: ADR-NNNN"
+  echo "[check_skip_impl_ratchet] FAIL — gated skip-count rose by +$delta without exempt: ADR-NNNN"
   echo "[check_skip_impl_ratchet] Fix: (a) close the regression, OR"
   echo "                          (b) add a new yaml row with exempt: <ADR-NNNN>"
   echo "                              citing an Accepted ADR that justifies the increase."
