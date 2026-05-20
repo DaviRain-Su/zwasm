@@ -15,9 +15,9 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
    `chore(p9b):` / `feat(p9b):` prefix. Last source commit
-   `ce698ad2` (B82 — i64 compare cohort moved from legacy to
-   ctx; legacy 270 → 260; ctx 121 → 131; emitI64CompareCtx
-   adapter; no ctx ext).
+   `caa09171` (B83 — i32+i64 shift cohorts moved from legacy
+   to ctx; legacy 260 → 250; ctx 131 → 141; emitI{32,64}ShiftCtx
+   adapters; no ctx ext).
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -108,24 +108,25 @@
 | B80 | Legacy → ctx cohort move: i64 binary ALU (6 ops). Mirror of B79; emitI64BinaryCtx adapter. Legacy 286 → 280; ctx 105 → 111. | `31898f22` |
 | B81 | Legacy → ctx cohort move: i32 compare (10 ops). emitI32CompareCtx adapter. Legacy 280 → 270; ctx 111 → 121. | `0d64626c` |
 | B82 | Legacy → ctx cohort move: i64 compare (10 ops). emitI64CompareCtx adapter. Legacy 270 → 260; ctx 121 → 131. | `ce698ad2` |
-| **B83** | **Legacy → ctx cohort move: i32 + i64 shift (i32.shl/shr_s/shr_u/rotl/rotr + i64 counterparts, 10 ops).** emitI32Shift / emitI64Shift exist. Add emitI32ShiftCtx + emitI64ShiftCtx adapters; regenerate 10 per-op files; legacy 260 → 250; ctx 131 → 141. | **NEXT** |
-| B83..B8x | Same shape for remaining legacy cohorts: eqz (2), bitcount (6), sign-extension (5), FP arith (8), FP compare (12), FP unary (14), FP min/max+copysign (6), SIMD cohorts (B29-B45). Eventually the inline-switch cutover (per ADR-0073) folds all into a single `inline for` dispatcher. | |
+| B83 | Legacy → ctx cohort move: i32+i64 shift (10 ops). emitI{32,64}ShiftCtx adapters. Legacy 260 → 250; ctx 131 → 141. | `caa09171` |
+| **B84** | **Legacy → ctx cohort move: i32+i64 bitcount (clz/ctz/popcnt × 2, 6 ops) + eqz (2 ops).** emitI{32,64}Bitcount + emitI{32,64}Eqz exist. Add 4 ctx adapters; regenerate 8 per-op files; legacy 250 → 242; ctx 141 → 149. | **NEXT** |
+| B84..B8x | Same shape for remaining legacy cohorts: sign-extension (5), FP arith (8), FP compare (12), FP unary (14), FP min/max+copysign (6), SIMD cohorts (B29-B45). Eventually the inline-switch cutover (per ADR-0073) folds all into a single `inline for` dispatcher. | |
 | B6x+1 | Inline-switch dispatcher cutover per ADR-0073 — both arches' `emit.zig` giant switch replaced by `inline for (collected_X_ops) |op_mod| { if (op_mod.op_tag == ins.op) return op_mod.emit(ctx, ins); }`. Moment per-op files become load-bearing. | |
 
-## Active state — §9.12-B mid-flight; B82 i64 compare landed 2026-05-20
+## Active state — §9.12-B mid-flight; B83 shift cohort landed 2026-05-20
 
-**B83 is the active task** — legacy → ctx cohort move for
-i32+i64 shift (10 ops). B82 closed i64 compare at `ce698ad2`
-(legacy 270 → 260; ctx 121 → 131).
+**B84 is the active task** — legacy → ctx cohort move for
+bitcount (clz/ctz/popcnt × 2 widths = 6 ops) + eqz (2 ops) = 8 ops.
+B83 closed shifts at `caa09171` (legacy 260 → 250; ctx 131 → 141).
 
-The loop for B83 (same pattern; 10 ops across 2 helpers):
+The loop for B84 (same pattern; 8 ops across 4 helpers):
 
-1. Add `emitI32ShiftCtx` + `emitI64ShiftCtx` adapters in
-   op_alu_int.zig.
-2. Regenerate 10 per-op files: i32_{shl,shr_s,shr_u,rotl,rotr}
-   + i64 counterparts.
-3. Move 10 entries from legacy (260 → 250) to ctx (131 → 141).
-4. Update emit.zig `.@"i32.shl"...=>` + `.@"i64.shl"...=>` arms.
+1. Add `emitI32BitcountCtx` + `emitI64BitcountCtx` + `emitI32EqzCtx`
+   + `emitI64EqzCtx` adapters in op_alu_int.zig.
+2. Regenerate 8 per-op files: i32_{clz,ctz,popcnt,eqz} + i64
+   counterparts.
+3. Move 8 entries from legacy (250 → 242) to ctx (141 → 149).
+4. Update 4 emit.zig arms.
 5. Verify 2-host green; commit + push.
 
 §9.12-B exit criterion stays as ROADMAP §9.12-B specifies (6 build
