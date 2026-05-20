@@ -38,8 +38,8 @@
   enforced. Remaining: Phase-10-feature ZirOp comptime reject
   infra (substantial), c_api Instance tests (D-139 blocked).
 - **§9.12-I partial** (`0ceed353` + `4cb46274` + `7be15f0d`):
-  D-149 SHA backfill 61/100 (42 mechanical + 19 Initial-row
-  earliest-commit). Remaining 38: multi-match narrative-pass
+  D-149 SHA backfill 70/100 (42 mechanical + 19 Initial-row
+  earliest-commit). Remaining 29: multi-match narrative-pass
   + zero-match + inline-no-date residuals.
 
 ## Next-cycle candidates (high-yield only)
