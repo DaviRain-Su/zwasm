@@ -47,6 +47,31 @@ While editing code, you cross a "boundary" when any of:
 When you cross a boundary AND no existing fixture covers it:
 **add a fixture in the same commit**. Don't defer.
 
+## Stress axes — dimensions worth exercising
+
+When designing a fixture, ask which **stress axes** the boundary
+sits on. The axes below recur across Wasm op families; coverage
+on each axis is what makes a fixture genuinely regression-
+detecting (vs a one-shot smoke test). Per master plan §9.12-C +
+ADR-0072 §"Invariants in code, not prose".
+
+| Axis                       | Examples                                                                                                                                          |
+|----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Numeric range**          | min/max int (i32 INT_MIN / INT_MAX, i64 likewise); ±0, NaN, ±Inf, denormal, subnormal FP; boundary just-inside / just-outside 2's-complement      |
+| **Alignment / offset**     | unaligned load/store (align 0 vs natural); page-edge access (mem.size - 1 / mem.size); SIMD lane-index 0 / max-1 / max                            |
+| **Register pressure**      | regalloc spill-vs-pool boundary (D-132 / D-133 class); first-spill vs Nth-spill; live-range crossing a call (clobber boundary)                    |
+| **Dispatch shape**         | same-module call vs cross-module bridge thunk (D-142 / ADR-0066); call_indirect with table[0] / table[last] / table[oob]; signature-mismatch trap |
+| **ABI boundary**           | caller-saved scratch vs callee-saved invariant; pinned reg (X19/R15) survival across cross-module call; signal-handler entry/exit                 |
+| **Control flow**           | block / loop / if-else nesting depth 1 / 2 / N; br to label-stack[0] vs label-stack[N]; unreachable-after-trap pruning                            |
+| **Validator strictness**   | type-stack underflow at function boundary; multi-value param/result mismatch; assert_unlinkable vs runtime trap distinction                       |
+| **Cross-module / linking** | host import (Cat III) vs Wasm import; assert_unlinkable error class vs runtime trap; v128 cross-module load (D-079)                               |
+
+A boundary on one axis often implies coverage gaps on others; a
+new SIMD recipe (numeric range) frequently introduces a new
+**register pressure** profile and a new **dispatch shape** (per-
+arch emit path). When uncertain which axes apply, scan the
+relevant `.dev/lessons/` and `.dev/decisions/` for prior cases.
+
 ## Where fixtures live
 
 ```
