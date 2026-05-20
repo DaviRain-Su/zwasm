@@ -15,9 +15,9 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
    `chore(p9b):` / `feat(p9b):` prefix. Last source commit
-   `c356d5ae` (B117 — lesson:
-   inline-switch-cutover-dce-substrate-coupling capturing B108-B112
-   retrospective + B109 select_typed regression case study).
+   `c3652994` (B118 — abi.zig comment-as-invariant: documented
+   spill_stage/table_emit pool overlap rationale; ≤2 simultaneous
+   scratch invariant).
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -143,7 +143,8 @@
 | B115 | §9.12-C audit §G.3 strengthening: `check_invariant_comments.sh` now also greps forbidden-phrase patterns from single_slot_dual_meaning.md. Combined --strict gate. | `c67d3e35` |
 | B116 | §9.12-C bug_fix_survey.md tightening: inlined 4-item Step 4 checklist (same-class-cases grep / multi-tag arm audit / §14 re-read / boundary fixture). B109's select_typed regression now named as case study. | `7d894171` |
 | B117 | Lesson capture: `2026-05-20-inline-switch-cutover-dce-substrate-coupling.md` documents B108-B112 retrospective (use-site DCE gating requirement + B109 select_typed regression). | `c356d5ae` |
-| **B118** | **D-133 sweep** (still deferred). 3-simultaneous-scratch caveat: spill_stage_gprs and table_emit_scratch_gprs overlap on X14/X15. Either (a) carve out a new disjoint scratch pool from callee-saved range, (b) restructure emit code to use 2-register load-then-overwrite (d-64 pattern), or (c) ADR-document that spill_stage and table_emit pools intentionally overlap (op handlers don't spill mid-op). Decision: pick (c) likely cheapest; verify with audit. | **NEXT** |
+| B118 | abi.zig overlap rationale documented inline (spill_stage/table_emit X14/X15 share is intentional + d-64 pattern keeps simultaneous use ≤ 2). Sets the contract for the D-133 sweep. | `c3652994` |
+| **B119** | **D-133 sweep — actual rename**. Mechanical edit of `op_table.zig` (emitTableFill / emitTableGrow / emitTableCopy / emitTableInit / emitElemDrop) + `op_memory.zig` (emitMemoryInit / emitDataDrop) hardcoded `encLdrImm(10/11/12, ...)` to `abi.table_emit_scratch_gprs[N]` / `abi.memory_emit_scratch_gprs[N]`. Reorder load operations where needed to fit ≤ 2 simultaneous scratch (d-64 pattern). Each site needs a register-pressure-class regression fixture per stress axes. | **NEXT** |
 
 ## Active state — §9.12-C mid-flight (B113 substrate prep landed) 2026-05-20
 
