@@ -1,12 +1,41 @@
 # 0080 — Phase 9 exit redefinition: literal-zero OR named-successor-phase ADR escape
 
-- **Status**: Proposed
+- **Status**: Rejected (2026-05-21; superseded by direct
+  implementation — see Rejection note below)
 - **Date**: 2026-05-21
 - **Author**: autonomous /continue loop (close-plan §6 (i))
 - **Tags**: phase-9, exit-criterion, governance, skip-impl, escape-valve
-- **User-collab gate**: this ADR's Acceptance requires user
-  review because it changes what "Phase 9 完備" means. The
-  autonomous loop pauses after Proposed.
+
+## Rejection note (2026-05-21, post-Proposed)
+
+User-collab spike under close-plan §6 (j) prep proved this ADR
+**unnecessary**. The spectest cross-module imports gap (D-153,
+the dominant runtime SKIP source at 100+ events) is solvable by
+**direct implementation** rather than Phase 10 escape valve:
+
+1. spectest is a finite 56-line OCaml host module
+   (`WebAssembly/spec/interpreter/host/spectest.ml`).
+2. Both zwasm v1 and wazero implement it as a regular `.wat`
+   module that the spec runner auto-registers; cross-module
+   resolver (β path) then binds testsuite imports normally.
+3. Spike at `private/spikes/d153_spectest_wat/` (2026-05-21):
+   compiled a 23-line spectest.wat + auto-registered it in
+   runCorpus + flipped `hasUnbindableImports` to consult
+   `registered.contains(imp.module)` for non-func imports.
+   Result: 192 runtime-skip → 80 (−112), 43 new failures
+   surfaced (= remaining cohort bugs in B146-B158 preparatory
+   infra, fixable individually).
+
+The 43 surfaced failures share a small number of root causes
+(notably: per-exporter `scratch_globals` wiring reads importer-
+side zero buffer instead of exporter side) — direct fix
+discharges the cohort. No Phase 10 escape needed.
+
+This ADR's `Status: Proposed` predicted "3-6 more months in
+§9.12-E"; the spike empirically refuted that estimate.
+Original Decision text below preserved for audit trail.
+
+## Context
 
 ## Context
 
