@@ -22,31 +22,31 @@
 ## Active state
 
 - Phase 9.12-E。close-plan §6 work sequence 実行中。
-- 完了: (a)〜(h)。直近 (h) は audit `§F.2a` で blocked-by
-  escalation の age ladder (14d soon / 30d block) を定義 +
-  `.dev/blocked_by_sweep_2026-05-21.md` で 28 rows を分類
-  (20 clean、7 soon、0 block)。re-walk work は D-156 起票。
-- 次: **(i) Phase 9 exit redefinition ADR** — `skip-impl == 0
-  on all 3 hosts` → `skip-impl == 0 OR every residual blocked
-  by named-successor-phase ADR`。D-079/D-136/D-153 を
-  successor phase に escape valve。**Status: Proposed まで
-  進めて stop** (Phase 9 完備の意味を変えるため user collab
-  必須)。
+- 完了: (a)〜(i)。直近 (i) は ADR-0080 (Proposed) で
+  Phase 9 exit を `manifest_skip_impl == 0 AND every runtime
+  SKIP paired with successor-phase ADR or skip-adr` に
+  redefinition。§9.12-E lockin 解除候補。
+- **PAUSED — user collab gate**: ADR-0080 は Phase 9 完備の
+  意味を変えるため、Accept には user review 必須
+  (close-plan §6 (i))。次の §6 (j) D-153 resume は
+  ADR-0080 Accept 後に begin。
 - D-153 は close-plan §6 (j) まで凍結。
+
+## Open questions / blockers
+
+- ADR-0080 Acceptance pending user collab. After Accept:
+  - Author successor-phase ADRs (ADR-0081 D-079 / ADR-0082
+    D-136 / ADR-0083 D-153) per ADR-0080 §"Concretely for
+    D-079, D-136, D-153".
+  - Update D-079 / D-136 / D-153 `blocked-by:` to point at
+    the new successor ADRs.
+  - Resume close-plan §6 (j) D-153 spike-first design.
 
 ## §9.12-B progress chunks
 
 `.dev/phase_log/p9_12_B_chunks.md` (B1〜B158 = 138 chunks)
 に移管。handover はポインタのみ保持。chunk table 蓄積に
 よる handover 肥大 (A1 / C5) を解消。
-
-## Open questions / blockers
-
-- §6 (i) Phase 9 exit redefinition ADR は user collab 必須
-  (Phase 9 完備の意味を変える) — Proposed まで進めて stop。
-- §6 (g) D-141 ADR は "blocked-by substrate audit Q3" を
-  解除するため、substrate audit 文脈との整合性確認が user
-  collab 推奨ポイント。
 
 ## See
 
