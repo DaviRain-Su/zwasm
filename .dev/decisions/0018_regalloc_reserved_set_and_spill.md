@@ -225,7 +225,7 @@ addressing imm12 displacement stays small for hot paths).
   saved_gprs` reduced 4 → 3 (X20..X22). Total `allocatable_
   gprs` pool: 9 → 8 regs (5 caller-saved scratch + 3 callee-
   saved). Spill territory begins at slot 8 (was 9). Comptime
-  disjointness guards still hold. SHA: `<backfill>`
+  disjointness guards still hold. SHA: `f55ddb99`
 - 2026-05-06 — **gap (class-aware boundary split per D-036)**:
   ADR-0018 originally treated `Allocation.max_reg_slots` as a
   single arch-wide pool size. Phase 7 / chunk-q surfaced the gap:

@@ -343,7 +343,7 @@ spill them because the body never modified them; AAPCS64
   per-arch reservation strategy that ADR-0017 conflated under
   "per-arch parity". Future arch ports (RISC-V, etc.) read
   ADR-0017 + ADR-0026 together to understand the pool-pressure
-  vs reload-cost trade and pick a strategy. SHA: `<backfill>`
+  vs reload-cost trade and pick a strategy. SHA: `bb404088`
 
 - 2026-05-06 — **JitRuntime layout extended per ADR-0027**:
   added `globals_base: [*]Value` (offset 48) + `globals_count:
@@ -355,7 +355,7 @@ spill them because the body never modified them; AAPCS64
   (per-Context "Layout extends only at the tail"). Construction
   sites updated in `src/engine/runner.zig`,
   `src/engine/codegen/shared/{entry,compile}.zig`. SHA:
-  `<backfill>`
+  `618ac144`
 
 - 2026-05-11 — **Path migration + head_size sync** (per
   2026-05-11 ADR audit, SUMMARY §3.2 + §3.3 / batch_B). Two
@@ -381,7 +381,7 @@ spill them because the body never modified them; AAPCS64
      asserts still hold; `*X0` / `*RDI` calling convention
      unchanged); honest-recorded so future readers see the
      current size without scanning the codebase.
-  SHA: `<backfill>`
+  SHA: `e85bd561`
 
 - 2026-05-18 — **Amendment**: MEMORY-class return capture slot
   added per ADR-0069 §Phase 2 chunk (b)-e-1. The original
@@ -443,4 +443,4 @@ spill them because the body never modified them; AAPCS64
   - x86_64 parallel work (ADR-0026 amendment + RDI capture)
     lands in ADR-0069 §Phase 2 chunk (b)-e-3.
 
-  SHA: `<backfill>`
+  SHA: `341e3f74`
