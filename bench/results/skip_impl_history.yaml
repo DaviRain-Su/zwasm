@@ -36,3 +36,17 @@ entries:
       Phase 9 completion exit criterion = drain this to 0 at §9.12-E (master plan
       §5.3).
     exempt: null
+
+  - commit: "0e353955"
+    timestamp: "2026-05-20T20:30:00Z"
+    non_simd_skip_impl: 193
+    simd_skip_impl: 0
+    total: 193
+    note: |
+      §9.12-E first measurement post-B134. SKIP-VALIDATOR-GAP (SIMD)
+      fully discharged (50 → 0) via B133 (lane-index range check) + B134
+      (alignment-immediate range check). `simd_assert_runner: 13351
+      passed, 0 failed, 0 skip-impl + 390 skip-adr`.
+      Remaining: SKIP-CROSS-MODULE-IMPORTS 100, SKIP-NO-LINK-TYPECHECK 26,
+      exports/manifest.txt 1, plus ~66 cascade.
+    exempt: null
