@@ -27,16 +27,40 @@
   (Accept) を次 cycle で正式に締める想定。
 - §9.12-F **進行中** (`3ace7fb4`): 6 dissolved-barrier closures
   (D-153/154/156/102/103/105); D-079 barrier rewritten honestly。
-  active rows 31 → 25 (target < 15; multi-cycle)。
-- 次: §9.12-F 残り debt の discharge or 真摯な barrier 維持。
-  実装可能枠: D-090 (lower.zig type-stack walker) /
-  D-094 (x86_64 multi-result hidden-ptr ABI) / D-062 (arm64
-  v128 stack-overflow); architectural / multi-cycle 枠:
-  D-141 + ADR-0079 implementation (runner.zig split).
-  外部 blocker 枠: D-010/D-021/D-028/D-148 は維持。
-  Phase-future-row 枠: D-007/D-018/D-020/D-022/D-026/D-058/
-  D-059/D-074/D-075/D-082/D-136/D-139/D-149 は当該 Phase row
-  open まで凍結。
+  active rows 31 → 25 (target < 15)。
+- §9.12-F residual の honest accounting:
+  - **speculative-preventive** (corpus does not exercise) —
+    D-090 (lower select type-stack walker) / D-094 (x86_64
+    multi-result hidden-ptr) / D-062 (arm64 v128 9th+ overflow)。
+    `karpathy-guidelines` (auto-load) と `no_workaround.md` で
+    指針: "don't add features beyond what the task requires" →
+    実装には触らず、被害が surface した時に対応。
+  - **multi-cycle architectural** — D-141 (file_size_check
+    WARN; per-file ADR + impl across runner.zig (ADR-0079
+    Proposed) / validator.zig / lower.zig / emit.zig × 2 archs
+    / inst.zig × 2 archs) / D-081 (emit.zig source split) /
+    D-055 (emit_test_*.zig migration; depends D-081)。next
+    cycle で ADR-0079 runner.zig 3-way split implementation
+    が高 yield (1995 → ~700+700+600 LOC、現在 EXEMPT marker
+    で乗っ取り中)。
+  - **external blocker** — D-010 (Zig stdlib) / D-021 (Phase
+    14 concurrency) / D-028 (zig 0.16 IPC) / D-148 (Codeberg
+    ziglang/zig#35343) — 維持。
+  - **Phase-future-row blocked** — D-007 / D-018 / D-020 /
+    D-022 / D-026 / D-058 / D-059 / D-074 / D-075 / D-082 /
+    D-136 / D-139 / D-149 — 当該 Phase row open まで凍結
+    (Phase 10 / 11 / 14 / v0.1.0 RC etc)。
+  - **now-status (mechanical)** — D-155 (ADR-0078 token-class
+    follow-up scripts): non-trivial; runner output schema 拡張
+    が前提なので multi-cycle。
+- 結論: §9.12-F の "< 15" target は構造的に achievable for
+  this loop iteration ではない。speculative-preventive の
+  3 件を fix する vs ADR-0079 を impl する のいずれかが
+  next cycle の高 yield 候補。
+- 次 cycle: **ADR-0079 runner.zig 3-way split impl** を試行
+  (architectural chunk per LOOP.md; 3-cycle cap で進捗
+  measurable)。または §9.12-G の小タスク (zone_check `--gate`
+  既に enforced; Wasm 3.0 ZirOp mapping table 起草) に移行。
 
 ## Ubuntu mirror verification
 
