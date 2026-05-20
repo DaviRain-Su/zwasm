@@ -37,9 +37,9 @@ cd "$(dirname "$0")/.."
 
 strict=0
 case "${1:-}" in
-  --strict) strict=1 ;;
+  --strict|--gate) strict=1 ;;
   "") ;;
-  *) echo "usage: $0 [--strict]" >&2; exit 2 ;;
+  *) echo "usage: $0 [--strict|--gate]" >&2; exit 2 ;;
 esac
 
 # Extract the arm64 allocatable-caller-saved-scratch pool from abi.zig.
