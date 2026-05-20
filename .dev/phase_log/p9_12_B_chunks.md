@@ -1,5 +1,11 @@
 ## §9.12-B progress (sub-chunks)
 
+> **Schema version 1 (pre-2026-05-21)** — `Sub-chunk | Description
+> | SHA`. B1–B158 are grandfathered without a `Type` column per
+> close-plan §6 (b). New phase_log files use schema v2
+> (`Sub-chunk | Type | Description | SHA`) — see
+> [`.claude/skills/continue/LOOP.md` §"Chunk types"](../../.claude/skills/continue/LOOP.md).
+
 | Sub-chunk | Description | SHA |
 |---|---|---|
 | B1 | i32_add per-op file foundation (template + collector wire; stubs only; legacy dispatch retains authority) | `bb85b918` |

@@ -379,9 +379,15 @@ the rest run in main.
 
 ### Chunk granularity — when to bundle vs split
 
-**Default**: 5–15 ops per chunk for established-pattern emit / handler
-work. Sub-1-op chunks are reserved for ADR-grade design changes (new
-ABI surface, new scratch reservation, new shared helper).
+**Chunk type first**: every chunk is one of `emit` / `architectural` /
+`survey` / `test-only` / `infrastructure`. The size rule below applies
+to `emit` chunks. Non-emit types have distinct granularity rules
+(notably: `architectural` chunks are spike-first and capped at 3
+cycles without measurable progress). See [`LOOP.md` §"Chunk types"](LOOP.md).
+
+**Default (emit)**: 5–15 ops per chunk for established-pattern emit /
+handler work. Sub-1-op chunks are reserved for ADR-grade design changes
+(new ABI surface, new scratch reservation, new shared helper).
 
 **Bundle when ALL**: same dispatch helper consumer, same handler
 shape (only `op` field differs), source diff ≤ 800 LOC + test diff
@@ -946,9 +952,14 @@ in the strict whitelist.
 
 ## Reference tables — see `LOOP.md`
 
-Four static reference sections moved to `LOOP.md` at §9.12-A / A5b
-(2026-05-19) to keep this file focused on per-task loop procedure:
+Reference sections moved to `LOOP.md` (originally §9.12-A / A5b
+2026-05-19; "Chunk types" added 2026-05-21 per close-plan §6 (b))
+to keep this file focused on per-task loop procedure:
 
+- **Chunk types — type-aware granularity rules** — `emit` /
+  `architectural` / `survey` / `test-only` / `infrastructure` size
+  + gate + exit rules; `architectural` 3-cycle cap. See
+  [`LOOP.md` §"Chunk types"](LOOP.md).
 - **Subagent delegation cheatsheet** — when to fork an Explore /
   Bash subagent vs stay in main. See [`LOOP.md` §"Subagent
   delegation cheatsheet"](LOOP.md).

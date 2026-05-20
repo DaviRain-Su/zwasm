@@ -391,11 +391,86 @@ End-of-turn checklist (every turn that ends with the task closed):
    landed and what fires next. Do not write a long progress
    summary — it invites pause.
 
+## Chunk types — type-aware granularity rules
+
+> Added 2026-05-21 per `.dev/phase9_structural_debt_close_plan.md`
+> §6 (b) (resolving A2 — "5-15 ops per chunk" rule doesn't fit
+> architectural / survey / infra work). The single `emit`-only
+> rubric was misapplied to architectural work in §9.12-B
+> (D-153, 12 cycles), inviting "1 more chunk" pressure where
+> step-back was the correct move.
+
+Every chunk has one of the following **types**. The granularity
+rule (size, gate scope, exit criterion) varies per type. The
+chunk-table schema in `.dev/phase_log/<phase>.md` carries a
+`Type` column so future audits can grep type-vs-outcome.
+
+| Type             | Granularity rule                                                                | Gate (Step 5 class) | Exit criterion                                                                          |
+|------------------|---------------------------------------------------------------------------------|---------------------|-----------------------------------------------------------------------------------------|
+| `emit`           | 5–15 ops per chunk; see §"Chunk granularity" below for full bundle/split rules. | `cohort` (test-all) | Mac green + ubuntu kicked; new op count matches table.                                  |
+| `architectural`  | **Spike-first**. No code on `zwasm-from-scratch` until design ADR Proposed.     | `substrate` only    | Design ADR Proposed → impl chunks split out as `emit` / `infrastructure`.               |
+| `survey`         | Single cycle. One Explore subagent. Output → `private/notes/<phase>-<task>-survey.md`. | (no test gate)      | Survey doc ≥ 200 lines, ≤ 400 lines, cited from the next task's Step 1 Plan.            |
+| `test-only`      | Co-located with the cohort it tests. No source mutation in this commit.         | `cohort` (test-all) | New fixture count matches table; no regression in adjacent suites.                      |
+| `infrastructure` | `scripts/`, `build.zig`, CI hooks, gate logic, observability. No `src/` change. | `substrate`         | Local lint + test green; behavioural neutrality verified (no fixture count delta).      |
+
+### `architectural` chunks — cycle cap
+
+An `architectural`-typed chunk that survives **3 cycles** without
+**measurable progress** (test count delta, FAIL count delta,
+landed-design-ADR delta — NOT "preparatory infra" or "wire-up
+deferred to next cycle") triggers a **mandatory step-back**:
+
+1. `git reset --mixed <last-green-SHA>` on local
+   `zwasm-from-scratch` (the preparatory infra commits are
+   either kept and re-applied as `infrastructure` chunks, or
+   stashed under `private/spikes/<slug>/`).
+2. Stash the WIP under `private/spikes/<slug>/` for re-use.
+3. Open a **design ADR** in `.dev/decisions/` before any
+   resumed implementation. The ADR's `Decision` section MUST
+   name the spike-output that justifies the chosen approach.
+
+The cycle counter resets when the design ADR lands and the
+follow-up implementation chunks are re-typed as `emit` /
+`infrastructure` (= no longer architectural).
+
+The discipline exists because D-153's 12-cycle drift (B146–B158
++ B156 revert) demonstrated that "helper-first land → wire-up
+next cycle" is a spike on the main branch, not architecture.
+The cycle cap forces the spike off-branch where it belongs.
+
+See [`.claude/rules/architectural_spike.md`](../../rules/architectural_spike.md)
+(landed at close-plan §6 (d)) for the full spike discipline this
+rule references.
+
+### Chunk-table schema in `.dev/phase_log/<phase>.md`
+
+Forward-going schema (= applies from the next new chunk row):
+
+```markdown
+| Sub-chunk | Type | Description | SHA |
+|---|---|---|---|
+| <id> | <type> | <one line> | `<sha>` |
+```
+
+Existing pre-2026-05-21 phase_log files (notably
+`p9_12_B_chunks.md`'s B1–B158) are grandfathered without the
+`Type` column — those chunks are immutable historical records.
+New phase_log files (and any new rows appended to existing
+files after 2026-05-21) MUST use the v2 schema. The
+`audit_scaffolding §F` debt-coherence check verifies new rows
+carry a valid type token.
+
+The 5 tokens above are the **closed set** for phase_log Type
+column. Adding a new type requires an ADR amendment to this
+section.
+
 ## Chunk granularity — when to bundle vs split
 
 > Detail block extracted from SKILL.md at §9.12-A / A5b. SKILL.md
 > retains a 6-line "Default + bundle/split criteria" summary; the
-> historical examples and full criteria live here.
+> historical examples and full criteria live here. This section
+> covers **`emit`-typed** chunks; see §"Chunk types" above for
+> non-emit granularity rules.
 
 **Default chunk size for established-pattern emit/handler chunks:
 5–15 ops.** Sub-1-op chunks are reserved for ADR-grade design
