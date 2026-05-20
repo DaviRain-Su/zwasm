@@ -803,6 +803,8 @@ const x86_64_ref_null = @import("x86_64/ops/wasm_1_0/ref_null.zig");
 const x86_64_ref_func = @import("x86_64/ops/wasm_1_0/ref_func.zig");
 const x86_64_drop = @import("x86_64/ops/wasm_1_0/drop.zig");
 const x86_64_select = @import("x86_64/ops/wasm_1_0/select.zig");
+const x86_64_memory_size = @import("x86_64/ops/wasm_1_0/memory_size.zig");
+const x86_64_memory_grow = @import("x86_64/ops/wasm_1_0/memory_grow.zig");
 
 const x86_64_i32_add = @import("x86_64/ops/wasm_1_0/i32_add.zig");
 const x86_64_i32_sub = @import("x86_64/ops/wasm_1_0/i32_sub.zig");
@@ -1616,6 +1618,8 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_ref_func,
     x86_64_drop,
     x86_64_select,
+    x86_64_memory_size,
+    x86_64_memory_grow,
 };
 
 comptime {
@@ -1711,8 +1715,10 @@ test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // select (1 new per-op file, +1 = 85; select_typed shares
     // runtime via emit.zig grouped arm but lacks Zone 1 meta —
     // its per-op file is deferred). The B6x+1 cutover folds this
-    // tuple back into `collected_x86_64_ops`.
-    try std.testing.expectEqual(@as(usize, 85), collected_x86_64_ctx_ops.len);
+    // tuple back into `collected_x86_64_ops`. B71: memory.size +
+    // memory.grow (2 new per-op files + 2 Zone 1 meta backfills,
+    // +2 = 87).
+    try std.testing.expectEqual(@as(usize, 87), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would

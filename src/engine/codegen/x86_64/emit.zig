@@ -1433,21 +1433,9 @@ pub fn compile(
             .@"f64x2.floor" => try op_simd_float.emitF64x2Floor(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"f64x2.trunc" => try op_simd_float.emitF64x2Trunc(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"f64x2.nearest" => try op_simd_float.emitF64x2Nearest(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"memory.size" => {
-                // Wasm spec §4.4.7 — return current memory size in
-                // 64-KiB pages. mem_limit (bytes) lives at
-                // [R15 + jit_abi.mem_limit_off]; pages = bytes >> 16.
-                // Push fresh i32 vreg.
-                const result_v = next_vreg;
-                next_vreg += 1;
-                if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-                const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
-                try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(dst_r, abi.runtime_ptr_save_gpr, jit_abi.mem_limit_off).slice());
-                try buf.appendSlice(allocator, inst.encShrRImm8(.q, dst_r, 16).slice());
-                try gpr.gprStoreSpilled(allocator, &buf, alloc, spill_base_off, result_v, 0);
-                try pushed_vregs.append(allocator, result_v);
-            },
-            .@"memory.grow" => try op_call.emitMemoryGrow(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, outgoing_max_bytes),
+            // §9.12-B / B71: memory.size + memory.grow migrated.
+            .@"memory.size" => try op_call.emitMemorySizeCtx(&ctx, &ins),
+            .@"memory.grow" => try op_call.emitMemoryGrowCtx(&ctx, &ins),
             // §9.12-B / B70: select + select_typed inline body
             // extracted into `op_alu_int.emitSelectCtx` `(ctx, ins)`
             // adapter (handles v128 / fp / GPR 3-path dispatch).

@@ -855,3 +855,40 @@ pub fn captureCallResult(
         try pushed_vregs.append(allocator, result);
     }
 }
+
+/// §9.12-B / B71 (ADR-0075) — `(ctx, ins)` adapter for
+/// `memory.grow`. Threads `ctx.outgoing_max_bytes` into the
+/// existing `emitMemoryGrow` helper (host-import call with
+/// shadow-space alloc).
+///
+/// Wasm spec §4.4.7 (memory.grow).
+pub fn emitMemoryGrowCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitMemoryGrow(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.spill_base_off,
+        ctx.outgoing_max_bytes,
+    );
+}
+
+/// §9.12-B / B71 (ADR-0075) — `(ctx, ins)` adapter for
+/// `memory.size`. Loads mem_limit from R15+off and shifts right
+/// 16 to produce 64-KiB page count. Extracted from emit.zig's
+/// prior inline body.
+///
+/// Wasm spec §4.4.7 (memory.size).
+pub fn emitMemorySizeCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    const result_v = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_v >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const dst_r = try gpr.gprDefSpilled(ctx.alloc, result_v, 0);
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(dst_r, abi.runtime_ptr_save_gpr, jit_abi.mem_limit_off).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encShrRImm8(.q, dst_r, 16).slice());
+    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_v, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, result_v);
+}
