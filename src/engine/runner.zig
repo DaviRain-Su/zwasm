@@ -141,6 +141,7 @@ pub const CompiledWasm = struct {
     globals_offsets: []u32,
     globals_valtypes: []zir.ValType,
     globals_byte_size: u32,
+    num_global_imports: u32, // B150 (D-153): wasm-idx[0..N) imports prefix.
     arena: std.heap.ArenaAllocator,
 
     pub fn deinit(self: *CompiledWasm, allocator: Allocator) void {
@@ -590,6 +591,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             .globals_offsets = elay.offsets,
             .globals_valtypes = elay.valtypes,
             .globals_byte_size = elay.byte_size,
+            .num_global_imports = num_global_imports_empty,
             .arena = arena,
         };
     }
@@ -615,14 +617,12 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     // (drains binary.{66,67}).
     const data_count_section_present: bool = module.find(.data_count) != null;
 
-    // Count function imports (memory / table / global imports do
-    // not extend the function index space).
+    // Count function + global imports (B150 / D-153 — global-prefix).
     var num_imports: u32 = 0;
-    if (imports_buf) |ib| {
-        for (ib.items) |imp| {
-            if (imp.kind == .func) num_imports += 1;
-        }
-    }
+    var nm_global_imports: u32 = 0;
+    if (imports_buf) |ib| for (ib.items) |imp| {
+        if (imp.kind == .func) num_imports += 1 else if (imp.kind == .global) nm_global_imports += 1;
+    };
 
     // Build the unified wasm-space func_sigs vector:
     // `[import_func_sigs..., defined_func_sigs...]`. Indexed by
@@ -988,6 +988,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         .globals_offsets = globals_offsets,
         .globals_valtypes = globals_valtypes,
         .globals_byte_size = globals_byte_size,
+        .num_global_imports = nm_global_imports,
         .arena = arena,
     };
 }
