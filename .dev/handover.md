@@ -13,11 +13,11 @@
    (master plan v2). §9.12-A `[x]` 2026-05-19; §9.12-B is the active
    row. **B30..B52 covered the dispatcher-signature-compatible cohort
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
-3. `git log --oneline -10` — recent commits include B133 (§9.12-E
-   open). **§9.12-E in progress**: SIMD lane-index check landed
-   (B133); alignment check next (B134). Survey at
-   `private/notes/p9_12-E-simd-validator-gap-survey.md` covers
-   both halves of SKIP-VALIDATOR-GAP SIMD (50 sites).
+3. `git log --oneline -10` — §9.12-E in progress: SIMD axis fully
+   discharged at B133+B134 (lane-index + alignment validator
+   range checks); B135 measured 50→0 + landed ratchet entry
+   (skip_impl total 243 → 193). Next: B136 picks the smallest
+   remaining workstream (exports non-invoke-action, 1 site).
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -159,8 +159,9 @@
 | B131 | ADR-0070 amendment — reclassify `_exit` / `fork` / `waitpid` / `alarm` from Replaceable → Necessary (empirical: Zig 0.16 std.posix lacks all four; std.process.exit not async-signal-safe). Script's NECESSARY/REPLACEABLE_SYMS arrays updated to match. D-151 deleted (barrier dissolved). Replaceable count 8 → 3. | `8dfe9018` |
 | B132 | §9.12-D CLOSE — migrate `std.c.pid_t` → `std.posix.pid_t` + `std.c.kill` → `std.posix.kill catch {}` (EXEMPT-FALLBACK in SIGALRM handler). ADR-0070 §B132 amendment reclassifies `std.c.getenv` Replaceable → Necessary (c_api context: no `std.process.Init` available so `Environ.getPosix` is structurally unavailable). Replaceable count 3 → 0. `check_libc_boundary --gate` returns 0; §9.12-D `[ ]` → `[x]`. | `b098a688` |
 | B133 | §9.12-E first chunk — SIMD lane-index validator range check (Wasm SIMD §3.3.6.X). New `Error.InvalidLaneIndex` + `readLaneIdx` helper; 4 handlers (extract_lane / replace_lane / load_lane / store_lane) take a `lane_count` parameter; 20 call sites in `dispatchPrefixFD` pass concrete counts per shape. Discharges lane-index portion of SKIP-VALIDATOR-GAP SIMD (50 total). | `c32f6b0d` |
-| B134 | §9.12-E SIMD alignment-immediate validator check (Wasm §3.3.7). `Error.InvalidSimdAlignment` + `readSimdMemarg(max_align_log2)` helper. New per-shape `opSimdLoad` / `opSimdStore` handlers (replace generic `opLoad(.v128)` / `opStore(.v128)` routing). load_lane/store_lane handlers also take `max_align_log2`. 22 dispatch arms updated with concrete max_align per shape. Together with B133 closes SKIP-VALIDATOR-GAP SIMD lane-index + align halves. | `<this commit>` |
-| **B135** | §9.12-E continuation — measure the actual SKIP-VALIDATOR-GAP SIMD discharge by running `simd_assert_runner` and checking the skip-impl delta. Pick next workstream: exports non-invoke-action (1 site, smallest) or SKIP-NO-LINK-TYPECHECK (26 sites, Instance.checkImportType + applyAssertUnlinkable callback). | **NEXT** |
+| B134 | §9.12-E SIMD alignment-immediate validator check (Wasm §3.3.7). `Error.InvalidSimdAlignment` + `readSimdMemarg(max_align_log2)` helper. New per-shape `opSimdLoad` / `opSimdStore` handlers (replace generic `opLoad(.v128)` / `opStore(.v128)` routing). load_lane/store_lane handlers also take `max_align_log2`. 22 dispatch arms updated with concrete max_align per shape. Together with B133 closes SKIP-VALIDATOR-GAP SIMD lane-index + align halves. | `004f29e7` |
+| B135 | §9.12-E SIMD discharge measurement. `simd_assert_runner: 13351 passed, 0 failed, 0 skip-impl + 390 skip-adr` — SIMD axis now spec-complete. skip_impl_history.yaml entry added (243 → 193, delta -50). Ratchet baseline advances. | `<this commit>` |
+| **B136** | §9.12-E next workstream — pick exports non-invoke-action (1 site; `action.get`/`set` dispatcher in spec runner) for smallest first piece, OR start SKIP-NO-LINK-TYPECHECK (26 sites; needs `Instance.checkImportType` + `applyAssertUnlinkable` callback). Recommendation: exports first (≤ 50 LOC, isolated), then SKIP-NO-LINK-TYPECHECK, then SKIP-CROSS-MODULE-IMPORTS (largest). | **NEXT** |
 
 ## Active state — §9.12-C CLOSED at B129 (ADR-0077 complete); §9.12-D NEXT
 
