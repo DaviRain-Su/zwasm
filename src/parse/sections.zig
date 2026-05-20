@@ -656,7 +656,7 @@ pub fn decodeElement(parent_alloc: Allocator, body: []const u8) Error!Elements {
                 const expr = body[expr_start..pos];
                 const n = try leb128.readUleb128(u32, body, &pos);
                 const funcs = try alloc.alloc(u32, n);
-                for (funcs) |*f| f.* = try readFuncrefInitExpr(body, &pos);
+                for (funcs) |*f| f.* = try readFuncrefInitExpr(body, &pos, .funcref);
                 e.* = .{
                     .kind = .active,
                     .tableidx = 0,
@@ -699,7 +699,7 @@ pub fn decodeElement(parent_alloc: Allocator, body: []const u8) Error!Elements {
                 };
                 const n = try leb128.readUleb128(u32, body, &pos);
                 const funcs = try alloc.alloc(u32, n);
-                for (funcs) |*f| f.* = try readFuncrefInitExpr(body, &pos);
+                for (funcs) |*f| f.* = try readFuncrefInitExpr(body, &pos, reftype_vt);
                 e.* = .{ .kind = .passive, .elem_type = reftype_vt, .funcidxs = funcs };
             },
             6 => {
@@ -719,7 +719,7 @@ pub fn decodeElement(parent_alloc: Allocator, body: []const u8) Error!Elements {
                 };
                 const n = try leb128.readUleb128(u32, body, &pos);
                 const funcs = try alloc.alloc(u32, n);
-                for (funcs) |*f| f.* = try readFuncrefInitExpr(body, &pos);
+                for (funcs) |*f| f.* = try readFuncrefInitExpr(body, &pos, reftype_vt);
                 e.* = .{
                     .kind = .active,
                     .tableidx = tableidx,
@@ -740,7 +740,7 @@ pub fn decodeElement(parent_alloc: Allocator, body: []const u8) Error!Elements {
                 };
                 const n = try leb128.readUleb128(u32, body, &pos);
                 const funcs = try alloc.alloc(u32, n);
-                for (funcs) |*f| f.* = try readFuncrefInitExpr(body, &pos);
+                for (funcs) |*f| f.* = try readFuncrefInitExpr(body, &pos, reftype_vt);
                 e.* = .{ .kind = .declarative, .elem_type = reftype_vt, .funcidxs = funcs };
             },
             else => return Error.InvalidFunctype,
@@ -765,20 +765,35 @@ pub fn decodeElement(parent_alloc: Allocator, body: []const u8) Error!Elements {
 ///   close-plan §6 (j) Step B cohort 6). Table-init then reads
 ///   the imported funcref global value at `scratch_globals[
 ///   globals_offsets[N]]` and substitutes it as the table entry.
-fn readFuncrefInitExpr(body: []const u8, pos: *usize) Error!u32 {
+fn readFuncrefInitExpr(body: []const u8, pos: *usize, expected: ValType) Error!u32 {
     if (pos.* >= body.len) return Error.UnexpectedEnd;
     const op = body[pos.*];
     pos.* += 1;
     const idx: u32 = switch (op) {
-        0xD2 => try leb128.readUleb128(u32, body, pos),
+        0xD2 => blk: {
+            // ref.func produces funcref. Reject when the segment's
+            // declared reftype is externref (elem.51 case — Wasm spec
+            // §3.4.6 type mismatch).
+            if (expected != .funcref) return Error.InvalidFunctype;
+            break :blk try leb128.readUleb128(u32, body, pos);
+        },
         0xD0 => blk: {
             if (pos.* >= body.len) return Error.UnexpectedEnd;
             const rt_byte = body[pos.*];
-            if (rt_byte != 0x70 and rt_byte != 0x6F) return Error.BadValType;
+            const rt_vt: ValType = switch (rt_byte) {
+                0x70 => .funcref,
+                0x6F => .externref,
+                else => return Error.BadValType,
+            };
+            if (rt_vt != expected) return Error.InvalidFunctype;
             pos.* += 1;
             break :blk std.math.maxInt(u32);
         },
         0x23 => blk: {
+            // global.get produces the imported global's type. Strict
+            // per-global type check is deferred to compileWasm
+            // (validator owns the globals index space); decoder only
+            // ensures the marker is structurally valid.
             const n = try leb128.readUleb128(u32, body, pos);
             if (n >= 0x80000000) return Error.InvalidFunctype;
             break :blk 0x80000000 | n;
