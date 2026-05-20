@@ -986,18 +986,17 @@ pub fn compile(
             // shape-tag pipeline on x86_64 per ADR-0041; spilled
             // v128 vregs surface UnsupportedOp until 9.7-c MOVDQU
             // helpers land.
-            .@"i8x16.add" => try op_simd_int_arith.emitI8x16Add(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i8x16.sub" => try op_simd_int_arith.emitI8x16Sub(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i16x8.add" => try op_simd_int_arith.emitI16x8Add(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i16x8.sub" => try op_simd_int_arith.emitI16x8Sub(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i32x4.add" => try op_simd_int_arith.emitI32x4Add(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i32x4.sub" => try op_simd_int_arith.emitI32x4Sub(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i64x2.add" => try op_simd_int_arith.emitI64x2Add(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i64x2.sub" => try op_simd_int_arith.emitI64x2Sub(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            // §9.7 / 9.7-c: native multiply. PMULLW (SSE2) for
-            // i16x8.mul; PMULLD (SSE4.1) for i32x4.mul.
-            .@"i16x8.mul" => try op_simd_int_arith.emitI16x8Mul(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i32x4.mul" => try op_simd_int_arith.emitI32x4Mul(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            // §9.12-B / B91: SIMD int binary arith cohort migrated to ctx tuple.
+            .@"i8x16.add" => try op_simd_int_arith.emitI8x16AddCtx(&ctx, &ins),
+            .@"i8x16.sub" => try op_simd_int_arith.emitI8x16SubCtx(&ctx, &ins),
+            .@"i16x8.add" => try op_simd_int_arith.emitI16x8AddCtx(&ctx, &ins),
+            .@"i16x8.sub" => try op_simd_int_arith.emitI16x8SubCtx(&ctx, &ins),
+            .@"i32x4.add" => try op_simd_int_arith.emitI32x4AddCtx(&ctx, &ins),
+            .@"i32x4.sub" => try op_simd_int_arith.emitI32x4SubCtx(&ctx, &ins),
+            .@"i64x2.add" => try op_simd_int_arith.emitI64x2AddCtx(&ctx, &ins),
+            .@"i64x2.sub" => try op_simd_int_arith.emitI64x2SubCtx(&ctx, &ins),
+            .@"i16x8.mul" => try op_simd_int_arith.emitI16x8MulCtx(&ctx, &ins),
+            .@"i32x4.mul" => try op_simd_int_arith.emitI32x4MulCtx(&ctx, &ins),
             // §9.7 / 9.7-d: i64x2.mul synthesis (no native SSE4.1 form;
             // PMULUDQ + shift/add idiom uses XMM14/15 as scratch).
             .@"i64x2.mul" => try op_simd_int_arith.emitI64x2Mul(allocator, &buf, alloc, &pushed_vregs, &next_vreg),

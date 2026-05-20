@@ -1257,16 +1257,9 @@ pub const collected_x86_64_ops = .{
     // `collected_x86_64_ops` (298 → 292) to `_ctx_ops` (32 → 38).
     // The B28 7-arg stubs rewritten in place.
     // v128 logical cohort moved to ctx tuple at B90 (6 ops).
-    x86_64_i8x16_add,
-    x86_64_i8x16_sub,
-    x86_64_i16x8_add,
-    x86_64_i16x8_sub,
-    x86_64_i16x8_mul,
-    x86_64_i32x4_add,
-    x86_64_i32x4_sub,
-    x86_64_i32x4_mul,
-    x86_64_i64x2_add,
-    x86_64_i64x2_sub,
+    // SIMD int binary arith cohort moved at B91 (10 ops: add/sub
+    // × 4 widths + i16x8/i32x4.mul; i64x2.mul skipped — no Zone 1
+    // meta file).
     x86_64_i8x16_neg,
     x86_64_i8x16_abs,
     x86_64_i16x8_neg,
@@ -1670,6 +1663,17 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_v128_or,
     x86_64_v128_xor,
     x86_64_v128_bitselect,
+    // B91: SIMD int binary arith cohort moved from legacy.
+    x86_64_i8x16_add,
+    x86_64_i8x16_sub,
+    x86_64_i16x8_add,
+    x86_64_i16x8_sub,
+    x86_64_i16x8_mul,
+    x86_64_i32x4_add,
+    x86_64_i32x4_sub,
+    x86_64_i32x4_mul,
+    x86_64_i64x2_add,
+    x86_64_i64x2_sub,
 };
 
 comptime {
@@ -1740,8 +1744,8 @@ test "migratedArchOpCount tracks collected per-arch tuples (B59: arm64=348, x86_
     // load/store per-op files directly to ctx tuple (not in legacy
     // tuple before, so x86_64 count unchanged).
     try std.testing.expectEqual(@as(usize, 348), migratedArchOpCount(.arm64));
-    // B79..B89 walked cohorts; B90 v128 logical (6 ops).
-    try std.testing.expectEqual(@as(usize, 188), migratedArchOpCount(.x86_64));
+    // B79..B90 walked cohorts; B91 SIMD int binary arith (10 ops).
+    try std.testing.expectEqual(@as(usize, 178), migratedArchOpCount(.x86_64));
 }
 
 test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
@@ -1798,8 +1802,10 @@ test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // moved (+14 = 191). B89: FP min/max+copysign (6 ops;
     // emitFp{MinMax,Copysign}Ctx) moved (+6 = 197). B90: v128
     // logical (6 ops; emitV128*Ctx adapters; first SIMD migration)
-    // moved (+6 = 203).
-    try std.testing.expectEqual(@as(usize, 203), collected_x86_64_ctx_ops.len);
+    // moved (+6 = 203). B91: SIMD int binary arith (10 ops; add/sub
+    // × 4 widths + i16x8/i32x4.mul; i64x2.mul deferred — no Zone 1
+    // meta) moved (+10 = 213).
+    try std.testing.expectEqual(@as(usize, 213), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would

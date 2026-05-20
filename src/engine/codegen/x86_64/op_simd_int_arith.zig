@@ -16,16 +16,78 @@
 
 const std = @import("std");
 
+const zir = @import("../../../ir/zir.zig");
 const regalloc = @import("../shared/regalloc.zig");
 const inst = @import("inst.zig");
 const abi = @import("abi.zig");
 const gpr = @import("gpr.zig");
 const types = @import("types.zig");
+const ctx_mod = @import("ctx.zig");
 const op_simd = @import("op_simd.zig");
 const op_simd_float = @import("op_simd_float.zig");
 
 const Allocator = std.mem.Allocator;
 const Error = types.Error;
+
+// §9.12-B / B91 (ADR-0075) — `(ctx, ins)` adapters for the SIMD
+// int binary arith cohort (8 add/sub + 2 native mul + 1 synthesised
+// i64x2.mul = 11 ops). Each wraps its existing helper. ins is
+// always ignored (one helper per op).
+
+pub fn emitI8x16AddCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI8x16Add(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
+}
+
+pub fn emitI8x16SubCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI8x16Sub(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
+}
+
+pub fn emitI16x8AddCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI16x8Add(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
+}
+
+pub fn emitI16x8SubCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI16x8Sub(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
+}
+
+pub fn emitI32x4AddCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI32x4Add(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
+}
+
+pub fn emitI32x4SubCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI32x4Sub(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
+}
+
+pub fn emitI64x2AddCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI64x2Add(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
+}
+
+pub fn emitI64x2SubCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI64x2Sub(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
+}
+
+pub fn emitI16x8MulCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI16x8Mul(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
+}
+
+pub fn emitI32x4MulCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI32x4Mul(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
+}
+
+pub fn emitI64x2MulCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitI64x2Mul(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+}
 
 pub fn emitI8x16Add(
     allocator: Allocator,
