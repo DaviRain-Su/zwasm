@@ -68,6 +68,13 @@ pub const Error = error{
     OperandStackOverflow,
     ControlStackOverflow,
     ArityMismatch,
+    /// Wasm SIMD spec §3.3.6.X (lane-index range): an
+    /// `extract_lane*` / `replace_lane*` / load_lane / store_lane
+    /// op's 1-byte lane-index immediate is ≥ the shape's lane
+    /// count (16 / 8 / 4 / 2 depending on i8x16 / i16x8 / i32x4 /
+    /// i64x2 / f32x4 / f64x2). Per spec, this is a validation-time
+    /// reject (`assert_invalid`), not a deferred runtime trap.
+    InvalidLaneIndex,
     NotImplemented,
     OutOfMemory,
 } || leb128.Error;
@@ -912,18 +919,20 @@ const Validator = struct {
             20 => try self.opSimdSplat(.f64), // f64x2.splat
 
             // extract_lane / replace_lane: read 1-byte lane immediate.
-            21, 22 => try self.opSimdExtractLane(.i32), // i8x16.extract_lane_{s,u}
-            23 => try self.opSimdReplaceLane(.i32), // i8x16.replace_lane
-            24, 25 => try self.opSimdExtractLane(.i32), // i16x8.extract_lane_{s,u}
-            26 => try self.opSimdReplaceLane(.i32), // i16x8.replace_lane
-            27 => try self.opSimdExtractLane(.i32), // i32x4.extract_lane
-            28 => try self.opSimdReplaceLane(.i32), // i32x4.replace_lane
-            29 => try self.opSimdExtractLane(.i64), // i64x2.extract_lane
-            30 => try self.opSimdReplaceLane(.i64), // i64x2.replace_lane
-            31 => try self.opSimdExtractLane(.f32), // f32x4.extract_lane
-            32 => try self.opSimdReplaceLane(.f32), // f32x4.replace_lane
-            33 => try self.opSimdExtractLane(.f64), // f64x2.extract_lane
-            34 => try self.opSimdReplaceLane(.f64), // f64x2.replace_lane
+            // Lane count per shape: i8x16=16, i16x8=8, i32x4=4,
+            // i64x2=2, f32x4=4, f64x2=2 (Wasm SIMD spec §3.3.6.X).
+            21, 22 => try self.opSimdExtractLane(.i32, 16), // i8x16.extract_lane_{s,u}
+            23 => try self.opSimdReplaceLane(.i32, 16), // i8x16.replace_lane
+            24, 25 => try self.opSimdExtractLane(.i32, 8), // i16x8.extract_lane_{s,u}
+            26 => try self.opSimdReplaceLane(.i32, 8), // i16x8.replace_lane
+            27 => try self.opSimdExtractLane(.i32, 4), // i32x4.extract_lane
+            28 => try self.opSimdReplaceLane(.i32, 4), // i32x4.replace_lane
+            29 => try self.opSimdExtractLane(.i64, 2), // i64x2.extract_lane
+            30 => try self.opSimdReplaceLane(.i64, 2), // i64x2.replace_lane
+            31 => try self.opSimdExtractLane(.f32, 4), // f32x4.extract_lane
+            32 => try self.opSimdReplaceLane(.f32, 4), // f32x4.replace_lane
+            33 => try self.opSimdExtractLane(.f64, 2), // f64x2.extract_lane
+            34 => try self.opSimdReplaceLane(.f64, 2), // f64x2.replace_lane
 
             // Comparison ops (relops, sub 35..76): pop 2× v128, push
             // v128 mask. §9.9 / 9.9-f-1 splits the bitwise unop +
@@ -943,8 +952,16 @@ const Validator = struct {
             // §9.7 / 9.7-ba — load_lane × 4, store_lane × 4.
             // memarg + lane byte; load_lane pops (i32, v128) + pushes
             // v128; store_lane pops (i32, v128) + pushes nothing.
-            84, 85, 86, 87 => try self.opSimdLoadLane(),
-            88, 89, 90, 91 => try self.opSimdStoreLane(),
+            // Lane count per access width: load/store{8}=16,
+            // {16}=8, {32}=4, {64}=2 (Wasm SIMD spec §4.3.4).
+            84 => try self.opSimdLoadLane(16), // v128.load8_lane
+            85 => try self.opSimdLoadLane(8), // v128.load16_lane
+            86 => try self.opSimdLoadLane(4), // v128.load32_lane
+            87 => try self.opSimdLoadLane(2), // v128.load64_lane
+            88 => try self.opSimdStoreLane(16), // v128.store8_lane
+            89 => try self.opSimdStoreLane(8), // v128.store16_lane
+            90 => try self.opSimdStoreLane(4), // v128.store32_lane
+            91 => try self.opSimdStoreLane(2), // v128.store64_lane
 
             // §9.9 / 9.9-f-6 — int arith range (94..211). Split out
             // unop arms to fix StackUnderflow for `i*.neg / abs /
@@ -1165,20 +1182,30 @@ const Validator = struct {
         try self.pushType(.v128);
     }
 
+    /// Read + range-check a 1-byte SIMD lane-index immediate.
+    /// Wasm SIMD spec §3.3.6.X: the immediate `lane_idx` MUST be
+    /// `< lane_count`. Validation-time reject (Error.InvalidLaneIndex),
+    /// not a deferred runtime trap (the prior "deferred to emit"
+    /// comment was wrong — fixed at §9.12-E / B133).
+    fn readLaneIdx(self: *Validator, lane_count: u8) Error!void {
+        if (self.pos >= self.body.len) return Error.UnexpectedEnd;
+        const lane_idx = self.body[self.pos];
+        self.pos += 1;
+        if (lane_idx >= lane_count) return Error.InvalidLaneIndex;
+    }
+
     /// SIMD extract_lane (`i8x16.extract_lane_s`, `f32x4.extract_lane`,
     /// …): read 1-byte lane immediate; pop v128; push scalar.
-    fn opSimdExtractLane(self: *Validator, dst: ValType) Error!void {
-        if (self.pos >= self.body.len) return Error.UnexpectedEnd;
-        self.pos += 1; // lane byte (bound-check deferred to emit per spec)
+    fn opSimdExtractLane(self: *Validator, dst: ValType, lane_count: u8) Error!void {
+        try self.readLaneIdx(lane_count);
         try self.popExpect(.v128);
         try self.pushType(dst);
     }
 
     /// SIMD replace_lane (`i8x16.replace_lane`, `f64x2.replace_lane`,
     /// …): read 1-byte lane immediate; pop scalar + v128; push v128.
-    fn opSimdReplaceLane(self: *Validator, src: ValType) Error!void {
-        if (self.pos >= self.body.len) return Error.UnexpectedEnd;
-        self.pos += 1;
+    fn opSimdReplaceLane(self: *Validator, src: ValType, lane_count: u8) Error!void {
+        try self.readLaneIdx(lane_count);
         try self.popExpect(src);
         try self.popExpect(.v128);
         try self.pushType(.v128);
@@ -1186,11 +1213,10 @@ const Validator = struct {
 
     /// SIMD load_lane: memarg (align uleb + offset uleb) + 1-byte
     /// lane immediate. Pop v128 + i32 idx; push v128 (modified).
-    fn opSimdLoadLane(self: *Validator) Error!void {
+    fn opSimdLoadLane(self: *Validator, lane_count: u8) Error!void {
         _ = try leb128.readUleb128(u32, self.body, &self.pos); // align
         _ = try leb128.readUleb128(u32, self.body, &self.pos); // offset
-        if (self.pos >= self.body.len) return Error.UnexpectedEnd;
-        self.pos += 1; // lane byte
+        try self.readLaneIdx(lane_count);
         try self.popExpect(.v128);
         try self.popExpect(.i32);
         try self.pushType(.v128);
@@ -1198,11 +1224,10 @@ const Validator = struct {
 
     /// SIMD store_lane: memarg + 1-byte lane immediate. Pop v128 +
     /// i32 idx; push nothing.
-    fn opSimdStoreLane(self: *Validator) Error!void {
+    fn opSimdStoreLane(self: *Validator, lane_count: u8) Error!void {
         _ = try leb128.readUleb128(u32, self.body, &self.pos); // align
         _ = try leb128.readUleb128(u32, self.body, &self.pos); // offset
-        if (self.pos >= self.body.len) return Error.UnexpectedEnd;
-        self.pos += 1; // lane byte
+        try self.readLaneIdx(lane_count);
         try self.popExpect(.v128);
         try self.popExpect(.i32);
     }
