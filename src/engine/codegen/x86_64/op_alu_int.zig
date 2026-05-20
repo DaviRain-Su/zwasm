@@ -39,6 +39,8 @@ const gpr = @import("gpr.zig");
 const jit_abi = @import("../shared/jit_abi.zig");
 const types = @import("types.zig");
 const ctx_mod = @import("ctx.zig");
+const op_simd = @import("op_simd.zig");
+const op_alu_float = @import("op_alu_float.zig");
 
 const Allocator = std.mem.Allocator;
 const Error = types.Error;
@@ -879,6 +881,54 @@ pub fn emitI64Const(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void 
     try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm64Q(dst, value).slice());
     try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, vreg, 0);
     try ctx.pushed_vregs.append(ctx.allocator, vreg);
+}
+
+/// §9.12-B / B70 (ADR-0075) — `(ctx, ins)` adapter for `select` +
+/// `select_typed` (shared dispatch). Pops c / val2 / val1; pushes
+/// val1 if c != 0 else val2. Three-path dispatch per
+/// ADR-0056 §9.9-m-4a/b:
+///   - v128 → `op_simd.emitV128Select` (mask-based)
+///   - f32/f64 → `op_alu_float.emitFpSelect` (MOVD/Q shuttle +
+///     CMOVNE; x86 has no FP CMOV). Detected via `ins.extra`
+///     ∈ {0x7C, 0x7D} (Wasm valtype encoding).
+///   - i32 / i64 / funcref / externref → inline GPR path with
+///     D-097 d-18 alias-aware CMOV direction.
+///
+/// Wasm spec §4.4.4 / §3.3.2.2.
+pub fn emitSelectCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    if (ctx.pushed_vregs.items.len < 3) return Error.AllocationMissing;
+    const cond_v = ctx.pushed_vregs.pop().?;
+    const val2_v = ctx.pushed_vregs.pop().?;
+    const val1_v = ctx.pushed_vregs.pop().?;
+    const result_v = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_v >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    if (ctx.alloc.shapeTag(val1_v) == .v128) {
+        try op_simd.emitV128Select(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, cond_v, val1_v, val2_v, result_v);
+        try ctx.pushed_vregs.append(ctx.allocator, result_v);
+        return;
+    }
+    if (ins.extra == 0x7D or ins.extra == 0x7C) {
+        try op_alu_float.emitFpSelect(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, ctx.pushed_vregs, ins.extra == 0x7C, cond_v, val1_v, val2_v, result_v);
+        return;
+    }
+    // GPR path. D-097 d-18: pick CMOV direction so MOV is self-MOV
+    // (or skipped) when result_v aliases val1_v or val2_v.
+    const cond_r = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, cond_v, 0);
+    try ctx.buf.appendSlice(ctx.allocator, inst.encTestRR(.d, cond_r, cond_r).slice());
+    const val2_r = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, val2_v, 1);
+    const val1_r = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, val1_v, 0);
+    const dst_r = try gpr.gprDefSpilled(ctx.alloc, result_v, 0);
+    if (dst_r == val2_r) {
+        try ctx.buf.appendSlice(ctx.allocator, inst.encCmovccRR(.q, .ne, dst_r, val1_r).slice());
+    } else {
+        if (dst_r != val1_r) {
+            try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, dst_r, val1_r).slice());
+        }
+        try ctx.buf.appendSlice(ctx.allocator, inst.encCmovccRR(.q, .e, dst_r, val2_r).slice());
+    }
+    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_v, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, result_v);
 }
 
 /// §9.12-B / B68 (ADR-0075) — `(ctx, ins)` adapter for `ref.null`.

@@ -1448,79 +1448,10 @@ pub fn compile(
                 try pushed_vregs.append(allocator, result_v);
             },
             .@"memory.grow" => try op_call.emitMemoryGrow(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, outgoing_max_bytes),
-            .select, .select_typed => {
-                // Wasm spec §4.4.4 / §3.3.2.2 — pop c, val2, val1;
-                // push val1 if c != 0 else val2. x86_64: TEST c,c
-                // → q-form MOV+CMOVNE. Dispatch (§9.9-m-4a / ADR-0056):
-                // v128 via op_simd; i32 / i64 / funcref / externref
-                // share q-form (REX.W harmless for i32 zero-ext IR);
-                // f32/f64 → UnsupportedOp (m-4b XMM dispatch).
-                if (pushed_vregs.items.len < 3) return Error.AllocationMissing;
-                const cond_v = pushed_vregs.pop().?;
-                const val2_v = pushed_vregs.pop().?;
-                const val1_v = pushed_vregs.pop().?;
-                const result_v = next_vreg;
-                next_vreg += 1;
-                if (result_v >= alloc.slots.len) return Error.SlotOverflow;
-                if (alloc.shapeTag(val1_v) == .v128) {
-                    // D-083 part 2: v128 select → mask-based emit
-                    // (mirror of arm64/emit.zig dispatch).
-                    try op_simd.emitV128Select(allocator, &buf, alloc, spill_base_off, cond_v, val1_v, val2_v, result_v);
-                    try pushed_vregs.append(allocator, result_v);
-                    continue;
-                }
-                // §9.9 / 9.9-m-4b: f32 / f64 select via op_alu_float.
-                // emitFpSelect (MOVD/Q-to-GPR + CMOVNE + MOVD/Q-back
-                // shuttle; x86 has no FP CMOV).
-                if (ins.extra == 0x7D or ins.extra == 0x7C) {
-                    try op_alu_float.emitFpSelect(allocator, &buf, alloc, spill_base_off, &pushed_vregs, ins.extra == 0x7C, cond_v, val1_v, val2_v, result_v);
-                    continue;
-                }
-                // GPR path (i32 / i64 / funcref / externref).
-                //
-                // D-097 d-18: select with two non-distinct register
-                // slots needs alias-aware cmov direction. The
-                // regalloc's LIFO free-pool reuses slots, so
-                // `result_v` can land on EITHER `val1_v`'s slot or
-                // `val2_v`'s slot depending on the expire order at
-                // select's def PC. Pre-d-18 always emitted
-                // `MOV dst, val2 ; CMOVNE dst, val1` — safe when
-                // dst aliases val2 (MOV is a self-MOV) but broken
-                // when dst aliases val1 (MOV clobbers val1 before
-                // CMOVNE reads it). The d-18 fix picks the cmov
-                // direction so the MOV is always a self-MOV (or
-                // skipped entirely) when an alias exists:
-                //   - dst == val1: CMOVE dst, val2 if cond=0
-                //   - dst == val2: CMOVNE dst, val1 if cond≠0
-                //   - otherwise: MOV dst, val1; CMOVE dst, val2.
-                //
-                // CMOV's read-modify-write shape means the "dst
-                // already holds X" branch must precede the cmov
-                // whose condition keeps that X. CMOVE = move on
-                // ZF=1 (= cond was 0 = pick val2); CMOVNE = move
-                // on ZF=0 (= cond ≠ 0 = pick val1). Wasm spec
-                // §4.4.4: result = (cond ≠ 0) ? val1 : val2.
-                const cond_r = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, cond_v, 0);
-                try buf.appendSlice(allocator, inst.encTestRR(.d, cond_r, cond_r).slice());
-                const val2_r = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, val2_v, 1);
-                const val1_r = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, val1_v, 0);
-                const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
-                if (dst_r == val2_r) {
-                    // dst already holds val2 (alias). CMOVNE swaps
-                    // to val1 on cond ≠ 0.
-                    try buf.appendSlice(allocator, inst.encCmovccRR(.q, .ne, dst_r, val1_r).slice());
-                } else {
-                    // dst == val1 or independent: MOV dst, val1
-                    // (skipped if aliased) + CMOVE swaps to val2 on
-                    // cond = 0.
-                    if (dst_r != val1_r) {
-                        try buf.appendSlice(allocator, inst.encMovRR(.q, dst_r, val1_r).slice());
-                    }
-                    try buf.appendSlice(allocator, inst.encCmovccRR(.q, .e, dst_r, val2_r).slice());
-                }
-                try gpr.gprStoreSpilled(allocator, &buf, alloc, spill_base_off, result_v, 0);
-                try pushed_vregs.append(allocator, result_v);
-            },
+            // §9.12-B / B70: select + select_typed inline body
+            // extracted into `op_alu_int.emitSelectCtx` `(ctx, ins)`
+            // adapter (handles v128 / fp / GPR 3-path dispatch).
+            .select, .select_typed => try op_alu_int.emitSelectCtx(&ctx, &ins),
             .@"unreachable" => {
                 // Wasm spec §4.4.6.1 — trap unconditionally.
                 // Emit JMP rel32 placeholder; record fixup so the
