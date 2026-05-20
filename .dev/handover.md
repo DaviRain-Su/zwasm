@@ -15,8 +15,8 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
    `chore(p9b):` / `feat(p9b):` prefix. Last source commit
-   `75c463f6` (B69 — drop op migrated to `(ctx, ins)`; ctx
-   83 → 84; 1 new per-op file; select deferred to B70).
+   `74734076` (B70 — select op migrated to `(ctx, ins)`; ctx
+   84 → 85; 1 new per-op file; select_typed shares runtime body).
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -94,37 +94,37 @@
 | B67 | Cohort migration: const cohort (`i32.const`, `i64.const`, `f32.const`, `f64.const`, 4 ops) to `(ctx, ins)`. Extracted i32/i64.const inline bodies into op_alu_int helpers; f32/f64.const wrap existing `emitFpConst` via op_alu_float aliases. 4 NEW per-op files. `_ctx_ops` 77 → 81; legacy unchanged at 292. | `ee5d604b` |
 | B68 | Cohort migration: ref cohort (`ref.null`, `ref.func`, 2 ops) to `(ctx, ins)`. Extracted inline bodies into `op_alu_int.emit{RefNull,RefFunc}` adapters. 2 NEW per-op files. `_ctx_ops` 81 → 83; legacy unchanged at 292. | `7a6c6a77` |
 | B69 | Single-op migration: `drop` to `(ctx, ins)`. Inline body (pop vreg, no codegen) → `op_control.emitDropCtx`. 1 NEW per-op file. `_ctx_ops` 83 → 84. Select deferred to B70. | `75c463f6` |
-| **B70** | **Single-op migration: `select` + `select_typed` (2 ops, shared dispatch arm)** to `(ctx, ins)`. ~70-line emit.zig inline body covering 3 paths (v128 via op_simd / fp via op_alu_float / GPR with CMOV alias-handling). Extract into op_alu_float (or op_simd) — needs careful adapter shape because the body crosses module boundaries. May need new op_select.zig helper file. 1 NEW per-op file (select.zig only; select_typed shares the same emit). | **NEXT** |
-| B70..B6x | After B70: control flow (br/if/end family) → local ops → atomic.fence / nop. Followed by B6x+1 inline-switch cutover folding ctx tuple into unified `collected_x86_64_ops`. | |
+| B70 | Single-op migration: `select` (+ `select_typed` shares emit arm) to `(ctx, ins)`. ~70-line 3-path body extracted into `op_alu_int.emitSelectCtx` (added op_simd + op_alu_float imports to op_alu_int; no cycle). 1 NEW per-op file. `_ctx_ops` 84 → 85. | `74734076` |
+| **B71** | **Single-op migration: `memory.grow` to `(ctx, ins)`** — currently routes via `op_call.emitMemoryGrow` (existing helper takes outgoing_max_bytes). Add `(ctx, ins)` adapter in op_call.zig. Existing `wasm_1_0/memory_grow.zig` Zone 1 meta may or may not exist — survey first; if missing, B66-style backfill within this chunk. 1 NEW per-op file. | **NEXT** |
+| B71..B6x | After B71: control flow (br/if/end family) → local ops → atomic.fence / nop. Followed by B6x+1 inline-switch cutover folding ctx tuple into unified `collected_x86_64_ops`. | |
 | B6x+1 | Inline-switch dispatcher cutover per ADR-0073 — both arches' `emit.zig` giant switch replaced by `inline for (collected_X_ops) |op_mod| { if (op_mod.op_tag == ins.op) return op_mod.emit(ctx, ins); }`. Moment per-op files become load-bearing. | |
 
-## Active state — §9.12-B mid-flight; B69 drop landed 2026-05-20
+## Active state — §9.12-B mid-flight; B70 select landed 2026-05-20
 
-**B70 is the active task** — migrate `select` + `select_typed`
-(2 ops sharing one dispatch arm) to `(ctx, ins)`. B69 closed
-drop at `75c463f6` (`collected_x86_64_ctx_ops` 83 → 84).
+**B71 is the active task** — migrate `memory.grow` (1 op) to
+`(ctx, ins)`. B70 closed select at `74734076`
+(`collected_x86_64_ctx_ops` 84 → 85).
 
-The loop for B70:
+The loop for B71:
 
-1. Survey emit.zig select arm (~line 1451-1523) — covers 3
-   paths: v128 (`op_simd.emitV128Select`), fp (`op_alu_float.
-   emitFpSelect` for f32/f64 detected via `ins.extra ==
-   0x7C/0x7D`), GPR (inline CMOV alias-handling).
-2. Decide adapter home — likely `op_alu_float.zig` (already
-   has emitFpSelect) or new `op_select.zig` standalone file.
-3. Extract the ~70-line body into `emitSelectCtx(ctx, ins)`.
-   Will need to read `ins.extra` for the fp detection branch.
-4. Replace emit.zig arm with `(ctx, ins)` adapter call.
-5. Create 1 per-op file at `x86_64/ops/wasm_1_0/select.zig`
-   (select_typed shares — registered via single op_tag match).
-6. Update collector (84 → 85) + assertion.
-7. Verify 2-host green; commit + push.
+1. Survey emit.zig arm (line ~1450) — routes to
+   `op_call.emitMemoryGrow(allocator, &buf, alloc,
+   &pushed_vregs, &next_vreg, spill_base_off, outgoing_max_bytes)`.
+2. Check Zone 1 meta `src/instruction/wasm_1_0/memory_grow.zig`
+   — author if missing (B66-style backfill inline).
+3. Add `emitMemoryGrowCtx(ctx, ins)` adapter in op_call.zig
+   threading `ctx.outgoing_max_bytes` etc.
+4. Replace emit.zig arm; create 1 per-op file.
+5. Update collector (85 → 86) + assertion.
+6. Verify 2-host green; commit + push.
 
-Note: op_convert.zig 1009 LOC, op_control.zig 1181 LOC — split
-plan deferred to §9.12-D cleanup. After B70: control-flow
-(br/br_if/br_table/if/else/end/return/unreachable) + local
-ops (local.get/set/tee) — both need extraction from emit.zig
-private helpers.
+Note: op_convert.zig 1009 LOC, op_control.zig 1181 LOC,
+op_alu_int.zig now hosts cross-deps to op_simd + op_alu_float
+(B70) — split plans + dependency surface for §9.12-D cleanup
+audit. After B71: control-flow + local ops + atomic.fence/nop
+remain. local.{get,set,tee} need extraction from emit.zig
+private helpers; control-flow needs more meta files. Move
+toward B6x+1 inline-switch cutover after sweeping these.
 
 §9.12-B exit criterion stays as ROADMAP §9.12-B specifies (6 build
 combos green + DCE 0 + completeness comptime check). Per-op file
