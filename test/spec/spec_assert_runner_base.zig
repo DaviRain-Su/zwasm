@@ -86,20 +86,38 @@ pub fn decodeFnName(fn_name: []const u8, buf: []u8) ![]const u8 {
 /// (chunk 9.9-h-21): twin counters for `skip-impl` (counts toward
 /// release gate) and `skip-adr-<id>` (waived per the named ADR).
 ///
-/// The two skip counters report distinct facts in the summary line:
-/// `skipped (= N skip-impl + M skip-adr)`. The exit-non-zero gate
-/// (`failed > 0`) is checked by the caller; tally just collects.
+/// Close-plan §6 (e) (2026-05-21) split the historical `skipped`
+/// counter into two strictly-distinguished counters — manifest
+/// skip lines vs runtime SKIP-* events — because conflating them
+/// hid the actual "skip-impl == 0" gate signal under runtime
+/// SKIP events (e.g. SKIP-CROSS-MODULE-IMPORTS in §9.12-E).
+///
+/// Summary line shape:
+/// `skipped (= N skip-impl + R runtime-skip + M skip-adr)`.
+/// The exit-non-zero gate (`failed > 0`) is checked by the
+/// caller; tally just collects.
 pub const AssertTally = struct {
     passed: u32 = 0,
     failed: u32 = 0,
-    /// `skip-impl <reason>` — counts toward `skip-impl == 0` gate
-    /// (ADR-0029 Path B). Per ADR-0029 the release gate forbids
-    /// any line starting with `skip-impl `; a non-zero value here
-    /// means the manifest has yet-to-be-classified gaps.
-    skipped: u32 = 0,
+    /// Manifest `skip-impl <reason>` lines (and bare-legacy
+    /// `skip <reason>` pre-chunk 9.9-h-22 regen lines) — counts
+    /// toward the `skip-impl == 0` release gate (ADR-0029 Path B
+    /// + ADR-0050 D-5). A non-zero value means the manifest has
+    /// yet-to-be-classified gaps that need either a `skip-adr-<id>`
+    /// reclassification or an implementation that lets the line
+    /// be removed entirely.
+    manifest_skip_impl: u32 = 0,
+    /// Runtime SKIP-* events emitted by assertion-time code when
+    /// a fixture would otherwise FAIL because of a structural
+    /// barrier the runner can't paper over (SKIP-CROSS-MODULE-
+    /// IMPORTS / SKIP-V2-InstanceAllocFailed / SKIP-VALIDATOR-GAP
+    /// / SKIP-WASMTIME-UNUSABLE / etc.). These are NOT counted
+    /// against the manifest gate but ARE reported separately so
+    /// audit / ratchet logic can distinguish "manifest-marked
+    /// gap" from "runtime-detected gap". Paired skip-token
+    /// taxonomy ADR pending (close-plan §6 (f)).
+    runtime_skip: u32 = 0,
     /// `skip-adr-<ADR-id> <reason>` — waived per the named ADR.
-    /// Bare-legacy `skip <reason>` (pre-chunk 9.9-h-22 regen)
-    /// also lands here with a one-time WARN to stdout.
     skipped_adr: u32 = 0,
 };
 
@@ -2431,7 +2449,7 @@ pub fn runCorpus(
 
         switch (classifySkipLine(line)) {
             .skip_impl => {
-                tally.skipped += 1;
+                tally.manifest_skip_impl += 1;
                 continue;
             },
             .skip_adr => {
@@ -2440,7 +2458,7 @@ pub fn runCorpus(
             },
             .bare_legacy => {
                 try stdout.print("WARN  {s}: bare `skip` line — migrate to `skip-impl` or `skip-adr-<id>` (chunk 9.9-h-22 regen sweep): {s}\n", .{ name, line });
-                tally.skipped += 1;
+                tally.manifest_skip_impl += 1;
                 continue;
             },
             .other => {},
@@ -2502,7 +2520,7 @@ pub fn runCorpus(
                 // state. Pre-empt the compile-stage FAIL for those.
                 if (hasUnbindableImports(gpa, wasm_bytes, &registered)) {
                     try stdout.print("SKIP-CROSS-MODULE-IMPORTS  {s}/{s}: module imports state the spec runner cannot bind\n", .{ name, file });
-                    tally.skipped += 1;
+                    tally.runtime_skip += 1;
                     module_bad = true;
                     continue;
                 }
@@ -2578,7 +2596,7 @@ pub fn runCorpus(
                     // (Track-D scope). The callback prints its own
                     // SKIP-* marker before returning.
                     error.SkipModule => {
-                        tally.skipped += 1;
+                        tally.runtime_skip += 1;
                         module_bad = true;
                         continue;
                     },
@@ -2594,7 +2612,7 @@ pub fn runCorpus(
             },
             .assert_return => {
                 if (module_bad) {
-                    tally.skipped += 1;
+                    tally.runtime_skip += 1;
                     continue;
                 }
                 const compiled_ptr: *const runner_mod.CompiledWasm = if (current_compiled) |*c| c else {
@@ -2621,7 +2639,7 @@ pub fn runCorpus(
             },
             .assert_trap => {
                 if (module_bad) {
-                    tally.skipped += 1;
+                    tally.runtime_skip += 1;
                     continue;
                 }
                 const compiled_ptr: *const runner_mod.CompiledWasm = if (current_compiled) |*c| c else {
@@ -2644,7 +2662,7 @@ pub fn runCorpus(
                 // for our scaffold; trap-reason classification
                 // is out of scope per D-022).
                 if (module_bad) {
-                    tally.skipped += 1;
+                    tally.runtime_skip += 1;
                     continue;
                 }
                 const compiled_ptr: *const runner_mod.CompiledWasm = if (current_compiled) |*c| c else {
@@ -2662,7 +2680,7 @@ pub fn runCorpus(
             },
             .invoke_action => {
                 if (module_bad) {
-                    tally.skipped += 1;
+                    tally.runtime_skip += 1;
                     continue;
                 }
                 const compiled_ptr: *const runner_mod.CompiledWasm = if (current_compiled) |*c| c else {
@@ -2689,7 +2707,7 @@ pub fn runCorpus(
             },
             .get_action => {
                 if (module_bad) {
-                    tally.skipped += 1;
+                    tally.runtime_skip += 1;
                     continue;
                 }
                 const compiled_ptr: *const runner_mod.CompiledWasm = if (current_compiled) |*c| c else {
@@ -2721,7 +2739,7 @@ pub fn runCorpus(
                     var c = compiled_ok;
                     c.deinit(gpa);
                     try stdout.print("SKIP-VALIDATOR-GAP  {s}: assert_invalid {s}\n", .{ name, file });
-                    tally.skipped += 1;
+                    tally.runtime_skip += 1;
                 } else |_| {
                     tally.passed += 1;
                 }
@@ -2738,7 +2756,7 @@ pub fn runCorpus(
                     var c = compiled_ok;
                     c.deinit(gpa);
                     try stdout.print("SKIP-PARSER-GAP  {s}: assert_malformed {s}\n", .{ name, file });
-                    tally.skipped += 1;
+                    tally.runtime_skip += 1;
                 } else |_| {
                     tally.passed += 1;
                 }
@@ -2748,7 +2766,7 @@ pub fn runCorpus(
                 const file = classified.body;
                 const cb = callbacks.handle_assert_uninstantiable orelse {
                     try stdout.print("SKIP-NO-INSTANTIATE-CB  {s}: assert_uninstantiable {s} (specialisation lacks callback)\n", .{ name, file });
-                    tally.skipped += 1;
+                    tally.runtime_skip += 1;
                     continue;
                 };
                 const wasm_bytes = dir.readFileAlloc(io, file, gpa, .limited(4 << 20)) catch |err| {
@@ -2763,7 +2781,7 @@ pub fn runCorpus(
                 // modules is structurally untestable here.
                 if (hasUnbindableImports(gpa, wasm_bytes, &registered)) {
                     try stdout.print("SKIP-CROSS-MODULE-IMPORTS  {s}/{s}: assert_uninstantiable on module the spec runner cannot bind\n", .{ name, file });
-                    tally.skipped += 1;
+                    tally.runtime_skip += 1;
                     continue;
                 }
                 // Compile-stage failure is also a valid
@@ -2833,7 +2851,7 @@ pub fn runCorpus(
                 // with the upstream wast semantics — `(register)`
                 // outside a module context is invalid).
                 if (module_bad or current_wasm == null) {
-                    tally.skipped += 1;
+                    tally.runtime_skip += 1;
                     continue;
                 }
                 const alias = classified.body;
@@ -3040,7 +3058,8 @@ test "AssertTally: defaults are zero" {
     const t: AssertTally = .{};
     try testing.expectEqual(@as(u32, 0), t.passed);
     try testing.expectEqual(@as(u32, 0), t.failed);
-    try testing.expectEqual(@as(u32, 0), t.skipped);
+    try testing.expectEqual(@as(u32, 0), t.manifest_skip_impl);
+    try testing.expectEqual(@as(u32, 0), t.runtime_skip);
     try testing.expectEqual(@as(u32, 0), t.skipped_adr);
 }
 

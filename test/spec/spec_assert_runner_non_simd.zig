@@ -108,8 +108,16 @@ pub fn main(init: std.process.Init) !void {
     }
 
     try stdout.print(
-        "\nspec_assert_runner_non_simd: {d} passed, {d} failed, {d} skipped (= {d} skip-impl + {d} skip-adr) (over {d} manifests)\n",
-        .{ tally.passed, tally.failed, tally.skipped + tally.skipped_adr, tally.skipped, tally.skipped_adr, manifest_count },
+        "\nspec_assert_runner_non_simd: {d} passed, {d} failed, {d} skipped (= {d} skip-impl + {d} runtime-skip + {d} skip-adr) (over {d} manifests)\n",
+        .{
+            tally.passed,
+            tally.failed,
+            tally.manifest_skip_impl + tally.runtime_skip + tally.skipped_adr,
+            tally.manifest_skip_impl,
+            tally.runtime_skip,
+            tally.skipped_adr,
+            manifest_count,
+        },
     );
     try stdout.flush();
 

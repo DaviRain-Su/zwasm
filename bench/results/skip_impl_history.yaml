@@ -68,3 +68,26 @@ entries:
       `spec_assert_runner_non_simd: 25325 passed, 0 failed, 688
       skipped (= 192 skip-impl + 496 skip-adr)`.
     exempt: null
+
+  - commit: "close-plan §6 (e) — semantic shift baseline"
+    timestamp: "2026-05-21T00:00:00Z"
+    non_simd_skip_impl: 0
+    simd_skip_impl: 0
+    total: 0
+    note: |
+      AssertTally split: `skipped` → `manifest_skip_impl` (rename) +
+      new `runtime_skip` field (close-plan §6 (e), tracks C2). The
+      "skip-impl" counter now strictly counts manifest `skip-impl`
+      lines; the prior 192 was almost entirely runtime SKIP-*
+      events (SKIP-CROSS-MODULE-IMPORTS×100 + SKIP-NO-LINK-TYPECHECK
+      + cascades) which now flow to `runtime_skip` separately.
+      Output format extended to 3-counter shape:
+      `661 skipped (= 0 skip-impl + 192 runtime-skip + 469 skip-adr)`.
+      Forward ratchet semantics: only `manifest_skip_impl` is gated;
+      `runtime_skip` is reported but not ratcheted (its growth
+      reflects discovery of structural gaps, NOT a release-gate
+      regression). Pre-existing baseline entries above are
+      historical snapshots under the prior conflated semantics —
+      they are NOT re-extracted because we can't re-run those
+      commits.
+    exempt: null
