@@ -22,16 +22,14 @@
 ## Active state
 
 - Phase 9.12-E。close-plan §6 work sequence 実行中。
-- 完了: (a)〜(e)。直近 (e) で AssertTally 分割 — manifest
-  `skip-impl` lines は実は 0 だった (旧 192 は runtime
-  SKIP events だった)。Phase 9 完備 gate signal が見え
-  るようになった。
-- 次: **(f) skip-token taxonomy ADR** — 既存 SKIP-* token
-  (V2-InstanceAllocFailed / VALIDATOR-GAP / PARSER-GAP /
-  CROSS-MODULE-IMPORTS / NO-LINK-TYPECHECK /
-  NON-INVOKE-ACTION / WASMTIME-UNUSABLE / NO-INSTANTIATE-CB)
-  の class 定義 ADR (debt-trackable / ADR-required /
-  runner-internal)。
+- 完了: (a)〜(f)。直近 (f) は ADR-0078 (Proposed) で
+  19 SKIP-* token を 3 class (debt-trackable / ADR-required /
+  runner-internal) に分類。D-155 で ratchet + audit script
+  follow-up を起票。
+- 次: **(g) D-141 runner.zig split ADR** — `engine/runner.zig`
+  (現 1995 行) を 2-3 file に分割する ADR を Proposed まで。
+  D-141 row の `blocked-by: substrate audit Q3` を新 ADR
+  番号に更新して解除する (B1 構造的歪みの最終止め)。
 - D-153 は close-plan §6 (j) まで凍結。
 
 ## §9.12-B progress chunks
