@@ -416,6 +416,32 @@ state per `.claude/rules/extended_challenge.md` Step 4 + the
   spike; scaffold via `scripts/new_spike.sh` or document
   the lifecycle inline).
 
+### G.5 On-branch architectural spike pattern (added 2026-05-21)
+
+```sh
+bash scripts/audit_arch_spike_pattern.sh
+```
+
+Greps the last 14 days of `zwasm-from-scratch` commits for the
+forbidden phrases enumerated in
+[`.claude/rules/architectural_spike.md`](../../rules/architectural_spike.md)
+("preparatory infra", "wire-up next cycle", "lay the groundwork",
+etc.). Each hit is graded by whether the commit body pairs the
+phrase with a `private/spikes/<slug>/` or
+`.dev/decisions/NNNN_` reference:
+
+- Paired with spike/ADR → `soon` (discipline held; the
+  multi-cycle work is acknowledged, but flag to keep the cycle
+  count visible against the `architectural` 3-cycle cap in
+  LOOP.md §"Chunk types").
+- No pairing → `block` (re-derives the D-153 / B146–B158
+  failure mode: helper-first land + wire-up next cycle = an
+  unobservable on-branch spike).
+
+This audit runs forward-only — D-153's existing B146–B158
+commits are not retroactively flagged (close-plan §6 (j)
+handles their resolution).
+
 ## I. Edge-case fixture coverage (added 2026-05-04 per ADR-0020)
 
 Verifies the `test/edge_cases/p<N>/` fixture corpus stays in

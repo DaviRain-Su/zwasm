@@ -44,3 +44,14 @@ Sometimes the upstream is broken. The bar:
 checklist) は
 [`references/no_workaround_details.md`](../references/no_workaround_details.md)
 を参照。
+
+## Sibling rules
+
+- [`architectural_spike.md`](architectural_spike.md) — forbids
+  on-branch architectural spikes ("helper先 land → wire-up 別
+  cycle" pattern that caused D-153's 12-cycle drift). Code
+  commits to `zwasm-from-scratch` must have an observable
+  behaviour point; experimentation belongs in
+  `private/spikes/`.
+- [`spike_lifecycle.md`](spike_lifecycle.md) — Status
+  discipline for `private/spikes/<slug>/`.
