@@ -72,6 +72,19 @@ pub const allocatable_caller_saved_scratch_gprs = [_]Xn{ 9, 10, 11, 12, 13 };
 /// not have placed a live vreg on them. The disjointness
 /// check below (comptime block) enforces this; if a future
 /// edit attempts to add these to allocatable, the build fails.
+///
+/// **Intentional overlap with `spill_stage_gprs`**: these pools
+/// share X14/X15 because (a) table/memory emit handlers do not
+/// themselves spill mid-op (vregs are live-locked across the
+/// op's emit boundary), so X14/X15 are guaranteed free at
+/// op entry; (b) carving out a third disjoint pool would consume
+/// allocatable_callee_saved_gprs slots that the regalloc relies
+/// on. The d-64 refactor pattern (load-then-overwrite a single
+/// scratch reg) keeps simultaneous use ≤ 2 registers per op.
+/// When D-133 sweep lands, this assumption is what makes the
+/// substitution safe; if a future op needs ≥ 3 simultaneous
+/// scratch slots, file an ADR before extending the pool size.
+///
 /// Pairs with `.claude/rules/comment_as_invariant.md` —
 /// invariant in code, not prose.
 pub const table_emit_scratch_gprs = [_]Xn{ 14, 15 };
