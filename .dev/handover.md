@@ -15,8 +15,8 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
    `chore(p9b):` / `feat(p9b):` prefix. Last source commit
-   `22f6a06f` (B88 — FP unary (14 ops) moved from legacy to
-   ctx; legacy 214 → 200; ctx 177 → 191).
+   `4ec2bff1` (B89 — FP min/max + copysign (6 ops) moved from
+   legacy to ctx; legacy 200 → 194; ctx 191 → 197).
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -112,24 +112,28 @@
 | B85 | Legacy → ctx cohort move: sign-ext (5) + width-conv (3) = 8 ops. Legacy 242 → 234; ctx 149 → 157. | `0a94c60a` |
 | B86 | Legacy → ctx cohort move: FP arith (8 ops). Legacy 234 → 226; ctx 157 → 165. | `130eeec9` |
 | B87 | Legacy → ctx cohort move: FP compare (12 ops). Legacy 226 → 214; ctx 165 → 177. | `2b3c1d81` |
-| B88 | Legacy → ctx cohort move: FP unary (14 ops). emitFpUnaryCtx adapter. Legacy 214 → 200; ctx 177 → 191. | `22f6a06f` |
-| **B89** | **Legacy → ctx cohort move: FP min/max + copysign (6 ops).** emitFpMinMax + emitFpCopysign exist. Add ctx adapters; regenerate 6 per-op files; legacy 200 → 194; ctx 191 → 197. | **NEXT** |
-| B89..B8x | After B89: SIMD cohorts (B29-B45 stubs; ~80 ops total). Eventually the inline-switch cutover (per ADR-0073) folds all into a single `inline for` dispatcher. | |
+| B88 | Legacy → ctx cohort move: FP unary (14 ops). Legacy 214 → 200; ctx 177 → 191. | `22f6a06f` |
+| B89 | Legacy → ctx cohort move: FP min/max (4) + copysign (2) = 6 ops. emitFp{MinMax,Copysign}Ctx adapters. Legacy 200 → 194; ctx 191 → 197. | `4ec2bff1` |
+| **B90** | **Legacy → ctx SIMD cohort: v128 logical (6 ops: v128.not/and/andnot/or/xor/bitselect).** First SIMD cohort migration. Locate emitSimdLogical (or per-op) helper; add ctx adapter(s); regenerate 6 per-op files (wasm_2_0/); legacy 194 → 188; ctx 197 → 203. | **NEXT** |
+| B90..B9x | After B90: remaining SIMD cohorts (~74 ops): int binary arith (10), int neg/abs (8), int compare (36 across widths), shifts (12), min/max (12), sat arith (10), float arith (16), float unary (14), float compare (12), bool reductions (9), narrow/extend (16), extmul (16), swizzle/popcnt/dot/q15mulr/fp-conv (11), splats (6). Eventually inline-switch cutover (ADR-0073). | |
 | B6x+1 | Inline-switch dispatcher cutover per ADR-0073 — both arches' `emit.zig` giant switch replaced by `inline for (collected_X_ops) |op_mod| { if (op_mod.op_tag == ins.op) return op_mod.emit(ctx, ins); }`. Moment per-op files become load-bearing. | |
 
-## Active state — §9.12-B mid-flight; B88 FP unary landed 2026-05-20
+## Active state — §9.12-B mid-flight; B89 FP min/max+copysign landed 2026-05-20
 
-**B89 is the active task** — legacy → ctx cohort move for
-FP min/max + copysign (6 ops). B88 closed FP unary at
-`22f6a06f` (legacy 214 → 200; ctx 177 → 191).
+**B90 is the active task** — first SIMD legacy → ctx cohort
+move for v128 logical ops (6 ops: not/and/andnot/or/xor/bitselect).
+B89 closed FP min/max+copysign at `4ec2bff1` (legacy 200 → 194;
+ctx 191 → 197).
 
-The loop for B89 (same pattern; 6 ops via 2 helpers):
+The loop for B90:
 
-1. Locate emitFpMinMax + emitFpCopysign in op_alu_float.zig.
-2. Add ctx adapters (likely 2).
-3. Regenerate 6 per-op files (f32/f64.{min,max,copysign}).
-4. Move 6 entries from legacy (200 → 194) to ctx (191 → 197).
-5. Update emit.zig 2 arms.
+1. Locate the emit helper(s) for v128.{not,and,andnot,or,xor,bitselect}
+   in op_simd.zig (or similar). May be one helper or per-op.
+2. Add ctx adapter(s).
+3. Regenerate 6 per-op files at wasm_2_0/v128_{not,and,andnot,or,
+   xor,bitselect}.zig.
+4. Move 6 entries from legacy (194 → 188) to ctx (197 → 203).
+5. Update emit.zig arm.
 6. Verify 2-host green; commit + push.
 
 §9.12-B exit criterion stays as ROADMAP §9.12-B specifies (6 build
