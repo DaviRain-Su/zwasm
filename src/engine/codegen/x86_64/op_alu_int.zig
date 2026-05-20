@@ -36,6 +36,7 @@ const regalloc = @import("../shared/regalloc.zig");
 const inst = @import("inst.zig");
 const abi = @import("abi.zig");
 const gpr = @import("gpr.zig");
+const jit_abi = @import("../shared/jit_abi.zig");
 const types = @import("types.zig");
 const ctx_mod = @import("ctx.zig");
 
@@ -876,6 +877,47 @@ pub fn emitI64Const(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void 
     const dst = try gpr.gprDefSpilled(ctx.alloc, vreg, 0);
     const value: u64 = (@as(u64, ins.extra) << 32) | @as(u64, ins.payload);
     try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm64Q(dst, value).slice());
+    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, vreg, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, vreg);
+}
+
+/// §9.12-B / B68 (ADR-0075) — `(ctx, ins)` adapter for `ref.null`.
+/// Pushes the null funcref/externref value (= 0). XOR-zero the
+/// 32-bit form implicitly clears the upper 32 bits.
+/// Extracted from emit.zig's prior inline body.
+///
+/// Wasm spec §4.4.5 (ref.null t).
+pub fn emitRefNull(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    const vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const dst_r = try gpr.gprDefSpilled(ctx.alloc, vreg, 0);
+    try ctx.buf.appendSlice(ctx.allocator, inst.encXorRR(.d, dst_r, dst_r).slice());
+    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, vreg, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, vreg);
+}
+
+/// §9.12-B / B68 (ADR-0075) — `(ctx, ins)` adapter for `ref.func`.
+/// Loads func_entities_ptr from R15, then ADDs `funcidx *
+/// sizeOf(FuncEntity)` to materialise the FuncEntity pointer.
+/// Extracted from emit.zig's prior inline body.
+///
+/// Wasm spec §4.4.5 (ref.func x).
+pub fn emitRefFunc(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    const vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const dst_r = try gpr.gprDefSpilled(ctx.alloc, vreg, 0);
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(dst_r, abi.runtime_ptr_save_gpr, jit_abi.func_entities_ptr_off).slice());
+    const byte_off: u64 = @as(u64, ins.payload) * jit_abi.func_entity_size;
+    if (byte_off != 0) {
+        // ADD r64, imm32 (7 bytes). byte_off > i32 max requires
+        // ~134M entries (sizeOf(FuncEntity) ≈ 16) — caught by
+        // validator's funcidx bounds long before reaching here.
+        if (byte_off > 0x7FFFFFFF) return Error.UnsupportedOp;
+        try ctx.buf.appendSlice(ctx.allocator, inst.encAddR64Imm32(dst_r, @intCast(byte_off)).slice());
+    }
     try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, vreg, 0);
     try ctx.pushed_vregs.append(ctx.allocator, vreg);
 }

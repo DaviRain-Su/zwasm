@@ -799,6 +799,8 @@ const x86_64_i32_const = @import("x86_64/ops/wasm_1_0/i32_const.zig");
 const x86_64_i64_const = @import("x86_64/ops/wasm_1_0/i64_const.zig");
 const x86_64_f32_const = @import("x86_64/ops/wasm_1_0/f32_const.zig");
 const x86_64_f64_const = @import("x86_64/ops/wasm_1_0/f64_const.zig");
+const x86_64_ref_null = @import("x86_64/ops/wasm_1_0/ref_null.zig");
+const x86_64_ref_func = @import("x86_64/ops/wasm_1_0/ref_func.zig");
 
 const x86_64_i32_add = @import("x86_64/ops/wasm_1_0/i32_add.zig");
 const x86_64_i32_sub = @import("x86_64/ops/wasm_1_0/i32_sub.zig");
@@ -1608,6 +1610,8 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_i64_const,
     x86_64_f32_const,
     x86_64_f64_const,
+    x86_64_ref_null,
+    x86_64_ref_func,
 };
 
 comptime {
@@ -1698,9 +1702,10 @@ test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // structure cohort (block + loop, 2 new per-op files, +2 = 77).
     // B66: Zone 1 meta backfill (no Zone 2 change). B67: const
     // cohort (i32/i64/f32/f64.const, 4 new per-op files, +4 = 81).
-    // The B6x+1 cutover folds this tuple back into
+    // B68: ref cohort (ref.null + ref.func, 2 new per-op files,
+    // +2 = 83). The B6x+1 cutover folds this tuple back into
     // `collected_x86_64_ops`.
-    try std.testing.expectEqual(@as(usize, 81), collected_x86_64_ctx_ops.len);
+    try std.testing.expectEqual(@as(usize, 83), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would
