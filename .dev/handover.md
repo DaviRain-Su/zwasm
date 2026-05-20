@@ -21,26 +21,31 @@
 
 ## Active state
 
-- Phase 9.12-E。close-plan §6 work sequence 実行中。
-- 完了: (a)〜(i)。直近 (i) は ADR-0080 (Proposed) で
-  Phase 9 exit を `manifest_skip_impl == 0 AND every runtime
-  SKIP paired with successor-phase ADR or skip-adr` に
-  redefinition。§9.12-E lockin 解除候補。
-- **PAUSED — user collab gate**: ADR-0080 は Phase 9 完備の
-  意味を変えるため、Accept には user review 必須
-  (close-plan §6 (i))。次の §6 (j) D-153 resume は
-  ADR-0080 Accept 後に begin。
-- D-153 は close-plan §6 (j) まで凍結。
+- Phase 9.12-E。close-plan §6 完了 (a)〜(i) + (j) impl 開始。
+- ADR-0080 は user-collab spike 結果を経て **Rejected**
+  (commit `dc07b79`)。spectest を `.wat` で auto-register
+  する v1/wazero 方式を採用 → §6 (j) を spike-first から
+  direct implementation に変更。
+- §6 (j) Step A 完了 (commit `f5b3f62`): `test/spec/spectest.wat`
+  + build.zig wat2wasm step + @embedFile route。
+  Mac 計測: runtime-skip 192 → 80 (-112)、新規 43 failures
+  surface (= B146-B158 残バグ cohort)。
+- 次: **§6 (j) Step B** — 43 failures を root-cause cohort
+  単位で discharge。優先順:
+  1. 21 × UnsupportedEntrySignature (init-time) — 最大
+     cohort。entry helper signature dispatch gap の可能性。
+     どの export を呼んで起きるか trace 必要。
+  2. 7 × globals-zero (`got 0, expected 666`) — per-exporter
+     scratch_globals wiring が import 側 zero buffer を読む
+     bug。`rt.globals_base` の cross-module 切り替え不全。
+  3. 5 × InvalidFuncIndex / 2 × InvalidFunctype — funcref
+     resolution gap (elem/imports cohort)。
+  4. 4 × assert_uninstantiable but instantiated cleanly —
+     unlinkable/uninstantiable 区別の緩さ。
 
 ## Open questions / blockers
 
-- ADR-0080 Acceptance pending user collab. After Accept:
-  - Author successor-phase ADRs (ADR-0081 D-079 / ADR-0082
-    D-136 / ADR-0083 D-153) per ADR-0080 §"Concretely for
-    D-079, D-136, D-153".
-  - Update D-079 / D-136 / D-153 `blocked-by:` to point at
-    the new successor ADRs.
-  - Resume close-plan §6 (j) D-153 spike-first design.
+- なし。autonomous loop resumed。
 
 ## §9.12-B progress chunks
 
