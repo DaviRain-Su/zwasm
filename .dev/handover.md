@@ -15,10 +15,10 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent commits under `chore(p9*):` /
    `feat(p9*):` / `refactor(p9*):` / `docs(adr):` prefix.
-   **§9.12-C closed at B129** (ADR-0077 complete); §9.12-D in
-   progress: B130 munmap, B131 ADR-0070 amendment (replaceable
-   count 9 → 3). Next: B132 migrates the remaining 3 sites
-   (kill, pid_t, getenv) to close §9.12-D.
+   **§9.12-C closed at B129** (ADR-0077 complete); **§9.12-D
+   closed at B132** (ADR-0070 complete; replaceable 9 → 0).
+   Loop advances to §9.12-E — primary Phase 9 completion exit
+   (Wasm 2.0 skip-impl 243 → 0). Substantial multi-chunk work.
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -157,8 +157,9 @@
 | B128 | Strict gate flip — `gate_commit.sh` invokes `check_invariant_comments.sh --strict` between the libc/fallback info checks and `zig build test`. New D-132/D-133-class digit literals now fail pre-commit. | `d8fe353b` |
 | B129 | §9.12-C close — D-133 row deleted from `debt.md`; §9.12-C `[ ]` → `[x]` in ROADMAP. ADR-0077 8-step plan complete; the regalloc op-internal scratch fence is fully implemented (substrate + reservation table + validator + production wire + handler sweep + boundary fixtures + strict gate). | `9558e5f7` |
 | B130 | §9.12-D first migration — `std.c.munmap` → `std.posix.munmap` in `src/platform/jit_mem.zig` (clean win). Harden `check_libc_boundary.sh` to exclude `.zig-cache/` / `zig-out/` (4 unclassified false positives → 0). File D-151 naming the 6-site Zig 0.16 stdlib gap that blocks §9.12-D's literal exit. | `823f4ad8` |
-| B131 | ADR-0070 amendment — reclassify `_exit` / `fork` / `waitpid` / `alarm` from Replaceable → Necessary (empirical: Zig 0.16 std.posix lacks all four; std.process.exit not async-signal-safe). Script's NECESSARY/REPLACEABLE_SYMS arrays updated to match. D-151 deleted (barrier dissolved). Replaceable count 8 → 3. | `<this commit>` |
-| **B132** | §9.12-D close path — migrate remaining 3 replaceable sites: `std.c.kill` → `std.posix.kill` (with EXEMPT-FALLBACK in SIGALRM handler), `std.c.pid_t` → `std.posix.pid_t` (trivial type rename), `std.c.getenv` → `std.process.getEnvVarOwned` (c_api alloc threading; biggest piece). When count hits 0, flip §9.12-D `[ ]` → `[x]`. | **NEXT** |
+| B131 | ADR-0070 amendment — reclassify `_exit` / `fork` / `waitpid` / `alarm` from Replaceable → Necessary (empirical: Zig 0.16 std.posix lacks all four; std.process.exit not async-signal-safe). Script's NECESSARY/REPLACEABLE_SYMS arrays updated to match. D-151 deleted (barrier dissolved). Replaceable count 8 → 3. | `8dfe9018` |
+| B132 | §9.12-D CLOSE — migrate `std.c.pid_t` → `std.posix.pid_t` + `std.c.kill` → `std.posix.kill catch {}` (EXEMPT-FALLBACK in SIGALRM handler). ADR-0070 §B132 amendment reclassifies `std.c.getenv` Replaceable → Necessary (c_api context: no `std.process.Init` available so `Environ.getPosix` is structurally unavailable). Replaceable count 3 → 0. `check_libc_boundary --gate` returns 0; §9.12-D `[ ]` → `[x]`. | `<this commit>` |
+| **B133** | §9.12-E (Wasm 2.0 100% complete) is the next active row. Scope: SKIP-CROSS-MODULE-IMPORTS 100 + SKIP-NO-LINK-TYPECHECK 26 + SKIP-VALIDATOR-GAP SIMD 50 + exports non-invoke-action 1 + D-079 v128 cross-module imports (ii). Substantial multi-chunk work; likely surfaces architectural questions worth user touchpoint. | **NEXT** |
 
 ## Active state — §9.12-C CLOSED at B129 (ADR-0077 complete); §9.12-D NEXT
 
@@ -177,21 +178,32 @@ Loop advances to §9.12-D (Q6 libc dependency boundary).
 7. ~~**B128**: strict gate flip~~ — DONE.
 8. ~~**B129**: D-133 close + §9.12-C [x]~~ — DONE.
 
-### §9.12-D remaining work (post-B131)
+### §9.12-E scope (next active row)
 
-`check_libc_boundary.sh` count: 3 replaceable.
-- `std.c.pid_t` @ run_runner_jit.zig:91 → `std.posix.pid_t`
-  (1-line type rename).
-- `std.c.kill` @ run_runner_jit.zig:101 → `std.posix.kill`
-  (returns error union; SIGALRM handler discard via
-  `catch {}` with EXEMPT-FALLBACK per
-  `no_fallback_on_failure.md` signal-handler clause).
-- `std.c.getenv` @ instance.zig:212 → `std.process.getEnvVarOwned`
-  (Zone 3 c_api; needs allocator threading or
-  `src/platform/env.zig` helper).
+★ **Primary Phase 9 completion exit** (Wasm 2.0 100% — skip-impl
+243 → 0 + 4 comprehensive test suites green) per
+`phase9_completion_master_plan.md` §5.3 + §2.2.
 
-B132 lands all 3 + flips §9.12-D `[ ]` → `[x]` when the
-strict gate hits 0.
+Major workstreams:
+
+- SKIP-CROSS-MODULE-IMPORTS 100 (imports/elem/data/linking/
+  table*/memory*/global) discharge via relaxed
+  `hasUnbindableImports()` reject condition + per-shape resolver.
+- SKIP-NO-LINK-TYPECHECK 26 via `Instance.checkImportType()` +
+  `applyAssertUnlinkable` callback.
+- SKIP-VALIDATOR-GAP SIMD 50 (simd_lane lane-index range +
+  simd_align alignment immediate range).
+- exports non-invoke-action 1 (action dispatcher `get`/`set`).
+- D-079 v128 cross-module imports (ii) via ADR-0052 §3 globals
+  extension.
+
+Exit predicate: `spec_assert_runner_non_simd: 0 failed,
+0 skip-impl`; `simd_assert_runner: 0 failed, 0 skip-impl`;
+Mac+ubuntunote bit-identical; ratchet 0 maintained.
+
+This is genuine multi-chunk feature work likely to span many
+B-sequence iterations. Some sub-tasks (e.g. cross-module
+binding shapes) may need ADR-grade design touchpoints.
 
 ### Spike validation summary (B121)
 
