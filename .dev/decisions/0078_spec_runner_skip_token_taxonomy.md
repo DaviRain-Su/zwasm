@@ -60,15 +60,15 @@ ADR amendment).
 
 | Token                          | Class             | Paired artifact                                                |
 |--------------------------------|-------------------|----------------------------------------------------------------|
-| `SKIP-CROSS-MODULE-IMPORTS`    | `debt-trackable`  | D-153 (paused; spike-first redesign per close-plan §6 (j))     |
+| `SKIP-CROSS-MODULE-IMPORTS`    | `debt-trackable`  | D-153 (discharged `3ace7fb4`); runner retains the emission site for residual non-bindable cases that fall outside §9.12-E close-plan §6 (j) auto-register coverage |
 | `SKIP-CROSS-MODULE-CALLEE-STATE` | `ADR-required`  | `.dev/decisions/skip_cross_module_register.md`                 |
 | `SKIP-EMPTY`                   | `runner-internal` | empty fixture guard                                            |
-| `SKIP-EXPORTS`                 | `debt-trackable`  | `exports/manifest.txt` gap (1 fixture; close-plan §7 follow-up) |
+| `SKIP-EXPORTS`                 | `debt-trackable`  | `exports/manifest.txt` gap (1 fixture; close-plan §7 follow-up; runner emission retired in current test/spec/ — inventory-only) |
 | `SKIP-HOST-IMPORT`             | `ADR-required`    | `.dev/decisions/skip_embenchen_emcc_env_imports.md`            |
 | `SKIP-NO-INSTANTIATE-CB`       | `runner-internal` | specialisation lacks `handle_assert_uninstantiable` callback   |
-| `SKIP-NO-LINK-TYPECHECK`       | `debt-trackable`  | linking typecheck gap (26 fixtures; D-NNN follow-up)           |
+| `SKIP-NO-LINK-TYPECHECK`       | `debt-trackable`  | D-157 (Track-D scope: non-func import-type checking; 56 fixtures emit this token) |
 | `SKIP-NOENTRY`                 | `runner-internal` | fixture has no entry function (out-of-scope by design)         |
-| `SKIP-NON-INVOKE-ACTION`       | `debt-trackable`  | D-152 (compileWasm empty-fn-path globals_offsets fix)          |
+| `SKIP-NON-INVOKE-ACTION`       | `debt-trackable`  | D-152 (discharged `b403ce3a`); runner retains emission via fallback path when `handle_get_action` callback is null |
 | `SKIP-PARSER-GAP`              | `debt-trackable`  | parser-recognition gap; per-fixture D-NNN as discovered        |
 | `SKIP-START-TRAP`              | `runner-internal` | start function legitimately traps; runner doesn't re-raise     |
 | `SKIP-V2-InstanceAllocFailed`  | `debt-trackable`  | v0.2 instance alloc gap; D-NNN per-fixture                     |
@@ -76,8 +76,8 @@ ADR amendment).
 | `SKIP-VALIDATOR-GAP`           | `debt-trackable`  | validator strictness gap; per-fixture D-NNN as discovered      |
 | `SKIP-WASI`                    | `debt-trackable`  | WASI surface gap; per-call D-NNN                               |
 | `SKIP-WASMTIME-FAIL`           | `runner-internal` | wasmtime-side failure on differential fixture (their bug)      |
-| `SKIP-WASMTIME-MISSING`        | `debt-trackable`  | D-008 (windowsmini wasmtime install gap)                       |
-| `SKIP-WASMTIME-UNUSABLE`       | `debt-trackable`  | D-008 (windowsmini wasmtime stub binary)                       |
+| `SKIP-WASMTIME-MISSING`        | `debt-trackable`  | D-008 (discharged `cb07e112`); runner-internal robustness signal — token survives for windowsmini-side wasmtime install regression detection |
+| `SKIP-WASMTIME-UNUSABLE`       | `debt-trackable`  | D-008 (discharged `cb07e112`); runner-internal robustness signal — token survives for wasmtime stub-binary regression detection |
 | `SKIP-HOST-STATE-DIVERGED`     | `ADR-required`    | `.dev/decisions/skip_host_state_diverged.md`                   |
 
 ### When a new token is introduced
@@ -184,10 +184,9 @@ plan C3 failure mode).
 - Runner source: `test/spec/spec_assert_runner_base.zig`
   (lines that emit `SKIP-*`).
 
-<!--
 ## Revision history
 
-| Date       | SHA          | Note                                    |
-|------------|--------------|-----------------------------------------|
-| 2026-05-21 | `a8e8d524` | Initial Proposed version.               |
--->
+| Date       | SHA          | Note                                                                                                                                                                  |
+|------------|--------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 2026-05-21 | `a8e8d524`   | Initial Proposed version.                                                                                                                                             |
+| 2026-05-21 | (this commit) | Paired-artifact column refresh — D-008 / D-152 / D-153 discharge SHAs cited inline; D-157 filed for SKIP-NO-LINK-TYPECHECK Track-D gap (resolves "D-NNN follow-up" placeholder); SKIP-EXPORTS marked inventory-only; SKIP-WASMTIME-* annotated as runner-internal robustness signals retained for host-side regression detection. Triggered by `scripts/check_skip_taxonomy_pairing.sh` (audit §G.1.2, landed `2e8f0f22`). Decision § canonical class column unchanged. |

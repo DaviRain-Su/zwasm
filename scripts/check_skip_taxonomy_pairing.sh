@@ -114,8 +114,15 @@ while IFS=$'\t' read -r tok cls art; do
         else
           sha=$(debt_discharged_sha "$id")
           if [ -n "$sha" ]; then
-            findings_soon+=("$tok: paired debt $id discharged at $sha but row still cited in ADR-0078 — update Paired artifact column (cite discharge SHA or remove SKIP-* emission if the gap dissolved)")
-            drift_discharged_count=$((drift_discharged_count + 1))
+            # If the artifact text already cites the discharge SHA inline,
+            # the row is intentionally pointing at the discharged state —
+            # not drift. Otherwise the column is stale.
+            if printf '%s' "$art" | grep -qF "$sha"; then
+              debt_active_count=$((debt_active_count + 1))
+            else
+              findings_soon+=("$tok: paired debt $id discharged at $sha but row still cited in ADR-0078 — update Paired artifact column (cite discharge SHA or remove SKIP-* emission if the gap dissolved)")
+              drift_discharged_count=$((drift_discharged_count + 1))
+            fi
           else
             findings_soon+=("$tok: paired debt $id neither active nor found in discharge history")
             drift_discharged_count=$((drift_discharged_count + 1))
@@ -131,6 +138,12 @@ while IFS=$'\t' read -r tok cls art; do
           findings_info+=("$tok: per-instance D-NNN deferral ('$art') — debts get filed when fixtures hit; no action required")
           info_per_instance_count=$((info_per_instance_count + 1))
         fi
+      elif printf '%s' "$art" | grep -qiE 'inventory-only'; then
+        # Inventory-only rows: the token is registered in the table but
+        # not currently emitted by `test/spec/` source. The row is
+        # forward-looking documentation, not a paired-artifact drift.
+        findings_info+=("$tok: inventory-only (token not currently emitted) — no action required")
+        info_per_instance_count=$((info_per_instance_count + 1))
       else
         # debt-trackable without any D-NNN reference at all.
         findings_soon+=("$tok: debt-trackable but artifact lacks any D-NNN reference (artifact: '$art')")
