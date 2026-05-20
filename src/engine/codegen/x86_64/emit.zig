@@ -1471,88 +1471,13 @@ pub fn compile(
             .@"if" => try op_control.emitIfCtx(&ctx, &ins),
             .@"else" => try op_control.emitElseCtx(&ctx, &ins),
             .end => {
-                // Two distinct forms (mirrors arm64/emit.zig):
-                // (A) Intra-function `end`: pops a label, patches
-                //     forward fixups (block) / no-op for loop.
-                // (B) Function-level `end`: marshals result, runs
-                //     epilogue, returns. Disambiguation: empty
-                //     label stack → form (B).
-                if (labels.items.len > 0) {
-                    try op_control.emitEndIntra(allocator, &buf, &pushed_vregs, alloc, &labels, spill_base_off, func);
-                    continue;
-                }
-                // D-093 (d-5): function-level end may inherit a
-                // placeholder vreg from a dead-fall-through loop
-                // (`loop.wast:cont-inner` shape). The marshal is
-                // unreachable at runtime; skip when top_vreg has
-                // no slot entry.
-                // D-093 (d-11): multi-result return marshal via the
-                // shared op_control helper. Same shape as the
-                // `.return` op path above.
-                try op_control.marshalReturnRegs(allocator, &buf, alloc, &pushed_vregs, spill_base_off, func, return_is_memory_class, indirect_result_slot_neg_off);
-                // Epilogue: ADD RSP, frame ; POP R15? ; POP RBP ; RET.
-                if (frame_bytes > 0) {
-                    try buf.appendSlice(allocator, rspAdd(frame_bytes).slice());
-                }
-                if (uses_runtime_ptr) {
-                    try buf.appendSlice(allocator, inst.encPopR(.r15).slice());
-                }
-                try buf.appendSlice(allocator, inst.encPopR(.rbp).slice());
-                try buf.appendSlice(allocator, inst.encRet().slice());
-
-                // Trap stub: emitted after the regular RET when
-                // the function had any bounds-check fixups. Sets
-                // JitRuntime.trap_flag = 1, clears EAX (return
-                // value cleared so traps don't masquerade as
-                // valid returns), runs the same epilogue, RETs.
-                // Each pending bounds_fixup gets its disp32
-                // patched to the trap stub address.
-                if (bounds_fixups.items.len > 0 or unreach_fixups.items.len > 0) {
-                    const trap_byte: u32 = @intCast(buf.items.len);
-                    try buf.appendSlice(allocator, inst.encStoreImm32MemDisp32(abi.runtime_ptr_save_gpr, jit_abi.trap_flag_off, 1).slice());
-                    try buf.appendSlice(allocator, inst.encXorRR(.d, .rax, .rax).slice()); // XOR EAX, EAX (return = 0)
-                    if (frame_bytes > 0) {
-                        try buf.appendSlice(allocator, rspAdd(frame_bytes).slice());
-                    }
-                    if (uses_runtime_ptr) {
-                        try buf.appendSlice(allocator, inst.encPopR(.r15).slice());
-                    }
-                    try buf.appendSlice(allocator, inst.encPopR(.rbp).slice());
-                    try buf.appendSlice(allocator, inst.encRet().slice());
-                    for (bounds_fixups.items) |fx_byte| {
-                        const disp: i32 = @as(i32, @intCast(trap_byte)) -
-                            @as(i32, @intCast(fx_byte)) - 6;
-                        inst.patchRel32(buf.items, fx_byte, 6, disp);
-                    }
-                    // unreachable fixups: 5-byte JMP rel32 (0xE9 +
-                    // disp32). disp = trap_byte - (fx_byte + 5).
-                    for (unreach_fixups.items) |fx_byte| {
-                        const disp: i32 = @as(i32, @intCast(trap_byte)) -
-                            @as(i32, @intCast(fx_byte)) - 5;
-                        inst.patchRel32(buf.items, fx_byte, 5, disp);
-                    }
-                }
-                // §9.7/9.7-al — SIMD const-pool append + patch
-                // (per ADR-0042). After the trap stub, if any
-                // v128.const / future shuffle ops emitted MOVUPS-
-                // RIP-rel placeholders, append the per-function
-                // const-pool 16-byte aligned and patch each
-                // placeholder's disp32 to the RIP-relative offset.
-                if (simd_const_fixups.items.len > 0) {
-                    while (buf.items.len % 16 != 0) try buf.append(allocator, 0);
-                    const pool_byte: u32 = @intCast(buf.items.len);
-                    if (func.simd_consts) |sc| {
-                        for (sc) |c| try buf.appendSlice(allocator, &c);
-                    }
-                    for (extra_consts.items) |c| try buf.appendSlice(allocator, &c);
-                    for (simd_const_fixups.items) |fx| {
-                        const target_byte: u32 = pool_byte + fx.const_idx * 16;
-                        const disp32: i32 = @as(i32, @intCast(target_byte)) -
-                            @as(i32, @intCast(fx.post_insn_byte));
-                        inst.patchRipRelDisp32(buf.items, fx.disp32_byte_offset, disp32);
-                    }
-                }
-                break;
+                // §9.12-B / B77 (ADR-0075): both forms route
+                // through op_control.emitEndCtx. Function-level
+                // form (label stack empty pre-call) breaks the
+                // body loop; intra-function form continues.
+                const at_function_end = labels.items.len == 0;
+                try op_control.emitEndCtx(&ctx, &ins);
+                if (at_function_end) break;
             },
             else => {
                 std.debug.print("x86_64/emit: UnsupportedOp[body-op-{s}] (func_idx={d})\n", .{ @tagName(ins.op), func.func_idx });

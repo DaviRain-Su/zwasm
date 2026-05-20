@@ -31,6 +31,7 @@ const inst = @import("inst.zig");
 const rbp_disp = @import("rbp_disp.zig");
 const abi = @import("abi.zig");
 const gpr = @import("gpr.zig");
+const jit_abi = @import("../shared/jit_abi.zig");
 const types = @import("types.zig");
 const label_mod = @import("label.zig");
 
@@ -1216,6 +1217,106 @@ pub fn emitElseCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
         ctx.pushed_vregs,
         ctx.labels,
     );
+}
+
+/// §9.12-B / B77 (ADR-0075) — `(ctx, ins)` adapter for `end`.
+/// Two forms (mirrors emit.zig's prior inline body):
+///   (A) Intra-function (`labels.len > 0`): label pop + fixup patch.
+///   (B) Function-level (`labels.len == 0`): marshalReturnRegs +
+///       epilogue + RET + trap stub (bounds_fixups / unreach_fixups)
+///       + SIMD const-pool emission + RIP-rel fixup patching.
+///
+/// Caller (emit.zig dispatch loop) must `break` out of the body
+/// loop after this returns when form (B) fires; the adapter
+/// returns normally and the per-op file's `emit(ctx, ins)` is
+/// invoked from the inline-switch (post B6x+1) — the caller's
+/// loop continuation discipline mirrors `.return` (sets
+/// `ctx.dead_code = true`, body-loop continues to next ins which
+/// will be the next function's first ins or none).
+///
+/// Wasm spec §3.4.4 (end) / §4.4.7 (function-final end).
+pub fn emitEndCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    if (ctx.labels.items.len > 0) {
+        return emitEndIntra(
+            ctx.allocator,
+            ctx.buf,
+            ctx.pushed_vregs,
+            ctx.alloc,
+            ctx.labels,
+            ctx.spill_base_off,
+            ctx.func,
+        );
+    }
+    return emitEndInter(ctx);
+}
+
+/// §9.12-B / B77 — function-level `end` form. Extracted from
+/// emit.zig's prior inline body. Emits the multi-result marshal
+/// + epilogue + RET, then the trap stub block (when any
+/// `bounds_fixups` / `unreach_fixups` are pending), then the
+/// SIMD const-pool (when any `simd_const_fixups` are pending).
+///
+/// Patches each pending fixup's disp32 to the trap stub address
+/// or the const-pool entry RIP-relative offset.
+fn emitEndInter(ctx: *ctx_mod.EmitCtx) Error!void {
+    try marshalReturnRegs(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.spill_base_off,
+        ctx.func,
+        ctx.return_is_memory_class,
+        ctx.indirect_result_slot_neg_off,
+    );
+    if (ctx.frame_bytes > 0) {
+        try ctx.buf.appendSlice(ctx.allocator, rbp_disp.rspAdd(ctx.frame_bytes).slice());
+    }
+    if (ctx.uses_runtime_ptr) {
+        try ctx.buf.appendSlice(ctx.allocator, inst.encPopR(.r15).slice());
+    }
+    try ctx.buf.appendSlice(ctx.allocator, inst.encPopR(.rbp).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encRet().slice());
+
+    if (ctx.bounds_fixups.items.len > 0 or ctx.unreach_fixups.items.len > 0) {
+        const trap_byte: u32 = @intCast(ctx.buf.items.len);
+        try ctx.buf.appendSlice(ctx.allocator, inst.encStoreImm32MemDisp32(abi.runtime_ptr_save_gpr, jit_abi.trap_flag_off, 1).slice());
+        try ctx.buf.appendSlice(ctx.allocator, inst.encXorRR(.d, .rax, .rax).slice());
+        if (ctx.frame_bytes > 0) {
+            try ctx.buf.appendSlice(ctx.allocator, rbp_disp.rspAdd(ctx.frame_bytes).slice());
+        }
+        if (ctx.uses_runtime_ptr) {
+            try ctx.buf.appendSlice(ctx.allocator, inst.encPopR(.r15).slice());
+        }
+        try ctx.buf.appendSlice(ctx.allocator, inst.encPopR(.rbp).slice());
+        try ctx.buf.appendSlice(ctx.allocator, inst.encRet().slice());
+        for (ctx.bounds_fixups.items) |fx_byte| {
+            const disp: i32 = @as(i32, @intCast(trap_byte)) -
+                @as(i32, @intCast(fx_byte)) - 6;
+            inst.patchRel32(ctx.buf.items, fx_byte, 6, disp);
+        }
+        for (ctx.unreach_fixups.items) |fx_byte| {
+            const disp: i32 = @as(i32, @intCast(trap_byte)) -
+                @as(i32, @intCast(fx_byte)) - 5;
+            inst.patchRel32(ctx.buf.items, fx_byte, 5, disp);
+        }
+    }
+
+    if (ctx.simd_const_fixups.items.len > 0) {
+        while (ctx.buf.items.len % 16 != 0) try ctx.buf.append(ctx.allocator, 0);
+        const pool_byte: u32 = @intCast(ctx.buf.items.len);
+        if (ctx.func.simd_consts) |sc| {
+            for (sc) |c| try ctx.buf.appendSlice(ctx.allocator, &c);
+        }
+        for (ctx.extra_consts.items) |c| try ctx.buf.appendSlice(ctx.allocator, &c);
+        for (ctx.simd_const_fixups.items) |fx| {
+            const target_byte: u32 = pool_byte + fx.const_idx * 16;
+            const disp32: i32 = @as(i32, @intCast(target_byte)) -
+                @as(i32, @intCast(fx.post_insn_byte));
+            inst.patchRipRelDisp32(ctx.buf.items, fx.disp32_byte_offset, disp32);
+        }
+    }
 }
 
 /// §9.12-B / B75 (ADR-0075) — `(ctx, ins)` adapters for the
