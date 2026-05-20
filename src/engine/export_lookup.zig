@@ -37,39 +37,72 @@ pub const GlobalsLayout = struct {
     byte_size: u32,
 };
 
-/// Decode the global section + compute per-defined-global byte
-/// offsets and total byte size, mirroring ADR-0052 §9.9 / 9.9-h-2.
-/// Scalar globals (i32/i64/f32/f64/ref) occupy 8 bytes; v128
-/// globals occupy 16 bytes with 16-byte alignment padding. Total
-/// rounded up to 16 bytes so the byte buffer is safe to address
-/// as v128 from any starting position.
+/// Decode the import + global sections and compute per-global
+/// byte offsets + valtypes + total byte size. Result indexed by
+/// the FULL wasm global index space (§9.12-E / B153 per D-153
+/// Option A): `[0..num_global_imports)` are imports;
+/// `[num_global_imports..total)` are defined globals. Scalar
+/// globals (i32/i64/f32/f64/ref) occupy 8 bytes; v128 globals
+/// occupy 16 bytes with 16-byte alignment padding. Total rounded
+/// up to 16 bytes so the byte buffer is safe to address as v128
+/// from any starting position.
 pub fn computeGlobalsLayout(allocator: Allocator, wasm_bytes: []const u8) Error!GlobalsLayout {
     var module = try parser.parse(allocator, wasm_bytes);
     defer module.deinit(allocator);
 
-    const gs = module.find(.global) orelse {
-        const offs = try allocator.alloc(u32, 0);
-        const vts = try allocator.alloc(zir.ValType, 0);
-        return .{ .offsets = offs, .valtypes = vts, .byte_size = 0 };
-    };
-    var gs_buf = try sections.decodeGlobals(allocator, gs.body);
-    defer gs_buf.deinit();
+    var num_imports: u32 = 0;
+    var import_vts: [256]zir.ValType = undefined;
+    if (module.find(.import)) |is| {
+        var imports = try sections.decodeImports(allocator, is.body);
+        defer imports.deinit();
+        for (imports.items) |imp| {
+            if (imp.kind != .global) continue;
+            if (num_imports >= import_vts.len) return Error.UnsupportedEntrySignature;
+            import_vts[num_imports] = imp.payload.global.valtype;
+            num_imports += 1;
+        }
+    }
 
-    const offsets = try allocator.alloc(u32, gs_buf.items.len);
+    const gs_opt = module.find(.global);
+    var defined_count: usize = 0;
+    if (gs_opt) |gs| {
+        var gs_buf = try sections.decodeGlobals(allocator, gs.body);
+        defer gs_buf.deinit();
+        defined_count = gs_buf.items.len;
+    }
+    const total = @as(usize, num_imports) + defined_count;
+
+    const offsets = try allocator.alloc(u32, total);
     errdefer allocator.free(offsets);
-    const valtypes = try allocator.alloc(zir.ValType, gs_buf.items.len);
+    const valtypes = try allocator.alloc(zir.ValType, total);
     errdefer allocator.free(valtypes);
 
     var off: u32 = 0;
-    for (gs_buf.items, 0..) |gd, gi| {
-        valtypes[gi] = gd.valtype;
-        const sa: struct { size: u32, alignv: u32 } = switch (gd.valtype) {
+    for (0..num_imports) |i| {
+        const vt = import_vts[i];
+        valtypes[i] = vt;
+        const sa: struct { size: u32, alignv: u32 } = switch (vt) {
             .v128 => .{ .size = 16, .alignv = 16 },
             .i32, .i64, .f32, .f64, .funcref, .externref => .{ .size = 8, .alignv = 8 },
         };
         off = std.mem.alignForward(u32, off, sa.alignv);
-        offsets[gi] = off;
+        offsets[i] = off;
         off += sa.size;
+    }
+    if (gs_opt) |gs| {
+        var gs_buf = try sections.decodeGlobals(allocator, gs.body);
+        defer gs_buf.deinit();
+        for (gs_buf.items, 0..) |gd, gi| {
+            const dst = num_imports + gi;
+            valtypes[dst] = gd.valtype;
+            const sa: struct { size: u32, alignv: u32 } = switch (gd.valtype) {
+                .v128 => .{ .size = 16, .alignv = 16 },
+                .i32, .i64, .f32, .f64, .funcref, .externref => .{ .size = 8, .alignv = 8 },
+            };
+            off = std.mem.alignForward(u32, off, sa.alignv);
+            offsets[dst] = off;
+            off += sa.size;
+        }
     }
     return .{
         .offsets = offsets,
