@@ -64,6 +64,19 @@ pub const spill_stage_gprs = [_]Xn{ 14, 15 };
 /// stage reg.
 pub const allocatable_caller_saved_scratch_gprs = [_]Xn{ 9, 10, 11, 12, 13 };
 
+/// Named scratch pool for table.* / memory.* emit handlers
+/// (D-132 / D-133 sweep per ADR-0072 + master plan §9.12-C).
+/// These registers MUST be disjoint from `allocatable_*_gprs`
+/// because table/memory emit runs inline within an op handler
+/// (no separate save/restore boundary) and the regalloc must
+/// not have placed a live vreg on them. The disjointness
+/// check below (comptime block) enforces this; if a future
+/// edit attempts to add these to allocatable, the build fails.
+/// Pairs with `.claude/rules/comment_as_invariant.md` —
+/// invariant in code, not prose.
+pub const table_emit_scratch_gprs = [_]Xn{ 14, 15 };
+pub const memory_emit_scratch_gprs = [_]Xn{ 14, 15 };
+
 /// Intra-procedure-call scratch (linker-clobbered). Reserved
 /// for the platform's PLT veneer; emit may use these only
 /// short-lived.
@@ -159,6 +172,12 @@ comptime {
         }
         for (spill_stage_gprs) |s| {
             if (a == s) @compileError("regalloc pool overlaps spill_stage_gprs — ADR-0018 invariant violated");
+        }
+        for (table_emit_scratch_gprs) |s| {
+            if (a == s) @compileError("regalloc pool overlaps table_emit_scratch_gprs — D-133 invariant violated (master plan §9.12-C)");
+        }
+        for (memory_emit_scratch_gprs) |s| {
+            if (a == s) @compileError("regalloc pool overlaps memory_emit_scratch_gprs — D-133 invariant violated (master plan §9.12-C)");
         }
     }
 }
