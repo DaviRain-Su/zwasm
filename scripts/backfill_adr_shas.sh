@@ -25,14 +25,23 @@ filled=0
 skipped_zero=0
 skipped_multi=0
 candidates=()
+multi_report=()
 
 for adr in .dev/decisions/*.md; do
     grep -q "<backfill>" "$adr" || continue
     base="$(basename "$adr")"
-    # Iterate lines containing <backfill>.
-    while IFS= read -r line; do
-        # Extract a YYYY-MM-DD prefix from the line itself.
+    # Iterate <backfill>-bearing line numbers.
+    while IFS=: read -r lineno line; do
+        # Extract a YYYY-MM-DD from the same line first; if absent,
+        # walk up to 5 prior lines for a date (covers inline
+        # `SHA: <backfill>` placeholders whose date is in a heading
+        # or paragraph-prefix line above).
         date=$(printf '%s' "$line" | grep -oE '20[2-9][0-9]-[0-9]{2}-[0-9]{2}' | head -1)
+        if [ -z "$date" ]; then
+            start=$((lineno - 5))
+            [ "$start" -lt 1 ] && start=1
+            date=$(sed -n "${start},${lineno}p" "$adr" | grep -oE '20[2-9][0-9]-[0-9]{2}-[0-9]{2}' | tail -1)
+        fi
         [ -n "$date" ] || continue
         # Find unique commit on that date touching the file.
         shas=$(git log --follow --pretty='%h %ad' --date=short -- "$adr" \
@@ -42,6 +51,7 @@ for adr in .dev/decisions/*.md; do
             skipped_zero=$((skipped_zero + 1))
         elif [ "$n" -gt 1 ]; then
             skipped_multi=$((skipped_multi + 1))
+            multi_report+=("$adr:$lineno  $date  candidates: $(printf '%s' "$shas" | tr '\n' ' ')")
         else
             sha=$shas
             # Defensive: never replace a placeholder with a SHA whose own
@@ -54,7 +64,7 @@ for adr in .dev/decisions/*.md; do
             candidates+=("$adr|$date|$sha")
             filled=$((filled + 1))
         fi
-    done < <(grep "<backfill>" "$adr")
+    done < <(grep -n "<backfill>" "$adr")
 done
 
 echo "Backfill candidates ($filled rows; skipped $skipped_zero zero / $skipped_multi multi):"
@@ -62,6 +72,14 @@ for c in "${candidates[@]}"; do
     IFS='|' read -r f d s <<< "$c"
     echo "  $f  $d  → $s"
 done
+
+if [ "$skipped_multi" -gt 0 ] && [ "$MODE" = "--multi-report" ]; then
+    echo
+    echo "Multi-match placeholders (narrative-pass needed):"
+    for m in "${multi_report[@]}"; do
+        echo "  $m"
+    done
+fi
 
 if [ "$MODE" = "--apply" ]; then
     echo
