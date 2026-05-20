@@ -29,6 +29,7 @@
 const std = @import("std");
 
 const inst = @import("inst.zig");
+const zir = @import("../../../ir/zir.zig");
 const Xn = inst.Xn;
 
 /// First 8 X-registers carry function arguments + return values
@@ -240,6 +241,73 @@ pub fn fpSlotToReg(slot_id: u16) ?Xn {
     return allocatable_v_regs[slot_id];
 }
 
+// ============================================================
+// ADR-0077 — per-op scratch reservation table (arm64).
+// ============================================================
+
+/// Slot ids that the 5 D-133 bulk handlers clobber as op-internal
+/// scratch. The B119 live-scratch census
+/// (.dev/lessons/2026-05-20-d133-sweep-pool-size-insufficient.md)
+/// shows table.fill / table.copy / table.init / memory.init hold
+/// ≥ 4 simultaneously-live scratches across X9..X13 in their loop
+/// bodies. Reserving the full {0..4} set is the conservative
+/// formulation validated by the B121 spike — per-handler tightening
+/// is a future optimisation if profile shows spill pressure
+/// regression. memory.copy / memory.fill are not in the bulk
+/// cohort (they touch only X11/X12 transiently and the d-64
+/// load-then-overwrite pattern already covers them).
+const bulk_handler_reservation = [_]u16{ 0, 1, 2, 3, 4 };
+
+const zir_op_count = @typeInfo(zir.ZirOp).@"enum".fields.len;
+
+/// Per-op scratch reservation lookup table (ADR-0077).
+///
+/// Indexed by `@intFromEnum(ZirOp)`. Each entry is the slice of
+/// regalloc slot ids that the op's emit handler will clobber
+/// internally during code generation. Empty slice = no
+/// reservation (default for every op). When the regalloc walker
+/// is wired (B125), it queries this table via
+/// `opScratchReservation` and forbids live-vreg overlap on the
+/// listed slot ids across the op's PC range.
+///
+/// Comptime block below asserts every reservation references
+/// only allocatable slot ids (else the reservation is a no-op
+/// declaration; B124 lifts this to the canonical
+/// `validateRegallocOpScratchReservation` check).
+pub const op_scratch_reservation_table: [zir_op_count][]const u16 = blk: {
+    var t: [zir_op_count][]const u16 = .{&.{}} ** zir_op_count;
+    t[@intFromEnum(zir.ZirOp.@"table.fill")] = &bulk_handler_reservation;
+    t[@intFromEnum(zir.ZirOp.@"table.copy")] = &bulk_handler_reservation;
+    t[@intFromEnum(zir.ZirOp.@"table.init")] = &bulk_handler_reservation;
+    t[@intFromEnum(zir.ZirOp.@"memory.init")] = &bulk_handler_reservation;
+    break :blk t;
+};
+
+// Comptime sanity: every declared reservation slot id is in the
+// regalloc allocatable range. A reservation for a slot id ≥
+// `allocatable_gprs.len` would be a silent no-op (regalloc never
+// assigns past that threshold to a non-spill vreg). The full
+// `validateRegallocOpScratchReservation` check lands at B124.
+comptime {
+    for (op_scratch_reservation_table) |reservation| {
+        for (reservation) |sid| {
+            if (sid >= allocatable_gprs.len) {
+                @compileError("ADR-0077: op_scratch_reservation_table references non-allocatable slot id (= no-op declaration)");
+            }
+        }
+    }
+}
+
+/// `shared/regalloc.zig::ScratchReservationFn` compatible accessor.
+/// Pass `&opScratchReservation` as the 4th argument of
+/// `computeWith` to enable the arm64 fence (B125 wires
+/// `compile.zig`).
+pub fn opScratchReservation(op: zir.ZirOp) []const u16 {
+    const idx = @intFromEnum(op);
+    if (idx >= zir_op_count) return &.{};
+    return op_scratch_reservation_table[idx];
+}
+
 /// Is `xn` caller-saved per AAPCS64? Used by emit to decide
 /// whether a vreg held in `xn` needs a save before a call.
 pub fn isCallerSaved(xn: Xn) bool {
@@ -373,4 +441,53 @@ test "fp_spill_stage_vregs is exactly V29, V30 (2 regs for binary FP-op spill st
     try testing.expectEqual(@as(usize, 2), fp_spill_stage_vregs.len);
     try testing.expectEqual(@as(Xn, 29), fp_spill_stage_vregs[0]);
     try testing.expectEqual(@as(Xn, 30), fp_spill_stage_vregs[1]);
+}
+
+// ============================================================
+// ADR-0077 — op_scratch_reservation_table tests.
+// ============================================================
+
+test "opScratchReservation: table.fill reserves slots {0..4} (= X9..X13)" {
+    const r = opScratchReservation(.@"table.fill");
+    try testing.expectEqualSlices(u16, &[_]u16{ 0, 1, 2, 3, 4 }, r);
+}
+
+test "opScratchReservation: 4 bulk handlers all reserve the same set" {
+    const expected = [_]u16{ 0, 1, 2, 3, 4 };
+    try testing.expectEqualSlices(u16, &expected, opScratchReservation(.@"table.fill"));
+    try testing.expectEqualSlices(u16, &expected, opScratchReservation(.@"table.copy"));
+    try testing.expectEqualSlices(u16, &expected, opScratchReservation(.@"table.init"));
+    try testing.expectEqualSlices(u16, &expected, opScratchReservation(.@"memory.init"));
+}
+
+test "opScratchReservation: non-bulk ops have empty reservation" {
+    try testing.expectEqual(@as(usize, 0), opScratchReservation(.nop).len);
+    try testing.expectEqual(@as(usize, 0), opScratchReservation(.@"i32.add").len);
+    try testing.expectEqual(@as(usize, 0), opScratchReservation(.@"i32.const").len);
+    // table.set / table.get / table.size / table.grow are NOT in
+    // the bulk cohort — d-64 / d-66 already discharged them via
+    // load-then-overwrite. Empty reservation here is intentional.
+    try testing.expectEqual(@as(usize, 0), opScratchReservation(.@"table.set").len);
+    try testing.expectEqual(@as(usize, 0), opScratchReservation(.@"table.get").len);
+}
+
+test "opScratchReservation: all reserved slot ids are in allocatable range" {
+    // Runtime mirror of the comptime check; defensive guard so a
+    // future edit that bypasses comptime (e.g. extracting the
+    // table to a separate module) surfaces immediately.
+    for (op_scratch_reservation_table) |reservation| {
+        for (reservation) |sid| {
+            try testing.expect(sid < allocatable_gprs.len);
+        }
+    }
+}
+
+test "opScratchReservation: shape matches shared.ScratchReservationFn" {
+    // Compile-time confirmation that the accessor's signature is
+    // assignable to the shared regalloc's ScratchReservationFn.
+    // If the shared type drifts (renames its arg or return), this
+    // line fails to compile.
+    const regalloc = @import("../shared/regalloc.zig");
+    const fp: regalloc.ScratchReservationFn = &opScratchReservation;
+    _ = fp;
 }
