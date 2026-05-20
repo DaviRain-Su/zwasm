@@ -394,6 +394,38 @@ paired ADR/debt artifact.
   no finding (the table is forward-looking; specialisation
   overrides may emit them).
 
+#### G.1.2 ADR-0078 paired-artifact resolution (added 2026-05-21; ADR-0078 follow-up)
+
+```sh
+bash scripts/check_skip_taxonomy_pairing.sh --gate
+```
+
+For each row in ADR-0078's canonical table, resolves the Paired
+artifact column against current ground truth:
+
+- `debt-trackable` row citing `D-NNN` (concrete) → grep
+  `.dev/debt.md` for an active row; if absent, grep `git log`
+  for a discharge SHA. `soon` finding when the debt is
+  discharged but the row still references it (the ADR table
+  needs updating — either cite the discharge SHA or retire the
+  SKIP-* emission if the underlying gap dissolved).
+- `debt-trackable` row with `D-NNN` placeholder ("D-NNN
+  follow-up") → `soon` (unfiled debt; the row promises tracking
+  but no concrete D-NNN exists).
+- `debt-trackable` row with per-instance phrasing ("per-fixture
+  D-NNN as discovered" / "per-corpus D-NNN" / "per-call D-NNN")
+  → info, no finding (these are deferred-as-instances markers,
+  not concrete pairings).
+- `ADR-required` row citing `.dev/decisions/<file>.md` → check
+  file exists. Missing file → `block` (the row's claim is
+  load-bearing for the audit; the file MUST resolve).
+- `runner-internal` row → no external artifact required (the
+  ADR row itself is the artifact).
+
+Script exit 1 only on `block` (missing ADR file). `soon` and
+info findings are reported but never block — they prompt the
+next ADR amendment cycle.
+
 ### G.2 Anchor-command currency
 
 Re-run the diagnostic anchor commands the loop has been silently
