@@ -234,10 +234,16 @@ Discharge 累計 (`b11314ff` 時点 = Step B 完了):
 - 43 → **0 failed** (-43, ALL discharged)
 - 80 → 1 runtime-skip
 
-**Step B Exit 判定**: runtime-skip ≤ 20 ✓ AND 43 failures 全消化 ✓。
-Step B 完了基準を達成。残 runtime-skip 1 は
-skip_text_format_parser 由来の text-format-only fixture で、
-spec corpus の構造的制約。
+**Step B Exit 判定**: runtime-skip 0 ✓ AND 43 failures 全消化 ✓。
+Step B 完了基準を達成 + ROADMAP §9.12-E primary exit
+(`0 runtime-skip + 0 failed + 4 testsuites green`) も literal に
+達成 (Mac aarch64 at `7b2e1b02`)。`spec_assert_runner_non_simd:
+25401 passed / 0 failed / 0 runtime-skip / 525 skip-adr` +
+`simd_assert_runner: 13351 / 0 / 0 / 390 skip-adr` + edge_cases
++ realworld-run-jit + wasmtime-misc-runtime all green.
+
+ubuntu mirror 検証は次 push で kick。bit-identical 確認後、
+close-plan §7 (Accept) を正式に発火させる。
 
 Cohort 1-residual (data data-init UES × 15) 完 (`72a87509`):
 真の root cause は cohort 4 と同じく "imported entity の actual

@@ -5,60 +5,40 @@
 
 ## Cold-start procedure
 
-1. **READ FIRST** [`.dev/phase9_structural_debt_close_plan.md`](phase9_structural_debt_close_plan.md)
-   (Status: Proposed 2026-05-20). この close-plan が
-   `/continue` Step 1a の override を発火させ、ROADMAP
-   §9.<N> task より先に §6 Work sequence を実行する。
-2. **READ NEXT** [`.dev/lessons/2026-05-20-refactor-tradeoffs-honest-accounting.md`](lessons/2026-05-20-refactor-tradeoffs-honest-accounting.md) — 経緯記録。
-3. `git log --oneline -10` — last code commit: `b11314ff`
-   (close-plan §6 (j) Step B cohort 6 完了: elem-form 4 の
-   cross-module funcref runtime resolution。残 0 FAIL)。
-4. **Live status**: `zig build test-spec-wasm-2.0-assert >
-   /tmp/spec.log 2>&1 || true; grep "^FAIL " /tmp/spec.log |
-   sort | uniq -c | sort -rn` — current breakdown is the
-   source of truth.
-5. `.dev/debt.md::D-154` — close-plan umbrella row。
+1. `git log --oneline -10` — last code commit: `7b2e1b02`
+   (elem init-expr reftype mismatch rejected at decode →
+   §9.12-E 0 runtime-skip)。close-plan §6 (j) Step B 完。
+2. **Live status**: `zig build test-spec-wasm-2.0-assert >
+   /tmp/spec.log 2>&1 || true; grep "passed\\|^FAIL " /tmp/spec.log`
+   — Mac aarch64 baseline expected at HEAD `7b2e1b02`:
+   spec non_simd 25401 PASS / 0 FAIL / 0 runtime-skip / 525
+   skip-adr; spec simd 13351 / 0 / 0 / 390 skip-adr; 4 testsuites
+   green.
+3. ROADMAP §9 Phase Status widget: Phase 9 IN-PROGRESS。§9.12-E
+   は `[x]` 既 close (`7b2e1b02` Mac). 次 `[ ]` は **§9.12-F**
+   (Phase-9-eligible debt cohort)。
 
 ## Active state
 
-- Phase 9.12-E。close-plan §6 (j) Step B 進行中。
-- §6 (j) Step A 完了 (`f5b3f626`): spectest.wat auto-register。
-- §6 (j) Step B cohort 1+2 部分着 (`2ddcdd7c`): const-expr
-  `global.get N` for imported globals + importer-side
-  `scratch_globals` の `[0..num_imports)` を registered
-  exporter から populate。
-- §6 (j) Step B 全 cohort 完 (`45bc96d3` / `ce67cd4a` /
-  `72a87509` / `4090d7da` / `b11314ff`)。**43 → 0 FAIL** since
-  Step A。runtime-skip 1 (= 妥当な範囲)。
-- 次: **close-plan §6 (j) Step B Exit 判定 + close-plan §7
-  (Accept) 段取り**。Phase 9.12-E の primary exit
-  (`skip-impl == 0 literally`) は manifest 部分 0、runtime
-  部分は 1 のみ (skip_text_format_parser 由来の 1 件)。
-  これは spec corpus の構造的制約 (text-format-only
-  fixture) なので、ROADMAP §9.12-E の close 判定 +
-  close-plan §6 終了宣言を次 cycle で実施。
+- Phase 9.12-E **完** (`7b2e1b02` Mac aarch64, 4 testsuites
+  green). close-plan §6 (j) Step B 完了 — 43 → 0 FAIL, 192 → 0
+  runtime-skip, +93 PASS over 7 chunks。close-plan §7
+  (Accept) を次 cycle で正式に締める想定。
+- 次: **§9.12-F (Phase-9-eligible debt cohort)** —
+  D-094 (x86_64 multi-result indirect-result-buffer) /
+  D-090 (lower.zig type-stack walker) / D-062 (arm64 v128
+  9th+ stack overflow) / D-141 (file_size_check WARN; ADR-0079
+  per file 含む) / D-081 (emit.zig source split) / D-055
+  (emit_test_*.zig migration)。Exit: debt active rows < 15。
 
-## Step B 再開時の手順 (cold-start)
+## Ubuntu mirror verification
 
-```sh
-# 1. ログ再生
-zig build test-spec-wasm-2.0-assert > /tmp/spec.log 2>&1
-grep "^FAIL " /tmp/spec.log | sort | uniq -c | sort -rn
-
-# 2. cohort 3 候補の fixture を bisect
-#    InvalidFuncIndex: imports.60/61, elem.57, linking.17, table_grow.6
-#    InvalidFunctype: elem.66/68
-ls test/spec/wasm-2.0-assert/imports/imports.6{0,1}.wat
-```
-
-仮説 (verified at 2026-05-21):
-- elem.57 / elem.66 / elem.68 などは declarative elem
-  segment で typeidx が type section 範囲外、または
-  declarative funcidx の resolve タイミング差。compile 時の
-  validator がリジェクトすべきところで何かが抜けている。
-
-cohort 詳細は `.dev/phase9_structural_debt_close_plan.md`
-§6 (j) Step B 参照。
+- Mac aarch64 で 4 testsuites green は確認済 (`7b2e1b02`)。
+- ubuntunote 上の test-spec mirror は `bash scripts/
+  run_remote_ubuntu.sh test-spec-wasm-2.0-assert &` で次 push
+  時に kick。`§9.12-E` exit text の `Mac+ubuntunote
+  bit-identical` 要件は ubuntu mirror が一致した時点で
+  完成宣言。
 
 ## Open questions / blockers
 
@@ -71,6 +51,10 @@ handover はポインタのみ保持。
 
 ## See
 
-- [ROADMAP](./ROADMAP.md) §9.12 — phase row
-- [`debt.md`](./debt.md) — D-154 umbrella, D-153 paused
-- [`lessons/INDEX.md`](./lessons/INDEX.md) — 2026-05-20 entry
+- [ROADMAP](./ROADMAP.md) §9.12 — §9.12-E `[x]` `7b2e1b02`,
+  next `[ ]` = §9.12-F。
+- [`debt.md`](./debt.md) — D-094 / D-090 / D-062 / D-141 /
+  D-081 / D-055 が §9.12-F の対象。
+- [`phase9_structural_debt_close_plan.md`](./phase9_structural_debt_close_plan.md)
+  §6 (j) Step B execution log。
+- [`lessons/INDEX.md`](./lessons/INDEX.md) — 2026-05-20 entry。
