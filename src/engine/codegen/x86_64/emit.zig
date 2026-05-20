@@ -1215,26 +1215,27 @@ pub fn compile(
             // Low half: 1-instr SSE4.1 PMOVSX*/PMOVZX* direct.
             // High half: PSHUFD imm=0xEE swaps upper qword to lower
             // position + PMOVSX/ZX. 2 instr per high-extend.
-            .@"i16x8.extend_low_i8x16_s" => try op_simd_int_cmp_lane.emitI16x8ExtendLowI8x16S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i16x8.extend_low_i8x16_u" => try op_simd_int_cmp_lane.emitI16x8ExtendLowI8x16U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i16x8.extend_high_i8x16_s" => try op_simd_int_cmp_lane.emitI16x8ExtendHighI8x16S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i16x8.extend_high_i8x16_u" => try op_simd_int_cmp_lane.emitI16x8ExtendHighI8x16U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i32x4.extend_low_i16x8_s" => try op_simd_int_cmp_lane.emitI32x4ExtendLowI16x8S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i32x4.extend_low_i16x8_u" => try op_simd_int_cmp_lane.emitI32x4ExtendLowI16x8U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i32x4.extend_high_i16x8_s" => try op_simd_int_cmp_lane.emitI32x4ExtendHighI16x8S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i32x4.extend_high_i16x8_u" => try op_simd_int_cmp_lane.emitI32x4ExtendHighI16x8U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i64x2.extend_low_i32x4_s" => try op_simd_int_cmp_lane.emitI64x2ExtendLowI32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i64x2.extend_low_i32x4_u" => try op_simd_int_cmp_lane.emitI64x2ExtendLowI32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i64x2.extend_high_i32x4_s" => try op_simd_int_cmp_lane.emitI64x2ExtendHighI32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"i64x2.extend_high_i32x4_u" => try op_simd_int_cmp_lane.emitI64x2ExtendHighI32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            // §9.12-B / B105: SIMD narrow + extend cohort migrated to ctx tuple.
+            .@"i16x8.extend_low_i8x16_s" => try op_simd_int_cmp_lane.emitI16x8ExtendLowI8x16SCtx(&ctx, &ins),
+            .@"i16x8.extend_low_i8x16_u" => try op_simd_int_cmp_lane.emitI16x8ExtendLowI8x16UCtx(&ctx, &ins),
+            .@"i16x8.extend_high_i8x16_s" => try op_simd_int_cmp_lane.emitI16x8ExtendHighI8x16SCtx(&ctx, &ins),
+            .@"i16x8.extend_high_i8x16_u" => try op_simd_int_cmp_lane.emitI16x8ExtendHighI8x16UCtx(&ctx, &ins),
+            .@"i32x4.extend_low_i16x8_s" => try op_simd_int_cmp_lane.emitI32x4ExtendLowI16x8SCtx(&ctx, &ins),
+            .@"i32x4.extend_low_i16x8_u" => try op_simd_int_cmp_lane.emitI32x4ExtendLowI16x8UCtx(&ctx, &ins),
+            .@"i32x4.extend_high_i16x8_s" => try op_simd_int_cmp_lane.emitI32x4ExtendHighI16x8SCtx(&ctx, &ins),
+            .@"i32x4.extend_high_i16x8_u" => try op_simd_int_cmp_lane.emitI32x4ExtendHighI16x8UCtx(&ctx, &ins),
+            .@"i64x2.extend_low_i32x4_s" => try op_simd_int_cmp_lane.emitI64x2ExtendLowI32x4SCtx(&ctx, &ins),
+            .@"i64x2.extend_low_i32x4_u" => try op_simd_int_cmp_lane.emitI64x2ExtendLowI32x4UCtx(&ctx, &ins),
+            .@"i64x2.extend_high_i32x4_s" => try op_simd_int_cmp_lane.emitI64x2ExtendHighI32x4SCtx(&ctx, &ins),
+            .@"i64x2.extend_high_i32x4_u" => try op_simd_int_cmp_lane.emitI64x2ExtendHighI32x4UCtx(&ctx, &ins),
             // §9.7 / 9.7-y: i*x*.narrow_*_{s,u} (4 ops). PACKSSWB
             // (SSE2) + PACKUSWB (SSE2) for i8x16; PACKSSDW (SSE2)
             // + PACKUSDW (SSE4.1) for i16x8. All single-instr via
             // emitV128IntBinop.
-            .@"i8x16.narrow_i16x8_s" => try op_simd_int_cmp_lane.emitI8x16NarrowI16x8S(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i8x16.narrow_i16x8_u" => try op_simd_int_cmp_lane.emitI8x16NarrowI16x8U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i16x8.narrow_i32x4_s" => try op_simd_int_cmp_lane.emitI16x8NarrowI32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"i16x8.narrow_i32x4_u" => try op_simd_int_cmp_lane.emitI16x8NarrowI32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i8x16.narrow_i16x8_s" => try op_simd_int_cmp_lane.emitI8x16NarrowI16x8SCtx(&ctx, &ins),
+            .@"i8x16.narrow_i16x8_u" => try op_simd_int_cmp_lane.emitI8x16NarrowI16x8UCtx(&ctx, &ins),
+            .@"i16x8.narrow_i32x4_s" => try op_simd_int_cmp_lane.emitI16x8NarrowI32x4SCtx(&ctx, &ins),
+            .@"i16x8.narrow_i32x4_u" => try op_simd_int_cmp_lane.emitI16x8NarrowI32x4UCtx(&ctx, &ins),
             // §9.7 / 9.7-z: i*x*.abs (4 ops). PABSB/W/D (SSSE3
             // 0F 38 1C/1D/1E) for 8/16/32-bit lanes — single-instr
             // unary via emitV128FpUnop. i64x2.abs synthesises via
