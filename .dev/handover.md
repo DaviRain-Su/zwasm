@@ -15,8 +15,8 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
    `chore(p9b):` / `feat(p9b):` prefix. Last source commit
-   `e214d151` (B102 — SIMD float unary (14 ops) moved from legacy
-   to ctx; legacy 84 → 70; ctx 307 → 321).
+   `8a1b8c3b` (B103 — SIMD float compare (12 ops) moved from
+   legacy to ctx; legacy 70 → 58; ctx 321 → 333).
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -126,27 +126,28 @@
 | B99 | Legacy → ctx SIMD cohort move: int sat arith (10 ops). Legacy 110 → 100; ctx 281 → 291. | `f9c8fc10` |
 | B100 | Legacy → ctx SIMD cohort move: f32x4 arith (8 ops). Legacy 100 → 92; ctx 291 → 299. | `e2ea1b5f` |
 | B101 | Legacy → ctx SIMD cohort move: f64x2 arith (8 ops). Legacy 92 → 84; ctx 299 → 307. | `34a1ca6f` |
-| B102 | Legacy → ctx SIMD cohort move: float unary (14 ops; all 5-arg). Legacy 84 → 70; ctx 307 → 321. | `e214d151` |
-| **B103** | **Legacy → ctx SIMD cohort: float compare (12 ops: f32x4/f64x2.eq/ne/lt/gt/le/ge).** Per-op ctx adapters in op_simd_float.zig; regenerate 12 per-op files; legacy 70 → 58; ctx 321 → 333. | **NEXT** |
-| B103..B9x | After B103: bool reductions (9), narrow/extend (16), extmul (16), swizzle/popcnt/dot/q15mulr/fp-conv (11), splats (6). Eventually inline-switch cutover (ADR-0073). | |
+| B102 | Legacy → ctx SIMD cohort move: float unary (14 ops). Legacy 84 → 70; ctx 307 → 321. | `e214d151` |
+| B103 | Legacy → ctx SIMD cohort move: float compare (12 ops; all 5-arg). Legacy 70 → 58; ctx 321 → 333. | `8a1b8c3b` |
+| **B104** | **Legacy → ctx SIMD cohort: bool reductions (~9 ops: v128.any_true + i{8x16,16x8,32x4,64x2}.all_true + i{8x16,16x8,32x4,64x2}.bitmask).** Survey emit.zig and op_simd*.zig for exact set + helpers. Per-op ctx adapters; regenerate per-op files; legacy 58 → ~49; ctx 333 → ~342. | **NEXT** |
+| B104..B9x | After B104: narrow/extend (16), extmul (16), swizzle/popcnt/dot/q15mulr/fp-conv (11), splats (6). Eventually inline-switch cutover (ADR-0073). | |
 | B6x+1 | Inline-switch dispatcher cutover per ADR-0073 — both arches' `emit.zig` giant switch replaced by `inline for (collected_X_ops) |op_mod| { if (op_mod.op_tag == ins.op) return op_mod.emit(ctx, ins); }`. Moment per-op files become load-bearing. | |
 
-## Active state — §9.12-B mid-flight; B102 SIMD float unary landed 2026-05-20
+## Active state — §9.12-B mid-flight; B103 SIMD float compare landed 2026-05-20
 
-**B103 is the active task** — SIMD float compare cohort (12
-ops: f32x4/f64x2.eq/ne/lt/gt/le/ge). B102 closed at `e214d151`
-(legacy 84 → 70; ctx 307 → 321).
+**B104 is the active task** — SIMD bool reductions cohort
+(~9 ops: v128.any_true + i*x*.all_true + i*x*.bitmask). B103
+closed at `8a1b8c3b` (legacy 70 → 58; ctx 321 → 333).
 
-The loop for B103:
+The loop for B104:
 
-1. Locate emitF{32x4,64x2}{Eq,Ne,Lt,Gt,Le,Ge} helpers in
-   op_simd_float.zig.
-2. Add 12 per-op ctx adapters.
-3. Regenerate 12 per-op files at wasm_2_0/f{32x4,64x2}_{eq,ne,
-   lt,gt,le,ge}.zig.
-4. Move 12 entries from legacy (70 → 58) to ctx (321 → 333).
-5. Update emit.zig arms.
-6. Verify 2-host green; commit + push.
+1. Survey emit.zig for `.@"v128.any_true"`, `.@"i*x*.all_true"`,
+   `.@"i*x*.bitmask"` arms and confirm count.
+2. Locate helpers in op_simd.zig or op_simd_int_arith.zig.
+3. Add per-op ctx adapters.
+4. Regenerate per-op files.
+5. Move entries from legacy to ctx.
+6. Update emit.zig arms.
+7. Verify 2-host green; commit + push.
 
 §9.12-B exit criterion stays as ROADMAP §9.12-B specifies (6 build
 combos green + DCE 0 + completeness comptime check). Per-op file
