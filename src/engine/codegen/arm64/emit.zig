@@ -52,19 +52,13 @@ const jit_abi = @import("../shared/jit_abi.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
 const op_const = @import("op_const.zig");
-const op_alu_int = @import("op_alu_int.zig");
-const op_alu_float = @import("op_alu_float.zig");
-const op_convert = @import("op_convert.zig");
 const op_memory = @import("op_memory.zig");
 const op_control = @import("op_control.zig");
 const op_call = @import("op_call.zig");
-const op_globals = @import("op_globals.zig");
-const op_table = @import("op_table.zig");
 const op_simd = @import("op_simd.zig");
 const op_simd_int_arith = @import("op_simd_int_arith.zig");
 const op_simd_int_cmp_lane = @import("op_simd_int_cmp_lane.zig");
 const op_simd_float = @import("op_simd_float.zig");
-const bounds_check = @import("bounds_check.zig");
 
 const Label = label_mod.Label;
 const LabelKind = label_mod.LabelKind;
@@ -819,25 +813,6 @@ pub fn compile(
         switch (ins.op) {
             .@"i32.const" => try op_const.emitI32Const(&ctx, &ins),
             .@"i64.const" => try op_const.emitI64Const(&ctx, &ins),
-            .@"i64.add",
-            .@"i64.sub",
-            .@"i64.mul",
-            .@"i64.and",
-            .@"i64.or",
-            .@"i64.xor",
-            => try op_alu_int.emitI64Binary(&ctx, &ins),
-            .@"i64.eq",
-            .@"i64.ne",
-            .@"i64.lt_s",
-            .@"i64.lt_u",
-            .@"i64.gt_s",
-            .@"i64.gt_u",
-            .@"i64.le_s",
-            .@"i64.le_u",
-            .@"i64.ge_s",
-            .@"i64.ge_u",
-            => try op_alu_int.emitI64Compare(&ctx, &ins),
-            .@"i64.eqz" => try op_alu_int.emitI64Eqz(&ctx, &ins),
             // §9.9 / 9.9-m-1a (per ADR-0056): Wasm 2.0 reference-types
             // partial — null + is_null. ref.func deferred to m-1b
             // (needs JitRuntime extension for `func_entities_ptr`).
@@ -855,7 +830,6 @@ pub fn compile(
                 try gpr.gprStoreSpilled(allocator, &buf, alloc, ctx.spill_base_off, vreg, 0);
                 try pushed_vregs.append(allocator, vreg);
             },
-            .@"ref.is_null" => try op_alu_int.emitI64Eqz(&ctx, &ins),
             // §9.9 / 9.9-m-1b: ref.func idx — produce
             // `@intFromPtr(&rt.func_entities[idx])` matching
             // `Value.fromFuncRef`'s encoding (interp parity per
@@ -888,53 +862,6 @@ pub fn compile(
                 try gpr.gprStoreSpilled(allocator, &buf, alloc, ctx.spill_base_off, vreg, 0);
                 try pushed_vregs.append(allocator, vreg);
             },
-            .@"i64.shl",
-            .@"i64.shr_s",
-            .@"i64.shr_u",
-            .@"i64.rotr",
-            => try op_alu_int.emitI64Shift(&ctx, &ins),
-            .@"i64.rotl" => try op_alu_int.emitI64Rotl(&ctx, &ins),
-            .@"i64.clz" => try op_alu_int.emitI64Clz(&ctx, &ins),
-            .@"i64.ctz" => try op_alu_int.emitI64Ctz(&ctx, &ins),
-            .@"i32.wrap_i64",
-            .@"i64.extend_i32_u",
-            => try op_convert.emitWrap32(&ctx, &ins),
-            .@"i64.extend_i32_s" => try op_convert.emitExtendI32S(&ctx, &ins),
-            .@"f32.convert_i32_s",
-            .@"f32.convert_i32_u",
-            .@"f32.convert_i64_s",
-            .@"f32.convert_i64_u",
-            .@"f64.convert_i32_s",
-            .@"f64.convert_i32_u",
-            .@"f64.convert_i64_s",
-            .@"f64.convert_i64_u",
-            => try op_convert.emitConvertIntToFloat(&ctx, &ins),
-            .@"i32.trunc_f32_s",
-            .@"i32.trunc_f32_u",
-            .@"i64.trunc_f32_s",
-            .@"i64.trunc_f32_u",
-            => try bounds_check.emitTrappingTruncF32(&ctx, &ins),
-            .@"i32.trunc_f64_s",
-            .@"i32.trunc_f64_u",
-            .@"i64.trunc_f64_s",
-            .@"i64.trunc_f64_u",
-            => try bounds_check.emitTrappingTruncF64(&ctx, &ins),
-            .@"i32.trunc_sat_f32_s",
-            .@"i32.trunc_sat_f32_u",
-            .@"i32.trunc_sat_f64_s",
-            .@"i32.trunc_sat_f64_u",
-            .@"i64.trunc_sat_f32_s",
-            .@"i64.trunc_sat_f32_u",
-            .@"i64.trunc_sat_f64_s",
-            .@"i64.trunc_sat_f64_u",
-            => try op_convert.emitTruncSat(&ctx, &ins),
-            .@"i32.reinterpret_f32" => try op_convert.emitReinterpretI32FromF32(&ctx, &ins),
-            .@"i64.reinterpret_f64" => try op_convert.emitReinterpretI64FromF64(&ctx, &ins),
-            .@"f32.reinterpret_i32" => try op_convert.emitReinterpretF32FromI32(&ctx, &ins),
-            .@"f64.reinterpret_i64" => try op_convert.emitReinterpretF64FromI64(&ctx, &ins),
-            .@"f32.demote_f64",
-            .@"f64.promote_f32",
-            => try op_convert.emitFloatDemotePromote(&ctx, &ins),
             .@"f32.const" => {
                 // Stage the IEEE-754 bits via a GPR const, then
                 // FMOV S, W. The intermediate W-reg is the FP
@@ -986,95 +913,8 @@ pub fn compile(
                 try gpr.fpStoreSpilled(allocator, &buf, alloc, spill_base_off, vreg, 0);
                 try pushed_vregs.append(allocator, vreg);
             },
-            .@"f32.add",
-            .@"f32.sub",
-            .@"f32.mul",
-            .@"f32.div",
-            .@"f64.add",
-            .@"f64.sub",
-            .@"f64.mul",
-            .@"f64.div",
-            => try op_alu_float.emitFloatBinary(&ctx, &ins),
-            .@"f32.abs",
-            .@"f32.neg",
-            .@"f32.sqrt",
-            .@"f32.ceil",
-            .@"f32.floor",
-            .@"f32.trunc",
-            .@"f32.nearest",
-            .@"f64.abs",
-            .@"f64.neg",
-            .@"f64.sqrt",
-            .@"f64.ceil",
-            .@"f64.floor",
-            .@"f64.trunc",
-            .@"f64.nearest",
-            => try op_alu_float.emitFloatUnary(&ctx, &ins),
-            .@"f32.copysign",
-            .@"f64.copysign",
-            => try op_alu_float.emitFloatCopysign(&ctx, &ins),
-            .@"f32.min",
-            .@"f32.max",
-            .@"f64.min",
-            .@"f64.max",
-            => try op_alu_float.emitFloatMinMax(&ctx, &ins),
-            .@"f32.eq",
-            .@"f32.ne",
-            .@"f32.lt",
-            .@"f32.gt",
-            .@"f32.le",
-            .@"f32.ge",
-            .@"f64.eq",
-            .@"f64.ne",
-            .@"f64.lt",
-            .@"f64.gt",
-            .@"f64.le",
-            .@"f64.ge",
-            => try op_alu_float.emitFloatCompare(&ctx, &ins),
-            .@"i64.popcnt" => try op_alu_int.emitI64Popcnt(&ctx, &ins),
-            .@"i32.add",
-            .@"i32.sub",
-            .@"i32.mul",
-            .@"i32.and",
-            .@"i32.or",
-            .@"i32.xor",
-            .@"i32.shl",
-            .@"i32.shr_s",
-            .@"i32.shr_u",
-            => try op_alu_int.emitI32Binary(&ctx, &ins),
-            .@"i32.rotr" => try op_alu_int.emitI32Rotr(&ctx, &ins),
-            .@"i32.rotl" => try op_alu_int.emitI32Rotl(&ctx, &ins),
-            .@"i32.eq",
-            .@"i32.ne",
-            .@"i32.lt_s",
-            .@"i32.lt_u",
-            .@"i32.gt_s",
-            .@"i32.gt_u",
-            .@"i32.le_s",
-            .@"i32.le_u",
-            .@"i32.ge_s",
-            .@"i32.ge_u",
-            => try op_alu_int.emitI32Compare(&ctx, &ins),
-            .@"i32.eqz" => try op_alu_int.emitI32Eqz(&ctx, &ins),
-            .@"i32.clz" => try op_alu_int.emitI32Clz(&ctx, &ins),
-            .@"i32.ctz" => try op_alu_int.emitI32Ctz(&ctx, &ins),
             // §9.7 / 7.9 chunk c: Wasm 2.0 sign-extension ops.
-            .@"i32.extend8_s" => try op_alu_int.emitI32Extend8S(&ctx, &ins),
-            .@"i32.extend16_s" => try op_alu_int.emitI32Extend16S(&ctx, &ins),
-            .@"i64.extend8_s" => try op_alu_int.emitI64Extend8S(&ctx, &ins),
-            .@"i64.extend16_s" => try op_alu_int.emitI64Extend16S(&ctx, &ins),
-            .@"i64.extend32_s" => try op_alu_int.emitI64Extend32S(&ctx, &ins),
             // §9.7 / 7.9 chunk c: integer divide / remainder.
-            .@"i32.div_s",
-            .@"i32.div_u",
-            .@"i32.rem_s",
-            .@"i32.rem_u",
-            => try op_alu_int.emitI32DivRem(&ctx, &ins),
-            .@"i64.div_s",
-            .@"i64.div_u",
-            .@"i64.rem_s",
-            .@"i64.rem_u",
-            => try op_alu_int.emitI64DivRem(&ctx, &ins),
             .@"local.get" => {
                 // Push a fresh vreg holding the value loaded from
                 // `[SP, #(local_base_off + layout.offsets[local_idx])]`.
@@ -1222,7 +1062,6 @@ pub fn compile(
                     },
                 }
             },
-            .@"i32.popcnt" => try op_alu_int.emitI32Popcnt(&ctx, &ins),
             .select, .select_typed => {
                 // Wasm spec §4.4.4 / §3.3.2.2 (select / select_typed)
                 // — pop c, val2, val1 (top of stack is c). Push val1
@@ -1356,8 +1195,6 @@ pub fn compile(
             },
             .call_indirect => try op_call.emitCallIndirect(&ctx, &ins),
             .call => try op_call.emitCall(&ctx, &ins),
-            .@"global.get" => try op_globals.emitGlobalGet(&ctx, &ins),
-            .@"global.set" => try op_globals.emitGlobalSet(&ctx, &ins),
             .@"memory.size" => {
                 // Wasm memory.size returns current size in 64-KiB pages.
                 // X27 carries the byte limit; pages = bytes >> 16.
@@ -1425,33 +1262,8 @@ pub fn compile(
                 }
                 try pushed_vregs.append(allocator, result);
             },
-            .@"i32.load",
-            .@"i32.load8_s",
-            .@"i32.load8_u",
-            .@"i32.load16_s",
-            .@"i32.load16_u",
-            .@"i64.load",
-            .@"i64.load8_s",
-            .@"i64.load8_u",
-            .@"i64.load16_s",
-            .@"i64.load16_u",
-            .@"i64.load32_s",
-            .@"i64.load32_u",
-            .@"f32.load",
-            .@"f64.load",
-            .@"i32.store",
-            .@"i32.store8",
-            .@"i32.store16",
-            .@"i64.store",
-            .@"i64.store8",
-            .@"i64.store16",
-            .@"i64.store32",
-            .@"f32.store",
-            .@"f64.store",
-            => try op_memory.emitMemOp(&ctx, &ins),
             .@"memory.fill" => try op_memory.emitMemoryFill(&ctx),
             .@"memory.copy" => try op_memory.emitMemoryCopy(&ctx),
-            .@"memory.init" => try op_memory.emitMemoryInit(&ctx, &ins),
             // §9.9 / 9.9-m-3a: data.drop / elem.drop — write 1 to
             // the dropped-flag byte at `[r15+ptr_off]+idx`. No
             // operands consumed; no result pushed. validator already
@@ -1471,23 +1283,14 @@ pub fn compile(
             // §9.9 / 9.9-m-2a (per ADR-0058): table.get / table.set /
             // table.size — bounds-checked load/store against the
             // per-table TableSlice descriptor in JitRuntime.
-            .@"table.get" => try op_table.emitTableGet(&ctx, &ins),
-            .@"table.set" => try op_table.emitTableSet(&ctx, &ins),
-            .@"table.size" => try op_table.emitTableSize(&ctx, &ins),
-            .@"table.grow" => try op_table.emitTableGrow(&ctx, &ins),
             // §9.9 / 9.9-m-2b (per ADR-0058): table.fill — inline
             // loop writing N copies of val into refs[dst..dst+n].
-            .@"table.fill" => try op_table.emitTableFill(&ctx, &ins),
             // §9.9 / 9.9-m-2c (per ADR-0058): table.copy — element-
             // typed memmove with same-table backward arm.
-            .@"table.copy" => try op_table.emitTableCopy(&ctx, &ins),
             // §9.9 / 9.9-m-2c-init (per ADR-0058 amendment):
             // table.init — copy from elem segment to table; honours
             // elem_dropped flag.
-            .@"table.init" => try op_table.emitTableInit(&ctx, &ins),
             .br_table => try op_control.emitBrTable(&ctx, &ins),
-            .@"if" => try op_control.emitIf(&ctx, &ins),
-            .@"else" => try op_control.emitElse(&ctx, &ins),
             .br_if => try op_control.emitBrIf(&ctx, &ins),
             .end => {
                 // Two distinct forms:
@@ -1700,12 +1503,6 @@ pub fn compile(
             .@"v128.store32_lane" => try op_simd.emitV128Store32Lane(&ctx, &ins),
             .@"v128.store64_lane" => try op_simd.emitV128Store64Lane(&ctx, &ins),
             // §9.9 / 9.9-g-4 — splat handlers for all 6 shapes.
-            .@"i8x16.splat" => try op_simd_int_cmp_lane.emitI8x16Splat(&ctx, &ins),
-            .@"i16x8.splat" => try op_simd_int_cmp_lane.emitI16x8Splat(&ctx, &ins),
-            .@"i32x4.splat" => try op_simd_int_cmp_lane.emitI32x4Splat(&ctx, &ins),
-            .@"i64x2.splat" => try op_simd_int_cmp_lane.emitI64x2Splat(&ctx, &ins),
-            .@"f32x4.splat" => try op_simd_float.emitF32x4Splat(&ctx, &ins),
-            .@"f64x2.splat" => try op_simd_float.emitF64x2Splat(&ctx, &ins),
             .@"i32x4.extract_lane" => try op_simd_int_cmp_lane.emitI32x4ExtractLane(&ctx, &ins),
             .@"i32x4.replace_lane" => try op_simd_int_cmp_lane.emitI32x4ReplaceLane(&ctx, &ins),
             // §9.9 / 9.9-f-1 — v128 bitwise (AND / OR / XOR / ANDNOT
@@ -1713,77 +1510,17 @@ pub fn compile(
             // + Arm IHI 0055 §C7.2.{6, 34, 39, 93, 244} (NEON
             // AND/BIC/BSL/EOR/MVN). x86_64 mirror at op_simd.zig
             // landed in §9.5/9.6.
-            .@"v128.and" => try op_simd.emitV128And(&ctx, &ins),
-            .@"v128.or" => try op_simd.emitV128Or(&ctx, &ins),
-            .@"v128.xor" => try op_simd.emitV128Xor(&ctx, &ins),
-            .@"v128.andnot" => try op_simd.emitV128Andnot(&ctx, &ins),
-            .@"v128.not" => try op_simd.emitV128Not(&ctx, &ins),
-            .@"v128.bitselect" => try op_simd.emitV128Bitselect(&ctx, &ins),
             // §9.9/9.5-c-iv — int-arith ADD/SUB across all 4 shapes.
-            .@"i8x16.add" => try op_simd_int_arith.emitI8x16Add(&ctx, &ins),
-            .@"i8x16.sub" => try op_simd_int_arith.emitI8x16Sub(&ctx, &ins),
-            .@"i16x8.add" => try op_simd_int_arith.emitI16x8Add(&ctx, &ins),
-            .@"i16x8.sub" => try op_simd_int_arith.emitI16x8Sub(&ctx, &ins),
-            .@"i32x4.add" => try op_simd_int_arith.emitI32x4Add(&ctx, &ins),
-            .@"i32x4.sub" => try op_simd_int_arith.emitI32x4Sub(&ctx, &ins),
-            .@"i64x2.add" => try op_simd_int_arith.emitI64x2Add(&ctx, &ins),
-            .@"i64x2.sub" => try op_simd_int_arith.emitI64x2Sub(&ctx, &ins),
-            .@"i16x8.mul" => try op_simd_int_arith.emitI16x8Mul(&ctx, &ins),
-            .@"i32x4.mul" => try op_simd_int_arith.emitI32x4Mul(&ctx, &ins),
             // (i64x2.mul dispatch lives below alongside the §9.5-c-vii-mul block.)
             // §9.9 / 9.9-g-10 — int min/max + avgr_u (14 ops). NEON
             // has no .2D form for these (and Wasm spec correspondingly
             // has no i64x2 min/max/avgr); i32x4.avgr_u also doesn't
             // exist in the Wasm proposal.
-            .@"i8x16.min_s" => try op_simd_int_arith.emitI8x16MinS(&ctx, &ins),
-            .@"i8x16.min_u" => try op_simd_int_arith.emitI8x16MinU(&ctx, &ins),
-            .@"i8x16.max_s" => try op_simd_int_arith.emitI8x16MaxS(&ctx, &ins),
-            .@"i8x16.max_u" => try op_simd_int_arith.emitI8x16MaxU(&ctx, &ins),
-            .@"i8x16.avgr_u" => try op_simd_int_arith.emitI8x16AvgrU(&ctx, &ins),
-            .@"i16x8.min_s" => try op_simd_int_arith.emitI16x8MinS(&ctx, &ins),
-            .@"i16x8.min_u" => try op_simd_int_arith.emitI16x8MinU(&ctx, &ins),
-            .@"i16x8.max_s" => try op_simd_int_arith.emitI16x8MaxS(&ctx, &ins),
-            .@"i16x8.max_u" => try op_simd_int_arith.emitI16x8MaxU(&ctx, &ins),
-            .@"i16x8.avgr_u" => try op_simd_int_arith.emitI16x8AvgrU(&ctx, &ins),
-            .@"i32x4.min_s" => try op_simd_int_arith.emitI32x4MinS(&ctx, &ins),
-            .@"i32x4.min_u" => try op_simd_int_arith.emitI32x4MinU(&ctx, &ins),
-            .@"i32x4.max_s" => try op_simd_int_arith.emitI32x4MaxS(&ctx, &ins),
-            .@"i32x4.max_u" => try op_simd_int_arith.emitI32x4MaxU(&ctx, &ins),
             // §9.9 / 9.9-g-7 + 9.9-g-8 — int shifts (12 ops).
-            .@"i8x16.shl" => try op_simd_int_arith.emitI8x16Shl(&ctx, &ins),
-            .@"i16x8.shl" => try op_simd_int_arith.emitI16x8Shl(&ctx, &ins),
-            .@"i32x4.shl" => try op_simd_int_arith.emitI32x4Shl(&ctx, &ins),
-            .@"i64x2.shl" => try op_simd_int_arith.emitI64x2Shl(&ctx, &ins),
-            .@"i8x16.shr_u" => try op_simd_int_arith.emitI8x16ShrU(&ctx, &ins),
-            .@"i16x8.shr_u" => try op_simd_int_arith.emitI16x8ShrU(&ctx, &ins),
-            .@"i32x4.shr_u" => try op_simd_int_arith.emitI32x4ShrU(&ctx, &ins),
-            .@"i64x2.shr_u" => try op_simd_int_arith.emitI64x2ShrU(&ctx, &ins),
-            .@"i8x16.shr_s" => try op_simd_int_arith.emitI8x16ShrS(&ctx, &ins),
-            .@"i16x8.shr_s" => try op_simd_int_arith.emitI16x8ShrS(&ctx, &ins),
-            .@"i32x4.shr_s" => try op_simd_int_arith.emitI32x4ShrS(&ctx, &ins),
-            .@"i64x2.shr_s" => try op_simd_int_arith.emitI64x2ShrS(&ctx, &ins),
             // §9.9 / 9.9-g-3 — v128 reductions (any_true / all_true).
-            .@"v128.any_true" => try op_simd.emitV128AnyTrue(&ctx, &ins),
-            .@"i8x16.all_true" => try op_simd_int_cmp_lane.emitI8x16AllTrue(&ctx, &ins),
-            .@"i16x8.all_true" => try op_simd_int_cmp_lane.emitI16x8AllTrue(&ctx, &ins),
-            .@"i32x4.all_true" => try op_simd_int_cmp_lane.emitI32x4AllTrue(&ctx, &ins),
-            .@"i64x2.all_true" => try op_simd_int_cmp_lane.emitI64x2AllTrue(&ctx, &ins),
             // §9.9 / 9.9-g-19 — i*x*.bitmask (per ADR-0051; uses
             // emit-time-derived per-shape masks via extra_consts).
-            .@"i8x16.bitmask" => try op_simd_int_cmp_lane.emitI8x16Bitmask(&ctx, &ins),
-            .@"i16x8.bitmask" => try op_simd_int_cmp_lane.emitI16x8Bitmask(&ctx, &ins),
-            .@"i32x4.bitmask" => try op_simd_int_cmp_lane.emitI32x4Bitmask(&ctx, &ins),
-            .@"i64x2.bitmask" => try op_simd_int_cmp_lane.emitI64x2Bitmask(&ctx, &ins),
             // §9.9/9.9-f-7 — int unops (abs / neg / popcnt).
-            .@"i8x16.abs" => try op_simd_int_arith.emitI8x16Abs(&ctx, &ins),
-            .@"i8x16.neg" => try op_simd_int_arith.emitI8x16Neg(&ctx, &ins),
-            .@"i8x16.popcnt" => try op_simd_int_arith.emitI8x16Popcnt(&ctx, &ins),
-            .@"i16x8.abs" => try op_simd_int_arith.emitI16x8Abs(&ctx, &ins),
-            .@"i16x8.neg" => try op_simd_int_arith.emitI16x8Neg(&ctx, &ins),
-            .@"i32x4.abs" => try op_simd_int_arith.emitI32x4Abs(&ctx, &ins),
-            .@"i32x4.neg" => try op_simd_int_arith.emitI32x4Neg(&ctx, &ins),
-            .@"i64x2.abs" => try op_simd_int_arith.emitI64x2Abs(&ctx, &ins),
-            .@"i64x2.neg" => try op_simd_int_arith.emitI64x2Neg(&ctx, &ins),
             // §9.9/9.5-c-vi — int lane access for B/H/D element forms.
             // i32x4 already wired in 9.5-c-iii above. f32x4/f64x2 +
             // i64x2.mul defer to 9.5-c-vii.
@@ -1804,120 +1541,18 @@ pub fn compile(
             // §9.9/9.5-c-vii-mul — i64x2.mul multi-instr synthesis.
             .@"i64x2.mul" => try op_simd_int_arith.emitI64x2Mul(&ctx, &ins),
             // §9.6/9.6-a — f32x4 / f64x2 binary FP arithmetic.
-            .@"f32x4.add" => try op_simd_float.emitF32x4Add(&ctx, &ins),
-            .@"f32x4.sub" => try op_simd_float.emitF32x4Sub(&ctx, &ins),
-            .@"f32x4.mul" => try op_simd_float.emitF32x4Mul(&ctx, &ins),
-            .@"f32x4.div" => try op_simd_float.emitF32x4Div(&ctx, &ins),
-            .@"f64x2.add" => try op_simd_float.emitF64x2Add(&ctx, &ins),
-            .@"f64x2.sub" => try op_simd_float.emitF64x2Sub(&ctx, &ins),
-            .@"f64x2.mul" => try op_simd_float.emitF64x2Mul(&ctx, &ins),
-            .@"f64x2.div" => try op_simd_float.emitF64x2Div(&ctx, &ins),
             // §9.6/9.6-b — f32x4/f64x2 unary FP arithmetic.
-            .@"f32x4.abs" => try op_simd_float.emitF32x4Abs(&ctx, &ins),
-            .@"f32x4.neg" => try op_simd_float.emitF32x4Neg(&ctx, &ins),
-            .@"f32x4.sqrt" => try op_simd_float.emitF32x4Sqrt(&ctx, &ins),
-            .@"f32x4.ceil" => try op_simd_float.emitF32x4Ceil(&ctx, &ins),
-            .@"f32x4.floor" => try op_simd_float.emitF32x4Floor(&ctx, &ins),
-            .@"f32x4.trunc" => try op_simd_float.emitF32x4Trunc(&ctx, &ins),
-            .@"f32x4.nearest" => try op_simd_float.emitF32x4Nearest(&ctx, &ins),
-            .@"f64x2.abs" => try op_simd_float.emitF64x2Abs(&ctx, &ins),
-            .@"f64x2.neg" => try op_simd_float.emitF64x2Neg(&ctx, &ins),
-            .@"f64x2.sqrt" => try op_simd_float.emitF64x2Sqrt(&ctx, &ins),
-            .@"f64x2.ceil" => try op_simd_float.emitF64x2Ceil(&ctx, &ins),
-            .@"f64x2.floor" => try op_simd_float.emitF64x2Floor(&ctx, &ins),
-            .@"f64x2.trunc" => try op_simd_float.emitF64x2Trunc(&ctx, &ins),
-            .@"f64x2.nearest" => try op_simd_float.emitF64x2Nearest(&ctx, &ins),
             // §9.6/9.6-c-i — f32x4/f64x2 min/max (NaN-propagating).
-            .@"f32x4.min" => try op_simd_float.emitF32x4Min(&ctx, &ins),
-            .@"f32x4.max" => try op_simd_float.emitF32x4Max(&ctx, &ins),
-            .@"f64x2.min" => try op_simd_float.emitF64x2Min(&ctx, &ins),
-            .@"f64x2.max" => try op_simd_float.emitF64x2Max(&ctx, &ins),
             // §9.6/9.6-c-ii — f32x4/f64x2 pmin/pmax synthesis (FCMGT + BSL).
-            .@"f32x4.pmin" => try op_simd_float.emitF32x4Pmin(&ctx, &ins),
-            .@"f32x4.pmax" => try op_simd_float.emitF32x4Pmax(&ctx, &ins),
-            .@"f64x2.pmin" => try op_simd_float.emitF64x2Pmin(&ctx, &ins),
-            .@"f64x2.pmax" => try op_simd_float.emitF64x2Pmax(&ctx, &ins),
             // §9.6/9.6-d — int per-lane compares (CMEQ/CMGT/CMGE/CMHI/CMHS family).
-            .@"i8x16.eq" => try op_simd_int_cmp_lane.emitI8x16Eq(&ctx, &ins),
-            .@"i8x16.ne" => try op_simd_int_cmp_lane.emitI8x16Ne(&ctx, &ins),
-            .@"i8x16.lt_s" => try op_simd_int_cmp_lane.emitI8x16LtS(&ctx, &ins),
-            .@"i8x16.lt_u" => try op_simd_int_cmp_lane.emitI8x16LtU(&ctx, &ins),
-            .@"i8x16.gt_s" => try op_simd_int_cmp_lane.emitI8x16GtS(&ctx, &ins),
-            .@"i8x16.gt_u" => try op_simd_int_cmp_lane.emitI8x16GtU(&ctx, &ins),
-            .@"i8x16.le_s" => try op_simd_int_cmp_lane.emitI8x16LeS(&ctx, &ins),
-            .@"i8x16.le_u" => try op_simd_int_cmp_lane.emitI8x16LeU(&ctx, &ins),
-            .@"i8x16.ge_s" => try op_simd_int_cmp_lane.emitI8x16GeS(&ctx, &ins),
-            .@"i8x16.ge_u" => try op_simd_int_cmp_lane.emitI8x16GeU(&ctx, &ins),
-            .@"i16x8.eq" => try op_simd_int_cmp_lane.emitI16x8Eq(&ctx, &ins),
-            .@"i16x8.ne" => try op_simd_int_cmp_lane.emitI16x8Ne(&ctx, &ins),
-            .@"i16x8.lt_s" => try op_simd_int_cmp_lane.emitI16x8LtS(&ctx, &ins),
-            .@"i16x8.lt_u" => try op_simd_int_cmp_lane.emitI16x8LtU(&ctx, &ins),
-            .@"i16x8.gt_s" => try op_simd_int_cmp_lane.emitI16x8GtS(&ctx, &ins),
-            .@"i16x8.gt_u" => try op_simd_int_cmp_lane.emitI16x8GtU(&ctx, &ins),
-            .@"i16x8.le_s" => try op_simd_int_cmp_lane.emitI16x8LeS(&ctx, &ins),
-            .@"i16x8.le_u" => try op_simd_int_cmp_lane.emitI16x8LeU(&ctx, &ins),
-            .@"i16x8.ge_s" => try op_simd_int_cmp_lane.emitI16x8GeS(&ctx, &ins),
-            .@"i16x8.ge_u" => try op_simd_int_cmp_lane.emitI16x8GeU(&ctx, &ins),
-            .@"i32x4.eq" => try op_simd_int_cmp_lane.emitI32x4Eq(&ctx, &ins),
-            .@"i32x4.ne" => try op_simd_int_cmp_lane.emitI32x4Ne(&ctx, &ins),
-            .@"i32x4.lt_s" => try op_simd_int_cmp_lane.emitI32x4LtS(&ctx, &ins),
-            .@"i32x4.lt_u" => try op_simd_int_cmp_lane.emitI32x4LtU(&ctx, &ins),
-            .@"i32x4.gt_s" => try op_simd_int_cmp_lane.emitI32x4GtS(&ctx, &ins),
-            .@"i32x4.gt_u" => try op_simd_int_cmp_lane.emitI32x4GtU(&ctx, &ins),
-            .@"i32x4.le_s" => try op_simd_int_cmp_lane.emitI32x4LeS(&ctx, &ins),
-            .@"i32x4.le_u" => try op_simd_int_cmp_lane.emitI32x4LeU(&ctx, &ins),
-            .@"i32x4.ge_s" => try op_simd_int_cmp_lane.emitI32x4GeS(&ctx, &ins),
-            .@"i32x4.ge_u" => try op_simd_int_cmp_lane.emitI32x4GeU(&ctx, &ins),
-            .@"i64x2.eq" => try op_simd_int_cmp_lane.emitI64x2Eq(&ctx, &ins),
-            .@"i64x2.ne" => try op_simd_int_cmp_lane.emitI64x2Ne(&ctx, &ins),
-            .@"i64x2.lt_s" => try op_simd_int_cmp_lane.emitI64x2LtS(&ctx, &ins),
-            .@"i64x2.gt_s" => try op_simd_int_cmp_lane.emitI64x2GtS(&ctx, &ins),
-            .@"i64x2.le_s" => try op_simd_int_cmp_lane.emitI64x2LeS(&ctx, &ins),
-            .@"i64x2.ge_s" => try op_simd_int_cmp_lane.emitI64x2GeS(&ctx, &ins),
             // §9.6/9.6-e — FP per-lane compares (FCMEQ/FCMGT/FCMGE).
-            .@"f32x4.eq" => try op_simd_float.emitF32x4Eq(&ctx, &ins),
-            .@"f32x4.ne" => try op_simd_float.emitF32x4Ne(&ctx, &ins),
-            .@"f32x4.lt" => try op_simd_float.emitF32x4Lt(&ctx, &ins),
-            .@"f32x4.gt" => try op_simd_float.emitF32x4Gt(&ctx, &ins),
-            .@"f32x4.le" => try op_simd_float.emitF32x4Le(&ctx, &ins),
-            .@"f32x4.ge" => try op_simd_float.emitF32x4Ge(&ctx, &ins),
-            .@"f64x2.eq" => try op_simd_float.emitF64x2Eq(&ctx, &ins),
-            .@"f64x2.ne" => try op_simd_float.emitF64x2Ne(&ctx, &ins),
-            .@"f64x2.lt" => try op_simd_float.emitF64x2Lt(&ctx, &ins),
-            .@"f64x2.gt" => try op_simd_float.emitF64x2Gt(&ctx, &ins),
-            .@"f64x2.le" => try op_simd_float.emitF64x2Le(&ctx, &ins),
-            .@"f64x2.ge" => try op_simd_float.emitF64x2Ge(&ctx, &ins),
             // §9.6/9.6-f-i — i8x16.swizzle via NEON TBL (1-register form).
-            .@"i8x16.swizzle" => try op_simd_int_cmp_lane.emitI8x16Swizzle(&ctx, &ins),
             // §9.6/9.6-g-i — extend low/high (SXTL/SXTL2/UXTL/UXTL2).
-            .@"i16x8.extend_low_i8x16_s" => try op_simd_int_cmp_lane.emitI16x8ExtendLowI8x16S(&ctx, &ins),
-            .@"i16x8.extend_high_i8x16_s" => try op_simd_int_cmp_lane.emitI16x8ExtendHighI8x16S(&ctx, &ins),
-            .@"i16x8.extend_low_i8x16_u" => try op_simd_int_cmp_lane.emitI16x8ExtendLowI8x16U(&ctx, &ins),
-            .@"i16x8.extend_high_i8x16_u" => try op_simd_int_cmp_lane.emitI16x8ExtendHighI8x16U(&ctx, &ins),
-            .@"i32x4.extend_low_i16x8_s" => try op_simd_int_cmp_lane.emitI32x4ExtendLowI16x8S(&ctx, &ins),
-            .@"i32x4.extend_high_i16x8_s" => try op_simd_int_cmp_lane.emitI32x4ExtendHighI16x8S(&ctx, &ins),
-            .@"i32x4.extend_low_i16x8_u" => try op_simd_int_cmp_lane.emitI32x4ExtendLowI16x8U(&ctx, &ins),
-            .@"i32x4.extend_high_i16x8_u" => try op_simd_int_cmp_lane.emitI32x4ExtendHighI16x8U(&ctx, &ins),
-            .@"i64x2.extend_low_i32x4_s" => try op_simd_int_cmp_lane.emitI64x2ExtendLowI32x4S(&ctx, &ins),
-            .@"i64x2.extend_high_i32x4_s" => try op_simd_int_cmp_lane.emitI64x2ExtendHighI32x4S(&ctx, &ins),
-            .@"i64x2.extend_low_i32x4_u" => try op_simd_int_cmp_lane.emitI64x2ExtendLowI32x4U(&ctx, &ins),
-            .@"i64x2.extend_high_i32x4_u" => try op_simd_int_cmp_lane.emitI64x2ExtendHighI32x4U(&ctx, &ins),
             // §9.6/9.6-g-ii — saturating narrow (SQXTN/SQXTUN family).
-            .@"i8x16.narrow_i16x8_s" => try op_simd_int_cmp_lane.emitI8x16NarrowI16x8S(&ctx, &ins),
-            .@"i8x16.narrow_i16x8_u" => try op_simd_int_cmp_lane.emitI8x16NarrowI16x8U(&ctx, &ins),
-            .@"i16x8.narrow_i32x4_s" => try op_simd_int_cmp_lane.emitI16x8NarrowI32x4S(&ctx, &ins),
-            .@"i16x8.narrow_i32x4_u" => try op_simd_int_cmp_lane.emitI16x8NarrowI32x4U(&ctx, &ins),
             // §9.6/9.6-g-iii — i→f FP convert (SCVTF/UCVTF family).
-            .@"f32x4.convert_i32x4_s" => try op_simd_float.emitF32x4ConvertI32x4S(&ctx, &ins),
-            .@"f32x4.convert_i32x4_u" => try op_simd_float.emitF32x4ConvertI32x4U(&ctx, &ins),
-            .@"f64x2.convert_low_i32x4_s" => try op_simd_float.emitF64x2ConvertLowI32x4S(&ctx, &ins),
             .@"f64x2.convert_low_i32x4_u" => try op_simd_float.emitF64x2ConvertLowI32x4U(&ctx, &ins),
             // §9.6/9.6-g-iv — FP promote/demote (FCVTL/FCVTN).
-            .@"f64x2.promote_low_f32x4" => try op_simd_float.emitF64x2PromoteLowF32x4(&ctx, &ins),
-            .@"f32x4.demote_f64x2_zero" => try op_simd_float.emitF32x4DemoteF64x2Zero(&ctx, &ins),
             // §9.6/9.6-g-v — trunc_sat (FCVTZS/U + SQXTN/UQXTN family).
-            .@"i32x4.trunc_sat_f32x4_s" => try op_simd_float.emitI32x4TruncSatF32x4S(&ctx, &ins),
-            .@"i32x4.trunc_sat_f32x4_u" => try op_simd_float.emitI32x4TruncSatF32x4U(&ctx, &ins),
             .@"i32x4.trunc_sat_f64x2_s_zero" => try op_simd_float.emitI32x4TruncSatF64x2SZero(&ctx, &ins),
             .@"i32x4.trunc_sat_f64x2_u_zero" => try op_simd_float.emitI32x4TruncSatF64x2UZero(&ctx, &ins),
             // §9.6/9.6-f-ii — v128.const + i8x16.shuffle (per ADR-0042
