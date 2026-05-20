@@ -1128,13 +1128,13 @@ pub fn compile(
             .@"f32x4.sub" => try op_simd_float.emitF32x4SubCtx(&ctx, &ins),
             .@"f32x4.mul" => try op_simd_float.emitF32x4MulCtx(&ctx, &ins),
             .@"f32x4.div" => try op_simd_float.emitF32x4DivCtx(&ctx, &ins),
-            .@"f32x4.sqrt" => try op_simd_float.emitF32x4Sqrt(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f32x4.sqrt" => try op_simd_float.emitF32x4SqrtCtx(&ctx, &ins),
             // §9.12-B / B101: SIMD f64x2 arith migrated to ctx tuple.
             .@"f64x2.add" => try op_simd_float.emitF64x2AddCtx(&ctx, &ins),
             .@"f64x2.sub" => try op_simd_float.emitF64x2SubCtx(&ctx, &ins),
             .@"f64x2.mul" => try op_simd_float.emitF64x2MulCtx(&ctx, &ins),
             .@"f64x2.div" => try op_simd_float.emitF64x2DivCtx(&ctx, &ins),
-            .@"f64x2.sqrt" => try op_simd_float.emitF64x2Sqrt(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.sqrt" => try op_simd_float.emitF64x2SqrtCtx(&ctx, &ins),
             // §9.7 / 9.7-q: f32x4 + f64x2 min/max NaN-correction
             // synthesis (4 ops). MINPS/MAXPS / MINPD/MAXPD wrapped
             // with cranelift's 10-instr (fmin) / 13-instr (fmax)
@@ -1450,18 +1450,19 @@ pub fn compile(
             // PSLL{D,Q}-imm 31/63); ceil/floor/trunc/nearest via
             // SSE4.1 ROUNDPS/ROUNDPD imm with precision-exception
             // suppression (bit 3 set).
-            .@"f32x4.abs" => try op_simd_float.emitF32x4Abs(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"f64x2.abs" => try op_simd_float.emitF64x2Abs(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"f32x4.neg" => try op_simd_float.emitF32x4Neg(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"f64x2.neg" => try op_simd_float.emitF64x2Neg(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"f32x4.ceil" => try op_simd_float.emitF32x4Ceil(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"f32x4.floor" => try op_simd_float.emitF32x4Floor(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"f32x4.trunc" => try op_simd_float.emitF32x4Trunc(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"f32x4.nearest" => try op_simd_float.emitF32x4Nearest(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"f64x2.ceil" => try op_simd_float.emitF64x2Ceil(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"f64x2.floor" => try op_simd_float.emitF64x2Floor(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"f64x2.trunc" => try op_simd_float.emitF64x2Trunc(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"f64x2.nearest" => try op_simd_float.emitF64x2Nearest(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            // §9.12-B / B102: SIMD float unary cohort migrated to ctx tuple.
+            .@"f32x4.abs" => try op_simd_float.emitF32x4AbsCtx(&ctx, &ins),
+            .@"f64x2.abs" => try op_simd_float.emitF64x2AbsCtx(&ctx, &ins),
+            .@"f32x4.neg" => try op_simd_float.emitF32x4NegCtx(&ctx, &ins),
+            .@"f64x2.neg" => try op_simd_float.emitF64x2NegCtx(&ctx, &ins),
+            .@"f32x4.ceil" => try op_simd_float.emitF32x4CeilCtx(&ctx, &ins),
+            .@"f32x4.floor" => try op_simd_float.emitF32x4FloorCtx(&ctx, &ins),
+            .@"f32x4.trunc" => try op_simd_float.emitF32x4TruncCtx(&ctx, &ins),
+            .@"f32x4.nearest" => try op_simd_float.emitF32x4NearestCtx(&ctx, &ins),
+            .@"f64x2.ceil" => try op_simd_float.emitF64x2CeilCtx(&ctx, &ins),
+            .@"f64x2.floor" => try op_simd_float.emitF64x2FloorCtx(&ctx, &ins),
+            .@"f64x2.trunc" => try op_simd_float.emitF64x2TruncCtx(&ctx, &ins),
+            .@"f64x2.nearest" => try op_simd_float.emitF64x2NearestCtx(&ctx, &ins),
             // §9.12-B / B71: memory.size + memory.grow migrated.
             .@"memory.size" => try op_call.emitMemorySizeCtx(&ctx, &ins),
             .@"memory.grow" => try op_call.emitMemoryGrowCtx(&ctx, &ins),

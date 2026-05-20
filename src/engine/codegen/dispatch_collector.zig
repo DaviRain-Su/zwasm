@@ -1270,20 +1270,7 @@ pub const collected_x86_64_ops = .{
     // SIMD int sat arith cohort moved at B99 (10 ops; all 6-arg).
     // SIMD f32x4 arith cohort moved at B100 (8 ops).
     // SIMD f64x2 arith cohort moved at B101 (8 ops).
-    x86_64_f32x4_abs,
-    x86_64_f32x4_neg,
-    x86_64_f32x4_sqrt,
-    x86_64_f32x4_ceil,
-    x86_64_f32x4_floor,
-    x86_64_f32x4_trunc,
-    x86_64_f32x4_nearest,
-    x86_64_f64x2_abs,
-    x86_64_f64x2_neg,
-    x86_64_f64x2_sqrt,
-    x86_64_f64x2_ceil,
-    x86_64_f64x2_floor,
-    x86_64_f64x2_trunc,
-    x86_64_f64x2_nearest,
+    // SIMD float unary cohort moved at B102 (14 ops; all 5-arg).
     x86_64_f32x4_eq,
     x86_64_f32x4_ne,
     x86_64_f32x4_lt,
@@ -1694,6 +1681,21 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_f64x2_max,
     x86_64_f64x2_pmin,
     x86_64_f64x2_pmax,
+    // B102: SIMD float unary cohort moved from legacy.
+    x86_64_f32x4_abs,
+    x86_64_f32x4_neg,
+    x86_64_f32x4_sqrt,
+    x86_64_f32x4_ceil,
+    x86_64_f32x4_floor,
+    x86_64_f32x4_trunc,
+    x86_64_f32x4_nearest,
+    x86_64_f64x2_abs,
+    x86_64_f64x2_neg,
+    x86_64_f64x2_sqrt,
+    x86_64_f64x2_ceil,
+    x86_64_f64x2_floor,
+    x86_64_f64x2_trunc,
+    x86_64_f64x2_nearest,
 };
 
 comptime {
@@ -1764,8 +1766,8 @@ test "migratedArchOpCount tracks collected per-arch tuples (B59: arm64=348, x86_
     // load/store per-op files directly to ctx tuple (not in legacy
     // tuple before, so x86_64 count unchanged).
     try std.testing.expectEqual(@as(usize, 348), migratedArchOpCount(.arm64));
-    // B79..B100 walked cohorts; B101 SIMD f64x2 arith (8 ops).
-    try std.testing.expectEqual(@as(usize, 84), migratedArchOpCount(.x86_64));
+    // B79..B101 walked cohorts; B102 SIMD float unary (14 ops).
+    try std.testing.expectEqual(@as(usize, 70), migratedArchOpCount(.x86_64));
 }
 
 test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
@@ -1836,8 +1838,9 @@ test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // B99: SIMD int sat arith (10 ops; all 6-arg) moved (+10 = 291).
     // B100: SIMD f32x4 arith (8 ops; add/sub/mul/div 6-arg, min/max/
     // pmin/pmax 5-arg) moved (+8 = 299). B101: SIMD f64x2 arith
-    // (8 ops; mirror) moved (+8 = 307).
-    try std.testing.expectEqual(@as(usize, 307), collected_x86_64_ctx_ops.len);
+    // (8 ops; mirror) moved (+8 = 307). B102: SIMD float unary
+    // (14 ops; all 5-arg) moved (+14 = 321).
+    try std.testing.expectEqual(@as(usize, 321), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would
