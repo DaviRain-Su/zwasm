@@ -29,6 +29,35 @@ Before editing code to fix a bug, run a **same-class-cases survey**:
 This complements `textbook_survey.md` (task-start design survey) by
 addressing **bug-fix-time** survey discipline.
 
+## `/continue` Step 4 inline checklist (per master plan §9.12-C)
+
+When the per-task TDD loop's Step 4 (Refactor) involves a bug-fix
+diff, walk this 4-item checklist **before** the Mac lint gate:
+
+- [ ] **Same-class-cases grep** — for every changed symbol /
+      pattern, `rg -n '<symbol>' src/` to find siblings. If the
+      diff is a bundled-arm rename or pattern change, the related
+      siblings often live in adjacent files (e.g., x86_64 mirror
+      of an arm64 fix).
+- [ ] **Multi-tag arm audit** — when removing or renaming a switch
+      arm covering multiple `.@"foo"` patterns, verify each
+      constituent is independently handled by the new dispatch
+      path. Discovered by B109's `.select, .select_typed` regression
+      where only `.select` had a per-op file.
+- [ ] **§14 forbidden list re-read** — if the diff is near a §14
+      entry, re-read the corresponding `.claude/rules/*.md` file
+      auto-loaded with the source. Specifically: single_slot_dual_
+      meaning.md, no_workaround.md, abi_callee_saved_pinning.md.
+- [ ] **Boundary fixture obligation** — per
+      `.claude/rules/edge_case_testing.md` Stress axes section,
+      identify which axes the fix sits on. If it touches numeric
+      range, alignment, register pressure, dispatch shape, ABI
+      boundary, control flow, or validator strictness — add a
+      regression fixture in the same commit unless one exists.
+
+Each item is 30 seconds; the discipline prevents the "fix at
+symptom not population" failure mode that motivated this rule.
+
 ## When to skip (gate)
 
 - **Trivial fixes**: typos in comments, format strings, missing
