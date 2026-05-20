@@ -129,10 +129,38 @@ fn simdOnModuleLoaded(
     base.resetGrowableMemory(1);
     @memset(scratch_globals[0..], 0);
 
+    // Close-plan §6 (j) Step B cohort 1 — see non_simd mirror.
+    if (base.current_registered) |reg| {
+        base.applyImportedGlobalsFromRegistered(
+            gpa,
+            wasm_bytes,
+            compiled.globals_offsets,
+            compiled.globals_valtypes,
+            scratch_globals[0..],
+            compiled.num_global_imports,
+            reg,
+        ) catch |err| {
+            try stdout.print("FAIL  {s} imported-globals-init: {s}\n", .{ name, @errorName(err) });
+            return err;
+        };
+    }
+
+    const gctx_runtime = @import("zwasm").engine.runner_validate.GlobalsCtx{
+        .offsets = compiled.globals_offsets,
+        .valtypes = compiled.globals_valtypes,
+        .buf = scratch_globals[0..],
+        .num_imports = compiled.num_global_imports,
+    };
+
     // §9.9 / 9.9-d-7: write active data-segment bytes so subsequent
     // v128.load fixtures see the fixture-declared bytes instead of
     // the all-zero memset baseline.
-    runner_mod.applyActiveDataSegments(gpa, wasm_bytes, base.growable_memory[0..@intCast(base.current_mem_bytes)]) catch |err| {
+    runner_mod.applyActiveDataSegmentsCtx(
+        gpa,
+        wasm_bytes,
+        base.growable_memory[0..@intCast(base.current_mem_bytes)],
+        gctx_runtime,
+    ) catch |err| {
         try stdout.print("FAIL  {s} data-init: {s}\n", .{ name, @errorName(err) });
         return err;
     };
@@ -152,12 +180,13 @@ fn simdOnModuleLoaded(
     };
     // D-063 discharge (§9.9 / 9.9-h-4) — populate the funcref table
     // from active element segments so `call_indirect` finds entries.
-    runner_mod.applyTableInit(
+    runner_mod.applyTableInitCtx(
         gpa,
         wasm_bytes,
         compiled,
         scratch_funcptrs[0..],
         scratch_typeidxs[0..],
+        gctx_runtime,
     ) catch |err| {
         try stdout.print("FAIL  {s} table-init: {s}\n", .{ name, @errorName(err) });
         return err;
@@ -166,12 +195,13 @@ fn simdOnModuleLoaded(
     // runner — wire per-non-zero-table scratch for multi-table
     // JIT call_indirect. SIMD corpora today are single-table, so
     // this collapses to an entry-0 rebind + `active_table_count = 1`.
-    base.setupMultiTableScratch(
+    base.setupMultiTableScratchCtx(
         gpa,
         wasm_bytes,
         compiled,
         scratch_funcptrs[0..],
         scratch_typeidxs[0..],
+        gctx_runtime,
     ) catch |err| {
         try stdout.print("FAIL  {s} multi-table-init: {s}\n", .{ name, @errorName(err) });
         return err;

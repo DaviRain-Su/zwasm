@@ -151,14 +151,36 @@ pub fn validateGlobalInitExpr(
     if (pos + 1 != expr.len) return Error.InvalidGlobalInitExpr;
 }
 
+/// Context for resolving `global.get N` inside a const-expression
+/// during init-time (active data offset, active elem offset,
+/// defined-global init). Wasm spec §3.3.3 restricts const-expr
+/// `global.get` to imported immutable globals (N <
+/// num_global_imports); the importer-side scratch buffer must be
+/// pre-populated with the imported values before any caller of
+/// the eval helpers below is invoked. When `ctx` is `null`, the
+/// helpers behave as before — `global.get` reaches the `else`
+/// arm and returns `UnsupportedConstExpr` / `UnsupportedEntrySignature`.
+pub const GlobalsCtx = struct {
+    offsets: []const u32,
+    valtypes: []const zir.ValType,
+    buf: []const u8,
+    num_imports: u32,
+};
+
 /// Decode a scalar const-expression's raw bits as a u64. Used by
 /// setupRuntime to initialise defined-global slots from their
 /// init_expr. Returns `Error.UnsupportedEntrySignature` for
 /// shapes not yet supported (the const-expr corpus consumed by
 /// the Wasm 2.0 spec runner is finite — i32/i64/f32/f64.const,
 /// ref.null, ref.func, v128.const is handled by the separate
-/// `evalConstV128Expr`).
+/// `evalConstV128Expr`). `global.get N` for imported immutable
+/// globals is supported when `ctx` is non-null per close-plan
+/// §6 (j) Step B cohort 1.
 pub fn evalConstScalarRaw(expr: []const u8) Error!u64 {
+    return evalConstScalarRawCtx(expr, null);
+}
+
+pub fn evalConstScalarRawCtx(expr: []const u8, ctx: ?GlobalsCtx) Error!u64 {
     if (expr.len < 2) return Error.UnsupportedEntrySignature;
     var pos: usize = 1;
     const v: u64 = switch (expr[0]) {
@@ -200,6 +222,20 @@ pub fn evalConstScalarRaw(expr: []const u8) Error!u64 {
             const fidx = leb128.readUleb128(u32, expr, &pos) catch return Error.UnsupportedEntrySignature;
             break :blk @as(u64, fidx);
         },
+        0x23 => blk: { // global.get N — close-plan §6 (j) Step B cohort 1
+            const idx = leb128.readUleb128(u32, expr, &pos) catch return Error.UnsupportedEntrySignature;
+            const c = ctx orelse return Error.UnsupportedEntrySignature;
+            if (idx >= c.num_imports) return Error.UnsupportedEntrySignature;
+            if (idx >= c.offsets.len or idx >= c.valtypes.len) return Error.UnsupportedEntrySignature;
+            const off = c.offsets[idx];
+            const slot_size: u32 = switch (c.valtypes[idx]) {
+                .v128 => 16, // unreachable in scalar path; reject below
+                .i32, .i64, .f32, .f64, .funcref, .externref => 8,
+            };
+            if (c.valtypes[idx] == .v128) return Error.UnsupportedEntrySignature;
+            if (off + slot_size > c.buf.len) return Error.UnsupportedEntrySignature;
+            break :blk std.mem.readInt(u64, c.buf[off..][0..8], .little);
+        },
         else => return Error.UnsupportedEntrySignature,
     };
     if (pos >= expr.len or expr[pos] != 0x0B) return Error.UnsupportedEntrySignature;
@@ -225,9 +261,36 @@ pub fn evalConstV128Expr(expr: []const u8) Error!([16]u8) {
 /// `runtime/instance/instantiate.zig:evalConstI32Expr` but stays
 /// JIT-runner-local to avoid pulling instance/ into engine/.
 pub fn evalConstI32Expr(expr: []const u8) Error!i32 {
-    if (expr.len < 2 or expr[0] != 0x41) return Error.UnsupportedConstExpr;
+    return evalConstI32ExprCtx(expr, null);
+}
+
+/// Context-aware variant per close-plan §6 (j) Step B cohort 1.
+/// Accepts the `global.get N` shape (opcode 0x23) for imported
+/// immutable globals when `ctx` is non-null. The importer-side
+/// `ctx.buf` must be pre-populated with each imported global's
+/// resolved value (see spec runner's
+/// `applyImportedGlobalsFromRegistered`).
+pub fn evalConstI32ExprCtx(expr: []const u8, ctx: ?GlobalsCtx) Error!i32 {
+    if (expr.len < 2) return Error.UnsupportedConstExpr;
     var pos: usize = 1;
-    const v = leb128.readSleb128(i32, expr, &pos) catch return Error.UnsupportedConstExpr;
+    const v: i32 = switch (expr[0]) {
+        0x41 => blk: { // i32.const
+            const n = leb128.readSleb128(i32, expr, &pos) catch return Error.UnsupportedConstExpr;
+            break :blk n;
+        },
+        0x23 => blk: { // global.get N
+            const idx = leb128.readUleb128(u32, expr, &pos) catch return Error.UnsupportedConstExpr;
+            const c = ctx orelse return Error.UnsupportedConstExpr;
+            if (idx >= c.num_imports) return Error.UnsupportedConstExpr;
+            if (idx >= c.offsets.len or idx >= c.valtypes.len) return Error.UnsupportedConstExpr;
+            if (c.valtypes[idx] != .i32) return Error.UnsupportedConstExpr;
+            const off = c.offsets[idx];
+            if (off + 4 > c.buf.len) return Error.UnsupportedConstExpr;
+            const bits = std.mem.readInt(u32, c.buf[off..][0..4], .little);
+            break :blk @bitCast(bits);
+        },
+        else => return Error.UnsupportedConstExpr,
+    };
     if (pos >= expr.len or expr[pos] != 0x0B) return Error.UnsupportedConstExpr;
     return v;
 }

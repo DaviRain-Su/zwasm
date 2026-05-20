@@ -173,7 +173,40 @@ fn nonSimdOnModuleLoaded(
     base.current_mem_max_pages = mem_limits.max;
     @memset(scratch_globals[0..], 0);
 
-    runner_mod.applyActiveDataSegments(gpa, wasm_bytes, base.growable_memory[0..@intCast(base.current_mem_bytes)]) catch |err| {
+    // Close-plan §6 (j) Step B cohort 1 — populate the importer's
+    // scratch_globals[0..num_global_imports) from registered
+    // exporters (spectest + fixture-to-fixture) BEFORE evaluating
+    // any const-exprs that may `global.get N` against those slots.
+    // Order matters: data / elem / defined-global init exprs all
+    // observe the populated slots via `GlobalsCtx`.
+    if (base.current_registered) |reg| {
+        base.applyImportedGlobalsFromRegistered(
+            gpa,
+            wasm_bytes,
+            compiled.globals_offsets,
+            compiled.globals_valtypes,
+            scratch_globals[0..],
+            compiled.num_global_imports,
+            reg,
+        ) catch |err| {
+            try stdout.print("FAIL  {s} imported-globals-init: {s}\n", .{ name, @errorName(err) });
+            return err;
+        };
+    }
+
+    const gctx_runtime = @import("zwasm").engine.runner_validate.GlobalsCtx{
+        .offsets = compiled.globals_offsets,
+        .valtypes = compiled.globals_valtypes,
+        .buf = scratch_globals[0..],
+        .num_imports = compiled.num_global_imports,
+    };
+
+    runner_mod.applyActiveDataSegmentsCtx(
+        gpa,
+        wasm_bytes,
+        base.growable_memory[0..@intCast(base.current_mem_bytes)],
+        gctx_runtime,
+    ) catch |err| {
         try stdout.print("FAIL  {s} data-init: {s}\n", .{ name, @errorName(err) });
         return err;
     };
@@ -188,12 +221,13 @@ fn nonSimdOnModuleLoaded(
         try stdout.print("FAIL  {s} globals-init: {s}\n", .{ name, @errorName(err) });
         return err;
     };
-    runner_mod.applyTableInit(
+    runner_mod.applyTableInitCtx(
         gpa,
         wasm_bytes,
         compiled,
         scratch_funcptrs[0..],
         scratch_typeidxs[0..],
+        gctx_runtime,
     ) catch |err| {
         try stdout.print("FAIL  {s} table-init: {s}\n", .{ name, @errorName(err) });
         return err;
@@ -204,12 +238,13 @@ fn nonSimdOnModuleLoaded(
     // modules). Single-table modules become a 1-line entry-0
     // rebind; multi-table modules walk each non-zero table's elem
     // segments into the per-table scratch.
-    base.setupMultiTableScratch(
+    base.setupMultiTableScratchCtx(
         gpa,
         wasm_bytes,
         compiled,
         scratch_funcptrs[0..],
         scratch_typeidxs[0..],
+        gctx_runtime,
     ) catch |err| {
         try stdout.print("FAIL  {s} multi-table-init: {s}\n", .{ name, @errorName(err) });
         return err;

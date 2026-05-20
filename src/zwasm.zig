@@ -129,6 +129,7 @@ pub const instruction = struct {
 };
 pub const engine = struct {
     pub const runner = @import("engine/runner.zig");
+    pub const runner_validate = @import("engine/runner_validate.zig");
     pub const export_lookup = @import("engine/export_lookup.zig");
     pub const codegen = struct {
         pub const dispatch_collector = @import("engine/codegen/dispatch_collector.zig");

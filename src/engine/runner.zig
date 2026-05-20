@@ -1,3 +1,4 @@
+// FILE-SIZE-EXEMPT: split plan tracked in ADR-0079 (Proposed, close-plan §6 (g)) — runner.zig accumulates driver + compile + setup; close-plan §6 (j) Step B cohort 1 added GlobalsCtx wiring pushing past 2000-line soft target. Implementation deferred per ADR-0079 sequencing (D-141 unblocked).
 //! End-to-end wasm → JIT runner (Step 4 / sub-7.5b-i).
 //!
 //! Loads raw wasm bytes, walks the standard sections, compiles
@@ -1009,6 +1010,18 @@ pub fn applyDefinedGlobalsInit(
     var globals_decoded = try sections.decodeGlobals(ta, section.body);
     defer globals_decoded.deinit();
     if (globals_decoded.items.len + num_global_imports != globals_offsets.len) return Error.UnsupportedEntrySignature;
+    // Pre-populated imports prefix at [0..num_global_imports) lets
+    // `(global.get N)` in defined-global init exprs resolve when
+    // N references an imported immutable global (Wasm spec §3.3.3).
+    // Callers that haven't populated the import prefix get the
+    // ctx but its buf reads zeros — matching pre-cohort-1 behaviour
+    // for fixtures that don't use global.get in init exprs.
+    const gctx: rv.GlobalsCtx = .{
+        .offsets = globals_offsets,
+        .valtypes = globals_valtypes,
+        .buf = globals_buf,
+        .num_imports = num_global_imports,
+    };
     for (globals_decoded.items, 0..) |gd, gi| {
         const off = globals_offsets[num_global_imports + gi];
         const vt = globals_valtypes[num_global_imports + gi];
@@ -1020,7 +1033,7 @@ pub fn applyDefinedGlobalsInit(
             },
             .i32, .i64, .f32, .f64, .funcref, .externref => {
                 if (off + 8 > globals_buf.len) return Error.UnsupportedEntrySignature;
-                const raw = try rv.evalConstScalarRaw(gd.init_expr);
+                const raw = try rv.evalConstScalarRawCtx(gd.init_expr, gctx);
                 std.mem.writeInt(u64, globals_buf[off..][0..8], raw, .little);
             },
         }
@@ -1071,6 +1084,20 @@ pub fn applyTableInit(
     return applyTableInitForTable(allocator, wasm_bytes, compiled, 0, funcptrs_buf, typeidxs_buf);
 }
 
+/// Ctx-aware variant per close-plan §6 (j) Step B cohort 1.
+/// `(elem (offset (global.get N)) ...)` resolves N against the
+/// importer-side global buffer when ctx is non-null.
+pub fn applyTableInitCtx(
+    allocator: Allocator,
+    wasm_bytes: []const u8,
+    compiled: *const CompiledWasm,
+    funcptrs_buf: []u64,
+    typeidxs_buf: []u32,
+    ctx: ?rv.GlobalsCtx,
+) Error!void {
+    return applyTableInitForTableCtx(allocator, wasm_bytes, compiled, 0, funcptrs_buf, typeidxs_buf, ctx);
+}
+
 /// §9.9 / 9.9-l-1b-d093-d42b (D-112): per-table variant of
 /// `applyTableInit`. `tableidx` selects which declared table's
 /// active element segments are applied; segments targeting any
@@ -1084,6 +1111,18 @@ pub fn applyTableInitForTable(
     tableidx: u32,
     funcptrs_buf: []u64,
     typeidxs_buf: []u32,
+) Error!void {
+    return applyTableInitForTableCtx(allocator, wasm_bytes, compiled, tableidx, funcptrs_buf, typeidxs_buf, null);
+}
+
+pub fn applyTableInitForTableCtx(
+    allocator: Allocator,
+    wasm_bytes: []const u8,
+    compiled: *const CompiledWasm,
+    tableidx: u32,
+    funcptrs_buf: []u64,
+    typeidxs_buf: []u32,
+    ctx: ?rv.GlobalsCtx,
 ) Error!void {
     if (funcptrs_buf.len != typeidxs_buf.len) return Error.UnsupportedEntrySignature;
     @memset(funcptrs_buf, 0);
@@ -1119,7 +1158,7 @@ pub fn applyTableInitForTable(
     for (elems.items) |seg| {
         if (seg.kind != .active) continue;
         if (seg.tableidx != tableidx) continue;
-        const off = rv.evalConstI32Expr(seg.offset_expr) catch return Error.UnsupportedEntrySignature;
+        const off = rv.evalConstI32ExprCtx(seg.offset_expr, ctx) catch return Error.UnsupportedEntrySignature;
         if (off < 0) return Error.UnsupportedEntrySignature;
         const base: usize = @intCast(off);
         if (base + seg.funcidxs.len > funcptrs_buf.len) return Error.UnsupportedEntrySignature;
@@ -1143,6 +1182,10 @@ pub fn applyTableInitForTable(
 /// that would SEGV on `call_indirect`. No-op when `dispatch`
 /// is empty.
 pub fn patchTableImportFuncptrs(allocator: Allocator, wasm_bytes: []const u8, num_imports: u32, tableidx: u32, dispatch: []const usize, funcptrs_buf: []u64) Error!void {
+    return patchTableImportFuncptrsCtx(allocator, wasm_bytes, num_imports, tableidx, dispatch, funcptrs_buf, null);
+}
+
+pub fn patchTableImportFuncptrsCtx(allocator: Allocator, wasm_bytes: []const u8, num_imports: u32, tableidx: u32, dispatch: []const usize, funcptrs_buf: []u64, ctx: ?rv.GlobalsCtx) Error!void {
     if (num_imports == 0 or dispatch.len == 0) return;
     var ta = std.heap.ArenaAllocator.init(allocator);
     defer ta.deinit();
@@ -1153,7 +1196,7 @@ pub fn patchTableImportFuncptrs(allocator: Allocator, wasm_bytes: []const u8, nu
     defer elems.deinit();
     for (elems.items) |seg| {
         if (seg.kind != .active or seg.tableidx != tableidx) continue;
-        const off = rv.evalConstI32Expr(seg.offset_expr) catch return Error.UnsupportedEntrySignature;
+        const off = rv.evalConstI32ExprCtx(seg.offset_expr, ctx) catch return Error.UnsupportedEntrySignature;
         if (off < 0) return Error.UnsupportedEntrySignature;
         const base: usize = @intCast(off);
         for (seg.funcidxs, 0..) |fidx, i| {
@@ -1222,6 +1265,19 @@ pub fn applyActiveDataSegments(
     wasm_bytes: []const u8,
     memory: []u8,
 ) Error!void {
+    return applyActiveDataSegmentsCtx(allocator, wasm_bytes, memory, null);
+}
+
+/// Ctx-aware variant per close-plan §6 (j) Step B cohort 1.
+/// Resolves `(data (offset (global.get N)) ...)` when N references
+/// an imported immutable global whose value is in `ctx.buf` at
+/// `ctx.offsets[N]`.
+pub fn applyActiveDataSegmentsCtx(
+    allocator: Allocator,
+    wasm_bytes: []const u8,
+    memory: []u8,
+    ctx: ?rv.GlobalsCtx,
+) Error!void {
     var temp_arena = std.heap.ArenaAllocator.init(allocator);
     defer temp_arena.deinit();
     const ta = temp_arena.allocator();
@@ -1231,7 +1287,7 @@ pub fn applyActiveDataSegments(
         defer datas.deinit();
         for (datas.items) |seg| {
             if (seg.kind != .active) continue;
-            const off = rv.evalConstI32Expr(seg.offset_expr) catch return Error.UnsupportedEntrySignature;
+            const off = rv.evalConstI32ExprCtx(seg.offset_expr, ctx) catch return Error.UnsupportedEntrySignature;
             if (off < 0) return Error.UnsupportedEntrySignature;
             const off_u: u64 = @intCast(off);
             if (off_u + seg.bytes.len > memory.len) return Error.UnsupportedEntrySignature;

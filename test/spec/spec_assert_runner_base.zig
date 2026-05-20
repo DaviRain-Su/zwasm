@@ -571,6 +571,17 @@ pub fn setupMultiTableScratch(
     table0_funcptrs: []u64,
     table0_typeidxs: []u32,
 ) anyerror!void {
+    return setupMultiTableScratchCtx(gpa, wasm_bytes, compiled, table0_funcptrs, table0_typeidxs, null);
+}
+
+pub fn setupMultiTableScratchCtx(
+    gpa: std.mem.Allocator,
+    wasm_bytes: []const u8,
+    compiled: *const runner_mod.CompiledWasm,
+    table0_funcptrs: []u64,
+    table0_typeidxs: []u32,
+    gctx: ?zwasm.engine.runner_validate.GlobalsCtx,
+) anyerror!void {
     const num_tables = runner_mod.countDeclaredTables(gpa, wasm_bytes);
     if (num_tables > SCRATCH_MAX_TABLES) return error.UnsupportedEntrySignature;
 
@@ -668,20 +679,21 @@ pub fn setupMultiTableScratch(
             const fp_slice = scratch_extra_funcptrs[k - 1][0..tbl_min];
             const ti_slice = scratch_extra_typeidxs[k - 1][0..tbl_min];
             if (tbl_min > 0) {
-                try runner_mod.applyTableInitForTable(gpa, wasm_bytes, compiled, k, fp_slice, ti_slice);
+                try runner_mod.applyTableInitForTableCtx(gpa, wasm_bytes, compiled, k, fp_slice, ti_slice, gctx);
                 // §9.9-III (c)-2.3-γ-5 multi-table extension: patch
                 // import-bearing entries in table k's funcptr slice
                 // with resolved bridge-thunk addresses from
                 // `current_dispatch`. Mirrors the table-0 patch in
                 // each on_module_loaded; here for tables 1..N.
                 if (current_dispatch) |disp| {
-                    try runner_mod.patchTableImportFuncptrs(
+                    try runner_mod.patchTableImportFuncptrsCtx(
                         gpa,
                         wasm_bytes,
                         compiled.num_imports,
                         k,
                         disp,
                         fp_slice,
+                        gctx,
                     );
                 }
             }
@@ -692,7 +704,7 @@ pub fn setupMultiTableScratch(
         }
         const refs_slice = scratch_table_refs[k][0..tbl_min];
         @memset(refs_slice, Value.null_ref);
-        try populateTableRefs(gpa, wasm_bytes, compiled, k, refs_slice);
+        try populateTableRefs(gpa, wasm_bytes, compiled, k, refs_slice, gctx);
         // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
         // funcref tables alias the funcptrs/extra_funcptrs slice;
         // externref tables get a null funcptrs base so the JIT
@@ -853,6 +865,7 @@ fn populateTableRefs(
     compiled: *const runner_mod.CompiledWasm,
     tableidx: u32,
     refs_out: []u64,
+    gctx: ?zwasm.engine.runner_validate.GlobalsCtx,
 ) anyerror!void {
     var temp_arena = std.heap.ArenaAllocator.init(gpa);
     defer temp_arena.deinit();
@@ -865,7 +878,7 @@ fn populateTableRefs(
     for (elems.items) |seg| {
         if (seg.kind != .active) continue;
         if (seg.tableidx != tableidx) continue;
-        const off = evalConstI32ExprForSeg(seg.offset_expr) catch return error.UnsupportedEntrySignature;
+        const off = zwasm.engine.runner_validate.evalConstI32ExprCtx(seg.offset_expr, gctx) catch return error.UnsupportedEntrySignature;
         if (off < 0) return error.UnsupportedEntrySignature;
         const base: usize = @intCast(off);
         if (base + seg.funcidxs.len > refs_out.len) return error.UnsupportedEntrySignature;
@@ -880,14 +893,6 @@ fn populateTableRefs(
     }
 }
 
-fn evalConstI32ExprForSeg(expr: []const u8) !i32 {
-    if (expr.len < 2 or expr[0] != 0x41) return error.UnsupportedConstExpr;
-    const leb128 = @import("zwasm").support.leb128;
-    var pos: usize = 1;
-    const v = try leb128.readSleb128(i32, expr, &pos);
-    if (pos >= expr.len or expr[pos] != 0x0B) return error.UnsupportedConstExpr;
-    return v;
-}
 
 /// Capacity for the spec-runner's `host_dispatch_base` stub
 /// array. Spec corpus modules typically import 0–2 functions
@@ -921,6 +926,14 @@ pub fn initHostDispatchStubs() void {
 // behaviour preserved for the import-free majority.
 pub var current_dispatch: ?[]usize = null;
 pub var current_thunk_arena: jit_mem.JitBlock = .{ .bytes = &[_:0]u8{} };
+
+// Close-plan §6 (j) Step B cohort 1 — corpus-scope handle on the
+// runCorpus-local `registered` map so per-module `on_module_loaded`
+// callbacks can populate the importer's `scratch_globals` from
+// registered exporter values (`applyImportedGlobalsFromRegistered`).
+// Set right after the spectest auto-register block in `runCorpus`;
+// reset to null at runCorpus deinit.
+pub var current_registered: ?*std.StringHashMapUnmanaged(RegisteredExporter) = null;
 
 /// Const view of `current_dispatch` for passing to
 /// `makeJitRuntime`'s `dispatch_override` parameter.
@@ -1476,6 +1489,79 @@ pub fn resolveCrossModuleImports(
         slot_idx += 1;
     }
     return slot_idx;
+}
+
+/// Close-plan §6 (j) Step B cohort 1 — walk the importer's global
+/// imports and write each resolved value into the importer's
+/// `scratch_globals` byte buffer at the import-slot offset.
+///
+/// Both spectest and fixture-to-fixture imports route through the
+/// same path: look up the exporter in `registered`, ensure the
+/// exporter's own scratch_globals is populated
+/// (`ensureCompiledAndRt` triggers `applyDefinedGlobalsInit` on
+/// the exporter side), then read 8 bytes (or 16 for v128) from
+/// the exporter's slot and write to the importer's slot.
+///
+/// Imports without a matching registered exporter, or imports
+/// whose exporter doesn't actually export the requested global,
+/// are silently skipped — the importer's slot stays zero. Caller-
+/// side const-expr eval surfaces the absence as
+/// `UnsupportedConstExpr` only when a const-expr actually reads
+/// the unpopulated slot (the bindable-imports pre-filter catches
+/// the genuinely unlinkable cases before reaching this helper).
+pub fn applyImportedGlobalsFromRegistered(
+    allocator: std.mem.Allocator,
+    importer_wasm: []const u8,
+    importer_globals_offsets: []const u32,
+    importer_globals_valtypes: []const zwasm.ir.zir.ValType,
+    importer_globals_buf: []u8,
+    importer_num_global_imports: u32,
+    registered: *std.StringHashMapUnmanaged(RegisteredExporter),
+) !void {
+    if (importer_num_global_imports == 0) return;
+    var temp_arena = std.heap.ArenaAllocator.init(allocator);
+    defer temp_arena.deinit();
+    const ta = temp_arena.allocator();
+    var module = try zwasm.parse.parser.parse(ta, importer_wasm);
+    defer module.deinit(ta);
+    const sec = module.find(.import) orelse return;
+    var imports = try zwasm.parse.sections.decodeImports(ta, sec.body);
+    defer imports.deinit();
+
+    var importer_global_slot: u32 = 0;
+    for (imports.items) |imp| {
+        if (imp.kind != .global) continue;
+        defer importer_global_slot += 1;
+        if (importer_global_slot >= importer_num_global_imports) break;
+
+        const exporter_ptr = registered.getPtr(imp.module) orelse continue;
+        exporter_ptr.ensureCompiledAndRt(allocator) catch continue;
+        const exporter_compiled = &exporter_ptr.compiled.?;
+        const exporter_globals_buf = exporter_ptr.scratch_globals orelse continue;
+
+        const exporter_global_idx = zwasm.engine.export_lookup.findExportGlobal(
+            ta,
+            exporter_ptr.bytes_owned,
+            imp.name,
+        ) catch continue;
+        if (exporter_global_idx >= exporter_compiled.globals_valtypes.len) continue;
+        const exporter_vt = exporter_compiled.globals_valtypes[exporter_global_idx];
+        const exporter_off = exporter_compiled.globals_offsets[exporter_global_idx];
+
+        const importer_off = importer_globals_offsets[importer_global_slot];
+        const importer_vt = importer_globals_valtypes[importer_global_slot];
+        if (importer_vt != exporter_vt) continue;
+        const width: usize = switch (importer_vt) {
+            .v128 => 16,
+            .i32, .i64, .f32, .f64, .funcref, .externref => 8,
+        };
+        if (exporter_off + width > exporter_globals_buf.len) continue;
+        if (importer_off + width > importer_globals_buf.len) continue;
+        @memcpy(
+            importer_globals_buf[importer_off..][0..width],
+            exporter_globals_buf[exporter_off..][0..width],
+        );
+    }
 }
 
 /// §9.9 / 9.9-l-1b-d093-d8c (per ADR-0059): growable memory pool
@@ -2469,6 +2555,9 @@ pub fn runCorpus(
             gop.value_ptr.* = .{ .bytes_owned = bytes_owned };
         }
     }
+
+    current_registered = &registered;
+    defer current_registered = null;
 
     defer {
         if (current_wasm) |b| gpa.free(b);
