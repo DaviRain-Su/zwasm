@@ -195,6 +195,46 @@ forbidden by the file's own discipline header.
   (e.g. cited Phase has closed; cited ADR has landed) →
   `soon` ("flip to `now` and discharge").
 
+### F.2a Blocked-by escalation by age (added 2026-05-21)
+
+Close-plan §6 (h) (resolving close-plan B2 — 30+ `blocked-by`
+rows accumulating without re-evaluation). Pairs with the
+unconditional barrier-dissolution check in `/continue` Resume
+Step 0.5; this audit-side variant catches rows that survived
+that check (the barrier still holds) but are due for deeper
+re-walk.
+
+Threshold ladder, evaluated against each row's `Last reviewed`
+column:
+
+| Age (today − Last reviewed)              | Finding                  | Action                                                                              |
+|------------------------------------------|--------------------------|-------------------------------------------------------------------------------------|
+| ≤ 3 resume cycles (= ≤ 14 calendar days) | `none` (clean)           | No action. Routine.                                                                 |
+| > 3 cycles / > 14 days                   | `soon`                   | Re-walk the barrier; update `Last reviewed` if still blocked. Same-resume task.     |
+| > 5 cycles / > 30 days                   | `block`                  | Barrier likely fossilised. File an ADR or lesson capturing the structural cause, OR promote the row to `now` (the barrier is no longer real). |
+
+The cycle count is approximated by calendar days because the
+loop has no global cycle counter — 1 cycle ≈ 5 calendar days
+is the working conversion (longer when the user is away).
+When in doubt, the calendar-day threshold wins.
+
+Multiple escalations in one resume (≥ 3 rows hitting `soon` /
+`block`) fire the `/continue` Step 0.5 narrow-audit trigger —
+that's the structural failure-mode this rule prevents
+(multiple barriers evaporating together as a closed phase /
+landed ADR / Zig bump renders many at once).
+
+The runnable form of this check lives at:
+
+```sh
+bash scripts/audit_blocked_by_age.sh   # to be authored as a follow-up debt
+```
+
+Until the script lands, the audit performs the calendar
+arithmetic inline by `awk`-extracting the `Last reviewed`
+column from `.dev/debt.md` and comparing against `date -u
++%Y-%m-%d`.
+
 ### F.3 Lessons INDEX coverage
 
 Every file in `.dev/lessons/` (excluding INDEX.md, `_TEMPLATE.md`,
