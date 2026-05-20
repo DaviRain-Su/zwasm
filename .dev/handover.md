@@ -15,8 +15,8 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
    `chore(p9b):` / `feat(p9b):` prefix. Last source commit
-   `aa7455d9` (B71 — memory.size + memory.grow migrated;
-   ctx 85 → 87; 2 new per-op files + 2 Zone 1 meta backfills).
+   `095ea19d` (B72 — nop migrated; ctx 87 → 88; atomic.fence
+   deferred (UnsupportedOp), unreachable defers (ctx ext needed)).
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -96,36 +96,39 @@
 | B69 | Single-op migration: `drop` to `(ctx, ins)`. Inline body (pop vreg, no codegen) → `op_control.emitDropCtx`. 1 NEW per-op file. `_ctx_ops` 83 → 84. Select deferred to B70. | `75c463f6` |
 | B70 | Single-op migration: `select` (+ `select_typed` shares emit arm) to `(ctx, ins)`. ~70-line 3-path body extracted into `op_alu_int.emitSelectCtx` (added op_simd + op_alu_float imports to op_alu_int; no cycle). 1 NEW per-op file. `_ctx_ops` 84 → 85. | `74734076` |
 | B71 | Cohort migration: `memory.size` + `memory.grow` (2 ops) to `(ctx, ins)`. Inline meta backfill (memory_size.zig + memory_grow.zig at Zone 1). memory.size body extracted to op_call.emitMemorySizeCtx; memory.grow wraps existing emitMemoryGrow. 2 NEW per-op files. `_ctx_ops` 85 → 87. | `aa7455d9` |
-| **B72** | **Single-op migration: `atomic.fence` to `(ctx, ins)`** — Wasm 2.0 threads proposal. Emits MFENCE (3 bytes). Inline body in emit.zig. Needs Zone 1 meta backfill (atomic_fence.zig — check first). 1 NEW per-op file. Also include `nop` (1 byte emit; no Zone 1 meta yet → backfill). | **NEXT** |
-| B72..B6x | After B72: control flow (br/if/end family/return/unreachable) → local ops (need helper extraction from emit.zig private functions). Followed by B6x+1 inline-switch cutover folding ctx tuple into unified `collected_x86_64_ops`. | |
+| B72 | Single-op migration: `nop` (1 op) to `(ctx, ins)` + Zone 1 meta backfill. Zero-bytes adapter at op_control.emitNopCtx. 1 NEW per-op file. `_ctx_ops` 87 → 88. atomic.fence deferred (UnsupportedOp on x86_64); unreachable deferred (ctx ext for `dead_code` local needed). | `095ea19d` |
+| **B73** | **Cohort migration: control-flow `unreachable` + `return` + br family** — requires ctx extension to expose `dead_code` (`bool`), `unreach_fixups` already in ctx, and `labels` for br. May need ADR for ctx-field additions. Larger scope; survey first to determine if it's bundled or split. | **NEXT** |
+| B73..B6x | After B73: br_if / br_table / if / else / end (label-touching ops) → local ops (local.get/set/tee with layout.disps threading). Then B6x+1 inline-switch cutover folding ctx tuple into unified `collected_x86_64_ops`. | |
 | B6x+1 | Inline-switch dispatcher cutover per ADR-0073 — both arches' `emit.zig` giant switch replaced by `inline for (collected_X_ops) |op_mod| { if (op_mod.op_tag == ins.op) return op_mod.emit(ctx, ins); }`. Moment per-op files become load-bearing. | |
 
-## Active state — §9.12-B mid-flight; B71 memory.size+grow landed 2026-05-20
+## Active state — §9.12-B mid-flight; B72 nop landed 2026-05-20
 
-**B72 is the active task** — migrate `atomic.fence` + `nop`
-(2 small ops) to `(ctx, ins)`. B71 closed memory.size+grow at
-`aa7455d9` (`collected_x86_64_ctx_ops` 85 → 87).
+**B73 is the active task** — migrate control-flow `unreachable`
+(and possibly `return` + br family) to `(ctx, ins)`. Requires
+ctx extension to expose currently-local state. B72 closed nop
+at `095ea19d` (`collected_x86_64_ctx_ops` 87 → 88).
 
-The loop for B72:
+The loop for B73:
 
-1. Survey emit.zig for atomic.fence + nop arms (both inline,
-   very short bodies — nop = no bytes; atomic.fence = MFENCE
-   3 bytes).
-2. Check + author Zone 1 meta files (atomic_fence.zig, nop.zig
-   at wasm_*_/...). atomic.fence is wasm_2_0 (threads); nop is
-   wasm_1_0.
-3. Add `emitAtomicFenceCtx` + `emitNopCtx` adapters (likely in
-   op_control.zig).
-4. Replace emit.zig arms; create 2 per-op files.
-5. Update collector (87 → 89) + assertion.
-6. Verify 2-host green; commit + push.
+1. Survey emit.zig dispatch arms for `unreachable` (line ~1443),
+   `return` (line ~1549), and br family (br, br_if, br_table).
+2. Identify ctx fields needed:
+   - `unreachable`: needs `unreach_fixups` (already in ctx) +
+     `dead_code: *bool` (NEW field).
+   - `return`: needs func / frame_bytes / uses_runtime_ptr /
+     return_is_memory_class / indirect_result_slot_neg_off (most
+     already in ctx; check).
+   - br family: needs `labels` (already in ctx) + ditto.
+3. Extend ctx_mod with missing fields (if any) — substrate
+   change, file ADR if it crosses ROADMAP §4/§5.
+4. Add adapters; create per-op files; update collector.
+5. Verify 2-host green; commit + push.
 
-Note: op_convert.zig 1009 LOC, op_control.zig 1181 LOC,
-op_alu_int.zig now hosts cross-deps to op_simd + op_alu_float
-(B70). Remaining unmigrated x86_64 emit.zig arms after B72:
-control-flow (br/br_if/br_table/if/else/end/return/unreachable)
-+ local ops (local.get/set/tee, need emit.zig private helper
-extraction). Move toward B6x+1 inline-switch cutover after.
+Note: op_convert.zig 1009 LOC, op_control.zig 1188 LOC,
+op_alu_int.zig hosts cross-deps to op_simd + op_alu_float
+(B70). After B73: local ops (local.get/set/tee with
+layout.disps threading — needs emit.zig private helper
+extraction). Then B6x+1 inline-switch cutover.
 
 §9.12-B exit criterion stays as ROADMAP §9.12-B specifies (6 build
 combos green + DCE 0 + completeness comptime check). Per-op file
