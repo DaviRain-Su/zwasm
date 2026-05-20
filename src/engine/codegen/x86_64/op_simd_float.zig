@@ -74,6 +74,49 @@ pub fn emitF32x4PmaxCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!v
     return emitF32x4Pmax(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
 }
 
+// §9.12-B / B101 (ADR-0075) — `(ctx, ins)` adapters for the
+// SIMD f64x2 arith cohort (8 ops; mirror of B100).
+
+pub fn emitF64x2AddCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitF64x2Add(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
+}
+
+pub fn emitF64x2SubCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitF64x2Sub(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
+}
+
+pub fn emitF64x2MulCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitF64x2Mul(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
+}
+
+pub fn emitF64x2DivCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitF64x2Div(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
+}
+
+pub fn emitF64x2MinCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitF64x2Min(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+}
+
+pub fn emitF64x2MaxCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitF64x2Max(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+}
+
+pub fn emitF64x2PminCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitF64x2Pmin(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+}
+
+pub fn emitF64x2PmaxCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    _ = ins;
+    return emitF64x2Pmax(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+}
+
 /// Wasm spec §4.4.4 (f*x*.{eq, ne, lt, gt, le, ge}) — pop two
 /// v128, push v128 where each lane is all-ones if the IEEE-754
 /// comparison holds else all-zero. Wasm requires ordered eq / lt /

@@ -1129,10 +1129,11 @@ pub fn compile(
             .@"f32x4.mul" => try op_simd_float.emitF32x4MulCtx(&ctx, &ins),
             .@"f32x4.div" => try op_simd_float.emitF32x4DivCtx(&ctx, &ins),
             .@"f32x4.sqrt" => try op_simd_float.emitF32x4Sqrt(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"f64x2.add" => try op_simd_float.emitF64x2Add(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"f64x2.sub" => try op_simd_float.emitF64x2Sub(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"f64x2.mul" => try op_simd_float.emitF64x2Mul(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
-            .@"f64x2.div" => try op_simd_float.emitF64x2Div(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            // §9.12-B / B101: SIMD f64x2 arith migrated to ctx tuple.
+            .@"f64x2.add" => try op_simd_float.emitF64x2AddCtx(&ctx, &ins),
+            .@"f64x2.sub" => try op_simd_float.emitF64x2SubCtx(&ctx, &ins),
+            .@"f64x2.mul" => try op_simd_float.emitF64x2MulCtx(&ctx, &ins),
+            .@"f64x2.div" => try op_simd_float.emitF64x2DivCtx(&ctx, &ins),
             .@"f64x2.sqrt" => try op_simd_float.emitF64x2Sqrt(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             // §9.7 / 9.7-q: f32x4 + f64x2 min/max NaN-correction
             // synthesis (4 ops). MINPS/MAXPS / MINPD/MAXPD wrapped
@@ -1144,8 +1145,8 @@ pub fn compile(
             // scratch.
             .@"f32x4.min" => try op_simd_float.emitF32x4MinCtx(&ctx, &ins),
             .@"f32x4.max" => try op_simd_float.emitF32x4MaxCtx(&ctx, &ins),
-            .@"f64x2.min" => try op_simd_float.emitF64x2Min(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"f64x2.max" => try op_simd_float.emitF64x2Max(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.min" => try op_simd_float.emitF64x2MinCtx(&ctx, &ins),
+            .@"f64x2.max" => try op_simd_float.emitF64x2MaxCtx(&ctx, &ins),
             // §9.7 / 9.7-r: v128 bitwise ops + v128.any_true (7 ops).
             // PAND/POR/PXOR/PANDN (SSE2) for and/or/xor/andnot;
             // 3-instr synthesis for not (PCMPEQB ones,ones + PXOR);
@@ -1308,8 +1309,8 @@ pub fn compile(
             // Cranelift maps the same way (`lower.isle:1542-1545`).
             .@"f32x4.pmin" => try op_simd_float.emitF32x4PminCtx(&ctx, &ins),
             .@"f32x4.pmax" => try op_simd_float.emitF32x4PmaxCtx(&ctx, &ins),
-            .@"f64x2.pmin" => try op_simd_float.emitF64x2Pmin(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
-            .@"f64x2.pmax" => try op_simd_float.emitF64x2Pmax(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.pmin" => try op_simd_float.emitF64x2PminCtx(&ctx, &ins),
+            .@"f64x2.pmax" => try op_simd_float.emitF64x2PmaxCtx(&ctx, &ins),
             // §9.7 / 9.7-ax: v128.load + v128.store foundation
             // memory ops. Mirror scalar emitMemOp shape with
             // access_size=16 + MOVUPS final encoding. RAX/RCX/RDX
