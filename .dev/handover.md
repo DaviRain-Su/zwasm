@@ -15,8 +15,8 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
    `chore(p9b):` / `feat(p9b):` prefix. Last source commit
-   `130eeec9` (B86 — FP arith (8 ops) moved from legacy to ctx;
-   legacy 234 → 226; ctx 157 → 165).
+   `2b3c1d81` (B87 — FP compare (12 ops) moved from legacy to
+   ctx; legacy 226 → 214; ctx 165 → 177).
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -110,23 +110,24 @@
 | B83 | Legacy → ctx cohort move: i32+i64 shift (10 ops). emitI{32,64}ShiftCtx adapters. Legacy 260 → 250; ctx 131 → 141. | `caa09171` |
 | B84 | Legacy → ctx cohort move: bitcount (6) + eqz (2) = 8 ops. 4 adapters. Legacy 250 → 242; ctx 141 → 149. | `38164478` |
 | B85 | Legacy → ctx cohort move: sign-ext (5) + width-conv (3) = 8 ops. Legacy 242 → 234; ctx 149 → 157. | `0a94c60a` |
-| B86 | Legacy → ctx cohort move: FP arith (8 ops: f32/f64.add/sub/mul/div). emitFpBinaryCtx adapter. Legacy 234 → 226; ctx 157 → 165. | `130eeec9` |
-| **B87** | **Legacy → ctx cohort move: FP compare (12 ops: f32/f64.eq/ne/lt/gt/le/ge).** emitFpCompare exists. Add emitFpCompareCtx adapter; regenerate 12 per-op files; legacy 226 → 214; ctx 165 → 177. | **NEXT** |
-| B87..B8x | Same shape for remaining legacy cohorts: FP unary (14), FP min/max+copysign (6), SIMD cohorts (B29-B45). Eventually the inline-switch cutover (per ADR-0073) folds all into a single `inline for` dispatcher. | |
+| B86 | Legacy → ctx cohort move: FP arith (8 ops). Legacy 234 → 226; ctx 157 → 165. | `130eeec9` |
+| B87 | Legacy → ctx cohort move: FP compare (12 ops). emitFpCompareCtx adapter. Legacy 226 → 214; ctx 165 → 177. | `2b3c1d81` |
+| **B88** | **Legacy → ctx cohort move: FP unary (14 ops: f32/f64.abs/neg/sqrt/ceil/floor/trunc/nearest).** emitFpUnary exists. Add emitFpUnaryCtx; regenerate 14 per-op files; legacy 214 → 200; ctx 177 → 191. | **NEXT** |
+| B88..B8x | Same shape for remaining legacy cohorts: FP min/max+copysign (6), SIMD cohorts (B29-B45). Eventually the inline-switch cutover (per ADR-0073) folds all into a single `inline for` dispatcher. | |
 | B6x+1 | Inline-switch dispatcher cutover per ADR-0073 — both arches' `emit.zig` giant switch replaced by `inline for (collected_X_ops) |op_mod| { if (op_mod.op_tag == ins.op) return op_mod.emit(ctx, ins); }`. Moment per-op files become load-bearing. | |
 
-## Active state — §9.12-B mid-flight; B86 FP arith landed 2026-05-20
+## Active state — §9.12-B mid-flight; B87 FP compare landed 2026-05-20
 
-**B87 is the active task** — legacy → ctx cohort move for
-FP compare (12 ops). B86 closed FP arith at `130eeec9`
-(legacy 234 → 226; ctx 157 → 165).
+**B88 is the active task** — legacy → ctx cohort move for
+FP unary (14 ops). B87 closed FP compare at `2b3c1d81`
+(legacy 226 → 214; ctx 165 → 177).
 
-The loop for B87 (same pattern; 12 ops):
+The loop for B88 (same pattern; 14 ops):
 
-1. Locate emitFpCompare in op_alu_float.zig.
-2. Add emitFpCompareCtx adapter.
-3. Regenerate 12 per-op files (f32.{eq,ne,lt,gt,le,ge} + f64 same).
-4. Move 12 entries from legacy (226 → 214) to ctx (165 → 177).
+1. Locate emitFpUnary in op_alu_float.zig.
+2. Add emitFpUnaryCtx adapter.
+3. Regenerate 14 per-op files (f32.{abs,neg,sqrt,ceil,floor,trunc,nearest} + f64 same).
+4. Move 14 entries from legacy (214 → 200) to ctx (177 → 191).
 5. Update emit.zig arm.
 6. Verify 2-host green; commit + push.
 
