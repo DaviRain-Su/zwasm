@@ -15,9 +15,9 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
    `chore(p9b):` / `feat(p9b):` prefix. Last source commit
-   `c1780807` (B110 — arm64 inline-switch cutover; pruned 221 dead
-   arms in arm64/emit.zig; 1995→1630 LOC; both arches now load-bearing
-   on per-op files).
+   `c1780807` (B110 — arm64 inline-switch cutover). B111: §9.12-B
+   exit check found DCE gap → D-150 filed; needs multi-chunk substrate
+   work to land §9.12-B exit criterion.
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -136,18 +136,23 @@
 | B108 | Soft inline-switch cutover for x86_64: new `dispatchX86_64Ctx` walks collected_x86_64_ctx_ops (391); wired before the giant switch. | `d2b1e9d2` |
 | B109 | Pruned 242 dead switch arms in x86_64/emit.zig. emit.zig 1628→1300 LOC. Remaining arms cover payload-laden / no-Zone-1-meta ops (extract_lane / replace_lane / shuffle / i64x2.mul / v128.const / load_lane / store_lane / popcnt / trunc_sat_f64x2 / convert_low_i32x4_u + multi-line `end`). | `fc6cc1d3` |
 | B110 | arm64 inline-switch cutover (mirror of B109 for arm64). Removed 221 dead arms in arm64/emit.zig + 6 unused imports. emit.zig 1995→1630 LOC. Per-op files load-bearing for 348 ops via dispatch_collector.dispatch(.arm64, ...). Both arches complete. | `c1780807` |
-| **B111** | **§9.12-B exit check + Phase boundary work**: ROADMAP §9.12-B exit criterion is "6 build combos green + DCE 0 + completeness comptime check". Verify, then close §9.12-B and proceed to §9.12-C/D/E. | **NEXT** |
+| B111 | §9.12-B exit check ran `check_build_dce.sh --gate`. 4/6 combos clean; **2/6 FAIL**: v1_0:p1 and v1_0:p2 contain `_instruction.wasm_2_0.*` symbols. Root: `src/zwasm.zig` + `src/api/instance.zig` + `src/ir/dispatch_collector.zig` unconditionally reference wasm_2_0 meta files. Filed D-150 with multi-chunk discharge plan. | (debt-only) |
+| **B112** | **Begin D-150 DCE discharge — chunk (a): wrap `src/zwasm.zig` wasm_2_0 umbrella in comptime conditional**. Smallest first step. Then re-run DCE check; address next gap. | **NEXT** |
 
-## Active state — §9.12-B inline-switch cutover complete (both arches) 2026-05-20
+## Active state — §9.12-B inline-switch cutover landed; DCE gap remains 2026-05-20
 
-**B111 is the active task** — verify §9.12-B exit criterion and close
-the row. Exit criterion (per master plan §9.12-B): "6 build combos
-green + DCE 0 + completeness comptime check". Investigate what those
-checks look like; trigger them; address gaps as standalone chunks.
+**B112 is the active task** — discharge D-150 chunk (a): wrap
+`src/zwasm.zig`'s `wasm_2_0` umbrella in `comptime if
+(build_options.wasm_level)`. Smallest scope first; then run
+`bash scripts/check_build_dce.sh --gate` to measure delta.
 
-After §9.12-B closes, §9.12-C (dedup-sweep), §9.12-D (libc-boundary
-sample migration), §9.12-E (skip-impl == 0 ratchet) remain in the
-Phase 9 substrate audit close cycle.
+Subsequent chunks (B113+) per D-150 plan:
+- (b) wrap `src/api/instance.zig` import.
+- (c) audit `src/ir/dispatch_collector.zig` references; consider
+  filtering `collected_ops` tuple by build options.
+- (d) verify v1_0 builds DCE-clean.
+
+Once D-150 closes, §9.12-B can flip [x]; then §9.12-C/D/E proceed.
 
 §9.12-B exit criterion stays as ROADMAP §9.12-B specifies (6 build
 combos green + DCE 0 + completeness comptime check). Per-op file
