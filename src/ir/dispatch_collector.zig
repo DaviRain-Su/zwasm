@@ -562,6 +562,14 @@ const f64_reinterpret_i64 = @import("../instruction/wasm_1_0/f64_reinterpret_i64
 const f32_demote_f64 = @import("../instruction/wasm_1_0/f32_demote_f64.zig");
 const f64_promote_f32 = @import("../instruction/wasm_1_0/f64_promote_f32.zig");
 
+// Wasm 3.0 tail-call ops — §9.12-G Phase 10 prep. `wasm_level: .v3_0`
+// triggers `enabledByBuild` to filter them out under -Dwasm=v2_0 or
+// lower; the dispatcher then returns `UnsupportedOpForBuildLevel` per
+// the comptime-reject contract at `d641dcd8`.
+const return_call = @import("../instruction/wasm_3_0/return_call.zig");
+const return_call_indirect = @import("../instruction/wasm_3_0/return_call_indirect.zig");
+const return_call_ref = @import("../instruction/wasm_3_0/return_call_ref.zig");
+
 /// Tuple of all migrated per-op modules. Order is not load-bearing;
 /// `dispatcher` uses `op_tag` for routing.
 pub const collected_ops = .{
@@ -939,6 +947,11 @@ pub const collected_ops = .{
     i64x2_splat,
     f32x4_splat,
     f64x2_splat,
+
+    // Wasm 3.0 tail-call (§9.12-G Phase 10 prep).
+    return_call,
+    return_call_indirect,
+    return_call_ref,
 };
 
 comptime {
@@ -1036,6 +1049,7 @@ pub fn populateDispatchTable(table: *@import("dispatch_table.zig").DispatchTable
 /// value in Zig); callers can read `.op_tag` / `.handlers.*` off it.
 pub fn opModuleFor(comptime tag: ZirOp) ?type {
     comptime {
+        @setEvalBranchQuota(10_000);
         for (collected_ops) |op_mod| {
             if (op_mod.op_tag == tag) {
                 return op_mod;
@@ -1110,9 +1124,22 @@ test "zirOpTagCount matches the ZirOp enum field count" {
     try std.testing.expect(n >= 200);
 }
 
-test "migratedOpCount tracks collected_ops length (374 after §9.12-B / B52 splats + ref.is_null)" {
-    // Running tally: 162 + i16x8 cmp 10 = 172.
-    try std.testing.expectEqual(@as(usize, 374), migratedOpCount());
+test "migratedOpCount tracks collected_ops length (377 after §9.12-G tail-call stubs)" {
+    // Running tally: 374 (§9.12-B / B52 baseline) + 3 Wasm 3.0
+    // tail-call stubs (return_call / return_call_indirect /
+    // return_call_ref) = 377.
+    try std.testing.expectEqual(@as(usize, 377), migratedOpCount());
+}
+
+test "opModuleFor resolves Phase 10 tail-call stubs (return_call / _indirect / _ref)" {
+    // §9.12-G Phase 10 prep: tail-call ops registered with
+    // `wasm_level: .v3_0` so the dispatcher's comptime build-option
+    // filter rejects them under -Dwasm=v2_0 (per the synthetic
+    // build-filter test above). Under the default -Dwasm=v3_0
+    // they pass the filter; the stub handler returns NotMigrated.
+    try std.testing.expect(comptime opModuleFor(.return_call) != null);
+    try std.testing.expect(comptime opModuleFor(.return_call_indirect) != null);
+    try std.testing.expect(comptime opModuleFor(.return_call_ref) != null);
 }
 
 test "migrationComplete is false until §9.12-B migrates all 581 ops" {
