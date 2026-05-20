@@ -15,8 +15,8 @@
    (374/581 IR-axis, 348/314 arch-axis); B53+ is gated on ADR-0075**.
 3. `git log --oneline -10` — recent autonomous-loop chunks under
    `chore(p9b):` / `feat(p9b):` prefix. Last source commit
-   `f66ed1f9` (B92 — SIMD int neg/abs (8 ops) moved from
-   legacy to ctx; legacy 178 → 170; ctx 213 → 221).
+   `ba509a26` (B93 — SIMD i8x16 compare (10 ops) moved from
+   legacy to ctx; legacy 170 → 160; ctx 221 → 231).
 4. `bash scripts/p9_completion_status.sh` — live progress.
 5. `bash scripts/p9_simd_status.sh` — live SIMD status.
 6. `.dev/debt.md` `now` rows: none.
@@ -116,26 +116,27 @@
 | B89 | Legacy → ctx cohort move: FP min/max+copysign (6 ops). Legacy 200 → 194; ctx 191 → 197. | `4ec2bff1` |
 | B90 | Legacy → ctx SIMD cohort move: v128 logical (6 ops). First SIMD migration. Legacy 194 → 188; ctx 197 → 203. | `766ffade` |
 | B91 | Legacy → ctx SIMD cohort move: int binary arith (10 ops; i64x2.mul deferred). Legacy 188 → 178; ctx 203 → 213. | `8f6d0c83` |
-| B92 | Legacy → ctx SIMD cohort move: int neg/abs (8 ops). 8 per-op ctx adapters (5-arg helpers). Legacy 178 → 170; ctx 213 → 221. | `f66ed1f9` |
-| **B93** | **Legacy → ctx SIMD cohort: i8x16 compare (10 ops: i8x16.eq/ne/lt_s/lt_u/gt_s/gt_u/le_s/le_u/ge_s/ge_u).** Helper shape per cohort. 10 per-op ctx adapters; regenerate 10 per-op files; legacy 170 → 160; ctx 221 → 231. | **NEXT** |
-| B93..B9x | After B93: remaining SIMD cohorts: i16x8/i32x4/i64x2 compare (26 — B33-B35), shifts (12), min/max (12), sat arith (10), float arith (16), float unary (14), float compare (12), bool reductions (9), narrow/extend (16), extmul (16), swizzle/popcnt/dot/q15mulr/fp-conv (11), splats (6). Eventually inline-switch cutover (ADR-0073). | |
+| B92 | Legacy → ctx SIMD cohort move: int neg/abs (8 ops). Legacy 178 → 170; ctx 213 → 221. | `f66ed1f9` |
+| B93 | Legacy → ctx SIMD cohort move: i8x16 compare (10 ops). 10 per-op ctx adapters in op_simd_int_cmp_lane.zig (new zir+ctx_mod imports). Legacy 170 → 160; ctx 221 → 231. | `ba509a26` |
+| **B94** | **Legacy → ctx SIMD cohort: i16x8 compare (10 ops).** Same pattern as B93; 10 per-op ctx adapters in op_simd_int_cmp_lane.zig (imports already there); regenerate 10 per-op files; legacy 160 → 150; ctx 231 → 241. | **NEXT** |
+| B94..B9x | After B94: i32x4 compare (10), i64x2 compare (6 — no _u variants), SIMD shifts (12), min/max (12), sat arith (10), float arith (16), float unary (14), float compare (12), bool reductions (9), narrow/extend (16), extmul (16), swizzle/popcnt/dot/q15mulr/fp-conv (11), splats (6). Eventually inline-switch cutover (ADR-0073). | |
 | B6x+1 | Inline-switch dispatcher cutover per ADR-0073 — both arches' `emit.zig` giant switch replaced by `inline for (collected_X_ops) |op_mod| { if (op_mod.op_tag == ins.op) return op_mod.emit(ctx, ins); }`. Moment per-op files become load-bearing. | |
 
-## Active state — §9.12-B mid-flight; B92 SIMD int neg/abs landed 2026-05-20
+## Active state — §9.12-B mid-flight; B93 SIMD i8x16 compare landed 2026-05-20
 
-**B93 is the active task** — SIMD i8x16 compare cohort (10 ops:
-eq/ne/lt_s/lt_u/gt_s/gt_u/le_s/le_u/ge_s/ge_u). B92 closed at
-`f66ed1f9` (legacy 178 → 170; ctx 213 → 221).
+**B94 is the active task** — SIMD i16x8 compare cohort (10 ops:
+eq/ne/lt_s/lt_u/gt_s/gt_u/le_s/le_u/ge_s/ge_u). B93 closed at
+`ba509a26` (legacy 170 → 160; ctx 221 → 231).
 
-The loop for B93:
+The loop for B94 (same pattern as B93):
 
-1. Locate the emit helpers in op_simd_int_cmp_lane.zig (or
-   similar). 10 ops at i8x16 width. Survey signature.
-2. Add 10 ctx adapters (one per op).
-3. Regenerate 10 per-op files at wasm_2_0/i8x16_*.zig.
-4. Move 10 entries from legacy (170 → 160) to ctx (221 → 231).
-5. Update emit.zig arms.
-6. Verify 2-host green; commit + push.
+1. Add 10 i16x8 ctx adapters in op_simd_int_cmp_lane.zig
+   (imports already added at B93).
+2. Regenerate 10 per-op files at wasm_2_0/i16x8_{eq,ne,lt_s,lt_u,
+   gt_s,gt_u,le_s,le_u,ge_s,ge_u}.zig.
+3. Move 10 entries from legacy (160 → 150) to ctx (231 → 241).
+4. Update emit.zig arms.
+5. Verify 2-host green; commit + push.
 
 §9.12-B exit criterion stays as ROADMAP §9.12-B specifies (6 build
 combos green + DCE 0 + completeness comptime check). Per-op file
