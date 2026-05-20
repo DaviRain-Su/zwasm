@@ -5,9 +5,9 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit: `166cb319`
-   (ADR-0079 Step 1: setupRuntime carve → src/engine/setup.zig)。
-   runner.zig 2051 → 1577 LOC (FILE-SIZE-EXEMPT marker 解除)。
+1. `git log --oneline -10` — last code commit: `c3e391f9`
+   (ADR-0079 Steps 2+3: compileWasm + helpers → compile.zig)。
+   runner.zig 1577 → 397 LOC (ADR-0079 全 Step 完了)。
 2. **Live status**: `zig build test-spec-wasm-2.0-assert >
    /tmp/spec.log 2>&1 || true; grep "passed\\|^FAIL " /tmp/spec.log`
    — Mac aarch64 baseline expected at HEAD `7b2e1b02`:
@@ -56,14 +56,23 @@
   this loop iteration ではない。speculative-preventive の
   3 件を fix する vs ADR-0079 を impl する のいずれかが
   next cycle の高 yield 候補。
-- ADR-0079 Step 1 完 (`166cb319`): setupRuntime + RuntimeOwned
-  + hostDispatchTrap → setup.zig (556 LOC)。runner.zig 1577。
-- 次 cycle: **ADR-0079 Step 2** (carve compile.zig with
-  compileWasm + applyDefinedGlobalsInit + resolveFuncrefGlobals
-  + applyTableInit* + patchTableImportFuncptrs* +
-  countDeclaredTables + declaredTableMin/Max + applyActiveData
-  Segments*; ~900 LOC target)。Step 3 (runner.zig final shrink
-  ~380 LOC) は Step 2 完了で自動的に達成。
+- ADR-0079 全 Step 完 (`166cb319` Step 1 + `c3e391f9` Steps 2+3):
+  - setup.zig 555 LOC (RuntimeOwned + setupRuntime +
+    hostDispatchTrap)
+  - compile.zig 1225 LOC (compileWasm + apply* / patch* /
+    declaredTable* / countDeclaredTables / resolveFuncrefGlobals)
+  - runner.zig 2051 → 397 LOC (driver only: Error / CompiledWasm
+    / findExportFunc / runI32Export / runVoidExport + tests +
+    pub-const re-exports for backwards-compat external surface)
+- D-141 row partial discharge: runner.zig now under 1000 soft cap。
+  WARN list 残: validator.zig / lower.zig / liveness.zig /
+  emit.zig (arm64+x86_64) / inst.zig (arm64+x86_64) / op_simd_*。
+- 次 cycle: §9.12-F / §9.12-G / §9.12-H / §9.12-I のいずれかへ
+  進む。最も yield 高い候補:
+  - §9.12-I (D-149 ADR SHA backfill 75 → 0; 機械的だが量
+    multiple)
+  - §9.12-G の Wasm 3.0 ZirOp mapping table 起草 (Phase 10 prep)
+  - 別 file の per-file ADR + 分割 (D-141 残)
 
 ## Ubuntu mirror verification
 
