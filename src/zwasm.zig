@@ -73,6 +73,7 @@ pub const ir = struct {
     pub const zir = @import("ir/zir.zig");
     pub const dispatch_table = @import("ir/dispatch_table.zig");
     pub const dispatch_collector = @import("ir/dispatch_collector.zig");
+    pub const feature_level_check = @import("ir/feature_level_check.zig");
     pub const wasm_byte_map = @import("ir/wasm_byte_map.zig");
     pub const lower = @import("ir/lower.zig");
     pub const verifier = @import("ir/verifier.zig");
