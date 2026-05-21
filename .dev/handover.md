@@ -5,10 +5,9 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit: `33af8d5a`
-   (audit_spikes recognises older spike README formats; 3
-   spurious findings cleared; §9.12-I "private/ closure"
-   partial credit).
+1. `git log --oneline -10` — last code commit: `0d524134`
+   (EXEMPT-FALLBACK markers on 10 catch{} sites; §9.12-A
+   anti-fallback enforcement now passes --gate).
 2. **Live status** (when uncertain):
    `bash scripts/p9_completion_status.sh` —
    `bash scripts/check_skip_impl_ratchet.sh --report` —
