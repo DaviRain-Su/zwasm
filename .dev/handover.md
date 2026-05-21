@@ -11,13 +11,13 @@
 [`.dev/phase9_13_0_close_plan.md`](./phase9_13_0_close_plan.md).
 The `/continue` skill's Step 1a close-plan override
 activates; follow that doc's §6 Work sequence. §0 preflight
-runs an 8-tool inventory check first (~5s).
+(8-tool inventory) green at HEAD `4196b385` (2026-05-22).
 
 | Next track | First action | User touchpoint |
 |---|---|---|
 | W2 (main) — D-084 v128 marshal | `src/engine/codegen/x86_64/op_call.zig` + sibling: locate SysV branch, mirror to Win64 hidden-RDI ABI | none |
-| W1 (subagent, parallel) — D-028 IPC flake rate | dispatch background subagent: `for i in 1..10; do bash scripts/run_remote_windows.sh test-all ... done`; aggregate | none |
-| WA (main, parallel) — §9.12-F ADR draft | `.dev/decisions/NNNN_phase9_debt_exit_reframe.md` Status: Proposed | ADR-flip Proposed → Accepted |
+| W1 (subagent, parallel) — D-028 IPC flake rate | RUNNING as background subagent (10× test-all) — note lands at `private/notes/p9-d028-flake-rate.md` on completion | none |
+| WA (main, parallel) — §9.12-F ADR draft | ✅ Drafted at `.dev/decisions/0102_phase9_debt_exit_reframe.md` (`4196b385`, Status: Proposed) | ADR-flip Proposed → Accepted |
 
 §9.12-E ★ DONE (Wasm 2.0 100%). §9.12-I batched at row 11
 (§9.13-0 close).
@@ -41,7 +41,7 @@ Per execution plan §0.2.1. **Inner loop = Mac cross-compile**
 (~4s; rsync not on windowsmini). L3 (commit + push +
 test-all) **only at chunk close**, not per iteration.
 
-## windowsmini state (HEAD `411eacfb` confirmed working)
+## windowsmini state
 
 - 8 tools installed via `scripts/windows/install_tools.ps1`:
   zig 0.16.0 / hyperfine / wasm-tools / wasmtime / wabt /
@@ -57,7 +57,7 @@ test-all) **only at chunk close**, not per iteration.
 | Exit | Latest fact |
 |---|---|
 | §9.13-0 windowsmini full green | D-022 F1 closed (`0c2474c2`); D-084 / D-028 / D-136 open |
-| §9.12-F debt active rows < 15 | 19; re-framing via WA ADR |
+| §9.12-F debt active rows < 15 | 19 active; WA ADR 0102 Proposed (`4196b385`) reframes exit per-row predicate |
 | §9.12-I ADR `Accepted` < 30 | strict 33; batched at Phase 9 close |
 
 ## Active `now` debts
@@ -66,24 +66,23 @@ test-all) **only at chunk close**, not per iteration.
 
 ## Open questions / blockers
 
-- §9.12-F exit re-framing — WA ADR draft autonomous;
-  ADR-flip review needs user (only `user-judgment` allowed
-  here per `handover_framing.md`).
+- §9.12-F exit re-framing — ADR 0102 Proposed; ADR-flip
+  Proposed → Accepted needs user (allowed `user-judgment`
+  per `handover_framing.md`: §18 ADR-flip review).
 
 ## Recent context (2026-05-22 commits)
 
+- `4196b385` — ADR 0102 draft (§9.12-F exit reframe, Proposed).
+- `1b4a5b5a` — README refresh (status / platforms / Wasm-WASI / CLI).
+- `7f360d21` — rename execution_plan → close_plan + handover refresh.
 - `411eacfb` — measured L0/L1 timings + tar-pipe workflow.
 - `606bb941` — system-level defense (`platform_panic_vs_error.md` +
   inline INVARIANT + lesson) + Win64 iter workflow §0.2.1.
 - `0c2474c2` — F1 fix via `@panic` (correct approach).
-- `4ec3f4cb` — F1 first attempt via Error widening (audit
-  trail of the wrong approach; superseded by `0c2474c2`).
-- `9857c680` — W0 close + sequence re-prioritise.
-- `9218f91e` / `b5d28ed2` — install_tools.ps1.
 
 ## See
 
 - Execution plan: [`phase9_13_0_close_plan.md`](./phase9_13_0_close_plan.md).
 - ROADMAP §9.13-0 / §9.12-F / §9.12-I.
 - [`debt.md`](./debt.md): D-022 / D-028 / D-084 / D-136.
-- [`scripts/windows/install_tools.ps1`](../scripts/windows/install_tools.ps1).
+- ADR 0102: [`decisions/0102_phase9_debt_exit_reframe.md`](./decisions/0102_phase9_debt_exit_reframe.md).
