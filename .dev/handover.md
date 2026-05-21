@@ -5,36 +5,32 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit: `99dcc932`
-   (ADR-0082 Proposed — dispatch_collector_ops.zig extraction,
-   ~900 LOC registry move). Impl cycle next.
+1. `git log --oneline -10` — last code commit: `7bec6946`
+   (ADR-0082 impl landed; dispatch_collector.zig 1397 → 500 LOC;
+   new dispatch_collector_ops.zig 923 LOC). ADR-0082 Accepted.
 2. **User directive (2026-05-21)**: batch-session architectural
    mode.
 3. **Live status**: `bash scripts/p9_completion_status.sh` —
-   D-055 `Status: now`; D-081 blocked; ADR-0082 awaits impl.
+   D-055 `Status: now`; D-081 blocked.
 
 ## Authorized next-session pickup (priority order — updated 2026-05-21)
 
-1. **PRIMARY: ADR-0082 impl (dispatch_collector_ops.zig
-   extraction)**. ADR Proposed at `99dcc932`. Carve cycle:
-   - Create `src/ir/dispatch_collector_ops.zig` with 419 op
-     imports + `collected_ops` tuple (lines 151–1055 of
-     dispatch_collector.zig). Add std/zir/build_options
-     imports needed by the imports themselves.
-   - Update `dispatch_collector.zig`: remove lines 151–1055,
-     add `const ops_registry = @import("dispatch_collector_ops.zig");
-     pub const collected_ops = ops_registry.collected_ops;`.
-   - Cohort gate (test-all). feature_level_check.zig uses
-     `collector.collected_ops` — re-export preserves it.
-   - dispatch_collector.zig 1397 → ~500; new ops file ~900.
-2. **Next D-141 candidate** (after #1 lands):
+1. **PRIMARY: next D-141 per-file ADR**. Suggested order:
    - `src/validate/validator.zig` (1699 LOC) — ADR-0083
-     candidate.
+     candidate. Validator-internal helpers likely have
+     measurable extractable mass (per-spec-version dispatch
+     tables, error-construction helpers, type-stack walker).
+     Step 0 survey must measure 1-line routes vs inline-recipe
+     LOC distribution per ADR-0080 lesson.
    - `src/engine/codegen/x86_64/op_simd_int_cmp_lane.zig`
-     (2121 LOC — over hard cap).
-3. **D-055 discharge (independent)**. Test-array migration
-   to `setup.localDisp()` + sentinel wire-up. Multi-cycle.
-4. **§9.12-F debt-cohort walk** continues per Step 0.5.
+     (2121 LOC — over hard cap; urgent).
+   - `src/engine/codegen/{arm64,x86_64}/regalloc.zig`.
+2. **D-055 discharge (independent)**. ~95 test-array hardcoded
+   byte-offset sites migrate to `setup.localDisp()` /
+   `prologue.body_start_offset()`-relative; wire
+   `inst.encMovMemDisp32Imm32` call in emit.zig prologue
+   (5-line patch). Multi-cycle mechanical.
+3. **§9.12-F debt-cohort walk** continues per Step 0.5.
 2. **D-081 decision deferred to ADR-0081 cycle**: re-blocked
    pending ADR-0054 amendment OR alternative path. Not urgent
    for §9.12-F debt target (D-081's barrier wording is now
@@ -68,13 +64,13 @@
   dispatcher comptime-reject + CLI --invoke. Discrete-opcode
   stub coverage structurally complete. Remaining: api/instance
   split (#3 above) + c_api Instance tests (D-139 blocked).
-- **§9.12-F**: 24 debt rows; D-149/153/154/156/102/103/105/155
-  closed; D-157 filed. 2026-05-21: ADR-0081 Accepted (`b8d91990`);
-  D-141's x86_64 emit.zig slot closed. D-055 `Status: now` (test
-  migration unpaired from D-081). D-081 still blocked (ADR-0054
-  amendment path). ADR-0080 Withdrawn precedent + lesson
-  `emit-zig-survey-per-op-pattern-already-absorbed.md` shapes
-  future ADR drafts.
+- **§9.12-F**: 24 debt rows; closed: D-149/153/154/156/102/103/
+  105/155. 2026-05-21: ADR-0081 + ADR-0082 both Accepted same day
+  (emit_setup.zig + dispatch_collector_ops.zig); D-141's
+  emit.zig (x86_64) + dispatch_collector.zig slots closed. D-055
+  `Status: now`; D-081 still blocked (ADR-0054 amendment path).
+  Lesson `emit-zig-survey-per-op-pattern-already-absorbed.md`
+  shapes future per-file ADR Step 0 surveys.
 
 ## Operational note for the batch-session loop
 
