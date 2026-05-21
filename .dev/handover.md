@@ -5,38 +5,37 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit `3b46c27a` lands
-   D-055 partial: 30 tests cumulative. emit_test_float ~99%
-   done (1 unreachable test remaining). emit_test_int has 27
-   sites pending.
+1. `git log --oneline -10` — last code commit will land
+   D-141 sweep cont.: ADR-0095 extracts element-section
+   decoder to `sections_element.zig` (sections.zig
+   1556→1190 LOC; still WARN). D-055 mechanical remainder
+   unchanged (27 emit_test_int sites pending).
 2. **User directive (2026-05-21)**: batch-session architectural
-   mode — Phase 9 closure quality. D-158 closed; D-141 remaining
-   candidates need ADR-grade survey first.
+   mode — Phase 9 closure quality. D-141 per-file ADR cycle
+   continues; remaining candidates need own ADR-grade survey.
 3. **Live status**: `bash scripts/p9_completion_status.sh`.
 
 ## Active `now` debts
 
 - **D-055** (mechanical, multi-cycle, partial): cumulative 30
-  tests migrated. emit_test_float ~99% done (1 unreachable test
-  with prescan-induced runtime_ptr remaining). emit_test_int
-  starts next cycle (27 sites). After full migration, sentinel
-  wire-up is a 5-line patch in x86_64/emit.zig.
+  tests migrated. emit_test_float ~99% done (1 unreachable
+  test with prescan-induced runtime_ptr remaining).
+  emit_test_int starts next cycle (27 sites). After full
+  migration, sentinel wire-up is a 5-line patch in
+  x86_64/emit.zig.
 
 ## Authorized next-session pickup (priority order)
 
-1. **Remaining D-141 candidates — all need ADR-grade survey
-   (NOT single-cycle mechanical)**:
-   - `parse/sections.zig` (1556 LOC) — per-section vs Wasm-
-     version-cohort split vs FILE-SIZE-EXEMPT marker.
+1. **Remaining D-141 candidates** (architectural, each needs
+   own ADR-grade survey — NOT single-cycle mechanical):
    - `api/instance.zig` (1431 LOC) — c_api lifecycle redesign.
-   - `engine/compile.zig` (1225 LOC) — compileWasm phased
-     sub-fn split.
-   - `regalloc.zig` (1529 LOC after ADR-0090) — compute/verify/
-     vreg-class axis split.
-   Now that D-158 is discharged, struct-method-style extractions
-   can proceed with SIBLING-PUB marker discipline.
+   - `src/engine/codegen/shared/regalloc.zig` (1401 LOC after
+     ADR-0090) — compute/verify/vreg-class axis split.
+   - `parse/sections.zig` follow-up (1190 LOC post-ADR-0095) —
+     candidates: bundle data + codes families to a sibling,
+     OR FILE-SIZE-EXEMPT-marker review when sub-1500.
 2. **D-055 continuation** (multi-cycle mechanical, partial at
-   `783e6c11`; continue from emit_test_float line ~159).
+   `783e6c11`; continue from emit_test_int line ~159).
 3. **§9.12-G `src/api/instance.zig` split** (per c_api lifecycle).
 4. **§9.12-H bench baseline** (Mac Wasm 2.0 + wasmtime).
 5. **§9.12-I ADR/lesson curation closure**.
@@ -49,9 +48,11 @@
 - **ADR-0078 fully load-bearing**: G.1.1 + G.1.2 + amendment.
 - **§9.12-G partial**: 41 Wasm 3.0 stubs landed; dispatcher
   comptime-reject; CLI --invoke.
-- **§9.12-F**: 11 D-141 slots closed in 2026-05-21 session.
-  ADRs 0079+0081+0082+0083+0084+0085+0086+0087+0088+0089+0090
+- **§9.12-F**: 12 D-141 slots closed (2026-05-21 session).
+  ADRs 0079+0081+0082+0083+0084+0085+0086+0087+0088+0089+0090+0095
   Accepted. ADR-0094 Accepted (D-158). 3 lessons captured.
+  `engine/compile.zig` is no longer in WARN list (915 LOC <
+  soft cap).
 
 ## Pattern menu (next-session reference)
 
@@ -59,7 +60,7 @@
 |---|---|---|
 | Pure-data re-export | One block > 40% LOC, no methods, no state | ADR-0082, 0086, 0087, 0088, 0090 |
 | Pure top-level helper | 3+ standalone helpers, no callers, simple imports | ADR-0079, 0081, 0085 |
-| Cross-file struct method | Struct-method-heavy file with SIMD or other clean axis | ADR-0083, 0089 (now paired with ADR-0094 SIBLING-PUB discipline) |
+| Cross-file struct method | Struct-method-heavy file with SIMD or other clean axis | ADR-0083, 0089, 0095 (paired with ADR-0094 SIBLING-PUB discipline) |
 | Per-caller migration | N independent symbols, 100+ caller sites | ADR-0084 |
 
 See lesson `2026-05-21-pure-data-extraction-via-reexport.md`
@@ -77,13 +78,12 @@ work needs survey-first discipline.
 
 ## Open questions / blockers
 
-- なし。D-158 discharged; remaining D-141 candidates each need
-  ADR-grade survey before extraction (no mechanical pattern fits).
+- なし。Remaining D-141 candidates each need own ADR-grade
+  survey before extraction (no mechanical pattern fits).
 
 ## See
 
 - [ROADMAP](./ROADMAP.md) §9.12 — F (D-141 sweep partial) / G / H / I open.
 - [`debt.md`](./debt.md) — 25 active rows.
-- [`decisions/0094_sibling_pub_marker_for_cross_file_struct_methods.md`](./decisions/0094_sibling_pub_marker_for_cross_file_struct_methods.md)
-  — Accepted; D-158 closed.
+- [`decisions/0095_sections_element_extraction.md`](./decisions/0095_sections_element_extraction.md) — Accepted.
 - [`lessons/INDEX.md`](./lessons/INDEX.md).
