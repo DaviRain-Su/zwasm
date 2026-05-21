@@ -11,13 +11,16 @@
 [`.dev/phase9_13_0_close_plan.md`](./phase9_13_0_close_plan.md).
 The `/continue` skill's Step 1a close-plan override
 activates; follow that doc's §6 Work sequence. §0 preflight
-(8-tool inventory) green at HEAD `8334bc44` (2026-05-22).
+(8-tool inventory) green at HEAD `8a2eade8` (2026-05-22).
 
 | Next track | First action | User touchpoint |
 |---|---|---|
-| W3.b (main) — SEH shim impl per ADR 0103 (after Proposed → Accepted) | `src/platform/windows_traphandler.zig` (Zone 0): `install`/`uninstall`/`arm`/`disarm` + `vehHandler` reading `EXCEPTION_POINTERS.ContextRecord.Rip`; wire `installSigsegvHandler` Windows arm; Mac cross-compile gate (`-Dtarget=x86_64-windows-gnu`) | ADR 0103 flip Proposed → Accepted before W3.b impl |
-| WA (DONE) — §9.12-F ADR draft | `4196b385` (ADR 0102 Proposed) | ADR-flip Proposed → Accepted |
-| W3.a (DONE) — SEH bridge ADR draft | `8334bc44` (ADR 0103 Proposed; **diverges from close-plan §5/W3 Option A** to VEH+threadlocal Option B per v1/Wasmtime/Wasmer precedent) | ADR 0103 flip Proposed → Accepted |
+| W3.b (main) — SEH shim impl per ADR 0103 | `src/platform/windows_traphandler.zig` (Zone 0): `install`/`uninstall`/`arm`/`disarm` + `vehHandler` reading `EXCEPTION_POINTERS.ContextRecord.Rip`; wire `installSigsegvHandler` Windows arm; Mac cross-compile gate | **GATED** on ADR 0103 flip Proposed → Accepted (architectural ADR-first per `architectural_spike.md`) |
+| W4 (verification) — windowsmini reconcile | `bash scripts/run_remote_windows.sh test-all` post-W3.b | gated on W3.b |
+| W5 (DONE) — `std.posix.*` Windows availability | Already discharged at §9.12-D / B132 (`b098a688` 2026-05-20); gate exit 0; Win64 cross-compile exit 0 | none |
+| W6 — DCE × Windows: Mac-side DONE (6/6 combos green, monotone text bytes); windowsmini-side deferred to W4 | `check_build_dce.sh --report` exit 0 | none until W4 |
+| WA (DONE) — ADR 0102 §9.12-F exit reframe | `4196b385` (Proposed) | ADR-flip Proposed → Accepted |
+| W3.a (DONE) — ADR 0103 Win64 SEH bridge | `8334bc44` (Proposed; diverges from close-plan §5/W3 Option A to VEH+threadlocal Option B per v1/Wasmtime/Wasmer survey) | ADR-flip Proposed → Accepted |
 
 §9.12-E ★ DONE (Wasm 2.0 100%). §9.12-I batched at row 11
 (§9.13-0 close).
@@ -41,9 +44,7 @@ test-all) **only at chunk close**, not per iteration.
 
 ## windowsmini state
 
-- 8 tools installed via `scripts/windows/install_tools.ps1`:
-  zig 0.16.0 / hyperfine / wasm-tools / wasmtime / wabt /
-  yq / lldb (LLVM 22.1.6 + python311.dll).
+- 8 tools installed via `scripts/windows/install_tools.ps1`.
 - `zig build`: ✓.
 - `zig build test`: 1744/1775 pass, 2 D-136 SEH crashes.
 - `zig build test-all`: 37/39 steps OK; only spec_wasm_2_0
@@ -69,20 +70,19 @@ test-all) **only at chunk close**, not per iteration.
 - ADR 0102 (§9.12-F exit reframe) — Proposed → Accepted needs
   user (allowed `user-judgment` per `handover_framing.md`).
 - ADR 0103 (Win64 SEH bridge) — Proposed → Accepted needs
-  user; W3.b impl chunk gated on flip (architectural ADR-first
-  per `architectural_spike.md`).
+  user; W3.b impl chunk gated on flip per
+  `architectural_spike.md`.
 - D-028 barrier re-framing — W1 partial evidence suggests
   Windows resource exhaustion / SSH stall, not IPC timeout.
-  Revisit after W3.b lands (SEH bridge may reduce corpus
-  duration).
+  Revisit after W3.b lands.
 
 ## Recent context (2026-05-22 commits)
 
+- `8a2eade8` — W3.a DONE; retarget handover at W3.b.
 - `8334bc44` — ADR 0103 draft (Win64 SEH bridge via VEH, Proposed).
 - `15300741` — refresh §9.13-0 items (D-084 closed pre-row) + W1 partial.
 - `4196b385` — ADR 0102 draft (§9.12-F exit reframe, Proposed).
 - `0c2474c2` — F1 fix via `@panic` (D-022 close).
-- `7a7e387c` — Win64 v128 marshal via hidden-pointer (D-084 close, 2026-05-12).
 
 ## See
 

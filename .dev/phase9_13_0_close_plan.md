@@ -285,26 +285,50 @@ D-084 forward; refreshed alongside this amendment.
   platform residual) is the umbrella row for fallout here.
 - Exit: D-022 closed; windowsmini `test-all` exit 0.
 
-### W5 — Q6 std.posix.* Windows availability
+### ~~W5 — Q6 std.posix.* Windows availability~~ STRUCK
 
-- Grep for `std.c.write` / `std.c._exit` / `std.c.getenv` /
-  `std.c.munmap` in `src/`. If any remaining: convert to
-  `std.posix.*` if Windows-available; otherwise leave with
-  `// FILE-SIZE-EXEMPT`-style comment naming the constraint.
-- Cross-compile sanity: `zig build -Dtarget=x86_64-windows-gnu`
-  on Mac (just compile, don't run).
-- Exit: build green for Windows target on all hosts.
+W5's actionable work was discharged at §9.12-D / B132
+(`b098a688` 2026-05-20) before §9.13-0 opened: `std.c.kill` /
+`std.c.pid_t` migrated to `std.posix.*`, and the single
+remaining `std.c.getenv` site (`api/instance.zig:213`
+`wasm_engine_new`) was reclassified Replaceable → Necessary
+in ADR-0070 with the rationale that c_api exports do not
+receive `std.process.Init` (no Juicy Main mechanism in
+C-ABI-callable code). Verified this resume (2026-05-22):
+
+- `bash scripts/check_libc_boundary.sh --gate` →
+  31 necessary, 0 replaceable, 0 unclassified. Exit 0.
+- `zig build -Dtarget=x86_64-windows-gnu` → exit 0
+  (Mac → Win64-gnu cross-compile clean).
+
+The close-plan W5 framing was carried forward from the
+original §9.9-IV → §9.13-0 relocation (ADR-0049 + ADR-0056 +
+ADR-0065 2026-05-18 amends) without re-checking the
+§9.12-D discharge log. Same pattern as W2 STRUCK.
 
 ### W6 — build-option DCE 6 combos × Windows
 
-- Run on windowsmini:
-  `for w in v1_0 v2_0 v3_0; do for wasi in p1 p2; do
-   zig build -Dwasm=$w -Dwasi=$wasi test-build-completeness;
-   done; done`
-- Use `nm` / `objdump --syms` to verify excluded ops are
-  truly absent from the binary (per ADR-0073 DCE substrate).
-- Exit: 6 combos green; `check_build_dce.sh` exit 0 on
+**Mac-side DONE** (2026-05-22 this resume):
+
+- `bash scripts/check_build_dce.sh --report` → all 6 combos
+  green; text bytes monotone (v1_0=1039856 < v2_0=v3_0=1085784);
+  forbidden-symbol grep clean. Exit 0.
+
+**Windows-side deferred to W4** (windowsmini reconcile after
+W3.b SEH bridge impl lands):
+
+- `ssh windowsmini` `bash scripts/check_build_dce.sh --gate` —
+  runs the same 6-combo matrix on Windows native MSVC ABI;
+  `nm` / `objdump --syms` confirm excluded ops are absent
+  from PE/COFF binaries (per ADR-0073 DCE substrate).
+- Exit: 6 combos green AND `check_build_dce.sh` exit 0 on
   windowsmini.
+
+The Mac-side check was originally framed as "Run on
+windowsmini"; in practice the matrix builds with
+`-Dtarget=x86_64-windows-gnu` cross-compile would catch any
+MinGW-vs-MSVC structural divergence at L0. Windows native
+MSVC verification stays at W4.
 
 ### WA — §9.12-F exit re-framing ADR (parallel, main only)
 
@@ -346,8 +370,8 @@ rows proceed in main session.
 | 6 | ~~**W3.a** SEH bridge ADR draft~~ DONE `8334bc44` (Status: Proposed; **diverges from §5/W3 Option A**: adopts `AddVectoredExceptionHandler` + threadlocal `RecoveryInfo` per v1/Wasmtime/Wasmer precedent, not `__try`/`__except` C shim) | — | — | `.dev/decisions/0103_win64_seh_bridge.md` Status: Proposed |
 | 7 | **W3.b** SEH shim impl | `emit` (post-ADR) | NO | C/Zig shim + spec_assert_runner integration; Mac+ubuntu green |
 | 8 | **W4** windowsmini reconcile run (final post-W3 verification) | verification | NO | `bash scripts/run_remote_windows.sh test-all` exit 0; D-022 / D-136 / D-028 all closed (D-084 already closed pre-§9.13-0) |
-| 9 | **W5** posix.* Windows availability | `infrastructure` | NO | grep+convert; cross-compile green |
-| 10 | **W6** build-option DCE × Windows | verification | NO | 6 combos green; check_build_dce 0 |
+| 9 | ~~**W5** posix.* Windows availability~~ DONE (autonomous: `check_libc_boundary --gate` reports 0 replaceable + 0 unclassified; ADR-0070 amended `b098a688` 2026-05-20 §9.12-D / B132 reclassified `std.c.getenv` in `wasm_engine_new` Replaceable → Necessary; `zig build -Dtarget=x86_64-windows-gnu` exit 0). Original framing assumed open replaceable sites; the §9.12-D sweep already discharged. | — | — | gate exit 0; Win64 cross-compile exit 0 |
+| 10 | **W6** build-option DCE × Windows — Mac-side DONE (`check_build_dce.sh --report`: 6/6 combos green; text bytes monotone v1_0 < v2_0 == v3_0; forbidden-symbol grep clean). Windows-side `nm`/`objdump` symbol verification gated on W4 reconcile (post-W3.b). | verification | NO | Mac: 6 combos green; windowsmini: deferred to W4 |
 | 11 | §9.13-0 close + Phase 9 boundary | phase-boundary | NO | §9.13-0 [x]; `should_gate_windows.sh --record`; §9.12-I batch ADR Status flip; SHA backfill |
 
 ## §7 Subagent prompt template — W0 / W1 dispatch
