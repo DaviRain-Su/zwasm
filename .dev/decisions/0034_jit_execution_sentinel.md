@@ -1,6 +1,6 @@
 # 0034 — JIT-execution sentinel (per-prologue flag store)
 
-- **Status**: Accepted (partial — see D-055; ARM64 inject landed, x86_64 deferred)
+- **Status**: Closed (Phase 8 DONE; D-055 closed x86_64 portion at `871c78e1`)
 - **Date**: 2026-05-09
 - **Author**: Phase 8 / §9.8a / 8a.2-a autonomous /continue cycle
 - **Tags**: roadmap, phase8, diagnostic, jit, observability, prologue, abi
