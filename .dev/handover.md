@@ -15,14 +15,26 @@
 
 ## Authorized next-session pickup (priority order — updated 2026-05-21)
 
-1. **PRIMARY: next D-141 per-file ADR**. Suggested order:
-   - `src/engine/codegen/x86_64/op_simd_int_cmp_lane.zig`
-     (2121 LOC — over hard cap; urgent). ADR-0084 candidate.
-     Step 0 survey via measurement-focused brief (per
-     ADR-0080 lesson).
-   - `src/engine/codegen/{arm64,x86_64}/regalloc.zig` (~1851
-     each).
-   - `src/engine/codegen/{arm64,x86_64}/inst.zig` (1328 LOC).
+1. **PRIMARY: next D-141 per-file ADR**. Candidate triage
+   (verified actual LOC + exemption status this cycle):
+   - **EXEMPT, skip**: `op_simd_int_cmp_lane.zig` (2121 LOC) —
+     already marked `FILE-SIZE-EXEMPT` per ADR-0075 §9.12-B
+     (uniform `(ctx, ins)` adapter catalog). Not a refactor
+     target.
+   - **arm64/inst.zig** (1807 LOC) — top candidate by LOC.
+     Likely instruction encoder catalog shape (parallel of
+     x86_64/inst.zig 1328); apply ADR-0081/0082-style top-
+     level helper extraction.
+   - **arm64/emit.zig** (1630 LOC) — mirror of x86_64/emit.zig
+     after ADR-0081 (already at 1144); same prologue + frame
+     helper extraction shape likely applies.
+   - **x86_64/inst.zig** (1328 LOC) — parallel of arm64.
+   - **lower.zig** (1109 LOC) — `Lowerer = struct {...}`
+     struct-method-heavy. See lesson `2026-05-21-cross-file-
+     struct-method-syntax-zig-0-16.md` for the pre-extraction
+     checklist; replay ADR-0083 pattern.
+   Step 0 surveys must use measurement-focused brief per
+   ADR-0080 lesson.
 2. **D-055 discharge (independent)**. ~95 hardcoded byte-offset
    sites migrate; sentinel wire-up.
 3. **§9.12-F debt-cohort walk** continues per Step 0.5.
