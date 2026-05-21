@@ -5,10 +5,9 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit: `2a70881b`
-   (gate_commit — libc_boundary + fallback_patterns flipped to
-   --gate; §9.12-A enforcement-install now hard-gating, not
-   info-only).
+1. `git log --oneline -10` — last code commit: `ba4c6690`
+   (spike_lifecycle rule — canonical README shape aligned with
+   new_spike.sh output; audit-vs-rule-vs-scaffold drift closed).
 2. **Live status** (when uncertain):
    `bash scripts/p9_completion_status.sh` —
    `bash scripts/check_skip_impl_ratchet.sh --report` —
