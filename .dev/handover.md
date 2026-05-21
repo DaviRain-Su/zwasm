@@ -5,10 +5,10 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit `f777edaa` lands
-   D-158 discharge (ADR-0094 impl: `scripts/check_sibling_pub.sh`
-   + 9 SIBLING-PUB markers + bonus pub→private downgrade +
-   gate_commit integration + lesson step 4).
+1. `git log --oneline -10` — last code commit `783e6c11` lands
+   D-055 partial: 5 emit_test_float sites migrated to
+   `prologue.body_start_offset()`-relative pattern (out of 77
+   remaining; first measurable progress on multi-cycle migration).
 2. **User directive (2026-05-21)**: batch-session architectural
    mode — Phase 9 closure quality. D-158 closed; D-141 remaining
    candidates need ADR-grade survey first.
@@ -16,11 +16,13 @@
 
 ## Active `now` debts
 
-- **D-055** (mechanical, multi-cycle): ~95 hardcoded byte-offset
-  sites in x86_64 `emit_test_int.zig` / `emit_test_float.zig`
-  migrate to `prologue.body_start_offset()`-relative pattern +
-  wire `inst.encMovMemDisp32Imm32` call. Barrier dissolved
-  2026-05-21; mechanical work remains.
+- **D-055** (mechanical, multi-cycle, partial): 5/82 sites
+  migrated at `783e6c11` (emit_test_float first 5 tests). 77
+  sites remain (~21 in emit_test_int + ~56 in emit_test_float).
+  Pattern documented in commit; next cycle continues from line
+  159 onward in emit_test_float (i32.reinterpret_f32 etc.).
+  After full migration, the x86_64 JIT sentinel wire-up is a
+  5-line patch.
 
 ## Authorized next-session pickup (priority order)
 
@@ -35,7 +37,8 @@
      vreg-class axis split.
    Now that D-158 is discharged, struct-method-style extractions
    can proceed with SIBLING-PUB marker discipline.
-2. **D-055 discharge** (independent, multi-cycle mechanical).
+2. **D-055 continuation** (multi-cycle mechanical, partial at
+   `783e6c11`; continue from emit_test_float line ~159).
 3. **§9.12-G `src/api/instance.zig` split** (per c_api lifecycle).
 4. **§9.12-H bench baseline** (Mac Wasm 2.0 + wasmtime).
 5. **§9.12-I ADR/lesson curation closure**.
