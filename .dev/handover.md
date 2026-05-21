@@ -5,9 +5,10 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit: `3d1f4e83`
-   (Wasm 3.0 GC array cohort per-op stubs × 14; §9.12-G
-   Phase 10 prep; cumulative 30 Wasm 3.0 stubs landed).
+1. `git log --oneline -10` — last code commit: `614212af`
+   (Wasm 3.0 GC ref/cast + i31 cohorts per-op stubs × 11;
+   §9.12-G Phase 10 prep; cumulative 41 Wasm 3.0 stubs landed
+   across all 6 discrete-opcode cohorts).
 2. **Live status** (when uncertain):
    `bash scripts/p9_completion_status.sh` —
    `bash scripts/check_skip_impl_ratchet.sh --report` —
@@ -33,16 +34,19 @@
     inventory-only mark); ADR Decision § class column
     unchanged (still Proposed pending user Accept).
 - **§9.12-G partial** (`39f1dc15` + `d641dcd8` + `d0da6e21` +
-  `bf13981c` + `4df000bb` + `a3b0217b` + `3d1f4e83`): Wasm 3.0
-  ZirOp mapping doc; include/wasm.h byte-identical; zone_check
-  --gate enforced; dispatcher emits UnsupportedOpForBuildLevel
-  for build-filtered ops (Phase 10 comptime-reject infra; DCE-
-  safe); CLI `run --invoke <name>` mode (Phase 11 bench
-  prerequisite); **Wasm 3.0 per-op stubs landed cumulatively
-  × 30**: tail-call (3) + EH (3) + typed-func-refs (4) + GC
-  struct (6) + GC array (14). Remaining Phase 10 ZirOp stub
-  coverage: GC ref/cast cohort (8 ops); GC i31 cohort (3 ops);
-  memory64; multi-memory; relaxed-simd; `src/api/instance.zig`
+  `bf13981c` + `4df000bb` + `a3b0217b` + `3d1f4e83` +
+  `614212af`): Wasm 3.0 ZirOp mapping doc; include/wasm.h
+  byte-identical; zone_check --gate enforced; dispatcher emits
+  UnsupportedOpForBuildLevel for build-filtered ops (Phase 10
+  comptime-reject infra; DCE-safe); CLI `run --invoke <name>`
+  mode (Phase 11 bench prerequisite); **Wasm 3.0 per-op stubs
+  landed cumulatively × 41 across all 6 discrete-opcode
+  cohorts**: tail-call (3) + EH (3) + typed-func-refs (4) +
+  GC struct (6) + GC array (14) + GC ref/cast (8) + GC i31 (3).
+  Remaining Phase 10 features (memory64, multi-memory,
+  relaxed-simd) extend existing-op semantics rather than add
+  new ZirOps; per-op stub coverage is structurally complete.
+  Remaining §9.12-G non-stub deliverables: `src/api/instance.zig`
   (1424 LOC) health + helper extraction (batch-session); c_api
   Instance tests (D-139 blocked).
 - **§9.12-F partial** (active debt 24; "< 15" target needs
@@ -62,12 +66,14 @@
   - D-141 per-file ADRs (validator.zig 1790 / dispatch_
     collector 1887 / regalloc 1851 / inst.zig × 2 archs / …).
 - **autonomous-cycle-eligible**:
-  - §9.12-G Wasm 3.0 GC ref/cast cohort (ref.test / ref.test_null
-    / ref.cast / ref.cast_null / br_on_cast / br_on_cast_fail /
-    any.convert_extern / extern.convert_any) — 8 ops; bundle as
-    one chunk (same pattern as `3d1f4e83`).
-  - §9.12-G Wasm 3.0 GC i31 cohort (ref.i31 / i31.get_s /
-    i31.get_u) — 3 ops; bundle with ref/cast or solo.
+  - Loop has reached equilibrium for single-cycle-tractable
+    §9.12-G stub work. Remaining §9.12-G deliverables
+    (`src/api/instance.zig` 1424 LOC split, c_api Instance
+    test coverage) are batch-session or external-blocker work.
+  - Opportunistic: §9.12-G `--invoke` arg-marshalling extension
+    + result printing (Phase 11 bench can use the no-args path
+    landed at `d0da6e21`; arg-marshalling is the next graceful
+    step but not on Phase 11 critical path).
 
 Loop has reached equilibrium for single-cycle-tractable work;
 remaining items need batch-session or multi-cycle architectural
