@@ -116,13 +116,6 @@ pub const Error = error{
     /// detection is single-bit; Diagnostic M3 (D-022) widens
     /// this to per-trap-kind reasons.
     Trap,
-    /// Class B mixed-class entry helpers (`(i32,f64)` /
-    /// `(f64,i32)`) require an inline-asm thunk per
-    /// arch+ABI (aarch64 BLR + fmov, x86_64 SysV native
-    /// extern-struct).  Win64 has no implemented thunk yet
-    /// → `else` branch returns this variant.  Discharge via
-    /// §9.13-0 D-022 Win64 ABI marshal work.
-    UnsupportedEntrySignature,
 };
 
 /// Body shared by the ~97 Class A / Class C entry helpers.
@@ -1129,7 +1122,15 @@ pub fn callI32f64NoArgs(
         if (rt.trap_flag != 0) return Error.Trap;
         return result;
     } else {
-        return Error.UnsupportedEntrySignature;
+        // Win64: no inline-asm thunk yet (§9.13-0 D-022).
+        // @panic keeps the shared `Error` set narrow so
+        // Class A/C exhaustive-switch callers don't widen
+        // for a variant that can't fire on their path; the
+        // 3 Class B mixed-class helpers crash visibly at
+        // runtime IF actually invoked on Win64 (no silent
+        // wrong-result).  Discharge by implementing the
+        // Win64 ABI thunks.
+        @panic("Class B mixed-class entry helper: no Win64 thunk yet (D-022)");
     }
 }
 
@@ -1172,7 +1173,15 @@ pub fn callF64i32NoArgs(
         if (rt.trap_flag != 0) return Error.Trap;
         return result;
     } else {
-        return Error.UnsupportedEntrySignature;
+        // Win64: no inline-asm thunk yet (§9.13-0 D-022).
+        // @panic keeps the shared `Error` set narrow so
+        // Class A/C exhaustive-switch callers don't widen
+        // for a variant that can't fire on their path; the
+        // 3 Class B mixed-class helpers crash visibly at
+        // runtime IF actually invoked on Win64 (no silent
+        // wrong-result).  Discharge by implementing the
+        // Win64 ABI thunks.
+        @panic("Class B mixed-class entry helper: no Win64 thunk yet (D-022)");
     }
 }
 
@@ -1233,7 +1242,15 @@ pub fn callF64f32NoArgs(
         if (rt.trap_flag != 0) return Error.Trap;
         return .{ .r0 = r0_raw, .r1 = r1_raw };
     } else {
-        return Error.UnsupportedEntrySignature;
+        // Win64: no inline-asm thunk yet (§9.13-0 D-022).
+        // @panic keeps the shared `Error` set narrow so
+        // Class A/C exhaustive-switch callers don't widen
+        // for a variant that can't fire on their path; the
+        // 3 Class B mixed-class helpers crash visibly at
+        // runtime IF actually invoked on Win64 (no silent
+        // wrong-result).  Discharge by implementing the
+        // Win64 ABI thunks.
+        @panic("Class B mixed-class entry helper: no Win64 thunk yet (D-022)");
     }
 }
 
