@@ -5,10 +5,9 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit: `547b2afa`
-   (lesson `cross-file-struct-method-syntax-zig-0-16` + handover
-   triage correction; op_simd_int_cmp_lane.zig identified as
-   FILE-SIZE-EXEMPT, not a refactor target).
+1. `git log --oneline -10` — last code commit: `067c7d38`
+   (ADR-0084 Proposed — arm64/inst.zig FP machinery extraction
+   ~355 LOC). Impl cycle next.
 2. **User directive (2026-05-21)**: batch-session architectural
    mode.
 3. **Live status**: `bash scripts/p9_completion_status.sh` —
@@ -16,21 +15,26 @@
 
 ## Authorized next-session pickup (priority order — updated 2026-05-21)
 
-1. **PRIMARY: next D-141 per-file ADR**. Candidate triage:
-   - **EXEMPT, skip**: `op_simd_int_cmp_lane.zig` (2121 LOC) —
-     `FILE-SIZE-EXEMPT` per ADR-0075 §9.12-B.
-   - **arm64/inst.zig** (1807 LOC) — top candidate. Likely
-     instruction encoder catalog shape; apply ADR-0081/0082-
-     style top-level helper extraction.
+1. **PRIMARY: ADR-0084 impl (arm64/inst.zig FP extraction)**.
+   ADR Proposed at `067c7d38`. Carve cycle:
+   - Create `src/engine/codegen/arm64/inst_fp.zig` with 35 FP
+     encoders (16 conversions + 16 binary + 12 unary/rounding +
+     7 move/select) + their in-source tests (~355 LOC total).
+     `const inst = @import("inst.zig"); const Cond = inst.Cond;`
+     for shared enum.
+   - Delete the same content from inst.zig (1807 → ~1455 LOC).
+   - Update 2 caller files: `op_alu_float.zig` + `op_convert.zig`
+     to add `const inst_fp = @import("inst_fp.zig");` and
+     rewrite `inst.encF...` to `inst_fp.encF...` for FP-side
+     encoders.
+   - Cohort gate + lint.
+2. **Subsequent D-141 candidates** (after #1 lands):
    - **arm64/emit.zig** (1630 LOC) — mirror of x86_64/emit.zig
-     after ADR-0081; same prologue + frame helper shape likely
-     applies.
-   - **x86_64/inst.zig** (1328 LOC).
-   - **lower.zig** (1109 LOC) — `Lowerer = struct {...}` is
-     struct-method-heavy. See lesson `2026-05-21-cross-file-
-     struct-method-syntax-zig-0-16.md` for pre-extraction
-     checklist; replay ADR-0083 pattern (pub + free-fn convert).
-   Step 0 surveys must use measurement-focused brief.
+     after ADR-0081; same shape likely applies.
+   - **x86_64/inst.zig** (1328 LOC) — parallel of arm64; FP
+     extraction may apply similarly.
+   - **lower.zig** (1109 LOC) — `Lowerer = struct {...}`
+     struct-method-heavy. Apply ADR-0083 pattern.
 2. **D-055 discharge (independent)**. ~95 hardcoded byte-offset
    sites migrate; sentinel wire-up. Multi-cycle mechanical.
 3. **§9.12-F debt-cohort walk** continues per Step 0.5.
