@@ -281,7 +281,7 @@ Deferred to `D-081`, blocked-by `emit.zig` source split
   (`file_size_check.sh` warn → gate flip + D-057 + D-065 close +
   D-081 file). SHA backfilled at phase close per /continue
   Step 7 batch-backfill discipline.
-- 2026-05-21 (`<this commit>`): **Amendment — legacy-file
+- 2026-05-21 (`f79104bb`): **Amendment — legacy-file
   grandfather clause for §"Naming convention"**. The strict
   `<source>_test.zig` shape is **forward-looking** for new
   files. Two legacy test files predate the convention:
