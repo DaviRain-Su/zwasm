@@ -12,6 +12,7 @@ const zir = @import("../../../ir/zir.zig");
 const regalloc = @import("../shared/regalloc.zig");
 const inst = @import("inst.zig");
 const abi = @import("abi.zig");
+const prologue = @import("prologue.zig");
 
 const emit = @import("emit.zig");
 const compile = emit.compile;
@@ -41,12 +42,13 @@ test "compile: f32.const — MOV EAX,bits + MOVD XMM8,EAX" {
     //   PUSH RBP        55              (1)
     //   MOV RBP, RSP    48 89 e5        (3) → 4
     // Body:
-    //   MOV EAX, bits   b8 + 4 imm      (5) → 9
-    //   MOVD XMM8,EAX   66 44 0f 6e c0  (5) → 14
+    //   MOV EAX, bits   b8 + 4 imm      (5) → body+5
+    //   MOVD XMM8,EAX   66 44 0f 6e c0  (5) → body+10
+    const body_start = prologue.body_start_offset(false, 0);
     const expected_imm = inst.encMovImm32W(.rax, 0x3F800000);
-    try testing.expectEqualSlices(u8, expected_imm.slice(), out.bytes[4 .. 4 + expected_imm.len]);
+    try testing.expectEqualSlices(u8, expected_imm.slice(), out.bytes[body_start .. body_start + expected_imm.len]);
     const expected_movd = inst.encMovdXmmFromR32(.xmm8, .rax);
-    try testing.expectEqualSlices(u8, expected_movd.slice(), out.bytes[9 .. 9 + expected_movd.len]);
+    try testing.expectEqualSlices(u8, expected_movd.slice(), out.bytes[body_start + 5 .. body_start + 5 + expected_movd.len]);
 }
 
 test "compile: f64.const — MOVABS RAX,bits + MOVQ XMM8,RAX" {
@@ -69,12 +71,13 @@ test "compile: f64.const — MOVABS RAX,bits + MOVQ XMM8,RAX" {
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
     defer deinit(testing.allocator, out);
     // Body layout (post-prologue at 4):
-    //   MOVABS RAX,bits 48 b8 + 8 imm   (10) → 14
-    //   MOVQ XMM8,RAX   66 4c 0f 6e c0  (5)  → 19
+    //   MOVABS RAX,bits 48 b8 + 8 imm   (10) → body+10
+    //   MOVQ XMM8,RAX   66 4c 0f 6e c0  (5)  → body+15
+    const body_start = prologue.body_start_offset(false, 0);
     const expected_imm = inst.encMovImm64Q(.rax, bits);
-    try testing.expectEqualSlices(u8, expected_imm.slice(), out.bytes[4 .. 4 + expected_imm.len]);
+    try testing.expectEqualSlices(u8, expected_imm.slice(), out.bytes[body_start .. body_start + expected_imm.len]);
     const expected_movq = inst.encMovqXmmFromR64(.xmm8, .rax);
-    try testing.expectEqualSlices(u8, expected_movq.slice(), out.bytes[14 .. 14 + expected_movq.len]);
+    try testing.expectEqualSlices(u8, expected_movq.slice(), out.bytes[body_start + 10 .. body_start + 10 + expected_movq.len]);
 }
 
 test "compile: f32.add — MOVAPS XMM10,XMM8 + ADDSS XMM10,XMM9" {
@@ -98,12 +101,13 @@ test "compile: f32.add — MOVAPS XMM10,XMM8 + ADDSS XMM10,XMM9" {
     // Body layout (4-byte prologue):
     //   [4..14]  f32.const 0x3F800000 (10 bytes: MOV EAX + MOVD XMM8)
     //   [14..24] f32.const 0x40000000 (10 bytes: MOV EAX + MOVD XMM9)
-    //   [24..28] MOVAPS XMM10, XMM8   (4 bytes)
-    //   [28..33] ADDSS XMM10, XMM9    (5 bytes)
+    //   [body+20..body+24] MOVAPS XMM10, XMM8 (4 bytes)
+    //   [body+24..body+29] ADDSS XMM10, XMM9  (5 bytes)
+    const body_start = prologue.body_start_offset(false, 0);
     const expected_movaps = inst.encMovapsXmmXmm(.xmm10, .xmm8);
-    try testing.expectEqualSlices(u8, expected_movaps.slice(), out.bytes[24 .. 24 + expected_movaps.len]);
+    try testing.expectEqualSlices(u8, expected_movaps.slice(), out.bytes[body_start + 20 .. body_start + 20 + expected_movaps.len]);
     const expected_addss = inst.encSseScalarBinary(.f32, 0x58, .xmm10, .xmm9);
-    try testing.expectEqualSlices(u8, expected_addss.slice(), out.bytes[28 .. 28 + expected_addss.len]);
+    try testing.expectEqualSlices(u8, expected_addss.slice(), out.bytes[body_start + 24 .. body_start + 24 + expected_addss.len]);
 }
 
 test "compile: f64.mul — MOVAPS XMM10,XMM8 + MULSD XMM10,XMM9" {
@@ -128,12 +132,13 @@ test "compile: f64.mul — MOVAPS XMM10,XMM8 + MULSD XMM10,XMM9" {
     // Body layout (4-byte prologue):
     //   [4..19]  f64.const 1.0 (15 bytes: MOVABS RAX + MOVQ XMM8,RAX)
     //   [19..34] f64.const 2.0 (15 bytes)
-    //   [34..38] MOVAPS XMM10, XMM8 (4 bytes)
-    //   [38..43] MULSD XMM10, XMM9  (5 bytes)
+    //   [body+30..body+34] MOVAPS XMM10, XMM8 (4 bytes)
+    //   [body+34..body+39] MULSD XMM10, XMM9  (5 bytes)
+    const body_start = prologue.body_start_offset(false, 0);
     const expected_movaps = inst.encMovapsXmmXmm(.xmm10, .xmm8);
-    try testing.expectEqualSlices(u8, expected_movaps.slice(), out.bytes[34 .. 34 + expected_movaps.len]);
+    try testing.expectEqualSlices(u8, expected_movaps.slice(), out.bytes[body_start + 30 .. body_start + 30 + expected_movaps.len]);
     const expected_mulsd = inst.encSseScalarBinary(.f64, 0x59, .xmm10, .xmm9);
-    try testing.expectEqualSlices(u8, expected_mulsd.slice(), out.bytes[38 .. 38 + expected_mulsd.len]);
+    try testing.expectEqualSlices(u8, expected_mulsd.slice(), out.bytes[body_start + 34 .. body_start + 34 + expected_mulsd.len]);
 }
 
 test "compile: f64.promote_f32 — CVTSS2SD XMM9, XMM8" {
@@ -151,9 +156,10 @@ test "compile: f64.promote_f32 — CVTSS2SD XMM9, XMM8" {
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 2 };
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
     defer deinit(testing.allocator, out);
-    // After f32.const at [4..14]: CVTSS2SD XMM9, XMM8 at [14..19].
+    // After f32.const at [body..body+10]: CVTSS2SD XMM9, XMM8 at [body+10..body+15].
+    const body_start = prologue.body_start_offset(false, 0);
     const expected = inst.encSseScalarBinary(.f32, 0x5A, .xmm9, .xmm8);
-    try testing.expectEqualSlices(u8, expected.slice(), out.bytes[14 .. 14 + expected.len]);
+    try testing.expectEqualSlices(u8, expected.slice(), out.bytes[body_start + 10 .. body_start + 10 + expected.len]);
 }
 
 test "compile: i32.reinterpret_f32 — MOVD R10D, XMM8 (XMM→GPR bit-cast)" {
