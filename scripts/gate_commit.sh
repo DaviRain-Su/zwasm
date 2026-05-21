@@ -127,29 +127,21 @@ fi
 # --- gates: A1 checks (informational; skipped on docs-only) -------------
 #
 # Per §9.12-A / A7: wire as informational, not --gate, until the
-# precondition cleanups land:
-#   - check_libc_boundary --gate fails on 9 replaceable sites cleared
-#     in §9.12-D sample migration.
-#   - check_fallback_patterns --gate fails on 10 existing `catch {}`
-#     sites cleared in a follow-up (each marked EXEMPT-FALLBACK OR
-#     rewritten to propagate the error).
-# When those preconditions clear, swap each invocation to --gate mode.
+# Both check_libc_boundary and check_fallback_patterns now run in
+# strict `--gate` mode — preconditions cleared:
+#   - check_libc_boundary: 9 replaceable sites migrated in §9.12-D
+#     (current site count = 0).
+#   - check_fallback_patterns: 10 existing `catch {}` sites marked
+#     EXEMPT-FALLBACK with ADR-0014 / ADR-0016 citations at 0d524134.
 
 if [ "$DOCS_ONLY" -eq 0 ]; then
-    # NOTE: `awk '... exit'` would SIGPIPE the upstream pipe, which with
-    # `set -o pipefail` aborts gate_commit.sh. Use `grep | head` instead
-    # (head reads exactly one line; the pipe closes cleanly).
     if [ -x scripts/check_libc_boundary.sh ]; then
-        n=$(bash scripts/check_libc_boundary.sh 2>&1 | grep -E '^replaceable:' | head -1 | awk '{print $2}') || true
-        if [ -n "${n:-}" ] && [ "$n" != "0" ]; then
-            echo "[gate_commit] (info) check_libc_boundary: $n replaceable site(s) — migration in §9.12-D"
-        fi
+        echo "[gate_commit] check_libc_boundary --gate ..."
+        bash scripts/check_libc_boundary.sh --gate > /dev/null
     fi
     if [ -x scripts/check_fallback_patterns.sh ]; then
-        n=$(bash scripts/check_fallback_patterns.sh 2>&1 | grep -E '^fail:' | head -1 | awk '{print $2}') || true
-        if [ -n "${n:-}" ] && [ "$n" != "0" ]; then
-            echo "[gate_commit] (info) check_fallback_patterns: $n fail site(s) — cleanup in §9.12-A follow-up"
-        fi
+        echo "[gate_commit] check_fallback_patterns --gate ..."
+        bash scripts/check_fallback_patterns.sh --gate > /dev/null
     fi
     # ADR-0077 strict gate (§9.12-C / B128). The B126 sweep
     # discharged all 55 latent overlap sites; --strict now fails
