@@ -16,23 +16,29 @@ just a 1-line tool inventory check (env was provisioned
 
 | Track | First action | User touchpoint |
 |---|---|---|
-| W0 — windowsmini test-all survey | check Bash `bwapumur8` result OR re-launch (background subagent) | none |
+| W0 (DONE) — survey result captured | see `private/notes/p9-9.13-0-survey.md` | — |
+| W4 — fix `entry.zig` F1 compile error (re-prioritised) | main: read entry.zig, add `UnsupportedEntrySignature` to `Error` decl | none |
 | WA — §9.12-F ADR draft | main session, parallel with W0 | ADR-flip Proposed → Accepted |
 
 §9.12-E ★ DONE (Wasm 2.0 100%). §9.12-I batched at row 10
 (§9.13-0 close).
 
-## windowsmini state (2026-05-22 — fresh)
+## windowsmini state (2026-05-22 — fresh, W0 complete)
 
 - HEAD `9218f91e` (synced).
 - All 8 tools installed + on PATH: zig 0.16.0 / hyperfine /
   wasm-tools / wasmtime / wabt (wat2wasm + wast2json) /
   yq 4.53.2 / lldb 22.1.6 / python311.dll.
 - `zig build` ✓ (was failing pre-wabt-install).
-- `zig build test` ✓ 1744/1775 pass, 2 crashes (both D-136
-  SEH expected; smoke landscape clean).
-- `zig build test-all` running in background (Bash
-  `bwapumur8`); result drives W0 close.
+- `zig build test` ✓ 1744/1775 pass; 2 crashes (D-136 SEH).
+- `zig build test-all` ✓ 7m49s; 1692/1721 tests pass, 36/39
+  steps green, **1 build step failed** → see W0 survey.
+- **W0 survey landed**: `private/notes/p9-9.13-0-survey.md`
+  (gitignored).  Findings: F1 `entry.zig` compile error (NEW
+  → D-022 candidate; ~5-min fix once `Error` decl read);
+  F2 SEH guards (D-136 as expected); F3 SKIP-V2 Go binaries
+  (Phase 11+ deferral, not Windows-specific); F4 edge-case
+  runner clean.
 
 ## Current Phase 9 state
 

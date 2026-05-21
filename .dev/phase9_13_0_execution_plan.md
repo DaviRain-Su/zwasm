@@ -77,8 +77,9 @@ Two independent tracks; the loop drives both:
 | **WA** — §9.12-F exit ADR draft | main session | `architectural` (ADR draft only; no src/ change) | ADR-flip Proposed → Accepted |
 | **W0–W6** — §9.13-0 Cat IV chunks | mostly main; W0+W1 may use background subagent | `survey` then `emit` / `infrastructure` then `architectural` (W3 SEH only) | None for W0–W2 / W4–W6; W3 SEH bridge surfaces shim-design ADR at draft |
 
-Anti-pattern guard: this doc must not list "wait for X" or
-"needs commitment to Y". Pure work descriptors, ordered.
+Anti-pattern guard: this doc lists pure work descriptors,
+ordered.  Surrender framing is forbidden per
+`handover_framing.md`.
 
 ## §3 Subagent delegation policy (this plan only)
 
@@ -262,16 +263,17 @@ rows proceed in main session.
 
 | # | Item | Type | Subagent? | Output |
 |---|---|---|---|---|
-| 1 | **W0** survey | `survey` | YES (background) | `private/notes/p9-9.13-0-survey.md`; handover update names W1+W2 priority |
+| 1 | ~~**W0** survey~~ DONE 2026-05-22 | — | — | `private/notes/p9-9.13-0-survey.md` (gitignored) |
 | 2 | **WA** ADR draft | `architectural` (doc-only) | NO | `.dev/decisions/NNNN_phase9_debt_exit_reframe.md` Status: Proposed |
-| 3 | **W1** D-028 flake measurement | `survey` | YES (background, after W0 returns OR parallel with WA) | `private/notes/p9-d028-flake-rate.md`; if rate 0 → discharge commit |
-| 4 | **W2** D-084 v128 marshal | `emit` | NO | Source diff + Mac green; ubuntu deferred |
-| 5 | **W3.a** SEH bridge ADR draft | `architectural` (doc-only) | NO | `.dev/decisions/NNNN_win64_seh_bridge.md` Status: Proposed |
-| 6 | **W3.b** SEH shim impl | `emit` (post-ADR) | NO | C/Zig shim + spec_assert_runner integration; Mac+ubuntu green |
-| 7 | **W4** windowsmini reconcile run | verification | NO | `bash scripts/run_remote_windows.sh test-all` exit 0; D-022 close |
-| 8 | **W5** posix.* Windows availability | `infrastructure` | NO | grep+convert; cross-compile green |
-| 9 | **W6** build-option DCE × Windows | verification | NO | 6 combos green; check_build_dce 0 |
-| 10 | §9.13-0 close + Phase 9 boundary | phase-boundary | NO | §9.13-0 [x]; `should_gate_windows.sh --record`; §9.12-I batch ADR Status flip; SHA backfill |
+| 3 | **W4-pre** F1 `entry.zig` compile fix (re-prioritised from row 7 per W0 evidence: spec-runner doesn't compile, blocking W3 verification) | `emit` | NO | Add `UnsupportedEntrySignature` to `Error` decl; Mac+ubuntu green; ubuntu deferred |
+| 4 | **W1** D-028 flake measurement (re-launchable any time) | `survey` | YES (background) | `private/notes/p9-d028-flake-rate.md` |
+| 5 | **W2** D-084 v128 marshal | `emit` | NO | Source diff + Mac green; ubuntu deferred |
+| 6 | **W3.a** SEH bridge ADR draft | `architectural` (doc-only) | NO | `.dev/decisions/NNNN_win64_seh_bridge.md` Status: Proposed |
+| 7 | **W3.b** SEH shim impl | `emit` (post-ADR) | NO | C/Zig shim + spec_assert_runner integration; Mac+ubuntu green |
+| 8 | **W4** windowsmini reconcile run | verification | NO | `bash scripts/run_remote_windows.sh test-all` exit 0; D-022 close |
+| 9 | **W5** posix.* Windows availability | `infrastructure` | NO | grep+convert; cross-compile green |
+| 10 | **W6** build-option DCE × Windows | verification | NO | 6 combos green; check_build_dce 0 |
+| 11 | §9.13-0 close + Phase 9 boundary | phase-boundary | NO | §9.13-0 [x]; `should_gate_windows.sh --record`; §9.12-I batch ADR Status flip; SHA backfill |
 
 ## §7 Subagent prompt template — W0 / W1 dispatch
 
