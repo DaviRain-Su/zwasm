@@ -3,44 +3,52 @@
 > ≤ 80 lines. No numeric predictions (per
 > [`no_handover_predictions.md`](../.claude/rules/no_handover_predictions.md)).
 
-## Cold-start procedure — §9.12-F D-055 migration in progress
+## Cold-start procedure — §9.12-F D-055 closed
 
 §9.12-F (debt active rows < 15) and §9.12-I (ADR canonical) open.
 
-| Exit criterion                  | Latest fact                                                                |
-|---------------------------------|----------------------------------------------------------------------------|
-| §9.12-F: debt active rows < 15  | 23 (no change this commit; D-055 site-count progressing)                   |
-| §9.12-I: ADR `Accepted` < 30    | strict 33 / loose 52 — blocked on Phase 9 close                            |
+| Exit criterion                  | Latest fact                                                                 |
+|---------------------------------|-----------------------------------------------------------------------------|
+| §9.12-F: debt active rows < 15  | 22 (D-055 closed this commit; was 23)                                       |
+| §9.12-I: ADR `Accepted` < 30    | strict 33 / loose 52 — blocked on Phase 9 close                             |
 
-**This commit (D-055 migration batch 2)**: 6 more test sites in
-`emit_test_int.zig` migrated from hardcoded prologue offsets to
-`prologue.body_start_offset()` pattern. `emit_test_int.zig` is
-now substantially helper-relative; only 1 literal-offset site
-remains (the `[0..body_start]` slice that already uses the
-helper).
+**This commit (D-055 close — JIT-execution sentinel on x86_64
+prologue)**:
 
-Tests migrated this commit:
-- `(i32.const 0xDEADBEEF) end` — imm32 byte slice
-- `(i32.const 7) (local.tee 0) end` — STORE [RBP-8] EBX
-- `(i32.const 8) (i32.const 3) i32.sub end` — SUB R13D R12D
-- `(i32.const 6) (i32.const 7) i32.mul end` — IMUL
-- `i32.wrap_i64` — MOV EBX EBX self-MOV
-- `i64.extend_i32_u` — MOV EBX EBX
-- `i64.extend_i32_s` — MOVSXD RBX EBX
-- `(i32.const 0)(i32.const 99) i32.store offset=0` — store path
+The x86_64 prologue now emits the `MOV [R15 + jit_executed_flag_off],
+1` sentinel (11 bytes, REX.B + 0xC7 + ModR/M + disp32 + imm32),
+gated on `uses_runtime_ptr=true`. Mirrors the ARM64 inject at
+`d6e29ac` per ADR-0034 (§9.8a / 8a.2).
 
-Behavior-preserving (zig build test-all green on Mac aarch64).
-Combined with batch 1 (commit `84c83e11`), the 4
-`uses_runtime_ptr=true` tests + the bulk of `uses_runtime_ptr
-=false` tests in `emit_test_int.zig` now use the helper.
+- `src/engine/codegen/x86_64/emit.zig`: 1-line wire-up of
+  `inst.encMovMemDisp32Imm32(.r15, jit_abi.jit_executed_flag_off,
+  1)` inside the `if (uses_runtime_ptr)` branch, immediately
+  after `MOV R15, runtime_ptr_save`.
+- `src/engine/codegen/x86_64/prologue.zig`: `body_start_offset`
+  helper now adds `sentinel_size = 11` to uses_runtime_ptr cases
+  (was: noted in docstring as a deferred +N). Layout table
+  updated to new offsets: 20 / 24 / 27 vs. 4 / 8 / 11.
+- Final test-site fix-ups: `emit_test_int.zig` exp_prologue size
+  13 → 24 + sentinel splice; total-length assertion 80 → 91.
+- Final emit_test_float.zig site (unreachable JMP rel32)
+  migrated to helper-relative.
 
-**Next pickup**: D-055 migration batch 3 — sweep
-`emit_test_float.zig` (91 `out.bytes[...]` sites). Most are
-`uses_runtime_ptr=false` per the file's comments; the migration
-applies the same `prologue.body_start_offset(false, 0) + delta`
-pattern. After full sweep, the 5-line
-`inst.encMovMemDisp32Imm32` wire-up in `x86_64/emit.zig`
-prologue can land safely.
+Both test families (emit_test_int.zig + emit_test_float.zig)
+substantially use `prologue.body_start_offset()` per ADR-0021 +
+edge_case_testing.md; the +11 prologue shift propagates
+automatically.
+
+Behavior-preserving for all existing JIT-emit semantics; the
+sentinel only adds a write to a previously-unused field
+(`JitRuntime.jit_executed_flag`), which post-call readers can
+inspect to confirm "JIT body actually ran" vs "compile-passed
+but never invoked".
+
+**Next pickup**: D-141 file-size cap WARN proliferation (18
+files exceed 1000-LOC soft cap). Per ADR-0099 D2, each file
+needs either (a) a per-file split ADR with P1-P4 conditions, or
+(b) an EXEMPT marker for files in [2000, 2500] range. Approach
+in batches.
 
 ## Recent context
 
@@ -48,32 +56,33 @@ prologue can land safely.
 - §9.12-I batch 1 (`1095d225`) + batch 2 (`5e2b1a6e`).
 - §9.12-F D-018 discharge (`02397144` + backfill `3df2f7ff`).
 - §9.12-F barrier sweep (`d68ad87c`).
-- D-055 migration batch 1 (`84c83e11`).
+- D-055 migration batch 1 (`84c83e11`) + batch 2 (`b7d4f399`).
 
 ## Active `now` debts
 
-- **D-055** (mechanical, multi-cycle): emit_test_int.zig ~done;
-  emit_test_float.zig pending; final 5-line wire after sweep.
+- なし — D-055 closed.
 
 ## Other queued work
 
-1. **D-055 migration batch 3 (emit_test_float.zig)**.
-2. **D-141 per-file file-size ADRs** — 18 WARN files.
-3. **§9.12-I revisit after Phase 9 close**.
+1. **D-141 per-file file-size ADRs** — 18 WARN files.
+2. **§9.12-I revisit after Phase 9 close**.
+3. **D-081 follow-up** — was blocked-by ADR-0054 amendment +
+   ADR-0081 successor; needs re-walking now that D-055 closed
+   (D-081 had a "paired with D-055" note).
 
 ## Active state (snapshot)
 
 - §9.12-A enforcement: 11 items OK.
-- §9.12-F: 23 active rows; D-055 migration in progress.
+- §9.12-F: 22 active rows; D-055 just closed; exit `< 15`.
 - §9.12-G / §9.12-H: closed.
 - §9.12-I: 29 ADRs flipped; blocked on Phase 9 close.
 
 ## Open questions / blockers
 
-- なし for D-055 batch 3.
+- なし for D-141 batches.
 
 ## See
 
 - [ROADMAP](./ROADMAP.md) §9.12-F + §9.12-I scope + exit
 - [`debt.md`](./debt.md), [`lessons/INDEX.md`](./lessons/INDEX.md)
-- [`src/engine/codegen/x86_64/prologue.zig`](../src/engine/codegen/x86_64/prologue.zig) — body_start_offset helper
+- ADR-0034 (sentinel design), `d6e29ac` (ARM64 inject)

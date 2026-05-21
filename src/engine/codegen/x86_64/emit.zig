@@ -262,18 +262,15 @@ pub fn compile(
         // modrm) so the prologue's frame-bytes formula stays Cc-agnostic.
         const rt_src_gpr: abi.Gpr = if (return_is_memory_class) .rsi else abi.current.entry_arg0_gpr;
         try buf.appendSlice(allocator, inst.encMovRR(.q, abi.current.runtime_ptr_save_gpr, rt_src_gpr).slice());
+        // §9.8a / 8a.2 (ADR-0034) — JIT-execution sentinel: write 1
+        // to `JitRuntime.jit_executed_flag` so post-call readers can
+        // distinguish "JIT body actually ran" from "compile-passed
+        // but never invoked". `MOV DWORD PTR [R15 + flag_off], 1`
+        // is 7 bytes (REX.B + C7 + ModR/M + disp32 + imm32). Gated on
+        // uses_runtime_ptr because the sentinel uses R15. Mirrors
+        // the ARM64 inject at d6e29ac (D-055 close).
+        try buf.appendSlice(allocator, inst.encMovMemDisp32Imm32(.r15, jit_abi.jit_executed_flag_off, 1).slice());
     }
-    // §9.8a / 8a.2 (ADR-0034) — JIT-execution sentinel: ARM64
-    // has the inject landed at d6e29ac; x86_64 inject is deferred
-    // (D-055) pending x86_64 prologue.zig helper extract (D-052)
-    // because the existing test landscape uses
-    // `expectEqualSlices(&full_byte_array, out.bytes)` rather than
-    // a body_start_offset()-relative pattern. Inserting 7 sentinel
-    // bytes per func without a helper layer would require updating
-    // 50+ test sites manually, exceeding chunk-bundle threshold.
-    // The encoder helper `inst.encMovMemDisp32Imm32` lands now
-    // (reusable for future Phase 8 / 15 work) so the wire-up
-    // becomes a 5-line patch once the helper migration completes.
     if (frame_bytes > 0) {
         // §9.7 / 7.10-g: pick imm8 / imm32 form per range.
         // imm8 form is 4 bytes; imm32 is 7 bytes.

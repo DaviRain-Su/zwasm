@@ -573,8 +573,9 @@ test "compile: (i32.const 0) i32.load offset=0 end — ADR-0026 prologue + bound
     // JA patch: trap_byte = 59. fixup_byte = 38, insn_size = 6.
     //   disp = 59 - 38 - 6 = 15 = 0x0F.
     //
-    // Total length: 80 bytes.
-    try testing.expectEqual(@as(usize, 80), out.bytes.len);
+    // Total length: 80 bytes pre-D-055-sentinel; +11 sentinel bytes
+    // after D-055 close = 91 bytes (uses_runtime_ptr=true).
+    try testing.expectEqual(@as(usize, 91), out.bytes.len);
     // Spot-check the prologue (verifies ADR-0026 structure).
     // The MOV R15, <entry_arg0> byte differs by Cc; derive the
     // expected sequence dynamically so this works on both SysV
@@ -583,8 +584,9 @@ test "compile: (i32.const 0) i32.load offset=0 end — ADR-0026 prologue + bound
     const exp_push_r15 = inst.encPushR(.r15);
     const exp_mov_rbp_rsp = inst.encMovRR(.q, .rbp, .rsp);
     const exp_mov_r15_arg0 = inst.encMovRR(.q, abi.current.runtime_ptr_save_gpr, abi.current.entry_arg0_gpr);
+    const exp_sentinel = inst.encMovMemDisp32Imm32(.r15, @import("../shared/jit_abi.zig").jit_executed_flag_off, 1);
     const exp_sub_rsp_8 = inst.encSubRSpImm8(8);
-    var exp_prologue: [13]u8 = undefined;
+    var exp_prologue: [24]u8 = undefined;
     var off: usize = 0;
     @memcpy(exp_prologue[off .. off + exp_push_rbp.len], exp_push_rbp.slice());
     off += exp_push_rbp.len;
@@ -594,11 +596,13 @@ test "compile: (i32.const 0) i32.load offset=0 end — ADR-0026 prologue + bound
     off += exp_mov_rbp_rsp.len;
     @memcpy(exp_prologue[off .. off + exp_mov_r15_arg0.len], exp_mov_r15_arg0.slice());
     off += exp_mov_r15_arg0.len;
+    @memcpy(exp_prologue[off .. off + exp_sentinel.len], exp_sentinel.slice());
+    off += exp_sentinel.len;
     @memcpy(exp_prologue[off .. off + exp_sub_rsp_8.len], exp_sub_rsp_8.slice());
     off += exp_sub_rsp_8.len;
-    try testing.expectEqual(@as(usize, 13), off);
+    try testing.expectEqual(@as(usize, 24), off);
     // D-055 migration: prologue size sourced from prologue.body_start_offset() so the
-    // assertion survives sentinel injection (sentinel adds +7 to uses_runtime_ptr cases).
+    // assertion survives the sentinel injection (sentinel adds +11 to uses_runtime_ptr cases).
     const body_start = prologue.body_start_offset(true, 8);
     try testing.expectEqualSlices(u8, &exp_prologue, out.bytes[0..body_start]);
     // JA placeholder = body_start + 25 (after const + memory-load + LEA bytes per layout comment).

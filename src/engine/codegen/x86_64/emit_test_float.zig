@@ -1323,14 +1323,20 @@ test "compile: unreachable emits JMP rel32 + trap stub patches disp to trap_byte
     //   PUSH RBP (1) + PUSH R15 (2) + MOV RBP RSP (3)
     //   + MOV R15 RDI (3) + SUB RSP, 8 (4) = 13 bytes
     // JMP rel32 (5 bytes) starts at offset 13.
-    try testing.expectEqual(@as(u8, 0xE9), out.bytes[13]);
-    const disp = std.mem.readInt(i32, out.bytes[14..18], .little);
-    const jmp_at: i32 = 13;
+    // D-055 migration: prologue size sourced from body_start_offset().
+    // `unreachable` prescan flips uses_runtime_ptr=true (R15 saved
+    // even though not loaded for memory access in this fixture);
+    // frame=8.
+    const body_start = prologue.body_start_offset(true, 8);
+    try testing.expectEqual(@as(u8, 0xE9), out.bytes[body_start]);
+    const disp_slice_start = body_start + 1;
+    const disp = std.mem.readInt(i32, out.bytes[disp_slice_start..][0..4], .little);
+    const jmp_at: i32 = @intCast(body_start);
     const target_abs: i32 = jmp_at + 5 + disp;
     // After JMP: end-handler emits ADD RSP, 8 (4) + POP R15 (2)
     // + POP RBP (1) + RET (1) = 8 bytes → trap stub starts at
-    // 13 + 5 + 8 = 26.
-    try testing.expectEqual(@as(i32, 26), target_abs);
+    // body_start + 5 + 8.
+    try testing.expectEqual(@as(i32, jmp_at + 5 + 8), target_abs);
 }
 
 test "compile: SysV callee with 6 i32 params — 6th param read from caller stack [RBP+16+8*0] (§9.7 / 7.10-j)" {
