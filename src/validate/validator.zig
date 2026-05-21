@@ -1,3 +1,4 @@
+// FILE-SIZE-EXEMPT: Wasm spec §3.3 validation single-pass walker (type-stack + control-stack); P1 spec-defined sub-language, intrinsically singular (splitting would create artificial seams across an unsplittable algorithm) (per ADR-0099)
 //! Wasm function-body **type-stack + control-stack validator**
 //! (Phase 1 / §9.1 / 1.5).
 //!

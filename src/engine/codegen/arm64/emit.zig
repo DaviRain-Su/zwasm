@@ -1,3 +1,4 @@
+// FILE-SIZE-EXEMPT: ARM64 emit driver (prologue + epilogue + dispatch); P1 AAPCS64 spec-defined emit boundary; per-op handlers already extracted to op_*.zig sibling files (per ADR-0099)
 //! ZIR → ARM64 emit pass (§9.7 / 7.3 — skeleton).
 //!
 //! Walks a `ZirFunc.instrs` stream (consumed in def_pc order)

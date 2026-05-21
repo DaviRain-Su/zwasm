@@ -1,3 +1,4 @@
+// FILE-SIZE-EXEMPT: x86_64 emit driver (prologue + epilogue + dispatch); P1 SysV/Win64 spec-defined emit boundary; per-op handlers already extracted to op_*.zig sibling files (per ADR-0099)
 //! x86_64 emit pass — skeleton (§9.7 / 7.7).
 //!
 //! Mirrors the role of `arm64/emit.zig`'s `compile()` entry but
