@@ -5,11 +5,10 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit: `0f3f863f`
-   (ADR-0088 — liveness_stack_effect.zig extraction;
-   liveness.zig 1192 → 679 LOC; zero caller migration via
-   re-export; mirror of ADR-0087 pattern; Accepted same
-   cycle).
+1. `git log --oneline -10` — last lesson commit captures the
+   re-export pattern validated across ADR-0082/0086/0087/0088
+   (3791 LOC moved across 4 sibling extractions with 0 caller
+   migration). Most recent code commit: `0f3f863f` (ADR-0088).
 2. **User directive (2026-05-21)**: batch-session architectural
    mode.
 3. **Live status**: `bash scripts/p9_completion_status.sh` —
