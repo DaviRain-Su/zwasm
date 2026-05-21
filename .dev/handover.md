@@ -2,51 +2,49 @@
 
 > ≤ 80 lines. No numeric predictions (per
 > [`no_handover_predictions.md`](../.claude/rules/no_handover_predictions.md)).
+> Framing discipline per
+> [`handover_framing.md`](../.claude/rules/handover_framing.md).
 
-## Cold-start procedure — §9.12-F discharge plateau
+## Cold-start procedure — §9.13-0 cohort autonomous start
 
-§9.12-F (debt active rows < 15) and §9.12-I (ADR canonical) open.
-The autonomous discharge work has reached a productive plateau —
-remaining barriers are genuine future-phase deferrals or external
-upstream issues. Next step is user-judgment territory (§9.12-F
-exit re-framing OR pivot to §9.13-0 multi-cycle work).
+Open work: §9.13-0 (Cat IV windowsmini reconcile) + §9.12-F /
+§9.12-I cleanup. §9.12-E ★ (Wasm 2.0 100%, 4 testsuites green)
+DONE. The autonomous loop drives §9.13-0 forward in `emit` /
+`infrastructure` chunks; the per-cycle commit pair lands work
+even if many cycles are needed.
 
-| Exit criterion                  | Latest fact                                                   |
-|---------------------------------|---------------------------------------------------------------|
-| §9.12-F: debt active rows < 15  | 19 (D-081 closed `f79104bb`; 4/6 phase-9-eligible cohort done)|
-| §9.12-I: ADR `Accepted` < 30    | strict 33 / loose 53 (ADR-0034 flipped `9457a4b6`)            |
+| Exit criterion                  | Latest fact                                                       |
+|---------------------------------|-------------------------------------------------------------------|
+| §9.13-0 windowsmini full green  | not yet; Cat IV cohort 4 debts open (D-022, D-028, D-084, D-136)  |
+| §9.12-F: debt active rows < 15  | 19 (cleanup; criterion likely needs §18 amendment — file ADR)     |
+| §9.12-I: ADR `Accepted` < 30    | strict 33 / loose 53 (blocked on Phase 9 close)                   |
 
-**Latest cycles since plateau** (cleanup + heartbeat):
+## Active task — §9.13-0 chunk 1
 
-- `9641f794` debt-stale-framing-pattern lesson.
-- `b2f88711` trigger-watch heartbeat (D-094 / D-062 / D-079).
-- `d8e02f32` arm64 m-4c comment cleanup post-D-090.
-- `e2e3c1f2` runVoidExport docstring refresh post-D-055.
+**First chunk** (autonomous, `emit` or `infrastructure`):
 
-These touched comments only (no behaviour change).
+`§9.13-0-a — inventory the 4 Cat IV debts on windowsmini`. Run
+`bash scripts/run_remote_windows.sh test-all > /tmp/win.log 2>&1`
+foreground (Bash timeout ≥ 600000 ms) to capture the actual
+failure landscape. Read the log tail; produce
+`private/notes/p9-9.13-0-survey.md` enumerating which debts
+each FAIL maps to. This is `survey`-typed; commit the survey
+note (gitignored) reference in handover and proceed to chunk 2.
 
-**Trigger-watch candidates**: D-094 (real workload demanding
->2 same-class results), D-062 (≥ 9 v128 args), D-079 (c_api
-v128). No fixture changes; triggers un-fired.
+**Chunk 2 candidate** (post-survey): pick the highest-leverage
+debt and land its fix as a focused `emit` chunk. D-084 (Win64
+v128 marshal) likely smallest; D-136 (SEH bridge) likely
+largest. Order TBD by survey evidence.
 
-**§9.12-F remaining state**:
+## §9.12-F exit re-framing (parallel autonomous track)
 
-- 13 deferred to Phase 10/11/14/v0.1.0 RC/external (D-007,
-  D-010, D-020, D-021, D-026, D-058, D-059, D-074, D-075,
-  D-079, D-082, D-148, D-157).
-- 4 §9.13-0 / Cat IV cohort (D-022, D-028, D-136 + sibling).
-- 2 trigger-not-fired Phase-9-eligible (D-062, D-094).
-
-**Next pickup** (user-judgment territory):
-
-(a) §9.13-0 windowsmini reconcile (D-136 SEH bridge, D-028 IPC)
-    — substantial multi-cycle Win64-side work.
-(b) §18 amendment of §9.12-F exit criterion — re-frame to
-    "phase-9-eligible cohort substantially addressed".
-(c) Wait for natural trigger events (D-094 / D-062 fixtures).
-
-windowsmini reachable per `ssh windowsmini`. SEH bridge needs
-Win64 PowerShell + small C/asm shim.
+The §9.12-F exit criterion ("debt active rows < 15") is a §9
+phase-row exit. Re-framing it touches ROADMAP §9 → requires
+ADR per §18.2. **This is the only `user-judgment` flagged in
+handover** (per `handover_framing.md`); the autonomous loop
+can draft the ADR (`.dev/decisions/NNNN_phase9_debt_exit_
+reframe.md`) with `Status: Proposed` and surface for user
+review at ADR-flip time.
 
 ## Recent context
 
@@ -54,32 +52,27 @@ Win64 PowerShell + small C/asm shim.
 - §9.12-I batches 1+2 + ADR-0034 flip.
 - §9.12-F discharges: D-018 / D-055 / D-090 / D-141 / D-081.
 - D-055 migration batches 1+2 + close (`871c78e1`).
-- Plateau cleanups + lesson.
+- Plateau-period cleanups + `2026-05-21-debt-stale-framing-pattern.md`.
 
 ## Active `now` debts
 
-- なし.
+- なし (handle as part of §9.13-0 chunks).
 
-## Other queued work
+## §9.13-0 Cat IV cohort (the autonomous target)
 
-1. **§9.13-0 windowsmini reconcile** (D-136 SEH, D-028 IPC).
-2. **§9.12-F exit re-framing decision** (user-judgment).
-3. **D-094 / D-062 trigger-watch** per stale-framing lesson.
-
-## Active state (snapshot)
-
-- §9.12-A enforcement: 11 items OK.
-- §9.12-F: 19 active rows; 4/6 phase-9-eligible debts closed.
-- §9.12-G / §9.12-H / D-055 / D-090 / D-141 / D-081: closed.
-- §9.12-I: 30 ADRs flipped; blocked on Phase 9 close.
+- **D-084** Win64 v128 marshal residual.
+- **D-136** Win64 SEH bridge for `assert_trap` recovery
+  (C/asm shim alongside Zig).
+- **D-028** windowsmini SSH test-runner IPC flake.
+- **D-022** Win64 cross-platform residual (paired with above).
 
 ## Open questions / blockers
 
-- §9.12-F exit re-framing decision (user-judgment per §18).
-- §9.13-0 needs commitment to deep Win64 SEH work or wait.
+- §9.12-F exit re-framing — **ADR-drafting is autonomous**;
+  ADR-flip review needs user. Not a stop on chunk progress.
 
 ## See
 
-- [ROADMAP](./ROADMAP.md) §9.12-F + §9.12-I + §9.13-0
+- [ROADMAP](./ROADMAP.md) §9.13-0 + §9.12-F + §9.12-I
 - [`debt.md`](./debt.md), [`lessons/INDEX.md`](./lessons/INDEX.md)
-- New lesson: `2026-05-21-debt-stale-framing-pattern.md`
+- New rule: [`handover_framing.md`](../.claude/rules/handover_framing.md)
