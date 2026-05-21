@@ -1,9 +1,29 @@
 # 0080 — Split `src/engine/codegen/x86_64/emit.zig` along driver / int / float boundary
 
-- **Status**: Proposed
+- **Status**: **Withdrawn (2026-05-21, same-day pivot)** — see Revision history footer.
 - **Date**: 2026-05-21
 - **Author**: autonomous /continue loop (D-055 / D-081 paired discharge)
-- **Tags**: file-layout, refactor, zone-2, codegen-x86_64, file-size-cap
+- **Tags**: file-layout, refactor, zone-2, codegen-x86_64, file-size-cap, withdrawn
+
+> **Withdrawal summary**: implementation-prep verification (same
+> day) showed the Step 0 survey overestimated `emit.zig` carve
+> potential along the int/float axis. The per-op-file pattern
+> from ADR-0074 had already extracted nearly all domain-specific
+> code into `op_alu_float.zig`, `op_alu_int.zig`, `op_memory.zig`,
+> `op_convert.zig`, `op_simd*.zig`. emit.zig's float dispatch arms
+> are 18 single-line routes to those op_*.zig modules; carving
+> them into `emit_float.zig` would produce a ~50-LOC wrapper file
+> that doesn't shrink the parent. The true extractable mass of
+> emit.zig is the **setup-pipeline helpers** (prologue + param
+> marshalling + local init + state init + frame helpers,
+> ~500 LOC), not the dispatch arms. A successor ADR (target
+> ADR-0081) proposes the setup-helper extraction instead. See
+> [`.dev/lessons/2026-05-21-emit-zig-survey-per-op-pattern-already-absorbed.md`](../lessons/2026-05-21-emit-zig-survey-per-op-pattern-already-absorbed.md)
+> for the lesson capturing the survey-time discipline gap.
+
+> Sections below preserve the original Proposed text for
+> historical reference; readers seeking the current emit.zig
+> refactor plan should consult ADR-0081 once it lands.
 
 ## Context
 
@@ -288,10 +308,9 @@ boundaries — emit.zig is the codegen entry for x86_64).
   current shape), `emit_test_int.zig` (1607 LOC), `emit_test_float.zig`
   (1539 LOC), `prologue.zig` (helper landed via D-052 close).
 
-<!--
 ## Revision history
 
-| Date       | SHA          | Note                                    |
-|------------|--------------|-----------------------------------------|
-| 2026-05-21 | `<backfill>` | Initial Proposed version.               |
--->
+| Date       | SHA          | Note                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+|------------|--------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 2026-05-21 | `32a431a0`   | Initial Proposed version.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 2026-05-21 | `<backfill>` | **Status: Withdrawn** — same-day implementation-prep verification revealed the Step 0 survey overestimated the int/float carve mass. emit.zig's 18 float dispatch arms are 1-line routes to `op_alu_float.zig` / `op_memory.zig` / `op_convert.zig` (ADR-0074 per-op-file pattern already absorbed the float code). emit_float.zig per this ADR would be a ~50-LOC wrapper; doesn't shrink emit.zig meaningfully. The actual extractable mass is the setup-pipeline helpers (~500 LOC) — successor ADR-0081 will propose that target. D-055 + D-081 stay `Status: now` but their discharge paths re-walk per the lesson (D-081's rename-to-strict-suffix may need ADR-0054 amendment alternative since source-split is no longer the chosen path; D-055's sentinel wire-up + test-array migration unaffected). |
