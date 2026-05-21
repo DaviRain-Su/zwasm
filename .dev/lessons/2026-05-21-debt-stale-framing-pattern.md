@@ -104,6 +104,46 @@ trigger condition (fixture presence, workload existence) at
 every resume. The fixture trigger may fire silently like the
 D-090 case did.
 
+## Extension — close-plan §6 row staleness (2026-05-22)
+
+The same pattern recurred at `.dev/phase9_13_0_close_plan.md` §6:
+
+- Row 5 (W2 D-084 Win64 v128 marshal "residual") — D-084 was
+  already discharged at `7a7e387c` 2026-05-12 §9.9-i-1 per
+  ADR-0055 (Status: Accepted); the row was carried forward
+  from the §9.9-IV → §9.13-0 relocation (ADR-0049 + ADR-0056 +
+  ADR-0065 2026-05-18 amends) without re-checking the
+  discharge log.
+- Row 9 (W5 posix.* Windows availability) — discharged at
+  §9.12-D / B132 (`b098a688` 2026-05-20); the row was carried
+  forward without `check_libc_boundary.sh --gate` invocation
+  at plan-draft time.
+
+Both rows were verified-already-discharged this resume in <2
+minutes (grep `git log` + run the relevant gate script). The
+close-plan was drafted with care for the items it added; the
+items it inherited from §9.9-IV's old framing got no
+verification pass.
+
+**Structural fix for close-plan drafting**: when drafting a
+`.dev/phase*_close_plan.md` §6 work sequence, walk each row:
+
+1. For "close debt D-NNN" rows: grep `.dev/debt.md` Discharged
+   section for D-NNN. If present → STRIKE the row at draft
+   time, not on first execution.
+2. For "do X" rows (grep-and-convert, run-and-verify): execute
+   the verification command in advance. If the gate is already
+   green → STRIKE.
+3. Carry-forward rows from a relocation (§N.N → §M.M) inherit
+   discharge state from the original phase; the relocation
+   commit MUST re-walk the discharge log.
+
+This applies to ANY phase-close plan drafted from a prior
+phase's row list. The 2026-05-22 §9.13-0 case had ~5 of 11
+rows in this state (rows 1+3 DONE pre-relocation, rows 5+9
+STRUCK at first-execution); a plan-draft-time verification
+pass would have caught 4/5 cases.
+
 ## Related
 
 - `.claude/skills/continue/SKILL.md` Step 0.5 (barrier-dissolution
@@ -111,3 +151,6 @@ D-090 case did.
 - ADR-0050 (ADR / debt lifecycle) — debt-row hygiene framework.
 - `.dev/lessons/2026-05-16-narrative-claim-vs-landed-state.md` —
   the sibling lesson about narrative drift in handover.
+- `.claude/rules/architectural_spike.md` — sibling discipline
+  for on-branch spike-vs-real-work boundary; same shape
+  applies to "close-plan-drafted but already done" rows.
