@@ -1,6 +1,6 @@
 # 0037 — Regalloc upgrade: slot reuse on dead vregs (Phase 8b MVP)
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 8 DONE)
 - **Date**: 2026-05-09
 - **Author**: Phase 8 / §9.8b / 8b.2-b autonomous /continue cycle
 - **Tags**: roadmap, phase8, jit, regalloc, optimisation

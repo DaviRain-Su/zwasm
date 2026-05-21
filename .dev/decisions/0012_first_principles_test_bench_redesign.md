@@ -1,6 +1,6 @@
 # 0012 — Adopt tier-provisioned hybrid architecture for the test/bench suite
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 6 DONE)
 - **Date**: 2026-05-03
 - **Author**: continue loop
 - **Tags**: phase-6, test-suite, bench-suite, infrastructure,

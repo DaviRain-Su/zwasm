@@ -1,13 +1,13 @@
 ---
 name: 0002 — Curate the §9.1 / 1.9 MVP corpus to a hand-picked Wasm-1.0-pure subset
 date: 2026-05-01
-status: Accepted
+status: Closed (Phase 1 DONE)
 tags: phase-1, spec-corpus, scope
 ---
 
 # 0002 — Curate the §9.1 / 1.9 MVP corpus to a hand-picked Wasm-1.0-pure subset
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 1 DONE)
 - **Date**: 2026-05-01
 - **Author**: Claude (autonomous /continue loop)
 - **Tags**: phase-1, spec-corpus, scope

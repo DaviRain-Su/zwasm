@@ -1,6 +1,6 @@
 # 0013 — Runtime-asserting WAST runner detailed design
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 6 DONE)
 - **Date**: 2026-05-03
 - **Author**: continue loop
 - **Tags**: phase-6, test-runner, runtime-assertion, per-instr-trace,

@@ -1,13 +1,13 @@
 ---
 name: 0003 — Curate the §9.2 / 2.8 Wasm 2.0 corpus to a hand-picked passable subset
 date: 2026-05-02
-status: Accepted
+status: Closed (Phase 2 DONE)
 tags: phase-2, spec-corpus, scope
 ---
 
 # 0003 — Curate the §9.2 / 2.8 Wasm 2.0 corpus to a hand-picked passable subset
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 2 DONE)
 - **Date**: 2026-05-02
 - **Author**: Claude (autonomous /continue loop)
 - **Tags**: phase-2, spec-corpus, scope

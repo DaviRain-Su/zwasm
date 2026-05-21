@@ -1,6 +1,6 @@
 # 0015 — Adopt canonical debug toolkit for Phase 6+
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 6 DONE)
 - **Date**: 2026-05-04
 - **Author**: zwasm v2 / continue loop
 - **Tags**: phase-6, debug, tooling, observability, infrastructure

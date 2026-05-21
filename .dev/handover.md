@@ -5,41 +5,52 @@
 
 ## Cold-start procedure — §9.12-I in progress
 
-§9.12-I (ADR + lesson + private/ closure). 2 of 3 exit
-criteria now met this commit:
+§9.12-I (ADR + lesson + private/ closure). Exit criteria:
 
-| Exit criterion | Pre-commit | Post-commit |
-|---|---|---|
-| `check_adr_history.sh --gate` 0 | 5 pending (3 real + 2 templates) | 1 pending (template only) — gate exits 0 ✓ |
-| `check_lesson_citing.sh` 0 | 2 unfilled | 0 ✓ |
-| ADR `Accepted` count < 30 | 85 | 85 (open — canonical pass deferred) |
+| Exit criterion                  | Latest fact                                                                              |
+|---------------------------------|------------------------------------------------------------------------------------------|
+| `check_adr_history.sh --gate` 0 | 1 pending (template only) — gate exits 0 ✓                                               |
+| `check_lesson_citing.sh` 0      | 0 unfilled ✓                                                                             |
+| ADR `Accepted` count < 30       | strict `^- **Status**: Accepted$` count = 35; loose (incl. annotated) = 54 — still open  |
 
-**This commit (mechanical backfills)**:
-- ADR-0075 row: `<backfill>` → `799b9b10` (D-160 amend).
-- ADR-0080 row: `<backfill>` → `2b8e2447` (Withdrawn commit).
-- ADR-0094 rows (2): `<backfill>` → `ac89b0a6` (Proposed) +
-  `5653180c` (Accepted at f777edaa).
-- Lesson `d141-sweep-structural-debts.md`: Citing `<pending>` →
-  `ce43d124`.
-- Lesson `emit-zig-survey-per-op-pattern-already-absorbed.md`:
-  Citing `<backfill>` → `2b8e2447`.
+**This commit (ADR canonical pass batch 1)**: 27 ADRs flipped
+`Accepted` → `Closed (Phase N DONE)` for Phase 1/2/3/4/6/7/8
+cohort whose `**Tags**` line names only DONE phases. Frontmatter
+`status:` + body `**Status**:` both updated; no Revision history
+row added (this is a routine batch closure, not an amendment).
 
-**Next pickup**: ADR Status canonical pass — flip ~55 ADRs
-from `Accepted` to `Closed (Phase X DONE)` where the ADR's
-authoring phase has been marked DONE per the §9 Phase Status
-widget. The §9.12-I row text says "~22-25 entries" specifically
-for the Phase-9-cohort; older phases also need pruning to reach
-the `< 30` exit target. This is a substantial multi-cycle pass
-(85 → < 30 = ~55+ flips); approach in batches by phase.
+Targets flipped (by ADR num + closing phase):
 
-Approach:
-1. Group ADRs by authoring phase via `git log --follow`.
-2. For each phase Status: DONE (per Phase Status widget),
-   batch-flip `Accepted` → `Closed (Phase N DONE)` on its
-   ADRs.
-3. skip-ADR Status wording cleanup (skip_cross_module_register
-   / skip_cross_module_action — separate scan).
-4. Lesson promotion scan (3+ citations).
+- Phase 1: 0002
+- Phase 2: 0003
+- Phase 3: 0004
+- Phase 4: 0005
+- Phase 6: 0008, 0012, 0013, 0015, 0016
+- Phase 7: 0014, 0017, 0018, 0019, 0021, 0023, 0024, 0026, 0029
+- Phase 8: 0030, 0031, 0032, 0033, 0036, 0037, 0038, 0039, 0040
+
+**Deliberately NOT flipped (need per-ADR review next cycle)**:
+
+- Annotated `Accepted (partial — ...)` / `Accepted (scope
+  downgraded ...)`: 0025, 0034, 0035, and ~12 others. Manual
+  review per ADR (the annotation carries context that auto-flip
+  would lose).
+- Meta-tagged (no phase tag in `**Tags**` line): 0009, 0020,
+  0022, 0027, 0028, 0049, 0050, 0052, 0053, 0060, 0062, 0063,
+  0064, 0067, 0074, 0076, 0077, 0081–0093, 0098, 0099, 0100,
+  0101 (≈34 ADRs). Most are file-layout reform (zone-1 / zone-2
+  cap discipline) tied to §9.12 — keep `Accepted` until §9.12-I
+  closes.
+- Phase-9 cohort (17 ADRs): 0041, 0054, 0055, 0056, 0057, 0058,
+  0059, 0061, 0065, 0066, 0068, 0070, 0071, 0072, 0073, 0075,
+  0094. Phase 9 still IN-PROGRESS; stay `Accepted`.
+
+**Next pickup**: ADR canonical pass batch 2 — review the
+annotated `Accepted (partial ...)` cohort. Each one needs an
+individual judgment (still load-bearing? converted to `Closed
+(Phase X DONE; <deferral note>)`?). After batch 2: skip-ADR
+Status wording cleanup (skip_cross_module_register /
+skip_cross_module_action) and Lesson promotion scan.
 
 ## Recent context
 
@@ -53,7 +64,7 @@ Approach:
 
 ## Other queued work
 
-1. **§9.12-I ADR canonical pass** — next cycle (multi-cycle).
+1. **§9.12-I ADR canonical pass batch 2** — annotated cohort.
 2. **D-055 continuation**.
 3. **Phase 10 ZirOp slot policy ADR** — gates memory64 /
    relaxed-simd file-level placeholders.
@@ -63,16 +74,14 @@ Approach:
 - §9.12-A enforcement: 11 items OK.
 - §9.12-F: `[ ]` in ROADMAP. D-141 portion absorbed by
   file-size reform (ADR-0099/0100/0101). Remaining sub-items
-  per row text: D-094 / D-090 / D-062 / D-081 / D-055
-  dissolution verify (or per-row discharge). Exit `debt active
-  rows < 15` — current count unverified, likely close.
+  per row text: D-094 / D-090 / D-062 / D-081 / D-055.
 - §9.12-G: closed (`4bd62842`).
 - §9.12-H: closed (`600bd7cf`).
-- §9.12-I: in progress (this commit + canonical pass to come).
+- §9.12-I: in progress (batch 1 this commit + batch 2 to come).
 
 ## Open questions / blockers
 
-- なし for §9.12-I canonical pass.
+- なし for §9.12-I canonical pass batch 2.
 
 ## See
 

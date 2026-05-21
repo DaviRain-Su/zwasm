@@ -1,6 +1,6 @@
 # 0036 — §9.8b / 8b.1 Coalescer scope downgrade: scaffolding-only MVP
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 8 DONE)
 - **Date**: 2026-05-09
 - **Author**: Phase 8 / §9.8b / 8b.1 autonomous /continue cycle
 - **Tags**: roadmap, phase8, jit, optimisation, coalescer, scope

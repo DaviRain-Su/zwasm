@@ -1,6 +1,6 @@
 # 0039 — AOT skeleton: inline-bytes .cwasm format + JIT-pipeline reuse
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 8 DONE)
 - **Date**: 2026-05-09
 - **Author**: Phase 8 / §9.8b / 8b.3-b autonomous /continue cycle
 - **Tags**: roadmap, phase8, jit, aot, format, cold-start

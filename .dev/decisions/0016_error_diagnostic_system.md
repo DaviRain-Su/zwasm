@@ -1,6 +1,6 @@
 # 0016 — Adopt error diagnostic system (Diagnostic core + CLI parity, phase 1)
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 6 DONE)
 - **Date**: 2026-05-04
 - **Author**: zwasm v2 / continue loop
 - **Tags**: phase-6, error-handling, diagnostic, cli-ux, c-abi, observability

@@ -1,6 +1,6 @@
 # 0026 — x86_64 runtime invariant reservation: reload-from-runtime-ptr (single-reservation model)
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 7 DONE)
 - **Date**: 2026-05-05
 - **Author**: Shota / autonomous loop
 - **Tags**: jit, abi, runtime, x86_64, phase7

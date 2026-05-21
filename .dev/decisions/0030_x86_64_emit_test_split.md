@@ -1,6 +1,6 @@
 # 0030 — Split x86_64/emit.zig tests to emit_test.zig (D-051 close)
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 8 DONE)
 - **Date**: 2026-05-08
 - **Author**: Phase 8 / §9.8 / 8.2 autonomous /continue cycle
 - **Tags**: roadmap, phase8, refactor, file-shape, jit, x86_64, mirror-adr-0021

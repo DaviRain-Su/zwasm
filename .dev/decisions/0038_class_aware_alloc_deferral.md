@@ -1,6 +1,6 @@
 # 0038 — §9.8b / 8b.2-d class-aware allocation deferral to Phase 15
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 8 DONE)
 - **Date**: 2026-05-09
 - **Author**: Phase 8 / §9.8b / 8b.2-d autonomous /continue cycle
 - **Tags**: roadmap, phase8, jit, regalloc, class-aware, scope, deferral

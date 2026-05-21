@@ -1,6 +1,6 @@
 # 0040 — §9.8b ≥10% aggregate target revision: defer to Phase 12 + 15
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 8 DONE)
 - **Date**: 2026-05-09
 - **Author**: Phase 8 / §9.8b / 8b.3-e autonomous /continue cycle
 - **Tags**: roadmap, phase8, bench, scope, deferral

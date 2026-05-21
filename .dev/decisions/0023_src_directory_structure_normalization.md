@@ -1,6 +1,6 @@
 # 0023 — Normalise src/ directory structure and naming
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 7 DONE)
 - **Date**: 2026-05-04
 - **Author**: Shota / structural drift inventory + Q1-Q10 design dialogue
 - **Tags**: roadmap, refactor, naming, structure, modularity, phase7

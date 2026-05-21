@@ -1,13 +1,13 @@
 ---
 name: 0005 — Hand-author include/wasi.h instead of vendoring upstream
 date: 2026-05-02
-status: Accepted
+status: Closed (Phase 4 DONE)
 tags: phase-4, c-api, wasi, vendoring
 ---
 
 # 0005 — Hand-author `include/wasi.h` instead of vendoring upstream
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 4 DONE)
 - **Date**: 2026-05-02
 - **Author**: Claude (autonomous /continue loop)
 - **Tags**: phase-4, c-api, wasi, vendoring

@@ -1,13 +1,13 @@
 ---
 name: 0008 — Insert Phase 6 (v1 conformance baseline) before any JIT phase
 date: 2026-05-02
-status: Accepted
+status: Closed (Phase 6 DONE)
 tags: phase-6, v1, conformance, regression
 ---
 
 # 0008 — Insert Phase 6 (v1 conformance baseline) before any JIT phase
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 6 DONE)
 - **Date**: 2026-05-02
 - **Author**: Claude (autonomous /continue loop, on user direction)
 - **Tags**: phase-6, v1, conformance, regression

@@ -1,13 +1,13 @@
 ---
 name: 0004 — Pin upstream wasm-c-api commit for vendored include/wasm.h
 date: 2026-05-02
-status: Accepted
+status: Closed (Phase 3 DONE)
 tags: phase-3, c-api, vendoring
 ---
 
 # 0004 — Pin upstream wasm-c-api commit for vendored include/wasm.h
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 3 DONE)
 - **Date**: 2026-05-02
 - **Author**: Claude (autonomous /continue loop)
 - **Tags**: phase-3, c-api, vendoring

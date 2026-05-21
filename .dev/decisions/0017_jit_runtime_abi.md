@@ -1,6 +1,6 @@
 # 0017 — Adopt explicit JitRuntime ABI: X0 = `*const JitRuntime`
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 7 DONE)
 - **Date**: 2026-05-04
 - **Author**: Shota / autonomous loop
 - **Tags**: jit, abi, runtime, phase7

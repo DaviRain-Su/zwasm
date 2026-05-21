@@ -1,6 +1,6 @@
 # 0033 — Per-pass diagnostic extension to the trace ringbuffer
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 8 DONE)
 - **Date**: 2026-05-09
 - **Author**: Phase 8 / §9.8a / 8a.1-a autonomous /continue cycle
 - **Tags**: roadmap, phase8, diagnostic, trace, observability, jit

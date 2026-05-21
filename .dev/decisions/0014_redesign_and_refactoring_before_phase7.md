@@ -1,6 +1,6 @@
 # 0014 — Redesign + refactoring sweep before Phase 7
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 7 DONE)
 - **Date**: 2026-05-03
 - **Author**: continue loop iter 5–11 + interactive dialogue
 - **Tags**: phase-6, redesign, refactor, value-semantics,

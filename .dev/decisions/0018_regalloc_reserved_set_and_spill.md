@@ -1,6 +1,6 @@
 # 0018 — Adopt explicit regalloc reserved set + first-class spill
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 7 DONE)
 - **Date**: 2026-05-04
 - **Author**: Shota / autonomous loop
 - **Tags**: regalloc, jit, abi, phase7

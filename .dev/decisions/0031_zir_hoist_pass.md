@@ -1,6 +1,6 @@
 # 0031 — ZIR-stage hoist pass (constant hoisting MVP)
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 8 DONE)
 - **Date**: 2026-05-08
 - **Author**: Phase 8 / §9.8 / 8.4 autonomous /continue cycle
 - **Tags**: roadmap, phase8, jit, optimisation, zir, hoist, licm

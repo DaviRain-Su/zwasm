@@ -1,6 +1,6 @@
 # 0032 — Phase 8 reorg: foundation-first, bench-driven optimisation
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 8 DONE)
 - **Date**: 2026-05-08
 - **Author**: User (collaborative reframing) + autonomous /continue cycle
 - **Tags**: roadmap, phase8, reorg, bench, observability, jit, meta-process

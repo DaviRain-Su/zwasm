@@ -1,6 +1,6 @@
 # 0024 — Module graph and lib root (single shared Module across artifacts)
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 7 DONE)
 - **Date**: 2026-05-05
 - **Author**: Shota / post-ADR-0023 build-system gap discovery
 - **Tags**: roadmap, build, module-graph, refactor, phase7, post-implementation

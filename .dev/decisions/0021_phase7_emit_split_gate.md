@@ -1,6 +1,6 @@
 # 0021 — Insert Phase 7 sub-gate for emit.zig split + test byte-offset abstraction before x86_64 emit work
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 7 DONE)
 - **Date**: 2026-05-04
 - **Author**: Shota / design + refactor cycle session
 - **Tags**: roadmap, phase7, refactor, file-shape, jit, amend-0019

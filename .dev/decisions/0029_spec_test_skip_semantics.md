@@ -1,6 +1,6 @@
 # 0029 — Sharpen `skip=0` semantics in §9.7 / 7.5 (and §9.7 / 7.8) exit criteria
 
-- **Status**: Accepted
+- **Status**: Closed (Phase 7 DONE)
 - **Date**: 2026-05-06
 - **Author**: zwasm v2 maintainer (autonomous loop, `/continue` audit chunk)
 - **Tags**: roadmap, exit-criteria, spec-tests, phase-7
