@@ -61,9 +61,13 @@ Approach:
 ## Active state (snapshot)
 
 - §9.12-A enforcement: 11 items OK.
-- §9.12-F (D-141 + reform): closed.
-- §9.12-G: closed.
-- §9.12-H: closed.
+- §9.12-F: `[ ]` in ROADMAP. D-141 portion absorbed by
+  file-size reform (ADR-0099/0100/0101). Remaining sub-items
+  per row text: D-094 / D-090 / D-062 / D-081 / D-055
+  dissolution verify (or per-row discharge). Exit `debt active
+  rows < 15` — current count unverified, likely close.
+- §9.12-G: closed (`4bd62842`).
+- §9.12-H: closed (`600bd7cf`).
 - §9.12-I: in progress (this commit + canonical pass to come).
 
 ## Open questions / blockers
