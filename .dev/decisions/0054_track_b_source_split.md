@@ -281,3 +281,20 @@ Deferred to `D-081`, blocked-by `emit.zig` source split
   (`file_size_check.sh` warn → gate flip + D-057 + D-065 close +
   D-081 file). SHA backfilled at phase close per /continue
   Step 7 batch-backfill discipline.
+- 2026-05-21 (`<this commit>`): **Amendment — legacy-file
+  grandfather clause for §"Naming convention"**. The strict
+  `<source>_test.zig` shape is **forward-looking** for new
+  files. Two legacy test files predate the convention:
+  - `src/engine/codegen/x86_64/emit_test_int.zig` (catalog
+    of i32/i64 + control/memory/calls JIT-emit tests, ~1600
+    LOC after D-055 helper migration)
+  - `src/engine/codegen/x86_64/emit_test_float.zig` (catalog
+    of f32/f64 JIT-emit tests, ~1500 LOC)
+  Both test ops scattered across many per-op files (per
+  ADR-0074 per-op-file pattern absorbed the int/float emit
+  content). No single source file matches their name; the
+  strict convention's "1:1 mapping" assumption doesn't hold.
+  **Resolution**: grandfather these two specific files
+  (D-081 close); new test files MUST still use strict shape
+  per the original convention. Sites of grandfathering listed
+  here so future audits don't re-flag them.

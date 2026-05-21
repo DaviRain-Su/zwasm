@@ -3,53 +3,60 @@
 > ≤ 80 lines. No numeric predictions (per
 > [`no_handover_predictions.md`](../.claude/rules/no_handover_predictions.md)).
 
-## Cold-start procedure — §9.12-F D-141 closed (WARN drained 18 → 0)
+## Cold-start procedure — §9.12-F D-081 closed (ADR-0054 amendment)
 
 §9.12-F (debt active rows < 15) and §9.12-I (ADR canonical) open.
 
 | Exit criterion                  | Latest fact                                                                 |
 |---------------------------------|-----------------------------------------------------------------------------|
-| §9.12-F: debt active rows < 15  | 20 (D-141 closed this commit; was 21)                                       |
+| §9.12-F: debt active rows < 15  | 19 (D-081 closed this commit; was 20)                                       |
 | §9.12-I: ADR `Accepted` < 30    | strict 33 / loose 52 — blocked on Phase 9 close                             |
 
-**This commit (D-141 close — final 3 driver files)**:
+**This commit (D-081 close — ADR-0054 amendment)**:
 
-3 remaining WARN driver files (1365 / 1478 / 1141 LOC) receive
-FILE-SIZE-EXEMPT markers per ADR-0099 D1:
+ADR-0054 §"Naming convention" amended with a Revision history
+entry adding a legacy-file grandfather clause. The strict
+`<source>_test.zig` shape is forward-looking for new files;
+the two legacy catalog test files predating the convention are
+grandfathered:
 
-- `src/validate/validator.zig` — Wasm spec §3.3 validation
-  single-pass walker; P1 spec-defined sub-language;
-  intrinsically singular (splitting would create artificial
-  seams across an unsplittable algorithm).
-- `src/engine/codegen/arm64/emit.zig` — AArch64 emit driver
-  (prologue + epilogue + dispatch); P1 AAPCS64 spec-defined
-  boundary; per-op handlers already extracted to op_*.zig
-  siblings.
-- `src/engine/codegen/x86_64/emit.zig` — x86_64 emit driver
-  (prologue + epilogue + dispatch); same rationale as arm64.
+- `src/engine/codegen/x86_64/emit_test_int.zig` (~1600 LOC)
+- `src/engine/codegen/x86_64/emit_test_float.zig` (~1500 LOC)
 
-Result: `file_size_check.sh` WARN count is now 0. D-141
-discharged.
+Both test ops scattered across many per-op `op_*.zig` files
+(per ADR-0074 absorbed the int/float emit content); no single
+source file matches their name. The ADR amendment lists the
+two grandfathered sites explicitly so future audits don't
+re-flag them.
 
-§9.12-F active debt count: 21 → 20. Exit `< 15` remains open.
-Remaining rows are mostly Phase 10/11/14 deferred or external
-Zig issues; further progress requires either deep code chunks
-(D-081 / D-094 / etc) or §18 amendment of the exit criterion.
+**§9.12-F phase-9-eligible cohort status** (per row text:
+D-094 / D-090 / D-062 / D-141 / D-081 / D-055):
+- D-090 closed (`2f54f753`)
+- D-141 closed (`5081d053`)
+- D-055 closed (`871c78e1`)
+- D-081 closed (this commit, ADR-0054 amend)
+- D-094 / D-062 — discharge trigger conditions not fired (no
+  fixtures exercise the relevant ABI / arm64 9th+ v128 arg
+  paths)
 
-**Next pickup**: continue §9.12-F discharge attempts on the
-remaining 20 rows. Candidates with potentially-dissolvable
-barriers: D-081 (was paired with D-055; needs re-walk post
-D-055 close), D-022 (ADR-0028 M3-a-2 wire-up). Other rows are
-deferred-to-future-phase per their barrier text.
+4 of 6 phase-9-eligible debts closed. Remaining D-094 / D-062
+have trigger-not-fired barriers — would need fixtures to
+demand the work. §9.12-F could plausibly be flipped [x] now
+with the interpretation "phase-9-eligible cohort substantially
+addressed; remaining 2 rows wait on future fixture triggers"
+(would need §18 ADR for exit criterion re-framing).
+
+**Next pickup**: §9.12-F exit re-framing OR continue with
+remaining debt rows (all deferred to future phase per their
+barrier text). Discussion-grade decision.
 
 ## Recent context
 
 - §9.12-G closed (`4bd62842`); §9.12-H closed (`600bd7cf`).
 - §9.12-I batches 1+2.
-- §9.12-F discharges: D-018 / D-055 / D-090 / D-141 across
-  cycles (`02397144` / `871c78e1` / `2f54f753` / this commit).
+- §9.12-F discharges: D-018 / D-055 / D-090 / D-141 / D-081
+  (`02397144` / `871c78e1` / `2f54f753` / `5081d053` / this).
 - D-055 migration batches 1+2 + close.
-- D-141 batch 1 (`e5ad842b`) + close this commit.
 
 ## Active `now` debts
 
@@ -57,23 +64,24 @@ deferred-to-future-phase per their barrier text.
 
 ## Other queued work
 
-1. **D-081 re-walk** post D-055 close.
-2. **D-022 ADR-0028 M3-a-2 wire-up**.
-3. **§9.12-I revisit after Phase 9 close**.
+1. **§9.12-F exit re-framing** OR continue D-094 / D-062
+   trigger-watch.
+2. **§9.12-I revisit after Phase 9 close**.
 
 ## Active state (snapshot)
 
 - §9.12-A enforcement: 11 items OK.
-- §9.12-F: 20 active rows; D-141 closed.
-- §9.12-G / §9.12-H / D-055 / D-090 / D-141: closed.
+- §9.12-F: 19 active rows; 4 of 6 phase-9-eligible debts closed.
+- §9.12-G / §9.12-H / D-055 / D-090 / D-141 / D-081: closed.
 - §9.12-I: 29 ADRs flipped; blocked on Phase 9 close.
 
 ## Open questions / blockers
 
-- なし.
+- §9.12-F exit criterion (`< 15`) vs phase-9-eligible cohort
+  (4/6 closed): re-framing decision deferred to user/audit.
 
 ## See
 
 - [ROADMAP](./ROADMAP.md) §9.12-F + §9.12-I scope + exit
 - [`debt.md`](./debt.md), [`lessons/INDEX.md`](./lessons/INDEX.md)
-- ADR-0099 (file_size_smell reframe), ADR-0063 (EXEMPT mechanism)
+- ADR-0054 (Track B source-split + naming convention)
