@@ -3,78 +3,63 @@
 > ≤ 80 lines. No numeric predictions (per
 > [`no_handover_predictions.md`](../.claude/rules/no_handover_predictions.md)).
 
-## Cold-start procedure
+## Cold-start procedure — §9.12-G in progress
 
-File-size discipline reform complete (2026-05-21 cycles C1..C6).
-Standard cold-start procedure resumes; next priority is §9.12-G.
+ROADMAP §9.12-G is **Phase 10 prep substrate**, 7 deliverables.
+Track inline here; commit per-sub-chunk per ROADMAP §18.3.
 
-1. ROADMAP §9.12 open items: G (`api/instance.zig` redesign), H
-   (bench baseline), I (ADR/lesson curation closure). Approach
-   §9.12-G by evaluating P3 conditions per ADR-0099 §D2 **before**
-   any extraction (c_api lifecycle redesign; not file-size-driven).
-2. **DO NOT** mechanically extract WARN files from
-   `scripts/file_size_check.sh`. ADR-0099 §D1 makes EXEMPT the
-   default outcome when no valid extraction exists.
-3. `bash scripts/check_split_smell.sh` runs informationally inside
-   `gate_commit.sh`. Current 6 findings are acceptable carve-outs:
-   - api/wasm.zig hub-emptiness (public C ABI surface).
-   - inst_neon N3 (informational, naming-pattern sibling).
-   - regalloc_compute N1 test-context (intentional round-trip).
-   - regalloc.zig + regalloc_compute.zig testFenceTableFill N4
-     dup (3-LOC helper, ADR-0100 accepted).
-   - sections_codes / sections_data N3 (P1 spec-axis siblings;
-     §D2 tie-breaker acceptable even though substantive < 100).
+| # | Deliverable | Status |
+|---|---|---|
+| (a) | `.dev/wasm_3_0_zirop_mapping.md` machine-generated from collector | exists (184 LOC); verify currency |
+| (b) | Extend `src/instruction/wasm_3_0/` placeholders for all Phase 10 features (GC / EH / tail-call / memory64 / multi-memory / typed funcrefs); each must reject with `Error.UnsupportedOpForBuildLevel` at comptime | partial (44 files in GC/EH/tail-call; memory64 / multi-memory / typed-funcref coverage unverified) |
+| (c) | `src/api/instance.zig` (1431 LOC) health + helper extraction + minimal c_api Instance-path test coverage (D-139 pulled forward); P3 evaluation per ADR-0099 §D2 first | open |
+| (d) | CLI `--invoke` mode (prerequisite for Phase 11 bench) | open |
+| (e) | `include/wasm.h` upstream diff check vs WebAssembly/wasm-c-api | open |
+| (f) | `scripts/zone_check.sh` migration info → `--gate` enforcement in `gate_commit.sh` | open (BASELINE=0, 0 current violations — mechanical edit) |
+| (g) | `.dev/architecture/zone_layout.md` reference document | ✅ this commit |
+
+**Next pickup**: (f) — `zone_check.sh --gate` migration. Smallest
+isolated edit (gate_commit.sh insert) + verify pre-commit gate
+stays green on docs-only and src diffs.
+
+## Recent reform context (file-size discipline)
+
+Cycles C1..C6 (2026-05-21) landed ADR-0099 + 0100 + 0101 +
+rule + script + lesson + init_expr.zig redesign. Reform complete;
+planning artefacts archived at `private/archive/2026-05-21-file-size-reform/`.
 
 ## Active `now` debts
 
 - **D-055** (mechanical, multi-cycle): emit_test_int has 27 sites
-  pending. Discharge unblocked now that reform has landed.
+  pending. Discharge now unblocked.
 
-## Other queued work
+## Other queued work (post-§9.12-G)
 
-1. **§9.12-G** — `api/instance.zig` redesign (P3 evaluation per
-   ADR-0099 §D2; c_api lifecycle restructure).
-2. **§9.12-H** — bench baseline (Mac Wasm 2.0 + wasmtime
-   comparison).
-3. **§9.12-I** — ADR/lesson curation closure (Phase 9 close).
-4. **D-055 continuation** (now unblocked).
-5. **Remaining D-141 WARN files** — most resolve to
-   FILE-SIZE-EXEMPT marker per ADR-0099 §D2; the audit_scaffolding
-   §J.8 split-smell finding is the source of truth, not the raw
-   WARN list.
+1. **§9.12-H** — bench baseline (Mac Wasm 2.0 + wasmtime).
+2. **§9.12-I** — ADR/lesson curation closure (Phase 9 close).
+3. **D-055 continuation**.
+4. **Remaining D-141 WARN files** — per ADR-0099 §D2 mostly
+   resolve to FILE-SIZE-EXEMPT markers.
 
 ## Active state (snapshot)
 
-- §9.12-A enforcement: 11 items OK (check_split_smell.sh wired).
-- §9.12-F (D-141 sweep + reform): closed. 15 ADRs Accepted; net
-  after reform = 12 valid + 1 redesigned (init_expr) + 3 retired.
-- §9.12-G / §9.12-H / §9.12-I: open.
-
-## Reform — closed (this session, 2026-05-21)
-
-- ADR-0099 (file-size discipline reframe; 4+4 conditions; EXEMPT
-  as default).
-- ADR-0100 (retrospective rollback notice; ADR-0097 rolled back,
-  ADR-0095/0096 superseded by ADR-0101).
-- ADR-0101 (init_expr.zig extraction; P3 deep utility).
-- `.claude/rules/file_size_smell.md` (auto-loaded discipline).
-- `scripts/check_split_smell.sh` (informational gate addition).
-- `.dev/lessons/2026-05-21-file-size-cap-as-smell-detector-not-metric.md`.
-- Planning artifacts archived at
-  `private/archive/2026-05-21-file-size-reform/`.
+- §9.12-A enforcement: 11 items OK (check_split_smell wired).
+- §9.12-F (D-141 + reform): closed.
+- §9.12-G: in progress (g done; a/b verify pending; c-f open).
+- §9.12-H / §9.12-I: open.
 
 ## Open questions / blockers
 
-- なし。
+- なし。Next sub-chunk (f) is mechanical.
 
 ## See
 
+- [ROADMAP](./ROADMAP.md) §9.12-G (full deliverable list); §4.1 zones
+- [`.dev/architecture/zone_layout.md`](./architecture/zone_layout.md) — landed this commit
+- [`.dev/wasm_3_0_zirop_mapping.md`](./wasm_3_0_zirop_mapping.md) — needs currency verification
+- [`.dev/phase10_prep.md`](./phase10_prep.md) — pre-existing Phase 10 scoping
 - [`.dev/decisions/0099_file_size_discipline_reframe.md`](./decisions/0099_file_size_discipline_reframe.md)
-- [`.dev/decisions/0100_rollback_invalid_d141_extractions.md`](./decisions/0100_rollback_invalid_d141_extractions.md)
-- [`.dev/decisions/0101_init_expr_extraction.md`](./decisions/0101_init_expr_extraction.md)
-- [`.claude/rules/file_size_smell.md`](../.claude/rules/file_size_smell.md)
-- [`scripts/check_split_smell.sh`](../scripts/check_split_smell.sh)
-- [`.dev/lessons/2026-05-21-file-size-cap-as-smell-detector-not-metric.md`](./lessons/2026-05-21-file-size-cap-as-smell-detector-not-metric.md)
-- [ROADMAP](./ROADMAP.md) §9.12 G/H/I; §5 A2 reframed
+- [`.claude/rules/zone_deps.md`](../.claude/rules/zone_deps.md)
+- [`scripts/zone_check.sh`](../scripts/zone_check.sh)
 - [`debt.md`](./debt.md) — D-055 only `now`
 - [`lessons/INDEX.md`](./lessons/INDEX.md)
