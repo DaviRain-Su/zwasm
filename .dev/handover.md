@@ -5,19 +5,19 @@
 > Framing discipline:
 > [`handover_framing.md`](../.claude/rules/handover_framing.md).
 
-## Cold-start procedure — §9.13-0 + §9.12-F parallel tracks
+## Cold-start procedure — §9.13-0 close-plan override active
 
 **Authoritative work source for this session**:
 [`.dev/phase9_13_0_close_plan.md`](./phase9_13_0_close_plan.md).
 The `/continue` skill's Step 1a close-plan override
 activates; follow that doc's §6 Work sequence. §0 preflight
-(8-tool inventory) green at HEAD `4196b385` (2026-05-22).
+(8-tool inventory) green at HEAD `ae172ca4` (2026-05-22).
 
 | Next track | First action | User touchpoint |
 |---|---|---|
-| W2 (main) — D-084 v128 marshal | `src/engine/codegen/x86_64/op_call.zig` + sibling: locate SysV branch, mirror to Win64 hidden-RDI ABI | none |
-| W1 (subagent, parallel) — D-028 IPC flake rate | RUNNING as background subagent (10× test-all) — note lands at `private/notes/p9-d028-flake-rate.md` on completion | none |
-| WA (main, parallel) — §9.12-F ADR draft | ✅ Drafted at `.dev/decisions/0102_phase9_debt_exit_reframe.md` (`4196b385`, Status: Proposed) | ADR-flip Proposed → Accepted |
+| W3.a (main) — SEH bridge ADR draft | `.dev/decisions/NNNN_win64_seh_bridge.md` Status: Proposed — cranelift `__try`/`__except` shim + Zig-callable `seh_arm/disarm/recover` boundary, per close-plan §5/W3 | ADR-flip Proposed → Accepted before W3.b impl |
+| W1 (DONE partial) — D-028 flake measurement | 2/10 runs; run 2 wedged > 120 min (exit 137). Failure signature **diverges** from D-028's IPC-timeout framing (exit 3 + runner-transition hang). D-028 barrier re-framing surfaces — defer to W3.b post-SEH-bridge or as standalone follow-up | none |
+| WA (DONE) — §9.12-F ADR draft | `4196b385` (ADR 0102 Proposed) | ADR-flip Proposed → Accepted |
 
 §9.12-E ★ DONE (Wasm 2.0 100%). §9.12-I batched at row 11
 (§9.13-0 close).
@@ -51,13 +51,14 @@ test-all) **only at chunk close**, not per iteration.
 - `zig build test-all`: 37/39 steps OK; only spec_wasm_2_0
   runtime fails (D-136 inside).
 - W0 survey: `private/notes/p9-9.13-0-survey.md`.
+- W1 survey: `private/notes/p9-d028-flake-rate.md` (partial).
 
 ## Current Phase 9 state
 
 | Exit | Latest fact |
 |---|---|
-| §9.13-0 windowsmini full green | D-022 F1 closed (`0c2474c2`); D-084 / D-028 / D-136 open |
-| §9.12-F debt active rows < 15 | 19 active; WA ADR 0102 Proposed (`4196b385`) reframes exit per-row predicate |
+| §9.13-0 windowsmini full green | D-022 closed (`0c2474c2`); D-084 closed pre-§9.13-0 (`7a7e387c` 2026-05-12 §9.9-i-1 per ADR-0055); D-136 / D-028 open |
+| §9.12-F debt active rows | 19 active; WA ADR 0102 Proposed (`4196b385`) reframes exit per-row predicate |
 | §9.12-I ADR `Accepted` < 30 | strict 33; batched at Phase 9 close |
 
 ## Active `now` debts
@@ -69,20 +70,25 @@ test-all) **only at chunk close**, not per iteration.
 - §9.12-F exit re-framing — ADR 0102 Proposed; ADR-flip
   Proposed → Accepted needs user (allowed `user-judgment`
   per `handover_framing.md`: §18 ADR-flip review).
+- D-028 barrier re-framing — W1 partial evidence suggests
+  Windows resource exhaustion / SSH stall, not IPC timeout.
+  Update D-028 row narrative after W3.b lands (SEH bridge
+  may reduce corpus duration; revisit).
 
 ## Recent context (2026-05-22 commits)
 
+- `ae172ca4` — handover retarget at W2 D-084 (now amended;
+  see this commit).
 - `4196b385` — ADR 0102 draft (§9.12-F exit reframe, Proposed).
 - `1b4a5b5a` — README refresh (status / platforms / Wasm-WASI / CLI).
 - `7f360d21` — rename execution_plan → close_plan + handover refresh.
-- `411eacfb` — measured L0/L1 timings + tar-pipe workflow.
-- `606bb941` — system-level defense (`platform_panic_vs_error.md` +
-  inline INVARIANT + lesson) + Win64 iter workflow §0.2.1.
 - `0c2474c2` — F1 fix via `@panic` (correct approach).
+- `7a7e387c` — Win64 v128 marshal via hidden-pointer; closes D-084 (2026-05-12).
 
 ## See
 
 - Execution plan: [`phase9_13_0_close_plan.md`](./phase9_13_0_close_plan.md).
 - ROADMAP §9.13-0 / §9.12-F / §9.12-I.
-- [`debt.md`](./debt.md): D-022 / D-028 / D-084 / D-136.
+- [`debt.md`](./debt.md): D-028 / D-136 (active Cat IV).
 - ADR 0102: [`decisions/0102_phase9_debt_exit_reframe.md`](./decisions/0102_phase9_debt_exit_reframe.md).
+- ADR 0055: [`decisions/0055_win64_v128_marshal.md`](./decisions/0055_win64_v128_marshal.md) (D-084 closure).

@@ -114,11 +114,15 @@ Close §9.13-0 (Cat IV windowsmini reconcile). Exit per
 - windowsmini `zig build test-all` green incl.
   `spec_assert_runner_non_simd`.
 - Bit-identical with Mac aarch64 + ubuntunote x86_64.
-- 4 Cat IV debts closed: D-022 / D-028 / D-084 / D-136.
+- 3 Cat IV debts closed: D-022 / D-028 / D-136 (D-084 already
+  closed pre-§9.13-0 at `7a7e387c` 2026-05-12 §9.9-i-1 per
+  ADR-0055; original §9.13-0 framing carried it forward as
+  "residual" but no residual Win64 v128 marshal failure exists
+  per W0 survey post-F1 — see §6 row 5 STRUCK note).
 
-Parallel track: WA (`.dev/decisions/NNNN_phase9_debt_exit_
-reframe.md` draft for §9.12-F exit criterion). Autonomous draft;
-ADR-flip is the only user touchpoint.
+Parallel track: WA (`.dev/decisions/0102_phase9_debt_exit_
+reframe.md`) — DRAFT LANDED `4196b385` (Status: Proposed).
+ADR-flip Proposed → Accepted is the only user touchpoint.
 
 ## §2 Parallel-track model
 
@@ -212,20 +216,39 @@ only; `test-all` adds `test-spec*`, `test-edge-cases`,
   W1 close commit may discharge D-028 with rate-reduction
   rationale + ADR.
 
-### W2 — D-084 Win64 v128 marshal residual
+### ~~W2 — D-084 Win64 v128 marshal residual~~ STRUCK
 
-- Read: `src/engine/codegen/x86_64/op_call.zig`
-  (`captureCallResult`, `marshalCallArgs`) + sibling for
-  v128 hidden-pointer handling.
-- Identify: where SysV (Linux x86_64) path branches and
-  whether Win64 branch exists / is correct.
-- Implement: missing Win64 v128 path; mirror SysV semantics
-  via Win64 ABI register/stack-slot rules.
-- Test gate: Mac fg (`zig build test-all` if substrate
-  classification = logic/cohort); ubuntu deferred via
-  ADR-0076 D3. windowsmini verified at W4.
-- Exit: D-084 row removed from `.dev/debt.md`; relevant
-  fixture in `test/spec/` for v128 multi-result green.
+D-084 is **not a §9.13-0 task** — already discharged
+pre-§9.13-0 at commit `7a7e387c` (2026-05-12) under
+§9.9-i-1 per ADR-0055 (Status: Accepted). D-084 is NOT
+in active `.dev/debt.md`.
+
+Verification walked 2026-05-22 (this resume):
+
+- `marshalCallArgs` Win64 v128 hidden-pointer path exists
+  at `src/engine/codegen/x86_64/op_call.zig:642-664`
+  (per-call scratch via `win64V128ScratchBase`; LEA scratch
+  addr → int-arg-reg slot or stack overflow).
+- `captureCallResult` non-MEMORY-class v128 capture exists
+  at `:842-853` (XMM0/XMM1 cap per Win64 §3.2.4 §"≤1 per
+  class"; MOVAPS to result vreg).
+- `captureCallResult` MEMORY-class v128 returns
+  `Error.UnsupportedOp` at `:765` — but MEMORY-class is
+  SysV-only (`results.len > 2 and abi.current_cc == .sysv`,
+  see `:169`), so the v128 line is unreachable on Win64.
+  The SysV MEMORY-class v128 gap is **D-094 territory**
+  (active `blocked-by:` row), not D-084.
+- W0 survey (`private/notes/p9-9.13-0-survey.md`) at HEAD
+  `9218f91e` enumerated **only D-136 SEH crashes** as the
+  windowsmini-specific residual; the F1 `entry.zig`
+  compile error was the only other gap and closed at
+  `0c2474c2`.
+
+The W2 framing was carried forward from the original
+§9.9-IV → §9.13-0 relocation (ADR-0049 + ADR-0056 +
+ADR-0065 2026-05-18 amends) without re-checking the
+discharge log. ROADMAP §9.13-0 items list also carries
+D-084 forward; refreshed alongside this amendment.
 
 ### W3 — D-136 Win64 SEH bridge
 
@@ -316,13 +339,13 @@ rows proceed in main session.
 | # | Item | Type | Subagent? | Output |
 |---|---|---|---|---|
 | 1 | ~~**W0** survey~~ DONE 2026-05-22 | — | — | `private/notes/p9-9.13-0-survey.md` (gitignored) |
-| 2 | **WA** ADR draft | `architectural` (doc-only) | NO | `.dev/decisions/NNNN_phase9_debt_exit_reframe.md` Status: Proposed |
+| 2 | ~~**WA** ADR draft~~ DONE `4196b385` (Status: Proposed; ADR-flip is the only user touchpoint) | — | — | `.dev/decisions/0102_phase9_debt_exit_reframe.md` Status: Proposed |
 | 3 | ~~**F1-fix** `entry.zig` Win64 build~~ DONE `0c2474c2` (`@panic("D-022")` in 3 Class B mixed helpers' else-branch; shared `Error = error{Trap}` preserved; cascade-free) | — | — | windowsmini `zig build` exit 0; test 1744/1775; test-all 37/39 |
-| 4 | **W1** D-028 flake measurement (re-launchable any time) | `survey` | YES (background) | `private/notes/p9-d028-flake-rate.md` |
-| 5 | **W2** D-084 v128 marshal | `emit` | NO | Source diff + Mac green; ubuntu deferred |
+| 4 | ~~**W1** D-028 flake measurement~~ PARTIAL (2/10 runs; run 2 wedged > 120 min mid-corpus, killed exit 137). Note at `private/notes/p9-d028-flake-rate.md` (gitignored, 5.7 KB). **New evidence**: failure signature diverges from D-028's "test runner failed to respond for 1m4ms" — observed exit 3 (binary failure) + indefinite hang at runner transition. Suggests Windows resource exhaustion / SSH buffering stall, not IPC timeout. Re-frames D-028's blocked-by barrier. | `survey` | — | `private/notes/p9-d028-flake-rate.md` |
+| 5 | ~~**W2** D-084 v128 marshal~~ **STRUCK** — already closed `7a7e387c` (2026-05-12 §9.9-i-1) per ADR-0055 (Accepted); D-084 not in active `.dev/debt.md`; `marshalCallArgs` Win64 v128 hidden-pointer path lives at `op_call.zig:642-664` + `captureCallResult` non-MEMORY-class v128 at `:842-853`; W0 survey post-F1 enumerates only D-136 SEH crashes as residual Win64 failure — no v128 marshal failure present. | — | — | — |
 | 6 | **W3.a** SEH bridge ADR draft | `architectural` (doc-only) | NO | `.dev/decisions/NNNN_win64_seh_bridge.md` Status: Proposed |
 | 7 | **W3.b** SEH shim impl | `emit` (post-ADR) | NO | C/Zig shim + spec_assert_runner integration; Mac+ubuntu green |
-| 8 | **W4** windowsmini reconcile run (final post-W3 verification) | verification | NO | `bash scripts/run_remote_windows.sh test-all` exit 0; D-022 / D-084 / D-136 / D-028 all closed |
+| 8 | **W4** windowsmini reconcile run (final post-W3 verification) | verification | NO | `bash scripts/run_remote_windows.sh test-all` exit 0; D-022 / D-136 / D-028 all closed (D-084 already closed pre-§9.13-0) |
 | 9 | **W5** posix.* Windows availability | `infrastructure` | NO | grep+convert; cross-compile green |
 | 10 | **W6** build-option DCE × Windows | verification | NO | 6 combos green; check_build_dce 0 |
 | 11 | §9.13-0 close + Phase 9 boundary | phase-boundary | NO | §9.13-0 [x]; `should_gate_windows.sh --record`; §9.12-I batch ADR Status flip; SHA backfill |
