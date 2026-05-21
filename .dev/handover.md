@@ -52,6 +52,14 @@ D-079 — explicit triggers may fire silently next.
 windowsmini is reachable per `ssh windowsmini`. SEH bridge work
 needs Win64 PowerShell + likely a small C/asm shim.
 
+**Trigger-watch this cycle (per debt-stale-framing-pattern
+lesson)**: D-094 (real workload demanding >2 same-class
+results), D-062 (spec testsuite demand for ≥ 9 v128 params),
+D-079 (c_api Instance path v128). Grepped `test/wasmtime_misc/`
+and `test/realworld/` for matching fixture shapes; none found.
+Triggers still un-fired. Last reviewed bumped to 2026-05-21
+(no row content change; see git history if needed).
+
 ## Recent context
 
 - §9.12-G closed (`4bd62842`); §9.12-H closed (`600bd7cf`).
