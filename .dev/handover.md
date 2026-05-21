@@ -5,39 +5,30 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit: the ADR-0080
-   Withdraw + lesson + D-055/D-081 re-walk landing now (same-day
-   pivot per lesson `emit-zig-survey-per-op-pattern-already-absorbed.md`).
-2. **User directive (2026-05-21)**: batch-session / multi-cycle
-   architectural mode authorized.
+1. `git log --oneline -10` — last code commit: `7945084f`
+   (ADR-0081 Proposed — Phase 1 emit_setup.zig extraction, ~163
+   LOC pure-function helpers). Awaiting impl cycle.
+2. **User directive (2026-05-21)**: batch-session architectural
+   mode.
 3. **Live status**: `bash scripts/p9_completion_status.sh` —
-   D-055 stays `Status: now`; D-081 re-blocked pending ADR-0081
-   pivot decision.
+   D-055 `Status: now`; D-081 blocked; ADR-0081 Phase 1 sized
+   at ~163 LOC move (mechanical, single-cycle).
 
-## Authorized next-session pickup (priority order — updated 2026-05-21 [REVISED])
+## Authorized next-session pickup (priority order — updated 2026-05-21)
 
-1. **PRIMARY: ADR-0081 Proposed (emit_setup.zig pipeline
-   extraction)**. Pivot replacement for Withdrawn ADR-0080.
-   New target: extract emit.zig's actual extractable mass —
-   prologue assembly (~60 LOC), parameter marshalling (~170
-   LOC), local zero-init (~25 LOC), state init (~90 LOC),
-   frame helpers `computeOutgoingMaxBytes` + `computeLocalLayout`
-   + `localDisp` (~150 LOC) — totalling ~500 LOC out of
-   emit.zig's 1300 LOC into a new `emit_setup.zig`. emit.zig
-   shrinks to ~800 LOC (driver: compile() entry + dispatch
-   switch + control-flow scaffold + SIMD inline cases).
-   - **cycle 1 (next)**: draft `.dev/decisions/0081_emit_setup_
-     zig_extraction.md` Proposed. Decision: 2-way split along
-     pipeline-phase axis (ADR-0079 Alt B shape). Test impact:
-     emit_test_int.zig / emit_test_float.zig still cover the
-     extracted helpers through compile() entry (no test moves).
-   - **cycle 2 (architectural)**: execute extraction.
-     `git mv`-style helper moves + `pub` re-exports in emit.zig
-     for callers (e.g., spec runners that may use localDisp
-     directly). Test gate: `cohort`.
-   - **cycle 3 (D-055 close)**: ~95 test-array hardcoded byte
-     offsets → `prologue.body_start_offset()`-relative; wire
-     sentinel. D-055 discharges.
+1. **PRIMARY: ADR-0081 Phase 1 impl (emit_setup.zig
+   extraction)**. ADR Proposed at `7945084f`. Mechanical:
+   - **next cycle**: create
+     `src/engine/codegen/x86_64/emit_setup.zig` with the four
+     declarations (computeOutgoingMaxBytes lines 117-195,
+     localDisp 1217-1237, LocalLayout 1238-1252,
+     computeLocalLayout 1253-end). Update emit.zig: remove
+     those four decls, add 5-line import + alias block + `pub
+     const localDisp = setup.localDisp;` re-export for tests.
+     Test gate: `cohort` (test-all). emit.zig 1300 → ~1140.
+   - **after impl**: ADR-0081 Status: Proposed → Accepted on
+     green gate. D-141 row's "emit.zig × 2 arches" slot closes
+     for x86_64 side.
 2. **D-081 decision deferred to ADR-0081 cycle**: re-blocked
    pending ADR-0054 amendment OR alternative path. Not urgent
    for §9.12-F debt target (D-081's barrier wording is now
