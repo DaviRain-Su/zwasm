@@ -15,6 +15,30 @@
 3. **Live status**: `bash scripts/p9_completion_status.sh` —
    D-055 `Status: now`; D-081 blocked.
 
+## Structural debts surfaced 2026-05-21 (priority — discharge before more D-141 extraction)
+
+User-triggered honest retrospective at end of 2026-05-21 session
+revealed compromises that should be addressed BEFORE pushing for
+more D-141 closures. **Step 0.5 debt sweep will pick these up.**
+
+- **D-158** (ADR-grade): cross-file private boundary in Zig 0.16
+  — Validator/Lowerer/op_control_merge_mov pub-surface leak from
+  ADR-0083/0089/0093 (in spirit of ROADMAP §P1 violation; needs
+  ADR-grade investigation of strategies).
+- **D-159** (mechanical, ≤ 1 min): codegen/dispatch_collector_ops.zig
+  FILE-SIZE-EXEMPT marker per ADR-0086 Consequences.
+- **D-160** (mechanical-ish): ADR-0075 §9.12-B amendment +
+  FILE-SIZE-EXEMPT marker for `inst_neon_arith.zig` (1282) +
+  `inst_sse_packed.zig` (1086).
+
+See lesson `2026-05-21-d141-sweep-structural-debts.md` for the
+honest accounting. **AI loop discipline note**: continuation-pressure
+mode rationalizes marginal extractions (ADR-0092: 1527 → 1403, still
+over cap; ADR-0093: similar). Soft cap is a smell not a constraint
+per user direction "意味があるならハードキャップ無視可". Address D-158
+before any further struct-method extraction (avoid compounding the
+pub-surface leak).
+
 ## Authorized next-session pickup (priority order — 2026-05-21)
 
 **Mechanical-extraction sweep is exhausted.** 11 D-141 closures
