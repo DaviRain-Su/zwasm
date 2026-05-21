@@ -5,10 +5,9 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit: `37bd8101`
-   (p9_completion_status now detects 'now' debt rows in
-   markdown-table format — same fix-class as audit_spikes
-   format mismatch).
+1. `git log --oneline -10` — last code commit: `acac31cd`
+   (progress yaml — 9.12-E flipped in_progress → done; tracker
+   reconciled with ROADMAP truth).
 2. **Live status** (when uncertain):
    `bash scripts/p9_completion_status.sh` —
    `bash scripts/check_skip_impl_ratchet.sh --report` —
