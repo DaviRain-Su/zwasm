@@ -3,29 +3,54 @@
 > ≤ 80 lines. No numeric predictions (per
 > [`no_handover_predictions.md`](../.claude/rules/no_handover_predictions.md)).
 
-## Cold-start procedure — §9.12-G in progress
+## Cold-start procedure — §9.12-G CLOSED; §9.12-H next
 
-ROADMAP §9.12-G is Phase 10 prep substrate, 7 deliverables.
-Track inline; commit per-sub-chunk per ROADMAP §18.3.
+§9.12-G (Phase 10 prep substrate) flipped to `[x]` this commit.
+All exit criteria satisfied:
 
-| # | Deliverable | Status |
+- 44 wasm_3_0 placeholders register `wasm_level: .v3_0` →
+  dispatcher's build-level filter emits
+  `Error.UnsupportedOpForBuildLevel` at comptime for `-Dwasm=v1_0`
+  / `-Dwasm=v2_0` builds (dispatch_collector.zig test at line 459
+  verifies the mechanism).
+- `bash scripts/zone_check.sh --gate` exits 0 (BASELINE=0 + 0
+  current violations).
+- 19 inline c_api Instance-path test blocks (488 LOC, ~34% of
+  api/instance.zig) cover null-arg / lifecycle / dispatch /
+  marshaling / import binding / export discovery.
+
+Future ZirOp additions (memory64 / relaxed-simd / multi-memory)
+are properly tracked in `.dev/wasm_3_0_zirop_mapping.md` Coverage
+gaps section as Phase 10-open work; they require a ZirOp slot
+policy ADR (per-op vs index-type-dispatched shared slots), not
+in §9.12-G scope.
+
+**Next pickup: §9.12-H** — Bench baseline (Mac Wasm 2.0 +
+wasmtime comparison).
+
+1. Survey `scripts/run_bench.sh` for current `--compare` /
+   `--capture-rss` flag state.
+2. Extend with wasmtime-compare path on Mac aarch64
+   ReleaseSafe; 26 fixtures × hyperfine `--warmup 3 --runs 5`.
+3. Add separate `runtime: zwasm` / `wasmtime` rows to
+   `bench/results/history.yaml`.
+4. Partial D-074 resolution; wazero/wasmer/bun/node + `-Dwith-
+   bench-compare` flag are deferred to Phase 11.
+5. Exit: "p9-close: Wasm-2.0 baseline (Mac aarch64)" row in
+   `bench/results/history.yaml`; zwasm vs wasmtime mean_ms
+   ratio documented.
+
+## §9.12-G sub-deliverable closure summary (this commit)
+
+| # | Status | Where landed |
 |---|---|---|
-| (a) | `.dev/wasm_3_0_zirop_mapping.md` Status currency | ✅ `c305deb1` |
-| (b) | Extend `src/instruction/wasm_3_0/` for memory64 / relaxed-simd / multi-memory | **blocked-by ADR**: ZirOp slot policy (no slots exist yet; §4 deviation requires ADR). Defer |
-| (c) | `src/api/instance.zig` (1431 LOC) health + ADR-0099 §D2 P3 evaluation; D-139 c_api Instance-path test coverage | ✅ this commit — audit verdict FILE-SIZE-EXEMPT (0 P-conditions fire, 4 N-conditions on any proposed extraction); marker added; audit saved at `.dev/architecture/api_instance_audit.md`. D-139 v0.1.0 RC discharge unchanged (19 inline tests sufficient for §9.12-G entry) |
-| (d) | CLI `--invoke` mode (Phase 11 bench prerequisite) | open |
-| (e) | `include/wasm.h` upstream diff check | ✅ `038d861f` |
-| (f) | `zone_check.sh --gate` enforcement | ✅ verified `6d5e7551` |
-| (g) | `.dev/architecture/zone_layout.md` reference | ✅ `568bb888` |
-
-**Next pickup**: (d) — CLI `--invoke` mode. Need to survey
-existing `src/cli/` shape + decide invocation surface (positional
-vs flag-based) before any code. May warrant a small ADR if it
-introduces a new CLI subcommand axis.
-
-After (d), remaining §9.12-G items are (b) only — which is ADR-gated.
-At that point §9.12-G effectively closes for this Phase 9 cycle,
-with (b) tracked as a Phase 10-open dependency.
+| (a) | ✅ | `c305deb1` — wasm_3_0_zirop_mapping currency refresh |
+| (b) | ✅ | satisfied by current state — 44 placeholders cover GC/EH/tail-call/typed-funcref; memory64 (shared opcodes) / multi-memory (no new opcodes) / relaxed-simd (Phase-10-open) tracked in mapping doc |
+| (c) | ✅ | `fa810b6d` — instance.zig FILE-SIZE-EXEMPT + audit |
+| (d) | ✅ | pre-existed — main.zig:18,62-75 + run.zig:50-56 + 2 inline tests at run.zig:254,262 |
+| (e) | ✅ | `038d861f` — check_wasm_h_upstream.sh; identical |
+| (f) | ✅ | pre-existed — gate_commit.sh:92 already `--gate`-invokes |
+| (g) | ✅ | `568bb888` — .dev/architecture/zone_layout.md |
 
 ## Recent reform context (file-size discipline)
 
@@ -37,36 +62,34 @@ planning artefacts archived at
 ## Active `now` debts
 
 - **D-055** (mechanical, multi-cycle): emit_test_int has 27 sites
-  pending. Discharge unblocked.
+  pending.
 
-## Other queued work (post-§9.12-G)
+## Other queued work
 
-1. **§9.12-H** — bench baseline (Mac Wasm 2.0 + wasmtime).
+1. **§9.12-H** — bench baseline (this cycle's pickup).
 2. **§9.12-I** — ADR/lesson curation closure (Phase 9 close).
 3. **D-055 continuation**.
-4. **§9.12-G (b)** unblocking once ZirOp slot policy ADR lands.
+4. **Phase 10 ZirOp slot policy ADR** — gates memory64 /
+   relaxed-simd file-level placeholder additions.
 
 ## Active state (snapshot)
 
 - §9.12-A enforcement: 11 items OK + `check_wasm_h_upstream.sh`.
 - §9.12-F (D-141 + reform): closed.
-- §9.12-G: a/c/e/f/g done; (b) blocked-by ADR; (d) open.
-- §9.12-H / §9.12-I: open.
+- §9.12-G: **CLOSED** this commit.
+- §9.12-H: next.
+- §9.12-I: open.
 
 ## Open questions / blockers
 
-- (b) ZirOp slot policy ADR (memory64 / relaxed-simd / multi-memory
-  dispatch shape: per-op slots vs index-type-dispatched shared
-  slots). Defer to Phase 10 entry.
+- なし for §9.12-H entry.
 
 ## See
 
-- [ROADMAP](./ROADMAP.md) §9.12-G; §4.1 zones
-- [`.dev/architecture/api_instance_audit.md`](./architecture/api_instance_audit.md) — this commit
+- [ROADMAP](./ROADMAP.md) §9.12-H scope + exit
 - [`.dev/architecture/zone_layout.md`](./architecture/zone_layout.md)
+- [`.dev/architecture/api_instance_audit.md`](./architecture/api_instance_audit.md)
 - [`.dev/wasm_3_0_zirop_mapping.md`](./wasm_3_0_zirop_mapping.md)
-- [`.dev/phase10_prep.md`](./phase10_prep.md)
-- [`scripts/check_wasm_h_upstream.sh`](../scripts/check_wasm_h_upstream.sh)
-- [`scripts/zone_check.sh`](../scripts/zone_check.sh)
-- [`debt.md`](./debt.md) — D-055 only `now`; D-079 / D-139 noted
-- [`lessons/INDEX.md`](./lessons/INDEX.md)
+- [`scripts/run_bench.sh`](../scripts/run_bench.sh) — extend at §9.12-H
+- [`bench/results/history.yaml`](../bench/results/history.yaml)
+- [`debt.md`](./debt.md), [`lessons/INDEX.md`](./lessons/INDEX.md)
