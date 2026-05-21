@@ -5,37 +5,40 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit is the
-   barrier-dissolution flip cycle landing now (debt walk:
-   D-055 + D-081 → `Status: now`; D-018 wording refresh).
+1. `git log --oneline -10` — last code commit: `32a431a0`
+   (ADR-0080 Proposed — emit.zig int/float split). Awaiting
+   user Accept (Status flip Proposed → Accepted) OR direct
+   continuation into impl per architectural-chunk discipline.
 2. **User directive (2026-05-21)**: batch-session / multi-cycle
-   architectural mode authorized. Lift single-cycle-tractable
-   self-restriction.
+   architectural mode authorized.
 3. **Live status**: `bash scripts/p9_completion_status.sh` —
    `now` rows = 2 (D-055 + D-081, paired discharge in emit.zig
    int/float split session).
 
 ## Authorized next-session pickup (priority order — updated 2026-05-21)
 
-1. **PRIMARY: ADR-0080 (emit.zig int/float source split) +
-   discharge of D-055 + D-081**. Barriers dissolved this resume
-   per Step 0.5 (prologue.zig helper landed at `ac8238bf` via
-   D-052 close). Multi-cycle architectural chunk:
-   - **cycle 1**: draft `.dev/decisions/0080_emit_zig_int_float_
-     split.md` Proposed (follow ADR-0079 shape: Context naming
-     the bloat axis, Decision proposing split into `emit_int.zig`
-     / `emit_float.zig` / `emit.zig` driver, Alternatives noting
-     source-family vs op-family trade-offs, file-layout proposal).
-   - **cycle 2-3**: execute split — distribute helpers per ADR,
-     `git mv emit_test_{int,float}.zig → emit_{int,float}_test
-     .zig`, update `src/zwasm.zig` root imports, migrate ~95
-     `expectEqualSlices` test sites to `body_start_offset()`-
-     relative via prologue helper (paired D-055 work).
-   - **cycle 4 (sentinel)**: wire `inst.encMovMemDisp32Imm32`
-     call in emit.zig prologue (5-line patch); D-055 fully
-     closed.
-   Files touched: `src/engine/codegen/x86_64/{emit,emit_int,
-   emit_float,emit_int_test,emit_float_test,prologue}.zig`,
+1. **PRIMARY: ADR-0080 implementation (emit.zig int/float
+   split + D-055/D-081 paired discharge)**. ADR-0080 Proposed
+   landed at `32a431a0`. Multi-cycle impl per ADR's
+   "Implementation order" §:
+   - **cycle 2 (next)**: carve `emit_float.zig` (leaf, lower
+     blast radius). Move float param marshalling, float const
+     (f32/f64.const), float memory, float convert, return
+     marshalling. Update emit.zig dispatch switch to route
+     `.f32.*` / `.f64.*` arms via `emit_float.handle*`. Test
+     gate: `cohort` (test-all).
+   - **cycle 3**: carve `emit_int.zig` (int param marshalling,
+     int const, div/rem, memory, int-output converts). emit.zig
+     shrinks to ~400 LOC driver. Test gate: `cohort`.
+   - **cycle 4 (infrastructure)**: D-081 close via `git mv
+     emit_test_{int,float}.zig → emit_{int,float}_test.zig` +
+     `src/zwasm.zig` root-import update. Mechanical.
+   - **cycle 5+ (D-055)**: ~95 test-array hardcoded byte-offset
+     sites → `prologue.body_start_offset()`-relative migration;
+     wire `inst.encMovMemDisp32Imm32` call in emit.zig prologue
+     (5-line patch). D-055 closes.
+   Files touched (cumulative): `src/engine/codegen/x86_64/{emit,
+   emit_int,emit_float,emit_int_test,emit_float_test,prologue}.zig`,
    `src/zwasm.zig`.
 2. **§9.12-F debt-cohort processing (continue)**. After D-055 /
    D-081 close, walk remaining 22 `blocked-by:` rows on each
