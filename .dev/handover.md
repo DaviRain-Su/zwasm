@@ -5,10 +5,11 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit: `f16d4593` /
-   `6d71eb60` (ADR-0085 — arm64/emit_setup.zig extraction;
-   emit.zig 1632 → 1479 LOC; mirror of ADR-0081 x86_64 case;
-   Accepted same cycle).
+1. `git log --oneline -10` — last code commit: `f0d91a82`
+   (ADR-0086 — codegen dispatch_collector_ops.zig extraction;
+   dispatch_collector.zig 1887 → 264 LOC; -1623 single-file
+   reduction; mirror of ADR-0082 Zone-1 side; Accepted same
+   cycle).
 2. **User directive (2026-05-21)**: batch-session architectural
    mode.
 3. **Live status**: `bash scripts/p9_completion_status.sh` —
@@ -16,18 +17,19 @@
 
 ## Authorized next-session pickup (priority order — updated 2026-05-21)
 
-1. **PRIMARY: next D-141 per-file ADR candidate**:
+1. **PRIMARY: next D-141 candidate (priority by extractability)**:
+   - **parse/sections.zig** (1556 LOC) — likely per-section
+     parser; survey first to determine extractability axis.
+   - **api/instance.zig** (1431 LOC) — c_api Instance lifecycle;
+     §9.12-G item, possibly survey-first.
+   - **engine/compile.zig** (1225 LOC) — already split from
+     runner.zig at ADR-0079; may have grown via subsequent
+     work. Survey first.
+   - **ir/zir.zig** (1244 LOC) — ZIR types module; pure-data
+     surface likely.
    - **lower.zig** (1109 LOC) — `Lowerer = struct {...}`
-     struct-method-heavy. Apply ADR-0083 pattern + lesson
-     `cross-file-struct-method-syntax-zig-0-16.md`
-     pre-extraction checklist.
-   - **NOTE**: `x86_64/inst.zig` (1328 LOC) is **already**
-     per-family split (orchestrator + inst_alu / inst_mem /
-     inst_branch / inst_sse children) per the file's own
-     docstring — NOT a refactor target.
-   - Remaining D-141 candidates: x86_64 emit_test_int/float.zig
-     (blocked by D-055/D-081), op_simd_float.zig (1543 LOC), op_simd.zig
-     (1104 LOC), op_simd_int_arith.zig (1137 LOC).
+     struct-method-heavy. ADR-0083 pattern.
+   - **analysis/liveness.zig** (1192 LOC) — likely struct-method.
 2. **Subsequent D-141 candidates** (after #1 lands):
    - **arm64/emit.zig** (1630 LOC) — mirror of x86_64/emit.zig
      after ADR-0081; same shape likely applies.
