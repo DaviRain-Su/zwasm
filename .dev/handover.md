@@ -5,33 +5,34 @@
 
 ## Cold-start procedure — §9.12-G in progress
 
-ROADMAP §9.12-G is **Phase 10 prep substrate**, 7 deliverables.
-Track inline here; commit per-sub-chunk per ROADMAP §18.3.
+ROADMAP §9.12-G is Phase 10 prep substrate, 7 deliverables.
+Track inline; commit per-sub-chunk per ROADMAP §18.3.
 
 | # | Deliverable | Status |
 |---|---|---|
-| (a) | `.dev/wasm_3_0_zirop_mapping.md` machine-generated from collector | exists (184 LOC); verify currency |
-| (b) | Extend `src/instruction/wasm_3_0/` placeholders for all Phase 10 features (GC / EH / tail-call / memory64 / multi-memory / typed funcrefs); each must reject with `Error.UnsupportedOpForBuildLevel` at comptime | partial (44 files in GC/EH/tail-call; memory64 / multi-memory / typed-funcref coverage unverified) |
+| (a) | `.dev/wasm_3_0_zirop_mapping.md` — currency refresh (Status section drift: claimed 3 placeholders; actually 44) | ✅ this commit; Phase-10-open machine-gen target preserved |
+| (b) | Extend `src/instruction/wasm_3_0/` for memory64 / relaxed-simd / multi-memory coverage; each comptime-rejects with `Error.UnsupportedOpForBuildLevel` | open (gaps named in mapping doc Coverage section) |
 | (c) | `src/api/instance.zig` (1431 LOC) health + helper extraction + minimal c_api Instance-path test coverage (D-139 pulled forward); P3 evaluation per ADR-0099 §D2 first | open |
 | (d) | CLI `--invoke` mode (prerequisite for Phase 11 bench) | open |
 | (e) | `include/wasm.h` upstream diff check vs WebAssembly/wasm-c-api | open |
-| (f) | `scripts/zone_check.sh` migration info → `--gate` enforcement in `gate_commit.sh` | open (BASELINE=0, 0 current violations — mechanical edit) |
-| (g) | `.dev/architecture/zone_layout.md` reference document | ✅ this commit |
+| (f) | `scripts/zone_check.sh --gate` enforcement in `gate_commit.sh` non-fast path | ✅ already landed (line 92 in gate_commit.sh); BASELINE=0 + 0 violations live |
+| (g) | `.dev/architecture/zone_layout.md` reference document | ✅ prior commit `568bb888` |
 
-**Next pickup**: (f) — `zone_check.sh --gate` migration. Smallest
-isolated edit (gate_commit.sh insert) + verify pre-commit gate
-stays green on docs-only and src diffs.
+**Next pickup**: (b) — placeholders for memory64 / relaxed-simd /
+multi-memory coverage gaps per the mapping doc's named-gaps list.
+Each placeholder is a small file rejecting with
+`Error.UnsupportedOpForBuildLevel` at comptime.
 
 ## Recent reform context (file-size discipline)
 
-Cycles C1..C6 (2026-05-21) landed ADR-0099 + 0100 + 0101 +
-rule + script + lesson + init_expr.zig redesign. Reform complete;
+Cycles C1..C6 (2026-05-21) landed ADR-0099 + 0100 + 0101 + rule +
+script + lesson + init_expr.zig redesign. Reform complete;
 planning artefacts archived at `private/archive/2026-05-21-file-size-reform/`.
 
 ## Active `now` debts
 
 - **D-055** (mechanical, multi-cycle): emit_test_int has 27 sites
-  pending. Discharge now unblocked.
+  pending. Discharge unblocked.
 
 ## Other queued work (post-§9.12-G)
 
@@ -43,23 +44,23 @@ planning artefacts archived at `private/archive/2026-05-21-file-size-reform/`.
 
 ## Active state (snapshot)
 
-- §9.12-A enforcement: 11 items OK (check_split_smell wired).
+- §9.12-A enforcement: 11 items OK.
 - §9.12-F (D-141 + reform): closed.
-- §9.12-G: in progress (g done; a/b verify pending; c-f open).
+- §9.12-G: a + f + g done; b/c/d/e open.
 - §9.12-H / §9.12-I: open.
 
 ## Open questions / blockers
 
-- なし。Next sub-chunk (f) is mechanical.
+- なし。(b) is small per-placeholder additions in
+  `src/instruction/wasm_3_0/`.
 
 ## See
 
-- [ROADMAP](./ROADMAP.md) §9.12-G (full deliverable list); §4.1 zones
-- [`.dev/architecture/zone_layout.md`](./architecture/zone_layout.md) — landed this commit
-- [`.dev/wasm_3_0_zirop_mapping.md`](./wasm_3_0_zirop_mapping.md) — needs currency verification
+- [ROADMAP](./ROADMAP.md) §9.12-G; §4.1 zones
+- [`.dev/wasm_3_0_zirop_mapping.md`](./wasm_3_0_zirop_mapping.md) — refreshed Status section + named coverage gaps
+- [`.dev/architecture/zone_layout.md`](./architecture/zone_layout.md)
 - [`.dev/phase10_prep.md`](./phase10_prep.md) — pre-existing Phase 10 scoping
-- [`.dev/decisions/0099_file_size_discipline_reframe.md`](./decisions/0099_file_size_discipline_reframe.md)
 - [`.claude/rules/zone_deps.md`](../.claude/rules/zone_deps.md)
-- [`scripts/zone_check.sh`](../scripts/zone_check.sh)
+- [`scripts/zone_check.sh`](../scripts/zone_check.sh) — BASELINE=0 + --gate enforcing
 - [`debt.md`](./debt.md) — D-055 only `now`
 - [`lessons/INDEX.md`](./lessons/INDEX.md)

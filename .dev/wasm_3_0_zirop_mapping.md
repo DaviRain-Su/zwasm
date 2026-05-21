@@ -154,15 +154,62 @@ Merged into Wasm 3.0.
 
 ## Status of files in src/instruction/wasm_3_0/
 
-Placeholders present (no handler bodies registered):
+44 placeholder files present (refreshed 2026-05-21 per §9.12-G);
+no handler bodies registered — each is a one-op stub that maps
+to a slot in the ZirOp catalogue.
 
-- `src/instruction/wasm_3_0/custom_page_sizes.zig`
-- `src/instruction/wasm_3_0/extended_const.zig`
-- `src/instruction/wasm_3_0/wide_arith.zig`
+**GC proposal** (~25 files):
+- arrays: `array_new.zig`, `array_new_default.zig`,
+  `array_new_fixed.zig`, `array_new_data.zig`, `array_new_elem.zig`,
+  `array_get.zig`, `array_get_s.zig`, `array_get_u.zig`,
+  `array_set.zig`, `array_len.zig`, `array_copy.zig`,
+  `array_fill.zig`, `array_init_data.zig`, `array_init_elem.zig`.
+- structs: `struct_new.zig`, `struct_new_default.zig`,
+  `struct_get.zig`, `struct_get_s.zig`, `struct_get_u.zig`,
+  `struct_set.zig`.
+- references / casts: `ref_test.zig`, `ref_test_null.zig`,
+  `ref_cast.zig`, `ref_cast_null.zig`, `ref_as_non_null.zig`,
+  `ref_i31.zig`, `i31_get_s.zig`, `i31_get_u.zig`,
+  `any_convert_extern.zig`, `extern_convert_any.zig`,
+  `br_on_cast.zig`, `br_on_cast_fail.zig`, `br_on_null.zig`,
+  `br_on_non_null.zig`.
 
-Expected additions at Phase 10 open (one per proposal):
-`exception_handling.zig`, `tail_call.zig`, `function_references.zig`,
-`gc.zig`, `relaxed_simd.zig`, `memory64.zig`.
+**Exception-handling proposal** (3 files): `throw.zig`,
+`throw_ref.zig`, `try_table.zig`.
+
+**Tail-call / typed-funcref proposals** (4 files):
+`call_ref.zig`, `return_call.zig`, `return_call_indirect.zig`,
+`return_call_ref.zig`.
+
+**Pre-existing single-file proposals** (3 files):
+`custom_page_sizes.zig`, `extended_const.zig`, `wide_arith.zig`.
+
+### Coverage gaps (vs §9.12-G exit criteria)
+
+§9.12-G demands "all Phase 10 feature ZirOps reject with
+`Error.UnsupportedOpForBuildLevel` at `comptime`". Each
+placeholder above MUST contain that comptime-reject body
+once registered; the audit at Phase 10 open verifies coverage.
+
+**Still missing at file-level** (per §9.12-G coverage check):
+
+- `memory64`: no dedicated wasm_3_0 placeholder file. The two
+  new ZirOps `memory.size_64` / `memory.grow_64` (per the
+  table above) share opcodes with the MVP forms and dispatch
+  on memory index type — placement may end up in
+  `src/instruction/wasm_1_0/` with index-type variant
+  selection rather than as separate wasm_3_0 files.
+- `relaxed-simd`: no placeholders. Relaxed-SIMD ops live in the
+  0xFD-prefix SIMD family and belong under
+  `src/instruction/wasm_3_0/relaxed_simd/` (or a single
+  `relaxed_simd.zig` register-many) when added.
+- `multi-memory`: no opcodes (existing memory ops gain a
+  `memidx` immediate); placeholder file unnecessary, but
+  the dispatch wiring needs a Phase 10 audit.
+
+These gaps are tracked under §9.12-G deliverable (b) — extend
+`src/instruction/wasm_3_0/` placeholders to cover all Phase 10
+features.
 
 ## Sub-opcode source verification
 
