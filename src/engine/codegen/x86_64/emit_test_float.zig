@@ -178,9 +178,10 @@ test "compile: i32.reinterpret_f32 — MOVD R10D, XMM8 (XMM→GPR bit-cast)" {
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
     defer deinit(testing.allocator, out);
-    // After f32.const at [4..14]: MOVD EBX, XMM8 at [14..19].
+    // After f32.const at [body..body+10]: MOVD EBX, XMM8 at [body+10..body+15].
+    const body_start = prologue.body_start_offset(false, 0);
     const expected = inst.encMovdR32FromXmm(.rbx, .xmm8);
-    try testing.expectEqualSlices(u8, expected.slice(), out.bytes[14 .. 14 + expected.len]);
+    try testing.expectEqualSlices(u8, expected.slice(), out.bytes[body_start + 10 .. body_start + 10 + expected.len]);
 }
 
 test "compile: f32.reinterpret_i32 — MOVD XMM8, R10D (GPR→XMM bit-cast)" {
@@ -199,9 +200,10 @@ test "compile: f32.reinterpret_i32 — MOVD XMM8, R10D (GPR→XMM bit-cast)" {
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
     defer deinit(testing.allocator, out);
-    // After i32.const at [4..9] (5 bytes for EBX): MOVD XMM8, EBX at [9..14].
+    // After i32.const at [body..body+5] (5 bytes for EBX): MOVD XMM8, EBX at [body+5..body+10].
+    const body_start = prologue.body_start_offset(false, 0);
     const expected = inst.encMovdXmmFromR32(.xmm8, .rbx);
-    try testing.expectEqualSlices(u8, expected.slice(), out.bytes[9 .. 9 + expected.len]);
+    try testing.expectEqualSlices(u8, expected.slice(), out.bytes[body_start + 5 .. body_start + 5 + expected.len]);
 }
 
 test "compile: f32.load — emit MOVSS xmm_dst, [rax + rdx] after eff-addr/bounds-check" {
@@ -385,32 +387,33 @@ test "compile: i32.trunc_sat_f32_u — UCOMI/JP + clamp paths + CVTTSS2SI .q for
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
     defer deinit(testing.allocator, out);
-    // After f32.const at [4..14]:
-    //   [14..18] UCOMISS XMM8, XMM8     (4 bytes; REX.R+B)
-    //   [18..24] JP rel32 zero_path     (6 bytes)
-    //   [24..27] XORPS XMM7, XMM7       (3 bytes; no prefix, no REX)
-    //   [27..31] UCOMISS XMM8, XMM7     (4 bytes; REX.R only)
-    //   [31..37] JBE rel32 zero_path    (6 bytes)
-    //   [37..42] MOV EAX, 0x4F800000    (5 bytes; no REX)
-    //   [42..46] MOVD XMM7, EAX         (4 bytes; no REX)
-    //   [46..50] UCOMISS XMM8, XMM7     (4 bytes)
-    //   [50..56] JAE rel32 max_path     (6 bytes)
-    //   [56..61] CVTTSS2SI RBX, XMM8 .q (5 bytes; slot 0 = RBX after chunk 13b)
-    //   [61..66] JMP rel32 done         (5 bytes)
-    //   zero_path at 66
+    // After f32.const at [body..body+10]:
+    //   [body+10..+14] UCOMISS XMM8, XMM8     (4 bytes; REX.R+B)
+    //   [body+14..+20] JP rel32 zero_path     (6 bytes)
+    //   [body+20..+23] XORPS XMM7, XMM7       (3 bytes; no prefix, no REX)
+    //   [body+23..+27] UCOMISS XMM8, XMM7     (4 bytes; REX.R only)
+    //   [body+27..+33] JBE rel32 zero_path    (6 bytes)
+    //   [body+33..+38] MOV EAX, 0x4F800000    (5 bytes; no REX)
+    //   [body+38..+42] MOVD XMM7, EAX         (4 bytes; no REX)
+    //   [body+42..+46] UCOMISS XMM8, XMM7     (4 bytes)
+    //   [body+46..+52] JAE rel32 max_path     (6 bytes)
+    //   [body+52..+57] CVTTSS2SI RBX, XMM8 .q (5 bytes; slot 0 = RBX after chunk 13b)
+    //   [body+57..+62] JMP rel32 done         (5 bytes)
+    //   zero_path at body+62
+    const body_start = prologue.body_start_offset(false, 0);
     const expected_xorps = inst.encSsePackedBinary(.f32, 0x57, .xmm7, .xmm7);
-    try testing.expectEqualSlices(u8, expected_xorps.slice(), out.bytes[24 .. 24 + expected_xorps.len]);
+    try testing.expectEqualSlices(u8, expected_xorps.slice(), out.bytes[body_start + 20 .. body_start + 20 + expected_xorps.len]);
     const expected_thresh = inst.encMovImm32W(.rax, 0x4F800000);
-    try testing.expectEqualSlices(u8, expected_thresh.slice(), out.bytes[37 .. 37 + expected_thresh.len]);
+    try testing.expectEqualSlices(u8, expected_thresh.slice(), out.bytes[body_start + 33 .. body_start + 33 + expected_thresh.len]);
     const expected_cvt = inst.encCvttScalar2Int(.f32, true, .rbx, .xmm8);
-    try testing.expectEqualSlices(u8, expected_cvt.slice(), out.bytes[56 .. 56 + expected_cvt.len]);
+    try testing.expectEqualSlices(u8, expected_cvt.slice(), out.bytes[body_start + 52 .. body_start + 52 + expected_cvt.len]);
     // JP/JBE/JAE rel32 opcode bytes (disps patched at end-of-emit).
-    try testing.expectEqual(@as(u8, 0x0F), out.bytes[18]);
-    try testing.expectEqual(@as(u8, 0x8A), out.bytes[19]);
-    try testing.expectEqual(@as(u8, 0x0F), out.bytes[31]);
-    try testing.expectEqual(@as(u8, 0x86), out.bytes[32]); // Jcc.be = 6
-    try testing.expectEqual(@as(u8, 0x0F), out.bytes[50]);
-    try testing.expectEqual(@as(u8, 0x83), out.bytes[51]); // Jcc.ae = 3
+    try testing.expectEqual(@as(u8, 0x0F), out.bytes[body_start + 14]);
+    try testing.expectEqual(@as(u8, 0x8A), out.bytes[body_start + 15]);
+    try testing.expectEqual(@as(u8, 0x0F), out.bytes[body_start + 27]);
+    try testing.expectEqual(@as(u8, 0x86), out.bytes[body_start + 28]); // Jcc.be = 6
+    try testing.expectEqual(@as(u8, 0x0F), out.bytes[body_start + 46]);
+    try testing.expectEqual(@as(u8, 0x83), out.bytes[body_start + 47]); // Jcc.ae = 3
 }
 
 test "compile: i32.trunc_sat_f32_s — CVTTSS2SI + CMP INT_MIN + branch saturation" {
@@ -429,23 +432,24 @@ test "compile: i32.trunc_sat_f32_s — CVTTSS2SI + CMP INT_MIN + branch saturati
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
     defer deinit(testing.allocator, out);
-    // After f32.const at [4..14]:
-    //   [14..19] CVTTSS2SI EBX, XMM8      (5 bytes; F3 + REX + 0F + 2C + ModRM)
-    //   [19..25] CMP EBX, 0x80000000     (6 bytes; 81 + ModRM + imm32 — no REX needed for RBX)
-    //   [25..31] JNE rel32 (placeholder) (6 bytes)
+    // After f32.const at [body..body+10]:
+    //   [body+10..+15] CVTTSS2SI EBX, XMM8      (5 bytes; F3 + REX + 0F + 2C + ModRM)
+    //   [body+15..+21] CMP EBX, 0x80000000     (6 bytes; 81 + ModRM + imm32 — no REX needed for RBX)
+    //   [body+21..+27] JNE rel32 (placeholder) (6 bytes)
     //   ...
+    const body_start = prologue.body_start_offset(false, 0);
     const expected_cvt = inst.encCvttScalar2Int(.f32, false, .rbx, .xmm8);
-    try testing.expectEqualSlices(u8, expected_cvt.slice(), out.bytes[14 .. 14 + expected_cvt.len]);
+    try testing.expectEqualSlices(u8, expected_cvt.slice(), out.bytes[body_start + 10 .. body_start + 10 + expected_cvt.len]);
     const expected_cmp = inst.encCmpRImm32(.rbx, 0x80000000);
-    try testing.expectEqualSlices(u8, expected_cmp.slice(), out.bytes[19 .. 19 + expected_cmp.len]);
+    try testing.expectEqualSlices(u8, expected_cmp.slice(), out.bytes[body_start + 15 .. body_start + 15 + expected_cmp.len]);
     // JNE / JP / JBE rel32 opcode bytes (disps patched at end-of-emit).
     // Offsets shift by -1 vs pre-13b: CMP imm32 saves a REX byte for RBX.
-    try testing.expectEqual(@as(u8, 0x0F), out.bytes[25]);
-    try testing.expectEqual(@as(u8, 0x85), out.bytes[26]); // Jcc.ne = 5
-    try testing.expectEqual(@as(u8, 0x0F), out.bytes[35]);
-    try testing.expectEqual(@as(u8, 0x8A), out.bytes[36]); // Jcc.p = A
+    try testing.expectEqual(@as(u8, 0x0F), out.bytes[body_start + 21]);
+    try testing.expectEqual(@as(u8, 0x85), out.bytes[body_start + 22]); // Jcc.ne = 5
+    try testing.expectEqual(@as(u8, 0x0F), out.bytes[body_start + 31]);
+    try testing.expectEqual(@as(u8, 0x8A), out.bytes[body_start + 32]); // Jcc.p = A
     const expected_xorps = inst.encSsePackedBinary(.f32, 0x57, .xmm7, .xmm7);
-    try testing.expectEqualSlices(u8, expected_xorps.slice(), out.bytes[41 .. 41 + expected_xorps.len]);
+    try testing.expectEqualSlices(u8, expected_xorps.slice(), out.bytes[body_start + 37 .. body_start + 37 + expected_xorps.len]);
 }
 
 test "compile: i64.trunc_sat_f64_s — CVTTSD2SI .q + i64 sentinel via MOVABS+CMP r/r" {
@@ -463,16 +467,17 @@ test "compile: i64.trunc_sat_f64_s — CVTTSD2SI .q + i64 sentinel via MOVABS+CM
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
     defer deinit(testing.allocator, out);
-    // After f64.const at [4..19]:
-    //   [19..24]  CVTTSD2SI RBX, XMM8 (5 bytes; F2 + REX.W+R + 0F + 2C + ModRM 0xD8)
-    //   [24..34]  MOVABS RCX, INT_MIN_i64 (10 bytes)
-    //   [34..37]  CMP RBX, RCX (3 bytes; REX.W + 39 + ModRM) — slot 0 = RBX after chunk 13b
+    // After f64.const at [body..body+15]:
+    //   [body+15..+20] CVTTSD2SI RBX, XMM8 (5 bytes; F2 + REX.W+R + 0F + 2C + ModRM 0xD8)
+    //   [body+20..+30] MOVABS RCX, INT_MIN_i64 (10 bytes)
+    //   [body+30..+33] CMP RBX, RCX (3 bytes; REX.W + 39 + ModRM) — slot 0 = RBX after chunk 13b
+    const body_start = prologue.body_start_offset(false, 0);
     const expected_cvt = inst.encCvttScalar2Int(.f64, true, .rbx, .xmm8);
-    try testing.expectEqualSlices(u8, expected_cvt.slice(), out.bytes[19 .. 19 + expected_cvt.len]);
+    try testing.expectEqualSlices(u8, expected_cvt.slice(), out.bytes[body_start + 15 .. body_start + 15 + expected_cvt.len]);
     const expected_min = inst.encMovImm64Q(.rcx, 0x8000000000000000);
-    try testing.expectEqualSlices(u8, expected_min.slice(), out.bytes[24 .. 24 + expected_min.len]);
+    try testing.expectEqualSlices(u8, expected_min.slice(), out.bytes[body_start + 20 .. body_start + 20 + expected_min.len]);
     const expected_cmp = inst.encCmpRR(.q, .rbx, .rcx);
-    try testing.expectEqualSlices(u8, expected_cmp.slice(), out.bytes[34 .. 34 + expected_cmp.len]);
+    try testing.expectEqualSlices(u8, expected_cmp.slice(), out.bytes[body_start + 30 .. body_start + 30 + expected_cmp.len]);
 }
 
 test "compile: f32.convert_i32_u — CVTSI2SS XMM8, R10 (REX.W on i32 src for zero-extend trick)" {
