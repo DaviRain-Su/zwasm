@@ -5,11 +5,11 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit: `30ae661f`
-   (ADR-0090 — regalloc_shape_tags.zig extraction;
-   regalloc.zig 1851 → 1529 LOC; mirror of ADR-0088
+1. `git log --oneline -10` — last code commit: `f1f95fed`
+   (ADR-0091 — compile_init.zig extraction; compile.zig
+   1225 → 917 LOC, UNDER soft cap; mirror of ADR-0090
    re-export pattern; Accepted same cycle). **Session
-   total: 11 D-141 closures + 3 lessons captured.**
+   total: 12 D-141 closures + 3 lessons.**
 2. **User directive (2026-05-21)**: batch-session architectural
    mode — Phase 9 closure quality. Substantially advanced.
 3. **Live status**: `bash scripts/p9_completion_status.sh` —
