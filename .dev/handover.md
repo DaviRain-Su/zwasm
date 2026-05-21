@@ -5,69 +5,64 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit: `32a431a0`
-   (ADR-0080 Proposed — emit.zig int/float split). Awaiting
-   user Accept (Status flip Proposed → Accepted) OR direct
-   continuation into impl per architectural-chunk discipline.
+1. `git log --oneline -10` — last code commit: the ADR-0080
+   Withdraw + lesson + D-055/D-081 re-walk landing now (same-day
+   pivot per lesson `emit-zig-survey-per-op-pattern-already-absorbed.md`).
 2. **User directive (2026-05-21)**: batch-session / multi-cycle
    architectural mode authorized.
 3. **Live status**: `bash scripts/p9_completion_status.sh` —
-   `now` rows = 2 (D-055 + D-081, paired discharge in emit.zig
-   int/float split session).
+   D-055 stays `Status: now`; D-081 re-blocked pending ADR-0081
+   pivot decision.
 
-## Authorized next-session pickup (priority order — updated 2026-05-21)
+## Authorized next-session pickup (priority order — updated 2026-05-21 [REVISED])
 
-1. **PRIMARY: ADR-0080 implementation (emit.zig int/float
-   split + D-055/D-081 paired discharge)**. ADR-0080 Proposed
-   landed at `32a431a0`. Multi-cycle impl per ADR's
-   "Implementation order" §:
-   - **cycle 2 (next)**: carve `emit_float.zig` (leaf, lower
-     blast radius). Move float param marshalling, float const
-     (f32/f64.const), float memory, float convert, return
-     marshalling. Update emit.zig dispatch switch to route
-     `.f32.*` / `.f64.*` arms via `emit_float.handle*`. Test
-     gate: `cohort` (test-all).
-   - **cycle 3**: carve `emit_int.zig` (int param marshalling,
-     int const, div/rem, memory, int-output converts). emit.zig
-     shrinks to ~400 LOC driver. Test gate: `cohort`.
-   - **cycle 4 (infrastructure)**: D-081 close via `git mv
-     emit_test_{int,float}.zig → emit_{int,float}_test.zig` +
-     `src/zwasm.zig` root-import update. Mechanical.
-   - **cycle 5+ (D-055)**: ~95 test-array hardcoded byte-offset
-     sites → `prologue.body_start_offset()`-relative migration;
-     wire `inst.encMovMemDisp32Imm32` call in emit.zig prologue
-     (5-line patch). D-055 closes.
-   Files touched (cumulative): `src/engine/codegen/x86_64/{emit,
-   emit_int,emit_float,emit_int_test,emit_float_test,prologue}.zig`,
-   `src/zwasm.zig`.
-2. **§9.12-F debt-cohort processing (continue)**. After D-055 /
-   D-081 close, walk remaining 22 `blocked-by:` rows on each
-   subsequent resume's Step 0.5 (already happening per
-   discipline). Goal: debt < 15 by Phase 9 close. External-
-   blocker rows (D-010, D-021, D-028, D-148) likely hold;
-   structural rows (D-094, D-141) progress alongside.
-3. **D-141 per-file ADRs + splits (parallel to #1)** —
-   ADR-0079 shape for each. Priority by structural impact:
-   - `src/validate/validator.zig` (1699 LOC) — next ADR-0081
-   - `src/ir/dispatch_collector.zig` (1397 LOC)
-   - `src/engine/codegen/{arm64,x86_64}/regalloc.zig`
-   - `src/engine/codegen/{arm64,x86_64}/inst*.zig`
-   - `src/engine/codegen/x86_64/op_simd_int_cmp_lane.zig`
-     (2121 LOC — over hard cap)
-4. **§9.12-G `src/api/instance.zig` split** (1424 LOC). Per-
-   file ADR + extraction following ADR-0079.
-5. **§9.12-H bench baseline** (Mac Wasm 2.0 + wasmtime × 26
-   fixtures × hyperfine). Provides D-018 measurement that
-   lets that row discharge.
-6. **§9.12-I ADR/lesson curation closure**. Judgment-heavy.
+1. **PRIMARY: ADR-0081 Proposed (emit_setup.zig pipeline
+   extraction)**. Pivot replacement for Withdrawn ADR-0080.
+   New target: extract emit.zig's actual extractable mass —
+   prologue assembly (~60 LOC), parameter marshalling (~170
+   LOC), local zero-init (~25 LOC), state init (~90 LOC),
+   frame helpers `computeOutgoingMaxBytes` + `computeLocalLayout`
+   + `localDisp` (~150 LOC) — totalling ~500 LOC out of
+   emit.zig's 1300 LOC into a new `emit_setup.zig`. emit.zig
+   shrinks to ~800 LOC (driver: compile() entry + dispatch
+   switch + control-flow scaffold + SIMD inline cases).
+   - **cycle 1 (next)**: draft `.dev/decisions/0081_emit_setup_
+     zig_extraction.md` Proposed. Decision: 2-way split along
+     pipeline-phase axis (ADR-0079 Alt B shape). Test impact:
+     emit_test_int.zig / emit_test_float.zig still cover the
+     extracted helpers through compile() entry (no test moves).
+   - **cycle 2 (architectural)**: execute extraction.
+     `git mv`-style helper moves + `pub` re-exports in emit.zig
+     for callers (e.g., spec runners that may use localDisp
+     directly). Test gate: `cohort`.
+   - **cycle 3 (D-055 close)**: ~95 test-array hardcoded byte
+     offsets → `prologue.body_start_offset()`-relative; wire
+     sentinel. D-055 discharges.
+2. **D-081 decision deferred to ADR-0081 cycle**: re-blocked
+   pending ADR-0054 amendment OR alternative path. Not urgent
+   for §9.12-F debt target (D-081's barrier wording is now
+   accurate; row stays `blocked-by:` until structural path
+   chosen).
+3. **§9.12-F debt-cohort processing (continue)**. After D-055
+   close, walk remaining 23 `blocked-by:` rows on each
+   subsequent resume's Step 0.5. Goal: debt < 15 by Phase 9
+   close. External-blocker rows (D-010, D-021, D-028, D-148)
+   likely hold; structural rows (D-094, D-141) progress
+   alongside.
+4. **D-141 per-file ADRs + splits** — pickup remaining
+   files per ADR-0079 shape: validator.zig (1699) /
+   dispatch_collector (1397) / regalloc / inst /
+   op_simd_int_cmp_lane (2121 over hard cap).
+5. **§9.12-G `src/api/instance.zig` split** (1424 LOC).
+6. **§9.12-H bench baseline** (Mac Wasm 2.0 + wasmtime ×
+   hyperfine) — also discharges D-018.
+7. **§9.12-I ADR/lesson curation closure**. Judgment-heavy.
 
 ## Active state (snapshot)
 
-- **§9.12-A enforcement layer fully load-bearing**: 9 items OK
-  per `p9_completion_status`; `gate_commit` strict --gate for
-  libc + fallback; `pre-push` runs 4 audit gates; §7.9
-  `feature_level_check.zig` comptime invariant landed
-  (`2d6bd6ca`).
+- **§9.12-A enforcement**: 9 items OK; `gate_commit` strict
+  --gate for libc + fallback; `pre-push` 4 audit gates;
+  §7.9 `feature_level_check.zig` (`2d6bd6ca`).
 - **§9.12-E [x]** at `7b2e1b02`.
 - **ADR-0078 fully load-bearing**: G.1.1 + G.1.2 + amendment;
   pre-push wired.
@@ -77,9 +72,12 @@
   stub coverage structurally complete. Remaining: api/instance
   split (#3 above) + c_api Instance tests (D-139 blocked).
 - **§9.12-F**: 24 debt rows; D-149/153/154/156/102/103/105/155
-  closed; D-157 newly filed. 2026-05-21 resume: D-055 + D-081
-  barrier-dissolution flip to `Status: now` (paired discharge
-  via ADR-0080 emit.zig int/float split, multi-cycle).
+  closed; D-157 filed. 2026-05-21 resume: D-055 stays `Status:
+  now` (mechanical work, unpaired from D-081 post-ADR-0080
+  Withdraw); D-081 re-blocked pending ADR-0081 pivot decision.
+  ADR-0080 Withdrawn same-day; lesson
+  `emit-zig-survey-per-op-pattern-already-absorbed.md` captures
+  the survey-time discipline gap.
 
 ## Operational note for the batch-session loop
 
