@@ -10,18 +10,22 @@ Track inline; commit per-sub-chunk per ROADMAP §18.3.
 
 | # | Deliverable | Status |
 |---|---|---|
-| (a) | `.dev/wasm_3_0_zirop_mapping.md` Status section currency | ✅ `c305deb1` |
-| (b) | Extend `src/instruction/wasm_3_0/` for memory64 / relaxed-simd / multi-memory; comptime `Error.UnsupportedOpForBuildLevel` | **blocked-by ADR**: no relaxed-simd / memory64_64 ZirOps exist in `src/ir/zir.zig` yet; adding them is §4-territory (deviation watch), requires ADR. Defer until (c)/(d) inform the ZirOp slot policy |
-| (c) | `src/api/instance.zig` (1431 LOC) health + helper extraction + minimal c_api Instance-path test coverage (D-139); P3 evaluation per ADR-0099 §D2 first | open |
-| (d) | CLI `--invoke` mode (prerequisite for Phase 11 bench) | open |
-| (e) | `include/wasm.h` upstream diff check vs WebAssembly/wasm-c-api | ✅ this commit — `scripts/check_wasm_h_upstream.sh` lands; local is byte-identical to upstream |
-| (f) | `scripts/zone_check.sh --gate` enforcement | ✅ already landed; verified `6d5e7551` |
+| (a) | `.dev/wasm_3_0_zirop_mapping.md` Status currency | ✅ `c305deb1` |
+| (b) | Extend `src/instruction/wasm_3_0/` for memory64 / relaxed-simd / multi-memory | **blocked-by ADR**: ZirOp slot policy (no slots exist yet; §4 deviation requires ADR). Defer |
+| (c) | `src/api/instance.zig` (1431 LOC) health + ADR-0099 §D2 P3 evaluation; D-139 c_api Instance-path test coverage | ✅ this commit — audit verdict FILE-SIZE-EXEMPT (0 P-conditions fire, 4 N-conditions on any proposed extraction); marker added; audit saved at `.dev/architecture/api_instance_audit.md`. D-139 v0.1.0 RC discharge unchanged (19 inline tests sufficient for §9.12-G entry) |
+| (d) | CLI `--invoke` mode (Phase 11 bench prerequisite) | open |
+| (e) | `include/wasm.h` upstream diff check | ✅ `038d861f` |
+| (f) | `zone_check.sh --gate` enforcement | ✅ verified `6d5e7551` |
 | (g) | `.dev/architecture/zone_layout.md` reference | ✅ `568bb888` |
 
-**Next pickup**: (c) — `api/instance.zig` health + P3 evaluation.
-This is a substrate audit + restructure (~1431 LOC file); start
-with the §D2 P3 conditions check before any code change. May
-require an ADR if extraction is justified.
+**Next pickup**: (d) — CLI `--invoke` mode. Need to survey
+existing `src/cli/` shape + decide invocation surface (positional
+vs flag-based) before any code. May warrant a small ADR if it
+introduces a new CLI subcommand axis.
+
+After (d), remaining §9.12-G items are (b) only — which is ADR-gated.
+At that point §9.12-G effectively closes for this Phase 9 cycle,
+with (b) tracked as a Phase 10-open dependency.
 
 ## Recent reform context (file-size discipline)
 
@@ -40,32 +44,29 @@ planning artefacts archived at
 1. **§9.12-H** — bench baseline (Mac Wasm 2.0 + wasmtime).
 2. **§9.12-I** — ADR/lesson curation closure (Phase 9 close).
 3. **D-055 continuation**.
-4. **§9.12-G (b)** unblocking once ZirOp slot policy for memory64
-   / relaxed-simd is decided (likely after (c) and a fresh ADR).
+4. **§9.12-G (b)** unblocking once ZirOp slot policy ADR lands.
 
 ## Active state (snapshot)
 
-- §9.12-A enforcement: 11 items OK + `check_wasm_h_upstream.sh`
-  available (not yet gate-wired).
+- §9.12-A enforcement: 11 items OK + `check_wasm_h_upstream.sh`.
 - §9.12-F (D-141 + reform): closed.
-- §9.12-G: a/e/f/g done; b blocked-by ADR; c/d open.
+- §9.12-G: a/c/e/f/g done; (b) blocked-by ADR; (d) open.
 - §9.12-H / §9.12-I: open.
 
 ## Open questions / blockers
 
-- (b) blocked-by missing ZirOp slot design ADR. The mapping doc's
-  table presents `memory.size_64` / `memory.grow_64` and
-  relaxed-simd opcodes as aspirational targets; none are
-  registered as ZirOp enum tags today. Decision needed:
-  per-op enum slots vs index-type-dispatched shared slots.
+- (b) ZirOp slot policy ADR (memory64 / relaxed-simd / multi-memory
+  dispatch shape: per-op slots vs index-type-dispatched shared
+  slots). Defer to Phase 10 entry.
 
 ## See
 
 - [ROADMAP](./ROADMAP.md) §9.12-G; §4.1 zones
-- [`.dev/wasm_3_0_zirop_mapping.md`](./wasm_3_0_zirop_mapping.md)
+- [`.dev/architecture/api_instance_audit.md`](./architecture/api_instance_audit.md) — this commit
 - [`.dev/architecture/zone_layout.md`](./architecture/zone_layout.md)
+- [`.dev/wasm_3_0_zirop_mapping.md`](./wasm_3_0_zirop_mapping.md)
 - [`.dev/phase10_prep.md`](./phase10_prep.md)
-- [`scripts/check_wasm_h_upstream.sh`](../scripts/check_wasm_h_upstream.sh) — new this commit
-- [`scripts/zone_check.sh`](../scripts/zone_check.sh) — BASELINE=0 + --gate
-- [`debt.md`](./debt.md) — D-055 only `now`
+- [`scripts/check_wasm_h_upstream.sh`](../scripts/check_wasm_h_upstream.sh)
+- [`scripts/zone_check.sh`](../scripts/zone_check.sh)
+- [`debt.md`](./debt.md) — D-055 only `now`; D-079 / D-139 noted
 - [`lessons/INDEX.md`](./lessons/INDEX.md)

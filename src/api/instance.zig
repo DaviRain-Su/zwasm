@@ -1,3 +1,4 @@
+// FILE-SIZE-EXEMPT: C ABI translation catalog (Zone 3 boundary layer); no separable subsystem per ADR-0099 §D2 P3 evaluation (see .dev/architecture/api_instance_audit.md, §9.12-G (c)).
 //! Engine / Store / Module / Instance / Func / Extern surface of
 //! the C ABI binding (§9.5 / 5.0 chunk d carve-out from
 //! `wasm.zig` per ADR-0007).
