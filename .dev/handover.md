@@ -5,11 +5,10 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit: `f0d91a82`
-   (ADR-0086 — codegen dispatch_collector_ops.zig extraction;
-   dispatch_collector.zig 1887 → 264 LOC; -1623 single-file
-   reduction; mirror of ADR-0082 Zone-1 side; Accepted same
-   cycle).
+1. `git log --oneline -10` — last code commit: `50834b6f`
+   (ADR-0087 — ir/zir_ops.zig extraction; zir.zig 1244 → 566
+   LOC; zero caller migration via re-export; mirror of
+   ADR-0086 pattern; Accepted same cycle).
 2. **User directive (2026-05-21)**: batch-session architectural
    mode.
 3. **Live status**: `bash scripts/p9_completion_status.sh` —
@@ -18,15 +17,16 @@
 ## Authorized next-session pickup (priority order — updated 2026-05-21)
 
 1. **PRIMARY: next D-141 candidate (priority by extractability)**:
-   - **parse/sections.zig** (1556 LOC) — likely per-section
-     parser; survey first to determine extractability axis.
+   - **parse/sections.zig** (1556 LOC) — 16 structs (Types,
+     Imports, Tables, Globals, Codes, Memory, DataSegment etc.)
+     + decode functions; natural per-section axis split BUT
+     7-8 new files — bigger refactor than recent ADRs. Survey
+     first; consider ADR-grade design choice (per-section
+     files vs single-file grouping).
    - **api/instance.zig** (1431 LOC) — c_api Instance lifecycle;
-     §9.12-G item, possibly survey-first.
+     §9.12-G item.
    - **engine/compile.zig** (1225 LOC) — already split from
-     runner.zig at ADR-0079; may have grown via subsequent
-     work. Survey first.
-   - **ir/zir.zig** (1244 LOC) — ZIR types module; pure-data
-     surface likely.
+     runner at ADR-0079; check current shape.
    - **lower.zig** (1109 LOC) — `Lowerer = struct {...}`
      struct-method-heavy. ADR-0083 pattern.
    - **analysis/liveness.zig** (1192 LOC) — likely struct-method.
