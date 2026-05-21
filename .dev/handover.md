@@ -5,32 +5,27 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit: `e9258a24`
-   (ADR-0083 Proposed — validator_simd.zig extraction, ~420 LOC).
-   Impl cycle next.
+1. `git log --oneline -10` — last code commit: `860281bb`
+   (ADR-0083 impl landed; validator.zig 1790 → 1363 LOC;
+   validator_simd.zig 457 LOC new). ADR-0083 Accepted.
 2. **User directive (2026-05-21)**: batch-session architectural
    mode.
 3. **Live status**: `bash scripts/p9_completion_status.sh` —
-   D-055 `Status: now`; D-081 blocked; ADR-0083 awaits impl.
+   D-055 `Status: now`; D-081 blocked.
 
 ## Authorized next-session pickup (priority order — updated 2026-05-21)
 
-1. **PRIMARY: ADR-0083 impl (validator_simd.zig extraction)**.
-   ADR Proposed at `e9258a24`. Carve cycle:
-   - Create `src/validate/validator_simd.zig` with lines
-     900–1320 (SIMD 0xFD dispatcher + SIMD op helpers).
-     `validator_simd.dispatchPrefixFD(self, sub_op)` takes
-     `*Validator` from validator.zig.
-   - Update `validator.zig`: delete lines 900–1320, add
-     `0xFD => return @import("validator_simd.zig").dispatchPrefixFD(self, sub_op);`
-     dispatch arm. validator.zig 1790 → ~1370 LOC.
-   - Cohort gate (test-all).
-2. **Next D-141 candidate** (after ADR-0083 lands):
+1. **PRIMARY: next D-141 per-file ADR**. Suggested order:
    - `src/engine/codegen/x86_64/op_simd_int_cmp_lane.zig`
-     (2121 LOC — over hard cap; urgent).
-   - `src/engine/codegen/{arm64,x86_64}/regalloc.zig` (~1851).
-   - ADR-0084 candidate: validator memory/table/ref bulk
-     extraction (~174 LOC) when concrete pressure surfaces.
+     (2121 LOC — over hard cap; urgent). ADR-0084 candidate.
+     Step 0 survey via measurement-focused brief (per
+     ADR-0080 lesson).
+   - `src/engine/codegen/{arm64,x86_64}/regalloc.zig` (~1851
+     each).
+   - `src/engine/codegen/{arm64,x86_64}/inst.zig` (1328 LOC).
+2. **D-055 discharge (independent)**. ~95 hardcoded byte-offset
+   sites migrate; sentinel wire-up.
+3. **§9.12-F debt-cohort walk** continues per Step 0.5.
 2. **D-055 discharge (independent)**. ~95 test-array hardcoded
    byte-offset sites migrate to `setup.localDisp()` /
    `prologue.body_start_offset()`-relative; wire
@@ -71,12 +66,13 @@
   stub coverage structurally complete. Remaining: api/instance
   split (#3 above) + c_api Instance tests (D-139 blocked).
 - **§9.12-F**: 24 debt rows; closed: D-149/153/154/156/102/103/
-  105/155. 2026-05-21: ADR-0081 + ADR-0082 both Accepted same day
-  (emit_setup.zig + dispatch_collector_ops.zig); D-141's
-  emit.zig (x86_64) + dispatch_collector.zig slots closed. D-055
-  `Status: now`; D-081 still blocked (ADR-0054 amendment path).
-  Lesson `emit-zig-survey-per-op-pattern-already-absorbed.md`
-  shapes future per-file ADR Step 0 surveys.
+  105/155. 2026-05-21: ADR-0081 + 0082 + 0083 all Accepted
+  same day (emit_setup.zig + dispatch_collector_ops.zig +
+  validator_simd.zig); D-141 slots closed for emit.zig (x86_64)
+  + dispatch_collector.zig + validator.zig. D-055 `Status: now`;
+  D-081 still blocked. Lesson
+  `emit-zig-survey-per-op-pattern-already-absorbed.md` continues
+  to shape per-file ADR Step 0 surveys.
 
 ## Operational note for the batch-session loop
 
