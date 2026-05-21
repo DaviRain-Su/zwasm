@@ -31,6 +31,7 @@
 
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
+const inst_fp = @import("inst_fp.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
 
@@ -168,7 +169,7 @@ pub fn emitI64Popcnt(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     const xn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
     const wd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
     const v_scratch: inst.Vn = 31;
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovDtoFromX(v_scratch, xn));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovDtoFromX(v_scratch, xn));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCntV8B(v_scratch, v_scratch));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddvB8B(v_scratch, v_scratch));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encUmovWFromVB0(wd, v_scratch));
@@ -298,7 +299,7 @@ pub fn emitI32Popcnt(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     const wn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
     const wd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
     const v_scratch: inst.Vn = 31;
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovStoFromW(v_scratch, wn));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovStoFromW(v_scratch, wn));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCntV8B(v_scratch, v_scratch));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddvB8B(v_scratch, v_scratch));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encUmovWFromVB0(wd, v_scratch));

@@ -36,6 +36,7 @@ const std = @import("std");
 
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
+const inst_fp = @import("inst_fp.zig");
 const inst_neon = @import("inst_neon.zig");
 const abi = @import("abi.zig");
 const ctx_mod = @import("ctx.zig");
@@ -161,7 +162,7 @@ fn emitMergeMov(
         const src_v = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, stage_src);
         const merge_v = try gpr.fpDefSpilled(ctx.alloc, merge_vreg, stage_dst);
         if (merge_v != src_v) {
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovDReg(merge_v, src_v));
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovDReg(merge_v, src_v));
         }
         try gpr.fpStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, merge_vreg, stage_dst);
         return;

@@ -32,6 +32,8 @@
 
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
+const inst_fp = @import("inst_fp.zig");
+
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
 const op_const = @import("op_const.zig");
@@ -52,7 +54,7 @@ fn emitTrunc32BoundsCheck(
     lower_cmp: inst.Cond,
 ) !void {
     // NaN check: FCMP src, src ; B.VS trap.
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFCmpS(src_v, src_v));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFCmpS(src_v, src_v));
     {
         const fixup_at: u32 = @intCast(ctx.buf.items.len);
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.vs, 0));
@@ -60,8 +62,8 @@ fn emitTrunc32BoundsCheck(
     }
     // Lower bound: materialise into S31 via W16, then FCMP + trap.
     try op_const.emitConstU32(ctx.allocator, ctx.buf, 16, lower_bits);
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovStoFromW(31, 16));
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFCmpS(src_v, 31));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovStoFromW(31, 16));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFCmpS(src_v, 31));
     {
         const fixup_at: u32 = @intCast(ctx.buf.items.len);
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(lower_cmp, 0));
@@ -69,8 +71,8 @@ fn emitTrunc32BoundsCheck(
     }
     // Upper bound: materialise + FCMP + B.GE trap.
     try op_const.emitConstU32(ctx.allocator, ctx.buf, 16, upper_bits);
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovStoFromW(31, 16));
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFCmpS(src_v, 31));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovStoFromW(31, 16));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFCmpS(src_v, 31));
     {
         const fixup_at: u32 = @intCast(ctx.buf.items.len);
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.ge, 0));
@@ -89,23 +91,23 @@ fn emitTrunc64BoundsCheck(
     upper_bits: u64,
     lower_cmp: inst.Cond,
 ) !void {
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFCmpD(src_v, src_v));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFCmpD(src_v, src_v));
     {
         const fixup_at: u32 = @intCast(ctx.buf.items.len);
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.vs, 0));
         try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
     }
     try op_const.emitConstU64(ctx.allocator, ctx.buf, 16, lower_bits);
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovDtoFromX(31, 16));
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFCmpD(src_v, 31));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovDtoFromX(31, 16));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFCmpD(src_v, 31));
     {
         const fixup_at: u32 = @intCast(ctx.buf.items.len);
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(lower_cmp, 0));
         try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
     }
     try op_const.emitConstU64(ctx.allocator, ctx.buf, 16, upper_bits);
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovDtoFromX(31, 16));
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFCmpD(src_v, 31));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovDtoFromX(31, 16));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFCmpD(src_v, 31));
     {
         const fixup_at: u32 = @intCast(ctx.buf.items.len);
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.ge, 0));
@@ -133,10 +135,10 @@ pub fn emitTrappingTruncF32(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     };
     try emitTrunc32BoundsCheck(ctx, vn, b.lo, b.hi, b.lo_cmp);
     const word: u32 = switch (ins.op) {
-        .@"i32.trunc_f32_s" => inst.encFcvtzsWFromS(dest, vn),
-        .@"i32.trunc_f32_u" => inst.encFcvtzuWFromS(dest, vn),
-        .@"i64.trunc_f32_s" => inst.encFcvtzsXFromS(dest, vn),
-        .@"i64.trunc_f32_u" => inst.encFcvtzuXFromS(dest, vn),
+        .@"i32.trunc_f32_s" => inst_fp.encFcvtzsWFromS(dest, vn),
+        .@"i32.trunc_f32_u" => inst_fp.encFcvtzuWFromS(dest, vn),
+        .@"i64.trunc_f32_s" => inst_fp.encFcvtzsXFromS(dest, vn),
+        .@"i64.trunc_f32_u" => inst_fp.encFcvtzuXFromS(dest, vn),
         else => unreachable,
     };
     try gpr.writeU32(ctx.allocator, ctx.buf, word);
@@ -165,10 +167,10 @@ pub fn emitTrappingTruncF64(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     };
     try emitTrunc64BoundsCheck(ctx, vn, b.lo, b.hi, b.lo_cmp);
     const word: u32 = switch (ins.op) {
-        .@"i32.trunc_f64_s" => inst.encFcvtzsWFromD(dest, vn),
-        .@"i32.trunc_f64_u" => inst.encFcvtzuWFromD(dest, vn),
-        .@"i64.trunc_f64_s" => inst.encFcvtzsXFromD(dest, vn),
-        .@"i64.trunc_f64_u" => inst.encFcvtzuXFromD(dest, vn),
+        .@"i32.trunc_f64_s" => inst_fp.encFcvtzsWFromD(dest, vn),
+        .@"i32.trunc_f64_u" => inst_fp.encFcvtzuWFromD(dest, vn),
+        .@"i64.trunc_f64_s" => inst_fp.encFcvtzsXFromD(dest, vn),
+        .@"i64.trunc_f64_u" => inst_fp.encFcvtzuXFromD(dest, vn),
         else => unreachable,
     };
     try gpr.writeU32(ctx.allocator, ctx.buf, word);

@@ -41,6 +41,7 @@ const builtin = @import("builtin");
 
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
+const inst_fp = @import("inst_fp.zig");
 const inst_neon = @import("inst_neon.zig");
 const abi = @import("abi.zig");
 const ctx_mod = @import("ctx.zig");
@@ -403,7 +404,7 @@ fn marshalCallArgs(ctx: *EmitCtx, callee_sig: FuncType) Error!void {
                     stack_byte_off += slot_size;
                 } else {
                     if (vs != fp_arg_slot) {
-                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovSReg(fp_arg_slot, vs));
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovSReg(fp_arg_slot, vs));
                     }
                     fp_arg_slot += 1;
                 }
@@ -417,7 +418,7 @@ fn marshalCallArgs(ctx: *EmitCtx, callee_sig: FuncType) Error!void {
                     stack_byte_off += 8;
                 } else {
                     if (vs != fp_arg_slot) {
-                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovDReg(fp_arg_slot, vs));
+                        try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovDReg(fp_arg_slot, vs));
                     }
                     fp_arg_slot += 1;
                 }
@@ -622,7 +623,7 @@ fn captureCallResult(ctx: *EmitCtx, callee_sig: FuncType, memory_class: bool, bu
                         std.debug.print("arm64/op_call: captureCallResult.f32 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, id });
                         return Error.SlotOverflow;
                     };
-                    if (vd != src_reg) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovSReg(vd, src_reg));
+                    if (vd != src_reg) try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovSReg(vd, src_reg));
                 },
                 .spill => |off| {
                     const abs_off: u32 = ctx.spill_base_off + off;
@@ -636,7 +637,7 @@ fn captureCallResult(ctx: *EmitCtx, callee_sig: FuncType, memory_class: bool, bu
                         std.debug.print("arm64/op_call: captureCallResult.f64 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, id });
                         return Error.SlotOverflow;
                     };
-                    if (vd != src_reg) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovDReg(vd, src_reg));
+                    if (vd != src_reg) try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovDReg(vd, src_reg));
                 },
                 .spill => |off| {
                     const abs_off: u32 = ctx.spill_base_off + off;

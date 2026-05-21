@@ -26,6 +26,8 @@
 
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
+const inst_fp = @import("inst_fp.zig");
+
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
 
@@ -64,14 +66,14 @@ pub fn emitConvertIntToFloat(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     // D-034 spill-aware: FP dest def via V29 (stage 0).
     const vd = try gpr.fpDefSpilled(ctx.alloc, args.result, 0);
     const word: u32 = switch (ins.op) {
-        .@"f32.convert_i32_s" => inst.encScvtfSFromW(vd, src),
-        .@"f32.convert_i32_u" => inst.encUcvtfSFromW(vd, src),
-        .@"f32.convert_i64_s" => inst.encScvtfSFromX(vd, src),
-        .@"f32.convert_i64_u" => inst.encUcvtfSFromX(vd, src),
-        .@"f64.convert_i32_s" => inst.encScvtfDFromW(vd, src),
-        .@"f64.convert_i32_u" => inst.encUcvtfDFromW(vd, src),
-        .@"f64.convert_i64_s" => inst.encScvtfDFromX(vd, src),
-        .@"f64.convert_i64_u" => inst.encUcvtfDFromX(vd, src),
+        .@"f32.convert_i32_s" => inst_fp.encScvtfSFromW(vd, src),
+        .@"f32.convert_i32_u" => inst_fp.encUcvtfSFromW(vd, src),
+        .@"f32.convert_i64_s" => inst_fp.encScvtfSFromX(vd, src),
+        .@"f32.convert_i64_u" => inst_fp.encUcvtfSFromX(vd, src),
+        .@"f64.convert_i32_s" => inst_fp.encScvtfDFromW(vd, src),
+        .@"f64.convert_i32_u" => inst_fp.encUcvtfDFromW(vd, src),
+        .@"f64.convert_i64_s" => inst_fp.encScvtfDFromX(vd, src),
+        .@"f64.convert_i64_u" => inst_fp.encUcvtfDFromX(vd, src),
         else => unreachable,
     };
     try gpr.writeU32(ctx.allocator, ctx.buf, word);
@@ -91,14 +93,14 @@ pub fn emitTruncSat(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const vn = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
     const dest = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
     const word: u32 = switch (ins.op) {
-        .@"i32.trunc_sat_f32_s" => inst.encFcvtzsWFromS(dest, vn),
-        .@"i32.trunc_sat_f32_u" => inst.encFcvtzuWFromS(dest, vn),
-        .@"i32.trunc_sat_f64_s" => inst.encFcvtzsWFromD(dest, vn),
-        .@"i32.trunc_sat_f64_u" => inst.encFcvtzuWFromD(dest, vn),
-        .@"i64.trunc_sat_f32_s" => inst.encFcvtzsXFromS(dest, vn),
-        .@"i64.trunc_sat_f32_u" => inst.encFcvtzuXFromS(dest, vn),
-        .@"i64.trunc_sat_f64_s" => inst.encFcvtzsXFromD(dest, vn),
-        .@"i64.trunc_sat_f64_u" => inst.encFcvtzuXFromD(dest, vn),
+        .@"i32.trunc_sat_f32_s" => inst_fp.encFcvtzsWFromS(dest, vn),
+        .@"i32.trunc_sat_f32_u" => inst_fp.encFcvtzuWFromS(dest, vn),
+        .@"i32.trunc_sat_f64_s" => inst_fp.encFcvtzsWFromD(dest, vn),
+        .@"i32.trunc_sat_f64_u" => inst_fp.encFcvtzuWFromD(dest, vn),
+        .@"i64.trunc_sat_f32_s" => inst_fp.encFcvtzsXFromS(dest, vn),
+        .@"i64.trunc_sat_f32_u" => inst_fp.encFcvtzuXFromS(dest, vn),
+        .@"i64.trunc_sat_f64_s" => inst_fp.encFcvtzsXFromD(dest, vn),
+        .@"i64.trunc_sat_f64_u" => inst_fp.encFcvtzuXFromD(dest, vn),
         else => unreachable,
     };
     try gpr.writeU32(ctx.allocator, ctx.buf, word);
@@ -111,7 +113,7 @@ pub fn emitReinterpretI32FromF32(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     const args = try ctx.popUnary();
     const vn = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
     const wd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovWFromS(wd, vn));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovWFromS(wd, vn));
     try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
     try ctx.pushed_vregs.append(ctx.allocator, args.result);
 }
@@ -121,7 +123,7 @@ pub fn emitReinterpretI64FromF64(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     const args = try ctx.popUnary();
     const vn = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
     const xd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovXFromD(xd, vn));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovXFromD(xd, vn));
     try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
     try ctx.pushed_vregs.append(ctx.allocator, args.result);
 }
@@ -131,7 +133,7 @@ pub fn emitReinterpretF32FromI32(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     const args = try ctx.popUnary();
     const wn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
     const vd = try gpr.fpDefSpilled(ctx.alloc, args.result, 0);
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovStoFromW(vd, wn));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovStoFromW(vd, wn));
     try gpr.fpStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
     try ctx.pushed_vregs.append(ctx.allocator, args.result);
 }
@@ -141,7 +143,7 @@ pub fn emitReinterpretF64FromI64(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     const args = try ctx.popUnary();
     const xn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
     const vd = try gpr.fpDefSpilled(ctx.alloc, args.result, 0);
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovDtoFromX(vd, xn));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovDtoFromX(vd, xn));
     try gpr.fpStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
     try ctx.pushed_vregs.append(ctx.allocator, args.result);
 }
@@ -154,8 +156,8 @@ pub fn emitFloatDemotePromote(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const vn = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
     const vd = try gpr.fpDefSpilled(ctx.alloc, args.result, 0);
     const word: u32 = switch (ins.op) {
-        .@"f32.demote_f64" => inst.encFcvtSFromD(vd, vn),
-        .@"f64.promote_f32" => inst.encFcvtDFromS(vd, vn),
+        .@"f32.demote_f64" => inst_fp.encFcvtSFromD(vd, vn),
+        .@"f64.promote_f32" => inst_fp.encFcvtDFromS(vd, vn),
         else => unreachable,
     };
     try gpr.writeU32(ctx.allocator, ctx.buf, word);

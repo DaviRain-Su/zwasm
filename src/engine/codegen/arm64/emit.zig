@@ -44,6 +44,7 @@ const builtin = @import("builtin");
 const zir = @import("../../../ir/zir.zig");
 const dispatch_collector = @import("../dispatch_collector.zig");
 const inst = @import("inst.zig");
+const inst_fp = @import("inst_fp.zig");
 const inst_neon = @import("inst_neon.zig");
 const abi = @import("abi.zig");
 const label_mod = @import("label.zig");
@@ -886,7 +887,7 @@ pub fn compile(
                 const vd = try gpr.fpDefSpilled(alloc, vreg, 0);
                 const w_scratch = try gpr.gprDefSpilled(alloc, vreg, 0);
                 try op_const.emitConstU32(allocator, &buf, w_scratch, ins.payload);
-                try gpr.writeU32(allocator, &buf, inst.encFmovStoFromW(vd, w_scratch));
+                try gpr.writeU32(allocator, &buf, inst_fp.encFmovStoFromW(vd, w_scratch));
                 try gpr.fpStoreSpilled(allocator, &buf, alloc, spill_base_off, vreg, 0);
                 try pushed_vregs.append(allocator, vreg);
             },
@@ -909,7 +910,7 @@ pub fn compile(
                 if (lane1 != 0) try gpr.writeU32(allocator, &buf, inst.encMovkImm16(x_scratch, lane1, 1));
                 if (lane2 != 0) try gpr.writeU32(allocator, &buf, inst.encMovkImm16(x_scratch, lane2, 2));
                 if (lane3 != 0) try gpr.writeU32(allocator, &buf, inst.encMovkImm16(x_scratch, lane3, 3));
-                try gpr.writeU32(allocator, &buf, inst.encFmovDtoFromX(vd, x_scratch));
+                try gpr.writeU32(allocator, &buf, inst_fp.encFmovDtoFromX(vd, x_scratch));
                 try gpr.fpStoreSpilled(allocator, &buf, alloc, spill_base_off, vreg, 0);
                 try pushed_vregs.append(allocator, vreg);
             },

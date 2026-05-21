@@ -25,6 +25,7 @@
 
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
+const inst_fp = @import("inst_fp.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
 
@@ -40,14 +41,14 @@ pub fn emitFloatBinary(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const vm = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.rhs, 1);
     const vd = try gpr.fpDefSpilled(ctx.alloc, args.result, 0);
     const word: u32 = switch (ins.op) {
-        .@"f32.add" => inst.encFAddS(vd, vn, vm),
-        .@"f32.sub" => inst.encFSubS(vd, vn, vm),
-        .@"f32.mul" => inst.encFMulS(vd, vn, vm),
-        .@"f32.div" => inst.encFDivS(vd, vn, vm),
-        .@"f64.add" => inst.encFAddD(vd, vn, vm),
-        .@"f64.sub" => inst.encFSubD(vd, vn, vm),
-        .@"f64.mul" => inst.encFMulD(vd, vn, vm),
-        .@"f64.div" => inst.encFDivD(vd, vn, vm),
+        .@"f32.add" => inst_fp.encFAddS(vd, vn, vm),
+        .@"f32.sub" => inst_fp.encFSubS(vd, vn, vm),
+        .@"f32.mul" => inst_fp.encFMulS(vd, vn, vm),
+        .@"f32.div" => inst_fp.encFDivS(vd, vn, vm),
+        .@"f64.add" => inst_fp.encFAddD(vd, vn, vm),
+        .@"f64.sub" => inst_fp.encFSubD(vd, vn, vm),
+        .@"f64.mul" => inst_fp.encFMulD(vd, vn, vm),
+        .@"f64.div" => inst_fp.encFDivD(vd, vn, vm),
         else => unreachable,
     };
     try gpr.writeU32(ctx.allocator, ctx.buf, word);
@@ -63,20 +64,20 @@ pub fn emitFloatUnary(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const vn = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
     const vd = try gpr.fpDefSpilled(ctx.alloc, args.result, 0);
     const word: u32 = switch (ins.op) {
-        .@"f32.abs" => inst.encFAbsS(vd, vn),
-        .@"f32.neg" => inst.encFNegS(vd, vn),
-        .@"f32.sqrt" => inst.encFSqrtS(vd, vn),
-        .@"f32.ceil" => inst.encFRintPS(vd, vn),
-        .@"f32.floor" => inst.encFRintMS(vd, vn),
-        .@"f32.trunc" => inst.encFRintZS(vd, vn),
-        .@"f32.nearest" => inst.encFRintNS(vd, vn),
-        .@"f64.abs" => inst.encFAbsD(vd, vn),
-        .@"f64.neg" => inst.encFNegD(vd, vn),
-        .@"f64.sqrt" => inst.encFSqrtD(vd, vn),
-        .@"f64.ceil" => inst.encFRintPD(vd, vn),
-        .@"f64.floor" => inst.encFRintMD(vd, vn),
-        .@"f64.trunc" => inst.encFRintZD(vd, vn),
-        .@"f64.nearest" => inst.encFRintND(vd, vn),
+        .@"f32.abs" => inst_fp.encFAbsS(vd, vn),
+        .@"f32.neg" => inst_fp.encFNegS(vd, vn),
+        .@"f32.sqrt" => inst_fp.encFSqrtS(vd, vn),
+        .@"f32.ceil" => inst_fp.encFRintPS(vd, vn),
+        .@"f32.floor" => inst_fp.encFRintMS(vd, vn),
+        .@"f32.trunc" => inst_fp.encFRintZS(vd, vn),
+        .@"f32.nearest" => inst_fp.encFRintNS(vd, vn),
+        .@"f64.abs" => inst_fp.encFAbsD(vd, vn),
+        .@"f64.neg" => inst_fp.encFNegD(vd, vn),
+        .@"f64.sqrt" => inst_fp.encFSqrtD(vd, vn),
+        .@"f64.ceil" => inst_fp.encFRintPD(vd, vn),
+        .@"f64.floor" => inst_fp.encFRintMD(vd, vn),
+        .@"f64.trunc" => inst_fp.encFRintZD(vd, vn),
+        .@"f64.nearest" => inst_fp.encFRintND(vd, vn),
         else => unreachable,
     };
     try gpr.writeU32(ctx.allocator, ctx.buf, word);
@@ -121,19 +122,19 @@ pub fn emitFloatCopysign(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const mask_lsl_hw: u2 = if (is_d) 3 else 1;
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(ip0, 0x8000, mask_lsl_hw));
     if (is_d) {
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovXFromD(w_a, vn_x));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovXFromD(w_a, vn_x));
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBicRegX(w_a, w_a, ip0));
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovXFromD(ip1, vm_y));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovXFromD(ip1, vm_y));
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAndReg(ip1, ip1, ip0));
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(w_a, w_a, ip1));
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovDtoFromX(vd, w_a));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovDtoFromX(vd, w_a));
     } else {
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovWFromS(w_a, vn_x));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovWFromS(w_a, vn_x));
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBicRegW(w_a, w_a, ip0));
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovWFromS(ip1, vm_y));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovWFromS(ip1, vm_y));
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAndRegW(ip1, ip1, ip0));
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(w_a, w_a, ip1));
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encFmovStoFromW(vd, w_a));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovStoFromW(vd, w_a));
     }
     try gpr.fpStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
     try ctx.pushed_vregs.append(ctx.allocator, args.result);
@@ -146,10 +147,10 @@ pub fn emitFloatMinMax(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const vm = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.rhs, 1);
     const vd = try gpr.fpDefSpilled(ctx.alloc, args.result, 0);
     const word: u32 = switch (ins.op) {
-        .@"f32.min" => inst.encFMinS(vd, vn, vm),
-        .@"f32.max" => inst.encFMaxS(vd, vn, vm),
-        .@"f64.min" => inst.encFMinD(vd, vn, vm),
-        .@"f64.max" => inst.encFMaxD(vd, vn, vm),
+        .@"f32.min" => inst_fp.encFMinS(vd, vn, vm),
+        .@"f32.max" => inst_fp.encFMaxS(vd, vn, vm),
+        .@"f64.min" => inst_fp.encFMinD(vd, vn, vm),
+        .@"f64.max" => inst_fp.encFMaxD(vd, vn, vm),
         else => unreachable,
     };
     try gpr.writeU32(ctx.allocator, ctx.buf, word);
@@ -187,7 +188,7 @@ pub fn emitFloatCompare(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         .@"f32.ge", .@"f64.ge" => .ge,
         else => unreachable,
     };
-    try gpr.writeU32(ctx.allocator, ctx.buf, if (is_d) inst.encFCmpD(vn, vm) else inst.encFCmpS(vn, vm));
+    try gpr.writeU32(ctx.allocator, ctx.buf, if (is_d) inst_fp.encFCmpD(vn, vm) else inst_fp.encFCmpS(vn, vm));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCsetW(wd, cond));
     try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
     try ctx.pushed_vregs.append(ctx.allocator, args.result);

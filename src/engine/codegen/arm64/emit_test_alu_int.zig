@@ -12,6 +12,7 @@ const std = @import("std");
 
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
+const inst_fp = @import("inst_fp.zig");
 const prologue = @import("prologue.zig");
 const regalloc = @import("../shared/regalloc.zig");
 const emit = @import("emit.zig");
@@ -246,7 +247,7 @@ test "compile: i32.popcnt emits 4-instr V-register SIMD pattern" {
     const body0 = prologue.body_start_offset(false);
     // After MOVZ-W9 + MOVK-W9 (0xDEADBEEF needs both lanes):
     // FMOV S31, W9 / CNT V31.8B / ADDV B31 / UMOV W9, V31.B[0].
-    try testing.expectEqual(@as(u32, inst.encFmovStoFromW(31, 9)), std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst_fp.encFmovStoFromW(31, 9)), std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encCntV8B(31, 31)), std.mem.readInt(u32, out.bytes[body0 + 12 ..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encAddvB8B(31, 31)), std.mem.readInt(u32, out.bytes[body0 + 16 ..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encUmovWFromVB0(9, 31)), std.mem.readInt(u32, out.bytes[body0 + 20 ..][0..4], .little));
@@ -430,7 +431,7 @@ test "compile: i64.popcnt emits FMOV-D + CNT/ADDV/UMOV V-register pattern" {
     // After STP/MOV-FP/MOVZ-X9 (12 bytes):
     // FMOV D31, X9 / CNT V31.8B / ADDV B31 / UMOV W9.
     const body0 = prologue.body_start_offset(false);
-    try testing.expectEqual(@as(u32, inst.encFmovDtoFromX(31, 9)), std.mem.readInt(u32, out.bytes[body0 + 4 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst_fp.encFmovDtoFromX(31, 9)), std.mem.readInt(u32, out.bytes[body0 + 4 ..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encCntV8B(31, 31)), std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encAddvB8B(31, 31)), std.mem.readInt(u32, out.bytes[body0 + 12 ..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encUmovWFromVB0(9, 31)), std.mem.readInt(u32, out.bytes[body0 + 16 ..][0..4], .little));

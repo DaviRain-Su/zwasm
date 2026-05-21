@@ -12,6 +12,7 @@ const std = @import("std");
 
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
+const inst_fp = @import("inst_fp.zig");
 const abi = @import("abi.zig");
 const prologue = @import("prologue.zig");
 const regalloc = @import("../shared/regalloc.zig");
@@ -93,7 +94,7 @@ test "compile: call N — f32 callee result captured via FMOV S, S0" {
     defer deinit(testing.allocator, out);
     const body0 = prologue.body_start_offset(false);
     // After MOV X0,X19 + BL: FMOV S16, S0 (f32 slot 0 → V16) at body+8.
-    try testing.expectEqual(@as(u32, inst.encFmovSReg(16, 0)), std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst_fp.encFmovSReg(16, 0)), std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
 }
 
 test "compile: call N — i32 + i64 args marshalled into W1/X2 (X0=runtime ptr per ADR-0017), result in W0" {
@@ -177,8 +178,8 @@ test "compile: call N — f32 + f64 args marshalled into S0/D1" {
     //   [bl_off-12] FMOV S0, S16     ; arg0
     //   [bl_off-8]  FMOV D1, D17     ; arg1
     //   [bl_off-4]  ORR X0, XZR, X19 ; restore runtime_ptr
-    try testing.expectEqual(@as(u32, inst.encFmovSReg(0, 16)), std.mem.readInt(u32, out.bytes[bl_off - 12 ..][0..4], .little));
-    try testing.expectEqual(@as(u32, inst.encFmovDReg(1, 17)), std.mem.readInt(u32, out.bytes[bl_off - 8 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst_fp.encFmovSReg(0, 16)), std.mem.readInt(u32, out.bytes[bl_off - 12 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst_fp.encFmovDReg(1, 17)), std.mem.readInt(u32, out.bytes[bl_off - 8 ..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encOrrReg(0, 31, abi.runtime_ptr_save_gpr)), std.mem.readInt(u32, out.bytes[bl_off - 4 ..][0..4], .little));
 }
 

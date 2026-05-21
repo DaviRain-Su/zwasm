@@ -14,6 +14,7 @@ const std = @import("std");
 
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
+const inst_fp = @import("inst_fp.zig");
 const prologue = @import("prologue.zig");
 const regalloc = @import("../shared/regalloc.zig");
 const emit = @import("emit.zig");
@@ -267,7 +268,7 @@ test "compile: f32.const emits emitConstU32 + FMOV S, W" {
     const body0 = prologue.body_start_offset(false);
     try testing.expectEqual(@as(u32, inst.encMovzImm16(9, 0)), std.mem.readInt(u32, out.bytes[body0..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encMovkImm16(9, 0x3F80, 1)), std.mem.readInt(u32, out.bytes[body0 + 4 ..][0..4], .little));
-    try testing.expectEqual(@as(u32, inst.encFmovStoFromW(16, 9)), std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst_fp.encFmovStoFromW(16, 9)), std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
     // end with f32 result → FMOV S0, S16 = 0x1E204000 | (16<<5) = 0x1E204200.
     try testing.expectEqual(@as(u32, 0x1E204200), std.mem.readInt(u32, out.bytes[body0 + 12 ..][0..4], .little));
 }

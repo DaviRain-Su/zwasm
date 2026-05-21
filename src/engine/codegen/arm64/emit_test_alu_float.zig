@@ -12,6 +12,8 @@ const std = @import("std");
 
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
+const inst_fp = @import("inst_fp.zig");
+
 const prologue = @import("prologue.zig");
 const regalloc = @import("../shared/regalloc.zig");
 const emit = @import("emit.zig");
@@ -25,10 +27,10 @@ const testing = std.testing;
 test "compile: f32 binary ALU each emits S-form" {
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f32} };
     const cases = [_]struct { op: zir.ZirOp, want_word_at_offset: u32 }{
-        .{ .op = .@"f32.add", .want_word_at_offset = inst.encFAddS(16, 16, 17) },
-        .{ .op = .@"f32.sub", .want_word_at_offset = inst.encFSubS(16, 16, 17) },
-        .{ .op = .@"f32.mul", .want_word_at_offset = inst.encFMulS(16, 16, 17) },
-        .{ .op = .@"f32.div", .want_word_at_offset = inst.encFDivS(16, 16, 17) },
+        .{ .op = .@"f32.add", .want_word_at_offset = inst_fp.encFAddS(16, 16, 17) },
+        .{ .op = .@"f32.sub", .want_word_at_offset = inst_fp.encFSubS(16, 16, 17) },
+        .{ .op = .@"f32.mul", .want_word_at_offset = inst_fp.encFMulS(16, 16, 17) },
+        .{ .op = .@"f32.div", .want_word_at_offset = inst_fp.encFDivS(16, 16, 17) },
     };
     for (cases) |c| {
         var f = ZirFunc.init(0, sig, &.{});
@@ -81,7 +83,7 @@ test "compile: f32 cmps each emit FCMP-S + CSET-W with right Cond" {
         defer deinit(testing.allocator, out);
         const body0 = prologue.body_start_offset(false);
         // FCMP at body+24; CSET at body+28.
-        try testing.expectEqual(@as(u32, inst.encFCmpS(16, 17)), std.mem.readInt(u32, out.bytes[body0 + 24 ..][0..4], .little));
+        try testing.expectEqual(@as(u32, inst_fp.encFCmpS(16, 17)), std.mem.readInt(u32, out.bytes[body0 + 24 ..][0..4], .little));
         try testing.expectEqual(@as(u32, inst.encCsetW(9, c.want_cond)), std.mem.readInt(u32, out.bytes[body0 + 28 ..][0..4], .little));
     }
 }
@@ -94,15 +96,15 @@ test "compile: f32 unary ops + min/max each emit correct encoding" {
         want_word_at_offset: u32,
     };
     const cases = [_]Case{
-        .{ .op = .@"f32.abs", .binary = false, .want_word_at_offset = inst.encFAbsS(16, 16) },
-        .{ .op = .@"f32.neg", .binary = false, .want_word_at_offset = inst.encFNegS(16, 16) },
-        .{ .op = .@"f32.sqrt", .binary = false, .want_word_at_offset = inst.encFSqrtS(16, 16) },
-        .{ .op = .@"f32.ceil", .binary = false, .want_word_at_offset = inst.encFRintPS(16, 16) },
-        .{ .op = .@"f32.floor", .binary = false, .want_word_at_offset = inst.encFRintMS(16, 16) },
-        .{ .op = .@"f32.trunc", .binary = false, .want_word_at_offset = inst.encFRintZS(16, 16) },
-        .{ .op = .@"f32.nearest", .binary = false, .want_word_at_offset = inst.encFRintNS(16, 16) },
-        .{ .op = .@"f32.min", .binary = true, .want_word_at_offset = inst.encFMinS(16, 16, 17) },
-        .{ .op = .@"f32.max", .binary = true, .want_word_at_offset = inst.encFMaxS(16, 16, 17) },
+        .{ .op = .@"f32.abs", .binary = false, .want_word_at_offset = inst_fp.encFAbsS(16, 16) },
+        .{ .op = .@"f32.neg", .binary = false, .want_word_at_offset = inst_fp.encFNegS(16, 16) },
+        .{ .op = .@"f32.sqrt", .binary = false, .want_word_at_offset = inst_fp.encFSqrtS(16, 16) },
+        .{ .op = .@"f32.ceil", .binary = false, .want_word_at_offset = inst_fp.encFRintPS(16, 16) },
+        .{ .op = .@"f32.floor", .binary = false, .want_word_at_offset = inst_fp.encFRintMS(16, 16) },
+        .{ .op = .@"f32.trunc", .binary = false, .want_word_at_offset = inst_fp.encFRintZS(16, 16) },
+        .{ .op = .@"f32.nearest", .binary = false, .want_word_at_offset = inst_fp.encFRintNS(16, 16) },
+        .{ .op = .@"f32.min", .binary = true, .want_word_at_offset = inst_fp.encFMinS(16, 16, 17) },
+        .{ .op = .@"f32.max", .binary = true, .want_word_at_offset = inst_fp.encFMaxS(16, 16, 17) },
     };
     for (cases) |c| {
         var f = ZirFunc.init(0, sig, &.{});
@@ -161,12 +163,12 @@ test "compile: f32.copysign emits 8-instr FMOV/BIC/AND/ORR sequence" {
     // After 2 consts (each 3 u32s = 24 bytes), 8-instr copysign sequence at body+24.
     try testing.expectEqual(@as(u32, inst.encMovzImm16(16, 0)), std.mem.readInt(u32, out.bytes[body0 + 24 ..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encMovkImm16(16, 0x8000, 1)), std.mem.readInt(u32, out.bytes[body0 + 28 ..][0..4], .little));
-    try testing.expectEqual(@as(u32, inst.encFmovWFromS(9, 16)), std.mem.readInt(u32, out.bytes[body0 + 32 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst_fp.encFmovWFromS(9, 16)), std.mem.readInt(u32, out.bytes[body0 + 32 ..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encBicRegW(9, 9, 16)), std.mem.readInt(u32, out.bytes[body0 + 36 ..][0..4], .little));
-    try testing.expectEqual(@as(u32, inst.encFmovWFromS(17, 17)), std.mem.readInt(u32, out.bytes[body0 + 40 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst_fp.encFmovWFromS(17, 17)), std.mem.readInt(u32, out.bytes[body0 + 40 ..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encAndRegW(17, 17, 16)), std.mem.readInt(u32, out.bytes[body0 + 44 ..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encOrrRegW(9, 9, 17)), std.mem.readInt(u32, out.bytes[body0 + 48 ..][0..4], .little));
-    try testing.expectEqual(@as(u32, inst.encFmovStoFromW(16, 9)), std.mem.readInt(u32, out.bytes[body0 + 52 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst_fp.encFmovStoFromW(16, 9)), std.mem.readInt(u32, out.bytes[body0 + 52 ..][0..4], .little));
 }
 
 test "compile: f64.copysign emits X-form 8-instr sequence with hw=3 mask" {
@@ -195,21 +197,21 @@ test "compile: f64.copysign emits X-form 8-instr sequence with hw=3 mask" {
     // After 2 consts (24 bytes), 8-instr copysign sequence at body+24.
     try testing.expectEqual(@as(u32, inst.encMovzImm16(16, 0)), std.mem.readInt(u32, out.bytes[body0 + 24 ..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encMovkImm16(16, 0x8000, 3)), std.mem.readInt(u32, out.bytes[body0 + 28 ..][0..4], .little));
-    try testing.expectEqual(@as(u32, inst.encFmovXFromD(9, 16)), std.mem.readInt(u32, out.bytes[body0 + 32 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst_fp.encFmovXFromD(9, 16)), std.mem.readInt(u32, out.bytes[body0 + 32 ..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encBicRegX(9, 9, 16)), std.mem.readInt(u32, out.bytes[body0 + 36 ..][0..4], .little));
-    try testing.expectEqual(@as(u32, inst.encFmovXFromD(17, 17)), std.mem.readInt(u32, out.bytes[body0 + 40 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst_fp.encFmovXFromD(17, 17)), std.mem.readInt(u32, out.bytes[body0 + 40 ..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encAndReg(17, 17, 16)), std.mem.readInt(u32, out.bytes[body0 + 44 ..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encOrrReg(9, 9, 17)), std.mem.readInt(u32, out.bytes[body0 + 48 ..][0..4], .little));
-    try testing.expectEqual(@as(u32, inst.encFmovDtoFromX(16, 9)), std.mem.readInt(u32, out.bytes[body0 + 52 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst_fp.encFmovDtoFromX(16, 9)), std.mem.readInt(u32, out.bytes[body0 + 52 ..][0..4], .little));
 }
 
 test "compile: f64 binary ALU each emits D-form" {
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.f64} };
     const cases = [_]struct { op: zir.ZirOp, want_word_at_offset: u32 }{
-        .{ .op = .@"f64.add", .want_word_at_offset = inst.encFAddD(16, 16, 17) },
-        .{ .op = .@"f64.sub", .want_word_at_offset = inst.encFSubD(16, 16, 17) },
-        .{ .op = .@"f64.mul", .want_word_at_offset = inst.encFMulD(16, 16, 17) },
-        .{ .op = .@"f64.div", .want_word_at_offset = inst.encFDivD(16, 16, 17) },
+        .{ .op = .@"f64.add", .want_word_at_offset = inst_fp.encFAddD(16, 16, 17) },
+        .{ .op = .@"f64.sub", .want_word_at_offset = inst_fp.encFSubD(16, 16, 17) },
+        .{ .op = .@"f64.mul", .want_word_at_offset = inst_fp.encFMulD(16, 16, 17) },
+        .{ .op = .@"f64.div", .want_word_at_offset = inst_fp.encFDivD(16, 16, 17) },
     };
     for (cases) |c| {
         var f = ZirFunc.init(0, sig, &.{});
@@ -316,7 +318,7 @@ test "compile: f32.convert_i32_s emits SCVTF S, W" {
     defer deinit(testing.allocator, out);
     const body0 = prologue.body_start_offset(false);
     // After MOVZ W9 #7: SCVTF S16, W9 at body+4.
-    try testing.expectEqual(@as(u32, inst.encScvtfSFromW(16, 9)), std.mem.readInt(u32, out.bytes[body0 + 4 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst_fp.encScvtfSFromW(16, 9)), std.mem.readInt(u32, out.bytes[body0 + 4 ..][0..4], .little));
 }
 
 test "compile: f64.convert_i64_u emits UCVTF D, X" {
@@ -336,7 +338,7 @@ test "compile: f64.convert_i64_u emits UCVTF D, X" {
     defer deinit(testing.allocator, out);
     const body0 = prologue.body_start_offset(false);
     // After MOVZ X9 #0xDEAD: UCVTF D16, X9 at body+4.
-    try testing.expectEqual(@as(u32, inst.encUcvtfDFromX(16, 9)), std.mem.readInt(u32, out.bytes[body0 + 4 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst_fp.encUcvtfDFromX(16, 9)), std.mem.readInt(u32, out.bytes[body0 + 4 ..][0..4], .little));
 }
 
 test "compile: f32.demote_f64 emits FCVT S, D" {
@@ -355,7 +357,7 @@ test "compile: f32.demote_f64 emits FCVT S, D" {
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
     defer deinit(testing.allocator, out);
     // Find FCVT S16, D16 in the byte stream.
-    const expected = inst.encFcvtSFromD(16, 16);
+    const expected = inst_fp.encFcvtSFromD(16, 16);
     var found = false;
     var p: usize = 0;
     while (p + 4 <= out.bytes.len) : (p += 4) {
@@ -382,7 +384,7 @@ test "compile: f64.promote_f32 emits FCVT D, S" {
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
     defer deinit(testing.allocator, out);
-    const expected = inst.encFcvtDFromS(16, 16);
+    const expected = inst_fp.encFcvtDFromS(16, 16);
     var found = false;
     var p: usize = 0;
     while (p + 4 <= out.bytes.len) : (p += 4) {
@@ -409,7 +411,7 @@ test "compile: i32.trunc_sat_f32_s emits FCVTZS W, S" {
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
     defer deinit(testing.allocator, out);
-    const expected = inst.encFcvtzsWFromS(9, 16); // dest W9, src V16
+    const expected = inst_fp.encFcvtzsWFromS(9, 16); // dest W9, src V16
     var found = false;
     var p: usize = 0;
     while (p + 4 <= out.bytes.len) : (p += 4) {
@@ -436,7 +438,7 @@ test "compile: i64.trunc_sat_f64_u emits FCVTZU X, D" {
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
     defer deinit(testing.allocator, out);
-    const expected = inst.encFcvtzuXFromD(9, 16);
+    const expected = inst_fp.encFcvtzuXFromD(9, 16);
     var found = false;
     var p: usize = 0;
     while (p + 4 <= out.bytes.len) : (p += 4) {
@@ -463,7 +465,7 @@ test "compile: i32.reinterpret_f32 emits FMOV W, S" {
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
     defer deinit(testing.allocator, out);
-    const expected = inst.encFmovWFromS(9, 16);
+    const expected = inst_fp.encFmovWFromS(9, 16);
     var found = false;
     var p: usize = 0;
     while (p + 4 <= out.bytes.len) : (p += 4) {
@@ -490,7 +492,7 @@ test "compile: f64.reinterpret_i64 emits FMOV D, X" {
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
     defer deinit(testing.allocator, out);
-    const expected = inst.encFmovDtoFromX(16, 9);
+    const expected = inst_fp.encFmovDtoFromX(16, 9);
     var found = false;
     var p: usize = 0;
     while (p + 4 <= out.bytes.len) : (p += 4) {
@@ -535,12 +537,12 @@ test "compile: i32.trunc_f32_s emits NaN+lower+upper checks then FCVTZS W,S" {
     var p: usize = 0;
     while (p + 4 <= out.bytes.len) : (p += 4) {
         const w = std.mem.readInt(u32, out.bytes[p..][0..4], .little);
-        if (w == inst.encFCmpS(16, 16)) {
+        if (w == inst_fp.encFCmpS(16, 16)) {
             found_fcmp_self = true;
             fcmp_self_count += 1;
         }
-        if (w == inst.encFCmpS(16, 31)) fcmp_v31_count += 1;
-        if (w == inst.encFcvtzsWFromS(9, 16)) found_fcvtzs = true;
+        if (w == inst_fp.encFCmpS(16, 31)) fcmp_v31_count += 1;
+        if (w == inst_fp.encFcvtzsWFromS(9, 16)) found_fcvtzs = true;
     }
     try testing.expect(found_fcmp_self);
     try testing.expectEqual(@as(u32, 1), fcmp_self_count); // NaN check is single FCMP self
@@ -572,9 +574,9 @@ test "compile: i32.trunc_f64_s emits NaN+f64-lower+f64-upper checks then FCVTZS 
     var p: usize = 0;
     while (p + 4 <= out.bytes.len) : (p += 4) {
         const w = std.mem.readInt(u32, out.bytes[p..][0..4], .little);
-        if (w == inst.encFCmpD(16, 16)) fcmp_self_count += 1;
-        if (w == inst.encFCmpD(16, 31)) fcmp_v31_count += 1;
-        if (w == inst.encFcvtzsWFromD(9, 16)) found_fcvtzs = true;
+        if (w == inst_fp.encFCmpD(16, 16)) fcmp_self_count += 1;
+        if (w == inst_fp.encFCmpD(16, 31)) fcmp_v31_count += 1;
+        if (w == inst_fp.encFcvtzsWFromD(9, 16)) found_fcvtzs = true;
     }
     try testing.expectEqual(@as(u32, 1), fcmp_self_count);
     try testing.expectEqual(@as(u32, 2), fcmp_v31_count);
