@@ -5,10 +5,11 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit: `50834b6f`
-   (ADR-0087 — ir/zir_ops.zig extraction; zir.zig 1244 → 566
-   LOC; zero caller migration via re-export; mirror of
-   ADR-0086 pattern; Accepted same cycle).
+1. `git log --oneline -10` — last code commit: `0f3f863f`
+   (ADR-0088 — liveness_stack_effect.zig extraction;
+   liveness.zig 1192 → 679 LOC; zero caller migration via
+   re-export; mirror of ADR-0087 pattern; Accepted same
+   cycle).
 2. **User directive (2026-05-21)**: batch-session architectural
    mode.
 3. **Live status**: `bash scripts/p9_completion_status.sh` —
@@ -17,19 +18,17 @@
 ## Authorized next-session pickup (priority order — updated 2026-05-21)
 
 1. **PRIMARY: next D-141 candidate (priority by extractability)**:
-   - **parse/sections.zig** (1556 LOC) — 16 structs (Types,
-     Imports, Tables, Globals, Codes, Memory, DataSegment etc.)
-     + decode functions; natural per-section axis split BUT
-     7-8 new files — bigger refactor than recent ADRs. Survey
-     first; consider ADR-grade design choice (per-section
-     files vs single-file grouping).
+   - **parse/sections.zig** (1556 LOC) — 16 structs + decode
+     functions; per-section axis split — bigger refactor with
+     7+ new files. Survey first; ADR-grade design choice.
    - **api/instance.zig** (1431 LOC) — c_api Instance lifecycle;
      §9.12-G item.
-   - **engine/compile.zig** (1225 LOC) — already split from
-     runner at ADR-0079; check current shape.
+   - **engine/compile.zig** (1225 LOC) — huge `pub fn compileWasm`
+     spanning lines 29-903 (~875 LOC); needs ADR-grade
+     extraction axis (compileWasm phase split? section-by-
+     section dispatch?). Survey-first.
    - **lower.zig** (1109 LOC) — `Lowerer = struct {...}`
      struct-method-heavy. ADR-0083 pattern.
-   - **analysis/liveness.zig** (1192 LOC) — likely struct-method.
 2. **Subsequent D-141 candidates** (after #1 lands):
    - **arm64/emit.zig** (1630 LOC) — mirror of x86_64/emit.zig
      after ADR-0081; same shape likely applies.
