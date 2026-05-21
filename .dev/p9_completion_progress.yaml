@@ -97,7 +97,7 @@ sub_rows:
 
   - id: "9.12-E"
     title: "★ Wasm 2.0 100% completion — skip-impl 243 → 0 + comprehensive testsuite"
-    status: in_progress
+    status: done
     exit_criteria:
       - "SKIP-CROSS-MODULE-IMPORTS: 100 → 0 (8 corpora cleared)"
       - "SKIP-NO-LINK-TYPECHECK: 26 → 0 (assert_unlinkable type check)"
