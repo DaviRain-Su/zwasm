@@ -61,12 +61,19 @@ for d in "$spikes_dir"/*/; do
     continue
   fi
 
-  status=$(grep -E '^\*\*Status\*\*:' "$readme" | head -1 | sed -E 's/^\*\*Status\*\*:\s*//' | awk '{print $1}')
-  outcome=$(grep -E '^\*\*Outcome\*\*:' "$readme" | head -1 | sed -E 's/^\*\*Outcome\*\*:\s*//')
-  created=$(grep -E '^\*\*Created\*\*:' "$readme" | head -1 | sed -E 's/^\*\*Created\*\*:\s*([0-9]{4}-[0-9]{2}-[0-9]{2}).*/\1/')
+  # Accept both `**Field**:` (canonical) and `- **Field**:` (bullet-list
+  # form used by older spikes pre-`new_spike.sh`). Accept any of
+  # `Created` / `Started` / `Date` for the creation-date field — the
+  # spike_lifecycle.md template names `Started`; `new_spike.sh` emits
+  # `Created`; the early q3-* spikes use `Date`. All three carry the
+  # same semantic (ISO YYYY-MM-DD).
+  # `tr -d` strips inline-code backticks (e.g. `Status: \`merged-into-prod\` (note)`).
+  status=$(grep -E '^-?\s*\*\*Status\*\*:' "$readme" | head -1 | sed -E 's/^-?\s*\*\*Status\*\*:\s*//' | tr -d '`' | awk '{print $1}')
+  outcome=$(grep -E '^-?\s*\*\*Outcome\*\*:' "$readme" | head -1 | sed -E 's/^-?\s*\*\*Outcome\*\*:\s*//')
+  created=$(grep -E '^-?\s*\*\*(Created|Started|Date)\*\*:' "$readme" | head -1 | sed -E 's/^-?\s*\*\*(Created|Started|Date)\*\*:\s*([0-9]{4}-[0-9]{2}-[0-9]{2}).*/\2/')
 
   if [ -z "$status" ] || [ -z "$created" ]; then
-    echo "WARN  $slug: README.md missing Status or Created header"
+    echo "WARN  $slug: README.md missing Status or Created/Started/Date header"
     count=$((count + 1))
     continue
   fi
