@@ -55,8 +55,8 @@ function. This has two cascading constraints:
 
 ## Fix (or path forward)
 
-Three-step pre-extraction checklist for per-file ADRs targeting
-struct-method-heavy files:
+Four-step pre-extraction checklist for per-file ADRs targeting
+struct-method-heavy files (step 4 added by ADR-0094, 2026-05-21):
 
 1. **Identify struct + moved methods that need pub-ification**.
    - The struct declaration: `pub const Validator = struct {...}`.
@@ -75,6 +75,20 @@ struct-method-heavy files:
 3. **Field accesses stay**. `self.body`, `self.pos`,
    `self.memory_count` — these work cross-file as long as the
    struct itself is pub.
+
+4. **Annotate each pub-ified-for-sibling-only decl with the
+   SIBLING-PUB marker** (per ADR-0094):
+
+   ```zig
+   // SIBLING-PUB: <sibling files> (per ADR-NNNN extraction)
+   pub fn helperX(...) ...
+   ```
+
+   `scripts/check_sibling_pub.sh --gate` (wired into
+   `gate_commit.sh`) verifies no file outside the authorized
+   sibling list calls the marked decl. The marker documents
+   the deliberate "pub for sibling reach, not for the world"
+   intent and bounds the leak.
 
 Mechanical: Python regex over the extracted block worked
 cleanly for ADR-0083 (50 intra-SIMD calls + 4 helper-call
@@ -122,6 +136,8 @@ pattern applies to lower.zig + future validator.zig follow-up.
 - ADR-0081 — emit_setup.zig (pure top-level helper extraction, no cross-file methods)
 - ADR-0082 — dispatch_collector_ops.zig (pure data extraction, no methods)
 - ADR-0083 — validator_simd.zig (FIRST cross-file struct-method extraction; this lesson's subject)
+- ADR-0094 — SIBLING-PUB marker + audit grep (the pub-leak
+  encapsulation discipline; step 4 above)
 - `.claude/rules/zig_tips.md` — Zig 0.16 idioms; should reference this lesson
   when discussing `usingnamespace` removal.
 - Lesson `2026-05-21-emit-zig-survey-per-op-pattern-already-absorbed.md`

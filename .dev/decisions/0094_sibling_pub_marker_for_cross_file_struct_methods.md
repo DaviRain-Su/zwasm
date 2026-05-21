@@ -1,6 +1,6 @@
 # 0094 — Introduce SIBLING-PUB marker + audit grep for cross-file struct-method extraction
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-05-21
 - **Author**: Shota Kudo
 - **Tags**: phase9, structural-debt, encapsulation, audit, zig-0-16
@@ -223,3 +223,4 @@ grep:
 | Date       | SHA          | Note                                    |
 |------------|--------------|-----------------------------------------|
 | 2026-05-21 | `<backfill>` | Initial proposed version (this commit). |
+| 2026-05-21 | `<backfill>` | Accepted at `f777edaa` — `scripts/check_sibling_pub.sh` + 9 markers + bonus `resolveAndEmitMergeMovsRegBatch` pub→private downgrade + gate_commit integration + lesson step 4. D-158 closed. |
