@@ -1,0 +1,291 @@
+<#
+.SYNOPSIS
+    Install zwasm v2's Windows-native toolchain.
+
+.DESCRIPTION
+    Idempotent, per-user installer. Mirrors flake.nix pin list so
+    Mac / Linux / Windows share the same tool surface (per user
+    guidance 2026-05-22 "Mac side と同じツールを使うべき"):
+        zig, hyperfine, wasm-tools, wasmtime,
+        wabt (wat2wasm + wast2json), yq (yq-go), lldb (LLVM).
+    Tools land in %LOCALAPPDATA%\zwasm-tools\<name>-<version>\
+    and are added to the user-scoped PATH.
+
+    Background: v1 has scripts/windows/install-tools.ps1 but it
+    does not include wabt / yq / lldb. v2's build.zig (Close-plan
+    §6 (j), 2026-05-21) added a hard `wat2wasm` SystemCommand —
+    this PS1 plugs the gap before §9.13-0 Cat IV reconcile.
+
+    Idempotent: a versioned directory that already exists is
+    skipped unless -Force is passed. PATH entries are not
+    duplicated.
+
+    Requires: Windows 10/11 with built-in tar.exe, PowerShell
+    5.1 or PowerShell 7. Does not require administrator rights.
+
+.PARAMETER Force
+    Reinstall every tool even if the version-stamped directory
+    already exists.
+
+.PARAMETER OnlyTool
+    Install just one tool. Default: all.
+
+.EXAMPLE
+    pwsh -NoLogo -File scripts\windows\install_tools.ps1
+
+.EXAMPLE
+    pwsh -NoLogo -File scripts\windows\install_tools.ps1 -OnlyTool wabt -Force
+#>
+
+[CmdletBinding()]
+param(
+    [switch]$Force,
+    [ValidateSet('zig', 'hyperfine', 'wasm-tools', 'wasmtime', 'wabt', 'yq', 'lldb', 'all')]
+    [string]$OnlyTool = 'all'
+)
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+# --- Pinned versions (mirror flake.nix; bumped manually) ---
+
+$versions = @{
+    'zig'        = '0.16.0'
+    'hyperfine'  = '1.20.0'
+    'wasm-tools' = '1.246.1'
+    'wasmtime'   = '42.0.1'
+    'wabt'       = '1.0.41'
+    'yq'         = '4.53.2'
+    'lldb'       = '22.1.6'      # via LLVM installer; lldb is bundled
+}
+
+# --- Install layout ---
+
+$installRoot = Join-Path $env:LOCALAPPDATA 'zwasm-tools'
+$workDir     = Join-Path $installRoot '.work'
+New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $workDir     | Out-Null
+
+# --- Helpers ---
+
+function Download-File {
+    param([Parameter(Mandatory)][string]$Url,
+          [Parameter(Mandatory)][string]$Dest)
+    Write-Host "  download: $Url"
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $oldProgress = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing
+    }
+    finally {
+        $ProgressPreference = $oldProgress
+    }
+}
+
+function Extract-Zip {
+    param([Parameter(Mandatory)][string]$Archive,
+          [Parameter(Mandatory)][string]$Dest)
+    if (Test-Path $Dest) { Remove-Item -Recurse -Force $Dest }
+    New-Item -ItemType Directory -Force -Path $Dest | Out-Null
+    Expand-Archive -LiteralPath $Archive -DestinationPath $Dest -Force
+}
+
+function Extract-TarGz {
+    param([Parameter(Mandatory)][string]$Archive,
+          [Parameter(Mandatory)][string]$Dest)
+    if (Test-Path $Dest) { Remove-Item -Recurse -Force $Dest }
+    New-Item -ItemType Directory -Force -Path $Dest | Out-Null
+    & tar.exe -xzf $Archive -C $Dest
+    if ($LASTEXITCODE -ne 0) {
+        throw "tar.exe extraction failed for $Archive (exit $LASTEXITCODE)"
+    }
+}
+
+function Resolve-SingleSubdir {
+    param([Parameter(Mandatory)][string]$ParentDir)
+    $children = @(Get-ChildItem -LiteralPath $ParentDir -Directory)
+    if ($children.Count -eq 1) { return $children[0].FullName }
+    return $ParentDir
+}
+
+function Install-Archive {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Version,
+        [Parameter(Mandatory)][string]$Url,
+        [Parameter(Mandatory)][ValidateSet('zip', 'tar.gz')][string]$Format
+    )
+    $stampedDir = Join-Path $installRoot ("{0}-{1}" -f $Name, $Version)
+    if ((Test-Path $stampedDir) -and -not $Force) {
+        Write-Host "[skip] $Name $Version (exists)"
+        return $stampedDir
+    }
+    Write-Host "[install] $Name $Version"
+    $ext = if ($Format -eq 'zip') { 'zip' } else { 'tar.gz' }
+    $archive = Join-Path $workDir ("{0}-{1}.{2}" -f $Name, $Version, $ext)
+    Download-File -Url $Url -Dest $archive
+    $staging = Join-Path $workDir ("{0}-{1}-staging" -f $Name, $Version)
+    if ($Format -eq 'zip') {
+        Extract-Zip -Archive $archive -Dest $staging
+    } else {
+        Extract-TarGz -Archive $archive -Dest $staging
+    }
+    $unpacked = Resolve-SingleSubdir -ParentDir $staging
+    if (Test-Path $stampedDir) { Remove-Item -Recurse -Force $stampedDir }
+    Move-Item -LiteralPath $unpacked -Destination $stampedDir
+    Remove-Item -Recurse -Force $staging -ErrorAction SilentlyContinue
+    Remove-Item -Force $archive -ErrorAction SilentlyContinue
+    return $stampedDir
+}
+
+function Install-SingleFile {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Version,
+        [Parameter(Mandatory)][string]$Url,
+        [Parameter(Mandatory)][string]$FileName
+    )
+    $stampedDir = Join-Path $installRoot ("{0}-{1}" -f $Name, $Version)
+    $dest = Join-Path $stampedDir $FileName
+    if ((Test-Path $dest) -and -not $Force) {
+        Write-Host "[skip] $Name $Version (exists)"
+        return $stampedDir
+    }
+    Write-Host "[install] $Name $Version"
+    New-Item -ItemType Directory -Force -Path $stampedDir | Out-Null
+    Download-File -Url $Url -Dest $dest
+    return $stampedDir
+}
+
+function Install-NSISExe {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Version,
+        [Parameter(Mandatory)][string]$Url
+    )
+    # NSIS-based installer (LLVM uses NSIS).  /S = silent.
+    # /D=<path> MUST be last and unquoted; this is an NSIS oddity.
+    $stampedDir = Join-Path $installRoot ("{0}-{1}" -f $Name, $Version)
+    if ((Test-Path $stampedDir) -and -not $Force) {
+        Write-Host "[skip] $Name $Version (exists)"
+        return $stampedDir
+    }
+    Write-Host "[install] $Name $Version (NSIS silent install)"
+    $installer = Join-Path $workDir ("{0}-{1}-install.exe" -f $Name, $Version)
+    Download-File -Url $Url -Dest $installer
+    # /D MUST be last arg, unquoted, even if path contains spaces.
+    # User-writable destination -> no admin required.
+    & $installer /S /D=$stampedDir
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Name installer failed (exit $LASTEXITCODE)"
+    }
+    Remove-Item -Force $installer -ErrorAction SilentlyContinue
+    return $stampedDir
+}
+
+# --- Install plan ---
+
+$paths = @{}
+
+if ($OnlyTool -in @('all', 'zig')) {
+    $v = $versions['zig']
+    $url = "https://ziglang.org/download/$v/zig-x86_64-windows-$v.zip"
+    $paths['zig'] = Install-Archive -Name 'zig' -Version $v -Url $url -Format 'zip'
+}
+
+if ($OnlyTool -in @('all', 'hyperfine')) {
+    $v = $versions['hyperfine']
+    $url = "https://github.com/sharkdp/hyperfine/releases/download/v$v/hyperfine-v$v-x86_64-pc-windows-msvc.zip"
+    $paths['hyperfine'] = Install-Archive -Name 'hyperfine' -Version $v -Url $url -Format 'zip'
+}
+
+if ($OnlyTool -in @('all', 'wasm-tools')) {
+    $v = $versions['wasm-tools']
+    $url = "https://github.com/bytecodealliance/wasm-tools/releases/download/v$v/wasm-tools-$v-x86_64-windows.zip"
+    $paths['wasm-tools'] = Install-Archive -Name 'wasm-tools' -Version $v -Url $url -Format 'zip'
+}
+
+if ($OnlyTool -in @('all', 'wasmtime')) {
+    $v = $versions['wasmtime']
+    $url = "https://github.com/bytecodealliance/wasmtime/releases/download/v$v/wasmtime-v$v-x86_64-windows.zip"
+    $paths['wasmtime'] = Install-Archive -Name 'wasmtime' -Version $v -Url $url -Format 'zip'
+}
+
+if ($OnlyTool -in @('all', 'wabt')) {
+    $v = $versions['wabt']
+    # wabt release naming: wabt-<v>-windows-x64.tar.gz (NO 'v' prefix on tag).
+    $url = "https://github.com/WebAssembly/wabt/releases/download/$v/wabt-$v-windows-x64.tar.gz"
+    $paths['wabt'] = Install-Archive -Name 'wabt' -Version $v -Url $url -Format 'tar.gz'
+}
+
+if ($OnlyTool -in @('all', 'yq')) {
+    $v = $versions['yq']
+    $url = "https://github.com/mikefarah/yq/releases/download/v$v/yq_windows_amd64.exe"
+    # yq ships as a single .exe; stamped dir holds it as 'yq.exe' for
+    # PATH-compatible invocation.
+    $paths['yq'] = Install-SingleFile -Name 'yq' -Version $v -Url $url -FileName 'yq.exe'
+}
+
+if ($OnlyTool -in @('all', 'lldb')) {
+    $v = $versions['lldb']
+    # LLVM NSIS installer bundles lldb + dsymutil + clang-format etc.
+    # Per-user install path -> no admin needed.
+    $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$v/LLVM-$v-win64.exe"
+    $paths['lldb'] = Install-NSISExe -Name 'llvm' -Version $v -Url $url
+}
+
+# --- PATH wiring (User scope, idempotent) ---
+
+function Update-UserPath {
+    param([Parameter(Mandatory)][string[]]$Add)
+    $current = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if (-not $current) { $current = '' }
+    $entries = @($current.Split(';') | Where-Object { $_ })
+    $changed = $false
+    foreach ($p in $Add) {
+        if (-not $p) { continue }
+        if ($entries -notcontains $p) {
+            $entries += $p
+            Write-Host "[path] +$p"
+            $changed = $true
+        }
+    }
+    if ($changed) {
+        [Environment]::SetEnvironmentVariable('Path', ($entries -join ';'), 'User')
+    }
+}
+
+# Per-tool PATH layout:
+#   zig / wasm-tools / wasmtime / hyperfine — binaries directly in stamped dir
+#   wabt        — bin/ subdir (wat2wasm, wast2json, wasm-strip, etc.)
+#   yq          — yq.exe directly in stamped dir
+#   llvm (lldb) — bin/ subdir (lldb.exe, dsymutil.exe, llvm-objdump.exe, ...)
+$pathsToAdd = @()
+if ($paths.ContainsKey('zig'))         { $pathsToAdd += $paths['zig'] }
+if ($paths.ContainsKey('hyperfine'))   { $pathsToAdd += $paths['hyperfine'] }
+if ($paths.ContainsKey('wasm-tools'))  { $pathsToAdd += $paths['wasm-tools'] }
+if ($paths.ContainsKey('wasmtime'))    { $pathsToAdd += $paths['wasmtime'] }
+if ($paths.ContainsKey('wabt'))        { $pathsToAdd += (Join-Path $paths['wabt']  'bin') }
+if ($paths.ContainsKey('yq'))          { $pathsToAdd += $paths['yq'] }
+if ($paths.ContainsKey('lldb'))        { $pathsToAdd += (Join-Path $paths['lldb']  'bin') }
+
+# Git for Windows bash (needed by `bash scripts/*.sh`).  Skip if absent.
+$gitBin = 'C:\Program Files\Git\bin'
+if (Test-Path (Join-Path $gitBin 'bash.exe')) {
+    $pathsToAdd += $gitBin
+}
+
+Update-UserPath -Add $pathsToAdd
+
+Write-Host ""
+Write-Host "Done. Open a new shell to pick up PATH changes."
+Write-Host "Verify:"
+Write-Host "  zig version"
+Write-Host "  hyperfine --version"
+Write-Host "  wasm-tools --version"
+Write-Host "  wasmtime --version"
+Write-Host "  wat2wasm --version       # (wabt)"
+Write-Host "  wast2json --version      # (wabt)"
+Write-Host "  yq --version"
+Write-Host "  lldb --version"
