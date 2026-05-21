@@ -2,7 +2,7 @@
 
 **Date**: 2026-05-21
 **Keywords**: D-018, D-081, D-090, D-141, D-055, ADR-0034, debt sweep, stale framing, barrier dissolution, /continue Step 0.5
-**Citing**: `<backfill>` (lesson commit), §9.12-F discharges (`02397144` D-018, `871c78e1` D-055, `2f54f753` D-090, `5081d053` D-141, `f79104bb` D-081, `9457a4b6` ADR-0034 flip)
+**Citing**: `9641f794` (lesson commit), §9.12-F discharges (`02397144` D-018, `871c78e1` D-055, `2f54f753` D-090, `5081d053` D-141, `f79104bb` D-081, `9457a4b6` ADR-0034 flip)
 
 ## The pattern
 
