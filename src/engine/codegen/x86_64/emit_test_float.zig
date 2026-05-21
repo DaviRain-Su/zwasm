@@ -1058,13 +1058,14 @@ test "compile: f32.const → end emits MOVAPS XMM0, XMM8 (FP-aware return marsha
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
     defer deinit(testing.allocator, out);
     // Layout (uses_runtime_ptr = false, frame_bytes = 0):
-    //   [0..4]   prologue: PUSH RBP ; MOV RBP, RSP
-    //   [4..14]  f32.const: MOV EAX, bits ; MOVD XMM8, EAX
-    //   [14..18] end FP marshal: MOVAPS XMM0, XMM8 (4 bytes)
-    //   [18..20] epilogue: POP RBP ; RET
+    //   [0..body] prologue: PUSH RBP ; MOV RBP, RSP
+    //   [body..body+10] f32.const: MOV EAX, bits ; MOVD XMM8, EAX
+    //   [body+10..body+14] end FP marshal: MOVAPS XMM0, XMM8 (4 bytes)
+    //   [body+14..body+16] epilogue: POP RBP ; RET
+    const body_start = prologue.body_start_offset(false, 0);
     const expected_movaps = inst.encMovapsXmmXmm(.xmm0, .xmm8);
-    try testing.expectEqualSlices(u8, expected_movaps.slice(), out.bytes[14 .. 14 + expected_movaps.len]);
-    try testing.expectEqual(@as(usize, 20), out.bytes.len);
+    try testing.expectEqualSlices(u8, expected_movaps.slice(), out.bytes[body_start + 10 .. body_start + 10 + expected_movaps.len]);
+    try testing.expectEqual(@as(usize, body_start + 16), out.bytes.len);
 }
 
 test "compile: f64.const → end emits MOVAPS XMM0, XMM8 (same MOVAPS works for f64)" {
@@ -1086,13 +1087,14 @@ test "compile: f64.const → end emits MOVAPS XMM0, XMM8 (same MOVAPS works for 
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
     defer deinit(testing.allocator, out);
     // Layout:
-    //   [0..4]   prologue
-    //   [4..19]  f64.const: MOVABS RAX, bits ; MOVQ XMM8, RAX
-    //   [19..23] end FP marshal: MOVAPS XMM0, XMM8
-    //   [23..25] epilogue
+    //   [0..body] prologue
+    //   [body..body+15] f64.const: MOVABS RAX, bits ; MOVQ XMM8, RAX
+    //   [body+15..body+19] end FP marshal: MOVAPS XMM0, XMM8
+    //   [body+19..body+21] epilogue
+    const body_start = prologue.body_start_offset(false, 0);
     const expected_movaps = inst.encMovapsXmmXmm(.xmm0, .xmm8);
-    try testing.expectEqualSlices(u8, expected_movaps.slice(), out.bytes[19 .. 19 + expected_movaps.len]);
-    try testing.expectEqual(@as(usize, 25), out.bytes.len);
+    try testing.expectEqualSlices(u8, expected_movaps.slice(), out.bytes[body_start + 15 .. body_start + 15 + expected_movaps.len]);
+    try testing.expectEqual(@as(usize, body_start + 21), out.bytes.len);
 }
 
 test "compile: i64-result end emits MOV RAX, src (.q full width avoids truncation)" {
@@ -1112,14 +1114,15 @@ test "compile: i64-result end emits MOV RAX, src (.q full width avoids truncatio
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
     defer deinit(testing.allocator, out);
     // Layout (slot 0 = RBX after chunk 13b — i32.const + self-MOV both shed REX):
-    //   [0..4]   prologue
-    //   [4..9]   i32.const: MOV EBX, imm32 (B8+rd + 4-byte imm = 5 bytes)
-    //   [9..11]  i64.extend_i32_u: MOV EBX, EBX (.d, 2 bytes — no REX)
-    //   [11..14] end i64 marshal: MOV RAX, RBX (.q, 3 bytes; REX.W = 48 89 D8)
-    //   [14..16] epilogue
+    //   [0..body]   prologue
+    //   [body..body+5]   i32.const: MOV EBX, imm32 (B8+rd + 4-byte imm = 5 bytes)
+    //   [body+5..body+7]  i64.extend_i32_u: MOV EBX, EBX (.d, 2 bytes — no REX)
+    //   [body+7..body+10] end i64 marshal: MOV RAX, RBX (.q, 3 bytes; REX.W = 48 89 D8)
+    //   [body+10..body+12] epilogue
+    const body_start = prologue.body_start_offset(false, 0);
     const expected_movrr = inst.encMovRR(.q, .rax, .rbx);
-    try testing.expectEqualSlices(u8, expected_movrr.slice(), out.bytes[11 .. 11 + expected_movrr.len]);
-    try testing.expectEqual(@as(usize, 16), out.bytes.len);
+    try testing.expectEqualSlices(u8, expected_movrr.slice(), out.bytes[body_start + 7 .. body_start + 7 + expected_movrr.len]);
+    try testing.expectEqual(@as(usize, body_start + 12), out.bytes.len);
 }
 
 test "compile: nop emits no body bytes (between prologue and epilogue)" {
@@ -1181,20 +1184,21 @@ test "compile: return mid-function (i32.const, return, end) emits MOV EAX + epil
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
     defer deinit(testing.allocator, out);
     // Layout (slot 0 = RBX after chunk 13b pool shrink):
-    //   [0..4]   prologue: PUSH RBP ; MOV RBP, RSP (4 bytes)
-    //   [4..9]   i32.const: MOV EBX, imm (5 bytes)
-    //   [9..11]  return marshal: MOV EAX, EBX (2 bytes — .d MovRR, no REX)
-    //   [11..13] return epilogue: POP RBP ; RET (2 bytes)
+    //   [0..body]    prologue: PUSH RBP ; MOV RBP, RSP (4 bytes)
+    //   [body..body+5]   i32.const: MOV EBX, imm (5 bytes)
+    //   [body+5..body+7]  return marshal: MOV EAX, EBX (2 bytes — .d MovRR, no REX)
+    //   [body+7..body+9] return epilogue: POP RBP ; RET (2 bytes)
     //   end (function-level):
     //     pushed_vregs.len > 0 still — emit second marshal MOV EAX, EBX
-    //     [13..15] (2 bytes)
-    //     [15..17] second epilogue: POP RBP ; RET (2 bytes)
+    //     [body+9..body+11] (2 bytes)
+    //     [body+11..body+13] second epilogue: POP RBP ; RET (2 bytes)
+    const body_start = prologue.body_start_offset(false, 0);
     const expected_marshal = inst.encMovRR(.d, abi.return_gpr, .rbx);
-    try testing.expectEqualSlices(u8, expected_marshal.slice(), out.bytes[9 .. 9 + expected_marshal.len]);
-    // First RET at byte 12
-    try testing.expectEqual(@as(u8, 0xC3), out.bytes[12]);
-    // Total length: 4 + 5 + 2 + 2 + 2 + 2 = 17 bytes
-    try testing.expectEqual(@as(usize, 17), out.bytes.len);
+    try testing.expectEqualSlices(u8, expected_marshal.slice(), out.bytes[body_start + 5 .. body_start + 5 + expected_marshal.len]);
+    // First RET at body+8
+    try testing.expectEqual(@as(u8, 0xC3), out.bytes[body_start + 8]);
+    // Total length: body + 5 + 2 + 2 + 2 + 2 = body + 13 bytes
+    try testing.expectEqual(@as(usize, body_start + 13), out.bytes.len);
 }
 
 test "compile: i64.add emits ADD .q (REX.W) — 64-bit width preserved" {
@@ -1278,13 +1282,14 @@ test "compile: i64.const emits MOVABS r64, imm64 (10 bytes)" {
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{});
     defer deinit(testing.allocator, out);
     // Layout (uses_runtime_ptr = false, frame_bytes = 0):
-    //   [0..4]   prologue: PUSH RBP ; MOV RBP, RSP
-    //   [4..14]  i64.const: MOVABS RBX, imm64 (10 bytes; REX.W + B8+rd + 8-byte imm)
-    //   [14..17] end i64 marshal: MOV RAX, RBX (.q, 3 bytes; 48 89 D8)
-    //   [17..19] epilogue: POP RBP ; RET
+    //   [0..body]    prologue: PUSH RBP ; MOV RBP, RSP
+    //   [body..body+10]  i64.const: MOVABS RBX, imm64 (10 bytes; REX.W + B8+rd + 8-byte imm)
+    //   [body+10..body+13] end i64 marshal: MOV RAX, RBX (.q, 3 bytes; 48 89 D8)
+    //   [body+13..body+15] epilogue: POP RBP ; RET
+    const body_start = prologue.body_start_offset(false, 0);
     const expected_movabs = inst.encMovImm64Q(.rbx, value);
-    try testing.expectEqualSlices(u8, expected_movabs.slice(), out.bytes[4 .. 4 + expected_movabs.len]);
-    try testing.expectEqual(@as(usize, 19), out.bytes.len);
+    try testing.expectEqualSlices(u8, expected_movabs.slice(), out.bytes[body_start .. body_start + expected_movabs.len]);
+    try testing.expectEqual(@as(usize, body_start + 15), out.bytes.len);
 }
 
 test "compile: unreachable emits JMP rel32 + trap stub patches disp to trap_byte" {
