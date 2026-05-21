@@ -116,6 +116,13 @@ pub const Error = error{
     /// detection is single-bit; Diagnostic M3 (D-022) widens
     /// this to per-trap-kind reasons.
     Trap,
+    /// Class B mixed-class entry helpers (`(i32,f64)` /
+    /// `(f64,i32)`) require an inline-asm thunk per
+    /// arch+ABI (aarch64 BLR + fmov, x86_64 SysV native
+    /// extern-struct).  Win64 has no implemented thunk yet
+    /// → `else` branch returns this variant.  Discharge via
+    /// §9.13-0 D-022 Win64 ABI marshal work.
+    UnsupportedEntrySignature,
 };
 
 /// Body shared by the ~97 Class A / Class C entry helpers.
