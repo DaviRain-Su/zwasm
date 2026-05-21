@@ -104,11 +104,14 @@ ADR-0099 + check_split_smell.sh are the structural fix.
    - 5a: create init_expr.zig with copied helpers (sections.zig still has originals)
    - 5b: re-point sections_element/codes/data at init_expr.X
    - 5c: remove duplicates from sections.zig; sections.zig delegates to init_expr too
-6. **Cycle 6** — Verification + handover refresh + acceptance criteria check
+6. **Cycle 6** — 3 sub-steps:
+   - 6a: verification (check_split_smell + zig build test + file_size_check)
+   - 6b: land condensed retrospective lesson at `.dev/lessons/2026-05-21-file-size-cap-as-smell-detector-not-metric.md`
+   - 6c: `mv private/file-size-reform/ private/archive/2026-05-21-file-size-reform/` + handover refresh to next priority
 7. **Cycle 7 (optional)** — audit_scaffolding §B/§J + LOOP.md + ADR template amendments
 8. **Cycle 8 (optional)** — next-D-141 guidance update
 
-Acceptance findings: 4 expected (api/wasm.zig hub, testFenceTableFill N4 dup, inst_neon N3 informational, regalloc_compute N1 test-context carve-out).
+Acceptance findings (Cycle 6a): 4 expected (api/wasm.zig hub, testFenceTableFill N4 dup, inst_neon N3 informational, regalloc_compute N1 test-context carve-out).
 
 ## See
 
