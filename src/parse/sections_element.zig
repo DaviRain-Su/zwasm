@@ -1,14 +1,15 @@
 //! Wasm element section decoder (Wasm 2.0 §5.5.12, 8 forms 0–7).
-//! Extracted from `sections.zig` per ADR-0095 (D-141 sweep).
-//!
-//! Imports `sections.scanInitExpr` declaratively inside function
-//! bodies (Zig lazy-import resolution; same shape as ADR-0083
-//! validator_simd ↔ validator).
+//! Originally extracted per ADR-0095 (superseded by ADR-0101);
+//! const-expression helpers now live in `init_expr.zig` per
+//! ADR-0099 §D2 (P3 deep utility). This file keeps `sections.zig`
+//! imported for `sections.Error` (the externally-observable
+//! section-decoder error union).
 
 const std = @import("std");
 const leb128 = @import("../support/leb128.zig");
 const zir = @import("../ir/zir.zig");
 const sections = @import("sections.zig");
+const init_expr = @import("init_expr.zig");
 
 const Allocator = std.mem.Allocator;
 const ValType = zir.ValType;
@@ -51,7 +52,7 @@ pub fn decodeElement(parent_alloc: Allocator, body: []const u8) sections.Error!E
         switch (flag) {
             0 => {
                 const expr_start = pos;
-                try sections.scanInitExpr(body, &pos);
+                try init_expr.scanInitExpr(body, &pos);
                 const expr = body[expr_start..pos];
                 const n = try leb128.readUleb128(u32, body, &pos);
                 const funcs = try alloc.alloc(u32, n);
@@ -93,7 +94,7 @@ pub fn decodeElement(parent_alloc: Allocator, body: []const u8) sections.Error!E
                 // latter resolves to the spec null sentinel via
                 // `funcidxs` carrying `std.math.maxInt(u32)`.
                 const expr_start = pos;
-                try sections.scanInitExpr(body, &pos);
+                try init_expr.scanInitExpr(body, &pos);
                 const expr = body[expr_start..pos];
                 const n = try leb128.readUleb128(u32, body, &pos);
                 const funcs = try alloc.alloc(u32, n);
@@ -111,7 +112,7 @@ pub fn decodeElement(parent_alloc: Allocator, body: []const u8) sections.Error!E
                 // vec(funcidx).
                 const tableidx = try leb128.readUleb128(u32, body, &pos);
                 const expr_start = pos;
-                try sections.scanInitExpr(body, &pos);
+                try init_expr.scanInitExpr(body, &pos);
                 const expr = body[expr_start..pos];
                 if (pos >= body.len) return sections.Error.UnexpectedEnd;
                 const elemkind = body[pos];
@@ -148,7 +149,7 @@ pub fn decodeElement(parent_alloc: Allocator, body: []const u8) sections.Error!E
                 // vec(reftype-expr).
                 const tableidx = try leb128.readUleb128(u32, body, &pos);
                 const expr_start = pos;
-                try sections.scanInitExpr(body, &pos);
+                try init_expr.scanInitExpr(body, &pos);
                 const expr = body[expr_start..pos];
                 if (pos >= body.len) return sections.Error.UnexpectedEnd;
                 const reftype_byte = body[pos];

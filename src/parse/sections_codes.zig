@@ -6,6 +6,7 @@ const std = @import("std");
 const leb128 = @import("../support/leb128.zig");
 const zir = @import("../ir/zir.zig");
 const sections = @import("sections.zig");
+const init_expr = @import("init_expr.zig");
 
 const Allocator = std.mem.Allocator;
 const ValType = zir.ValType;
@@ -70,7 +71,7 @@ pub fn decodeCodes(parent_alloc: Allocator, body: []const u8) sections.Error!Cod
         var w: usize = 0;
         for (0..decl_count) |_| {
             const c = try leb128.readUleb128(u32, code, &inner);
-            const t = try sections.readValType(code, &inner);
+            const t = try init_expr.readValType(code, &inner);
             for (0..c) |_| {
                 locals[w] = t;
                 w += 1;

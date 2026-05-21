@@ -3,48 +3,49 @@
 > ≤ 80 lines. No numeric predictions (per
 > [`no_handover_predictions.md`](../.claude/rules/no_handover_predictions.md)).
 
-## Cold-start procedure — FILE-SIZE REFORM Cycle 5b next
+## Cold-start procedure — FILE-SIZE REFORM Cycle 5c next
 
-**Pickup is Cycle 5 sub-step 5b of the file-size discipline reform.**
+**Pickup is Cycle 5 sub-step 5c of the file-size discipline reform.**
 
 1. Read `private/file-size-reform/07-execution-plan.md` §"Cycle 5"
-   sub-step 5b (workspace gitignored; archived at 6c).
-2. Execute sub-step 5b: re-point the 3 siblings at `init_expr`:
-   `sections_element.zig` (7 sites of `sections.scanInitExpr`),
-   `sections_codes.zig` (`sections.readValType`), `sections_data.zig`
-   (`sections.scanInitExpr`). Add `const init_expr =
-   @import("init_expr.zig");` to each. After 5b: siblings no
-   longer call `sections.X` helpers (N1 cleared for them).
-3. Then sub-step 5c (delete duplicates from sections.zig; sections.zig
-   internal callers also use init_expr).
-4. Then Cycle 6 (verification + lesson + archive).
+   sub-step 5c (workspace gitignored; archived at 6c).
+2. Execute sub-step 5c: in `src/parse/sections.zig`:
+   - Replace internal `scanInitExpr(...)` calls with
+     `init_expr.scanInitExpr(...)`.
+   - Replace internal `readValType(...)` calls with
+     `init_expr.readValType(...)` (in decodeTypes / decodeGlobals
+     etc.; 4-5 sites).
+   - Delete the `scanInitExpr`, `readValType`, `skipLeb128`
+     function definitions from sections.zig (lines ~455-523).
+   - Add `const init_expr = @import("init_expr.zig");` near top.
+3. Then Cycle 6 (verification + lesson + archive).
 
-**Recovery**: `grep -r 'sections\.scanInitExpr\|sections\.readValType' src/parse/`
-tells which call sites remain.
+**Recovery**: `grep -n 'scanInitExpr\|readValType\|skipLeb128' src/parse/sections.zig`
+shows which sites + defs remain.
 
 ## Cycles landed (this session)
 
-- **Cycle 1** (`a33e3dea`): ADR-0099 + rule + script + lesson +
-  ROADMAP §A2 reframe.
-- **Cycle 2** (`ce67bb45`): check_split_smell.sh wired into
-  gate_commit.sh (informational) + audit §J.1 amend + §J.8 add.
-- **Cycle 3** (`a061d709`): ADR-0100 + ADR-0095/0096/0097 Status updates.
-- **Cycle 4** (`dc6edf9a`): ADR-0097 rollback — verify family
-  re-incorporated into regalloc.zig; regalloc_verify.zig deleted.
-- **Cycle 5a** (this commit): ADR-0101 Accepted +
-  `src/parse/init_expr.zig` created (~115 LOC including tests).
-  sections.zig keeps its copies during 5a.
+- **C1** (`a33e3dea`): ADR-0099 + rule + script + lesson + §A2 reframe.
+- **C2** (`ce67bb45`): check_split_smell wired into gate + audit §J.
+- **C3** (`a061d709`): ADR-0100 + 0095/0096/0097 Status updates.
+- **C4** (`dc6edf9a`): ADR-0097 rollback executed.
+- **C5a** (`d99d37bc`): ADR-0101 + init_expr.zig created.
+- **C5b** (this commit): 3 siblings re-pointed at init_expr —
+  sections_element (4 sites), sections_codes (1), sections_data (2).
 
-check_split_smell now: still 9 findings (5a is purely additive;
-findings drop in 5b/5c when sibling and internal callers re-point).
+check_split_smell: 6 findings (was 9; 3 sections N1-helper-circular
+cleared). Residual 6: 4 expected + 2 sections N3-shallow
+(sections_codes 58 LOC, sections_data 77 LOC — both Wasm §5.5.x
+spec-axis siblings; P1 acceptable per ADR-0099 §D2 tie-breaker
+even though substantive < 100). 5c does not change these.
 
 ## Background (short)
 
 Post-D-141 retrospective: 3 of 15 sweep extractions don't satisfy
-proper architectural standards. Reform plan: ADR-0099 (✅ C1) →
-gate wire (✅ C2) → ADR-0100 (✅ C3) → 0097 rollback (✅ C4) →
-ADR-0101 init_expr extraction (in progress: ✅ 5a, 5b/5c pending)
-→ verify + lesson + archive (C6).
+proper architectural standards. Reform plan: ADR-0099 (✅C1) →
+gate wire (✅C2) → ADR-0100 (✅C3) → 0097 rollback (✅C4) →
+ADR-0101 init_expr (✅C5a, ✅C5b; 5c pending) → verify + lesson +
+archive (C6).
 
 ## Active `now` debts
 
@@ -68,7 +69,8 @@ ADR-0101 init_expr extraction (in progress: ✅ 5a, 5b/5c pending)
 
 ## Open questions / blockers
 
-- なし。5b is mechanical (3 file edits, 9 call sites total).
+- なし。5c is mechanical (sections.zig internal-caller re-point
+  + delete helper defs).
 
 ## See
 

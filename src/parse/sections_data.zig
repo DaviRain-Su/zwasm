@@ -6,6 +6,7 @@
 const std = @import("std");
 const leb128 = @import("../support/leb128.zig");
 const sections = @import("sections.zig");
+const init_expr = @import("init_expr.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -56,7 +57,7 @@ pub fn decodeData(parent_alloc: Allocator, body: []const u8) sections.Error!Data
         switch (flag) {
             0 => {
                 const expr_start = pos;
-                try sections.scanInitExpr(body, &pos);
+                try init_expr.scanInitExpr(body, &pos);
                 const expr = body[expr_start..pos];
                 const size = try leb128.readUleb128(u32, body, &pos);
                 const size_us: usize = @intCast(size);
@@ -82,7 +83,7 @@ pub fn decodeData(parent_alloc: Allocator, body: []const u8) sections.Error!Data
             2 => {
                 const memidx = try leb128.readUleb128(u32, body, &pos);
                 const expr_start = pos;
-                try sections.scanInitExpr(body, &pos);
+                try init_expr.scanInitExpr(body, &pos);
                 const expr = body[expr_start..pos];
                 const size = try leb128.readUleb128(u32, body, &pos);
                 const size_us: usize = @intCast(size);
