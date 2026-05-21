@@ -5,9 +5,10 @@
 
 ## Cold-start procedure
 
-1. `git log --oneline -10` — last code commit: `0d524134`
-   (EXEMPT-FALLBACK markers on 10 catch{} sites; §9.12-A
-   anti-fallback enforcement now passes --gate).
+1. `git log --oneline -10` — last code commit: `2d6bd6ca`
+   (feature_level_check.zig — §9.12-A item 7.9; bidirectional
+   comptime invariant for v3 wasm_level metadata; all 9
+   master-plan enforcement items now OK).
 2. **Live status** (when uncertain):
    `bash scripts/p9_completion_status.sh` —
    `bash scripts/check_skip_impl_ratchet.sh --report` —
