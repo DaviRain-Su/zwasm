@@ -338,3 +338,4 @@ Concretely:
 |------------|-------------|----------------------------------|
 | 2026-05-22 | `a6e3eb4f`| Status: Proposed → Accepted     |
 | 2026-05-22 | `b7d842b8`| Consequences refinement: W3.b-2 recovery PC/SP capture via `callJitOrTrap` helper (@returnAddress + inline-asm RSP). Validated via `private/spikes/win64-recovery-pc-sp/` Win64 cross-compile disasm. |
+| 2026-05-22 | `<backfill>` | **§"Consequences" path-(a) DEMOTED to Rejected** per ADR-0105 (JIT-prologue stack-probe). The `_resetstkoflw()` MSVCRT linkage quick-fix path is no longer the intended D-162 close mechanism. The VEH bridge design itself (path-b VEH-AV for assert_trap recovery; threadlocal RecoveryInfo; `callJitOrTrap` helper) remains load-bearing and Accepted. EXCEPTION_STACK_OVERFLOW filter (added W4 retry 2 `09ee5bb9`) will be REMOVED when ADR-0105 lands. See ADR-0104 §Consequences "Neutral" + ADR-0105 §Context for the comparative survey driving the demotion. |

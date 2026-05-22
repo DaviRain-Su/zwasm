@@ -1,5 +1,7 @@
 # Windows SSH (`windowsmini`) Setup
 
+> **Doc-state**: ACTIVE — load-bearing reference (Phase 9+ scope).
+
 zwasm v2's third native platform — Windows x86_64 — is verified
 locally via SSH to a host called `windowsmini`. This is the same
 mini PC and SSH alias the user already maintains for zwasm v1's

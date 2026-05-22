@@ -1,5 +1,7 @@
 # Read-only reference clones
 
+> **Doc-state**: ACTIVE — load-bearing reference (Phase 9+ scope).
+
 Pointed to from `CLAUDE.md` and mirrored in
 `.claude/settings.json` (`additionalDirectories` /
 `Edit(...)` / `Write(...)` allow-lists). Never edit or commit

@@ -1,5 +1,7 @@
 # Wasm 3.0 ZirOp ↔ spec opcode mapping
 
+> **Doc-state**: ACTIVE — load-bearing reference (Phase 9+ scope).
+
 > Phase 10 prep deliverable per ROADMAP §9.12-G. Tracks the
 > Wasm 3.0 ZirOps declared in `src/ir/zir.zig` against the
 > upstream `WebAssembly/<proposal>/document/core/binary.rst`

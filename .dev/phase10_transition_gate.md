@@ -1,5 +1,7 @@
 # Phase 9 → Phase 10 transition gate
 
+> **Doc-state**: ACTIVE — load-bearing reference (Phase 9+ scope).
+
 > **Hard human-in-loop gate** before §9.12-equivalent flip /
 > Phase 10 opens. The autonomous `/continue` loop **must stop**
 > when it reaches this gate and surface to the user; no

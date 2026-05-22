@@ -1,5 +1,7 @@
 # Blocked-by ledger sweep — 2026-05-21
 
+> **Doc-state**: ACTIVE — load-bearing reference (Phase 9+ scope).
+
 > Initial sweep per close-plan §6 (h) acceptance. Establishes
 > the age-threshold ladder defined in
 > [`audit_scaffolding §F.2a`](../.claude/skills/audit_scaffolding/CHECKS.md)

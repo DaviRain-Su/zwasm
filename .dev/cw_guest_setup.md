@@ -1,5 +1,7 @@
 # ClojureWasm guest end-to-end — setup procedure
 
+> **Doc-state**: ACTIVE — load-bearing reference (Phase 9+ scope).
+
 > Discovered 2026-05-04 during §9.6 / 6.G investigation: the
 > ROADMAP's original wording "via `build.zig.zon` `path = ...`"
 > presumed CW v2 would expose pre-built `.wasm` artefacts as a

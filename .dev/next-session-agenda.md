@@ -1,5 +1,7 @@
 # Session plan — 2026-05-04 design + refactor + rules cycle
 
+> **Doc-state**: ACTIVE — load-bearing reference (Phase 9+ scope).
+
 > **STATUS — POST-EXECUTION (2026-05-04 session close)**: this file
 > is now an **historical record** of the plan as written at session
 > start. The actual outcome **diverged in one place** — sub-deliverable

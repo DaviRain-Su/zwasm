@@ -1,5 +1,7 @@
 # Phase 10 Preparation — decision-gathering phase
 
+> **Doc-state**: ACTIVE — load-bearing reference (Phase 9+ scope).
+
 > **Mode**: surveys + draft documents only. **No `src/` changes.**
 > The autonomous `/continue` loop runs each track to a deliverable,
 > then **stops** (no `ScheduleWakeup` re-arm) so the user can review

@@ -1,5 +1,7 @@
 # Dispatcher wire design (§9.12-B / B3 design note)
 
+> **Doc-state**: ACTIVE — load-bearing reference (Phase 9+ scope).
+
 > Where each of the 5 per-axis dispatchers per ADR-0073 / ADR-0023
 > §4.5 amend actually hooks into the existing codebase. Authored
 > during §9.12-B / B3 as the design output before per-axis wiring

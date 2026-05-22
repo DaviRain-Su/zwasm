@@ -1,5 +1,7 @@
 # Optimisation log — Adopted / Rejected / Deferred ledger
 
+> **Doc-state**: ACTIVE — load-bearing reference (Phase 9+ scope).
+
 > **Tracker for optimisation candidates and decisions from Phase 8
 > onward**. The Phase 7 baseline (interpreter + naive JIT) is the
 > measurement zero; `bench/` hyperfine numbers are the adoption

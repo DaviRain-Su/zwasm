@@ -1,5 +1,7 @@
 # Ubuntu SSH (`ubuntunote`) Setup
 
+> **Doc-state**: ACTIVE — load-bearing reference (Phase 9+ scope).
+
 zwasm v2's Linux x86_64 verification host. **Native x86_64
 hardware** (replaces the OrbStack Rosetta-2 path that tripped
 D-134 — see

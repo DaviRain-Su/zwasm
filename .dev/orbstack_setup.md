@@ -1,5 +1,7 @@
 # OrbStack Ubuntu x86_64 VM Setup (DEV-SCRATCH ONLY post-2026-05-17)
 
+> **Doc-state**: ARCHIVED-IN-PLACE 2026-05-22 — OrbStack retired per ADR-0067 (ubuntunote pivot). Kept for historical reference + Mac-local scratch use. Do not edit.
+
 > **STATUS**: Retired from the per-chunk autonomous gate per
 > [ADR-0067](decisions/0067_ubuntunote_native_x86_64_gate_host.md).
 > Root cause: Apple Rosetta 2 signal-translation race for

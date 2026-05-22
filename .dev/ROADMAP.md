@@ -1250,7 +1250,7 @@ etc.) live in the archive; phase-internal sub-chunk records are in
 `(register ...)` cross-module binding + host imports +
 start-trap propagation) AND Wasm 2.0 (including SIMD-128
 fixed-width ops on both backends) complete on Mac aarch64 +
-OrbStack Linux x86_64 + windowsmini Win x86_64.
+ubuntunote Linux x86_64 + windowsmini Win x86_64 (per ADR-0067 ubuntunote pivot; OrbStack retired).
 
 **Exit criterion** (per ADR-0056 2026-05-17 amend, 4-category
 `skip-impl == 0` predicate):
@@ -1341,7 +1341,7 @@ audit at §9.12 IS a hard gate per ADR-0062.
 - All 50 realworld samples pass on Mac + Linux.
 - Windows realworld subset (25 samples, C+C++ tier as v1) passes.
 - `bench/history.yaml` gets per-merge automatic recording on Mac
-  natively, Linux via OrbStack, and Windows via `windowsmini` SSH
+  natively, Linux via ubuntunote (per ADR-0067), and Windows via `windowsmini` SSH
   (`scripts/run_remote_windows.sh`).
 - `bash scripts/run_bench.sh --quick` works locally.
 - **SIMD per-op gap analysis vs (wasmtime, wazero, wasmer)** —
@@ -1652,8 +1652,9 @@ test "differential: <name>" {
 }
 ```
 
-Combined with the three-platform gate (Mac aarch64 + OrbStack
-Ubuntu x86_64 + windowsmini SSH), the three-way invariant
+Combined with the three-platform gate (Mac aarch64 + ubuntunote
+Ubuntu x86_64 [per ADR-0067; OrbStack retired] + windowsmini SSH),
+the three-way invariant
 `interp == jit_arm64 == jit_x86` is enforced without needing a
 single host that runs both JITs.
 
@@ -1674,8 +1675,8 @@ single host that runs both JITs.
 Local pre-push (A7, A8):
 
 - Mac aarch64 native — `bash scripts/gate_merge.sh`.
-- OrbStack Ubuntu x86_64 native — `orb run -m my-ubuntu-amd64 bash
-  -c '... gate_merge.sh'`.
+- ubuntunote Ubuntu x86_64 native (per ADR-0067 pivot; OrbStack
+  retired) — `bash scripts/run_remote_ubuntu.sh test-all`.
 - Windows x86_64 native — `bash scripts/run_remote_windows.sh` (drives
   the `windowsmini` SSH host; pulls `origin/zwasm-from-scratch` on
   the remote clone at `~/Documents/MyProducts/zwasm_from_scratch`,
@@ -1894,8 +1895,9 @@ that's fine, but the act of typing it is the act of re-deciding.
   C ABI (§4.4).
 - **WASI** — WebAssembly System Interface; `wasi_snapshot_preview1`
   (0.1), Component Model wit (0.2 / 0.3).
-- **🔒 gate** — phases marked require Mac native + OrbStack Ubuntu
-  native + windowsmini build to pass before proceeding.
+- **🔒 gate** — phases marked require Mac native + ubuntunote
+  Ubuntu native (per ADR-0067; OrbStack retired) + windowsmini
+  build to pass before proceeding.
 - **Differential test** — running the same wasm through interp and
   JIT, asserting identical output (§4.2 / Phase 7+).
 - **Three-OS** — macOS aarch64, Linux x86_64, Windows x86_64; all

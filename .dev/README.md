@@ -1,5 +1,7 @@
 # .dev/
 
+> **Doc-state**: ACTIVE — load-bearing reference (Phase 9+ scope).
+
 Project-level design and operational metadata. Tracked in git. English.
 
 ## Always present (load-bearing)

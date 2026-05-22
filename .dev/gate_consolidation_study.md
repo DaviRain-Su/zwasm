@@ -1,5 +1,7 @@
 # Gate consolidation study (§9.12-A / A6)
 
+> **Doc-state**: ACTIVE — load-bearing reference (Phase 9+ scope).
+
 > Measurement + analysis of the 15 enforcement scripts + 2 build-step
 > gates that fire across `gate_commit.sh` / `gate_merge.sh` / manual
 > Step 4 / `audit_scaffolding`. Output of master plan §9.12-A "Measure
