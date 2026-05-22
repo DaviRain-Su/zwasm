@@ -83,11 +83,21 @@ Plus `test/api/zig_facade_wasm2.zig` exercising them.
 
 Per audit Agent 2 §B + §D. Per master plan §5.2. Per ADR-0104 D1.3.
 
-### I4 — `wast_runtime_runner` in `test-all`
+### I4 — `wast_runtime_runner` (smoke) in `test-all`
 
-`build.zig` MUST wire `wast_runtime_runner` into the `test-all`
-aggregate step (currently NOT in per audit Agent 2 §D + the
-`build.zig:443-453` comment "Not wired into test-all aggregate").
+`build.zig` MUST wire the **smoke** step
+(`run_wast_runtime_smoke`, exercising `wast_runtime_runner` against
+`test/runners/fixtures/`) into the `test-all` aggregate step. The
+**wasmtime_misc full-corpus** step (`run_wasmtime_misc_runtime`)
+is intentionally NOT in test-all per build.zig:454 comment —
+deferred to §9.6 / 6.E interp-behaviour-bug investigation (separate
+concern; D-072 etc).
+
+Currently satisfied at build.zig:616
+(`test_all_step.dependOn(&run_wast_runtime_smoke.step)`); Agent 2's
+"NOT in test-all" finding mis-identified the deferred wasmtime_misc
+step as the c_api Instance-path test (they share the same
+`wast_runtime_runner_exe` binary).
 
 Per ADR-0104 D1.4.
 

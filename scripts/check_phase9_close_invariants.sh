@@ -86,15 +86,16 @@ else
   fail "I3: $zig_facade_test missing"
 fi
 
-# I4 — wast_runtime_runner in test-all
-# Check the explicit "NOT in test-all" marker comment first — wins over
-# any partial substring match elsewhere in build.zig.
-if grep -qE 'NOT in test-all|NOT YET aggregated into test-all' build.zig; then
-  fail "I4: build.zig still carries 'NOT in test-all' comment for wast_runtime_runner (close per master plan §5.2)"
-elif grep -qE 'test_all_step\.dependOn.*wast_runtime|test_all_step\.dependOn\(.*wast_runtime_smoke' build.zig; then
-  ok "I4: wast_runtime_runner wired into test-all"
+# I4 — wast_runtime_runner (smoke version) in test-all
+# Per Agent 2 finding (master plan §5.2 last bullet) — the smoke step
+# exercising `wast_runtime_runner` against `test/runners/fixtures/`
+# MUST be wired into test-all. The wasmtime_misc full-corpus step is
+# intentionally NOT in test-all (deferred to §9.6 / 6.E investigation
+# per build.zig:454 comment); that doesn't count against I4.
+if grep -qE 'test_all_step\.dependOn\(&run_wast_runtime_smoke\.step\)' build.zig; then
+  ok "I4: wast_runtime_runner smoke step wired into test-all"
 else
-  fail "I4: wast_runtime_runner test-all wiring not detected"
+  fail "I4: wast_runtime_runner smoke step not wired into test-all (master plan §5.2 close)"
 fi
 
 # I5 — Zero workaround-masquerade `trigger-not-fired` debts
