@@ -1,6 +1,6 @@
 # 0106 — Multi-result return convention reconsideration (replace per-shape Win64 thunks)
 
-- **Status**: Proposed
+- **Status**: Accepted (path (a) buffer-write selected)
 - **Date**: 2026-05-22
 - **Author**: Shota Kudo + 2026-05-22 Agent 4 (v1/wasmtime comparative survey)
 - **Tags**: phase-9, codegen, jit, abi, multi-value, win64, sysv, aapcs64
@@ -144,20 +144,40 @@ even though the lowering is "uniform" at the API level).
   Win64" and produced exit-3 Writer-error crashes — the per-shape
   ABI is genuinely incompatible with Win64.
 
-## Final pick gate
+## Final pick (resolved 2026-05-23)
 
-User picks (a) or (b) at §9.13 hard gate review per ADR-0104 D3.
-This ADR's Proposed→Accepted flip occurs at that gate, with the
-chosen path designated.
+**Path (a) — buffer-write entry ABI** is selected per user collab
+re-audit against ROADMAP §2:
 
-**Recommendation** for the gate review: **path (b) — uniform
-implicit-SRet ABI lowering** — preserves the register-pair fast
-path for the common ≤ 2-result case and matches wasmtime's
-industry-leading codegen. Path (a) is acceptable as a simpler
-fallback if path (b) implementation cost is judged too high.
+- **P3 (cold-start over peak throughput)**: (a)'s 1 entry-helper
+  shape costs ~1 extra memory write per result on the ≤ 2-result
+  common case; (b)'s register-pair fast-path preservation buys
+  peak throughput at the cost of an ABI-lowering layer. v2 chooses
+  cold-start.
+- **P10 (knowledge compression / teaching)**: (a) is "callee
+  writes to caller-provided buffer" — one sentence. (b) requires
+  explaining implicit-result-area pointer + per-platform sizing
+  rules (SysV / Win64 / AAPCS64) + register-pair vs buffer
+  threshold logic.
+- **P13 (type up-front, invariants at design time)**: (a) is a
+  single ABI invariant across all arities and platforms; (b)
+  introduces per-arch sizing-rule invariants in the lowering
+  layer.
+- **§14 (API widening avoidance)**: (a) **reduces** the API
+  surface from 5 `FuncRet_*` extern structs to 1; (b) preserves
+  the per-shape catalog at the JIT layer (lowering-only change at
+  the ABI boundary).
+- **User Tier-0 decision (ADR-0104 D3)**: explicitly named
+  "buffer-write ABI 決心" as the chosen direction.
+- **Implementation cost**: 4 cycles ((a)) vs 6 cycles ((b)).
 
-Either way, the resulting design replaces the per-shape
-`FuncRet_*` extern struct family.
+(b) remains documented above as a viable industry-standard
+alternative, but is rejected for v2 on the principle alignment
+above. The 4-cycle Implementation plan in §"If path (a) —
+buffer-write entry ABI" is the autonomous-loop work scope.
+
+The chosen design replaces the per-shape `FuncRet_*` extern
+struct family.
 
 ## Implementation plan (post-Accept)
 
@@ -290,3 +310,4 @@ both close + all 3 hosts PASS `assert_return type-all-*` fixtures.
 | Date       | Commit       | Change                          |
 |------------|--------------|---------------------------------|
 | 2026-05-22 | `6bfd0c8c` | Initial draft (Proposed status; user picks path (a) or (b) at §9.13 hard gate review per ADR-0104 D5) |
+| 2026-05-23 | `<backfill>` | **Status: Proposed → Accepted with path (a) buffer-write selected** per user collab re-audit. ROADMAP §2 P3 + P10 + P13 + §14 (API widening avoidance) all favour (a) over (b); ADR-0104 D3 user Tier-0 decision explicitly named "buffer-write ABI 決心". (b) remains documented as a viable alternative but rejected for v2 on principle alignment. Implementation cost 4 cycles per §"If path (a)"; D-094 + D-164 close alongside. |

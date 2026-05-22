@@ -1,6 +1,6 @@
 # 0105 — Adopt JIT-prologue stack-probe for stack-overflow trap recovery
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-05-22
 - **Author**: Shota Kudo + 2026-05-22 Agent 4 (v1/wasmtime comparative survey)
 - **Tags**: phase-9, codegen, jit, win64, posix, stack-overflow, abi
@@ -285,3 +285,4 @@ when D-162 closes + all 3 hosts PASS `assert_exhaustion` fixtures.
 | Date       | Commit       | Change                          |
 |------------|--------------|---------------------------------|
 | 2026-05-22 | `6bfd0c8c` | Initial draft (Proposed status; user flips Accepted at §9.13 hard gate per ADR-0104 D5) |
+| 2026-05-23 | `<backfill>` | **Status: Proposed → Accepted** per user collab re-audit. Single design path with v1 + wasmtime precedent; ROADMAP §2 P3 (cold-start over peak; 2-instr prologue <1% overhead) + P10 (cross-platform uniformity teaches the same pattern on all 3 hosts) + P14 (`_resetstkoflw` Win64-only workaround explicitly Rejected) all align. No §14 forbidden-list conflict. Implementation per §"Implementation plan" cycles 1-3 now unblocked for the autonomous loop. |

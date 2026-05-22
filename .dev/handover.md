@@ -19,73 +19,75 @@ bash scripts/check_phase9_close_invariants.sh --gate
 (per `.claude/skills/continue/SKILL.md` Resume Step 5d + ADR-0104
 + `.claude/rules/phase9_close_invariants.md` §"Forbidden edits").
 
-**Current gate state**: **FAIL 5/18** (13 OK: I2×4 + I3×5 + I4 + I5
-+ I7×2). I2 c_api tests + I3 Zig facade landed 2026-05-23 cycle;
-remaining FAILs are all I6 (2 user-gated ADRs) and I1 (3
-SKIP-WIN64 arms, blocked by I6 implementations).
+**Current gate state**: **FAIL 3/18** (15 OK: I2×4 + I3×5 + I4 +
+I5 + I6×2 + I7×2). I6 ADR-0105 + ADR-0106 flipped Accepted
+2026-05-23 cycle (path (a) buffer-write selected for 0106 per
+ROADMAP §2 P3+P10+P13+§14 alignment + ADR-0104 D3 Tier-0).
+Remaining 3 FAILs are all I1 SKIP-WIN64 arms — implementation
+work, no longer user-gated.
 
-## Bucket-3 stop — user touchpoint required
+## Active task — I1 SKIP-WIN64 arm removal via ADR impl
 
-All autonomous prep walked; loop stops without re-arm.
+Per ADR-0105 + ADR-0106 Implementation plans:
 
-**Gating user touchpoint(s)**:
+### ADR-0105 (JIT-prologue stack-probe) — 3 cycles
 
-- **ADR-0105** ([`0105_jit_prologue_stack_probe.md`](./decisions/0105_jit_prologue_stack_probe.md))
-  — `Status: Proposed → Accepted` flip at §9.13 hard gate
-  review. After flip + impl (3 cycles per ADR-0105 §"Implementation
-  plan"), I1 `SKIP-WIN64-EXHAUSTION` removed; D-162 closes.
-- **ADR-0106** ([`0106_multi_result_return_convention.md`](./decisions/0106_multi_result_return_convention.md))
-  — `Status: Proposed → Accepted` flip **with path (a) buffer-write
-  OR path (b) implicit-SRet selection**. After flip + impl (4–6
-  cycles), I1 `SKIP-WIN64-MULTI-RESULT` removed; D-164 + D-094
-  close.
-- **D-163** (`SKIP-WIN64-CALL-INDIRECT-TRAP` codegen-bug spike)
-  is non-ADR-gated but downstream of the codegen-bug
-  investigation; surfaces after ADR-0105/0106 land.
+1. `JitRuntime.stack_limit` field + cross-platform init in
+   `instantiate.zig`.
+2. x86_64 + arm64 prologue emit + 3 trap-stub entries. Mac +
+   ubuntunote `assert_exhaustion runaway` PASS.
+3. Win64 prologue emit + `windows_traphandler.zig` EXCEPTION_
+   STACK_OVERFLOW filter removal + windowsmini verify. Remove
+   `SKIP-WIN64-EXHAUSTION` arm from `spec_assert_runner_base.zig`.
+   Closes D-162; gate I1a OK.
 
-**Autonomous prep walked this resume** (do not re-walk):
+### ADR-0106 path (a) buffer-write entry ABI — 4 cycles
 
-- ADR-0105 + ADR-0106 References §: comprehensive v1 +
-  wasmtime + spec testsuite citations with line ranges. SHA
-  backfill enrichment commit `97b2a2db` is the touchpoint.
-  **Null result for further refs** — production-runtime
-  survey already covers v1 + wasmtime; no third reference
-  adds value.
-- ADR-0106 path (a) vs (b) spike: **null result** — both
-  paths have detailed implementation plans in the ADR
-  itself; a spike would re-derive ADR content. User's
-  selection at §9.13 is judgment over (a) simplicity vs (b)
-  register-pair fast-path preservation, not data-gated.
-- ADR-0105 spike: **not applicable** — single design path;
-  spike would BE the on-branch impl gated on Accept.
-- ADR-0105/0106 Consequences refinement: **null result** —
-  Consequences sections detailed against current code state
-  at draft (`6bfd0c8c`); no consequence has dissolved.
+1. Introduce `[*]u64 results` parameter in `entry.zig` entry-
+   helper signature; update `runner.zig` / `instantiate.zig`
+   callsites.
+2. x86_64 JIT epilogue rewrites — write `results[i]` instead
+   of RAX/RDX.
+3. arm64 JIT epilogue rewrites — write `results[i]` instead
+   of X0/X1.
+4. Remove `FuncRet_*` extern struct family from `entry.zig`.
+   Remove `SKIP-WIN64-MULTI-RESULT` arm. D-094 + D-164 close;
+   gate I1c OK.
 
-**To resume**: flip ADR-0105 + ADR-0106 Status to Accepted
-(user collab review at §9.13 hard gate) and re-invoke
-/continue. The autonomous loop will then pick up I1 SKIP arm
-removal + JIT-prologue stack-probe + multi-result ABI
-implementation per ADR-0104 D5 / D6.
+### ADR-0163 (Win64 call_indirect trap codegen spike) — 1-2 cycles
+
+Disassemble `emitCallIndirect` Win64 branch at the OOB fixture's
+index 306 site; compare bounds-check + trap-stub epilogue with
+POSIX sibling; fix divergence. Remove `SKIP-WIN64-CALL-INDIRECT-
+TRAP` arm. Gate I1b OK.
+
+## Phase 9 close sequence (post-I1)
+
+1. All 3 SKIP-WIN64 arms removed → gate 18/18 OK.
+2. windowsmini `test-all` green with ZERO `SKIP-WIN64-*` token
+   (Phase boundary windowsmini reconciliation per ADR-0049).
+3. §9.13-0 / §9.12-F / §9.12-I re-flipped `[x]` with cited SHAs.
+4. §9.13 🔒 collab gate review cleared.
+5. Phase Status widget flips `9 | IN-PROGRESS → DONE`.
 
 ## Work landed this session (2026-05-23 cycle)
 
-- **I3** Zig facade `Runtime` / `Module` / `Instance` / `Value`
-  + facade test in `src/zwasm.zig` (`6c4faeea`).
+- **I3** Zig facade `Runtime / Module / Instance / Value` +
+  facade test in `src/zwasm.zig` (`6c4faeea`).
 - **I2** 4 c_api Wasm-2.0 utilisation test blocks in
   `src/api/instance.zig` (`a35e0f21`): reftype round-trip,
   bulk-traps, mixed-exports walk, cross-module funcref.
-- **§5.4** stale ADR/debt cleanup (`97b2a2db`): 5 ADR
-  Revision history SHA backfills (ADR-0078 / 0103 / 0104 /
-  0105 / 0106); D-007 / D-010 Phase target verification.
-- **D-062** closed (this cycle, no commit yet) — barrier-
-  dissolution check found arm64 v128 9th+ stack-arg already
-  implemented at §9.9 / 9.9-f-3 = `80b2f1c5` (caller) +
-  §9.9-e-1 (callee). Row removed from `debt.md`.
+- **§5.4** stale ADR/debt cleanup (`97b2a2db`): 5 ADR Revision
+  history SHA backfills + D-007 / D-010 Phase target verify.
+- **D-062** closed (`b14e5438`) — barrier dissolved
+  (§9.9-f-3 `80b2f1c5` already landed both sides).
+- **I6** ADR-0105 + ADR-0106 Accepted (this commit, path (a)
+  buffer-write for ADR-0106).
 
 ## Active `now` debts
 
-(None — D-062 closed this cycle.)
+(None — D-062 closed; D-094 / D-164 will flip to `now` and
+close inside the ADR-0106 path (a) implementation cycles.)
 
 ## See
 
@@ -93,10 +95,11 @@ implementation per ADR-0104 D5 / D6.
   Tier 1; §6 exit predicate; §8 fresh-session entry).
 - [ADR-0104](./decisions/0104_phase9_honest_accounting_reframe.md)
   (META reframe; Accepted).
-- [ADR-0105](./decisions/0105_jit_prologue_stack_probe.md) +
-  [ADR-0106](./decisions/0106_multi_result_return_convention.md)
-  (Proposed; user-gated).
+- [ADR-0105](./decisions/0105_jit_prologue_stack_probe.md)
+  (Accepted 2026-05-23; impl per §"Implementation plan").
+- [ADR-0106](./decisions/0106_multi_result_return_convention.md)
+  (Accepted 2026-05-23 path (a); impl per §"If path (a)").
 - [`.claude/rules/phase9_close_invariants.md`](../.claude/rules/phase9_close_invariants.md)
   (I1-I7 invariants + Forbidden edits).
-- [`debt.md`](./debt.md): D-094 / D-164 (ADR-0104 reframed;
-  blocked by ADR-0106 Accept).
+- [`debt.md`](./debt.md): D-094 / D-164 (blocked by ADR-0106
+  Accept — barrier dissolved; will move to `now` next cycle).
