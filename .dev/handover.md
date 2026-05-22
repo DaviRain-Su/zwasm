@@ -11,30 +11,30 @@
 [`.dev/phase9_13_0_close_plan.md`](./phase9_13_0_close_plan.md).
 The `/continue` skill's Step 1a close-plan override
 activates; follow that doc's §6 Work sequence. HEAD
-`1b78775f` (2026-05-22); §0 preflight is a 10-canary check
-(8 build tools + handle64 / Procmon64 — full Sysinternals
-bundle at `711bdcce`). All green at session close
-2026-05-22.
+`2b8e6904` (2026-05-22, D-161 close); §0 preflight is a
+10-canary check (8 build tools + handle64 / Procmon64 —
+full Sysinternals bundle at `711bdcce`).
 
 ## Active track
 
 | Next chunk | First action | Gating |
 |---|---|---|
-| **D-161** (autonomous) — Win64 Class B mixed-class entry helper impl | `src/engine/codegen/shared/entry.zig:1135/1188/1259` 3 `@panic("D-022")` sites — replace with Win64 inline-asm thunks mirroring existing arm64+SysV branches (callI32f64NoArgs / callF64i32NoArgs / callF64f32NoArgs); cross-compile gate `zig build -Dtarget=x86_64-windows-gnu` | **none** — autonomous-eligible; surfaced 2026-05-22 `ba68a896` windowsmini post-Defender-fix test-all (was hidden by D-028 wedge until Defender fix uncovered it) |
 | W3.b (main) — SEH shim impl per ADR 0103 | `src/platform/windows_traphandler.zig` (Zone 0): `install`/`uninstall`/`arm`/`disarm` + `vehHandler`; wire `installSigsegvHandler` Windows arm | **GATED** on user flip ADR 0103 Proposed → Accepted |
 
-Subsequent: W4 windowsmini reconcile (gated on W3.b + D-161
-both land); §9.13-0 close + Phase 9 boundary (gated on W4 +
-ADR 0102 flip).
+Subsequent: W4 windowsmini reconcile (gated on W3.b landing);
+§9.13-0 close + Phase 9 boundary (gated on W4 + ADR 0102 flip).
+
+All autonomous-eligible close-plan §6 rows are now landed
+(W0 / WA / F1 / W1 / W3.a / W5 / W6-Mac / D-161; W2 + W5
+struck). The remaining work is ADR-gated: W3.b on
+ADR 0103, Phase 9 boundary on ADR 0102.
 
 D-028 hypothesis #5 (Defender real-time scan) **CONFIRMED**
 at `ba68a896`: post-fix test-all completed without wedge.
 N=1; need N=5 consecutive silent runs per
-`heisenbug_discharge.md` streak rule to close.
-
-Discharged this session (do not re-walk): W0 / WA / F1 /
-W1 / W2 (struck) / W3.a / W5 (struck) / W6-Mac. Full ledger
-in close-plan §6.
+`heisenbug_discharge.md` streak rule to close. D-161 close
+unblocks one more test-all data point per natural-cycle
+windowsmini reconciles.
 
 ## Critical: do NOT widen shared `Error` for Win64 gaps
 
@@ -74,9 +74,7 @@ Inner loop = Mac cross-compile
 
 ## Active `now` debts
 
-- **D-161** — Win64 Class B mixed-class entry helper (3 @panic
-  sites at `entry.zig:1135/1188/1259`); autonomous-eligible
-  impl, surfaced 2026-05-22 `ba68a896`.
+(none — D-161 closed at `2b8e6904`.)
 
 ## Open questions / blockers (user-touchpoints)
 
