@@ -80,6 +80,7 @@ ADR amendment).
 | `SKIP-WASMTIME-UNUSABLE`       | `debt-trackable`  | D-008 (discharged `cb07e112`); runner-internal robustness signal — token survives for wasmtime stub-binary regression detection |
 | `SKIP-HOST-STATE-DIVERGED`     | `ADR-required`    | `.dev/decisions/skip_host_state_diverged.md`                   |
 | `SKIP-WIN64-EXHAUSTION`        | `debt-trackable`  | D-162 (Win64 stack-overflow guard-page restoration; VEH receives EXCEPTION_STACK_OVERFLOW but cannot re-arm guard page without `_resetstkoflw()` or prologue stack-probe; proper fix matches Wasmtime/Wasmer scheme) |
+| `SKIP-WIN64-CALL-INDIRECT-TRAP`| `debt-trackable`  | D-163 (Win64 JIT call_indirect trap path crashes mid-corpus; first surfaced at `as-call_indirect-last ()` in wasm-2.0-assert/call/call.0.wasm via W4 retry 4; POSIX trap-stub path works, Win64-specific failure mode TBD — JIT codegen OR VEH-recovery interaction) |
 
 ### When a new token is introduced
 
