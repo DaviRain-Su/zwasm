@@ -1,0 +1,176 @@
+//! Buffer-write entry ABI (ADR-0106 path (a), cycle 1).
+//!
+//! Sibling to `entry.zig`'s ~84 per-shape `callXX_yy` helpers.
+//! ADR-0106 path (a) collapses that catalog to ONE entry-helper
+//! shape:
+//!
+//! ```text
+//!   fn(*JitRuntime, [*]u64 results, [*]const u64 args)
+//!     callconv(.c) ErrCode
+//! ```
+//!
+//! Where `args` is a caller-prepared `u64` array (one slot per
+//! Wasm param, regardless of valtype — i32 / f32 fit in the low
+//! 32 bits, f64 / i64 in the full 64, funcref/externref pointers
+//! in the full 64), and `results` is a caller-allocated buffer
+//! sized by the function's `sig.results.len`. `ErrCode` is the
+//! trap-status return (0 = OK, non-0 = trap kind). The JIT body's
+//! epilogue writes each result to `results[i]` instead of the
+//! per-arch register-pair (RAX/RDX or X0/X1).
+//!
+//! Why this shape (per ADR-0106 §"Path (a) — buffer-write entry ABI"):
+//!
+//! - **Cross-platform uniformity**: the single `u64` ErrCode
+//!   return sidesteps Win64's hidden-RCX-pointer struct-return ABI
+//!   (the D-164 root cause). All 3 hosts use the same shape.
+//! - **Wasm 3.0 ready**: GC reftypes / EH tag-pack / memory64
+//!   ptr64 results all fit in the existing `u64` slots — no new
+//!   shape catalog per Wasm proposal.
+//! - **Closes D-094 + D-164 together**: the buffer-write
+//!   convention absorbs SysV's `> 2 same-class results` case
+//!   without needing the hidden-RDI MEMORY-class path.
+//!
+//! Cycle 1 (this commit) introduces the type alias + helper +
+//! a hand-rolled JIT-byte test that exercises the API shape end-
+//! to-end without touching the JIT emit path. Cycles 2-3 update
+//! the JIT epilogue (x86_64 + arm64) to write `results[i]`
+//! instead of RAX/RDX / X0/X1. Cycle 4 removes the per-shape
+//! `FuncRet_*` extern struct family from `entry.zig` + removes
+//! the `SKIP-WIN64-MULTI-RESULT` arm from `spec_assert_runner_base.zig`.
+//!
+//! Zone 2 (`src/engine/codegen/shared/`) — same as `entry.zig`.
+
+const std = @import("std");
+const builtin = @import("builtin");
+
+const jit_abi = @import("jit_abi.zig");
+const stack_limit_mod = @import("../../../platform/stack_limit.zig");
+
+pub const JitRuntime = jit_abi.JitRuntime;
+
+/// Trap-status return code from a buffer-write JIT entry.
+/// Mirrors the on-`JitRuntime.trap_kind` codes so the caller can
+/// disambiguate without a separate fetch (the JIT body still
+/// writes `trap_kind` to `rt.trap_kind` for diagnostic purposes;
+/// the C-ABI scalar return here is a redundant fast path).
+pub const ErrCode = u32;
+pub const ErrCode_OK: ErrCode = 0;
+
+pub const Error = error{Trap};
+
+/// Buffer-write entry function-pointer type. Wasm 1.0 / 2.0 / 3.0
+/// uniform — every JIT-compiled function (under path (a)) lowers
+/// to this signature regardless of arity / result types.
+pub const BufferWriteFn = *const fn (
+    rt: *JitRuntime,
+    results: [*]u64,
+    args: [*]const u64,
+) callconv(.c) ErrCode;
+
+/// Invoke a buffer-write-shape JIT function. The caller owns
+/// `args` (Wasm-param values packed as u64) and `results` (sized
+/// by the function's `sig.results.len`). On success the buffer
+/// contains the result values; on trap `Error.Trap` is returned
+/// and the buffer contents are undefined.
+///
+/// Mirrors `entry.invokeAndCheck`'s pre/post discipline:
+///   - Initialise `stack_limit` (ADR-0105 D1) so the prologue
+///     probe activates.
+///   - Clear `trap_flag` before the call.
+///   - Check `trap_flag` after the call; `Error.Trap` on non-0.
+///   - The ErrCode return is a redundant trap signal — if either
+///     ErrCode != 0 OR trap_flag != 0 the call is treated as trap.
+pub fn invokeBufferWrite(
+    rt: *JitRuntime,
+    fn_ptr: BufferWriteFn,
+    args: [*]const u64,
+    results: [*]u64,
+) Error!void {
+    rt.stack_limit = stack_limit_mod.computeStackLimit(stack_limit_mod.STACK_GUARD_HEADROOM);
+    rt.trap_flag = 0;
+    const code = fn_ptr(rt, results, args);
+    if (code != ErrCode_OK or rt.trap_flag != 0) return Error.Trap;
+}
+
+// ============================================================
+// Tests — hand-rolled JIT bytes that match the buffer-write ABI
+// without depending on the JIT emit changes (cycles 2-3).
+// ============================================================
+
+const testing = std.testing;
+
+/// Hand-rolled arm64 JIT bytes: writes `results[0] = 42`, returns 0.
+///
+/// AAPCS64 mapping: X0=rt, X1=results, X2=args. Body:
+///   MOVZ X3, #42        ; 0xD2800543 → 0x43 0x05 0x80 0xD2
+///   STR  X3, [X1]       ; 0xF9000023 → 0x23 0x00 0x00 0xF9
+///   MOV  W0, WZR        ; 0x2A1F03E0 → 0xE0 0x03 0x1F 0x2A
+///   RET                 ; 0xD65F03C0 → 0xC0 0x03 0x5F 0xD6
+const aarch64_results0_eq_42: [16]u8 = .{
+    0x43, 0x05, 0x80, 0xD2,
+    0x23, 0x00, 0x00, 0xF9,
+    0xE0, 0x03, 0x1F, 0x2A,
+    0xC0, 0x03, 0x5F, 0xD6,
+};
+
+/// Hand-rolled x86_64 SysV/Win64 JIT bytes: same semantics.
+///
+/// Win64: rt=RCX results=RDX args=R8. SysV: rt=RDI results=RSI args=RDX.
+/// We pick a register-agnostic sequence by re-loading via the SysV slot
+/// because the unit test compiles to native host ABI; the test runs
+/// on Mac aarch64 primarily so this body is gated by os/cpu.
+const x86_64_sysv_results0_eq_42: [16]u8 = .{
+    // MOV RAX, 42            -> 48 C7 C0 2A 00 00 00
+    0x48, 0xC7, 0xC0, 0x2A, 0x00, 0x00, 0x00,
+    // MOV [RSI], RAX         -> 48 89 06
+    0x48, 0x89, 0x06,
+    // XOR EAX, EAX           -> 31 C0
+    0x31, 0xC0,
+    // RET                    -> C3
+    0xC3,
+    // pad to 16
+    0x90,
+    0x90, 0x90,
+};
+
+test "buffer-write entry: hand-rolled JIT writes results[0] = 42 (ADR-0106 path (a) cycle 1 API check)" {
+    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64) and
+        !(builtin.cpu.arch == .x86_64 and builtin.os.tag != .windows))
+    {
+        return error.SkipZigTest;
+    }
+    const bytes: [16]u8 = if (builtin.cpu.arch == .aarch64)
+        aarch64_results0_eq_42
+    else
+        x86_64_sysv_results0_eq_42;
+
+    const jit_mem = @import("../../../platform/jit_mem.zig");
+    var block = try jit_mem.alloc(bytes.len);
+    defer jit_mem.free(block);
+    try jit_mem.setWritable(block);
+    @memcpy(block.bytes[0..bytes.len], &bytes);
+    try jit_mem.setExecutable(block);
+
+    const fn_ptr: BufferWriteFn = @ptrCast(block.bytes.ptr);
+
+    var rt: JitRuntime = .{
+        .vm_base = undefined,
+        .mem_limit = 0,
+        .funcptr_base = undefined,
+        .table_size = 0,
+        .typeidx_base = undefined,
+        .trap_flag = 0,
+        .globals_base = undefined,
+        .globals_count = 0,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
+    };
+    var args_buf: [1]u64 = .{0};
+    var results_buf: [1]u64 = .{0};
+    try invokeBufferWrite(&rt, fn_ptr, &args_buf, &results_buf);
+    try testing.expectEqual(@as(u64, 42), results_buf[0]);
+}
+
+test "buffer-write entry: ErrCode_OK sentinel" {
+    try testing.expectEqual(@as(ErrCode, 0), ErrCode_OK);
+}

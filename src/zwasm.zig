@@ -316,6 +316,7 @@ pub const engine = struct {
             pub const regalloc = @import("engine/codegen/shared/regalloc.zig");
             pub const linker = @import("engine/codegen/shared/linker.zig");
             pub const entry = @import("engine/codegen/shared/entry.zig");
+            pub const entry_buffer_write = @import("engine/codegen/shared/entry_buffer_write.zig");
             pub const compile = @import("engine/codegen/shared/compile.zig");
             pub const jit_abi = @import("engine/codegen/shared/jit_abi.zig");
             pub const thunk = @import("engine/codegen/shared/thunk.zig");
@@ -423,6 +424,7 @@ test {
     _ = @import("platform/stack_limit.zig");
     _ = @import("engine/codegen/shared/linker.zig");
     _ = @import("engine/codegen/shared/entry.zig");
+    _ = @import("engine/codegen/shared/entry_buffer_write.zig");
     _ = @import("engine/codegen/shared/jit_abi.zig");
     _ = @import("engine/codegen/shared/compile.zig");
     _ = @import("engine/codegen/shared/thunk.zig");
