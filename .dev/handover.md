@@ -60,8 +60,9 @@ Per ADR-0105 + ADR-0106 Implementation plans:
     (`d0aa6a85`). Mac compile + Linux x86_64 cross-compile green;
     ubuntu runtime test exercises end-to-end. Param marshal for
     buffer-write deferred to alongside cycle 2d/3.
-2d. [ ] arm64 emit sibling — capture X1 (= results) → frame slot
-    + epilogue write `[X<slot> + i*8]` + MOV W0, WZR (ErrCode_OK).
+2d. [x] arm64 emit branches prologue+epilogue on `result_abi`
+    (`a714da31`). Mac test-all green (0-arg buffer_write test
+    now runs natively).
 2e. [ ] Param-marshal change: when `.buffer_write`, args from
     `[args_ptr + i*8]` not per-class regs (both arches).
 3. [ ] arm64 JIT epilogue rewrites — write `results[i]` instead
