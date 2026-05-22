@@ -195,6 +195,110 @@ reliability concerns outweigh the once-per-merge value when
 manual periodic verification covers the regression-detection
 goal.
 
+## Interactive JIT debug session (windowsmini side, added 2026-05-22)
+
+windowsmini is wired as an **active debug host** equivalent to
+Mac aarch64 + ubuntunote x86_64 — not just a passive
+phase-boundary gate. The 4-tier iteration workflow
+(`.dev/phase9_13_0_close_plan.md` §0.2.1) covers test-gate
+flow; this section covers the **diagnostic flow** when a Win64
+JIT bug needs hands-on debugging.
+
+### Prerequisite — `install_tools.ps1 -OnlyTool sysinternals`
+
+The Sysinternals Suite (Procmon, Process Explorer, DebugView,
+Handle.exe, ListDLLs, PsExec, etc.) lands at
+`%LOCALAPPDATA%\zwasm-tools\sysinternals-<date>\` and joins
+User PATH. Run once after a fresh windowsmini provision; bump
+via `-Force -OnlyTool sysinternals` when refreshing.
+
+### Windows Defender exclusion baseline
+
+For zwasm v2 workloads on windowsmini, the Defender exclusions
+that **must be in place** (per 2026-05-22 user-side
+configuration):
+
+**ExclusionPath (8)**:
+- `C:\Program Files\LLVM` (lldb + llvm-objdump / nm / readobj / symbolizer / cxxfilt / etc.)
+- `C:\Users\shota\AppData\Local\zig` (zig global cache)
+- `C:\Users\shota\AppData\Local\zwasm-tools` (wabt / wasmtime / hyperfine / yq / wasm-tools)
+- `C:\Users\shota\AppData\Local\zwasm-tools\sysinternals-<date>` (explicit subpath for clarity)
+- `C:\Users\shota\AppData\Local\CrashDumps` (reserved for WER `.dmp` output)
+- `C:\Users\shota\Documents\MyProducts\zwasm_from_scratch` (repo root)
+- `C:\Users\shota\Documents\MyProducts\zwasm_from_scratch\.zig-cache`
+- `C:\Users\shota\Documents\MyProducts\zwasm_from_scratch\zig-out`
+
+**ExclusionProcess (17)** — all `build.zig::addExecutable` outputs:
+`build.exe`, `test.exe`, `zig.exe`, `zwasm.exe`,
+`zwasm-c-host-hello.exe`, `zwasm-edge-runner.exe`,
+`zwasm-realworld-{diff,run-jit,run,_}runner.exe` (4),
+`zwasm-spec-{assert,runner,simd,wasm-2-0-assert}.exe` (4),
+`zwasm-wasi-runner.exe`, `zwasm-wast-runner.exe`,
+`zwasm-wast-runtime-runner.exe`.
+
+Verify with:
+
+```powershell
+Get-MpPreference | Select-Object -ExpandProperty ExclusionPath
+Get-MpPreference | Select-Object -ExpandProperty ExclusionProcess
+```
+
+Without these, D-028-class wedges at runner transitions are
+expected (Defender image scan on `*.exe` spawn delays / stalls
+the parent's wait). The user 2026-05-22 dialogue captured the
+exact PowerShell sequence; future Defender setup drift can be
+re-applied from this list.
+
+### SSH-driven debug workflows
+
+The canonical recipes for each debug scenario live in
+[`.claude/skills/debug_jit_auto/SKILL.md`](../.claude/skills/debug_jit_auto/SKILL.md)
+Recipes 9-14:
+
+| Recipe | Use case | Tool |
+|---|---|---|
+| 9 | First-triage lldb on a reproducible crash | `lldb` via SSH |
+| 10 | D-028 wedge investigation (runner spawn stalls) | `Procmon64.exe` |
+| 11 | D-028 hypothesis #3 (fd / handle fullness) | `handle64.exe` |
+| 12 | JIT byte stream disasm (Win64 PE/COFF) | `llvm-objdump --disassemble -b binary` |
+| 13 | W3.b VEH handler entry trace (post-impl) | `Dbgview.exe` + `OutputDebugStringA` |
+| 14 | Post-mortem of WER `.dmp` crash dump | `lldb -c <dump>` |
+
+### Enabling WER crash dump collection (one-time setup, admin required)
+
+`%LOCALAPPDATA%\CrashDumps\` is reserved as the WER drop
+location but per-app registration is needed for non-default
+collection. **Not yet applied as of 2026-05-22**; apply when
+the first Win64 crash needs post-mortem analysis. Snippet (run
+as administrator on windowsmini):
+
+```powershell
+$reg = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps"
+foreach ($exe in @(
+    'zwasm-spec-runner.exe', 'zwasm-spec-assert.exe',
+    'zwasm-spec-wasm-2-0-assert.exe', 'zwasm-wast-runner.exe',
+    'zwasm-wast-runtime-runner.exe', 'zwasm-realworld-run-runner.exe',
+    'zwasm-realworld-run-jit-runner.exe'
+)) {
+    New-Item -Path "$reg\$exe" -Force | Out-Null
+    Set-ItemProperty -Path "$reg\$exe" -Name DumpType -Value 2  # 2 = full mini-dump
+    Set-ItemProperty -Path "$reg\$exe" -Name DumpFolder -Value 'C:\Users\shota\AppData\Local\CrashDumps'
+    Set-ItemProperty -Path "$reg\$exe" -Name DumpCount -Value 10
+}
+```
+
+After enable, any unrecovered crash drops a `.dmp` file; use
+Recipe 14 (lldb post-mortem) to inspect.
+
+### SSH-vs-desktop trade-off
+
+Procmon / Process Explorer / DebugView have **GUI**, but
+their headless invocation (Procmon `/Quiet /BackingFile`,
+Dbgview `/g /t /k /l <log>`) works fine over SSH and writes
+artifact files we then SCP back. The interactive GUI is
+faster for one-off exploration; the SSH form is the
+autonomous-loop-friendly path.
+
 ## When to update this file
 
 - After bumping `windowsmini` tool versions, sync the pin list.

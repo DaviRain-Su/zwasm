@@ -27,23 +27,30 @@ is the **how** for runtime-debug spikes — the catalogue of tools that
 already exist locally + the recipe shapes that fit the autonomous
 loop.
 
-## Tool inventory (post-7.10-l, ubuntunote-updated 2026-05-17)
+## Tool inventory (post-7.10-l, ubuntunote-updated 2026-05-17, windowsmini-added 2026-05-22)
 
-| Tool | Mac (nix `flake.nix`) | ubuntunote (`apt` / `nix profile`) | Purpose |
-|---|---|---|---|
-| `lldb` | `pkgs.lldb` (21.x) | Nix dev-shell via `flake.nix` (21.x) | batch-mode debugger; primary autonomous tool |
-| `gdb` | not in flake (darwin gdb is finicky — codesign required) | `apt install gdb` (15.x) | Linux-side alternative to lldb |
-| `ndisasm` / `nasm` | `pkgs.nasm` (3.x) | `apt install nasm` (2.16.x) | raw byte stream → x86_64 disasm |
-| `objdump` | clang's (in nix shell) | `apt install binutils` (default) | ELF / Mach-O disasm |
-| `strace` | not on Mac (use `dtruss` Apple-native) | `apt install strace` (6.8) | mmap / mprotect syscall trace (catches RWX page issues) |
-| `ltrace` | n/a | `apt install ltrace` (0.7.3) | libc / dynamic library call trace |
-| `valgrind` | `pkgs.valgrind` (Linux only at flake level) | `apt install valgrind` (3.22) | heap analysis when DebugAllocator isn't enough |
-| `bpftrace` | n/a (macOS lacks eBPF) | `apt install bpftrace` (0.20) + `bpfcc-tools` | kernel-level dynamic tracing (sigaction / SEGV path investigation; D-134 used `print-fatal-signals` + dmesg in lieu — `bpftrace` is the next-level escalation) |
-| `perf` | n/a | `apt install linux-tools-generic` | CPU profiling, branch / cache analysis |
-| `qemu-x86_64` | n/a | `apt install qemu-user-static` | cross-arch verification (run an x86_64 ELF under emulation) — useful for sanity-checking what the *native* x86_64 hardware does vs an emulator |
-| `readelf` / `nm` | clang's | binutils default | ELF inspection |
-| `xxd` | available | available | hex dump / patch |
-| `file` | available | `apt install file` | quick arch / format identification |
+| Tool | Mac (nix `flake.nix`) | ubuntunote (`apt` / `nix profile`) | windowsmini (`install_tools.ps1`) | Purpose |
+|---|---|---|---|---|
+| `lldb` | `pkgs.lldb` (21.x) | Nix dev-shell via `flake.nix` (21.x) | LLVM bundle 22.1.6 at `C:\Program Files\LLVM\bin\lldb.exe` | batch-mode debugger; primary autonomous tool |
+| `gdb` | not in flake (darwin gdb is finicky — codesign required) | `apt install gdb` (15.x) | n/a (use lldb) | Linux-side alternative to lldb |
+| `ndisasm` / `nasm` | `pkgs.nasm` (3.x) | `apt install nasm` (2.16.x) | n/a (use llvm-objdump --disassemble -b binary) | raw byte stream → x86_64 disasm |
+| `objdump` / `llvm-objdump` | clang's (in nix shell) | `apt install binutils` (default) | `llvm-objdump.exe` (LLVM bundle) | ELF / Mach-O / PE/COFF disasm |
+| `llvm-readobj` | clang's | binutils default | LLVM bundle | PE/COFF / ELF inspection (symbols, sections, headers) |
+| `llvm-symbolizer` | clang's | binutils default | LLVM bundle | backtrace symbolication |
+| `strace` | not on Mac (use `dtruss` Apple-native) | `apt install strace` (6.8) | n/a (use **Procmon64.exe** — Sysinternals — for file/process/registry trace) | syscall / OS event trace (catches RWX page issues, file access timing) |
+| `ltrace` | n/a | `apt install ltrace` (0.7.3) | n/a (lib call trace not first-class on Win) | libc / dynamic library call trace |
+| `valgrind` | `pkgs.valgrind` (Linux only at flake level) | `apt install valgrind` (3.22) | n/a | heap analysis when DebugAllocator isn't enough |
+| `bpftrace` | n/a (macOS lacks eBPF) | `apt install bpftrace` (0.20) + `bpfcc-tools` | n/a (ETW / WPR is the Win analog; not wired yet) | kernel-level dynamic tracing |
+| `perf` | n/a | `apt install linux-tools-generic` | n/a (PerfView is the Win analog; not installed yet) | CPU profiling, branch / cache analysis |
+| `qemu-x86_64` | n/a | `apt install qemu-user-static` | n/a (windowsmini is native x86_64) | cross-arch verification |
+| `readelf` / `nm` | clang's | binutils default | `llvm-nm.exe` (LLVM bundle) | ELF / PE/COFF symbol inspection |
+| `xxd` | available | available | `bash -c "xxd ..."` via Git-Bash; or PowerShell `Format-Hex` | hex dump / patch |
+| `file` | available | `apt install file` | `bash -c "file ..."` via Git-Bash | quick arch / format identification |
+| **`Procmon64.exe`** | n/a | n/a | Sysinternals bundle (`install_tools.ps1 -OnlyTool sysinternals`) — `%LOCALAPPDATA%\zwasm-tools\sysinternals-<date>\` | Process / file / registry trace. **D-028 wedge investigation primary tool**. Filter on Process Name → see exactly what zwasm-spec-runner.exe's spawn does (parent process wait, image scan delay, etc.) |
+| **`procexp64.exe`** | n/a | n/a | Sysinternals bundle | Live process state, fd / handle count. **D-028 hypothesis #3 (fd-table fullness)** directly observable here — open Process Explorer → Find Handle → see handle count per process |
+| **`handle64.exe`** | n/a | n/a | Sysinternals bundle | CLI fd/handle enumeration. `handle64.exe -p zwasm-spec-runner.exe` lists open handles of a specific process |
+| **`Dbgview.exe`** | n/a | n/a | Sysinternals bundle | Capture `OutputDebugStringA/W` from any process. Useful when adding W3.b VEH-handler debug prints |
+| **`tcpview64.exe`** | n/a | n/a | Sysinternals bundle | TCP/UDP connection viewer. Not core for JIT debug; included with bundle |
 
 **Not viable / out of scope**: `rr` (record-and-replay) — needs
 perf counters that virtualised hosts often don't expose
@@ -321,29 +328,234 @@ Capture the address anyway and add a row to this table in
 the same commit that closes the bug. The cheatsheet's
 value is cumulative.
 
+## Windows recipes (windowsmini-specific, added 2026-05-22)
+
+The POSIX-signal-model recipes (1, 4, 7) DON'T apply cleanly on
+Win64 — Windows uses Vectored Exception Handling (VEH) +
+Structured Exception Handling (SEH) instead of `sigaction` /
+`sigsetjmp`. Until D-136 / W3.b lands the VEH bridge (per
+ADR-0103), Windows-side trap recovery is **not present** — any
+SEGV / OOB / illegal-instruction in JIT code terminates the
+process outright. These recipes work around that.
+
+Common SSH invocation pattern for all Windows recipes:
+
+```bash
+# From Mac: drop into windowsmini's PowerShell or Git-Bash
+ssh windowsmini "powershell -NoLogo -NoProfile -Command \"<cmd>\""
+ssh windowsmini "bash -lc '<cmd>'"
+```
+
+### Recipe 9 — `lldb -b` first triage on windowsmini (SSH)
+
+Mirror of Recipe 1, adapted for Win64 PE/COFF:
+
+```bash
+ssh windowsmini "bash -lc '
+  cd ~/Documents/MyProducts/zwasm_from_scratch
+  lldb -b \
+    -o \"settings set target.x86-disassembly-flavor intel\" \
+    -o \"process launch -- <argv>\" \
+    -o \"register read\" \
+    -o \"disassemble --pc --count 20\" \
+    -o \"memory read --size 1 --count 256 \\\$pc\" \
+    -o \"thread backtrace\" \
+    -o \"quit\" \
+    ./zig-out/bin/<exe>.exe 2>&1
+'"
+```
+
+**Differences from POSIX**:
+- Register names: `RIP` / `RSP` / `RBP` same as Linux x86_64
+- Symbol resolution uses PE/COFF + .pdb (Zig emits both for
+  debug builds); lldb auto-discovers .pdb files next to .exe
+- `EXCEPTION_ACCESS_VIOLATION` is the Win64 equivalent of
+  SIGSEGV — lldb on Windows prints "stop reason = Exception
+  Access violation".
+
+### Recipe 10 — `Procmon64.exe` for process spawn / file access trace (D-028 primary)
+
+Procmon captures every file / process / registry / network
+event with timestamp. Killer tool for D-028 wedge: see exactly
+which child-process spawn hangs and what files are being
+scanned at that moment.
+
+```bash
+# Manual interactive (from windowsmini desktop):
+#   1. Procmon64.exe → start capture
+#   2. Filter: Process Name contains "zwasm" OR contains "zig"
+#   3. Run: zig build test-all in another shell
+#   4. After wedge: File → Save → CSV or PML
+#   5. Look for: Process Create events + the millisecond gap
+#      before/after suspect runner transition (wast_runner exit →
+#      spec_assert_runner start)
+
+# Headless (SSH-driven) capture via /BackingFile + /Quiet:
+ssh windowsmini "powershell -NoLogo -NoProfile -Command \"
+  Start-Process -FilePath 'C:\Users\shota\AppData\Local\zwasm-tools\sysinternals-2026-05-22\Procmon64.exe' \
+    -ArgumentList '/Quiet','/Minimized','/BackingFile','C:\Users\shota\procmon-trace.pml','/AcceptEula'
+\""
+# Run test-all in another SSH session
+# Then:
+ssh windowsmini "powershell -NoLogo -NoProfile -Command \"
+  & 'C:\Users\shota\AppData\Local\zwasm-tools\sysinternals-2026-05-22\Procmon64.exe' /Terminate
+\""
+# Then SCP procmon-trace.pml back to Mac and open with Procmon GUI
+# (Procmon native PML format is not text-readable; export to CSV via GUI for grep)
+```
+
+**What to look for in the trace** (D-028 wedge specifically):
+- Long gaps (>10 s) between `Process Create` for one runner
+  and its first `File Read` event → image scan delay
+- `CreateFile` events on `.exe` files from `MsMpEng.exe`
+  (Defender process) interleaved with zwasm process spawn →
+  confirms Defender hypothesis (#5 in D-028)
+- Sudden burst of handle / file events at runner transition →
+  hypothesis #3 evidence
+
+### Recipe 11 — `handle64.exe` for fd / handle count (D-028 #3 probe)
+
+D-028 hypothesis #3 says "fd-table fullness at runner
+transition". Test directly:
+
+```bash
+# Snapshot of all open handles for a specific process:
+ssh windowsmini "powershell -NoLogo -NoProfile -Command \"
+  & 'C:\Users\shota\AppData\Local\zwasm-tools\sysinternals-2026-05-22\handle64.exe' \
+    -p zwasm-spec-runner.exe -accepteula
+\""
+
+# Per-process count (rough):
+ssh windowsmini "powershell -NoLogo -NoProfile -Command \"
+  & 'C:\Users\shota\AppData\Local\zwasm-tools\sysinternals-2026-05-22\handle64.exe' \
+    -p zwasm-spec-runner.exe -accepteula 2>\\\$null | Measure-Object -Line
+\""
+
+# All processes with high handle count:
+ssh windowsmini "powershell -NoLogo -NoProfile -Command \"
+  Get-Process | Sort-Object -Property HandleCount -Descending | Select-Object -First 10 Name, HandleCount, Id
+\""
+```
+
+**Expected baseline**: zwasm test runners typically hold
+50-200 handles. If a wedged process shows >5000 handles,
+hypothesis #3 is confirmed.
+
+### Recipe 12 — `llvm-objdump` PE/COFF JIT byte disasm
+
+Mirror of Recipe 2, adapted for Win64. Since the JIT-emitted
+bytes are NOT in a PE/COFF file (they live at mmap'd memory),
+the same `--disassemble -b binary` form works:
+
+```bash
+ssh windowsmini "bash -lc '
+  # Hex dump from spike code: write block.bytes to /tmp/jit.bin (via lldb memory write -outfile)
+  llvm-objdump --disassemble -b binary -m x86_64 --x86-asm-syntax=intel /tmp/jit.bin
+'"
+
+# To inspect an actual PE/COFF binary (test exe symbols, sections):
+ssh windowsmini "bash -lc '
+  llvm-readobj --headers --sections --symbols ./zig-out/bin/zwasm-spec-runner.exe
+'"
+
+# To dump only the .text section disasm:
+ssh windowsmini "bash -lc '
+  llvm-objdump --disassemble --section=.text ./zig-out/bin/zwasm-spec-runner.exe | head -200
+'"
+```
+
+### Recipe 13 — `Dbgview.exe` + `OutputDebugStringA` for VEH handler verification (W3.b post-land)
+
+**Placeholder until W3.b SEH bridge implementation lands.**
+
+When `src/platform/windows_traphandler.zig` is implemented per
+ADR-0103, instrument the `vehHandler` entry point with
+`OutputDebugStringA("[veh] hit RIP=...")` calls. Capture with:
+
+```bash
+# Manual: launch Dbgview.exe on windowsmini desktop, "Capture Win32" + "Capture Events"
+# Then run the test that triggers VEH
+
+# Programmatic launch:
+ssh windowsmini "powershell -NoLogo -NoProfile -Command \"
+  Start-Process -FilePath 'C:\Users\shota\AppData\Local\zwasm-tools\sysinternals-2026-05-22\Dbgview.exe' \
+    -ArgumentList '/g','/t','/k','/l','C:\Users\shota\veh-trace.log'
+\""
+```
+
+`OutputDebugStringA` is the most reliable async-signal-safe-ish
+escape hatch on Windows for VEH handler observation; printf is
+not safe in VEH context (loader lock, etc.).
+
+### Recipe 14 — Crash dump (WER `.dmp`) post-mortem with lldb
+
+When a Win64 test crashes outright (no recovery, process kill),
+Windows Error Reporting auto-drops a `.dmp` file to
+`%LOCALAPPDATA%\CrashDumps\` (path is in ExclusionPath per
+2026-05-22 setup). lldb on Windows can read these:
+
+```bash
+ssh windowsmini "bash -lc '
+  ls -la /c/Users/shota/AppData/Local/CrashDumps/
+  lldb -c /c/Users/shota/AppData/Local/CrashDumps/zwasm-spec-runner.exe.<pid>.dmp \
+    -o \"thread backtrace all\" \
+    -o \"register read\" \
+    -o \"quit\"
+'"
+```
+
+**Enabling WER dump collection** (one-time, requires admin —
+or PowerShell ssh if user has admin):
+
+```powershell
+# Set per-app dump config for zwasm runners (DumpType 2 = full mini-dump):
+$reg = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps"
+New-Item -Path "$reg\zwasm-spec-runner.exe" -Force
+Set-ItemProperty -Path "$reg\zwasm-spec-runner.exe" -Name DumpType -Value 2
+Set-ItemProperty -Path "$reg\zwasm-spec-runner.exe" -Name DumpFolder -Value 'C:\Users\shota\AppData\Local\CrashDumps'
+Set-ItemProperty -Path "$reg\zwasm-spec-runner.exe" -Name DumpCount -Value 10
+```
+
+(Not yet applied on windowsmini as of 2026-05-22 — add when
+first Win64 crash needs post-mortem analysis.)
+
 ## When to invoke each recipe (decision tree)
 
 ```
-SEGV reproduces in test-realworld-run-jit?
-├── YES → Recipe 1 (lldb -b) for first triage. Read fault RIP.
-│        ├── RIP inside JIT block (block.bytes.ptr ≤ RIP < ptr+len)?
-│        │   ├── YES → Recipe 2 (ndisasm) on the byte range.
-│        │   │        Identify the faulting x86 insn → trace back
-│        │   │        to the emit-pass site that produced it.
-│        │   │        → Likely candidates: prologue stack
-│        │   │          alignment, spill region overflow, trap
-│        │   │          stub address calc.
-│        │   └── NO → not in JIT body. Check entry shim
-│        │            (entry.zig), runtime ptr passing, or
-│        │            JitRuntime layout (Recipe 3).
-│        └── Crash before lldb attaches?
-│            └── Recipe 4 (SIGSEGV handler) instead.
+Host = Mac / ubuntunote?
+├── SEGV reproduces in test-realworld-run-jit?
+│   ├── YES → Recipe 1 (lldb -b) for first triage. Read fault RIP.
+│   │        ├── RIP inside JIT block (block.bytes.ptr ≤ RIP < ptr+len)?
+│   │        │   ├── YES → Recipe 2 (ndisasm) on the byte range.
+│   │        │   │        Identify the faulting x86 insn → trace back
+│   │        │   │        to the emit-pass site that produced it.
+│   │        │   │        → Likely candidates: prologue stack
+│   │        │   │          alignment, spill region overflow, trap
+│   │        │   │          stub address calc.
+│   │        │   └── NO → not in JIT body. Check entry shim
+│   │        │            (entry.zig), runtime ptr passing, or
+│   │        │            JitRuntime layout (Recipe 3).
+│   │        └── Crash before lldb attaches?
+│   │            └── Recipe 4 (SIGSEGV handler) instead.
+│   │
+│   ├── NO but suspect mprotect issue?
+│   │   └── Recipe 3 (strace) for mmap/mprotect timeline.
+│   │
+│   └── Hard to localise to one fixture?
+│       └── Recipe 5 (spike) + Recipe 6 (bisection).
 │
-├── NO but suspect mprotect issue?
-│   └── Recipe 3 (strace) for mmap/mprotect timeline.
-│
-└── Hard to localise to one fixture?
-    └── Recipe 5 (spike) + Recipe 6 (bisection).
+└── Host = windowsmini?
+    ├── Process wedges / hangs at runner transition (D-028 shape)?
+    │   ├── First: Recipe 11 (handle64 fd count) — hypothesis #3 probe
+    │   └── Then: Recipe 10 (Procmon trace) — see what spawn does
+    │
+    ├── Crash / EXCEPTION_ACCESS_VIOLATION?
+    │   ├── If WER dump available: Recipe 14 (post-mortem)
+    │   ├── If reproducible under lldb: Recipe 9 (lldb -b, SSH form)
+    │   └── If JIT bytes need disasm: Recipe 12 (llvm-objdump PE)
+    │
+    └── W3.b VEH bridge work (D-136 impl)?
+        └── Recipe 13 (Dbgview + OutputDebugString) for VEH entry trace
 ```
 
 ## Lessons / ADR landing
@@ -405,6 +617,8 @@ incantation" not "this reads like documentation".
   for the native x86_64 Linux gate host (post-ADR-0067).
 - `.dev/orbstack_setup.md` — retained for dev-scratch use only
   (no longer the per-chunk gate host per ADR-0067).
-- `.dev/windows_ssh_setup.md` — windowsmini setup (no JIT debug
-  workflow yet — Windows-side JIT crashes need their own
-  recipes; add when first encountered).
+- `.dev/windows_ssh_setup.md` — windowsmini setup; see its
+  "Interactive JIT debug session" section for canonical SSH-
+  side workflow (lldb-attach, Procmon launch, WER dump
+  collection). Recipes 9-14 above are the toolkit; setup.md
+  is the host-side prerequisite list.
