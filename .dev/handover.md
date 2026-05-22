@@ -34,10 +34,12 @@ Per ADR-0105 + ADR-0106 Implementation plans:
 
 1. [x] `JitRuntime.stack_limit` field + `src/platform/stack_limit.zig`
    cross-platform query helper (this cycle `3aa5ee5e`).
-2. [ ] x86_64 + arm64 prologue emit (`cmp sp, [vmctx+stack_limit_off]
-   + b.ls trap-stub`) + 3 trap-stub entries + wire stack_limit init
-   into entry helpers. Mac + ubuntunote `assert_exhaustion runaway`
-   PASS.
+2a. [x] arm64 prologue probe + stack-overflow trap stub (`7b86f715`).
+    stack_limit=0 default keeps probe a no-op; Mac test-all green.
+2b. [ ] x86_64 prologue probe + trap stub (sibling to arm64).
+2c. [ ] Wire stack_limit init at entry-helper sites + spec runner;
+    verify `assert_exhaustion runaway` PASS via probe (not via
+    OS guard page).
 3. [ ] Win64 prologue emit + `windows_traphandler.zig` EXCEPTION_
    STACK_OVERFLOW filter removal + windowsmini verify. Remove
    `SKIP-WIN64-EXHAUSTION` arm from `spec_assert_runner_base.zig`.
