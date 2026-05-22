@@ -19,107 +19,73 @@ bash scripts/check_phase9_close_invariants.sh --gate
 (per `.claude/skills/continue/SKILL.md` Resume Step 5d + ADR-0104
 + `.claude/rules/phase9_close_invariants.md` §"Forbidden edits").
 
-Current gate state: **FAIL 5/18** (13 OK: I2×4 + I3×5 + I4 + I5 +
-I7×2) — I2 c_api tests + I3 facade landed; remaining I1 (3
-SKIP-WIN64, blocked by I6) and I6 (2 ADR Accept, user-gated).
-`[x]` flips on §9.13-0 / §9.12-F / §9.12-I / §9.13 are §18.3
-violations until the gate exits 0.
+**Current gate state**: **FAIL 5/18** (13 OK: I2×4 + I3×5 + I4 + I5
++ I7×2). I2 c_api tests + I3 Zig facade landed 2026-05-23 cycle;
+remaining FAILs are all I6 (2 user-gated ADRs) and I1 (3
+SKIP-WIN64 arms, blocked by I6 implementations).
 
-## Phase 9 = DONE predicate
+## Bucket-3 stop — user touchpoint required
 
-Per master plan §6 + ADR-0104 D1:
+All autonomous prep walked; loop stops without re-arm.
 
-1. `check_phase9_close_invariants.sh --gate` exit 0
-2. windowsmini `test-all` green with ZERO `SKIP-WIN64-*` token
-3. c_api Wasm-2.0 utilisation tests landed (4 fixtures)
-4. Zig facade subset in `src/zwasm.zig` (Runtime / Module /
-   Instance / Value) + facade test
-5. `wast_runtime_runner` in `test-all`
-6. ADR-0105 + ADR-0106 `Status: Accepted` (user collab flip at
-   §9.13 hard gate review)
-7. §9.13-0 / §9.12-F / §9.12-I re-flipped `[x]` with cited SHAs
-8. §9.13 collab gate cleared
+**Gating user touchpoint(s)**:
 
-## User Tier-0 decision (2026-05-22, sticky)
+- **ADR-0105** ([`0105_jit_prologue_stack_probe.md`](./decisions/0105_jit_prologue_stack_probe.md))
+  — `Status: Proposed → Accepted` flip at §9.13 hard gate
+  review. After flip + impl (3 cycles per ADR-0105 §"Implementation
+  plan"), I1 `SKIP-WIN64-EXHAUSTION` removed; D-162 closes.
+- **ADR-0106** ([`0106_multi_result_return_convention.md`](./decisions/0106_multi_result_return_convention.md))
+  — `Status: Proposed → Accepted` flip **with path (a) buffer-write
+  OR path (b) implicit-SRet selection**. After flip + impl (4–6
+  cycles), I1 `SKIP-WIN64-MULTI-RESULT` removed; D-164 + D-094
+  close.
+- **D-163** (`SKIP-WIN64-CALL-INDIRECT-TRAP` codegen-bug spike)
+  is non-ADR-gated but downstream of the codegen-bug
+  investigation; surfaces after ADR-0105/0106 land.
 
-- D-162 fix: **JIT-prologue stack-probe** (ADR-0105; v1 +
-  wasmtime precedent). Supersedes ADR-0103 path-(a)
-  `_resetstkoflw` quick fix → REJECTED.
-- D-164 fix: **buffer-write entry ABI** OR **uniform implicit-
-  SRet** (ADR-0106; user picks at §9.13 gate). Per-shape Win64
-  inline-asm thunks REJECTED (band-aid).
-- §9.13-0 / §9.12-F / §9.12-I premature `[x]` REVERTED per
-  ADR-0104 D2 (audit found drift-amended criteria).
+**Autonomous prep walked this resume** (do not re-walk):
 
-## Tier 1 outstanding work (per master plan §5)
+- ADR-0105 + ADR-0106 References §: comprehensive v1 +
+  wasmtime + spec testsuite citations with line ranges. SHA
+  backfill enrichment commit `97b2a2db` is the touchpoint.
+  **Null result for further refs** — production-runtime
+  survey already covers v1 + wasmtime; no third reference
+  adds value.
+- ADR-0106 path (a) vs (b) spike: **null result** — both
+  paths have detailed implementation plans in the ADR
+  itself; a spike would re-derive ADR content. User's
+  selection at §9.13 is judgment over (a) simplicity vs (b)
+  register-pair fast-path preservation, not data-gated.
+- ADR-0105 spike: **not applicable** — single design path;
+  spike would BE the on-branch impl gated on Accept.
+- ADR-0105/0106 Consequences refinement: **null result** —
+  Consequences sections detailed against current code state
+  at draft (`6bfd0c8c`); no consequence has dissolved.
 
-### §5.1 — Win64 codegen redesign (ADR-0105 + ADR-0106)
+**To resume**: flip ADR-0105 + ADR-0106 Status to Accepted
+(user collab review at §9.13 hard gate) and re-invoke
+/continue. The autonomous loop will then pick up I1 SKIP arm
+removal + JIT-prologue stack-probe + multi-result ABI
+implementation per ADR-0104 D5 / D6.
 
-- [ ] D-162 close — JIT-prologue stack-probe (ADR-0105)
-- [ ] D-164 close — multi-result ABI (ADR-0106 path a or b)
-- [ ] D-163 close — Win64 call_indirect trap codegen spike
-- D-094 closes alongside D-164 (uniform multi-result ABI)
-- D-062 mechanical — closes alongside ADR-0105/0106 land
+## Work landed this session (2026-05-23 cycle)
 
-### §5.2 — c_api / Zig API Wasm-2.0 tests + facade — DONE
-
-All in-source `test "..."` blocks in `src/api/instance.zig` /
-`src/zwasm.zig` (idiom-corrected 2026-05-22 — no `test/api/`
-directory).
-
-- [x] `test "wasm 2.0 reftype c_api round-trip"` — landed
-- [x] `test "wasm 2.0 bulk-traps via c_api"` — landed
-- [x] `test "wasm 2.0 mixed-exports c_api walk"` — landed
-- [x] `test "wasm 2.0 cross-module funcref via wasm_instance_new"` — landed
-- [x] `src/zwasm.zig` Zig facade (Runtime/Module/Instance/Value) +
-      `test "zwasm facade Wasm 2.0 ..."` block — landed
-- [x] `wast_runtime_runner` smoke step in `test-all` (I4 OK)
-
-### §5.4 — Stale ADR / debt cleanup — DONE (except §9.x SHA batch)
-
-- [x] D-007 / D-010 Phase target — already on rows (verified 2026-05-23)
-- [x] skip_cross_module_action / skip_embenchen_emcc_env_imports
-      Status: Superseded (`fca7fe1c`)
-- [x] D-149 SHA backfill — 5 ADR Revision rows landed
-      (this cycle). Remaining `<backfill>` tokens are template /
-      convention legitimate placeholders.
-- [ ] 17 §9.x rows SHA backfill — batch commit at Phase 9 close
-
-### Autonomous prep paths walked (per bucket-3)
-
-- **ADR-0105** (JIT-prologue stack-probe): References § already
-  comprehensive (v1: x86.zig:2708-2722, jit.zig:6464, cli.zig:2157,
-  guard.zig:289-309; wasmtime: 4 file paths with line ranges; spec
-  testsuite assert_exhaustion runaway). SHA backfill this cycle
-  (`<this commit>`) is the enrichment touchpoint. **Null result for
-  further refs** — production-runtime survey already covers v1 +
-  wasmtime; no third reference adds value.
-- **ADR-0106** (multi-result ABI): References § already
-  comprehensive (v1: vm.zig:33, x86.zig:25, cli.zig:2157;
-  wasmtime/cranelift: 4 abi.rs line ranges; wasm-c-api: wasm.h +
-  example/multi.c; failed cap=2 experiment SHA). SHA backfill this
-  cycle is the enrichment touchpoint. **Null result for further
-  refs** — industry-consensus survey covered.
-
-## How a fresh /continue cycle handles this state
-
-1. SessionStart hook prints CLAUDE.md + this handover.
-2. `/continue` Resume Step 2 finds §9.12-F as the first `[ ]` row.
-3. Resume Step 5d runs `check_phase9_close_invariants.sh --gate` →
-   FAIL with per-invariant detail.
-4. Loop reads master plan §5 for Tier-1 picklist.
-5. Picks next work (e.g. §5.1 D-162 stack-probe, §5.2 c_api
-   fixture, §5.4 D-007 Phase-target add).
-6. Implements + commits + gate re-runs.
-7. When gate exits 0, user reviews + flips ADR-0105 + ADR-0106
-   to Accepted, then re-flips §9.13-0 / §9.12-F / §9.12-I [x]
-   + clears §9.13 hard gate → Phase 9 = DONE.
+- **I3** Zig facade `Runtime` / `Module` / `Instance` / `Value`
+  + facade test in `src/zwasm.zig` (`6c4faeea`).
+- **I2** 4 c_api Wasm-2.0 utilisation test blocks in
+  `src/api/instance.zig` (`a35e0f21`): reftype round-trip,
+  bulk-traps, mixed-exports walk, cross-module funcref.
+- **§5.4** stale ADR/debt cleanup (`97b2a2db`): 5 ADR
+  Revision history SHA backfills (ADR-0078 / 0103 / 0104 /
+  0105 / 0106); D-007 / D-010 Phase target verification.
+- **D-062** closed (this cycle, no commit yet) — barrier-
+  dissolution check found arm64 v128 9th+ stack-arg already
+  implemented at §9.9 / 9.9-f-3 = `80b2f1c5` (caller) +
+  §9.9-e-1 (callee). Row removed from `debt.md`.
 
 ## Active `now` debts
 
-- D-062: arm64 v128 9th+ stack-arg overflow (mechanical;
-  precedent in §9.9 / 9.9-i-1 x86_64 sibling discharge per
-  ADR-0104 D3 reframe).
+(None — D-062 closed this cycle.)
 
 ## See
 
@@ -127,10 +93,10 @@ directory).
   Tier 1; §6 exit predicate; §8 fresh-session entry).
 - [ADR-0104](./decisions/0104_phase9_honest_accounting_reframe.md)
   (META reframe; Accepted).
-- [ADR-0105](./decisions/0105_jit_prologue_stack_probe.md)
-  (D-162 fix; Proposed).
-- [ADR-0106](./decisions/0106_multi_result_return_convention.md)
-  (D-164 / D-094 fix; Proposed).
+- [ADR-0105](./decisions/0105_jit_prologue_stack_probe.md) +
+  [ADR-0106](./decisions/0106_multi_result_return_convention.md)
+  (Proposed; user-gated).
 - [`.claude/rules/phase9_close_invariants.md`](../.claude/rules/phase9_close_invariants.md)
   (I1-I7 invariants + Forbidden edits).
-- [`debt.md`](./debt.md): D-094 / D-062 / D-164 (ADR-0104 reframed).
+- [`debt.md`](./debt.md): D-094 / D-164 (ADR-0104 reframed;
+  blocked by ADR-0106 Accept).
