@@ -19,10 +19,11 @@ bash scripts/check_phase9_close_invariants.sh --gate
 (per `.claude/skills/continue/SKILL.md` Resume Step 5d + ADR-0104
 + `.claude/rules/phase9_close_invariants.md` §"Forbidden edits").
 
-Current gate state: **FAIL 9/18** (9 OK: I3×5 + I4 + I5 + I7×2) —
-I3 Zig facade landed; I1 (3 SKIP-WIN64), I2 (4 c_api tests), I6
-(2 ADR Accept) remain. `[x]` flips on §9.13-0 / §9.12-F / §9.12-I /
-§9.13 are §18.3 violations until the gate exits 0.
+Current gate state: **FAIL 5/18** (13 OK: I2×4 + I3×5 + I4 + I5 +
+I7×2) — I2 c_api tests + I3 facade landed; remaining I1 (3
+SKIP-WIN64, blocked by I6) and I6 (2 ADR Accept, user-gated).
+`[x]` flips on §9.13-0 / §9.12-F / §9.12-I / §9.13 are §18.3
+violations until the gate exits 0.
 
 ## Phase 9 = DONE predicate
 
@@ -60,19 +61,19 @@ Per master plan §6 + ADR-0104 D1:
 - D-094 closes alongside D-164 (uniform multi-result ABI)
 - D-062 mechanical — closes alongside ADR-0105/0106 land
 
-### §5.2 — c_api / Zig API Wasm-2.0 tests + facade
+### §5.2 — c_api / Zig API Wasm-2.0 tests + facade — DONE
 
-In-source `test "..."` blocks in `src/api/instance.zig` (idiom-
-corrected 2026-05-22 — no `test/api/` directory).
+All in-source `test "..."` blocks in `src/api/instance.zig` /
+`src/zwasm.zig` (idiom-corrected 2026-05-22 — no `test/api/`
+directory).
 
-- [ ] `test "wasm 2.0 reftype c_api round-trip"` in src/api/instance.zig
-- [ ] `test "wasm 2.0 bulk-traps via c_api"` in src/api/instance.zig
-- [ ] `test "wasm 2.0 mixed-exports c_api walk"` in src/api/instance.zig
-- [ ] `test "wasm 2.0 cross-module funcref via wasm_instance_new"`
+- [x] `test "wasm 2.0 reftype c_api round-trip"` — landed
+- [x] `test "wasm 2.0 bulk-traps via c_api"` — landed
+- [x] `test "wasm 2.0 mixed-exports c_api walk"` — landed
+- [x] `test "wasm 2.0 cross-module funcref via wasm_instance_new"` — landed
 - [x] `src/zwasm.zig` Zig facade (Runtime/Module/Instance/Value) +
-      `test "zwasm facade Wasm 2.0 ..."` block — landed this cycle.
-- [x] `wast_runtime_runner` smoke step in `test-all` (verified
-      pre-Phase-9-close; I4 OK).
+      `test "zwasm facade Wasm 2.0 ..."` block — landed
+- [x] `wast_runtime_runner` smoke step in `test-all` (I4 OK)
 
 ### §5.4 — Stale ADR / debt cleanup (in-progress)
 
