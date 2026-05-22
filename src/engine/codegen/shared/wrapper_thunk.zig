@@ -286,20 +286,54 @@ pub fn emitX8664Win64(
     params: EmitParams,
 ) Error!EmitOutput {
     if (params.sig.params.len != 0) return Error.UnsupportedOp;
-    if (params.sig.results.len != 2) return Error.UnsupportedOp;
     if (!all_gpr_class(params.sig.results)) return Error.UnsupportedOp;
 
+    const n_results = params.sig.results.len;
     var bytes: std.ArrayList(u8) = .empty;
     errdefer bytes.deinit(allocator);
 
-    try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x28 }); // SUB RSP, 0x28
-    try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x54, 0x24, 0x20 }); // MOV [RSP+0x20], RDX
-    try emitCallRel32(allocator, &bytes, params, 4 + 5);
-    try bytes.appendSlice(allocator, &.{ 0x4C, 0x8B, 0x44, 0x24, 0x20 }); // MOV R8, [RSP+0x20]
-    try bytes.appendSlice(allocator, &.{ 0x49, 0x89, 0x00 }); // MOV [R8], RAX
-    try bytes.appendSlice(allocator, &.{ 0x49, 0x89, 0x50, 0x08 }); // MOV [R8+8], RDX
-    try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xC4, 0x28 }); // ADD RSP, 0x28
-    try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 }); // XOR EAX,EAX ; RET
+    if (n_results == 2) {
+        // 2-int register-class shape (33 bytes); body uses
+        // register convention (result 0 in RAX, result 1 in RDX).
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x28 }); // SUB RSP, 0x28
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x54, 0x24, 0x20 }); // MOV [RSP+0x20], RDX
+        try emitCallRel32(allocator, &bytes, params, 4 + 5);
+        try bytes.appendSlice(allocator, &.{ 0x4C, 0x8B, 0x44, 0x24, 0x20 }); // MOV R8, [RSP+0x20]
+        try bytes.appendSlice(allocator, &.{ 0x49, 0x89, 0x00 }); // MOV [R8], RAX
+        try bytes.appendSlice(allocator, &.{ 0x49, 0x89, 0x50, 0x08 }); // MOV [R8+8], RDX
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xC4, 0x28 }); // ADD RSP, 0x28
+        try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 }); // XOR EAX,EAX ; RET
+    } else if (n_results == 3) {
+        // 3-int MEMORY-class shape (19 bytes); body uses Win64
+        // MEMORY-class convention: RCX = hidden ptr to results
+        // buffer, RDX = rt. Wrapper swaps RCX↔RDX so body's view
+        // matches what its prologue captures.
+        //
+        // ```text
+        //   SUB RSP, 0x28        ; 48 83 EC 28  — shadow + alignment
+        //   XCHG RCX, RDX        ; 48 87 CA     — swap rt ↔ results
+        //   CALL body             ; E8 + disp32 — body writes [RCX+i*8]
+        //   ADD RSP, 0x28        ; 48 83 C4 28
+        //   XOR EAX, EAX         ; 31 C0       — ErrCode_OK
+        //   RET                   ; C3
+        // ```
+        //
+        // **REQUIRES**: body-side cycle 2c Win64 MEMORY-class
+        // extension. Today's cycle 2c gates on `abi.current_cc
+        // == .sysv` only — bodies on Win64 always use
+        // register_write. This wrapper's CALL is only runtime-
+        // correct after the body emit extension lands.
+        // The byte sequence is committed in advance so the
+        // wrapper-side is ready when the body-side gates extend
+        // (cf. Phase 2'j in the next cycle).
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x28 }); // SUB RSP, 0x28
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x87, 0xCA }); // XCHG RCX, RDX
+        try emitCallRel32(allocator, &bytes, params, 4 + 3);
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xC4, 0x28 }); // ADD RSP, 0x28
+        try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 }); // XOR EAX,EAX ; RET
+    } else {
+        return Error.UnsupportedOp;
+    }
 
     return .{ .bytes = try bytes.toOwnedSlice(allocator) };
 }
@@ -481,14 +515,28 @@ test "wrapper_thunk: emitX8664Win64 2-int register-class (i32, i64) (33 bytes)" 
     try testing.expectEqualSlices(u8, &.{ 0x31, 0xC0, 0xC3 }, out.bytes[30..33]);
 }
 
-test "wrapper_thunk: emitX8664Win64 returns UnsupportedOp for 3-int (cycle 2c body extension required)" {
+test "wrapper_thunk: emitX8664Win64 3-int MEMORY-class (19 bytes)" {
     const results = [_]@TypeOf(@as(@import("../../../ir/zir.zig").ValType, .i32)){ .i32, .i32, .i32 };
     const params: EmitParams = .{
         .sig = .{ .params = &.{}, .results = &results },
-        .body_offset = 0,
+        .body_offset = 200,
         .thunk_offset = 0,
     };
-    try testing.expectError(Error.UnsupportedOp, emitX8664Win64(testing.allocator, params));
+    const out = try emitX8664Win64(testing.allocator, params);
+    defer testing.allocator.free(out.bytes);
+    try testing.expectEqual(@as(usize, 19), out.bytes.len);
+    // SUB RSP, 0x28
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x83, 0xEC, 0x28 }, out.bytes[0..4]);
+    // XCHG RCX, RDX
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x87, 0xCA }, out.bytes[4..7]);
+    // CALL body_offset(200) - (0 + 7 + 5) = 188
+    try testing.expectEqual(@as(u8, 0xE8), out.bytes[7]);
+    const disp = std.mem.readInt(i32, out.bytes[8..12], .little);
+    try testing.expectEqual(@as(i32, 188), disp);
+    // ADD RSP, 0x28
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x83, 0xC4, 0x28 }, out.bytes[12..16]);
+    // XOR EAX, EAX ; RET
+    try testing.expectEqualSlices(u8, &.{ 0x31, 0xC0, 0xC3 }, out.bytes[16..19]);
 }
 
 test "wrapper_thunk: EmitParams + EmitOutput types present" {
