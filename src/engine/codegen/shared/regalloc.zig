@@ -107,7 +107,19 @@ pub const Slot = union(enum) {
 /// `compute()` runs over a function containing SIMD ops.
 pub const ShapeTag = enum(u2) { scalar, v128, _ };
 
+const result_abi_mod = @import("result_abi.zig");
+
 pub const Allocation = struct {
+    /// ADR-0106 path (a) cycle 2b — result-marshal ABI for the
+    /// JIT-compiled function. `.register_write` (default) = legacy
+    /// per-class RAX/RDX (x86_64) / X0..X7,V0..V7 (arm64) epilogue.
+    /// `.buffer_write` = ADR-0106 uniform shape (epilogue writes
+    /// `results[i]` via the entry-helper's results-ptr arg).
+    /// Threaded via Allocation because compile()'s positional
+    /// signature has ~358 callsites; wide refactor deferred to a
+    /// dedicated `CompileOpts` struct landing alongside cycle 4.
+    /// Default preserves all existing callsites' behaviour.
+    result_abi: result_abi_mod.ResultAbi = .register_write,
     /// `slots[v]` is the dense physical slot id assigned to
     /// vreg `v`. Length matches `func.liveness.?.ranges.len`.
     /// Slot ids are 0..n_slots-1 (no holes).
