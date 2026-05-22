@@ -391,6 +391,58 @@ End-of-turn checklist (every turn that ends with the task closed):
    landed and what fires next. Do not write a long progress
    summary — it invites pause.
 
+## When NOT to re-arm — bucket-3 stop
+
+Per SKILL.md stop bucket 3, when **all forward work is
+user-input-gated AND autonomous prep paths are exhausted**, the
+loop stops **without** `ScheduleWakeup`. Re-arming under this
+state is the failure mode the bucket-3 stop exists to prevent:
+60s heartbeats that null-op cycle after cycle add token / token
+cost / log noise without moving any bit forward.
+
+**Decision tree at the top of every cycle's Step 6+7**:
+
+1. Did this cycle land code OR enrich an ADR? → re-arm normally.
+2. No code landed AND no ADR enriched? Then check:
+   a. Are there `now` debts? → discharge them next cycle, re-arm.
+   b. Did any `blocked-by:` barrier dissolve? → flip to `now`,
+      re-arm.
+   c. Is there an unwalked autonomous prep path for any gating
+      ADR (see SKILL.md "Autonomous prep paths")? → walk it
+      next cycle, re-arm.
+   d. **None of (a)–(c)** → **bucket-3 stop**. Skip
+      `ScheduleWakeup`. Surface the specific user touchpoint(s)
+      in one sentence + list the walked-paths so the user knows
+      everything autonomous-eligible was done.
+
+**How bucket-3 differs from forbidden anti-patterns**:
+
+- **"User can /continue when ready"** (forbidden) — surrenders
+  *autonomous-eligible* work to the user. Bucket 3 fires only
+  when there is **no** autonomous-eligible work left.
+- **"Wait for natural trigger"** (forbidden framing) — passively
+  defers without naming a testable condition. Bucket 3 names
+  the precise ADR Status flip / collab review needed.
+- **"Big next task, natural stop"** (forbidden) — fakes
+  exhaustion. Bucket 3 demands the prep-path walk first;
+  if any path is unwalked, the loop must walk it before
+  stopping.
+
+The presence of a `.dev/phase*_close_plan.md` doc whose §6
+rows are ALL closed or ADR-gated is the canonical signature
+of bucket-3 readiness. The plan doc itself names the gating
+ADRs; matching them against `Status: Proposed` confirms.
+
+**Handover state at bucket-3 stop**:
+
+The final handover.md (committed in the previous code cycle)
+should already reflect this state — `Active track` lists only
+ADR-gated chunks, `Active now debts` is empty, `Open questions
+/ blockers` enumerates the user touchpoints with concrete
+testable barriers. The bucket-3 stop turn does NOT need to
+commit a new handover; the existing one is sufficient. The
+one-sentence surface message is the user-facing artifact.
+
 ## Chunk types — type-aware granularity rules
 
 > Added 2026-05-21 per `.dev/phase9_structural_debt_close_plan.md`
@@ -597,8 +649,13 @@ beats inventing new ways to stop.
   runs Mac + ubuntunote only and reconciles windowsmini at
   Phase boundaries.
 - **"User can /continue when ready"** — the closing line that
-  re-introduces babysitting. Forbidden — the closing line is the
-  `ScheduleWakeup` and one short sentence.
+  re-introduces babysitting **when autonomous-eligible work
+  remains**. Forbidden in that case — the closing line is the
+  `ScheduleWakeup` and one short sentence. **Carve-out**:
+  legitimate at bucket-3 stop per SKILL.md (all forward work
+  user-gated AND every autonomous prep path walked) — in that
+  case skip `ScheduleWakeup` and surface the specific gate; see
+  "When NOT to re-arm" above for the decision tree.
 - **"Auto-compact might be coming, safer to stop"** — forbidden;
   PostCompact recovers, the loop continues.
 - **"Wait for natural trigger" / "needs commitment" / "substantial

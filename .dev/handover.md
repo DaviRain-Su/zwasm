@@ -15,26 +15,44 @@ activates; follow that doc's §6 Work sequence. HEAD
 10-canary check (8 build tools + handle64 / Procmon64 —
 full Sysinternals bundle at `711bdcce`).
 
-## Active track
+## Bucket-3 stop — user touchpoint required
 
-| Next chunk | First action | Gating |
-|---|---|---|
-| W3.b (main) — SEH shim impl per ADR 0103 | `src/platform/windows_traphandler.zig` (Zone 0): `install`/`uninstall`/`arm`/`disarm` + `vehHandler`; wire `installSigsegvHandler` Windows arm | **GATED** on user flip ADR 0103 Proposed → Accepted |
+Per `/continue` SKILL.md stop bucket 3: all autonomous-eligible
+close-plan §6 rows landed (W0 / WA / F1 / W1 / W3.a / W5 /
+W6-Mac / D-161; W2 + W5 struck); zero `now` debts; no
+`blocked-by:` barrier dissolved. Loop stops without
+`ScheduleWakeup` re-arm.
 
-Subsequent: W4 windowsmini reconcile (gated on W3.b landing);
-§9.13-0 close + Phase 9 boundary (gated on W4 + ADR 0102 flip).
+**Gating user touchpoint(s)**:
 
-All autonomous-eligible close-plan §6 rows are now landed
-(W0 / WA / F1 / W1 / W3.a / W5 / W6-Mac / D-161; W2 + W5
-struck). The remaining work is ADR-gated: W3.b on
-ADR 0103, Phase 9 boundary on ADR 0102.
+- ADR 0103 (`.dev/decisions/0103_win64_seh_bridge.md`) —
+  `Status: Proposed → Accepted` flip. After flip, autonomous
+  loop resumes at **W3.b** (`src/platform/windows_traphandler.zig`
+  Zone 0: `install`/`uninstall`/`arm`/`disarm` + `vehHandler`;
+  wire `installSigsegvHandler` Windows arm).
+- ADR 0102 (`.dev/decisions/0102_phase9_debt_exit_reframe.md`)
+  — `Status: Proposed → Accepted` flip. Gates §9.13-0 close +
+  Phase 9 boundary (after W4 windowsmini reconcile, itself
+  gated on W3.b landing).
+
+**Autonomous prep paths NOT YET walked** (available
+next-cycle work per SKILL.md "Autonomous prep paths"):
+
+- ADR 0103 — wasmtime traphandlers reference-repo enrichment,
+  `private/spikes/win64-seh-veh/` validation spike, Consequences
+  refinement.
+- ADR 0102 — re-walk `.dev/debt.md` against the ADR's exit
+  predicate (a/b/c clauses).
+
+**To resume**: flip the named ADR(s) and re-invoke `/continue`.
+Next cycle walks prep paths or enters W3.b impl directly.
 
 D-028 hypothesis #5 (Defender real-time scan) **CONFIRMED**
 at `ba68a896`: post-fix test-all completed without wedge.
 N=1; need N=5 consecutive silent runs per
 `heisenbug_discharge.md` streak rule to close. D-161 close
 unblocks one more test-all data point per natural-cycle
-windowsmini reconciles.
+windowsmini reconciles after W3.b lands.
 
 ## Critical: do NOT widen shared `Error` for Win64 gaps
 
@@ -76,16 +94,10 @@ Inner loop = Mac cross-compile
 
 (none — D-161 closed at `2b8e6904`.)
 
-## Open questions / blockers (user-touchpoints)
+## Open questions / blockers
 
-- ADR 0102 (§9.12-F exit reframe) — Proposed → Accepted.
-- ADR 0103 (Win64 SEH bridge VEH+threadlocal) — Proposed →
-  Accepted; W3.b impl gated on flip.
-- D-028 leading hypothesis re-framed at `f7d61bd1` from IPC
-  timeout → Windows resource exhaustion at runner transition
-  (W1 2026-05-22 partial evidence at 2/2 failures); next probe
-  defers to post-W3.b natural-experiment OR explicit `test-all`
-  orchestration instrumentation.
+User touchpoints listed in Bucket-3 stop section above.
+D-028 next probe defers to post-W3.b natural-experiment.
 
 ## See
 

@@ -86,6 +86,49 @@ autonomous tracks. Drop (c). Re-arm and proceed.
   0.5 walks these.
 - Pointing at the **`phase*_close_plan.md`** doc when one is
   active (close-plan override per `/continue` Step 1a).
+- Declaring a **bucket-3 stop state** when all forward work is
+  user-input-gated AND every autonomous prep path has been
+  walked (per `/continue` SKILL.md stop bucket 3). The
+  handover names the gating user touchpoint(s) and the
+  walked-paths ledger. The next /continue cycle reads this,
+  confirms no `now` debts / no barrier dissolution / no
+  unwalked path, and bucket-3 stops without re-arm.
+
+## Bucket-3 stop framing — the legitimate "wait for user"
+
+The `wait for natural trigger` phrase is forbidden because it
+surrenders work that IS autonomous-eligible. Bucket-3 stop
+state is the **opposite shape**: every autonomous lever has
+been pulled; the remaining work *structurally* needs user
+input. Handover frames this as:
+
+```markdown
+## Bucket-3 stop — user touchpoint required
+
+All autonomous prep walked; loop stops without re-arm.
+
+**Gating user touchpoint(s)**:
+
+- ADR-NNNN (`.dev/decisions/NNNN_<slug>.md`) — `Status:
+  Proposed → Accepted` flip. After flip, autonomous loop
+  resumes at <chunk-id>.
+
+**Autonomous prep walked this resume** (do not re-walk):
+
+- ADR-NNNN References enriched: <commit-sha> cites
+  `~/Documents/OSS/<source>/...`.
+- ADR-NNNN spike: `private/spikes/<slug>/` Status:
+  <rejected|merged-into-prod>.
+- ADR-NNNN Consequences refined: <commit-sha>.
+
+**To resume**: flip the named ADR(s) and re-invoke /continue.
+```
+
+This is NOT forbidden framing — it is the encoded artifact
+of "we did everything autonomous; here is what's left and
+it genuinely needs you". The forbidden phrases in the table
+above target the *opposite* failure mode (defer without
+walking the levers).
 
 ## What handover is NOT for
 

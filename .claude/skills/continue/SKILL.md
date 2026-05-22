@@ -22,7 +22,7 @@ stops.
 
 ## Stop conditions — strict whitelist
 
-You may stop the autonomous loop **only** for one of these two
+You may stop the autonomous loop **only** for one of these three
 reasons. Anything else is a non-stop condition and you must keep
 going.
 
@@ -37,6 +37,55 @@ going.
    `windowsmini`) is provably absent. Document the blocker in
    `handover.md` "Open questions / blockers", then stop. Do not
    stop on a hunch — only after investigation.
+3. **All forward work is user-input-gated AND autonomous prep
+   paths are exhausted** — every remaining ROADMAP / close-plan
+   row is blocked on a user touchpoint (ADR `Status: Proposed →
+   Accepted` flip, collaborative review, etc.); AND `.dev/debt.md`
+   has zero `now` rows AND no `blocked-by:` barrier dissolved
+   this resume; AND the autonomous prep paths for each gating
+   ADR have been walked (see "Autonomous prep paths for
+   user-gated ADRs" below). In this state, surface the specific
+   user touchpoint(s) needed and stop **WITHOUT `ScheduleWakeup`
+   re-arm**. The user resumes by satisfying the gate and
+   re-invoking `/continue`. This is **distinct** from
+   "User can /continue when ready" (forbidden anti-pattern):
+   that one surrenders forward work that IS autonomous-eligible;
+   bucket 3 fires only after every autonomous lever has been
+   pulled and the remaining work *structurally* needs the user.
+
+### Autonomous prep paths for user-gated ADRs
+
+Before bucket 3 fires, the loop MUST attempt each of these where
+applicable to the gating ADR. Each path produces value the user
+can review at flip time — they are **not** "wait around" work.
+
+- **Reference-repo enrichment** — read v1
+  (`~/Documents/MyProducts/zwasm/`), wasmtime / cranelift / wasm3
+  / regalloc2 (`~/Documents/OSS/`), spec testsuite, etc. for
+  precedents on the ADR's design problem. Append concrete file /
+  line citations to the ADR's `References` or `Alternatives`
+  section. Commit as docs-only `chore(adr): enrich NNNN
+  references from <source>`.
+- **Throwaway spike** — under `private/spikes/<adr-slug>/` (per
+  `.claude/rules/architectural_spike.md` + `spike_lifecycle.md`),
+  prototype the ADR's chosen path or its primary rejected
+  alternative. Outcome lands as `Status: rejected` lesson OR
+  refines the ADR's `Consequences` section. **Spike work is
+  autonomous; on-branch impl stays gated on ADR Accepted.**
+- **Consequences refinement** — re-walk the ADR's `Consequences`
+  / `Removal condition` text against current code state. If a
+  named consequence has dissolved or sharpened, edit the ADR
+  (Revision history footer per `.dev/decisions/README.md`).
+- **WebFetch spec / upstream** — for ABI / spec / upstream-API
+  ADRs, fetch the authoritative doc (W3C Wasm spec, Arm IHI 0055,
+  Intel SDM, MSDN, ziglang/zig issues, etc.) and cite the URL in
+  ADR References. Per `extended_challenge.md` Step 4.
+
+If ALL applicable paths above have been walked for ALL gating
+ADRs (i.e. each ADR has at least one enrichment commit OR a
+documented null result), bucket 3 is unlocked. Record the
+walked-paths list in `handover.md` "Open questions / blockers"
+so the next resume doesn't re-walk.
 
 ### Non-stop conditions (explicit, exhaustive)
 
