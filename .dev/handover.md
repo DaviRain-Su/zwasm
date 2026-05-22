@@ -87,6 +87,14 @@ Per ADR-0105 + ADR-0106 Implementation plans:
     EmitOutput / Error` types declared; stub returns
     `UnsupportedOp`. Sets stable callsite contract for the
     Phase 2' per-arch byte emit.
+3e (Phase 2'-e2e). [x] End-to-end integration test (`38f033b1`)
+    — compiles a 3-int Wasm body via native_emit, places body+wrapper
+    in JIT memory, invokes via invokeBufferWrite, verifies
+    `results_buf = (11, 22, 33)`. **FIRST proof that wrapper bytes
+    actually execute correctly.** Discovered + fixed critical bug:
+    arm64 3-int wrapper didn't save X30 across BL → infinite loop
+    (caught at 31min 99%CPU; fix = STP X30,XZR / LDP X30,XZR pair,
+    24 bytes vs buggy 16).
 3e (Phase 2'a). [x] x86_64 SysV 3-int MEMORY-class wrapper
     (`2d7c87c5`). 11 bytes; XCHG RDI,RSI + CALL + XOR + RET.
     Body's MEMORY-class epilogue (cycle 2c) writes 3xi32
