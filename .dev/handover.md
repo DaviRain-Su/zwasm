@@ -10,49 +10,38 @@
 **Authoritative work source**:
 [`.dev/phase9_13_0_close_plan.md`](./phase9_13_0_close_plan.md).
 The `/continue` skill's Step 1a close-plan override
-activates; follow that doc's §6 Work sequence. HEAD
-`2b8e6904` (2026-05-22, D-161 close); §0 preflight is a
-10-canary check (8 build tools + handle64 / Procmon64 —
-full Sysinternals bundle at `711bdcce`).
+activates; follow that doc's §6 Work sequence. ADRs 0102 +
+0103 flipped `Status: Proposed → Accepted` at `a6e3eb4f`;
+bucket-3 gate dissolved. §0 preflight is a 10-canary check
+(8 build tools + handle64 / Procmon64 — full Sysinternals
+bundle at `711bdcce`).
 
-## Bucket-3 stop — user touchpoint required
+## Active task — W3.b-2 (arm/disarm callsite integration)
 
-Per `/continue` SKILL.md stop bucket 3: all autonomous-eligible
-close-plan §6 rows landed (W0 / WA / F1 / W1 / W3.a / W5 /
-W6-Mac / D-161; W2 + W5 struck); zero `now` debts; no
-`blocked-by:` barrier dissolved. Loop stops without
-`ScheduleWakeup` re-arm.
+W3.b-1 landed (`src/platform/windows_traphandler.zig` +
+`installSigsegvHandler` Windows arm via VEH install). Next
+chunk wires `arm(RecoveryInfo)` / `disarm()` into the 5
+`sigsetjmp(@ptrCast(&sigsegv_recover_buf), 1)` callsites on
+the Windows arm:
 
-**Gating user touchpoint(s)**:
+- `test/spec/spec_assert_runner_base.zig:3602` and `:3620`
+- `test/spec/spec_assert_runner_non_simd.zig:339`, `:1498`,
+  `:1837`
 
-- ADR 0103 (`.dev/decisions/0103_win64_seh_bridge.md`) —
-  `Status: Proposed → Accepted` flip. After flip, autonomous
-  loop resumes at **W3.b** (`src/platform/windows_traphandler.zig`
-  Zone 0: `install`/`uninstall`/`arm`/`disarm` + `vehHandler`;
-  wire `installSigsegvHandler` Windows arm).
-- ADR 0102 (`.dev/decisions/0102_phase9_debt_exit_reframe.md`)
-  — `Status: Proposed → Accepted` flip. Gates §9.13-0 close +
-  Phase 9 boundary (after W4 windowsmini reconcile, itself
-  gated on W3.b landing).
+Type: `emit`. Per ADR-0103 §4, POSIX path keeps `sigsetjmp`
++ `siglongjmp`; Windows arm gets `windows_traphandler.arm(.{
+.jit_code_start, .jit_code_end, .recovery_pc, .recovery_sp,
+.recovery_rax_trap_code }) → callJit → disarm()`. The
+recovery context shape (capturing PC/SP at the callsite)
+needs Step-0 verification against v1 / Wasmtime patterns
+since Zig has no portable `setjmp`-like primitive that gets
+us the resume PC/SP cleanly — the spike question is whether
+to use MSVCRT `_setjmp` (analogue of POSIX `sigsetjmp`) or
+inline-asm RIP/RSP capture.
 
-**Autonomous prep paths NOT YET walked** (available
-next-cycle work per SKILL.md "Autonomous prep paths"):
-
-- ADR 0103 — wasmtime traphandlers reference-repo enrichment,
-  `private/spikes/win64-seh-veh/` validation spike, Consequences
-  refinement.
-- ADR 0102 — re-walk `.dev/debt.md` against the ADR's exit
-  predicate (a/b/c clauses).
-
-**To resume**: flip the named ADR(s) and re-invoke `/continue`.
-Next cycle walks prep paths or enters W3.b impl directly.
-
-D-028 hypothesis #5 (Defender real-time scan) **CONFIRMED**
-at `ba68a896`: post-fix test-all completed without wedge.
-N=1; need N=5 consecutive silent runs per
-`heisenbug_discharge.md` streak rule to close. D-161 close
-unblocks one more test-all data point per natural-cycle
-windowsmini reconciles after W3.b lands.
+After W3.b-2: **W4** (windowsmini reconcile run; verifies
+`spec_assert_runner_non_simd` green) → row 10 W6 Windows
+DCE check → row 11 §9.13-0 close + Phase 9 boundary.
 
 ## Critical: do NOT widen shared `Error` for Win64 gaps
 
@@ -72,32 +61,25 @@ Inner loop = Mac cross-compile
 
 ## windowsmini state
 
-- 9 tools (zig 0.16 / hyperfine / wasm-tools / wasmtime / wabt /
-  yq / lldb / **sysinternals** [`711bdcce`]) installed via
-  `scripts/windows/install_tools.ps1`.
-- Defender exclusion baseline configured 2026-05-22: 8
-  ExclusionPath (LLVM + sysinternals + CrashDumps + repo +
-  caches) + 17 ExclusionProcess (all `addExecutable` outputs).
-- `zig build test-all`: 37/39 steps OK; only spec_wasm_2_0
-  runtime fails (D-136 SEH crashes inside).
-- **Debug wiring** (per b737d53e): `debug_jit_auto` skill
-  Recipes 9-14 + `windows_ssh_setup.md` "Interactive JIT debug
-  session" section now provide windowsmini-equivalent
-  "actively wired" debug posture (lldb-via-SSH, Procmon, fd
-  count via handle64, llvm-objdump PE, WER post-mortem).
-  Real-cycle試運転 deferred to W3.b implementation phase.
+- 9 tools + sysinternals installed via
+  `scripts/windows/install_tools.ps1` (`711bdcce`).
+- Defender exclusion baseline configured 2026-05-22.
 - Surveys: `private/notes/p9-9.13-0-survey.md` (W0),
   `private/notes/p9-d028-flake-rate.md` (W1 partial),
   `private/notes/p9-9.13-0-w3a-survey.md` (W3.a).
 
 ## Active `now` debts
 
-(none — D-161 closed at `2b8e6904`.)
+(none. D-136 in-flight discharge across W3.b; row stays
+`blocked-by: <Win64 SEH bridge land + W4 reconcile>` until
+W4 confirms windowsmini green.)
 
 ## Open questions / blockers
 
-User touchpoints listed in Bucket-3 stop section above.
-D-028 next probe defers to post-W3.b natural-experiment.
+D-028 next probe defers to post-W3.b natural-experiment
+(streak rule N=5 silent test-all runs). The N=1 confirmation
+at `ba68a896` (Defender real-time scan hypothesis) is one
+data point.
 
 ## See
 
