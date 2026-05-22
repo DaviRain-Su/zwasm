@@ -1,6 +1,6 @@
 # Skip — `embenchen_*1.wasm` (emscripten `env`-module imports)
 
-- **Status**: Accepted (skip until follow-up — see "Removal plan"). Operationally effective via `skip-adr-skip_embenchen_emcc_env_imports` prefix per ADR-0029 Path B (since chunk 9.9-h-23, 2026-05-12); see §"Implementation" below.
+- **Status**: Superseded by §9.12-E DONE (2026-05-22 per ADR-0104) — §9.12-E discharged the import-matching machinery this skip-ADR's "What v2 needs to fix" section pointed at. The 4 fixtures are retire candidates; runner-side filter removal pending §9.13-0 reconcile. Emcc env-shim runtime (separate concern) remains Phase 11 per D-026.
 - **Date**: 2026-05-04
 - **Author**: zwasm v2 / continue loop
 - **Tags**: phase-6, skip-adr, misc-runtime, embenchen, manifest-format

@@ -151,4 +151,4 @@ Expected post-split LOC: runner.zig ~1750, runner_validate.zig
 | Date       | Change                                          | Commit |
 |------------|-------------------------------------------------|--------|
 | 2026-05-17 | Initial draft + acceptance + split execution    | (this commit) |
-| 2026-05-22 | `<backfill>` | Status: Accepted → Closed (§9.12-A DONE) |
+| 2026-05-22 | `006f0d6d` | Status: Accepted → Closed (§9.12-A DONE) |

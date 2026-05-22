@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-05-22
-- **Author**: Shota Kudo (via `/continue` autonomous loop, W3.a track of `.dev/phase9_13_0_close_plan.md`)
+- **Author**: Shota Kudo (via `/continue` autonomous loop, W3.a track of `.dev/archive/phase9/phase9_13_0_close_plan.md`)
 - **Tags**: phase-9, windows, win64, traphandler, spec-assert-runner, D-136
 
 ## Context
@@ -52,7 +52,7 @@ gitignored):
   carrying `oob_exit_pc` / `jit_code_start` / `jit_code_end` /
   `active`. v1 does NOT use `__try` / `__except` blocks.
 
-The original `.dev/phase9_13_0_close_plan.md` §W3 sketched a C
+The original `.dev/archive/phase9/phase9_13_0_close_plan.md` §W3 sketched a C
 shim wrapping `__try` / `__except` (Option A) and rejected
 AddVectoredExceptionHandler citing "process-wide global state
 incompatible with per-runner state" (Option B). The survey shows
@@ -183,7 +183,7 @@ Concretely:
 ### Positive
 
 - **D-136 closes** when the implementation chunk (W3.b per
-  `phase9_13_0_close_plan.md` §6 row 7) lands and windowsmini
+  `archive/phase9/phase9_13_0_close_plan.md` §6 row 7) lands and windowsmini
   `spec_assert_runner_non_simd` runs green. windowsmini reaches
   3-host bit-identical for `assert_trap` fixtures.
 - **No new C source file**; v2's "pure Zig + linked C headers"
@@ -289,7 +289,7 @@ Concretely:
 
 - `.dev/debt.md` D-136 row — the structural barrier this ADR
   removes at W3.b land.
-- `.dev/phase9_13_0_close_plan.md` §W3 — the close-plan's
+- `.dev/archive/phase9/phase9_13_0_close_plan.md` §W3 — the close-plan's
   Option A sketch this ADR diverges from (and refreshes).
 - `private/notes/p9-9.13-0-w3a-survey.md` — gitignored survey
   that surfaced the divergence (v1 + Wasmtime + Wasmer all

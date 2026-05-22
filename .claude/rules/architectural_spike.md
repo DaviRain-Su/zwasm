@@ -137,5 +137,5 @@ Re-check the forbidden phrase list against `git log
 - `.dev/lessons/2026-05-20-refactor-tradeoffs-honest-accounting.md`
   — the D-153 / B146–B158 retrospective that motivated this
   rule.
-- `.dev/phase9_structural_debt_close_plan.md` §6 (d) — the
+- `.dev/archive/phase9/phase9_structural_debt_close_plan.md` §6 (d) — the
   close-plan step that ordered this rule's creation.

@@ -1,5 +1,7 @@
 # §9.13-0 Cat IV — execution plan
 
+> **Doc-state**: ARCHIVED 2026-05-22 — superseded by [`.dev/phase9_close_master.md`](../../phase9_close_master.md). Kept for ADR / ROADMAP citation lineage; do not edit.
+
 > Close-plan-style doc. `.dev/handover.md` Cold-start procedure
 > step 1 points here, so the `/continue` skill's Step 1a override
 > activates and §6 Work sequence below is the **authoritative

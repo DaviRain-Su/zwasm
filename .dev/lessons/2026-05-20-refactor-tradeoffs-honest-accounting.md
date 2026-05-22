@@ -9,7 +9,7 @@ metadata:
 
 ## Citing
 
-- `.dev/phase9_structural_debt_close_plan.md` §6 が actionable
+- `.dev/archive/phase9/phase9_structural_debt_close_plan.md` §6 が actionable
   work sequence (この lesson は経緯記録)
 - `.dev/debt.md::D-154` (umbrella tracking row)
 
@@ -94,7 +94,7 @@ D-153 (12 cycle 経過時点で skip-impl 192 不動) はそれ
 ## 次セッションでの hook 方法
 
 `.dev/handover.md` の `Cold-start procedure` step 1 を
-`.dev/phase9_structural_debt_close_plan.md` への
+`.dev/archive/phase9/phase9_structural_debt_close_plan.md` への
 ポインタに置換。`/continue` Step 1a (close-plan
 override) が発火し、ROADMAP §9.<N> task より先に
 close-plan §6 を実行する。

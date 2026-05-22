@@ -1,5 +1,7 @@
 # Phase 9 completion substrate re-examination gate
 
+> **Doc-state**: ARCHIVED 2026-05-22 — superseded by [`.dev/phase9_close_master.md`](../../phase9_close_master.md). Kept for ADR / ROADMAP citation lineage; do not edit.
+
 > **Hard human-in-loop gate** before §9.12 flips and Phase 10
 > prep work begins. The autonomous `/continue` loop **must stop**
 > when it reaches this row and surface to the user; no

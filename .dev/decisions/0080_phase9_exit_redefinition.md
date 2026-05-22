@@ -208,7 +208,7 @@ named structural barrier with a successor-phase plan.
 
 ## References
 
-- Close-plan §6 (i) — `.dev/phase9_structural_debt_close_plan.md`
+- Close-plan §6 (i) — `.dev/archive/phase9/phase9_structural_debt_close_plan.md`
 - ADR-0029 Path B — skip-impl release gate (preserved).
 - ADR-0050 D-5 — one-way ratchet (preserved; now manifest-only).
 - ADR-0056 — Phase 9 scope extension (this ADR amends its

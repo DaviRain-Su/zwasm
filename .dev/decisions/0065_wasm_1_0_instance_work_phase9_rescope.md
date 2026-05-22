@@ -16,7 +16,7 @@ spec_assert PASS count of 24001/0/2069 (non-SIMD) +
 13301/0/440 (SIMD) since chunk d-85.
 
 Decomposition of the residual `skip-impl == 1573` (per
-[`.dev/phase9_close_plan.md`](../phase9_close_plan.md) §2) shows
+[`.dev/archive/phase9/phase9_close_plan.md`](../archive/phase9/phase9_close_plan.md) §2) shows
 the count is **not uniform**:
 
 | Cat     | Description                                                                                            |                Today | Original ROADMAP placement             |
@@ -141,7 +141,7 @@ landing time per ADR-0014 no-renumber discipline).
 
 ### Alternative D — Promote the close-plan §3 narrative into a lesson rather than a new ADR
 
-- **Sketch**: rely on `.dev/phase9_close_plan.md` + a
+- **Sketch**: rely on `.dev/archive/phase9/phase9_close_plan.md` + a
   `.dev/lessons/2026-05-17-cat-iii-roadmap-misclassification.md`
   to carry the correction; amend ADR-0056 only.
 - **Why rejected**: per
@@ -249,7 +249,7 @@ landing time per ADR-0014 no-renumber discipline).
 - ADR-0063, ADR-0064 — pre-commit gate reactivation
   foundation (the gate runs on every Cat II / III / IV
   commit)
-- [`.dev/phase9_close_plan.md`](../phase9_close_plan.md) —
+- [`.dev/archive/phase9/phase9_close_plan.md`](../archive/phase9/phase9_close_plan.md) —
   authoritative execution playbook (this ADR is the
   load-bearing decision; close-plan is the runnable
   sequence)

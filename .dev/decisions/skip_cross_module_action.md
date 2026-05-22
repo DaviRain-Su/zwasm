@@ -1,6 +1,6 @@
 # Skip — wast cross-module action directives
 
-- **Status**: Accepted (skip while cross-module imports are out of scope). Operationally effective via `skip-adr-skip_cross_module_action` prefix per ADR-0029 Path B.
+- **Status**: Superseded by §9.9-III + §9.12-E DONE (2026-05-22 per ADR-0104) — Cross-module dispatch (§9.9-III [x]) + SKIP-CROSS-MODULE-IMPORTS discharge (§9.12-E [x]) make this skip-ADR's framing obsolete. The 286 distiller-level emissions are retire candidates; runner-side filter removal pending verification at §9.13-0 reconcile.
 - **Date**: 2026-05-16 (originally landed as `skip-adr-cross-module-action` at §9.9 / 9.9-l-1b-d093-d37; vocab-renamed at §9.9 / 9.9-l-1b-d093-d60 to satisfy `check_skip_adrs --gate` per D-131)
 - **Author**: zwasm v2 / continue loop
 - **Tags**: phase-9, skip-adr, spec-conformance, cross-module

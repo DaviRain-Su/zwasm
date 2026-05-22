@@ -1,5 +1,7 @@
 # Phase 9 構造的負債 close plan
 
+> **Doc-state**: ARCHIVED 2026-05-22 — superseded by [`.dev/phase9_close_master.md`](../../phase9_close_master.md). Kept for ADR / ROADMAP citation lineage; do not edit.
+
 > **Status**: CLOSED 2026-05-21 — §6 (a)〜(h) + (j) Step A +
 > Step B (cohorts 1-6) all done; (i) Rejected (ADR-0080).
 > Cumulative discharge: 43 → 0 FAIL, +93 PASS, 192 → 0

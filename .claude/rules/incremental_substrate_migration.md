@@ -39,7 +39,10 @@ Q3 C-adopted completion of Phase 9 (§9.12-B) MUST proceed **incrementally**:
 
 ### Progress tracker (machine-readable)
 
-- Update the sub-row × op × layer matrix in `.dev/p9_completion_progress.yaml`
+- ~~Update the sub-row × op × layer matrix in `.dev/p9_completion_progress.yaml`~~
+  (yaml deleted 2026-05-22 per `.dev/phase9_close_master.md` — Phase 9
+  close moved to invariant-script discipline; this rule's §9.12-B-era
+  yaml step is obsolete)
 - On each chunk close, the commit adds a row to the yaml
 - Check live status via `bash scripts/p9_completion_status.sh`
 
@@ -67,7 +70,8 @@ one op at a time.
 - This rule auto-loads on the listed paths
 - `scripts/check_subrow_exit.sh` (§9.12-A; literal verification of exit conditions
   on chunk close)
-- `.dev/p9_completion_progress.yaml` (§9.12-A; seed)
+- ~~`.dev/p9_completion_progress.yaml`~~ (deleted 2026-05-22; see
+  `.dev/phase9_close_master.md` invariant-script discipline)
 
 ## Related
 

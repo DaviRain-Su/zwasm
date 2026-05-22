@@ -2,14 +2,14 @@
 
 - **Status**: Accepted
 - **Date**: 2026-05-22
-- **Author**: Shota Kudo (via `/continue` autonomous loop, WA track of `.dev/phase9_13_0_close_plan.md`)
+- **Author**: Shota Kudo (via `/continue` autonomous loop, WA track of `.dev/archive/phase9/phase9_13_0_close_plan.md`)
 - **Tags**: phase-9, debt, exit-criterion, scope
 
 ## Context
 
 ROADMAP §9.12-F currently reads:
 
-> **Phase-9-eligible debt cohort** per [`phase9_completion_master_plan.md`](../phase9_completion_master_plan.md) §5.3. D-094 (x86_64 multi-result indirect-result-buffer; verify dissolution via D-140/D-148 chain or discharge); D-090 (lower.zig type-stack walker); D-062 (arm64 v128 9th+ stack overflow); D-141 (file_size_check WARN; mostly dissolved by Q3 C adoption, individual ADRs for the remainder); D-081 (emit.zig source split; verify dissolution by Q3 C); D-055 (emit_test_*.zig migration). **Exit: debt active rows < 15.**
+> **Phase-9-eligible debt cohort** per [`archive/phase9/phase9_completion_master_plan.md`](../archive/phase9/phase9_completion_master_plan.md) §5.3. D-094 (x86_64 multi-result indirect-result-buffer; verify dissolution via D-140/D-148 chain or discharge); D-090 (lower.zig type-stack walker); D-062 (arm64 v128 9th+ stack overflow); D-141 (file_size_check WARN; mostly dissolved by Q3 C adoption, individual ADRs for the remainder); D-081 (emit.zig source split; verify dissolution by Q3 C); D-055 (emit_test_*.zig migration). **Exit: debt active rows < 15.**
 
 The numeric `< 15` exit criterion has become a poor proxy for the
 phase's actual completion semantics. Current state at HEAD
@@ -19,7 +19,7 @@ phase's actual completion semantics. Current state at HEAD
 - Of those 19:
   - **4 are §9.13-0 Cat IV** (D-022 / D-028 / D-084 / D-136). These
     are tracked as their own row in §9 (§9.13-0) and have a
-    distinct execution plan (`.dev/phase9_13_0_close_plan.md`).
+    distinct execution plan (`.dev/archive/phase9/phase9_13_0_close_plan.md`).
     Counting them against §9.12-F double-counts: closing them is
     §9.13-0's exit, not §9.12-F's.
   - **2 are trigger-not-fired** (D-094 x86_64 multi-result
@@ -47,7 +47,7 @@ unwritten and therefore drift-prone). Either path is honest
 only when the exit criterion names what it actually checks.
 
 The original `< 15` bar was set in
-`phase9_completion_master_plan.md` §5.3 as a coarse signal that
+`archive/phase9/phase9_completion_master_plan.md` §5.3 as a coarse signal that
 Phase-9-eligible cleanup had landed. Two events since dissolve
 it as a measurement:
 
@@ -189,9 +189,9 @@ count.
 - ROADMAP §9.12-F (line ~1312) — the row being amended.
 - ROADMAP §9.13-0 (line ~1316) — the sibling phase-9 cleanup
   row whose per-row close criterion this ADR aligns §9.12-F to.
-- `.dev/phase9_completion_master_plan.md` §5.3 — original `< 15`
+- `.dev/archive/phase9/phase9_completion_master_plan.md` §5.3 — original `< 15`
   source.
-- `.dev/phase9_13_0_close_plan.md` §1 + §5/WA — execution plan
+- `.dev/archive/phase9/phase9_13_0_close_plan.md` §1 + §5/WA — execution plan
   for this ADR's drafting (WA track) and the Cat IV closure
   (§9.13-0 closure).
 - `.dev/decisions/0049_*.md` — ADR-0049 (windowsmini gate

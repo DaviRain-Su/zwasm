@@ -174,4 +174,4 @@ green.
 
 - 2026-05-21 — Initial draft, Cycle 5 of file-size discipline reform.
 
-- 2026-05-22 (`<backfill>`) — Status: Accepted → Closed (§9.12-A DONE).
+- 2026-05-22 (`006f0d6d`) — Status: Accepted → Closed (§9.12-A DONE).

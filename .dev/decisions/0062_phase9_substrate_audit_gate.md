@@ -88,7 +88,7 @@ Concretely:
    completion_substrate_audit.md) collaborative review`.
    Insert **before** the existing Phase 10 entry gate (which
    renumbers from 9.12 to 9.13).
-2. **Create `.dev/phase9_completion_substrate_audit.md`** as the
+2. **Create `.dev/archive/phase9/phase9_completion_substrate_audit.md`** as the
    gate document. It frames the audit's scope (§4.5 / §4.6
    implementation review, P14 sharpening, P13 reconsideration,
    dispatch architecture spike comparison, gating mechanism
@@ -199,7 +199,7 @@ substrate audit clears.
 1. This ADR lands first (per ROADMAP §18.2: ADR before edit).
 2. Same chunk: insert new row 9.12 into ROADMAP §9.9 task
    table; renumber existing 9.12 → 9.13; create
-   `.dev/phase9_completion_substrate_audit.md`.
+   `.dev/archive/phase9/phase9_completion_substrate_audit.md`.
 3. `/continue` skill's hard-gate detection rule (already
    generic per SKILL.md "Detection rule") picks up the new
    `🔒` + gate-doc-reference row at the next resume after 9.9
@@ -220,4 +220,4 @@ substrate audit clears.
 - 2026-05-16 chat discussion (substrate drift surfaced; user
   directive on sequencing).
 
-- 2026-05-22 (`<backfill>`) — Status: Accepted → Closed (§9.12 DONE). Gate fired and cleared at §9.12 [x] per ADR-0078 §9.12-I cohort canonical pass.
+- 2026-05-22 (`006f0d6d`) — Status: Accepted → Closed (§9.12 DONE). Gate fired and cleared at §9.12 [x] per ADR-0078 §9.12-I cohort canonical pass.

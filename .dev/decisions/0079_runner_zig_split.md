@@ -164,7 +164,7 @@ an `infrastructure`-typed chunk family per
 
 ## References
 
-- Close-plan §6 (g) — `.dev/phase9_structural_debt_close_plan.md`
+- Close-plan §6 (g) — `.dev/archive/phase9/phase9_structural_debt_close_plan.md`
 - D-141 — `.dev/debt.md` (current `blocked-by:` row to be
   retargeted at this ADR).
 - ADR-0023 — `src/` directory structure normalisation

@@ -91,5 +91,5 @@ chunk would violate the rule.
 ## Cited from
 
 - `.dev/debt.md` D-132 (Status: now; d-64 paused)
-- `.dev/phase9_completion_substrate_audit.md` (Phase 10 prep
+- `.dev/archive/phase9/phase9_completion_substrate_audit.md` (Phase 10 prep
   audit gate — investigation trigger added)

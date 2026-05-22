@@ -212,7 +212,7 @@ The rule cites these as illustrative:
   shape).
 - `.claude/rules/bug_fix_survey.md` (sibling-site sweep
   discipline; pairs with this rule).
-- `.dev/phase9_completion_substrate_audit.md` §Q5.
+- `.dev/archive/phase9/phase9_completion_substrate_audit.md` §Q5.
 
 ## Revision history
 

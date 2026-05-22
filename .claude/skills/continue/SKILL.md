@@ -349,7 +349,7 @@ change between iterations.
    "unchecked checkboxes with no work-tracking artifact".
 
    For §9.7 specifically: at every resume where active row is
-   ≥ 7.10, the loop reads `.dev/phase8_transition_gate.md`
+   ≥ 7.10, the loop reads `.dev/archive/phase_gates/phase8_transition_gate.md`
    §3a (deferred-work DAG) + §3 (design cleanliness) and
    reconciles their checkboxes with `.dev/debt.md`.
 5c. **Step 0.7 — Prior cycle ubuntu verification (ADR-0076 D3)**.
@@ -944,30 +944,17 @@ gate document. These override the "non-stop" default above.
 Currently registered hard gates:
 
 - **§9.7 → §9.8 (Phase 7 → Phase 8)** — anchored at row §9.7 /
-  7.13, document `.dev/phase8_transition_gate.md`. Triggers
+  7.13, document `.dev/archive/phase_gates/phase8_transition_gate.md`. Triggers
   when the next-task lookup resolves to row 7.13 OR to
   "open §9.8". The loop must:
   1. Skip `ScheduleWakeup` (do **not** re-arm).
   2. Surface a one-sentence handoff: "Phase 8 entry gate
-     (`.dev/phase8_transition_gate.md`) needs collaborative
+     (`.dev/archive/phase_gates/phase8_transition_gate.md`) needs collaborative
      review; pausing autonomous mode."
   3. Treat resumption as bucket-1 user intervention — the user
      re-engages by working through the gate checklist, marking
      ☑ as items resolve, and finally asking for the gate to
      be cleared (= flipping 7.13 to `[x]`).
-- **§9.9 → Substrate audit (Phase 9 完備 review)** — anchored
-  at row §9.9 / 9.12 (per ADR-0062), document
-  `.dev/phase9_completion_substrate_audit.md`. Triggers when
-  the next-task lookup resolves to row 9.12. The loop must:
-  1. Skip `ScheduleWakeup` (do **not** re-arm).
-  2. Surface a one-sentence handoff: "Phase 9 完備 substrate
-     audit (`.dev/phase9_completion_substrate_audit.md`) needs
-     collaborative review; pausing autonomous mode."
-  3. Treat resumption as bucket-1 user intervention — the user
-     re-engages by working through the gate checklist (Q2 /
-     Q3 / Q4 decisions + cascading ADRs), marking ☑ as items
-     resolve, and finally flipping 9.12 to `[x]`. Phase 10
-     entry gate (9.13) only opens after substrate audit clears.
 - **§9.9 → Phase 10 (Phase 9 → Phase 10)** — anchored at row
   §9.9 / 9.13 (was 9.12 pre-ADR-0062 renumber), document
   `.dev/phase10_transition_gate.md` (Track D prep deliverable).

@@ -104,5 +104,5 @@ code is unsound.
 
 - `.dev/debt.md` D-138 (Status: blocked-by per-import bound dispatch)
 - `.dev/handover.md` (active task: (c)-2 with bound-dispatch design)
-- `.dev/phase9_close_plan.md` §6 step (c) sub-chunk 2 (cross-module
+- `.dev/archive/phase9/phase9_close_plan.md` §6 step (c) sub-chunk 2 (cross-module
   import linker)

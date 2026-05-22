@@ -180,7 +180,7 @@ later selected on Linux Debug builds for leak detection).
 - ADR-0067 (ubuntunote host pivot; D-134 Rosetta) — one origin of libc
   reliability concerns.
 - ADR-0071 (Phase 9 substrate audit resolution; Q6 referent).
-- `.dev/phase9_completion_substrate_audit.md` §Q6.
+- `.dev/archive/phase9/phase9_completion_substrate_audit.md` §Q6.
 - D-134 lineage (D-103 → d-29 → d-62 → d-65); the signal-recovery story
   driving the necessary set.
 - Inventory survey: 2026-05-19 grep-based site enumeration (this ADR's

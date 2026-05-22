@@ -106,7 +106,7 @@ D-090 case did.
 
 ## Extension — close-plan §6 row staleness (2026-05-22)
 
-The same pattern recurred at `.dev/phase9_13_0_close_plan.md` §6:
+The same pattern recurred at `.dev/archive/phase9/phase9_13_0_close_plan.md` §6:
 
 - Row 5 (W2 D-084 Win64 v128 marshal "residual") — D-084 was
   already discharged at `7a7e387c` 2026-05-12 §9.9-i-1 per

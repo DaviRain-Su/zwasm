@@ -662,7 +662,7 @@ sibling set.
   - D-138 (filed 2026-05-17, discharged at (c)-2.4 landing).
   - D-079 (v128 cross-module imports, sub-gap ii) —
     incidentally covered by (c)-2.4's v128 fixture.
-- Phase-9 close plan: [`../phase9_close_plan.md`](../phase9_close_plan.md)
+- Phase-9 close plan: [`../phase9_close_plan.md`](../archive/phase9/phase9_close_plan.md)
   §6 step (c) — the umbrella for this ADR's implementation.
 
 ## Revision history

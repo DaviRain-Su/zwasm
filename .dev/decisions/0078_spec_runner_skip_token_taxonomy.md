@@ -175,7 +175,7 @@ plan C3 failure mode).
 
 ## References
 
-- Close-plan §6 (f) — `.dev/phase9_structural_debt_close_plan.md`
+- Close-plan §6 (f) — `.dev/archive/phase9/phase9_structural_debt_close_plan.md`
 - Sibling ADRs: ADR-0050 (skip-impl ratchet); ADR-0029 (Path B
   skip classification); `.dev/decisions/skip_*.md` (per-fixture
   paired ADRs).

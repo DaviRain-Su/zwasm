@@ -17,7 +17,7 @@ sessions:
    manifest skip-impl (1).
 
 2. **The user finalized the 7 requirements for Phase 9 completion**
-   ([`.dev/phase9_completion_master_plan.md`](../phase9_completion_master_plan.md) Chapter 1):
+   ([`.dev/archive/phase9/phase9_completion_master_plan.md`](../archive/phase9/phase9_completion_master_plan.md) Chapter 1):
    - Full resolution of debt / ADRs, Wasm 2.0 completion 100%, fixation of
      learnings, Phase 10 ground preparation, bench baseline, scaffolding
      iteration speed, windowsmini cross-platform sweep.
@@ -304,8 +304,8 @@ that those axes induce compromise).
   - ADR-0070 (libc dependency policy; Q6)
   - ADR-0072 (comment-as-invariant rule; Q5)
   - ADR-0073 (build-option DCE substrate; details of Q3 C adoption)
-- Master plan: [`.dev/phase9_completion_master_plan.md`](../phase9_completion_master_plan.md)
-- Design discussion: [`.dev/phase9_completion_substrate_audit.md`](../phase9_completion_substrate_audit.md)
+- Master plan: [`.dev/archive/phase9/phase9_completion_master_plan.md`](../archive/phase9/phase9_completion_master_plan.md)
+- Design discussion: [`.dev/archive/phase9/phase9_completion_substrate_audit.md`](../archive/phase9/phase9_completion_substrate_audit.md)
 - Survey outputs (gitignored): `private/notes/p9-close-q3-arch-survey.md`, `private/notes/p9-close-skip-impl-inventory.md`
 
 ## Revision history
@@ -316,4 +316,4 @@ that those axes induce compromise).
 | 2026-05-19 | `dfe977c7` | Full draft populated in §9.12-pre — Alternatives A/B/D-1/E/F + Consequences + Structural cohesion caveat (Q2 P14). |
 | 2026-05-19 | `43d82eb5` | **Accepted** at §9.12 collab gate. Q2 P13 = Accept (re-evaluate at §9.12-B if op gaps) / Q2 P14 = Amend with structural cohesion caveat / Q2 §4.5 = Amend (interp required; 4 axes per-op file) / Q2 §4.6 = Accept (4-layer DCE) / Q3 = Hypothesis C / Q4 = Decision + minimal PoC / Q5 = 5 deliverables + dedup sweep / Q6 = under-management forward-looking policy. ROADMAP §9.12 → [x]; §14 forbidden list amended; Phase Status widget wording updated. |
 
-- 2026-05-22 (`<backfill>`) — Status: Accepted → Closed (§9.12 DONE) per §9.12-I cohort canonical pass.
+- 2026-05-22 (`006f0d6d`) — Status: Accepted → Closed (§9.12 DONE) per §9.12-I cohort canonical pass.

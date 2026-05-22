@@ -1,5 +1,7 @@
 # Phase 9 close plan
 
+> **Doc-state**: ARCHIVED 2026-05-22 — superseded by [`.dev/phase9_close_master.md`](../../phase9_close_master.md). Kept for ADR / ROADMAP citation lineage; do not edit.
+
 > **Status**: Active — work item for the next session(s). Compiled
 > at the end of 2026-05-17 close-readiness discovery cycle.
 >

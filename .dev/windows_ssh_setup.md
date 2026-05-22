@@ -200,7 +200,7 @@ goal.
 windowsmini is wired as an **active debug host** equivalent to
 Mac aarch64 + ubuntunote x86_64 — not just a passive
 phase-boundary gate. The 4-tier iteration workflow
-(`.dev/phase9_13_0_close_plan.md` §0.2.1) covers test-gate
+(`.dev/archive/phase9/phase9_13_0_close_plan.md` §0.2.1) covers test-gate
 flow; this section covers the **diagnostic flow** when a Win64
 JIT bug needs hands-on debugging.
 

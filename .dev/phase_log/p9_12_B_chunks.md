@@ -189,7 +189,7 @@ Loop advances to §9.12-D (Q6 libc dependency boundary).
 
 ★ **Primary Phase 9 completion exit** (Wasm 2.0 100% — skip-impl
 243 → 0 + 4 comprehensive test suites green) per
-`phase9_completion_master_plan.md` §5.3 + §2.2.
+`archive/phase9/phase9_completion_master_plan.md` §5.3 + §2.2.
 
 Major workstreams:
 
@@ -238,8 +238,8 @@ binding shapes) may need ADR-grade design touchpoints.
 
 ## References
 
-PRIMARY: [`phase9_completion_master_plan.md`](phase9_completion_master_plan.md).
-Substrate audit doc: [`phase9_completion_substrate_audit.md`](phase9_completion_substrate_audit.md)
+PRIMARY: [`archive/phase9/phase9_completion_master_plan.md`](../archive/phase9/phase9_completion_master_plan.md).
+Substrate audit doc: [`phase9_completion_substrate_audit.md`](../archive/phase9/phase9_completion_substrate_audit.md)
 (§Decisions filled at §9.12 collab close).
 Accepted ADRs: [`0070`](decisions/0070_libc_dependency_policy.md) /
 [`0071`](decisions/0071_phase9_substrate_audit_resolution.md) /

@@ -1,5 +1,7 @@
 # Phase 9 Completion — Master Plan v2 2026-05-19
 
+> **Doc-state**: ARCHIVED 2026-05-22 — superseded by [`.dev/phase9_close_master.md`](../../phase9_close_master.md). Kept for ADR / ROADMAP citation lineage; do not edit.
+
 > **Purpose**: Achieve all of the user's 7 requirements plus additional feedback (design quality first / build-option DCE driven through every layer / mechanical enforcement so we cannot give up) within the Phase 9 close, and establish a substrate that lets Phase 10 (Wasm 3.0) start with **zero debt, fully prepared, fast iteration, and giving up made physically impossible**.
 >
 > **Origin**: After §9.9 [x] flip in the 2026-05-18 to 19 sessions, the user presented 7 requirements plus 3 additional feedback items (skip-impl 100% as top priority / removal of cost/risk wording / adopting the build-option DCE axis). Investigation → integration → self-review → first draft → policy adjustment → this second draft.

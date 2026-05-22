@@ -49,9 +49,10 @@ require human-in-loop strategic judgment.
 
 ### 1. Phase 9 functional completion
 
-- [ ] `zig build test-all` green on Mac + OrbStack + windowsmini
-      (3-host); latest pushed commit. Phase boundary
-      reconciliation per ADR-0049 — windowsmini deferred per-chunk
+- [ ] `zig build test-all` green on Mac + ubuntunote + windowsmini
+      (3-host per ADR-0067 ubuntunote pivot; OrbStack retired);
+      latest pushed commit. Phase boundary reconciliation per
+      ADR-0049 — windowsmini deferred per-chunk
       but **required at this gate**.
 - [ ] §9.9 spec gate: `simd_assert_runner: N passed, 0 failed,
       M skipped (= 0 skip-impl + M skip-adr)` on all 3 hosts.

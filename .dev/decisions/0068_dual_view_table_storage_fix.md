@@ -394,7 +394,7 @@ survive any of those reshapes.
   - [`2026-05-17-gamma3d-dispatch-write-segv-bisect.md`](../lessons/2026-05-17-gamma3d-dispatch-write-segv-bisect.md)
     — D-142 investigation chain that preceded D-126's
     exposure.
-- Close-plan: [`../phase9_close_plan.md`](../phase9_close_plan.md)
+- Close-plan: [`../phase9_close_plan.md`](../archive/phase9/phase9_close_plan.md)
   §6 step (c) — Cat III work umbrella.
 
 ## Revision history

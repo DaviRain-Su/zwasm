@@ -445,7 +445,7 @@ one-sentence surface message is the user-facing artifact.
 
 ## Chunk types — type-aware granularity rules
 
-> Added 2026-05-21 per `.dev/phase9_structural_debt_close_plan.md`
+> Added 2026-05-21 per `.dev/archive/phase9/phase9_structural_debt_close_plan.md`
 > §6 (b) (resolving A2 — "5-15 ops per chunk" rule doesn't fit
 > architectural / survey / infra work). The single `emit`-only
 > rubric was misapplied to architectural work in §9.12-B
