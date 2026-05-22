@@ -427,6 +427,33 @@ change between iterations.
    Step 3 (`git log`), Step 0.5 (debt sweep), Step 0.5b (live
    status check). It is a runnable command in the loop's
    procedure, not a "remember to check" rule.
+5d. **Step 0.8 — Phase 9 close invariants (ADR-0104; mandatory
+   while Phase 9 is IN-PROGRESS)**. Run:
+
+   ```sh
+   bash scripts/check_phase9_close_invariants.sh --gate
+   ```
+
+   If exit code is 0 → all Phase 9 = DONE invariants hold; the
+   loop can attempt `[x]` flips on §9.13-0 / §9.12-F / §9.12-I /
+   §9.13.
+
+   If exit code is non-0 → at least one invariant FAILed. Read the
+   per-invariant FAIL lines + `.claude/rules/phase9_close_invariants.md`
+   + `.dev/phase9_close_master.md` §5 to identify which Tier-1
+   item the loop should pick up next. **`[x]` flips on §9.13-0 /
+   §9.12-F / §9.12-I / §9.13 are §18.3 violations while gate
+   FAILs** — `.claude/rules/phase9_close_invariants.md` §"Forbidden
+   edits" enforces this.
+
+   This step is the non-bypassable mechanism the 2026-05-22 audit
+   established (user direction: "新セッションから迂回できない原理的な
+   仕組み"). It supersedes ad-hoc "is this row really done"
+   judgment with a mechanical gate.
+
+   The step retires when Phase Status widget flips
+   `9 | IN-PROGRESS → DONE`. Until then it runs at every resume
+   before the per-task TDD loop.
 6. `zig build test` (Phase 0+) — confirm the build is green. From
    Phase 1, also run `zig build test-spec`. From Phase 7, also run
    the differential subset. **If output is large (>200 lines), run
