@@ -11,9 +11,10 @@
 [`.dev/phase9_13_0_close_plan.md`](./phase9_13_0_close_plan.md).
 The `/continue` skill's Step 1a close-plan override
 activates; follow that doc's §6 Work sequence. HEAD
-`3d9288a6` (2026-05-22); §0 preflight is now a 9-tool
-inventory (sysinternals added at `711bdcce`) — green this
-session.
+`1b78775f` (2026-05-22); §0 preflight is a 10-canary check
+(8 build tools + handle64 / Procmon64 — full Sysinternals
+bundle at `711bdcce`). All green at session close
+2026-05-22.
 
 ## Active track
 
