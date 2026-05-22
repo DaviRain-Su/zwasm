@@ -86,6 +86,50 @@ pub fn disarm() void {
     @atomicStore(bool, &recovery.active, false, .release);
 }
 
+/// Run `jit_fn(args)` under VEH protection on Windows. Returns
+/// `true` if `jit_fn` either (a) trapped via a hardware fault
+/// inside `[jit_code_start, jit_code_end)` (VEH redirected to
+/// the function's return point with `Rax = 1`), or (b) returned
+/// `error.Trap` from the entry shim. Returns `false` on clean
+/// success.
+///
+/// **Must NOT be inlined** — `@returnAddress()` must point at
+/// the caller's RIP after this function returns, and inline asm
+/// captures the helper's frame RSP. Marked `noinline` per
+/// ADR-0103 Consequences refinement.
+///
+/// POSIX path: callers gate via `if (comptime builtin.os.tag ==
+/// .windows) ...` and keep the existing `sigsetjmp` site inline
+/// in the caller frame (per discipline at
+/// `spec_assert_runner_base.zig:2306-2312`).
+pub noinline fn callJitOrTrap(
+    jit_code_start: usize,
+    jit_code_end: usize,
+    comptime jit_fn: anytype,
+    args: anytype,
+) bool {
+    if (comptime builtin.os.tag != .windows) return false;
+    var rsp_on_entry: usize = undefined;
+    if (comptime builtin.cpu.arch == .x86_64) {
+        asm volatile ("mov %%rsp, %[sp]"
+            : [sp] "=r" (rsp_on_entry),
+            :
+            : .{ .memory = true });
+    }
+    arm(.{
+        .jit_code_start = jit_code_start,
+        .jit_code_end = jit_code_end,
+        .recovery_pc = @returnAddress(),
+        .recovery_sp = rsp_on_entry + 8,
+        .recovery_rax_trap_code = 1,
+    });
+    defer disarm();
+    @call(.never_inline, jit_fn, args) catch |err| switch (err) {
+        error.Trap => return true,
+    };
+    return false;
+}
+
 const impl = if (builtin.os.tag == .windows) struct {
     const win = std.os.windows;
 

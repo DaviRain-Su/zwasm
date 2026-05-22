@@ -336,6 +336,22 @@ fn nonSimdOnModuleLoaded(
             // the caller frame (see discipline note in
             // `spec_assert_runner_base.zig` lines ~1281–1290).
             const segv_trapped: bool = blk: {
+                if (comptime @import("builtin").os.tag == .windows) {
+                    // Win64 VEH path (ADR-0103 / W3.b-2). The
+                    // helper arms threadlocal recovery against
+                    // the JIT region, runs the entry, and
+                    // returns true if a hardware fault inside
+                    // the region OR an `error.Trap` return path
+                    // fires. Disarm runs via the helper's defer.
+                    const jit_start = @intFromPtr(compiled.module.block.bytes.ptr);
+                    const jit_end = jit_start + compiled.module.block.bytes.len;
+                    break :blk @import("zwasm").platform.windows_traphandler.callJitOrTrap(
+                        jit_start,
+                        jit_end,
+                        entry.callVoidNoArgs,
+                        .{ compiled.module, start_funcidx, &rt },
+                    );
+                }
                 if (base.sigsetjmp(@ptrCast(&base.sigsegv_recover_buf), 1) != 0) {
                     base.sigsegv_armed.store(false, .release);
                     break :blk true;
@@ -1834,15 +1850,27 @@ fn nonSimdHandleAssertUninstantiable(
             // "uninstantiable" outcome (the module never finishes
             // start-init cleanly). Arm sigsegv + treat recovered
             // SEGV identically to error.Trap → return true.
-            if (base.sigsetjmp(@ptrCast(&base.sigsegv_recover_buf), 1) != 0) {
-                base.sigsegv_armed.store(false, .release);
-                return true;
+            if (comptime @import("builtin").os.tag == .windows) {
+                // Win64 VEH path (ADR-0103 / W3.b-2).
+                const jit_start = @intFromPtr(compiled.module.block.bytes.ptr);
+                const jit_end = jit_start + compiled.module.block.bytes.len;
+                if (@import("zwasm").platform.windows_traphandler.callJitOrTrap(
+                    jit_start,
+                    jit_end,
+                    entry.callVoidNoArgs,
+                    .{ compiled.module, start_funcidx, &rt },
+                )) return true;
+            } else {
+                if (base.sigsetjmp(@ptrCast(&base.sigsegv_recover_buf), 1) != 0) {
+                    base.sigsegv_armed.store(false, .release);
+                    return true;
+                }
+                base.sigsegv_armed.store(true, .release);
+                defer base.sigsegv_armed.store(false, .release);
+                entry.callVoidNoArgs(compiled.module, start_funcidx, &rt) catch |err| switch (err) {
+                    error.Trap => return true,
+                };
             }
-            base.sigsegv_armed.store(true, .release);
-            defer base.sigsegv_armed.store(false, .release);
-            entry.callVoidNoArgs(compiled.module, start_funcidx, &rt) catch |err| switch (err) {
-                error.Trap => return true,
-            };
         }
     }
 
