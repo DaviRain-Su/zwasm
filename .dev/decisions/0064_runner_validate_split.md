@@ -1,6 +1,6 @@
 # 0064 — Split runner.zig: extract module-level validation into runner_validate.zig
 
-- **Status**: Accepted
+- **Status**: Closed (§9.12-A DONE)
 - **Date**: 2026-05-17
 - **Author**: Shota Kudo (chaploud)
 - **Tags**: scaffolding, runner, module-validation, file-size, ROADMAP-§A2
@@ -151,3 +151,4 @@ Expected post-split LOC: runner.zig ~1750, runner_validate.zig
 | Date       | Change                                          | Commit |
 |------------|-------------------------------------------------|--------|
 | 2026-05-17 | Initial draft + acceptance + split execution    | (this commit) |
+| 2026-05-22 | `<backfill>` | Status: Accepted → Closed (§9.12-A DONE) |

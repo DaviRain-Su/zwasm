@@ -1,6 +1,6 @@
 # 0098 — Extract regalloc compute family into `regalloc_compute.zig`
 
-- **Status**: Accepted
+- **Status**: Closed (§9.12-A DONE)
 - **Date**: 2026-05-21
 - **Author**: autonomous /continue loop (D-141 per-file ADR series, post-ADR-0097)
 - **Tags**: file-layout, refactor, zone-2, regalloc, file-size-cap
@@ -110,3 +110,5 @@ External API surface unchanged.
 
 - 2026-05-21 — Initial draft (Proposed → Accepted same cycle;
   behaviour-neutral refactor; test gate asserts neutrality).
+
+- 2026-05-22 (`<backfill>`) — Status: Accepted → Closed (§9.12-A DONE).

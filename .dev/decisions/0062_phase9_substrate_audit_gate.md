@@ -1,6 +1,6 @@
 # 0062 — Insert Phase 9 → Phase 10 substrate re-examination gate
 
-- **Status**: Accepted
+- **Status**: Closed (§9.12 DONE)
 - **Date**: 2026-05-16
 - **Author**: Shota Kudo + Claude
 - **Tags**: roadmap, governance, substrate, dispatch-table, P14, build-flags
@@ -219,3 +219,5 @@ substrate audit clears.
 - `.dev/archive/phase_gates/phase8_transition_gate.md` (precedent gate doc; archived 2026-05-19 in §9.12-A).
 - 2026-05-16 chat discussion (substrate drift surfaced; user
   directive on sequencing).
+
+- 2026-05-22 (`<backfill>`) — Status: Accepted → Closed (§9.12 DONE). Gate fired and cleared at §9.12 [x] per ADR-0078 §9.12-I cohort canonical pass.

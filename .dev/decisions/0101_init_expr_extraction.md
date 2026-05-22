@@ -1,6 +1,6 @@
 # 0101 — Extract `parse/init_expr.zig` (Wasm constant-expression utility)
 
-- **Status**: Accepted
+- **Status**: Closed (§9.12-A DONE)
 - **Date**: 2026-05-21
 - **Author**: post-ADR-0099 redesign
 - **Tags**: file-layout, refactor, zone-1, parse, init-expr, deep-utility
@@ -173,3 +173,5 @@ green.
 ## Revision history
 
 - 2026-05-21 — Initial draft, Cycle 5 of file-size discipline reform.
+
+- 2026-05-22 (`<backfill>`) — Status: Accepted → Closed (§9.12-A DONE).

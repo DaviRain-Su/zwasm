@@ -1,6 +1,6 @@
 # 0100 — Rollback ADR-0097 + supersede ADR-0095/0096 per ADR-0099 §D2
 
-- **Status**: Accepted
+- **Status**: Closed (§9.12-A DONE)
 - **Date**: 2026-05-21
 - **Author**: post-D-141 retrospective
 - **Tags**: rollback, file-size-discipline, retrospective, ADR-0099-application
@@ -140,3 +140,5 @@ that ADR.
 ## Revision history
 
 - 2026-05-21 — Initial draft, Cycle 3 of file-size discipline reform.
+
+- 2026-05-22 (`<backfill>`) — Status: Accepted → Closed (§9.12-A DONE) per §9.12-I cohort canonical pass.
