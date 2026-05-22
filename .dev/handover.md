@@ -36,7 +36,7 @@ Per ADR-0105 + ADR-0106 Implementation plans:
    cross-platform query helper (this cycle `3aa5ee5e`).
 2a. [x] arm64 prologue probe + stack-overflow trap stub (`7b86f715`).
     stack_limit=0 default keeps probe a no-op; Mac test-all green.
-2b. [ ] x86_64 prologue probe + trap stub (sibling to arm64).
+2b. [x] x86_64 prologue probe + trap stub (`c2caba63`).
 2c. [ ] Wire stack_limit init at entry-helper sites + spec runner;
     verify `assert_exhaustion runaway` PASS via probe (not via
     OS guard page).
