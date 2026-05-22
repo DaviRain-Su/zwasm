@@ -16,31 +16,49 @@ bucket-3 gate dissolved. §0 preflight is a 10-canary check
 (8 build tools + handle64 / Procmon64 — full Sysinternals
 bundle at `711bdcce`).
 
-## Active task — W4 retry (post-beacon diagnostic)
+## Active task — W4 retry 5 (new crash class investigation)
 
-W4 first run at `f73e7a98` HEAD: `zwasm-spec-wasm-2-0-assert.exe`
-exit 253 mid-corpus, **zero stdout output** (stdout 1024B buffer
-dropped in-flight progress). Build summary: 37/39 steps OK;
-1693/1724 tests passed; spec_assert_runner (wasm-1.0) ran 212
-PASS confirming VEH install path is correct. So the crash is in
-the wasm-2.0 corpus specifically; not in install/teardown.
+W4 retry chain summary (HEAD = `007e26e1`):
 
-Diagnostic infra landed at `ee7403ff`: per-manifest stderr
-beacon (`[W4 BEACON] entering manifest <name>`) + per-manifest
-stdout flush. Next W4 retry will name the suspect manifest in
-the win.log without needing windowsmini live attach.
+| Retry | HEAD | Result | Crash directive |
+|---|---|---|---|
+| 1 | `f73e7a98` | exit 253 zero output | unknown (no beacons) |
+| 2 | `1567516e` | exit 1 | `assert_exhaustion runaway ()` |
+| 3 | `09ee5bb9` | exit 29 (STACK_OVERFLOW filter active) | `assert_exhaustion runaway ()` (downstream re-fault) |
+| 4 | `007e26e1` | exit 1 | `assert_trap as-call_indirect-last ()` (NEW class — earlier than D-162) |
 
-**Next chunk** (after this push lands and is rebuilt on
-windowsmini): re-run W4 (`bash scripts/run_remote_windows.sh
-test-all > /tmp/win.log 2>&1`), `grep -E "\[W4 BEACON\]"
-/tmp/win.log | tail -3` to identify the suspect manifest, then
-narrow to specific fixture via per-fixture probe. Type:
-`verification`. Expected outcomes:
+Permanent value landed this chain: per-manifest beacon
+(`ee7403ff`), per-directive beacon (`aeb01a23`), VEH
+EXCEPTION_STACK_OVERFLOW filter (`09ee5bb9`), SKIP-WIN64-
+EXHAUSTION + D-162 debt row + ADR-0078 taxonomy
+(`007e26e1`).
 
-- Beacon names a specific manifest → next chunk targets that
-  manifest's fixtures + adds per-fixture beacon.
-- All beacons present, crash AFTER the loop → diagnostic
-  reframed (the crash is in a teardown / global destructor).
+**Next chunk** (W4 retry 5 investigation): the
+`assert_trap as-call_indirect-last ()` crash class is distinct
+from D-162. The fixture exercises `(call_indirect ... unreachable)`
+in `call.0.wasm`. The wasm-1.0 spec_assert_runner ran 212 PASS
+including its own `unreachable: assert_trap as-call_indirect-
+last ()` directive, so the corpus path isn't intrinsically
+broken — something about `call.0.wasm`'s module shape OR cumulative
+state after 55 directives surfaces the bug. Candidates:
+
+- Win64 `call_indirect` JIT codegen specific to call.0.wasm's
+  type signatures (cross-checked: callI32NoArgs etc. work for
+  wasm-1.0 runner, so NOT the entry-helper layer).
+- Cumulative per-module state exhaustion (55 JIT invocations
+  → FD / handle / stack pressure).
+- Trap stub control-flow interaction with VEH's redirected
+  recovery PC (the as-call_indirect-last fixture exercises
+  unreachable-as-trap; VEH recovery may overlap with trap stub).
+
+Next investigation: read `test/spec/wasm-2.0-assert/call/
+call.0.wasm` (via `wasm2wat` or hexdump) to extract the
+`as-call_indirect-last` shape, then either fix in JIT codegen
+OR add a finer-grained skip token (e.g.
+`SKIP-WIN64-CALL-INDIRECT-TRAP`) with a paired D-163 debt row.
+Type: `architectural` (4th cycle in the W4 retry chain — per
+architectural_spike.md, cycles 1-3 produced clear measurable
+progress; this is now investigation continuation).
 
 After W4 green: spike `private/spikes/win64-recovery-pc-sp/`
 status flips `merged-into-prod`; row 10 W6 Windows DCE symbol
