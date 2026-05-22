@@ -171,6 +171,109 @@ test "buffer-write entry: hand-rolled JIT writes results[0] = 42 (ADR-0106 path 
     try testing.expectEqual(@as(u64, 42), results_buf[0]);
 }
 
+/// Typed-result wrapper around `invokeBufferWrite` for the
+/// spec runner's multi-result dispatch (cycle 3c will swap the
+/// per-shape `callI32i32i32NoArgs` callsites in
+/// `spec_assert_runner_non_simd.zig` to this helper when on
+/// Win64). The helper packs 0 args (no-args overload — the only
+/// shape currently hitting the SKIP-WIN64-MULTI-RESULT arm) and
+/// unpacks each `[*]u64` result slot into the caller's typed
+/// out-param array.
+///
+/// The caller must compile the JIT module with
+/// `alloc.result_abi = .buffer_write`. The fn_ptr extracted via
+/// `module.entry(idx, BufferWriteFn)` is shape-correct only
+/// under that compilation; reusing this against a `.register_write`-
+/// compiled module produces undefined behaviour.
+///
+/// Per-result type tag picks how to unpack each `u64` slot:
+/// `.i32` / `.f32` masks low 32 bits; `.i64` / `.f64` /
+/// `.funcref` / `.externref` reads the full 64 bits.
+pub const ResultKind = enum { i32, i64, f32, f64, funcref, externref };
+
+pub const TypedResult = union(ResultKind) {
+    i32: u32,
+    i64: u64,
+    f32: u32,
+    f64: u64,
+    funcref: u64,
+    externref: u64,
+};
+
+pub fn invokeMultiResultNoArgs(
+    rt: *JitRuntime,
+    fn_ptr: BufferWriteFn,
+    results: []TypedResult,
+) Error!void {
+    if (results.len > 16) return Error.Trap;
+    var args_buf: [1]u64 = .{0};
+    var u64_buf: [16]u64 = undefined;
+    try invokeBufferWrite(rt, fn_ptr, &args_buf, &u64_buf);
+    for (results, 0..) |*r, i| {
+        const slot = u64_buf[i];
+        r.* = switch (r.*) {
+            .i32 => .{ .i32 = @intCast(slot & 0xFFFFFFFF) },
+            .i64 => .{ .i64 = slot },
+            .f32 => .{ .f32 = @intCast(slot & 0xFFFFFFFF) },
+            .f64 => .{ .f64 = slot },
+            .funcref => .{ .funcref = slot },
+            .externref => .{ .externref = slot },
+        };
+    }
+}
+
+test "buffer-write entry: invokeMultiResultNoArgs unpacks 3-i32 result (ADR-0106 cycle 3b)" {
+    if (!(builtin.cpu.arch == .aarch64 and builtin.os.tag == .macos) and
+        !(builtin.cpu.arch == .x86_64 and builtin.os.tag != .windows))
+    {
+        return error.SkipZigTest;
+    }
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{ .i32, .i32, .i32 } };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 100 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 200 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 300 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 3 },
+        .{ .def_pc = 1, .last_use_pc = 3 },
+        .{ .def_pc = 2, .last_use_pc = 3 },
+    } };
+    const slots = [_]u16{ 0, 1, 2 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slots,
+        .n_slots = 3,
+        .result_abi = .buffer_write,
+    };
+    const sigs = [_]zir.FuncType{sig};
+    const out = try native_emit.compile(testing.allocator, &f, alloc, &sigs, &.{}, 0, &.{}, &.{});
+    defer native_emit.deinit(testing.allocator, out);
+    const bodies = [_]linker.FuncBody{
+        .{ .bytes = out.bytes, .call_fixups = out.call_fixups },
+    };
+    var module = try linker.link(testing.allocator, &bodies, 0);
+    defer module.deinit(testing.allocator);
+    const fn_ptr = module.entry(0, BufferWriteFn);
+    var rt: JitRuntime = .{
+        .vm_base = undefined,
+        .mem_limit = 0,
+        .funcptr_base = undefined,
+        .table_size = 0,
+        .typeidx_base = undefined,
+        .trap_flag = 0,
+        .globals_base = undefined,
+        .globals_count = 0,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
+    };
+    var results = [_]TypedResult{ .{ .i32 = 0 }, .{ .i32 = 0 }, .{ .i32 = 0 } };
+    try invokeMultiResultNoArgs(&rt, fn_ptr, &results);
+    try testing.expectEqual(@as(u32, 100), results[0].i32);
+    try testing.expectEqual(@as(u32, 200), results[1].i32);
+    try testing.expectEqual(@as(u32, 300), results[2].i32);
+}
+
 test "buffer-write entry: ErrCode_OK sentinel" {
     try testing.expectEqual(@as(ErrCode, 0), ErrCode_OK);
 }
