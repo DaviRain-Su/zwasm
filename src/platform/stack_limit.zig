@@ -128,19 +128,24 @@ fn computeWindows(headroom: usize) usize {
 // Diagnostic
 // ============================================================
 
-/// ADR-0105 R3 diagnostic: once-per-thread stderr report of the
+/// ADR-0105 R3 diagnostic: per-call stderr report of the
 /// JIT-prologue stack-probe context (`stack_limit` value, current
-/// approximate SP, margin). Permanent per `.claude/rules/
-/// extended_challenge.md` Step 5 — multi-cycle Win64 stack-probe
-/// investigations re-use this to confirm the probe sees a sane
-/// `rt.stack_limit` BEFORE the recursion crashes the process.
-/// One stderr line per thread; safe to leave wired in production
-/// (cheap once-flag check + ignored after first call).
+/// approximate SP, margin) on Win64. Other hosts fire once per
+/// thread to avoid spamming the spec runner stdout. Permanent per
+/// `.claude/rules/extended_challenge.md` Step 5 — multi-cycle
+/// Win64 stack-probe investigation needs per-fixture evidence
+/// (margin at `assert_exhaustion runaway` specifically vs initial
+/// thread entry).
 threadlocal var diag_seen: bool = false;
 
 pub fn diagOnce(stack_limit_value: usize) void {
-    if (diag_seen) return;
-    diag_seen = true;
+    // R3 cycle 3: gate the once-flag on non-Windows hosts only.
+    // Win64 prints per call to surface runaway's margin before
+    // the OS guard fires.
+    if (comptime builtin.os.tag != .windows) {
+        if (diag_seen) return;
+        diag_seen = true;
+    }
     var sp: usize = 0;
     if (comptime builtin.cpu.arch == .x86_64) {
         sp = asm volatile ("mov %%rsp, %[sp]"
