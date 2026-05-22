@@ -52,23 +52,22 @@ fixtures show **3 distinct Win64 bugs**, in this order:
 
 **Triage order: R3 → R1+R2 → re-run → D-163**.
 
-**Active chunk** (architectural / R3 cycle 1 landed): permanent
-diagnostic `stack_limit.diagOnce(rt.stack_limit)` wired into
-`entry.invokeAndCheck`/`invokeAndCheckVoid`. Prints
-`[stack_probe] stack_limit=0x... sp=0x... margin=0x... os=...
-arch=...` once per thread (`src/platform/stack_limit.zig::diagOnce`;
-permanent per `extended_challenge.md` Step 5). Mac aarch64 +
-ubuntu green; Win64 cross-compile green.
+**R3 cycle 1 evidence (2026-05-23, `/tmp/win.log:1592`)**:
+`stack_limit=0x319d004000 sp=0x319dff3070 margin=0xfef070
+os=windows arch=x86_64`. `computeWindows` returns sane value
+(~16 MiB margin). Runner still crashes exit 253 (STACK_OVERFLOW)
+on first `assert_exhaustion runaway ()` — probe is **not
+firing** despite sane `stack_limit`.
 
-**Next cycle (windowsmini evidence)**: read `/tmp/win.log` for
-`[stack_probe]` line. Decision:
-
-- `stack_limit=0x0` → `GetCurrentThreadStackLimits` failed at
-  runtime; fix `computeWindows`.
-- `stack_limit > 0`, `margin > 0x4000` → JBE patch / R15
-  live-ness at trap; add stub-side diagnostic.
-- `stack_limit > 0`, `margin == 0` → SP already below limit at
-  entry; recompute `STACK_GUARD_HEADROOM` for Win64.
+**Active chunk** (architectural / R3 cycle 2): INT 3 (0xCC)
+prepended to stack-overflow trap stub on Win64 only
+(`op_control.zig`). Next windowsmini run: if exit code
+**changes from 253** → probe IS firing, trap-stub epilogue is
+the bug (POP/RET sequence somehow leaves stack inconsistent).
+If exit code **stays 253** → probe genuinely never fires
+(JBE patch off / R15 stale at probe / R15 base hit garbage).
+Test asserts in `emit_test_int.zig` made Cc-aware (Win64
+expects +1 byte for the INT3).
 
 After R3 root cause: R1/R2 (Phase 2 Win64 2-int register-class
 — `op_control.zig::marshalReturnRegs` likely SysV-only) →
