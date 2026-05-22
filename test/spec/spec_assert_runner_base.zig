@@ -3149,22 +3149,19 @@ pub fn runCorpus(
                 // for our scaffold; trap-reason classification
                 // is out of scope per D-022).
                 //
-                // Win64 SKIP-WIN64-EXHAUSTION (D-162): stack
-                // overflow on Windows fires EXCEPTION_STACK_
-                // OVERFLOW which VEH does receive (per ADR-0103
-                // §3 filter extension 2026-05-22), but the
-                // consumed guard page is NOT auto-restored by
-                // the kernel. Downstream stack growth re-faults
-                // (= exit 29 observed at W4 retry 3 / 09ee5bb9).
-                // Proper fix needs `_resetstkoflw()` (MSVCRT)
-                // linkage OR JIT-prologue stack-probe scheme
-                // (matches Wasmtime / Wasmer). Until then,
-                // skip on Windows. POSIX path unchanged.
-                if (@import("builtin").os.tag == .windows) {
-                    try stdout.print("SKIP-WIN64-EXHAUSTION  {s}: {s} (D-162 — guard page restoration unimplemented)\n", .{ name, line });
-                    tally.skipped_adr += 1;
-                    continue;
-                }
+                // ADR-0105 D5 (2026-05-23): D-162 close — Win64
+                // assert_exhaustion skip arm REMOVED. The JIT-
+                // prologue stack-probe (ADR-0105 D2, landed cycles
+                // 2a-2c) traps cleanly via the dedicated stack-
+                // overflow trap stub (kind=4) on all 3 hosts
+                // BEFORE the OS guard page would fault — so Win64
+                // no longer needs EXCEPTION_STACK_OVERFLOW
+                // recovery (also removed from
+                // `windows_traphandler.zig::vehHandler`).
+                // POSIX paths unchanged: the probe replaces
+                // SIGSEGV-handler+siglongjmp recovery as the
+                // primary trap path; siglongjmp remains as a
+                // safety net for memory-bounds traps.
                 if (module_bad) {
                     tally.runtime_skip += 1;
                     continue;

@@ -149,23 +149,17 @@ const impl = if (builtin.os.tag == .windows) struct {
         switch (code) {
             win.EXCEPTION_ACCESS_VIOLATION,
             win.EXCEPTION_ILLEGAL_INSTRUCTION,
-            win.EXCEPTION_STACK_OVERFLOW,
             EXCEPTION_INT_DIVIDE_BY_ZERO,
             EXCEPTION_INT_OVERFLOW,
             => {},
             else => return win.EXCEPTION_CONTINUE_SEARCH,
         }
-        // STACK_OVERFLOW caveat (W4 retry 2 diagnosis 2026-05-22):
-        // when this branch handles EXCEPTION_STACK_OVERFLOW, Windows
-        // does NOT auto-restore the consumed guard page. Subsequent
-        // stack-grow in the same thread may overflow silently. For
-        // spec_assert_runner_non_simd, each `assert_exhaustion`
-        // directive is rare (~1 per manifest) and the caller-frame
-        // RSP recovery target is high enough above the guard
-        // boundary that the runner continues OK. A proper fix would
-        // call `_resetstkoflw()` (MSVCRT) here, but that adds an
-        // ADR-0070 libc_boundary entry; deferred to a follow-up
-        // debt row if the residual recurs.
+        // ADR-0105 D4 (2026-05-23): EXCEPTION_STACK_OVERFLOW removed
+        // from the filter. The JIT-prologue stack-probe (ADR-0105 D2)
+        // traps cleanly via the kind=4 stack-overflow trap stub
+        // BEFORE SP descends past the guard page — VEH no longer
+        // sees this exception code. Removing the arm dissolves the
+        // guard-page-restoration headache (`_resetstkoflw()` etc.).
         const rip = exception_info.ContextRecord.Rip;
         if (rip < recovery.info.jit_code_start or rip >= recovery.info.jit_code_end) {
             return win.EXCEPTION_CONTINUE_SEARCH;
