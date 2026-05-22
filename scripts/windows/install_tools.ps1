@@ -7,9 +7,17 @@
     Mac / Linux / Windows share the same tool surface (per user
     guidance 2026-05-22 "Mac side と同じツールを使うべき"):
         zig, hyperfine, wasm-tools, wasmtime,
-        wabt (wat2wasm + wast2json), yq (yq-go), lldb (LLVM).
+        wabt (wat2wasm + wast2json), yq (yq-go), lldb (LLVM),
+        sysinternals (Procmon + ProcExp + DebugView + Handle + ~70 tools).
     Tools land in %LOCALAPPDATA%\zwasm-tools\<name>-<version>\
     and are added to the user-scoped PATH.
+
+    The sysinternals entry exists to give windowsmini-side JIT
+    debugging the same "actively wired" status as Mac+ubuntunote
+    (per close-plan §0.2.1 + debug_jit_auto skill Windows recipes).
+    Without these tools D-028 / D-136 / future Win64-specific JIT
+    bugs are debuggable only via lldb, which lacks process / file
+    / handle tracing.
 
     Background: v1 has scripts/windows/install-tools.ps1 but it
     does not include wabt / yq / lldb. v2's build.zig (Close-plan
@@ -40,7 +48,7 @@
 [CmdletBinding()]
 param(
     [switch]$Force,
-    [ValidateSet('zig', 'hyperfine', 'wasm-tools', 'wasmtime', 'wabt', 'yq', 'lldb', 'all')]
+    [ValidateSet('zig', 'hyperfine', 'wasm-tools', 'wasmtime', 'wabt', 'yq', 'lldb', 'sysinternals', 'all')]
     [string]$OnlyTool = 'all'
 )
 
@@ -57,6 +65,10 @@ $versions = @{
     'wabt'       = '1.0.41'
     'yq'         = '4.53.2'
     'lldb'       = '22.1.6'      # via LLVM installer; lldb is bundled
+    # Sysinternals Suite has no suite-level semver — Microsoft ships a
+    # rolling zip at a fixed URL. The pin is a date-stamp marking when
+    # we last verified the bundle. Bump manually + use -Force to refresh.
+    'sysinternals' = '2026-05-22'
 }
 
 # --- Install layout ---
@@ -283,6 +295,23 @@ if ($OnlyTool -in @('all', 'lldb')) {
     $paths['python311'] = Split-Path $pyDir -Parent
 }
 
+if ($OnlyTool -in @('all', 'sysinternals')) {
+    # Sysinternals Suite — Microsoft's debug toolkit bundle (~70 .exe).
+    # Bundle URL is fixed (latest); the $versions pin is a date-stamp
+    # marking when we last downloaded.
+    # Tools used by zwasm v2 debug workflows:
+    #   Procmon64.exe   — process / file / registry tracing (D-028 wedge)
+    #   procexp64.exe   — live process state, fd / handle inspection
+    #   DebugView.exe   — OutputDebugString capture
+    #   handle64.exe    — fd / handle enumeration per process
+    # The zip extracts flat (no nested top-dir) — Install-Archive's
+    # Resolve-SingleSubdir falls through to return $staging as-is and
+    # Move-Item renames staging → stampedDir. Tested 2026-05-22.
+    $v = $versions['sysinternals']
+    $url = 'https://download.sysinternals.com/files/SysinternalsSuite.zip'
+    $paths['sysinternals'] = Install-Archive -Name 'sysinternals' -Version $v -Url $url -Format 'zip'
+}
+
 # --- PATH wiring (User scope, idempotent) ---
 
 function Update-UserPath {
@@ -322,6 +351,9 @@ if ($paths.ContainsKey('yq'))          { $pathsToAdd += $paths['yq'] }
 # inherited at SSH login time.
 if ($paths.ContainsKey('lldb'))        { $pathsToAdd += $paths['lldb'] }
 if ($paths.ContainsKey('python311'))   { $pathsToAdd += $paths['python311'] }
+# Sysinternals Suite: all .exe live flat in the stamped dir (Procmon64.exe,
+# procexp64.exe, DebugView.exe, handle64.exe, ...).
+if ($paths.ContainsKey('sysinternals')) { $pathsToAdd += $paths['sysinternals'] }
 
 # Git for Windows bash (needed by `bash scripts/*.sh`).  Skip if absent.
 $gitBin = 'C:\Program Files\Git\bin'
@@ -342,3 +374,5 @@ Write-Host "  wat2wasm --version       # (wabt)"
 Write-Host "  wast2json --version      # (wabt)"
 Write-Host "  yq --version"
 Write-Host "  lldb --version"
+Write-Host "  Procmon64.exe /?         # (sysinternals) — file/process tracer"
+Write-Host "  handle64.exe -h          # (sysinternals) — fd / handle enumeration"
