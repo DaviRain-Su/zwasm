@@ -333,7 +333,7 @@ pub fn compile(
     //         user int args from RDX (max 3)
     // The base index into arg_gprs is set so index 0 of the user
     // params lands on the first non-runtime-ptr arg reg.
-    {
+    param_marshal: {
         var p_idx: u32 = 0;
         // Cc-aware arg-reg index counters. SysV (§3.2.3) tracks
         // int and FP args independently — `int_arg_idx` starts
@@ -351,6 +351,32 @@ pub fn compile(
         // and shifts rt to RSI (slot 1); user int args begin at
         // RDX (slot 2). For non-MEMORY-class, slot 0 = RDI = rt;
         // user int args begin at RSI (slot 1).
+        // ADR-0106 path (a) cycle 2e — buffer_write ABI: args
+        // come from `[args_ptr + i*8]` (args_ptr in RDX on SysV
+        // / R8 on Win64; the 3rd `callconv(.c)` arg after rt
+        // (RDI/RCX) + results (RSI/RDX)). Skip the per-class
+        // arg-reg shuffle for buffer_write. v128 deferred (a
+        // u64 slot can't hold a 128-bit value; cycle 2f scope).
+        // Win64 deferred until cycle 2f (R8 + shadow-space).
+        if (buffer_write and abi.current_cc == .sysv) {
+            while (p_idx < num_params) : (p_idx += 1) {
+                const off: i32 = layout.disps[p_idx];
+                const ptype = func.sig.params[p_idx];
+                if (ptype == .v128) return Error.UnsupportedOp;
+                // MOV RAX, [RDX + 8*p_idx]
+                try buf.appendSlice(
+                    allocator,
+                    inst.encMovR64FromMemDisp32(.rax, .rdx, @intCast(p_idx * 8)).slice(),
+                );
+                switch (ptype) {
+                    .i32 => try buf.appendSlice(allocator, rbpStoreR32(off, .rax).slice()),
+                    .i64, .f32, .f64, .funcref, .externref => try buf.appendSlice(allocator, rbpStoreR64(off, .rax).slice()),
+                    .v128 => unreachable, // guarded above.
+                }
+            }
+            // Skip the legacy per-class loop entirely.
+            break :param_marshal;
+        }
         var int_arg_idx: usize = if (return_is_memory_class) 2 else 1;
         var fp_arg_idx: usize = if (abi.current_cc == .win64) 1 else 0;
         // §9.7 / 7.10-j: per-overflow NSAA index for SysV. Mirror of

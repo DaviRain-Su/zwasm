@@ -332,6 +332,32 @@ pub fn compile(
     // (full 64-bit). AAPCS64 X0 = `*const JitRuntime` (already
     // snapshotted to X19 above), X1 = param 0, etc.
     var p_idx: u32 = 0;
+    // ADR-0106 path (a) cycle 2e — buffer_write ABI: args come
+    // from `[X2 + i*8]` (args_ptr is the 3rd AAPCS64 arg after
+    // rt=X0, results=X1, args=X2). Skip the per-class arg-reg
+    // shuffle entirely. v128 deferred (cycle 2f scope; a u64
+    // slot can't hold a 128-bit value).
+    if (buffer_write) {
+        while (p_idx < num_params) : (p_idx += 1) {
+            const param_off_u: u32 = local_base_off + layout.offsets[p_idx];
+            const param_ty = func.sig.params[p_idx];
+            if (param_ty == .v128) return Error.UnsupportedOp;
+            if (param_off_u > 32760) return Error.UnsupportedOp;
+            // LDR X16, [X2, #(p_idx*8)]
+            const args_off_u: u32 = @intCast(p_idx * 8);
+            if (args_off_u > 32760) return Error.UnsupportedOp;
+            try gpr.writeU32(allocator, &buf, inst.encLdrImm(16, 2, @intCast(args_off_u)));
+            // Store per type: i32/f32 use STR W (low 32 bits); i64/f64/refs use STR X.
+            switch (param_ty) {
+                .i32, .f32 => try gpr.writeU32(allocator, &buf, inst.encStrImmW(16, 31, @intCast(param_off_u))),
+                .i64, .f64, .funcref, .externref => try gpr.writeU32(allocator, &buf, inst.encStrImm(16, 31, @intCast(param_off_u))),
+                .v128 => unreachable, // guarded above.
+            }
+        }
+        // Fall through — the existing per-class while loop below
+        // checks `p_idx < num_params` and exits immediately since
+        // p_idx now equals num_params.
+    }
     var int_arg_idx: u5 = 1; // X0 = runtime ptr; user int args from X1
     var fp_arg_idx: u5 = 0; // V0..V7 for FP args
     // Overflow-args byte cursor in the caller's outgoing-args

@@ -195,6 +195,54 @@ else if (builtin.cpu.arch == .x86_64)
 else
     struct {};
 
+test "buffer-write entry: native-emit (i32) → i32 identity via [args_ptr+0] (ADR-0106 cycle 2e)" {
+    if (!(builtin.cpu.arch == .aarch64 and builtin.os.tag == .macos) and
+        !(builtin.cpu.arch == .x86_64 and builtin.os.tag != .windows))
+    {
+        return error.SkipZigTest;
+    }
+    // Build ZirFunc: (param i32) → i32; body = local.get 0; end.
+    const sig: zir.FuncType = .{ .params = &.{.i32}, .results = &.{.i32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"local.get", .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{.{ .def_pc = 0, .last_use_pc = 1 }} };
+    const slots = [_]u16{0};
+    const alloc: regalloc.Allocation = .{
+        .slots = &slots,
+        .n_slots = 1,
+        .result_abi = .buffer_write,
+    };
+    const sigs = [_]zir.FuncType{sig};
+    const out = try native_emit.compile(testing.allocator, &f, alloc, &sigs, &.{}, 0, &.{}, &.{});
+    defer native_emit.deinit(testing.allocator, out);
+
+    const bodies = [_]linker.FuncBody{
+        .{ .bytes = out.bytes, .call_fixups = out.call_fixups },
+    };
+    var module = try linker.link(testing.allocator, &bodies, 0);
+    defer module.deinit(testing.allocator);
+    const fn_ptr = module.entry(0, BufferWriteFn);
+    var rt: JitRuntime = .{
+        .vm_base = undefined,
+        .mem_limit = 0,
+        .funcptr_base = undefined,
+        .table_size = 0,
+        .typeidx_base = undefined,
+        .trap_flag = 0,
+        .globals_base = undefined,
+        .globals_count = 0,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
+    };
+    // args[0] = 123 (i32 value packed into low 32 of u64).
+    var args_buf: [1]u64 = .{123};
+    var results_buf: [1]u64 = .{0};
+    try invokeBufferWrite(&rt, fn_ptr, &args_buf, &results_buf);
+    try testing.expectEqual(@as(u64, 123), results_buf[0] & 0xFFFFFFFF);
+}
+
 test "buffer-write entry: native-emit (i32.const 42) end → results[0] = 42 (ADR-0106 cycle 2c/2d)" {
     if (!(builtin.cpu.arch == .aarch64 and builtin.os.tag == .macos) and
         !(builtin.cpu.arch == .x86_64 and builtin.os.tag != .windows))
