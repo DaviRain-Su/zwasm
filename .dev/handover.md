@@ -76,10 +76,12 @@ Per ADR-0105 + ADR-0106 Implementation plans:
     `invokeMultiResultNoArgs` + `TypedResult` union foundation
     (`6182b745`). Mac aarch64 + Linux x86_64 SysV verified
     end-to-end on `() → (i32, i32, i32)`.
-3c. [ ] Wire `invokeMultiResultNoArgs` into
-    spec_assert_runner_non_simd.zig's 3 multi-result callsites
-    (lines 767/817/892) gated on Win64. Module compile site
-    also passes `result_abi = .buffer_write` on Win64.
+3c. [x] Shape coverage tests for ALL 3 SKIP-arm shapes
+    `(i32,i64)` + `(i64,i32)` + `(i32,i32,i32)` via buffer_write
+    end-to-end (`2330cea7`). Mac arm64 + Linux x86_64 verified.
+3d. [ ] Wire `invokeMultiResultNoArgs` into spec_assert_runner_non_simd.zig's
+    3 callsites (lines 767/817/892) when on Win64 + module
+    compile passes `result_abi = .buffer_write` on Win64.
 4. [ ] Remove `FuncRet_*` extern struct family + remove
    `SKIP-WIN64-MULTI-RESULT` arm. D-094 + D-164 close;
    gate I1c OK.
