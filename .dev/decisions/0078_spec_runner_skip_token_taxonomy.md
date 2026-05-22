@@ -79,6 +79,7 @@ ADR amendment).
 | `SKIP-WASMTIME-MISSING`        | `debt-trackable`  | D-008 (discharged `cb07e112`); runner-internal robustness signal — token survives for windowsmini-side wasmtime install regression detection |
 | `SKIP-WASMTIME-UNUSABLE`       | `debt-trackable`  | D-008 (discharged `cb07e112`); runner-internal robustness signal — token survives for wasmtime stub-binary regression detection |
 | `SKIP-HOST-STATE-DIVERGED`     | `ADR-required`    | `.dev/decisions/skip_host_state_diverged.md`                   |
+| `SKIP-WIN64-EXHAUSTION`        | `debt-trackable`  | D-162 (Win64 stack-overflow guard-page restoration; VEH receives EXCEPTION_STACK_OVERFLOW but cannot re-arm guard page without `_resetstkoflw()` or prologue stack-probe; proper fix matches Wasmtime/Wasmer scheme) |
 
 ### When a new token is introduced
 
