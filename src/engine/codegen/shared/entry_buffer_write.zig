@@ -274,6 +274,104 @@ test "buffer-write entry: invokeMultiResultNoArgs unpacks 3-i32 result (ADR-0106
     try testing.expectEqual(@as(u32, 300), results[2].i32);
 }
 
+test "buffer-write entry: native-emit () → (i32, i64) shape (SKIP arm callI32i64NoArgs shape; ADR-0106 cycle 3c)" {
+    if (!(builtin.cpu.arch == .aarch64 and builtin.os.tag == .macos) and
+        !(builtin.cpu.arch == .x86_64 and builtin.os.tag != .windows))
+    {
+        return error.SkipZigTest;
+    }
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{ .i32, .i64 } };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 7 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"i64.const", .payload = 8 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 2 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+    } };
+    const slots = [_]u16{ 0, 1 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slots,
+        .n_slots = 2,
+        .result_abi = .buffer_write,
+    };
+    const sigs = [_]zir.FuncType{sig};
+    const out = try native_emit.compile(testing.allocator, &f, alloc, &sigs, &.{}, 0, &.{}, &.{});
+    defer native_emit.deinit(testing.allocator, out);
+    const bodies = [_]linker.FuncBody{
+        .{ .bytes = out.bytes, .call_fixups = out.call_fixups },
+    };
+    var module = try linker.link(testing.allocator, &bodies, 0);
+    defer module.deinit(testing.allocator);
+    const fn_ptr = module.entry(0, BufferWriteFn);
+    var rt: JitRuntime = .{
+        .vm_base = undefined,
+        .mem_limit = 0,
+        .funcptr_base = undefined,
+        .table_size = 0,
+        .typeidx_base = undefined,
+        .trap_flag = 0,
+        .globals_base = undefined,
+        .globals_count = 0,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
+    };
+    var results = [_]TypedResult{ .{ .i32 = 0 }, .{ .i64 = 0 } };
+    try invokeMultiResultNoArgs(&rt, fn_ptr, &results);
+    try testing.expectEqual(@as(u32, 7), results[0].i32);
+    try testing.expectEqual(@as(u64, 8), results[1].i64);
+}
+
+test "buffer-write entry: native-emit () → (i64, i32) shape (SKIP arm callI64i32NoArgs shape; ADR-0106 cycle 3c)" {
+    if (!(builtin.cpu.arch == .aarch64 and builtin.os.tag == .macos) and
+        !(builtin.cpu.arch == .x86_64 and builtin.os.tag != .windows))
+    {
+        return error.SkipZigTest;
+    }
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{ .i64, .i32 } };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"i64.const", .payload = 0xABCDEF12 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0xCAFE });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 2 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+    } };
+    const slots = [_]u16{ 0, 1 };
+    const alloc: regalloc.Allocation = .{
+        .slots = &slots,
+        .n_slots = 2,
+        .result_abi = .buffer_write,
+    };
+    const sigs = [_]zir.FuncType{sig};
+    const out = try native_emit.compile(testing.allocator, &f, alloc, &sigs, &.{}, 0, &.{}, &.{});
+    defer native_emit.deinit(testing.allocator, out);
+    const bodies = [_]linker.FuncBody{
+        .{ .bytes = out.bytes, .call_fixups = out.call_fixups },
+    };
+    var module = try linker.link(testing.allocator, &bodies, 0);
+    defer module.deinit(testing.allocator);
+    const fn_ptr = module.entry(0, BufferWriteFn);
+    var rt: JitRuntime = .{
+        .vm_base = undefined,
+        .mem_limit = 0,
+        .funcptr_base = undefined,
+        .table_size = 0,
+        .typeidx_base = undefined,
+        .trap_flag = 0,
+        .globals_base = undefined,
+        .globals_count = 0,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
+    };
+    var results = [_]TypedResult{ .{ .i64 = 0 }, .{ .i32 = 0 } };
+    try invokeMultiResultNoArgs(&rt, fn_ptr, &results);
+    try testing.expectEqual(@as(u64, 0xABCDEF12), results[0].i64);
+    try testing.expectEqual(@as(u32, 0xCAFE), results[1].i32);
+}
+
 test "buffer-write entry: ErrCode_OK sentinel" {
     try testing.expectEqual(@as(ErrCode, 0), ErrCode_OK);
 }
