@@ -105,11 +105,23 @@ Per ADR-0105 + ADR-0106 Implementation plans:
 3e (Phase 2'd). [x] arm64 AAPCS64 3-int MEMORY-class wrapper
     (`daed4952`). 16-byte sequence (MOV X8,X1 + BL + MOV W0,
     WZR + RET); Mac aarch64 test green.
-3e (Phase 2'e). [ ] arm64 AAPCS64 2-int register-class shape
-    for `(i32,i64)` / `(i64,i32)`. Body returns result 0 in
-    X0 and result 1 in X1 per AAPCS64; wrapper saves results
-    ptr to X19 (callee-saved), CALLs body, STR X0 → [X19+0]
-    + STR X1 → [X19+8], restores X19, MOV W0 WZR, RET.
+3e (Phase 2'e). [x] arm64 AAPCS64 2-int register-class wrapper
+    (`003eaed0`). 28-byte sequence (STP X1,X30 #-16! + BL +
+    LDP X9,X30 #+16 + STR X0,[X9] + STR X1,[X9+8] + MOV W0
+    WZR + RET). Stack-save chosen over X19-save (X19 pinned
+    + clobbered by body). All 3 SKIP-arm shapes now have
+    arm64 wrapper coverage; SysV + arm64 sibling pair done.
+3e (Phase 2'f). [ ] Linker hookup: per-function thunk address
+    exposed via `module.entry_buf(idx, BufferWriteFn)` in
+    `shared/linker.zig`. compileWasm calls `wrapper_thunk.emit`
+    for multi-result funcs + appends bytes to module image.
+3e (Phase 2'g). [ ] Spec runner 3 multi-result callsites
+    (`spec_assert_runner_non_simd.zig:767/817/892`) use
+    `invokeMultiResultNoArgs(rt, module.entry_buf(idx,
+    BufferWriteFn), results)`.
+3e (Phase 2'h, optional). [ ] x86_64 Win64 wrapper sibling
+    — gated on either windowsmini access OR cycle 2c emit
+    extension for Win64 MEMORY-class RCX-as-hidden-ptr.
 3e (Phase 2''). [ ] linker.JitModule exposes per-function
     thunk address (`module.entry_buf(idx, BufferWriteFn)`).
     ~30 LOC in linker.zig + emit pipeline integration.
