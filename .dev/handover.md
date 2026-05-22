@@ -52,28 +52,32 @@ fixtures show **3 distinct Win64 bugs**, in this order:
 
 **Triage order: R3 → R1+R2 → re-run → D-163**.
 
-1. **R3 (ADR-0105 Win64)**: investigate why JIT-prologue
-   stack-probe doesn't fire on Win64. Likely cause: stack_limit
-   not set, or comparison instruction wrong on Win64, or VEH
-   STACK_OVERFLOW filter still firing pre-probe. Check
-   `src/platform/stack_limit.zig` + `emit.zig` Win64 prologue
-   probe emission. Likely 1-cycle fix.
+**Active chunk** (architectural / R3 cycle 1 landed): permanent
+diagnostic `stack_limit.diagOnce(rt.stack_limit)` wired into
+`entry.invokeAndCheck`/`invokeAndCheckVoid`. Prints
+`[stack_probe] stack_limit=0x... sp=0x... margin=0x... os=...
+arch=...` once per thread (`src/platform/stack_limit.zig::diagOnce`;
+permanent per `extended_challenge.md` Step 5). Mac aarch64 +
+ubuntu green; Win64 cross-compile green.
 
-2. **R1/R2 (Phase 2 Win64 2-int register-class)**: the
-   wrapper Win64 (Phase 2'i, 33 bytes) assumes body writes
-   result 1 to RDX. Verify body's register_write epilogue
-   actually writes RDX on Win64 — cycle 2c's marshalReturnRegs
-   may be SysV-only. Likely a Cc-aware fix in
-   `src/engine/codegen/x86_64/op_control.zig::marshalReturnRegs`.
+**Next cycle (windowsmini evidence)**: read `/tmp/win.log` for
+`[stack_probe]` line. Decision:
 
-3. After R1/R2/R3 land + windowsmini re-runs green except
-   D-163: focus on D-163 spike's H1/H2/H3 probes (per
-   `private/spikes/d-163-win64-call-indirect-trap/`).
+- `stack_limit=0x0` → `GetCurrentThreadStackLimits` failed at
+  runtime; fix `computeWindows`.
+- `stack_limit > 0`, `margin > 0x4000` → JBE patch / R15
+  live-ness at trap; add stub-side diagnostic.
+- `stack_limit > 0`, `margin == 0` → SP already below limit at
+  entry; recompute `STACK_GUARD_HEADROOM` for Win64.
 
-windowsmini is SSH-reachable (verified 2026-05-23). Per ADR-0049
-investigation work is autonomous-eligible. `bash scripts/
-run_remote_windows.sh test-all` can be re-kicked after each
-fix; result lands in `/tmp/win.log`.
+After R3 root cause: R1/R2 (Phase 2 Win64 2-int register-class
+— `op_control.zig::marshalReturnRegs` likely SysV-only) →
+re-run → D-163 (spike H1/H2/H3 in
+`private/spikes/d-163-win64-call-indirect-trap/`).
+
+windowsmini SSH-reachable per ADR-0049; autonomous-eligible.
+`bash scripts/run_remote_windows.sh test-all` re-kicked each
+cycle → `/tmp/win.log`.
 
 ## Work landed this session (2026-05-23)
 
@@ -81,6 +85,9 @@ ADR-0106 cycle 3e Phase 2'a → 2'l full implementation chain;
 D-094 + D-164 closed (Mac/Linux); SKIP-WIN64-MULTI-RESULT arm
 removed. Mac aarch64 + Linux x86_64 green. **Win64 runtime
 NOT verified during the cycle** — surfaced as R1/R2/R3 here.
+
+R3 cycle 1: `stack_limit.diagOnce` permanent diagnostic landed.
+windowsmini round-trip kicked; evidence read next cycle.
 
 ## See
 
