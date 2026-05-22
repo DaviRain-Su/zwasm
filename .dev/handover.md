@@ -52,22 +52,26 @@ fixtures show **3 distinct Win64 bugs**, in this order:
 
 **Triage order: R3 → R1+R2 → re-run → D-163**.
 
-**R3 cycle 1 evidence (2026-05-23, `/tmp/win.log:1592`)**:
-`stack_limit=0x319d004000 sp=0x319dff3070 margin=0xfef070
-os=windows arch=x86_64`. `computeWindows` returns sane value
-(~16 MiB margin). Runner still crashes exit 253 (STACK_OVERFLOW)
-on first `assert_exhaustion runaway ()` — probe is **not
-firing** despite sane `stack_limit`.
+**R3 cycle 1+2 evidence (2026-05-23)**:
+- Cycle 1: `[stack_probe] stack_limit=0x319d004000 sp=0x319dff3070
+  margin=0xfef070` — computeStackLimit sane (~16 MiB margin).
+- Cycle 2: INT 3 (0xCC) at trap stub top, Win64-only. Exit code
+  remained 253 (STACK_OVERFLOW). Probe **does not reach trap
+  stub** — JBE never fires for runaway despite sane stack_limit
+  at thread entry.
 
-**Active chunk** (architectural / R3 cycle 2): INT 3 (0xCC)
-prepended to stack-overflow trap stub on Win64 only
-(`op_control.zig`). Next windowsmini run: if exit code
-**changes from 253** → probe IS firing, trap-stub epilogue is
-the bug (POP/RET sequence somehow leaves stack inconsistent).
-If exit code **stays 253** → probe genuinely never fires
-(JBE patch off / R15 stale at probe / R15 base hit garbage).
-Test asserts in `emit_test_int.zig` made Cc-aware (Win64
-expects +1 byte for the INT3).
+**Active chunk** (architectural / R3 cycle 3): remove once-flag
+on Win64 so `diagOnce` prints **per call**. Next run lands a
+`[stack_probe]` line for the runaway invocation itself (margin
+at the moment of its call). Three possible outcomes:
+
+- margin huge (~16 MiB) AND probe still doesn't fire → JBE
+  patch off, OR R15 stale at probe site, OR `stack_limit_off`
+  computes wrong on Win64 (extern struct layout drift).
+- margin zero/negative → STACK_GUARD_HEADROOM consumed by
+  runner ceremony BEFORE runaway; need adaptive headroom.
+- margin shrinks during recursion → recursion is happening but
+  probe's R15+offset isn't reading rt.stack_limit.
 
 After R3 root cause: R1/R2 (Phase 2 Win64 2-int register-class
 — `op_control.zig::marshalReturnRegs` likely SysV-only) →
@@ -80,13 +84,10 @@ cycle → `/tmp/win.log`.
 
 ## Work landed this session (2026-05-23)
 
-ADR-0106 cycle 3e Phase 2'a → 2'l full implementation chain;
-D-094 + D-164 closed (Mac/Linux); SKIP-WIN64-MULTI-RESULT arm
-removed. Mac aarch64 + Linux x86_64 green. **Win64 runtime
-NOT verified during the cycle** — surfaced as R1/R2/R3 here.
-
-R3 cycle 1: `stack_limit.diagOnce` permanent diagnostic landed.
-windowsmini round-trip kicked; evidence read next cycle.
+ADR-0106 cycle 3e Phase 2'a→2'l full chain; D-094 + D-164 closed
+(Mac/Linux); SKIP-WIN64-MULTI-RESULT arm removed. R3 cycles 1+2:
+diagnostic + INT 3 trap-stub sentinel rule out `stack_limit=0`
+and trap-stub epilogue bug; probe genuinely never reaches stub.
 
 ## See
 
