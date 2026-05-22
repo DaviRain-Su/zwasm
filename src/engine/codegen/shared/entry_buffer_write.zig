@@ -92,6 +92,23 @@ pub fn invokeBufferWrite(
     if (code != ErrCode_OK or rt.trap_flag != 0) return Error.Trap;
 }
 
+/// ADR-0106 cycle 3e Phase 2'h step 2 — Win64 routing helper for
+/// 0-arg multi-result entry helpers; caller extracts u64 slots
+/// into FuncRet struct. Forward-declared `linker.JitModule` use is
+/// fine because both modules are in the same Zone 2 cohort.
+pub fn invokeBufWin64NoArgs(
+    rt: *JitRuntime,
+    module: @import("linker.zig").JitModule,
+    func_idx: u32,
+    comptime n_results: usize,
+) Error![n_results]u64 {
+    const buf_fn = module.entry_buf(func_idx, BufferWriteFn);
+    var args_buf: [1]u64 = .{0};
+    var results_buf: [n_results]u64 = [_]u64{0} ** n_results;
+    try invokeBufferWrite(rt, buf_fn, &args_buf, &results_buf);
+    return results_buf;
+}
+
 // ============================================================
 // Tests — hand-rolled JIT bytes that match the buffer-write ABI
 // without depending on the JIT emit changes (cycles 2-3).

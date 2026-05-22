@@ -22,6 +22,7 @@ const builtin = @import("builtin");
 const linker = @import("linker.zig");
 const jit_abi = @import("jit_abi.zig");
 const stack_limit_mod = @import("../../../platform/stack_limit.zig");
+const entry_buffer_write = @import("entry_buffer_write.zig");
 
 /// Shared clobber set for the AAPCS64 inline-asm BLR thunks used by
 /// the Class B entry helpers (ADR-0069). Lists all caller-saved
@@ -916,6 +917,10 @@ pub fn callI32i64NoArgs(
     func_idx: u32,
     rt: *JitRuntime,
 ) Error!FuncRet_i32i64 {
+    if (builtin.os.tag == .windows) {
+        const r = try entry_buffer_write.invokeBufWin64NoArgs(rt, module, func_idx, 2);
+        return .{ .r0 = @intCast(r[0] & 0xFFFFFFFF), .r1 = r[1] };
+    }
     const Fn = *const fn (*const JitRuntime) callconv(.c) FuncRet_i32i64;
     return invokeAndCheck(rt, FuncRet_i32i64, module.entry(func_idx, Fn), .{});
 }
@@ -926,6 +931,10 @@ pub fn callI64i32NoArgs(
     func_idx: u32,
     rt: *JitRuntime,
 ) Error!FuncRet_i64i32 {
+    if (builtin.os.tag == .windows) {
+        const r = try entry_buffer_write.invokeBufWin64NoArgs(rt, module, func_idx, 2);
+        return .{ .r0 = r[0], .r1 = @intCast(r[1] & 0xFFFFFFFF) };
+    }
     const Fn = *const fn (*const JitRuntime) callconv(.c) FuncRet_i64i32;
     return invokeAndCheck(rt, FuncRet_i64i32, module.entry(func_idx, Fn), .{});
 }
@@ -940,28 +949,19 @@ pub fn callI32i32NoArgs(
     return invokeAndCheck(rt, FuncRet_i32i32, module.entry(func_idx, Fn), .{});
 }
 
-/// `() -> (i32, i32, i32)` — Class C MEMORY-class per ADR-0069
-/// §Phase 2.
-///
-/// Native `callconv(.c)` matches the JIT emit shape on both
-/// supported arches (ADR-0026 2026-05-18 Convention Swap):
-///
-/// - arm64 AAPCS64 §6.8.2: 24 B struct routes via the X8 indirect-
-///   result-pointer register (separate from X0..X7 arg regs).
-///   JIT-emitted callee captures X8 in prologue, writes results
-///   via `[X8, #(i*8)]`.
-/// - x86_64 SysV §3.2.3: 24 B struct is MEMORY-class; caller
-///   passes `&buffer` in RDI (slot 0), shifting `rt` to RSI
-///   (slot 1). JIT-emitted callee captures RDI in prologue,
-///   writes results via `[RDI + i*8]`.
-///
-/// Win64: NOT YET SUPPORTED — Win64 indirect-result uses RCX-as-
-/// hidden-arg per Microsoft x64; deferred to §9.13-0.
+/// `() -> (i32, i32, i32)` — Class C MEMORY-class per ADR-0069.
+/// SysV / AAPCS64: native `callconv(.c)` MEMORY-class via X8
+/// (arm64) / RDI hidden-arg (SysV). Win64: wrapper-thunk path
+/// (Phase 2'h step 2).
 pub fn callI32i32i32NoArgs(
     module: linker.JitModule,
     func_idx: u32,
     rt: *JitRuntime,
 ) Error!FuncRet_i32i32i32 {
+    if (builtin.os.tag == .windows) {
+        const r = try entry_buffer_write.invokeBufWin64NoArgs(rt, module, func_idx, 3);
+        return .{ .r0 = r[0], .r1 = r[1], .r2 = r[2] };
+    }
     const Fn = *const fn (*const JitRuntime) callconv(.c) FuncRet_i32i32i32;
     return invokeAndCheck(rt, FuncRet_i32i32i32, module.entry(func_idx, Fn), .{});
 }
