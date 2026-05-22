@@ -20,10 +20,58 @@
 //!   assembly (no `callconv(.c)` at the internal call →
 //!   no Win64 ABI rules → no struct-return ABI mismatch).
 //!
-//! Per-arch emit primitives are stubs in this commit; cycle
-//! 3e Phase 2' implements them. This file provides the
-//! type foundation + the `EmitParams` shape so subsequent
-//! cycles have a stable callsite contract.
+//! Per-arch emit (Phase 2' a-e) is COMPLETE: x86_64 SysV +
+//! arm64 AAPCS64 each cover the 2-int register-class shape
+//! and 3-int MEMORY-class shape — the 3 sig shapes that hit
+//! the `SKIP-WIN64-MULTI-RESULT` arm in
+//! `spec_assert_runner_base.zig`. Each wrapper byte sequence
+//! is unit-tested against expected bytes.
+//!
+//! ## Phase 2'g integration plan (linker hookup)
+//!
+//! Subsequent cycles wire this module into the production
+//! compile path:
+//!
+//! 1. Extend `shared/linker.zig::link()` with an optional
+//!    `wrapper_specs: ?[]const WrapperSpec` parameter (where
+//!    `WrapperSpec = struct { func_idx: u32, sig: FuncType }`).
+//!    When non-null + non-empty:
+//!    - After laying out function bodies (current pass), call
+//!      `wrapper_thunk.emit(allocator, .{ .sig, .body_offset =
+//!      func_offsets[idx], .thunk_offset = block_size_so_far })`
+//!      per spec.
+//!    - Append wrapper bytes to `block.bytes`.
+//!    - Populate `thunk_offsets[idx] = thunk_offset` for each
+//!      spec'd function; `NO_THUNK` for the rest.
+//!    - Skip the pass entirely when wrapper_specs == null (or
+//!      `wrapper_thunk.emit` returns `Error.UnsupportedOp` for
+//!      every spec — e.g. arch/shape unsupported).
+//!
+//! 2. Extend `shared/compile.zig::compileOne` to detect when
+//!    the function's sig hits a supported wrapper shape
+//!    (`results.len in {2, 3}` + all GPR-class) and append to
+//!    the wrapper_specs slice.
+//!
+//! 3. Spec runner's 3 multi-result callsites in
+//!    `test/spec/spec_assert_runner_non_simd.zig` (lines
+//!    767/817/892) gated on `builtin.os.tag == .windows`:
+//!    - Use `module.entry_buf(func_idx, BufferWriteFn)` to
+//!      get the wrapper pointer.
+//!    - Invoke via `entry_buffer_write.invokeMultiResultNoArgs`.
+//!    - Unpack results from `TypedResult` array.
+//!
+//! 4. Remove the `SKIP-WIN64-MULTI-RESULT` arm in
+//!    `spec_assert_runner_base.zig` (lines 3055-3082). After
+//!    Phase 2'g lands, Win64 multi-result fixtures route
+//!    through the wrapper thunk (currently the same as the
+//!    existing per-shape `callI32i32i32NoArgs` etc but with
+//!    the buffer-write boundary intercept).
+//!
+//! 5. Phase boundary windowsmini reconciliation runs
+//!    `bash scripts/run_remote_windows.sh test-all` to
+//!    verify the Win64 path. If wrapper byte sequence has a
+//!    bug specific to Win64 (e.g. shadow space alignment),
+//!    surface via test FAIL at that point.
 //!
 //! Zone 2 (`src/engine/codegen/shared/`) — same as
 //! `entry_buffer_write.zig` + `result_abi.zig`.
