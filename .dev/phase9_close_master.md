@@ -227,12 +227,15 @@ core runner.
 
 ### §5.4 — Stale ADR / debt cleanup (concurrent with §5.1-§5.3)
 
-- [ ] D-007 / D-010 — add explicit Phase target to `blocked-by:`.
-- [ ] `skip_cross_module_action.md` Status flip (Superseded by
-  §9.9-III / §9.12-E DONE).
-- [ ] `skip_embenchen_emcc_env_imports.md` Status flip
-  (Superseded by §9.12-E DONE).
-- [ ] D-149 SHA backfill — 8 ADR `<backfill>` placeholders.
+- [x] D-007 / D-010 — explicit Phase target already on rows
+  (verified 2026-05-23: D-007 Phase 11 WASI envv/preopens;
+  D-010 upstream Zig stdlib OR third-site Phase 11+).
+- [x] `skip_cross_module_action.md` Status flip (`fca7fe1c`).
+- [x] `skip_embenchen_emcc_env_imports.md` Status flip (`fca7fe1c`).
+- [x] D-149 SHA backfill — 5 ADR Revision rows backfilled
+  (ADR-0078 / 0103 / 0104 / 0105 / 0106). Remaining `<backfill>`
+  tokens in `0000_template.md` + `README.md` are legitimate
+  convention placeholders.
 - [ ] 17 §9.x rows SHA backfill — batch commit at Phase 9 close.
 
 ## §6 — Exit predicate (when can Phase 9 actually flip DONE)

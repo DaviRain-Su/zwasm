@@ -289,4 +289,4 @@ both close + all 3 hosts PASS `assert_return type-all-*` fixtures.
 
 | Date       | Commit       | Change                          |
 |------------|--------------|---------------------------------|
-| 2026-05-22 | `<backfill>` | Initial draft (Proposed status; user picks path (a) or (b) at §9.13 hard gate review per ADR-0104 D5) |
+| 2026-05-22 | `6bfd0c8c` | Initial draft (Proposed status; user picks path (a) or (b) at §9.13 hard gate review per ADR-0104 D5) |

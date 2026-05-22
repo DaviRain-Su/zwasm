@@ -75,15 +75,31 @@ directory).
       `test "zwasm facade Wasm 2.0 ..."` block — landed
 - [x] `wast_runtime_runner` smoke step in `test-all` (I4 OK)
 
-### §5.4 — Stale ADR / debt cleanup (in-progress)
+### §5.4 — Stale ADR / debt cleanup — DONE (except §9.x SHA batch)
 
-- [ ] D-007 / D-010 — add explicit Phase target
+- [x] D-007 / D-010 Phase target — already on rows (verified 2026-05-23)
 - [x] skip_cross_module_action / skip_embenchen_emcc_env_imports
-      Status: Superseded (Phase A `fca7fe1c`)
-- [ ] D-149 SHA backfill — 5 ADR `<backfill>` rows landed at
-      `006f0d6d`; remaining placeholders are template + ADR-0104
-      self-ref (legitimate)
+      Status: Superseded (`fca7fe1c`)
+- [x] D-149 SHA backfill — 5 ADR Revision rows landed
+      (this cycle). Remaining `<backfill>` tokens are template /
+      convention legitimate placeholders.
 - [ ] 17 §9.x rows SHA backfill — batch commit at Phase 9 close
+
+### Autonomous prep paths walked (per bucket-3)
+
+- **ADR-0105** (JIT-prologue stack-probe): References § already
+  comprehensive (v1: x86.zig:2708-2722, jit.zig:6464, cli.zig:2157,
+  guard.zig:289-309; wasmtime: 4 file paths with line ranges; spec
+  testsuite assert_exhaustion runaway). SHA backfill this cycle
+  (`<this commit>`) is the enrichment touchpoint. **Null result for
+  further refs** — production-runtime survey already covers v1 +
+  wasmtime; no third reference adds value.
+- **ADR-0106** (multi-result ABI): References § already
+  comprehensive (v1: vm.zig:33, x86.zig:25, cli.zig:2157;
+  wasmtime/cranelift: 4 abi.rs line ranges; wasm-c-api: wasm.h +
+  example/multi.c; failed cap=2 experiment SHA). SHA backfill this
+  cycle is the enrichment touchpoint. **Null result for further
+  refs** — industry-consensus survey covered.
 
 ## How a fresh /continue cycle handles this state
 

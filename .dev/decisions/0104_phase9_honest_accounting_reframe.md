@@ -377,4 +377,4 @@ invariants.sh` gate then becomes a permanent regression check
 
 | Date       | Commit       | Change                                          |
 |------------|--------------|-------------------------------------------------|
-| 2026-05-22 | `<backfill>` | Initial draft + Accepted same cycle (this commit) |
+| 2026-05-22 | `fca7fe1c` | Initial draft + Accepted same cycle (this commit) |
