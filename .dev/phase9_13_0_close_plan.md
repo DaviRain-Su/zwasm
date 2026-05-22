@@ -8,22 +8,27 @@
 ## §0 Preflight — environment health check (run FIRST)
 
 windowsmini was provisioned 2026-05-22 by
-`scripts/windows/install_tools.ps1` (commit `cfbd3b16`).
-Tool inventory verified:
+`scripts/windows/install_tools.ps1` (commits `cfbd3b16` /
+`711bdcce` sysinternals add). Tool inventory verified:
 zig 0.16.0 / hyperfine 1.20.0 / wasm-tools 1.246.1 /
 wasmtime 42.0.1 / wabt 1.0.41 (wat2wasm + wast2json) /
-yq 4.53.2 / lldb 22.1.6 (LLVM, with Python 3.11 DLL).
+yq 4.53.2 / lldb 22.1.6 (LLVM, with Python 3.11 DLL) /
+sysinternals 2026-05-22 (Procmon64 / procexp64 / handle64 /
+Dbgview / +160 files at `%LOCALAPPDATA%\zwasm-tools\
+sysinternals-2026-05-22\`).
 
 ### §0.1 Tool inventory check (each resume)
 
 ```sh
 ssh windowsmini "bash -lc '
-for t in zig hyperfine wasm-tools wasmtime wat2wasm wast2json yq lldb; do
+for t in zig hyperfine wasm-tools wasmtime wat2wasm wast2json yq lldb handle64 Procmon64; do
   command -v \$t >/dev/null && echo OK \$t || echo MISS \$t
 done'"
 ```
 
-Expected: 8 × `OK` lines.
+Expected: 10 × `OK` lines (8 original + 2 sysinternals canaries:
+handle64 / Procmon64; full Sysinternals bundle has ~70 tools at
+the same install path).
 
 ### §0.2 If any tool missing: re-run installer
 
@@ -37,8 +42,8 @@ are skipped. PATH wiring re-applied at the end. After running,
 open a new SSH session for PATH to propagate.
 
 `-OnlyTool <name>` (zig / hyperfine / wasm-tools / wasmtime /
-wabt / yq / lldb) targets a single tool; `-Force` reinstalls
-even if present.
+wabt / yq / lldb / sysinternals) targets a single tool;
+`-Force` reinstalls even if present.
 
 ### §0.2.1 Win64 iteration workflow — 4 tiers
 

@@ -11,8 +11,9 @@
 [`.dev/phase9_13_0_close_plan.md`](./phase9_13_0_close_plan.md).
 The `/continue` skill's Step 1a close-plan override
 activates; follow that doc's §6 Work sequence. HEAD
-`f7d61bd1` (2026-05-22); §0 preflight (8-tool inventory) was
-green this session.
+`3d9288a6` (2026-05-22); §0 preflight is now a 9-tool
+inventory (sysinternals added at `711bdcce`) — green this
+session.
 
 ## Active track
 
