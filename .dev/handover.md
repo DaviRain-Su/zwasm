@@ -82,25 +82,22 @@ Per ADR-0105 + ADR-0106 Implementation plans:
 3d. [x] Thread `result_abi` through shared `compileOne`
     (`7c3e20ae`). All 3 callsites updated; default `.register_write`
     preserves behaviour.
-3e. [ ] Full ABI migration — module-level ABI choice ripples
-    THREE distinct surfaces:
-    - **Entry-helper callsites** in spec runner / tests (~84
-      sites). Per-module ABI requires per-module helper choice.
-    - **Intra-module Wasm `call` emit** (op_call.zig both
-      arches). JIT-emitted callers route through callees'
-      prologue/epilogue; if callees expect buffer_write
-      (= results buffer + args buffer pointers in regs), the
-      callers must allocate + pass those buffers.
-    - **Module compile selector** in `compileWasm` — auto-
-      detect or explicit flag per-module.
-    The intra-module call surface is the constraint I missed
-    in cycle 3a–3d planning: buffer_write isn't just about
-    the entry boundary — it changes the JIT-internal calling
-    convention too. A future cycle decides + implements all
-    three together (likely with a multi-cycle plan + private
-    spike for the intra-module call lowering shape). Foundation
-    cycles 1–3d remain load-bearing: the per-function emit
-    works correctly for ALL 3 SKIP-arm shapes.
+3e. [ ] **JIT-emitted wrapper thunk** (revised approach per
+    `private/spikes/adr-0106-cycle3e-call-lowering/SPIKE.md`
+    §"REVISED APPROACH"). Per-function thunk in new
+    `wrapper_thunk.zig`; declared in Zig as
+    `fn(rt, results, args) callconv(.c) ErrCode` (single u32
+    return — Win64-safe, no hidden RCX). Body calls function
+    via raw assembly (register convention preserved
+    internally; no Win64 ABI rules at internal call). Body
+    itself unchanged (register_write default). Intra-module
+    Wasm `call` unchanged. ~300-400 LOC total vs the
+    big-bang's ~750-850 LOC.
+    Steps: (i) per-arch wrapper emit (~250 LOC, new
+    `shared/wrapper_thunk.zig`); (ii) linker exposes
+    per-function thunk address; (iii) 3 spec runner multi-
+    result callsites use thunk path; (iv) remove
+    SKIP-WIN64-MULTI-RESULT arm.
 4. [ ] Remove `FuncRet_*` extern struct family + remove
    `SKIP-WIN64-MULTI-RESULT` arm. D-094 + D-164 close;
    gate I1c OK (after cycle 3e lands + windowsmini reconciliation).
