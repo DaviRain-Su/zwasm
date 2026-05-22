@@ -2868,6 +2868,24 @@ pub fn runCorpus(
             .other => {},
         }
 
+        // W4 reconcile diagnostic (D-136 in-flight): per-directive
+        // beacon to stderr so a crash mid-manifest names the exact
+        // directive. Cost: one write(2) per directive (~50/manifest
+        // × ~60 manifests = ~3000 writes total); value: the
+        // line-level crash locator when stdout's 1024B buffer drops
+        // in-flight progress. The line content is truncated to 80
+        // bytes to keep the beacon compact in /tmp/win.log.
+        {
+            const tag = "[W4 DIR] ";
+            _ = write(2, tag, tag.len);
+            _ = write(2, name.ptr, name.len);
+            _ = write(2, " : ", 3);
+            const max_dir_bytes: usize = 80;
+            const dir_len = if (line.len > max_dir_bytes) max_dir_bytes else line.len;
+            _ = write(2, line.ptr, dir_len);
+            _ = write(2, "\n", 1);
+        }
+
         const classified = classifyDirective(line);
         switch (classified.kind) {
             .module => {
