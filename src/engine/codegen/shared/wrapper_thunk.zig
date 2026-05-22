@@ -115,33 +115,69 @@ pub fn emit(
     if (builtin.cpu.arch != .x86_64 or builtin.os.tag == .windows) {
         return Error.UnsupportedOp;
     }
-    // Only the 3-int-result MEMORY-class shape covered here;
-    // other shapes deferred to subsequent Phase 2' chunks.
     if (params.sig.params.len != 0) return Error.UnsupportedOp;
-    if (params.sig.results.len != 3) return Error.UnsupportedOp;
-    for (params.sig.results) |r| {
-        if (r != .i32) return Error.UnsupportedOp;
-    }
 
     var bytes: std.ArrayList(u8) = .empty;
     errdefer bytes.deinit(allocator);
 
-    // XCHG RDI, RSI — 48 87 FE
-    try bytes.appendSlice(allocator, &.{ 0x48, 0x87, 0xFE });
-    // CALL rel32 — E8 + 32-bit displacement = body_offset - (thunk_offset + 4 + 4)
-    // (the displacement is from the instruction AFTER the CALL).
-    const call_site_after: i64 = @as(i64, @intCast(params.thunk_offset)) + 3 + 5;
+    // Classify shape: MEMORY-class (≥3 GPR results) vs register-class
+    // (1-2 results in RAX/RDX). Per SysV §3.2.3.
+    const n_results = params.sig.results.len;
+    if (n_results == 3 and all_gpr_class(params.sig.results)) {
+        // 3-int MEMORY-class: body expects RDI=&buf, RSI=rt.
+        // Wrapper: XCHG RDI, RSI ; CALL body ; XOR EAX, EAX ; RET.
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x87, 0xFE });
+        try emitCallRel32(allocator, &bytes, params, 3);
+        try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 });
+    } else if (n_results == 2 and all_gpr_class(params.sig.results)) {
+        // 2-int register-class: body writes results to RAX (result 0)
+        // and RDX (result 1). Wrapper saves results-ptr to RBX
+        // (callee-saved), calls body, then writes RAX → [RBX+0] and
+        // RDX → [RBX+8]. Per ADR-0106 path (a) `[*]u64 results`
+        // shape, each result occupies 8 bytes regardless of i32/i64;
+        // the body's i32-result-zero-extends-to-64 + MOV r/m64
+        // produces the correct u64-slot semantics for the typed
+        // result helper to mask later.
+        try bytes.append(allocator, 0x53); // PUSH RBX
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0xF3 }); // MOV RBX, RSI
+        try emitCallRel32(allocator, &bytes, params, 1 + 3);
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x03 }); // MOV [RBX], RAX
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x53, 0x08 }); // MOV [RBX+8], RDX
+        try bytes.append(allocator, 0x5B); // POP RBX
+        try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 }); // XOR EAX,EAX ; RET
+    } else {
+        return Error.UnsupportedOp;
+    }
+
+    return .{ .bytes = try bytes.toOwnedSlice(allocator) };
+}
+
+fn all_gpr_class(results: []const @import("../../../ir/zir.zig").ValType) bool {
+    for (results) |r| switch (r) {
+        .i32, .i64, .funcref, .externref => {},
+        .f32, .f64, .v128 => return false,
+    };
+    return true;
+}
+
+/// Emit `CALL rel32`. `instr_pre_len` is the number of bytes
+/// emitted BEFORE this CALL in the wrapper (used to compute
+/// the wrapper-relative offset where the disp32 is measured
+/// from — which is the byte after the CALL = thunk_offset +
+/// instr_pre_len + 5).
+fn emitCallRel32(
+    allocator: std.mem.Allocator,
+    bytes: *std.ArrayList(u8),
+    params: EmitParams,
+    instr_pre_len: u32,
+) Error!void {
+    const call_site_after: i64 = @as(i64, @intCast(params.thunk_offset)) +
+        @as(i64, @intCast(instr_pre_len)) + 5;
     const disp: i32 = @intCast(@as(i64, @intCast(params.body_offset)) - call_site_after);
     try bytes.append(allocator, 0xE8);
     var disp_bytes: [4]u8 = undefined;
     std.mem.writeInt(i32, &disp_bytes, disp, .little);
     try bytes.appendSlice(allocator, &disp_bytes);
-    // XOR EAX, EAX — 31 C0
-    try bytes.appendSlice(allocator, &.{ 0x31, 0xC0 });
-    // RET — C3
-    try bytes.append(allocator, 0xC3);
-
-    return .{ .bytes = try bytes.toOwnedSlice(allocator) };
 }
 
 const testing = std.testing;
@@ -166,6 +202,34 @@ test "wrapper_thunk: emit returns UnsupportedOp for 0-result sig" {
     };
     const r = emit(testing.allocator, params);
     try testing.expectError(Error.UnsupportedOp, r);
+}
+
+test "wrapper_thunk: emit x86_64 SysV 2-int register-class (i32, i64) (20 bytes)" {
+    if (builtin.cpu.arch != .x86_64 or builtin.os.tag == .windows) {
+        return error.SkipZigTest;
+    }
+    const results = [_]@TypeOf(@as(@import("../../../ir/zir.zig").ValType, .i32)){ .i32, .i64 };
+    const params: EmitParams = .{
+        .sig = .{ .params = &.{}, .results = &results },
+        .body_offset = 200,
+        .thunk_offset = 100,
+    };
+    const out = try emit(testing.allocator, params);
+    defer testing.allocator.free(out.bytes);
+    try testing.expectEqual(@as(usize, 20), out.bytes.len);
+    // PUSH RBX
+    try testing.expectEqual(@as(u8, 0x53), out.bytes[0]);
+    // MOV RBX, RSI
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x89, 0xF3 }, out.bytes[1..4]);
+    // CALL opcode + disp32 = 200 - (100 + 4 + 5) = 91
+    try testing.expectEqual(@as(u8, 0xE8), out.bytes[4]);
+    const disp = std.mem.readInt(i32, out.bytes[5..9], .little);
+    try testing.expectEqual(@as(i32, 91), disp);
+    // MOV [RBX], RAX ; MOV [RBX+8], RDX
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x89, 0x03 }, out.bytes[9..12]);
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x89, 0x53, 0x08 }, out.bytes[12..16]);
+    // POP RBX ; XOR EAX, EAX ; RET
+    try testing.expectEqualSlices(u8, &.{ 0x5B, 0x31, 0xC0, 0xC3 }, out.bytes[16..20]);
 }
 
 test "wrapper_thunk: emit x86_64 SysV 3-int-result MEMORY-class (11 bytes)" {
