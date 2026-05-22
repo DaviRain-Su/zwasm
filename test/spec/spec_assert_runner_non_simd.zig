@@ -104,7 +104,23 @@ pub fn main(init: std.process.Init) !void {
     while (try iter.next(io)) |dir_entry| {
         if (dir_entry.kind != .directory) continue;
         manifest_count += 1;
+        // Per-manifest progress beacon to stderr (async-signal-safe;
+        // raw write(2)) so a crash mid-corpus identifies the manifest
+        // even when stdout's 1024B buffer drops the in-flight output.
+        // Added at W4 reconcile diagnosis (D-136 in-flight). The
+        // cost is two syscalls per manifest (≤ 60 over the wasm-2.0
+        // corpus); the value is naming the suspect manifest.
+        {
+            const tag = "[W4 BEACON] entering manifest ";
+            _ = base.write(2, tag, tag.len);
+            _ = base.write(2, dir_entry.name.ptr, dir_entry.name.len);
+            _ = base.write(2, "\n", 1);
+        }
         try base.runCorpus(io, gpa, &root, dir_entry.name, stdout, &tally, non_simd_callbacks);
+        // Per-manifest stdout flush so partial progress survives a
+        // crash. Cost: one flush per ~10 manifests; value: identifies
+        // the last successfully-completed manifest.
+        stdout.flush() catch {};
     }
 
     try stdout.print(

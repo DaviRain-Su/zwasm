@@ -2434,7 +2434,7 @@ pub var sigsegv_handler_entry_count: std.atomic.Value(u32) = .init(0);
 /// entry). Initial value 0 means "no armed entry yet".
 pub var sigsegv_last_armed_entry: std.atomic.Value(u32) = .init(0);
 
-extern "c" fn write(fd: c_int, buf: [*]const u8, count: usize) isize;
+pub extern "c" fn write(fd: c_int, buf: [*]const u8, count: usize) isize;
 
 /// Async-signal-safe u32 → decimal-ASCII formatter. Writes digits
 /// at the end of `buf` and returns the slice that holds them.
