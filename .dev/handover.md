@@ -47,14 +47,14 @@ Per ADR-0105 + ADR-0106 Implementation plans:
 
 ### ADR-0106 path (a) buffer-write entry ABI — 4 cycles
 
-1. Introduce `[*]u64 results` parameter in `entry.zig` entry-
-   helper signature; update `runner.zig` / `instantiate.zig`
-   callsites.
-2. x86_64 JIT epilogue rewrites — write `results[i]` instead
-   of RAX/RDX.
-3. arm64 JIT epilogue rewrites — write `results[i]` instead
+1. [x] `BufferWriteFn` + `invokeBufferWrite` foundation in new
+   `entry_buffer_write.zig` (`f8b9eff7`). Hand-rolled JIT bytes
+   verify end-to-end (results[0] = 42).
+2. [ ] x86_64 JIT epilogue rewrites — write `results[i]` instead
+   of RAX/RDX. Migrate a callsite to verify.
+3. [ ] arm64 JIT epilogue rewrites — write `results[i]` instead
    of X0/X1.
-4. Remove `FuncRet_*` extern struct family from `entry.zig`.
+4. [ ] Remove `FuncRet_*` extern struct family from `entry.zig`.
    Remove `SKIP-WIN64-MULTI-RESULT` arm. D-094 + D-164 close;
    gate I1c OK.
 
