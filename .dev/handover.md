@@ -50,8 +50,12 @@ Per ADR-0105 + ADR-0106 Implementation plans:
 1. [x] `BufferWriteFn` + `invokeBufferWrite` foundation in new
    `entry_buffer_write.zig` (`f8b9eff7`). Hand-rolled JIT bytes
    verify end-to-end (results[0] = 42).
-2. [ ] x86_64 JIT epilogue rewrites — write `results[i]` instead
-   of RAX/RDX. Migrate a callsite to verify.
+2a. [x] `ResultAbi` enum foundation in `result_abi.zig` (`7dd79884`)
+    per `private/spikes/adr-0106-cycle2/SPIKE.md` Alt 2 (per-module
+    compile flag, phased migration).
+2b. [ ] Thread `ResultAbi` into `x86_64/emit.zig::compile()` + branch
+    prologue (capture RSI=results) + epilogue (write [RSI+8*i])
+    when `.buffer_write`. Defaults preserve existing behaviour.
 3. [ ] arm64 JIT epilogue rewrites — write `results[i]` instead
    of X0/X1.
 4. [ ] Remove `FuncRet_*` extern struct family from `entry.zig`.
