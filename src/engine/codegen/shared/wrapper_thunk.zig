@@ -112,6 +112,9 @@ pub fn emit(
     allocator: std.mem.Allocator,
     params: EmitParams,
 ) Error!EmitOutput {
+    if (builtin.cpu.arch == .aarch64) {
+        return emitAarch64(allocator, params);
+    }
     if (builtin.cpu.arch != .x86_64 or builtin.os.tag == .windows) {
         return Error.UnsupportedOp;
     }
@@ -150,6 +153,73 @@ pub fn emit(
     }
 
     return .{ .bytes = try bytes.toOwnedSlice(allocator) };
+}
+
+/// arm64 AAPCS64 wrapper emit (Mac aarch64).
+///
+/// AAPCS64 register usage: X0=rt, X1=results, X2=args (per ADR-0106
+/// path (a)'s `fn(rt, results, args) callconv(.c) ErrCode`).
+/// Body's MEMORY-class path (cycle 2c arm64 implementation) expects
+/// X8=indirect-result-pointer + X0=rt; register-class path expects
+/// X0=rt + result regs are X0/X1.
+///
+/// 3-int MEMORY-class shape (the `() → (i32, i32, i32)` SKIP shape):
+///   MOV  X8, X1           ; results ptr into X8 hidden arg
+///   ADRP X16, body        ; address-of-body high
+///   ADD  X16, X16, body_lo
+///   BLR  X16
+///   MOV  W0, WZR          ; ErrCode_OK = 0
+///   RET
+///
+/// For BLR-via-X16 setup the relative addressing math is more
+/// complex than x86_64's CALL rel32. Use a simpler scheme: emit an
+/// LDR-from-literal-pool that contains body_addr, then BLR. ~20 bytes.
+/// Even simpler for relative-BL: arm64's B/BL is ±128MB range; for
+/// in-module dispatch this is always reachable.
+///
+/// Simplest shape:
+///   MOV  X8, X1                ; 0xAA0103E8  — 4 bytes (ORR X8, XZR, X1)
+///   BL   body_offset            ; 0x94000000 | (imm26)  — 4 bytes
+///   MOV  W0, WZR                ; 0x2A1F03E0  — 4 bytes (ORR W0, WZR, WZR)
+///   RET                          ; 0xD65F03C0  — 4 bytes
+///
+/// Total: 16 bytes. `imm26` is the body-relative-to-call-site
+/// displacement in 4-byte words, sign-extended.
+fn emitAarch64(allocator: std.mem.Allocator, params: EmitParams) Error!EmitOutput {
+    if (params.sig.params.len != 0) return Error.UnsupportedOp;
+    if (params.sig.results.len != 3) return Error.UnsupportedOp;
+    if (!all_gpr_class(params.sig.results)) return Error.UnsupportedOp;
+
+    var bytes: std.ArrayList(u8) = .empty;
+    errdefer bytes.deinit(allocator);
+
+    // MOV X8, X1 = ORR X8, XZR, X1, LSL #0
+    // Encoding: sf=1 opc=01 N=0 (0xAA) Rm=X1(00001) Rn=XZR(11111) Rd=X8(01000)
+    // Result: 0xAA0103E8 (little-endian: E8 03 01 AA)
+    try writeInsn(allocator, &bytes, 0xAA0103E8);
+
+    // BL body_offset — opcode 0x94000000 | (imm26 & 0x3FFFFFF)
+    // imm26 = (body_offset - bl_site) / 4 where bl_site = thunk_offset + 4
+    const bl_site: i64 = @as(i64, @intCast(params.thunk_offset)) + 4;
+    const disp_bytes: i64 = @as(i64, @intCast(params.body_offset)) - bl_site;
+    if (@mod(disp_bytes, 4) != 0) return Error.UnsupportedOp;
+    const disp_words: i32 = @intCast(@divExact(disp_bytes, 4));
+    const imm26: u32 = @bitCast(disp_words);
+    try writeInsn(allocator, &bytes, 0x94000000 | (imm26 & 0x03FFFFFF));
+
+    // MOV W0, WZR = ORR W0, WZR, WZR
+    try writeInsn(allocator, &bytes, 0x2A1F03E0);
+
+    // RET = RET X30
+    try writeInsn(allocator, &bytes, 0xD65F03C0);
+
+    return .{ .bytes = try bytes.toOwnedSlice(allocator) };
+}
+
+fn writeInsn(allocator: std.mem.Allocator, bytes: *std.ArrayList(u8), word: u32) Error!void {
+    var b: [4]u8 = undefined;
+    std.mem.writeInt(u32, &b, word, .little);
+    try bytes.appendSlice(allocator, &b);
 }
 
 fn all_gpr_class(results: []const @import("../../../ir/zir.zig").ValType) bool {
@@ -202,6 +272,28 @@ test "wrapper_thunk: emit returns UnsupportedOp for 0-result sig" {
     };
     const r = emit(testing.allocator, params);
     try testing.expectError(Error.UnsupportedOp, r);
+}
+
+test "wrapper_thunk: emit aarch64 3-int MEMORY-class (16 bytes)" {
+    if (builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    const i32_results = [_]@TypeOf(@as(@import("../../../ir/zir.zig").ValType, .i32)){ .i32, .i32, .i32 };
+    const params: EmitParams = .{
+        .sig = .{ .params = &.{}, .results = &i32_results },
+        .body_offset = 64,
+        .thunk_offset = 0,
+    };
+    const out = try emit(testing.allocator, params);
+    defer testing.allocator.free(out.bytes);
+    try testing.expectEqual(@as(usize, 16), out.bytes.len);
+    // MOV X8, X1
+    try testing.expectEqual(@as(u32, 0xAA0103E8), std.mem.readInt(u32, out.bytes[0..4], .little));
+    // BL body_offset(64) - bl_site(4) = +60 bytes = +15 words → imm26 = 15
+    const bl = std.mem.readInt(u32, out.bytes[4..8], .little);
+    try testing.expectEqual(@as(u32, 0x94000000 | 15), bl);
+    // MOV W0, WZR
+    try testing.expectEqual(@as(u32, 0x2A1F03E0), std.mem.readInt(u32, out.bytes[8..12], .little));
+    // RET
+    try testing.expectEqual(@as(u32, 0xD65F03C0), std.mem.readInt(u32, out.bytes[12..16], .little));
 }
 
 test "wrapper_thunk: emit x86_64 SysV 2-int register-class (i32, i64) (20 bytes)" {
