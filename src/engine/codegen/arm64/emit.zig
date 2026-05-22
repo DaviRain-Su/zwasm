@@ -257,6 +257,21 @@ pub fn compile(
     // saved per AAPCS64 — preserved across calls without explicit
     // save/restore.
     try gpr.writeU32(allocator, &buf, inst.encOrrReg(abi.runtime_ptr_save_gpr, 31, 0));
+    // ADR-0105 D2 — JIT-prologue stack-probe. Insert BEFORE the
+    // sentinel write so a probe-trap doesn't pollute the
+    // jit_executed_flag (the function didn't actually run if it
+    // trapped at entry). Layout: LDR X16 ← stack_limit; MOV X17 ←
+    // SP (= ADD X17, SP, #0; rn=31 in ADD-imm means SP not XZR);
+    // CMP X17, X16; B.LS placeholder. When stack_limit = 0
+    // (probe disabled), CMP SP,0 is always > so B.LS never fires
+    // — graceful no-op for tests / non-init paths. The B.LS
+    // placeholder records its byte offset for end-of-function
+    // patching against the stack-overflow trap stub.
+    try gpr.writeU32(allocator, &buf, inst.encLdrImm(16, abi.runtime_ptr_save_gpr, jit_abi.stack_limit_off));
+    try gpr.writeU32(allocator, &buf, inst.encAddImm12(17, 31, 0));
+    try gpr.writeU32(allocator, &buf, inst.encCmpRegX(17, 16));
+    const stack_probe_fixup: u32 = @intCast(buf.items.len);
+    try gpr.writeU32(allocator, &buf, inst.encBCond(.ls, 0));
     // §9.8a / 8a.2 (ADR-0034) — JIT-execution sentinel: write 1 to
     // `JitRuntime.jit_executed_flag` so post-call readers can
     // distinguish "JIT body actually ran" from "compile-passed but
@@ -1288,6 +1303,13 @@ pub fn compile(
                 };
                 try EmitCindStub.emit(allocator, &buf, cind_bounds_fixups.items, 2, frame_bytes);
                 try EmitCindStub.emit(allocator, &buf, cind_sig_fixups.items, 3, frame_bytes);
+                // ADR-0105 D3 — stack-overflow trap stub. Probe fired
+                // BEFORE `SUB SP, SP, frame_bytes`, so the stub must
+                // NOT add frame_bytes back (SP is still at the post-
+                // STP-FP/LR position). Mirrors EmitCindStub shape with
+                // fb=0 + kind=4 (new code; 0=unmarked, 1=generic, 2=
+                // cind-bounds, 3=cind-sig, 4=stack-overflow).
+                try EmitCindStub.emit(allocator, &buf, &.{stack_probe_fixup}, 4, 0);
                 // §9.6/9.6-f-ii + §9.9-g-19 — SIMD const-pool flush +
                 // LDR-Q-literal imm19 fixups (per ADR-0042 + ADR-0051).
                 // After the trap stub, if any v128.const / i8x16.shuffle

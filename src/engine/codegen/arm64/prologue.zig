@@ -14,15 +14,21 @@
 //! ~128 site bulk relativisation is sequenced under §9.7 / 7.5d
 //! sub-deliverable b alongside the emit.zig split.
 //!
-//! Prologue layout (per ADR-0017, current as of 2026-05-04):
+//! Prologue layout (per ADR-0017 + ADR-0034 + ADR-0105 D2):
 //!
 //!   Word 0:   STP X29, X30, [SP, #-16]!     (4 bytes — ABI-pinned)
 //!   Word 1:   MOV X29, SP                   (4 bytes — ABI-pinned)
 //!   Words 2-6: 5 LDRs into X28/X27/X26/W25/X24 (20 bytes — ADR-0017)
 //!   Word 7:   ORR X19, XZR, X0  (= MOV X19, X0)  (4 bytes — ADR-0017 sub-2d-ii)
-//!   Word 8 (optional, frame > 0): SUB SP, SP, #frame_bytes  (4 bytes)
+//!   Words 8-11: ADR-0105 D2 stack-probe         (16 bytes)
+//!               LDR X16, [X19, #stack_limit_off]
+//!               ADD X17, SP, #0   (= MOV X17, SP)
+//!               CMP X17, X16
+//!               B.LS stack_overflow_trap_stub  (fixup)
+//!   Words 12-13: MOVZ X17,#1 + STR W17,[X19,#flag_off] (ADR-0034)
+//!   Word 14 (optional, frame > 0): SUB SP, SP, #frame_bytes  (4 bytes)
 //!
-//! Total: 32 bytes (no frame) or 36 bytes (frame > 0). Words 0-1
+//! Total: 56 bytes (no frame) or 60 bytes (frame > 0). Words 0-1
 //! are pinned by AAPCS64 (Arm IHI 0055 §6.4); the optional SUB SP
 //! only appears when the function has locals + spill bytes.
 //!
@@ -49,9 +55,10 @@ pub const FpLrSave = struct {
 /// §9.8a / 8a.2 (ADR-0034) JIT-execution sentinel adds 8 bytes
 /// to every prologue (MOVZ X17, #1 + STR W17, [X19, #flag_off]),
 /// shifting body_start from 32 → 40 (no frame) and 36 → 44
-/// (with frame).
+/// (with frame). ADR-0105 D2 adds the JIT-prologue stack-probe
+/// (4 instructions / 16 bytes), shifting again to 56 → 60.
 pub fn body_start_offset(has_frame: bool) u32 {
-    return if (has_frame) 44 else 40;
+    return if (has_frame) 60 else 56;
 }
 
 /// Body-start offset for MEMORY-class returns (AAPCS64 §6.8.2;
@@ -86,13 +93,13 @@ pub fn assertPrologueOpcodes(bytes: []const u8) error{ PrologueTooShort, BadStpO
 
 const testing = std.testing;
 
-test "body_start_offset: 40 bytes no frame, 44 bytes with frame (post-§9.8a/8a.2 sentinel)" {
-    try testing.expectEqual(@as(u32, 40), body_start_offset(false));
-    try testing.expectEqual(@as(u32, 44), body_start_offset(true));
+test "body_start_offset: 56 bytes no frame, 60 bytes with frame (post-ADR-0105 D2 probe)" {
+    try testing.expectEqual(@as(u32, 56), body_start_offset(false));
+    try testing.expectEqual(@as(u32, 60), body_start_offset(true));
 }
 
-test "body_start_offset_memory_return: 48 bytes (MEMORY-class STR X8 after frame-SUB)" {
-    try testing.expectEqual(@as(u32, 48), body_start_offset_memory_return());
+test "body_start_offset_memory_return: 64 bytes (MEMORY-class STR X8 after frame-SUB)" {
+    try testing.expectEqual(@as(u32, 64), body_start_offset_memory_return());
 }
 
 test "wordAt reads u32 little-endian at offset" {
