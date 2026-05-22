@@ -16,28 +16,35 @@ bucket-3 gate dissolved. §0 preflight is a 10-canary check
 (8 build tools + handle64 / Procmon64 — full Sysinternals
 bundle at `711bdcce`).
 
-## Active task — W4 (windowsmini reconcile)
+## Active task — W4 retry (post-beacon diagnostic)
 
-W3.b-2 fully landed across `72d8a0e8` (helper + 2 simple sites +
-2 unittest skips) and `af4eff55` (dispatch-ladder via local
-`Dispatch` struct). All 3 Windows-arm sigsetjmp sites in
-`spec_assert_runner_non_simd.zig` now route through
-`callJitOrTrap`. The 2 sigsegv-guard unittests in
-`spec_assert_runner_base.zig` are Windows-skipped.
+W4 first run at `f73e7a98` HEAD: `zwasm-spec-wasm-2-0-assert.exe`
+exit 253 mid-corpus, **zero stdout output** (stdout 1024B buffer
+dropped in-flight progress). Build summary: 37/39 steps OK;
+1693/1724 tests passed; spec_assert_runner (wasm-1.0) ran 212
+PASS confirming VEH install path is correct. So the crash is in
+the wasm-2.0 corpus specifically; not in install/teardown.
 
-Next chunk: **W4** windowsmini reconcile run. Per close-plan §6
-row 8 — fire `bash scripts/run_remote_windows.sh test-all >
-/tmp/win.log 2>&1` against windowsmini, verify
-`spec_assert_runner_non_simd` runs green (= D-136 discharged),
-new FAILs filed as debt or fixed inline. Type: `verification`.
+Diagnostic infra landed at `ee7403ff`: per-manifest stderr
+beacon (`[W4 BEACON] entering manifest <name>`) + per-manifest
+stdout flush. Next W4 retry will name the suspect manifest in
+the win.log without needing windowsmini live attach.
 
-After W4 green: spike status flips `merged-into-prod`; row 10
-W6 Windows DCE symbol verification; row 11 §9.13-0 close +
-Phase 9 boundary (= 9.13 transition).
+**Next chunk** (after this push lands and is rebuilt on
+windowsmini): re-run W4 (`bash scripts/run_remote_windows.sh
+test-all > /tmp/win.log 2>&1`), `grep -E "\[W4 BEACON\]"
+/tmp/win.log | tail -3` to identify the suspect manifest, then
+narrow to specific fixture via per-fixture probe. Type:
+`verification`. Expected outcomes:
 
-ADR-0049 says windowsmini per-chunk gate is deferred, but the
-W4 reconcile IS the once-per-phase-boundary execution. The
-loop fires this run as a `verification` chunk type.
+- Beacon names a specific manifest → next chunk targets that
+  manifest's fixtures + adds per-fixture beacon.
+- All beacons present, crash AFTER the loop → diagnostic
+  reframed (the crash is in a teardown / global destructor).
+
+After W4 green: spike `private/spikes/win64-recovery-pc-sp/`
+status flips `merged-into-prod`; row 10 W6 Windows DCE symbol
+verification; row 11 §9.13-0 close + Phase 9 boundary.
 
 ## Critical: do NOT widen shared `Error` for Win64 gaps
 
