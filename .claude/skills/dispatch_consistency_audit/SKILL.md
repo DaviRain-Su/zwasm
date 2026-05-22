@@ -186,5 +186,5 @@ finding is a Phase 9 completion blocker.
 - ADR-0023 §4.5 amend (per-op file pattern formalised)
 - Master plan §7.7 (Q3 C design consistency audit)
 - `scripts/check_build_dce.sh` (functional A1; sampling mode used here)
-- `scripts/p9_completion_status.sh` (sibling progress tracker)
+- ~~`scripts/p9_completion_status.sh`~~ (deleted 2026-05-22 per ADR-0104; superseded by `scripts/check_phase9_close_invariants.sh` per `.dev/phase9_close_master.md` Phase C wiring)
 - `audit_scaffolding §K.7` (Phase 9 completion enforcement integration)

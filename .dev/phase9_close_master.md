@@ -89,11 +89,11 @@ Phase-9-eligible Zig facade subset = ~100 LOC of thin wrappers.
 > ⇒ 2 回セルフレビュー。次回クリアセッションから取り組めるように配線"
 
 Concretely:
-- D-162: adopt JIT-prologue stack-probe (ADR-0104; v1/wasmtime
+- D-162: adopt JIT-prologue stack-probe (ADR-0105; v1/wasmtime
   precedent). Supersedes ADR-0103 path-(a) `_resetstkoflw` quick
   fix.
 - D-164: adopt **either** (a) buffer-write entry ABI **or**
-  (b) uniform implicit-SRet — both Phase-9-scope. ADR-0105 will
+  (b) uniform implicit-SRet — both Phase-9-scope. ADR-0106 will
   pick one with a rejection rationale for the other and for
   "per-shape inline-asm thunks" (band-aid).
 - §9.13-0 / §9.12-F / §9.12-I [x] flips are reverted; Phase 9
@@ -126,9 +126,9 @@ Concretely:
 
 **Phase C: Wire + write new Phase 9 work** (P9-P10)
 
-- ADR-0104: D-162 JIT-prologue stack-probe (Proposed; user flips
+- ADR-0105: D-162 JIT-prologue stack-probe (Proposed; user flips
   Accepted at §9.13 gate).
-- ADR-0105: D-164 multi-result ABI redesign (Proposed; user
+- ADR-0106: D-164 multi-result ABI redesign (Proposed; user
   picks (a) buffer-write or (b) uniform implicit-SRet).
 - `.claude/rules/phase9_close_invariants.md` (auto-loaded; lists
   the audit invariants).
@@ -157,10 +157,10 @@ Concretely:
 Tracked in this section because the rule + check script (Phase C)
 auto-load this list. Do not edit elsewhere.
 
-### §5.1 — Win64 codegen redesign per ADR-0104 / ADR-0105
+### §5.1 — Win64 codegen redesign per ADR-0105 / ADR-0106
 
 - [ ] D-162 close — JIT-prologue stack-probe implementation per
-  ADR-0104.
+  ADR-0105.
   - Emit cmp [VMCtx + stack_limit_off], rsp + jbe trap-stub in
     JIT function prologue (x86_64) + cmp / b.ls equivalent
     (arm64).
@@ -171,8 +171,8 @@ auto-load this list. Do not edit elsewhere.
   - Remove `SKIP-WIN64-EXHAUSTION` arm from
     `spec_assert_runner_base.zig`.
   - Verify on all 3 hosts: `assert_exhaustion runaway` PASS.
-- [ ] D-164 close — multi-result ABI per ADR-0105.
-  - Per ADR-0105 decision, either:
+- [ ] D-164 close — multi-result ABI per ADR-0106.
+  - Per ADR-0106 decision, either:
     (a) replace `FuncRet_*` entry helpers with `[*]u64`
         buffer-write entry ABI, or
     (b) introduce uniform implicit-SRet ABI lowering in
@@ -238,7 +238,7 @@ Phase 9 = DONE when **ALL** below hold:
 4. `.dev/debt.md` has zero `blocked-by:` rows whose stated
    barrier is "trigger-not-fired" for a Phase-9-scope feature
    (D-094 / D-062 closed).
-5. ADR-0104 + ADR-0105 Status: `Accepted` (via collab user
+5. ADR-0105 + ADR-0106 Status: `Accepted` (via collab user
    touchpoint at §9.13 hard gate).
 6. §9.13-0 / §9.12-F / §9.12-I [x] re-flip with cited
    commit SHAs.

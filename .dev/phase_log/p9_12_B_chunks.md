@@ -249,6 +249,6 @@ Accepted ADRs: [`0070`](decisions/0070_libc_dependency_policy.md) /
 Proposed (active, B53 will flip): [`0075`](decisions/0075_x86_64_emitctx_ctx_passing_unification.md);
 amends [`0023`](decisions/0023_src_directory_structure_normalization.md) §4.5
 + [`0050`](decisions/0050_adr_lifecycle_and_skip_adr_enforcement.md) D-5/D-6.
-Enforcement: [`scripts/p9_completion_status.sh`](../scripts/p9_completion_status.sh)
+Enforcement: ~~`scripts/p9_completion_status.sh`~~ (deleted 2026-05-22 per ADR-0104; replaced by `scripts/check_phase9_close_invariants.sh` per `.dev/phase9_close_master.md` §4 Phase C)
 + [`gate_consolidation_study.md`](gate_consolidation_study.md).
 Bootstrap framework: [`src/ir/dispatch_collector.zig`](../src/ir/dispatch_collector.zig)
