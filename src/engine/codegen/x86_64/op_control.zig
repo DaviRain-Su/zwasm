@@ -1330,13 +1330,6 @@ fn emitEndInter(ctx: *ctx_mod.EmitCtx) Error!void {
     // was emitted, = uses_runtime_ptr was true).
     if (ctx.stack_probe_fixup != 0) {
         const stub_byte: u32 = @intCast(ctx.buf.items.len);
-        // R3 diagnostic (Win64-only, temporary): INT 3 (0xCC) at the
-        // very top of the stack-overflow trap stub. Exit-code distinguish
-        // probe-fired (BREAKPOINT-class) from probe-never-fired
-        // (STACK_OVERFLOW exit 253). Remove after R3 root cause found.
-        if (comptime abi.current_cc == .win64) {
-            try ctx.buf.append(ctx.allocator, 0xCC);
-        }
         try ctx.buf.appendSlice(ctx.allocator, inst.encStoreImm32MemDisp32(abi.runtime_ptr_save_gpr, jit_abi.trap_flag_off, 1).slice());
         try ctx.buf.appendSlice(ctx.allocator, inst.encStoreImm32MemDisp32(abi.runtime_ptr_save_gpr, jit_abi.trap_kind_off, 4).slice());
         try ctx.buf.appendSlice(ctx.allocator, inst.encXorRR(.d, .rax, .rax).slice());

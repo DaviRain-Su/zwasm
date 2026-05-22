@@ -578,10 +578,7 @@ test "compile: (i32.const 0) i32.load offset=0 end — ADR-0026 prologue + bound
     // overflow trap stub after ADR-0105 D2/D3 close = 132 bytes
     // (uses_runtime_ptr=true; stub = 11 STR trap_flag + 11 STR
     // trap_kind + 2 XOR + 2 POP R15 + 1 POP RBP + 1 RET = 28).
-    // Win64 temporary R3 diagnostic: +1 byte INT 3 at trap-stub top
-    // → 133. Removed once R3 root cause found.
-    const exp_len: usize = if (comptime abi.current_cc == .win64) 133 else 132;
-    try testing.expectEqual(exp_len, out.bytes.len);
+    try testing.expectEqual(@as(usize, 132), out.bytes.len);
     // Spot-check the prologue (verifies ADR-0026 + ADR-0105 structure).
     // The MOV R15, <entry_arg0> byte differs by Cc; derive the
     // expected sequence dynamically so this works on both SysV
@@ -628,15 +625,8 @@ test "compile: (i32.const 0) i32.load offset=0 end — ADR-0026 prologue + bound
     const ja_off = body_start + 25;
     try testing.expectEqualSlices(u8, &.{ 0x0F, 0x87, 0x0F, 0x00, 0x00, 0x00 }, out.bytes[ja_off .. ja_off + 6]);
     // Trap stub starts at body_start + 46 (body 38 bytes + epilogue 8 bytes).
-    // Win64 temporary R3 diagnostic prepends a 1-byte INT 3 (0xCC) at
-    // the trap-stub top — first byte differs by Cc; assert the
-    // post-INT3 MOV [R15+0x28], 1 sequence starting one byte later.
     const trap_off = body_start + 46;
-    const stub_body_off = trap_off + (if (comptime abi.current_cc == .win64) @as(usize, 1) else 0);
-    if (comptime abi.current_cc == .win64) {
-        try testing.expectEqual(@as(u8, 0xCC), out.bytes[trap_off]);
-    }
-    try testing.expectEqualSlices(u8, &.{ 0x41, 0xC7, 0x87, 0x28, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00 }, out.bytes[stub_body_off .. stub_body_off + 11]);
+    try testing.expectEqualSlices(u8, &.{ 0x41, 0xC7, 0x87, 0x28, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00 }, out.bytes[trap_off .. trap_off + 11]);
 }
 
 test "compile: i32.load with stack underflow → AllocationMissing" {
