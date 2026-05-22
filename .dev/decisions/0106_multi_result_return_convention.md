@@ -288,6 +288,12 @@ both close + all 3 hosts PASS `assert_return type-all-*` fixtures.
   after this ADR's implementation).
 - D-094 (SysV multi-result MEMORY-class; closes alongside).
 - D-164 (Win64 multi-result hidden-pointer; closes alongside).
+- `private/spikes/adr-0106-cycle2/SPIKE.md` — cycle 2 migration
+  design spike (Alt 2 per-module compile flag chosen);
+  authored 2026-05-23 during cycles 1-3d foundation work.
+- `private/spikes/adr-0106-cycle3e-call-lowering/SPIKE.md` —
+  cycle 3e intra-module call lowering design spike; authored
+  2026-05-23 after cycle 3d documented the 3-surface scope.
 - v1: `~/Documents/MyProducts/zwasm/src/vm.zig:33` (entry
   signature with `[*]u64 regs`), `src/x86.zig:25` (SysV ABI
   shape), `src/cli.zig:2157` (epilogue Trap conversion).
