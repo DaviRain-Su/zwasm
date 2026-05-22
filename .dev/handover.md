@@ -55,15 +55,17 @@ fixtures show **3 distinct Win64 bugs**, in this order:
 **R3 cycle 1+2 evidence (2026-05-23)**:
 - Cycle 1: `[stack_probe] stack_limit=0x319d004000 sp=0x319dff3070
   margin=0xfef070` — computeStackLimit sane (~16 MiB margin).
-- Cycle 2: INT 3 (0xCC) at trap stub top, Win64-only. Exit code
+- Cycle 2: INT 3 (0xCC) at trap stub top (Win64-only). Exit code
   remained 253 (STACK_OVERFLOW). Probe **does not reach trap
-  stub** — JBE never fires for runaway despite sane stack_limit
-  at thread entry.
+  stub**.
+- Cycle 3 (in flight): INT 3 reverted (broke a Win64 unit test
+  on byte-position assertion before runaway could run). Per-call
+  `diagOnce` retained — next run lands a `[stack_probe]` per
+  invocation.
 
-**Active chunk** (architectural / R3 cycle 3): remove once-flag
-on Win64 so `diagOnce` prints **per call**. Next run lands a
-`[stack_probe]` line for the runaway invocation itself (margin
-at the moment of its call). Three possible outcomes:
+**Active chunk** (architectural / R3 cycle 4): with per-call diag
+landing on every test, next windowsmini run shows
+`[stack_probe]` line at the runaway invocation. Three outcomes:
 
 - margin huge (~16 MiB) AND probe still doesn't fire → JBE
   patch off, OR R15 stale at probe site, OR `stack_limit_off`
