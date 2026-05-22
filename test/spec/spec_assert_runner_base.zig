@@ -3034,52 +3034,17 @@ pub fn runCorpus(
                 };
             },
             .assert_return => {
-                // Win64 SKIP-WIN64-MULTI-RESULT (D-164): W4 retry 5
-                // (2026-05-22) found `assert_return type-all-i32-i64
-                // ()` in `call_indirect.0.wasm` crashes on Windows.
-                // Root cause: Win64 ABI returns >8-byte structs via
-                // hidden RCX pointer; JIT epilogue writes RAX/RDX
-                // (SysV / AAPCS64 convention). Multi-result entry
-                // helpers (`callI32i64NoArgs` etc) use `callconv(.c)`
-                // — Zig follows Win64's hidden-pointer convention,
-                // JIT does not. Proper fix needs per-shape Win64
-                // inline-asm thunks (precedent: callI32f64NoArgs
-                // thunk at entry.zig:1156). Multi-cycle; until
-                // then skip `type-all-` shaped directives on
-                // Windows. POSIX path unchanged.
-                // Broader detection (W4 retry 6 extension): any
-                // assert_return whose result RHS (after `->`) has
-                // ≥ 2 `<type>:<value>` pairs is multi-result. Catches
-                // `type-all-*`, `type-i32-i64`, `break-multi-value`,
-                // `value-block-i32-i64`, `return-i32-i32-i32`, etc.
-                if (@import("builtin").os.tag == .windows) {
-                    if (std.mem.find(u8, line, "->")) |arrow_pos| {
-                        const rhs = line[arrow_pos + 2 ..];
-                        const colon_count = std.mem.count(u8, rhs, ":");
-                        if (colon_count >= 2) {
-                            try stdout.print("SKIP-WIN64-MULTI-RESULT  {s}: {s} (D-164 — Win64 ABI hidden-pointer mismatch)\n", .{ name, line });
-                            tally.skipped_adr += 1;
-                            continue;
-                        }
-                    }
-                    // Single-result wrappers around internal multi-result
-                    // calls (D-164 inherits the JIT-level silent-truncate):
-                    // these fixtures return 1 value but internally call a
-                    // multi-result function (D-094 / Win64 cap=1 truncates
-                    // the second result). The cap=2 fix attempt at 64d84219
-                    // introduced a Writer-error crash; reverted at a6863faa.
-                    // Until the underlying multi-result-in-JIT path is
-                    // fixed (hidden-pointer or per-shape thunks), skip
-                    // these specific wrappers by name match.
-                    if (std.mem.find(u8, line, "as-binary-all-operands") != null or
-                        std.mem.find(u8, line, "as-mixed-operands") != null or
-                        std.mem.find(u8, line, "fac-ssa") != null)
-                    {
-                        try stdout.print("SKIP-WIN64-MULTI-RESULT  {s}: {s} (D-164 — internal multi-result silent-truncate)\n", .{ name, line });
-                        tally.skipped_adr += 1;
-                        continue;
-                    }
-                }
+                // ADR-0106 cycle 3e Phase 2'h step 2 (2026-05-23):
+                // D-164 SKIP arm removed. The wrapper-thunk path
+                // (`module.entry_buf` + buffer-write helpers, see
+                // entry_buffer_write.invokeBufWin64NoArgs) bypasses
+                // Win64's hidden-RCX struct-return ABI by using a
+                // JIT-emitted wrapper that internally CALLs the body
+                // via raw assembly (no callconv(.c) at the internal
+                // call boundary). D-164 closed by the implementation
+                // chain Phase 2'f–2'k (`4c7941c9` → `05ca0f05`).
+                // Phase boundary windowsmini reconciliation per
+                // ADR-0049 verifies runtime correctness.
                 if (module_bad) {
                     tally.runtime_skip += 1;
                     continue;
