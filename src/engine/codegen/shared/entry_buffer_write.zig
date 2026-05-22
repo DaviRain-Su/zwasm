@@ -174,3 +174,64 @@ test "buffer-write entry: hand-rolled JIT writes results[0] = 42 (ADR-0106 path 
 test "buffer-write entry: ErrCode_OK sentinel" {
     try testing.expectEqual(@as(ErrCode, 0), ErrCode_OK);
 }
+
+// ============================================================
+// ADR-0106 cycle 2c — x86_64 emit drives the buffer-write epilogue
+// when `alloc.result_abi == .buffer_write`. Test compiles a trivial
+// `(i32.const 42) end` fn with the flag set + invokes via
+// invokeBufferWrite. Mac aarch64 skips because arm64 cycle 2d is
+// pending; Linux x86_64 + Win64 ubuntu (cycle 2c target) exercise
+// the new emit path.
+// ============================================================
+
+const zir = @import("../../../ir/zir.zig");
+const ZirFunc = zir.ZirFunc;
+const regalloc = @import("regalloc.zig");
+const x86_emit = @import("../x86_64/emit.zig");
+const x86_jit_mem = @import("../../../platform/jit_mem.zig");
+const linker = @import("linker.zig");
+
+test "buffer-write entry: x86_64 emit (i32.const 42) end → results[0] = 42 (ADR-0106 cycle 2c)" {
+    if (builtin.cpu.arch != .x86_64) return error.SkipZigTest;
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    // Build the ZirFunc: () -> i32; body = i32.const 42; end.
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 42 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{.{ .def_pc = 0, .last_use_pc = 1 }} };
+    const slots = [_]u16{0};
+    const alloc: regalloc.Allocation = .{
+        .slots = &slots,
+        .n_slots = 1,
+        .result_abi = .buffer_write,
+    };
+    const sigs = [_]zir.FuncType{sig};
+    const out = try x86_emit.compile(testing.allocator, &f, alloc, &sigs, &.{}, 0, &.{}, &.{});
+    defer x86_emit.deinit(testing.allocator, out);
+
+    const bodies = [_]linker.FuncBody{
+        .{ .bytes = out.bytes, .call_fixups = out.call_fixups },
+    };
+    var module = try linker.link(testing.allocator, &bodies, 0);
+    defer module.deinit(testing.allocator);
+
+    const fn_ptr = module.entry(0, BufferWriteFn);
+    var rt: JitRuntime = .{
+        .vm_base = undefined,
+        .mem_limit = 0,
+        .funcptr_base = undefined,
+        .table_size = 0,
+        .typeidx_base = undefined,
+        .trap_flag = 0,
+        .globals_base = undefined,
+        .globals_count = 0,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
+    };
+    var args_buf: [1]u64 = .{0};
+    var results_buf: [1]u64 = .{0};
+    try invokeBufferWrite(&rt, fn_ptr, &args_buf, &results_buf);
+    try testing.expectEqual(@as(u64, 42), results_buf[0]);
+}

@@ -440,7 +440,15 @@ pub fn marshalReturnRegs(
     // ADR-0069 §Phase 3 covers up-to-16 result slots of mixed
     // int/f32/f64 (the large-sig fixture) but v128 multi-result
     // remains UnsupportedOp.
-    if (return_is_memory_class) {
+    //
+    // ADR-0106 path (a) cycle 2c — the buffer-write ABI uses the
+    // SAME shape (load captured ptr to RAX, write `[RAX + i*8]`),
+    // just sourced from the buffer-write `results` arg (RSI/RDX)
+    // instead of the MEMORY-class hidden `&result_buf` (RDI).
+    // The prologue captures whichever applies into
+    // `indirect_result_slot_neg_off`; the read here is identical.
+    const buffer_write: bool = alloc.result_abi == .buffer_write;
+    if (return_is_memory_class or buffer_write) {
         const slot_disp: i32 = -@as(i32, @intCast(indirect_result_slot_neg_off));
         try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .rbp, slot_disp).slice());
         const result_base = pushed_vregs.items.len - func.sig.results.len;
@@ -1271,6 +1279,15 @@ fn emitEndInter(ctx: *ctx_mod.EmitCtx) Error!void {
         ctx.return_is_memory_class,
         ctx.indirect_result_slot_neg_off,
     );
+    // ADR-0106 path (a) cycle 2c — buffer-write ABI returns the
+    // trap-status ErrCode (= 0 on OK) in EAX. marshalReturnRegs
+    // for buffer_write writes results to `[results_ptr + i*8]`
+    // and leaves RAX with the buffer-ptr value (from the MEMORY-
+    // class-shaped epilogue we reused); we clobber it to 0 here
+    // so the entry helper's `code != ErrCode_OK` check passes.
+    if (ctx.alloc.result_abi == .buffer_write) {
+        try ctx.buf.appendSlice(ctx.allocator, inst.encXorRR(.d, .rax, .rax).slice());
+    }
     if (ctx.frame_bytes > 0) {
         try ctx.buf.appendSlice(ctx.allocator, rbp_disp.rspAdd(ctx.frame_bytes).slice());
     }

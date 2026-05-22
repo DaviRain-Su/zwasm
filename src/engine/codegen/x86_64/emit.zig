@@ -204,7 +204,13 @@ pub fn compile(
     // result to `[RAX + i*8]`. Win64 MEMORY-class deferred to
     // §9.13-0.
     const return_is_memory_class: bool = func.sig.results.len > 2 and abi.current_cc == .sysv;
-    const indirect_result_slot_bytes: u32 = if (return_is_memory_class) 8 else 0;
+    // ADR-0106 path (a) cycle 2c — buffer-write ABI also needs a
+    // captured-pointer slot (for the results ptr passed in RSI on
+    // SysV / RDX on Win64). Shares storage with the MEMORY-class
+    // slot when only one applies; the buffer-write flag overrides
+    // the rt_src_gpr selection in the prologue capture below.
+    const buffer_write: bool = alloc.result_abi == .buffer_write;
+    const indirect_result_slot_bytes: u32 = if (return_is_memory_class or buffer_write) 8 else 0;
     const spill_base_off: u32 = locals_bytes + r15_save_bytes + 8;
     // Buffer-ptr capture slot lives BELOW the spill region (deeper
     // into the frame, larger RBP-negative offset). Slot anchored at
@@ -307,6 +313,16 @@ pub fn compile(
     if (return_is_memory_class) {
         const disp: i32 = -@as(i32, @intCast(indirect_result_slot_neg_off));
         try buf.appendSlice(allocator, inst.encStoreR64MemRBPDisp32(disp, .rdi).slice());
+    } else if (buffer_write) {
+        // ADR-0106 path (a) cycle 2c — capture the buffer-write
+        // `results` pointer arg (RSI in SysV / RDX in Win64) to the
+        // same frame slot the MEMORY-class path uses. The epilogue
+        // in op_control.zig::marshalReturnRegs branches on
+        // `alloc.result_abi == .buffer_write` to load this back
+        // into RAX and write each result to `[RAX + i*8]`.
+        const disp: i32 = -@as(i32, @intCast(indirect_result_slot_neg_off));
+        const results_ptr_gpr: abi.Gpr = if (abi.current_cc == .win64) .rdx else .rsi;
+        try buf.appendSlice(allocator, inst.encStoreR64MemRBPDisp32(disp, results_ptr_gpr).slice());
     }
 
     // §9.7 / 7.8-x86-params: marshal i32 params from arg regs to
