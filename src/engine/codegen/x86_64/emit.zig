@@ -196,14 +196,18 @@ pub fn compile(
     // trigger = `sig.results.len > 2`) follow the standard SysV
     // §3.2.3 hidden-arg shape — RDI = &result_buffer, RSI = rt
     // (= the function's natural arg0 shifted one int-slot deeper).
+    // ADR-0106 cycle 3e Phase 2'k: extended to Win64 — hidden ptr
+    // in RCX (instead of RDI), rt in RDX (instead of RSI). The
+    // epilogue's `[RAX + i*8]` write shape stays identical since
+    // RAX is loaded from the captured-pointer frame slot.
     // Aligns with Zig's auto-generated `callconv(.c)` lowering for
     // struct returns > 16 B so entry.zig helpers don't need inline-
-    // asm thunks. The prologue captures RDI into an 8-byte frame
-    // slot positioned BELOW the spill region; the epilogue
-    // (`marshalReturnRegs`) loads it into RAX and writes each
-    // result to `[RAX + i*8]`. Win64 MEMORY-class deferred to
-    // §9.13-0.
-    const return_is_memory_class: bool = func.sig.results.len > 2 and abi.current_cc == .sysv;
+    // asm thunks. The prologue captures the hidden ptr into an
+    // 8-byte frame slot positioned BELOW the spill region; the
+    // epilogue (`marshalReturnRegs`) loads it into RAX and writes
+    // each result to `[RAX + i*8]`.
+    const return_is_memory_class: bool = func.sig.results.len > 2 and
+        (abi.current_cc == .sysv or abi.current_cc == .win64);
     // ADR-0106 path (a) cycle 2c — buffer-write ABI also needs a
     // captured-pointer slot (for the results ptr passed in RSI on
     // SysV / RDX on Win64). Shares storage with the MEMORY-class
@@ -268,7 +272,14 @@ pub fn compile(
         // shifts rt to RSI. Win64 passes in RCX (MEMORY-class Win64
         // deferred). Both encodings are 3 bytes (REX.W+B + opcode +
         // modrm) so the prologue's frame-bytes formula stays Cc-agnostic.
-        const rt_src_gpr: abi.Gpr = if (return_is_memory_class) .rsi else abi.current.entry_arg0_gpr;
+        // ADR-0106 cycle 3e Phase 2'k: Cc-aware MEMORY-class rt
+        // source. SysV §3.2.3 shifts rt to RSI (slot 1) when slot 0
+        // holds the hidden &buffer ptr (RDI). Win64 shifts rt to
+        // RDX (slot 1) when slot 0 holds the hidden ptr (RCX).
+        const rt_src_gpr: abi.Gpr = if (return_is_memory_class)
+            (if (abi.current_cc == .win64) .rdx else .rsi)
+        else
+            abi.current.entry_arg0_gpr;
         try buf.appendSlice(allocator, inst.encMovRR(.q, abi.current.runtime_ptr_save_gpr, rt_src_gpr).slice());
         // ADR-0105 D2 — JIT-prologue stack-probe. Sibling to arm64's
         // probe at the same prologue position (per ADR-0105 D2 syntax
@@ -320,7 +331,11 @@ pub fn compile(
         try buf.appendSlice(allocator, inst.encStoreR64MemRBPDisp32(disp, results_ptr_gpr).slice());
     } else if (return_is_memory_class) {
         const disp: i32 = -@as(i32, @intCast(indirect_result_slot_neg_off));
-        try buf.appendSlice(allocator, inst.encStoreR64MemRBPDisp32(disp, .rdi).slice());
+        // ADR-0106 cycle 3e Phase 2'k: Cc-aware MEMORY-class hidden-ptr
+        // capture. SysV puts the hidden &buffer ptr in RDI (slot 0);
+        // Win64 puts it in RCX (slot 0).
+        const hidden_ptr_gpr: abi.Gpr = if (abi.current_cc == .win64) .rcx else .rdi;
+        try buf.appendSlice(allocator, inst.encStoreR64MemRBPDisp32(disp, hidden_ptr_gpr).slice());
     }
 
     // §9.7 / 7.8-x86-params: marshal i32 params from arg regs to
