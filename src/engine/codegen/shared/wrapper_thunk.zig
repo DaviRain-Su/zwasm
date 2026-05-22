@@ -242,9 +242,25 @@ fn emitAarch64(allocator: std.mem.Allocator, params: EmitParams) Error!EmitOutpu
     errdefer bytes.deinit(allocator);
 
     if (n_results == 3) {
-        // 3-int MEMORY-class shape: MOV X8, X1 + BL + MOV W0, WZR + RET.
+        // 3-int MEMORY-class shape (24 bytes):
+        //   STP X30, XZR, [SP, #-16]!  ; A9BF7FFE — save LR (BL clobbers X30)
+        //   MOV X8, X1                  ; AA0103E8
+        //   BL  body                    ; 94??????
+        //   LDP X30, XZR, [SP], #16    ; A8C17FFE — restore LR
+        //   MOV W0, WZR                 ; 2A1F03E0
+        //   RET                          ; D65F03C0
+        //
+        // X30 (LR) must be saved across BL — BL writes its
+        // return address to X30, clobbering the wrapper's own
+        // return address (the caller's site). Without the
+        // save/restore the wrapper's RET jumps back to the
+        // wrapper's BL+4 instead of the caller, infinite loop
+        // (observed 2026-05-23 cycle 3e Phase 2'd integration
+        // attempt at 99% CPU for 31 min).
+        try writeInsn(allocator, &bytes, 0xA9BF7FFE);
         try writeInsn(allocator, &bytes, 0xAA0103E8);
-        try emitBLAarch64(allocator, &bytes, params, 4);
+        try emitBLAarch64(allocator, &bytes, params, 8);
+        try writeInsn(allocator, &bytes, 0xA8C17FFE);
         try writeInsn(allocator, &bytes, 0x2A1F03E0);
         try writeInsn(allocator, &bytes, 0xD65F03C0);
     } else if (n_results == 2) {
@@ -342,6 +358,90 @@ test "wrapper_thunk: EmitParams + EmitOutput types present" {
     _ = params;
 }
 
+test "wrapper_thunk: end-to-end execution — () → (i32, i32, i32) via wrapper" {
+    if (!(builtin.cpu.arch == .aarch64 and builtin.os.tag == .macos) and
+        !(builtin.cpu.arch == .x86_64 and builtin.os.tag != .windows))
+    {
+        return error.SkipZigTest;
+    }
+    // Build ZirFunc: () → (i32, i32, i32); body = 11; 22; 33; end.
+    const zir = @import("../../../ir/zir.zig");
+    const ZirFunc = zir.ZirFunc;
+    const regalloc = @import("regalloc.zig");
+    const native_emit = if (builtin.cpu.arch == .aarch64)
+        @import("../arm64/emit.zig")
+    else
+        @import("../x86_64/emit.zig");
+    const jit_mem = @import("../../../platform/jit_mem.zig");
+    const entry_buf = @import("entry_buffer_write.zig");
+
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{ .i32, .i32, .i32 } };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 11 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 22 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 33 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 3 },
+        .{ .def_pc = 1, .last_use_pc = 3 },
+        .{ .def_pc = 2, .last_use_pc = 3 },
+    } };
+    const slots = [_]u16{ 0, 1, 2 };
+    // result_abi=.register_write (default): body uses MEMORY-class
+    // for > 2 results per cycle 2c emit; wrapper bridges the
+    // entry-helper-vs-MEMORY-class boundary.
+    const alloc: regalloc.Allocation = .{
+        .slots = &slots,
+        .n_slots = 3,
+        .result_abi = .register_write,
+    };
+    const sigs = [_]zir.FuncType{sig};
+    const body_out = try native_emit.compile(testing.allocator, &f, alloc, &sigs, &.{}, 0, &.{}, &.{});
+    defer native_emit.deinit(testing.allocator, body_out);
+
+    // Wrapper goes IMMEDIATELY AFTER the body in JIT memory.
+    const body_offset: u32 = 0;
+    const thunk_offset: u32 = @intCast(body_out.bytes.len);
+
+    const wrapper_out = try emit(testing.allocator, .{
+        .sig = sig,
+        .body_offset = body_offset,
+        .thunk_offset = thunk_offset,
+    });
+    defer testing.allocator.free(wrapper_out.bytes);
+
+    // Allocate JIT memory + copy body + wrapper.
+    const total_size = body_out.bytes.len + wrapper_out.bytes.len;
+    var block = try jit_mem.alloc(total_size);
+    defer jit_mem.free(block);
+    try jit_mem.setWritable(block);
+    @memcpy(block.bytes[body_offset..][0..body_out.bytes.len], body_out.bytes);
+    @memcpy(block.bytes[thunk_offset..][0..wrapper_out.bytes.len], wrapper_out.bytes);
+    try jit_mem.setExecutable(block);
+
+    // Wrapper's address = block.bytes.ptr + thunk_offset.
+    const fn_ptr: entry_buf.BufferWriteFn = @ptrCast(@alignCast(block.bytes.ptr + thunk_offset));
+    var rt: entry_buf.JitRuntime = .{
+        .vm_base = undefined,
+        .mem_limit = 0,
+        .funcptr_base = undefined,
+        .table_size = 0,
+        .typeidx_base = undefined,
+        .trap_flag = 0,
+        .globals_base = undefined,
+        .globals_count = 0,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
+    };
+    var args_buf: [1]u64 = .{0};
+    var results_buf: [3]u64 = .{ 0, 0, 0 };
+    try entry_buf.invokeBufferWrite(&rt, fn_ptr, &args_buf, &results_buf);
+    try testing.expectEqual(@as(u32, 11), @as(u32, @intCast(results_buf[0] & 0xFFFFFFFF)));
+    try testing.expectEqual(@as(u32, 22), @as(u32, @intCast(results_buf[1] & 0xFFFFFFFF)));
+    try testing.expectEqual(@as(u32, 33), @as(u32, @intCast(results_buf[2] & 0xFFFFFFFF)));
+}
+
 test "wrapper_thunk: emit returns UnsupportedOp for 0-result sig" {
     const params: EmitParams = .{
         .sig = .{ .params = &.{}, .results = &.{} },
@@ -380,7 +480,7 @@ test "wrapper_thunk: emit aarch64 2-int register-class (i32, i64) (28 bytes)" {
     try testing.expectEqual(@as(u32, 0xD65F03C0), std.mem.readInt(u32, out.bytes[24..28], .little));
 }
 
-test "wrapper_thunk: emit aarch64 3-int MEMORY-class (16 bytes)" {
+test "wrapper_thunk: emit aarch64 3-int MEMORY-class (24 bytes)" {
     if (builtin.cpu.arch != .aarch64) return error.SkipZigTest;
     const i32_results = [_]@TypeOf(@as(@import("../../../ir/zir.zig").ValType, .i32)){ .i32, .i32, .i32 };
     const params: EmitParams = .{
@@ -390,16 +490,20 @@ test "wrapper_thunk: emit aarch64 3-int MEMORY-class (16 bytes)" {
     };
     const out = try emit(testing.allocator, params);
     defer testing.allocator.free(out.bytes);
-    try testing.expectEqual(@as(usize, 16), out.bytes.len);
+    try testing.expectEqual(@as(usize, 24), out.bytes.len);
+    // STP X30, XZR, [SP, #-16]!
+    try testing.expectEqual(@as(u32, 0xA9BF7FFE), std.mem.readInt(u32, out.bytes[0..4], .little));
     // MOV X8, X1
-    try testing.expectEqual(@as(u32, 0xAA0103E8), std.mem.readInt(u32, out.bytes[0..4], .little));
-    // BL body_offset(64) - bl_site(4) = +60 bytes = +15 words → imm26 = 15
-    const bl = std.mem.readInt(u32, out.bytes[4..8], .little);
-    try testing.expectEqual(@as(u32, 0x94000000 | 15), bl);
+    try testing.expectEqual(@as(u32, 0xAA0103E8), std.mem.readInt(u32, out.bytes[4..8], .little));
+    // BL body_offset(64) - bl_site(8) = +56 bytes = +14 words → imm26 = 14
+    const bl = std.mem.readInt(u32, out.bytes[8..12], .little);
+    try testing.expectEqual(@as(u32, 0x94000000 | 14), bl);
+    // LDP X30, XZR, [SP], #16
+    try testing.expectEqual(@as(u32, 0xA8C17FFE), std.mem.readInt(u32, out.bytes[12..16], .little));
     // MOV W0, WZR
-    try testing.expectEqual(@as(u32, 0x2A1F03E0), std.mem.readInt(u32, out.bytes[8..12], .little));
+    try testing.expectEqual(@as(u32, 0x2A1F03E0), std.mem.readInt(u32, out.bytes[16..20], .little));
     // RET
-    try testing.expectEqual(@as(u32, 0xD65F03C0), std.mem.readInt(u32, out.bytes[12..16], .little));
+    try testing.expectEqual(@as(u32, 0xD65F03C0), std.mem.readInt(u32, out.bytes[20..24], .little));
 }
 
 test "wrapper_thunk: emit x86_64 SysV 2-int register-class (i32, i64) (20 bytes)" {
