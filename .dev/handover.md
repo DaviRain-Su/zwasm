@@ -16,187 +16,96 @@
 bash scripts/check_phase9_close_invariants.sh --gate
 ```
 
-(per `.claude/skills/continue/SKILL.md` Resume Step 5d + ADR-0104
-+ `.claude/rules/phase9_close_invariants.md` §"Forbidden edits").
+(per `.claude/skills/continue/SKILL.md` Resume Step 5d +
+ADR-0104 + `.claude/rules/phase9_close_invariants.md`).
 
-**Current gate state**: **FAIL 3/18** (15 OK: I2×4 + I3×5 + I4 +
-I5 + I6×2 + I7×2). I6 ADR-0105 + ADR-0106 flipped Accepted
-2026-05-23 cycle (path (a) buffer-write selected for 0106 per
-ROADMAP §2 P3+P10+P13+§14 alignment + ADR-0104 D3 Tier-0).
-Remaining 3 FAILs are all I1 SKIP-WIN64 arms — implementation
-work, no longer user-gated.
+**Current gate state**: **17/18 passed** (was 16/18 at
+2026-05-23 session start; 2026-05-23 advanced via ADR-0106
+cycle 3e Phase 2'a–2'l implementation chain). Sole remaining
+FAIL: **I1b — D-163 SKIP-WIN64-CALL-INDIRECT-TRAP**.
 
-## Active task — I1 SKIP-WIN64 arm removal via ADR impl
+## Bucket-3 stop — user touchpoint required
 
-Per ADR-0105 + ADR-0106 Implementation plans:
+All autonomous prep walked; loop stops without re-arm.
 
-### ADR-0105 (JIT-prologue stack-probe) — 3 cycles
+**Gating user touchpoint(s)**:
 
-1. [x] `JitRuntime.stack_limit` field + `src/platform/stack_limit.zig`
-   cross-platform query helper (this cycle `3aa5ee5e`).
-2a. [x] arm64 prologue probe + stack-overflow trap stub (`7b86f715`).
-    stack_limit=0 default keeps probe a no-op; Mac test-all green.
-2b. [x] x86_64 prologue probe + trap stub (`c2caba63`).
-2c. [x] Wire stack_limit init via `invokeAndCheck`/`invokeAndCheckVoid`
-    central helpers (`0b534d66`). All ~14 entry-helper sites
-    auto-populate via the shared helper. Mac test-all green.
-3. [x] D-162 closed (`6b9ae4ce`). SKIP-WIN64-EXHAUSTION arm
-   removed + EXCEPTION_STACK_OVERFLOW filter removed from VEH.
-   Win64 cross-compile green; windowsmini reconciliation at
-   Phase 9 close boundary.
+- **D-163 Win64 JIT call_indirect trap path investigation**
+  requires actual Win64 runtime inspection (lldb-attach via
+  windowsmini OR a Win64 test machine). Autonomous probe via
+  Mac cross-compile + llvm-objdump is feasible but the byte-
+  sequence analysis can't distinguish the leading hypotheses
+  (H1 ADD-RSP shadow-space mismatch vs H2 VEH unwinder
+  confusion vs H3 R15↔entry_arg0_gpr mapping) without runtime
+  probe data. After D-163 fix lands + windowsmini reconciliation
+  green, gate flips 18/18 and §9.13-0 / §9.12-F / §9.12-I /
+  §9.13 are eligible for `[x]` per ADR-0104.
 
-### ADR-0106 path (a) buffer-write entry ABI — 4 cycles
+**Autonomous prep walked this resume** (do not re-walk):
 
-1. [x] `BufferWriteFn` + `invokeBufferWrite` foundation in new
-   `entry_buffer_write.zig` (`f8b9eff7`). Hand-rolled JIT bytes
-   verify end-to-end (results[0] = 42).
-2a. [x] `ResultAbi` enum foundation in `result_abi.zig` (`7dd79884`)
-    per `private/spikes/adr-0106-cycle2/SPIKE.md` Alt 2 (per-module
-    compile flag, phased migration).
-2b. [x] `Allocation.result_abi: ResultAbi = .register_write` field
-    threaded via regalloc (`1909b06e`). compile() signature
-    unchanged (358 callsites). Cycle-4 debt: promote to CompileOpts struct.
-2c. [x] x86_64 emit branches prologue+epilogue on `result_abi`
-    (`d0aa6a85`). Mac compile + Linux x86_64 cross-compile green;
-    ubuntu runtime test exercises end-to-end. Param marshal for
-    buffer-write deferred to alongside cycle 2d/3.
-2d. [x] arm64 emit branches prologue+epilogue on `result_abi`
-    (`a714da31`). Mac test-all green (0-arg buffer_write test
-    now runs natively).
-2e. [x] Param marshal for `.buffer_write` (`daca5e40`). x86_64
-    SysV + arm64; Mac green with 1-arg identity test. Win64 +
-    v128 + multi-arg overflow deferred to 2f.
-2f. [ ] Win64 buffer_write param marshal (R8 + shadow-space) +
-    v128 + multi-arg overflow handling.
-3a. [x] Multi-result buffer_write hand-rolled test
-    (`() → (i32, i32, i32)` D-164 trigger shape; `2882d2ba`).
-    Fixed branch ordering: buffer_write now takes precedence
-    over MEMORY-class in prologue capture.
-3b. [x] Typed multi-result invoke helper
-    `invokeMultiResultNoArgs` + `TypedResult` union foundation
-    (`6182b745`). Mac aarch64 + Linux x86_64 SysV verified
-    end-to-end on `() → (i32, i32, i32)`.
-3c. [x] Shape coverage tests for ALL 3 SKIP-arm shapes
-    `(i32,i64)` + `(i64,i32)` + `(i32,i32,i32)` via buffer_write
-    end-to-end (`2330cea7`). Mac arm64 + Linux x86_64 verified.
-3d. [x] Thread `result_abi` through shared `compileOne`
-    (`7c3e20ae`). All 3 callsites updated; default `.register_write`
-    preserves behaviour.
-3e (Phase 1). [x] `wrapper_thunk.zig` type foundation +
-    public `emit` API stub (`a3139eed`). `EmitParams /
-    EmitOutput / Error` types declared; stub returns
-    `UnsupportedOp`. Sets stable callsite contract for the
-    Phase 2' per-arch byte emit.
-3e (Phase 2'-e2e). [x] End-to-end integration test (`38f033b1`)
-    — compiles a 3-int Wasm body via native_emit, places body+wrapper
-    in JIT memory, invokes via invokeBufferWrite, verifies
-    `results_buf = (11, 22, 33)`. **FIRST proof that wrapper bytes
-    actually execute correctly.** Discovered + fixed critical bug:
-    arm64 3-int wrapper didn't save X30 across BL → infinite loop
-    (caught at 31min 99%CPU; fix = STP X30,XZR / LDP X30,XZR pair,
-    24 bytes vs buggy 16).
-3e (Phase 2'a). [x] x86_64 SysV 3-int MEMORY-class wrapper
-    (`2d7c87c5`). 11 bytes; XCHG RDI,RSI + CALL + XOR + RET.
-    Body's MEMORY-class epilogue (cycle 2c) writes 3xi32
-    to caller's results buffer directly.
-3e (Phase 2'b). [x] x86_64 SysV 2-int register-convention
-    wrapper for `(i32,i64)` + `(i64,i32)` shapes
-    (`1b738af4`). 20-byte sequence; tested. All 3 SKIP-arm
-    shapes now have SysV wrapper coverage.
-3e (Phase 2'c). [ ] x86_64 Win64 sibling. Requires either
-    (i) extending cycle 2c emit to handle Win64 MEMORY-class
-    (RCX as hidden ptr; current cycle 2c gates on
-    `abi.current_cc == .sysv`) OR (ii) different wrapper
-    shape that does multi-result reconstruction without
-    body-side MEMORY-class. Without windowsmini access,
-    correctness verified at phase-boundary reconciliation.
-3e (Phase 2'd). [x] arm64 AAPCS64 3-int MEMORY-class wrapper
-    (`daed4952`). 16-byte sequence (MOV X8,X1 + BL + MOV W0,
-    WZR + RET); Mac aarch64 test green.
-3e (Phase 2'e). [x] arm64 AAPCS64 2-int register-class wrapper
-    (`003eaed0`). 28-byte sequence (STP X1,X30 #-16! + BL +
-    LDP X9,X30 #+16 + STR X0,[X9] + STR X1,[X9+8] + MOV W0
-    WZR + RET). Stack-save chosen over X19-save (X19 pinned
-    + clobbered by body). All 3 SKIP-arm shapes now have
-    arm64 wrapper coverage; SysV + arm64 sibling pair done.
-3e (Phase 2'f). [x] `JitModule.thunk_offsets: ?[]const u32` +
-    `entry_buf(idx, Fn)` method foundation (`4c7941c9`).
-    `NO_THUNK` sentinel = 0xFFFFFFFF. Caller pattern stable.
-3e (Phase 2'g). [ ] Linker pass-2 emit: extend `link()` to
-    accept per-function wrapper-bytes input + place them in
-    `block.bytes` after the bodies + populate `thunk_offsets`.
-    Required: an integration test that compiles a multi-result
-    Wasm fn through compileWasm → linker → invokeMultiResultNoArgs
-    via `module.entry_buf` end-to-end.
-3e (Phase 2'g). [ ] Spec runner 3 multi-result callsites
-    (`spec_assert_runner_non_simd.zig:767/817/892`) use
-    `invokeMultiResultNoArgs(rt, module.entry_buf(idx,
-    BufferWriteFn), results)`.
-3e (Phase 2'h, optional). [ ] x86_64 Win64 wrapper sibling
-    — gated on either windowsmini access OR cycle 2c emit
-    extension for Win64 MEMORY-class RCX-as-hidden-ptr.
-3e (Phase 2''). [ ] linker.JitModule exposes per-function
-    thunk address (`module.entry_buf(idx, BufferWriteFn)`).
-    ~30 LOC in linker.zig + emit pipeline integration.
-3e (Phase 3'). [ ] Spec runner 3 multi-result callsites
-    use `invokeMultiResultNoArgs(rt, module.entry_buf(idx,
-    BufferWriteFn), results)`. ~30 LOC change.
-4. [ ] Remove `SKIP-WIN64-MULTI-RESULT` arm from
-    spec_assert_runner_base.zig. windowsmini phase-boundary
-    reconciliation verifies. D-094 + D-164 close; I1c OK.
-4. [ ] Remove `FuncRet_*` extern struct family + remove
-   `SKIP-WIN64-MULTI-RESULT` arm. D-094 + D-164 close;
-   gate I1c OK (after cycle 3e lands + windowsmini reconciliation).
-4. [ ] Remove `FuncRet_*` extern struct family + remove
-   `SKIP-WIN64-MULTI-RESULT` arm. D-094 + D-164 close;
-   gate I1c OK.
+- **Reference-repo enrichment**: wasmtime (Cranelift x64 +
+  Winch) + Wasmer singlepass surveyed 2026-05-23. Findings in
+  `private/spikes/d-163-win64-call-indirect-trap/README.md`:
+  mature engines emit Win64 `.pdata + .xdata` unwind info per
+  JIT function (zwasm v2 does not); wasmtime uses VEH context-
+  rewrite for traps (zwasm v2 uses trap-stub RET); wasm-1.0
+  `unreachable` works on Win64 with same RET pattern (refutes
+  "unwind absence" as sole cause).
+- **Throwaway spike**: `private/spikes/d-163-win64-call-
+  indirect-trap/` running. 5 numbered hypotheses + distinguishing
+  probes; refined ranking H2 (core) → H1 (supported) → H3
+  (plausible) → H4/H5 (low).
+- **ADR Consequences refinement**: ADR-0078 SKIP taxonomy row
+  already cites D-163 + lists codegen-bug spike as the close
+  path. No further refinement needed.
+- **WebFetch upstream**: not strictly walked; wasmtime
+  reference-repo survey covered the relevant MSDN Win64 ABI
+  considerations (UNWIND_INFO + VEH mechanics).
 
-### ADR-0163 (Win64 call_indirect trap codegen spike) — 1-2 cycles
-
-Disassemble `emitCallIndirect` Win64 branch at the OOB fixture's
-index 306 site; compare bounds-check + trap-stub epilogue with
-POSIX sibling; fix divergence. Remove `SKIP-WIN64-CALL-INDIRECT-
-TRAP` arm. Gate I1b OK.
-
-## Phase 9 close sequence (post-I1)
-
-1. All 3 SKIP-WIN64 arms removed → gate 18/18 OK.
-2. windowsmini `test-all` green with ZERO `SKIP-WIN64-*` token
-   (Phase boundary windowsmini reconciliation per ADR-0049).
-3. §9.13-0 / §9.12-F / §9.12-I re-flipped `[x]` with cited SHAs.
-4. §9.13 🔒 collab gate review cleared.
-5. Phase Status widget flips `9 | IN-PROGRESS → DONE`.
+**To resume**: get the cycle started on a Win64 host (or
+windowsmini) with the runner under lldb; capture PC + register
+state at crash point; match against the 5 hypotheses; then
+re-invoke /continue with the probe results in handover.md
+"Active task". Alternative autonomous path:
+write a synthetic Zig spike (`private/spikes/d-163-.../probe.zig`)
+that emits the bounds-check + trap-stub bytes for the
+`call_indirect` OOB fixture, cross-compile to
+`x86_64-windows-gnu`, and inspect via `llvm-objdump -d`. The
+spike doc enumerates which hypotheses each probe distinguishes.
 
 ## Work landed this session (2026-05-23 cycle)
 
-- **I3** Zig facade `Runtime / Module / Instance / Value` +
-  facade test in `src/zwasm.zig` (`6c4faeea`).
-- **I2** 4 c_api Wasm-2.0 utilisation test blocks in
-  `src/api/instance.zig` (`a35e0f21`): reftype round-trip,
-  bulk-traps, mixed-exports walk, cross-module funcref.
-- **§5.4** stale ADR/debt cleanup (`97b2a2db`): 5 ADR Revision
-  history SHA backfills + D-007 / D-010 Phase target verify.
-- **D-062** closed (`b14e5438`) — barrier dissolved
-  (§9.9-f-3 `80b2f1c5` already landed both sides).
-- **I6** ADR-0105 + ADR-0106 Accepted (this commit, path (a)
-  buffer-write for ADR-0106).
+ADR-0106 cycle 3e: Phase 2'a/2'b/2'd/2'e (per-arch wrapper emit
+for SysV + arm64 covering 2-int + 3-int shapes), Phase 2'f
+(`JitModule.entry_buf` + `thunk_offsets`), Phase 2'g
+(`linker.linkWithThunks` + `WrapperSpec`), Phase 2'h step 1
+(compileWasm wires linkWithThunks), Phase 2'h step 2 (entry
+helpers Win64-route via `module.entry_buf` + `invokeBufWin64NoArgs`),
+Phase 2'i (Win64 2-int wrapper), Phase 2'j (Win64 3-int
+MEMORY-class wrapper with XCHG RCX↔RDX), Phase 2'k (body-side
+cycle 2c MEMORY-class extended to Win64 — gate + Cc-aware
+rt_src_gpr/hidden_ptr_gpr), Phase 2'l (SKIP-WIN64-MULTI-RESULT
+arm removed). D-094 + D-164 closed. Two latent wrapper bugs
+caught + fixed via end-to-end tests (arm64 X30-not-saved +
+x86_64 RBX clobbered). Lesson recorded:
+`2026-05-23-wrapper-thunk-stack-save-not-callee-saved.md`.
+D-163 wasmtime+Wasmer survey + spike + debt row refinement
+(`3b456290`).
 
 ## Active `now` debts
 
-(None — D-062 closed; D-094 / D-164 will flip to `now` and
-close inside the ADR-0106 path (a) implementation cycles.)
+(None — D-094 + D-164 discharged this session.)
 
 ## See
 
-- [`phase9_close_master.md`](./phase9_close_master.md) (§5
-  Tier 1; §6 exit predicate; §8 fresh-session entry).
-- [ADR-0104](./decisions/0104_phase9_honest_accounting_reframe.md)
-  (META reframe; Accepted).
-- [ADR-0105](./decisions/0105_jit_prologue_stack_probe.md)
-  (Accepted 2026-05-23; impl per §"Implementation plan").
-- [ADR-0106](./decisions/0106_multi_result_return_convention.md)
-  (Accepted 2026-05-23 path (a); impl per §"If path (a)").
-- [`.claude/rules/phase9_close_invariants.md`](../.claude/rules/phase9_close_invariants.md)
-  (I1-I7 invariants + Forbidden edits).
-- [`debt.md`](./debt.md): D-094 / D-164 (blocked by ADR-0106
-  Accept — barrier dissolved; will move to `now` next cycle).
+- [`phase9_close_master.md`](./phase9_close_master.md).
+- ADR-0104 (Phase 9 honest-accounting reframe).
+- ADR-0105 (JIT-prologue stack-probe — D-162 closed prior).
+- ADR-0106 (multi-result ABI redesign — cycles 1 through 3e
+  Phase 2'l landed this session).
+- ADR-0078 (SKIP taxonomy — only `SKIP-WIN64-CALL-INDIRECT-TRAP`
+  arm remains; closes with D-163).
+- `private/spikes/d-163-win64-call-indirect-trap/` (gitignored
+  hypothesis enumeration + probe ranking).
+- `.dev/debt.md`: D-163 row body refined with hypothesis
+  ranking.
