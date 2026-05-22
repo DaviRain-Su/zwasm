@@ -163,8 +163,11 @@ pub fn emit(
     if (builtin.cpu.arch == .aarch64) {
         return emitAarch64(allocator, params);
     }
-    if (builtin.cpu.arch != .x86_64 or builtin.os.tag == .windows) {
+    if (builtin.cpu.arch != .x86_64) {
         return Error.UnsupportedOp;
+    }
+    if (builtin.os.tag == .windows) {
+        return emitX8664Win64(allocator, params);
     }
     if (params.sig.params.len != 0) return Error.UnsupportedOp;
 
@@ -217,6 +220,86 @@ pub fn emit(
     } else {
         return Error.UnsupportedOp;
     }
+
+    return .{ .bytes = try bytes.toOwnedSlice(allocator) };
+}
+
+/// x86_64 Win64 wrapper emit. Public so byte-sequence unit
+/// tests can exercise it on Mac/Linux hosts (the bytes are
+/// host-independent; runtime execution requires Win64).
+///
+/// Win64 calling convention (per Microsoft x64 ABI):
+/// - RCX = arg 0, RDX = arg 1, R8 = arg 2, R9 = arg 3.
+/// - Return in RAX (≤ 8 bytes) or via hidden RCX (struct > 8).
+/// - 32-byte shadow space reserved by caller below the return
+///   address; called function may use it freely.
+/// - RBX / RBP / RDI / RSI / R12..R15 callee-saved.
+///
+/// Wrapper Zig signature `fn(rt, results, args) callconv(.c)
+/// u32`: ≤ 8-byte return → no hidden RCX → RCX = rt,
+/// RDX = results, R8 = args, return in RAX.
+///
+/// Currently supports: 2-int register-class shape only. The
+/// 3-int MEMORY-class Win64 shape requires the body-side
+/// cycle 2c MEMORY-class extension (RCX hidden ptr, RDX rt)
+/// which is out of scope for this cycle — see
+/// `private/spikes/adr-0106-cycle3e-win64-wrapper/README.md`.
+///
+/// 2-int register-class shape (33 bytes):
+///
+/// ```text
+///   SUB RSP, 0x28           ; 48 83 EC 28        — shadow(32) + 8 save = 40 bytes
+///   MOV [RSP+0x20], RDX     ; 48 89 54 24 20     — save results ptr
+///   CALL body                ; E8 + disp32
+///   MOV R8, [RSP+0x20]      ; 4C 8B 44 24 20     — recover results in R8 (R8 is caller-saved; OK to use after CALL)
+///   MOV [R8], RAX           ; 49 89 00           — result 0 → buf[0]
+///   MOV [R8+8], RDX         ; 49 89 50 08        — result 1 → buf[8]
+///   ADD RSP, 0x28           ; 48 83 C4 28
+///   XOR EAX, EAX            ; 31 C0              — ErrCode_OK
+///   RET                      ; C3
+/// ```
+///
+/// Total: 4+5+5+5+3+4+4+2+1 = 33 bytes.
+///
+/// Stack alignment: Win64 expects body-entry RSP ≡ 8 (mod 16).
+/// Wrapper-entry RSP ≡ 8 (mod 16) (caller's CALL pushed ret
+/// addr). SUB RSP, 0x28 → RSP ≡ 8-40 ≡ 0 (mod 16). CALL
+/// pushes 8 → body sees ≡ 8 (mod 16). ✓
+///
+/// Body's view at entry:
+/// - RCX = rt (unchanged from wrapper's caller-supplied RCX).
+/// - RDX = results (clobbered AFTER body; body may use as
+///   scratch).
+/// - R8 = args (clobbered; body may use).
+///
+/// Body returns: RAX = result 0, RDX = result 1 (Win64-violating
+/// but JIT-emitted body chooses its own internal convention per
+/// ADR-0106 path (a) wrapper design).
+///
+/// Body MUST be compiled with `result_abi = .register_write` AND
+/// the body's cycle 2c emit must NOT route 2-int through Win64's
+/// hidden-RCX path (= keep RAX/RDX register convention even on
+/// Win64). Today's cycle 2c gates MEMORY-class on `.sysv` only;
+/// 2-int Win64 already goes through register_write naturally.
+pub fn emitX8664Win64(
+    allocator: std.mem.Allocator,
+    params: EmitParams,
+) Error!EmitOutput {
+    if (params.sig.params.len != 0) return Error.UnsupportedOp;
+    if (params.sig.results.len != 2) return Error.UnsupportedOp;
+    if (!all_gpr_class(params.sig.results)) return Error.UnsupportedOp;
+
+    var bytes: std.ArrayList(u8) = .empty;
+    errdefer bytes.deinit(allocator);
+
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x28 }); // SUB RSP, 0x28
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x54, 0x24, 0x20 }); // MOV [RSP+0x20], RDX
+    try emitCallRel32(allocator, &bytes, params, 4 + 5);
+    try bytes.appendSlice(allocator, &.{ 0x4C, 0x8B, 0x44, 0x24, 0x20 }); // MOV R8, [RSP+0x20]
+    try bytes.appendSlice(allocator, &.{ 0x49, 0x89, 0x00 }); // MOV [R8], RAX
+    try bytes.appendSlice(allocator, &.{ 0x49, 0x89, 0x50, 0x08 }); // MOV [R8+8], RDX
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xC4, 0x28 }); // ADD RSP, 0x28
+    try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 }); // XOR EAX,EAX ; RET
 
     return .{ .bytes = try bytes.toOwnedSlice(allocator) };
 }
@@ -363,6 +446,50 @@ fn emitCallRel32(
 }
 
 const testing = std.testing;
+
+test "wrapper_thunk: emitX8664Win64 2-int register-class (i32, i64) (33 bytes)" {
+    // Pure byte-sequence test — no host gating. The bytes are
+    // independent of the host's cpu/os; runtime execution
+    // requires Win64 (verified at Phase boundary windowsmini
+    // reconciliation, not per-chunk).
+    const results = [_]@TypeOf(@as(@import("../../../ir/zir.zig").ValType, .i32)){ .i32, .i64 };
+    const params: EmitParams = .{
+        .sig = .{ .params = &.{}, .results = &results },
+        .body_offset = 100,
+        .thunk_offset = 0,
+    };
+    const out = try emitX8664Win64(testing.allocator, params);
+    defer testing.allocator.free(out.bytes);
+    try testing.expectEqual(@as(usize, 33), out.bytes.len);
+    // SUB RSP, 0x28
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x83, 0xEC, 0x28 }, out.bytes[0..4]);
+    // MOV [RSP+0x20], RDX
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x89, 0x54, 0x24, 0x20 }, out.bytes[4..9]);
+    // CALL body_offset(100) - (0 + 9 + 5) = 86
+    try testing.expectEqual(@as(u8, 0xE8), out.bytes[9]);
+    const disp = std.mem.readInt(i32, out.bytes[10..14], .little);
+    try testing.expectEqual(@as(i32, 86), disp);
+    // MOV R8, [RSP+0x20]
+    try testing.expectEqualSlices(u8, &.{ 0x4C, 0x8B, 0x44, 0x24, 0x20 }, out.bytes[14..19]);
+    // MOV [R8], RAX
+    try testing.expectEqualSlices(u8, &.{ 0x49, 0x89, 0x00 }, out.bytes[19..22]);
+    // MOV [R8+8], RDX
+    try testing.expectEqualSlices(u8, &.{ 0x49, 0x89, 0x50, 0x08 }, out.bytes[22..26]);
+    // ADD RSP, 0x28
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x83, 0xC4, 0x28 }, out.bytes[26..30]);
+    // XOR EAX, EAX ; RET
+    try testing.expectEqualSlices(u8, &.{ 0x31, 0xC0, 0xC3 }, out.bytes[30..33]);
+}
+
+test "wrapper_thunk: emitX8664Win64 returns UnsupportedOp for 3-int (cycle 2c body extension required)" {
+    const results = [_]@TypeOf(@as(@import("../../../ir/zir.zig").ValType, .i32)){ .i32, .i32, .i32 };
+    const params: EmitParams = .{
+        .sig = .{ .params = &.{}, .results = &results },
+        .body_offset = 0,
+        .thunk_offset = 0,
+    };
+    try testing.expectError(Error.UnsupportedOp, emitX8664Win64(testing.allocator, params));
+}
 
 test "wrapper_thunk: EmitParams + EmitOutput types present" {
     // Compile-time sanity: the types exist and have the
