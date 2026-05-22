@@ -19,9 +19,9 @@ bash scripts/check_phase9_close_invariants.sh --gate
 (per `.claude/skills/continue/SKILL.md` Resume Step 5d + ADR-0104
 + `.claude/rules/phase9_close_invariants.md` §"Forbidden edits").
 
-Current gate state: **FAIL 16/18** — Tier 1 work not yet
-implemented. `[x]` flips on §9.13-0 / §9.12-F / §9.12-I / §9.13
-are §18.3 violations until the gate exits 0.
+Current gate state: **FAIL 14/18** (4 OK: I4 + I5 + I7×2) — Tier 1
+implementation not yet started. `[x]` flips on §9.13-0 / §9.12-F /
+§9.12-I / §9.13 are §18.3 violations until the gate exits 0.
 
 ## Phase 9 = DONE predicate
 
