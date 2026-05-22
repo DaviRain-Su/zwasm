@@ -40,10 +40,10 @@ Per ADR-0105 + ADR-0106 Implementation plans:
 2c. [x] Wire stack_limit init via `invokeAndCheck`/`invokeAndCheckVoid`
     central helpers (`0b534d66`). All ~14 entry-helper sites
     auto-populate via the shared helper. Mac test-all green.
-3. [ ] Win64 prologue emit + `windows_traphandler.zig` EXCEPTION_
-   STACK_OVERFLOW filter removal + windowsmini verify. Remove
-   `SKIP-WIN64-EXHAUSTION` arm from `spec_assert_runner_base.zig`.
-   Closes D-162; gate I1a OK.
+3. [x] D-162 closed (`6b9ae4ce`). SKIP-WIN64-EXHAUSTION arm
+   removed + EXCEPTION_STACK_OVERFLOW filter removed from VEH.
+   Win64 cross-compile green; windowsmini reconciliation at
+   Phase 9 close boundary.
 
 ### ADR-0106 path (a) buffer-write entry ABI — 4 cycles
 
