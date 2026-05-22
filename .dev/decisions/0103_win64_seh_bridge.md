@@ -1,6 +1,6 @@
 # 0103 — Adopt AddVectoredExceptionHandler + threadlocal RecoveryInfo for Win64 trap recovery
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-05-22
 - **Author**: Shota Kudo (via `/continue` autonomous loop, W3.a track of `.dev/phase9_13_0_close_plan.md`)
 - **Tags**: phase-9, windows, win64, traphandler, spec-assert-runner, D-136
@@ -288,3 +288,9 @@ Concretely:
   classification at W3.b time (new `necessary` category
   entries since they're Win32 platform syscalls, not C
   runtime).
+
+## Revision history
+
+| Date       | SHA         | Change                          |
+|------------|-------------|----------------------------------|
+| 2026-05-22 | `<backfill>`| Status: Proposed → Accepted     |

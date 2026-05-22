@@ -1,6 +1,6 @@
 # 0102 — Reframe §9.12-F exit from "active rows < 15" to "phase-9-eligible cohort substantially addressed"
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-05-22
 - **Author**: Shota Kudo (via `/continue` autonomous loop, WA track of `.dev/phase9_13_0_close_plan.md`)
 - **Tags**: phase-9, debt, exit-criterion, scope
@@ -207,3 +207,9 @@ count.
   count).
 - `.claude/rules/extended_challenge.md` Step 1 — rejection
   rationale for Alternative A.
+
+## Revision history
+
+| Date       | SHA         | Change                          |
+|------------|-------------|----------------------------------|
+| 2026-05-22 | `<backfill>`| Status: Proposed → Accepted     |
