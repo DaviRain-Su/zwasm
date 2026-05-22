@@ -50,8 +50,11 @@ discover_flipped_rows() {
 
 check_9_12_A() {
   local fail=0 f n
+  # p9_completion_status removed 2026-05-22 per ADR-0104 — §9.12-A
+  # enforcement-artefact discipline replaced by invariant-script
+  # approach (see .dev/phase9_close_master.md §4 Phase C).
   for s in check_build_dce check_skip_impl_ratchet check_fallback_patterns \
-           check_subrow_exit check_libc_boundary p9_completion_status; do
+           check_subrow_exit check_libc_boundary; do
     f="scripts/$s.sh"
     if [ ! -x "$f" ]; then echo "  MISS  $f"; fail=1; continue; fi
     n=$(wc -l < "$f")
