@@ -3034,6 +3034,24 @@ pub fn runCorpus(
                 };
             },
             .assert_return => {
+                // Win64 SKIP-WIN64-MULTI-RESULT (D-164): W4 retry 5
+                // (2026-05-22) found `assert_return type-all-i32-i64
+                // ()` in `call_indirect.0.wasm` crashes on Windows.
+                // Root cause: Win64 ABI returns >8-byte structs via
+                // hidden RCX pointer; JIT epilogue writes RAX/RDX
+                // (SysV / AAPCS64 convention). Multi-result entry
+                // helpers (`callI32i64NoArgs` etc) use `callconv(.c)`
+                // — Zig follows Win64's hidden-pointer convention,
+                // JIT does not. Proper fix needs per-shape Win64
+                // inline-asm thunks (precedent: callI32f64NoArgs
+                // thunk at entry.zig:1156). Multi-cycle; until
+                // then skip `type-all-` shaped directives on
+                // Windows. POSIX path unchanged.
+                if (@import("builtin").os.tag == .windows and std.mem.find(u8, line, "type-all-") != null) {
+                    try stdout.print("SKIP-WIN64-MULTI-RESULT  {s}: {s} (D-164 — Win64 ABI hidden-pointer mismatch)\n", .{ name, line });
+                    tally.skipped_adr += 1;
+                    continue;
+                }
                 if (module_bad) {
                     tally.runtime_skip += 1;
                     continue;

@@ -81,6 +81,7 @@ ADR amendment).
 | `SKIP-HOST-STATE-DIVERGED`     | `ADR-required`    | `.dev/decisions/skip_host_state_diverged.md`                   |
 | `SKIP-WIN64-EXHAUSTION`        | `debt-trackable`  | D-162 (Win64 stack-overflow guard-page restoration; VEH receives EXCEPTION_STACK_OVERFLOW but cannot re-arm guard page without `_resetstkoflw()` or prologue stack-probe; proper fix matches Wasmtime/Wasmer scheme) |
 | `SKIP-WIN64-CALL-INDIRECT-TRAP`| `debt-trackable`  | D-163 (Win64 JIT call_indirect trap path crashes mid-corpus; first surfaced at `as-call_indirect-last ()` in wasm-2.0-assert/call/call.0.wasm via W4 retry 4; POSIX trap-stub path works, Win64-specific failure mode TBD — JIT codegen OR VEH-recovery interaction) |
+| `SKIP-WIN64-MULTI-RESULT`      | `debt-trackable`  | D-164 (Win64 ABI returns >8-byte structs via hidden RCX pointer; JIT writes RAX+RDX SysV-style; `FuncRet_i32i64` and similar multi-result entry helpers need per-shape Win64 inline-asm thunks like callI32f64NoArgs precedent) |
 
 ### When a new token is introduced
 
