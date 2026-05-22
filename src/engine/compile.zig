@@ -876,12 +876,32 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     // import calls never produce a CallFixup (the emit pass routes
     // them to the function-local trap stub directly), so the
     // sentinel slots are never read.
+    //
+    // ADR-0106 cycle 3e Phase 2'h: collect wrapper specs for every
+    // multi-result function (results.len >= 2). The linker's pass-2
+    // calls `wrapper_thunk.emit` per spec; shapes that aren't yet
+    // supported return UnsupportedOp and the linker silently skips
+    // them (sets `thunk_offsets[idx] = NO_THUNK`). Bodies stay
+    // register_write per cycle 3d; the wrapper bridges to
+    // buffer-write convention only at the entry helper boundary.
     const bodies = try allocator.alloc(linker.FuncBody, results.len);
     defer allocator.free(bodies);
     for (results, 0..) |r, i| {
         bodies[i] = .{ .bytes = r.out.bytes, .call_fixups = r.out.call_fixups };
     }
-    const linked = try linker.link(allocator, bodies, num_imports);
+    var wrapper_specs_list: std.ArrayList(linker.WrapperSpec) = .empty;
+    defer wrapper_specs_list.deinit(allocator);
+    for (results, 0..) |_, i| {
+        const wasm_idx = num_imports + @as(u32, @intCast(i));
+        const sig = func_sigs[wasm_idx];
+        if (sig.results.len >= 2) {
+            try wrapper_specs_list.append(allocator, .{
+                .func_idx = wasm_idx,
+                .sig = sig,
+            });
+        }
+    }
+    const linked = try linker.linkWithThunks(allocator, bodies, num_imports, wrapper_specs_list.items);
 
     return .{
         .module = linked,
