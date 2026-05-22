@@ -11,70 +11,81 @@
 [`.dev/phase9_close_master.md`](./phase9_close_master.md).
 
 **Mandatory before any §9.x [x] flip**: run
+`bash scripts/check_phase9_close_invariants.sh --gate`.
 
-```sh
-bash scripts/check_phase9_close_invariants.sh --gate
-```
+**Current gate state (mac-host invariants)**: 17/18 passed.
+**windowsmini state (runtime, captured 2026-05-23 in
+`/tmp/win.log`)**: 3 regressions surfaced; Phase 9 NOT closing.
 
-(per `.claude/skills/continue/SKILL.md` Resume Step 5d +
-ADR-0104 + `.claude/rules/phase9_close_invariants.md`).
+## Active task — Win64 regression triage (from /tmp/win.log)
 
-**Current gate state**: **17/18 passed**. Sole remaining FAIL:
-**I1b — D-163 SKIP-WIN64-CALL-INDIRECT-TRAP**.
+windowsmini `run_remote_windows.sh test-all` exit 253 at
+`assert_exhaustion runaway ()` in `call/` manifest. Reached
+fixtures show **3 distinct Win64 bugs**, in this order:
 
-## Active task — D-163 close drive
+1. **R1 — `br: type-f64-f64-value(())`** (line 2238)
+   - Got: `(f64:0x4014000000000000, f64:0x00007ff6baf00000)`
+   - Expected: `(f64:4.0, f64:5.0)`
+   - First f64 correct; **second is uninit pointer-shaped
+     (0x7ff6...)**. Class: Phase 2'a–2'l Win64 multi-result
+     2-int register-class wrapper bug. Body's register_write
+     epilogue likely not writing result 1 to RDX on Win64
+     (SysV-only mapping); wrapper reads garbage.
 
-**Step 0 (first action this session)**: read `/tmp/win.log`.
-A `bash scripts/run_remote_windows.sh test-all` run was kicked
-in background at the end of the prior session (2026-05-23
-~06:30) to capture the post-Phase-2'l Win64 state. The log
-contains:
+2. **R2 — `br: as-return-values(())`** (line 2239)
+   - Got: `(i32:2, i64:330762767128)`
+   - Expected: `(i32:2, i64:7)`
+   - Same class as R1.
 
-- Whether Phase 2'a → 2'l Win64 path (cycles 2'i + 2'j + 2'k
-  wrappers + body MEMORY-class) executes correctly at runtime.
-- Specific failures (if any) on the wasm-2.0 corpus's
-  `assert_trap as-call_indirect-last ()` fixture in
-  `call/call.0.wasm` (= D-163 reproduction).
-- The exact crash signature (return code, stderr).
+3. **R3 — `assert_exhaustion runaway ()` in `call/`** (line
+   2629) → runner exit 253. **D-162 supposedly closed by
+   ADR-0105 (`7c1ec732`)** but the JIT-prologue stack-probe
+   doesn't actually fire on Win64 — stack overflow still
+   crashes the runner. SKIP-WIN64-EXHAUSTION arm was removed
+   (`d-162`) without windowsmini runtime verification.
 
-**Decision tree from the log**:
+4. **D-163 status: UNKNOWN** — runner died at R3 BEFORE
+   reaching `call/call.0.wasm`'s D-163 fixture. Re-run only
+   after R1/R2/R3 fix.
 
-1. **windowsmini test-all all-green** → unexpected; verify
-   D-163 SKIP arm was actually removed + re-check the
-   wasm-2.0 corpus path. Possibly D-163 dissolved.
-2. **windowsmini crashes at the D-163 fixture** → proceed
-   with the spike's ranked-hypothesis investigation:
-   - H2 (VEH unwinder confusion) CORE
-   - H1 (ADD-RSP shadow-space mismatch) SUPPORTED
-   - H3 (R15↔entry_arg0_gpr) PLAUSIBLE
-   - Use the spike doc's distinguishing probes; SSH back
-     into windowsmini for lldb-attach or specific dumps.
-3. **windowsmini fails elsewhere first** (Phase 2'a → 2'l
-   regression) → fix that path before D-163 resumes.
+## Next session action plan
 
-windowsmini is reachable via SSH alias (verified 2026-05-23).
-Per ADR-0049 only the per-chunk test gate is deferred;
-investigation work via windowsmini is autonomous-eligible.
+**Triage order: R3 → R1+R2 → re-run → D-163**.
+
+1. **R3 (ADR-0105 Win64)**: investigate why JIT-prologue
+   stack-probe doesn't fire on Win64. Likely cause: stack_limit
+   not set, or comparison instruction wrong on Win64, or VEH
+   STACK_OVERFLOW filter still firing pre-probe. Check
+   `src/platform/stack_limit.zig` + `emit.zig` Win64 prologue
+   probe emission. Likely 1-cycle fix.
+
+2. **R1/R2 (Phase 2 Win64 2-int register-class)**: the
+   wrapper Win64 (Phase 2'i, 33 bytes) assumes body writes
+   result 1 to RDX. Verify body's register_write epilogue
+   actually writes RDX on Win64 — cycle 2c's marshalReturnRegs
+   may be SysV-only. Likely a Cc-aware fix in
+   `src/engine/codegen/x86_64/op_control.zig::marshalReturnRegs`.
+
+3. After R1/R2/R3 land + windowsmini re-runs green except
+   D-163: focus on D-163 spike's H1/H2/H3 probes (per
+   `private/spikes/d-163-win64-call-indirect-trap/`).
+
+windowsmini is SSH-reachable (verified 2026-05-23). Per ADR-0049
+investigation work is autonomous-eligible. `bash scripts/
+run_remote_windows.sh test-all` can be re-kicked after each
+fix; result lands in `/tmp/win.log`.
 
 ## Work landed this session (2026-05-23)
 
-ADR-0106 cycle 3e Phase 2'a → 2'l (full implementation chain:
-per-arch wrapper emit SysV+arm64+Win64 × 2-int+3-int shapes,
-linker hookup, compileWasm wiring, entry helpers Win64-routing,
-body-side cycle 2c MEMORY-class Win64 extension, SKIP arm
-removal). D-094 + D-164 closed. 2 latent wrapper bugs caught
-via e2e tests (arm64 X30 + x86_64 RBX). Lesson:
-`2026-05-23-wrapper-thunk-stack-save-not-callee-saved.md`.
-D-163 wasmtime+Wasmer survey + spike + debt refinement.
-
-## Active `now` debts: none.
+ADR-0106 cycle 3e Phase 2'a → 2'l full implementation chain;
+D-094 + D-164 closed (Mac/Linux); SKIP-WIN64-MULTI-RESULT arm
+removed. Mac aarch64 + Linux x86_64 green. **Win64 runtime
+NOT verified during the cycle** — surfaced as R1/R2/R3 here.
 
 ## See
 
-- [`phase9_close_master.md`](./phase9_close_master.md) (§5.1
-  D-163 only remaining; §6 exit predicate).
-- `private/spikes/d-163-win64-call-indirect-trap/` (gitignored;
-  5 hypotheses + distinguishing probes).
+- `/tmp/win.log` (windowsmini test-all result; 17703 lines).
+- [`phase9_close_master.md`](./phase9_close_master.md) §5.1.
+- `private/spikes/d-163-win64-call-indirect-trap/`.
 - ADR-0104 / 0105 / 0106 / 0078.
-- `.dev/debt.md`: D-163 row body refined with hypothesis
-  ranking.
+- `.dev/lessons/2026-05-23-wrapper-thunk-stack-save-not-callee-saved.md`.
