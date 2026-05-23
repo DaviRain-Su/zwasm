@@ -17,72 +17,62 @@
 **windowsmini state (runtime, captured 2026-05-23 in
 `/tmp/win.log`)**: 3 regressions surfaced; Phase 9 NOT closing.
 
-## Active task — Win64 regression triage (from /tmp/win.log)
+## Active chunk — D-165 (Win64 fac-rec hang spike)
 
-windowsmini `run_remote_windows.sh test-all` exit 253 at
-`assert_exhaustion runaway ()` in `call/` manifest. Reached
-fixtures show **3 distinct Win64 bugs**, in this order:
+Phase 9 close gate: invariants 17/18 (I1 = SKIP-WIN64-CALL-
+INDIRECT-TRAP). Blocking sequence: **D-165 → D-163 → §9.13-0
+[x] flip → Phase 9 DONE**.
 
-1. **R1 — `br: type-f64-f64-value(())`** (line 2238)
-   - Got: `(f64:0x4014000000000000, f64:0x00007ff6baf00000)`
-   - Expected: `(f64:4.0, f64:5.0)`
-   - First f64 correct; **second is uninit pointer-shaped
-     (0x7ff6...)**. Class: Phase 2'a–2'l Win64 multi-result
-     2-int register-class wrapper bug. Body's register_write
-     epilogue likely not writing result 1 to RDX on Win64
-     (SysV-only mapping); wrapper reads garbage.
+**Immediate next action**: investigate D-165. windowsmini
+test-all stalls at `assert_exhaustion fac-rec i64:1073741824`
+(the directive right after `fac : assert_return fac-ssa`,
+line ~28527 in /tmp/win.log from the cycle-8 run).
 
-2. **R2 — `br: as-return-values(())`** (line 2239)
-   - Got: `(i32:2, i64:330762767128)`
-   - Expected: `(i32:2, i64:7)`
-   - Same class as R1.
+Concrete spike steps (no Step 0 survey — root-cause hunting):
 
-3. **R3 — `assert_exhaustion runaway ()` in `call/`** (line
-   2629) → runner exit 253. **D-162 supposedly closed by
-   ADR-0105 (`7c1ec732`)** but the JIT-prologue stack-probe
-   doesn't actually fire on Win64 — stack overflow still
-   crashes the runner. SKIP-WIN64-EXHAUSTION arm was removed
-   (`d-162`) without windowsmini runtime verification.
+1. Write a Mac-host unit test that compiles a Wasm `fac-rec`-
+   shape `(func (param i64) (result i64))` recursive body and
+   directly executes it via the JIT (Mac aarch64 first to
+   verify the test scaffold). Probe should fire at depth
+   ~16K (1 MiB / 64 bytes).
+2. Cross-build for `x86_64-windows-gnu` and `objdump -d` the
+   emitted prologue + body + trap stub. Compare against the
+   `runaway` shape (which works) — diff the byte sequences.
+3. If bytes look identical to runaway's structure → hang is
+   in some Win64 runtime interaction (VEH, thread state).
+   Bisect by reducing the fac-rec input from 1073741824 to
+   a small value (e.g. 100) and see if it changes behavior.
+4. If bytes differ from runaway → diff isolates the bug
+   site. Likely candidates: i64-result regalloc, post-CALL
+   marshal, recursive-call sig validation.
 
-4. **D-163 status: UNKNOWN** — runner died at R3 BEFORE
-   reaching `call/call.0.wasm`'s D-163 fixture. Re-run only
-   after R1/R2/R3 fix.
+Hypotheses for what differs vs runaway:
+- (a) Probe doesn't fire for i64-param/i64-result functions
+  (regression of probe gating?).
+- (b) Trap stub leaves stack in wrong state for i64-result
+  caller; post-trap unwind hangs.
+- (c) Recursion never traps — fac-rec has small per-call
+  frame but the multi-billion input still saturates somehow.
 
-## Next session action plan
+After D-165 resolved: remove `SKIP-WIN64-CALL-INDIRECT-TRAP`
+arm in `spec_assert_runner_base.zig:3088`, re-run windowsmini,
+observe `call: assert_trap as-call_indirect-last ()` outcome.
+If PASS → D-163 closed by R3 fix's broader trap-path repair;
+flip I1 to OK; check_phase9_close_invariants.sh exits 0; flip
+§9.13-0 [x] → Phase 9 DONE.
 
-**Triage**: ✅ R3 closed → R1+R2 → re-run → D-163.
+## Closed this session (2026-05-23)
 
-**R3 CLOSED (2026-05-23, cycle 6)**: Root cause = Windows
-commit-pattern early-overflow. `EXCEPTION_STACK_OVERFLOW` fires
-WAY before SP reaches `LowLimit + 16K` despite
-`GetCurrentThreadStackLimits` returning correct reserved bounds.
-Fix: bump `STACK_GUARD_HEADROOM` to 1 MiB on Win64 only
-(`1e2d716d`). windowsmini evidence: `runaway` +
-`mutual-runaway` both PASS on Win64 (per /tmp/win.log:31388 of
-cycle-6 run). Mac+Linux unchanged. Lesson landed at
-`.dev/lessons/2026-05-23-win64-stack-probe-headroom.md`.
-
-**R1+R2 status**: ✅ **BOTH CLOSED** (verified
-`/tmp/win.log:15477` cycle 8 — `br: type-f64-f64-value` and
-`as-return-value` both PASS on windowsmini). R2 fixed by
-cap=2 (`aac986d9`); R1 fixed by wrapper 2-XMM extension +
-`callF64f64NoArgs` Win64 branch (`73bcf80f`).
-
-**D-163 status**: SKIP-WIN64-CALL-INDIRECT-TRAP arm at line
-16043 still fires. To verify post-R3 fix, remove SKIP arm
-and observe — needs windowsmini round-trip. Blocked by D-165
-(see below).
-
-**D-165 (new)**: windowsmini test-all stalls at
-`assert_exhaustion fac-rec i64:1073741824` (the directive
-right after `fac : assert_return fac-ssa`). fac-rec is
-recursive `(param i64) (result i64)` — with 1 MiB Win64
-headroom, probe should fire after ~16K iterations (~ms).
-Yet it hangs >20 min. Hypotheses: (a) probe doesn't fire
-for fac-rec (regression? but runaway works); (b) trap stub
-unwinds incorrectly for i64-result functions on Win64; (c)
-post-trap caller continues with bogus result + multiplies
-+ loops somehow. Investigate as a separate spike.
+- ✅ **R3 / D-162** (`assert_exhaustion runaway` Win64 crash):
+  Win64 commit-pattern early-overflow root cause. Fix:
+  `STACK_GUARD_HEADROOM = 1 MiB` on Win64 only (`1e2d716d`).
+  Lesson: `.dev/lessons/2026-05-23-win64-stack-probe-headroom.md`.
+- ✅ **R2** (`br: as-return-values (i32, i64)`): Win64 cap=1 →
+  cap=2 in `op_control.zig::marshalReturnRegs` (`aac986d9`).
+- ✅ **R1** (`br: type-f64-f64-value (f64, f64)`): wrapper
+  2-XMM branch in `emitX8664Win64` + Win64 routing in
+  `callF64f64NoArgs` (`73bcf80f`). Verified PASS on
+  windowsmini cycle-8 log.
 
 After R3: R1/R2 (Win64 `marshalReturnRegs` Cc-aware fix) →
 re-run → D-163 (spike H1/H2/H3 in
