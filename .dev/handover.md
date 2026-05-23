@@ -42,22 +42,24 @@ Tackle in this order (autonomous-eligible, ROI-descending):
 
 1. **A1. D-157 CLOSED** (cycle 15-16; SKIP 56→0 wasm-2.0).
 2. **A2. D-139 CLOSED** (cycle 17; c_api Instance audit tests).
-3. **D-166 + A4 D-163 CLOSED** (cycle 19-20, `e5042b3e`). Single
-   root cause: `scratch_typeidxs` not reset between modules in
-   spec runner. Symptoms differed per host (Mac OK / ubuntu
-   off-by-one / Win64 silent process death) but ONE fix at
-   `spec_assert_runner_non_simd.zig:251` closes both. Phase 9
-   close gate: 17/18 → **18/18**. See lesson
-   `2026-05-23-d163-d166-shared-root-cause.md`.
+3. **D-166 + A4 D-163 CLOSED** (cycle 19-20, `e5042b3e`).
+   Shared root cause: `scratch_typeidxs` not reset between
+   modules → stale sig-mismatch false-negative. Phase 9 close
+   gate: 17/18 → **18/18**.
+4. **Win64 2-i32-result fix** (`a40bc6d6`). `callI32i32NoArgs`
+   missing Win64 wrapper-thunk path (asymmetric with the
+   3-result version). After fix: wasm-2.0/call/ Win64 isolated
+   = 90 passed 0 failed 0 SKIPs.
+5. **ADR-0107 Proposed** (`6b3c6705`). Byte-buffer
+   `Runtime.globals` migration for D-079 (ii). User-gated.
 
-**Remaining**:
-- A3 (D-079 ii v128 cross-module): structural `Runtime.globals`
-  refactor; ADR-0107 needed before full migration (user-gated).
-- 2 Win64 multi-result fails surfaced in cycle 11
-  (`type-all-i32-i32`, `as-call-all-operands`) — distinct from
-  D-163; D-094/D-164 territory needs separate investigation.
-- §9.13 hard gate ADR-0105 + ADR-0106 Accepted flip (user
-  touchpoint).
+**Remaining work (all user-gated)**:
+- A3 D-079 ii — blocked-by: ADR-0107 Accept.
+- §9.13 hard gate — ADR-0105 + ADR-0106 are Accepted; awaiting
+  collaborative flip per Track D + Phase B `[x]` re-flip with
+  cited SHAs.
+
+windowsmini full reconcile in BG; ubuntu test-all = exit 0.
 2. **A2. D-139** — c_api Instance audit + coverage tests in
    `src/api/instance.zig`.
 3. **A3. D-079 (ii)** — c_api v128 cross-module: extend
