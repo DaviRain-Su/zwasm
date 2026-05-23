@@ -1660,3 +1660,52 @@ test "compile: call_indirect — bounds + sig (JAE+JNE → trap stub) + CALL RAX
     const expected_call = inst.encCallReg(.rax);
     try testing.expectEqualSlices(u8, expected_call.slice(), out.bytes[call_off .. call_off + expected_call.len]);
 }
+
+test "compile: self-recursive (call 0) emits JBE with patched disp32 pointing at trap stub (R3)" {
+    // ADR-0105 D2/D3 probe wiring end-to-end check. Asserts that
+    // for a self-recursive `(call 0)` body the prologue's JBE
+    // rel32 placeholder gets PATCHED at function-close to a
+    // non-zero disp that lands on the stack-overflow trap stub's
+    // first byte. R3 cycle 5 introduced after windowsmini evidence
+    // showed the probe never fires despite sane stack_limit — the
+    // only remaining hypothesis is patch / encoding drift. If this
+    // test passes on Mac (SysV) + Win64 (via run_remote_windows),
+    // the patch is correct; if it fails on either, the patch is
+    // the bug.
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .call, .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{} };
+    const slots = [_]u16{};
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 0 };
+    // compile(alloc, func, alloc, func_sigs, module_types, num_imports, globals_offsets, globals_valtypes).
+    // func_sigs[0] = self's sig so `call 0` resolves to a valid sig.
+    const out = try compile(testing.allocator, &f, alloc, &.{sig}, &.{sig}, 0, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+
+    // Locate JBE rel32 (0F 86) — emitted in the prologue right
+    // after `CMP RSP, [R15+stack_limit_off]`. Cc-agnostic search
+    // since prologue layout differs only by the `MOV R15, <arg0>`
+    // dest byte (SysV RDI vs Win64 RCX), not by stride.
+    var jbe_off: ?usize = null;
+    var i: usize = 0;
+    while (i + 1 < out.bytes.len) : (i += 1) {
+        if (out.bytes[i] == 0x0F and out.bytes[i + 1] == 0x86) {
+            jbe_off = i;
+            break;
+        }
+    }
+    try testing.expect(jbe_off != null);
+    const off = jbe_off.?;
+    // Patch ran → disp32 ≠ 0.
+    const disp32: i32 = std.mem.readInt(i32, out.bytes[off + 2 ..][0..4], .little);
+    try testing.expect(disp32 != 0);
+    // Disp32 points to trap-stub-start (first byte = REX.B byte
+    // for `MOV [R15+disp], imm32` = 0x41).
+    const jbe_end: i64 = @as(i64, @intCast(off)) + 6;
+    const stub_abs: i64 = jbe_end + @as(i64, disp32);
+    try testing.expect(stub_abs >= 0 and stub_abs < @as(i64, @intCast(out.bytes.len)));
+    try testing.expectEqual(@as(u8, 0x41), out.bytes[@intCast(stub_abs)]);
+}
