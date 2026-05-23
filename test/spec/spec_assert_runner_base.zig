@@ -2343,6 +2343,7 @@ pub fn growableMemoryGrowFn(rt: *entry.JitRuntime, delta_pages: u32) callconv(.c
     @memset(growable_memory[@intCast(old_bytes)..@intCast(new_bytes)], 0);
     current_mem_bytes = new_bytes;
     rt.mem_limit = new_bytes;
+    std.debug.print("[d-166] grow: old={d} delta={d} new={d}\n", .{ old_pages, delta_pages, new_pages });
     return @intCast(old_pages);
 }
 
