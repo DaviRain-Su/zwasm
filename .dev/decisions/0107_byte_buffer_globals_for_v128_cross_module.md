@@ -127,6 +127,47 @@ since cross-module global imports are immutable in Wasm 2.0).
   (already byte-buffer-style); host-side changes substantial.
   Estimated 2-3 implementation cycles.
 
+- **Implementation hazards** (cycle 34 spike-equivalent
+  investigation per `/continue` SKILL.md autonomous-prep
+  walk; reviewed actual code state in lieu of throwaway
+  prototype since spec runner's `GlobalsCtx` already proves
+  the design at `src/engine/runner_validate.zig:163`):
+  1. **validator.zig's `globals: []ImportGlobal` is a
+     SEPARATE list** from `Runtime.globals` (compile-time
+     module state vs runtime store). The migration must NOT
+     conflate them — only `Runtime.globals` (host-side
+     store) changes; validator-side stays as-is.
+     Callsites at `validator.zig:815, 821` are unaffected.
+  2. **`globals_storage: []Value` is a separate backing
+     buffer** at `instantiate.zig:690`, parallel to
+     `Runtime.globals: []*Value`'s pointer-to-element layer.
+     The byte-buffer migration consolidates BOTH into a
+     single `globals_buf: []u8 align(16)`; the storage-vs-
+     slot split disappears.
+  3. **c_api cross-module aliasing** at
+     `api/instance.zig:512` currently stores
+     `*Value` pointer (= aliases source instance's slot).
+     Byte-buffer migration must choose between (a) slice
+     view aliasing (`source.globals_buf[off..off+width]`)
+     or (b) byte copy at instantiate time (matches spec
+     runner's `applyImportedGlobalsFromRegistered`). Both
+     are correct for Wasm 2.0 (immutable cross-module
+     globals); the copy approach matches the
+     already-converged spec-runner pattern. Future Wasm
+     proposal for mutable shared globals would re-open this
+     choice.
+  4. **`interp/mvp.zig:728` does `rt.globals = &slots`** —
+     local-scope slice assignment for spectest scaffolding.
+     Migration changes the slice type; mechanical rewrite
+     (`rt.globals_buf = &storage_bytes` + offsets/valtypes
+     initialised inline). Trivial.
+
+  Net assessment: NO design change to ADR-0107 needed; the
+  4 hazards are mechanical-callsite-level concerns that
+  surface during implementation, not design-time blockers.
+  Spike outcome = "design verified by existing GlobalsCtx
+  precedent + reviewed implementation hazards".
+
 - **Neutral / follow-ups**:
   - `setup.zig::createOwned` updated to compute byte buffer
     size from compiled.globals_byte_size (already calculated
@@ -172,4 +213,5 @@ since cross-module global imports are immutable in Wasm 2.0).
 |------------|--------------|-----------------------------------------|
 | 2026-05-23 | `<backfill>` | Initial Proposed.                       |
 | 2026-05-23 | `<backfill>` | Cycle 32 enrichment — added Alternative D (wasmtime fixed-16-byte-cell model) + zware scalar-only counter-precedent. Per `/continue` SKILL.md autonomous-prep walk for user-gated ADRs. |
+| 2026-05-23 | `<backfill>` | Cycle 34 spike-equivalent investigation — reviewed actual code state at validator.zig:815, instantiate.zig:690/700, api/instance.zig:512, interp/mvp.zig:728; surfaced 4 implementation hazards (validator/Runtime split, globals_storage consolidation, c_api aliasing choice, mvp.zig slice rewrite). Outcome: design verified by existing GlobalsCtx precedent; no ADR changes needed; hazards documented for impl reference. |
 -->
