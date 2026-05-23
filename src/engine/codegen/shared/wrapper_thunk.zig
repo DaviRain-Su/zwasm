@@ -285,13 +285,14 @@ pub fn emitX8664Win64(
     allocator: std.mem.Allocator,
     params: EmitParams,
 ) Error!EmitOutput {
-    // 2026-05-23: relaxed from 0-arg-only to 0..3-arg (each i32 / i64
-    // / fits-in-int-arg-reg). 4+ args still unsupported; surfaced as
-    // garbage results on `add64_u_with_carry` (3-arg i64+i64+i32 →
-    // (i64, i32)) when SKIP-WIN64-MULTI-RESULT was retired at cycle 9.
-    if (params.sig.params.len > 3) return Error.UnsupportedOp;
-    for (params.sig.params) |p| {
-        if (p != .i32 and p != .i64) return Error.UnsupportedOp;
+    // 2026-05-23: relaxed from 0-arg-only to 0..1-arg (i32 / i64).
+    // 2+ args still unsupported; surfaced as garbage-1st-result on
+    // `break-br_if-num-num` etc. when SKIP-WIN64-MULTI-RESULT arm
+    // was retired at cycle 9 + 21.
+    if (params.sig.params.len > 1) return Error.UnsupportedOp;
+    if (params.sig.params.len == 1) {
+        const p0 = params.sig.params[0];
+        if (p0 != .i32 and p0 != .i64) return Error.UnsupportedOp;
     }
     const results_all_gpr = all_gpr_class(params.sig.results);
     const results_all_xmm = all_xmm_class(params.sig.results);
@@ -310,21 +311,9 @@ pub fn emitX8664Win64(
         try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x28 }); // SUB RSP, 0x28
         try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x54, 0x24, 0x20 }); // MOV [RSP+0x20], RDX (save results)
         var prefix_size: u32 = 4 + 5;
-        // Args load: each load is from [R8 + i*8] into the body's
-        // expected Win64 arg reg (a0=RDX, a1=R8, a2=R9). Load order
-        // matters: a2 first (still using R8 as base), THEN a0 into
-        // RDX, then a1 last (which overwrites R8 itself).
-        if (n_params >= 3) {
-            try bytes.appendSlice(allocator, &.{ 0x4D, 0x8B, 0x48, 0x10 }); // MOV R9, [R8+0x10]
-            prefix_size += 4;
-        }
-        if (n_params >= 1) {
-            try bytes.appendSlice(allocator, &.{ 0x49, 0x8B, 0x10 }); // MOV RDX, [R8] (load a0)
+        if (n_params == 1) {
+            try bytes.appendSlice(allocator, &.{ 0x49, 0x8B, 0x10 }); // MOV RDX, [R8] (load a0 from args[0])
             prefix_size += 3;
-        }
-        if (n_params >= 2) {
-            try bytes.appendSlice(allocator, &.{ 0x4D, 0x8B, 0x40, 0x08 }); // MOV R8, [R8+0x08] (a1, last)
-            prefix_size += 4;
         }
         try emitCallRel32(allocator, &bytes, params, prefix_size);
         try bytes.appendSlice(allocator, &.{ 0x4C, 0x8B, 0x44, 0x24, 0x20 }); // MOV R8, [RSP+0x20]
