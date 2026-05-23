@@ -43,15 +43,18 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
 
 ### Autonomous-eligible (next session pick from here)
 
-- **D-167 body-side cycle 2c MEMORY-class Win64 extension**
-  — independent of D-168. cycle 2c MEMORY-class body emit
-  currently `.sysv`-gated in `emit_setup.zig`; extend to
-  Win64 (RCX = hidden ptr, RDX = rt — matches wrapper's
-  body view per ADR-0106 path (a) Phase 2'j note in
-  `wrapper_thunk.zig` 0-arg arm). Spike-first per
-  `architectural_spike.md`. Required for D-167 shape 3/3
-  runtime correctness; can land in parallel with ADR-0108
-  review.
+- (cycle 31 finding: body-side cycle 2c Win64 MEMORY-class
+  IS already supported per D-165 close at `75f96dee` /
+  `99a047f6` 2026-05-23 — see emit_setup.zig:104 +
+  emit.zig:209. Stale claims in wrapper_thunk.zig comments
+  + spike README + prior handover removed. **D-167 wire-up
+  shape 3/3 now only blocks on D-168 → ADR-0108 Accept**,
+  same as shapes 1-2.)
+- After ADR-0108 Accept: single-cycle wire-up of all 3
+  shapes in entry.zig (`callI32i32_i32` / `callI32i64_i32` /
+  `callI64i32_i64i64i32` / `callI32i32i64_i32`) +
+  `invokeBufWin64Args` helper + windowsmini integration
+  verify.
 
 ### User-gated (this session)
 
