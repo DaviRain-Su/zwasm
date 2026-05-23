@@ -50,45 +50,44 @@ fixtures show **3 distinct Win64 bugs**, in this order:
 
 ## Next session action plan
 
-**Triage order: R3 → R1+R2 → re-run → D-163**.
+**Triage**: R3 → R1+R2 → re-run → D-163.
 
-**R3 cycle 1-4 evidence (2026-05-23)**:
-- C1: computeStackLimit returns sane non-zero on Win64.
-- C2: INT 3 at trap stub top; exit 253 unchanged (reverted).
-- C3: per-call diag at runaway shows ~16 MiB margin, yet crash
-  exit 253 → probe genuinely never fires.
-- C4: `via_off==stack_limit==0x7cb4804000`, off=224 — layout +
-  offset + rt validity all correct. Bug is JIT-side probe.
+**R3 cycle 1-5 evidence (2026-05-23)**:
+- C1-3: stack_limit sane (~16 MiB margin at runaway); probe
+  never reaches trap stub (INT 3 sentinel showed exit 253
+  unchanged).
+- C4: `via_off==stack_limit==0x7cb4804000`, off=224 — layout,
+  offset, rt validity all correct.
+- C5: host-runnable JBE-patch test PASSED on Win64 (Build
+  Summary 1708/1753, 0 fails). Encode-time patch is correct;
+  probe genuinely fails at runtime despite correct bytes.
 
-**Active chunk** (architectural / R3 cycle 5): new host-runnable
-unit test `compile: self-recursive (call 0) emits JBE with
-patched disp32 pointing at trap stub (R3)` in
-`emit_test_int.zig` asserts JBE disp32 ≠ 0 AND points to a byte
-that starts with REX.B (0x41 = trap-stub first opcode).
+**Active chunk** (architectural / R3 cycle 6): bump
+`STACK_GUARD_HEADROOM` from 16 KiB to **1 MiB on Win64 only**.
+Hypothesis: Windows raises `EXCEPTION_STACK_OVERFLOW` BEFORE SP
+reaches `low + 16K` due to commit-pattern early-overflow.
+A 1 MiB headroom guarantees the probe fires well before any
+Windows commit boundary.
 
 Outcomes for next windowsmini run:
-- Test PASSES on Win64 → patch + encoding correct, bug must be
-  in some runtime-only path (R15 actually clobbered during
-  recursion, or probe instruction stride wrong).
-- Test FAILS on Win64 → bug is in patch / encoding emission;
-  fix in `op_control.zig::emitEndInter` or `emit.zig` prologue
-  probe block.
+- runaway PASSES → commit-pattern hypothesis confirmed; land
+  lesson + tune headroom permanently (no ADR change since D6
+  said "tunable per amend").
+- runaway STILL crashes 253 → bug is in probe instruction
+  stream execution itself (last hypotheses exhausted; needs
+  user-driven windbg / disasm investigation).
 
-After R3 root cause: R1/R2 (Phase 2 Win64 2-int register-class
-— `op_control.zig::marshalReturnRegs` likely SysV-only) →
+After R3: R1/R2 (Win64 `marshalReturnRegs` Cc-aware fix) →
 re-run → D-163 (spike H1/H2/H3 in
 `private/spikes/d-163-win64-call-indirect-trap/`).
 
-windowsmini SSH-reachable per ADR-0049; autonomous-eligible.
-`bash scripts/run_remote_windows.sh test-all` re-kicked each
-cycle → `/tmp/win.log`.
+windowsmini SSH-reachable, autonomous-eligible per ADR-0049.
 
 ## Work landed this session (2026-05-23)
 
-ADR-0106 cycle 3e Phase 2'a→2'l full chain; D-094 + D-164 closed
-(Mac/Linux); SKIP-WIN64-MULTI-RESULT arm removed. R3 cycles 1+2:
-diagnostic + INT 3 trap-stub sentinel rule out `stack_limit=0`
-and trap-stub epilogue bug; probe genuinely never reaches stub.
+ADR-0106 Phase 2'a→2'l; D-094/D-164 closed (Mac/Linux). R3 5+
+diagnostic cycles ruled out stack_limit=0, layout drift, JBE
+patch off, encoder bug.
 
 ## See
 
