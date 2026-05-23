@@ -52,28 +52,27 @@ fixtures show **3 distinct Win64 bugs**, in this order:
 
 **Triage order: R3 → R1+R2 → re-run → D-163**.
 
-**R3 cycle 1-3 evidence (2026-05-23)**:
-- Cycle 1: computeStackLimit returns sane non-zero on Win64.
-- Cycle 2: INT 3 at trap stub top; exit code stayed 253. Probe
-  never reaches stub (reverted with broken paired test).
-- Cycle 3 (`/tmp/win.log:4251`): per-call diag at
-  `assert_exhaustion runaway`:
-  `stack_limit=0x12bd204000 sp=0x12be1f7fa0 margin=0xff3fa0`
-  — runaway entered with ~16 MiB margin yet crashed exit 253.
-  Probe genuinely never fires despite huge margin. Cause is
-  in bucket "JBE patch off / R15 stale / `stack_limit_off`
-  layout drift" per cycle-3 decision tree.
+**R3 cycle 1-4 evidence (2026-05-23)**:
+- C1: computeStackLimit returns sane non-zero on Win64.
+- C2: INT 3 at trap stub top; exit 253 unchanged (reverted).
+- C3: per-call diag at runaway shows ~16 MiB margin, yet crash
+  exit 253 → probe genuinely never fires.
+- C4: `via_off==stack_limit==0x7cb4804000`, off=224 — layout +
+  offset + rt validity all correct. Bug is JIT-side probe.
 
-**Active chunk** (architectural / R3 cycle 4): extend `diagOnce`
-into `diagOnceWithRt(rt, off, val)` that ALSO reads
-`*(rt + stack_limit_off)` via raw pointer cast and prints as
-`via_off=0x...`. Three outcomes:
+**Active chunk** (architectural / R3 cycle 5): new host-runnable
+unit test `compile: self-recursive (call 0) emits JBE with
+patched disp32 pointing at trap stub (R3)` in
+`emit_test_int.zig` asserts JBE disp32 ≠ 0 AND points to a byte
+that starts with REX.B (0x41 = trap-stub first opcode).
 
-- `via_off == stack_limit_value` → layout correct AND `rt` valid
-  in Zig context → bug is in JIT-side probe encoding (JBE patch
-  off / R15 actually stale at runtime / instruction encoding).
-- `via_off != stack_limit_value` → offset/layout drift on Win64
-  build despite `extern struct` discipline.
+Outcomes for next windowsmini run:
+- Test PASSES on Win64 → patch + encoding correct, bug must be
+  in some runtime-only path (R15 actually clobbered during
+  recursion, or probe instruction stride wrong).
+- Test FAILS on Win64 → bug is in patch / encoding emission;
+  fix in `op_control.zig::emitEndInter` or `emit.zig` prologue
+  probe block.
 
 After R3 root cause: R1/R2 (Phase 2 Win64 2-int register-class
 — `op_control.zig::marshalReturnRegs` likely SysV-only) →
