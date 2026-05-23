@@ -3072,24 +3072,15 @@ pub fn runCorpus(
                 }
             },
             .assert_trap => {
-                // Win64 SKIP-WIN64-CALL-INDIRECT-TRAP (D-163): W4
-                // retry 4 (2026-05-22) found `as-call_indirect-last
-                // ()` in `wasm-2.0-assert/call/call.0.wasm` crashes
-                // on Windows (table size 1, call_indirect index 306
-                // — OOB trap). POSIX trap-stub path works (the
-                // stub writes trap_flag + returns); something in
-                // the Win64 JIT trap path OR its interaction with
-                // VEH recovery fails. Root cause TBD; until
-                // investigated, skip assert_trap directives whose
-                // body mentions `call_indirect` on Windows. The
-                // narrow shape matches D-162's pattern: a known
-                // Win64-specific crash class skipped via debt-
-                // trackable token. POSIX path unchanged.
-                if (@import("builtin").os.tag == .windows and std.mem.find(u8, line, "call_indirect") != null) {
-                    try stdout.print("SKIP-WIN64-CALL-INDIRECT-TRAP  {s}: {s} (D-163 — Win64 JIT call_indirect trap path)\n", .{ name, line });
-                    tally.skipped_adr += 1;
-                    continue;
-                }
+                // D-163 close attempt (2026-05-23, cycle 8): the
+                // Win64 call-indirect trap SKIP arm is removed. With
+                // R3's stack-probe (`1e2d716d`) fixing the broader
+                // Win64 trap path, the call_indirect trap may also
+                // succeed. The next windowsmini reconcile observes
+                // `call: assert_trap as-call_indirect-last ()` outcome
+                // directly. PASS → D-163 closes; flips invariant I1
+                // OK. FAIL/crash → revert this removal + reopen D-163
+                // with the actual crash signature as new evidence.
                 if (module_bad) {
                     tally.runtime_skip += 1;
                     continue;
