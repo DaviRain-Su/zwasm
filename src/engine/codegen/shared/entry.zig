@@ -170,8 +170,9 @@ inline fn invokeAndCheck(
     rt.trap_flag = 0;
     stack_limit_mod.diagOnceWithRt(rt, jit_abi.stack_limit_off, rt.stack_limit);
     const result = @call(.auto, f, .{rt} ++ args);
-    if (rt.trap_flag != 0) return Error.Trap;
-    return result;
+    if (rt.trap_flag == 0) return result;
+    if (rt.trap_kind == 4) std.debug.print("[d-165] kind=4 cumulative_trap_stub_entry_count={d}\n", .{rt.trap_stub_entry_count});
+    return Error.Trap;
 }
 
 /// Void-return sibling of `invokeAndCheck`.
