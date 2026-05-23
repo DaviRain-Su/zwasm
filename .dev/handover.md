@@ -52,28 +52,28 @@ fixtures show **3 distinct Win64 bugs**, in this order:
 
 **Triage order: R3 → R1+R2 → re-run → D-163**.
 
-**R3 cycle 1+2 evidence (2026-05-23)**:
-- Cycle 1: `[stack_probe] stack_limit=0x319d004000 sp=0x319dff3070
-  margin=0xfef070` — computeStackLimit sane (~16 MiB margin).
-- Cycle 2: INT 3 (0xCC) at trap stub top (Win64-only). Exit code
-  remained 253 (STACK_OVERFLOW). Probe **does not reach trap
-  stub**.
-- Cycle 3 (in flight): INT 3 reverted (broke a Win64 unit test
-  on byte-position assertion before runaway could run). Per-call
-  `diagOnce` retained — next run lands a `[stack_probe]` per
-  invocation.
+**R3 cycle 1-3 evidence (2026-05-23)**:
+- Cycle 1: computeStackLimit returns sane non-zero on Win64.
+- Cycle 2: INT 3 at trap stub top; exit code stayed 253. Probe
+  never reaches stub (reverted with broken paired test).
+- Cycle 3 (`/tmp/win.log:4251`): per-call diag at
+  `assert_exhaustion runaway`:
+  `stack_limit=0x12bd204000 sp=0x12be1f7fa0 margin=0xff3fa0`
+  — runaway entered with ~16 MiB margin yet crashed exit 253.
+  Probe genuinely never fires despite huge margin. Cause is
+  in bucket "JBE patch off / R15 stale / `stack_limit_off`
+  layout drift" per cycle-3 decision tree.
 
-**Active chunk** (architectural / R3 cycle 4): with per-call diag
-landing on every test, next windowsmini run shows
-`[stack_probe]` line at the runaway invocation. Three outcomes:
+**Active chunk** (architectural / R3 cycle 4): extend `diagOnce`
+into `diagOnceWithRt(rt, off, val)` that ALSO reads
+`*(rt + stack_limit_off)` via raw pointer cast and prints as
+`via_off=0x...`. Three outcomes:
 
-- margin huge (~16 MiB) AND probe still doesn't fire → JBE
-  patch off, OR R15 stale at probe site, OR `stack_limit_off`
-  computes wrong on Win64 (extern struct layout drift).
-- margin zero/negative → STACK_GUARD_HEADROOM consumed by
-  runner ceremony BEFORE runaway; need adaptive headroom.
-- margin shrinks during recursion → recursion is happening but
-  probe's R15+offset isn't reading rt.stack_limit.
+- `via_off == stack_limit_value` → layout correct AND `rt` valid
+  in Zig context → bug is in JIT-side probe encoding (JBE patch
+  off / R15 actually stale at runtime / instruction encoding).
+- `via_off != stack_limit_value` → offset/layout drift on Win64
+  build despite `extern struct` discipline.
 
 After R3 root cause: R1/R2 (Phase 2 Win64 2-int register-class
 — `op_control.zig::marshalReturnRegs` likely SysV-only) →
