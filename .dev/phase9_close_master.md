@@ -207,6 +207,47 @@ core runner.
 - [x] D-062 — arm64 v128 9th+ stack-arg overflow path closed
   (`d0b3941b` — §9.9-f-3 sibling landed both sides).
 
+### §5.3a — Phase 9 真スコープ expansion (2026-05-23 user audit)
+
+Per ADR-0104 Revision history row 2026-05-23, the following
+3 debt rows are promoted to Phase 9 真スコープ under the
+"Wasm 2.0 complete + Zig/C API complete at Phase 9 release"
+rubric. Originally `blocked-by: Track-D` or `v0.1.0 RC`; the
+user audit identified them as structurally Phase 9.
+
+- [ ] **D-157 close** — `assert_unlinkable` non-func import-type
+  checking. 56 Wasm 2.0 spec corpus fixtures emit
+  `SKIP-NO-LINK-TYPECHECK` because `instantiate.zig` only
+  checks func-import types at link time. Discharge path:
+  extend `runtime/instance/instantiate.zig` to verify
+  table / memory / global import types against the target
+  imports' declared shapes at bind time. Existing infra:
+  runner's Path 3a `hasIncompatibleImportType()` (func path)
+  generalises naturally. Exit: `spec_assert_runner_non_simd`
+  emits 0 `SKIP-NO-LINK-TYPECHECK` on Mac + ubuntunote +
+  windowsmini.
+- [ ] **D-079 (ii) close** — v128 cross-module imports via
+  `wasm_instance_new` (c_api Instance path). spec-runner
+  side already discharged at §9.12-E (`b11314ff`). Discharge
+  path: extend `Runtime.globals: []*Value` (ADR-0052 §3
+  scalar-only) to v128-aware via per-entry width carried in
+  `globals_offsets/valtypes`, then plumb into
+  `instantiate.zig` cross-module import wiring. Exit: a
+  new in-source test block in `src/api/instance.zig`
+  exercising v128-typed cross-module global import via
+  `wasm_instance_new`.
+- [ ] **D-139 close** — spec_assert bypasses c_api
+  `wasm_instance_new` / `setupRuntime` path. Discharge path:
+  audit which c_api Instance behaviours (zombie list, arena
+  ownership, cross-module Store binding) lack spec-corpus
+  coverage; either (a) route spec_assert through c_api OR
+  (b) add per-c_api-feature unit fixtures. The §9.12-G
+  "minimal c_api Instance-path test coverage" pulled-forward
+  subset is `[x]` (via I4 `wast_runtime_runner` smoke); the
+  remaining audit + bridge is what §5.3a closes. Exit: an
+  audit doc enumerating c_api Instance behaviours + paired
+  in-source tests in `src/api/instance.zig` covering each.
+
 ### §5.4 — Stale ADR / debt cleanup (concurrent with §5.1-§5.3)
 
 - [x] D-007 / D-010 — explicit Phase target already on rows
@@ -239,6 +280,16 @@ Phase 9 = DONE when **ALL** below hold:
    commit SHAs.
 7. §9.13 🔒 Phase 10 entry gate review cleared.
 8. Phase Status widget flips `9 | IN-PROGRESS → DONE`.
+9. **D-157 closed (§5.3a)** — `SKIP-NO-LINK-TYPECHECK` 0 across
+   3 hosts via `instantiate.zig` non-func import-type checking.
+10. **D-079 (ii) closed (§5.3a)** — c_api `wasm_instance_new`
+    accepts v128-typed cross-module global imports without
+    `UnsupportedImport`; paired in-source test in
+    `src/api/instance.zig` PASSes on 3 hosts.
+11. **D-139 closed (§5.3a)** — c_api Instance lifecycle audit
+    document filed AND covered by paired in-source tests in
+    `src/api/instance.zig`; OR spec_assert routed through c_api
+    (whichever path the discharge chooses).
 
 ## §7 — Anti-patterns to NOT repeat
 
