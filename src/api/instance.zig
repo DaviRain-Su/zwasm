@@ -1684,3 +1684,103 @@ test "wasm 2.0 cross-module funcref via wasm_instance_new: B's main dispatches i
     try testing.expectEqual(ValKind.i32, results_data[0].kind);
     try testing.expectEqual(@as(i32, 42), results_data[0].of.i32);
 }
+
+// D-139 §5.3a A2 — c_api Instance audit coverage. The spec runner
+// bypasses `wasm_instance_new` per ADR-0045; these tests exercise
+// the lifecycle / arena / cross-module paths that only c_api uses.
+
+test "wasm 2.0 c_api arena ownership: 4 instances of same module, independent cleanup" {
+    const e = wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer wasm_engine_delete(e);
+    const s = wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer wasm_store_delete(s);
+
+    var bytes = cross_module_a_wasm;
+    const bv: ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer wasm_module_delete(m);
+
+    // Each instance has its own arena (Instance.arena per
+    // src/runtime/instance/instance.zig); reusing the same Module
+    // across instantiations must not leak or alias their storage.
+    var insts: [4]?*Instance = undefined;
+    for (&insts) |*slot| {
+        slot.* = wasm_instance_new(s, m, null, null) orelse return error.InstanceAllocFailed;
+    }
+
+    // Exercise each instance's exported "answer" func — verifies
+    // each arena's lowered ZirFunc + JIT runtime are independent.
+    for (insts) |inst| {
+        var exports: ExternVec = .{ .size = 0, .data = null };
+        wasm_instance_exports(inst.?, &exports);
+        defer wasm_extern_vec_delete(&exports);
+        const answer = wasm_extern_as_func(exports.data.?[0]) orelse return error.AnswerFuncNull;
+        var rd: [1]Val = undefined;
+        var rv: ValVec = .{ .size = 1, .data = &rd };
+        const av: ValVec = .{ .size = 0, .data = null };
+        const trap = wasm_func_call(answer, &av, &rv);
+        try testing.expect(trap == null);
+        try testing.expectEqual(@as(i32, 42), rd[0].of.i32);
+    }
+
+    // Delete in non-sequential order (3,1,0,2) — arena cleanup
+    // must be order-independent and not double-free.
+    wasm_instance_delete(insts[3]);
+    wasm_instance_delete(insts[1]);
+    wasm_instance_delete(insts[0]);
+    wasm_instance_delete(insts[2]);
+}
+
+test "wasm 2.0 c_api zombie lifecycle: B holds funcref into A after wasm_instance_delete(A)" {
+    const e = wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer wasm_engine_delete(e);
+    const s = wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer wasm_store_delete(s);
+
+    var bytes_a = cross_module_a_wasm;
+    const bv_a: ByteVec = .{ .size = bytes_a.len, .data = &bytes_a };
+    const m_a = wasm_module_new(s, &bv_a) orelse return error.ModuleAAllocFailed;
+    defer wasm_module_delete(m_a);
+    const inst_a = wasm_instance_new(s, m_a, null, null) orelse return error.InstanceAAllocFailed;
+    // No `defer wasm_instance_delete(inst_a)` — we delete A
+    // BEFORE B to exercise the zombie keep-alive contract.
+
+    // Take A's exports vec, build B's imports, then RELEASE
+    // exports_a BEFORE deleting A (the ExternVec holds pointers
+    // into A's arena; deleting A first would dangle them).
+    // After this block, the only remaining reference into A is
+    // B's import binding — that's what the zombie list tracks.
+    var bytes_b = cross_module_b_wasm;
+    const bv_b: ByteVec = .{ .size = bytes_b.len, .data = &bytes_b };
+    const m_b = wasm_module_new(s, &bv_b) orelse return error.ModuleBAllocFailed;
+    defer wasm_module_delete(m_b);
+    const inst_b = blk: {
+        var exports_a: ExternVec = .{ .size = 0, .data = null };
+        wasm_instance_exports(inst_a, &exports_a);
+        defer wasm_extern_vec_delete(&exports_a);
+        const answer_ext = exports_a.data.?[0] orelse return error.AnswerExternNull;
+        var imports_arr: [1]?*const Extern = .{answer_ext};
+        const imports_opaque: *const anyopaque = @ptrCast(&imports_arr);
+        break :blk wasm_instance_new(s, m_b, imports_opaque, null) orelse return error.InstanceBAllocFailed;
+    };
+    defer wasm_instance_delete(inst_b);
+
+    // Cache B's "main" handle while A's instance is still live.
+    var exports_b: ExternVec = .{ .size = 0, .data = null };
+    wasm_instance_exports(inst_b, &exports_b);
+    defer wasm_extern_vec_delete(&exports_b);
+    const main_b = wasm_extern_as_func(exports_b.data.?[0]) orelse return error.MainFuncNull;
+
+    // Delete A BEFORE calling B. The zombie list / kept-alive
+    // contract must preserve A's func storage until B (which
+    // imported A's funcref) is also deleted. Without this,
+    // `main_b` calling into A would dereference freed memory.
+    wasm_instance_delete(inst_a);
+
+    var rd: [1]Val = undefined;
+    var rv: ValVec = .{ .size = 1, .data = &rd };
+    const av: ValVec = .{ .size = 0, .data = null };
+    const trap = wasm_func_call(main_b, &av, &rv);
+    try testing.expect(trap == null);
+    try testing.expectEqual(@as(i32, 42), rd[0].of.i32);
+}
