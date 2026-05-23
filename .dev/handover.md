@@ -17,75 +17,72 @@
 `assert_exhaustion fac-rec i64:1073741824` hangs after
 `fac : assert_return fac-ssa` (line ~28527).
 
-## Active chunk — D-165 cycle 3 (Win64 fac-rec hang spike)
+## Active chunk — D-165 cycle 4 (Win64 fac-rec hang spike)
 
 Phase 9 close gate: I1 = SKIP-WIN64-CALL-INDIRECT-TRAP.
 Blocking sequence: **D-165 → D-163 → §9.13-0 → Phase 9 DONE**.
 
-Spike: `private/spikes/d-165-win64-fac-rec-hang/`
-(SURVEY.md = cycle-1 subagent; ANALYSIS_REFINED.md =
-cycle-1 static-analysis corrections).
+Spike: `private/spikes/d-165-win64-fac-rec-hang/`.
 
 ### Hypotheses (per `hypothesis_enumeration.md`)
 
 1. ~~Probe doesn't fire (frame_bytes=0)~~ — REJECTED cycle 1
-   via `emit_setup.zig:104-111` read; on Win64 `frame_bytes
-   ≥ 56` (shadow space).
-2. ~~`stack_limit = 0` globally~~ — REJECTED cycle 1 by
-   analogy: runaway PASSes on cycle 8 with the same runner.
+   (Win64 shadow space forces `frame_bytes ≥ 56`).
+2. ~~`stack_limit = 0` globally~~ — REJECTED cycle 1 by analogy.
 3. ~~Byte-shape regression in i64-result emit~~ — REJECTED
-   cycle 2 (`03715de1`). New unit test `compile: self-
-   recursive (i64)->i64 — probe + i64-result marshal (D-165
-   cycle 2)` asserts JBE-patched + SUB RSP > 0 + REX.W MOV
-   r64,RAX post-CALL marshal. PASS on Mac SysV + Win64 cross-
-   build clean. The minimal `local.get 0; call 0; end` shape
-   emits the structurally-correct prologue + marshal.
-4. (active, **leading**) Trap-flag propagation stall for
-   single-i64-result Win64. Signature: `rt.trap_flag = 1`
-   set but runner's post-call check reads i64 result before
-   checking the flag, OR the wasm/jit entry shim's
-   trap-detection branch for single-i64-result on Win64 is
-   broken. Probe (cycle 3): read the wasm/jit entry shim for
-   single-i64-result Win64 path —
-   `src/engine/codegen/shared/entry.zig` +
-   `entry_buffer_write.zig`; grep for trap_flag usage on the
-   i64 return path.
-5. (active) Cumulative unwind cost ≥ runner timeout.
-   Signature: 13K-frame unwind crosses commit regions
-   per-frame; external wall-clock timeout fires, not a true
-   infinite loop. Probe: instrument unwind frame count OR
-   bisect fac-rec input on windowsmini.
+   cycle 2 (`0fe14a5f`) and refined cycle 3 (`e6a56734`). Unit
+   test `compile: self-recursive (i64)->i64 — probe + i64-
+   result marshal` asserts JBE-patched + SUB RSP ≥ 48 (Win64) /
+   ≥ 16 (SysV) + REX.W MOV r64,RAX post-CALL + MOV
+   entry_arg0_gpr,runtime_ptr_save_gpr pre-CALL. PASS on Mac
+   SysV native + Win64 cross-build clean.
+4. ~~Trap-flag propagation stall (host-side)~~ — REJECTED
+   cycle 3 by read of `src/engine/codegen/shared/entry.zig:
+   162-175` `invokeAndCheck`: BOTH `callI64_i64` and
+   `callI32NoArgs` flow through this helper which clears
+   `rt.trap_flag = 0` pre-call and returns `Error.Trap` on
+   non-zero post-call. Same path on Win64.
+5. (active, **leading**) Probe fires correctly on Win64 but
+   the recovery path interacts with Win64 commit-region
+   geometry such that trap_stub's `POP R15; POP RBP; RET`
+   sequence faults on a guard-page boundary AND VEH no longer
+   handles `EXCEPTION_STACK_OVERFLOW` (per ADR-0105 D4 removal,
+   `windows_traphandler.zig:157`). Signature: process hangs in
+   default OS exception handling. Probe: instrument trap stub
+   with a counter at [R15 + diagnostic_off] OR enable
+   `diagOnceWithRt` print in trap stub; rerun on windowsmini;
+   observe whether trap stub fires for fac-rec.
 
-### Cycle 3 plan
+### Cycle 4 plan (runtime instrumentation)
 
-1. Read entry-shim layer to map the i64-result return path
-   on Win64. Identify where `rt.trap_flag` is checked after
-   a Wasm call returns.
-2. Compare with the `()->()` path that works for runaway.
-3. If a missing trap_flag check is found → fix it; add a
-   unit test asserting the entry shim observes trap_flag for
-   single-i64-result on both Cc.
-4. If the check is present → pivot to H5 (instrument runner
-   to surface frame-unwind cost OR bisect fac-rec input on
-   windowsmini).
+Static analysis exhausted (3-cycle cap reached; H1-H4 rejected).
+Cycle 4 lands **runtime instrumentation** for windowsmini:
+
+1. Add `trap_stub_entry_count: u32` to `JitRuntime`; emit
+   `INC DWORD PTR [R15+off]` as first inst in trap stub
+   (op_control.zig:1334+). Mac/Linux paths unchanged.
+2. Surface counter via `invokeAndCheck` diagnostic.
+3. Push; reconcile via `bash scripts/run_remote_windows.sh
+   test-all`. Observe:
+   - count > 0, flag=0 → flag-write lost.
+   - count = 0 → probe never fires (revisit H1 with evidence).
+   - count > 0, flag=1 → unwind cost hypothesis.
 
 ### After D-165 resolved
 
 Remove `SKIP-WIN64-CALL-INDIRECT-TRAP` arm in
 `spec_assert_runner_base.zig:3088`, re-run windowsmini,
 observe `call: assert_trap as-call_indirect-last ()`. If
-PASS → D-163 closed by broader trap-path repair; flip I1
-to OK; gate exits 0; flip §9.13-0 [x] → Phase 9 DONE.
+PASS → D-163 closed; flip I1; gate exits 0; flip §9.13-0 [x]
+→ Phase 9 DONE.
 
 ## Closed this session (2026-05-23)
 
-- ✅ **R3 / D-162** Win64 stack-probe headroom
-  (`1e2d716d`). Lesson:
-  `.dev/lessons/2026-05-23-win64-stack-probe-headroom.md`.
-- ✅ **R2** Win64 `marshalReturnRegs` cap=1→2 (`aac986d9`).
-- ✅ **R1** Win64 wrapper 2-XMM + `callF64f64NoArgs`
-  (`73bcf80f`).
-- ✅ **D-165 cycle 2** byte-shape unit test (`03715de1`).
+- ✅ **R3 / D-162**, **R2**, **R1** (Win64 stack-probe / cap /
+  wrapper); D-094, D-164 (multi-result ABI).
+- ✅ **D-165 cycle 2** byte-shape test (`0fe14a5f`).
+- ✅ **D-165 cycle 3** arg-marshal extension (`e6a56734`) +
+  H4 ruled out via entry.zig read.
 
 windowsmini SSH-reachable, autonomous-eligible per ADR-0049.
 
