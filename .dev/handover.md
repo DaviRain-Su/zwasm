@@ -50,32 +50,30 @@ fixtures show **3 distinct Win64 bugs**, in this order:
 
 ## Next session action plan
 
-**Triage**: R3 → R1+R2 → re-run → D-163.
+**Triage**: ✅ R3 closed → R1+R2 → re-run → D-163.
 
-**R3 cycle 1-5 evidence (2026-05-23)**:
-- C1-3: stack_limit sane (~16 MiB margin at runaway); probe
-  never reaches trap stub (INT 3 sentinel showed exit 253
-  unchanged).
-- C4: `via_off==stack_limit==0x7cb4804000`, off=224 — layout,
-  offset, rt validity all correct.
-- C5: host-runnable JBE-patch test PASSED on Win64 (Build
-  Summary 1708/1753, 0 fails). Encode-time patch is correct;
-  probe genuinely fails at runtime despite correct bytes.
+**R3 CLOSED (2026-05-23, cycle 6)**: Root cause = Windows
+commit-pattern early-overflow. `EXCEPTION_STACK_OVERFLOW` fires
+WAY before SP reaches `LowLimit + 16K` despite
+`GetCurrentThreadStackLimits` returning correct reserved bounds.
+Fix: bump `STACK_GUARD_HEADROOM` to 1 MiB on Win64 only
+(`1e2d716d`). windowsmini evidence: `runaway` +
+`mutual-runaway` both PASS on Win64 (per /tmp/win.log:31388 of
+cycle-6 run). Mac+Linux unchanged. Lesson landed at
+`.dev/lessons/2026-05-23-win64-stack-probe-headroom.md`.
 
-**Active chunk** (architectural / R3 cycle 6): bump
-`STACK_GUARD_HEADROOM` from 16 KiB to **1 MiB on Win64 only**.
-Hypothesis: Windows raises `EXCEPTION_STACK_OVERFLOW` BEFORE SP
-reaches `low + 16K` due to commit-pattern early-overflow.
-A 1 MiB headroom guarantees the probe fires well before any
-Windows commit boundary.
+**Active chunk** (architectural / R1+R2 — Phase 2 Win64
+multi-result wrapper): R1/R2 fixtures `br: type-f64-f64-value`
+and `br: as-return-values` show second i64/f64 reads garbage
+on Win64 (pre-existing per handover):
+- got `(f64:4.0, f64:0x00007ff6...)` expected `(f64:4.0, f64:5.0)`
+- got `(i32:2, i64:330762767128)` expected `(i32:2, i64:7)`
 
-Outcomes for next windowsmini run:
-- runaway PASSES → commit-pattern hypothesis confirmed; land
-  lesson + tune headroom permanently (no ADR change since D6
-  said "tunable per amend").
-- runaway STILL crashes 253 → bug is in probe instruction
-  stream execution itself (last hypotheses exhausted; needs
-  user-driven windbg / disasm investigation).
+Class: ADR-0106 Phase 2'a-2'l Win64 2-int register-class wrapper.
+Body's `register_write` epilogue likely writes result 1 to RDX
+on Win64 (SysV-only mapping). Fix in
+`src/engine/codegen/x86_64/op_control.zig::marshalReturnRegs`
+(Cc-aware).
 
 After R3: R1/R2 (Win64 `marshalReturnRegs` Cc-aware fix) →
 re-run → D-163 (spike H1/H2/H3 in
@@ -85,9 +83,9 @@ windowsmini SSH-reachable, autonomous-eligible per ADR-0049.
 
 ## Work landed this session (2026-05-23)
 
-ADR-0106 Phase 2'a→2'l; D-094/D-164 closed (Mac/Linux). R3 5+
-diagnostic cycles ruled out stack_limit=0, layout drift, JBE
-patch off, encoder bug.
+ADR-0106 Phase 2'a→2'l; D-094/D-164 closed (Mac/Linux). R3
+CLOSED via 6 cycles → D-162 trap-on-Win64 fixed; root cause
+(Windows commit-pattern early-overflow) captured in lesson.
 
 ## See
 
