@@ -1861,7 +1861,6 @@ pub var current_mem_max_pages: ?u32 = null;
 /// Called from each runner's `on_module_loaded` callback. Zeros the
 /// in-use region so prior module state doesn't leak into this one.
 pub fn resetGrowableMemory(initial_pages: u32) void {
-    std.debug.print("[d-166] reset to {d} pages\n", .{initial_pages});
     current_mem_bytes = @as(u64, initial_pages) * 65536;
     if (current_mem_bytes > GROWABLE_MEMORY_CAPACITY) {
         // Pathological declared initial size — clamp + log. Spec
@@ -2344,7 +2343,6 @@ pub fn growableMemoryGrowFn(rt: *entry.JitRuntime, delta_pages: u32) callconv(.c
     @memset(growable_memory[@intCast(old_bytes)..@intCast(new_bytes)], 0);
     current_mem_bytes = new_bytes;
     rt.mem_limit = new_bytes;
-    std.debug.print("[d-166] grow: old={d} delta={d} new={d}\n", .{ old_pages, delta_pages, new_pages });
     return @intCast(old_pages);
 }
 
@@ -3231,8 +3229,6 @@ pub fn runCorpus(
                 };
             },
             .assert_return => {
-                std.debug.print("[d-166] before assert_return '{s}': mem_bytes={d}\n", .{ line, current_mem_bytes });
-                defer std.debug.print("[d-166] after assert_return '{s}': mem_bytes={d}\n", .{ line, current_mem_bytes });
                 // ADR-0106 cycle 3e Phase 2'h step 2 (2026-05-23):
                 // D-164 SKIP arm removed. The wrapper-thunk path
                 // (`module.entry_buf` + buffer-write helpers, see
@@ -3271,8 +3267,6 @@ pub fn runCorpus(
                 }
             },
             .assert_trap => {
-                std.debug.print("[d-166] before assert_trap '{s}': mem_bytes={d}\n", .{ line, current_mem_bytes });
-                defer std.debug.print("[d-166] after assert_trap '{s}': mem_bytes={d}\n", .{ line, current_mem_bytes });
                 // D-163 caller-side bounds-check trap path crashes
                 // on Win64 (cycle 9+; cycle 14 narrowed to JIT body
                 // / trap-stub RET — entry helper exonerated by
