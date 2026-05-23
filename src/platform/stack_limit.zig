@@ -167,13 +167,12 @@ pub fn diagOnceWithRt(rt_ptr: *const anyopaque, stack_limit_off: usize, stack_li
 }
 
 fn diagOnceRaw(stack_limit_value: usize, rt_ptr: ?*const anyopaque, stack_limit_off: usize) void {
-    // R3 cycle 3: gate the once-flag on non-Windows hosts only.
-    // Win64 prints per call to surface runaway's margin before
-    // the OS guard fires.
-    if (comptime builtin.os.tag != .windows) {
-        if (diag_seen) return;
-        diag_seen = true;
-    }
+    // Once per thread on all hosts. Cycle 3's "per call on Win64"
+    // override was retired after R3 cycle 6 root-cause (Windows
+    // commit-pattern early-overflow) — no longer need to flood
+    // stderr per fixture; the once-flag is sufficient evidence.
+    if (diag_seen) return;
+    diag_seen = true;
     var sp: usize = 0;
     if (comptime builtin.cpu.arch == .x86_64) {
         sp = asm volatile ("mov %%rsp, %[sp]"
