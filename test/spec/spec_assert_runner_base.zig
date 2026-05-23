@@ -3273,11 +3273,12 @@ pub fn runCorpus(
                 // `[d-163e] flag=...` print not appearing for the
                 // as-call_indirect-last directive). SKIP narrowed
                 // to wasm-2.0 corpus.
-                if (@import("builtin").os.tag == .windows and std.mem.find(u8, line, "call_indirect") != null) {
-                    try stdout.print("SKIP-WIN64-CALL-INDIRECT-TRAP  {s}: {s} (D-163 — Win64 JIT call_indirect trap path; wasm-2.0 corpus scope)\n", .{ name, line });
-                    tally.skipped_adr += 1;
-                    continue;
-                }
+                // D-163 cycle 20 probe: SKIP arm BYPASSED post-D-166-fix
+                // to verify if Win64 caller-side bounds-check trap now
+                // succeeds (D-166's scratch_typeidxs reset means OOB
+                // call_indirect now triggers sig-mismatch trap stub,
+                // distinct from the previously-untested bounds-check
+                // trap stub). Restore arm at probe close.
                 if (module_bad) {
                     tally.runtime_skip += 1;
                     continue;
