@@ -33,6 +33,12 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
 - 35: user opted per-file cap override → ADR-0099
   amended (Revision 2026-05-24) + ADR-0108 Withdrawn
   + D-168 discharged + entry.zig marker cap=3000.
+- 36: CW v2 dogfooding reframe — c_api veneer →
+  native Zig facade inversion. Drafted **ADR-0109**
+  (Engine + Linker + TypedFunc + Memory slice view)
+  + `docs/zig_api_design.md` (CW-AI 渡し用 spec).
+  Supersedes ADR-0025 minimum-subset; D-075 re-scoped
+  to track impl cycles on Accept.
 
 ## Remaining work
 
@@ -49,8 +55,10 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
 ### Still user-gated
 
 - **ADR-0107** Accept → D-079 (ii) c_api byte-buffer globals
-  migration (~2-3 cycles, 4 hazards documented in ADR
-  Consequences).
+  migration (~2-3 cycles, 4 hazards documented).
+- **ADR-0109** Accept → D-075 re-scope + native Zig API
+  rewrite (~6-8 cycles). Paired spec: `docs/zig_api_design.md`
+  (CW v2 dogfooding reference).
 - **§9.13 hard gate** — ADR-0105 + ADR-0106 Track D collab
   review + Phase B `[x]` re-flip per
   `phase9_close_master.md` §5.3a Phase B.

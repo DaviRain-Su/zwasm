@@ -1,6 +1,6 @@
 # 0025 — Zig library surface (host-API for `@import("zwasm")` consumers)
 
-- **Status**: Accepted (partial — see D-075; design retained, implementation deferred to v0.1.0 RC)
+- **Status**: Accepted (partial — see D-075; the *minimum subset* target shape (Runtime/Module/Instance/Value as thin c_api veneer) is **superseded by ADR-0109** native-Zig inversion 2026-05-24; the layering goal of "Zig consumers get a high-level facade independent of the c_api binding" persists, but the concrete API shape pivots from c_api veneer to first-principles Engine + Linker + TypedFunc per ADR-0109 + `docs/zig_api_design.md`)
 - **Date**: 2026-05-05
 - **Author**: Shota / Zig host-API gap surfaced post-ADR-0024
 - **Tags**: roadmap, api, library, surface, phase8, breaking-changes-allowed

@@ -1,0 +1,494 @@
+# zwasm v2 — Zig API design spec (target)
+
+**Status**: Design spec for the target native Zig API.
+**Audience**: Zig consumers embedding zwasm v2 as a Wasm runtime
+library (ClojureWasm v2 dogfooding, and any other Zig project).
+**Implementation status**: This document describes the **target
+shape** the public Zig API will converge on. Today's
+`src/zwasm.zig` is a thin veneer over the wasm-c-api binding
+(historical accident — c_api work landed first); the design
+below is a forward-looking rewrite scoped post-ADR-0109 Accept.
+**Sections marked "(impl: partial)" are usable today in some
+form; sections marked "(impl: target)" are spec-only until
+the rewrite lands.**
+
+This doc is self-contained: read top-to-bottom to understand
+the consumer-facing contract without needing to read the
+ADRs. References at the bottom point to ADRs / code for
+deeper dives.
+
+## §1 — Design principles
+
+Five principles drive every shape below:
+
+1. **Native Zig is the primary surface; c_api is a separate
+   downstream layer.** The Zig API does not delegate to
+   wasm-c-api internally. The c_api binding (`src/api/`) is
+   for cross-language consumers and stays as a Zone-3
+   sibling.
+2. **Allocator strict-pass.** Every alloc goes through the
+   caller-provided `std.mem.Allocator`. No `c_allocator`
+   fallback, no hidden globals.
+3. **Comptime-typed signatures are the central UX.** Most
+   consumer code uses `instance.typedFunc(fn(i32, i32) i32,
+   "add")` rather than raw `Value` slices. The runtime
+   marshals.
+4. **Wasm linear memory is exposed as a bounds-checked `[]u8`
+   slice view.** No double allocation: host alloc and Wasm
+   linear memory are separate by construction, and the host
+   gets a slice into the Wasm side rather than a copy.
+5. **Trap is a narrow error union, not a catchall.** Every
+   spec-defined trap variant (`IntDivByZero`, `OutOfBoundsLoad`,
+   `StackOverflow`, etc.) is preserved through the API boundary.
+
+## §2 — API surface (overview)
+
+```zig
+const zwasm = @import("zwasm");
+
+// Top-level: Engine
+pub const Engine = struct {
+    pub fn init(alloc: std.mem.Allocator, opts: InitOpts) !Engine;
+    pub fn deinit(self: *Engine) void;
+    pub fn compile(self: *Engine, bytes: []const u8) !Module;
+    pub fn linker(self: *Engine) Linker;
+};
+
+// Module: compile-once, instantiate-many
+pub const Module = struct {
+    pub fn deinit(self: *Module) void;
+    pub fn exports(self: *const Module) []const ExportInfo;  // metadata
+    pub fn imports(self: *const Module) []const ImportInfo;  // metadata
+};
+
+// Linker: builder for imports
+pub const Linker = struct {
+    pub fn defineFunc(self: *Linker, mod: []const u8, name: []const u8, func: anytype) !void;
+    pub fn defineMemory(self: *Linker, mod: []const u8, name: []const u8, mem: *Memory) !void;
+    pub fn defineGlobal(self: *Linker, mod: []const u8, name: []const u8, g: *Global) !void;
+    pub fn defineTable(self: *Linker, mod: []const u8, name: []const u8, t: *Table) !void;
+    pub fn defineInstance(self: *Linker, mod: []const u8, inst: *Instance) !void;
+    pub fn defineWasi(self: *Linker, cfg: WasiConfig) !void;
+    pub fn instantiate(self: *Linker, module: Module) !Instance;
+    pub fn deinit(self: *Linker) void;
+};
+
+// Instance: runnable Wasm module
+pub const Instance = struct {
+    pub fn deinit(self: *Instance) void;
+    pub fn typedFunc(self: *Instance, comptime Sig: type, name: []const u8) !TypedFunc(Sig);
+    pub fn call(self: *Instance, comptime Sig: type, name: []const u8, args: anytype) !ReturnOf(Sig);
+    pub fn invoke(self: *Instance, name: []const u8, args: []const Value, results: []Value) !void;
+    pub fn memory(self: *Instance) ?*Memory;
+    pub fn global(self: *Instance, name: []const u8) ?*Global;
+    pub fn table(self: *Instance, name: []const u8) ?*Table;
+};
+
+// Typed function handle (cache for hot-path calls)
+pub fn TypedFunc(comptime Sig: type) type { ... }
+
+// Wasm linear memory view
+pub const Memory = struct {
+    pub fn slice(self: *Memory) []u8;
+    pub fn sliceAt(self: *Memory, offset: u32, len: u32) ![]u8;
+    pub fn readBytes(self: *Memory, offset: u32, len: u32) ![]u8;
+    pub fn writeBytes(self: *Memory, offset: u32, data: []const u8) !void;
+    pub fn read(self: *Memory, comptime T: type, offset: u32) !T;
+    pub fn write(self: *Memory, offset: u32, value: anytype) !void;
+    pub fn size(self: *Memory) u32;     // in pages (64 KiB)
+    pub fn grow(self: *Memory, delta_pages: u32) !u32;
+};
+
+// Untagged 8-byte slot (NaN-boxing-friendly)
+pub const Value = extern union {
+    bits64: u64,
+    i32: i32, u32: u32, i64: i64, u64: u64,
+    f32_bits: u32, f64_bits: u64,
+    ref: u64,
+};
+pub const V128 = extern struct { bytes: [16]u8 align(16) };
+pub const ValueKind = enum { i32, i64, f32, f64, v128, funcref, externref };
+
+// Trap — full spec set, no catchall
+pub const Trap = error{
+    Unreachable, IntOverflow, IntDivByZero, InvalidConversionToInt,
+    OutOfBoundsLoad, OutOfBoundsStore, OutOfBoundsTableAccess,
+    UninitializedElement, IndirectCallTypeMismatch,
+    StackOverflow, CallStackExhausted, OutOfMemory,
+};
+
+// Host function context (passed as first arg of host funcs)
+pub const Caller = struct {
+    pub fn engine(self: *Caller) *Engine;
+    pub fn memory(self: *Caller) ?*Memory;  // calling instance's memory
+    pub fn instance(self: *Caller) *Instance;
+    pub fn alloc(self: *Caller) std.mem.Allocator;
+};
+```
+
+## §3 — Canonical usage examples
+
+### §3.1 — Hello world
+
+```zig
+const std = @import("std");
+const zwasm = @import("zwasm");
+
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+
+    var engine = try zwasm.Engine.init(gpa.allocator(), .{});
+    defer engine.deinit();
+
+    const wasm_bytes = @embedFile("hello.wasm");
+    var module = try engine.compile(wasm_bytes);
+    defer module.deinit();
+
+    var linker = engine.linker();
+    defer linker.deinit();
+
+    var instance = try linker.instantiate(module);
+    defer instance.deinit();
+
+    const add = try instance.typedFunc(fn(i32, i32) i32, "add");
+    const sum = try add.call(.{ 2, 3 });
+    std.debug.print("2 + 3 = {d}\n", .{sum});
+}
+```
+
+### §3.2 — Host imports (Zig function as Wasm import)
+
+```zig
+fn hostPrint(caller: *zwasm.Caller, ptr: u32, len: u32) void {
+    const mem = caller.memory() orelse return;
+    const s = mem.sliceAt(ptr, len) catch return;
+    std.debug.print("{s}\n", .{s});
+}
+
+fn hostAbort(_: *zwasm.Caller, code: i32) noreturn {
+    std.process.exit(@intCast(code));
+}
+
+// ...
+try linker.defineFunc("env", "print", hostPrint);  // signature inferred
+try linker.defineFunc("env", "abort", hostAbort);
+const inst = try linker.instantiate(module);
+```
+
+The runtime infers each Wasm import signature from the Zig
+function's type via `@typeInfo(.@"fn")`. Mismatches between
+the host function signature and the Wasm import declaration
+fail at `instantiate()` time with a typed error.
+
+The first parameter of a host function must be `*Caller` —
+this gives the host code access to the calling instance's
+memory, allocator, and runtime state. Subsequent parameters
+must be `i32 / u32 / i64 / u64 / f32 / f64` (and in the
+future `V128` for v128 + `?u64` for ref types).
+
+### §3.3 — Multi-result
+
+```zig
+// Wasm: (func (export "divmod") (param i32 i32) (result i32 i32) ...)
+const divmod = try instance.typedFunc(fn(i32, i32) struct { i32, i32 }, "divmod");
+const r = try divmod.call(.{ 10, 3 });
+std.debug.print("quot={d} rem={d}\n", .{ r[0], r[1] });
+
+// Or named tuple fields via Zig struct
+const DivMod = struct { quot: i32, rem: i32 };
+const dm = try instance.typedFunc(fn(i32, i32) DivMod, "divmod");
+const r2 = try dm.call(.{ 10, 3 });
+std.debug.print("quot={d} rem={d}\n", .{ r2.quot, r2.rem });
+```
+
+### §3.4 — Memory access (no double allocation)
+
+```zig
+const mem = instance.memory() orelse return error.NoMemory;
+
+// Zero-copy view of the entire linear memory
+const all = mem.slice();
+std.debug.print("memory size: {d} bytes\n", .{all.len});
+
+// Bounds-checked slice helper
+const window = try mem.sliceAt(0x1000, 256);
+@memcpy(window[0..5], "hello");
+
+// Typed read/write (little-endian, alignment-respecting)
+try mem.write(0x2000, @as(i32, 42));
+const back = try mem.read(i32, 0x2000);
+
+// String pattern: write to Wasm-side allocator, then call
+const wasm_alloc = try instance.typedFunc(fn(u32) u32, "alloc");
+const wasm_free  = try instance.typedFunc(fn(u32, u32) void, "free");
+const greet      = try instance.typedFunc(fn(u32, u32) void, "greet");
+
+const msg = "hello from Zig";
+const ptr = try wasm_alloc.call(.{ @intCast(msg.len) });
+defer wasm_free.call(.{ ptr, @intCast(msg.len) }) catch {};
+try mem.writeBytes(ptr, msg);
+try greet.call(.{ ptr, @intCast(msg.len) });
+```
+
+**Memory management contract**:
+
+- `mem.slice()` returns a `[]u8` that aliases the Wasm
+  linear memory directly. No copy, no extra alloc.
+- The slice is invalidated by `memory.grow()` and by
+  re-entering Wasm code that may grow memory. Hold it only
+  across non-Wasm-calling Zig sequences.
+- Host alloc (the Engine's `std.mem.Allocator`) and Wasm
+  linear memory are **separate by construction**. Host
+  pointers cannot be passed to Wasm directly (sandbox);
+  data must be copied into Wasm memory (or pre-loaded at
+  instantiation time via imports).
+- Wasm-side alloc/free (via exported functions) is the
+  responsibility of the Wasm module. The host calls these
+  to allocate Wasm-side buffers but must free them with
+  the corresponding deallocator.
+
+### §3.5 — Untyped invoke (REPL / dynamic dispatch)
+
+For cases where the function signature isn't known at
+comptime (REPL, inspector tools, dynamic dispatch):
+
+```zig
+var args = [_]zwasm.Value{
+    .{ .i32 = 10 },
+    .{ .i32 = 3 },
+};
+var results: [2]zwasm.Value = undefined;
+try instance.invoke("divmod", &args, &results);
+// results[0].i32 == 3, results[1].i32 == 1
+```
+
+The caller is responsible for matching `args` / `results`
+counts and types to the Wasm function signature. Type
+mismatches surface as `error.ArgTypeMismatch` /
+`error.ResultTypeMismatch`.
+
+### §3.6 — Trap handling
+
+```zig
+const div = try instance.typedFunc(fn(i32, i32) i32, "div");
+
+const r = div.call(.{ 10, 0 }) catch |err| switch (err) {
+    error.IntDivByZero    => return error.UserDivisionError,
+    error.IntOverflow     => return error.UserOverflowError,
+    error.OutOfBoundsLoad => unreachable,  // div doesn't load
+    error.StackOverflow   => return error.UserStackError,
+    else => return err,
+};
+```
+
+All spec-defined trap variants from `Trap` are preserved
+through `TypedFunc.call`, `Instance.invoke`, and `Instance.call`.
+The error union is the union of (export-lookup errors,
+arg/result marshal errors, `Trap`).
+
+### §3.7 — Sharing memory between instances
+
+```zig
+var inst_a = try linker_a.instantiate(module_a);
+defer inst_a.deinit();
+
+// Build a second linker that shares inst_a's memory
+var linker_b = engine.linker();
+defer linker_b.deinit();
+try linker_b.defineMemory("env", "shared_mem", inst_a.memory().?);
+
+var inst_b = try linker_b.instantiate(module_b);
+defer inst_b.deinit();
+// inst_a and inst_b now share the same linear memory.
+```
+
+### §3.8 — WASI
+
+```zig
+try linker.defineWasi(.{
+    .stdin = io.stdIn(),
+    .stdout = io.stdOut(),
+    .stderr = io.stdErr(),
+    .args = &.{"prog", "arg1", "arg2"},
+    .env = &.{ .{ "PATH", "/usr/bin" } },
+    .preopens = &.{ .{ "/tmp", "/sandbox/tmp" } },
+});
+// All wasi_snapshot_preview1 imports are defined as a unit.
+const inst = try linker.instantiate(module);
+```
+
+## §4 — Value layout (8-byte slot)
+
+The `Value` type is an **untagged extern union** matching the
+internal JIT slot representation. NaN-boxing-friendly: float
+values store their IEEE-754 bit pattern in `f32_bits` /
+`f64_bits` (no canonicalization at the slot level —
+canonicalization happens only at Wasm op boundaries that the
+spec requires).
+
+```zig
+pub const Value = extern union {
+    bits64: u64,           // raw 64-bit access
+    i32: i32, u32: u32,
+    i64: i64, u64: u64,
+    f32_bits: u32,         // IEEE-754 bit pattern (32 bits in low half)
+    f64_bits: u64,         // IEEE-754 bit pattern
+    ref: u64,              // funcref/externref, see §4.1
+};
+```
+
+Caller responsibility: the union has no runtime tag. Wasm
+type is determined by the function signature; the caller
+must select the correct field. Mismatched-field reads are
+silent UB at the Wasm spec level (the runtime will use the
+bits as the signature-declared type).
+
+### §4.1 — Reference type encoding
+
+- **funcref**: `ref` field holds `@intFromPtr(*const FuncEntity)`
+  for non-null references. The pointer carries source-instance
+  identity (enabling cross-instance `call_indirect`). `null_ref`
+  is encoded as `ref = 0` — `c_allocator.alloc` cannot return
+  address 0 on supported platforms, so 0 is a safe sentinel.
+- **externref**: `ref` field holds an opaque 64-bit host
+  handle. Same `0` sentinel for null.
+
+### §4.2 — v128
+
+v128 is too large for the 8-byte slot. The Zig API exposes
+v128 as a separate `V128` type:
+
+```zig
+pub const V128 = extern struct {
+    bytes: [16]u8 align(16),
+};
+```
+
+For TypedFunc signatures, use `V128` as the parameter or
+result type. The marshal layer treats v128 specially (no
+union overlap with `Value`).
+
+### §4.3 — NaN-boxing-friendly bit ownership
+
+For consumers (notably ClojureWasm v2) that wish to NaN-box
+their own value representation **inside** the Wasm float
+slot:
+
+- Float values pass through the API as **bit patterns**
+  (`f32_bits` / `f64_bits`). zwasm does NOT canonicalize
+  NaNs at the Value boundary — canonicalization happens
+  only inside `f32.add` / `f64.div` / etc. handlers per
+  Wasm §6.2.3 spec requirement.
+- Therefore, NaN payloads survive round-trips through
+  `typedFunc.call` and `invoke` as long as the Wasm
+  function itself doesn't perform an op that demands
+  canonicalization.
+- The full 64 bits of `f64_bits` (or 32 bits of `f32_bits`)
+  are usable for tagging. Sign bit, exponent bits, and
+  payload bits are all preserved across the boundary.
+
+## §5 — Comparison to current state
+
+| Component | Current `src/zwasm.zig` | Target (this doc) |
+|---|---|---|
+| Top-level | `Runtime` (wraps wasm_engine + wasm_store) | `Engine` |
+| Module load | `Module.parse(rt, bytes)` (calls `wasm_module_new`) | `engine.compile(bytes)` |
+| Imports | `InstantiateOpts = struct {}` (empty) | `Linker` builder |
+| Typed call | none (114 internal `callXxx_yyy`) | `TypedFunc(Sig)` comptime-generic |
+| Memory access | none | `Memory.slice()` + helpers |
+| Value type | tagged `union(enum)` (~16+ bytes, v128 = u128) | untagged `extern union` (8 bytes), `V128` separate |
+| Trap | `error.Trap` catchall in `InvokeError` | full `Trap` error set preserved |
+| Allocator | accepted but ignored (`c_allocator` used) | strict-pass through `Engine.init` |
+| WASI | none in facade | `linker.defineWasi(cfg)` |
+| Host functions | none in facade | `linker.defineFunc(mod, name, zigFn)` with comptime marshal |
+
+The rewrite touches:
+- `src/zwasm.zig` (~500 line replacement)
+- New `src/api/host_func_marshal.zig` (comptime fn-type → Wasm-sig adapter generator)
+- New `src/api/linker.zig` (Zone-2-or-3 builder; positioning TBD per ADR-0109)
+- New `src/api/memory_view.zig` (slice view over Wasm linear memory)
+- Internal `Runtime` → `JitRuntime` rename (physical struct stays — ABI is JIT-emitted-code-stable)
+
+Estimated 6-8 cycles of autonomous work, parallelizable.
+
+## §6 — Open questions for CW v2 review
+
+1. **Multi-result return shape**: the spec defaults to `struct { i32, i32 }`
+   (anonymous tuple) for multi-result. Does CW v2 prefer named
+   fields (`struct { quot: i32, rem: i32 }`) as the primary shape?
+   Both work; the question is which is the documented "blessed"
+   pattern.
+2. **Caller as first arg of host funcs**: required (above shows
+   `fn(caller: *Caller, ...)`)? Or optional (omit when not
+   needed)? Required is simpler to teach; optional is less
+   boilerplate for pure functions.
+3. **Memory invalidation on grow**: should `mem.slice()` return
+   a slice that grows alongside? Or a snapshot at-call-time?
+   Snapshot is simpler + matches Wasm spec (each `memory.grow`
+   may relocate); growth-tracking slice would require pointer
+   dereference per access.
+4. **WasiConfig granularity**: full `defineWasi(cfg)` 一括 vs
+   per-syscall `defineWasiFd / defineWasiClock / ...`. CW likely
+   wants the bulk path; embedded/restricted hosts might want
+   per-syscall.
+5. **TypedFunc cache lifetime**: tied to `*Instance` (must
+   re-lookup after `defineFunc` adds host functions)? Or
+   stable across the Instance's lifetime?
+6. **`?u64` for ref-typed args**: `funcref` / `externref`
+   as host-func parameters — `?u64` (nullable raw handle) or
+   typed `FuncRef` / `ExternRef` wrappers?
+
+CW v2 should raise these (and any others discovered while
+prototyping against this spec) so they get fixed before
+impl lands.
+
+## §7 — References
+
+- **ADRs**:
+  - ADR-0014 — Allocator + zombie-instance contract.
+  - ADR-0025 — Zig library facade (the originally-proposed
+    minimum subset; superseded by ADR-0109 for the target
+    shape).
+  - ADR-0052 — Globals representation (scalar-only today).
+  - ADR-0061 — Reftype 8-byte slot encoding.
+  - ADR-0106 — Multi-result return convention (wrapper thunk).
+  - ADR-0107 — Byte-buffer globals for v128 cross-module
+    (Proposed).
+  - ADR-0109 — **This design's formal record** (Proposed;
+    supersedes ADR-0025 minimum-subset target).
+- **Code** (current state):
+  - `src/zwasm.zig` — current facade (c_api veneer).
+  - `src/runtime/value.zig` — internal `Value` extern union.
+  - `src/runtime/trap.zig` — full Trap error set.
+  - `src/runtime/runtime.zig::Runtime` — physical struct
+    (will rename to `JitRuntime`).
+  - `src/api/instance.zig` — wasm-c-api binding (stays as
+    Zone-3 sibling, not deleted).
+  - `src/engine/codegen/shared/entry.zig` — 114-entry typed
+    helper catalog (internal; TypedFunc comptime layer
+    replaces the consumer-facing equivalent).
+- **Industry precedents** surveyed:
+  - **wasmtime** (Rust): `Engine` + `Store<T>` + `Linker<T>` +
+    `TypedFunc<Params, Results>`.
+  - **wasmer** (Rust): `Engine` + `Store` + `Imports` (via
+    `imports!` macro) + `TypedFunction<Args, Rets>`.
+  - **wasmi** (Rust): sister of wasmtime, same shape.
+  - **wasm3** (C): `IM3Environment` (engine) + `IM3Runtime`
+    (per-execution state — distinct from "Engine").
+  - **WAMR** (C): `wasm_engine_t` + `wasm_runtime_init`.
+  - **zware** (Zig): `Store` + `Instance` (no `Engine`).
+  - **v1 zwasm** (Zig, predecessor): `WasmModule.load(alloc,
+    bytes)` — 1-step, host imports inline via
+    `loadWithImports`. Predates the Linker pattern; this
+    spec inherits the allocator-strict-pass + 1-step
+    intuition while adopting the Linker for reuse.
+
+## §8 — Revision history
+
+- 2026-05-24 — Initial draft. Conversation-derived from
+  Phase 9 close cycle 35 discussion: c_api → native-Zig
+  inversion + v1-shape inspiration tempered by
+  first-principles analysis (Engine + Linker + TypedFunc
+  via Zig fn type + Memory slice view + NaN-boxing-friendly
+  Value).
