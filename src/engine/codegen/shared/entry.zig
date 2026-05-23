@@ -902,14 +902,11 @@ pub const FuncRet_f64f64 = extern struct {
 /// spec_assert non-simd runner to invoke the `add64_u_with_carry`
 /// family (spec `if.wast` / `func.wast` / etc.). Multi-result ABI
 /// per `FuncRet_i64i32`.
-pub fn callI64i32_i64i64i32(
-    module: linker.JitModule,
-    func_idx: u32,
-    rt: *JitRuntime,
-    a0: u64,
-    a1: u64,
-    a2: u32,
-) Error!FuncRet_i64i32 {
+pub fn callI64i32_i64i64i32(module: linker.JitModule, func_idx: u32, rt: *JitRuntime, a0: u64, a1: u64, a2: u32) Error!FuncRet_i64i32 {
+    if (builtin.os.tag == .windows) {
+        const r = try entry_buffer_write.invokeBufWin64Args(rt, module, func_idx, &.{ a0, a1, @as(u64, a2) }, 2);
+        return .{ .r0 = r[0], .r1 = @intCast(r[1] & 0xFFFFFFFF) };
+    }
     const Fn = *const fn (*const JitRuntime, u64, u64, u32) callconv(.c) FuncRet_i64i32;
     return invokeAndCheck(rt, FuncRet_i64i32, module.entry(func_idx, Fn), .{ a0, a1, a2 });
 }
@@ -977,11 +974,11 @@ pub fn callI32i32i32NoArgs(
 /// result's width differs (W-form vs X-form on arm64; 32 vs 64
 /// bits of buffer slot 2 on x86_64). Per the u64-padded
 /// `FuncRet_i32i32i64` layout, each slot is 8 B regardless.
-pub fn callI32i32i64NoArgs(
-    module: linker.JitModule,
-    func_idx: u32,
-    rt: *JitRuntime,
-) Error!FuncRet_i32i32i64 {
+pub fn callI32i32i64NoArgs(module: linker.JitModule, func_idx: u32, rt: *JitRuntime) Error!FuncRet_i32i32i64 {
+    if (builtin.os.tag == .windows) {
+        const r = try entry_buffer_write.invokeBufWin64NoArgs(rt, module, func_idx, 3);
+        return .{ .r0 = r[0], .r1 = r[1], .r2 = r[2] };
+    }
     const Fn = *const fn (*const JitRuntime) callconv(.c) FuncRet_i32i32i64;
     return invokeAndCheck(rt, FuncRet_i32i32i64, module.entry(func_idx, Fn), .{});
 }
