@@ -168,7 +168,7 @@ inline fn invokeAndCheck(
     // ADR-0105 D1 — populate stack_limit per call for the prologue probe.
     rt.stack_limit = stack_limit_mod.computeStackLimit(stack_limit_mod.STACK_GUARD_HEADROOM);
     rt.trap_flag = 0;
-    stack_limit_mod.diagOnce(rt.stack_limit);
+    stack_limit_mod.diagOnceWithRt(rt, jit_abi.stack_limit_off, rt.stack_limit);
     const result = @call(.auto, f, .{rt} ++ args);
     if (rt.trap_flag != 0) return Error.Trap;
     return result;
@@ -182,7 +182,7 @@ inline fn invokeAndCheckVoid(
 ) Error!void {
     rt.stack_limit = stack_limit_mod.computeStackLimit(stack_limit_mod.STACK_GUARD_HEADROOM);
     rt.trap_flag = 0;
-    stack_limit_mod.diagOnce(rt.stack_limit);
+    stack_limit_mod.diagOnceWithRt(rt, jit_abi.stack_limit_off, rt.stack_limit);
     @call(.auto, f, .{rt} ++ args);
     if (rt.trap_flag != 0) return Error.Trap;
 }

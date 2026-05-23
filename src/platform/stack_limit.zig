@@ -139,6 +139,19 @@ fn computeWindows(headroom: usize) usize {
 threadlocal var diag_seen: bool = false;
 
 pub fn diagOnce(stack_limit_value: usize) void {
+    diagOnceRaw(stack_limit_value, null, 0);
+}
+
+/// R3 cycle 4 variant: cross-checks `*(rt + off)` (= what the JIT
+/// probe reads) against the direct `stack_limit_value` (= what
+/// `invokeAndCheck` just wrote via field syntax). If they disagree
+/// on Win64, `stack_limit_off` is wrong relative to the actual
+/// extern-struct layout.
+pub fn diagOnceWithRt(rt_ptr: *const anyopaque, stack_limit_off: usize, stack_limit_value: usize) void {
+    diagOnceRaw(stack_limit_value, rt_ptr, stack_limit_off);
+}
+
+fn diagOnceRaw(stack_limit_value: usize, rt_ptr: ?*const anyopaque, stack_limit_off: usize) void {
     // R3 cycle 3: gate the once-flag on non-Windows hosts only.
     // Win64 prints per call to surface runaway's margin before
     // the OS guard fires.
@@ -160,9 +173,24 @@ pub fn diagOnce(stack_limit_value: usize) void {
         sp - stack_limit_value
     else
         0;
+    var via_off_value: usize = 0;
+    if (rt_ptr) |p| {
+        const base: [*]const u8 = @ptrCast(p);
+        const slot: *const usize = @ptrCast(@alignCast(base + stack_limit_off));
+        via_off_value = slot.*;
+    }
     std.debug.print(
-        "[stack_probe] stack_limit=0x{x} sp=0x{x} margin=0x{x} os={s} arch={s}\n",
-        .{ stack_limit_value, sp, margin, @tagName(builtin.os.tag), @tagName(builtin.cpu.arch) },
+        "[stack_probe] stack_limit=0x{x} sp=0x{x} margin=0x{x} via_off=0x{x} off={d} rt=0x{x} os={s} arch={s}\n",
+        .{
+            stack_limit_value,
+            sp,
+            margin,
+            via_off_value,
+            stack_limit_off,
+            if (rt_ptr) |p| @intFromPtr(p) else 0,
+            @tagName(builtin.os.tag),
+            @tagName(builtin.cpu.arch),
+        },
     );
 }
 
