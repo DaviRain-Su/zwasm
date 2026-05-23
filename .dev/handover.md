@@ -31,44 +31,46 @@ A4 D-163/D-166 shared root-cause, Win64 2-i32-result fix,
 ADR-0107 Proposed, cycle 21-24 D-167 revert): `git log
 --grep="cycle 2[0-5]"` and `git log --grep="A1\|A2\|A4"`.
 
-## Cycles 26-28 progress (D-167 spike work-order step 1 COMPLETE)
+## Cycle 29 finding (D-167 wire-up blocked by entry.zig cap)
 
-**All 3 wrapper shapes Mac-green**: 1-arg+2-int (36 bytes;
-cycle 26), 3-arg+2-int (44 bytes; cycle 27), 1-arg+3-int
-MEMORY (22 bytes; cycle 28). `emitX8664Win64` predicate now
-allows `n_params ∈ {0,1,3}` × (2-int register-class OR
-1-arg-3-int MEMORY-class). All 4 D-167 entry-helper unique
-shapes covered. Bytes per spike README § "Win64 byte
-sequences (proven from cycle 21-24)". FILE-SIZE-EXEMPT
-marker added (ADR-0099 D2 P1 — closed sub-language; tests
-change in lockstep with emit).
+Attempted D-167 wire-up (3 Win64 if-arms in
+`src/engine/codegen/shared/entry.zig`); pre-commit gate
+emitted `EXEMPT-CAP EXCEEDED` (2521 vs cap 2500). File was
+exactly at exempt-cap before edits. Compact 1-line
+forwarding to a Win64-side helper module would still net
+≥ 3 lines (one per if-arm). Reverted; filed **D-168** for
+the structural split required before wire-up can land.
 
-**Wrapper extension only — entry.zig if-arm wire-up not yet
-done.** Cycle 28 caveat: shape 3/3 wrapper is byte-correct
-but runtime-correctness inherits the same body-side gating
-issue as the existing 0-arg 3-int arm (cycle 2c MEMORY-class
-body emit is `.sysv`-only today; bodies on Win64 use
-register_write). Wire-up must coordinate both.
+## Cycles 26-28 progress (D-167 spike step 1 COMPLETE)
+
+3 wrapper shapes Mac-green: 1-arg+2-int (cycle 26),
+3-arg+2-int (cycle 27), 1-arg+3-int MEMORY (cycle 28).
+`emitX8664Win64` predicate covers all 4 entry-helper unique
+shapes. Shape 3/3 inherits body-side `.sysv`-gating caveat
+from existing 0-arg 3-int arm (separate cycle work). See
+`git log --grep="D-167 shape"`.
 
 ## Remaining work
 
 ### Autonomous-eligible (next session pick from here)
 
-- **D-167 wire-up step 2** (spike work-order step 2) —
-  synthetic end-to-end execution tests on Mac for each of
-  the 3 shapes via hand-rolled body bytes (pattern at
-  `wrapper_thunk.zig:579+` `() → (i32, i32, i32)`). Verifies
-  the wrapper bridges register convention correctly under
-  actual execution (Mac aarch64 path covers AAPCS64; x86_64
-  SysV path covers ubuntu; Win64 path NOT runtime-verifiable
-  on Mac/Linux — covered at step 4 windowsmini integration).
-- **D-167 wire-up step 3** — entry.zig Win64 if-arms
-  calling `invokeBufWin64Args` helper (add back in
-  `entry_buffer_write.zig`). For 3-int MEMORY-class shape:
-  ALSO needs body-side cycle 2c MEMORY-class extension to
-  Win64 (currently `.sysv`-gated; see emit_setup.zig).
-- **D-167 wire-up step 4** — windowsmini integration verify
-  ESPECIALLY simd_assert (cycle 24's regression site).
+- **D-168 entry.zig structural split** (filed cycle 29) —
+  `src/engine/codegen/shared/entry.zig` is exactly at
+  exempt-cap=2500. D-167 wire-up attempted cycle 29 added
+  21 lines to that file (3 Win64 if-arms) and triggered
+  `EXEMPT-CAP EXCEEDED` block. Even with compact 1-line
+  forwarding to a Win64-side helper module (3 lines added),
+  the cap is still exceeded. **D-167 wire-up is blocked
+  until entry.zig is split.** Discharge path: see D-168 in
+  debt.md for split strategy options.
+- **D-167 wire-up shape 1-3** — blocked by D-168.
+  After split: add `invokeBufWin64Args` helper +
+  `entry.zig` Win64 if-arms for `callI32i32_i32` /
+  `callI32i64_i32` / `callI64i32_i64i64i32`. Body-side
+  cycle 2c MEMORY-class Win64 extension still required for
+  shape 3/3 (`callI32i32i64_i32`).
+- **D-167 windowsmini integration verify** — final step;
+  blocked by all above.
 
 ### User-gated
 
