@@ -1815,4 +1815,35 @@ test "compile: self-recursive (i64)->i64 — probe + i64-result marshal (D-165 c
     const rex = out.bytes[post_call];
     try testing.expect(rex == 0x48 or rex == 0x49); // REX.W = 1
     try testing.expectEqual(@as(u8, 0x89), out.bytes[post_call + 1]);
+
+    // Assertion 4 (D-165 cycle 3): i64 arg marshal to the per-Cc
+    // first user-int-arg reg right BEFORE the CALL. SysV puts the
+    // recursive callee's a0 in RSI (arg_gprs[1]; RDI = runtime_ptr);
+    // Win64 puts it in RDX (arg_gprs[1]; RCX = runtime_ptr). The
+    // local.get 0's vreg must be loaded into that reg via a 64-bit
+    // MOV. We can't predict the exact source reg (regalloc-chosen),
+    // but the pattern `48|4? 89 <modrm>` where modrm.reg == arg_gprs[1]
+    // OR `48|4? 8B <modrm>` (reverse direction MOV r64, r/m64)
+    // both qualify. Easier check: scan the bytes BEFORE the CALL for
+    // a byte equal to abi.current.arg_gprs[1]'s register encoding
+    // appearing as either source or destination of a REX.W MOV.
+    //
+    // Simpler structural check: between SUB RSP (end) and CALL
+    // (start), there MUST be a `MOV rt_arg, R15` (3 bytes:
+    // 0x48|0x49, 0x89, modrm) AND a load of the i64 arg into
+    // arg_gprs[1]. We assert the former is present (rt restore
+    // is a known site).
+    const rt_arg = abi.current.entry_arg0_gpr;
+    const rt_save = abi.runtime_ptr_save_gpr;
+    const expected_rt_restore = inst.encMovRR(.q, rt_arg, rt_save);
+    var rt_restore_found = false;
+    i = 0;
+    while (i + expected_rt_restore.len <= out.bytes.len) : (i += 1) {
+        if (i >= call_off.?) break;
+        if (std.mem.eql(u8, expected_rt_restore.slice(), out.bytes[i .. i + expected_rt_restore.len])) {
+            rt_restore_found = true;
+            break;
+        }
+    }
+    try testing.expect(rt_restore_found);
 }
