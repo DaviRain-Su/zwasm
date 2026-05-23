@@ -48,6 +48,17 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
   Plan doc: `.dev/phase9_value_widen_plan.md` (6 sub-
   phase / 9-12 cycle / test coverage 強化を Phase 2
   に明示)。ROADMAP §9.13-V row 追加。
+- 38: **§9.13-V Phase A.1 (scope audit) CLOSED**.
+  REPORT at `private/spikes/value-widen-scope-audit/REPORT.md`
+  (gitignored, spike discipline)。ADR-0052 "50+ test sites"
+  claim **inflated ~25×** に検証。ADR-0110 §1.66-75 の cope
+  list 中 4項目 (globals_byte_storage / globals_byte_base /
+  evalConstScalarValue / evalConstV128Value) は **phantom**
+  (tree 不在) に検証。Phase 4d/4e はほぼ空、Phase 4g
+  (spec runner unification, 26 sites) が新 long pole に判明。
+  plan doc §2 Phase 1 + §4 risk register (R8/R9/R10 追加、
+  R1 dissolved、R2 downgraded) + §5 cycle estimate + §8
+  revision history 更新。
 
 ## Remaining work
 
@@ -71,16 +82,20 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
 
 ### Autonomous-eligible (next session pick from here)
 
-優先順 (Phase A 起点; D-167 wire-up は Phase A.4 に折りたたみ):
+優先順 (Phase A.1 closed cycle 38; A.2 起点):
 
-1. **§9.13-V Phase A.1 — scope audit** (1 cycle, autonomous)。
-2. **§9.13-V Phase A.2 — test coverage** (2-3 cycle)。
+1. **§9.13-V Phase A.2 — test coverage** (2-3 cycle, **NEXT**)。
    user-flagged "テスト不足感" 対応; Value=8 baseline で
-   boundary fixtures 整備。
-3. **§9.13-V Phase A.3-A.6** — Value flip + cascade + merge
+   boundary fixtures 整備。Plan doc §3 + REPORT §10 で計 6
+   fixture category: 数値域 / v128 lane / NaN payload / ref
+   encoding / cross-instance v128 import (REPORT §10 add) /
+   globals 16B alignment + Value.zero v128 readback (REPORT
+   §10 add)。
+2. **§9.13-V Phase A.3-A.6** — Value flip + cascade + merge
    (feature branch `zwasm-from-scratch-value16`; D-167
-   wire-up を A.4 内 に統合)。
-4. **Phase B / C / D** — windowsmini reconcile + ADR closure
+   wire-up を A.4 内 に統合)。Phase 4d/4e はほぼ空、Phase
+   4g が long pole (REPORT §8 reference)。
+3. **Phase B / C / D** — windowsmini reconcile + ADR closure
    + debt cohort verify。Phase A と並列実行可能 (詳細は flow
    doc §4)。
 
@@ -99,8 +114,10 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
 
 Per `/continue` SKILL.md Resume Steps 0.5 / 0.7 / 0.8.
 **Current state**: autonomous-eligible. `now` debts:
-D-167 (folded into §9.13-V Phase A.4) + §9.13-V Phase A.1
-scope audit is the next chunk (see flow doc §2).
+D-167 (folded into §9.13-V Phase A.4) + §9.13-V Phase A.2
+test coverage is the next chunk (see flow doc §2 + plan doc
+§2 Phase 2 + REPORT §10 for the three additional fixture
+categories beyond plan §3).
 **Step 1a override**: `phase9_close_master.md` reference
 above triggers close-plan override per SKILL.md; Step 2
 (ROADMAP §9 first `[ ]` lookup) is therefore informational
