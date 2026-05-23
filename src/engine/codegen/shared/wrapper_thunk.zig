@@ -286,13 +286,15 @@ pub fn emitX8664Win64(
     params: EmitParams,
 ) Error!EmitOutput {
     if (params.sig.params.len != 0) return Error.UnsupportedOp;
-    if (!all_gpr_class(params.sig.results)) return Error.UnsupportedOp;
+    const results_all_gpr = all_gpr_class(params.sig.results);
+    const results_all_xmm = all_xmm_class(params.sig.results);
+    if (!results_all_gpr and !results_all_xmm) return Error.UnsupportedOp;
 
     const n_results = params.sig.results.len;
     var bytes: std.ArrayList(u8) = .empty;
     errdefer bytes.deinit(allocator);
 
-    if (n_results == 2) {
+    if (n_results == 2 and results_all_gpr) {
         // 2-int register-class shape (33 bytes); body uses
         // register convention (result 0 in RAX, result 1 in RDX).
         try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x28 }); // SUB RSP, 0x28
@@ -303,7 +305,22 @@ pub fn emitX8664Win64(
         try bytes.appendSlice(allocator, &.{ 0x49, 0x89, 0x50, 0x08 }); // MOV [R8+8], RDX
         try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xC4, 0x28 }); // ADD RSP, 0x28
         try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 }); // XOR EAX,EAX ; RET
-    } else if (n_results == 3) {
+    } else if (n_results == 2 and results_all_xmm) {
+        // R1 fix (2026-05-23): 2-XMM (f64, f64) register-class shape.
+        // Mirror of 2-int but stores XMM0/XMM1 via MOVQ. Body's
+        // marshalReturnRegs (with R1/R2 cap=2 fix) writes both
+        // XMM regs even on Win64.
+        // MOVQ [R8], XMM0   = 66 41 0F D6 00       (5 bytes)
+        // MOVQ [R8+8], XMM1 = 66 41 0F D6 48 08    (6 bytes)
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x28 }); // SUB RSP, 0x28
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x54, 0x24, 0x20 }); // MOV [RSP+0x20], RDX
+        try emitCallRel32(allocator, &bytes, params, 4 + 5);
+        try bytes.appendSlice(allocator, &.{ 0x4C, 0x8B, 0x44, 0x24, 0x20 }); // MOV R8, [RSP+0x20]
+        try bytes.appendSlice(allocator, &.{ 0x66, 0x41, 0x0F, 0xD6, 0x00 }); // MOVQ [R8], XMM0
+        try bytes.appendSlice(allocator, &.{ 0x66, 0x41, 0x0F, 0xD6, 0x48, 0x08 }); // MOVQ [R8+8], XMM1
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xC4, 0x28 }); // ADD RSP, 0x28
+        try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 }); // XOR EAX,EAX ; RET
+    } else if (n_results == 3 and results_all_gpr) {
         // 3-int MEMORY-class shape (19 bytes); body uses Win64
         // MEMORY-class convention: RCX = hidden ptr to results
         // buffer, RDX = rt. Wrapper swaps RCX↔RDX so body's view
@@ -455,6 +472,14 @@ fn all_gpr_class(results: []const @import("../../../ir/zir.zig").ValType) bool {
     for (results) |r| switch (r) {
         .i32, .i64, .funcref, .externref => {},
         .f32, .f64, .v128 => return false,
+    };
+    return true;
+}
+
+fn all_xmm_class(results: []const @import("../../../ir/zir.zig").ValType) bool {
+    for (results) |r| switch (r) {
+        .f32, .f64 => {},
+        .i32, .i64, .funcref, .externref, .v128 => return false,
     };
     return true;
 }

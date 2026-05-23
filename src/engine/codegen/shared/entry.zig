@@ -1316,12 +1316,12 @@ pub fn callF64f32NoArgs(
     }
 }
 
-/// `() -> (f64, f64)` — HFA returned via V0+V1 / XMM0+XMM1.
-pub fn callF64f64NoArgs(
-    module: linker.JitModule,
-    func_idx: u32,
-    rt: *JitRuntime,
-) Error!FuncRet_f64f64 {
+/// `() -> (f64, f64)` — HFA on POSIX, Win64 uses 2-XMM wrapper.
+pub fn callF64f64NoArgs(module: linker.JitModule, func_idx: u32, rt: *JitRuntime) Error!FuncRet_f64f64 {
+    if (builtin.os.tag == .windows) {
+        const r = try entry_buffer_write.invokeBufWin64NoArgs(rt, module, func_idx, 2);
+        return .{ .r0 = @bitCast(r[0]), .r1 = @bitCast(r[1]) };
+    }
     const Fn = *const fn (*const JitRuntime) callconv(.c) FuncRet_f64f64;
     return invokeAndCheck(rt, FuncRet_f64f64, module.entry(func_idx, Fn), .{});
 }
