@@ -3103,11 +3103,17 @@ pub fn runCorpus(
                 // arm restored — Removal condition: wasm-2.0-specific
                 // Win64 trap-path fix lands (separate spike from R3;
                 // multi-value / reftype interactions possible).
-                if (@import("builtin").os.tag == .windows and std.mem.find(u8, line, "call_indirect") != null) {
-                    try stdout.print("SKIP-WIN64-CALL-INDIRECT-TRAP  {s}: {s} (D-163 — Win64 JIT call_indirect trap path; wasm-2.0 corpus scope)\n", .{ name, line });
-                    tally.skipped_adr += 1;
-                    continue;
-                }
+                // D-163 cycle 13: SKIP arm TEMPORARILY removed to
+                // capture actual Win64 caller-side bounds-check
+                // trap crash stderr. Restore at cycle 13 close
+                // (or earlier if root cause found). Was:
+                // ```
+                // if (@import("builtin").os.tag == .windows and std.mem.find(u8, line, "call_indirect") != null) {
+                //     try stdout.print("SKIP-WIN64-CALL-INDIRECT-TRAP ...\n", ...);
+                //     tally.skipped_adr += 1;
+                //     continue;
+                // }
+                // ```
                 if (module_bad) {
                     tally.runtime_skip += 1;
                     continue;
