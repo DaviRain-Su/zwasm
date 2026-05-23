@@ -62,13 +62,22 @@ Fix: bump `STACK_GUARD_HEADROOM` to 1 MiB on Win64 only
 cycle-6 run). Mac+Linux unchanged. Lesson landed at
 `.dev/lessons/2026-05-23-win64-stack-probe-headroom.md`.
 
-**R1+R2 status**: R2 ✅ fixed by cap=2 (`aac986d9`). R1 fix
-landed this cycle: 2-XMM branch in `emitX8664Win64` wrapper
-+ Win64 branch in `callF64f64NoArgs`. Pending windowsmini
-verification.
+**R1+R2 status**: ✅ **BOTH CLOSED** (verified
+`/tmp/win.log:15477` cycle 8 — `br: type-f64-f64-value` and
+`as-return-value` both PASS on windowsmini). R2 fixed by
+cap=2 (`aac986d9`); R1 fixed by wrapper 2-XMM extension +
+`callF64f64NoArgs` Win64 branch (`73bcf80f`).
 
-**Open follow-up**: windowsmini stalls at `fac` (~line 30K),
-unrelated to R1/R2/R3. Investigate as D-165 next.
+**D-163 status**: SKIP-WIN64-CALL-INDIRECT-TRAP arm at line
+16043 still fires. To verify post-R3 fix, remove SKIP arm
+and observe — needs windowsmini round-trip. Blocked by D-165
+(see below).
+
+**D-165 (new)**: windowsmini test-all stalls at `fac` (~line
+28K, after fac-ssa). Pre-existing pre-R3 (was hidden by
+runaway crash). Multi-result fac fixture or follow-on test
+hangs on Win64. Investigate as a separate spike before
+D-163 verification can proceed.
 
 After R3: R1/R2 (Win64 `marshalReturnRegs` Cc-aware fix) →
 re-run → D-163 (spike H1/H2/H3 in
