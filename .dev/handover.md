@@ -53,28 +53,29 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
 
 ### Next-session cold-start MUST read first
 
-1. **ADR-0110** (`.dev/decisions/0110_value_widen_to_16_byte.md`)
-   — Phase 9 真スコープ最大の追加項目、Accepted。
-2. **`.dev/phase9_value_widen_plan.md`** — §9.13-V 実装計画
-   6 sub-phase。
+1. **[`.dev/phase9_remaining_flow.md`](./phase9_remaining_flow.md)**
+   — Phase 9 close → Phase 10 open 全体フロー (Phase A-F)。
+   サイクル見積もり + parallelization + tests-stay-green
+   invariant の運用詳細。最初に読むと全体像が掴める。
+2. **[`.dev/decisions/0110_value_widen_to_16_byte.md`](./decisions/0110_value_widen_to_16_byte.md)**
+   — Phase A の設計記録、Accepted。
+3. **[`.dev/phase9_value_widen_plan.md`](./phase9_value_widen_plan.md)**
+   — Phase A 実装計画 6 sub-phase。
 
 ### Autonomous-eligible (next session pick from here)
 
-優先順:
+優先順 (Phase A 起点; D-167 wire-up は Phase A.4 に折りたたみ):
 
-1. **§9.13-V Phase 1 — scope audit** (1 cycle、autonomous)。
-   `private/spikes/value-widen-scope-audit/REPORT.md` 出力。
-   ADR-0052 が言ってた "50+ test sites" の honest 再カウント。
-2. **D-167 wire-up (single cycle)** — ADR-0099 per-file cap
-   override で entry.zig cap unblocked。Value widening と独立
-   に main で land 可能。`invokeBufWin64Args` helper +
-   entry.zig Win64 if-arms × 4 + windowsmini integration verify。
-3. **§9.13-V Phase 2 — test coverage 強化** (2-3 cycle)。
-   `test/edge_cases/p9/value_semantics/` + v128 lane / NaN
-   payload / cross-instance funcref boundary fixtures。
-4. **§9.13-V Phase 3-6** — Value definition flip + cascade
-   impl + cope code removal + 3-host verify (feature branch
-   `zwasm-from-scratch-value16` 推奨、Phase 6 で main merge)。
+1. **§9.13-V Phase A.1 — scope audit** (1 cycle, autonomous)。
+2. **§9.13-V Phase A.2 — test coverage** (2-3 cycle)。
+   user-flagged "テスト不足感" 対応; Value=8 baseline で
+   boundary fixtures 整備。
+3. **§9.13-V Phase A.3-A.6** — Value flip + cascade + merge
+   (feature branch `zwasm-from-scratch-value16`; D-167
+   wire-up を A.4 内 に統合)。
+4. **Phase B / C / D** — windowsmini reconcile + ADR closure
+   + debt cohort verify。Phase A と並列実行可能 (詳細は flow
+   doc §4)。
 
 ### Still user-gated
 
