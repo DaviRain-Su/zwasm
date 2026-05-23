@@ -226,34 +226,42 @@ core runner.
 
 ### §5.3a — Phase 9 真スコープ expansion (2026-05-23 user audit)
 
-Per ADR-0104 Revision history row 2026-05-23, the following
-3 debt rows are promoted to Phase 9 真スコープ under the
-"Wasm 2.0 complete + Zig/C API complete at Phase 9 release"
-rubric. Originally `blocked-by: Track-D` or `v0.1.0 RC`; the
-user audit identified them as structurally Phase 9.
+Per ADR-0104 Revision history row 2026-05-23 + 2026-05-23 cycle 9
+amendment, 3 debt rows are promoted to Phase 9 真スコープ under
+the "Wasm 2.0 complete + Zig/C API complete at Phase 9 release"
+rubric. Originally `blocked-by: Track-D` or `v0.1.0 RC`; the user
+audit identified them as structurally Phase 9.
 
-- [ ] **D-157 close** — `assert_unlinkable` non-func import-type
-  checking. 56 Wasm 2.0 spec corpus fixtures emit
+**Two-phase iteration discipline** (cycle 9 amend): Mac aarch64
++ ubuntunote x86_64 SysV gate is the per-chunk green target for
+each of (D-157 / D-079 (ii) / D-139). Per-chunk windowsmini
+reconcile is **NOT** required — ADR-0049 already defers it. The
+Win64-specific Wasm-1.0/2.0 surface is already closed (D-162,
+D-163, D-164, D-165 all done cycle 9); these 3 remaining rows
+touch `runtime/instance/instantiate.zig` + `src/runtime/` globals
+shape + `src/api/instance.zig` — host-side library code with no
+new JIT codegen, so the Win64 portion is structurally
+"recompile-and-PASS" rather than "redesign-per-platform". Final
+windowsmini reconcile runs ONCE after all 3 land Mac+ubuntu green
+(= "Phase B reconcile" below).
+
+#### §5.3a / Phase A — Mac aarch64 + ubuntunote x86_64 implementation cohort
+
+Order chosen per autonomous-eligibility + ROI:
+
+- [ ] **A1. D-157 close** — `assert_unlinkable` non-func import-
+  type checking. 56 Wasm 2.0 spec corpus fixtures emit
   `SKIP-NO-LINK-TYPECHECK` because `instantiate.zig` only
   checks func-import types at link time. Discharge path:
   extend `runtime/instance/instantiate.zig` to verify
   table / memory / global import types against the target
   imports' declared shapes at bind time. Existing infra:
   runner's Path 3a `hasIncompatibleImportType()` (func path)
-  generalises naturally. Exit: `spec_assert_runner_non_simd`
-  emits 0 `SKIP-NO-LINK-TYPECHECK` on Mac + ubuntunote +
-  windowsmini.
-- [ ] **D-079 (ii) close** — v128 cross-module imports via
-  `wasm_instance_new` (c_api Instance path). spec-runner
-  side already discharged at §9.12-E (`b11314ff`). Discharge
-  path: extend `Runtime.globals: []*Value` (ADR-0052 §3
-  scalar-only) to v128-aware via per-entry width carried in
-  `globals_offsets/valtypes`, then plumb into
-  `instantiate.zig` cross-module import wiring. Exit: a
-  new in-source test block in `src/api/instance.zig`
-  exercising v128-typed cross-module global import via
-  `wasm_instance_new`.
-- [ ] **D-139 close** — spec_assert bypasses c_api
+  generalises naturally. Per-chunk gate: Mac + ubuntu
+  `test-all` green; `SKIP-NO-LINK-TYPECHECK` count drops from
+  56 → 0 on both hosts. Highest-ROI starter (mechanical,
+  clear exit predicate, no API surface change).
+- [ ] **A2. D-139 close** — spec_assert bypasses c_api
   `wasm_instance_new` / `setupRuntime` path. Discharge path:
   audit which c_api Instance behaviours (zombie list, arena
   ownership, cross-module Store binding) lack spec-corpus
@@ -261,9 +269,39 @@ user audit identified them as structurally Phase 9.
   (b) add per-c_api-feature unit fixtures. The §9.12-G
   "minimal c_api Instance-path test coverage" pulled-forward
   subset is `[x]` (via I4 `wast_runtime_runner` smoke); the
-  remaining audit + bridge is what §5.3a closes. Exit: an
-  audit doc enumerating c_api Instance behaviours + paired
-  in-source tests in `src/api/instance.zig` covering each.
+  remaining audit + bridge is what §5.3a closes. Per-chunk
+  gate: Mac + ubuntu `zig build test` green with new
+  in-source `test "..."` blocks in `src/api/instance.zig`
+  covering each audited behaviour.
+- [ ] **A3. D-079 (ii) close** — v128 cross-module imports via
+  `wasm_instance_new` (c_api Instance path). spec-runner
+  side already discharged at §9.12-E (`b11314ff`). Discharge
+  path: extend `Runtime.globals: []*Value` (ADR-0052 §3
+  scalar-only) to v128-aware via per-entry width carried in
+  `globals_offsets/valtypes`, then plumb into
+  `instantiate.zig` cross-module import wiring. Per-chunk
+  gate: Mac + ubuntu `zig build test` green with new
+  in-source test in `src/api/instance.zig` exercising v128-
+  typed cross-module global import via `wasm_instance_new`.
+  Last in this cohort because the `Runtime.globals` refactor
+  is widest in scope (intersects ADR-0052 §3 amendment).
+
+#### §5.3a / Phase B — windowsmini reconcile (single shot after Phase A complete)
+
+- [ ] **B1.** After A1 + A2 + A3 all `[x]` and Mac+ubuntu
+  test-all green, run `bash scripts/run_remote_windows.sh
+  test-all` ONCE. Expected: identical PASS counts (or +N for
+  newly-passing assert_unlinkable fixtures); 0
+  `SKIP-NO-LINK-TYPECHECK` emission; new in-source c_api
+  tests PASS on Win64. If a Win64-specific issue surfaces, it
+  is in scope to fix within the same Phase B reconcile (single
+  re-iterate); the "redesign per platform" risk is structurally
+  low for host-side library code (no JIT codegen change).
+- [ ] **B2.** Once B1 windowsmini green: §9.13-0 [x] flip
+  (windowsmini full `test-all` green WITHOUT `SKIP-WIN64-*` OR
+  `SKIP-NO-LINK-TYPECHECK` emission); §9.12-F + §9.12-I [x] if
+  not yet flipped per master plan §6 condition 6; SHA-backfill
+  pass for §9.x rows whose Status column is bare.
 
 ### §5.4 — Stale ADR / debt cleanup (concurrent with §5.1-§5.3)
 
@@ -297,16 +335,32 @@ Phase 9 = DONE when **ALL** below hold:
    commit SHAs.
 7. §9.13 🔒 Phase 10 entry gate review cleared.
 8. Phase Status widget flips `9 | IN-PROGRESS → DONE`.
-9. **D-157 closed (§5.3a)** — `SKIP-NO-LINK-TYPECHECK` 0 across
-   3 hosts via `instantiate.zig` non-func import-type checking.
-10. **D-079 (ii) closed (§5.3a)** — c_api `wasm_instance_new`
-    accepts v128-typed cross-module global imports without
-    `UnsupportedImport`; paired in-source test in
-    `src/api/instance.zig` PASSes on 3 hosts.
-11. **D-139 closed (§5.3a)** — c_api Instance lifecycle audit
-    document filed AND covered by paired in-source tests in
-    `src/api/instance.zig`; OR spec_assert routed through c_api
-    (whichever path the discharge chooses).
+9. **D-157 closed (§5.3a Phase A1)** — `SKIP-NO-LINK-TYPECHECK`
+   0 on Mac + ubuntu (per-chunk gate); also 0 on windowsmini
+   after Phase B1 reconcile.
+10. **D-079 (ii) closed (§5.3a Phase A3)** — c_api
+    `wasm_instance_new` accepts v128-typed cross-module global
+    imports without `UnsupportedImport`; paired in-source test
+    in `src/api/instance.zig` PASSes on Mac + ubuntu (per-chunk
+    gate); also PASSes on windowsmini after Phase B1 reconcile.
+11. **D-139 closed (§5.3a Phase A2)** — c_api Instance lifecycle
+    audit document filed AND covered by paired in-source tests
+    in `src/api/instance.zig`; OR spec_assert routed through
+    c_api (whichever path the discharge chooses). Mac + ubuntu
+    per-chunk gate; windowsmini after Phase B1.
+
+**Two-phase discipline** (cycle 9 amend): per-chunk gate for
+items 9-11 is Mac + ubuntu only (ADR-0049 windowsmini deferral
+applies); a single `bash scripts/run_remote_windows.sh test-all`
+runs AFTER 9-11 all complete to verify the Win64 host side. This
+keeps the iteration loop fast (10-15 sec/iter on Mac instead of
+8-15 min/iter via windowsmini round-trip) while still enforcing
+the 3-host invariant at Phase 9 close. Justified because the
+remaining surface is host-side library code (instantiate /
+Runtime.globals / c_api Instance) — no new JIT codegen
+introducing per-arch divergence. If a Win64 issue surfaces in
+the final reconcile, it's in scope to fix in the same Phase B
+window before §9.13-0 [x] flip.
 
 ## §7 — Anti-patterns to NOT repeat
 
