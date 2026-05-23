@@ -280,8 +280,11 @@ pub fn emit(
 /// Body MUST be compiled with `result_abi = .register_write` AND
 /// the body's cycle 2c emit must NOT route 2-int through Win64's
 /// hidden-RCX path (= keep RAX/RDX register convention even on
-/// Win64). Today's cycle 2c gates MEMORY-class on `.sysv` only;
-/// 2-int Win64 already goes through register_write naturally.
+/// Win64). 2-int Win64 goes through register_write naturally
+/// (cycle 2c body emit handles both .sysv and .win64
+/// MEMORY-class as of D-165 close 2026-05-23 — see
+/// `x86_64/emit_setup.zig:104` Win64 arm + `emit.zig:209`
+/// `return_is_memory_class` predicate).
 pub fn emitX8664Win64(
     allocator: std.mem.Allocator,
     params: EmitParams,
@@ -319,11 +322,9 @@ pub fn emitX8664Win64(
         // entry (Win64 MEMORY-class): RCX = hidden results
         // ptr, RDX = rt, R8 = a0.
         //
-        // **Same body-side gating caveat as the 0-arg 3-int
-        // arm**: cycle 2c MEMORY-class body emit is
-        // `.sysv`-only today; this wrapper is byte-correct
-        // but runtime-correctness needs the body-side
-        // extension (cf. ADR-0106 Phase 2'j note above).
+        // Body-side cycle 2c MEMORY-class Win64 emit landed
+        // at D-165 close (`75f96dee` / `99a047f6` 2026-05-23) —
+        // see emit_setup.zig:104 Win64 arm.
         try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x28 }); // SUB RSP, 0x28
         try bytes.appendSlice(allocator, &.{ 0x4D, 0x8B, 0x00 }); // MOV R8, [R8]  (a0)
         try bytes.appendSlice(allocator, &.{ 0x48, 0x87, 0xCA }); // XCHG RCX, RDX
@@ -432,14 +433,10 @@ pub fn emitX8664Win64(
         //   RET                   ; C3
         // ```
         //
-        // **REQUIRES**: body-side cycle 2c Win64 MEMORY-class
-        // extension. Today's cycle 2c gates on `abi.current_cc
-        // == .sysv` only — bodies on Win64 always use
-        // register_write. This wrapper's CALL is only runtime-
-        // correct after the body emit extension lands.
-        // The byte sequence is committed in advance so the
-        // wrapper-side is ready when the body-side gates extend
-        // (cf. Phase 2'j in the next cycle).
+        // Body-side cycle 2c Win64 MEMORY-class emit landed
+        // at D-165 close (2026-05-23): `emit_setup.zig:104`
+        // Win64 arm + `emit.zig:209` `return_is_memory_class`
+        // covers `.win64` alongside `.sysv`.
         try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x28 }); // SUB RSP, 0x28
         try bytes.appendSlice(allocator, &.{ 0x48, 0x87, 0xCA }); // XCHG RCX, RDX
         try emitCallRel32(allocator, &bytes, params, 4 + 3);
@@ -770,12 +767,8 @@ test "wrapper_thunk: emitX8664Win64 1-arg 3-int MEMORY-class (i32) -> (i32, i32,
     // R8 still holds the args ptr — after the MOV, R8 holds
     // a0 and the args ptr is consumed.
     //
-    // **Same body-side gating caveat as the 0-arg arm**: the
-    // cycle 2c MEMORY-class body emit gates on `.sysv`-only;
-    // bodies on Win64 use register_write today. This wrapper
-    // is byte-correct but not runtime-correct until the
-    // body-side extension lands (cf. ADR-0106 Phase 2'j note
-    // on the existing 0-arg 3-int arm).
+    // Body-side cycle 2c Win64 MEMORY-class emit landed at
+    // D-165 close (see comment on 0-arg 3-int arm above).
     //
     // Concrete helper: `callI32i32i64_i32` — 1 i32 arg, 3
     // results (i32, i32, i64); the i64 result is what pushes
