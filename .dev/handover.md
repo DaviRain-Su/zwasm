@@ -62,18 +62,17 @@ Fix: bump `STACK_GUARD_HEADROOM` to 1 MiB on Win64 only
 cycle-6 run). Mac+Linux unchanged. Lesson landed at
 `.dev/lessons/2026-05-23-win64-stack-probe-headroom.md`.
 
-**Active chunk** (architectural / R1+R2 — Phase 2 Win64
-multi-result wrapper): R1/R2 fixtures `br: type-f64-f64-value`
-and `br: as-return-values` show second i64/f64 reads garbage
-on Win64 (pre-existing per handover):
-- got `(f64:4.0, f64:0x00007ff6...)` expected `(f64:4.0, f64:5.0)`
-- got `(i32:2, i64:330762767128)` expected `(i32:2, i64:7)`
-
-Class: ADR-0106 Phase 2'a-2'l Win64 2-int register-class wrapper.
-Body's `register_write` epilogue likely writes result 1 to RDX
-on Win64 (SysV-only mapping). Fix in
-`src/engine/codegen/x86_64/op_control.zig::marshalReturnRegs`
-(Cc-aware).
+**Active chunk** (R1+R2 marshalReturnRegs Win64 cap fix
+landed): `gpr_cap` / `xmm_cap` in
+`op_control.zig::marshalReturnRegs` were hardcoded to 1 on
+Win64; body wrote only RAX/XMM0, leaving RDX/XMM1 as garbage.
+Wrapper thunk (`emitX8664Win64` 2-int case) and Zig extern-
+struct return both expect both registers populated. Fixed
+to cap=2 on both Cc. Next windowsmini run should clear R2
+(`(i32, i64)`). R1 (`(f64, f64)`) may need additional
+wrapper-side work (current wrapper rejects non-gpr; entry
+helper uses direct Zig extern-struct return = Win64
+MEMORY-class).
 
 After R3: R1/R2 (Win64 `marshalReturnRegs` Cc-aware fix) →
 re-run → D-163 (spike H1/H2/H3 in
