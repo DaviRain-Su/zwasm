@@ -41,23 +41,23 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
 - 32: ADR-0107 reference-repo enrichment (Alternative D
   wasmtime fixed-16-byte-cell + zware scalar counter-
   precedent). D-167 status flipped to `blocked-by: D-168`.
+- 33: ADR-0108 reference-repo enrichment (9 precedents
+  showing > 2500 LOC uniform-pattern catalogs are canonical
+  across wasmtime/cranelift, wasm-tools, zware).
 
 ## Remaining work
 
 ### Autonomous-eligible (next session pick from here)
 
-- **ADR-0108 reference-repo enrichment** (autonomous prep
-  lever for D-168 → D-167 wire-up unblock). Check
-  wasmtime / cranelift / wasm-tools for analog catalog file
-  patterns + cite in ADR-0108 References. Quick lever walk
-  (~30 min).
 - **ADR-0107 throwaway spike** under `private/spikes/adr-0107-globals-buf/`
   — prototype byte-buffer Runtime.globals migration to
   surface implementation hazards before user collab review.
-  Substantial (~1 cycle).
+  Last unwalked autonomous-prep lever. Substantial (~1 cycle).
 - After ADR-0108 Accept: single-cycle wire-up of D-167
   shapes 1-3 in entry.zig + `invokeBufWin64Args` helper +
   windowsmini integration verify.
+- After ADR-0107 spike completes: bucket-3 stop is genuine
+  if user hasn't flipped either ADR.
 
 ### User-gated (this session)
 
@@ -72,7 +72,9 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
 
 ### Bucket-3 prep walked
 
-- ADR-0108: spike-(a) null-result cycle 30; ref-repo PENDING.
+- ADR-0108: spike-(a) null-result cycle 30; ref-repo walked
+  cycle 33 (9 precedents from wasmtime/cranelift, wasm-tools,
+  zware). **All applicable levers walked.**
 - ADR-0107: ref-repo walked cycle 32; spike PENDING.
 
 ### User-gated

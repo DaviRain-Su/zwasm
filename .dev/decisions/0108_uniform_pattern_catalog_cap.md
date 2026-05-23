@@ -158,8 +158,55 @@ this ADR `Status: Closed`.
 - `src/engine/codegen/shared/entry.zig` — 114 entry-helper
   catalog at HEAD=c15090d5.
 
+### External-runtime precedents for uniform-pattern catalogs > 2500 LOC
+
+Cycle 33 reference-repo enrichment per `/continue` SKILL.md
+autonomous-prep-walk. Each is a single-file per-shape catalog
+following the same pattern as zwasm v2's entry.zig (one
+declaration per spec-enumerated case; monotonic growth keyed
+to an external axis):
+
+- `~/Documents/OSS/wasmtime/cranelift/codegen/src/isa/s390x/inst/emit_tests.rs`
+  — **14,011 LOC**. Per-instruction byte-sequence emit test
+  catalog for s390x ISA. Direct analog of zwasm v2's
+  `wrapper_thunk.zig` byte tests scaled to a full ISA.
+- `~/Documents/OSS/wasmtime/cranelift/codegen/src/isa/aarch64/inst/emit_tests.rs`
+  — **7,974 LOC**. Same shape for aarch64.
+- `~/Documents/OSS/wasmtime/cranelift/codegen/src/isa/aarch64/inst/emit.rs`
+  — **3,700 LOC**. Per-instruction emit code (paired with
+  emit_tests.rs above).
+- `~/Documents/OSS/wasmtime/cranelift/codegen/meta/src/shared/instructions.rs`
+  — **3,921 LOC**. Per-instruction metadata catalog (instruction
+  DSL declarations).
+- `~/Documents/OSS/wasm-tools/crates/wasm-smith/src/core/code_builder.rs`
+  — **7,660 LOC**. Per-Wasm-instruction fuzz-corpus generator.
+- `~/Documents/OSS/wasm-tools/crates/wasmparser/src/validator/operators.rs`
+  — **4,836 LOC**. Per-operator validation catalog.
+- `~/Documents/OSS/wasm-tools/crates/wasm-encoder/src/core/instructions.rs`
+  — **4,701 LOC**. Per-Wasm-instruction encoder catalog.
+- `~/Documents/OSS/wasmtime/crates/wasmtime/src/runtime/types.rs`
+  — **3,653 LOC**. Per-Wasm-type definition catalog.
+- `~/Documents/OSS/zware/src/instance/vm.zig` — **2,732 LOC**.
+  Per-opcode interpreter dispatch (Zig idiom — closest
+  language-and-design-philosophy precedent).
+
+These files exemplify the "uniform-pattern catalog" pattern
+ADR-0108 codifies: declarative enumeration of N+ cases of
+the same mechanical shape, where the count grows with an
+external axis (ISA opcode set, Wasm spec instruction list,
+spec-defined Wasm signature shapes). The pattern is canonical
+across mature Wasm runtimes — entry.zig at 2500 LOC is
+SMALLER than 8 of the 9 precedents cited. Extraction
+into per-shape siblings would create the same N3-shallow
+pattern that ADR-0099 D2 rejects.
+
 ## Revision history
 
 - 2026-05-23 — Initial draft at cycle 30 (private/notes/ —
   none; ADR is the artifact). Filed Status: Proposed for
   user collab review.
+- 2026-05-23 — Cycle 33 enrichment: added "External-runtime
+  precedents" subsection citing 9 multi-kLOC catalog files
+  across wasmtime/cranelift, wasm-tools, and zware. Per
+  `/continue` SKILL.md autonomous-prep-walk for user-gated
+  ADRs.
