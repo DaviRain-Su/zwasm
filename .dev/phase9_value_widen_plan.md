@@ -38,7 +38,7 @@ runner `GlobalsCtx` byte-buffer adapter) and ADR-0107
 
 ## §2 — Sub-phase plan (6-8 cycles)
 
-### Phase 1 — Honest scope audit (1 cycle, autonomous)
+### Phase 1 — Honest scope audit (1 cycle, autonomous) — **CLOSED 2026-05-24 cycle 38**
 
 Inventory the actual cascade with primary code evidence (not
 ADR-0052's inflated "50+ test sites" claim):
@@ -57,6 +57,30 @@ ADR-0052's inflated "50+ test sites" claim):
 
 **Exit**: REPORT.md written, true cascade count established,
 risk register updated in this plan doc §4.
+
+**Audit outcome** (see `private/spikes/value-widen-scope-audit/
+REPORT.md` §1 for executive summary, §2 for full per-sub-phase
+inventory):
+
+- True cascade: ~14 Value-tied src/ sites + ~26 spec-runner cope
+  sites + ~10 engine cope sites. Spec runner unification (Phase
+  4g) dominates, not the Value flip itself.
+- ADR-0052 "50+ test sites" claim is **inflated ~25×** — actual
+  `@sizeOf(Value)` literal asserts = 1; `Value{...}` constructors
+  flip transparently.
+- **Phantom cope sites**: ADR-0110 §1.66-75 listed
+  `globals_byte_storage` / `globals_byte_base` /
+  `evalConstScalarValue` / `evalConstV128Value` — **none exist
+  in tree**. Cope took a different shape (`globals_offsets[]` +
+  `slot_size 8/16` switch in `evalConstScalarRawCtx`).
+- **Phase 4d/4e are nearly empty**: JitRuntime fields are
+  pointer/u32/u64 (don't shift); ZirInstr.payload is u32
+  (not Value-tied).
+- **Phase 4g is the new long pole** (~1.5-2 cycles): 26 sites
+  including `applyImportedGlobalsFromRegistered` (~100 LOC
+  simplification, single largest cope-removal site).
+- See REPORT §10 for three Phase A.2 fixture additions beyond
+  plan §3.
 
 ### Phase 2 — Test coverage strengthening (2-3 cycles, autonomous)
 
@@ -298,26 +322,33 @@ behavior-preservation contract for Phase 4 cascade work.
 
 | ID | Risk | Mitigation |
 |---|---|---|
-| R1 | ZIR payload encoding breakage invalidates cached `.zir` debug dumps | Acceptable (debug only); re-dump from re-compiled fixtures; document in commit body |
-| R2 | JitRuntime extern struct field offset shift cascades through all per-arch prologues | Phase 1 audit identifies all sites; Phase 4d landed atomically per arch; per-arch test-all gates each landing |
-| R3 | Bench regression for scalar-only modules (operand stack doubling) | Phase 6 bench delta required per Phase 8b discipline; if > 5% regression on representative scalar fixture, investigate hot-path optimization (e.g. compact frame layout for scalar-only functions) |
+| R1 | ~~ZIR payload encoding breakage~~ — **dissolved per Phase 1 audit**: ZirInstr.payload is u32 (not Value-tied); no encoder bump | n/a |
+| R2 | ~~JitRuntime extern struct field offset shift~~ — **downgraded per Phase 1 audit**: all fields are pointer/u32/u64; no offsets shift. Only docstrings stale | docstring-only update at Phase 4d |
+| R3 | Bench regression for scalar-only modules (operand stack doubling 32→64 KiB per Runtime) | Phase 6 bench delta required per Phase 8b discipline; if > 5% regression on representative scalar fixture, investigate hot-path optimization (e.g. compact frame layout for scalar-only functions) |
 | R4 | Feature-branch merge conflicts with main (D-167 wire-up + Phase 9 close work) | Periodic rebase against main during cascade work; if conflicts grow, consider co-landing instead of branch isolation |
 | R5 | Phase 2 test coverage strengthening surfaces existing bugs in 8-byte Value path | Honest investigation; if bug is critical, fix before Phase 3 widen; if bug is Value-width-independent, file as separate debt |
 | R6 | Cope-code removal grep (Phase 5) reveals out-of-tree consumers expecting old shape (e.g. external tooling) | Unlikely (zwasm v2 isn't released yet); if found, document removal in v0.2 migration notes |
 | R7 | windowsmini Win64 ABI surfaces new edge case with 16-byte Value (e.g. v128 args in calling convention) | Phase 6 windowsmini reconcile catches; mitigation: per ADR-0106 wrapper-thunk path can absorb Win64 v128 calling convention quirks |
+| R8 | `applyImportedGlobalsFromRegistered` (test/spec/spec_assert_runner_base.zig:1782-1880) is the single largest cope-removal site (~100 LOC) with per-valtype byte-copy width logic — high churn, high regression risk | Phase 2 boundary fixture: cross-instance v128 global import with recognizable lane pattern (per REPORT §10). Migration becomes uniform `importer_buf[slot] = exporter_buf[slot]`; fixture catches if either pre- or post-widen path regresses |
+| R9 | `globals_valtypes` is consumed by validator (src/validate/validator.zig:815,821) for spec-correct type-checking. Mistakenly dropping it during cope cleanup would break Wasm spec validation | Phase 4g cope-removal scope explicitly retains `globals_valtypes` (vs dropping `globals_offsets` + `globals_byte_size`). REPORT §6 names the boundary |
+| R10 | `Runtime.globals: []*Value` indirection (cross-module aliasing per ADR-0014 §6.K.3) is orthogonal to Value width but easily confused mid-refactor | Phase 4a preserves aliasing semantics; only the pointed-at slot doubles. REPORT §2.a row a.4 documents the boundary |
 
 ## §5 — Cycle estimate
 
 | Phase | Cycle count | Cumulative |
 |---|---|---|
-| Phase 1 — scope audit | 1 | 1 |
+| Phase 1 — scope audit | 1 (CLOSED 2026-05-24 cycle 38) | 1 |
 | Phase 2 — test coverage | 2-3 | 3-4 |
 | Phase 3 — Value definition | 1 | 4-5 |
-| Phase 4 — cascade impl (a-g) | 3-5 | 7-10 |
-| Phase 5 — cope code grep | 1 | 8-11 |
-| Phase 6 — 3-host verify + ADR closure | 1 | 9-12 |
+| Phase 4 — cascade impl (a-g) | 3.5-5 (4a ~0.5, 4b ~1, 4c ~0.5, 4d ~0.25, 4e ~0, 4f ~0.5, 4g ~1.5-2) | 7.5-10 |
+| Phase 5 — cope code grep | 1 | 8.5-11 |
+| Phase 6 — 3-host verify + ADR closure | 1 | 9.5-12 |
 
 **Total estimate**: 9-12 cycles. Bounded; not open-ended.
+
+Phase 1 audit refined Phase 4 sub-phase distribution: 4d/4e are
+nearly empty; 4g (spec runner unification) is the new long pole.
+Total holds at 9-12 cycles.
 
 At current autonomous loop pace (~1 cycle / 30-60 min when
 unblocked), this is **~1-2 calendar weeks** of zwasm v2 work,
@@ -358,3 +389,11 @@ merge.
   cycle 37. User collab confirmation: "Value=16 は対応する、
   ということで確定", test concerns explicitly addressed in
   Phase 2.
+- 2026-05-24 cycle 38 — Phase 1 (scope audit) CLOSED. REPORT
+  at `private/spikes/value-widen-scope-audit/REPORT.md`. §2
+  Phase 1 section updated with audit outcome; §4 risk register
+  added R8/R9/R10 + dissolved R1/downgraded R2 per audit
+  evidence; §5 cycle estimate refined per-sub-phase. Phase A.2
+  is the next chunk; REPORT §10 names three boundary fixtures
+  beyond plan §3 (cross-instance v128 import, globals
+  alignment, Value.zero v128 readback).
