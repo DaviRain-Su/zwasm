@@ -250,6 +250,17 @@ fn nonSimdOnModuleLoaded(
     // table's true size — that's the exporter's table min.
     const table0_min = base.effectiveTable0Min(gpa, wasm_bytes, base.current_registered);
     const table0_cap = @min(@as(usize, table0_min), scratch_funcptrs.len);
+    // D-166 fix — reset scratch_funcptrs / scratch_typeidxs to sentinel
+    // FOR THE FULL CAPACITY before applyTableInit writes table0_cap entries.
+    // Per base.zig:668 comment, `rt.table_size` stays at scratch capacity
+    // (= 1024) and call_indirect relies on sig-mismatch (sentinel typeidx
+    // = maxInt(u32)) for OOB idx trap. If we skip this reset, leftover
+    // entries from a previous module's table layout could match a
+    // call_indirect's expected typeidx → sig check passes → stale
+    // funcptr executed → wild memory corruption (D-166 ubuntu
+    // memory_grow.4 off-by-one signature).
+    @memset(scratch_funcptrs[0..], 0);
+    @memset(scratch_typeidxs[0..], std.math.maxInt(u32));
     runner_mod.applyTableInitCtx(
         gpa,
         wasm_bytes,
