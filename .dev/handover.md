@@ -62,17 +62,13 @@ Fix: bump `STACK_GUARD_HEADROOM` to 1 MiB on Win64 only
 cycle-6 run). Mac+Linux unchanged. Lesson landed at
 `.dev/lessons/2026-05-23-win64-stack-probe-headroom.md`.
 
-**Active chunk** (R1+R2 marshalReturnRegs Win64 cap fix
-landed): `gpr_cap` / `xmm_cap` in
-`op_control.zig::marshalReturnRegs` were hardcoded to 1 on
-Win64; body wrote only RAX/XMM0, leaving RDX/XMM1 as garbage.
-Wrapper thunk (`emitX8664Win64` 2-int case) and Zig extern-
-struct return both expect both registers populated. Fixed
-to cap=2 on both Cc. Next windowsmini run should clear R2
-(`(i32, i64)`). R1 (`(f64, f64)`) may need additional
-wrapper-side work (current wrapper rejects non-gpr; entry
-helper uses direct Zig extern-struct return = Win64
-MEMORY-class).
+**R1+R2 status**: R2 ✅ fixed by cap=2 (`aac986d9`). R1 fix
+landed this cycle: 2-XMM branch in `emitX8664Win64` wrapper
++ Win64 branch in `callF64f64NoArgs`. Pending windowsmini
+verification.
+
+**Open follow-up**: windowsmini stalls at `fac` (~line 30K),
+unrelated to R1/R2/R3. Investigate as D-165 next.
 
 After R3: R1/R2 (Win64 `marshalReturnRegs` Cc-aware fix) →
 re-run → D-163 (spike H1/H2/H3 in
