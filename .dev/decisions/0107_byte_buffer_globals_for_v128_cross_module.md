@@ -84,6 +84,36 @@ since cross-module global imports are immutable in Wasm 2.0).
   以外を片付けて" — D-079 (ii) is the only remaining structural
   §5.3a item. Deferring contradicts Phase 9 = DONE eligibility.
 
+### Alternative D — Fixed 16-byte per-global cell (wasmtime model)
+
+- **Sketch**: All globals are 16-byte cells regardless of declared
+  type; indexing is `globals_buf + i*16`. Cast helpers reinterpret
+  the cell as i32/i64/f32/f64/v128/funcref/externref at access
+  sites. Wasm modules typically have ≤ 10 globals so the 8-byte-
+  per-scalar waste is negligible (~80 bytes per module).
+- **Precedent**: `wasmtime/crates/wasmtime/src/runtime/vm/vmcontext.rs:491+`
+  `VMGlobalDefinition { storage: [u8; 16] }` with `as_i32()` /
+  `as_v128()` / `set_u128()` cast helpers + alignment asserts
+  at lines 513-519. Cross-module wiring at
+  `imports.rs` threads `VmPtr<VMGlobalDefinition>` for imported
+  globals (16-byte alignment preserved across boundary).
+- **Counter-precedent**: zware `src/store/global.zig` uses
+  `value: u64` (scalar-only; v128-incapable — same shape as
+  zwasm v1 pre-D-079).
+- **Why rejected for v2**: The spec runner's `GlobalsCtx` at
+  §9.12-E `b11314ff` already converged on variable per-entry
+  byte offsets (`globals_offsets[]` + `globals_valtypes[]`),
+  and JIT-codegen reads via `[globals_base + ctx.globals_offsets[idx]]`
+  (per-entry offset lookup). Switching to fixed 16-byte stride
+  would require refactoring BOTH the spec runner AND JIT codegen
+  for marginal memory savings (~80 bytes/module). The variable-
+  offset model also matches arm64's Q-form / x86_64's xmm load
+  alignment naturally (16-byte alignment required for v128
+  slots; scalars at 8-byte slots satisfy their alignment).
+  Fixed-cell is the cleaner alternative for a greenfield runtime;
+  for v2 mid-Phase-9, converging on the existing `GlobalsCtx`
+  shape is structurally cheaper.
+
 ## Consequences
 
 - **Positive**: Single global access model across spec runner +
@@ -128,6 +158,12 @@ since cross-module global imports are immutable in Wasm 2.0).
 - JIT codegen (already byte-buffer):
   `src/engine/codegen/arm64/op_globals.zig` /
   `src/engine/codegen/x86_64/op_globals.zig`.
+- External-runtime precedents (Alternative D ref enrichment,
+  cycle 32 autonomous prep walk per `/continue` SKILL.md):
+  - `~/Documents/OSS/wasmtime/crates/wasmtime/src/runtime/vm/vmcontext.rs:491+`
+    `VMGlobalDefinition` (fixed 16-byte cell model).
+  - `~/Documents/OSS/zware/src/store/global.zig` (scalar-only
+    counter-precedent; v128-incapable).
 
 <!--
 ## Revision history
@@ -135,4 +171,5 @@ since cross-module global imports are immutable in Wasm 2.0).
 | Date       | SHA          | Note                                    |
 |------------|--------------|-----------------------------------------|
 | 2026-05-23 | `<backfill>` | Initial Proposed.                       |
+| 2026-05-23 | `<backfill>` | Cycle 32 enrichment — added Alternative D (wasmtime fixed-16-byte-cell model) + zware scalar-only counter-precedent. Per `/continue` SKILL.md autonomous-prep walk for user-gated ADRs. |
 -->

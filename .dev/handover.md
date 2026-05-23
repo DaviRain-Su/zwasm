@@ -28,40 +28,52 @@ pre-cycle-20). I1 satisfied — no SKIP-WIN64-* emission.
 
 Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
 
-## Cycles 26-30 progress
+## Cycles 26-32 progress
 
 - 26-28: D-167 spike step 1 COMPLETE — 3 wrapper shapes
-  Mac-green (1-arg+2-int, 3-arg+2-int, 1-arg+3-int MEMORY)
-  via TDD red→green; `git log --grep="D-167 shape"`.
+  Mac-green; `git log --grep="D-167 shape"`.
 - 29: D-167 wire-up attempt hit entry.zig EXEMPT-CAP EXCEEDED
   (2521 vs 2500). Reverted; filed **D-168**.
-- 30: D-168 options (a/b/c) reject per ADR-0099 N3-shallow;
-  drafted **ADR-0108** (CATALOG-EXEMPT cap 4000 tier) for
-  the option (d) path. D-168 → `blocked-by: ADR-0108 Accept`.
+- 30: drafted **ADR-0108** (CATALOG-EXEMPT cap 4000 tier);
+  D-168 → `blocked-by: ADR-0108 Accept`.
+- 31: stale-comment cleanup — body-side MEMORY-class Win64
+  already done (D-165). D-167 wire-up sole blocker = D-168.
+- 32: ADR-0107 reference-repo enrichment (Alternative D
+  wasmtime fixed-16-byte-cell + zware scalar counter-
+  precedent). D-167 status flipped to `blocked-by: D-168`.
 
 ## Remaining work
 
 ### Autonomous-eligible (next session pick from here)
 
-- (cycle 31 finding: body-side cycle 2c Win64 MEMORY-class
-  IS already supported per D-165 close at `75f96dee` /
-  `99a047f6` 2026-05-23 — see emit_setup.zig:104 +
-  emit.zig:209. Stale claims in wrapper_thunk.zig comments
-  + spike README + prior handover removed. **D-167 wire-up
-  shape 3/3 now only blocks on D-168 → ADR-0108 Accept**,
-  same as shapes 1-2.)
-- After ADR-0108 Accept: single-cycle wire-up of all 3
-  shapes in entry.zig (`callI32i32_i32` / `callI32i64_i32` /
-  `callI64i32_i64i64i32` / `callI32i32i64_i32`) +
-  `invokeBufWin64Args` helper + windowsmini integration
-  verify.
+- **ADR-0108 reference-repo enrichment** (autonomous prep
+  lever for D-168 → D-167 wire-up unblock). Check
+  wasmtime / cranelift / wasm-tools for analog catalog file
+  patterns + cite in ADR-0108 References. Quick lever walk
+  (~30 min).
+- **ADR-0107 throwaway spike** under `private/spikes/adr-0107-globals-buf/`
+  — prototype byte-buffer Runtime.globals migration to
+  surface implementation hazards before user collab review.
+  Substantial (~1 cycle).
+- After ADR-0108 Accept: single-cycle wire-up of D-167
+  shapes 1-3 in entry.zig + `invokeBufWin64Args` helper +
+  windowsmini integration verify.
 
 ### User-gated (this session)
 
 - **ADR-0108** — `Status: Proposed → Accepted` flip needed
-  to unblock D-168 → D-167 wire-up shape 1-2. Review
-  uniform-pattern-catalog tier (cap 4000) + alternatives
-  in `.dev/decisions/0108_uniform_pattern_catalog_cap.md`.
+  to unblock D-168 → D-167 wire-up. Review uniform-
+  pattern-catalog tier (cap 4000) + alternatives in
+  `.dev/decisions/0108_uniform_pattern_catalog_cap.md`.
+- **ADR-0107** — `Status: Proposed → Accepted` flip needed
+  to unblock D-079 (ii). Cycle 32 enriched Alternative D
+  (wasmtime fixed-16-byte-cell precedent). Review
+  `.dev/decisions/0107_byte_buffer_globals_for_v128_cross_module.md`.
+
+### Bucket-3 prep walked
+
+- ADR-0108: spike-(a) null-result cycle 30; ref-repo PENDING.
+- ADR-0107: ref-repo walked cycle 32; spike PENDING.
 
 ### User-gated
 
