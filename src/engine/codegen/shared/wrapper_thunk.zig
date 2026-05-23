@@ -285,21 +285,37 @@ pub fn emitX8664Win64(
     allocator: std.mem.Allocator,
     params: EmitParams,
 ) Error!EmitOutput {
-    if (params.sig.params.len != 0) return Error.UnsupportedOp;
+    // 2026-05-23: relaxed from 0-arg-only to 0..1-arg (i32 / i64).
+    // 2+ args still unsupported; surfaced as garbage-1st-result on
+    // `break-br_if-num-num` etc. when SKIP-WIN64-MULTI-RESULT arm
+    // was retired at cycle 9 + 21.
+    if (params.sig.params.len > 1) return Error.UnsupportedOp;
+    if (params.sig.params.len == 1) {
+        const p0 = params.sig.params[0];
+        if (p0 != .i32 and p0 != .i64) return Error.UnsupportedOp;
+    }
     const results_all_gpr = all_gpr_class(params.sig.results);
     const results_all_xmm = all_xmm_class(params.sig.results);
     if (!results_all_gpr and !results_all_xmm) return Error.UnsupportedOp;
 
     const n_results = params.sig.results.len;
+    const n_params = params.sig.params.len;
     var bytes: std.ArrayList(u8) = .empty;
     errdefer bytes.deinit(allocator);
 
     if (n_results == 2 and results_all_gpr) {
-        // 2-int register-class shape (33 bytes); body uses
+        // 2-int register-class shape; body uses
         // register convention (result 0 in RAX, result 1 in RDX).
+        // For 1-arg case: load arg0 from R8 (args[0]) into RDX
+        // before the body sees its expected (rt=RCX, a0=RDX) shape.
         try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x28 }); // SUB RSP, 0x28
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x54, 0x24, 0x20 }); // MOV [RSP+0x20], RDX
-        try emitCallRel32(allocator, &bytes, params, 4 + 5);
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x54, 0x24, 0x20 }); // MOV [RSP+0x20], RDX (save results)
+        var prefix_size: u32 = 4 + 5;
+        if (n_params == 1) {
+            try bytes.appendSlice(allocator, &.{ 0x49, 0x8B, 0x10 }); // MOV RDX, [R8] (load a0 from args[0])
+            prefix_size += 3;
+        }
+        try emitCallRel32(allocator, &bytes, params, prefix_size);
         try bytes.appendSlice(allocator, &.{ 0x4C, 0x8B, 0x44, 0x24, 0x20 }); // MOV R8, [RSP+0x20]
         try bytes.appendSlice(allocator, &.{ 0x49, 0x89, 0x00 }); // MOV [R8], RAX
         try bytes.appendSlice(allocator, &.{ 0x49, 0x89, 0x50, 0x08 }); // MOV [R8+8], RDX
