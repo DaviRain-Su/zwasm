@@ -91,8 +91,13 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
 ## Cold-start procedure
 
 Per `/continue` SKILL.md Resume Steps 0.5 / 0.7 / 0.8.
-Current state = bucket-3 stop pending ADR-0107 / ADR-0108
-Accept (above).
+**Current state**: autonomous-eligible. `now` debts:
+D-167 (folded into §9.13-V Phase A.4) + §9.13-V Phase A.1
+scope audit is the next chunk (see flow doc §2).
+**Step 1a override**: `phase9_close_master.md` reference
+above triggers close-plan override per SKILL.md; Step 2
+(ROADMAP §9 first `[ ]` lookup) is therefore informational
+— actual next work is per flow doc + plan doc.
 
 ## See
 
