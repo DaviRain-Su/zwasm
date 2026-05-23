@@ -292,18 +292,47 @@ pub fn emitX8664Win64(
     // current cycle re-introduces shapes one at a time, each
     // gated behind its own Mac byte test (see spike README §
     // "Spike work order").
-    if (n_params != 0 and n_params != 1) return Error.UnsupportedOp;
-    if (n_params == 1 and !all_gpr_class(params.sig.params)) return Error.UnsupportedOp;
+    if (n_params != 0 and n_params != 1 and n_params != 3) return Error.UnsupportedOp;
+    if (n_params != 0 and !all_gpr_class(params.sig.params)) return Error.UnsupportedOp;
     const results_all_gpr = all_gpr_class(params.sig.results);
     const results_all_xmm = all_xmm_class(params.sig.results);
     if (!results_all_gpr and !results_all_xmm) return Error.UnsupportedOp;
 
     const n_results = params.sig.results.len;
-    // 1-arg shapes only support 2-int register-class today.
-    if (n_params == 1 and !(n_results == 2 and results_all_gpr)) return Error.UnsupportedOp;
+    // Multi-arg shapes only support 2-int register-class today.
+    if (n_params != 0 and !(n_results == 2 and results_all_gpr)) return Error.UnsupportedOp;
 
     var bytes: std.ArrayList(u8) = .empty;
     errdefer bytes.deinit(allocator);
+
+    if (n_params == 3 and n_results == 2 and results_all_gpr) {
+        // 3-arg + 2-int register-class shape (44 bytes; D-167
+        // shape 2/3). Body view at entry: RCX=rt, RDX=a0,
+        // R8=a1, R9=a2 (standard Win64 GPR arg slots 0-3).
+        //
+        // Load order is critical because wrapper-entry R8
+        // holds args ptr and gets overwritten when loading a1:
+        //   1. Save results (RDX) to shadow [RSP+0x20].
+        //   2. MOV R9, [R8+0x10]  — a2 FIRST while R8=args ptr.
+        //   3. MOV RDX, [R8]      — a0; R8 still args ptr.
+        //   4. MOV R8, [R8+0x08]  — a1 LAST; R8 now consumed.
+        //   5. CALL body.
+        //   6. Restore results into R8 from shadow; write
+        //      RAX → [R8], RDX → [R8+8].
+        //   7. ADD RSP, 0x28; XOR EAX,EAX; RET.
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x28 }); // SUB RSP, 0x28
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x54, 0x24, 0x20 }); // MOV [RSP+0x20], RDX
+        try bytes.appendSlice(allocator, &.{ 0x4D, 0x8B, 0x48, 0x10 }); // MOV R9, [R8+0x10]
+        try bytes.appendSlice(allocator, &.{ 0x49, 0x8B, 0x10 }); // MOV RDX, [R8]
+        try bytes.appendSlice(allocator, &.{ 0x4D, 0x8B, 0x40, 0x08 }); // MOV R8, [R8+0x08]
+        try emitCallRel32(allocator, &bytes, params, 4 + 5 + 4 + 3 + 4);
+        try bytes.appendSlice(allocator, &.{ 0x4C, 0x8B, 0x44, 0x24, 0x20 }); // MOV R8, [RSP+0x20]
+        try bytes.appendSlice(allocator, &.{ 0x49, 0x89, 0x00 }); // MOV [R8], RAX
+        try bytes.appendSlice(allocator, &.{ 0x49, 0x89, 0x50, 0x08 }); // MOV [R8+8], RDX
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xC4, 0x28 }); // ADD RSP, 0x28
+        try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 }); // XOR EAX,EAX ; RET
+        return .{ .bytes = try bytes.toOwnedSlice(allocator) };
+    }
 
     if (n_params == 1 and n_results == 2 and results_all_gpr) {
         // 1-arg + 2-int register-class shape (36 bytes; D-167).
@@ -646,6 +675,61 @@ test "wrapper_thunk: emitX8664Win64 1-arg 2-int register-class (i32) -> (i32, i3
     try testing.expectEqualSlices(u8, &.{ 0x48, 0x83, 0xC4, 0x28 }, out.bytes[29..33]);
     // XOR EAX, EAX ; RET
     try testing.expectEqualSlices(u8, &.{ 0x31, 0xC0, 0xC3 }, out.bytes[33..36]);
+}
+
+test "wrapper_thunk: emitX8664Win64 3-arg 2-int register-class (i64, i64, i32) -> (i64, i32) (44 bytes)" {
+    // D-167 spike step (1) shape 2/3 — 3-arg + 2-int Win64
+    // wrapper. Byte sequence from
+    // private/spikes/d167-win64-multi-arg-wrapper/README.md
+    // "Win64 byte sequences (proven from cycle 21-24)".
+    //
+    // Critical: a2 MUST be loaded FIRST into R9, then a0 into
+    // RDX, then a1 into R8 LAST. Reason: wrapper-entry R8
+    // holds args ptr; loading a1 into R8 overwrites it, so a2
+    // (which lives at args[2] = [R8+16]) must be hoisted out
+    // before that overwrite. Body view at entry: RCX=rt,
+    // RDX=a0, R8=a1, R9=a2 (Win64 GPR arg slots 0-3).
+    //
+    // Concrete helper: `callI64i32_i64i64i32` — Value slot
+    // size is 8 bytes, so args[0]=[R8], args[1]=[R8+8],
+    // args[2]=[R8+16] regardless of i32/i64 distinction (i32
+    // occupies low 32 bits; high bits zero per Wasm-Value
+    // convention).
+    const ValType = @import("../../../ir/zir.zig").ValType;
+    const params_arr = [_]ValType{ .i64, .i64, .i32 };
+    const results = [_]ValType{ .i64, .i32 };
+    const params: EmitParams = .{
+        .sig = .{ .params = &params_arr, .results = &results },
+        .body_offset = 300,
+        .thunk_offset = 0,
+    };
+    const out = try emitX8664Win64(testing.allocator, params);
+    defer testing.allocator.free(out.bytes);
+    try testing.expectEqual(@as(usize, 44), out.bytes.len);
+    // SUB RSP, 0x28
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x83, 0xEC, 0x28 }, out.bytes[0..4]);
+    // MOV [RSP+0x20], RDX  (save results ptr)
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x89, 0x54, 0x24, 0x20 }, out.bytes[4..9]);
+    // MOV R9, [R8+0x10]  (a2 FIRST — before R8 gets overwritten)
+    try testing.expectEqualSlices(u8, &.{ 0x4D, 0x8B, 0x48, 0x10 }, out.bytes[9..13]);
+    // MOV RDX, [R8]  (a0)
+    try testing.expectEqualSlices(u8, &.{ 0x49, 0x8B, 0x10 }, out.bytes[13..16]);
+    // MOV R8, [R8+0x08]  (a1 LAST — R8 now reused for a1)
+    try testing.expectEqualSlices(u8, &.{ 0x4D, 0x8B, 0x40, 0x08 }, out.bytes[16..20]);
+    // CALL rel32: body_offset(300) - (0 + 20 + 5) = 275
+    try testing.expectEqual(@as(u8, 0xE8), out.bytes[20]);
+    const disp = std.mem.readInt(i32, out.bytes[21..25], .little);
+    try testing.expectEqual(@as(i32, 275), disp);
+    // MOV R8, [RSP+0x20]
+    try testing.expectEqualSlices(u8, &.{ 0x4C, 0x8B, 0x44, 0x24, 0x20 }, out.bytes[25..30]);
+    // MOV [R8], RAX
+    try testing.expectEqualSlices(u8, &.{ 0x49, 0x89, 0x00 }, out.bytes[30..33]);
+    // MOV [R8+8], RDX
+    try testing.expectEqualSlices(u8, &.{ 0x49, 0x89, 0x50, 0x08 }, out.bytes[33..37]);
+    // ADD RSP, 0x28
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x83, 0xC4, 0x28 }, out.bytes[37..41]);
+    // XOR EAX, EAX ; RET
+    try testing.expectEqualSlices(u8, &.{ 0x31, 0xC0, 0xC3 }, out.bytes[41..44]);
 }
 
 test "wrapper_thunk: EmitParams + EmitOutput types present" {
