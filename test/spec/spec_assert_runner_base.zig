@@ -2042,39 +2042,228 @@ pub fn hasIncompatibleImportType(
         "table",      "memory",
     };
     for (imports.items) |imp| {
-        if (imp.kind != .func) continue;
         if (std.mem.eql(u8, imp.module, "spectest")) {
-            // spectest-specific shape mismatches not yet caught
-            // by the bindable path. Imports.wast assert_unlinkable
-            // shapes: declaring a non-func export as func, OR
-            // a name that isn't in the spectest catalog at all
-            // ("unknown"). For func names that DO exist in
-            // spectest, the runtime stub binds them so this case
-            // is genuinely unlinkable-only when the kind is
-            // wrong or the name doesn't exist.
-            for (spectest_non_func_names) |bad_name| {
-                if (std.mem.eql(u8, imp.name, bad_name)) return true;
+            // spectest-specific shape mismatches. (a) func imports:
+            // declaring a non-func export as func, OR a name that
+            // isn't in the spectest catalog ("unknown"). For func
+            // names that DO exist in spectest, the runtime stub
+            // binds them. (b) non-func imports (global / table /
+            // memory): re-use `isSpectestNonFuncBindable` — its
+            // contract already encodes the spectest catalog's
+            // expected types. Non-bindable → unlinkable.
+            if (imp.kind == .func) {
+                for (spectest_non_func_names) |bad_name| {
+                    if (std.mem.eql(u8, imp.name, bad_name)) return true;
+                }
+                if (std.mem.eql(u8, imp.name, "unknown")) return true;
+                continue;
+            } else {
+                if (!isSpectestNonFuncBindable(imp)) return true;
+                continue;
             }
-            // The "unknown" name (literal) — spectest exports
-            // never include this name.
-            if (std.mem.eql(u8, imp.name, "unknown")) return true;
-            continue;
         }
+        // Non-spectest imports — look up exporter in registered map.
         const exp = registered.getPtr(imp.module) orelse continue;
-        const want_tidx = imp.payload.func_typeidx;
-        if (want_tidx >= types.items.len) return true;
-        const want = types.items[want_tidx];
-        const exporter_ft = zwasm.engine.export_lookup.getExportFuncType(allocator, exp.bytes_owned, imp.name) catch {
-            // Exporter doesn't have this export OR the lookup
-            // failed — treat as a mismatch so the linker rejects.
-            return true;
-        };
-        defer allocator.free(exporter_ft.params);
-        defer allocator.free(exporter_ft.results);
-        if (exporter_ft.params.len != want.params.len) return true;
-        if (exporter_ft.results.len != want.results.len) return true;
-        for (exporter_ft.params, want.params) |sp, wp| if (sp != wp) return true;
-        for (exporter_ft.results, want.results) |sr, wr| if (sr != wr) return true;
+        switch (imp.kind) {
+            .func => {
+                const want_tidx = imp.payload.func_typeidx;
+                if (want_tidx >= types.items.len) return true;
+                const want = types.items[want_tidx];
+                const exporter_ft = zwasm.engine.export_lookup.getExportFuncType(allocator, exp.bytes_owned, imp.name) catch return true;
+                defer allocator.free(exporter_ft.params);
+                defer allocator.free(exporter_ft.results);
+                if (exporter_ft.params.len != want.params.len) return true;
+                if (exporter_ft.results.len != want.results.len) return true;
+                for (exporter_ft.params, want.params) |sp, wp| if (sp != wp) return true;
+                for (exporter_ft.results, want.results) |sr, wr| if (sr != wr) return true;
+            },
+            .global, .table, .memory => {
+                // Mirror `instantiate.zig::checkImportTypeMatches`
+                // for non-func imports. Walk the exporter's export
+                // section to locate the named export; verify kind
+                // matches; cross-reference the exporter's
+                // global / table / memory section (including
+                // imports prefix) to read the actual type.
+                if (crossModuleNonFuncImportMismatch(allocator, exp.bytes_owned, imp)) return true;
+            },
+        }
+    }
+    return false;
+}
+
+/// Returns `true` when the exporter's `imp.name` export does not
+/// match `imp` (kind mismatch, missing export, or type mismatch).
+/// Mirror of `runtime/instance/instantiate.zig::checkImportTypeMatches`
+/// non-func arms, adapted to read the exporter's wasm bytes
+/// directly rather than a binding descriptor.
+fn crossModuleNonFuncImportMismatch(
+    allocator: std.mem.Allocator,
+    exporter_bytes: []const u8,
+    imp: zwasm.parse.sections.Import,
+) bool {
+    var module = zwasm.parse.parser.parse(allocator, exporter_bytes) catch return true;
+    defer module.deinit(allocator);
+    const export_sec = module.find(.@"export") orelse return true;
+    var exports = zwasm.parse.sections.decodeExports(allocator, export_sec.body) catch return true;
+    defer exports.deinit();
+    var found: ?zwasm.parse.sections.Export = null;
+    for (exports.items) |e| {
+        if (std.mem.eql(u8, e.name, imp.name)) {
+            found = e;
+            break;
+        }
+    }
+    const e = found orelse return true;
+    // Kind compatibility — declaring `(global ...)` against a
+    // table export is a kind mismatch.
+    const want_kind_byte: u8 = switch (imp.kind) {
+        .func => 0,
+        .table => 1,
+        .memory => 2,
+        .global => 3,
+    };
+    const exp_kind_byte: u8 = switch (e.kind) {
+        .func => 0,
+        .table => 1,
+        .memory => 2,
+        .global => 3,
+    };
+    if (want_kind_byte != exp_kind_byte) return true;
+    switch (imp.kind) {
+        .func => return false, // handled by caller
+        .global => {
+            const want = imp.payload.global;
+            return crossModuleGlobalMismatch(allocator, &module, e.idx, want.valtype, want.mutable);
+        },
+        .table => {
+            const want = imp.payload.table;
+            return crossModuleTableMismatch(allocator, &module, e.idx, want.elem_type, want.min, want.max);
+        },
+        .memory => {
+            const want = imp.payload.memory;
+            return crossModuleMemoryMismatch(allocator, &module, e.idx, want.min, want.max);
+        },
+    }
+}
+
+/// Walk the exporter's import + global sections to find the
+/// global at `global_idx` and verify its valtype + mutability
+/// match `want_valtype` / `want_mutable`.
+fn crossModuleGlobalMismatch(
+    allocator: std.mem.Allocator,
+    module: *const zwasm.runtime.Module,
+    global_idx: u32,
+    want_valtype: zwasm.ir.zir.ValType,
+    want_mutable: bool,
+) bool {
+    var imported_globals: u32 = 0;
+    if (module.find(.import)) |is| {
+        var imps = zwasm.parse.sections.decodeImports(allocator, is.body) catch return true;
+        defer imps.deinit();
+        for (imps.items) |im| {
+            if (im.kind != .global) continue;
+            if (imported_globals == global_idx) {
+                return im.payload.global.valtype != want_valtype or im.payload.global.mutable != want_mutable;
+            }
+            imported_globals += 1;
+        }
+    }
+    const defined_idx = global_idx - imported_globals;
+    const gs = module.find(.global) orelse return true;
+    var globals = zwasm.parse.sections.decodeGlobals(allocator, gs.body) catch return true;
+    defer globals.deinit();
+    if (defined_idx >= globals.items.len) return true;
+    const g = globals.items[defined_idx];
+    return g.valtype != want_valtype or g.mutable != want_mutable;
+}
+
+/// Walk the exporter's import + table sections to find the
+/// table at `table_idx` and verify elem_type / min / max match
+/// (per Wasm 2.0 §3.4.10 limits-matching: source.min >= want.min
+/// and want.max >= source.max if want.max is set).
+fn crossModuleTableMismatch(
+    allocator: std.mem.Allocator,
+    module: *const zwasm.runtime.Module,
+    table_idx: u32,
+    want_elem: zwasm.ir.zir.ValType,
+    want_min: u32,
+    want_max: ?u32,
+) bool {
+    var imported_tables: u32 = 0;
+    if (module.find(.import)) |is| {
+        var imps = zwasm.parse.sections.decodeImports(allocator, is.body) catch return true;
+        defer imps.deinit();
+        for (imps.items) |im| {
+            if (im.kind != .table) continue;
+            if (imported_tables == table_idx) {
+                const t = im.payload.table;
+                return tableLimitsMismatch(t.elem_type, t.min, t.max, want_elem, want_min, want_max);
+            }
+            imported_tables += 1;
+        }
+    }
+    const defined_idx = table_idx - imported_tables;
+    const ts = module.find(.table) orelse return true;
+    var tables = zwasm.parse.sections.decodeTables(allocator, ts.body) catch return true;
+    defer tables.deinit();
+    if (defined_idx >= tables.items.len) return true;
+    const t = tables.items[defined_idx];
+    return tableLimitsMismatch(t.elem_type, t.min, t.max, want_elem, want_min, want_max);
+}
+
+fn tableLimitsMismatch(
+    src_elem: zwasm.ir.zir.ValType,
+    src_min: u32,
+    src_max: ?u32,
+    want_elem: zwasm.ir.zir.ValType,
+    want_min: u32,
+    want_max: ?u32,
+) bool {
+    if (src_elem != want_elem) return true;
+    if (src_min < want_min) return true;
+    if (want_max) |wm| {
+        const sm = src_max orelse return true;
+        if (sm > wm) return true;
+    }
+    return false;
+}
+
+/// Walk the exporter's import + memory sections to find the
+/// memory at `mem_idx` and verify limits (min / max) match.
+fn crossModuleMemoryMismatch(
+    allocator: std.mem.Allocator,
+    module: *const zwasm.runtime.Module,
+    mem_idx: u32,
+    want_min: u32,
+    want_max: ?u32,
+) bool {
+    var imported_mems: u32 = 0;
+    if (module.find(.import)) |is| {
+        var imps = zwasm.parse.sections.decodeImports(allocator, is.body) catch return true;
+        defer imps.deinit();
+        for (imps.items) |im| {
+            if (im.kind != .memory) continue;
+            if (imported_mems == mem_idx) {
+                const m = im.payload.memory;
+                return memLimitsMismatch(m.min, m.max, want_min, want_max);
+            }
+            imported_mems += 1;
+        }
+    }
+    const defined_idx = mem_idx - imported_mems;
+    const ms = module.find(.memory) orelse return true;
+    var mems = zwasm.parse.sections.decodeMemory(allocator, ms.body) catch return true;
+    defer mems.deinit();
+    if (defined_idx >= mems.items.len) return true;
+    const m = mems.items[defined_idx];
+    return memLimitsMismatch(m.min, m.max, want_min, want_max);
+}
+
+fn memLimitsMismatch(src_min: u32, src_max: ?u32, want_min: u32, want_max: ?u32) bool {
+    if (src_min < want_min) return true;
+    if (want_max) |wm| {
+        const sm = src_max orelse return true;
+        if (sm > wm) return true;
     }
     return false;
 }
