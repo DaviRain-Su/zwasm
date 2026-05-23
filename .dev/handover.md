@@ -31,35 +31,44 @@ A4 D-163/D-166 shared root-cause, Win64 2-i32-result fix,
 ADR-0107 Proposed, cycle 21-24 D-167 revert): `git log
 --grep="cycle 2[0-5]"` and `git log --grep="A1\|A2\|A4"`.
 
-## Cycles 26-27 progress (D-167 spike work-order step 1, shapes 1-2/3)
+## Cycles 26-28 progress (D-167 spike work-order step 1 COMPLETE)
 
-**1-arg + 2-int-result (36 bytes; cycle 26) + 3-arg + 2-int-result
-(44 bytes; cycle 27) wrapper shapes LANDED** with Mac byte
-tests. `emitX8664Win64` predicate now allows `n_params ∈
-{0, 1, 3}` with `n_results == 2 and all_gpr` for multi-arg.
-Bytes per spike README § "Win64 byte sequences (proven from
-cycle 21-24)". Wrapper extension only; entry.zig if-arm
-wire-up deferred until remaining shape lands (incremental
-approach per spike work order step 3). Shape 1/3 implicitly
-covers `callI32i32_i32` + `callI32i64_i32`; shape 2/3 covers
-`callI64i32_i64i64i32`.
+**All 3 wrapper shapes Mac-green**: 1-arg+2-int (36 bytes;
+cycle 26), 3-arg+2-int (44 bytes; cycle 27), 1-arg+3-int
+MEMORY (22 bytes; cycle 28). `emitX8664Win64` predicate now
+allows `n_params ∈ {0,1,3}` × (2-int register-class OR
+1-arg-3-int MEMORY-class). All 4 D-167 entry-helper unique
+shapes covered. Bytes per spike README § "Win64 byte
+sequences (proven from cycle 21-24)". FILE-SIZE-EXEMPT
+marker added (ADR-0099 D2 P1 — closed sub-language; tests
+change in lockstep with emit).
+
+**Wrapper extension only — entry.zig if-arm wire-up not yet
+done.** Cycle 28 caveat: shape 3/3 wrapper is byte-correct
+but runtime-correctness inherits the same body-side gating
+issue as the existing 0-arg 3-int arm (cycle 2c MEMORY-class
+body emit is `.sysv`-only today; bodies on Win64 use
+register_write). Wire-up must coordinate both.
 
 ## Remaining work
 
 ### Autonomous-eligible (next session pick from here)
 
-- **D-167 shape 3/3** — 1-arg + 3-int MEMORY-class
-  (`callI32i32i64_i32`). Body uses Win64 MEMORY-class
-  convention (RCX = hidden ptr, RDX = rt). Cycle 21-24's
-  3-int extension was the same shape as the existing 0-arg
-  3-int MEMORY arm; just add `n_params == 1` allowance with
-  `MOV RDX/RCX` rearrangement + a0 load into a Win64 GPR
-  arg-slot register.
-- **D-167 wire-up** — after shape 3/3 Mac-green: add
-  entry.zig Win64 if-arms calling `invokeBufWin64Args`
-  helper (to add back in `entry_buffer_write.zig`), then
-  windowsmini integration verify ESPECIALLY simd_assert
-  (cycle 24's regression site).
+- **D-167 wire-up step 2** (spike work-order step 2) —
+  synthetic end-to-end execution tests on Mac for each of
+  the 3 shapes via hand-rolled body bytes (pattern at
+  `wrapper_thunk.zig:579+` `() → (i32, i32, i32)`). Verifies
+  the wrapper bridges register convention correctly under
+  actual execution (Mac aarch64 path covers AAPCS64; x86_64
+  SysV path covers ubuntu; Win64 path NOT runtime-verifiable
+  on Mac/Linux — covered at step 4 windowsmini integration).
+- **D-167 wire-up step 3** — entry.zig Win64 if-arms
+  calling `invokeBufWin64Args` helper (add back in
+  `entry_buffer_write.zig`). For 3-int MEMORY-class shape:
+  ALSO needs body-side cycle 2c MEMORY-class extension to
+  Win64 (currently `.sysv`-gated; see emit_setup.zig).
+- **D-167 wire-up step 4** — windowsmini integration verify
+  ESPECIALLY simd_assert (cycle 24's regression site).
 
 ### User-gated
 
