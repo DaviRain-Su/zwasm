@@ -109,6 +109,23 @@ pub fn invokeBufWin64NoArgs(
     return results_buf;
 }
 
+/// Win64 routing helper for N-arg multi-result entry helpers.
+/// Generalises invokeBufWin64NoArgs to accept a packed args slice
+/// (each Wasm-param packed as u64). Use for `(i32) -> (i32, i64)`-
+/// and similar shapes per ADR-0106 buffer-write convention.
+pub fn invokeBufWin64Args(
+    rt: *JitRuntime,
+    module: @import("linker.zig").JitModule,
+    func_idx: u32,
+    args: []const u64,
+    comptime n_results: usize,
+) Error![n_results]u64 {
+    const buf_fn = module.entry_buf(func_idx, BufferWriteFn);
+    var results_buf: [n_results]u64 = [_]u64{0} ** n_results;
+    try invokeBufferWrite(rt, buf_fn, args.ptr, &results_buf);
+    return results_buf;
+}
+
 // ============================================================
 // Tests — hand-rolled JIT bytes that match the buffer-write ABI
 // without depending on the JIT emit changes (cycles 2-3).
