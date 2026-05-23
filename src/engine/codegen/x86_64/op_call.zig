@@ -810,17 +810,17 @@ pub fn captureCallResult(
 
     // D-093 (d-11) — multi-result capture. SysV §3.2.3: GPR results
     // in RAX, RDX (≤2); FP / SIMD results in XMM0, XMM1 (≤2).
-    // Win64 §3.2.4: ≤1 result per class. Overflow → UnsupportedOp.
+    // D-165 close 2026-05-23: Win64 cap bumped 1→2 (mirror of R2
+    // `marshalReturnRegs` cap fix `aac986d9`). Body writes both
+    // results to RAX+RDX (R2); caller MUST capture both, or the
+    // second result becomes garbage and downstream uses see
+    // corrupt values (the actual D-165 fac-ssa hang root cause —
+    // pick0 is 2-i64-result register-class; truncating cap=1
+    // dropped its second result, fac-ssa's loop state corrupts).
     const gpr_result_regs = [_]abi.Gpr{ .rax, .rdx };
     const xmm_result_regs = [_]abi.Xmm{ .xmm0, .xmm1 };
-    const gpr_cap: u8 = switch (abi.current_cc) {
-        .sysv => 2,
-        .win64 => 1,
-    };
-    const xmm_cap: u8 = switch (abi.current_cc) {
-        .sysv => 2,
-        .win64 => 1,
-    };
+    const gpr_cap: u8 = 2;
+    const xmm_cap: u8 = 2;
 
     // D-093 (d-12) — cap-exceed silent-truncate (workaround per
     // D-094 debt row). Mirrors marshalReturnRegs's cap handling.
