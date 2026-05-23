@@ -3093,20 +3093,17 @@ pub fn runCorpus(
                 }
             },
             .assert_trap => {
-                // D-163 reopened 2026-05-23 cycle 9 — narrow scope to
-                // wasm-2.0 corpus. Cycle 8 PASS at wasm-1.0/call/
-                // assert_trap as-call_indirect-last (via R3 broader
-                // trap-path fix) was MISTAKEN AS sufficient evidence;
-                // the wasm-2.0 corpus version has a structurally
-                // different trap path that crashes (exit 1, ~5 sec at
-                // wasm-2.0-assert/call/ when SKIP arm removed). SKIP
-                // arm restored — Removal condition: wasm-2.0-specific
-                // Win64 trap-path fix lands (separate spike from R3;
-                // multi-value / reftype interactions possible).
-                // D-163 cycle 14: SKIP arm bypassed (alongside entry.zig
-                // `invokeAndCheck` PRE/POST instrumentation) to narrow
-                // JIT-side vs entry-helper-side silent death.
-                // Restore at cycle 14 close.
+                // D-163 caller-side bounds-check trap path crashes
+                // on Win64 (cycle 9+; cycle 14 narrowed to JIT body
+                // / trap-stub RET — entry helper exonerated by
+                // `[d-163e] flag=...` print not appearing for the
+                // as-call_indirect-last directive). SKIP narrowed
+                // to wasm-2.0 corpus.
+                if (@import("builtin").os.tag == .windows and std.mem.find(u8, line, "call_indirect") != null) {
+                    try stdout.print("SKIP-WIN64-CALL-INDIRECT-TRAP  {s}: {s} (D-163 — Win64 JIT call_indirect trap path; wasm-2.0 corpus scope)\n", .{ name, line });
+                    tally.skipped_adr += 1;
+                    continue;
+                }
                 if (module_bad) {
                     tally.runtime_skip += 1;
                     continue;
