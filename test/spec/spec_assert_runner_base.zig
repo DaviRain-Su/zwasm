@@ -2029,43 +2029,28 @@ pub fn hasIncompatibleImportType(
     var imports = zwasm.parse.sections.decodeImports(allocator, sec.body) catch return false;
     defer imports.deinit();
     // Importer's type section — resolves imp.payload.func_typeidx
-    // to a FuncType (params + results).
-    const type_sec = module.find(.type) orelse return false;
-    var types = zwasm.parse.sections.decodeTypes(allocator, type_sec.body) catch return false;
-    defer types.deinit();
+    // to a FuncType (params + results). Optional: non-func-only
+    // import modules legitimately have no type section (e.g.
+    // `(module (import "test" "unknown" (global i32)))`).
+    var types_opt: ?zwasm.parse.sections.Types = if (module.find(.type)) |s|
+        zwasm.parse.sections.decodeTypes(allocator, s.body) catch null
+    else
+        null;
+    defer if (types_opt) |*t| t.deinit();
 
-    // Known spectest non-func exports — declaring any of these
-    // as a func import is a kind mismatch (assert_unlinkable PASS).
-    // Per WebAssembly/spec/test/core/imports.wast.
-    const spectest_non_func_names = [_][]const u8{
-        "global_i32", "global_i64", "global_f32", "global_f64",
-        "table",      "memory",
-    };
+    // spectest is registered at runCorpus start (line 3014); both
+    // spectest and cross-module imports use the same generic
+    // registered-map lookup path below. The check covers (a)
+    // export presence by name (catches "unknown" / missing
+    // exports), (b) kind compatibility (catches declaring non-func
+    // as func and vice-versa), and (c) full type matching —
+    // global valtype/mutable, table elem-type + limits-subsume,
+    // memory limits-subsume — per Wasm 2.0 §3.4.10.
     for (imports.items) |imp| {
-        if (std.mem.eql(u8, imp.module, "spectest")) {
-            // spectest-specific shape mismatches. (a) func imports:
-            // declaring a non-func export as func, OR a name that
-            // isn't in the spectest catalog ("unknown"). For func
-            // names that DO exist in spectest, the runtime stub
-            // binds them. (b) non-func imports (global / table /
-            // memory): re-use `isSpectestNonFuncBindable` — its
-            // contract already encodes the spectest catalog's
-            // expected types. Non-bindable → unlinkable.
-            if (imp.kind == .func) {
-                for (spectest_non_func_names) |bad_name| {
-                    if (std.mem.eql(u8, imp.name, bad_name)) return true;
-                }
-                if (std.mem.eql(u8, imp.name, "unknown")) return true;
-                continue;
-            } else {
-                if (!isSpectestNonFuncBindable(imp)) return true;
-                continue;
-            }
-        }
-        // Non-spectest imports — look up exporter in registered map.
         const exp = registered.getPtr(imp.module) orelse continue;
         switch (imp.kind) {
             .func => {
+                const types = types_opt orelse return true;
                 const want_tidx = imp.payload.func_typeidx;
                 if (want_tidx >= types.items.len) return true;
                 const want = types.items[want_tidx];
@@ -3493,10 +3478,12 @@ pub fn runCorpus(
                 if (runner_mod.compileWasm(gpa, wasm_bytes)) |compiled_ok| {
                     var c = compiled_ok;
                     c.deinit(gpa);
-                    // Path 3a (§9.12-E / B141): link-time func-
+                    // Path 3a (§9.12-E / B141): link-time
                     // import type-check vs the registered exporter
                     // map. A mismatch means the importer would
-                    // fail to link → PASS assert_unlinkable.
+                    // fail to link → PASS assert_unlinkable. Per
+                    // cycle 16 D-157 close, this covers all import
+                    // kinds (func / table / memory / global).
                     if (hasIncompatibleImportType(gpa, wasm_bytes, &registered)) {
                         tally.passed += 1;
                         continue;
