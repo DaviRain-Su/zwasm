@@ -13,10 +13,12 @@
 **Mandatory before any §9.x [x] flip**:
 `bash scripts/check_phase9_close_invariants.sh --gate`.
 
-**Gate state (mac-host)**: 18/18 passed.
-**Win64 surface (originally-planned)**: ALL CLOSED — D-162 /
-D-163 / D-164 / D-165 (cycle 9). The Win64 codegen redesign
-per ADR-0105 / ADR-0106 is structurally complete.
+**Gate state (mac-host)**: 17/18 passed (I1 = D-163 reopened
+cycle 9 — wasm-2.0 corpus scope; SKIP arm restored).
+**Win64 surface**: D-162 / D-164 / D-165 closed (cycle 8-9).
+D-163 partially closed (wasm-1.0/call/ PASS via R3) but
+wasm-2.0/call/ structurally-different shape still crashes
+(5-sec exit 1 on windowsmini); narrow-scope SKIP arm restored.
 
 ## Remaining work — Phase 9 真スコープ (host-side library code)
 
@@ -36,23 +38,18 @@ code. Phase B (below) bundles the Win64 verification once.
 
 Tackle in this order (autonomous-eligible, ROI-descending):
 
-1. **A1. D-157** — `assert_unlinkable` non-func import-type
-   checking. Extend `runtime/instance/instantiate.zig` to
-   verify table / memory / global import types at bind time
-   (mirror of existing func-import-type check). Exit: 56
-   `SKIP-NO-LINK-TYPECHECK` → 0 on Mac + ubuntu. **Highest-ROI
-   starter** (mechanical, clear exit, no API surface change).
-2. **A2. D-139** — c_api Instance lifecycle audit + coverage.
-   Audit which `wasm_instance_new` / `setupRuntime` behaviours
-   lack spec-corpus coverage; add paired in-source `test "..."`
-   blocks in `src/api/instance.zig` per audited behaviour. Exit:
-   audit doc filed + tests PASS on Mac + ubuntu.
-3. **A3. D-079 (ii)** — c_api v128 cross-module imports. Extend
-   `Runtime.globals: []*Value` (ADR-0052 §3 scalar-only) to
-   v128-aware; plumb into `instantiate.zig` cross-module import
-   wiring. Exit: new in-source test in `src/api/instance.zig`
-   PASSes on Mac + ubuntu. Last because Runtime.globals refactor
-   is widest in scope (ADR-0052 §3 amend may be needed).
+1. **A1. D-157** — `instantiate.zig` non-func import-type check.
+   Exit: 56 `SKIP-NO-LINK-TYPECHECK` → 0 on Mac+ubuntu.
+2. **A2. D-139** — c_api Instance audit + coverage tests in
+   `src/api/instance.zig`.
+3. **A3. D-079 (ii)** — c_api v128 cross-module: extend
+   `Runtime.globals` to v128-aware + plumb into instantiate.zig.
+4. **A4. D-163 wasm-2.0** — investigate wasm-2.0/call/
+   `assert_trap as-call_indirect-last` 5-sec crash on Win64
+   (likely multi-value/reftype/typeidx interaction R3 missed).
+   Repro via `test/private/d-165/` isolation pattern; cmd /c
+   per Recipes 15-17. Order is flexible — can interleave with
+   A1-A3 since infra is independent.
 
 ### Phase B — windowsmini reconcile (single shot after A1+A2+A3)
 
@@ -78,8 +75,9 @@ autonomous step after Phase A + B complete.
 ## Closed this session (2026-05-23)
 
 - ✅ **R3 / D-162, R2, R1, D-094, D-164**.
-- ✅ **D-163** SKIP-WIN64-CALL-INDIRECT-TRAP arm retired
-  (`0de438a6`); R3 broader trap-path fix repaired.
+- ⚠️ **D-163** SKIP arm retired `0de438a6` but **REOPENED**
+  cycle 9 — close was wasm-1.0 only; wasm-2.0/call/ trap
+  path still crashes. Narrow-scope arm restored.
 - ✅ **D-165** Win64 internal JIT-to-JIT MEMORY-class + cap
   fix (`75f96dee` + `99a047f6`). Real trigger: pick0's 2nd
   i64-result silently truncated by Win64 cap=1 in

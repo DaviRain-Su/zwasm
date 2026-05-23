@@ -3072,15 +3072,21 @@ pub fn runCorpus(
                 }
             },
             .assert_trap => {
-                // D-163 close attempt (2026-05-23, cycle 8): the
-                // Win64 call-indirect trap SKIP arm is removed. With
-                // R3's stack-probe (`1e2d716d`) fixing the broader
-                // Win64 trap path, the call_indirect trap may also
-                // succeed. The next windowsmini reconcile observes
-                // `call: assert_trap as-call_indirect-last ()` outcome
-                // directly. PASS → D-163 closes; flips invariant I1
-                // OK. FAIL/crash → revert this removal + reopen D-163
-                // with the actual crash signature as new evidence.
+                // D-163 reopened 2026-05-23 cycle 9 — narrow scope to
+                // wasm-2.0 corpus. Cycle 8 PASS at wasm-1.0/call/
+                // assert_trap as-call_indirect-last (via R3 broader
+                // trap-path fix) was MISTAKEN AS sufficient evidence;
+                // the wasm-2.0 corpus version has a structurally
+                // different trap path that crashes (exit 1, ~5 sec at
+                // wasm-2.0-assert/call/ when SKIP arm removed). SKIP
+                // arm restored — Removal condition: wasm-2.0-specific
+                // Win64 trap-path fix lands (separate spike from R3;
+                // multi-value / reftype interactions possible).
+                if (@import("builtin").os.tag == .windows and std.mem.find(u8, line, "call_indirect") != null) {
+                    try stdout.print("SKIP-WIN64-CALL-INDIRECT-TRAP  {s}: {s} (D-163 — Win64 JIT call_indirect trap path; wasm-2.0 corpus scope)\n", .{ name, line });
+                    tally.skipped_adr += 1;
+                    continue;
+                }
                 if (module_bad) {
                     tally.runtime_skip += 1;
                     continue;

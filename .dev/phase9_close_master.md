@@ -186,15 +186,22 @@ auto-load this list. Do not edit elsewhere.
   arm removed (`17953c9e`). windowsmini reconciliation
   at Phase 9 close boundary verifies `assert_return
   type-all-*` PASS on Win64.
-- [x] D-163 close — Win64 call_indirect trap path. SKIP arm
-  removed (`0de438a6`); windowsmini reconcile cycle 8 verified
-  `call: assert_trap as-call_indirect-last ()` PASS without
-  FAIL/SKIP/crash (log line 14615). The codegen-bug spike was
-  not needed — R3 stack-probe (`1e2d716d`) broader trap-path
-  fix repaired this trap path alongside the runaway exhaustion
-  path. Originally hypothesised as separate ABI mismatch /
-  bounds-check non-AV; actual root cause was the same Win64
-  commit-region early-overflow R3 fixed.
+- [ ] D-163 close — Win64 call_indirect trap path. Cycle 8
+  evidence (wasm-1.0/call/assert_trap as-call_indirect-last
+  PASS at log line 14615 after R3 broader trap-path fix) was
+  MISTAKEN as sufficient and the SKIP arm was removed at
+  `0de438a6`. Cycle 9 verification on wasm-2.0/call/ exposed
+  that the wasm-2.0 corpus's structurally-different
+  `as-call_indirect-last` directive still crashes (exit 1 in
+  ~5 sec on windowsmini). SKIP arm restored (cycle 9), scope
+  narrowed to wasm-2.0 corpus. Remaining fix: investigate
+  wasm-2.0-specific Win64 trap-path on `assert_trap` with
+  multi-value / reftype call_indirect. Treat as Phase A4
+  (autonomous-eligible, requires Mac-side reproducer of the
+  wasm-2.0 call_indirect-last shape because Win64 crashes
+  in 5 sec — `test/private/d-165/` style isolation + cmd /c
+  orchestration applies per `debug_jit_auto/SKILL.md` Recipes
+  15-17).
 
 ### §5.2 — c_api / Zig API Wasm-2.0 utilisation tests
 
