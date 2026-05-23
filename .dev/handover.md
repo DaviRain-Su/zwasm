@@ -73,11 +73,16 @@ cap=2 (`aac986d9`); R1 fixed by wrapper 2-XMM extension +
 and observe — needs windowsmini round-trip. Blocked by D-165
 (see below).
 
-**D-165 (new)**: windowsmini test-all stalls at `fac` (~line
-28K, after fac-ssa). Pre-existing pre-R3 (was hidden by
-runaway crash). Multi-result fac fixture or follow-on test
-hangs on Win64. Investigate as a separate spike before
-D-163 verification can proceed.
+**D-165 (new)**: windowsmini test-all stalls at
+`assert_exhaustion fac-rec i64:1073741824` (the directive
+right after `fac : assert_return fac-ssa`). fac-rec is
+recursive `(param i64) (result i64)` — with 1 MiB Win64
+headroom, probe should fire after ~16K iterations (~ms).
+Yet it hangs >20 min. Hypotheses: (a) probe doesn't fire
+for fac-rec (regression? but runaway works); (b) trap stub
+unwinds incorrectly for i64-result functions on Win64; (c)
+post-trap caller continues with bogus result + multiplies
++ loops somehow. Investigate as a separate spike.
 
 After R3: R1/R2 (Win64 `marshalReturnRegs` Cc-aware fix) →
 re-run → D-163 (spike H1/H2/H3 in
