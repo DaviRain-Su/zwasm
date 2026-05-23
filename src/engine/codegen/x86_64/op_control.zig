@@ -489,14 +489,17 @@ pub fn marshalReturnRegs(
     }
     const gpr_result_regs = [_]abi.Gpr{ .rax, .rdx };
     const xmm_result_regs = [_]abi.Xmm{ .xmm0, .xmm1 };
-    const gpr_cap: u8 = switch (abi.current_cc) {
-        .sysv => 2,
-        .win64 => 1,
-    };
-    const xmm_cap: u8 = switch (abi.current_cc) {
-        .sysv => 2,
-        .win64 => 1,
-    };
+    // R1/R2 fix (2026-05-23): JIT-internal convention writes
+    // result 0 → RAX, result 1 → RDX on BOTH SysV and Win64 for
+    // 2-int register-class returns. The Win64 wrapper thunk
+    // (ADR-0106 Phase 2'i, `shared/wrapper_thunk.zig::
+    // emitX8664Win64` 2-int case) reads RDX after the CALL —
+    // body must write it. Pre-R1/R2 cap=1 left RDX as garbage,
+    // surfacing as `br: as-return-values` second-i64 wrong.
+    // Same for XMM cohort: body writes XMM0+XMM1, wrapper
+    // (when extended) or Zig extern-struct return reads both.
+    const gpr_cap: u8 = 2;
+    const xmm_cap: u8 = 2;
     // D-093 (d-12) — cap-exceed silent-truncate (workaround per
     // D-094 debt row). SysV §3.2.3 limits result regs to 2/class;
     // >2 results need indirect-result-buffer via hidden RDI ptr.
