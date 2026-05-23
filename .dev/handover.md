@@ -46,23 +46,22 @@ Tackle in this order (autonomous-eligible, ROI-descending):
    `src/api/instance.zig`.
 3. **A3. D-079 (ii)** — c_api v128 cross-module: extend
    `Runtime.globals` to v128-aware + plumb into instantiate.zig.
-4. **A4. D-163 wasm-2.0 (in flight, cycle 11 → 12)** —
+4. **A4. D-163 wasm-2.0 (in flight, cycle 12 → 13)** —
    investigate wasm-2.0/call/ caller-side bounds-check trap
-   crash on Win64. Cycles 10-11 progress: Mac cross-build path
-   verified (cycle 10, `7de1119d`); cycle 11 re-enabled
-   `[d-163-jit]` per-function hex dump (`9ceb9d0d`; identical
-   shape to D-165 cycle 9 `abf04319`, removed at D-165 close);
-   windowsmini isolation dir created (`test/private/d-163/iso/call/`
-   copy of wasm-2.0-assert/call/); native build + initial run
-   verified runner reaches the SKIP arm (87 passed, 2 NEW
-   FAILs surfaced — `type-all-i32-i32` and `as-call-all-operands`
-   return garbage 32-bit values, possible D-094/D-164 territory
-   regression to triage). Cycle 12 next: rebuild on windowsmini
-   with diag commit, capture `[d-163-jit]` lines, identify the
-   function containing `as-call_indirect-last` (table-0 OOB
-   index 306), decode trap-stub bytes, compare ADD-RSP vs
-   prologue SUB-RSP (H1) and check R15 state (H3). Spike:
-   `private/spikes/d-163-win64-call-indirect-trap/`. Order:
+   crash on Win64. Cycle 12 (`f0b32dac`) decoded `func56`
+   (call_indirect with bounds check, ~223 bytes) on windowsmini
+   via `[d-163-jit]` dump + `ndisasm -b 64`: Prologue
+   `SUB RSP, 0x58` exactly matches bounds-trap-stub
+   `ADD RSP, 0x58`; R15 preserved through body; alignment OK.
+   **H1 / H3 / H4 REJECTED** for static layout. Crash is
+   runtime-side (entry helper / VEH / unwind metadata).
+   See lesson `2026-05-23-d163-static-jit-layout-verified.md`.
+   Cycle 13 next: bypass SKIP arm in
+   `spec_assert_runner_base.zig:3085` temporarily, run on
+   windowsmini, capture stderr + exit code + timing to narrow
+   runtime root cause. Companion: 2 NEW Win64 FAILs
+   (`type-all-i32-i32`, `as-call-all-operands` garbage 1st
+   i32) need separate triage (D-094/D-164 territory). Order:
    can interleave with A1-A3.
 
 ### Phase B — windowsmini reconcile (single shot after A1+A2+A3)
