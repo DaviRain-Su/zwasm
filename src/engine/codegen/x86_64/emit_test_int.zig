@@ -1709,3 +1709,110 @@ test "compile: self-recursive (call 0) emits JBE with patched disp32 pointing at
     try testing.expect(stub_abs >= 0 and stub_abs < @as(i64, @intCast(out.bytes.len)));
     try testing.expectEqual(@as(u8, 0x41), out.bytes[@intCast(stub_abs)]);
 }
+
+test "compile: self-recursive (i64)->i64 — probe + i64-result marshal (D-165 cycle 2)" {
+    // D-165 spike cycle 2 — sibling of the R3 ()->() test above for
+    // the fac-rec shape `(func (param i64) (result i64))` that hangs
+    // on Win64 with `assert_exhaustion fac-rec i64:1073741824`.
+    //
+    // Body: `local.get 0; call 0; end` — minimal valid shape that
+    // exercises (a) i64 param marshal into local slot, (b) the
+    // prologue stack-probe, (c) i64-arg pass to recursive call,
+    // (d) i64-result capture from RAX into a vreg, (e) end's
+    // marshal of the result vreg back into RAX.
+    //
+    // Cycle 2's H3 says: a Win64-specific marshal regression from
+    // the recent R1/R2/R3 diff. The byte-shape assertions below
+    // hold on both SysV (Mac host native) and Win64 (cross-compile
+    // / windowsmini reconcile). FAIL on either platform localises
+    // H3 to a byte-encoding bug.
+    const sig: zir.FuncType = .{ .params = &[_]zir.ValType{.i64}, .results = &[_]zir.ValType{.i64} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"local.get", .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .call, .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    f.liveness = .{
+        .ranges = &[_]zir.LiveRange{
+            .{ .def_pc = 0, .last_use_pc = 1 }, // local.get → consumed by call as arg
+            .{ .def_pc = 1, .last_use_pc = 2 }, // call result → consumed by end
+        },
+    };
+    const slots = [_]u16{ 0, 1 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 2 };
+    const out = try compile(testing.allocator, &f, alloc, &.{sig}, &.{sig}, 0, &.{}, &.{});
+    defer deinit(testing.allocator, out);
+
+    // Assertion 1: JBE rel32 patched (probe wired). Sibling of the
+    // R3 test's check; the property must hold for i64-shape too.
+    var jbe_off: ?usize = null;
+    var i: usize = 0;
+    while (i + 1 < out.bytes.len) : (i += 1) {
+        if (out.bytes[i] == 0x0F and out.bytes[i + 1] == 0x86) {
+            jbe_off = i;
+            break;
+        }
+    }
+    try testing.expect(jbe_off != null);
+    const jbe = jbe_off.?;
+    const disp32: i32 = std.mem.readInt(i32, out.bytes[jbe + 2 ..][0..4], .little);
+    try testing.expect(disp32 != 0);
+    const stub_abs: i64 = @as(i64, @intCast(jbe)) + 6 + @as(i64, disp32);
+    try testing.expect(stub_abs >= 0 and stub_abs < @as(i64, @intCast(out.bytes.len)));
+    try testing.expectEqual(@as(u8, 0x41), out.bytes[@intCast(stub_abs)]);
+
+    // Assertion 2: SUB RSP, imm with imm > 0 — fac-rec MUST allocate
+    // frame for the i64 param slot (8 bytes) + spill region. Probe
+    // gating doesn't require this (probe fires before SUB RSP), but
+    // if frame_bytes were 0 the recursion would still grow stack by
+    // 8 bytes per CALL (RIP push) — slower probe-fire, possibly
+    // missed timing.
+    //
+    // Encoding: imm8 form `48 83 EC ib` (4 bytes); imm32 form
+    // `48 81 EC id` (7 bytes). Both have prefix `48 8? EC`.
+    var sub_rsp_imm: ?u32 = null;
+    i = 0;
+    while (i + 3 < out.bytes.len) : (i += 1) {
+        if (out.bytes[i] == 0x48 and out.bytes[i + 2] == 0xEC) {
+            if (out.bytes[i + 1] == 0x83) {
+                sub_rsp_imm = out.bytes[i + 3];
+                break;
+            } else if (out.bytes[i + 1] == 0x81 and i + 6 < out.bytes.len) {
+                sub_rsp_imm = std.mem.readInt(u32, out.bytes[i + 3 ..][0..4], .little);
+                break;
+            }
+        }
+    }
+    try testing.expect(sub_rsp_imm != null);
+    try testing.expect(sub_rsp_imm.? > 0);
+    // On SysV (Mac native): frame_bytes covers locals(8) + spill +
+    // r15_save(8) + alignment → ≥ 16. On Win64: + shadow space (32)
+    // → ≥ 48.  Use platform-aware floor.
+    const min_frame: u32 = if (abi.current_cc == .win64) 48 else 16;
+    try testing.expect(sub_rsp_imm.? >= min_frame);
+
+    // Assertion 3: i64 result capture after CALL — must be 64-bit
+    // form `MOV r64, RAX` (REX.W set). Look for the byte sequence
+    // produced by `inst.encMovRR(.q, <vreg_reg>, .rax)` right after
+    // the CALL rel32 (E8 disp32 = 5 bytes).
+    var call_off: ?usize = null;
+    i = 0;
+    while (i < out.bytes.len) : (i += 1) {
+        if (out.bytes[i] == 0xE8) {
+            call_off = i;
+            break;
+        }
+    }
+    try testing.expect(call_off != null);
+    const post_call: usize = call_off.? + 5;
+    try testing.expect(post_call + 3 <= out.bytes.len);
+    // MOV r64, RAX encoding: REX.W (0x48 or 0x49) + 0x89 + ModR/M.
+    // Source = RAX (reg field = 0), so ModR/M = 0xC0 | (dst_low3 << 3).
+    // We only care that the result-capture is the 64-bit width form
+    // (REX.W set), not 32-bit (REX.B alone). The 32-bit form would
+    // truncate the upper i64 bits — a regression vs ADR-0026 i64
+    // marshal contract.
+    const rex = out.bytes[post_call];
+    try testing.expect(rex == 0x48 or rex == 0x49); // REX.W = 1
+    try testing.expectEqual(@as(u8, 0x89), out.bytes[post_call + 1]);
+}
