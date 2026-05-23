@@ -16,9 +16,11 @@
 **Gate state (mac-host)**: 17/18 passed (I1 = D-163 reopened
 cycle 9 — wasm-2.0 corpus scope; SKIP arm restored).
 **Win64 surface**: D-162 / D-164 / D-165 closed (cycle 8-9).
-D-163 partially closed (wasm-1.0/call/ PASS via R3) but
-wasm-2.0/call/ structurally-different shape still crashes
-(5-sec exit 1 on windowsmini); narrow-scope SKIP arm restored.
+D-163 **caller-side bounds-check trap path** crashes on Win64
+(5-sec exit 1 on windowsmini); cycle 8 PASS was callee-side
+`unreachable` trap in wasm-1.0/unreachable/ — distinct path
+(cycle 10 honest-accounting correction, commit `7de1119d`).
+Caller-side bounds-check trap has never been verified on Win64.
 
 ## Remaining work — Phase 9 真スコープ (host-side library code)
 
@@ -44,12 +46,18 @@ Tackle in this order (autonomous-eligible, ROI-descending):
    `src/api/instance.zig`.
 3. **A3. D-079 (ii)** — c_api v128 cross-module: extend
    `Runtime.globals` to v128-aware + plumb into instantiate.zig.
-4. **A4. D-163 wasm-2.0** — investigate wasm-2.0/call/
-   `assert_trap as-call_indirect-last` 5-sec crash on Win64
-   (likely multi-value/reftype/typeidx interaction R3 missed).
-   Repro via `test/private/d-165/` isolation pattern; cmd /c
-   per Recipes 15-17. Order is flexible — can interleave with
-   A1-A3 since infra is independent.
+4. **A4. D-163 wasm-2.0 (in flight, cycle 10 → 11)** —
+   investigate wasm-2.0/call/ caller-side bounds-check trap
+   crash on Win64. Cycle 10 verified Mac cross-build path
+   (`zig build install -Dtarget=x86_64-windows-gnu` produces
+   4.4 MB PE32+) and corrected cycle 8 misattribution narrative
+   (commit `7de1119d`). Next chunk (cycle 11): capture
+   `D165_DUMP_JIT=1` runtime dump of the affected function on
+   windowsmini (build natively per Recipe 15), decode trap-stub
+   bytes locally, compare against prologue `SUB RSP`. Active
+   spike: `private/spikes/d-163-win64-call-indirect-trap/`
+   H1 (shadow-space ADD-RSP mismatch) + H3 (R15 pre-trap) +
+   H4 (alignment). Order: can interleave with A1-A3.
 
 ### Phase B — windowsmini reconcile (single shot after A1+A2+A3)
 
@@ -74,23 +82,13 @@ autonomous step after Phase A + B complete.
 
 ## Closed this session (2026-05-23)
 
-- ✅ **R3 / D-162, R2, R1, D-094, D-164**.
-- ⚠️ **D-163** SKIP arm retired `0de438a6` but **REOPENED**
-  cycle 9 — close was wasm-1.0 only; wasm-2.0/call/ trap
-  path still crashes. Narrow-scope arm restored.
-- ✅ **D-165** Win64 internal JIT-to-JIT MEMORY-class + cap
-  fix (`75f96dee` + `99a047f6`). Real trigger: pick0's 2nd
-  i64-result silently truncated by Win64 cap=1 in
-  `captureCallResult`. Mac + windowsmini isolated PASS.
+- ✅ R3 / D-162, R2, R1, D-094, D-164, D-165.
+- ⚠️ D-163 SKIP arm retired `0de438a6`, reopened cycle 9 (path
+  confusion; cycle 10 corrected narrative — see commit
+  `7de1119d`). Caller-side bounds-check trap is open work.
 
-## Cycle 9 debug-workflow codification
-
-- `debug_jit_auto/SKILL.md` Recipes 15-17 (cmd /c
-  orchestration, JIT bytes dump, manifest-bisect via
-  `test/private/d-165/`); `windows_ssh_setup.md` cmd /c
-  short-circuit; `build.zig` `installArtifact` for stable
-  `zig-out/bin/` paths; lessons 2026-05-23-*.
-
+Cycle 9-10 debug infra: `debug_jit_auto/SKILL.md` Recipes
+15-17; `build.zig` `installArtifact`; lessons 2026-05-23-*.
 windowsmini SSH-reachable, autonomous-eligible per ADR-0049.
 
 ## See
