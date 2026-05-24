@@ -227,13 +227,13 @@ pub fn evalConstScalarRawCtx(expr: []const u8, ctx: ?GlobalsCtx) Error!u64 {
             const c = ctx orelse return Error.UnsupportedEntrySignature;
             if (idx >= c.num_imports) return Error.UnsupportedEntrySignature;
             if (idx >= c.offsets.len or idx >= c.valtypes.len) return Error.UnsupportedEntrySignature;
-            const off = c.offsets[idx];
-            const slot_size: u32 = switch (c.valtypes[idx]) {
-                .v128 => 16, // unreachable in scalar path; reject below
-                .i32, .i64, .f32, .f64, .funcref, .externref => 8,
-            };
+            // v128 globals are not scalar — caller must dispatch v128 init
+            // via `evalConstV128Expr` instead. Reject early.
             if (c.valtypes[idx] == .v128) return Error.UnsupportedEntrySignature;
-            if (off + slot_size > c.buf.len) return Error.UnsupportedEntrySignature;
+            // Post-ADR-0110 widen: every slot occupies uniform 16 bytes;
+            // scalar values live in the low 8 bytes (little-endian).
+            const off = c.offsets[idx];
+            if (off + 8 > c.buf.len) return Error.UnsupportedEntrySignature;
             break :blk std.mem.readInt(u64, c.buf[off..][0..8], .little);
         },
         else => return Error.UnsupportedEntrySignature,
