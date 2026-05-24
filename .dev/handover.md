@@ -8,27 +8,29 @@
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24)。
   §9.13 hard gate cleared; widget 9→DONE; §10 task table inline 展開済。
-- **Last commit**: this commit (`36c494a3` 直後; 10.C9 step 1+2
-  完了 — §9.11 audit_scaffolding Phase-boundary report 生成
-  (`private/audit-2026-05-24-phase9-close.md`; 0 block / 4 soon /
-  6 watch) + §9.x 23 rows SHA backfill (9.0..9.13))。
+- **Last commit**: `e861143c` (10.C9 step 3 完了 — Mac aarch64
+  Wasm-2.0 baseline 14-fixture entry append to
+  `bench/results/history.yaml`; reason="p9-close: Wasm-2.0
+  baseline (Mac aarch64)"; Phase 10 計測ゼロ点)。直前: step 1+2
+  (`1433004b` 23-row SHA backfill + audit report 生成 0 block /
+  4 soon / 6 watch).
 - **Phase 9 close invariants gate (mac-host)**: **18/18 PASS** 維持。
 
-## Active task — 10.C9 Phase 9 close 後始末 (step 3+ next)
+## Active task — 10.C9 Phase 9 close 後始末 (step 4 next)
 
-per ROADMAP §10 / 10.C9 row + design plan §6.1。Steps 1+2 closed
-this commit; **NEXT** = step 3:
+per ROADMAP §10 / 10.C9 row + design plan §6.1。Steps 1-3 closed;
+**NEXT** = step 4:
 
 1. ~~§9.11 audit_scaffolding Phase-boundary pass~~ — DONE
    (`private/audit-2026-05-24-phase9-close.md` 生成; 0 block findings)
-2. ~~§9.x SHA backfill~~ — DONE (23 rows: 9.0..9.13 全て
+2. ~~§9.x SHA backfill~~ — DONE `1433004b` (23 rows: 9.0..9.13 全て
    `[x] \`SHA\`` 形式に統一; `9.12-I` を `c5ec6889` (ADR-0104 reframe
    後 canonical close) に / `9.13-0` を `add3da3d` (同) に修正)
-3. **NEXT — bench Phase 9 close baseline** — `scripts/run_bench.sh
-   --quick` Mac aarch64; `bench/results/history.yaml` に
-   "p9-close: Wasm-2.0 baseline (Mac aarch64)" 行 append (ADR-
-   0012 §7 cadence; Phase 10 計測のゼロ点)
-4. **`phase9_close_master.md` → Doc-state: ARCHIVED-IN-PLACE**
+3. ~~bench Phase 9 close baseline~~ — DONE `e861143c` (Mac aarch64
+   14-fixture entry append at line 313526; reason="p9-close:
+   Wasm-2.0 baseline (Mac aarch64)"; ADR-0012 §7 cadence; Phase
+   10 計測のゼロ点)
+4. **NEXT — `phase9_close_master.md` → Doc-state: ARCHIVED-IN-PLACE**
    + `scripts/check_phase9_close_invariants.sh` I7 amendment
    (ACTIVE | ARCHIVED-IN-PLACE 受容) + `.claude/rules/phase9_
    close_invariants.md` retirement 注記 — bundle 1 commit
