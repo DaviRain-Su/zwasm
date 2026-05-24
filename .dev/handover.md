@@ -6,39 +6,36 @@
 
 ## Current state
 
-- **Phase**: 9 IN-PROGRESS. Phase B.3 (D-139) in flight.
-- **Last commit**: `64c2378c` — D-139 audit doc + gap C2
-  (multi-store isolation) test landed.
+- **Phase**: 9 IN-PROGRESS. **Phase B.3 (D-139) CLOSED** at
+  `f81234b0` — audit + 7 in-source tests landed.
+- **Last commit**: `f81234b0` — D-139 gap A3 (OOB elem trap zombie)
+  close; audit doc revision history updated.
 - **Phase 9 close gate (mac-host)**: **18/18 PASS**.
-- **Test state at `64c2378c`**: Mac `zig build test` GREEN; lint
-  GREEN. ubuntu kick for `fe666b0f` (D-167 close) verified
-  GREEN at Step 0.7. windowsmini at `7680cbd2`: 0 FAIL.
-- **D-028 heisenbug streak**: 1/5 silent.
+- **Test state at `f81234b0`**: Mac `zig build test` GREEN; lint
+  GREEN. ubuntu verified GREEN at `61997baa` (one cycle back per
+  Step 0.7).
+- **D-028 heisenbug streak**: 1/5 silent (accumulates organically
+  through Phase C/D/E windowsmini boundary runs).
 
-## Active task — Phase B.3 D-139 cont. (gap A3 partial-init zombie)
+## Active task — Phase C (§9.12-I ADR canonical closure)
 
-Per [`c_api_instance_audit_2026-05-24.md`](./c_api_instance_audit_2026-05-24.md) §4.
-Audit + gaps C2/A2/B3/C4/C3 closed (C3 via D-174 cascade fix
-`57039f10`). Remaining:
+Per [`phase9_remaining_flow.md`](./phase9_remaining_flow.md) §2 Phase C
+(1-2 cycles, autonomous):
 
-- **NEXT** — Gap A3: `wasm_instance_new` partial-init trap parks
-  arena as zombie; verify post-trap store cleanup integrity.
-- **THEN** — D-139 close commit (`chore(debt): close D-139 ...`).
+- **C.1 — ADR Status canonical pass** (~22-25 Phase 9 cohort ADRs):
+  walk `.dev/decisions/*.md` for ADRs touched in Phase 9; flip
+  `Status: Accepted → Closed (Phase 9 DONE)` for ones whose
+  implementation has fully landed.
+- **C.2 — Lesson Citing backfill** (3 lessons with unfilled
+  Citing per pre-commit gate output).
+- **C.3 — verify `bash scripts/check_adr_history.sh --gate`
+  exits 0**.
 
-Deferred:
-- Gap A2's full transitive diamond → simpler multi-consumer
-  pattern landed instead; full chain deferred to D-075 v0.1.0 RC.
-- Module-side reverse-order delete (`wasm_store_delete` before
-  `wasm_module_delete`) still UAF-prone — separate concern
-  outside D-139 audit scope.
+Exit: `scripts/check_adr_history.sh --gate` 0;
+`scripts/check_lesson_citing.sh` 0; ADR `Accepted` count < 30.
 
-3 new debts filed at C2 (blocked on ADR-0025 v0.1.0 RC c_api
-accessor exports): D-171 (A1 global zombie), D-172 (B1 table
-alias), D-173 (B2 memory alias). Documented in audit §3 / §4.
-
-After Phase B.3 fully closes → §9.13-0 row exit predicate
-evaluation, then Phase C/D/E/F per
-[`phase9_remaining_flow.md`](./phase9_remaining_flow.md) §2.
+Then Phase D (§9.12-F debt verify, 1 cycle), then Phase E
+(§9.13 hard gate, **user collab**), then Phase F (Phase 10 open).
 
 ## Cold-start procedure
 
@@ -54,9 +51,13 @@ Authoritative remaining-work source:
 
 - ADR-0104 (Phase 9 真スコープ)
 - ADR-0110 — Value widen 8→16, Closed (implemented) at `9204847a`
-- D-167 discharged 2026-05-24 at `4339eb02` (windowsmini-verified at `7680cbd2`)
-- D-079 (ii) / D-170 — c_api wasm_instance_new v128 globals JIT
-  wiring; blocked-by Phase 10+ alongside ADR-0109
+- D-167 discharged at `4339eb02`/`fe666b0f` (Phase B.1)
+- D-174 cascade fix discharged at `57039f10` (Phase B.3 sub)
+- D-139 audit + 7 tests discharged at cycles producing
+  `64c2378c` → `f81234b0` (Phase B.3)
+- D-171 / D-172 / D-173 — c_api accessor blockers (filed
+  during D-139 audit; v0.1.0 RC scope per ADR-0025)
+- [`c_api_instance_audit_2026-05-24.md`](./c_api_instance_audit_2026-05-24.md)
+  — D-139 audit (now closed; §6 revision history)
 - [`phase9_remaining_flow.md`](./phase9_remaining_flow.md) §2
-  Phase B/C/D/E/F sequence
-- §9.13-V closed-cohort cycles 38-56: `git log --grep="§9.13-V"`
+  Phase C/D/E/F sequence reference
