@@ -4,7 +4,7 @@
 runaway, EXCEPTION_STACK_OVERFLOW, GetCurrentThreadStackLimits,
 commit pattern, R3, D-162
 
-**Citing**: commit `1e2d716d` (R3 cycle 6 fix), `<backfill>` (R3
+**Citing**: commit `1e2d716d` (R3 cycle 6 fix), `17917f07` (R3
 close).
 
 ## What we tried

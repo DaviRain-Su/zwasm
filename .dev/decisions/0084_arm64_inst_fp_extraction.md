@@ -1,6 +1,6 @@
 # 0084 — Extract FP encoders from `arm64/inst.zig` into `inst_fp.zig`
 
-- **Status**: Accepted (2026-05-21, impl landed; amended scope per Revision history)
+- **Status**: Closed (2026-05-21, impl landed; amended scope per Revision history)
 - **Date**: 2026-05-21
 - **Author**: autonomous /continue loop (D-141 per-file ADR series, post-ADR-0083)
 - **Tags**: file-layout, refactor, zone-2, codegen-arm64, file-size-cap

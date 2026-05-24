@@ -1,6 +1,6 @@
 # D-163 cycle 14: Win64 silent death — entry helper exonerated
 
-> **Citing**: commit `<backfill>` (this commit). Predecessor:
+> **Citing**: commit `8f59b8bb`. Predecessor:
 > `2026-05-23-d163-static-jit-layout-verified.md`.
 
 ## What happened

@@ -1,6 +1,6 @@
 # 0085 — Extract arm64 emit setup helpers into `emit_setup.zig`
 
-- **Status**: Accepted (2026-05-21, draft + impl landed same cycle)
+- **Status**: Closed (2026-05-21, draft + impl landed same cycle)
 - **Date**: 2026-05-21
 - **Author**: autonomous /continue loop (D-141 per-file ADR series, post-ADR-0084)
 - **Tags**: file-layout, refactor, zone-2, codegen-arm64, file-size-cap

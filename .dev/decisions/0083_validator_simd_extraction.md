@@ -1,6 +1,6 @@
 # 0083 — Extract SIMD validator into `validator_simd.zig`
 
-- **Status**: Accepted (2026-05-21, impl landed)
+- **Status**: Closed (2026-05-21, impl landed)
 - **Date**: 2026-05-21
 - **Author**: autonomous /continue loop (D-141 per-file ADR series, post-ADR-0082)
 - **Tags**: file-layout, refactor, zone-1, validator, simd, file-size-cap

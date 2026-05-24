@@ -1,6 +1,6 @@
 # 0091 — Extract post-compile init helpers to `compile_init.zig`
 
-- **Status**: Accepted (2026-05-21, draft + impl landed same cycle)
+- **Status**: Closed (2026-05-21, draft + impl landed same cycle)
 - **Date**: 2026-05-21
 - **Author**: autonomous /continue loop (D-141 per-file ADR series, post-ADR-0090)
 - **Tags**: file-layout, refactor, zone-2, engine, file-size-cap

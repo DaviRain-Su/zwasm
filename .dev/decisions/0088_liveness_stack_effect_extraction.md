@@ -1,6 +1,6 @@
 # 0088 — Extract stackEffect catalog to `liveness_stack_effect.zig`
 
-- **Status**: Accepted (2026-05-21, draft + impl landed same cycle)
+- **Status**: Closed (2026-05-21, draft + impl landed same cycle)
 - **Date**: 2026-05-21
 - **Author**: autonomous /continue loop (D-141 per-file ADR series, post-ADR-0087)
 - **Tags**: file-layout, refactor, zone-1, ir, analysis, file-size-cap

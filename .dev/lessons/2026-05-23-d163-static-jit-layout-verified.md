@@ -1,6 +1,6 @@
 # D-163 cycle 12: Win64 caller-side bounds-check trap — JIT layout statically correct
 
-> **Citing**: commit `<backfill>` (this commit). Spike:
+> **Citing**: commit `f0b32dac`. Spike:
 > `private/spikes/d-163-win64-call-indirect-trap/`.
 
 ## What happened

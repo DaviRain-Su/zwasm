@@ -1,6 +1,6 @@
 # 0082 — Extract op registry from `dispatch_collector.zig` into `dispatch_collector_ops.zig`
 
-- **Status**: Accepted (2026-05-21, impl landed)
+- **Status**: Closed (2026-05-21, impl landed)
 - **Date**: 2026-05-21
 - **Author**: autonomous /continue loop (D-141 per-file ADR series, post-ADR-0081)
 - **Tags**: file-layout, refactor, zone-1, dispatch-collector, file-size-cap

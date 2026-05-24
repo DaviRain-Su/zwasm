@@ -1,6 +1,6 @@
 # 0086 — Extract codegen op registry into `dispatch_collector_ops.zig`
 
-- **Status**: Accepted (2026-05-21, draft + impl landed same cycle)
+- **Status**: Closed (2026-05-21, draft + impl landed same cycle)
 - **Date**: 2026-05-21
 - **Author**: autonomous /continue loop (D-141 per-file ADR series, post-ADR-0085)
 - **Tags**: file-layout, refactor, zone-2, codegen, file-size-cap, dispatch-collector

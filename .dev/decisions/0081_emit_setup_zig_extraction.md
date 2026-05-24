@@ -1,6 +1,6 @@
 # 0081 — Extract top-level setup helpers from `emit.zig` into `emit_setup.zig` (Phase 1)
 
-- **Status**: Accepted (2026-05-21, impl landed)
+- **Status**: Closed (2026-05-21, impl landed)
 - **Date**: 2026-05-21
 - **Author**: autonomous /continue loop (post-ADR-0080 Withdraw pivot)
 - **Tags**: file-layout, refactor, zone-2, codegen-x86_64, file-size-cap
