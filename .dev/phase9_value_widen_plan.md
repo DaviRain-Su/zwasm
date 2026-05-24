@@ -397,3 +397,18 @@ merge.
   is the next chunk; REPORT §10 names three boundary fixtures
   beyond plan §3 (cross-instance v128 import, globals
   alignment, Value.zero v128 readback).
+- 2026-05-24 cycles 39-41 — **Phase 2 (test coverage) CLOSED**.
+  13 fixtures landed (5 scalar + 8 v128) under
+  `test/edge_cases/p9/value_semantics/` + `v128_lane_ops/` +
+  `v128_nan_payload/`. Cycle 41 attempted REPORT §10
+  cross-instance v128 import fixture (`test/runners/fixtures/
+  v128_cross_instance/`) and surfaced a **new production gap**:
+  c_api `evalConstExprValue` at `src/runtime/instance/instantiate.zig:340-373`
+  rejects `v128.const` (opcode 0xFD 0x0C) — Value=8 has no
+  slot to write into. Fixture reverted; filed as **D-169**
+  blocked-by Phase A.3 (Value widen unblocks the new
+  `Value.v128: [16]u8` variant + the `evalConstExprValue` arm).
+  REPORT §10 items 1/2/3 all defer to Phase A.3 (post-widen
+  contracts that can't be authored at Value=8 baseline). New
+  gap is enrichment beyond REPORT §6 c_api cope inventory —
+  the const-init path was not previously enumerated as cope.
