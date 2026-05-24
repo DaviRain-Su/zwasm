@@ -103,6 +103,31 @@ pub const Func = struct {
     func_idx: u32,
 };
 
+/// `wasm_global_t` — opaque-from-C handle for a global instance.
+/// Carries an instance back-pointer + the global's index in
+/// `Runtime.globals[]`. The valtype + mutability are cached at
+/// handle-creation time so `wasm_global_get` can marshal the
+/// internal `Value` cell into a `wasm_val_t` (tagged C union)
+/// without re-walking the module's globals section.
+///
+/// **Storage lifetime** (per ADR-0110 Phase A.4g): the underlying
+/// `*Value` cell lives in the owning Store's arena. A Global
+/// handle synthesised against an Instance's export can outlive
+/// that Instance as long as another live instance (zombie list)
+/// keeps the Store anchored — the c_api cross-instance global
+/// mutation surface relies on this pointer-aliased storage shape.
+///
+/// v128 globals are deliberately NOT exposed through this API
+/// per `wasm-c-api include/wasm.h:329-338` (`wasm_val_t` lacks a
+/// 128-bit slot) — see `.dev/lessons/2026-05-24-c_api-v128-spec-boundary.md`.
+/// Zig-side v128 access goes through the ADR-0109 native API only.
+pub const Global = struct {
+    instance: ?*Instance,
+    global_idx: u32,
+    valtype: zir.ValType,
+    mutable: bool,
+};
+
 // `Trap` and `TrapKind` live in `src/api/trap_surface.zig`
 // after the §9.5 / 5.0 chunk b carve-out (ADR-0007); see the
 // re-exports near the imports at the top of this file.
@@ -174,6 +199,12 @@ pub const Extern = struct {
     /// For kind = global: index into the source instance's
     /// runtime globals list. Only meaningful when `kind == .global`.
     global_idx: u32 = 0,
+    /// For kind = global: the Global handle owned by this Extern.
+    /// C hosts borrow via `wasm_extern_as_global` (no transfer of
+    /// ownership) and must NOT call `wasm_global_delete` on the
+    /// returned pointer; `wasm_extern_delete` releases it. Mirrors
+    /// `Extern.func` for the func variant.
+    global: ?*Global = null,
 };
 
 // `ExternVec` lives in `src/api/vec.zig` after the §9.5 / 5.0
@@ -820,10 +851,11 @@ pub export fn wasm_extern_kind(e: ?*const Extern) callconv(.c) u8 {
 }
 
 /// `wasm_extern_delete(*Extern)` — free an Extern handle and
-/// the contained Func (if any). Null-tolerant.
+/// the contained Func / Global (if any). Null-tolerant.
 pub export fn wasm_extern_delete(e: ?*Extern) callconv(.c) void {
     const handle = e orelse return;
     if (handle.func) |fh| wasm_func_delete(fh);
+    if (handle.global) |gh| wasm_global_delete(gh);
     const inst = handle.instance orelse return;
     const store = inst.store orelse return;
     const alloc = storeAllocator(store) orelse return;
@@ -839,6 +871,69 @@ pub export fn wasm_extern_as_func(e: ?*Extern) callconv(.c) ?*Func {
     const handle = e orelse return null;
     if (handle.kind != .func) return null;
     return handle.func;
+}
+
+/// `wasm_extern_as_global(*Extern)` — borrow the Global contained
+/// in an Extern. Returns null if the Extern is not of kind global.
+/// **Ownership stays with the Extern**; callers must NOT call
+/// `wasm_global_delete` on the returned pointer. Mirrors
+/// `wasm_extern_as_func` (per `include/wasm.h:_as_*` family
+/// discipline).
+pub export fn wasm_extern_as_global(e: ?*Extern) callconv(.c) ?*Global {
+    const handle = e orelse return null;
+    if (handle.kind != .global) return null;
+    return handle.global;
+}
+
+/// `wasm_global_delete(*Global)` — free a Global handle. Null-
+/// tolerant. The borrowed handle returned by `wasm_extern_as_global`
+/// must NOT be passed here (the owning Extern's
+/// `wasm_extern_delete` releases it via the `Extern.global`
+/// back-pointer); only call this on a Global obtained via a
+/// future `wasm_global_new` (host-side standalone construction).
+pub export fn wasm_global_delete(g: ?*Global) callconv(.c) void {
+    const handle = g orelse return;
+    const inst = handle.instance orelse return;
+    const store = inst.store orelse return;
+    const alloc = storeAllocator(store) orelse return;
+    alloc.destroy(handle);
+}
+
+/// `wasm_global_get(global, out)` — Wasm spec §4.5.5
+/// (`global.get`) — read the global's current value into `out`.
+/// Reads via the pointer-aliased `Value` cell (per ADR-0110), so
+/// cross-instance reads see writes from any instance importing
+/// the same global. v128-typed globals leave `out` zero-set with
+/// `kind = .i32` (spec-prohibited from the c_api union; see
+/// `2026-05-24-c_api-v128-spec-boundary.md`) — callers needing
+/// v128 access use the ADR-0109 native Zig API.
+pub export fn wasm_global_get(g: ?*const Global, out: ?*Val) callconv(.c) void {
+    const o = out orelse return;
+    o.* = .{ .kind = .i32, .of = .{ .i32 = 0 } };
+    const handle = g orelse return;
+    const inst = handle.instance orelse return;
+    const rt = inst.runtime orelse return;
+    if (handle.global_idx >= rt.globals.len) return;
+    const slot: *runtime.Value = rt.globals[handle.global_idx];
+    o.* = marshalValOut(slot.*, handle.valtype);
+}
+
+/// `wasm_global_set(global, val)` — Wasm spec §4.5.6
+/// (`global.set`) — write `val` into the global's `Value` cell.
+/// No-op when the global is immutable (spec: mutability is
+/// validated at instantiation; setting an immutable global from
+/// the host is an out-of-band write and is rejected here). v128
+/// inputs are rejected at the union shape (per spec-boundary
+/// lesson); callers needing v128 use the native Zig API.
+pub export fn wasm_global_set(g: ?*Global, v: ?*const Val) callconv(.c) void {
+    const val = v orelse return;
+    const handle = g orelse return;
+    if (!handle.mutable) return;
+    const inst = handle.instance orelse return;
+    const rt = inst.runtime orelse return;
+    if (handle.global_idx >= rt.globals.len) return;
+    const slot: *runtime.Value = rt.globals[handle.global_idx];
+    slot.* = marshalValIn(val.*);
 }
 
 // --- extern vec (pointer-vec; vec_delete also frees pointed-to objects)
@@ -900,7 +995,32 @@ pub export fn wasm_instance_exports(i: ?*const Instance, out: ?*ExternVec) callc
             },
             .table => ext.table_idx = exp.idx,
             .memory => ext.memory_idx = exp.idx,
-            .global => ext.global_idx = exp.idx,
+            .global => {
+                ext.global_idx = exp.idx;
+                // export_types[idx] is parallel to exports_storage[idx]; the
+                // .global variant carries valtype + mutability so the c_api
+                // marshaling path in wasm_global_get can render wasm_val_t
+                // without re-walking the module's globals section.
+                const gh = alloc.create(Global) catch {
+                    alloc.destroy(ext);
+                    break;
+                };
+                const gt = switch (inst.export_types[idx]) {
+                    .global => |g| g,
+                    else => {
+                        alloc.destroy(gh);
+                        alloc.destroy(ext);
+                        break;
+                    },
+                };
+                gh.* = .{
+                    .instance = @constCast(inst),
+                    .global_idx = exp.idx,
+                    .valtype = gt.valtype,
+                    .mutable = gt.mutable,
+                };
+                ext.global = gh;
+            },
         }
         buf[idx] = ext;
         populated += 1;
@@ -1649,6 +1769,64 @@ test "wasm 2.0 mixed-exports c_api walk: func+memory+table+global surface via wa
     try testing.expect(wasm_extern_as_func(data[1]) == null);
     try testing.expect(wasm_extern_as_func(data[2]) == null);
     try testing.expect(wasm_extern_as_func(data[3]) == null);
+}
+
+test "wasm 2.0 c_api scalar global accessors: read and write mutable i32 via wasm_extern_as_global + wasm_global_get/set (D-171)" {
+    // mixed_exports_wasm declares `(global (export "g") (mut i32) (i32.const 7))`
+    // at export index 3. Exercises D-171 minimum-viable surface:
+    // wasm_extern_as_global → wasm_global_get (returns initial 7) →
+    // wasm_global_set (writes 42) → wasm_global_get (returns 42).
+    // wasm_extern_as_global on non-global externs returns null.
+    // Per `2026-05-24-c_api-v128-spec-boundary.md`: v128 globals are
+    // permanently NOT exposed through this API (covered by D-079 Zig API).
+    const e = wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer wasm_engine_delete(e);
+    const s = wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer wasm_store_delete(s);
+
+    var bytes = mixed_exports_wasm;
+    const bv: ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer wasm_module_delete(m);
+
+    const inst = wasm_instance_new(s, m, null, null) orelse return error.InstanceAllocFailed;
+    defer wasm_instance_delete(inst);
+
+    var exports: ExternVec = undefined;
+    wasm_instance_exports(inst, &exports);
+    defer wasm_extern_vec_delete(&exports);
+    try testing.expectEqual(@as(usize, 4), exports.size);
+    const data = exports.data orelse return error.NullExportsData;
+
+    // Non-global externs return null from wasm_extern_as_global.
+    try testing.expect(wasm_extern_as_global(data[0]) == null); // func
+    try testing.expect(wasm_extern_as_global(data[1]) == null); // memory
+    try testing.expect(wasm_extern_as_global(data[2]) == null); // table
+
+    // Global extern at idx 3 resolves; the handle records valtype + mutability.
+    const g = wasm_extern_as_global(data[3]) orelse return error.GlobalResolveFailed;
+    try testing.expectEqual(@as(u8, @intFromEnum(zir.ValType.i32)), @intFromEnum(g.valtype));
+    try testing.expect(g.mutable);
+
+    // Read the initial value (7 per fixture's `i32.const 7` init).
+    var v: Val = undefined;
+    wasm_global_get(g, &v);
+    try testing.expectEqual(ValKind.i32, v.kind);
+    try testing.expectEqual(@as(i32, 7), v.of.i32);
+
+    // Write 42; re-read sees the new value (pointer-aliased cell per ADR-0110).
+    const new_val: Val = .{ .kind = .i32, .of = .{ .i32 = 42 } };
+    wasm_global_set(g, &new_val);
+    wasm_global_get(g, &v);
+    try testing.expectEqual(ValKind.i32, v.kind);
+    try testing.expectEqual(@as(i32, 42), v.of.i32);
+
+    // Null-arg discipline.
+    wasm_global_get(null, &v);
+    wasm_global_get(g, null);
+    wasm_global_set(null, &new_val);
+    wasm_global_set(g, null);
+    try testing.expect(wasm_extern_as_global(null) == null);
 }
 
 // (module (func (export "answer") (result i32) (i32.const 42)))
