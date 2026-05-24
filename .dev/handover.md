@@ -85,6 +85,18 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
   contract に整理 — Phase A.3 後に landing。Phase A.2 全体は
   cycles 39-41 (2 substantive + 1 gap-surface) で close、
   estimate 2-3 cycle 内。
+- 42: **§9.13-V Phase A.3 — Value extern union widen 8→16
+  landed on feature branch `zwasm-from-scratch-value16`**
+  (226ce9d7)。`src/runtime/value.zig` に `bits128: u128` +
+  `v128: [16]u8` variants 追加、`Value.zero` を `.bits128 = 0`
+  に flip、`Value.fromV128` constructor 追加、in-source test
+  も `@sizeOf == 16` + `@alignOf >= 16` + Value.zero v128 readback
+  + fromV128 round-trip に拡充。Tree compile-green +
+  lint-green;intentional runtime cascade red (SlotOverflow
+  qLoadSpilled.spill abs_off=40 — Phase A.4c regalloc spill
+  stride doubling の target)。Main (zwasm-from-scratch) は
+  bcc4951f に stable。Phase A.4 cascade で green を restore
+  予定。
 
 ## Remaining work
 
@@ -108,19 +120,28 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
 
 ### Autonomous-eligible (next session pick from here)
 
-優先順 (Phase A.1 closed 38; A.2.1 closed 39; A.2.2 closed 40; A.2.3 closed 41; **Phase A.3 起点**):
+優先順 (A.1 38; A.2.1 39; A.2.2 40; A.2.3 41; A.3 42 on feature
+branch; **Phase A.4a 起点**):
 
-1. **§9.13-V Phase A.3 — Value definition flip** (**NEXT**, 1
-   cycle, autonomous; **feature branch
-   `zwasm-from-scratch-value16`**)。Plan doc §2 Phase 3 per
-   ADR-0110。src/runtime/value.zig を 8-byte extern union から
-   16-byte に widen; `Value.v128: [16]u8` + `Value.bits128: u128`
-   variants 追加。`@sizeOf(Value) == 16` + `@alignOf(Value) >= 16`
-   comptime assert flip。Intentionally tree-breaking — Phase
-   A.4 cascade (3.5-5 cycle) で green を restore。**Feature
-   branch workflow**: main の per-chunk push 規律と異なる; A.6
-   merge gate で 3-host green を確認してから main へ rebase
-   merge。詳細: plan doc §2 Phase 3 + flow doc §2 Phase A.3-A.6。
+1. **§9.13-V Phase A.4a — storage layouts** (**NEXT**, ~0.5 cycle,
+   autonomous, feature branch `zwasm-from-scratch-value16`)。
+   Plan doc §2 Phase 4a + REPORT §2.a。`src/engine/setup.zig`
+   の `@memset(globals_buf, .{ .bits64 = 0 })` literal を
+   `.{ .bits128 = 0 }` に switch (a.8 site)。`Runtime.globals_storage`
+   / `Runtime.operand_buf` は `[N]Value` で sizeof 自動 doubling
+   (a.5, a.6); source change なし、bench footprint 32→64 KiB
+   per Runtime。`Runtime.globals: []*Value` indirection 保持
+   (R-new-10)。Phase A.4 残り 4b/4c/4f/4g + (4d/4e empty) は
+   後続 chunk。
+2. **§9.13-V Phase A.4b-g** — JIT codegen globals stride
+   (LSL #3 → #4 + Q-reg / MOVUPS), regalloc spill `*8 → *16`,
+   host call marshal + c_api evalConstExprValue v128 arm
+   (D-169 discharge), spec runner GlobalsCtx removal (~1.5-2
+   cycle long pole)。詳細: plan doc §2 Phase 4a-g + REPORT §2
+   per-sub-phase inventory。
+3. **§9.13-V Phase A.5 / A.6** — cope code grep clean + 3-host
+   verify + merge to main。Phase A.6 で feature → main rebase
+   merge + ubuntu/windowsmini reconcile。
 3. **§9.13-V Phase A.3-A.6** — Value flip + cascade + merge
    (feature branch `zwasm-from-scratch-value16`; D-167
    wire-up を A.4 内 に統合)。Phase 4d/4e はほぼ空、Phase
@@ -144,12 +165,16 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
 
 Per `/continue` SKILL.md Resume Steps 0.5 / 0.7 / 0.8.
 **Current state**: autonomous-eligible (feature-branch
-workflow). `now` debts: D-167 (folded into §9.13-V Phase A.4).
-**D-169** filed cycle 41 — blocked-by Phase A.3 (c_api v128
-const init gap surfaced during A.2.3 attempt). Phase A.3
-(Value definition flip on feature branch
-`zwasm-from-scratch-value16`) is the next chunk per plan doc
-§2 Phase 3。
+workflow active at `zwasm-from-scratch-value16`; tree is
+intentionally runtime-red until Phase A.4 cascade restores
+green; main `zwasm-from-scratch` stable at bcc4951f). `now`
+debts: D-167 (folded into §9.13-V Phase A.4f) + **D-169**
+(c_api v128 const init gap; discharged inside Phase A.4f).
+Phase A.4a (storage layouts: `@memset` literal switch +
+sizeof auto-doubling) is the next chunk per plan doc §2
+Phase 4a。**Ubuntu per-chunk gate SKIPPED on feature branch**
+(`run_remote_ubuntu.sh` hardcoded to origin/zwasm-from-scratch);
+gate re-asserted at A.6 merge.
 **Step 1a override**: `phase9_close_master.md` reference
 above triggers close-plan override per SKILL.md; Step 2
 (ROADMAP §9 first `[ ]` lookup) is therefore informational
