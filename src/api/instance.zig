@@ -1834,6 +1834,63 @@ test "wasm 2.0 c_api zombie lifecycle: B holds funcref into A after wasm_instanc
     try testing.expectEqual(@as(i32, 42), rd[0].of.i32);
 }
 
+test "wasm 2.0 c_api arena ownership: reverse-order delete (B then A) from forward-order instantiate" {
+    // D-139 gap B3 per .dev/c_api_instance_audit_2026-05-24.md §3.
+    // Focused 2-instance variant of the existing 4-instance arena
+    // test: instantiate A then B (forward); delete B before A
+    // (reverse-LIFO). Verify A remains usable after B's arena
+    // deinit — no aliasing across same-module instances.
+    const e = wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer wasm_engine_delete(e);
+    const s = wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer wasm_store_delete(s);
+
+    var bytes = cross_module_a_wasm;
+    const bv: ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer wasm_module_delete(m);
+
+    const inst_a = wasm_instance_new(s, m, null, null) orelse return error.InstanceAAllocFailed;
+    defer wasm_instance_delete(inst_a);
+    const inst_b = wasm_instance_new(s, m, null, null) orelse return error.InstanceBAllocFailed;
+    // No defer for inst_b — explicit delete mid-test exercises
+    // reverse-order arena deinit (B before A) while A stays live.
+
+    // Cache A's "answer" handle via defer (A survives the test).
+    var exports_a: ExternVec = .{ .size = 0, .data = null };
+    wasm_instance_exports(inst_a, &exports_a);
+    defer wasm_extern_vec_delete(&exports_a);
+    const answer_a = wasm_extern_as_func(exports_a.data.?[0]) orelse return error.AnswerANull;
+
+    // B's exports vec must be released BEFORE explicit inst_b
+    // delete — defer would dangle into B's freed arena.
+    var exports_b: ExternVec = .{ .size = 0, .data = null };
+    wasm_instance_exports(inst_b, &exports_b);
+    const answer_b = wasm_extern_as_func(exports_b.data.?[0]) orelse return error.AnswerBNull;
+
+    var rd: [1]Val = undefined;
+    var rv: ValVec = .{ .size = 1, .data = &rd };
+    const av: ValVec = .{ .size = 0, .data = null };
+
+    // Stage 1: both instances live, independent calls succeed.
+    try testing.expect(wasm_func_call(answer_a, &av, &rv) == null);
+    try testing.expectEqual(@as(i32, 42), rd[0].of.i32);
+    try testing.expect(wasm_func_call(answer_b, &av, &rv) == null);
+    try testing.expectEqual(@as(i32, 42), rd[0].of.i32);
+
+    // Stage 2: reverse-order arena deinit. B (instantiated second)
+    // is destroyed first. A's arena + JIT runtime must remain
+    // intact.
+    wasm_extern_vec_delete(&exports_b);
+    wasm_instance_delete(inst_b);
+
+    // Stage 3: A still callable post-B-delete. This catches
+    // accidental aliasing of arena slots, JIT code pages, or
+    // module-shared mutable state across same-module instances.
+    try testing.expect(wasm_func_call(answer_a, &av, &rv) == null);
+    try testing.expectEqual(@as(i32, 42), rd[0].of.i32);
+}
+
 test "wasm 2.0 c_api zombie multi-consumer: 2 instances hold funcref into A after wasm_instance_delete(A)" {
     // D-139 gap A2 per .dev/c_api_instance_audit_2026-05-24.md §3.
     // Extends the baseline single-consumer zombie test with a
