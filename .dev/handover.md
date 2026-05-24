@@ -6,33 +6,32 @@
 
 ## Current state
 
-- **Phase**: 9 IN-PROGRESS. §9.13-V `[x]` (`9204847a`, this cycle).
-- **Last commit**: `<this cycle>` — post-merge bookkeeping
-  (ADR-0110 → Closed, §9.13-V [x], handover refresh).
-- **Phase 9 close gate (mac-host)**: **18/18 PASS** (verified
-  resume Step 0.8).
-- **Test state**: Mac+ubuntu test-all GREEN at `9204847a`
-  (ubuntu code-equivalent verified via `73ba4e38..9204847a` diff =
-  scripts/+docs only); windowsmini: D-167 pre-existing **9 fails**
-  (was 10 pre-cohort; value16 incidentally improved by 1).
+- **Phase**: 9 IN-PROGRESS. §9.13-V `[x]`; Phase B.1 in flight.
+- **Last commit**: `4339eb02` — D-167 wire-up (Win64 1+arg multi-
+  result entry helpers; `invokeBufWin64Args` helper + 4 Win64
+  if-arms in entry.zig).
+- **Phase 9 close gate (mac-host)**: **18/18 PASS**.
+- **Test state**: Mac aarch64 test-all GREEN at `4339eb02`;
+  cross-Win64 build (`-Dtarget=x86_64-windows-gnu`) GREEN; lint
+  GREEN. ubuntu test-all GREEN at `6db998e2` (verified prior
+  cycle 0.7); ubuntu kick for `4339eb02` in flight (background).
+  windowsmini integration verify for D-167 wire-up: in flight.
 
-## Active task — Phase B (windowsmini D-167 reconcile)
+## Active task — Phase B.1 (D-167 windowsmini verify)
 
-Per [`phase9_remaining_flow.md`](./phase9_remaining_flow.md) §2
-Phase B sequence:
+Wire-up landed at `4339eb02`. Verification in flight:
+`bash scripts/run_remote_windows.sh test-all > /tmp/win.log 2>&1`
+expected to flip the pre-existing 9 Win64 directive fails (D-167
+class) toward 0. Two possible outcomes for next cycle:
 
-- **B.1 (next)** — **D-167 Win64 1+ arg multi-result entry helpers**
-  (`now` debt). Single-cycle wire-up per debt row:
-  - add `invokeBufWin64Args` helper to
-    `src/engine/codegen/shared/entry_buffer_write.zig` (mirror
-    of existing `invokeBufWin64NoArgs` lines 95-110)
-  - add Win64 if-arms in `src/engine/codegen/shared/entry.zig`
-    for `callI32i32_i32` / `callI32i64_i32` /
-    `callI64i32_i64i64i32` (4-line forwarding each) +
-    `callI32i32i64_i32`
-  - windowsmini integration verify (simd_assert orchestration
-    via `bash scripts/run_remote_windows.sh test-all`)
-  - 11 Win64 directive fails clear on success
+- **All 9 → 0**: discharge D-167 (`chore(debt): close D-167 ...`),
+  proceed to B.2 (D-028 IPC flake verify).
+- **Partial / new failure shape**: file the residual as a refined
+  D-167 sub-row or new debt, decide between additional wire-up
+  vs spike investigation.
+
+Phase B remaining after B.1:
+
 - **B.2** — D-028 IPC flake CONFIRMED #5 final verify (N=4 more
   silent runs post-Windows-Defender fix; per
   `.claude/rules/heisenbug_discharge.md`)
