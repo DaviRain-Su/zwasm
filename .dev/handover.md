@@ -123,6 +123,18 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
   cascade restoration COMPLETE in 3 cycle (estimate 3.5-5);
   A.4f/A.4g re-classified as post-green cleanup ではなく
   cascade-blocker。
+- 46: **§9.13-V Phase A.4f — D-169 discharged** (092d2cdb)。
+  `evalConstExprValue` (`src/runtime/instance/instantiate.zig:340`)
+  に `0xFD 0x0C` (v128.const) arm 追加 — Value=16 の `.v128`
+  variant を直接書き込む。c_api wasm_instance_new は v128 globals
+  module で InstanceAllocFailed しなくなった。**Side-find: D-170
+  filed** — cross-instance v128 import fixture を再構築したら
+  importer.read_lane0 が Unreachable trap; even 単一-module v128
+  global.get via wast_runtime_runner も同 trap。spec_assert_runner
+  path は byte-buffer cope で green、c_api wasm_instance_new path
+  の JIT runtime wiring (Runtime.globals []*Value vs JitRuntime.
+  globals_base [*]Value) が v128 で未 reconciled。Phase A.4g cope
+  removal で全貌が見える見込み。Mac test-all 維持 green。
 
 ## Remaining work
 
@@ -147,26 +159,24 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
 ### Autonomous-eligible (next session pick from here)
 
 優先順 (A.1 38; A.2.1 39; A.2.2 40; A.2.3 41; A.3 42; A.4a 43;
-A.4c 44; A.4b 45 on feature branch; **Phase A.4f 起点**):
+A.4c 44; A.4b 45; A.4f 46 on feature branch; **Phase A.4g 起点**):
 
-1. **§9.13-V Phase A.4f — c_api v128.const arm + marshalValOut
-   v128** (**NEXT**, ~0.5 cycle, autonomous, feature branch)。
-   D-169 discharge。`src/runtime/instance/instantiate.zig:340-373`
-   `evalConstExprValue` switch に `0xFD => switch (expr[pos])
-   { 0x0C => ...read 16 bytes... return .{ .v128 = bytes } }`
-   arm を追加。`src/api/instance.zig:735-745` marshalValOut の
-   `.v128 => .{ .kind = .i64, .of = .{ .i64 = 0 } }, // unreachable
-   for MVP` cope を実装に置換。cycle 41 で reverted した
-   v128_cross_instance fixture を recreate (R-new-8)。
-2. **§9.13-V Phase A.4g — spec runner GlobalsCtx removal**
-   (~1.5-2 cycle long pole)。Test-all GREEN baseline で
-   incremental に行える: REPORT §2.g 26 sites の `globals_offsets`
-   / `globals_byte_size` / `GlobalsCtx` を順次削除、
-   `applyImportedGlobalsFromRegistered` (~100 LOC simplification,
-   R-new-8 highest-risk) を uniform `importer_buf[slot] =
-   exporter_buf[slot]` に置換。各 chunk で test-all green を
-   gate。
-3. **§9.13-V Phase A.5 / A.6** — cope code grep clean + 3-host
+1. **§9.13-V Phase A.4g — spec runner GlobalsCtx removal**
+   (**NEXT**, ~1.5-2 cycle long pole, autonomous, feature branch)。
+   Plan doc §2 Phase 4g + REPORT §2.g 26 sites。test-all GREEN
+   baseline を維持しながら incremental に行う:
+   - g.1-g.9: `src/engine/{runner_validate,compile_init,
+     compile,runner,export_lookup}.zig` から `GlobalsCtx` /
+     `globals_offsets` / `globals_byte_size` 削除、`[]const Value`
+     直接渡しに switch。
+   - g.15-g.24: `test/spec/spec_assert_runner_*.zig` の
+     `scratch_globals: []u8` → `[]Value` 移行 (~100 LOC
+     `applyImportedGlobalsFromRegistered` simplification、
+     R-new-8 highest-risk site)。
+   - g.26: docstring 更新。
+   Phase A.4g 完了後 D-170 (cross-module v128 globals JIT wiring)
+   の全貌が見える見込み。
+2. **§9.13-V Phase A.5 / A.6** — cope code grep clean + 3-host
    verify + merge to main。Phase A.6 で feature → main rebase
    merge + ubuntu/windowsmini reconcile。
 3. **§9.13-V Phase A.3-A.6** — Value flip + cascade + merge
@@ -197,15 +207,14 @@ intentionally runtime-red until Phase A.4 cascade restores
 green; main `zwasm-from-scratch` stable at bcc4951f). `now`
 debts: D-167 (folded into §9.13-V Phase A.4f) + **D-169**
 (c_api v128 const init gap; discharged inside Phase A.4f).
-**Mac `zig build test-all` is GREEN** under Value=16 as of cycle
-45 (A.4b landed) — edge 68/0, wast 72/0, spec_assert 212/0,
-wast_runtime 266/0. Phase A.4 cascade restoration COMPLETE in
-3 cycles (under 3.5-5 estimate). Phase A.4f (D-169 discharge:
-c_api v128.const arm in evalConstExprValue + marshalValOut)
-is the next chunk; A.4g (spec runner GlobalsCtx removal,
-~1.5-2 cycle long pole) follows; A.5/A.6 close。**Ubuntu
-per-chunk gate SKIPPED on feature branch**; gate re-asserted
-at A.6 merge.
+**Mac `zig build test-all` is GREEN** under Value=16 (edge 68/0,
+wast 72/0, spec_assert 212/0, wast_runtime 266/0). Phase A.4
+cascade restoration COMPLETE; D-169 discharged at cycle 46
+(c_api evalConstExprValue v128.const arm). D-170 filed for
+the surfaced cross-module v128 globals JIT wiring gap. Next
+chunk: Phase A.4g (spec runner GlobalsCtx removal, ~1.5-2
+cycle long pole)。**Ubuntu per-chunk gate SKIPPED on feature
+branch**; gate re-asserted at A.6 merge.
 **Step 1a override**: `phase9_close_master.md` reference
 above triggers close-plan override per SKILL.md; Step 2
 (ROADMAP §9 first `[ ]` lookup) is therefore informational
