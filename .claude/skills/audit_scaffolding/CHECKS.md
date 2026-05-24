@@ -362,6 +362,36 @@ extension lands) and parse output. Until then, manual audit:
   the wast_runtime_runner.zig case; create a fresh debt row
   if a new skip-ADR surfaces this gap).
 
+### F.10 Dual-view table storage sync (ADR-0068 §A1; added 2026-05-25)
+
+```sh
+bash scripts/audit_table_sync.sh
+```
+
+Replaces the deleted `.claude/rules/dual_view_table_sync.md`
+(retired 2026-05-25; never had an actual enforcement mechanism
+— the rule's promised `audit §F grep` was aspirational).
+Verifies every writing handler in `src/engine/codegen/{arm64,
+x86_64}/op_table.zig` (Set/Copy/Init/Grow/Fill) is in one of
+three compliant shapes: (a) inline mirror — references both
+`tables_ptr_off` AND `tables_jit_ci_ptr_off`; (b) runtime
+delegation — calls via `table_<op>_fn_off`; or (c) thin
+wrapper — body is `return emitXxx(...);` only.
+
+Findings:
+
+- PARTIAL (references refs base but not mirror base) →
+  `block` — re-introduces D-126 (post-mutation
+  `call_indirect` reads stale funcptr_base; cross-instance
+  dispatch fails silently).
+- UNKNOWN (no base reference + not a wrapper + no runtime
+  helper) → `block` — handler shape doesn't fit any of the
+  three expected compliance patterns; likely added without
+  considering the dual-view invariant.
+
+Promotion to `gate_commit.sh` hard gate is queued after 2+
+clean audit cycles per ADR-0068 Revision 2026-05-25.
+
 ## G. Extended-challenge consistency
 
 ### G.1 Workaround pairings
