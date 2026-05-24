@@ -180,14 +180,15 @@ pub const JitRuntime = extern struct {
     /// Layout-stable: replaces the existing 4-byte pad after
     /// `trap_flag`. All offsets in this struct unchanged.
     trap_kind: u32 = 0,
-    /// Globals array base pointer (ADR-0027). Each entry is one
-    /// `runtime.value.Value` = 8 bytes. JIT body's `global.get`
-    /// emits `LDR Rd, [X23, Ridx, LSL #3]` (ARM64) or
-    /// `MOV R_dst, [R_scratch + idx*8]` (x86_64) where the
-    /// `[*]const Value` `globals_base` is reloaded from
-    /// `[R15 + globals_base_off]` (x86_64) or pre-loaded into
-    /// X23 at function prologue (ARM64) per ADR-0026's invariant
-    /// strategy.
+    /// Globals array base pointer (ADR-0027 + ADR-0110 §9.13-V
+    /// widen). Each entry is one `runtime.value.Value` = 16 bytes
+    /// post-widen. JIT body's `global.get` emits `LDR Rd, [X23,
+    /// #byte_off]` (ARM64) or `MOV R_dst, [R_scratch + byte_off]`
+    /// (x86_64) where `byte_off` is per-global `idx * 16` from
+    /// `computeGlobalsLayout` (uniform stride). `globals_base` is
+    /// reloaded from `[R15 + globals_base_off]` (x86_64) or
+    /// pre-loaded into X23 at function prologue (ARM64) per
+    /// ADR-0026's invariant strategy.
     globals_base: [*]Value,
     /// Globals array length. Reserved for future bounds-checked
     /// global access (gc proposal Phase 11+ runtime-typed

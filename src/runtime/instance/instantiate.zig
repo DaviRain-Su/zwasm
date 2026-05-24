@@ -333,10 +333,11 @@ pub fn buildExportTypes(
 }
 
 /// Evaluate a global init-expression and return the initial Value.
-/// Supported shapes for v0.1.0: `<i32|i64|f32|f64>.const N; end`
-/// and `ref.null funcref|externref; end`. `global.get N` (importing
-/// from another module's globals) defers with the rest of cross-
-/// module global imports.
+/// Supported shapes for v0.1.0: `<i32|i64|f32|f64>.const N; end`,
+/// `ref.null funcref|externref; end`, and Wasm 2.0 `v128.const
+/// b0..b15; end` (post-ADR-0110 §9.13-V Phase A.4f; closes D-169).
+/// `global.get N` (importing from another module's globals) defers
+/// with the rest of cross-module global imports.
 pub fn evalConstExprValue(expr: []const u8) !Value {
     if (expr.len < 2) return error.UnsupportedConstExpr;
     var pos: usize = 1;
@@ -365,6 +366,20 @@ pub fn evalConstExprValue(expr: []const u8) !Value {
             if (pos >= expr.len) return error.UnsupportedConstExpr;
             pos += 1;
             break :blk .{ .ref = Value.null_ref };
+        },
+        // Wasm 2.0 SIMD prefix — currently only `v128.const`
+        // (sub-opcode 0x0C) is a valid const-expression op (per
+        // Wasm 2.0 §3.5.4 + ADR-0110 D-169 discharge).
+        0xFD => blk: {
+            if (pos >= expr.len) return error.UnsupportedConstExpr;
+            const sub = expr[pos];
+            pos += 1;
+            if (sub != 0x0C) return error.UnsupportedConstExpr;
+            if (pos + 16 > expr.len) return error.UnsupportedConstExpr;
+            var bytes: [16]u8 = undefined;
+            @memcpy(&bytes, expr[pos..][0..16]);
+            pos += 16;
+            break :blk .{ .v128 = bytes };
         },
         else => return error.UnsupportedConstExpr,
     };
