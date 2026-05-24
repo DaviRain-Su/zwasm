@@ -15,22 +15,22 @@
   GREEN at Step 0.7. windowsmini at `7680cbd2`: 0 FAIL.
 - **D-028 heisenbug streak**: 1/5 silent.
 
-## Active task — Phase B.3 D-139 cont. (gap C3 store_delete order)
+## Active task — Phase B.3 D-139 cont. (gap A3 partial-init zombie)
 
 Per [`c_api_instance_audit_2026-05-24.md`](./c_api_instance_audit_2026-05-24.md) §4 discharge plan.
-Audit + gaps C2 (`64c2378c`) + A2 (`38e31003`) + B3 (`034878b6`)
-closed. Remaining:
+Audit + gaps C2/A2/B3/C4 closed. Remaining:
 
-- **NEXT** — Gap C3: `wasm_store_delete` while live instance
-  exists (cleanup order safety).
-- **THEN** — Gap C4 (engine reuse across stores) + Gap A3
-  (partial-init trap zombie).
+- **NEXT** — Gap A3: `wasm_instance_new` partial-init trap parks
+  arena as zombie; verify post-trap store cleanup integrity.
 - **THEN** — D-139 close commit (`chore(debt): close D-139 ...`).
 
-Note: Gap A2's audit wording referenced a 3-instance "diamond";
-the chunk landed the simpler multi-consumer-of-A pattern (two
-B-instances both holding funcrefs into A). Full transitive
-C→A→B chain deferred to D-075 v0.1.0 RC if needed.
+Deferred:
+- Gap C3 (store_delete with live instance) → **D-174** filed
+  (impl gap: wasm_store_delete needs cascade-delete or self-
+  clear-store-ptr defensive fix; not testable until landed).
+- Gap A2's full transitive diamond → simpler multi-consumer
+  pattern landed instead; full chain deferred to D-075 v0.1.0
+  RC.
 
 3 new debts filed at C2 (blocked on ADR-0025 v0.1.0 RC c_api
 accessor exports): D-171 (A1 global zombie), D-172 (B1 table
