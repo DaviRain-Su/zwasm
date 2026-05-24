@@ -1,6 +1,6 @@
 # 0055 — Win64 v128 param marshal via hidden-pointer (Microsoft x64 ABI)
 
-- **Status**: Accepted
+- **Status**: Closed (implemented)
 - **Date**: 2026-05-12
 - **Author**: zwasm v2 maintainer (autonomous `/continue` loop, Phase 9 close)
 - **Tags**: phase-9, simd, x86_64, abi, windows

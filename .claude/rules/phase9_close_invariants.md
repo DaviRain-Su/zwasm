@@ -130,10 +130,12 @@ implementations that should be either:
 - `now` (currently being implemented), or
 - `blocked-by: ADR-XXXX Accept` (a real design dependency).
 
-### I6 — ADR-0105 + ADR-0106 Accepted
+### I6 — ADR-0105 + ADR-0106 Accepted (or later Closed)
 
-Both companion ADRs MUST be `Status: Accepted` before §9.13-0 [x].
-User collab review at §9.13 hard gate handles the flip.
+Both companion ADRs MUST be `Status: Accepted` (initial user-flip
+at §9.13 hard gate per ADR-0104 D1.6) OR `Status: Closed (implemented)`
+(post-impl canonical pass per §9.12-I Phase C). Both satisfy the
+invariant intent: design decision is final, no longer Proposed.
 
 ### I7 — Phase-9-close master plan ACTIVE
 

@@ -1,6 +1,6 @@
 # 0054 — Track B source-split: x86_64 + arm64 SIMD source partition (D-057 + D-065 close)
 
-- **Status**: Accepted
+- **Status**: Closed (implemented)
 - **Date**: 2026-05-12
 - **Author**: Phase 10 prep + §9.9-h-15..-20 autonomous /continue cycle
 - **Tags**: roadmap, phase9, refactor, file-shape, jit, simd, x86_64, arm64, mirror-adr-0030

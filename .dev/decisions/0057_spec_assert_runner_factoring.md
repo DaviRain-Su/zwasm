@@ -1,6 +1,6 @@
 # 0057 — spec_assert_runner factoring: base + specialisations
 
-- **Status**: Accepted
+- **Status**: Closed (implemented)
 - **Date**: 2026-05-12
 - **Author**: zwasm v2 maintainer (autonomous `/continue` loop, Phase 9 close, §9.9 / 9.9-l-1)
 - **Tags**: phase-9, testing, spec-runner, refactor

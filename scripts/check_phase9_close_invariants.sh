@@ -124,18 +124,22 @@ else
   fi
 fi
 
-# I6 — ADR-0105 + ADR-0106 Accepted
+# I6 — ADR-0105 + ADR-0106 Accepted (or later post-impl Closed)
+# Both "Accepted" (initial user-flip) and "Closed (implemented)"
+# (post-impl canonical pass per §9.12-I Phase C) satisfy the
+# invariant intent: design decision is final + no longer Proposed.
 for adr in 0105_jit_prologue_stack_probe 0106_multi_result_return_convention; do
   f=".dev/decisions/${adr}.md"
   if [ ! -f "$f" ]; then
     fail "I6: $f missing"
     continue
   fi
-  if grep -qE '^- \*\*Status\*\*: Accepted' "$f"; then
-    ok "I6: $(basename "$f" .md) Status: Accepted"
+  if grep -qE '^- \*\*Status\*\*: (Accepted|Closed)' "$f"; then
+    status=$(grep -E '^- \*\*Status\*\*:' "$f" | head -1)
+    ok "I6: $(basename "$f" .md) $status"
   else
     status=$(grep -E '^- \*\*Status\*\*:' "$f" | head -1)
-    fail "I6: $(basename "$f" .md) NOT Accepted yet — $status (user collab flip at §9.13 gate per ADR-0104 D1.6)"
+    fail "I6: $(basename "$f" .md) NOT Accepted/Closed yet — $status (user collab flip at §9.13 gate per ADR-0104 D1.6)"
   fi
 done
 

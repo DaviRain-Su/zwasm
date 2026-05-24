@@ -1,6 +1,6 @@
 # 0075 — Mirror arm64's `(*EmitCtx, *const ZirInstr)` shape on x86_64 per-op handlers
 
-- **Status**: Accepted
+- **Status**: Closed (implemented)
 - **Date**: 2026-05-19
 - **Author**: Shota Kudo
 - **Tags**: phase9, substrate, dispatcher, zone2

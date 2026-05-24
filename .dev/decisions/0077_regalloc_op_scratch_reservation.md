@@ -1,6 +1,6 @@
 # 0077 — Make regalloc aware of op-internal scratch reservations
 
-- **Status**: Accepted
+- **Status**: Closed (implemented)
 - **Date**: 2026-05-20
 - **Author**: autonomous-loop (Claude) + shota.508 (review)
 - **Tags**: regalloc, ABI, scratch, D-132, D-133, §9.12-C, substrate

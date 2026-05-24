@@ -1,6 +1,6 @@
 # 0074 — Split the per-op file across Zone 1 and Zone 2 along the axis boundary
 
-- **Status**: Accepted
+- **Status**: Closed (implemented)
 - **Date**: 2026-05-19
 - **Author**: autonomous /continue loop (§9.12-B / B9)
 - **Tags**: architecture, zone, dispatch, instruction, codegen

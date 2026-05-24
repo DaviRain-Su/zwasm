@@ -1,6 +1,6 @@
 # 0060 — Force-spill call-crossing vregs in the regalloc
 
-- **Status**: Accepted
+- **Status**: Closed (implemented)
 - **Date**: 2026-05-14
 - **Author**: zwasm-from-scratch /continue autonomous loop (D-093 d-16)
 - **Tags**: regalloc, call-abi, mvp

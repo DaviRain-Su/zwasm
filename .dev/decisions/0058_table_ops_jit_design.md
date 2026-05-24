@@ -1,6 +1,6 @@
 # 0058 — JIT table.* family design: generalized TableSlice ABI
 
-- **Status**: Accepted
+- **Status**: Closed (implemented)
 - **Date**: 2026-05-12
 - **Author**: zwasm v2 maintainer (autonomous `/continue` loop, Phase 9 close, §9.9 / 9.9-m-2 cluster)
 - **Tags**: phase-9, jit, abi, tables

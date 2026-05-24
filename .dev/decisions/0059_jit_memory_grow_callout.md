@@ -1,6 +1,6 @@
 # 0059 — Adopt a `JitRuntime` callout pattern for `memory.grow`
 
-- **Status**: Accepted
+- **Status**: Closed (implemented)
 - **Date**: 2026-05-13
 - **Author**: autonomous /continue loop (Shota Kudo)
 - **Tags**: jit, abi, runtime-callout, memory.grow, phase9

@@ -1,6 +1,6 @@
 # 0066 — Per-import bridge thunks for cross-module function-import dispatch
 
-- **Status**: Accepted (amended 2026-05-17 §A1 + 2026-05-18 §A2 — bridge thunk shape extended to save caller's full pinned reserved-invariant cohort: §A1 added X19 / R15 per D-142 fix (A); §A2 extended arm64 to X19 + X24..X28 per D-144 fix; x86_64 unchanged at R15 per ADR-0026's single-pin design. See Amendments §A1 + §A2 below.)
+- **Status**: Closed (implemented; amended 2026-05-17 §A1 + 2026-05-18 §A2 — bridge thunk shape extended to save caller's full pinned reserved-invariant cohort: §A1 added X19 / R15 per D-142 fix (A); §A2 extended arm64 to X19 + X24..X28 per D-144 fix; x86_64 unchanged at R15 per ADR-0026's single-pin design. See Amendments §A1 + §A2 below.)
 - **Date**: 2026-05-17
 - **Author**: zwasm v2 maintainer (Phase 9 §9.9-III Cat III work)
 - **Tags**: phase-9, cat-iii, cross-module, host-imports, jit, abi, instance, store, dispatch, thunks, callee-saved, aapcs64

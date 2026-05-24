@@ -1,6 +1,6 @@
 # 0041 — SIMD-128 design framing (Phase 9 / §9.9)
 
-- **Status**: Accepted
+- **Status**: Closed (implemented)
 - **Date**: 2026-05-09
 - **Author**: Phase 9 / §9.9/9.2 autonomous /continue cycle
 - **Tags**: roadmap, phase9, simd, jit, validator, ir, neon, sse4_1
