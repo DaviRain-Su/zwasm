@@ -109,6 +109,31 @@ pub fn invokeBufWin64NoArgs(
     return results_buf;
 }
 
+/// ADR-0106 cycle 3e Phase 2'h step 2 — Win64 routing helper for
+/// 1+-arg multi-result entry helpers (D-167 wire-up). Mirrors
+/// `invokeBufWin64NoArgs` but threads caller-supplied args through
+/// the buffer-write ABI's `args: [*]const u64` channel.
+///
+/// Caller packs arg values into a `[]const u64` (each Value slot
+/// 8 bytes; i32 args zero-extend, f32 args occupy low 32 bits per
+/// the buffer-write ABI convention). The Win64 wrapper-thunk
+/// (`wrapper_thunk.zig::emitX8664Win64` 1-arg+2-int /
+/// 3-arg+2-int / 1-arg+3-int-MEM shapes, cycles 21-28) reads via
+/// `[R8]` / `[R8+8]` / `[R8+16]` and routes into body-side
+/// register-write (1+2int) or MEMORY-class (1+3int) convention.
+pub fn invokeBufWin64Args(
+    rt: *JitRuntime,
+    module: @import("linker.zig").JitModule,
+    func_idx: u32,
+    args: []const u64,
+    comptime n_results: usize,
+) Error![n_results]u64 {
+    const buf_fn = module.entry_buf(func_idx, BufferWriteFn);
+    var results_buf: [n_results]u64 = [_]u64{0} ** n_results;
+    try invokeBufferWrite(rt, buf_fn, args.ptr, &results_buf);
+    return results_buf;
+}
+
 // ============================================================
 // Tests — hand-rolled JIT bytes that match the buffer-write ABI
 // without depending on the JIT emit changes (cycles 2-3).
