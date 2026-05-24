@@ -1688,6 +1688,42 @@ const cross_module_b_wasm = [_]u8{
     0x00, 0x0b,
 };
 
+// D-170 fixture (§9.13-0 close blocker). Cross-instance v128
+// global import — Exporter defines a v128 global with known
+// lane bits; Importer imports it and exports a function that
+// extracts lane 0 via `i32x4.extract_lane`. The c_api carries
+// only i32 across the boundary (wasm-c-api `wasm_val_t` has no
+// v128 slot per `include/wasm.h:329-338`; matches wasmtime +
+// wasmer per lesson `2026-05-24-c_api-v128-spec-boundary.md`).
+// Boundary axis: cross-module / linking + v128 source-of-truth
+// init ordering (per edge_case_testing.md Stress axes).
+//
+// (module
+//   (global (export "g") v128
+//     (v128.const i32x4 0xdeadbeef 0x00c0ffee 0x12340000 0x56780000)))
+const v128_cross_inst_exporter_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x06, 0x16, 0x01, 0x7b, 0x00, 0xfd, 0x0c, 0xef,
+    0xbe, 0xad, 0xde, 0xee, 0xff, 0xc0, 0x00, 0x00,
+    0x00, 0x34, 0x12, 0x00, 0x00, 0x78, 0x56, 0x0b,
+    0x07, 0x05, 0x01, 0x01, 0x67, 0x03, 0x00,
+};
+
+// (module
+//   (import "exp" "g" (global v128)))
+//
+// Importer carries only the v128 global import — no function /
+// SIMD ops. The c_api uses interp dispatch which does not yet
+// implement SIMD ops (D-110 / Phase 10+ scope); D-170 isolates
+// the cross-instance v128 wiring at the `Runtime.globals[]`
+// pointer-aliasing layer and verifies the resulting cell
+// directly from Zig.
+const v128_cross_inst_importer_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x02, 0x0a, 0x01, 0x03, 0x65, 0x78, 0x70, 0x01,
+    0x67, 0x03, 0x7b, 0x00,
+};
+
 // Module with an active element segment whose offset is out-of-
 // bounds for the declared table: writes funcidx=0 into table[5]
 // on a 1-entry table. Wasm 2.0 §4.5.4 says active element bounds
@@ -1755,6 +1791,65 @@ test "wasm 2.0 cross-module funcref via wasm_instance_new: B's main dispatches i
     try testing.expect(trap == null);
     try testing.expectEqual(ValKind.i32, results_data[0].kind);
     try testing.expectEqual(@as(i32, 42), results_data[0].of.i32);
+}
+
+test "wasm 2.0 cross-module v128 global via wasm_instance_new: D-170 close" {
+    // D-170 / D-079(ii) — verifies cross-instance v128 global
+    // pointer-aliasing through `Runtime.globals[]: []*Value`
+    // (post-Phase A.4g uniform 16-byte stride; matches industry
+    // pointer-aliasing pattern per lesson
+    // `2026-05-24-c_api-v128-spec-boundary.md`). c_api's wasm.h
+    // surface does NOT expose v128 (spec-prohibited per
+    // `include/wasm.h:329-338` `wasm_val_t` union shape); the
+    // assertion therefore reads the Value cell directly from the
+    // importer's runtime.
+    const e = wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer wasm_engine_delete(e);
+    const s = wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer wasm_store_delete(s);
+
+    var bytes_exp = v128_cross_inst_exporter_wasm;
+    const bv_exp: ByteVec = .{ .size = bytes_exp.len, .data = &bytes_exp };
+    const m_exp = wasm_module_new(s, &bv_exp) orelse return error.ExporterModuleAllocFailed;
+    defer wasm_module_delete(m_exp);
+    const inst_exp = wasm_instance_new(s, m_exp, null, null) orelse return error.ExporterInstanceAllocFailed;
+    defer wasm_instance_delete(inst_exp);
+
+    var exports_exp: ExternVec = .{ .size = 0, .data = null };
+    wasm_instance_exports(inst_exp, &exports_exp);
+    defer wasm_extern_vec_delete(&exports_exp);
+    try testing.expectEqual(@as(usize, 1), exports_exp.size);
+    const g_ext = exports_exp.data.?[0] orelse return error.GlobalExternNull;
+
+    var bytes_imp = v128_cross_inst_importer_wasm;
+    const bv_imp: ByteVec = .{ .size = bytes_imp.len, .data = &bytes_imp };
+    const m_imp = wasm_module_new(s, &bv_imp) orelse return error.ImporterModuleAllocFailed;
+    defer wasm_module_delete(m_imp);
+
+    var imports_arr: [1]?*const Extern = .{g_ext};
+    const imports_opaque: *const anyopaque = @ptrCast(&imports_arr);
+    const inst_imp = wasm_instance_new(s, m_imp, imports_opaque, null) orelse return error.ImporterInstanceAllocFailed;
+    defer wasm_instance_delete(inst_imp);
+
+    // Source (exporter) cell: defined global at idx=0, init via
+    // v128.const → storage[0] holds the lane bits.
+    const rt_exp = inst_exp.runtime orelse return error.ExporterRuntimeNull;
+    try testing.expectEqual(@as(usize, 1), rt_exp.globals.len);
+    const exp_v128 = rt_exp.globals[0].v128;
+    try testing.expectEqual(@as(u32, 0xdeadbeef), std.mem.readInt(u32, exp_v128[0..4], .little));
+
+    // Importer cell: imported global at idx=0, pointer aliases
+    // source. The pointer-aliasing invariant requires the
+    // importer's slot AND the source's slot to dereference to
+    // the same 16 bytes.
+    const rt_imp = inst_imp.runtime orelse return error.ImporterRuntimeNull;
+    try testing.expectEqual(@as(usize, 1), rt_imp.globals.len);
+    try testing.expectEqual(rt_exp.globals[0], rt_imp.globals[0]);
+    const imp_v128 = rt_imp.globals[0].v128;
+    try testing.expectEqual(@as(u32, 0xdeadbeef), std.mem.readInt(u32, imp_v128[0..4], .little));
+    try testing.expectEqual(@as(u32, 0x00c0ffee), std.mem.readInt(u32, imp_v128[4..8], .little));
+    try testing.expectEqual(@as(u32, 0x12340000), std.mem.readInt(u32, imp_v128[8..12], .little));
+    try testing.expectEqual(@as(u32, 0x56780000), std.mem.readInt(u32, imp_v128[12..16], .little));
 }
 
 // D-139 §5.3a A2 — c_api Instance audit coverage. The spec runner
