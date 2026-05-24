@@ -185,9 +185,14 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
   に `--branch <name> [step]` form 追加。default invocation の
   semantics は不変 (per-chunk loop は `--branch` を渡さない;
   ADR-0076 D3 main-dev-branch verify が継続)。Phase A.6
-  feature-branch ubuntu verification を unblock。ubuntu
-  test-all on feature branch を background でキック (task
-  bql6d6pbi); 次 cycle 結果検証。
+  feature-branch ubuntu verification を unblock。Ubuntu
+  test-all on `zwasm-from-scratch-value16` (snapshot 73ba4e38)
+  **GREEN** (`/tmp/ubuntu_feature.log`)。
+- 54: **§9.13-V Phase A.6 prep — run_remote_windows.sh
+  `--branch` arg** (b88536df)。Mirror of ubuntu script.
+  Windowsmini test-all on feature branch をキック (task
+  bdgm2w2sh, 5-15 min ETA); 次 cycle で結果検証 + 3-host
+  ready 判定。
 
 ## Remaining work
 
