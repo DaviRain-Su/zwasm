@@ -190,21 +190,21 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
   **GREEN** (`/tmp/ubuntu_feature.log`)。
 - 54: **§9.13-V Phase A.6 prep — run_remote_windows.sh
   `--branch` arg** (b88536df)。Mirror of ubuntu script。
-- 55: **§9.13-V Phase A.6 — windowsmini feature-branch FAIL
-  (9 multi-result regressions); baseline comparison
-  in flight**。Feature branch windowsmini test-all surfaced
-  9 multi-result return failures: `break-br_if-num-num` +
-  `break-br_table-num-num` + `break-br_table-nested-num-num`
-  — pattern: expected `(i32:51, i64:52)` got `(i32:0, i64:51)`,
-  shift-by-one across slots。Mac aarch64 + Linux ubuntu pass。
-  仮説: 8-byte vs 16-byte stride mismatch on Win64 wrapper
-  thunk path (wrapper_thunk emit literals `+0x08`/`+0x10`
-  encode 8-byte stride; pairs with `[n]u64` entry buffers
-  — that's consistent). Need to determine if pre-existing
-  D-167 fails (= no regression, merge proceeds with known
-  fails) or NEW regression introduced by Phase A.4 cascade.
-  Baseline windowsmini test-all on main `zwasm-from-scratch`
-  kicked (separate task)。
+- 55: **§9.13-V Phase A.6 — windowsmini baseline diff: feature
+  branch IMPROVES Win64 fail count from 10 → 9**。Pre-feature-
+  branch main has 10 multi-result fails; feature branch has 9
+  (`break-br_if-num-num(i32:0)` passes on feature branch, fails
+  on main). All 9 fails on feature branch are PRE-EXISTING
+  (D-167 class: Win64 wrapper thunk multi-result; not new
+  regression). 3-host verification COMPLETE:
+  - Mac aarch64 test-all: GREEN
+  - Linux x86_64 (ubuntu) test-all: GREEN
+  - Win64 (windowsmini) test-all: 9 pre-existing fails
+    (D-167 class), unchanged from cycle 37 baseline minus 1
+    (feature branch IMPROVES by 1)。
+  Phase A.6 autonomous prep COMPLETE。残: user-gated merge
+  (substantial 22-commit landing on zwasm-from-scratch main
+  dev branch)。
 
 ## Remaining work
 
@@ -226,74 +226,66 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
    **Phase A 着手前に必読** — drift 発生で CW v1
    dogfooding 破壊。
 
-### Autonomous-eligible (next session pick from here)
+## Bucket-3 stop — user touchpoint required
 
-優先順 (... A.5 51; A.6-prep ADR-0110 history 52 on feature
-branch; **Phase A.6 remaining 起点**):
+All autonomous prep walked; loop stops without re-arm per
+`/continue` SKILL.md bucket-3.
 
-1. **§9.13-V Phase A.6 — feature-branch 3-host verify + merge
-   to zwasm-from-scratch** (**NEXT**, ~1-2 cycle; **partially
-   user-gated**)。Plan doc §2 Phase 6 explicitly says "user-
-   gated review"。Autonomous prep done at cycle 52 (ADR-0110
-   Revision history)。Remaining work:
-   - **Autonomous**: `scripts/run_remote_ubuntu.sh` を
-     `--branch <name>` arg 対応に extension、feature branch
-     上で ubuntu test-all 実行。同 windowsmini 用 script も
-     extension。
-   - **User-gated**: feature branch (zwasm-from-scratch-
-     value16) を zwasm-from-scratch (main dev branch) に
-     merge する操作は substantial scale (20+ commits, +161
-     LOC) で、user collab review が plan doc 既定 (§5 Phase 6
-     "user-gated review")。
-   - Post-merge: 3-host gate on merged main + §9.13-V row
-     `[x]` flip + ADR-0110 Status: Closed (implemented)。
-2. **Phase B / C / D / E / F** — flow doc §2 per
-   `.dev/phase9_remaining_flow.md` (windowsmini reconcile,
-   §9.12-I ADR closure, §9.12-F debt cohort verify, §9.13
-   collab gate, Phase 10 open)。Phase A.6 merge 完了 unblocks
-   all。
-3. **§9.13-V Phase A.3-A.6** — Value flip + cascade + merge
-   (feature branch `zwasm-from-scratch-value16`; D-167
-   wire-up を A.4 内 に統合)。Phase 4d/4e はほぼ空、Phase
-   4g が long pole (REPORT §8 reference)。
-4. **Phase B / C / D** — windowsmini reconcile + ADR closure
-   + debt cohort verify。Phase A と並列実行可能 (詳細は flow
-   doc §4)。
+**Gating user touchpoint**:
 
-### Still user-gated
+- **Merge `zwasm-from-scratch-value16` → `zwasm-from-scratch`**
+  (main dev branch). Plan doc §5 explicitly designates
+  Phase A.6 as "user-gated review". The merge lands a
+  22-commit feature branch representing the §9.13-V cohort
+  (Value extern union widen 8→16 per ADR-0110) + 13 boundary
+  fixtures + cope cleanup. Net diff vs main: +313/-152 = +161
+  LOC (fixture-inflated; ~+65 net code change). After merge:
+  ROADMAP §9.13-V `[x]` flip + ADR-0110 Status flip to
+  `Closed (implemented)` + autonomous loop resumes Phase B/C/D/F.
 
-- **ADR-0109** Accept → D-075 re-scope + native Zig API
-  rewrite (~6-8 cycles)。§9.13-V Phase 4f で facade Value
-  section が simplify される (V128 separate 不要に)。
-- **§9.13 hard gate** — ADR-0105 + ADR-0106 Track D collab
-  review + Phase B `[x]` re-flip per `phase9_close_master.md`
-  §5.3a Phase B。**§9.13-V 完了が §9.13 ゲートの前提**
-  (ADR-0104 Revision 2026-05-24 で expansion)。
+**Autonomous prep walked this cohort** (do not re-walk):
 
+- ADR-0110 Revision history: cycles 38-51 implementation
+  lineage with SHAs (commit `5acc3250`).
+- 3-host verification:
+  - Mac aarch64 `zig build test-all` GREEN (verified throughout
+    cycles 42-50).
+  - Linux x86_64 ubuntu test-all on feature branch GREEN
+    (verified cycle 53, `/tmp/ubuntu_feature.log` HEAD=73ba4e38).
+  - Win64 windowsmini test-all on feature branch: 9 fails,
+    all PRE-EXISTING D-167 class (verified cycle 55 vs main
+    baseline 10 fails; feature branch IMPROVES by 1).
+- Cope-grep verification at cycle 51 (plan doc §7a).
+- D-169 discharged at cycle 46. D-170 filed (deferred to Phase
+  10+ JIT runtime wiring rework).
+
+**To resume**: review the feature branch
+(`https://github.com/clojurewasm/zwasm/tree/zwasm-from-scratch-value16`),
+merge into `zwasm-from-scratch` (rebase merge or `--no-ff` per
+preference), then re-invoke `/continue`. Post-merge work
+(autonomous): SHA backfill in ROADMAP §9.13-V row, ADR-0110
+Status closure, then proceed to Phase B (windowsmini D-167
+reconcile per `.dev/phase9_remaining_flow.md` §2).
 
 ## Cold-start procedure
 
 Per `/continue` SKILL.md Resume Steps 0.5 / 0.7 / 0.8.
-**Current state**: autonomous-eligible (feature-branch
-workflow active at `zwasm-from-scratch-value16`; tree is
-intentionally runtime-red until Phase A.4 cascade restores
-green; main `zwasm-from-scratch` stable at bcc4951f). `now`
-debts: D-167 (folded into §9.13-V Phase A.4f) + **D-169**
-(c_api v128 const init gap; discharged inside Phase A.4f).
-**Mac `zig build test-all` is GREEN** under Value=16. Phase
-A.5 closure at cycle 51 + ADR-0110 Revision history at cycle
-52 complete the autonomous prep. Next: Phase A.6 remaining
-work — `scripts/run_remote_ubuntu.sh` `--branch` arg extension
-+ feature-branch 3-host verification (autonomous), followed
-by user-gated merge to zwasm-from-scratch (plan §5 marks
-Phase 6 "user-gated review")。
-**Step 1a override**: `phase9_close_master.md` reference
-above triggers close-plan override per SKILL.md; Step 2
-(ROADMAP §9 first `[ ]` lookup) is therefore informational
-— actual next work is per flow doc + plan doc.
+**Current state**: **bucket-3 stop** (autonomous loop ended
+cycle 56 without re-arm). 3-host verification COMPLETE on
+feature branch `zwasm-from-scratch-value16`; user-gated merge
+to `zwasm-from-scratch` is the next action (plan doc §5
+explicit). Post-merge autonomous loop resumes for SHA backfill
++ ADR-0110 closure + Phase B/C/D/F.
 
 ## See
 
 - ADR-0104 (Phase 9 真スコープ), ADR-0107 (byte-buffer
-  globals), ADR-0108 (CATALOG-EXEMPT tier).
-- `private/spikes/d167-win64-multi-arg-wrapper/README.md`.
+  globals), ADR-0108 (CATALOG-EXEMPT tier), ADR-0110 (Value
+  widen 8→16, Implemented (feature branch state)).
+- `.dev/phase9_value_widen_plan.md` — implementation plan
+  (Phase A.1-A.5 closed; Phase A.6 user-gated merge pending).
+- `.dev/phase9_remaining_flow.md` — Phase B/C/D/E/F sequence
+  reference for post-merge autonomous resumption.
+- `private/spikes/d167-win64-multi-arg-wrapper/README.md` —
+  pre-existing Win64 multi-result 9 fails (unchanged by
+  feature branch, feature branch improves count by 1).
