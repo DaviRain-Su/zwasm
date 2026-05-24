@@ -339,3 +339,55 @@ cited.
 - 2026-05-24 — ADR-0104 Revision history entry added
   (in same commit): Phase 9 真スコープ amended to
   include §9.13-V cohort.
+- 2026-05-24 cycles 38-51 — **Implementation cohort
+  landed on feature branch `zwasm-from-scratch-value16`**:
+  - Phase A.1 scope audit (cycle 38, REPORT at
+    `private/spikes/value-widen-scope-audit/REPORT.md`):
+    confirmed ADR-0052 "50+ test sites" claim was
+    inflated ~25×; 4 ADR-0110 §1.66-75 phantom items
+    (`globals_byte_storage` / `globals_byte_base` /
+    `evalConstScalarValue` / `evalConstV128Value`) DO
+    NOT exist in tree.
+  - Phase A.2 test coverage (cycles 39-41): 13 boundary
+    fixtures landed (5 scalar + 8 v128 at
+    `test/edge_cases/p9/{value_semantics,v128_lane_ops,
+    v128_nan_payload}/`). Side-find: D-169 (c_api
+    evalConstExprValue v128.const reject) filed.
+  - Phase A.3 (cycle 42, `226ce9d7`): `src/runtime/value.zig`
+    extern union widened 8→16; `bits128 / v128: [16]u8`
+    variants added; `Value.zero` flipped to `.bits128 = 0`.
+  - Phase A.4 cascade (cycles 43-46):
+    - A.4a (`e6ba1f5a`): zero-init literal sites.
+    - A.4c (`269cb783`): regalloc spill stride *8→*16;
+      Mac `zig build test` GREEN.
+    - A.4b (`36c50710`): `computeGlobalsLayout` uniform
+      16-byte stride + JIT codegen globals fallback;
+      Mac `zig build test-all` GREEN (edge 68/0, wast
+      72/0, spec_assert 212/0, wast_runtime 266/0).
+      **Cascade restoration COMPLETE in 3 cycles** vs
+      3.5-5 estimate.
+    - A.4f (`092d2cdb`): **D-169 discharged** —
+      `evalConstExprValue` v128.const arm added; side-find
+      D-170 filed (c_api JIT runtime wiring for v128 globals
+      via wasm_instance_new; deferred to Phase 10+).
+  - Phase A.4g cope cleanup (cycles 47-50):
+    - A.4g-1 (`4178e717`): evalConstScalarRawCtx slot_size
+      dead-code removal.
+    - A.4g-2 (`5c6f91fe`): `globals_byte_size` field
+      removal (CompiledWasm + GlobalsLayout + 4 sites).
+    - A.4g-3 (`1fd60829`): applyDefinedGlobalsInit +
+      resolveFuncrefGlobals bounds check unification.
+    - A.4g-4 (`8fe9d801`): applyImportedGlobalsFromRegistered
+      uniform 16-byte copy (R-new-8 highest-risk
+      migration boundary dissolved).
+  - Phase A.5 (`57cd4147`): cope-grep verification +
+    closure decision documented in plan doc §7a. Net
+    diff vs main `bcc4951f`: +313 / -152 = +161 LOC
+    (fixture-inflated; ~+65 net code change). Residual
+    `globals_offsets` (47 src refs) + `GlobalsCtx`
+    (9 refs) are structural metadata deferred to Phase
+    10+ alongside ADR-0109 + D-170 discharge.
+  - **Status: Implemented (feature branch state).
+    Closure pending Phase A.6 merge to main** (3-host
+    verify + ubuntu/windowsmini reconcile + bench delta
+    capture + main rebase + merge).
