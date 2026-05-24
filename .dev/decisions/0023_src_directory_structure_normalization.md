@@ -50,7 +50,7 @@ This ADR redefines the `src/` final shape, drawing on:
 - LLVM `lib/CodeGen/` and Cranelift `cranelift/codegen/` as the
   industry idiom for the code-generation subtree
 - ClojureWasmFromScratch's "see the final shape on day 1"
-  principle (CW v2 P2)
+  principle (cw v1 P2)
 - Build-flag granularity expected for v0.1.0+ (per-Wasm-version,
   per-engine, per-feature, per-WASI-level toggles)
 

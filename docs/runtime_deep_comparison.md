@@ -6,7 +6,7 @@ per-runtime below).
 not just surface API. Triggered by zwasm v2's ADR-0052 (Value=8-byte
 invariant) re-evaluation and ADR-0107 (byte-buffer globals
 propagation) review.
-**Audience**: zwasm v2 maintainers + ClojureWasm v2 dogfooding
+**Audience**: zwasm v2 maintainers + ClojureWasm v1 dogfooding
 team. Synthesis of three parallel subagent audits (private/notes/
 runtime-deep-comparison-{rust,c-family,other}.md, ~1800 lines
 combined source).
@@ -386,7 +386,7 @@ Raw audit material with full file:line citations:
 - `private/notes/runtime-deep-comparison-other.md` (634 lines)
   — wazero, zware, wasm3
 
-These are gitignored. If a future zwasm v2 / CW v2 review needs
+These are gitignored. If a future zwasm v2 / cw v1 review needs
 to cite specific code, the source reports have the citations;
 this synthesis doc has the conclusions.
 

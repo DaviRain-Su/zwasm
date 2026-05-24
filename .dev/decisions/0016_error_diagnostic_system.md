@@ -45,7 +45,7 @@ Two further symptoms surfaced in §9.6 / 6.K.2's debug session:
 The survey compared four internal shapes (plain error set,
 `*ErrorContext` arg, tagged Result union, hybrid) across hot-path
 cost / library UX / C ABI / JIT compatibility, then reviewed
-wasmtime, wazero, and ClojureWasm v2 (`~/Documents/MyProducts/ClojureWasmFromScratch/`)
+wasmtime, wazero, and ClojureWasm v1 (`~/Documents/MyProducts/ClojureWasmFromScratch/`)
 for cross-reference. The hybrid shape — Zig error set drives
 control flow on the hot path, structured `Diagnostic` payload in
 a threadlocal slot — wins on every axis when constrained by
@@ -219,7 +219,7 @@ phase 2+ extension must satisfy them.
    - `pub const Info = struct { kind, phase, location,
      message_buf: [512]u8, message_len }`. Inline 512-byte
      buffer (matches v1 c\_api `ERROR_BUF_SIZE` and
-     ClojureWasm v2's `runtime/error.zig`; the symmetry is
+     ClojureWasm v1's `runtime/error.zig`; the symmetry is
      cheap and v1's longest message strings sit well under
      this cap). `setDiag` doesn't allocate on the cold path
      (per principle 2).
@@ -550,10 +550,10 @@ phase 2+ extension must satisfy them.
   `src/interp/mod.zig:121` (`Trap`, 12 tags) +
   `src/c_api/trap_surface.zig:34` (`TrapKind`, 11 tags) +
   `c_api/trap_surface.zig:mapInterpTrap` (the glue)
-- ClojureWasm v2 reference:
+- ClojureWasm v1 reference:
   `~/Documents/MyProducts/ClojureWasmFromScratch/src/runtime/error.zig`
   + `error_print.zig` (the `Phase × Kind × Location + threadlocal`
-  pattern this ADR borrows. **CW v2 is in Zig, not Clojure** —
+  pattern this ADR borrows. **cw v1 is in Zig, not Clojure** —
   the `.cljc` file the survey originally cited does not exist;
   the actual sources are these `.zig` files. CW's phases differ
   from zwasm's — see Alternative F)

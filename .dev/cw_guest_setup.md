@@ -4,18 +4,18 @@
 
 > Discovered 2026-05-04 during §9.6 / 6.G investigation: the
 > ROADMAP's original wording "via `build.zig.zon` `path = ...`"
-> presumed CW v2 would expose pre-built `.wasm` artefacts as a
-> Zig package. CW v2
+> presumed cw v1 would expose pre-built `.wasm` artefacts as a
+> Zig package. cw v1
 > (`~/Documents/MyProducts/ClojureWasmFromScratch/`) is at Phase
 > 3 (tree-walk evaluator) and won't emit wasm until its own
-> Phase 14+. CW v1 (`~/Documents/MyProducts/ClojureWasm/`) does
+> Phase 14+. cw v0 (`~/Documents/MyProducts/ClojureWasm/`) does
 > emit wasm32-wasi guests today and is the substitute substrate
 > for §9.6 / 6.G's "guest end-to-end" verification.
 >
 > This file is the operational procedure for that substitution.
 > ADR-grade discussion was deemed unnecessary — the substitution
 > is mechanical, the timeline is documented, and removal is
-> procedural (when CW v2 lands wasm, switch the corpus source).
+> procedural (when cw v1 lands wasm, switch the corpus source).
 
 ## What 6.G actually requires
 
@@ -25,19 +25,19 @@ same output as wasmtime. The mechanism (path-dep vs vendoring)
 is implementation detail; the load-bearing claim is
 "interoperability proven against a real CW guest".
 
-## Substrate selection (CW v1 substitution)
+## Substrate selection (cw v0 substitution)
 
-**Choice**: vendor a small subset of CW v1's `bench/wasm/*.wasm`
+**Choice**: vendor a small subset of cw v0's `bench/wasm/*.wasm`
 into `test/realworld/wasm/` with a `cljw_` prefix. This:
 
 - Keeps the existing realworld 3-runner pipeline (parse / run /
   diff vs wasmtime) doing the verification work.
 - Avoids `build.zig.zon` `path = "../ClojureWasm"` (which
-  requires every host that runs `zig build` to have CW v1
+  requires every host that runs `zig build` to have cw v0
   cloned at the relative path; windowsmini doesn't).
-- Defers the `path = ...` mechanism until CW v2's wasm backend
+- Defers the `path = ...` mechanism until cw v1's wasm backend
   ships; at that point the corpus switches source from "vendored
-  from CW v1 commit X" to "built by CW v2 path-dep at Y".
+  from cw v0 commit X" to "built by cw v1 path-dep at Y".
 
 **Selected fixtures** (small, compute-only, WASI-pure):
 
@@ -83,28 +83,28 @@ runners walk `test/realworld/wasm/` recursively for `.wasm`.
 - All 5 in `test/realworld/diff_runner.zig` produce **either**
   `MATCH` (both runtimes byte-equal non-empty stdout) **or**
   `SKIP-EMPTY` (both runtimes produced empty stdout — trivially
-  equal). CW v1's `bench/` fixtures are compute-only: their
+  equal). cw v0's `bench/` fixtures are compute-only: their
   `_start` runs silently and the computed result is exposed via
   named exports (e.g. `fib`) intended for a host harness, so
   SKIP-EMPTY is the expected outcome under direct CLI invocation.
   `MISMATCH` or `SKIP-V2-*` is a real fail and triggers the
   spec-gap escape clause (debt or skip-ADR per §9.6 / 6.J).
 
-If a future fixture exercises a printing path (e.g. a CW v2
+If a future fixture exercises a printing path (e.g. a cw v1
 `(println ...)` form once that lands), it should appear as
 MATCH; the gate remains "both runtimes agreed on stdout
 bytes", whatever that byte count is.
 
 ## Removal / migration path
 
-When CW v2 lands its wasm32-wasi backend (CW Phase 14+):
+When cw v1 lands its wasm32-wasi backend (CW Phase 14+):
 
-1. Update CW v2's `build.zig.zon` `paths` field to include the
+1. Update cw v1's `build.zig.zon` `paths` field to include the
    wasm output directory (currently `bench/wasm/` is *not* in
    `paths`, so even path-dep can't see it).
 2. Add `clojure_wasm_v2 = .{ .path = "../ClojureWasmFromScratch" }`
    to zwasm v2's `build.zig.zon`.
-3. Add a build step that triggers CW v2's `zig build wasm`
+3. Add a build step that triggers cw v1's `zig build wasm`
    target and consumes the artifacts.
 4. Delete the vendored `cljw_*.wasm` files; replace with the
    build-product path.
@@ -115,10 +115,10 @@ When CW v2 lands its wasm32-wasi backend (CW Phase 14+):
 
 Per `.claude/rules/lessons_vs_adr.md`:
 
-- The choice (CW v1 vendor) is mechanical — it doesn't reject
+- The choice (cw v0 vendor) is mechanical — it doesn't reject
   named alternatives with load-bearing rationale; it picks the
   only working substrate.
-- No removal-condition rationale needs preservation — when CW v2
+- No removal-condition rationale needs preservation — when cw v1
   ships wasm, the migration is obvious.
 - No subsequent ROADMAP / phase / scope decision rests on this
   choice.
@@ -131,7 +131,7 @@ Revision history conventions, not as a separate ADR.
 ## See also
 
 - `test/realworld/README.md` — three-runner pipeline.
-- `~/Documents/MyProducts/ClojureWasm/build.zig:122` — CW v1's
+- `~/Documents/MyProducts/ClojureWasm/build.zig:122` — cw v0's
   `wasm` build step (wasm32-wasi target).
 - `~/Documents/MyProducts/ClojureWasmFromScratch/.dev/ROADMAP.md`
-  §9 — CW v2's phase plan; wasm backend at Phase 14.
+  §9 — cw v1's phase plan; wasm backend at Phase 14.

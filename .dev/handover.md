@@ -7,32 +7,32 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24)。
-- **Last commit**: this commit — **10.J-invest 完了** (plan doc
-  [`phase10_zig_api_plan.md`](./phase10_zig_api_plan.md) 1140+
-  lines; 2 subagent surveys at `private/notes/p10-J.invest-{code,
-  test}-survey.md` の synthesized 結果; 8 chunks J.1..J.close +
-  three-tier test architecture + coverage matrix + 7 decision
-  points + 10 risks)。直前: `11c6e94e` (J.0 amend round)。
+- **Last commit**: this commit — **10.J plan APPROVED** + cw v1
+  naming 正規化 (zwasm v2 docs 全 "CW v2" / "ClojureWasm v2" →
+  "cw v1" / "ClojureWasm v1"; `cw_guest_setup.md` 内 OLD
+  ClojureWasm/ refs → "cw v0" 別途明示); `docs/zig_api_design.md`
+  §2 Value snippet を ADR-0110 16-byte uniform に整合;
+  `phase10_zig_api_plan_ja.md` 削除 (英語版 canonical)。直前:
+  `c50e9ed1` (A+C: table_storage.zig 削除 + audit_table_sync.sh
+  gate)。
 - **Phase 9 close invariants gate (mac-host)**: **18/18 PASS** 維持。
 
-## Active task — 10.J-1 待機中 (USER REVIEW GATE)
+## Active task — 10.J impl train (J.1..J.close 自走中)
 
-**ガイド**: plan doc [`phase10_zig_api_plan.md`](./phase10_zig_api_plan.md)
-を review し、特に以下を確認/承認お願いします:
+**ADR-0109 (Accepted 2026-05-25) + plan doc** [`phase10_zig_api_plan.md`](./phase10_zig_api_plan.md) **user 承認済** (D1-D7 frozen / 5 must-have / R1-R10)。**J.1 から J.close まで /continue loop 自走**; 各 sub-chunk close 時に handover が次 sub-chunk へ retarget; 8-12 cycles 想定; per-sub-chunk user 承認 不要。
 
-- **§3 chunk decomposition** (J.1-J.close 8 chunks; J.4 critical path)
-- **§4 integrated test strategy** (Tier 1/2/3 architecture; 「他 test
-  green でも Zig API 壊れている」を構造的に防ぐ仕組み)
-- **§5 decision points D1-D7** — 推奨判断が frozen 済 (Option B
-  subsystem split / J.4 spike contingency / Tier-2 corpus realworld+p7
-  only / WASI skeleton-only / etc)。ユーザ override 可。
-- **§6 risk inventory R1-R10** — TypedFunc comptime / 名前衝突等
-- **§7 cycle estimate** 8-12 cycles (ADR-0109 estimate 6-8 を上回るが
-  J.4 spike contingency + J.6 Tier-2 runner exe を visible scope に
-  含めた結果; どちらも scope-creep ではない)
+| Sub-chunk | Scope | Gate | Status |
+|---|---|---|---|
+| **J.1 NEXT** | Runtime → JitRuntime 機械 rename (~25 import sites) | `unclear` → test-all | 着手準備完了 |
+| J.2 | Engine + Module + allocator strict-pass | substrate | J.1 後 |
+| J.3 | Instance + 完全 Trap set | substrate | J.2 後 |
+| J.4 | TypedFunc + Memory + multi-result (**critical path**; spike 可) | substrate | J.3 後 |
+| J.5 | Linker + Caller + host imports | substrate | J.4 後 |
+| J.6 | Tier-2 zig_facade_runner | cohort | J.5 後 |
+| J.7 | WASI defineWasi skeleton | substrate | J.6 後 |
+| J.close | Coverage audit + D-075 close + ROADMAP 10.J [x] | substrate | J.7 後 |
 
-**承認後**: J.1 (Runtime → JitRuntime mechanical rename) から impl 開始。
-否承認/修正要求あれば plan doc を amend してから再 review。
+**J.1 exit criterion**: (1) `grep -nE '\bruntime\.Runtime\b' src/ test/` 0 hit; (2) `zig build test-all` GREEN; (3) `zig build lint` GREEN。**Tier-1 tests landed in commit**: NONE NEW (rename; 既存 tests が挙動不変 prove)。**Risk**: LOW (survey §3 "mechanical 90% search-replace")。詳細 plan §3 J.1。
 
 ## Phase 10 progress (stable snapshot; refreshed on row [x] flip only)
 
@@ -69,27 +69,16 @@ not nearly complete at 10.J close).
 5 件; debt 26 rows + Phase 9 boundary → `meta_audit` suggest
 (user-gated; NOT autonomously fired)。
 
-## Cold-start procedure
+## Cold-start procedure + key refs
 
 Per `/continue` SKILL.md Resume Steps 0.5 / 0.7 / 0.8。Step 0.8
-の `scripts/check_phase9_close_invariants.sh --gate` は Phase 9 =
-DONE 後 permanent regression check として残存 (I7 ARCHIVED-IN-PLACE
-受理済; 18/18 PASS)。
+`scripts/check_phase9_close_invariants.sh --gate` (18/18 PASS) は
+Phase 9 = DONE 後 permanent regression check として残存。
 
-**Phase 10 設計の authoritative source**:
-[`phase10_design_plan_ja.md`](./phase10_design_plan_ja.md) §3-§8
-(2026-05-25 amend: §3.6 ADR-0109 sub-section + §7 J.* chunks)。
-**Zig API consumer spec**: [`../docs/zig_api_design.md`](../docs/zig_api_design.md) (live; ADR-0109 Accepted)。
-
-## See
-
-- [`../docs/zig_api_design.md`](../docs/zig_api_design.md) —
-  Zig API consumer spec (ADR-0109 paired; live)
-- [`decisions/0109_native_zig_api_inversion.md`](./decisions/0109_native_zig_api_inversion.md)
-  — Accepted 2026-05-25; impl tracker = D-075 + ROADMAP §10 / 10.J
-- [`phase10_design_plan_ja.md`](./phase10_design_plan_ja.md) — r3 + 2026-05-25 amend
-- [`phase_log/phase10.md`](./phase_log/phase10.md) — sub-chunk record
-- [`phase9_close_master.md`](./phase9_close_master.md) —
-  ARCHIVED-IN-PLACE 2026-05-25; cite-only
-- ROADMAP §10 (12 sub-rows incl. new 10.J)
-- `private/audit-2026-05-24-phase9-close.md` (gitignored)
+- **10.J impl 順序**: [`phase10_zig_api_plan.md`](./phase10_zig_api_plan.md) §3 (J.1..J.close)
+- **Phase 10 全体設計**: [`phase10_design_plan_ja.md`](./phase10_design_plan_ja.md) §3.1-§3.6 + §7 work-sequence
+- **Zig API spec**: [`../docs/zig_api_design.md`](../docs/zig_api_design.md) (live; ADR-0109 Accepted)
+- **ADR-0109**: [`decisions/0109_native_zig_api_inversion.md`](./decisions/0109_native_zig_api_inversion.md) (impl tracker = D-075 + ROADMAP §10 / 10.J)
+- **Sub-chunk log**: [`phase_log/phase10.md`](./phase_log/phase10.md) (rows 10.C9 + 10.F + 10.J)
+- **Phase 9 close master**: [`phase9_close_master.md`](./phase9_close_master.md) (ARCHIVED-IN-PLACE 2026-05-25; cite-only)
+- ROADMAP §10 = task table (12 行); audit report = `private/audit-2026-05-24-phase9-close.md` (gitignored)

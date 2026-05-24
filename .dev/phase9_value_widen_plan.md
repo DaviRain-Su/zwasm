@@ -363,7 +363,7 @@ running in parallel with D-167 wire-up + Phase 9 close gate.
 Add new row to §9.<active phase>:
 
 ```markdown
-| 9.13-V | **Value widen to 16-byte (terminal SIMD width) per ADR-0110.** Six sub-phases per `.dev/phase9_value_widen_plan.md`: scope audit → test coverage strengthening → Value definition flip → cascade impl → cope code removal → 3-host verify. Removes ADR-0052 per-valtype offsets cope + obsoletes ADR-0107 (Withdrawn). Implements v128 first-class per industry 5/7 majority. CW v2 dogfooding-aware (ADR-0109 Value section simplifies in same cohort). Exit: cope-code grep clean + Mac+ubuntu+windowsmini test-all green + bench delta within tolerance. | [ ] |
+| 9.13-V | **Value widen to 16-byte (terminal SIMD width) per ADR-0110.** Six sub-phases per `.dev/phase9_value_widen_plan.md`: scope audit → test coverage strengthening → Value definition flip → cascade impl → cope code removal → 3-host verify. Removes ADR-0052 per-valtype offsets cope + obsoletes ADR-0107 (Withdrawn). Implements v128 first-class per industry 5/7 majority. cw v1 dogfooding-aware (ADR-0109 Value section simplifies in same cohort). Exit: cope-code grep clean + Mac+ubuntu+windowsmini test-all green + bench delta within tolerance. | [ ] |
 ```
 
 This row's `[ ]` flips when Phase 6 completes.

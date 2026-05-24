@@ -4,7 +4,7 @@
 **Accepted 2026-05-25** authorizes the rewrite; ROADMAP §10 /
 10.J carries the implementation cycles.
 **Audience**: Zig consumers embedding zwasm v2 as a Wasm runtime
-library (ClojureWasm v2 dogfooding, and any other Zig project).
+library (ClojureWasm v1 dogfooding, and any other Zig project).
 **Implementation status (2026-05-25 amend)**: Today's
 `src/zwasm.zig` (507 lines, ADR-0025 minimum subset) is a thin
 veneer over the wasm-c-api binding — `Runtime` ignores the
@@ -105,14 +105,15 @@ pub const Memory = struct {
     pub fn grow(self: *Memory, delta_pages: u32) !u32;
 };
 
-// Untagged 8-byte slot (NaN-boxing-friendly)
+// Untagged 16-byte slot per ADR-0110 (v128 first-class; no separate V128 type)
 pub const Value = extern union {
+    bits128: u128,
+    v128: [16]u8 align(16),
     bits64: u64,
     i32: i32, u32: u32, i64: i64, u64: u64,
     f32_bits: u32, f64_bits: u64,
     ref: u64,
 };
-pub const V128 = extern struct { bytes: [16]u8 align(16) };
 pub const ValueKind = enum { i32, i64, f32, f64, v128, funcref, externref };
 
 // Trap — full spec set, no catchall
@@ -191,7 +192,8 @@ The first parameter of a host function must be `*Caller` —
 this gives the host code access to the calling instance's
 memory, allocator, and runtime state. Subsequent parameters
 must be `i32 / u32 / i64 / u64 / f32 / f64` (and in the
-future `V128` for v128 + `?u64` for ref types).
+future `[16]u8` / `u128` for v128 + `?u64` for ref types
+per the §4 Value union; no separate `V128` type per ADR-0110).
 
 ### §3.3 — Multi-result
 
@@ -390,7 +392,7 @@ path.
 
 ### §4.3 — NaN-boxing-friendly bit ownership
 
-For consumers (notably ClojureWasm v2) that wish to NaN-box
+For consumers (notably ClojureWasm v1) that wish to NaN-box
 their own value representation **inside** the Wasm float
 slot:
 
@@ -431,10 +433,10 @@ The rewrite touches:
 
 Estimated 6-8 cycles of autonomous work, parallelizable.
 
-## §6 — Open questions for CW v2 review
+## §6 — Open questions for cw v1 review
 
 1. **Multi-result return shape**: the spec defaults to `struct { i32, i32 }`
-   (anonymous tuple) for multi-result. Does CW v2 prefer named
+   (anonymous tuple) for multi-result. Does cw v1 prefer named
    fields (`struct { quot: i32, rem: i32 }`) as the primary shape?
    Both work; the question is which is the documented "blessed"
    pattern.
@@ -458,7 +460,7 @@ Estimated 6-8 cycles of autonomous work, parallelizable.
    as host-func parameters — `?u64` (nullable raw handle) or
    typed `FuncRef` / `ExternRef` wrappers?
 
-CW v2 should raise these (and any others discovered while
+cw v1 should raise these (and any others discovered while
 prototyping against this spec) so they get fixed before
 impl lands.
 

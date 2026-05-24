@@ -11,7 +11,7 @@ project state.
 | Path                                             | What it is                                                             |
 |--------------------------------------------------|------------------------------------------------------------------------|
 | `~/Documents/MyProducts/zwasm/`                  | zwasm v1 (current main, ClojureWasm consumer) — **read, never copy**   |
-| `~/Documents/MyProducts/ClojureWasmFromScratch/` | CW v2 — procedural template that this project mirrors                  |
+| `~/Documents/MyProducts/ClojureWasmFromScratch/` | cw v1 — procedural template that this project mirrors                  |
 | `~/Documents/OSS/wasmtime/`                      | wasmtime + cranelift (winch / regalloc2 reference)                     |
 | `~/Documents/OSS/zware/`                         | Zig idiomatic interpreter                                              |
 | `~/Documents/OSS/wasm3/`                         | wasm3 (M3 IR + tail-call dispatch interpreter)                         |

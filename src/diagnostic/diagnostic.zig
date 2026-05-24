@@ -107,7 +107,7 @@ pub const Location = union(enum) {
 };
 
 /// Inline message buffer size — matches v1 c_api `ERROR_BUF_SIZE`
-/// and ClojureWasm v2's `error.zig`. The cap is soft; v1's
+/// and ClojureWasm v1's `error.zig`. The cap is soft; v1's
 /// longest message strings sit well under 200 bytes.
 pub const message_buf_size: usize = 512;
 

@@ -1,9 +1,9 @@
 # 0109 — Native Zig API inversion: Engine + Linker + TypedFunc
 
-- **Status**: Accepted 2026-05-25 (user collab review at Phase 10 open; CW v2 dogfooding feedback unblocked the deferral; D-075 re-scoped from "blocked-by Accept" to impl tracker; ROADMAP §10 / 10.J carries the 6-8 implementation cycles)
+- **Status**: Accepted 2026-05-25 (user collab review at Phase 10 open; cw v1 dogfooding feedback unblocked the deferral; D-075 re-scoped from "blocked-by Accept" to impl tracker; ROADMAP §10 / 10.J carries the 6-8 implementation cycles)
 - **Date**: 2026-05-24
 - **Author**: claude (autonomous loop, cycle 36)
-- **Tags**: zwasm.zig, facade, api, Engine, Linker, TypedFunc, CW-v2, dogfooding, D-075
+- **Tags**: zwasm.zig, facade, api, Engine, Linker, TypedFunc, cw-v1, dogfooding, D-075
 - **Supersedes-portion-of**: ADR-0025 "minimum subset" target shape (Runtime / Module / Instance / Value as thin c_api veneer)
 - **Amends**: ADR-0024 `src/zwasm.zig` re-export hub role (now also hosts native facade types)
 - **Paired execution plan + test strategy**: TBD — produced by a post-amend codebase-investigation chunk (subagent-driven; enumerates every site needing change for the rewrite + designs the test approach to ensure regression detection + happy path + edge cases so "other tests pass while Zig API is broken" cannot happen). Required reading before any J.* impl chunk lands.
@@ -20,7 +20,7 @@ top.
 
 Cycle 35 (`6b0cbbf6`) closed the immediate Phase 9 blocker
 (D-168 entry.zig cap) but surfaced a deeper question raised
-by the ClojureWasm v2 dogfooding team: **the current Zig
+by the ClojureWasm v1 dogfooding team: **the current Zig
 facade is not designed for Zig consumers**. Concrete defects
 inventoried in the cycle 35-36 discussion:
 
@@ -54,7 +54,7 @@ inventoried in the cycle 35-36 discussion:
 The user reframe (cycle 36): the c_api binding is the
 **industry-standard wasm-c-api implementation** and stays
 where it is; the Zig API should be **independent and
-first-principles**, designed for Zig consumers (CW v2
+first-principles**, designed for Zig consumers (cw v1
 being the immediate use case, but generalizable to any
 Zig project embedding Wasm).
 
@@ -132,7 +132,7 @@ the native Zig facade is a sibling, not a replacement.
 
 Full design spec: `docs/zig_api_design.md` (written
 alongside this ADR; reviewed in tandem at Accept time;
-canonical artifact for ClojureWasm v2 dogfooding).
+canonical artifact for ClojureWasm v1 dogfooding).
 
 ## Alternatives considered
 
@@ -171,14 +171,14 @@ canonical artifact for ClojureWasm v2 dogfooding).
 
 ### Alternative C — Defer the rewrite to v0.1.0 RC (status quo)
 
-- **Sketch**: Mark D-075 as still-deferred. CW v2 codes
+- **Sketch**: Mark D-075 as still-deferred. cw v1 codes
   against the current c_api-veneer facade, accepting the
   defects, and migrates at v0.1.0 RC.
-- **Why rejected**: CW v2 explicitly stated (2026-05-24)
+- **Why rejected**: cw v1 explicitly stated (2026-05-24)
   that the current facade defects block their work.
   Allocator strict-pass and host import wiring are
   structural blockers, not nice-to-haves. Deferring
-  forces CW v2 to either (a) not dogfood until v0.1.0
+  forces cw v1 to either (a) not dogfood until v0.1.0
   RC (= months) or (b) build a CW-internal Zig facade
   around the c_api binding that duplicates the work this
   ADR proposes. (a) blocks CW; (b) wastes work that has
@@ -201,7 +201,7 @@ canonical artifact for ClojureWasm v2 dogfooding).
 
 **Positive**:
 
-- ClojureWasm v2 (and any other Zig consumer) gets a
+- ClojureWasm v1 (and any other Zig consumer) gets a
   first-principles API designed for them. Allocator
   strict-pass, comptime-typed marshal, NaN-boxing-friendly
   Value, host import builder.
@@ -226,9 +226,9 @@ canonical artifact for ClojureWasm v2 dogfooding).
   touches many import sites (mechanical).
 - Breaking change for anything depending on the current
   c_api-veneer facade. Mitigation: today's facade is
-  unused outside the Phase 9 invariant test (I3); CW v2
+  unused outside the Phase 9 invariant test (I3); cw v1
   hasn't started coding against it. Window for the
-  breaking change is now (pre-CW-v2 adoption).
+  breaking change is now (pre-cw-v1 adoption).
 - The c_api binding stays at `src/api/`, which means
   TWO API surfaces exist in the tree. This is intentional
   (audience separation: native Zig vs cross-language)
@@ -255,14 +255,14 @@ canonical artifact for ClojureWasm v2 dogfooding).
 
 ## Removal condition
 
-This ADR retires when the rewrite ships and CW v2 has
+This ADR retires when the rewrite ships and cw v1 has
 successfully dogfooded against the new API for at least
 1 minor version (= the design has survived contact with
 a real consumer). At that point this ADR transitions
 to `Status: Closed (Implemented)` with the implementation
 SHA range cited.
 
-If CW v2 review surfaces a fundamental shape problem
+If cw v1 review surfaces a fundamental shape problem
 (e.g. TypedFunc comptime layer hits a Zig compiler
 limitation), this ADR is amended (Revision history) or
 superseded by a follow-on ADR.
@@ -297,7 +297,7 @@ superseded by a follow-on ADR.
   artifact).
 - 2026-05-25 — **Status: Proposed → Accepted** at Phase 10
   open. User direction: "実装を提案の状態に寄せていく (大作業
-  OK)" — CW v2 dogfooding feedback overrides the Phase 16
+  OK)" — cw v1 dogfooding feedback overrides the Phase 16
   deferral the original ADR-0025 plan carried. Companion
   amends in the same commit:
   - ADR-0025 Status clarified (target shape fully

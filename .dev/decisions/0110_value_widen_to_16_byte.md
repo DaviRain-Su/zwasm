@@ -191,7 +191,7 @@ under tight Phase 9 schedule pressure.
   embedded runtime" positioning but zwasm v2 is
   positioning toward "production-grade Wasm 2.0 runtime
   with JIT" (3-host, full spec compliance, dogfooded by
-  CW v2). At that positioning, "pay once, never again"
+  cw v1). At that positioning, "pay once, never again"
   beats "ongoing cope". User judgment 2026-05-24:
   "影響範囲が死ぬほど広くても取り組む価値がある".
 
@@ -250,7 +250,7 @@ under tight Phase 9 schedule pressure.
   representation, no further cope path needed.
 - ADR-0109 (native Zig API) `Value` exposure simplifies:
   no `V128` separate type — v128 is a Value variant like
-  any other. CW v2 dogfooding contract simplifies.
+  any other. cw v1 dogfooding contract simplifies.
 - Test coverage strengthening for Value semantics
   (boundary fixtures for v128 lane ops / NaN payload
   preservation / sign extension / ref encoding) lands as
@@ -283,7 +283,7 @@ under tight Phase 9 schedule pressure.
   16-byte extern union as internal; no separate `V128`
   type needed.
 - `docs/zig_api_design.md` updated alongside ADR-0109
-  Value section (CW v2 dogfooding contract).
+  Value section (cw v1 dogfooding contract).
 - §9.13-V plan doc (`.dev/phase9_value_widen_plan.md`)
   is the implementation playbook.
 - Future v128 SIMD extensions (Relaxed SIMD) become

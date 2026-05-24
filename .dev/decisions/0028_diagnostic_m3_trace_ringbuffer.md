@@ -54,7 +54,7 @@ Phase 7's progress changed the calculation:
 
 A cross-runtime trace mechanism survey was conducted (per
 `.claude/rules/textbook_survey.md`) covering zwasm v1,
-ClojureWasm v2 error machinery, wasmtime, cranelift+regalloc2,
+ClojureWasm v1 error machinery, wasmtime, cranelift+regalloc2,
 wasm3, wasmer, V8/SpiderMonkey wasm baseline, in
 `private/notes/p7-trace-survey.md` (informal; not load-bearing).
 Key findings:
