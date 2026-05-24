@@ -147,20 +147,18 @@ pub const CompiledWasm = struct {
     /// `func_results` covers only the defined functions and is
     /// indexed by `defined_idx = wasm_idx - num_imports`.
     num_imports: u32,
-    /// Per-defined-global metadata (ADR-0052; §9.9 / 9.9-h-2).
-    /// `globals_offsets[i]` is the byte offset of defined global
-    /// `i` inside the runtime's globals byte buffer;
+    /// Per-defined-global metadata (ADR-0052 + ADR-0110 §9.13-V).
+    /// `globals_offsets[i]` is the byte offset of global `i`
+    /// inside the runtime's globals byte buffer;
     /// `globals_valtypes[i]` selects the JIT emit path for
-    /// global.get / global.set on that index. Scalar globals
-    /// (i32/i64/f32/f64/ref) occupy 8 bytes; v128 globals
-    /// occupy 16 bytes with 16-byte alignment padding.
-    /// `globals_byte_size` is the total bytes the runtime
-    /// needs to allocate (16-byte aligned; sum of per-global
-    /// sizes plus alignment padding). Empty slices / zero when
-    /// the module has no defined globals.
+    /// global.get / global.set on that index. Post-widen: every
+    /// global occupies uniform 16 bytes regardless of valtype,
+    /// so the total byte size is derivable as
+    /// `globals_valtypes.len * 16` (consumers that need a
+    /// pre-aligned allocation size compute it inline).
+    /// Empty slices when the module has no globals.
     globals_offsets: []u32,
     globals_valtypes: []zir.ValType,
-    globals_byte_size: u32,
     num_global_imports: u32, // B150 (D-153): wasm-idx[0..N) imports prefix.
     arena: std.heap.ArenaAllocator,
 

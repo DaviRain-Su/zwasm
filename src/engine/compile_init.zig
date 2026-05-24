@@ -26,7 +26,7 @@ const CompiledWasm = runner_mod.CompiledWasm;
 /// ADR-0052 — write each defined global's init-expression value
 /// into `globals_buf` at the per-global byte offset. Scalar
 /// globals (i32/i64/f32/f64/refs) → 8 bytes; v128 → 16 bytes.
-/// Buffers smaller than `compiled.globals_byte_size` are rejected.
+/// Buffers smaller than `globals_valtypes.len * 16` are rejected.
 pub fn applyDefinedGlobalsInit(
     allocator: Allocator,
     wasm_bytes: []const u8,

@@ -27,14 +27,14 @@ const Error = runner_mod.Error;
 /// correct offsets even for modules with no functions
 /// (`exports.wast` `(module $Global)` shape).
 ///
-/// All three slices are caller-owned via `allocator`; pair with
+/// Both slices are caller-owned via `allocator`; pair with
 /// `deinitGlobalsLayout`. Empty (no global section) returns
-/// `.{ .offsets = &.{}, .valtypes = &.{}, .byte_size = 0 }`
-/// (zero-length slices, no allocations).
+/// `.{ .offsets = &.{}, .valtypes = &.{} }` (zero-length slices,
+/// no allocations). Total byte size is derivable as
+/// `valtypes.len * 16` per ADR-0110 §9.13-V uniform stride.
 pub const GlobalsLayout = struct {
     offsets: []u32,
     valtypes: []zir.ValType,
-    byte_size: u32,
 };
 
 /// Decode the import + global sections and compute per-global
@@ -100,11 +100,7 @@ pub fn computeGlobalsLayout(allocator: Allocator, wasm_bytes: []const u8) Error!
             off += 16;
         }
     }
-    return .{
-        .offsets = offsets,
-        .valtypes = valtypes,
-        .byte_size = std.mem.alignForward(u32, off, 16),
-    };
+    return .{ .offsets = offsets, .valtypes = valtypes };
 }
 
 /// Find an exported global by name. Returns its global_idx in the

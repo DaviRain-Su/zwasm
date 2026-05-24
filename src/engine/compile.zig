@@ -463,7 +463,6 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             .num_imports = sig_count,
             .globals_offsets = elay.offsets,
             .globals_valtypes = elay.valtypes,
-            .globals_byte_size = elay.byte_size,
             .num_global_imports = num_global_imports_empty,
             .arena = arena,
         };
@@ -633,7 +632,6 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     errdefer allocator.free(globals_offsets);
     const globals_valtypes = elay.valtypes;
     errdefer allocator.free(globals_valtypes);
-    const globals_byte_size = elay.byte_size;
     // close-plan §6 (j) Step B cohort 3 — validator table-index space is
     // imports prefix + defined. Pre-fix shape only exposed defined tables
     // so `call_indirect`/`table.*` against an imported table (e.g.
@@ -911,7 +909,6 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         .num_imports = num_imports,
         .globals_offsets = globals_offsets,
         .globals_valtypes = globals_valtypes,
-        .globals_byte_size = globals_byte_size,
         .num_global_imports = nm_global_imports,
         .arena = arena,
     };

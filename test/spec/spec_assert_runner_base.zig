@@ -1028,7 +1028,7 @@ pub const RegisteredExporter = struct {
     rt: ?*entry.JitRuntime = null,
     /// §9.9-III (c)-2.3-γ-1: per-exporter globals byte buffer.
     /// Allocated lazily in `ensureCompiledAndRt` sized to the
-    /// exporter's `compiled.globals_byte_size`, populated via
+    /// exporter's `globals_valtypes.len * 16`, populated via
     /// `runner_mod.applyDefinedGlobalsInit`. The pointer is
     /// then wired into `rt.globals_base` so a cross-module
     /// callee touching `global.get` / `global.set` reads /
@@ -1142,7 +1142,10 @@ pub const RegisteredExporter = struct {
             // reads / writes match the JIT alignment contract,
             // mirroring the importer-side `scratch_globals: [256]u8
             // align(16)` shape in spec_assert_runner_non_simd.
-            const buf = try allocator.alignedAlloc(u8, .of(u128), compiled.globals_byte_size);
+            // Post-ADR-0110 widen: every global occupies uniform 16 bytes;
+            // total size = globals_valtypes.len * 16 (16-byte aligned).
+            const globals_byte_size: u32 = @intCast(compiled.globals_valtypes.len * 16);
+            const buf = try allocator.alignedAlloc(u8, .of(u128), globals_byte_size);
             @memset(buf, 0);
             try runner_mod.applyDefinedGlobalsInit(
                 allocator,
@@ -4049,7 +4052,7 @@ test "RegisteredExporter γ-1: ensureCompiledAndRt populates scratch_globals + w
     // A `(func)` is included so `compileWasm` takes the full
     // globals-decoding path; the no-func-section early return at
     // `src/engine/runner.zig:585` short-circuits with
-    // `globals_byte_size = 0` and would leave `scratch_globals`
+    // `globals_valtypes.len * 16 = 0` and would leave `scratch_globals`
     // an empty slice (= test pre-existing orphan rot surfaced
     // when the base file was wired into `zig build test`).
     //   magic + version : 00 61 73 6d 01 00 00 00
