@@ -189,10 +189,22 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
   test-all on `zwasm-from-scratch-value16` (snapshot 73ba4e38)
   **GREEN** (`/tmp/ubuntu_feature.log`)。
 - 54: **§9.13-V Phase A.6 prep — run_remote_windows.sh
-  `--branch` arg** (b88536df)。Mirror of ubuntu script.
-  Windowsmini test-all on feature branch をキック (task
-  bdgm2w2sh, 5-15 min ETA); 次 cycle で結果検証 + 3-host
-  ready 判定。
+  `--branch` arg** (b88536df)。Mirror of ubuntu script。
+- 55: **§9.13-V Phase A.6 — windowsmini feature-branch FAIL
+  (9 multi-result regressions); baseline comparison
+  in flight**。Feature branch windowsmini test-all surfaced
+  9 multi-result return failures: `break-br_if-num-num` +
+  `break-br_table-num-num` + `break-br_table-nested-num-num`
+  — pattern: expected `(i32:51, i64:52)` got `(i32:0, i64:51)`,
+  shift-by-one across slots。Mac aarch64 + Linux ubuntu pass。
+  仮説: 8-byte vs 16-byte stride mismatch on Win64 wrapper
+  thunk path (wrapper_thunk emit literals `+0x08`/`+0x10`
+  encode 8-byte stride; pairs with `[n]u64` entry buffers
+  — that's consistent). Need to determine if pre-existing
+  D-167 fails (= no regression, merge proceeds with known
+  fails) or NEW regression introduced by Phase A.4 cascade.
+  Baseline windowsmini test-all on main `zwasm-from-scratch`
+  kicked (separate task)。
 
 ## Remaining work
 
