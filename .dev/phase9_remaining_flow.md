@@ -1,9 +1,19 @@
 # Phase 9 remaining work — flow reference
 
-> **Doc-state**: ACTIVE — load-bearing for Phase 9 close
-> through Phase 10 open. Drafted 2026-05-24 cycle 37
-> post-ADR-0110 Accept. Will transition to ARCHIVED at
-> Phase 10 open + Phase Status widget flip.
+> **Doc-state**: ARCHIVED-IN-PLACE 2026-05-25 — Phase 9 = DONE
+> 2026-05-24 (§9.13 hard gate cleared `36c494a3`; widget 9→DONE
+> at 10.C9-step5); Phase 10 open. Drafted 2026-05-24 cycle 37
+> post-ADR-0110 Accept. Body text stays as snapshot of the
+> cycle-37 flow; for current work see ROADMAP §10 + handover.
+> Don't edit body; cite-only.
+>
+> **Superseded-portion-by ADR-0109 (Accepted 2026-05-25)**:
+> §3.3 / Phase F section references "F.2 ADR-0109 Accept → D-075
+> native Zig API rewrite" as a deferred Phase F sub-step — that
+> deferral is now resolved. ADR-0109 is Accepted; ROADMAP §10 /
+> 10.J is the impl carrier (J.0 amend round complete; J.invest
+> + J.1+ scheduled). D-075 re-scoped from "blocked-by Accept" to
+> impl tracker.
 > **Audience**: zwasm v2 maintainers + future-self cold-start
 > entry. Sister doc to
 > [`phase9_close_master.md`](./phase9_close_master.md) — the

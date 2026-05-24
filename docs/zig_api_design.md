@@ -1,16 +1,22 @@
 # zwasm v2 — Zig API design spec (target)
 
-**Status**: Design spec for the target native Zig API.
+**Status**: Live consumer spec for the native Zig API. ADR-0109
+**Accepted 2026-05-25** authorizes the rewrite; ROADMAP §10 /
+10.J carries the implementation cycles.
 **Audience**: Zig consumers embedding zwasm v2 as a Wasm runtime
 library (ClojureWasm v2 dogfooding, and any other Zig project).
-**Implementation status**: This document describes the **target
-shape** the public Zig API will converge on. Today's
-`src/zwasm.zig` is a thin veneer over the wasm-c-api binding
-(historical accident — c_api work landed first); the design
-below is a forward-looking rewrite scoped post-ADR-0109 Accept.
-**Sections marked "(impl: partial)" are usable today in some
-form; sections marked "(impl: target)" are spec-only until
-the rewrite lands.**
+**Implementation status (2026-05-25 amend)**: Today's
+`src/zwasm.zig` (507 lines, ADR-0025 minimum subset) is a thin
+veneer over the wasm-c-api binding — `Runtime` ignores the
+caller allocator (`c_allocator` hard-coded internally),
+`InstantiateOpts` is empty (no host imports), `InvokeError`
+collapses 12 trap variants into one `error.Trap`, no
+`TypedFunc` / `Linker` / `Memory` surface. The rewrite to the
+shape below ships as ROADMAP §10 / 10.J in 6-8 cycles. **No J.*
+impl chunk lands until the pre-impl investigation + execution
+plan + test strategy (the next chunk after amend round) is
+user-reviewed.** During the impl train, ADR-0109 Revision
+history tracks per-section landing.
 
 This doc is self-contained: read top-to-bottom to understand
 the consumer-facing contract without needing to read the
@@ -318,18 +324,24 @@ try linker.defineWasi(.{
 const inst = try linker.instantiate(module);
 ```
 
-## §4 — Value layout (8-byte slot)
+## §4 — Value layout (uniform 16-byte slot per ADR-0110)
 
-The `Value` type is an **untagged extern union** matching the
-internal JIT slot representation. NaN-boxing-friendly: float
-values store their IEEE-754 bit pattern in `f32_bits` /
-`f64_bits` (no canonicalization at the slot level —
-canonicalization happens only at Wasm op boundaries that the
-spec requires).
+The `Value` type is an **untagged `extern union` of width 16
+bytes** (matching the internal JIT slot post-ADR-0110 Accept
+`9204847a` 2026-05-24). v128 is **first-class** in the union —
+no separate `V128` type. NaN-boxing-friendly: float values
+store their IEEE-754 bit pattern in `f32_bits` / `f64_bits`
+(no canonicalization at the slot level — canonicalization
+happens only at Wasm op boundaries that the spec requires).
 
 ```zig
 pub const Value = extern union {
-    bits64: u64,           // raw 64-bit access
+    // 16-byte raw view (largest variant; v128 reads/writes go here)
+    bits128: u128,
+    v128: [16]u8 align(16),
+
+    // 8-byte scalar variants (occupy low 8 bytes; upper 8 zero by convention)
+    bits64: u64,
     i32: i32, u32: u32,
     i64: i64, u64: u64,
     f32_bits: u32,         // IEEE-754 bit pattern (32 bits in low half)
@@ -337,6 +349,14 @@ pub const Value = extern union {
     ref: u64,              // funcref/externref, see §4.1
 };
 ```
+
+The internal JIT-emitted code reads/writes a single 16-byte
+cell per Value slot (uniform stride; per ADR-0110 §"Decision"
+the `idx * 16` stride is what makes globals / locals
+pointer-aliasable across instances + Q-reg / MOVUPS-friendly
+on both arm64 and x86_64). The facade exposes the same union
+so consumer code can address any variant without a separate
+v128 type.
 
 Caller responsibility: the union has no runtime tag. Wasm
 type is determined by the function signature; the caller
@@ -354,20 +374,19 @@ bits as the signature-declared type).
 - **externref**: `ref` field holds an opaque 64-bit host
   handle. Same `0` sentinel for null.
 
-### §4.2 — v128
+### §4.2 — v128 (first-class per ADR-0110)
 
-v128 is too large for the 8-byte slot. The Zig API exposes
-v128 as a separate `V128` type:
+v128 is the union's natural width — no special-case
+wrapper type. For TypedFunc signatures consumers use
+`[16]u8` / `u128` directly (or a thin `V128` alias in
+consumer code if they prefer a named type; zwasm itself does
+not export one).
 
-```zig
-pub const V128 = extern struct {
-    bytes: [16]u8 align(16),
-};
-```
-
-For TypedFunc signatures, use `V128` as the parameter or
-result type. The marshal layer treats v128 specially (no
-union overlap with `Value`).
+For the c_api boundary v128 is **permanently NOT exposed**
+(spec-prohibited per `wasm-c-api include/wasm.h:329-338`;
+see `.dev/lessons/2026-05-24-c_api-v128-spec-boundary.md`).
+The native Zig API is the only consumer-visible v128 access
+path.
 
 ### §4.3 — NaN-boxing-friendly bit ownership
 
@@ -392,12 +411,12 @@ slot:
 
 | Component | Current `src/zwasm.zig` | Target (this doc) |
 |---|---|---|
-| Top-level | `Runtime` (wraps wasm_engine + wasm_store) | `Engine` |
+| Top-level | `Runtime` (wraps wasm_engine + wasm_store) | `Engine` (internal physical struct renamed `JitRuntime` to preserve JIT ABI surface) |
 | Module load | `Module.parse(rt, bytes)` (calls `wasm_module_new`) | `engine.compile(bytes)` |
 | Imports | `InstantiateOpts = struct {}` (empty) | `Linker` builder |
 | Typed call | none (114 internal `callXxx_yyy`) | `TypedFunc(Sig)` comptime-generic |
 | Memory access | none | `Memory.slice()` + helpers |
-| Value type | tagged `union(enum)` (~16+ bytes, v128 = u128) | untagged `extern union` (8 bytes), `V128` separate |
+| Value type | tagged `union(enum)` (~16+ bytes, v128 = u128) | untagged `extern union` (uniform 16 bytes per ADR-0110; v128 first-class — **no separate `V128` type**) |
 | Trap | `error.Trap` catchall in `InvokeError` | full `Trap` error set preserved |
 | Allocator | accepted but ignored (`c_allocator` used) | strict-pass through `Engine.init` |
 | WASI | none in facade | `linker.defineWasi(cfg)` |
@@ -492,3 +511,21 @@ impl lands.
   first-principles analysis (Engine + Linker + TypedFunc
   via Zig fn type + Memory slice view + NaN-boxing-friendly
   Value).
+- 2026-05-25 — **§4 Value section rewritten** for ADR-0110
+  Accept (`9204847a` 2026-05-24): internal Value is now
+  uniform 16-byte with v128 first-class; the original
+  "8-byte slot + separate `V128` 16-byte struct" split is
+  obsolete. The facade exposes a single `extern union`
+  with all variants (`bits128` / `v128` / `bits64` / `i32`
+  / `i64` / `f32_bits` / `f64_bits` / `ref`). §5
+  Comparison table updated to match. v128 stays
+  permanently NOT exposed through the c_api boundary
+  (spec-prohibited per `include/wasm.h:329-338`); the
+  native Zig API is the only v128-typed consumer path.
+- 2026-05-25 — ADR-0109 **Accepted** (Status: Proposed →
+  Accepted, user collab review at Phase 10 open). This
+  doc is the live consumer spec; impl scheduled as
+  ROADMAP §10 / 10.J. **Pre-impl investigation +
+  execution plan + test strategy** (subagent-driven) is
+  the next chunk after the amend round; the resulting
+  plan doc gates the first J.* impl chunk.

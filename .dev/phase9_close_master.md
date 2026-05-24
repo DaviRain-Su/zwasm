@@ -10,7 +10,17 @@
 > retirement-eligible per Phase Status widget = `9 | DONE`. Don't
 > edit body; cite-only.
 >
-> **Phase 9 = DONE 2026-05-24** (§9.13 hard gate cleared; widget 9→DONE; commit `36c494a3`). I1-I7 invariants pass mechanically via `scripts/check_phase9_close_invariants.sh --gate` (regression check retained post-DONE). Phase 10 design plan: `phase10_design_plan_ja.md` (r3)。
+> **Superseded-portion-by ADR-0109 (Accepted 2026-05-25)**: §1
+> deliverable table row 40 reads "c_api / Zig facade full surface
+> (TypedFunc / WasiStdio / etc) | YES — deferred to v0.1.0 RC
+> (Phase 16)" — that **deferral is OBSOLETE**. ADR-0109 (Accepted
+> at Phase 10 open) re-classifies the native Zig facade
+> implementation as Phase 10 / ROADMAP §10 / 10.J scope. Body
+> text stays as a snapshot of the Phase 9 close decision; for
+> current truth see `docs/zig_api_design.md`, ADR-0109, D-075
+> (re-scoped to impl tracker), and ROADMAP §10 / 10.J.
+>
+> **Phase 9 = DONE 2026-05-24** (§9.13 hard gate cleared; widget 9→DONE; commit `36c494a3`). I1-I7 invariants pass mechanically via `scripts/check_phase9_close_invariants.sh --gate` (regression check retained post-DONE). Phase 10 design plan: `phase10_design_plan_ja.md` (r3, amended 2026-05-25 with §3.6 ADR-0109 sub-section + §7 J.* chunk entries)。
 >
 > **Supersedes**: `phase9_close_plan.md` + `phase9_completion_master_plan.md` +
 > `phase9_13_0_close_plan.md` + `phase9_structural_debt_close_plan.md` +

@@ -1,11 +1,12 @@
 # 0109 — Native Zig API inversion: Engine + Linker + TypedFunc
 
-- **Status**: Proposed
+- **Status**: Accepted 2026-05-25 (user collab review at Phase 10 open; CW v2 dogfooding feedback unblocked the deferral; D-075 re-scoped from "blocked-by Accept" to impl tracker; ROADMAP §10 / 10.J carries the 6-8 implementation cycles)
 - **Date**: 2026-05-24
 - **Author**: claude (autonomous loop, cycle 36)
 - **Tags**: zwasm.zig, facade, api, Engine, Linker, TypedFunc, CW-v2, dogfooding, D-075
 - **Supersedes-portion-of**: ADR-0025 "minimum subset" target shape (Runtime / Module / Instance / Value as thin c_api veneer)
 - **Amends**: ADR-0024 `src/zwasm.zig` re-export hub role (now also hosts native facade types)
+- **Paired execution plan + test strategy**: TBD — produced by a post-amend codebase-investigation chunk (subagent-driven; enumerates every site needing change for the rewrite + designs the test approach to ensure regression detection + happy path + edge cases so "other tests pass while Zig API is broken" cannot happen). Required reading before any J.* impl chunk lands.
 
 ## Context
 
@@ -102,10 +103,17 @@ of the c_api binding**, adopting:
    signature and generates marshal code. Multi-result via
    Zig anonymous struct return (`fn(i32, i32) struct { i32,
    i32 }`).
-5. **`Value` exposed as the internal `extern union`** (8-byte
-   slot, untagged, NaN-boxing-friendly). `V128` separate
-   16-byte struct. `ValueKind` enum for dynamic-dispatch
-   cases.
+5. **`Value` exposed as the internal `extern union`** — post-
+   ADR-0110 (Accepted 2026-05-24 `9204847a`) the internal
+   Value cell is **uniform 16-byte** (v128 first-class). The
+   facade exposes this single union with all variants
+   (i32/i64/f32_bits/f64_bits/v128/ref) — **no separate
+   `V128` type** (ADR-0110 supersedes the original 8+16
+   split intended in this ADR's first draft; see
+   Revision history 2026-05-25). NaN-boxing-friendly:
+   float bits flow through `f32_bits` / `f64_bits` without
+   canonicalization at the Value boundary. `ValueKind` enum
+   for dynamic-dispatch cases.
 6. **Full `Trap` error set re-exported** (no `error.Trap`
    catchall in the API boundary).
 7. **`Memory` slice view**: `mem.slice() → []u8`,
@@ -287,3 +295,39 @@ superseded by a follow-on ADR.
   `Status: Proposed` for user collab review. Paired
   with `docs/zig_api_design.md` (consumer spec
   artifact).
+- 2026-05-25 — **Status: Proposed → Accepted** at Phase 10
+  open. User direction: "実装を提案の状態に寄せていく (大作業
+  OK)" — CW v2 dogfooding feedback overrides the Phase 16
+  deferral the original ADR-0025 plan carried. Companion
+  amends in the same commit:
+  - ADR-0025 Status clarified (target shape fully
+    superseded; ADR-0025 stays in-tree as design lineage).
+  - D-075 re-scoped from `blocked-by: ADR-0109 Accept`
+    to `Status: now` (impl tracker for the 6-8 cycles).
+  - ROADMAP §10 new row **10.J** added (placed before
+    10.F so the rename chain lands early — see
+    Consequences §"Internal rename `Runtime` → `JitRuntime`").
+  - `phase10_design_plan_ja.md` §7 work-sequence updated
+    + new §3.6 sub-section for Zig API implementation.
+  - `phase9_close_master.md` §1 deliverable table row 40
+    "deferred to v0.1.0 RC (Phase 16)" — that doc is
+    ARCHIVED-IN-PLACE so the row text stays as a snapshot;
+    superseding noted in the doc's top blockquote.
+  - **§5 Value section reconciled with ADR-0110**: the
+    "8-byte slot + separate V128 16-byte struct" split
+    from the original draft is OBSOLETE post-ADR-0110
+    Accept (`9204847a` 2026-05-24 widened internal Value
+    to uniform 16-byte). The facade now exposes the single
+    extern union with all variants — no separate `V128`
+    type. `docs/zig_api_design.md` §4 amended to match.
+- 2026-05-25 — **Pre-impl investigation + execution plan
+  + test strategy** queued as the next chunk after this
+  amend round. Per user direction: codebase-wide
+  investigation (subagent-driven) enumerating every site
+  needing change for the rewrite, plus a unified plan
+  doc that integrates the test strategy — covering
+  regression detection / happy path / edge cases so
+  "other tests pass while Zig API is broken" cannot
+  happen. The plan doc gates the first J.* impl chunk;
+  no `src/zwasm.zig` rewrite lands before the plan is
+  user-reviewed.

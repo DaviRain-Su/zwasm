@@ -1,11 +1,15 @@
 # Phase 9 §9.13-V — Value widen to 16-byte (implementation plan)
 
-> **Doc-state**: ACTIVE — load-bearing for §9.13-V cohort.
+> **Doc-state**: ARCHIVED-IN-PLACE 2026-05-25 — §9.13-V row
+> closed at commit `9204847a` (ADR-0110 Value widen 16-byte
+> shipped). Body text stays as snapshot of the cycle-37 plan;
+> for ADR-0109 Value section see `docs/zig_api_design.md` §4
+> (amended 2026-05-25 to reflect ADR-0110 Accept — no separate
+> V128 type, v128 first-class in the union). Don't edit body;
+> cite-only.
 > **Genesis**: 2026-05-24 cycle 37, paired with ADR-0110
 > Accepted. Supersedes ADR-0052 cope-mechanism portion +
 > obsoletes ADR-0107 (Withdrawn).
-> **Authoritative for**: §9.13-V row execution. ROADMAP §9
-> row references this doc for sub-chunk details.
 
 ## §1 — Purpose + scope
 

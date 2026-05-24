@@ -299,6 +299,49 @@ test/                              (Phase 9 4 層を Phase 10 で拡張)
 
 **ADR**: 3 本 — `ADR-0115 GC heap + collector` + `ADR-0116 GC roots + RTT + i31` + `ADR-0117 GC × EH × TC integration invariants`
 
+### §3.6 Native Zig API rewrite (ADR-0109 Accepted 2026-05-25)
+
+ROADMAP §10 / 10.J carries the 6-8 implementation cycles per
+ADR-0109 (`docs/zig_api_design.md` consumer spec)。 既存
+`src/zwasm.zig` (507 LOC, ADR-0025 minimum-subset c_api veneer)
+を first-principles native facade に置換:
+
+- **Engine + Module + Instance** (1-step compile;
+  `engine.compile(bytes) → Module`; `module.instantiate() →
+  Instance` or `linker.instantiate(module) → Instance`)
+- **TypedFunc(comptime Sig: type)** + multi-result via Zig
+  anonymous struct return
+- **Linker** builder + host imports + `Caller` ctx for host
+  functions
+- **Memory** slice view (`mem.slice() → []u8`; bounds-checked
+  `sliceAt` / `read(T, offset)` / `write(offset, value)`)
+- **Trap** full error set (12 spec variants preserved; no
+  `error.Trap` catchall)
+- **Allocator strict-pass** through `Engine.init(alloc, opts)`
+- **WASI bulk** `linker.defineWasi(cfg)` (skeleton in Phase
+  10; full impl drives Phase 11)
+
+**内部 rename `runtime.Runtime` → `runtime.JitRuntime`** が先頭。
+JIT-emitted code が `[X19 + offset]` で読む ABI 表面は維持しつつ、
+public facade に `Engine` 名を譲るため。10.M / 10.R / 10.TC /
+10.E / 10.G が `runtime/` を触る前に landing したい (rename 後送
+りで触る場合の rename churn 防止)。
+
+**Value 16-byte uniform** (ADR-0110 Accept 後の現実) — facade も
+同 union を expose; v128 first-class、別 `V128` type は無し。c_api
+側は spec-prohibited per `wasm-c-api include/wasm.h:329-338`。
+
+**Gating**: J.0 amend round 後、pre-impl codebase-investigation
+(subagent-driven; enumerates every site needing change) +
+execution plan + integrated test strategy を 1 plan doc に統合し
+**user review**。J.1+ impl chunks は plan 承認後に開始。
+
+**ADR**: ADR-0109 (Accepted) + ADR-0025 (Superseded; design
+lineage retained)。
+**Test discipline**: regression detection + happy path + edge
+cases — "other tests pass while Zig API is broken" cannot happen
+(user direction 2026-05-25; plan doc が test 配置を具体化)。
+
 ---
 
 ## §4. テスト戦略 (Phase 9 4 層 → Phase 10 拡張)
@@ -426,7 +469,10 @@ ABI 安定性のため build-option で消せない:
 | # | チャンク | 種別 | 内容 | windowsmini |
 |---|---------|------|------|-------------|
 | C9.1 | Phase 9 close 後始末 | infrastructure | §9.11 audit_scaffolding + §9.x 17 行 SHA backfill + bench baseline + widget 9→DONE + Phase 10 row inline 展開 | 不要 |
-| F.1-F.3 | c_api scalar accessors | emit | D-171/172/173; 3 chunks | 不要 |
+| J.0 | ADR-0109 amend round + ROADMAP 10.J 行追加 | infrastructure | Status flip / D-075 re-scope / docs reconcile / phase_log/phase10.md row 10.F + 10.J 追加 | 不要 |
+| J.invest | **Pre-impl codebase investigation + execution plan + integrated test strategy** | survey/design | subagent-driven; enumerates every change site in `src/zwasm.zig` + `src/api/` + `src/runtime/` + import sites + ABI surfaces; 統合 plan doc は test 設計も含む (regression / happy path / edge cases; "other tests pass while Zig API is broken" 防止); user review gate | 不要 |
+| J.1+ | **Native Zig API impl** (ADR-0109) | architectural→emit | plan doc 順序に従う: Runtime → JitRuntime rename → Engine/Module/Instance native → TypedFunc + multi-result → Linker + host imports + Caller → Memory slice view → Trap full set → WASI bulk skeleton → test runner Tier-2 → close。6-8 cycles 想定 | reconcile 1 (rename 後 + close) |
+| F.1-F.3 | c_api scalar accessors | emit | D-171/172/173; D-171 minimum-viable は J.0 と並行で `142502a5` landed; 残: D-171 _new/_type + D-172 + D-173 | 不要 |
 | Z.1 | **ZirInstr 128-bit 拡張** (直接実装; spike なし) | architectural | 全 emit/regalloc/lower/interp 連動; Phase 9 corpus 全 host 再 green; 既存 emit_test_* baseline 更新; 不味ければ revert | reconcile 1 |
 | D.1 | ADR-0111 memory64 design | survey/design | docs-only | 不要 |
 | D.2 | ADR-0112 Tail Call design | survey/design | docs-only | 不要 |
@@ -474,7 +520,7 @@ ABI 安定性のため build-option で消せない:
 | P.1 | `scripts/check_phase10_close_invariants.sh` 整備 | infrastructure | §8 全 invariant |  |
 | P.2 | Phase 10 close: widget 10→DONE; Phase 11 inline 展開 | infrastructure |  | reconcile 1 (final) |
 
-依存順序 — test infra (T.1-T.4) を実装陣の前に配備 → Z.1 ZirInstr 拡張 → 設計ラウンド ADR → サブシステム別実装。
+依存順序 — J.0 amend → J.invest (plan + test strategy) → J.1+ Native Zig API impl (Runtime → JitRuntime rename を最初に下ろし 10.M/R/TC/E/G の rename churn 回避) → F.* c_api 残り (J と並行可) → test infra (T.1-T.4) → Z.1 ZirInstr 拡張 → 設計ラウンド ADR → サブシステム別実装。
 
 ---
 

@@ -47,3 +47,66 @@ close)
   status 段落追加 — bundle 1 commit; 18/18 invariants 維持 `[x] 91059738`
 - **10.C9-step5** — `phase_log/phase10.md` 新規ファイル作成
   (sub-chunk 記録先; mirrors phase9.md shape) `[x]` (this commit)
+
+
+## Row 10.F — c_api scalar accessors
+
+**Scope**: wasm-c-api spec 標準 global / table / memory
+accessors を `src/api/instance.zig` に追加 (D-171 / D-172 /
+D-173; `phase9_close_master.md` §5.3a Phase F)。
+
+**Status**: [ ] (partial; D-171 minimum-viable landed; remaining
+chunks queued)
+
+### Sub-chunks (commit-time order)
+
+- **10.F-D171-mv** — D-171 minimum-viable global accessors
+  (export-derived path). `Global` opaque handle + `wasm_extern
+  _as_global` + `wasm_global_get/set/delete` を追加; mutable
+  i32 global in-source test green; Mac test-all green; v128
+  permanently spec-prohibited per `2026-05-24-c_api-v128-spec
+  -boundary.md` `[x] 142502a5`
+- **10.F-D171-full** — `wasm_global_new` + `wasm_global_type`
+  (host-side standalone construction; Extern wrap → `wasm
+  _instance_new(imports[])` シナリオ用) (planned)
+- **10.F-D172** — `wasm_extern_as_table` + `wasm_table_get/
+  set/size/grow` (planned)
+- **10.F-D173** — `wasm_extern_as_memory` + `wasm_memory_data
+  /data_size/size/grow` (planned)
+
+
+## Row 10.J — Native Zig API (ADR-0109)
+
+**Scope**: `src/zwasm.zig` rewrite per `docs/zig_api_design.md`
+(Engine + Linker + TypedFunc + Memory slice view + Caller ctx +
+full Trap error set + allocator strict-pass)。Internal rename
+`runtime.Runtime` → `runtime.JitRuntime` lands first
+(mechanical; ABI-preserving)。
+
+**Status**: [ ] (J.0 amend round in progress this commit;
+J.1+ gated on execution plan doc)
+
+### Sub-chunks (commit-time order)
+
+- **10.J-0** — ADR-0109 Status: Proposed → Accepted; ADR-0025
+  Status: Superseded; `docs/zig_api_design.md` §4 reconciled
+  with ADR-0110 (16-byte Value); D-075 re-scoped to impl
+  tracker; ROADMAP §10 new row 10.J inserted before 10.F;
+  phase9_close_master.md / phase9_remaining_flow.md /
+  phase9_value_widen_plan.md Doc-state updated;
+  phase10_design_plan_ja.md §7 work-sequence + §3.x
+  ADR-0109 sub-section added; handover.md refresh `[ ]` (this commit)
+- **10.J-investigation** — pre-impl codebase-investigation
+  (subagent-driven; enumerates every site needing change in
+  `src/zwasm.zig` + `src/api/` + `src/runtime/runtime.zig`
+  + import sites + ABI surfaces) + execution plan + integrated
+  test strategy (regression detection / happy path / edge
+  cases per user direction 2026-05-25; "other tests pass
+  while Zig API is broken" cannot happen) → plan doc lands
+  somewhere under `.dev/` (location TBD by investigation);
+  **user review gate** before J.1+ (planned)
+- **10.J-1+** — implementation cycles per plan doc (Runtime
+  → JitRuntime rename → Engine / Module / Instance native
+  facade → TypedFunc + multi-result → Linker + host imports
+  + Caller → Memory slice view → Trap full set → WASI bulk
+  → test runner Tier-2 → close) (planned)
