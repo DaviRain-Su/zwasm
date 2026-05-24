@@ -10,17 +10,24 @@
 # requested `zig build` step.
 #
 # Usage:
-#   bash scripts/run_remote_ubuntu.sh                  # default: zig build test-all
-#   bash scripts/run_remote_ubuntu.sh build            # zig build
-#   bash scripts/run_remote_ubuntu.sh test             # zig build test
-#   bash scripts/run_remote_ubuntu.sh test-spec        # zig build test-spec
+#   bash scripts/run_remote_ubuntu.sh                          # default: zig build test-all on zwasm-from-scratch
+#   bash scripts/run_remote_ubuntu.sh build                    # zig build
+#   bash scripts/run_remote_ubuntu.sh test                     # zig build test
+#   bash scripts/run_remote_ubuntu.sh test-spec                # zig build test-spec
+#   bash scripts/run_remote_ubuntu.sh --branch NAME [STEP]     # test arbitrary branch (feature branch verification)
+#
+# The `--branch` form is used by §9.13-V Phase A.6 to verify
+# feature branches (e.g. `zwasm-from-scratch-value16`) before
+# merging to the main dev branch. Default branch is
+# `zwasm-from-scratch`; the per-chunk `/continue` loop never
+# passes `--branch` (it expects to verify the just-pushed
+# origin HEAD of the main dev branch per ADR-0076 D3).
 #
 # Prerequisites: SSH alias `ubuntunote` configured; Zig 0.16.0
 # available remotely via the project's flake.nix dev shell;
 # the repo cloned at ~/Documents/MyProducts/zwasm_from_scratch
-# with `origin` pointing at clojurewasm/zwasm and the
-# `zwasm-from-scratch` branch checked out. Setup procedure in
-# `.dev/ubuntunote_setup.md`.
+# with `origin` pointing at clojurewasm/zwasm. Setup procedure
+# in `.dev/ubuntunote_setup.md`.
 #
 # Failure attribution: each remote step (preflight / sync /
 # build) emits a labelled `[run_remote_ubuntu] FAIL: <step>`
@@ -30,9 +37,17 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-STEP="${1:-test-all}"
 REMOTE_DIR="Documents/MyProducts/zwasm_from_scratch"
 REMOTE_BRANCH="zwasm-from-scratch"
+if [ "${1:-}" = "--branch" ]; then
+    if [ -z "${2:-}" ]; then
+        echo "[run_remote_ubuntu] FAIL: --branch requires a branch name" >&2
+        exit 2
+    fi
+    REMOTE_BRANCH="$2"
+    shift 2
+fi
+STEP="${1:-test-all}"
 
 die_step() {
     echo "[run_remote_ubuntu] FAIL: $1" >&2
