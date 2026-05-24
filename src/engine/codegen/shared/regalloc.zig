@@ -211,16 +211,17 @@ pub const Allocation = struct {
         // `id < threshold` ⇒ id < pool size (≤ 16 today), so the
         // u8 narrowing is provably safe.
         if (id < threshold) return .{ .reg = @intCast(id) };
-        // ADR-0053 Part 1: when `spill_offsets` is populated, consult
-        // the per-slot byte offset table (shape-aware: v128 slots
-        // get 16-byte alignment + stride; scalar slots stay 8-byte).
-        // Falls back to the legacy uniform 8-byte formula when null
-        // — the all-scalar / no-v128-spill case.
+        // ADR-0053 Part 1 + ADR-0110 §9.13-V Phase A.4c: when
+        // `spill_offsets` is populated, consult the per-slot byte
+        // offset table (v128-aware: pre-widen this carried 8/16
+        // stride mix; post-Value=16 widen every slot is uniformly
+        // 16-byte). Fallback path also returns 16-byte stride
+        // post-widen — `Value` is 16 bytes regardless of variant.
         if (self.spill_offsets) |offsets| {
             const spill_idx = id - self.max_reg_slots_gpr;
             return .{ .spill = offsets[spill_idx] };
         }
-        return .{ .spill = (@as(u32, id) - self.max_reg_slots_gpr) * 8 };
+        return .{ .spill = (@as(u32, id) - self.max_reg_slots_gpr) * 16 };
     }
 
     /// Total spill-frame bytes required by this allocation.
@@ -250,7 +251,7 @@ pub const Allocation = struct {
             const last = offsets[offsets.len - 1];
             return std.mem.alignForward(u32, last + 16, 16);
         }
-        return (@as(u32, self.n_slots) - self.max_reg_slots_gpr) * 8;
+        return (@as(u32, self.n_slots) - self.max_reg_slots_gpr) * 16;
     }
 
     /// Per-vreg shape tag query (§9.9 / 9.4 per ADR-0041
@@ -472,13 +473,14 @@ test "Allocation.slot: id < max_reg_slots_gpr resolves to .reg for class .gpr" {
     try testing.expectEqual(Slot{ .reg = 9 }, alloc.slot(2, .gpr));
 }
 
-test "Allocation.slot: id >= max_reg_slots_gpr resolves to .spill at 8-aligned offset" {
+test "Allocation.slot: id >= max_reg_slots_gpr resolves to .spill at 16-aligned offset" {
     const slots = [_]u16{ 9, 10, 11, 12 };
     const alloc: Allocation = .{ .slots = &slots, .n_slots = 13, .max_reg_slots_gpr = 10 };
     try testing.expectEqual(Slot{ .reg = 9 }, alloc.slot(0, .gpr));
     try testing.expectEqual(Slot{ .spill = 0 }, alloc.slot(1, .gpr));
-    try testing.expectEqual(Slot{ .spill = 8 }, alloc.slot(2, .gpr));
-    try testing.expectEqual(Slot{ .spill = 16 }, alloc.slot(3, .gpr));
+    // Post-ADR-0110 widen: stride is 16-byte (matches @sizeOf(Value) == 16).
+    try testing.expectEqual(Slot{ .spill = 16 }, alloc.slot(2, .gpr));
+    try testing.expectEqual(Slot{ .spill = 32 }, alloc.slot(3, .gpr));
 }
 
 test "Allocation.spillBytes: 0 when n_slots fits in pool" {
@@ -487,10 +489,10 @@ test "Allocation.spillBytes: 0 when n_slots fits in pool" {
     try testing.expectEqual(@as(u32, 0), alloc.spillBytes());
 }
 
-test "Allocation.spillBytes: 8-byte stride past pool size" {
+test "Allocation.spillBytes: 16-byte stride past pool size (post-ADR-0110)" {
     const slots = [_]u16{ 9, 10, 11, 12 };
     const alloc: Allocation = .{ .slots = &slots, .n_slots = 13, .max_reg_slots_gpr = 10 };
-    try testing.expectEqual(@as(u32, 24), alloc.spillBytes()); // (13-10)*8
+    try testing.expectEqual(@as(u32, 48), alloc.spillBytes()); // (13-10)*16
 }
 
 // ========================================================
@@ -504,7 +506,7 @@ test "Allocation.slot: same id resolves to .reg for .fpr but .spill for .gpr (cl
     try testing.expectEqual(Slot{ .reg = 0 }, alloc.slot(0, .gpr));
     try testing.expectEqual(Slot{ .reg = 7 }, alloc.slot(1, .gpr));
     try testing.expectEqual(Slot{ .spill = 0 }, alloc.slot(2, .gpr));
-    try testing.expectEqual(Slot{ .spill = 32 }, alloc.slot(3, .gpr)); // (12 - 8) * 8
+    try testing.expectEqual(Slot{ .spill = 64 }, alloc.slot(3, .gpr)); // (12 - 8) * 16
     // class .fpr — boundary at 13 (default max_reg_slots_fp); same ids stay in regs
     try testing.expectEqual(Slot{ .reg = 0 }, alloc.slot(0, .fpr));
     try testing.expectEqual(Slot{ .reg = 7 }, alloc.slot(1, .fpr));
@@ -517,21 +519,23 @@ test "Allocation.slot: id >= max_reg_slots_fp resolves to .spill for .fpr" {
     const alloc: Allocation = .{ .slots = &slots, .n_slots = 15 };
     try testing.expectEqual(Slot{ .reg = 12 }, alloc.slot(0, .fpr));
     // FP spill: id >= 13 → .spill, offset uses GPR boundary as origin
-    // so the shared spill frame is class-agnostic.
-    try testing.expectEqual(Slot{ .spill = (13 - 8) * 8 }, alloc.slot(1, .fpr));
-    try testing.expectEqual(Slot{ .spill = (14 - 8) * 8 }, alloc.slot(2, .fpr));
+    // so the shared spill frame is class-agnostic. Stride is 16-byte
+    // post-ADR-0110 widen.
+    try testing.expectEqual(Slot{ .spill = (13 - 8) * 16 }, alloc.slot(1, .fpr));
+    try testing.expectEqual(Slot{ .spill = (14 - 8) * 16 }, alloc.slot(2, .fpr));
 }
 
 test "Allocation.slot: spill offset is class-agnostic (shared frame origin = max_reg_slots_gpr)" {
     // A function with mixed GPR/FP vregs sharing a spill frame:
-    // GPR vreg at slot 8 → spill 0; FP vreg at slot 14 → spill 48.
+    // GPR vreg at slot 8 → spill 0; FP vreg at slot 14 → spill 96.
     // Even though FP doesn't *actually* spill at slot 8..12
     // (those are V-regs), the offset formula stays consistent so
     // the prologue can size the frame from spillBytes() alone.
+    // Stride is 16-byte post-ADR-0110 widen.
     const slots = [_]u16{ 8, 14 };
     const alloc: Allocation = .{ .slots = &slots, .n_slots = 15 };
     try testing.expectEqual(Slot{ .spill = 0 }, alloc.slot(0, .gpr));
-    try testing.expectEqual(Slot{ .spill = (14 - 8) * 8 }, alloc.slot(1, .fpr));
+    try testing.expectEqual(Slot{ .spill = (14 - 8) * 16 }, alloc.slot(1, .fpr));
 }
 
 // ============================================================

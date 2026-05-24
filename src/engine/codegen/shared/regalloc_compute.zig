@@ -409,7 +409,7 @@ test "compute: scalar-only function has null shape_tags" {
     try testing.expect(alloc.shape_tags == null);
 }
 
-test "spill_offsets: scalar-only allocation keeps legacy 8-byte stride" {
+test "spill_offsets: scalar-only allocation uses 16-byte stride (post-ADR-0110 widen)" {
     const slots = [_]u16{ 0, 1, 8, 9 };
     const tags = [_]ShapeTag{ .scalar, .scalar, .scalar, .scalar };
     const alloc: Allocation = .{
@@ -421,8 +421,9 @@ test "spill_offsets: scalar-only allocation keeps legacy 8-byte stride" {
     };
     try testing.expectEqual(@as(u32, 0), alloc.slot(0, .gpr).reg);
     try testing.expectEqual(@as(u32, 1), alloc.slot(1, .gpr).reg);
+    // Post-widen: every slot is 16-byte regardless of scalar/v128.
     try testing.expectEqual(@as(u32, 0), alloc.slot(2, .gpr).spill);
-    try testing.expectEqual(@as(u32, 8), alloc.slot(3, .gpr).spill);
+    try testing.expectEqual(@as(u32, 16), alloc.slot(3, .gpr).spill);
 }
 
 test "spill_offsets: v128 spill slot gets 16-byte alignment + stride" {

@@ -417,10 +417,10 @@ test "emitI32x4Add: spilled rhs loads via MOVUPS stage XMM14 (ADR-0053 Part 3)" 
     try pushed.append(testing.allocator, 1); // rhs → slot 6 → spilled
     var next_vreg: u32 = 2;
 
-    // spill_base_off = 16; rhs spill_off = (6 - 4) * 8 = 16 (per
-    // legacy formula, since shape_tags is unset on this manual
-    // Allocation and spill_offsets is null). abs_off = 16 + 16 = 32
-    // → disp = -32.
+    // spill_base_off = 16; rhs spill_off = (6 - 4) * 16 = 32
+    // (post-ADR-0110 widen formula; shape_tags is unset on this
+    // manual Allocation and spill_offsets is null). abs_off =
+    // 16 + 32 = 48 → disp = -48.
     try op_simd_int_arith.emitI32x4Add(testing.allocator, &buf, alloc, &pushed, &next_vreg, 16);
 
     // Expected: MOVUPS XMM14, [RBP-32] ; PADDD XMM9, XMM8 (lhs→dst
