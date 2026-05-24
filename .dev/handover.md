@@ -67,6 +67,14 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
   green。Side-find: build.zig で run_edge_p9 が test_all_step
   に wired されていなかった (test_edge_step 経由のみ); 1-line
   fix で p9 corpus 全 60 fixture が test-all に組み入れ。
+- 40: **§9.13-V Phase A.2.2 — v128 global cope-path boundary
+  fixtures landed** (8 fixtures): 6 shape round-trips
+  (i8x16/i16x8/i32x4/i64x2/f32x4/f64x2 lanes 0+MAX via global)
+  at `test/edge_cases/p9/v128_lane_ops/` + 2 NaN-payload
+  preservation (f32x4 / f64x2 non-canonical NaNs) at
+  `v128_nan_payload/`。全 ADR-0052 cope-state baseline green。
+  Phase A.4g unification の behaviour-preservation contract が
+  これで成立。p9 corpus: 60 → 68 → 68 passed。
 
 ## Remaining work
 
@@ -90,22 +98,20 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
 
 ### Autonomous-eligible (next session pick from here)
 
-優先順 (Phase A.1 closed cycle 38; A.2.1 closed cycle 39; A.2.2 起点):
+優先順 (Phase A.1 closed 38; A.2.1 closed 39; A.2.2 closed 40; A.2.3 起点):
 
-1. **§9.13-V Phase A.2.2 — v128 lane matrix + NaN propagation**
-   (**NEXT**, ~1 cycle)。`test/edge_cases/p9/v128_lane_ops/`
-   に shape × op × boundary-lane fixtures。`test/edge_cases/p9/
-   v128_nan_payload/` で f32x4 / f64x2 NaN payload preservation。
-   v128 globals は ADR-0052 cope path 経由 (`scratch_globals`
-   byte buffer); これも Value=cope-state baseline として green
-   establish。
-2. **§9.13-V Phase A.2.3 — cross-instance v128 + alignment +
-   zero-init** (~1 cycle)。
+1. **§9.13-V Phase A.2.3 — cross-instance v128 + alignment +
+   zero-init** (**NEXT**, ~1 cycle)。
    `test/edge_cases/p9/v128_cross_instance/` で R-new-8
-   highest-risk fixture (export v128 global from module A
-   with recognisable lanes, import into module B);
-   plus globals 16B alignment runtime assertion + Value.zero
-   v128 readback (REPORT §10 additions)。
+   highest-risk fixture: export v128 global from module A
+   with recognisable lanes, import into module B; the migration
+   from per-valtype 8/16 byte-copy in `applyImportedGlobalsFromRegistered`
+   (test/spec/spec_assert_runner_base.zig:1782-1880) to uniform
+   `importer_buf[slot] = exporter_buf[slot]` must NOT regress
+   v128 cross-instance behaviour。Plus globals 16B alignment
+   runtime assertion + Value.zero v128 readback (REPORT §10
+   additions; Zig in-source tests in src/runtime/value.zig
+   + harness alignment check)。
 3. **§9.13-V Phase A.3-A.6** — Value flip + cascade + merge
    (feature branch `zwasm-from-scratch-value16`; D-167
    wire-up を A.4 内 に統合)。Phase 4d/4e はほぼ空、Phase
@@ -129,10 +135,9 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
 
 Per `/continue` SKILL.md Resume Steps 0.5 / 0.7 / 0.8.
 **Current state**: autonomous-eligible. `now` debts:
-D-167 (folded into §9.13-V Phase A.4) + §9.13-V Phase A.2.2
-(v128 lane matrix + NaN propagation) is the next chunk
-(plan doc §3 categories 2/3 + REPORT §10 — see
-"Autonomous-eligible" #1 above).
+D-167 (folded into §9.13-V Phase A.4) + §9.13-V Phase A.2.3
+(cross-instance v128 import + alignment + zero-init) is
+the next chunk (plan doc §3 categories 4/5 + REPORT §10).
 **Step 1a override**: `phase9_close_master.md` reference
 above triggers close-plan override per SKILL.md; Step 2
 (ROADMAP §9 first `[ ]` lookup) is therefore informational
