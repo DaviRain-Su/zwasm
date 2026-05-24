@@ -124,17 +124,17 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
   A.4f/A.4g re-classified as post-green cleanup ではなく
   cascade-blocker。
 - 46: **§9.13-V Phase A.4f — D-169 discharged** (092d2cdb)。
-  `evalConstExprValue` (`src/runtime/instance/instantiate.zig:340`)
-  に `0xFD 0x0C` (v128.const) arm 追加 — Value=16 の `.v128`
-  variant を直接書き込む。c_api wasm_instance_new は v128 globals
-  module で InstanceAllocFailed しなくなった。**Side-find: D-170
-  filed** — cross-instance v128 import fixture を再構築したら
-  importer.read_lane0 が Unreachable trap; even 単一-module v128
-  global.get via wast_runtime_runner も同 trap。spec_assert_runner
-  path は byte-buffer cope で green、c_api wasm_instance_new path
-  の JIT runtime wiring (Runtime.globals []*Value vs JitRuntime.
-  globals_base [*]Value) が v128 で未 reconciled。Phase A.4g cope
-  removal で全貌が見える見込み。Mac test-all 維持 green。
+  `evalConstExprValue` に `0xFD 0x0C` (v128.const) arm 追加。
+  c_api wasm_instance_new が v128 globals module で
+  InstanceAllocFailed しなくなった。D-170 filed (cross-module
+  v128 globals JIT wiring 未 reconciled)。Mac test-all 維持 green。
+- 47: **§9.13-V Phase A.4g-1 — evalConstScalarRawCtx
+  slot_size cleanup** (4178e717)。REPORT §2.g item g.2:
+  `runner_validate.zig` の global.get N (0x23) arm から
+  per-valtype slot_size switch (`.v128 => 16` arm が
+  unreachable な dead code) を削除、v128 rejection を
+  bounds check の前に reorder、scalar 8-byte read width を
+  literal 化。1/26 sites cleaned。Mac test-all 維持 green。
 
 ## Remaining work
 
@@ -158,25 +158,29 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
 
 ### Autonomous-eligible (next session pick from here)
 
-優先順 (A.1 38; A.2.1 39; A.2.2 40; A.2.3 41; A.3 42; A.4a 43;
-A.4c 44; A.4b 45; A.4f 46 on feature branch; **Phase A.4g 起点**):
+優先順 (A.1 38; ... A.4f 46; A.4g-1 47 on feature branch;
+**Phase A.4g-2 起点**):
 
-1. **§9.13-V Phase A.4g — spec runner GlobalsCtx removal**
-   (**NEXT**, ~1.5-2 cycle long pole, autonomous, feature branch)。
-   Plan doc §2 Phase 4g + REPORT §2.g 26 sites。test-all GREEN
-   baseline を維持しながら incremental に行う:
-   - g.1-g.9: `src/engine/{runner_validate,compile_init,
-     compile,runner,export_lookup}.zig` から `GlobalsCtx` /
-     `globals_offsets` / `globals_byte_size` 削除、`[]const Value`
-     直接渡しに switch。
-   - g.15-g.24: `test/spec/spec_assert_runner_*.zig` の
-     `scratch_globals: []u8` → `[]Value` 移行 (~100 LOC
-     `applyImportedGlobalsFromRegistered` simplification、
-     R-new-8 highest-risk site)。
-   - g.26: docstring 更新。
-   Phase A.4g 完了後 D-170 (cross-module v128 globals JIT wiring)
-   の全貌が見える見込み。
-2. **§9.13-V Phase A.5 / A.6** — cope code grep clean + 3-host
+1. **§9.13-V Phase A.4g-2 — globals_byte_size field removal**
+   (**NEXT**, ~0.5 cycle)。REPORT §2.g items g.10-g.13。
+   `src/engine/runner.zig::CompiledWasm.globals_byte_size` field
+   削除 + `src/engine/compile.zig` の 2 assignment sites 削除 +
+   `src/engine/compile_init.zig` docstring 更新 +
+   `test/spec/spec_assert_runner_base.zig:1145` の `alignedAlloc(u8,
+   .of(u128), compiled.globals_byte_size)` を
+   `globals_valtypes.len * 16` 計算 (or `[]Value` allocation) に
+   switch。Uniform stride で field は redundant。
+2. **§9.13-V Phase A.4g-3+ remaining** (~1-1.5 cycle)。
+   - g.20: `applyImportedGlobalsFromRegistered` per-valtype width
+     logic simplification (~100 LOC, R-new-8 highest-risk)。
+   - g.21: `applyDefinedGlobalsInit` byte-buffer write → `[]Value`
+     (compile_init.zig:60-73)。
+   - g.1/g.5-g.9: `GlobalsCtx` struct removal + 6 fn signatures
+     simplification。
+   - g.15-g.19/g.22-g.24: spec_assert_runner_*.zig の
+     `scratch_globals: []u8` → `[]Value` 移行。
+   - g.26: docstrings。
+3. **§9.13-V Phase A.5 / A.6** — cope code grep clean + 3-host
    verify + merge to main。Phase A.6 で feature → main rebase
    merge + ubuntu/windowsmini reconcile。
 3. **§9.13-V Phase A.3-A.6** — Value flip + cascade + merge
@@ -207,14 +211,11 @@ intentionally runtime-red until Phase A.4 cascade restores
 green; main `zwasm-from-scratch` stable at bcc4951f). `now`
 debts: D-167 (folded into §9.13-V Phase A.4f) + **D-169**
 (c_api v128 const init gap; discharged inside Phase A.4f).
-**Mac `zig build test-all` is GREEN** under Value=16 (edge 68/0,
-wast 72/0, spec_assert 212/0, wast_runtime 266/0). Phase A.4
-cascade restoration COMPLETE; D-169 discharged at cycle 46
-(c_api evalConstExprValue v128.const arm). D-170 filed for
-the surfaced cross-module v128 globals JIT wiring gap. Next
-chunk: Phase A.4g (spec runner GlobalsCtx removal, ~1.5-2
-cycle long pole)。**Ubuntu per-chunk gate SKIPPED on feature
-branch**; gate re-asserted at A.6 merge.
+**Mac `zig build test-all` is GREEN** under Value=16. Phase
+A.4g progress: cycle 47 cleaned 1/26 sites (slot_size switch).
+Next: Phase A.4g-2 (globals_byte_size field removal,
+g.10-g.13)。**Ubuntu per-chunk gate SKIPPED on feature branch**;
+gate re-asserted at A.6 merge.
 **Step 1a override**: `phase9_close_master.md` reference
 above triggers close-plan override per SKILL.md; Step 2
 (ROADMAP §9 first `[ ]` lookup) is therefore informational
