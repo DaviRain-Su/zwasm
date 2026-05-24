@@ -6,31 +6,39 @@
 
 ## Current state
 
-- **Phase**: 9 IN-PROGRESS. **§9.12-I `[x]`** at `526bbe30` —
-  Phase C closed.
-- **Last commit**: `526bbe30` — 12 more ADRs Accepted→Closed
-  (0041, 0053, 0054, 0055, 0057, 0058, 0059, 0060, 0066, 0074,
-  0075, 0077). ADR Accepted **52 → 25** (target <30).
+- **Phase**: 9 IN-PROGRESS. **§9.12-F `[x]`** + **§9.12-I `[x]`**
+  — Phase D + Phase C both closed.
+- **Last commit**: §9.12-F flip (this cycle) — all 6 cohort
+  debts verified discharged: D-094, D-090, D-062, D-141, D-081,
+  D-055.
 - **Phase 9 close gate (mac-host)**: **18/18 PASS**.
-- **Test state at `526bbe30`**: docs-only chunk; Mac+ubuntu
-  GREEN at prior `e670446b` per Step 0.7.
-- **D-028 heisenbug streak**: 1/5 silent.
+- **Remaining `[ ]` in §9**: only §9.13-0 + §9.13 (hard gate).
 
-## Active task — Phase D (§9.12-F debt cohort verify)
+## Active task — §9.13-0 close blocker investigation
 
-Per [`phase9_remaining_flow.md`](./phase9_remaining_flow.md) §2
-Phase D (1 cycle, autonomous):
+§9.13-0 exit per row text requires (per ADR-0104 Revision
+2026-05-23): D-162 ✅, D-163 ✅, D-164 ✅, D-157 ✅, D-139 ✅,
+**D-079 (ii) ❌ blocker remaining**.
 
-- **D.1 — §9.12-F debt cohort dissolution verify**: walk per
-  ADR-0102 per-row predicate (a)(b)(c)(d) for D-094, D-062,
-  D-141, D-081, D-055.
-- ADR-0102 says most have dissolved via ADR-0106 / Q3 C
-  adoption / per-op file pattern. Verify each row state.
+**D-079 (ii) status**: barrier "ADR-0110 implementation" was
+dissolved (Phase A done at `9204847a`), but cycle 46 surfaced
+D-170 ("c_api `wasm_instance_new` v128 globals JIT-execution
+gap") — the actual fix wasn't auto-included in Phase A.4. Both
+debts describe the same c_api-Instance v128 cross-module gap.
 
-Exit: §9.12-F row flip `[x]`.
+**Next chunk decision** (autonomous):
+- **Option A**: investigate D-170 tractability — audit
+  `wasm_instance_new` → JitRuntime construction path; if Phase
+  A.4g's uniform 16-byte stride makes the fix small (~50-100
+  LOC), discharge D-170 (closes §9.13-0).
+- **Option B**: if D-170 is genuinely Phase 10+ scope
+  (requires ADR-0109 / new design), file ADR-0104 amendment
+  removing D-079(ii) from §9.13-0 scope + cite D-170 as Phase
+  10+ deferral. Then §9.13-0 can flip `[x]`.
 
-After §9.12-F closes → Phase E (§9.13 hard gate, **user
-collab**) → Phase F (Phase 10 open).
+Pick A first (cheap to investigate; if intractable, fall back
+to B). Then Phase E (§9.13 hard gate, **user collab**) →
+Phase F (Phase 10 open).
 
 ## Cold-start procedure
 
