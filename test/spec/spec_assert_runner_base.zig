@@ -1773,8 +1773,10 @@ fn extractExporterTableMin(
 /// same path: look up the exporter in `registered`, ensure the
 /// exporter's own scratch_globals is populated
 /// (`ensureCompiledAndRt` triggers `applyDefinedGlobalsInit` on
-/// the exporter side), then read 8 bytes (or 16 for v128) from
-/// the exporter's slot and write to the importer's slot.
+/// the exporter side), then copy 16 bytes from the exporter's
+/// slot to the importer's slot. Per ADR-0110 §9.13-V every slot
+/// is uniform 16 bytes regardless of valtype; scalar writes
+/// land in the low 8 bytes (high 8 stay zero from `@memset`).
 ///
 /// Imports without a matching registered exporter, or imports
 /// whose exporter doesn't actually export the requested global,
@@ -1825,15 +1827,15 @@ pub fn applyImportedGlobalsFromRegistered(
         const importer_off = importer_globals_offsets[importer_global_slot];
         const importer_vt = importer_globals_valtypes[importer_global_slot];
         if (importer_vt != exporter_vt) continue;
-        const width: usize = switch (importer_vt) {
-            .v128 => 16,
-            .i32, .i64, .f32, .f64, .funcref, .externref => 8,
-        };
-        if (exporter_off + width > exporter_globals_buf.len) continue;
-        if (importer_off + width > importer_globals_buf.len) continue;
+        // Post-ADR-0110 widen: uniform 16-byte slot stride; the
+        // per-valtype 8/16 byte-copy switch collapsed (R-new-8).
+        // Scalar values occupy the low 8 bytes; high 8 stay zero
+        // (init via `@memset(buf, 0)` in setupRuntime).
+        if (exporter_off + 16 > exporter_globals_buf.len) continue;
+        if (importer_off + 16 > importer_globals_buf.len) continue;
         @memcpy(
-            importer_globals_buf[importer_off..][0..width],
-            exporter_globals_buf[exporter_off..][0..width],
+            importer_globals_buf[importer_off..][0..16],
+            exporter_globals_buf[exporter_off..][0..16],
         );
     }
 }
