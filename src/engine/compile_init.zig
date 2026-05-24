@@ -59,14 +59,14 @@ pub fn applyDefinedGlobalsInit(
     for (globals_decoded.items, 0..) |gd, gi| {
         const off = globals_offsets[num_global_imports + gi];
         const vt = globals_valtypes[num_global_imports + gi];
+        // Post-ADR-0110 widen: every slot is uniform 16 bytes.
+        if (off + 16 > globals_buf.len) return Error.UnsupportedEntrySignature;
         switch (vt) {
             .v128 => {
-                if (off + 16 > globals_buf.len) return Error.UnsupportedEntrySignature;
                 const bytes = try rv.evalConstV128Expr(gd.init_expr);
                 @memcpy(globals_buf[off..][0..16], &bytes);
             },
             .i32, .i64, .f32, .f64, .funcref, .externref => {
-                if (off + 8 > globals_buf.len) return Error.UnsupportedEntrySignature;
                 const raw = try rv.evalConstScalarRawCtx(gd.init_expr, gctx);
                 std.mem.writeInt(u64, globals_buf[off..][0..8], raw, .little);
             },
@@ -100,7 +100,9 @@ pub fn resolveFuncrefGlobals(
         const fidx = rv.initExprRefFunc(gd.init_expr) orelse continue;
         if (fidx >= func_entities.len) continue;
         const off = globals_offsets[num_global_imports + gi];
-        if (off + 8 > globals_buf.len) return Error.UnsupportedEntrySignature;
+        // Post-ADR-0110 widen: every slot is uniform 16 bytes; an 8-byte
+        // scalar write lands in the low half of the slot.
+        if (off + 16 > globals_buf.len) return Error.UnsupportedEntrySignature;
         std.mem.writeInt(u64, globals_buf[off..][0..8], @intFromPtr(&func_entities[fidx]), .little);
     }
 }
