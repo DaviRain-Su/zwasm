@@ -7,41 +7,32 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24)。
-  §9.13 hard gate cleared; widget 9→DONE; §10 task table inline 展開済。
-  **10.C9 closed** (this commit; 5 sub-steps recorded in
-  `phase_log/phase10.md`)。
-- **Last commit**: this commit (10.C9 [x] flip + phase_log/phase10.md
-  作成 — step 5). 10.C9 直近 4 commits: `1433004b` (steps 1+2 SHA backfill
-  + audit) → `e861143c` (step 3 bench baseline) → `4f612ba9` (handover
-  retarget) → `91059738` (step 4 master plan ARCHIVED-IN-PLACE + I7 amend
-  + rule retirement note).
-- **Phase 9 close invariants gate (mac-host)**: **18/18 PASS** 維持
-  (I7 ARCHIVED-IN-PLACE 受理確認済)。
+- **Last commit**: `142502a5` — feat(c_api,p10): D-171
+  minimum-viable global accessors (10.F sub-chunk)。`Global`
+  opaque handle + `wasm_extern_as_global` +
+  `wasm_global_get/set/delete` を `src/api/instance.zig` に追加;
+  1 in-source test GREEN; Mac test-all GREEN。
+- **Phase 9 close invariants gate (mac-host)**: **18/18 PASS** 維持。
+- **User pause (2026-05-25)**: ADR-0109 native Zig API
+  (`docs/zig_api_design.md`) について「Phase 9 / Phase 10 設計時に
+  この議論を含めていたが、どこで着手予定か / 動線・配線で気にすべき
+  ポイントは / Phase 9 close 段階で形を作っておきたかった」との user
+  問い合わせで autonomous loop 中断。回答完了後 user 判断待ち。
 
-## Active task — 10.F c_api scalar accessors (next chunk)
+## Active task — 10.F c_api accessors (D-171 minimum-viable closed)
 
-per ROADMAP §10 / 10.F row + `phase9_close_master.md` §5.3a Phase F:
+10.F 全体スコープ (D-171 / D-172 / D-173) のうち D-171 の export
+派生 accessor は `142502a5` で landed。残:
 
-**Scope**: `src/api/instance.zig` に wasm-c-api spec 標準 scalar
-accessor 群を追加。closes D-171 / D-172 / D-173 の 3 行（全て
-`blocked-by: Phase F`）。
+- **D-171 残**: `wasm_global_new` (host-side standalone) +
+  `wasm_global_type`。host が Wasm global を host 側で作り Wasm
+  module の global import 先として食わせるシナリオ用。次の sub-chunk
+  で D-172 / D-173 と束ねる候補。
+- **D-172**: `wasm_extern_as_table` + `wasm_table_get/set/size/grow`
+- **D-173**: `wasm_extern_as_memory` + `wasm_memory_data/data_size/size/grow`
 
-- **D-171** — `wasm_extern_as_global` + `wasm_global_new` +
-  `wasm_global_get` + `wasm_global_set` (scalar i32/i64/f32/f64
-  のみ; v128 は spec-prohibited per `2026-05-24-c_api-v128-spec
-  -boundary` lesson + `include/wasm.h:329-338`)
-- **D-172** — `wasm_extern_as_table` + `wasm_table_get` /
-  `wasm_table_set` / `wasm_table_size` / `wasm_table_grow`
-  (`include/wasm.h:483-497`)
-- **D-173** — `wasm_extern_as_memory` + `wasm_memory_data` /
-  `wasm_memory_data_size` / `wasm_memory_size` / `wasm_memory
-  _grow` (`include/wasm.h:471-481`)
-
-**Approach**: 1 chunk (or up to 3 if test diff > 400 LOC). Step 0
-survey: wasmtime / wasmer の `crates/c-api/src/{global,table,memory}.rs`
-+ wasm-c-api `include/wasm.h` 該当範囲 + v1 zwasm `src/c_api/`。
-TDD: 各 accessor に in-source `test "wasm 2.0 c_api scalar
-accessor: <fn>"` block。
+**Approach**: 各 sub-chunk = 1 commit, TDD (in-source test
+block per accessor family)。
 
 ## 10.F 完了後の chunk 順序 (design plan §6 全体)
 
