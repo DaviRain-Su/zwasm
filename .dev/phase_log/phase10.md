@@ -96,17 +96,22 @@ J.1+ gated on execution plan doc)
   phase9_value_widen_plan.md Doc-state updated;
   phase10_design_plan_ja.md §7 work-sequence + §3.x
   ADR-0109 sub-section added; handover.md refresh `[ ]` (this commit)
-- **10.J-investigation** — pre-impl codebase-investigation
-  (subagent-driven; enumerates every site needing change in
-  `src/zwasm.zig` + `src/api/` + `src/runtime/runtime.zig`
-  + import sites + ABI surfaces) + execution plan + integrated
-  test strategy (regression detection / happy path / edge
-  cases per user direction 2026-05-25; "other tests pass
-  while Zig API is broken" cannot happen) → plan doc lands
-  somewhere under `.dev/` (location TBD by investigation);
-  **user review gate** before J.1+ (planned)
-- **10.J-1+** — implementation cycles per plan doc (Runtime
-  → JitRuntime rename → Engine / Module / Instance native
-  facade → TypedFunc + multi-result → Linker + host imports
-  + Caller → Memory slice view → Trap full set → WASI bulk
-  → test runner Tier-2 → close) (planned)
+- **10.J-invest** — pre-impl investigation + execution plan +
+  integrated test strategy. 2 subagents (Explore, parallel)
+  produced `private/notes/p10-J.invest-code-survey.md` (990
+  lines; site-by-site change enumeration, rename impact 25+
+  files, TypedFunc comptime feasibility analysis, layering
+  recommendations) + `private/notes/p10-J.invest-test-survey
+  .md` (579 lines; fixture inventory 57 realworld + ~100 edge-
+  case, ADR-0109 §3 pattern decomposition, three-tier
+  architecture proposal, 5 must-have scenarios). Plan doc
+  synthesizes both into [`phase10_zig_api_plan.md`](../phase10
+  _zig_api_plan.md) — 8 impl chunks (J.1..J.close) + integrated
+  test strategy + 7 decision points + 10 risk items. **User
+  review gate**: J.1 first commit blocked until plan reviewed `[x]` (this commit)
+- **10.J-1+** — implementation cycles per plan doc §3 (Runtime
+  → JitRuntime rename → Engine + Module + allocator strict-pass
+  → Instance + Trap full set → TypedFunc + Memory + multi-result
+  → Linker + Caller + host imports → Tier-2 runner → WASI
+  skeleton → close + coverage audit) (planned; ~8-12 cycles
+  per plan §7)

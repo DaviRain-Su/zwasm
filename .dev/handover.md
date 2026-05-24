@@ -7,45 +7,32 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24)。
-- **Last commit**: this commit (10.J-0 amend round — ADR-0109
-  Status: Proposed → Accepted; ADR-0025 Superseded; D-075
-  re-scoped to impl tracker; `docs/zig_api_design.md` §4 + §5 +
-  §8 reconciled with ADR-0110 (16-byte Value); ROADMAP §10 new
-  row 10.J inserted before 10.F; phase_log/phase10.md row 10.F
-  + 10.J added; phase10_design_plan_ja.md §3.6 + §7 work
-  sequence amended; phase9_close_master.md / phase9_remaining
-  _flow.md / phase9_value_widen_plan.md Doc-state notes
-  added)。直前: `142502a5` D-171 minimum-viable global accessors
-  (10.F sub-chunk; 並行)。
+- **Last commit**: this commit — **10.J-invest 完了** (plan doc
+  [`phase10_zig_api_plan.md`](./phase10_zig_api_plan.md) 1140+
+  lines; 2 subagent surveys at `private/notes/p10-J.invest-{code,
+  test}-survey.md` の synthesized 結果; 8 chunks J.1..J.close +
+  three-tier test architecture + coverage matrix + 7 decision
+  points + 10 risks)。直前: `11c6e94e` (J.0 amend round)。
 - **Phase 9 close invariants gate (mac-host)**: **18/18 PASS** 維持。
 
-## Active task — 10.J-invest (pre-impl investigation + execution plan + integrated test strategy)
+## Active task — 10.J-1 待機中 (USER REVIEW GATE)
 
-**NEXT chunk** per ROADMAP §10 / 10.J + ADR-0109 Revision 2026-05-25:
+**ガイド**: plan doc [`phase10_zig_api_plan.md`](./phase10_zig_api_plan.md)
+を review し、特に以下を確認/承認お願いします:
 
-`src/zwasm.zig` の native Zig API rewrite (Engine + Linker +
-TypedFunc + Memory) を始める前に、subagent 駆動で以下を作る:
+- **§3 chunk decomposition** (J.1-J.close 8 chunks; J.4 critical path)
+- **§4 integrated test strategy** (Tier 1/2/3 architecture; 「他 test
+  green でも Zig API 壊れている」を構造的に防ぐ仕組み)
+- **§5 decision points D1-D7** — 推奨判断が frozen 済 (Option B
+  subsystem split / J.4 spike contingency / Tier-2 corpus realworld+p7
+  only / WASI skeleton-only / etc)。ユーザ override 可。
+- **§6 risk inventory R1-R10** — TypedFunc comptime / 名前衝突等
+- **§7 cycle estimate** 8-12 cycles (ADR-0109 estimate 6-8 を上回るが
+  J.4 spike contingency + J.6 Tier-2 runner exe を visible scope に
+  含めた結果; どちらも scope-creep ではない)
 
-1. **コードベース調査** — 現状 `src/zwasm.zig` / `src/api/` /
-   `src/runtime/runtime.zig` / 全 import 元 / ABI surface (JIT-
-   emitted code が読む `[X19 + offset]` 含む) を survey し、
-   ADR-0109 + `docs/zig_api_design.md` の native facade に
-   寄せる場合に「何をどれだけ変更しなければならないか」を
-   site 単位で列挙。
-2. **実行計画 (execution plan)** — 調査結果を総括して J.1+
-   sub-chunk decomposition + dependency order + per-chunk
-   exit criterion を確定。Runtime → JitRuntime rename を
-   最初に下ろす (10.M/R/TC/E/G の rename churn 回避)。
-3. **統合テスト戦略** — plan doc 内に **テスト設計** も含む。
-   「どうあれば良いテストになるか」を考えながら、regression
-   detection + happy path + edge cases を網羅し、「他の test
-   が通過しても Zig API が壊れている」が起きない構造を組む。
-   API usage パターン出し (ADR-0109 §3.1-§3.8 → 拡張可) +
-   既存 fixture (`test/realworld/wasm/cljw_*.wasm` /
-   `test/edge_cases/p*/`) appendable な leverage を含む。
-
-**Output**: plan doc (場所 TBD — investigation 結果次第)。
-**Gating**: plan doc landing 後 user review → 承認後 J.1+ 開始。
+**承認後**: J.1 (Runtime → JitRuntime mechanical rename) から impl 開始。
+否承認/修正要求あれば plan doc を amend してから再 review。
 
 ## 10.J 完了後 / 10.F 残り (並行) — chunk order
 
