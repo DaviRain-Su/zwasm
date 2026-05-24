@@ -34,32 +34,40 @@
 **承認後**: J.1 (Runtime → JitRuntime mechanical rename) から impl 開始。
 否承認/修正要求あれば plan doc を amend してから再 review。
 
-## 10.J 完了後 / 10.F 残り (並行) — chunk order
+## Phase 10 progress (stable snapshot; refreshed on row [x] flip only)
 
-- **10.F 残り** (`src/api/instance.zig` 側; 10.J と独立; いつでも
-  挿入可能): D-171 `_new`/`_type` + D-172 (table) + D-173 (memory)
-- 10.Z (ZirInstr 128-bit 拡張; Z.1 直接実装)
-- 10.D (ADR-0111-0117 + ROADMAP §12 amend 設計ラウンド)
-- 10.T (test infra: corpus import / stress runners / emit_test
-  baseline / realworld skeleton)
-- 10.M (memory64) → 10.R (function-refs) → 10.TC (Tail Call)
-  → 10.E (EH) → 10.G (WasmGC)
-- 10.P (Phase 10 close: invariants script + widget 10→DONE)
+Full row text + per-row exit criteria live in ROADMAP §10 task
+table (12 rows; /continue Resume Step 2 lands there first).
+Original Phase 10 scope (memory64 / fn-refs / TC / EH / GC)
+is unchanged by 10.J insertion — design in
+`phase10_design_plan_ja.md` §3.1-§3.5.
 
-## Audit follow-up (4 soon items; cleanup chunk候補)
+| Row | Status | One-line |
+|---|---|---|
+| 10.0 | [x] | Phase 9→10 transition; widget 9→DONE; §10 inline expand |
+| 10.C9 | [x] | Phase 9 close 後始末 (audit + SHA backfill + bench baseline + master plan archive) |
+| 10.J | [ ] **ACTIVE** | Native Zig API (ADR-0109; 8-12 cycles) — see [`phase10_zig_api_plan.md`](./phase10_zig_api_plan.md); inserted 2026-05-25 |
+| 10.F | [ ] partial | c_api scalar accessors (D-171 minimum-viable landed `142502a5`; D-171 `_new`/`_type` + D-172 + D-173 remain; can land parallel to 10.J — different file) |
+| 10.Z | [ ] | ZirInstr 128-bit 拡張 (`payload: u32 → u64`; full 4-host re-green) |
+| 10.D | [ ] | ADR-0111..0117 + ROADMAP §12 amend 設計ラウンド (7 ADRs Accepted) |
+| 10.T | [ ] | Test infra (corpus import / stress runners / emit_test baseline / realworld skeleton / BLESS workflow) |
+| 10.M | [ ] | memory64 + multi-memory enable |
+| 10.R | [ ] | function-references prereq (5 ops + `(ref $sig)` typing; GC prereq) |
+| 10.TC | [ ] | Tail Call (regalloc terminator-class extension + ops + interp trampoline) |
+| 10.E | [ ] | Exception Handling (callsite_metadata + EH ops + unwind + cross-module propagation) |
+| 10.G | [ ] | WasmGC (Value.anyref / heap + collector + RTT / i31 / op_gc / mark-sweep β) |
+| 10.P | [ ] | Phase 10 close (invariants script + widget 10→DONE + Phase 11 inline expand) |
 
-audit-2026-05-24-phase9-close.md `soon` セクション (10.J / 10.F
-の合間に消化候補):
+**Currently active**: 10.J (~10 row pending after; Phase 10 is
+not nearly complete at 10.J close).
 
-- **ADR-0078 paired-artifact drift** — 3 SKIP-* rows (D-157 /
-  D-162 / D-163) reference discharged debts; table 更新 OR
-  SKIP-* emission retire。
-- **Spike lifecycle hygiene** — 7 件 (2 merged-into-prod 残置 +
-  5 pre-skeleton no-README)。
-- **ADR `<backfill>` 5 件 (ADR-0107 含む)**。
-- **Debt 26 rows > 15 threshold + Phase 9 boundary** → `meta_audit`
-  suggest; user-gated per `meta_audit/SKILL.md`; do NOT
-  autonomously fire。
+## Audit follow-up (4 soon items)
+
+`private/audit-2026-05-24-phase9-close.md` `soon` セクション
+(10.J/10.F の合間に消化候補): ADR-0078 paired-artifact drift
+(3 SKIP-* rows); spike lifecycle hygiene (7 件); ADR `<backfill>`
+5 件; debt 26 rows + Phase 9 boundary → `meta_audit` suggest
+(user-gated; NOT autonomously fired)。
 
 ## Cold-start procedure
 

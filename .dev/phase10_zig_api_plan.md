@@ -18,6 +18,41 @@
 
 ---
 
+## §0 — Within-Phase-10 context (read this first)
+
+This document covers **only 10.J** — 1 row out of Phase 10's
+**12 task rows** (10.0 / 10.C9 / 10.J / 10.F / 10.Z / 10.D / 10.T /
+10.M / 10.R / 10.TC / 10.E / 10.G / 10.P; see ROADMAP §10 task
+table for the full list + per-row status).
+
+**10.J is an inserted chunk** (added 2026-05-25 at ADR-0109 Accept;
+not in the original Phase 10 design). Phase 10's **original
+scope** — memory64 (10.M) + function-references (10.R) + Tail Call
+(10.TC) + Exception Handling (10.E) + WasmGC (10.G) — is unchanged
+by this insertion. The design for that original scope lives in
+[`phase10_design_plan_ja.md`](./phase10_design_plan_ja.md) (§3.1
+through §3.5); §3.6 of that doc is the cross-reference back to
+10.J / this plan.
+
+**At 10.J close**, the `/continue` loop's Resume Step 2 will pick
+up the next `[ ]` row from ROADMAP §10 — most likely 10.F (c_api
+scalar accessor remainder; D-171 minimum-viable already landed
+at `142502a5` 2026-05-25) or 10.Z (ZirInstr 128-bit). Phase 10 is
+**not** complete at 10.J close; **~10 task rows still pending**.
+
+The current-cycle snapshot of Phase 10 progress lives in
+`handover.md` §"Phase 10 progress" (refreshed on each row `[x]`
+flip). The runnable source-of-truth is ROADMAP §10's task table
+(/continue Resume Step 2 always lands there first).
+
+**If you are a fresh session reading this doc to start a chunk**:
+verify against ROADMAP §10's `[ ]` row order that 10.J is still
+the active row. If the task table shows 10.J `[x]`, this doc is
+historical reference; pick up the next `[ ]` row (which is
+governed by `phase10_design_plan_ja.md`, not this doc).
+
+---
+
 ## §1 — Purpose, scope, gates
 
 **Purpose**: decompose ADR-0109 (Accepted 2026-05-25) into a
