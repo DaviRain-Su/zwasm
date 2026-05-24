@@ -2,6 +2,8 @@
 
 > **Doc-state**: ACTIVE — load-bearing for current Phase 9 close work.
 >
+> **Phase 9 = DONE 2026-05-24** (§9.13 hard gate cleared; widget 9→DONE per this commit). ARCHIVED-IN-PLACE 移行は 10.C9 chunk で `scripts/check_phase9_close_invariants.sh` I7 amendment + `.claude/rules/phase9_close_invariants.md` retirement と bundle 処理予定。Phase 10 design plan: `phase10_design_plan_ja.md` (DRAFT; r3)。
+>
 > **Supersedes**: `phase9_close_plan.md` + `phase9_completion_master_plan.md` +
 > `phase9_13_0_close_plan.md` + `phase9_structural_debt_close_plan.md` +
 > `phase9_completion_substrate_audit.md` (all archived to
