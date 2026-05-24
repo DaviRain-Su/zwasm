@@ -845,11 +845,12 @@ test "compile: (i32.const 42) global.set 1 — emits ADR-0027 reload + store (i3
 
     // Body should contain the global.set sequence:
     //   MOV RAX, [R15 + 48]                  →  49 8B 87 30 00 00 00
-    //   MOV [RAX + 8], EBX  (idx=1, byte_off=8) →  89 98 08 00 00 00
+    //   MOV [RAX + 16], EBX  (idx=1, byte_off=16; post-ADR-0110
+    //   fallback stride is *16) →  89 98 10 00 00 00
     // (slot 0 = RBX after chunk 13b pool shrink — no REX prefix needed.)
     const expected = [_]u8{
         0x49, 0x8B, 0x87, 0x30, 0x00, 0x00, 0x00,
-        0x89, 0x98, 0x08, 0x00, 0x00, 0x00,
+        0x89, 0x98, 0x10, 0x00, 0x00, 0x00,
     };
     var found = false;
     var i: usize = 0;

@@ -272,7 +272,7 @@ test "compile: global.get 0 (i32) — emits LDR W from [X23 + 0]" {
     try testing.expectEqual(expected_ldr, std.mem.readInt(u32, out.bytes[body0 + 4 ..][0..4], .little));
 }
 
-test "compile: (i32.const 99) global.set 1 (i32) — emits STR W to [X23 + 8]" {
+test "compile: (i32.const 99) global.set 1 (i32) — emits STR W to [X23 + 16] (post-ADR-0110 stride)" {
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
     var f = ZirFunc.init(0, sig, &.{});
     defer f.deinit(testing.allocator);
@@ -290,7 +290,8 @@ test "compile: (i32.const 99) global.set 1 (i32) — emits STR W to [X23 + 8]" {
     const body0 = prologue.body_start_offset(false);
     // [body0 + 0]: extra LDR X23 prologue word (prescan added)
     // [body0 + 4]: MOVZ W9, #99
-    // [body0 + 8]: STR W9, [X23, #8]
-    const expected_str = inst.encStrImmW(9, 23, 8);
+    // [body0 + 8]: STR W9, [X23, #16] (fallback stride is *16
+    // post-ADR-0110; idx=1 → 16)
+    const expected_str = inst.encStrImmW(9, 23, 16);
     try testing.expectEqual(expected_str, std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
 }

@@ -71,7 +71,8 @@ fn lookupGlobalShape(
     if (idx < globals_offsets.len) {
         return .{ .byte_off = globals_offsets[idx], .vt = globals_valtypes[idx] };
     }
-    return .{ .byte_off = idx * 8, .vt = .i32 };
+    // Post-ADR-0110 widen: uniform 16-byte stride (matches @sizeOf(Value)).
+    return .{ .byte_off = idx * 16, .vt = .i32 };
 }
 
 /// Wasm spec §4.4.5 (global.get N). Dispatch on valtype.

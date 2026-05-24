@@ -41,11 +41,11 @@ pub const GlobalsLayout = struct {
 /// byte offsets + valtypes + total byte size. Result indexed by
 /// the FULL wasm global index space (§9.12-E / B153 per D-153
 /// Option A): `[0..num_global_imports)` are imports;
-/// `[num_global_imports..total)` are defined globals. Scalar
-/// globals (i32/i64/f32/f64/ref) occupy 8 bytes; v128 globals
-/// occupy 16 bytes with 16-byte alignment padding. Total rounded
-/// up to 16 bytes so the byte buffer is safe to address as v128
-/// from any starting position.
+/// `[num_global_imports..total)` are defined globals. Post
+/// ADR-0110 §9.13-V Phase A.4b: every global occupies a uniform
+/// 16-byte slot regardless of valtype — matching `@sizeOf(Value)`
+/// + the `[*]Value` stride that c_api's JitRuntime.globals_base
+/// hands to JIT-emitted code. Total stays 16-byte rounded.
 pub fn computeGlobalsLayout(allocator: Allocator, wasm_bytes: []const u8) Error!GlobalsLayout {
     var module = try parser.parse(allocator, wasm_bytes);
     defer module.deinit(allocator);
@@ -78,16 +78,17 @@ pub fn computeGlobalsLayout(allocator: Allocator, wasm_bytes: []const u8) Error!
     errdefer allocator.free(valtypes);
 
     var off: u32 = 0;
+    // Post-ADR-0110 widen: uniform 16-byte stride for every valtype.
+    // This converges the spec-runner byte-buffer layout with the
+    // c_api `[*]Value` stride that JitRuntime.globals_base hands
+    // JIT-emitted code. Scalar writes (8 bytes) land in the low
+    // 8 bytes of each 16-byte slot; W/X/S/D-form JIT reads pick up
+    // the matching prefix bytes via little-endian.
     for (0..num_imports) |i| {
         const vt = import_vts[i];
         valtypes[i] = vt;
-        const sa: struct { size: u32, alignv: u32 } = switch (vt) {
-            .v128 => .{ .size = 16, .alignv = 16 },
-            .i32, .i64, .f32, .f64, .funcref, .externref => .{ .size = 8, .alignv = 8 },
-        };
-        off = std.mem.alignForward(u32, off, sa.alignv);
         offsets[i] = off;
-        off += sa.size;
+        off += 16;
     }
     if (gs_opt) |gs| {
         var gs_buf = try sections.decodeGlobals(allocator, gs.body);
@@ -95,13 +96,8 @@ pub fn computeGlobalsLayout(allocator: Allocator, wasm_bytes: []const u8) Error!
         for (gs_buf.items, 0..) |gd, gi| {
             const dst = num_imports + gi;
             valtypes[dst] = gd.valtype;
-            const sa: struct { size: u32, alignv: u32 } = switch (gd.valtype) {
-                .v128 => .{ .size = 16, .alignv = 16 },
-                .i32, .i64, .f32, .f64, .funcref, .externref => .{ .size = 8, .alignv = 8 },
-            };
-            off = std.mem.alignForward(u32, off, sa.alignv);
             offsets[dst] = off;
-            off += sa.size;
+            off += 16;
         }
     }
     return .{

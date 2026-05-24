@@ -35,14 +35,15 @@ const EmitCtx = ctx_mod.EmitCtx;
 const Error = ctx_mod.Error;
 
 /// Look up the byte offset + valtype for global `idx`. Returns
-/// the legacy `idx * 8` shape when the index falls outside the
-/// per-defined-global metadata range (imported globals; the v128
-/// imports path is tracked under D-079).
+/// the uniform 16-byte stride fallback when the index falls outside
+/// the per-defined-global metadata range (imports beyond the table;
+/// v128 imports path tracked under D-079). Post-ADR-0110 widen:
+/// stride is 16 (matches `@sizeOf(Value)`).
 fn lookupGlobalShape(ctx: *const EmitCtx, idx: u32) struct { byte_off: u32, vt: zir.ValType } {
     if (idx < ctx.globals_offsets.len) {
         return .{ .byte_off = ctx.globals_offsets[idx], .vt = ctx.globals_valtypes[idx] };
     }
-    return .{ .byte_off = idx * 8, .vt = .i32 };
+    return .{ .byte_off = idx * 16, .vt = .i32 };
 }
 
 /// Wasm spec §4.4.5 (global.get N) — push the value of global N
