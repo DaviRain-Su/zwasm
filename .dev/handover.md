@@ -15,18 +15,24 @@
   GREEN at Step 0.7. windowsmini at `7680cbd2`: 0 FAIL.
 - **D-028 heisenbug streak**: 1/5 silent.
 
-## Active task — Phase B.3 D-139 cont. (gap A2 transitive zombie)
+## Active task — Phase B.3 D-139 cont. (gap B3 reverse-order arena)
 
 Per [`c_api_instance_audit_2026-05-24.md`](./c_api_instance_audit_2026-05-24.md) §4 discharge plan.
-Audit + gap C2 closed this chunk (`64c2378c`). Next chunks:
+Audit + gaps C2 (`64c2378c`) + A2 (`38e31003`) closed. Remaining:
 
-- **NEXT** — Gap A2: `"wasm 2.0 c_api zombie transitive: 3-instance
-  diamond funcref graph survives delete order A→C→B"` —
-  multi-zombie park + transitive import chain.
-- **THEN** — Gap B3 (reverse-order arena delete) + Gap A3
-  (partial-init trap zombie) + Gap C3 (store_delete cleanup
-  order) + Gap C4 (engine reuse across stores).
+- **NEXT** — Gap B3: arena reverse-order delete (B then A from
+  forward-order instantiate).
+- **THEN** — Gap A3 (partial-init trap zombie) + Gap C3
+  (store_delete cleanup order) + Gap C4 (engine reuse across
+  stores).
 - **THEN** — D-139 close commit (`chore(debt): close D-139 ...`).
+
+Note: Gap A2's audit wording referenced a 3-instance "diamond"
+with B importing from C; the chunk landed the simpler multi-
+consumer-of-A pattern (two B-instances both hold funcrefs into
+A). This exercises multi-zombie-park at the same plumbing level;
+full transitive C→A→B chain would require hand-rolled module C
+bytes (deferred to D-075 v0.1.0 RC if needed).
 
 3 new debts filed at C2 (blocked on ADR-0025 v0.1.0 RC c_api
 accessor exports): D-171 (A1 global zombie), D-172 (B1 table
