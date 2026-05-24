@@ -135,6 +135,15 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
   unreachable な dead code) を削除、v128 rejection を
   bounds check の前に reorder、scalar 8-byte read width を
   literal 化。1/26 sites cleaned。Mac test-all 維持 green。
+- 48: **§9.13-V Phase A.4g-2 — globals_byte_size field
+  removal** (5c6f91fe)。REPORT §2.g items g.10-g.13 +
+  g.14-extension。`CompiledWasm.globals_byte_size` +
+  `GlobalsLayout.byte_size` field 削除 (uniform 16-byte stride
+  で `globals_valtypes.len * 16` から計算可能);
+  `compile.zig` の 3 sites + `export_lookup.zig` の
+  `alignForward` cleanup + `spec_assert_runner_base.zig:1145`
+  allocator site を inline computation に switch。~5/26
+  cumulative。Mac test-all 維持 green。
 
 ## Remaining work
 
@@ -158,29 +167,28 @@ Closed cycles 10-25: `git log --grep="cycle 2[0-5]\|A1\|A2\|A4"`.
 
 ### Autonomous-eligible (next session pick from here)
 
-優先順 (A.1 38; ... A.4f 46; A.4g-1 47 on feature branch;
-**Phase A.4g-2 起点**):
+優先順 (... A.4g-1 47; A.4g-2 48 on feature branch;
+**Phase A.4g-3 起点**):
 
-1. **§9.13-V Phase A.4g-2 — globals_byte_size field removal**
-   (**NEXT**, ~0.5 cycle)。REPORT §2.g items g.10-g.13。
-   `src/engine/runner.zig::CompiledWasm.globals_byte_size` field
-   削除 + `src/engine/compile.zig` の 2 assignment sites 削除 +
-   `src/engine/compile_init.zig` docstring 更新 +
-   `test/spec/spec_assert_runner_base.zig:1145` の `alignedAlloc(u8,
-   .of(u128), compiled.globals_byte_size)` を
-   `globals_valtypes.len * 16` 計算 (or `[]Value` allocation) に
-   switch。Uniform stride で field は redundant。
-2. **§9.13-V Phase A.4g-3+ remaining** (~1-1.5 cycle)。
-   - g.20: `applyImportedGlobalsFromRegistered` per-valtype width
-     logic simplification (~100 LOC, R-new-8 highest-risk)。
-   - g.21: `applyDefinedGlobalsInit` byte-buffer write → `[]Value`
-     (compile_init.zig:60-73)。
-   - g.1/g.5-g.9: `GlobalsCtx` struct removal + 6 fn signatures
-     simplification。
-   - g.15-g.19/g.22-g.24: spec_assert_runner_*.zig の
-     `scratch_globals: []u8` → `[]Value` 移行。
-   - g.26: docstrings。
-3. **§9.13-V Phase A.5 / A.6** — cope code grep clean + 3-host
+1. **§9.13-V Phase A.4g-3 — applyDefinedGlobalsInit
+   byte-buffer simplification** (**NEXT**, ~0.5 cycle)。
+   REPORT §2.g item g.21: `compile_init.zig:62-73` の
+   `applyDefinedGlobalsInit` body の per-valtype 8/16 write
+   ceremony — 全 slot は 16-byte uniform stride、scalar 8-byte
+   write はそのままで OK、v128 16-byte write もそのまま;
+   bounds check (`off + 16 > buf.len`) を統一できる。
+2. **§9.13-V Phase A.4g-4 — applyImportedGlobalsFromRegistered
+   simplification** (~1 cycle, R-new-8 highest-risk)。
+   `spec_assert_runner_base.zig:1782-1880` ~100 LOC の
+   per-valtype `width = if (vt == .v128) 16 else 8` byte-copy
+   logic を uniform 16-byte copy に置換。
+3. **§9.13-V Phase A.4g-5 — GlobalsCtx struct removal** (~0.5
+   cycle)。`runner_validate.zig:163-168` の `GlobalsCtx`
+   struct + その 6 fn signatures (compile_init.zig:33,83,
+   130,159,242,333) を `[]const Value` 直接渡しに simplify。
+4. **§9.13-V Phase A.4g-6+ remaining**: spec_assert_runner_*.zig
+   `scratch_globals: []u8 → []Value` 移行 + docstrings。
+5. **§9.13-V Phase A.5 / A.6** — cope code grep clean + 3-host
    verify + merge to main。Phase A.6 で feature → main rebase
    merge + ubuntu/windowsmini reconcile。
 3. **§9.13-V Phase A.3-A.6** — Value flip + cascade + merge
