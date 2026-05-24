@@ -902,7 +902,7 @@ pub export fn wasm_func_call(
     const num_locals = sig.params.len + zfunc.locals.len;
     const locals = alloc.alloc(runtime.Value, num_locals) catch return allocTrap(alloc, store, .out_of_memory);
     defer alloc.free(locals);
-    for (locals) |*l| l.* = .{ .bits64 = 0 };
+    for (locals) |*l| l.* = .{ .bits128 = 0 };
     if (args) |a| if (a.data) |dp| {
         for (0..a.size) |idx| locals[idx] = marshalValIn(dp[idx]);
     };

@@ -184,7 +184,7 @@ pub fn setupRuntime(
     const Value = @import("../runtime/value.zig").Value;
     const globals_buf = try allocator.alloc(Value, if (globals_count == 0) 1 else globals_count);
     errdefer allocator.free(globals_buf);
-    @memset(globals_buf, .{ .bits64 = 0 });
+    @memset(globals_buf, .{ .bits128 = 0 });
 
     const funcptrs_buf = try allocator.alloc(u64, if (table_size == 0) 1 else table_size);
     errdefer allocator.free(funcptrs_buf);
