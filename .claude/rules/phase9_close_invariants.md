@@ -8,7 +8,21 @@ paths:
   - "build.zig"
 ---
 
-# Phase 9 close invariants (auto-loaded; non-bypassable until Phase 9 = DONE)
+# Phase 9 close invariants (auto-loaded; permanent regression check post-DONE)
+
+> **Retirement status (2026-05-25)**: Phase 9 = DONE 2026-05-24
+> (Phase Status widget `9 | DONE`; §9.13 hard gate cleared at
+> commit `36c494a3`). Per the §"Stale-ness" section at the
+> bottom of this file, this rule's "non-bypassable until Phase 9
+> = DONE" framing is satisfied. The rule body is **retained as
+> informational reference** + the `scripts/check_phase9_close
+> _invariants.sh --gate` invariant set is **retained as a
+> permanent regression check** (if any future commit
+> re-introduces a SKIP-WIN64-* arm / removes a facade type /
+> removes the wast_runtime_runner smoke from test-all, the
+> script FAILs). Auto-load remains for the paths listed in
+> frontmatter so the regression check is salient when those
+> files are edited.
 
 Auto-loaded when editing ROADMAP / handover / debt / spec runner /
 zwasm.zig facade / build.zig. Codifies the **honest-accounting**

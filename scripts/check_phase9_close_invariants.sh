@@ -148,10 +148,11 @@ mp=.dev/phase9_close_master.md
 if [ ! -f "$mp" ]; then
   fail "I7: $mp not found"
 else
-  if grep -qE '\*\*Doc-state\*\*: ACTIVE' "$mp"; then
-    ok "I7: master plan Doc-state: ACTIVE"
+  if grep -qE '\*\*Doc-state\*\*: (ACTIVE|ARCHIVED-IN-PLACE)' "$mp"; then
+    state=$(grep -oE '\*\*Doc-state\*\*: (ACTIVE|ARCHIVED-IN-PLACE)' "$mp" | head -1 | sed 's/.*: //')
+    ok "I7: master plan Doc-state: $state"
   else
-    fail "I7: master plan does not declare Doc-state: ACTIVE"
+    fail "I7: master plan does not declare Doc-state: ACTIVE | ARCHIVED-IN-PLACE"
   fi
 fi
 ho=.dev/handover.md
