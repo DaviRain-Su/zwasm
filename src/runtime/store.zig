@@ -70,6 +70,19 @@ pub const Store = struct {
     /// NOT copy them. Walked + freed (the hashmap itself) by
     /// `wasm_store_delete`.
     instances: std.StringHashMapUnmanaged(*anyopaque) = .empty,
+    /// Per-Store live c_api Instance back-registry (D-174 defensive
+    /// fix). Distinct from `instances` (host-import alias registry)
+    /// and `zombies` (already-deinited instances kept for cross-
+    /// module funcref survival). Every successful `wasm_instance_new`
+    /// appends its handle; `wasm_instance_delete` swap-removes.
+    /// `wasm_store_delete` walks this list to cascade-cleanup any
+    /// instance still alive at store-teardown time — without this,
+    /// reverse-order delete (`wasm_store_delete(s)` before
+    /// `wasm_instance_delete(inst)`) UAFs on the freed Store via
+    /// `inst.store.engine` deref. Stored as `*anyopaque` to avoid the
+    /// `store.zig` ↔ `api/instance.zig` circular import. See
+    /// `.dev/c_api_instance_audit_2026-05-24.md` §3 C3.
+    live_instances: std.ArrayList(*anyopaque) = .empty,
 
     /// Register an instance under a host-import alias. The `name`
     /// bytes are caller-owned (NOT copied). Errors only on OOM in

@@ -256,6 +256,31 @@ pub export fn wasm_store_delete(s: ?*Store) callconv(.c) void {
     const handle = s orelse return;
     const engine = handle.engine orelse return; // dangling — leak rather than crash
     const alloc = engineAllocator(engine);
+    // D-174: cascade-cleanup any c_api Instance handles still
+    // registered as live at store-teardown time. Each handle's
+    // runtime + arena get parked as zombies (reaped in the next
+    // loop), and the Instance struct itself is freed. After the
+    // cascade, `inst.store` pointers in any caller-held handle
+    // are stale, but the handles themselves are freed — calling
+    // wasm_instance_delete on them post-cascade is UB by C-API
+    // contract (use-after-free of caller-owned handle pointer).
+    for (handle.live_instances.items) |inst_opaque| {
+        const inst: *Instance = @ptrCast(@alignCast(inst_opaque));
+        if (inst.runtime) |rt| {
+            if (inst.arena) |arena| {
+                // EXEMPT-FALLBACK: D-174 — parkAsZombie OOM at store-teardown accepts arena leak over UAF.
+                parkAsZombie(alloc, handle, rt, arena) catch {};
+                inst.arena = null;
+            } else {
+                rt.deinit();
+                alloc.destroy(rt);
+            }
+        }
+        inst.funcs_storage = &.{};
+        inst.func_ptrs_storage = &.{};
+        alloc.destroy(inst);
+    }
+    handle.live_instances.deinit(alloc);
     // Reap zombies first: each one's runtime + arena outlived the
     // instance handle so cross-module funcrefs into it stayed
     // valid; with the store going away, no foreign reference
@@ -600,6 +625,15 @@ pub export fn wasm_instance_new(
         return null;
     };
 
+    // D-174 defensive fix: register inst in the store's live-instance
+    // list so wasm_store_delete can cascade-cleanup on reverse-order
+    // teardown. If the append OOMs the inst stays out of the cascade
+    // list — instance→store teardown order still works (the normal
+    // path); reverse-order would UAF as before. Accept the OOM-degrades-
+    // to-pre-D-174-behaviour rather than complicate the success path.
+    // EXEMPT-FALLBACK: D-174 — live_instances append OOM degrades to pre-fix behaviour; full ENOMEM propagation would require redesigning wasm_instance_new's allocator contract.
+    store.live_instances.append(alloc, @ptrCast(inst)) catch {};
+
     instantiate.instantiateRuntime(bytes, inst, inst_rt, bindings) catch {
         // Per ADR-0014 §2.1 / 6.K.2 sub-change 4: park the failed
         // instance's runtime + arena on the store's zombie list.
@@ -627,10 +661,28 @@ pub export fn wasm_instance_new(
         // outlived it via the zombie list.
         inst.funcs_storage = &.{};
         inst.func_ptrs_storage = &.{};
+        // D-174: live_instances may carry this inst (registered above
+        // before instantiateRuntime). Drop the back-registry entry so
+        // the cascade in wasm_store_delete doesn't double-free.
+        removeFromLiveInstances(store, inst);
         alloc.destroy(inst);
         return null;
     };
     return inst;
+}
+
+/// D-174: linear-scan + swap-remove this inst from store.live_instances.
+/// No-op when inst isn't registered (the OOM-during-append path leaves
+/// inst out of the list but otherwise live). Cheap by construction —
+/// typical workloads have ≤ tens of instances per store.
+fn removeFromLiveInstances(store: *Store, inst: *Instance) void {
+    const inst_opaque: *anyopaque = @ptrCast(inst);
+    for (store.live_instances.items, 0..) |item, idx| {
+        if (item == inst_opaque) {
+            _ = store.live_instances.swapRemove(idx);
+            return;
+        }
+    }
 }
 
 /// `wasm_instance_delete(*Instance)` — release the C-side
@@ -647,6 +699,10 @@ pub export fn wasm_instance_delete(i: ?*Instance) callconv(.c) void {
     const handle = i orelse return;
     const store = handle.store orelse return;
     const alloc = storeAllocator(store) orelse return;
+    // D-174: drop the live-instance registry entry before parking +
+    // free so wasm_store_delete doesn't try to cascade-cleanup an
+    // already-freed handle.
+    removeFromLiveInstances(store, handle);
     if (handle.runtime) |rt| {
         if (handle.arena) |arena| {
             // Park instead of free. If parkAsZombie OOMs we accept
@@ -1832,6 +1888,35 @@ test "wasm 2.0 c_api zombie lifecycle: B holds funcref into A after wasm_instanc
     const trap = wasm_func_call(main_b, &av, &rv);
     try testing.expect(trap == null);
     try testing.expectEqual(@as(i32, 42), rd[0].of.i32);
+}
+
+test "wasm 2.0 c_api cross-module Store binding: wasm_store_delete cascades over live instance" {
+    // D-139 gap C3 per .dev/c_api_instance_audit_2026-05-24.md §3.
+    // Validates D-174 cascade fix: reverse-order delete
+    // (wasm_store_delete BEFORE wasm_instance_delete) must safely
+    // cascade-cleanup the live instance via store.live_instances,
+    // not UAF on inst.store.engine deref.
+    const e = wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer wasm_engine_delete(e);
+    const s = wasm_store_new(e) orelse return error.StoreAllocFailed;
+
+    var bytes = minimal_wasm;
+    const bv: ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    const inst = wasm_instance_new(s, m, null, null) orelse return error.InstanceAllocFailed;
+    // Sanity: inst was registered in s.live_instances at creation.
+    try testing.expect(s.live_instances.items.len == 1);
+    _ = inst; // intentionally not deleted; the cascade handles it.
+
+    // Delete module first (module's lifetime depends on store).
+    wasm_module_delete(m);
+
+    // Reverse-order: wasm_store_delete BEFORE any wasm_instance_delete.
+    // The cascade walks s.live_instances, parks each inst's runtime +
+    // arena as zombie, then reaps the zombies + frees the store. No
+    // UAF on caller's `inst` pointer (it's freed during cascade; we
+    // don't touch it after).
+    wasm_store_delete(s);
 }
 
 test "wasm 2.0 c_api cross-module Store binding: engine-allocator survives store deinit; new store on same engine works" {
