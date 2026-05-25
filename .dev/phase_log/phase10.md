@@ -280,6 +280,28 @@ architectural-typed work).
 
 ### Sub-chunks (commit-time order)
 
+- **10.R-2** — `br_on_null` impl (`86f37b3a`). Second op in
+  10.R typed-function-references family. lower.zig 0xD4 + uleb
+  labelidx → emit `.br_on_null` (mirror of `br_if`'s
+  `emitUlebPayload` shape). validator.zig 0xD4 → new
+  `opBrOnNull`: pop reftype (polymorphic funcref/externref
+  /.bot); resolve label l; pop label_types from stack (branch
+  consumes); push label_types + reftype back (fall-through
+  preserves both). Stack pre `[t1*, reftype]` → post (fall)
+  same; branch destination expects `[t1*]`. Interp handler
+  added to `function_references.zig::register`: pop reftype;
+  if non-null push back + return (no branch); if null →
+  re-derive branch mechanics locally (label_len/labelAt/
+  popLabel + stack restore + pc jump). The ~25 LOC duplication
+  vs `interp/mvp.zig::doBranch` is intentional — `instruction/`
+  is Zone 1 and `interp/` is Zone 2 (`.claude/rules/zone_deps.md`
+  forbids upward import); future refactor could promote
+  doBranch to `runtime/frame.zig` to dedupe. 3 new tests:
+  register slot for br_on_null; non-null fall-through (ref
+  preserved on top, pc unchanged); null branch (ref consumed,
+  pc jumps to label.target_pc, stack restored to label.height).
+  Mac `test-all` GREEN; lint + zone + fs gates exit 0.
+
 - **10.R-1** — `ref.as_non_null` impl (`fe97f615`). Opens
   10.R with the simplest of the 5 ops. `Trap.NullReference`
   variant added to runtime/trap.zig (spec maps "null
