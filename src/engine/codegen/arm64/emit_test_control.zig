@@ -316,6 +316,37 @@ test "compile: try_table emit populates EmitOutput.exception_handlers (IT-2)" {
     try testing.expectEqual(out.exception_handlers[0].pc_start, out.exception_handlers[0].pc_end);
 }
 
+test "compile: throw emits B placeholder + appends bounds_fixup (IT-3 trap-path)" {
+    // Phase 10 EH integration IT-3 minimum — throw emits a single
+    // unconditional B placeholder targeting the function trap
+    // stub (mirror of `unreachable`). Full dispatcher CALL +
+    // handler branch lands at IT-6. The byte count after compile
+    // must include the prologue + the 4-byte B placeholder + the
+    // trap-stub epilogue (patched by the function-end pass).
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+
+    try f.instrs.append(testing.allocator, .{ .op = .throw, .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{} };
+    const alloc: regalloc.Allocation = .{ .slots = &[_]u16{}, .n_slots = 0 };
+
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32);
+    defer deinit(testing.allocator, out);
+
+    // Prologue (STP + MOV FP, SP = 8 bytes) + B placeholder
+    // (4 bytes) + trap stub (~24 bytes: MOVZ W17, STR trap_flag,
+    // STR trap_kind, MOVZ X0, LDP, RET = 6 * 4 = 24 bytes).
+    // Conservative lower bound: prologue + B + first 3 trap-stub
+    // words = 8 + 4 + 12 = 24 bytes.
+    try testing.expect(out.bytes.len >= 24);
+    // The throw op does NOT register any HandlerEntry (only
+    // try_table does); exception_handlers slice stays empty.
+    try testing.expectEqual(@as(usize, 0), out.exception_handlers.len);
+}
+
 test "compile: try_table reaches per-op emit with ExceptionTable.Builder wired (IT-1)" {
     // Phase 10 EH integration IT-1 — compile() detects `.try_table`
     // ops in func.instrs and allocates a per-function

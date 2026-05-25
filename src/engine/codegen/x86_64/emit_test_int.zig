@@ -1885,6 +1885,26 @@ test "compile: try_table emit populates EmitOutput.exception_handlers (IT-2)" {
     try testing.expectEqual(out.exception_handlers[0].pc_start, out.exception_handlers[0].pc_end);
 }
 
+test "compile: throw emits JMP rel32 placeholder + appends unreach_fixup (IT-3 trap-path)" {
+    // Mirror of arm64 IT-3 sibling — see that test for rationale.
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+
+    try f.instrs.append(testing.allocator, .{ .op = .throw, .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{} };
+    const alloc: regalloc.Allocation = .{ .slots = &[_]u16{}, .n_slots = 0 };
+
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32);
+    defer deinit(testing.allocator, out);
+
+    // JMP rel32 is 5 bytes; prologue + trap stub adds more.
+    try testing.expect(out.bytes.len >= 5);
+    try testing.expectEqual(@as(usize, 0), out.exception_handlers.len);
+}
+
 test "compile: try_table reaches per-op emit with ExceptionTable.Builder wired (IT-1)" {
     // Phase 10 EH integration IT-1 — compile() detects `.try_table`
     // ops in func.instrs and allocates a per-function

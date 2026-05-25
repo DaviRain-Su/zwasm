@@ -810,12 +810,15 @@ const x86_64_i64_extend8_s = @import("x86_64/ops/wasm_2_0/i64_extend8_s.zig");
 const x86_64_i64_extend16_s = @import("x86_64/ops/wasm_2_0/i64_extend16_s.zig");
 const x86_64_i64_extend32_s = @import("x86_64/ops/wasm_2_0/i64_extend32_s.zig");
 
-// Wasm 3.0 EH (ADR-0114) — IT-1 routes try_table through the
-// per-op file so the stub's `exception_table_builder` invariant
-// assert exercises the compile() wiring. throw / throw_ref join
-// at IT-3 when their bodies materialize.
+// Wasm 3.0 EH (ADR-0114) — IT-1 routed try_table; IT-3 adds
+// throw / throw_ref. arm64 throw / throw_ref dispatch INLINE
+// in arm64/emit.zig (NOT in collected_arm64_ops) because the
+// per-op file cannot set the legacy `dead_code` local; x86_64
+// per-op file has ctx.dead_code and routes here.
 const arm64_try_table = @import("arm64/ops/wasm_3_0/try_table.zig");
 const x86_64_try_table = @import("x86_64/ops/wasm_3_0/try_table.zig");
+const x86_64_throw = @import("x86_64/ops/wasm_3_0/throw.zig");
+const x86_64_throw_ref = @import("x86_64/ops/wasm_3_0/throw_ref.zig");
 
 /// Tuple of all migrated arm64 per-op modules.
 pub const collected_arm64_ops = .{
@@ -1649,6 +1652,10 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_i32x4_trunc_sat_f32x4_s,
     x86_64_i32x4_trunc_sat_f32x4_u,
     // Wasm 3.0 EH (ADR-0114 D2) — IT-1 try_table stub routes here
-    // for its `exception_table_builder` invariant assert.
+    // for its `exception_table_builder` invariant assert. IT-3
+    // adds throw / throw_ref (trap-only path until IT-6 wires
+    // the dispatcher CALL).
     x86_64_try_table,
+    x86_64_throw,
+    x86_64_throw_ref,
 };

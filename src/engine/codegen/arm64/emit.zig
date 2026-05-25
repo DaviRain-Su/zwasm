@@ -61,6 +61,8 @@ const computeLocalLayout = setup.computeLocalLayout;
 const LocalLayout = setup.LocalLayout;
 const jit_abi = @import("../shared/jit_abi.zig");
 const exception_table = @import("../shared/exception_table.zig");
+const op_throw = @import("ops/wasm_3_0/throw.zig");
+const op_throw_ref = @import("ops/wasm_3_0/throw_ref.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
 const op_const = @import("op_const.zig");
@@ -1131,6 +1133,21 @@ pub fn compile(
             .loop => try op_control.emitLoop(&ctx, &ins),
             .br => {
                 try op_control.emitBr(&ctx, &ins);
+                dead_code = true;
+            },
+            // IT-3 minimum — throw / throw_ref dispatched here
+            // (rather than via dispatch_collector) so the local
+            // `dead_code` can be set; arm64 EmitCtx lacks the
+            // x86_64-style `dead_code: *bool` ctx field. Per-op
+            // bodies emit a B-placeholder targeting the trap stub
+            // (mirror of unreachable). Full dispatcher CALL +
+            // handler dispatch lands at IT-6.
+            .throw => {
+                try op_throw.emit(&ctx, &ins);
+                dead_code = true;
+            },
+            .throw_ref => {
+                try op_throw_ref.emit(&ctx, &ins);
                 dead_code = true;
             },
             .call_indirect => try op_call.emitCallIndirect(&ctx, &ins),

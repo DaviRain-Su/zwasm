@@ -6,13 +6,18 @@
 //! re-enter the dispatcher (same shape as throw). Per
 //! ADR-0114 D6.
 //!
-//! Stub: emit returns `UnsupportedOp`. Real body lands at
-//! 10.E-codegen-4c.
+//! ## IT-3 minimum scope (current shape)
+//!
+//! Same as `throw.zig` sibling — dispatcher CALL + .handler
+//! branch defers to IT-6; current emit is a B-placeholder to
+//! the function's trap stub.
 //!
 //! Zone 2 (`src/engine/codegen/arm64/ops/`).
 
 const meta = @import("../../../../../instruction/wasm_3_0/throw_ref.zig");
 const ctx_mod = @import("../../ctx.zig");
+const gpr = @import("../../gpr.zig");
+const inst = @import("../../inst.zig");
 const zir = @import("../../../../../ir/zir.zig");
 
 pub const op_tag = meta.op_tag;
@@ -25,7 +30,9 @@ pub const n_successor_edges: u8 = 0;
 pub const is_safepoint: bool = false;
 
 pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
-    _ = ctx;
     _ = ins;
-    return error.UnsupportedOp;
+    // IT-3 minimum — see throw.zig sibling.
+    const fixup_at: u32 = @intCast(ctx.buf.items.len);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encB(0));
+    try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
 }
