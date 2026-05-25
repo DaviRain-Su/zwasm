@@ -101,7 +101,44 @@ pub const Value = extern union {
         if (v.ref == null_ref) return null;
         return @ptrFromInt(v.ref);
     }
+
+    /// Encode an i32 as an i31-tagged GC reference (Wasm 3.0 GC
+    /// proposal §3.x). Stores the i31-packed payload in the low
+    /// 32 bits of the `ref` slot per ADR-0116 D4; the high 32 bits
+    /// are zeroed. Spec `ref.i31` truncates wider-than-31-bit
+    /// inputs silently — `i32ToI31Truncate` mirrors that.
+    ///
+    /// Phase 10 punts on the dedicated `anyref: u32` arm (ADR-0116
+    /// D4) until the GC heap impl needs to disambiguate i31 from
+    /// heap-pointer encodings; the ref slot is sufficient while
+    /// no heap-ref Value exists.
+    pub fn fromI31Truncate(x: i32) Value {
+        return .{ .ref = @as(u64, i31_pack.i32ToI31Truncate(x)) };
+    }
+
+    /// Decode an i31-tagged ref to a signed i32 (Wasm 3.0
+    /// `i31.get_s`). Caller MUST verify `isI31Ref(v)` first; the
+    /// runtime handler reads the low 32 bits of the ref slot and
+    /// passes them through `i31ToI32Signed`.
+    pub fn refAsI31Signed(v: Value) i32 {
+        return i31_pack.i31ToI32Signed(@truncate(v.ref));
+    }
+
+    /// Decode an i31-tagged ref to an unsigned i32 (Wasm 3.0
+    /// `i31.get_u`). High bit zero-extends.
+    pub fn refAsI31Unsigned(v: Value) u32 {
+        return i31_pack.i31ToI32Unsigned(@truncate(v.ref));
+    }
+
+    /// Discriminate an i31 ref from a heap-ref / null. Per
+    /// ADR-0116 D4: low bit `1` marks an i31; low bit `0` marks
+    /// heap pointer or null.
+    pub fn isI31Ref(v: Value) bool {
+        return i31_pack.isI31(@truncate(v.ref));
+    }
 };
+
+const i31_pack = @import("../feature/gc/i31.zig");
 
 comptime {
     // Locks in the platform contract above: any future change to

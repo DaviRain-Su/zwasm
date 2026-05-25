@@ -487,6 +487,11 @@ pub const Lowerer = struct {
             // Wasm 2.0+ prefix opcodes (sat-trunc / bulk-memory / ...)
             0xFC => try self.emitPrefixFC(),
 
+            // Wasm 3.0 GC prefix (struct / array / ref.test / ref.cast /
+            // i31 / br_on_cast ...). Currently dispatches only the i31
+            // sub-trio; remaining GC ops light up per 10.G sub-chunks.
+            0xFB => try self.emitPrefixFB(),
+
             // Wasm SIMD-128 prefix (§9.9 per ADR-0041).
             // Sub-opcode is uleb32; emit lands the ZirOp + immediate
             // payload mirroring the validator's prefix-0xFD catalogue
@@ -512,6 +517,20 @@ pub const Lowerer = struct {
     /// Sub-opcodes 0..7 are saturating truncations (§9.2 / 2.3
     /// chunk 2); 10/11 are memory.copy/memory.fill (chunk 4); other
     /// sub-opcodes land in later chunks.
+    /// Wasm 3.0 GC prefix (0xFB). Sub-opcodes encode struct / array /
+    /// ref.test / ref.cast / i31 / br_on_cast etc.; this dispatcher
+    /// currently handles only the i31 trio. Other sub-opcodes land
+    /// per 10.G heap / struct / array sub-chunks.
+    fn emitPrefixFB(self: *Lowerer) Error!void {
+        const sub = try leb128.readUleb128(u32, self.body, &self.pos);
+        switch (sub) {
+            28 => try self.emit(.@"ref.i31", 0, 0),
+            29 => try self.emit(.@"i31.get_s", 0, 0),
+            30 => try self.emit(.@"i31.get_u", 0, 0),
+            else => return Error.NotImplemented,
+        }
+    }
+
     fn emitPrefixFC(self: *Lowerer) Error!void {
         const sub = try leb128.readUleb128(u32, self.body, &self.pos);
         switch (sub) {

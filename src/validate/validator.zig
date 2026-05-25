@@ -681,6 +681,9 @@ pub const Validator = struct {
             // Wasm 2.0 prefix opcodes (§9.2 / 2.3 chunk 2 onward)
             0xFC => try self.dispatchPrefixFC(),
 
+            // Wasm 3.0 GC prefix.
+            0xFB => try self.dispatchPrefixFB(),
+
             // Wasm SIMD-128 prefix (§9.9 / Phase 9 per ADR-0041).
             // The validator dispatches inline (mirroring 0xFC's
             // shape) per ADR-0041 Revision 2 — the central
@@ -895,6 +898,43 @@ pub const Validator = struct {
     /// are memory.copy/memory.fill (chunk 4); 8/9/12+ land in later
     /// chunks (data section / table section dependencies).
     /// Encoding: 0xFC <uleb32 sub-opcode>.
+    /// Wasm 3.0 GC prefix (0xFB). Currently dispatches only the
+    /// i31 sub-trio (28 / 29 / 30); other GC sub-opcodes light up
+    /// per 10.G heap / struct / array sub-chunks.
+    fn dispatchPrefixFB(self: *Validator) Error!void {
+        const sub = try leb128.readUleb128(u32, self.body, &self.pos);
+        switch (sub) {
+            28 => try self.opRefI31(),
+            29, 30 => try self.opI31Get(), // .get_s / .get_u share validator shape
+            else => return Error.NotImplemented,
+        }
+    }
+
+    /// Wasm spec 3.0 §3.x (GC) — `ref.i31`: pop i32, push an
+    /// i31-tagged reftype. v2.0 reftype catalogue can't express
+    /// the (ref i31) precision; we push `.funcref` as the
+    /// validator stand-in (same caveat as 10.R-1..5 typed-ref
+    /// catalogue limitation — typed precision deferred to 10.G
+    /// typed-ref catalogue extension).
+    fn opRefI31(self: *Validator) Error!void {
+        try self.popExpect(.i32);
+        try self.pushType(.funcref);
+    }
+
+    /// Wasm spec 3.0 §3.x (GC) — `i31.get_s` / `i31.get_u`: pop a
+    /// reftype (must be an i31 ref at runtime; runtime checks
+    /// `isI31Ref` and traps otherwise), push i32. Validator
+    /// shape identical for both ops (sign vs unsign disambiguation
+    /// is runtime-side).
+    fn opI31Get(self: *Validator) Error!void {
+        const top = try self.popAny();
+        switch (top) {
+            .bot => {},
+            .known => |t| if (t != .funcref and t != .externref) return Error.StackTypeMismatch,
+        }
+        try self.pushType(.i32);
+    }
+
     fn dispatchPrefixFC(self: *Validator) Error!void {
         const sub = try leb128.readUleb128(u32, self.body, &self.pos);
         switch (sub) {
