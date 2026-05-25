@@ -571,6 +571,41 @@ Design source: ADR-0114 + ADR-0117 (cross-subsystem invariants).
 
 **SHA pointer**: backfilled at Phase 10 close.
 
+- **10.E-5d** — cross-frame throw unwind (`82be1d75`).
+  `Runtime` gains `PendingException { tag_idx, payload_len,
+  payload: [16]Value }` + `max_exception_payload = 16` constant
+  + `pending_exception: ?PendingException = null` slot. Per
+  ADR-0114 D6 the codegen path uses a thread-local `zwasm_throw`
+  trampoline slot; interp variant lives directly on Runtime
+  (single-threaded per Runtime in v2). `throwOp` writes the
+  popped payload + tag_idx into the slot before walking the
+  local frame's catch vec; on local match clears the slot and
+  succeeds; on no local match leaves the slot set and propagates
+  `Trap.UncaughtException`. `invoke()` (the shared call-machinery
+  helper used by callOp / callIndirectOp / callRefOp) wraps
+  `dispatch.run(callee.instrs)` with a post-popFrame intercept:
+  if `run_err == Trap.UncaughtException` AND
+  `pending_exception != null` AND a caller frame still exists,
+  retry `findAndDispatchCatch` against the caller. On caller-frame
+  match clears the slot and returns success (dispatch resumes at
+  catch's target label in caller's body); otherwise re-raises.
+  Laddering across nested invoke calls keeps the slot set across
+  arbitrary-depth unwind. 2 new mvp_tests: outer
+  `(block (result i32) (block (try_table (catch_all 0))))`
+  wrapping `call inner` where inner throws — outer's catch_all
+  branches to inner-block end (arity=0 to avoid payload-type
+  mismatch with the catch_all variant), then `i32.const 42`
+  fills the outer-block result; verifies operand stack [42]
+  + pending_exception cleared. Negative: no outer try_table →
+  trap propagates with pending_exception surviving so a
+  top-level caller could inspect tag_idx. Mac `test-all` GREEN;
+  lint exit 0. Wasm spec 3.0 §3.3.10.7-8 + §4.5; ADR-0114 D6.
+  This completes the EH interp foundation (throw + catch_ +
+  catch_all + cross-frame). Remaining 10.E work: exnref +
+  catch_ref / catch_all_ref dispatch (10.E-exnref); production
+  Runtime.tag_param_counts wiring (10.E-N-3); regalloc-side
+  codegen impl; spec corpus.
+
 - **10.E-5c** — interp catch_ dispatch with tag-equality +
   payload push (`3cbb12aa`). Bundles 10.E-N-2 (Runtime
   tag_param_counts) since the latter was unobservable
