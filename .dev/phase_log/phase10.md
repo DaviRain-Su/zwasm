@@ -125,6 +125,19 @@ J.1+ gated on execution plan doc)
   `pub const Runtime` → `pub const Engine`. zone_check classifier
   extended `src/zwasm/*` → `lib`. Mac 1812/1826 PASS, I3 18/18,
   ubuntu kicked post-push (`017193bc`)
+- **10.J / J.4** — `src/zwasm/typed_func.zig` + `src/zwasm/memory.zig`
+  new. `TypedFunc(comptime Sig)` uses `@typeInfo(.@"fn")` +
+  `std.meta.ArgsTuple` to derive the call shape; per-scalar marshal
+  helpers cover i32/i64/u32/u64/f32/f64 (NaN bits preserved via
+  `@bitCast`). Multi-result via anonymous-struct return type
+  (`@typeInfo(.@"struct").fields` inline-for walk). `Memory.read /
+  write / slice / size` wrap `rt.memory` little-endian for
+  i8/i16/i32/i64/f32/f64. `Instance.typedFunc(Sig, name)` +
+  `Instance.memory()` added. 4 tests landed: T1.5 add, T1.6 swap
+  multi-result, T1.7 Memory i32 round-trip, T1.8 quiet-NaN bit
+  preservation. Mac 1819/1833 PASS, lint clean, I3 18/18,
+  ubuntu kicked post-push (`995270cf`). Critical-path comptime
+  layer completed in 1 cycle (plan estimated 1-2)
 - **10.J / J.3** — `src/zwasm/instance.zig` new (native `Instance`);
   c_api veneer `Instance` + `valueToVal`/`valFromApi` deleted from
   `src/zwasm.zig`. `Instance.invoke(name, args, results)` resolves

@@ -164,7 +164,7 @@ implementation train starts at J.2.
 | Risk | LOW — Instance is a wrapper over existing `runtime_instance.Instance`; Trap re-export is mechanical |
 | Commit message form | `feat(zwasm,p10): J.3 Instance + untyped invoke + full Trap set per ADR-0109` |
 
-### J.4 — `TypedFunc(comptime Sig)` + multi-result + Memory **(critical path; 1-2 cycles)**
+### J.4 — `TypedFunc(comptime Sig)` + multi-result + Memory **(critical path; 1-2 cycles)** — **CLOSED `995270cf` (1 cycle)**
 
 | Field | Value |
 |---|---|
