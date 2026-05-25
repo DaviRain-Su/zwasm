@@ -15,6 +15,14 @@
 
 const dispatch_table = @import("../../ir/dispatch_table.zig");
 
+// 10.G-i31-helpers: i31 small-integer pack/unpack helpers per
+// ADR-0116 D4. Re-exported here so `zig build test` walks the
+// helper unit tests + the helpers are reachable from the future
+// 0xFB GC-prefix dispatcher + i31 op handlers via
+// `feature.gc.i31_pack`. (`i31` itself is a Zig 0.16 primitive
+// type name; the helper module is `i31_pack` to avoid shadowing.)
+pub const i31_pack = @import("i31.zig");
+
 pub fn register(_: *dispatch_table.DispatchTable) void {
     // Placeholder — feature implementation deferred per ADR-0023.
 }
