@@ -26,6 +26,7 @@ const validator_mod = @import("../validate/validator.zig");
 const FuncType = zir.FuncType;
 const compile_func = @import("codegen/shared/compile.zig");
 const linker = @import("codegen/shared/linker.zig");
+const exception_table_mod = @import("codegen/shared/exception_table.zig");
 const entry = @import("codegen/shared/entry.zig");
 const rv = @import("runner_validate.zig");
 // ADR-0079 Step 1 — setup carve-out (RuntimeOwned + setupRuntime +
@@ -167,6 +168,14 @@ pub const CompiledWasm = struct {
     /// `Runtime.tag_param_counts` after `setup` writes it.
     /// Empty slice when the module has no tag section.
     tag_param_counts: []u32,
+    /// Phase 10.E IT-5 (ADR-0114 D3) — per-Instance JIT exception
+    /// table flattened from per-function `EmitOutput.exception_handlers`
+    /// at compile end. pc_start / pc_end are module-relative
+    /// (= function-local pcs shifted by the linker's func_offsets).
+    /// Consumed by the FP-walk unwinder via
+    /// `ExceptionTable.lookup(absolute_pc - block_addr, throw_tag_idx)`.
+    /// Empty slice when no function contains a try_table.
+    exception_table: exception_table_mod.ExceptionTable,
     arena: std.heap.ArenaAllocator,
 
     pub fn deinit(self: *CompiledWasm, allocator: Allocator) void {
@@ -177,6 +186,7 @@ pub const CompiledWasm = struct {
         allocator.free(self.globals_offsets);
         allocator.free(self.globals_valtypes);
         if (self.tag_param_counts.len > 0) allocator.free(self.tag_param_counts);
+        if (self.exception_table.entries.len > 0) allocator.free(self.exception_table.entries);
         self.module.deinit(allocator);
         self.arena.deinit();
     }

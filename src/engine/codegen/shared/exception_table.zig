@@ -149,6 +149,51 @@ pub const Builder = struct {
     }
 };
 
+/// Phase 10.E IT-5 — collect per-function HandlerEntry slices into
+/// a single per-Instance ExceptionTable.entries. pc_start / pc_end
+/// are shifted by each function's byte offset within the JitBlock
+/// (`func_offsets[num_imports + i]`), making them module-relative —
+/// consistent with the FP-walk unwinder calling
+/// `ExceptionTable.lookup(absolute_pc - block_addr, throw_tag_idx)`.
+/// landing_pad_pc stays as written by the per-arch emit; IT-4 / IT-6
+/// resolution to a module-relative JIT byte offset happens at the
+/// dispatch boundary.
+///
+/// `per_func_handlers[i]` corresponds to the i-th DEFINED function
+/// (wasm idx `num_imports + i`). Empty per-function slices are
+/// skipped; the returned slice's length equals the sum of all
+/// per-function lengths. Returns the empty static slice when total
+/// is zero (no allocation; deinit-side `if (len > 0) free` works).
+pub fn collectModuleTable(
+    allocator: std.mem.Allocator,
+    per_func_handlers: []const []const HandlerEntry,
+    func_offsets: []const u32,
+    num_imports: u32,
+) std.mem.Allocator.Error![]HandlerEntry {
+    var total: usize = 0;
+    for (per_func_handlers) |h| total += h.len;
+    if (total == 0) return &[_]HandlerEntry{};
+
+    var entries = try allocator.alloc(HandlerEntry, total);
+    errdefer allocator.free(entries);
+
+    var write_idx: usize = 0;
+    for (per_func_handlers, 0..) |handlers, i| {
+        const base = func_offsets[num_imports + i];
+        for (handlers) |h| {
+            entries[write_idx] = .{
+                .pc_start = h.pc_start + base,
+                .pc_end = h.pc_end + base,
+                .tag_idx = h.tag_idx,
+                .landing_pad_pc = h.landing_pad_pc,
+                .kind = h.kind,
+            };
+            write_idx += 1;
+        }
+    }
+    return entries;
+}
+
 // ---------------------------------------------------------------------
 // Unit tests — pure-data lookup; no per-arch dependency.
 // ---------------------------------------------------------------------
@@ -296,4 +341,52 @@ test "exception_table: Builder.finalize aliases the appended entries (no copy)" 
     const t = b.finalize();
     try testing.expectEqual(@as(usize, 1), t.entries.len);
     try testing.expectEqual(@as(u32, 50), t.entries[0].landing_pad_pc);
+}
+
+test "collectModuleTable: per-function entries flatten with module-relative pc shift" {
+    // Phase 10.E IT-5 — two defined funcs (wasm-idx 1 + 2) preceded
+    // by one import (wasm-idx 0). fn1 has 1 catch at function-local
+    // [0, 10); fn2 has 2 catches at function-local [0, 5) and
+    // [5, 20). func_offsets places fn1 at byte 0, fn2 at byte 64.
+    // After collection, fn2's pc ranges must be shifted by +64.
+    const fn1_handlers = [_]HandlerEntry{
+        .{ .pc_start = 0, .pc_end = 10, .tag_idx = 3, .landing_pad_pc = 8, .kind = .catch_ },
+    };
+    const fn2_handlers = [_]HandlerEntry{
+        .{ .pc_start = 0, .pc_end = 5, .tag_idx = null, .landing_pad_pc = 4, .kind = .catch_all },
+        .{ .pc_start = 5, .pc_end = 20, .tag_idx = 7, .landing_pad_pc = 18, .kind = .catch_ref },
+    };
+    const per_func: [2][]const HandlerEntry = .{ &fn1_handlers, &fn2_handlers };
+    const func_offsets = [_]u32{ 0xFFFFFFFF, 0, 64 }; // import sentinel + fn1 + fn2
+
+    const entries = try collectModuleTable(testing.allocator, &per_func, &func_offsets, 1);
+    defer testing.allocator.free(entries);
+
+    try testing.expectEqual(@as(usize, 3), entries.len);
+
+    // fn1's catch — base 0, unchanged pcs.
+    try testing.expectEqual(@as(u32, 0), entries[0].pc_start);
+    try testing.expectEqual(@as(u32, 10), entries[0].pc_end);
+    try testing.expectEqual(@as(?u32, 3), entries[0].tag_idx);
+    try testing.expectEqual(CatchKind.catch_, entries[0].kind);
+
+    // fn2's catches — base 64, pc ranges shift by +64.
+    try testing.expectEqual(@as(u32, 64), entries[1].pc_start);
+    try testing.expectEqual(@as(u32, 69), entries[1].pc_end);
+    try testing.expectEqual(@as(?u32, null), entries[1].tag_idx);
+    try testing.expectEqual(CatchKind.catch_all, entries[1].kind);
+
+    try testing.expectEqual(@as(u32, 69), entries[2].pc_start);
+    try testing.expectEqual(@as(u32, 84), entries[2].pc_end);
+    try testing.expectEqual(@as(?u32, 7), entries[2].tag_idx);
+    try testing.expectEqual(CatchKind.catch_ref, entries[2].kind);
+}
+
+test "collectModuleTable: all per-func slices empty → returns static empty slice" {
+    const per_func: [2][]const HandlerEntry = .{ &.{}, &.{} };
+    const func_offsets = [_]u32{ 0, 100 };
+    const entries = try collectModuleTable(testing.allocator, &per_func, &func_offsets, 0);
+    // No allocation when total is zero; caller can pass the slice
+    // through `if (len > 0) free` without UB.
+    try testing.expectEqual(@as(usize, 0), entries.len);
 }

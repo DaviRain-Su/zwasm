@@ -19,6 +19,7 @@ const leb128 = @import("../support/leb128.zig");
 const FuncType = zir.FuncType;
 const compile_func = @import("codegen/shared/compile.zig");
 const linker = @import("codegen/shared/linker.zig");
+const exception_table = @import("codegen/shared/exception_table.zig");
 const rv = @import("runner_validate.zig");
 
 const runner_mod = @import("runner.zig");
@@ -497,6 +498,8 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             .globals_valtypes = elay.valtypes,
             .num_global_imports = num_global_imports_empty,
             .tag_param_counts = empty_tag_param_counts,
+            // No defined functions → no JIT exception entries (IT-5).
+            .exception_table = .{ .entries = &.{} },
             .arena = arena,
         };
     }
@@ -982,6 +985,28 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         }
     }
     const linked = try linker.linkWithThunks(allocator, bodies, num_imports, wrapper_specs_list.items);
+    errdefer {
+        var l = linked;
+        l.deinit(allocator);
+    }
+
+    // Phase 10.E IT-5 — collect per-function HandlerEntry slices
+    // into a single per-Instance ExceptionTable. pc shifts use
+    // `linked.func_offsets` so the resulting pcs are module-
+    // relative (consistent with the FP-walk unwinder's
+    // `absolute_pc - block_addr` lookup key).
+    const per_func_handlers = try allocator.alloc([]const exception_table.HandlerEntry, results.len);
+    defer allocator.free(per_func_handlers);
+    for (results, 0..) |r, i| {
+        per_func_handlers[i] = r.out.exception_handlers;
+    }
+    const exception_entries = try exception_table.collectModuleTable(
+        allocator,
+        per_func_handlers,
+        linked.func_offsets,
+        num_imports,
+    );
+    errdefer if (exception_entries.len > 0) allocator.free(exception_entries);
 
     return .{
         .module = linked,
@@ -993,6 +1018,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         .globals_valtypes = globals_valtypes,
         .num_global_imports = nm_global_imports,
         .tag_param_counts = tag_param_counts,
+        .exception_table = .{ .entries = exception_entries },
         .arena = arena,
     };
 }
