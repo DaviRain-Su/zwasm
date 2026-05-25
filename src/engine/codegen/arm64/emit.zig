@@ -112,6 +112,12 @@ pub const EmitOutput = struct {
     /// per-function slices into the per-Instance ExceptionTable on
     /// CompiledWasm. Empty for functions without try_table.
     exception_handlers: []const exception_table.HandlerEntry = &.{},
+    /// Phase 10.E IT-6 prep — per-function aligned frame size in
+    /// bytes (= prologue's `SUB SP, SP, #N` value). Consumed by
+    /// the linker to populate `CodeMap.Entry.frame_bytes`; the EH
+    /// SP-restore path uses it to recover the handler frame's
+    /// post-prologue SP boundary after `MOV SP, X29`.
+    frame_bytes: u32 = 0,
 };
 
 pub fn deinit(allocator: Allocator, out: EmitOutput) void {
@@ -1583,6 +1589,7 @@ pub fn compile(
         .n_slots = alloc.n_slots,
         .call_fixups = try call_fixups.toOwnedSlice(allocator),
         .exception_handlers = exception_handlers,
+        .frame_bytes = frame_bytes,
     };
 }
 

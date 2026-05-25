@@ -53,6 +53,12 @@ pub const Error = error{
 pub const FuncBody = struct {
     bytes: []const u8,
     call_fixups: []const emit.CallFixup,
+    /// Phase 10.E IT-6 prep — per-function aligned frame size in
+    /// bytes (from `EmitOutput.frame_bytes`). Propagates to
+    /// `CodeMap.Entry.frame_bytes`; the EH SP-restore path
+    /// consumes it. Defaults to 0 for callers that don't set it
+    /// (legacy test fixtures + non-EH paths).
+    frame_bytes: u32 = 0,
 };
 
 /// ADR-0106 cycle 3e Phase 2'g — per-function buffer-write
@@ -332,6 +338,7 @@ pub fn link(allocator: Allocator, func_bodies: []const FuncBody, num_imports: u3
         offsets,
         num_imports,
         @intCast(total_size),
+        func_bodies,
     );
 
     return .{
@@ -346,15 +353,19 @@ pub fn link(allocator: Allocator, func_bodies: []const FuncBody, num_imports: u3
 /// the sum of body lengths (= one-past-end offset of the last
 /// defined function); `block.bytes.len` is page-aligned by
 /// `jit_mem.alloc` and overshoots the actual function range.
+/// `func_bodies` carries the per-function `frame_bytes` populated
+/// by IT-6 prep.
 fn buildCodeMapEntries(
     allocator: Allocator,
     block: jit_mem.JitBlock,
     offsets: []const u32,
     num_imports: u32,
     code_total: u32,
+    func_bodies: []const FuncBody,
 ) Allocator.Error![]code_map.Entry {
     const defined_count = offsets.len - num_imports;
     if (defined_count == 0) return &[_]code_map.Entry{};
+    std.debug.assert(func_bodies.len == defined_count);
 
     var entries = try allocator.alloc(code_map.Entry, defined_count);
     errdefer allocator.free(entries);
@@ -372,7 +383,7 @@ fn buildCodeMapEntries(
             .start_addr = block_addr + off,
             .len = next_off - off,
             .func_idx = wasm_idx,
-            .frame_bytes = 0, // populated by IT-6 SP-restore path
+            .frame_bytes = func_bodies[i].frame_bytes,
         };
     }
     return entries;
@@ -481,6 +492,7 @@ pub fn linkWithThunks(
         offsets_copy,
         num_imports,
         @intCast(body_size),
+        func_bodies,
     );
     errdefer allocator.free(code_map_entries);
 
@@ -702,4 +714,25 @@ test "link: import-only module — code_map empty" {
     var module = try link(testing.allocator, &.{}, 2);
     defer module.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 0), module.codeMap().entries.len);
+}
+
+test "link: frame_bytes round-trips from FuncBody to CodeMap.Entry (IT-6 prep)" {
+    // Phase 10.E IT-6 preparatory threading — `EmitOutput.frame_bytes`
+    // flows through `FuncBody.frame_bytes` into
+    // `CodeMap.Entry.frame_bytes`. The EH SP-restore path
+    // (sp_restore.emitSpRestoreFull) reads this to recover the
+    // handler frame's post-prologue SP boundary.
+    var body0_bytes = [_]u8{0} ** 16;
+    var body1_bytes = [_]u8{0} ** 32;
+    const bodies = [_]FuncBody{
+        .{ .bytes = body0_bytes[0..], .call_fixups = &.{}, .frame_bytes = 48 },
+        .{ .bytes = body1_bytes[0..], .call_fixups = &.{}, .frame_bytes = 96 },
+    };
+    var module = try link(testing.allocator, &bodies, 0);
+    defer module.deinit(testing.allocator);
+
+    const cmap = module.codeMap();
+    try testing.expectEqual(@as(usize, 2), cmap.entries.len);
+    try testing.expectEqual(@as(u32, 48), cmap.entries[0].frame_bytes);
+    try testing.expectEqual(@as(u32, 96), cmap.entries[1].frame_bytes);
 }

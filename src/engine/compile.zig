@@ -970,7 +970,11 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     const bodies = try allocator.alloc(linker.FuncBody, results.len);
     defer allocator.free(bodies);
     for (results, 0..) |r, i| {
-        bodies[i] = .{ .bytes = r.out.bytes, .call_fixups = r.out.call_fixups };
+        bodies[i] = .{
+            .bytes = r.out.bytes,
+            .call_fixups = r.out.call_fixups,
+            .frame_bytes = r.out.frame_bytes,
+        };
     }
     var wrapper_specs_list: std.ArrayList(linker.WrapperSpec) = .empty;
     defer wrapper_specs_list.deinit(allocator);

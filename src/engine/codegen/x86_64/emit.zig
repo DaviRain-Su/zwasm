@@ -1230,6 +1230,7 @@ pub fn compile(
         .n_slots = alloc.n_slots,
         .call_fixups = try call_fixups.toOwnedSlice(allocator),
         .exception_handlers = exception_handlers,
+        .frame_bytes = frame_bytes,
     };
 }
 
