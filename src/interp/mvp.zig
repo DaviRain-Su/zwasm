@@ -551,26 +551,51 @@ pub fn invoke(rt: *Runtime, table: *const DispatchTable, callee: *const zir.ZirF
     try run_err;
 }
 
-/// Wasm 3.0 EH `throw tag_idx` (§3.3.10.7 / §4.5). Walks the
-/// current frame's label stack inward-out looking for a
-/// `try_table` whose catch-vec contains a matching clause. On
-/// match dispatches like `br` to the catch's `label_idx` target
-/// (which is measured from try_table's lexical position, i.e.
-/// excluding the try_table label itself — see
-/// `Validator.validateCatchVec`).
+/// Wasm 3.0 EH `throw tag_idx` (§3.3.10.7 / §4.5). Pops the
+/// tag's params (per `Runtime.tag_param_counts[tag_idx]`) into
+/// a stack-local stash, then walks the current frame's label
+/// stack inward-out looking for a `try_table` whose catch-vec
+/// contains a matching clause. On match dispatches like `br`
+/// to the catch's `label_idx` target (which is measured from
+/// try_table's lexical position, i.e. excluding the try_table
+/// label itself — see `Validator.validateCatchVec`).
 ///
-/// Currently only the `catch_all` (0x02) flavor matches; `catch_`
-/// (0x00) and `catch_ref` (0x01) tag-equality matching needs
-/// `Module.tags` wiring (10.E-N) to know each tag's param count
-/// for stack marshalling, and `catch_all_ref` (0x03) needs
-/// exnref support (10.E-N). When no matching catch is found in
-/// the current frame, propagates `Trap.UncaughtException` (cross-
-/// frame unwind lands at 10.E-5c).
+/// Catch flavor coverage:
+///   - `catch_` (0x00): match if `entry.tag_idx == thrown_tag_idx`;
+///     restore operand stack to target label's height, push the
+///     stashed payload (= the tag's params in spec order).
+///   - `catch_all` (0x02): always matches; payload is discarded
+///     (stack restores to target label's height).
+///   - `catch_ref` (0x01) / `catch_all_ref` (0x03): deferred —
+///     exnref support lands at 10.E-N alongside the heap-typed
+///     exception value (would push an `exnref` payload in
+///     addition to / instead of the tag params).
+///
+/// When no matching catch is found in the current frame, the
+/// stashed payload is dropped and `Trap.UncaughtException`
+/// propagates (cross-frame unwind lands at 10.E-5d).
 fn throwOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
     const frame = rt.currentFrame();
     const thrown_tag_idx: u32 = @intCast(instr.payload);
-    if (try findAndDispatchCatch(rt, frame, thrown_tag_idx)) return;
+
+    // Pop the tag's params per the pre-resolved count. Safe
+    // fallback: when `tag_param_counts` is empty or the tag_idx
+    // is past the populated length, treat as 0 params.
+    const param_count: u32 = if (thrown_tag_idx < rt.tag_param_counts.len)
+        rt.tag_param_counts[thrown_tag_idx]
+    else
+        0;
+    if (param_count > max_block_arity) return Trap.Unreachable;
+    var payload_buf: [max_block_arity]Value = undefined;
+    var i: u32 = param_count;
+    while (i > 0) {
+        i -= 1;
+        payload_buf[i] = rt.popOperand();
+    }
+    const payload = payload_buf[0..param_count];
+
+    if (try findAndDispatchCatch(rt, frame, thrown_tag_idx, payload)) return;
     return Trap.UncaughtException;
 }
 
@@ -582,23 +607,31 @@ fn throwRefOp(_: *InterpCtx, _: *const ZirInstr) anyerror!void {
     return Trap.UncaughtException;
 }
 
-/// 10.E-5b catch dispatch. Walks the frame's label stack inward-
-/// out (depth 0 = innermost). For each label whose owning
-/// BlockInfo is a `.try_table`, scans the matching `LandingPad`
-/// in `func.eh_landing_pads` for the first satisfying catch
-/// clause (currently only `catch_all`). On match: routes through
-/// `doBranch` with depth `(try_table_depth + 1 + catch.label_idx)`
-/// — the `+ 1` skips past the try_table's own label, per the
-/// validator's catch-label numbering (catches are validated with
-/// `control_len` pre-try_table-pushFrame, so `label_idx=0` from
-/// the catch's perspective is the label just outside the
-/// try_table).
+/// 10.E-5b/c catch dispatch. Walks the frame's label stack
+/// inward-out (depth 0 = innermost). For each label whose
+/// owning BlockInfo is a `.try_table`, scans the matching
+/// `LandingPad` in `func.eh_landing_pads` for the first
+/// satisfying catch clause.
+///
+///   - `catch_all` (no payload push): routes through `doBranch`
+///     with depth `(try_table_depth + 1 + catch.label_idx)`.
+///     The `+ 1` skips the try_table's own label per the
+///     validator's catch-label numbering.
+///   - `catch_` (push payload): manual unwind — pop labels down
+///     to the target depth, set `operand_len = target.height`,
+///     then push each payload Value in spec order. doBranch
+///     can't be reused here because its `restoreToLabel` uses
+///     the target's `branch_arity` (block result count) rather
+///     than the tag's param count.
+///
+/// `catch_ref` / `catch_all_ref` are deferred to the exnref
+/// implementation (10.E-N follow-up).
 fn findAndDispatchCatch(
     rt: *Runtime,
     frame: *runtime.Frame,
     thrown_tag_idx: u32,
+    payload: []const Value,
 ) Trap!bool {
-    _ = thrown_tag_idx; // unused until catch_ / catch_ref support lands at 10.E-N
     const fnz = frame.func orelse return false;
     const landing_pads = fnz.eh_landing_pads orelse return false;
     const catch_entries = fnz.eh_catch_entries orelse &[_]zir.CatchEntry{};
@@ -618,16 +651,37 @@ fn findAndDispatchCatch(
                     try doBranch(rt, frame, depth + 1 + entry.label_idx);
                     return true;
                 },
-                .catch_, .catch_ref, .catch_all_ref => {
-                    // Deferred: catch_ / catch_ref need Module.tags
-                    // wiring (10.E-N) for tag-equality + param
-                    // marshalling; catch_all_ref needs exnref
-                    // support (10.E-N).
+                .catch_ => {
+                    if (entry.tag_idx != thrown_tag_idx) continue;
+                    try dispatchCatchWithPayload(rt, frame, depth + 1 + entry.label_idx, payload);
+                    return true;
+                },
+                .catch_ref, .catch_all_ref => {
+                    // Deferred: needs exnref support (10.E-N follow-up).
                 },
             }
         }
     }
     return false;
+}
+
+/// Unwind to `target_depth` and push `payload` values onto the
+/// operand stack at the target label's height. Used by catch_
+/// dispatch where `payload` carries the thrown tag's params (the
+/// catch label's stack signature expects exactly these values).
+inline fn dispatchCatchWithPayload(
+    rt: *Runtime,
+    frame: *runtime.Frame,
+    target_depth: u32,
+    payload: []const Value,
+) Trap!void {
+    if (target_depth >= frame.label_len) return Trap.Unreachable;
+    const target = frame.labelAt(target_depth);
+    var k: u32 = 0;
+    while (k <= target_depth) : (k += 1) _ = frame.popLabel();
+    rt.operand_len = target.height;
+    for (payload) |v| try rt.pushOperand(v);
+    frame.pc = target.target_pc;
 }
 
 fn findLandingPad(pads: []const zir.LandingPad, block_idx: u32) ?zir.LandingPad {
@@ -1043,18 +1097,62 @@ test "throw without enclosing try_table: propagates Trap.UncaughtException (10.E
     try testing.expectError(Trap.UncaughtException, dispatch_loop.run(&rt, &t, fnz.instrs.items));
 }
 
-test "throw with only catch_ (no catch_all): currently uncaught — defers to 10.E-N" {
-    // try_table with only a catch_ entry (no catch_all) — current
-    // impl skips it pending Module.tags wiring, so the exception
-    // propagates Trap.UncaughtException despite the structural
-    // match. This test pins the deferred behavior so a future
-    // 10.E-N change is detected explicitly.
+test "throw + catch_ with matching tag_idx + i32 param: catch pushes param at target (10.E-5c)" {
+    // (func (result i32)
+    //   (block (result i32)       ; arity=1, block_idx=0
+    //     (try_table              ; arity=0, block_idx=1, catch 0 0
+    //       i32.const 77
+    //       throw 0               ; tag 0 has 1 i32 param
+    //     end)
+    //   end)                      ; result = the catch's i32 payload
+    //   end
+    var fnz = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &[_]zir.ValType{.i32} }, &.{});
+    defer fnz.deinit(testing.allocator);
+
+    try fnz.blocks.append(testing.allocator, .{ .kind = .block, .start_inst = 1, .end_inst = 5 });
+    try fnz.blocks.append(testing.allocator, .{ .kind = .try_table, .start_inst = 2, .end_inst = 4 });
+
+    const catches = try testing.allocator.dupe(zir.CatchEntry, &[_]zir.CatchEntry{
+        .{ .kind = .catch_, .tag_idx = 0, .label_idx = 0 },
+    });
+    fnz.eh_catch_entries = catches;
+    const lps = try testing.allocator.dupe(zir.LandingPad, &[_]zir.LandingPad{
+        .{ .block_idx = 1, .catches_start = 0, .catches_end = 1 },
+    });
+    fnz.eh_landing_pads = lps;
+
+    try fnz.instrs.append(testing.allocator, .{ .op = .block, .payload = 0, .extra = 1 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .try_table, .payload = 1, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 77, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .throw, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    // Tag 0 has 1 param (i32).
+    const tag_counts = [_]u32{1};
+    rt.tag_param_counts = &tag_counts;
+    try rt.pushFrame(.{ .sig = fnz.sig, .locals = &.{}, .operand_base = 0, .pc = 0, .func = &fnz });
+    defer _ = rt.popFrame();
+
+    try dispatch_loop.run(&rt, &t, fnz.instrs.items);
+
+    try testing.expectEqual(@as(u32, 1), rt.operand_len);
+    try testing.expectEqual(@as(i32, 77), rt.popOperand().i32);
+}
+
+test "throw + catch_ with non-matching tag_idx: falls through to UncaughtException (10.E-5c)" {
+    // try_table with only catch_ on tag 5, but throw 0 — no match.
     var fnz = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &.{} }, &.{});
     defer fnz.deinit(testing.allocator);
 
     try fnz.blocks.append(testing.allocator, .{ .kind = .try_table, .start_inst = 0, .end_inst = 2 });
     const catches = try testing.allocator.dupe(zir.CatchEntry, &[_]zir.CatchEntry{
-        .{ .kind = .catch_, .tag_idx = 0, .label_idx = 0 },
+        .{ .kind = .catch_, .tag_idx = 5, .label_idx = 0 },
     });
     fnz.eh_catch_entries = catches;
     const lps = try testing.allocator.dupe(zir.LandingPad, &[_]zir.LandingPad{

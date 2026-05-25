@@ -185,6 +185,18 @@ pub const Runtime = struct {
     /// IndirectCallTypeMismatch when the table cell's resolved
     /// callee disagrees. Borrowed by the runner.
     module_types: []const zir.FuncType = &.{},
+    /// Wasm 3.0 EH (10.E-N-2): per-tag param count, pre-resolved
+    /// from `module.tags[i].typeidx → module_types[typeidx].params.len`
+    /// at module setup time. Indexed by `tag_idx`. `throwOp` reads
+    /// `tag_param_counts[tag_idx]` to pop that many operand values
+    /// into the exception payload stash before walking the catch
+    /// vec. Default `&.{}`: existing tests / runners that don't
+    /// thread tags through see length-0 → throwOp pops 0 (safe
+    /// fallback). Validator's `Error.InvalidTagIndex` rejects
+    /// out-of-range `throw` at compile time, so the runtime side
+    /// never sees a tag_idx past the populated length when the
+    /// production pipeline has populated this field.
+    tag_param_counts: []const u32 = &.{},
     /// Dispatch table used by the active interp run. Set by
     /// `src/interp/dispatch.zig`'s `run`; the `call` handler
     /// needs it to recursively dispatch the callee body.
