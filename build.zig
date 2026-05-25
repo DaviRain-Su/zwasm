@@ -415,6 +415,29 @@ pub fn build(b: *std.Build) void {
     const run_wasm_3_0_assert_unit = b.addRunArtifact(wasm_3_0_assert_unit_tests);
     test_step.dependOn(&run_wasm_3_0_assert_unit.step);
 
+    // §10 / 10.T-3: gc_stress + eh_frequency runner skeletons.
+    // Impl-body lands when 10.G / 10.E activate (collector vtable +
+    // FP-walk unwind in place). Until then the runners report
+    // SKIP-P10-{GC,EH}-GAP and exit 0; their in-source unit tests
+    // verify the matrix shapes per ADR-0115/0116 + ADR-0114.
+    const gc_stress_runner_mod = createSanitizedModule(b, sanitize_opts, .{
+        .root_source_file = b.path("test/runners/gc_stress_runner.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const gc_stress_runner_tests = b.addTest(.{ .root_module = gc_stress_runner_mod });
+    const run_gc_stress_runner_tests = b.addRunArtifact(gc_stress_runner_tests);
+    test_step.dependOn(&run_gc_stress_runner_tests.step);
+
+    const eh_frequency_runner_mod = createSanitizedModule(b, sanitize_opts, .{
+        .root_source_file = b.path("test/runners/eh_frequency_runner.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const eh_frequency_runner_tests = b.addTest(.{ .root_module = eh_frequency_runner_mod });
+    const run_eh_frequency_runner_tests = b.addRunArtifact(eh_frequency_runner_tests);
+    test_step.dependOn(&run_eh_frequency_runner_tests.step);
+
     // `zig build test-spec-wasm-2.0` — wast-directive runner
     // (Phase 2 / §9.2 / 2.7). Reads each subdir's manifest.txt
     // and processes module / assert_invalid / assert_malformed
