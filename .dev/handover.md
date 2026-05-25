@@ -25,13 +25,12 @@
   under `feature/gc/i31.zig`。
 - **10.G-i31-ops = SHIPPED** (`52a6c225`): 3 i31 ops interp impl
   + Value helpers + 0xFB GC prefix dispatcher。
-- **10.E-1 = SHIPPED 2026-05-25** (`ffb56dd7`): tag section
-  (id=13) parse skeleton。SectionId.tag enum + seen array bump +
-  orderIndex extension (tag between memory(5) and global(6) per
-  Wasm 3.0 EH §4.5)。3 new tests (accept empty, canonical order,
-  out-of-order rejection)。Entry decoding + try_table opcode +
-  throw / throw_ref + interp unwinder land in 10.E-N。
-- **Mac `zig build test-all`**: green (scope=unclear)。
+- **10.E-1 = SHIPPED** (`ffb56dd7`): tag section parse skeleton。
+- **10.E-2 = SHIPPED 2026-05-25** (`390856f8` + `cec18589`):
+  `decodeTags` body decoder (TagEntry { attribute, typeidx } slice)
+  + InvalidTagAttribute error + 6 unit tests + sections.zig
+  FILE-SIZE-EXEMPT marker (P1 spec-defined catalog per ADR-0099 D2)。
+- **Mac `zig build test`**: green。
 
 ## Phase 10 progress
 
@@ -66,12 +65,14 @@ row。
   heavy。
 
 **Phase 10 candidates** (parallelisable):
-- **10.E-2 NEXT**: Tag-entry decoding into `Module.tags[]`
-  (attribute byte + typeidx vec) + Module.tags field on
-  Module struct + decoder unit tests. Foundation for try_table
-  + throw / throw_ref which need to resolve tag references.
-- 10.E-3: try_table opcode parse + validator skeleton
-- 10.E-4: throw / throw_ref interp (frame unwinding)
+- **10.E-3 NEXT**: try_table opcode parse + validator skeleton。
+  try_table is a control structure (new BlockKind) with catch
+  clauses; needs new lower path + validator. Per spec
+  §3.3.10.5-6 (EH) the opcode is 0x1F + blocktype + vec(catch)。
+  Interp body / unwinder come later (10.E-5).
+- 10.E-4: throw / throw_ref opcodes (0x08 / 0x0A) — parse +
+  validator + early Trap variant for "no handler" case
+- 10.E-5: try_table + throw interp impl (frame unwinding)
 - 10.G-2: Module.needs_gc_heap parse-time detector
 - 10.G-3: struct ops (most-impactful next GC slice; needs heap)
 - 10.M-5b: SIMD memarg memory64 (validator + lower + codegen)
