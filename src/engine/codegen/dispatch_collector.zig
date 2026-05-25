@@ -389,3 +389,59 @@ test "axisOf: x86_64 ops/wasm_3_0/return_call_ref.zig declares terminator axes" 
     try std.testing.expectEqual(@as(u8, 0), axis.n_successor_edges);
     try std.testing.expectEqual(false, axis.is_safepoint);
 }
+
+// ADR-0114 D2/D6 + ADR-0113 §A/B — EH op axes:
+//   try_table = fallthrough (NOT terminator), 1 successor edge
+//     per the catch-all per-op constant (per-callsite N
+//     populated at lower time per ADR-0113 D3), not a safepoint.
+//   throw / throw_ref = terminator (CALL into dispatcher;
+//     never returns to caller), 0 in-function CFG edges, not
+//     a safepoint (mirrors tail-call shape).
+
+test "axisOf: arm64 ops/wasm_3_0/try_table.zig declares fallthrough axes (ADR-0114 D2)" {
+    const tt_mod = @import("arm64/ops/wasm_3_0/try_table.zig");
+    const axis = axisOf(tt_mod);
+    try std.testing.expectEqual(false, axis.is_terminator);
+    try std.testing.expectEqual(@as(u8, 1), axis.n_successor_edges);
+    try std.testing.expectEqual(false, axis.is_safepoint);
+}
+
+test "axisOf: arm64 ops/wasm_3_0/throw.zig declares terminator axes (ADR-0114 D6)" {
+    const th_mod = @import("arm64/ops/wasm_3_0/throw.zig");
+    const axis = axisOf(th_mod);
+    try std.testing.expectEqual(true, axis.is_terminator);
+    try std.testing.expectEqual(@as(u8, 0), axis.n_successor_edges);
+    try std.testing.expectEqual(false, axis.is_safepoint);
+}
+
+test "axisOf: arm64 ops/wasm_3_0/throw_ref.zig declares terminator axes" {
+    const tr_mod = @import("arm64/ops/wasm_3_0/throw_ref.zig");
+    const axis = axisOf(tr_mod);
+    try std.testing.expectEqual(true, axis.is_terminator);
+    try std.testing.expectEqual(@as(u8, 0), axis.n_successor_edges);
+    try std.testing.expectEqual(false, axis.is_safepoint);
+}
+
+test "axisOf: x86_64 ops/wasm_3_0/try_table.zig declares fallthrough axes" {
+    const tt_mod = @import("x86_64/ops/wasm_3_0/try_table.zig");
+    const axis = axisOf(tt_mod);
+    try std.testing.expectEqual(false, axis.is_terminator);
+    try std.testing.expectEqual(@as(u8, 1), axis.n_successor_edges);
+    try std.testing.expectEqual(false, axis.is_safepoint);
+}
+
+test "axisOf: x86_64 ops/wasm_3_0/throw.zig declares terminator axes" {
+    const th_mod = @import("x86_64/ops/wasm_3_0/throw.zig");
+    const axis = axisOf(th_mod);
+    try std.testing.expectEqual(true, axis.is_terminator);
+    try std.testing.expectEqual(@as(u8, 0), axis.n_successor_edges);
+    try std.testing.expectEqual(false, axis.is_safepoint);
+}
+
+test "axisOf: x86_64 ops/wasm_3_0/throw_ref.zig declares terminator axes" {
+    const tr_mod = @import("x86_64/ops/wasm_3_0/throw_ref.zig");
+    const axis = axisOf(tr_mod);
+    try std.testing.expectEqual(true, axis.is_terminator);
+    try std.testing.expectEqual(@as(u8, 0), axis.n_successor_edges);
+    try std.testing.expectEqual(false, axis.is_safepoint);
+}
