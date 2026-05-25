@@ -928,6 +928,27 @@ Design source: ADR-0112 (Accepted 2026-05-25) + ADR-0113 §A.
 
 **SHA pointer**: backfilled at Phase 10 close.
 
+- **10.TC-3b** — tail-call per-op file skeletons + terminator
+  axes (`cbc3d587`). Creates `engine/codegen/{arm64,x86_64}/
+  ops/wasm_3_0/` directories with `return_call.zig` /
+  `return_call_indirect.zig` / `return_call_ref.zig` (6 files,
+  3 ops × 2 arches). Each declares `is_terminator=true /
+  n_successor_edges=0 / is_safepoint=false` per ADR-0112 D2
+  (separate op_tail_call.zig design; not an extension of
+  op_call.zig) + ADR-0112 D7 (safepoint-free invariant between
+  teardown and BR X16 / JMP R11) + ADR-0113 §A (terminator
+  axis: tail-jump leaves the function, no fallthrough). Emit
+  stubs return `error.UnsupportedOp` pending the shared
+  `op_tail_call.zig` + `frame_teardown.zig` helpers (10.TC-3c
+  / 10.TC-3d follow-on). Files are NOT yet registered into
+  `collected_arm64_ops` / `_x86_64_ops` — per
+  `.claude/rules/architectural_spike.md` the wiring lands when
+  the emit body has substance (no on-branch spike). 6 new
+  `axisOf` comptime tests in `dispatch_collector.zig` verify
+  the terminator classification fires for all 6 per-op files
+  (the observable behavior point of this chunk). Mac
+  `test-all` GREEN; lint exit 0. ADR-0112 D2/D7 + ADR-0113 §A.
+
 - **10.TC-3a** — ADR-0113 §A 3-axis foundation (`7447be67`).
   Lands the per-op file 3-axis (`is_terminator` /
   `n_successor_edges` / `is_safepoint`) classification pattern

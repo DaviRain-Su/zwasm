@@ -52,6 +52,15 @@
   `is_terminator=false / n_successor_edges=1 / is_safepoint=true`.
   Defaults match regular-call shape so non-migrated ops classify
   sanely. 4 unit tests. Detail: phase_log §10.TC.
+- **10.TC-3b = SHIPPED 2026-05-26** (`cbc3d587`): tail-call per-op
+  file skeletons. 6 new files (arm64 + x86_64 × return_call /
+  return_call_indirect / return_call_ref) declaring
+  `is_terminator=true / n_successor_edges=0 / is_safepoint=false`
+  per ADR-0112 D2/D7. emit stubs return `UnsupportedOp` pending
+  shared `op_tail_call.zig` + `frame_teardown.zig`. 6 axisOf
+  comptime tests. Files NOT yet in `collected_arch_ops` (no
+  on-branch spike per architectural_spike.md). Detail:
+  phase_log §10.TC.
 - **Mac `zig build test-all`**: green (scope=unclear)。
 
 ## Phase 10 progress
@@ -65,22 +74,24 @@ ROADMAP §10 = 13-row task table。
     cross-module + spec corpus + regalloc terminator-class 残)
 - Pending: 10.E / 10.G / 10.P
 
-## Active task — 10.TC-3b op_tail_call.zig emit body
+## Active task — 10.TC-3c frame_teardown.zig shared helper
 
-Foundation for ADR-0113 §A 3-axis (Axis3 + axisOf) is in place
-at 10.TC-3a (`7447be67`); call.zig declares the axes. Next:
-create per-arch `op_tail_call.zig` with axes
-`is_terminator=true / n_successor_edges=0 / is_safepoint=false`
-+ real emit per ADR-0112 D3 (frame_teardown + tail-jump shape:
-arm64 BR X16; x86_64 JMP RAX). Spec corpus runs once codegen
-handles return_call/_indirect/_ref end-to-end.
+10.TC-3b (`cbc3d587`) landed terminator-axis skeletons for the 3
+tail-call ops × 2 arches; emit stubs return `UnsupportedOp`. Next:
+create `src/engine/codegen/shared/frame_teardown.zig` (ADR-0112 D3)
+— the shared SP-restore + LDP X29,X30 / POP RBP + clobber-saved
+restore helper. Inputs per ADR-0112 D3: `{ n_clobber_saved: u8,
+frame_bytes: u32, n_incoming: u8, n_outgoing: u8 }`. Per-arch emit
+calls differ (LDP vs POP) but invariant order is identical;
+sharing keeps the safepoint-free invariant audit single-pass.
 
-Refs: ADR-0112 D3, ADR-0113 §A, arm64/op_call.zig +
-x86_64/op_call.zig (template), test/spec/wasm-3.0-assert/
-tail-call/return_call/.
+Refs: ADR-0112 D3, src/engine/codegen/arm64/epilogue.zig +
+prologue.zig (existing ABI-pinned shape; do NOT touch).
 
 **Next sub-chunk candidates (names only, NO predictions)**:
-- 10.TC-3b — op_tail_call.zig emit body (the active task above)
+- 10.TC-3c — frame_teardown.zig shared helper (active task above)
+- 10.TC-3d — engine/codegen/<arch>/op_tail_call.zig (shared per-arch
+  helper that consumes frame_teardown + BR X16 / JMP R11)
 - 10.E-codegen — ADR-0114 D3-D6 codegen-side EH (exception_table,
   FP-walk unwind, zwasm_throw trampoline, op_exception_handling)
 - 10.E-N-4 — c_api instantiate → interp Runtime tag_param_counts
