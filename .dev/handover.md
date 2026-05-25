@@ -32,13 +32,15 @@
   predicate (byte-scan type section).
 - **10.E-3a = SHIPPED** (`c2238c9a`): BlockKind.try_table enum
   entry + validator labelType arm。
-- **10.E-3b = SHIPPED 2026-05-25** (`da8880a9`): 0x1F opcode parse
-  + catch-vec skeleton。lower openTryTable (mirrors openBlock +
-  skipCatchVec)、validator opTryTable (label-range validation on
-  catch entries; tag-range + label-type matching pending)、interp
-  `.try_table` reuses blockOp for no-exception path。5 validator
-  unit tests (empty / catch_all / OOB label / catch with tag /
-  unknown kind). throw / unwind path lands at 10.E-5。
+- **10.E-3b = SHIPPED** (`da8880a9`): try_table opcode 0x1F +
+  catch-vec skeleton。
+- **10.E-4 = SHIPPED 2026-05-25** (`753aec8f`): throw / throw_ref
+  opcodes (0x08 / 0x0A)。lower emits + markUnreachable; validator
+  opThrow (reads tag_idx, markUnreachable) + opThrowRef (pops
+  reftype, markUnreachable); interp returns new Trap.UncaughtException
+  variant。5 new validator unit tests (polymorphic-stack via
+  throw / unreachable code after throw / throw_ref pop+unreachable /
+  underflow / type mismatch)。Real unwind lands at 10.E-5。
 - **Mac `zig build test-all`**: green (scope=unclear)。
 
 ## Phase 10 progress
@@ -74,17 +76,21 @@ row。
   heavy。
 
 **Phase 10 candidates** (parallelisable):
-- **10.E-4 NEXT**: throw / throw_ref opcodes — parse + validator
-  + `Trap.UncaughtException` Trap variant (= no try_table on
-  stack to catch it)。`throw` opcode is 0x08 + tag_idx; pops
-  the tag's payload types; polymorphic-stack from here (=
-  terminator)。`throw_ref` opcode is 0x0A; pops exnref; same
-  terminator semantics。Validator: range-check tag_idx (pending
-  Module.tags wiring; for now allow any) + pop tag.params +
-  markUnreachable。Interp: trap UncaughtException for now (real
-  unwind lands at 10.E-5)。
-- 10.E-5: try_table + throw interp (frame unwinding + catch
-  dispatch + catch metadata storage)
+- **10.E-5 NEXT**: try_table + throw interp unwinder + catch
+  metadata storage. Big chunk — needs ZirInstr / ZirFunc carries
+  catch entries (storage shape design); interp loop intercepts
+  Trap.UncaughtException and walks frame stack matching against
+  current try_table's catch vec; resume at matching catch's
+  label. May need ADR or split into multiple sub-chunks (catch
+  metadata shape decision, runtime unwinder, integration tests).
+- 10.E-N (parallel): Module.tags wiring through validator —
+  unlocks tag_idx range validation on throw + tag-params popping。
+- 10.G-3: heap-top reftype detection extension to
+  needs_heap_detector (anyref / eqref / i31ref / exnref bytes
+  in func sigs / globals / tables / locals)
+- 10.G-4: struct ops (needs GC heap impl first)
+- 10.M-5b: SIMD memarg memory64 (validator + lower + codegen)
+- 10.TC-3: regalloc terminator-class + codegen tail-call
 - 10.G-3: heap-top reftype detection extension to
   needs_heap_detector (anyref / eqref / i31ref / exnref bytes
   in func sigs / globals / tables / locals)
