@@ -93,6 +93,25 @@ pub const HostCall = struct {
     ctx: *anyopaque,
 };
 
+/// Max number of operand values a tag's param-list can stash in
+/// `PendingException.payload`. Matches `max_block_arity` in
+/// `src/interp/mvp.zig` (the cap on Wasm 2.0 multivalue block
+/// arity, reused here so the same fixed-size pop buffer can be
+/// re-used for tag payload marshalling).
+pub const max_exception_payload: u32 = 16;
+
+/// Wasm 3.0 EH in-flight exception record (10.E-5d). Lives at
+/// `Runtime.pending_exception` for the lifetime of one throw
+/// → catch dispatch (cleared when the matching catch fires;
+/// stays set while `Trap.UncaughtException` propagates across
+/// frames until either a caller-frame catch claims it or the
+/// trap escapes the top-level invocation).
+pub const PendingException = struct {
+    tag_idx: u32,
+    payload_len: u32,
+    payload: [max_exception_payload]Value,
+};
+
 /// Per-instance interpreter state. Owns linear memory + globals
 /// (heap-backed); operand and frame stacks are inline.
 pub const Runtime = struct {
@@ -197,6 +216,21 @@ pub const Runtime = struct {
     /// never sees a tag_idx past the populated length when the
     /// production pipeline has populated this field.
     tag_param_counts: []const u32 = &.{},
+
+    /// Wasm 3.0 EH (10.E-5d) — in-flight exception slot for cross-
+    /// frame unwind. `throwOp` writes the thrown tag's idx + popped
+    /// payload values here before walking the local frame's catch
+    /// vec; on a local-frame match, the slot is cleared and dispatch
+    /// proceeds. On no local match, the slot stays set and
+    /// `Trap.UncaughtException` propagates; the `invoke()` helper
+    /// catches the trap post-popFrame and retries
+    /// `findAndDispatchCatch` against the caller's frame, repeating
+    /// up the frame stack until either a catch fires or the trap
+    /// escapes the top-level invocation. Treated as a thread-local-
+    /// equivalent slot per ADR-0114 D6's "zwasm_throw trampoline"
+    /// design (interp variant: in-process slot vs codegen's
+    /// per-thread storage).
+    pending_exception: ?PendingException = null,
     /// Dispatch table used by the active interp run. Set by
     /// `src/interp/dispatch.zig`'s `run`; the `call` handler
     /// needs it to recursively dispatch the callee body.

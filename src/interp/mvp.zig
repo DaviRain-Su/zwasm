@@ -548,7 +548,24 @@ pub fn invoke(rt: *Runtime, table: *const DispatchTable, callee: *const zir.ZirF
     const dispatch_loop_local = @import("dispatch.zig");
     const run_err = dispatch_loop_local.run(rt, table, callee.instrs.items);
     _ = rt.popFrame();
-    try run_err;
+
+    // Wasm 3.0 EH cross-frame unwind (10.E-5d). When the callee
+    // body propagated an uncaught exception, retry the catch
+    // search against the caller frame's labels before re-raising.
+    // The pending-exception payload survives the popFrame since
+    // it lives on Runtime, not on the per-frame operand stack.
+    run_err catch |err| {
+        if (err == Trap.UncaughtException and rt.pending_exception != null and rt.frame_len > 0) {
+            const exc = rt.pending_exception.?;
+            const caller = rt.currentFrame();
+            const payload = exc.payload[0..exc.payload_len];
+            if (try findAndDispatchCatch(rt, caller, exc.tag_idx, payload)) {
+                rt.pending_exception = null;
+                return;
+            }
+        }
+        return err;
+    };
 }
 
 /// Wasm 3.0 EH `throw tag_idx` (§3.3.10.7 / §4.5). Pops the
@@ -586,16 +603,30 @@ fn throwOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
         rt.tag_param_counts[thrown_tag_idx]
     else
         0;
-    if (param_count > max_block_arity) return Trap.Unreachable;
-    var payload_buf: [max_block_arity]Value = undefined;
+    if (param_count > runtime.max_exception_payload) return Trap.Unreachable;
+
+    // Stash into the Runtime's pending-exception slot so the
+    // unwinder can recover the payload after `invoke()` pops the
+    // throwing frame. The slot is cleared on local-frame catch
+    // OR by the cross-frame `invoke()` recovery path on caller-
+    // frame catch (10.E-5d); otherwise it stays set as the trap
+    // propagates further out.
+    var exc: runtime.PendingException = .{
+        .tag_idx = thrown_tag_idx,
+        .payload_len = param_count,
+        .payload = undefined,
+    };
     var i: u32 = param_count;
     while (i > 0) {
         i -= 1;
-        payload_buf[i] = rt.popOperand();
+        exc.payload[i] = rt.popOperand();
     }
-    const payload = payload_buf[0..param_count];
+    rt.pending_exception = exc;
 
-    if (try findAndDispatchCatch(rt, frame, thrown_tag_idx, payload)) return;
+    if (try findAndDispatchCatch(rt, frame, thrown_tag_idx, exc.payload[0..param_count])) {
+        rt.pending_exception = null;
+        return;
+    }
     return Trap.UncaughtException;
 }
 
@@ -1201,4 +1232,97 @@ test "Label.block_idx defaults to 0 and is populated by blockOp" {
     try dispatch_loop.step(&rt, &t, &fnz.instrs.items[0]);
     try testing.expectEqual(@as(u32, 1), frame.label_len);
     try testing.expectEqual(@as(u32, 0), frame.labelAt(0).block_idx);
+}
+
+test "cross-frame throw: callee throws, outer try_table catch_all catches (10.E-5d)" {
+    // Inner func: (func throw 0 end)  — empty params, empty results.
+    var inner = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &.{} }, &.{});
+    defer inner.deinit(testing.allocator);
+    try inner.instrs.append(testing.allocator, .{ .op = .throw, .payload = 0, .extra = 0 });
+    try inner.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+
+    // Outer func:
+    //   (block (result i32)        ; outer_block, block_idx=0, end_inst=7
+    //     (block                    ; inner_block, block_idx=1, end_inst=5
+    //                               ;   — catch_all targets THIS label
+    //                               ;     (arity=0 so no payload mismatch)
+    //       (try_table              ; block_idx=2, end_inst=4
+    //         call 0                ; func 0 = inner; throws uncaught
+    //       end)
+    //     end)                       ; catch_all branched here; stack=[]
+    //     i32.const 42                ; pushed after catch
+    //   end)                          ; outer_block end → pops i32 result
+    //   end                           ; function end → returns 42
+    var outer = zir.ZirFunc.init(1, .{ .params = &.{}, .results = &[_]zir.ValType{.i32} }, &.{});
+    defer outer.deinit(testing.allocator);
+
+    try outer.blocks.append(testing.allocator, .{ .kind = .block, .start_inst = 1, .end_inst = 7 });
+    try outer.blocks.append(testing.allocator, .{ .kind = .block, .start_inst = 2, .end_inst = 5 });
+    try outer.blocks.append(testing.allocator, .{ .kind = .try_table, .start_inst = 3, .end_inst = 4 });
+
+    const catches = try testing.allocator.dupe(zir.CatchEntry, &[_]zir.CatchEntry{
+        .{ .kind = .catch_all, .tag_idx = 0, .label_idx = 0 },
+    });
+    outer.eh_catch_entries = catches;
+    const lps = try testing.allocator.dupe(zir.LandingPad, &[_]zir.LandingPad{
+        .{ .block_idx = 2, .catches_start = 0, .catches_end = 1 },
+    });
+    outer.eh_landing_pads = lps;
+
+    try outer.instrs.append(testing.allocator, .{ .op = .block, .payload = 0, .extra = 1 });
+    try outer.instrs.append(testing.allocator, .{ .op = .block, .payload = 1, .extra = 0 });
+    try outer.instrs.append(testing.allocator, .{ .op = .try_table, .payload = 2, .extra = 0 });
+    try outer.instrs.append(testing.allocator, .{ .op = .call, .payload = 0, .extra = 0 });
+    try outer.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+    try outer.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+    try outer.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 42, .extra = 0 });
+    try outer.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+    try outer.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+
+    // callOp consults rt.funcs[idx] for the callee body.
+    const funcs = [_]*const zir.ZirFunc{&inner};
+    rt.funcs = &funcs;
+    defer rt.funcs = &.{};
+
+    try rt.pushFrame(.{ .sig = outer.sig, .locals = &.{}, .operand_base = 0, .pc = 0, .func = &outer });
+    defer _ = rt.popFrame();
+
+    try dispatch_loop.run(&rt, &t, outer.instrs.items);
+
+    try testing.expectEqual(@as(u32, 1), rt.operand_len);
+    try testing.expectEqual(@as(i32, 42), rt.popOperand().i32);
+    // pending_exception cleared on cross-frame catch.
+    try testing.expect(rt.pending_exception == null);
+}
+
+test "cross-frame throw: callee throws, no outer try_table → propagates Trap.UncaughtException with payload stash set (10.E-5d)" {
+    var inner = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &.{} }, &.{});
+    defer inner.deinit(testing.allocator);
+    try inner.instrs.append(testing.allocator, .{ .op = .throw, .payload = 0, .extra = 0 });
+    try inner.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+
+    var outer = zir.ZirFunc.init(1, .{ .params = &.{}, .results = &.{} }, &.{});
+    defer outer.deinit(testing.allocator);
+    try outer.instrs.append(testing.allocator, .{ .op = .call, .payload = 0, .extra = 0 });
+    try outer.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    const funcs = [_]*const zir.ZirFunc{&inner};
+    rt.funcs = &funcs;
+    defer rt.funcs = &.{};
+    try rt.pushFrame(.{ .sig = outer.sig, .locals = &.{}, .operand_base = 0, .pc = 0, .func = &outer });
+    defer _ = rt.popFrame();
+
+    try testing.expectError(Trap.UncaughtException, dispatch_loop.run(&rt, &t, outer.instrs.items));
+    // pending_exception survives — outermost caller can inspect tag_idx if needed.
+    try testing.expect(rt.pending_exception != null);
+    try testing.expectEqual(@as(u32, 0), rt.pending_exception.?.tag_idx);
 }
