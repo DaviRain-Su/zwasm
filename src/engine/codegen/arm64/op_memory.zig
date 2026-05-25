@@ -65,7 +65,17 @@ const sx12: inst.Xn = abi.allocatable_caller_saved_scratch_gprs[3];
 /// Unified handler for all 25 i32/i64/f32/f64 load/store arms.
 /// Caller dispatches based on `ins.op`; this fn handles the
 /// shared bounds-check prologue and per-op LDR/STR emission.
+///
+/// Wasm spec §4.4.7 (memory.load/store) — i32-idx memories
+/// only at this layer; i64-idx memory64 wrap-check + 64-bit
+/// offset materialise lands at 10.M-4b (ADR-0111 D4).
+/// `MemArgExtra.memidx == 0` invariant: multi-memory routing
+/// requires the instantiate-side reject lift (10.M-5+ region);
+/// until then codegen sees only memory 0. The runtime assert
+/// codifies the prose-only invariant per `.claude/rules/comment_as_invariant.md`.
 pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const memarg = zir.MemArgExtra.unpack(ins.extra);
+    std.debug.assert(memarg.memidx == 0);
     const is_store = switch (ins.op) {
         .@"i32.store",
         .@"i32.store8",

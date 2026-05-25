@@ -232,6 +232,13 @@ pub fn emitMemOp(
 /// to pick MOV / MOVZX / MOVSX shapes). Decomposes per-op at the
 /// B6x+1 cutover.
 pub fn emitI32Load(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    // ADR-0111 D3: `MemArgExtra.memidx == 0` invariant — codegen
+    // only sees memory 0 until multi-memory routing lands
+    // (instantiate-side reject lift + per-memidx vm_base/mem_limit
+    // plumbing; 10.M-5+ region). The runtime assert codifies the
+    // prose invariant per `.claude/rules/comment_as_invariant.md`.
+    const memarg = zir.MemArgExtra.unpack(ins.extra);
+    std.debug.assert(memarg.memidx == 0);
     return emitMemOp(
         ctx.allocator,
         ctx.buf,
