@@ -377,7 +377,7 @@ pub fn compute(
             // because V_local0 was killed at a br inside an
             // inner void block then its slot was reused by the
             // `i32.const 0x2` that followed).
-            const depth: u32 = instr.payload;
+            const depth: u32 = @intCast(instr.payload);
             const target_depth: u32 = if (depth >= block_stack_len)
                 0
             else

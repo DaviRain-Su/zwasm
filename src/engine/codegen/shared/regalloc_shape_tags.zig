@@ -92,7 +92,7 @@ pub fn populateShapeTags(allocator: Allocator, func: *const ZirFunc, n_vregs: us
         // flow through here; D-061 discharge.
         if (ins.op == .@"local.get") {
             if (next_vreg < tags.len) {
-                if (func.localValType(ins.payload) == .v128) tags[next_vreg] = .v128;
+                if (func.localValType(@intCast(ins.payload)) == .v128) tags[next_vreg] = .v128;
             }
             next_vreg += 1;
             continue;

@@ -80,7 +80,7 @@ fn parseBr(opaque_ctx: *ParserCtx, instr: *ZirInstr) anyerror!void {
 fn parseI32Const(opaque_ctx: *ParserCtx, instr: *ZirInstr) anyerror!void {
     const ctx = Ctx.fromOpaque(opaque_ctx);
     const v = try ctx.readSleb32();
-    instr.payload = @bitCast(v);
+    instr.payload = @as(u32, @bitCast(v));
     instr.extra = 0;
 }
 
@@ -88,7 +88,7 @@ fn parseI64Const(opaque_ctx: *ParserCtx, instr: *ZirInstr) anyerror!void {
     const ctx = Ctx.fromOpaque(opaque_ctx);
     const v = try ctx.readSleb64();
     const u: u64 = @bitCast(v);
-    instr.payload = @truncate(u);
+    instr.payload = @as(u32, @truncate(u));
     instr.extra = @truncate(u >> 32);
 }
 

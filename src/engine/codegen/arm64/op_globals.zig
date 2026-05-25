@@ -55,25 +55,27 @@ fn lookupGlobalShape(ctx: *const EmitCtx, idx: u32) struct { byte_off: u32, vt: 
 /// Caller MUST have ensured `uses_globals` was true at prologue
 /// time; otherwise X23 is undefined.
 pub fn emitGlobalGet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
-    const shape = lookupGlobalShape(ctx, ins.payload);
+    const globalidx: u32 = @intCast(ins.payload);
+    const shape = lookupGlobalShape(ctx, globalidx);
     switch (shape.vt) {
-        .i32 => try emitI32GlobalGet(ctx, ins.payload, shape.byte_off),
-        .i64, .funcref, .externref => try emitI64GlobalGet(ctx, ins.payload, shape.byte_off),
-        .f32 => try emitF32GlobalGet(ctx, ins.payload, shape.byte_off),
-        .f64 => try emitF64GlobalGet(ctx, ins.payload, shape.byte_off),
-        .v128 => try emitV128GlobalGet(ctx, ins.payload, shape.byte_off),
+        .i32 => try emitI32GlobalGet(ctx, globalidx, shape.byte_off),
+        .i64, .funcref, .externref => try emitI64GlobalGet(ctx, globalidx, shape.byte_off),
+        .f32 => try emitF32GlobalGet(ctx, globalidx, shape.byte_off),
+        .f64 => try emitF64GlobalGet(ctx, globalidx, shape.byte_off),
+        .v128 => try emitV128GlobalGet(ctx, globalidx, shape.byte_off),
     }
 }
 
 /// Wasm spec §4.4.5 (global.set N).
 pub fn emitGlobalSet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
-    const shape = lookupGlobalShape(ctx, ins.payload);
+    const globalidx: u32 = @intCast(ins.payload);
+    const shape = lookupGlobalShape(ctx, globalidx);
     switch (shape.vt) {
-        .i32 => try emitI32GlobalSet(ctx, ins.payload, shape.byte_off),
-        .i64, .funcref, .externref => try emitI64GlobalSet(ctx, ins.payload, shape.byte_off),
-        .f32 => try emitF32GlobalSet(ctx, ins.payload, shape.byte_off),
-        .f64 => try emitF64GlobalSet(ctx, ins.payload, shape.byte_off),
-        .v128 => try emitV128GlobalSet(ctx, ins.payload, shape.byte_off),
+        .i32 => try emitI32GlobalSet(ctx, globalidx, shape.byte_off),
+        .i64, .funcref, .externref => try emitI64GlobalSet(ctx, globalidx, shape.byte_off),
+        .f32 => try emitF32GlobalSet(ctx, globalidx, shape.byte_off),
+        .f64 => try emitF64GlobalSet(ctx, globalidx, shape.byte_off),
+        .v128 => try emitV128GlobalSet(ctx, globalidx, shape.byte_off),
     }
 }
 

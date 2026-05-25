@@ -114,7 +114,7 @@ pub fn register(table: *DispatchTable) void {
 
 fn i32Const(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
-    try rt.pushOperand(.{ .i32 = @bitCast(instr.payload) });
+    try rt.pushOperand(.{ .i32 = @bitCast(@as(u32, @truncate(instr.payload))) });
 }
 fn i64Const(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);

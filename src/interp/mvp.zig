@@ -265,14 +265,14 @@ inline fn doBranch(rt: *Runtime, frame: *runtime.Frame, depth: u32) Trap!void {
 
 fn brOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
-    try doBranch(rt, rt.currentFrame(), instr.payload);
+    try doBranch(rt, rt.currentFrame(), @intCast(instr.payload));
 }
 
 fn brIfOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
     const cond = rt.popOperand().i32;
     if (cond != 0) {
-        try doBranch(rt, rt.currentFrame(), instr.payload);
+        try doBranch(rt, rt.currentFrame(), @intCast(instr.payload));
     }
 }
 
@@ -540,9 +540,9 @@ test "block + end: arity=0, operand stack restored" {
     defer fnz.deinit(testing.allocator);
     try fnz.blocks.append(testing.allocator, .{ .kind = .block, .start_inst = 0, .end_inst = 2 });
     try fnz.instrs.append(testing.allocator, .{ .op = .block, .payload = 0, .extra = 0 });
-    try fnz.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 7)), .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = @as(u64, @as(u32, @bitCast(@as(i32, 7)))), .extra = 0 });
     try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
-    try fnz.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 99)), .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = @as(u64, @as(u32, @bitCast(@as(i32, 99)))), .extra = 0 });
     try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
 
     var t = DispatchTable.init();

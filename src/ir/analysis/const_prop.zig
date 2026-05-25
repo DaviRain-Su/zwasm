@@ -66,7 +66,7 @@ pub fn compute(allocator: Allocator, func: *const ZirFunc) !ConstantPool {
         switch (instr.op) {
             .@"i32.const", .@"i64.const" => {
                 if (sim_len == max_simulated_stack) return error.OperandStackOverflow;
-                const lo = instr.payload;
+                const lo: u32 = @truncate(instr.payload);
                 const hi: u32 = if (instr.op == .@"i64.const") instr.extra else 0;
                 sim_stack[sim_len] = .{
                     .def_pc = pc,

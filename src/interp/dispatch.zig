@@ -109,7 +109,7 @@ const StubHandlers = struct {
 
     fn pushI32Const(opaque_ctx: *dispatch_table.InterpCtx, instr: *const ZirInstr) anyerror!void {
         const rt = Runtime.fromOpaque(opaque_ctx);
-        const v: i32 = @bitCast(instr.payload);
+        const v: i32 = @bitCast(@as(u32, @truncate(instr.payload)));
         try rt.pushOperand(.{ .i32 = v });
     }
 };
@@ -134,7 +134,7 @@ test "step: bound i32.const handler pushes the payload" {
     defer rt.deinit();
     const table = buildSmokeTable();
 
-    const instr: ZirInstr = .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 42)), .extra = 0 };
+    const instr: ZirInstr = .{ .op = .@"i32.const", .payload = @as(u64, @as(u32, @bitCast(@as(i32, 42)))), .extra = 0 };
     try step(&rt, &table, &instr);
 
     try testing.expectEqual(@as(u32, 1), rt.operand_len);
@@ -147,10 +147,10 @@ test "run: walks sequence, leaves operand stack with the const sequence" {
     const table = buildSmokeTable();
 
     const instrs = [_]ZirInstr{
-        .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 1)), .extra = 0 },
-        .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 2)), .extra = 0 },
+        .{ .op = .@"i32.const", .payload = @as(u64, @as(u32, @bitCast(@as(i32, 1)))), .extra = 0 },
+        .{ .op = .@"i32.const", .payload = @as(u64, @as(u32, @bitCast(@as(i32, 2)))), .extra = 0 },
         .{ .op = .nop, .payload = 0, .extra = 0 },
-        .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 3)), .extra = 0 },
+        .{ .op = .@"i32.const", .payload = @as(u64, @as(u32, @bitCast(@as(i32, 3)))), .extra = 0 },
     };
     try run(&rt, &table, &instrs);
 
@@ -182,9 +182,9 @@ test "trace_cb: receives one event per dispatched instruction" {
     rt.trace_ctx = @ptrCast(&sink);
 
     const instrs = [_]ZirInstr{
-        .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 11)), .extra = 0 },
+        .{ .op = .@"i32.const", .payload = @as(u64, @as(u32, @bitCast(@as(i32, 11)))), .extra = 0 },
         .{ .op = .nop, .payload = 0, .extra = 0 },
-        .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 22)), .extra = 0 },
+        .{ .op = .@"i32.const", .payload = @as(u64, @as(u32, @bitCast(@as(i32, 22)))), .extra = 0 },
     };
     try run(&rt, &table, &instrs);
 
@@ -204,7 +204,7 @@ test "trace_cb: null callback is zero-cost (no error path)" {
     // rt.trace_cb left null by default.
 
     const instrs = [_]ZirInstr{
-        .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 5)), .extra = 0 },
+        .{ .op = .@"i32.const", .payload = @as(u64, @as(u32, @bitCast(@as(i32, 5)))), .extra = 0 },
     };
     try run(&rt, &table, &instrs);
     try testing.expectEqual(@as(u32, 1), rt.operand_len);
@@ -218,9 +218,9 @@ test "run: bubbles handler trap and stops iteration" {
     // .nop slot left null → step returns Trap.Unreachable on the second instr.
 
     const instrs = [_]ZirInstr{
-        .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 7)), .extra = 0 },
+        .{ .op = .@"i32.const", .payload = @as(u64, @as(u32, @bitCast(@as(i32, 7)))), .extra = 0 },
         .{ .op = .nop, .payload = 0, .extra = 0 },
-        .{ .op = .@"i32.const", .payload = @bitCast(@as(i32, 99)), .extra = 0 },
+        .{ .op = .@"i32.const", .payload = @as(u64, @as(u32, @bitCast(@as(i32, 99)))), .extra = 0 },
     };
     try testing.expectError(Trap.Unreachable, run(&rt, &t, &instrs));
 

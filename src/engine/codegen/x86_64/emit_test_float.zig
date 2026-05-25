@@ -60,7 +60,7 @@ test "compile: f64.const — MOVABS RAX,bits + MOVQ XMM8,RAX" {
     const bits: u64 = 0x3FF0000000000000;
     try f.instrs.append(testing.allocator, .{
         .op = .@"f64.const",
-        .payload = @truncate(bits),
+        .payload = @as(u32, @truncate(bits)),
         .extra = @truncate(bits >> 32),
     });
     try f.instrs.append(testing.allocator, .{ .op = .end });
@@ -1076,7 +1076,7 @@ test "compile: f64.const → end emits MOVAPS XMM0, XMM8 (same MOVAPS works for 
     const bits: u64 = 0x3FF0000000000000; // 1.0
     try f.instrs.append(testing.allocator, .{
         .op = .@"f64.const",
-        .payload = @truncate(bits),
+        .payload = @as(u32, @truncate(bits)),
         .extra = @truncate(bits >> 32),
     });
     try f.instrs.append(testing.allocator, .{ .op = .end });
@@ -1271,7 +1271,7 @@ test "compile: i64.const emits MOVABS r64, imm64 (10 bytes)" {
     const value: u64 = 0x0CABBA6E0BA66A6E; // arbitrary 64-bit literal
     try f.instrs.append(testing.allocator, .{
         .op = .@"i64.const",
-        .payload = @truncate(value),
+        .payload = @as(u32, @truncate(value)),
         .extra = @truncate(value >> 32),
     });
     try f.instrs.append(testing.allocator, .{ .op = .end });

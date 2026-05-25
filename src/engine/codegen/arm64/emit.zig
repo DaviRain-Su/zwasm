@@ -786,7 +786,7 @@ pub fn compile(
                 }
                 const vd = try gpr.fpDefSpilled(alloc, vreg, 0);
                 const w_scratch = try gpr.gprDefSpilled(alloc, vreg, 0);
-                try op_const.emitConstU32(allocator, &buf, w_scratch, ins.payload);
+                try op_const.emitConstU32(allocator, &buf, w_scratch, @truncate(ins.payload));
                 try gpr.writeU32(allocator, &buf, inst_fp.encFmovStoFromW(vd, w_scratch));
                 try gpr.fpStoreSpilled(allocator, &buf, alloc, spill_base_off, vreg, 0);
                 try pushed_vregs.append(allocator, vreg);
@@ -821,7 +821,7 @@ pub fn compile(
                 // `[SP, #(local_base_off + layout.offsets[local_idx])]`.
                 // Width follows declared local type (i32 → LDR W,
                 // i64 → LDR X, v128 → LDR Q per §9.9-e-1).
-                const local_idx = ins.payload;
+                const local_idx: u32 = @intCast(ins.payload);
                 if (local_idx >= total_locals) return Error.UnsupportedOp;
                 const ty = localValType(func, num_params, local_idx);
                 const offset_u: u32 = local_base_off + layout.offsets[local_idx];
@@ -881,7 +881,7 @@ pub fn compile(
                 // `[SP, #(local_base_off + layout.offsets[local_idx])]`.
                 // Width follows declared local type per §9.9-e-1.
                 if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
-                const local_idx = ins.payload;
+                const local_idx: u32 = @intCast(ins.payload);
                 if (local_idx >= total_locals) return Error.UnsupportedOp;
                 const ty = localValType(func, num_params, local_idx);
                 const offset_u: u32 = local_base_off + layout.offsets[local_idx];
@@ -924,7 +924,7 @@ pub fn compile(
                 // Write top vreg to local slot WITHOUT popping —
                 // the value remains pushed.
                 if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
-                const local_idx = ins.payload;
+                const local_idx: u32 = @intCast(ins.payload);
                 if (local_idx >= total_locals) return Error.UnsupportedOp;
                 const ty = localValType(func, num_params, local_idx);
                 const offset_u: u32 = local_base_off + layout.offsets[local_idx];

@@ -154,7 +154,7 @@ pub fn emitCall(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBL(0));
     try ctx.call_fixups.append(ctx.allocator, CallFixup{
         .byte_offset = fixup_at,
-        .target_func_idx = ins.payload,
+        .target_func_idx = @intCast(ins.payload),
     });
 
     try captureCallResult(ctx, callee_sig, memory_class_return, return_buffer_off);
@@ -206,7 +206,7 @@ pub fn emitCallIndirect(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const w_idx = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, idx_vreg, 0);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(17, 31, w_idx));
 
-    const expected_typeidx: u32 = canonical_type.canonicalTypeidx(ctx.module_types, ins.payload);
+    const expected_typeidx: u32 = canonical_type.canonicalTypeidx(ctx.module_types, @intCast(ins.payload));
     // Skeleton restricts expected typeidx to imm12 range
     // (4096 distinct types is well above any realistic module's
     // needs); larger canonical typeidx → UnsupportedOp.

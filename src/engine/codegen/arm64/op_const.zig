@@ -70,7 +70,7 @@ pub fn emitI32Const(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         return Error.SlotOverflow;
     }
     const xd = try gpr.gprDefSpilled(ctx.alloc, vreg, 0);
-    try emitConstU32(ctx.allocator, ctx.buf, xd, ins.payload);
+    try emitConstU32(ctx.allocator, ctx.buf, xd, @truncate(ins.payload));
     try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, vreg, 0);
     try ctx.pushed_vregs.append(ctx.allocator, vreg);
 }

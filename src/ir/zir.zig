@@ -70,7 +70,7 @@ pub const ZirOp = zir_ops.ZirOp;
 
 pub const ZirInstr = struct {
     op: ZirOp,
-    payload: u32 = 0,
+    payload: u64 = 0,
     extra: u32 = 0,
 };
 
@@ -222,7 +222,7 @@ pub const HoistedConst = struct {
     in_loop_pc: u32,
     local_idx: u32,
     op: ZirOp,
-    payload: u32,
+    payload: u64,
     extra: u32,
 };
 

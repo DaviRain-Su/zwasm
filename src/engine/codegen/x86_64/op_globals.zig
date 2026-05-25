@@ -44,7 +44,7 @@ pub fn emitGlobalGetCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!v
         ctx.pushed_vregs,
         ctx.next_vreg,
         ctx.spill_base_off,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
         ctx.globals_offsets,
         ctx.globals_valtypes,
     );
@@ -57,7 +57,7 @@ pub fn emitGlobalSetCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!v
         ctx.alloc,
         ctx.pushed_vregs,
         ctx.spill_base_off,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
         ctx.globals_offsets,
         ctx.globals_valtypes,
     );

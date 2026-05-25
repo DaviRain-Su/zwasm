@@ -65,7 +65,7 @@ pub fn emitTableGetCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
         ctx.bounds_fixups,
         ctx.spill_base_off,
         ctx.func_idx,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
     );
 }
 
@@ -78,7 +78,7 @@ pub fn emitTableSetCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
         ctx.bounds_fixups,
         ctx.spill_base_off,
         ctx.func_idx,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
     );
 }
 
@@ -90,7 +90,7 @@ pub fn emitTableSizeCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!v
         ctx.pushed_vregs,
         ctx.next_vreg,
         ctx.spill_base_off,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
     );
 }
 
@@ -103,7 +103,7 @@ pub fn emitTableGrowCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!v
         ctx.next_vreg,
         ctx.spill_base_off,
         ctx.outgoing_max_bytes,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
     );
 }
 
@@ -116,7 +116,7 @@ pub fn emitTableFillCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!v
         ctx.bounds_fixups,
         ctx.spill_base_off,
         ctx.func_idx,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
     );
 }
 
@@ -129,7 +129,7 @@ pub fn emitTableCopyCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!v
         ctx.bounds_fixups,
         ctx.spill_base_off,
         ctx.func_idx,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
         ins.extra,
     );
 }
@@ -143,7 +143,7 @@ pub fn emitTableInitCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!v
         ctx.bounds_fixups,
         ctx.spill_base_off,
         ctx.func_idx,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
         ins.extra,
     );
 }

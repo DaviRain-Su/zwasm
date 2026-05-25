@@ -159,7 +159,7 @@ fn emitV128ExtractLane(
     // SPILL-EXEMPT: scalar lane result (GPR); spill-aware path is its own follow-on alongside other GPR sites.
     const result_x = try gpr.resolveGpr(ctx.alloc, result_vreg);
 
-    const lane = ins.payload & lane_mask;
+    const lane: u32 = @intCast(ins.payload & lane_mask);
     try gpr.writeU32(ctx.allocator, ctx.buf, encoder(result_x, src_v, lane));
     try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
 }
@@ -187,7 +187,7 @@ fn emitV128ReplaceLane(
     if (src_v != result_v) {
         try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(result_v, src_v));
     }
-    const lane = ins.payload & lane_mask;
+    const lane: u32 = @intCast(ins.payload & lane_mask);
     try gpr.writeU32(ctx.allocator, ctx.buf, encoder(result_v, new_lane_x, lane));
     try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 1);
     try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
@@ -816,7 +816,7 @@ pub fn emitI8x16Shuffle(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encLdrLiteralQ(result_v, 0));
     try ctx.simd_const_fixups.append(ctx.allocator, .{
         .byte_offset = fixup_byte,
-        .const_idx = ins.payload,
+        .const_idx = @intCast(ins.payload),
     });
 
     // TBL V<result>.16B, { V30.16B, V31.16B }, V<result>.16B.

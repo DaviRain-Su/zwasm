@@ -47,7 +47,7 @@ pub fn emitF32Const(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void 
         ctx.next_vreg,
         ctx.spill_base_off,
         ins.op,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
         ins.extra,
     );
 }

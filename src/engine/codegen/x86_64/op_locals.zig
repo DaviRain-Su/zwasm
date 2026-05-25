@@ -179,7 +179,7 @@ pub fn emitLocalGetCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
         ctx.func,
         ctx.total_locals,
         ctx.local_disps,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
     );
 }
 
@@ -196,7 +196,7 @@ pub fn emitLocalSetCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
         ctx.func,
         ctx.total_locals,
         ctx.local_disps,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
     );
 }
 
@@ -213,6 +213,6 @@ pub fn emitLocalTeeCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
         ctx.func,
         ctx.total_locals,
         ctx.local_disps,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
     );
 }

@@ -94,7 +94,7 @@ fn emitV128ExtractLaneFp(
     // SPILL-EXEMPT: FP scalar result; fpDefSpilled (D-form, 8-byte stride) is its own follow-on alongside other FP-side sites.
     const result_v = try gpr.resolveFp(ctx.alloc, result_vreg);
 
-    const lane = ins.payload & lane_mask;
+    const lane: u32 = @intCast(ins.payload & lane_mask);
     try gpr.writeU32(ctx.allocator, ctx.buf, encoder(result_v, src_v, lane));
     try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
 }
@@ -138,7 +138,7 @@ fn emitV128ReplaceLaneFp(
     if (src_v != result_v) {
         try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(result_v, src_v));
     }
-    const lane = ins.payload & lane_mask;
+    const lane: u32 = @intCast(ins.payload & lane_mask);
     try gpr.writeU32(ctx.allocator, ctx.buf, encoder(result_v, lane, ins_src));
     try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 1);
     try ctx.pushed_vregs.append(ctx.allocator, result_vreg);

@@ -97,7 +97,7 @@ fn vregClassOfOp(ins: zir.ZirInstr, func: *const ZirFunc) ?VregClass {
         .@"f64.load",
         => .fpr,
         // local.get: from local valtype.
-        .@"local.get" => switch (func.localValType(ins.payload)) {
+        .@"local.get" => switch (func.localValType(@intCast(ins.payload))) {
             .f32, .f64 => VregClass.fpr,
             .v128 => VregClass.v128,
             .i32, .i64, .funcref, .externref => VregClass.gpr,

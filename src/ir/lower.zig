@@ -485,7 +485,7 @@ pub const Lowerer = struct {
     }
 
     // SIBLING-PUB: lower_simd.zig (per ADR-0089 extraction)
-    pub fn emit(self: *Lowerer, op: ZirOp, payload: u32, extra: u32) Error!void {
+    pub fn emit(self: *Lowerer, op: ZirOp, payload: u64, extra: u32) Error!void {
         // D-093 (d-1): skip ZirInstr emission while in the dead
         // region following an unconditional terminator. Operand
         // bytes are still consumed by the caller (the dispatch

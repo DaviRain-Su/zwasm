@@ -1032,7 +1032,7 @@ pub fn emitI32Const(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void 
     ctx.next_vreg.* += 1;
     if (vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
     const dst = try gpr.gprDefSpilled(ctx.alloc, vreg, 0);
-    try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm32W(dst, ins.payload).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm32W(dst, @truncate(ins.payload)).slice());
     try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, vreg, 0);
     try ctx.pushed_vregs.append(ctx.allocator, vreg);
 }

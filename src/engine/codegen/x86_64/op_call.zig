@@ -81,7 +81,7 @@ pub fn emitCallCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
         ctx.outgoing_max_bytes,
         ctx.func_sigs,
         ctx.num_imports,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
     );
 }
 
@@ -96,7 +96,7 @@ pub fn emitCallIndirectCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Erro
         ctx.spill_base_off,
         ctx.outgoing_max_bytes,
         ctx.module_types,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
         ins.extra,
     );
 }

@@ -145,7 +145,7 @@ fn emitDeriveTypeidxFromFuncref(
 /// the operand's value (silent miscompile mirror of the m-5 trap-
 /// stub R15 prescan bug).
 pub fn emitTableGet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
-    const tableidx = ins.payload;
+    const tableidx: u32 = @intCast(ins.payload);
     // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
     // imm12 budget reshaped by stride 16 → 24: W-form len/max
     // (byte_off ≤ 16380, scaled by 4) caps tableidx at (16380-12)/24
@@ -199,7 +199,7 @@ pub fn emitTableGet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// write `tables[x][idx] = val`. Traps `OutOfBoundsTableAccess` on
 /// idx >= table.len.
 pub fn emitTableSet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
-    const tableidx = ins.payload;
+    const tableidx: u32 = @intCast(ins.payload);
     if (tableidx >= 512) return Error.UnsupportedOp;
     const tbl_off: u15 = @intCast(@as(u32, tableidx) * jit_abi.table_slice_size);
 
@@ -272,7 +272,7 @@ pub fn emitTableSet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// the failure mode d-64 surfaced for `emitTableGet` /
 /// `emitTableSet` via the `funcref_roundtrip` reproducer.
 pub fn emitTableSize(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
-    const tableidx = ins.payload;
+    const tableidx: u32 = @intCast(ins.payload);
     if (tableidx >= 512) return Error.UnsupportedOp;
     const len_off: u14 = @intCast(@as(u32, tableidx) * jit_abi.table_slice_size + 8);
 
@@ -302,7 +302,7 @@ pub fn emitTableSize(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// X27 mem_limit) survive even though the callout did not
 /// touch linear memory.
 pub fn emitTableGrow(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
-    const tableidx = ins.payload;
+    const tableidx: u32 = @intCast(ins.payload);
     if (tableidx >= 512) return Error.UnsupportedOp;
 
     if (ctx.pushed_vregs.items.len < 2) return Error.AllocationMissing;
@@ -353,7 +353,7 @@ pub fn emitTableGrow(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// the TableSlice prologue load. Skipping this surfaces as silent
 /// miscompile (m-2a class bug).
 pub fn emitTableFill(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
-    const tableidx = ins.payload;
+    const tableidx: u32 = @intCast(ins.payload);
     if (tableidx >= 512) return Error.UnsupportedOp;
     const tbl_off: u15 = @intCast(@as(u32, tableidx) * jit_abi.table_slice_size);
 
@@ -469,7 +469,7 @@ pub fn emitTableFill(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 ///   W13 = dst_len / src_len (transient, reused per bounds check)
 ///   X15 = ref scratch (per-iter LDR target → STR source)
 pub fn emitTableCopy(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
-    const dst_tbl = ins.payload;
+    const dst_tbl: u32 = @intCast(ins.payload);
     const src_tbl = ins.extra;
     if (dst_tbl >= 512 or src_tbl >= 512) return Error.UnsupportedOp;
     const dst_tbl_off: u15 = @intCast(@as(u32, dst_tbl) * jit_abi.table_slice_size);
@@ -674,7 +674,7 @@ pub fn emitTableCopy(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 ///   X11 = dst_refs (from tables[x])
 ///   X12 = elem_refs (from elems[y]; len-overridden to 0 if dropped)
 pub fn emitTableInit(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
-    const elemidx = ins.payload;
+    const elemidx: u32 = @intCast(ins.payload);
     const tableidx = ins.extra;
     // tableidx cap = 512 (TableSlice stride 24, see ADR-0068 +
     // emitTableGet rationale). elemidx cap stays 1024 because

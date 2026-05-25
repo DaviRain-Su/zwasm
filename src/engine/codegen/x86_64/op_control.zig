@@ -1395,7 +1395,7 @@ pub fn emitBrCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
         ctx.uses_runtime_ptr,
         ctx.return_is_memory_class,
         ctx.indirect_result_slot_neg_off,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
     );
     ctx.dead_code.* = true;
 }
@@ -1413,7 +1413,7 @@ pub fn emitBrIfCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
         ctx.uses_runtime_ptr,
         ctx.return_is_memory_class,
         ctx.indirect_result_slot_neg_off,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
     );
 }
 
@@ -1430,7 +1430,7 @@ pub fn emitBrTableCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!voi
         ctx.uses_runtime_ptr,
         ctx.return_is_memory_class,
         ctx.indirect_result_slot_neg_off,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
         ins.extra,
     );
 }

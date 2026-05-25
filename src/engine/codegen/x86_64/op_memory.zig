@@ -241,7 +241,7 @@ pub fn emitI32Load(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
         ctx.bounds_fixups,
         ctx.spill_base_off,
         ins.op,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
         ctx.func_idx,
     );
 }
@@ -309,7 +309,7 @@ pub fn emitMemoryInitCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!
         ctx.bounds_fixups,
         ctx.spill_base_off,
         ctx.func_idx,
-        ins.payload,
+        @as(u32, @intCast(ins.payload)),
     );
 }
 

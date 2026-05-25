@@ -858,39 +858,39 @@ pub fn compile(
             // shapes follow in 9.7-f). Splat broadcasts a scalar i32
             // across 4 lanes; extract_lane pulls one lane back to
             // scalar via PEXTRD (SSE4.1).
-            .@"i32x4.extract_lane" => try op_simd_int_cmp_lane.emitI32x4ExtractLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
+            .@"i32x4.extract_lane" => try op_simd_int_cmp_lane.emitI32x4ExtractLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, @as(u32, @intCast(ins.payload))),
             // §9.7 / 9.7-aw: i64x2.extract_lane via PEXTRQ (SSE4.1
             // REX.W=1 variant of PEXTRD). Mirror of i32x4.extract_
             // lane handler with u1 lane (i64x2 has 2 lanes).
-            .@"i64x2.extract_lane" => try op_simd_int_cmp_lane.emitI64x2ExtractLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
+            .@"i64x2.extract_lane" => try op_simd_int_cmp_lane.emitI64x2ExtractLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, @as(u32, @intCast(ins.payload))),
             // §9.7 / 9.7-f: replace_lane for the wide-int v128 shapes.
             // PINSRD (32-bit) / PINSRQ (64-bit, REX.W mandatory) plus a
             // MOVAPS preamble when dst doesn't alias the input vec.
-            .@"i32x4.replace_lane" => try op_simd_int_cmp_lane.emitI32x4ReplaceLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
-            .@"i64x2.replace_lane" => try op_simd_int_cmp_lane.emitI64x2ReplaceLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
+            .@"i32x4.replace_lane" => try op_simd_int_cmp_lane.emitI32x4ReplaceLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, @as(u32, @intCast(ins.payload))),
+            .@"i64x2.replace_lane" => try op_simd_int_cmp_lane.emitI64x2ReplaceLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, @as(u32, @intCast(ins.payload))),
             // §9.7 / 9.7-g: narrow-int lane access (i8x16 / i16x8).
             // PEXTRB / PEXTRW + optional MOVSX for signed extract.
             // PINSRB / PINSRW + MOVAPS preamble for replace.
-            .@"i8x16.extract_lane_s" => try op_simd_int_cmp_lane.emitI8x16ExtractLaneS(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
-            .@"i8x16.extract_lane_u" => try op_simd_int_cmp_lane.emitI8x16ExtractLaneU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
-            .@"i16x8.extract_lane_s" => try op_simd_int_cmp_lane.emitI16x8ExtractLaneS(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
-            .@"i16x8.extract_lane_u" => try op_simd_int_cmp_lane.emitI16x8ExtractLaneU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
-            .@"i8x16.replace_lane" => try op_simd_int_cmp_lane.emitI8x16ReplaceLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
-            .@"i16x8.replace_lane" => try op_simd_int_cmp_lane.emitI16x8ReplaceLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, ins.payload),
+            .@"i8x16.extract_lane_s" => try op_simd_int_cmp_lane.emitI8x16ExtractLaneS(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, @as(u32, @intCast(ins.payload))),
+            .@"i8x16.extract_lane_u" => try op_simd_int_cmp_lane.emitI8x16ExtractLaneU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, @as(u32, @intCast(ins.payload))),
+            .@"i16x8.extract_lane_s" => try op_simd_int_cmp_lane.emitI16x8ExtractLaneS(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, @as(u32, @intCast(ins.payload))),
+            .@"i16x8.extract_lane_u" => try op_simd_int_cmp_lane.emitI16x8ExtractLaneU(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, @as(u32, @intCast(ins.payload))),
+            .@"i8x16.replace_lane" => try op_simd_int_cmp_lane.emitI8x16ReplaceLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, @as(u32, @intCast(ins.payload))),
+            .@"i16x8.replace_lane" => try op_simd_int_cmp_lane.emitI16x8ReplaceLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, @as(u32, @intCast(ins.payload))),
             // §9.7 / 9.7-h: integer splat siblings (i32x4 already
             // landed in 9.7-e). i8x16 via PSHUFB-broadcast; i16x8
             // via PSHUFLW + PSHUFD; i64x2 via PUNPCKLQDQ.
             // §9.7 / 9.7-i: f32x4 lane access trio. XMM-source
             // semantics — splat / extract reuse encPshufd; replace
             // uses the new INSERTPS encoder (SSE4.1 3A 21 /r ib).
-            .@"f32x4.extract_lane" => try op_simd_float.emitF32x4ExtractLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.payload),
-            .@"f32x4.replace_lane" => try op_simd_float.emitF32x4ReplaceLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.payload),
+            .@"f32x4.extract_lane" => try op_simd_float.emitF32x4ExtractLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, @as(u32, @intCast(ins.payload))),
+            .@"f32x4.replace_lane" => try op_simd_float.emitF32x4ReplaceLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, @as(u32, @intCast(ins.payload))),
             // §9.7 / 9.7-j: f64x2 lane access trio. splat + extract_lane
             // reuse encPshufd (imm 0x44 / 0xEE for low/high qword).
             // replace_lane uses MOVAPS preamble + MOVSD (lane=0) /
             // MOVLHPS (lane=1).
-            .@"f64x2.extract_lane" => try op_simd_float.emitF64x2ExtractLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.payload),
-            .@"f64x2.replace_lane" => try op_simd_float.emitF64x2ReplaceLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, ins.payload),
+            .@"f64x2.extract_lane" => try op_simd_float.emitF64x2ExtractLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, @as(u32, @intCast(ins.payload))),
+            .@"f64x2.replace_lane" => try op_simd_float.emitF64x2ReplaceLane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, @as(u32, @intCast(ins.payload))),
             // §9.7 / 9.7-k: int compare eq/ne family. PCMPEQ B/W/D
             // (SSE2) + PCMPEQQ (SSE4.1); ne paths apply NOT via
             // PXOR with an all-ones mask (PCMPEQB scratch, scratch).
@@ -1021,44 +1021,44 @@ pub fn compile(
             // access_size=16 + MOVUPS final encoding. RAX/RCX/RDX
             // scratches reused (pool-excluded). bounds_fixups +
             // spill_base_off + ins.payload threading mirrors i32.load.
-            .@"v128.load" => try op_simd.emitV128Load(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
-            .@"v128.store" => try op_simd.emitV128Store(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
+            .@"v128.load" => try op_simd.emitV128Load(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.store" => try op_simd.emitV128Store(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
             // §9.7 / 9.7-ay: v128.load{8,16,32,64}_splat (4 ops).
             // All reuse v128MemPrologue with appropriate access_size
             // + a per-lane-width broadcast tail. 8/16-bit go through
             // GPR (MOVZX + MOVD); 32/64-bit use MOVSS/MOVSD direct
             // load + PSHUFD broadcast.
-            .@"v128.load8_splat" => try op_simd.emitV128Load8Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
-            .@"v128.load16_splat" => try op_simd.emitV128Load16Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
-            .@"v128.load32_splat" => try op_simd.emitV128Load32Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
-            .@"v128.load64_splat" => try op_simd.emitV128Load64Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
+            .@"v128.load8_splat" => try op_simd.emitV128Load8Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load16_splat" => try op_simd.emitV128Load16Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load32_splat" => try op_simd.emitV128Load32Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load64_splat" => try op_simd.emitV128Load64Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
             // §9.7 / 9.7-az: v128.load{32,64}_zero (2 ops). Single-
             // instruction MOVSS/MOVSD memory load — the scalar form
             // already zero-extends the upper bits per Intel SDM.
-            .@"v128.load32_zero" => try op_simd.emitV128Load32Zero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
-            .@"v128.load64_zero" => try op_simd.emitV128Load64Zero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
+            .@"v128.load32_zero" => try op_simd.emitV128Load32Zero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load64_zero" => try op_simd.emitV128Load64Zero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
             // §9.7 / 9.7-ba: v128.load_lane / store_lane × 4 sizes
             // (8 ops). payload = memarg.offset; extra = lane byte.
             // Uses GPR roundtrip (MOVZX/MOV + PINSR/PEXTR reg-form);
             // store_lane PUSH/POPs RCX around the prologue's RCX-
             // clobbering LEA.
-            .@"v128.load8_lane" => try op_simd.emitV128Load8Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, ins.extra, func.func_idx),
-            .@"v128.load16_lane" => try op_simd.emitV128Load16Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, ins.extra, func.func_idx),
-            .@"v128.load32_lane" => try op_simd.emitV128Load32Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, ins.extra, func.func_idx),
-            .@"v128.load64_lane" => try op_simd.emitV128Load64Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, ins.extra, func.func_idx),
-            .@"v128.store8_lane" => try op_simd.emitV128Store8Lane(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, ins.payload, ins.extra, func.func_idx),
-            .@"v128.store16_lane" => try op_simd.emitV128Store16Lane(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, ins.payload, ins.extra, func.func_idx),
-            .@"v128.store32_lane" => try op_simd.emitV128Store32Lane(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, ins.payload, ins.extra, func.func_idx),
-            .@"v128.store64_lane" => try op_simd.emitV128Store64Lane(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, ins.payload, ins.extra, func.func_idx),
+            .@"v128.load8_lane" => try op_simd.emitV128Load8Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
+            .@"v128.load16_lane" => try op_simd.emitV128Load16Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
+            .@"v128.load32_lane" => try op_simd.emitV128Load32Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
+            .@"v128.load64_lane" => try op_simd.emitV128Load64Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
+            .@"v128.store8_lane" => try op_simd.emitV128Store8Lane(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
+            .@"v128.store16_lane" => try op_simd.emitV128Store16Lane(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
+            .@"v128.store32_lane" => try op_simd.emitV128Store32Lane(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
+            .@"v128.store64_lane" => try op_simd.emitV128Store64Lane(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
             // §9.7 / 9.7-bb: v128.load{8x8,16x4,32x2}_{s,u} (6 ops).
             // MOVSD load + PMOVSX/ZX{BW,WD,DQ} extend. No new
             // encoders. Closes the §9.7 v128 op surface.
-            .@"v128.load8x8_s" => try op_simd.emitV128Load8x8S(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
-            .@"v128.load8x8_u" => try op_simd.emitV128Load8x8U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
-            .@"v128.load16x4_s" => try op_simd.emitV128Load16x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
-            .@"v128.load16x4_u" => try op_simd.emitV128Load16x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
-            .@"v128.load32x2_s" => try op_simd.emitV128Load32x2S(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
-            .@"v128.load32x2_u" => try op_simd.emitV128Load32x2U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, ins.payload, func.func_idx),
+            .@"v128.load8x8_s" => try op_simd.emitV128Load8x8S(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load8x8_u" => try op_simd.emitV128Load8x8U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load16x4_s" => try op_simd.emitV128Load16x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load16x4_u" => try op_simd.emitV128Load16x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load32x2_s" => try op_simd.emitV128Load32x2S(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load32x2_u" => try op_simd.emitV128Load32x2U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
             // §9.7 / 9.7-af: native single-instr multiply-and-add
             // pair. PMULHRSW (SSSE3) implements Q15 multiply-round-
             // saturate exactly per Wasm spec; PMADDWD (SSE2)
@@ -1095,13 +1095,13 @@ pub fn compile(
             // b-mask, and appends both to extra_consts.
             .@"i8x16.shuffle" => {
                 const simd_consts_base: u32 = if (func.simd_consts) |sc| @intCast(sc.len) else 0;
-                try op_simd_int_cmp_lane.emitI8x16Shuffle(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &simd_const_fixups, &extra_consts, simd_consts_base, func.simd_consts, ins.payload);
+                try op_simd_int_cmp_lane.emitI8x16Shuffle(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &simd_const_fixups, &extra_consts, simd_consts_base, func.simd_consts, @as(u32, @intCast(ins.payload)));
             },
             // §9.7/9.7-al — v128.const via ADR-0042 const-pool
             // (mirror of ARM64 §9.6/9.6-f-ii). Lower pass stored
             // const_idx in ins.payload pointing into
             // func.simd_consts.
-            .@"v128.const" => try op_simd.emitV128Const(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &simd_const_fixups, ins.payload, spill_base_off),
+            .@"v128.const" => try op_simd.emitV128Const(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &simd_const_fixups, @as(u32, @intCast(ins.payload)), spill_base_off),
             // §9.7/9.7-am — i32x4.trunc_sat_f64x2_s_zero. Recipe
             // needs a shared INT32_MAX_f64-broadcast const; placed
             // into per-emit-pass extra_consts.

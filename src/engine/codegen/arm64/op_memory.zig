@@ -520,7 +520,7 @@ pub fn emitMemoryCopy(ctx: *EmitCtx) Error!void {
 ///   X15 = seg.len (overridden to 0 if dropped)
 ///   X9, X10, X12 = ad-hoc temps
 pub fn emitMemoryInit(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
-    const dataidx = ins.payload;
+    const dataidx: u32 = @intCast(ins.payload);
     // imm12 budget: LDR X-form scaled byte_off ≤ 32760 → idx ≤ 2047
     // (stride 16). LDRB imm12 ≤ 4095 → idx ≤ 4095. The 2047 bound
     // is the tighter one. Validator already bounds idx vs the

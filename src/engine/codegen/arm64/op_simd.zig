@@ -72,7 +72,7 @@ pub const simd_scratch_v: u5 = 31;
 /// the access. Mirrors `op_memory.emitMemOp`'s prologue exactly so
 /// any future bounds-check refinement (e.g. ADR-0028 M3-a-2 trap
 /// localisation) flows uniformly across scalar + v128 paths.
-fn v128MemPrologue(ctx: *EmitCtx, addr_vreg: u32, offset_imm: u32, access_size: u12) Error!void {
+fn v128MemPrologue(ctx: *EmitCtx, addr_vreg: u32, offset_imm: u64, access_size: u12) Error!void {
     const ip0: inst.Xn = 16;
     const ip1: inst.Xn = 17;
     // SPILL-EXEMPT: address staging mirrors op_memory.emitMemOp stage 0.
@@ -773,7 +773,7 @@ pub fn emitV128Const(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encLdrLiteralQ(result_v, 0));
     try ctx.simd_const_fixups.append(ctx.allocator, .{
         .byte_offset = fixup_byte,
-        .const_idx = ins.payload,
+        .const_idx = @intCast(ins.payload),
     });
 
     try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);

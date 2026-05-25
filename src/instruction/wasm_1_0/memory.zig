@@ -67,9 +67,9 @@ pub fn register(table: *DispatchTable) void {
 
 const wasm_page_size: usize = 65536;
 
-fn effectiveAddrStore(rt: *Runtime, offset: u32, width: usize) Trap!usize {
+fn effectiveAddrStore(rt: *Runtime, offset: u64, width: usize) Trap!usize {
     // Mirrors the inline addr math in `loadInt`; trap kind is Store here.
-    const ea: u64 = @as(u64, rt.popOperand().u32) + @as(u64, offset);
+    const ea: u64 = @as(u64, rt.popOperand().u32) + offset;
     if (ea + width > rt.memory.len) return Trap.OutOfBoundsStore;
     return @intCast(ea);
 }
@@ -109,9 +109,9 @@ fn f64Load(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     try rt.pushOperand(.{ .bits64 = bits });
 }
 
-fn loadInt(rt: *Runtime, comptime W: type, comptime sign_extend: bool, offset: u32) Trap!i64 {
+fn loadInt(rt: *Runtime, comptime W: type, comptime sign_extend: bool, offset: u64) Trap!i64 {
     const width = @sizeOf(W);
-    const ea: u64 = @as(u64, rt.popOperand().u32) + @as(u64, offset);
+    const ea: u64 = @as(u64, rt.popOperand().u32) + offset;
     if (ea + width > rt.memory.len) return Trap.OutOfBoundsLoad;
     const raw = std.mem.readInt(W, rt.memory[@intCast(ea)..][0..width], .little);
     if (sign_extend) {
