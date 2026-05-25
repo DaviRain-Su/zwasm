@@ -151,7 +151,7 @@ implementation train starts at J.2.
 | Risk | MEDIUM — direct parser call bypassing c_api needs verification (parser already exists; survey §4.1 confirms `parse(alloc, input)` entry exists at `src/parse/parser.zig:66`). Engine ownership of per-instance `runtime.Runtime` instances must avoid double-free with c_api's parallel ownership. |
 | Commit message form | `feat(zwasm,p10): J.2 Engine + Module + allocator strict-pass per ADR-0109` |
 
-### J.3 — `Instance` + untyped `invoke` + full `Trap` error set re-export
+### J.3 — `Instance` + untyped `invoke` + full `Trap` error set re-export — **CLOSED `698c23ce`**
 
 | Field | Value |
 |---|---|

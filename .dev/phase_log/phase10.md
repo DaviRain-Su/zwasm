@@ -125,3 +125,18 @@ J.1+ gated on execution plan doc)
   `pub const Runtime` → `pub const Engine`. zone_check classifier
   extended `src/zwasm/*` → `lib`. Mac 1812/1826 PASS, I3 18/18,
   ubuntu kicked post-push (`017193bc`)
+- **10.J / J.3** — `src/zwasm/instance.zig` new (native `Instance`);
+  c_api veneer `Instance` + `valueToVal`/`valFromApi` deleted from
+  `src/zwasm.zig`. `Instance.invoke(name, args, results)` resolves
+  exports via `inst.exports_storage`, marshals zwasm.Value →
+  runtime.Value into locals, drives `dispatch.run` directly against
+  the process-shared dispatch table (lifted `dispatchTable()` `pub`
+  in `src/api/instance.zig`), and maps each dispatch error to the
+  corresponding `runtime.Trap` variant. `InvokeError = error{
+  ExportNotFound, NotAFunc, ArgArityMismatch, ResultArityMismatch }
+  || Trap` — all 12 spec trap variants individually addressable
+  (no TrapKind round-trip lossiness). `Trap` re-exported from
+  `runtime.Trap`. New tests: T1.3 (untyped invoke happy-path),
+  T1.4 (div-by-zero → `error.DivByZero`), T1.4-types (`@typeInfo`
+  walks the 12 Trap variant names). Mac 1815/1829 PASS,
+  I3 18/18, ubuntu kicked post-push (`698c23ce`)
