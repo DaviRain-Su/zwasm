@@ -9,12 +9,11 @@
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24)。
 - **10.D = CLOSED 2026-05-25**: 全 7 ADR (0111-0117) Accepted、
   impl rows unlocked。
-- **10.M-5 = SHIPPED 2026-05-25** (`96dafb3c`): validator memory64
-  widening + end-to-end test。`Validator.memory0_idx_type` 追加、
-  `skipMemarg` で bit-6 handling、`opLoad/opStore` で memAddrType()
-  dispatch (i32/i64)。Hand-crafted memory64 module (memory i64 1 +
-  i32.store/i32.load via i64 addr) が full chain (parser → validator
-  → lower → arm64 emitMemOpI64 → runtime) を抜けて 42 返却。
+- **10.M-5 = SHIPPED** (`96dafb3c`): validator memory64 widening + e2e test。
+- **10.M-close = SHIPPED 2026-05-25** (`b7556472`): `-Dwasm=v2_0`
+  symbol-absence gate at `scripts/check_phase10_close_invariants.sh`。
+  `nm` で `emitMemOpI64` symbol が v2.0 build に 0 件 (= comptime DCE
+  確認) を mechanical 検証。ADR-0111 D4 + Revision 2026-05-25。
 - **Mac `zig build test`**: green (substrate baseline)。
 
 ## Phase 10 progress
@@ -37,15 +36,20 @@ Per ADR-0111 (Accepted)。`phase10_design_plan_ja.md` §3.1 source-of-truth。
 - 10.M-4b [x] SHIPPED `d651d40b` (arm64 i64 wrap-check + memory0_idx_type plumbing)
 - 10.M-4c [x] SHIPPED `affef52f` (x86_64 i64 wrap-check mirror)
 - 10.M-5 [x] SHIPPED `96dafb3c` (validator memory64 widening + e2e test)
-- **10.M-close NEXT**: `-Dwasm=v2_0` symbol-absence gate を
-  `scripts/check_phase10_close_invariants.sh` に追加 (ADR-0111
-  Revision per user collab 1/7)。`nm` で `emitMemOpI64`-class symbol
-  が v2.0 build で 0 件であることを mechanical に検証。10.M parent
-  row を `[x]` flip するための最終条件。
-- 10.M-5b (deferrable): SIMD memarg memory64 support。
-  `validator_simd.zig::readSimdMemarg` + `lower_simd.zig::emitMemargLane`
-  が現在 align bit-6 を破棄中 (v128.load/store on i64-indexed memory
-  が validator-reject される)。同 pattern を SIMD 側に展開。
+- 10.M-close [x] SHIPPED `b7556472` (-Dwasm=v2_0 symbol-absence gate)
+- **10.M-fixture NEXT**: `test/edge_cases/p10/memory64/` に
+  最小 fixture (基本 store+load round-trip + page-edge access)。
+  在所の in-source e2e test (`runner.zig`) と等価セマンティクスを
+  .wat + .wasm + .expect triple として永続化 (ADR-0020
+  edge_case_testing 準拠)。fixture runner (test/edge_cases/runner.zig)
+  経由で `zig build test-all` から拾わせる。
+- 10.M-5b (deferrable): SIMD memarg memory64 support
+  (`validator_simd.zig::readSimdMemarg` + `lower_simd.zig::emitMemargLane`)。
+- 10.M-spec-corpus (deferrable): WebAssembly/memory64 spec testsuite
+  (~127 .wast files) を spec runner に wire-up。
+- 10.M-parent-close: ROADMAP §10 / 10.M row `[x]` flip。
+  Requires edge_cases + spec corpus + realworld/p10/clang_wasm64/
+  green (ADR-0111 row text)。
 
 **ADR-0113 callsite_metadata refactor**: 10.M は memory64 で
 bounds_fixups を **触らない** (ADR-0111 D6 ↔ orthogonal)。

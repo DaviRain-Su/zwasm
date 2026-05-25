@@ -269,6 +269,27 @@ close: -Dwasm=v2_0 symbol-absence gate).
 
 ### Sub-chunks (commit-time order)
 
+- **10.M-close** — `-Dwasm=v2_0` symbol-absence gate
+  (`b7556472`). Lands
+  `scripts/check_phase10_close_invariants.sh` with invariant
+  I1: `nm zig-out/bin/zwasm | grep -cE 'emitMemOpI64\b'`
+  must return 0 after `zig build -Dwasm=v2_0`. Mechanical
+  proof that the i64 emit arm is comptime-DCE'd from the
+  v2.0 build per ADR-0111 D4 + Revision 2026-05-25 (user
+  collab 1/7). Without this check, the "v2.0 = pure Wasm
+  2.0 substrate" guarantee would be runtime-skip-only;
+  the nm-grep makes the DCE structural. Verified: default
+  v3_0 build has 1 `emitMemOpI64` symbol; -Dwasm=v2_0 build
+  has 0. Script restores default cache slot on exit so
+  subsequent `zig build` doesn't pay from-scratch rebuild.
+  Mirrors `check_phase9_close_invariants.sh` structure;
+  future Phase 10 close criteria (GC strip, AOT serialise
+  round-trip per ADR-0117) extend this script. 10.M parent
+  row stays `[ ]` — additional ROADMAP §10 / 10.M exit
+  predicates (edge_cases + spec corpus + realworld/p10/
+  clang_wasm64 green) not yet discharged; flipping now is a
+  §18.3 violation.
+
 - **10.M-5** — validator memory64 widening + end-to-end test
   (`96dafb3c`). Closes the parser → validator → lowerer →
   codegen → runtime chain. **Validator** (`src/validate/
