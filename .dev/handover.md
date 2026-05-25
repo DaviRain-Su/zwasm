@@ -127,27 +127,26 @@ ROADMAP §10 = 13-row task table。
     cross-module + spec corpus + regalloc terminator-class 残)
 - Pending: 10.E / 10.G / 10.P
 
-## Active task — ADR-0115 (GC heap + collector) reference enrichment
+## Active task — ADR-0116 (GC roots + RTT + i31) reference enrichment
 
-ADR-0117 enriched (`04e0baf3`) with 3 concrete wasmtime
-cross-subsystem citations (TryTable reverse-order, ReturnCall
-terminator, safepoint × moving-GC). Next: ADR-0115 (GC heap +
-collector design) reference enrichment from wasmtime
-`crates/wasmtime/src/runtime/vm/gc/` (drc.rs deferred reference-
-counted collector, gc_runtime.rs heap interface) + cranelift
-`crates/cranelift/src/func_environ/gc/enabled.rs` (per-op
-codegen).
+ADR-0115 enriched (`b12e8600`) with 4 concrete wasmtime citations
+(GcRuntime factory, GcHeap trait vtable, DrcCollector, NullCollector).
+Next: ADR-0116 (GC roots + RTT + i31) reference enrichment from
+wasmtime `crates/wasmtime/src/runtime/vm/gc/` (gc_ref.rs root
+table, i31.rs i31 unboxed representation, trace_info.rs root
+tracing).
 
-Same shape as the ADR-0117 enrichment: docs-only commit, cites
+Same shape as the ADR-0115 enrichment: docs-only commit, cites
 specific file/line references, autonomous-prep value retained
-for user collab review at ADR-flip / phase-close time.
+for user collab review at ADR-flip time.
 
-Refs: ADR-0115, wasmtime gc/ + cranelift gc/ source trees.
+Refs: ADR-0116, wasmtime gc/ source.
 
 **Next sub-chunk candidates (names only, NO predictions)**:
-- ADR-0115 (GC heap + collector) reference enrichment (active)
-- ADR-0116 (GC roots + RTT + i31) reference enrichment
+- ADR-0116 (GC roots + RTT + i31) reference enrichment (active)
 - ADR-0111 (memory64) reference enrichment
+- ADR-0112 / ADR-0113 / ADR-0114 reference re-walk (already
+  partially enriched in prior cycles; re-check for gaps)
 - 10.E-codegen-4c — throw / throw_ref emit body (deferred per lesson)
 - 10.E-codegen-4b-2 — try_table emit body via ExceptionTable.Builder
 - 10.TC-3f/g/h — tail-call follow-ons (same chain-level concern)
