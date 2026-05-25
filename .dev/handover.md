@@ -17,12 +17,13 @@
   parent row `[ ]` 留め — `(ref $sig)` typed reftype precision
   が 10.G で typed catalogue 拡張時に validator を引き締めるまで
   scope 不完全。
-- **10.TC-1 = SHIPPED 2026-05-25** (`a83e095f`): return_call +
-  return_call_indirect interp impl + tailReturn helper refactor
-  (10.R-5 returnCallRef も同 helper 使うよう dedup)。lower 0x12/0x13、
-  validator opReturnCall + opReturnCallIndirect (checkResultsMatchFnReturn
-  helper)、interp mvp.zig 各ハンドラ。4 unit tests in trap_audit.zig。
-- **Mac `zig build test-all`**: green (scope=unclear → test-all)。
+- **10.TC-1 = SHIPPED** (`a83e095f`): return_call + return_call_indirect
+  interp impl + tailReturn helper。
+- **10.TC-1b = SHIPPED 2026-05-25** (`b7562e5c`): validator unit
+  test coverage (6 tests) — return_call/return_call_indirect positive
+  + 5 negative paths (fn-return mismatch / funcidx OOB / non-funcref
+  table) via public `validateFunction` API。
+- **Mac `zig build test`**: green。
 
 ## Phase 10 progress
 
@@ -43,19 +44,27 @@ row。
 **10.TC sub-chunk progress**:
 
 - 10.TC-1 [x] SHIPPED `a83e095f` (return_call + return_call_indirect
-  interp + tailReturn dedup; return_call_ref refactored to use same
-  helper)
-- **10.TC-2 NEXT**: spec corpus wire-up — `scripts/import_proposal_corpus.sh`
-  で tail-call spec testsuite (95 wast per row text) を
-  `test/spec/wasm_3_0_proposals/tail_call/` 配下に import し、
-  `spec_assert_runner_wasm_3_0.zig` から走らせて Mac + ubuntu で
-  interp パス確認。codegen は次 sub-chunk なので interp-only でも
-  spec assertions の大半は通る見込み。
-- 10.TC-3+: regalloc terminator-class 拡張 (ADR-0113 §A) +
-  `op_tail_call.zig` 新規 + `frame_teardown.zig` helper + codegen
-  arm64/x86_64 経路 + `cross_module_tail_call.zig` (ADR-0066 thunk
-  不再利用 per row text) + EH × TC cross fixture。複数 sub-chunk
-  にわたる codegen heavy。
+  interp + tailReturn dedup)
+- 10.TC-1b [x] SHIPPED `b7562e5c` (validator unit tests; 6 cases)
+- **10.TC-2 (deferred to post-codegen)**: spec corpus full wire-up
+  needs JIT codegen for return_call/_indirect/_ref — `runner.compileWasm`
+  goes through codegen which doesn't yet have these op handlers。spec
+  corpus は `test/spec/wasm-3.0-assert/tail-call/` に import 済みだが
+  実行は codegen 後。**Adopt RunnerCallbacks 経由の interp-only spec
+  runner is large** (spec_assert_runner_base ~4000 LOC + per-proposal
+  ~2000 LOC specialization)。
+- **10.TC-3 NEXT**: regalloc terminator-class 拡張 (ADR-0113 §A) +
+  `op_tail_call.zig` codegen 着手。複数 sub-chunk にわたる codegen
+  heavy。
+
+**Other Phase 10 candidates** (parallelisable; pick based on
+scope budget per cycle):
+- 10.M-5b: SIMD memarg memory64 (validator + lower + codegen)
+- 10.E-1: EH interp foundation — try_table parse + tag section
+  parse + validator skeleton (interp path; codegen deferred to 10.E-N)
+- 10.G-1: i31 ops (smallest of GC ops; ref.i31 / i31.get_s /
+  i31.get_u; no heap needed since i31 is value-coded)
+- 10.G-2: Module.needs_gc_heap parse-time detector
 
 **Other Phase 10 candidates** (after 10.TC-2):
 - 10.M-5b: SIMD memarg memory64
