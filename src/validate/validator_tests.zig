@@ -740,6 +740,48 @@ test "validate (try_table): unknown catch kind byte rejected" {
     try testing.expectError(Error.BadBlockType, r);
 }
 
+// ============================================================
+// Wasm 3.0 EH throw / throw_ref validator coverage (10.E-4)
+// ============================================================
+
+test "validate (throw): polymorphic-stack from terminator" {
+    // body: throw 0 ; end
+    // Even though caller is () -> i32, throw marks the rest unreachable
+    // and the function's end_type (i32) is satisfied polymorphically.
+    const body = [_]u8{ 0x08, 0x00, 0x0B };
+    try validateFunction(i32_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
+test "validate (throw): code after throw is unreachable" {
+    // body: throw 0 ; i32.const 99 ; end
+    // i32.const after throw runs in polymorphic mode; end_type i32
+    // satisfied polymorphically (no explicit value left on stack).
+    const body = [_]u8{ 0x08, 0x00, 0x41, 0x63, 0x0B };
+    try validateFunction(i32_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
+test "validate (throw_ref): pops reftype + marks unreachable" {
+    // body: ref.null funcref ; throw_ref ; end
+    // ref.null 0x70 (funcref) pushes a funcref; throw_ref pops it
+    // and marks unreachable.
+    const body = [_]u8{ 0xD0, 0x70, 0x0A, 0x0B };
+    try validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
+test "validate (throw_ref): empty stack → StackUnderflow" {
+    // body: throw_ref ; end (no reftype on stack)
+    const body = [_]u8{ 0x0A, 0x0B };
+    const r = validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+    try testing.expectError(Error.StackUnderflow, r);
+}
+
+test "validate (throw_ref): non-reftype on stack → StackTypeMismatch" {
+    // body: i32.const 0 ; throw_ref ; end
+    const body = [_]u8{ 0x41, 0x00, 0x0A, 0x0B };
+    const r = validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+    try testing.expectError(Error.StackTypeMismatch, r);
+}
+
 test "validate (tail-call): return_call_indirect with fn-return mismatch fails" {
     // caller sig: () -> () (empty); module_types[0] = () -> i32 → mismatch.
     const body = [_]u8{ 0x41, 0x00, 0x13, 0x00, 0x00, 0x0B };

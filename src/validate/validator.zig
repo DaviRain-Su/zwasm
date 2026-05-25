@@ -574,6 +574,10 @@ pub const Validator = struct {
             0x04 => try self.opIf(),
             // Wasm 3.0 EH `try_table` (§3.3.10.6 / §4.5).
             0x1F => try self.opTryTable(),
+            // Wasm 3.0 EH `throw tag_idx` (§3.3.10.7).
+            0x08 => try self.opThrow(),
+            // Wasm 3.0 EH `throw_ref` (§3.3.10.8).
+            0x0A => try self.opThrowRef(),
             0x05 => try self.opElse(),
             0x0B => try self.opEnd(),
             0x0C => try self.opBr(),
@@ -718,6 +722,38 @@ pub const Validator = struct {
     /// unwind path. Catch encoding per §4.5: 0x00 catch / 0x01
     /// catch_ref carry tag_idx + label_idx; 0x02 catch_all / 0x03
     /// catch_all_ref carry label_idx only.
+    /// Wasm spec 3.0 §3.3.10.7 — `throw tag_idx`: raise an
+    /// exception with the tag's payload. Pops the tag's params
+    /// from the operand stack; polymorphic-stack from here
+    /// (terminator). Tag-index range validation + per-param
+    /// type popping pending Module.tags wiring (10.E-N) — for
+    /// now the foundation skeleton reads + skips the tag_idx
+    /// and marks unreachable.
+    fn opThrow(self: *Validator) Error!void {
+        _ = try leb128.readUleb128(u32, self.body, &self.pos);
+        // TODO(10.E-N): once Module.tags reaches the validator,
+        // pop the tag's param types here. Skipping for now lets
+        // body validation accept `throw` without false-positive
+        // stack-mismatch errors; downstream polymorphic-mode
+        // handles the unreachable suffix.
+        self.markUnreachable();
+    }
+
+    /// Wasm spec 3.0 §3.3.10.8 — `throw_ref`: re-raise an
+    /// exception via an `exnref` on the operand stack.
+    /// Polymorphic-stack from here. v2.0 catalogue can't express
+    /// the (ref null exn) type so we accept any reftype as the
+    /// popped value (same caveat as 10.R-1..5 typed-ref
+    /// catalogue limitation).
+    fn opThrowRef(self: *Validator) Error!void {
+        const top = try self.popAny();
+        switch (top) {
+            .bot => {},
+            .known => |t| if (t != .funcref and t != .externref) return Error.StackTypeMismatch,
+        }
+        self.markUnreachable();
+    }
+
     fn opTryTable(self: *Validator) Error!void {
         const bt = try self.readBlockType();
         try self.validateCatchVec();

@@ -195,6 +195,19 @@ pub const Lowerer = struct {
             // wiring — the catch vec is parsed-and-discarded; body
             // runs like a block; full catch dispatch lands at 10.E-5.
             0x1F => try self.openTryTable(),
+            // Wasm 3.0 EH `throw tag_idx` (§4.5): raise an exception
+            // with the tag's payload. Terminator — marks the rest of
+            // the block unreachable in the lowerer.
+            0x08 => {
+                try self.emitUlebPayload(.throw);
+                self.markUnreachable();
+            },
+            // Wasm 3.0 EH `throw_ref`: re-raise the exception held by
+            // the top-of-stack exnref. Terminator like `throw`.
+            0x0A => {
+                try self.emit(.throw_ref, 0, 0);
+                self.markUnreachable();
+            },
             0x05 => try self.emitElse(),
             0x0B => {
                 if (self.block_stack_len == 0) {

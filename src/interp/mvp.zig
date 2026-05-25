@@ -73,6 +73,11 @@ pub fn register(table: *DispatchTable) void {
     // semantics as `block` for the no-exception path. Full catch
     // dispatch + frame unwind on `throw` land at 10.E-5.
     table.interp[op(.try_table)] = blockOp;
+    // Wasm 3.0 EH `throw` / `throw_ref` foundation: trap with
+    // UncaughtException for now. Full catch dispatch via the
+    // enclosing try_table's catch vec lands at 10.E-5.
+    table.interp[op(.throw)] = throwOp;
+    table.interp[op(.throw_ref)] = throwRefOp;
     table.interp[op(.loop)] = loopOp;
     table.interp[op(.@"if")] = ifOp;
     table.interp[op(.@"else")] = elseOp;
@@ -538,6 +543,20 @@ pub fn invoke(rt: *Runtime, table: *const DispatchTable, callee: *const zir.ZirF
     const run_err = dispatch_loop_local.run(rt, table, callee.instrs.items);
     _ = rt.popFrame();
     try run_err;
+}
+
+/// Wasm 3.0 EH `throw tag_idx` foundation: trap immediately
+/// since the unwind path to a matching `try_table` catch is not
+/// yet implemented. Full catch dispatch + frame walk lands at
+/// 10.E-5.
+fn throwOp(_: *InterpCtx, _: *const ZirInstr) anyerror!void {
+    return Trap.UncaughtException;
+}
+
+/// Wasm 3.0 EH `throw_ref` foundation: same as `throwOp` —
+/// trap until 10.E-5 implements the unwind path.
+fn throwRefOp(_: *InterpCtx, _: *const ZirInstr) anyerror!void {
+    return Trap.UncaughtException;
 }
 
 fn returnOp(c: *InterpCtx, _: *const ZirInstr) anyerror!void {

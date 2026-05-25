@@ -32,6 +32,13 @@ pub const Trap = error{
     /// Wasm 3.0 typed function references (§3.3.8): `ref.as_non_null`
     /// trap on null ref. Spec message: "null reference".
     NullReference,
+    /// Wasm 3.0 exception-handling proposal (§3.3.10.7 / §4.5):
+    /// `throw` / `throw_ref` raised an exception that escaped the
+    /// outermost function without a matching catch in any
+    /// enclosing `try_table` frame. Phase 10's interp foundation
+    /// (10.E-4) traps uncaught exceptions immediately; full catch
+    /// dispatch + frame unwind lands at 10.E-5.
+    UncaughtException,
 };
 
 /// Per-instruction trace event (Phase 6 / §9.6 / 6.A per ADR-0013).
