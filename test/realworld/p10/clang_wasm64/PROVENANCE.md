@@ -19,4 +19,27 @@ emcc -sMEMORY64=1 <src>.c -o <name>.c.wasm
 arm64 + x86_64 work — the runtime mmap call returns a single
 contiguous region per Memory).
 
-**Status**: SKIP-P10-MEM64-GAP until 10.M impl row lands.
+**Status** (2026-05-26 update): the 10.M impl row interp + codegen
++ SIMD memarg are SHIPPED — memory64 paths are fully exercised by
+`test/edge_cases/p10/memory64/` (3 fixtures: page-edge load,
+bounds trap, store-load round-trip via i64 addr) and the
+`test/spec/wasm-3.0-assert/memory64/` smoke corpus (6 manifests,
+337 assert_return + 205 assert_trap directives baked from upstream
+spec testsuite). The remaining gap for *this* directory's
+realworld fixtures is **toolchain-side**, not impl-side:
+
+- Needs `emcc -sMEMORY64=1` (emscripten 3.x) on the build host
+  to compile `big_alloc.c` / `big_memcpy.c` into Wasm binaries.
+- Needs a 64-bit test host (Mac aarch64 + Linux x86_64 qualify;
+  Win64 also OK per ADR-0111 D5 — `MapViewOfFile3` for >4 GiB).
+
+Once the build host has the toolchain set up (or pre-built
+artifacts are sourced from upstream emscripten test suites),
+drop the `big_alloc.c.wasm` + `big_memcpy.c.wasm` + matching
+`.expect` files here. The `test/realworld/runner.zig` already
+walks this directory; the fixtures will execute on landing.
+
+Skip token retired from impl-driven to toolchain-driven:
+**`SKIP-P10-MEM64-REALWORLD-TOOLCHAIN`** — emcc not in PATH or
+not configured with `-sMEMORY64=1` support. The original
+`SKIP-P10-MEM64-GAP` (impl-driven) is dissolved by this update.
