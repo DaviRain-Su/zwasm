@@ -32,11 +32,17 @@ const std = @import("std");
 
 const frame_chain_adapter = @import("frame_chain_adapter.zig");
 
-/// One JIT-emitted function's address range.
+/// One JIT-emitted function's address range. `frame_bytes` is
+/// the prologue's `SUB SP, SP, #N` (arm64) / `SUB RSP, #N`
+/// (x86_64) frame-allocation size — the EH SP-restore path
+/// applies this same subtraction after `MOV SP, X29` (arm64)
+/// / `MOV RSP, RBP` (x86_64) to recover the handler frame's
+/// prologue-completion SP boundary.
 pub const Entry = struct {
     start_addr: usize,
     len: u32,
     func_idx: u32,
+    frame_bytes: u32 = 0,
 };
 
 /// Lookup outcome.
@@ -289,6 +295,31 @@ test "code_map: normalizeForUnwind — outside → non_jit_pc_sentinel" {
 
     const rel = normalizeForUnwind(0x8000, @ptrCast(@constCast(&m)));
     try testing.expectEqual(non_jit_pc_sentinel, rel);
+}
+
+test "code_map: Entry.frame_bytes defaults to 0 for back-compat" {
+    var b: Builder = .empty;
+    defer b.deinit(testing.allocator);
+    try b.add(testing.allocator, .{ .start_addr = 0x9000, .len = 50, .func_idx = 0 });
+    const m = b.finalize();
+    try testing.expectEqual(@as(u32, 0), m.entries[0].frame_bytes);
+}
+
+test "code_map: Entry.frame_bytes round-trips when explicitly set" {
+    var b: Builder = .empty;
+    defer b.deinit(testing.allocator);
+    try b.add(testing.allocator, .{
+        .start_addr = 0xA000,
+        .len = 100,
+        .func_idx = 0,
+        .frame_bytes = 64,
+    });
+    const m = b.finalize();
+    try testing.expectEqual(@as(u32, 64), m.entries[0].frame_bytes);
+
+    const hit = m.lookup(0xA042);
+    try testing.expect(hit == .inside);
+    try testing.expectEqual(@as(u32, 0x42), hit.inside.relative_pc);
 }
 
 test "code_map: adapterContextFor produces a Context the adapter can consume" {

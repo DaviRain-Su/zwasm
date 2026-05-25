@@ -41,6 +41,31 @@ pub fn emitSpFromGpr(
     try buf.appendSlice(allocator, enc.slice());
 }
 
+/// Emit the full SP-restore sequence: `MOV RSP, src_gpr` followed
+/// by `SUB RSP, #frame_bytes` (Imm8 form for ≤127; Imm32 form
+/// otherwise). For `frame_bytes == 0`, identical to
+/// `emitSpFromGpr`.
+///
+/// The trampoline calls this from the .handler return path
+/// with `src_gpr` holding `handler_fp` and `frame_bytes` =
+/// `code_map.Entry.frame_bytes` of the catching function.
+pub fn emitSpRestoreFull(
+    allocator: std.mem.Allocator,
+    buf: *std.ArrayList(u8),
+    src_gpr: inst.Gpr,
+    frame_bytes: u32,
+) !void {
+    try emitSpFromGpr(allocator, buf, src_gpr);
+    if (frame_bytes == 0) return;
+    if (frame_bytes <= 127) {
+        const enc = inst.encSubRSpImm8(@intCast(frame_bytes));
+        try buf.appendSlice(allocator, enc.slice());
+    } else {
+        const enc = inst.encSubRSpImm32(@intCast(frame_bytes));
+        try buf.appendSlice(allocator, enc.slice());
+    }
+}
+
 // ---------------------------------------------------------------------
 // Unit tests — byte-level snapshots for the MOV r/m64, r64
 // encoding. Mac-host tests verify the encoding directly via the
@@ -92,4 +117,44 @@ test "sp_restore x86_64: emitSpFromGpr R11 — handler_fp returned in R11 (REX.W
     try testing.expectEqual(@as(u8, 0x4C), buf.items[0]);
     try testing.expectEqual(@as(u8, 0x89), buf.items[1]);
     try testing.expectEqual(@as(u8, 0xDC), buf.items[2]);
+}
+
+test "sp_restore x86_64: emitSpRestoreFull frame_bytes=0 → MOV RSP, Rsrc only (3 bytes)" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+
+    try emitSpRestoreFull(testing.allocator, &buf, .rbp, 0);
+    try testing.expectEqual(@as(usize, 3), buf.items.len);
+    try testing.expectEqual(@as(u8, 0x48), buf.items[0]);
+    try testing.expectEqual(@as(u8, 0x89), buf.items[1]);
+    try testing.expectEqual(@as(u8, 0xEC), buf.items[2]);
+}
+
+test "sp_restore x86_64: emitSpRestoreFull frame_bytes=16 → MOV RSP,RBP + SUB RSP,#16 (Imm8 = 7 bytes)" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+
+    try emitSpRestoreFull(testing.allocator, &buf, .rbp, 16);
+    try testing.expectEqual(@as(usize, 7), buf.items.len);
+    // MOV RSP, RBP → 48 89 EC
+    try testing.expectEqual(@as(u8, 0x48), buf.items[0]);
+    try testing.expectEqual(@as(u8, 0x89), buf.items[1]);
+    try testing.expectEqual(@as(u8, 0xEC), buf.items[2]);
+    // SUB RSP, 16 → 48 83 EC 10
+    try testing.expectEqual(@as(u8, 0x48), buf.items[3]);
+    try testing.expectEqual(@as(u8, 0x83), buf.items[4]);
+    try testing.expectEqual(@as(u8, 0xEC), buf.items[5]);
+    try testing.expectEqual(@as(u8, 0x10), buf.items[6]);
+}
+
+test "sp_restore x86_64: emitSpRestoreFull frame_bytes=256 promotes SUB to Imm32 (10 bytes)" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+
+    try emitSpRestoreFull(testing.allocator, &buf, .rbp, 256);
+    try testing.expectEqual(@as(usize, 10), buf.items.len);
+    // MOV RSP, RBP (3 bytes) + SUB RSP, 256 via Imm32 (7 bytes).
+    try testing.expectEqual(@as(u8, 0x81), buf.items[4]); // Imm32 opcode
+    try testing.expectEqual(@as(u8, 0x00), buf.items[6]); // low byte of 256
+    try testing.expectEqual(@as(u8, 0x01), buf.items[7]); // high byte of 256
 }
