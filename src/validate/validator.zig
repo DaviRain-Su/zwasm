@@ -672,6 +672,7 @@ pub const Validator = struct {
             0xD3 => try self.opRefAsNonNull(),
             0xD4 => try self.opBrOnNull(),
             0xD6 => try self.opBrOnNonNull(),
+            0x14 => try self.opCallRef(),
 
             // Wasm 2.0 prefix opcodes (§9.2 / 2.3 chunk 2 onward)
             0xFC => try self.dispatchPrefixFC(),
@@ -1074,6 +1075,39 @@ pub const Validator = struct {
                 for (prefix) |t| try self.pushType(t);
             },
         }
+    }
+
+    /// Wasm spec 3.0 §3.3.8.10 (function-references proposal):
+    /// `call_ref typeidx` — pop a funcref (whose typed signature
+    /// must match `module_types[typeidx]`); pop the args matching
+    /// that signature's params; push the signature's results.
+    /// Runtime separately traps if the funcref is null
+    /// (Trap.NullReference) or its actual sig mismatches
+    /// (Trap.IndirectCallTypeMismatch).
+    ///
+    /// v2.0 reftype catalogue can't express the per-funcref typed
+    /// signature, so the validator only checks that the topmost
+    /// stack entry is a reftype (funcref / externref / .bot). The
+    /// runtime side enforces the sig-equality. Typed `(ref $sig)`
+    /// validation arrives with 10.G.
+    fn opCallRef(self: *Validator) Error!void {
+        const type_idx = try leb128.readUleb128(u32, self.body, &self.pos);
+        if (type_idx >= self.module_types.len) return Error.InvalidFuncIndex;
+        const callee = self.module_types[type_idx];
+        // Pop topmost funcref (polymorphic over funcref/externref/.bot
+        // per the v2.0 catalogue limitation).
+        const top = try self.popAny();
+        switch (top) {
+            .bot => {},
+            .known => |t| if (t != .funcref and t != .externref) return Error.StackTypeMismatch,
+        }
+        // Pop args in reverse, then push results.
+        var i: usize = callee.params.len;
+        while (i > 0) {
+            i -= 1;
+            try self.popExpect(callee.params[i]);
+        }
+        for (callee.results) |r| try self.pushType(r);
     }
 
     /// Wasm spec §3.4.7.3 / §3.4.10 (ref.func x): read funcidx,

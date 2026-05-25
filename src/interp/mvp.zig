@@ -79,6 +79,15 @@ pub fn register(table: *DispatchTable) void {
     table.interp[op(.@"return")] = returnOp;
     table.interp[op(.call)] = callOp;
     table.interp[op(.call_indirect)] = callIndirectOp;
+    // Wasm 3.0 typed function references (function-references proposal).
+    // Lives here (Zone 2) rather than in instruction/wasm_3_0/ (Zone 1)
+    // because the handler invokes a callee body via `invoke()` + the
+    // interp dispatch loop, both of which are Zone 2. The feature-level
+    // gate in src/ir/feature_level_check.zig (`v3_op_tags` includes
+    // `.call_ref`) prevents the lowering layer from emitting this op
+    // when `wasm_3_0` is disabled — so unconditional registration here
+    // is harmless on Wasm-2.0-only builds.
+    table.interp[op(.call_ref)] = callRefOp;
 
     // Parametric
     table.interp[op(.drop)] = drop;
@@ -342,6 +351,34 @@ fn callIndirectOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const fe = runtime.Value.refAsFuncEntity(ref_v) orelse return Trap.UninitializedElement;
     const callee_rt = fe.runtime;
     if (fe.func_idx >= callee_rt.funcs.len) return Trap.UninitializedElement;
+    const callee = callee_rt.funcs[fe.func_idx];
+
+    if (instr.payload >= rt.module_types.len) return Trap.IndirectCallTypeMismatch;
+    const expected = rt.module_types[instr.payload];
+    if (!sigEq(callee.sig, expected)) return Trap.IndirectCallTypeMismatch;
+
+    const dispatch_tbl = rt.table orelse return Trap.Unreachable;
+    try invoke(rt, dispatch_tbl, callee);
+}
+
+/// Wasm spec 3.0 §3.3.8.10 (`call_ref typeidx`): pops a funcref;
+/// if null → Trap.NullReference (§3.3.8.10 step 2). Else decodes
+/// the funcref to a FuncEntity, verifies its signature equals
+/// `module_types[typeidx]` (else Trap.IndirectCallTypeMismatch),
+/// and invokes the callee body — same cross-module dispatch path
+/// as `call_indirect` (§3.4 / 6.K.3 via `fe.runtime`). Encoding:
+/// `instr.payload` = typeidx.
+///
+/// Differs from call_indirect by sourcing the funcref directly
+/// from the operand stack (no table indexing); spec-required null
+/// trap supplants call_indirect's table-bound UninitializedElement.
+fn callRefOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
+    const rt = Runtime.fromOpaque(c);
+    const ref_v = rt.popOperand();
+    if (ref_v.ref == runtime.Value.null_ref) return Trap.NullReference;
+    const fe = runtime.Value.refAsFuncEntity(ref_v) orelse return Trap.NullReference;
+    const callee_rt = fe.runtime;
+    if (fe.func_idx >= callee_rt.funcs.len) return Trap.IndirectCallTypeMismatch;
     const callee = callee_rt.funcs[fe.func_idx];
 
     if (instr.payload >= rt.module_types.len) return Trap.IndirectCallTypeMismatch;
