@@ -6,1031 +6,288 @@ description: Resume fully autonomous work on zwasm-from-scratch and drive the pe
 # continue
 
 Pick up where the previous session left off and **drive the iteration
-loop fully autonomously, indefinitely, without user babysitting**.
-The user invoked `/continue` precisely so they can walk away — go to
-sleep, leave the desk, or just stop replying — and expect to come
-back to a long chain of green commits, not a "shall I proceed?"
-prompt.
+loop fully autonomously, indefinitely, without user babysitting**. The
+user invoked `/continue` precisely to walk away and expect a long chain
+of green commits, not a "shall I proceed?" prompt.
 
 This skill is **opinionated about context discipline and
-self-perpetuation**: it delegates heavy reads to subagents, compacts
-proactively, resets at phase boundaries, **pushes its own work**, and
-**re-arms itself** so the loop survives even when the user is not
-present. The zwasm v2 project is multi-phase; without these
-disciplines, late-session quality degrades and overnight progress
-stops.
+self-perpetuation**: delegate heavy reads to subagents, compact
+proactively, reset at phase boundaries, push, and re-arm so the loop
+survives even when the user is not present.
 
-## Stop conditions — strict whitelist
+## Stop conditions — strict 3-bucket whitelist
 
-You may stop the autonomous loop **only** for one of these three
-reasons. Anything else is a non-stop condition and you must keep
-going.
+Stop ONLY for one of the 3 buckets. Anything else continues.
 
-1. **The user explicitly intervenes** — a new directive arrives,
-   they interrupt, they ask you to pause, or they type a message
-   that is incompatible with continuing the loop. The user typing
-   nothing is *not* an intervention.
-2. **A genuinely unsolvable problem is identified** — root cause
-   unclear after investigation; OR a load-bearing trade-off is
-   needed that conflicts with ROADMAP §2 (P/A) or §14 (forbidden
-   list); OR a required external host (`ubuntunote`,
-   `windowsmini`) is provably absent. Document the blocker in
-   `handover.md` "Open questions / blockers", then stop. Do not
-   stop on a hunch — only after investigation.
-3. **All forward work is user-input-gated AND autonomous prep
-   paths are exhausted** — every remaining ROADMAP / close-plan
-   row is blocked on a user touchpoint (ADR `Status: Proposed →
-   Accepted` flip, collaborative review, etc.); AND `.dev/debt.md`
-   has zero `now` rows AND no `blocked-by:` barrier dissolved
-   this resume; AND the autonomous prep paths for each gating
-   ADR have been walked (see "Autonomous prep paths for
-   user-gated ADRs" below). In this state, surface the specific
-   user touchpoint(s) needed and stop **WITHOUT `ScheduleWakeup`
-   re-arm**. The user resumes by satisfying the gate and
-   re-invoking `/continue`. This is **distinct** from
-   "User can /continue when ready" (forbidden anti-pattern):
-   that one surrenders forward work that IS autonomous-eligible;
-   bucket 3 fires only after every autonomous lever has been
-   pulled and the remaining work *structurally* needs the user.
+1. **User intervenes** — explicit message, interrupt, or new directive.
+   Silence is NOT intervention.
+2. **Genuinely unsolvable** — root cause unclear after investigation
+   OR ROADMAP §2/§14 conflict OR required external host provably
+   absent (per `extended_challenge.md` definition of "provably").
+3. **All forward work user-input-gated AND autonomous prep walked** —
+   bucket-3 stop without `ScheduleWakeup` re-arm. See
+   [`STOP_BUCKETS.md`](STOP_BUCKETS.md) for the full whitelist + the
+   autonomous-prep-paths catalog that must be exhausted first.
 
-### Autonomous prep paths for user-gated ADRs
+**Phase boundaries / "big task" / N-commit milestones / context-fill /
+auto-compact / subagent fan-out / push / user silence** — NONE are
+stop conditions. Continue.
 
-Before bucket 3 fires, the loop MUST attempt each of these where
-applicable to the gating ADR. Each path produces value the user
-can review at flip time — they are **not** "wait around" work.
-
-- **Reference-repo enrichment** — read v1
-  (`~/Documents/MyProducts/zwasm/`), wasmtime / cranelift / wasm3
-  / regalloc2 (`~/Documents/OSS/`), spec testsuite, etc. for
-  precedents on the ADR's design problem. Append concrete file /
-  line citations to the ADR's `References` or `Alternatives`
-  section. Commit as docs-only `chore(adr): enrich NNNN
-  references from <source>`.
-- **Throwaway spike** — under `private/spikes/<adr-slug>/` (per
-  `.claude/rules/architectural_spike.md` + `spike_lifecycle.md`),
-  prototype the ADR's chosen path or its primary rejected
-  alternative. Outcome lands as `Status: rejected` lesson OR
-  refines the ADR's `Consequences` section. **Spike work is
-  autonomous; on-branch impl stays gated on ADR Accepted.**
-- **Consequences refinement** — re-walk the ADR's `Consequences`
-  / `Removal condition` text against current code state. If a
-  named consequence has dissolved or sharpened, edit the ADR
-  (Revision history footer per `.dev/decisions/README.md`).
-- **WebFetch spec / upstream** — for ABI / spec / upstream-API
-  ADRs, fetch the authoritative doc (W3C Wasm spec, Arm IHI 0055,
-  Intel SDM, MSDN, ziglang/zig issues, etc.) and cite the URL in
-  ADR References. Per `extended_challenge.md` Step 4.
-
-If ALL applicable paths above have been walked for ALL gating
-ADRs (i.e. each ADR has at least one enrichment commit OR a
-documented null result), bucket 3 is unlocked. Record the
-walked-paths list in `handover.md` "Open questions / blockers"
-so the next resume doesn't re-walk.
-
-### Non-stop conditions (explicit, exhaustive)
-
-The following are **not** stop conditions. Encountering any of them
-means you continue the loop. If you find yourself reaching for one
-as justification to stop, you are violating this skill.
-
-**Phase / scaffolding state** — never a stop on its own:
-
-- A Phase boundary just closed (§9.<N> → §9.<N+1>); the §9.<N>
-  table is empty and needs to be opened; multiple `[x]` flips
-  and SHA backfills are pending.
-- The next task is "big" / N commits have already landed / you
-  produced a long status summary and feel like a good stopping
-  point — these are loop-discipline traps, not stop signals.
-- An `audit_scaffolding` finding is `block` — fix locally if the
-  scope is local, else file an ADR via §18 + queue the fix in
-  handover, then continue. Either path continues the loop.
-
-**Delegation / autonomous mechanics** — handle and continue:
-
-- The next task needs an Explore / Plan / Bash subagent — fork
-  and continue.
-- The next task requires `git push` — push and continue (see
-  "Push policy" below).
-- A `windowsmini` gate failed because the commit isn't yet on
-  `origin/zwasm-from-scratch` — push and re-run, then continue.
-- Context fill is high or auto-compact looks imminent — the
-  `PostCompact` hook recovers state (see "Auto-compact
-  recovery"); never a pre-emptive stop.
-
-**User signal** — silence is not intervention:
-
-- The user has not replied for a long time — that is the
-  **point** of the skill. Only an explicit user message stops
-  the loop.
-
-If you are unsure whether to stop, the answer is **don't**. The user
-will interrupt if needed.
-
-## Destructive-action policy — autonomous within scope
-
-The harness's general "ask before destructive" guidance does **not**
-gate the autonomous loop on the following local, reversible actions.
-Run them without confirmation:
-
-- `rm <file>` / `rm -r <dir>` / `rm -rf <dir>` for paths under
-  `private/`, `.zig-cache/`, `zig-out/`, `/tmp/`, scratch
-  artifacts you yourself just created (e.g. smoke-test files
-  under `.claude/`), and survey notes you no longer need.
-- `mv` / `cp` / `mkdir` / `rmdir` for the same scope.
-- `git stash` / `git restore <path>` / `git checkout -- <path>`
-  to discard uncommitted local edits when re-starting a task
-  after auto-compact (see "Auto-compact recovery").
-- `git reset <commit>` (mixed / soft) on the local
-  `zwasm-from-scratch` branch when the working tree is yours
-  alone. **`git reset --hard` remains denied** by
-  `.claude/settings.json` and is a bucket-2 stop if genuinely
-  needed.
-
-Out of scope (still ask the user / stop):
-
-- `rm -rf /`, `rm -rf ~/`, `rm -rf $HOME`, `rm -rf .git` —
-  denied in `.claude/settings.json`; if you somehow need them,
-  that is bucket 2 of the stop whitelist.
-- Anything outside the project working tree and the
-  `additionalDirectories` list in settings.json.
-- `git push --force` / `--force-with-lease` — denied; main push
-  forbidden by §14.
+If unsure whether to stop: **don't**. Full bucket details +
+destructive-action policy + non-stop exhaustive list:
+[`STOP_BUCKETS.md`](STOP_BUCKETS.md).
 
 ## Loop mechanics — see `LOOP.md`
 
-The two policy sections that govern the autonomous loop —
-**Push policy** (when / how `git push` happens without user
-approval) and **Self-perpetuation** (the `ScheduleWakeup` re-arm
-contract) — live in the sibling file `LOOP.md`. Read it once
-per session at the top of the resume procedure; it does not
-change between iterations.
+Push policy + Self-perpetuation (the `ScheduleWakeup` re-arm contract):
+sibling file [`LOOP.md`](LOOP.md). Read once per session at the top of
+resume; does not change between iterations.
+
+## Bundle mode (ADR-0118 D6)
+
+When work crosses a session boundary (multi-cycle integration: GC
+heap impl, EH-on-JIT integration, regalloc refactor, etc.), use
+**bundle mode** to preserve continuity across `/continue` invocations.
+
+Handover.md optionally carries an `## Active bundle` section:
+
+```markdown
+## Active bundle
+
+- **Bundle-ID**: 10.E-codegen-IT-1..IT-3
+- **Cycles-remaining**: ~3
+- **Continuity-memo**: HandlerEntry count + landing_pad_pc fixup table
+- **Exit-condition**: try_table fixture compiles + Builder.entries.len > 0 in test
+```
+
+Resume procedure Step 1 (below) detects this and **routes to
+bundle-next-step** instead of ROADMAP §9 lookup (parallels Step 1a
+close-plan override). Bundle close requires the named observable
+delta verified — `bash scripts/check_bundle_active.sh --close` enforces
+this at the close commit. Delta = 0 after planned N cycles → either
+continue (extend N) or pivot (handover rewrite + commit chore).
+
+This is the structural defense against atom-rhythm (lesson
+`e62db476` — 13 atoms shipped without behavior signal). Bundle mode
+makes "multi-cycle integration with continuity" first-class instead
+of relying on handover prose.
 
 ## Resume procedure (run on every session pickup)
 
-1. Read `.dev/handover.md`. (The `SessionStart` hook already prints it.)
-   **Framing grep — mandatory on every resume** (per
-   [`.claude/rules/handover_framing.md`](../../rules/handover_framing.md)):
+Outline (full details in [`RESUME.md`](RESUME.md)):
 
-   ```sh
-   grep -nE "user-judgment territory|wait for natural trigger|wait for .* fixtures|needs commitment to|substantial multi-cycle|deep .* work or wait|pivot to .* OR" .dev/handover.md
-   ```
-
-   If non-empty → the **FIRST chunk of this resume is the
-   handover.md rewrite itself**. Replace forbidden framing with
-   concrete chunk descriptions, commit
-   (`chore(handover): remove forbidden framing`), then re-read
-   handover and proceed. **Do not enter the prose-suggested
-   chunk while forbidden framing is present** — the framing is
-   by construction unreliable. The 2026-05-22 retrospective
-   showed that handover framing can override the anti-pattern
-   list when it uses different words for the same surrender;
-   this grep closes that gap.
-
-1a. **Close-plan / amendment-cycle override**. If handover.md's
-    `Cold-start procedure` step 1 directs to a
-    `.dev/phase*_close_plan.md` OR `.dev/phase*_close_master.md`
-    document (canonical names: `phase<N>_close_plan.md` for
-    amendment-cycle plans; `phase<N>_close_master.md` for
-    post-amendment master plans introduced 2026-05-22 per ADR-0104),
-    that doc's `§6 Work sequence` is
-    the **authoritative work source for this session** —
-    superseding the ROADMAP-first lookup in Step 2 below. The
-    plan doc exists precisely because the ROADMAP is
-    acknowledged-stale pending its first amendment step (step
-    (a)). Execute the plan's step (a) FIRST; it will land the
-    ROADMAP / ADR amendments that re-align state. After step (a)
-    closes, the override no longer fires (handover.md gets
-    refreshed at step (a)-6 to point at the next step).
-
-    Detection: scan handover.md for `phase*_close_plan.md` OR `phase*_close_master.md`
-    reference in the Cold-start procedure section or Active
-    state section. If matched → plan supersedes ROADMAP for THIS
-    session. If unmatched → proceed to Step 2 normally.
-
-    The same override applies for any future Phase-close plans;
-    the pattern is structural (handover → close-plan → §6
-    sequence). Distinct from hard-gates (which STOP the loop);
-    a close-plan keeps the loop autonomous but redirects what it
-    works on.
-2. Read `.dev/ROADMAP.md`:
-   - Look up the **Phase Status** widget at the top of §9 — it
-     names the IN-PROGRESS phase and its first open `[ ]` task.
-   - Open that phase's `§9.<N>` task table and confirm the table's
-     first `[ ]` matches the widget. If they disagree (drift), the
-     widget is wrong; trust the table and update the widget.
-   - If §9.<N>'s task table is missing/empty, the phase has not
-     been opened yet; expand it first (mirror the previous phase's
-     structure).
-   - **Step 1a close-plan override note**: if Step 1a fired,
-     SKIP this Step 2 check — the plan doc names the work
-     directly. The ROADMAP audit happens at the close-plan's
-     step (a)-3 (the ROADMAP edit chunk itself).
-3. `git log --oneline -10` and `git status -sb` — identify the last
-   commit and whether anything is in flight.
-   - If `git status` is clean and origin is ahead-or-equal: proceed.
-   - If `git status` shows uncommitted changes that look in-flight:
-     decide — complete and commit, or `git stash` and restart the
-     task (cheaper than guessing what was half-done).
-   - If local is ahead of origin: push immediately (no approval
-     needed; see "Push policy") before the next Step 0.
-4. **Step 0.4 — Lesson scan**. Read `.dev/lessons/INDEX.md`. For
-   the active task's domain (interpreter, cross-module imports,
-   ABI, build.zig, validator, …), grep the keyword column for
-   pre-recorded learnings. Read every matching lesson **before**
-   starting Step 0 (Survey). This is cheap (≤ 30 s) and prevents
-   re-paying spike costs that prior cycles already paid. See
-   `.claude/rules/lessons_vs_adr.md` for the lesson concept.
-5. **Step 0.5 — Debt sweep**. Read `.dev/debt.md`. For every
-   row with `Status: now`, attempt to discharge it before
-   starting the active task. **Effort estimate is irrelevant**;
-   only structural impossibility (a `blocked-by: <X>` barrier
-   that the row's author named) prevents discharge. Discharge
-   commit messages take the form `chore(debt): close D-NNN
-   <one line>`; remove the row from `.dev/debt.md` in the same
-   commit. New debts discovered during the active task are
-   appended at task close (Step 7), not mid-task.
-
-   **Barrier-dissolution check (unconditional, every resume)**:
-   regardless of `Last reviewed` date, walk every `Status:
-   blocked-by: <X>` row and re-evaluate the named barrier
-   right now. The barrier is by construction **testable in
-   concrete terms** (per the same-resume discipline below):
-   "§9.7 / 7.7 完了" → grep ROADMAP for the row's `[x]`;
-   "x86_64 regalloc port" → grep src/engine/codegen/x86_64
-   for `regalloc` evidence; "Zig 0.17 stdlib API" → check
-   `zig version`. If the barrier dissolved (= the named
-   condition is now satisfied), **flip to `Status: now` in the
-   same resume**, then discharge alongside as if it had been
-   `now` from the start. This check is cheap (`grep | head`
-   per row) and runs **before** any per-task work — it
-   prevents stale `blocked-by` rows from outliving their
-   barriers silently. The `Last reviewed` column is then
-   updated only when the barrier still holds.
-
-   **Stale-barrier escalation** (secondary trigger, for rows
-   the unconditional check can't resolve definitively): scan
-   every `Status: blocked-by:` row's `Last reviewed` date.
-   Any row reviewed more than 3 resume cycles ago (or > 14
-   days) without barrier dissolution gets its barrier
-   re-walked with deeper investigation (read referenced
-   files, run referenced commands, walk referenced ADRs),
-   then `Last reviewed` updated to today. **If 3+ rows hit
-   this escalation in one resume**, fire `audit_scaffolding`
-   in narrow mode (`§F` debt-coherence checks only) before
-   continuing — this catches the failure mode where multiple
-   barriers quietly evaporated together (a closed phase, a
-   landed ADR, a Zig version bump).
-
-   The discipline that makes Step 0.5 work: **a barrier named
-   in concrete terms always names something testable**. "Phase
-   7 design ADR" → grep for the ADR; "Zig 0.17 stdlib API" →
-   check current Zig version; "ADR-0016 M3 work item" → grep
-   ROADMAP for M3 status. Vague barriers ("later", "TBD") were
-   forbidden at file creation; if one slipped in, the audit
-   `§F.2` rejects the row.
-5b. **Step 0.5b — Live status check (per active phase)**. When
-   the active phase has a registered live-status script
-   (currently `scripts/p9_simd_status.sh` for §9.9; future
-   phases drop their own as patterns recur per
-   `.claude/rules/no_handover_predictions.md`), run it
-   **before** picking the next sub-chunk:
-
-   ```sh
-   bash scripts/p9_simd_status.sh
-   ```
-
-   The script's output is the authoritative answer to "what
-   is failing right now". If anything in handover.md /
-   debt.md narrative disagrees with the live numbers, trust
-   the script and update the stale doc before starting the
-   per-task TDD loop. The next sub-chunk is picked from
-   handover's `Next candidates` list filtered by what the
-   live evidence actually shows is broken.
-
-   **Why this step exists**: §9.9-g-13 surfaced a drift case
-   where prior handover predicted "16 cmp fails are alias
-   case" but live evidence showed they were `i*x*.ne`
-   family. The chunk's preventive value was real but the
-   target framing was wrong. This step prevents
-   recurrence at the structural level — the rule
-   ([`no_handover_predictions.md`](../../rules/no_handover_predictions.md))
-   forbids future predictions; this step verifies whatever
-   handover *does* claim against live measurement before
-   committing scarce session budget to a chunk.
-
-   When no live-status script exists for the active phase
-   (e.g. structural / refactor phases without a fail-count
-   metric), this step is skipped — and the next chunk that
-   introduces measurable failures should drop the script
-   then, not let handover accumulate predictions about it.
-5a. **Step 0.6 — Hard-gate prep awareness**. When the active
-   phase has a registered hard-gate row (per the "Exception —
-   hard human-in-loop transition gates" section below) and the
-   first `[ ]` row in §9.<phase> is **at or past** the
-   prep-window threshold (= 3 rows before the hard-gate row
-   in §9.<phase>'s task table; for §9.7 with hard gate at 7.13
-   that's 7.10 onward), open the hard-gate document
-   (`.dev/phase<N+1>_transition_gate.md`) and:
-
-   - Cross-check every checkbox under "design cleanliness
-     extrapolation" / "deferred-work dependency DAG" sections
-     against current code state.
-   - For any unmet checkbox that maps to a concrete code
-     change, ensure a corresponding `.dev/debt.md` row exists
-     (Status: `now` if all predecessors landed, else
-     `blocked-by: <named predecessor>`).
-   - If a gate-checkbox unmet item has **no** corresponding
-     debt row and no ROADMAP §9.<phase> row, that is a gap —
-     file the debt entry **immediately** (this is why the
-     check happens at Step 0.6, not at gate-stop time).
-
-   This is cheap (one file read + grep) and runs **before**
-   the per-task TDD loop picks the next chunk. It ensures the
-   hard-gate prep work is **discoverable as `now` debt** while
-   there's still iteration budget, not deferred to the
-   collaborative gate review where it surfaces as
-   "unchecked checkboxes with no work-tracking artifact".
-
-   For §9.7 specifically: at every resume where active row is
-   ≥ 7.10, the loop reads `.dev/archive/phase_gates/phase8_transition_gate.md`
-   §3a (deferred-work DAG) + §3 (design cleanliness) and
-   reconciles their checkboxes with `.dev/debt.md`.
-5c. **Step 0.7 — Prior cycle ubuntu verification (ADR-0076 D3)**.
-   The previous cycle pushed source+handover in one commit pair
-   and kicked `bash scripts/run_remote_ubuntu.sh` in background
-   (per ADR-0076 D2/D3). The result is verified HERE, mechanically.
-
-   Either Bash:
-
-   ```sh
-   tail -3 /tmp/ubuntu.log
-   ```
-
-   or `Read /tmp/ubuntu.log` (Read tool with a small offset
-   from end) — both are equivalent. Choose whichever fits
-   context budget; the file is the single source of truth.
-
-   Expected: a line `[run_remote_ubuntu] OK (HEAD=<sha>)` whose
-   `<sha>` matches `git log -1 --format=%h origin/zwasm-from-scratch~0`
-   (= the just-tested commit). If matched → proceed to Step 6.
-
-   If FAIL OR if the log is stale (HEAD mismatch / log missing /
-   abort marker): **revert the prior cycle's commit pair**.
-
-   ```sh
-   git reset --mixed HEAD~2   # source + handover commits
-   ```
-
-   The diff stays in the worktree. Investigate the named failure
-   (Read the log tail; `grep -i 'FAIL\|error' /tmp/ubuntu.log`),
-   fix in place, re-run Step 5 (test gate), then resume Step 6.
-   The commit pair gets re-built atop the fix; one push lands
-   the corrected chunk plus the fix as one cycle.
-
-   **First-resume exception**: when `/tmp/ubuntu.log` doesn't
-   exist (first cycle after the rule landed, or the log was
-   cleared), skip this step silently.
-
-   **Non-code-gap exception**: when the log SHA is older than
-   origin HEAD but the diff between them touches **no** code
-   gate inputs (= no `src/`, `test/`, `include/`, `build.zig`,
-   `build.zig.zon`, `flake.nix`, `flake.lock`), the gap is
-   skill / docs / hook / `bench(ci)` commits that never needed
-   ubuntu verification. Skip the revert silently. Check:
-
-   ```sh
-   log_sha=$(awk -F'[=)]' '/OK \(HEAD=/{print $2}' /tmp/ubuntu.log | tail -1)
-   git diff --name-only "${log_sha}..origin/zwasm-from-scratch" -- \
-       src/ test/ include/ build.zig build.zig.zon flake.nix flake.lock
-   ```
-
-   Empty output → non-code-gap → proceed to Step 6 as if
-   matched. Non-empty output → genuine code was pushed without
-   verification → revert per the FAIL path below.
-
-   This exception exists because skill-edit commits, hook
-   updates, `bench(ci): record <sha>` bot commits, and CLAUDE.md
-   tweaks can land on origin between code cycles. The previous
-   strict shape mis-fired on these by attempting to `git reset
-   --mixed HEAD~2` — destroying valid docs commits. The
-   exception preserves the verification discipline (real code
-   is still ubuntu-checked one-cycle-deferred) while letting
-   non-code commits flow through.
-
-   **Force-push is forbidden** by §14, so the failing commit
-   pair WAS already on origin. After local revert + fix, the
-   next cycle's single push lands as a follow-up commit pair
-   — the broken state is visible in `git log` but not in
-   working state. This is acceptable because
-   `zwasm-from-scratch` is the development branch; the
-   `main` merge gate (`scripts/gate_merge.sh`) re-runs the
-   strict 3-host `test-all` before any `main` push.
-
-   This step joins the mechanical-checkpoint family alongside
-   Step 3 (`git log`), Step 0.5 (debt sweep), Step 0.5b (live
-   status check). It is a runnable command in the loop's
-   procedure, not a "remember to check" rule.
-5d. **Step 0.8 — Phase 9 close invariants** (RETIRED for Phase 10+;
-   `scripts/check_phase9_close_invariants.sh` retained as permanent
-   regression check. Phase 9 = DONE 2026-05-24. Per ADR-0118 D1.)
-6. `zig build test` (Phase 0+) — confirm the build is green. From
-   Phase 1, also run `zig build test-spec`. From Phase 7, also run
-   the differential subset. **If output is large (>200 lines), run
-   via subagent and ask only for pass/fail + the first failure.**
-7. **One-sentence** status to the user (phase + last commit + next
-   task). Do **not** produce a multi-line summary; that is a stop
-   antipattern (see "Self-perpetuation").
-8. **Immediately proceed into the TDD loop.** Do not wait for "go" —
-   `/continue` itself is the go signal, and so is the wakeup that
-   fired it.
+1. **Read handover.md + framing grep** — per
+   `handover_doc_discipline.md` §1. If forbidden phrases found
+   (`user-judgment territory` etc.), the FIRST chunk this resume IS
+   the handover rewrite.
+1a. **Close-plan / amendment override** — handover points at
+    `phase*_close_plan.md` / `phase*_close_master.md` → plan's §6 Work
+    sequence supersedes ROADMAP for this session.
+1b. **Bundle override (NEW)** — handover has `## Active bundle` with
+    non-met exit-condition → bundle-next-step supersedes ROADMAP.
+2. **Read ROADMAP** — Phase Status widget + first `[ ]` row. Skip
+    when Step 1a / 1b fired.
+3. **git log + status** — clean: proceed. Uncommitted in-flight:
+   complete or stash. Local ahead of origin: push immediately.
+4. **Step 0.4 — Lesson scan** ([`RESUME.md`](RESUME.md#step-04)).
+5. **Step 0.5 — Debt sweep + barrier-dissolution check**
+   ([`RESUME.md`](RESUME.md#step-05)).
+5b. **Step 0.5b — Live status check** (per-phase `p<N>_*_status.sh`
+   if exists) ([`RESUME.md`](RESUME.md#step-05b)).
+5c. **Step 0.6 — Hard-gate prep awareness** (within 3 rows of a
+   registered hard gate) ([`RESUME.md`](RESUME.md#step-06)).
+5d. **Step 0.7 — Prior-cycle ubuntu verification (ADR-0076 D3)** —
+   `tail -3 /tmp/ubuntu.log` mechanically. Revert prior commit pair
+   on FAIL; first-resume + non-code-gap exceptions apply.
+   ([`RESUME.md`](RESUME.md#step-07)).
+6. `zig build test` (Phase 0+); `test-spec` from Phase 1; differential
+   from Phase 7. Output >200 lines → subagent.
+7. **One-sentence status** (phase + last commit + next task). No
+   multi-line summary.
+8. **Immediately enter TDD loop.** `/continue` itself is the go signal.
 
 ## Per-task TDD loop
 
-For each `[ ]` task in §9.<N>, run **Steps 0 → 7** in order. **Step
-0 defaults to subagent**; Step 5 may delegate when output is large;
-the rest run in main.
+**Step 0 defaults to subagent** (Explore, mode "medium"); Step 5 may
+delegate large output; rest run in main.
 
-### Chunk granularity — when to bundle vs split
+### Chunk granularity (emit chunks)
 
-**Chunk type first**: every chunk is one of `emit` / `architectural` /
-`survey` / `test-only` / `infrastructure`. The size rule below applies
-to `emit` chunks. Non-emit types have distinct granularity rules
-(notably: `architectural` chunks are spike-first and capped at 3
-cycles without measurable progress). See [`LOOP.md` §"Chunk types"](LOOP.md).
+5–15 ops per chunk for established-pattern emit. **Bundle when ALL**:
+same dispatch helper consumer, same handler shape, diff ≤ 800 LOC src
++ 400 LOC test, coordinated boundary semantics. **Split when ANY**:
+crosses instruction class, structurally different recipe per variant,
+ADR-grade design choice for one variant only, mid-cycle ratchet
+> 1200 LOC.
 
-**Default (emit)**: 5–15 ops per chunk for established-pattern emit /
-handler work. Sub-1-op chunks are reserved for ADR-grade design changes
-(new ABI surface, new scratch reservation, new shared helper).
+When in doubt: **bundle**. Anti-pattern: "1 op = 1 chunk" for
+established-pattern work. Chunk type taxonomy + retrospective examples:
+[`LOOP.md`](LOOP.md) §"Chunk types".
 
-**Bundle when ALL**: same dispatch helper consumer, same handler
-shape (only `op` field differs), source diff ≤ 800 LOC + test diff
-≤ 400 LOC, coordinated boundary semantics.
+### Step 0 — Survey
 
-**Split when ANY**: crosses an instruction class (GPR vs XMM, ALU vs
-memory, scalar vs SIMD), one variant has a structurally different
-recipe, ADR-grade design choice for one variant only, or mid-cycle
-ratchet pushes the diff > 1200 LOC.
+Default: do Step 0. Skip only when `textbook_survey.md` "When to skip"
+criteria hold (refactor/rename/doc-only + no new public API + no new
+behaviour). New `encXxx` encoder forfeits skip.
 
-When in doubt, **bundle**: the chunk-table row in handover.md is a
-status marker, not a unit of work. Anti-pattern: "1 op = 1 chunk"
-for ops following an established pattern.
+Dispatch one Explore subagent with the textbook-survey brief (200–400
+lines: file pointers, key shapes, idioms, divergence highlights from
+ROADMAP §2). Summary lands in `private/notes/<phase>-<task>-survey.md`
+(optional). See `textbook_survey.md` + `no_copy_from_v1.md`.
 
-Full criteria + the §9.7 / §9.9 retrospective examples table:
-[`LOOP.md` §"Chunk granularity"](LOOP.md).
-
-### Step 0 — Survey (subagent: Explore, default mode "medium")
-
-**Default: do Step 0.** Skip only when the strict criteria in
-[`.claude/rules/textbook_survey.md`](../../rules/textbook_survey.md)
-"When to skip Step 0" hold — refactor / rename / doc-only **and**
-no new public API **and** no new behaviour observable from outside
-the module. The "continuation of prior task" exception is
-**narrow** — it applies when the diff adds zero new encoders, zero
-new helpers, zero new design choices (see textbook_survey.md
-"Continuation — narrow definition" + the §9.6 examples table).
-
-> **The standing pattern that nearly always trips the skip
-> criterion**: a sub-chunk under the same parent ROADMAP row
-> (e.g. §9.6-c-i after §9.6-c-ii) introducing **at least one
-> new `encXxx` encoder function** is NOT a continuation. Do
-> Step 0.
-
-Otherwise: dispatch one Explore subagent to survey the textbooks.
-**Default brief**:
-
-> Survey how `<concept>` is implemented in:
-> - `~/Documents/MyProducts/zwasm/src/...` (v1, ~65K LOC) — read,
->   never copy
-> - `~/Documents/OSS/wasmtime/cranelift/...` and/or
->   `~/Documents/OSS/wasmtime/winch/...` (Rust reference)
-> - `~/Documents/OSS/zware/src/...` (Zig idiom)
-> - `~/Documents/OSS/wasm3/source/...` (M3 IR / interpreter idiom)
-> - `~/Documents/OSS/wasm-c-api/include/wasm.h` (when ABI is at
->   stake)
-> - `~/Documents/OSS/regalloc2/` (when JIT regalloc is at stake)
-> - `~/Documents/OSS/zig/lib/std/...` (when stdlib API is in
->   question)
->
-> Return 200–400 lines: file pointers, key data shapes, idioms used,
-> what each codebase does *differently* and why. Do **not** copy
-> code; describe the design space. Highlight 2–3 decisions where
-> zwasm v2 should likely diverge based on ROADMAP §2 principles.
-
-The summary lands in `private/notes/<phase>-<task>-survey.md`
-(gitignored, optional persistence). Read it, then proceed to Step 1.
-
-See [`.claude/rules/textbook_survey.md`](../../rules/textbook_survey.md)
-for when to skip Step 0 and how to avoid being pulled by upstream
-styles. The prohibition on copy-paste from v1 is in
-[`.claude/rules/no_copy_from_v1.md`](../../rules/no_copy_from_v1.md).
-
-**Mid-cycle stuck or wanting 裏取り (verification)**: when an
-implementation-time question surfaces that Step 0's survey
-didn't anticipate, see
-[`.claude/rules/extended_challenge.md`](../../rules/extended_challenge.md)
-**Step 4** — `WebFetch` / `WebSearch` for spec / ABI / upstream
-docs, mid-cycle reference-repo deep reads, and `private/spikes/`
-throwaway experiments are all in scope and autonomous. Cite
-URLs / file paths in the commit body or ADR References.
+**Mid-cycle 裏取り**: `extended_challenge.md` Step 4 — WebFetch /
+reference-repo deep read / `private/spikes/<slug>/` throwaway (per
+`spike_discipline.md`).
 
 ### Step 1 — Plan
 
-Re-open `.dev/ROADMAP.md` §9.<N> task table and confirm the first
-`[ ]` row is still the one in `.dev/handover.md` Active task. If
-they disagree (someone — user or a prior loop iteration —
-re-prioritised between turns), trust ROADMAP and update handover;
-do not silently follow the stale handover.
+Re-open ROADMAP §9.<N> task table; confirm first `[ ]` matches
+handover. Disagreement → trust ROADMAP, update handover.
 
-**Exception — close-plan override active**: when Resume Step 1a
-fired (handover.md directs at a `.dev/phase*_close_plan.md` or `.dev/phase*_close_master.md`),
-the plan doc is the authoritative source for the active task,
-and `trust ROADMAP over handover` is **inverted** for the
-duration of the plan's step (a) (the amendment cycle). After
-step (a) lands the ROADMAP / ADR edits, handover.md gets
-refreshed and the normal `trust ROADMAP` discipline resumes.
-Concretely: during step (a) sub-steps, the "first `[ ]` in
-ROADMAP §9.<N>" is intentionally not what's worked on — the
-plan doc's §6 sub-step is. Step 7's handover refresh keeps
-plan progress visible across sessions.
+**Close-plan override** (Step 1a fired): plan doc is authoritative;
+"trust ROADMAP over handover" is inverted during step (a) amendment
+cycle.
 
-One sentence in chat: the smallest red test that captures the next
-behaviour. No permission needed.
+**Bundle override** (Step 1b fired): handover's `## Active bundle`
+names next step; do not look up ROADMAP §9.<N>.
 
-**Deviation watch.** If your Plan would touch §1, §2 (P/A), §4
-(architecture / Zone / ZirOp), §5 (layout), §9 phase scope or
-exit criteria, §11 layers, or §14 forbidden list — STOP. Write
-`.dev/decisions/NNNN_<slug>.md` first per ROADMAP §18.2, then
-return to Step 2. Discovering the deviation at Step 7 (commit
-time) is too late — Step 7's §18 self-check exists as a backstop,
-not as the primary checkpoint.
+One sentence in chat: smallest red test capturing next behaviour. No
+permission needed.
+
+**Deviation watch**: Plan touches §1, §2, §4, §5, §9 scope, §11, §14 →
+STOP. File `.dev/decisions/NNNN_<slug>.md` per §18.2 first.
 
 ### Step 2 — Red
 
-Write the failing test (Edit / Write — auto-accepted). Run it;
-confirm red.
+Write failing test. Run; confirm red.
 
 ### Step 3 — Green
 
-Minimal code to pass. Resist over-design — the next refactor pass
-is cheap.
+Minimal code to pass. Resist over-design.
 
 ### Step 4 — Refactor
 
-While green. Apply only structural improvements that do not change
-behaviour.
+While green. Structural improvements only; no behaviour change.
 
-**Debt observation.** While editing, if you see a smell that doesn't
-fit this task's surgical scope (an obviously-incorrect docstring,
-a deprecated comment, a `catch {}` cluster, a positional API ripe
-for `Opts` struct refactor, etc.), do NOT silently leave it. Decide:
+**Debt observation**: smell out of scope?  Mechanical fix (≤ 5 min) →
+inline; else **append `now` debt row** to `.dev/debt.md`.
 
-- If discharging it now stays behaviour-preserving and is mechanical
-  (≤ 5 minutes of typing) — fix it inline with the rest of Step 4.
-- Otherwise — **append a debt entry to `.dev/debt.md`** with
-  `Status: now` (so the next resume's Step 0.5 picks it up). New
-  debts are never invisible; if you saw it, future-you must see
-  it too.
+**Workaround check**: papered over missing tool/file/capability?
+Re-read `extended_challenge.md`; walk 3-step procedure (Confirm →
+Self-provision → Document specifically) NOW before Step 5.
 
-The `now` vs `blocked-by` discipline is **structural impossibility
-only**, not effort estimation. See `.dev/debt.md`'s discipline
-header.
+**Boundary-fixture check**: diff touched numeric edge / FP corner /
+strictness-sensitive comparison / trap condition / regalloc-ABI
+invariant → add fixture under `test/edge_cases/p<N>/<concept>/<case>.{wat,wasm,expect}`.
+Per `test_discipline.md` §1 stress-axes table.
 
-**Workaround / extended-challenge check.** If the way you got
-green involved papering over a missing tool / file / capability
-("added a SKIP-X-MISSING fallback", "skipped a host's gate") —
-re-read `.claude/rules/extended_challenge.md`. The 3-step
-procedure (Confirm → Self-provision → Document specifically)
-may not have been walked. If it wasn't, walk it now before
-proceeding to Step 5. A workaround without paired investigation
-is forbidden; a workaround with a debt entry naming the
-structural barrier is acceptable.
+**Mac-host lint gate** (ADR-0009): `zig build lint -- --max-warnings 0`.
+Mac-only; deprecation findings are platform-independent.
 
-**Boundary-fixture check** (per ADR-0020 / `.claude/rules/edge_
-case_testing.md`). If this cycle's diff touched a semantic
-boundary — numeric edge, special FP value (NaN/±Inf/±0/
-denormal), strictness-sensitive comparison, spec-defined trap
-condition, or a regalloc/spill/ABI invariant — **add a fixture
-under `test/edge_cases/p<N>/<concept>/<case>.{wat,wasm,expect}`
-in this commit** unless one already exists. The rule's "When
-NOT to add a fixture" section lists exemptions; if you decline,
-record the rationale in `private/notes/p<N>-edge-case-rationale.md`
-(gitignored — the rationale matters for future-you, not for
-git history). Skipping this check silently is a guideline
-violation; the rule is load-bearing for Phase 8 / 15
-optimisation work that depends on regression-detecting
-fixtures.
+### Step 5 — Test gate (scope-adaptive)
 
-After refactor, before moving to Step 5, run the **Mac-host lint
-gate** (ADR-0009) once:
-
-```sh
-zig build lint -- --max-warnings 0
-```
-
-If this fails, the diff used a deprecated stdlib API. Fix at the
-call site (consult `.claude/rules/zig_tips.md` for the canonical
-0.16 replacement) and re-run before Step 5. The lint gate is
-Mac-only — it is **not** repeated on ubuntunote / windowsmini,
-since deprecation findings are platform-independent.
-
-### Step 5 — Test gate (scope-adaptive; ADR-0076 D1)
-
-**Classify first**:
-
-```sh
-bash scripts/classify_chunk_scope.sh
-```
-
-Map the printed class to the gate command (ADR-0076 D1):
-
-| Class       | Mac gate (foreground) | ubuntu gate (background, kicked AFTER push) |
-|-------------|-----------------------|---------------------------------------------|
-| `substrate` | `zig build test`      | `zig build test`                            |
-| `logic`     | `zig build test-all`  | `zig build test-all`                        |
-| `cohort`    | `zig build test-all`  | `zig build test-all`                        |
-| `unclear`   | `zig build test-all`  | `zig build test-all`                        |
-
-The script IS the rule. When the heuristic is wrong, edit
-`scripts/classify_chunk_scope.sh` (mirroring `gate_commit.sh` /
-`zone_check.sh` discipline). LOOP.md does NOT maintain the
-judgement table in prose.
-
-Phase-0 sub-steps 0.1 / 0.2 / 0.3 stay at `zig build` only
-(build verify; predates this rule and is unaffected).
-
-**Pipeline (ADR-0076 D2 + D3)**:
-
-1. **Mac runs foreground** with the gate from the class column.
-   Fail-fast — the next steps (commit pair / push) need its
-   result inline.
-2. **ubuntu does NOT run here.** It is kicked off after the
-   single push in Step 6+7 (per ADR-0076 D2), against the
-   just-pushed HEAD. Verification of the prior cycle's ubuntu
-   happens at the NEXT cycle's Resume Step 0.7 (per ADR-0076
-   D3).
-3. **windowsmini is deferred per ADR-0049** — autonomous chunks
-   must NOT fire `bash scripts/run_remote_windows.sh test-all`,
-   regardless of `should_gate_windows.sh`'s output. windowsmini
-   runs once at Phase boundary as the "Windows reconciliation"
-   sub-step. **OrbStack is retired** from the per-chunk gate
-   per ADR-0067 (D-134 Rosetta race; native ubuntunote replaces
-   it).
-4. **ubuntunote's stdout+stderr redirects to `/tmp/ubuntu.log`**.
-   The log is the single source of truth. **Re-running
-   `scripts/run_remote_ubuntu.sh` just to re-grep its output is
-   forbidden** — these builds take minutes; Read the log file
-   instead.
-
-Per-chunk commands (used inside the file-logged pipeline):
-
-- `zig build <step> > /tmp/mac.log 2>&1` (Mac aarch64 host,
-  foreground)
-- `bash scripts/run_remote_ubuntu.sh <step> > /tmp/ubuntu.log 2>&1`
-  (Linux x86_64 via SSH to ubuntunote — Bash timeout
-  ≥ 600000 ms for cold builds; **`run_in_background: true`**).
-  The wrapper does `git fetch + reset --hard
-  origin/zwasm-from-scratch` on the remote clone, then runs
-  `nix develop --command zig build <step>` to ensure the
-  pinned Zig 0.16.0 from `flake.nix` is in use.
-
-Phase-boundary windowsmini reconciliation (NOT per-chunk):
-
-- `bash scripts/run_remote_windows.sh test-all > /tmp/win.log 2>&1`
-  runs once at Phase close. The script `git fetch + reset
-  --hard origin/zwasm-from-scratch` on the windowsmini clone
-  at `~/Documents/MyProducts/zwasm_from_scratch` and runs
-  `zig build test-all` there. After full green:
-  `bash scripts/should_gate_windows.sh --record`. See
-  `LOOP.md` §"Phase-boundary Windows reconciliation".
-
-**Mac must be green per chunk to proceed to Step 6+7**;
-ubuntu's result is verified one cycle later (ADR-0076 D3) at
-Resume Step 0.7; windowsmini must be green per Phase boundary.
-If a prior cycle's ubuntu fails the Step 0.7 check, the current
-cycle reverts the prior commit pair and switches to fix mode.
-
-ubuntunote SSH setup: `.dev/ubuntunote_setup.md` (mDNS
-`ubuntunote.local`, key auth, NOPASSWD sudo, Determinate Nix +
-flake-pinned Zig). Windows SSH: `.dev/windows_ssh_setup.md`.
-OrbStack scratch: `.dev/orbstack_setup.md` (interactive dev
-only; NOT per-chunk gate). If a host appears absent (`ssh:
-connection refused` / no DNS resolution for ubuntunote or
-windowsmini), the bucket-2 stop whitelist requires "provably
-absent" — and what counts as "provable" is defined by
-`.claude/rules/extended_challenge.md`. Walk the 3-step procedure
-(Confirm → Self-provision → Document specifically) **first**;
-only stop if Steps 1+2 actually ran and confirmed the absence
-is structural. "I assume it's absent" is not a proof.
-
-Provisioning failures or missing tooling on a host that's
-otherwise reachable (e.g. windowsmini's wasmtime-stub case
-from §9.6 / 6.F) are usually not stop conditions — file a
-debt entry naming the structural barrier and proceed.
-
-#### Step 5b — Bench-delta sub-step (Phase 8b only; ADR-0032)
-
-After the three-host test gate passes AND the active task
-is a **bench-driven optimisation row** (currently §9.8b
-rows; future Phases tagged the same way), capture a
-per-fixture bench delta:
-
-```sh
-bash scripts/run_bench.sh --quick --diff HEAD~1 \
-    > /tmp/bench-delta.md
-```
-
-The output table goes verbatim into the commit message body
-(under a `## Bench delta` heading). **Both positive and
-negative movements surface** — the loop neither cherry-picks
-positives nor hides regressions. A regression on any
-recorded fixture without a paired explanation in the commit
-body is a Step-7 forbid.
-
-**Trigger conditions** (ALL must hold):
-
-- Active row is in §9.8b OR a Phase-section explicitly tagged
-  "bench-driven" in its ROADMAP description.
-- Diff modifies `src/ir/`, `src/engine/codegen/`, or other
-  optimisation-pass-touching files.
-- §9.8a foundation rows 8a.1 / 8a.2 / 8a.3 are all `[x]`
-  (the bench-delta script + observability infra exist).
-
-When ANY trigger fails, Step 5b is **skipped** — Phase 8a
-foundation work and non-optimisation Phase rows do not
-require per-commit bench delta (it'd be ceremony noise).
-
-The discipline exists because the autonomous loop demonstrated
-in §9.8 / 8.4 cycles that landing optimisations without
-measuring per-pass effect produces "implemented but unmeasured"
-work; ADR-0032 codifies the bench-driven sequencing.
+Classify: `bash scripts/classify_chunk_scope.sh` → map to gate
+command per ADR-0076 D1. Full pipeline + Step 5b bench-delta sub-step
+(Phase 8b only):  [`GATE.md`](GATE.md).
 
 ### Step 6+7 — Commit pair, single push, ubuntu kick, re-arm (ADR-0076 D2)
 
-The legacy "source commit → push → handover commit → push" two-push
-cycle is replaced by a single-push commit pair per ADR-0076 D2.
-Sequence (run in order; no waits between, no per-step approval):
+The legacy 2-push cycle is replaced by single-push commit pair.
 
-1. **Source commit**. `git add <source files>; git commit -m
-   "<type>(<scope>): <one line>"`. The pre-commit gate runs. If
-   the gate blocks for a genuine reason, fix and re-stage.
-   Never `git commit --no-verify` (forbidden by ROADMAP §14).
-
-2. **Update `.dev/handover.md`** (replace, do not append):
-   - `Current state`: 5 lines max — Phase, last commit SHA +
-     one-line gist, next task id. **Delete** any per-task prose
-     older than the active task (already in `git log
-     --grep="§9.<N> / N.M"`, the canonical lookup).
-   - `Active task`: refresh the chunk progress table so the
-     **next** chunk is marked `**NEXT**`.
-   - Keep the file ≤ 100 lines. Anything stable across phases
-     belongs in `CLAUDE.md` or a skill / rule file, not here.
-
-   This is the only mandatory documentation step (zwasm v2 does
-   not maintain the per-task / per-concept chapter cadence — P9).
-
-3. **Mark `[x]` for the just-completed task in ROADMAP §9.<N>**.
-   Leave the Status column SHA blank (`[x]`) — SHA is
-   **batch-backfilled at phase close**. The commit message
-   references `§9.<N> / N.M`; `git log --grep` is the lookup.
-
-   **§18 self-check before this edit** (PreToolUse hook
-   re-prints): `[x]` flips + SHA backfills are routine status
-   updates, no ADR needed. If the same commit touches §9 phase
-   scope, exit criteria, §11, §14, or §1/§2/§4/§5 text — that
-   part is a *deviation*; file `.dev/decisions/NNNN_<slug>.md`
-   first per ROADMAP §18.2.
-
-4. **Append new debt entries to `.dev/debt.md`**. Any Step-4 debt
-   observation not discharged inline gets a row with `Status:
-   now` (default) or `Status: blocked-by: <barrier>`. Update
-   `.dev/lessons/INDEX.md` + add lesson files if a learning
-   emerged.
-
-5. **Handover commit**. `git add .dev/ROADMAP.md
-   .dev/handover.md [.dev/debt.md] [.dev/lessons/...] && git
-   commit -m "chore(p<N>): mark §9.<N> / N.M [x]; retarget
-   handover at N.M+1"`. Pre-commit gate is docs-skip path.
-
-6. **Single push (ADR-0076 D2)**. `git pull --rebase --autostash
-   origin zwasm-from-scratch && git push origin
-   zwasm-from-scratch`. The rebase integrates the bench-CI bot's
-   `bench(ci): record <sha> [skip ci]` commits (disjoint from
-   loop diffs). The single push lands both commits atomically;
-   the rebase-against-bench count halves vs the old 2-push cycle.
-   If rebase conflicts (bucket-2 of the stop whitelist, history
-   work needs user input), stop. If non-fast-forward after
-   rebase (parallel non-bench commit landed), retry `pull
-   --rebase + push` once before stopping.
-
-7. **ubuntu test kick (background; ADR-0076 D3)**. Fire
+1. **Source commit**. `git add <files>; git commit -m "<type>(<scope>): <line>"`.
+   Pre-commit gate runs. Never `--no-verify` (§14 forbidden).
+2. **Update handover.md** (replace, not append): Current state (5
+   lines, Phase + last SHA + next task), Active task (chunk progress
+   with **NEXT** marker), ≤ 100 lines. Stable content moves to
+   `CLAUDE.md` or skill/rule.
+3. **Mark `[x]` for completed task in ROADMAP §9.<N>**. SHA stays
+   bare; batch-backfilled at phase close. **§18 self-check** (PreToolUse
+   hook re-prints): routine `[x]` flip + SHA backfill = no ADR.
+   Touching §1/§2/§4/§5/§9 scope/§11/§14 = deviation; file ADR first.
+4. **Append `.dev/debt.md` + lessons** as needed.
+5. **Handover commit**. `git commit -m "chore(p<N>): mark §9.<N> / N.M [x]; retarget handover at N.M+1"`.
+6. **Single push (ADR-0076 D2)**. `git pull --rebase --autostash origin zwasm-from-scratch && git push origin zwasm-from-scratch`.
+   Rebase integrates bench-CI bot commits (disjoint from loop diffs).
+   Single push lands both commits atomically.
+7. **ubuntu kick (background; ADR-0076 D3)**.
    `bash scripts/run_remote_ubuntu.sh <step> > /tmp/ubuntu.log 2>&1`
-   with `run_in_background: true`, where `<step>` matches the
-   Step-5 scope class (`test` for substrate; `test-all`
-   otherwise). The wrapper does `git fetch + reset --hard
-   origin/zwasm-from-scratch` on the remote, so it tests the
-   commit pair just pushed. **Do NOT wait** for completion;
-   verification happens at next cycle's Resume Step 0.7.
-
-8. **Re-arm** with `ScheduleWakeup(delaySeconds=60,
-   prompt="/continue")`. The literal `60` is the **harness
-   runtime floor** (= shortest heartbeat the harness allows;
-   the tool clamps to `[60, 3600]`). Do NOT take the
-   `ScheduleWakeup` tool description's "default 1200–1800s
-   for idle ticks" guidance — see LOOP.md "Self-perpetuation"
-   for the 5 reasons. Mandatory.
-
-9. Final user-facing text: one sentence. State the closed task
-   id and the next task id. Do not write a status table.
-
-(Per-task notes in `private/notes/` are **optional and not
-load-bearing**. Write them only if the survey or stuck-points
-are non-trivial enough to be worth re-reading later. If a
-private note describes a load-bearing decision, promote it
-to an ADR or a lesson per `lessons_vs_adr.md`. The audit and
-resume procedures do not read `private/` as authoritative.)
+   with `run_in_background: true`. Do NOT wait; Step 0.7 next cycle
+   verifies.
+8. **Re-arm**: `ScheduleWakeup(delaySeconds=60, prompt="/continue")`.
+   Literal `60` = harness floor (`[60, 3600]` clamp). The tool
+   description's "default 1200–1800s" does NOT apply — see
+   [`LOOP.md`](LOOP.md) §"Self-perpetuation". Mandatory.
+9. **Final user text**: one sentence (closed task id + next task id).
 
 ## Auto-compact recovery
 
-You **cannot** invoke `/compact` yourself — it is a user slash
-command. The harness fires `autoCompactEnabled` when context fills,
-silently summarising prior conversation. After compact:
+Can't invoke `/compact` (user-only). Harness auto-fires on context
+fill, silently summarising. After compact:
 
-- The system prompt and skill listing survive.
-- The `PostCompact` hook re-emits `scripts/print_handover_brief.sh`
-  output (language policy + handover.md + last 3 git commits) into
-  the conversation, mirroring SessionStart. That brief is your
-  recovery anchor.
-- Tool-result detail (test logs, file dumps) does **not** survive
-  — only the harness summary remains.
+- System prompt + skill listing survive.
+- `PostCompact` hook re-emits `print_handover_brief.sh` (handover.md +
+  last 3 commits). That brief = recovery anchor.
+- Tool-result detail does NOT survive — only harness summary.
 
-Two implications for the loop:
+Two implications:
 
-1. **Treat the PostCompact brief as a fresh resume.** Re-read
-   `.dev/handover.md`, locate the active task in ROADMAP §9, run
-   `git log -3` and `git status`, then continue from Step 0 of
-   that task. If `git status` shows uncommitted changes that look
-   in-flight, decide: complete and commit, or `git stash` and
-   restart the task. **Do not stop** — auto-compact is explicitly
-   in the non-stop list.
-2. **Update `handover.md` before any long subagent call.** Step 7
-   is not the only time you should write it. Before:
-   - Dispatching an Explore subagent for a multi-file survey.
-   - Running a long test suite (`zig build test-all` past a few
-     minutes).
-   - Any `run_in_background` Bash that may outlast the next
-     compact.
-   …flush the current state to `handover.md` so post-compact
-   recovery has fresh ground truth. The cost is a 30-second edit;
-   the value is not losing the loop's bearings overnight.
+1. **Treat PostCompact brief as fresh resume.** Re-read handover.md,
+   locate active task, `git log -3` + `git status`, continue from
+   Step 0. **Do not stop** — auto-compact is non-stop.
+2. **Update handover.md before any long subagent / background Bash.**
+   Step 7 is not the only flush point. The cost is a 30s edit; value
+   is not losing bearings overnight.
 
-The loop is designed so mid-task auto-compact loses at most one
-task's worth of in-flight Steps 0-3. Steps 4-6 (refactor / gate /
-commit) end with an artifact in git; Step 7 ends with handover
-updated and a wakeup armed. Anchor on those.
+The loop is designed so auto-compact loses at most one task's worth
+of in-flight Steps 0-3. Steps 4-6 end with git artifacts; Step 7 ends
+with handover + wakeup. Anchor on those.
 
 ### Repeat
 
-Steps 0–7 for each `[ ]` task in §9.<N>. Then Phase boundary
-(below). Then §9.<N+1>'s Step 0. The loop never voluntarily exits
-this cycle.
+Steps 0–8 for each `[ ]` task in §9.<N>. Then Phase boundary. Then
+§9.<N+1>'s Step 0. Loop never voluntarily exits.
 
 ## Phase boundary — inline, no stop
 
-A Phase closes when the last `[ ]` in §9.<N> flips to `[x]`. At
-that point:
+When the last `[ ]` in §9.<N> flips `[x]`:
 
-1. **Mandatory: invoke `audit_scaffolding`** (the skill's
-   "Mandatory" trigger — phase boundary). It produces
-   `private/audit-YYYY-MM-DD.md`. The skill reviews ALL §A〜G
-   categories with extra weight on §F (debt-coherence;
-   `blocked-by:` rows whose barrier just dissolved at the
-   closing phase) and §G (extended-challenge anchor commands;
-   re-runs `ssh windowsmini "command -v zig"` etc.).
-   If a `block` finding is local and obvious, fix in the next
-   commit. If a `block` finding requires a load-bearing change,
-   file an ADR via §18, queue in handover, then continue.
-   **Either path continues the loop** — phase boundaries are
-   non-stop.
-2. Optional: run built-in `simplify` on `git diff
-   <phase-start>..HEAD -- src/`. Apply behaviour-preserving
-   suggestions; queue larger ones in `handover.md`.
-3. **Backfill SHA pointers for §9.<N>'s task rows.** For each
-   `[x]` row whose Status column is bare (no SHA), fill the SHA
-   with:
+1. **Mandatory: invoke `audit_scaffolding`** (Phase-boundary mandatory
+   trigger). Walk §A〜G; weight §F (debt coherence) + §G (extended-
+   challenge anchor commands). `block` finding: fix locally if scope
+   is local, else file ADR + queue in handover. **Either path
+   continues.**
+2. Optional: `simplify` on phase diff. Apply behaviour-preserving;
+   queue larger ones.
+3. **Backfill SHA pointers for §9.<N>**: `git log --grep="§9.<N> / <N.M>" --pretty=%h | head -1` per row; one commit (`chore(p<N>): backfill §9.<N> SHA pointers`).
+4. **Open §9.<N+1>**: update Phase Status widget (§9.<N> → DONE,
+   §9.<N+1> → IN-PROGRESS); expand task table; refresh handover.
+5. Push + re-arm (`ScheduleWakeup(60)`); resume §9.<N+1>'s Step 0.
 
-   ```
-   git log --grep="§9.<N> / <N.M>" --pretty=%h | head -1
-   ```
-
-   Land this in **one** commit (e.g. `chore(p<N>): backfill §9.<N>
-   SHA pointers`). This is the single phase-level commit where
-   SHA bookkeeping is paid; per-task Step 7 stays SHA-free so it
-   doesn't generate per-task backfill commits.
-4. **Open §9.<N+1>**: update the **Phase Status** widget at the
-   top of §9 (mark §9.<N> as `DONE`, §9.<N+1> as `IN-PROGRESS`);
-   expand §9.<N+1>'s task table inline (mirror §9.<N>'s structure:
-   a numbered `[ ]` table with the same Status column shape);
-   update handover.md to point at §9.<N+1>'s first task.
-5. Push, re-arm via `ScheduleWakeup(delaySeconds=60,
-   prompt="/continue")` (literal `60` = harness floor; see
-   Step 8 + LOOP.md "Self-perpetuation"), and resume §9.<N+1>'s Step
-   0 immediately. If the harness compacts mid-transition, the
-   PostCompact brief recovers state.
-
-The phase-boundary review steps are **opportunistic, not
-mandatory**. Apply when the scaffolding seems to need it; skip
-when the work has been clean. Either way, the loop continues.
+Phase-boundary review is **opportunistic** except Step 1 (audit
+mandatory).
 
 ### Exception — hard human-in-loop transition gates
 
-A small number of phase boundaries are **hard gates**: the
-autonomous loop must **stop** and surface to the user with a
-gate document. These override the "non-stop" default above.
+A small number of phase boundaries are **hard gates** — loop MUST stop
+and surface to user with the gate document. Currently registered:
 
-Currently registered hard gates:
+- **§9.7 → §9.8**: row 7.13, doc `.dev/archive/phase_gates/phase8_transition_gate.md`
+- **§9.9 → Phase 10**: row 9.13, doc `.dev/phase10_transition_gate.md`
 
-- **§9.7 → §9.8 (Phase 7 → Phase 8)** — anchored at row §9.7 /
-  7.13, document `.dev/archive/phase_gates/phase8_transition_gate.md`. Triggers
-  when the next-task lookup resolves to row 7.13 OR to
-  "open §9.8". The loop must:
-  1. Skip `ScheduleWakeup` (do **not** re-arm).
-  2. Surface a one-sentence handoff: "Phase 8 entry gate
-     (`.dev/archive/phase_gates/phase8_transition_gate.md`) needs collaborative
-     review; pausing autonomous mode."
-  3. Treat resumption as bucket-1 user intervention — the user
-     re-engages by working through the gate checklist, marking
-     ☑ as items resolve, and finally asking for the gate to
-     be cleared (= flipping 7.13 to `[x]`).
-- **§9.9 → Phase 10 (Phase 9 → Phase 10)** — anchored at row
-  §9.9 / 9.13 (was 9.12 pre-ADR-0062 renumber), document
-  `.dev/phase10_transition_gate.md` (Track D prep deliverable).
-  Triggers when the next-task lookup resolves to row 9.13 OR
-  to "open Phase 10". The loop must:
-  1. Skip `ScheduleWakeup` (do **not** re-arm).
-  2. Surface a one-sentence handoff: "Phase 10 entry gate
-     (`.dev/phase10_transition_gate.md`) needs collaborative
-     review; pausing autonomous mode."
-  3. Treat resumption as bucket-1 user intervention — the user
-     re-engages by working through the gate checklist, marking
-     ☑ as items resolve, and finally asking for the gate to
-     be cleared (= flipping 9.13 to `[x]`).
-
-**Detection rule** — the loop scans for hard gates at **two**
-checkpoints:
-
-1. **Resume Procedure Step 2** (every `/continue` invocation,
-   including fresh manual sessions and `ScheduleWakeup`-fired
-   wake-ups). When reading §9.<active>'s task table to identify
-   the first `[ ]` row, check whether that row's body contains
-   `🔒` AND a reference to a `.dev/phase*.md` gate document
-   (canonical patterns: `phase<N>_transition_gate.md`,
-   `phase<N>_completion_*.md`). If yes, this is a hard gate —
-   surface to user immediately with a one-sentence handoff and
-   the gate doc path. **Do not enter
-   the per-task TDD loop**.
-2. **Step 7 re-target** (after a per-task close, before the
-   final `ScheduleWakeup`). Scan the next `[ ]` row in
-   §9.<active>; same detection. If matched, skip
-   `ScheduleWakeup` and surface to user.
-
-Both checkpoints are needed because: (1) a fresh `/continue`
-may load up after a previous session already flipped 7.12 to
-`[x]`, in which case Resume Procedure walks straight into the
-gate row without ever passing through Step 7 of a prior task;
-(2) a long-running autonomous session that closes the pre-gate
-row in-cycle and is about to re-arm needs Step 7 to catch the
-gate before sleeping.
-
-This pattern generalises — future hard gates (Phase 11 → 12+,
-etc.) can be added by replicating the row + gate document
-shape; the same Detection rule then catches them.
-
-A hard gate is **not** a bucket-2 unsolvable problem; the loop
-isn't broken. It's an explicit "this needs the user; don't
-proceed silently" checkpoint, distinct from both stop buckets
-in the strict whitelist.
+Detection at Resume Step 2 + Step 7 re-target: row body contains 🔒 +
+`.dev/phase*.md` gate reference → skip `ScheduleWakeup`, surface
+one-sentence handoff. Hard gate is NOT bucket-2; it's "this needs the
+user; don't proceed silently".
 
 ## Reference tables — see `LOOP.md`
 
-Reference sections moved to `LOOP.md` (originally §9.12-A / A5b
-2026-05-19; "Chunk types" added 2026-05-21 per close-plan §6 (b))
-to keep this file focused on per-task loop procedure:
+- **Chunk types** — `emit` / `architectural` / `survey` / `test-only`
+  / `infrastructure` size + gate + exit rules; `architectural`
+  3-cycle cap.
+- **Subagent delegation cheatsheet**.
+- **What NOT to invoke during the loop**.
+- **Model selection (dual-model)** — Opus 4.7 for per-task TDD, Opus
+  4.6 for long-context audit/simplify subagents.
+- **Anti-patterns observed in past sessions** — 6 named failure modes.
 
-- **Chunk types — type-aware granularity rules** — `emit` /
-  `architectural` / `survey` / `test-only` / `infrastructure` size
-  + gate + exit rules; `architectural` 3-cycle cap. See
-  [`LOOP.md` §"Chunk types"](LOOP.md).
-- **Subagent delegation cheatsheet** — when to fork an Explore /
-  Bash subagent vs stay in main. See [`LOOP.md` §"Subagent
-  delegation cheatsheet"](LOOP.md).
-- **What NOT to invoke during the loop** — `simplify` / `review` /
-  `audit_scaffolding` cadence guidance. See [`LOOP.md` §"What NOT
-  to invoke during the loop"](LOOP.md).
-- **Model selection (dual-model)** — Opus 4.7 for per-task TDD,
-  Opus 4.6 for long-context audit/simplify subagents. See
-  [`LOOP.md` §"Model selection (dual-model)"](LOOP.md).
-- **Anti-patterns observed in past sessions (do not repeat)** —
-  6 named failure modes ("Big next task, natural stop", "N commits
-  is enough", "Push needs approval", "windowsmini gate defer",
-  "User can /continue when ready", "Auto-compact safer to stop").
-  See [`LOOP.md` §"Anti-patterns observed in past sessions"](LOOP.md).
+All in [`LOOP.md`](LOOP.md).
