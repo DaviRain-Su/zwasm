@@ -355,9 +355,20 @@ fn emitLaneByte(self: *Lowerer, op: ZirOp) Error!void {
 
 /// memarg+lane op (load_lane / store_lane): payload = offset,
 /// extra = lane byte. align is dropped (unused in emit; the
-/// validator consumed it for type-stack tracking).
+/// validator consumed it for type-stack tracking). Wasm 3.0
+/// §5.4.6 memory64 memarg encoding: align uleb bit 6 (0x40)
+/// signals a memidx uleb follows; memidx is decoded-and-
+/// discarded here since the instantiate path rejects
+/// multi-memory > 1 (per ADR-0111 D5) and the lane variant's
+/// `extra` field is already consumed by the lane byte. When
+/// per-lane multi-memory codegen lands, memidx can route via
+/// a side table similar to the scalar MemArgExtra packing.
 fn emitMemargLane(self: *Lowerer, op: ZirOp) Error!void {
-    _ = try leb128.readUleb128(u32, self.body, &self.pos); // align
+    const raw_align = try leb128.readUleb128(u32, self.body, &self.pos);
+    const has_memidx = (raw_align & 0x40) != 0;
+    if (has_memidx) {
+        _ = try leb128.readUleb128(u32, self.body, &self.pos); // memidx (discarded; multi-memory rejected at instantiate)
+    }
     const offset = try leb128.readUleb128(u32, self.body, &self.pos);
     if (self.pos >= self.body.len) return Error.UnexpectedEnd;
     const lane = self.body[self.pos];

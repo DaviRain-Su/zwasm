@@ -899,3 +899,41 @@ test "lower (try_table): malformed catch kind rejected" {
     const body = [_]u8{ 0x1F, 0x40, 0x01, 0x05, 0x00, 0x0B, 0x0B };
     try testing.expectError(Error.BadBlockType, lowerFunctionBody(testing.allocator, &body, &f, &.{}, &.{}));
 }
+
+// 10.M-5b: SIMD lane-memarg with Wasm 3.0 bit-6 memidx encoding.
+
+test "lower (simd): v128.load8_lane with bit-6 memidx — memidx is decoded-and-discarded" {
+    var f = newFunc(empty_sig);
+    defer f.deinit(testing.allocator);
+    // 0xFD 0x54 (load8_lane sub-opcode) align=0x40 (= bit-6 set, effective 0)
+    // memidx=0 offset=0x08 lane=3 end
+    const body = [_]u8{ 0xFD, 0x54, 0x40, 0x00, 0x08, 0x03, 0x0B };
+    try lowerFunctionBody(testing.allocator, &body, &f, &.{}, &.{});
+    try testing.expectEqual(ZirOp.@"v128.load8_lane", f.instrs.items[0].op);
+    // payload = offset (memidx discarded; lane variants' extra holds lane byte)
+    try testing.expectEqual(@as(u32, 0x08), f.instrs.items[0].payload);
+    // extra = lane byte (= 3).
+    try testing.expectEqual(@as(u32, 3), f.instrs.items[0].extra);
+}
+
+test "lower (simd): v128.store32_lane without bit-6 → legacy 2-uleb shape still works" {
+    var f = newFunc(empty_sig);
+    defer f.deinit(testing.allocator);
+    // 0xFD 0x5A (store32_lane sub-opcode) align=2 offset=0x10 lane=1 end
+    const body = [_]u8{ 0xFD, 0x5A, 0x02, 0x10, 0x01, 0x0B };
+    try lowerFunctionBody(testing.allocator, &body, &f, &.{}, &.{});
+    try testing.expectEqual(ZirOp.@"v128.store32_lane", f.instrs.items[0].op);
+    try testing.expectEqual(@as(u32, 0x10), f.instrs.items[0].payload);
+    try testing.expectEqual(@as(u32, 1), f.instrs.items[0].extra);
+}
+
+test "lower (simd): v128.load64_lane with bit-6 + non-zero memidx — memidx decoded-and-discarded" {
+    var f = newFunc(empty_sig);
+    defer f.deinit(testing.allocator);
+    // 0xFD 0x57 (load64_lane sub-opcode) align=0x43 (= bit-6 | 3) memidx=2 offset=0 lane=0 end
+    const body = [_]u8{ 0xFD, 0x57, 0x43, 0x02, 0x00, 0x00, 0x0B };
+    try lowerFunctionBody(testing.allocator, &body, &f, &.{}, &.{});
+    try testing.expectEqual(ZirOp.@"v128.load64_lane", f.instrs.items[0].op);
+    try testing.expectEqual(@as(u32, 0), f.instrs.items[0].payload);
+    try testing.expectEqual(@as(u32, 0), f.instrs.items[0].extra);
+}

@@ -349,14 +349,29 @@ pub fn readLaneIdx(self: *Validator, lane_count: u8) Error!void {
 }
 
 /// Read + range-check a SIMD memarg's alignment immediate.
-/// Wasm spec §3.3.7: align uleb is the log2 of the alignment
-/// in bytes and MUST be ≤ log2(natural_alignment_bytes).
-/// Validation-time reject (Error.InvalidSimdAlignment).
+/// Wasm spec §3.3.7 + Wasm 3.0 §5.4.6 memory64 memarg encoding:
+/// the align uleb's bit 6 (0x40) is the memidx-presence flag —
+/// when set, a memidx uleb follows the align and the effective
+/// log2-align is `align & 0x3F` (low 6 bits). The validator
+/// range-checks the effective alignment against the op's
+/// natural alignment (Error.InvalidSimdAlignment).
+///
+/// memidx is decoded-and-discarded — the runtime instantiate
+/// path rejects multi-memory > 1 per ADR-0111 D5, so memidx
+/// must be 0 in valid modules. Reading it here keeps the
+/// validator in sync with the lowerer's `emitMemarg` and
+/// `emitMemargLane` shape.
+///
 /// §9.12-E / B134: SIMD-only enforcement; non-SIMD opLoad /
 /// opStore still uses skipMemarg (separate workstream).
 pub fn readSimdMemarg(self: *Validator, max_align_log2: u8) Error!void {
-    const align_log2 = try leb128.readUleb128(u32, self.body, &self.pos);
+    const raw_align = try leb128.readUleb128(u32, self.body, &self.pos);
+    const has_memidx = (raw_align & 0x40) != 0;
+    const align_log2: u32 = if (has_memidx) (raw_align & 0x3F) else raw_align;
     if (align_log2 > max_align_log2) return Error.InvalidSimdAlignment;
+    if (has_memidx) {
+        _ = try leb128.readUleb128(u32, self.body, &self.pos); // memidx (decoded-and-discarded; multi-memory rejected at instantiate)
+    }
     _ = try leb128.readUleb128(u32, self.body, &self.pos); // offset
 }
 
