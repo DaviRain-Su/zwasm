@@ -138,7 +138,7 @@ Subsequent chunks J.2..J.close retain their numbering for stable
 cross-reference (handover / git commit grep / survey notes). The
 implementation train starts at J.2.
 
-### J.2 — `Engine` + `Module` skeleton; native parser path; allocator strict-pass
+### J.2 — `Engine` + `Module` skeleton; native parser path; allocator strict-pass — **CLOSED `017193bc`**
 
 | Field | Value |
 |---|---|

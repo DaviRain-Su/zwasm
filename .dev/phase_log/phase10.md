@@ -109,9 +109,19 @@ J.1+ gated on execution plan doc)
   _zig_api_plan.md) — 8 impl chunks (J.1..J.close) + integrated
   test strategy + 7 decision points + 10 risk items. **User
   review gate**: J.1 first commit blocked until plan reviewed `[x]` (this commit)
-- **10.J-1+** — implementation cycles per plan doc §3 (Runtime
-  → JitRuntime rename → Engine + Module + allocator strict-pass
+- **10.J-1+** — implementation cycles per plan doc §3 (J.1
+  withdrawn 2026-05-25; Engine + Module + allocator strict-pass
   → Instance + Trap full set → TypedFunc + Memory + multi-result
   → Linker + Caller + host imports → Tier-2 runner → WASI
-  skeleton → close + coverage audit) (planned; ~8-12 cycles
-  per plan §7)
+  skeleton → close + coverage audit) (~6-10 cycles per plan §7
+  post-J.1 retraction)
+- **10.J / J.2** — `src/zwasm/{engine,module}.zig` new; c_api
+  `Runtime` + `Module` veneers in `src/zwasm.zig` deleted; `Instance`
+  field `rt: *Runtime` → `c_store: *_api_instance.Store` (rt was
+  unused by `invoke`). Native parser path via `src/parse/parser.zig`
+  with allocator threaded. T1.1 (RecordingAllocator strict-pass) +
+  T1.2 (truncated header / bad magic → `error.ParseFailed`) + the
+  existing round-trip test rewritten on Engine. I3 grep updated
+  `pub const Runtime` → `pub const Engine`. zone_check classifier
+  extended `src/zwasm/*` → `lib`. Mac 1812/1826 PASS, I3 18/18,
+  ubuntu kicked post-push (`017193bc`)
