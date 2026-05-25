@@ -72,7 +72,12 @@ chunks queued)
 - **10.F-D172** — `wasm_extern_as_table` + `wasm_table_get/
   set/size/grow` (planned)
 - **10.F-D173** — `wasm_extern_as_memory` + `wasm_memory_data
-  /data_size/size/grow` (planned)
+  /data_size/size/grow` + `wasm_memory_grow` `[x] 7a8c3ae2`
+  (pub const Memory + 5 c_api exports per include/wasm.h:471-481;
+  Tier-1 "wasm 2.0 c_api memory accessors: data + size + grow
+  round-trip (D-173)" PASS; B2 audit gap (cross-instance
+  memory.copy aliasing) unblocked; D-173 discharged. File-size
+  exempt cap 2500→2800 via ADR-0099 (cap=N) override.)
 
 
 ## Row 10.J — Native Zig API (ADR-0109)
