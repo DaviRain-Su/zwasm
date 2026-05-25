@@ -269,6 +269,24 @@ close: -Dwasm=v2_0 symbol-absence gate).
 
 ### Sub-chunks (commit-time order)
 
+- **10.M-fixture-2** — OOB-trap + page-edge memory64 fixtures.
+  Extends `test/edge_cases/p10/memory64/` with 2 additional
+  cases covering trap-condition + exact-equals off-by-one
+  stress axes per `.claude/rules/edge_case_testing.md`.
+  `oob_trap_past_limit.{wat,wasm,expect}` — i64-indexed
+  memory; addr 65533 + i32.load (size 4) → ea+size=65537 >
+  mem_limit=65536 → trap "out of bounds memory access".
+  `page_edge_load_succeeds.{wat,wasm,expect}` — addr 65532
+  + i32.load → ea+size=65536 == mem_limit → succeeds (check
+  is `>`, not `>=`). Memory zero-init → returns 0. Both
+  share canonical 47-byte memory64 module shape (handcrafted
+  WAT); address LEB differs by one bit. Mirror the p7
+  past_limit fixture shape but on i64-typed memory,
+  exercising validator `memAddrType()` dispatcher + codegen
+  `emitMemOpI64` bounds check. p10 corpus 3/3 PASS; total
+  111/111 edge_cases (p7=40 + p9=68 + p10=3) PASS. Mac
+  `test-all` GREEN; lint + zone + fs gates exit 0.
+
 - **10.M-fixture** — edge_cases/p10/memory64/ store+load
   triple. New `test/edge_cases/p10/memory64/
   store_load_i32_via_i64_addr.{wat,wasm,expect}` —

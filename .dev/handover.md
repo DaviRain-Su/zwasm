@@ -11,9 +11,11 @@
   impl rows unlocked。
 - **10.M-5 = SHIPPED** (`96dafb3c`): validator memory64 widening + e2e test。
 - **10.M-close = SHIPPED** (`b7556472`): -Dwasm=v2_0 symbol-absence gate。
-- **10.M-fixture = SHIPPED 2026-05-25**: edge_cases/p10/memory64/
-  store_load_i32_via_i64_addr triple + build.zig wire-up。canonical
-  fixture location 確立、test-all 経由で regression detection 有効。
+- **10.M-fixture = SHIPPED** (`699f3b95`): edge_cases/p10/memory64/ store+load triple。
+- **10.M-fixture-2 = SHIPPED 2026-05-25**: 追加 OOB-trap + page-edge
+  fixtures。memory64 fixture set が basic round-trip + trap-boundary
+  + exact-equals off-by-one カバー。p10 corpus 3/3 PASS、total
+  111/111 (p7=40 + p9=68 + p10=3) PASS。
 - **Mac `zig build test`**: green (substrate baseline)。
 
 ## Phase 10 progress
@@ -37,14 +39,14 @@ Per ADR-0111 (Accepted)。`phase10_design_plan_ja.md` §3.1 source-of-truth。
 - 10.M-4c [x] SHIPPED `affef52f` (x86_64 i64 wrap-check mirror)
 - 10.M-5 [x] SHIPPED `96dafb3c` (validator memory64 widening + e2e test)
 - 10.M-close [x] SHIPPED `b7556472` (-Dwasm=v2_0 symbol-absence gate)
-- 10.M-fixture [x] SHIPPED (edge_cases/p10/memory64/ triple + build.zig wire-up)
-- **10.M-fixture-2 NEXT**: 追加の memory64 fixture (page-edge access /
-  load-with-large-offset / OOB trap)。現在の triple は basic store+load
-  のみ; stress axes (numeric range / alignment / trap boundary) を
-  カバーする 2-3 追加 case で `.claude/rules/edge_case_testing.md` の
-  推奨カバレッジを満たす。
-- 10.M-5b (deferrable): SIMD memarg memory64 support
-  (`validator_simd.zig::readSimdMemarg` + `lower_simd.zig::emitMemargLane`)。
+- 10.M-fixture [x] SHIPPED `699f3b95` (edge_cases p10/memory64 triple)
+- 10.M-fixture-2 [x] SHIPPED (OOB-trap + page-edge fixtures)
+- **10.M-5b NEXT**: SIMD memarg memory64 support。
+  `validator_simd.zig::readSimdMemarg` で bit-6 handling、
+  `lower_simd.zig::emitMemargLane` で memidx 抽出。v128.load/store
+  on i64-indexed memory が validator-reject される現状を解消。
+  arm64 op_simd.zig + x86_64 emit.zig SIMD load_lane sites は
+  既存の lane=u8 → 新 packed (lane + memidx + ...) 移行が必要。
 - 10.M-spec-corpus (deferrable): WebAssembly/memory64 spec testsuite
   (~127 .wast files) を spec runner に wire-up。
 - 10.M-parent-close: ROADMAP §10 / 10.M row `[x]` flip。
