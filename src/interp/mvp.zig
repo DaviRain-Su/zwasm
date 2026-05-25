@@ -552,14 +552,14 @@ pub fn invoke(rt: *Runtime, table: *const DispatchTable, callee: *const zir.ZirF
     // Wasm 3.0 EH cross-frame unwind (10.E-5d). When the callee
     // body propagated an uncaught exception, retry the catch
     // search against the caller frame's labels before re-raising.
-    // The pending-exception payload survives the popFrame since
-    // it lives on Runtime, not on the per-frame operand stack.
+    // The pending-exception pointer survives the popFrame since
+    // it lives on Runtime, not on the per-frame operand stack;
+    // the underlying `*Exception` survives via `rt.live_exceptions`.
     run_err catch |err| {
         if (err == Trap.UncaughtException and rt.pending_exception != null and rt.frame_len > 0) {
             const exc = rt.pending_exception.?;
             const caller = rt.currentFrame();
-            const payload = exc.payload[0..exc.payload_len];
-            if (try findAndDispatchCatch(rt, caller, exc.tag_idx, payload)) {
+            if (try findAndDispatchCatch(rt, caller, exc)) {
                 rt.pending_exception = null;
                 return;
             }
@@ -605,25 +605,24 @@ fn throwOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
         0;
     if (param_count > runtime.max_exception_payload) return Trap.Unreachable;
 
-    // Stash into the Runtime's pending-exception slot so the
-    // unwinder can recover the payload after `invoke()` pops the
-    // throwing frame. The slot is cleared on local-frame catch
-    // OR by the cross-frame `invoke()` recovery path on caller-
-    // frame catch (10.E-5d); otherwise it stays set as the trap
-    // propagates further out.
-    var exc: runtime.PendingException = .{
-        .tag_idx = thrown_tag_idx,
-        .payload_len = param_count,
-        .payload = undefined,
-    };
+    // Pop params into a stack-local buffer (last param on top).
+    var payload_buf: [runtime.max_exception_payload]Value = undefined;
     var i: u32 = param_count;
     while (i > 0) {
         i -= 1;
-        exc.payload[i] = rt.popOperand();
+        payload_buf[i] = rt.popOperand();
     }
+
+    // Allocate the Exception heap object; track for Runtime.deinit
+    // cleanup. The exnref pushed by catch_all_ref / catch_ref
+    // points into this allocation; lifetime extends until
+    // Runtime.deinit (pre-GC milestones).
+    const exc = try rt.alloc.create(runtime.Exception);
+    exc.* = runtime.Exception.init(thrown_tag_idx, payload_buf[0..param_count]);
+    try rt.live_exceptions.append(rt.alloc, exc);
     rt.pending_exception = exc;
 
-    if (try findAndDispatchCatch(rt, frame, thrown_tag_idx, exc.payload[0..param_count])) {
+    if (try findAndDispatchCatch(rt, frame, exc)) {
         rt.pending_exception = null;
         return;
     }
@@ -660,12 +659,12 @@ fn throwRefOp(_: *InterpCtx, _: *const ZirInstr) anyerror!void {
 fn findAndDispatchCatch(
     rt: *Runtime,
     frame: *runtime.Frame,
-    thrown_tag_idx: u32,
-    payload: []const Value,
+    exc: *runtime.Exception,
 ) Trap!bool {
     const fnz = frame.func orelse return false;
     const landing_pads = fnz.eh_landing_pads orelse return false;
     const catch_entries = fnz.eh_catch_entries orelse &[_]zir.CatchEntry{};
+    const payload = exc.payload[0..exc.payload_len];
 
     var depth: u32 = 0;
     while (depth < frame.label_len) : (depth += 1) {
@@ -683,12 +682,24 @@ fn findAndDispatchCatch(
                     return true;
                 },
                 .catch_ => {
-                    if (entry.tag_idx != thrown_tag_idx) continue;
+                    if (entry.tag_idx != exc.tag_idx) continue;
                     try dispatchCatchWithPayload(rt, frame, depth + 1 + entry.label_idx, payload);
                     return true;
                 },
-                .catch_ref, .catch_all_ref => {
-                    // Deferred: needs exnref support (10.E-N follow-up).
+                .catch_all_ref => {
+                    // catch_all_ref pushes only the exnref (no tag params).
+                    var exn_only: [1]Value = .{Value.fromExceptionRef(@ptrCast(exc))};
+                    try dispatchCatchWithPayload(rt, frame, depth + 1 + entry.label_idx, exn_only[0..]);
+                    return true;
+                },
+                .catch_ref => {
+                    if (entry.tag_idx != exc.tag_idx) continue;
+                    // catch_ref pushes the tag's params followed by the exnref.
+                    var combined: [runtime.max_exception_payload + 1]Value = undefined;
+                    for (payload, 0..) |v, j| combined[j] = v;
+                    combined[payload.len] = Value.fromExceptionRef(@ptrCast(exc));
+                    try dispatchCatchWithPayload(rt, frame, depth + 1 + entry.label_idx, combined[0 .. payload.len + 1]);
+                    return true;
                 },
             }
         }
@@ -1325,4 +1336,126 @@ test "cross-frame throw: callee throws, no outer try_table → propagates Trap.U
     // pending_exception survives — outermost caller can inspect tag_idx if needed.
     try testing.expect(rt.pending_exception != null);
     try testing.expectEqual(@as(u32, 0), rt.pending_exception.?.tag_idx);
+}
+
+test "throw + catch_all_ref: catch pushes exnref pointing at Exception (10.E-exnref-a)" {
+    // (func (result i32)
+    //   (block (result i32)        ; outer_block, block_idx=0, end_inst=7
+    //     (block (result i32)      ; inner_block, block_idx=1, arity=1, end_inst=5
+    //                              ;   — catch_all_ref targets this label; pushes exnref
+    //       (try_table             ; block_idx=2, end_inst=4
+    //         throw 0
+    //       end)
+    //     end)                      ; catch_all_ref branched here with exnref on stack
+    //                               ; (block's branch_arity=1 catches the exnref as the block result)
+    //     drop                      ; discard the exnref
+    //     i32.const 7                ; substitute return value
+    //   end)
+    //   end
+    // The inner block has (result i32) so its branch_arity=1 matches
+    // the single value (exnref reinterpreted as ref u64) catch_all_ref pushes.
+    var fnz = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &[_]zir.ValType{.i32} }, &.{});
+    defer fnz.deinit(testing.allocator);
+
+    try fnz.blocks.append(testing.allocator, .{ .kind = .block, .start_inst = 1, .end_inst = 7 });
+    try fnz.blocks.append(testing.allocator, .{ .kind = .block, .start_inst = 2, .end_inst = 5 });
+    try fnz.blocks.append(testing.allocator, .{ .kind = .try_table, .start_inst = 3, .end_inst = 4 });
+
+    const catches = try testing.allocator.dupe(zir.CatchEntry, &[_]zir.CatchEntry{
+        .{ .kind = .catch_all_ref, .tag_idx = 0, .label_idx = 0 },
+    });
+    fnz.eh_catch_entries = catches;
+    const lps = try testing.allocator.dupe(zir.LandingPad, &[_]zir.LandingPad{
+        .{ .block_idx = 2, .catches_start = 0, .catches_end = 1 },
+    });
+    fnz.eh_landing_pads = lps;
+
+    try fnz.instrs.append(testing.allocator, .{ .op = .block, .payload = 0, .extra = 1 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .block, .payload = 1, .extra = 1 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .try_table, .payload = 2, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .throw, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .drop, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 7, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    try rt.pushFrame(.{ .sig = fnz.sig, .locals = &.{}, .operand_base = 0, .pc = 0, .func = &fnz });
+    defer _ = rt.popFrame();
+
+    try dispatch_loop.run(&rt, &t, fnz.instrs.items);
+
+    try testing.expectEqual(@as(u32, 1), rt.operand_len);
+    try testing.expectEqual(@as(i32, 7), rt.popOperand().i32);
+    // The Exception heap object survives in live_exceptions until Runtime.deinit.
+    try testing.expectEqual(@as(usize, 1), rt.live_exceptions.items.len);
+}
+
+test "throw + catch_ref with matching tag: pushes params + exnref (10.E-exnref-a)" {
+    // (func (result i32)
+    //   (block (result i32)        ; outer_block, block_idx=0, end_inst=8
+    //     (block (param i32 i32)   ; inner_block, block_idx=1
+    //                              ;   — catch_ref expects [i32, exnref]
+    //                              ;     but block's signature is tricky here;
+    //                              ;     using arity=2 so branch_arity=2 captures both
+    //       (try_table             ; block_idx=2
+    //         i32.const 88
+    //         throw 0              ; tag 0 has 1 i32 param → catch_ref pushes [88, exnref]
+    //       end)
+    //     end)                      ; catch_ref branched here with [88, exnref]
+    //                               ; inner block's branch_arity=2 means br carries both
+    //     drop                      ; drop exnref
+    //                               ; stack=[88]
+    //   end)                        ; outer block's branch_arity=1 → carry 88
+    //   end
+    //
+    // Note: this test bypasses validator-enforced label type matching by
+    // directly constructing ZirFunc. The arity-2 inner block is shorthand
+    // for "branch_arity=2 captures whatever catch_ref pushes".
+    var fnz = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &[_]zir.ValType{.i32} }, &.{});
+    defer fnz.deinit(testing.allocator);
+
+    try fnz.blocks.append(testing.allocator, .{ .kind = .block, .start_inst = 1, .end_inst = 7 });
+    try fnz.blocks.append(testing.allocator, .{ .kind = .block, .start_inst = 2, .end_inst = 6 });
+    try fnz.blocks.append(testing.allocator, .{ .kind = .try_table, .start_inst = 3, .end_inst = 5 });
+
+    const catches = try testing.allocator.dupe(zir.CatchEntry, &[_]zir.CatchEntry{
+        .{ .kind = .catch_ref, .tag_idx = 0, .label_idx = 0 },
+    });
+    fnz.eh_catch_entries = catches;
+    const lps = try testing.allocator.dupe(zir.LandingPad, &[_]zir.LandingPad{
+        .{ .block_idx = 2, .catches_start = 0, .catches_end = 1 },
+    });
+    fnz.eh_landing_pads = lps;
+
+    try fnz.instrs.append(testing.allocator, .{ .op = .block, .payload = 0, .extra = 1 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .block, .payload = 1, .extra = 2 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .try_table, .payload = 2, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 88, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .throw, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .drop, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    // Tag 0 has 1 param (i32).
+    const tag_counts = [_]u32{1};
+    rt.tag_param_counts = &tag_counts;
+    try rt.pushFrame(.{ .sig = fnz.sig, .locals = &.{}, .operand_base = 0, .pc = 0, .func = &fnz });
+    defer _ = rt.popFrame();
+
+    try dispatch_loop.run(&rt, &t, fnz.instrs.items);
+
+    try testing.expectEqual(@as(u32, 1), rt.operand_len);
+    try testing.expectEqual(@as(i32, 88), rt.popOperand().i32);
 }

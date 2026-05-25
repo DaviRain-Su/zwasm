@@ -102,6 +102,26 @@ pub const Value = extern union {
         return @ptrFromInt(v.ref);
     }
 
+    /// Wasm 3.0 EH (10.E-exnref-a) — encode an `Exception` heap
+    /// object pointer as an `exnref` `Value`. The pointer must
+    /// outlive every read of the ref (lifetime tied to the owning
+    /// Runtime's `live_exceptions` tracker, freed at
+    /// `Runtime.deinit`). Same bit-level layout as `fromFuncRef`;
+    /// disambiguation between funcref / exnref is validator-
+    /// enforced (the operand stack type tracking knows which
+    /// reftype is in play at each pop site).
+    pub fn fromExceptionRef(exc: *anyopaque) Value {
+        return .{ .ref = @intFromPtr(exc) };
+    }
+
+    /// Decode an exnref `Value` to its `*anyopaque` source (caller
+    /// reinterprets as `*Exception` from `feature/exception_handling`).
+    /// Returns `null` for the null exnref sentinel.
+    pub fn refAsExceptionPtr(v: Value) ?*anyopaque {
+        if (v.ref == null_ref) return null;
+        return @ptrFromInt(v.ref);
+    }
+
     /// Encode an i32 as an i31-tagged GC reference (Wasm 3.0 GC
     /// proposal §3.x). Stores the i31-packed payload in the low
     /// 32 bits of the `ref` slot per ADR-0116 D4; the high 32 bits

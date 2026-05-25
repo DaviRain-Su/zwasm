@@ -93,24 +93,19 @@ pub const HostCall = struct {
     ctx: *anyopaque,
 };
 
-/// Max number of operand values a tag's param-list can stash in
-/// `PendingException.payload`. Matches `max_block_arity` in
-/// `src/interp/mvp.zig` (the cap on Wasm 2.0 multivalue block
-/// arity, reused here so the same fixed-size pop buffer can be
-/// re-used for tag payload marshalling).
-pub const max_exception_payload: u32 = 16;
+/// Wasm 3.0 EH Exception heap object — re-exported from
+/// `feature/exception_handling/exception.zig` (Zone 1). Carried
+/// by `Runtime.pending_exception` as `*Exception` during in-flight
+/// throw / catch dispatch; tracked in `Runtime.live_exceptions`
+/// for `Runtime.deinit` cleanup.
+pub const Exception = @import("../feature/exception_handling/exception.zig").Exception;
 
-/// Wasm 3.0 EH in-flight exception record (10.E-5d). Lives at
-/// `Runtime.pending_exception` for the lifetime of one throw
-/// → catch dispatch (cleared when the matching catch fires;
-/// stays set while `Trap.UncaughtException` propagates across
-/// frames until either a caller-frame catch claims it or the
-/// trap escapes the top-level invocation).
-pub const PendingException = struct {
-    tag_idx: u32,
-    payload_len: u32,
-    payload: [max_exception_payload]Value,
-};
+/// Max number of operand values a tag's param-list can stash in
+/// `Exception.payload`. Mirrors the `Exception` struct's inline
+/// cap; matches `max_block_arity` in `src/interp/mvp.zig` (the
+/// cap on Wasm 2.0 multivalue block arity, reused here so the
+/// same fixed-size buffer can carry tag payload marshalling).
+pub const max_exception_payload: u32 = 16;
 
 /// Per-instance interpreter state. Owns linear memory + globals
 /// (heap-backed); operand and frame stacks are inline.
@@ -217,20 +212,31 @@ pub const Runtime = struct {
     /// production pipeline has populated this field.
     tag_param_counts: []const u32 = &.{},
 
-    /// Wasm 3.0 EH (10.E-5d) — in-flight exception slot for cross-
-    /// frame unwind. `throwOp` writes the thrown tag's idx + popped
-    /// payload values here before walking the local frame's catch
-    /// vec; on a local-frame match, the slot is cleared and dispatch
-    /// proceeds. On no local match, the slot stays set and
-    /// `Trap.UncaughtException` propagates; the `invoke()` helper
-    /// catches the trap post-popFrame and retries
+    /// Wasm 3.0 EH (10.E-5d / 10.E-exnref-a) — in-flight exception
+    /// slot for cross-frame unwind. `throwOp` allocates an
+    /// `Exception` heap object (tracked in `live_exceptions` for
+    /// `deinit` cleanup), writes the pointer here, then walks the
+    /// local frame's catch vec; on a local-frame match the slot is
+    /// cleared and dispatch proceeds. On no local match the slot
+    /// stays set and `Trap.UncaughtException` propagates; the
+    /// `invoke()` helper catches the trap post-popFrame and retries
     /// `findAndDispatchCatch` against the caller's frame, repeating
     /// up the frame stack until either a catch fires or the trap
     /// escapes the top-level invocation. Treated as a thread-local-
     /// equivalent slot per ADR-0114 D6's "zwasm_throw trampoline"
     /// design (interp variant: in-process slot vs codegen's
-    /// per-thread storage).
-    pending_exception: ?PendingException = null,
+    /// per-thread storage). `catch_all_ref` / `catch_ref` dispatch
+    /// reads the slot's pointer to push the exnref value on the
+    /// catch target's stack.
+    pending_exception: ?*Exception = null,
+
+    /// Wasm 3.0 EH (10.E-exnref-a) — Exception heap objects
+    /// allocated by `throwOp` for the lifetime of this Runtime.
+    /// Freed at `deinit`. The naive "leak until Runtime end"
+    /// strategy is sufficient for the pre-GC milestones; the
+    /// final GC-managed exnref reachability lands at 10.G when
+    /// `Collector` walks `exnref`-typed roots per ADR-0117 I1.
+    live_exceptions: std.ArrayList(*Exception) = .empty,
     /// Dispatch table used by the active interp run. Set by
     /// `src/interp/dispatch.zig`'s `run`; the `call` handler
     /// needs it to recursively dispatch the callee body.
@@ -289,6 +295,11 @@ pub const Runtime = struct {
         rawFreeOwned(self.alloc, Value, self.globals_storage);
         rawFreeOwned(self.alloc, bool, self.data_dropped);
         rawFreeOwned(self.alloc, bool, self.elem_dropped);
+        // Wasm 3.0 EH (10.E-exnref-a): free per-throw Exception heap
+        // objects. Arena allocators no-op the destroy; testing /
+        // standalone allocators release them here.
+        for (self.live_exceptions.items) |exc| self.alloc.destroy(exc);
+        self.live_exceptions.deinit(self.alloc);
     }
 
     pub fn pushOperand(self: *Runtime, v: Value) Trap!void {
