@@ -23,6 +23,7 @@ const std = @import("std");
 const zir = @import("../../../ir/zir.zig");
 const sections = @import("../../../parse/sections.zig");
 const regalloc = @import("../shared/regalloc.zig");
+const exception_table = @import("../shared/exception_table.zig");
 const label_mod = @import("label.zig");
 const types = @import("types.zig");
 
@@ -154,6 +155,14 @@ pub const EmitCtx = struct {
     /// switch between host-import dispatch and a normal
     /// `CALL rel32 + CallFixup`.
     num_imports: u32,
+    /// 10.E-codegen-4b: per-function EH handler-entry accumulator.
+    /// `op_exception_handling.try_table` appends one `HandlerEntry`
+    /// per catch clause (per ADR-0114 D2); the post-emit linker
+    /// finalises into the per-Instance ExceptionTable consumed by
+    /// the FP-walk unwinder. Optional: null for functions that
+    /// contain no try_table (back-compat for every existing
+    /// EmitCtx construction site).
+    exception_table_builder: ?*exception_table.Builder = null,
     /// Per-defined-global metadata (ADR-0052; §9.9 / 9.9-h-2).
     /// Indexed by **defined** global idx (= wasm-space global
     /// idx minus the leading imported-global count). Parallel
