@@ -127,26 +127,22 @@ ROADMAP §10 = 13-row task table。
     cross-module + spec corpus + regalloc terminator-class 残)
 - Pending: 10.E / 10.G / 10.P
 
-## Active task — ADR-0116 (GC roots + RTT + i31) reference enrichment
+## Active task — ADR-0111 (memory64) reference enrichment
 
-ADR-0115 enriched (`b12e8600`) with 4 concrete wasmtime citations
-(GcRuntime factory, GcHeap trait vtable, DrcCollector, NullCollector).
-Next: ADR-0116 (GC roots + RTT + i31) reference enrichment from
-wasmtime `crates/wasmtime/src/runtime/vm/gc/` (gc_ref.rs root
-table, i31.rs i31 unboxed representation, trace_info.rs root
-tracing).
+ADR-0116 enriched (`f7e717d9`) with 4 concrete wasmtime citations
+(ExternRefHostDataTable root-walker indirection, VMGcRef tagged-
+pointer + I31_REF_DISCRIMINANT, i31.rs canonical pack pattern,
+is_i31 hot-path). Next: ADR-0111 (memory64) reference enrichment
+from wasmtime `crates/wasmtime/src/runtime/vm/memory/` (memory64
+support, idx_type encoding, large-memory bounds-check).
 
-Same shape as the ADR-0115 enrichment: docs-only commit, cites
-specific file/line references, autonomous-prep value retained
-for user collab review at ADR-flip time.
+Same shape: docs-only commit, cites specific file/line references.
 
-Refs: ADR-0116, wasmtime gc/ source.
+Refs: ADR-0111, wasmtime memory/ source.
 
 **Next sub-chunk candidates (names only, NO predictions)**:
-- ADR-0116 (GC roots + RTT + i31) reference enrichment (active)
-- ADR-0111 (memory64) reference enrichment
-- ADR-0112 / ADR-0113 / ADR-0114 reference re-walk (already
-  partially enriched in prior cycles; re-check for gaps)
+- ADR-0111 (memory64) reference enrichment (active)
+- ADR-0112 / ADR-0113 / ADR-0114 reference re-walk for gaps
 - 10.E-codegen-4c — throw / throw_ref emit body (deferred per lesson)
 - 10.E-codegen-4b-2 — try_table emit body via ExceptionTable.Builder
 - 10.TC-3f/g/h — tail-call follow-ons (same chain-level concern)
