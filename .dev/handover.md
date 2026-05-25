@@ -46,6 +46,12 @@
 - **10.G-smoke-doc = SHIPPED 2026-05-26** (`dd3dd7d4`):
   retire `gc/struct` from SMOKE; wabt 1.0.40 wast2json doesn't
   support GC proposal type syntax. Awaits wabt bump.
+- **10.TC-3a = SHIPPED 2026-05-26** (`7447be67`): ADR-0113 §A
+  3-axis foundation. `Axis3` struct + `axisOf` helper in
+  dispatch_collector; arm64+x86_64 `ops/wasm_1_0/call.zig` declare
+  `is_terminator=false / n_successor_edges=1 / is_safepoint=true`.
+  Defaults match regular-call shape so non-migrated ops classify
+  sanely. 4 unit tests. Detail: phase_log §10.TC.
 - **Mac `zig build test-all`**: green (scope=unclear)。
 
 ## Phase 10 progress
@@ -59,19 +65,22 @@ ROADMAP §10 = 13-row task table。
     cross-module + spec corpus + regalloc terminator-class 残)
 - Pending: 10.E / 10.G / 10.P
 
-## Active task — 10.TC-3 codegen tail-call (regalloc terminator)
+## Active task — 10.TC-3b op_tail_call.zig emit body
 
-memory64 spec corpus expansion (10.M-spec-corpus) shipped this
-cycle. EH + memory64 + GC parse-time predicate are at a clean
-stopping point. Pivot back to Tail Call codegen — ADR-0113 §A
-regalloc terminator-class extension + per-arch
-`op_tail_call.zig` codegen. Architectural-grade work; expect
-multi-cycle spike-first per `.claude/rules/architectural_spike.md`.
-Refs: ADR-0112, ADR-0113 §A, `src/engine/codegen/{arm64,x86_64}/`.
+Foundation for ADR-0113 §A 3-axis (Axis3 + axisOf) is in place
+at 10.TC-3a (`7447be67`); call.zig declares the axes. Next:
+create per-arch `op_tail_call.zig` with axes
+`is_terminator=true / n_successor_edges=0 / is_safepoint=false`
++ real emit per ADR-0112 D3 (frame_teardown + tail-jump shape:
+arm64 BR X16; x86_64 JMP RAX). Spec corpus runs once codegen
+handles return_call/_indirect/_ref end-to-end.
+
+Refs: ADR-0112 D3, ADR-0113 §A, arm64/op_call.zig +
+x86_64/op_call.zig (template), test/spec/wasm-3.0-assert/
+tail-call/return_call/.
 
 **Next sub-chunk candidates (names only, NO predictions)**:
-- 10.TC-3 — regalloc terminator-class + codegen tail-call
-  (the active task above)
+- 10.TC-3b — op_tail_call.zig emit body (the active task above)
 - 10.E-codegen — ADR-0114 D3-D6 codegen-side EH (exception_table,
   FP-walk unwind, zwasm_throw trampoline, op_exception_handling)
 - 10.E-N-4 — c_api instantiate → interp Runtime tag_param_counts

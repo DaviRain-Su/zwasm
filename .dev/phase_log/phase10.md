@@ -914,3 +914,44 @@ hoot). Design source: ADR-0115 + ADR-0116.
 
 - **10.G-i31-helpers** — pack/unpack helpers under
   `feature/gc/i31.zig` (`e79bb7a1`).
+
+
+## Row 10.TC — Tail Call impl
+
+**Scope** (parent row §10 / 10.TC): regalloc terminator-class
+拡張 (ADR-0113 §A) + `op_tail_call.zig` per-arch + frame_teardown
+shared helper + cross_module_tail_call inline emit (no ADR-0066
+thunk re-use) + interp trampoline (re-derived; v1 vm.zig
+read-only) + safepoint-free comptime invariant + spec corpus
+(95 wast) + realworld (clang_musttail + wasm_of_ocaml).
+Design source: ADR-0112 (Accepted 2026-05-25) + ADR-0113 §A.
+
+**SHA pointer**: backfilled at Phase 10 close.
+
+- **10.TC-3a** — ADR-0113 §A 3-axis foundation (`7447be67`).
+  Lands the per-op file 3-axis (`is_terminator` /
+  `n_successor_edges` / `is_safepoint`) classification pattern
+  defined by ADR-0113 §A. New `Axis3` struct + `axisOf(comptime
+  mod: type)` helper in `engine/codegen/dispatch_collector.zig`
+  reads each axis via `@hasDecl` with safe defaults
+  (`false / 1 / false` — matches the regular-call shape so
+  pre-migration per-op files classify sanely). First two
+  per-op file migrations: arm64 + x86_64
+  `ops/wasm_1_0/call.zig` declare `is_terminator=false /
+  n_successor_edges=1 / is_safepoint=true` (the non-default
+  axis is `is_safepoint`: a regular call IS a GC safepoint
+  per ADR-0115/0116 root-walk contract). 4 unit tests: empty
+  mod → defaults; arm64 call → declared values; x86_64 call →
+  declared values; partial override (only is_terminator
+  declared) → declared + defaults. The downstream consumers
+  (regalloc terminator-class extension at 10.TC-3b, EH
+  N-successor at 10.E-codegen, GC stack-map at 10.G) read via
+  `axisOf` when they land. Mac `test-all` GREEN; lint exit 0.
+  ADR-0113 §A.
+
+- **10.TC-1b** — return_call / return_call_indirect /
+  return_call_ref validator unit test coverage (`b7562e5c`;
+  pre-this-cycle); 6 tests.
+
+- **10.TC-1** — return_call + return_call_indirect interp impl
+  + tailReturn helper (`a83e095f`; pre-this-cycle).
