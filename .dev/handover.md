@@ -35,12 +35,14 @@
 - **10.E-3b = SHIPPED** (`da8880a9`): try_table opcode 0x1F +
   catch-vec skeleton。
 - **10.E-4 = SHIPPED 2026-05-25** (`753aec8f`): throw / throw_ref
-  opcodes (0x08 / 0x0A)。lower emits + markUnreachable; validator
-  opThrow (reads tag_idx, markUnreachable) + opThrowRef (pops
-  reftype, markUnreachable); interp returns new Trap.UncaughtException
-  variant。5 new validator unit tests (polymorphic-stack via
-  throw / unreachable code after throw / throw_ref pop+unreachable /
-  underflow / type mismatch)。Real unwind lands at 10.E-5。
+  opcodes (0x08 / 0x0A) — validator + interp Trap.UncaughtException
+  emission。
+- **10.E-5a = SHIPPED 2026-05-25** (`da1cec05`): EH catch
+  metadata storage shape filled in on ZirFunc (`eh_landing_pads`
+  + flat `eh_catch_entries` per ADR-0114 D3); lowerer wires
+  catch-vec decode into LandingPad with half-open slice; 5
+  lower_tests covering empty / mixed / ref-variants / nested /
+  malformed. Detail: phase_log §10.E。
 - **Mac `zig build test-all`**: green (scope=unclear)。
 
 ## Phase 10 progress
@@ -54,59 +56,30 @@ ROADMAP §10 = 13-row task table。
     cross-module + spec corpus + regalloc terminator-class 残)
 - Pending: 10.E / 10.G / 10.P
 
-## Active task — 10.TC tail-call continued
+## Active task — 10.E-5b interp unwinder
 
-`phase10_design_plan_ja.md` tail-call section + ROADMAP §10 10.TC
-row。
+Consume `func.eh_landing_pads` + `func.eh_catch_entries` (landed
+10.E-5a) from the interp dispatch loop. On `Trap.UncaughtException`
+emitted by `throwOp` / `throwRefOp`: walk the label stack
+inward-out to find the enclosing `.try_table` BlockInfo, look up
+its `LandingPad` by `block_idx`, linear-scan its catches for tag
+match (incl. `catch_all` variants), restore operand-stack height
+to the chosen label's height, push tag params (and exnref for
+`_ref` variants), jump pc to the catch's `label_idx` target.
 
-**10.TC sub-chunk progress**:
+Refs: `src/runtime/trap.zig:UncaughtException`,
+`src/interp/mvp.zig:{throwOp, throwRefOp, blockOp}`,
+`src/validate/validator.zig:opThrow` (tag-param popping pending
+Module.tags wiring at 10.E-N).
 
-- 10.TC-1 [x] SHIPPED `a83e095f` (return_call + return_call_indirect
-  interp + tailReturn dedup)
-- 10.TC-1b [x] SHIPPED `b7562e5c` (validator unit tests; 6 cases)
-- **10.TC-2 (deferred to post-codegen)**: spec corpus full wire-up
-  needs JIT codegen for return_call/_indirect/_ref — `runner.compileWasm`
-  goes through codegen which doesn't yet have these op handlers。spec
-  corpus は `test/spec/wasm-3.0-assert/tail-call/` に import 済みだが
-  実行は codegen 後。**Adopt RunnerCallbacks 経由の interp-only spec
-  runner is large** (spec_assert_runner_base ~4000 LOC + per-proposal
-  ~2000 LOC specialization)。
-- **10.TC-3 NEXT**: regalloc terminator-class 拡張 (ADR-0113 §A) +
-  `op_tail_call.zig` codegen 着手。複数 sub-chunk にわたる codegen
-  heavy。
-
-**Phase 10 candidates** (parallelisable):
-- **10.E-5 NEXT**: try_table + throw interp unwinder + catch
-  metadata storage. Big chunk — needs ZirInstr / ZirFunc carries
-  catch entries (storage shape design); interp loop intercepts
-  Trap.UncaughtException and walks frame stack matching against
-  current try_table's catch vec; resume at matching catch's
-  label. May need ADR or split into multiple sub-chunks (catch
-  metadata shape decision, runtime unwinder, integration tests).
-- 10.E-N (parallel): Module.tags wiring through validator —
-  unlocks tag_idx range validation on throw + tag-params popping。
-- 10.G-3: heap-top reftype detection extension to
-  needs_heap_detector (anyref / eqref / i31ref / exnref bytes
-  in func sigs / globals / tables / locals)
-- 10.G-4: struct ops (needs GC heap impl first)
-- 10.M-5b: SIMD memarg memory64 (validator + lower + codegen)
-- 10.TC-3: regalloc terminator-class + codegen tail-call
-- 10.G-3: heap-top reftype detection extension to
-  needs_heap_detector (anyref / eqref / i31ref / exnref bytes
-  in func sigs / globals / tables / locals)
-- 10.G-4: struct ops (needs GC heap impl first)
-- 10.M-5b: SIMD memarg memory64 (validator + lower + codegen)
-- 10.TC-3: regalloc terminator-class + codegen tail-call
-
-**Other Phase 10 candidates** (after 10.TC-2):
-- 10.M-5b: SIMD memarg memory64
-- 10.M-spec-corpus: memory64 spec testsuite
-- 10.E EH: regalloc N-successor callsite + `feature/exception_handling/`
-- 10.G GC: typed reftype catalogue (unlocks 10.R parent close)
-- 10.P close
-
-**ADR-0113 callsite_metadata refactor**: 10.M は memory64 で
-bounds_fixups を **触らない** (ADR-0111 D6 ↔ orthogonal)。
+**Next sub-chunk candidates (names only, NO predictions)**:
+- 10.E-5b — interp unwinder (the active task above)
+- 10.E-N — Module.tags wiring through validator (tag_idx range +
+  tag-params popping on throw)
+- 10.G-3 — heap-top reftype detection extension
+- 10.G-4 — struct ops (needs GC heap impl first)
+- 10.M-5b — SIMD memarg memory64 (validator + lower + codegen)
+- 10.TC-3 — regalloc terminator-class + codegen tail-call
 
 ## Open questions / blockers
 

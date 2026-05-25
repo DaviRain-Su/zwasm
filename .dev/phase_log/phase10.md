@@ -557,3 +557,72 @@ architectural-typed work).
   shared reject / reserved bits reject). Mac `test-all` GREEN,
   lint clean, zone_check + file_size_check exit 0.
 
+
+
+## Row 10.E — Exception Handling impl
+
+**Scope** (parent row §10 / 10.E): regalloc N-successor callsite
+拡張 (ADR-0113 §B) + `feature/exception_handling/` (tag +
+exception) + `unwind.zig` FP-walk + `zwasm_throw` trampoline
++ `op_exception_handling.zig` landing-pad emit + cross-module
+propagation + EH × TC integration + c_api tag accessors +
+spec corpus 76 assertion + realworld/p10/emscripten_eh/。
+Design source: ADR-0114 + ADR-0117 (cross-subsystem invariants).
+
+**SHA pointer**: backfilled at Phase 10 close.
+
+- **10.E-5a** — EH catch metadata storage + lowerer wire-up
+  (`da1cec05`). `zir.CatchKind` enum (catch_ / catch_ref /
+  catch_all / catch_all_ref; raw byte values 0x00..0x03 per
+  Wasm 3.0 EH §4.5), `zir.CatchEntry { kind, tag_idx,
+  label_idx }`, filled `zir.LandingPad { block_idx,
+  catches_start, catches_end }` (was empty struct slot
+  reserved on ZirFunc since Phase 10 open). ZirFunc gains
+  two new owned-slice slots: `eh_landing_pads: ?[]const
+  LandingPad` (one per try_table in body order) and
+  `eh_catch_entries: ?[]const CatchEntry` (flat backing —
+  LandingPad ranges are half-open slices into this).
+  `ZirFunc.deinit` frees both alongside the existing
+  `simd_consts` discipline. Lowerer: `skipCatchVec` renamed
+  to `lowerCatchVec`, decodes each spec catch entry into
+  `Lowerer.catch_entries: ArrayList(CatchEntry)`;
+  `openTryTable` records the half-open slice on a fresh
+  `LandingPad` appended to `Lowerer.landing_pads:
+  ArrayList(LandingPad)`. Both builders transfer ownership
+  to the ZirFunc slots at `run()` close via `toOwnedSlice`
+  (mirror of `simd_consts` flush). Dead-region try_tables
+  (D-093) `shrinkRetainingCapacity` back so the unreachable
+  branch never leaves LandingPad-less catch data on the
+  builder. 5 lower_tests (empty catch vec / catch+catch_all
+  mixed / catch_ref+catch_all_ref / nested try_tables with
+  flat catch entries / malformed kind byte rejected as
+  `Error.BadBlockType`). Wasm spec 3.0 §3.3.10.6 +
+  §4.5; ADR-0114 D3 interp-side metadata. Mac `test-all`
+  GREEN; lint + zone + fs gates exit 0. Interp unwinder
+  consuming this data lands at 10.E-5b.
+
+- **10.E-4** — throw / throw_ref opcodes (`753aec8f`).
+  Lower emits + markUnreachable; validator `opThrow` reads
+  tag_idx + markUnreachable (tag-param popping pending
+  Module.tags wiring at 10.E-N); `opThrowRef` pops any
+  reftype + markUnreachable. Interp `throwOp` / `throwRefOp`
+  return new `Trap.UncaughtException` variant. 5 new
+  validator unit tests (polymorphic-stack via throw /
+  unreachable code after throw / throw_ref pop+unreachable /
+  underflow / type mismatch). Real unwind lands at 10.E-5b
+  consuming the 10.E-5a catch metadata.
+
+- **10.E-3b** — try_table opcode 0x1F + catch-vec parse
+  skeleton (`da8880a9`). Lowerer `openTryTable` +
+  `skipCatchVec` (later replaced at 10.E-5a); validator
+  `opTryTable` + `validateCatchVec` (label-range only —
+  type-matching pending 10.E-5).
+
+- **10.E-3a** — `BlockKind.try_table` enum entry + validator
+  `labelType` arm (`c2238c9a`).
+
+- **10.E-2** — `decodeTags` + `TagEntry` (`390856f8` +
+  `cec18589`). Module.tags storage shape; runtime/validator
+  wiring at 10.E-N.
+
+- **10.E-1** — tag section parse skeleton (`ffb56dd7`).
