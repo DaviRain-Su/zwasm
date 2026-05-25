@@ -928,6 +928,27 @@ Design source: ADR-0112 (Accepted 2026-05-25) + ADR-0113 §A.
 
 **SHA pointer**: backfilled at Phase 10 close.
 
+- **10.TC-3d** — op_tail_call.zig per-arch helpers
+  (`176b00f5`). Lands step (5) of the ADR-0112 D3/D4 tail-call
+  emit sequence: `arm64/op_tail_call.zig::emitTailJump` emits
+  `BR X16` (0xD61F0200 canonical AAPCS64 IP0 indirect branch
+  per Arm IHI 0055 §6.4 + ADR-0066 thunk convention);
+  `x86_64/op_tail_call.zig::emitTailJump` emits `JMP R11`
+  (41 FF E3 = REX.B + FF /4 ModR/M; R11 chosen over RAX to
+  avoid callee-prologue clobber conflict). Both files expose
+  `tail_target_gpr` constant (arm64=16, x86_64=.r11) as the
+  canonical convention. Per ADR-0112 D2 these are sibling
+  files to `op_call.zig` (not extensions) so the regular-call
+  vs tail-call shapes don't accumulate dual-meaning drift
+  across Phase 11+. Per-op-file wire-up + steps (1)-(4)
+  integration land at 10.TC-3e together with
+  `collected_arm64_ops` / `_x86_64_ops` registration. 6 unit
+  tests: arm64=3 (BR X16 byte / BR X17 alternate / target
+  constant) + x86_64=3 (JMP R11 byte / JMP RAX cross-check /
+  target constant). Mac `test-all` GREEN; lint exit 0.
+  Safepoint-free invariant (ADR-0112 D7) audit home docked
+  in both file headers. ADR-0112 D2/D3/D4/D7.
+
 - **10.TC-3c** — frame_teardown.zig shared helper (`23ae7da2`).
   Per ADR-0112 D3: `arm64/frame_teardown.zig` emits the
   ADD-SP-then-LDP-X29,X30 teardown (mirroring the regular

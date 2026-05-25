@@ -69,6 +69,14 @@
   Safepoint-free invariant (ADR-0112 D7) held by no-alloc /
   no-host-call / no-signal-check emit body. Consumed by
   10.TC-3d op_tail_call.zig. Detail: phase_log §10.TC.
+- **10.TC-3d = SHIPPED 2026-05-26** (`176b00f5`): per-arch
+  op_tail_call.zig — emitTailJump foundation. arm64 emits
+  BR X16 (0xD61F0200); x86_64 emits JMP R11 (41 FF E3).
+  Step (5) of ADR-0112 D3/D4 emit sequence; steps (1)-(4)
+  reuse existing op_call marshalling + frame_teardown.
+  6 unit tests (3/arch). Wire-up to per-op files +
+  collected_arch_ops lands at 10.TC-3e. Detail:
+  phase_log §10.TC.
 - **Mac `zig build test-all`**: green (scope=unclear)。
 
 ## Phase 10 progress
@@ -82,30 +90,35 @@ ROADMAP §10 = 13-row task table。
     cross-module + spec corpus + regalloc terminator-class 残)
 - Pending: 10.E / 10.G / 10.P
 
-## Active task — 10.TC-3d op_tail_call.zig per-arch helper
+## Active task — 10.TC-3e callee target load + frame_teardown integration
 
-10.TC-3c (`23ae7da2`) landed `frame_teardown.zig` shared facade
-+ per-arch encoders. Next: create
-`src/engine/codegen/{arm64,x86_64}/op_tail_call.zig` — the
-per-arch shared helper consumed by the 3 `ops/wasm_3_0/return_call*`
-per-op files. Per ADR-0112 D3 emit sequence:
-  (1) marshal args → X1..X7 / V0..V7  (caller frame still live)
-  (2) load callee_rt → X0 (literal pool)
-  (3) load callee_entry → X16
-  (4) frame_teardown.emit(…)  (caller's frame disappears)
-  (5) BR X16  (no LR; callee returns to caller's caller)
-x86_64 mirror: RDI/RSI/... + R11 + JMP R11.
+10.TC-3d (`176b00f5`) landed `emitTailJump` (step 5 of ADR-0112
+D3/D4). Next: layer steps (1)-(4) into op_tail_call:
+- (1) reuse `op_call.marshalCallArgs` to marshal callee args
+  before the teardown (caller frame still live).
+- (2)-(3) load callee_rt → X0 / RDI and callee_entry → X16 / R11
+  via existing literal-pool / fixup pattern.
+- (4) call `frame_teardown.emit(...)` with caller's params.
+- (5) `emitTailJump(...)` (landed).
 
-Refs: ADR-0112 D3/D4, src/engine/codegen/arm64/op_call.zig
-(template for arg marshalling), shared/frame_teardown.zig
-(landed 10.TC-3c).
+Plus per-op-file wire-up: replace the `UnsupportedOp` stubs in
+`ops/wasm_3_0/return_call.zig` (× 2 arches) with delegation to
+`op_tail_call.emitReturnCall(ctx, ins)`, and register into
+`collected_arm64_ops` / `_x86_64_ops` so the dispatcher picks
+them up.
+
+Refs: ADR-0112 D3/D4, op_call.zig (marshalCallArgs template),
+shared/frame_teardown.zig + op_tail_call.zig (landed).
 
 **Next sub-chunk candidates (names only, NO predictions)**:
-- 10.TC-3d — op_tail_call.zig per-arch helper (active task above)
-- 10.TC-3e — wire op_tail_call into ops/wasm_3_0/return_call.zig
-  + register into collected_arch_ops; lower.zig hookup
+- 10.TC-3e — callee target load + frame_teardown integration +
+  per-op wire-up (active task above)
 - 10.TC-3f — cross_module_tail_call.zig (ADR-0112 D4, cross-module
   frame consumption)
+- 10.TC-3g — return_call_indirect emit body (bounds + sig check
+  + frame_teardown + tail-jump)
+- 10.TC-3h — return_call_ref emit body (null-check + sig dispatch
+  via typed funcref)
 - 10.E-codegen — ADR-0114 D3-D6 codegen-side EH (exception_table,
   FP-walk unwind, zwasm_throw trampoline, op_exception_handling)
 - 10.E-N-4 — c_api instantiate → interp Runtime tag_param_counts
