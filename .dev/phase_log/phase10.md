@@ -928,6 +928,29 @@ Design source: ADR-0112 (Accepted 2026-05-25) + ADR-0113 §A.
 
 **SHA pointer**: backfilled at Phase 10 close.
 
+- **10.TC-3c** — frame_teardown.zig shared helper (`23ae7da2`).
+  Per ADR-0112 D3: `arm64/frame_teardown.zig` emits the
+  ADD-SP-then-LDP-X29,X30 teardown (mirroring the regular
+  arm64/emit.zig epilogue lines ~1245-1252 minus the trailing
+  RET); `x86_64/frame_teardown.zig` emits ADD-RSP-then-POP-RBP
+  (Imm8 form for ≤127, Imm32 for larger); `shared/frame_teardown.zig`
+  is the arch-agnostic facade dispatching via
+  `builtin.target.cpu.arch` (same pattern as
+  `shared/thunk.zig` / `shared/compile.zig`). The shared
+  `Params` struct exposes the 4-axis ADR-0112 D3 inputs
+  (`n_clobber_saved` / `frame_bytes` / `n_incoming` /
+  `n_outgoing`); currently only `frame_bytes` is consumed,
+  the others are plumbed through for future ADR-0066 §A2 /
+  D-144 pinned-cohort restoration + AAPCS64 §6.4.2
+  overflow-region adjustment. Safepoint-free invariant
+  (ADR-0112 D7) maintained: emit body has no allocator /
+  host-call / signal-check operations. 10 unit tests: 4
+  arm64 byte-snapshot (frame=0/16/0x12345/RET-absence),
+  6 x86_64 byte-snapshot (frame=0/16/256/RET-absence + Imm8
+  127 boundary + Imm32 128 boundary), 2 facade smoke (host
+  arch resolution). Mac `test-all` GREEN; lint exit 0.
+  Consumed by 10.TC-3d op_tail_call.zig. ADR-0112 D3/D7.
+
 - **10.TC-3b** — tail-call per-op file skeletons + terminator
   axes (`cbc3d587`). Creates `engine/codegen/{arm64,x86_64}/
   ops/wasm_3_0/` directories with `return_call.zig` /

@@ -61,6 +61,14 @@
   comptime tests. Files NOT yet in `collected_arch_ops` (no
   on-branch spike per architectural_spike.md). Detail:
   phase_log §10.TC.
+- **10.TC-3c = SHIPPED 2026-05-26** (`23ae7da2`): frame_teardown.zig
+  shared helper (ADR-0112 D3). arm64 emits ADD SP + LDP
+  X29,X30,[SP],#16; x86_64 emits ADD RSP + POP RBP. shared/
+  facade dispatches by `builtin.target.cpu.arch`. 10 unit
+  tests (4 arm64 + 6 x86_64 byte-snapshot + 2 facade smoke).
+  Safepoint-free invariant (ADR-0112 D7) held by no-alloc /
+  no-host-call / no-signal-check emit body. Consumed by
+  10.TC-3d op_tail_call.zig. Detail: phase_log §10.TC.
 - **Mac `zig build test-all`**: green (scope=unclear)。
 
 ## Phase 10 progress
@@ -74,24 +82,30 @@ ROADMAP §10 = 13-row task table。
     cross-module + spec corpus + regalloc terminator-class 残)
 - Pending: 10.E / 10.G / 10.P
 
-## Active task — 10.TC-3c frame_teardown.zig shared helper
+## Active task — 10.TC-3d op_tail_call.zig per-arch helper
 
-10.TC-3b (`cbc3d587`) landed terminator-axis skeletons for the 3
-tail-call ops × 2 arches; emit stubs return `UnsupportedOp`. Next:
-create `src/engine/codegen/shared/frame_teardown.zig` (ADR-0112 D3)
-— the shared SP-restore + LDP X29,X30 / POP RBP + clobber-saved
-restore helper. Inputs per ADR-0112 D3: `{ n_clobber_saved: u8,
-frame_bytes: u32, n_incoming: u8, n_outgoing: u8 }`. Per-arch emit
-calls differ (LDP vs POP) but invariant order is identical;
-sharing keeps the safepoint-free invariant audit single-pass.
+10.TC-3c (`23ae7da2`) landed `frame_teardown.zig` shared facade
++ per-arch encoders. Next: create
+`src/engine/codegen/{arm64,x86_64}/op_tail_call.zig` — the
+per-arch shared helper consumed by the 3 `ops/wasm_3_0/return_call*`
+per-op files. Per ADR-0112 D3 emit sequence:
+  (1) marshal args → X1..X7 / V0..V7  (caller frame still live)
+  (2) load callee_rt → X0 (literal pool)
+  (3) load callee_entry → X16
+  (4) frame_teardown.emit(…)  (caller's frame disappears)
+  (5) BR X16  (no LR; callee returns to caller's caller)
+x86_64 mirror: RDI/RSI/... + R11 + JMP R11.
 
-Refs: ADR-0112 D3, src/engine/codegen/arm64/epilogue.zig +
-prologue.zig (existing ABI-pinned shape; do NOT touch).
+Refs: ADR-0112 D3/D4, src/engine/codegen/arm64/op_call.zig
+(template for arg marshalling), shared/frame_teardown.zig
+(landed 10.TC-3c).
 
 **Next sub-chunk candidates (names only, NO predictions)**:
-- 10.TC-3c — frame_teardown.zig shared helper (active task above)
-- 10.TC-3d — engine/codegen/<arch>/op_tail_call.zig (shared per-arch
-  helper that consumes frame_teardown + BR X16 / JMP R11)
+- 10.TC-3d — op_tail_call.zig per-arch helper (active task above)
+- 10.TC-3e — wire op_tail_call into ops/wasm_3_0/return_call.zig
+  + register into collected_arch_ops; lower.zig hookup
+- 10.TC-3f — cross_module_tail_call.zig (ADR-0112 D4, cross-module
+  frame consumption)
 - 10.E-codegen — ADR-0114 D3-D6 codegen-side EH (exception_table,
   FP-walk unwind, zwasm_throw trampoline, op_exception_handling)
 - 10.E-N-4 — c_api instantiate → interp Runtime tag_param_counts
