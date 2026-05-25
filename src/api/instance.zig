@@ -1,4 +1,4 @@
-// FILE-SIZE-EXEMPT: (cap=2800) C ABI translation catalog (Zone 3 boundary layer); no separable subsystem per ADR-0099 §D2 P3 evaluation (see .dev/architecture/api_instance_audit.md, §9.12-G (c)). 10.F D-173 memory accessors + paired test extended exempt cap 2500→2800 via ADR-0099 (cap=N) override; D-172 / D-171 (next 10.F chunks) tighten or restructure if growth continues.
+// FILE-SIZE-EXEMPT: (cap=3000) C ABI translation catalog (Zone 3 boundary layer); no separable subsystem per ADR-0099 §D2 P3 evaluation (see .dev/architecture/api_instance_audit.md, §9.12-G (c)). 10.F D-173/D-172 accessor surfaces extended exempt cap 2500→2800→3000 via ADR-0099 (cap=N) override; D-171 (next 10.F chunk) tightens or restructures if growth continues past 3000.
 //! Engine / Store / Module / Instance / Func / Extern surface of
 //! the C ABI binding (§9.5 / 5.0 chunk d carve-out from
 //! `wasm.zig` per ADR-0007).
@@ -128,6 +128,32 @@ pub const Global = struct {
     mutable: bool,
 };
 
+/// `wasm_ref_t` — opaque reference handle per `include/wasm.h:327-365`.
+/// Carries a single `u64` ref payload (funcref / externref encoding
+/// per `runtime.Value.ref` semantics). Allocated by
+/// `wasm_table_get` / `wasm_ref_copy`; freed by `wasm_ref_delete`.
+/// v0.1 surface: payload only; ref-type kind (funcref vs externref)
+/// is implicit from the source Table's `elem_type`.
+pub const Ref = struct {
+    instance: ?*Instance,
+    ref: u64,
+};
+
+/// `wasm_table_t` — opaque-from-C handle for a table export.
+/// Mirrors `Global`'s shape per `include/wasm.h:466-477`. Wasm 1.0
+/// / 2.0 modules carry at most one table per index; multi-table is
+/// post-v0.2. Backing storage is the importing instance's
+/// `rt.tables[table_idx].refs` — get / set / size accessors read /
+/// mutate that slice directly so cross-module imports
+/// see writes uniformly per ADR-0014 §6.K.3 arena-aliased semantics.
+pub const Table = struct {
+    instance: ?*Instance,
+    table_idx: u32 = 0,
+    elem_type: zir.ValType,
+    min: u32,
+    max: ?u32,
+};
+
 /// `wasm_memory_t` — opaque-from-C handle for a memory export.
 /// Mirrors `Global`'s shape per `include/wasm.h:471-481`. Wasm 1.0
 /// / 2.0 modules carry at most one memory; `memory_idx` is always
@@ -222,6 +248,10 @@ pub const Extern = struct {
     /// For kind = memory: the Memory handle owned by this Extern.
     /// Same borrow / ownership discipline as `func` / `global`.
     memory: ?*Memory = null,
+    /// For kind = table: the Table handle owned by this Extern.
+    /// Same borrow / ownership discipline as `func` / `global` /
+    /// `memory`.
+    table: ?*Table = null,
 };
 
 // `ExternVec` lives in `src/api/vec.zig` after the §9.5 / 5.0
@@ -909,6 +939,7 @@ pub export fn wasm_extern_delete(e: ?*Extern) callconv(.c) void {
     if (handle.func) |fh| wasm_func_delete(fh);
     if (handle.global) |gh| wasm_global_delete(gh);
     if (handle.memory) |mh| wasm_memory_delete(mh);
+    if (handle.table) |th| wasm_table_delete(th);
     const inst = handle.instance orelse return;
     const store = inst.store orelse return;
     const alloc = storeAllocator(store) orelse return;
@@ -1068,6 +1099,86 @@ pub export fn wasm_memory_grow(m: ?*Memory, delta: u32) callconv(.c) bool {
     return true;
 }
 
+// ============================================================
+// Ref + Table accessors (D-172 / `include/wasm.h:466-477` + 327-365)
+// ============================================================
+
+/// `wasm_ref_delete(*Ref)` — free a Ref handle. Null-tolerant.
+pub export fn wasm_ref_delete(r: ?*Ref) callconv(.c) void {
+    const handle = r orelse return;
+    const inst = handle.instance orelse return;
+    const store = inst.store orelse return;
+    const alloc = storeAllocator(store) orelse return;
+    alloc.destroy(handle);
+}
+
+/// `wasm_extern_as_table(*Extern)` — borrow the Table contained
+/// in an Extern. Returns null if the Extern is not of kind table.
+pub export fn wasm_extern_as_table(e: ?*Extern) callconv(.c) ?*Table {
+    const handle = e orelse return null;
+    if (handle.kind != .table) return null;
+    return handle.table;
+}
+
+/// `wasm_table_delete(*Table)` — free a Table handle. Null-tolerant.
+/// The borrowed handle returned by `wasm_extern_as_table` must NOT
+/// be passed here (the owning Extern's `wasm_extern_delete`
+/// releases it via the `Extern.table` back-pointer).
+pub export fn wasm_table_delete(t: ?*Table) callconv(.c) void {
+    const handle = t orelse return;
+    const inst = handle.instance orelse return;
+    const store = inst.store orelse return;
+    const alloc = storeAllocator(store) orelse return;
+    alloc.destroy(handle);
+}
+
+/// `wasm_table_size(*const Table)` — Wasm spec §4.4.6
+/// (`table.size`) — slot count of the table's `refs` backing slice.
+pub export fn wasm_table_size(t: ?*const Table) callconv(.c) u32 {
+    const handle = t orelse return 0;
+    const inst = handle.instance orelse return 0;
+    const rt = inst.runtime orelse return 0;
+    if (handle.table_idx >= rt.tables.len) return 0;
+    return @intCast(rt.tables[handle.table_idx].refs.len);
+}
+
+/// `wasm_table_get(*const Table, idx)` — Wasm spec §4.4.6
+/// (`table.get`) — read the ref at `idx`. Returns a heap-allocated
+/// `*Ref` (caller owns; releases via `wasm_ref_delete`) or null on
+/// OOB. The null-ref slot is returned as a Ref whose `.ref ==
+/// runtime.Value.null_ref` — the caller distinguishes null
+/// reference vs OOB by `wasm_table_size` bound check.
+pub export fn wasm_table_get(t: ?*const Table, idx: u32) callconv(.c) ?*Ref {
+    const handle = t orelse return null;
+    const inst = handle.instance orelse return null;
+    const rt = inst.runtime orelse return null;
+    const store = inst.store orelse return null;
+    const alloc = storeAllocator(store) orelse return null;
+    if (handle.table_idx >= rt.tables.len) return null;
+    const tab = rt.tables[handle.table_idx];
+    if (idx >= tab.refs.len) return null;
+    const ref_handle = alloc.create(Ref) catch return null;
+    ref_handle.* = .{ .instance = @constCast(inst), .ref = tab.refs[idx].ref };
+    return ref_handle;
+}
+
+/// `wasm_table_set(*Table, idx, *Ref)` — Wasm spec §4.4.6
+/// (`table.set`) — write `ref` into slot `idx`. Passing null `ref`
+/// stores `runtime.Value.null_ref`. Returns `false` on OOB; true
+/// on success. Ownership of the Ref handle stays with the caller
+/// (only the `.ref` payload is read).
+pub export fn wasm_table_set(t: ?*Table, idx: u32, ref: ?*Ref) callconv(.c) bool {
+    const handle = t orelse return false;
+    const inst = handle.instance orelse return false;
+    const rt = inst.runtime orelse return false;
+    if (handle.table_idx >= rt.tables.len) return false;
+    const tab = rt.tables[handle.table_idx];
+    if (idx >= tab.refs.len) return false;
+    const payload: u64 = if (ref) |r| r.ref else runtime.Value.null_ref;
+    tab.refs[idx] = .{ .ref = payload };
+    return true;
+}
+
 // --- extern vec (pointer-vec; vec_delete also frees pointed-to objects)
 //
 // `wasm_extern_vec_new_empty` / `_new_uninitialized` / `_new`
@@ -1125,7 +1236,29 @@ pub export fn wasm_instance_exports(i: ?*const Instance, out: ?*ExternVec) callc
                 fh.* = .{ .instance = @constCast(inst), .func_idx = exp.idx };
                 ext.func = fh;
             },
-            .table => ext.table_idx = exp.idx,
+            .table => {
+                ext.table_idx = exp.idx;
+                const th = alloc.create(Table) catch {
+                    alloc.destroy(ext);
+                    break;
+                };
+                const tt = switch (inst.export_types[idx]) {
+                    .table => |t| t,
+                    else => {
+                        alloc.destroy(th);
+                        alloc.destroy(ext);
+                        break;
+                    },
+                };
+                th.* = .{
+                    .instance = @constCast(inst),
+                    .table_idx = exp.idx,
+                    .elem_type = tt.elem_type,
+                    .min = tt.min,
+                    .max = tt.max,
+                };
+                ext.table = th;
+            },
             .memory => {
                 ext.memory_idx = exp.idx;
                 const mh = alloc.create(Memory) catch {
@@ -2633,4 +2766,64 @@ test "wasm 2.0 c_api memory accessors: data + size + grow round-trip (D-173)" {
     try testing.expectEqual(@as(usize, 0), wasm_memory_data_size(null));
     try testing.expectEqual(@as(u32, 0), wasm_memory_size(null));
     try testing.expect(!wasm_memory_grow(null, 1));
+}
+
+// D-172 close: c_api table accessors. Exercises
+// `wasm_extern_as_table` + `wasm_table_size` + `wasm_table_get` +
+// `wasm_table_set` + `wasm_ref_delete` over the
+// `mixed_exports_wasm` fixture's exported "t" table (1 funcref slot).
+test "wasm 2.0 c_api table accessors: size + get + set round-trip (D-172)" {
+    const e = wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer wasm_engine_delete(e);
+    const s = wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer wasm_store_delete(s);
+
+    var bytes = mixed_exports_wasm;
+    const bv: ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer wasm_module_delete(m);
+
+    const inst = wasm_instance_new(s, m, null, null) orelse return error.InstanceAllocFailed;
+    defer wasm_instance_delete(inst);
+
+    var exports: ExternVec = .{ .size = 0, .data = null };
+    wasm_instance_exports(inst, &exports);
+    defer wasm_extern_vec_delete(&exports);
+
+    // Exports order: f (func), m (memory), t (table), g (global).
+    const tab = wasm_extern_as_table(exports.data.?[2]) orelse return error.TableNull;
+    try testing.expectEqual(@as(u32, 1), wasm_table_size(tab));
+
+    // Initial null-ref slot.
+    const r0 = wasm_table_get(tab, 0) orelse return error.RefNull;
+    defer wasm_ref_delete(r0);
+    try testing.expectEqual(@as(u64, runtime.Value.null_ref), r0.ref);
+
+    // Forge a sentinel non-null ref + write it.
+    var sentinel: Ref = .{ .instance = null, .ref = 0xC0FFEE };
+    try testing.expect(wasm_table_set(tab, 0, &sentinel));
+    const r1 = wasm_table_get(tab, 0) orelse return error.RefNull;
+    defer wasm_ref_delete(r1);
+    try testing.expectEqual(@as(u64, 0xC0FFEE), r1.ref);
+
+    // OOB index: get returns null, set returns false.
+    try testing.expect(wasm_table_get(tab, 1) == null);
+    try testing.expect(!wasm_table_set(tab, 1, &sentinel));
+
+    // Null-ref clears the slot back to null_ref.
+    try testing.expect(wasm_table_set(tab, 0, null));
+    const r2 = wasm_table_get(tab, 0) orelse return error.RefNull;
+    defer wasm_ref_delete(r2);
+    try testing.expectEqual(@as(u64, runtime.Value.null_ref), r2.ref);
+
+    // Non-table Extern → null.
+    try testing.expect(wasm_extern_as_table(exports.data.?[0]) == null); // func
+    try testing.expect(wasm_extern_as_table(exports.data.?[1]) == null); // memory
+    try testing.expect(wasm_extern_as_table(null) == null);
+
+    // Null tolerance on accessors.
+    try testing.expectEqual(@as(u32, 0), wasm_table_size(null));
+    try testing.expect(wasm_table_get(null, 0) == null);
+    try testing.expect(!wasm_table_set(null, 0, &sentinel));
+    wasm_ref_delete(null);
 }
