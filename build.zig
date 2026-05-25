@@ -543,6 +543,28 @@ pub fn build(b: *std.Build) void {
     const test_realworld_diff_step = b.step("test-realworld-diff", "Diff realworld fixtures' stdout against wasmtime");
     test_realworld_diff_step.dependOn(&run_realworld_diff.step);
 
+    // `zig build test-api-zig-facade` — Phase 10 / §10.J / J.6.
+    // Walks the realworld corpus driving each fixture through the
+    // native Zig facade (`Engine.compile` → `Module.instantiate`).
+    // Pairs with `test-realworld-run` (c_api path) so the same
+    // fixture set exercises both surfaces. WASI fixtures SKIP per
+    // D-176 (defineWasi lands at J.7).
+    const zig_facade_runner_mod = createSanitizedModule(b, sanitize_opts, .{
+        .root_source_file = b.path("test/api/zig_facade_runner.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    zig_facade_runner_mod.addImport("zwasm", zwasm_lib_mod);
+    const zig_facade_runner_exe = b.addExecutable(.{
+        .name = "zwasm-zig-facade-runner",
+        .root_module = zig_facade_runner_mod,
+    });
+    const run_zig_facade = b.addRunArtifact(zig_facade_runner_exe);
+    run_zig_facade.addArg(b.pathFromRoot("test/realworld/wasm"));
+    const test_api_zig_facade_step = b.step("test-api-zig-facade", "Run each realworld fixture through the native Zig API (Engine/Module/Instance)");
+    test_api_zig_facade_step.dependOn(&run_zig_facade.step);
+
     // `zig build test-wasi-p1` — Phase 4 / §9.4 / 4.9. Walks
     // `test/wasi/` driving each .wasm fixture through
     // `cli_run.runWasm`, comparing the exit code against the
@@ -678,6 +700,7 @@ pub fn build(b: *std.Build) void {
     test_all_step.dependOn(&run_edge_p9.step);
     test_all_step.dependOn(&run_realworld_run_jit.step);
     test_all_step.dependOn(&run_wasmtime_misc_runtime.step);
+    test_all_step.dependOn(&run_zig_facade.step);
 
     // `zig build run-repro -Dtask=<name>` — discover
     // `private/dbg/<task>/repro.zig`, link it against the zwasm
