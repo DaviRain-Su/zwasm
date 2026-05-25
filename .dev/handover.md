@@ -12,18 +12,22 @@
 - **10.M-5 = SHIPPED** (`96dafb3c`): validator memory64 widening + e2e test。
 - **10.M-close = SHIPPED** (`b7556472`): -Dwasm=v2_0 symbol-absence gate。
 - **10.M-fixture = SHIPPED** (`699f3b95`): edge_cases/p10/memory64/ store+load triple。
-- **10.M-fixture-2 = SHIPPED 2026-05-25**: 追加 OOB-trap + page-edge
-  fixtures。memory64 fixture set が basic round-trip + trap-boundary
-  + exact-equals off-by-one カバー。p10 corpus 3/3 PASS、total
-  111/111 (p7=40 + p9=68 + p10=3) PASS。
+- **10.M-fixture-2 = SHIPPED** (`18bd07cd`): OOB-trap + page-edge fixtures。
+- **10.R-1 = SHIPPED 2026-05-25** (`fe97f615`): function-references 第1op
+  `ref.as_non_null` impl。`Trap.NullReference` 追加、lower 0xD3、validator
+  opRefAsNonNull、新 `wasm_3_0/function_references.zig` register pattern
+  確立 (wasm_2_0/reference_types 同形)。`wasm_3_0_enabled` comptime flag
+  + ext_function_references が api/instance.zig dispatch table 初期化に
+  wire-up。ROADMAP §10 / 10.R open。
 - **Mac `zig build test`**: green (substrate baseline)。
 
 ## Phase 10 progress
 
 ROADMAP §10 = 13-row task table。
 - DONE (7/13): 10.0 / 10.C9 / 10.J / 10.F / 10.Z / 10.T / 10.D
-- IN-PROGRESS: 10.M (5/6 sub-chunks shipped; close-step remaining)
-- Pending: 10.R / 10.TC / 10.E / 10.G / 10.P
+- IN-PROGRESS: 10.M (7/8 sub-chunks; spec-corpus + realworld deferred)、
+  10.R (1/5 ops shipped)
+- Pending: 10.TC / 10.E / 10.G / 10.P
 
 ## Active task — 10.M memory64 impl
 
@@ -40,17 +44,20 @@ Per ADR-0111 (Accepted)。`phase10_design_plan_ja.md` §3.1 source-of-truth。
 - 10.M-5 [x] SHIPPED `96dafb3c` (validator memory64 widening + e2e test)
 - 10.M-close [x] SHIPPED `b7556472` (-Dwasm=v2_0 symbol-absence gate)
 - 10.M-fixture [x] SHIPPED `699f3b95` (edge_cases p10/memory64 triple)
-- 10.M-fixture-2 [x] SHIPPED (OOB-trap + page-edge fixtures)
-- **10.M-5b NEXT**: SIMD memarg memory64 support。
-  `validator_simd.zig::readSimdMemarg` で bit-6 handling、
-  `lower_simd.zig::emitMemargLane` で memidx 抽出。v128.load/store
-  on i64-indexed memory が validator-reject される現状を解消。
-  arm64 op_simd.zig + x86_64 emit.zig SIMD load_lane sites は
-  既存の lane=u8 → 新 packed (lane + memidx + ...) 移行が必要。
-- 10.M-spec-corpus (deferrable): WebAssembly/memory64 spec testsuite
-  (~127 .wast files) を spec runner に wire-up。
-- 10.M-parent-close: ROADMAP §10 / 10.M row `[x]` flip。
-  Requires spec corpus + realworld/p10/clang_wasm64/ green (ADR-0111 row text)。
+- 10.M-fixture-2 [x] SHIPPED `18bd07cd` (OOB-trap + page-edge fixtures)
+- 10.R-1 [x] SHIPPED `fe97f615` (ref.as_non_null impl)
+- **10.R-2 NEXT**: `br_on_null` impl。Wasm 0xD4 + labelidx (uleb)。
+  validator: pop reftype; if null → branch (consume labels/results
+  per arity); else preserve top + fall through (reftype stays).
+  lower: emit `.br_on_null` with payload=labelidx。interp register
+  in same `wasm_3_0/function_references.zig`。1-op chunk; mirror
+  br_if shape (branch on condition).
+- 10.R-3..5 (cohort): br_on_non_null / call_ref / return_call_ref。
+- 10.M-5b (deferrable, lower priority): SIMD memarg memory64 (validator
+  + lower; codegen for SIMD memory64 emit substantial; defer to post-10.R).
+- 10.M-spec-corpus (deferrable): memory64 spec testsuite wire-up。
+- 10.M-parent-close: ROADMAP §10 / 10.M row `[x]` flip after spec
+  corpus + realworld green。
 
 **ADR-0113 callsite_metadata refactor**: 10.M は memory64 で
 bounds_fixups を **触らない** (ADR-0111 D6 ↔ orthogonal)。

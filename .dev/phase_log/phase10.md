@@ -269,6 +269,41 @@ close: -Dwasm=v2_0 symbol-absence gate).
 
 ### Sub-chunks (commit-time order)
 
+## Row 10.R — function-references typed-ref family
+
+Per `phase10_design_plan_ja.md` §3.2. 5-op proposal (GC
+prereq): `ref.as_non_null` / `br_on_null` / `br_on_non_null`
+/ `call_ref` / `return_call_ref`. Sub-chunks per op (family
+allows bundling but each is a distinct dispatch / interp
+shape; 1 op = 1 sub-chunk per granularity rule for
+architectural-typed work).
+
+### Sub-chunks (commit-time order)
+
+- **10.R-1** — `ref.as_non_null` impl (`fe97f615`). Opens
+  10.R with the simplest of the 5 ops. `Trap.NullReference`
+  variant added to runtime/trap.zig (spec maps "null
+  reference"; zero exhaustive switch cascade per
+  platform_panic_vs_error grep). lower.zig 0xD3 → emit
+  `.ref.as_non_null` (no immediate). validator.zig 0xD3 →
+  new `opRefAsNonNull` (pop reftype polymorphic, push same;
+  v2.0 catalogue opaque to nullability axis — typed
+  `(ref $sig)` deferred to 10.G WasmGC). New
+  `src/instruction/wasm_3_0/function_references.zig`
+  register pattern (mirror of wasm_2_0/reference_types.zig)
+  with interp handler: pop ref; if `Value.null_ref` → trap;
+  else push back. Per-op file
+  `src/instruction/wasm_3_0/ref_as_non_null.zig` stays as
+  NotMigrated placeholder — dispatch_collector falls through
+  to this new legacy registry. `src/api/instance.zig` new
+  `wasm_3_0_enabled` comptime flag + `ext_function_references`
+  import + register call in `g_dispatch_table_storage` init
+  (first wasm_3_0 register hook). 3 unit tests in
+  function_references.zig (register slot / non-null pass
+  through / null trap). Mac `test-all` GREEN; lint + zone +
+  fs gates exit 0.
+
+
 - **10.M-fixture-2** — OOB-trap + page-edge memory64 fixtures.
   Extends `test/edge_cases/p10/memory64/` with 2 additional
   cases covering trap-condition + exact-equals off-by-one
