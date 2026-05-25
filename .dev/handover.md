@@ -21,13 +21,17 @@
   interp impl + tailReturn helper。
 - **10.TC-1b = SHIPPED** (`b7562e5c`): validator unit test
   coverage (6 tests)。
-- **10.G-i31-helpers = SHIPPED 2026-05-25** (`e79bb7a1`):
-  `src/feature/gc/i31.zig` — ADR-0116 D4 i31 pack/unpack helpers
-  (isI31 / i31ToI32Signed / i31ToI32Unsigned / i32ToI31 (range-checked) /
-  i32ToI31Truncate) + 7 unit tests。Foundation for 10.G i31 ops;
-  0xFB GC-prefix dispatcher + Value `anyref` arm + 3 op handlers
-  land in subsequent 10.G sub-chunks。
-- **Mac `zig build test`**: green。
+- **10.G-i31-helpers = SHIPPED** (`e79bb7a1`): pack/unpack helpers
+  under `feature/gc/i31.zig`。
+- **10.G-i31-ops = SHIPPED 2026-05-25** (`52a6c225`): ref.i31 +
+  i31.get_s + i31.get_u interp impl。Value helpers (fromI31Truncate /
+  refAsI31Signed / refAsI31Unsigned / isI31Ref) + 0xFB GC prefix
+  dispatcher (lower + validator) + `wasm_3_0/i31_ops.zig` register
+  + api/instance.zig wiring。7 unit tests (round-trips / null-trap /
+  silent truncation)。i31 値は `Value.ref` low-32 bits に低位ビット-1
+  discriminant で格納 (ADR-0116 D4); dedicated `anyref: u32` Value
+  arm 追加は GC heap impl まで punt。
+- **Mac `zig build test-all`**: green (scope=unclear)。
 
 ## Phase 10 progress
 
@@ -62,16 +66,16 @@ row。
   heavy。
 
 **Phase 10 candidates** (parallelisable):
-- **10.G-i31-ops NEXT**: Add Value `anyref: u32` arm + 0xFB GC
-  prefix dispatcher (lower + validator) + the 3 i31 op interp
-  handlers (ref.i31 / i31.get_s / i31.get_u) using the helpers
-  shipped at 10.G-i31-helpers (`e79bb7a1`)。Value union arm
-  addition is foundational (ADR-0116 D4 design; not §18
-  deviation since pre-Accepted ADR)。codegen側は 10.G-N で別途。
-- 10.M-5b: SIMD memarg memory64 (validator + lower + codegen)
-- 10.E-1: EH foundation — tag section parse + try_table parse +
-  validator skeleton (interp path; codegen deferred)
+- **10.E-1 NEXT**: EH foundation — tag section (§13) parse +
+  try_table opcode parse + validator skeleton (interp path;
+  full interp throw/catch + codegen deferred to 10.E-N). The
+  try_table control structure introduces a new BlockKind and
+  the tag section adds Module.tags[]; both foundational but
+  scope-bounded for one chunk if we accept "parse only;
+  validator rejects body" interim state.
 - 10.G-2: Module.needs_gc_heap parse-time detector
+- 10.G-3: struct ops (most-impactful next GC slice; needs heap)
+- 10.M-5b: SIMD memarg memory64 (validator + lower + codegen)
 - 10.TC-3: regalloc terminator-class + codegen tail-call
 
 **Other Phase 10 candidates** (after 10.TC-2):
