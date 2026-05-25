@@ -49,6 +49,25 @@ close)
   (sub-chunk 記録先; mirrors phase9.md shape) `[x]` (this commit)
 
 
+## Row 10.Z — ZirInstr 128-bit 拡張 (`payload: u32 → u64`)
+
+**Scope**: ROADMAP §10 row 10.Z — widen `ZirInstr.payload`
+(`src/ir/zir.zig:73`) for memory64 offset carry per design plan
+§3.1 / Z.1。
+
+**Status**: `[ ]` (attempt 1/3 measured cascade; cycle-2 pending)。
+
+### Sub-chunks (commit-time order)
+
+- **10.Z-cycle1** — Mechanical widen attempt; 131 compile errors
+  observed (120× `expected u32 found u64` + 11× @bitCast size
+  mismatch). Reverted per ROADMAP "失敗時 chunk revert"。`.dev/
+  phase10_z_chunk_plan.md` 新規で cycle-2 subagent strategy 文書化。
+  Architectural-chunk attempt 1/3.
+- **10.Z-cycle2** — Subagent-driven mechanical migration per
+  `.dev/phase10_z_chunk_plan.md` §"Cycle-2 strategy" (planned)
+
+
 ## Row 10.F — c_api scalar accessors
 
 **Scope**: wasm-c-api spec 標準 global / table / memory
