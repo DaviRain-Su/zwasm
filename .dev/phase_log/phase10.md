@@ -269,6 +269,27 @@ close: -Dwasm=v2_0 symbol-absence gate).
 
 ### Sub-chunks (commit-time order)
 
+- **10.M-fixture** — edge_cases/p10/memory64/ store+load
+  triple. New `test/edge_cases/p10/memory64/
+  store_load_i32_via_i64_addr.{wat,wasm,expect}` —
+  `(memory i64 1) (func (export "test") (result i32)
+  i64.const 0 i32.const 42 i32.store offset=0 align=2
+  i64.const 0 i32.load offset=0 align=2)` returns 42.
+  Equivalent semantics to the in-source `runI32Export:
+  memory64 store+load` at 10.M-5 (`96dafb3c`); this chunk
+  persists the boundary as a canonical runner-walkable
+  fixture per `.claude/rules/edge_case_testing.md`. `build.zig`
+  threads `run_edge_p10` into `test-edge-cases` aggregate +
+  `test-all` (mirrors p7 / p9 pattern; same
+  `edge_runner_exe` walks `test/edge_cases/p10/`). Stress
+  axes covered: dispatch shape (i32.load on i64-indexed
+  memory exercises validator `memAddrType()` + codegen
+  `emitMemOpI64`); validator strictness (`skipMemarg`
+  bit-6-unset path = implicit memidx=0). Page-edge
+  access / large-offset / OOB-trap stress axes deferred to
+  10.M-fixture-2. Mac `test-all` GREEN (edge runner
+  includes p10 triple); lint + zone + fs gates exit 0.
+
 - **10.M-close** — `-Dwasm=v2_0` symbol-absence gate
   (`b7556472`). Lands
   `scripts/check_phase10_close_invariants.sh` with invariant

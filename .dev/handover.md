@@ -10,10 +10,10 @@
 - **10.D = CLOSED 2026-05-25**: 全 7 ADR (0111-0117) Accepted、
   impl rows unlocked。
 - **10.M-5 = SHIPPED** (`96dafb3c`): validator memory64 widening + e2e test。
-- **10.M-close = SHIPPED 2026-05-25** (`b7556472`): `-Dwasm=v2_0`
-  symbol-absence gate at `scripts/check_phase10_close_invariants.sh`。
-  `nm` で `emitMemOpI64` symbol が v2.0 build に 0 件 (= comptime DCE
-  確認) を mechanical 検証。ADR-0111 D4 + Revision 2026-05-25。
+- **10.M-close = SHIPPED** (`b7556472`): -Dwasm=v2_0 symbol-absence gate。
+- **10.M-fixture = SHIPPED 2026-05-25**: edge_cases/p10/memory64/
+  store_load_i32_via_i64_addr triple + build.zig wire-up。canonical
+  fixture location 確立、test-all 経由で regression detection 有効。
 - **Mac `zig build test`**: green (substrate baseline)。
 
 ## Phase 10 progress
@@ -37,19 +37,18 @@ Per ADR-0111 (Accepted)。`phase10_design_plan_ja.md` §3.1 source-of-truth。
 - 10.M-4c [x] SHIPPED `affef52f` (x86_64 i64 wrap-check mirror)
 - 10.M-5 [x] SHIPPED `96dafb3c` (validator memory64 widening + e2e test)
 - 10.M-close [x] SHIPPED `b7556472` (-Dwasm=v2_0 symbol-absence gate)
-- **10.M-fixture NEXT**: `test/edge_cases/p10/memory64/` に
-  最小 fixture (基本 store+load round-trip + page-edge access)。
-  在所の in-source e2e test (`runner.zig`) と等価セマンティクスを
-  .wat + .wasm + .expect triple として永続化 (ADR-0020
-  edge_case_testing 準拠)。fixture runner (test/edge_cases/runner.zig)
-  経由で `zig build test-all` から拾わせる。
+- 10.M-fixture [x] SHIPPED (edge_cases/p10/memory64/ triple + build.zig wire-up)
+- **10.M-fixture-2 NEXT**: 追加の memory64 fixture (page-edge access /
+  load-with-large-offset / OOB trap)。現在の triple は basic store+load
+  のみ; stress axes (numeric range / alignment / trap boundary) を
+  カバーする 2-3 追加 case で `.claude/rules/edge_case_testing.md` の
+  推奨カバレッジを満たす。
 - 10.M-5b (deferrable): SIMD memarg memory64 support
   (`validator_simd.zig::readSimdMemarg` + `lower_simd.zig::emitMemargLane`)。
 - 10.M-spec-corpus (deferrable): WebAssembly/memory64 spec testsuite
   (~127 .wast files) を spec runner に wire-up。
 - 10.M-parent-close: ROADMAP §10 / 10.M row `[x]` flip。
-  Requires edge_cases + spec corpus + realworld/p10/clang_wasm64/
-  green (ADR-0111 row text)。
+  Requires spec corpus + realworld/p10/clang_wasm64/ green (ADR-0111 row text)。
 
 **ADR-0113 callsite_metadata refactor**: 10.M は memory64 で
 bounds_fixups を **触らない** (ADR-0111 D6 ↔ orthogonal)。
