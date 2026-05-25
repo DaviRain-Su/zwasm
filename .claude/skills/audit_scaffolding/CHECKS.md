@@ -544,7 +544,7 @@ bash scripts/audit_arch_spike_pattern.sh
 
 Greps the last 14 days of `zwasm-from-scratch` commits for the
 forbidden phrases enumerated in
-[`.claude/rules/architectural_spike.md`](../../rules/architectural_spike.md)
+[`.claude/rules/spike_discipline.md`](../../rules/spike_discipline.md)
 ("preparatory infra", "wire-up next cycle", "lay the groundwork",
 etc.). Each hit is graded by whether the commit body pairs the
 phrase with a `private/spikes/<slug>/` or
@@ -567,7 +567,7 @@ handles their resolution).
 Verifies the `test/edge_cases/p<N>/` fixture corpus stays in
 sync with semantic-boundary code touched in recent commits.
 The discipline lives in
-[`.claude/rules/edge_case_testing.md`](../../rules/edge_case_testing.md):
+[`.claude/rules/test_discipline.md`](../../rules/test_discipline.md):
 boundary-touching commits land their fixture in the same diff.
 
 ### I.1 Fixture triple integrity
@@ -608,7 +608,7 @@ changes with fixture additions:
 For each boundary-touching commit lacking a paired fixture
 addition: `soon` finding ("touches semantic boundary without
 fixture addition; verify rationale per
-`.claude/rules/edge_case_testing.md`'s 'When NOT to add a
+`.claude/rules/test_discipline.md`'s 'When NOT to add a
 fixture' section").
 
 Intentionally noisy at first; calibration happens via the
@@ -622,7 +622,7 @@ Any deviation → `warn` finding.
 
 ### I.5 Stale-ness
 
-If the rule file (`.claude/rules/edge_case_testing.md`) is
+If the rule file (`.claude/rules/test_discipline.md`) is
 missing or its `paths:` frontmatter no longer covers `src/**`
 + `test/**`, §I's premise is broken — `block` finding ("rule
 file missing; restore from ADR-0020 or supersede").

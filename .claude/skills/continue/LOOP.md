@@ -183,7 +183,7 @@ fi
 
 The script appends to `private/heisenbug-<name>.log` (gitignored)
 and prints `DISCHARGE CANDIDATE` when the streak threshold fires
-(default 5 per `.claude/rules/heisenbug_discharge.md`). On
+(default 5 per `.claude/rules/investigation_discipline.md`). On
 discharge candidacy: do NOT close the debt row autonomously —
 walk the 4-condition checklist in the rule (streak, structural
 commit diversity, instrumentation in place, root cause OR
@@ -490,7 +490,7 @@ The discipline exists because D-153's 12-cycle drift (B146–B158
 next cycle" is a spike on the main branch, not architecture.
 The cycle cap forces the spike off-branch where it belongs.
 
-See [`.claude/rules/architectural_spike.md`](../../rules/architectural_spike.md)
+See [`.claude/rules/spike_discipline.md`](../../rules/spike_discipline.md)
 (landed at close-plan §6 (d)) for the full spike discipline this
 rule references.
 
@@ -660,7 +660,7 @@ beats inventing new ways to stop.
   PostCompact recovers, the loop continues.
 - **"Wait for natural trigger" / "needs commitment" / "substantial
   multi-cycle work"** — forbidden in handover.md framing per
-  [`handover_framing.md`](../../rules/handover_framing.md). These
+  [`handover_doc_discipline.md`](../../rules/handover_doc_discipline.md). These
   are surrender phrases dressed up to bypass the phrase-grep above.
   Multi-cycle work is just multi-cycle; iterate. If handover.md
   contains any of these, the **first action on resume is to
@@ -669,5 +669,5 @@ beats inventing new ways to stop.
   (c) Wait for ...` for the next session implies the user picks.
   The loop picks in handover itself. Concrete failure mode:
   2026-05-22 null-op night (~50 cycles, zero behaviour delta).
-  Per `handover_framing.md`, drop the Wait option and execute
+  Per `handover_doc_discipline.md`, drop the Wait option and execute
   the substantive branch(es) in parallel.
