@@ -100,11 +100,13 @@
 - **10.E-codegen-3g = SHIPPED 2026-05-26** (`654de49f`):
   x86_64/sp_restore.zig — MOV RSP, <src_gpr> emit. 3 tests.
 - **10.E-codegen-3h = SHIPPED 2026-05-26** (`e246da18`):
-  frame_bytes-aware SP-restore. CodeMap.Entry gains
-  `frame_bytes: u32 = 0`; per-arch emitSpRestoreFull composes
-  emitSpFromGpr + SUB SP/RSP, #frame_bytes (arm64 LSL-12
-  split; x86_64 Imm8↔Imm32 promote). 8 new tests. EH landing
-  path now production-shape complete.
+  frame_bytes-aware SP-restore. 8 new tests.
+- **10.E-codegen-4 = SHIPPED 2026-05-26** (`f5524688`):
+  per-arch EH op_exception_handling skeletons. 6 files
+  (try_table / throw / throw_ref × 2 arches) declaring
+  ADR-0113 §A axes — try_table=fallthrough(false/1/false);
+  throw/throw_ref=terminator(true/0/false). 6 axisOf tests.
+  Emit stubs return UnsupportedOp pending 4b/4c bodies.
 - **Mac `zig build test-all`**: green (scope=unclear)。
 
 ## Phase 10 progress
@@ -118,34 +120,32 @@ ROADMAP §10 = 13-row task table。
     cross-module + spec corpus + regalloc terminator-class 残)
 - Pending: 10.E / 10.G / 10.P
 
-## Active task — 10.E-codegen-4 per-arch op_exception_handling.zig (try_table parse-skeleton)
+## Active task — 10.E-codegen-4b try_table emit body
 
-All EH unwind / restoration primitives landed (3a-3h: storage +
-walk + frame-chain reader + adapter + code_map + dispatcher +
-sp_restore). Next: hook the try_table / throw / throw_ref ZIR ops
-into the dispatch pipeline via per-arch `op_exception_handling.zig`
-per ADR-0114 D2.
+10.E-codegen-4 (`f5524688`) landed EH skeletons + axes. Next:
+try_table emit body per ADR-0114 D2. The try_table op should:
+- Decode the parsed catch_vec from the ZirInstr (catches_start /
+  catches_end into ZirFunc.eh_catch_entries per 10.E-3b parse).
+- Call ExceptionTable.Builder.add(...) per catch clause, with
+  pc_start = current emit position (= start of the inner block
+  body), pc_end populated later when the block end is emitted,
+  tag_idx + landing_pad_pc + CatchKind from the catch entry.
+- Emit ZERO JIT bytes (the inner block's body emits normally
+  via the existing `block` op recursion).
 
-Initial atom (3a-equivalent for this row): create both per-arch
-files with `op_tag` / `wasm_level` / `emit` skeletons returning
-`UnsupportedOp` for the 3 ops (try_table / throw / throw_ref).
-Declare 3-axis: try_table = is_terminator=false /
-n_successor_edges=(1 + N_catches; per-op constant 1 here for
-catch-all shape) / is_safepoint=false; throw / throw_ref =
-is_terminator=true / n_successor_edges=0 / is_safepoint=false.
-Add axisOf tests like 10.TC-3b's tail-call axes did.
+Need: EmitCtx access to a per-function ExceptionTable.Builder
+(new field; goes into ctx.zig EmitCtx). Plus a way to record
+pc_start now and patch pc_end at try_table-close (= the
+matching `end` op emit). This mirrors how br_table /
+bounds_fixups thread fixup metadata through EmitCtx.
 
-Refs: ADR-0114 D2 + ADR-0113 §A/B (N-successor axis), instruction
-/wasm_3_0/try_table.zig + throw.zig + throw_ref.zig stubs,
-10.TC-3b skeleton pattern.
+Refs: ADR-0114 D2, exception_table.zig Builder (landed),
+src/ir/lower.zig (catch_entries already populated by
+10.E-3b parse).
 
 **Next sub-chunk candidates (names only, NO predictions)**:
-- 10.E-codegen-4 — per-arch op_exception_handling.zig skeletons (active)
-- 10.E-codegen-4b — try_table emit body (push handler entries to
-  per-Instance ExceptionTable.Builder; emit zero JIT bytes per
-  ADR-0114 D2)
-- 10.E-codegen-4c — throw / throw_ref emit body (marshal payload
-  + tag_idx into argregs + CALL zwasm_throw dispatcher)
+- 10.E-codegen-4b — try_table emit body (active)
+- 10.E-codegen-4c — throw / throw_ref emit body
 - 10.E-codegen-3i — assembly entry/exit glue per arch
 - 10.TC-3f/g/h — tail-call follow-ons (deferred)
 - 10.E-N-4 — c_api instantiate → interp Runtime tag_param_counts

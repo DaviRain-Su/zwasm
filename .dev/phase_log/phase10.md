@@ -617,6 +617,29 @@ Design source: ADR-0114 + ADR-0117 (cross-subsystem invariants).
 
 **SHA pointer**: backfilled at Phase 10 close.
 
+- **10.E-codegen-4** — per-arch EH op_exception_handling
+  skeletons (`f5524688`). Per ADR-0114 D2 + ADR-0113 §A/B:
+  6 per-op files (3 ops × 2 arches) under
+  `engine/codegen/{arm64,x86_64}/ops/wasm_3_0/` —
+  `try_table.zig`, `throw.zig`, `throw_ref.zig`. Each
+  declares the 3-axis classification: try_table falls
+  through into inner block (`is_terminator=false /
+  n_successor_edges=1 / is_safepoint=false`; per-callsite
+  N for the catch-vec EH-aware metadata populated at
+  lower time per ADR-0113 D3); throw / throw_ref are
+  terminators (`is_terminator=true / n_successor_edges=0
+  / is_safepoint=false`; CALL the zwasm_throw dispatcher,
+  never return to caller — mirrors tail-call shape). Emit
+  stubs return `UnsupportedOp` pending real bodies: 4b
+  for try_table (Builder.add per catch + recursive inner-
+  block emit), 4c for throw / throw_ref (payload marshal
+  + tag_idx load + CALL dispatcher). Files NOT yet in
+  `collected_arch_ops` registry per architectural_spike.md
+  (no on-branch spike; wired when emit bodies land).
+  6 axisOf comptime tests in `dispatch_collector.zig`
+  verify each per-op file's declared axes. Mac `test-all`
+  GREEN; lint exit 0. ADR-0114 D2/D6 + ADR-0113 §A/B.
+
 - **10.E-codegen-3h** — frame_bytes-aware SP-restore
   (`e246da18`). Per ADR-0114 D6: completes the SP-restore
   primitive for functions with locals. Three coordinated
