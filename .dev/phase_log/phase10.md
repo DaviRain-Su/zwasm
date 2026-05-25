@@ -617,6 +617,21 @@ Design source: ADR-0114 + ADR-0117 (cross-subsystem invariants).
 
 **SHA pointer**: backfilled at Phase 10 close.
 
+- **10.E-codegen-3f** — arm64 sp_restore.zig SP=FP restore emit
+  (`9af0770e`). Per ADR-0114 D6: the assembly trampoline calls
+  `emitSpFromGpr(allocator, buf, src_gpr)` to emit `MOV SP, Xn`
+  (canonical AAPCS64 form `ADD SP, Xn, #0`; opcode 0x91000000
+  | (Rn<<5) | Rd) on the .handler return path before jumping
+  to landing_pad_pc. Zero-locals restore only — functions with
+  locals + spills need a follow-up `SUB SP, SP, #frame_bytes`
+  emit that lands when CodeMap.Entry gains the frame_bytes
+  field (10.E-codegen-3h follow-on). 3 byte-snapshot tests:
+  MOV SP, X29 → 0x910003BF (zero-locals canonical); MOV SP, X1
+  (handler_fp landed in X1 after dispatchThrow result marshal);
+  MOV SP, X0 → 0x9100001F (encoding cross-check). Mac
+  `test-all` GREEN; lint exit 0. ADR-0114 D6, ADR-0017
+  (prologue layout: SP == FP at prologue-completion).
+
 - **10.E-codegen-3e** — shared/zwasm_throw.zig Zig dispatcher
   (`a2043d1c`). Per ADR-0114 D6: the entry point invoked by the
   JIT-emitted throw / throw_ref ops (via arch-specific assembly

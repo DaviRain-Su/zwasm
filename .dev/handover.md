@@ -93,11 +93,13 @@
 - **10.E-codegen-3d = SHIPPED 2026-05-26** (`2d6e3c78`):
   shared/code_map.zig — per-Instance JIT code map. 10 unit tests.
 - **10.E-codegen-3e = SHIPPED 2026-05-26** (`a2043d1c`):
-  shared/zwasm_throw.zig — Zig dispatcher entry per ADR-0114 D6.
-  `dispatchThrow(table, code_map, ThrowSite, max_depth)` →
-  UnwindResult. Closes the full EH-unwind data pipeline; only
-  arch-specific assembly entry/exit glue + per-arch
-  op_exception_handling remain. 4 end-to-end unit tests.
+  shared/zwasm_throw.zig — Zig dispatcher entry. 4 end-to-end
+  unit tests.
+- **10.E-codegen-3f = SHIPPED 2026-05-26** (`9af0770e`):
+  arm64/sp_restore.zig — `emitSpFromGpr` emits MOV SP, Xn
+  (ADD SP, Xn, #0 canonical form). Zero-locals restore only;
+  frame_bytes-aware follow-up lands when CodeMap.Entry gains
+  the field. 3 byte-snapshot tests.
 - **Mac `zig build test-all`**: green (scope=unclear)。
 
 ## Phase 10 progress
@@ -111,40 +113,25 @@ ROADMAP §10 = 13-row task table。
     cross-module + spec corpus + regalloc terminator-class 残)
 - Pending: 10.E / 10.G / 10.P
 
-## Active task — 10.E-codegen-3f arm64 SP-restore emit helper
+## Active task — 10.E-codegen-3g x86_64 SP-restore emit helper
 
-10.E-codegen-3e (`a2043d1c`) landed the Zig dispatcher entry.
-Next: arm64 SP-restore emit helper that the assembly trampoline
-calls after `dispatchThrow` returns `.handler{handler_fp, ...}`.
-Per ADR-0114 D6 the restoration is: MOV SP, handler_fp's
-prologue boundary (= the SP value the handler frame had right
-after its prologue ran). Concretely on AAPCS64:
-  MOV SP, X29  (=handler_fp restored)
-  then standard frame-recovery from there.
+10.E-codegen-3f (`9af0770e`) landed arm64 sp_restore.zig. Next:
+mirror for x86_64 — `src/engine/codegen/x86_64/sp_restore.zig`
+emitting `MOV RSP, <src_gpr>` (= MOV r64, r64 form). On
+SysV/Win64 the prologue's `MOV RBP, RSP` (after the PUSH RBP)
+leaves RBP == RSP at prologue-completion; the zero-locals
+restore is just `MOV RSP, RBP` (= 48 89 EC).
 
-Actually, the handler frame is mid-execution when the throw
-fires — its SP may have already advanced past its prologue
-boundary (e.g. due to local spills, function calls in flight).
-For the landing-pad-jump shape we need the handler frame's
-PROLOGUE-completion SP, which equals X29 (= FP) since AAPCS64
-prologue leaves SP == FP after the SUB SP, #frame_bytes is
-applied. So the restoration shape is: SP = handler_fp -
-frame_bytes_of_handler_function.
+Same shape as arm64: zero-locals restore only; frame_bytes-
+aware follow-up lands when CodeMap.Entry gains the field.
 
-This frame_bytes lookup is per-function metadata we don't yet
-expose. Initial atom: just emit the SP=handler_fp restore as
-a placeholder (correct for zero-locals functions); the
-frame_bytes-aware restore lands when CodeMap.Entry gains
-the frame_bytes field.
-
-Refs: ADR-0114 D6, ADR-0017 (arm64 prologue layout), code_map.zig
-(landed).
+Refs: ADR-0114 D6, System V AMD64 §3.2.2, arm64/sp_restore.zig
+(landed) for the mirror shape.
 
 **Next sub-chunk candidates (names only, NO predictions)**:
-- 10.E-codegen-3f — arm64 SP-restore emit helper (active)
-- 10.E-codegen-3g — x86_64 SP-restore emit helper
-- 10.E-codegen-3h — assembly entry/exit glue per arch
-- 10.E-codegen-4 — per-arch op_exception_handling.zig
+- 10.E-codegen-3g — x86_64 SP-restore emit helper (active)
+- 10.E-codegen-3h — assembly entry/exit glue + frame_bytes-aware restore
+- 10.E-codegen-4 — per-arch op_exception_handling.zig (try_table / throw emit)
 - 10.TC-3f/g/h — tail-call follow-ons (deferred)
 - 10.E-N-4 — c_api instantiate → interp Runtime tag_param_counts
 - 10.G-4 — struct ops (needs GC heap impl first)
