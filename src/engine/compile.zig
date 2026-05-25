@@ -464,6 +464,29 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
                 if (!ok) return Error.ExportIdxOutOfRange;
             }
         }
+        // Wasm 3.0 EH (10.E-N-3) — build tag_param_counts even
+        // for the empty-function module path. A valid Wasm
+        // module may declare just types + tags (no functions);
+        // the interp Runtime still wants the slot populated so
+        // a host-side throw could marshal payload via the
+        // standard pop path.
+        const empty_tag_param_counts: []u32 = blk: {
+            const tag_section = module.find(.tag) orelse break :blk &.{};
+            const tags_only = try sections.decodeTags(a, tag_section.body);
+            if (tags_only.len == 0) break :blk &.{};
+            const type_section_for_tags = module.find(.type) orelse return Error.MissingTypeSection;
+            var types_for_tags = try sections.decodeTypes(a, type_section_for_tags.body);
+            defer types_for_tags.deinit();
+            const out = try allocator.alloc(u32, tags_only.len);
+            errdefer allocator.free(out);
+            for (tags_only, 0..) |tag, i| {
+                if (tag.typeidx >= types_for_tags.items.len) return Error.InvalidFuncIndex;
+                out[i] = @intCast(types_for_tags.items[tag.typeidx].params.len);
+            }
+            break :blk out;
+        };
+        errdefer if (empty_tag_param_counts.len > 0) allocator.free(empty_tag_param_counts);
+
         return .{
             .module = empty_module,
             .func_results = empty_results,
@@ -473,6 +496,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             .globals_offsets = elay.offsets,
             .globals_valtypes = elay.valtypes,
             .num_global_imports = num_global_imports_empty,
+            .tag_param_counts = empty_tag_param_counts,
             .arena = arena,
         };
     }
@@ -797,6 +821,26 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     else
         &.{};
 
+    // Wasm 3.0 EH (10.E-N-3) — pre-resolve per-tag param count
+    // from `tags[i].typeidx → module_types[typeidx].params.len`.
+    // The interp's `throwOp` reads this to pop the right number
+    // of operand values into the Exception payload at throw
+    // time; without it, real-world tag-using Wasm would always
+    // pop 0 (the safe-fallback default). Allocated on the
+    // outer (caller-owned) allocator so the slice survives the
+    // arena tear-down and lands in `CompiledWasm.tag_param_counts`.
+    const tag_param_counts: []u32 = blk: {
+        if (tags_slice.len == 0) break :blk &.{};
+        const out = try allocator.alloc(u32, tags_slice.len);
+        errdefer allocator.free(out);
+        for (tags_slice, 0..) |tag, i| {
+            if (tag.typeidx >= types.items.len) return Error.InvalidFuncIndex;
+            out[i] = @intCast(types.items[tag.typeidx].params.len);
+        }
+        break :blk out;
+    };
+    errdefer if (tag_param_counts.len > 0) allocator.free(tag_param_counts);
+
     // §9.9 / 9.9-l-1b-d093-d82 (skip-impl drainage):
     // Wasm spec §3.4.7.3 / §3.4.10 declared-funcrefs set. A
     // funcidx is "declared" iff it appears in some global
@@ -948,6 +992,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         .globals_offsets = globals_offsets,
         .globals_valtypes = globals_valtypes,
         .num_global_imports = nm_global_imports,
+        .tag_param_counts = tag_param_counts,
         .arena = arena,
     };
 }

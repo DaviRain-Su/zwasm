@@ -160,6 +160,13 @@ pub const CompiledWasm = struct {
     globals_offsets: []u32,
     globals_valtypes: []zir.ValType,
     num_global_imports: u32, // B150 (D-153): wasm-idx[0..N) imports prefix.
+    /// Wasm 3.0 EH (10.E-N-3) — per-tag param count, pre-resolved
+    /// at compile time from
+    /// `tag_section[i].typeidx → module_types[typeidx].params.len`.
+    /// Consumed by the interp's `throwOp` via
+    /// `Runtime.tag_param_counts` after `setup` writes it.
+    /// Empty slice when the module has no tag section.
+    tag_param_counts: []u32,
     arena: std.heap.ArenaAllocator,
 
     pub fn deinit(self: *CompiledWasm, allocator: Allocator) void {
@@ -169,6 +176,7 @@ pub const CompiledWasm = struct {
         allocator.free(self.func_typeidxs);
         allocator.free(self.globals_offsets);
         allocator.free(self.globals_valtypes);
+        if (self.tag_param_counts.len > 0) allocator.free(self.tag_param_counts);
         self.module.deinit(allocator);
         self.arena.deinit();
     }
@@ -439,4 +447,53 @@ test "compileWasm: empty code section (count=0) — binary.61.wasm shape (D-135 
     defer compiled.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 0), compiled.func_sigs.len);
     try testing.expectEqual(@as(usize, 0), compiled.func_results.len);
+}
+
+test "compileWasm: tag_param_counts populated from tag section + types (10.E-N-3)" {
+    // type(1): [(i32) -> ()]  — typeidx=0 has 1 param.
+    // tag(13): [tag attr=0 typeidx=0]  — tag 0 references typeidx 0.
+    // Expected: compiled.tag_param_counts = [1].
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        // type section: count=1; functype: 0x60, params=[i32], results=[]
+        0x01, 0x05, 0x01, 0x60, 0x01, 0x7F, 0x00,
+        // tag section (id 13): count=1; tag: attr=0x00, typeidx=0
+        0x0D,
+        0x03, 0x01, 0x00, 0x00,
+    };
+    var compiled = try compileWasm(testing.allocator, &bytes);
+    defer compiled.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 1), compiled.tag_param_counts.len);
+    try testing.expectEqual(@as(u32, 1), compiled.tag_param_counts[0]);
+}
+
+test "compileWasm: tag_param_counts empty when no tag section (10.E-N-3)" {
+    const bytes = [_]u8{ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
+    var compiled = try compileWasm(testing.allocator, &bytes);
+    defer compiled.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 0), compiled.tag_param_counts.len);
+}
+
+test "compileWasm: multiple tags with mixed-arity types (10.E-N-3)" {
+    // type 0: () -> ()         (0 params)
+    // type 1: (i32 i64) -> ()  (2 params)
+    // tag 0 → type 0; tag 1 → type 1; tag 2 → type 0.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        // type section: count=2
+        0x01, 0x09, 0x02,
+        0x60, 0x00, 0x00, // type 0: 0 params, 0 results
+        0x60, 0x02, 0x7F, 0x7E, 0x00, // type 1: i32+i64 params, 0 results
+        // tag section: count=3; (0,0), (0,1), (0,0)
+        0x0D, 0x07, 0x03, 0x00, 0x00,
+        0x00, 0x01, 0x00, 0x00,
+    };
+    var compiled = try compileWasm(testing.allocator, &bytes);
+    defer compiled.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 3), compiled.tag_param_counts.len);
+    try testing.expectEqual(@as(u32, 0), compiled.tag_param_counts[0]);
+    try testing.expectEqual(@as(u32, 2), compiled.tag_param_counts[1]);
+    try testing.expectEqual(@as(u32, 0), compiled.tag_param_counts[2]);
 }
