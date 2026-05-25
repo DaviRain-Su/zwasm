@@ -127,29 +127,26 @@ ROADMAP §10 = 13-row task table。
     cross-module + spec corpus + regalloc terminator-class 残)
 - Pending: 10.E / 10.G / 10.P
 
-## Active task — ADR-0117 cross-subsystem invariant enrichment
+## Active task — ADR-0115 (GC heap + collector) reference enrichment
 
-The lesson (`e62db476`) recommends pausing the per-cycle EH
-foundation-atom rhythm and pivoting to a different track. Next
-cycle picks an autonomous prep path: ADR-0117 (cross-subsystem
-invariant audit) reference enrichment. Per the lesson, foundation
-chain reached its natural pause; integration work needs a focused
-multi-cycle design pass not autonomous-loop-eligible at per-cycle
-granularity.
+ADR-0117 enriched (`04e0baf3`) with 3 concrete wasmtime
+cross-subsystem citations (TryTable reverse-order, ReturnCall
+terminator, safepoint × moving-GC). Next: ADR-0115 (GC heap +
+collector design) reference enrichment from wasmtime
+`crates/wasmtime/src/runtime/vm/gc/` (drc.rs deferred reference-
+counted collector, gc_runtime.rs heap interface) + cranelift
+`crates/cranelift/src/func_environ/gc/enabled.rs` (per-op
+codegen).
 
-ADR-0117 reference enrichment: walk v1 (`~/Documents/MyProducts/zwasm/`)
-+ wasmtime + wasm3 for prior-art on cross-subsystem invariants
-(safepoint-free, root-walking, GC barrier discipline) and cite
-concrete file/line references into ADR-0117's `References` section.
-Docs-only commit; autonomous prep value retained for the user at
-ADR-flip / phase-close review time.
+Same shape as the ADR-0117 enrichment: docs-only commit, cites
+specific file/line references, autonomous-prep value retained
+for user collab review at ADR-flip / phase-close time.
 
-Refs: ADR-0117 (cross-subsystem invariants), autonomous prep
-paths per /continue skill stop bucket 3 prep list.
+Refs: ADR-0115, wasmtime gc/ + cranelift gc/ source trees.
 
 **Next sub-chunk candidates (names only, NO predictions)**:
-- ADR-0117 reference enrichment (active)
-- ADR-0115 / 0116 (GC stack-map design) reference enrichment
+- ADR-0115 (GC heap + collector) reference enrichment (active)
+- ADR-0116 (GC roots + RTT + i31) reference enrichment
 - ADR-0111 (memory64) reference enrichment
 - 10.E-codegen-4c — throw / throw_ref emit body (deferred per lesson)
 - 10.E-codegen-4b-2 — try_table emit body via ExceptionTable.Builder
