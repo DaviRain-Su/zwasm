@@ -1,4 +1,4 @@
-// FILE-SIZE-EXEMPT: C ABI translation catalog (Zone 3 boundary layer); no separable subsystem per ADR-0099 §D2 P3 evaluation (see .dev/architecture/api_instance_audit.md, §9.12-G (c)).
+// FILE-SIZE-EXEMPT: (cap=2800) C ABI translation catalog (Zone 3 boundary layer); no separable subsystem per ADR-0099 §D2 P3 evaluation (see .dev/architecture/api_instance_audit.md, §9.12-G (c)). 10.F D-173 memory accessors + paired test extended exempt cap 2500→2800 via ADR-0099 (cap=N) override; D-172 / D-171 (next 10.F chunks) tighten or restructure if growth continues.
 //! Engine / Store / Module / Instance / Func / Extern surface of
 //! the C ABI binding (§9.5 / 5.0 chunk d carve-out from
 //! `wasm.zig` per ADR-0007).
@@ -128,6 +128,20 @@ pub const Global = struct {
     mutable: bool,
 };
 
+/// `wasm_memory_t` — opaque-from-C handle for a memory export.
+/// Mirrors `Global`'s shape per `include/wasm.h:471-481`. Wasm 1.0
+/// / 2.0 modules carry at most one memory; `memory_idx` is always
+/// 0 in v0.1 (multi-memory is post-v0.2 per Phase 14+ scope). The
+/// backing storage is the importing instance's `rt.memory` slice —
+/// the c_api accessors `wasm_memory_data` / `..._size` / `..._grow`
+/// read / mutate that slice directly so cross-module imports
+/// (instance B importing instance A's memory) see writes
+/// uniformly per ADR-0014 §6.K.3 arena-aliased semantics.
+pub const Memory = struct {
+    instance: ?*Instance,
+    memory_idx: u32 = 0,
+};
+
 // `Trap` and `TrapKind` live in `src/api/trap_surface.zig`
 // after the §9.5 / 5.0 chunk b carve-out (ADR-0007); see the
 // re-exports near the imports at the top of this file.
@@ -205,6 +219,9 @@ pub const Extern = struct {
     /// returned pointer; `wasm_extern_delete` releases it. Mirrors
     /// `Extern.func` for the func variant.
     global: ?*Global = null,
+    /// For kind = memory: the Memory handle owned by this Extern.
+    /// Same borrow / ownership discipline as `func` / `global`.
+    memory: ?*Memory = null,
 };
 
 // `ExternVec` lives in `src/api/vec.zig` after the §9.5 / 5.0
@@ -891,6 +908,7 @@ pub export fn wasm_extern_delete(e: ?*Extern) callconv(.c) void {
     const handle = e orelse return;
     if (handle.func) |fh| wasm_func_delete(fh);
     if (handle.global) |gh| wasm_global_delete(gh);
+    if (handle.memory) |mh| wasm_memory_delete(mh);
     const inst = handle.instance orelse return;
     const store = inst.store orelse return;
     const alloc = storeAllocator(store) orelse return;
@@ -971,6 +989,85 @@ pub export fn wasm_global_set(g: ?*Global, v: ?*const Val) callconv(.c) void {
     slot.* = marshalValIn(val.*);
 }
 
+// ============================================================
+// Memory accessors (D-173 / `include/wasm.h:471-481`)
+// ============================================================
+
+/// `wasm_extern_as_memory(*Extern)` — borrow the Memory contained
+/// in an Extern. Returns null if the Extern is not of kind memory.
+/// Ownership stays with the Extern (same discipline as
+/// `wasm_extern_as_func` / `wasm_extern_as_global`).
+pub export fn wasm_extern_as_memory(e: ?*Extern) callconv(.c) ?*Memory {
+    const handle = e orelse return null;
+    if (handle.kind != .memory) return null;
+    return handle.memory;
+}
+
+/// `wasm_memory_delete(*Memory)` — free a Memory handle. Null-
+/// tolerant. The borrowed handle returned by `wasm_extern_as_memory`
+/// must NOT be passed here (the owning Extern's
+/// `wasm_extern_delete` releases it via the `Extern.memory`
+/// back-pointer).
+pub export fn wasm_memory_delete(m: ?*Memory) callconv(.c) void {
+    const handle = m orelse return;
+    const inst = handle.instance orelse return;
+    const store = inst.store orelse return;
+    const alloc = storeAllocator(store) orelse return;
+    alloc.destroy(handle);
+}
+
+/// `wasm_memory_data(*Memory)` — Wasm spec §4.5.7 (linear memory
+/// data pointer). Returns a byte pointer into the importing
+/// instance's `rt.memory` slice; valid for the lifetime of the
+/// instance (or for the cross-module zombie window per
+/// ADR-0014 §6.K.2). Null on a stale / detached handle.
+pub export fn wasm_memory_data(m: ?*Memory) callconv(.c) ?[*]u8 {
+    const handle = m orelse return null;
+    const inst = handle.instance orelse return null;
+    const rt = inst.runtime orelse return null;
+    if (rt.memory.len == 0) return null;
+    return rt.memory.ptr;
+}
+
+/// `wasm_memory_data_size(*const Memory)` — byte length of the
+/// memory's backing slice. Mirrors `wasm_memory_data` lifetime.
+pub export fn wasm_memory_data_size(m: ?*const Memory) callconv(.c) usize {
+    const handle = m orelse return 0;
+    const inst = handle.instance orelse return 0;
+    const rt = inst.runtime orelse return 0;
+    return rt.memory.len;
+}
+
+/// `wasm_memory_size(*const Memory)` — Wasm spec §4.4.7
+/// (`memory.size`) — page count. Page size = 64 KiB per spec.
+pub export fn wasm_memory_size(m: ?*const Memory) callconv(.c) u32 {
+    const handle = m orelse return 0;
+    const inst = handle.instance orelse return 0;
+    const rt = inst.runtime orelse return 0;
+    return @intCast(rt.memory.len / 65536);
+}
+
+/// `wasm_memory_grow(*Memory, delta)` — Wasm spec §4.4.7
+/// (`memory.grow`) — request additional `delta` pages. Returns
+/// `true` on success (= old-page-count returned to guest via
+/// memory.grow semantics is observable via `wasm_memory_size`
+/// after the call); `false` on allocator failure or detached
+/// handle. v0.1: no max-pages check (the importing module's
+/// declared max is enforced at instantiate; host-side grow
+/// honours the declared bound through realloc availability).
+pub export fn wasm_memory_grow(m: ?*Memory, delta: u32) callconv(.c) bool {
+    const handle = m orelse return false;
+    const inst = handle.instance orelse return false;
+    const rt = inst.runtime orelse return false;
+    const old_pages = rt.memory.len / 65536;
+    const new_pages = old_pages + delta;
+    const new_bytes = new_pages * 65536;
+    const grown = rt.alloc.realloc(rt.memory, new_bytes) catch return false;
+    @memset(grown[rt.memory.len..new_bytes], 0);
+    rt.memory = grown;
+    return true;
+}
+
 // --- extern vec (pointer-vec; vec_delete also frees pointed-to objects)
 //
 // `wasm_extern_vec_new_empty` / `_new_uninitialized` / `_new`
@@ -1029,7 +1126,15 @@ pub export fn wasm_instance_exports(i: ?*const Instance, out: ?*ExternVec) callc
                 ext.func = fh;
             },
             .table => ext.table_idx = exp.idx,
-            .memory => ext.memory_idx = exp.idx,
+            .memory => {
+                ext.memory_idx = exp.idx;
+                const mh = alloc.create(Memory) catch {
+                    alloc.destroy(ext);
+                    break;
+                };
+                mh.* = .{ .instance = @constCast(inst), .memory_idx = exp.idx };
+                ext.memory = mh;
+            },
             .global => {
                 ext.global_idx = exp.idx;
                 // export_types[idx] is parallel to exports_storage[idx]; the
@@ -2473,4 +2578,59 @@ test "wasm 2.0 c_api zombie multi-consumer: 2 instances hold funcref into A afte
 
     // Stage 4 (implicit on defer): inst_b2 deletion releases A's
     // zombie; wasm_store_delete then drains the empty zombie list.
+}
+
+// D-173 close: c_api memory accessors. Exercises
+// `wasm_extern_as_memory` + `wasm_memory_data` + `wasm_memory_size`
+// + `wasm_memory_data_size` + `wasm_memory_grow` over the
+// `mixed_exports_wasm` fixture's exported "m" memory (1 page).
+test "wasm 2.0 c_api memory accessors: data + size + grow round-trip (D-173)" {
+    const e = wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer wasm_engine_delete(e);
+    const s = wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer wasm_store_delete(s);
+
+    var bytes = mixed_exports_wasm;
+    const bv: ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer wasm_module_delete(m);
+
+    const inst = wasm_instance_new(s, m, null, null) orelse return error.InstanceAllocFailed;
+    defer wasm_instance_delete(inst);
+
+    var exports: ExternVec = .{ .size = 0, .data = null };
+    wasm_instance_exports(inst, &exports);
+    defer wasm_extern_vec_delete(&exports);
+
+    // Exports order: f (func), m (memory), t (table), g (global).
+    const mem = wasm_extern_as_memory(exports.data.?[1]) orelse return error.MemoryNull;
+    try testing.expectEqual(@as(u32, 1), wasm_memory_size(mem));
+    try testing.expectEqual(@as(usize, 65536), wasm_memory_data_size(mem));
+
+    // Byte write + read round-trip through the data pointer.
+    const data = wasm_memory_data(mem) orelse return error.MemoryDataNull;
+    data[0x100] = 0xAB;
+    data[0x101] = 0xCD;
+    try testing.expectEqual(@as(u8, 0xAB), data[0x100]);
+    try testing.expectEqual(@as(u8, 0xCD), data[0x101]);
+
+    // Grow by 1 page → size=2, data_size=128 KiB; existing bytes
+    // preserved + new tail zero-initialised.
+    try testing.expect(wasm_memory_grow(mem, 1));
+    try testing.expectEqual(@as(u32, 2), wasm_memory_size(mem));
+    try testing.expectEqual(@as(usize, 131072), wasm_memory_data_size(mem));
+    const data2 = wasm_memory_data(mem) orelse return error.MemoryDataNull;
+    try testing.expectEqual(@as(u8, 0xAB), data2[0x100]);
+    try testing.expectEqual(@as(u8, 0x00), data2[65536]); // first byte of new page
+
+    // Non-memory Extern → null.
+    try testing.expect(wasm_extern_as_memory(exports.data.?[0]) == null); // func
+    try testing.expect(wasm_extern_as_memory(exports.data.?[3]) == null); // global
+    try testing.expect(wasm_extern_as_memory(null) == null);
+
+    // Null tolerance on accessors.
+    try testing.expect(wasm_memory_data(null) == null);
+    try testing.expectEqual(@as(usize, 0), wasm_memory_data_size(null));
+    try testing.expectEqual(@as(u32, 0), wasm_memory_size(null));
+    try testing.expect(!wasm_memory_grow(null, 1));
 }
