@@ -125,6 +125,21 @@ J.1+ gated on execution plan doc)
   `pub const Runtime` → `pub const Engine`. zone_check classifier
   extended `src/zwasm/*` → `lib`. Mac 1812/1826 PASS, I3 18/18,
   ubuntu kicked post-push (`017193bc`)
+- **10.J / J.7** — `src/zwasm/linker.zig` extended with
+  `WasiConfig` + `defineWasi(cfg)`. Native facade routes any
+  `wasi_snapshot_preview1` import through existing
+  `src/api/wasi.zig::lookupWasiThunk`; thunk receives the host
+  via `ctx` directly (NOT via `store.wasi_host` — the latter is
+  c_allocator-owned by `wasm_store_delete`, while Linker uses
+  Engine's user allocator; allocator-mismatch verified to
+  SIGABRT before the ownership lift). `LinkError` gains
+  `UnsupportedWasiImport` (phase-11-deferred name) +
+  `WasiAlreadyDefined`. T1.13 smoke verifies instantiation
+  without exercising syscalls. `test/api/zig_facade_runner.zig`
+  outcome flipped 0 PASS / 55 SKIP-WASI → 45 PASS /
+  10 SKIP-WASI (Go-toolchain residual under D-177). D-176
+  discharged; D-177 opened. Mac 1824/1838 PASS, lint clean,
+  I3 18/18, ubuntu kicked post-push (`05c47829`)
 - **10.J / J.6** — `test/api/zig_facade_runner.zig` new (~155 LOC).
   Walks a corpus dir, drives each `.wasm` through Engine → Module →
   Instance natively. Pre-scans imports to classify as PASS /

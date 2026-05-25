@@ -204,7 +204,7 @@ implementation train starts at J.2.
 | Risk | MEDIUM — runner code is straightforward; risk is "running ~150 fixtures takes too long for per-chunk gate" (mitigate: tag the runner with `--quick` mode that exercises only cljw_* + 5 p7 fixtures for per-chunk; full run only at test-all). Per test survey §10, full run estimated < 30s on Mac. |
 | Commit message form | `test(api,p10): J.6 Tier-2 zig_facade_runner — 150-fixture parity per ADR-0109 + test survey §4.2` |
 
-### J.7 — WASI bulk `defineWasi(cfg)` skeleton + ADR-0109 §3.8 stub test
+### J.7 — WASI bulk `defineWasi(cfg)` skeleton + ADR-0109 §3.8 stub test — **CLOSED `05c47829`**
 
 | Field | Value |
 |---|---|
