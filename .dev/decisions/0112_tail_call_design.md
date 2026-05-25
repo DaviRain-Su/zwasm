@@ -1,6 +1,6 @@
 # 0112 — Tail Call design: inline cross-module emit + frame_teardown helper + terminator class
 
-- **Status**: Proposed (user collab gate at Phase 10 / 10.D ADR round; pending Accept)
+- **Status**: Accepted (2026-05-25; Phase 10 / 10.D ADR round close)
 - **Date**: 2026-05-25
 - **Author**: claude (autonomous loop, /continue prep path)
 - **Tags**: tail-call, wasm-3.0, codegen, regalloc, terminator-class, safepoint-free, Phase 10 / 10.TC
@@ -210,3 +210,7 @@ transitions to `Closed (Implemented)` with the impl SHA range cited.
   collab review at 10.D. Co-drafted in the 10.D ADR round
   alongside ADR-0111 + ADR-0113..0117 (across multiple
   /continue cycles per the 7-ADR scope).
+- 2026-05-25 — Status: Proposed → **Accepted** (user collab 3/7).
+  All 7 decisions accepted as drafted (inline emit + frame_teardown
+  shared helper; interpreter trampoline + pc_continue; safepoint-free
+  comptime invariant; op_tail_call.zig as separate file).

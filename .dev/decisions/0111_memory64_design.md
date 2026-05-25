@@ -1,6 +1,6 @@
 # 0111 — memory64 design: idx_type + multi-memory + i32 fast-path
 
-- **Status**: Proposed (user collab gate at Phase 10 / 10.D ADR round; pending Accept)
+- **Status**: Accepted (2026-05-25; Phase 10 / 10.D ADR round close)
 - **Date**: 2026-05-25
 - **Author**: claude (autonomous loop, /continue prep path)
 - **Tags**: memory64, wasm-3.0, multi-memory, codegen, ZirInstr,
@@ -181,3 +181,12 @@ cited.
   collab review at 10.D. Co-drafted in the 10.D ADR round
   alongside ADR-0112..0117 (over multiple /continue cycles per
   the 7-ADR scope).
+- 2026-05-25 — Status: Proposed → **Accepted** (user collab 1/7).
+  All 6 decisions accepted. Enhancement added: `-Dwasm=v2_0`
+  build symbol-absence gate (= `nm` check that `emitMem64Wrap`-class
+  symbols are zero-count in v2.0 build) gets wired into
+  `scripts/check_phase10_close_invariants.sh` (10.P) as a
+  mechanical proof that comptime DCE of the i64 arm holds. This
+  is the v2.0 substrate-fidelity invariant in nm-grep form, a
+  generalisation pattern future `-Dgc=false` / `-Dwasm=v3_0`
+  strip checks will replicate.

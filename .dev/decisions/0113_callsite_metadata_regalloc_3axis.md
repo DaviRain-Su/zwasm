@@ -1,6 +1,6 @@
 # 0113 — callsite_metadata generalisation + regalloc 3-axis (terminator / N-successor / stack-map)
 
-- **Status**: Proposed (user collab gate at Phase 10 / 10.D ADR round; pending Accept)
+- **Status**: Accepted (2026-05-25; Phase 10 / 10.D ADR round close)
 - **Date**: 2026-05-25
 - **Author**: claude (autonomous loop, /continue prep path)
 - **Tags**: callsite_metadata, regalloc, exception-handling, gc,
@@ -232,3 +232,9 @@ the impl SHA range cited.
   paths for user-gated ADRs"). Status: Proposed pending user
   collab review at 10.D. Co-drafted with ADR-0111 / 0112 /
   0114..0117 across the 7-ADR 10.D round.
+- 2026-05-25 — Status: Proposed → **Accepted** (user collab 2/7;
+  foundation ADR, accepted first per dependency order). All 6
+  decisions accepted as drafted. This is the load-bearing
+  foundation: bounds_fixups refactor (1-edge → CallsiteEdge[1])
+  lands in the FIRST of EH/TC/GC impl rows to ship; subsequent
+  rows consume the shape unchanged.

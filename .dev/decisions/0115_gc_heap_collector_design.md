@@ -1,6 +1,6 @@
 # 0115 — WasmGC heap + collector design: per-Store slab + pluggable vtable + needs_gc_heap zero-overhead gate
 
-- **Status**: Proposed (user collab gate at Phase 10 / 10.D ADR round; pending Accept)
+- **Status**: Accepted (2026-05-25; Phase 10 / 10.D ADR round close)
 - **Date**: 2026-05-25
 - **Author**: claude (autonomous loop, /continue prep path)
 - **Tags**: wasmgc, wasm-3.0, gc-heap, collector-vtable, mark-sweep,
@@ -302,3 +302,14 @@ the impl SHA range cited.
   collab review at 10.D. Co-drafted in the 10.D ADR round
   alongside ADR-0111 / 0112 / 0113 / 0114 / 0116 / 0117 (over
   multiple /continue cycles per the 7-ADR scope).
+- 2026-05-25 — Status: Proposed → **Accepted** (user collab 5/7).
+  All 9 decisions accepted. Enhancement: `Module.needs_gc_heap`
+  parse-time bit gets declared as a load-bearing field with a
+  pinned offset in the parsed `Module` extern struct; ABI-freeze
+  to prevent silent drift when later /JIT / Instance init paths
+  consume it. Field offset + name are cited in Reference § so
+  that future audits can grep its presence mechanically. Mode B
+  (host root provider; ~50 LOC) ships in Phase 10 alongside
+  Mode A; `-Dgc=false` nuclear strip ships as a Phase 10
+  invariant (10.P close); `null` collector test-only; mark_sweep
+  must-ship.

@@ -1,6 +1,6 @@
 # 0117 — GC × EH × TC integration invariants: cross-subsystem correctness
 
-- **Status**: Proposed (user collab gate at Phase 10 / 10.D ADR round; pending Accept)
+- **Status**: Accepted (2026-05-25; Phase 10 / 10.D ADR round close)
 - **Date**: 2026-05-25
 - **Author**: claude (autonomous loop, /continue prep path)
 - **Tags**: integration-invariants, gc-eh-tc-cross-product, safepoint,
@@ -325,3 +325,18 @@ gate. At that point:
   /continue prep cycles. After Accept flip on all 7 ADRs,
   10.D closes and impl rows 10.M / 10.R / 10.TC / 10.E / 10.G
   unlock.
+- 2026-05-25 — Status: Proposed → **Accepted** (user collab 7/7;
+  final ADR). All 6 invariants accepted as drafted (I1 exnref
+  rooted across unwind / I2 tail-call no-leak / I3 FP-walk skips
+  consumed frames / I4 try_table-over-GC-call stack-map / I5
+  return_call-in-try-table doesn't catch / I6 `-Dgc=false`
+  preserves EH+TC). 4 enhancements added: (a) at Phase 10 close
+  (10.P), the 6 invariants get **promoted** to a permanent
+  regression rule at `.claude/rules/p10_cross_subsystem_invariants.md`
+  (auto-loaded for feature/gc/, feature/exception_handling/,
+  engine/codegen/); (b) `-Dgc=false` build matrix runs at every
+  per-chunk gate (CI build time +30% acceptable); (c) 6
+  cross-fixtures land as **skeleton (.wat only; .expect filled
+  per impl row)** at 10.T extension before any of 10.E/10.G/10.TC
+  ship, so the cross fixture inventory is in place regardless of
+  impl order. The 7-ADR round is now closed; impl rows unlock.

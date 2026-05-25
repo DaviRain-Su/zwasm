@@ -1,6 +1,6 @@
 # 0114 — Exception Handling design: tag identity + FP-walk unwind + 2-edge callsite
 
-- **Status**: Proposed (user collab gate at Phase 10 / 10.D ADR round; pending Accept)
+- **Status**: Accepted (2026-05-25; Phase 10 / 10.D ADR round close)
 - **Date**: 2026-05-25
 - **Author**: claude (autonomous loop, /continue prep path)
 - **Tags**: exception-handling, wasm-3.0, codegen, unwind, tag-identity,
@@ -276,3 +276,13 @@ the impl SHA range cited.
   collab review at 10.D. Co-drafted in the 10.D ADR round
   alongside ADR-0111 / 0112 / 0113 / 0115..0117 (over multiple
   /continue cycles per the 7-ADR scope).
+- 2026-05-25 — Status: Proposed → **Accepted** (user collab 4/7).
+  All 9 decisions accepted. Enhancement: the Trap (signal/VEH)
+  vs Throw (software `zwasm_throw`) dispatcher-separation
+  invariant (decision §6) gets banked into
+  `.claude/rules/no_workaround.md` (or a new dedicated
+  `p10_eh_dispatcher_separation.md`) as a load-bearing rule —
+  so future "便利だから SEH 流用" drift is caught structurally,
+  not only by the comptime assert in `emit.zig`. Concretely:
+  the rule's stale-ness check ensures that the catch-path
+  symbol set never references the Trap dispatcher's entry-point.

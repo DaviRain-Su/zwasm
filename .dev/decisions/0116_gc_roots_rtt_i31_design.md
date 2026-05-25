@@ -1,6 +1,6 @@
 # 0116 — WasmGC roots + RTT + i31 design: precise root walk + 8-deep display + low-bit discriminant
 
-- **Status**: Proposed (user collab gate at Phase 10 / 10.D ADR round; pending Accept)
+- **Status**: Accepted (2026-05-25; Phase 10 / 10.D ADR round close)
 - **Date**: 2026-05-25
 - **Author**: claude (autonomous loop, /continue prep path)
 - **Tags**: wasmgc, wasm-3.0, gc-roots, rtt, i31, type-hierarchy,
@@ -311,3 +311,11 @@ the impl SHA range cited.
   collab review at 10.D. Co-drafted in the 10.D ADR round
   alongside ADR-0111..0115 / 0117 (over multiple /continue
   cycles per the 7-ADR scope).
+- 2026-05-25 — Status: Proposed → **Accepted** (user collab 6/7).
+  All 9 decisions accepted. Enhancement: when the parser rejects
+  an RTT chain of depth ≥ 8 (decision §9), the diagnostic message
+  must include the explicit "Workaround: factor your type
+  hierarchy into shallower trees (compiler-generated Wasm rarely
+  exceeds depth 5)" guidance. This makes the cap a discoverable
+  zwasm choice (not a spec rule) so toolchain authors can
+  restructure rather than file bugs.
