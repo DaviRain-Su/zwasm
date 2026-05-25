@@ -630,10 +630,26 @@ fn throwOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
 }
 
 /// Wasm 3.0 EH `throw_ref` (§3.3.10.8). Re-raises an exception
-/// via an `exnref` on the operand stack. Defers to 10.E-N
-/// exnref impl — currently traps without consuming the operand
-/// (validator already accepted the pop for static-stack tracking).
-fn throwRefOp(_: *InterpCtx, _: *const ZirInstr) anyerror!void {
+/// via an `exnref` on the operand stack. Pops the exnref,
+/// resolves the `*Exception` it wraps, writes the pointer to
+/// `rt.pending_exception`, then re-enters `findAndDispatchCatch`
+/// against the current frame. A null exnref traps
+/// (`Trap.NullReference` per spec). The Exception object itself
+/// is NOT re-allocated — `throw_ref` just routes the existing
+/// `*Exception` back through the unwinder, so catch arms that
+/// match see the same payload + tag_idx as the original throw.
+fn throwRefOp(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
+    const rt = Runtime.fromOpaque(c);
+    const frame = rt.currentFrame();
+    const ref_v = rt.popOperand();
+    const exc_opaque = Value.refAsExceptionPtr(ref_v) orelse return Trap.NullReference;
+    const exc: *runtime.Exception = @ptrCast(@alignCast(exc_opaque));
+    rt.pending_exception = exc;
+
+    if (try findAndDispatchCatch(rt, frame, exc)) {
+        rt.pending_exception = null;
+        return;
+    }
     return Trap.UncaughtException;
 }
 
@@ -1458,4 +1474,90 @@ test "throw + catch_ref with matching tag: pushes params + exnref (10.E-exnref-a
 
     try testing.expectEqual(@as(u32, 1), rt.operand_len);
     try testing.expectEqual(@as(i32, 88), rt.popOperand().i32);
+}
+
+test "throw_ref: re-raises Exception caught via catch_all_ref by outer try_table (10.E-exnref-b)" {
+    // (func (result i32)
+    //   (block (result i32)        ; outer_block, block_idx=0, end_inst=10
+    //     (block (result i32)      ; mid_block, block_idx=1, arity=1, end_inst=8
+    //       (try_table             ; outer try_table, block_idx=2, end_inst=7
+    //                              ;   — catch_all_ref grabs the exnref
+    //         (try_table           ; inner try_table, block_idx=3, end_inst=5
+    //                              ;   — catch_all_ref grabs the original throw
+    //           throw 0            ; raises Exception
+    //         end)
+    //         throw_ref            ; re-raise (exnref on stack from inner catch_all_ref)
+    //       end)
+    //     end)                      ; mid_block end with exnref captured by outer catch
+    //     drop                      ; discard the exnref
+    //     i32.const 9
+    //   end)
+    //   end
+    var fnz = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &[_]zir.ValType{.i32} }, &.{});
+    defer fnz.deinit(testing.allocator);
+
+    try fnz.blocks.append(testing.allocator, .{ .kind = .block, .start_inst = 1, .end_inst = 10 });
+    try fnz.blocks.append(testing.allocator, .{ .kind = .block, .start_inst = 2, .end_inst = 8 });
+    try fnz.blocks.append(testing.allocator, .{ .kind = .try_table, .start_inst = 3, .end_inst = 7 });
+    try fnz.blocks.append(testing.allocator, .{ .kind = .try_table, .start_inst = 4, .end_inst = 5 });
+
+    const catches = try testing.allocator.dupe(zir.CatchEntry, &[_]zir.CatchEntry{
+        .{ .kind = .catch_all_ref, .tag_idx = 0, .label_idx = 0 }, // outer try_table → mid_block
+        .{ .kind = .catch_all_ref, .tag_idx = 0, .label_idx = 0 }, // inner try_table → outer try_table
+    });
+    fnz.eh_catch_entries = catches;
+    const lps = try testing.allocator.dupe(zir.LandingPad, &[_]zir.LandingPad{
+        .{ .block_idx = 2, .catches_start = 0, .catches_end = 1 }, // outer
+        .{ .block_idx = 3, .catches_start = 1, .catches_end = 2 }, // inner
+    });
+    fnz.eh_landing_pads = lps;
+
+    try fnz.instrs.append(testing.allocator, .{ .op = .block, .payload = 0, .extra = 1 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .block, .payload = 1, .extra = 1 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .try_table, .payload = 2, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .try_table, .payload = 3, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .throw, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .throw_ref, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .drop, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 9, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    try rt.pushFrame(.{ .sig = fnz.sig, .locals = &.{}, .operand_base = 0, .pc = 0, .func = &fnz });
+    defer _ = rt.popFrame();
+
+    try dispatch_loop.run(&rt, &t, fnz.instrs.items);
+
+    try testing.expectEqual(@as(u32, 1), rt.operand_len);
+    try testing.expectEqual(@as(i32, 9), rt.popOperand().i32);
+    // Single Exception allocation (throw_ref reuses, not re-allocates).
+    try testing.expectEqual(@as(usize, 1), rt.live_exceptions.items.len);
+}
+
+test "throw_ref: null exnref → Trap.NullReference (10.E-exnref-b)" {
+    // Push a canonical null exnref (Value.ref = null_ref) and run
+    // throw_ref. Pushing via `i32.const 0` would leave the upper
+    // 4 bytes of the operand-stack Value uninitialised (extern
+    // union — only the .i32 field is written; Debug poison makes
+    // `.ref` non-zero garbage), so push the null ref directly.
+    var fnz = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &.{} }, &.{});
+    defer fnz.deinit(testing.allocator);
+    try fnz.instrs.append(testing.allocator, .{ .op = .throw_ref, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    try rt.pushFrame(.{ .sig = fnz.sig, .locals = &.{}, .operand_base = 0, .pc = 0, .func = &fnz });
+    defer _ = rt.popFrame();
+    try rt.pushOperand(.{ .ref = Value.null_ref });
+
+    try testing.expectError(Trap.NullReference, dispatch_loop.run(&rt, &t, fnz.instrs.items));
 }
