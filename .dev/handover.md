@@ -7,9 +7,9 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24)。
-- **Last commit**: `9748e805` — 10.T-2b spec_assert_runner_wasm_3_0.zig
-  skeleton + build.zig wire (enumerates 4 manifests / 353 directives
-  across 4/5 sub-corpora; gc empty per D-179)。10.D 7/7 ADRs drafted
+- **Last commit**: `1e381c52` — 10.T-3 gc_stress + eh_frequency
+  runner skeletons (matrix shapes per ADR-0114 + ADR-0115/0116;
+  impl-body activates with 10.G / 10.E)。10.D 7/7 ADRs drafted
   (Accept pending)。
 - **Phase 9 close invariants gate (mac-host)**: **18/18 PASS** 維持。
 - **Mac `zig build test`**: 1827/1841 passed (substrate baseline);
@@ -40,12 +40,13 @@ Accept gate — only impl rows are). Sub-chunks in order:
   424 raw .wast committed.
 - 10.T-2a ✓ `433967fb`: `scripts/regen_spec_3_0_assert.sh` +
   smoke bake (4/5).
-- 10.T-2b ✓ `9748e805`: skeleton runner enumerates manifests +
-  wired to `test-spec-wasm-3.0-assert` + `test-all`.
-- **10.T-3 NEXT**: `test/runners/gc_stress_runner.zig` +
-  `test/runners/eh_frequency_runner.zig` skeletons (impl-body
-  pending 10.G / 10.E; skeletons can be SKIP-routed wired
-  into build.zig as no-op steps until impl rows fire).
+- 10.T-2b ✓ `9748e805`: wasm-3.0 runner skeleton.
+- 10.T-3 ✓ `1e381c52`: gc_stress + eh_frequency skeletons.
+- **10.T-4 NEXT**: Phase 9 `emit_test_*.zig` baseline 採取 +
+  `ZWASM_TEST_BLESS=1` bless workflow (per design plan §4.7;
+  current ~50-op emit_test golden snapshots stay as Phase 10
+  byte-identical baseline; Z chunk verified pre-commit). Then
+  10.T-5 realworld/p10/ skeleton (9 fixture / 5 toolchain).
 - 10.T-3: `gc_stress_runner.zig` + `eh_frequency_runner.zig`
   skeletons (impl after 10.G / 10.E land).
 - 10.T-4: Phase 9 `emit_test_*.zig` baseline 採取 +
