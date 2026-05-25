@@ -269,6 +269,32 @@ close: -Dwasm=v2_0 symbol-absence gate).
 
 ### Sub-chunks (commit-time order)
 
+- **10.M-2** — Runtime data shape (`939b7bbe`).
+  New `src/runtime/instance/memory_instance.zig` introduces
+  `MemoryInstance { bytes, idx_type, pages_min, pages_max }`,
+  re-exported from `runtime.zig` as `runtime.MemoryInstance`.
+  `Runtime.memories: []MemoryInstance` field added (parallel to
+  the existing `memory: []u8`); populated to length-1 at every
+  instantiate path (defined + imported memory) carrying the
+  parsed `idx_type` + page bounds. `Runtime.memory` stays as
+  pointer alias of `memories[0].bytes` via new helper
+  `setMemory0Bytes(bytes)` — `if (memories.len >= 1) self.memories[0].bytes = bytes`
+  (vacuous when memories empty, keeps test-only setups
+  invariant-free). Mutation sites switched: `wasm_memory_grow`
+  (c_api), `memoryGrow` (wasm_1_0 interpreter handler),
+  `allocMem` (bulk_memory test helper). `Runtime.deinit` adds
+  `rawFreeOwned(MemoryInstance, memories)` (caught 13-leak
+  regression at first build). ~80 `rt.memory` readers stay
+  byte-identical — per-memidx code-side rewrite belongs to
+  10.M-3/10.M-4 codegen alongside MemArg memidx wire-up.
+  Multi-memory > 1 reject (instantiate.zig:572 + :582) stays
+  intact: lifting earlier would silently route per-op access to
+  memory[0] regardless of declared memidx — correctness
+  regression. New `Runtime.setMemory0Bytes` round-trip test
+  asserts the alias invariant (empty-vacuous + populated
+  cases). Mac `test-all` GREEN, lint clean, zone+fs gates
+  exit 0.
+
 - **10.M-1** — parser + validator widening (`063e80e8`).
   `MemoryEntry.idx_type: enum(u1) { i32, i64 } = .i32` field
   added; `min`/`max` widened `u32 → u64`; new `readMemLimits`

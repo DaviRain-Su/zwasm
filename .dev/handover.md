@@ -9,13 +9,14 @@
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24)。
 - **10.D = CLOSED 2026-05-25**: 全 7 ADR (0111-0117) Accepted、
   impl rows unlocked。
-- **10.M-1 = SHIPPED 2026-05-25** (commit `063e80e8`): parser+validator
-  memory64 widening。`MemoryEntry.idx_type` + u64 limits + Wasm 3.0
-  §5.4.4 4-bit flag (`0x04`/`0x05` accepted under `wasm_level >= .v3_0`、
-  `Error.Memory64Unsupported` otherwise)。`ImportPayload.memory` /
-  `ImportShape.memory` cascade、`engine/compile.zig` per-idx_type page
-  cap、spec_assert_runner ヘルパ widening (`@intCast` 仮 narrow @
-  resetGrowableMemory)。Mac `test-all` GREEN / lint clean。
+- **10.M-1 = SHIPPED 2026-05-25** (`063e80e8`): parser+validator
+  memory64 widening。
+- **10.M-2 = SHIPPED 2026-05-25** (`939b7bbe`): Runtime データ shape。
+  `MemoryInstance { bytes, idx_type, pages_min, pages_max }` +
+  `Runtime.memories: []MemoryInstance` 追加。`rt.memory` は
+  `memories[0].bytes` の pointer alias として残存 (`setMemory0Bytes`
+  helper で同期)。~80 reader 触らず。multi-memory > 1 reject は維持
+  (10.M-3 で MemArg memidx wire-up と同時にリフト)。Mac `test-all` GREEN。
 - **Mac `zig build test`**: green (substrate baseline)。
 
 ## Phase 10 progress
@@ -32,16 +33,14 @@ Per ADR-0111 (Accepted)。`phase10_design_plan_ja.md` §3.1 source-of-truth。
 **Sub-chunk progress**:
 
 - 10.M-1 [x] SHIPPED `063e80e8` (parser+validator widening)
-- **10.M-2 NEXT**: runtime refactor `memory: []u8 → memories: []MemoryInstance`
-  (~80 call site cascade per ADR-0111 Consequences)。`Runtime.memory`
-  + `Memory.grow` + `instantiate.zig` の単一 memory 仮定を外し、
-  `MemoryInstance { bytes: []u8, idx_type, pages_min, pages_max }`
-  に置き換える。`memories[0]` ショートカットを `memidx == 0` の
-  ZirOp emit が読む。`current_mem_bytes` (spec runner) も u64
-  widening。multi-memory > 1 reject (instantiate.zig:582) を
-  `wasm_level >= .v3_0` で external lift。
-- 10.M-3: `MemArg extra: packed struct(u32) { align_pow2: u5, memidx: u8, _: u19 }`
-  per Wasm 3.0 §5.4.6 (parser + lowerer wire-up)。
+- 10.M-2 [x] SHIPPED `939b7bbe` (Runtime.memories[] + setMemory0Bytes alias)
+- **10.M-3 NEXT**: `MemArg extra: packed struct(u32) { align_pow2: u5, memidx: u8, _: u19 }`
+  per Wasm 3.0 §5.4.6 (parser + lowerer wire-up)。memarg align uleb の
+  bit-6 を読んで memidx LEB が follow するか判定 (Wasm 3.0 §5.4.6)。
+  ZirInstr.extra (u32) の新フォーマット導入 + lowerer で per-memidx
+  routing (現状全 emit が memories[0] 固定)。memidx > 0 が emit-time
+  に到達したら一旦 trap (multi-memory > 1 reject はまだ instantiate
+  で hold)。
 - 10.M-4: codegen — arm64/x86_64 で i64 wrap-check + 64-bit offset
   materialise (X17 MOVZ+MOVK 4-lane / R10 MOV imm64)。**i32
   fast-path byte-identical** を `emit_test_memory.zig` で機械検証。
