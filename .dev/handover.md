@@ -7,58 +7,53 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24)。
-- **Last commit**: `05c47829` — J.7 `Linker.defineWasi` skeleton
-  (ADR-0109 §3.8)。`src/zwasm/linker.zig` extended; WASI fixtures
-  flip 0 PASS / 55 SKIP-WASI → **45 PASS / 10 SKIP-WASI**。D-176
-  discharged; D-177 opened (Go-toolchain WASI gap → Phase 11)。
+- **Last commit**: J.close — docs-only。ROADMAP §10 / 10.J `[x]`
+  flipped; ADR-0109 Revision row "Implementation complete; Status
+  remains Accepted pending cw v1 dogfooding"; D-075 status re-scoped
+  to "dogfooding gate only" (impl tracker duty discharged); plan §4.2
+  coverage audit result appended。10.J 6 cycles closed (J.2..J.7 SHAs:
+  `017193bc` `698c23ce` `995270cf` `b10922d2` `97434726` `05c47829`)。
 - **Phase 9 close invariants gate (mac-host)**: **18/18 PASS** 維持。
 - **Mac `zig build test`**: 1824/1838 passed (14 skipped); lint clean。
-  J.7 で新規 +1 test: T1.13 defineWasi smoke instantiation。
-- **ubuntu test**: HEAD `05c47829` を post-push でバックグラウンド
-  kick 予定 — 次 resume Step 0.7 で verify。
 
-## Active task — 10.J impl train (J.close NEXT)
+## Active task — 10.F NEXT (c_api scalar accessors)
 
-ADR-0109 Accepted 2026-05-25。`/continue` loop は J.close まで自走。
+10.J 完了。Phase 10 内の次の `[ ]` 行は **10.F** (c_api scalar
+accessors D-171/172/173)。`/continue` loop は 10.F..10.P まで自走。
 
-| Sub-chunk | Scope | Gate | Status |
-|---|---|---|---|
-| J.2 | Engine + Module skeleton | substrate | CLOSED `017193bc` |
-| J.3 | Instance + untyped invoke + full Trap | substrate | CLOSED `698c23ce` |
-| J.4 | TypedFunc + Memory + multi-result | substrate | CLOSED `995270cf` |
-| J.5 | Linker + Caller + host imports | substrate | CLOSED `b10922d2` |
-| J.6 | Tier-2 zig_facade_runner | substrate | CLOSED `97434726` |
-| J.7 | WASI defineWasi skeleton | substrate | **CLOSED `05c47829`** |
-| **J.close NEXT** | Coverage audit + D-075 close + ROADMAP 10.J [x] | substrate | 着手準備完了 |
+| Row | Scope | Status |
+|---|---|---|
+| 10.0 | Phase 9→10 transition | `[x]` |
+| 10.C9 | Phase 9 close 後始末 | `[x]` |
+| 10.J | Native Zig API (ADR-0109) | **CLOSED this commit** |
+| **10.F NEXT** | c_api scalar accessors (D-171/172/173) — `wasm_extern_as_{global,table,memory}` + `wasm_global_new/get/set` + `wasm_table_get/set/size/grow` + `wasm_memory_data/data_size/size/grow` を `src/api/instance.zig` に追加 (wasm-c-api spec 標準)。Sub-chunks in `phase_log/phase10.md` row 10.F | `[ ]` |
+| 10.Z | (TBD; ROADMAP §10 row Z) | `[ ]` |
+| 10.D / 10.T / 10.M / 10.R / 10.TC / 10.E / 10.G / 10.P | (TBD; ROADMAP §10 rows) | `[ ]` |
 
-**J.close exit criterion** (per plan §3 J.close):
-(a) Coverage matrix verification: every public symbol in `docs/zig_api_design.md`
-§3 has ≥ 1 Tier-1 test (T1.1〜T1.13 already cover 13 surfaces; J.close audits
-gaps);
-(b) D-075 closes (`Status: Closed (implemented)` 2026-05-25 + cite J.* SHAs);
-(c) ADR-0109 Status flips `Accepted → Closed (implemented)`;
-(d) ROADMAP §10 10.J row flips `[ ]` → `[x]` with cited SHA;
-(e) I3 invariant gate GREEN (already maintained throughout J.* train);
-(f) Coverage matrix exception reframe per S-4 ("100% except D6 defer" for
-`defineGlobal`/`defineTable`).
-詳細 plan §3 J.close。
+**10.F exit criterion** (per ROADMAP §10 row + D-171/172/173):
+spec-standard accessors を `src/api/instance.zig` に追加して
+3 つの c_api audit gap (A1 / B1 / B2) を埋める; `wasm_global_new` 等
+は `include/wasm.h:452-459 / 471-481 / 483-497` の signature exact。
+v128 path は c_api から永久 excluded (spec-prohibited; lesson
+`2026-05-24-c_api-v128-spec-boundary.md`). 詳細
+`.dev/c_api_instance_audit_2026-05-24.md` + 各 D 行。
 
 ## Known plan latent issues
 
-- **S-4** (this chunk): coverage matrix "deferred" rows
-  (`defineGlobal`/`defineTable`) — reframe exit criterion to
-  "100% except D6 defer". Will be done in J.close commit body.
+- ADR-0109 Status `Accepted` (not `Closed`) until cw v1 dogfooding
+  feedback per Removal condition。D-075 carries the gate;
+  retires when ADR-0109 flips。
 
 ## Phase 10 progress
 
-ROADMAP §10 = 13-row task table (10.0/10.C9 done; 10.J close imminent;
-10.F/10.Z/10.D/10.T/10.M/10.R/10.TC/10.E/10.G/10.P pending; Phase 10
-は 10.J close 後も大半未完)。
+ROADMAP §10 = 13-row task table。10.0/10.C9/10.J done; 10.F next;
+10.Z/10.D/10.T/10.M/10.R/10.TC/10.E/10.G/10.P pending。
 
 ## Key refs
 
-- **Plan**: [`phase10_zig_api_plan.md`](./phase10_zig_api_plan.md) §3 J.close
-- **ADR-0109**: [`decisions/0109_native_zig_api_inversion.md`](./decisions/0109_native_zig_api_inversion.md) (Accepted; flips Closed at J.close)
-- **Phase 10 全体設計**: [`phase10_design_plan_ja.md`](./phase10_design_plan_ja.md) §3.1-§3.6
-- **Zig API spec**: [`../docs/zig_api_design.md`](../docs/zig_api_design.md)
+- **ROADMAP §10**: [`ROADMAP.md`](./ROADMAP.md) lines 1338+
+- **ADR-0109**: [`decisions/0109_native_zig_api_inversion.md`](./decisions/0109_native_zig_api_inversion.md) (Accepted; impl-complete Revision row 2026-05-25; Closed pending cw v1 dogfooding)
+- **10.J plan + audit**: [`phase10_zig_api_plan.md`](./phase10_zig_api_plan.md) §4.2 audit result
+- **10.F audit context**: [`c_api_instance_audit_2026-05-24.md`](./c_api_instance_audit_2026-05-24.md)
+- **Phase 10 全体設計**: [`phase10_design_plan_ja.md`](./phase10_design_plan_ja.md)
 - **Sub-chunk log**: [`phase_log/phase10.md`](./phase_log/phase10.md)

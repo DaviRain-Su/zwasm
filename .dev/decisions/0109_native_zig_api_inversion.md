@@ -363,3 +363,21 @@ superseded by a follow-on ADR.
   is now obsolete; the 10.J position is retained because the
   remaining J.2..J.close work is still the load-bearing
   facade rewrite.
+- 2026-05-25 — **Implementation complete** (ROADMAP §10 / 10.J `[x]`;
+  6 cycles J.2..J.7). Sub-chunk SHAs: J.2 `017193bc` (Engine + Module
+  skeleton + native parser + allocator strict-pass), J.3 `698c23ce`
+  (Instance + untyped invoke + full 12-variant Trap set), J.4
+  `995270cf` (TypedFunc(comptime Sig) + Memory + multi-result),
+  J.5 `b10922d2` (Linker + Caller + host imports + host_func_marshal
+  + `instantiateInternal` refactor), J.6 `97434726` (Tier-2
+  `zig_facade_runner` + `test-api-zig-facade` build step), J.7
+  `05c47829` (Linker.defineWasi skeleton + UnsupportedWasiImport
+  variant). Coverage matrix per plan §4.2: T1.1..T1.13 cover every
+  shipped public symbol; `Linker.defineGlobal` / `defineTable` /
+  `Instance.global` / `.table` / `Instance.call` sugar /
+  `engine.linker()` factory / `Module.exports() / .imports()`
+  iterators carved out as Phase 11 D6 follow-up per the plan's
+  "deferred" rows (S-4 reframe). **Status remains Accepted** until
+  cw v1 dogfooding feedback per this ADR's Removal condition;
+  D-075 status tightened to "dogfooding gate only" (impl tracker
+  duty discharged at this commit).

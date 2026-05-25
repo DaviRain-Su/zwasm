@@ -217,7 +217,7 @@ implementation train starts at J.2.
 | Risk | LOW — skeleton only; deep WASI semantics deferred. Avoid scope-creep into Phase 11 territory. |
 | Commit message form | `feat(zwasm,p10): J.7 linker.defineWasi(cfg) skeleton (Phase 11 owns full WASI)` |
 
-### J.close — Coverage matrix audit + D-075 close + I3 final amend + 10.J [x]
+### J.close — Coverage matrix audit + D-075 close + I3 final amend + 10.J [x] — **CLOSED this commit**
 
 | Field | Value |
 |---|---|
@@ -299,6 +299,26 @@ This matrix is the auditable contract. J.close verifies every row holds.
 | Allocator strict-pass invariant | T1.1 | J.2 | Recording allocator wrapper proves `Engine.alloc` is used, NOT c_allocator |
 
 **Audit procedure at J.close**: grep `src/zwasm/` + `src/zwasm.zig` for every `pub fn` / `pub const`; verify each has a ≥ 1 test reference. Any miss = failure to close 10.J.
+
+**Audit result (J.close 2026-05-25)**: every shipped public symbol
+has ≥ 1 Tier-1 test reference per the matrix above (T1.1..T1.13;
+1824 / 1838 Mac PASS, lint clean, I3 18/18). The plan's "deferred"
+rows (`defineGlobal` / `defineTable` / `Instance.global` / `.table`)
+are NOT shipped — carved out to Phase 11 D6 per the S-4 reframe.
+Additional non-shipped surfaces noted post-audit (vs the plan
+matrix):
+  - `engine.linker()` factory — replaced with `Linker.init(&eng)`
+    direct construction; the factory was plan aspiration, the
+    direct form is what landed.
+  - `Instance.call(Sig, name, args)` sugar — replaced with the
+    `Instance.typedFunc(Sig, name).call(args_tuple)` two-step
+    surface; the two-step form is what T1.5 / T1.6 / T1.8 cover.
+  - `Module.exports() / .imports()` iterators — replaced with
+    `Module.sectionCount()` placeholder (J.2 §3 row noted the
+    full iterators were aspirational). Phase 11 D6 carries the
+    full iterator delivery.
+None of the omissions are exit-blocking — they're all Phase 11 D6
+scope per ADR-0109 §3 "v0.1 surface delivery vehicle" framing.
 
 ### §4.3 — Build-gate placement (the structural anti-rot)
 

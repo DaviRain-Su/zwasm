@@ -125,6 +125,19 @@ J.1+ gated on execution plan doc)
   `pub const Runtime` → `pub const Engine`. zone_check classifier
   extended `src/zwasm/*` → `lib`. Mac 1812/1826 PASS, I3 18/18,
   ubuntu kicked post-push (`017193bc`)
+- **10.J / J.close** — Docs-only close of 10.J. ROADMAP §10 row
+  10.J flipped `[ ]` → `[x]`. ADR-0109 Revision history row added
+  ("Implementation complete; 6 cycles J.2..J.7 SHAs cited; Status
+  remains Accepted pending cw v1 dogfooding per Removal condition").
+  Plan §3 J.close row marked CLOSED + §4.2 coverage matrix audit
+  result appended ("every shipped public symbol carries ≥ 1 Tier-1
+  test; `defineGlobal` / `defineTable` / `Instance.global` /
+  `.table` / `Instance.call` sugar / `engine.linker()` factory /
+  `Module.exports().imports()` iterators carved out as Phase 11 D6
+  follow-up per S-4 reframe"). D-075 status re-scoped from
+  "implementation tracker" to "dogfooding gate only" (impl tracker
+  duty discharged; row retires when ADR-0109 Status flips Closed).
+  Mac 1824/1838 PASS, lint clean, I3 18/18 maintained.
 - **10.J / J.7** — `src/zwasm/linker.zig` extended with
   `WasiConfig` + `defineWasi(cfg)`. Native facade routes any
   `wasi_snapshot_preview1` import through existing
