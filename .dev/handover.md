@@ -19,10 +19,14 @@
   scope 不完全。
 - **10.TC-1 = SHIPPED** (`a83e095f`): return_call + return_call_indirect
   interp impl + tailReturn helper。
-- **10.TC-1b = SHIPPED 2026-05-25** (`b7562e5c`): validator unit
-  test coverage (6 tests) — return_call/return_call_indirect positive
-  + 5 negative paths (fn-return mismatch / funcidx OOB / non-funcref
-  table) via public `validateFunction` API。
+- **10.TC-1b = SHIPPED** (`b7562e5c`): validator unit test
+  coverage (6 tests)。
+- **10.G-i31-helpers = SHIPPED 2026-05-25** (`e79bb7a1`):
+  `src/feature/gc/i31.zig` — ADR-0116 D4 i31 pack/unpack helpers
+  (isI31 / i31ToI32Signed / i31ToI32Unsigned / i32ToI31 (range-checked) /
+  i32ToI31Truncate) + 7 unit tests。Foundation for 10.G i31 ops;
+  0xFB GC-prefix dispatcher + Value `anyref` arm + 3 op handlers
+  land in subsequent 10.G sub-chunks。
 - **Mac `zig build test`**: green。
 
 ## Phase 10 progress
@@ -57,14 +61,18 @@ row。
   `op_tail_call.zig` codegen 着手。複数 sub-chunk にわたる codegen
   heavy。
 
-**Other Phase 10 candidates** (parallelisable; pick based on
-scope budget per cycle):
+**Phase 10 candidates** (parallelisable):
+- **10.G-i31-ops NEXT**: Add Value `anyref: u32` arm + 0xFB GC
+  prefix dispatcher (lower + validator) + the 3 i31 op interp
+  handlers (ref.i31 / i31.get_s / i31.get_u) using the helpers
+  shipped at 10.G-i31-helpers (`e79bb7a1`)。Value union arm
+  addition is foundational (ADR-0116 D4 design; not §18
+  deviation since pre-Accepted ADR)。codegen側は 10.G-N で別途。
 - 10.M-5b: SIMD memarg memory64 (validator + lower + codegen)
-- 10.E-1: EH interp foundation — try_table parse + tag section
-  parse + validator skeleton (interp path; codegen deferred to 10.E-N)
-- 10.G-1: i31 ops (smallest of GC ops; ref.i31 / i31.get_s /
-  i31.get_u; no heap needed since i31 is value-coded)
+- 10.E-1: EH foundation — tag section parse + try_table parse +
+  validator skeleton (interp path; codegen deferred)
 - 10.G-2: Module.needs_gc_heap parse-time detector
+- 10.TC-3: regalloc terminator-class + codegen tail-call
 
 **Other Phase 10 candidates** (after 10.TC-2):
 - 10.M-5b: SIMD memarg memory64
