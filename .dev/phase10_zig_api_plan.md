@@ -115,30 +115,40 @@ Each chunk row below specifies: **scope** + **files touched** + **exit
 criterion** + **Tier-1 tests landed in this commit** + **gate class** +
 **dependencies / risks**.
 
-### J.1 — Internal rename `runtime.Runtime` → `runtime.JitRuntime`
+### J.1 — WITHDRAWN 2026-05-25 (internal rename retracted)
 
-| Field | Value |
-|---|---|
-| Scope | Pure mechanical rename. `pub const Runtime = struct` in `src/runtime/runtime.zig` → `pub const JitRuntime`; every `runtime.Runtime` import alias updated to `runtime.JitRuntime`. JIT-emitted code's `[X19 + @offsetOf(JitRuntime, field)]` references update by recompilation (offsets unchanged). |
-| Files touched | `src/runtime/runtime.zig` (struct rename + docstring); ~25 import sites: `src/interp/mvp.zig`, `src/interp/dispatch.zig`, `src/interp/trap_audit.zig`, all 8 `src/instruction/wasm_*` files, `src/api/instance.zig`, `src/api/cross_module.zig`, `src/api/wasi.zig`, `src/cli/run.zig`, plus indirect imports |
-| Exit criterion | (a) `grep -nE '\bruntime\.Runtime\b' src/ test/` returns 0 hits; (b) `zig build test-all` GREEN on Mac (pre-test SHA + post-test SHA identical behavior); (c) `zig build lint` GREEN |
-| Tier-1 tests landed | NONE NEW — this is a rename; existing tests prove no behavior change |
-| Gate class | `unclear` per `classify_chunk_scope.sh` → Mac `zig build test-all` foreground; ubuntu kicked post-push per ADR-0076 D2/D3 |
-| Dependencies | None. **BLOCKS** J.2-J.close (subsequent native facade types want to use the renamed name + no rename churn during impl) |
-| Risk | LOW — survey §3 classifies as "mechanical rename"; 90% search-replace, 10% offset-comment + docstring verification |
-| Commit message form | `refactor(runtime,p10): rename Runtime → JitRuntime per ADR-0109 §1 (J.1)` |
+**Status**: WITHDRAWN. Originally specified `runtime.Runtime` →
+`runtime.JitRuntime` rename per ADR-0109 §1. Investigation at J.1
+着手 discovered that `JitRuntime` is already a load-bearing
+`extern struct` at `src/engine/codegen/shared/jit_abi.zig:137`
+(399 usages / 26 files; introduced from day 1 per ADR-0017 sub-2a
+with the `Jit` prefix precisely to avoid collision with the
+pre-existing `runtime.Runtime`). The §1 rename rationale ("preserve
+the ABI surface that JIT-emitted code reads via `[X19 + offset]`")
+was based on a factual error — JIT body reads `jit_abi.JitRuntime`
+(per offset constants at `jit_abi.zig:396-428` + `arm64/emit.zig:233-244`
+LDR sites), NOT `runtime.Runtime`. ADR-0109 §1 + Alternative D +
+Consequences amended 2026-05-25 (Revision history row 3) to drop
+the rename clause; `runtime.Runtime` stays as-is. Zig 0.16's
+module-as-struct semantics + `usingnamespace` removal guarantee
+qualified access so `runtime.Runtime` + `jit_abi.JitRuntime`
+coexist without ambiguity.
+
+Subsequent chunks J.2..J.close retain their numbering for stable
+cross-reference (handover / git commit grep / survey notes). The
+implementation train starts at J.2.
 
 ### J.2 — `Engine` + `Module` skeleton; native parser path; allocator strict-pass
 
 | Field | Value |
 |---|---|
 | Scope | New `src/zwasm/engine.zig` + `src/zwasm/module.zig` (per survey §8 Option B subsystem split — recommended). `Engine.init(alloc, opts) → Engine`; `Engine.deinit`; `engine.compile(bytes) → Module` (1-step, direct call into `src/parse/parser.zig:66 parse(alloc, input)` — bypasses wasm-c-api). `Module.deinit`; `Module.exports() / .imports()` metadata iterators. Allocator strict-pass: every internal allocation uses `Engine.alloc` (no `c_allocator` fallback). **Old `src/zwasm.zig::Runtime` / `::Module` DELETED in same commit** (no transition limbo). I3 invariant test rewritten to use new Engine surface. |
-| Files touched | NEW: `src/zwasm/engine.zig` (~80 LOC), `src/zwasm/module.zig` (~60 LOC). EDIT: `src/zwasm.zig` (re-exports + delete old Runtime/Module structs; ~120 LOC after); `scripts/check_phase9_close_invariants.sh` I3 (grep updated from `pub const Runtime` to `pub const Engine`). |
+| Files touched | NEW: `src/zwasm/engine.zig` (~80 LOC), `src/zwasm/module.zig` (~60 LOC). EDIT: `src/zwasm.zig` (re-exports + delete old facade `pub const Runtime` (c_api veneer) / `pub const Module`; ~120 LOC after); `scripts/check_phase9_close_invariants.sh` I3 (grep updated from `pub const Runtime` to `pub const Engine`). Note: internal `runtime.Runtime` at `src/runtime/runtime.zig:96` is unaffected (J.1 withdrawn 2026-05-25; see retraction note above). |
 | Exit criterion | (a) `Engine.init(custom_recording_allocator, .{})` → custom allocator's `alloc()` is invoked (allocator strict-pass verified); (b) `engine.compile(facade_extend8_s_wasm) → Module` succeeds; (c) Tier-1 test "zwasm facade Wasm 2.0 round-trip via Engine / Module / Instance" GREEN; (d) I3 invariant gate GREEN with new grep |
 | Tier-1 tests landed | **T1.1** Engine + Module lifecycle (allocator strict-pass verified via recording wrapper); **T1.2** Module.compile rejects invalid bytes (proves parse error path) |
 | Gate class | `substrate` → Mac `zig build test`; ubuntu kicked post-push |
-| Dependencies | J.1 (uses `JitRuntime` name); ADR-0109 §1 + §3 + §8 |
-| Risk | MEDIUM — direct parser call bypassing c_api needs verification (parser already exists; survey §4.1 confirms `parse(alloc, input)` entry exists at `src/parse/parser.zig:66`). Engine ownership of JitRuntime instances must avoid double-free with c_api's parallel ownership. |
+| Dependencies | None (J.1 withdrawn); ADR-0109 §1 + §3 + §8. The new chunk starts the J.* train. |
+| Risk | MEDIUM — direct parser call bypassing c_api needs verification (parser already exists; survey §4.1 confirms `parse(alloc, input)` entry exists at `src/parse/parser.zig:66`). Engine ownership of per-instance `runtime.Runtime` instances must avoid double-free with c_api's parallel ownership. |
 | Commit message form | `feat(zwasm,p10): J.2 Engine + Module + allocator strict-pass per ADR-0109` |
 
 ### J.3 — `Instance` + untyped `invoke` + full `Trap` error set re-export
@@ -316,8 +326,8 @@ cycle" (= on-branch architectural spike per `architectural_spike.md`).
 
 | Chunk | Tier-1 tests landed in commit | Notes |
 |---|---|---|
-| J.1 | NONE NEW (rename only; existing tests prove no behavior change) | OK per `architectural_spike.md` §"When this rule does NOT fire" |
-| J.2 | T1.1, T1.2 | Engine + Module lifecycle |
+| ~~J.1~~ | (WITHDRAWN 2026-05-25) | rename retracted; see §3 J.1 row |
+| J.2 | T1.1, T1.2 | Engine + Module lifecycle (new starting chunk) |
 | J.3 | T1.3, T1.4 | Untyped invoke + Trap variant |
 | J.4 | T1.5, T1.6, T1.7, T1.8 | TypedFunc + Memory + NaN-box |
 | J.5 | T1.9, T1.10, T1.11, T1.12 | Linker + Caller + Memory share |
@@ -376,7 +386,7 @@ user can override at review time.
 |---|---|---|---|---|
 | R1 | TypedFunc comptime hits Zig 0.16 compiler wall (recursion depth, anytype handling) | spike-needed | J.4 opens with a private/spikes/typed_func/ 0.5-cycle spike before main impl; outcome → Status: merged-into-prod OR rejected ADR amendment | J.4 |
 | R2 | Allocator strict-pass thread-through misses a hidden allocation site | spike-needed | J.2 audits one creation flow end-to-end before the first commit; recording-allocator T1.1 proves no fallback at runtime | J.2 |
-| R3 | JIT-emitted code's `@offsetOf(JitRuntime, ...)` assumptions break under rename | defer-to-impl | J.1 exit criterion (c) requires `zig build test-all` GREEN pre/post — any JIT codegen breakage surfaces immediately | J.1 |
+| R3 | ~~JIT-emitted code's `@offsetOf(JitRuntime, ...)` assumptions break under rename~~ | WITHDRAWN | J.1 rename retracted 2026-05-25; risk dissolved. `@offsetOf(jit_abi.JitRuntime, ...)` constants at `src/engine/codegen/shared/jit_abi.zig:396-428` reference the pre-existing `jit_abi.JitRuntime` extern struct (= the actual JIT ABI surface), not `runtime.Runtime`. | (n/a) |
 | R4 | Memory.slice() invalidation across `memory.grow()` is not enforced (caller responsibility per spec §3.4) | defer-to-impl | Document in Memory docstring; J.4 T1.7 adds a comment explicitly stating the contract; future debt if a consumer trips on it | J.4 |
 | R5 | v128 marshalling — spec §4 says first-class but no host-fn fixture exercises it in Phase 10 | decision-needed | J.4 lands v128 via the Value union; T1.* deferred to Phase 11 (no public consumer yet); D-178 follow-up debt opened at J.close | J.4 |
 | R6 | Host-function error handling — what if Zig host fn returns an error? | defer-to-impl | ADR-0109 §3.2 says host funcs return void or trap; J.5 enforces this at signature-validation time (`@typeInfo(fn).return_type == void or error{...}`) | J.5 |
@@ -391,7 +401,7 @@ user can override at review time.
 
 | Chunk | Lower | Upper | Notes |
 |---|---|---|---|
-| J.1 | 1 | 1 | Rename mechanical |
+| ~~J.1~~ | ~~1~~ | ~~1~~ | WITHDRAWN 2026-05-25 (rename retracted) |
 | J.2 | 1 | 2 | If allocator audit surfaces hidden sites |
 | J.3 | 1 | 1 | Wrapper over existing types |
 | J.4 | 1 | 3 | If spike needed (R1) — adds 1-2 cycles |
@@ -399,12 +409,13 @@ user can override at review time.
 | J.6 | 1 | 1 | Runner exe |
 | J.7 | 1 | 1 | Skeleton |
 | J.close | 1 | 1 | Audit + flip |
-| **Total** | **8** | **12** | ADR-0109 estimated 6-8; survey-informed range is 8-12 |
+| **Total** | **7** | **11** | ADR-0109 estimated 6-8; survey-informed range 7-11 post-J.1 withdrawal |
 
 The survey-informed upper bound is higher than ADR-0109's 6-8 estimate
 because (a) J.4 spike contingency was not enumerated in the ADR, and
 (b) the explicit Tier-2 runner (J.6) was not in the ADR's chunk count.
-Both are visible scope; neither is scope-creep.
+Both are visible scope; neither is scope-creep. J.1 withdrawal removes
+1 cycle from both bounds (the rename was 1-1 mechanical).
 
 ---
 
@@ -432,3 +443,24 @@ Both are visible scope; neither is scope-creep.
   (code + test) into the execution + test plan. Decision points D1-D7
   frozen per recommendations. Risk inventory R1-R10 carried with
   classification. Pending user review at J.1 open.
+- 2026-05-25 — **J.1 chunk WITHDRAWN** (rename `runtime.Runtime` →
+  `runtime.JitRuntime` retracted; see §3 J.1 retraction note + ADR-0109
+  Revision history row 3). Subsequent chunks J.2..J.close retain
+  numbering for stable cross-reference. Affected sections:
+  - §3 J.1 row replaced with retraction note
+  - §3 J.2 row: dependency cleared (was "J.1 (uses JitRuntime name)"
+    → "None"); `Files touched` clarified to note internal `runtime.Runtime`
+    is unaffected
+  - §4.4 chunk obligations table: J.1 row marked withdrawn
+  - §6 R3 marked WITHDRAWN (the JIT offset risk dissolves with rename
+    retraction; `@offsetOf(jit_abi.JitRuntime, ...)` is independent of
+    `runtime.Runtime`)
+  - §7 cycle estimate Total: 8-12 → 7-11 (-1 cycle for J.1 removal)
+  Rationale: pre-impl investigation discovered `JitRuntime` is already
+  a load-bearing `extern struct` at `src/engine/codegen/shared/jit_abi.zig:137`
+  (399 usages / 26 files; born as `JitRuntime` per ADR-0017 sub-2a to
+  avoid collision with the pre-existing `runtime.Runtime`). The §3 J.1
+  rename rationale was a factual error about which struct JIT body
+  reads. Zig 0.16 namespace separation handles `runtime.Runtime` vs
+  `jit_abi.JitRuntime` without ambiguity. Keeping `runtime.Runtime`
+  preserves ADR-0017 design intent.

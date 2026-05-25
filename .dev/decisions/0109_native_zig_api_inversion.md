@@ -87,10 +87,19 @@ needs), **TypedFunc as the primary call surface**
 Rewrite `src/zwasm.zig` as a **native Zig facade independent
 of the c_api binding**, adopting:
 
-1. **`Engine`** as top-level type (rename of internal `Runtime`
-   for the public facade; physical struct in `runtime/runtime.zig`
-   is renamed `JitRuntime` to preserve the ABI surface that
-   JIT-emitted code reads via `[X19 + offset]`).
+1. **`Engine`** as top-level type for the new public Zig facade
+   — `pub const Engine = struct { ... }` in `src/zwasm/engine.zig`
+   replaces the current `src/zwasm.zig::Runtime` c_api veneer.
+   The internal interpreter-state struct `src/runtime/runtime.zig::Runtime`
+   is **unchanged** — it lives in its own namespace and is
+   unrelated to the JIT ABI struct `JitRuntime` at
+   `src/engine/codegen/shared/jit_abi.zig:137` (introduced as
+   `JitRuntime` from day 1 per ADR-0017 sub-2a, prefixed with
+   `Jit` precisely to avoid collision with the pre-existing
+   `runtime.Runtime`). Zig 0.16's module-as-struct semantics
+   + `usingnamespace` removal guarantee qualified access at every
+   call site, so `runtime.Runtime` + `jit_abi.JitRuntime`
+   coexist without ambiguity.
 2. **`engine.compile(bytes)` → `Module`** (1-step, not
    `Runtime` + `Module.parse` + `Module.instantiate` 3-step).
 3. **`engine.linker()` → `Linker`** as a reusable builder
@@ -184,18 +193,19 @@ canonical artifact for ClojureWasm v1 dogfooding).
   ADR proposes. (a) blocks CW; (b) wastes work that has
   to be redone when zwasm proper lands the facade.
 
-### Alternative D — `Runtime` instead of `Engine`
+### Alternative D — `Runtime` instead of `Engine` for the public facade
 
-- **Sketch**: Keep the internal/external name as `Runtime`
-  for the top-level facade type (current ADR-0025 name).
+- **Sketch**: Keep the public facade name as `Runtime`
+  (current ADR-0025 name) instead of introducing `Engine`.
 - **Why rejected**: 5/5 major Wasm runtimes use `Engine`
   as the top-level name. `Runtime` is used by wasm3 and
   WAMR to mean "per-execution state" — a different
-  concept. Adopting `Engine` reduces cognitive load for
-  consumers familiar with wasmtime / wasmer / wasmi /
-  wasm-c-api. Internal physical struct stays
-  `JitRuntime` (renamed from `Runtime`) so the JIT ABI
-  surface keeps its load-bearing name.
+  concept. Adopting `Engine` for the public facade reduces
+  cognitive load for consumers familiar with wasmtime /
+  wasmer / wasmi / wasm-c-api. The internal struct
+  `runtime.Runtime` (interp per-instance state) keeps its
+  name unchanged — it is namespace-isolated from the
+  public `Engine` facade.
 
 ## Consequences
 
@@ -220,10 +230,10 @@ canonical artifact for ClojureWasm v1 dogfooding).
 **Negative**:
 
 - ~6-8 cycles of implementation work. Affects
-  `src/zwasm.zig` (~500 line rewrite), `src/api/host_func_marshal.zig`
-  (new), `src/api/linker.zig` (new), `src/api/memory_view.zig`
-  (new). Internal rename `Runtime` → `JitRuntime`
-  touches many import sites (mechanical).
+  `src/zwasm.zig` (rewrite) + new modules under `src/zwasm/`
+  (`engine.zig`, `module.zig`, `instance.zig`, `typed_func.zig`,
+  `memory.zig`, `linker.zig`, `caller.zig`, `host_func_marshal.zig`,
+  `wasi_config.zig`) per `phase10_zig_api_plan.md` §3.
 - Breaking change for anything depending on the current
   c_api-veneer facade. Mitigation: today's facade is
   unused outside the Phase 9 invariant test (I3); cw v1
@@ -234,8 +244,8 @@ canonical artifact for ClojureWasm v1 dogfooding).
   (audience separation: native Zig vs cross-language)
   but adds maintenance load. Mitigation: c_api stays as
   a thin wrapper around the same internal types; native
-  facade and c_api share the underlying `JitRuntime` +
-  `Instance` impl.
+  facade and c_api share the underlying `runtime.Runtime`
+  + `Instance` impl.
 
 **Neutral / follow-ups**:
 
@@ -249,9 +259,6 @@ canonical artifact for ClojureWasm v1 dogfooding).
 - Phase 11 (WASI 0.1 full + bench infra) ROADMAP row
   should reference `linker.defineWasi(cfg)` as the WASI
   surface delivery vehicle.
-- The internal rename `Runtime` → `JitRuntime` is a
-  separate mechanical chunk; can land first or
-  alongside.
 
 ## Removal condition
 
@@ -279,8 +286,8 @@ superseded by a follow-on ADR.
   (relevant for `Engine.init` allocator plumbing +
   `Instance.detachForZombie` API).
 - ADR-0107 — Byte-buffer globals for v128 cross-module
-  (orthogonal but related: facade `Value` exposes v128
-  via the separate `V128` type, not the union).
+  (Withdrawn 2026-05-24; root-cause-fixed by ADR-0110
+  uniform 16-byte Value).
 - D-075 (`.dev/debt.md`) — Zig facade implementation
   tracker (will be re-scoped to track this ADR's cycles
   on Accept).
@@ -331,3 +338,28 @@ superseded by a follow-on ADR.
   happen. The plan doc gates the first J.* impl chunk;
   no `src/zwasm.zig` rewrite lands before the plan is
   user-reviewed.
+- 2026-05-25 — **Internal `runtime.Runtime` → `JitRuntime`
+  rename clause WITHDRAWN** from Decision §1 + Alternative D
+  + Consequences. Rationale: pre-impl investigation at J.1
+  着手 surfaced that `JitRuntime` is already a load-bearing
+  `extern struct` at `src/engine/codegen/shared/jit_abi.zig:137`
+  (399 usages / 26 files; introduced from day 1 per ADR-0017
+  sub-2a with the `Jit` prefix precisely to avoid collision
+  with the pre-existing `runtime.Runtime`). The original §1
+  rename rationale ("preserve the ABI surface that JIT-emitted
+  code reads via `[X19 + offset]`") was based on a factual
+  error — JIT body reads `jit_abi.JitRuntime` (per offset
+  constants at `jit_abi.zig:396-428` + `arm64/emit.zig:233-244`
+  LDR sites), NOT `runtime.Runtime`. Keeping `runtime.Runtime`
+  as-is preserves the ADR-0017 design intent. Zig 0.16's
+  module-as-struct semantics + `usingnamespace` removal
+  guarantee qualified access at every call site, so
+  `runtime.Runtime` + `jit_abi.JitRuntime` coexist without
+  ambiguity. Side-effect: `phase10_zig_api_plan.md` §3 J.1
+  chunk withdrawn (subsequent chunks J.2..J.close keep their
+  numbers); plan §7 cycle estimate reduced by 1. Note: the
+  earlier "10.J added before 10.F so the rename chain lands
+  early" rationale (Revision row 2 above, last sub-bullet)
+  is now obsolete; the 10.J position is retained because the
+  remaining J.2..J.close work is still the load-bearing
+  facade rewrite.

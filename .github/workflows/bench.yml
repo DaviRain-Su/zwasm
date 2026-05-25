@@ -1,23 +1,27 @@
-# Bench CI — runs `scripts/run_bench.sh --quick --phase-record` on every
-# push to zwasm-from-scratch across Mac aarch64 + Linux x86_64 runners,
-# then aggregates the per-arch fragment YAMLs into a single bot commit
-# that appends to bench/results/history.yaml.
+# Bench CI — runs `scripts/run_bench.sh --quick --phase-record` across
+# Mac aarch64 + Linux x86_64 runners, then aggregates the per-arch
+# fragment YAMLs into a single bot commit that appends to
+# bench/results/history.yaml.
 #
-# Trigger: push to zwasm-from-scratch only (no PR runs; this is the
-# autonomous-loop's working branch).
+# Trigger: **manual only** (`workflow_dispatch`). Auto-trigger on push
+# to zwasm-from-scratch was DISABLED 2026-05-25 per user direction —
+# local development is the primary path and CI was not actually
+# consumed; auto-runs were producing noise + failures. To re-run
+# the bench, use `gh workflow run bench.yml --ref zwasm-from-scratch`
+# or trigger via the GitHub Actions UI. To restore auto-trigger,
+# re-add the `push:` block (preserved in git history at commit
+# 4d626f3e^).
+#
 # Jobs: bench-mac + bench-linux run in parallel, each writes a fragment
 # under bench/results/ci/<arch>-<run>.yaml and uploads it as an artifact.
 # bench-aggregate downloads both fragments, appends them in arch-name-
 # sorted order to bench/results/history.yaml, and pushes one bot commit
 # tagged `[skip ci]` (to break recursion) with path-restricted scope.
-# Replaces the prior "Phase 11 deferred" marker in bench/README.md.
 
 name: bench
 
 on:
-  push:
-    branches:
-      - zwasm-from-scratch
+  workflow_dispatch:
 
 permissions:
   contents: write
