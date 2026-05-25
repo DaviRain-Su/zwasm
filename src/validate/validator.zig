@@ -673,6 +673,7 @@ pub const Validator = struct {
             0xD4 => try self.opBrOnNull(),
             0xD6 => try self.opBrOnNonNull(),
             0x14 => try self.opCallRef(),
+            0x15 => try self.opReturnCallRef(),
 
             // Wasm 2.0 prefix opcodes (§9.2 / 2.3 chunk 2 onward)
             0xFC => try self.dispatchPrefixFC(),
@@ -1108,6 +1109,52 @@ pub const Validator = struct {
             try self.popExpect(callee.params[i]);
         }
         for (callee.results) |r| try self.pushType(r);
+    }
+
+    /// Wasm spec 3.0 §3.3.10.5 (function-references + tail-call):
+    /// `return_call_ref typeidx` — tail-call variant of call_ref.
+    /// Pop a funcref + the typeidx-determined params; verify that
+    /// the callee's results match the **enclosing function's**
+    /// return type (else the tail call would lose values); mark
+    /// the stack polymorphic-from-here (= unreachable) per spec.
+    /// Runtime trap semantics inherit call_ref's null + sig-mismatch
+    /// behaviour.
+    ///
+    /// Same v2.0 catalogue limitation as call_ref: the validator
+    /// can't enforce typed `(ref $sig)` precision; the runtime sig
+    /// check supplies that strictness.
+    fn opReturnCallRef(self: *Validator) Error!void {
+        const type_idx = try leb128.readUleb128(u32, self.body, &self.pos);
+        if (type_idx >= self.module_types.len) return Error.InvalidFuncIndex;
+        const callee = self.module_types[type_idx];
+        // Pop topmost funcref (polymorphic over funcref/externref/.bot).
+        const top = try self.popAny();
+        switch (top) {
+            .bot => {},
+            .known => |t| if (t != .funcref and t != .externref) return Error.StackTypeMismatch,
+        }
+        // Pop callee params in reverse (the tail-call args).
+        var i: usize = callee.params.len;
+        while (i > 0) {
+            i -= 1;
+            try self.popExpect(callee.params[i]);
+        }
+        // Callee's results must match the enclosing function's return
+        // type element-wise — the tail call's results ARE the
+        // function's results.
+        const fn_frame = &self.control_buf[0];
+        switch (fn_frame.end_type) {
+            .empty => if (callee.results.len != 0) return Error.StackTypeMismatch,
+            .single => |t| {
+                if (callee.results.len != 1 or callee.results[0] != t) return Error.StackTypeMismatch;
+            },
+            .multi => |ts| {
+                if (callee.results.len != ts.len) return Error.StackTypeMismatch;
+                for (callee.results, ts) |a, b| if (a != b) return Error.StackTypeMismatch;
+            },
+        }
+        // Polymorphic-stack from here (terminator).
+        self.markUnreachable();
     }
 
     /// Wasm spec §3.4.7.3 / §3.4.10 (ref.func x): read funcidx,

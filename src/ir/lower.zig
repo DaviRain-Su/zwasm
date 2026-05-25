@@ -479,6 +479,7 @@ pub const Lowerer = struct {
             0xD4 => try self.emitUlebPayload(.br_on_null),
             0xD6 => try self.emitUlebPayload(.br_on_non_null),
             0x14 => try self.emitUlebPayload(.call_ref),
+            0x15 => try self.emitUlebPayload(.return_call_ref),
 
             // Wasm 2.0+ prefix opcodes (sat-trunc / bulk-memory / ...)
             0xFC => try self.emitPrefixFC(),

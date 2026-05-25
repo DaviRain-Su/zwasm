@@ -293,3 +293,95 @@ test "call_ref: sig mismatch → Trap.IndirectCallTypeMismatch" {
     try rt.pushOperand(runtime.Value.fromFuncRef(&entities[0]));
     try testing.expectError(Trap.IndirectCallTypeMismatch, dispatch_loop.run(&rt, &t, caller.instrs.items));
 }
+
+// ============================================================
+// Wasm 3.0 function-references + tail-call: return_call_ref (10.R-5)
+// ============================================================
+
+test "return_call_ref: null funcref → Trap.NullReference" {
+    var caller = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &.{} }, &.{});
+    defer caller.deinit(testing.allocator);
+    try caller.instrs.append(testing.allocator, .{ .op = .return_call_ref, .payload = 0, .extra = 0 });
+    try caller.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+
+    var t = DispatchTable.init();
+    mvp.register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    rt.table = &t;
+    const types = [_]zir.FuncType{.{ .params = &.{}, .results = &.{} }};
+    rt.module_types = &types;
+
+    try rt.pushFrame(.{ .sig = caller.sig, .locals = &.{}, .operand_base = 0, .pc = 0, .func = &caller });
+    defer _ = rt.popFrame();
+    try rt.pushOperand(.{ .ref = runtime.Value.null_ref });
+    try testing.expectError(Trap.NullReference, dispatch_loop.run(&rt, &t, caller.instrs.items));
+}
+
+test "return_call_ref: matching sig — callee result becomes caller result; caller frame done" {
+    const i32_arr = [_]zir.ValType{.i32};
+    var callee = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &i32_arr }, &.{});
+    defer callee.deinit(testing.allocator);
+    try callee.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 11, .extra = 0 });
+    try callee.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+
+    // caller: () -> i32. The funcref is pushed manually; then
+    // return_call_ref typeidx=0 promotes callee's 11 to caller's result.
+    var caller = zir.ZirFunc.init(1, .{ .params = &.{}, .results = &i32_arr }, &.{});
+    defer caller.deinit(testing.allocator);
+    try caller.instrs.append(testing.allocator, .{ .op = .return_call_ref, .payload = 0, .extra = 0 });
+    try caller.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+
+    var t = DispatchTable.init();
+    mvp.register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    rt.table = &t;
+    const funcs = [_]*const zir.ZirFunc{&callee};
+    rt.funcs = &funcs;
+    var entities = [_]runtime.FuncEntity{.{ .runtime = &rt, .func_idx = 0, .typeidx = 0, .funcptr = 0 }};
+    rt.func_entities = &entities;
+    const types = [_]zir.FuncType{.{ .params = &.{}, .results = &i32_arr }};
+    rt.module_types = &types;
+
+    try rt.pushFrame(.{ .sig = caller.sig, .locals = &.{}, .operand_base = 0, .pc = 0, .func = &caller });
+    defer _ = rt.popFrame();
+    try rt.pushOperand(runtime.Value.fromFuncRef(&entities[0]));
+    try dispatch_loop.run(&rt, &t, caller.instrs.items);
+    // After the tail-call: callee's 11 promoted to caller's result;
+    // caller frame marked done; stack reset to caller's operand_base + arity=1.
+    try testing.expectEqual(@as(u32, 1), rt.operand_len);
+    try testing.expectEqual(@as(u32, 11), rt.popOperand().u32);
+    try testing.expect(rt.currentFrame().done);
+}
+
+test "return_call_ref: sig mismatch → Trap.IndirectCallTypeMismatch" {
+    const i32_arr = [_]zir.ValType{.i32};
+    // callee: () -> i32; expected (typeidx=0): () -> () → mismatch.
+    var callee = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &i32_arr }, &.{});
+    defer callee.deinit(testing.allocator);
+    try callee.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0, .extra = 0 });
+    try callee.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+
+    var caller = zir.ZirFunc.init(1, .{ .params = &.{}, .results = &.{} }, &.{});
+    defer caller.deinit(testing.allocator);
+    try caller.instrs.append(testing.allocator, .{ .op = .return_call_ref, .payload = 0, .extra = 0 });
+    try caller.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+
+    var t = DispatchTable.init();
+    mvp.register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    rt.table = &t;
+    const funcs = [_]*const zir.ZirFunc{&callee};
+    rt.funcs = &funcs;
+    var entities = [_]runtime.FuncEntity{.{ .runtime = &rt, .func_idx = 0, .typeidx = 0, .funcptr = 0 }};
+    rt.func_entities = &entities;
+    const types = [_]zir.FuncType{.{ .params = &.{}, .results = &.{} }};
+    rt.module_types = &types;
+
+    try rt.pushFrame(.{ .sig = caller.sig, .locals = &.{}, .operand_base = 0, .pc = 0, .func = &caller });
+    defer _ = rt.popFrame();
+    try rt.pushOperand(runtime.Value.fromFuncRef(&entities[0]));
+    try testing.expectError(Trap.IndirectCallTypeMismatch, dispatch_loop.run(&rt, &t, caller.instrs.items));
+}

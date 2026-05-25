@@ -88,6 +88,7 @@ pub fn register(table: *DispatchTable) void {
     // when `wasm_3_0` is disabled — so unconditional registration here
     // is harmless on Wasm-2.0-only builds.
     table.interp[op(.call_ref)] = callRefOp;
+    table.interp[op(.return_call_ref)] = returnCallRefOp;
 
     // Parametric
     table.interp[op(.drop)] = drop;
@@ -387,6 +388,51 @@ fn callRefOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
 
     const dispatch_tbl = rt.table orelse return Trap.Unreachable;
     try invoke(rt, dispatch_tbl, callee);
+}
+
+/// Wasm spec 3.0 §3.3.10.5 (`return_call_ref typeidx`): tail-call
+/// variant of call_ref. Pops funcref + the typeidx-determined args,
+/// runs the same null + sig-mismatch checks, invokes the callee,
+/// then promotes the callee's results to the enclosing function's
+/// results (= `returnOp` post-pass) and marks the caller frame
+/// done. Not a true tail call (interp still stacks frames during
+/// `invoke()`); a stack-non-growing variant arrives with 10.TC
+/// (ADR-0113 §A regalloc terminator-class extension).
+fn returnCallRefOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
+    const rt = Runtime.fromOpaque(c);
+    const ref_v = rt.popOperand();
+    if (ref_v.ref == runtime.Value.null_ref) return Trap.NullReference;
+    const fe = runtime.Value.refAsFuncEntity(ref_v) orelse return Trap.NullReference;
+    const callee_rt = fe.runtime;
+    if (fe.func_idx >= callee_rt.funcs.len) return Trap.IndirectCallTypeMismatch;
+    const callee = callee_rt.funcs[fe.func_idx];
+
+    if (instr.payload >= rt.module_types.len) return Trap.IndirectCallTypeMismatch;
+    const expected = rt.module_types[instr.payload];
+    if (!sigEq(callee.sig, expected)) return Trap.IndirectCallTypeMismatch;
+
+    const dispatch_tbl = rt.table orelse return Trap.Unreachable;
+    try invoke(rt, dispatch_tbl, callee);
+
+    // Tail-call: promote callee's results to caller's results +
+    // mark caller frame done. Validator guaranteed callee.results
+    // matches caller's return type element-wise.
+    const caller_frame = rt.currentFrame();
+    const arity: u32 = @intCast(caller_frame.sig.results.len);
+    if (arity > max_block_arity) return Trap.Unreachable;
+    var saved: [max_block_arity]Value = undefined;
+    var i: u32 = arity;
+    while (i > 0) {
+        i -= 1;
+        saved[i] = rt.popOperand();
+    }
+    rt.operand_len = caller_frame.operand_base;
+    i = 0;
+    while (i < arity) : (i += 1) {
+        try rt.pushOperand(saved[i]);
+    }
+    caller_frame.label_len = 0;
+    caller_frame.done = true;
 }
 
 inline fn sigEq(a: zir.FuncType, b: zir.FuncType) bool {
