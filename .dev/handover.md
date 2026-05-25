@@ -127,7 +127,28 @@ ROADMAP §10 = 13-row task table。
     cross-module + spec corpus + regalloc terminator-class 残)
 - Pending: 10.E / 10.G / 10.P
 
-## Active task — Phase 10 ADR enrichment cycle complete; pivot needed
+## Active task — bucket-3-stop candidate; integration plan landed
+
+Phase 10 EH-on-JIT integration plan landed at `803cffe2`
+(`.dev/phase10_eh_integration_plan.md`). The doc consolidates
+the 13-cycle foundation chain into 6 integration tasks (IT-1..6)
+with concrete call sites + acceptance criteria + sequencing.
+Future implementer (user collab or multi-cycle autonomous
+resume) can pick up at IT-1 without re-deriving design.
+
+This is the natural pause for the autonomous loop. Remaining
+ROADMAP §10 work all needs user-paced multi-cycle integration:
+- 10.E (EH integration) — covered by phase10_eh_integration_plan.md
+- 10.TC (tail-call codegen integration) — same chain-level concern
+- 10.G-4 (struct ops) — blocked-by GC heap impl
+- 10.M-realworld — toolchain-blocked
+- 10.P (Phase 10 close gate) — user-touchpoint by construction
+
+**Bucket-3 candidate**: autonomous prep paths walked (all 7 P10
+ADRs enriched + integration plan doc landed + lesson recorded).
+The next forward step structurally needs the user.
+
+## Active task — Phase 10 ADR enrichment cycle complete (legacy header retained below)
 
 This /continue cycle enriched 4 Phase 10 ADRs with concrete
 wasmtime citations:
