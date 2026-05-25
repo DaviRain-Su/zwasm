@@ -269,6 +269,28 @@ close: -Dwasm=v2_0 symbol-absence gate).
 
 ### Sub-chunks (commit-time order)
 
+- **10.M-4c** — x86_64 i64 idx_type wrap-check mirror
+  (`affef52f`). Closes 10.M-4 cross-arch symmetry. `x86_64/
+  ctx.zig::InitArgs` + `EmitCtx` add `memory0_idx_type`
+  field; `x86_64/emit.zig::compile` removes the temporary
+  `_ = memory0_idx_type;` discard and threads through
+  `EmitCtx.init(...)`. `op_memory.zig::emitI32Load` (the
+  22-alias wrapper) gains the same comptime + runtime
+  2-stage gate as arm64 — when `wasm_level >= .v3_0 AND
+  ctx.memory0_idx_type == .i64` dispatch to new
+  `emitMemOpI64`; else fall to existing emitMemOp
+  (byte-identical i32 fast path). emitMemOpI64 differs at
+  TWO points: (1) Idx MOV width `.q` (64-bit full copy) vs
+  i32's `.d` (32-bit zero-extend) — Wasm 3.0 §5.4.7 i64
+  idx_type semantic; (2) Offset taken as u64 (not u32) for
+  memarg offsets > u32::MAX — `encMovImm64Q` already u64-
+  typed so MOVABS path needs no encoder change. All other
+  shapes (LEA RCX, [RDX+access_size]; CMP RCX, mem_limit;
+  JA trap; final MOV/MOVZX/MOVSX/MOVSS/MOVSD with [RAX+RDX]
+  base-idx) are X-form already — byte-identical to i32
+  path. Mirror of arm64 10.M-4b. Mac `test-all` GREEN; lint
+  + zone + fs gates exit 0.
+
 - **10.M-4b** — arm64 i64 idx_type wrap-check emit +
   memory0_idx_type plumbing (`d651d40b`).
   ADR-0111 D4 vertical slice: codegen now distinguishes i32 vs
