@@ -79,6 +79,6 @@ pub const Instance = struct {
 pub const ExportType = union(sections.ImportKind) {
     func: zir.FuncType,
     table: struct { elem_type: zir.ValType, min: u32, max: ?u32 },
-    memory: struct { min: u32, max: ?u32 },
+    memory: struct { idx_type: sections.MemoryEntry.IdxType = .i32, min: u64, max: ?u64 },
     global: struct { valtype: zir.ValType, mutable: bool },
 };

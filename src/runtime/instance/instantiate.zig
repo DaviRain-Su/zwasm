@@ -295,7 +295,7 @@ pub fn buildExportTypes(
                         if (it.kind != .memory) continue;
                         if (idx == exp.idx) {
                             const m = it.payload.memory;
-                            break :blk .{ .memory = .{ .min = m.min, .max = m.max } };
+                            break :blk .{ .memory = .{ .idx_type = m.idx_type, .min = m.min, .max = m.max } };
                         }
                         idx += 1;
                     }
@@ -305,7 +305,7 @@ pub fn buildExportTypes(
                 const dm = (defined_memories orelse return error.UnsupportedImport).items;
                 if (def_idx >= dm.len) return error.UnsupportedImport;
                 const m = dm[def_idx];
-                break :blk .{ .memory = .{ .min = m.min, .max = m.max } };
+                break :blk .{ .memory = .{ .idx_type = m.idx_type, .min = m.min, .max = m.max } };
             },
             .global => blk: {
                 var imp_count: u32 = 0;

@@ -600,6 +600,7 @@ fn buildBindings(
                 };
                 bindings[idx] = .{ .memory = .{
                     .memory = source_rt.memory,
+                    .source_idx_type = desc.idx_type,
                     .source_min = desc.min,
                     .source_max = desc.max,
                 } };

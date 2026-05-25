@@ -1590,7 +1590,7 @@ pub fn effectiveMemory0Min(
     allocator: std.mem.Allocator,
     importer_wasm: []const u8,
     registered: ?*const std.StringHashMapUnmanaged(RegisteredExporter),
-) u32 {
+) u64 {
     var temp_arena = std.heap.ArenaAllocator.init(allocator);
     defer temp_arena.deinit();
     const ta = temp_arena.allocator();
@@ -1623,7 +1623,7 @@ pub fn effectiveMemory0Max(
     allocator: std.mem.Allocator,
     importer_wasm: []const u8,
     registered: ?*const std.StringHashMapUnmanaged(RegisteredExporter),
-) ?u32 {
+) ?u64 {
     var temp_arena = std.heap.ArenaAllocator.init(allocator);
     defer temp_arena.deinit();
     const ta = temp_arena.allocator();
@@ -1654,7 +1654,7 @@ fn extractExporterMemoryMax(
     allocator: std.mem.Allocator,
     exporter_wasm: []const u8,
     export_name: []const u8,
-) ?u32 {
+) ?u64 {
     var temp_arena = std.heap.ArenaAllocator.init(allocator);
     defer temp_arena.deinit();
     const ta = temp_arena.allocator();
@@ -1692,7 +1692,7 @@ fn extractExporterMemoryMin(
     allocator: std.mem.Allocator,
     exporter_wasm: []const u8,
     export_name: []const u8,
-) ?u32 {
+) ?u64 {
     var temp_arena = std.heap.ArenaAllocator.init(allocator);
     defer temp_arena.deinit();
     const ta = temp_arena.allocator();
@@ -1884,7 +1884,7 @@ pub fn resetGrowableMemory(initial_pages: u32) void {
 /// module's own declaration — matters for `memory_size.wast`
 /// and `memory_grow.wast` where the max-pages cap gates whether
 /// a `memory.grow` succeeds vs returns -1.
-pub fn extractMemoryLimits(allocator: std.mem.Allocator, wasm_bytes: []const u8) struct { min: u32, max: ?u32 } {
+pub fn extractMemoryLimits(allocator: std.mem.Allocator, wasm_bytes: []const u8) struct { min: u64, max: ?u64 } {
     var module = zwasm.parse.parser.parse(allocator, wasm_bytes) catch return .{ .min = 0, .max = null };
     defer module.deinit(allocator);
     const sec = module.find(.memory) orelse return .{ .min = 0, .max = null };
@@ -2224,8 +2224,8 @@ fn crossModuleMemoryMismatch(
     allocator: std.mem.Allocator,
     module: *const zwasm.runtime.Module,
     mem_idx: u32,
-    want_min: u32,
-    want_max: ?u32,
+    want_min: u64,
+    want_max: ?u64,
 ) bool {
     var imported_mems: u32 = 0;
     if (module.find(.import)) |is| {
@@ -2249,7 +2249,7 @@ fn crossModuleMemoryMismatch(
     return memLimitsMismatch(m.min, m.max, want_min, want_max);
 }
 
-fn memLimitsMismatch(src_min: u32, src_max: ?u32, want_min: u32, want_max: ?u32) bool {
+fn memLimitsMismatch(src_min: u64, src_max: ?u64, want_min: u64, want_max: ?u64) bool {
     if (src_min < want_min) return true;
     if (want_max) |wm| {
         const sm = src_max orelse return true;

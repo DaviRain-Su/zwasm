@@ -71,7 +71,12 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     // and the runner surfaced SKIP-VALIDATOR-GAP at the
     // `.assert_invalid` arm.
     {
-        const max_mem_pages: u32 = 65536;
+        // Per-idx_type max page counts (Wasm 3.0 §A.1 implementation
+        // limits). i32: 4 GiB / 64 KiB page = 65536 pages. i64:
+        // spec-defined ceiling is 2^48 bytes = 2^32 pages; runtime
+        // cascade (10.M-2) may further restrict per host.
+        const max_mem_pages_i32: u64 = 65536;
+        const max_mem_pages_i64: u64 = @as(u64, 1) << 32;
         var num_memory_imports: u32 = 0;
         if (imports_buf) |ib| {
             for (ib.items) |imp| if (imp.kind == .memory) {
@@ -84,9 +89,13 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             defer ms_buf.deinit();
             defined_memories = @intCast(ms_buf.items.len);
             for (ms_buf.items) |mem_entry| {
-                if (mem_entry.min > max_mem_pages) return Error.InvalidMemoryLimit;
+                const cap: u64 = switch (mem_entry.idx_type) {
+                    .i32 => max_mem_pages_i32,
+                    .i64 => max_mem_pages_i64,
+                };
+                if (mem_entry.min > cap) return Error.InvalidMemoryLimit;
                 if (mem_entry.max) |max| {
-                    if (max > max_mem_pages) return Error.InvalidMemoryLimit;
+                    if (max > cap) return Error.InvalidMemoryLimit;
                     if (max < mem_entry.min) return Error.InvalidMemoryLimit;
                 }
             }

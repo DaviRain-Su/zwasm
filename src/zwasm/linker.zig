@@ -260,6 +260,7 @@ pub const Linker = struct {
                         };
                         bindings_list.append(scratch, .{ .memory = .{
                             .memory = alias.bytes,
+                            .source_idx_type = memlimits.idx_type,
                             .source_min = memlimits.min,
                             .source_max = memlimits.max,
                         } }) catch return error.OutOfMemory;

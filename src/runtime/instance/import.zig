@@ -79,11 +79,13 @@ pub const TableImport = struct {
 
 /// Memory import. The `memory` slice header aliases the source's
 /// memory bytes (per ADR-0014 §2.2 / §6.K.2 the arena holds
-/// the bytes alive across importer teardown).
+/// the bytes alive across importer teardown). `source_idx_type`
+/// + u64 page widths added at 10.M-1 per ADR-0111 Decision 1.
 pub const MemoryImport = struct {
     memory: []u8,
-    source_min: u32,
-    source_max: ?u32,
+    source_idx_type: @import("../../parse/sections.zig").MemoryEntry.IdxType = .i32,
+    source_min: u64,
+    source_max: ?u64,
 };
 
 /// Global import. The `slot` points at the source runtime's

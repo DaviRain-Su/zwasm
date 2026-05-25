@@ -15,6 +15,7 @@
 //! and Zone 1 (`ir/zir.zig`).
 
 const std = @import("std");
+const build_options = @import("build_options");
 
 const leb128 = @import("../support/leb128.zig");
 const zir = @import("../ir/zir.zig");
@@ -30,6 +31,10 @@ pub const Error = error{
     BadValType,
     TrailingBytes,
     LocalsOverflow,
+    /// Memory64 (i64 idx_type) flag bit set in limits prefix but
+    /// build's `wasm_level < .v3_0` — comptime gate per ADR-0111
+    /// Decision 1.
+    Memory64Unsupported,
     OutOfMemory,
 } || leb128.Error;
 
@@ -118,7 +123,7 @@ pub const Import = struct {
 pub const ImportPayload = union(enum) {
     func_typeidx: u32,
     table: struct { elem_type: ValType, min: u32, max: ?u32 },
-    memory: struct { min: u32, max: ?u32 },
+    memory: MemoryEntry,
     global: struct { valtype: ValType, mutable: bool },
 };
 
@@ -172,8 +177,8 @@ pub fn decodeImports(parent_alloc: Allocator, body: []const u8) Error!Imports {
                 break :blk .{ .table = .{ .elem_type = elem_type, .min = limits.min, .max = limits.max } };
             },
             .memory => blk: {
-                const limits = try readLimits(body, &pos);
-                break :blk .{ .memory = .{ .min = limits.min, .max = limits.max } };
+                const ml = try readMemLimits(body, &pos);
+                break :blk .{ .memory = .{ .idx_type = ml.idx_type, .min = ml.min, .max = ml.max } };
             },
             .global => blk: {
                 const t = try init_expr.readValType(body, &pos);
@@ -314,13 +319,25 @@ pub fn decodeGlobals(parent_alloc: Allocator, body: []const u8) Error!Globals {
 // DataKind moved to `sections_data.zig` (re-exported below after
 // the memory section).
 
-/// One Wasm memory's limits. v0.1.0 only allows one memory per
-/// module (`memidx == 0`); multi-memory is post-v0.1.0.
+/// One Wasm memory's limits. Wasm 3.0 §5.4.4 widens the limits
+/// prefix to encode the i64-flag bit (memory64 proposal). Per
+/// ADR-0111 Decision 1, `idx_type` is always present (not
+/// build-option-gated) for ABI stability across `-Dwasm` levels.
+/// Multi-memory enable lives at parser+validator (this layer);
+/// runtime cascade to `[]MemoryInstance` is 10.M-2.
 pub const MemoryEntry = struct {
-    /// Initial size in 64 KiB pages (§5.5.5 / §5.4.4).
-    min: u32,
+    /// Address-space width discriminator (Wasm 3.0 §5.4.4 limits
+    /// prefix bit 0x04). `.i32` for legacy (≤ 4 GiB); `.i64` for
+    /// memory64 (spec-full 2^64 addressable).
+    idx_type: IdxType = .i32,
+    /// Initial size in 64 KiB pages (§5.5.5 / §5.4.4). u64 storage
+    /// regardless of `idx_type`; for `.i32`, decoder rejects values
+    /// > `u32` max.
+    min: u64,
     /// Optional upper bound in pages.
-    max: ?u32 = null,
+    max: ?u64 = null,
+
+    pub const IdxType = enum(u1) { i32 = 0, i64 = 1 };
 };
 
 pub const Memories = struct {
@@ -332,11 +349,42 @@ pub const Memories = struct {
     }
 };
 
+/// Read one memory's limits per Wasm 3.0 §5.4.4. Flag byte bits:
+/// - bit 0 (0x01): has_max
+/// - bit 1 (0x02): shared (NOT supported in v0.1.0; rejected)
+/// - bit 2 (0x04): memory64 (i64 idx_type)
+/// - bit 3 (0x08): has_page_size (custom-page-size proposal;
+///   not supported)
+/// Accepted flag values: `0x00` / `0x01` (i32) always; `0x04` /
+/// `0x05` (i64) only when `comptime build_options.wasm_level >=
+/// .v3_0` — else `Error.Memory64Unsupported` per ADR-0111 D1.
+fn readMemLimits(body: []const u8, pos: *usize) Error!MemoryEntry {
+    if (pos.* >= body.len) return Error.UnexpectedEnd;
+    const flag = body[pos.*];
+    pos.* += 1;
+    const has_max = (flag & 0x01) != 0;
+    const is_shared = (flag & 0x02) != 0;
+    const is_i64 = (flag & 0x04) != 0;
+    if (is_shared) return Error.BadValType;
+    if ((flag & ~@as(u8, 0x05)) != 0) return Error.BadValType;
+    if (is_i64) {
+        if (comptime @intFromEnum(build_options.wasm_level) < @intFromEnum(@TypeOf(build_options.wasm_level).v3_0)) {
+            return Error.Memory64Unsupported;
+        }
+    }
+    const min = try leb128.readUleb128(u64, body, pos);
+    const max: ?u64 = if (has_max) try leb128.readUleb128(u64, body, pos) else null;
+    const idx_type: MemoryEntry.IdxType = if (is_i64) .i64 else .i32;
+    return .{ .idx_type = idx_type, .min = min, .max = max };
+}
+
 /// Decode the body of a memory section (`SectionId.memory`):
 ///   memorysec = vec(memtype)
 ///   memtype   = limits
-///   limits    = 0x00 n:uleb128             (min only)
-///             | 0x01 n:uleb128 m:uleb128   (min + max)
+/// See `readMemLimits` for the flag-byte semantics. Multi-memory
+/// is enabled at this layer (Wasm 3.0 §5.4.6); the count > 1
+/// constraint is enforced at the runtime instantiation layer
+/// (10.M-2).
 pub fn decodeMemory(parent_alloc: Allocator, body: []const u8) Error!Memories {
     var arena = std.heap.ArenaAllocator.init(parent_alloc);
     errdefer arena.deinit();
@@ -346,18 +394,7 @@ pub fn decodeMemory(parent_alloc: Allocator, body: []const u8) Error!Memories {
     const count = try leb128.readUleb128(u32, body, &pos);
     const items = try alloc.alloc(MemoryEntry, count);
     for (items) |*entry| {
-        if (pos >= body.len) return Error.UnexpectedEnd;
-        const flag = body[pos];
-        pos += 1;
-        const min = try leb128.readUleb128(u32, body, &pos);
-        switch (flag) {
-            0x00 => entry.* = .{ .min = min },
-            0x01 => {
-                const max = try leb128.readUleb128(u32, body, &pos);
-                entry.* = .{ .min = min, .max = max };
-            },
-            else => return Error.BadValType,
-        }
+        entry.* = try readMemLimits(body, &pos);
     }
     if (pos != body.len) return Error.TrailingBytes;
     return .{ .arena = arena, .items = items };
@@ -785,21 +822,84 @@ test "decodeTables: rejects unknown reftype byte" {
     try testing.expectError(Error.BadValType, decodeTables(testing.allocator, &[_]u8{ 0x01, 0x55, 0x00, 0x00 }));
 }
 
-test "decodeMemory: min only + min/max forms" {
+test "decodeMemory: min only + min/max forms (i32 default)" {
     // count=2; entry 0 = (min 1); entry 1 = (min 2 max 3)
     const body = [_]u8{ 0x02, 0x00, 0x01, 0x01, 0x02, 0x03 };
     var m = try decodeMemory(testing.allocator, &body);
     defer m.deinit();
     try testing.expectEqual(@as(usize, 2), m.items.len);
-    try testing.expectEqual(@as(u32, 1), m.items[0].min);
+    try testing.expectEqual(MemoryEntry.IdxType.i32, m.items[0].idx_type);
+    try testing.expectEqual(@as(u64, 1), m.items[0].min);
     try testing.expect(m.items[0].max == null);
-    try testing.expectEqual(@as(u32, 2), m.items[1].min);
-    try testing.expectEqual(@as(u32, 3), m.items[1].max.?);
+    try testing.expectEqual(MemoryEntry.IdxType.i32, m.items[1].idx_type);
+    try testing.expectEqual(@as(u64, 2), m.items[1].min);
+    try testing.expectEqual(@as(u64, 3), m.items[1].max.?);
 }
 
-test "decodeMemory: rejects unknown limits flag" {
-    const body = [_]u8{ 0x01, 0x05, 0x01 };
+test "decodeMemory: rejects shared flag (threads not supported)" {
+    const body = [_]u8{ 0x01, 0x03, 0x01, 0x02 };
     try testing.expectError(Error.BadValType, decodeMemory(testing.allocator, &body));
+}
+
+test "decodeMemory: rejects reserved flag bits" {
+    const body = [_]u8{ 0x01, 0x08, 0x01 };
+    try testing.expectError(Error.BadValType, decodeMemory(testing.allocator, &body));
+}
+
+// Memory64 (Wasm 3.0 §5.4.4): flag bit 0x04 selects i64 idx_type.
+// Tests fire only under -Dwasm=v3_0 (the default); under v2_0 the
+// parser rejects with Error.Memory64Unsupported (comptime gate per
+// ADR-0111 D1; verified via the -Dwasm=v2_0 build path itself, not
+// a runtime test).
+test "decodeMemory: i64 memory min only (Wasm 3.0 §5.4.4)" {
+    if (comptime @intFromEnum(build_options.wasm_level) < @intFromEnum(@TypeOf(build_options.wasm_level).v3_0)) return;
+    // count=1; flag=0x04 (i64, min only); min=7
+    const body = [_]u8{ 0x01, 0x04, 0x07 };
+    var m = try decodeMemory(testing.allocator, &body);
+    defer m.deinit();
+    try testing.expectEqual(@as(usize, 1), m.items.len);
+    try testing.expectEqual(MemoryEntry.IdxType.i64, m.items[0].idx_type);
+    try testing.expectEqual(@as(u64, 7), m.items[0].min);
+    try testing.expect(m.items[0].max == null);
+}
+
+test "decodeMemory: i64 memory min+max (Wasm 3.0 §5.4.4)" {
+    if (comptime @intFromEnum(build_options.wasm_level) < @intFromEnum(@TypeOf(build_options.wasm_level).v3_0)) return;
+    // count=1; flag=0x05 (i64, min+max); min=2, max=8
+    const body = [_]u8{ 0x01, 0x05, 0x02, 0x08 };
+    var m = try decodeMemory(testing.allocator, &body);
+    defer m.deinit();
+    try testing.expectEqual(@as(usize, 1), m.items.len);
+    try testing.expectEqual(MemoryEntry.IdxType.i64, m.items[0].idx_type);
+    try testing.expectEqual(@as(u64, 2), m.items[0].min);
+    try testing.expectEqual(@as(u64, 8), m.items[0].max.?);
+}
+
+test "decodeMemory: multi-memory parser enable (Wasm 3.0 §5.4.6)" {
+    // count=3 mixed: (i32 min 1), (i64 min 2 max 3), (i32 min 4)
+    // Runtime instantiation still rejects count > 1 until 10.M-2;
+    // this test asserts the parser layer alone accepts the shape.
+    const body = [_]u8{
+        0x03, // count=3
+        0x00, 0x01, // entry 0: i32, min 1
+        0x05, 0x02, 0x03, // entry 1: i64, min 2, max 3
+        0x00, 0x04, // entry 2: i32, min 4
+    };
+    if (comptime @intFromEnum(build_options.wasm_level) < @intFromEnum(@TypeOf(build_options.wasm_level).v3_0)) {
+        // v2.0 build rejects entry 1's i64 flag at the parser.
+        try testing.expectError(Error.Memory64Unsupported, decodeMemory(testing.allocator, &body));
+        return;
+    }
+    var m = try decodeMemory(testing.allocator, &body);
+    defer m.deinit();
+    try testing.expectEqual(@as(usize, 3), m.items.len);
+    try testing.expectEqual(MemoryEntry.IdxType.i32, m.items[0].idx_type);
+    try testing.expectEqual(@as(u64, 1), m.items[0].min);
+    try testing.expectEqual(MemoryEntry.IdxType.i64, m.items[1].idx_type);
+    try testing.expectEqual(@as(u64, 2), m.items[1].min);
+    try testing.expectEqual(@as(u64, 3), m.items[1].max.?);
+    try testing.expectEqual(MemoryEntry.IdxType.i32, m.items[2].idx_type);
+    try testing.expectEqual(@as(u64, 4), m.items[2].min);
 }
 
 test "decodeExports: single func export" {
