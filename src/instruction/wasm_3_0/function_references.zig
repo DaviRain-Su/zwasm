@@ -6,8 +6,9 @@
 //! interp handlers via the same DispatchTable.interp slot pattern
 //! as the Wasm 2.0 reftype family.
 //!
-//! 10.R-1 lands ref.as_non_null only; the other 4 ops register at
-//! 10.R-2..10.R-5 (sub-chunks per the design plan).
+//! 10.R-1 landed ref.as_non_null; 10.R-2 added br_on_null; 10.R-3
+//! adds br_on_non_null. call_ref / return_call_ref register at
+//! 10.R-4..10.R-5 (sub-chunks per the design plan).
 //!
 //! Wasm spec 3.0 §3.3.8.5 (`ref.as_non_null`): pop reftype; if
 //! null, trap (.NullReference per ADR-0111 / runtime/trap.zig);
@@ -41,6 +42,7 @@ inline fn op(o: ZirOp) usize {
 pub fn register(table: *DispatchTable) void {
     table.interp[op(.@"ref.as_non_null")] = refAsNonNull;
     table.interp[op(.br_on_null)] = brOnNull;
+    table.interp[op(.br_on_non_null)] = brOnNonNull;
 }
 
 fn refAsNonNull(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
@@ -57,21 +59,12 @@ fn refAsNonNull(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
 /// Zone 1 and mvp.zig is Zone 2 (zone_deps.md forbids upward).
 const max_branch_arity: u32 = 16;
 
-/// Wasm spec 3.0 §3.3.8.6 — `br_on_null l`: pop reftype; if
-/// null, branch to label l (consume l.branch_arity values from
-/// stack as branch values); else push the non-null reftype back
-/// and fall through. Branch mechanics mirror `mvp.zig::doBranch`
-/// + `restoreToLabel` but re-derived to keep instruction/ Zone-1
-/// clean (no interp/ import).
-fn brOnNull(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
-    const rt = Runtime.fromOpaque(c);
-    const r = rt.popOperand().ref;
-    if (r != Value.null_ref) {
-        try rt.pushOperand(.{ .ref = r });
-        return;
-    }
-    // Null path: branch to label `depth`.
-    const depth: u32 = @intCast(instr.payload);
+/// Re-derived branch mechanic mirroring `mvp.zig::doBranch` +
+/// `restoreToLabel`. Lives here rather than imported because
+/// instruction/ is Zone 1 and mvp.zig is Zone 2 (zone_deps.md
+/// forbids upward). A future refactor could promote this to
+/// `runtime/frame.zig` (Zone 1) and dedupe with mvp.zig.
+fn branchTo(rt: *Runtime, depth: u32) anyerror!void {
     const frame = rt.currentFrame();
     if (depth >= frame.label_len) return runtime.Trap.Unreachable;
     const target = frame.labelAt(depth);
@@ -98,6 +91,33 @@ fn brOnNull(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     frame.pc = target.target_pc;
 }
 
+/// Wasm spec 3.0 §3.3.8.6 — `br_on_null l`: pop reftype; if
+/// null, branch to label l (consume l.branch_arity values from
+/// stack as branch values); else push the non-null reftype back
+/// and fall through.
+fn brOnNull(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
+    const rt = Runtime.fromOpaque(c);
+    const r = rt.popOperand().ref;
+    if (r != Value.null_ref) {
+        try rt.pushOperand(.{ .ref = r });
+        return;
+    }
+    try branchTo(rt, @intCast(instr.payload));
+}
+
+/// Wasm spec 3.0 §3.3.8.7 — `br_on_non_null l`: pop reftype; if
+/// non-null, push the ref back and branch to label l (which
+/// expects `[t1*, reftype]` — the non-null ref is passed as a
+/// branch value at top). Otherwise consume the (null) ref and
+/// fall through with the prefix `[t1*]` on stack.
+fn brOnNonNull(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
+    const rt = Runtime.fromOpaque(c);
+    const r = rt.popOperand().ref;
+    if (r == Value.null_ref) return; // null: fall through, ref consumed
+    try rt.pushOperand(.{ .ref = r });
+    try branchTo(rt, @intCast(instr.payload));
+}
+
 // ============================================================
 // Tests
 // ============================================================
@@ -110,11 +130,12 @@ fn driveOne(rt: *Runtime, table: *const DispatchTable, t: ZirOp, payload: u32, e
     try dispatch_loop.step(rt, table, &instr);
 }
 
-test "register: ref.as_non_null + br_on_null slots populated" {
+test "register: ref.as_non_null + br_on_null + br_on_non_null slots populated" {
     var t = DispatchTable.init();
     register(&t);
     try testing.expect(t.interp[op(.@"ref.as_non_null")] != null);
     try testing.expect(t.interp[op(.br_on_null)] != null);
+    try testing.expect(t.interp[op(.br_on_non_null)] != null);
 }
 
 test "ref.as_non_null: non-null funcref → passes through" {
@@ -179,6 +200,55 @@ test "br_on_null: null → branch (ref consumed; pc jumps to target)" {
     try driveOne(&rt, &t, .br_on_null, 0, 0); // depth=0 → target_pc=42
     // ref popped; stack restored to height=0.
     try testing.expectEqual(@as(u32, 0), rt.operand_len);
+    // pc jumped to target.
+    try testing.expectEqual(@as(u32, 42), rt.currentFrame().pc);
+}
+
+test "br_on_non_null: null → fall through (ref consumed; pc unchanged)" {
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    const empty_sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
+    var frame: runtime.Frame = .{
+        .sig = empty_sig,
+        .locals = &.{},
+        .operand_base = 0,
+        .pc = 100,
+    };
+    // Label expects [reftype] (branch_arity=1) on branch, but the
+    // null path doesn't take it; we just verify the ref is
+    // consumed and pc is unchanged.
+    try frame.pushLabel(.{ .height = 0, .arity = 1, .branch_arity = 1, .target_pc = 999 });
+    try rt.pushFrame(frame);
+    try rt.pushOperand(.{ .ref = Value.null_ref });
+    try driveOne(&rt, &t, .br_on_non_null, 0, 0); // depth=0
+    // ref consumed (stack empty); pc unchanged (no branch).
+    try testing.expectEqual(@as(u32, 0), rt.operand_len);
+    try testing.expectEqual(@as(u32, 100), rt.currentFrame().pc);
+}
+
+test "br_on_non_null: non-null → branch (ref passed at top; pc jumps)" {
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    const empty_sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
+    var frame: runtime.Frame = .{
+        .sig = empty_sig,
+        .locals = &.{},
+        .operand_base = 0,
+        .pc = 100,
+    };
+    // Label expects [reftype]; branch_arity=1 carries the ref to
+    // the branch destination.
+    try frame.pushLabel(.{ .height = 0, .arity = 1, .branch_arity = 1, .target_pc = 42 });
+    try rt.pushFrame(frame);
+    try rt.pushOperand(.{ .ref = 0x2000 });
+    try driveOne(&rt, &t, .br_on_non_null, 0, 0); // depth=0 → target_pc=42
+    // ref preserved on top of stack (branch_arity=1 carried it).
+    try testing.expectEqual(@as(u32, 1), rt.operand_len);
+    try testing.expectEqual(@as(u64, 0x2000), rt.popOperand().ref);
     // pc jumped to target.
     try testing.expectEqual(@as(u32, 42), rt.currentFrame().pc);
 }

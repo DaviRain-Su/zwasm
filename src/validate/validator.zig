@@ -671,6 +671,7 @@ pub const Validator = struct {
             // Wasm 3.0 typed function references (function-references proposal).
             0xD3 => try self.opRefAsNonNull(),
             0xD4 => try self.opBrOnNull(),
+            0xD6 => try self.opBrOnNonNull(),
 
             // Wasm 2.0 prefix opcodes (§9.2 / 2.3 chunk 2 onward)
             0xFC => try self.dispatchPrefixFC(),
@@ -1027,6 +1028,52 @@ pub const Validator = struct {
             .multi => |ts| for (ts) |t| try self.pushType(t),
         }
         try self.pushType(reftype);
+    }
+
+    /// Wasm spec 3.0 §3.3.8.7 (function-references proposal):
+    /// `br_on_non_null l` — pop reftype; if non-null at runtime,
+    /// branch to label l (consume l.label_types — which include
+    /// the reftype as the last entry — from stack as branch
+    /// values, ref passed at top). Otherwise the (null) reftype
+    /// is consumed and the fall-through path has just the
+    /// prefix on stack. Stack effect: precondition
+    /// `[t1*, reftype]` where label l takes `[t1*, reftype]`;
+    /// postcondition (fall-through) `[t1*]` (ref consumed).
+    /// Branch path destination expects `[t1*, reftype]` (non-null
+    /// narrowed, but v2.0 catalogue can't express the narrowing).
+    fn opBrOnNonNull(self: *Validator) Error!void {
+        const depth = try leb128.readUleb128(u32, self.body, &self.pos);
+        const top = try self.popAny();
+        const reftype: ValType = switch (top) {
+            .bot => .funcref, // polymorphic; pick any reftype
+            .known => |t| blk: {
+                if (t != .funcref and t != .externref) return Error.StackTypeMismatch;
+                break :blk t;
+            },
+        };
+        const target = self.frameAt(depth) orelse return Error.InvalidBranchDepth;
+        const lt = target.labelType();
+        // Label l must take [t1*, reftype]; the last entry of lt
+        // must match the popped reftype. Pop the prefix t1* from
+        // stack + push back (fall-through has just [t1*]).
+        switch (lt) {
+            .empty => return Error.StackTypeMismatch,
+            .single => |t| {
+                if (t != reftype) return Error.StackTypeMismatch;
+                // Prefix is empty; no further pop/push.
+            },
+            .multi => |ts| {
+                if (ts.len == 0) return Error.StackTypeMismatch;
+                if (ts[ts.len - 1] != reftype) return Error.StackTypeMismatch;
+                const prefix = ts[0 .. ts.len - 1];
+                var i: usize = prefix.len;
+                while (i > 0) {
+                    i -= 1;
+                    try self.popExpect(prefix[i]);
+                }
+                for (prefix) |t| try self.pushType(t);
+            },
+        }
     }
 
     /// Wasm spec §3.4.7.3 / §3.4.10 (ref.func x): read funcidx,
