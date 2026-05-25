@@ -385,6 +385,36 @@ pub fn build(b: *std.Build) void {
     const test_spec_wasm_2_0_assert_step = b.step("test-spec-wasm-2.0-assert", "Run Wasm 2.0 non-SIMD scalar spec assertion runner (§9.9 / 9.9-l-1b per ADR-0057; corpus lands at k-1)");
     test_spec_wasm_2_0_assert_step.dependOn(&run_non_simd_assert.step);
 
+    // `zig build test-spec-wasm-3.0-assert` — §10 / 10.T-2b. Wasm 3.0
+    // assertion runner skeleton; enumerates the baked manifests under
+    // `test/spec/wasm-3.0-assert/<proposal>/<name>/manifest.txt` and
+    // reports per-proposal directive counts. JIT-execute + assertion
+    // matching lands cycle-by-cycle as impl rows 10.M / 10.R / 10.TC /
+    // 10.E / 10.G adopt the spec_assert_runner_base callbacks pattern.
+    const wasm_3_0_assert_runner_mod = createSanitizedModule(b, sanitize_opts, .{
+        .root_source_file = b.path("test/spec/spec_assert_runner_wasm_3_0.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const wasm_3_0_assert_runner_exe = b.addExecutable(.{
+        .name = "zwasm-spec-wasm-3-0-assert",
+        .root_module = wasm_3_0_assert_runner_mod,
+    });
+    const run_wasm_3_0_assert = b.addRunArtifact(wasm_3_0_assert_runner_exe);
+    run_wasm_3_0_assert.addArg(b.pathFromRoot("test/spec/wasm-3.0-assert"));
+    const test_spec_wasm_3_0_assert_step = b.step("test-spec-wasm-3.0-assert", "Run Wasm 3.0 spec assertion runner skeleton (§10 / 10.T-2b; 5 sub-corpora enumerated)");
+    test_spec_wasm_3_0_assert_step.dependOn(&run_wasm_3_0_assert.step);
+
+    // In-source test of the runner skeleton (covers PROPOSALS list).
+    const wasm_3_0_assert_unit_mod = createSanitizedModule(b, sanitize_opts, .{
+        .root_source_file = b.path("test/spec/spec_assert_runner_wasm_3_0.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const wasm_3_0_assert_unit_tests = b.addTest(.{ .root_module = wasm_3_0_assert_unit_mod });
+    const run_wasm_3_0_assert_unit = b.addRunArtifact(wasm_3_0_assert_unit_tests);
+    test_step.dependOn(&run_wasm_3_0_assert_unit.step);
+
     // `zig build test-spec-wasm-2.0` — wast-directive runner
     // (Phase 2 / §9.2 / 2.7). Reads each subdir's manifest.txt
     // and processes module / assert_invalid / assert_malformed
@@ -639,6 +669,10 @@ pub fn build(b: *std.Build) void {
     // SKIP-WASMTIME-FAIL gracefully and do not break the gate.
     test_all_step.dependOn(&run_realworld_diff.step);
     test_all_step.dependOn(&run_wast_2_0.step);
+    // §10 / 10.T-2b: wasm-3.0 assertion runner skeleton — enumerates
+    // baked manifests, exits clean. Adopts JIT-execute as impl rows
+    // 10.M / 10.R / 10.TC / 10.E / 10.G land.
+    test_all_step.dependOn(&run_wasm_3_0_assert.step);
     test_all_step.dependOn(&run_wasmtime_misc_basic.step);
     test_all_step.dependOn(&run_wast_runtime_smoke.step);
     test_all_step.dependOn(&run_c_host.step);
