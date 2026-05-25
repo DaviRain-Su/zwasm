@@ -791,3 +791,111 @@ test "lower (simd): unknown 0xFD sub-opcode → NotImplemented" {
     const body = [_]u8{ 0xFD, 0xFA, 0x01, 0x0B };
     try testing.expectError(Error.NotImplemented, lowerFunctionBody(testing.allocator, &body, &f, &.{}, &.{}));
 }
+
+// Wasm 3.0 EH try_table catch-metadata lowering (10.E-5a).
+
+test "lower (try_table): empty catch vec → LandingPad with empty catch slice" {
+    var f = newFunc(empty_sig);
+    defer f.deinit(testing.allocator);
+
+    // try_table () (count=0) end ; end_fn
+    const body = [_]u8{ 0x1F, 0x40, 0x00, 0x0B, 0x0B };
+    try lowerFunctionBody(testing.allocator, &body, &f, &.{}, &.{});
+
+    try testing.expect(f.eh_landing_pads != null);
+    try testing.expectEqual(@as(usize, 1), f.eh_landing_pads.?.len);
+    const lp = f.eh_landing_pads.?[0];
+    try testing.expectEqual(@as(u32, 0), lp.block_idx);
+    try testing.expectEqual(@as(u32, 0), lp.catches_start);
+    try testing.expectEqual(@as(u32, 0), lp.catches_end);
+    try testing.expect(f.eh_catch_entries == null);
+}
+
+test "lower (try_table): catch + catch_all vec stored in eh_catch_entries" {
+    var f = newFunc(empty_sig);
+    defer f.deinit(testing.allocator);
+
+    // try_table () count=2
+    //   0x00 catch tag_idx=7 label_idx=0
+    //   0x02 catch_all label_idx=1
+    // end ; end_fn
+    //
+    // Outer label_idx=1 is the function frame; outer 0 is the
+    // try_table itself. Validator label-range checks are not
+    // enforced at lower time, so this body lowers regardless.
+    const body = [_]u8{ 0x1F, 0x40, 0x02, 0x00, 0x07, 0x00, 0x02, 0x01, 0x0B, 0x0B };
+    try lowerFunctionBody(testing.allocator, &body, &f, &.{}, &.{});
+
+    try testing.expectEqual(@as(usize, 1), f.eh_landing_pads.?.len);
+    const lp = f.eh_landing_pads.?[0];
+    try testing.expectEqual(@as(u32, 0), lp.catches_start);
+    try testing.expectEqual(@as(u32, 2), lp.catches_end);
+
+    try testing.expect(f.eh_catch_entries != null);
+    try testing.expectEqual(@as(usize, 2), f.eh_catch_entries.?.len);
+
+    const c0 = f.eh_catch_entries.?[0];
+    try testing.expectEqual(zir.CatchKind.catch_, c0.kind);
+    try testing.expectEqual(@as(u32, 7), c0.tag_idx);
+    try testing.expectEqual(@as(u32, 0), c0.label_idx);
+
+    const c1 = f.eh_catch_entries.?[1];
+    try testing.expectEqual(zir.CatchKind.catch_all, c1.kind);
+    try testing.expectEqual(@as(u32, 0), c1.tag_idx);
+    try testing.expectEqual(@as(u32, 1), c1.label_idx);
+}
+
+test "lower (try_table): catch_ref + catch_all_ref kinds preserved" {
+    var f = newFunc(empty_sig);
+    defer f.deinit(testing.allocator);
+
+    // try_table () count=2 (catch_ref 3 0) (catch_all_ref 0) end ; end_fn
+    const body = [_]u8{ 0x1F, 0x40, 0x02, 0x01, 0x03, 0x00, 0x03, 0x00, 0x0B, 0x0B };
+    try lowerFunctionBody(testing.allocator, &body, &f, &.{}, &.{});
+
+    try testing.expectEqual(@as(usize, 2), f.eh_catch_entries.?.len);
+    try testing.expectEqual(zir.CatchKind.catch_ref, f.eh_catch_entries.?[0].kind);
+    try testing.expectEqual(@as(u32, 3), f.eh_catch_entries.?[0].tag_idx);
+    try testing.expectEqual(zir.CatchKind.catch_all_ref, f.eh_catch_entries.?[1].kind);
+    try testing.expectEqual(@as(u32, 0), f.eh_catch_entries.?[1].tag_idx);
+}
+
+test "lower (try_table): nested try_tables get distinct LandingPads with flat catch entries" {
+    var f = newFunc(empty_sig);
+    defer f.deinit(testing.allocator);
+
+    // try_table () count=1 (catch_all 1)
+    //   try_table () count=1 (catch_all 0)
+    //   end
+    // end ; end_fn
+    const body = [_]u8{
+        0x1F, 0x40, 0x01, 0x02, 0x01,
+        0x1F, 0x40, 0x01, 0x02, 0x00,
+        0x0B, 0x0B, 0x0B,
+    };
+    try lowerFunctionBody(testing.allocator, &body, &f, &.{}, &.{});
+
+    try testing.expectEqual(@as(usize, 2), f.eh_landing_pads.?.len);
+    // Outer try_table is appended first; inner second.
+    const outer = f.eh_landing_pads.?[0];
+    const inner = f.eh_landing_pads.?[1];
+    try testing.expectEqual(@as(u32, 0), outer.block_idx);
+    try testing.expectEqual(@as(u32, 1), inner.block_idx);
+    try testing.expectEqual(@as(u32, 0), outer.catches_start);
+    try testing.expectEqual(@as(u32, 1), outer.catches_end);
+    try testing.expectEqual(@as(u32, 1), inner.catches_start);
+    try testing.expectEqual(@as(u32, 2), inner.catches_end);
+
+    try testing.expectEqual(@as(usize, 2), f.eh_catch_entries.?.len);
+    try testing.expectEqual(@as(u32, 1), f.eh_catch_entries.?[0].label_idx);
+    try testing.expectEqual(@as(u32, 0), f.eh_catch_entries.?[1].label_idx);
+}
+
+test "lower (try_table): malformed catch kind rejected" {
+    var f = newFunc(empty_sig);
+    defer f.deinit(testing.allocator);
+
+    // try_table () count=1 kind=0x05 (invalid)
+    const body = [_]u8{ 0x1F, 0x40, 0x01, 0x05, 0x00, 0x0B, 0x0B };
+    try testing.expectError(Error.BadBlockType, lowerFunctionBody(testing.allocator, &body, &f, &.{}, &.{}));
+}

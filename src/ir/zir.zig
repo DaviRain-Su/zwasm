@@ -235,8 +235,47 @@ pub const LaneRouting = struct {};
 /// Phase 10+: GC-managed reference root map.
 pub const GcRootMap = struct {};
 
-/// Phase 10+: exception-handling landing pad record.
-pub const LandingPad = struct {};
+/// Wasm 3.0 EH §4.5 — catch clause kind discriminator. Encoded in the
+/// `try_table` instruction's catch-vec; preserved on `CatchEntry`
+/// for the interp unwinder to decide payload shape at catch time.
+///   - `catch_` / `catch_ref`: match exception by `tag_idx` equality.
+///     `_ref` variants additionally push the originating `exnref` on
+///     entry to the catch label.
+///   - `catch_all` / `catch_all_ref`: match any exception (no
+///     `tag_idx`). `_ref` pushes the `exnref`.
+pub const CatchKind = enum(u8) {
+    catch_ = 0x00,
+    catch_ref = 0x01,
+    catch_all = 0x02,
+    catch_all_ref = 0x03,
+};
+
+/// One catch clause inside a `try_table`'s catch-vec. Stored flat in
+/// `ZirFunc.eh_catch_entries`; each `LandingPad` references a
+/// `[catches_start, catches_end)` slice. `tag_idx` is unused (zeroed)
+/// for the `catch_all` / `catch_all_ref` kinds.
+///
+/// Wasm spec 3.0 §4.5 — try_table catch encoding.
+pub const CatchEntry = struct {
+    kind: CatchKind,
+    tag_idx: u32,
+    label_idx: u32,
+};
+
+/// Phase 10+: exception-handling landing pad. One per `try_table`
+/// instruction in the function body. `block_idx` keys into
+/// `ZirFunc.blocks` (the `.try_table` BlockInfo); the interp
+/// unwinder uses this to associate a try_table label on the
+/// label stack with its catch-vec when `Trap.UncaughtException`
+/// propagates. `catches_start` / `catches_end` form a half-open
+/// slice into `ZirFunc.eh_catch_entries`.
+///
+/// Wasm spec 3.0 §3.3.10.6 — try_table catch metadata.
+pub const LandingPad = struct {
+    block_idx: u32,
+    catches_start: u32,
+    catches_end: u32,
+};
 
 /// Phase 10+: tail-call site record.
 pub const TailCallSite = struct {};
@@ -363,7 +402,14 @@ pub const ZirFunc = struct {
 
     // Phase 10+ — GC / EH / tail-call additional state.
     gc_root_map: ?GcRootMap = null,
-    eh_landing_pads: ?[]LandingPad = null,
+    /// One entry per `try_table` in body order (per ADR-0114 EH design,
+    /// interp-side metadata; codegen consumes the same data via
+    /// `engine/codegen/shared/exception_table.zig` at JIT time).
+    /// Owned slice; freed by `ZirFunc.deinit`.
+    eh_landing_pads: ?[]const LandingPad = null,
+    /// Flat backing store for all catch clauses across the function.
+    /// `LandingPad.catches_start..catches_end` indexes into this.
+    eh_catch_entries: ?[]const CatchEntry = null,
     tail_call_sites: ?[]TailCallSite = null,
 
     // Phase 8+ — optimisation passes.
@@ -401,6 +447,8 @@ pub const ZirFunc = struct {
         self.blocks.deinit(alloc);
         self.branch_targets.deinit(alloc);
         if (self.simd_consts) |sc| alloc.free(sc);
+        if (self.eh_landing_pads) |lps| alloc.free(lps);
+        if (self.eh_catch_entries) |ces| alloc.free(ces);
     }
 
     /// Total declared-locals count = original `func.locals.len`
@@ -452,6 +500,7 @@ test "ZirFunc.init: required fields populated, slots null" {
     try std.testing.expect(f.simd_lane_routing == null);
     try std.testing.expect(f.gc_root_map == null);
     try std.testing.expect(f.eh_landing_pads == null);
+    try std.testing.expect(f.eh_catch_entries == null);
     try std.testing.expect(f.tail_call_sites == null);
     try std.testing.expect(f.hoisted_constants == null);
     try std.testing.expect(f.bounds_check_elision_map == null);

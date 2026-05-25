@@ -136,8 +136,19 @@ pub const Lowerer = struct {
     /// Flushed to `out.simd_consts` at `run()` close.
     simd_consts: std.ArrayList([16]u8) = .empty,
 
+    /// Wasm 3.0 EH (ADR-0114). Builders for the per-function
+    /// landing-pad + catch-entry arrays. One LandingPad per
+    /// `try_table` opcode (appended at openTryTable); catch entries
+    /// land flat in `catch_entries` with `[start, end)` slice.
+    /// Flushed to `out.eh_landing_pads` / `out.eh_catch_entries`
+    /// at `run()` close.
+    landing_pads: std.ArrayList(zir.LandingPad) = .empty,
+    catch_entries: std.ArrayList(zir.CatchEntry) = .empty,
+
     fn run(self: *Lowerer) Error!void {
         errdefer self.simd_consts.deinit(self.alloc);
+        errdefer self.landing_pads.deinit(self.alloc);
+        errdefer self.catch_entries.deinit(self.alloc);
         var fn_done = false;
         while (!fn_done) {
             if (self.pos >= self.body.len) return Error.UnexpectedEnd;
@@ -152,6 +163,16 @@ pub const Lowerer = struct {
             self.out.simd_consts = try self.simd_consts.toOwnedSlice(self.alloc);
         } else {
             self.simd_consts.deinit(self.alloc);
+        }
+        if (self.landing_pads.items.len > 0) {
+            self.out.eh_landing_pads = try self.landing_pads.toOwnedSlice(self.alloc);
+        } else {
+            self.landing_pads.deinit(self.alloc);
+        }
+        if (self.catch_entries.items.len > 0) {
+            self.out.eh_catch_entries = try self.catch_entries.toOwnedSlice(self.alloc);
+        } else {
+            self.catch_entries.deinit(self.alloc);
         }
     }
 
@@ -729,19 +750,27 @@ pub const Lowerer = struct {
     }
 
     /// Wasm 3.0 EH `try_table` opener — mirrors `openBlock` but
-    /// inserts the catch-vec parse between `readBlockArity` and
-    /// the frame push. The catch vec is currently consumed-and-
-    /// discarded; full catch dispatch (label-types matching,
-    /// runtime unwind) lands at 10.E-5. The emitted ZirInstr's
-    /// payload + extra slots stay 0 — sufficient for the
-    /// foundation-shape interp at the current scope where the body
-    /// runs like a block (no exceptions actually raised).
+    /// parses the catch-vec into `Lowerer.catch_entries` between
+    /// `readBlockArity` and the frame push. Each opener appends one
+    /// `LandingPad` referencing the new block plus the half-open
+    /// catch-entry slice. The interp unwinder (10.E-5b) consumes
+    /// `ZirFunc.eh_landing_pads` keyed by the try_table label's
+    /// block_idx to find the matching catch on `Trap.UncaughtException`.
+    ///
+    /// Wasm spec 3.0 §3.3.10.6 — try_table.
     fn openTryTable(self: *Lowerer) Error!void {
         const arity = try self.readBlockArity();
-        try self.skipCatchVec();
+        const catches_start: u32 = @intCast(self.catch_entries.items.len);
+        try self.lowerCatchVec();
+        const catches_end: u32 = @intCast(self.catch_entries.items.len);
 
         if (self.block_stack_len == max_control_stack) return Error.ControlStackOverflow;
         if (self.unreachable_at_depth != null) {
+            // Dead-code try_table — the catch entries belong to no
+            // BlockInfo we'll emit; truncate them back to avoid
+            // dangling LandingPad-less catch data. Per D-093 dead-
+            // region discipline.
+            self.catch_entries.shrinkRetainingCapacity(catches_start);
             self.block_stack[self.block_stack_len] = unreachable_block_sentinel;
             self.block_stack_len += 1;
             return;
@@ -754,34 +783,49 @@ pub const Lowerer = struct {
             .start_inst = start_inst,
             .end_inst = 0,
         });
+        try self.landing_pads.append(self.alloc, .{
+            .block_idx = block_idx,
+            .catches_start = catches_start,
+            .catches_end = catches_end,
+        });
         try self.emit(.try_table, block_idx, arity);
 
         self.block_stack[self.block_stack_len] = block_idx;
         self.block_stack_len += 1;
     }
 
-    /// Parse-and-discard the catch vec that follows `try_table`'s
-    /// blocktype. Spec catch encoding (Wasm 3.0 EH §4.5):
+    /// Decode the catch vec that follows `try_table`'s blocktype
+    /// into `Lowerer.catch_entries`. Spec catch encoding (Wasm 3.0
+    /// EH §4.5):
     ///   0x00 tag_idx label_idx  -- catch
     ///   0x01 tag_idx label_idx  -- catch_ref
     ///   0x02 label_idx          -- catch_all
     ///   0x03 label_idx          -- catch_all_ref
-    /// Storage for catch metadata lands at 10.E-5 when the interp
-    /// unwind path needs to dispatch on a matching catch.
-    fn skipCatchVec(self: *Lowerer) Error!void {
+    /// `tag_idx` is zeroed for the `_all` variants.
+    fn lowerCatchVec(self: *Lowerer) Error!void {
         const count = try leb128.readUleb128(u32, self.body, &self.pos);
         var i: u32 = 0;
         while (i < count) : (i += 1) {
             if (self.pos >= self.body.len) return Error.UnexpectedEnd;
-            const kind = self.body[self.pos];
+            const kind_byte = self.body[self.pos];
             self.pos += 1;
-            switch (kind) {
+            switch (kind_byte) {
                 0x00, 0x01 => {
-                    _ = try leb128.readUleb128(u32, self.body, &self.pos); // tag_idx
-                    _ = try leb128.readUleb128(u32, self.body, &self.pos); // label_idx
+                    const tag_idx = try leb128.readUleb128(u32, self.body, &self.pos);
+                    const label_idx = try leb128.readUleb128(u32, self.body, &self.pos);
+                    try self.catch_entries.append(self.alloc, .{
+                        .kind = if (kind_byte == 0x00) .catch_ else .catch_ref,
+                        .tag_idx = tag_idx,
+                        .label_idx = label_idx,
+                    });
                 },
                 0x02, 0x03 => {
-                    _ = try leb128.readUleb128(u32, self.body, &self.pos); // label_idx
+                    const label_idx = try leb128.readUleb128(u32, self.body, &self.pos);
+                    try self.catch_entries.append(self.alloc, .{
+                        .kind = if (kind_byte == 0x02) .catch_all else .catch_all_ref,
+                        .tag_idx = 0,
+                        .label_idx = label_idx,
+                    });
                 },
                 else => return Error.BadBlockType,
             }
