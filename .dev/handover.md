@@ -82,10 +82,13 @@
 - **10.E-codegen-2 = SHIPPED 2026-05-26** (`3b0000ad`):
   shared/unwind.zig FP-walk per ADR-0114 D5. 7 unit tests.
 - **10.E-codegen-3a = SHIPPED 2026-05-26** (`de2f79fe`):
-  arm64/frame_chain.zig — AAPCS64 frame-prefix read
-  (`[X29, #0]` = saved FP, `[X29, #8]` = saved LR). Returns
-  null for `fp == 0` (top-of-Wasm-stack sentinel). 4 unit
-  tests with synthetic 2-slot frame arrays.
+  arm64/frame_chain.zig — AAPCS64 frame-prefix read. 4 unit
+  tests.
+- **10.E-codegen-3b = SHIPPED 2026-05-26** (`dcffaba4`):
+  x86_64/frame_chain.zig — SysV/Win64 frame-prefix read
+  (`[RBP, #0]` = saved RBP, `[RBP, #8]` = saved RIP). Same
+  `loadFrame(fp) ?RawFrameLink` shape; same `fp == 0`
+  sentinel; same INVARIANT. 4 unit tests.
 - **Mac `zig build test-all`**: green (scope=unclear)。
 
 ## Phase 10 progress
@@ -99,25 +102,29 @@ ROADMAP §10 = 13-row task table。
     cross-module + spec corpus + regalloc terminator-class 残)
 - Pending: 10.E / 10.G / 10.P
 
-## Active task — 10.E-codegen-3b x86_64 frame_chain.zig
+## Active task — 10.E-codegen-3c FrameChainLoader adapter (arm64 + x86_64)
 
-10.E-codegen-3a (`de2f79fe`) landed arm64 frame_chain.zig. Next:
-mirror for x86_64 — `src/engine/codegen/x86_64/frame_chain.zig`
-reading the SysV/Win64 frame prefix planted by the prologue's
-`PUSH RBP; MOV RBP, RSP`:
-  [RBP, #0] = caller's saved RBP
-  [RBP, #8] = caller's saved RIP (return address)
+Both per-arch `frame_chain.zig` files landed (3a + 3b). Next: a
+per-arch adapter that bridges `frame_chain.loadFrame(fp)` to the
+shared `unwind.FrameChainLoader` interface. The adapter holds the
+PC-normalization callback (saved-LR / saved-RIP → module-relative
+PC via the active function's code-map). Initial atom: just the
+adapter struct + a trivial identity-PC-normalization variant for
+test integration, then a synthetic-frame integration test that
+walks `frame_chain` → `unwind.walk` → handler hit end-to-end.
 
-Same `loadFrame(fp) → ?RawFrameLink` shape as arm64; same
-`fp == 0` sentinel; same INVARIANT (no alloc / host-call /
-signal-check). 4 unit tests with synthetic 2-slot frame arrays.
+The PC normalization (absolute LR/RIP → relative pc lookup via a
+per-instance code-map) is a separate concern that lands when the
+JIT-side throw site identifier wiring goes in (post-trampoline);
+identity-normalization for now lets the adapter + walk integration
+land observable.
 
-Refs: ADR-0114 D6/D5, System V AMD64 §3.2.2, arm64/frame_chain.zig
-(landed) for the mirror shape.
+Refs: ADR-0114 D5/D6, unwind.zig (landed), frame_chain.zig per
+arch (landed).
 
 **Next sub-chunk candidates (names only, NO predictions)**:
-- 10.E-codegen-3b — x86_64 frame_chain.zig (active above)
-- 10.E-codegen-3c — zwasm_throw assembly stub per arch
+- 10.E-codegen-3c — FrameChainLoader adapter (active above)
+- 10.E-codegen-3d — zwasm_throw trampoline assembly stub per arch
 - 10.E-codegen-4 — per-arch op_exception_handling.zig
 - 10.TC-3f/g/h — tail-call follow-ons (deferred)
 - 10.E-N-4 — c_api instantiate → interp Runtime tag_param_counts

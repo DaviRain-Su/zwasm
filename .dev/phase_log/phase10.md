@@ -617,6 +617,19 @@ Design source: ADR-0114 + ADR-0117 (cross-subsystem invariants).
 
 **SHA pointer**: backfilled at Phase 10 close.
 
+- **10.E-codegen-3b** — x86_64 frame_chain.zig SysV/Win64
+  frame-prefix read (`dcffaba4`). Mirror of 10.E-codegen-3a's
+  arm64 version. `loadFrame(fp) ?RawFrameLink` reads the
+  RBP-chained prefix at `[RBP, #0]` (saved RBP) + `[RBP, #8]`
+  (saved RIP = return address). System V AMD64 ABI §3.2.2
+  and Win64 ABI both use the same RBP-chained frame layout
+  for this prefix shape, so one file covers both x86_64
+  targets — only the prologue's register-save list differs,
+  not the FP-chain shape. Same `fp == 0` sentinel; same
+  INVARIANT (no alloc / host-call / signal-check). 4 unit
+  tests parallel to arm64 version. Mac `test-all` GREEN;
+  lint exit 0. ADR-0114 D6, System V AMD64 §3.2.2.
+
 - **10.E-codegen-3a** — arm64 frame_chain.zig AAPCS64
   frame-prefix read (`de2f79fe`). Per ADR-0114 D6 + AAPCS64
   §6.4: `loadFrame(fp) ?RawFrameLink` reads the prologue-
