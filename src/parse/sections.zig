@@ -35,6 +35,10 @@ pub const Error = error{
     /// build's `wasm_level < .v3_0` — comptime gate per ADR-0111
     /// Decision 1.
     Memory64Unsupported,
+    /// Wasm 3.0 EH proposal §4.5: a tag entry's attribute byte must
+    /// be `0x00` (exception tag); other values are reserved for
+    /// future extensions and rejected at parse time.
+    InvalidTagAttribute,
     OutOfMemory,
 } || leb128.Error;
 
@@ -99,6 +103,41 @@ pub fn decodeFunctions(alloc: Allocator, body: []const u8) Error![]u32 {
     }
     if (pos != body.len) return Error.TrailingBytes;
     return indices;
+}
+
+/// Wasm 3.0 exception-handling proposal §4.5: one tag-section
+/// entry. The attribute byte is currently `0x00` (exception tag)
+/// only; `typeidx` references a function-type whose params
+/// describe the exception's payload (results MUST be empty per
+/// the EH proposal validation rules — enforced when the
+/// tag-resolution wiring lands at 10.E-N).
+pub const TagEntry = struct {
+    attribute: u8,
+    typeidx: u32,
+};
+
+/// Decode the body of a tag section (`SectionId.tag`):
+///   vec(tag)
+///   tag := attr:byte typeidx:u32
+/// Returns a slice of TagEntry. Caller owns the allocation
+/// (single arena drop per the file-level memory contract).
+///
+/// Wasm 3.0 EH proposal §4.5 binary format.
+pub fn decodeTags(alloc: Allocator, body: []const u8) Error![]TagEntry {
+    var pos: usize = 0;
+    const count = try leb128.readUleb128(u32, body, &pos);
+    const entries = try alloc.alloc(TagEntry, count);
+    errdefer alloc.free(entries);
+    for (entries) |*entry| {
+        if (pos >= body.len) return Error.UnexpectedEnd;
+        const attr = body[pos];
+        pos += 1;
+        if (attr != 0x00) return Error.InvalidTagAttribute;
+        const typeidx = try leb128.readUleb128(u32, body, &pos);
+        entry.* = .{ .attribute = attr, .typeidx = typeidx };
+    }
+    if (pos != body.len) return Error.TrailingBytes;
+    return entries;
 }
 
 pub const ImportKind = enum(u8) {
@@ -626,6 +665,48 @@ test "decodeFunctions: rejects truncated input" {
 
 test "decodeFunctions: rejects trailing bytes" {
     const r = decodeFunctions(testing.allocator, &[_]u8{ 0x01, 0x00, 0xFF });
+    try testing.expectError(Error.TrailingBytes, r);
+}
+
+test "decodeTags: empty body (count=0) yields empty slice" {
+    const out = try decodeTags(testing.allocator, &[_]u8{0x00});
+    defer testing.allocator.free(out);
+    try testing.expectEqual(@as(usize, 0), out.len);
+}
+
+test "decodeTags: single entry (attr=0x00 typeidx=0)" {
+    // body: count=1, attr=0x00, typeidx=0.
+    const out = try decodeTags(testing.allocator, &[_]u8{ 0x01, 0x00, 0x00 });
+    defer testing.allocator.free(out);
+    try testing.expectEqual(@as(usize, 1), out.len);
+    try testing.expectEqual(@as(u8, 0x00), out[0].attribute);
+    try testing.expectEqual(@as(u32, 0), out[0].typeidx);
+}
+
+test "decodeTags: three entries preserved in order" {
+    // body: count=3, (attr=0 typeidx=0), (attr=0 typeidx=2), (attr=0 typeidx=5)
+    const out = try decodeTags(testing.allocator, &[_]u8{ 0x03, 0x00, 0x00, 0x00, 0x02, 0x00, 0x05 });
+    defer testing.allocator.free(out);
+    try testing.expectEqual(@as(usize, 3), out.len);
+    try testing.expectEqual(@as(u32, 0), out[0].typeidx);
+    try testing.expectEqual(@as(u32, 2), out[1].typeidx);
+    try testing.expectEqual(@as(u32, 5), out[2].typeidx);
+}
+
+test "decodeTags: rejects non-zero attribute byte (reserved for future use)" {
+    // attr=0x01 is reserved; only 0x00 (exception tag) is currently valid.
+    const r = decodeTags(testing.allocator, &[_]u8{ 0x01, 0x01, 0x00 });
+    try testing.expectError(Error.InvalidTagAttribute, r);
+}
+
+test "decodeTags: rejects truncated input (missing typeidx)" {
+    // count=1, attr=0x00, but no typeidx follows.
+    const r = decodeTags(testing.allocator, &[_]u8{ 0x01, 0x00 });
+    try testing.expectError(leb128.Error.Truncated, r);
+}
+
+test "decodeTags: rejects trailing bytes" {
+    const r = decodeTags(testing.allocator, &[_]u8{ 0x01, 0x00, 0x00, 0xFF });
     try testing.expectError(Error.TrailingBytes, r);
 }
 
