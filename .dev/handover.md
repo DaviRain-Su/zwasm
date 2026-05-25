@@ -14,7 +14,7 @@
 - **10.TC-1 = SHIPPED** (`a83e095f`).
 - **10.G-i31-ops / 10.G-2 / 10.G-3 = SHIPPED**.
 - **10.E interp side = COMPLETE**.
-- **10.E codegen IT-1..IT-4 = SHIPPED**:
+- **10.E codegen IT-1..IT-5 = SHIPPED**:
   - IT-1 (`c3424788`): EmitCtx.exception_table_builder wiring
   - IT-2 (`2d938570`): try_table emit body — HandlerEntry per
     catch, pc_end patched at matching `end`
@@ -22,47 +22,57 @@
     trap (dispatcher CALL deferred to IT-6)
   - IT-4 (`5b75bee5`): linker populates per-Instance
     CodeMap entries on JitModule
+  - IT-5 (`14fafdc6`): CompiledWasm.exception_table aggregates
+    per-function HandlerEntry slices with module-relative pcs
 
 ## ROADMAP §10 progress
 
 - DONE (7/13): 10.0 / 10.C9 / 10.J / 10.F / 10.Z / 10.T / 10.D
 - IN-PROGRESS (4): 10.M (7/8) / 10.R (5/5; gated on 10.G) /
   10.TC (codegen + cross-module + spec corpus 残) /
-  10.E (codegen integration IT-5..IT-6 残)
+  10.E (codegen integration IT-6 残)
 - Pending (3): 10.G / 10.P (close gate)
 
-## Active task — Phase 10.E IT-5
+## Active task — Phase 10.E IT-6
 
-Next continuous chunk picks up at **IT-5** per
-`.dev/phase10_eh_integration_plan.md` §IT-5 — add an
-`exception_table: ExceptionTable` field to `CompiledWasm`,
-collecting the per-function `FuncResult.out.exception_handlers`
-slices (already produced by IT-2) into a single per-Instance
-table. Touchpoint: `src/engine/runner.zig` (CompiledWasm) +
-`src/engine/compile.zig` (the compileWasm pipeline that
-assembles CompiledWasm). Acceptance: a CompiledWasm built from
-a try_table-containing module has
-`exception_table.entries.len > 0`.
+Next continuous chunk picks up at **IT-6** per
+`.dev/phase10_eh_integration_plan.md` §IT-6 — per-arch
+`zwasm_throw` assembly trampoline glue. The trampoline captures
+throw-site FP + LR (X29 / X30 on arm64; RBP / saved-RIP on
+x86_64), calls `shared/zwasm_throw.dispatchThrow(table,
+code_map, throw_site, max_depth)`, and on the result either
+JMPs to the landing pad (via `sp_restore.emitSpRestoreFull`) or
+sets `trap_flag=1` and unwinds via the standard trap epilogue.
 
-After IT-5: IT-6 (per-arch zwasm_throw trampoline glue) — the
-load-bearing piece that makes throw actually call dispatchThrow
-instead of trapping unconditionally.
+This is the load-bearing piece: once IT-6 ships, throw / throw_ref
+actually call dispatchThrow instead of trapping unconditionally
+(the IT-3 minimum shape). Realistic scope: IT-6 may itself need
+to split into IT-6a (assembly stub design + `naked` Zig vs `.s`
+ADR decision) and IT-6b (per-arch impl + integration with
+op_throw.emit replacing the trap-only path). The integration
+plan §IT-6 cites the choice between pure-Zig + `naked` attribute
+and per-arch `.s` files as an open design question.
+
+After IT-6: row 10.E flips DONE; spec corpus fixture run
+(wasm-3.0-assert/exception-handling/) becomes runnable.
 
 ## Open questions / blockers
 
 - 10.G-4 (struct ops) — blocked-by GC heap impl
 - 10.M-realworld — toolchain-blocked (clang_wasm64 fixture)
 - 10.P close gate — user touchpoint by construction
+- IT-6 design choice: pure-Zig `naked` fn vs per-arch `.s` file
+  for the trampoline entry stub (`.dev/phase10_eh_integration_plan.md`
+  §IT-6 "Open questions for user collab")
 - IT-2 HandlerEntry.landing_pad_pc currently holds the raw
-  relative br-depth (placeholder); IT-6 resolves to a JIT
-  byte offset
-- IT-4 CodeMap.Entry.frame_bytes is a 0 placeholder; IT-6's
-  SP-restore path populates it for handler dispatch
+  relative br-depth (placeholder); IT-6 resolves it
+- IT-4 CodeMap.Entry.frame_bytes is a 0 placeholder; IT-6
+  SP-restore path populates it
 
 ## Key refs
 
 - **Integration plan** (`.dev/phase10_eh_integration_plan.md`) —
-  IT-1..IT-6 (IT-1..IT-4 shipped; IT-5 next)
+  IT-1..IT-6 (IT-1..IT-5 shipped; IT-6 next; last in chain)
 - **ADR-0114** (EH design)
 - **ADR-0118** (`.dev/decisions/0118_meta_loop_consolidation.md`)
 - **ROADMAP §10**
