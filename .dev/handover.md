@@ -27,40 +27,23 @@
   + Value helpers + 0xFB GC prefix dispatcher。
 - **10.G-2 = SHIPPED** (`d5810162`): needs_gc_heap parse-time
   predicate.
-- **10.E-1..3b = SHIPPED** (`ffb56dd7` / `390856f8` `cec18589` /
-  `c2238c9a` / `da8880a9`): tag-section parser + TagEntry +
-  BlockKind.try_table + try_table opcode parse skeleton.
-  Detail: phase_log §10.E。
-- **10.E-4 = SHIPPED** (`753aec8f`): throw / throw_ref opcodes
-  (validator + interp Trap.UncaughtException emission).
-- **10.E-5a = SHIPPED** (`da1cec05`): EH catch metadata storage
-  + lowerer wire-up. Detail: phase_log §10.E。
-- **10.E-5b = SHIPPED** (`d8a4aa43`): interp throw unwinder
-  (catch_all only). Detail: phase_log §10.E。
-- **10.E-N-1 = SHIPPED 2026-05-26** (`aa60df61`): Module.tags
-  wiring through validator. Detail: phase_log §10.E。
-- **10.E-5c = SHIPPED 2026-05-26** (`3cbb12aa`): interp catch_
-  dispatch (tag-equality + payload push); bundles 10.E-N-2
-  Runtime.tag_param_counts. Detail: phase_log §10.E。
-- **10.E-5d = SHIPPED 2026-05-26** (`82be1d75`): cross-frame
-  throw unwind via Runtime.pending_exception slot + invoke()
-  post-popFrame catch retry. Detail: phase_log §10.E。
-- **10.E-exnref-a = SHIPPED 2026-05-26** (`49cf7157`): Exception
-  heap object + catch_all_ref / catch_ref dispatch arms.
-  Detail: phase_log §10.E。
-- **10.E-exnref-b = SHIPPED 2026-05-26** (`e448356d`): throw_ref
-  interp impl (re-raise via exnref). Detail: phase_log §10.E。
-- **10.E-N-3 = SHIPPED 2026-05-26** (`d2f8e5c7`): production
-  tag_param_counts wiring through `CompiledWasm`.
-  Detail: phase_log §10.E。
+- **10.E interp-side = COMPLETE 2026-05-26** (10.E-1..3b /
+  10.E-4 / 10.E-5a..d / 10.E-N-1..3 / 10.E-exnref-a..b; last
+  SHA `d2f8e5c7`): tag-section parser → throw/throw_ref →
+  try_table catch metadata + all 4 catch flavors dispatch +
+  cross-frame unwind + exnref + production tag_param_counts.
+  Detail: phase_log §10.E (15 entries).
 - **10.G-3 = SHIPPED 2026-05-26** (`8bebcc76`): detectNeedsGcHeap
   scans heap-top reftype bytes across sections. Detail:
   phase_log §10.G。
 - **10.M-5b = SHIPPED 2026-05-26** (`37771003`): SIMD lane-memarg
-  bit-6 memidx decode (validator_simd + lower_simd). Closes the
-  10.M-4b carry-over; non-lane SIMD load/store already worked
-  via the scalar emitMemarg. 3 new lower_tests. Detail:
-  phase_log §10.M。
+  bit-6 memidx decode. Detail: phase_log §10.M。
+- **10.M-spec-corpus = SHIPPED 2026-05-26** (`3d6aba35`): bake 5
+  additional memory64 wast manifests (align64 / load64 /
+  memory_grow64 / memory_redundancy64 / memory_trap64). Smoke
+  set extends from 4 to 9 manifests; runner skeleton reports
+  memory64 directives 150 → 835. memory64.wast excluded
+  (non-standard syntax). Detail: phase_log §10.M。
 - **Mac `zig build test-all`**: green (scope=unclear)。
 
 ## Phase 10 progress
@@ -74,28 +57,26 @@ ROADMAP §10 = 13-row task table。
     cross-module + spec corpus + regalloc terminator-class 残)
 - Pending: 10.E / 10.G / 10.P
 
-## Active task — 10.M-spec-corpus memory64 spec testsuite
+## Active task — 10.TC-3 codegen tail-call (regalloc terminator)
 
-The memory64 impl is now full-stack (parser + validator + runtime
-+ codegen + SIMD memarg). Bring up the spec corpus by importing
-the Wasm 3.0 memory64 proposal testsuite under
-`test/spec/wasm-3.0-assert/memory64/` (mirroring the
-tail-call / exception-handling directories), wiring it into the
-spec-assert runner with a 3.0-gated arm. Refs: existing
-`test/spec/wasm-3.0-assert/{tail-call,exception-handling}/`
-import pattern, `test/spec/spec_assert_runner_base.zig`,
-ADR-0050 (skip-impl ratchet for new corpus arrivals).
+memory64 spec corpus expansion (10.M-spec-corpus) shipped this
+cycle. EH + memory64 + GC parse-time predicate are at a clean
+stopping point. Pivot back to Tail Call codegen — ADR-0113 §A
+regalloc terminator-class extension + per-arch
+`op_tail_call.zig` codegen. Architectural-grade work; expect
+multi-cycle spike-first per `.claude/rules/architectural_spike.md`.
+Refs: ADR-0112, ADR-0113 §A, `src/engine/codegen/{arm64,x86_64}/`.
 
 **Next sub-chunk candidates (names only, NO predictions)**:
-- 10.M-spec-corpus — memory64 spec testsuite import (the active
-  task above)
 - 10.TC-3 — regalloc terminator-class + codegen tail-call
+  (the active task above)
 - 10.E-codegen — ADR-0114 D3-D6 codegen-side EH (exception_table,
   FP-walk unwind, zwasm_throw trampoline, op_exception_handling)
 - 10.E-N-4 — c_api instantiate → interp Runtime tag_param_counts
   wiring (only needed once Wasm-with-throw exercises the interp
   Runtime via c_api)
 - 10.G-4 — struct ops (needs GC heap impl first)
+- 10.M-realworld — clang_wasm64 realworld fixture
 
 ## Open questions / blockers
 

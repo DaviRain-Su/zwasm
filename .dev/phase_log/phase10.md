@@ -269,6 +269,29 @@ close: -Dwasm=v2_0 symbol-absence gate).
 
 ### Sub-chunks (commit-time order)
 
+- **10.M-spec-corpus** — bake 5 additional memory64 wast
+  manifests (`3d6aba35`). Extends the Wasm 3.0 smoke set's
+  memory64 coverage from 1 manifest (address64 only) to 6,
+  baking the full set of memory64-specific `*64.wast` files:
+  align64 / load64 / memory_grow64 / memory_redundancy64 /
+  memory_trap64. Each via
+  `bash scripts/regen_spec_3_0_assert.sh memory64 <name>`
+  (wast2json --enable-all + python distill into the canonical
+  directive lines). SMOKE array in the regen script extended
+  to match. `memory64.wast` itself excluded — non-standard
+  `(module definition ...)` syntax that wast2json rejects;
+  the spec-defined memory64 semantics are covered by the
+  other 6 manifests. spec_assert_runner_wasm_3_0 skeleton
+  (currently enumerate-and-count) now reports memory64
+  manifests=6 / module=37 / return=337 / trap=205 / invalid=83
+  / skip=62 (was 1/3/27/12/1/0 pre-extend); 9 total wasm-3.0
+  manifests / 835 directives. JIT-execute wiring for the
+  directives is gated on the runner's
+  `spec_assert_runner_base` callbacks pattern adoption per
+  the runner's own commentary — per-proposal impl-row scope,
+  not 10.M-spec-corpus's. Mac `test-all` GREEN; lint exit 0.
+  Per Phase 10 design plan §4.6 corpus 取り込み step.
+
 - **10.M-5b** — SIMD lane-memarg memory64 (`37771003`).
   Closes the 10.M-4b carry-over. `validator_simd.zig::
   readSimdMemarg` + `lower_simd.zig::emitMemargLane` now decode
