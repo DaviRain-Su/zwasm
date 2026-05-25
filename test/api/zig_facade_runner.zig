@@ -84,7 +84,7 @@ pub fn main(init: std.process.Init) !void {
             },
             .skip_wasi => {
                 skip_wasi += 1;
-                try stdout.print("SKIP-WASI    {s}: D-176 (defineWasi deferred to J.7)\n", .{entry.name});
+                try stdout.print("SKIP-WASI    {s}: WASI import name not in lookupWasiThunk (Phase 11 / D-177)\n", .{entry.name});
             },
             .skip_imports => {
                 skip_imports += 1;
@@ -111,6 +111,11 @@ pub fn main(init: std.process.Init) !void {
 
 const Outcome = union(enum) {
     pass,
+    /// Reserved for fixtures whose WASI requirements remain
+    /// outside v0.1 facade scope after J.7 (e.g. preopens land
+    /// at Phase 11). No fixture currently routes here, but the
+    /// runner keeps the variant so re-classification can happen
+    /// without an Outcome-shape change.
     skip_wasi,
     skip_imports,
     fail_parse: []const u8,
@@ -118,12 +123,13 @@ const Outcome = union(enum) {
 };
 
 fn runFixture(alloc: std.mem.Allocator, bytes: []const u8) Outcome {
-    // Pre-scan import section to classify the fixture before
-    // attempting `Engine.compile` (avoids spending the c_api
-    // arena setup on a SKIP-WASI fixture).
+    // Pre-scan import section to classify the fixture. WASI imports
+    // route through `Linker.defineWasi` (J.7); non-WASI host imports
+    // are out of v0.1 facade scope.
+    var needs_wasi = false;
     if (preScanImports(alloc, bytes)) |class| switch (class) {
         .none => {},
-        .wasi => return .skip_wasi,
+        .wasi => needs_wasi = true,
         .non_wasi => return .skip_imports,
     } else |_| {
         // Pre-scan parser failure surfaces as FAIL-PARSE in the
@@ -136,9 +142,20 @@ fn runFixture(alloc: std.mem.Allocator, bytes: []const u8) Outcome {
     var mod = eng.compile(bytes) catch |err| return .{ .fail_parse = @errorName(err) };
     defer mod.deinit();
 
+    if (needs_wasi) {
+        var lk = zwasm.Linker.init(&eng);
+        defer lk.deinit();
+        lk.defineWasi(.{}) catch return .{ .fail_inst = "defineWasi OOM" };
+        var inst = lk.instantiate(&mod) catch |err| switch (err) {
+            error.UnsupportedWasiImport => return .skip_wasi,
+            else => return .{ .fail_inst = @errorName(err) },
+        };
+        defer inst.deinit();
+        return .pass;
+    }
+
     var inst = mod.instantiate(.{}) catch |err| return .{ .fail_inst = @errorName(err) };
     defer inst.deinit();
-
     return .pass;
 }
 

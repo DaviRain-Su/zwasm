@@ -759,6 +759,50 @@ test "zwasm facade T1.12: cross-instance memory sharing via Linker.defineMemory"
     try std.testing.expectEqual(@as(i32, 42), try exp_mem.read(i32, 4));
 }
 
+// T1.13 fixture — imports wasi_snapshot_preview1.proc_exit
+// (i32 -> ()) and exports "go" which never calls it.
+// Instantiation succeeds (binding wires WASI thunk via Linker.defineWasi);
+// no syscall is exercised.
+const facade_wasi_smoke_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    // type: vec=2; [0] = (i32)->() (for proc_exit); [1] = ()->() (for go)
+    // body: 0x02, 0x60 0x01 0x7F 0x00, 0x60 0x00 0x00 = 8 bytes
+    0x01, 0x08, 0x02, 0x60, 0x01, 0x7F, 0x00, 0x60,
+    0x00, 0x00,
+    // import "wasi_snapshot_preview1" "proc_exit" func type 0
+    // body: vec=1, 22 'w...' 09 'p...' 00 00 = 1+1+22+1+9+1+1 = 36 bytes
+    0x02, 0x24, 0x01, 0x16, 0x77, 0x61,
+    0x73, 0x69, 0x5F, 0x73, 0x6E, 0x61, 0x70, 0x73,
+    0x68, 0x6F, 0x74, 0x5F, 0x70, 0x72, 0x65, 0x76,
+    0x69, 0x65, 0x77, 0x31, 0x09, 0x70, 0x72, 0x6F,
+    0x63, 0x5F, 0x65, 0x78, 0x69, 0x74, 0x00, 0x00,
+    // function: 1 fn, type 1
+    0x03, 0x02, 0x01, 0x01,
+    // export "go" func 1 (imports come first)
+    0x07, 0x06, 0x01, 0x02,
+    0x67, 0x6F, 0x00, 0x01,
+    // code: locals 0; end — entry 2, sec 4
+    0x0A, 0x04, 0x01, 0x02,
+    0x00, 0x0B,
+};
+
+test "zwasm facade T1.13: Linker.defineWasi smoke instantiation" {
+    var eng = try Engine.init(std.testing.allocator, .{});
+    defer eng.deinit();
+
+    var lk = Linker.init(&eng);
+    defer lk.deinit();
+    try lk.defineWasi(.{});
+
+    var mod = try eng.compile(&facade_wasi_smoke_wasm);
+    defer mod.deinit();
+
+    var inst = try lk.instantiate(&mod);
+    defer inst.deinit();
+    // Smoke: instantiate succeeds and ownership of the wasi_host
+    // transfers to the Store (`wasm_store_delete` will free it).
+}
+
 test "zwasm facade T1.4-types: Instance.invoke return type carries all 12 Trap variants" {
     const InvokeError = Instance.InvokeError;
     const info = @typeInfo(InvokeError).error_set orelse @compileError("expected concrete error_set");

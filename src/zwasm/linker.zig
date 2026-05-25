@@ -11,9 +11,11 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const _api_instance = @import("../api/instance.zig");
+const _api_wasi = @import("../api/wasi.zig");
 const _sections = @import("../parse/sections.zig");
 const _runtime = @import("../runtime/runtime.zig");
 const _runtime_import = @import("../runtime/instance/import.zig");
+const _wasi_host = @import("../wasi/host.zig");
 const _zir = @import("../ir/zir.zig");
 
 const _zwasm = @import("../zwasm.zig");
@@ -27,16 +29,36 @@ pub const Caller = _caller.Caller;
 
 pub const LinkError = error{
     UnknownImport,
+    /// A `wasi_snapshot_preview1` import whose name has no thunk
+    /// registered in `src/api/wasi.zig::lookupWasiThunk`. Distinct
+    /// from `UnknownImport` so callers can route these as
+    /// "phase-11 deferred" rather than treating them as fatal.
+    UnsupportedWasiImport,
     ImportKindMismatch,
     SignatureMismatch,
     InstantiateFailed,
+    WasiAlreadyDefined,
     OutOfMemory,
+};
+
+/// Bulk WASI configuration per ADR-0109 §3.8 +
+/// `docs/zig_api_design.md` §3.8. v0.1 carries the minimum
+/// surface; full preopens / env / stdin streams land at Phase 11
+/// (D-177).
+pub const WasiConfig = struct {
+    args: []const []const u8 = &.{},
+    // envs / preopens / stdin / stdout / stderr deferred to Phase 11 (D-177).
 };
 
 pub const Linker = struct {
     engine: *_engine.Engine,
     entries: std.ArrayList(Entry) = .empty,
     ctx_storage: std.ArrayList(CtxEntry) = .empty,
+    /// WASI host registered by `defineWasi`. Linker owns the
+    /// allocation; thunks receive the pointer via their `ctx`
+    /// argument (not via `store.wasi_host`, whose owning allocator
+    /// is `wasm_store_delete`'s c_allocator).
+    wasi_host: ?*_wasi_host.Host = null,
 
     pub const CtxEntry = struct {
         ptr: *anyopaque,
@@ -73,6 +95,28 @@ pub const Linker = struct {
         for (self.ctx_storage.items) |e| e.destroy_fn(self.engine.alloc, e.ptr);
         self.ctx_storage.deinit(self.engine.alloc);
         self.entries.deinit(self.engine.alloc);
+        if (self.wasi_host) |h| {
+            h.deinit();
+            self.engine.alloc.destroy(h);
+            self.wasi_host = null;
+        }
+    }
+
+    /// ADR-0109 §3.8 — bulk WASI bindings. After `defineWasi`,
+    /// any `(import "wasi_snapshot_preview1" "<name>" ...)` in
+    /// the module is satisfied by the registered host. v0.1
+    /// installs args; envs / preopens / stdin streams land at
+    /// Phase 11 (D-177). At-most-once per Linker.
+    pub fn defineWasi(self: *Linker, cfg: WasiConfig) !void {
+        if (self.wasi_host != null) return error.WasiAlreadyDefined;
+        const h = try self.engine.alloc.create(_wasi_host.Host);
+        errdefer self.engine.alloc.destroy(h);
+        h.* = try _wasi_host.Host.init(self.engine.alloc);
+        errdefer h.deinit();
+
+        if (cfg.args.len > 0) try h.setArgs(cfg.args);
+
+        self.wasi_host = h;
     }
 
     fn destroyForCtx(comptime Ctx: type) *const fn (Allocator, *anyopaque) void {
@@ -154,7 +198,30 @@ pub const Linker = struct {
                 module_types = _sections.decodeTypes(scratch, ts.body) catch return error.InstantiateFailed;
             }
 
+            // Each WASI thunk receives the host via its `ctx`
+            // argument (`host_call.ctx = host`), so we deliberately
+            // do NOT write `store.wasi_host` here — that field's
+            // owning allocator is `wasm_store_delete`'s c_allocator,
+            // while ours is the Engine's user-supplied allocator.
+            // The Linker keeps ownership of the host across all
+            // instances created from it.
+
             for (decoded.items) |it| {
+                // ADR-0109 §3.8 — WASI shortcut: any
+                // `wasi_snapshot_preview1` import resolves through
+                // the registered host even if no entry was added
+                // via defineFunc.
+                if (std.mem.eql(u8, it.module, "wasi_snapshot_preview1")) {
+                    if (it.kind != .func) return error.ImportKindMismatch;
+                    const host = self.wasi_host orelse return error.UnknownImport;
+                    const thunk = _api_wasi.lookupWasiThunk(it.name) orelse return error.UnsupportedWasiImport;
+                    bindings_list.append(scratch, .{ .func = .{
+                        .host_call = .{ .fn_ptr = thunk, .ctx = @ptrCast(host) },
+                        .source = .wasi,
+                    } }) catch return error.OutOfMemory;
+                    continue;
+                }
+
                 const entry = self.findEntry(it.module, it.name) orelse return error.UnknownImport;
                 switch (it.kind) {
                     .func => {
