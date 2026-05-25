@@ -10,6 +10,8 @@
 //!
 //! Zone 2 (`src/engine/codegen/x86_64/ops/`).
 
+const std = @import("std");
+
 const meta = @import("../../../../../instruction/wasm_3_0/try_table.zig");
 const ctx_mod = @import("../../ctx.zig");
 const zir = @import("../../../../../ir/zir.zig");
@@ -24,7 +26,10 @@ pub const n_successor_edges: u8 = 1;
 pub const is_safepoint: bool = false;
 
 pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
-    _ = ctx;
     _ = ins;
+    // IT-1 invariant — compile() MUST allocate the per-function
+    // ExceptionTable.Builder when any try_table op is present.
+    // Failure here means the IT-1 scan/wiring regressed.
+    std.debug.assert(ctx.exception_table_builder != null);
     return error.UnsupportedOp;
 }

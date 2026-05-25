@@ -18,6 +18,7 @@ const emit = @import("emit.zig");
 const ZirFunc = zir.ZirFunc;
 const compile = emit.compile;
 const deinit = emit.deinit;
+const Error = emit.Error;
 
 const testing = std.testing;
 
@@ -257,4 +258,26 @@ test "compile: br_if 0 — forward CBNZ fixup" {
     const body0 = prologue.body_start_offset(false);
     const cbnz = std.mem.readInt(u32, out.bytes[body0 + 4 ..][0..4], .little);
     try testing.expectEqual(@as(u32, inst.encCbnzW(9, 2)), cbnz);
+}
+
+test "compile: try_table reaches per-op emit with ExceptionTable.Builder wired (IT-1)" {
+    // Phase 10 EH integration IT-1 — compile() detects `.try_table`
+    // ops in func.instrs and allocates a per-function
+    // `ExceptionTable.Builder`, threading it through
+    // `ctx.exception_table_builder`. The per-op stub still returns
+    // `UnsupportedOp` (IT-2 lands the emit body); this test only
+    // verifies the dispatcher reaches the stub with the builder
+    // wired (the stub's `std.debug.assert(builder != null)` would
+    // panic otherwise).
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .try_table, .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{} };
+    const alloc: regalloc.Allocation = .{ .slots = &[_]u16{}, .n_slots = 0 };
+    try testing.expectError(
+        Error.UnsupportedOp,
+        compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32),
+    );
 }

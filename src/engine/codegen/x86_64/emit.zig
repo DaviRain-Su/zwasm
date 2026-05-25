@@ -50,6 +50,7 @@ const inst = @import("inst.zig");
 const usage = @import("usage.zig");
 const abi = @import("abi.zig");
 const jit_abi = @import("../shared/jit_abi.zig");
+const exception_table = @import("../shared/exception_table.zig");
 const types = @import("types.zig");
 const ctx_mod = @import("ctx.zig");
 const label_mod = @import("label.zig");
@@ -636,6 +637,20 @@ pub fn compile(
     // `as-memory.grow-size`). Mirror of arm64 7.5-emit-deadcode.
     var dead_code: bool = false;
 
+    // EH integration IT-1 (ADR-0114 D2 + phase10_eh_integration_plan
+    // §IT-1): scan once for try_table presence and allocate a
+    // per-function `ExceptionTable.Builder`. Mirror of the arm64
+    // setup; the per-op `try_table.emit` populates entries.
+    var has_try_table: bool = false;
+    for (func.instrs.items) |scan_ins| {
+        if (scan_ins.op == .try_table) {
+            has_try_table = true;
+            break;
+        }
+    }
+    var eh_builder: exception_table.Builder = .empty;
+    defer eh_builder.deinit(allocator);
+
     // §9.12-B / B53+ (ADR-0075) — per-function emit context.
     // B53 substrate; B54 wires the first consumer (`i32.div_s`).
     // B73 added `dead_code` pointer for unreachable adapter.
@@ -668,6 +683,7 @@ pub fn compile(
         .local_disps = layout.disps,
         .stack_probe_fixup = stack_probe_fixup,
         .memory0_idx_type = memory0_idx_type,
+        .exception_table_builder = if (has_try_table) &eh_builder else null,
     });
 
     for (func.instrs.items) |ins| {

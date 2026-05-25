@@ -60,6 +60,7 @@ const computeOutgoingMaxBytes = setup.computeOutgoingMaxBytes;
 const computeLocalLayout = setup.computeLocalLayout;
 const LocalLayout = setup.LocalLayout;
 const jit_abi = @import("../shared/jit_abi.zig");
+const exception_table = @import("../shared/exception_table.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
 const op_const = @import("op_const.zig");
@@ -614,6 +615,23 @@ pub fn compile(
     else
         0;
 
+    // EH integration IT-1 (ADR-0114 D2 + phase10_eh_integration_plan
+    // §IT-1): scan once for try_table presence and allocate a
+    // per-function `ExceptionTable.Builder` on the function-emit
+    // arena. The per-op `try_table.emit` populates entries; cycles
+    // IT-2..IT-5 fold the builder into the per-Instance
+    // `CompiledWasm.exception_table`. Functions without EH pay one
+    // linear scan + no allocation (`.empty` ArrayList).
+    var has_try_table: bool = false;
+    for (func.instrs.items) |scan_ins| {
+        if (scan_ins.op == .try_table) {
+            has_try_table = true;
+            break;
+        }
+    }
+    var eh_builder: exception_table.Builder = .empty;
+    defer eh_builder.deinit(allocator);
+
     // Bundle compile()'s mutable state behind a pointer-based
     // EmitCtx so extracted op-handler modules (op_const, op_alu,
     // …) observe the same backing storage as the still-inlined
@@ -645,6 +663,7 @@ pub fn compile(
         .globals_offsets = globals_offsets,
         .globals_valtypes = globals_valtypes,
         .memory0_idx_type = memory0_idx_type,
+        .exception_table_builder = if (has_try_table) &eh_builder else null,
     };
 
     // §9.7 / 7.5-emit-deadcode: track polymorphic-stack dead

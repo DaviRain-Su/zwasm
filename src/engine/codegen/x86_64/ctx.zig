@@ -69,6 +69,10 @@ pub const InitArgs = struct {
     stack_probe_fixup: u32,
     /// ADR-0111 D4 — see EmitCtx field of the same name.
     memory0_idx_type: sections.MemoryEntry.IdxType = .i32,
+    /// EH integration IT-1 — see EmitCtx field of the same name.
+    /// Defaults to `null`; populated by `compile()` only when the
+    /// function contains a `try_table` op.
+    exception_table_builder: ?*exception_table.Builder = null,
 };
 
 /// Per-function emit context for x86_64. Threaded as `*EmitCtx`
@@ -244,6 +248,7 @@ pub const EmitCtx = struct {
             .local_disps = args.local_disps,
             .stack_probe_fixup = args.stack_probe_fixup,
             .memory0_idx_type = args.memory0_idx_type,
+            .exception_table_builder = args.exception_table_builder,
         };
     }
 

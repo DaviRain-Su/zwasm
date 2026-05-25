@@ -810,6 +810,13 @@ const x86_64_i64_extend8_s = @import("x86_64/ops/wasm_2_0/i64_extend8_s.zig");
 const x86_64_i64_extend16_s = @import("x86_64/ops/wasm_2_0/i64_extend16_s.zig");
 const x86_64_i64_extend32_s = @import("x86_64/ops/wasm_2_0/i64_extend32_s.zig");
 
+// Wasm 3.0 EH (ADR-0114) — IT-1 routes try_table through the
+// per-op file so the stub's `exception_table_builder` invariant
+// assert exercises the compile() wiring. throw / throw_ref join
+// at IT-3 when their bodies materialize.
+const arm64_try_table = @import("arm64/ops/wasm_3_0/try_table.zig");
+const x86_64_try_table = @import("x86_64/ops/wasm_3_0/try_table.zig");
+
 /// Tuple of all migrated arm64 per-op modules.
 pub const collected_arm64_ops = .{
     arm64_i32_add,
@@ -1160,6 +1167,7 @@ pub const collected_arm64_ops = .{
     arm64_i64x2_splat,
     arm64_f32x4_splat,
     arm64_f64x2_splat,
+    arm64_try_table,
 };
 
 /// Tuple of all migrated x86_64 per-op modules.
@@ -1640,4 +1648,7 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_f32x4_demote_f64x2_zero,
     x86_64_i32x4_trunc_sat_f32x4_s,
     x86_64_i32x4_trunc_sat_f32x4_u,
+    // Wasm 3.0 EH (ADR-0114 D2) — IT-1 try_table stub routes here
+    // for its `exception_table_builder` invariant assert.
+    x86_64_try_table,
 };

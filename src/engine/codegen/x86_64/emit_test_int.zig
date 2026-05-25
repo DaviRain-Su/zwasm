@@ -1850,3 +1850,23 @@ test "compile: self-recursive (i64)->i64 — probe + i64-result marshal (D-165 c
     }
     try testing.expect(rt_restore_found);
 }
+
+test "compile: try_table reaches per-op emit with ExceptionTable.Builder wired (IT-1)" {
+    // Phase 10 EH integration IT-1 — compile() detects `.try_table`
+    // ops in func.instrs and allocates a per-function
+    // `ExceptionTable.Builder`. Per-op stub's
+    // `std.debug.assert(builder != null)` would panic if the
+    // wiring regressed; here we just confirm the dispatcher
+    // reaches the stub and returns `UnsupportedOp` cleanly.
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .try_table, .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{} };
+    const alloc: regalloc.Allocation = .{ .slots = &[_]u16{}, .n_slots = 0 };
+    try testing.expectError(
+        Error.UnsupportedOp,
+        compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32),
+    );
+}
