@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# Regenerate Wasm 3.0 spec corpus with full assertion manifests.
+# Companion to `scripts/regen_spec_{1,2}_0_assert.sh`; same
+# wast2json + python distill pipeline, but consumes the
+# `test/spec/wasm-3.0-assert/<proposal>/raw/` corpus imported by
+# `scripts/import_proposal_corpus.sh` (10.T-1).
+#
+# 10.T-2a — smoke bake of 1 canonical wast per proposal to
+# validate the wast2json pipeline against the 5 Wasm 3.0 corpora.
+# Full bake + runner skeleton is 10.T-2b territory (when
+# `spec_assert_runner_wasm_3_0.zig` exists to consume the
+# manifests).
+#
+# Usage:
+#   bash scripts/regen_spec_3_0_assert.sh
+#       Bake the curated smoke set (1 wast/proposal) into
+#       `test/spec/wasm-3.0-assert/<proposal>/<name>/`.
+#   bash scripts/regen_spec_3_0_assert.sh <proposal> <name>
+#       Bake a specific .wast (must exist in raw/).
+#
+# Per Phase 10 design plan §4.6 corpus 取り込み手順 step 2.
+
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+DEST_ROOT=test/spec/wasm-3.0-assert
+
+if ! command -v wast2json >/dev/null 2>&1; then
+    echo "[regen_spec_3_0_assert] wast2json not in PATH (need wabt; nix develop?)" >&2
+    exit 1
+fi
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "[regen_spec_3_0_assert] python3 not in PATH" >&2
+    exit 1
+fi
+
+# Smoke set: 1 canonical wast per proposal that exercises the
+# proposal-specific feature (NOT a base-spec re-export). These
+# anchor the wast2json + manifest pipeline; 10.T-2b expands.
+declare -a SMOKE=(
+    "memory64/address64"
+    "tail-call/return_call"
+    "exception-handling/try_table"
+    "gc/struct"
+    "function-references/ref"
+)
+
+bake_one() {
+    local proposal="$1"
+    local name="$2"
+    local src="$DEST_ROOT/$proposal/raw/$name.wast"
+
+    if [ ! -f "$src" ]; then
+        echo "[bake] $proposal/$name: missing $src (run import_proposal_corpus.sh --copy $proposal first)" >&2
+        return 1
+    fi
+
+    local out_dir="$DEST_ROOT/$proposal/$name"
+    rm -rf "$out_dir"
+    mkdir -p "$out_dir"
+
+    local tmp; tmp=$(mktemp -d)
+    trap "rm -rf '$tmp'" RETURN
+
+    # --enable-all covers all 5 proposals + their interactions
+    # (e.g. EH × GC, tail-call × ref-types). wast2json's
+    # decoder is permissive; the validator inside zwasm is
+    # what enforces actual conformance.
+    if ! wast2json --enable-all "$src" -o "$tmp/$name.json" >"$tmp/w2j.err" 2>&1; then
+        echo "[bake] $proposal/$name: wast2json rejected — see $tmp/w2j.err" >&2
+        cat "$tmp/w2j.err" >&2
+        rm -rf "$tmp"
+        return 1
+    fi
+
+    # Distill the JSON into the same manifest.txt format the
+    # wasm-{1,2}.0-assert runners consume. Reuse the same
+    # directive vocabulary; runner-specific filtering is
+    # 10.T-2b's responsibility.
+    python3 - "$tmp/$name.json" "$out_dir/manifest.txt" <<'PY'
+import json, sys
+src, dst = sys.argv[1], sys.argv[2]
+d = json.load(open(src))
+def fmt(v):
+    return f"{v['type']}:{v.get('value','?')}"
+lines = []
+for c in d['commands']:
+    t = c.get('type')
+    if t == 'module':
+        lines.append('module ' + c['filename'])
+    elif t == 'assert_return':
+        a = c['action']
+        if a.get('type') != 'invoke':
+            lines.append('skip-impl non-invoke-action')
+            continue
+        args = a.get('args', [])
+        results = c.get('expected', [])
+        args_s = ' '.join(fmt(x) for x in args) if args else '()'
+        results_s = ' '.join(fmt(x) for x in results) if results else '()'
+        lines.append(f'assert_return {a["field"]} {args_s} -> {results_s}')
+    elif t == 'assert_trap':
+        a = c['action']
+        args = a.get('args', []) if a.get('type') == 'invoke' else []
+        args_s = ' '.join(fmt(x) for x in args) if args else '()'
+        field = a.get('field', '<non-invoke>')
+        lines.append(f'assert_trap {field} {args_s}')
+    elif t == 'assert_invalid':
+        lines.append(f'assert_invalid {c.get("filename", "<inline>")}')
+    elif t == 'assert_malformed':
+        if c.get('module_type') == 'binary' and 'filename' in c:
+            lines.append(f'assert_malformed {c["filename"]}')
+        else:
+            lines.append('skip-adr-skip_text_format_parser directive-assert_malformed-text')
+    elif t == 'assert_exception':
+        a = c.get('action', {})
+        args = a.get('args', []) if a.get('type') == 'invoke' else []
+        args_s = ' '.join(fmt(x) for x in args) if args else '()'
+        field = a.get('field', '<non-invoke>')
+        lines.append(f'assert_exception {field} {args_s}')
+    else:
+        lines.append(f'skip-impl directive-{t}')
+with open(dst, 'w') as f:
+    f.write('\n'.join(lines) + '\n')
+PY
+
+    # Copy referenced .wasm artifacts (module / assert_invalid /
+    # assert_malformed) — same shape as the 1.0/2.0 bake.
+    while read -r line; do
+        # shellcheck disable=SC2086
+        set -- $line
+        case "$1" in
+            module|assert_invalid|assert_malformed)
+                [ -f "$tmp/$2" ] && cp "$tmp/$2" "$out_dir/" ;;
+        esac
+    done < "$out_dir/manifest.txt"
+
+    rm -rf "$tmp"
+    trap - RETURN
+
+    local n_mod n_ret n_trap
+    n_mod=$(grep -c '^module ' "$out_dir/manifest.txt" || true)
+    n_ret=$(grep -c '^assert_return ' "$out_dir/manifest.txt" || true)
+    n_trap=$(grep -c '^assert_trap ' "$out_dir/manifest.txt" || true)
+    printf "[bake] %-22s %-15s module=%-3s return=%-4s trap=%-3s\n" \
+        "$proposal" "$name" "$n_mod" "$n_ret" "$n_trap"
+}
+
+if [ $# -eq 2 ]; then
+    bake_one "$1" "$2"
+else
+    for entry in "${SMOKE[@]}"; do
+        proposal="${entry%/*}"
+        name="${entry#*/}"
+        bake_one "$proposal" "$name" || true
+    done
+fi

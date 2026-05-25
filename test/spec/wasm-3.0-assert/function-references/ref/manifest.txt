@@ -1,0 +1,13 @@
+module ref.0.wasm
+assert_invalid ref.1.wasm
+assert_invalid ref.2.wasm
+assert_invalid ref.3.wasm
+assert_invalid ref.4.wasm
+assert_invalid ref.5.wasm
+assert_invalid ref.6.wasm
+assert_invalid ref.7.wasm
+assert_invalid ref.8.wasm
+assert_invalid ref.9.wasm
+assert_invalid ref.10.wasm
+assert_invalid ref.11.wasm
+assert_invalid ref.12.wasm
