@@ -70,7 +70,13 @@ chunks queued)
   (host-side standalone construction; Extern wrap → `wasm
   _instance_new(imports[])` シナリオ用) (planned)
 - **10.F-D172** — `wasm_extern_as_table` + `wasm_table_get/
-  set/size/grow` (planned)
+  set/size` + minimal `wasm_ref_t` + `wasm_ref_delete` `[x] cf6f009e`
+  (pub const Table + pub const Ref + 6 c_api exports per
+  include/wasm.h:466-477 + 327-365; Tier-1 "wasm 2.0 c_api table
+  accessors: size + get + set round-trip (D-172)" PASS; B1 audit
+  gap (cross-instance table.set aliasing) unblocked;
+  `wasm_table_grow` deferred to next sub-chunk. File-size exempt
+  cap 2800→3000 via ADR-0099 (cap=N) override.)
 - **10.F-D173** — `wasm_extern_as_memory` + `wasm_memory_data
   /data_size/size/grow` + `wasm_memory_grow` `[x] 7a8c3ae2`
   (pub const Memory + 5 c_api exports per include/wasm.h:471-481;
