@@ -47,6 +47,8 @@ pub const Instance = @import("zwasm/instance.zig").Instance;
 pub const Trap = @import("zwasm/instance.zig").Trap;
 pub const TypedFunc = @import("zwasm/typed_func.zig").TypedFunc;
 pub const Memory = @import("zwasm/memory.zig").Memory;
+pub const Linker = @import("zwasm/linker.zig").Linker;
+pub const Caller = @import("zwasm/caller.zig").Caller;
 
 /// Zig-idiomatic tagged-union mirror of `wasm_val_t`.
 /// Wasm spec §4.2.2 — value representation at the host boundary
@@ -592,6 +594,169 @@ test "zwasm facade T1.8: NaN-boxing — f64 quiet NaN bits preserved" {
     const got = try qnan.call(.{});
     const got_bits: u64 = @bitCast(got);
     try std.testing.expectEqual(@as(u64, 0x7FF8_0000_0000_0001), got_bits);
+}
+
+// T1.9 fixture — imports env.add(i32,i32)→i32, exports go(i32,i32)→i32
+// that calls add.
+const facade_host_add_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    // type: (i32,i32) -> i32 — size 7
+    0x01, 0x07, 0x01, 0x60, 0x02, 0x7F, 0x7F, 0x01,
+    0x7F,
+    // import: "env" "add" func type 0 — size 11
+    0x02, 0x0B, 0x01, 0x03, 0x65, 0x6E, 0x76,
+    0x03, 0x61, 0x64, 0x64, 0x00, 0x00,
+    // function: 1 fn, type 0
+    0x03, 0x02,
+    0x01, 0x00,
+    // export: "go" func 1 (imports come first in funcidx space) — size 6
+    0x07, 0x06, 0x01, 0x02, 0x67, 0x6F,
+    0x00, 0x01,
+    // code: locals 0; local.get 0; local.get 1; call 0; end — entry 8, sec 10
+    0x0A, 0x0A, 0x01, 0x08, 0x00, 0x20,
+    0x00, 0x20, 0x01, 0x10, 0x00, 0x0B,
+};
+
+fn hostAdd(_: *Caller, a: i32, b: i32) i32 {
+    return a +% b;
+}
+
+test "zwasm facade T1.9: Linker.defineFunc + host import round-trip" {
+    var eng = try Engine.init(std.testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&facade_host_add_wasm);
+    defer mod.deinit();
+
+    var lk = Linker.init(&eng);
+    defer lk.deinit();
+    try lk.defineFunc("env", "add", fn (*Caller, i32, i32) i32, hostAdd);
+
+    var inst = try lk.instantiate(&mod);
+    defer inst.deinit();
+
+    const go = inst.typedFunc(fn (i32, i32) i32, "go");
+    try std.testing.expectEqual(@as(i32, 11), try go.call(.{ 4, 7 }));
+}
+
+// T1.10 fixture — imports env.poke_42 (no args, no result); has 1-page
+// memory exported as "mem"; exports "go" that calls poke_42.
+const facade_host_poke_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    // type: () -> () — size 4
+    0x01, 0x04, 0x01, 0x60, 0x00, 0x00,
+    // import "env" "poke_42" func type 0 — size 15
+    0x02, 0x0F,
+    0x01, 0x03, 0x65, 0x6E, 0x76, 0x07, 0x70, 0x6F,
+    0x6B, 0x65, 0x5F, 0x34, 0x32, 0x00, 0x00,
+    // function: 1 fn, type 0
+    0x03,
+    0x02, 0x01, 0x00,
+    // memory: min 1
+    0x05, 0x03, 0x01, 0x00, 0x01,
+    // export: "mem" memory 0; "go" func 1 — size 12
+    0x07, 0x0C, 0x02, 0x03, 0x6D, 0x65, 0x6D, 0x02,
+    0x00, 0x02, 0x67, 0x6F, 0x00, 0x01,
+    // code: locals 0; call 0; end — entry 4, sec 6
+    0x0A, 0x06,
+    0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+};
+
+fn hostPoke42(caller: *Caller) void {
+    const mem = caller.memory() orelse return;
+    mem.write(0, @as(i32, 42)) catch return;
+}
+
+test "zwasm facade T1.10: host fn uses caller.memory() to write linear memory" {
+    var eng = try Engine.init(std.testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&facade_host_poke_wasm);
+    defer mod.deinit();
+
+    var lk = Linker.init(&eng);
+    defer lk.deinit();
+    try lk.defineFunc("env", "poke_42", fn (*Caller) void, hostPoke42);
+
+    var inst = try lk.instantiate(&mod);
+    defer inst.deinit();
+
+    const go = inst.typedFunc(fn () void, "go");
+    try go.call(.{});
+
+    const mem = inst.memory() orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(i32, 42), try mem.read(i32, 0));
+}
+
+fn hostAddOneArg(_: *Caller, a: i32) i32 {
+    return a +% 1;
+}
+
+test "zwasm facade T1.11: arity-mismatched host fn → error.SignatureMismatch" {
+    var eng = try Engine.init(std.testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&facade_host_add_wasm);
+    defer mod.deinit();
+
+    var lk = Linker.init(&eng);
+    defer lk.deinit();
+    // Module declares env.add as (i32,i32)→i32; register with (i32)→i32.
+    try lk.defineFunc("env", "add", fn (*Caller, i32) i32, hostAddOneArg);
+
+    try std.testing.expectError(error.SignatureMismatch, lk.instantiate(&mod));
+}
+
+// T1.12 importer — imports env.shared (memory 1); writes 42 into memory[4].
+const facade_cross_mem_writer_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    // type: () -> ()
+    0x01, 0x04, 0x01, 0x60, 0x00, 0x00,
+    // import "env" "shared" memory min=1 — size 15
+    0x02, 0x0F,
+    0x01, 0x03, 0x65, 0x6E, 0x76, 0x06, 0x73, 0x68,
+    0x61, 0x72, 0x65, 0x64, 0x02, 0x00, 0x01,
+    // function
+    0x03,
+    0x02, 0x01, 0x00,
+    // export "go" func 0
+    0x07, 0x06, 0x01, 0x02, 0x67,
+    0x6F, 0x00, 0x00,
+    // code: locals 0; i32.const 4; i32.const 42; i32.store align=2 offset=0; end — entry 9, sec 11
+    0x0A, 0x0B, 0x01, 0x09, 0x00,
+    0x41, 0x04, 0x41, 0x2A, 0x36, 0x02, 0x00, 0x0B,
+};
+
+// T1.12 exporter — (memory (export "shared") 1).
+const facade_cross_mem_exporter_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x0A, 0x01,
+    0x06, 0x73, 0x68, 0x61, 0x72, 0x65, 0x64, 0x02,
+    0x00,
+};
+
+test "zwasm facade T1.12: cross-instance memory sharing via Linker.defineMemory" {
+    var eng = try Engine.init(std.testing.allocator, .{});
+    defer eng.deinit();
+
+    var exporter_mod = try eng.compile(&facade_cross_mem_exporter_wasm);
+    defer exporter_mod.deinit();
+    var exporter = try exporter_mod.instantiate(.{});
+    defer exporter.deinit();
+
+    var writer_mod = try eng.compile(&facade_cross_mem_writer_wasm);
+    defer writer_mod.deinit();
+
+    var lk = Linker.init(&eng);
+    defer lk.deinit();
+    const exp_mem = exporter.memory() orelse return error.TestUnexpectedResult;
+    try lk.defineMemory("env", "shared", exp_mem);
+
+    var writer = try lk.instantiate(&writer_mod);
+    defer writer.deinit();
+
+    const go = writer.typedFunc(fn () void, "go");
+    try go.call(.{});
+
+    // Writer's i32.store landed in the shared exporter memory.
+    try std.testing.expectEqual(@as(i32, 42), try exp_mem.read(i32, 4));
 }
 
 test "zwasm facade T1.4-types: Instance.invoke return type carries all 12 Trap variants" {

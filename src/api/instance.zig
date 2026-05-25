@@ -592,7 +592,6 @@ pub export fn wasm_instance_new(
     _ = trap_out;
     const store = s orelse return null;
     const module = m orelse return null;
-    const alloc = storeAllocator(store) orelse return null;
     // Upstream wasm.h declares `imports` as `wasm_extern_t* const
     // imports[]`. We accept it as an opaque pointer and recast
     // here to keep the C ABI byte-identical while letting the
@@ -601,6 +600,45 @@ pub export fn wasm_instance_new(
         @as([*]const ?*const Extern, @ptrCast(@alignCast(p)))
     else
         null;
+
+    return instantiateInternal(store, module, BuildBindingsCApi{ .imports_array = imports_array });
+}
+
+/// Shape produced by either the c_api Extern path (`wasm_instance_new`)
+/// or a native binding constructor (e.g. `src/zwasm/linker.zig`).
+/// `build` is invoked once with the per-instance arena allocator
+/// after the arena exists; it returns the pre-resolved binding
+/// slice (or null when the module declares no imports).
+pub const BindingsBuilder = struct {
+    ctx: *anyopaque,
+    build: *const fn (ctx: *anyopaque, arena_alloc: std.mem.Allocator, bytes: []const u8, store: *Store) anyerror!?[]const runtime_instance_import.ImportBinding,
+};
+
+const BuildBindingsCApi = struct {
+    imports_array: ?[*]const ?*const Extern,
+
+    fn buildImpl(ctx: *anyopaque, arena_alloc: std.mem.Allocator, bytes: []const u8, store: *Store) anyerror!?[]const runtime_instance_import.ImportBinding {
+        const self: *BuildBindingsCApi = @ptrCast(@alignCast(ctx));
+        return buildBindings(arena_alloc, bytes, self.imports_array, store);
+    }
+
+    pub fn asBuilder(self: *BuildBindingsCApi) BindingsBuilder {
+        return .{ .ctx = self, .build = buildImpl };
+    }
+};
+
+/// Internal entry shared by `wasm_instance_new` (C ABI path,
+/// Extern[]-driven bindings) and `src/zwasm/linker.zig` (native
+/// path, host-fn + cross-instance bindings). Both wrap their
+/// resolver in a `BindingsBuilder` and call here.
+pub fn instantiateInternal(store: *Store, module: *const Module, builder_state: anytype) ?*Instance {
+    const alloc = storeAllocator(store) orelse return null;
+
+    var local_state = builder_state;
+    const builder: BindingsBuilder = if (@TypeOf(builder_state) == BindingsBuilder)
+        builder_state
+    else
+        local_state.asBuilder();
 
     const inst_rt = alloc.create(runtime.Runtime) catch return null;
     inst_rt.* = runtime.Runtime.init(alloc);
@@ -626,10 +664,7 @@ pub export fn wasm_instance_new(
 
     // Per ADR-0023 §7 item 5 (Step A2): set up the per-instance
     // arena BEFORE binding build (binding allocations live on
-    // the same arena), then rebind the runtime allocator. The
-    // ImportBinding builder pre-resolves WASI thunks + cross-
-    // module CallCtx; the relocated `instantiate.instantiateRuntime`
-    // sees only Zone-1 native types.
+    // the same arena), then rebind the runtime allocator.
     const arena = alloc.create(std.heap.ArenaAllocator) catch {
         inst_rt.deinit();
         alloc.destroy(inst_rt);
@@ -641,7 +676,7 @@ pub export fn wasm_instance_new(
     inst_rt.alloc = arena.allocator();
     inst_rt.instance = inst;
 
-    const bindings = buildBindings(arena.allocator(), bytes, imports_array, store) catch {
+    const bindings = builder.build(builder.ctx, arena.allocator(), bytes, store) catch {
         if (inst.arena) |a2| {
             // EXEMPT-FALLBACK: ADR-0014 — parkAsZombie OOM accepts arena leak over UAF of cross-module references.
             parkAsZombie(alloc, store, inst_rt, a2) catch {};
