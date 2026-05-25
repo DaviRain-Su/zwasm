@@ -269,6 +269,23 @@ close: -Dwasm=v2_0 symbol-absence gate).
 
 ### Sub-chunks (commit-time order)
 
+- **10.M-4a** — codegen memidx==0 invariant assert (`60ec148f`).
+  Anchors `MemArgExtra.memidx == 0` at the 2 scalar memory-op
+  dispatch points (arm64 op_memory.zig::emitMemOp +
+  x86_64 op_memory.zig::emitI32Load 22-alias wrapper) per
+  `.claude/rules/comment_as_invariant.md`. Promotes the prose
+  invariant "multi-memory routing requires the instantiate-side
+  reject lift" to a Debug-runtime assert — any future ZIR
+  synthesis path emitting memidx > 0 trips the assert before
+  reaching wrong-memory miscompile. Mac `test-all` GREEN
+  (existing memory tests don't fire the assert; all current
+  lowering paths produce memidx=0 via MemArgExtra default).
+  Sub-step for the 10.M-4 i64 wrap-check vertical slice; the
+  i64 emit body + `memories[0].idx_type` plumbing land at
+  10.M-4b (arm64) and 10.M-4c (x86_64). load_lane/store_lane
+  memidx wire-up (parser `emitMemargLane` currently discards
+  align bit-6) is a 10.M-4 follow-up.
+
 - **10.M-3** — MemArgExtra + bit-6 memidx decode (`f0809d0c`).
   `zir.MemArgExtra: packed struct(u32) { align_pow2: u5,
   memidx: u8, _pad: u19 }` with `pack`/`unpack` helpers added.
