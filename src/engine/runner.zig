@@ -518,6 +518,39 @@ test "runI32Export: cross-frame throw — callee throws, caller's try_table catc
     try testing.expectEqual(@as(u32, 42), try runI32Export(testing.allocator, &bytes, "test"));
 }
 
+test "runI32Export: 2-level cross-frame throw — inner→mid→test catches via outermost try_table" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    // (module
+    //   (tag $e0)
+    //   (func $inner (throw $e0))
+    //   (func $mid (call $inner))
+    //   (func (export "test") (result i32)
+    //     (block $catch
+    //       (try_table (catch_all $catch)
+    //         call $mid)
+    //       (return (i32.const 99)))
+    //     (i32.const 77)))
+    //
+    // Exercises the FP-walk unwinder traversing 2 frames
+    // (inner → mid → test). Verifies the sniffed loadFrame
+    // (D-184) handles repeated walk-step disambiguation —
+    // each frame has uses_runtime_ptr=true (every function
+    // either throws, calls, or has try_table), so each frame's
+    // [RBP, 0] holds saved R15 (rt ptr value), not saved RBP.
+    // The CodeMap-aware sniff per frame finds the correct
+    // saved-RBP slot each iteration.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x60,
+        0x00, 0x00, 0x60, 0x00, 0x01, 0x7f, 0x03, 0x04, 0x03, 0x00, 0x00, 0x01,
+        0x0d, 0x03, 0x01, 0x00, 0x00, 0x07, 0x08, 0x01, 0x04, 0x74, 0x65, 0x73,
+        0x74, 0x00, 0x02, 0x0a, 0x20, 0x03, 0x04, 0x00, 0x08, 0x00, 0x0b, 0x04,
+        0x00, 0x10, 0x00, 0x0b, 0x14, 0x00, 0x02, 0x40, 0x1f, 0x40, 0x01, 0x02,
+        0x00, 0x10, 0x01, 0x0b, 0x41, 0xe3, 0x00, 0x0f, 0x0b, 0x41, 0xcd, 0x00,
+        0x0b,
+    };
+    try testing.expectEqual(@as(u32, 77), try runI32Export(testing.allocator, &bytes, "test"));
+}
+
 test "runI32Export: throw + catch_ with i32 payload returns 88 (10.E-payload-prop bundle close)" {
     // D-182 discharge — bundle 10.E-payload-prop closed on both
     // arches. Throw side: throw.emit pops N values + stores at
