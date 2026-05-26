@@ -165,6 +165,61 @@ decisions per `phase10_design_plan_ja.md` §3.5):
    ADR-0114) stores `?*Exception` pointer, NOT a GcRef — but is
    root-scanned by the GC walker.
 
+   **`ValType` enum extension** (this Revision 2026-05-29
+   amendment): the parser-/validator-side ValType enum
+   (`ir/zir.zig::ValType`) extends with 5 new closed-enum
+   variants:
+   ```zig
+   pub const ValType = enum(u8) {
+       i32, i64, f32, f64,                  // Wasm 1.0 numeric
+       v128,                                 // Wasm 2.0 SIMD
+       funcref, externref,                   // Wasm 2.0 ref
+       anyref, eqref, structref, arrayref,   // Wasm 3.0 GC (new)
+       i31ref,                               // Wasm 3.0 GC (new)
+   };
+   ```
+   Per Wasm 3.0 spec binary encoding: anyref 0x6E / eqref 0x6D /
+   structref 0x6B / arrayref 0x6A / i31ref 0x6C. Parser /
+   validator / runtime branches recognise these bytes at the
+   sub-chunks following ValType-extension cycle.
+
+   **Cascade pattern decision** — closed-enum + per-site arm
+   added on demand. Rationale:
+   - Closed-enum preserves Zig 0.16 exhaustiveness checking
+     (per ADR-0009's `require_exhaustive_enum_switch` lint
+     rule), which catches "forgot to handle a new valtype"
+     bugs at compile time — load-bearing for the 217-site
+     switch surface (parse / validate / lower / emit / interp
+     / runtime / api crossing).
+   - Non-exhaustive `enum(u8) { …, _ }` shape was considered
+     and REJECTED: forces `else =>` on every switch, which
+     defeats the very static checking the lint exists to
+     enforce; trades a one-time mechanical cascade cost for
+     permanent loss of exhaustiveness signal.
+   - Per-site cascade: each ValType switch arm-out adds
+     handling for the relevant new variants when the per-op
+     sub-chunk lands. Sites that don't yet need GC semantics
+     (e.g., numeric op handlers) add `.anyref, .eqref,
+     .structref, .arrayref, .i31ref => unreachable` — the
+     numeric ops don't accept ref-typed operands at the
+     validator level, so the runtime arm is provably-dead.
+     Sites that DO need GC semantics (e.g., the future
+     `op_gc.zig` dispatcher) add real handling per-variant.
+   - The ValType extension lands as a single sub-chunk
+     (sub-chunk 1 per `.dev/phase10_g_op_bundle_plan.md`);
+     the per-site cascade lands alongside in the same commit
+     OR in immediate-follow sub-chunks (per chunk granularity
+     rules in `LOOP.md`: bundle when ≤ 800 LOC src + 400 LOC
+     test; split when > 1200 LOC).
+   - Anti-pattern AVOIDED: extending ValType with @panic
+     stubs as the default cascade arm. Per
+     `platform_panic_vs_error.md` the @panic pattern targets
+     `comptime`-pruned target-conditional `else` branches —
+     NOT enum-extension cascades. For GC valtypes the
+     correct cascade arm is `unreachable` (where the
+     validator has type-system-proven the value can't reach)
+     or explicit per-variant handling (where it can).
+
 7. **Stack-map per-Instance side-table** (ADR-0113 D4) — NOT
    per-function field. Table is `HashMap(u32 callsite_pc, []const
    RegSlot live_refs)`. Lazy populate alongside JIT emit (codegen
@@ -349,3 +404,15 @@ the impl SHA range cited.
   Mode A; `-Dgc=false` nuclear strip ships as a Phase 10
   invariant (10.P close); `null` collector test-only; mark_sweep
   must-ship.
+- 2026-05-29 — Decision §6 amended via /continue autonomous
+  prep path (per `.dev/phase10_g_op_bundle_plan.md` sub-chunk
+  1). Added `ValType` enum extension (5 new closed variants
+  for anyref / eqref / structref / arrayref / i31ref) +
+  cascade pattern decision (closed-enum + per-site arm-out
+  per LOOP.md chunk granularity; REJECTED non-exhaustive
+  `enum(u8) { …, _ }` shape because it defeats ADR-0009's
+  exhaustiveness lint). Foundation-cycle work `e953b089`
+  added the parallel `Value.anyref` arm; this amendment
+  authorises the ValType-side counterpart for the op_gc
+  bundle. Implementation lands at op_gc bundle sub-chunk 1
+  (next cycle).
