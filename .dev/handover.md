@@ -6,8 +6,8 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `4d0e20f1` — op_tail_call.emitDirectTailJump helper
-  (10.TC emit-body cycle 2 of the active bundle).
+- **HEAD**: `b03545fe` — arm64 return_call.emit wired end-to-end
+  (10.TC emit-body cycle 3 of the active bundle).
 - **ROADMAP §10 progress**: 7/13 DONE (10.0/10.C9/10.J/10.F/
   10.Z/10.D/10.T), 4 IN-PROGRESS (10.M/10.R/10.TC/10.E with
   10.E core substantively done), 2 Pending (10.G/10.P).
@@ -21,36 +21,37 @@
 ## Active bundle
 
 - **Bundle-ID**: 10.TC-emit-body
-- **Cycles-remaining**: ~5
-- **Continuity-memo**: cycles 1 + 2 landed. Cycle 1 (`c2039bbb`):
-  CallFixup gains `is_tail`; arm64 linker dispatches B vs BL;
-  x86_64 emit owns the opcode byte. Cycle 2 (`4d0e20f1`):
-  `arm64/op_tail_call.emitDirectTailJump(allocator, buf,
-  call_fixups, target_func_idx)` emits `B 0` + appends
-  CallFixup{is_tail=true}. Helpers available: `emitTailJump`
-  (BR X16 form, for cross-module/indirect/ref), `emitDirectTailJump`
-  (B+fixup form, same-module direct), `emitLoadCalleeRtSameModule`
-  (MOV X0,X19), `frame_teardown.emit` (shared per-arch facade).
-  Refinement of ADR-0112 D4 (not deviation): same-module direct
-  uses B+CallFixup{is_tail=true} (1 instr; linker has imm26
-  reach); cross-module/indirect/ref use BR X16+literal-pool.
-- **Exit-condition**: `return_call N` arm64 emit body wired
-  end-to-end (marshal args → MOV X0,X19 → frame_teardown → B
-  fixup), driven by a fixture (spec corpus or hand-rolled)
-  through link+execute returning the expected i32 on Mac
-  aarch64. Cross-arch (x86_64 SysV mirror) lands as a
-  follow-on bundle cycle. The bundle closes when all 3 ops
-  (return_call / return_call_indirect / return_call_ref) emit
-  end-to-end on Mac aarch64 with one fixture each.
-- **Next cycle (cycle 3)**: wire arm64 `return_call.zig::emit`
-  body. Two sub-steps: (a) make `op_call.marshalCallArgs` pub
-  with SIBLING-PUB marker citing ADR-0112; (b) thread
-  `frame_bytes: u32` through `EmitCtx` (populated when ctx is
-  constructed in compile()); (c) `return_call.emit` body =
-  marshal → emitLoadCalleeRtSameModule → frame_teardown.emit
-  → emitDirectTailJump. End-to-end fixture: 2-function module
-  where fn0 does `return_call 1` and fn1 returns 7; link +
-  execute via `module.entry(0, Fn)`; assert return == 7.
+- **Cycles-remaining**: ~4
+- **Continuity-memo**: cycles 1-3 landed. Cycle 1 (`c2039bbb`):
+  `CallFixup.is_tail` + arm64 linker B/BL dispatch. Cycle 2
+  (`4d0e20f1`): `arm64/op_tail_call.emitDirectTailJump` helper.
+  Cycle 3 (`b03545fe`): arm64 `return_call.emit` wired
+  end-to-end via `emitDirectReturnCall(ctx, ins)` orchestrator
+  (marshal → MOV X0,X19 → frame_teardown → emitDirectTailJump).
+  `EmitCtx.frame_bytes` plumbed; `op_call.marshalCallArgs` pub
+  via SIBLING-PUB; e2e fixture in linker.zig (`fn0 return_call
+  fn1 returns 7`) green on Mac aarch64.
+- **Exit-condition**: x86_64 SysV mirror of cycle 3 wired
+  end-to-end (JMP rel32 opcode at emit + emitDirectReturnCall
+  + same e2e fixture green on Linux x86_64) AND `return_call_
+  indirect` / `return_call_ref` arm64+x86_64 wired with at
+  least one e2e fixture each.
+- **Next cycle (cycle 4)**: x86_64 SysV mirror of arm64
+  cycle 3. Sub-steps: (a) `x86_64/op_tail_call.zig` gains
+  `emitDirectTailJump(allocator, buf, call_fixups,
+  target_func_idx)` that emits `0xE9 + 4 bytes disp32=0` +
+  appends CallFixup{is_tail=true} (linker's patchRel32
+  preserves the JMP opcode byte). (b) `x86_64/op_tail_call.zig`
+  gains `emitDirectReturnCall(ctx, ins)` orchestrator: marshal
+  args via op_call.marshalCallArgs (x86_64 sibling — pub-flip
+  + SIBLING-PUB needed in x86_64/op_call.zig too) → MOV RDI,R15
+  (emitLoadCalleeRtSameModule) → frame_teardown.emit (POP RBP
+  + ADD RSP, frame_bytes; no RET) → emitDirectTailJump.
+  (c) Thread `frame_bytes` through x86_64 EmitCtx; populate at
+  ctx construction in x86_64/emit.zig. (d) Add `.return_call`
+  dispatch arm to x86_64/emit.zig switch. (e) Ungate the
+  linker.zig e2e test for x86_64 SysV (replace `if !(macos and
+  aarch64) skip` with both-host guard).
 
 ## Session highlights (prior session; for handoff context)
 
