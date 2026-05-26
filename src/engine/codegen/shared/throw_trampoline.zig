@@ -82,17 +82,18 @@ pub fn zwasmThrowTrampoline() callconv(.naked) noreturn {
             :
             : [off] "i" (trap_flag_off),
             : arm64_clobbers),
-        .x86_64 => asm volatile (
-        // mov $1, %r10d
-            \\ movl $1, %%r10d
-            // mov %r10d, trap_flag_off(%r15)
-            \\ movl %%r10d, %c[off](%%r15)
-            // xor %eax, %eax  ; clear return value
-            \\ xorl %%eax, %%eax
-            \\ retq
-            :
-            : [off] "i" (trap_flag_off),
-            : x86_64_clobbers),
+        // The displacement is comptime-inlined into the asm
+        // template — the `%c[name]` modifier form (drop-`$`) isn't
+        // accepted by Zig 0.16's LLVM inline-asm template parser
+        // for x86_64 memory operands. `comptimePrint` produces a
+        // string literal known at compile time; functionally
+        // identical to a hand-written constant.
+        .x86_64 => asm volatile (std.fmt.comptimePrint(
+                \\ movl $1, %%r10d
+                \\ movl %%r10d, {d}(%%r15)
+                \\ xorl %%eax, %%eax
+                \\ retq
+            , .{trap_flag_off}) ::: x86_64_clobbers),
         else => @compileError("unsupported host arch for EH trampoline"),
     }
 }
