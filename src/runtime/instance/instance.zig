@@ -70,6 +70,15 @@ pub const Instance = struct {
     /// debt D-006 (the "linking-errors-pass-for-the-wrong-reason"
     /// gap exposed by the auto-register spike).
     export_types: []ExportType = &.{},
+    /// 10.G op_gc cycle 21 (ADR-0116 §3a impl) — per-Instance
+    /// GC type metadata materialised from `Module.types`
+    /// (parser side-tables per ADR-0121 D2). Populated iff
+    /// `Module.needs_gc_heap` was true at parse-time. The
+    /// underlying `entries / struct_infos / array_infos` slices
+    /// live in the Instance `arena` so single `arena.deinit()`
+    /// releases them. Resolver for runtime struct.new / array.new
+    /// reads `struct_infos[typeidx].?` / `array_infos[typeidx].?`.
+    gc_type_infos: ?@import("../../feature/gc/type_info.zig").GcTypeInfos = null,
 };
 
 /// Structural type of an exported entity. Mirrors the four
@@ -82,3 +91,45 @@ pub const ExportType = union(sections.ImportKind) {
     memory: struct { idx_type: sections.MemoryEntry.IdxType = .i32, min: u64, max: ?u64 },
     global: struct { valtype: zir.ValType, mutable: bool },
 };
+
+// ============================================================
+// Tests
+// ============================================================
+
+const testing = std.testing;
+const type_info_mod = @import("../../feature/gc/type_info.zig");
+
+test "Instance: gc_type_infos defaults to null (10.G op_gc cycle 21; ADR-0116 §3a)" {
+    const inst: Instance = .{
+        .store = null,
+        .module = null,
+        .runtime = null,
+    };
+    try testing.expectEqual(@as(?type_info_mod.GcTypeInfos, null), inst.gc_type_infos);
+}
+
+test "Instance: gc_type_infos round-trips a single-struct module shape (10.G op_gc cycle 21)" {
+    // Build the parser-side Types directly (no full instantiate path),
+    // materialise, and assert the GcTypeInfos surface is correct.
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // struct { i32 var } as a single typedef.
+    const body = [_]u8{ 0x01, 0x5F, 0x01, 0x7F, 0x01 };
+    var types = try sections.decodeTypes(testing.allocator, &body);
+    defer types.deinit();
+
+    const gti = try type_info_mod.materialiseGcTypes(a, types);
+
+    // Mirror the cycle-21 instantiate wire: stash into Instance field.
+    var inst: Instance = .{ .store = null, .module = null, .runtime = null };
+    inst.gc_type_infos = gti;
+
+    try testing.expect(inst.gc_type_infos != null);
+    const stashed = inst.gc_type_infos.?;
+    try testing.expectEqual(@as(usize, 1), stashed.entries.len);
+    try testing.expectEqual(type_info_mod.TypeKind.struct_, stashed.entries[0].kind);
+    try testing.expect(stashed.struct_infos[0] != null);
+    try testing.expectEqual(@as(u32, 8), stashed.struct_infos[0].?.payload_size);
+}

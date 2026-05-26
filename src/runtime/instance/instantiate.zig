@@ -541,6 +541,20 @@ pub fn instantiateRuntime(
         const h = try a.create(heap_mod.Heap);
         h.* = heap_mod.Heap.init(a);
         rt.gc_heap = h;
+
+        // 10.G op_gc cycle 21 (ADR-0116 §3a impl). Materialise
+        // per-Instance GC type metadata from the parser side-
+        // tables. Decode types fresh (the main type-section
+        // decode happens later in `instantiateInternal` but
+        // doesn't expose its `Types` upward; for now we decode
+        // here too — a follow-up consolidation cycle can share
+        // the decode if hot-path measurement justifies it).
+        if (module.find(.type)) |type_section| {
+            var types = try sections.decodeTypes(a, type_section.body);
+            defer types.deinit();
+            const type_info = @import("../../feature/gc/type_info.zig");
+            inst.gc_type_infos = try type_info.materialiseGcTypes(a, types);
+        }
     }
 
     // §9.4 / 4.7 + §9.6 / 6.E iter 7: import section. Every import

@@ -124,16 +124,17 @@ pub const ArrayHeader = extern struct {
 /// indexed by typeidx (mirrors `sections.Types.items.len`).
 /// Non-struct/non-array entries have `kind = .func` placeholder
 /// + null struct_info / array_info pointers.
+///
+/// Lifetime is caller-owned — `materialiseGcTypes` takes an
+/// `Allocator` and allocates the three slices from it. The
+/// Instance's arena allocator is the typical caller; on
+/// `Instance.arena.deinit()` everything is released uniformly.
+/// No internal arena (the test-only `decodeAndMaterialise`
+/// helper provides one for unit-test cleanup convenience).
 pub const GcTypeInfos = struct {
-    arena: std.heap.ArenaAllocator,
-    /// Pointer-stable; lifetime = parent allocator.
     entries: []TypeInfo,
     struct_infos: []?StructInfo,
     array_infos: []?ArrayInfo,
-
-    pub fn deinit(self: *GcTypeInfos) void {
-        self.arena.deinit();
-    }
 };
 
 /// Compute the byte size of a field given its declared ValType.
@@ -146,13 +147,11 @@ fn fieldSlotSize(valtype: ValType) Error!u8 {
 }
 
 /// Walk parser-side Types and build the per-Instance GC type
-/// metadata. Caller owns the returned `GcTypeInfos` (single
-/// arena drop).
-pub fn materialiseGcTypes(parent_alloc: Allocator, types: sections.Types) Error!GcTypeInfos {
-    var arena = std.heap.ArenaAllocator.init(parent_alloc);
-    errdefer arena.deinit();
-    const alloc = arena.allocator();
-
+/// metadata. Caller-owned allocator; on partial failure mid-walk
+/// the per-typeidx allocations are NOT individually freed
+/// (caller arena-drops on its own deinit path — Instance arena
+/// is the canonical case).
+pub fn materialiseGcTypes(alloc: Allocator, types: sections.Types) Error!GcTypeInfos {
     const n = types.items.len;
     const entries = try alloc.alloc(TypeInfo, n);
     const struct_infos = try alloc.alloc(?StructInfo, n);
@@ -213,7 +212,6 @@ pub fn materialiseGcTypes(parent_alloc: Allocator, types: sections.Types) Error!
     }
 
     return .{
-        .arena = arena,
         .entries = entries,
         .struct_infos = struct_infos,
         .array_infos = array_infos,
@@ -226,17 +224,28 @@ pub fn materialiseGcTypes(parent_alloc: Allocator, types: sections.Types) Error!
 
 const testing = std.testing;
 
-fn decodeAndMaterialise(body: []const u8) !GcTypeInfos {
+/// Test helper: decode types + materialise into a local arena;
+/// arena returned for caller-side deinit. The pre-cycle-21
+/// `GcTypeInfos.deinit` was inlined into the struct; this
+/// helper restores the test-time convenience.
+fn decodeAndMaterialise(body: []const u8) !struct {
+    arena: std.heap.ArenaAllocator,
+    gti: GcTypeInfos,
+} {
     var t = try sections.decodeTypes(testing.allocator, body);
     defer t.deinit();
-    return materialiseGcTypes(testing.allocator, t);
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    errdefer arena.deinit();
+    const gti = try materialiseGcTypes(arena.allocator(), t);
+    return .{ .arena = arena, .gti = gti };
 }
 
 test "materialiseGcTypes: single i32 struct → 1 field offset=0 size=8" {
     // structtype: count=1, 0x5F, field_count=1, valtype=i32(0x7F), mut=0x00.
     const body = [_]u8{ 0x01, 0x5F, 0x01, 0x7F, 0x00 };
-    var gti = try decodeAndMaterialise(&body);
-    defer gti.deinit();
+    var result = try decodeAndMaterialise(&body);
+    defer result.arena.deinit();
+    const gti = result.gti;
 
     try testing.expectEqual(@as(usize, 1), gti.entries.len);
     try testing.expectEqual(TypeKind.struct_, gti.entries[0].kind);
@@ -259,8 +268,9 @@ test "materialiseGcTypes: multi-field struct → offsets 0, 8, 16; payload_size 
         0x01, 0x7D,
         0x00,
     };
-    var gti = try decodeAndMaterialise(&body);
-    defer gti.deinit();
+    var result = try decodeAndMaterialise(&body);
+    defer result.arena.deinit();
+    const gti = result.gti;
 
     const si = gti.struct_infos[0].?;
     try testing.expectEqual(@as(u32, 24), si.payload_size);
@@ -274,8 +284,9 @@ test "materialiseGcTypes: multi-field struct → offsets 0, 8, 16; payload_size 
 test "materialiseGcTypes: array of i32 → element.size=8 offset=0" {
     // arraytype: count=1, 0x5E, valtype=i32, mut=0x01.
     const body = [_]u8{ 0x01, 0x5E, 0x7F, 0x01 };
-    var gti = try decodeAndMaterialise(&body);
-    defer gti.deinit();
+    var result = try decodeAndMaterialise(&body);
+    defer result.arena.deinit();
+    const gti = result.gti;
 
     try testing.expectEqual(TypeKind.array, gti.entries[0].kind);
     try testing.expect(gti.array_infos[0] != null);
@@ -293,8 +304,9 @@ test "materialiseGcTypes: mixed func+struct+array preserves kinds" {
         0x5F, 0x01, 0x7F, 0x01, // struct { i32 var }
         0x5E, 0x7E, 0x00, // array of i64 const
     };
-    var gti = try decodeAndMaterialise(&body);
-    defer gti.deinit();
+    var result = try decodeAndMaterialise(&body);
+    defer result.arena.deinit();
+    const gti = result.gti;
 
     try testing.expectEqual(TypeKind.func, gti.entries[0].kind);
     try testing.expectEqual(TypeKind.struct_, gti.entries[1].kind);
@@ -310,7 +322,11 @@ test "materialiseGcTypes: v128 field rejects UnsupportedFieldSize" {
     const body = [_]u8{ 0x01, 0x5F, 0x01, 0x7B, 0x00 };
     var t = try sections.decodeTypes(testing.allocator, &body);
     defer t.deinit();
-    try testing.expectError(Error.UnsupportedFieldSize, materialiseGcTypes(testing.allocator, t));
+    // Arena handles partial-failure cleanup (caller responsibility per
+    // the function's contract — Instance arena is the canonical site).
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    try testing.expectError(Error.UnsupportedFieldSize, materialiseGcTypes(arena.allocator(), t));
 }
 
 test "ObjectHeader layout: 8 bytes; ArrayHeader: 12 bytes" {
