@@ -6,65 +6,60 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `9b03db83` — chore(p10): pivot 10.E-EH-compile-runtime
-  bundle; file D-192. Cycle-1 slice of 10.E (compile path) closed
-  at `908414b2`; deeper EH runtime path blocked-by exnref ValType +
-  cross-module register (D-192).
+- **HEAD**: `e953b089` — feat(p10): Value.anyref arm +
+  Module.needs_gc_heap flag (10.G-foundation cycle 1). Opens the
+  10.G WasmGC bundle per ADR-0115/0116. Both additive — no
+  semantic consumer yet.
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
 - **Active debt rows**: 18 — all `blocked-by:` with named
   structural barriers. Zero `now`-status rows.
 
-## Audit-scaffolding (narrow §F + §G; this cycle)
+## Active bundle
 
-- §F.5 skip-ADRs: 0 violations.
-- §F.6 ADR history: 8 `<backfill>` placeholders pending (soon —
-  batch backfill at Phase 10 close per F.7).
-- §F.3a lesson citing: OK.
-- §F.10 dual-view table sync: 0 violations.
-- §G.1.1 skip taxonomy: OK.
-- §G.1.2 ADR-0078 pairing: 0 block findings.
-- §G.3 comment-as-invariant: 0 latent overlap sites.
-- §G.4 spike lifecycle: 3 stale merged-into-prod spikes deleted
-  (private/, gitignored); 5 older spikes lack README.md (soon —
-  scaffold via scripts/new_spike.sh or delete after outcome review).
-- §G.5 arch-spike pattern: OK.
+- **Bundle-ID**: 10.G-foundation
+- **Cycles-remaining**: ~6 (estimate; foundation substrate before
+  full GC heap impl)
+- **Continuity-memo**: Cycle 1 (HEAD `e953b089`) lands Value.anyref
+  + Module.needs_gc_heap flag (both additive). Next steps: (2)
+  parser recognises GC valtype bytes (anyref 0x6E, eqref 0x6D,
+  structref 0x6B, arrayref 0x6A, i31ref 0x6C); (3)
+  needs_heap_detector.zig walks sections + flips the flag; (4)
+  feature/gc/heap.zig per-Store slab (ADR-0115 §1-5); (5)
+  Collector vtable + null collector α (ADR-0115 §10); (6)
+  regalloc stack-map axis (ADR-0113 §C / ADR-0115 §7).
+- **Exit-condition**: needs_gc_heap detector flips true on a wasm
+  module declaring `(type $s (struct (field i32)))` AND
+  feature/gc/heap.zig allocates the per-Store slab on first GC op.
 
-No `block` findings. Scaffolding clean.
-
-## Spec runner observable (HEAD `908414b2`)
+## Spec runner observable (HEAD `e953b089`)
 
 ```
 [memory64           ] return=337 (pass=337 fail=0  ) trap=205 (pass=205 fail=0  ) invalid=83  (pass=83  fail=0) skip=0
 [tail-call          ] return=31  (pass=31  fail=0  ) trap=0   (pass=0   fail=0  ) invalid=10  (pass=10  fail=0)
 [exception-handling ] return=34  (pass=0   fail=34 ) trap=2   (pass=0   fail=2  ) invalid=7   (pass=5   fail=2  ) exception=4 (pass=0 fail=4)
-[function-references] invalid=12  (pass=12 fail=0)
+[function-references] invalid=12  (pass=12  fail=0)
 total: return pass=368 fail=34; trap pass=205 fail=2; invalid pass=110 fail=2; exception pass=0 fail=4
 ```
 
-## Active task — open 10.G WasmGC bundle (next cycle)
+memory64 / tail-call / function-references all clean. Remaining 40
+fails all in exception-handling (gate per D-192 / 10.G).
 
-Remaining Phase 10 IN-PROGRESS rows all gate on 10.G:
-- **10.E** — blocked-by D-192 (exnref ValType is GC-territory per
-  ADR-0114 line 217-218: ships only when ADR-0115/0116 ship).
-- **10.R-4 / 10.R-5** — `(ref $sig)` typed-funcref is GC-territory
-  per 10.R-1's note ("deferred to 10.G WasmGC").
-- **10.G** itself — full GC heap+collector+RTT+i31 (ADR-0115/0116/
-  0117 all Accepted 2026-05-25). Sub-tasks per ROADMAP §10 row:
-  Value.anyref arm + Module.needs_gc_heap flag + needs_heap_detector
-  + heap.zig + Collector vtable + regalloc stack-map axis +
-  i31.zig + type_hierarchy + op_gc + op_i31 + collector_mark_sweep
-  + gc_stress_runner + cross fixtures + spec corpus.
-
-Next cycle: open bundle `10.G-foundation` with exit-condition
-"`Value.anyref` arm + `Module.needs_gc_heap` parse-time flag land
-(both additive, no impl-side consumer yet)" — that's the smallest
-slice carving off the GC substrate before opening the larger
-collector / op_gc work.
+Recent commits this resume:
+- `e953b089` feat — Value.anyref + Module.needs_gc_heap (10.G cycle 1).
+- `94d16e33` chore — audit_scaffolding §F+§G clean; retarget at 10.G.
+- `9b03db83` chore — pivot 10.E-EH-compile-runtime bundle; file D-192.
+- `908414b2` fix — frontendValidate threads tags for EH compile.
+- `755d33d2` fix — wast baker emits invoke action (D-191 close; memory64 FULL).
 
 ## Next sub-chunk candidates (names only)
 
-- **10.G-foundation bundle** — active per above; opens with
-  Value.anyref + needs_gc_heap (cycle 1 of ~10).
+- **10.G-foundation cycle 2** — parser GC valtype byte recognition
+  (anyref 0x6E / eqref 0x6D / structref 0x6B / arrayref 0x6A /
+  i31ref 0x6C). Single-cycle: add ValType variants + sections
+  decoder branches.
+- **10.G-foundation cycle 3** — needs_heap_detector.zig walks
+  type / import / global / table / element / function sections
+  for GC valtype references; sets Module.needs_gc_heap = true.
 - **10.M-realworld** — toolchain-blocked (D-179 wabt 1.0.41+).
 - **10.P close gate** — user touchpoint by construction.
 
