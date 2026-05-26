@@ -6,15 +6,15 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `96a17d5a` — feat(p10): Runtime.gc_heap +
-  instantiate-side gate (10.G-foundation cycle 5; ADR-0115 §1).
-  Closes the 10.G-foundation bundle's exit-condition (instantiate
-  consumes Module.needs_gc_heap to materialise Heap iff true).
+- **HEAD**: `62bebe25` — feat(p10): -Dgc=true|false build-option
+  seam (10.G-foundation cycle 6; ADR-0115 §3). Final substrate
+  bit — pairs with cycle-5's runtime gate. Foundation fully
+  closed.
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
 - **Active debt rows**: 18 — all `blocked-by:` with named
   structural barriers. Zero `now`-status rows.
 
-## 10.G-foundation bundle CLOSED (5 cycles; ~310 LOC + 18 tests)
+## 10.G-foundation bundle CLOSED (6 cycles; ~350 LOC + 19 tests)
 
 Substrate landed for the larger 10.G WasmGC implementation:
 
@@ -23,9 +23,10 @@ Substrate landed for the larger 10.G WasmGC implementation:
 - `e3bd30e1` cycle 3 — feature/gc/heap.zig per-Store slab (7 tests).
 - `e5eed624` cycle 4 — Collector vtable + collector_null (6 tests).
 - `96a17d5a` cycle 5 — Runtime.gc_heap + instantiate gate (3 tests).
+- `62bebe25` cycle 6 — `-Dgc=true|false` build-option seam (1 test).
 
-zig build test 2116/2130 (was 2099/2113 at bundle open; +17
-foundation tests + +1 wire test in parser at cycle 2).
+zig build test 2117/2131 (was 2099/2113 at bundle open; +18
+foundation tests across 6 cycles).
 
 What's NOT yet in place (post-foundation, future bundles):
 - GC valtype parser/validator (anyref/eqref/structref/arrayref/
