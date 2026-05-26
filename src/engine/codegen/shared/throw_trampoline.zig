@@ -282,10 +282,90 @@ pub fn zwasmThrowTrampoline() callconv(.naked) noreturn {
                 :
                 : [core] "r" (&trampolineCore),
                 : x86_64_clobbers),
-            .windows => @compileError(
-                "x86_64-windows EH trampoline body is cycle 3c-iii-d scope; " ++
-                    "Win64 ABI arg shuffling differs from SysV (RCX/RDX/R8/R9 + shadow space).",
-            ),
+            // x86_64 Win64 (MS x64) body. Same shape as the SysV
+            // path — `callq *core; branch on eh_handler_active; on
+            // 1 install SP/RBP and jmpq *pc`. Differences from SysV:
+            //   - Arg routing: trampolineCore is `callconv(.c)` →
+            //     Win64 ABI puts args in RCX/RDX/R8/R9.
+            //     arg0 initial_fp     = %rcx (= %rbp at entry)
+            //     arg1 throw_site_addr = %rdx (= saved RIP at +8 of
+            //                                  the entry SP)
+            //     arg2 tag_idx        = %r8  (op_throw doesn't yet
+            //                                  marshal; placeholder
+            //                                  via the throw-site-
+            //                                  marshalled reg, same
+            //                                  outstanding gap as SysV)
+            //     arg3 rt             = %r9  (= %r15 pinned)
+            //   - Shadow space: Win64 requires 32 bytes of caller-
+            //     allocated stack before the CALL into trampolineCore
+            //     (MS x64 ABI §The Stack After Function Prologues).
+            //     `subq $0x20, %rsp` allocates; `addq $0x20, %rsp`
+            //     releases on the uncaught arm. The handler arm
+            //     never returns, so cleanup is implicit (new SP
+            //     completely supersedes the wrapper's stack frame).
+            //   - Stack-layout offset for saved RIP: at trampoline
+            //     entry, [RSP] = saved RIP. After `pushq %rbp` we
+            //     have [RSP] = saved RBP, [RSP+8] = saved RIP. Then
+            //     `subq $0x20, %rsp` bumps the offsets by 0x20, so
+            //     saved RIP lives at [RSP + 0x28].
+            //
+            //   pushq %rbp
+            //   movq %rbp, %rcx                ; arg0 = initial_fp
+            //   subq $0x20, %rsp               ; shadow space
+            //   movq 0x28(%rsp), %rdx          ; arg1 = throw_site_addr
+            //   movq <pre-marshalled tag reg>, %r8 ; arg2 = tag_idx
+            //   movq %r15, %r9                 ; arg3 = rt ptr
+            //   callq *%[core]
+            //   movl active(%r15), %eax
+            //   testl %eax, %eax
+            //   jz .Luncaught
+            //   movq sp(%r15), %rsp            ; handler arm
+            //   movq fp(%r15), %rbp
+            //   jmpq *pc(%r15)
+            // .Luncaught:
+            //   addq $0x20, %rsp               ; release shadow space
+            //   popq %rbp
+            //   retq
+            //
+            // op_throw on x86_64 emits `MOVABS R10, addr; CALL R10`;
+            // it does not yet marshal tag_idx into a specific reg
+            // (same outstanding gap on SysV). For the in-progress
+            // EH pipeline, catch_all-only fixtures work because
+            // catch_all ignores tag_idx; tagged-catch coverage is
+            // gated on op_throw marshal completion (follow-on).
+            // The Win64 body uses RCX as the "incoming tag_idx" reg
+            // — matching the Win64 first-arg convention should
+            // op_throw eventually marshal there — but the routing
+            // is shuffled (initial_fp also wants RCX). Stash RCX
+            // first via R10 (caller-saved, free).
+            .windows => asm volatile (std.fmt.comptimePrint(
+                    \\movq %%rcx, %%r10
+                    \\pushq %%rbp
+                    \\movq %%rbp, %%rcx
+                    \\subq $0x20, %%rsp
+                    \\movq 0x28(%%rsp), %%rdx
+                    \\movq %%r10, %%r8
+                    \\movq %%r15, %%r9
+                    \\callq *%[core]
+                    \\movl {d}(%%r15), %%eax
+                    \\testl %%eax, %%eax
+                    \\jz 1f
+                    \\movq {d}(%%r15), %%rsp
+                    \\movq {d}(%%r15), %%rbp
+                    \\jmpq *{d}(%%r15)
+                    \\1:
+                    \\addq $0x20, %%rsp
+                    \\popq %%rbp
+                    \\retq
+                , .{
+                    jit_abi.eh_handler_active_off,
+                    jit_abi.eh_handler_sp_off,
+                    jit_abi.eh_handler_fp_off,
+                    jit_abi.eh_handler_pc_off,
+                })
+                :
+                : [core] "r" (&trampolineCore),
+                : x86_64_clobbers),
             else => @compileError("unsupported x86_64 OS for EH trampoline"),
         },
         else => @compileError("unsupported host arch for EH trampoline"),
