@@ -610,6 +610,21 @@ pub const Lowerer = struct {
                 const n = try leb128.readUleb128(u32, self.body, &self.pos);
                 try self.emit(.@"array.new_fixed", typeidx, n);
             },
+            // array.get / array.get_s / array.get_u / array.set / array.fill
+            // (Wasm 3.0 GC §3.3.5.6.10-14). Encoding: 0xFB {11..14,16}
+            // typeidx(uleb32). Pack typeidx in payload.
+            11, 12, 13, 14, 16 => {
+                const typeidx = try leb128.readUleb128(u32, self.body, &self.pos);
+                const tag: zir.ZirOp = switch (sub) {
+                    11 => .@"array.get",
+                    12 => .@"array.get_s",
+                    13 => .@"array.get_u",
+                    14 => .@"array.set",
+                    16 => .@"array.fill",
+                    else => unreachable,
+                };
+                try self.emit(tag, typeidx, 0);
+            },
             // array.len (Wasm 3.0 GC §3.3.5.6.13). No immediates.
             15 => try self.emit(.@"array.len", 0, 0),
             // ref.eq (Wasm 3.0 GC §3.3.5.2). No immediates.

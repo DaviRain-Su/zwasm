@@ -491,6 +491,123 @@ test "validate: array.len with i32 operand → StackTypeMismatch (10.G op_gc cyc
     try testing.expectError(Error.StackTypeMismatch, r);
 }
 
+test "validate: array.get reads i32 element (10.G op_gc cycle 18)" {
+    const fn_sig: FuncType = .{ .params = &.{}, .results = &i32_arr };
+    const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
+    const kinds = [_]sections.TypeKind{ .func, .arraydef };
+    const struct_defs = [_]?sections.StructDef{ null, null };
+    const array_defs = [_]?sections.ArrayDef{
+        null,
+        .{ .element = .{ .valtype = .i32, .mutable = true } },
+    };
+    // i32.const 5 ; array.new_default 1 ; i32.const 0 ; array.get 1 ; end
+    const body = [_]u8{ 0x41, 0x05, 0xFB, 0x07, 0x01, 0x41, 0x00, 0xFB, 0x0B, 0x01, 0x0B };
+    try validateFunctionWithGcTypes(
+        fn_sig,
+        &.{},
+        &body,
+        &.{},
+        &.{},
+        &module_types,
+        &kinds,
+        &struct_defs,
+        &array_defs,
+        0,
+        &.{},
+        0,
+    );
+}
+
+test "validate: array.set on mutable element round-trips (10.G op_gc cycle 18)" {
+    const arrayref_arr_g = [_]ValType{.arrayref};
+    const fn_sig: FuncType = .{ .params = &.{}, .results = &arrayref_arr_g };
+    const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
+    const kinds = [_]sections.TypeKind{ .func, .arraydef };
+    const struct_defs = [_]?sections.StructDef{ null, null };
+    const array_defs = [_]?sections.ArrayDef{ null, .{ .element = .{ .valtype = .i32, .mutable = true } } };
+    // new ; idx ; val ; set ; new (result) ; end
+    const body = [_]u8{
+        0x41, 0x05, 0xFB, 0x07, 0x01,
+        0x41, 0x00, 0x41, 0x2A, 0xFB,
+        0x0E, 0x01, 0x41, 0x05, 0xFB,
+        0x07, 0x01, 0x0B,
+    };
+    try validateFunctionWithGcTypes(
+        fn_sig,
+        &.{},
+        &body,
+        &.{},
+        &.{},
+        &module_types,
+        &kinds,
+        &struct_defs,
+        &array_defs,
+        0,
+        &.{},
+        0,
+    );
+}
+
+test "validate: array.set on immutable element → StackTypeMismatch (10.G op_gc cycle 18)" {
+    const arrayref_arr_g = [_]ValType{.arrayref};
+    const fn_sig: FuncType = .{ .params = &.{}, .results = &arrayref_arr_g };
+    const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
+    const kinds = [_]sections.TypeKind{ .func, .arraydef };
+    const struct_defs = [_]?sections.StructDef{ null, null };
+    const array_defs = [_]?sections.ArrayDef{ null, .{ .element = .{ .valtype = .i32, .mutable = false } } };
+    const body = [_]u8{
+        0x41, 0x05, 0xFB, 0x07, 0x01,
+        0x41, 0x00, 0x41, 0x2A, 0xFB,
+        0x0E, 0x01, 0x41, 0x05, 0xFB,
+        0x07, 0x01, 0x0B,
+    };
+    const r = validateFunctionWithGcTypes(
+        fn_sig,
+        &.{},
+        &body,
+        &.{},
+        &.{},
+        &module_types,
+        &kinds,
+        &struct_defs,
+        &array_defs,
+        0,
+        &.{},
+        0,
+    );
+    try testing.expectError(Error.StackTypeMismatch, r);
+}
+
+test "validate: array.fill round-trips on mutable element (10.G op_gc cycle 18)" {
+    const arrayref_arr_g = [_]ValType{.arrayref};
+    const fn_sig: FuncType = .{ .params = &.{}, .results = &arrayref_arr_g };
+    const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
+    const kinds = [_]sections.TypeKind{ .func, .arraydef };
+    const struct_defs = [_]?sections.StructDef{ null, null };
+    const array_defs = [_]?sections.ArrayDef{ null, .{ .element = .{ .valtype = .i32, .mutable = true } } };
+    // new ; idx ; val ; count ; fill ; new (return) ; end
+    const body = [_]u8{
+        0x41, 0x05, 0xFB, 0x07, 0x01,
+        0x41, 0x00, 0x41, 0x2A, 0x41,
+        0x03, 0xFB, 0x10, 0x01, 0x41,
+        0x05, 0xFB, 0x07, 0x01, 0x0B,
+    };
+    try validateFunctionWithGcTypes(
+        fn_sig,
+        &.{},
+        &body,
+        &.{},
+        &.{},
+        &module_types,
+        &kinds,
+        &struct_defs,
+        &array_defs,
+        0,
+        &.{},
+        0,
+    );
+}
+
 test "validate: struct.get reads i32 field (10.G op_gc cycle 17)" {
     // struct { i32 var }; body: struct.new_default 1 ; struct.get 1 0 ; end.
     //   0xFB 0x01 0x01           — struct.new_default typeidx=1

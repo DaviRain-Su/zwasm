@@ -1212,6 +1212,15 @@ pub const Validator = struct {
             7 => try self.opArrayNew(.default),
             // array.new_fixed (sub-op 8): pop N init values, push arrayref.
             8 => try self.opArrayNewFixed(),
+            // array.get (sub-op 11): pop i32 idx + arrayref, push element.
+            11 => try self.opArrayGet(),
+            // array.get_s / array.get_u (sub-ops 12/13): packed element
+            // types (ADR-0121 D3 defers).
+            12, 13 => return Error.NotImplemented,
+            // array.set (sub-op 14): pop value + i32 idx + arrayref.
+            14 => try self.opArraySet(),
+            // array.fill (sub-op 16): pop count + value + i32 idx + arrayref.
+            16 => try self.opArrayFill(),
             // array.len (Wasm 3.0 GC §3.3.5.6.13): pop arrayref, push i32.
             15 => try self.opArrayLen(),
             // ref.eq (Wasm 3.0 GC §3.3.5.2): pop 2 reftypes, push i32.
@@ -1344,6 +1353,59 @@ pub const Validator = struct {
         switch (top) {
             .bot => {},
             .known => |t| if (t != .structref and t != .anyref and t != .eqref) return Error.StackTypeMismatch,
+        }
+    }
+
+    /// Resolve typeidx to an ArrayDef (cycle 18 helper). Returns
+    /// InvalidFuncIndex on unknown typeidx or non-arraydef kind.
+    fn lookupArrayDef(self: *Validator) Error!sections.ArrayDef {
+        const typeidx = try leb128.readUleb128(u32, self.body, &self.pos);
+        if (typeidx >= self.module_types_kinds.len) return Error.InvalidFuncIndex;
+        if (self.module_types_kinds[typeidx] != .arraydef) return Error.InvalidFuncIndex;
+        return self.array_defs[typeidx] orelse return Error.InvalidFuncIndex;
+    }
+
+    /// Wasm spec 3.0 §3.3.5.6.10 — `array.get typeidx`: pop i32 idx
+    /// + arrayref, push element.valtype. Packed types (ADR-0121 D3)
+    /// reject via get_s/_u routes in dispatch.
+    fn opArrayGet(self: *Validator) Error!void {
+        const ad = try self.lookupArrayDef();
+        try self.popExpect(.i32);
+        const top = try self.popAny();
+        switch (top) {
+            .bot => {},
+            .known => |t| if (t != .arrayref and t != .anyref and t != .eqref) return Error.StackTypeMismatch,
+        }
+        try self.pushType(ad.element.valtype);
+    }
+
+    /// Wasm spec 3.0 §3.3.5.6.12 — `array.set typeidx`: pop value
+    /// + i32 idx + arrayref. Element type must be mutable.
+    fn opArraySet(self: *Validator) Error!void {
+        const ad = try self.lookupArrayDef();
+        if (!ad.element.mutable) return Error.StackTypeMismatch;
+        try self.popExpect(ad.element.valtype);
+        try self.popExpect(.i32);
+        const top = try self.popAny();
+        switch (top) {
+            .bot => {},
+            .known => |t| if (t != .arrayref and t != .anyref and t != .eqref) return Error.StackTypeMismatch,
+        }
+    }
+
+    /// Wasm spec 3.0 §3.3.5.6.14 — `array.fill typeidx`: pop count
+    /// (i32) + value + i32 idx + arrayref. Element type must be
+    /// mutable. Stack effect (top first): count, value, idx, arrayref.
+    fn opArrayFill(self: *Validator) Error!void {
+        const ad = try self.lookupArrayDef();
+        if (!ad.element.mutable) return Error.StackTypeMismatch;
+        try self.popExpect(.i32); // count
+        try self.popExpect(ad.element.valtype); // fill value
+        try self.popExpect(.i32); // idx
+        const top = try self.popAny();
+        switch (top) {
+            .bot => {},
+            .known => |t| if (t != .arrayref and t != .anyref and t != .eqref) return Error.StackTypeMismatch,
         }
     }
 
