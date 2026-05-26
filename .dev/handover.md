@@ -6,9 +6,10 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `ca0f51a0` — 10.E-spec-runner bundle ready to close
-  (3 cycles; e2e fixture green on Mac aarch64 + Linux x86_64 SysV
-  verified via ubuntu Step 0.7).
+- **HEAD**: `062f3c94` — spec_assert_runner_wasm_3_0 main-loop
+  now executes assert_return; first run reports pass=25 fail=364
+  across 774 directives (tail-call: 25 pass / 6 fail confirms the
+  closed 10.TC-emit-body bundle against wast-baked fixtures).
 - **ROADMAP §10 progress**: 7/13 DONE (10.0/10.C9/10.J/10.F/
   10.Z/10.D/10.T), 4 IN-PROGRESS (10.M/10.R/10.TC/10.E with
   10.E core + 10.TC same-module direct + indirect + 10.E spec
@@ -42,12 +43,13 @@ verification of the tail-call substrate.
 
 ## Next candidates
 
-- **10.E spec runner main-loop** — iterate manifests under the
-  corpus root, dispatch each parsed Directive through runOne,
-  count pass / fail / skip per proposal. Separate bundle from
-  the just-closed primitives bundle. Smallest first step:
-  extend spec_assert_runner_wasm_3_0.zig main() with a single-
-  manifest execution path (vs the current enumerate-and-count).
+- **10.E spec runner: tail-call FAIL bisect** (6 fails out of 31
+  assert_returns). Identify which 6 fail; root-cause each. Likely
+  candidates: multi-result returns, v128 / refs in args/results,
+  cross-module funcref tail-call. Small-cycle wins per failure.
+- **10.E spec runner: assert_trap execution** — expect runOne to
+  return RunError.InvokeFailed for assert_trap directives; needs
+  trap-class discrimination to verify the EXPECTED trap kind.
 - **10.R-4/5** — `call_ref` / `return_call_ref`. Needs the
   `(ref $sig)` typed-funcref Value shape decision first (per
   D-186). Survey-then-spike chunk before implementation.
