@@ -451,3 +451,114 @@ test "runOne e2e: return_call.0.wasm type-i32 () -> i32:306 (10.TC verify)" {
     const result = try runOne(testing.allocator, wasm_bytes, "type-i32", &.{});
     try testing.expectEqual(@as(i32, 306), result.i32);
 }
+
+// ============================================================
+// Tail-call FAIL bisect (D-187 — interp tail-call grows Zig stack)
+// ============================================================
+//
+// wasm-3.0-assert/tail-call shows pass=25 / fail=6 out of 31
+// assert_returns against `return_call.0.wasm`. Root cause (per
+// `src/interp/mvp.zig:440-443` self-documented limitation): the
+// interp's `returnCallOp` invokes the callee via Zig recursion
+// (`invoke(callee)` then `tailReturn` — see mvp.zig:467-482),
+// mirroring Wasm tail-calls onto the host call stack. Each
+// `return_call` adds an interp Frame (max_frame_stack = 256 per
+// `src/runtime/frame.zig:24`); recursion exceeding 256 deep hits
+// `Trap.CallStackExhausted` at `runtime.zig:341`. The 6 failing
+// cases (count/even/odd at 999+ iterations) need millions of
+// tail-iterations and trip the ceiling well before completion.
+// The JIT codegen (10.TC-emit-body bundle) implements
+// frame_teardown + BR X16 / JMP R11 for actual frame-reuse;
+// Native API `Instance.invoke` (src/zwasm/instance.zig:113) goes
+// through `dispatch.run` → interp dispatch table, so the JIT
+// path is not yet exercised by this runner.
+//
+// This test is a **regression marker** — `pass == 25` pins the
+// current state. When D-187 discharges (either by routing the
+// spec runner through the JIT or implementing a non-recursive
+// interp dispatch for tail-call), this assertion fails red and
+// must be retightened to `pass == 31, fail == 0`.
+//
+// All 31 asserts target `return_call.0.wasm`; later `module`
+// directives in the manifest switch to other fixtures unrelated
+// to these asserts.
+test "tail-call bisect: enumerate 31 assert_returns + print failures (D-187 regression marker)" {
+    const wasm_bytes = @embedFile("wasm-3.0-assert/tail-call/return_call/return_call.0.wasm");
+    const Case = struct {
+        name: []const u8,
+        args: []const zwasm_root.Value,
+        want_kind: enum { i32, i64, f32, f64 },
+        want_i32: i32 = 0,
+        want_i64: i64 = 0,
+        want_f32: u32 = 0,
+        want_f64: u64 = 0,
+    };
+    const cases = [_]Case{
+        .{ .name = "type-i32",       .args = &.{}, .want_kind = .i32, .want_i32 = 306 },
+        .{ .name = "type-i64",       .args = &.{}, .want_kind = .i64, .want_i64 = 356 },
+        .{ .name = "type-f32",       .args = &.{}, .want_kind = .f32, .want_f32 = 1165172736 },
+        .{ .name = "type-f64",       .args = &.{}, .want_kind = .f64, .want_f64 = 4660882566700597248 },
+        .{ .name = "type-first-i32", .args = &.{}, .want_kind = .i32, .want_i32 = 32 },
+        .{ .name = "type-first-i64", .args = &.{}, .want_kind = .i64, .want_i64 = 64 },
+        .{ .name = "type-first-f32", .args = &.{}, .want_kind = .f32, .want_f32 = 1068037571 },
+        .{ .name = "type-first-f64", .args = &.{}, .want_kind = .f64, .want_f64 = 4610064722561534525 },
+        .{ .name = "type-second-i32",.args = &.{}, .want_kind = .i32, .want_i32 = 32 },
+        .{ .name = "type-second-i64",.args = &.{}, .want_kind = .i64, .want_i64 = 64 },
+        .{ .name = "type-second-f32",.args = &.{}, .want_kind = .f32, .want_f32 = 1107296256 },
+        .{ .name = "type-second-f64",.args = &.{}, .want_kind = .f64, .want_f64 = 4634211053438658150 },
+        .{ .name = "fac-acc", .args = &[_]zwasm_root.Value{ .{ .i64 = 0 }, .{ .i64 = 1 } }, .want_kind = .i64, .want_i64 = 1 },
+        .{ .name = "fac-acc", .args = &[_]zwasm_root.Value{ .{ .i64 = 1 }, .{ .i64 = 1 } }, .want_kind = .i64, .want_i64 = 1 },
+        .{ .name = "fac-acc", .args = &[_]zwasm_root.Value{ .{ .i64 = 5 }, .{ .i64 = 1 } }, .want_kind = .i64, .want_i64 = 120 },
+        .{ .name = "fac-acc", .args = &[_]zwasm_root.Value{ .{ .i64 = 25 }, .{ .i64 = 1 } }, .want_kind = .i64, .want_i64 = 7034535277573963776 },
+        .{ .name = "count", .args = &[_]zwasm_root.Value{ .{ .i64 = 0 } }, .want_kind = .i64, .want_i64 = 0 },
+        .{ .name = "count", .args = &[_]zwasm_root.Value{ .{ .i64 = 1000 } }, .want_kind = .i64, .want_i64 = 0 },
+        .{ .name = "count", .args = &[_]zwasm_root.Value{ .{ .i64 = 1000000 } }, .want_kind = .i64, .want_i64 = 0 },
+        .{ .name = "even", .args = &[_]zwasm_root.Value{ .{ .i64 = 0 } }, .want_kind = .i32, .want_i32 = 44 },
+        .{ .name = "even", .args = &[_]zwasm_root.Value{ .{ .i64 = 1 } }, .want_kind = .i32, .want_i32 = 99 },
+        .{ .name = "even", .args = &[_]zwasm_root.Value{ .{ .i64 = 100 } }, .want_kind = .i32, .want_i32 = 44 },
+        .{ .name = "even", .args = &[_]zwasm_root.Value{ .{ .i64 = 77 } }, .want_kind = .i32, .want_i32 = 99 },
+        .{ .name = "even", .args = &[_]zwasm_root.Value{ .{ .i64 = 1000000 } }, .want_kind = .i32, .want_i32 = 44 },
+        .{ .name = "even", .args = &[_]zwasm_root.Value{ .{ .i64 = 1000001 } }, .want_kind = .i32, .want_i32 = 99 },
+        .{ .name = "odd", .args = &[_]zwasm_root.Value{ .{ .i64 = 0 } }, .want_kind = .i32, .want_i32 = 99 },
+        .{ .name = "odd", .args = &[_]zwasm_root.Value{ .{ .i64 = 1 } }, .want_kind = .i32, .want_i32 = 44 },
+        .{ .name = "odd", .args = &[_]zwasm_root.Value{ .{ .i64 = 200 } }, .want_kind = .i32, .want_i32 = 99 },
+        .{ .name = "odd", .args = &[_]zwasm_root.Value{ .{ .i64 = 77 } }, .want_kind = .i32, .want_i32 = 44 },
+        .{ .name = "odd", .args = &[_]zwasm_root.Value{ .{ .i64 = 1000000 } }, .want_kind = .i32, .want_i32 = 99 },
+        .{ .name = "odd", .args = &[_]zwasm_root.Value{ .{ .i64 = 999999 } }, .want_kind = .i32, .want_i32 = 44 },
+    };
+
+    var pass: u32 = 0;
+    var fail: u32 = 0;
+    for (cases, 0..) |c, idx| {
+        const got = runOne(testing.allocator, wasm_bytes, c.name, c.args) catch |err| {
+            std.debug.print("[bisect fail #{d:>2}] {s} args={any} -> err={s}\n", .{ idx, c.name, c.args, @errorName(err) });
+            fail += 1;
+            continue;
+        };
+        const ok = switch (c.want_kind) {
+            .i32 => got.i32 == c.want_i32,
+            .i64 => got.i64 == c.want_i64,
+            .f32 => got.f32 == c.want_f32,
+            .f64 => got.f64 == c.want_f64,
+        };
+        if (ok) {
+            pass += 1;
+        } else {
+            switch (c.want_kind) {
+                .i32 => std.debug.print("[bisect fail #{d:>2}] {s} args={any} want=i32:{d} got=i32:{d}\n", .{ idx, c.name, c.args, c.want_i32, got.i32 }),
+                .i64 => std.debug.print("[bisect fail #{d:>2}] {s} args={any} want=i64:{d} got=i64:{d}\n", .{ idx, c.name, c.args, c.want_i64, got.i64 }),
+                .f32 => std.debug.print("[bisect fail #{d:>2}] {s} args={any} want=f32:{x} got=f32:{x}\n", .{ idx, c.name, c.args, c.want_f32, got.f32 }),
+                .f64 => std.debug.print("[bisect fail #{d:>2}] {s} args={any} want=f64:{x} got=f64:{x}\n", .{ idx, c.name, c.args, c.want_f64, got.f64 }),
+            }
+            fail += 1;
+        }
+    }
+    if (pass != 25 or fail != 6) {
+        std.debug.print("[D-187 regression marker] pass={d} fail={d} (was 25/6)\n", .{ pass, fail });
+    }
+    // Pin current interp tail-call state per D-187. When the
+    // discharge lands (JIT routing or non-recursive interp
+    // dispatch), retighten to `pass == 31`.
+    try testing.expectEqual(@as(u32, 25), pass);
+    try testing.expectEqual(@as(u32, 6), fail);
+}
