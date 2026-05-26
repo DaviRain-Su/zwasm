@@ -17,9 +17,13 @@
 - **10.E IT-6 prep SHIPPED**: frame_bytes thread (`9ac268f1`),
   landing_pad_pc forward fixup (`18b2a077`), ADR-0119 draft
   (`e725bce7`), spike-validated flip to Accepted (`213df2f2`).
-- **10.E IT-6 cycle 3a SHIPPED** (`14b32f74`): trampoline
-  scaffolding under `shared/throw_trampoline.zig` (naked fn,
-  trap-only body).
+- **10.E IT-6 cycle 3a SHIPPED** (`14b32f74` + `0d099a41`
+  fix-forward): trampoline scaffolding under
+  `shared/throw_trampoline.zig` (naked fn, trap-only body).
+- **10.E IT-6 cycle 3b SHIPPED** (`7c7169ad`): `op_throw` /
+  `op_throw_ref` retargeted (both archs) — JIT bytes now load
+  the trampoline address and BLR/CALL into it before the
+  trap-stub fallback B/JMP.
 
 ## ROADMAP §10 progress
 
@@ -32,31 +36,43 @@
 ## Active bundle
 
 - **Bundle-ID**: `10.E-codegen-IT-6`
-- **Cycles-remaining**: `~2` (op_throw retarget + dispatchThrow
-  integration in trampoline body)
-- **Continuity-memo**: ADR-0119 Accepted (`213df2f2`); trampoline
-  scaffolding shipped (`14b32f74`) under
-  `src/engine/codegen/shared/throw_trampoline.zig` with trap-only
-  body. Symbol exists + is testable via inline-asm wrapper.
+- **Cycles-remaining**: `~1` (cycle 3c — dispatchThrow body
+  integration in trampoline)
+- **Continuity-memo**: Trampoline + retargeted throw sites are
+  now both shipped. Net observable behavior matches IT-3 (every
+  throw traps) but the integration surface is in place — the
+  trampoline body (trap-only stub) is the next step.
 - **Exit-condition**: end-to-end `throw 0 / catch_all 0` fixture
   compiles + runs + lands at the catch block (per integration
   plan §IT-6 acceptance).
 
-Next /continue resume picks up **cycle 3b — op_throw retarget**:
-update arm64 + x86_64 `op_throw.emit` (and `throw_ref`) to emit
-the address-load + BLR/CALL sequence targeting
-`@intFromPtr(&zwasmThrowTrampoline)`, followed by the B/JMP
-fallback to the function trap stub (existing IT-3 path stays
-as the "trampoline returned" continuation). Address-load
-recipe choice:
-- arm64: MOVZ/MOVK chain (4 instr, 16 bytes) into X16, then BLR X16.
-- x86_64: MOVABS imm64 into RAX (10 bytes), then CALL RAX.
+Next /continue resume picks up **cycle 3c — dispatchThrow
+integration in trampoline body** per ADR-0114 D6:
 
-Cycle 3c (final): replace the trampoline's trap-only body with
-the full dispatchThrow integration per ADR-0114 D6 — capture
-FP+LR into ThrowSite, CALL `shared/zwasm_throw.dispatchThrow`,
-branch on UnwindResult (`.handler` → sp_restore + JMP to
-landing_pad_pc; `.uncaught` → keep current trap_flag set).
+1. Capture caller FP (X29 / RBP) + saved-LR/RIP into a
+   `ThrowSite` record on the trampoline's stack.
+2. Marshal arg(s) for `shared/zwasm_throw.dispatchThrow(table,
+   code_map, throw_site, max_depth)`. `table` + `code_map` are
+   per-Instance — read from `Runtime.exception_table` +
+   `Runtime.code_map` (new JitRuntime fields; cycle 3c also
+   plumbs them via instantiate).
+3. CALL dispatchThrow (Zig fn, C ABI). UnwindResult is likely
+   indirect-result (X8 / RDI hidden arg) due to size > 16 bytes.
+4. Branch on result.tag:
+   - `.handler`: `sp_restore.emitSpRestoreFull` (uses
+     CodeMap.Entry.frame_bytes from IT-6 prep) + BR/JMP to
+     `landing_pad_pc` (resolved by IT-6 prep landing_pad fixup,
+     module-relative via IT-5 collection).
+   - `.uncaught`: keep current trap_flag=1 path; RET to caller
+     (which still B/JMPs to its trap stub via the cycle-3b
+     fallback).
+
+Open question for cycle 3c: tag_idx marshalling. The throw site
+needs to pass `ins.payload` (tag_idx) to the trampoline. Cycle
+3b doesn't yet marshal it; the trampoline's signature must
+accept it via a fixed argreg (X0 on arm64 / RDI on x86_64, per
+the dispatcher entry convention). op_throw.emit at cycle 3c
+prepends a tag_idx load to the address-load + BLR/CALL.
 
 ## Open questions / blockers
 
