@@ -6,11 +6,10 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `ccc39156` — feat(p10): parser readValType recognises
-  byte 0x6C → .i31ref (10.G op_gc cycle 3). Wasm 3.0 GC §5.3.1
-  encoding wired through `init_expr.zig::readValType` — single
-  helper consumed by type/global/table/element/code-locals
-  decode paths.
+- **HEAD**: `56e1dd0b` — feat(p10): validator accepts i31ref as
+  reftype (10.G op_gc cycle 4). opRefNull(0x6C → .i31ref) + 8
+  reftype-check sites cascade-extended. `ref.null i31ref ;
+  ref.is_null ; end` validates clean.
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
 - **Active debt rows**: 18 — all `blocked-by:` with named
   structural barriers. Zero `now`-status rows.
@@ -59,12 +58,14 @@ future op_gc consumers. EH 40 fails still gated on the bigger
 - **Cycles-remaining**: ~19 (per `.dev/phase10_g_op_bundle_plan.md`)
 - **Continuity-memo**: Cycle 1 (`3b1a4c43`) ADR-0115 §6
   amendment. Cycle 2 (`a4556584`) ValType.i31ref + 16-site
-  cascade. Cycle 3 (`ccc39156`) parser readValType wires byte
-  0x6C → .i31ref. Cycle 4 (next): validator stack-types accept
-  i31ref through `popExpect` / `pushType` reftype paths. Cycle
-  5: i31 ops (ref.i31 / i31.get_s / i31.get_u) — wire
-  `op_i31_ops.zig` interp handler + lower-side opcode dispatch
-  (0xFB 0x1C / 0x1D / 0x1E).
+  cascade. Cycle 3 (`ccc39156`) parser readValType wires 0x6C.
+  Cycle 4 (`56e1dd0b`) validator opRefNull + reftype-check
+  cascade. Cycle 5 (next): i31 ops (ref.i31 / i31.get_s /
+  i31.get_u) — wire interp handlers in
+  `src/instruction/wasm_3_0/i31_ops.zig` (currently stub) +
+  lower-side opcode dispatch (0xFB 0x1C / 0x1D / 0x1E). i31_pack
+  helpers in `src/feature/gc/i31.zig` provide truncate /
+  sign-extend / zero-extend primitives.
 - **Exit-condition**: wasm-3.0-assert exception-handling /
   function-references / gc corpora open for op_gc dispatch +
   at least the first i31 spec directive flips green via the
