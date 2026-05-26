@@ -28,7 +28,10 @@ const abi = @import("abi.zig");
 const types = @import("types.zig");
 const ctx_mod = @import("ctx.zig");
 const op_call = @import("op_call.zig");
-const frame_teardown = @import("../shared/frame_teardown.zig");
+// D-185 sibling fix (arm64 root cause): the shared facade is
+// host-dispatched. x86_64 emit always wants x86_64 bytes regardless
+// of host, so import the sibling directly.
+const frame_teardown = @import("frame_teardown.zig");
 const zir = @import("../../../ir/zir.zig");
 
 /// R11 — System V AMD64 caller-saved scratch (no fixed role in

@@ -39,7 +39,14 @@ const gpr = @import("gpr.zig");
 const abi = @import("abi.zig");
 const ctx_mod = @import("ctx.zig");
 const op_call = @import("op_call.zig");
-const frame_teardown = @import("../shared/frame_teardown.zig");
+// D-185 root cause: the shared `frame_teardown` facade dispatches
+// on `builtin.target.cpu.arch` (host arch). When this arm64 emit
+// runs on an x86_64 host (cross-arch byte-snapshot test), the
+// shared facade routes to `x86_64/frame_teardown` and writes 1
+// byte (POP RBP) instead of 4 (LDP X29,X30) — silent corruption
+// of the arm64 byte stream. arm64 emit always wants arm64 bytes
+// regardless of host, so import the sibling directly.
+const frame_teardown = @import("frame_teardown.zig");
 const canonical_type = @import("../shared/canonical_type.zig");
 const zir = @import("../../../ir/zir.zig");
 
@@ -192,13 +199,9 @@ pub fn emitIndirectReturnCall(
     if (ctx.pushed_vregs.items.len < 1) return ctx_mod.Error.AllocationMissing;
     const idx_vreg = ctx.pushed_vregs.pop().?;
 
-    std.debug.print("[D-185] emitIndirectReturnCall entry buf.len={d} (%4={d}) sizeof(ZirInstr)={d} alignof(ZirInstr)={d}\n", .{ ctx.buf.items.len, ctx.buf.items.len % 4, @sizeOf(zir.ZirInstr), @alignOf(zir.ZirInstr) });
-
     try op_call.marshalCallArgs(ctx, callee_sig);
-    std.debug.print("[D-185] post-marshal buf.len={d} (%4={d}) idx_vreg={d}\n", .{ ctx.buf.items.len, ctx.buf.items.len % 4, idx_vreg });
 
     const w_idx = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, idx_vreg, 0);
-    std.debug.print("[D-185] post-gprLoadSpilled buf.len={d} (%4={d}) w_idx={d}\n", .{ ctx.buf.items.len, ctx.buf.items.len % 4, w_idx });
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(17, 31, w_idx));
 
     const expected_typeidx: u32 = canonical_type.canonicalTypeidx(ctx.module_types, @intCast(ins.payload));
@@ -208,10 +211,6 @@ pub fn emitIndirectReturnCall(
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegW(17, 25));
     {
         const fixup_at: u32 = @intCast(ctx.buf.items.len);
-        // D-185 probe: byte alignment of cind_bounds fixup site.
-        // Both hosts MUST see fixup_at % 4 == 0 (arm64 instruction
-        // boundary). Divergence localises the panic source.
-        std.debug.print("[D-185] cind_bounds fixup_at={d} (%4={d})\n", .{ fixup_at, fixup_at % 4 });
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hs, 0));
         try ctx.cind_bounds_fixups.append(ctx.allocator, fixup_at);
     }
@@ -221,7 +220,6 @@ pub fn emitIndirectReturnCall(
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmW(16, @intCast(expected_typeidx)));
     {
         const fixup_at: u32 = @intCast(ctx.buf.items.len);
-        std.debug.print("[D-185] cind_sig fixup_at={d} (%4={d})\n", .{ fixup_at, fixup_at % 4 });
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.ne, 0));
         try ctx.cind_sig_fixups.append(ctx.allocator, fixup_at);
     }
@@ -229,14 +227,10 @@ pub fn emitIndirectReturnCall(
     // Funcptr load: LDR X16, [X26, X17, LSL #3]. X16 = tail-target
     // (per `tail_target_gpr`) — matches the BR X16 in step (7).
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrXRegLsl3(tail_target_gpr, 26, 17));
-    std.debug.print("[D-185] post-funcptr buf.len={d} (%4={d})\n", .{ ctx.buf.items.len, ctx.buf.items.len % 4 });
 
     try emitLoadCalleeRtSameModule(ctx.allocator, ctx.buf);
-    std.debug.print("[D-185] post-loadCalleeRt buf.len={d} (%4={d}) ctx.frame_bytes={d}\n", .{ ctx.buf.items.len, ctx.buf.items.len % 4, ctx.frame_bytes });
     try frame_teardown.emit(ctx.allocator, ctx.buf, .{ .frame_bytes = ctx.frame_bytes });
-    std.debug.print("[D-185] post-frame_teardown buf.len={d} (%4={d})\n", .{ ctx.buf.items.len, ctx.buf.items.len % 4 });
     try emitTailJump(ctx.allocator, ctx.buf, tail_target_gpr);
-    std.debug.print("[D-185] post-tailJump buf.len={d} (%4={d})\n", .{ ctx.buf.items.len, ctx.buf.items.len % 4 });
 }
 
 // ---------------------------------------------------------------------
