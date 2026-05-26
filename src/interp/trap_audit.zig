@@ -387,6 +387,50 @@ test "return_call: invokes callee + promotes its result to caller frame done" {
     try testing.expect(rt.currentFrame().done);
 }
 
+test "return_call: chained A→B→C tail calls preserve frame depth (safepoint-free)" {
+    // Wasm tail-call semantics: each `return_call` REPLACES the
+    // current frame (not stacks). A chain of N return_calls
+    // should keep frame_len == 1 throughout; observed value
+    // propagates through the chain to the original caller's
+    // result slot. Per ADR-0112 D7 safepoint-free invariant.
+    const i32_arr = [_]zir.ValType{.i32};
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &i32_arr };
+
+    var fn_c = zir.ZirFunc.init(0, sig, &.{});
+    defer fn_c.deinit(testing.allocator);
+    try fn_c.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 33, .extra = 0 });
+    try fn_c.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+
+    var fn_b = zir.ZirFunc.init(1, sig, &.{});
+    defer fn_b.deinit(testing.allocator);
+    try fn_b.instrs.append(testing.allocator, .{ .op = .return_call, .payload = 0, .extra = 0 });
+    try fn_b.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+
+    var fn_a = zir.ZirFunc.init(2, sig, &.{});
+    defer fn_a.deinit(testing.allocator);
+    try fn_a.instrs.append(testing.allocator, .{ .op = .return_call, .payload = 1, .extra = 0 });
+    try fn_a.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+
+    var t = DispatchTable.init();
+    mvp.register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    rt.table = &t;
+    const funcs = [_]*const zir.ZirFunc{ &fn_c, &fn_b, &fn_a };
+    rt.funcs = &funcs;
+
+    try rt.pushFrame(.{ .sig = fn_a.sig, .locals = &.{}, .operand_base = 0, .pc = 0, .func = &fn_a });
+    defer _ = rt.popFrame();
+    const initial_frame_len = rt.frame_len;
+    try dispatch_loop.run(&rt, &t, fn_a.instrs.items);
+    // Tail-call invariant: frame depth unchanged after the chain.
+    try testing.expectEqual(initial_frame_len, rt.frame_len);
+    // Result from leaf (fn_c) propagated to the originally-pushed frame.
+    try testing.expectEqual(@as(u32, 1), rt.operand_len);
+    try testing.expectEqual(@as(u32, 33), rt.popOperand().u32);
+    try testing.expect(rt.currentFrame().done);
+}
+
 test "return_call: funcidx OOB → Trap.Unreachable" {
     var caller = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &.{} }, &.{});
     defer caller.deinit(testing.allocator);
