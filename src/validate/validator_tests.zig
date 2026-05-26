@@ -470,6 +470,26 @@ test "validate: br_on_cast_fail inside block round-trip (10.G op_gc cycle 9)" {
     try validateFunction(fn_sig, &.{}, &body, &.{}, &.{}, &module_types, 0, &.{}, 0);
 }
 
+test "validate: array.len round-trip (10.G op_gc cycle 12)" {
+    // Wasm 3.0 GC §3.3.5.6.13 — `(ref.null arrayref ; array.len ; end)`.
+    // Validator: ref.null arrayref pushes arrayref; array.len pops
+    // arrayref-compatible reftype, pushes i32.
+    //
+    // Opcode encoding:
+    //   0xD0 0x6A        — ref.null arrayref
+    //   0xFB 0x0F        — array.len
+    //   0x0B             — end
+    const body = [_]u8{ 0xD0, 0x6A, 0xFB, 0x0F, 0x0B };
+    try validateFunction(i32_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
+test "validate: array.len with i32 operand → StackTypeMismatch (10.G op_gc cycle 12)" {
+    // Wrong input type: i32 instead of arrayref.
+    const body = [_]u8{ 0x41, 0x00, 0xFB, 0x0F, 0x0B };
+    const r = validateFunction(i32_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+    try testing.expectError(Error.StackTypeMismatch, r);
+}
+
 test "validate: ref.eq round-trip (10.G op_gc cycle 11)" {
     // Wasm 3.0 GC §3.3.5.2 — `(ref.null anyref ; ref.null anyref ;
     //   ref.eq ; end)`. Validator: two ref.null pushes, ref.eq pops

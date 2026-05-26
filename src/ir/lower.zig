@@ -564,6 +564,8 @@ pub const Lowerer = struct {
     fn emitPrefixFB(self: *Lowerer) Error!void {
         const sub = try leb128.readUleb128(u32, self.body, &self.pos);
         switch (sub) {
+            // array.len (Wasm 3.0 GC §3.3.5.6.13). No immediates.
+            15 => try self.emit(.@"array.len", 0, 0),
             // ref.eq (Wasm 3.0 GC §3.3.5.2). No immediates.
             19 => try self.emit(.@"ref.eq", 0, 0),
             // ref.test / ref.test_null (Wasm 3.0 GC §3.3.5.3).

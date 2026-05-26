@@ -33,6 +33,7 @@ pub fn register(table: *DispatchTable) void {
     table.interp[op(.@"any.convert_extern")] = convertIdentity;
     table.interp[op(.@"extern.convert_any")] = convertIdentity;
     table.interp[op(.@"ref.eq")] = refEq;
+    table.interp[op(.@"array.len")] = arrayLen;
 }
 
 fn convertIdentity(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
@@ -51,6 +52,17 @@ fn refEq(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
     const a = rt.popOperand();
     const eq: i32 = if (a.ref == b.ref) 1 else 0;
     try rt.pushOperand(.{ .i32 = eq });
+}
+
+/// Wasm 3.0 GC §3.3.5.6.13 — `array.len`: pop arrayref, push i32
+/// length. Cycle-12 stub: array creation ops (array.new family)
+/// haven't landed, so every reftype operand is structurally null →
+/// trap NullReference. Real length-decode lands with ArrayInfo
+/// RTT when sub-chunk 6 of the bundle plan ships.
+fn arrayLen(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
+    const rt = Runtime.fromOpaque(c);
+    _ = rt.popOperand();
+    return runtime.Trap.NullReference;
 }
 
 // ============================================================
@@ -148,4 +160,23 @@ test "ref.eq: null vs non-null returns 0 (10.G op_gc cycle 11)" {
     try rt.pushOperand(.{ .ref = 0xCAFE });
     try driveOne(&rt, &t, .@"ref.eq");
     try testing.expectEqual(@as(i32, 0), rt.popOperand().i32);
+}
+
+test "array.len: traps NullReference pre-array-creation (10.G op_gc cycle 12)" {
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    try rt.pushOperand(.{ .ref = Value.null_ref });
+    try testing.expectError(runtime.Trap.NullReference, driveOne(&rt, &t, .@"array.len"));
+}
+
+test "array.len: also traps on non-null operand pre-ArrayInfo (10.G op_gc cycle 12)" {
+    // Cycle-12 stub always traps — ArrayInfo lookup lands later.
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    try rt.pushOperand(.{ .ref = 0xDEAD });
+    try testing.expectError(runtime.Trap.NullReference, driveOne(&rt, &t, .@"array.len"));
 }

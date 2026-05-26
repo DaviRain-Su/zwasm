@@ -1139,6 +1139,8 @@ pub const Validator = struct {
     fn dispatchPrefixFB(self: *Validator) Error!void {
         const sub = try leb128.readUleb128(u32, self.body, &self.pos);
         switch (sub) {
+            // array.len (Wasm 3.0 GC §3.3.5.6.13): pop arrayref, push i32.
+            15 => try self.opArrayLen(),
             // ref.eq (Wasm 3.0 GC §3.3.5.2): pop 2 reftypes, push i32.
             19 => try self.opRefEq(),
             // ref.test / ref.test_null share validator shape:
@@ -1198,6 +1200,20 @@ pub const Validator = struct {
                 try self.pushType(t);
             },
         }
+    }
+
+    /// Wasm spec 3.0 §3.3.5.6.13 — `array.len`: pop an arrayref
+    /// (`(ref null array)`), push i32. Pre-RTT we accept any
+    /// reftype on the operand (the spec restricts to arrayref-
+    /// subtypes; runtime traps NullReference until array creation
+    /// ops land).
+    fn opArrayLen(self: *Validator) Error!void {
+        const top = try self.popAny();
+        switch (top) {
+            .bot => {},
+            .known => |t| if (t != .funcref and t != .externref and t != .i31ref and t != .anyref and t != .eqref and t != .structref and t != .arrayref) return Error.StackTypeMismatch,
+        }
+        try self.pushType(.i32);
     }
 
     /// Wasm spec 3.0 §3.3.5.2 — `ref.eq`: pop two reftypes,
