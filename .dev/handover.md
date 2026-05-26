@@ -24,6 +24,14 @@
   (RCX/RDX/R8/R9 arg routing + 32-byte shadow space). Verified
   via cross-compile (`-Dtarget=x86_64-windows-gnu` green);
   windowsmini runtime gate stays at phase boundary per ADR-0067.
+- **op_throw tag_idx marshal SHIPPED** (`81e1bd9a`): both arm64
+  + x86_64 op_throw now marshal `ins.payload` into the
+  platform's first-arg register (W0 / RDI / RCX) before the
+  BLR/CALL. Tagged-catch e2e fixture
+  `runI32Export: tagged catch routes by tag_idx` proves the
+  marshal works — `(throw $e1)` correctly routes to the second
+  `catch $e1` HandlerEntry (returning 77), not the first
+  `catch $e0`.
 
 ## ROADMAP §10 progress
 
@@ -35,12 +43,10 @@
 
 ## Next candidates (names + Refs)
 
-- **op_throw tag_idx marshal** — both arm64 + x86_64 op_throw
-  currently emit `MOVZ/MOVABS addr; BLR/CALL` without first
-  marshalling `instr.payload` (= tag_idx) into the first arg
-  reg (X0 / RDI / RCX). Catch_all works because it ignores
-  tag_idx; tagged catches will mismatch. Touches:
-  `arm64/ops/wasm_3_0/throw.zig` + `x86_64/ops/wasm_3_0/throw.zig`.
+- **throw_ref op + exnref handling** — `throw_ref` currently
+  reuses `emitTrampolineCallAndTrap` but doesn't dereference the
+  exnref to extract its tag + payload. Touches: both arches'
+  `throw_ref.zig`, exnref Value carve-out.
 - **10.M-realworld** — toolchain-blocked (clang_wasm64 fixture);
   barrier in D-179 (wabt 1.0.41+ GC type syntax).
 - **10.TC** — Wasm 3.0 spec corpus extension + cross-module EH
