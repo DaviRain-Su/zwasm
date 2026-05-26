@@ -637,6 +637,56 @@ test "runOneExpectException: normal return reports .returned_normally" {
     try testing.expectEqual(ExceptionOutcome.returned_normally, outcome);
 }
 
+test "D-188 bisect: EH + func-refs invalid-accepted fixtures (regression marker)" {
+    // Identifies the 6 fixtures listed as assert_invalid that
+    // current `Engine.compile` accepts. Pinned per D-188 — when
+    // the validator's reject-set closes a case, the count goes
+    // down; this test goes red as a prompt to update the marker.
+    // Cross-corpus @embedFile pins the fixtures at compile time.
+    const Case = struct { name: []const u8, bytes: []const u8 };
+    const cases = [_]Case{
+        // exception-handling try_table (7 fixtures: 6..12; 6 pass / 1 fail per runner)
+        .{ .name = "try_table.6",  .bytes = @embedFile("wasm-3.0-assert/exception-handling/try_table/try_table.6.wasm") },
+        .{ .name = "try_table.7",  .bytes = @embedFile("wasm-3.0-assert/exception-handling/try_table/try_table.7.wasm") },
+        .{ .name = "try_table.8",  .bytes = @embedFile("wasm-3.0-assert/exception-handling/try_table/try_table.8.wasm") },
+        .{ .name = "try_table.9",  .bytes = @embedFile("wasm-3.0-assert/exception-handling/try_table/try_table.9.wasm") },
+        .{ .name = "try_table.10", .bytes = @embedFile("wasm-3.0-assert/exception-handling/try_table/try_table.10.wasm") },
+        .{ .name = "try_table.11", .bytes = @embedFile("wasm-3.0-assert/exception-handling/try_table/try_table.11.wasm") },
+        .{ .name = "try_table.12", .bytes = @embedFile("wasm-3.0-assert/exception-handling/try_table/try_table.12.wasm") },
+        // function-references ref (12 fixtures: 1..12; 7 pass / 5 fail per runner)
+        .{ .name = "ref.1",  .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.1.wasm") },
+        .{ .name = "ref.2",  .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.2.wasm") },
+        .{ .name = "ref.3",  .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.3.wasm") },
+        .{ .name = "ref.4",  .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.4.wasm") },
+        .{ .name = "ref.5",  .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.5.wasm") },
+        .{ .name = "ref.6",  .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.6.wasm") },
+        .{ .name = "ref.7",  .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.7.wasm") },
+        .{ .name = "ref.8",  .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.8.wasm") },
+        .{ .name = "ref.9",  .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.9.wasm") },
+        .{ .name = "ref.10", .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.10.wasm") },
+        .{ .name = "ref.11", .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.11.wasm") },
+        .{ .name = "ref.12", .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.12.wasm") },
+    };
+
+    var accepted_count: u32 = 0;
+    for (cases) |c| {
+        const outcome = try compileExpectInvalid(testing.allocator, c.bytes);
+        if (outcome == .accepted) {
+            std.debug.print("[D-188 invalid-accepted] {s}\n", .{c.name});
+            accepted_count += 1;
+        }
+    }
+    // Current state: 1 fixture incorrectly accepted (try_table.10
+    // — deep EH validator gap around `catch_all_ref` typing in a
+    // try_table block declared without `(result exnref)`). The
+    // 5 function-references "unknown type" cases (ref.1..5) closed
+    // at the D-188 first-cycle fix in `instantiate.zig::frontendValidate`
+    // (pre-decode pass forced section-body validation regardless
+    // of code-section presence). Tighten further when the EH
+    // try_table type-check rule lands.
+    try testing.expectEqual(@as(u32, 1), accepted_count);
+}
+
 test "compileExpectInvalid: return_call.0.wasm accepted (no false rejection)" {
     // Sanity: the valid return_call.0.wasm (which the bisect test
     // executes 31/31 directives against) must NOT be reported as

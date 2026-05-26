@@ -59,6 +59,20 @@ pub fn frontendValidate(alloc: std.mem.Allocator, binary: []const u8) bool {
     var module = parser.parse(alloc, binary) catch return false;
     defer module.deinit(alloc);
 
+    // D-188 — structural body validation runs unconditionally for
+    // every present section that contains valtype-bearing entries.
+    // The downstream path's type/global/table/elem decodes were
+    // gated behind the "has-type-section AND has-code-section"
+    // shortcut, which let modules containing only a type / global
+    // / table / elem section bypass valtype checks (e.g., the
+    // Wasm 3.0 typed-funcref `(ref N)` byte 0x64/0x63 with an
+    // out-of-bounds typeidx in the wasm-3.0-assert/function-
+    // references/ref.{1..5} fixtures). Decoding here is a pure
+    // structural integrity gate; the heavier per-function
+    // validation below remains gated on a code section being
+    // present.
+    if (!preDecodeSectionBodies(alloc, &module)) return false;
+
     const type_section = module.find(.type) orelse return validateNoCode(alloc, &module);
     const code_section = module.find(.code) orelse return true;
 
@@ -188,7 +202,44 @@ pub fn frontendValidate(alloc: std.mem.Allocator, binary: []const u8) bool {
 pub fn validateNoCode(_: std.mem.Allocator, _: *Module) bool {
     // No code section: nothing per-function to validate. The
     // module's section-id ordering was already checked by
-    // parser.parse, which is sufficient.
+    // parser.parse; section-body structural integrity is checked
+    // separately by `preDecodeSectionBodies` (called from
+    // `frontendValidate`'s top), so this helper is genuinely a
+    // no-op for modules with no code.
+    return true;
+}
+
+/// D-188 — pre-validation pass that decodes the body of each
+/// present section whose entries embed valtypes (or other
+/// structural data with their own integrity invariants). Returns
+/// false on any decode error. Runs ahead of the conditional
+/// per-function validate path so a module without a code section
+/// can't silently bypass type/global/table/elem body checks.
+fn preDecodeSectionBodies(alloc: std.mem.Allocator, module: *Module) bool {
+    if (module.find(.type)) |s| {
+        var t = sections.decodeTypes(alloc, s.body) catch return false;
+        t.deinit();
+    }
+    if (module.find(.import)) |s| {
+        var im = sections.decodeImports(alloc, s.body) catch return false;
+        im.deinit();
+    }
+    if (module.find(.table)) |s| {
+        var t = sections.decodeTables(alloc, s.body) catch return false;
+        t.deinit();
+    }
+    if (module.find(.memory)) |s| {
+        var m = sections.decodeMemory(alloc, s.body) catch return false;
+        m.deinit();
+    }
+    if (module.find(.global)) |s| {
+        var g = sections.decodeGlobals(alloc, s.body) catch return false;
+        g.deinit();
+    }
+    if (module.find(.element)) |s| {
+        var e = sections.decodeElement(alloc, s.body) catch return false;
+        e.deinit();
+    }
     return true;
 }
 
