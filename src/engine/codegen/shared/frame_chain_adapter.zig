@@ -58,10 +58,22 @@ pub fn loadFrameLink(fp: usize, ctx: ?*anyopaque) ?unwind.FrameLink {
         .x86_64 => raw.caller_rip,
         else => unreachable,
     };
+    // D-183: subtract 1 from the saved return address before
+    // normalising for `ExceptionTable.lookup`. The saved LR/RIP
+    // points to the instruction AFTER the CALL/BL — when the
+    // CALL is the last instruction in a try_table body, the
+    // unadjusted ret_addr lands at `pc_end` (half-open) and
+    // would reject the match. DWARF / libunwind / wasmtime /
+    // WAMR convention is to subtract 1 so the lookup lands at
+    // the prior instruction's byte. The lookup is just an
+    // in-range check (no decode of the underlying bytes), so
+    // subtracting 1 is safe — the result still lies within
+    // the CALL/BL instruction's byte range.
+    const lookup_addr = ret_addr -% 1;
     return .{
         .caller_fp = raw.caller_fp,
-        .caller_pc = adapter_ctx.normalize(ret_addr, adapter_ctx.normalize_ctx),
-        .caller_abs_pc = ret_addr,
+        .caller_pc = adapter_ctx.normalize(lookup_addr, adapter_ctx.normalize_ctx),
+        .caller_abs_pc = lookup_addr,
     };
 }
 
@@ -94,13 +106,17 @@ fn identityTruncate(ret_addr: usize, ctx: ?*anyopaque) u32 {
 
 test "frame_chain_adapter: loadFrameLink reads raw frame + normalizes PC via callback" {
     // Synthetic 2-slot frame prefix: caller_fp = 0xDEAD, caller_ret = 0xBEEF1234.
+    // D-183: the adapter subtracts 1 from the saved return
+    // address before normalising (DWARF convention; lands the
+    // lookup at the prior instruction's byte). caller_pc =
+    // truncate(ret_addr - 1) = 0xBEEF1233.
     var frame: [2]usize = .{ 0xDEAD, 0xBEEF1234 };
     const fp: usize = @intFromPtr(&frame);
 
     const ctx: Context = .{ .normalize = identityTruncate };
     const link = loadFrameLink(fp, @ptrCast(@constCast(&ctx))).?;
     try testing.expectEqual(@as(usize, 0xDEAD), link.caller_fp);
-    try testing.expectEqual(@as(u32, 0xBEEF1234), link.caller_pc);
+    try testing.expectEqual(@as(u32, 0xBEEF1233), link.caller_pc);
 }
 
 test "frame_chain_adapter: loadFrameLink returns null for fp == 0 sentinel" {
@@ -160,10 +176,12 @@ test "frame_chain_adapter: end-to-end walk — uncaught after exhausting frame c
     try testing.expectEqual(unwind.UnwindResult.uncaught, result);
 }
 
-test "frame_chain_adapter: normalize callback receives raw absolute address" {
-    // The normalizer should see the raw saved LR/RIP, not a
-    // pre-massaged value. Verifies the adapter does NOT mutate
-    // the address before the callback.
+test "frame_chain_adapter: normalize callback receives ret_addr - 1 (D-183 DWARF convention)" {
+    // D-183: the adapter subtracts 1 from the saved return
+    // address before invoking the normalizer so the lookup
+    // lands at the prior instruction's byte (DWARF / libunwind
+    // convention; covers try_table bodies ending in CALL where
+    // the saved-LR lands exactly at the body's `pc_end`).
     const Probe = struct {
         var captured: usize = 0;
         fn capture(ret_addr: usize, ctx: ?*anyopaque) u32 {
@@ -179,5 +197,5 @@ test "frame_chain_adapter: normalize callback receives raw absolute address" {
 
     const ctx: Context = .{ .normalize = Probe.capture };
     _ = loadFrameLink(fp, @ptrCast(@constCast(&ctx)));
-    try testing.expectEqual(@as(usize, 0xDEADC0DEABCD1234), Probe.captured);
+    try testing.expectEqual(@as(usize, 0xDEADC0DEABCD1233), Probe.captured);
 }

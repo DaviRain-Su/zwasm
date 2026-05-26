@@ -481,6 +481,38 @@ test "runI32Export: tagged catch routes by tag_idx — throw $e1 → catch $e1 r
     try testing.expectEqual(@as(u32, 77), try runI32Export(testing.allocator, &bytes, "test"));
 }
 
+test "runI32Export: cross-frame throw — callee throws, caller's try_table catches (D-183)" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    // (module
+    //   (tag $e0)
+    //   (func $callee (throw $e0))
+    //   (func (export "test") (result i32)
+    //     (block $catch
+    //       (try_table (catch_all $catch)
+    //         call $callee)
+    //       (return (i32.const 99)))
+    //     (i32.const 42)))
+    //
+    // D-183 discharge: the dispatcher's initial_pc + the
+    // unwinder's caller_pc are now both module-relative (=
+    // `absolute_pc - block_addr`), matching the module-relative
+    // pc_start/pc_end stored by `collectModuleTable`. Prior to
+    // the fix, dispatch returned function-relative PCs which
+    // happened to equal module-relative only for the first
+    // defined function — multi-function modules fell through to
+    // `.uncaught` because the caller's pc range was offset by
+    // the preceding function(s)'s byte length.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x60,
+        0x00, 0x00, 0x60, 0x00, 0x01, 0x7f, 0x03, 0x03, 0x02, 0x00, 0x01, 0x0d,
+        0x03, 0x01, 0x00, 0x00, 0x07, 0x08, 0x01, 0x04, 0x74, 0x65, 0x73, 0x74,
+        0x00, 0x01, 0x0a, 0x1a, 0x02, 0x04, 0x00, 0x08, 0x00, 0x0b, 0x13, 0x00,
+        0x02, 0x40, 0x1f, 0x40, 0x01, 0x02, 0x00, 0x10, 0x00, 0x0b, 0x41, 0xe3,
+        0x00, 0x0f, 0x0b, 0x41, 0x2a, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 42), try runI32Export(testing.allocator, &bytes, "test"));
+}
+
 test "runI32Export: throw + catch_ with i32 payload returns 88 (10.E-payload-prop bundle close)" {
     // D-182 discharge — bundle 10.E-payload-prop closed on both
     // arches. Throw side: throw.emit pops N values + stores at

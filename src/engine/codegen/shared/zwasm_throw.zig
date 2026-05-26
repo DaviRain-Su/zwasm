@@ -78,15 +78,23 @@ pub fn dispatchThrow(
     site: ThrowSite,
     max_unwind_depth: u32,
 ) UnwindResult {
-    // (1) Normalise the throw-site absolute address. If the
-    // throw site is NOT in any JIT-compiled function (= the
-    // assembly glue called us with a corrupted address, or
-    // the throw originated from a host frame somehow), the
-    // initial lookup will fall through and the walker will
-    // continue up the frame chain looking for a handler.
-    const initial_pc = switch (code_map.lookup(site.throw_site_addr)) {
-        .inside => |hit| hit.relative_pc,
-        .outside => code_map_mod.non_jit_pc_sentinel,
+    // (1) Normalise the throw-site absolute address to a
+    // module-relative PC (= absolute - block_addr) to match
+    // `collectModuleTable`'s pc_start/pc_end shift convention.
+    // D-183: prior code returned function-relative
+    // `hit.relative_pc` which only happens to equal module-
+    // relative for the first defined function (offset 0 in the
+    // JitBlock); for cross-frame catches in non-first functions
+    // the lookup would miss because the stored pc_start was
+    // module-relative but the lookup PC was function-relative.
+    const initial_pc = blk: {
+        if (code_map.entries.len == 0) break :blk code_map_mod.non_jit_pc_sentinel;
+        switch (code_map.lookup(site.throw_site_addr)) {
+            .outside => break :blk code_map_mod.non_jit_pc_sentinel,
+            .inside => {},
+        }
+        const block_addr = code_map.entries[0].start_addr;
+        break :blk @as(u32, @intCast(site.throw_site_addr - block_addr));
     };
 
     // (2) Build the adapter context. The code_map serves both
@@ -182,20 +190,31 @@ test "dispatchThrow: no matching handler → uncaught" {
 }
 
 test "dispatchThrow: handler in caller frame after one unwind step" {
-    // Two functions in the code map:
-    //   f0: [0x10000, 0x10100)  — throw site here
-    //   f1: [0x20000, 0x20100)  — handler frame here (caller)
+    // Two functions in the code map. The CodeMap's first entry
+    // defines `block_addr` (the JitBlock base) — both functions
+    // are addressed relative to it for the unwinder's
+    // module-relative PC convention (D-183 fix; see
+    // `code_map.normalizeForUnwind` + `dispatchThrow`'s
+    // initial_pc computation).
+    //   f0: [0x10000, 0x10100)  — throw site here; block_addr =
+    //                              0x10000 since f0 is first.
+    //   f1: [0x20000, 0x20100)  — handler frame here (caller);
+    //                              module-relative range is
+    //                              [0x10000, 0x10100) =
+    //                              0x20000 - 0x10000.
     var cb: CodeBuilder = .empty;
     defer cb.deinit(testing.allocator);
     try cb.add(testing.allocator, .{ .start_addr = 0x10000, .len = 0x100, .func_idx = 0 });
     try cb.add(testing.allocator, .{ .start_addr = 0x20000, .len = 0x100, .func_idx = 1 });
     const cmap = cb.finalize();
 
-    // PC ranges must be disjoint so the inner-then-outer walk is
-    // actually exercised: inner's range [0, 0x50) catches tag 7
-    // (won't match the throw of tag 5); outer's range [0x50, 0x100)
-    // is catch_all. Inner's relative throw PC 0x42 misses → walker
-    // steps to outer at relative PC 0x70 → catch_all hits.
+    // HandlerEntries are MODULE-relative (post-collectModuleTable
+    // shift). f1's entry sits at module-relative offset
+    // 0x20000 - 0x10000 = 0x10000 onwards. The inner range
+    // matches f0's body (tag 7 — throw of tag 5 misses); the
+    // outer range covers f1's [0x10050, 0x10100) which the
+    // walker hits after one frame step (saved LR 0x20070 → mod
+    // 0x10070 ∈ [0x10050, 0x10100)).
     var eb3: Builder = .empty;
     defer eb3.deinit(testing.allocator);
     try eb3.add(testing.allocator, .{
@@ -206,8 +225,8 @@ test "dispatchThrow: handler in caller frame after one unwind step" {
         .kind = .catch_,
     });
     try eb3.add(testing.allocator, .{
-        .pc_start = 0x50,
-        .pc_end = 0x100,
+        .pc_start = 0x10050,
+        .pc_end = 0x10100,
         .tag_idx = null,
         .landing_pad_pc = 0x90,
         .kind = .catch_all,
