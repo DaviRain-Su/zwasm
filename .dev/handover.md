@@ -37,8 +37,13 @@
   `unwind.walk` threads `initial_abs_pc`; `trampolineCore`
   `.handler` branch resolves the catching function's entry,
   computes absolute SP + landing-pad PC, writes them to new
-  JitRuntime fields `eh_handler_{active,sp,pc}`. Both Mac aarch64
-  and Linux x86_64 SysV green (2000/2014 pass).
+  JitRuntime fields `eh_handler_{active,sp,pc}`.
+- **10.E IT-6 cycle 3c-iii-c SHIPPED** (`27fdaad7`):
+  naked-stub branch on `eh_handler_active` + JMP path. Both
+  arches: after `blr/callq core`, branch on the flag; on `1`
+  install SP/FP from JitRuntime and BR/JMP to absolute
+  `eh_handler_pc`. Added `eh_handler_fp` field for FP restore.
+  Mac aarch64 + Linux x86_64 SysV green (2000/2014 pass).
 
 ## ROADMAP §10 progress
 
@@ -51,25 +56,17 @@
 ## Active bundle
 
 - **Bundle-ID**: `10.E-codegen-IT-6`
-- **Cycles-remaining**: `~1` (cycle 3c-iii-c naked-stub branch +
-  end-to-end fixture)
-- **Continuity-memo**: trampoline body, throw-site retargeting,
-  per-Instance EH data wiring, and the .handler resolution
-  (SP + absolute landing PC into JitRuntime) are all in place.
-  Next: naked stub reads `eh_handler_active` after `trampolineCore`
-  returns, and on `1` does `mov sp, [rt + eh_handler_sp_off]; br
-  [rt + eh_handler_pc_off]` (arm64) / `movq off(%r15), %rsp; jmpq
-  *off(%r15)` (x86_64) instead of LDP/RET.
-  1. Naked-stub branch: load `eh_handler_active` after `blr core`;
-     `cbz x16, .Luncaught` (arm64) / `testl %eax, %eax; jz .Lunc`
-     (x86_64); the .uncaught arm does today's LDP+RET, the
-     handler arm loads SP + target PC and BR/JMP.
-  2. End-to-end fixture: minimal `(throw 0) (catch_all 0)` WAT
-     that the existing IT-3/IT-5 emit pipeline can already compile;
-     verify the catch-block return path executes (e.g. distinct
-     return value from throw + catch).
-  3. Win64 trampoline body (currently `@compileError`) — fold in
-     RCX/RDX/R8/R9 + shadow-space ABI shuffle.
+- **Cycles-remaining**: `~1` (cycle 3c-iii-d end-to-end fixture)
+- **Continuity-memo**: full trampoline → core → dispatchThrow →
+  unwind → naked-stub branch → SP/FP install → BR-to-landing-pad
+  pipeline is in place on Mac aarch64 + Linux x86_64 SysV.
+  Next: minimal `(throw 0) (catch_all 0)` end-to-end fixture that
+  the existing IT-3/IT-5 emit pipeline can compile; verify the
+  catch-block return path executes (distinct return value from
+  throw + catch path). Add the fixture under `test/edge_cases/p10/`
+  or directly in `src/engine/runner.zig` test block. Win64
+  trampoline body (currently `@compileError`) is the final
+  remaining work after that.
 - **Exit-condition**: end-to-end `throw 0 / catch_all 0` fixture
   compiles + runs + lands at the catch block (per integration
   plan §IT-6 acceptance).
