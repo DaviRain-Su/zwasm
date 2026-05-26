@@ -6,8 +6,9 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `d189955c` — x86_64 return_call.emit wired end-to-end
-  (10.TC emit-body cycle 5; both arches green for same-module direct).
+- **HEAD**: `aa6f3928` — revert pair for 10.TC-emit-body cycle 6
+  (arm64 return_call_indirect panicked on Linux x86_64 SysV ubuntu
+  with `@divExact` alignment failure; D-185 filed for root-cause).
 - **ROADMAP §10 progress**: 7/13 DONE (10.0/10.C9/10.J/10.F/
   10.Z/10.D/10.T), 4 IN-PROGRESS (10.M/10.R/10.TC/10.E with
   10.E core substantively done), 2 Pending (10.G/10.P).
@@ -21,39 +22,36 @@
 ## Active bundle
 
 - **Bundle-ID**: 10.TC-emit-body
-- **Cycles-remaining**: ~3
-- **Continuity-memo**: cycles 1-5 landed. Cycle 1 (`c2039bbb`):
-  `CallFixup.is_tail` + arm64 linker B/BL dispatch. Cycle 2
-  (`4d0e20f1`): arm64 `emitDirectTailJump`. Cycle 3 (`b03545fe`):
-  arm64 `return_call.emit` wired end-to-end (e2e fixture green
-  on Mac aarch64). Cycle 4 (`aa1c53e6`): `frame_teardown.Params
-  .uses_runtime_ptr` plumbed + x86_64 POP R15 fix. Cycle 5
-  (`d189955c`): x86_64 `return_call.emit` wired end-to-end via
-  inline-for dispatcher (collected_x86_64_ctx_ops 394 → 395);
-  `.return_call` added to x86_64 `usesRuntimePtr` whitelist;
-  e2e fixture (linker.zig) now green on BOTH Mac aarch64 and
-  Linux x86_64 SysV. Same-module direct `return_call` complete.
+- **Cycles-remaining**: ~4 (cycle 6 reverted; investigation cycle
+  inserted before re-attempt)
+- **Continuity-memo**: cycles 1-5 landed (same-module direct
+  `return_call` complete on both arches). Cycle 6 (`99d10707` +
+  `8d1b7e7a`) attempted arm64 `return_call_indirect` but ubuntu
+  Linux x86_64 panicked with `@divExact` alignment failure in
+  the cind_bounds_fixups trap-stub patching loop. Reverted via
+  `b6d669b7` + `aa6f3928` per Step 0.7 mandate. Same code passes
+  full clean rebuild on Mac aarch64; the failure is heisenbug-
+  class (host-conditional alignment divergence). Filed D-185.
 - **Exit-condition**: x86_64 SysV mirror of cycle 3 wired
   end-to-end (JMP rel32 opcode at emit + emitDirectReturnCall
   + same e2e fixture green on Linux x86_64) AND `return_call_
   indirect` / `return_call_ref` arm64+x86_64 wired with at
   least one e2e fixture each.
-- **Next cycle (cycle 6)**: `return_call_indirect` arm64 emit
-  body. Uses the BR X16 path (D4 prescribed shape) because the
-  callee target comes from a runtime table lookup, not the
-  linker. Sub-steps: (a) arm64 ops/wasm_3_0/return_call_indirect
-  .zig stub flips to delegation → new
-  `op_tail_call.emitIndirectReturnCall(ctx, ins)`. (b) Same as
-  `op_call.emitCallIndirect` shape for bounds + sig check
-  (reuse cind_bounds_fixups + cind_sig_fixups), then LDR funcptr
-  into X16, marshal args, MOV X0,X19, frame_teardown, BR X16
-  (use existing `emitTailJump(target=X16)`). Open question: does
-  the existing bounds-trap shape work pre-teardown? Yes — bounds
-  check uses CMP+B.HS which fits before marshal/teardown.
-  (c) Add `.return_call_indirect` dispatch arm in arm64/emit.zig.
-  (d) e2e fixture in linker.zig: 2-fn module with table containing
-  fn1; fn0 does `return_call_indirect 0 0` after `i32.const 0`;
-  verify execute returns fn1's value.
+- **Next cycle (cycle 7 — D-185 investigation)**: probe the
+  Linux x86_64 alignment divergence BEFORE re-attempting
+  return_call_indirect. Per `investigation_discipline.md` §1:
+  each cycle should land one permanent diagnostic primitive
+  rather than throwaway probes. Approach: cherry-pick the
+  cycle 6 diff (`99d10707`), then add `std.debug.print` at
+  every `cind_*_fixups.append` site in arm64/op_call.zig +
+  emitIndirectReturnCall printing `buf.items.len % 4`, plus
+  print `@sizeOf(ZirInstr)` / `@alignOf(ZirInstr)` once at
+  compile() entry. Run `bash scripts/run_remote_ubuntu.sh
+  test` and `zig build test` locally; compare the cind-fixup
+  byte_offsets across hosts. Leading hypotheses from D-185:
+  (3) ZirInstr layout host-divergent (extra-field padding);
+  (4) regalloc-slot reg-vs-spill branch host-divergent. Probe
+  distinguishes the two. Root-cause → cycle 8 ships the fix.
 
 ## Session highlights (prior session; for handoff context)
 
