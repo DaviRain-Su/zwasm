@@ -125,6 +125,139 @@ Land WasmGC roots + RTT + i31 with the following design choices:
    supertype chain dynamically). Display-8 + fallback is the
    wasmtime + SpiderMonkey shape.
 
+3a. **StructInfo / ArrayInfo concrete layout** (Revision
+   2026-05-27 — added once ADR-0121 parser substrate landed
+   and the no-RTT validator+lower surface for struct.new /
+   struct.get / struct.set / array.new family completed at
+   10.G op_gc cycles 15-18). Materialised per-Instance at
+   instantiate time from `sections.Types.struct_defs` /
+   `sections.Types.array_defs` (parser side-tables; ADR-0121
+   D2). All sizes / offsets are byte units relative to the
+   start of the GC heap object payload (header excluded):
+
+   ```zig
+   //! src/feature/gc/type_info.zig — load-bearing per ADR-0116 §3 + §3a.
+
+   pub const FieldInfo = extern struct {
+       /// Byte offset of this field within the struct payload
+       /// (or 0 for the sole element-type slot of an array).
+       offset: u32,
+       /// Byte size of this field (4 for i32/f32/anyref-class;
+       /// 8 for i64/f64; 16 for v128; 4 for the 32-bit GcRef in
+       /// the Value union per ADR-0115 D5).
+       size: u8,
+       /// ValType byte (Wasm 3.0 §5.3.5 encoding). Stored as u8
+       /// so the layout stays extern-stable across Zig versions.
+       valtype_byte: u8,
+       /// Mutable bit from the spec field-type triple.
+       /// Read by struct.set / array.set / array.fill validator
+       /// + (later) interp write paths.
+       mutable: bool,
+       /// Reserved for SIMD lane alignment; zero today.
+       _reserved: u8 = 0,
+   };
+
+   pub const StructInfo = extern struct {
+       /// Pointer-stable shared with the matching TypeInfo entry
+       /// (see §3). Used by `ref.cast` for the O(1) display check.
+       type_info: *const TypeInfo,
+       /// Field array (allocated in the Instance arena per Module
+       /// per ADR-0123 lifecycle). Length tracked by TypeInfo.field_count.
+       fields: [*]const FieldInfo,
+       /// Total payload size after the GC ObjectHeader. Sum of
+       /// `fields[i].size` rounded up to ObjectHeader alignment
+       /// (8 bytes per ADR-0115 D1; preserves the low-bit-0
+       /// invariant per §5).
+       payload_size: u32,
+   };
+
+   pub const ArrayInfo = extern struct {
+       /// Pointer-stable per above.
+       type_info: *const TypeInfo,
+       /// Single element-type triple. Arrays carry no field array;
+       /// element offset within the i-th array slot is
+       /// `i * element.size + sizeof(ArrayHeader)`.
+       element: FieldInfo,
+   };
+   ```
+
+   **Heap object header** (ADR-0115 §"Object header" amendment;
+   the header is what the GC walker decodes to find object
+   kind + length):
+
+   ```zig
+   pub const ObjectKind = enum(u8) {
+       struct_,  // payload follows StructInfo.fields layout
+       array,    // payload = ArrayHeader { length: u32 } ++ element[]
+   };
+
+   pub const ObjectHeader = extern struct {
+       kind: ObjectKind,
+       _pad: [3]u8 = .{0, 0, 0},
+       /// 32-bit pointer-to-info; resolves via the per-Instance
+       /// TypeInfo array's pointer-stable arena. The high bit
+       /// is reserved for the mark phase of `collector_mark_sweep`
+       /// per ADR-0115 §10 (struct/array distinction is `kind`;
+       /// mark bit lives separately so the info pointer stays
+       /// stable across GC cycles).
+       info: u32,
+   };
+
+   pub const ArrayHeader = extern struct {
+       header: ObjectHeader,
+       /// Element count. Set at array.new / array.new_default /
+       /// array.new_fixed allocation; read by array.len / array.get
+       /// / array.set / array.fill at runtime for the bounds check.
+       length: u32,
+   };
+   ```
+
+   **Object header alignment**: 8 bytes total (1 kind + 3 pad +
+   4 info). `ArrayHeader` is 12 bytes (8 header + 4 length).
+   Allocator rounds payload start to 8-byte alignment, preserving
+   the §5 low-bit-0 invariant for GcRef storage.
+
+   **Instance-time materialisation** (`src/runtime/instance/
+   instantiate.zig` — wiring lands at 10.G op_gc cycle 20+):
+
+   1. After `parser.parse` populates `Module.types` (with
+      `Types.struct_defs` / `Types.array_defs` per ADR-0121 D2),
+      allocate `Instance.gc_type_infos: []TypeInfo` (length
+      = `types.items.len`).
+   2. For each `typeidx` walk:
+      - `kinds[i] == .func` → `TypeInfo.kind = .func` (filled
+        by typed-funcref work; cycle 20+ outside scope).
+      - `kinds[i] == .structdef` → materialise StructInfo:
+        compute field offsets by accumulating field sizes (with
+        per-field alignment per Wasm spec — for first cut, treat
+        all fields as 8-byte-aligned slots so layout is trivial
+        and lookup is O(1) without alignment math).
+      - `kinds[i] == .arraydef` → materialise ArrayInfo with
+        the single element FieldInfo.
+   3. Populate `TypeInfo.supertype_chain` from the subtype-decl
+      bytes (Wasm 3.0 GC §5 sub-type encoding; deferred —
+      this cut allows depth-0 chains only, which covers all
+      compiler-generated WasmGC from Dart / Kotlin / hoot).
+   4. Comptime-assert (in the materialisation function body) that
+      `Instance.gc_heap != null` for any Instance whose module
+      declared struct or array types (mirrors the parse-time
+      `needs_gc_heap` flag per ADR-0115 §1).
+
+   **Offset compute simplification** (this cut): every field
+   gets an 8-byte slot regardless of declared size. v128 fields
+   (16 bytes) reject with `Error.UnsupportedFieldSize` until
+   sub-chunk 7 of the bundle plan revisits the layout. Per-field
+   alignment optimisations defer to Phase 11 — for Phase 10's
+   correctness-first goal, the 8-byte-uniform layout is correct
+   (Wasm semantics don't constrain field offsets; only field
+   identity by index matters).
+
+   **GcRef encoding in payload slots**: per ADR-0115 §6 + §5,
+   ref-typed fields store a 32-bit GcRef in the low half of
+   their 8-byte slot; high half is zero-padding. Mark-sweep
+   walks payload slots interpreting them by `FieldInfo.valtype_byte`
+   (only reftype slots are followed).
+
 4. **i31 low-bit-1 discriminant + arith-shift sign-extend**
    (`i31.zig`):
 
@@ -359,3 +492,13 @@ the impl SHA range cited.
   exceeds depth 5)" guidance. This makes the cap a discoverable
   zwasm choice (not a spec rule) so toolchain authors can
   restructure rather than file bugs.
+- 2026-05-27 — Added §3a (StructInfo / ArrayInfo concrete runtime
+  layout) once ADR-0121 parser side-tables landed at 10.G op_gc
+  cycle 14 (`b5b3a39f`) and the no-RTT validator+lower surface
+  completed at cycles 15-18 (`06a8dff5`, `678aac15`, `94e5e3fe`,
+  `8b657b30`). Specifies FieldInfo / StructInfo / ArrayInfo /
+  ObjectHeader / ArrayHeader extern shapes + the per-Instance
+  materialisation step. This cut uses an 8-byte-uniform field
+  slot layout (v128 fields reject for now); per-field alignment
+  optimisation deferred to Phase 11. Unblocks struct.new /
+  array.new interp wiring starting at cycle 20+.
