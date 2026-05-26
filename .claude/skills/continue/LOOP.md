@@ -443,6 +443,73 @@ testable barriers. The bucket-3 stop turn does NOT need to
 commit a new handover; the existing one is sufficient. The
 one-sentence surface message is the user-facing artifact.
 
+## Yield-aware pacing — soft-surface between non-stop and bucket 3
+
+Bucket 3 (above) is **strict** — fires only when all forward
+work is user-gated AND autonomous prep walked. As long as the
+loop has high-yield work available, bucket 3 doesn't fire and
+the loop continues per Step 6+7.
+
+But there's an observed failure mode (see lesson
+`2026-05-28-yield-taper-pacing.md`): between bucket-3 strict and
+"non-stop continue", the loop falls into a **diminishing-returns
+ramp** — successive low-yield chunks (test-only regressions,
+docstring updates, refactors with no behaviour delta) pile up
+without surfacing to the user. The user becomes the de-facto
+circuit breaker because the loop itself has no "this is enough
+for one session" sensor.
+
+### Yield class
+
+| Class | Examples |
+|---|---|
+| **High-yield** | debt row closed (`now` → discharged) / ROADMAP row flipped `[x]` / new behaviour delta (fixture previously failing now passes) / bundle close / new ADR Proposed |
+| **Low-yield** | test-only regression / docs-only / handover refresh / lesson write / refactor with no behaviour delta / docstring update |
+
+Both classes are valid work. The issue is **runs of low-yield
+without surfacing**, not the chunks themselves.
+
+### Step 1 self-check (run at planning step)
+
+1. `git log --oneline -5` — read the last 5 commit subjects.
+2. Classify each as high-yield or low-yield (table above).
+3. If **≥4 of last 5 are low-yield AND the next planned chunk
+   is also low-yield** → add ONE line to handover's
+   `Open questions / blockers` section:
+   ```
+   - **Yield-taper note** (YYYY-MM-DD): last N cycles low-yield
+     (<one-line summary>); recommend user check-in before next
+     chunk OR pivot to high-yield candidate (<one>).
+   ```
+   Then continue the loop (this is NOT a stop).
+
+### Discipline around the note
+
+- Once present, do NOT re-add it each cycle. Replace if the
+  recent classification changes (e.g., depth grew from 4/5 to
+  5/5). Drop it when the next cycle ships a high-yield chunk.
+- The note's purpose is **lowering the user's check-in friction**
+  — they read handover and immediately see "loop has been doing
+  polish; intent check?" without re-deriving the state from
+  git log.
+- **This is NOT bucket 3** — the loop keeps re-arming. Bucket 3
+  strict discipline is unchanged.
+- **This is NOT a forbidden surrender phrase** per
+  `handover_doc_discipline.md` §1 — the note names a *testable
+  observation* (recent commit yield-class counts) plus a concrete
+  pivot candidate.
+
+### Why this exists
+
+Empirically observed 2026-05-28 session retrospective: after the
+EH cycle's high-yield closes (D-181 → D-184), the loop shipped
+5+ consecutive low-yield chunks (regression tests, docstring
+updates, refactor) before the user manually paused. Each chunk
+was individually valuable but the cumulative pattern signaled a
+natural pacing-down moment that the loop didn't autonomously
+recognize. The yield-taper note gives the user a low-friction
+interrupt point without replacing their circuit-breaker role.
+
 ## Chunk types — type-aware granularity rules
 
 > Added 2026-05-21 per `.dev/archive/phase9/phase9_structural_debt_close_plan.md`

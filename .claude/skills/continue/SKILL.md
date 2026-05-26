@@ -72,6 +72,23 @@ This is the structural defense against atom-rhythm (lesson
 makes "multi-cycle integration with continuity" first-class instead
 of relying on handover prose.
 
+**Bundle vs debt row — when to pick which** (2026-05-28
+clarification per session retrospective):
+
+- **Bundle**: work is being **actively pursued cycle-after-cycle
+  RIGHT NOW**. The cycles-remaining + exit-condition contract
+  preserves continuity. Use bundle mode for multi-cycle
+  investigation chains too (e.g., D-183 → D-184 root-cause
+  investigation should have been bundled, not debt-rowed).
+- **Debt row**: a noted gap that may or may not be worked soon;
+  named structural barrier; discharge predicate clear. Use when
+  filing-then-deferring; the row tracks the gap regardless of
+  when work resumes.
+
+Test: if you would re-arm `/continue` to immediately work on
+this thing next cycle → bundle. If you're noting "this needs
+fixing eventually" → debt row.
+
 ## Resume procedure (run on every session pickup)
 
 Outline (full details in [`RESUME.md`](RESUME.md)):
