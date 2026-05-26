@@ -6,10 +6,9 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `dcdedd87` — 10.E-payload-prop Cycles 1-3 shipped.
-  Cycle 3 threads CompiledWasm.tag_param_counts → EmitCtx (both
-  arches) and consumes it in throw.emit by emitting a single
-  zero-write to `eh_payload_len` before the trampoline call.
+- **HEAD**: `78eb1d14` — 10.E-payload-prop Cycles 1-4 shipped.
+  Cycle 4 replaces Cycle 3's zero-write with real pop-N+store-N
+  in throw.emit (both arches; gpr-class only per ADR-0120 §3).
   IT-6 N=0 tagged-catch tests still green. Mac local + cross-
   compile x86_64-linux green. Ubuntu verify pending Step 0.7.
 - **10.D = CLOSED 2026-05-25**, **10.M (incl D-181 ungate),
@@ -27,7 +26,7 @@
 ## Active bundle
 
 - **Bundle-ID**: 10.E-payload-prop
-- **Cycles-remaining**: ~2 (Cycles 1-3 shipped: `d27c6857`, `36a53773`, `dcdedd87`)
+- **Cycles-remaining**: ~1 (Cycles 1-4 shipped: `d27c6857`, `36a53773`, `dcdedd87`, `78eb1d14`)
 - **Continuity-memo**: payload propagation through
   `Runtime.eh_payload_buf: [16]u64` + `EmitCtx.tag_param_counts:
   []const u32 = &.{}` threading per ADR-0120. Throw emits
@@ -46,33 +45,37 @@
   10.R (5/5; gated on 10.G) / 10.TC.
 - Pending (2): 10.G / 10.P (close gate).
 
-## Active task — Cycle 4 of 10.E-payload-prop bundle
+## Active task — Cycle 5 of 10.E-payload-prop bundle (last)
 
-Cycle 3 (`dcdedd87`): EmitCtx threading + zero-write to
-`eh_payload_len` at every throw site. The infrastructure is now
-in place for the actual pop-N+store-N to land cleanly.
+Cycle 4 (`78eb1d14`): throw.emit pop+store-N + write N. The
+payload now flows throw-site → eh_payload_buf. Cycle 5 closes
+the bundle with the catch-side load+push.
 
-**NEXT (Cycle 4)** — throw.emit actual payload pop+store + first
-red-then-green test for throw + catch_ with i32 payload:
-- arm64 + x86_64 throw.emit: replace the current
-  `eh_payload_len = 0` zero-write with the real pop+store
-  sequence:
-  - Read N = `ctx.tag_param_counts[tag_idx]` at emit time
-    (compile-time-known).
-  - Pop N vregs from `ctx.pushed_vregs`.
-  - For each i in [0, N): load value from spill slot via
-    `gprLoadSpilled`, store at `[runtime_ptr + eh_payload_buf_off
-    + i*8]` (8-byte slot stride; align matches u64).
-  - Write N (instead of 0) to `eh_payload_len`.
-- Same-cycle observable test: probe the runI32Export "throw +
-  catch_ with i32 payload returns 88" against current state —
-  documents what currently still drops (the catch landing pad
-  doesn't yet read the buffer). Cycle 5 wires try_table.emit's
-  landing-pad-synth pop-from-buf+push-to-vregs.
-
-Note: payload-buf offset = 296 fits in u14 (STR Wn imm14 / X-form
-imm12*4 budget). Existing `encStrImmW(rt, rn, byte_offset: u14)`
-encoder usable directly.
+**NEXT (Cycle 5)** — catch landing pad load+push + end-to-end
+test:
+- Identify the emit point: when a catch label's matching `end`
+  patches `Builder.entries[entry_idx].landing_pad_pc`, this is
+  the byte position where the catch block's body begins. The
+  load+push code must sit between landing_pad_pc and the block
+  body. Two options:
+  (a) emit the load+push code BEFORE patching landing_pad_pc;
+      landing_pad_pc points to the load+push sequence's first
+      byte (preferred — minimal API change).
+  (b) emit landing pad as a fixed-size stub elsewhere and patch
+      landing_pad_pc to it (more flexible but adds linker work).
+- Pick (a). At the catch-label `end` op in arm64/emit.zig +
+  x86_64/emit.zig, look up the matching HandlerEntry's kind +
+  tag_idx → tag_param_counts[tag_idx] = N. Emit:
+  - For i in [0, N): LDR Xstage, [X19, #(eh_payload_buf_off
+    + i*8)]; allocate a fresh vreg and store via gprStoreSpilled.
+  - For catch_ref / catch_all_ref: additionally LDR exnref
+    pointer + push as fresh vreg (deferred to v0.2 per ADR-0120
+    §3 if exnref is v0.2 scope).
+- Same-cycle end-to-end test: `runI32Export: throw + catch_
+  with i32 payload returns 88` — currently silent-drops (returns
+  0); ungate to green after Cycle 5 lands.
+- Cycle 6 (post-bundle): spec-corpus wiring + close 10.E close
+  gate.
 
 ## Next candidates (after bundle close)
 
