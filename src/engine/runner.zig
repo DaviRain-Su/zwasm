@@ -453,11 +453,7 @@ test "runI32Export: throw + catch_all returns 42 (IT-6 cycle 3c-iii-d end-to-end
 }
 
 test "runI32Export: tagged catch routes by tag_idx — throw $e1 → catch $e1 returns 77" {
-    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
-        // D-180: same Linux x86_64 SysV gap as the catch_all e2e
-        // fixture above.
-        return error.SkipZigTest;
-    }
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     // (module
     //   (tag $e0) (tag $e1)
     //   (func (export "test") (result i32)

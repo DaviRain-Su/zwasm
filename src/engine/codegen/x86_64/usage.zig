@@ -149,6 +149,26 @@ pub fn usesRuntimePtr(func: *const ZirFunc) bool {
             .@"i64.trunc_f32_u",
             .@"i64.trunc_f64_s",
             .@"i64.trunc_f64_u",
+            // Phase 10 EH (ADR-0114 D6 + ADR-0119) — `throw` /
+            // `throw_ref` emit `MOVABS R10, trampoline; CALL R10`;
+            // the trampoline reads `[R15 + eh_table_off]` etc. to
+            // run `dispatchThrow`. Without R15 initialised, those
+            // reads see whatever was in R15 at process startup
+            // (typically Linux loader base, e.g. 0x7ffff7ffd000)
+            // and the EH dispatch silently misroutes (e2e fixture
+            // returns 0 instead of catching).
+            //
+            // `try_table` doesn't emit any R15-dependent bytes
+            // directly, but its semantic completion relies on the
+            // throw site reaching the trampoline; including it
+            // here is defensive — a try_table with no inner throw
+            // is a valid Wasm shape and would unnecessarily emit
+            // R15 setup, but the cost is 13 bytes (probe + sentinel)
+            // and the asymmetric "throw forces R15, try_table
+            // doesn't" rule is harder to maintain correctly.
+            .throw,
+            .throw_ref,
+            .try_table,
             => return true,
             else => {},
         }
