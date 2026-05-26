@@ -304,4 +304,6 @@ test {
     _ = @import("collector_iface.zig");
     _ = @import("collector_null.zig");
     _ = @import("register.zig");
+    // 10.G op_gc cycle 20: type_info.zig (ADR-0116 §3a impl).
+    _ = @import("type_info.zig");
 }
