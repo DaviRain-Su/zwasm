@@ -6,8 +6,8 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `b03545fe` — arm64 return_call.emit wired end-to-end
-  (10.TC emit-body cycle 3 of the active bundle).
+- **HEAD**: `aa1c53e6` — frame_teardown.Params.uses_runtime_ptr fix
+  (10.TC emit-body cycle 4; foundation for x86_64 wire-up).
 - **ROADMAP §10 progress**: 7/13 DONE (10.0/10.C9/10.J/10.F/
   10.Z/10.D/10.T), 4 IN-PROGRESS (10.M/10.R/10.TC/10.E with
   10.E core substantively done), 2 Pending (10.G/10.P).
@@ -21,8 +21,8 @@
 ## Active bundle
 
 - **Bundle-ID**: 10.TC-emit-body
-- **Cycles-remaining**: ~4
-- **Continuity-memo**: cycles 1-3 landed. Cycle 1 (`c2039bbb`):
+- **Cycles-remaining**: ~3
+- **Continuity-memo**: cycles 1-4 landed. Cycle 1 (`c2039bbb`):
   `CallFixup.is_tail` + arm64 linker B/BL dispatch. Cycle 2
   (`4d0e20f1`): `arm64/op_tail_call.emitDirectTailJump` helper.
   Cycle 3 (`b03545fe`): arm64 `return_call.emit` wired
@@ -30,28 +30,34 @@
   (marshal → MOV X0,X19 → frame_teardown → emitDirectTailJump).
   `EmitCtx.frame_bytes` plumbed; `op_call.marshalCallArgs` pub
   via SIBLING-PUB; e2e fixture in linker.zig (`fn0 return_call
-  fn1 returns 7`) green on Mac aarch64.
+  fn1 returns 7`) green on Mac aarch64. Cycle 4 (`aa1c53e6`):
+  `frame_teardown.Params.uses_runtime_ptr` plumbed + x86_64
+  emits POP R15 (mirror of regular epilogue minus RET) —
+  latent bug fix that unblocks the x86_64 cycle 5 mirror.
 - **Exit-condition**: x86_64 SysV mirror of cycle 3 wired
   end-to-end (JMP rel32 opcode at emit + emitDirectReturnCall
   + same e2e fixture green on Linux x86_64) AND `return_call_
   indirect` / `return_call_ref` arm64+x86_64 wired with at
   least one e2e fixture each.
-- **Next cycle (cycle 4)**: x86_64 SysV mirror of arm64
-  cycle 3. Sub-steps: (a) `x86_64/op_tail_call.zig` gains
+- **Next cycle (cycle 5)**: x86_64 SysV mirror end-to-end.
+  Pre-reqs (x86_64 already has): EmitCtx.frame_bytes,
+  EmitCtx.uses_runtime_ptr, op_call.marshalCallArgs pub.
+  Sub-steps: (a) `x86_64/op_tail_call.zig` gains
   `emitDirectTailJump(allocator, buf, call_fixups,
-  target_func_idx)` that emits `0xE9 + 4 bytes disp32=0` +
-  appends CallFixup{is_tail=true} (linker's patchRel32
-  preserves the JMP opcode byte). (b) `x86_64/op_tail_call.zig`
-  gains `emitDirectReturnCall(ctx, ins)` orchestrator: marshal
-  args via op_call.marshalCallArgs (x86_64 sibling — pub-flip
-  + SIBLING-PUB needed in x86_64/op_call.zig too) → MOV RDI,R15
-  (emitLoadCalleeRtSameModule) → frame_teardown.emit (POP RBP
-  + ADD RSP, frame_bytes; no RET) → emitDirectTailJump.
-  (c) Thread `frame_bytes` through x86_64 EmitCtx; populate at
-  ctx construction in x86_64/emit.zig. (d) Add `.return_call`
-  dispatch arm to x86_64/emit.zig switch. (e) Ungate the
-  linker.zig e2e test for x86_64 SysV (replace `if !(macos and
-  aarch64) skip` with both-host guard).
+  target_func_idx)` = emit `encJmpRel32(0)` (5-byte 0xE9 +
+  disp32=0) + append CallFixup{is_tail=true}. Linker's
+  patchRel32 preserves the opcode byte. (b) Same file gains
+  `emitDirectReturnCall(ctx, ins)`: marshal args →
+  emitLoadCalleeRtSameModule (MOV RDI,R15) →
+  frame_teardown.emit(.{ frame_bytes, uses_runtime_ptr }) →
+  emitDirectTailJump. (c) Add `.return_call` to
+  `x86_64/usage.zig::usesRuntimePtr` whitelist (return_call's
+  MOV RDI,R15 reads R15 — D-180 lesson). (d) Add
+  `.return_call` dispatch arm to `x86_64/emit.zig` (delegate
+  to `op_return_call.emit`; set dead_code=true). (e) Ungate
+  the linker.zig e2e test (replace mac-only guard with both-
+  host guard). Verify both Mac aarch64 + Linux x86_64 SysV
+  green via 3-host loop.
 
 ## Session highlights (prior session; for handoff context)
 
