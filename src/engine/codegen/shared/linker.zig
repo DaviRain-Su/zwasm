@@ -677,6 +677,99 @@ test "link: is_tail=false (default) patches BL opcode (regression for the dispat
     try testing.expectEqual(@as(u32, 0x94000000), patched_word & 0xFC000000);
 }
 
+// ADR-0112 D3 / 10.TC emit-body cycle 3 — end-to-end `return_call`
+// drives the full pipeline (emit → link → execute) on Mac aarch64.
+// fn0 = `return_call 1 ; end` (no args, no locals → frame_bytes=0
+// keeps the teardown to a single LDP). fn1 = `i32.const 7 ; end`.
+// The caller invokes fn0 expecting i32; if the tail-call is wired
+// correctly, fn1's body runs and its RET goes straight back to the
+// Zig stub — the same observable as a regular call but via the
+// B-fixup path (no LR clobber, no return through fn0).
+test "link+execute: fn0 return_call fn1 returns 7 via B fixup (ADR-0112 D3)" {
+    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
+        return error.SkipZigTest;
+    }
+    const sigs = [_]zir.FuncType{
+        .{ .params = &.{}, .results = &.{.i32} }, // fn0
+        .{ .params = &.{}, .results = &.{.i32} }, // fn1
+    };
+
+    // fn0: () → i32  { return_call 1 ; end }
+    var fn0 = ZirFunc.init(0, sigs[0], &.{});
+    defer fn0.deinit(testing.allocator);
+    try fn0.instrs.append(testing.allocator, .{ .op = .return_call, .payload = 1 });
+    try fn0.instrs.append(testing.allocator, .{ .op = .end });
+    fn0.liveness = .{ .ranges = &[_]zir.LiveRange{} };
+    const fn0_slots = [_]u16{};
+    const fn0_alloc: regalloc.Allocation = .{ .slots = &fn0_slots, .n_slots = 0 };
+
+    // fn1: () → i32  { i32.const 7 ; end }
+    var fn1 = ZirFunc.init(1, sigs[1], &.{});
+    defer fn1.deinit(testing.allocator);
+    try fn1.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 7 });
+    try fn1.instrs.append(testing.allocator, .{ .op = .end });
+    fn1.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+    } };
+    const fn1_slots = [_]u16{0};
+    const fn1_alloc: regalloc.Allocation = .{ .slots = &fn1_slots, .n_slots = 1 };
+
+    const out0 = try emit.compile(testing.allocator, &fn0, fn0_alloc, &sigs, &.{}, 0, &.{}, &.{}, .i32, &.{});
+    defer emit.deinit(testing.allocator, out0);
+    const out1 = try emit.compile(testing.allocator, &fn1, fn1_alloc, &sigs, &.{}, 0, &.{}, &.{}, .i32, &.{});
+    defer emit.deinit(testing.allocator, out1);
+
+    const bodies = [_]FuncBody{
+        .{ .bytes = out0.bytes, .call_fixups = out0.call_fixups },
+        .{ .bytes = out1.bytes, .call_fixups = out1.call_fixups },
+    };
+    var module = try link(testing.allocator, &bodies, 0);
+    defer module.deinit(testing.allocator);
+
+    // Verify the fixup at fn0's tail-jump site patched into a B
+    // (0x14 prefix), not BL (0x94). The byte_offset is the start
+    // of the B placeholder which sits after marshalCallArgs (no
+    // args → no bytes), emitLoadCalleeRtSameModule (4B), and
+    // frame_teardown (4B for frame_bytes=0 → single LDP).
+    var byte_off: usize = module.func_offsets[0];
+    // Skip prologue + body so we find the B-patched word. The
+    // exact prologue size varies — scan forward for the 0x14...
+    // prefix. (Robust to prologue layout changes that don't
+    // touch the tail-call wire-up.)
+    const block_end: usize = module.func_offsets[1];
+    var found_b: bool = false;
+    while (byte_off + 4 <= block_end) : (byte_off += 4) {
+        const w = std.mem.readInt(u32, module.block.bytes[byte_off..][0..4], .little);
+        // B encoding: top 6 bits = 000101 = 0x14000000 / 0x17... .
+        // Avoid false-positive against the conditional B.cond
+        // (0x54...) and unconditional BR (0xD61F...).
+        if ((w & 0xFC000000) == 0x14000000) {
+            found_b = true;
+            break;
+        }
+    }
+    try testing.expect(found_b);
+
+    // End-to-end execute: fn0 tail-calls fn1; fn1 returns 7.
+    var memory: [0]u8 = .{};
+    var rt: jit_abi.JitRuntime = .{
+        .vm_base = &memory,
+        .mem_limit = 0,
+        .funcptr_base = undefined,
+        .table_size = 0,
+        .typeidx_base = undefined,
+        .trap_flag = 0,
+        .globals_base = undefined,
+        .globals_count = 0,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
+    };
+    const Fn = *const fn (rt: *jit_abi.JitRuntime) callconv(.c) u32;
+    const f = module.entry(0, Fn);
+    try testing.expectEqual(@as(u32, 7), f(&rt));
+    try testing.expect(rt.jit_executed_flag != 0);
+}
+
 test "linkWithThunks: single multi-result function — wrapper invocation writes results buffer" {
     if (!(builtin.cpu.arch == .aarch64 and builtin.os.tag == .macos) and
         !(builtin.cpu.arch == .x86_64 and builtin.os.tag != .windows))

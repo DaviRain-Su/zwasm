@@ -63,6 +63,7 @@ const jit_abi = @import("../shared/jit_abi.zig");
 const exception_table = @import("../shared/exception_table.zig");
 const op_throw = @import("ops/wasm_3_0/throw.zig");
 const op_throw_ref = @import("ops/wasm_3_0/throw_ref.zig");
+const op_return_call = @import("ops/wasm_3_0/return_call.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
 const op_const = @import("op_const.zig");
@@ -697,6 +698,7 @@ pub fn compile(
         .open_try_tables = if (has_try_table) &open_try_tables else null,
         .landing_pad_fixups = if (has_try_table) &landing_pad_fixups else null,
         .tag_param_counts = tag_param_counts,
+        .frame_bytes = frame_bytes,
     };
 
     // §9.7 / 7.5-emit-deadcode: track polymorphic-stack dead
@@ -1170,6 +1172,10 @@ pub fn compile(
             },
             .call_indirect => try op_call.emitCallIndirect(&ctx, &ins),
             .call => try op_call.emitCall(&ctx, &ins),
+            .return_call => {
+                try op_return_call.emit(&ctx, &ins);
+                dead_code = true;
+            },
             .@"memory.size" => {
                 // Wasm memory.size returns current size in 64-KiB pages.
                 // X27 carries the byte limit; pages = bytes >> 16.

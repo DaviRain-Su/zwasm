@@ -228,6 +228,16 @@ pub const EmitCtx = struct {
     /// wrapper_thunk test helpers and any pre-EH compile path).
     tag_param_counts: []const u32 = &.{},
 
+    /// ADR-0112 D3 / 10.TC emit-body cycle 3 — total frame size
+    /// (16-byte aligned) the function's prologue allocated via
+    /// `SUB SP, SP, #frame_bytes`. Consumed by `op_tail_call.zig`
+    /// to drive `frame_teardown.emit(...)` ahead of the tail-jump,
+    /// since the regular epilogue is bypassed for tail-call.
+    /// Default 0 preserves existing EmitCtx construction sites
+    /// that don't yet care (entry / linker / wrapper_thunk test
+    /// helpers); compile() populates it for real bodies.
+    frame_bytes: u32 = 0,
+
     /// Pop two operands + allocate a result vreg. Shared header
     /// for every binary op-handler. Returns the lhs / rhs / result
     /// vreg ids or `AllocationMissing` (stack underflow) /

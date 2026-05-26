@@ -38,6 +38,9 @@ const inst = @import("inst.zig");
 const gpr = @import("gpr.zig");
 const abi = @import("abi.zig");
 const ctx_mod = @import("ctx.zig");
+const op_call = @import("op_call.zig");
+const frame_teardown = @import("../shared/frame_teardown.zig");
+const zir = @import("../../../ir/zir.zig");
 
 /// X16 — the AAPCS64 intra-procedure-call scratch (IP0) per
 /// Arm IHI 0055 §6.4. ADR-0066 § (bridge thunk) already uses
@@ -112,6 +115,40 @@ pub fn emitDirectTailJump(
         .target_func_idx = target_func_idx,
         .is_tail = true,
     });
+}
+
+/// Wasm spec 3.0 §3.3.8.18 (tail-call proposal) — `return_call N`.
+/// Orchestrates the ADR-0112 D3 sequence for the same-module
+/// direct case:
+///   (1) marshal args via `op_call.marshalCallArgs` (X1..X7 + V0..V7),
+///   (2) restore X0 = X19 via `emitLoadCalleeRtSameModule`,
+///   (3) `frame_teardown.emit(frame_bytes)` (caller's frame gone),
+///   (4) `emitDirectTailJump(target_func_idx)` (B + CallFixup).
+///
+/// Step (3) of D3 (load callee_entry → X16) is elided here because
+/// the linker materialises the callee body offset directly into the
+/// B instruction's imm26 — saving one instruction over the BR X16
+/// path. Cross-module / indirect / ref tail-calls (which can't
+/// reach via imm26) take the BR X16 path through follow-on chunks.
+///
+/// Import-as-callee is rejected (UnsupportedOp) for now: a host
+/// import call doesn't follow v2's prologue convention and can't
+/// be tail-called via this same-module path. Per ADR-0112 D4 the
+/// cross-module bridge-tail-call shape is a separate chunk
+/// (10.TC-3f) and the import-tail-call subset would route through
+/// there or its own thunk.
+pub fn emitDirectReturnCall(
+    ctx: *ctx_mod.EmitCtx,
+    ins: *const zir.ZirInstr,
+) ctx_mod.Error!void {
+    if (ins.payload >= ctx.func_sigs.len) return ctx_mod.Error.AllocationMissing;
+    if (ins.payload < ctx.num_imports) return ctx_mod.Error.UnsupportedOp;
+    const callee_sig: zir.FuncType = ctx.func_sigs[ins.payload];
+
+    try op_call.marshalCallArgs(ctx, callee_sig);
+    try emitLoadCalleeRtSameModule(ctx.allocator, ctx.buf);
+    try frame_teardown.emit(ctx.allocator, ctx.buf, .{ .frame_bytes = ctx.frame_bytes });
+    try emitDirectTailJump(ctx.allocator, ctx.buf, ctx.call_fixups, @intCast(ins.payload));
 }
 
 // ---------------------------------------------------------------------

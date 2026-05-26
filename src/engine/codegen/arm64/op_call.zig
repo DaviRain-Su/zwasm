@@ -320,7 +320,11 @@ pub fn emitCallIndirect(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// `fpLoadSpilled(stage 0)` lands the value in a staging register
 /// that the immediately-following STR consumes before the next
 /// arg's stage-0 load reuses it.
-fn marshalCallArgs(ctx: *EmitCtx, callee_sig: FuncType) Error!void {
+// Tail-call shares the AAPCS64 args marshal shape with regular call.
+// The args land in X1..X7 / V0..V7 with the same overflow-region byte
+// layout; tail-call just teardowns the caller's frame before B-jumping.
+// SIBLING-PUB: op_tail_call.zig (per ADR-0112 D3)
+pub fn marshalCallArgs(ctx: *EmitCtx, callee_sig: FuncType) Error!void {
     const n_args: u32 = @intCast(callee_sig.params.len);
     if (n_args == 0) return;
     if (ctx.pushed_vregs.items.len < n_args) return Error.AllocationMissing;
