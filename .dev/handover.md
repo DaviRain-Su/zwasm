@@ -6,11 +6,12 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `8b5b2ae1` — memory.size/grow plumb memAddrType in
-  validator (+30 return + +16 trap directives pass). Previous
-  cycles this resume: `49e6a44a` D-189 close (memarg natural-
-  alignment cap; +37 invalid reject). Stack: 10.M validator gaps
-  closing incrementally.
+- **HEAD**: `01de05e8` — bulk memory ops (memory.copy/fill/init)
+  plumb memAddrType (no runner delta this cycle; preemptive spec
+  correctness pairing with the prior cycle's `8b5b2ae1`
+  memory.size/grow plumb). Stack: 10.M validator gaps closing
+  incrementally — memory64 corpus return 82→112, trap 1→17,
+  invalid 111/1 since the start of this resume.
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
 - **Active debt rows**: 17 — all `blocked-by:` with named
   structural barriers. Zero `now`-status rows.
@@ -30,6 +31,7 @@ assert_invalid now 111/1 — only try_table.10 remains (deep EH
 catch_all_ref typing, requires exnref ValType extension).
 
 Recent commits this resume:
+- `01de05e8` — bulk mem ops memAddrType (preemptive; no runner delta).
 - `8b5b2ae1` — opMemorySize/Grow memAddrType plumb (+46 dirs).
 - `a2a3ac3b` test — D-189 regression fixture correction.
 - `49e6a44a` — D-189 close (37 align64 cases reject).
