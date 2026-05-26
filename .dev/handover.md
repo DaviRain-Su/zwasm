@@ -17,8 +17,13 @@
   `src/engine/runner.zig` compiles + runs + lands at the catch
   block (returns 42), paired uncaught variant traps cleanly.
   Mac aarch64 + Linux x86_64 SysV both green at HEAD (2001/2015
-  pass, 14 skip, 0 fail). 10.E codegen-side COMPLETE; Win64 EH
-  trampoline body still `@compileError` (deferred).
+  pass, 14 skip, 0 fail). 10.E codegen-side COMPLETE.
+- **Win64 EH trampoline body SHIPPED** (`ce169224`): the
+  x86_64-windows arm of `throw_trampoline.zig` now implements
+  Win64 (MS x64) ABI variant of the same naked-stub shape
+  (RCX/RDX/R8/R9 arg routing + 32-byte shadow space). Verified
+  via cross-compile (`-Dtarget=x86_64-windows-gnu` green);
+  windowsmini runtime gate stays at phase boundary per ADR-0067.
 
 ## ROADMAP §10 progress
 
@@ -30,11 +35,12 @@
 
 ## Next candidates (names + Refs)
 
-- **Win64 EH trampoline body** — `throw_trampoline.zig` x86_64-windows
-  arm currently `@compileError`. Implement Win64 ABI arg shuffling
-  (RCX/RDX/R8/R9 + shadow space) so the EH pipeline is fully cross-
-  platform. Touches: arm64/x86_64 SysV are already green; this is
-  Win64-only.
+- **op_throw tag_idx marshal** — both arm64 + x86_64 op_throw
+  currently emit `MOVZ/MOVABS addr; BLR/CALL` without first
+  marshalling `instr.payload` (= tag_idx) into the first arg
+  reg (X0 / RDI / RCX). Catch_all works because it ignores
+  tag_idx; tagged catches will mismatch. Touches:
+  `arm64/ops/wasm_3_0/throw.zig` + `x86_64/ops/wasm_3_0/throw.zig`.
 - **10.M-realworld** — toolchain-blocked (clang_wasm64 fixture);
   barrier in D-179 (wabt 1.0.41+ GC type syntax).
 - **10.TC** — Wasm 3.0 spec corpus extension + cross-module EH
