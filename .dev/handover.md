@@ -6,10 +6,11 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `a98c7b1f` — D-180 closed (root-caused), structural
-  defenses landed. Mac aarch64 + Linux x86_64 SysV BOTH green
-  (2003/2017 pass on Mac, ubuntu OK at HEAD). Windowsmini =
-  phase-boundary per ADR-0067.
+- **HEAD**: `e4802ea9` — D-181 ungate landed (memory64 i64-idx
+  runner test now exercises Mac aarch64 + Linux x86_64 SysV). Mac
+  local `zig build test` green; cross-compile x86_64-linux clean;
+  ubuntu verification kicked this cycle, Step 0.7 next resume
+  closes D-181 if ubuntu green.
 - **10.D = CLOSED 2026-05-25**, **10.M sub-chunks 1..fixture-2,
   10.R 1..5, 10.TC-1, 10.G-i31-ops/2/3, 10.E (codegen + interp +
   IT-6 bundle full)**: all SHIPPED.
@@ -19,9 +20,8 @@
   (was previously Mac-only-hidden by gate; D-180 caught this).
 - **Win64 trampoline body SHIPPED** (`ce169224`): cross-compile
   green; runtime gate stays at phase boundary.
-- **op_throw tag_idx marshal SHIPPED** (`81e1bd9a`).
-- **D-180 root cause + structural defenses SHIPPED** (`2808bc81` +
-  `a98c7b1f`): x86_64 `usesRuntimePtr` whitelist drift detector +
+- **D-180 structural defenses SHIPPED** (`2808bc81` + `a98c7b1f`):
+  x86_64 `usesRuntimePtr` whitelist drift detector +
   `test_discipline.md` §4 (host-only test gates must pair with
   debt-row OR spec-pinned rationale) + lesson
   `2026-05-28-x86_64-uses-runtime-ptr-eh-gap.md`.
@@ -33,13 +33,21 @@
 - IN-PROGRESS (3): 10.M (7/8) / 10.R (5/5; gated on 10.G) / 10.TC.
 - Pending (2): 10.G / 10.P (close gate).
 
-## Next candidates (names + Refs)
+## Active task — next chunk after D-181 ubuntu verify
 
-- **D-181** — x86_64 SysV i64-indexed memory ops (`emitMemOpI64`
-  X-form + wrap-check per ADR-0111 D4). Ungates the memory64
-  runner test from Mac-only.
-- **throw_ref op** — exnref dereferencing (cycle 3c-iv scope per
-  the EH integration plan §IT-6 follow-on).
+If ubuntu confirms D-181 close → next chunk is **throw_ref op
+emit body** (cycle 3c-iv per
+`.dev/phase10_eh_integration_plan.md` IT-6 follow-on):
+- exnref dereference + tag-equality dispatch through Module.tags
+  (10.E-N-1 / N-2 / N-3 wiring per phase log entries §10.E-N).
+- Builds on the IT-6 catch_all / throw frame already wired.
+
+If ubuntu reveals miscompile → investigate root cause under D-181
+extension; revert ungate first (per ADR-0076 D3 protocol).
+
+## Next candidates (names + Refs; no predictions)
+
+- **throw_ref op** — exnref dereferencing (10.E-N family per phase log).
 - **10.M-realworld** — toolchain-blocked (D-179 wabt 1.0.41+).
 - **10.TC** — Wasm 3.0 spec corpus extension wiring into the
   spec runner.
@@ -53,6 +61,7 @@
 ## Key refs
 
 - ADR-0017 (pinned rt regs X19/R15); ADR-0026 (Cc-pivot).
+- ADR-0111 (memory64; D4 emit shape underwrites D-181).
 - ADR-0114 (EH design), ADR-0119 (naked-Zig trampoline).
 - Integration plan `.dev/phase10_eh_integration_plan.md`.
 - ROADMAP §10, Phase log `.dev/phase_log/phase10.md`.
