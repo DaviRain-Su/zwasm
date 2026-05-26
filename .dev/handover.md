@@ -6,8 +6,8 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `c2039bbb` — CallFixup.is_tail + linker B/BL dispatch
-  (10.TC emit-body cycle 1 of the active bundle).
+- **HEAD**: `4d0e20f1` — op_tail_call.emitDirectTailJump helper
+  (10.TC emit-body cycle 2 of the active bundle).
 - **ROADMAP §10 progress**: 7/13 DONE (10.0/10.C9/10.J/10.F/
   10.Z/10.D/10.T), 4 IN-PROGRESS (10.M/10.R/10.TC/10.E with
   10.E core substantively done), 2 Pending (10.G/10.P).
@@ -21,32 +21,36 @@
 ## Active bundle
 
 - **Bundle-ID**: 10.TC-emit-body
-- **Cycles-remaining**: ~6
-- **Continuity-memo**: foundation cycle 1 landed (CallFixup gains
-  `is_tail`; arm64 linker dispatches B vs BL; x86_64 emit owns
-  the opcode byte; 2 unit tests cover both branches). Helpers
-  available from 10.TC-3a..3e: `op_tail_call.emitTailJump`,
-  `op_tail_call.emitLoadCalleeRtSameModule`, `tail_target_gpr`,
-  `frame_teardown.emit` (per-arch via shared facade). Refinement
-  of ADR-0112 D4 (not deviation): same-module direct uses
-  B+CallFixup{is_tail=true} (1 instr); cross-module/indirect/ref
-  use BR X16+literal-pool (D4 prescribed shape).
+- **Cycles-remaining**: ~5
+- **Continuity-memo**: cycles 1 + 2 landed. Cycle 1 (`c2039bbb`):
+  CallFixup gains `is_tail`; arm64 linker dispatches B vs BL;
+  x86_64 emit owns the opcode byte. Cycle 2 (`4d0e20f1`):
+  `arm64/op_tail_call.emitDirectTailJump(allocator, buf,
+  call_fixups, target_func_idx)` emits `B 0` + appends
+  CallFixup{is_tail=true}. Helpers available: `emitTailJump`
+  (BR X16 form, for cross-module/indirect/ref), `emitDirectTailJump`
+  (B+fixup form, same-module direct), `emitLoadCalleeRtSameModule`
+  (MOV X0,X19), `frame_teardown.emit` (shared per-arch facade).
+  Refinement of ADR-0112 D4 (not deviation): same-module direct
+  uses B+CallFixup{is_tail=true} (1 instr; linker has imm26
+  reach); cross-module/indirect/ref use BR X16+literal-pool.
 - **Exit-condition**: `return_call N` arm64 emit body wired
   end-to-end (marshal args → MOV X0,X19 → frame_teardown → B
-  fixup), driven by a spec fixture from
-  `test/spec/wasm-3.0-assert/tail-call/return_call/return_call.0.wasm`
-  through `cli_run.runWasmCaptured` returning the expected i32
-  on Mac aarch64. Cross-arch (x86_64 SysV mirror) lands as a
-  follow-on bundle cycle. The bundle closes only when all 3 ops
+  fixup), driven by a fixture (spec corpus or hand-rolled)
+  through link+execute returning the expected i32 on Mac
+  aarch64. Cross-arch (x86_64 SysV mirror) lands as a
+  follow-on bundle cycle. The bundle closes when all 3 ops
   (return_call / return_call_indirect / return_call_ref) emit
-  end-to-end on Mac aarch64 with one spec fixture each.
-- **Next cycle (cycle 2)**: wire arm64 `return_call.emit` body —
-  reuse `op_call.marshalCallArgs`, then `emitLoadCalleeRtSameModule`,
-  then `frame_teardown.emit`, then append `B 0` placeholder +
-  `CallFixup{byte_offset, target_func_idx=ins.payload, is_tail=true}`.
-  Add helper `op_tail_call.emitDirectTailJump` that owns the
-  placeholder+fixup append. Drive by a new spec-fixture-shaped
-  unit test in `test/spec/` or `src/engine/codegen/arm64/`.
+  end-to-end on Mac aarch64 with one fixture each.
+- **Next cycle (cycle 3)**: wire arm64 `return_call.zig::emit`
+  body. Two sub-steps: (a) make `op_call.marshalCallArgs` pub
+  with SIBLING-PUB marker citing ADR-0112; (b) thread
+  `frame_bytes: u32` through `EmitCtx` (populated when ctx is
+  constructed in compile()); (c) `return_call.emit` body =
+  marshal → emitLoadCalleeRtSameModule → frame_teardown.emit
+  → emitDirectTailJump. End-to-end fixture: 2-function module
+  where fn0 does `return_call 1` and fn1 returns 7; link +
+  execute via `module.entry(0, Fn)`; assert return == 7.
 
 ## Session highlights (prior session; for handoff context)
 
