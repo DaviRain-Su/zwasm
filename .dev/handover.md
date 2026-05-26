@@ -6,10 +6,10 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `5f841bdc` — docs(p10): scope the 10.G op_gc bundle
-  plan (post-foundation). Sequenced 12-sub-chunk plan + cycle
-  estimate (~20 internal) + ADR-grade design decision flagged
-  (ValType extension shape).
+- **HEAD**: `3b1a4c43` — docs(adr-0115): amend §6 with ValType
+  extension authorisation (10.G op_gc cycle 1). Design decision
+  recorded: closed-enum + per-site `unreachable` cascade chosen
+  over non-exhaustive enum. Impl lands at the next commit.
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
 - **Active debt rows**: 18 — all `blocked-by:` with named
   structural barriers. Zero `now`-status rows.
@@ -52,18 +52,25 @@ Foundation cycles produce no spec-runner delta — they substrate
 future op_gc consumers. EH 40 fails still gated on the bigger
 10.G work (per D-192).
 
-## Active task — open 10.G op_gc bundle cycle 1 (ValType extension)
+## Active bundle
 
-Plan landed at `.dev/phase10_g_op_bundle_plan.md` (HEAD
-`5f841bdc`). Cycle 1 is sub-chunk 1 (GC ValType enum
-extension) — ADR-grade design choice + amendment to ADR-0115
-authorising the closed-enum + @panic cascade pattern (vs
-non-exhaustive enum tradeoff). Single-cycle scope: amend ADR
-+ extend ir/zir.zig::ValType + mechanical cascade through the
-~217 exhaustive switch sites with @panic stubs.
-
-Authorised by ADR-0115/0116 (both Accepted 2026-05-25);
-amendment captures the cascade-pattern rationale.
+- **Bundle-ID**: 10.G-op_gc
+- **Cycles-remaining**: ~19 (per `.dev/phase10_g_op_bundle_plan.md`)
+- **Continuity-memo**: Cycle 1 (`3b1a4c43`) ADR-0115 §6 amended
+  with ValType extension authorisation + cascade-pattern
+  decision (closed-enum + per-site `unreachable` arm; @panic
+  rejected since that pattern targets comptime-pruned platform
+  branches, not enum extensions). Cycle 2 (next): extend
+  `ir/zir.zig::ValType` with 5 new closed variants (anyref
+  0x6E, eqref 0x6D, structref 0x6B, arrayref 0x6A, i31ref
+  0x6C) + cascade `.gc_variants => unreachable` arms across the
+  ~217 exhaustive switch sites. Mechanical via rg-find + per-
+  site arm addition; expect LOC budget at high end of chunk
+  granularity (may bundle or split per LOOP.md rules).
+- **Exit-condition**: wasm-3.0-assert exception-handling /
+  function-references / gc corpora open for op_gc dispatch +
+  at least the first i31 spec directive flips green via the
+  new dispatch + heap path.
 
 ## Next sub-chunk candidates (names only)
 
