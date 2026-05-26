@@ -433,6 +433,23 @@ fn tailReturn(rt: *Runtime) anyerror!void {
     caller_frame.done = true;
 }
 
+/// D-187 — interp tail-call trampoline signal. Sets the runtime
+/// flag that `src/interp/dispatch.zig::run`'s outer loop polls
+/// after the current frame's instr loop exits, marks the caller
+/// frame done so the inner loop exits without executing further
+/// instrs, and clears the caller's label stack so any in-flight
+/// control labels don't survive into the popped frame. Args
+/// stay on the operand stack at `[caller.operand_base..operand_len]`
+/// (validator-guaranteed exactly the callee's params at
+/// return_call); the trampoline pops them into fresh callee
+/// locals after popping the caller frame.
+fn signalTailCall(rt: *Runtime, callee: *const zir.ZirFunc) void {
+    rt.pending_tail_call = callee;
+    const caller_frame = rt.currentFrame();
+    caller_frame.done = true;
+    caller_frame.label_len = 0;
+}
+
 /// Wasm spec 3.0 §3.3.10.5 (`return_call_ref typeidx`): tail-call
 /// variant of call_ref. Pops funcref + the typeidx-determined args,
 /// runs the same null + sig-mismatch checks, invokes the callee,
@@ -454,16 +471,29 @@ fn returnCallRefOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const expected = rt.module_types[instr.payload];
     if (!sigEq(callee.sig, expected)) return Trap.IndirectCallTypeMismatch;
 
+    // Same-module: route through `dispatch.run` trampoline (D-187).
+    // Cross-module (callee_rt != rt) keeps the recursive shape for
+    // now — cross-rt frame switching needs the rt swap that the
+    // trampoline doesn't yet model.
+    if (callee_rt == rt) {
+        signalTailCall(rt, callee);
+        return;
+    }
     const dispatch_tbl = rt.table orelse return Trap.Unreachable;
     try invoke(rt, dispatch_tbl, callee);
     try tailReturn(rt);
 }
 
 /// Wasm spec 3.0 §3.3.10.3 (`return_call funcidx`): tail-call
-/// variant of `call`. Mirrors `callOp` + `tailReturn`. Host imports
-/// (rt.host_calls) are tail-called the same way as Zir-defined
-/// funcs — the host fn pushes its results, then `tailReturn`
-/// promotes them to the caller's results.
+/// variant of `call`. Host imports (rt.host_calls) keep the
+/// invoke + `tailReturn` shape (host fns don't grow the host
+/// call stack per Wasm tail-call, so the prior recursive shape
+/// stays correct for them). Same-module Zir-defined callees
+/// route through `dispatch.run`'s trampoline (D-187 discharge):
+/// the handler sets `rt.pending_tail_call` + marks the current
+/// frame done; the trampoline pops the caller frame, pops args
+/// off the operand stack into fresh callee locals, and continues
+/// iterating in the same Zig stack frame.
 fn returnCallOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
     const idx: u32 = @intCast(instr.payload);
@@ -476,9 +506,7 @@ fn returnCallOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     }
     if (idx >= rt.funcs.len) return Trap.Unreachable;
     const callee = rt.funcs[idx];
-    const tbl = rt.table orelse return Trap.Unreachable;
-    try invoke(rt, tbl, callee);
-    try tailReturn(rt);
+    signalTailCall(rt, callee);
 }
 
 /// Wasm spec 3.0 §3.3.10.4 (`return_call_indirect typeidx tableidx`):
@@ -503,6 +531,10 @@ fn returnCallIndirectOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const expected = rt.module_types[instr.payload];
     if (!sigEq(callee.sig, expected)) return Trap.IndirectCallTypeMismatch;
 
+    if (callee_rt == rt) {
+        signalTailCall(rt, callee);
+        return;
+    }
     const dispatch_tbl = rt.table orelse return Trap.Unreachable;
     try invoke(rt, dispatch_tbl, callee);
     try tailReturn(rt);

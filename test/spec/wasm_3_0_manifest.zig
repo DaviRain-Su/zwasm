@@ -553,12 +553,13 @@ test "tail-call bisect: enumerate 31 assert_returns + print failures (D-187 regr
             fail += 1;
         }
     }
-    if (pass != 25 or fail != 6) {
-        std.debug.print("[D-187 regression marker] pass={d} fail={d} (was 25/6)\n", .{ pass, fail });
+    if (pass != cases.len or fail != 0) {
+        std.debug.print("[tail-call bisect] pass={d} fail={d} (expected all-pass)\n", .{ pass, fail });
     }
-    // Pin current interp tail-call state per D-187. When the
-    // discharge lands (JIT routing or non-recursive interp
-    // dispatch), retighten to `pass == 31`.
-    try testing.expectEqual(@as(u32, 25), pass);
-    try testing.expectEqual(@as(u32, 6), fail);
+    // D-187 discharged via the 10.TC interp trampoline (planned
+    // row 10.TC scope) — `dispatch.run` now switches frames
+    // in-place on `return_call`, so the host Zig call stack no
+    // longer grows per Wasm tail-call. All 31 directives must pass.
+    try testing.expectEqual(@as(u32, 0), fail);
+    try testing.expectEqual(@as(u32, @intCast(cases.len)), pass);
 }

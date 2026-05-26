@@ -260,6 +260,21 @@ pub const Runtime = struct {
     /// needs it to recursively dispatch the callee body.
     table: ?*const dispatch_table.DispatchTable = null,
 
+    /// Wasm 3.0 tail-call signal (D-187 discharge per ROADMAP §10
+    /// row 10.TC "interp trampoline" scope). `return_call` /
+    /// `return_call_indirect` / `return_call_ref` handlers set
+    /// this to the resolved callee + mark the current frame
+    /// `done`; `src/interp/dispatch.zig::run`'s trampoline loop
+    /// reads the signal after the inner instr loop exits, pops
+    /// the caller frame, pops args off the operand stack into
+    /// freshly-alloc'd callee locals, pushes the callee frame,
+    /// and continues iterating WITHOUT recursing into Zig. The
+    /// previous shape (returnCallOp → mvp.invoke → dispatch.run
+    /// recursion) mirrored Wasm tail-call depth onto the host
+    /// call stack and tripped `Trap.CallStackExhausted` at
+    /// `max_frame_stack = 256` for self-recursive count(N≥256).
+    pending_tail_call: ?*const zir.ZirFunc = null,
+
     operand_buf: [max_operand_stack]Value = undefined,
     operand_len: u32 = 0,
 

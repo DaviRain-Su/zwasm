@@ -66,7 +66,7 @@ pub fn step(
 pub fn run(
     rt: *Runtime,
     table: *const DispatchTable,
-    instrs: []const ZirInstr,
+    initial_instrs: []const ZirInstr,
 ) anyerror!void {
     const saved_table = rt.table;
     rt.table = table;
@@ -86,13 +86,80 @@ pub fn run(
         _ = rt.popFrame();
     };
 
-    const f = rt.currentFrame();
-    f.pc = 0;
-    f.done = false;
-    while (f.pc < instrs.len and !f.done) {
-        const cur = f.pc;
-        try step(rt, table, &instrs[cur]);
-        if (f.pc == cur) f.pc += 1;
+    // Trampoline state (10.TC interp trampoline; D-187 discharge).
+    // Each tail-call switch allocates fresh callee locals; the
+    // PREVIOUS iteration's trampoline alloc is freed at the
+    // start of the next switch. The locals for the LAST callee
+    // in the chain are freed at exit (defer). The initial
+    // frame's locals — alloc'd by the caller of dispatch.run
+    // (`Instance.invoke` / `mvp.invoke`) — are NOT touched here;
+    // the caller's own defer-free retains ownership.
+    var prev_trampoline_locals: ?[]runtime.Value = null;
+    defer if (prev_trampoline_locals) |l| rt.alloc.free(l);
+
+    var instrs = initial_instrs;
+    while (true) {
+        const f = rt.currentFrame();
+        f.pc = 0;
+        f.done = false;
+        while (f.pc < instrs.len and !f.done) {
+            const cur = f.pc;
+            try step(rt, table, &instrs[cur]);
+            if (f.pc == cur) f.pc += 1;
+        }
+
+        const next_callee = rt.pending_tail_call orelse break;
+        rt.pending_tail_call = null;
+
+        // Tail-call frame switch: caller already marked done by
+        // `returnCallOp` (sig leaves args at top of operand
+        // stack: operand_buf[caller.operand_base..operand_len]).
+        // Pop caller frame, alloc fresh callee locals, pop args
+        // into locals, zero-init declared locals, push callee.
+        _ = rt.popFrame();
+
+        const params_len = next_callee.sig.params.len;
+        const total = params_len + next_callee.locals.len;
+        const new_locals = try rt.alloc.alloc(runtime.Value, total);
+
+        // Pop args in reverse so last param popped first lands at
+        // locals[params_len-1]. operand_len underflow guard
+        // mirrors `mvp.invoke`'s defensive check.
+        var i: usize = params_len;
+        while (i > 0) {
+            i -= 1;
+            if (rt.operand_len == 0) {
+                rt.alloc.free(new_locals);
+                return Trap.StackOverflow;
+            }
+            new_locals[i] = rt.popOperand();
+        }
+        var j: usize = params_len;
+        while (j < total) : (j += 1) new_locals[j] = runtime.Value.zero;
+
+        rt.pushFrame(.{
+            .sig = next_callee.sig,
+            .locals = new_locals,
+            .operand_base = rt.operand_len,
+            .pc = 0,
+            .func = next_callee,
+        }) catch |e| {
+            rt.alloc.free(new_locals);
+            return e;
+        };
+
+        // Free PREVIOUS iteration's trampoline alloc — that
+        // frame just got popped, and the alloc is no longer
+        // referenced. The very first switch has nothing to free
+        // (the popped frame's locals belong to the caller of
+        // dispatch.run, not the trampoline).
+        if (prev_trampoline_locals) |l| rt.alloc.free(l);
+        prev_trampoline_locals = new_locals;
+
+        // Switch to the callee's instruction stream — without this
+        // the outer loop would re-run the caller's instrs against
+        // the new frame and tail-call indefinitely.
+        instrs = next_callee.instrs.items;
     }
 }
 
