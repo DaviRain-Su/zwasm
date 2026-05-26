@@ -226,6 +226,41 @@ pub fn validateFunction(
     try v.run();
 }
 
+/// Wasm 3.0 memory64 — `validateFunction` variant that threads
+/// `memory0_idx_type` so memory ops (load/store) pop the correct
+/// address valtype (i32 for default memory, i64 for memory64 per
+/// the memory section's flag bit 0x04 / ADR-0111 D1). Used by
+/// `frontendValidate` in `runtime/instance/instantiate.zig` so
+/// modules declaring an i64 memory validate cleanly instead of
+/// rejecting their load/store bodies with StackTypeMismatch.
+pub fn validateFunctionWithMemIdx(
+    sig: FuncType,
+    locals: []const ValType,
+    body: []const u8,
+    func_types: []const FuncType,
+    globals: []const GlobalEntry,
+    module_types: []const FuncType,
+    data_count: u32,
+    tables: []const zir.TableEntry,
+    elem_count: u32,
+    memory0_idx_type: sections.MemoryEntry.IdxType,
+) Error!void {
+    var v = Validator{
+        .sig = sig,
+        .locals = locals,
+        .body = body,
+        .pos = 0,
+        .func_types = func_types,
+        .globals = globals,
+        .module_types = module_types,
+        .data_count = data_count,
+        .tables = tables,
+        .elem_count = elem_count,
+        .memory0_idx_type = memory0_idx_type,
+    };
+    try v.run();
+}
+
 /// Wasm 3.0 EH (10.E-N-1) — `validateFunction` variant that also
 /// threads the decoded tag section so `throw` and try_table catch
 /// clauses range-check `tag_idx` against `module.tags[]`. Used

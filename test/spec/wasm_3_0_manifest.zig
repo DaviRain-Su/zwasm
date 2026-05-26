@@ -687,6 +687,23 @@ test "D-188 bisect: EH + func-refs invalid-accepted fixtures (regression marker)
     try testing.expectEqual(@as(u32, 1), accepted_count);
 }
 
+test "memory64: address64.0.wasm compiles (frontendValidate memory0_idx_type plumbing)" {
+    // Regression marker for the memory64 frontendValidate fix.
+    // Before the fix, `validator.validateFunction` defaulted
+    // memory0_idx_type to .i32, so memory64 fixtures (which load/
+    // store at i64 addresses) failed with StackTypeMismatch.
+    // After the fix, frontendValidate extracts the memory section's
+    // idx_type and threads it into validator. Compile-side only;
+    // runtime memory ops + invoke remain a separate gap.
+    const wasm_bytes = @embedFile("wasm-3.0-assert/memory64/address64/address64.0.wasm");
+    const alloc = testing.allocator;
+
+    var engine = try zwasm_root.Engine.init(alloc, .{});
+    defer engine.deinit();
+    var module = try engine.compile(wasm_bytes);
+    defer module.deinit();
+}
+
 test "compileExpectInvalid: return_call.0.wasm accepted (no false rejection)" {
     // Sanity: the valid return_call.0.wasm (which the bisect test
     // executes 31/31 directives against) must NOT be reported as

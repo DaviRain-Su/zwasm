@@ -182,9 +182,26 @@ pub fn frontendValidate(alloc: std.mem.Allocator, binary: []const u8) bool {
         };
     }
 
+    // Memory0's idx_type drives the validator's memory-op address
+    // valtype (i32 vs i64). Wasm 3.0 memory64 modules declare a
+    // memory section with flag bit 0x04 set; without threading
+    // this through, the validator defaults to i32 addresses and
+    // rejects memory64 function bodies with StackTypeMismatch.
+    // ADR-0111 D1.
+    var memories_owned: ?sections.Memories = if (module.find(.memory)) |s|
+        sections.decodeMemory(alloc, s.body) catch return false
+    else
+        null;
+    defer if (memories_owned) |*m| m.deinit();
+    const memory0_idx_type: sections.MemoryEntry.IdxType =
+        if (memories_owned) |m|
+            (if (m.items.len > 0) m.items[0].idx_type else .i32)
+        else
+            .i32;
+
     for (codes_owned.items, defined_func_indices) |code, type_idx| {
         const sig = types_owned.items[type_idx];
-        validator.validateFunction(
+        validator.validateFunctionWithMemIdx(
             sig,
             code.locals,
             code.body,
@@ -194,6 +211,7 @@ pub fn frontendValidate(alloc: std.mem.Allocator, binary: []const u8) bool {
             0, // data_count
             table_entries,
             0, // elem_count
+            memory0_idx_type,
         ) catch return false;
     }
     return true;
