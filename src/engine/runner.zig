@@ -281,14 +281,13 @@ const testing = std.testing;
 // the fixtures committed in sub-3c.
 
 test "runI32Export: memory64 store+load round-trip via i64 idx_type (ADR-0111 D4 e2e)" {
-    // D-181: Phase 10.M memory64 i64-idx emit lands on arm64 first
-    // (ADR-0111 D4); x86_64 SysV emit of `emitMemOpI64 X-form +
-    // wrap-check` is incomplete. Per `test_discipline.md` §4 — gate
-    // is paired with a debt row naming the structural impl gap, not
-    // just "Mac-only".
-    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
-        return error.SkipZigTest;
-    }
+    // D-181 discharge: x86_64 SysV `emitMemOpI64` X-form + wrap-check
+    // body is implemented (src/engine/codegen/x86_64/op_memory.zig:306);
+    // `usesRuntimePtr` already whitelists all memory load/store ops
+    // (src/engine/codegen/x86_64/usage.zig:60). Ungated for Mac aarch64
+    // + Linux x86_64 SysV per ADR-0111 D4. Windows skip retained
+    // (phase-boundary host).
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     // (module
     //   (memory i64 1)
     //   (func (export "test") (result i32)
