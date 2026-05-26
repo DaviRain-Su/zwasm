@@ -6,10 +6,10 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `3b1a4c43` — docs(adr-0115): amend §6 with ValType
-  extension authorisation (10.G op_gc cycle 1). Design decision
-  recorded: closed-enum + per-site `unreachable` cascade chosen
-  over non-exhaustive enum. Impl lands at the next commit.
+- **HEAD**: `a4556584` — feat(p10): extend ValType with .i31ref +
+  cascade unreachable arms (10.G op_gc cycle 2). 16-site cascade
+  across parse/validate/lower/per-arch codegen. i31ref shares
+  reftype gpr-slot semantics with funcref/externref.
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
 - **Active debt rows**: 18 — all `blocked-by:` with named
   structural barriers. Zero `now`-status rows.
@@ -56,17 +56,15 @@ future op_gc consumers. EH 40 fails still gated on the bigger
 
 - **Bundle-ID**: 10.G-op_gc
 - **Cycles-remaining**: ~19 (per `.dev/phase10_g_op_bundle_plan.md`)
-- **Continuity-memo**: Cycle 1 (`3b1a4c43`) ADR-0115 §6 amended
-  with ValType extension authorisation + cascade-pattern
-  decision (closed-enum + per-site `unreachable` arm; @panic
-  rejected since that pattern targets comptime-pruned platform
-  branches, not enum extensions). Cycle 2 (next): extend
-  `ir/zir.zig::ValType` with 5 new closed variants (anyref
-  0x6E, eqref 0x6D, structref 0x6B, arrayref 0x6A, i31ref
-  0x6C) + cascade `.gc_variants => unreachable` arms across the
-  ~217 exhaustive switch sites. Mechanical via rg-find + per-
-  site arm addition; expect LOC budget at high end of chunk
-  granularity (may bundle or split per LOOP.md rules).
+- **Continuity-memo**: Cycle 1 (`3b1a4c43`) ADR-0115 §6
+  amendment. Cycle 2 (`a4556584`) extends ValType with .i31ref
+  + 16-site cascade. Actual cascade was 16 sites not 217 —
+  the 217 figure conflated opcode switches (different enum)
+  with ValType switches. Cycle 3 (next): parser
+  `sections.zig::readValType` recognises byte 0x6C → .i31ref
+  (+ similar for anyref/eqref/structref/arrayref bytes when
+  those variants land). Cycle 4: validator stack-types accept
+  i31ref. Cycle 5: i31 ops (ref.i31 / i31.get_s / i31.get_u).
 - **Exit-condition**: wasm-3.0-assert exception-handling /
   function-references / gc corpora open for op_gc dispatch +
   at least the first i31 spec directive flips green via the
