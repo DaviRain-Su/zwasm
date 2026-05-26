@@ -12,7 +12,6 @@
 
 const meta = @import("../../../../../instruction/wasm_3_0/return_call_indirect.zig");
 const ctx_mod = @import("../../ctx.zig");
-const op_tail_call = @import("../../op_tail_call.zig");
 const zir = @import("../../../../../ir/zir.zig");
 
 pub const op_tag = meta.op_tag;
@@ -28,5 +27,7 @@ pub const n_successor_edges: u8 = 0;
 pub const is_safepoint: bool = false;
 
 pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
-    return op_tail_call.emitIndirectReturnCall(ctx, ins);
+    _ = ctx;
+    _ = ins;
+    return error.UnsupportedOp;
 }
