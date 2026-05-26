@@ -6,11 +6,11 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `06a8dff5` — feat(p10): struct.new + struct.new_default
-  validator+lower (10.G op_gc cycle 15; ADR-0121 D5). Sub-ops 0/1
-  consume typeidx from the cycle-14 side-tables; pre-RTT push
-  .structref. New validateFunctionWithGcTypes entry point.
-  Interp deferred to ADR-0116 RTT amendment.
+- **HEAD**: `678aac15` — feat(p10): array.new family validator+lower
+  (10.G op_gc cycle 16; ADR-0121 D5). Sub-ops 6/7/8 (array.new /
+  array.new_default / array.new_fixed) consume typeidx + element-
+  type pops via cycle-14 side-tables; push .arrayref. Interp
+  deferred to ADR-0116 RTT amendment same as struct.new.
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
 - **Active debt rows**: 18 — all `blocked-by:` with named
   structural barriers. Zero `now`-status rows.
@@ -56,19 +56,21 @@ future op_gc consumers. EH 40 fails still gated on the bigger
 ## Active bundle
 
 - **Bundle-ID**: 10.G-op_gc
-- **Cycles-remaining**: ~11 (per `.dev/phase10_g_op_bundle_plan.md`)
+- **Cycles-remaining**: ~10 (per `.dev/phase10_g_op_bundle_plan.md`)
 - **Continuity-memo**: Cycles 1-6 substrate. Cycles 7-12 wired
-  no-RTT GC ops. Cycle 13 (`3b3b8654`) ADR-0121 filed. Cycle 14
-  (`b5b3a39f`) decodeTypes 0x5F/0x5E + side-tables. Cycle 15
-  (`06a8dff5`) struct.new + struct.new_default validator+lower
-  via validateFunctionWithGcTypes. Cycle 16 (next): mirror
-  struct.new for array — array.new (sub-op 6) + array.new_default
-  (sub-op 7) + array.new_fixed (sub-op 8). All consume typeidx
-  (look up Types.array_defs[idx]); array.new pops len+init,
-  array.new_default pops just len, array.new_fixed reads literal
-  N + pops N values. Push .arrayref. Cycle 17+: struct.get /
-  struct.get_s / struct.get_u / struct.set + array.get / array.set
-  validator+lower (field/element-index immediates).
+  no-RTT GC ops. Cycles 13-14 (ADR-0121 + decodeTypes 0x5F/0x5E
+  + side-tables). Cycle 15 (`06a8dff5`) struct.new family
+  validator+lower. Cycle 16 (`678aac15`) array.new family
+  validator+lower. Cycle 17 (next): struct.get / struct.get_s /
+  struct.get_u / struct.set (sub-ops 2/3/4/5). Validator
+  consumes typeidx + fieldidx; resolves StructDef.fields[fieldidx]
+  for the slot type. struct.get pops structref, pushes field.
+  struct.get_s/_u for packed types (NotImplemented this cut per
+  ADR-0121 D3). struct.set pops value + structref, pushes nothing.
+  Cycle 18: array.get / array.get_s / array.get_u / array.set
+  + array.fill mirror. Cycle 19+: ADR-0116 amendment for
+  StructInfo/ArrayInfo runtime layout (RTT 8-deep) — unblocks
+  interp for all the struct/array ops landed at cycles 15-18.
 - **Exit-condition**: wasm-3.0-assert exception-handling /
   function-references / gc corpora open for op_gc dispatch +
   at least the first i31 spec directive flips green via the
