@@ -6,10 +6,10 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `62bebe25` — feat(p10): -Dgc=true|false build-option
-  seam (10.G-foundation cycle 6; ADR-0115 §3). Final substrate
-  bit — pairs with cycle-5's runtime gate. Foundation fully
-  closed.
+- **HEAD**: `5f841bdc` — docs(p10): scope the 10.G op_gc bundle
+  plan (post-foundation). Sequenced 12-sub-chunk plan + cycle
+  estimate (~20 internal) + ADR-grade design decision flagged
+  (ValType extension shape).
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
 - **Active debt rows**: 18 — all `blocked-by:` with named
   structural barriers. Zero `now`-status rows.
@@ -52,21 +52,27 @@ Foundation cycles produce no spec-runner delta — they substrate
 future op_gc consumers. EH 40 fails still gated on the bigger
 10.G work (per D-192).
 
-## Active task — survey for next tractable §10 work
+## Active task — open 10.G op_gc bundle cycle 1 (ValType extension)
 
-Foundation closed; next move requires choosing a parent bundle:
-(A) GC valtype parser+validator extensions (cycle ~6-10 of larger
-10.G impl), OR (B) opportunistic wait for user touchpoint on
-ADR-0120 / Phase 10 close prep / D-179 wabt bump.
+Plan landed at `.dev/phase10_g_op_bundle_plan.md` (HEAD
+`5f841bdc`). Cycle 1 is sub-chunk 1 (GC ValType enum
+extension) — ADR-grade design choice + amendment to ADR-0115
+authorising the closed-enum + @panic cascade pattern (vs
+non-exhaustive enum tradeoff). Single-cycle scope: amend ADR
++ extend ir/zir.zig::ValType + mechanical cascade through the
+~217 exhaustive switch sites with @panic stubs.
 
-(A) is autonomous-eligible. (B) is bucket-3 territory if no
-single-cycle work remains.
+Authorised by ADR-0115/0116 (both Accepted 2026-05-25);
+amendment captures the cascade-pattern rationale.
 
 ## Next sub-chunk candidates (names only)
 
-- **10.G op_gc impl bundle (parent of foundation)** — GC
-  valtype enum extensions + parser/validator + op_gc.zig
-  dispatch + collector_mark_sweep impl. Multi-cycle, large.
+- **10.G op_gc cycle 1: ValType extension + ADR-0115 amend**.
+- **10.G op_gc cycle 2: parser readValType branches for 5 GC bytes**.
+- **10.G op_gc cycle 3: validator stack-type accepts GC ValTypes**.
+- **10.G op_gc cycle 4: i31 ops (ref.i31 / i31.get_s / i31.get_u)**.
+- Per `.dev/phase10_g_op_bundle_plan.md` for the full 12-sub-chunk
+  sequence with cycle estimates.
 - **10.M-realworld** — toolchain-blocked (D-179 wabt 1.0.41+).
 - **10.P close gate** — user touchpoint by construction.
 
