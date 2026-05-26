@@ -61,6 +61,7 @@ pub fn loadFrameLink(fp: usize, ctx: ?*anyopaque) ?unwind.FrameLink {
     return .{
         .caller_fp = raw.caller_fp,
         .caller_pc = adapter_ctx.normalize(ret_addr, adapter_ctx.normalize_ctx),
+        .caller_abs_pc = ret_addr,
     };
 }
 
@@ -131,7 +132,7 @@ test "frame_chain_adapter: end-to-end walk — synthetic frame chain → handler
 
     const ctx: Context = .{ .normalize = identityTruncate };
     const loader = loaderFor(&ctx);
-    const result = unwind.walk(t, 5, 9999, inner_fp, loader, 16);
+    const result = unwind.walk(t, 5, 9999, 0xDEAD0000 | 9999, inner_fp, loader, 16);
 
     switch (result) {
         .handler => |h| {
@@ -155,7 +156,7 @@ test "frame_chain_adapter: end-to-end walk — uncaught after exhausting frame c
 
     const ctx: Context = .{ .normalize = identityTruncate };
     const loader = loaderFor(&ctx);
-    const result = unwind.walk(t, 7, 50, inner_fp, loader, 16);
+    const result = unwind.walk(t, 7, 50, 0x50, inner_fp, loader, 16);
     try testing.expectEqual(unwind.UnwindResult.uncaught, result);
 }
 

@@ -59,6 +59,13 @@ pub const CatchKind = exception_table.CatchKind;
 pub const FrameLink = struct {
     caller_fp: usize,
     caller_pc: u32,
+    /// Absolute return address (= raw saved LR / RIP, pre-normalize).
+    /// The walker carries this so a handler match in this frame can
+    /// return the absolute PC, letting the trampoline look up the
+    /// catching function's `code_map.Entry` for `start_addr` +
+    /// `frame_bytes` (needed to compute the absolute landing-pad
+    /// JMP target and the SP-restore amount).
+    caller_abs_pc: usize,
 };
 
 /// Function pointer that materialises one frame-chain step.
@@ -81,6 +88,14 @@ pub const HandlerLanding = struct {
     /// this frame's prologue boundary before jumping to
     /// `landing_pad_pc`.
     handler_fp: usize,
+    /// Absolute PC inside the catching function at the moment the
+    /// handler matched (= the throw-site call's saved-LR for the
+    /// catching frame, OR `throw_site_addr` if the handler hit in
+    /// the throwing function itself). The trampoline does
+    /// `code_map.lookup(handler_abs_pc)` to recover the catching
+    /// function's `start_addr` + `frame_bytes` for the SP-restore
+    /// and absolute landing-pad JMP target.
+    handler_abs_pc: usize,
 };
 
 /// Unwind walk result. `.uncaught` propagates to the
@@ -103,11 +118,13 @@ pub fn walk(
     table: ExceptionTable,
     throw_tag_idx: u32,
     initial_pc: u32,
+    initial_abs_pc: usize,
     initial_fp: usize,
     loader: FrameChainLoader,
     max_depth: u32,
 ) UnwindResult {
     var pc = initial_pc;
+    var abs_pc = initial_abs_pc;
     var fp = initial_fp;
     var depth: u32 = 0;
     while (depth < max_depth) : (depth += 1) {
@@ -116,12 +133,14 @@ pub fn walk(
                 .landing_pad_pc = hit.landing_pad_pc,
                 .kind = hit.kind,
                 .handler_fp = fp,
+                .handler_abs_pc = abs_pc,
             } };
         }
         const link = loader.load(fp, loader.ctx) orelse return .uncaught;
         if (link.caller_fp == 0) return .uncaught;
         fp = link.caller_fp;
         pc = link.caller_pc;
+        abs_pc = link.caller_abs_pc;
     }
     // Depth exhausted — treat as uncaught. The trampoline
     // distinguishes this from a clean top-of-stack via the
@@ -167,7 +186,7 @@ test "unwind: matching handler in current frame → returns handler immediately"
 
     // No frame chain needed — handler hits at the initial frame.
     const frames: SyntheticFrames = .{ .links = &.{} };
-    const result = walk(t, 5, 50, 1, frames.loader(), 16);
+    const result = walk(t, 5, 50, 0, 1, frames.loader(), 16);
 
     switch (result) {
         .handler => |h| {
@@ -195,10 +214,10 @@ test "unwind: no handler in any frame → uncaught (caller_fp == 0 terminates)" 
     // fp=2 → caller fp=1 ; fp=1 → caller fp=0 (top).
     const frames: SyntheticFrames = .{ .links = &.{
         null,
-        .{ .caller_fp = 0, .caller_pc = 0 },
-        .{ .caller_fp = 1, .caller_pc = 50 },
+        .{ .caller_fp = 0, .caller_pc = 0, .caller_abs_pc = 0 },
+        .{ .caller_fp = 1, .caller_pc = 50, .caller_abs_pc = 50 },
     } };
-    const result = walk(t, 99, 50, 2, frames.loader(), 16);
+    const result = walk(t, 99, 50, 0, 2, frames.loader(), 16);
     try testing.expectEqual(UnwindResult.uncaught, result);
 }
 
@@ -227,10 +246,10 @@ test "unwind: walks to caller frame and finds handler there" {
     // caller frame at fp=1, call site pc=550.
     const frames: SyntheticFrames = .{ .links = &.{
         null,
-        .{ .caller_fp = 0, .caller_pc = 0 },
-        .{ .caller_fp = 1, .caller_pc = 550 },
+        .{ .caller_fp = 0, .caller_pc = 0, .caller_abs_pc = 0 },
+        .{ .caller_fp = 1, .caller_pc = 550, .caller_abs_pc = 0x10550 },
     } };
-    const result = walk(t, 5, 50, 2, frames.loader(), 16);
+    const result = walk(t, 5, 50, 0x10050, 2, frames.loader(), 16);
 
     switch (result) {
         .handler => |h| {
@@ -254,7 +273,7 @@ test "unwind: catch_all in inner frame catches everything (no walk needed)" {
     const t = b.finalize();
 
     const frames: SyntheticFrames = .{ .links = &.{} };
-    const result = walk(t, 12345, 50, 0, frames.loader(), 16);
+    const result = walk(t, 12345, 50, 0, 0, frames.loader(), 16);
     switch (result) {
         .handler => |h| {
             try testing.expectEqual(@as(u32, 77), h.landing_pad_pc);
@@ -274,10 +293,10 @@ test "unwind: max_depth bound prevents runaway on corrupted chain" {
     // (a cycle). Without max_depth this would loop forever.
     const frames: SyntheticFrames = .{
         .links = &.{
-            .{ .caller_fp = 0, .caller_pc = 0 }, // fp=0 → fp=0 (self-cycle)
+            .{ .caller_fp = 0, .caller_pc = 0, .caller_abs_pc = 0 }, // fp=0 → fp=0 (self-cycle)
         },
     };
-    const result = walk(t, 1, 0, 0, frames.loader(), 4);
+    const result = walk(t, 1, 0, 0, 0, frames.loader(), 4);
     try testing.expectEqual(UnwindResult.uncaught, result);
 }
 
@@ -288,7 +307,7 @@ test "unwind: loader returning null (invalid fp) → uncaught" {
 
     // Empty frame chain — loader returns null at any fp.
     const frames: SyntheticFrames = .{ .links = &.{} };
-    const result = walk(t, 5, 50, 99, frames.loader(), 16);
+    const result = walk(t, 5, 50, 0, 99, frames.loader(), 16);
     try testing.expectEqual(UnwindResult.uncaught, result);
 }
 
@@ -309,11 +328,11 @@ test "unwind: handler_fp reports the catching frame (NOT the throwing frame)" {
     // (pc=1500 hits the handler). handler_fp should be 1.
     const frames: SyntheticFrames = .{ .links = &.{
         null,
-        .{ .caller_fp = 0, .caller_pc = 0 },
-        .{ .caller_fp = 1, .caller_pc = 1500 },
-        .{ .caller_fp = 2, .caller_pc = 50 },
+        .{ .caller_fp = 0, .caller_pc = 0, .caller_abs_pc = 0 },
+        .{ .caller_fp = 1, .caller_pc = 1500, .caller_abs_pc = 0x21500 },
+        .{ .caller_fp = 2, .caller_pc = 50, .caller_abs_pc = 0x20050 },
     } };
-    const result = walk(t, 7, 10, 3, frames.loader(), 16);
+    const result = walk(t, 7, 10, 0x30010, 3, frames.loader(), 16);
     switch (result) {
         .handler => |h| try testing.expectEqual(@as(usize, 1), h.handler_fp),
         .uncaught => try testing.expect(false),

@@ -383,7 +383,27 @@ pub const JitRuntime = extern struct {
     eh_code_map_entries: ?[*]const code_map.Entry = null,
     /// Entry count for `eh_code_map_entries`.
     eh_code_map_count: u32 = 0,
-    _pad14: u32 = 0,
+    /// Phase 10.E IT-6 cycle 3c-iii — handler-dispatch result fields.
+    /// Written by `trampolineCore` on `.handler` return; consumed by
+    /// the naked stub's branch + JMP path.
+    ///
+    /// `eh_handler_active`:
+    ///   0 = `.uncaught` path (naked stub RETs to throw site whose
+    ///       fallthrough hits the trap stub).
+    ///   1 = `.handler` path (naked stub restores SP from
+    ///       `eh_handler_sp` and JMPs to `eh_handler_pc`).
+    ///
+    /// `eh_handler_sp` = absolute SP value at the catching frame's
+    /// prologue boundary = `handler_fp - frame_bytes` (per AAPCS64
+    /// §6.4 + the function's `SUB SP, SP, #frame_bytes` prologue).
+    ///
+    /// `eh_handler_pc` = absolute address of the landing-pad
+    /// instruction = `code_map.Entry.start_addr + landing_pad_pc`
+    /// (catching function's start + the catch label's module-relative
+    /// offset).
+    eh_handler_active: u32 = 0,
+    eh_handler_sp: usize = 0,
+    eh_handler_pc: usize = 0,
 };
 
 /// Default `memory_grow_fn` — unconditionally refuses growth by
@@ -465,6 +485,11 @@ pub const eh_table_entries_off: u12 = @offsetOf(JitRuntime, "eh_table_entries");
 pub const eh_table_count_off: u12 = @offsetOf(JitRuntime, "eh_table_count");
 pub const eh_code_map_entries_off: u12 = @offsetOf(JitRuntime, "eh_code_map_entries");
 pub const eh_code_map_count_off: u12 = @offsetOf(JitRuntime, "eh_code_map_count");
+/// Phase 10.E IT-6 cycle 3c-iii — handler-dispatch fields read by
+/// the naked-stub trampoline's branch after `trampolineCore` returns.
+pub const eh_handler_active_off: u12 = @offsetOf(JitRuntime, "eh_handler_active");
+pub const eh_handler_sp_off: u12 = @offsetOf(JitRuntime, "eh_handler_sp");
+pub const eh_handler_pc_off: u12 = @offsetOf(JitRuntime, "eh_handler_pc");
 
 /// Total size of the head section consumed by the prologue.
 pub const head_size: u32 = @sizeOf(JitRuntime);
@@ -605,10 +630,13 @@ test "JitRuntime: layout offsets match documented prologue load sequence" {
     try testing.expectEqual(@as(u12, 80), jit_executed_flag_off);
 }
 
-test "JitRuntime: total size = 272 bytes (post-IT-6 cycle 3c eh_table + eh_code_map tail)" {
+test "JitRuntime: total size = 288 bytes (post-IT-6 cycle 3c-iii handler-dispatch tail)" {
     // Phase 10.E IT-6 cycle 3c — EH dispatcher fields appended
     // (+32 bytes = 2 ptrs × 8 B + 2 u32 × 4 B + 2 u32 pads × 4 B).
-    try testing.expectEqual(@as(u32, 272), head_size);
+    // Phase 10.E IT-6 cycle 3c-iii adds the handler-dispatch
+    // result fields (+16 bytes = u32 active replacing the prior pad
+    // + 2 usize for SP and PC).
+    try testing.expectEqual(@as(u32, 288), head_size);
 }
 
 test "JitRuntime: D-165 cycle 4 trap_stub_entry_count offset (W-form imm12-safe)" {

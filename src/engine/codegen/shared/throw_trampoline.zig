@@ -127,16 +127,39 @@ pub fn trampolineCore(
     switch (result) {
         .uncaught => {
             rt.trap_flag = 1;
+            rt.eh_handler_active = 0;
         },
         .handler => |h| {
-            // IT-6 cycle 3c-iii (next) — handler dispatch via
-            // `sp_restore.emitSpRestoreFull` + JMP to landing_pad_pc
-            // (resolved to absolute via CodeMap.Entry.start_addr +
-            // landing_pad_pc, then BR / JMP). Until that lands, the
-            // .handler path traps; the unwinder match is still
-            // verified end-to-end via a fixture's installed catch.
-            _ = h;
-            rt.trap_flag = 1;
+            // Resolve the catching function's CodeMap entry via the
+            // absolute PC captured at the matched frame. If the
+            // handler's containing PC isn't in any JIT function
+            // (= corrupted state or future cross-module scenario the
+            // current single-instance walker doesn't support), trap.
+            const entry_lookup = cmap.lookup(h.handler_abs_pc);
+            switch (entry_lookup) {
+                .inside => |hit| {
+                    // SP-restore: handler_fp = catching frame's X29/RBP
+                    // = SP at the point AFTER the prologue's `MOV X29,SP`.
+                    // The prologue then did `SUB SP, SP, #frame_bytes`
+                    // (allocating locals + spills + outgoing-call slots);
+                    // to land at the catch handler with the prologue-
+                    // completion SP, subtract that frame_bytes back.
+                    rt.eh_handler_sp = h.handler_fp -% hit.frame_bytes;
+                    // Landing-pad PC: module-relative `landing_pad_pc`
+                    // plus the catching function's absolute `start_addr`.
+                    rt.eh_handler_pc = hit.start_addr +% h.landing_pad_pc;
+                    rt.eh_handler_active = 1;
+                    // trap_flag stays 0 — handler dispatch will run.
+                },
+                .outside => {
+                    // Defensive: should not happen for a real handler
+                    // hit (the unwinder matched a HandlerEntry which by
+                    // construction lives inside a JIT function's PC
+                    // range). Treat as uncaught.
+                    rt.trap_flag = 1;
+                    rt.eh_handler_active = 0;
+                },
+            }
         },
     }
 }
@@ -352,37 +375,62 @@ test "zwasmThrowTrampoline: uncaught path sets trap_flag (no handler installed)"
     try testing.expectEqual(@as(u32, 0), rt.trap_flag);
     invokeTrampolineWith(&rt, 0);
     try testing.expectEqual(@as(u32, 1), rt.trap_flag);
+    try testing.expectEqual(@as(u32, 0), rt.eh_handler_active);
 }
 
-test "zwasmThrowTrampoline: handler found path also sets trap_flag (cycle 3c-iii pending)" {
+test "zwasmThrowTrampoline: handler-found path populates eh_handler_sp + eh_handler_pc + active=1" {
     // Install a catch_all handler that covers the throw site's
-    // PC. dispatchThrow returns .handler — trampolineCore currently
-    // falls back to trap (cycle 3c-iii implements the actual JMP
-    // to landing_pad_pc). The test verifies the DISPATCH path is
-    // exercised; once 3c-iii lands, this assertion flips to
-    // "trap_flag == 0 + observable landing-pad execution".
+    // PC. dispatchThrow returns .handler; trampolineCore now
+    // resolves the catching function's CodeMap entry, computes
+    // the absolute landing-pad PC (start_addr + landing_pad_pc)
+    // and the restored SP (handler_fp - frame_bytes), stashes
+    // both in JitRuntime, and sets `eh_handler_active = 1`. The
+    // naked-stub branch + JMP path (cycle 3c-iii-next) consumes
+    // these fields; this test verifies the data plumbing.
     var rt: jit_abi.JitRuntime = std.mem.zeroes(jit_abi.JitRuntime);
 
-    // Install one CodeMap entry that covers a known PC range.
     const cmap_entries = [_]code_map_mod.Entry{
         .{ .start_addr = 0x10000, .len = 0x100, .func_idx = 0, .frame_bytes = 32 },
     };
     rt.eh_code_map_entries = cmap_entries[0..].ptr;
     rt.eh_code_map_count = cmap_entries.len;
 
-    // Install a catch_all handler covering the same PC range.
     const eh_entries = [_]exception_table.HandlerEntry{
         .{ .pc_start = 0, .pc_end = 0x100, .tag_idx = null, .landing_pad_pc = 0x40, .kind = .catch_all },
     };
     rt.eh_table_entries = eh_entries[0..].ptr;
     rt.eh_table_count = eh_entries.len;
 
-    // We can't realistically pass throw_site_addr=0x10042 from the
-    // assembly wrapper (X30 is whatever the BL set it to). Call
-    // `trampolineCore` directly to verify the dispatch logic and
-    // the placeholder trap-flag fallback; the wrapper-call path
-    // is covered by the .uncaught test above.
-    trampolineCore(999, 0x10042, 5, &rt);
+    // Direct `trampolineCore` call (bypasses the asm wrapper so we
+    // control `throw_site_addr` precisely — needed to assert exact
+    // absolute landing-pad PC + SP values).
+    const fake_handler_fp: usize = 0x7FFF_0000_4000;
+    trampolineCore(fake_handler_fp, 0x10042, 5, &rt);
+
+    try testing.expectEqual(@as(u32, 1), rt.eh_handler_active);
+    try testing.expectEqual(@as(u32, 0), rt.trap_flag);
+    // start_addr (0x10000) + landing_pad_pc (0x40) = 0x10040.
+    try testing.expectEqual(@as(usize, 0x10040), rt.eh_handler_pc);
+    // handler_fp (0x7FFF_0000_4000) - frame_bytes (32) = …_3FE0.
+    try testing.expectEqual(@as(usize, 0x7FFF_0000_3FE0), rt.eh_handler_sp);
+}
+
+test "zwasmThrowTrampoline: uncaught fallback (no handler reachable) → trap_flag + active=0" {
+    // Empty handler table → walker never matches. Use a stack-resident
+    // sentinel frame so loadFrame returns caller_fp=0 cleanly (no host
+    // stack walk, per test_discipline.md §3).
+    var sentinel: [2]usize align(16) = .{ 0, 0 };
+    var rt: jit_abi.JitRuntime = std.mem.zeroes(jit_abi.JitRuntime);
+
+    const cmap_entries = [_]code_map_mod.Entry{
+        .{ .start_addr = 0x10000, .len = 0x100, .func_idx = 0, .frame_bytes = 0 },
+    };
+    rt.eh_code_map_entries = cmap_entries[0..].ptr;
+    rt.eh_code_map_count = cmap_entries.len;
+    // No handler installed → .uncaught.
+
+    trampolineCore(@intFromPtr(&sentinel), 0x10042, 5, &rt);
+    try testing.expectEqual(@as(u32, 0), rt.eh_handler_active);
     try testing.expectEqual(@as(u32, 1), rt.trap_flag);
 }
 

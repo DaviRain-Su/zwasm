@@ -95,11 +95,16 @@ pub fn dispatchThrow(
     const ctx = code_map_mod.adapterContextFor(code_map);
     const loader = frame_chain_adapter.loaderFor(&ctx);
 
-    // (3) Walk.
+    // (3) Walk. `throw_site_addr` is the absolute address of the
+    // throw instruction; the walker carries it (or each frame's
+    // raw saved LR/RIP) through so the handler-match step can
+    // return `handler_abs_pc` for the trampoline's CodeMap.Entry
+    // lookup (start_addr + frame_bytes).
     return unwind.walk(
         table,
         site.tag_idx,
         initial_pc,
+        site.throw_site_addr,
         site.initial_fp,
         loader,
         max_unwind_depth,

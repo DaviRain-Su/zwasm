@@ -51,6 +51,14 @@ pub const Lookup = union(enum) {
     inside: struct {
         relative_pc: u32,
         func_idx: u32,
+        /// Start address of the containing function — needed by the
+        /// EH handler-dispatch path to convert `landing_pad_pc`
+        /// (module-relative) to an absolute target for the JMP.
+        start_addr: usize,
+        /// Prologue frame allocation bytes (the `SUB SP, SP, #N` the
+        /// catching function emitted). The EH landing path computes
+        /// `new_sp = handler_fp - frame_bytes` before the JMP.
+        frame_bytes: u32,
     },
     /// `ret_addr` is not in any JIT-compiled function (host
     /// frame / OS frame / corrupted). The unwinder should
@@ -83,7 +91,12 @@ pub const CodeMap = struct {
         const e = self.entries[lo - 1];
         if (ret_addr >= e.start_addr + e.len) return .outside;
         const rel: u32 = @intCast(ret_addr - e.start_addr);
-        return .{ .inside = .{ .relative_pc = rel, .func_idx = e.func_idx } };
+        return .{ .inside = .{
+            .relative_pc = rel,
+            .func_idx = e.func_idx,
+            .start_addr = e.start_addr,
+            .frame_bytes = e.frame_bytes,
+        } };
     }
 };
 
