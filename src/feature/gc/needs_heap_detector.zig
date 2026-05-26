@@ -292,3 +292,12 @@ test "needs_gc_heap: clean module with only i32 types returns false" {
     defer m.deinit(testing.allocator);
     try testing.expect(!detectNeedsGcHeap(&m));
 }
+
+test {
+    // 10.G-foundation cycle 3: pull sibling heap.zig tests into
+    // the test root walk. needs_heap_detector is reached from
+    // src/parse/parser.zig directly (cycle 2 wiring), so this
+    // reference cascades heap.zig discovery without depending
+    // on register.zig's re-export pattern.
+    _ = @import("heap.zig");
+}

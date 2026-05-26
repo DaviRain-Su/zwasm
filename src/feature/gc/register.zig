@@ -30,6 +30,15 @@ pub const i31_pack = @import("i31.zig");
 // in-source unit tests discoverable by `zig build test`.
 pub const needs_heap_detector = @import("needs_heap_detector.zig");
 
+// 10.G-foundation cycle 3: per-Store GC heap slab per ADR-0115
+// §1 / §5. Bump-pointer allocator over a Runtime-arena-backed
+// slab; 32-bit GcRef offsets, 2-byte alignment, 4 KB grow
+// granularity, 4 GiB cap. Re-exported so the future
+// instantiate-side gate can allocate a Heap on first GC op
+// when Module.needs_gc_heap is true. Collector vtable + null
+// collector α land at cycle 4.
+pub const heap = @import("heap.zig");
+
 pub fn register(_: *dispatch_table.DispatchTable) void {
     // Placeholder — feature implementation deferred per ADR-0023.
 }
