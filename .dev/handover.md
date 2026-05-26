@@ -6,9 +6,8 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `3ae3cfaa` — wasm 3.0 spec manifest parser foundation
-  (10.E spec-runner bundle cycle 1; `test/spec/wasm_3_0_manifest
-  .zig` + 8 unit tests on the Directive parse shape).
+- **HEAD**: `79749ffe` — TypedValue → runtime.Value payload parser
+  (10.E spec-runner bundle cycle 2; parsePayload + 8 new tests).
 - **ROADMAP §10 progress**: 7/13 DONE (10.0/10.C9/10.J/10.F/
   10.Z/10.D/10.T), 4 IN-PROGRESS (10.M/10.R/10.TC/10.E with
   10.E core + 10.TC same-module direct + indirect substantively
@@ -45,28 +44,26 @@ Observable deltas at close (HEAD `ae2abab7`):
 ## Active bundle
 
 - **Bundle-ID**: 10.E-spec-runner
-- **Cycles-remaining**: ~5
-- **Continuity-memo**: cycle 1 (`3ae3cfaa`) shipped the manifest
-  parser foundation — `test/spec/wasm_3_0_manifest.zig` with
-  Directive {kind, module_path, func_name, args, results, ...}
-  + parseLine() over alloc-free TypedValue slices. 8 unit tests
-  cover module / assert_return (no-args + typed-args + void
-  result) / assert_trap / assert_invalid / skip-impl / overflow.
-  No execution dispatch yet — parser only.
+- **Cycles-remaining**: ~4
+- **Continuity-memo**: cycles 1-2 landed in
+  `test/spec/wasm_3_0_manifest.zig`. Cycle 1 (`3ae3cfaa`): parseLine
+  over alloc-free TypedValue slices + Directive shape (8 tests).
+  Cycle 2 (`79749ffe`): parsePayload → runtime.Value with
+  i32/i64 unsigned-wrap @bitCast + f32/f64 bit-pattern @bitCast +
+  PayloadError mapping (8 more tests; 17 total in the file).
+  Parser layer COMPLETE — execution dispatch starts cycle 3.
 - **Exit-condition**: at least ONE assert_return directive from a
   wasm-3.0-assert sub-corpus manifest executes end-to-end via
   `cli_run.runWasmCaptured` (or equivalent invocation path) with
   the parsed args + expected result matched against actual
   return; `zig build test-spec-wasm-3.0-assert` reports >0
   assertions passed (vs the current skeleton's 0).
-- **Next cycle (cycle 2)**: TypedValue → `runtime.Value` payload
-  parser. Add `parsePayload(tv: TypedValue) !runtime.Value`:
-  i32/i64 via std.fmt.parseInt; f32/f64 via @bitCast from the
-  uleb-decoded u32/u64 bit pattern. Same-cycle observable:
-  unit tests round-tripping a few payloads from each manifest.
-  Subsequent cycles wire: module loader (3) → execute dispatcher
-  through cli_run (4) → trap comparison (5) → integration into
-  spec_assert_runner_wasm_3_0.zig main loop (close).
+- **Next cycle (cycle 3)**: module loader + invoke integration.
+  Survey `spec_assert_runner_base.zig` (4091 LOC) for the
+  existing module-load + invoke pattern. Add `runOne(dir,
+  directive, args[], expected[])` helper. Same-cycle observable:
+  ONE wasm-3.0-assert manifest entry executes end-to-end
+  through runOne (e.g. return_call.0.wasm `type-i32 () -> i32:306`).
 
 ## Next candidates (after 10.E-spec-runner bundle closes)
 
