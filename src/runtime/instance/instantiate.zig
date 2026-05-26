@@ -468,6 +468,28 @@ pub fn evalConstI32Expr(expr: []const u8) !i32 {
     return v;
 }
 
+/// Wasm spec §3.4.7 — active data segment offset's result type
+/// matches the target memory's idx_type. memory64 modules emit
+/// `i64.const N; end` (opcode 0x42) for offsets; legacy i32
+/// memories emit `i32.const N; end` (opcode 0x41). Returns the
+/// offset as `u64` so the caller can range-check against the
+/// memory's byte length uniformly.
+pub fn evalConstMemAddrExpr(
+    expr: []const u8,
+    idx_type: sections.MemoryEntry.IdxType,
+) !u64 {
+    switch (idx_type) {
+        .i32 => return @as(u64, @intCast(@as(u32, @bitCast(try evalConstI32Expr(expr))))),
+        .i64 => {
+            if (expr.len < 2 or expr[0] != 0x42) return error.UnsupportedConstExpr;
+            var pos: usize = 1;
+            const v = try leb128.readSleb128(i64, expr, &pos);
+            if (pos >= expr.len or expr[pos] != 0x0B) return error.UnsupportedConstExpr;
+            return @bitCast(v);
+        },
+    }
+}
+
 /// Instantiate `bytes` into `rt`, wiring every import via
 /// `bindings` (one per `(import ...)` row in declaration order).
 /// Pass `null` when the module has no imports.
@@ -707,9 +729,15 @@ pub fn instantiateRuntime(
         for (datas.items) |seg| {
             if (seg.kind != .active) continue;
             if (seg.memidx != 0) return error.MultiMemoryUnsupported;
-            const offset = try evalConstI32Expr(seg.offset_expr);
-            const dst_end = @as(usize, @intCast(offset)) + seg.bytes.len;
-            if (dst_end > rt.memory.len) return error.DataSegmentOutOfRange;
+            // Wasm spec §3.4.7 — offset's result type matches the
+            // target memory's idx_type; memory64 modules emit
+            // i64.const. ADR-0111 D2 runtime-side close.
+            const mem_idx_type: sections.MemoryEntry.IdxType =
+                if (rt.memories.len > 0) rt.memories[0].idx_type else .i32;
+            const offset = try evalConstMemAddrExpr(seg.offset_expr, mem_idx_type);
+            const dst_end_u128: u128 = @as(u128, offset) + @as(u128, seg.bytes.len);
+            if (dst_end_u128 > rt.memory.len) return error.DataSegmentOutOfRange;
+            const dst_end: usize = @intCast(dst_end_u128);
             @memcpy(rt.memory[@intCast(offset)..dst_end], seg.bytes);
         }
     }
