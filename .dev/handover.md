@@ -6,10 +6,10 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `e3bd30e1` — feat(p10): feature/gc/heap.zig per-Store
-  slab (10.G-foundation cycle 3). Bump-pointer allocator over a
-  Runtime-arena-backed slab; 32-bit GcRef, 2-byte align, 4 KB
-  page grow, 4 GiB cap. No collector / no root walker yet.
+- **HEAD**: `e5eed624` — feat(p10): Collector vtable +
+  collector_null (10.G-foundation cycle 4). Pluggable interface
+  mirroring std.mem.Allocator shape; null collector wraps Heap
+  as allocator-only.
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
 - **Active debt rows**: 18 — all `blocked-by:` with named
   structural barriers. Zero `now`-status rows.
@@ -17,18 +17,19 @@
 ## Active bundle
 
 - **Bundle-ID**: 10.G-foundation
-- **Cycles-remaining**: ~3
+- **Cycles-remaining**: ~2
 - **Continuity-memo**: Cycle 1 (`e953b089`) Value.anyref +
   Module.needs_gc_heap field. Cycle 2 (`3fa32ddf`) parser wires
   needs_heap_detector. Cycle 3 (`e3bd30e1`) feature/gc/heap.zig
-  per-Store slab + 7 tests. Next steps: (4) Collector vtable +
-  null collector α (ADR-0115 §10) — `collector_null.zig` wraps
-  heap.zig as the allocator-only implementation; (5) regalloc
-  stack-map axis (ADR-0113 §C / ADR-0115 §7); (6) instantiate-
-  side gate that materialises Heap iff Module.needs_gc_heap.
+  per-Store slab. Cycle 4 (`e5eed624`) Collector vtable +
+  collector_null. Next: (5) Runtime.gc_heap field + instantiate-
+  side gate that materialises Heap iff Module.needs_gc_heap;
+  (6) `-Dgc-collector={null,mark_sweep}` build-option dispatch
+  (sets up the seam for the future mark_sweep impl).
 - **Exit-condition**: instantiate-side gate consumes
-  Module.needs_gc_heap AND on first struct.new the Heap.allocate
-  returns a non-null GcRef readable via Value.anyref.
+  Module.needs_gc_heap (Heap created when true, null when false)
+  AND a Tier-1 test wires Collector.allocObject through Runtime
+  into an observable GcRef.
 
 ## Spec runner observable (HEAD `e953b089`)
 
@@ -44,22 +45,25 @@ memory64 / tail-call / function-references all clean. Remaining 40
 fails all in exception-handling (gate per D-192 / 10.G).
 
 Recent commits this resume:
+- `e5eed624` feat — Collector vtable + collector_null (10.G cycle 4).
 - `e3bd30e1` feat — feature/gc/heap.zig per-Store slab (10.G cycle 3).
 - `3fa32ddf` feat — parser wires needs_heap_detector (10.G cycle 2).
 - `e953b089` feat — Value.anyref + Module.needs_gc_heap (10.G cycle 1).
 - `94d16e33` chore — audit_scaffolding §F+§G clean; retarget at 10.G.
-- `9b03db83` chore — pivot 10.E-EH-compile-runtime bundle; file D-192.
 
 ## Next sub-chunk candidates (names only)
 
-- **10.G-foundation cycle 4** — Collector vtable + null collector
-  α (ADR-0115 §10): `Collector` vtable struct (allocFn / collect
-  Fn / walkRootsFn / ctx); `collector_null.zig` wraps Heap as
-  alloc-only (collect + walk are no-ops). `-Dgc-collector=
-  {null,mark_sweep}` build option lands at cycle 5+.
-- **10.G-foundation cycle 5** — Instantiate-side gate:
-  Runtime.gc_heap allocates iff Module.needs_gc_heap; otherwise
-  stays null (zero-overhead invariant per ADR-0115 §1).
+- **10.G-foundation cycle 5** — Instantiate-side gate: add
+  `Runtime.gc_heap: ?*Heap` + `Runtime.gc_collector: ?Collector`
+  fields; `instantiateRuntime` materialises them iff
+  `Module.needs_gc_heap` (zero-overhead invariant per ADR-0115
+  §1). End-to-end Tier-1 test: instance.invoke a synthesised
+  struct.new equivalent allocates a non-null GcRef.
+- **10.G-foundation cycle 6** — `-Dgc-collector={null,mark_sweep}`
+  build-option dispatch (sets up the seam for the future
+  mark_sweep impl); also `-Dgc=false` strips feature/gc/ via
+  compile-time DCE (WAMR-equivalent nuclear strip per ADR-0115
+  §3).
 - **10.M-realworld** — toolchain-blocked (D-179 wabt 1.0.41+).
 - **10.P close gate** — user touchpoint by construction.
 
