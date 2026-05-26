@@ -303,7 +303,12 @@ pub fn link(allocator: Allocator, func_bodies: []const FuncBody, num_imports: u3
                     if (disp_words < -(1 << 25) or disp_words >= (1 << 25)) {
                         return Error.DisplacementOverflow;
                     }
-                    const new_word = inst.encBL(@intCast(disp_words));
+                    // ADR-0112 D4: `is_tail = true` → B (0x14...);
+                    // otherwise BL (0x94...). Same imm26 layout.
+                    const new_word = if (fx.is_tail)
+                        inst.encB(@intCast(disp_words))
+                    else
+                        inst.encBL(@intCast(disp_words));
                     std.mem.writeInt(u32, block.bytes[@intCast(fixup_abs)..][0..4], new_word, .little);
                 },
                 .x86_64 => {
@@ -591,6 +596,85 @@ test "link: 2-function module — fn0 calls fn1, returns 7" {
     try testing.expectEqual(@intFromPtr(f1), module.entryAddr(1));
     // Distinct functions live at distinct offsets.
     try testing.expect(module.entryAddr(0) != module.entryAddr(1));
+}
+
+// ADR-0112 D4 / 10.TC emit-body wiring (cycle 1): tail-call
+// CallFixup with `is_tail = true` MUST patch to B (0x14...),
+// NOT BL (0x94...), so the caller's frame is not preserved by
+// LR-save and the callee RETs to the caller's caller. Same
+// imm26 layout — only bit 31 differs. Synthetic test exercises
+// the patch dispatch without going through emit.compile (which
+// doesn't yet construct is_tail CallFixups; that lands in the
+// follow-on cycle wiring return_call.emit).
+test "link: is_tail=true patches B opcode at fixup site (ADR-0112 D4)" {
+    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
+        return error.SkipZigTest;
+    }
+
+    // fn0 body: 4-byte placeholder at offset 0 + RET. After link,
+    //   byte 0..4 = B fn1 (PC-relative).
+    // fn1 body: just RET (returns to caller, harmless for the
+    //   patch-only assertion — we never execute this).
+    const ret_word: u32 = 0xD65F03C0; // RET (X30)
+    var fn0_bytes: [8]u8 = undefined;
+    std.mem.writeInt(u32, fn0_bytes[0..4], 0x14000000, .little); // B 0 placeholder
+    std.mem.writeInt(u32, fn0_bytes[4..8], ret_word, .little);
+    var fn1_bytes: [4]u8 = undefined;
+    std.mem.writeInt(u32, fn1_bytes[0..4], ret_word, .little);
+
+    const fn0_fixups = [_]emit.CallFixup{.{
+        .byte_offset = 0,
+        .target_func_idx = 1,
+        .is_tail = true,
+    }};
+
+    const bodies = [_]FuncBody{
+        .{ .bytes = fn0_bytes[0..], .call_fixups = fn0_fixups[0..] },
+        .{ .bytes = fn1_bytes[0..], .call_fixups = &.{} },
+    };
+    var module = try link(testing.allocator, &bodies, 0);
+    defer module.deinit(testing.allocator);
+
+    const fn0_off = module.func_offsets[0];
+    const fn1_off = module.func_offsets[1];
+    const disp_bytes: i64 = @as(i64, fn1_off) - @as(i64, fn0_off);
+    const disp_words: i32 = @intCast(@divExact(disp_bytes, 4));
+
+    const patched_word = std.mem.readInt(u32, module.block.bytes[fn0_off..][0..4], .little);
+    try testing.expectEqual(inst.encB(disp_words), patched_word);
+    // Critical: B prefix (0x14...) not BL prefix (0x94...).
+    try testing.expectEqual(@as(u32, 0x14000000), patched_word & 0xFC000000);
+}
+
+test "link: is_tail=false (default) patches BL opcode (regression for the dispatch branch)" {
+    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
+        return error.SkipZigTest;
+    }
+
+    const ret_word: u32 = 0xD65F03C0;
+    var fn0_bytes: [8]u8 = undefined;
+    std.mem.writeInt(u32, fn0_bytes[0..4], 0x94000000, .little); // BL 0 placeholder
+    std.mem.writeInt(u32, fn0_bytes[4..8], ret_word, .little);
+    var fn1_bytes: [4]u8 = undefined;
+    std.mem.writeInt(u32, fn1_bytes[0..4], ret_word, .little);
+
+    const fn0_fixups = [_]emit.CallFixup{.{
+        .byte_offset = 0,
+        .target_func_idx = 1,
+        // is_tail defaults to false
+    }};
+
+    const bodies = [_]FuncBody{
+        .{ .bytes = fn0_bytes[0..], .call_fixups = fn0_fixups[0..] },
+        .{ .bytes = fn1_bytes[0..], .call_fixups = &.{} },
+    };
+    var module = try link(testing.allocator, &bodies, 0);
+    defer module.deinit(testing.allocator);
+
+    const fn0_off = module.func_offsets[0];
+    const patched_word = std.mem.readInt(u32, module.block.bytes[fn0_off..][0..4], .little);
+    // BL prefix (0x94...) — the existing dispatch path stays intact.
+    try testing.expectEqual(@as(u32, 0x94000000), patched_word & 0xFC000000);
 }
 
 test "linkWithThunks: single multi-result function — wrapper invocation writes results buffer" {

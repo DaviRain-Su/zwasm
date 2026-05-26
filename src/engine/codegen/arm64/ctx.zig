@@ -39,14 +39,21 @@ pub const Error = error{
     OutOfMemory,
 };
 
-/// Pending `BL` site requiring linker patch. The post-emit
+/// Pending `BL` / `B` site requiring linker patch. The post-emit
 /// caller (linker / runtime harness) computes the target
 /// address relative to `byte_offset` and rewrites the imm26
 /// field. `target_func_idx` is the Wasm function index the call
 /// targets.
+///
+/// `is_tail` selects the opcode the linker writes (ADR-0112 D4):
+/// `false` → `BL` (regular call, LR saved); `true` → `B`
+/// (tail-call, no LR). The two share the same `imm26` field
+/// layout — only bit 31 differs — so the same fixup record
+/// drives both with a single dispatch in `shared/linker.zig`.
 pub const CallFixup = struct {
     byte_offset: u32,
     target_func_idx: u32,
+    is_tail: bool = false,
 };
 
 /// Pending `LDR Q<rt>, <label>` site requiring const-pool patch

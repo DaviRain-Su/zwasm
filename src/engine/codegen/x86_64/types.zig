@@ -35,12 +35,22 @@ pub fn rejectUnsupported(reason: []const u8, ctx: u32) Error {
     return Error.UnsupportedOp;
 }
 
-/// Pending `CALL rel32` site requiring linker patch. Shape
-/// mirrors arm64's CallFixup so the post-emit linker can reuse
-/// the same fixup-record contract.
+/// Pending `CALL rel32` / `JMP rel32` site requiring linker
+/// patch. Shape mirrors arm64's CallFixup so the post-emit linker
+/// can reuse the same fixup-record contract.
+///
+/// `is_tail` mirrors arm64's flag (ADR-0112 D4): `false` → CALL
+/// (0xE8 opcode), `true` → JMP (0xE9 opcode). The emit pass
+/// writes the opcode byte; the linker only patches the `rel32`
+/// displacement via `patchRel32`, which leaves the opcode byte
+/// untouched — so the x86_64 linker patch loop ignores `is_tail`
+/// (the emit-time opcode choice is load-bearing). Carried in the
+/// shared record so per-arch handlers can read it uniformly when
+/// useful (e.g. for diagnostic counters).
 pub const CallFixup = struct {
     byte_offset: u32,
     target_func_idx: u32,
+    is_tail: bool = false,
 };
 
 /// Pending `MOVUPS xmm, [RIP+disp32]` site requiring const-pool
