@@ -564,6 +564,18 @@ pub const Lowerer = struct {
     fn emitPrefixFB(self: *Lowerer) Error!void {
         const sub = try leb128.readUleb128(u32, self.body, &self.pos);
         switch (sub) {
+            // struct.new / struct.new_default (Wasm 3.0 GC §3.3.5.6.1).
+            // Encoding: 0xFB {0,1} typeidx(uleb32). Pack typeidx in
+            // payload; runtime handler reads it for the StructInfo
+            // lookup (deferred to RTT integration).
+            0 => {
+                const typeidx = try leb128.readUleb128(u32, self.body, &self.pos);
+                try self.emit(.@"struct.new", typeidx, 0);
+            },
+            1 => {
+                const typeidx = try leb128.readUleb128(u32, self.body, &self.pos);
+                try self.emit(.@"struct.new_default", typeidx, 0);
+            },
             // array.len (Wasm 3.0 GC §3.3.5.6.13). No immediates.
             15 => try self.emit(.@"array.len", 0, 0),
             // ref.eq (Wasm 3.0 GC §3.3.5.2). No immediates.

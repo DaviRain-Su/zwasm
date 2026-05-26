@@ -234,6 +234,43 @@ pub fn validateFunction(
     try v.run();
 }
 
+/// ADR-0121 D5 (10.G op_gc cycle 15) — `validateFunction` variant
+/// that threads the GC typedef side-tables. Used by tests + future
+/// `frontendValidate` integration so struct.new / struct.new_default
+/// (and forthcoming struct.get/set, array.new family) can resolve
+/// typeidx → StructDef / ArrayDef.
+pub fn validateFunctionWithGcTypes(
+    sig: FuncType,
+    locals: []const ValType,
+    body: []const u8,
+    func_types: []const FuncType,
+    globals: []const GlobalEntry,
+    module_types: []const FuncType,
+    module_types_kinds: []const sections.TypeKind,
+    struct_defs: []const ?sections.StructDef,
+    array_defs: []const ?sections.ArrayDef,
+    data_count: u32,
+    tables: []const zir.TableEntry,
+    elem_count: u32,
+) Error!void {
+    var v = Validator{
+        .sig = sig,
+        .locals = locals,
+        .body = body,
+        .pos = 0,
+        .func_types = func_types,
+        .globals = globals,
+        .module_types = module_types,
+        .module_types_kinds = module_types_kinds,
+        .struct_defs = struct_defs,
+        .array_defs = array_defs,
+        .data_count = data_count,
+        .tables = tables,
+        .elem_count = elem_count,
+    };
+    try v.run();
+}
+
 /// Wasm 3.0 memory64 — `validateFunction` variant that threads
 /// `memory0_idx_type` so memory ops (load/store) pop the correct
 /// address valtype (i32 for default memory, i64 for memory64 per
@@ -501,6 +538,21 @@ pub const Validator = struct {
     /// existing test surface migrated at 10.E-N-1; production
     /// `compileWasm` passes the decoded section).
     tags: []const sections.TagEntry = &.{},
+    /// ADR-0121 D2 (10.G op_gc cycle 14) — parallel to
+    /// `module_types`; tags each typeidx's kind so struct.new /
+    /// array.new can look up the typedef shape. Empty slice
+    /// (default) means struct/array ops reject as "unknown
+    /// typeidx kind" — preserves the pre-cycle-15 behaviour
+    /// for callers that don't thread the kinds slice.
+    module_types_kinds: []const sections.TypeKind = &.{},
+    /// ADR-0121 D2 — sparse typeidx → struct field list. Non-null
+    /// iff `module_types_kinds[idx] == .structdef`. struct.new /
+    /// struct.new_default consult this via `struct_defs[idx].?`.
+    struct_defs: []const ?sections.StructDef = &.{},
+    /// ADR-0121 D2 — sparse typeidx → array element type. Non-null
+    /// iff `module_types_kinds[idx] == .arraydef`. array.new family
+    /// consults this when those ops land.
+    array_defs: []const ?sections.ArrayDef = &.{},
 
     operand_buf: [max_operand_stack]TypeOrBot = undefined,
     operand_len: usize = 0,
@@ -1139,6 +1191,12 @@ pub const Validator = struct {
     fn dispatchPrefixFB(self: *Validator) Error!void {
         const sub = try leb128.readUleb128(u32, self.body, &self.pos);
         switch (sub) {
+            // struct.new (sub-op 0): pop field-count Values per
+            // declared struct, push .structref.
+            0 => try self.opStructNew(false),
+            // struct.new_default (sub-op 1): no pops, just typeidx;
+            // push .structref.
+            1 => try self.opStructNew(true),
             // array.len (Wasm 3.0 GC §3.3.5.6.13): pop arrayref, push i32.
             15 => try self.opArrayLen(),
             // ref.eq (Wasm 3.0 GC §3.3.5.2): pop 2 reftypes, push i32.
@@ -1200,6 +1258,34 @@ pub const Validator = struct {
                 try self.pushType(t);
             },
         }
+    }
+
+    /// Wasm spec 3.0 §3.3.5.6.1 — `struct.new typeidx` /
+    /// `struct.new_default typeidx`: allocate a struct of the
+    /// declared type. `struct.new` pops one Value per field (in
+    /// reverse declared order so the topmost stack entry is the
+    /// last field); `struct.new_default` skips the pops and
+    /// zero-inits. Both push `.structref`.
+    ///
+    /// Pre-RTT cycle-15: the pushed reftype is the abstract
+    /// `.structref` rather than a typed `(ref typeidx)` (typed-
+    /// ref ValType narrowing lands with RTT TypeInfo per ADR-0116
+    /// amendment). Caller-side cast ops re-validate against the
+    /// expected concrete type.
+    fn opStructNew(self: *Validator, is_default: bool) Error!void {
+        const typeidx = try leb128.readUleb128(u32, self.body, &self.pos);
+        if (typeidx >= self.module_types_kinds.len) return Error.InvalidFuncIndex;
+        if (self.module_types_kinds[typeidx] != .structdef) return Error.InvalidFuncIndex;
+        const sd = self.struct_defs[typeidx] orelse return Error.InvalidFuncIndex;
+        if (!is_default) {
+            // Pop fields in reverse declared order: stack top = last field.
+            var i: usize = sd.fields.len;
+            while (i > 0) {
+                i -= 1;
+                try self.popExpect(sd.fields[i].valtype);
+            }
+        }
+        try self.pushType(.structref);
     }
 
     /// Wasm spec 3.0 §3.3.5.6.13 — `array.len`: pop an arrayref

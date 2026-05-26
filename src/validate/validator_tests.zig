@@ -17,6 +17,7 @@ const sections = @import("../parse/sections.zig");
 
 const validateFunction = validator.validateFunction;
 const validateFunctionWithTags = validator.validateFunctionWithTags;
+const validateFunctionWithGcTypes = validator.validateFunctionWithGcTypes;
 const Error = validator.Error;
 const GlobalEntry = validator.GlobalEntry;
 const ValType = zir.ValType;
@@ -488,6 +489,141 @@ test "validate: array.len with i32 operand → StackTypeMismatch (10.G op_gc cyc
     const body = [_]u8{ 0x41, 0x00, 0xFB, 0x0F, 0x0B };
     const r = validateFunction(i32_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
     try testing.expectError(Error.StackTypeMismatch, r);
+}
+
+test "validate: struct.new_default round-trips (10.G op_gc cycle 15)" {
+    // Types: [() -> (anyref), struct { i32 var }].
+    // Body: struct.new_default 1 ; end.
+    // struct.new_default pops nothing, pushes .structref (currently
+    // marshalled as .anyref shape downstream — see runtime/value.zig).
+    //
+    // Encoding:
+    //   0xFB 0x01 0x01   — struct.new_default typeidx=1
+    //   0x0B             — end
+    const anyref_arr = [_]ValType{.anyref};
+    const i32_arr2 = [_]ValType{.i32};
+    const structref_arr = [_]ValType{.structref};
+    const fn_sig: FuncType = .{ .params = &.{}, .results = &structref_arr };
+    const dummy_struct_sig: FuncType = .{ .params = &.{}, .results = &.{} };
+    const module_types = [_]FuncType{ fn_sig, dummy_struct_sig };
+    const kinds = [_]sections.TypeKind{ .func, .structdef };
+    const sd_fields = [_]sections.StructFieldType{
+        .{ .valtype = .i32, .mutable = true },
+    };
+    const struct_defs = [_]?sections.StructDef{
+        null,
+        .{ .fields = &sd_fields },
+    };
+    const array_defs = [_]?sections.ArrayDef{ null, null };
+    const body = [_]u8{ 0xFB, 0x01, 0x01, 0x0B };
+    _ = i32_arr2;
+    _ = anyref_arr;
+    try validateFunctionWithGcTypes(
+        fn_sig,
+        &.{},
+        &body,
+        &.{},
+        &.{},
+        &module_types,
+        &kinds,
+        &struct_defs,
+        &array_defs,
+        0,
+        &.{},
+        0,
+    );
+}
+
+test "validate: struct.new with matching fields round-trips (10.G op_gc cycle 15)" {
+    // struct { i32 var, i64 const }; body pushes i32 + i64, calls
+    // struct.new 1, returns structref.
+    //   0x41 0x2A        — i32.const 42
+    //   0x42 0x07        — i64.const 7
+    //   0xFB 0x00 0x01   — struct.new typeidx=1
+    //   0x0B             — end
+    const structref_arr = [_]ValType{.structref};
+    const fn_sig: FuncType = .{ .params = &.{}, .results = &structref_arr };
+    const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
+    const kinds = [_]sections.TypeKind{ .func, .structdef };
+    const sd_fields = [_]sections.StructFieldType{
+        .{ .valtype = .i32, .mutable = true },
+        .{ .valtype = .i64, .mutable = false },
+    };
+    const struct_defs = [_]?sections.StructDef{ null, .{ .fields = &sd_fields } };
+    const array_defs = [_]?sections.ArrayDef{ null, null };
+    const body = [_]u8{ 0x41, 0x2A, 0x42, 0x07, 0xFB, 0x00, 0x01, 0x0B };
+    try validateFunctionWithGcTypes(
+        fn_sig,
+        &.{},
+        &body,
+        &.{},
+        &.{},
+        &module_types,
+        &kinds,
+        &struct_defs,
+        &array_defs,
+        0,
+        &.{},
+        0,
+    );
+}
+
+test "validate: struct.new with wrong field type → StackTypeMismatch (10.G op_gc cycle 15)" {
+    // struct { i32 var } — push i64 instead → mismatch.
+    //   0x42 0x07        — i64.const 7
+    //   0xFB 0x00 0x01   — struct.new typeidx=1
+    //   0x0B             — end
+    const structref_arr = [_]ValType{.structref};
+    const fn_sig: FuncType = .{ .params = &.{}, .results = &structref_arr };
+    const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
+    const kinds = [_]sections.TypeKind{ .func, .structdef };
+    const sd_fields = [_]sections.StructFieldType{
+        .{ .valtype = .i32, .mutable = true },
+    };
+    const struct_defs = [_]?sections.StructDef{ null, .{ .fields = &sd_fields } };
+    const array_defs = [_]?sections.ArrayDef{ null, null };
+    const body = [_]u8{ 0x42, 0x07, 0xFB, 0x00, 0x01, 0x0B };
+    const r = validateFunctionWithGcTypes(
+        fn_sig,
+        &.{},
+        &body,
+        &.{},
+        &.{},
+        &module_types,
+        &kinds,
+        &struct_defs,
+        &array_defs,
+        0,
+        &.{},
+        0,
+    );
+    try testing.expectError(Error.StackTypeMismatch, r);
+}
+
+test "validate: struct.new pointing at func typeidx → InvalidFuncIndex (10.G op_gc cycle 15)" {
+    // typeidx 0 is .func, not .structdef.
+    const structref_arr = [_]ValType{.structref};
+    const fn_sig: FuncType = .{ .params = &.{}, .results = &structref_arr };
+    const module_types = [_]FuncType{fn_sig};
+    const kinds = [_]sections.TypeKind{.func};
+    const struct_defs = [_]?sections.StructDef{null};
+    const array_defs = [_]?sections.ArrayDef{null};
+    const body = [_]u8{ 0xFB, 0x01, 0x00, 0x0B };
+    const r = validateFunctionWithGcTypes(
+        fn_sig,
+        &.{},
+        &body,
+        &.{},
+        &.{},
+        &module_types,
+        &kinds,
+        &struct_defs,
+        &array_defs,
+        0,
+        &.{},
+        0,
+    );
+    try testing.expectError(Error.InvalidFuncIndex, r);
 }
 
 test "validate: ref.eq round-trip (10.G op_gc cycle 11)" {
