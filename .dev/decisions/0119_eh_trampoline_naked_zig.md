@@ -1,6 +1,6 @@
 # 0119 — Use pure-Zig `callconv(.naked)` for the EH dispatcher trampoline
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-05-27
 - **Author**: zwasm-from-scratch loop
 - **Tags**: phase-10, exception-handling, codegen, abi
@@ -205,11 +205,16 @@ ADR-0119 is superseded if either:
   against; ADR-0118 D6 mandates load-bearing decisions be
   recorded before atom-rhythm work begins
 - Zig 0.16 stdlib: `std.builtin.CallingConvention.naked`
+- **Spike** `private/spikes/p10-it6-naked-trampoline/` —
+  empirical validation of §Removal condition #1. All 3
+  hosts (aarch64-macos / x86_64-linux-gnu / x86_64-windows-gnu)
+  produce zero prologue + zero epilogue for a `callconv(.naked)`
+  fn whose body is `asm volatile`. Spike Status:
+  `merged-into-prod`; see README for per-host disassembly.
 
-<!--
 ## Revision history
 
-| Date       | SHA          | Note                            |
-|------------|--------------|---------------------------------|
-| 2026-05-27 | `<backfill>` | Initial Proposed.               |
--->
+| Date       | SHA          | Note                                                          |
+|------------|--------------|---------------------------------------------------------------|
+| 2026-05-27 | `e725bce7`   | Initial Proposed.                                             |
+| 2026-05-27 | `<backfill>` | Flipped to Accepted; spike validation added to References §. |
