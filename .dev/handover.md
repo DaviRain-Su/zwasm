@@ -6,10 +6,12 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `36a53773` — 10.E-payload-prop Cycles 1+2 shipped
-  (Runtime.eh_payload_buf @ `d27c6857`; JitRuntime.eh_payload_buf
-  + offset constants @ `36a53773`). Mac local green; ubuntu @
-  `327082b5` green; cycle 2 ubuntu verify pending next Step 0.7.
+- **HEAD**: `dcdedd87` — 10.E-payload-prop Cycles 1-3 shipped.
+  Cycle 3 threads CompiledWasm.tag_param_counts → EmitCtx (both
+  arches) and consumes it in throw.emit by emitting a single
+  zero-write to `eh_payload_len` before the trampoline call.
+  IT-6 N=0 tagged-catch tests still green. Mac local + cross-
+  compile x86_64-linux green. Ubuntu verify pending Step 0.7.
 - **10.D = CLOSED 2026-05-25**, **10.M (incl D-181 ungate),
   10.R 1..5, 10.TC-1, 10.G-i31-ops/2/3, 10.E (IT-1..IT-6 codegen
   foundation + interp catch_/catch_all dispatch + tag-equality)**:
@@ -25,7 +27,7 @@
 ## Active bundle
 
 - **Bundle-ID**: 10.E-payload-prop
-- **Cycles-remaining**: ~3 (Cycles 1+2 shipped: `d27c6857`, `36a53773`)
+- **Cycles-remaining**: ~2 (Cycles 1-3 shipped: `d27c6857`, `36a53773`, `dcdedd87`)
 - **Continuity-memo**: payload propagation through
   `Runtime.eh_payload_buf: [16]u64` + `EmitCtx.tag_param_counts:
   []const u32 = &.{}` threading per ADR-0120. Throw emits
@@ -44,29 +46,33 @@
   10.R (5/5; gated on 10.G) / 10.TC.
 - Pending (2): 10.G / 10.P (close gate).
 
-## Active task — Cycle 3 of 10.E-payload-prop bundle
+## Active task — Cycle 4 of 10.E-payload-prop bundle
 
-Cycle 1 (`d27c6857`): Runtime fields. Cycle 2 (`36a53773`):
-JitRuntime fields + `eh_payload_buf_off` / `eh_payload_len_off`
-constants + offset/size tests.
+Cycle 3 (`dcdedd87`): EmitCtx threading + zero-write to
+`eh_payload_len` at every throw site. The infrastructure is now
+in place for the actual pop-N+store-N to land cleanly.
 
-**NEXT (Cycle 3)** — EmitCtx threading + throw.emit writes:
-- Add `tag_param_counts: []const u32 = &.{}` to per-arch EmitCtx
-  (arm64 + x86_64 ctx.zig) + InitArgs (x86_64) with default.
-- Thread through emit.compile + shared/compile.zig::compileOne +
-  engine/compile.zig (existing tag_param_counts var). Update
-  ~20 emit.compile test sites with `&.{}` default at new position.
-- throw.emit on both arches: read N = `ctx.tag_param_counts[tag_idx]`
-  at emit time; emit byte sequence that pops N vregs from
-  `pushed_vregs` and stores each at `[runtime_ptr +
-  eh_payload_buf_off + i*8]`; write N to `[runtime_ptr +
-  eh_payload_len_off]`. Existing tag_idx marshal into W0/RDI
-  preserved. NB: payload-buf base offset exceeds u12 imm12
-  budget — emit will need a 2-instr address synthesis (MOVZ +
-  ADD or LEA-equivalent) per arch.
-- Same-cycle observable test: existing `throw $e1 → catch $e1
-  returns 77` still green (N=0 tags pay zero extra cost beyond
-  the eh_payload_len = 0 store).
+**NEXT (Cycle 4)** — throw.emit actual payload pop+store + first
+red-then-green test for throw + catch_ with i32 payload:
+- arm64 + x86_64 throw.emit: replace the current
+  `eh_payload_len = 0` zero-write with the real pop+store
+  sequence:
+  - Read N = `ctx.tag_param_counts[tag_idx]` at emit time
+    (compile-time-known).
+  - Pop N vregs from `ctx.pushed_vregs`.
+  - For each i in [0, N): load value from spill slot via
+    `gprLoadSpilled`, store at `[runtime_ptr + eh_payload_buf_off
+    + i*8]` (8-byte slot stride; align matches u64).
+  - Write N (instead of 0) to `eh_payload_len`.
+- Same-cycle observable test: probe the runI32Export "throw +
+  catch_ with i32 payload returns 88" against current state —
+  documents what currently still drops (the catch landing pad
+  doesn't yet read the buffer). Cycle 5 wires try_table.emit's
+  landing-pad-synth pop-from-buf+push-to-vregs.
+
+Note: payload-buf offset = 296 fits in u14 (STR Wn imm14 / X-form
+imm12*4 budget). Existing `encStrImmW(rt, rn, byte_offset: u14)`
+encoder usable directly.
 
 ## Next candidates (after bundle close)
 
