@@ -37,6 +37,7 @@ const std = @import("std");
 const inst = @import("inst.zig");
 const gpr = @import("gpr.zig");
 const abi = @import("abi.zig");
+const ctx_mod = @import("ctx.zig");
 
 /// X16 — the AAPCS64 intra-procedure-call scratch (IP0) per
 /// Arm IHI 0055 §6.4. ADR-0066 § (bridge thunk) already uses
@@ -82,6 +83,37 @@ pub fn emitTailJump(
     try gpr.writeU32(allocator, buf, inst.encBr(target));
 }
 
+/// Same-module direct tail-call alternative to the BR X16 path:
+/// emit a `B 0` placeholder + register a `CallFixup{is_tail=true}`
+/// so the post-emit linker patches the imm26 to a PC-relative B
+/// (0x14...) targeting the callee body. Refinement of ADR-0112
+/// D4 (not deviation): D4 prescribes BR X16 for the cross-module
+/// case where the callee target isn't reachable by imm26; for
+/// same-module direct the linker has the offset and a single B
+/// (one instr) is structurally equivalent to load-then-BR-X16.
+///
+/// Caller MUST have:
+///   (1) marshalled args into X1..X7 / V0..V7,
+///   (2) emitted `emitLoadCalleeRtSameModule` (X0 ← X19),
+///   (3) emitted `frame_teardown.emit(...)` (caller's frame gone).
+/// This helper emits step (5) of the D3 sequence; step (3) is
+/// elided because the linker materialises the target directly
+/// into the B instruction's imm26.
+pub fn emitDirectTailJump(
+    allocator: std.mem.Allocator,
+    buf: *std.ArrayList(u8),
+    call_fixups: *std.ArrayList(ctx_mod.CallFixup),
+    target_func_idx: u32,
+) !void {
+    const fixup_at: u32 = @intCast(buf.items.len);
+    try gpr.writeU32(allocator, buf, inst.encB(0));
+    try call_fixups.append(allocator, ctx_mod.CallFixup{
+        .byte_offset = fixup_at,
+        .target_func_idx = target_func_idx,
+        .is_tail = true,
+    });
+}
+
 // ---------------------------------------------------------------------
 // Unit tests — byte-level snapshots for the BR encoder. These run on
 // every host since the arm64 encoders are pure comptime helpers.
@@ -125,4 +157,46 @@ test "op_tail_call arm64: emitLoadCalleeRtSameModule emits MOV X0, X19 (ORR X0, 
 
 test "op_tail_call arm64: emitLoadCalleeRtSameModule uses abi.runtime_ptr_save_gpr (X19) as source" {
     try testing.expectEqual(@as(inst.Xn, 19), abi.runtime_ptr_save_gpr);
+}
+
+test "op_tail_call arm64: emitDirectTailJump appends B 0 placeholder + is_tail=true CallFixup" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var fixups: std.ArrayList(ctx_mod.CallFixup) = .empty;
+    defer fixups.deinit(testing.allocator);
+
+    // Pre-pad the buffer so the fixup's byte_offset is non-zero
+    // (better regression value than the trivial start-of-function
+    // case).
+    try gpr.writeU32(testing.allocator, &buf, inst.encOrrReg(0, 31, 19)); // 4-byte prelude
+
+    try emitDirectTailJump(testing.allocator, &buf, &fixups, 7);
+
+    // Buffer grew by exactly one 4-byte placeholder.
+    try testing.expectEqual(@as(usize, 8), buf.items.len);
+    const placeholder = std.mem.readInt(u32, buf.items[4..8], .little);
+    try testing.expectEqual(inst.encB(0), placeholder);
+
+    // Fixup records the right offset + target + is_tail flag.
+    try testing.expectEqual(@as(usize, 1), fixups.items.len);
+    try testing.expectEqual(@as(u32, 4), fixups.items[0].byte_offset);
+    try testing.expectEqual(@as(u32, 7), fixups.items[0].target_func_idx);
+    try testing.expectEqual(true, fixups.items[0].is_tail);
+}
+
+test "op_tail_call arm64: emitDirectTailJump byte_offset tracks pre-existing buf length" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    var fixups: std.ArrayList(ctx_mod.CallFixup) = .empty;
+    defer fixups.deinit(testing.allocator);
+
+    // Three preludes — verify the fixup tracks current cursor.
+    var i: u32 = 0;
+    while (i < 3) : (i += 1) {
+        try gpr.writeU32(testing.allocator, &buf, inst.encOrrReg(0, 31, 19));
+    }
+
+    try emitDirectTailJump(testing.allocator, &buf, &fixups, 0);
+
+    try testing.expectEqual(@as(u32, 12), fixups.items[0].byte_offset);
 }
