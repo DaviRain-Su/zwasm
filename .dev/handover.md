@@ -76,33 +76,14 @@
   compiles + runs + lands at the catch block (per integration
   plan §IT-6 acceptance).
 
-Next /continue resume picks up **cycle 3c — dispatchThrow
-integration in trampoline body** per ADR-0114 D6:
-
-1. Capture caller FP (X29 / RBP) + saved-LR/RIP into a
-   `ThrowSite` record on the trampoline's stack.
-2. Marshal arg(s) for `shared/zwasm_throw.dispatchThrow(table,
-   code_map, throw_site, max_depth)`. `table` + `code_map` are
-   per-Instance — read from `Runtime.exception_table` +
-   `Runtime.code_map` (new JitRuntime fields; cycle 3c also
-   plumbs them via instantiate).
-3. CALL dispatchThrow (Zig fn, C ABI). UnwindResult is likely
-   indirect-result (X8 / RDI hidden arg) due to size > 16 bytes.
-4. Branch on result.tag:
-   - `.handler`: `sp_restore.emitSpRestoreFull` (uses
-     CodeMap.Entry.frame_bytes from IT-6 prep) + BR/JMP to
-     `landing_pad_pc` (resolved by IT-6 prep landing_pad fixup,
-     module-relative via IT-5 collection).
-   - `.uncaught`: keep current trap_flag=1 path; RET to caller
-     (which still B/JMPs to its trap stub via the cycle-3b
-     fallback).
-
-Open question for cycle 3c: tag_idx marshalling. The throw site
-needs to pass `ins.payload` (tag_idx) to the trampoline. Cycle
-3b doesn't yet marshal it; the trampoline's signature must
-accept it via a fixed argreg (X0 on arm64 / RDI on x86_64, per
-the dispatcher entry convention). op_throw.emit at cycle 3c
-prepends a tag_idx load to the address-load + BLR/CALL.
+**Cycle 3c-ii resumption recipe**:
+1. `git stash show -p stash@{0}` to inspect WIP.
+2. Pop the stash (`git stash pop`); strip mid-line `//` from
+   arm64 asm templates (blocker 1).
+3. Step-0-survey of `unwind.zig` + `frame_chain_adapter.zig`
+   against the failing `zwasm_throw` tests (blocker 2).
+4. After both clear, finish trampoline-core split + handler
+   dispatch (cycle 3c-iii).
 
 ## Open questions / blockers
 
