@@ -96,6 +96,11 @@ pub fn readValType(body: []const u8, pos: *usize) Error!ValType {
         0x7B => .v128, // Wasm 2.0 SIMD §5.3.5
         0x70 => .funcref, // Wasm 2.0 §5.3.1 reftype
         0x6F => .externref, // Wasm 2.0 §5.3.1 reftype
+        // Wasm 3.0 GC §5.3.1 — i31ref reftype (10.G op_gc cycle 3).
+        // Other GC bytes (anyref 0x6E / eqref 0x6D / structref 0x6B
+        // / arrayref 0x6A) land with the matching enum variants
+        // in subsequent cycles per `.dev/phase10_g_op_bundle_plan.md`.
+        0x6C => .i31ref,
         else => Error.BadValType,
     };
 }
@@ -152,4 +157,17 @@ test "readValType: BadValType on unknown encoding" {
     var pos: usize = 0;
     const body = [_]u8{0x00};
     try testing.expectError(Error.BadValType, readValType(&body, &pos));
+}
+
+test "readValType: i31ref (Wasm 3.0 GC byte 0x6C; 10.G op_gc cycle 3)" {
+    // Wasm 3.0 GC spec §5.3.1 — i31ref valtype encoding byte.
+    // Cycle 3 of 10.G-op_gc bundle (per `.dev/phase10_g_op_
+    // bundle_plan.md` sub-chunk 2). Other GC bytes (anyref
+    // 0x6E / eqref 0x6D / structref 0x6B / arrayref 0x6A)
+    // land in subsequent cycles alongside their ValType
+    // enum variants.
+    var pos: usize = 0;
+    const body = [_]u8{0x6C};
+    try testing.expectEqual(ValType.i31ref, try readValType(&body, &pos));
+    try testing.expectEqual(@as(usize, 1), pos);
 }
