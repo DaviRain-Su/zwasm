@@ -6,12 +6,13 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `639c2916` — memory64 frontendValidate fix (10.M
-  progress). `memory0_idx_type` now threaded into validator;
-  memory64 modules with i64 addresses no longer reject as
-  StackTypeMismatch. +52 directives pass (51 assert_return + 1
-  assert_trap); surfaced 37 invalid-accepted memory64 cases →
-  D-189 (per-case 10.M validator gaps).
+- **HEAD**: `12f700b5` — EH module-compile gap pinned as
+  regression marker (10.E pending). Previous cycle `639c2916`
+  plumbed memory0_idx_type into frontendValidate (10.M
+  progress, +52 directives pass, surfaced D-189). Investigation
+  this cycle: memory64 modules now compile but instantiate fails
+  (deeper runtime work); EH modules still reject at compile
+  (try_table validator gap; deeper EH validator work).
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
 - **Active debt rows**: 19 — all `blocked-by:` with named
   structural barriers. Zero `now`-status rows.
@@ -34,20 +35,20 @@ Recent commits this resume:
 
 ## Next sub-chunk candidates (names only)
 
-- **D-189 memory64 invalid-accepted bisect** — identify 37
-  fixtures + their spec rules; add validator arms per case.
-  Bounded by 10.M scope.
-- **memory64 trap fail bisect** — 204 memory64 assert_trap fail;
-  many likely OOB-load runtime trap cases. Investigate how
-  current runtime handles i64 addressing in load/store; if
-  runtime correctly raises OOB-bounds for i64 addresses ≥ mem.size,
-  these should flip pass.
-- **memory64 return fail bisect** — 274 still fail; mix of
-  runtime memory.size/grow with i64 results + load/store edge
-  cases. Per-case investigation.
-- **D-188 final (try_table.10)** — EH per-clause result-type
-  unification for `catch_all_ref` typing.
-- **10.R-3** — `br_on_non_null` (unblocks 10.R-4 / 10.R-5).
+- **memory64 instantiate gap** — modules compile (post-639c2916)
+  but `linker.instantiate` fails for memory64 fixtures. Likely
+  runtime memory-allocator path doesn't handle i64 memory size.
+  Multi-cycle bundle (10.M runtime scope).
+- **EH module-compile gap** — `try_table` op validator + interp
+  dispatch substrate. The 33+2+4 EH directive fails all root in
+  module-compile reject. Multi-cycle (10.E scope).
+- **D-189 memory64 invalid-accepted bisect** — 37 cases; per-case
+  validator-rule fix (memarg alignment, constant offset overflow,
+  etc.). Bounded by 10.M scope.
+- **D-188 final (try_table.10)** — `catch_all_ref` typing in
+  try_table. Requires exnref ValType extension (multi-cycle).
+- **10.R-4 / 10.R-5 (call_ref / return_call_ref)** — blocked-by
+  D-186 (typed-funcref Value shape ADR).
 - **10.G WasmGC** — large multi-cycle bundle.
 - **10.M-realworld** — toolchain-blocked (D-179 wabt 1.0.41+).
 
