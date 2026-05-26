@@ -6,11 +6,9 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `e4802ea9` — D-181 ungate landed (memory64 i64-idx
-  runner test now exercises Mac aarch64 + Linux x86_64 SysV). Mac
-  local `zig build test` green; cross-compile x86_64-linux clean;
-  ubuntu verification kicked this cycle, Step 0.7 next resume
-  closes D-181 if ubuntu green.
+- **HEAD**: `228d2d79` — D-181 CLOSED. memory64 i64-idx runner test
+  now exercises Mac aarch64 + Linux x86_64 SysV; ubuntu run @
+  `228d2d79` exit 0. Discharged row moved to debt §Discharged.
 - **10.D = CLOSED 2026-05-25**, **10.M sub-chunks 1..fixture-2,
   10.R 1..5, 10.TC-1, 10.G-i31-ops/2/3, 10.E (codegen + interp +
   IT-6 bundle full)**: all SHIPPED.
@@ -33,21 +31,25 @@
 - IN-PROGRESS (3): 10.M (7/8) / 10.R (5/5; gated on 10.G) / 10.TC.
 - Pending (2): 10.G / 10.P (close gate).
 
-## Active task — next chunk after D-181 ubuntu verify
+## Active task — throw_ref op emit body (IT-6 follow-on)
 
-If ubuntu confirms D-181 close → next chunk is **throw_ref op
-emit body** (cycle 3c-iv per
-`.dev/phase10_eh_integration_plan.md` IT-6 follow-on):
-- exnref dereference + tag-equality dispatch through Module.tags
-  (10.E-N-1 / N-2 / N-3 wiring per phase log entries §10.E-N).
-- Builds on the IT-6 catch_all / throw frame already wired.
+Next chunk = **throw_ref op + 10.E-N tag-equality dispatch**
+per `.dev/phase10_eh_integration_plan.md` §IT-6 follow-on +
+phase log §10.E-N entries:
+- 10.E-N-1: `Module.tags` wiring through validator
+- 10.E-N-2: interp-side production tag_param_counts wiring
+- 10.E-N-3: codegen-side tag-equality + payload push at
+  catch_/catch_ref dispatch (cycle 3c-iv scope; throw_ref pops
+  exnref + dereferences)
 
-If ubuntu reveals miscompile → investigate root cause under D-181
-extension; revert ungate first (per ADR-0076 D3 protocol).
+Existing IT-6 catch_all + throw frame already wired both arches
+(D-180 close confirmed). exnref dispatch is the open follow-on
+that converts "throw_ref pops any exnref + uncaught" path into
+"throw_ref + catch_ref payload push".
 
 ## Next candidates (names + Refs; no predictions)
 
-- **throw_ref op** — exnref dereferencing (10.E-N family per phase log).
+- **10.E-N-1 / N-2 / N-3** — exnref dereferencing + Module.tags.
 - **10.M-realworld** — toolchain-blocked (D-179 wabt 1.0.41+).
 - **10.TC** — Wasm 3.0 spec corpus extension wiring into the
   spec runner.
