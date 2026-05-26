@@ -6,13 +6,14 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `c90ba93f` — 10.E-payload-prop Cycles 1-4 shipped +
-  tripwire test + D-182 (catch landing pad load+push still
-  pending). Throw side end-to-end: Runtime+JitRuntime fields,
-  EmitCtx threading, throw.emit pop-N+store-N. Catch side is
-  D-182 follow-on (regalloc-coordinated emit at catch-label
-  end-op-patch site). Mac local + cross-compile x86_64-linux
-  green. Ubuntu verify pending Step 0.7.
+- **HEAD**: `7987f136` — D-182 arm64 path discharged. Bundle
+  10.E-payload-prop end-to-end on Mac aarch64: throw + catch_
+  with i32 payload returns 88. Catch-label end-op-patch site
+  in arm64/emit.zig now emits per-clause prelude (load
+  eh_payload_buf[i] into top-N block-result vreg slots + JMP
+  to common continuation). x86_64 mirror still pending — that
+  is the remaining D-182 work; tripwire test gated Mac-aarch64-
+  only until x86_64 lands.
 - **10.D = CLOSED 2026-05-25**, **10.M (incl D-181 ungate),
   10.R 1..5, 10.TC-1, 10.G-i31-ops/2/3, 10.E (IT-1..IT-6 codegen
   foundation + interp catch_/catch_all dispatch + tag-equality)**:
@@ -47,36 +48,29 @@
   10.R (5/5; gated on 10.G) / 10.TC.
 - Pending (2): 10.G / 10.P (close gate).
 
-## Active task — D-182 discharge (10.E-payload-prop bundle close)
+## Active task — D-182 x86_64 mirror
 
-Cycles 1-4 + tripwire shipped through `c90ba93f`. The bundle's
-remaining work is captured in D-182 (`.dev/debt.md`): JIT catch
-landing pad load+push synthesis.
+arm64 catch landing pad load+push shipped (`7987f136`); test
+green on Mac aarch64. Next: mirror the same logic in
+x86_64/emit.zig at the catch-label end-op-patch site. Pattern:
 
-**Implementation plan** (D-182 discharge):
-- Emit point: `arm64/emit.zig:1302` and analogous x86_64 site
-  where `eh_builder.entries[fx.entry_idx].landing_pad_pc` is set
-  per matching catch fixup.
-- For each matching fixup with `entry.kind in {.catch_,
-  .catch_ref}`: snapshot `clause_start = buf.items.len`; look
-  up `N = ctx.tag_param_counts[entry.tag_idx.?]`; emit per-clause
-  prelude (load `eh_payload_buf[0..N]` into block-result vreg
-  slots; for catch_ref additionally push exnref pointer — defer
-  per ADR-0120 §3); emit JMP-to-common placeholder; set
-  `landing_pad_pc = clause_start`.
-- After all matching fixups: snapshot `common_pc =
-  buf.items.len`; patch each JMP placeholder to common_pc.
-- The block-result vreg(s) sit at `ctx.pushed_vregs.items[
-  pushed_vregs.items.len - N .. pushed_vregs.items.len]` after
-  `op_control.emitEndIntra` runs (the inner block's body
-  produced N result values; for catch path those are the
-  payload values overwriting the inner-body's). Use
-  `gprStoreSpilled` to write loaded payload into each vreg's
-  spill slot.
-- Cycle 5b (after D-182 lands): ungate the tripwire test
-  `runI32Export: throw + catch_ with i32 payload returns 88`
-  → expect 88.
-- Cycle 6 (bundle close): spec-corpus wiring + close 10.E.
+- Probe matching fixups for any `.catch_ / .catch_ref` with
+  `N > 0` payload.
+- No-payload path: existing simple `landing_pad_pc =
+  buf.items.len` shape.
+- Payload path: for each matching fixup, snapshot
+  `clause_start`; emit MOV r10/r11 from
+  `[R15 + eh_payload_buf_off + i*8]`, then store into the
+  block-result vreg's slot via x86_64 gpr helpers; emit
+  `JMP rel32` placeholder; patch `landing_pad_pc =
+  clause_start`. After all, common_pc = buf.items.len + patch
+  placeholders.
+- Encoders: `inst.encMovR64FromMemDisp32(stage, .r15, off)` for
+  loads; x86_64 has its own forward-JMP helper to find.
+- Ungate the tripwire test for Linux x86_64 SysV.
+
+Cycle 6 (bundle close after x86_64 mirror): spec-corpus wiring
++ close 10.E.
 
 ## Next candidates (after bundle close)
 
