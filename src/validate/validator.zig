@@ -1146,7 +1146,10 @@ pub const Validator = struct {
     }
 
     /// memory.copy: 0xFC 10 0x00 0x00 (two reserved memidx bytes).
-    /// Pops three i32 (n, src, dst); pushes nothing.
+    /// Pops three idx-type values (n, src, dst); pushes nothing.
+    /// For memory64 the three are i64 per Wasm 3.0 §3.4.7
+    /// (multi-memory cross-memory copies use the destination
+    /// memory's idx_type per spec; single-memory case uses memory 0).
     fn opMemoryCopy(self: *Validator) Error!void {
         if (self.memory_count == 0) return Error.UnknownMemory;
         if (self.pos + 2 > self.body.len) return Error.UnexpectedEnd;
@@ -1154,14 +1157,17 @@ pub const Validator = struct {
             return Error.BadBlockType; // reserved bytes must be zero
         }
         self.pos += 2;
-        try self.popExpect(.i32);
-        try self.popExpect(.i32);
-        try self.popExpect(.i32);
+        const addr = self.memAddrType();
+        try self.popExpect(addr); // n
+        try self.popExpect(addr); // src
+        try self.popExpect(addr); // dst
     }
 
     /// memory.init: 0xFC 8 dataidx 0x00 (one reserved memidx byte).
-    /// Pops three i32 (n, src, dst); pushes nothing. dataidx must be
-    /// less than the module's data segment count.
+    /// Pops three values (n:i32, src:i32, dst:idx_type); pushes
+    /// nothing. dataidx must be < module's data segment count.
+    /// Wasm 3.0 §3.4.7: dst uses the memory's idx_type (i64 for
+    /// memory64); src + n are always i32 (data-segment offsets).
     fn opMemoryInit(self: *Validator) Error!void {
         if (self.memory_count == 0) return Error.UnknownMemory;
         if (!self.data_count_section_present) return Error.UnknownMemory;
@@ -1170,9 +1176,9 @@ pub const Validator = struct {
         if (self.pos >= self.body.len) return Error.UnexpectedEnd;
         if (self.body[self.pos] != 0x00) return Error.BadBlockType;
         self.pos += 1;
-        try self.popExpect(.i32);
-        try self.popExpect(.i32);
-        try self.popExpect(.i32);
+        try self.popExpect(.i32); // n (data-segment byte count)
+        try self.popExpect(.i32); // src (data-segment offset)
+        try self.popExpect(self.memAddrType()); // dst (memory addr)
     }
 
     /// data.drop: 0xFC 9 dataidx. No operand stack effects.
@@ -1538,15 +1544,18 @@ pub const Validator = struct {
     }
 
     /// memory.fill: 0xFC 11 0x00 (one reserved memidx byte).
-    /// Pops three i32 (n, val, dst); pushes nothing.
+    /// Pops three values (n:idx_type, val:i32, dst:idx_type);
+    /// pushes nothing. Wasm 3.0 §3.4.7: dst + n use the memory's
+    /// idx_type (i64 for memory64); val is always i32.
     fn opMemoryFill(self: *Validator) Error!void {
         if (self.memory_count == 0) return Error.UnknownMemory;
         if (self.pos >= self.body.len) return Error.UnexpectedEnd;
         if (self.body[self.pos] != 0x00) return Error.BadBlockType;
         self.pos += 1;
-        try self.popExpect(.i32);
-        try self.popExpect(.i32);
-        try self.popExpect(.i32);
+        const addr = self.memAddrType();
+        try self.popExpect(addr); // n
+        try self.popExpect(.i32); // val
+        try self.popExpect(addr); // dst
     }
 
     fn opBrTable(self: *Validator) Error!void {
