@@ -747,6 +747,35 @@ test "memory64: address64.0.wasm compiles (frontendValidate memory0_idx_type plu
     defer module.deinit();
 }
 
+test "memory64 instantiate gap regression: address64.0 currently fails at linker.instantiate" {
+    // Bisect marker for the "memory64 instantiate gap" handover
+    // candidate. address64.0.wasm has no imports — pure memory64
+    // module with one `(memory i64 1)` + 30 exported funcs doing
+    // i32/i64 loads at i64 addresses. The compile path is fully
+    // green (sibling test above); the gap is at linker.instantiate,
+    // which currently surfaces as `error.InstantiateFailed` (the
+    // c_api boundary's coarse wrapper around any runtime-side
+    // failure in `runtime/instance/instantiate.zig::instantiateRuntime`).
+    // The next investigation cycle should narrow which specific
+    // `return error.<X>` site fires — candidates from inspection:
+    // `MultiMemoryUnsupported`, `DataSegmentOutOfRange`, the
+    // bulk-mem `memAddrType` plumbing landed at `01de05e8` and
+    // memory.size/grow at `8b5b2ae1`, but instantiate-time wiring
+    // (memory allocation, data-segment install on i64 memory)
+    // hasn't been swept end-to-end. When this gap closes the test
+    // flips red as a prompt to retighten the expectation.
+    const wasm_bytes = @embedFile("wasm-3.0-assert/memory64/address64/address64.0.wasm");
+    const alloc = testing.allocator;
+
+    var engine = try zwasm_root.Engine.init(alloc, .{});
+    defer engine.deinit();
+    var module = try engine.compile(wasm_bytes);
+    defer module.deinit();
+    var linker = zwasm_root.Linker.init(&engine);
+    defer linker.deinit();
+    try testing.expectError(error.InstantiateFailed, linker.instantiate(&module));
+}
+
 test "compileExpectInvalid: return_call.0.wasm accepted (no false rejection)" {
     // Sanity: the valid return_call.0.wasm (which the bisect test
     // executes 31/31 directives against) must NOT be reported as
