@@ -5,72 +5,58 @@
 
 ## Current state
 
-- **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24)
-- **10.D = CLOSED 2026-05-25**.
-- **10.M sub-chunks 1..fixture-2 = SHIPPED**.
-- **10.R sub-chunks 1..5 = SHIPPED**.
-- **10.TC-1 = SHIPPED** (`a83e095f`).
-- **10.G-i31-ops / 10.G-2 / 10.G-3 = SHIPPED**.
-- **10.E codegen IT-1..IT-5 = SHIPPED**.
-- **10.E IT-6 BUNDLE CLOSED** (`c9b9d16c`): end-to-end
-  `(block (try_table (catch_all $b) (throw $e)) ...)` fixture in
-  `src/engine/runner.zig` compiles + runs + lands at the catch
-  block (returns 42), paired uncaught variant traps cleanly.
-  Mac aarch64 + Linux x86_64 SysV both green at HEAD (2001/2015
-  pass, 14 skip, 0 fail). 10.E codegen-side COMPLETE.
-- **Win64 EH trampoline body SHIPPED** (`ce169224`): the
-  x86_64-windows arm of `throw_trampoline.zig` now implements
-  Win64 (MS x64) ABI variant of the same naked-stub shape
-  (RCX/RDX/R8/R9 arg routing + 32-byte shadow space). Verified
-  via cross-compile (`-Dtarget=x86_64-windows-gnu` green);
-  windowsmini runtime gate stays at phase boundary per ADR-0067.
-- **op_throw tag_idx marshal SHIPPED** (`81e1bd9a`): both arm64
-  + x86_64 op_throw now marshal `ins.payload` into the
-  platform's first-arg register (W0 / RDI / RCX) before the
-  BLR/CALL. Tagged-catch e2e fixture
-  `runI32Export: tagged catch routes by tag_idx` proves the
-  marshal works — `(throw $e1)` correctly routes to the second
-  `catch $e1` HandlerEntry (returning 77), not the first
-  `catch $e0`.
+- **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
+- **HEAD**: `a98c7b1f` — D-180 closed (root-caused), structural
+  defenses landed. Mac aarch64 + Linux x86_64 SysV BOTH green
+  (2003/2017 pass on Mac, ubuntu OK at HEAD). Windowsmini =
+  phase-boundary per ADR-0067.
+- **10.D = CLOSED 2026-05-25**, **10.M sub-chunks 1..fixture-2,
+  10.R 1..5, 10.TC-1, 10.G-i31-ops/2/3, 10.E (codegen + interp +
+  IT-6 bundle full)**: all SHIPPED.
+- **10.E IT-6 BUNDLE CLOSED** (`c9b9d16c` → corrected at `a98c7b1f`):
+  end-to-end `throw + catch_all` returns 42 + tagged `catch $e1`
+  returns 77 + uncaught variant traps. Both arches actually wired
+  (was previously Mac-only-hidden by gate; D-180 caught this).
+- **Win64 trampoline body SHIPPED** (`ce169224`): cross-compile
+  green; runtime gate stays at phase boundary.
+- **op_throw tag_idx marshal SHIPPED** (`81e1bd9a`).
+- **D-180 root cause + structural defenses SHIPPED** (`2808bc81` +
+  `a98c7b1f`): x86_64 `usesRuntimePtr` whitelist drift detector +
+  `test_discipline.md` §4 (host-only test gates must pair with
+  debt-row OR spec-pinned rationale) + lesson
+  `2026-05-28-x86_64-uses-runtime-ptr-eh-gap.md`.
 
 ## ROADMAP §10 progress
 
 - DONE (8/13): 10.0 / 10.C9 / 10.J / 10.F / 10.Z / 10.T / 10.D /
-  10.E (codegen-side; Win64 follow-on tracked below).
-- IN-PROGRESS (3): 10.M (7/8) / 10.R (5/5; gated on 10.G) /
-  10.TC (codegen + cross-module + spec corpus 残).
+  10.E.
+- IN-PROGRESS (3): 10.M (7/8) / 10.R (5/5; gated on 10.G) / 10.TC.
 - Pending (2): 10.G / 10.P (close gate).
 
 ## Next candidates (names + Refs)
 
-- **throw_ref op + exnref handling** — `throw_ref` currently
-  reuses `emitTrampolineCallAndTrap` but doesn't dereference the
-  exnref to extract its tag + payload. Touches: both arches'
-  `throw_ref.zig`, exnref Value carve-out.
-- **10.M-realworld** — toolchain-blocked (clang_wasm64 fixture);
-  barrier in D-179 (wabt 1.0.41+ GC type syntax).
-- **10.TC** — Wasm 3.0 spec corpus extension + cross-module EH
-  fixtures. The naked-stub trampoline + handler dispatch pipeline
-  now lets the EH spec subset (`exception-handling/try_table.wast`
-  etc.) be run end-to-end; gap is wiring it into the spec runner.
+- **D-181** — x86_64 SysV i64-indexed memory ops (`emitMemOpI64`
+  X-form + wrap-check per ADR-0111 D4). Ungates the memory64
+  runner test from Mac-only.
+- **throw_ref op** — exnref dereferencing (cycle 3c-iv scope per
+  the EH integration plan §IT-6 follow-on).
+- **10.M-realworld** — toolchain-blocked (D-179 wabt 1.0.41+).
+- **10.TC** — Wasm 3.0 spec corpus extension wiring into the
+  spec runner.
 
 ## Open questions / blockers
 
-- 10.G-4 (struct ops) — blocked-by GC heap impl
-- 10.M-realworld — toolchain-blocked (clang_wasm64 fixture)
-- 10.P close gate — user touchpoint by construction
+- 10.G-4 (struct ops) — blocked-by GC heap impl.
+- 10.M-realworld — toolchain-blocked (D-179).
+- 10.P close gate — user touchpoint by construction.
 
 ## Key refs
 
-- **ADR-0119 Accepted** (`213df2f2`,
-  `.dev/decisions/0119_eh_trampoline_naked_zig.md`)
-- **Spike** `private/spikes/p10-it6-naked-trampoline/` —
-  Status: merged-into-prod.
-- **Integration plan** (`.dev/phase10_eh_integration_plan.md`)
-- **ADR-0114** (EH design)
-- **ROADMAP §10**
-- **Phase log** (`.dev/phase_log/phase10.md`)
-- **Lessons**:
+- ADR-0017 (pinned rt regs X19/R15); ADR-0026 (Cc-pivot).
+- ADR-0114 (EH design), ADR-0119 (naked-Zig trampoline).
+- Integration plan `.dev/phase10_eh_integration_plan.md`.
+- ROADMAP §10, Phase log `.dev/phase_log/phase10.md`.
+- Lessons (Phase 10 EH cycle):
   - `2026-05-26-eh-codegen-foundation-atom-rhythm.md` (`e62db476`)
   - `2026-05-28-eh-test-wrapper-host-fp-walk-segv.md`
-    (sentinel-frame discipline → `test_discipline.md` §3)
+  - `2026-05-28-x86_64-uses-runtime-ptr-eh-gap.md`
