@@ -1197,6 +1197,12 @@ pub const Validator = struct {
             // struct.new_default (sub-op 1): no pops, just typeidx;
             // push .structref.
             1 => try self.opStructNew(true),
+            // array.new (sub-op 6): pop init Value + i32 size, push arrayref.
+            6 => try self.opArrayNew(.with_init),
+            // array.new_default (sub-op 7): pop i32 size only, push arrayref.
+            7 => try self.opArrayNew(.default),
+            // array.new_fixed (sub-op 8): pop N init values, push arrayref.
+            8 => try self.opArrayNewFixed(),
             // array.len (Wasm 3.0 GC §3.3.5.6.13): pop arrayref, push i32.
             15 => try self.opArrayLen(),
             // ref.eq (Wasm 3.0 GC §3.3.5.2): pop 2 reftypes, push i32.
@@ -1286,6 +1292,48 @@ pub const Validator = struct {
             }
         }
         try self.pushType(.structref);
+    }
+
+    const ArrayNewVariant = enum { with_init, default };
+
+    /// Wasm spec 3.0 §3.3.5.6.6 — `array.new typeidx` /
+    /// `array.new_default typeidx`: allocate an array of the
+    /// declared element type. `array.new` pops one init Value
+    /// (matching ArrayDef.element.valtype) + i32 size; the
+    /// `_default` variant skips the init pop. Both push `.arrayref`.
+    ///
+    /// Pre-RTT cycle-16: the pushed reftype is the abstract
+    /// `.arrayref`; typed-ref ValType narrowing lands with RTT
+    /// (ADR-0116 amendment).
+    fn opArrayNew(self: *Validator, variant: ArrayNewVariant) Error!void {
+        const typeidx = try leb128.readUleb128(u32, self.body, &self.pos);
+        if (typeidx >= self.module_types_kinds.len) return Error.InvalidFuncIndex;
+        if (self.module_types_kinds[typeidx] != .arraydef) return Error.InvalidFuncIndex;
+        const ad = self.array_defs[typeidx] orelse return Error.InvalidFuncIndex;
+        // Pop order on the stack (top first): size:i32, then init (if any).
+        try self.popExpect(.i32);
+        if (variant == .with_init) {
+            try self.popExpect(ad.element.valtype);
+        }
+        try self.pushType(.arrayref);
+    }
+
+    /// Wasm spec 3.0 §3.3.5.6.8 — `array.new_fixed typeidx N`:
+    /// allocate an N-element array of the declared element type;
+    /// pop N init Values (last array element on top), push
+    /// `.arrayref`. N is an in-stream uleb32 immediate (not a
+    /// typeidx-side length).
+    fn opArrayNewFixed(self: *Validator) Error!void {
+        const typeidx = try leb128.readUleb128(u32, self.body, &self.pos);
+        if (typeidx >= self.module_types_kinds.len) return Error.InvalidFuncIndex;
+        if (self.module_types_kinds[typeidx] != .arraydef) return Error.InvalidFuncIndex;
+        const ad = self.array_defs[typeidx] orelse return Error.InvalidFuncIndex;
+        const n = try leb128.readUleb128(u32, self.body, &self.pos);
+        var i: u32 = 0;
+        while (i < n) : (i += 1) {
+            try self.popExpect(ad.element.valtype);
+        }
+        try self.pushType(.arrayref);
     }
 
     /// Wasm spec 3.0 §3.3.5.6.13 — `array.len`: pop an arrayref

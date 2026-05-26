@@ -576,6 +576,24 @@ pub const Lowerer = struct {
                 const typeidx = try leb128.readUleb128(u32, self.body, &self.pos);
                 try self.emit(.@"struct.new_default", typeidx, 0);
             },
+            // array.new / array.new_default (Wasm 3.0 GC §3.3.5.6.6).
+            // Encoding: 0xFB {6,7} typeidx(uleb32). Pack typeidx in payload.
+            6 => {
+                const typeidx = try leb128.readUleb128(u32, self.body, &self.pos);
+                try self.emit(.@"array.new", typeidx, 0);
+            },
+            7 => {
+                const typeidx = try leb128.readUleb128(u32, self.body, &self.pos);
+                try self.emit(.@"array.new_default", typeidx, 0);
+            },
+            // array.new_fixed (Wasm 3.0 GC §3.3.5.6.8).
+            // Encoding: 0xFB 0x08 typeidx(uleb32) N(uleb32).
+            // Pack typeidx in payload + N in extra.
+            8 => {
+                const typeidx = try leb128.readUleb128(u32, self.body, &self.pos);
+                const n = try leb128.readUleb128(u32, self.body, &self.pos);
+                try self.emit(.@"array.new_fixed", typeidx, n);
+            },
             // array.len (Wasm 3.0 GC §3.3.5.6.13). No immediates.
             15 => try self.emit(.@"array.len", 0, 0),
             // ref.eq (Wasm 3.0 GC §3.3.5.2). No immediates.

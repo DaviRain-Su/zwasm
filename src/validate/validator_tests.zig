@@ -491,6 +491,155 @@ test "validate: array.len with i32 operand → StackTypeMismatch (10.G op_gc cyc
     try testing.expectError(Error.StackTypeMismatch, r);
 }
 
+test "validate: array.new_default round-trips (10.G op_gc cycle 16)" {
+    // Types: [() -> (arrayref), array<i32 var>].
+    //   0x41 0x05        — i32.const 5 (size)
+    //   0xFB 0x07 0x01   — array.new_default typeidx=1
+    //   0x0B             — end
+    const arrayref_arr = [_]ValType{.arrayref};
+    const fn_sig: FuncType = .{ .params = &.{}, .results = &arrayref_arr };
+    const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
+    const kinds = [_]sections.TypeKind{ .func, .arraydef };
+    const struct_defs = [_]?sections.StructDef{ null, null };
+    const array_defs = [_]?sections.ArrayDef{
+        null,
+        .{ .element = .{ .valtype = .i32, .mutable = true } },
+    };
+    const body = [_]u8{ 0x41, 0x05, 0xFB, 0x07, 0x01, 0x0B };
+    try validateFunctionWithGcTypes(
+        fn_sig,
+        &.{},
+        &body,
+        &.{},
+        &.{},
+        &module_types,
+        &kinds,
+        &struct_defs,
+        &array_defs,
+        0,
+        &.{},
+        0,
+    );
+}
+
+test "validate: array.new with matching init+size round-trips (10.G op_gc cycle 16)" {
+    // array<i32 var>; body: i32.const 42 (init) ; i32.const 8 (size) ;
+    //   array.new typeidx=1 ; end.
+    //   0x41 0x2A 0x41 0x08 0xFB 0x06 0x01 0x0B
+    const arrayref_arr = [_]ValType{.arrayref};
+    const fn_sig: FuncType = .{ .params = &.{}, .results = &arrayref_arr };
+    const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
+    const kinds = [_]sections.TypeKind{ .func, .arraydef };
+    const struct_defs = [_]?sections.StructDef{ null, null };
+    const array_defs = [_]?sections.ArrayDef{
+        null,
+        .{ .element = .{ .valtype = .i32, .mutable = true } },
+    };
+    const body = [_]u8{ 0x41, 0x2A, 0x41, 0x08, 0xFB, 0x06, 0x01, 0x0B };
+    try validateFunctionWithGcTypes(
+        fn_sig,
+        &.{},
+        &body,
+        &.{},
+        &.{},
+        &module_types,
+        &kinds,
+        &struct_defs,
+        &array_defs,
+        0,
+        &.{},
+        0,
+    );
+}
+
+test "validate: array.new with wrong init type → StackTypeMismatch (10.G op_gc cycle 16)" {
+    // array<i32>; push i64 init instead.
+    //   0x42 0x2A 0x41 0x08 0xFB 0x06 0x01 0x0B
+    const arrayref_arr = [_]ValType{.arrayref};
+    const fn_sig: FuncType = .{ .params = &.{}, .results = &arrayref_arr };
+    const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
+    const kinds = [_]sections.TypeKind{ .func, .arraydef };
+    const struct_defs = [_]?sections.StructDef{ null, null };
+    const array_defs = [_]?sections.ArrayDef{
+        null,
+        .{ .element = .{ .valtype = .i32, .mutable = true } },
+    };
+    const body = [_]u8{ 0x42, 0x2A, 0x41, 0x08, 0xFB, 0x06, 0x01, 0x0B };
+    const r = validateFunctionWithGcTypes(
+        fn_sig,
+        &.{},
+        &body,
+        &.{},
+        &.{},
+        &module_types,
+        &kinds,
+        &struct_defs,
+        &array_defs,
+        0,
+        &.{},
+        0,
+    );
+    try testing.expectError(Error.StackTypeMismatch, r);
+}
+
+test "validate: array.new_fixed N=3 round-trips (10.G op_gc cycle 16)" {
+    // array<i32>; 3 i32 consts then array.new_fixed typeidx=1 N=3.
+    //   0x41 0x01 0x41 0x02 0x41 0x03 0xFB 0x08 0x01 0x03 0x0B
+    const arrayref_arr = [_]ValType{.arrayref};
+    const fn_sig: FuncType = .{ .params = &.{}, .results = &arrayref_arr };
+    const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
+    const kinds = [_]sections.TypeKind{ .func, .arraydef };
+    const struct_defs = [_]?sections.StructDef{ null, null };
+    const array_defs = [_]?sections.ArrayDef{
+        null,
+        .{ .element = .{ .valtype = .i32, .mutable = true } },
+    };
+    const body = [_]u8{ 0x41, 0x01, 0x41, 0x02, 0x41, 0x03, 0xFB, 0x08, 0x01, 0x03, 0x0B };
+    try validateFunctionWithGcTypes(
+        fn_sig,
+        &.{},
+        &body,
+        &.{},
+        &.{},
+        &module_types,
+        &kinds,
+        &struct_defs,
+        &array_defs,
+        0,
+        &.{},
+        0,
+    );
+}
+
+test "validate: array.new pointing at struct typeidx → InvalidFuncIndex (10.G op_gc cycle 16)" {
+    // typeidx 1 is .structdef, not .arraydef.
+    const arrayref_arr = [_]ValType{.arrayref};
+    const fn_sig: FuncType = .{ .params = &.{}, .results = &arrayref_arr };
+    const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
+    const kinds = [_]sections.TypeKind{ .func, .structdef };
+    const sd_fields = [_]sections.StructFieldType{
+        .{ .valtype = .i32, .mutable = true },
+    };
+    const struct_defs = [_]?sections.StructDef{ null, .{ .fields = &sd_fields } };
+    const array_defs = [_]?sections.ArrayDef{ null, null };
+    const body = [_]u8{ 0x41, 0x05, 0xFB, 0x07, 0x01, 0x0B };
+    const r = validateFunctionWithGcTypes(
+        fn_sig,
+        &.{},
+        &body,
+        &.{},
+        &.{},
+        &module_types,
+        &kinds,
+        &struct_defs,
+        &array_defs,
+        0,
+        &.{},
+        0,
+    );
+    try testing.expectError(Error.InvalidFuncIndex, r);
+}
+
 test "validate: struct.new_default round-trips (10.G op_gc cycle 15)" {
     // Types: [() -> (anyref), struct { i32 var }].
     // Body: struct.new_default 1 ; end.
