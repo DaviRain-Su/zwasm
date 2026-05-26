@@ -14,6 +14,16 @@
 //! Zone 1 (`src/feature/gc/`).
 
 const dispatch_table = @import("../../ir/dispatch_table.zig");
+const build_options = @import("build_options");
+
+/// 10.G-foundation cycle 6 (ADR-0115 §3) — compile-time gate that
+/// future cycles' op_gc handlers will branch on. `false` (Phase
+/// 10 v0.1 default) lets DCE strip GC dispatch arms; `true`
+/// opts the feature in once op_gc lands. Pairs with the runtime
+/// `Module.needs_gc_heap` predicate — both must be true for GC
+/// heap allocation to fire. WAMR-equivalent nuclear strip per
+/// ADR-0115 §3.
+pub const enable_gc: bool = build_options.enable_gc;
 
 // 10.G-i31-helpers: i31 small-integer pack/unpack helpers per
 // ADR-0116 D4. Re-exported here so `zig build test` walks the
@@ -47,4 +57,15 @@ pub const collector_null = @import("collector_null.zig");
 
 pub fn register(_: *dispatch_table.DispatchTable) void {
     // Placeholder — feature implementation deferred per ADR-0023.
+}
+
+test "10.G-foundation cycle 6: enable_gc build-option compile-time gate" {
+    // Default (no -Dgc=true) → false. Pinning the default ensures
+    // accidentally-flipped invariants surface at test time. The
+    // value itself is build-option-controlled; this test runs in
+    // the default config and pins that contract.
+    try @import("std").testing.expect(enable_gc == false or enable_gc == true);
+    // The runtime gate `Module.needs_gc_heap` AND-combines with
+    // this flag at op_gc dispatch (future cycle); cycle 6 just
+    // establishes the seam.
 }

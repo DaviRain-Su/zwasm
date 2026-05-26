@@ -59,11 +59,26 @@ pub fn build(b: *std.Build) void {
     // `-Dtrace-ringbuffer=true`.
     const trace_ringbuffer = b.option(bool, "trace-ringbuffer", "Compile in Diagnostic M3-a trace ringbuffer (default: false)") orelse false;
 
+    // ADR-0115 §3 — `-Dgc=true|false` zero-overhead compile-time
+    // gate. `false` (default for Phase 10 v0.1 since WasmGC ops
+    // aren't dispatched yet) means GC heap allocator + collector
+    // vtable + root walk all skip at runtime; future cycles add
+    // the dispatch-side comptime check that strips op_gc handlers
+    // via DCE when `enable_gc=false` (WAMR-equivalent nuclear
+    // strip per ADR-0115 §3). `true` opts the feature in once
+    // op_gc lands. Pairs with `Module.needs_gc_heap` parse-time
+    // predicate — the runtime gate at instantiate already
+    // skips heap materialisation when needs_gc_heap=false, so
+    // `enable_gc=false` is the additional source-level strip for
+    // module-construction code paths.
+    const enable_gc = b.option(bool, "gc", "Enable WasmGC heap+collector compile-in (default: false; per ADR-0115 §3)") orelse false;
+
     const options = b.addOptions();
     options.addOption(WasmLevel, "wasm_level", wasm_level);
     options.addOption(WasiLevel, "wasi_level", wasi_level);
     options.addOption(EngineMode, "engine_mode", engine_mode);
     options.addOption(bool, "trace_ringbuffer", trace_ringbuffer);
+    options.addOption(bool, "enable_gc", enable_gc);
 
     // Build_options as a single shared module so both `core` and
     // `exe_mod` (and any other consumer) reference the same Module.
