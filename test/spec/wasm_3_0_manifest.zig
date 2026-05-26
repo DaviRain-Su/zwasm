@@ -225,6 +225,34 @@ pub fn runOneTrap(
     return .returned_normally;
 }
 
+pub const CompileOutcome = enum {
+    /// Engine.compile errored — assert_invalid / assert_malformed
+    /// passes (the validator/parser rejected as expected).
+    rejected,
+    /// Engine.compile succeeded — assert_invalid / assert_malformed
+    /// fails (the bytes parsed AND validated clean).
+    accepted,
+};
+
+/// `assert_invalid` / `assert_malformed` execution path: try
+/// `Engine.compile` and report whether the module was rejected.
+/// Currently both directives map to the same dispatch (compile
+/// bundles parse + validate; the spec-level distinction —
+/// assert_malformed targets the parser stage, assert_invalid the
+/// validator — isn't surfaced by the c_api boundary today).
+/// OutOfMemory propagates; everything else from compile is treated
+/// as a rejection.
+pub fn compileExpectInvalid(
+    alloc: std.mem.Allocator,
+    wasm_bytes: []const u8,
+) std.mem.Allocator.Error!CompileOutcome {
+    var engine = try zwasm_root.Engine.init(alloc, .{});
+    defer engine.deinit();
+    var module = engine.compile(wasm_bytes) catch return .rejected;
+    module.deinit();
+    return .accepted;
+}
+
 /// Adapter for the cycle-2 parsePayload output (runtime.Value
 /// extern union) → cycle-3 runOne input (zwasm.Value tagged union).
 /// The two types differ structurally: runtime.Value stores floats
@@ -529,6 +557,26 @@ test "runOneTrap: trap_on_neg i32:-1 traps" {
     const args = [_]zwasm_root.Value{.{ .i32 = -1 }};
     const outcome = try runOneTrap(testing.allocator, wasm_bytes, "trap_on_neg", &args);
     try testing.expectEqual(TrapOutcome.trapped, outcome);
+}
+
+test "compileExpectInvalid: return_call.1.wasm rejected (assert_invalid path)" {
+    // tail-call return_call.1.wasm is listed as assert_invalid in
+    // the corpus manifest (one of 10 invalid fixtures). The
+    // validator must reject it; this pins the assert_invalid
+    // dispatch surface before the runner wires it in.
+    const wasm_bytes = @embedFile("wasm-3.0-assert/tail-call/return_call/return_call.1.wasm");
+    const outcome = try compileExpectInvalid(testing.allocator, wasm_bytes);
+    try testing.expectEqual(CompileOutcome.rejected, outcome);
+}
+
+test "compileExpectInvalid: return_call.0.wasm accepted (no false rejection)" {
+    // Sanity: the valid return_call.0.wasm (which the bisect test
+    // executes 31/31 directives against) must NOT be reported as
+    // rejected. Guards against the helper classifying valid
+    // modules as invalid.
+    const wasm_bytes = @embedFile("wasm-3.0-assert/tail-call/return_call/return_call.0.wasm");
+    const outcome = try compileExpectInvalid(testing.allocator, wasm_bytes);
+    try testing.expectEqual(CompileOutcome.accepted, outcome);
 }
 
 // ============================================================

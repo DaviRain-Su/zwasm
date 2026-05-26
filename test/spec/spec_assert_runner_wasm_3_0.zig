@@ -51,7 +51,11 @@ const ProposalSummary = struct {
     asserts_trap_pass: u32 = 0,
     asserts_trap_fail: u32 = 0,
     asserts_invalid: u32 = 0,
+    asserts_invalid_pass: u32 = 0,
+    asserts_invalid_fail: u32 = 0,
     asserts_malformed: u32 = 0,
+    asserts_malformed_pass: u32 = 0,
+    asserts_malformed_fail: u32 = 0,
     asserts_exception: u32 = 0,
     skips: u32 = 0,
 };
@@ -87,6 +91,10 @@ pub fn main(init: std.process.Init) !void {
     var grand_total_return_fail: u32 = 0;
     var grand_total_trap_pass: u32 = 0;
     var grand_total_trap_fail: u32 = 0;
+    var grand_total_invalid_pass: u32 = 0;
+    var grand_total_invalid_fail: u32 = 0;
+    var grand_total_malformed_pass: u32 = 0;
+    var grand_total_malformed_fail: u32 = 0;
 
     for (PROPOSALS) |proposal| {
         var summary: ProposalSummary = .{ .name = proposal };
@@ -205,8 +213,47 @@ pub fn main(init: std.process.Init) !void {
                             .returned_normally => summary.asserts_trap_fail += 1,
                         }
                     },
-                    .assert_invalid => summary.asserts_invalid += 1,
-                    .assert_malformed => summary.asserts_malformed += 1,
+                    .assert_invalid => {
+                        summary.asserts_invalid += 1;
+                        // Read the named .wasm sibling and try to
+                        // compile it; rejection = pass, acceptance
+                        // = fail. read errors / OOM = fail (the
+                        // assert couldn't be evaluated).
+                        const inv_bytes = sub_dir.readFileAlloc(io, d.module_path, gpa, .limited(4 << 20)) catch {
+                            summary.asserts_invalid_fail += 1;
+                            continue;
+                        };
+                        defer gpa.free(inv_bytes);
+                        const outcome = manifest_parser.compileExpectInvalid(gpa, inv_bytes) catch {
+                            summary.asserts_invalid_fail += 1;
+                            continue;
+                        };
+                        switch (outcome) {
+                            .rejected => summary.asserts_invalid_pass += 1,
+                            .accepted => summary.asserts_invalid_fail += 1,
+                        }
+                    },
+                    .assert_malformed => {
+                        summary.asserts_malformed += 1;
+                        const mal_bytes = sub_dir.readFileAlloc(io, d.module_path, gpa, .limited(4 << 20)) catch {
+                            summary.asserts_malformed_fail += 1;
+                            continue;
+                        };
+                        defer gpa.free(mal_bytes);
+                        // compile bundles parse + validate today;
+                        // spec-level distinction (parser-stage
+                        // reject vs validator-stage reject) isn't
+                        // surfaced by the c_api boundary. Any
+                        // compile-side rejection counts as pass.
+                        const outcome = manifest_parser.compileExpectInvalid(gpa, mal_bytes) catch {
+                            summary.asserts_malformed_fail += 1;
+                            continue;
+                        };
+                        switch (outcome) {
+                            .rejected => summary.asserts_malformed_pass += 1,
+                            .accepted => summary.asserts_malformed_fail += 1,
+                        }
+                    },
                     .assert_exception => summary.asserts_exception += 1,
                     .skip_impl, .skip_validator, .skip_runtime => summary.skips += 1,
                     .unknown => {},
@@ -217,11 +264,12 @@ pub fn main(init: std.process.Init) !void {
         const total_directives = summary.modules + summary.asserts_return + summary.asserts_trap +
             summary.asserts_invalid + summary.asserts_malformed + summary.asserts_exception + summary.skips;
         try stdout.print(
-            "[{s:<22}] manifests={d:<3} module={d:<3} return={d:<4} (pass={d:<4} fail={d:<4}) trap={d:<4} (pass={d:<4} fail={d:<4}) invalid={d:<3} malformed={d:<3} exception={d:<3} skip={d}\n",
+            "[{s:<22}] manifests={d:<3} module={d:<3} return={d:<4} (pass={d:<4} fail={d:<4}) trap={d:<4} (pass={d:<4} fail={d:<4}) invalid={d:<3} (pass={d:<3} fail={d:<3}) malformed={d:<3} (pass={d:<3} fail={d:<3}) exception={d:<3} skip={d}\n",
             .{ proposal, summary.manifests, summary.modules, summary.asserts_return,
                summary.asserts_return_pass, summary.asserts_return_fail,
                summary.asserts_trap, summary.asserts_trap_pass, summary.asserts_trap_fail,
-               summary.asserts_invalid, summary.asserts_malformed,
+               summary.asserts_invalid, summary.asserts_invalid_pass, summary.asserts_invalid_fail,
+               summary.asserts_malformed, summary.asserts_malformed_pass, summary.asserts_malformed_fail,
                summary.asserts_exception, summary.skips },
         );
         grand_total_manifests += summary.manifests;
@@ -230,13 +278,19 @@ pub fn main(init: std.process.Init) !void {
         grand_total_return_fail += summary.asserts_return_fail;
         grand_total_trap_pass += summary.asserts_trap_pass;
         grand_total_trap_fail += summary.asserts_trap_fail;
+        grand_total_invalid_pass += summary.asserts_invalid_pass;
+        grand_total_invalid_fail += summary.asserts_invalid_fail;
+        grand_total_malformed_pass += summary.asserts_malformed_pass;
+        grand_total_malformed_fail += summary.asserts_malformed_fail;
     }
 
     try stdout.print(
-        "[wasm-3.0-assert] total: {d} manifests, {d} directives; assert_return pass={d} fail={d}; assert_trap pass={d} fail={d} (assert_invalid / multi-value execution lands in follow-on cycles)\n",
+        "[wasm-3.0-assert] total: {d} manifests, {d} directives; assert_return pass={d} fail={d}; assert_trap pass={d} fail={d}; assert_invalid pass={d} fail={d}; assert_malformed pass={d} fail={d} (multi-value execution + assert_exception land in follow-on cycles)\n",
         .{ grand_total_manifests, grand_total_directives,
            grand_total_return_pass, grand_total_return_fail,
-           grand_total_trap_pass, grand_total_trap_fail },
+           grand_total_trap_pass, grand_total_trap_fail,
+           grand_total_invalid_pass, grand_total_invalid_fail,
+           grand_total_malformed_pass, grand_total_malformed_fail },
     );
     try stdout.flush();
 }
