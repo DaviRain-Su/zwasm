@@ -404,6 +404,11 @@ pub const JitRuntime = extern struct {
     eh_handler_active: u32 = 0,
     eh_handler_sp: usize = 0,
     eh_handler_pc: usize = 0,
+    /// FP (X29 / RBP) to install BEFORE the BR/JMP to the landing
+    /// pad. The catching function's body uses FP to address its
+    /// locals + spills; we restore it from the unwinder's matched
+    /// frame. = `HandlerLanding.handler_fp` verbatim.
+    eh_handler_fp: usize = 0,
 };
 
 /// Default `memory_grow_fn` — unconditionally refuses growth by
@@ -490,6 +495,7 @@ pub const eh_code_map_count_off: u12 = @offsetOf(JitRuntime, "eh_code_map_count"
 pub const eh_handler_active_off: u12 = @offsetOf(JitRuntime, "eh_handler_active");
 pub const eh_handler_sp_off: u12 = @offsetOf(JitRuntime, "eh_handler_sp");
 pub const eh_handler_pc_off: u12 = @offsetOf(JitRuntime, "eh_handler_pc");
+pub const eh_handler_fp_off: u12 = @offsetOf(JitRuntime, "eh_handler_fp");
 
 /// Total size of the head section consumed by the prologue.
 pub const head_size: u32 = @sizeOf(JitRuntime);
@@ -630,13 +636,13 @@ test "JitRuntime: layout offsets match documented prologue load sequence" {
     try testing.expectEqual(@as(u12, 80), jit_executed_flag_off);
 }
 
-test "JitRuntime: total size = 288 bytes (post-IT-6 cycle 3c-iii handler-dispatch tail)" {
+test "JitRuntime: total size = 296 bytes (post-IT-6 cycle 3c-iii handler-dispatch tail)" {
     // Phase 10.E IT-6 cycle 3c — EH dispatcher fields appended
     // (+32 bytes = 2 ptrs × 8 B + 2 u32 × 4 B + 2 u32 pads × 4 B).
     // Phase 10.E IT-6 cycle 3c-iii adds the handler-dispatch
-    // result fields (+16 bytes = u32 active replacing the prior pad
-    // + 2 usize for SP and PC).
-    try testing.expectEqual(@as(u32, 288), head_size);
+    // result fields (+24 bytes = u32 active replacing the prior pad
+    // + 3 usize for SP, PC, FP).
+    try testing.expectEqual(@as(u32, 296), head_size);
 }
 
 test "JitRuntime: D-165 cycle 4 trap_stub_entry_count offset (W-form imm12-safe)" {

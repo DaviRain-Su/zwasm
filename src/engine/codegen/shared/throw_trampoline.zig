@@ -148,6 +148,9 @@ pub fn trampolineCore(
                     // Landing-pad PC: module-relative `landing_pad_pc`
                     // plus the catching function's absolute `start_addr`.
                     rt.eh_handler_pc = hit.start_addr +% h.landing_pad_pc;
+                    // The catching function's body addresses locals
+                    // via X29/RBP; restore it from the matched frame.
+                    rt.eh_handler_fp = h.handler_fp;
                     rt.eh_handler_active = 1;
                     // trap_flag stays 0 — handler dispatch will run.
                 },
@@ -173,75 +176,114 @@ pub fn trampolineCore(
 ///   - X30 / [RSP]: saved-LR / saved-RIP (the throw-site address)
 ///
 /// Marshals these into the C-ABI argregs for `trampolineCore`,
-/// calls it, then restores the saved FP/LR and RETs back to the
-/// throw site's post-CALL B/JMP (which falls through to the
-/// function trap stub for the standard epilogue).
+/// calls it, then branches on `JitRuntime.eh_handler_active`:
+///   - 0 (uncaught): restore the saved FP/LR and RET back to the
+///     throw site's post-CALL fallthrough (the trap-stub branch).
+///   - 1 (handler): install `eh_handler_sp` → SP, `eh_handler_fp`
+///     → X29/RBP, then BR/JMP to `eh_handler_pc` (the absolute
+///     landing-pad address; never returns to the wrapper).
 pub fn zwasmThrowTrampoline() callconv(.naked) noreturn {
     switch (builtin.target.cpu.arch) {
-        // ARM64 body — comments outside the asm template (the
-        // LLVM ARM64 inline-asm parser doesn't reliably accept
-        // `//` as a comment delimiter in all build configs).
+        // ARM64 body. The offsets into JitRuntime are inlined at
+        // comptime via `std.fmt.comptimePrint` so the asm template
+        // sees literal numbers; LDR Wt / LDR Xt accept 12-bit imm
+        // (scaled by access size) which all current EH offsets fit
+        // (≤ 296 B head_size). Comments live outside the template
+        // body — the LLVM ARM64 inline-asm parser doesn't reliably
+        // accept `//` as a comment delimiter.
         //
-        // Layout:
-        //   stp x29, x30, [sp, #-16]!  ; save throw site's FP+LR
-        //                                (need both for post-call
-        //                                RET; STP also keeps SP
-        //                                16-aligned for AAPCS64).
-        //   mov x3, x19                ; arg3 = rt ptr (pinned)
-        //   mov x2, x0                 ; arg2 = tag_idx (from
-        //                                throw site's MOV W0)
-        //   mov x1, x30                ; arg1 = throw_site_addr
-        //                                (saved LR from BLR)
-        //   mov x0, x29                ; arg0 = initial_fp
-        //                                (throw fn's FP)
-        //   blr %[core]                ; call trampolineCore;
-        //                                BLR clobbers X30 with
-        //                                "return from this BLR";
-        //                                trampolineCore's own
-        //                                prologue saves+restores
-        //                                its X29/X30.
-        //   ldp x29, x30, [sp], #16    ; restore throw site's FP+LR
-        //   ret                        ; jump to X30 = throw-site
-        //                                post-BLR (lands at the
-        //                                B trap_stub).
-        .aarch64 => asm volatile (
-            \\stp x29, x30, [sp, #-16]!
-            \\mov x3, x19
-            \\mov x2, x0
-            \\mov x1, x30
-            \\mov x0, x29
-            \\blr %[core]
-            \\ldp x29, x30, [sp], #16
-            \\ret
+        //   stp x29, x30, [sp, #-16]!   ; save throw fn FP+LR
+        //   mov x3, x19                  ; arg3 = rt ptr (pinned)
+        //   mov x2, x0                   ; arg2 = tag_idx
+        //   mov x1, x30                  ; arg1 = throw_site_addr
+        //   mov x0, x29                  ; arg0 = initial_fp
+        //   blr %[core]                  ; call trampolineCore (void)
+        //   ldr w16, [x19, #active]      ; load eh_handler_active
+        //   cbz w16, .Luncaught          ; 0 → uncaught fallthrough
+        //   ldr x16, [x19, #sp]          ; handler path: load new SP
+        //   mov sp, x16
+        //   ldr x29, [x19, #fp]          ; restore catching frame FP
+        //   ldr x16, [x19, #pc]          ; load absolute landing PC
+        //   br x16                       ; jump (never returns here)
+        // .Luncaught:
+        //   ldp x29, x30, [sp], #16
+        //   ret
+        .aarch64 => asm volatile (std.fmt.comptimePrint(
+                \\stp x29, x30, [sp, #-16]!
+                \\mov x3, x19
+                \\mov x2, x0
+                \\mov x1, x30
+                \\mov x0, x29
+                \\blr %[core]
+                \\ldr w16, [x19, #{d}]
+                \\cbz w16, 1f
+                \\ldr x16, [x19, #{d}]
+                \\mov sp, x16
+                \\ldr x29, [x19, #{d}]
+                \\ldr x16, [x19, #{d}]
+                \\br x16
+                \\1:
+                \\ldp x29, x30, [sp], #16
+                \\ret
+            , .{
+                jit_abi.eh_handler_active_off,
+                jit_abi.eh_handler_sp_off,
+                jit_abi.eh_handler_fp_off,
+                jit_abi.eh_handler_pc_off,
+            })
             :
             : [core] "r" (&trampolineCore),
             : arm64_clobbers),
-        // x86_64 SysV body:
-        //   pushq %rbp           ; save throw fn's FP; SP -> 16-aligned
-        //   movq 8(%rsp), %rsi   ; arg1 = throw_site_addr (saved RIP at
-        //                          old [RSP]; PUSH bumped it to +8)
-        //   movq %rdi, %rdx      ; arg2 = tag_idx (was in RDI per the
-        //                          throw site's MOV EDI marshal)
-        //   movq %rbp, %rdi      ; arg0 = initial_fp (throw fn's FP)
-        //   movq %r15, %rcx      ; arg3 = rt ptr
-        //   callq *[core]
-        //   popq %rbp            ; restore RBP, RSP back to entry+0
-        //   retq                 ; jump to saved RIP (throw-site)
+        // x86_64 SysV body. The handler arm restores RSP from
+        // `eh_handler_sp`, RBP from `eh_handler_fp`, then `jmpq *`
+        // through `eh_handler_pc`. The `pushq %rbp` from the
+        // uncaught entry path is intentionally NOT popped on the
+        // handler arm — the new SP completely supersedes the
+        // wrapper's stack frame.
+        //
+        //   pushq %rbp                 ; save throw fn RBP
+        //   movq 8(%rsp), %rsi          ; arg1 = throw_site_addr
+        //   movq %rdi, %rdx             ; arg2 = tag_idx
+        //   movq %rbp, %rdi             ; arg0 = initial_fp
+        //   movq %r15, %rcx             ; arg3 = rt ptr
+        //   callq *%[core]              ; trampolineCore (void)
+        //   movl active(%r15), %eax
+        //   testl %eax, %eax
+        //   jz .Luncaught
+        //   movq sp(%r15), %rsp         ; handler path
+        //   movq fp(%r15), %rbp
+        //   jmpq *pc(%r15)              ; never returns
+        // .Luncaught:
+        //   popq %rbp
+        //   retq
         .x86_64 => switch (builtin.target.os.tag) {
-            .linux, .macos, .freebsd, .netbsd, .openbsd, .dragonfly => asm volatile (
-                \\pushq %%rbp
-                \\movq 8(%%rsp), %%rsi
-                \\movq %%rdi, %%rdx
-                \\movq %%rbp, %%rdi
-                \\movq %%r15, %%rcx
-                \\callq *%[core]
-                \\popq %%rbp
-                \\retq
+            .linux, .macos, .freebsd, .netbsd, .openbsd, .dragonfly => asm volatile (std.fmt.comptimePrint(
+                    \\pushq %%rbp
+                    \\movq 8(%%rsp), %%rsi
+                    \\movq %%rdi, %%rdx
+                    \\movq %%rbp, %%rdi
+                    \\movq %%r15, %%rcx
+                    \\callq *%[core]
+                    \\movl {d}(%%r15), %%eax
+                    \\testl %%eax, %%eax
+                    \\jz 1f
+                    \\movq {d}(%%r15), %%rsp
+                    \\movq {d}(%%r15), %%rbp
+                    \\jmpq *{d}(%%r15)
+                    \\1:
+                    \\popq %%rbp
+                    \\retq
+                , .{
+                    jit_abi.eh_handler_active_off,
+                    jit_abi.eh_handler_sp_off,
+                    jit_abi.eh_handler_fp_off,
+                    jit_abi.eh_handler_pc_off,
+                })
                 :
                 : [core] "r" (&trampolineCore),
                 : x86_64_clobbers),
             .windows => @compileError(
-                "x86_64-windows EH trampoline body is cycle 3c-iii scope; " ++
+                "x86_64-windows EH trampoline body is cycle 3c-iii-d scope; " ++
                     "Win64 ABI arg shuffling differs from SysV (RCX/RDX/R8/R9 + shadow space).",
             ),
             else => @compileError("unsupported x86_64 OS for EH trampoline"),
@@ -413,6 +455,7 @@ test "zwasmThrowTrampoline: handler-found path populates eh_handler_sp + eh_hand
     try testing.expectEqual(@as(usize, 0x10040), rt.eh_handler_pc);
     // handler_fp (0x7FFF_0000_4000) - frame_bytes (32) = …_3FE0.
     try testing.expectEqual(@as(usize, 0x7FFF_0000_3FE0), rt.eh_handler_sp);
+    try testing.expectEqual(@as(usize, 0x7FFF_0000_4000), rt.eh_handler_fp);
 }
 
 test "zwasmThrowTrampoline: uncaught fallback (no handler reachable) → trap_flag + active=0" {
