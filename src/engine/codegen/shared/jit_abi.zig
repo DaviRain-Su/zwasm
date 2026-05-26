@@ -409,6 +409,20 @@ pub const JitRuntime = extern struct {
     /// locals + spills; we restore it from the unwinder's matched
     /// frame. = `HandlerLanding.handler_fp` verbatim.
     eh_handler_fp: usize = 0,
+    /// Phase 10.E-payload-prop Cycle 2 (ADR-0120) — JIT payload
+    /// staging region. Written by throw.emit's pop+store sequence
+    /// (Cycle 2 follow-on); read by try_table.emit's landing-pad
+    /// load+push synthesis (Cycle 3). Width 16×u64 matches
+    /// ADR-0114 D1's `Exception.payload[16]Value` inline cap;
+    /// v128 / exnref tag params remain v0.2 scope per ADR-0120
+    /// Consequence §3. Layout-stable tail: added after the
+    /// IT-6 handler-dispatch trio so existing prologue offsets
+    /// are unaffected.
+    eh_payload_buf: [16]u64 = [_]u64{0} ** 16,
+    /// EH payload length (N from `tag_param_counts[tag_idx]` at
+    /// the most recent throw site). See `eh_payload_buf`.
+    eh_payload_len: u32 = 0,
+    _pad14: u32 = 0,
 };
 
 /// Default `memory_grow_fn` — unconditionally refuses growth by
@@ -496,6 +510,13 @@ pub const eh_handler_active_off: u12 = @offsetOf(JitRuntime, "eh_handler_active"
 pub const eh_handler_sp_off: u12 = @offsetOf(JitRuntime, "eh_handler_sp");
 pub const eh_handler_pc_off: u12 = @offsetOf(JitRuntime, "eh_handler_pc");
 pub const eh_handler_fp_off: u12 = @offsetOf(JitRuntime, "eh_handler_fp");
+/// Phase 10.E-payload-prop Cycle 2 (ADR-0120) — JIT payload
+/// staging region. throw.emit writes pop-N+store-at-`[runtime_ptr
+/// + eh_payload_buf_off + i*8]`; try_table.emit's landing-pad
+/// synthesis loads from the same. Base is 8-aligned (u64 slot
+/// array); per-slot stride is 8 bytes.
+pub const eh_payload_buf_off: u16 = @offsetOf(JitRuntime, "eh_payload_buf");
+pub const eh_payload_len_off: u16 = @offsetOf(JitRuntime, "eh_payload_len");
 
 /// Total size of the head section consumed by the prologue.
 pub const head_size: u32 = @sizeOf(JitRuntime);
@@ -636,13 +657,24 @@ test "JitRuntime: layout offsets match documented prologue load sequence" {
     try testing.expectEqual(@as(u12, 80), jit_executed_flag_off);
 }
 
-test "JitRuntime: total size = 296 bytes (post-IT-6 cycle 3c-iii handler-dispatch tail)" {
+test "JitRuntime: total size = 432 bytes (post-10.E-payload-prop Cycle 2 ADR-0120)" {
     // Phase 10.E IT-6 cycle 3c — EH dispatcher fields appended
     // (+32 bytes = 2 ptrs × 8 B + 2 u32 × 4 B + 2 u32 pads × 4 B).
     // Phase 10.E IT-6 cycle 3c-iii adds the handler-dispatch
     // result fields (+24 bytes = u32 active replacing the prior pad
     // + 3 usize for SP, PC, FP).
-    try testing.expectEqual(@as(u32, 296), head_size);
+    // Phase 10.E-payload-prop Cycle 2 (ADR-0120) adds payload
+    // staging (+136 bytes = 16 × 8 B buf + u32 len + u32 pad).
+    try testing.expectEqual(@as(u32, 432), head_size);
+}
+
+test "JitRuntime: eh_payload_buf + eh_payload_len offsets (ADR-0120 Cycle 2)" {
+    // 8-aligned (X-form u64 array stride).
+    if ((eh_payload_buf_off & 7) != 0) @compileError("eh_payload_buf_off not 8-aligned");
+    // 4-aligned (W-form u32 store).
+    if ((eh_payload_len_off & 3) != 0) @compileError("eh_payload_len_off not 4-aligned");
+    // eh_payload_len immediately follows the 16×u64 buf.
+    try testing.expectEqual(@as(u16, eh_payload_buf_off) + 128, eh_payload_len_off);
 }
 
 test "JitRuntime: D-165 cycle 4 trap_stub_entry_count offset (W-form imm12-safe)" {
