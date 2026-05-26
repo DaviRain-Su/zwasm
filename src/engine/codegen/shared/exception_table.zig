@@ -95,6 +95,24 @@ pub const ExceptionTable = struct {
     }
 };
 
+/// Phase 10.E IT-6 prep — forward fixup recording one catch's
+/// landing-pad target. Written by `try_table.emit` once the inner
+/// block's `ExceptionTable.Builder` row is appended, patched by
+/// the matching catch-label's `end` op (which writes
+/// `entries[entry_idx].landing_pad_pc = ctx.buf.items.len` post-end).
+///
+/// `target_labels_depth` is the value of `ctx.labels.items.len`
+/// AT FIXUP CREATION (= try_table.emit time, AFTER the try_table's
+/// own inner-block label is pushed). For catch `label_idx = K`, it
+/// equals `ctx.labels.items.len - K`. When the matching `end`
+/// fires it observes labels.items.len equal to this value; AFTER
+/// the pop, the popped label was the target and the next emit byte
+/// is the landing-pad PC.
+pub const LandingPadFixup = struct {
+    entry_idx: u32,
+    target_labels_depth: u32,
+};
+
 /// Per-arch emit-time bookkeeping for an open `try_table` block.
 /// One entry pushed at `try_table.emit`, popped + patched at the
 /// matching `end` op (the `pc_end` placeholder originally written

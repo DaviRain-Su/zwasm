@@ -653,6 +653,9 @@ pub fn compile(
     // IT-2 — see arm64/emit.zig open_try_tables comment.
     var open_try_tables: std.ArrayList(exception_table.OpenTryTable) = .empty;
     defer open_try_tables.deinit(allocator);
+    // IT-6 prep — see arm64/emit.zig landing_pad_fixups comment.
+    var landing_pad_fixups: std.ArrayList(exception_table.LandingPadFixup) = .empty;
+    defer landing_pad_fixups.deinit(allocator);
 
     // §9.12-B / B53+ (ADR-0075) — per-function emit context.
     // B53 substrate; B54 wires the first consumer (`i32.div_s`).
@@ -688,6 +691,7 @@ pub fn compile(
         .memory0_idx_type = memory0_idx_type,
         .exception_table_builder = if (has_try_table) &eh_builder else null,
         .open_try_tables = if (has_try_table) &open_try_tables else null,
+        .landing_pad_fixups = if (has_try_table) &landing_pad_fixups else null,
     });
 
     for (func.instrs.items) |ins| {
@@ -748,6 +752,7 @@ pub fn compile(
         // pop the matching label and break the depth match). Mirror
         // of the arm64 emit.zig logic, hoisted above the ctx
         // dispatcher because `.end` is in `collected_x86_64_ctx_ops`.
+        const end_pre_pop_depth: u32 = if (ins.op == .end) @intCast(labels.items.len) else 0;
         if (ins.op == .end and labels.items.len > 0 and open_try_tables.items.len > 0) {
             const top = open_try_tables.items[open_try_tables.items.len - 1];
             if (top.labels_depth == labels.items.len) {
@@ -761,6 +766,21 @@ pub fn compile(
             }
         }
         if (try dispatch_collector.dispatchX86_64Ctx(ins.op, &ctx, &ins)) {
+            // IT-6 prep — post-dispatch landing_pad_pc patch.
+            // Mirror of the arm64 emit.zig flow.
+            if (ins.op == .end and end_pre_pop_depth > 0 and landing_pad_fixups.items.len > 0) {
+                const land_pc: u32 = @intCast(buf.items.len);
+                var i: usize = 0;
+                while (i < landing_pad_fixups.items.len) {
+                    const fx = landing_pad_fixups.items[i];
+                    if (fx.target_labels_depth == end_pre_pop_depth) {
+                        eh_builder.entries.items[fx.entry_idx].landing_pad_pc = land_pc;
+                        _ = landing_pad_fixups.swapRemove(i);
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
             continue;
         }
         switch (ins.op) {

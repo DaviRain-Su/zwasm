@@ -1883,6 +1883,9 @@ test "compile: try_table emit populates EmitOutput.exception_handlers (IT-2)" {
     try testing.expectEqual(@as(?u32, 7), out.exception_handlers[1].tag_idx);
     try testing.expectEqual(out.exception_handlers[0].pc_start, out.exception_handlers[1].pc_start);
     try testing.expectEqual(out.exception_handlers[0].pc_start, out.exception_handlers[0].pc_end);
+    // IT-6 prep — landing_pad_pc patched to post-end buf offset.
+    try testing.expectEqual(out.exception_handlers[0].pc_end, out.exception_handlers[0].landing_pad_pc);
+    try testing.expectEqual(out.exception_handlers[1].pc_end, out.exception_handlers[1].landing_pad_pc);
 }
 
 test "compile: throw emits JMP rel32 placeholder + appends unreach_fixup (IT-3 trap-path)" {

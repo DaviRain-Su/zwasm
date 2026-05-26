@@ -5,9 +5,6 @@
 //! handler entries into `ExceptionTable.Builder` for the
 //! FP-walk unwinder.
 //!
-//! Stub: emit returns `UnsupportedOp`. Real body lands at
-//! 10.E-codegen-4b.
-//!
 //! Zone 2 (`src/engine/codegen/x86_64/ops/`).
 
 const std = @import("std");
@@ -26,10 +23,13 @@ pub const n_successor_edges: u8 = 1;
 pub const is_safepoint: bool = false;
 
 /// Wasm spec 3.0 §3.3.10.6 (try_table) — mirror of arm64 sibling.
-/// See arm64/ops/wasm_3_0/try_table.zig for the full IT-2 rationale.
+/// See arm64/ops/wasm_3_0/try_table.zig for the IT-2 + IT-6 prep
+/// rationale (HandlerEntry registration + landing_pad_pc forward
+/// fixup).
 pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
     std.debug.assert(ctx.exception_table_builder != null);
     std.debug.assert(ctx.open_try_tables != null);
+    std.debug.assert(ctx.landing_pad_fixups != null);
     const builder = ctx.exception_table_builder.?;
 
     const block_idx: u32 = @intCast(ins.payload);
@@ -50,23 +50,8 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
     const range_start: usize = lp.catches_start;
     const range_end: usize = lp.catches_end;
 
-    for (catch_entries[range_start..range_end]) |ce| {
-        const is_catch_all = (ce.kind == .catch_all or ce.kind == .catch_all_ref);
-        try builder.add(ctx.allocator, .{
-            .pc_start = pc_start,
-            .pc_end = pc_start + 1, // placeholder; end-op patches
-            .tag_idx = if (is_catch_all) null else ce.tag_idx,
-            .landing_pad_pc = ce.label_idx, // placeholder for IT-4
-            .kind = switch (ce.kind) {
-                .catch_ => .catch_,
-                .catch_ref => .catch_ref,
-                .catch_all => .catch_all,
-                .catch_all_ref => .catch_all_ref,
-            },
-        });
-    }
-    const entry_count: u32 = @intCast(range_end - range_start);
-
+    // Push the forward-resolving Label FIRST so catch label_idx
+    // is evaluated against the try_table-inclusive labels stack.
     try ctx.labels.append(ctx.allocator, .{
         .kind = .block,
         .target_byte_offset = 0,
@@ -75,9 +60,31 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
         .param_arity = 0,
         .entry_stack_depth = @intCast(ctx.pushed_vregs.items.len),
     });
+    const labels_depth_after_push: u32 = @intCast(ctx.labels.items.len);
+
+    for (catch_entries[range_start..range_end], 0..) |ce, i| {
+        const is_catch_all = (ce.kind == .catch_all or ce.kind == .catch_all_ref);
+        try builder.add(ctx.allocator, .{
+            .pc_start = pc_start,
+            .pc_end = pc_start + 1, // placeholder; end-op patches (IT-2)
+            .tag_idx = if (is_catch_all) null else ce.tag_idx,
+            .landing_pad_pc = ce.label_idx, // placeholder; IT-6 prep patches
+            .kind = switch (ce.kind) {
+                .catch_ => .catch_,
+                .catch_ref => .catch_ref,
+                .catch_all => .catch_all,
+                .catch_all_ref => .catch_all_ref,
+            },
+        });
+        try ctx.landing_pad_fixups.?.append(ctx.allocator, .{
+            .entry_idx = entry_start + @as(u32, @intCast(i)),
+            .target_labels_depth = labels_depth_after_push - ce.label_idx,
+        });
+    }
+    const entry_count: u32 = @intCast(range_end - range_start);
 
     try ctx.open_try_tables.?.append(ctx.allocator, .{
-        .labels_depth = @intCast(ctx.labels.items.len),
+        .labels_depth = labels_depth_after_push,
         .entry_start = entry_start,
         .entry_count = entry_count,
     });

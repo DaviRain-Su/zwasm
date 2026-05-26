@@ -651,6 +651,12 @@ pub fn compile(
     // matched Builder rows' pc_end with the current buf offset.
     var open_try_tables: std.ArrayList(exception_table.OpenTryTable) = .empty;
     defer open_try_tables.deinit(allocator);
+    // IT-6 prep — per-catch landing_pad_pc forward fixups. Each
+    // `try_table.emit` appends one per catch clause; the matching
+    // catch-label's `end` patches `Builder.entries[i].landing_pad_pc`
+    // to the post-end buf offset.
+    var landing_pad_fixups: std.ArrayList(exception_table.LandingPadFixup) = .empty;
+    defer landing_pad_fixups.deinit(allocator);
 
     // Bundle compile()'s mutable state behind a pointer-based
     // EmitCtx so extracted op-handler modules (op_const, op_alu,
@@ -685,6 +691,7 @@ pub fn compile(
         .memory0_idx_type = memory0_idx_type,
         .exception_table_builder = if (has_try_table) &eh_builder else null,
         .open_try_tables = if (has_try_table) &open_try_tables else null,
+        .landing_pad_fixups = if (has_try_table) &landing_pad_fixups else null,
     };
 
     // §9.7 / 7.5-emit-deadcode: track polymorphic-stack dead
@@ -1281,7 +1288,25 @@ pub fn compile(
                             _ = open_try_tables.pop();
                         }
                     }
+                    // IT-6 prep — snapshot the depth of the label
+                    // about to be popped; landing_pad fixups whose
+                    // `target_labels_depth` matches resolve to the
+                    // post-emitEndIntra buf position.
+                    const popped_depth: u32 = @intCast(labels.items.len);
                     try op_control.emitEndIntra(&ctx, &ins);
+                    if (landing_pad_fixups.items.len > 0) {
+                        const land_pc: u32 = @intCast(buf.items.len);
+                        var i: usize = 0;
+                        while (i < landing_pad_fixups.items.len) {
+                            const fx = landing_pad_fixups.items[i];
+                            if (fx.target_labels_depth == popped_depth) {
+                                eh_builder.entries.items[fx.entry_idx].landing_pad_pc = land_pc;
+                                _ = landing_pad_fixups.swapRemove(i);
+                            } else {
+                                i += 1;
+                            }
+                        }
+                    }
                     continue;
                 }
                 // Function-level end (labels stack is empty).

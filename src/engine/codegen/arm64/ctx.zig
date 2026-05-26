@@ -178,6 +178,13 @@ pub const EmitCtx = struct {
     /// `labels_depth`. Optional: null for functions without any
     /// try_table; non-null iff `exception_table_builder` is non-null.
     open_try_tables: ?*std.ArrayList(exception_table.OpenTryTable) = null,
+    /// 10.E-codegen IT-6 prep: per-catch landing_pad_pc forward
+    /// fixup list. `try_table.emit` appends one per catch clause
+    /// (key = labels-stack depth of the target br-label); the
+    /// matching label's `end` patches `Builder.entries[entry_idx]
+    /// .landing_pad_pc` to the post-end buf offset. Non-null iff
+    /// `exception_table_builder` is non-null.
+    landing_pad_fixups: ?*std.ArrayList(exception_table.LandingPadFixup) = null,
     /// Per-defined-global metadata (ADR-0052; §9.9 / 9.9-h-2).
     /// Indexed by **defined** global idx (= wasm-space global
     /// idx minus the leading imported-global count). Parallel

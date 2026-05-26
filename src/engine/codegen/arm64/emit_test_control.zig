@@ -314,6 +314,15 @@ test "compile: try_table emit populates EmitOutput.exception_handlers (IT-2)" {
     // value `pc_start + 1` MUST have been overwritten.
     try testing.expectEqual(out.exception_handlers[0].pc_start, out.exception_handlers[1].pc_start);
     try testing.expectEqual(out.exception_handlers[0].pc_start, out.exception_handlers[0].pc_end);
+
+    // IT-6 prep — landing_pad_pc was the raw label_idx (0) at
+    // try_table.emit time; the matching catch-label `end` patch
+    // (label_idx=0 → try_table's own block) resolves it to the
+    // post-end buf offset (= pc_end here, since the empty inner
+    // body emits zero bytes and emitEndIntra emits no merge code
+    // for a 0-arity block).
+    try testing.expectEqual(out.exception_handlers[0].pc_end, out.exception_handlers[0].landing_pad_pc);
+    try testing.expectEqual(out.exception_handlers[1].pc_end, out.exception_handlers[1].landing_pad_pc);
 }
 
 test "compile: throw emits B placeholder + appends bounds_fixup (IT-3 trap-path)" {

@@ -9,10 +9,6 @@
 //! HandlerEntry; the JIT body for the inner block continues
 //! to emit normally.
 //!
-//! Stub: emit returns `UnsupportedOp`. Real body (Builder.add
-//! per catch clause + recursive emit of inner block) lands at
-//! 10.E-codegen-4b.
-//!
 //! Zone 2 (`src/engine/codegen/arm64/ops/`).
 
 const std = @import("std");
@@ -43,10 +39,12 @@ pub const is_safepoint: bool = false;
 /// Wasm spec 3.0 §3.3.10.6 (try_table) — register one
 /// HandlerEntry per catch clause; emit zero JIT bytes (the inner
 /// block emits via regular dispatch; matching `end` patches
-/// pc_end per IT-2 in the parent emit driver).
+/// pc_end per IT-2 and matching catch-label `end` patches
+/// landing_pad_pc per IT-6 prep — in the parent emit driver).
 pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
     std.debug.assert(ctx.exception_table_builder != null);
     std.debug.assert(ctx.open_try_tables != null);
+    std.debug.assert(ctx.landing_pad_fixups != null);
     const builder = ctx.exception_table_builder.?;
 
     // Phase 10.Z widened ZirInstr.payload to u64; block_idx is the
@@ -72,34 +70,13 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
     const range_start: usize = lp.catches_start;
     const range_end: usize = lp.catches_end;
 
-    for (catch_entries[range_start..range_end]) |ce| {
-        const is_catch_all = (ce.kind == .catch_all or ce.kind == .catch_all_ref);
-        try builder.add(ctx.allocator, .{
-            .pc_start = pc_start,
-            // Placeholder; patched by the matching `end` op in
-            // compile()'s emit loop. `+1` keeps Builder.add's
-            // `pc_start < pc_end` invariant satisfied.
-            .pc_end = pc_start + 1,
-            .tag_idx = if (is_catch_all) null else ce.tag_idx,
-            // Placeholder — full resolution to a JIT byte offset
-            // lands at IT-4 (CodeMap + unwinder integration). The
-            // relative br-depth `ce.label_idx` is preserved here.
-            .landing_pad_pc = ce.label_idx,
-            .kind = switch (ce.kind) {
-                .catch_ => .catch_,
-                .catch_ref => .catch_ref,
-                .catch_all => .catch_all,
-                .catch_all_ref => .catch_all_ref,
-            },
-        });
-    }
-    const entry_count: u32 = @intCast(range_end - range_start);
-
-    // Push a forward-resolving Label so the inner block ops + the
-    // matching `end` work via the existing op_control machinery.
-    // Multi-value try_table blocktype arity stays 0 here; full
-    // support folds in at IT-2-followon when the inner-block
-    // operand-stack discipline is exercised by spec fixtures.
+    // Push the forward-resolving Label FIRST so catch label_idx is
+    // evaluated against the labels stack that INCLUDES the
+    // try_table's own block — Wasm spec §3.3.10.6 where label_idx=0
+    // names the try_table label itself. Multi-value try_table
+    // blocktype arity stays 0 here; full support folds in at IT-2-
+    // followon when the inner-block operand-stack discipline is
+    // exercised by spec fixtures.
     try ctx.labels.append(ctx.allocator, .{
         .kind = .block,
         .target_byte_offset = 0,
@@ -108,9 +85,40 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
         .param_arity = 0,
         .entry_stack_depth = @intCast(ctx.pushed_vregs.items.len),
     });
+    const labels_depth_after_push: u32 = @intCast(ctx.labels.items.len);
+
+    for (catch_entries[range_start..range_end], 0..) |ce, i| {
+        const is_catch_all = (ce.kind == .catch_all or ce.kind == .catch_all_ref);
+        try builder.add(ctx.allocator, .{
+            .pc_start = pc_start,
+            // pc_end placeholder; patched by the matching `end`
+            // op in compile()'s emit loop (IT-2).
+            .pc_end = pc_start + 1,
+            .tag_idx = if (is_catch_all) null else ce.tag_idx,
+            // landing_pad_pc placeholder; patched by the matching
+            // catch-label's `end` op (IT-6 prep). The raw relative
+            // br-depth `ce.label_idx` lives here pending the patch.
+            .landing_pad_pc = ce.label_idx,
+            .kind = switch (ce.kind) {
+                .catch_ => .catch_,
+                .catch_ref => .catch_ref,
+                .catch_all => .catch_all,
+                .catch_all_ref => .catch_all_ref,
+            },
+        });
+        // IT-6 prep — register the per-catch forward fixup keyed
+        // by the target label's depth. For catch label_idx=K with
+        // L labels post-push, the target lives at depth L - K
+        // (label_idx=0 → the try_table block itself, depth L).
+        try ctx.landing_pad_fixups.?.append(ctx.allocator, .{
+            .entry_idx = entry_start + @as(u32, @intCast(i)),
+            .target_labels_depth = labels_depth_after_push - ce.label_idx,
+        });
+    }
+    const entry_count: u32 = @intCast(range_end - range_start);
 
     try ctx.open_try_tables.?.append(ctx.allocator, .{
-        .labels_depth = @intCast(ctx.labels.items.len),
+        .labels_depth = labels_depth_after_push,
         .entry_start = entry_start,
         .entry_count = entry_count,
     });
