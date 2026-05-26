@@ -851,6 +851,36 @@ test "D-189 partial: align64 invalid fixtures rejected (memarg natural-align rul
     }
 }
 
+test "10.G-foundation cycle 5: clean module instantiates with gc_heap=null (zero-overhead invariant)" {
+    // Sanity: a minimal valid module (clean (i32) -> (i32) functype,
+    // no GC bytes) instantiates with Runtime.gc_heap left null —
+    // verifies ADR-0115 §1's zero-overhead invariant end-to-end
+    // through engine.compile + linker.instantiate. The mirror test
+    // (needs_gc_heap=true → gc_heap non-null) requires a parser-
+    // valid module that ALSO trips needs_heap_detector; synthesising
+    // such bytes needs the GC valtype parser/validator extensions
+    // that land in subsequent bundles. For cycle 5 the field-level
+    // Runtime tests at `src/runtime/runtime.zig` cover the
+    // materialise-then-deinit path directly.
+    const clean_bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, // magic
+        0x01, 0x00, 0x00, 0x00, // version 1
+        0x01, 0x06, 0x01, 0x60, 0x01, 0x7F, 0x01, 0x7F, // (i32) -> (i32)
+    };
+    const alloc = testing.allocator;
+    var engine = try zwasm_root.Engine.init(alloc, .{});
+    defer engine.deinit();
+    var module = try engine.compile(&clean_bytes);
+    defer module.deinit();
+    try testing.expectEqual(false, module.native.needs_gc_heap);
+    var linker = zwasm_root.Linker.init(&engine);
+    defer linker.deinit();
+    var instance = try linker.instantiate(&module);
+    defer instance.deinit();
+    const rt = instance.handle.runtime.?;
+    try testing.expectEqual(@as(?*zwasm_root.feature.gc.heap.Heap, null), rt.gc_heap);
+}
+
 test "EH module-compile: try_table.0.wasm compiles (10.E frontendValidate tags plumbing)" {
     // try_table.0.wasm has `(tag (type 0)) ... (func ... throw 0)`.
     // Previously frontendValidate routed through

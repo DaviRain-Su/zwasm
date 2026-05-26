@@ -32,6 +32,7 @@ const value_mod = @import("value.zig");
 const trap_mod = @import("trap.zig");
 const frame_mod = @import("frame.zig");
 const memory_instance_mod = @import("instance/memory_instance.zig");
+const heap_mod = @import("../feature/gc/heap.zig");
 pub const MemoryInstance = memory_instance_mod.MemoryInstance;
 
 const Allocator = std.mem.Allocator;
@@ -275,6 +276,17 @@ pub const Runtime = struct {
     /// `max_frame_stack = 256` for self-recursive count(N≥256).
     pending_tail_call: ?*const zir.ZirFunc = null,
 
+    /// 10.G-foundation cycle 5 (ADR-0115 §1 zero-overhead gate).
+    /// Per-Store GC heap slab — non-null iff
+    /// `Module.needs_gc_heap` was true at parse-time. When null,
+    /// GC heap allocation + collector vtable + root walk all
+    /// skip; when non-null, instantiate materialised a `*Heap`
+    /// via `setupGcHeap` and `Runtime.deinit` releases it back
+    /// to the parent allocator. Future cycles add
+    /// `gc_collector: ?Collector` alongside (cycle 6) and the
+    /// op_gc.zig dispatch consumers (post-foundation).
+    gc_heap: ?*heap_mod.Heap = null,
+
     operand_buf: [max_operand_stack]Value = undefined,
     operand_len: u32 = 0,
 
@@ -333,6 +345,16 @@ pub const Runtime = struct {
         // standalone allocators release them here.
         for (self.live_exceptions.items) |exc| self.alloc.destroy(exc);
         self.live_exceptions.deinit(self.alloc);
+        // 10.G-foundation cycle 5: release the GC heap if
+        // instantiate materialised one. Arena-owned in the c_api
+        // path so `Heap.deinit` is the no-op slice-release; the
+        // `destroy(*Heap)` releases the struct itself. testing.
+        // allocator path frees the bytes too.
+        if (self.gc_heap) |h| {
+            h.deinit();
+            self.alloc.destroy(h);
+            self.gc_heap = null;
+        }
     }
 
     pub fn pushOperand(self: *Runtime, v: Value) Trap!void {
@@ -404,6 +426,26 @@ test "Runtime.init: EH payload staging defaults (ADR-0120 10.E-payload-prop Cycl
     for (r.eh_payload_buf) |slot| {
         try testing.expectEqual(@as(u64, 0), slot);
     }
+}
+
+test "Runtime.init: gc_heap defaults to null (10.G-foundation cycle 5; ADR-0115 §1 zero-overhead gate)" {
+    var r = Runtime.init(testing.allocator);
+    defer r.deinit();
+    try testing.expectEqual(@as(?*heap_mod.Heap, null), r.gc_heap);
+}
+
+test "Runtime.deinit: releases gc_heap when set (10.G-foundation cycle 5)" {
+    var r = Runtime.init(testing.allocator);
+    // Simulate the instantiate-side gate: create + assign a heap.
+    const h = try testing.allocator.create(heap_mod.Heap);
+    h.* = heap_mod.Heap.init(testing.allocator);
+    _ = try h.allocate(16); // bump cursor; ensure bytes allocated
+    r.gc_heap = h;
+    // Round-trip: deinit should free the slab bytes (heap.deinit)
+    // + the *Heap struct itself (alloc.destroy). The testing
+    // allocator catches leaks on either side.
+    r.deinit();
+    try testing.expectEqual(@as(?*heap_mod.Heap, null), r.gc_heap);
 }
 
 test "Runtime.setMemory0Bytes: preserves memory ↔ memories[0].bytes alias (ADR-0111 D2)" {

@@ -41,6 +41,7 @@ const leb128 = @import("../../support/leb128.zig");
 const dbg = @import("../../support/dbg.zig");
 const import_mod = @import("import.zig");
 const instance_mod = @import("instance.zig");
+const heap_mod = @import("../../feature/gc/heap.zig");
 
 const Module = runtime_mod.Module;
 const Value = runtime_mod.Value;
@@ -529,6 +530,18 @@ pub fn instantiateRuntime(
 
     var module = try parser.parse(a, bytes);
     defer module.deinit(a);
+
+    // 10.G-foundation cycle 5 (ADR-0115 §1 zero-overhead gate).
+    // Materialise the per-Store GC heap slab when the module
+    // declares GC types / heap reftype slots (`needs_gc_heap`
+    // set at parse-time by `feature/gc/needs_heap_detector`).
+    // Non-GC modules see no allocation here — invariant per
+    // ADR-0115 §1: zero overhead when false.
+    if (module.needs_gc_heap) {
+        const h = try a.create(heap_mod.Heap);
+        h.* = heap_mod.Heap.init(a);
+        rt.gc_heap = h;
+    }
 
     // §9.4 / 4.7 + §9.6 / 6.E iter 7: import section. Every import
     // resolution comes from `bindings[i]` (the binding-side has
