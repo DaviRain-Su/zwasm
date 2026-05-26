@@ -146,8 +146,13 @@ fn valTypeByte(t: ValType) u8 {
         .v128 => 0x7B,
         .funcref => 0x70,
         .externref => 0x6F,
-        // Wasm 3.0 GC §5.3.1 — i31ref byte = 0x6C per ADR-0116.
+        // Wasm 3.0 GC §5.3.1 — heap-top reftype bytes per
+        // ADR-0115/0116 (10.G op_gc cycles 2 + 6).
         .i31ref => 0x6C,
+        .anyref => 0x6E,
+        .eqref => 0x6D,
+        .structref => 0x6B,
+        .arrayref => 0x6A,
     };
 }
 
@@ -885,7 +890,7 @@ pub const Validator = struct {
         const top = try self.popAny();
         switch (top) {
             .bot => {},
-            .known => |t| if (t != .funcref and t != .externref and t != .i31ref) return Error.StackTypeMismatch,
+            .known => |t| if (t != .funcref and t != .externref and t != .i31ref and t != .anyref and t != .eqref and t != .structref and t != .arrayref) return Error.StackTypeMismatch,
         }
         self.markUnreachable();
     }
@@ -1156,7 +1161,7 @@ pub const Validator = struct {
         const top = try self.popAny();
         switch (top) {
             .bot => {},
-            .known => |t| if (t != .funcref and t != .externref and t != .i31ref) return Error.StackTypeMismatch,
+            .known => |t| if (t != .funcref and t != .externref and t != .i31ref and t != .anyref and t != .eqref and t != .structref and t != .arrayref) return Error.StackTypeMismatch,
         }
         try self.pushType(.i32);
     }
@@ -1225,9 +1230,8 @@ pub const Validator = struct {
         if (dataidx >= self.data_count) return Error.InvalidFuncIndex;
     }
 
-    /// ref.null t: 0xD0 reftype. Reads a single byte: 0x70=funcref,
-    /// 0x6F=externref, 0x6C=i31ref (Wasm 3.0 GC — 10.G op_gc
-    /// cycle 4). Pushes the corresponding reference type.
+    /// ref.null t: 0xD0 reftype. Reads a single byte covering the
+    /// Wasm 2.0 + Wasm 3.0 GC reftype space.
     fn opRefNull(self: *Validator) Error!void {
         if (self.pos >= self.body.len) return Error.UnexpectedEnd;
         const b = self.body[self.pos];
@@ -1235,11 +1239,13 @@ pub const Validator = struct {
         const t: ValType = switch (b) {
             0x70 => .funcref,
             0x6F => .externref,
-            // 10.G op_gc cycle 4: i31ref per Wasm 3.0 GC §5.3.1.
-            // Other GC reftypes (anyref 0x6E / eqref 0x6D /
-            // structref 0x6B / arrayref 0x6A) land with their
-            // ValType variants in subsequent cycles.
+            // Wasm 3.0 GC §5.3.1 heap-top reftype bytes
+            // (10.G op_gc cycles 4 + 6).
+            0x6E => .anyref,
+            0x6D => .eqref,
             0x6C => .i31ref,
+            0x6B => .structref,
+            0x6A => .arrayref,
             else => return Error.BadValType,
         };
         try self.pushType(t);
@@ -1251,7 +1257,7 @@ pub const Validator = struct {
         const top = try self.popAny();
         switch (top) {
             .bot => {},
-            .known => |t| if (t != .funcref and t != .externref and t != .i31ref) return Error.StackTypeMismatch,
+            .known => |t| if (t != .funcref and t != .externref and t != .i31ref and t != .anyref and t != .eqref and t != .structref and t != .arrayref) return Error.StackTypeMismatch,
         }
         try self.pushType(.i32);
     }
@@ -1273,7 +1279,7 @@ pub const Validator = struct {
                 try self.pushType(.funcref);
             },
             .known => |t| {
-                if (t != .funcref and t != .externref and t != .i31ref) return Error.StackTypeMismatch;
+                if (t != .funcref and t != .externref and t != .i31ref and t != .anyref and t != .eqref and t != .structref and t != .arrayref) return Error.StackTypeMismatch;
                 try self.pushType(t);
             },
         }
@@ -1296,7 +1302,7 @@ pub const Validator = struct {
         const reftype: ValType = switch (top) {
             .bot => .funcref, // polymorphic; pick any reftype
             .known => |t| blk: {
-                if (t != .funcref and t != .externref and t != .i31ref) return Error.StackTypeMismatch;
+                if (t != .funcref and t != .externref and t != .i31ref and t != .anyref and t != .eqref and t != .structref and t != .arrayref) return Error.StackTypeMismatch;
                 break :blk t;
             },
         };
@@ -1330,7 +1336,7 @@ pub const Validator = struct {
         const reftype: ValType = switch (top) {
             .bot => .funcref, // polymorphic; pick any reftype
             .known => |t| blk: {
-                if (t != .funcref and t != .externref and t != .i31ref) return Error.StackTypeMismatch;
+                if (t != .funcref and t != .externref and t != .i31ref and t != .anyref and t != .eqref and t != .structref and t != .arrayref) return Error.StackTypeMismatch;
                 break :blk t;
             },
         };
@@ -1381,7 +1387,7 @@ pub const Validator = struct {
         const top = try self.popAny();
         switch (top) {
             .bot => {},
-            .known => |t| if (t != .funcref and t != .externref and t != .i31ref) return Error.StackTypeMismatch,
+            .known => |t| if (t != .funcref and t != .externref and t != .i31ref and t != .anyref and t != .eqref and t != .structref and t != .arrayref) return Error.StackTypeMismatch,
         }
         // Pop args in reverse, then push results.
         var i: usize = callee.params.len;
@@ -1412,7 +1418,7 @@ pub const Validator = struct {
         const top = try self.popAny();
         switch (top) {
             .bot => {},
-            .known => |t| if (t != .funcref and t != .externref and t != .i31ref) return Error.StackTypeMismatch,
+            .known => |t| if (t != .funcref and t != .externref and t != .i31ref and t != .anyref and t != .eqref and t != .structref and t != .arrayref) return Error.StackTypeMismatch,
         }
         // Pop callee params in reverse (the tail-call args).
         var i: usize = callee.params.len;
@@ -1719,7 +1725,7 @@ pub const Validator = struct {
                     // 10.G op_gc cycle 2: i31ref is a reftype per
                     // Wasm 3.0 spec — untyped select rejects ref
                     // operands per Wasm 2.0 §3.3.2.2.
-                    .funcref, .externref, .i31ref => false,
+                    .funcref, .externref, .i31ref, .anyref, .eqref, .structref, .arrayref => false,
                 };
             }
         }.check;

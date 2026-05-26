@@ -926,6 +926,12 @@ fn marshalValOut(v: runtime.Value, kind: zir.ValType) Val {
         // alongside the i31 op handlers (sub-chunk 4 per
         // `.dev/phase10_g_op_bundle_plan.md`).
         .i31ref => .{ .kind = .anyref, .of = .{ .ref = if (v.ref == runtime.Value.null_ref) null else @ptrFromInt(v.ref) } },
+        // 10.G op_gc cycle 6: remaining GC reftypes (anyref /
+        // eqref / structref / arrayref) all marshal as c_api
+        // .anyref shape — same u32 GcRef encoding per
+        // ADR-0115 §6. Concrete struct.new / array.new op-host
+        // marshalling lands at op_gc impl (sub-chunks 5-6).
+        .anyref, .eqref, .structref, .arrayref => .{ .kind = .anyref, .of = .{ .ref = if (v.ref == runtime.Value.null_ref) null else @ptrFromInt(v.ref) } },
     };
 }
 

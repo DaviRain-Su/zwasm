@@ -31,11 +31,26 @@ pub const ValType = enum(u8) {
     /// per ADR-0116 §135-149). i31 has NO heap allocation —
     /// it's the only Internal-hierarchy ValType that doesn't
     /// reach into the per-Store GC slab. Added per ADR-0115 §6
-    /// Revision 2026-05-29 (cycle 2 of 10.G-op_gc bundle). The
-    /// other 4 Internal-hierarchy types (anyref / eqref /
-    /// structref / arrayref) land in subsequent cycles via the
-    /// same closed-enum + per-site arm-out cascade pattern.
+    /// Revision 2026-05-29 (cycle 2 of 10.G-op_gc bundle).
     i31ref,
+    /// Wasm 3.0 GC heap-top reftype `anyref` — Internal-hierarchy
+    /// any reference. u32 GcRef offset into per-Store GC slab
+    /// per ADR-0115 §6. Heap-allocating ops (struct.new etc.)
+    /// land in subsequent cycles; this variant is parse-time
+    /// substrate. Byte 0x6E per Wasm 3.0 §5.3.1.
+    anyref,
+    /// Wasm 3.0 GC `eqref` — Internal-hierarchy equality-
+    /// comparable reference. Shares the u32 GcRef encoding with
+    /// anyref. Byte 0x6D per Wasm 3.0 §5.3.1.
+    eqref,
+    /// Wasm 3.0 GC `structref` — Internal-hierarchy struct
+    /// reference. Heap-allocated via struct.new (sub-chunk 5);
+    /// shares u32 GcRef encoding. Byte 0x6B per Wasm 3.0 §5.3.1.
+    structref,
+    /// Wasm 3.0 GC `arrayref` — Internal-hierarchy array
+    /// reference. Heap-allocated via array.new (sub-chunk 6);
+    /// shares u32 GcRef encoding. Byte 0x6A per Wasm 3.0 §5.3.1.
+    arrayref,
 };
 
 pub const FuncType = struct {

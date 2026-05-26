@@ -176,6 +176,10 @@ fn runtimeToZwasm(v: _runtime_value.Value, vt: _zir.ValType) _zwasm.Value {
         // (host opaque u64 ref). Real native API i31ref slot lands
         // alongside the i31 op handlers (sub-chunk 4).
         .i31ref => .{ .externref = if (v.ref == 0) null else v.ref },
+        // 10.G op_gc cycle 6: remaining GC reftypes marshal as
+        // externref-shape (host opaque u64 ref). Per-type native
+        // API slots land at op_gc dispatch (sub-chunks 5-7).
+        .anyref, .eqref, .structref, .arrayref => .{ .externref = if (v.ref == 0) null else v.ref },
     };
 }
 

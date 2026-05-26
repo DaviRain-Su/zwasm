@@ -66,7 +66,7 @@ pub fn applyDefinedGlobalsInit(
                 const bytes = try rv.evalConstV128Expr(gd.init_expr);
                 @memcpy(globals_buf[off..][0..16], &bytes);
             },
-            .i32, .i64, .f32, .f64, .funcref, .externref, .i31ref => {
+            .i32, .i64, .f32, .f64, .funcref, .externref, .i31ref, .anyref, .eqref, .structref, .arrayref => {
                 // 10.G op_gc cycle 2: i31ref shares the scalar
                 // const-expr init shape (low-bit-tagged u32 GcRef
                 // per ADR-0116; fits the 8-byte slot like other

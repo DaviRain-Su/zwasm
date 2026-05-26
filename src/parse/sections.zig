@@ -596,9 +596,11 @@ test "decodeTypes: accepts v128 valtype (Wasm 2.0 SIMD)" {
 }
 
 test "decodeTypes: rejects unknown valtype byte" {
-    // 0x6E is unassigned in the Wasm 2.0 valtype space; must be
-    // rejected.
-    const body = [_]u8{ 0x01, 0x60, 0x01, 0x6E, 0x00 };
+    // 0x55 is unassigned in the Wasm 3.0 valtype space; must be
+    // rejected. (0x6E was previously used here but became anyref
+    // in Wasm 3.0 GC — see ADR-0115 §6 Revision 2026-05-29 +
+    // 10.G op_gc cycle 6.)
+    const body = [_]u8{ 0x01, 0x60, 0x01, 0x55, 0x00 };
     try testing.expectError(Error.BadValType, decodeTypes(testing.allocator, &body));
 }
 
