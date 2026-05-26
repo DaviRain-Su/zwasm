@@ -518,6 +518,42 @@ test "runI32Export: cross-frame throw — callee throws, caller's try_table catc
     try testing.expectEqual(@as(u32, 42), try runI32Export(testing.allocator, &bytes, "test"));
 }
 
+test "runI32Export: multi-catch try_table — tag-correct clause's prelude pushes payload (D-182 per-clause)" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    // (module
+    //   (type $t (func (param i32)))
+    //   (tag $e0 (type $t))
+    //   (tag $e1 (type $t))
+    //   (func (export "test") (result i32)
+    //     (block $catch (result i32)
+    //       (try_table (catch $e0 $catch) (catch $e1 $catch)
+    //         i32.const 88
+    //         throw $e1)
+    //       i32.const 99)))
+    //
+    // Exercises the per-clause prelude path in D-182's
+    // landing_pad_fixups patch site: BOTH catches target the
+    // same outer label ($catch) and BOTH have N=1 payload
+    // counts, so each clause needs its own prelude emitting
+    // a load-from-eh_payload_buf into the block-result vreg.
+    // The dispatcher's `entry.tag_idx` lookup picks catch $e1
+    // → its prelude fires → pushes 88 → block returns 88.
+    //
+    // If the per-clause-prelude path were broken (e.g.,
+    // matching both fixups to the same landing_pad_pc),
+    // the dispatcher could land at the wrong clause and
+    // the regression would surface as 0 or 99.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x09, 0x02, 0x60,
+        0x01, 0x7f, 0x00, 0x60, 0x00, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x01, 0x0d,
+        0x05, 0x02, 0x00, 0x00, 0x00, 0x00, 0x07, 0x08, 0x01, 0x04, 0x74, 0x65,
+        0x73, 0x74, 0x00, 0x00, 0x0a, 0x19, 0x01, 0x17, 0x00, 0x02, 0x7f, 0x1f,
+        0x40, 0x02, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0xd8, 0x00, 0x08,
+        0x01, 0x0b, 0x41, 0xe3, 0x00, 0x0b, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 88), try runI32Export(testing.allocator, &bytes, "test"));
+}
+
 test "runI32Export: cross-frame throw with i32 payload — propagates via eh_payload_buf across frames" {
     if (builtin.os.tag == .windows) return error.SkipZigTest;
     // (module
