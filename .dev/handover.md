@@ -6,11 +6,12 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `93e63ba7` — feat(p10): ref.cast + ref.cast_null
-  vertical slice (10.G op_gc cycle 8). Second cast-family pair;
-  full lower+validator+interp; cycle-8 stub semantics (ref.cast
-  traps NullReference on null; ref.cast_null round-trips both).
-  RTT subtype-mismatch trap defers to type_hierarchy.zig.
+- **HEAD**: `a262a7d2` — feat(p10): br_on_cast + br_on_cast_fail
+  validator+lower (10.G op_gc cycle 9). Branch-on-cast family
+  parse+validator wired for sub-ops 24/25; opBrOnCast mirrors
+  opBrOnNonNull's label-type contract. Interp deferred (gc
+  corpus D-179-blocked; runtime semantics land with struct ops
+  + RTT TypeInfo).
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
 - **Active debt rows**: 18 — all `blocked-by:` with named
   structural barriers. Zero `now`-status rows.
@@ -56,18 +57,18 @@ future op_gc consumers. EH 40 fails still gated on the bigger
 ## Active bundle
 
 - **Bundle-ID**: 10.G-op_gc
-- **Cycles-remaining**: ~18 (per `.dev/phase10_g_op_bundle_plan.md`)
+- **Cycles-remaining**: ~17 (per `.dev/phase10_g_op_bundle_plan.md`)
 - **Continuity-memo**: Cycle 1 ADR amend. Cycle 2 ValType.i31ref
   cascade. Cycle 3 parser 0x6C. Cycle 4 validator opRefNull.
   Cycle 5 opRefI31 typed push. Cycle 6 extend ValType with 4
   remaining GC variants. Cycle 7 (`63cf843a`) ref.test +
   ref.test_null vertical slice. Cycle 8 (`93e63ba7`) ref.cast +
-  ref.cast_null vertical slice (interp traps NullReference on
-  null cast; cast_null round-trips). Cycle 9-10 (next):
-  br_on_cast / br_on_cast_fail (branch shape; consumes flags +
-  label + rt1 + rt2 per Wasm 3.0 GC encoding §3.3.5.5). Cycle
-  11+: struct.new / struct.get / struct.set — gated on RTT
-  TypeInfo (sub-chunk 5 of plan).
+  ref.cast_null vertical slice. Cycle 9 (`a262a7d2`) br_on_cast
+  + br_on_cast_fail validator+lower (interp deferred to RTT
+  integration). Cycle 10 (next): struct.new / struct.new_default
+  validator+lower (sub-ops 0/1; consume typeidx; pre-RTT push a
+  generic .structref). Cycle 11+: struct.get / struct.set —
+  gated on RTT TypeInfo (sub-chunk 5 of plan).
 - **Exit-condition**: wasm-3.0-assert exception-handling /
   function-references / gc corpora open for op_gc dispatch +
   at least the first i31 spec directive flips green via the
