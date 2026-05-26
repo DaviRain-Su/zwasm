@@ -698,15 +698,19 @@ test "D-189 partial: align64 invalid fixtures rejected (memarg natural-align rul
     // each fixture's align-too-large memarg triggers
     // `Error.AlignmentTooLarge` (or maps via the c_api boundary
     // to ParseFailed) → all 37 reject.
-    const fixtures = [_][]const u8{
-        @embedFile("wasm-3.0-assert/memory64/align64/align64.0.wasm"),
-        @embedFile("wasm-3.0-assert/memory64/align64/align64.1.wasm"),
-        @embedFile("wasm-3.0-assert/memory64/align64/align64.2.wasm"),
+    // align64.0..align64.68 are baked VALID modules (per
+    // memory64/align64/manifest.txt's `module` directives);
+    // the assert_invalid fixtures start at align64.69 (37 total
+    // through align64.105). Embed three representative invalids.
+    const fixtures = [_]struct { name: []const u8, bytes: []const u8 }{
+        .{ .name = "align64.69",  .bytes = @embedFile("wasm-3.0-assert/memory64/align64/align64.69.wasm") },
+        .{ .name = "align64.70",  .bytes = @embedFile("wasm-3.0-assert/memory64/align64/align64.70.wasm") },
+        .{ .name = "align64.105", .bytes = @embedFile("wasm-3.0-assert/memory64/align64/align64.105.wasm") },
     };
-    for (fixtures, 0..) |bytes, i| {
-        const outcome = try compileExpectInvalid(testing.allocator, bytes);
+    for (fixtures) |c| {
+        const outcome = try compileExpectInvalid(testing.allocator, c.bytes);
         if (outcome != .rejected) {
-            std.debug.print("[D-189 align64.{d}] expected rejected, got accepted\n", .{i});
+            std.debug.print("[D-189 {s}] expected rejected, got accepted\n", .{c.name});
         }
         try testing.expectEqual(CompileOutcome.rejected, outcome);
     }
