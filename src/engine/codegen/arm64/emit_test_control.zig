@@ -273,10 +273,14 @@ test "compile: try_table emit populates EmitOutput.exception_handlers (IT-2)" {
     var f = ZirFunc.init(0, sig, &.{});
     defer f.deinit(testing.allocator);
 
-    // try_table block_idx=0; matching `end`; then function-level
-    // `end`. No inner ops — pc_start == pc_end after patch
-    // (degenerate but valid for the round-trip test).
+    // Wrap try_table in an enclosing block so catch_all label_idx=0
+    // resolves to a real outer label (Wasm 3.0 EH spec — catch
+    // clause labels are evaluated against the surrounding context,
+    // not the try_table itself). Structure:
+    //   block; try_table; end (try_table); end (block); end (fn).
+    try f.instrs.append(testing.allocator, .{ .op = .block, .payload = 0 });
     try f.instrs.append(testing.allocator, .{ .op = .try_table, .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
     try f.instrs.append(testing.allocator, .{ .op = .end });
     try f.instrs.append(testing.allocator, .{ .op = .end });
 
@@ -315,12 +319,11 @@ test "compile: try_table emit populates EmitOutput.exception_handlers (IT-2)" {
     try testing.expectEqual(out.exception_handlers[0].pc_start, out.exception_handlers[1].pc_start);
     try testing.expectEqual(out.exception_handlers[0].pc_start, out.exception_handlers[0].pc_end);
 
-    // IT-6 prep — landing_pad_pc was the raw label_idx (0) at
-    // try_table.emit time; the matching catch-label `end` patch
-    // (label_idx=0 → try_table's own block) resolves it to the
-    // post-end buf offset (= pc_end here, since the empty inner
-    // body emits zero bytes and emitEndIntra emits no merge code
-    // for a 0-arity block).
+    // landing_pad_pc patched to the buf offset right after the
+    // enclosing block's `end` op (Wasm 3.0 EH: catch label_idx=0
+    // targets the surrounding block). With zero-byte inner body
+    // and zero-arity blocks, the outer-block's end emits nothing
+    // additional → land_pc equals pc_end.
     try testing.expectEqual(out.exception_handlers[0].pc_end, out.exception_handlers[0].landing_pad_pc);
     try testing.expectEqual(out.exception_handlers[1].pc_end, out.exception_handlers[1].landing_pad_pc);
 }

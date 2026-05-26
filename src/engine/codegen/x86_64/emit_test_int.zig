@@ -1858,7 +1858,14 @@ test "compile: try_table emit populates EmitOutput.exception_handlers (IT-2)" {
     var f = ZirFunc.init(0, sig, &.{});
     defer f.deinit(testing.allocator);
 
+    // Wrap try_table in an enclosing block so catch_all label_idx=0
+    // resolves to a real outer label (Wasm 3.0 EH spec — catch
+    // clause labels are evaluated against the surrounding context,
+    // not the try_table itself). Structure:
+    //   block; try_table; end (try_table); end (block); end (fn).
+    try f.instrs.append(testing.allocator, .{ .op = .block, .payload = 0 });
     try f.instrs.append(testing.allocator, .{ .op = .try_table, .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
     try f.instrs.append(testing.allocator, .{ .op = .end });
     try f.instrs.append(testing.allocator, .{ .op = .end });
 
@@ -1883,7 +1890,10 @@ test "compile: try_table emit populates EmitOutput.exception_handlers (IT-2)" {
     try testing.expectEqual(@as(?u32, 7), out.exception_handlers[1].tag_idx);
     try testing.expectEqual(out.exception_handlers[0].pc_start, out.exception_handlers[1].pc_start);
     try testing.expectEqual(out.exception_handlers[0].pc_start, out.exception_handlers[0].pc_end);
-    // IT-6 prep — landing_pad_pc patched to post-end buf offset.
+    // landing_pad_pc patched to the buf offset right after the
+    // enclosing block's `end` op (no inner instructions → equals
+    // pc_end here since try_table's end and the outer block's end
+    // both emit zero net bytes for a void-arity fixture).
     try testing.expectEqual(out.exception_handlers[0].pc_end, out.exception_handlers[0].landing_pad_pc);
     try testing.expectEqual(out.exception_handlers[1].pc_end, out.exception_handlers[1].landing_pad_pc);
 }

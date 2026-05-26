@@ -399,6 +399,52 @@ test "runI32Export: trunc_f32_s/nan traps (sub-7.5b-ii trap_flag detection)" {
     try testing.expectError(entry.Error.Trap, runI32Export(testing.allocator, &bytes, "test"));
 }
 
+test "runI32Export: throw + catch_all returns 42 (IT-6 cycle 3c-iii-d end-to-end)" {
+    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
+        // x86_64 SysV: the trampoline body compiles + tests pass on
+        // Linux, but the end-to-end fixture exercising the full
+        // JIT-emit pipeline for try_table+throw+catch_all on SysV is
+        // gated behind the x86_64 op_throw/op_try_table emit which
+        // still has open coverage gaps (cycle 3c-iii-d/e Linux work).
+        // The Mac aarch64 path is fully wired; verify there first.
+        return error.SkipZigTest;
+    }
+    // (module
+    //   (tag $e0)
+    //   (func (export "test") (result i32)
+    //     (block $catch
+    //       (try_table (catch_all $catch)
+    //         (throw $e0))
+    //       (return (i32.const 99)))
+    //     (i32.const 42)))
+    //
+    // Acceptance per Phase 10 EH integration plan §IT-6:
+    //   end-to-end `throw 0` catches via `try_table catch_all 0`,
+    //   lands at the catch_all block, returns normally with the
+    //   "caught" sentinel 42 (not the "fallthrough" 99 and not a
+    //   trap).
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x60,
+        0x00, 0x00, 0x60, 0x00, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x01, 0x0d, 0x03,
+        0x01, 0x00, 0x00, 0x07, 0x08, 0x01, 0x04, 0x74, 0x65, 0x73, 0x74, 0x00,
+        0x00, 0x0a, 0x15, 0x01, 0x13, 0x00, 0x02, 0x40, 0x1f, 0x40, 0x01, 0x02,
+        0x00, 0x08, 0x00, 0x0b, 0x41, 0xe3, 0x00, 0x0f, 0x0b, 0x41, 0x2a, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 42), try runI32Export(testing.allocator, &bytes, "test"));
+
+    // Companion check: same shape WITHOUT the catch_all clause →
+    // throw propagates uncaught → trap (verifies the dispatch
+    // pipeline distinguishes the two cases, not just that
+    // landing_pad happens to land at i32.const 42 unconditionally).
+    const uncaught_bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x60,
+        0x00, 0x00, 0x60, 0x00, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x01, 0x0d, 0x03,
+        0x01, 0x00, 0x00, 0x07, 0x08, 0x01, 0x04, 0x74, 0x65, 0x73, 0x74, 0x00,
+        0x00, 0x0a, 0x06, 0x01, 0x04, 0x00, 0x08, 0x00, 0x0b,
+    };
+    try testing.expectError(entry.Error.Trap, runI32Export(testing.allocator, &uncaught_bytes, "test"));
+}
+
 test "compileWasm: empty module (header only) compiles to empty CompiledWasm" {
     // §9.9 / 9.9-l-1b-d093-d69: ungated (was Mac-only) so the
     // testing.allocator (DebugAllocator) leak gate runs on all

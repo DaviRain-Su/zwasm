@@ -50,8 +50,15 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
     const range_start: usize = lp.catches_start;
     const range_end: usize = lp.catches_end;
 
-    // Push the forward-resolving Label FIRST so catch label_idx
-    // is evaluated against the try_table-inclusive labels stack.
+    // Snapshot labels depth BEFORE pushing try_table's own label —
+    // catch clause label_idx is resolved against the ENCLOSING
+    // context (Wasm 3.0 EH spec: catch labels treat the try_table
+    // as transparent in the label stack). So `catch_all 0` targets
+    // the surrounding block, not the try_table itself. The
+    // try_table's own label is still pushed for intra-body `br 0`
+    // resolution.
+    const labels_depth_outer: u32 = @intCast(ctx.labels.items.len);
+
     try ctx.labels.append(ctx.allocator, .{
         .kind = .block,
         .target_byte_offset = 0,
@@ -76,9 +83,11 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
                 .catch_all_ref => .catch_all_ref,
             },
         });
+        // Patch fires when the label at outer-resolved depth is
+        // popped (its matching `end` op).
         try ctx.landing_pad_fixups.?.append(ctx.allocator, .{
             .entry_idx = entry_start + @as(u32, @intCast(i)),
-            .target_labels_depth = labels_depth_after_push - ce.label_idx,
+            .target_labels_depth = labels_depth_outer - ce.label_idx,
         });
     }
     const entry_count: u32 = @intCast(range_end - range_start);

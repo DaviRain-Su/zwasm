@@ -70,13 +70,15 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
     const range_start: usize = lp.catches_start;
     const range_end: usize = lp.catches_end;
 
-    // Push the forward-resolving Label FIRST so catch label_idx is
-    // evaluated against the labels stack that INCLUDES the
-    // try_table's own block — Wasm spec §3.3.10.6 where label_idx=0
-    // names the try_table label itself. Multi-value try_table
-    // blocktype arity stays 0 here; full support folds in at IT-2-
-    // followon when the inner-block operand-stack discipline is
-    // exercised by spec fixtures.
+    // Snapshot labels depth BEFORE pushing try_table's own label —
+    // catch clause label_idx is resolved against the ENCLOSING
+    // context (Wasm 3.0 EH spec: catch labels are validated as if
+    // the try_table is transparent in the label stack). So
+    // `catch_all 0` targets the surrounding block, not the
+    // try_table itself. The try_table's own label is needed for
+    // intra-body `br 0` resolution and gets pushed below.
+    const labels_depth_outer: u32 = @intCast(ctx.labels.items.len);
+
     try ctx.labels.append(ctx.allocator, .{
         .kind = .block,
         .target_byte_offset = 0,
@@ -107,12 +109,14 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
             },
         });
         // IT-6 prep — register the per-catch forward fixup keyed
-        // by the target label's depth. For catch label_idx=K with
-        // L labels post-push, the target lives at depth L - K
-        // (label_idx=0 → the try_table block itself, depth L).
+        // by the target label's depth. With label_idx resolved
+        // against the OUTER context (labels_depth_outer), the
+        // target lives at `labels_depth_outer - ce.label_idx`. The
+        // patch fires when the label at that depth is popped (its
+        // matching `end` op).
         try ctx.landing_pad_fixups.?.append(ctx.allocator, .{
             .entry_idx = entry_start + @as(u32, @intCast(i)),
-            .target_labels_depth = labels_depth_after_push - ce.label_idx,
+            .target_labels_depth = labels_depth_outer - ce.label_idx,
         });
     }
     const entry_count: u32 = @intCast(range_end - range_start);

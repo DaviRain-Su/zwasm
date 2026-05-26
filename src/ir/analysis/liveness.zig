@@ -225,12 +225,14 @@ pub fn compute(
             continue;
         }
 
-        // block / loop: structural markers — push frame so `.br N`
-        // can resolve target depth. (D-093 d-10: param_arity tracked
-        // but only meaningful for if-frames at the .else restore
-        // point; block / loop don't have a comparable mid-frame
-        // boundary.)
-        if (instr.op == .block or instr.op == .loop) {
+        // block / loop / try_table: structural markers — push frame
+        // so `.br N` can resolve target depth. `try_table` shares
+        // the block-frame discipline (param/result arity packed into
+        // `instr.extra` low byte); its catch clauses are handled
+        // out-of-band by the emit layer via `func.eh_catch_entries`
+        // — liveness treats it as a regular block for stack-effect
+        // purposes.
+        if (instr.op == .block or instr.op == .loop or instr.op == .try_table) {
             if (block_stack_len == max_control_stack) return Error.UnsupportedOp;
             // block/loop store result_arity for completeness;
             // merge mechanism here is fall-through-only so
@@ -355,7 +357,16 @@ pub fn compute(
         // exists per Wasm validator rules); subsequent ops may
         // re-push fresh vregs they themselves define, which we
         // treat conservatively.
-        if (instr.op == .@"return" or instr.op == .@"unreachable") {
+        // throw / throw_ref drain the operand stack identically to
+        // `unreachable` / `return`: control never reaches subsequent
+        // ops at this PC (the throw transfers to a catch landing pad
+        // OR escapes the Wasm boundary as uncaught). The catch arm's
+        // operand stack is reconstructed at the landing pad by the
+        // emit layer; from liveness's straight-line view, the throw
+        // is a stack-draining terminator.
+        if (instr.op == .@"return" or instr.op == .@"unreachable" or
+            instr.op == .throw or instr.op == .throw_ref)
+        {
             while (sim_len > 0) {
                 sim_len -= 1;
                 const vreg = sim_stack[sim_len];
