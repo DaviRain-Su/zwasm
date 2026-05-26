@@ -470,6 +470,28 @@ test "validate: br_on_cast_fail inside block round-trip (10.G op_gc cycle 9)" {
     try validateFunction(fn_sig, &.{}, &body, &.{}, &.{}, &module_types, 0, &.{}, 0);
 }
 
+test "validate: ref.eq round-trip (10.G op_gc cycle 11)" {
+    // Wasm 3.0 GC §3.3.5.2 — `(ref.null anyref ; ref.null anyref ;
+    //   ref.eq ; end)`. Validator: two ref.null pushes, ref.eq pops
+    // both and pushes i32.
+    //
+    // Opcode encoding:
+    //   0xD0 0x6E        — ref.null anyref
+    //   0xD0 0x6E        — ref.null anyref
+    //   0xFB 0x13        — ref.eq
+    //   0x0B             — end
+    const body = [_]u8{ 0xD0, 0x6E, 0xD0, 0x6E, 0xFB, 0x13, 0x0B };
+    try validateFunction(i32_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
+test "validate: ref.eq with i32 operand → StackTypeMismatch (10.G op_gc cycle 11)" {
+    // Wrong input: push i32 instead of a reftype.
+    //   0x41 0x00 0xD0 0x6E 0xFB 0x13 0x0B
+    const body = [_]u8{ 0x41, 0x00, 0xD0, 0x6E, 0xFB, 0x13, 0x0B };
+    const r = validateFunction(i32_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+    try testing.expectError(Error.StackTypeMismatch, r);
+}
+
 test "validate: any.convert_extern round-trip (10.G op_gc cycle 10)" {
     // Wasm 3.0 GC §3.3.5.7 — `(ref.null externref ; any.convert_extern ;
     //   ref.is_null ; end)`. Validator: ref.null externref pushes

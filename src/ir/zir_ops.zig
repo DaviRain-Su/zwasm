@@ -552,6 +552,7 @@ pub const ZirOp = enum(u16) {
     br_on_cast_fail,
     @"any.convert_extern",
     @"extern.convert_any",
+    @"ref.eq",
 
     // GC: i31
     @"ref.i31",

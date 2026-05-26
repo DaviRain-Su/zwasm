@@ -564,6 +564,8 @@ pub const Lowerer = struct {
     fn emitPrefixFB(self: *Lowerer) Error!void {
         const sub = try leb128.readUleb128(u32, self.body, &self.pos);
         switch (sub) {
+            // ref.eq (Wasm 3.0 GC §3.3.5.2). No immediates.
+            19 => try self.emit(.@"ref.eq", 0, 0),
             // ref.test / ref.test_null (Wasm 3.0 GC §3.3.5.3).
             // Each consumes a heap_type byte from the body. The
             // byte is stored in payload (u32-extended) so the

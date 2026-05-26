@@ -32,6 +32,7 @@ inline fn op(o: ZirOp) usize {
 pub fn register(table: *DispatchTable) void {
     table.interp[op(.@"any.convert_extern")] = convertIdentity;
     table.interp[op(.@"extern.convert_any")] = convertIdentity;
+    table.interp[op(.@"ref.eq")] = refEq;
 }
 
 fn convertIdentity(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
@@ -39,6 +40,17 @@ fn convertIdentity(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
     // any↔extern distinction is validator-only. Leave the operand
     // on the stack unchanged.
     _ = c;
+}
+
+/// Wasm 3.0 GC §3.3.5.2 — `ref.eq`: pop two reftypes, push i32
+/// (1 iff same reference identity, else 0). Two nulls compare
+/// equal per spec (null_ref == null_ref).
+fn refEq(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
+    const rt = Runtime.fromOpaque(c);
+    const b = rt.popOperand();
+    const a = rt.popOperand();
+    const eq: i32 = if (a.ref == b.ref) 1 else 0;
+    try rt.pushOperand(.{ .i32 = eq });
 }
 
 // ============================================================
@@ -92,4 +104,48 @@ test "extern.convert_any: null ref round-trips (10.G op_gc cycle 10)" {
     try rt.pushOperand(.{ .ref = Value.null_ref });
     try driveOne(&rt, &t, .@"extern.convert_any");
     try testing.expectEqual(Value.null_ref, rt.popOperand().ref);
+}
+
+test "ref.eq: same non-null ref returns 1 (10.G op_gc cycle 11)" {
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    try rt.pushOperand(.{ .ref = 0x1234_5678 });
+    try rt.pushOperand(.{ .ref = 0x1234_5678 });
+    try driveOne(&rt, &t, .@"ref.eq");
+    try testing.expectEqual(@as(i32, 1), rt.popOperand().i32);
+}
+
+test "ref.eq: distinct refs return 0 (10.G op_gc cycle 11)" {
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    try rt.pushOperand(.{ .ref = 0x1111 });
+    try rt.pushOperand(.{ .ref = 0x2222 });
+    try driveOne(&rt, &t, .@"ref.eq");
+    try testing.expectEqual(@as(i32, 0), rt.popOperand().i32);
+}
+
+test "ref.eq: null == null returns 1 (10.G op_gc cycle 11)" {
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    try rt.pushOperand(.{ .ref = Value.null_ref });
+    try rt.pushOperand(.{ .ref = Value.null_ref });
+    try driveOne(&rt, &t, .@"ref.eq");
+    try testing.expectEqual(@as(i32, 1), rt.popOperand().i32);
+}
+
+test "ref.eq: null vs non-null returns 0 (10.G op_gc cycle 11)" {
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    try rt.pushOperand(.{ .ref = Value.null_ref });
+    try rt.pushOperand(.{ .ref = 0xCAFE });
+    try driveOne(&rt, &t, .@"ref.eq");
+    try testing.expectEqual(@as(i32, 0), rt.popOperand().i32);
 }

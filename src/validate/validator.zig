@@ -1139,6 +1139,8 @@ pub const Validator = struct {
     fn dispatchPrefixFB(self: *Validator) Error!void {
         const sub = try leb128.readUleb128(u32, self.body, &self.pos);
         switch (sub) {
+            // ref.eq (Wasm 3.0 GC §3.3.5.2): pop 2 reftypes, push i32.
+            19 => try self.opRefEq(),
             // ref.test / ref.test_null share validator shape:
             // consume heap_type byte, pop reftype, push i32.
             20, 21 => try self.opRefTest(),
@@ -1196,6 +1198,22 @@ pub const Validator = struct {
                 try self.pushType(t);
             },
         }
+    }
+
+    /// Wasm spec 3.0 §3.3.5.2 — `ref.eq`: pop two reftypes,
+    /// push i32 (1 iff same reference). Pre-RTT we accept any
+    /// reftype on both operands (the spec restricts to eqref-
+    /// subtypes; ADR-0116 §"Internal hierarchy" RTT lands later).
+    fn opRefEq(self: *Validator) Error!void {
+        var i: u32 = 0;
+        while (i < 2) : (i += 1) {
+            const top = try self.popAny();
+            switch (top) {
+                .bot => {},
+                .known => |t| if (t != .funcref and t != .externref and t != .i31ref and t != .anyref and t != .eqref and t != .structref and t != .arrayref) return Error.StackTypeMismatch,
+            }
+        }
+        try self.pushType(.i32);
     }
 
     /// Wasm spec 3.0 §3.3.5.7 — `any.convert_extern` /
