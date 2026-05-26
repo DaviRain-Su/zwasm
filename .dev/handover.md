@@ -6,54 +6,65 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `b04a214e` — fix(p10): instantiate active data on
-  memory64 (i64.const offset). One-line dispatch fix
-  (evalConstMemAddrExpr) at the data-install site moved 396
-  directives green; address64.0 regression marker tightened to
-  expect-success.
+- **HEAD**: `60549a3e` — fix(p10): memory.size/grow interp returns
+  idx-type-width result. inline `memory0IsI64(rt)` dispatches
+  push/pop width on the memory section's idx_type; runtime page-cap
+  also lifts for memory64. Two new in-source tests pin both shapes.
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
-- **Active debt rows**: 17 — all `blocked-by:` with named
-  structural barriers. Zero `now`-status rows.
+- **Active debt rows**: 18 — all `blocked-by:` with named
+  structural barriers. Zero `now`-status rows. (D-190 filed this
+  cycle for the spec-runner architecture issue.)
 
-## Spec runner observable (HEAD `b04a214e`)
+## Spec runner observable (HEAD `60549a3e`)
 
 ```
-[memory64           ] return=337 (pass=289 fail=36 ) trap=205 (pass=205 fail=0  ) invalid=83  (pass=83  fail=0) exception=0
+[memory64           ] return=337 (pass=296 fail=29 ) trap=205 (pass=205 fail=0  ) invalid=83  (pass=83  fail=0) exception=0
 [tail-call          ] return=31  (pass=31  fail=0  ) trap=0   (pass=0   fail=0  ) invalid=10  (pass=10  fail=0) exception=0
 [exception-handling ] return=34  (pass=0   fail=33 ) trap=2   (pass=0   fail=2  ) invalid=7   (pass=6   fail=1) exception=4 (pass=0 fail=4)
 [gc                 ] (no corpus — D-179 wabt)
 [function-references] return=0   (pass=0   fail=0  ) trap=0   (pass=0   fail=0  ) invalid=12  (pass=12  fail=0) exception=0
-total: return pass=320 fail=69; trap pass=205 fail=2; invalid pass=111 fail=1; exception pass=0 fail=4
+total: return pass=327 fail=62; trap pass=205 fail=2; invalid pass=111 fail=1; exception pass=0 fail=4
 ```
 
-memory64 trap 188→0 (full sweep); return 244→36 fail (36 residual,
-multi-value or per-fixture remaining). assert_invalid 111/1 — only
-try_table.10 remains.
+memory64 return 296 (was 289 last cycle, +7); fail 29 (was 36).
+Remaining 29 traced to runner-architecture (D-190) — each
+assert_return creates a fresh Instance, so state-dependent
+sequences (size → grow → size → load) can't accumulate.
 
 Recent commits this resume:
+- `60549a3e` fix — memory.size/grow interp idx-type-width result.
+- `747de7df` chore — retarget handover after memory64 data-segment fix.
 - `b04a214e` fix — instantiate active data on memory64 (+396 dirs).
 - `7d815816` chore — retarget handover at memory64 instantiate gap.
 - `ea414cf0` test — pin memory64 instantiate gap at address64.0.
-- `24f0353f` chore — retarget handover after bulk mem ops memAddrType.
-- `01de05e8` — bulk mem ops memAddrType (preemptive; no runner delta).
 
-## Active task — memory64 residual return fails (36)
+## Active task — EH module-compile gap OR D-190 (runner refactor)
 
-memory64 return 244→36 fail. The remaining 36 are spread across
-the wasm-3.0-assert/memory64 corpus. Next sub-chunk: bisect what
-shape (likely multi-value, oob trap discrimination, or per-op
-codegen edge) the residuals share. Per-case investigation; can be
-walked single-cycle by greping the runner for "fail" emit (after
-adding a verbose mode) OR by writing a manifest-bisect test à la
-the tail-call/D-187 pattern at line 790 of wasm_3_0_manifest.zig.
+memory64 corpus has hit the runner-state ceiling: further per-op
+fixes won't close the 29 residual without D-190's instance-sharing
+refactor. Two parallel paths:
+
+(a) **D-190** — refactor wasm-3.0-assert runner to thread one
+Instance per `module <path>` block. Multi-cycle (touches runOne
+signatures + dispatch loop). Closes memory64 residual 29 + makes
+the runner correct for future memory_redundancy64 / memory64.wast
+test classes.
+
+(b) **EH module-compile gap** — 33+2+4 EH directive fails all
+root at the missing `try_table` op validator + interp dispatch.
+Multi-cycle (10.E scope). Each cycle = one architectural sub-step
+toward the EH-on-interp path.
+
+Pick (a) next cycle — it's smaller and closes a concrete number
+(29 directives) with no upstream/ADR dependency. EH stays the
+larger 10.E bundle candidate.
 
 ## Next sub-chunk candidates (names only)
 
-- **memory64 return residual (36)** — active per above; per-case
-  bisect.
+- **D-190 runner refactor** — active per above; multi-cycle but
+  bounded.
 - **EH module-compile gap** — `try_table` op validator + interp
-  dispatch substrate. The 33+2+4 EH directive fails all root
-  here. Multi-cycle (10.E scope).
+  dispatch substrate. Multi-cycle (10.E scope).
 - **D-188 final (try_table.10)** — `catch_all_ref` typing in
   try_table. Blocked-by exnref ValType extension (multi-cycle).
 - **10.R-4 / 10.R-5 (call_ref / return_call_ref)** — blocked-by
