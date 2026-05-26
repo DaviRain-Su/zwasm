@@ -262,6 +262,41 @@ pub fn validateFunctionWithMemIdx(
     try v.run();
 }
 
+/// 10.E EH module-compile path — `frontendValidate` variant that
+/// threads both `memory0_idx_type` AND `tags`. Used by
+/// `runtime/instance/instantiate.zig::frontendValidate` so the
+/// CLI / c_api compile path validates `throw` / `try_table` ops
+/// without rejecting them on the empty-tags default.
+pub fn validateFunctionWithMemIdxAndTags(
+    sig: FuncType,
+    locals: []const ValType,
+    body: []const u8,
+    func_types: []const FuncType,
+    globals: []const GlobalEntry,
+    module_types: []const FuncType,
+    data_count: u32,
+    tables: []const zir.TableEntry,
+    elem_count: u32,
+    memory0_idx_type: sections.MemoryEntry.IdxType,
+    tags: []const sections.TagEntry,
+) Error!void {
+    var v = Validator{
+        .sig = sig,
+        .locals = locals,
+        .body = body,
+        .pos = 0,
+        .func_types = func_types,
+        .globals = globals,
+        .module_types = module_types,
+        .data_count = data_count,
+        .tables = tables,
+        .elem_count = elem_count,
+        .memory0_idx_type = memory0_idx_type,
+        .tags = tags,
+    };
+    try v.run();
+}
+
 /// Wasm 3.0 EH (10.E-N-1) — `validateFunction` variant that also
 /// threads the decoded tag section so `throw` and try_table catch
 /// clauses range-check `tag_idx` against `module.tags[]`. Used

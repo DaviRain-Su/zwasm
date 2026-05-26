@@ -199,9 +199,20 @@ pub fn frontendValidate(alloc: std.mem.Allocator, binary: []const u8) bool {
         else
             .i32;
 
+    // 10.E EH module-compile path: decode the tag section so
+    // `throw` / `try_table` catch clauses range-check tag_idx
+    // against module.tags[] instead of failing on the empty
+    // default. Modules without a tag section pass an empty slice
+    // (preserves prior behavior for non-EH modules).
+    const tags_slice: []const sections.TagEntry = if (module.find(.tag)) |s|
+        sections.decodeTags(alloc, s.body) catch return false
+    else
+        &.{};
+    defer if (tags_slice.len > 0) alloc.free(tags_slice);
+
     for (codes_owned.items, defined_func_indices) |code, type_idx| {
         const sig = types_owned.items[type_idx];
-        validator.validateFunctionWithMemIdx(
+        validator.validateFunctionWithMemIdxAndTags(
             sig,
             code.locals,
             code.body,
@@ -212,6 +223,7 @@ pub fn frontendValidate(alloc: std.mem.Allocator, binary: []const u8) bool {
             table_entries,
             0, // elem_count
             memory0_idx_type,
+            tags_slice,
         ) catch return false;
     }
     return true;

@@ -804,15 +804,22 @@ test "D-188 bisect: EH + func-refs invalid-accepted fixtures (regression marker)
             accepted_count += 1;
         }
     }
-    // Current state: 1 fixture incorrectly accepted (try_table.10
-    // — deep EH validator gap around `catch_all_ref` typing in a
-    // try_table block declared without `(result exnref)`). The
-    // 5 function-references "unknown type" cases (ref.1..5) closed
-    // at the D-188 first-cycle fix in `instantiate.zig::frontendValidate`
+    // Current state: 2 fixtures incorrectly accepted (try_table.8 +
+    // try_table.10 — both root at the deep EH validator gap around
+    // catch_ref / catch_all_ref typing: a try_table block declared
+    // with empty / wrong block-result type doesn't reject when its
+    // catch_ref / catch_all_ref clause pushes (exnref) onto the
+    // block's stack. Same 10.E barrier; tighten both when per-clause
+    // result-type unification lands. try_table.8 surfaced after the
+    // 10.E frontendValidate tags plumbing (this cycle) — prior to
+    // the fix, ALL try_table modules failed earlier in validator
+    // (empty tags slice rejected throw / catch). The 5 function-
+    // references "unknown type" cases (ref.1..5) closed at the
+    // D-188 first-cycle fix in `instantiate.zig::frontendValidate`
     // (pre-decode pass forced section-body validation regardless
     // of code-section presence). Tighten further when the EH
     // try_table type-check rule lands.
-    try testing.expectEqual(@as(u32, 1), accepted_count);
+    try testing.expectEqual(@as(u32, 2), accepted_count);
 }
 
 test "D-189 partial: align64 invalid fixtures rejected (memarg natural-align rule)" {
@@ -844,18 +851,21 @@ test "D-189 partial: align64 invalid fixtures rejected (memarg natural-align rul
     }
 }
 
-test "EH gap regression: try_table.0.wasm currently rejects at compile (10.E pending)" {
-    // Documents the current EH module-compile gap (drives the
-    // 33/34 assert_return + 2/2 assert_trap + 4/4 assert_exception
-    // fails for exception-handling in the spec runner). When 10.E
-    // EH validator + execution rounds close enough that try_table.0
-    // compiles, this test flips red as a prompt to retighten to
-    // the post-fix state (compile OK + invoke produces values).
+test "EH module-compile: try_table.0.wasm compiles (10.E frontendValidate tags plumbing)" {
+    // try_table.0.wasm has `(tag (type 0)) ... (func ... throw 0)`.
+    // Previously frontendValidate routed through
+    // validateFunctionWithMemIdx which doesn't thread the module's
+    // tag section, so `throw 0` failed validator's
+    // `tag_idx >= self.tags.len` check (tags.len=0) → ParseFailed.
+    // Now frontendValidate decodes the tag section and threads it
+    // into the validator alongside memory0_idx_type. Runtime EH
+    // dispatch is a separate gap (next cycle).
     const wasm_bytes = @embedFile("wasm-3.0-assert/exception-handling/try_table/try_table.0.wasm");
     const alloc = testing.allocator;
     var engine = try zwasm_root.Engine.init(alloc, .{});
     defer engine.deinit();
-    try testing.expectError(error.ParseFailed, engine.compile(wasm_bytes));
+    var module = try engine.compile(wasm_bytes);
+    defer module.deinit();
 }
 
 test "memory64: address64.0.wasm compiles (frontendValidate memory0_idx_type plumbing)" {
