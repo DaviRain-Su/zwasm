@@ -399,14 +399,28 @@ test "runI32Export: trunc_f32_s/nan traps (sub-7.5b-ii trap_flag detection)" {
     try testing.expectError(entry.Error.Trap, runI32Export(testing.allocator, &bytes, "test"));
 }
 
+test "runI32Export: simple i32.const probe on all hosts (sanity)" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    // (module (func (export "test") (result i32) (i32.const 42)))
+    // Simplest possible runI32Export fixture — verifies the basic
+    // entry-shim + JIT pipeline works on the current host
+    // independent of any EH machinery.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60,
+        0x00, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x00, 0x07, 0x08, 0x01, 0x04, 0x74,
+        0x65, 0x73, 0x74, 0x00, 0x00, 0x0a, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2a,
+        0x0b,
+    };
+    try testing.expectEqual(@as(u32, 42), try runI32Export(testing.allocator, &bytes, "test"));
+}
+
 test "runI32Export: throw + catch_all returns 42 (IT-6 cycle 3c-iii-d end-to-end)" {
     if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
-        // x86_64 SysV: the trampoline body compiles + tests pass on
-        // Linux, but the end-to-end fixture exercising the full
-        // JIT-emit pipeline for try_table+throw+catch_all on SysV is
-        // gated behind the x86_64 op_throw/op_try_table emit which
-        // still has open coverage gaps (cycle 3c-iii-d/e Linux work).
-        // The Mac aarch64 path is fully wired; verify there first.
+        // D-180: end-to-end EH fixture returns 0 (not 42) on Linux
+        // x86_64 SysV when this gate is removed. Investigation
+        // ongoing. The trampoline body + tag_idx marshal compile
+        // green on SysV but the resulting binary mis-marshals the
+        // catch-arm return value. Gate kept until D-180 closes.
         return error.SkipZigTest;
     }
     // (module
@@ -447,6 +461,8 @@ test "runI32Export: throw + catch_all returns 42 (IT-6 cycle 3c-iii-d end-to-end
 
 test "runI32Export: tagged catch routes by tag_idx — throw $e1 → catch $e1 returns 77" {
     if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
+        // D-180: same Linux x86_64 SysV gap as the catch_all e2e
+        // fixture above.
         return error.SkipZigTest;
     }
     // (module
