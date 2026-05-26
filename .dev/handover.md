@@ -24,6 +24,10 @@
   `op_throw_ref` retargeted (both archs) — JIT bytes now load
   the trampoline address and BLR/CALL into it before the
   trap-stub fallback B/JMP.
+- **10.E IT-6 cycle 3c-i SHIPPED** (`73c163d4`): JitRuntime
+  gains `eh_table_entries` + `eh_table_count` + `eh_code_map_entries`
+  + `eh_code_map_count` (defaults null/0); setupRuntime wires
+  from CompiledWasm.exception_table + module.code_map_entries.
 
 ## ROADMAP §10 progress
 
@@ -36,12 +40,12 @@
 ## Active bundle
 
 - **Bundle-ID**: `10.E-codegen-IT-6`
-- **Cycles-remaining**: `~1` (cycle 3c — dispatchThrow body
-  integration in trampoline)
-- **Continuity-memo**: Trampoline + retargeted throw sites are
-  now both shipped. Net observable behavior matches IT-3 (every
-  throw traps) but the integration surface is in place — the
-  trampoline body (trap-only stub) is the next step.
+- **Cycles-remaining**: `~1-2` (cycle 3c-ii: trampoline body
+  dispatchThrow integration + .handler dispatch)
+- **Continuity-memo**: 3c-i (JitRuntime fields + setup wire)
+  shipped. Trampoline + retargeted throw sites + per-Instance
+  EH data are all in place. The trampoline body (currently
+  trap-only) is the last load-bearing slot before bundle close.
 - **Exit-condition**: end-to-end `throw 0 / catch_all 0` fixture
   compiles + runs + lands at the catch block (per integration
   plan §IT-6 acceptance).
