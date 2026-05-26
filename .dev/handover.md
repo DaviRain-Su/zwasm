@@ -14,9 +14,9 @@
 - **10.E interp side = COMPLETE**.
 - **10.E codegen IT-1..IT-5 = SHIPPED** (`c3424788`, `2d938570`,
   `466674b7`, `5b75bee5`, `14fafdc6`).
-- **10.E IT-6 prep SHIPPED** (`9ac268f1` frame_bytes,
-  `18b2a077` landing_pad_pc forward fixup, `e725bce7` ADR-0119
-  draft).
+- **10.E IT-6 prep SHIPPED**: frame_bytes thread (`9ac268f1`),
+  landing_pad_pc forward fixup (`18b2a077`), ADR-0119 draft
+  (`e725bce7`), spike-validated flip to Accepted (`213df2f2`).
 
 ## ROADMAP §10 progress
 
@@ -26,57 +26,50 @@
   10.E (codegen IT-6 trampoline impl 残)
 - Pending (3): 10.G / 10.P (close gate)
 
-## Bucket-3 stop — user touchpoint required
+## Active bundle
 
-All autonomous prep for bundle `10.E-codegen-IT-6` walked; loop
-stops without re-arm per the autonomous-prep-paths catalog in
-`.claude/skills/continue/STOP_BUCKETS.md`.
+- **Bundle-ID**: `10.E-codegen-IT-6`
+- **Cycles-remaining**: `~1-2` (trampoline impl + op_throw retarget)
+- **Continuity-memo**: ADR-0119 Accepted (`213df2f2`); spike
+  empirically validated `callconv(.naked)` semantics on all 3
+  hosts. Trampoline impl is now unblocked.
+- **Exit-condition**: end-to-end `throw 0 / catch_all 0` fixture
+  compiles + runs + lands at the catch block (per integration
+  plan §IT-6 acceptance).
 
-**Gating user touchpoint**:
+Next /continue resume picks up the **trampoline impl** —
+create `src/engine/codegen/{arm64,x86_64}/throw_trampoline.zig`
+per ADR-0119 Decision §. Body per ADR-0114 D6 sequence:
+capture FP+LR into ThrowSite stack record, marshal Runtime ptr
++ tag_idx + payload into argregs, CALL
+`shared/zwasm_throw.dispatchThrow`, branch on UnwindResult:
+- `.handler`: `sp_restore.emitSpRestoreFull` (uses
+  CodeMap.Entry.frame_bytes from IT-6 prep) + BR/JMP to
+  `landing_pad_pc` (resolved by IT-6 prep landing_pad fixup).
+- `.uncaught`: standard trap-stub epilogue (set trap_flag=1,
+  RET).
 
-- **ADR-0119** (`.dev/decisions/0119_eh_trampoline_naked_zig.md`)
-  — `Status: Proposed → Accepted` flip. After flip, the
-  autonomous loop resumes at the IT-6 trampoline impl cycle:
-  create `src/engine/codegen/{arm64,x86_64}/throw_trampoline.zig`
-  per the ADR's Decision §, retarget `op_throw.emit` /
-  `op_throw_ref.emit` to CALL the trampoline (replacing the IT-3
-  unconditional-trap branch), thread sp_restore for the
-  `.handler` path. ROADMAP §10.E flips DONE on bundle close.
-
-**Autonomous prep walked this bundle** (do not re-walk):
-
-- IT-6 frame_bytes (`9ac268f1`): EmitOutput → FuncBody →
-  CodeMap.Entry; replaces IT-4 placeholder 0.
-- IT-6 landing_pad_pc forward fixup (`18b2a077`): try_table.emit
-  pushes the Label first, registers per-catch fixups; the
-  matching catch-label `end` patches `Builder.entries[i]
-  .landing_pad_pc` to the post-end buf offset. Test extended:
-  `landing_pad_pc == pc_end` for the empty-inner-body fixture.
-- ADR-0119 draft (`e725bce7`): three alternatives (per-arch `.s`,
-  regular Zig + `@frameAddress`, inline `asm` in non-naked fn)
-  recorded with explicit reject rationale. Removal condition
-  names Zig-version regression + throw-site redesign.
-
-**To resume**: flip ADR-0119 to Accepted (per ROADMAP §18.2 +
-`.dev/decisions/README.md` lifecycle), then re-invoke /continue.
-The loop picks up the trampoline impl as bundle cycle 3 of 3.
+Then retarget `op_throw.emit` + `op_throw_ref.emit` to CALL
+the trampoline (replacing the IT-3 unconditional-trap branch).
+Address load: either `@intFromPtr(&zwasmThrowTrampoline)` via
+literal pool (arm64) / RIP-rel MOVABS (x86_64), OR a Runtime
+field set at instance init time — choose at impl time.
 
 ## Open questions / blockers
 
 - 10.G-4 (struct ops) — blocked-by GC heap impl
 - 10.M-realworld — toolchain-blocked (clang_wasm64 fixture)
 - 10.P close gate — user touchpoint by construction
-- **ADR-0119** — Proposed; user flip required to unblock IT-6
-  trampoline impl (this bucket-3 stop)
 
 ## Key refs
 
-- **ADR-0119** (`.dev/decisions/0119_eh_trampoline_naked_zig.md`)
-  — naked-Zig vs `.s` choice (Proposed)
-- **Integration plan** (`.dev/phase10_eh_integration_plan.md`) —
-  IT-1..IT-6 (IT-1..IT-5 + IT-6 prep shipped; IT-6 impl gated)
-- **ADR-0114** (EH design)
-- **ADR-0118** (`.dev/decisions/0118_meta_loop_consolidation.md`)
+- **ADR-0119 Accepted** (`213df2f2`,
+  `.dev/decisions/0119_eh_trampoline_naked_zig.md`)
+- **Spike** `private/spikes/p10-it6-naked-trampoline/` —
+  Status: merged-into-prod (zero-prologue empirical evidence,
+  per-host disasm in README)
+- **Integration plan** (`.dev/phase10_eh_integration_plan.md`)
+- **ADR-0114** (EH design — D6 specifies the trampoline shape)
 - **ROADMAP §10**
 - **Phase log** (`.dev/phase_log/phase10.md`)
 - **Lesson** `2026-05-26-eh-codegen-foundation-atom-rhythm.md`
