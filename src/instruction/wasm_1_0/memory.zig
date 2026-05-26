@@ -233,30 +233,60 @@ fn i64Store32(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
 
 // --- memory.size / memory.grow ---
 
+/// True when memory 0 is declared with `(memory i64 …)` (Wasm 3.0
+/// memory64). Falls back to i32 when no memory section is present
+/// (consistent with `frontendValidate` / `instantiateRuntime`).
+inline fn memory0IsI64(rt: *const Runtime) bool {
+    return rt.memories.len > 0 and rt.memories[0].idx_type == .i64;
+}
+
 fn memorySize(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
-    const pages: u32 = @intCast(rt.memory.len / wasm_page_size);
-    try rt.pushOperand(.{ .u32 = pages });
+    const pages: u64 = rt.memory.len / wasm_page_size;
+    // Wasm spec §4.4.7 — result type matches the memory's idx_type.
+    if (memory0IsI64(rt)) {
+        try rt.pushOperand(.{ .i64 = @bitCast(pages) });
+    } else {
+        try rt.pushOperand(.{ .u32 = @intCast(pages) });
+    }
 }
 
 fn memoryGrow(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
-    const delta = rt.popOperand().u32;
-    const old_pages: u32 = @intCast(rt.memory.len / wasm_page_size);
-    // Wasm 1.0 max: 2^16 pages = 4 GiB. Fail returns -1 (i32).
-    const new_pages: u64 = @as(u64, old_pages) + @as(u64, delta);
-    if (new_pages > std.math.maxInt(u16) + 1) {
-        try rt.pushOperand(.{ .i32 = -1 });
+    const is_i64 = memory0IsI64(rt);
+    // Pop delta in the memory's idx-type-width: writer pushed i64
+    // for memory64 modules; reading .u32 there would mask off the
+    // high half and silently miscompute.
+    const delta: u64 = if (is_i64) @bitCast(rt.popOperand().i64) else rt.popOperand().u32;
+    const old_pages: u64 = rt.memory.len / wasm_page_size;
+    // Wasm 1.0 max: 2^16 pages = 4 GiB. Wasm 3.0 memory64 max:
+    // 2^48 pages = 16 EiB (per memory64 spec). The interp's realloc
+    // path can't service 2^48 pages anyway — cap at host usize.
+    const page_cap: u64 = if (is_i64) std.math.maxInt(u48) else std.math.maxInt(u16) + 1;
+    const new_pages_widened = @addWithOverflow(old_pages, delta);
+    if (new_pages_widened[1] != 0 or new_pages_widened[0] > page_cap) {
+        // Fail returns -1 in the matching width.
+        if (is_i64) try rt.pushOperand(.{ .i64 = -1 }) else try rt.pushOperand(.{ .i32 = -1 });
         return;
     }
-    const new_bytes: usize = @intCast(new_pages * wasm_page_size);
+    const new_pages = new_pages_widened[0];
+    const new_bytes_widened = @mulWithOverflow(new_pages, @as(u64, wasm_page_size));
+    if (new_bytes_widened[1] != 0 or new_bytes_widened[0] > std.math.maxInt(usize)) {
+        if (is_i64) try rt.pushOperand(.{ .i64 = -1 }) else try rt.pushOperand(.{ .i32 = -1 });
+        return;
+    }
+    const new_bytes: usize = @intCast(new_bytes_widened[0]);
     const new_mem = rt.alloc.realloc(rt.memory, new_bytes) catch {
-        try rt.pushOperand(.{ .i32 = -1 });
+        if (is_i64) try rt.pushOperand(.{ .i64 = -1 }) else try rt.pushOperand(.{ .i32 = -1 });
         return;
     };
     @memset(new_mem[rt.memory.len..], 0);
     rt.setMemory0Bytes(new_mem);
-    try rt.pushOperand(.{ .u32 = old_pages });
+    if (is_i64) {
+        try rt.pushOperand(.{ .i64 = @bitCast(old_pages) });
+    } else {
+        try rt.pushOperand(.{ .u32 = @intCast(old_pages) });
+    }
 }
 
 // ============================================================
@@ -335,4 +365,54 @@ test "memory.grow grows by 1 page; size reflects update" {
 
     try driveOne(&rt, &t, .@"memory.size", 0, 0);
     try testing.expectEqual(@as(u32, 1), rt.popOperand().u32);
+}
+
+test "memory.size on memory64 returns i64 result (ADR-0111 D2 runtime)" {
+    // Wasm spec §4.4.7 — memory.size returns i32 for i32-indexed
+    // memory and i64 for i64-indexed (memory64). The interp's
+    // current i32-only path returned the low 32 bits with the
+    // high bits undefined; the wasm-3.0-assert memory64 corpus
+    // surfaced this as ~22 size/grow mismatches.
+    const sections_mod = @import("../../parse/sections.zig");
+    const memory_instance = @import("../../runtime/instance/memory_instance.zig");
+
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    rt.memory = try testing.allocator.alloc(u8, 2 * 65536); // 2 pages
+    var mi: [1]memory_instance.MemoryInstance = .{.{
+        .bytes = rt.memory,
+        .idx_type = sections_mod.MemoryEntry.IdxType.i64,
+        .pages_min = 2,
+        .pages_max = null,
+    }};
+    rt.memories = mi[0..];
+    defer rt.memories = &.{};
+
+    try driveOne(&rt, &t, .@"memory.size", 0, 0);
+    try testing.expectEqual(@as(i64, 2), rt.popOperand().i64);
+}
+
+test "memory.grow on memory64 pops i64 delta, pushes i64 old_size (ADR-0111 D2 runtime)" {
+    const sections_mod = @import("../../parse/sections.zig");
+    const memory_instance = @import("../../runtime/instance/memory_instance.zig");
+
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    var mi: [1]memory_instance.MemoryInstance = .{.{
+        .bytes = &.{},
+        .idx_type = sections_mod.MemoryEntry.IdxType.i64,
+        .pages_min = 0,
+        .pages_max = null,
+    }};
+    rt.memories = mi[0..];
+    defer rt.memories = &.{};
+
+    try rt.pushOperand(.{ .i64 = 1 });
+    try driveOne(&rt, &t, .@"memory.grow", 0, 0);
+    try testing.expectEqual(@as(i64, 0), rt.popOperand().i64); // old size = 0
+    try testing.expectEqual(@as(usize, 65536), rt.memory.len);
 }
