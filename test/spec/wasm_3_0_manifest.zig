@@ -177,6 +177,21 @@ pub fn runOne(
     return results[0];
 }
 
+/// D-190 — `assert_return` invoke against an already-instantiated
+/// Instance. The dispatch loop owns Engine/Module/Linker/Instance
+/// per `module` directive so state-dependent sequences within a
+/// module block accumulate (memory.grow → memory.size → load
+/// etc.). Mirrors `runOne`'s single-scalar-result gate.
+pub fn invokeInstance(
+    instance: *zwasm_root.Instance,
+    func_name: []const u8,
+    args: []const zwasm_root.Value,
+) RunError!zwasm_root.Value {
+    var results: [1]zwasm_root.Value = undefined;
+    instance.invoke(func_name, args, results[0..1]) catch return RunError.InvokeFailed;
+    return results[0];
+}
+
 pub const TrapOutcome = enum {
     /// invoke errored — assert_trap passes (something trapped).
     trapped,
@@ -225,6 +240,23 @@ pub fn runOneTrap(
     return .returned_normally;
 }
 
+/// D-190 — `assert_trap` invoke against an already-instantiated
+/// Instance. Mirrors `runOneTrap`'s sig-lookup + lenient
+/// trap-treatment logic but shares the caller-owned Instance.
+pub fn invokeInstanceTrap(
+    instance: *zwasm_root.Instance,
+    func_name: []const u8,
+    args: []const zwasm_root.Value,
+) RunError!TrapOutcome {
+    const sig = instance.exportFuncSig(func_name) orelse return RunError.LoadFailed;
+    const n_results = sig.results.len;
+    var results_buf: [4]zwasm_root.Value = undefined;
+    if (n_results > results_buf.len) return RunError.InvokeFailed;
+    const results = results_buf[0..n_results];
+    instance.invoke(func_name, args, results) catch return .trapped;
+    return .returned_normally;
+}
+
 pub const ExceptionOutcome = enum {
     /// invoke errored with `Trap.UncaughtException` —
     /// assert_exception passes.
@@ -266,6 +298,25 @@ pub fn runOneExpectException(
     if (n_results > results_buf.len) return RunError.InvokeFailed;
     const results = results_buf[0..n_results];
 
+    instance.invoke(func_name, args, results) catch |err| {
+        return if (err == error.UncaughtException) .uncaught_exception else .other_trap;
+    };
+    return .returned_normally;
+}
+
+/// D-190 — `assert_exception` invoke against an already-instantiated
+/// Instance. Mirrors `runOneExpectException`'s trap-class
+/// discrimination logic.
+pub fn invokeInstanceExpectException(
+    instance: *zwasm_root.Instance,
+    func_name: []const u8,
+    args: []const zwasm_root.Value,
+) RunError!ExceptionOutcome {
+    const sig = instance.exportFuncSig(func_name) orelse return RunError.LoadFailed;
+    const n_results = sig.results.len;
+    var results_buf: [4]zwasm_root.Value = undefined;
+    if (n_results > results_buf.len) return RunError.InvokeFailed;
+    const results = results_buf[0..n_results];
     instance.invoke(func_name, args, results) catch |err| {
         return if (err == error.UncaughtException) .uncaught_exception else .other_trap;
     };
@@ -573,6 +624,36 @@ test "runOne e2e: return_call.0.wasm type-i32 () -> i32:306 (10.TC verify)" {
     const wasm_bytes = @embedFile("wasm-3.0-assert/tail-call/return_call/return_call.0.wasm");
     const result = try runOne(testing.allocator, wasm_bytes, "type-i32", &.{});
     try testing.expectEqual(@as(i32, 306), result.i32);
+}
+
+test "D-190 invokeInstance shared-state: grow then size on memory64 returns post-grow page count" {
+    // Spec runner state-persistence regression marker. The wasm-3.0-
+    // assert dispatch loop previously created a fresh Engine + Module
+    // + Instance per directive, so the memory_grow64.0 manifest's
+    // `grow i64:1 -> i64:0` followed by `size () -> i64:1` always saw
+    // a fresh-zero state on the second call. invokeInstance (this
+    // cycle) reuses a single Instance across directives within a
+    // `module` block.
+    const wasm_bytes = @embedFile("wasm-3.0-assert/memory64/memory_grow64/memory_grow64.0.wasm");
+    const alloc = testing.allocator;
+    var engine = try zwasm_root.Engine.init(alloc, .{});
+    defer engine.deinit();
+    var module = try engine.compile(wasm_bytes);
+    defer module.deinit();
+    var linker = zwasm_root.Linker.init(&engine);
+    defer linker.deinit();
+    var instance = try linker.instantiate(&module);
+    defer instance.deinit();
+
+    // size () -> i64:0 (initial)
+    const r0 = try invokeInstance(&instance, "size", &.{});
+    try testing.expectEqual(@as(i64, 0), r0.i64);
+    // grow i64:1 -> i64:0 (old size)
+    const r1 = try invokeInstance(&instance, "grow", &.{.{ .i64 = 1 }});
+    try testing.expectEqual(@as(i64, 0), r1.i64);
+    // size () -> i64:1 (post-grow) — fails on stateless dispatch
+    const r2 = try invokeInstance(&instance, "size", &.{});
+    try testing.expectEqual(@as(i64, 1), r2.i64);
 }
 
 test "runOneTrap: handcrafted_trap always_traps reports .trapped" {

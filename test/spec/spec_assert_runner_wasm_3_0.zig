@@ -128,6 +128,26 @@ pub fn main(init: std.process.Init) !void {
             var cur_module_bytes: ?[]u8 = null;
             defer if (cur_module_bytes) |b| gpa.free(b);
 
+            // D-190 — Engine/Module/Linker/Instance share-state across
+            // all directives following each `module <path>` block.
+            // Each `module` directive tears down the prior context
+            // and creates a fresh one; subsequent assert_returns /
+            // assert_traps / assert_exceptions invoke against the
+            // shared Instance so state-dependent sequences (e.g.,
+            // memory_grow64's grow → size → load) accumulate per
+            // spec semantics. Setup failure leaves cur_instance =
+            // null so dependent directives skip cleanly.
+            var cur_engine: ?zwasm.Engine = null;
+            var cur_module: ?zwasm.Module = null;
+            var cur_linker: ?zwasm.Linker = null;
+            var cur_instance: ?zwasm.Instance = null;
+            defer {
+                if (cur_instance) |*i| i.deinit();
+                if (cur_linker) |*l| l.deinit();
+                if (cur_module) |*m| m.deinit();
+                if (cur_engine) |*e| e.deinit();
+            }
+
             // Sub-corpus dir (e.g. `tail-call/return_call/`) — both
             // the manifest AND the .wasm files it cites live here.
             var sub_dir = pdir.openDir(io, entry.name, .{}) catch continue;
@@ -147,13 +167,32 @@ pub fn main(init: std.process.Init) !void {
                             cur_module_bytes = null;
                             continue;
                         };
+                        // D-190 — tear down prior context (defers
+                        // are scope-bound; explicit teardown happens
+                        // here per `module` directive).
+                        if (cur_instance) |*i| { i.deinit(); cur_instance = null; }
+                        if (cur_linker) |*l| { l.deinit(); cur_linker = null; }
+                        if (cur_module) |*m| { m.deinit(); cur_module = null; }
+                        if (cur_engine) |*e| { e.deinit(); cur_engine = null; }
+                        cur_engine = zwasm.Engine.init(gpa, .{}) catch continue;
+                        cur_module = (cur_engine.?).compile(cur_module_bytes.?) catch {
+                            // Compile failed — leave cur_engine alive
+                            // but cur_module/instance null; dependent
+                            // asserts will skip via the orelse path.
+                            continue;
+                        };
+                        cur_linker = zwasm.Linker.init(&cur_engine.?);
+                        cur_instance = (cur_linker.?).instantiate(&cur_module.?) catch {
+                            continue;
+                        };
                     },
                     .assert_return => {
                         summary.asserts_return += 1;
-                        const bytes = cur_module_bytes orelse continue;
+                        _ = cur_module_bytes orelse continue;
                         // Build args slice (zwasm.Value); skip if any
                         // typed arg can't parse (e.g. v128 / refs not yet
-                        // mapped).
+                        // mapped). Skip BEFORE instance gate so unsupported
+                        // shapes stay un-counted regardless of setup state.
                         var call_args: [4]zwasm.Value = undefined;
                         var call_args_ok = true;
                         var ai: u8 = 0;
@@ -172,7 +211,14 @@ pub fn main(init: std.process.Init) !void {
                         const expected_tv = d.results[0];
                         const expected_rv = manifest_parser.parsePayload(expected_tv) catch continue;
                         const expected_zv = manifest_parser.runtimeToZwasm(expected_rv, expected_tv.ty);
-                        const got = manifest_parser.runOne(gpa, bytes, d.func_name, call_args[0..d.args_len]) catch {
+                        const instance = if (cur_instance) |*i| i else {
+                            // Setup failure earlier in this module block;
+                            // count as fail since the assert couldn't
+                            // be evaluated.
+                            summary.asserts_return_fail += 1;
+                            continue;
+                        };
+                        const got = manifest_parser.invokeInstance(instance, d.func_name, call_args[0..d.args_len]) catch {
                             summary.asserts_return_fail += 1;
                             continue;
                         };
@@ -186,7 +232,7 @@ pub fn main(init: std.process.Init) !void {
                     },
                     .assert_trap => {
                         summary.asserts_trap += 1;
-                        const bytes = cur_module_bytes orelse continue;
+                        _ = cur_module_bytes orelse continue;
                         // Build args (skip if any typed arg can't
                         // parse — same gate as assert_return).
                         var call_args: [4]zwasm.Value = undefined;
@@ -201,14 +247,18 @@ pub fn main(init: std.process.Init) !void {
                             call_args[ai] = manifest_parser.runtimeToZwasm(rv, tv.ty);
                         }
                         if (!call_args_ok) continue;
+                        const instance = if (cur_instance) |*i| i else {
+                            summary.asserts_trap_fail += 1;
+                            continue;
+                        };
                         // assert_trap directives carry no results
-                        // section in the baked manifest — runOneTrap
+                        // section in the baked manifest — invokeInstanceTrap
                         // looks up sig.results.len internally. Any
                         // InvokeError counts as the expected trap;
                         // setup errors (compile/instantiate/sig
                         // lookup) propagate as RunError → counted as
                         // fail (the assert couldn't be evaluated).
-                        const outcome = manifest_parser.runOneTrap(gpa, bytes, d.func_name, call_args[0..d.args_len]) catch {
+                        const outcome = manifest_parser.invokeInstanceTrap(instance, d.func_name, call_args[0..d.args_len]) catch {
                             summary.asserts_trap_fail += 1;
                             continue;
                         };
@@ -260,7 +310,7 @@ pub fn main(init: std.process.Init) !void {
                     },
                     .assert_exception => {
                         summary.asserts_exception += 1;
-                        const bytes = cur_module_bytes orelse continue;
+                        _ = cur_module_bytes orelse continue;
                         // Parse args (same gate as assert_return /
                         // assert_trap); v128 / refs skip.
                         var call_args: [4]zwasm.Value = undefined;
@@ -275,7 +325,11 @@ pub fn main(init: std.process.Init) !void {
                             call_args[ai] = manifest_parser.runtimeToZwasm(rv, tv.ty);
                         }
                         if (!call_args_ok) continue;
-                        const outcome = manifest_parser.runOneExpectException(gpa, bytes, d.func_name, call_args[0..d.args_len]) catch {
+                        const instance = if (cur_instance) |*i| i else {
+                            summary.asserts_exception_fail += 1;
+                            continue;
+                        };
+                        const outcome = manifest_parser.invokeInstanceExpectException(instance, d.func_name, call_args[0..d.args_len]) catch {
                             summary.asserts_exception_fail += 1;
                             continue;
                         };
