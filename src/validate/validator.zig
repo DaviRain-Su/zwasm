@@ -1197,6 +1197,15 @@ pub const Validator = struct {
             // struct.new_default (sub-op 1): no pops, just typeidx;
             // push .structref.
             1 => try self.opStructNew(true),
+            // struct.get (sub-op 2): pop structref, push field valtype.
+            // Packed-type fields (i8/i16) reject — caller must use
+            // struct.get_s/_u for those (deferred per ADR-0121 D3).
+            2 => try self.opStructGet(),
+            // struct.get_s / struct.get_u (sub-ops 3/4): packed-type
+            // field access. ADR-0121 D3 defers packed types this cut.
+            3, 4 => return Error.NotImplemented,
+            // struct.set (sub-op 5): pop value + structref, push nothing.
+            5 => try self.opStructSet(),
             // array.new (sub-op 6): pop init Value + i32 size, push arrayref.
             6 => try self.opArrayNew(.with_init),
             // array.new_default (sub-op 7): pop i32 size only, push arrayref.
@@ -1292,6 +1301,50 @@ pub const Validator = struct {
             }
         }
         try self.pushType(.structref);
+    }
+
+    /// Resolve a (typeidx, fieldidx) pair to a StructDef field. Used
+    /// by struct.get / struct.set (cycle 17). Returns InvalidFuncIndex
+    /// on unknown typeidx, wrong kind, or out-of-range fieldidx.
+    fn lookupStructField(self: *Validator) Error!sections.StructFieldType {
+        const typeidx = try leb128.readUleb128(u32, self.body, &self.pos);
+        const fieldidx = try leb128.readUleb128(u32, self.body, &self.pos);
+        if (typeidx >= self.module_types_kinds.len) return Error.InvalidFuncIndex;
+        if (self.module_types_kinds[typeidx] != .structdef) return Error.InvalidFuncIndex;
+        const sd = self.struct_defs[typeidx] orelse return Error.InvalidFuncIndex;
+        if (fieldidx >= sd.fields.len) return Error.InvalidFuncIndex;
+        return sd.fields[fieldidx];
+    }
+
+    /// Wasm spec 3.0 §3.3.5.6.2 — `struct.get typeidx fieldidx`:
+    /// pop structref, push the named field's valtype. Packed-type
+    /// fields (i8/i16) rejected here — caller must use struct.get_s
+    /// or struct.get_u (ADR-0121 D3 defers packed types).
+    fn opStructGet(self: *Validator) Error!void {
+        const field = try self.lookupStructField();
+        // Packed types not yet representable as ValType (ADR-0121 D3);
+        // when they land, this guard widens to "non-packed → straight
+        // push; packed → reject as 'use get_s/_u'".
+        const top = try self.popAny();
+        switch (top) {
+            .bot => {},
+            .known => |t| if (t != .structref and t != .anyref and t != .eqref) return Error.StackTypeMismatch,
+        }
+        try self.pushType(field.valtype);
+    }
+
+    /// Wasm spec 3.0 §3.3.5.6.4 — `struct.set typeidx fieldidx`:
+    /// pop value (matching field.valtype) + pop structref, push
+    /// nothing. Field must be mutable.
+    fn opStructSet(self: *Validator) Error!void {
+        const field = try self.lookupStructField();
+        if (!field.mutable) return Error.StackTypeMismatch;
+        try self.popExpect(field.valtype);
+        const top = try self.popAny();
+        switch (top) {
+            .bot => {},
+            .known => |t| if (t != .structref and t != .anyref and t != .eqref) return Error.StackTypeMismatch,
+        }
     }
 
     const ArrayNewVariant = enum { with_init, default };

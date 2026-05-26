@@ -491,6 +491,147 @@ test "validate: array.len with i32 operand → StackTypeMismatch (10.G op_gc cyc
     try testing.expectError(Error.StackTypeMismatch, r);
 }
 
+test "validate: struct.get reads i32 field (10.G op_gc cycle 17)" {
+    // struct { i32 var }; body: struct.new_default 1 ; struct.get 1 0 ; end.
+    //   0xFB 0x01 0x01           — struct.new_default typeidx=1
+    //   0xFB 0x02 0x01 0x00      — struct.get typeidx=1 fieldidx=0
+    //   0x0B                     — end
+    const fn_sig: FuncType = .{ .params = &.{}, .results = &i32_arr };
+    const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
+    const kinds = [_]sections.TypeKind{ .func, .structdef };
+    const sd_fields = [_]sections.StructFieldType{
+        .{ .valtype = .i32, .mutable = true },
+    };
+    const struct_defs = [_]?sections.StructDef{ null, .{ .fields = &sd_fields } };
+    const array_defs = [_]?sections.ArrayDef{ null, null };
+    const body = [_]u8{ 0xFB, 0x01, 0x01, 0xFB, 0x02, 0x01, 0x00, 0x0B };
+    try validateFunctionWithGcTypes(
+        fn_sig,
+        &.{},
+        &body,
+        &.{},
+        &.{},
+        &module_types,
+        &kinds,
+        &struct_defs,
+        &array_defs,
+        0,
+        &.{},
+        0,
+    );
+}
+
+test "validate: struct.set on mutable field round-trips (10.G op_gc cycle 17)" {
+    // struct { i32 var }; body:
+    //   struct.new_default 1 ; i32.const 42 ; struct.set 1 0 ;
+    //   struct.new_default 1 ; end  (return any structref).
+    //   0xFB 0x01 0x01           — struct.new_default
+    //   0x41 0x2A                — i32.const 42
+    //   0xFB 0x05 0x01 0x00      — struct.set
+    //   0xFB 0x01 0x01           — struct.new_default (result)
+    //   0x0B
+    // Wait — struct.new_default pushes structref, struct.set pops
+    // structref+i32; we want the structref BELOW the i32 at pop
+    // time, so order is: structref, i32. Restructure:
+    //   0xFB 0x01 0x01           — push structref [SR]
+    //   0x41 0x2A                — push i32 [SR, i32]
+    //   0xFB 0x05 0x01 0x00      — set pops i32, then SR → []
+    //   0xFB 0x01 0x01           — push final structref result
+    const structref_arr = [_]ValType{.structref};
+    const fn_sig: FuncType = .{ .params = &.{}, .results = &structref_arr };
+    const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
+    const kinds = [_]sections.TypeKind{ .func, .structdef };
+    const sd_fields = [_]sections.StructFieldType{
+        .{ .valtype = .i32, .mutable = true },
+    };
+    const struct_defs = [_]?sections.StructDef{ null, .{ .fields = &sd_fields } };
+    const array_defs = [_]?sections.ArrayDef{ null, null };
+    const body = [_]u8{
+        0xFB, 0x01, 0x01,
+        0x41, 0x2A, 0xFB,
+        0x05, 0x01, 0x00,
+        0xFB, 0x01, 0x01,
+        0x0B,
+    };
+    try validateFunctionWithGcTypes(
+        fn_sig,
+        &.{},
+        &body,
+        &.{},
+        &.{},
+        &module_types,
+        &kinds,
+        &struct_defs,
+        &array_defs,
+        0,
+        &.{},
+        0,
+    );
+}
+
+test "validate: struct.set on immutable field → StackTypeMismatch (10.G op_gc cycle 17)" {
+    // struct { i32 const }; struct.set rejects.
+    const structref_arr = [_]ValType{.structref};
+    const fn_sig: FuncType = .{ .params = &.{}, .results = &structref_arr };
+    const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
+    const kinds = [_]sections.TypeKind{ .func, .structdef };
+    const sd_fields = [_]sections.StructFieldType{
+        .{ .valtype = .i32, .mutable = false },
+    };
+    const struct_defs = [_]?sections.StructDef{ null, .{ .fields = &sd_fields } };
+    const array_defs = [_]?sections.ArrayDef{ null, null };
+    const body = [_]u8{
+        0xFB, 0x01, 0x01,
+        0x41, 0x2A, 0xFB,
+        0x05, 0x01, 0x00,
+        0xFB, 0x01, 0x01,
+        0x0B,
+    };
+    const r = validateFunctionWithGcTypes(
+        fn_sig,
+        &.{},
+        &body,
+        &.{},
+        &.{},
+        &module_types,
+        &kinds,
+        &struct_defs,
+        &array_defs,
+        0,
+        &.{},
+        0,
+    );
+    try testing.expectError(Error.StackTypeMismatch, r);
+}
+
+test "validate: struct.get with out-of-range fieldidx → InvalidFuncIndex (10.G op_gc cycle 17)" {
+    // struct { i32 } has only fieldidx 0; access fieldidx 7.
+    const fn_sig: FuncType = .{ .params = &.{}, .results = &i32_arr };
+    const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
+    const kinds = [_]sections.TypeKind{ .func, .structdef };
+    const sd_fields = [_]sections.StructFieldType{
+        .{ .valtype = .i32, .mutable = true },
+    };
+    const struct_defs = [_]?sections.StructDef{ null, .{ .fields = &sd_fields } };
+    const array_defs = [_]?sections.ArrayDef{ null, null };
+    const body = [_]u8{ 0xFB, 0x01, 0x01, 0xFB, 0x02, 0x01, 0x07, 0x0B };
+    const r = validateFunctionWithGcTypes(
+        fn_sig,
+        &.{},
+        &body,
+        &.{},
+        &.{},
+        &module_types,
+        &kinds,
+        &struct_defs,
+        &array_defs,
+        0,
+        &.{},
+        0,
+    );
+    try testing.expectError(Error.InvalidFuncIndex, r);
+}
+
 test "validate: array.new_default round-trips (10.G op_gc cycle 16)" {
     // Types: [() -> (arrayref), array<i32 var>].
     //   0x41 0x05        — i32.const 5 (size)
