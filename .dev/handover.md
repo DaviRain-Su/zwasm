@@ -6,14 +6,13 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `c05b0393` — **D-183 CLOSED**. Cross-frame EH now
-  works end-to-end on Mac aarch64 (`runI32Export: cross-frame
-  throw — callee throws, caller's try_table catches` returns
-  42). Two fixes: module-relative PC normalisation
-  (code_map.normalizeForUnwind + dispatchThrow's initial_pc
-  use `ret_addr - block_addr`) + DWARF-convention ret-addr-1
-  in frame_chain_adapter. Cross-compile x86_64-linux clean;
-  ubuntu verify pending Step 0.7.
+- **HEAD**: `0b51e6da` — D-183 CLOSED on Mac aarch64
+  (`c05b0393` module-relative PC + DWARF ret_addr-1). Linux
+  x86_64 SysV SEGVs at `loadFrame.slots[0]` (catch doesn't
+  match → walker traverses into host frames where Zig 0.16
+  self-hosted backend doesn't maintain RBP chaining). D-184
+  filed with 4 investigation paths; cross-frame test gated
+  Mac-aarch64-only.
 - **10.D = CLOSED 2026-05-25**; **10.M (incl D-181 ungate),
   10.R 1..5, 10.TC-1, 10.G-i31-ops/2/3, 10.E** (IT-1..IT-6 +
   10.E-N-1..N-3 + 10.E-5b/5c + 10.E-payload-prop bundle):
@@ -38,6 +37,9 @@
 
 ## Next candidates (names + Refs)
 
+- **D-184 discharge** — x86_64 SysV cross-frame catch-match
+  gap. 4 investigation paths in the debt row; probe-driven
+  cycle.
 - **10.TC codegen** — return_call / return_call_indirect /
   return_call_ref JIT emit + frame_teardown helper (ADR-0112,
   ADR-0113 §A foundations shipped pre-bundle). Multi-cycle
