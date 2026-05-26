@@ -50,18 +50,72 @@ pub const CodeEntry = codes_mod.CodeEntry;
 pub const Codes = codes_mod.Codes;
 pub const decodeCodes = codes_mod.decodeCodes;
 
+/// Per ADR-0121 D2: kind tag for each type-section entry. Existing
+/// `Types.items[idx]: FuncType` slot is consulted only when
+/// `kinds[idx] == .func`; struct / array defs live in the sparse
+/// side tables below.
+pub const TypeKind = enum(u8) { func, structdef, arraydef };
+
+/// Per ADR-0121 D3: shared field-type carrier for struct fields +
+/// array elements. Packed types (i8 / i16) deferred per D3; fields
+/// are restricted to the existing `ValType` set for ADR-0121 first cut.
+pub const StructFieldType = struct {
+    valtype: ValType,
+    mutable: bool,
+};
+
+/// Per ADR-0121 D2: struct typedef. Field list owned by the parent
+/// `Types` arena.
+pub const StructDef = struct {
+    fields: []const StructFieldType,
+};
+
+/// Per ADR-0121 D2: array typedef. Single element-type carrier
+/// (arrays share the field-type encoding per Wasm 3.0 GC §5).
+pub const ArrayDef = struct {
+    element: StructFieldType,
+};
+
 pub const Types = struct {
     arena: std.heap.ArenaAllocator,
     items: []FuncType,
+    /// Parallel to `items`; tags each entry's typedef kind.
+    kinds: []TypeKind,
+    /// Sparse; non-null iff `kinds[i] == .structdef`.
+    struct_defs: []?StructDef,
+    /// Sparse; non-null iff `kinds[i] == .arraydef`.
+    array_defs: []?ArrayDef,
 
     pub fn deinit(self: *Types) void {
         self.arena.deinit();
     }
 };
 
+/// Decode a single field-type triple per Wasm 3.0 GC §5: storage
+/// type byte (one ValType byte; packed types deferred per ADR-0121
+/// D3) + mutability byte (0x00 const, 0x01 var).
+fn readFieldType(body: []const u8, pos: *usize) Error!StructFieldType {
+    const valtype = try init_expr.readValType(body, pos);
+    if (pos.* >= body.len) return Error.UnexpectedEnd;
+    const mut_byte = body[pos.*];
+    pos.* += 1;
+    const mutable = switch (mut_byte) {
+        0x00 => false,
+        0x01 => true,
+        else => return Error.InvalidFunctype,
+    };
+    return .{ .valtype = valtype, .mutable = mutable };
+}
+
 /// Decode the body of a type section (`SectionId.@"type"`):
-///   vec(functype)
-/// where `functype = 0x60 vec(valtype) vec(valtype)`.
+///   vec(typedef)
+/// where typedef is one of:
+///   functype   = 0x60 vec(valtype) vec(valtype)        (Wasm 1.0)
+///   structtype = 0x5F vec(fieldtype)                   (Wasm 3.0 GC §5; ADR-0121 D4)
+///   arraytype  = 0x5E fieldtype                        (Wasm 3.0 GC §5; ADR-0121 D4)
+/// per ADR-0121 D1 the `items` slot stays `FuncType`-typed; non-func
+/// entries land as zero-initialised placeholders consulted only via
+/// the parallel `kinds` array.
 pub fn decodeTypes(parent_alloc: Allocator, body: []const u8) Error!Types {
     var arena = std.heap.ArenaAllocator.init(parent_alloc);
     errdefer arena.deinit();
@@ -70,25 +124,56 @@ pub fn decodeTypes(parent_alloc: Allocator, body: []const u8) Error!Types {
     var pos: usize = 0;
     const count = try leb128.readUleb128(u32, body, &pos);
     const items = try alloc.alloc(FuncType, count);
+    const kinds = try alloc.alloc(TypeKind, count);
+    const struct_defs = try alloc.alloc(?StructDef, count);
+    const array_defs = try alloc.alloc(?ArrayDef, count);
+    for (struct_defs) |*s| s.* = null;
+    for (array_defs) |*a| a.* = null;
 
-    for (items) |*ft| {
+    for (items, 0..) |*ft, i| {
         if (pos >= body.len) return Error.UnexpectedEnd;
-        if (body[pos] != 0x60) return Error.InvalidFunctype;
-        pos += 1;
+        switch (body[pos]) {
+            0x60 => {
+                pos += 1;
+                const param_count = try leb128.readUleb128(u32, body, &pos);
+                const params = try alloc.alloc(ValType, param_count);
+                for (params) |*p| p.* = try init_expr.readValType(body, &pos);
 
-        const param_count = try leb128.readUleb128(u32, body, &pos);
-        const params = try alloc.alloc(ValType, param_count);
-        for (params) |*p| p.* = try init_expr.readValType(body, &pos);
+                const result_count = try leb128.readUleb128(u32, body, &pos);
+                const results = try alloc.alloc(ValType, result_count);
+                for (results) |*r| r.* = try init_expr.readValType(body, &pos);
 
-        const result_count = try leb128.readUleb128(u32, body, &pos);
-        const results = try alloc.alloc(ValType, result_count);
-        for (results) |*r| r.* = try init_expr.readValType(body, &pos);
-
-        ft.* = .{ .params = params, .results = results };
+                ft.* = .{ .params = params, .results = results };
+                kinds[i] = .func;
+            },
+            0x5F => {
+                pos += 1;
+                const field_count = try leb128.readUleb128(u32, body, &pos);
+                const fields = try alloc.alloc(StructFieldType, field_count);
+                for (fields) |*f| f.* = try readFieldType(body, &pos);
+                ft.* = .{ .params = &.{}, .results = &.{} };
+                kinds[i] = .structdef;
+                struct_defs[i] = .{ .fields = fields };
+            },
+            0x5E => {
+                pos += 1;
+                const element = try readFieldType(body, &pos);
+                ft.* = .{ .params = &.{}, .results = &.{} };
+                kinds[i] = .arraydef;
+                array_defs[i] = .{ .element = element };
+            },
+            else => return Error.InvalidFunctype,
+        }
     }
 
     if (pos != body.len) return Error.TrailingBytes;
-    return .{ .arena = arena, .items = items };
+    return .{
+        .arena = arena,
+        .items = items,
+        .kinds = kinds,
+        .struct_defs = struct_defs,
+        .array_defs = array_defs,
+    };
 }
 
 /// Decode the body of a function section (`SectionId.function`):
@@ -579,8 +664,84 @@ test "decodeTypes: two functypes preserved in order" {
     try testing.expectEqualSlices(ValType, &[_]ValType{.i64}, t.items[1].results);
 }
 
-test "decodeTypes: rejects missing 0x60 prefix" {
+test "decodeTypes: rejects unknown typedef prefix" {
+    // 0x61 is unassigned in the Wasm 3.0 typedef space (0x60 func,
+    // 0x5F struct, 0x5E array). Other prefixes must reject.
     const body = [_]u8{ 0x01, 0x61, 0x00, 0x00 };
+    try testing.expectError(Error.InvalidFunctype, decodeTypes(testing.allocator, &body));
+}
+
+test "decodeTypes: single struct with one i32 const field (ADR-0121 D4; 10.G op_gc cycle 14)" {
+    // structtype = 0x5F vec(fieldtype); fieldtype = valtype mut_byte.
+    // Encoding: count=1, 0x5F, field_count=1, valtype=i32(0x7F), mut=0x00.
+    const body = [_]u8{ 0x01, 0x5F, 0x01, 0x7F, 0x00 };
+    var t = try decodeTypes(testing.allocator, &body);
+    defer t.deinit();
+    try testing.expectEqual(@as(usize, 1), t.items.len);
+    try testing.expectEqual(TypeKind.structdef, t.kinds[0]);
+    try testing.expect(t.struct_defs[0] != null);
+    const sd = t.struct_defs[0].?;
+    try testing.expectEqual(@as(usize, 1), sd.fields.len);
+    try testing.expectEqual(ValType.i32, sd.fields[0].valtype);
+    try testing.expectEqual(false, sd.fields[0].mutable);
+}
+
+test "decodeTypes: multi-field struct preserves field order + mutability (ADR-0121 D4)" {
+    // struct { i32 const, i64 var, f32 const }.
+    const body = [_]u8{
+        0x01, 0x5F,
+        0x03,
+        0x7F, 0x00, // i32 const
+        0x7E, 0x01, // i64 var
+        0x7D, 0x00, // f32 const
+    };
+    var t = try decodeTypes(testing.allocator, &body);
+    defer t.deinit();
+    const sd = t.struct_defs[0].?;
+    try testing.expectEqual(@as(usize, 3), sd.fields.len);
+    try testing.expectEqual(ValType.i32, sd.fields[0].valtype);
+    try testing.expectEqual(false, sd.fields[0].mutable);
+    try testing.expectEqual(ValType.i64, sd.fields[1].valtype);
+    try testing.expectEqual(true, sd.fields[1].mutable);
+    try testing.expectEqual(ValType.f32, sd.fields[2].valtype);
+    try testing.expectEqual(false, sd.fields[2].mutable);
+}
+
+test "decodeTypes: array of i32 var (ADR-0121 D4; 10.G op_gc cycle 14)" {
+    // arraytype = 0x5E fieldtype; one element-type triple.
+    const body = [_]u8{ 0x01, 0x5E, 0x7F, 0x01 };
+    var t = try decodeTypes(testing.allocator, &body);
+    defer t.deinit();
+    try testing.expectEqual(TypeKind.arraydef, t.kinds[0]);
+    try testing.expect(t.array_defs[0] != null);
+    const ad = t.array_defs[0].?;
+    try testing.expectEqual(ValType.i32, ad.element.valtype);
+    try testing.expectEqual(true, ad.element.mutable);
+}
+
+test "decodeTypes: mixed func + struct + array preserves kinds in order (ADR-0121 D4)" {
+    // Three entries: () -> (), struct { i32 var }, array of i64 const.
+    const body = [_]u8{
+        0x03,
+        0x60, 0x00, 0x00, // () -> ()
+        0x5F, 0x01, 0x7F, 0x01, // struct { i32 var }
+        0x5E, 0x7E, 0x00, // array of i64 const
+    };
+    var t = try decodeTypes(testing.allocator, &body);
+    defer t.deinit();
+    try testing.expectEqual(@as(usize, 3), t.items.len);
+    try testing.expectEqual(TypeKind.func, t.kinds[0]);
+    try testing.expectEqual(TypeKind.structdef, t.kinds[1]);
+    try testing.expectEqual(TypeKind.arraydef, t.kinds[2]);
+    try testing.expect(t.struct_defs[0] == null);
+    try testing.expect(t.struct_defs[1] != null);
+    try testing.expect(t.struct_defs[2] == null);
+    try testing.expect(t.array_defs[2] != null);
+}
+
+test "decodeTypes: rejects invalid mutability byte (ADR-0121 D4)" {
+    // mut byte must be 0x00 or 0x01; 0x02 rejects.
+    const body = [_]u8{ 0x01, 0x5F, 0x01, 0x7F, 0x02 };
     try testing.expectError(Error.InvalidFunctype, decodeTypes(testing.allocator, &body));
 }
 

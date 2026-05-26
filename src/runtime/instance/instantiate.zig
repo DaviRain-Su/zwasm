@@ -591,7 +591,13 @@ pub fn instantiateRuntime(
     const types = if (type_section_opt) |s|
         try sections.decodeTypes(a, s.body)
     else
-        sections.Types{ .arena = std.heap.ArenaAllocator.init(a), .items = &.{} };
+        sections.Types{
+            .arena = std.heap.ArenaAllocator.init(a),
+            .items = &.{},
+            .kinds = &.{},
+            .struct_defs = &.{},
+            .array_defs = &.{},
+        };
 
     var funcs: []zir.ZirFunc = &.{};
     if (code_section_opt) |code_section| {
