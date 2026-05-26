@@ -129,6 +129,68 @@ fn mapParseErr(err: std.fmt.ParseIntError) PayloadError {
     };
 }
 
+const zwasm_root = @import("zwasm");
+
+pub const RunError = error{
+    LoadFailed,
+    InvokeFailed,
+} || std.mem.Allocator.Error;
+
+/// Cycle 3: compile + invoke a wasm module's named export with
+/// typed args, return the first result Value. Per ADR-0109 the
+/// native Zig API (`zwasm.Engine` + `zwasm.Linker` +
+/// `zwasm.Instance.invoke`) is the canonical path — no c_api
+/// veneer.
+///
+/// Args + results use `zwasm.Value` (the Native API tagged union;
+/// f32/f64 stored as bit patterns). runtime.Value (from cycle 2's
+/// parsePayload) is the *internal* extern union; the caller
+/// converts via the small `runtimeToZwasm` adapter below.
+///
+/// **Bytes-in, not path-in**: the caller supplies the wasm byte
+/// slice (typically via `@embedFile` at the test call site). This
+/// keeps runOne FS-free + io-free → callable from any unit test
+/// without `std.process.Init` ceremony.
+///
+/// Scope (deliberate; multi-result + void lands when a manifest
+/// entry needs it):
+///   - exactly 1 result expected; void-returning funcs unsupported.
+///   - invocation errors flatten to `RunError.InvokeFailed`;
+///     trap-class discrimination is a follow-on cycle.
+pub fn runOne(
+    alloc: std.mem.Allocator,
+    wasm_bytes: []const u8,
+    func_name: []const u8,
+    args: []const zwasm_root.Value,
+) RunError!zwasm_root.Value {
+    var engine = zwasm_root.Engine.init(alloc, .{}) catch return RunError.OutOfMemory;
+    defer engine.deinit();
+    var module = engine.compile(wasm_bytes) catch return RunError.InvokeFailed;
+    defer module.deinit();
+    var linker = zwasm_root.Linker.init(&engine);
+    defer linker.deinit();
+    var instance = linker.instantiate(&module) catch return RunError.InvokeFailed;
+    defer instance.deinit();
+
+    var results: [1]zwasm_root.Value = undefined;
+    instance.invoke(func_name, args, results[0..1]) catch return RunError.InvokeFailed;
+    return results[0];
+}
+
+/// Adapter for the cycle-2 parsePayload output (runtime.Value
+/// extern union) → cycle-3 runOne input (zwasm.Value tagged union).
+/// The two types differ structurally: runtime.Value stores floats
+/// natively; zwasm.Value stores floats as bit patterns (u32/u64).
+/// This adapter handles the i32/i64/f32/f64 arms; v128 / ref arms
+/// land when a manifest needs them.
+pub fn runtimeToZwasm(rv: runtime.Value, ty: []const u8) zwasm_root.Value {
+    if (std.mem.eql(u8, ty, "i32")) return .{ .i32 = rv.i32 };
+    if (std.mem.eql(u8, ty, "i64")) return .{ .i64 = rv.i64 };
+    if (std.mem.eql(u8, ty, "f32")) return .{ .f32 = @bitCast(rv.f32) };
+    if (std.mem.eql(u8, ty, "f64")) return .{ .f64 = @bitCast(rv.f64) };
+    unreachable; // caller already validated via parsePayload
+}
+
 /// Parse one manifest line into a `Directive`. The caller owns
 /// `args_buf` and `results_buf` (typically per-line stack
 /// buffers of length 4 each — manifest cap inferred from the
@@ -373,4 +435,19 @@ test "parsePayload + parseLine round-trip: assert_return fac-acc i64:5 i64:1 →
     try testing.expectEqual(@as(i64, 5), a0.i64);
     try testing.expectEqual(@as(i64, 1), a1.i64);
     try testing.expectEqual(@as(i64, 120), r0.i64);
+}
+
+test "runOne e2e: return_call.0.wasm type-i32 () -> i32:306 (10.TC verify)" {
+    // First end-to-end manifest entry execution via the Native Zig
+    // API. Exercises the same-module direct tail-call codegen from
+    // the just-closed 10.TC-emit-body bundle: fn `type-i32` ends in
+    // `return_call type-first` (per the wast source); type-first
+    // returns 306 (= 0x132).
+    //
+    // @embedFile pins the fixture at compile time — keeps runOne
+    // FS-free + io-free, and the test fails fast if the corpus is
+    // missing (rather than skipping silently).
+    const wasm_bytes = @embedFile("wasm-3.0-assert/tail-call/return_call/return_call.0.wasm");
+    const result = try runOne(testing.allocator, wasm_bytes, "type-i32", &.{});
+    try testing.expectEqual(@as(i32, 306), result.i32);
 }
