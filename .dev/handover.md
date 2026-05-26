@@ -6,11 +6,11 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `b5b3a39f` — feat(p10): struct/array typedef parse +
-  Types side-tables (10.G op_gc cycle 14; ADR-0121 D1+D2+D3+D4).
-  decodeTypes now dispatches on 0x60/0x5F/0x5E; sparse side-
-  tables (kinds/struct_defs/array_defs) preserved across the
-  arena lifetime. Validator integration (D5) deferred to cycle 15.
+- **HEAD**: `06a8dff5` — feat(p10): struct.new + struct.new_default
+  validator+lower (10.G op_gc cycle 15; ADR-0121 D5). Sub-ops 0/1
+  consume typeidx from the cycle-14 side-tables; pre-RTT push
+  .structref. New validateFunctionWithGcTypes entry point.
+  Interp deferred to ADR-0116 RTT amendment.
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
 - **Active debt rows**: 18 — all `blocked-by:` with named
   structural barriers. Zero `now`-status rows.
@@ -56,21 +56,19 @@ future op_gc consumers. EH 40 fails still gated on the bigger
 ## Active bundle
 
 - **Bundle-ID**: 10.G-op_gc
-- **Cycles-remaining**: ~12 (per `.dev/phase10_g_op_bundle_plan.md`)
+- **Cycles-remaining**: ~11 (per `.dev/phase10_g_op_bundle_plan.md`)
 - **Continuity-memo**: Cycles 1-6 substrate. Cycles 7-12 wired
-  no-RTT GC ops (test/cast/br_on_cast/convert/eq/array.len).
-  Cycle 13 (`3b3b8654`) ADR-0121 filed. Cycle 14 (`b5b3a39f`)
-  implemented ADR-0121 D1+D2+D3+D4 — decodeTypes accepts
-  0x5F/0x5E; side-tables in place. Cycle 15 (next): wire
-  struct.new + struct.new_default validator+lower (sub-ops
-  0/1). Validator consumes typeidx (uleb32), looks up
-  Types.kinds[idx] == .structdef + Types.struct_defs[idx].?,
-  pops one Value per field in reverse declared order, pushes
-  .structref. Lower-side packs typeidx in payload. Interp
-  handler stubs trap NotImplemented (struct allocation needs
-  GC heap StructInfo header layout — ADR-0116 amendment
-  forthcoming). Cycle 16+: struct.get / struct.set + array.new
-  family vertical slices.
+  no-RTT GC ops. Cycle 13 (`3b3b8654`) ADR-0121 filed. Cycle 14
+  (`b5b3a39f`) decodeTypes 0x5F/0x5E + side-tables. Cycle 15
+  (`06a8dff5`) struct.new + struct.new_default validator+lower
+  via validateFunctionWithGcTypes. Cycle 16 (next): mirror
+  struct.new for array — array.new (sub-op 6) + array.new_default
+  (sub-op 7) + array.new_fixed (sub-op 8). All consume typeidx
+  (look up Types.array_defs[idx]); array.new pops len+init,
+  array.new_default pops just len, array.new_fixed reads literal
+  N + pops N values. Push .arrayref. Cycle 17+: struct.get /
+  struct.get_s / struct.get_u / struct.set + array.get / array.set
+  validator+lower (field/element-index immediates).
 - **Exit-condition**: wasm-3.0-assert exception-handling /
   function-references / gc corpora open for op_gc dispatch +
   at least the first i31 spec directive flips green via the
