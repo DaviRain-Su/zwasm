@@ -6,11 +6,13 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `78eb1d14` — 10.E-payload-prop Cycles 1-4 shipped.
-  Cycle 4 replaces Cycle 3's zero-write with real pop-N+store-N
-  in throw.emit (both arches; gpr-class only per ADR-0120 §3).
-  IT-6 N=0 tagged-catch tests still green. Mac local + cross-
-  compile x86_64-linux green. Ubuntu verify pending Step 0.7.
+- **HEAD**: `c90ba93f` — 10.E-payload-prop Cycles 1-4 shipped +
+  tripwire test + D-182 (catch landing pad load+push still
+  pending). Throw side end-to-end: Runtime+JitRuntime fields,
+  EmitCtx threading, throw.emit pop-N+store-N. Catch side is
+  D-182 follow-on (regalloc-coordinated emit at catch-label
+  end-op-patch site). Mac local + cross-compile x86_64-linux
+  green. Ubuntu verify pending Step 0.7.
 - **10.D = CLOSED 2026-05-25**, **10.M (incl D-181 ungate),
   10.R 1..5, 10.TC-1, 10.G-i31-ops/2/3, 10.E (IT-1..IT-6 codegen
   foundation + interp catch_/catch_all dispatch + tag-equality)**:
@@ -45,37 +47,36 @@
   10.R (5/5; gated on 10.G) / 10.TC.
 - Pending (2): 10.G / 10.P (close gate).
 
-## Active task — Cycle 5 of 10.E-payload-prop bundle (last)
+## Active task — D-182 discharge (10.E-payload-prop bundle close)
 
-Cycle 4 (`78eb1d14`): throw.emit pop+store-N + write N. The
-payload now flows throw-site → eh_payload_buf. Cycle 5 closes
-the bundle with the catch-side load+push.
+Cycles 1-4 + tripwire shipped through `c90ba93f`. The bundle's
+remaining work is captured in D-182 (`.dev/debt.md`): JIT catch
+landing pad load+push synthesis.
 
-**NEXT (Cycle 5)** — catch landing pad load+push + end-to-end
-test:
-- Identify the emit point: when a catch label's matching `end`
-  patches `Builder.entries[entry_idx].landing_pad_pc`, this is
-  the byte position where the catch block's body begins. The
-  load+push code must sit between landing_pad_pc and the block
-  body. Two options:
-  (a) emit the load+push code BEFORE patching landing_pad_pc;
-      landing_pad_pc points to the load+push sequence's first
-      byte (preferred — minimal API change).
-  (b) emit landing pad as a fixed-size stub elsewhere and patch
-      landing_pad_pc to it (more flexible but adds linker work).
-- Pick (a). At the catch-label `end` op in arm64/emit.zig +
-  x86_64/emit.zig, look up the matching HandlerEntry's kind +
-  tag_idx → tag_param_counts[tag_idx] = N. Emit:
-  - For i in [0, N): LDR Xstage, [X19, #(eh_payload_buf_off
-    + i*8)]; allocate a fresh vreg and store via gprStoreSpilled.
-  - For catch_ref / catch_all_ref: additionally LDR exnref
-    pointer + push as fresh vreg (deferred to v0.2 per ADR-0120
-    §3 if exnref is v0.2 scope).
-- Same-cycle end-to-end test: `runI32Export: throw + catch_
-  with i32 payload returns 88` — currently silent-drops (returns
-  0); ungate to green after Cycle 5 lands.
-- Cycle 6 (post-bundle): spec-corpus wiring + close 10.E close
-  gate.
+**Implementation plan** (D-182 discharge):
+- Emit point: `arm64/emit.zig:1302` and analogous x86_64 site
+  where `eh_builder.entries[fx.entry_idx].landing_pad_pc` is set
+  per matching catch fixup.
+- For each matching fixup with `entry.kind in {.catch_,
+  .catch_ref}`: snapshot `clause_start = buf.items.len`; look
+  up `N = ctx.tag_param_counts[entry.tag_idx.?]`; emit per-clause
+  prelude (load `eh_payload_buf[0..N]` into block-result vreg
+  slots; for catch_ref additionally push exnref pointer — defer
+  per ADR-0120 §3); emit JMP-to-common placeholder; set
+  `landing_pad_pc = clause_start`.
+- After all matching fixups: snapshot `common_pc =
+  buf.items.len`; patch each JMP placeholder to common_pc.
+- The block-result vreg(s) sit at `ctx.pushed_vregs.items[
+  pushed_vregs.items.len - N .. pushed_vregs.items.len]` after
+  `op_control.emitEndIntra` runs (the inner block's body
+  produced N result values; for catch path those are the
+  payload values overwriting the inner-body's). Use
+  `gprStoreSpilled` to write loaded payload into each vreg's
+  spill slot.
+- Cycle 5b (after D-182 lands): ungate the tripwire test
+  `runI32Export: throw + catch_ with i32 payload returns 88`
+  → expect 88.
+- Cycle 6 (bundle close): spec-corpus wiring + close 10.E.
 
 ## Next candidates (after bundle close)
 
