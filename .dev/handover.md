@@ -6,11 +6,11 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `8f6b69a7` — feat(p10): array.len vertical slice
-  (10.G op_gc cycle 12). Sub-op 15 wired full lower+validator+
-  interp; cycle-12 stub traps NullReference (array creation
-  ops + ArrayInfo RTT haven't landed). All no-RTT 0xFB sub-ops
-  now have parse paths.
+- **HEAD**: `3b3b8654` — docs(p10): file ADR-0121 struct/array
+  typedef parse + RTT layout (10.G op_gc cycle 13). Architectural
+  prep for the next sub-bundle (struct.new + array.new vertical
+  slices). Sequences the 6-decision path; sub-cycle implementation
+  lands cycle 14.
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
 - **Active debt rows**: 18 — all `blocked-by:` with named
   structural barriers. Zero `now`-status rows.
@@ -56,7 +56,7 @@ future op_gc consumers. EH 40 fails still gated on the bigger
 ## Active bundle
 
 - **Bundle-ID**: 10.G-op_gc
-- **Cycles-remaining**: ~14 (per `.dev/phase10_g_op_bundle_plan.md`)
+- **Cycles-remaining**: ~13 (per `.dev/phase10_g_op_bundle_plan.md`)
 - **Continuity-memo**: Cycles 1-6 substrate (ValType extension +
   parser/validator wires). Cycle 7 (`63cf843a`) ref.test family.
   Cycle 8 (`93e63ba7`) ref.cast family. Cycle 9 (`a262a7d2`)
@@ -64,15 +64,15 @@ future op_gc consumers. EH 40 fails still gated on the bigger
   Cycle 10 (`2dc566b1`) any↔extern convert vertical slice.
   Cycle 11 (`1c57e8a1`) ref.eq vertical slice. Cycle 12
   (`8f6b69a7`) array.len vertical slice (NullReference stub).
-  Cycle 13 (next): struct ops architectural prep — extend
-  decodeTypes in src/parse/sections.zig to recognise 0x5F
-  (struct-type) + 0x5E (array-type) prefixes; add StructDef /
-  ArrayDef + Types.struct_defs / array_defs side-tables; pure
-  parser-side substrate with same-cycle decoder tests (no
-  validator-side consumer yet). Cycle 14: file ADR amendment
-  (ADR-0116 or new ADR-0121) for StructInfo / ArrayInfo runtime
-  layout (RTT 8-deep display). Cycles 15+: struct.new family +
-  array.new family vertical slices once RTT lands.
+  Cycle 13 (`3b3b8654`) ADR-0121 filed for struct/array typedef
+  parse + RTT layout. Cycle 14 (next): implement ADR-0121 D1+D2
+  — extend src/parse/sections.zig decodeTypes for 0x5F + 0x5E
+  prefixes; add TypeKind / StructDef / ArrayDef + Types.kinds /
+  struct_defs / array_defs side-tables; same-cycle decoder tests
+  (2-3 round-trip tests covering single-field + multi-field
+  struct + 1D array). Cycle 15: validator integration for
+  struct.new / struct.new_default. Cycle 16+: struct.get /
+  struct.set / array.new family vertical slices.
 - **Exit-condition**: wasm-3.0-assert exception-handling /
   function-references / gc corpora open for op_gc dispatch +
   at least the first i31 spec directive flips green via the
