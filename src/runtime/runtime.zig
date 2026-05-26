@@ -212,6 +212,24 @@ pub const Runtime = struct {
     /// production pipeline has populated this field.
     tag_param_counts: []const u32 = &.{},
 
+    /// Wasm 3.0 EH (10.E-payload-prop Cycle 1; ADR-0120) — JIT
+    /// payload staging region. Written by JIT throw sites (each
+    /// pops N vregs and stores i ∈ [0, N) at `eh_payload_buf[i]`,
+    /// where N = `tag_param_counts[tag_idx]`), read by JIT catch
+    /// landing pads (push each as a fresh vreg before the catch
+    /// block's body). Width = u64 covers i32/i64/f32/f64 tag
+    /// params; v128/exnref tag params are out of scope for v0.1
+    /// per ADR-0120 Consequence §3. Length-16 matches ADR-0114
+    /// D1's `Exception.payload[16]Value` inline cap. Default
+    /// zero-init keeps existing test paths behaviour-preserving
+    /// (interp throwOp uses operand_buf directly; this slot is
+    /// JIT-only). Currently unconsumed — Cycle 2 wires throw.emit
+    /// writes; Cycle 3 wires try_table.emit landing-pad reads.
+    eh_payload_buf: [16]u64 = [_]u64{0} ** 16,
+    /// EH payload length (N from `tag_param_counts[tag_idx]` at
+    /// the most recent throw site). See `eh_payload_buf`.
+    eh_payload_len: u32 = 0,
+
     /// Wasm 3.0 EH (10.E-5d / 10.E-exnref-a) — in-flight exception
     /// slot for cross-frame unwind. `throwOp` allocates an
     /// `Exception` heap object (tracked in `live_exceptions` for
@@ -361,6 +379,16 @@ test "Runtime.init / deinit clean (no allocations)" {
     try testing.expectEqual(@as(usize, 0), r.globals.len);
     try testing.expectEqual(@as(u32, 0), r.operand_len);
     try testing.expectEqual(@as(u32, 0), r.frame_len);
+}
+
+test "Runtime.init: EH payload staging defaults (ADR-0120 10.E-payload-prop Cycle 1)" {
+    var r = Runtime.init(testing.allocator);
+    defer r.deinit();
+    try testing.expectEqual(@as(u32, 0), r.eh_payload_len);
+    try testing.expectEqual(@as(usize, 16), r.eh_payload_buf.len);
+    for (r.eh_payload_buf) |slot| {
+        try testing.expectEqual(@as(u64, 0), slot);
+    }
 }
 
 test "Runtime.setMemory0Bytes: preserves memory ↔ memories[0].bytes alias (ADR-0111 D2)" {
