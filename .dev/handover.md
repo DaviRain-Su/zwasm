@@ -6,9 +6,9 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `ae2abab7` — x86_64 return_call_indirect emit body
-  (10.TC emit-body bundle closes here; return_call_ref carved
-  out as D-186, blocked-by 10.R typed-funcref impl).
+- **HEAD**: `528b1636` — 10.R-3 br_on_non_null phase-log backfill
+  (impl was at `b31dc63f`; this commit reconciles the sub-chunk
+  ledger). 10.TC-emit-body bundle closed at `c329c270`.
 - **ROADMAP §10 progress**: 7/13 DONE (10.0/10.C9/10.J/10.F/
   10.Z/10.D/10.T), 4 IN-PROGRESS (10.M/10.R/10.TC/10.E with
   10.E core + 10.TC same-module direct + indirect substantively
@@ -47,17 +47,19 @@ Observable deltas at close (HEAD `ae2abab7`):
 - **10.E spec corpus runner** — `spec_assert_runner_wasm_3_0.zig`
   is a 130-line skeleton (enumerate-and-count). Adding actual
   assert_return / assert_trap / assert_exception execution is
-  multi-cycle.
-- **10.R sub-chunks 10.R-3..5** — `br_on_non_null` / `call_ref` /
-  `return_call_ref`. Unblocks D-186. The `(ref $sig)` typed-
-  funcref Value shape lands at 10.R-4 (call_ref codegen)
-  per the row's scope.
+  multi-cycle; natural next bundle. Smallest first step: pick
+  one wasm-3.0-assert corpus directory and add the
+  assert_return execution path through `cli_run.runWasmCaptured`
+  comparing return values against the spec's expected results.
+- **10.R-4/5** — `call_ref` / `return_call_ref`. Needs the
+  `(ref $sig)` typed-funcref Value shape decision first (per
+  D-186). Survey-then-spike chunk before implementation.
 - **10.G WasmGC** — large multi-cycle bundle; design plan +
   ADRs (0115/0116/0117) already shipped.
 - **10.M-realworld** — toolchain-blocked (D-179 wabt 1.0.41+).
-- **10.E follow-on**: c_api tag accessors, cross-module EH
-  propagation (v0.2), eh_frequency_runner bench scaffolding
-  (Phase 8b).
+- **10.E follow-on**: c_api tag accessors (include/wasm.h needs
+  upstream EH-proposal sync first), cross-module EH propagation
+  (v0.2), eh_frequency_runner bench scaffolding (Phase 8b).
 
 ## Open questions / blockers
 
