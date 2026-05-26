@@ -1131,7 +1131,8 @@ pub const Validator = struct {
     /// Encoding: 0xFC <uleb32 sub-opcode>.
     /// Wasm 3.0 GC prefix (0xFB). Dispatches i31 sub-trio (28-30)
     /// + ref.test / ref.test_null (20 / 21; 10.G op_gc cycle 7)
-    /// + ref.cast / ref.cast_null (22 / 23; 10.G op_gc cycle 8);
+    /// + ref.cast / ref.cast_null (22 / 23; 10.G op_gc cycle 8)
+    /// + br_on_cast / br_on_cast_fail (24 / 25; 10.G op_gc cycle 9);
     /// other GC sub-opcodes light up per 10.G heap / struct /
     /// array sub-chunks.
     fn dispatchPrefixFB(self: *Validator) Error!void {
@@ -1143,6 +1144,10 @@ pub const Validator = struct {
             // ref.cast / ref.cast_null share validator shape:
             // consume heap_type byte, pop reftype, push reftype back.
             22, 23 => try self.opRefCast(),
+            // br_on_cast / br_on_cast_fail share validator shape:
+            // consume flags + labelidx + ht1 + ht2, pop reftype,
+            // pop+repush label types, push reftype back on fall-through.
+            24, 25 => try self.opBrOnCast(),
             28 => try self.opRefI31(),
             29, 30 => try self.opI31Get(), // .get_s / .get_u share validator shape
             else => return Error.NotImplemented,
@@ -1186,6 +1191,55 @@ pub const Validator = struct {
                 try self.pushType(t);
             },
         }
+    }
+
+    /// Wasm spec 3.0 §3.3.5.5 — `br_on_cast flags l ht1 ht2` /
+    /// `br_on_cast_fail flags l ht1 ht2`: branch to label l when
+    /// (br_on_cast) the operand matches ht2, else (br_on_cast_fail)
+    /// when it doesn't. Stack effect mirrors br_on_null: pop the
+    /// branch reftype, verify label types match, then push them
+    /// back + the (narrowed) reftype on fall-through.
+    ///
+    /// Cycle-9 stub validator: consume flags (1 byte) + labelidx
+    /// (uleb32) + ht1 (1 byte) + ht2 (1 byte). Pre-RTT we don't
+    /// decode ht1/ht2 into ValType variants — the popped reftype
+    /// is preserved through the label-type round-trip and re-pushed
+    /// on fall-through. The label's last type entry must be the
+    /// popped reftype (mirroring br_on_non_null's contract).
+    fn opBrOnCast(self: *Validator) Error!void {
+        if (self.pos >= self.body.len) return Error.UnexpectedEnd;
+        self.pos += 1; // flags byte
+        const depth = try leb128.readUleb128(u32, self.body, &self.pos);
+        if (self.pos + 2 > self.body.len) return Error.UnexpectedEnd;
+        self.pos += 2; // ht1 + ht2 bytes
+        const top = try self.popAny();
+        const reftype: ValType = switch (top) {
+            .bot => .funcref,
+            .known => |t| blk: {
+                if (t != .funcref and t != .externref and t != .i31ref and t != .anyref and t != .eqref and t != .structref and t != .arrayref) return Error.StackTypeMismatch;
+                break :blk t;
+            },
+        };
+        const target = self.frameAt(depth) orelse return Error.InvalidBranchDepth;
+        const lt = target.labelType();
+        switch (lt) {
+            .empty => return Error.StackTypeMismatch,
+            .single => |t| {
+                if (t != reftype) return Error.StackTypeMismatch;
+            },
+            .multi => |ts| {
+                if (ts.len == 0) return Error.StackTypeMismatch;
+                if (ts[ts.len - 1] != reftype) return Error.StackTypeMismatch;
+                const prefix = ts[0 .. ts.len - 1];
+                var i: usize = prefix.len;
+                while (i > 0) {
+                    i -= 1;
+                    try self.popExpect(prefix[i]);
+                }
+                for (prefix) |t| try self.pushType(t);
+            },
+        }
+        try self.pushType(reftype);
     }
 
     /// Wasm spec 3.0 §3.x (GC) — `ref.i31`: pop i32, push an

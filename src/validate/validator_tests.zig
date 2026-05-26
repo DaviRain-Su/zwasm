@@ -421,6 +421,55 @@ test "validate: ref.cast_null heap_type round-trip (10.G op_gc cycle 8)" {
     try validateFunction(i32_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
 }
 
+test "validate: br_on_cast inside block round-trip (10.G op_gc cycle 9)" {
+    // Wasm 3.0 GC §3.3.5.5. Body:
+    //   block (param anyref) (result anyref)
+    //     br_on_cast 0 anyref anyref     ;; flags=0, label=0, ht1=ht2=0x6E
+    //   end
+    //   drop
+    //   ref.null anyref
+    //   end
+    //
+    // Encoding (block uses typeidx 1 = (anyref) -> (anyref)):
+    //   0xD0 0x6E         — ref.null anyref
+    //   0x02 0x01         — block typeidx 1
+    //   0xFB 0x18 ...     — br_on_cast flags=0 label=0 ht1=anyref ht2=anyref
+    //   0x0B 0x1A 0xD0 0x6E 0x0B
+    const body = [_]u8{
+        0xD0, 0x6E,
+        0x02, 0x01,
+        0xFB, 0x18,
+        0x00, 0x00,
+        0x6E, 0x6E,
+        0x0B, 0x1A,
+        0xD0, 0x6E,
+        0x0B,
+    };
+    const anyref_arr = [_]ValType{.anyref};
+    const fn_sig: FuncType = .{ .params = &.{}, .results = &anyref_arr };
+    const block_sig: FuncType = .{ .params = &anyref_arr, .results = &anyref_arr };
+    const module_types = [_]FuncType{ fn_sig, block_sig };
+    try validateFunction(fn_sig, &.{}, &body, &.{}, &.{}, &module_types, 0, &.{}, 0);
+}
+
+test "validate: br_on_cast_fail inside block round-trip (10.G op_gc cycle 9)" {
+    const body = [_]u8{
+        0xD0, 0x6E,
+        0x02, 0x01,
+        0xFB, 0x19,
+        0x00, 0x00,
+        0x6E, 0x6E,
+        0x0B, 0x1A,
+        0xD0, 0x6E,
+        0x0B,
+    };
+    const anyref_arr = [_]ValType{.anyref};
+    const fn_sig: FuncType = .{ .params = &.{}, .results = &anyref_arr };
+    const block_sig: FuncType = .{ .params = &anyref_arr, .results = &anyref_arr };
+    const module_types = [_]FuncType{ fn_sig, block_sig };
+    try validateFunction(fn_sig, &.{}, &body, &.{}, &.{}, &module_types, 0, &.{}, 0);
+}
+
 test "validate: ref.i31 → i31.get_s round-trip (10.G op_gc cycle 5; ADR-0115 §6 typed precision)" {
     // Wasm 3.0 GC §3.x — `(i32.const 42 ; ref.i31 ; i31.get_s)`
     // round-trips through ValType.i31ref (no longer the .funcref

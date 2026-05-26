@@ -595,6 +595,23 @@ pub const Lowerer = struct {
                 self.pos += 1;
                 try self.emit(.@"ref.cast_null", heap_type_byte, 0);
             },
+            // br_on_cast / br_on_cast_fail (Wasm 3.0 GC §3.3.5.5).
+            // Encoding: flags(u8) labelidx(uleb32) ht1(u8) ht2(u8).
+            // Pack labelidx in payload; pack {flags,ht1,ht2} bytes
+            // in extra (low 8 = flags, mid 8 = ht1, high 8 = ht2).
+            24, 25 => {
+                if (self.pos >= self.body.len) return Error.UnexpectedEnd;
+                const flags = self.body[self.pos];
+                self.pos += 1;
+                const labelidx = try leb128.readUleb128(u32, self.body, &self.pos);
+                if (self.pos + 2 > self.body.len) return Error.UnexpectedEnd;
+                const ht1 = self.body[self.pos];
+                const ht2 = self.body[self.pos + 1];
+                self.pos += 2;
+                const extra: u32 = @as(u32, flags) | (@as(u32, ht1) << 8) | (@as(u32, ht2) << 16);
+                const tag: zir.ZirOp = if (sub == 24) .br_on_cast else .br_on_cast_fail;
+                try self.emit(tag, labelidx, extra);
+            },
             28 => try self.emit(.@"ref.i31", 0, 0),
             29 => try self.emit(.@"i31.get_s", 0, 0),
             30 => try self.emit(.@"i31.get_u", 0, 0),
