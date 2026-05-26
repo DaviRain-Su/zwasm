@@ -25,6 +25,9 @@
 
 const std = @import("std");
 
+const manifest_parser = @import("wasm_3_0_manifest.zig");
+const zwasm = @import("zwasm");
+
 pub const std_options: std.Options = .{
     .enable_segfault_handler = false,
 };
@@ -42,6 +45,8 @@ const ProposalSummary = struct {
     manifests: u32 = 0,
     modules: u32 = 0,
     asserts_return: u32 = 0,
+    asserts_return_pass: u32 = 0,
+    asserts_return_fail: u32 = 0,
     asserts_trap: u32 = 0,
     asserts_invalid: u32 = 0,
     asserts_malformed: u32 = 0,
@@ -76,6 +81,8 @@ pub fn main(init: std.process.Init) !void {
 
     var grand_total_manifests: u32 = 0;
     var grand_total_directives: u32 = 0;
+    var grand_total_return_pass: u32 = 0;
+    var grand_total_return_fail: u32 = 0;
 
     for (PROPOSALS) |proposal| {
         var summary: ProposalSummary = .{ .name = proposal };
@@ -98,33 +105,97 @@ pub fn main(init: std.process.Init) !void {
             defer gpa.free(manifest);
 
             summary.manifests += 1;
+
+            // Active module bytes for assert_return dispatch. A new
+            // `module <path>` directive replaces the slice; the
+            // sub-corpus dir owns the alloc (freed below).
+            var cur_module_bytes: ?[]u8 = null;
+            defer if (cur_module_bytes) |b| gpa.free(b);
+
+            // Sub-corpus dir (e.g. `tail-call/return_call/`) — both
+            // the manifest AND the .wasm files it cites live here.
+            var sub_dir = pdir.openDir(io, entry.name, .{}) catch continue;
+            defer sub_dir.close(io);
+
             var lines = std.mem.splitScalar(u8, manifest, '\n');
             while (lines.next()) |line| {
                 if (line.len == 0) continue;
-                if (std.mem.startsWith(u8, line, "module ")) summary.modules += 1
-                else if (std.mem.startsWith(u8, line, "assert_return ")) summary.asserts_return += 1
-                else if (std.mem.startsWith(u8, line, "assert_trap ")) summary.asserts_trap += 1
-                else if (std.mem.startsWith(u8, line, "assert_invalid ")) summary.asserts_invalid += 1
-                else if (std.mem.startsWith(u8, line, "assert_malformed ")) summary.asserts_malformed += 1
-                else if (std.mem.startsWith(u8, line, "assert_exception ")) summary.asserts_exception += 1
-                else if (std.mem.startsWith(u8, line, "skip-")) summary.skips += 1;
+                var args_buf: [4]manifest_parser.TypedValue = undefined;
+                var results_buf: [4]manifest_parser.TypedValue = undefined;
+                const d = manifest_parser.parseLine(line, &args_buf, &results_buf) catch continue;
+                switch (d.kind) {
+                    .module => {
+                        summary.modules += 1;
+                        if (cur_module_bytes) |b| gpa.free(b);
+                        cur_module_bytes = sub_dir.readFileAlloc(io, d.module_path, gpa, .limited(4 << 20)) catch {
+                            cur_module_bytes = null;
+                            continue;
+                        };
+                    },
+                    .assert_return => {
+                        summary.asserts_return += 1;
+                        const bytes = cur_module_bytes orelse continue;
+                        // Build args slice (zwasm.Value); skip if any
+                        // typed arg can't parse (e.g. v128 / refs not yet
+                        // mapped).
+                        var call_args: [4]zwasm.Value = undefined;
+                        var call_args_ok = true;
+                        var ai: u8 = 0;
+                        while (ai < d.args_len) : (ai += 1) {
+                            const tv = d.args[ai];
+                            const rv = manifest_parser.parsePayload(tv) catch {
+                                call_args_ok = false;
+                                break;
+                            };
+                            call_args[ai] = manifest_parser.runtimeToZwasm(rv, tv.ty);
+                        }
+                        if (!call_args_ok) continue;
+                        // Single-scalar result only (cycle-3 scope);
+                        // void / multi-value defer.
+                        if (d.results_len != 1) continue;
+                        const expected_tv = d.results[0];
+                        const expected_rv = manifest_parser.parsePayload(expected_tv) catch continue;
+                        const expected_zv = manifest_parser.runtimeToZwasm(expected_rv, expected_tv.ty);
+                        const got = manifest_parser.runOne(gpa, bytes, d.func_name, call_args[0..d.args_len]) catch {
+                            summary.asserts_return_fail += 1;
+                            continue;
+                        };
+                        // Compare by the result type's discriminator.
+                        const match = if (std.mem.eql(u8, expected_tv.ty, "i32")) got.i32 == expected_zv.i32
+                            else if (std.mem.eql(u8, expected_tv.ty, "i64")) got.i64 == expected_zv.i64
+                            else if (std.mem.eql(u8, expected_tv.ty, "f32")) got.f32 == expected_zv.f32
+                            else if (std.mem.eql(u8, expected_tv.ty, "f64")) got.f64 == expected_zv.f64
+                            else false;
+                        if (match) summary.asserts_return_pass += 1 else summary.asserts_return_fail += 1;
+                    },
+                    .assert_trap => summary.asserts_trap += 1,
+                    .assert_invalid => summary.asserts_invalid += 1,
+                    .assert_malformed => summary.asserts_malformed += 1,
+                    .assert_exception => summary.asserts_exception += 1,
+                    .skip_impl, .skip_validator, .skip_runtime => summary.skips += 1,
+                    .unknown => {},
+                }
             }
         }
 
         const total_directives = summary.modules + summary.asserts_return + summary.asserts_trap +
             summary.asserts_invalid + summary.asserts_malformed + summary.asserts_exception + summary.skips;
         try stdout.print(
-            "[{s:<22}] manifests={d:<3} module={d:<3} return={d:<4} trap={d:<3} invalid={d:<3} malformed={d:<3} exception={d:<3} skip={d}\n",
-            .{ proposal, summary.manifests, summary.modules, summary.asserts_return, summary.asserts_trap,
-               summary.asserts_invalid, summary.asserts_malformed, summary.asserts_exception, summary.skips },
+            "[{s:<22}] manifests={d:<3} module={d:<3} return={d:<4} (pass={d:<4} fail={d:<4}) trap={d:<3} invalid={d:<3} malformed={d:<3} exception={d:<3} skip={d}\n",
+            .{ proposal, summary.manifests, summary.modules, summary.asserts_return,
+               summary.asserts_return_pass, summary.asserts_return_fail,
+               summary.asserts_trap, summary.asserts_invalid, summary.asserts_malformed,
+               summary.asserts_exception, summary.skips },
         );
         grand_total_manifests += summary.manifests;
         grand_total_directives += total_directives;
+        grand_total_return_pass += summary.asserts_return_pass;
+        grand_total_return_fail += summary.asserts_return_fail;
     }
 
     try stdout.print(
-        "[wasm-3.0-assert] total: {d} manifests, {d} directives (skeleton; JIT-execute lands per impl row 10.M/10.R/10.TC/10.E/10.G)\n",
-        .{ grand_total_manifests, grand_total_directives },
+        "[wasm-3.0-assert] total: {d} manifests, {d} directives; assert_return pass={d} fail={d} (assert_trap / assert_invalid / multi-value execution lands in follow-on cycles)\n",
+        .{ grand_total_manifests, grand_total_directives, grand_total_return_pass, grand_total_return_fail },
     );
     try stdout.flush();
 }

@@ -408,6 +408,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    wasm_3_0_assert_runner_mod.addImport("zwasm", core);
     const wasm_3_0_assert_runner_exe = b.addExecutable(.{
         .name = "zwasm-spec-wasm-3-0-assert",
         .root_module = wasm_3_0_assert_runner_mod,
@@ -423,6 +424,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    wasm_3_0_assert_unit_mod.addImport("zwasm", core);
     const wasm_3_0_assert_unit_tests = b.addTest(.{ .root_module = wasm_3_0_assert_unit_mod });
     const run_wasm_3_0_assert_unit = b.addRunArtifact(wasm_3_0_assert_unit_tests);
     test_step.dependOn(&run_wasm_3_0_assert_unit.step);
