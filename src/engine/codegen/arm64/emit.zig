@@ -1293,22 +1293,110 @@ pub fn compile(
                             _ = open_try_tables.pop();
                         }
                     }
-                    // IT-6 prep — snapshot the depth of the label
-                    // about to be popped; landing_pad fixups whose
-                    // `target_labels_depth` matches resolve to the
-                    // post-emitEndIntra buf position.
+                    // IT-6 prep + 10.E-payload-prop D-182 — snapshot
+                    // the depth of the label about to be popped; for
+                    // each landing_pad fixup whose `target_labels_depth`
+                    // matches, emit a per-clause prelude:
+                    //   - .catch_all / .catch_all_ref: zero-byte prelude
+                    //     (post-emitEndIntra position is the landing).
+                    //   - .catch_ / .catch_ref: load N=tag_param_counts
+                    //     [tag_idx] values from `eh_payload_buf` into
+                    //     the block-result vreg slots (= top N entries
+                    //     of `pushed_vregs` after emitEndIntra), then
+                    //     JMP to the common continuation. exnref push
+                    //     (.catch_ref / .catch_all_ref) is v0.2 scope
+                    //     per ADR-0120 §3.
                     const popped_depth: u32 = @intCast(labels.items.len);
                     try op_control.emitEndIntra(&ctx, &ins);
                     if (landing_pad_fixups.items.len > 0) {
-                        const land_pc: u32 = @intCast(buf.items.len);
-                        var i: usize = 0;
-                        while (i < landing_pad_fixups.items.len) {
-                            const fx = landing_pad_fixups.items[i];
-                            if (fx.target_labels_depth == popped_depth) {
-                                eh_builder.entries.items[fx.entry_idx].landing_pad_pc = land_pc;
+                        // Detect if any matching clause needs a prelude.
+                        var any_payload = false;
+                        var probe_i: usize = 0;
+                        while (probe_i < landing_pad_fixups.items.len) : (probe_i += 1) {
+                            const fx = landing_pad_fixups.items[probe_i];
+                            if (fx.target_labels_depth != popped_depth) continue;
+                            const k = eh_builder.entries.items[fx.entry_idx].kind;
+                            if (k == .catch_ or k == .catch_ref) {
+                                const tag_idx_opt = eh_builder.entries.items[fx.entry_idx].tag_idx;
+                                if (tag_idx_opt) |t| {
+                                    if (ctx.tag_param_counts.len > t and ctx.tag_param_counts[t] > 0) {
+                                        any_payload = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (!any_payload) {
+                            // Simple path (pre-D-182 shape): all matching
+                            // fixups land at post-emitEndIntra position.
+                            const land_pc: u32 = @intCast(buf.items.len);
+                            var i: usize = 0;
+                            while (i < landing_pad_fixups.items.len) {
+                                const fx = landing_pad_fixups.items[i];
+                                if (fx.target_labels_depth == popped_depth) {
+                                    eh_builder.entries.items[fx.entry_idx].landing_pad_pc = land_pc;
+                                    _ = landing_pad_fixups.swapRemove(i);
+                                } else {
+                                    i += 1;
+                                }
+                            }
+                        } else {
+                            // Per-clause prelude path. For each matching
+                            // fixup: snapshot clause_start, emit prelude,
+                            // emit JMP-to-common placeholder, patch
+                            // landing_pad_pc. After all matching fixups,
+                            // patch JMPs to common_pc = buf.items.len.
+                            var jmp_placeholders: std.ArrayList(u32) = .empty;
+                            defer jmp_placeholders.deinit(allocator);
+
+                            var i: usize = 0;
+                            while (i < landing_pad_fixups.items.len) {
+                                const fx = landing_pad_fixups.items[i];
+                                if (fx.target_labels_depth != popped_depth) {
+                                    i += 1;
+                                    continue;
+                                }
+                                const entry = &eh_builder.entries.items[fx.entry_idx];
+                                const clause_start: u32 = @intCast(buf.items.len);
+
+                                if (entry.kind == .catch_ or entry.kind == .catch_ref) {
+                                    const tag_idx = entry.tag_idx orelse return Error.UnsupportedOp;
+                                    const n_payload: u32 = if (ctx.tag_param_counts.len > tag_idx)
+                                        ctx.tag_param_counts[tag_idx]
+                                    else
+                                        0;
+                                    if (n_payload > 0) {
+                                        if (pushed_vregs.items.len < n_payload) return Error.AllocationMissing;
+                                        var k: u32 = 0;
+                                        while (k < n_payload) : (k += 1) {
+                                            const target_vreg = pushed_vregs.items[pushed_vregs.items.len - n_payload + k];
+                                            const dest_reg = try gpr.gprDefSpilled(alloc, target_vreg, 0);
+                                            const slot_off: u15 = @intCast(jit_abi.eh_payload_buf_off + k * 8);
+                                            try gpr.writeU32(allocator, &buf, inst.encLdrImm(dest_reg, abi.runtime_ptr_save_gpr, slot_off));
+                                            try gpr.gprStoreSpilled(allocator, &buf, alloc, spill_base_off, target_vreg, 0);
+                                        }
+                                    }
+                                }
+                                // catch_all / catch_all_ref: no payload
+                                // prelude needed; exnref push deferred.
+
+                                // Emit JMP placeholder to common_pc.
+                                const jmp_off: u32 = @intCast(buf.items.len);
+                                try gpr.writeU32(allocator, &buf, inst.encB(0));
+                                try jmp_placeholders.append(allocator, jmp_off);
+
+                                entry.landing_pad_pc = clause_start;
                                 _ = landing_pad_fixups.swapRemove(i);
-                            } else {
-                                i += 1;
+                            }
+
+                            // Patch all JMPs to common_pc.
+                            const common_pc: u32 = @intCast(buf.items.len);
+                            for (jmp_placeholders.items) |jmp_off| {
+                                const disp_bytes: i32 = @intCast(@as(i64, common_pc) - @as(i64, jmp_off));
+                                const disp_words: i32 = @divExact(disp_bytes, 4);
+                                const enc = inst.encB(disp_words);
+                                std.mem.writeInt(u32, buf.items[jmp_off..][0..4], enc, .little);
                             }
                         }
                     }
