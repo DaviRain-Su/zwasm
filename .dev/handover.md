@@ -6,9 +6,9 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `aa6f3928` — revert pair for 10.TC-emit-body cycle 6
-  (arm64 return_call_indirect panicked on Linux x86_64 SysV ubuntu
-  with `@divExact` alignment failure; D-185 filed for root-cause).
+- **HEAD**: `73187e6f` — D-185 closed; arm64 return_call_indirect
+  re-applied with arm64/x86_64 op_tail_call imports flipped from
+  shared facade to sibling frame_teardown (host-dispatch bug fix).
 - **ROADMAP §10 progress**: 7/13 DONE (10.0/10.C9/10.J/10.F/
   10.Z/10.D/10.T), 4 IN-PROGRESS (10.M/10.R/10.TC/10.E with
   10.E core substantively done), 2 Pending (10.G/10.P).
@@ -22,36 +22,38 @@
 ## Active bundle
 
 - **Bundle-ID**: 10.TC-emit-body
-- **Cycles-remaining**: ~4 (cycle 6 reverted; investigation cycle
-  inserted before re-attempt)
-- **Continuity-memo**: cycles 1-5 landed (same-module direct
-  `return_call` complete on both arches). Cycle 6 (`99d10707` +
-  `8d1b7e7a`) attempted arm64 `return_call_indirect` but ubuntu
-  Linux x86_64 panicked with `@divExact` alignment failure in
-  the cind_bounds_fixups trap-stub patching loop. Reverted via
-  `b6d669b7` + `aa6f3928` per Step 0.7 mandate. Same code passes
-  full clean rebuild on Mac aarch64; the failure is heisenbug-
-  class (host-conditional alignment divergence). Filed D-185.
+- **Cycles-remaining**: ~3
+- **Continuity-memo**: cycles 1-5 + cycle 7 (D-185 investigation
+  + fix) landed. Same-module direct `return_call` complete on
+  both arches. Cycle 6 first attempt (`99d10707`) reverted at
+  `aa6f3928` due to ubuntu @divExact panic. Cycle 7 (`73187e6f`)
+  diagnosed via D-185 probes: shared `frame_teardown` facade is
+  host-dispatched (`builtin.target.cpu.arch`) so arm64 emit on
+  x86_64 host wrote 1 byte (POP RBP) instead of 4 (LDP), mis-
+  aligning the byte stream. Fix: arm64/op_tail_call.zig +
+  x86_64/op_tail_call.zig import sibling frame_teardown directly.
+  Cycle 6's arm64 return_call_indirect re-applied with the fix.
+  D-185 closed; lesson `2026-05-26-shared-facade-host-dispatched-
+  cross-arch-byte-test` filed.
 - **Exit-condition**: x86_64 SysV mirror of cycle 3 wired
   end-to-end (JMP rel32 opcode at emit + emitDirectReturnCall
   + same e2e fixture green on Linux x86_64) AND `return_call_
   indirect` / `return_call_ref` arm64+x86_64 wired with at
   least one e2e fixture each.
-- **Next cycle (cycle 7 — D-185 investigation)**: probe the
-  Linux x86_64 alignment divergence BEFORE re-attempting
-  return_call_indirect. Per `investigation_discipline.md` §1:
-  each cycle should land one permanent diagnostic primitive
-  rather than throwaway probes. Approach: cherry-pick the
-  cycle 6 diff (`99d10707`), then add `std.debug.print` at
-  every `cind_*_fixups.append` site in arm64/op_call.zig +
-  emitIndirectReturnCall printing `buf.items.len % 4`, plus
-  print `@sizeOf(ZirInstr)` / `@alignOf(ZirInstr)` once at
-  compile() entry. Run `bash scripts/run_remote_ubuntu.sh
-  test` and `zig build test` locally; compare the cind-fixup
-  byte_offsets across hosts. Leading hypotheses from D-185:
-  (3) ZirInstr layout host-divergent (extra-field padding);
-  (4) regalloc-slot reg-vs-spill branch host-divergent. Probe
-  distinguishes the two. Root-cause → cycle 8 ships the fix.
+- **Next cycle (cycle 8)**: x86_64 `return_call_indirect` mirror.
+  Sub-steps: (a) `x86_64/op_tail_call.zig` gains
+  `emitIndirectReturnCall(ctx, ins)` mirroring arm64 shape —
+  pop idx, marshal args, bounds check via cind_bounds_fixups
+  (CMP + Jcc rel32 trap), sig check via cind_sig_fixups, MOV
+  R11 ← [funcptr_base + idx*8], MOV RDI ← R15, frame_teardown
+  (sibling import, NOT shared facade — D-185 lesson),
+  emitTailJump(R11). Restrictions mirror arm64: table_idx==0,
+  results.len<=2. (b) Wire x86_64 ops stub to delegate; set
+  ctx.dead_code.* = true. (c) Add to collected_x86_64_ctx_ops
+  (count 395 → 396; bump assertion). (d) Add `.return_call_
+  indirect` to x86_64 usesRuntimePtr whitelist. (e) Mirror
+  byte-snapshot test (will run cross-arch so the D-185 fix
+  is the structural defense against regression).
 
 ## Session highlights (prior session; for handoff context)
 
