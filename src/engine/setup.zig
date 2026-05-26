@@ -510,6 +510,22 @@ pub fn setupRuntime(
             .elem_segments_count = @intCast(elem_segments_buf.len),
             .tables_jit_ci_ptr = tables_jit_ci_buf.ptr,
             .tables_jit_ci_count = @intCast(tables_jit_ci_buf.len),
+            // Phase 10.E IT-6 cycle 3c — EH dispatcher fields. The
+            // trampoline reads ptr+count via `[X19/R15 + off]` to
+            // materialize `ExceptionTable` + `CodeMap` slices for
+            // `dispatchThrow`. Modules without try_table get an
+            // empty table (ptr null, count 0); the .uncaught path
+            // fires immediately.
+            .eh_table_entries = if (compiled.exception_table.entries.len > 0)
+                compiled.exception_table.entries.ptr
+            else
+                null,
+            .eh_table_count = @intCast(compiled.exception_table.entries.len),
+            .eh_code_map_entries = if (compiled.module.code_map_entries.len > 0)
+                compiled.module.code_map_entries.ptr
+            else
+                null,
+            .eh_code_map_count = @intCast(compiled.module.code_map_entries.len),
         },
         .memory = memory,
         .dispatch = dispatch,

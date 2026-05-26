@@ -24,6 +24,8 @@
 const std = @import("std");
 const Value = @import("../../../runtime/value.zig").Value;
 const FuncEntity = @import("../../../runtime/instance/func.zig").FuncEntity;
+const exception_table = @import("exception_table.zig");
+const code_map = @import("code_map.zig");
 
 /// `@sizeOf(FuncEntity)` — exposed for JIT emit's `ref.func`
 /// recipe (`ADD ptr, ptr, #(idx * func_entity_size)`). Comptime
@@ -355,6 +357,33 @@ pub const JitRuntime = extern struct {
     /// stalled" (count>0 with trap_flag possibly 1).
     trap_stub_entry_count: u32 = 0,
     _pad12: u32 = 0,
+    /// Phase 10.E IT-6 cycle 3c (ADR-0114 D5 + ADR-0119) —
+    /// per-Instance JIT exception table view consumed by
+    /// `shared/zwasm_throw.dispatchThrow` after the per-arch
+    /// trampoline CALL. Written at instance init from
+    /// `CompiledWasm.exception_table.entries` (per IT-5
+    /// collection). Module-relative pc_start / pc_end (the
+    /// unwinder subtracts `JitModule.block.bytes.ptr` from the
+    /// throw-site absolute address before lookup).
+    ///
+    /// `null` (with `eh_table_count = 0`) signals "no try_table
+    /// anywhere in this module" — the trampoline's .uncaught
+    /// path fires immediately without walking the table.
+    eh_table_entries: ?[*]const exception_table.HandlerEntry = null,
+    /// HandlerEntry count for `eh_table_entries`. Paired with
+    /// the ptr; both written together at instance init.
+    eh_table_count: u32 = 0,
+    _pad13: u32 = 0,
+    /// Phase 10.E IT-6 cycle 3c — per-Instance JIT CodeMap view.
+    /// Written at instance init from `JitModule.code_map_entries`
+    /// (per IT-4 build). The trampoline reads via
+    /// `code_map.CodeMap{ .entries = eh_code_map_entries[0..N] }`
+    /// then passes to `dispatchThrow` for absolute-pc →
+    /// `(func_idx, relative_pc)` translation.
+    eh_code_map_entries: ?[*]const code_map.Entry = null,
+    /// Entry count for `eh_code_map_entries`.
+    eh_code_map_count: u32 = 0,
+    _pad14: u32 = 0,
 };
 
 /// Default `memory_grow_fn` — unconditionally refuses growth by
@@ -429,6 +458,13 @@ pub const stack_limit_off: u12 = @offsetOf(JitRuntime, "stack_limit");
 /// x86_64 trap stub emits `INC DWORD PTR [R15 + this]` as its
 /// first instruction; arm64 unchanged.
 pub const trap_stub_entry_count_off: u12 = @offsetOf(JitRuntime, "trap_stub_entry_count");
+/// Phase 10.E IT-6 cycle 3c — EH dispatcher integration. Trampoline
+/// reads ptr+count via `[X19/R15 + off]` to materialize
+/// `ExceptionTable` + `CodeMap` slices for `dispatchThrow`.
+pub const eh_table_entries_off: u12 = @offsetOf(JitRuntime, "eh_table_entries");
+pub const eh_table_count_off: u12 = @offsetOf(JitRuntime, "eh_table_count");
+pub const eh_code_map_entries_off: u12 = @offsetOf(JitRuntime, "eh_code_map_entries");
+pub const eh_code_map_count_off: u12 = @offsetOf(JitRuntime, "eh_code_map_count");
 
 /// Total size of the head section consumed by the prologue.
 pub const head_size: u32 = @sizeOf(JitRuntime);
@@ -538,6 +574,17 @@ comptime {
     // ADR-0105 D1: stack_limit is X-form (usize); imm12 scales by 8.
     if ((stack_limit_off & 7) != 0) @compileError("stack_limit_off not 8-aligned");
     if (stack_limit_off > 32760) @compileError("stack_limit_off exceeds X-form imm12 budget");
+    // Phase 10.E IT-6 cycle 3c: EH ptr+count fields. Ptrs are X-form
+    // (8-byte); counts are W-form (4-byte). The trampoline's read
+    // sequence requires both alignment + within-imm12 budget.
+    if ((eh_table_entries_off & 7) != 0) @compileError("eh_table_entries_off not 8-aligned");
+    if ((eh_table_count_off & 3) != 0) @compileError("eh_table_count_off not 4-aligned");
+    if (eh_table_entries_off > 32760) @compileError("eh_table_entries_off exceeds X-form imm12 budget");
+    if (eh_table_count_off > 16380) @compileError("eh_table_count_off exceeds W-form imm12 budget");
+    if ((eh_code_map_entries_off & 7) != 0) @compileError("eh_code_map_entries_off not 8-aligned");
+    if ((eh_code_map_count_off & 3) != 0) @compileError("eh_code_map_count_off not 4-aligned");
+    if (eh_code_map_entries_off > 32760) @compileError("eh_code_map_entries_off exceeds X-form imm12 budget");
+    if (eh_code_map_count_off > 16380) @compileError("eh_code_map_count_off exceeds W-form imm12 budget");
 }
 
 // ============================================================
@@ -558,8 +605,10 @@ test "JitRuntime: layout offsets match documented prologue load sequence" {
     try testing.expectEqual(@as(u12, 80), jit_executed_flag_off);
 }
 
-test "JitRuntime: total size = 240 bytes (post-D-165 cycle 4 trap_stub_entry_count tail)" {
-    try testing.expectEqual(@as(u32, 240), head_size);
+test "JitRuntime: total size = 272 bytes (post-IT-6 cycle 3c eh_table + eh_code_map tail)" {
+    // Phase 10.E IT-6 cycle 3c — EH dispatcher fields appended
+    // (+32 bytes = 2 ptrs × 8 B + 2 u32 × 4 B + 2 u32 pads × 4 B).
+    try testing.expectEqual(@as(u32, 272), head_size);
 }
 
 test "JitRuntime: D-165 cycle 4 trap_stub_entry_count offset (W-form imm12-safe)" {
@@ -650,4 +699,46 @@ test "JitRuntime: round-trip construction + field reads" {
     try testing.expectEqual(@as(u32, 2), rt.globals_count);
     try testing.expectEqual(@as(usize, 0xDEADBEEF), rt.host_dispatch_base[0]);
     try testing.expectEqual(@as(u32, 1), rt.host_dispatch_count);
+}
+
+test "JitRuntime: §10.E IT-6 cycle 3c — EH ptr+count fields populate and are readable" {
+    // Phase 10.E IT-6 cycle 3c — verify the new EH dispatcher
+    // fields (`eh_table_entries` + `eh_table_count` +
+    // `eh_code_map_entries` + `eh_code_map_count`) can be
+    // populated by instance setup and read back via the same
+    // offsets the trampoline will use. Layout-stable proof:
+    // the comptime guards above already assert imm12-budget +
+    // alignment; this runtime test exercises the write/read
+    // round-trip a real `setup` pass will produce.
+    const eh_table = [_]exception_table.HandlerEntry{
+        .{ .pc_start = 0, .pc_end = 100, .tag_idx = 5, .landing_pad_pc = 42, .kind = .catch_ },
+    };
+    const eh_map = [_]code_map.Entry{
+        .{ .start_addr = 0x1000, .len = 256, .func_idx = 0, .frame_bytes = 48 },
+    };
+    var rt: JitRuntime = std.mem.zeroes(JitRuntime);
+    rt.eh_table_entries = eh_table[0..].ptr;
+    rt.eh_table_count = eh_table.len;
+    rt.eh_code_map_entries = eh_map[0..].ptr;
+    rt.eh_code_map_count = eh_map.len;
+
+    // Default-zero state proves the `?[*]const` + `= null` /
+    // `u32 = 0` defaults from earlier construction sites stay
+    // intact for non-EH modules.
+    const rt_default: JitRuntime = std.mem.zeroes(JitRuntime);
+    try testing.expectEqual(@as(?[*]const exception_table.HandlerEntry, null), rt_default.eh_table_entries);
+    try testing.expectEqual(@as(u32, 0), rt_default.eh_table_count);
+    try testing.expectEqual(@as(?[*]const code_map.Entry, null), rt_default.eh_code_map_entries);
+    try testing.expectEqual(@as(u32, 0), rt_default.eh_code_map_count);
+
+    // Populated-state round-trip — the trampoline will read these
+    // via `[X19, #eh_table_entries_off]` (arm64) / `[R15 +
+    // eh_table_entries_off]` (x86_64).
+    try testing.expectEqual(@as(u32, 1), rt.eh_table_count);
+    try testing.expectEqual(@as(u32, 5), rt.eh_table_entries.?[0].tag_idx.?);
+    try testing.expectEqual(@as(u32, 42), rt.eh_table_entries.?[0].landing_pad_pc);
+    try testing.expectEqual(@as(u32, 1), rt.eh_code_map_count);
+    try testing.expectEqual(@as(usize, 0x1000), rt.eh_code_map_entries.?[0].start_addr);
+    try testing.expectEqual(@as(u32, 0), rt.eh_code_map_entries.?[0].func_idx);
+    try testing.expectEqual(@as(u32, 48), rt.eh_code_map_entries.?[0].frame_bytes);
 }
