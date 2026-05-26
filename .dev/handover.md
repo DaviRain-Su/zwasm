@@ -6,36 +6,34 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `49e6a44a` — D-189 close (memarg natural-alignment
-  cap). All 37 wasm-3.0-assert/memory64/align64 invalid-accepted
-  cases now reject. Bisect uncovered a single shared root
-  cause: validator's `skipMemarg` consumed the align uleb without
-  bounds-checking. Fix: `readMemargCheckAlign` + per-op natural-
-  alignment dispatch.
+- **HEAD**: `8b5b2ae1` — memory.size/grow plumb memAddrType in
+  validator (+30 return + +16 trap directives pass). Previous
+  cycles this resume: `49e6a44a` D-189 close (memarg natural-
+  alignment cap; +37 invalid reject). Stack: 10.M validator gaps
+  closing incrementally.
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
 - **Active debt rows**: 17 — all `blocked-by:` with named
   structural barriers. Zero `now`-status rows.
 
-## Spec runner observable (HEAD `49e6a44a`)
+## Spec runner observable (HEAD `8b5b2ae1`)
 
 ```
-[memory64           ] return=337 (pass=51 fail=274) trap=205 (pass=1 fail=204) invalid=83 (pass=83 fail=0)  exception=0
-[tail-call          ] return=31  (pass=31 fail=0  ) trap=0   (pass=0 fail=0  ) invalid=10 (pass=10 fail=0) exception=0
-[exception-handling ] return=34  (pass=0  fail=33 ) trap=2   (pass=0 fail=2  ) invalid=7  (pass=6  fail=1) exception=4 (pass=0 fail=4)
+[memory64           ] return=337 (pass=81 fail=244) trap=205 (pass=17 fail=188) invalid=83 (pass=83 fail=0) exception=0
+[tail-call          ] return=31  (pass=31 fail=0  ) trap=0   (pass=0  fail=0  ) invalid=10 (pass=10 fail=0) exception=0
+[exception-handling ] return=34  (pass=0  fail=33 ) trap=2   (pass=0  fail=2  ) invalid=7  (pass=6  fail=1) exception=4 (pass=0 fail=4)
 [gc                 ] (no corpus — D-179 wabt)
-[function-references] return=0   (pass=0  fail=0  ) trap=0   (pass=0 fail=0  ) invalid=12 (pass=12 fail=0) exception=0
-total: return pass=82 fail=307; trap pass=1 fail=206; invalid pass=111 fail=1; exception pass=0 fail=4
+[function-references] return=0   (pass=0  fail=0  ) trap=0   (pass=0  fail=0  ) invalid=12 (pass=12 fail=0) exception=0
+total: return pass=112 fail=277; trap pass=17 fail=190; invalid pass=111 fail=1; exception pass=0 fail=4
 ```
 
 assert_invalid now 111/1 — only try_table.10 remains (deep EH
 catch_all_ref typing, requires exnref ValType extension).
 
 Recent commits this resume:
+- `8b5b2ae1` — opMemorySize/Grow memAddrType plumb (+46 dirs).
+- `a2a3ac3b` test — D-189 regression fixture correction.
 - `49e6a44a` — D-189 close (37 align64 cases reject).
-- `734348cd` chore + `12f700b5` test — EH compile-gap regression
-  marker (10.E pending).
-- `da2f16d4` chore + `639c2916` fix — 10.M memory64
-  frontendValidate plumbing (+52 directives pass).
+- `639c2916` — 10.M memory64 frontendValidate plumbing (+52 dirs).
 
 ## Next sub-chunk candidates (names only)
 
