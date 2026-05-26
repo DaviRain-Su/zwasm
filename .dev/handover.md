@@ -26,13 +26,19 @@
   `eh_code_map_count`; setupRuntime wires from CompiledWasm.
 - **10.E IT-6 cycle 3c-ii SHIPPED** (`6646e469` + `7d67e247`
   follow-up): trampoline body split into naked stub +
-  `trampolineCore` (callconv .c Zig fn) per ADR-0119. End-to-end
-  pipe naked-stub → core → `dispatchThrow` → unwind walk →
-  trap_flag exercised on Mac aarch64 + Linux SysV. Sentinel-frame
-  fix in `invokeTrampolineWith` (lesson
-  `2026-05-28-eh-test-wrapper-host-fp-walk-segv.md`; `test_discipline.md` §3)
-  resolves ubuntu SEGV that the initial cycle 3c-ii commit
-  introduced by walking the host RBP-chain.
+  `trampolineCore` (callconv .c Zig fn) per ADR-0119. Sentinel-
+  frame fix in `invokeTrampolineWith` resolves ubuntu SEGV
+  (lesson `2026-05-28-eh-test-wrapper-host-fp-walk-segv.md`;
+  `test_discipline.md` §3).
+- **10.E IT-6 cycle 3c-iii (a/b) SHIPPED** (`9d989144`):
+  handler-dispatch data plumbing. `code_map.Lookup.inside`
+  carries `start_addr` + `frame_bytes`; `unwind.FrameLink` +
+  `HandlerLanding` carry `caller_abs_pc` / `handler_abs_pc`;
+  `unwind.walk` threads `initial_abs_pc`; `trampolineCore`
+  `.handler` branch resolves the catching function's entry,
+  computes absolute SP + landing-pad PC, writes them to new
+  JitRuntime fields `eh_handler_{active,sp,pc}`. Both Mac aarch64
+  and Linux x86_64 SysV green (2000/2014 pass).
 
 ## ROADMAP §10 progress
 
@@ -45,23 +51,24 @@
 ## Active bundle
 
 - **Bundle-ID**: `10.E-codegen-IT-6`
-- **Cycles-remaining**: `~1` (cycle 3c-iii final handler dispatch)
-- **Continuity-memo**: trampoline body, throw-site retargeting, and
-  per-Instance EH data wiring are all in place. The `.handler`
-  branch in `trampolineCore` currently traps as a placeholder;
-  cycle 3c-iii implements actual handler dispatch:
-  1. Restore SP via `sp_restore.emitSpRestoreFull` (arm64 +
-     x86_64) at handler_fp's prologue boundary using frame_bytes.
-  2. Resolve `landing_pad_pc` (module-relative) to absolute via
-     `CodeMap.Entry.start_addr + landing_pad_pc`.
-  3. JMP / BR to the absolute landing-pad address from
-     `trampolineCore` (will require a small arch-shim helper
-     since `trampolineCore` is regular Zig — likely a tiny per-
-     arch `@extern(.naked)` thunk that takes (new_sp, target_pc)
-     and never returns).
-  4. Update the "handler found path" trampoline test to assert
-     `trap_flag == 0` + observable landing-pad execution.
-  5. Win64 trampoline body (currently `@compileError`) — fold in
+- **Cycles-remaining**: `~1` (cycle 3c-iii-c naked-stub branch +
+  end-to-end fixture)
+- **Continuity-memo**: trampoline body, throw-site retargeting,
+  per-Instance EH data wiring, and the .handler resolution
+  (SP + absolute landing PC into JitRuntime) are all in place.
+  Next: naked stub reads `eh_handler_active` after `trampolineCore`
+  returns, and on `1` does `mov sp, [rt + eh_handler_sp_off]; br
+  [rt + eh_handler_pc_off]` (arm64) / `movq off(%r15), %rsp; jmpq
+  *off(%r15)` (x86_64) instead of LDP/RET.
+  1. Naked-stub branch: load `eh_handler_active` after `blr core`;
+     `cbz x16, .Luncaught` (arm64) / `testl %eax, %eax; jz .Lunc`
+     (x86_64); the .uncaught arm does today's LDP+RET, the
+     handler arm loads SP + target PC and BR/JMP.
+  2. End-to-end fixture: minimal `(throw 0) (catch_all 0)` WAT
+     that the existing IT-3/IT-5 emit pipeline can already compile;
+     verify the catch-block return path executes (e.g. distinct
+     return value from throw + catch).
+  3. Win64 trampoline body (currently `@compileError`) — fold in
      RCX/RDX/R8/R9 + shadow-space ABI shuffle.
 - **Exit-condition**: end-to-end `throw 0 / catch_all 0` fixture
   compiles + runs + lands at the catch block (per integration
