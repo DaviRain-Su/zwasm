@@ -6,12 +6,12 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `bc486030` — **10.E-payload-prop bundle CLOSED**.
-  EH throw-with-payload end-to-end on Mac aarch64 + Linux x86_64
-  SysV. Tripwire test `runI32Export: throw + catch_ with i32
-  payload returns 88` green (gated windows-only at the loop's
-  ADR-0067 phase-boundary marker). Mac local + cross-compile
-  x86_64-linux green; ubuntu verify pending Step 0.7.
+- **HEAD**: `0a2449a7` — 10.E-payload-prop bundle CLOSED
+  (`bc486030`); lesson + D-183 (cross-frame EH e2e gap) filed.
+  Single-frame throw-with-payload end-to-end on Mac aarch64 +
+  Linux x86_64 SysV. **Cross-frame** (callee throws, caller
+  catches): traps; D-183 captures investigation paths
+  (dispatcher unit-tests green, gap is in production wiring).
 - **10.D = CLOSED 2026-05-25**; **10.M (incl D-181 ungate),
   10.R 1..5, 10.TC-1, 10.G-i31-ops/2/3, 10.E** (IT-1..IT-6 +
   10.E-N-1..N-3 + 10.E-5b/5c + 10.E-payload-prop bundle):
@@ -36,17 +36,18 @@
 
 ## Next candidates (names + Refs)
 
+- **D-183 discharge** — cross-frame EH e2e (callee throws,
+  caller catches). Investigation paths in the debt row;
+  probe-driven discovery cycle next.
 - **10.TC codegen** — return_call / return_call_indirect /
   return_call_ref JIT emit + frame_teardown helper (ADR-0112,
-  ADR-0113 §A foundations shipped pre-bundle). Likely
-  multi-cycle codegen bundle.
+  ADR-0113 §A foundations shipped pre-bundle). Multi-cycle
+  bundle.
 - **10.E exnref / catch_ref / catch_all_ref** — v0.2 scope per
-  ADR-0120 §3, but partial impl could ship for arm64-only as
-  follow-on to D-182.
+  ADR-0120 §3.
 - **10.E spec corpus wiring** — 76 assertion fixtures from the
-  Wasm 3.0 EH proposal (per ROADMAP row 10.E). Smoke-baked at
-  10.T-2a; runner-side wiring + per-directive PASS/SKIP/SKIP-ADR
-  accounting open.
+  Wasm 3.0 EH proposal. Smoke-baked at 10.T-2a; runner-side
+  wiring open.
 - **10.M-realworld** — toolchain-blocked (D-179 wabt 1.0.41+).
 
 ## Open questions / blockers
