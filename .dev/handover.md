@@ -6,69 +6,48 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `734c6219` — runOne + first e2e manifest execution
-  (10.E-spec-runner bundle cycle 3; bundle exit-condition MET
-  on Mac; ubuntu verify gates close).
+- **HEAD**: `ca0f51a0` — 10.E-spec-runner bundle ready to close
+  (3 cycles; e2e fixture green on Mac aarch64 + Linux x86_64 SysV
+  verified via ubuntu Step 0.7).
 - **ROADMAP §10 progress**: 7/13 DONE (10.0/10.C9/10.J/10.F/
   10.Z/10.D/10.T), 4 IN-PROGRESS (10.M/10.R/10.TC/10.E with
-  10.E core + 10.TC same-module direct + indirect substantively
-  done), 2 Pending (10.G/10.P).
+  10.E core + 10.TC same-module direct + indirect + 10.E spec
+  runner parser→executor primitives substantively done), 2
+  Pending (10.G/10.P).
 - **Active debt rows**: 17 — all `blocked-by:` with named
-  structural barriers (Phase 11 / toolchain / GC / v0.2 / 10.R).
-  Zero `now`-status rows.
-- **D-180 structural defenses STILL IN PLACE** (x86_64
-  `usesRuntimePtr` whitelist drift detector + test discipline
-  §4 + lesson).
+  structural barriers. Zero `now`-status rows.
 
-## 10.TC-emit-body bundle close — observable deltas
+## 10.E-spec-runner bundle close — observable deltas
 
-Bundle ran 8 cycles (1 reverted + re-applied via D-185 fix).
-Observable deltas at close (HEAD `ae2abab7`):
+Bundle ran 3 cycles closing at HEAD `734c6219` (source) +
+`ca0f51a0` (handover mark). Observable deltas:
 
-- `return_call N` arm64 e2e: `link+execute: fn0 return_call fn1
-  returns 7 via B/JMP fixup` GREEN on Mac aarch64 + Linux x86_64
-  SysV (cycles 3 + 5).
-- `return_call_indirect type_idx 0` arm64 byte-snapshot:
-  `compile: return_call_indirect — bounds + sig + funcptr-to-X16
-  + frame_teardown + BR X16` GREEN (cycle 6 re-applied at
-  `73187e6f`).
-- x86_64 emit dispatched via collected_x86_64_ctx_ops grew
-  394 → 395 (cycle 5) → 396 (cycle 8).
-- `CallFixup.is_tail` ships on both arches; arm64 linker
-  dispatches encB vs encBL based on the flag (cycle 1).
-- D-185 closed (root cause: shared facade host-dispatch); lesson
-  `2026-05-26-shared-facade-host-dispatched-cross-arch-byte-test`
-  filed.
-- D-186 filed for `return_call_ref` deferral (blocked-by 10.R
-  call_ref codegen + typed-funcref Value shape).
+- **C1 (`3ae3cfaa`)**: `test/spec/wasm_3_0_manifest.zig` —
+  parseLine over alloc-free TypedValue slices + Directive shape.
+  8 unit tests.
+- **C2 (`79749ffe`)**: parsePayload → runtime.Value with
+  i32/i64 unsigned-wrap @bitCast + f32/f64 bit-pattern @bitCast
+  + PayloadError mapping. 8 more tests (17 total).
+- **C3 (`734c6219`)**: `runOne(alloc, wasm_bytes, func_name,
+  args[])` via Native Zig API (ADR-0109 Engine + Linker +
+  Instance.invoke). First e2e test executes
+  `return_call.0.wasm::type-i32 () → i32:306` via @embedFile-
+  pinned fixture. 19 tests total in file. Green Mac + Linux
+  (ubuntu verified at `ca0f51a0`).
 
-## Active bundle
+Cross-link: the e2e test exercises the just-closed 10.TC-emit-
+body bundle's same-module direct return_call codegen on real
+wast-compiled bytes (not synthetic ZIR) — first cross-bundle
+verification of the tail-call substrate.
 
-- **Bundle-ID**: 10.E-spec-runner
-- **Cycles-remaining**: ~1 (close pending ubuntu verify)
-- **Continuity-memo**: cycles 1-3 landed in
-  `test/spec/wasm_3_0_manifest.zig`. C1 (`3ae3cfaa`): parseLine +
-  Directive shape (8 tests). C2 (`79749ffe`): parsePayload →
-  runtime.Value + PayloadError (8 more tests). C3 (`734c6219`):
-  `runOne(alloc, wasm_bytes, func_name, args[]) → zwasm.Value`
-  via Native Zig API (ADR-0109; Engine + Linker + Instance.invoke)
-  + first e2e test executing `return_call.0.wasm type-i32 () →
-  i32:306` via @embedFile-pinned fixture. 19 tests total in file;
-  Mac aarch64 all green; bundle exit-condition MET pending ubuntu.
-- **Exit-condition**: at least ONE assert_return directive from a
-  wasm-3.0-assert sub-corpus manifest executes end-to-end via
-  `cli_run.runWasmCaptured` (or equivalent invocation path) with
-  the parsed args + expected result matched against actual
-  return; `zig build test-spec-wasm-3.0-assert` reports >0
-  assertions passed (vs the current skeleton's 0).
-- **Next cycle (cycle 4 = close)**: verify ubuntu green via
-  Step 0.7, then close-commit with observable deltas (19 tests
-  + e2e fixture green both arches). Full
-  spec_assert_runner_wasm_3_0.zig main-loop integration =
-  separate bundle (this one just lands primitives).
+## Next candidates
 
-## Next candidates (after 10.E-spec-runner bundle closes)
-
+- **10.E spec runner main-loop** — iterate manifests under the
+  corpus root, dispatch each parsed Directive through runOne,
+  count pass / fail / skip per proposal. Separate bundle from
+  the just-closed primitives bundle. Smallest first step:
+  extend spec_assert_runner_wasm_3_0.zig main() with a single-
+  manifest execution path (vs the current enumerate-and-count).
 - **10.R-4/5** — `call_ref` / `return_call_ref`. Needs the
   `(ref $sig)` typed-funcref Value shape decision first (per
   D-186). Survey-then-spike chunk before implementation.
@@ -89,9 +68,10 @@ Observable deltas at close (HEAD `ae2abab7`):
 
 ## Key refs
 
-- ADR-0017, ADR-0026, ADR-0111, ADR-0112 (tail-call design;
-  governed the just-closed bundle), ADR-0113 §A (terminator
-  class), ADR-0114 D1/D5/D6, ADR-0119, ADR-0120.
-- ROADMAP §10, Phase log `.dev/phase_log/phase10.md` Row 10.TC.
+- ADR-0017, ADR-0026, ADR-0109 (Native Zig API; governs the
+  just-closed bundle's runOne shape), ADR-0111, ADR-0112,
+  ADR-0113 §A, ADR-0114 D1/D5/D6, ADR-0119, ADR-0120.
+- ROADMAP §10, Phase log `.dev/phase_log/phase10.md` Row 10.T /
+  10.TC / 10.E.
 - Lessons (recent): `.dev/lessons/INDEX.md` entries 2026-05-26
   (shared-facade-host-dispatched) + 2026-05-28 (5 EH lessons).
