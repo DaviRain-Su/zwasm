@@ -427,6 +427,19 @@ pub fn build(b: *std.Build) void {
     const run_wasm_3_0_assert_unit = b.addRunArtifact(wasm_3_0_assert_unit_tests);
     test_step.dependOn(&run_wasm_3_0_assert_unit.step);
 
+    // §10 / 10.E spec corpus runner foundation — manifest parser
+    // tests. Lands ahead of the dispatcher integration so future
+    // cycles can wire parsed Directives through cli_run.runWasmCaptured
+    // against a structured input shape.
+    const wasm_3_0_manifest_unit_mod = createSanitizedModule(b, sanitize_opts, .{
+        .root_source_file = b.path("test/spec/wasm_3_0_manifest.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const wasm_3_0_manifest_unit_tests = b.addTest(.{ .root_module = wasm_3_0_manifest_unit_mod });
+    const run_wasm_3_0_manifest_unit = b.addRunArtifact(wasm_3_0_manifest_unit_tests);
+    test_step.dependOn(&run_wasm_3_0_manifest_unit.step);
+
     // §10 / 10.T-3: gc_stress + eh_frequency runner skeletons.
     // Impl-body lands when 10.G / 10.E activate (collector vtable +
     // FP-walk unwind in place). Until then the runners report
