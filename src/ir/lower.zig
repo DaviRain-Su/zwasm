@@ -581,6 +581,20 @@ pub const Lowerer = struct {
                 self.pos += 1;
                 try self.emit(.@"ref.test_null", heap_type_byte, 0);
             },
+            // ref.cast / ref.cast_null (Wasm 3.0 GC §3.3.5.4).
+            // Same heap_type encoding as ref.test family.
+            22 => {
+                if (self.pos >= self.body.len) return Error.UnexpectedEnd;
+                const heap_type_byte = self.body[self.pos];
+                self.pos += 1;
+                try self.emit(.@"ref.cast", heap_type_byte, 0);
+            },
+            23 => {
+                if (self.pos >= self.body.len) return Error.UnexpectedEnd;
+                const heap_type_byte = self.body[self.pos];
+                self.pos += 1;
+                try self.emit(.@"ref.cast_null", heap_type_byte, 0);
+            },
             28 => try self.emit(.@"ref.i31", 0, 0),
             29 => try self.emit(.@"i31.get_s", 0, 0),
             30 => try self.emit(.@"i31.get_u", 0, 0),

@@ -399,6 +399,28 @@ test "validate: ref.test_null heap_type round-trip (10.G op_gc cycle 7)" {
     try validateFunction(i32_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
 }
 
+test "validate: ref.cast heap_type round-trip (10.G op_gc cycle 8)" {
+    // Wasm 3.0 GC §3.3.5.4 — `(ref.null anyref ; ref.cast anyref ;
+    // ref.is_null ; end)`. Validator: ref.cast pops reftype, pushes
+    // reftype back (heap_type byte consumed but pre-RTT the popped
+    // type is preserved). ref.is_null then consumes + pushes i32.
+    //
+    // Opcode encoding:
+    //   0xD0 0x6E       — ref.null anyref
+    //   0xFB 0x16 0x6E  — ref.cast anyref
+    //   0xD1            — ref.is_null
+    //   0x0B            — end
+    const body = [_]u8{ 0xD0, 0x6E, 0xFB, 0x16, 0x6E, 0xD1, 0x0B };
+    try validateFunction(i32_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
+test "validate: ref.cast_null heap_type round-trip (10.G op_gc cycle 8)" {
+    // Mirror: ref.cast_null variant accepts null operands;
+    // validator shape identical to ref.cast (sub-op 23 = 0x17).
+    const body = [_]u8{ 0xD0, 0x6E, 0xFB, 0x17, 0x6E, 0xD1, 0x0B };
+    try validateFunction(i32_result_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
 test "validate: ref.i31 → i31.get_s round-trip (10.G op_gc cycle 5; ADR-0115 §6 typed precision)" {
     // Wasm 3.0 GC §3.x — `(i32.const 42 ; ref.i31 ; i31.get_s)`
     // round-trips through ValType.i31ref (no longer the .funcref

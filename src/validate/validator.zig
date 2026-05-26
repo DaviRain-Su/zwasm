@@ -1130,7 +1130,8 @@ pub const Validator = struct {
     /// chunks (data section / table section dependencies).
     /// Encoding: 0xFC <uleb32 sub-opcode>.
     /// Wasm 3.0 GC prefix (0xFB). Dispatches i31 sub-trio (28-30)
-    /// + ref.test / ref.test_null (20 / 21; 10.G op_gc cycle 7);
+    /// + ref.test / ref.test_null (20 / 21; 10.G op_gc cycle 7)
+    /// + ref.cast / ref.cast_null (22 / 23; 10.G op_gc cycle 8);
     /// other GC sub-opcodes light up per 10.G heap / struct /
     /// array sub-chunks.
     fn dispatchPrefixFB(self: *Validator) Error!void {
@@ -1139,6 +1140,9 @@ pub const Validator = struct {
             // ref.test / ref.test_null share validator shape:
             // consume heap_type byte, pop reftype, push i32.
             20, 21 => try self.opRefTest(),
+            // ref.cast / ref.cast_null share validator shape:
+            // consume heap_type byte, pop reftype, push reftype back.
+            22, 23 => try self.opRefCast(),
             28 => try self.opRefI31(),
             29, 30 => try self.opI31Get(), // .get_s / .get_u share validator shape
             else => return Error.NotImplemented,
@@ -1162,6 +1166,26 @@ pub const Validator = struct {
             .known => |t| if (t != .funcref and t != .externref and t != .i31ref and t != .anyref and t != .eqref and t != .structref and t != .arrayref) return Error.StackTypeMismatch,
         }
         try self.pushType(.i32);
+    }
+
+    /// Wasm spec 3.0 §3.3.5.4 — `ref.cast heap_type` /
+    /// `ref.cast_null heap_type`: consume heap_type byte (no
+    /// validator constraint for cycle 8 — RTT subtype refinement
+    /// lands later with type_hierarchy.zig); pop reftype; push the
+    /// reftype back. Pre-RTT we don't decode heap_type into a
+    /// ValType variant — the popped reftype is preserved as the
+    /// pushed type.
+    fn opRefCast(self: *Validator) Error!void {
+        if (self.pos >= self.body.len) return Error.UnexpectedEnd;
+        self.pos += 1;
+        const top = try self.popAny();
+        switch (top) {
+            .bot => try self.pushBot(),
+            .known => |t| {
+                if (t != .funcref and t != .externref and t != .i31ref and t != .anyref and t != .eqref and t != .structref and t != .arrayref) return Error.StackTypeMismatch;
+                try self.pushType(t);
+            },
+        }
     }
 
     /// Wasm spec 3.0 §3.x (GC) — `ref.i31`: pop i32, push an
