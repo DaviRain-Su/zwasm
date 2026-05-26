@@ -168,6 +168,15 @@ if [ "$DOCS_ONLY" -eq 0 ]; then
         echo "[gate_commit] check_sibling_pub --gate ..."
         bash scripts/check_sibling_pub.sh --gate > /dev/null
     fi
+    # D-180 (lesson 2026-05-28-x86_64-uses-runtime-ptr-eh-gap):
+    # x86_64 `usesRuntimePtr` whitelist drift detector. Any op
+    # whose emit produces R15-dependent bytes MUST be listed; drift
+    # = silent miscompile on Linux x86_64 (Mac aarch64 immune).
+    # Informational; reviewer responds to WARN.
+    if [ -x scripts/check_uses_runtime_ptr.sh ]; then
+        echo "[gate_commit] check_uses_runtime_ptr (info) ..."
+        bash scripts/check_uses_runtime_ptr.sh
+    fi
 fi
 
 # --- gate: zig build test (skipped on docs-only OR --fast) ---------------

@@ -281,6 +281,11 @@ const testing = std.testing;
 // the fixtures committed in sub-3c.
 
 test "runI32Export: memory64 store+load round-trip via i64 idx_type (ADR-0111 D4 e2e)" {
+    // D-181: Phase 10.M memory64 i64-idx emit lands on arm64 first
+    // (ADR-0111 D4); x86_64 SysV emit of `emitMemOpI64 X-form +
+    // wrap-check` is incomplete. Per `test_discipline.md` §4 — gate
+    // is paired with a debt row naming the structural impl gap, not
+    // just "Mac-only".
     if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
         return error.SkipZigTest;
     }
@@ -327,9 +332,7 @@ test "runI32Export: memory64 store+load round-trip via i64 idx_type (ADR-0111 D4
 }
 
 test "runI32Export: trunc_sat_f32_s/pos_inf returns INT32_MAX" {
-    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
-        return error.SkipZigTest;
-    }
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     // (module (func (export "test") (result i32) f32.const +inf
     //   i32.trunc_sat_f32_s)) — compiled via wat2wasm 1.0.39.
     const bytes = [_]u8{
@@ -345,9 +348,7 @@ test "runI32Export: trunc_sat_f32_s/pos_inf returns INT32_MAX" {
 }
 
 test "runI32Export: trunc_sat_f32_s/nan returns 0" {
-    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
-        return error.SkipZigTest;
-    }
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     // (module (func (export "test") (result i32) f32.const nan
     //   i32.trunc_sat_f32_s))
     const bytes = [_]u8{
@@ -363,9 +364,7 @@ test "runI32Export: trunc_sat_f32_s/nan returns 0" {
 }
 
 test "runI32Export: trunc_sat_f32_s/neg_inf returns INT32_MIN (as u32 = 0x80000000)" {
-    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
-        return error.SkipZigTest;
-    }
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     // (module (func (export "test") (result i32) f32.const -inf
     //   i32.trunc_sat_f32_s))
     const bytes = [_]u8{
@@ -381,9 +380,7 @@ test "runI32Export: trunc_sat_f32_s/neg_inf returns INT32_MIN (as u32 = 0x800000
 }
 
 test "runI32Export: trunc_f32_s/nan traps (sub-7.5b-ii trap_flag detection)" {
-    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
-        return error.SkipZigTest;
-    }
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     // (module (func (export "test") (result i32) f32.const nan
     //   i32.trunc_f32_s)) — Wasm 1.0 trapping trunc; NaN → trap.
     // Same module shape as the sat variant, only the opcode

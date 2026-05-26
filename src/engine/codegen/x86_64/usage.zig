@@ -12,6 +12,22 @@ const zir = @import("../../../ir/zir.zig");
 const ZirOp = zir.ZirOp;
 const ZirFunc = zir.ZirFunc;
 
+/// INVARIANT: this enum IS the truth that the x86_64 prologue
+/// gates `PUSH R15 / MOV R15, <entry_arg0>` on. Any op whose emit:
+///   1. Reads or writes `[R15 + off]` in its emitted bytes, OR
+///   2. Invokes a runtime callback (trampoline, host dispatch,
+///      memory.grow / table.grow) that itself reads R15, OR
+///   3. Generates a trap-stub fixup (the trap stub writes
+///      `trap_flag` / `trap_kind` via R15),
+/// MUST be listed here. Drift = silent miscompile on Linux x86_64
+/// (Mac aarch64 is structurally immune — its prologue always sets
+/// X19). See lesson
+/// `.dev/lessons/2026-05-28-x86_64-uses-runtime-ptr-eh-gap.md`
+/// for the D-180 case study (EH ops missed → JIT read garbage R15
+/// from Linux loader base address).
+///
+/// Detection hook: `bash scripts/check_uses_runtime_ptr.sh`.
+///
 /// Returns `true` when the function emits any op that requires
 /// R15 to hold the runtime pointer at execution time. R15 is
 /// loaded in the prologue and used by:

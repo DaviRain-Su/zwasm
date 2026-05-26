@@ -256,6 +256,65 @@ switch (builtin.target.cpu.arch) {
   aarch64)) return error.SkipZigTest;` with a comment citing
   this exception).
 
+## §4 — Host-conditional test gates must surface, not hide
+
+Tests gated to one host (`if (!(builtin.os.tag == .macos and
+builtin.cpu.arch == .aarch64)) return error.SkipZigTest;` or
+similar) ARE arch/OS coverage gaps. Each gate falls into one of:
+
+| Category | What it means | What it requires |
+|---|---|---|
+| **Spec-pinned**: the test exercises arch-specific encoding only (e.g. arm64 byte-shape probes) | Other-arch behaviour is N/A | Comment naming the arch-only artifact + a sibling test for the other-arch encoding (if applicable) |
+| **Impl-pending**: the test would fail on other host because the impl isn't there yet | Real impl gap | **Paired `D-NNN` row in `.dev/debt.md`** with `Status: blocked-by:` naming the missing impl + `Refs` citing the test |
+| **Heisenbug-isolated**: cross-arch reveals a flaky / unreproducible failure | Diagnostic gap | Paired `D-NNN` row + `track_heisenbug.sh` discharge plan per `investigation_discipline.md` §2 |
+
+### Forbidden phrasing in gate comments
+
+- "Mac-only path is fully wired; verify there first" — implies the
+  other host will be added later but doesn't NAME the gap. Either
+  the gap has a debt row (cite it: `// D-NNN — <one-line gap>`) or
+  the gate is spec-pinned with a justification.
+- "Linux x86_64 SysV is gated behind ..." with no concrete reference
+  to what's gated. If the gate IS spec-pinned, say so explicitly:
+  `// SPEC-PINNED: AAPCS64 byte-shape probe; sibling x86_64 byte
+  test lives at <path>`.
+- Bare `if (!(macos and aarch64))` with NO comment at all.
+
+### Reviewer checklist
+
+When approving a new host-conditional gate:
+
+- [ ] Does the gate's comment cite either (a) a spec-pinned
+      rationale OR (b) a `D-NNN` debt row?
+- [ ] If the comment says "verify on host X first" without naming
+      a gap → REJECT until the gap is debt-rowed.
+- [ ] Are there sibling tests covering the same logic for the
+      other host? If yes, link them.
+- [ ] If the gate would suppress an x86_64 R15-related miscompile
+      (per the D-180 case study below), the debt row's Status MUST
+      name the gap structurally — not just "Linux later".
+
+### When §4 does NOT fire
+
+- Build-flag gates (`if (!enabled)`-style gated on a `build_options`
+  field) are intentional opt-in features; not host-conditional.
+- Tool-availability gates (`if (!has_tool_X) skip`) where `tool_X`
+  is documented as optional in `.dev/setup_*.md`.
+
+### Why §4 exists
+
+D-180 (2026-05-28) — `runI32Export: throw + catch_all returns 42`
+was gated to Mac aarch64 only. The IT-6 BUNDLE CLOSED claim of
+"fully wired on both arches" was technically incorrect; only Mac
+was wired. When the gate was finally ungated, Linux x86_64 SysV
+returned 0 (silent miscompile due to missing `usesRuntimePtr`
+entry — see lesson `2026-05-28-x86_64-uses-runtime-ptr-eh-gap.md`).
+The gate had hidden the bug for ~2 days. Had §4 been in place,
+the gate's "Linux x86_64 SysV path... gated behind the x86_64
+op_throw/op_try_table emit which still has open coverage gaps"
+phrasing would have triggered a "where is the D-NNN row?" question
+at review time and surfaced the gap immediately.
+
 ## Anti-patterns
 
 - **"We'll add the fixture later"** — add the WAT today; runner
