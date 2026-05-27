@@ -114,7 +114,16 @@ else
 fi
 
 # §8 I4 — covered by the pre-existing I1 above (memory64 i64-arm DCE).
-skip "§8 I4: covered by I1 (memory64 emitMemOpI64 DCE check; extends to other Phase 10 ops as land)"
+# The top-of-script I1 (memory64 emitMemOpI64 nm check) is the
+# concrete §8 I4 evidence: -Dwasm=v2_0 + nm verifies the comptime
+# DCE strip works. Future Phase 10 ops (EH / GC / TC) will extend
+# the nm check with their own symbols as those features ship a
+# v2_0-strip-eligible boundary.
+if [ $FAILS -eq 0 ] && grep -q "emitMemOpI64 absent" <(printf '%s\n' "${LINES[@]}"); then
+  ok "§8 I4: top I1 DCE check green (memory64 emitMemOpI64 stripped from -Dwasm=v2_0)"
+else
+  skip "§8 I4: top I1 DCE check not green yet; extends to EH/GC/TC as those features land"
+fi
 
 # §8 I5 — needs_gc_heap=false → GC infra zero calls
 skip "§8 I5: module-driven verify requires synthetic fixtures; deferred"
