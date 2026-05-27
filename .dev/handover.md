@@ -6,11 +6,11 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `cb7e452d` — feat(p10): RootScope Mode A host API
-  (cycle 29; ADR-0115 §4). withRootScope-equivalent shape:
-  init/pushRoot/collect. End-to-end GC stack now wired
-  (heap + collector + mark/sweep/trace + root walker + scope).
-  Cycle 30+ awaits D-179 unblock for spec runner.
+- **HEAD**: cycle 30 pivot — bundle 10.G-op_gc CLOSED; extended
+  `scripts/check_phase10_close_invariants.sh` from §8 I4-only
+  to all 23 invariants (6 PASS / 18 SKIP / 0 FAIL today). Loop
+  reorients to 10.P pre-flight + opportunistic 10.R / 10.E
+  unblocks pending external (D-179 / D-186 / D-192).
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
 - **Active debt rows**: 18 — all `blocked-by:` with named
   structural barriers. Zero `now`-status rows.
@@ -53,39 +53,23 @@ Foundation cycles produce no spec-runner delta — they substrate
 future op_gc consumers. EH 40 fails still gated on the bigger
 10.G work (per D-192).
 
-## Active bundle
+## Bundle 10.G-op_gc — CLOSED (pivot) at cycle 30
 
-- **Bundle-ID**: 10.G-op_gc
-- **Cycles-remaining**: ~1 (spec-runner integration; D-179
-  unblock external). Bundle near natural exit.
-- **Continuity-memo**: Cycles 1-6 substrate. Cycles 7-12 no-RTT
-  GC ops. Cycles 13-14 ADR-0121 + decodeTypes 0x5F/0x5E. Cycles
-  15-18: struct.new/new_default, array.new family, struct.get/set,
-  array.get/set/fill (full validator+lower). Off-bundle ADR-0122
-  skip-categorization detour `67741848`. Cycle 19 (`7100bfd1`)
-  ADR-0116 §3a StructInfo/ArrayInfo runtime layout amend. Cycle
-  20 (`9c16b0bb`) created type_info.zig substrate. Cycle 21
-  (`5c00600f`) Instance.gc_type_infos. Cycle 22 (`bbcd0602`)
-  struct.new family. Cycle 23 (`fdb8ccfa`) struct.get/set. Cycle
-  24 (`198f4add`) array.new family. Cycle 25 (`548545bf`)
-  array.get/set/fill+len. Cycle 26 (`0f842625`) β collector.
-  Cycle 27 (`c5f3df3b`) root walker. Cycle 28 (`8f018707`)
-  transitive trace. Cycle 29 (`cb7e452d`) Mode A RootScope
-  host API. **GC stack end-to-end wired**: parse → typeidx →
-  alloc → field access → mark + transitive trace → sweep →
-  Mode A scope. Cycle 30 (next): bundle is at natural exit
-  with D-179 (wabt 1.0.41+) blocking spec-runner verification.
-  Per ADR-0118 D6 pivot path: rewrite handover to retire
-  Active bundle + reorient to other Phase 10 IN-PROGRESS rows
-  (10.R typed-funcref, 10.E EH runtime, or 10.P invariant
-  pre-flight). Recommend pivot to 10.P pre-flight to start
-  closing the Phase 10 invariant 23-check before any new bundle.
-  **Per ADR-0122 D6 ongoing**: every cycle's Step 4 reviews 1-2
-  nearby `skip.blocker(.@"D-193")` sites for 3-min ungate probes.
-- **Exit-condition**: wasm-3.0-assert exception-handling /
-  function-references / gc corpora open for op_gc dispatch +
-  at least the first i31 spec directive flips green via the
-  new dispatch + heap path.
+29 cycles (7-29) landed full WasmGC runtime substrate end-to-end:
+parse + side-tables (cycles 13-14 ADR-0121) → typeidx
+materialiser + Instance.gc_type_infos (cycles 19-21 ADR-0116 §3a)
+→ struct ops interp (cycles 22-23) → array ops interp (cycles
+24-25) → β mark-sweep collector (cycle 26) → root walker (27) +
+transitive trace (28) + Mode A RootScope host API (29). +20
+ADR-0122 detour cycle 18 (60-site test skip categorization).
+
+Test count: 2117 → 2217 (+100 substantive tests). Spec-runner
+delta: 0 (exit-condition unmet because gc corpus is D-179-blocked
+on wabt 1.0.41+; per ADR-0118 D6 pivot path applies — bundle
+exits with all autonomous-eligible scope done).
+
+Per ADR-0122 D6: ongoing `/continue` Step 4 reviews 1-2 nearby
+`skip.blocker(.@"D-193")` sites for 3-min ungate probes.
 
 ## Next sub-chunk candidates (names only)
 
