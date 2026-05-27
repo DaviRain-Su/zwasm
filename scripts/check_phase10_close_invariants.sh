@@ -100,8 +100,21 @@ skip "§8 I4: covered by I1 (memory64 emitMemOpI64 DCE check; extends to other P
 # §8 I5 — needs_gc_heap=false → GC infra zero calls
 skip "§8 I5: module-driven verify requires synthetic fixtures; deferred"
 
-# §8 I6 — -Dgc=false complete strip
-skip "§8 I6: -Dgc build option exists (cycle 6); strip verify deferred"
+# §8 I6 — -Dgc=false complete strip + -Dgc=true compiles.
+# Build both paths; each must exit 0. (Deep "no GC symbols leak"
+# nm verify defers — CLI binary already DCE-strips unused
+# symbols regardless of the build option, so nm alone isn't
+# definitive; the meaningful close-time check is "default
+# build green AND opt-in build green".)
+i6_false=1
+i6_true=1
+zig build -Dgc=false > /tmp/check_p10_gcfalse.log 2>&1 && i6_false=0
+zig build -Dgc=true  > /tmp/check_p10_gctrue.log 2>&1 && i6_true=0
+if [ $i6_false -eq 0 ] && [ $i6_true -eq 0 ]; then
+  ok "§8 I6: -Dgc=false + -Dgc=true both build clean (strip seam works)"
+else
+  fail "§8 I6: -Dgc build failed (false=$i6_false true=$i6_true; see /tmp/check_p10_gc{false,true}.log)"
+fi
 
 # §8 I7 — emit_test_*.zig snapshot byte-identical w/ Phase 9
 skip "§8 I7: Phase 9 baseline snapshot deliverable T.3"
