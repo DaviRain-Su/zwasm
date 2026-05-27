@@ -238,8 +238,22 @@ skip "§8 I20: src mentions=$src_mentions (skeleton/doc); runtime emission check
 # §8 I21 — test/realworld/p10/ 9 fixture 5 toolchain green
 skip "§8 I21: realworld/p10 toolchain gated on D-179 + Dart/hoot"
 
-# §8 I22 — skip-list ratchet vs Phase 9 baseline
-skip "§8 I22: skip-impl ratchet checked at close via skip_impl_history.yaml"
+# §8 I22 — skip-list ratchet (Phase 10 close skip-impl ≤ Phase 9
+# baseline). Parse skip_impl_history.yaml — first `total:` is the
+# Phase 9 baseline (commit "(baseline)"); last `total:` is the
+# current measurement. Ratchet requires current ≤ baseline.
+sih=bench/results/skip_impl_history.yaml
+if [ -f "$sih" ]; then
+  baseline_total=$(grep -E "^\s+total:" "$sih" | head -1 | awk '{print $2}')
+  current_total=$(grep -E "^\s+total:" "$sih" | tail -1 | awk '{print $2}')
+  if [ -n "$baseline_total" ] && [ -n "$current_total" ] && [ "$current_total" -le "$baseline_total" ]; then
+    ok "§8 I22: skip-impl ratchet green (current=$current_total ≤ baseline=$baseline_total)"
+  else
+    fail "§8 I22: skip-impl ratchet broken (current=$current_total > baseline=$baseline_total)"
+  fi
+else
+  skip "§8 I22: $sih missing; ratchet history not initialised"
+fi
 
 # §8 I23 — widget Phase 10 IN-PROGRESS → DONE
 skip "§8 I23: widget status TBD by phase-close cycle itself"
