@@ -6,12 +6,11 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `8f018707` — feat(p10): MarkSweepCollector
-  transitive trace (cycle 28). markFromRoot now recursively
-  traces struct/array payload heap-reftype slots; cycle break
-  via mark-bit gate. +4 tests pin field/element/cycle/non-reftype-
-  decoy paths. **Mark-sweep collector complete.** Cycle 29
-  Mode A host API next.
+- **HEAD**: `cb7e452d` — feat(p10): RootScope Mode A host API
+  (cycle 29; ADR-0115 §4). withRootScope-equivalent shape:
+  init/pushRoot/collect. End-to-end GC stack now wired
+  (heap + collector + mark/sweep/trace + root walker + scope).
+  Cycle 30+ awaits D-179 unblock for spec runner.
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
 - **Active debt rows**: 18 — all `blocked-by:` with named
   structural barriers. Zero `now`-status rows.
@@ -57,8 +56,8 @@ future op_gc consumers. EH 40 fails still gated on the bigger
 ## Active bundle
 
 - **Bundle-ID**: 10.G-op_gc
-- **Cycles-remaining**: ~2 (Mode A host API + spec-runner
-  integration once D-179 unblocks)
+- **Cycles-remaining**: ~1 (spec-runner integration; D-179
+  unblock external). Bundle near natural exit.
 - **Continuity-memo**: Cycles 1-6 substrate. Cycles 7-12 no-RTT
   GC ops. Cycles 13-14 ADR-0121 + decodeTypes 0x5F/0x5E. Cycles
   15-18: struct.new/new_default, array.new family, struct.get/set,
@@ -71,14 +70,16 @@ future op_gc consumers. EH 40 fails still gated on the bigger
   24 (`198f4add`) array.new family. Cycle 25 (`548545bf`)
   array.get/set/fill+len. Cycle 26 (`0f842625`) β collector.
   Cycle 27 (`c5f3df3b`) root walker. Cycle 28 (`8f018707`)
-  transitive trace. **Mark-sweep collector complete.** Cycle 29
-  (next): Mode A `zwasm_runtime_with_root_scope` host API per
-  ADR-0115 §4 / ADR-0116 §1. Likely: add
-  `pub fn withRootScope(rt: *Runtime, ctx: anytype, cb: fn(...))`
-  that binds collector + invokes callback synchronously; cb body
-  can safely allocate without collection mid-scope. May need ADR
-  amendment for ergonomics; defer to /continue judgment. Cycle
-  30+ (D-179 unblocked): spec-runner gc corpus integration.
+  transitive trace. Cycle 29 (`cb7e452d`) Mode A RootScope
+  host API. **GC stack end-to-end wired**: parse → typeidx →
+  alloc → field access → mark + transitive trace → sweep →
+  Mode A scope. Cycle 30 (next): bundle is at natural exit
+  with D-179 (wabt 1.0.41+) blocking spec-runner verification.
+  Per ADR-0118 D6 pivot path: rewrite handover to retire
+  Active bundle + reorient to other Phase 10 IN-PROGRESS rows
+  (10.R typed-funcref, 10.E EH runtime, or 10.P invariant
+  pre-flight). Recommend pivot to 10.P pre-flight to start
+  closing the Phase 10 invariant 23-check before any new bundle.
   **Per ADR-0122 D6 ongoing**: every cycle's Step 4 reviews 1-2
   nearby `skip.blocker(.@"D-193")` sites for 3-min ungate probes.
 - **Exit-condition**: wasm-3.0-assert exception-handling /
