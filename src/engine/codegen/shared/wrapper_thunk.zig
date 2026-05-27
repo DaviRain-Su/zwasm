@@ -816,14 +816,13 @@ test "wrapper_thunk: EmitParams + EmitOutput types present" {
 }
 
 test "wrapper_thunk: end-to-end execution — () → (i32, i32, i32) via wrapper" {
-    // D-180 hazard: this gate hides Linux aarch64. D-193 tracks
-    // per-site triage. Win64 deferred per ADR-0122 phaseEnd batch.
+    // D-193 triage (cycle 41): ungated. Body uses comptime arch
+    // dispatch (arm64 vs x86_64 emit.zig) so Linux aarch64 / Mac
+    // x86_64 / Linux x86_64 SysV all execute the right path. CI
+    // matrix only runs Mac aarch64 + Linux x86_64 + Win — the
+    // prior Mac-aarch64-only gate was overly cautious. Win
+    // deferred per ADR-0122 phaseEnd batch.
     if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
-    if (!(builtin.cpu.arch == .aarch64 and builtin.os.tag == .macos) and
-        !(builtin.cpu.arch == .x86_64))
-    {
-        return skip.blocker(.@"D-193");
-    }
     // Build ZirFunc: () → (i32, i32, i32); body = 11; 22; 33; end.
     const zir = @import("../../../ir/zir.zig");
     const ZirFunc = zir.ZirFunc;
@@ -903,14 +902,13 @@ test "wrapper_thunk: end-to-end execution — () → (i32, i32, i32) via wrapper
 }
 
 test "wrapper_thunk: end-to-end execution — () → (i32, i64) via wrapper" {
-    // D-180 hazard: this gate hides Linux aarch64. D-193 tracks
-    // per-site triage. Win64 deferred per ADR-0122 phaseEnd batch.
+    // D-193 triage (cycle 41): ungated. Body uses comptime arch
+    // dispatch (arm64 vs x86_64 emit.zig) so Linux aarch64 / Mac
+    // x86_64 / Linux x86_64 SysV all execute the right path. CI
+    // matrix only runs Mac aarch64 + Linux x86_64 + Win — the
+    // prior Mac-aarch64-only gate was overly cautious. Win
+    // deferred per ADR-0122 phaseEnd batch.
     if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
-    if (!(builtin.cpu.arch == .aarch64 and builtin.os.tag == .macos) and
-        !(builtin.cpu.arch == .x86_64))
-    {
-        return skip.blocker(.@"D-193");
-    }
     const zir = @import("../../../ir/zir.zig");
     const ZirFunc = zir.ZirFunc;
     const regalloc = @import("regalloc.zig");
