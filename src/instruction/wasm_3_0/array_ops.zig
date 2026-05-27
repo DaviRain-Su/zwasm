@@ -48,6 +48,12 @@ pub fn register(table: *DispatchTable) void {
     table.interp[op(.@"array.new")] = arrayNew;
     table.interp[op(.@"array.new_default")] = arrayNewDefault;
     table.interp[op(.@"array.new_fixed")] = arrayNewFixed;
+    table.interp[op(.@"array.get")] = arrayGet;
+    table.interp[op(.@"array.set")] = arraySet;
+    table.interp[op(.@"array.fill")] = arrayFill;
+    // array.len: cycle-12 stub in ref_convert_ops.zig is now
+    // overridden by the real impl reading ArrayHeader.length.
+    table.interp[op(.@"array.len")] = arrayLen;
 }
 
 fn resolveArrayInfo(inst: *const Instance, typeidx: u32) anyerror!ArrayInfo {
@@ -128,6 +134,112 @@ fn arrayNewFixed(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
         @memcpy(dst, std.mem.asBytes(&v)[0..ai.element.size]);
     }
     try rt.pushOperand(.{ .ref = @as(u64, ref) });
+}
+
+/// Read ArrayHeader at offset 0 of the GC object; caller has
+/// already validated GcRef is non-null. Returns the length slot
+/// for bounds-check use; the kind field is implicitly trusted
+/// (validator narrowed the operand type to arrayref-class).
+fn readArrayHeader(heap: anytype, ref: u32) ArrayHeader {
+    var hdr: ArrayHeader = undefined;
+    @memcpy(std.mem.asBytes(&hdr)[0..array_header_size], heap.bytes[ref .. ref + array_header_size]);
+    return hdr;
+}
+
+/// Wasm 3.0 GC §3.3.5.6.10 — `array.get typeidx`: pop i32 idx +
+/// GcRef (trap null), bounds-check against ArrayHeader.length,
+/// read 8-byte element slot, push Value (validator-narrowed
+/// declared element type tells consumer which union arm is live).
+fn arrayGet(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
+    const rt = Runtime.fromOpaque(c);
+    const inst = @as(*const Instance, @ptrCast(@alignCast(rt.instance orelse return runtime.Trap.NullReference)));
+    const typeidx: u32 = @intCast(instr.payload);
+    const ai = try resolveArrayInfo(inst, typeidx);
+    const idx_val = rt.popOperand();
+    const idx_i32 = idx_val.i32;
+    const ref_val = rt.popOperand();
+    if (ref_val.ref == Value.null_ref) return runtime.Trap.NullReference;
+    const ref: u32 = @intCast(ref_val.ref);
+    const heap = rt.gc_heap orelse return runtime.Trap.NullReference;
+    const hdr = readArrayHeader(heap, ref);
+    if (idx_i32 < 0 or @as(u32, @intCast(idx_i32)) >= hdr.length) {
+        return runtime.Trap.OutOfBoundsLoad;
+    }
+    const idx: u32 = @intCast(idx_i32);
+    const src_off = ref + array_header_size + idx * ai.element.size;
+    var v: Value = undefined;
+    @memcpy(std.mem.asBytes(&v)[0..ai.element.size], heap.bytes[src_off .. src_off + ai.element.size]);
+    try rt.pushOperand(v);
+}
+
+/// Wasm 3.0 GC §3.3.5.6.12 — `array.set typeidx`: pop value +
+/// i32 idx + GcRef (trap null), bounds-check, write element.
+fn arraySet(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
+    const rt = Runtime.fromOpaque(c);
+    const inst = @as(*const Instance, @ptrCast(@alignCast(rt.instance orelse return runtime.Trap.NullReference)));
+    const typeidx: u32 = @intCast(instr.payload);
+    const ai = try resolveArrayInfo(inst, typeidx);
+    const v = rt.popOperand();
+    const idx_val = rt.popOperand();
+    const idx_i32 = idx_val.i32;
+    const ref_val = rt.popOperand();
+    if (ref_val.ref == Value.null_ref) return runtime.Trap.NullReference;
+    const ref: u32 = @intCast(ref_val.ref);
+    const heap = rt.gc_heap orelse return runtime.Trap.NullReference;
+    const hdr = readArrayHeader(heap, ref);
+    if (idx_i32 < 0 or @as(u32, @intCast(idx_i32)) >= hdr.length) {
+        return runtime.Trap.OutOfBoundsStore;
+    }
+    const idx: u32 = @intCast(idx_i32);
+    const dst_off = ref + array_header_size + idx * ai.element.size;
+    const dst = heap.bytes[dst_off .. dst_off + ai.element.size];
+    @memcpy(dst, std.mem.asBytes(&v)[0..ai.element.size]);
+}
+
+/// Wasm 3.0 GC §3.3.5.6.14 — `array.fill typeidx`: pop count +
+/// value + i32 idx + GcRef (trap null), bounds-check
+/// `idx + count ≤ length`, fill `count` slots with `value`.
+fn arrayFill(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
+    const rt = Runtime.fromOpaque(c);
+    const inst = @as(*const Instance, @ptrCast(@alignCast(rt.instance orelse return runtime.Trap.NullReference)));
+    const typeidx: u32 = @intCast(instr.payload);
+    const ai = try resolveArrayInfo(inst, typeidx);
+    const count_val = rt.popOperand();
+    const v = rt.popOperand();
+    const idx_val = rt.popOperand();
+    const count_i32 = count_val.i32;
+    const idx_i32 = idx_val.i32;
+    const ref_val = rt.popOperand();
+    if (ref_val.ref == Value.null_ref) return runtime.Trap.NullReference;
+    const ref: u32 = @intCast(ref_val.ref);
+    const heap = rt.gc_heap orelse return runtime.Trap.NullReference;
+    const hdr = readArrayHeader(heap, ref);
+    if (idx_i32 < 0 or count_i32 < 0) return runtime.Trap.OutOfBoundsStore;
+    const idx: u32 = @intCast(idx_i32);
+    const count: u32 = @intCast(count_i32);
+    const end_widened = @addWithOverflow(idx, count);
+    if (end_widened[1] != 0 or end_widened[0] > hdr.length) {
+        return runtime.Trap.OutOfBoundsStore;
+    }
+    var i: u32 = 0;
+    while (i < count) : (i += 1) {
+        const dst_off = ref + array_header_size + (idx + i) * ai.element.size;
+        const dst = heap.bytes[dst_off .. dst_off + ai.element.size];
+        @memcpy(dst, std.mem.asBytes(&v)[0..ai.element.size]);
+    }
+}
+
+/// Wasm 3.0 GC §3.3.5.6.13 — `array.len`: pop GcRef (trap null),
+/// read ArrayHeader.length, push i32. Upgrades the cycle-12 stub
+/// in `ref_convert_ops.zig` that always trapped NullReference.
+fn arrayLen(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
+    const rt = Runtime.fromOpaque(c);
+    const ref_val = rt.popOperand();
+    if (ref_val.ref == Value.null_ref) return runtime.Trap.NullReference;
+    const ref: u32 = @intCast(ref_val.ref);
+    const heap = rt.gc_heap orelse return runtime.Trap.NullReference;
+    const hdr = readArrayHeader(heap, ref);
+    try rt.pushOperand(.{ .i32 = @intCast(hdr.length) });
 }
 
 // ============================================================
@@ -230,4 +342,116 @@ test "array.new_fixed N=3: writes 3 values in declared order (10.G op_gc cycle 2
         @memcpy(std.mem.asBytes(&v)[0..8], heap.bytes[off .. off + 8]);
         try testing.expectEqual(want, v.i32);
     }
+}
+
+test "array.len reads ArrayHeader.length (10.G op_gc cycle 25)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const body = [_]u8{ 0x01, 0x5E, 0x7F, 0x01 };
+    const env = try buildInstanceForTypes(&arena, &body);
+
+    var t = DispatchTable.init();
+    register(&t);
+    try env.rt.pushOperand(.{ .i32 = 7 });
+    try driveOne(env.rt, &t, .@"array.new_default", 0, 0);
+    // Stack: [GcRef]
+    try driveOne(env.rt, &t, .@"array.len", 0, 0);
+    try testing.expectEqual(@as(i32, 7), env.rt.popOperand().i32);
+}
+
+test "array.set then array.get round-trips at idx 2 (10.G op_gc cycle 25)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const body = [_]u8{ 0x01, 0x5E, 0x7F, 0x01 };
+    const env = try buildInstanceForTypes(&arena, &body);
+
+    var t = DispatchTable.init();
+    register(&t);
+    try env.rt.pushOperand(.{ .i32 = 5 });
+    try driveOne(env.rt, &t, .@"array.new_default", 0, 0);
+    const ref_val = env.rt.popOperand();
+    // set: [GcRef, idx, value]
+    try env.rt.pushOperand(ref_val);
+    try env.rt.pushOperand(.{ .i32 = 2 });
+    try env.rt.pushOperand(.{ .i32 = 99 });
+    try driveOne(env.rt, &t, .@"array.set", 0, 0);
+    // get: [GcRef, idx]
+    try env.rt.pushOperand(ref_val);
+    try env.rt.pushOperand(.{ .i32 = 2 });
+    try driveOne(env.rt, &t, .@"array.get", 0, 0);
+    try testing.expectEqual(@as(i32, 99), env.rt.popOperand().i32);
+}
+
+test "array.get out-of-bounds idx traps OutOfBoundsLoad (10.G op_gc cycle 25)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const body = [_]u8{ 0x01, 0x5E, 0x7F, 0x01 };
+    const env = try buildInstanceForTypes(&arena, &body);
+
+    var t = DispatchTable.init();
+    register(&t);
+    try env.rt.pushOperand(.{ .i32 = 3 });
+    try driveOne(env.rt, &t, .@"array.new_default", 0, 0);
+    const ref_val = env.rt.popOperand();
+    try env.rt.pushOperand(ref_val);
+    try env.rt.pushOperand(.{ .i32 = 5 }); // beyond length=3
+    try testing.expectError(runtime.Trap.OutOfBoundsLoad, driveOne(env.rt, &t, .@"array.get", 0, 0));
+}
+
+test "array.fill writes count copies + array.get reads them back (10.G op_gc cycle 25)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const body = [_]u8{ 0x01, 0x5E, 0x7F, 0x01 };
+    const env = try buildInstanceForTypes(&arena, &body);
+
+    var t = DispatchTable.init();
+    register(&t);
+    try env.rt.pushOperand(.{ .i32 = 5 });
+    try driveOne(env.rt, &t, .@"array.new_default", 0, 0);
+    const ref_val = env.rt.popOperand();
+    // fill: [GcRef, idx=1, value=77, count=3]
+    try env.rt.pushOperand(ref_val);
+    try env.rt.pushOperand(.{ .i32 = 1 });
+    try env.rt.pushOperand(.{ .i32 = 77 });
+    try env.rt.pushOperand(.{ .i32 = 3 });
+    try driveOne(env.rt, &t, .@"array.fill", 0, 0);
+    // Verify slot 1..3 == 77 and slot 0, 4 stayed zero.
+    const expected = [_]i32{ 0, 77, 77, 77, 0 };
+    for (expected, 0..) |want, i| {
+        try env.rt.pushOperand(ref_val);
+        try env.rt.pushOperand(.{ .i32 = @intCast(i) });
+        try driveOne(env.rt, &t, .@"array.get", 0, 0);
+        try testing.expectEqual(want, env.rt.popOperand().i32);
+    }
+}
+
+test "array.fill OOB range (idx+count > length) traps OutOfBoundsStore (10.G op_gc cycle 25)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const body = [_]u8{ 0x01, 0x5E, 0x7F, 0x01 };
+    const env = try buildInstanceForTypes(&arena, &body);
+
+    var t = DispatchTable.init();
+    register(&t);
+    try env.rt.pushOperand(.{ .i32 = 3 });
+    try driveOne(env.rt, &t, .@"array.new_default", 0, 0);
+    const ref_val = env.rt.popOperand();
+    // idx=2, count=5 → 2+5=7 > length=3
+    try env.rt.pushOperand(ref_val);
+    try env.rt.pushOperand(.{ .i32 = 2 });
+    try env.rt.pushOperand(.{ .i32 = 11 });
+    try env.rt.pushOperand(.{ .i32 = 5 });
+    try testing.expectError(runtime.Trap.OutOfBoundsStore, driveOne(env.rt, &t, .@"array.fill", 0, 0));
+}
+
+test "array.len on null GcRef traps NullReference (10.G op_gc cycle 25)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const body = [_]u8{ 0x01, 0x5E, 0x7F, 0x01 };
+    const env = try buildInstanceForTypes(&arena, &body);
+
+    var t = DispatchTable.init();
+    register(&t);
+    try env.rt.pushOperand(.{ .ref = Value.null_ref });
+    try testing.expectError(runtime.Trap.NullReference, driveOne(env.rt, &t, .@"array.len", 0, 0));
 }
