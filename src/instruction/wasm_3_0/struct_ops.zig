@@ -51,6 +51,8 @@ inline fn op(o: ZirOp) usize {
 pub fn register(table: *DispatchTable) void {
     table.interp[op(.@"struct.new")] = structNew;
     table.interp[op(.@"struct.new_default")] = structNewDefault;
+    table.interp[op(.@"struct.get")] = structGet;
+    table.interp[op(.@"struct.set")] = structSet;
 }
 
 /// Resolve `inst.gc_type_infos.?.struct_infos[typeidx].?` —
@@ -104,6 +106,51 @@ fn structNew(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
         @memcpy(dst, as_u64);
     }
     try rt.pushOperand(.{ .ref = @as(u64, ref) });
+}
+
+/// Wasm 3.0 GC §3.3.5.6.2 — `struct.get typeidx fieldidx`:
+/// pop GcRef (trap null), read 8-byte slot at `ref + header_size
+/// + fields[fieldidx].offset`, push as Value. The popped slot's
+/// bytes are reinterpreted as the entire Value union — the
+/// validator-narrowed declared field type tells the consumer
+/// which arm is live.
+fn structGet(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
+    const rt = Runtime.fromOpaque(c);
+    const inst = @as(*const Instance, @ptrCast(@alignCast(rt.instance orelse return runtime.Trap.NullReference)));
+    const typeidx: u32 = @intCast(instr.payload);
+    const fieldidx: u32 = instr.extra;
+    const si = try resolveStructInfo(inst, typeidx);
+    if (fieldidx >= si.type_info.field_count) return runtime.Trap.NullReference;
+    const field = si.fields[fieldidx];
+    const ref_val = rt.popOperand();
+    if (ref_val.ref == Value.null_ref) return runtime.Trap.NullReference;
+    const ref: u32 = @intCast(ref_val.ref);
+    const heap = rt.gc_heap orelse return runtime.Trap.NullReference;
+    const src_off = ref + header_size + field.offset;
+    var v: Value = undefined;
+    @memcpy(std.mem.asBytes(&v)[0..8], heap.bytes[src_off .. src_off + 8]);
+    try rt.pushOperand(v);
+}
+
+/// Wasm 3.0 GC §3.3.5.6.4 — `struct.set typeidx fieldidx`:
+/// pop value + GcRef (trap null), write 8-byte slot. Validator
+/// already enforced field.mutable + correct value type.
+fn structSet(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
+    const rt = Runtime.fromOpaque(c);
+    const inst = @as(*const Instance, @ptrCast(@alignCast(rt.instance orelse return runtime.Trap.NullReference)));
+    const typeidx: u32 = @intCast(instr.payload);
+    const fieldidx: u32 = instr.extra;
+    const si = try resolveStructInfo(inst, typeidx);
+    if (fieldidx >= si.type_info.field_count) return runtime.Trap.NullReference;
+    const field = si.fields[fieldidx];
+    const v = rt.popOperand();
+    const ref_val = rt.popOperand();
+    if (ref_val.ref == Value.null_ref) return runtime.Trap.NullReference;
+    const ref: u32 = @intCast(ref_val.ref);
+    const heap = rt.gc_heap orelse return runtime.Trap.NullReference;
+    const dst_off = ref + header_size + field.offset;
+    const dst = heap.bytes[dst_off .. dst_off + 8];
+    @memcpy(dst, std.mem.asBytes(&v)[0..8]);
 }
 
 fn structNewDefault(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
@@ -248,4 +295,73 @@ test "struct.new_default: payload zero-init (10.G op_gc cycle 22)" {
     var f0: Value = undefined;
     @memcpy(std.mem.asBytes(&f0)[0..8], heap.bytes[payload_start .. payload_start + 8]);
     try testing.expectEqual(@as(i64, 0), f0.i64);
+}
+
+test "struct.get reads back struct.new field at offset 0 (10.G op_gc cycle 23)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    // struct { i32 var }
+    const body = [_]u8{ 0x01, 0x5F, 0x01, 0x7F, 0x01 };
+    const env = try buildInstanceForTypes(&arena, &body);
+
+    var t = DispatchTable.init();
+    register(&t);
+    // struct.new with i32=42; result GcRef on stack.
+    try env.rt.pushOperand(.{ .i32 = 42 });
+    try driveOne(env.rt, &t, .@"struct.new", 0);
+    // Now stack: [GcRef]. struct.get typeidx=0 fieldidx=0.
+    const instr: ZirInstr = .{ .op = .@"struct.get", .payload = 0, .extra = 0 };
+    try dispatch_loop.step(env.rt, &t, &instr);
+    try testing.expectEqual(@as(i32, 42), env.rt.popOperand().i32);
+}
+
+test "struct.set then struct.get round-trips i64 at offset 8 (10.G op_gc cycle 23)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    // struct { i32 var, i64 var }
+    const body = [_]u8{ 0x01, 0x5F, 0x02, 0x7F, 0x01, 0x7E, 0x01 };
+    const env = try buildInstanceForTypes(&arena, &body);
+
+    var t = DispatchTable.init();
+    register(&t);
+    // struct.new_default to get a fresh GcRef (zero-init).
+    try driveOne(env.rt, &t, .@"struct.new_default", 0);
+    // Duplicate the GcRef for the set + later get.
+    const ref_val = env.rt.popOperand();
+    try env.rt.pushOperand(ref_val);
+    try env.rt.pushOperand(.{ .i64 = 0xCAFE_BABE_DEAD });
+    const set_instr: ZirInstr = .{ .op = .@"struct.set", .payload = 0, .extra = 1 };
+    try dispatch_loop.step(env.rt, &t, &set_instr);
+    // Now read back fieldidx=1.
+    try env.rt.pushOperand(ref_val);
+    const get_instr: ZirInstr = .{ .op = .@"struct.get", .payload = 0, .extra = 1 };
+    try dispatch_loop.step(env.rt, &t, &get_instr);
+    try testing.expectEqual(@as(i64, 0xCAFE_BABE_DEAD), env.rt.popOperand().i64);
+}
+
+test "struct.get on null GcRef traps NullReference (10.G op_gc cycle 23)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const body = [_]u8{ 0x01, 0x5F, 0x01, 0x7F, 0x01 };
+    const env = try buildInstanceForTypes(&arena, &body);
+
+    var t = DispatchTable.init();
+    register(&t);
+    try env.rt.pushOperand(.{ .ref = Value.null_ref });
+    const instr: ZirInstr = .{ .op = .@"struct.get", .payload = 0, .extra = 0 };
+    try testing.expectError(runtime.Trap.NullReference, dispatch_loop.step(env.rt, &t, &instr));
+}
+
+test "struct.set on null GcRef traps NullReference (10.G op_gc cycle 23)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const body = [_]u8{ 0x01, 0x5F, 0x01, 0x7F, 0x01 };
+    const env = try buildInstanceForTypes(&arena, &body);
+
+    var t = DispatchTable.init();
+    register(&t);
+    try env.rt.pushOperand(.{ .ref = Value.null_ref });
+    try env.rt.pushOperand(.{ .i32 = 99 });
+    const instr: ZirInstr = .{ .op = .@"struct.set", .payload = 0, .extra = 0 };
+    try testing.expectError(runtime.Trap.NullReference, dispatch_loop.step(env.rt, &t, &instr));
 }
