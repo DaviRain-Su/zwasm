@@ -6,11 +6,12 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 30 pivot — bundle 10.G-op_gc CLOSED; extended
-  `scripts/check_phase10_close_invariants.sh` from §8 I4-only
-  to all 23 invariants (6 PASS / 18 SKIP / 0 FAIL today). Loop
-  reorients to 10.P pre-flight + opportunistic 10.R / 10.E
-  unblocks pending external (D-179 / D-186 / D-192).
+- **HEAD**: `ec44d894` — chore(p10): §8 I12 SKIP→PASS; ADR-0111..
+  0117 all Accepted-verified mechanically. Distribution: 7 PASS
+  / 17 SKIP / 0 FAIL. Loop continues opportunistic SKIP→PASS
+  upgrades + ADR-0122 D-193 site triage as autonomous-eligible
+  work. External-blocked: D-179 (gc spec corpus), D-186 (typed-
+  funcref Value), D-192 (EH runtime).
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
 - **Active debt rows**: 18 — all `blocked-by:` with named
   structural barriers. Zero `now`-status rows.
