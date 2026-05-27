@@ -306,4 +306,6 @@ test {
     _ = @import("register.zig");
     // 10.G op_gc cycle 20: type_info.zig (ADR-0116 §3a impl).
     _ = @import("type_info.zig");
+    // 10.G op_gc cycle 26: collector_mark_sweep.zig (β must-ship).
+    _ = @import("collector_mark_sweep.zig");
 }
