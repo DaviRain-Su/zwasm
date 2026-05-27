@@ -6,12 +6,12 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `0f842625` — feat(p10): collector_mark_sweep.zig β
-  must-ship (cycle 26). First non-stub Collector impl per
-  ADR-0115 §10; STW mark+sweep over Heap slab + ObjectHeader/
-  ArrayHeader. +5 tests. Bundle 10.G-op_gc sub-chunks 1-8
-  wired; remaining sub-chunk 9 (root walker, ADR-0115 §4) +
-  ADR-0116 transitive trace land at cycles 27+.
+- **HEAD**: `c5f3df3b` — feat(p10): MarkSweepCollector root
+  walker (cycle 27). walkRootsImpl conservatively scans
+  operand-stack + frame-locals + globals; reports candidate
+  GcRefs via user callback. +3 tests pin filter discipline
+  (i31/null/oob/unaligned rejected). Cycle 28+ adds transitive
+  trace from marked objects.
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
 - **Active debt rows**: 18 — all `blocked-by:` with named
   structural barriers. Zero `now`-status rows.
@@ -57,8 +57,8 @@ future op_gc consumers. EH 40 fails still gated on the bigger
 ## Active bundle
 
 - **Bundle-ID**: 10.G-op_gc
-- **Cycles-remaining**: ~4 (sub-chunk 9 root walker + ADR-0116
-  transitive trace + spec-runner integration once D-179 unblocks)
+- **Cycles-remaining**: ~3 (transitive trace + Mode A host API
+  + spec-runner integration once D-179 unblocks)
 - **Continuity-memo**: Cycles 1-6 substrate. Cycles 7-12 no-RTT
   GC ops. Cycles 13-14 ADR-0121 + decodeTypes 0x5F/0x5E. Cycles
   15-18: struct.new/new_default, array.new family, struct.get/set,
@@ -70,16 +70,19 @@ future op_gc consumers. EH 40 fails still gated on the bigger
   struct.new family. Cycle 23 (`fdb8ccfa`) struct.get/set. Cycle
   24 (`198f4add`) array.new family. Cycle 25 (`548545bf`)
   array.get/set/fill+len. Cycle 26 (`0f842625`)
-  collector_mark_sweep.zig β must-ship. Cycle 27 (next): sub-chunk
-  9 root walker. Wire `MarkSweepCollector.walkRootsImpl` to
-  enumerate Runtime.operand_stack reftype slots + Runtime.locals
-  reftype slots + Runtime.globals reftype slots, feeding GcRefs
-  to user callback. Cycle 28: transitive trace from marked
-  objects — decode payload slots via FieldInfo.valtype_byte;
-  for each reftype slot recursively markFromRoot. Cycle 29:
-  Mode A `zwasm_runtime_with_root_scope` host API per ADR-0115
-  §4 / ADR-0116 §1. Cycle 30+ (D-179 unblocked): spec-runner
-  gc corpus integration to verify against the actual gc spec.
+  collector_mark_sweep.zig β must-ship. Cycle 27 (`c5f3df3b`)
+  conservative root walker. Cycle 28 (next): transitive trace
+  from marked objects. For each marked ObjectHeader.info →
+  typeidx, look up StructInfo.fields[] OR ArrayInfo.element +
+  ArrayHeader.length; per reftype-classified slot
+  (FieldInfo.valtype_byte in funcref/externref/i31ref/anyref/
+  eqref/structref/arrayref), read 8-byte payload at
+  ref+header_size+offset, conservatively probe as GcRef,
+  recursively markFromRoot. Track work-list to avoid cycles
+  (mark set already gates re-visits). Cycle 29: Mode A
+  `zwasm_runtime_with_root_scope` host API per ADR-0115 §4 /
+  ADR-0116 §1 — defers if API design needs ADR amendment.
+  Cycle 30+ (D-179 unblocked): spec-runner gc corpus integration.
   **Per ADR-0122 D6 ongoing**: every cycle's Step 4 reviews 1-2
   nearby `skip.blocker(.@"D-193")` sites for 3-min ungate probes.
 - **Exit-condition**: wasm-3.0-assert exception-handling /
