@@ -48,6 +48,7 @@ const std = @import("std");
 const heap_mod = @import("heap.zig");
 const iface = @import("collector_iface.zig");
 const type_info_mod = @import("type_info.zig");
+const runtime_mod = @import("../../runtime/runtime.zig");
 
 const Heap = heap_mod.Heap;
 const GcRef = heap_mod.GcRef;
@@ -82,9 +83,24 @@ pub const MarkSweepCollector = struct {
     gc_type_infos: *const GcTypeInfos,
     /// Latest sweep statistics. Updated each `collectFn` call.
     last_stats: SweepStats = .{},
+    /// Runtime back-pointer for root enumeration (cycle 27).
+    /// `walkRootsImpl` casts this to `*runtime.Runtime` to scan
+    /// the operand stack + frame locals + globals. Held as
+    /// `?*anyopaque` so this Zone 1 file doesn't import the
+    /// Runtime concrete type (avoids zone-import cycle —
+    /// runtime.zig already references collector via Heap chain).
+    runtime: ?*anyopaque = null,
 
     pub fn init(heap: *Heap, gti: *const GcTypeInfos) MarkSweepCollector {
         return .{ .heap = heap, .gc_type_infos = gti };
+    }
+
+    /// Bind a Runtime back-pointer for root enumeration. Caller
+    /// passes `@ptrCast(rt)` after init. Optional — without this,
+    /// `walkRootsImpl` is a no-op (cycle-26 β behaviour preserved
+    /// for tests that exercise sweep without root binding).
+    pub fn bindRuntime(self: *MarkSweepCollector, rt: *anyopaque) void {
+        self.runtime = rt;
     }
 
     pub fn collector(self: *MarkSweepCollector) Collector {
@@ -177,19 +193,60 @@ pub const MarkSweepCollector = struct {
         };
     }
 
+    /// Conservative root walker (cycle 27). Enumerates Runtime's
+    /// operand stack + per-frame locals + globals; for each
+    /// Value slot tests whether `v.ref` looks like a valid GcRef
+    /// (within heap range, 2-byte aligned, non-null, low-bit-0
+    /// meaning not i31-tagged per ADR-0116 §6). Calls the user
+    /// callback per probable GcRef.
+    ///
+    /// **Conservative**: an i32 / f32 / i64 value that happens
+    /// to fall in the heap-offset range with the right alignment
+    /// will be conservatively treated as a root, keeping the
+    /// referenced object alive. False-positive marks are
+    /// acceptable per ADR-0116 §1 (precise tracing requires per-
+    /// slot type tracking which the validator drops at runtime).
+    ///
+    /// Returns silently if `bindRuntime` wasn't called (cycle-26
+    /// β tests exercise sweep-without-roots; preserve that path).
     fn walkRootsImpl(ctx: *anyopaque, root_callback: RootCallback, root_ctx: *anyopaque) void {
-        // Roots are owned by the caller (Runtime operand stack +
-        // locals + globals). β must-ship default: the collector
-        // doesn't enumerate roots itself; callers invoke
-        // `markFromRoot` directly OR pass their own walker that
-        // honours this vtable. The interface signature is kept
-        // intact so Mode A `zwasm_runtime_with_root_scope`
-        // (ADR-0115 §4) can wire later without vtable churn.
-        _ = ctx;
-        _ = root_callback;
-        _ = root_ctx;
+        const self: *MarkSweepCollector = @ptrCast(@alignCast(ctx));
+        const rt_opaque = self.runtime orelse return;
+        const rt = @as(*runtime_mod.Runtime, @ptrCast(@alignCast(rt_opaque)));
+        const heap_lo: u64 = heap_mod.Heap.min_align;
+        const heap_hi: u64 = self.heap.cursor;
+
+        // Operand stack.
+        var i: u32 = 0;
+        while (i < rt.operand_len) : (i += 1) {
+            tryReportRef(rt.operand_buf[i], heap_lo, heap_hi, root_callback, root_ctx);
+        }
+        // Per-frame locals.
+        var f: u32 = 0;
+        while (f < rt.frame_len) : (f += 1) {
+            for (rt.frame_buf[f].locals) |v| {
+                tryReportRef(v, heap_lo, heap_hi, root_callback, root_ctx);
+            }
+        }
+        // Globals (pointers to slots in globals_storage OR
+        // imported globals).
+        for (rt.globals) |gptr| {
+            tryReportRef(gptr.*, heap_lo, heap_hi, root_callback, root_ctx);
+        }
     }
 };
+
+fn tryReportRef(v: runtime_mod.Value, heap_lo: u64, heap_hi: u64, cb: RootCallback, cb_ctx: *anyopaque) void {
+    const r = v.ref;
+    // Quick rejects: null, i31-tagged (low bit 1), out of range,
+    // unaligned. Each preserves the §6 invariant: heap pointers
+    // have low bit 0 and live in [min_align, cursor).
+    if (r == 0) return;
+    if ((r & 1) != 0) return; // i31-tagged
+    if (r < heap_lo or r >= heap_hi) return;
+    if ((r % heap_mod.Heap.min_align) != 0) return;
+    cb(cb_ctx, @intCast(r));
+}
 
 // ============================================================
 // Tests
@@ -311,4 +368,127 @@ test "MarkSweepCollector: allocObject delegates to Heap.allocate (10.G op_gc cyc
     const ref = col.allocObject(16) orelse return error.UnexpectedAllocFail;
     try testing.expect(ref >= 2);
     try testing.expect(ref % 2 == 0);
+}
+
+test "MarkSweepCollector.walkRoots: enumerates operand-stack GcRefs (10.G op_gc cycle 27)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const body = [_]u8{ 0x01, 0x5F, 0x01, 0x7F, 0x01 };
+    const env = try buildArenaedHeap(&arena, &body);
+    const a = arena.allocator();
+    const rt = try a.create(runtime_mod.Runtime);
+    rt.* = runtime_mod.Runtime.init(a);
+
+    // Allocate 2 objects so the heap cursor advances.
+    const sz: u32 = header_size + 8;
+    const ref1 = try env.heap.allocate(sz);
+    const hdr1: ObjectHeader = .{ .kind = .struct_, .info = 0 };
+    @memcpy(env.heap.bytes[ref1 .. ref1 + header_size], std.mem.asBytes(&hdr1)[0..header_size]);
+    const ref2 = try env.heap.allocate(sz);
+    const hdr2: ObjectHeader = .{ .kind = .struct_, .info = 0 };
+    @memcpy(env.heap.bytes[ref2 .. ref2 + header_size], std.mem.asBytes(&hdr2)[0..header_size]);
+
+    // Push ref1 (not ref2) onto operand stack as a Value.ref.
+    try rt.pushOperand(.{ .ref = @as(u64, ref1) });
+
+    var c = MarkSweepCollector.init(env.heap, &env.gti);
+    c.bindRuntime(@ptrCast(rt));
+
+    // Collected via the vtable: walkRoots → markFromRoot → collect.
+    const Collected = struct {
+        var seen: [16]GcRef = undefined;
+        var seen_len: usize = 0;
+        fn cb(_: *anyopaque, ref: GcRef) void {
+            if (seen_len < seen.len) {
+                seen[seen_len] = ref;
+                seen_len += 1;
+            }
+        }
+    };
+    Collected.seen_len = 0;
+    const col = c.collector();
+    col.walkRoots(Collected.cb, @ptrCast(rt));
+    try testing.expectEqual(@as(usize, 1), Collected.seen_len);
+    try testing.expectEqual(ref1, Collected.seen[0]);
+}
+
+test "MarkSweepCollector.walkRoots: filters i31-tagged + null + out-of-range (10.G op_gc cycle 27)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const body = [_]u8{ 0x01, 0x5F, 0x01, 0x7F, 0x01 };
+    const env = try buildArenaedHeap(&arena, &body);
+    const a = arena.allocator();
+    const rt = try a.create(runtime_mod.Runtime);
+    rt.* = runtime_mod.Runtime.init(a);
+
+    // Push a real ref + 3 non-ref junk values that should be filtered.
+    const sz: u32 = header_size + 8;
+    const ref1 = try env.heap.allocate(sz);
+    const hdr1: ObjectHeader = .{ .kind = .struct_, .info = 0 };
+    @memcpy(env.heap.bytes[ref1 .. ref1 + header_size], std.mem.asBytes(&hdr1)[0..header_size]);
+
+    try rt.pushOperand(.{ .ref = @as(u64, ref1) });
+    try rt.pushOperand(.{ .ref = 0 }); // null
+    try rt.pushOperand(.{ .ref = 0x4242_4243 }); // odd → i31-tagged
+    try rt.pushOperand(.{ .ref = 0xDEAD_BEEF_DEAD_BEEF }); // way out of range
+
+    var c = MarkSweepCollector.init(env.heap, &env.gti);
+    c.bindRuntime(@ptrCast(rt));
+
+    const Collected = struct {
+        var seen: [16]GcRef = undefined;
+        var seen_len: usize = 0;
+        fn cb(_: *anyopaque, ref: GcRef) void {
+            if (seen_len < seen.len) {
+                seen[seen_len] = ref;
+                seen_len += 1;
+            }
+        }
+    };
+    Collected.seen_len = 0;
+    c.collector().walkRoots(Collected.cb, @ptrCast(rt));
+    try testing.expectEqual(@as(usize, 1), Collected.seen_len);
+    try testing.expectEqual(ref1, Collected.seen[0]);
+}
+
+test "MarkSweepCollector: rt.globals reftype value reported as root (10.G op_gc cycle 27)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const body = [_]u8{ 0x01, 0x5F, 0x01, 0x7F, 0x01 };
+    const env = try buildArenaedHeap(&arena, &body);
+    const a = arena.allocator();
+    const rt = try a.create(runtime_mod.Runtime);
+    rt.* = runtime_mod.Runtime.init(a);
+
+    const sz: u32 = header_size + 8;
+    const ref1 = try env.heap.allocate(sz);
+    const hdr1: ObjectHeader = .{ .kind = .struct_, .info = 0 };
+    @memcpy(env.heap.bytes[ref1 .. ref1 + header_size], std.mem.asBytes(&hdr1)[0..header_size]);
+
+    // Synthesise a 1-global runtime: globals_storage[0] holds the
+    // ref Value; globals[0] points at it.
+    const storage = try a.alloc(runtime_mod.Value, 1);
+    storage[0] = .{ .ref = @as(u64, ref1) };
+    const ptrs = try a.alloc(*runtime_mod.Value, 1);
+    ptrs[0] = &storage[0];
+    rt.globals = ptrs;
+    rt.globals_storage = storage;
+
+    var c = MarkSweepCollector.init(env.heap, &env.gti);
+    c.bindRuntime(@ptrCast(rt));
+
+    const Collected = struct {
+        var seen: [16]GcRef = undefined;
+        var seen_len: usize = 0;
+        fn cb(_: *anyopaque, ref: GcRef) void {
+            if (seen_len < seen.len) {
+                seen[seen_len] = ref;
+                seen_len += 1;
+            }
+        }
+    };
+    Collected.seen_len = 0;
+    c.collector().walkRoots(Collected.cb, @ptrCast(rt));
+    try testing.expectEqual(@as(usize, 1), Collected.seen_len);
+    try testing.expectEqual(ref1, Collected.seen[0]);
 }
