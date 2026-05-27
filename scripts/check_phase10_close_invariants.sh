@@ -130,8 +130,27 @@ fi
 # §8 I11 — bench Phase 10 close vs Phase 9 baseline
 skip "§8 I11: bench baseline comparison deferred to close cycle"
 
-# §8 I12 — ADR-0111..0117 Accepted
-skip "§8 I12: ADR Accepted normalisation deferred (verify per Phase 10 close)"
+# §8 I12 — ADR-0111..0117 Accepted (mechanical grep for the canonical
+# `- **Status**: Accepted` line shape used across .dev/decisions/).
+i12_pending=0
+i12_missing=()
+for adr_num in 0111 0112 0113 0114 0115 0116 0117; do
+  adr_f=$(ls .dev/decisions/${adr_num}_*.md 2>/dev/null | head -1)
+  if [ -z "$adr_f" ]; then
+    i12_pending=$((i12_pending + 1))
+    i12_missing+=("ADR-$adr_num (missing)")
+    continue
+  fi
+  if ! grep -qE "^- \*\*Status\*\*: (Accepted|Closed)" "$adr_f"; then
+    i12_pending=$((i12_pending + 1))
+    i12_missing+=("ADR-$adr_num")
+  fi
+done
+if [ $i12_pending -eq 0 ]; then
+  ok "§8 I12: ADR-0111..0117 all Accepted/Closed"
+else
+  fail "§8 I12: $i12_pending ADR(s) not Accepted/Closed: ${i12_missing[*]}"
+fi
 
 # §8 I13 — ROADMAP §12 stack-map exit criterion
 if grep -q "stack-map" .dev/ROADMAP.md 2>/dev/null; then
