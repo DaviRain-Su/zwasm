@@ -6,11 +6,12 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 85 — authored
-  `scripts/check_rule_paths.sh` + `scripts/check_skill_descriptions.sh`
-  (D-058 / D-059 discharged; cycle-82 audit `soon` cohort fully
-  closed across cycles 83/84/85: ADR backfill + SKILL.md split +
-  lint scripts).
+- **HEAD**: cycle 86 — wired `check_rule_paths` /
+  `check_skill_descriptions` / `check_doc_state` `--gate` into
+  `scripts/gate_commit.sh` via scope flags (RULES_TOUCHED /
+  SKILLS_TOUCHED / DEV_MD_TOUCHED). Drift detected by these lints
+  now blocks at source commit. cycle-82 audit cohort fully closed
+  across cycles 82-86.
 - Active debt rows: **18** — all `blocked-by:`; zero `now`.
 - Mac aarch64 test-all + lint green at HEAD prior to this chunk
   (52d9c784); ubuntu kick at 52d9c784 confirmed green (Step 0.7
@@ -21,29 +22,27 @@
 
 - None.
 
-## Active task — cycle 86: next autonomous chunk
+## Active task — cycle 87: next autonomous chunk
 
 `[wasm-3.0-assert] assert_invalid pass=134 fail=0` unchanged.
 Autonomous yield within §10 row 10.E / 10.G / further 10.M
 remains gated on ADR-0120 / ADR-0123 Accept or D-179 wabt
 upgrade.
 
-The cycle-82 audit `soon` cohort is now fully closed.
-Remaining candidates:
+Cycle 87 candidates:
 
 1. **Function-references / 10.R bake extension** — survey
    whether any ADR-0123-independent .wast modules remain
    un-baked in the function-references upstream corpus.
    Pure infra cycle.
 2. **Wasm 1.0 / 2.0 corpus coverage audit** — alt infra cycle.
-3. **Wire `check_rule_paths.sh` / `check_skill_descriptions.sh`
-   `--gate` into `gate_commit.sh` or `audit_scaffolding §G`**
-   so future drift is caught at commit time (currently
-   informational-only invocation).
+3. **debt.md re-evaluation pass** — 12 active rows crossed the
+   `Last reviewed > 14d` threshold per cycle-82 §F finding; walk
+   each and either re-confirm barrier or note dissolution.
 
-Cycle 86 picks (3) — small wiring chunk; closes the cycle-85
-lint pair into the gate pipeline so future drift can't sneak
-past commit.
+Cycle 87 picks (3) — debt re-eval has direct compounding value
+(stale rows hide barrier dissolutions); pure-doc cycle so the
+new docs-only short-circuit applies.
 
 ## Larger §10 work (blocked / later)
 
