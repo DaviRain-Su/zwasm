@@ -115,6 +115,10 @@ pub fn frontendValidate(alloc: std.mem.Allocator, binary: []const u8) bool {
 
     const func_types = alloc.alloc(zir.FuncType, imp_func_count + defined_func_indices.len) catch return false;
     defer alloc.free(func_types);
+    // 10.R-funcrefs-tail — parallel func-index → type-section-index map
+    // for ADR-0123 D4 typed `ref.func`. Same index space as func_types.
+    const func_type_indices = alloc.alloc(u32, imp_func_count + defined_func_indices.len) catch return false;
+    defer alloc.free(func_type_indices);
     {
         var cursor: usize = 0;
         if (imports_decoded) |im| for (im.items) |it| {
@@ -122,11 +126,13 @@ pub fn frontendValidate(alloc: std.mem.Allocator, binary: []const u8) bool {
             const ti = it.payload.func_typeidx;
             if (ti >= types_owned.items.len) return false;
             func_types[cursor] = types_owned.items[ti];
+            func_type_indices[cursor] = ti;
             cursor += 1;
         };
         for (defined_func_indices) |type_idx| {
             if (type_idx >= types_owned.items.len) return false;
             func_types[cursor] = types_owned.items[type_idx];
+            func_type_indices[cursor] = type_idx;
             cursor += 1;
         }
     }
@@ -319,6 +325,7 @@ pub fn frontendValidate(alloc: std.mem.Allocator, binary: []const u8) bool {
             memory0_idx_type,
             tags_slice,
             declared_funcs,
+            func_type_indices,
         ) catch return false;
     }
     return true;

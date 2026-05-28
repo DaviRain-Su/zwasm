@@ -347,6 +347,9 @@ pub fn validateFunctionWithMemIdxAndTags(
     /// callers that haven't been migrated yet — adopters pass the
     /// real bitset to enable the check.
     declared_funcs: []const bool,
+    /// 10.R-funcrefs-tail — func-index → type-section-index map for
+    /// ADR-0123 D4 typed `ref.func`. Empty → legacy abstract funcref.
+    func_type_indices: []const u32,
 ) Error!void {
     var v = Validator{
         .sig = sig,
@@ -363,6 +366,7 @@ pub fn validateFunctionWithMemIdxAndTags(
         .memory0_idx_type = memory0_idx_type,
         .tags = tags,
         .declared_funcs = declared_funcs,
+        .func_type_indices = func_type_indices,
     };
     try v.run();
 }
@@ -537,6 +541,14 @@ pub const Validator = struct {
     /// keep prior behaviour; production `compileWasm` passes a
     /// populated slice.
     declared_funcs: []const bool = &.{},
+    /// 10.R-funcrefs-tail — func-index → type-section-index map
+    /// (length = total funcs; imports first, then defined). ADR-0123
+    /// D4: `ref.func N` yields the non-null typed ref `(ref
+    /// func_type_indices[N])` instead of the abstract `funcref`, so it
+    /// satisfies typed `(ref $sig)` params at `call` / `call_ref`.
+    /// Empty (default) → legacy abstract `funcref` push for callers
+    /// (unit tests, compileWasm) that don't thread it yet.
+    func_type_indices: []const u32 = &.{},
     /// §9.9 / 9.9-l-1b-d093-d83 — per-element-segment reftype
     /// (parallel to `elem_count`; length = elem_count when
     /// populated). Used by `opTableInit` to enforce Wasm spec
@@ -2061,7 +2073,19 @@ pub const Validator = struct {
                 return Error.UndeclaredFuncRef;
             }
         }
-        try self.pushType(.funcref);
+        // ADR-0123 D4: `ref.func N` yields the non-null typed ref `(ref
+        // func_type_indices[N])` so it satisfies typed `(ref $sig)`
+        // params at `call` / `call_ref`. Callers that don't thread the
+        // func→typeidx map (unit tests, compileWasm pre-migration) fall
+        // back to the abstract `funcref`.
+        if (idx < self.func_type_indices.len) {
+            try self.pushType(.{ .ref = .{
+                .nullable = false,
+                .heap_type = .{ .concrete = self.func_type_indices[idx] },
+            } });
+        } else {
+            try self.pushType(.funcref);
+        }
     }
 
     /// table.get x: pop i32 idx, push tables[x].elem_type.
@@ -2501,13 +2525,27 @@ pub const Validator = struct {
 fn valTypeIsSubtypeFree(actual: ValType, expected: ValType) bool {
     if (actual.eql(expected)) return true;
     if (actual != .ref or expected != .ref) return false;
+    // Non-null actual satisfies a nullable expected; not vice-versa.
     if (actual.ref.nullable and !expected.ref.nullable) return false;
     const ah = actual.ref.heap_type;
     const eh = expected.ref.heap_type;
-    if (@as(@typeInfo(@TypeOf(ah)).@"union".tag_type.?, ah) != @as(@typeInfo(@TypeOf(eh)).@"union".tag_type.?, eh)) return false;
     return switch (ah) {
-        .abstract => |a| a == eh.abstract,
-        .concrete => |a| a == eh.concrete,
+        .concrete => |a_idx| switch (eh) {
+            .concrete => |e_idx| a_idx == e_idx,
+            // ADR-0123: a concrete typed ref `(ref $sig)` is a subtype
+            // of the abstract `func` head — `ref.func N` (typed) must
+            // still satisfy `funcref` globals/tables/params (ref_func.1).
+            // Pre-GC the type section holds only func types, so every
+            // concrete ref is a funcref; 10.G refines this once
+            // struct/array defs (non-func heads) enter module_types.
+            .abstract => |e_abs| e_abs == .func,
+        },
+        // An abstract head never narrows to a concrete type, and only
+        // matches the identical abstract head.
+        .abstract => |a_abs| switch (eh) {
+            .abstract => |e_abs| a_abs == e_abs,
+            .concrete => false,
+        },
     };
 }
 

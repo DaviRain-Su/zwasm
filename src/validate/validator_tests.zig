@@ -419,6 +419,97 @@ test "validate: ref.as_non_null (0xD4) narrows (ref null func) to non-null" {
     try validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
 }
 
+test "validate: ref.func yields typed (ref N) satisfying a typed-ref param (ADR-0123 D4)" {
+    // ADR-0123 D4: `ref.func N` pushes the non-null typed ref (ref to
+    // func N's type index), not abstract funcref, so it flows into a
+    // `call` whose param is `(ref 0)`. Pre-fix opRefFunc pushed
+    // `.funcref` → StackTypeMismatch (the br_on_*.0/.2 entry-func gate).
+    //   func 0 : type 0 = () -> i32
+    //   func 1 : type 1 = ((ref 0)) -> ()
+    //   under test (() -> ()): ref.func 0 ; call 1 ; end
+    const ref0: ValType = .{ .ref = .{ .nullable = false, .heap_type = .{ .concrete = 0 } } };
+    const t0: FuncType = .{ .params = &.{}, .results = &i32_arr };
+    const t1_params = [_]ValType{ref0};
+    const t1: FuncType = .{ .params = &t1_params, .results = &.{} };
+    const mod_types = [_]FuncType{ t0, t1 };
+    const fti = [_]u32{ 0, 1 };
+    // ref.func 0 (0xD2 0x00) ; call 1 (0x10 0x01) ; end (0x0B)
+    const body = [_]u8{ 0xD2, 0x00, 0x10, 0x01, 0x0B };
+    try validator.validateFunctionWithMemIdxAndTags(
+        empty_sig,
+        &.{},
+        &body,
+        &mod_types,
+        &.{},
+        &mod_types,
+        0,
+        &.{},
+        0,
+        1,
+        .i32,
+        &.{},
+        &.{},
+        &fti,
+    );
+}
+
+test "validate: typed (ref N) from ref.func is a subtype of funcref (global.set)" {
+    // ADR-0123 subtype: (ref $sig) <: funcref, so a typed ref.func
+    // result stores into a `(mut funcref)` global (ref_func.1 pattern).
+    //   func 0 : type 0 = () -> () ; global 0 : (mut funcref)
+    //   under test (() -> ()): ref.func 0 ; global.set 0 ; end
+    const t0: FuncType = .{ .params = &.{}, .results = &.{} };
+    const mod_types = [_]FuncType{t0};
+    const fti = [_]u32{0};
+    const globals = [_]GlobalEntry{.{ .valtype = .funcref, .mutable = true }};
+    // ref.func 0 (0xD2 0x00) ; global.set 0 (0x24 0x00) ; end (0x0B)
+    const body = [_]u8{ 0xD2, 0x00, 0x24, 0x00, 0x0B };
+    try validator.validateFunctionWithMemIdxAndTags(
+        empty_sig,
+        &.{},
+        &body,
+        &mod_types,
+        &globals,
+        &mod_types,
+        0,
+        &.{},
+        0,
+        1,
+        .i32,
+        &.{},
+        &.{},
+        &fti,
+    );
+}
+
+test "validate: typed (ref N) from ref.func is NOT a subtype of externref" {
+    // The subtype rule is narrow: (ref $sig) <: func head only, never
+    // externref. Storing a typed funcref into an externref global must
+    // still reject.
+    const t0: FuncType = .{ .params = &.{}, .results = &.{} };
+    const mod_types = [_]FuncType{t0};
+    const fti = [_]u32{0};
+    const globals = [_]GlobalEntry{.{ .valtype = .externref, .mutable = true }};
+    const body = [_]u8{ 0xD2, 0x00, 0x24, 0x00, 0x0B };
+    const r = validator.validateFunctionWithMemIdxAndTags(
+        empty_sig,
+        &.{},
+        &body,
+        &mod_types,
+        &globals,
+        &mod_types,
+        0,
+        &.{},
+        0,
+        1,
+        .i32,
+        &.{},
+        &.{},
+        &fti,
+    );
+    try testing.expectError(Error.StackTypeMismatch, r);
+}
+
 test "validate: ref.null with bad reftype byte → BadValType" {
     const body = [_]u8{ 0xD0, 0x55, 0x0B };
     const r = validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
