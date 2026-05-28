@@ -6,16 +6,13 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 95 (`7fbb833c`) — diagnostic probe of 10
-  remaining ParseFailed function-refs modules. Lesson
-  `2026-05-28-funcrefs-tail-error-classes.md` captures the
-  error class inventory (BadBlockType×3, BadValType×1,
-  StackTypeMismatch×4, StackUnderflow×1, NotImplemented×3,
-  UndeclaredFuncRef×?). Highest-yield fix: subtype-aware
-  popExpect (cycle-93 carve-out) addresses 5/12.
-- Cycles 91-94 before: ValType pivot to union(enum); parser
-  typed-funcref bytes; validator narrowing; bundle 10.R-
-  valtype-widen partial-closed at `2f127b96`.
+- **HEAD**: cycle 96 (`b51e0c8c`) — subtype-aware popExpect
+  helper (Wasm 3.0 §3.3.4: (ref ht) <: (ref null ht)). Forward-
+  compatible but corpus delta=0; StackTypeMismatch must be at a
+  different check site (labelTypesEq / per-op handlers).
+- Cycles 91-95 before: ValType pivot to union(enum); parser
+  typed-funcref bytes; validator narrowing; partial-close of
+  bundle 10.R-valtype-widen; diagnostic probe lesson.
 - Cycle 90 (`6e5e7e53` + `510eca36` + `d6b187f8`) before that:
   D-179 baker swap; ADR-0120 Accept + Cycle 1 impl; ADR-0123 Accept
   + Cycle 1 substrate.
@@ -45,23 +42,27 @@
   green-baked + validated; 0 ParseFailed for any
   function-references module.
 
-## Active task — cycle 96: subtype-aware popExpect (Cycle 2 of bundle)
+## Active task — cycle 97: identify the actual StackTypeMismatch site (Cycle 3 of bundle)
 
-Per cycle-95 lesson `2026-05-28-funcrefs-tail-error-classes.md`:
-add `popSubtype(expected)` helper in `src/validate/validator.zig`
-that accepts `(ref ht)` where `(ref null ht)` is expected (Wasm
-3.0 §3.3.4 subtype rules). Migrate the 5+ call sites in
-`opRefAsNonNull` / `opBrOnNull` / `opCallRef` / `opReturnCallRef`
-/ `popExpect` general path from `.eql`-strict to subtype-aware.
+Cycle 96 added subtype-aware popExpect but corpus delta=0. The
+StackTypeMismatch errors fire at one of the non-popExpect sites:
+- `labelTypesEq` (block end-type / br label-type strict-eql) —
+  used for block result type matching.
+- `if (!t.isRef())` in op-handler bodies (already permissive on
+  ref shapes).
+- Per-op handler hand-written eql checks (opCallRef /
+  opReturnCallRef / opBrOnNonNull).
 
-Smallest red test: `test "validator: pop (ref ht) where (ref null
-ht) expected succeeds via subtype rule"`.
+Smallest red test for cycle 97: re-add temp diag print (file
+`src/validate/validator.zig` annotations near each StackType-
+Mismatch return) + run `function-references/br_on_null/br_on_null.2.wasm`
+to identify the exact site. Then fix.
 
-Expected delta: 5/12 of the remaining function-references
-failures clear (4× StackTypeMismatch + 1× StackUnderflow). Bundle
-exit-condition advances toward ≥30/39 pass.
+Likely root: `labelTypesEq` strict-eql blocks `(ref ht)` ↔
+`(ref null ht)` matching for block result types. Extend to
+subtype-aware element comparison using `valTypeIsSubtype`.
 
-After cycle 96 lands, cycles 97+ per lesson:
+After cycle 97 lands, remaining cycles 98+ per lesson:
 - Block result typed-ref handling (BadBlockType ×3)
 - BadValType non-patched site probe (×1)
 - NotImplemented opcode identification (×3)
