@@ -127,9 +127,14 @@ pub fn usesRuntimePtr(func: *const ZirFunc) bool {
             // class.
             .return_call_indirect,
             // Trap-stub emitters: unreachable + div / rem (i32/i64
-            // × s/u) + trunc_trap (i32/i64 × f32/f64 × s/u). All
-            // write `[r15+trap_flag_off]` on the trap path; require
-            // R15 initialised.
+            // × s/u) + trunc_trap (i32/i64 × f32/f64 × s/u) +
+            // ref.as_non_null. All write `[r15+trap_flag_off]` on
+            // the trap path; require R15 initialised. ref.as_non_null
+            // added at 10.R cycle 51 — exact D-180 hazard
+            // (test trapped on Mac arm64 + returned 0 on ubuntu
+            // x86_64 before this whitelist entry, because the trap
+            // stub wrote trap_flag via an uninitialised R15).
+            .@"ref.as_non_null",
             .@"unreachable",
             // §9.9 / 9.9-m-1b: ref.func loads func_entities_ptr
             // from [r15+off]. Requires R15.
