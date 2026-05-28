@@ -6,70 +6,63 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: 10.M cycle 66 — memory.size / memory.grow memidx > 0
-  plumbing (lower + validator + interp). Baked
-  `multi-memory/memory_size0.wast`. Spec runner shows
-  `[multi-memory] manifests=2 module=2 return=9 (pass=9 fail=0)`
-  (up from return=2 last cycle). Mac aarch64 test-all + lint green
-  (verified by exit code).
+- **HEAD**: 10.M cycle 67 — bulk-op (memory.copy / memory.fill /
+  memory.init) memidx > 0 plumbing (lower + validator + interp).
+  Baked `data0.wast` + `memory_copy0.wast`. Spec runner shows
+  `[multi-memory] manifests=4 module=10 return=28 (pass=28 fail=0)
+  trap=2 (pass=2 fail=0)` (up from manifests=2 return=9 last cycle).
+  Mac aarch64 test-all + lint green (verified by exit code).
 - **D-188 FULLY DISCHARGED** (cycle 61). **D-194 / D-195(c)**
   DISCHARGED earlier. Active debt rows: 16 — all `blocked-by:`;
   zero `now`.
 
 ## Active bundle
 
-- None — 10.M-multi-memory closed cycle 65; cycles 64 / 66 are
-  autonomous continuations expanding the same area. Cycle 67+ can
-  remain in 10.M scope or pivot.
+- None — 10.M autonomous continuation runs cycle-by-cycle without a
+  formal bundle wrapper; each cycle yields its own observable delta.
 
-## Active task — cycle 67: next autonomous chunk
+## Active task — cycle 68: next autonomous chunk
 
-Cycle 67 candidates (ordered by smallest red + observable delta):
+Cycle 68 candidates (ordered by smallest red + observable delta):
 
-1. **10.M continuation: bulk-op memidx > 0** —
-   `memory.copy` / `memory.fill` / `memory.init` currently pin
-   memory 0; spec 3.0 takes per-op src_memidx + dst_memidx.
-   Similar shape to cycle 64-66 (lower + validator + interp
-   refactor). Would unlock `data0.wast` / `data1.wast` /
-   `memory_copy0.wast` etc. from the upstream multi-memory corpus.
-2. **10.M continuation: bake more multi-memory fixtures** —
-   `load0`/`memory_size0` proved the substrate; the upstream
-   corpus has ~30 fixtures (address0, align0, binary0, data0,
-   exports0, float_exprs0/1, float_memory0, imports0..4,
-   linking0..3, memory_copy0, memory_init0, memory_grow0,
-   memory_size0/1, memory_trap0/1, simd_memory*, start*,
-   store*, traps*). Pick the ones that only use already-wired
-   ops (load/store/size; not bulk-ops/imports yet). Pure infra
-   chunk.
-3. **D-195 sub-gap (b)** — cross-module `(register …)` runner
-   registry; would unblock 2 EH + 1 ref_func instantiate-fail
-   modules.
-4. **10.E EH runtime path** — standalone EH return path
-   (try_table.0 instantiate fixture). Multi-cycle.
+1. **10.M continuation: bake more multi-memory fixtures** —
+   Upstream `memory64/test/core/multi-memory/` has ~30 .wast; we have
+   4 baked (load0, memory_size0, data0, memory_copy0). Candidates
+   already-wired: `memory_init0` (memory.init memidx > 0; bulk-ops
+   landed cycle 67), `memory_grow0` (memory.grow memidx > 0; landed
+   cycle 66), `store0` (store memidx > 0; landed cycle 64),
+   `align0` (align checks; load/store), `address0` (i32 vs i64
+   addr). Pure infra; surfaces any remaining substrate gaps.
+2. **D-195 sub-gap (b)** — cross-module `(register …)` runner
+   registry. Sibling to D-192. Unblocks several instantiate-fail
+   modules in EH + function-references + multi-memory corpora.
+3. **10.E EH runtime path** — standalone EH return path
+   (try_table.0). Multi-cycle.
 
-Cycle 67 picks (1) by default — bulk-op refactor mirrors cycle
-64-66 pattern, has clearest observable delta (unlocks
-data0/memory_copy0 fixtures).
+Cycle 68 picks (1) by default — high-yield, low-risk pattern
+established over cycles 64-67; each baked fixture is a self-contained
+smoke test of the wired substrate. Pick `memory_init0` first (covers
+the cycle-67 substrate's last untested op).
 
 ## Larger §10 work (blocked / later)
 
 - **10.M memory64 multi-memory** — autonomous expansion in
-  progress (cycles 62-66 done; bulk-ops + corpus expansion ahead).
+  progress; substrate cycles 62-67 + corpus 65/66/67 baked. Most
+  remaining work is bake-and-verify until specialised gaps surface.
 - **10.E EH** — validator side spec-correct (cycle 61); runtime EH
-  dispatch + cross-module register (D-192) external-gated for
-  several fixtures.
+  dispatch + cross-module register (D-192) external-gated.
 - **10.G WasmGC** — D-179-blocked (wabt 1.0.41+).
 - **10.P close gate** — user touchpoint by construction.
 
-## Spec runner observable (post-cycle-66)
+## Spec runner observable (post-cycle-67)
 
 ```
 [memory64           ] return=337 trap=205 invalid=83  (all pass)
 [tail-call          ] return=31  trap=0   invalid=10  (all pass)
 [exception-handling ] return=34(fail34) trap=2(fail2) invalid=7(pass=7 fail=0) exception=4(fail4)
 [function-references] return=39(fail36) trap=4(fail4) invalid=18(pass=18 fail=0)
-[multi-memory       ] return=9 (pass=9 fail=0)  <- +7 from memory_size0 (cycle 66)
-[wasm-3.0-assert    ] assert_return pass=377  assert_invalid pass=118 fail=0
+[multi-memory       ] return=28 trap=2  (pass=28+2 fail=0)  <- +19+2 from memory_copy0 (cycle 67)
+[wasm-3.0-assert    ] assert_return pass=396  assert_trap pass=207  assert_invalid pass=118 fail=0
 ```
 
 ## Open questions / blockers
