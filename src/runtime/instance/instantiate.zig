@@ -1153,7 +1153,18 @@ pub fn instantiateRuntime(
                     }
                 }
                 for (globals.items, 0..) |g, i| {
-                    storage[i] = try evalConstExprValue(g.init_expr);
+                    // Wasm spec §3.5.10 — `ref.func N` is a valid global
+                    // init expr. evalConstExprValue is instance-context-
+                    // free, so resolve the funcref here against
+                    // rt.func_entities (mirrors element-init above).
+                    // ref_func.3: `(global funcref (ref.func 0))`.
+                    storage[i] = if (initExprRefFuncLocal(g.init_expr)) |fidx|
+                        (if (fidx < rt.func_entities.len)
+                            Value.fromFuncRef(&rt.func_entities[fidx])
+                        else
+                            return error.InvalidGlobalRefFunc)
+                    else
+                        try evalConstExprValue(g.init_expr);
                     slots[imp_global_count + i] = &storage[i];
                 }
                 rt.globals = slots;
