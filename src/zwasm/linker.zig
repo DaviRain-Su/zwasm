@@ -92,6 +92,12 @@ pub const Linker = struct {
         /// construction via standalone Store-anchored Global is
         /// still v0.2; this only wires the import-aliasing path).
         global_alias: GlobalAliasEntry,
+        /// 10.E-xmodule-tags — cross-instance EH tag binding (ADR-0114).
+        /// Resolves `(import "<as>" "<name>" (tag …))` to a tag in
+        /// another already-instantiated module. v0.1 holds the source
+        /// runtime + tag index (param-count type-match); `*TagInstance`
+        /// pointer-identity is the execution-stage step.
+        cross_module_tag: CrossModuleTagEntry,
     };
 
     pub const HostFuncEntry = struct {
@@ -116,6 +122,11 @@ pub const Linker = struct {
         slot: *_runtime.Value,
         source_valtype: _zir.ValType,
         source_mutable: bool,
+    };
+
+    pub const CrossModuleTagEntry = struct {
+        source_rt: *_runtime.Runtime,
+        source_tag_index: u32,
     };
 
     pub fn init(engine: *_engine.Engine) Linker {
@@ -312,6 +323,29 @@ pub const Linker = struct {
         });
     }
 
+    /// 10.E-xmodule-tags — register a cross-module EH tag (ADR-0114).
+    /// `source_tag_index` is the tag's index in `source_inst`'s tag
+    /// space; the importer resolves `(import module name (tag …))`
+    /// against this entry. No per-tag ctx (unlike funcs) — v0.1 only
+    /// records identity for the import-binding step.
+    pub fn defineCrossModuleTag(
+        self: *Linker,
+        module: []const u8,
+        name: []const u8,
+        source_inst: *_zwasm.Instance,
+        source_tag_index: u32,
+    ) !void {
+        const source_rt = source_inst.handle.runtime orelse return error.SignatureMismatch;
+        try self.entries.append(self.engine.alloc, .{
+            .module = module,
+            .name = name,
+            .payload = .{ .cross_module_tag = .{
+                .source_rt = source_rt,
+                .source_tag_index = source_tag_index,
+            } },
+        });
+    }
+
     /// Instantiate `mod` against the registered imports, returning
     /// a native `Instance`. Per ADR-0109 §3.2 the signature
     /// type-check happens here against each `(import ...)`
@@ -445,11 +479,20 @@ pub const Linker = struct {
                         } }) catch return error.OutOfMemory;
                     },
                     .table => return error.ImportKindMismatch,
-                    // EH tag imports (10.E-xmodule-tags): cross-module
-                    // tag binding (Linker defineCrossModuleTag) lands in
-                    // step 2; until then a tag import is unbound (findEntry
-                    // above returns UnknownImport before reaching here).
-                    .tag => return error.UnknownImport,
+                    // EH tag import (10.E-xmodule-tags) — resolve against
+                    // a `defineCrossModuleTag` entry. Param-count type
+                    // match happens runtime-side (checkImportTypeMatches);
+                    // here we just thread the source identity through.
+                    .tag => {
+                        const ct = switch (entry.payload) {
+                            .cross_module_tag => |c| c,
+                            else => return error.ImportKindMismatch,
+                        };
+                        bindings_list.append(scratch, .{ .tag = .{
+                            .source_runtime = ct.source_rt,
+                            .source_tag_index = ct.source_tag_index,
+                        } }) catch return error.OutOfMemory;
+                    },
                 }
             }
         }

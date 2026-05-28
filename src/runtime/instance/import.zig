@@ -36,6 +36,7 @@ pub const ImportBinding = union(enum) {
     table: TableImport,
     memory: MemoryImport,
     global: GlobalImport,
+    tag: TagImport,
 };
 
 /// Function import. The `host_call` slot is pre-built by the
@@ -95,4 +96,16 @@ pub const GlobalImport = struct {
     slot: *Value,
     source_valtype: zir.ValType,
     source_mutable: bool,
+};
+
+/// EH tag import (10.E-xmodule-tags). Cross-module tag binding per
+/// ADR-0114. v0.1 instantiate-resolution carries the source runtime
+/// + the source tag index so the import RESOLVES (no UnknownImport);
+/// the import-vs-export type match compares param COUNT
+/// (`source_runtime.tag_param_counts[source_tag_index]`). Full
+/// `*TagInstance` pointer-identity (throw/catch matching) is the
+/// execution-stage step — not wired here.
+pub const TagImport = struct {
+    source_runtime: *Runtime,
+    source_tag_index: u32,
 };

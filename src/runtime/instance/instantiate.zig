@@ -861,6 +861,7 @@ pub fn instantiateRuntime(
                 .table => .table,
                 .memory => .memory,
                 .global => .global,
+                .tag => .tag,
             };
             if (binding_kind != it.kind) return error.ImportKindMismatch;
             // Per Wasm 2.0 §3.4.10: import-vs-export type matching.
@@ -957,35 +958,56 @@ pub fn instantiateRuntime(
     // throwOp) consumes Runtime.tag_param_counts[tag_idx] to know
     // how many operand-stack values to pop into the Exception
     // payload. Wasm 3.0 §3.3.10.7 (throw).
-    if (module.find(.tag)) |tag_section| {
-        const tag_entries = try sections.decodeTags(a, tag_section.body);
-        const counts = try a.alloc(u32, tag_entries.len);
-        // ADR-0120 D5: parallel slot-count table (v128 = 2 slots,
-        // all v0.1 numeric/ref types = 1 slot). Computed alongside
-        // tag_param_counts because both walk the same tag section
-        // + same types lookup.
-        const slot_counts = try a.alloc(u32, tag_entries.len);
-        var total_slots: u32 = 0;
-        for (tag_entries, 0..) |entry, i| {
-            if (entry.typeidx >= types.items.len) return error.InvalidTypeIndex;
-            const params = types.items[entry.typeidx].params;
-            counts[i] = @intCast(params.len);
-            var slots: u32 = 0;
-            for (params) |p| {
-                slots += runtime_mod.slotCountForValType(p);
+    // Tag index space = imported tags (kind .tag) ++ defined tags
+    // (section 13), per Wasm ordering. 10.E-xmodule-tags cycle 116:
+    // throwOp/catchOp index `tag_param_counts[tag_idx]` with tag_idx in
+    // the FULL space — a defined-only table mis-counts imported-tag
+    // throws → operand-stack underflow (same import-offset class as the
+    // cyc114 validator fix). Imported tag counts come from the import's
+    // declared typeidx.
+    {
+        var imp_tag_count: usize = 0;
+        if (imports_decoded) |im| for (im.items) |it| {
+            if (it.kind == .tag) imp_tag_count += 1;
+        };
+        const defined_tag_entries: []const sections.TagEntry = if (module.find(.tag)) |tag_section|
+            try sections.decodeTags(a, tag_section.body)
+        else
+            &.{};
+        const total_tags = imp_tag_count + defined_tag_entries.len;
+        if (total_tags > 0) {
+            const counts = try a.alloc(u32, total_tags);
+            const slot_counts = try a.alloc(u32, total_tags);
+            var total_slots: u32 = 0;
+            var ti: usize = 0;
+            const fillTag = struct {
+                fn f(typeidx: u32, all_types: []const zir.FuncType, c: []u32, sc: []u32, idx: usize, max_slots: *u32) !void {
+                    if (typeidx >= all_types.len) return error.InvalidTypeIndex;
+                    const params = all_types[typeidx].params;
+                    c[idx] = @intCast(params.len);
+                    var slots: u32 = 0;
+                    for (params) |p| slots += runtime_mod.slotCountForValType(p);
+                    sc[idx] = slots;
+                    if (slots > max_slots.*) max_slots.* = slots;
+                }
+            }.f;
+            if (imports_decoded) |im| for (im.items) |it| {
+                if (it.kind != .tag) continue;
+                try fillTag(it.payload.tag_typeidx, types.items, counts, slot_counts, ti, &total_slots);
+                ti += 1;
+            };
+            for (defined_tag_entries) |entry| {
+                try fillTag(entry.typeidx, types.items, counts, slot_counts, ti, &total_slots);
+                ti += 1;
             }
-            slot_counts[i] = slots;
-            if (slots > total_slots) total_slots = slots;
-        }
-        rt.tag_param_counts = counts;
-        rt.tag_param_slot_counts = slot_counts;
-        // ADR-0120 D1: pre-size eh_payload to the maximum per-tag
-        // slot count. The buffer is single-use (one throw in flight
-        // at a time per Runtime per ADR-0120 D5+Consequence §5),
-        // so capacity = max(per-tag) not sum.
-        if (total_slots > 0) {
-            rt.eh_payload = try a.alloc(u64, total_slots);
-            @memset(rt.eh_payload, 0);
+            rt.tag_param_counts = counts;
+            rt.tag_param_slot_counts = slot_counts;
+            // ADR-0120 D1: pre-size eh_payload to the maximum per-tag
+            // slot count (single-use buffer; capacity = max not sum).
+            if (total_slots > 0) {
+                rt.eh_payload = try a.alloc(u64, total_slots);
+                @memset(rt.eh_payload, 0);
+            }
         }
     }
 
@@ -1240,6 +1262,29 @@ pub fn instantiateRuntime(
         const exports = try sections.decodeExports(a, export_section.body);
         inst.exports_storage = exports.items;
         inst.export_types = try buildExportTypes(a, module, exports.items, imports_decoded);
+        // EH cross-module tag exports (10.E-xmodule-tags): tag exports
+        // (kind 0x04) are dropped from exports_storage (c_api ExternKind
+        // lacks a tag variant), so scan the export section directly for
+        // them into the parallel `tag_exports` side-table.
+        const body = export_section.body;
+        var tag_list: std.ArrayList(instance_mod.TagExport) = .empty;
+        var pos: usize = 0;
+        const count = try leb128.readUleb128(u32, body, &pos);
+        var k: u32 = 0;
+        while (k < count) : (k += 1) {
+            const name_len = try leb128.readUleb128(u32, body, &pos);
+            if (pos + name_len > body.len) return error.InvalidModule;
+            const name = try a.dupe(u8, body[pos .. pos + name_len]);
+            pos += name_len;
+            if (pos >= body.len) return error.InvalidModule;
+            const kind_byte = body[pos];
+            pos += 1;
+            const exp_idx = try leb128.readUleb128(u32, body, &pos);
+            if (kind_byte == 4) {
+                try tag_list.append(a, .{ .name = name, .tag_index = exp_idx });
+            }
+        }
+        inst.tag_exports = tag_list.items;
     }
 }
 
@@ -1304,11 +1349,25 @@ fn checkImportTypeMatches(
                 if (max_s > wm) return error.ImportTypeMismatch;
             }
         },
-        // EH tag imports (10.E-xmodule-tags) have no ImportBinding
-        // variant yet — they never reach here in step 1 (the binding
-        // builder rejects them). Arm present for exhaustiveness; tag
-        // type-matching lands with the Linker tag-binding (step 2).
-        .tag => return error.ImportTypeMismatch,
+        // EH tag import (10.E-xmodule-tags). v0.1 param-COUNT match:
+        // importer's declared tag type (typeidx → params) vs the source
+        // tag's param count. Full param-TYPE identity rides the
+        // `*TagInstance` execution step (ADR-0114). NOTE:
+        // `tag_param_counts` is defined-tag-indexed; `source_tag_index`
+        // matches it as long as the source module imports no tags
+        // (true for the spec EH source try_table.0).
+        .tag => {
+            const t = binding.tag;
+            const want_tidx = it.payload.tag_typeidx;
+            const type_sec = module.find(.type) orelse return error.ImportTypeMismatch;
+            var types = try sections.decodeTypes(a, type_sec.body);
+            defer types.deinit();
+            if (want_tidx >= types.items.len) return error.ImportTypeMismatch;
+            const want_params = types.items[want_tidx].params.len;
+            const src_counts = t.source_runtime.tag_param_counts;
+            if (t.source_tag_index >= src_counts.len) return error.ImportTypeMismatch;
+            if (src_counts[t.source_tag_index] != want_params) return error.ImportTypeMismatch;
+        },
     }
 }
 
