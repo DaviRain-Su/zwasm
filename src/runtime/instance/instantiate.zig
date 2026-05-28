@@ -803,22 +803,33 @@ pub fn instantiateRuntime(
     // per-memory descriptor (idx_type + page bounds) is reachable
     // from the runtime side; `rt.memory` keeps its pointer-alias
     // semantics via setMemory0Bytes.
-    if (imp_memory_count > 1) return error.MultiMemoryUnsupported;
-    if (imp_memory_count == 1) {
+    // 10.M cycle 63 — relax single-memory cap for IMPORTED memories.
+    // Loop over all memory-kind imports and allocate N
+    // MemoryInstance entries (aliased to the source bindings; no
+    // copy). `rt.memory` keeps aliasing memories[0] for the
+    // legacy single-memory emit-side `[base, offset]` shape.
+    //
+    // **Imports + defined combination remains a pre-existing limitation**:
+    // when both are present, the `else if (module.find(.memory))`
+    // branch below is skipped (silently dropping defined memories).
+    // Filed as a future-cycle item; spec allows the combination but
+    // current usage in the test corpus uses one or the other.
+    if (imp_memory_count > 0) {
+        const mi = try a.alloc(runtime_mod.MemoryInstance, imp_memory_count);
+        var slot: usize = 0;
         for (imports_decoded.?.items, 0..) |it, idx| {
             if (it.kind != .memory) continue;
-            const mi = try a.alloc(runtime_mod.MemoryInstance, 1);
             const m = bindings.?[idx].memory;
-            mi[0] = .{
+            mi[slot] = .{
                 .bytes = m.memory,
                 .idx_type = m.source_idx_type,
                 .pages_min = m.source_min,
                 .pages_max = m.source_max,
             };
-            rt.memories = mi;
-            rt.memory = m.memory;
-            break;
+            slot += 1;
         }
+        rt.memories = mi;
+        rt.memory = mi[0].bytes;
     } else if (module.find(.memory)) |memory_section| {
         // 10.M cycle 62 — relax single-memory cap for DEFINED memories.
         // Loop-allocate N MemoryInstance entries (one per declared
