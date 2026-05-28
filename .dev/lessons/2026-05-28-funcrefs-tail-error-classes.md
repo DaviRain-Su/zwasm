@@ -87,6 +87,21 @@ opRefFunc non-null" framing was WRONG; actual classes for the 7:
   (func type_idx=0) — concrete typed-ref `(ref 0)` flowing through
   `block`/`br_on_null`/`call_ref`. cycle-102 target. Error class
   known; failing OP needs a position-level probe.
+
+  **Cycle 102 result**: the `br_on_*` MECHANICS were fine — the
+  StackTypeMismatch was at the type-0 ENTRY funcs (`func 4/5`:
+  `ref.func N; call M`), not the br_on funcs (type 1/2). Root cause:
+  `opRefFunc` pushed abstract `funcref`, but `call M` expected the
+  typed `(ref $sig)` param. Fix: opRefFunc pushes `(ref
+  func_type_indices[N])` (ADR-0123 D4) + `valTypeIsSubtypeFree` gains
+  `(ref $sig) <: func` so typed refs still satisfy funcref contexts
+  (else `ref_func.1`'s funcref `global.set`/`table.set` regress).
+  Threading: `func_type_indices` added to the Validator +
+  `validateFunctionWithMemIdxAndTags` + `frontendValidate`. Result:
+  ParseFailed 6→3, **return pass 0→7** (`7b9218c2`). Lesson: an error
+  CLASS at "func type_idx=N" names the function's TYPE index, not its
+  position — trace which funcs carry that type before blaming the
+  proposal-op the module is named after.
 - `ref_is_null.0` → fails BEFORE the per-func loop (no fv.diag) —
   earlier frontendValidate stage; uses `(table (ref null 0))` +
   `(elem (table 2) (ref 0) (ref.func 0))`.
