@@ -31,6 +31,24 @@ inline fn op(t: ZirOp) usize {
     return @intFromEnum(t);
 }
 
+/// 10.M cycle 64 — return the byte slice of the memory targeted by
+/// `instr.extra`'s `MemArgExtra.memidx` field (Wasm 3.0 §5.4.6
+/// memarg encoding). For memidx=0 this is `rt.memories[0].bytes`
+/// which aliases the legacy `rt.memory` per
+/// `setMemory0Bytes` (ADR-0111 D2); for memidx > 0 this routes to
+/// the corresponding entry in the `rt.memories` array.
+///
+/// Returns an empty slice when `rt.memories` is uninitialised (test
+/// scaffolds that bypass the full instantiate path leave it empty
+/// + rt.memory non-empty); falls back to `rt.memory` in that case
+/// so MVP single-memory tests stay green.
+inline fn memorySlice(rt: *Runtime, extra: u32) []u8 {
+    const memidx: u8 = zir.MemArgExtra.unpack(extra).memidx;
+    if (rt.memories.len == 0) return rt.memory;
+    if (memidx >= rt.memories.len) return &[_]u8{};
+    return rt.memories[memidx].bytes;
+}
+
 pub fn register(table: *DispatchTable) void {
     table.interp[op(.@"i32.load")] = i32Load;
     table.interp[op(.@"i64.load")] = i64Load;
@@ -67,10 +85,9 @@ pub fn register(table: *DispatchTable) void {
 
 const wasm_page_size: usize = 65536;
 
-fn effectiveAddrStore(rt: *Runtime, offset: u64, width: usize) Trap!usize {
-    // Mirrors the inline addr math in `loadInt`; trap kind is Store here.
-    const ea: u64 = @as(u64, rt.popOperand().u32) + offset;
-    if (ea + width > rt.memory.len) return Trap.OutOfBoundsStore;
+fn effectiveAddrStore(mem: []u8, popped_addr: u32, offset: u64, width: usize) Trap!usize {
+    const ea: u64 = @as(u64, popped_addr) + offset;
+    if (ea + width > mem.len) return Trap.OutOfBoundsStore;
     return @intCast(ea);
 }
 
@@ -78,42 +95,45 @@ fn effectiveAddrStore(rt: *Runtime, offset: u64, width: usize) Trap!usize {
 
 fn i32Load(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
-    // Pop addr first; effectiveAddr captures it.
+    const mem = memorySlice(rt, instr.extra);
     const ea: u64 = @as(u64, rt.popOperand().u32) + @as(u64, instr.payload);
-    if (ea + 4 > rt.memory.len) return Trap.OutOfBoundsLoad;
-    const v = std.mem.readInt(u32, rt.memory[@intCast(ea)..][0..4], .little);
+    if (ea + 4 > mem.len) return Trap.OutOfBoundsLoad;
+    const v = std.mem.readInt(u32, mem[@intCast(ea)..][0..4], .little);
     try rt.pushOperand(.{ .u32 = v });
 }
 
 fn i64Load(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
+    const mem = memorySlice(rt, instr.extra);
     const ea: u64 = @as(u64, rt.popOperand().u32) + @as(u64, instr.payload);
-    if (ea + 8 > rt.memory.len) return Trap.OutOfBoundsLoad;
-    const v = std.mem.readInt(u64, rt.memory[@intCast(ea)..][0..8], .little);
+    if (ea + 8 > mem.len) return Trap.OutOfBoundsLoad;
+    const v = std.mem.readInt(u64, mem[@intCast(ea)..][0..8], .little);
     try rt.pushOperand(.{ .u64 = v });
 }
 
 fn f32Load(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
+    const mem = memorySlice(rt, instr.extra);
     const ea: u64 = @as(u64, rt.popOperand().u32) + @as(u64, instr.payload);
-    if (ea + 4 > rt.memory.len) return Trap.OutOfBoundsLoad;
-    const bits = std.mem.readInt(u32, rt.memory[@intCast(ea)..][0..4], .little);
+    if (ea + 4 > mem.len) return Trap.OutOfBoundsLoad;
+    const bits = std.mem.readInt(u32, mem[@intCast(ea)..][0..4], .little);
     try rt.pushOperand(.{ .bits64 = bits });
 }
 
 fn f64Load(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
+    const mem = memorySlice(rt, instr.extra);
     const ea: u64 = @as(u64, rt.popOperand().u32) + @as(u64, instr.payload);
-    if (ea + 8 > rt.memory.len) return Trap.OutOfBoundsLoad;
-    const bits = std.mem.readInt(u64, rt.memory[@intCast(ea)..][0..8], .little);
+    if (ea + 8 > mem.len) return Trap.OutOfBoundsLoad;
+    const bits = std.mem.readInt(u64, mem[@intCast(ea)..][0..8], .little);
     try rt.pushOperand(.{ .bits64 = bits });
 }
 
-fn loadInt(rt: *Runtime, comptime W: type, comptime sign_extend: bool, offset: u64) Trap!i64 {
+fn loadInt(mem: []const u8, popped_addr: u32, comptime W: type, comptime sign_extend: bool, offset: u64) Trap!i64 {
     const width = @sizeOf(W);
-    const ea: u64 = @as(u64, rt.popOperand().u32) + offset;
-    if (ea + width > rt.memory.len) return Trap.OutOfBoundsLoad;
-    const raw = std.mem.readInt(W, rt.memory[@intCast(ea)..][0..width], .little);
+    const ea: u64 = @as(u64, popped_addr) + offset;
+    if (ea + width > mem.len) return Trap.OutOfBoundsLoad;
+    const raw = std.mem.readInt(W, mem[@intCast(ea)..][0..width], .little);
     if (sign_extend) {
         const SignedW = @Int(.signed, @bitSizeOf(W));
         const sw: SignedW = @bitCast(raw);
@@ -124,52 +144,62 @@ fn loadInt(rt: *Runtime, comptime W: type, comptime sign_extend: bool, offset: u
 
 fn i32Load8S(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
-    const v = try loadInt(rt, u8, true, instr.payload);
+    const addr = rt.popOperand().u32;
+    const v = try loadInt(memorySlice(rt, instr.extra), addr, u8, true, instr.payload);
     try rt.pushOperand(.{ .i32 = @intCast(@as(i32, @truncate(v))) });
 }
 fn i32Load8U(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
-    const v = try loadInt(rt, u8, false, instr.payload);
+    const addr = rt.popOperand().u32;
+    const v = try loadInt(memorySlice(rt, instr.extra), addr, u8, false, instr.payload);
     try rt.pushOperand(.{ .u32 = @intCast(v) });
 }
 fn i32Load16S(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
-    const v = try loadInt(rt, u16, true, instr.payload);
+    const addr = rt.popOperand().u32;
+    const v = try loadInt(memorySlice(rt, instr.extra), addr, u16, true, instr.payload);
     try rt.pushOperand(.{ .i32 = @intCast(@as(i32, @truncate(v))) });
 }
 fn i32Load16U(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
-    const v = try loadInt(rt, u16, false, instr.payload);
+    const addr = rt.popOperand().u32;
+    const v = try loadInt(memorySlice(rt, instr.extra), addr, u16, false, instr.payload);
     try rt.pushOperand(.{ .u32 = @intCast(v) });
 }
 fn i64Load8S(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
-    const v = try loadInt(rt, u8, true, instr.payload);
+    const addr = rt.popOperand().u32;
+    const v = try loadInt(memorySlice(rt, instr.extra), addr, u8, true, instr.payload);
     try rt.pushOperand(.{ .i64 = v });
 }
 fn i64Load8U(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
-    const v = try loadInt(rt, u8, false, instr.payload);
+    const addr = rt.popOperand().u32;
+    const v = try loadInt(memorySlice(rt, instr.extra), addr, u8, false, instr.payload);
     try rt.pushOperand(.{ .u64 = @intCast(v) });
 }
 fn i64Load16S(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
-    const v = try loadInt(rt, u16, true, instr.payload);
+    const addr = rt.popOperand().u32;
+    const v = try loadInt(memorySlice(rt, instr.extra), addr, u16, true, instr.payload);
     try rt.pushOperand(.{ .i64 = v });
 }
 fn i64Load16U(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
-    const v = try loadInt(rt, u16, false, instr.payload);
+    const addr = rt.popOperand().u32;
+    const v = try loadInt(memorySlice(rt, instr.extra), addr, u16, false, instr.payload);
     try rt.pushOperand(.{ .u64 = @intCast(v) });
 }
 fn i64Load32S(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
-    const v = try loadInt(rt, u32, true, instr.payload);
+    const addr = rt.popOperand().u32;
+    const v = try loadInt(memorySlice(rt, instr.extra), addr, u32, true, instr.payload);
     try rt.pushOperand(.{ .i64 = v });
 }
 fn i64Load32U(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
-    const v = try loadInt(rt, u32, false, instr.payload);
+    const addr = rt.popOperand().u32;
+    const v = try loadInt(memorySlice(rt, instr.extra), addr, u32, false, instr.payload);
     try rt.pushOperand(.{ .u64 = @intCast(v) });
 }
 
@@ -178,57 +208,75 @@ fn i64Load32U(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
 fn i32Store(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
     const v = rt.popOperand().u32;
-    const ea = try effectiveAddrStore(rt, instr.payload, 4);
-    std.mem.writeInt(u32, rt.memory[ea..][0..4], v, .little);
+    const addr = rt.popOperand().u32;
+    const mem = memorySlice(rt, instr.extra);
+    const ea = try effectiveAddrStore(mem, addr, instr.payload, 4);
+    std.mem.writeInt(u32, mem[ea..][0..4], v, .little);
 }
 fn i64Store(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
     const v = rt.popOperand().u64;
-    const ea = try effectiveAddrStore(rt, instr.payload, 8);
-    std.mem.writeInt(u64, rt.memory[ea..][0..8], v, .little);
+    const addr = rt.popOperand().u32;
+    const mem = memorySlice(rt, instr.extra);
+    const ea = try effectiveAddrStore(mem, addr, instr.payload, 8);
+    std.mem.writeInt(u64, mem[ea..][0..8], v, .little);
 }
 fn f32Store(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
     const v = rt.popOperand();
     const bits: u32 = @truncate(v.bits64);
-    const ea = try effectiveAddrStore(rt, instr.payload, 4);
-    std.mem.writeInt(u32, rt.memory[ea..][0..4], bits, .little);
+    const addr = rt.popOperand().u32;
+    const mem = memorySlice(rt, instr.extra);
+    const ea = try effectiveAddrStore(mem, addr, instr.payload, 4);
+    std.mem.writeInt(u32, mem[ea..][0..4], bits, .little);
 }
 fn f64Store(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
     const v = rt.popOperand();
-    const ea = try effectiveAddrStore(rt, instr.payload, 8);
-    std.mem.writeInt(u64, rt.memory[ea..][0..8], v.bits64, .little);
+    const addr = rt.popOperand().u32;
+    const mem = memorySlice(rt, instr.extra);
+    const ea = try effectiveAddrStore(mem, addr, instr.payload, 8);
+    std.mem.writeInt(u64, mem[ea..][0..8], v.bits64, .little);
 }
 fn i32Store8(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
     const v: u8 = @truncate(rt.popOperand().u32);
-    const ea = try effectiveAddrStore(rt, instr.payload, 1);
-    rt.memory[ea] = v;
+    const addr = rt.popOperand().u32;
+    const mem = memorySlice(rt, instr.extra);
+    const ea = try effectiveAddrStore(mem, addr, instr.payload, 1);
+    mem[ea] = v;
 }
 fn i32Store16(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
     const v: u16 = @truncate(rt.popOperand().u32);
-    const ea = try effectiveAddrStore(rt, instr.payload, 2);
-    std.mem.writeInt(u16, rt.memory[ea..][0..2], v, .little);
+    const addr = rt.popOperand().u32;
+    const mem = memorySlice(rt, instr.extra);
+    const ea = try effectiveAddrStore(mem, addr, instr.payload, 2);
+    std.mem.writeInt(u16, mem[ea..][0..2], v, .little);
 }
 fn i64Store8(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
     const v: u8 = @truncate(rt.popOperand().u64);
-    const ea = try effectiveAddrStore(rt, instr.payload, 1);
-    rt.memory[ea] = v;
+    const addr = rt.popOperand().u32;
+    const mem = memorySlice(rt, instr.extra);
+    const ea = try effectiveAddrStore(mem, addr, instr.payload, 1);
+    mem[ea] = v;
 }
 fn i64Store16(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
     const v: u16 = @truncate(rt.popOperand().u64);
-    const ea = try effectiveAddrStore(rt, instr.payload, 2);
-    std.mem.writeInt(u16, rt.memory[ea..][0..2], v, .little);
+    const addr = rt.popOperand().u32;
+    const mem = memorySlice(rt, instr.extra);
+    const ea = try effectiveAddrStore(mem, addr, instr.payload, 2);
+    std.mem.writeInt(u16, mem[ea..][0..2], v, .little);
 }
 fn i64Store32(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
     const v: u32 = @truncate(rt.popOperand().u64);
-    const ea = try effectiveAddrStore(rt, instr.payload, 4);
-    std.mem.writeInt(u32, rt.memory[ea..][0..4], v, .little);
+    const addr = rt.popOperand().u32;
+    const mem = memorySlice(rt, instr.extra);
+    const ea = try effectiveAddrStore(mem, addr, instr.payload, 4);
+    std.mem.writeInt(u32, mem[ea..][0..4], v, .little);
 }
 
 // --- memory.size / memory.grow ---

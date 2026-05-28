@@ -951,6 +951,63 @@ test "memory64 instantiate: address64.0 succeeds (i64-offset active data segment
     defer instance.deinit();
 }
 
+test "10.M cycle 64: i32.store + i32.load via memidx=1 round-trip 42 (interp)" {
+    // 10.M-multi-memory bundle cycle 64: interp memory handlers now
+    // route through `MemArgExtra.memidx` instead of the hard-pinned
+    // `rt.memory` alias. This test exercises the new path end-to-end:
+    // store 42 to memidx=1 offset 0, then load from same → expect 42.
+    // Pre-change: store + load both targeted memidx 0 (via rt.memory)
+    // → the value would round-trip 42 in memory 0 but memory 1 would
+    // stay all-zero. With the fix, the store lands in memory 1; the
+    // load also reads from memory 1; round-trip is 42.
+    //
+    // Module (hand-crafted):
+    //   (module
+    //     (memory 1) (memory 1)
+    //     (func (export "test") (result i32)
+    //       (i32.store (memory 1) (i32.const 0) (i32.const 42))
+    //       (i32.load  (memory 1) (i32.const 0))))
+    //
+    // memarg encoding (Wasm 3.0 §5.4.6): align byte sets bit 6 (0x40)
+    // to signal a memidx LEB follows; effective log2-align = align & 0x3F.
+    // For i32 natural align=4 (= 2^2), memarg align byte = 0x40 | 0x02 = 0x42,
+    // followed by memidx LEB (0x01) then offset LEB (0x00).
+    const wasm_bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // \0asm + version
+        // type section: () -> (i32)
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f,
+        // function section: 1 func, type 0
+        0x03, 0x02, 0x01, 0x00,
+        // memory section: 2 memories, both min=1
+        0x05, 0x05, 0x02, 0x00, 0x01, 0x00, 0x01,
+        // export section: "test" func 0
+        0x07, 0x08, 0x01, 0x04, 't', 'e', 's', 't', 0x00, 0x00,
+        // code section
+        0x0a, 0x12, 0x01, 0x10,            // section header, body count + size
+        0x00,                              // locals count
+        0x41, 0x00,                        // i32.const 0 (store addr)
+        0x41, 0x2a,                        // i32.const 42 (store value)
+        0x36, 0x42, 0x01, 0x00,            // i32.store memidx=1 align=2 offset=0
+        0x41, 0x00,                        // i32.const 0 (load addr)
+        0x28, 0x42, 0x01, 0x00,            // i32.load memidx=1 align=2 offset=0
+        0x0b,                              // end
+    };
+    const alloc = testing.allocator;
+
+    var engine = try zwasm_root.Engine.init(alloc, .{});
+    defer engine.deinit();
+    var module = try engine.compile(&wasm_bytes);
+    defer module.deinit();
+    var linker = zwasm_root.Linker.init(&engine);
+    defer linker.deinit();
+    var instance = try linker.instantiate(&module);
+    defer instance.deinit();
+
+    var results: [1]zwasm_root.Value = undefined;
+    try instance.invoke("test", &.{}, results[0..1]);
+    try testing.expectEqual(@as(i32, 42), results[0].i32);
+}
+
 test "10.M cycle 62: two-defined-memory module instantiates (multi-memory relax)" {
     // Smallest red for the 10.M-multi-memory bundle cycle-62 chunk:
     // hand-craft a binary wasm with `(memory 1) (memory 1)` (two
