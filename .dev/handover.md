@@ -6,12 +6,13 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 92 (`32871166`) — **ADR-0123 Cycle 3 landed**:
-  parser accepts `0x63 / 0x64` typed-funcref bytes; concrete
-  type-section indices bounds-checked at module-load (type /
-  global / code-locals sections); 5 invalid-accepted fixtures
-  (ref.1/2/3/6/8) now properly rejected. D-188 bisect = 0.
-- Cycle 91 (`80ad0128`) before: ValType pivot to union(enum).
+- **HEAD**: cycle 93 (`3593e568`) — **ADR-0123 Cycle 4 landed**:
+  validator narrows `RefType.nullable=true → false` on
+  ref.as_non_null + br_on_null fall-through. Carve-outs for
+  Cycle 5: opBrOnNonNull subtype label-match + opRefFunc
+  non-null push (both need subtype-aware popExpect helper).
+- Cycles 91/92 before: ValType pivot to union(enum); parser
+  0x63/0x64 typed-funcref bytes + module-load typeidx bounds.
 - Cycle 90 (`6e5e7e53` + `510eca36` + `d6b187f8`) before that:
   D-179 baker swap; ADR-0120 Accept + Cycle 1 impl; ADR-0123 Accept
   + Cycle 1 substrate.
@@ -20,31 +21,39 @@
 ## Active bundle
 
 - **Bundle-ID**: 10.R-valtype-widen
-- **Cycles-remaining**: ~2 (Cycle 3 closed at `32871166`)
-- **Continuity-memo**: parser 0x63/0x64 + module-load typeidx
-  bounds done. Cycle 4 next adds validator static narrowing
-  (ref.as_non_null / br_on_null narrow `RefType.nullable` flag;
-  ref.func produces non-nullable). Cycle 5 wires call_ref /
-  return_call_ref impl per ADR-0123 D3 / D4.
+- **Cycles-remaining**: ~1 (Cycle 4 closed at `3593e568`)
+- **Continuity-memo**: ref.as_non_null + br_on_null fall-through
+  narrowing done. Cycle 5 (final): call_ref / return_call_ref
+  runtime impl per ADR-0123 D3 / D4 + subtype-aware popExpect
+  helper that unblocks opRefFunc non-null push + opBrOnNonNull
+  label-type subtype match. Bundle exit-condition: spec corpus
+  function-references return ≥ 30/39 from currently 0/39.
 - **Exit-condition**: function-references spec corpus assert_return
   pass-rate ≥ 30/39 (currently 3/39); call_ref + return_call_ref
   green-baked + validated; 0 ParseFailed for any
   function-references module.
 
-## Active task — cycle 93: validator static narrowing (Cycle 4 of bundle)
+## Active task — cycle 94: call_ref + return_call_ref impl (Cycle 5, bundle close)
 
 Smallest red test:
-`test "validator: ref.as_non_null narrows RefType.nullable=true → false"`
-in `src/validate/validator.zig`. After ref.as_non_null, the
-type-stack top is updated from `RefType.abs(ht, true)` to
-`RefType.abs(ht, false)`. br_on_null fallthrough is similarly
-narrowed; br_on_non_null cross-checks the branch label's
-nullability expectation. ref.func yields non-nullable per Wasm
-3.0 §3.3.10.10.
+`test "call_ref: pop funcref + sig check trap → IndirectCallTypeMismatch"`
+in `src/instruction/wasm_3_0/call_ref.zig`. Migrate call_ref +
+return_call_ref from `NotMigrated` stub to full validate /
+interp / emit per ADR-0123 D3 (reuse call_indirect substrate +
+runtime null-trap + sig check via ZirInstr.payload typeidx).
 
-After cycle 4 lands, cycle 5 wires call_ref / return_call_ref
-runtime impl (D3 / D4) + spec corpus pass-rate ramp (target
-function-references return ≥ 30/39 from currently 0/39).
+Also lands in this cycle:
+- Subtype-aware `popExpect` helper that accepts non-null where
+  nullable is expected (per spec §3.3.4 subtype rules).
+- `opRefFunc` push: switch from `.funcref` (nullable) to
+  non-null abstract func ref `RefType.abs(.func, false)` (or
+  concrete `RefType.conc(typeidx, false)` if typeidx-plumbing
+  through to validator is feasible same-cycle).
+- `opBrOnNonNull` label-type subtype match (relaxed eql).
+
+Bundle close requires: function-references corpus assert_return
+≥ 30/39 pass (currently 0/39). At close, D-186 retires + ADR-0123
+moves from "Accepted" to "Closed (implemented)".
 
 ## Larger §10 work (post-bundle)
 
