@@ -967,10 +967,22 @@ pub const Validator = struct {
         }
     }
 
-    /// Validates a try_table's catch vec — currently just label
-    /// range. Tag-index range validation lands when Module.tags[]
-    /// reaches the validator (10.E-N). Label-type matching lands
-    /// at 10.E-5 with the interp unwind path.
+    /// Validates a try_table's catch vec. Per Wasm 3.0 EH §3.3.10.6,
+    /// each clause's branched-to label must accept the clause's
+    /// pushed types:
+    ///   - `catch tag depth`        → pushes `tag.params`
+    ///   - `catch_ref tag depth`    → pushes `tag.params ++ [exnref]`
+    ///   - `catch_all depth`        → pushes `[]`
+    ///   - `catch_all_ref depth`    → pushes `[exnref]`
+    /// Mismatch → `StackTypeMismatch`. (Tag-index + label-index
+    /// range checks subsume the prior pre-cycle-61 surface.)
+    ///
+    /// `catch_ref` / `catch_all_ref` always reject under the current
+    /// ValType subset: zwasm v2's parser doesn't yet decode the
+    /// `exnref` byte (0x69) — gated on D-192 / ADR-0120 — so no
+    /// valid label-type tuple can contain `exnref`. The blanket
+    /// reject is spec-correct for the current substrate; tighten to
+    /// structural matching once `exnref` lands.
     fn validateCatchVec(self: *Validator) Error!void {
         const count = try leb128.readUleb128(u32, self.body, &self.pos);
         var i: u32 = 0;
@@ -979,15 +991,45 @@ pub const Validator = struct {
             const kind = self.body[self.pos];
             self.pos += 1;
             switch (kind) {
-                0x00, 0x01 => {
+                0x00 => {
+                    // catch tag depth — pushes tag.params (= func type's
+                    // params; results are required to be empty per spec
+                    // but enforced at tag-decode time).
                     const tag_idx = try leb128.readUleb128(u32, self.body, &self.pos);
                     if (tag_idx >= self.tags.len) return Error.InvalidTagIndex;
                     const label_idx = try leb128.readUleb128(u32, self.body, &self.pos);
                     if (label_idx >= self.control_len) return Error.InvalidBranchDepth;
+                    const target = &self.control_buf[self.control_len - 1 - label_idx];
+                    const expected = target.labelType();
+                    const typeidx = self.tags[tag_idx].typeidx;
+                    if (typeidx >= self.module_types.len) return Error.InvalidTagIndex;
+                    const tag_params = self.module_types[typeidx].params;
+                    const pushed = blockTypeOfSlice(tag_params);
+                    if (!labelTypesEq(pushed, expected)) return Error.StackTypeMismatch;
                 },
-                0x02, 0x03 => {
+                0x01 => {
+                    // catch_ref tag depth — pushes tag.params ++ [exnref]
+                    const tag_idx = try leb128.readUleb128(u32, self.body, &self.pos);
+                    if (tag_idx >= self.tags.len) return Error.InvalidTagIndex;
                     const label_idx = try leb128.readUleb128(u32, self.body, &self.pos);
                     if (label_idx >= self.control_len) return Error.InvalidBranchDepth;
+                    // exnref absent from v2 ValType subset → no valid
+                    // label-type can contain it → spec-correct reject.
+                    return Error.StackTypeMismatch;
+                },
+                0x02 => {
+                    // catch_all depth — pushes []
+                    const label_idx = try leb128.readUleb128(u32, self.body, &self.pos);
+                    if (label_idx >= self.control_len) return Error.InvalidBranchDepth;
+                    const target = &self.control_buf[self.control_len - 1 - label_idx];
+                    if (!labelTypesEq(.empty, target.labelType())) return Error.StackTypeMismatch;
+                },
+                0x03 => {
+                    // catch_all_ref depth — pushes [exnref]
+                    const label_idx = try leb128.readUleb128(u32, self.body, &self.pos);
+                    if (label_idx >= self.control_len) return Error.InvalidBranchDepth;
+                    // Same exnref-absence rationale as 0x01.
+                    return Error.StackTypeMismatch;
                 },
                 else => return Error.BadBlockType,
             }

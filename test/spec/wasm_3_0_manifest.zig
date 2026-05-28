@@ -811,24 +811,26 @@ test "D-188 bisect: EH + func-refs invalid-accepted fixtures (regression marker)
             accepted_count += 1;
         }
     }
-    // Current state: 2 fixtures incorrectly accepted (D-188 only):
-    //   - try_table.8 + try_table.10 (D-188) — EH validator gap around
-    //     catch_ref / catch_all_ref typing: a try_table block declared
-    //     with empty / wrong block-result type doesn't reject when its
-    //     catch_ref / catch_all_ref clause pushes (exnref) onto the
-    //     block's stack. Same 10.E barrier; tighten when per-clause
-    //     result-type unification lands.
-    // D-195 sub-gap (c) — `ref.func N` declared-funcrefs gate —
-    // discharged cycle 60: `frontendValidate` now builds the
-    // declared-funcrefs bitset from globals init exprs + element
-    // segments + func-kind exports and threads it through
-    // `validateFunctionWithMemIdxAndTags` → opRefFunc rejects
-    // `ref.func N` when N is not declared. ref_func.4 + ref_func.5
-    // now rejected. ref.1..5 cases (also under D-188) had closed
-    // earlier via the pre-decode section-body validation in
-    // `frontendValidate`. Tighten further when the EH try_table
-    // type-check rule lands.
-    try testing.expectEqual(@as(u32, 2), accepted_count);
+    // Current state: 0 fixtures incorrectly accepted (D-188 FULLY
+    // discharged). Discharge SHAs:
+    //   - ref.1..5 (function-references unknown-type cases): closed
+    //     by the D-188 first-cycle fix in `instantiate.zig::
+    //     frontendValidate` — pre-decode section-body validation
+    //     forces type/global/table/elem decodes regardless of code-
+    //     section presence.
+    //   - ref_func.4 + ref_func.5 (`ref.func N` undeclared): closed
+    //     cycle 60 (`e7666598`, D-195 sub-gap c) — declared-funcrefs
+    //     bitset threaded through `frontendValidate` →
+    //     `validateFunctionWithMemIdxAndTags` → opRefFunc rejects.
+    //   - try_table.8 + try_table.10 (catch_ref + catch_all_ref label-
+    //     type mismatch): closed cycle 61 — `validateCatchVec` now
+    //     rejects `catch_ref` / `catch_all_ref` under v2's exnref-
+    //     less ValType subset (no valid label-type can match a
+    //     sequence containing exnref). Tighten to structural matching
+    //     when exnref ValType lands (D-192 / ADR-0120).
+    // Bisect kept as a regression marker — if a future change re-
+    // opens any of the 9 invalid-accepted gates, this fires.
+    try testing.expectEqual(@as(u32, 0), accepted_count);
 }
 
 test "D-189 partial: align64 invalid fixtures rejected (memarg natural-align rule)" {
