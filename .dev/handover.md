@@ -6,49 +6,59 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 105 (`6e58b534`) — element `ref.func` init-expr
-  accepts concrete typed-funcref segment types (`(ref $sig)`, not just
-  abstract funcref). **function-references ParseFailed 1 → 0 — ALL 15
-  modules now compile**; return pass **12 → 24**. Bundle
-  10.R-funcrefs-tail-2 exit-condition (ParseFailed=0) MET.
-- Prior: 104 unreachable-polymorphism (`8304714d`); 103 typed-ref
-  table/elem decode + bound (`d24ad2da`); 102 ref.func typed +
-  bundle-1 close (`7b9218c2`); 101 ref.as_non_null 0xD4 (`c82e8124`);
+- **HEAD**: cycle 106 (`<this commit>`) — SCOPING/PIVOT (no code
+  delta). Categorized the 15 function-references return fails: **8 =
+  ref_func.1** (its `(import "M" "f")` is UnknownImport because the
+  manifest `register` directive is `skip-impl directive-register` —
+  D-192 cross-module register substrate, shared with EH try_table);
+  ~7 scattered (externref-value arg/result handling in the runner +
+  others — to categorize). The funcrefs ENGINE is parse-complete
+  (ParseFailed=0) + 24/39 returns pass; the return-rate ≥32 is gated on
+  the harness substrate D-192, not engine bugs.
+- Prior: 105 element ref.func func-family + ParseFailed→0 (`6e58b534`);
+  104 unreachable-poly (`8304714d`); 103 typed table/elem decode
+  (`d24ad2da`); 102 ref.func typed (`7b9218c2`); 101 0xD4 (`c82e8124`);
   100 Gate 4 (`2fa216b9`).
-- Mac aarch64 test + lint green (cycle 105). ubuntu x86_64 SSH gate:
-  cycle-104 HEAD confirmed green; cycle-105 kick backgrounded —
-  Step 0.7 next resume verifies.
+- Mac test + lint green (cycle 105/106 — no src change cycle 106).
+  ubuntu: cycle-105 HEAD confirmed green (`a0692437`); cycle 106 is
+  docs-only (non-code-gap, no kick needed).
 
 ## Active bundle
 
-- **Bundle-ID**: 10.R-funcrefs-exec (follow-up; cycles 106+)
-- **Cycles-remaining**: ~3
-- **Continuity-memo**: bundle 10.R-funcrefs-tail-2 CLOSED cycle 105 —
-  function-references ParseFailed 3→0 (all modules compile), return
-  pass 7→24 (delta across cycles 100-105). NEXT surface: the **15
-  function-references return fails** (24/39 pass) — modules that now
-  compile but mis-execute. These are runtime/codegen gaps (call_ref
-  dispatch + sig check, ref.func runtime value, br_on_null/non_null +
-  ref.as_non_null runtime semantics, typed-table get/set). **Step 0
-  each cycle**: probe which assert_return directives fail + why (the
-  spec runner reports per-directive return pass/fail; add a probe to
-  name the failing export + actual-vs-expected), then fix the
-  highest-yield runtime op.
-- **Exit-condition**: function-references return pass-rate ≥ 32/39
-  (currently 24/39) — i.e. clear at least half the 15 remaining
-  return fails via runtime/codegen fixes.
+- **Bundle-ID**: 10.X-D192-register (cross-module `register` directive;
+  shared by func-refs ref_func.1 + EH try_table)
+- **Cycles-remaining**: ~4
+- **Continuity-memo**: cycle 106 re-scoped here from 10.R-funcrefs-exec
+  (whose ≥32 exit-condition is gated on this substrate). The manifest
+  `register` directive is `skip-impl directive-register` at corpus-bake
+  time, so a module registered under a name (ref_func.0 as "M",
+  try_table.0 providing `test::e0`/`test::throw`) is never available to
+  a later module's imports → UnknownImport. D-192 = implement the
+  `register` directive: (a) corpus baker emits it (find the skip-impl
+  site in `scripts/regen_spec_3_0_assert.sh` / the bake pipeline);
+  (b) the runner (`spec_assert_runner_wasm_3_0.zig`) already keeps a
+  per-manifest Engine+Linker (cycle 71) — wire `register <name>` to
+  `Linker.define*` the registered instance's exports under `<name>` so
+  later `instantiate` resolves cross-module imports. **Step 0**: survey
+  the bake skip-impl site + the runner's register/Linker path + how EH
+  try_table.0→.1 needs the same.
+- **Exit-condition**: ref_func.1 instantiates + its 8 assert_returns
+  pass (function-references return ≥ 32/39) AND try_table.1 (EH)
+  instantiates against try_table.0's registered tag/func.
 
-## Active task — cycle 106: probe + fix highest-yield function-references return fail
+## Active task — cycle 107: survey + begin the `register` directive substrate (D-192)
 
-All 15 modules compile (ParseFailed=0); 15 assert_returns still fail
-at execution. **Step 0 (probe)**: instrument the wasm-3.0-assert
-runner (or a focused test) to print which function-references exports
-fail assert_return + the actual-vs-expected values, to localize the
-runtime gap (likely `call_ref` dispatch / sig-mismatch trap, or
-`ref.func` producing a runtime funcref the table/call path mishandles).
-Then fix the highest-yield runtime/codegen op with a focused red test
-(prefer a `test/edge_cases/p10/funcrefs/` fixture or an interp/codegen
-unit test). Smallest red test per the localized execution gap.
+**Step 0 (survey)**: (1) where corpus baking emits `skip-impl
+directive-register` (grep `scripts/regen_spec_3_0_assert.sh` +
+`wast2json` adapter) — the `register` line must be baked into the
+manifest instead of skipped; (2) the runner's per-manifest Linker +
+how `register <name>` would map the instance's exports into the Linker
+namespace for later `instantiate` import resolution; (3) `Linker.define*`
+API surface. Then the smallest red step: bake + handle `register` for
+ref_func (register ref_func.0 as "M") so ref_func.1 resolves `(import
+"M" "f")`. Parallel ~7 scattered funcrefs return fails (externref-value
+handling) tracked under the old funcrefs-exec framing — revisit after
+D-192 if return < 32.
 
 ## Larger §10 work (later bundles)
 

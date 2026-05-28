@@ -131,6 +131,31 @@ segment (`isFuncref()` only matches abstract nullable funcref).
 `@embedFile` can't reach outside the src/ package, so the isolation
 test goes in `test/spec/`, not `src/`.
 
+## Cycle 106 — return-phase breakdown (engine vs harness)
+
+After ParseFailed→0 (cycle 105), function-references is 24/39 return
+pass. Categorizing the 15 return fails (gated runner probe at the
+assert_return fail paths) showed the remaining gap is **predominantly
+test-harness, not engine**:
+
+- **8 fails = ref_func.1** — `(import "M" "f")` → UnknownImport because
+  the manifest carries `skip-impl directive-register`: the corpus baker
+  drops the `register` directive, so ref_func.0 is never registered as
+  "M". This is **D-192 (cross-module register substrate)** — the SAME
+  gap EH try_table.1 hits (imports try_table.0's tag/func). Implement
+  the `register` directive (bake it + wire runner `register <name>` →
+  `Linker.define*`) to unblock both corpora.
+- **~7 scattered** — externref-value arg/result handling in the runner
+  (e.g. `init (param externref)` invoke is skipped when the runner
+  can't parse an externref arg, leaving a table uninitialized →
+  downstream `externref-elem` MISMATCH) + others.
+
+Lesson: when a spec corpus's *parse* is complete but *return* lags,
+categorize before assuming engine bugs — the gap was harness substrate
+(register directive + ref-value marshalling), and the highest-leverage
+fix (D-192 register) is SHARED across proposals. Re-scoped bundle
+10.R-funcrefs-exec → 10.X-D192-register accordingly.
+
 ## Related
 
 - Bundle `10.R-valtype-widen` (closed partial 2026-05-28 cycle 94)
