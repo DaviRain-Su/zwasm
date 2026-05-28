@@ -6,13 +6,13 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 96 (`b51e0c8c`) — subtype-aware popExpect
-  helper (Wasm 3.0 §3.3.4: (ref ht) <: (ref null ht)). Forward-
-  compatible but corpus delta=0; StackTypeMismatch must be at a
-  different check site (labelTypesEq / per-op handlers).
-- Cycles 91-95 before: ValType pivot to union(enum); parser
-  typed-funcref bytes; validator narrowing; partial-close of
-  bundle 10.R-valtype-widen; diagnostic probe lesson.
+- **HEAD**: cycle 97 (`6730bb3c`) — subtype-aware
+  `expectFrameEndTypes`: block / loop / if / function-body result-
+  type matching accepts `(ref ht)` for `(ref null ht)`. Forward-
+  compatible per Wasm 3.0 §3.3.4 but corpus delta=0; the actual
+  StackTypeMismatch fires at a still-unidentified site.
+- Cycles 91-96 before: ValType pivot; parser typed-funcref bytes;
+  narrowing; subtype popExpect.
 - Cycle 90 (`6e5e7e53` + `510eca36` + `d6b187f8`) before that:
   D-179 baker swap; ADR-0120 Accept + Cycle 1 impl; ADR-0123 Accept
   + Cycle 1 substrate.
@@ -42,31 +42,28 @@
   green-baked + validated; 0 ParseFailed for any
   function-references module.
 
-## Active task — cycle 97: identify the actual StackTypeMismatch site (Cycle 3 of bundle)
+## Active task — cycle 98: targeted print-diag at each StackTypeMismatch site
 
-Cycle 96 added subtype-aware popExpect but corpus delta=0. The
-StackTypeMismatch errors fire at one of the non-popExpect sites:
-- `labelTypesEq` (block end-type / br label-type strict-eql) —
-  used for block result type matching.
-- `if (!t.isRef())` in op-handler bodies (already permissive on
-  ref shapes).
-- Per-op handler hand-written eql checks (opCallRef /
-  opReturnCallRef / opBrOnNonNull).
+Cycle 96 (popExpect) + 97 (expectFrameEndTypes) both went
+subtype-aware but corpus delta=0. The StackTypeMismatch error
+class (4× in lesson) fires at a still-unidentified site. Cycle 98
+will:
 
-Smallest red test for cycle 97: re-add temp diag print (file
-`src/validate/validator.zig` annotations near each StackType-
-Mismatch return) + run `function-references/br_on_null/br_on_null.2.wasm`
-to identify the exact site. Then fix.
+1. Annotate each of the ~30 `Error.StackTypeMismatch` returns in
+   `src/validate/validator.zig` with a unique `std.debug.print`
+   tag (e.g., "[stm-N]").
+2. Run `function-references/br_on_null/br_on_null.2.wasm` (or
+   another StackTypeMismatch-class failing module per cycle-95
+   inventory).
+3. Identify the firing site + apply the appropriate spec-aware
+   fix.
+4. Remove diag prints before commit.
 
-Likely root: `labelTypesEq` strict-eql blocks `(ref ht)` ↔
-`(ref null ht)` matching for block result types. Extend to
-subtype-aware element comparison using `valTypeIsSubtype`.
-
-After cycle 97 lands, remaining cycles 98+ per lesson:
-- Block result typed-ref handling (BadBlockType ×3)
-- BadValType non-patched site probe (×1)
-- NotImplemented opcode identification (×3)
-- UndeclaredFuncRef case-by-case (judgment)
+After cycle 98 lands, remaining cycles per cycle-95 lesson:
+- BadBlockType ×3 (block-result typed-ref handling)
+- BadValType ×1 (non-patched site probe)
+- NotImplemented ×3 (opcode identification)
+- UndeclaredFuncRef ×? (judgment)
 
 ## Larger §10 work (post-bundle)
 
