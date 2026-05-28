@@ -211,6 +211,65 @@ pub fn frontendValidate(alloc: std.mem.Allocator, binary: []const u8) bool {
         &.{};
     defer if (tags_slice.len > 0) alloc.free(tags_slice);
 
+    // 10.R cycle 60 (D-195 sub-gap c) — Wasm spec §3.4.10 declared-
+    // funcrefs bitset. `ref.func N` must reference a function that
+    // appears in some global init expr (as `ref.func`), element
+    // segment (funcidx entry), or export (kind=func). Function bodies
+    // and the start function do NOT contribute. Mirror of
+    // `src/engine/compile.zig`'s declared_funcs construction; the
+    // bypassed-validation path (this fn) previously left
+    // `declared_funcs = &.{}`, letting fixtures like ref_func.4/5
+    // sneak past the validator's check. Builds before the per-fn
+    // validate loop so every function body sees the same bitset.
+    const total_funcs: usize = imp_func_count + defined_func_indices.len;
+    const declared_funcs = alloc.alloc(bool, total_funcs) catch return false;
+    defer alloc.free(declared_funcs);
+    @memset(declared_funcs, false);
+    if (globals_owned) |g| for (g.items) |gd| {
+        if (initExprRefFuncLocal(gd.init_expr)) |fidx| {
+            if (fidx < total_funcs) declared_funcs[fidx] = true;
+        }
+    };
+    if (module.find(.element)) |elem_section| {
+        var elems = sections.decodeElement(alloc, elem_section.body) catch return false;
+        defer elems.deinit();
+        for (elems.items) |seg| {
+            for (seg.funcidxs) |fidx| {
+                // ref.null entries encoded as maxInt(u32) per the
+                // element decoder; skip those.
+                if (fidx != std.math.maxInt(u32) and fidx < total_funcs) {
+                    declared_funcs[fidx] = true;
+                }
+            }
+        }
+    }
+    if (module.find(.@"export")) |exp_section| {
+        // Manual export scan tolerant of Wasm 3.0 export-kind
+        // extensions (e.g., `tag = 4` from the EH proposal which
+        // `sections.decodeExports` currently rejects with
+        // `BadValType` — see try_table.0.wasm). Only `kind == 0`
+        // (func) contributes to the declared-funcrefs set; other
+        // kinds (table / memory / global / tag / future) are
+        // ignored. Malformed body still rejects via `return false`.
+        const body = exp_section.body;
+        var pos: usize = 0;
+        const count = leb128.readUleb128(u32, body, &pos) catch return false;
+        var k: u32 = 0;
+        while (k < count) : (k += 1) {
+            const name_len = leb128.readUleb128(u32, body, &pos) catch return false;
+            if (pos + name_len > body.len) return false;
+            pos += name_len;
+            if (pos >= body.len) return false;
+            const kind_byte = body[pos];
+            pos += 1;
+            const exp_idx = leb128.readUleb128(u32, body, &pos) catch return false;
+            if (kind_byte == 0 and exp_idx < total_funcs) {
+                declared_funcs[exp_idx] = true;
+            }
+        }
+        if (pos != body.len) return false;
+    }
+
     for (codes_owned.items, defined_func_indices) |code, type_idx| {
         const sig = types_owned.items[type_idx];
         validator.validateFunctionWithMemIdxAndTags(
@@ -225,9 +284,26 @@ pub fn frontendValidate(alloc: std.mem.Allocator, binary: []const u8) bool {
             0, // elem_count
             memory0_idx_type,
             tags_slice,
+            declared_funcs,
         ) catch return false;
     }
     return true;
+}
+
+/// Wasm spec §3.4.10 declared-funcrefs helper: extract the single
+/// `ref.func N` payload from a global init expr, returning `null`
+/// when the expr is not a `ref.func N; end` sequence (e.g.
+/// `i32.const N; end`, `global.get N; end`, malformed). Inlined here
+/// instead of importing `engine/runner_validate.zig::initExprRefFunc`
+/// because that module is Zone 2 and this is Zone 1 (per
+/// `.claude/rules/zone_deps.md`).
+fn initExprRefFuncLocal(expr: []const u8) ?u32 {
+    if (expr.len < 3) return null;
+    if (expr[0] != 0xD2) return null; // ref.func opcode
+    var pos: usize = 1;
+    const idx = leb128.readUleb128(u32, expr, &pos) catch return null;
+    if (pos >= expr.len or expr[pos] != 0x0B) return null;
+    return idx;
 }
 
 pub fn validateNoCode(_: std.mem.Allocator, _: *Module) bool {

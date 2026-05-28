@@ -323,6 +323,13 @@ pub fn validateFunctionWithMemIdxAndTags(
     elem_count: u32,
     memory0_idx_type: sections.MemoryEntry.IdxType,
     tags: []const sections.TagEntry,
+    /// 10.R cycle 60 (D-195 sub-gap c) — Wasm spec §3.4.10
+    /// declared-funcrefs bitset. When non-empty, `ref.func N` rejects
+    /// if `N` is not declared (via globals init / elements / exports).
+    /// Empty (`&.{}`) preserves the legacy pre-cycle-60 behaviour for
+    /// callers that haven't been migrated yet — adopters pass the
+    /// real bitset to enable the check.
+    declared_funcs: []const bool,
 ) Error!void {
     var v = Validator{
         .sig = sig,
@@ -337,6 +344,7 @@ pub fn validateFunctionWithMemIdxAndTags(
         .elem_count = elem_count,
         .memory0_idx_type = memory0_idx_type,
         .tags = tags,
+        .declared_funcs = declared_funcs,
     };
     try v.run();
 }
