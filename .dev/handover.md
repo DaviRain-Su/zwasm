@@ -32,50 +32,81 @@ unblock signal.
 
 ## Active bundle
 
-- **Bundle-ID**: 10.E-payload-prop-v2 (ADR-0120 Cycles 2-5 per
-  ADR-0120 Consequences §1; ADR-0120 Cycle 1 substrate landed
-  at `510eca36`).
-- **Cycles-remaining**: ~4
-- **Continuity-memo**: ADR-0120 Cycle 1 (Runtime field +
-  tag_param_slot_counts thread) landed cycle 90. Cycle 2 of
-  bundle: throw.emit reads `tag_param_slot_counts[tag_idx]` and
-  emits the pop+STR sequence to write payload values to
-  `[runtime_ptr + eh_payload_ptr_off + i*8]` (arm64 first,
-  x86_64 bundled same cycle per arch-symmetry rhythm). Cycle 3:
-  try_table.emit catch-landing-pad prologue (LDR + push vreg
-  per slot). Cycle 4: catch_ref / catch_all_ref via
-  zwasm_reify_exnref helper. Cycle 5: spec-corpus runner wiring
-  + close 10.E.
-- **Exit-condition**: function-references unchanged for now
-  (paused per yield-taper note); EH `return=34 trap=2
-  exception=4` go from currently 0-pass to ≥30 pass.
-- **Paused**: 10.R-funcrefs-tail (resume when 10.E lands OR
-  external signal).
+- **None.** Cycle-99 inspection found that ADR-0120 Cycles 2-5
+  (throw.emit payload pop+STR + try_table.emit catch landing pad
+  + catch_ref reify + spec-corpus wiring) ALREADY LANDED as the
+  prior 10.E-payload-prop bundle (closed at D-182 discharge,
+  commit `7987f136`-class). The IT-6 test
+  `runI32Export: throw + catch_ with i32 payload returns 88`
+  passes; arm64 + x86_64 throw.emit + catch landing-pad fully
+  wired against JitRuntime's inline `[16]u64` eh_payload_buf.
+- The cycle-90 ADR-0120 revise (`[]u64` pre-sized at instantiate)
+  changed the INTERP-side `Runtime.eh_payload` shape; the JIT-
+  side `JitRuntime.eh_payload_buf [16]u64` stayed inline (no
+  user-observable difference for v0.1 scope).
+- EH spec corpus (`return=34 trap=2 exception=4`) all-fail is
+  gated on D-192 (cross-module register: try_table.1.wasm imports
+  test::e0 tag + test::throw func from try_table.0.wasm; runner
+  registry not wired) + exnref ValType extension (D-188 prereq).
+  These are NOT cycle-99-scope.
 - **Exit-condition**: function-references spec corpus assert_return
   pass-rate ≥ 30/39 (currently 3/39); call_ref + return_call_ref
   green-baked + validated; 0 ParseFailed for any
   function-references module.
 
-## Active task — cycle 99: ADR-0120 Cycle 2 — throw.emit payload pop+STR (arm64 + x86_64 bundled)
+## Bucket-3 stop framing — autonomous prep exhausted at session end
 
-Per ADR-0120 Consequences §1 Cycle 2: implement throw.emit (both
-arches in same chunk per arch-symmetry rhythm). Reads
-`tag_param_slot_counts[tag_idx]` from EmitCtx (Cycle 1 substrate
-already threaded); pops N slots from operand stack; emits N STRs
-into `[runtime_ptr + eh_payload_ptr_off + i*8]`; then sets
-`eh_payload_len = N` at the corresponding offset; then preserves
-existing tag_idx → argreg-0 MOV + BLR/CALL trampoline.
+All forward work that meaningfully advances spec runner observable
+is gated on one of:
 
-Smallest red test:
-`test "throw + catch_ with i32 payload returns 88 (cycle 99 throw-emit)"`
-in arm64 / x86_64 op tests. Currently `throw + catch_all returns
-42` IT-6 test passes (N=0 path); add N=1 i32 payload variant.
+1. **D-192 cross-module register substrate** — EH spec corpus
+   gated. ~30 EH directives. Substrate exists (D-195(b) runner
+   register-arm shipped), but extension to tag + func cross-module
+   binding for `try_table.1.wasm`-style fixtures is structural
+   work (~3-5 cycles).
+2. **Exnref ValType extension** (D-188 prereq) — try_table.8/10
+   + `catch_ref`/`catch_all_ref` validator semantics require
+   exnref as a first-class ValType variant. Touches Zone-1 ValType
+   union (post-cycle-90 widen), validator type-stack, interp
+   payload propagation. ADR-grade per ROADMAP §18.2. ~3-5 cycles.
+3. **Concrete typed-funcref opRefFunc push (non-null)** — Wasm
+   3.0 §3.3.10.10 requires `ref.func $f` yields `(ref $sig)`
+   (non-null concrete typed). Needs func_typeidxs plumbing into
+   validator. Likely 1 cycle but corpus-effect needs validation.
+4. **BadBlockType for typed-ref block result types** — block
+   instr prefix encoder doesn't accept `0x63`/`0x64` typed-ref
+   bytes as block result types. ~1 cycle.
 
-After cycle 99 lands, cycles 100-102 of ADR-0120 bundle:
-- Cycle 3: try_table.emit catch-landing-pad LDR + push vreg.
-- Cycle 4: catch_ref / catch_all_ref reify via
-  zwasm_reify_exnref runtime helper.
-- Cycle 5: spec-corpus runner wiring + close 10.E.
+Recent autonomous cycles (96-98) shipped 3× structurally-correct
+subtype-aware fixes with 0 corpus delta — further isolated fixes
+unlikely to compound without one of the gates above.
+
+**Session-summary observable** (cycle 90 start → cycle 99 end):
+
+```
+Before (cycle 81):  total 2000 directives baked; gc=0
+After  (cycle 99):  total 2349 directives baked (+349 = +17%)
+                    gc 568 directives now visible (impl=0%, surface=100%)
+                    assert_invalid pass=193 fail=1
+```
+
+Material structural changes shipped this session:
+
+- D-179 baker swap (wabt → wasm-tools) — GC corpus unlocked.
+- ADR-0120 Accepted + Cycle 1 substrate (`eh_payload []u64` +
+  slot_counts) — Cycles 2-5 already shipped previously.
+- ADR-0123 Accepted + Cycles 1-5 (partial) — ValType pivot to
+  union(enum); 30+ files migrated; parser typed-funcref bytes;
+  validator narrowing + subtype awareness on popExpect /
+  expectFrameEndTypes / opBrOnNonNull. 3 function-references
+  modules newly parse.
+- Audit cohort follow-through (D-186 reactivation, ADR backfills,
+  SKILL.md split, lint scripts, gate wiring).
+- Lessons filed for future cycles (yield-taper, corpus-expansion-
+  exhausted, funcrefs-tail-error-classes).
+
+Autonomous loop not re-armed — bucket-3 stop until user
+touchpoint (next ADR draft / impl direction / wait-on-external).
 
 ## Larger §10 work (post-bundle)
 
