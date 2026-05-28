@@ -1,0 +1,102 @@
+module type-subtyping.0.wasm
+module type-subtyping.1.wasm
+module type-subtyping.2.wasm
+module type-subtyping.3.wasm
+module type-subtyping.4.wasm
+module type-subtyping.5.wasm
+module type-subtyping.6.wasm
+module type-subtyping.7.wasm
+module type-subtyping.8.wasm
+module type-subtyping.9.wasm
+assert_invalid type-subtyping.10.wasm
+module type-subtyping.11.wasm
+module type-subtyping.12.wasm
+module type-subtyping.13.wasm
+module type-subtyping.14.wasm
+assert_invalid type-subtyping.15.wasm
+assert_invalid type-subtyping.16.wasm
+module type-subtyping.17.wasm
+assert_return run () -> ()
+assert_trap fail1 ()
+assert_trap fail2 ()
+assert_trap fail3 ()
+assert_trap fail4 ()
+assert_trap fail5 ()
+assert_trap fail6 ()
+module type-subtyping.18.wasm
+assert_trap fail1 ()
+assert_trap fail2 ()
+assert_trap fail3 ()
+assert_trap fail4 ()
+module type-subtyping.19.wasm
+assert_return run () -> ()
+assert_trap fail1 ()
+assert_trap fail2 ()
+module type-subtyping.20.wasm
+assert_return run () -> i32:1
+module type-subtyping.21.wasm
+assert_return run () -> i32:1
+module type-subtyping.22.wasm
+assert_return run () -> i32:0
+module type-subtyping.23.wasm
+assert_return run () -> i32:1
+module type-subtyping.24.wasm
+assert_return run () -> i32:1 i32:1
+module type-subtyping.25.wasm
+assert_return run () -> i32:1 i32:1 i32:1 i32:1
+module type-subtyping.26.wasm
+assert_return run () -> i32:1 i32:1 i32:1 i32:1 i32:1 i32:1 i32:1 i32:1
+module type-subtyping.27.wasm
+assert_return run () -> i32:0
+module type-subtyping.28.wasm
+assert_return run () -> i32:0
+module type-subtyping.29.wasm
+register M
+module type-subtyping.30.wasm
+skip-impl directive-assert_unlinkable
+skip-impl directive-assert_unlinkable
+skip-impl directive-assert_unlinkable
+module type-subtyping.34.wasm
+register M2
+skip-impl directive-assert_unlinkable
+skip-impl directive-assert_unlinkable
+module type-subtyping.37.wasm
+register M3
+module type-subtyping.38.wasm
+module type-subtyping.39.wasm
+register M4
+module type-subtyping.40.wasm
+module type-subtyping.41.wasm
+register M5
+skip-impl directive-assert_unlinkable
+module type-subtyping.43.wasm
+register M6
+module type-subtyping.44.wasm
+module type-subtyping.45.wasm
+register M7
+module type-subtyping.46.wasm
+module type-subtyping.47.wasm
+register M8
+module type-subtyping.48.wasm
+module type-subtyping.49.wasm
+register M9
+module type-subtyping.50.wasm
+module type-subtyping.51.wasm
+register M10
+skip-impl directive-assert_unlinkable
+module type-subtyping.53.wasm
+register M11
+skip-impl directive-assert_unlinkable
+assert_invalid type-subtyping.55.wasm
+assert_invalid type-subtyping.56.wasm
+assert_invalid type-subtyping.57.wasm
+assert_invalid type-subtyping.58.wasm
+assert_invalid type-subtyping.59.wasm
+assert_invalid type-subtyping.60.wasm
+assert_invalid type-subtyping.61.wasm
+assert_invalid type-subtyping.62.wasm
+assert_invalid type-subtyping.63.wasm
+assert_invalid type-subtyping.64.wasm
+assert_invalid type-subtyping.65.wasm
+assert_invalid type-subtyping.66.wasm
+assert_invalid type-subtyping.67.wasm

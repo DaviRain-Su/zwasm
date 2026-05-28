@@ -1,0 +1,30 @@
+module struct.0.wasm
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+module struct.2.wasm
+assert_invalid struct.3.wasm
+assert_invalid struct.4.wasm
+module struct.5.wasm
+assert_invalid struct.6.wasm
+module struct.7.wasm
+assert_return new () -> structref:?
+assert_return get_0_0 () -> f32:0
+assert_return get_vec_0 () -> f32:0
+assert_return get_0_y () -> f32:0
+assert_return get_vec_y () -> f32:0
+assert_return set_get_y f32:1088421888 -> f32:1088421888
+assert_return set_get_1 f32:1088421888 -> f32:1088421888
+assert_invalid struct.8.wasm
+module struct.9.wasm
+assert_trap struct.get-null ()
+assert_trap struct.set-null ()
+module struct.10.wasm
+assert_return get_packed_g0_0 () -> i32:0 i32:0
+assert_return get_packed_g1_0 () -> i32:4294967294 i32:254
+assert_return get_packed_g0_1 () -> i32:1 i32:1
+assert_return get_packed_g1_1 () -> i32:4294967295 i32:255
+assert_return get_packed_g0_2 () -> i32:2 i32:2
+assert_return get_packed_g1_2 () -> i32:4294967294 i32:65534
+assert_return get_packed_g0_3 () -> i32:3 i32:3
+assert_return get_packed_g1_3 () -> i32:4294967295 i32:65535
+assert_return set_get_packed_g0_1 i32:257 -> i32:1 i32:1
+assert_return set_get_packed_g0_3 i32:257 -> i32:257 i32:257

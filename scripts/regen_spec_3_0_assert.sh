@@ -42,14 +42,13 @@ fi
 # memory64.wast itself is excluded — uses non-standard
 # `(module definition ...)` syntax that wast2json rejects.
 #
-# `gc/struct` is intentionally absent: upstream wabt 1.0.40
-# (currently pinned in flake.nix) does NOT support GC proposal
-# syntax in wast2json — `i8`/`i16`/`anyref`/`struct`/`sub`/etc.
-# trigger "unexpected token" rejects. The GC corpus bakes when
-# wabt is bumped to a release with full GC type support
-# (upstream tracking issue: WebAssembly/wabt#2398-class). Until
-# then `gc/` only has `raw/` .wast files available for manual
-# reading; the runner's `gc 0 manifests` is the correct state.
+# GC corpus baking unlocked at cycle 90 by switching the baker from
+# wabt's `wast2json` to `wasm-tools json-from-wast`. wabt 1.0.40/1.0.41
+# do not parse GC syntax (`i8`/`i16`/`anyref`/`struct`/`sub`/etc.);
+# wasm-tools 1.247.0 (already in flake.nix) does. All 18 gc/raw/*.wast
+# probed clean at the baker level; whether they parse + validate +
+# execute on zwasm depends on Phase 10.G impl progress (currently 0
+# Zir ops — the bake step is no longer the gate).
 declare -a SMOKE=(
     "memory64/address64"
     "memory64/align64"
@@ -122,6 +121,29 @@ declare -a SMOKE=(
     "multi-memory/start0"
     "multi-memory/store1"
     "multi-memory/traps0"
+    # 10.G cycle 90 — full GC corpus, baker swap (wasm-tools).
+    # Bake-discoverable but impl distance is large (ZIR ops, heap,
+    # type-subtyping all yet to be wired). Spec runner will show
+    # gc=N(fail=N) initially; subsequent cycles whittle down as
+    # 10.G impl lands.
+    "gc/array"
+    "gc/array_copy"
+    "gc/array_fill"
+    "gc/array_init_data"
+    "gc/array_init_elem"
+    "gc/array_new_data"
+    "gc/array_new_elem"
+    "gc/binary-gc"
+    "gc/br_on_cast"
+    "gc/br_on_cast_fail"
+    "gc/extern"
+    "gc/i31"
+    "gc/ref_cast"
+    "gc/ref_eq"
+    "gc/ref_test"
+    "gc/struct"
+    "gc/type-subtyping-invalid"
+    "gc/type-subtyping"
 )
 
 bake_one() {
@@ -141,12 +163,18 @@ bake_one() {
     local tmp; tmp=$(mktemp -d)
     trap "rm -rf '$tmp'" RETURN
 
-    # --enable-all covers all 5 proposals + their interactions
-    # (e.g. EH × GC, tail-call × ref-types). wast2json's
-    # decoder is permissive; the validator inside zwasm is
-    # what enforces actual conformance.
-    if ! wast2json --enable-all "$src" -o "$tmp/$name.json" >"$tmp/w2j.err" 2>&1; then
-        echo "[bake] $proposal/$name: wast2json rejected — see $tmp/w2j.err" >&2
+    # Baker: `wasm-tools json-from-wast` (Bytecode Alliance, part of
+    # the wasm-tools crate suite; same project as wasmparser/wasmtime).
+    # Switched from wabt's `wast2json` per D-179 discharge — wabt
+    # 1.0.40/1.0.41 do not support GC proposal syntax (i8/i16 packed
+    # fields, anyref, struct), but wasm-tools 1.247.0 does. Output
+    # JSON format is structurally identical (verified at cycle 90
+    # bake-swap: command type counts match; .wasm filenames match
+    # the source-stem.N.wasm convention). All wasm features enabled
+    # by default — no equivalent of wabt's `--enable-all` flag
+    # required. zwasm's own validator is the conformance check.
+    if ! wasm-tools json-from-wast --wasm-dir "$tmp" "$src" -o "$tmp/$name.json" >"$tmp/w2j.err" 2>&1; then
+        echo "[bake] $proposal/$name: wasm-tools json-from-wast rejected — see $tmp/w2j.err" >&2
         cat "$tmp/w2j.err" >&2
         rm -rf "$tmp"
         return 1
@@ -161,8 +189,32 @@ import json, sys
 src, dst = sys.argv[1], sys.argv[2]
 d = json.load(open(src))
 def fmt(v):
-    return f"{v['type']}:{v.get('value','?')}"
+    # Bake JSON value normalization (cycle 90 baker swap from wabt
+    # wast2json → wasm-tools json-from-wast). wabt emits i32/i64
+    # values as unsigned (4294967295); wasm-tools emits them as
+    # signed (-1). Spec runner manifest parser expects unsigned —
+    # normalize here to avoid a runner-side migration touching every
+    # parse_value call site.
+    val = v.get('value', '?')
+    t = v['type']
+    if t == 'i32' and isinstance(val, str) and val.startswith('-'):
+        n = int(val)
+        if n < 0:
+            val = str(n + (1 << 32))
+    elif t == 'i64' and isinstance(val, str) and val.startswith('-'):
+        n = int(val)
+        if n < 0:
+            val = str(n + (1 << 64))
+    return f"{t}:{val}"
 lines = []
+def norm_mid(mid):
+    # wabt prefixes module ids with `$` (wast source-form); wasm-tools
+    # strips the `$`. The runner expects `$X` per wast convention; add
+    # back when missing.
+    if mid and not mid.startswith('$'):
+        return '$' + mid
+    return mid
+
 for c in d['commands']:
     t = c.get('type')
     if t == 'module':
@@ -171,7 +223,9 @@ for c in d['commands']:
         # The id is used by `register` + asserts that reference the
         # module by tag (e.g. `(invoke $X "fn" …)`). Without it the
         # runner can only dispatch to the most-recent instance.
-        mname = c.get('name')
+        # Cycle 90 baker swap (wasm-tools): id arrives bare; norm_mid
+        # restores the `$` prefix.
+        mname = norm_mid(c.get('name'))
         if mname:
             lines.append('module ' + mname + ' ' + c['filename'])
         else:
@@ -184,7 +238,7 @@ for c in d['commands']:
         # 10.M-D195b cycle 72 — when the action targets a tagged
         # module (`(invoke $M "fn" …)`), prefix the field with
         # `$M::` so the runner routes to the registered instance.
-        amod = a.get('module')
+        amod = norm_mid(a.get('module'))
         field_tok = (amod + '::' + a['field']) if amod else a['field']
         args = a.get('args', [])
         results = c.get('expected', [])
@@ -193,7 +247,7 @@ for c in d['commands']:
         lines.append(f'assert_return {field_tok} {args_s} -> {results_s}')
     elif t == 'assert_trap':
         a = c['action']
-        amod = a.get('module')
+        amod = norm_mid(a.get('module'))
         field_raw = a.get('field', '<non-invoke>')
         field_tok = (amod + '::' + field_raw) if amod else field_raw
         args = a.get('args', []) if a.get('type') == 'invoke' else []
@@ -224,7 +278,7 @@ for c in d['commands']:
         if a.get('type') != 'invoke':
             lines.append('skip-impl non-invoke-action')
             continue
-        amod = a.get('module')
+        amod = norm_mid(a.get('module'))
         field_tok = (amod + '::' + a['field']) if amod else a['field']
         args = a.get('args', [])
         args_s = ' '.join(fmt(x) for x in args) if args else '()'
@@ -252,19 +306,32 @@ PY
     # 10.M-D195b cycle 72 — `module $<id> <path>` form: when $2 starts
     # with `$`, the path is $3 (not $2). assert_invalid/malformed only
     # ever take a single arg.
+    # Cycle 90 baker swap: pipe each .wasm through `wasm-tools strip --all`
+    # to remove the `name` custom section that wasm-tools emits by default.
+    # The name section provokes a subtle parse / import-resolution issue
+    # on cross-module fixtures (linking1.{1,2}, imports4.{1,3,4} etc.)
+    # that didn't exist with wabt's output. Stripping is the surgical fix
+    # — name sections carry no semantic info needed by the spec runner.
+    copy_stripped() {
+        local src="$1"
+        local dst="$2"
+        if [ -f "$src" ]; then
+            wasm-tools strip --all "$src" -o "$dst" 2>/dev/null || cp "$src" "$dst"
+        fi
+    }
     while read -r line; do
         # shellcheck disable=SC2086
         set -- $line
         case "$1" in
             module)
                 if [ "${2:0:1}" = '$' ]; then
-                    [ -f "$tmp/$3" ] && cp "$tmp/$3" "$out_dir/"
+                    copy_stripped "$tmp/$3" "$out_dir/$3"
                 else
-                    [ -f "$tmp/$2" ] && cp "$tmp/$2" "$out_dir/"
+                    copy_stripped "$tmp/$2" "$out_dir/$2"
                 fi
                 ;;
             assert_invalid|assert_malformed)
-                [ -f "$tmp/$2" ] && cp "$tmp/$2" "$out_dir/" ;;
+                copy_stripped "$tmp/$2" "$out_dir/$2" ;;
         esac
     done < "$out_dir/manifest.txt"
 

@@ -1,0 +1,45 @@
+module ref_cast.0.wasm
+invoke init externref:0
+assert_trap ref_cast_non_null i32:0
+assert_return ref_cast_non_null i32:1 -> ()
+assert_return ref_cast_non_null i32:2 -> ()
+assert_return ref_cast_non_null i32:3 -> ()
+assert_return ref_cast_non_null i32:4 -> ()
+assert_trap ref_cast_non_null i32:5
+assert_trap ref_cast_non_null i32:6
+assert_trap ref_cast_non_null i32:7
+assert_return ref_cast_null i32:0 -> ()
+assert_trap ref_cast_null i32:1
+assert_trap ref_cast_null i32:2
+assert_trap ref_cast_null i32:3
+assert_trap ref_cast_null i32:4
+assert_return ref_cast_null i32:5 -> ()
+assert_return ref_cast_null i32:6 -> ()
+assert_return ref_cast_null i32:7 -> ()
+assert_trap ref_cast_i31 i32:0
+assert_return ref_cast_i31 i32:1 -> ()
+assert_trap ref_cast_i31 i32:2
+assert_trap ref_cast_i31 i32:3
+assert_trap ref_cast_i31 i32:4
+assert_trap ref_cast_i31 i32:5
+assert_trap ref_cast_i31 i32:6
+assert_trap ref_cast_i31 i32:7
+assert_trap ref_cast_struct i32:0
+assert_trap ref_cast_struct i32:1
+assert_return ref_cast_struct i32:2 -> ()
+assert_trap ref_cast_struct i32:3
+assert_trap ref_cast_struct i32:4
+assert_trap ref_cast_struct i32:5
+assert_trap ref_cast_struct i32:6
+assert_trap ref_cast_struct i32:7
+assert_trap ref_cast_array i32:0
+assert_trap ref_cast_array i32:1
+assert_trap ref_cast_array i32:2
+assert_return ref_cast_array i32:3 -> ()
+assert_trap ref_cast_array i32:4
+assert_trap ref_cast_array i32:5
+assert_trap ref_cast_array i32:6
+assert_trap ref_cast_array i32:7
+module ref_cast.1.wasm
+invoke test-sub ()
+invoke test-canon ()

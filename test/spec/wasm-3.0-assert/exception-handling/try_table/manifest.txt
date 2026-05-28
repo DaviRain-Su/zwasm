@@ -1,5 +1,5 @@
 module try_table.0.wasm
-skip-impl directive-register
+register test
 module try_table.1.wasm
 assert_return simple-throw-catch i32:0 -> i32:23
 assert_return simple-throw-catch i32:1 -> i32:42

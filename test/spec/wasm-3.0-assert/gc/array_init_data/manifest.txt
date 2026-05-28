@@ -1,0 +1,33 @@
+assert_invalid array_init_data.0.wasm
+assert_invalid array_init_data.1.wasm
+module array_init_data.2.wasm
+assert_trap array_init_data-null ()
+assert_trap array_init_data i32:13 i32:0 i32:0
+assert_trap array_init_data i32:0 i32:13 i32:0
+assert_trap array_init_data i32:0 i32:0 i32:13
+assert_trap array_init_data i32:0 i32:0 i32:13
+assert_trap array_init_data_i16 i32:0 i32:0 i32:7
+assert_return array_init_data i32:12 i32:0 i32:0 -> ()
+assert_return array_init_data i32:0 i32:12 i32:0 -> ()
+assert_return array_init_data_i16 i32:0 i32:6 i32:0 -> ()
+assert_return array_get_nth i32:0 -> i32:0
+assert_return array_get_nth i32:5 -> i32:0
+assert_return array_get_nth i32:11 -> i32:0
+assert_trap array_get_nth i32:12
+assert_return array_get_nth_i16 i32:0 -> i32:0
+assert_return array_get_nth_i16 i32:2 -> i32:0
+assert_return array_get_nth_i16 i32:5 -> i32:0
+assert_trap array_get_nth_i16 i32:6
+assert_return array_init_data i32:4 i32:2 i32:2 -> ()
+assert_return array_get_nth i32:3 -> i32:0
+assert_return array_get_nth i32:4 -> i32:99
+assert_return array_get_nth i32:5 -> i32:100
+assert_return array_get_nth i32:6 -> i32:0
+assert_return array_init_data_i16 i32:2 i32:5 i32:2 -> ()
+assert_return array_get_nth_i16 i32:1 -> i32:0
+assert_return array_get_nth_i16 i32:2 -> i32:26470
+assert_return array_get_nth_i16 i32:3 -> i32:26984
+assert_return array_get_nth_i16 i32:4 -> i32:0
+assert_return drop_segs () -> ()
+assert_return array_init_data i32:0 i32:0 i32:0 -> ()
+assert_trap array_init_data i32:0 i32:0 i32:1

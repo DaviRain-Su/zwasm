@@ -1,0 +1,46 @@
+module array.0.wasm
+assert_invalid array.1.wasm
+module array.2.wasm
+assert_invalid array.3.wasm
+assert_invalid array.4.wasm
+module array.5.wasm
+assert_return new () -> arrayref:?
+assert_return new () -> eqref:?
+assert_return get i32:0 -> f32:0
+assert_return set_get i32:1 f32:1088421888 -> f32:1088421888
+assert_return len () -> i32:3
+assert_trap get i32:10
+assert_trap set_get i32:10 f32:1088421888
+module array.6.wasm
+assert_return new () -> arrayref:?
+assert_return new () -> eqref:?
+assert_return get i32:0 -> f32:1065353216
+assert_return set_get i32:1 f32:1088421888 -> f32:1088421888
+assert_return len () -> i32:2
+assert_trap get i32:10
+assert_trap set_get i32:10 f32:1088421888
+module array.7.wasm
+assert_return new () -> arrayref:?
+assert_return new () -> eqref:?
+assert_return get_u i32:2 -> i32:255
+assert_return get_s i32:2 -> i32:4294967295
+assert_return set_get i32:1 i32:7 -> i32:7
+assert_return len () -> i32:3
+assert_trap get_u i32:10
+assert_trap get_s i32:10
+assert_trap set_get i32:10 i32:7
+module array.8.wasm
+assert_return new () -> arrayref:?
+assert_return new () -> eqref:?
+assert_return get i32:0 i32:0 -> i32:7
+assert_return get i32:1 i32:0 -> i32:1
+assert_return set_get i32:0 i32:1 i32:1 -> i32:2
+assert_return len () -> i32:2
+assert_trap get i32:10 i32:0
+assert_trap set_get i32:10 i32:0 i32:0
+assert_invalid array.9.wasm
+assert_invalid array.10.wasm
+assert_invalid array.11.wasm
+module array.12.wasm
+assert_trap array.get-null ()
+assert_trap array.set-null ()

@@ -1,0 +1,18 @@
+module extern.0.wasm
+invoke init externref:0
+assert_return internalize externref:1 -> anyref:1
+assert_return internalize externref:null -> anyref:null
+assert_return externalize anyref:2 -> externref:2
+assert_return externalize anyref:null -> externref:null
+assert_return externalize-i i32:0 -> externref:null
+assert_return externalize-i i32:1 -> externref:?
+assert_return externalize-i i32:2 -> externref:?
+assert_return externalize-i i32:3 -> externref:?
+assert_return externalize-i i32:4 -> externref:?
+assert_return externalize-i i32:5 -> externref:null
+assert_return externalize-ii i32:0 -> anyref:null
+assert_return externalize-ii i32:1 -> i31ref:?
+assert_return externalize-ii i32:2 -> structref:?
+assert_return externalize-ii i32:3 -> arrayref:?
+assert_return externalize-ii i32:4 -> anyref:0
+assert_return externalize-ii i32:5 -> anyref:null
