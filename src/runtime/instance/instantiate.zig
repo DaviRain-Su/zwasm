@@ -820,26 +820,34 @@ pub fn instantiateRuntime(
             break;
         }
     } else if (module.find(.memory)) |memory_section| {
+        // 10.M cycle 62 — relax single-memory cap for DEFINED memories.
+        // Loop-allocate N MemoryInstance entries (one per declared
+        // memory). `rt.memory` (the legacy `[*]u8` alias) continues
+        // to point at memories[0] for backward compat with the
+        // single-memory-shaped emit / load-store paths; memidx > 0
+        // ops require ADR-0111's MemArgExtra.memidx plumbing through
+        // emit (separate cycle). Imported memories still capped at 1
+        // at line 806 (binding shape carries one memory per slot).
         var memories = try sections.decodeMemory(a, memory_section.body);
         defer memories.deinit();
-        if (memories.items.len > 1) return error.MultiMemoryUnsupported;
-        if (memories.items.len == 1) {
-            const entry = memories.items[0];
-            const pages = entry.min;
-            const bytes_total: usize = @as(usize, pages) * 65536;
-            const mem = try a.alloc(u8, bytes_total);
-            @memset(mem, 0);
-            const mi = try a.alloc(runtime_mod.MemoryInstance, 1);
-            mi[0] = .{
-                .bytes = mem,
-                .idx_type = entry.idx_type,
-                .pages_min = entry.min,
-                .pages_max = entry.max,
-            };
+        if (memories.items.len > 0) {
+            const mi = try a.alloc(runtime_mod.MemoryInstance, memories.items.len);
+            for (memories.items, 0..) |entry, i| {
+                const pages = entry.min;
+                const bytes_total: usize = @as(usize, pages) * 65536;
+                const mem = try a.alloc(u8, bytes_total);
+                @memset(mem, 0);
+                mi[i] = .{
+                    .bytes = mem,
+                    .idx_type = entry.idx_type,
+                    .pages_min = entry.min,
+                    .pages_max = entry.max,
+                };
+            }
             rt.memories = mi;
-            rt.memory = mem;
-            dbg.print("instantiate.alloc", "memory rt={x} ptr={x} len={d}", .{
-                @intFromPtr(rt), @intFromPtr(mem.ptr), mem.len,
+            rt.memory = mi[0].bytes;
+            dbg.print("instantiate.alloc", "memory rt={x} count={d} ptr0={x} len0={d}", .{
+                @intFromPtr(rt), mi.len, @intFromPtr(mi[0].bytes.ptr), mi[0].bytes.len,
             });
         }
     }
@@ -849,17 +857,19 @@ pub fn instantiateRuntime(
         defer datas.deinit();
         for (datas.items) |seg| {
             if (seg.kind != .active) continue;
-            if (seg.memidx != 0) return error.MultiMemoryUnsupported;
-            // Wasm spec §3.4.7 — offset's result type matches the
-            // target memory's idx_type; memory64 modules emit
-            // i64.const. ADR-0111 D2 runtime-side close.
-            const mem_idx_type: sections.MemoryEntry.IdxType =
-                if (rt.memories.len > 0) rt.memories[0].idx_type else .i32;
+            // 10.M cycle 62 — route active-data writes to the
+            // declared target memory (seg.memidx); was hard-pinned to
+            // memidx=0. Wasm spec §3.4.7 — offset's result type
+            // matches the target memory's idx_type; memory64 modules
+            // emit i64.const. ADR-0111 D2 runtime-side close.
+            if (seg.memidx >= rt.memories.len) return error.DataSegmentOutOfRange;
+            const target = &rt.memories[seg.memidx];
+            const mem_idx_type: sections.MemoryEntry.IdxType = target.idx_type;
             const offset = try evalConstMemAddrExpr(seg.offset_expr, mem_idx_type);
             const dst_end_u128: u128 = @as(u128, offset) + @as(u128, seg.bytes.len);
-            if (dst_end_u128 > rt.memory.len) return error.DataSegmentOutOfRange;
+            if (dst_end_u128 > target.bytes.len) return error.DataSegmentOutOfRange;
             const dst_end: usize = @intCast(dst_end_u128);
-            @memcpy(rt.memory[@intCast(offset)..dst_end], seg.bytes);
+            @memcpy(target.bytes[@intCast(offset)..dst_end], seg.bytes);
         }
     }
 

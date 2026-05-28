@@ -951,6 +951,44 @@ test "memory64 instantiate: address64.0 succeeds (i64-offset active data segment
     defer instance.deinit();
 }
 
+test "10.M cycle 62: two-defined-memory module instantiates (multi-memory relax)" {
+    // Smallest red for the 10.M-multi-memory bundle cycle-62 chunk:
+    // hand-craft a binary wasm with `(memory 1) (memory 1)` (two
+    // defined memories). Pre-change: `instantiate.zig:825`'s
+    // `if (memories.items.len > 1) return error.MultiMemoryUnsupported`
+    // killed the instantiate. Post-change: the loop allocates N
+    // MemoryInstance entries; `rt.memory` keeps aliasing memories[0]
+    // for single-memory-shaped emit paths. memidx > 0 memory ops
+    // remain out of scope (next bundle cycle).
+    //
+    // Module shape (raw bytes; no function section since the test
+    // only exercises instantiate, not invoke):
+    //   magic + version
+    //   memory section: 2 entries, both `(min=1)`
+    const wasm_bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, // \0asm magic
+        0x01, 0x00, 0x00, 0x00, // version 1
+        0x05, 0x05, // section id 5 (memory), 5 bytes body
+        0x02,       //   count = 2
+        0x00, 0x01, //   memory[0]: flags=0 (min only), min=1
+        0x00, 0x01, //   memory[1]: flags=0 (min only), min=1
+    };
+    const alloc = testing.allocator;
+
+    var engine = try zwasm_root.Engine.init(alloc, .{});
+    defer engine.deinit();
+    var module = try engine.compile(&wasm_bytes);
+    defer module.deinit();
+    var linker = zwasm_root.Linker.init(&engine);
+    defer linker.deinit();
+    var instance = try linker.instantiate(&module);
+    defer instance.deinit();
+    // Substrate verification: the runtime now holds 2 MemoryInstance
+    // entries. (The native API doesn't expose `rt.memories.len`
+    // directly; instantiate succeeding is the observable delta —
+    // pre-change it returned `error.MultiMemoryUnsupported`.)
+}
+
 test "compileExpectInvalid: return_call.0.wasm accepted (no false rejection)" {
     // Sanity: the valid return_call.0.wasm (which the bisect test
     // executes 31/31 directives against) must NOT be reported as
