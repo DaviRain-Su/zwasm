@@ -94,17 +94,70 @@ pub fn readValType(body: []const u8, pos: *usize) Error!ValType {
         0x7D => .f32,
         0x7C => .f64,
         0x7B => .v128, // Wasm 2.0 SIMD §5.3.5
-        0x70 => .funcref, // Wasm 2.0 §5.3.1 reftype
-        0x6F => .externref, // Wasm 2.0 §5.3.1 reftype
+        // Legacy single-byte reftypes — equivalent to
+        // `(ref null <ht>)` per Wasm 3.0 §5.3.4.
+        0x70 => ValType.funcref, // (ref null func)
+        0x6F => ValType.externref, // (ref null extern)
         // Wasm 3.0 GC §5.3.1 heap-top reftype bytes
         // (10.G op_gc cycles 3 + 6).
-        0x6E => .anyref,
-        0x6D => .eqref,
-        0x6C => .i31ref,
-        0x6B => .structref,
-        0x6A => .arrayref,
+        0x6E => ValType.anyref,
+        0x6D => ValType.eqref,
+        0x6C => ValType.i31ref,
+        0x6B => ValType.structref,
+        0x6A => ValType.arrayref,
+        // ADR-0123 Cycle 3 (10.R-valtype-widen) — Wasm 3.0
+        // function-references §5.3.4: `(ref null ht)` = 0x63 + ht;
+        // `(ref ht)` = 0x64 + ht. The ht-byte is either:
+        //   - A single-byte abstract head (0x70/0x6F/0x6E/0x6D/
+        //     0x6C/0x6B/0x6A/0x69/0x71/0x72/0x73/0x74)
+        //   - A signed LEB128 type-section index (non-negative
+        //     values for concrete typed refs)
+        // Spec §5.3.5 (heaptype). We read one byte first; if it
+        // matches an abstract head we use that, else we treat it
+        // as the start of a signed LEB128 and rewind to decode.
+        0x63 => try readTypedRef(body, pos, true),
+        0x64 => try readTypedRef(body, pos, false),
         else => Error.BadValType,
     };
+}
+
+/// Helper for ADR-0123 0x63 / 0x64 typed-funcref parsing. Reads
+/// the heap-type that follows the prefix byte.
+fn readTypedRef(body: []const u8, pos: *usize, nullable: bool) Error!ValType {
+    if (pos.* >= body.len) return Error.UnexpectedEnd;
+    const ht_b = body[pos.*];
+    // Try abstract head first — single byte consume.
+    const abstract: ?zir.AbstractHeapType = switch (ht_b) {
+        0x70 => .func,
+        0x6F => .extern_,
+        0x6E => .any,
+        0x6D => .eq,
+        0x6C => .i31,
+        0x6B => .struct_,
+        0x6A => .array,
+        0x69 => .exn,
+        0x71 => .none,
+        0x72 => .noextern,
+        0x73 => .nofunc,
+        0x74 => .noexn,
+        else => null,
+    };
+    if (abstract) |a| {
+        pos.* += 1;
+        return .{ .ref = .{
+            .nullable = nullable,
+            .heap_type = .{ .abstract = a },
+        } };
+    }
+    // Concrete typed ref: signed LEB128 type-section index. Spec
+    // says non-negative LEB128 values — reject negative.
+    const idx_signed = leb128.readSleb128(i33, body, pos) catch return Error.BadValType;
+    if (idx_signed < 0) return Error.BadValType;
+    const idx: u32 = @intCast(idx_signed);
+    return .{ .ref = .{
+        .nullable = nullable,
+        .heap_type = .{ .concrete = idx },
+    } };
 }
 
 // ============================================================

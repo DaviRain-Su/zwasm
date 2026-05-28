@@ -57,13 +57,16 @@ pub fn decodeCodes(parent_alloc: Allocator, body: []const u8) sections.Error!Cod
         const decl_count = try leb128.readUleb128(u32, code, &inner);
 
         // First pass: total locals so we can allocate exactly once.
+        // ADR-0123 Cycle 3 — valtype is no longer always 1 byte:
+        // typed-funcref `0x63 / 0x64` prefixes consume a heap-type
+        // byte (or signed LEB128 typeidx) afterward. Use the full
+        // readValType to correctly advance the probe position.
         var probe = inner;
         var total: u64 = 0;
         for (0..decl_count) |_| {
             const c = try leb128.readUleb128(u32, code, &probe);
             total += c;
-            if (probe >= code.len) return sections.Error.UnexpectedEnd;
-            probe += 1; // skip the valtype byte
+            _ = try init_expr.readValType(code, &probe);
         }
         if (total > std.math.maxInt(u32)) return sections.Error.LocalsOverflow;
 

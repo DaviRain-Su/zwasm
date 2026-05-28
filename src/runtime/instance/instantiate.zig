@@ -356,10 +356,38 @@ pub fn validateNoCode(_: std.mem.Allocator, _: *Module) bool {
 /// false on any decode error. Runs ahead of the conditional
 /// per-function validate path so a module without a code section
 /// can't silently bypass type/global/table/elem body checks.
+/// Returns true iff `vt` is well-typed against a type section of
+/// `ntypes` entries: any concrete typed ref's index must be < ntypes.
+/// Abstract refs / numerics are unconditionally OK.
+fn validRefTypeIdx(vt: zir.ValType, ntypes: usize) bool {
+    return switch (vt) {
+        .i32, .i64, .f32, .f64, .v128 => true,
+        .ref => |r| switch (r.heap_type) {
+            .abstract => true,
+            .concrete => |idx| @as(usize, idx) < ntypes,
+        },
+    };
+}
+
 fn preDecodeSectionBodies(alloc: std.mem.Allocator, module: *Module) bool {
+    // ADR-0123 Cycle 3 — type-section typed-funcref bounds check.
+    // Modules whose FuncType.params / results contain a concrete
+    // typed ref `(ref null? $idx)` are now parseable (parser was
+    // extended at cycle 92 / 10.R-valtype-widen Cycle 3); the
+    // bounds check on $idx ∈ [0, types.len) must run at module-
+    // load time, NOT lazily at validate. Without it the function-
+    // references/ref.1/2/3/6/8 invalid fixtures (each containing
+    // `(ref $1)` while only 1 type is defined) pass the no-code
+    // shortcut and reach instantiate as "valid" when spec demands
+    // invalid.
     if (module.find(.type)) |s| {
         var t = sections.decodeTypes(alloc, s.body) catch return false;
-        t.deinit();
+        defer t.deinit();
+        const ntypes = t.items.len;
+        for (t.items) |ft| {
+            for (ft.params) |p| if (!validRefTypeIdx(p, ntypes)) return false;
+            for (ft.results) |r| if (!validRefTypeIdx(r, ntypes)) return false;
+        }
     }
     if (module.find(.import)) |s| {
         var im = sections.decodeImports(alloc, s.body) catch return false;
@@ -375,7 +403,35 @@ fn preDecodeSectionBodies(alloc: std.mem.Allocator, module: *Module) bool {
     }
     if (module.find(.global)) |s| {
         var g = sections.decodeGlobals(alloc, s.body) catch return false;
-        g.deinit();
+        defer g.deinit();
+        // ADR-0123 Cycle 3 — global-section typed-funcref bounds.
+        // ref.3 fixture: `(global (ref null $1))` with no type
+        // section. Reject.
+        const ntypes: usize = if (module.find(.type)) |ts| blk: {
+            var t = sections.decodeTypes(alloc, ts.body) catch break :blk 0;
+            defer t.deinit();
+            break :blk t.items.len;
+        } else 0;
+        for (g.items) |gd| {
+            if (!validRefTypeIdx(gd.valtype, ntypes)) return false;
+        }
+    }
+    // ADR-0123 Cycle 3 — code-section local-decl typed-funcref
+    // bounds. ref.8 fixture: function with `(local (ref null $1))`
+    // declared in the function body but no type 1 defined.
+    if (module.find(.code)) |s| {
+        var c = sections.decodeCodes(alloc, s.body) catch return false;
+        defer c.deinit();
+        const ntypes: usize = if (module.find(.type)) |ts| blk: {
+            var t = sections.decodeTypes(alloc, ts.body) catch break :blk 0;
+            defer t.deinit();
+            break :blk t.items.len;
+        } else 0;
+        for (c.items) |fbody| {
+            for (fbody.locals) |loc_vt| {
+                if (!validRefTypeIdx(loc_vt, ntypes)) return false;
+            }
+        }
     }
     if (module.find(.element)) |s| {
         var e = sections.decodeElement(alloc, s.body) catch return false;
