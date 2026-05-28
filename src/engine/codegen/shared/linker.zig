@@ -689,11 +689,10 @@ test "link: is_tail=false (default) patches BL opcode (regression for the dispat
 // B-fixup path (no LR clobber, no return through fn0).
 test "link+execute: fn0 return_call fn1 returns 7 via B/JMP fixup (ADR-0112 D3/D4)" {
     // Both arches wired in 10.TC-emit-body cycles 3 (arm64) + 5 (x86_64).
-    if (!(builtin.cpu.arch == .aarch64 and builtin.os.tag == .macos) and
-        !(builtin.cpu.arch == .x86_64 and builtin.os.tag != .windows))
-    {
-        return skip.blocker(.@"D-193");
-    }
+    // D-193 triage: ungated. Gate already included x86_64 (ran on
+    // ubuntu); removing the defensive over-skip on non-CI hosts
+    // (Linux aarch64 / Mac x86_64). Win deferred per ADR-0122 phaseEnd.
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
     const sigs = [_]zir.FuncType{
         .{ .params = &.{}, .results = &.{.i32} }, // fn0
         .{ .params = &.{}, .results = &.{.i32} }, // fn1
@@ -788,11 +787,10 @@ test "link+execute: fn0 return_call fn1 returns 7 via B/JMP fixup (ADR-0112 D3/D
 }
 
 test "linkWithThunks: single multi-result function — wrapper invocation writes results buffer" {
-    if (!(builtin.cpu.arch == .aarch64 and builtin.os.tag == .macos) and
-        !(builtin.cpu.arch == .x86_64 and builtin.os.tag != .windows))
-    {
-        return skip.blocker(.@"D-193");
-    }
+    // D-193 triage: ungated. Gate already included x86_64 (ran on
+    // ubuntu); removing the defensive over-skip on non-CI hosts
+    // (Linux aarch64 / Mac x86_64). Win deferred per ADR-0122 phaseEnd.
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
     const entry_buf = @import("entry_buffer_write.zig");
 
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{ .i32, .i32, .i32 } };
