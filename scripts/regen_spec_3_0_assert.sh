@@ -101,6 +101,25 @@ declare -a SMOKE=(
     "multi-memory/memory_trap1"
     "multi-memory/load2"
     "multi-memory/memory_copy1"
+    # 10.M cycle 73 — broaden remaining multi-memory coverage. The
+    # D-195(b) bundle close (cycle 72) unblocked cross-instance
+    # memory imports; these fixtures exercise wider corners (floats,
+    # mixed imports, linking sequences, start funcs, store + traps).
+    "multi-memory/float_exprs0"
+    "multi-memory/float_exprs1"
+    "multi-memory/float_memory0"
+    "multi-memory/imports0"
+    "multi-memory/imports1"
+    "multi-memory/imports2"
+    "multi-memory/imports3"
+    "multi-memory/imports4"
+    "multi-memory/linking0"
+    "multi-memory/linking1"
+    "multi-memory/linking2"
+    "multi-memory/linking3"
+    "multi-memory/start0"
+    "multi-memory/store1"
+    "multi-memory/traps0"
 )
 
 bake_one() {

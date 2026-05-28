@@ -1,0 +1,16 @@
+module imports4.0.wasm
+register test
+module imports4.1.wasm
+assert_return grow i32:0 -> i32:1
+assert_return grow i32:1 -> i32:1
+assert_return grow i32:0 -> i32:2
+assert_return grow i32:1 -> i32:4294967295
+assert_return grow i32:0 -> i32:2
+module $Mgm imports4.2.wasm
+register grown-memory
+assert_return $Mgm::grow () -> i32:1
+module $Mgim1 imports4.3.wasm
+register grown-imported-memory
+assert_return $Mgim1::grow () -> i32:2
+module $Mgim2 imports4.4.wasm
+assert_return $Mgim2::size () -> i32:3

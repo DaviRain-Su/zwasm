@@ -1,0 +1,13 @@
+module $M1 store1.0.wasm
+register M1
+module $M2 store1.1.wasm
+register M2
+invoke $M1::store i32:0 i64:1
+invoke $M2::store i32:0 i64:2
+assert_return $M1::load i32:0 -> i64:1
+assert_return $M2::load i32:0 -> i64:2
+module store1.2.wasm
+invoke store1 i32:0 i64:1
+invoke store2 i32:0 i64:2
+assert_return load1 i32:0 -> i64:1
+assert_return load2 i32:0 -> i64:2

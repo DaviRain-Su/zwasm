@@ -1,0 +1,9 @@
+module start0.0.wasm
+assert_return get () -> i32:68
+assert_return getn () -> i32:0
+invoke inc ()
+assert_return get () -> i32:69
+assert_return getn () -> i32:0
+invoke inc ()
+assert_return get () -> i32:70
+assert_return getn () -> i32:0

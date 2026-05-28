@@ -1,0 +1,10 @@
+module imports3.0.wasm
+register test
+skip-impl directive-assert_unlinkable
+skip-impl directive-assert_unlinkable
+skip-impl directive-assert_unlinkable
+skip-impl directive-assert_unlinkable
+skip-impl directive-assert_unlinkable
+skip-impl directive-assert_unlinkable
+skip-impl directive-assert_unlinkable
+skip-impl directive-assert_unlinkable
