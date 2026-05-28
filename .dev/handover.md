@@ -6,61 +6,56 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: 10.M-D195b cycle 77 — `Linker.defineGlobal` +
-  spectest globals (i32/i64/f32/f64) pre-register. D-196(a)
-  partial discharge (host-side standalone Global construction
-  still v0.2). Spec runner `[multi-memory] return=407 (pass=382
-  fail=25) trap=238 (pass=237 fail=1)`. Substrate change: data0.3/5
-  transitioned from UnknownImport → InstantiateFailed (cross-
-  instance global resolves; downstream gap = init-expr global.get
-  eval).
+- **HEAD**: 10.M-D195b cycle 78 — init-expr `global.get` support
+  + data-segment init deferred to after globals. `data0.3` /
+  `data0.5` now instantiate cleanly. Spec runner unchanged at
+  `[multi-memory] return=407 pass=382 fail=25` (data0.* have no
+  assertions; the fix is correctness-only at this granularity).
 - **D-188 / D-194 / D-195(c) DISCHARGED** earlier. **D-195(b)
-  memory + func + spectest stubs + globals WIRED** (cycles 71-77).
-  Active debt rows: 17 — all `blocked-by:`; zero `now`.
+  memory + func + spectest stubs + globals + init-expr global.get
+  WIRED** (cycles 71-78). Active debt rows: 17 — all `blocked-by:`;
+  zero `now`.
 
 ## Active bundle
 
 - None.
 
-## Active task — cycle 78: pivot to 10.E EH runtime path
+## Active task — cycle 79: pivot to 10.E EH runtime path
 
-10.M autonomous portion is substantially complete (the substrate
-is now memory + cross-instance memory imports + cross-instance
-funcs + cross-instance globals + spectest host stubs). Remaining
-10.M gaps are upstream-corrupted fixtures + obscure init-expr
-features. The next highest-yield §10 row is **10.E** —
+10.M autonomous portion is now thoroughly complete; further yield
+is gated on either (a) upstream-corrupted-fixture re-bake (out-of-
+band) or (b) function/global imports for cross-module register-as
+forms (low-yield). The next highest-value §10 row is **10.E** —
 `[exception-handling] return=34(fail34) trap=2(fail2) exception=4(fail4)`.
-Validator side spec-correct as of cycle 61; runtime EH dispatch
-is the remaining work.
 
-Cycle 78 candidates:
+Cycle 79 candidates:
 
-1. **10.E EH runtime — bake try_table.0 instantiate fixture** —
-   try_table.0.wasm currently fails `InstantiateFailed` (per
-   D-192). The validator now passes it; the runtime needs tag
-   section processing + throw/catch dispatch wiring. Multi-cycle
-   bundle (3-5 cycles likely).
-2. **Init-expr global.get support** — small extension to
-   `runtime/instance/instantiate.zig::evalConstMemAddrExpr`
-   accepting `0x23 globalidx` (global.get init-expr form) +
-   pulling the value from `rt.globals`. Closes data0.3/5
-   InstantiateFailed; +2 instantiate counters. 1 cycle.
-3. **D-178 full discharge — host-side standalone Global
-   construction** — v0.2 c_api scope per D-178 (defer).
+1. **10.E EH runtime — try_table.0 instantiate** — currently
+   `instantiate FAIL: InstantiateFailed`. Tag section processing
+   + throw/catch dispatch wiring. Multi-cycle bundle.
+2. **10.E EH runtime — survey existing substrate** — IT-1..IT-6
+   landed earlier in this project's history; the validator side
+   is spec-correct (cycle 61). Survey what runtime EH path exists
+   today + identify the next concrete gap.
+3. **Bake more 10.G or function-references fixtures** — both
+   gated on external (D-179 wabt / ADR-0123 typed-ref). Defer.
 
-Cycle 78 picks (2) — narrow scope, builds on cycle 77's spectest
-globals substrate, closes a few more fixture instantiate-fails.
+Cycle 79 picks (2) — survey before write. The EH runtime substrate
+is multi-cycle-old; understanding the existing state before adding
+to it is essential per `textbook_survey.md`.
 
 ## Larger §10 work (blocked / later)
 
-- **10.M memory64 multi-memory** — autonomous substantially done.
-  D-196 tail covered by runner allowlist or upstream fix.
+- **10.M memory64 multi-memory** — substantially complete (37
+  manifests / 619 passing directives + correctness for `data0.3/5`
+  init-expr global.get). D-196 tail = upstream-corrupted fixtures
+  + named-module register form (low-yield).
 - **10.E EH** — validator spec-correct (cycle 61); runtime EH
   dispatch is the next bundle (cycle 79+).
 - **10.G WasmGC** — D-179-blocked (wabt 1.0.41+).
 - **10.P close gate** — user touchpoint by construction.
 
-## Spec runner observable (post-cycle-77; counts unchanged)
+## Spec runner observable (post-cycle-78; counts unchanged)
 
 ```
 [memory64           ] return=337 trap=205 invalid=83  (all pass)
@@ -78,13 +73,14 @@ globals substrate, closes a few more fixture instantiate-fails.
 - ADR-0123 — Status: Proposed. Accept flip unblocks call_ref +
   return_call_ref impl + typed-ref parser (D-195 sub-gap a).
 - D-179 — wabt 1.0.41+ blocks GC corpus + clang_wasm64 realworld.
-- D-178 — narrow extension landed cycle 77 (defineGlobal); full
-  host-side Global construction surface remains v0.2.
+- D-192 — EH cross-module register-as form (specific module-id);
+  bundle 10.E runtime path subsumes this.
 - 10.P close gate — user touchpoint by construction.
 
 ## Key refs
 
-- ADR-0111 (memory64 + multi-memory design).
+- ADR-0114 (EH design).
+- ADR-0120 (10.E-payload-prop — Proposed).
 - ADR-0076 (D1 gate / D2 single-push / D3 ubuntu kick).
 - `.dev/lessons/2026-05-29-gate-tail-vs-exit-code.md`.
-- ROADMAP §10 row 10.M / 10.E; `.dev/phase_log/phase10.md`.
+- ROADMAP §10 row 10.E; `.dev/phase_log/phase10.md`.
