@@ -51,8 +51,14 @@ mapfile -t WHITELIST < <(
 
 is_whitelisted() {
     local op="$1"
+    # Whitelist entries use dot-separated names (`ref.as_non_null`,
+    # `memory.size`, `i32.load8_s`); filenames use underscore-only
+    # (`ref_as_non_null`, `memory_size`, `i32_load8_s`). Normalize
+    # both sides by replacing `.` → `_` for comparison.
+    local op_norm="${op//./_}"
     for w in "${WHITELIST[@]}"; do
-        if [ "$w" = "$op" ]; then return 0; fi
+        local w_norm="${w//./_}"
+        if [ "$w_norm" = "$op_norm" ]; then return 0; fi
     done
     return 1
 }
@@ -79,7 +85,18 @@ while IFS= read -r f; do
         # Also check for trampoline invocation (which clobbers
         # R15 implicitly via the trampoline's own R15 read).
         if ! grep -nE 'zwasmThrowTrampoline|trampolineCore|memory_grow_fn|table_grow_fn|host_dispatch' "$f" >/dev/null 2>&1; then
-            continue
+            # Per lesson `2026-05-28-d180-detector-misses-bounds-
+            # fixups.md` (10.R cycle 51): a per-op file that
+            # registers a fixup against the function-end trap
+            # stub is an IMPLICIT R15 user — the trap stub
+            # emitted at function end reads R15. Three channels:
+            # `bounds_fixups.append(...)` (memory bounds traps),
+            # `unreach_fixups.append(...)` (unreachable / trap),
+            # `sig_mismatch_fixups.append(...)` (call_indirect
+            # sig check). Any of these = implicit R15 use.
+            if ! grep -nE '\.(bounds_fixups|unreach_fixups|sig_mismatch_fixups)\.append' "$f" >/dev/null 2>&1; then
+                continue
+            fi
         fi
     fi
 
