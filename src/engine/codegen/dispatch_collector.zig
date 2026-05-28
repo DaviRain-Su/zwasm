@@ -205,7 +205,8 @@ test "migratedArchOpCount tracks collected per-arch tuples (B59: arm64=348, x86_
     // load/store per-op files directly to ctx tuple (not in legacy
     // tuple before, so x86_64 count unchanged).
     // Phase 10 EH (ADR-0114) — IT-1 added arm64_try_table (+1 = 349).
-    try std.testing.expectEqual(@as(usize, 349), migratedArchOpCount(.arm64));
+    // 10.R cycle 50 added arm64_ref_as_non_null (+1 = 350).
+    try std.testing.expectEqual(@as(usize, 350), migratedArchOpCount(.arm64));
     // B79..B106 walked cohorts; B107 SIMD residual (21 ops) — legacy tuple empty.
     try std.testing.expectEqual(@as(usize, 0), migratedArchOpCount(.x86_64));
 }
@@ -291,7 +292,8 @@ test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // IT-3 added x86_64_throw + x86_64_throw_ref (+2 = 394).
     // 10.TC emit-body cycle 5 (ADR-0112) — x86_64_return_call (+1 = 395).
     // 10.TC emit-body cycle 8 — x86_64_return_call_indirect (+1 = 396).
-    try std.testing.expectEqual(@as(usize, 396), collected_x86_64_ctx_ops.len);
+    // 10.R cycle 50 added x86_64_ref_as_non_null (+1 = 397).
+    try std.testing.expectEqual(@as(usize, 397), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would

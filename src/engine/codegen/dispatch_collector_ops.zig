@@ -822,6 +822,11 @@ const x86_64_throw_ref = @import("x86_64/ops/wasm_3_0/throw_ref.zig");
 const x86_64_return_call = @import("x86_64/ops/wasm_3_0/return_call.zig");
 const x86_64_return_call_indirect = @import("x86_64/ops/wasm_3_0/return_call_indirect.zig");
 
+// 10.R function-references — cycle 50 ref.as_non_null JIT emit
+// (ADR-0123 D2: representation-independent null-check, generic-trap).
+const arm64_ref_as_non_null = @import("arm64/ops/wasm_3_0/ref_as_non_null.zig");
+const x86_64_ref_as_non_null = @import("x86_64/ops/wasm_3_0/ref_as_non_null.zig");
+
 /// Tuple of all migrated arm64 per-op modules.
 pub const collected_arm64_ops = .{
     arm64_i32_add,
@@ -1173,6 +1178,8 @@ pub const collected_arm64_ops = .{
     arm64_f32x4_splat,
     arm64_f64x2_splat,
     arm64_try_table,
+    // 10.R function-references cycle 50.
+    arm64_ref_as_non_null,
 };
 
 /// Tuple of all migrated x86_64 per-op modules.
@@ -1668,4 +1675,6 @@ pub const collected_x86_64_ctx_ops = .{
     // emit delegates to op_tail_call.emitIndirectReturnCall (JMP R11
     // path; sibling arm64 wired via manual switch in arm64/emit.zig).
     x86_64_return_call_indirect,
+    // 10.R function-references cycle 50.
+    x86_64_ref_as_non_null,
 };
