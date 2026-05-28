@@ -145,23 +145,39 @@ lines = []
 for c in d['commands']:
     t = c.get('type')
     if t == 'module':
-        lines.append('module ' + c['filename'])
+        # 10.M-D195b cycle 72 — emit module-id when wast2json
+        # carries the `name: $X` field (set by wast `(module $X …)`).
+        # The id is used by `register` + asserts that reference the
+        # module by tag (e.g. `(invoke $X "fn" …)`). Without it the
+        # runner can only dispatch to the most-recent instance.
+        mname = c.get('name')
+        if mname:
+            lines.append('module ' + mname + ' ' + c['filename'])
+        else:
+            lines.append('module ' + c['filename'])
     elif t == 'assert_return':
         a = c['action']
         if a.get('type') != 'invoke':
             lines.append('skip-impl non-invoke-action')
             continue
+        # 10.M-D195b cycle 72 — when the action targets a tagged
+        # module (`(invoke $M "fn" …)`), prefix the field with
+        # `$M::` so the runner routes to the registered instance.
+        amod = a.get('module')
+        field_tok = (amod + '::' + a['field']) if amod else a['field']
         args = a.get('args', [])
         results = c.get('expected', [])
         args_s = ' '.join(fmt(x) for x in args) if args else '()'
         results_s = ' '.join(fmt(x) for x in results) if results else '()'
-        lines.append(f'assert_return {a["field"]} {args_s} -> {results_s}')
+        lines.append(f'assert_return {field_tok} {args_s} -> {results_s}')
     elif t == 'assert_trap':
         a = c['action']
+        amod = a.get('module')
+        field_raw = a.get('field', '<non-invoke>')
+        field_tok = (amod + '::' + field_raw) if amod else field_raw
         args = a.get('args', []) if a.get('type') == 'invoke' else []
         args_s = ' '.join(fmt(x) for x in args) if args else '()'
-        field = a.get('field', '<non-invoke>')
-        lines.append(f'assert_trap {field} {args_s}')
+        lines.append(f'assert_trap {field_tok} {args_s}')
     elif t == 'assert_invalid':
         lines.append(f'assert_invalid {c.get("filename", "<inline>")}')
     elif t == 'assert_malformed':
@@ -181,14 +197,17 @@ for c in d['commands']:
         # (e.g. memory_redundancy64's `zero_everything` call between
         # test_store_to_load and test_redundant_load). Previously
         # dropped as `skip-impl directive-action`; runner now invokes
-        # via invokeInstanceVoid.
+        # via invokeInstanceVoid. 10.M-D195b cycle 72 — `module` tag
+        # routes to the registered instance, same as asserts.
         a = c.get('action', {})
         if a.get('type') != 'invoke':
             lines.append('skip-impl non-invoke-action')
             continue
+        amod = a.get('module')
+        field_tok = (amod + '::' + a['field']) if amod else a['field']
         args = a.get('args', [])
         args_s = ' '.join(fmt(x) for x in args) if args else '()'
-        lines.append(f'invoke {a["field"]} {args_s}')
+        lines.append(f'invoke {field_tok} {args_s}')
     elif t == 'register':
         # 10.M-D195b cycle 70 — wast `(register "name" $module_id?)`
         # exports the most-recent module under `name` for subsequent
@@ -209,11 +228,21 @@ PY
 
     # Copy referenced .wasm artifacts (module / assert_invalid /
     # assert_malformed) — same shape as the 1.0/2.0 bake.
+    # 10.M-D195b cycle 72 — `module $<id> <path>` form: when $2 starts
+    # with `$`, the path is $3 (not $2). assert_invalid/malformed only
+    # ever take a single arg.
     while read -r line; do
         # shellcheck disable=SC2086
         set -- $line
         case "$1" in
-            module|assert_invalid|assert_malformed)
+            module)
+                if [ "${2:0:1}" = '$' ]; then
+                    [ -f "$tmp/$3" ] && cp "$tmp/$3" "$out_dir/"
+                else
+                    [ -f "$tmp/$2" ] && cp "$tmp/$2" "$out_dir/"
+                fi
+                ;;
+            assert_invalid|assert_malformed)
                 [ -f "$tmp/$2" ] && cp "$tmp/$2" "$out_dir/" ;;
         esac
     done < "$out_dir/manifest.txt"

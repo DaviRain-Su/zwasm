@@ -163,6 +163,13 @@ pub fn main(init: std.process.Init) !void {
             // or null when no module is currently active (compile /
             // instantiate failed).
             var cur_inst_idx: ?usize = null;
+            // 10.M-D195b cycle 72 — name → instance-idx map. Keyed
+            // by `$<id>` (from `module $<id> <path>` directives) AND
+            // by `<as>` (from `register <as>` directives). Lets
+            // tagged asserts (`$M::field`) dispatch to the registered
+            // instance instead of the most-recent one.
+            var name_to_idx: std.StringHashMap(usize) = std.StringHashMap(usize).init(gpa);
+            defer name_to_idx.deinit();
 
             // Sub-corpus dir (e.g. `tail-call/return_call/`) — both
             // the manifest AND the .wasm files it cites live here.
@@ -212,6 +219,14 @@ pub fn main(init: std.process.Init) !void {
                             continue;
                         };
                         cur_inst_idx = instances_list.items.len - 1;
+                        // 10.M-D195b cycle 72 — register the new
+                        // instance under its `$<id>` tag (when the
+                        // wast bound a name via `(module $X …)`).
+                        // Subsequent asserts can dispatch to this
+                        // instance via `$X::field`.
+                        if (d.module_id.len > 0) {
+                            name_to_idx.put(d.module_id, cur_inst_idx.?) catch {};
+                        }
                     },
                     .register => {
                         // 10.M-D195b cycle 71 — bind the most-recent
@@ -239,6 +254,10 @@ pub fn main(init: std.process.Init) !void {
                             }
                             break; // single memory0 binding; bail after first
                         }
+                        // 10.M-D195b cycle 72 — also register the
+                        // instance under the `<as>` name so tagged
+                        // asserts (`<as>::field`) dispatch to it.
+                        name_to_idx.put(d.func_name, idx) catch {};
                         summary.skips += 1;
                     },
                     .assert_return => {
@@ -264,13 +283,20 @@ pub fn main(init: std.process.Init) !void {
                         // (0 results) handled inline below so the
                         // state-mutating call still runs.
                         if (d.results_len > 1) continue;
-                        const idx_ret = cur_inst_idx orelse {
-                            // Setup failure earlier in this module block;
-                            // count as fail since the assert couldn't
-                            // be evaluated.
-                            summary.asserts_return_fail += 1;
-                            continue;
-                        };
+                        // 10.M-D195b cycle 72 — tagged dispatch.
+                        const idx_ret: usize = if (d.module_id.len > 0)
+                            (name_to_idx.get(d.module_id) orelse {
+                                summary.asserts_return_fail += 1;
+                                continue;
+                            })
+                        else
+                            (cur_inst_idx orelse {
+                                // Setup failure earlier in this module block;
+                                // count as fail since the assert couldn't
+                                // be evaluated.
+                                summary.asserts_return_fail += 1;
+                                continue;
+                            });
                         const instance = &instances_list.items[idx_ret];
                         if (d.results_len == 0) {
                             // Void-result assert_return — invoke for
@@ -317,10 +343,16 @@ pub fn main(init: std.process.Init) !void {
                             call_args[ai] = manifest_parser.runtimeToZwasm(rv, tv.ty);
                         }
                         if (!call_args_ok) continue;
-                        const idx_trap = cur_inst_idx orelse {
-                            summary.asserts_trap_fail += 1;
-                            continue;
-                        };
+                        const idx_trap: usize = if (d.module_id.len > 0)
+                            (name_to_idx.get(d.module_id) orelse {
+                                summary.asserts_trap_fail += 1;
+                                continue;
+                            })
+                        else
+                            (cur_inst_idx orelse {
+                                summary.asserts_trap_fail += 1;
+                                continue;
+                            });
                         const instance = &instances_list.items[idx_trap];
                         // assert_trap directives carry no results
                         // section in the baked manifest — invokeInstanceTrap
@@ -399,10 +431,16 @@ pub fn main(init: std.process.Init) !void {
                             call_args[ai] = manifest_parser.runtimeToZwasm(rv, tv.ty);
                         }
                         if (!call_args_ok) continue;
-                        const idx_exc = cur_inst_idx orelse {
-                            summary.asserts_exception_fail += 1;
-                            continue;
-                        };
+                        const idx_exc: usize = if (d.module_id.len > 0)
+                            (name_to_idx.get(d.module_id) orelse {
+                                summary.asserts_exception_fail += 1;
+                                continue;
+                            })
+                        else
+                            (cur_inst_idx orelse {
+                                summary.asserts_exception_fail += 1;
+                                continue;
+                            });
                         const instance = &instances_list.items[idx_exc];
                         const outcome = manifest_parser.invokeInstanceExpectException(instance, d.func_name, call_args[0..d.args_len]) catch {
                             summary.asserts_exception_fail += 1;
@@ -432,7 +470,10 @@ pub fn main(init: std.process.Init) !void {
                             call_args[ai] = manifest_parser.runtimeToZwasm(rv, tv.ty);
                         }
                         if (!call_args_ok) continue;
-                        const idx_inv = cur_inst_idx orelse continue;
+                        const idx_inv: usize = if (d.module_id.len > 0)
+                            (name_to_idx.get(d.module_id) orelse continue)
+                        else
+                            (cur_inst_idx orelse continue);
                         const instance = &instances_list.items[idx_inv];
                         // Failure is informational only — the action
                         // wasn't an assertion. Counters don't increment.

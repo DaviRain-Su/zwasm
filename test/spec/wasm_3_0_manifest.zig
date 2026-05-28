@@ -83,6 +83,16 @@ pub const Directive = struct {
     func_name: []const u8 = "",
     /// `skip-*` reason (the substring after the first space).
     reason: []const u8 = "",
+    /// 10.M-D195b cycle 72 — optional module tag. Set for:
+    ///   - `.module $<id> <path>` directives (the wast `(module $X …)`
+    ///     name-binding form); the runner stores the instance under
+    ///     this name in its registry.
+    ///   - assert / invoke directives whose action targets a tagged
+    ///     module (`$X::field` syntax); the runner dispatches the
+    ///     call to the registered `$X` instance instead of the
+    ///     most-recent one.
+    /// Empty when not present.
+    module_id: []const u8 = "",
     /// Caller stages args + results into these arrays. Parser
     /// writes by index up to the slice length; returns
     /// `OutOfRange` if more typed tokens appear than fit. The
@@ -415,7 +425,22 @@ pub fn parseLine(
 
     if (std.mem.eql(u8, kind_str, "module")) {
         directive.kind = .module;
-        directive.module_path = rest;
+        // 10.M-D195b cycle 72 — `module $<id> <path>` carries an
+        // optional name-binding tag (wast `(module $X …)` form).
+        // If `rest` starts with `$`, split off the first space-
+        // separated token as the module_id and the remainder as
+        // the path.
+        if (rest.len > 0 and rest[0] == '$') {
+            const sp = std.mem.findScalar(u8, rest, ' ');
+            if (sp) |sp_i| {
+                directive.module_id = rest[0..sp_i];
+                directive.module_path = rest[sp_i + 1 ..];
+            } else {
+                directive.module_path = rest;
+            }
+        } else {
+            directive.module_path = rest;
+        }
         return directive;
     }
     if (std.mem.eql(u8, kind_str, "skip-impl")) {
@@ -481,8 +506,16 @@ pub fn parseLine(
             seen_arrow = true;
             continue;
         }
-        if (!seen_name and std.mem.findScalar(u8, tok, ':') == null and !std.mem.eql(u8, tok, "()")) {
-            directive.func_name = tok;
+        if (!seen_name and !std.mem.eql(u8, tok, "()") and (std.mem.findScalar(u8, tok, ':') == null or std.mem.find(u8, tok, "::") != null)) {
+            // 10.M-D195b cycle 72 — `$module::field` syntax splits
+            // the token at `::`; the module_id (with $ prefix) goes
+            // into directive.module_id, the field into func_name.
+            if (std.mem.find(u8, tok, "::")) |sep| {
+                directive.module_id = tok[0..sep];
+                directive.func_name = tok[sep + 2 ..];
+            } else {
+                directive.func_name = tok;
+            }
             seen_name = true;
             continue;
         }
@@ -601,6 +634,26 @@ test "parseLine: register directive captures registered-as name (10.M-D195b cycl
     const d = try parseLine("register M", &args, &results);
     try testing.expectEqual(Kind.register, d.kind);
     try testing.expectEqualStrings("M", d.func_name);
+}
+
+test "parseLine: module $<id> <path> carries module_id (10.M-D195b cycle 72)" {
+    var args: [4]TypedValue = undefined;
+    var results: [4]TypedValue = undefined;
+    const d = try parseLine("module $M load1.0.wasm", &args, &results);
+    try testing.expectEqual(Kind.module, d.kind);
+    try testing.expectEqualStrings("$M", d.module_id);
+    try testing.expectEqualStrings("load1.0.wasm", d.module_path);
+}
+
+test "parseLine: assert_return with \\$M::field tagged invoke (10.M-D195b cycle 72)" {
+    var args: [4]TypedValue = undefined;
+    var results: [4]TypedValue = undefined;
+    const d = try parseLine("assert_return $M::read i32:20 -> i32:1", &args, &results);
+    try testing.expectEqual(Kind.assert_return, d.kind);
+    try testing.expectEqualStrings("$M", d.module_id);
+    try testing.expectEqualStrings("read", d.func_name);
+    try testing.expectEqual(@as(u8, 1), d.args_len);
+    try testing.expectEqual(@as(u8, 1), d.results_len);
 }
 
 test "parseLine: assert_invalid captures wasm path" {
