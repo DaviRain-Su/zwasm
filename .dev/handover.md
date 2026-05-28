@@ -6,15 +6,14 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `c8468551` — chore(p10): ADR-0122 D-193 ungate, Group A
-  batch (entry_buffer_write ×7 + linker 689/789, 9 already-x86_64
-  tests) (10.G cycle 45). Mac aarch64 `zig build test` exit 0 + lint
-  clean. cycle 44 (`1b360b94`) verified green on Linux x86_64 (ubuntu
-  `OK (HEAD=1b360b94)`). cycle 45 verification pending via ubuntu kick
+- **HEAD**: `2de7f0e5` — chore(p10): ADR-0122 D-193/D3, jit_mem exec
+  test portable via comptime per-arch bytes (arm64 MOVZ/RET vs x86_64
+  `mov eax,42`/`ret`) (10.G cycle 46). Mac aarch64 `zig build test`
+  exit 0 + lint clean. cycle 45 (`e0a01132`) verified green on Linux
+  x86_64 (ubuntu `OK`). cycle 46 verification pending via ubuntu kick
   — Step 0.7 next cycle reads `/tmp/ubuntu.log`.
-- **D-193 portable backlog CLEARED** (~23 → 3 over cycles 41/43/44/45).
-  The 3 remaining are all category-(a) arm64-byte-pinned — real
-  per-arch test work, not 3-min ungates.
+- **D-193 down to 2** (~23 → 2 over cycles 41/43/44/45/46). Both
+  remaining are linker.zig 610/650 (category-a, is_tail fixup patch).
 - **ROADMAP §10 progress**: 7/13 DONE, 4 IN-PROGRESS, 2 Pending.
 - **Active debt rows**: 18 — all `blocked-by:` with named structural
   barriers. Zero `now`-status rows.
@@ -24,26 +23,22 @@
 ## Active task — D-193 per-site ungate (ADR-0122 D6)
 
 Discharging the Mac-aarch64-only test gates that hide Linux x86_64
-coverage (D-180 hazard class). 3 category-(a) sites remain (see D-193
-row). These are arm64-byte-pinned — ungating naively breaks x86_64
-compile — so each needs an x86_64 sibling OR comptime byte-selection
-+ SIBLING-AT comment per ADR-0122 D3 (real per-arch test code).
+coverage (D-180 hazard class). 2 category-(a) sites remain (see D-193
+row): linker.zig 610/650.
 
-**NEXT chunk** — `jit_mem.zig` MOVZ-X0-#42 probe. The test allocs a
-RWX page, writes `MOVZ X0,#42`+`RET` (arm64 machine code), execs, and
-expects 42. The alloc+exec primitive (jit_mem) is portable; only the
-4-byte instruction stream is arch-specific. Convert: comptime-select
-the bytes — arm64 `{ MOVZ X0,#42; RET }` vs x86_64 `{ mov eax,42; ret }`
-(`B8 2A 00 00 00 C3`) — keep the alloc/exec/result-check portable; add
-a SIBLING-AT comment. Result delta: jit_mem exec primitive newly
-covered on Linux x86_64. Verify byte encodings against ISA refs
-(Arm IHI 0055 MOVZ + Intel SDM MOV imm32) before committing.
+**NEXT chunk** — `linker.zig` 610/650 (is_tail fixup patch). 610
+asserts the linker patches a `B` opcode (0x14… via `inst.encB`) at an
+is_tail CallFixup site; 650 asserts `BL` (0x94…) for is_tail=false.
+Both write raw arm64 bytes + assert arm64 opcode prefixes — naive
+ungate breaks x86_64 compile (`inst.encB` is arm64-only).
+**Step 0 survey first**: read `link()`'s fixup-patch loop — does it
+patch x86_64 JMP rel32 (E9…) / CALL rel32 (E8…) for is_tail /
+non-tail on x86_64? If yes → comptime-select the asserted opcode per
+arch (mirror jit_mem cycle 46). If x86_64 fixup-patching is itself an
+impl gap → open a specific D-NNN per ADR-0122 (c) and migrate the
+blocker, leaving the test arm64-pinned with a precise reason.
 
-**Then** — `linker.zig` 610/650 (is_tail B/BL fixup patch). Needs a
-Step 0 survey of `link()`'s per-arch fixup-patch dispatch (does it
-patch x86_64 JMP/CALL rel32?) before writing x86_64 sibling tests.
-
-After these 3, D-193 fully discharged → close the umbrella row.
+After these 2, D-193 fully discharged → close the umbrella row.
 
 ## Larger §10 work (not started; bigger than per-cycle ungate)
 
