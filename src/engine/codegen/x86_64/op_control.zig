@@ -282,6 +282,26 @@ fn captureOrEmitBlockMergeMov(
     return true;
 }
 
+/// 10.R D-194 Path B (cycle 58) — ctx-shape wrapper around the
+/// private `captureOrEmitBlockMergeMov` helper above, so the new
+/// `ops/wasm_3_0/` per-op handlers (`br_on_null`, `br_on_non_null`)
+/// can re-use the existing block-merge mechanism without requiring
+/// the full `emitBrIf` migration to `(ctx, ins)` shape. Mirror of
+/// `arm64/op_control_merge_mov.zig::captureOrEmitBlockMergeMov`'s
+/// public surface.
+pub fn captureOrEmitBlockMergeMovCtx(ctx: *ctx_mod.EmitCtx, tgt_idx: usize) Error!bool {
+    return captureOrEmitBlockMergeMov(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.labels,
+        ctx.spill_base_off,
+        ctx.func,
+        tgt_idx,
+    );
+}
+
 /// Wasm spec §3.4.4 (block) — push a forward-resolving label
 /// frame. No code emitted; the matching `end` patches all
 /// `pending` fixups.

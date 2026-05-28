@@ -2625,10 +2625,10 @@ test "entry: br_on_null branches to block end on null funcref — JIT 10.R cycle
     // Expected: callI32NoArgs returns 7 — branch around the drop, block
     // end (arity 0, empty stack), then i32.const 7 + func end → 7.
     if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
-    // x86_64 br_on_null deferred (D-194): x86_64 br_if not yet
-    // migrated to (ctx, ins) shape + captureOrEmitBlockMergeMov not
-    // pub-exported on x86_64. Per ADR-0122 D5 use skip.blocker helper.
-    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-194");
+    // D-194 discharged cycle 58 — x86_64 br_on_null per-op file landed
+    // via Path B (`captureOrEmitBlockMergeMovCtx` ctx-shape wrapper in
+    // `x86_64/op_control.zig`); test now runs on both Mac aarch64 +
+    // Linux x86_64.
 
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
     var fn0 = ZirFunc.init(0, sig, &.{});
@@ -2690,7 +2690,7 @@ test "entry: br_on_non_null falls through on null funcref param — JIT 10.R cyc
     // fall through pushes ref.null; block result = null; ref.is_null
     // returns 1. callI32_i64(0) → 1.
     if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
-    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-194");
+    // D-194 discharged cycle 58 — see br_on_null sibling above.
 
     const sig: zir.FuncType = .{ .params = &.{.funcref}, .results = &.{.i32} };
     var fn0 = ZirFunc.init(0, sig, &.{});

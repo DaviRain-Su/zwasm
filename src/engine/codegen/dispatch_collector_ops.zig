@@ -827,13 +827,17 @@ const x86_64_return_call_indirect = @import("x86_64/ops/wasm_3_0/return_call_ind
 const arm64_ref_as_non_null = @import("arm64/ops/wasm_3_0/ref_as_non_null.zig");
 const x86_64_ref_as_non_null = @import("x86_64/ops/wasm_3_0/ref_as_non_null.zig");
 
-// 10.R cycle 54b — br_on_null JIT emit (arm64 only this cycle;
-// x86_64 deferred to debt row pending x86_64 captureOrEmitBlockMergeMov
-// pub-export OR br_if's migration to the (ctx, ins) shape).
+// 10.R cycle 54b — br_on_null JIT emit. x86_64 (cycle 58) re-uses
+// the existing captureOrEmitBlockMergeMov via the ctx-shape wrapper
+// `captureOrEmitBlockMergeMovCtx` added to x86_64/op_control.zig
+// (D-194 Path B; no full br_if migration required).
 const arm64_br_on_null = @import("arm64/ops/wasm_3_0/br_on_null.zig");
+const x86_64_br_on_null = @import("x86_64/ops/wasm_3_0/br_on_null.zig");
 
-// 10.R cycle 56 — br_on_non_null JIT emit (arm64 only; x86_64 = D-194).
+// 10.R cycle 56 — br_on_non_null JIT emit (arm64); x86_64 cycle 58
+// (D-194 Path B; same captureOrEmitBlockMergeMovCtx wrapper).
 const arm64_br_on_non_null = @import("arm64/ops/wasm_3_0/br_on_non_null.zig");
+const x86_64_br_on_non_null = @import("x86_64/ops/wasm_3_0/br_on_non_null.zig");
 
 /// Tuple of all migrated arm64 per-op modules.
 pub const collected_arm64_ops = .{
@@ -1689,4 +1693,8 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_return_call_indirect,
     // 10.R function-references cycle 50.
     x86_64_ref_as_non_null,
+    // 10.R cycle 58 — br_on_null / br_on_non_null JIT emit (D-194
+    // discharge Path B via captureOrEmitBlockMergeMovCtx wrapper).
+    x86_64_br_on_null,
+    x86_64_br_on_non_null,
 };
