@@ -6,12 +6,11 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `86e5bfaf` — feat(p10): 10.R ref.as_non_null JIT emit
-  handlers + dispatch registration (cycle 50 scaffolding; §2
-  deviation acknowledged, bounded — execution test = cycle 51's
-  source commit). Mac aarch64 test exit 0; count tests pass at
-  arm64=350 / x86_64_ctx=397. cycle-49 ubuntu green at `c7dfeb2b`.
-  cycle-50 ubuntu kick pending (Step 0.7 next cycle).
+- **HEAD**: `529e7b53` — test(p10): ref.as_non_null JIT execution
+  test (10.R cycle 51) — closes cycle-50's §2 gap; ref.as_non_null
+  JIT emit is now **complete** (handlers + dispatch + test). Mac
+  aarch64 test exit 0 + lint clean. cycle-50 ubuntu green at
+  `aec7bdf6`. cycle-51 ubuntu kick pending (Step 0.7 next cycle).
 - **D-193 FULLY DISCHARGED** (cycle 47, `eccab477`): all ~23
   Mac-aarch64-only test gates cleared over cycles 41-47; D-180-hazard
   coverage gap gone; 0 `skip.blocker(.@"D-193")` sites repo-wide.
@@ -21,32 +20,29 @@
 ## Active bundle
 
 - **Bundle-ID**: 10.R-function-references
-- **Cycles-remaining**: ~3
+- **Cycles-remaining**: ~2
 - **Continuity-memo**: ADR-0123 (Proposed) — call_ref/return_call_ref
-  gated on Accept. **Cycle-50 landed scaffolding** (`86e5bfaf`):
-  arm64/x86_64 `ref_as_non_null.zig` emit handlers + dispatch
-  registration; count tests at 350/397; §2 deviation note (no
-  execution test yet). Cycle-49 verified findings: JIT traps surface
-  as generic `Error.Trap` (entry.zig:173/188); `trap_kind` is
-  diagnostic-only; arm64 ref.func/ref.null are inline-emit at
-  emit.zig:789/807 (per-op file pattern not used on arm64 for them);
-  callI32_i64 exists (entry.zig:547) for u64-arg entry. **Cycle-51
-  NEXT chunk — execution test** that closes the §2 gap: write the
-  trap-on-null case first (simplest, no funcref-entry plumbing needed)
-  in `src/engine/codegen/shared/entry.zig` (file already has the
-  comptime native_emit binding from cycle 43). Test shape:
-  `(func (result i32) ref.null funcref ; ref.as_non_null ; ref.is_null ; end)`
-  → expect `callI32NoArgs(...)` returns `Error.Trap`. Resolve at
-  test-write time: (a) `ref.null`'s payload encoding for funcref
-  RefType (check zir.zig + arm64/emit.zig:789 — payload is probably 0
-  for funcref or an enum like `@intFromEnum(zir.ValType.funcref)`),
-  (b) liveness model with identity-passthrough (vreg 0 lives pc 0-2:
-  ref.null→ref.is_null; vreg 1 lives pc 2-3: ref.is_null→end; slots
-  `[_]u16{0,1}` n_slots=2 — both physically distinct since they
-  overlap at pc 2), (c) regalloc.Allocation shape (mirror entry.zig
-  existing tests like 2147+). Then add the non-null case
-  (ref.func 0 inside a 2-func module — needs funcptr_base setup like
-  the linker.zig:524 test pattern).
+  gated on Accept. **ref.as_non_null JIT COMPLETE** (cycles 50-51:
+  `86e5bfaf` handlers + dispatch + count tests at 350/397; `529e7b53`
+  trap-on-null execution test in entry.zig passes Mac aarch64).
+  Identity-passthrough liveness model confirmed working: ref.as_non_null
+  pops src vreg, null-checks reg, pushes src back (no new vreg, no
+  MOV); the next consumer reads from src's slot unchanged. The trap
+  fires through bounds_fixups → generic trap stub → trap_flag=1 →
+  Error.Trap. **NEXT chunk — br_on_null + br_on_non_null JIT emit**
+  (other 2 ADR-independent null-ops). Same recipe family, but the
+  CMP/null-check branches into a LABEL fixup (br_if machinery) instead
+  of bounds_fixups (trap). Bundle them together — both have identical
+  shape (null-check + conditional br). Survey first: read br_if's emit
+  to understand label fixup machinery + how label-value passing
+  works on the null-taken branch (br_on_null passes the label's
+  values which sit BELOW the ref on the stack; br_on_non_null passes
+  the ref itself as the branch value when non-null). After br_on_null
+  family, the 3 ADR-independent null-ops are all JIT-emit-green; the
+  bundle exit-condition (function-references spec return/trap fixtures
+  run for the 3 ops) becomes the spec-runner wiring chunk (final pre-
+  ADR-Accept cycle). call_ref/return_call_ref impl waits for ADR-0123
+  Accept flip (still in open-questions).
 - **Exit-condition**: function-references spec return/trap fixtures run
   (not just invalid=12); the 5 ops execute under interp + JIT on both
   arches. (Autonomous portion: 3 null-ops JIT green; call_ref family
