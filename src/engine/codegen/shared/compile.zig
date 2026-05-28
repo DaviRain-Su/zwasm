@@ -311,11 +311,8 @@ const entry = @import("entry.zig");
 
 test "compileOne: pass_diagnostics records all 6 passes when trace enabled" {
     if (!trace.enabled) return error.SkipZigTest; // build-flag gate; ADR-0122 D7 exempt
-    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64) and
-        builtin.cpu.arch != .x86_64)
-    {
-        return skip.blocker(.@"D-193");
-    }
+    // D-193 triage: ungated. Pure compile-pipeline inspection (no JIT
+    // execution) — portable across all hosts.
     trace.clear();
 
     // Pure instruction bytes: `i32.const 7` (0x41 0x07) + `end` (0x0B).
@@ -349,9 +346,10 @@ test "compileOne: pass_diagnostics records all 6 passes when trace enabled" {
 }
 
 test "compileOne: tiny straight-line module — (func (result i32) i32.const 7 end) returns 7" {
-    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
-        return skip.blocker(.@"D-193");
-    }
+    // D-193 triage: ungated. compileOne (comptime arch dispatch) +
+    // callI32NoArgs (callconv .c) are portable; mac-arm64 + linux-x86_64
+    // both execute. Win deferred per ADR-0122 phaseEnd batch.
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
     // Pure instruction bytes (locals prefix is consumed by
     // sections.decodeCodes before this function): `i32.const 7`
     // (0x41 0x07) + `end` (0x0B).

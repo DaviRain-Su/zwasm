@@ -522,9 +522,10 @@ const ZirFunc = zir.ZirFunc;
 const regalloc = @import("regalloc.zig");
 
 test "link: 2-function module — fn0 calls fn1, returns 7" {
-    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
-        return skip.blocker(.@"D-193");
-    }
+    // D-193 triage: ungated. emit.compile (linker.zig:30 comptime arch
+    // switch) + module.entry (callconv .c) are portable; mac-arm64 +
+    // linux-x86_64 both execute. Win deferred per ADR-0122 phaseEnd.
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
     const sigs = [_]zir.FuncType{
         .{ .params = &.{}, .results = &.{.i32} }, // fn0
         .{ .params = &.{}, .results = &.{.i32} }, // fn1
