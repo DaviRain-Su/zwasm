@@ -6,57 +6,61 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: 10.M cycle 76 — diagnostic survey of remaining
-  multi-memory fails complete. Filed D-196 covering (a) Linker.
-  defineGlobal API absence, (b) 7 upstream-corrupted fixtures,
-  (c) named-module register-as form. Spec runner unchanged at
-  `[multi-memory] return=407 (pass=382 fail=25) trap=238 (pass=237
-  fail=1)`.
+- **HEAD**: 10.M-D195b cycle 77 — `Linker.defineGlobal` +
+  spectest globals (i32/i64/f32/f64) pre-register. D-196(a)
+  partial discharge (host-side standalone Global construction
+  still v0.2). Spec runner `[multi-memory] return=407 (pass=382
+  fail=25) trap=238 (pass=237 fail=1)`. Substrate change: data0.3/5
+  transitioned from UnknownImport → InstantiateFailed (cross-
+  instance global resolves; downstream gap = init-expr global.get
+  eval).
 - **D-188 / D-194 / D-195(c) DISCHARGED** earlier. **D-195(b)
-  memory + func + spectest stubs WIRED** (cycles 71-75).
-  D-196 filed cycle 76 (10.M tail; D-178-territory). Active
-  debt rows: 17 — all `blocked-by:`; zero `now`.
+  memory + func + spectest stubs + globals WIRED** (cycles 71-77).
+  Active debt rows: 17 — all `blocked-by:`; zero `now`.
 
 ## Active bundle
 
 - None.
 
-## Active task — cycle 77: pivot to 10.E EH runtime path
+## Active task — cycle 78: pivot to 10.E EH runtime path
 
-10.M autonomous portion is substantially done (94% multi-memory
-pass rate; remaining tail = D-196). The next-highest-yield §10 row
-is **10.E** — currently `[exception-handling] return=34(fail34)
-trap=2(fail2) exception=4(fail4)`. The validator side is spec-
-correct as of cycle 61; the runtime EH dispatch (throw / catch /
-unwind via FP-walk) is the remaining work.
+10.M autonomous portion is substantially complete (the substrate
+is now memory + cross-instance memory imports + cross-instance
+funcs + cross-instance globals + spectest host stubs). Remaining
+10.M gaps are upstream-corrupted fixtures + obscure init-expr
+features. The next highest-yield §10 row is **10.E** —
+`[exception-handling] return=34(fail34) trap=2(fail2) exception=4(fail4)`.
+Validator side spec-correct as of cycle 61; runtime EH dispatch
+is the remaining work.
 
-Cycle 77 candidates:
+Cycle 78 candidates:
 
-1. **10.E EH runtime — `throw` interp dispatch** — wire the
-   `op_throw` handler to construct an Exception object + initiate
-   FP-walk unwind. Multi-cycle bundle.
-2. **D-178 partial — Linker.defineGlobal** — adds host-side global
-   construction surface. Unblocks D-196(a) spectest globals + 2+
-   multi-memory fixtures. 1-2 cycles.
-3. **Bake 10.TC tail-call return_call fixtures expanded** — tail-call
-   spec corpus has 31 returns already; expanding it explores
-   ADR-0112 / 10.TC scope. 1 cycle.
+1. **10.E EH runtime — bake try_table.0 instantiate fixture** —
+   try_table.0.wasm currently fails `InstantiateFailed` (per
+   D-192). The validator now passes it; the runtime needs tag
+   section processing + throw/catch dispatch wiring. Multi-cycle
+   bundle (3-5 cycles likely).
+2. **Init-expr global.get support** — small extension to
+   `runtime/instance/instantiate.zig::evalConstMemAddrExpr`
+   accepting `0x23 globalidx` (global.get init-expr form) +
+   pulling the value from `rt.globals`. Closes data0.3/5
+   InstantiateFailed; +2 instantiate counters. 1 cycle.
+3. **D-178 full discharge — host-side standalone Global
+   construction** — v0.2 c_api scope per D-178 (defer).
 
-Cycle 77 picks (2) — narrow scope (1-2 cycles), clear D-196(a)
-discharge, learning that informs Linker.defineGlobal API design
-ahead of v0.2 c_api completion (D-178 full discharge).
+Cycle 78 picks (2) — narrow scope, builds on cycle 77's spectest
+globals substrate, closes a few more fixture instantiate-fails.
 
 ## Larger §10 work (blocked / later)
 
-- **10.M memory64 multi-memory** — autonomous substantially done
-  (37 manifests / 619 passing directives). D-196 tail = D-178
-  partial + upstream-corrupted fixtures + named-module register.
+- **10.M memory64 multi-memory** — autonomous substantially done.
+  D-196 tail covered by runner allowlist or upstream fix.
 - **10.E EH** — validator spec-correct (cycle 61); runtime EH
-  dispatch is the next bundle.
+  dispatch is the next bundle (cycle 79+).
 - **10.G WasmGC** — D-179-blocked (wabt 1.0.41+).
 - **10.P close gate** — user touchpoint by construction.
 
-## Spec runner observable (post-cycle-76; unchanged from 75)
+## Spec runner observable (post-cycle-77; counts unchanged)
 
 ```
 [memory64           ] return=337 trap=205 invalid=83  (all pass)
@@ -74,8 +78,8 @@ ahead of v0.2 c_api completion (D-178 full discharge).
 - ADR-0123 — Status: Proposed. Accept flip unblocks call_ref +
   return_call_ref impl + typed-ref parser (D-195 sub-gap a).
 - D-179 — wabt 1.0.41+ blocks GC corpus + clang_wasm64 realworld.
-- D-178 — Linker.defineGlobal/defineTable missing — cycle-77
-  partial-discharge target.
+- D-178 — narrow extension landed cycle 77 (defineGlobal); full
+  host-side Global construction surface remains v0.2.
 - 10.P close gate — user touchpoint by construction.
 
 ## Key refs
