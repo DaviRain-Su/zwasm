@@ -1,4 +1,4 @@
-// FILE-SIZE-EXEMPT: Wasm spec §3.3 validation single-pass walker (type-stack + control-stack); P1 spec-defined sub-language, intrinsically singular (splitting would create artificial seams across an unsplittable algorithm) (per ADR-0099)
+// FILE-SIZE-EXEMPT: Wasm spec §3.3 validation single-pass walker (type-stack + control-stack); P1 spec-defined sub-language, intrinsically singular (splitting would create artificial seams across an unsplittable algorithm). (per ADR-0099) (cap=3000)
 //! Wasm function-body **type-stack + control-stack validator**
 //! (Phase 1 / §9.1 / 1.5).
 //!
@@ -1862,18 +1862,25 @@ pub const Validator = struct {
         };
         const target = self.frameAt(depth) orelse return Error.InvalidBranchDepth;
         const lt = target.labelType();
-        // Label l must take [t1*, reftype]; the last entry of lt
-        // must match the popped reftype. Pop the prefix t1* from
-        // stack + push back (fall-through has just [t1*]).
+        // Label l must take [t1*, (ref ht)] where the popped
+        // reftype is (ref null ht). The branch only fires when the
+        // ref is non-null at runtime — so the narrowed (non-null)
+        // form is what flows to the label. Per Wasm 3.0 §3.3.10.9.
+        const narrowed_ref: ValType = if (reftype.isRef()) .{ .ref = .{
+            .nullable = false,
+            .heap_type = reftype.ref.heap_type,
+        } } else reftype;
         switch (lt) {
             .empty => return Error.StackTypeMismatch,
             .single => |t| {
-                if (!t.eql(reftype)) return Error.StackTypeMismatch;
+                if (!valTypeIsSubtypeFree(narrowed_ref, t)) {
+                    return Error.StackTypeMismatch;
+                }
                 // Prefix is empty; no further pop/push.
             },
             .multi => |ts| {
                 if (ts.len == 0) return Error.StackTypeMismatch;
-                if (!ts[ts.len - 1].eql(reftype)) return Error.StackTypeMismatch;
+                if (!valTypeIsSubtypeFree(narrowed_ref, ts[ts.len - 1])) return Error.StackTypeMismatch;
                 const prefix = ts[0 .. ts.len - 1];
                 var i: usize = prefix.len;
                 while (i > 0) {
