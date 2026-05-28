@@ -405,6 +405,20 @@ test "validate: ref.null externref pushes externref; drop ; end" {
     try validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
 }
 
+test "validate: ref.as_non_null (0xD4) narrows (ref null func) to non-null" {
+    // function-references §3.3.8.5: ref.as_non_null pops a reftype,
+    // pushes the non-null narrowing (traps at runtime on null). Opcode
+    // is 0xD4 (0xD3 is GC ref.eq). Pre-fix the dispatch mapped 0xD3 →
+    // opRefAsNonNull, leaving the real 0xD4 byte unhandled
+    // (NotImplemented) — ref_as_non_null.0 / .2 ParseFailed.
+    //   0xD0 0x70 — ref.null func  (pushes (ref null func))
+    //   0xD4      — ref.as_non_null (→ (ref func))
+    //   0x1A      — drop
+    //   0x0B      — end
+    const body = [_]u8{ 0xD0, 0x70, 0xD4, 0x1A, 0x0B };
+    try validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
 test "validate: ref.null with bad reftype byte → BadValType" {
     const body = [_]u8{ 0xD0, 0x55, 0x0B };
     const r = validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);

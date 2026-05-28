@@ -543,7 +543,8 @@ pub const Lowerer = struct {
                 try self.emit(.@"ref.func", idx, 0);
             },
             // Wasm 3.0 typed function references (function-references proposal).
-            0xD3 => try self.emit(.@"ref.as_non_null", 0, 0),
+            // ref.as_non_null is 0xD4 (0xD3 is GC ref.eq, not yet wired).
+            0xD4 => try self.emit(.@"ref.as_non_null", 0, 0),
             0xD5 => try self.emitUlebPayload(.br_on_null),
             0xD6 => try self.emitUlebPayload(.br_on_non_null),
             0x14 => try self.emitUlebPayload(.call_ref),

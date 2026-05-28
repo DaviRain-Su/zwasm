@@ -56,6 +56,20 @@ test "lower: i32.const + drop + end packs sleb128 value into payload" {
     try testing.expectEqual(ZirOp.end, f.instrs.items[2].op);
 }
 
+test "lower: ref.as_non_null (0xD4) emits .ref.as_non_null" {
+    var f = newFunc(empty_sig);
+    defer f.deinit(testing.allocator);
+
+    // ref.null func ; ref.as_non_null ; drop ; end. ref.as_non_null is
+    // opcode 0xD4 (0xD3 is GC ref.eq); pre-fix lower decoded 0xD3.
+    try lowerFunctionBody(testing.allocator, &[_]u8{ 0xD0, 0x70, 0xD4, 0x1A, 0x0B }, &f, &.{}, &.{});
+
+    try testing.expectEqual(ZirOp.@"ref.null", f.instrs.items[0].op);
+    try testing.expectEqual(ZirOp.@"ref.as_non_null", f.instrs.items[1].op);
+    try testing.expectEqual(ZirOp.drop, f.instrs.items[2].op);
+    try testing.expectEqual(ZirOp.end, f.instrs.items[3].op);
+}
+
 test "lower: i64.const splits low32/high32 across payload+extra" {
     var f = newFunc(empty_sig);
     defer f.deinit(testing.allocator);

@@ -944,7 +944,8 @@ pub const Validator = struct {
             0xD2 => try self.opRefFunc(),
 
             // Wasm 3.0 typed function references (function-references proposal).
-            0xD3 => try self.opRefAsNonNull(),
+            // ref.as_non_null is 0xD4 (0xD3 is GC ref.eq, not yet wired).
+            0xD4 => try self.opRefAsNonNull(),
             0xD5 => try self.opBrOnNull(),
             0xD6 => try self.opBrOnNonNull(),
             0x14 => try self.opCallRef(),
