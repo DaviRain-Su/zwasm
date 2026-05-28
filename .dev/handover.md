@@ -6,12 +6,16 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `f30d08a7` — feat(p10): arm64 br_on_non_null JIT emit
-  scaffolding (10.R cycle 56; count 351→352; SIBLING-PUB extended).
-  §2 deviation: execution test = cycle 57's immediate-next source
-  commit (matching twice-validated cycle-50→51 + cycle-54b→55
-  pattern). x86_64 br_on_non_null covered by existing D-194. Mac
-  aarch64 test exit 0. cycle-55 ubuntu green at `264d2bfb`.
+- **HEAD**: `efc66e31` — test(p10): br_on_non_null JIT execution
+  test (10.R cycle 57) — closes cycle-56 §2 gap on first try (third
+  application of the scaffolding-then-test pattern). **arm64
+  br_on_non_null is complete end-to-end** (null fall-through returns
+  1 via ref.null+ref.is_null). 3 of 5 ADR-0123-independent
+  function-references ops now JIT-emitted + tested on arm64:
+  ref.as_non_null + br_on_null + br_on_non_null. call_ref +
+  return_call_ref await ADR-0123 Accept. x86_64 br_on_null +
+  br_on_non_null under D-194. Mac aarch64 test exit 0. cycle-56
+  ubuntu green at `5bd2f904`.
 - **D-193 FULLY DISCHARGED** (cycle 47, `eccab477`): all ~23
   Mac-aarch64-only test gates cleared over cycles 41-47; D-180-hazard
   coverage gap gone; 0 `skip.blocker(.@"D-193")` sites repo-wide.
