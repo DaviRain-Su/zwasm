@@ -6,12 +6,12 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 91 (`80ad0128`) — **ADR-0123 Cycle 2 landed**:
-  `ValType` pivoted from `enum(u8)` to `union(enum)`; 30 files
-  migrated (29 src + 1 test); ~50 distinct switch / comparison
-  sites updated. New helpers (`eql`, `specByte`, `isFuncref`, etc.)
-  + pub-const aliases (funcref/externref/i31ref/anyref/eqref/
-  structref/arrayref) preserve construction ergonomics.
+- **HEAD**: cycle 92 (`32871166`) — **ADR-0123 Cycle 3 landed**:
+  parser accepts `0x63 / 0x64` typed-funcref bytes; concrete
+  type-section indices bounds-checked at module-load (type /
+  global / code-locals sections); 5 invalid-accepted fixtures
+  (ref.1/2/3/6/8) now properly rejected. D-188 bisect = 0.
+- Cycle 91 (`80ad0128`) before: ValType pivot to union(enum).
 - Cycle 90 (`6e5e7e53` + `510eca36` + `d6b187f8`) before that:
   D-179 baker swap; ADR-0120 Accept + Cycle 1 impl; ADR-0123 Accept
   + Cycle 1 substrate.
@@ -20,32 +20,31 @@
 ## Active bundle
 
 - **Bundle-ID**: 10.R-valtype-widen
-- **Cycles-remaining**: ~3 (Cycle 2 closed at `80ad0128`)
-- **Continuity-memo**: ValType pivot to union(enum) landed; all
-  29 src + 1 test files migrated. Cycle 3 next adds `0x63` /
-  `0x64` byte parsing in `src/parse/sections.zig::readValType`
-  + the corresponding writer-side multi-byte emission.
+- **Cycles-remaining**: ~2 (Cycle 3 closed at `32871166`)
+- **Continuity-memo**: parser 0x63/0x64 + module-load typeidx
+  bounds done. Cycle 4 next adds validator static narrowing
+  (ref.as_non_null / br_on_null narrow `RefType.nullable` flag;
+  ref.func produces non-nullable). Cycle 5 wires call_ref /
+  return_call_ref impl per ADR-0123 D3 / D4.
 - **Exit-condition**: function-references spec corpus assert_return
   pass-rate ≥ 30/39 (currently 3/39); call_ref + return_call_ref
   green-baked + validated; 0 ParseFailed for any
   function-references module.
 
-## Active task — cycle 92: parser typed-funcref bytes (Cycle 3 of bundle)
+## Active task — cycle 93: validator static narrowing (Cycle 4 of bundle)
 
 Smallest red test:
-`test "readValType: 0x64 + LEB-prefix funcidx → RefType.conc(idx, false)"`
-in `src/parse/sections.zig`. Add 0x63 (nullable typed) + 0x64
-(non-nullable typed) arms to `readValType` switch; both consume
-a subsequent LEB128 type-section index (or a negative heap-head
-LEB for the 12 abstract heads — Wasm 3.0 §5.3.4). Validator's
-type-stack tracking already handles RefType correctly via the
-Cycle 2 helpers.
+`test "validator: ref.as_non_null narrows RefType.nullable=true → false"`
+in `src/validate/validator.zig`. After ref.as_non_null, the
+type-stack top is updated from `RefType.abs(ht, true)` to
+`RefType.abs(ht, false)`. br_on_null fallthrough is similarly
+narrowed; br_on_non_null cross-checks the branch label's
+nullability expectation. ref.func yields non-nullable per Wasm
+3.0 §3.3.10.10.
 
-After cycle 3 lands, cycles 4-5 per ADR-0123 Consequences §5:
-- Cycle 4: validator static narrowing rules (ref.as_non_null /
-  br_on_null narrow .nullable flag; ref.func yields non-nullable).
-- Cycle 5: call_ref / return_call_ref impl (D3/D4) + spec corpus
-  pass-rate ramp.
+After cycle 4 lands, cycle 5 wires call_ref / return_call_ref
+runtime impl (D3 / D4) + spec corpus pass-rate ramp (target
+function-references return ≥ 30/39 from currently 0/39).
 
 ## Larger §10 work (post-bundle)
 
