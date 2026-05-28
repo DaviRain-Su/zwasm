@@ -6,11 +6,10 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `c786a2d8` — docs(p10): **ADR-0123** (10.R function-
-  references typed-funcref representation, Proposed) (cycle 48).
-  Docs-only — code unchanged from `89403a63` (already ubuntu-green
-  `OK (HEAD=89403a63)`). **No ubuntu kick this cycle** (non-code-gap;
-  Step 0.7 next cycle: c786a2d8 is docs-only, nothing new to verify).
+- **HEAD**: `ffa69d46` — chore(p10): remove dead
+  `skip.Blocker.@"D-193"` variant (D-193 discharged) (10.R cycle 49).
+  Mac aarch64 test exit 0 + lint clean. cycle-49 ubuntu kick pending
+  (Step 0.7 next cycle). ADR-0123 filed cycle 48 (`c786a2d8`).
 - **D-193 FULLY DISCHARGED** (cycle 47, `eccab477`): all ~23
   Mac-aarch64-only test gates cleared over cycles 41-47; D-180-hazard
   coverage gap gone; 0 `skip.blocker(.@"D-193")` sites repo-wide.
@@ -20,15 +19,29 @@
 ## Active bundle
 
 - **Bundle-ID**: 10.R-function-references
-- **Cycles-remaining**: ~5
-- **Continuity-memo**: ADR-0123 (Proposed) decides the representation —
-  sig type-index rides in `ZirInstr.payload` (mirrors call_indirect),
-  type stack stays generic funcref, runtime sig-dispatch (null-trap +
-  `IndirectCallTypeMismatch`), static typed-ref + nullability narrowing
-  deferred to 10.G. **call_ref / return_call_ref impl is gated on
-  ADR-0123 Accept** (user flip). The 3 null-manipulation ops
-  (ref.as_non_null / br_on_null / br_on_non_null) are
-  representation-independent (generic-ref null-check) and proceed NOW.
+- **Cycles-remaining**: ~4
+- **Continuity-memo**: ADR-0123 (Proposed): sig type-index in
+  `ZirInstr.payload`, generic funcref on type stack, runtime
+  sig-dispatch, typed-ref deferred to 10.G. **call_ref/return_call_ref
+  gated on ADR-0123 Accept**; the 3 null-ops are representation-
+  independent → proceed now. **ref.as_non_null JIT emit plan (cycle-49
+  survey, fully scoped)**: (1) Key finding — JIT traps are UNIFORMLY
+  generic `Error.Trap` (entry.zig:173/188 map any `trap_flag!=0` →
+  Error.Trap; `trap_kind` is diagnostic-only) → ref.as_non_null reuses
+  the existing generic trap-fixup path, NO trap-reason plumbing. (2)
+  Create `src/engine/codegen/{arm64,x86_64}/ops/wasm_3_0/ref_as_non_null.zig`
+  + register in `dispatch_collector_ops.zig` (mirror the ref_is_null
+  registration at wasm_1_0). (3) Emit = pop src vreg, load reg, `CMP
+  reg,#0; B.EQ/JE → append to bounds_fixups` (generic trap stub at
+  epilogue, per arm64 emit.zig:1480 / x86_64 op_control.zig:1331),
+  then push src vreg back (IDENTITY — confirm ctx API for leaving the
+  ref on the vstack; ref_is_null allocates a new bool result, we don't).
+  (4) Test WITHOUT funcref-entry harness: source funcref internally —
+  non-null `ref.func $g; ref.as_non_null; ref.is_null` → callI32NoArgs
+  == 0; null `ref.null func; ref.as_non_null` → Error.Trap. CONFIRM
+  ref.func/ref.null have JIT emit first; avoid arm64-pinned byte
+  asserts (D-193 lesson). NOTE: survey's `(call (ref.as_non_null ...))`
+  WAT is malformed (`call` takes a func-idx, not a funcref operand).
 - **Exit-condition**: function-references spec return/trap fixtures run
   (not just invalid=12); the 5 ops execute under interp + JIT on both
   arches. (Autonomous portion: 3 null-ops JIT green; call_ref family
@@ -52,12 +65,6 @@ placeholder — wiring it is part of this chunk). Then `br_on_null` +
 `br_on_non_null` (null-conditional branch, reuse br_if fixup machinery)
 as the following chunk. Mind the D-193 lesson: no arm64-pinned byte
 asserts — test via execution or comptime per-arch.
-
-## Trivial follow-up (2-min, opportunistic)
-
-- `src/test_support/skip.zig` `Blocker.@"D-193"` enum variant is now
-  unused (0 call sites). Remove it when next touching skip.zig — the
-  pre-commit gate passed with it present, so not urgent.
 
 ## Larger §10 work (blocked / later)
 
