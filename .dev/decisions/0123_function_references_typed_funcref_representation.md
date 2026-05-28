@@ -1,6 +1,6 @@
 # ADR-0123 — function-references (10.R): typed-funcref representation + call_ref sig-dispatch
 
-- **Status**: Proposed (loop-drafted; awaiting user flip → Accepted)
+- **Status**: Accepted (2026-05-28 — cycle 90 revision under "完成形がきれい" lens; user-delegated autonomous flip)
 - **Date**: 2026-05-28
 - **Tags**: wasm-3.0, function-references, valtype, call_ref, zir, phase10
 - **Deciders**: autonomous /continue loop (drafts); user (Accept flip)
@@ -36,74 +36,156 @@ hierarchy but **explicitly scopes typed-funcref impl out** (§229:
 load-bearing §4 decision recorded **first** (ROADMAP §18.2 /
 deviation-watch).
 
-## Decision
+## Decision (revised 2026-05-28 cycle 90 — "完成形がきれい" lens)
 
-**D1 — No new `ValType` variant for `(ref $sig)` in Phase 10.R.**
-The static type stack keeps the generic `funcref` reftype. The sig
-**type-index** for `call_ref` / `return_call_ref` rides in
-`ZirInstr.payload` (`u64`), exactly as `call_indirect` already carries
-its expected type-index (`src/interp/trap_audit.zig:73-103`). This
-avoids a disruptive `enum(u8)` → tagged-union `ValType` rewrite
-mid-Phase-10 and reuses the proven indirect-call substrate.
+**The original D1 ("keep ValType narrow, side-band the sig-index")
+was structurally a workaround**: it side-stepped the spec-mandated
+type system to defer cost. The cycle-90 industry survey (wasmtime
+`WasmRefType { nullable, heap_type }`; wasm-tools `RefType(u32)`
+bit-packed; WAMR's `WASMRefTypeMap*` side-band; wazero's
+backward-compat u64 widening) all confirmed: typed-ref representation
+in ValType is **not deferrable** if v2 wants to parse function-
+references modules that use `(local (ref $t))` / `(param (ref $t))` /
+`(global (ref $t))` / table element type `(ref $t)` (15 of 103 spec
+test files). The original D1 architecturally couldn't represent these.
 
-**D2 — Static nullability narrowing defers to 10.G.** In 10.R,
-`ref.as_non_null` / `br_on_null` / `br_on_non_null` operate at
-**runtime** on the generic ref representation (`Value.ref: u64`,
-null = 0). The validator stays non-narrowing (as today): it pops/pushes
-the generic reftype without expressing `(ref null T)` → `(ref T)`. The
-full static typed-ref module (with nullability in the type lattice)
-lands in 10.G alongside the GC type hierarchy, per ADR-0116's existing
-scoping. This is sound because the spec's *dynamic* semantics (trap on
-null) are fully captured at runtime; the static narrowing is an
-additional validation-strictness layer, not a runtime-behavior gate.
+Per user direction "AI は人間の 10x 速い → workaround を避け、あるべ
+き論の選択肢をとってください" (cycle 90), this ADR pivots to the clean
+wasmtime-style design. Zig's `union(enum)` makes tagged unions
+ergonomic in a way C (WAMR) and Go (wazero) lack, removing the
+constraint that drove peer runtimes' side-band/widening tricks.
+
+**D1 (revised) — Widen `ValType` to a tagged union with `Ref(RefType)`
+variant.**
+
+```zig
+pub const ValType = union(enum) {
+    i32, i64, f32, f64, v128,
+    ref: RefType,
+};
+
+pub const RefType = struct {
+    nullable: bool,
+    heap_type: HeapType,
+};
+
+pub const HeapType = union(enum) {
+    /// Abstract heaps: func / extern / any / eq / i31 / struct /
+    /// array / none / noextern / nofunc / exn / noexn.
+    abstract: AbstractHeapType,
+    /// Concrete typed reference: `(ref null? $typeidx)`.
+    concrete: u32, // type section index
+};
+
+pub const AbstractHeapType = enum(u8) {
+    func, extern_, any, eq, i31, struct_, array,
+    none, noextern, nofunc, exn, noexn,
+};
+```
+
+Old abstract-ref variants (`funcref`, `externref`, `i31ref`,
+`anyref`, `eqref`, `structref`, `arrayref`) become spelt as
+`.ref = .{ .nullable = true, .heap_type = .{ .abstract = .func } }`
+etc. A helper constructor `ValType.absRef(.func, .nullable)`
+preserves call-site ergonomics during the migration.
+
+**D2 (revised) — Static nullability narrowing from day 1.**
+Validator narrows `(ref null ht)` → `(ref ht)` after
+`ref.as_non_null` / `br_on_null` (fallthrough). `br_on_non_null` cross-
+checks branch label's expected nullability. `ref.func $f` yields
+non-nullable `(ref ht)` per spec §3.3.10.10. This is what wasmtime /
+wasm-tools / WAMR all do at validation time; deferring it costs the
+~4 assert_invalid spec tests that test narrowing in `(local (ref $t))`
+contexts. With ValType already widened (D1), narrowing is a small
+addition to the existing validator type-stack tracking, not a
+disruptive refactor.
 
 **D3 — `call_ref` runtime sig-dispatch mirrors `call_indirect`.**
-`call_ref` pops a funcref; traps `NullReference` on null; then checks
-the callee's actual signature against the static type-index
-(`ZirInstr.payload`), trapping `IndirectCallTypeMismatch` on mismatch
-(reusing the existing indirect-call sig-check). No table indirection —
-the funcref is called directly.
+Unchanged from original draft. `call_ref` pops a funcref; traps
+`NullReference` on null; reuses the existing indirect-call sig-check
+shape. The typed-ref's concrete typeidx flows through `ZirInstr.payload`
+as before; runtime check exists because wasmtime / WAMR also keep it
+(`func_environ.rs:2155-2170` FIXME: "validator narrowing info not
+piped down" — even wasmtime hasn't elided the runtime null-check).
 
-**D4 — `return_call_ref` = `call_ref` + frame teardown.** Reuses the
-ADR-0112 tail-call frame_teardown path (already landed for
-`return_call` / `return_call_indirect`, HEAD `ae2abab7`) plus D3's
-null+sig checks. This discharges debt D-186's representation blocker
-(D-186 stays blocked on 10.R-3/4 landing, which this ADR unblocks).
+**D4 — `return_call_ref` = `call_ref` + frame teardown.** Unchanged.
+ADR-0112 tail-call frame_teardown + D3 null+sig checks. D-186
+discharge predicate unchanged.
 
-## Alternatives
+**D5 (new) — 10.G GC heap types extend RefType without rework.**
+The GC heap types (struct/array/i31/exn) already need representation
+when 10.G's ref.cast / ref.test / br_on_cast land. Under D1's tagged
+union, they're additional `HeapType.abstract` variants OR new
+`HeapType.concrete` shapes for `(ref $structtype)` / `(ref $arraytype)`.
+No second refactor needed — 10.R + 10.G + 10.E share the same
+`ValType.Ref` shape.
 
-- **A1 — Extend `ValType` to a tagged union carrying a heap-type
-  index** (`(ref null? $idx)`). Rejected for 10.R: `ValType` is a
-  pervasive `enum(u8)` consumed across parse/validate/lower/interp/emit
-  + the GC variants; widening it to carry an index is a Phase-wide
-  structural change that ADR-0116 already deferred to the GC typed-ref
-  module. Doing it now would couple 10.R to a 10.G-scope refactor.
-- **A2 — Full static nullability narrowing in 10.R** (express
-  `(ref T)` vs `(ref null T)` in the validator type lattice). Rejected:
-  same coupling as A1; the runtime trap semantics (D2/D3) already give
-  spec-correct *behavior*; the extra static strictness is a 10.G
-  concern. Spec assert_invalid cases needing narrowing stay as
-  validator-strictness debt (parallels D-188's EH validator strictness).
-- **A3 — call_ref via a synthetic single-entry table** (reuse
-  call_indirect machinery literally). Rejected: adds a fake table +
-  bounds check the spec doesn't mandate; D3's direct funcref call is
-  simpler and matches wasmtime/wasm-tools.
+## Alternatives (revised cycle 90)
 
-## Consequences
+- **Original D1 (no widen; side-band sig-index in payload)**.
+  Rejected on revision per cycle-90 survey: provably cannot represent
+  `(local (ref $t))` / `(param (ref $t))` etc.; would fail 15/103 spec
+  test files at parse, not just at narrowing. The original ADR draft
+  conflated "instruction-level typed-ref" (which CAN be side-banded
+  via ZirInstr.payload) with "container-level typed-ref in
+  FuncType/locals/globals/tables" (which CANNOT). The revised design
+  resolves the latter cleanly.
+- **WAMR-style side-band** (`uint8 types[]` + parallel
+  `ref_type_maps[i]` keyed by position). Rejected: works in C where
+  tagged unions are awkward; Zig's `union(enum)` is the natural fit.
+  The side-band would touch every type-bearing container (FuncType /
+  LocalTypes / GlobalType / TableType) AND every place that consumes
+  them, paying churn cost with no representation benefit.
+- **Wazero-style backward-compat u64 widening** (low byte = old
+  encoding kind; upper bits = nullability + index). Rejected: works in
+  Go where tagged unions are absent; Zig's `union(enum)` removes the
+  constraint. Backward-compat bit-encoding is unnecessary for v2's
+  from-scratch ValType.
+- **A3 — call_ref via synthetic single-entry table** (literally reuse
+  call_indirect machinery). Rejected as before: adds a fake table +
+  bounds check the spec doesn't mandate.
 
-- 10.R becomes implementable without a §4 `ValType` overhaul: the
-  remaining work is emit handlers (null-check ops) + `call_ref`
-  validate/interp/emit reusing indirect-call sig-dispatch.
-- `ref.as_non_null` / `br_on_null` / `br_on_non_null` JIT emit is
-  **representation-independent** (generic-ref null-check) → can proceed
-  immediately, even before this ADR's Accept flip.
-- A known, bounded gap: assert_invalid spec cases that require static
-  nullability narrowing will not pass until 10.G. Tracked as
-  validator-strictness debt (file a D-row when the gc/function-ref
-  corpus surfaces them), NOT as a runtime-correctness gap.
-- When 10.G lands the typed-ref module, the `ZirInstr.payload` sig-index
-  carried here remains valid; 10.G adds the static lattice on top
-  without reworking the runtime path.
+## Consequences (revised cycle 90)
+
+1. **Spec-conformant typed-ref from day 1**: every spec test in
+   function-references/* that uses `(local (ref $t))` /
+   `(param (ref $t))` etc. (15 of 103 files) becomes parseable. 36
+   currently-failing assert_return + 4 trap fixtures move from
+   "blocked at parse" to "tractable for impl".
+2. **One Phase-wide ValType refactor, not two**: 10.R does the
+   widening; 10.G's GC heap types reuse the `RefType` shape via
+   additional `HeapType` variants. Per cycle-90 design audit, this is
+   strictly cheaper than 10.R-side-band + 10.G-widening = 2 refactors.
+3. **Validator narrowing from day 1**: ~4 currently-deferred
+   assert_invalid spec tests pass. No "narrowing-strictness debt" row
+   needed.
+4. **Call-site migration cost (AI-implementation-scale)**: every site
+   that does `switch (vt) { .funcref => ... }` becomes
+   `switch (vt) { .ref => |r| switch (r.heap_type) { ... } }`. ~100
+   call sites (parse + validate + ir + interp + engine + runtime).
+   At AI implementation velocity (per user CLAUDE.md guidance),
+   estimated 5-10 bundle cycles.
+5. **Implementation order (bundle 10.R-valtype-widen)**:
+   - **Cycle 1**: Add `RefType` + `HeapType` + `AbstractHeapType` to
+     zir.zig alongside existing enum ValType. Add `ValType.absRef`
+     constructor helper. New types are unused.
+   - **Cycle 2**: Convert ValType from `enum(u8)` to `union(enum)`
+     with `.ref: RefType` variant. Migrate the 7 abstract-ref enum
+     tags to be expressed via `.ref = .{ .nullable=true, .heap_type=
+     .{ .abstract = .X } }`. This is the disruptive cycle — every
+     `switch (vt)` site touched. Compiler errors guide migration.
+   - **Cycle 3**: Add `0x63` / `0x64` parsing in
+     `src/parse/sections.zig::readValType`; concrete-typeidx
+     `RefType.heap_type = .{ .concrete = idx }` flows through.
+   - **Cycle 4**: Validator static narrowing — ref.as_non_null /
+     br_on_null / br_on_non_null narrow the type-stack entry's
+     `RefType.nullable` field. ref.func yields non-nullable.
+   - **Cycle 5**: call_ref / return_call_ref impl per D3 / D4.
+   - **Cycle 6-N**: spec corpus pass-rate increases.
+6. **No regressions on non-function-references corpora**: the cycle-2
+   ValType migration is a pure refactor; existing memory64 /
+   multi-memory / tail-call / EH paths see only structural changes,
+   not behaviour changes.
 
 ## References
 
@@ -121,4 +203,7 @@ null+sig checks. This discharges debt D-186's representation blocker
 
 ## Revision history
 
-- 2026-05-28 — Proposed (10.R cycle 48, Step-0 survey outcome).
+| Date | Commit | Notes |
+|------|--------|-------|
+| 2026-05-28 | `<backfill>` | Initial Proposed (10.R cycle 48, Step-0 survey outcome). D1: side-band sig-index; D2: defer narrowing to 10.G. |
+| 2026-05-28 | `<backfill>` | Accepted + revised under "完成形がきれい" lens (cycle 90). D1 pivots from side-band to full ValType widening (wasmtime-style tagged union); D2 reverses to "narrow from day 1"; D5 added (10.G GC heap-types extend cleanly). Industry survey (wasmtime / wasm-tools / WAMR / wazero) confirmed the original D1 was structurally a workaround that couldn't represent `(local (ref $t))` at all. Bundle `10.R-valtype-widen` opens with the cycle 1-5 sequence in Consequences §5. |

@@ -53,6 +53,64 @@ pub const ValType = enum(u8) {
     arrayref,
 };
 
+// ADR-0123 (Accepted 2026-05-28) Cycle 1 — typed-funcref
+// representation substrate. New types ride alongside the existing
+// `ValType` enum; Cycle 2 of the `10.R-valtype-widen` bundle
+// will pivot `ValType` to `union(enum)` and migrate the seven
+// abstract-ref tags to `.ref = ValType.absRef(...)` form. Until
+// that cycle lands, these types are referenced by the parser
+// (`readValType`) and validator type-stack but not yet by the
+// IR / interp / engine layers.
+
+/// Wasm 3.0 reference-types abstract heap-type tags. Spec
+/// §5.3.5 byte encodings (negative-prefix LEB128):
+/// `func` (0x70), `extern` (0x6F), `any` (0x6E), `eq` (0x6D),
+/// `i31` (0x6C), `struct` (0x6B), `array` (0x6A),
+/// `none` (0x71), `noextern` (0x72), `nofunc` (0x73),
+/// `exn` (0x69), `noexn` (0x74).
+pub const AbstractHeapType = enum(u8) {
+    func,
+    extern_,
+    any,
+    eq,
+    i31,
+    struct_,
+    array,
+    none,
+    noextern,
+    nofunc,
+    exn,
+    noexn,
+};
+
+/// Heap type: either an abstract head (`func` / `extern` / ...)
+/// or a concrete typed reference `(ref null? $typeidx)` carrying
+/// a type-section index. ADR-0123 D1+D5.
+pub const HeapType = union(enum) {
+    abstract: AbstractHeapType,
+    concrete: u32, // type section index
+};
+
+/// Reference type: nullability flag + heap type. ADR-0123 D1.
+/// Wasm 3.0 §5.3.4 binary encoding: `0x63` = `(ref null ht)`,
+/// `0x64` = `(ref ht)`, plus the legacy single-byte abstract
+/// encodings (0x70 funcref = `(ref null func)`, etc.).
+pub const RefType = struct {
+    nullable: bool,
+    heap_type: HeapType,
+
+    /// Convenience: abstract reference at the given nullability.
+    pub fn abs(ht: AbstractHeapType, nullable: bool) RefType {
+        return .{ .nullable = nullable, .heap_type = .{ .abstract = ht } };
+    }
+
+    /// Convenience: concrete typed reference at the given
+    /// nullability + type-section index.
+    pub fn conc(idx: u32, nullable: bool) RefType {
+        return .{ .nullable = nullable, .heap_type = .{ .concrete = idx } };
+    }
+};
+
 pub const FuncType = struct {
     params: []const ValType,
     results: []const ValType,
