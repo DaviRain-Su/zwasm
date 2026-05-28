@@ -801,12 +801,18 @@ pub const Lowerer = struct {
         try self.emit(op, offset, extra);
     }
 
-    /// memory.size / memory.grow: must be followed by reserved 0x00 byte.
+    /// memory.size / memory.grow: takes a single memidx byte (was
+    /// "reserved 0x00" in Wasm 1.0/2.0; the multi-memory proposal
+    /// in Wasm 3.0 turns it into a real memidx). The memidx is
+    /// LEB128-encoded per Wasm spec §5.4.6 and lands in
+    /// `ZirInstr.payload` so the interp handler can route through
+    /// `rt.memories[memidx]` (cycle 64's MemArgExtra plumbing did
+    /// the same for load/store via `instr.extra`; for memory.size /
+    /// memory.grow which take no other operands `payload` is
+    /// available and the wider 32-bit width is wasted but harmless).
     fn emitMemoryReserved(self: *Lowerer, op: ZirOp) Error!void {
-        if (self.pos >= self.body.len) return Error.UnexpectedEnd;
-        if (self.body[self.pos] != 0x00) return Error.BadBlockType;
-        self.pos += 1;
-        try self.emit(op, 0, 0);
+        const memidx = try leb128.readUleb128(u32, self.body, &self.pos);
+        try self.emit(op, memidx, 0);
     }
 
     /// call_indirect: type_idx + table_idx (Wasm 2.0). In Wasm 1.0

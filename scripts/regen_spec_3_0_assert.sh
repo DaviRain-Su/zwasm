@@ -65,6 +65,9 @@ declare -a SMOKE=(
     # depending on memory.size / memory.grow with memidx > 0 (still
     # rejected by `lower.zig::emitMemoryReserved` — separate cycle).
     "multi-memory/load0"
+    # 10.M cycle 66 — multi-memory memory.size via memidx > 0 lands
+    # (lower + validator + interp memidx routing).
+    "multi-memory/memory_size0"
 )
 
 bake_one() {

@@ -281,32 +281,59 @@ fn i64Store32(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
 
 // --- memory.size / memory.grow ---
 
-/// True when memory 0 is declared with `(memory i64 …)` (Wasm 3.0
-/// memory64). Falls back to i32 when no memory section is present
-/// (consistent with `frontendValidate` / `instantiateRuntime`).
-inline fn memory0IsI64(rt: *const Runtime) bool {
-    return rt.memories.len > 0 and rt.memories[0].idx_type == .i64;
+/// True when the memory at `memidx` is declared with `(memory i64 …)`
+/// (Wasm 3.0 memory64). Falls back to i32 when `rt.memories[memidx]`
+/// is not present (test scaffolds that bypass instantiate leave
+/// memories empty + rt.memory non-empty for memidx=0).
+inline fn memoryIsI64(rt: *const Runtime, memidx: usize) bool {
+    return memidx < rt.memories.len and rt.memories[memidx].idx_type == .i64;
 }
 
-fn memorySize(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
+fn memorySize(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
-    const pages: u64 = rt.memory.len / wasm_page_size;
+    // 10.M cycle 66 — memidx in instr.payload (was reserved 0x00
+    // pre-multi-memory). Route through rt.memories[memidx]; fall
+    // back to rt.memory for the legacy memidx=0 / pre-instantiate
+    // case so the existing in-source unit tests stay green.
+    const memidx: usize = @intCast(instr.payload);
+    const mem: []const u8 = if (memidx < rt.memories.len)
+        rt.memories[memidx].bytes
+    else if (memidx == 0)
+        rt.memory
+    else
+        return Trap.OutOfBoundsLoad;
+    const pages: u64 = mem.len / wasm_page_size;
     // Wasm spec §4.4.7 — result type matches the memory's idx_type.
-    if (memory0IsI64(rt)) {
+    if (memoryIsI64(rt, memidx)) {
         try rt.pushOperand(.{ .i64 = @bitCast(pages) });
     } else {
         try rt.pushOperand(.{ .u32 = @intCast(pages) });
     }
 }
 
-fn memoryGrow(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
+fn memoryGrow(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
-    const is_i64 = memory0IsI64(rt);
+    const memidx: usize = @intCast(instr.payload);
+    const is_i64 = memoryIsI64(rt, memidx);
     // Pop delta in the memory's idx-type-width: writer pushed i64
     // for memory64 modules; reading .u32 there would mask off the
     // high half and silently miscompute.
     const delta: u64 = if (is_i64) @bitCast(rt.popOperand().i64) else rt.popOperand().u32;
-    const old_pages: u64 = rt.memory.len / wasm_page_size;
+    // Pick the target memory's bytes + pages_max. memidx=0 with
+    // empty rt.memories uses rt.memory (legacy unit-test path).
+    const target_bytes: []u8 = if (memidx < rt.memories.len)
+        rt.memories[memidx].bytes
+    else if (memidx == 0)
+        rt.memory
+    else {
+        if (is_i64) try rt.pushOperand(.{ .i64 = -1 }) else try rt.pushOperand(.{ .i32 = -1 });
+        return;
+    };
+    const declared_pages_max: ?u64 = if (memidx < rt.memories.len)
+        rt.memories[memidx].pages_max
+    else
+        null;
+    const old_pages: u64 = target_bytes.len / wasm_page_size;
     // Wasm 1.0 max: 2^16 pages = 4 GiB. Wasm 3.0 memory64 max:
     // 2^48 pages = 16 EiB (per memory64 spec). The interp's realloc
     // path can't service 2^48 pages anyway — cap at host usize.
@@ -314,14 +341,10 @@ fn memoryGrow(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
     // this further when declared (Wasm spec §3.4.4); without it
     // the grow can succeed past the module's stated max.
     const spec_cap: u64 = if (is_i64) std.math.maxInt(u48) else std.math.maxInt(u16) + 1;
-    const declared_max: u64 = if (rt.memories.len > 0 and rt.memories[0].pages_max != null)
-        rt.memories[0].pages_max.?
-    else
-        spec_cap;
+    const declared_max: u64 = declared_pages_max orelse spec_cap;
     const page_cap: u64 = @min(spec_cap, declared_max);
     const new_pages_widened = @addWithOverflow(old_pages, delta);
     if (new_pages_widened[1] != 0 or new_pages_widened[0] > page_cap) {
-        // Fail returns -1 in the matching width.
         if (is_i64) try rt.pushOperand(.{ .i64 = -1 }) else try rt.pushOperand(.{ .i32 = -1 });
         return;
     }
@@ -332,12 +355,19 @@ fn memoryGrow(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
         return;
     }
     const new_bytes: usize = @intCast(new_bytes_widened[0]);
-    const new_mem = rt.alloc.realloc(rt.memory, new_bytes) catch {
+    const new_mem = rt.alloc.realloc(target_bytes, new_bytes) catch {
         if (is_i64) try rt.pushOperand(.{ .i64 = -1 }) else try rt.pushOperand(.{ .i32 = -1 });
         return;
     };
-    @memset(new_mem[rt.memory.len..], 0);
-    rt.setMemory0Bytes(new_mem);
+    @memset(new_mem[target_bytes.len..], 0);
+    // For memidx=0, preserve the rt.memory ↔ rt.memories[0].bytes
+    // alias via setMemory0Bytes. For memidx > 0, store the new
+    // slice directly on the per-memory MemoryInstance entry.
+    if (memidx == 0) {
+        rt.setMemory0Bytes(new_mem);
+    } else {
+        rt.memories[memidx].bytes = new_mem;
+    }
     if (is_i64) {
         try rt.pushOperand(.{ .i64 = @bitCast(old_pages) });
     } else {

@@ -951,6 +951,54 @@ test "memory64 instantiate: address64.0 succeeds (i64-offset active data segment
     defer instance.deinit();
 }
 
+test "10.M cycle 66: memory.size on memidx=1 returns page count (interp)" {
+    // 10.M-multi-memory cycle 66: memory.size / memory.grow now
+    // accept a non-zero memidx (was reserved 0x00 / rejected with
+    // BadBlockType in `lower.zig::emitMemoryReserved`). Build a
+    // 2-memory module with memory[0] = 1 page + memory[1] = 3 pages;
+    // call memory.size on memidx=1 and expect 3.
+    //
+    // Module (hand-crafted):
+    //   (module
+    //     (memory 1) (memory 3)
+    //     (func (export "size1") (result i32)
+    //       (memory.size (memory 1))))
+    //
+    // memory.size encoding (Wasm 3.0 §5.4.7): opcode 0x3F + memidx
+    // LEB128. Pre-cycle-66 lower rejected memidx != 0 with
+    // BadBlockType.
+    const wasm_bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        // type section: () -> (i32)
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f,
+        // function section: 1 func, type 0
+        0x03, 0x02, 0x01, 0x00,
+        // memory section: memory[0]=min1, memory[1]=min3
+        0x05, 0x05, 0x02, 0x00, 0x01, 0x00, 0x03,
+        // export section: "size1" func 0
+        0x07, 0x09, 0x01, 0x05, 's', 'i', 'z', 'e', '1', 0x00, 0x00,
+        // code section: 1 body, 4 bytes (locals=0, memory.size memidx=1, end)
+        0x0a, 0x06, 0x01, 0x04,
+        0x00,        // locals count
+        0x3f, 0x01,  // memory.size memidx=1
+        0x0b,        // end
+    };
+    const alloc = testing.allocator;
+
+    var engine = try zwasm_root.Engine.init(alloc, .{});
+    defer engine.deinit();
+    var module = try engine.compile(&wasm_bytes);
+    defer module.deinit();
+    var linker = zwasm_root.Linker.init(&engine);
+    defer linker.deinit();
+    var instance = try linker.instantiate(&module);
+    defer instance.deinit();
+
+    var results: [1]zwasm_root.Value = undefined;
+    try instance.invoke("size1", &.{}, results[0..1]);
+    try testing.expectEqual(@as(i32, 3), results[0].i32);
+}
+
 test "10.M cycle 64: i32.store + i32.load via memidx=1 round-trip 42 (interp)" {
     // 10.M-multi-memory bundle cycle 64: interp memory handlers now
     // route through `MemArgExtra.memidx` instead of the hard-pinned

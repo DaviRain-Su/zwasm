@@ -270,6 +270,19 @@ pub fn frontendValidate(alloc: std.mem.Allocator, binary: []const u8) bool {
         if (pos != body.len) return false;
     }
 
+    // 10.M cycle 66 — total memory count (imports + defined) so the
+    // validator can range-check memidx in memory.size / memory.grow /
+    // load / store ops against the actual memory space.
+    const imp_memory_count_validate: u32 = blk: {
+        var n: u32 = 0;
+        if (imports_decoded) |im| for (im.items) |it| {
+            if (it.kind == .memory) n += 1;
+        };
+        break :blk n;
+    };
+    const def_memory_count_validate: u32 = if (memories_owned) |m| @intCast(m.items.len) else 0;
+    const total_memory_count: u32 = imp_memory_count_validate + def_memory_count_validate;
+
     for (codes_owned.items, defined_func_indices) |code, type_idx| {
         const sig = types_owned.items[type_idx];
         validator.validateFunctionWithMemIdxAndTags(
@@ -282,6 +295,7 @@ pub fn frontendValidate(alloc: std.mem.Allocator, binary: []const u8) bool {
             0, // data_count
             table_entries,
             0, // elem_count
+            total_memory_count,
             memory0_idx_type,
             tags_slice,
             declared_funcs,

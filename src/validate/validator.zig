@@ -321,6 +321,7 @@ pub fn validateFunctionWithMemIdxAndTags(
     data_count: u32,
     tables: []const zir.TableEntry,
     elem_count: u32,
+    memory_count: u32,
     memory0_idx_type: sections.MemoryEntry.IdxType,
     tags: []const sections.TagEntry,
     /// 10.R cycle 60 (D-195 sub-gap c) — Wasm spec §3.4.10
@@ -342,6 +343,7 @@ pub fn validateFunctionWithMemIdxAndTags(
         .data_count = data_count,
         .tables = tables,
         .elem_count = elem_count,
+        .memory_count = memory_count,
         .memory0_idx_type = memory0_idx_type,
         .tags = tags,
         .declared_funcs = declared_funcs,
@@ -2298,21 +2300,21 @@ pub const Validator = struct {
 
     fn opMemorySize(self: *Validator) Error!void {
         if (self.memory_count == 0) return Error.UnknownMemory;
-        if (self.pos >= self.body.len) return Error.UnexpectedEnd;
-        if (self.body[self.pos] != 0x00) return Error.InvalidOpcode;
-        self.pos += 1;
-        // Wasm 3.0 memory64 — result is the memory's idx_type
-        // (i32 for default memory, i64 for memory64 per
-        // ADR-0111 D1).
+        // 10.M cycle 66 — Wasm 3.0 multi-memory: was `if (body[pos]
+        // != 0x00) reject` (single reserved byte). Now LEB-decode
+        // memidx + range-check against memory_count. Pushed type
+        // uses memAddrType() which is currently memory0's idx_type;
+        // mixed i32/i64 multi-memory modules need per-memory
+        // idx_type plumbing (separate cycle).
+        const memidx = try leb128.readUleb128(u32, self.body, &self.pos);
+        if (memidx >= self.memory_count) return Error.UnknownMemory;
         try self.pushType(self.memAddrType());
     }
 
     fn opMemoryGrow(self: *Validator) Error!void {
         if (self.memory_count == 0) return Error.UnknownMemory;
-        if (self.pos >= self.body.len) return Error.UnexpectedEnd;
-        if (self.body[self.pos] != 0x00) return Error.InvalidOpcode;
-        self.pos += 1;
-        // Wasm 3.0 memory64 — delta + result use memory's idx_type.
+        const memidx = try leb128.readUleb128(u32, self.body, &self.pos);
+        if (memidx >= self.memory_count) return Error.UnknownMemory;
         try self.popExpect(self.memAddrType());
         try self.pushType(self.memAddrType());
     }
