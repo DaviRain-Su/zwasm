@@ -1820,7 +1820,13 @@ pub const Validator = struct {
         const top = try self.popAny();
         switch (top) {
             .bot => {
-                try self.pushType(.funcref);
+                // Unreachable/polymorphic stack: the result type is
+                // unknown, so stay polymorphic (.bot) rather than
+                // collapsing to a concrete funcref — else a typed
+                // downstream consumer (e.g. `call` expecting `(ref $t)`)
+                // mismatches the abstract funcref (ref_as_non_null.0
+                // func 6: `unreachable; ref.as_non_null; call 0`).
+                try self.pushBot();
             },
             .known => |t| {
                 if (!t.isRef()) return Error.StackTypeMismatch;
@@ -1895,6 +1901,11 @@ pub const Validator = struct {
     fn opBrOnNonNull(self: *Validator) Error!void {
         const depth = try leb128.readUleb128(u32, self.body, &self.pos);
         const top = try self.popAny();
+        // Unreachable/polymorphic stack: the popped ref type is unknown
+        // and unifies with whatever ref the label expects, so the ref↔
+        // label subtype checks below are skipped (br_on_non_null.0 func
+        // 6: `block (result (ref 0)); unreachable; br_on_non_null 0`).
+        const is_bot = (top == .bot);
         const reftype: ValType = switch (top) {
             .bot => .funcref, // polymorphic; pick any reftype
             .known => |t| blk: {
@@ -1915,14 +1926,14 @@ pub const Validator = struct {
         switch (lt) {
             .empty => return Error.StackTypeMismatch,
             .single => |t| {
-                if (!valTypeIsSubtypeFree(narrowed_ref, t)) {
+                if (!is_bot and !valTypeIsSubtypeFree(narrowed_ref, t)) {
                     return Error.StackTypeMismatch;
                 }
                 // Prefix is empty; no further pop/push.
             },
             .multi => |ts| {
                 if (ts.len == 0) return Error.StackTypeMismatch;
-                if (!valTypeIsSubtypeFree(narrowed_ref, ts[ts.len - 1])) return Error.StackTypeMismatch;
+                if (!is_bot and !valTypeIsSubtypeFree(narrowed_ref, ts[ts.len - 1])) return Error.StackTypeMismatch;
                 const prefix = ts[0 .. ts.len - 1];
                 var i: usize = prefix.len;
                 while (i > 0) {

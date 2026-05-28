@@ -482,6 +482,68 @@ test "validate: typed (ref N) from ref.func is a subtype of funcref (global.set)
     );
 }
 
+test "validate: ref.as_non_null in unreachable code stays polymorphic (satisfies typed-ref call)" {
+    // ref_as_non_null.0 func 6: `unreachable; ref.as_non_null; call 0`
+    // where call 0's param is (ref 0). After `unreachable` the stack is
+    // polymorphic; ref.as_non_null must push .bot (not a concrete
+    // funcref), else funcref mismatches the (ref 0) param.
+    //   func 0 : type 0 = ((ref 0)) -> i32  (call target)
+    const ref0: ValType = .{ .ref = .{ .nullable = false, .heap_type = .{ .concrete = 0 } } };
+    const t0_params = [_]ValType{ref0};
+    const t0: FuncType = .{ .params = &t0_params, .results = &i32_arr };
+    const mod_types = [_]FuncType{t0};
+    // unreachable (0x00) ; ref.as_non_null (0xD4) ; call 0 (0x10 0x00) ; end
+    const body = [_]u8{ 0x00, 0xD4, 0x10, 0x00, 0x0B };
+    try validator.validateFunctionWithMemIdxAndTags(
+        i32_result_sig,
+        &.{},
+        &body,
+        &mod_types,
+        &.{},
+        &mod_types,
+        0,
+        &.{},
+        0,
+        1,
+        .i32,
+        &.{},
+        &.{},
+        &.{},
+    );
+}
+
+test "validate: br_on_non_null to a concrete (ref N) label in unreachable code" {
+    // br_on_non_null.0 func 6: `block (result (ref 0)); unreachable;
+    // br_on_non_null 0; ...`. After `unreachable` the popped ref is
+    // polymorphic and must unify with the label's concrete (ref 0)
+    // type — the ref↔label subtype check is skipped, not failed.
+    const mod_types = [_]FuncType{.{ .params = &.{}, .results = &.{} }};
+    //   0x02 0x64 0x00  block (result (ref 0))
+    //   0x00            unreachable
+    //   0xD6 0x00       br_on_non_null 0
+    //   0x00            unreachable (fill block result polymorphically)
+    //   0x0B            end block (leaves (ref 0))
+    //   0x1A            drop
+    //   0x0B            end function
+    const body = [_]u8{ 0x02, 0x64, 0x00, 0x00, 0xD6, 0x00, 0x00, 0x0B, 0x1A, 0x0B };
+    try validator.validateFunctionWithMemIdxAndTags(
+        empty_sig,
+        &.{},
+        &body,
+        &mod_types,
+        &.{},
+        &mod_types,
+        0,
+        &.{},
+        0,
+        1,
+        .i32,
+        &.{},
+        &.{},
+        &.{},
+    );
+}
+
 test "validate: typed (ref N) from ref.func is NOT a subtype of externref" {
     // The subtype rule is narrow: (ref $sig) <: func head only, never
     // externref. Storing a typed funcref into an externref global must
