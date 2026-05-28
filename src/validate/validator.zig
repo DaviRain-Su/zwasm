@@ -651,29 +651,8 @@ pub const Validator = struct {
         }
     }
 
-    /// Returns true iff `actual` is assignment-compatible with `expected`
-    /// per the Wasm 3.0 subtype rules subset implemented for 10.R:
-    /// - Identical types match.
-    /// - Non-null ref is a subtype of nullable ref of the same heap_type.
-    /// - Full heap-type subtype lattice (any > eq > struct/array/i31; etc.)
-    ///   deferred to 10.G.
-    fn valTypeIsSubtype(actual: ValType, expected: ValType) bool {
-        if (actual.eql(expected)) return true;
-        // Only ref-shaped sub-typing supported here.
-        if (actual != .ref or expected != .ref) return false;
-        // Nullability subtype: (ref ht) <: (ref null ht).
-        // Heap type must be identical (lattice subtyping = 10.G).
-        if (actual.ref.nullable and !expected.ref.nullable) return false;
-        // actual nullable=false, expected nullable=true is the
-        // permitted relaxation; actual nullable=true, expected
-        // nullable=true falls through to the eql-true path above.
-        const ah = actual.ref.heap_type;
-        const eh = expected.ref.heap_type;
-        if (@as(@typeInfo(@TypeOf(ah)).@"union".tag_type.?, ah) != @as(@typeInfo(@TypeOf(eh)).@"union".tag_type.?, eh)) return false;
-        return switch (ah) {
-            .abstract => |a| a == eh.abstract,
-            .concrete => |a| a == eh.concrete,
-        };
+    pub fn valTypeIsSubtype(actual: ValType, expected: ValType) bool {
+        return valTypeIsSubtypeFree(actual, expected);
     }
 
     fn popAny(self: *Validator) Error!TypeOrBot {
@@ -2446,6 +2425,10 @@ pub const Validator = struct {
         // first present slot (operand_buf[frame.height]) maps to
         // expected[N - have].
         const offset = expected_len - have;
+        // ADR-0123 Cycle 3 (10.R-funcrefs-tail) — subtype-aware
+        // result-type check per Wasm 3.0 §3.3.4: a `(ref ht)`
+        // pushed onto a block whose declared end-type is
+        // `(ref null ht)` is valid.
         switch (end) {
             .empty => {},
             .single => |t| {
@@ -2453,7 +2436,7 @@ pub const Validator = struct {
                     const top = self.operand_buf[frame.height];
                     switch (top) {
                         .bot => {},
-                        .known => |k| if (!k.eql(t)) return Error.StackTypeMismatch,
+                        .known => |k| if (!valTypeIsSubtypeFree(k, t)) return Error.StackTypeMismatch,
                     }
                 }
             },
@@ -2464,13 +2447,32 @@ pub const Validator = struct {
                     const expected_t = ts[offset + i];
                     switch (slot) {
                         .bot => {},
-                        .known => |k| if (!k.eql(expected_t)) return Error.StackTypeMismatch,
+                        .known => |k| if (!valTypeIsSubtypeFree(k, expected_t)) return Error.StackTypeMismatch,
                     }
                 }
             },
         }
     }
 };
+
+/// Returns true iff `actual` is assignment-compatible with `expected`
+/// per the Wasm 3.0 subtype rules subset implemented for 10.R:
+/// - Identical types match.
+/// - Non-null ref is a subtype of nullable ref of the same heap_type.
+/// - Full heap-type subtype lattice (any > eq > struct/array/i31; etc.)
+///   deferred to 10.G.
+fn valTypeIsSubtypeFree(actual: ValType, expected: ValType) bool {
+    if (actual.eql(expected)) return true;
+    if (actual != .ref or expected != .ref) return false;
+    if (actual.ref.nullable and !expected.ref.nullable) return false;
+    const ah = actual.ref.heap_type;
+    const eh = expected.ref.heap_type;
+    if (@as(@typeInfo(@TypeOf(ah)).@"union".tag_type.?, ah) != @as(@typeInfo(@TypeOf(eh)).@"union".tag_type.?, eh)) return false;
+    return switch (ah) {
+        .abstract => |a| a == eh.abstract,
+        .concrete => |a| a == eh.concrete,
+    };
+}
 
 fn labelTypesEq(a: BlockType, b: BlockType) bool {
     return switch (a) {
