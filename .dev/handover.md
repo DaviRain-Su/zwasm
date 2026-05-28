@@ -6,13 +6,14 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 93 (`3593e568`) — **ADR-0123 Cycle 4 landed**:
-  validator narrows `RefType.nullable=true → false` on
-  ref.as_non_null + br_on_null fall-through. Carve-outs for
-  Cycle 5: opBrOnNonNull subtype label-match + opRefFunc
-  non-null push (both need subtype-aware popExpect helper).
-- Cycles 91/92 before: ValType pivot to union(enum); parser
-  0x63/0x64 typed-funcref bytes + module-load typeidx bounds.
+- **HEAD**: cycle 94 (`2f127b96`) — **ADR-0123 Cycle 5 partial-
+  close**: opRefNull extended (12 abstract heads + concrete LEB
+  idx), lower.zig 0xD0 handles typed-null, br_on_null opcode fix
+  (0xD4 → spec-correct 0xD5). 3 function-references modules
+  newly parse (fail 36 → 33). Bundle structural pivot done.
+- Cycles 91-93 before: ValType pivot to union(enum); parser
+  0x63/0x64 typed-funcref bytes; validator narrowing on
+  ref.as_non_null + br_on_null fall-through.
 - Cycle 90 (`6e5e7e53` + `510eca36` + `d6b187f8`) before that:
   D-179 baker swap; ADR-0120 Accept + Cycle 1 impl; ADR-0123 Accept
   + Cycle 1 substrate.
@@ -20,40 +21,44 @@
 
 ## Active bundle
 
-- **Bundle-ID**: 10.R-valtype-widen
-- **Cycles-remaining**: ~1 (Cycle 4 closed at `3593e568`)
-- **Continuity-memo**: ref.as_non_null + br_on_null fall-through
-  narrowing done. Cycle 5 (final): call_ref / return_call_ref
-  runtime impl per ADR-0123 D3 / D4 + subtype-aware popExpect
-  helper that unblocks opRefFunc non-null push + opBrOnNonNull
-  label-type subtype match. Bundle exit-condition: spec corpus
-  function-references return ≥ 30/39 from currently 0/39.
+- **Bundle-ID**: 10.R-funcrefs-tail (follow-up to closed
+  10.R-valtype-widen; opens at cycle 94 with the structural
+  pivot already done).
+- **Cycles-remaining**: ~3-5
+- **Continuity-memo**: Bundle 10.R-valtype-widen partial-closed
+  at `2f127b96`: ValType union(enum); parser typed-funcref bytes;
+  validator narrowing on ref.as_non_null + br_on_null; opRefNull
+  + lower 0xD0 extended; br_on_null opcode fixed (0xD4→0xD5).
+  Gap inventory: 10 function-references modules still ParseFailed
+  (br_on_null.0/2, br_on_non_null.0/1/2, ref_as_non_null.0/2,
+  ref_is_null.0). Probable causes: more opcode-byte mismatches
+  in lower/validator dispatch OR validator type-stack
+  interactions. Plus subtype-aware popExpect carve-out from
+  cycle 93 (needed for opRefFunc non-null + opBrOnNonNull
+  label match).
+- **Exit-condition**: function-references return ≥ 30/39 pass
+  (currently 0/39 — modules parse but exec path also incomplete).
 - **Exit-condition**: function-references spec corpus assert_return
   pass-rate ≥ 30/39 (currently 3/39); call_ref + return_call_ref
   green-baked + validated; 0 ParseFailed for any
   function-references module.
 
-## Active task — cycle 94: call_ref + return_call_ref impl (Cycle 5, bundle close)
+## Active task — cycle 95: probe + diagnose 10 ParseFailed modules
 
-Smallest red test:
-`test "call_ref: pop funcref + sig check trap → IndirectCallTypeMismatch"`
-in `src/instruction/wasm_3_0/call_ref.zig`. Migrate call_ref +
-return_call_ref from `NotMigrated` stub to full validate /
-interp / emit per ADR-0123 D3 (reuse call_indirect substrate +
-runtime null-trap + sig check via ZirInstr.payload typeidx).
+Smallest red test: trace one ParseFailed module (e.g.
+`function-references/br_on_null/br_on_null.0.wasm`) through
+compileWasm with a debug print at the failure site to identify
+which lower/validator dispatch arm rejects. Likely candidates:
+- `ref.func` (0xD2) emit `RefType.abs(.func, true)` rather
+  than non-null per spec §3.3.10.10 — Cycle 5 carve-out.
+- `table.set` / `table.get` typed-table interaction.
+- `local.tee` / `local.set` against narrowed RefType (popExpect
+  strict-eql blocks `(ref ht)` ↔ `(ref null ht)` subtyping).
 
-Also lands in this cycle:
-- Subtype-aware `popExpect` helper that accepts non-null where
-  nullable is expected (per spec §3.3.4 subtype rules).
-- `opRefFunc` push: switch from `.funcref` (nullable) to
-  non-null abstract func ref `RefType.abs(.func, false)` (or
-  concrete `RefType.conc(typeidx, false)` if typeidx-plumbing
-  through to validator is feasible same-cycle).
-- `opBrOnNonNull` label-type subtype match (relaxed eql).
-
-Bundle close requires: function-references corpus assert_return
-≥ 30/39 pass (currently 0/39). At close, D-186 retires + ADR-0123
-moves from "Accepted" to "Closed (implemented)".
+Smaller follow-ups after primary diagnosis:
+- Subtype-aware popExpect helper (cycle-93 carve-out).
+- opRefFunc non-null push.
+- opBrOnNonNull label-type subtype match.
 
 ## Larger §10 work (post-bundle)
 
