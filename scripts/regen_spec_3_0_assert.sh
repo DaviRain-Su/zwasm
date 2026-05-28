@@ -68,6 +68,12 @@ declare -a SMOKE=(
     # 10.M cycle 66 — multi-memory memory.size via memidx > 0 lands
     # (lower + validator + interp memidx routing).
     "multi-memory/memory_size0"
+    # 10.M cycle 67 — bulk-op memidx > 0 (memory.copy / memory.fill /
+    # memory.init). data0 exercises active-data memidx > 0;
+    # memory_copy0 exercises explicit memory.copy memidx routing
+    # (cross-memory copies between memidx 0 and 1).
+    "multi-memory/data0"
+    "multi-memory/memory_copy0"
 )
 
 bake_one() {

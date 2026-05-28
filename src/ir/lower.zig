@@ -701,12 +701,13 @@ pub const Lowerer = struct {
             6 => try self.emit(.@"i64.trunc_sat_f64_s", 0, 0),
             7 => try self.emit(.@"i64.trunc_sat_f64_u", 0, 0),
             8 => {
-                // memory.init: dataidx + reserved 0x00 byte.
+                // memory.init: dataidx + memidx (was reserved 0x00).
+                // 10.M cycle 67 — memidx LEB-decoded into `extra`
+                // (dataidx stays in `payload`). Multi-memory routes
+                // the destination memory via the new extra field.
                 const dataidx = try leb128.readUleb128(u32, self.body, &self.pos);
-                if (self.pos >= self.body.len) return Error.UnexpectedEnd;
-                if (self.body[self.pos] != 0x00) return Error.BadBlockType;
-                self.pos += 1;
-                try self.emit(.@"memory.init", dataidx, 0);
+                const dst_memidx = try leb128.readUleb128(u32, self.body, &self.pos);
+                try self.emit(.@"memory.init", dataidx, dst_memidx);
             },
             9 => {
                 // data.drop: dataidx.
@@ -743,20 +744,18 @@ pub const Lowerer = struct {
                 try self.emit(.@"table.fill", idx, 0);
             },
             10 => {
-                // memory.copy: two reserved 0x00 bytes (src/dst memidx).
-                if (self.pos + 2 > self.body.len) return Error.UnexpectedEnd;
-                if (self.body[self.pos] != 0x00 or self.body[self.pos + 1] != 0x00) {
-                    return Error.BadBlockType;
-                }
-                self.pos += 2;
-                try self.emit(.@"memory.copy", 0, 0);
+                // memory.copy: dst-memidx + src-memidx (was two
+                // reserved 0x00 bytes). 10.M cycle 67 — packed as
+                // payload=dst_memidx, extra=src_memidx.
+                const dst_memidx = try leb128.readUleb128(u32, self.body, &self.pos);
+                const src_memidx = try leb128.readUleb128(u32, self.body, &self.pos);
+                try self.emit(.@"memory.copy", dst_memidx, src_memidx);
             },
             11 => {
-                // memory.fill: one reserved 0x00 byte (memidx).
-                if (self.pos >= self.body.len) return Error.UnexpectedEnd;
-                if (self.body[self.pos] != 0x00) return Error.BadBlockType;
-                self.pos += 1;
-                try self.emit(.@"memory.fill", 0, 0);
+                // memory.fill: memidx (was reserved 0x00). 10.M cycle
+                // 67 — packed as payload=memidx.
+                const memidx = try leb128.readUleb128(u32, self.body, &self.pos);
+                try self.emit(.@"memory.fill", memidx, 0);
             },
             else => return Error.NotImplemented,
         }

@@ -40,43 +40,58 @@ pub fn register(table: *DispatchTable) void {
     table.interp[op(.@"data.drop")] = dataDrop;
 }
 
-fn memoryCopy(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
+/// 10.M cycle 67 — resolve the target memory slice by memidx,
+/// falling back to `rt.memory` when `rt.memories` is empty
+/// (test scaffolds that bypass instantiate). Mirrors the
+/// `memorySlice` helper in `wasm_1_0/memory.zig`.
+inline fn memSliceByIdx(rt: *Runtime, memidx: u64) []u8 {
+    if (rt.memories.len == 0 and memidx == 0) return rt.memory;
+    const i: usize = @intCast(memidx);
+    if (i >= rt.memories.len) return &[_]u8{};
+    return rt.memories[i].bytes;
+}
+
+fn memoryCopy(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
+    // 10.M cycle 67 — payload = dst_memidx, extra = src_memidx.
+    const dst_mem = memSliceByIdx(rt, instr.payload);
+    const src_mem = memSliceByIdx(rt, instr.extra);
     const n_i = rt.popOperand().i32;
     const src_i = rt.popOperand().i32;
     const dst_i = rt.popOperand().i32;
     const n: u64 = @as(u32, @bitCast(n_i));
     const src: u64 = @as(u32, @bitCast(src_i));
     const dst: u64 = @as(u32, @bitCast(dst_i));
-    const mem_len: u64 = rt.memory.len;
-    if (src + n > mem_len or dst + n > mem_len) return Trap.OutOfBoundsStore;
+    if (src + n > src_mem.len or dst + n > dst_mem.len) return Trap.OutOfBoundsStore;
     if (n == 0) return;
     const src_lo: usize = @intCast(src);
     const dst_lo: usize = @intCast(dst);
     const n_lo: usize = @intCast(n);
     // memmove semantics: if regions overlap with dst > src, copy
-    // backwards; otherwise forwards.
-    if (dst_lo > src_lo and dst_lo < src_lo + n_lo) {
-        std.mem.copyBackwards(u8, rt.memory[dst_lo .. dst_lo + n_lo], rt.memory[src_lo .. src_lo + n_lo]);
+    // backwards; otherwise forwards. The src vs dst overlap test
+    // is only valid when both refer to the SAME memory; cross-
+    // memidx copies never alias, so forward copy is always safe.
+    if (instr.payload == instr.extra and dst_lo > src_lo and dst_lo < src_lo + n_lo) {
+        std.mem.copyBackwards(u8, dst_mem[dst_lo .. dst_lo + n_lo], src_mem[src_lo .. src_lo + n_lo]);
     } else {
-        std.mem.copyForwards(u8, rt.memory[dst_lo .. dst_lo + n_lo], rt.memory[src_lo .. src_lo + n_lo]);
+        std.mem.copyForwards(u8, dst_mem[dst_lo .. dst_lo + n_lo], src_mem[src_lo .. src_lo + n_lo]);
     }
 }
 
-fn memoryFill(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
+fn memoryFill(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
+    const mem = memSliceByIdx(rt, instr.payload);
     const n_i = rt.popOperand().i32;
     const val_i = rt.popOperand().i32;
     const dst_i = rt.popOperand().i32;
     const n: u64 = @as(u32, @bitCast(n_i));
     const dst: u64 = @as(u32, @bitCast(dst_i));
-    const mem_len: u64 = rt.memory.len;
-    if (dst + n > mem_len) return Trap.OutOfBoundsStore;
+    if (dst + n > mem.len) return Trap.OutOfBoundsStore;
     if (n == 0) return;
     const dst_lo: usize = @intCast(dst);
     const n_lo: usize = @intCast(n);
     const byte: u8 = @truncate(@as(u32, @bitCast(val_i)));
-    @memset(rt.memory[dst_lo .. dst_lo + n_lo], byte);
+    @memset(mem[dst_lo .. dst_lo + n_lo], byte);
 }
 
 /// memory.init x: pop n, src, dst. Copy n bytes from data segment
@@ -86,10 +101,12 @@ fn memoryFill(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
 /// length as 0 (any n>0 → trap).
 fn memoryInit(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
+    // 10.M cycle 67 — payload = dataidx, extra = dst_memidx.
     const dataidx = instr.payload;
     if (dataidx >= rt.datas.len) return Trap.Unreachable;
     const dropped = if (dataidx < rt.data_dropped.len) rt.data_dropped[dataidx] else false;
-    const seg_len: u64 = if (dropped) 0 else rt.datas[dataidx].len;
+    const seg_len: u64 = if (dropped) 0 else rt.datas[@intCast(dataidx)].len;
+    const dst_mem = memSliceByIdx(rt, instr.extra);
 
     const n_i = rt.popOperand().i32;
     const src_i = rt.popOperand().i32;
@@ -97,12 +114,12 @@ fn memoryInit(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const n: u64 = @as(u32, @bitCast(n_i));
     const src: u64 = @as(u32, @bitCast(src_i));
     const dst: u64 = @as(u32, @bitCast(dst_i));
-    if (src + n > seg_len or dst + n > rt.memory.len) return Trap.OutOfBoundsStore;
+    if (src + n > seg_len or dst + n > dst_mem.len) return Trap.OutOfBoundsStore;
     if (n == 0) return;
     const src_lo: usize = @intCast(src);
     const dst_lo: usize = @intCast(dst);
     const n_lo: usize = @intCast(n);
-    @memcpy(rt.memory[dst_lo .. dst_lo + n_lo], rt.datas[dataidx][src_lo .. src_lo + n_lo]);
+    @memcpy(dst_mem[dst_lo .. dst_lo + n_lo], rt.datas[@intCast(dataidx)][src_lo .. src_lo + n_lo]);
 }
 
 /// data.drop x: mark data segment x as dropped. Subsequent

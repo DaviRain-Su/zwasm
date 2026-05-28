@@ -323,13 +323,18 @@ test "validate: memory.fill (0xFC 11) — pops three i32" {
     try validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
 }
 
-test "validate: memory.copy with non-zero reserved byte → BadBlockType" {
+test "validate: memory.copy memidx out of range → UnknownMemory (10.M cycle 67)" {
+    // Pre-cycle-67: non-zero reserved byte rejected with BadBlockType
+    // (single-memory enforcement). Post-cycle-67: memidx is a real
+    // LEB and rejects with UnknownMemory when out-of-range. The
+    // test bakes `memory.copy dst=1 src=0` against a single-memory
+    // module — dst=1 is out of range.
     const body = [_]u8{
         0x41, 0x00, 0x41, 0x00, 0x41, 0x00,
         0xFC, 0x0A, 0x01, 0x00, 0x0B,
     };
     const r = validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
-    try testing.expectError(Error.BadBlockType, r);
+    try testing.expectError(Error.UnknownMemory, r);
 }
 
 test "validate: memory.init (0xFC 8) with valid dataidx" {

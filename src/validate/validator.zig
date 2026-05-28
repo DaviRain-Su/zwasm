@@ -1646,11 +1646,14 @@ pub const Validator = struct {
     /// memory's idx_type per spec; single-memory case uses memory 0).
     fn opMemoryCopy(self: *Validator) Error!void {
         if (self.memory_count == 0) return Error.UnknownMemory;
-        if (self.pos + 2 > self.body.len) return Error.UnexpectedEnd;
-        if (self.body[self.pos] != 0x00 or self.body[self.pos + 1] != 0x00) {
-            return Error.BadBlockType; // reserved bytes must be zero
+        // 10.M cycle 67 — relax multi-memory: dst + src memidx are
+        // now real LEBs (were reserved 0x00). Range-check both
+        // against memory_count.
+        const dst_memidx = try leb128.readUleb128(u32, self.body, &self.pos);
+        const src_memidx = try leb128.readUleb128(u32, self.body, &self.pos);
+        if (dst_memidx >= self.memory_count or src_memidx >= self.memory_count) {
+            return Error.UnknownMemory;
         }
-        self.pos += 2;
         const addr = self.memAddrType();
         try self.popExpect(addr); // n
         try self.popExpect(addr); // src
@@ -1667,9 +1670,10 @@ pub const Validator = struct {
         if (!self.data_count_section_present) return Error.UnknownMemory;
         const dataidx = try leb128.readUleb128(u32, self.body, &self.pos);
         if (dataidx >= self.data_count) return Error.InvalidFuncIndex;
-        if (self.pos >= self.body.len) return Error.UnexpectedEnd;
-        if (self.body[self.pos] != 0x00) return Error.BadBlockType;
-        self.pos += 1;
+        // 10.M cycle 67 — relax multi-memory dst memidx LEB
+        // (was reserved 0x00). Range-check against memory_count.
+        const dst_memidx = try leb128.readUleb128(u32, self.body, &self.pos);
+        if (dst_memidx >= self.memory_count) return Error.UnknownMemory;
         try self.popExpect(.i32); // n (data-segment byte count)
         try self.popExpect(.i32); // src (data-segment offset)
         try self.popExpect(self.memAddrType()); // dst (memory addr)
@@ -2050,9 +2054,10 @@ pub const Validator = struct {
     /// idx_type (i64 for memory64); val is always i32.
     fn opMemoryFill(self: *Validator) Error!void {
         if (self.memory_count == 0) return Error.UnknownMemory;
-        if (self.pos >= self.body.len) return Error.UnexpectedEnd;
-        if (self.body[self.pos] != 0x00) return Error.BadBlockType;
-        self.pos += 1;
+        // 10.M cycle 67 — relax multi-memory memidx LEB (was
+        // reserved 0x00). Range-check against memory_count.
+        const memidx = try leb128.readUleb128(u32, self.body, &self.pos);
+        if (memidx >= self.memory_count) return Error.UnknownMemory;
         const addr = self.memAddrType();
         try self.popExpect(addr); // n
         try self.popExpect(.i32); // val

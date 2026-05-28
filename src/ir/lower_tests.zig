@@ -549,12 +549,22 @@ test "lower: data.drop (0xFC 9) emits ZirOp.data.drop with dataidx payload" {
     try testing.expectEqual(@as(u32, 7), drop.payload);
 }
 
-test "lower: memory.copy with non-zero reserved byte → BadBlockType" {
+test "lower: memory.copy with non-zero memidx packs dst/src into payload/extra (10.M cycle 67)" {
+    // Pre-cycle-67: lower rejected non-zero memidx with BadBlockType
+    // (reserved-byte semantics). Post-cycle-67: the bytes are LEB-
+    // decoded as dst_memidx + src_memidx and packed into the
+    // emitted ZirInstr's payload / extra fields (Wasm 3.0 multi-
+    // memory proposal). The body below is `memory.copy dst=0 src=1`.
     var f = newFunc(empty_sig);
     defer f.deinit(testing.allocator);
     const body = [_]u8{ 0xFC, 0x0A, 0x00, 0x01, 0x0B };
-    const r = lowerFunctionBody(testing.allocator, &body, &f, &.{}, &.{});
-    try testing.expectError(Error.BadBlockType, r);
+    try lowerFunctionBody(testing.allocator, &body, &f, &.{}, &.{});
+    // The single emitted instr is `memory.copy` with payload=0, extra=1.
+    try testing.expect(f.instrs.items.len >= 1);
+    const mc = f.instrs.items[0];
+    try testing.expectEqual(ZirOp.@"memory.copy", mc.op);
+    try testing.expectEqual(@as(u64, 0), mc.payload);
+    try testing.expectEqual(@as(u32, 1), mc.extra);
 }
 
 test "lower: 0xFC unknown sub-opcode → NotImplemented" {
