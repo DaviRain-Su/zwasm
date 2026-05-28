@@ -436,11 +436,19 @@ pub fn main(init: std.process.Init) !void {
     try stdout.flush();
 }
 
-test "wasm-3.0-assert: PROPOSALS list matches design plan §3.1-§3.5 + §4.6" {
-    try std.testing.expectEqual(@as(usize, 5), PROPOSALS.len);
+test "wasm-3.0-assert: PROPOSALS list matches design plan §3.1-§3.5 + §4.6 + 10.M extension" {
+    // 10.M cycle 65 (`1e88350f`) added "multi-memory" as the 6th
+    // entry; the upstream proposal lives at memory64/test/core/
+    // multi-memory/ (jointly tracked with memory64). ROADMAP §10
+    // row 10.M explicitly names multi-memory in scope, so this is
+    // a 10.M extension of the original 5-proposal design plan, not
+    // a §4/§9 scope deviation needing an ADR (per §18 routine
+    // additions to the test-infrastructure layer).
+    try std.testing.expectEqual(@as(usize, 6), PROPOSALS.len);
     try std.testing.expectEqualStrings("memory64", PROPOSALS[0]);
     try std.testing.expectEqualStrings("tail-call", PROPOSALS[1]);
     try std.testing.expectEqualStrings("exception-handling", PROPOSALS[2]);
     try std.testing.expectEqualStrings("gc", PROPOSALS[3]);
     try std.testing.expectEqualStrings("function-references", PROPOSALS[4]);
+    try std.testing.expectEqualStrings("multi-memory", PROPOSALS[5]);
 }
