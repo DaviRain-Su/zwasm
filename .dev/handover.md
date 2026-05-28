@@ -20,42 +20,40 @@
 
 ## Active bundle
 
-- **Bundle-ID**: 10.X-D192-register (cross-module `register` directive;
-  shared by func-refs ref_func.1 + EH try_table)
-- **Cycles-remaining**: ~3
-- **Continuity-memo**: D-192 funcrefs clause DONE (register M cyc107 +
-  ref.func global-init cyc108 → return 24→32). Remaining work:
-  1. **EH try_table.1 register** (the other D-192 clause) — try_table.1
-     imports `test::e0` tag + `test::throw` func from try_table.0. Check
-     if the EH manifest has a stale `skip-impl directive-register` (like
-     ref_func did) + whether the runner binds cross-module TAG exports
-     (defineCrossModuleFunc covers funcs; tags may need a new binding).
-  2. **Engine-path ref.func-global gap** (cli_run, NOT spec corpus):
-     `resolveFuncrefGlobals` (compile_init.zig) is defined but NEVER
-     called → cli_run funcref globals with ref.func init read null; AND
-     validateGlobalInitExpr (runner_validate.zig:113) produces abstract
-     funcref for ref.func (cycle-102-class), mismatching a typed
-     `(ref $t)` global. Real cli_run bug; separate subsystem from the
-     c_api fix (which the spec corpus guards).
-  3. **externref-elem** (1 fail) — runner can't parse externref invoke
-     args, so the `init` side-effect is skipped → table 1 stays empty.
-- **Exit-condition**: try_table.1 (EH) instantiates against
-  try_table.0's registered tag/func (the remaining D-192 clause; the
-  funcrefs ≥32 clause is MET).
+- **Bundle-ID**: 10.E-xmodule-tags (EH cross-module tag imports per
+  ADR-0114; D-192 register's funcrefs clause CLOSED cycle 108)
+- **Cycles-remaining**: ~5
+- **Continuity-memo**: D-192 register substrate PROVEN (funcrefs
+  return 24→32 cyc100-108). EH clause = a MAJOR designed-but-unimpl
+  substrate (ADR-0114) — full scope + the 5-step plan in
+  `lessons/2026-05-29-eh-cross-module-tag-substrate-scope.md`.
+  try_table.1 imports `test::e0` (TAG ×2) + `test::throw` (func) from
+  try_table.0. Gaps: ImportKind has no `.tag` (parser rejects 0x04);
+  tag exports filtered at decode (`sections.zig:606`); no
+  `ImportBinding.tag` / Linker tag API; tag identity index-based
+  (`exception.zig` tag_idx) not ADR-0114 `*TagInstance` → cross-module
+  throw/catch can't match. Plan: parser(1)→instantiate(2)→TagInstance
+  storage(3)→identity match(4)→JIT(5). Steps 1-2 are 0-corpus-delta;
+  frame each cycle's observable as the STAGE move (parse→instantiate→
+  match), not corpus count, until step 4.
+- **Exit-condition**: exception-handling try_table corpus return pass
+  ≥ 5/34 (currently 0/34) — i.e. cross-module throw/catch matches via
+  `*TagInstance` for at least the simple-throw-catch cases.
 
-## Active task — cycle 109: EH try_table.1 cross-module register (D-192 EH clause)
+## Active task — cycle 110: EH tag-import parser side (step 1 of ADR-0114 substrate)
 
-Apply the now-proven register substrate to EH. **Step 0**: (1) does the
-exception-handling try_table manifest carry a stale `skip-impl
-directive-register` (re-bake like ref_func if so)? (2) try_table.1
-imports a TAG (`test::e0`) + func (`test::throw`) from try_table.0 —
-the runner's `.register` handler binds func exports
-(defineCrossModuleFunc) but TAG exports are in the
-`.table, .global => {out of scope}` arm (line ~396); EH needs a
-cross-module TAG binding. Probe try_table.1's instantiate error first
-(UnknownImport on the tag vs func), then wire the tag binding. Parallel:
-the engine-path ref.func-global gap (item 2) is a clean cli_run fix
-(wire resolveFuncrefGlobals + typed-global ref.func) if EH stalls.
+**Step 0 done (cycle 109 survey)** — see the lesson. Step 1 (smallest
+observable): extend `parse/sections.zig` `ImportKind` with `tag = 0x04`
++ `ImportPayload.tag_typeidx` + accept `0x04` in the import-kind switch
+(line ~286), and un-filter tag exports (`sections.zig:606` — recognise
+kind=4 export as a `.tag` ExportDesc variant instead of dropping). Red
+test: decode an import section with a tag import (`0x04` kind) +
+assert the ImportKind.tag entry; decode a tag export + assert it
+appears. Observable: try_table.1 PARSES past the tag import (ParseFailed
+→ instantiate-stage). NOTE: the ImportKind enum extension cascades into
+every `switch (ImportKind)` (instantiate, linker) — those arms land in
+step 2; step 1 may need stub arms to compile. Deviation watch: ADR-0114
+is the design (Accepted); this is impl, not a §4 deviation.
 
 ## Larger §10 work (later bundles)
 
@@ -63,10 +61,13 @@ the engine-path ref.func-global gap (item 2) is a clean cli_run fix
   `test::e0` tag + `test::throw` func from try_table.0.wasm; runner
   registry needs tag + func cross-module binding. Gate 2 (exnref byte
   `0x69` standalone + `ValType.exnref` pub-const) folds in here.
-- **10.G WasmGC** — corpus baked (568 directives) but impl=0%; ZIR ops
-  + heap impl + subtype lattice. NOTE: `valTypeIsSubtypeFree`'s
-  `(ref $concrete) <: func` rule assumes pre-GC (all concrete = func
-  type); 10.G must refine once struct/array heads enter module_types.
+- **10.G WasmGC** — corpus baked (568) impl=0%; ZIR ops + heap +
+  subtype lattice (10.G refines `valTypeIsSubtypeFree`'s pre-GC
+  `(ref $concrete) <: func` assumption).
+- **Deferred funcrefs gaps** (post-D-192-EH): engine/cli_run
+  `resolveFuncrefGlobals` unwired (ref.func globals null in cli_run);
+  externref-elem (runner externref invoke-arg parsing). Both real but
+  off the spec-corpus path.
 - **10.P close gate** — user touchpoint by construction.
 
 ## Spec runner observable (post-cycle-108)
@@ -84,8 +85,8 @@ the engine-path ref.func-global gap (item 2) is a clean cli_run fix
 
 - ADR-0120 / ADR-0123: Accepted; impl autonomous. ADR-0123 D4
   (ref.func typed) landed cycle 102.
-- D-192: cross-module register substrate. New bundle after
-  10.R-funcrefs-tail-2 closes.
+- D-192: register substrate PROVEN (funcrefs). EH clause = active
+  bundle 10.E-xmodule-tags (ADR-0114 *TagInstance impl).
 - D-186 (return_call_ref): discharge predicate met by ADR-0123 D4 +
   cycle-102 opRefFunc typed push.
 
