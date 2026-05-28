@@ -71,6 +71,34 @@ Cycle 96+ work plan:
 Order recommendation: pick (1) first (highest yield + addresses
 the cycle-93 known carve-out).
 
+## Cycle 101 re-probe (post-Gate-4) — error map refresh
+
+Re-ran the per-func `frontendValidate` error probe after Gate 4
+cleared 3 modules (ParseFailed 10→7). The cycle-99 "Gate 3 =
+opRefFunc non-null" framing was WRONG; actual classes for the 7:
+
+- `ref_as_non_null.0/2` → **NotImplemented** — root cause: dispatch
+  typo `0xD3 => opRefAsNonNull` in BOTH `validator.zig` + `lower.zig`.
+  `ref.as_non_null` is **0xD4** (`0xD3` = GC ref.eq). Fixed cycle 101
+  (`7db8aed0`); `ref_as_non_null.2` parses (7→6). `ref_as_non_null.0`
+  still fails (separate later-function gate; uses `ref.func N`+`call`
+  with typed refs).
+- `br_on_null.0/2`, `br_on_non_null.0/2` → **StackTypeMismatch**
+  (func type_idx=0) — concrete typed-ref `(ref 0)` flowing through
+  `block`/`br_on_null`/`call_ref`. cycle-102 target. Error class
+  known; failing OP needs a position-level probe.
+- `ref_is_null.0` → fails BEFORE the per-func loop (no fv.diag) —
+  earlier frontendValidate stage; uses `(table (ref null 0))` +
+  `(elem (table 2) (ref 0) (ref.func 0))`.
+
+**Probe technique** (reusable): the c_api `wasm_module_new` →
+`frontendValidate` returns bool, masking the real error as
+`ParseFailed`. Temporarily wrap the per-func validate call
+(`instantiate.zig` ~line 322) with a `catch |e| print(@errorName(e))`
+to surface the class; revert before commit. "No fv.diag before the
+runner's compile-FAIL line" = failure is in an earlier stage
+(parse / preDecodeSectionBodies / section decode), not a func body.
+
 ## Related
 
 - Bundle `10.R-valtype-widen` (closed partial 2026-05-28 cycle 94)
