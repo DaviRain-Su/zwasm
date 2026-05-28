@@ -121,9 +121,12 @@ pub fn readValType(body: []const u8, pos: *usize) Error!ValType {
     };
 }
 
-/// Helper for ADR-0123 0x63 / 0x64 typed-funcref parsing. Reads
-/// the heap-type that follows the prefix byte.
-fn readTypedRef(body: []const u8, pos: *usize, nullable: bool) Error!ValType {
+/// Wasm spec §5.3.4 (reftype) — decode the heap-type that follows a
+/// `0x63` (`ref null ht`) / `0x64` (`ref ht`) prefix byte. The prefix
+/// is consumed by the caller: `readValType` peeks it, and the
+/// blocktype decoders in `validator.zig` / `lower.zig` reach the same
+/// position after their SLEB prefix read. ADR-0123 (10.R-valtype-widen).
+pub fn readTypedRef(body: []const u8, pos: *usize, nullable: bool) Error!ValType {
     if (pos.* >= body.len) return Error.UnexpectedEnd;
     const ht_b = body[pos.*];
     // Try abstract head first — single byte consume.

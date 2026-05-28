@@ -24,6 +24,7 @@ const std = @import("std");
 const leb128 = @import("../support/leb128.zig");
 const zir = @import("../ir/zir.zig");
 const sections = @import("../parse/sections.zig");
+const init_expr = @import("../parse/init_expr.zig");
 const dispatch_collector = @import("../ir/dispatch_collector.zig");
 const wasm_byte_map = @import("../ir/wasm_byte_map.zig");
 const validator_simd = @import("validator_simd.zig");
@@ -751,6 +752,14 @@ pub const Validator = struct {
                 // i64 8-byte gpr-class scalar path.
                 -16 => .{ .single = .funcref }, // 0x70
                 -17 => .{ .single = .externref }, // 0x6F
+                // function-references §5.3.4 + blocktype §5.4.1:
+                // typed-ref result via `0x63 ht` (ref null ht) / `0x64
+                // ht` (ref ht). The SLEB read above consumed the prefix
+                // byte (0x63 → -29, 0x64 → -28); readTypedRefBlockType
+                // decodes the heap-type that follows and bound-checks a
+                // concrete type index.
+                -29 => try self.readTypedRefBlockType(true), // 0x63
+                -28 => try self.readTypedRefBlockType(false), // 0x64
                 else => return Error.BadBlockType,
             };
             return .{ .start = .empty, .end = end };
@@ -762,6 +771,26 @@ pub const Validator = struct {
             .start = blockTypeOfSlice(ft.params),
             .end = blockTypeOfSlice(ft.results),
         };
+    }
+
+    /// Wasm spec §5.3.4 — decode the heap-type following a typed-ref
+    /// blocktype prefix (`0x63`/`0x64`, already consumed by
+    /// readBlockType's SLEB read) into a `.single` BlockType. A
+    /// concrete heap-type index must reference a declared type (spec
+    /// §3.2.3); out-of-range or malformed → BadBlockType, mirroring the
+    /// typeidx-blocktype bound check above. `readTypedRef` does not
+    /// bound-check (it also serves index-free init-expr contexts), so
+    /// the validator owns that check here. ref.9 / ref.10
+    /// (function-references) exercise the out-of-range reject.
+    fn readTypedRefBlockType(self: *Validator, nullable: bool) Error!BlockType {
+        const vt = init_expr.readTypedRef(self.body, &self.pos, nullable) catch
+            return Error.BadBlockType;
+        if (vt == .ref and vt.ref.heap_type == .concrete and
+            vt.ref.heap_type.concrete >= self.module_types.len)
+        {
+            return Error.BadBlockType;
+        }
+        return .{ .single = vt };
     }
 
     // ----------------------------------------------------------------

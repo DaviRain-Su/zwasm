@@ -38,6 +38,7 @@ const std = @import("std");
 
 const leb128 = @import("../support/leb128.zig");
 const zir = @import("zir.zig");
+const init_expr = @import("../parse/init_expr.zig");
 const dispatch_collector = @import("dispatch_collector.zig");
 const wasm_byte_map = @import("wasm_byte_map.zig");
 
@@ -1031,6 +1032,16 @@ pub const Lowerer = struct {
                 // 9.9-l-1b-d093-d45 (D-118): -16/-17 = funcref/externref
                 // reftype single valtypes (Wasm 2.0 §5.3.5).
                 -1, -2, -3, -4, -5, -16, -17 => @as(u32, 1), // single valtype
+                // function-references §5.3.4: typed-ref result via
+                // `0x63 ht` / `0x64 ht`. The SLEB read consumed the
+                // prefix (0x63 → -29, 0x64 → -28); consume the heap-type
+                // and count it as a single result. Nullability is
+                // irrelevant to arity, but readTypedRef needs it.
+                -29, -28 => blk: {
+                    _ = init_expr.readTypedRef(self.body, &self.pos, sleb == -29) catch
+                        return Error.BadBlockType;
+                    break :blk @as(u32, 1);
+                },
                 else => Error.BadBlockType,
             };
         }

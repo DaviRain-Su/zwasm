@@ -68,6 +68,33 @@ test "validate: nested block with i32 result" {
     try validateFunction(i32_result_sig, &.{}, &[_]u8{ 0x02, 0x7F, 0x41, 0x01, 0x0B, 0x0B }, &.{}, &.{}, &.{}, 0, &.{}, 0);
 }
 
+test "validate (block): typed-ref blocktype (ref null func) via 0x63 0x70 accepted" {
+    // function-references §5.3.4 + blocktype §5.4.1: `0x63 ht` =
+    // `(ref null ht)`. `(block (result (ref null func)) ref.null
+    // func) drop` — empty function. Pre-fix `readBlockType` reads
+    // the 0x63 prefix as SLEB -29 and rejects it as BadBlockType.
+    //   0x02 0x63 0x70 — block (result (ref null func))
+    //   0xD0 0x70      — ref.null func  (pushes (ref null func))
+    //   0x0B           — end block (leaves (ref null func) on stack)
+    //   0x1A           — drop
+    //   0x0B           — end function
+    const body = [_]u8{ 0x02, 0x63, 0x70, 0xD0, 0x70, 0x0B, 0x1A, 0x0B };
+    try validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
+test "validate (block): typed-ref blocktype with out-of-range concrete index rejected" {
+    // function-references ref.9 / ref.10 (assert_invalid): `block
+    // (result (ref 1))` but the module declares only type 0, so the
+    // concrete heap-type index 1 is out of range → BadBlockType.
+    //   0x02 0x64 0x01 — block (result (ref 1))
+    //   0x00           — unreachable
+    //   0x0B 0x1A 0x0B — end block ; drop ; end function
+    const one_type = [_]FuncType{empty_sig};
+    const body = [_]u8{ 0x02, 0x64, 0x01, 0x00, 0x0B, 0x1A, 0x0B };
+    const r = validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &one_type, 0, &.{}, 0);
+    try testing.expectError(Error.BadBlockType, r);
+}
+
 test "validate: nested block leaving wrong type at end fails" {
     // (block (result i32) i64.const 1) end -> i32.const? — fails
     const body = [_]u8{ 0x02, 0x7F, 0x42, 0x01, 0x0B, 0x0B };
