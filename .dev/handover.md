@@ -6,73 +6,84 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 89 — extended `check_uses_runtime_ptr.sh` to
-  catch indirect R15 use via `bounds_fixups.append` /
-  `unreach_fixups.append` (closes the d180-detector channel-gap
-  named in lesson `2026-05-28-d180-detector-misses-bounds-fixups
-  .md`); also fixed a pre-existing whitelist name-normalization
-  bug (dot vs underscore).
-- Active debt rows: **18** — all `blocked-by:`; zero `now`.
-- Mac aarch64 test-all + lint green at HEAD prior to this chunk
-  (52d9c784); ubuntu kick at 52d9c784 confirmed green (Step 0.7
-  passed; "failed command:" output is intentional negative-path
-  test stderr, not a failure).
+- **HEAD**: cycle 90 — **3 ADR/debt gates closed in one pass**:
+  - **D-179 discharged** (Track A `6e5e7e53`): baker swap wabt →
+    wasm-tools; GC corpus unlocked, +568 spec runner directives.
+  - **ADR-0120 revised + Accepted + Cycle 1 impl** (Track B
+    `510eca36`): `eh_payload []u64` pre-sized at instantiate (no
+    magic cap); D5 v128 slot accounting; D6 catch_ref lazy
+    reification.
+  - **ADR-0123 revised + Accepted + Cycle 1 impl** (Track C
+    `d6b187f8`): RefType / HeapType / AbstractHeapType substrate
+    added. Bundle 10.R-valtype-widen opens.
+- Mac aarch64 test-all + lint green.
 
 ## Active bundle
 
-- None.
+- **Bundle-ID**: 10.R-valtype-widen
+- **Cycles-remaining**: ~4-5
+- **Continuity-memo**: Substrate types (RefType / HeapType /
+  AbstractHeapType) added at cycle 90 Cycle 1. Cycle 2 pivots
+  `ValType` from `enum(u8)` to `union(enum)` with `ref: RefType`
+  variant; migrate 7 abstract-ref enum tags (funcref / externref /
+  i31ref / anyref / eqref / structref / arrayref) to
+  `.ref = RefType.abs(.X, true)`. Zig `require_exhaustive_enum_switch`
+  lint guides every site.
+- **Exit-condition**: function-references spec corpus assert_return
+  pass-rate ≥ 30/39 (currently 3/39); call_ref + return_call_ref
+  green-baked + validated; 0 ParseFailed for any
+  function-references module.
 
-## Active task — cycle 90: next autonomous chunk
+## Active task — cycle 91: ValType pivot (Cycle 2 of bundle)
 
-Spec-runner-observable yield exhausted per cycle-88 survey.
-Infrastructure-hardening candidates that remain:
+Smallest red test:
+`test "ValType: union(enum) — .ref = RefType.abs(.func, true) equals legacy funcref representation"`
+in `src/ir/zir.zig`. Existing 7 abstract-ref enum tags get an
+`.absRef(...)` constructor + comptime-assert preservation of byte
+mapping (funcref = 0x70, externref = 0x6F, etc.) per Wasm 3.0 §5.3.1.
 
-1. **`cleanup_orphans.sh` allowlist review** — extend dev-tool
-   patterns if other common orphan-prone invocations identified.
-2. **handover.md prune** — "## Larger §10 work" + "Open
-   questions / blockers" sections are stable across many cycles;
-   consider moving to CLAUDE.md to keep handover ≤ 50 lines.
-3. **gate_commit.sh `check_uses_runtime_ptr` --gate wiring** —
-   currently informational. Now that the detector is hardened
-   (cycle 89), promote to `--gate` mode when
-   `src/engine/codegen/x86_64/` is touched.
+After cycle 2 lands, cycles 3-5 per ADR-0123 Consequences §5:
+- Cycle 3: parser `0x63` / `0x64` for `(ref null? ht)`.
+- Cycle 4: validator static narrowing rules.
+- Cycle 5: call_ref / return_call_ref impl (D3/D4) + spec corpus
+  pass-rate ramp.
 
-Cycle 90 picks (3) — analogous to cycle-86 wiring of the
-rule-paths / skill-descriptions / doc-state lints into
-gate_commit. Promotes a hardened detector from informational
-to enforcing.
+## Larger §10 work (post-bundle)
 
-## Larger §10 work (blocked / later)
-
-- **10.E EH runtime** — gated on ADR-0120 Accept (exnref ValType).
-- **10.M memory64 multi-memory** — autonomous substantially done.
-- **10.G WasmGC** — D-179-blocked (wabt 1.0.41+).
+- **10.E EH payload-prop bundle** (ADR-0120 Cycles 2-5): throw.emit
+  pop+STR; try_table.emit catch landing-pad LDR+push; catch_ref
+  reification helper; spec corpus runner wiring. ~30 EH directives
+  flip to pass.
+- **10.G WasmGC ZIR ops** — D-179 unblocked at the bake layer;
+  impl distance is large (ZIR op set + heap impl + subtype lattice
+  reuse ADR-0123 RefType shape).
 - **10.P close gate** — user touchpoint by construction.
 
-## Spec runner observable (post-cycle-81; unchanged by cycle 82)
+## Spec runner observable (post-cycle-90 baker swap)
 
 ```
-[memory64           ] return=337 trap=205 invalid=83  (all pass)
-[tail-call          ] return=71  trap=7   invalid=24  (all pass)
-[exception-handling ] return=34(fail34) trap=2(fail2) invalid=7(pass=7 fail=0) exception=4(fail4)
+[memory64           ] return=337(all pass) trap=205(all pass) invalid=83
+[tail-call          ] return=71  trap=7    invalid=24(pass=23 fail=1)
+[exception-handling ] return=34(fail) trap=2(fail) invalid=7(pass) exception=4(fail)
 [function-references] return=39(fail36) trap=4(fail4) invalid=18(pass=18 fail=0)
-[multi-memory       ] return=407(pass=382 fail=25) trap=238(pass=237 fail=1)
-                      invalid=2(pass=2) malformed=2(pass=2) skip=56
-[wasm-3.0-assert    ] assert_return pass=790  assert_trap pass=449  assert_invalid pass=134 fail=0
+[gc                 ] return=407(fail=384) trap=100(fail=100) invalid=60(pass) malformed=1(pass)  ← NEW
+[multi-memory       ] return=407(pass=371 fail=36) trap=238(pass=237 fail=1) invalid=2 malformed=2 skip=56
+[wasm-3.0-assert] total: 71 manifests, 2349 directives
 ```
 
 ## Open questions / blockers
 
-- ADR-0120 — Status: Proposed; user Accept flip unblocks ~30 EH
-  spec directives.
-- ADR-0123 — Status: Proposed. Accept flip unblocks call_ref +
-  return_call_ref impl + typed-ref parser (D-195 sub-gap a).
-- D-179 — wabt 1.0.41+ blocks GC corpus + clang_wasm64 realworld.
+- ADR-0120 / ADR-0123 — both Accepted; impl bundles autonomous.
+- D-179 — DISCHARGED.
+- D-186 — discharge path unblocked by ADR-0123 D4; awaits cycle 5
+  of 10.R-valtype-widen bundle.
+- D-195 (function-references corpus gates) — sub-gap (a) unblocked
+  by ADR-0123 Cycle 3; sub-gap (b) cross-module register remains.
 - 10.P close gate — user touchpoint by construction.
 
 ## Key refs
 
-- ADR-0112 (Tail Call), ADR-0114 (EH), ADR-0120 / 0123 (Proposed).
-- ADR-0076 (D1 gate / D2 single-push / D3 ubuntu kick).
-- `.dev/lessons/2026-05-28-gate-tail-vs-exit-code.md`.
+- ADR-0120 (Accepted — EH payload), ADR-0123 (Accepted — typed-ref).
+- `.dev/lessons/2026-05-28-spec-corpus-expansion-exhausted.md`
+  (cycle-88 survey that surfaced these gates).
 - ROADMAP §10; `.dev/phase_log/phase10.md`.
