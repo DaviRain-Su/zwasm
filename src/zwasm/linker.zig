@@ -83,6 +83,15 @@ pub const Linker = struct {
         /// instance's lifetime (cross-module thunk dereferences
         /// `ctx` at every call).
         cross_module_func: CrossModuleFuncEntry,
+        /// 10.M-D195b extension cycle 77 — cross-instance global
+        /// alias. The slot pointer aliases the source instance's
+        /// `Runtime.globals[idx]` cell so importer reads/writes
+        /// see the same Value. Caller (the Linker user) must keep
+        /// the source instance alive for the importing instance's
+        /// lifetime. D-178 partial discharge (host-side global
+        /// construction via standalone Store-anchored Global is
+        /// still v0.2; this only wires the import-aliasing path).
+        global_alias: GlobalAliasEntry,
     };
 
     pub const HostFuncEntry = struct {
@@ -101,6 +110,12 @@ pub const Linker = struct {
         source_funcidx: u32,
         source_signature: _zir.FuncType,
         ctx_ptr: *_cross_module.CallCtx,
+    };
+
+    pub const GlobalAliasEntry = struct {
+        slot: *_runtime.Value,
+        source_valtype: _zir.ValType,
+        source_mutable: bool,
     };
 
     pub fn init(engine: *_engine.Engine) Linker {
@@ -199,6 +214,45 @@ pub const Linker = struct {
             .module = module,
             .name = name,
             .payload = .{ .memory_alias = .{ .bytes = bytes } },
+        });
+    }
+
+    /// 10.M-D195b cycle 77 — alias a global export from another
+    /// already-instantiated module. The importing module's `(import
+    /// <module> <name> (global …))` resolves to the source's
+    /// `globals[idx]` cell via a shared `*Value` pointer.
+    /// `source_inst` must outlive every Instance instantiated
+    /// through this Linker.
+    pub fn defineGlobal(
+        self: *Linker,
+        module: []const u8,
+        name: []const u8,
+        source_inst: *_zwasm.Instance,
+        source_name: []const u8,
+    ) !void {
+        const source_rt = source_inst.handle.runtime orelse return error.SignatureMismatch;
+        var glob_idx: u32 = std.math.maxInt(u32);
+        var glob_valtype: _zir.ValType = .i32;
+        var glob_mutable: bool = false;
+        for (source_inst.handle.exports_storage, source_inst.handle.export_types) |exp, et| {
+            if (!std.mem.eql(u8, exp.name, source_name)) continue;
+            if (exp.kind != .global) return error.ImportKindMismatch;
+            glob_idx = exp.idx;
+            glob_valtype = et.global.valtype;
+            glob_mutable = et.global.mutable;
+            break;
+        }
+        if (glob_idx == std.math.maxInt(u32)) return error.UnknownImport;
+        if (glob_idx >= source_rt.globals.len) return error.UnknownImport;
+
+        try self.entries.append(self.engine.alloc, .{
+            .module = module,
+            .name = name,
+            .payload = .{ .global_alias = .{
+                .slot = source_rt.globals[glob_idx],
+                .source_valtype = glob_valtype,
+                .source_mutable = glob_mutable,
+            } },
         });
     }
 
@@ -369,7 +423,28 @@ pub const Linker = struct {
                             .source_max = memlimits.max,
                         } }) catch return error.OutOfMemory;
                     },
-                    .table, .global => return error.ImportKindMismatch,
+                    .global => {
+                        // 10.M-D195b cycle 77 — cross-instance global
+                        // alias binding. Importer declares valtype +
+                        // mutable; runtime-side type check at call
+                        // boundary compares against source.
+                        const decl = switch (it.payload) {
+                            .global => |g| g,
+                            else => return error.ImportKindMismatch,
+                        };
+                        const ga = switch (entry.payload) {
+                            .global_alias => |g| g,
+                            else => return error.ImportKindMismatch,
+                        };
+                        if (decl.valtype != ga.source_valtype) return error.SignatureMismatch;
+                        if (decl.mutable != ga.source_mutable) return error.SignatureMismatch;
+                        bindings_list.append(scratch, .{ .global = .{
+                            .slot = ga.slot,
+                            .source_valtype = ga.source_valtype,
+                            .source_mutable = ga.source_mutable,
+                        } }) catch return error.OutOfMemory;
+                    },
+                    .table => return error.ImportKindMismatch,
                 }
             }
         }
