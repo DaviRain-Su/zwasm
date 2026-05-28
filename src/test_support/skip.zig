@@ -72,11 +72,6 @@ pub const Blocker = enum {
     @"D-186",
     /// wabt 1.0.41+ for gc spec corpus baking.
     @"D-179",
-    /// Mac aarch64-only test gate audit (~21 sites) — JIT integration
-    /// tests gated on (macos and aarch64) need per-site triage to
-    /// either build x86_64 siblings, convert to comptime guards, or
-    /// open more specific blocker rows. D-180 hazard category.
-    @"D-193",
 };
 
 /// Phase-end batch deferral. See `Win64Phase` doc.
