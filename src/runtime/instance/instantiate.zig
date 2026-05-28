@@ -601,14 +601,43 @@ pub fn evalConstMemAddrExpr(
     expr: []const u8,
     idx_type: sections.MemoryEntry.IdxType,
 ) !u64 {
-    switch (idx_type) {
-        .i32 => return @as(u64, @intCast(@as(u32, @bitCast(try evalConstI32Expr(expr))))),
-        .i64 => {
-            if (expr.len < 2 or expr[0] != 0x42) return error.UnsupportedConstExpr;
+    return evalConstMemAddrExprWithGlobals(expr, idx_type, &.{});
+}
+
+/// 10.M-D195b cycle 78 — accepts `global.get N` (opcode 0x23) in
+/// addition to the const-int shapes. The N index is into the
+/// importer's `rt.globals` slice (post-import-binding). Spec testsuite
+/// fixtures like `multi-memory/data0.{3,5}.wasm` declare
+/// `(data (global.get 0) "a")` against an imported `spectest.global_i32`
+/// global, hitting this path after the cycle-77 Linker.defineGlobal
+/// wiring resolves the import.
+pub fn evalConstMemAddrExprWithGlobals(
+    expr: []const u8,
+    idx_type: sections.MemoryEntry.IdxType,
+    globals: []const *Value,
+) !u64 {
+    if (expr.len < 2) return error.UnsupportedConstExpr;
+    switch (expr[0]) {
+        0x23 => { // global.get N
             var pos: usize = 1;
-            const v = try leb128.readSleb128(i64, expr, &pos);
+            const idx = leb128.readUleb128(u32, expr, &pos) catch return error.UnsupportedConstExpr;
             if (pos >= expr.len or expr[pos] != 0x0B) return error.UnsupportedConstExpr;
-            return @bitCast(v);
+            if (idx >= globals.len) return error.UnsupportedConstExpr;
+            const cell = globals[idx].*;
+            return switch (idx_type) {
+                .i32 => @as(u64, @intCast(@as(u32, @bitCast(cell.i32)))),
+                .i64 => @bitCast(cell.i64),
+            };
+        },
+        else => switch (idx_type) {
+            .i32 => return @as(u64, @intCast(@as(u32, @bitCast(try evalConstI32Expr(expr))))),
+            .i64 => {
+                if (expr[0] != 0x42) return error.UnsupportedConstExpr;
+                var pos: usize = 1;
+                const v = try leb128.readSleb128(i64, expr, &pos);
+                if (pos >= expr.len or expr[pos] != 0x0B) return error.UnsupportedConstExpr;
+                return @bitCast(v);
+            },
         },
     }
 }
@@ -889,26 +918,10 @@ pub fn instantiateRuntime(
         rt.memory = mi[0].bytes;
     }
 
-    if (module.find(.data)) |data_section| {
-        var datas = try sections.decodeData(a, data_section.body);
-        defer datas.deinit();
-        for (datas.items) |seg| {
-            if (seg.kind != .active) continue;
-            // 10.M cycle 62 — route active-data writes to the
-            // declared target memory (seg.memidx); was hard-pinned to
-            // memidx=0. Wasm spec §3.4.7 — offset's result type
-            // matches the target memory's idx_type; memory64 modules
-            // emit i64.const. ADR-0111 D2 runtime-side close.
-            if (seg.memidx >= rt.memories.len) return error.DataSegmentOutOfRange;
-            const target = &rt.memories[seg.memidx];
-            const mem_idx_type: sections.MemoryEntry.IdxType = target.idx_type;
-            const offset = try evalConstMemAddrExpr(seg.offset_expr, mem_idx_type);
-            const dst_end_u128: u128 = @as(u128, offset) + @as(u128, seg.bytes.len);
-            if (dst_end_u128 > target.bytes.len) return error.DataSegmentOutOfRange;
-            const dst_end: usize = @intCast(dst_end_u128);
-            @memcpy(target.bytes[@intCast(offset)..dst_end], seg.bytes);
-        }
-    }
+    // 10.M-D195b cycle 78 — data segments deferred to AFTER globals
+    // init so `(data (global.get N) ...)` offsets can resolve via
+    // rt.globals. Previously processed inline here; the move below
+    // happens after the globals section at line ~1020.
 
     // Tables. Imported tables value-copy the source TableInstance
     // (the refs slice is shared). Defined tables get freshly
@@ -1018,6 +1031,28 @@ pub fn instantiateRuntime(
                 imp_idx += 1;
             }
             rt.globals = slots;
+        }
+    }
+
+    // 10.M-D195b cycle 78 — data segment initialization deferred
+    // from the early memory-wiring block to AFTER global init. Active
+    // data segments may carry `(data (global.get N) ...)` offsets
+    // that read from an imported global (e.g., spec testsuite's
+    // `(global.get 0)` against spectest.global_i32). rt.globals must
+    // be populated before this loop fires.
+    if (module.find(.data)) |data_section| {
+        var datas = try sections.decodeData(a, data_section.body);
+        defer datas.deinit();
+        for (datas.items) |seg| {
+            if (seg.kind != .active) continue;
+            if (seg.memidx >= rt.memories.len) return error.DataSegmentOutOfRange;
+            const target = &rt.memories[seg.memidx];
+            const mem_idx_type: sections.MemoryEntry.IdxType = target.idx_type;
+            const offset = try evalConstMemAddrExprWithGlobals(seg.offset_expr, mem_idx_type, rt.globals);
+            const dst_end_u128: u128 = @as(u128, offset) + @as(u128, seg.bytes.len);
+            if (dst_end_u128 > target.bytes.len) return error.DataSegmentOutOfRange;
+            const dst_end: usize = @intCast(dst_end_u128);
+            @memcpy(target.bytes[@intCast(offset)..dst_end], seg.bytes);
         }
     }
 
