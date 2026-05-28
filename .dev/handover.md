@@ -6,13 +6,25 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 97 (`6730bb3c`) — subtype-aware
-  `expectFrameEndTypes`: block / loop / if / function-body result-
-  type matching accepts `(ref ht)` for `(ref null ht)`. Forward-
-  compatible per Wasm 3.0 §3.3.4 but corpus delta=0; the actual
-  StackTypeMismatch fires at a still-unidentified site.
-- Cycles 91-96 before: ValType pivot; parser typed-funcref bytes;
-  narrowing; subtype popExpect.
+- **HEAD**: cycle 98 (`9f98c9de`) — subtype-aware
+  `opBrOnNonNull` label-type match (narrowed reftype flows to
+  branch target per Wasm 3.0 §3.3.10.9). Spec-correct but corpus
+  delta=0 (3rd consecutive 0-delta cycle).
+- Cycles 91-97 before: ValType pivot; parser typed-funcref bytes;
+  narrowing; subtype popExpect / expectFrameEndTypes.
+
+## Yield-taper note (per `lessons/2026-05-28-yield-taper-pacing.md`)
+
+Bundle 10.R-funcrefs-tail cycles 96/97/98 all shipped spec-correct
+subtype-aware fixes with zero corpus delta. Per-module failures
+involve multiple cascading issues; chipping at validator
+strictness sites isn't moving function-references return pass-rate.
+Highest-leverage pivot: 10.E ADR-0120 Cycles 2-5 (throw.emit +
+try_table.emit catch landing-pad + catch_ref reification) unlock
+~30 EH directives directly. Bundle 10.R-funcrefs-tail paused;
+forward path 10.R-funcrefs-tail = bucket-3-stop-equivalent until
+either user touchpoint OR cycle-finish on 10.E gives related
+unblock signal.
 - Cycle 90 (`6e5e7e53` + `510eca36` + `d6b187f8`) before that:
   D-179 baker swap; ADR-0120 Accept + Cycle 1 impl; ADR-0123 Accept
   + Cycle 1 substrate.
@@ -20,50 +32,50 @@
 
 ## Active bundle
 
-- **Bundle-ID**: 10.R-funcrefs-tail (follow-up to closed
-  10.R-valtype-widen; opens at cycle 94 with the structural
-  pivot already done).
-- **Cycles-remaining**: ~3-5
-- **Continuity-memo**: Bundle 10.R-valtype-widen partial-closed
-  at `2f127b96`: ValType union(enum); parser typed-funcref bytes;
-  validator narrowing on ref.as_non_null + br_on_null; opRefNull
-  + lower 0xD0 extended; br_on_null opcode fixed (0xD4→0xD5).
-  Gap inventory: 10 function-references modules still ParseFailed
-  (br_on_null.0/2, br_on_non_null.0/1/2, ref_as_non_null.0/2,
-  ref_is_null.0). Probable causes: more opcode-byte mismatches
-  in lower/validator dispatch OR validator type-stack
-  interactions. Plus subtype-aware popExpect carve-out from
-  cycle 93 (needed for opRefFunc non-null + opBrOnNonNull
-  label match).
-- **Exit-condition**: function-references return ≥ 30/39 pass
-  (currently 0/39 — modules parse but exec path also incomplete).
+- **Bundle-ID**: 10.E-payload-prop-v2 (ADR-0120 Cycles 2-5 per
+  ADR-0120 Consequences §1; ADR-0120 Cycle 1 substrate landed
+  at `510eca36`).
+- **Cycles-remaining**: ~4
+- **Continuity-memo**: ADR-0120 Cycle 1 (Runtime field +
+  tag_param_slot_counts thread) landed cycle 90. Cycle 2 of
+  bundle: throw.emit reads `tag_param_slot_counts[tag_idx]` and
+  emits the pop+STR sequence to write payload values to
+  `[runtime_ptr + eh_payload_ptr_off + i*8]` (arm64 first,
+  x86_64 bundled same cycle per arch-symmetry rhythm). Cycle 3:
+  try_table.emit catch-landing-pad prologue (LDR + push vreg
+  per slot). Cycle 4: catch_ref / catch_all_ref via
+  zwasm_reify_exnref helper. Cycle 5: spec-corpus runner wiring
+  + close 10.E.
+- **Exit-condition**: function-references unchanged for now
+  (paused per yield-taper note); EH `return=34 trap=2
+  exception=4` go from currently 0-pass to ≥30 pass.
+- **Paused**: 10.R-funcrefs-tail (resume when 10.E lands OR
+  external signal).
 - **Exit-condition**: function-references spec corpus assert_return
   pass-rate ≥ 30/39 (currently 3/39); call_ref + return_call_ref
   green-baked + validated; 0 ParseFailed for any
   function-references module.
 
-## Active task — cycle 98: targeted print-diag at each StackTypeMismatch site
+## Active task — cycle 99: ADR-0120 Cycle 2 — throw.emit payload pop+STR (arm64 + x86_64 bundled)
 
-Cycle 96 (popExpect) + 97 (expectFrameEndTypes) both went
-subtype-aware but corpus delta=0. The StackTypeMismatch error
-class (4× in lesson) fires at a still-unidentified site. Cycle 98
-will:
+Per ADR-0120 Consequences §1 Cycle 2: implement throw.emit (both
+arches in same chunk per arch-symmetry rhythm). Reads
+`tag_param_slot_counts[tag_idx]` from EmitCtx (Cycle 1 substrate
+already threaded); pops N slots from operand stack; emits N STRs
+into `[runtime_ptr + eh_payload_ptr_off + i*8]`; then sets
+`eh_payload_len = N` at the corresponding offset; then preserves
+existing tag_idx → argreg-0 MOV + BLR/CALL trampoline.
 
-1. Annotate each of the ~30 `Error.StackTypeMismatch` returns in
-   `src/validate/validator.zig` with a unique `std.debug.print`
-   tag (e.g., "[stm-N]").
-2. Run `function-references/br_on_null/br_on_null.2.wasm` (or
-   another StackTypeMismatch-class failing module per cycle-95
-   inventory).
-3. Identify the firing site + apply the appropriate spec-aware
-   fix.
-4. Remove diag prints before commit.
+Smallest red test:
+`test "throw + catch_ with i32 payload returns 88 (cycle 99 throw-emit)"`
+in arm64 / x86_64 op tests. Currently `throw + catch_all returns
+42` IT-6 test passes (N=0 path); add N=1 i32 payload variant.
 
-After cycle 98 lands, remaining cycles per cycle-95 lesson:
-- BadBlockType ×3 (block-result typed-ref handling)
-- BadValType ×1 (non-patched site probe)
-- NotImplemented ×3 (opcode identification)
-- UndeclaredFuncRef ×? (judgment)
+After cycle 99 lands, cycles 100-102 of ADR-0120 bundle:
+- Cycle 3: try_table.emit catch-landing-pad LDR + push vreg.
+- Cycle 4: catch_ref / catch_all_ref reify via
+  zwasm_reify_exnref runtime helper.
+- Cycle 5: spec-corpus runner wiring + close 10.E.
 
 ## Larger §10 work (post-bundle)
 
