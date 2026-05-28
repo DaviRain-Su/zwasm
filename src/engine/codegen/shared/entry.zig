@@ -2142,12 +2142,21 @@ const skip = @import("../../../test_support/skip.zig");
 const zir = @import("../../../ir/zir.zig");
 const ZirFunc = zir.ZirFunc;
 const regalloc = @import("regalloc.zig");
-const emit = @import("../arm64/emit.zig");
+// Comptime per-arch emit dispatch (matches linker.zig:30). Lets the
+// execution tests below run on mac-arm64 + linux-x86_64 instead of
+// being arm64-pinned (D-193 / D-180-hazard discharge).
+const emit = switch (builtin.cpu.arch) {
+    .aarch64 => @import("../arm64/emit.zig"),
+    .x86_64 => @import("../x86_64/emit.zig"),
+    else => @compileError("entry.zig tests: unsupported arch"),
+};
 
 test "entry: i32.load offset=0 reads memory[0..4] through X28 vm_base" {
-    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
-        return skip.blocker(.@"D-193");
-    }
+    // D-193 triage: ungated. Body checks result value only (no
+    // arch-pinned byte asserts) and emits via comptime native_emit,
+    // so mac-arm64 + linux-x86_64 both exercise it. Win deferred per
+    // ADR-0122 phaseEnd batch.
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
 
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
     var fn0 = ZirFunc.init(0, sig, &.{});
@@ -2192,9 +2201,11 @@ test "entry: i32.load offset=0 reads memory[0..4] through X28 vm_base" {
 }
 
 test "entry: ADR-0018 sub-1c — spilled i32.const returns 42 via STR/LDR round-trip" {
-    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
-        return skip.blocker(.@"D-193");
-    }
+    // D-193 triage: ungated. Body checks result value only (no
+    // arch-pinned byte asserts) and emits via comptime native_emit,
+    // so mac-arm64 + linux-x86_64 both exercise it. Win deferred per
+    // ADR-0122 phaseEnd batch.
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
     // Force vreg 0 into spill territory (slot 10). The JIT body's
     // prologue extends frame by 8 + 16-align = 16 bytes; i32.const
     // emits MOVZ X14,#42 + STR X14,[SP]; end emits LDR X14,[SP] +
@@ -2241,9 +2252,11 @@ test "entry: ADR-0018 sub-1c — spilled i32.const returns 42 via STR/LDR round-
 }
 
 test "entry: ADR-0027 — global.set 0 then global.get 0 (i32) round-trips through JitRuntime.globals_base" {
-    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
-        return skip.blocker(.@"D-193");
-    }
+    // D-193 triage: ungated. Body checks result value only (no
+    // arch-pinned byte asserts) and emits via comptime native_emit,
+    // so mac-arm64 + linux-x86_64 both exercise it. Win deferred per
+    // ADR-0122 phaseEnd batch.
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
 
     const Value = @import("../../../runtime/value.zig").Value;
     // (i32.const 7) (global.set 0) (global.get 0) end
@@ -2297,9 +2310,11 @@ test "entry: ADR-0027 — global.set 0 then global.get 0 (i32) round-trips throu
 }
 
 test "entry: pure constant function returns 42 (sanity — no memory access)" {
-    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
-        return skip.blocker(.@"D-193");
-    }
+    // D-193 triage: ungated. Body checks result value only (no
+    // arch-pinned byte asserts) and emits via comptime native_emit,
+    // so mac-arm64 + linux-x86_64 both exercise it. Win deferred per
+    // ADR-0122 phaseEnd batch.
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
 
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
     var fn0 = ZirFunc.init(0, sig, &.{});
@@ -2340,9 +2355,11 @@ test "entry: pure constant function returns 42 (sanity — no memory access)" {
 }
 
 test "entry: callI32_i32i32 — 2 i32 params summed via i32.add" {
-    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
-        return skip.blocker(.@"D-193");
-    }
+    // D-193 triage: ungated. Body checks result value only (no
+    // arch-pinned byte asserts) and emits via comptime native_emit,
+    // so mac-arm64 + linux-x86_64 both exercise it. Win deferred per
+    // ADR-0122 phaseEnd batch.
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
     // (param i32 i32) (result i32) — body: local.get 0; local.get 1; i32.add; end
     const sig: zir.FuncType = .{ .params = &.{ .i32, .i32 }, .results = &.{.i32} };
     var fn0 = ZirFunc.init(0, sig, &.{});
@@ -2387,9 +2404,11 @@ test "entry: callI32_i32i32 — 2 i32 params summed via i32.add" {
 }
 
 test "entry: callI32_i32 — 1 i32 param echoed through W1 → SP slot 0 → result" {
-    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
-        return skip.blocker(.@"D-193");
-    }
+    // D-193 triage: ungated. Body checks result value only (no
+    // arch-pinned byte asserts) and emits via comptime native_emit,
+    // so mac-arm64 + linux-x86_64 both exercise it. Win deferred per
+    // ADR-0122 phaseEnd batch.
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
     const sig: zir.FuncType = .{ .params = &.{.i32}, .results = &.{.i32} };
     var fn0 = ZirFunc.init(0, sig, &.{});
     defer fn0.deinit(testing.allocator);
@@ -2429,9 +2448,11 @@ test "entry: callI32_i32 — 1 i32 param echoed through W1 → SP slot 0 → res
 }
 
 test "entry: f32 local round-trip — local.get 0 of f32 param via V0" {
-    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
-        return skip.blocker(.@"D-193");
-    }
+    // D-193 triage: ungated. Body checks result value only (no
+    // arch-pinned byte asserts) and emits via comptime native_emit,
+    // so mac-arm64 + linux-x86_64 both exercise it. Win deferred per
+    // ADR-0122 phaseEnd batch.
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
     // (param f32) (result f32) — body: local.get 0; end
     // The prologue STR S0, [SP, #0] (multi-arg-entry FP path);
     // local.get 0 must LDR S<vd>, [SP, #0] (D-NNN FP-local fix);
@@ -2478,9 +2499,11 @@ test "entry: f32 local round-trip — local.get 0 of f32 param via V0" {
 }
 
 test "entry: callI64NoArgs — i64.const 0xDEADBEEFCAFE returns full 64-bit" {
-    if (!(builtin.os.tag == .macos and builtin.cpu.arch == .aarch64)) {
-        return skip.blocker(.@"D-193");
-    }
+    // D-193 triage: ungated. Body checks result value only (no
+    // arch-pinned byte asserts) and emits via comptime native_emit,
+    // so mac-arm64 + linux-x86_64 both exercise it. Win deferred per
+    // ADR-0122 phaseEnd batch.
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
     // (result i64) — body: i64.const 0xDEADBEEFCAFE; end
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i64} };
     var fn0 = ZirFunc.init(0, sig, &.{});
