@@ -33,24 +33,55 @@ already-designed (ADR-0114) but UNIMPLEMENTED substrate.
 - Single-module EH EXECUTES (interp tests pass, `mvp.zig:1160+`); JIT
   throw/throw_ref emit incomplete (`arm64/emit.zig:1172`).
 
+## CORRECTION (cycle 111) — the blocker is PARSE-side, not execution
+
+Cycle 110 landed `ImportKind.tag` and the handover claimed try_table.1/.5
+"→ parse+compile+INSTANTIATE". **That claim is FALSE** — it was a stale
+run-step-cache misread (see `2026-05-29-zig-run-step-cache-stale-diag.md`).
+Running the runner binary DIRECTLY shows try_table.1/.5 STILL
+`compile FAIL: ParseFailed`; all 33 try_table.1 asserts fail `NO-CURINST`
+(cur_inst_idx null). Only try_table.0 (source) + try_table.2 instantiate.
+
+The real chain, in PARSE order (sections decode sequentially; Type=1
+is first, so the earliest blocker wins):
+
+1. **exnref `0x69` as a bare ValType** — try_table.1's Type section (id 1)
+   has functype results `(i32, exnref)` = `7f 69`. `init_expr.zig:readValType`
+   has arms `0x7F..0x6A` + typed-ref `0x63/0x64` but **no bare `0x69`**.
+   `zir.zig:40` confirms deliberate ("0x69 exn … not yet a ValType").
+   This fails FIRST, in section 1 — so cycle-110's `ImportKind.tag`
+   (section 2) is currently UNREACHABLE for try_table.1 (landed correct
+   but premature; exercised only by its unit tests, not the corpus).
+2. **Tag SECTION (id 13) decode** — try_table.1 DEFINES 7 tags
+   (`0d 0f 07 …` at byte ~0x94), distinct from the tag IMPORT. Needs a
+   section decoder (cycle 110 added import + export handling only).
+3. `ImportKind.tag` import — DONE cycle 110 (reached after 1+2 clear).
+4. try_table / catch-clause immediate decode — `lower.zig` +
+   `validator.zig` already have `0x1F`/`0x08`/`0x0A` arms; verify the
+   catch-vec decode handles this module's clauses.
+
+Only AFTER parse succeeds do the execution-side steps below apply.
+
 ## How to apply (10.E-xmodule-tags bundle plan, per ADR-0114)
 
 Multi-cycle, each cycle moving a STAGE (avoid on-branch-spike):
-1. Parser: `ImportKind.tag` + `ImportPayload.tag_typeidx` + un-filter
-   tag exports → try_table.1 PARSES past the tag import.
-2. `ImportBinding.tag` + instantiate switch arm + checkImportTypeMatches
-   for tags + Linker `defineCrossModuleTag` + `Payload.tag_alias` +
-   runner `.register` tag arm → try_table.1 INSTANTIATES.
-3. Runtime `*TagInstance` (ADR-0114 `tag.zig`) + `rt.tags` storage +
-   imported tags resolve to source instance's TagInstance.
-4. `Exception.tag_idx` → `*TagInstance`; throw/catch match by pointer
-   → cross-module throw/catch MATCHES → corpus asserts pass.
-5. JIT throw/throw_ref emit (if corpus needs JIT path).
+1. **`ValType.exnref` + readValType `0x69` arm** (+ the exhaustive-switch
+   cascade, à la cycle-110 `ImportKind.tag`) → try_table.1 Type section
+   PARSES. **NEXT chunk.**
+2. **Tag section (id 13) decoder** → module-defined tags parse.
+3. instantiate-side tag binding (`ImportBinding.tag` + instantiate arm +
+   checkImportTypeMatches + Linker `defineCrossModuleTag` + runner
+   `.register` tag arm) → try_table.1 INSTANTIATES.
+4. Runtime `*TagInstance` (ADR-0114 `tag.zig`) + `rt.tags`; imported
+   tags resolve to source instance's TagInstance.
+5. `Exception.tag_idx` → `*TagInstance`; throw/catch match by pointer →
+   cross-module throw/catch MATCHES → corpus asserts pass.
+6. JIT throw/throw_ref emit (if corpus needs JIT path).
 
-Note: steps 1-2 are 0-corpus-delta (instantiate works but asserts fail
-on tag-identity mismatch until step 4). Frame the bundle so each
-cycle's observable is the STAGE move (parse→instantiate→match), not
-the corpus count, until step 4.
+Steps 1-2 ARE corpus-observable: each flips a try_table.1 module from
+`compile FAIL:ParseFailed` toward parse. Verify by running the runner
+BINARY DIRECTLY (`zig build` run-step caches stderr — see the cache
+lesson), grepping `[wasm-3.0-assert] exception-handling/.* compile FAIL`.
 
 ## Related
 
