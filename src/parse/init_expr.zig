@@ -105,6 +105,10 @@ pub fn readValType(body: []const u8, pos: *usize) Error!ValType {
         0x6C => ValType.i31ref,
         0x6B => ValType.structref,
         0x6A => ValType.arrayref,
+        // Wasm 3.0 EH §5.3.1 — bare `exnref` = `(ref null exn)`.
+        // The Type section of EH modules (e.g. try_table.1's
+        // catch_ref result tuples `(i32, exnref)`) uses this byte.
+        0x69 => ValType.exnref,
         // ADR-0123 Cycle 3 (10.R-valtype-widen) — Wasm 3.0
         // function-references §5.3.4: `(ref null ht)` = 0x63 + ht;
         // `(ref ht)` = 0x64 + ht. The ht-byte is either:
@@ -235,6 +239,17 @@ test "readValType: i31ref (Wasm 3.0 GC byte 0x6C; 10.G op_gc cycle 3)" {
     var pos: usize = 0;
     const body = [_]u8{0x6C};
     try testing.expectEqual(ValType.i31ref, try readValType(&body, &pos));
+    try testing.expectEqual(@as(usize, 1), pos);
+}
+
+test "readValType: exnref (Wasm 3.0 EH byte 0x69; 10.E-xmodule-tags cycle 112)" {
+    // Wasm 3.0 EH §5.3.1 — bare `exnref` = `(ref null exn)`.
+    // try_table.1's Type section has functype results `(i32, exnref)`
+    // = `7f 69`; the bare 0x69 was BadValType pre-cycle-112 and is the
+    // FIRST parse blocker for the EH cross-module corpus.
+    var pos: usize = 0;
+    const body = [_]u8{0x69};
+    try testing.expectEqual(ValType.exnref, try readValType(&body, &pos));
     try testing.expectEqual(@as(usize, 1), pos);
 }
 

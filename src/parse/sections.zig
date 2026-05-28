@@ -674,6 +674,27 @@ test "decodeTypes: (i32, i64) -> (f32, f64)" {
     try testing.expectEqualSlices(ValType, &[_]ValType{ .f32, .f64 }, ft.results);
 }
 
+test "decodeTypes: functype with exnref result (Wasm 3.0 EH; 10.E-xmodule-tags cycle 112)" {
+    // try_table.1's catch_ref result tuples encode as `(i32, exnref)`
+    // = 0x60 0x00 0x02 0x7F 0x69 — the bare-0x69 exnref in the Type
+    // section was the FIRST parse blocker for the EH cross-module
+    // corpus (decodeTypes → readValType BadValType pre-cycle-112).
+    const body = [_]u8{
+        0x01, // count=1
+        0x60, // func
+        0x00, // 0 params
+        0x02, 0x7F, 0x69, // 2 results: i32, exnref
+    };
+    var t = try decodeTypes(testing.allocator, &body);
+    defer t.deinit();
+    try testing.expectEqual(@as(usize, 1), t.items.len);
+    const ft = t.items[0];
+    try testing.expectEqual(@as(usize, 0), ft.params.len);
+    try testing.expectEqual(@as(usize, 2), ft.results.len);
+    try testing.expectEqual(ValType.i32, ft.results[0]);
+    try testing.expect(ft.results[1].eql(ValType.exnref));
+}
+
 test "decodeTypes: two functypes preserved in order" {
     const body = [_]u8{
         0x02,

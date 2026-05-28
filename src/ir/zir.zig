@@ -37,7 +37,7 @@ const trace = @import("../diagnostic/trace.zig");
 ///   0x6C i31ref     = ValType.i31ref     = .{ .ref = .abs(.i31, true) }
 ///   0x6B structref  = ValType.structref  = .{ .ref = .abs(.struct_, true) }
 ///   0x6A arrayref   = ValType.arrayref   = .{ .ref = .abs(.array, true) }
-///   0x69 exn        (10.E + 10.G; not yet a ValType — used in tags)
+///   0x69 exnref     = ValType.exnref     = .{ .ref = .abs(.exn, true) }
 ///   0x63 (ref null ht)  = .{ .ref = .{ .nullable = true,  .heap_type = ht } }
 ///   0x64 (ref ht)       = .{ .ref = .{ .nullable = false, .heap_type = ht } }
 ///
@@ -62,6 +62,11 @@ pub const ValType = union(enum) {
     pub const i31ref: ValType = .{ .ref = RefType.abs(.i31, true) };
     pub const structref: ValType = .{ .ref = RefType.abs(.struct_, true) };
     pub const arrayref: ValType = .{ .ref = RefType.abs(.array, true) };
+    /// Wasm 3.0 EH §5.3.1 — `exnref` = `(ref null exn)`. The `.exn`
+    /// abstract head already exists (used by tag heap-types); this
+    /// alias + the `readValType` 0x69 arm let the bare byte appear as
+    /// a value type (try_table catch_ref result tuples). 10.E.
+    pub const exnref: ValType = .{ .ref = RefType.abs(.exn, true) };
 
     /// Reverse-map a RefType to a legacy abstract-ref ValType. Used
     /// by post-migration code paths that still want the byte-pinned
