@@ -6,12 +6,11 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 86 — wired `check_rule_paths` /
-  `check_skill_descriptions` / `check_doc_state` `--gate` into
-  `scripts/gate_commit.sh` via scope flags (RULES_TOUCHED /
-  SKILLS_TOUCHED / DEV_MD_TOUCHED). Drift detected by these lints
-  now blocks at source commit. cycle-82 audit cohort fully closed
-  across cycles 82-86.
+- **HEAD**: cycle 87 — debt.md re-evaluation pass for 11 stale rows
+  (D-026/007/010/020/021/022/028/074/075/082/148). All barriers
+  verified to still hold via individual probes; Last-reviewed
+  bumped to 2026-05-28. No discharges. Cycle 86 `check_doc_state
+  --gate` wiring confirmed operational on this commit.
 - Active debt rows: **18** — all `blocked-by:`; zero `now`.
 - Mac aarch64 test-all + lint green at HEAD prior to this chunk
   (52d9c784); ubuntu kick at 52d9c784 confirmed green (Step 0.7
@@ -22,27 +21,28 @@
 
 - None.
 
-## Active task — cycle 87: next autonomous chunk
+## Active task — cycle 88: next autonomous chunk
 
 `[wasm-3.0-assert] assert_invalid pass=134 fail=0` unchanged.
 Autonomous yield within §10 row 10.E / 10.G / further 10.M
 remains gated on ADR-0120 / ADR-0123 Accept or D-179 wabt
 upgrade.
 
-Cycle 87 candidates:
+Cycle 88 candidates:
 
 1. **Function-references / 10.R bake extension** — survey
    whether any ADR-0123-independent .wast modules remain
    un-baked in the function-references upstream corpus.
    Pure infra cycle.
-2. **Wasm 1.0 / 2.0 corpus coverage audit** — alt infra cycle.
-3. **debt.md re-evaluation pass** — 12 active rows crossed the
-   `Last reviewed > 14d` threshold per cycle-82 §F finding; walk
-   each and either re-confirm barrier or note dissolution.
+2. **Wasm 1.0 / 2.0 corpus coverage audit** — survey upstream
+   corpus for un-baked fixtures; alt infra cycle.
+3. **Cycle-82 audit §A staleness re-run** — confirm cohort
+   discharge closed the original `block` findings; small
+   verification chunk.
 
-Cycle 87 picks (3) — debt re-eval has direct compounding value
-(stale rows hide barrier dissolutions); pure-doc cycle so the
-new docs-only short-circuit applies.
+Cycle 88 picks (1) — function-references bake extension; lowest
+risk + measurable observable delta if any ADR-independent
+modules exist.
 
 ## Larger §10 work (blocked / later)
 
