@@ -6,54 +6,58 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 113 (`c968689c`) — `catch_ref`/`catch_all_ref`
-  structural label-type matching in `validateCatchVec` (the stale
-  "tighten once exnref lands" TODO; exnref landed cyc112). Unit-tested
-  + lint green + no spec-corpus regression.
-- **Re-correction (cyc113)**: the EH blocker is the **VALIDATOR**, not
-  parse. Direct-binary probe of `frontendValidate` shows try_table.1
-  (`24 funcs,7 tags`) + try_table.2 + try_table.5 ALL **reach the
-  validator** — Type(exnref)+Import(tag)+Tag-section(id 13, `decodeTags`
-  already exists+wired) all decode. try_table.1 fails at
-  `validate func[5]=catch-complex-1 StackTypeMismatch`. The runner's
-  "ParseFailed" is a lie (`Engine.compile` collapses validate errors →
-  D-197). cyc113's catch_ref fix is correct but ORTHOGONAL (catch-
-  complex-1 uses plain `catch` 0x00, not catch_ref).
-- Prior: 112 exnref ValType (`64315609`); 111 stale-cache correction
-  (`f5884d31`); 110 ImportKind.tag.
-- Mac test+lint green cyc113. ubuntu: cyc112 HEAD green
-  (`OK (HEAD=7e7c51d5)`); cyc113 kick backgrounded.
+- **HEAD**: cycle 114 (`5fdab0bf`) — `frontendValidate` now prepends
+  IMPORTED tags to the validator tag index space (was defined-only via
+  `decodeTags`). try_table.1 imports `test::e0` ×2, so catch/throw
+  indices were offset by 2 → `catch-complex-1` StackTypeMismatch (the
+  cyc110-113 "ParseFailed" was THIS validate failure, masked per D-197).
+  **try_table.1 + try_table.5 now PASS validation** (imp=2 defined=7
+  total=9, direct-binary verified). STAGE: validate → **instantiate
+  FAIL: UnknownImport** (Linker doesn't bind the imported tag yet).
+- Prior: 113 catch_ref/catch_all_ref structural matching (`c968689c`,
+  correct but orthogonal); 112 exnref ValType (`64315609`); 111
+  stale-cache correction; 110 ImportKind.tag.
+- Mac test+lint green cyc114; no spec-corpus regression. ubuntu: cyc113
+  HEAD green (`OK (HEAD=1226ff90)`); cyc114 kick backgrounded.
 
 ## Active bundle
 
 - **Bundle-ID**: 10.E-xmodule-tags (EH cross-module, ADR-0114)
-- **Cycles-remaining**: ~5
-- **Continuity-memo**: PARSE fully works for try_table.1 (exnref cyc112
-  + ImportKind.tag cyc110 + decodeTags pre-existing). Blocker chain is
-  now VALIDATOR → instantiate → execution. Validator: `catch-complex-1`
-  (func[5]) StackTypeMismatch over nested `try_table (result i32)`/
-  `block`/`if`/`throw`/`br 1` with plain `catch`(0x00) on param-carrying
-  tags. Body bytes + candidate causes in
-  `lessons/2026-05-29-eh-cross-module-tag-substrate-scope.md`
-  (CORRECTION #2). **VERIFY by running the runner BINARY DIRECTLY**
-  (`/tmp/c<NN>` cache-dir + `/bin/ls -t` binary; zig-build stderr is
-  cache/lossy — D-197 + cache lesson).
+- **Cycles-remaining**: ~4 (parse+validate done; instantiate-binding
+  next, then execution)
+- **Continuity-memo**: PARSE (cyc112) + VALIDATE (cyc114) now pass for
+  try_table.1/.5. Blocker chain: ~~parse~~ → ~~validate~~ →
+  **INSTANTIATE (UnknownImport)** → execution. try_table.1 imports
+  `test::e0` (tag) + `test::throw` (func) from try_table.0. The runner's
+  `.register` handler binds memory+func exports (cyc110) but NOT tags;
+  tag exports were filtered at decode (`sections.zig:606` `kind==4
+  continue`); no `ImportBinding.tag` / Linker tag API; instantiate's
+  `.tag` import arm returns `ImportTypeMismatch` (stub). Per
+  ADR-0114 + the cyc109 lesson plan. **VERIFY by running the runner
+  BINARY DIRECTLY** (`/tmp/c<NN>` cache-dir + `/bin/ls -t`; zig-build
+  stderr is cache/lossy — D-197 + cache lesson).
 - **Exit-condition**: exception-handling try_table corpus return pass
   ≥ 5/34 (currently 0/34).
 
-## Active task — cycle 114: catch-complex-1 validator StackTypeMismatch
+## Active task — cycle 115: instantiate-side tag binding (UnknownImport)
 
-Decode catch-complex-1's body (bytes in the lesson) + find where the
-validator's type stack diverges. Smallest red test: a hand-rolled
-`validateFunctionWithTags` body mirroring the diverging fragment
-(likely a plain `catch N L` whose tag has params + the label type, OR
-the `try_table (result i32)` body/`br`-to-block-result flow). Confirm
-red (StackTypeMismatch), fix the validator, green. Observable: rerun
-the runner BINARY DIRECTLY; try_table.1 func[5] should pass (advance to
-the next failing func or to instantiate). If the fix is an ADR-grade
-control-frame/label-type semantics change (§4-adjacent) file ADR first;
-a localized type-flow bug fix is routine. Temp-probe `frontendValidate`
-(EH-gated `std.debug.print`, revert after) to re-localize as needed.
+try_table.1 validates but `instantiate FAIL: UnknownImport` — the
+imported `test::e0` tag isn't bound. Step-probe what the c_api
+instantiate path needs (the runner uses `Engine.compile` →
+`Linker.instantiate`). Likely chain (do the smallest first, verify each
+by DIRECT binary run): (1) un-filter tag EXPORTS at decode
+(`sections.zig:606`) so try_table.0's `e0` tag export reaches
+`exports_storage` + `export_types` (ExportType.tag already exists,
+`instance.zig:96`); (2) runner `.register` (`spec_assert_runner_wasm_3_0.zig:357`)
+binds tag exports into the Linker; (3) Linker tag-resolution +
+`ImportBinding.tag` so instantiate's `.tag` arm resolves instead of
+`ImportTypeMismatch`. This is identity-by-index for now; ADR-0114
+`*TagInstance` pointer-identity is a LATER step (only needed once
+cross-module throw/catch executes). Smallest red: a focused test or the
+corpus stage-move (UnknownImport → instantiate OK). Deviation watch:
+new `Linker.Payload.tag` / `ImportBinding.tag` variants are §4-adjacent
+type additions — routine if mirroring the func/memory binding shape;
+file ADR only if the identity model changes.
 
 ## Larger §10 work (later bundles)
 
@@ -67,14 +71,14 @@ a localized type-flow bug fix is routine. Temp-probe `frontendValidate`
   `resolveFuncrefGlobals`; externref-elem runner arg parsing.
 - **10.P close gate** — user touchpoint by construction.
 
-## Spec runner observable (cycle-113, verified by DIRECT binary run)
+## Spec runner observable (cycle-114, verified by DIRECT binary run)
 
 ```
 [memory64           ] return=337 trap=205 invalid=83  (all pass)
 [tail-call          ] return=71  trap=7   invalid=24  (all pass)
 [exception-handling ] return=34(fail34) trap=2(fail2) invalid=7(pass) exception=4(fail4)
-   └─ try_table.0/.2 instantiate; .1/.5 reach validator then
-      catch-complex-1 (func[5]) StackTypeMismatch → compile FAIL.
+   └─ try_table.0/.2 instantiate; .1/.5 now VALIDATE (cyc114) then
+      instantiate FAIL: UnknownImport (imported tag unbound).
 [function-references] return=39(pass=32 fail=1) trap=4(pass) invalid=18(pass)
 [gc                 ] return=407(fail) trap=100(fail) invalid=60(pass=55 fail=5)
 [multi-memory       ] return=407(pass=387 fail=20) trap=238(pass=237 fail=1)
