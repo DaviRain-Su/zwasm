@@ -6,12 +6,12 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 82 — `audit_scaffolding` follow-through.
-  Bookkeeping: D-186 re-flipped to Active (was mis-filed); 11
-  future-dated `2026-05-29` entries corrected to actual commit
-  dates; 13 oldest Discharged rows pruned; lesson file renamed
-  `2026-05-28-gate-tail-vs-exit-code.md`; Doc-state markers added
-  to 12 `.dev/*.md` files.
+- **HEAD**: cycle 83 — backfilled 7 ADR Revision-history SHA
+  placeholders (ADR-0070 / 0107 / 0118 / 0119). cycle 82
+  (audit_scaffolding follow-through) before that: D-186
+  re-flipped to Active, 11 future-dated entries corrected, 13
+  oldest Discharged rows pruned, Doc-state markers added to 12
+  `.dev/*.md` files.
 - Active debt rows: **20** — all `blocked-by:`; zero `now`.
 - Mac aarch64 test-all + lint green at HEAD prior to this chunk
   (52d9c784); ubuntu kick at 52d9c784 confirmed green (Step 0.7
@@ -22,29 +22,28 @@
 
 - None.
 
-## Active task — cycle 83: next autonomous chunk
+## Active task — cycle 84: next autonomous chunk
 
 `[wasm-3.0-assert] assert_invalid pass=134 fail=0` unchanged.
 Autonomous yield within §10 row 10.E / 10.G / further 10.M
 remains gated on ADR-0120 / ADR-0123 Accept or D-179 wabt
 upgrade.
 
-Cycle 83 candidates (remaining audit `soon` findings):
+Cycle 84 candidates (remaining audit `soon` findings):
 
-1. **ADR `<backfill>` SHA placeholders (8 across ADR-0118 /
-   ADR-0119)** — phase-boundary cohort; safe to batch.
-2. **debug_jit_auto SKILL.md** = 733 lines (CHECKS §B.4
+1. **debug_jit_auto SKILL.md split** = 733 lines (CHECKS §B.4
    threshold 500); split recipes into sibling RECIPES.md.
-3. **D-058 / D-059 audit-lint script authoring** — these debt
-   rows discharge-trigger is "Phase 10 boundary audit"; cycle 82
-   IS that audit, so file the scripts inline OR document
-   non-discharge per row.
-4. **Function-references / 10.R bake extension** (was cycle-82
+2. **D-058 / D-059 audit-lint script authoring** — these debt
+   rows' discharge-trigger is "Phase 10 boundary audit"; cycle
+   82 IS that audit. Author the scripts (`check_rule_paths.sh`
+   + `check_skill_descriptions.sh`) OR document non-discharge
+   per row.
+3. **Function-references / 10.R bake extension** (was cycle-82
    alt-candidate 1).
 
-Cycle 83 picks (1) — ADR backfill is small, mechanical, and
-clears the longest-standing `<backfill>` strings before they
-accumulate.
+Cycle 84 picks (1) — SKILL.md split is the only audit `soon`
+remaining that's a pure refactor with clean structural axis
+(recipes vs procedure prose).
 
 ## Larger §10 work (blocked / later)
 
