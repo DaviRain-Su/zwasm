@@ -38,6 +38,13 @@ const PROPOSALS = [_][]const u8{
     "exception-handling",
     "gc",
     "function-references",
+    // 10.M cycle 65 — multi-memory corpus. Treated as a sibling
+    // proposal subdir under `wasm-3.0-assert/` because the upstream
+    // fixtures live in `memory64/test/core/multi-memory/` (the
+    // memory64 + multi-memory proposals are jointly tracked
+    // upstream). Bundle 10.M-multi-memory exercises load/store
+    // routing through MemArgExtra.memidx (cycle 64 substrate).
+    "multi-memory",
 };
 
 const ProposalSummary = struct {

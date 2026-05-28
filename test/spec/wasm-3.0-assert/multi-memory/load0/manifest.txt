@@ -1,0 +1,3 @@
+module load0.0.wasm
+assert_return load1 i32:0 -> i64:1
+assert_return load2 i32:0 -> i64:2

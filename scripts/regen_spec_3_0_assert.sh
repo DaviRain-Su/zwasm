@@ -60,6 +60,11 @@ declare -a SMOKE=(
     "tail-call/return_call"
     "exception-handling/try_table"
     "function-references/ref"
+    # 10.M cycle 65 — multi-memory corpus (load/store via memidx > 0).
+    # Subset chosen to exercise the cycle-64 interp routing without
+    # depending on memory.size / memory.grow with memidx > 0 (still
+    # rejected by `lower.zig::emitMemoryReserved` — separate cycle).
+    "multi-memory/load0"
 )
 
 bake_one() {

@@ -43,11 +43,15 @@ proposal_path() {
         exception-handling)  echo "exception-handling/test/core" ;;
         gc)                  echo "gc/test/core/gc" ;;
         function-references) echo "function-references/test/core" ;;
+        # 10.M cycle 65 — multi-memory proposal lives under the
+        # memory64 upstream as a sub-test-core directory; jointly
+        # tracked but exposed as its own zwasm corpus proposal.
+        multi-memory)        echo "memory64/test/core/multi-memory" ;;
         *) return 1 ;;
     esac
 }
 
-PROPOSALS=(memory64 tail-call exception-handling gc function-references)
+PROPOSALS=(memory64 tail-call exception-handling gc function-references multi-memory)
 
 check_one() {
     local p="$1"
