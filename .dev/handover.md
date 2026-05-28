@@ -6,13 +6,12 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 83 — backfilled 7 ADR Revision-history SHA
-  placeholders (ADR-0070 / 0107 / 0118 / 0119). cycle 82
-  (audit_scaffolding follow-through) before that: D-186
-  re-flipped to Active, 11 future-dated entries corrected, 13
-  oldest Discharged rows pruned, Doc-state markers added to 12
-  `.dev/*.md` files.
-- Active debt rows: **20** — all `blocked-by:`; zero `now`.
+- **HEAD**: cycle 85 — authored
+  `scripts/check_rule_paths.sh` + `scripts/check_skill_descriptions.sh`
+  (D-058 / D-059 discharged; cycle-82 audit `soon` cohort fully
+  closed across cycles 83/84/85: ADR backfill + SKILL.md split +
+  lint scripts).
+- Active debt rows: **18** — all `blocked-by:`; zero `now`.
 - Mac aarch64 test-all + lint green at HEAD prior to this chunk
   (52d9c784); ubuntu kick at 52d9c784 confirmed green (Step 0.7
   passed; "failed command:" output is intentional negative-path
@@ -22,28 +21,29 @@
 
 - None.
 
-## Active task — cycle 84: next autonomous chunk
+## Active task — cycle 86: next autonomous chunk
 
 `[wasm-3.0-assert] assert_invalid pass=134 fail=0` unchanged.
 Autonomous yield within §10 row 10.E / 10.G / further 10.M
 remains gated on ADR-0120 / ADR-0123 Accept or D-179 wabt
 upgrade.
 
-Cycle 84 candidates (remaining audit `soon` findings):
+The cycle-82 audit `soon` cohort is now fully closed.
+Remaining candidates:
 
-1. **debug_jit_auto SKILL.md split** = 733 lines (CHECKS §B.4
-   threshold 500); split recipes into sibling RECIPES.md.
-2. **D-058 / D-059 audit-lint script authoring** — these debt
-   rows' discharge-trigger is "Phase 10 boundary audit"; cycle
-   82 IS that audit. Author the scripts (`check_rule_paths.sh`
-   + `check_skill_descriptions.sh`) OR document non-discharge
-   per row.
-3. **Function-references / 10.R bake extension** (was cycle-82
-   alt-candidate 1).
+1. **Function-references / 10.R bake extension** — survey
+   whether any ADR-0123-independent .wast modules remain
+   un-baked in the function-references upstream corpus.
+   Pure infra cycle.
+2. **Wasm 1.0 / 2.0 corpus coverage audit** — alt infra cycle.
+3. **Wire `check_rule_paths.sh` / `check_skill_descriptions.sh`
+   `--gate` into `gate_commit.sh` or `audit_scaffolding §G`**
+   so future drift is caught at commit time (currently
+   informational-only invocation).
 
-Cycle 84 picks (1) — SKILL.md split is the only audit `soon`
-remaining that's a pure refactor with clean structural axis
-(recipes vs procedure prose).
+Cycle 86 picks (3) — small wiring chunk; closes the cycle-85
+lint pair into the gate pipeline so future drift can't sneak
+past commit.
 
 ## Larger §10 work (blocked / later)
 
