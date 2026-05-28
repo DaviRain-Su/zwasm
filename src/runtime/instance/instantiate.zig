@@ -111,6 +111,10 @@ pub fn frontendValidate(alloc: std.mem.Allocator, binary: []const u8) bool {
             // Imported memories aren't counted by this loop —
             // function/global/table tallies feed `func_types` sizing.
         },
+        .tag => {
+            // EH tag imports (10.E-xmodule-tags) don't contribute to
+            // the func/global/table index spaces this loop sizes.
+        },
     };
 
     const func_types = alloc.alloc(zir.FuncType, imp_func_count + defined_func_indices.len) catch return false;
@@ -848,6 +852,7 @@ pub fn instantiateRuntime(
         .table => imp_table_count += 1,
         .memory => imp_memory_count += 1,
         .global => imp_global_count += 1,
+        .tag => {}, // EH tag imports don't tally into these index spaces (10.E)
     };
 
     // Type / function / code sections may be absent for modules
@@ -1272,5 +1277,10 @@ fn checkImportTypeMatches(
                 if (max_s > wm) return error.ImportTypeMismatch;
             }
         },
+        // EH tag imports (10.E-xmodule-tags) have no ImportBinding
+        // variant yet — they never reach here in step 1 (the binding
+        // builder rejects them). Arm present for exhaustiveness; tag
+        // type-matching lands with the Linker tag-binding (step 2).
+        .tag => return error.ImportTypeMismatch,
     }
 }

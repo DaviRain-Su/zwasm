@@ -445,6 +445,11 @@ pub const Linker = struct {
                         } }) catch return error.OutOfMemory;
                     },
                     .table => return error.ImportKindMismatch,
+                    // EH tag imports (10.E-xmodule-tags): cross-module
+                    // tag binding (Linker defineCrossModuleTag) lands in
+                    // step 2; until then a tag import is unbound (findEntry
+                    // above returns UnknownImport before reaching here).
+                    .tag => return error.UnknownImport,
                 }
             }
         }

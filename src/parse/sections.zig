@@ -231,6 +231,10 @@ pub const ImportKind = enum(u8) {
     table = 0x01,
     memory = 0x02,
     global = 0x03,
+    // Wasm 3.0 EH (10.E-xmodule-tags / ADR-0114): tag import
+    // `(import "M" "e0" (tag (type N)))`. try_table.1 imports a tag
+    // from the registered try_table.0.
+    tag = 0x04,
 };
 
 pub const Import = struct {
@@ -250,6 +254,8 @@ pub const ImportPayload = union(enum) {
     table: struct { elem_type: ValType, min: u32, max: ?u32 },
     memory: MemoryEntry,
     global: struct { valtype: ValType, mutable: bool },
+    // Wasm 3.0 EH tag import — the tag's type-section index (10.E).
+    tag_typeidx: u32,
 };
 
 pub const Imports = struct {
@@ -284,11 +290,19 @@ pub fn decodeImports(parent_alloc: Allocator, body: []const u8) Error!Imports {
         const k = body[pos];
         pos += 1;
         const kind: ImportKind = switch (k) {
-            0x00, 0x01, 0x02, 0x03 => @enumFromInt(k),
+            0x00, 0x01, 0x02, 0x03, 0x04 => @enumFromInt(k),
             else => return Error.InvalidFunctype,
         };
         const payload: ImportPayload = switch (kind) {
             .func => .{ .func_typeidx = try leb128.readUleb128(u32, body, &pos) },
+            .tag => blk: {
+                // tagtype = attribute(0x00) + typeidx (Wasm 3.0 EH).
+                if (pos >= body.len) return Error.UnexpectedEnd;
+                const attr = body[pos];
+                pos += 1;
+                if (attr != 0x00) return Error.InvalidFunctype;
+                break :blk .{ .tag_typeidx = try leb128.readUleb128(u32, body, &pos) };
+            },
             .table => blk: {
                 if (pos >= body.len) return Error.UnexpectedEnd;
                 const reftype_byte = body[pos];
@@ -988,6 +1002,23 @@ test "decodeImports: single global import (immutable i32)" {
 
 test "decodeImports: rejects unknown desc kind" {
     const body = [_]u8{ 0x01, 0x00, 0x00, 0x05 };
+    try testing.expectError(Error.InvalidFunctype, decodeImports(testing.allocator, &body));
+}
+
+test "decodeImports: tag import (Wasm 3.0 EH, 10.E-xmodule-tags)" {
+    // count=1; mod="test"; name="e0"; desc=0x04 (tag) attr=0x00 typeidx=0.
+    // try_table.1 imports `test::e0` (a tag) — previously rejected at
+    // parse (kind 0x04 → InvalidFunctype); now decodes to ImportKind.tag.
+    const body = [_]u8{ 0x01, 0x04, 't', 'e', 's', 't', 0x02, 'e', '0', 0x04, 0x00, 0x00 };
+    var i = try decodeImports(testing.allocator, &body);
+    defer i.deinit();
+    try testing.expectEqual(ImportKind.tag, i.items[0].kind);
+    try testing.expectEqual(@as(u32, 0), i.items[0].payload.tag_typeidx);
+}
+
+test "decodeImports: tag import with non-zero attribute byte rejected" {
+    // tagtype attribute must be 0x00 (reserved); 0x01 is malformed.
+    const body = [_]u8{ 0x01, 0x04, 't', 'e', 's', 't', 0x02, 'e', '0', 0x04, 0x01, 0x00 };
     try testing.expectError(Error.InvalidFunctype, decodeImports(testing.allocator, &body));
 }
 

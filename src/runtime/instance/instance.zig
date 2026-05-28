@@ -90,6 +90,10 @@ pub const ExportType = union(sections.ImportKind) {
     table: struct { elem_type: zir.ValType, min: u32, max: ?u32 },
     memory: struct { idx_type: sections.MemoryEntry.IdxType = .i32, min: u64, max: ?u64 },
     global: struct { valtype: zir.ValType, mutable: bool },
+    // EH tag export type (10.E-xmodule-tags): the tag's func-type
+    // signature (param types; tags have no results). Used by cross-
+    // module tag import-vs-export matching (step 2+).
+    tag: zir.FuncType,
 };
 
 // ============================================================

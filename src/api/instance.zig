@@ -546,6 +546,11 @@ fn buildBindings(
             .table => .table,
             .memory => .memory,
             .global => .global,
+            // EH tag imports (10.E-xmodule-tags) don't bind through the
+            // legacy ext_ptr/ExternKind c_api path (ExternKind has no
+            // tag); cross-module tag binding goes via the Linker (step
+            // 2). Reaching here = unbound tag import.
+            .tag => return error.ImportKindMismatch,
         };
         if (ext.kind != want_kind) return error.ImportKindMismatch;
         const source_inst = ext.instance orelse return error.UnknownImportModule;
@@ -625,6 +630,10 @@ fn buildBindings(
                     .source_mutable = desc.mutable,
                 } };
             },
+            // Unreachable: the `want_kind` switch above returns early
+            // for `.tag` (tags don't bind through this legacy c_api
+            // path). Arm present only for exhaustiveness (10.E).
+            .tag => return error.ImportKindMismatch,
         }
     }
     return bindings;

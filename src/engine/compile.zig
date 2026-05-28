@@ -430,6 +430,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
                     .table => num_table_imports += 1,
                     .memory => num_memory_imports += 1,
                     .global => num_global_imports += 1,
+                    .tag => {}, // EH tag imports don't shift table/mem/global import bases (10.E)
                 };
             }
             const defined_tables: u32 = if (module.find(.table)) |ts| blk: {
@@ -744,6 +745,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
                 .table => num_table_imports += 1,
                 .memory => num_memory_imports += 1,
                 .global => num_global_imports += 1,
+                .tag => {}, // EH tag imports don't shift table/mem/global bases (10.E)
             };
         }
         const total_tables: u32 = num_table_imports + @as(u32, @intCast(if (tables_buf) |t| t.items.len else 0));

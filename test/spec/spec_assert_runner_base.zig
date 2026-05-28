@@ -918,7 +918,6 @@ fn populateTableRefs(
     }
 }
 
-
 /// Capacity for the spec-runner's `host_dispatch_base` stub
 /// array. Spec corpus modules typically import 0–2 functions
 /// (start.wast's `spectest.print_i32`); 64 is comfortable
@@ -1938,6 +1937,7 @@ pub fn isSpectestNonFuncBindable(imp: zwasm.parse.sections.Import) bool {
         .global => e.kind == .global and imp.payload.global.valtype.eql(e.valtype),
         .table => e.kind == .table,
         .memory => e.kind == .memory,
+        .tag => false, // spectest exports no tags (10.E-xmodule-tags)
     };
 }
 
@@ -2000,7 +2000,7 @@ pub fn hasUnbindableImports(
             // runCorpus start). Previously: unconditional return
             // true. Triggers preparatory infra (B146-B158) for
             // global / table / memory binding.
-            .table, .memory, .global => {
+            .table, .memory, .global, .tag => {
                 if (registered.contains(imp.module)) continue;
                 return true;
             },
@@ -2076,6 +2076,11 @@ pub fn hasIncompatibleImportType(
                 // imports prefix) to read the actual type.
                 if (crossModuleNonFuncImportMismatch(allocator, exp.bytes_owned, imp)) return true;
             },
+            .tag => {
+                // EH tag imports aren't link-type-checked in this
+                // (non-EH) runner; the wasm-3.0 runner owns EH
+                // cross-module tags (10.E-xmodule-tags).
+            },
         }
     }
     return false;
@@ -2111,6 +2116,7 @@ fn crossModuleNonFuncImportMismatch(
         .table => 1,
         .memory => 2,
         .global => 3,
+        .tag => 4, // EH tag import kind byte (10.E-xmodule-tags)
     };
     const exp_kind_byte: u8 = switch (e.kind) {
         .func => 0,
@@ -2133,6 +2139,10 @@ fn crossModuleNonFuncImportMismatch(
             const want = imp.payload.memory;
             return crossModuleMemoryMismatch(allocator, &module, e.idx, want.min, want.max);
         },
+        // Unreachable: a tag import (want_kind_byte=4) can't match any
+        // ExportDesc kind byte (0-3, tags filtered from exports), so
+        // the kind-byte check above already returned. 10.E.
+        .tag => return false,
     }
 }
 
@@ -3912,9 +3922,11 @@ test "RegisteredExporter γ-3.b-i: ensureCompiledAndRt populates scratch_func_en
         // type
         0x01, 0x04, 0x01, 0x60, 0x00, 0x00,
         // function
-        0x03, 0x03, 0x02, 0x00, 0x00,
+        0x03, 0x03,
+        0x02, 0x00, 0x00,
         // code
-        0x0a, 0x07, 0x02, 0x02, 0x00, 0x0b, 0x02, 0x00, 0x0b,
+        0x0a, 0x07, 0x02, 0x02, 0x00,
+        0x0b, 0x02, 0x00, 0x0b,
     };
     const gpa = testing.allocator;
     var exporter: RegisteredExporter = .{ .bytes_owned = try gpa.dupe(u8, &wasm_bytes_const) };
@@ -3950,11 +3962,13 @@ test "RegisteredExporter γ-3: ensureCompiledAndRt populates scratch_funcptrs + 
         // type
         0x01, 0x04, 0x01, 0x60, 0x00, 0x00,
         // function
-        0x03, 0x02, 0x01, 0x00,
+        0x03, 0x02,
+        0x01, 0x00,
         // table
         0x04, 0x04, 0x01, 0x70, 0x00, 0x01,
         // element
-        0x09, 0x07, 0x01, 0x00, 0x41, 0x00, 0x0b, 0x01, 0x00,
+        0x09, 0x07, 0x01, 0x00, 0x41, 0x00, 0x0b, 0x01,
+        0x00,
         // code
         0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b,
     };
@@ -3991,7 +4005,8 @@ test "RegisteredExporter γ-2: ensureCompiledAndRt populates scratch_memory + wi
         // memory section
         0x05, 0x03, 0x01, 0x00, 0x01,
         // data section
-        0x0b, 0x07, 0x01, 0x00, 0x41, 0x00, 0x0b, 0x01, 0x2a,
+        0x0b, 0x07, 0x01,
+        0x00, 0x41, 0x00, 0x0b, 0x01, 0x2a,
     };
     const gpa = testing.allocator;
     var exporter: RegisteredExporter = .{ .bytes_owned = try gpa.dupe(u8, &wasm_bytes_const) };
@@ -4072,9 +4087,11 @@ test "RegisteredExporter γ-1: ensureCompiledAndRt populates scratch_globals + w
         // type
         0x01, 0x04, 0x01, 0x60, 0x00, 0x00,
         // function
-        0x03, 0x02, 0x01, 0x00,
+        0x03, 0x02,
+        0x01, 0x00,
         // global
-        0x06, 0x06, 0x01, 0x7f, 0x00, 0x41, 0x2a, 0x0b,
+        0x06, 0x06, 0x01, 0x7f, 0x00, 0x41,
+        0x2a, 0x0b,
         // code
         0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b,
     };
