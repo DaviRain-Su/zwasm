@@ -188,6 +188,20 @@ pub const Linker = struct {
         });
     }
 
+    /// 10.M-D195b cycle 75 — raw-bytes overload of `defineMemory`.
+    /// `Memory.slice()` returns the instance's memory0 only; multi-
+    /// memory exports (memidx > 0) need direct slice access. This
+    /// entrypoint takes the slice straight (typically
+    /// `source_inst.handle.runtime.?.memories[memidx].bytes`).
+    /// Caller is responsible for keeping the source instance alive.
+    pub fn defineMemoryBytes(self: *Linker, module: []const u8, name: []const u8, bytes: []u8) !void {
+        try self.entries.append(self.engine.alloc, .{
+            .module = module,
+            .name = name,
+            .payload = .{ .memory_alias = .{ .bytes = bytes } },
+        });
+    }
+
     /// 10.M-D195b cycle 74 — bind a cross-instance function. The
     /// `source_inst` is a previously-instantiated module that
     /// exports `<source_name>` as a function; the importing

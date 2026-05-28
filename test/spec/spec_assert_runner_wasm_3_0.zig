@@ -28,6 +28,33 @@ const std = @import("std");
 const manifest_parser = @import("wasm_3_0_manifest.zig");
 const zwasm = @import("zwasm");
 
+// 10.M-D195b cycle 75 — host stubs for the Wasm spec testsuite's
+// `spectest.print*` conventional imports. The wast harness uses them
+// for trace prints; semantically they're side-effect-only no-ops, so
+// our binding ignores the args entirely (still pops them off the
+// operand stack per the Wasm ABI).
+fn spectestPrint(_: *zwasm.Caller) void {
+    // no-op (trace print semantics)
+}
+fn spectestPrintI32(_: *zwasm.Caller, _: i32) void {
+    // no-op (trace print semantics)
+}
+fn spectestPrintI64(_: *zwasm.Caller, _: i64) void {
+    // no-op (trace print semantics)
+}
+fn spectestPrintF32(_: *zwasm.Caller, _: f32) void {
+    // no-op (trace print semantics)
+}
+fn spectestPrintF64(_: *zwasm.Caller, _: f64) void {
+    // no-op (trace print semantics)
+}
+fn spectestPrintI32F32(_: *zwasm.Caller, _: i32, _: f32) void {
+    // no-op (trace print semantics)
+}
+fn spectestPrintF64F64(_: *zwasm.Caller, _: f64, _: f64) void {
+    // no-op (trace print semantics)
+}
+
 pub const std_options: std.Options = .{
     .enable_segfault_handler = false,
 };
@@ -216,6 +243,16 @@ pub fn main(init: std.process.Init) !void {
             } else |_| {
                 // spectest compile failure is non-fatal — see above.
             }
+            // 10.M-D195b cycle 75 — spectest.print* host funcs.
+            // No-op semantics; defineFunc returning errors is also
+            // non-fatal (fixtures that don't reference them still run).
+            cur_linker.defineFunc("spectest", "print", fn (*zwasm.Caller) void, spectestPrint) catch {};
+            cur_linker.defineFunc("spectest", "print_i32", fn (*zwasm.Caller, i32) void, spectestPrintI32) catch {};
+            cur_linker.defineFunc("spectest", "print_i64", fn (*zwasm.Caller, i64) void, spectestPrintI64) catch {};
+            cur_linker.defineFunc("spectest", "print_f32", fn (*zwasm.Caller, f32) void, spectestPrintF32) catch {};
+            cur_linker.defineFunc("spectest", "print_f64", fn (*zwasm.Caller, f64) void, spectestPrintF64) catch {};
+            cur_linker.defineFunc("spectest", "print_i32_f32", fn (*zwasm.Caller, i32, f32) void, spectestPrintI32F32) catch {};
+            cur_linker.defineFunc("spectest", "print_f64_f64", fn (*zwasm.Caller, f64, f64) void, spectestPrintF64F64) catch {};
 
             // Sub-corpus dir (e.g. `tail-call/return_call/`) — both
             // the manifest AND the .wasm files it cites live here.
@@ -289,18 +326,19 @@ pub fn main(init: std.process.Init) !void {
                         };
                         const inst = &instances_list.items[idx];
                         const exports = inst.handle.exports_storage;
-                        var memory_bound = false;
+                        const inst_rt = inst.handle.runtime;
                         for (exports) |exp| {
                             switch (exp.kind) {
                                 .memory => {
-                                    if (memory_bound) continue;
-                                    // Instance.memory() returns the
-                                    // implicit memory0; multi-memory
-                                    // exports (memidx > 0) need a
-                                    // richer accessor (future cycle).
-                                    if (inst.memory()) |mem| {
-                                        cur_linker.defineMemory(d.func_name, exp.name, mem) catch {};
-                                        memory_bound = true;
+                                    // 10.M-D195b cycle 75 — bind each
+                                    // memory export at its specific
+                                    // memidx (was memory0 only). The
+                                    // raw-bytes overload of defineMemory
+                                    // indexes into rt.memories directly.
+                                    if (inst_rt) |rt| {
+                                        if (exp.idx < rt.memories.len) {
+                                            cur_linker.defineMemoryBytes(d.func_name, exp.name, rt.memories[exp.idx].bytes) catch {};
+                                        }
                                     }
                                 },
                                 .func => {
@@ -313,8 +351,8 @@ pub fn main(init: std.process.Init) !void {
                                     cur_linker.defineCrossModuleFunc(d.func_name, exp.name, inst, exp.name) catch {};
                                 },
                                 .table, .global => {
-                                    // Out of scope for cycle 74; table /
-                                    // global cross-module exports remain
+                                    // Out of scope; table / global
+                                    // cross-module exports remain
                                     // unbound (importing modules will
                                     // fail with UnknownImport for those).
                                 },
