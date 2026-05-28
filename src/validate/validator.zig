@@ -902,7 +902,7 @@ pub const Validator = struct {
 
             // Wasm 3.0 typed function references (function-references proposal).
             0xD3 => try self.opRefAsNonNull(),
-            0xD4 => try self.opBrOnNull(),
+            0xD5 => try self.opBrOnNull(),
             0xD6 => try self.opBrOnNonNull(),
             0x14 => try self.opCallRef(),
             0x15 => try self.opReturnCallRef(),
@@ -1701,25 +1701,42 @@ pub const Validator = struct {
         if (dataidx >= self.data_count) return Error.InvalidFuncIndex;
     }
 
-    /// ref.null t: 0xD0 reftype. Reads a single byte covering the
-    /// Wasm 2.0 + Wasm 3.0 GC reftype space.
+    /// ref.null heaptype: 0xD0 + heaptype. Heaptype is a single
+    /// byte for the 12 abstract heads (Wasm 3.0 §5.3.5) OR a signed
+    /// LEB128 type-section index for concrete typed null refs
+    /// (function-references proposal §3.3.10.5).
     fn opRefNull(self: *Validator) Error!void {
         if (self.pos >= self.body.len) return Error.UnexpectedEnd;
         const b = self.body[self.pos];
-        self.pos += 1;
-        const t: ValType = switch (b) {
-            0x70 => .funcref,
-            0x6F => .externref,
-            // Wasm 3.0 GC §5.3.1 heap-top reftype bytes
-            // (10.G op_gc cycles 4 + 6).
-            0x6E => .anyref,
-            0x6D => .eqref,
-            0x6C => .i31ref,
-            0x6B => .structref,
-            0x6A => .arrayref,
-            else => return Error.BadValType,
+        // Single-byte abstract heads — consume one byte, build the
+        // matching abstract `(ref null ht)`.
+        const abstract: ?zir.AbstractHeapType = switch (b) {
+            0x70 => .func,
+            0x6F => .extern_,
+            0x6E => .any,
+            0x6D => .eq,
+            0x6C => .i31,
+            0x6B => .struct_,
+            0x6A => .array,
+            0x69 => .exn,
+            0x71 => .none,
+            0x72 => .noextern,
+            0x73 => .nofunc,
+            0x74 => .noexn,
+            else => null,
         };
-        try self.pushType(t);
+        if (abstract) |ht| {
+            self.pos += 1;
+            try self.pushType(.{ .ref = .{ .nullable = true, .heap_type = .{ .abstract = ht } } });
+            return;
+        }
+        // Concrete typed null ref: signed LEB128 type-section index
+        // (ADR-0123 Cycle 5). Index must be in [0, module_types.len).
+        const idx_signed = leb128.readSleb128(i33, self.body, &self.pos) catch return Error.BadValType;
+        if (idx_signed < 0) return Error.BadValType;
+        const idx: u32 = @intCast(idx_signed);
+        if (idx >= self.module_types.len) return Error.BadValType;
+        try self.pushType(.{ .ref = .{ .nullable = true, .heap_type = .{ .concrete = idx } } });
     }
 
     /// ref.is_null: pop any reftype, push i32. Polymorphic over

@@ -503,13 +503,38 @@ pub const Lowerer = struct {
             0xC3 => try self.emit(.@"i64.extend16_s", 0, 0),
             0xC4 => try self.emit(.@"i64.extend32_s", 0, 0),
 
-            // Wasm 2.0 reference types
+            // Wasm 2.0 reference types + Wasm 3.0 function-references
+            // (typed null) + GC abstract heads.
+            // ADR-0123 Cycle 5: heaptype is either a single-byte
+            // abstract head OR a signed LEB128 type-section index.
+            // Lowered `extra` carries the encoding-byte for legacy
+            // path compatibility (0x70 / 0x6F) — the runtime treats
+            // ref.null uniformly as Value.null_ref regardless of
+            // heap type, so the static distinction lives only in
+            // the validator type stack (cycle 90 ValType pivot).
             0xD0 => {
                 if (self.pos >= self.body.len) return Error.UnexpectedEnd;
                 const b = self.body[self.pos];
-                self.pos += 1;
-                if (b != 0x70 and b != 0x6F) return Error.BadBlockType;
-                try self.emit(.@"ref.null", 0, b);
+                const is_abstract = switch (b) {
+                    0x70, 0x6F, 0x6E, 0x6D, 0x6C, 0x6B, 0x6A, 0x69, 0x71, 0x72, 0x73, 0x74 => true,
+                    else => false,
+                };
+                if (is_abstract) {
+                    self.pos += 1;
+                    try self.emit(.@"ref.null", 0, b);
+                } else {
+                    // Concrete typed null: consume signed-LEB; emit
+                    // with extra=0x70 (funcref encoding placeholder)
+                    // since runtime semantics are identical. The
+                    // signed-LEB must be non-negative per spec
+                    // §5.3.5 (heap-type indices are u32); negative
+                    // values are not valid heap types — reject as
+                    // BadBlockType for backward compatibility with
+                    // the pre-cycle-90 rejection test.
+                    const idx_signed = leb128.readSleb128(i33, self.body, &self.pos) catch return Error.BadBlockType;
+                    if (idx_signed < 0) return Error.BadBlockType;
+                    try self.emit(.@"ref.null", 0, 0x70);
+                }
             },
             0xD1 => try self.emit(.@"ref.is_null", 0, 0),
             0xD2 => {
@@ -518,7 +543,7 @@ pub const Lowerer = struct {
             },
             // Wasm 3.0 typed function references (function-references proposal).
             0xD3 => try self.emit(.@"ref.as_non_null", 0, 0),
-            0xD4 => try self.emitUlebPayload(.br_on_null),
+            0xD5 => try self.emitUlebPayload(.br_on_null),
             0xD6 => try self.emitUlebPayload(.br_on_non_null),
             0x14 => try self.emitUlebPayload(.call_ref),
             0x15 => try self.emitUlebPayload(.return_call_ref),
