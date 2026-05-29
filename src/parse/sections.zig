@@ -56,11 +56,57 @@ pub const decodeCodes = codes_mod.decodeCodes;
 /// side tables below.
 pub const TypeKind = enum(u8) { func, structdef, arraydef };
 
-/// Per ADR-0121 D3: shared field-type carrier for struct fields +
-/// array elements. Packed types (i8 / i16) deferred per D3; fields
-/// are restricted to the existing `ValType` set for ADR-0121 first cut.
+/// Wasm 3.0 GC §5.3 storage type: `storagetype = valtype | packedtype`.
+/// Per ADR-0125 (refines ADR-0121 D3) this is a union, not a `ValType`
+/// extension — `i8`/`i16` never appear on the operand stack, so keeping
+/// them out of `ValType` avoids the single_slot_dual_meaning hazard.
+pub const PackedType = enum(u8) { i8 = 0x78, i16 = 0x77 };
+
+pub const StorageType = union(enum) {
+    val: ValType,
+    packed_: PackedType,
+
+    /// The operand-stack type seen by struct.new / set / get_s / get_u
+    /// (packed fields unpack to i32). Plain struct.get / array.get on a
+    /// packed field is invalid — callers check `isPacked` first.
+    pub fn operandType(self: StorageType) ValType {
+        return switch (self) {
+            .val => |v| v,
+            .packed_ => .i32,
+        };
+    }
+
+    pub fn isPacked(self: StorageType) bool {
+        return self == .packed_;
+    }
+
+    /// Wasm 3.0 §5.3 wire byte — for `FieldInfo.valtype_byte`.
+    pub fn specByte(self: StorageType) u8 {
+        return switch (self) {
+            .val => |v| v.specByte(),
+            .packed_ => |p| @intFromEnum(p),
+        };
+    }
+
+    /// Stored width in bytes for the get_s/get_u sign-extension boundary
+    /// (i8→1, i16→2). The heap slot stays 8 bytes uniform (ADR-0116 §3a);
+    /// this is the narrow read/write width, not the slot size.
+    pub fn storageWidth(self: StorageType) u8 {
+        return switch (self) {
+            .val => 8,
+            .packed_ => |p| switch (p) {
+                .i8 => 1,
+                .i16 => 2,
+            },
+        };
+    }
+};
+
+/// Per ADR-0121 D2 / ADR-0125: shared field-type carrier for struct
+/// fields + array elements. `storage` is the Wasm 3.0 storagetype
+/// (valtype or packed i8/i16).
 pub const StructFieldType = struct {
-    valtype: ValType,
+    storage: StorageType,
     mutable: bool,
 };
 
@@ -114,7 +160,9 @@ fn readFieldType(body: []const u8, pos: *usize) Error!StructFieldType {
         0x01 => true,
         else => return Error.InvalidFunctype,
     };
-    return .{ .valtype = valtype, .mutable = mutable };
+    // ADR-0125 Part A — wrap the valtype; packed i8/i16 decode lands in
+    // Part B (readValType still rejects 0x78/0x77 → BadValType for now).
+    return .{ .storage = .{ .val = valtype }, .mutable = mutable };
 }
 
 /// Six parallel arena-backed accumulators for `decodeTypes` — one entry
@@ -846,7 +894,7 @@ test "decodeTypes: single struct with one i32 const field (ADR-0121 D4; 10.G op_
     try testing.expect(t.struct_defs[0] != null);
     const sd = t.struct_defs[0].?;
     try testing.expectEqual(@as(usize, 1), sd.fields.len);
-    try testing.expectEqual(ValType.i32, sd.fields[0].valtype);
+    try testing.expectEqual(ValType.i32, sd.fields[0].storage.operandType());
     try testing.expectEqual(false, sd.fields[0].mutable);
 }
 
@@ -863,11 +911,11 @@ test "decodeTypes: multi-field struct preserves field order + mutability (ADR-01
     defer t.deinit();
     const sd = t.struct_defs[0].?;
     try testing.expectEqual(@as(usize, 3), sd.fields.len);
-    try testing.expectEqual(ValType.i32, sd.fields[0].valtype);
+    try testing.expectEqual(ValType.i32, sd.fields[0].storage.operandType());
     try testing.expectEqual(false, sd.fields[0].mutable);
-    try testing.expectEqual(ValType.i64, sd.fields[1].valtype);
+    try testing.expectEqual(ValType.i64, sd.fields[1].storage.operandType());
     try testing.expectEqual(true, sd.fields[1].mutable);
-    try testing.expectEqual(ValType.f32, sd.fields[2].valtype);
+    try testing.expectEqual(ValType.f32, sd.fields[2].storage.operandType());
     try testing.expectEqual(false, sd.fields[2].mutable);
 }
 
@@ -879,7 +927,7 @@ test "decodeTypes: array of i32 var (ADR-0121 D4; 10.G op_gc cycle 14)" {
     try testing.expectEqual(TypeKind.arraydef, t.kinds[0]);
     try testing.expect(t.array_defs[0] != null);
     const ad = t.array_defs[0].?;
-    try testing.expectEqual(ValType.i32, ad.element.valtype);
+    try testing.expectEqual(ValType.i32, ad.element.storage.operandType());
     try testing.expectEqual(true, ad.element.mutable);
 }
 

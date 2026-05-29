@@ -137,12 +137,17 @@ pub const GcTypeInfos = struct {
     array_infos: []?ArrayInfo,
 };
 
-/// Compute the byte size of a field given its declared ValType.
-/// All non-v128 ValTypes get `slot_size` (8 bytes) this cut.
-fn fieldSlotSize(valtype: ValType) Error!u8 {
-    return switch (valtype) {
-        .v128 => Error.UnsupportedFieldSize,
-        .i32, .i64, .f32, .f64, .ref => slot_size,
+/// Compute the heap slot size of a field given its storage type.
+/// Slots are 8 bytes uniform (ADR-0116 §3a) — packed i8/i16 occupy a
+/// full slot too; their narrow width is the get_s/get_u extension
+/// boundary (`StorageType.storageWidth`), not the slot size.
+fn fieldSlotSize(storage: sections.StorageType) Error!u8 {
+    return switch (storage) {
+        .packed_ => slot_size,
+        .val => |v| switch (v) {
+            .v128 => Error.UnsupportedFieldSize,
+            .i32, .i64, .f32, .f64, .ref => slot_size,
+        },
     };
 }
 
@@ -178,11 +183,11 @@ pub fn materialiseGcTypes(alloc: Allocator, types: sections.Types) Error!GcTypeI
                 const fields = try alloc.alloc(FieldInfo, sd.fields.len);
                 var offset: u32 = 0;
                 for (sd.fields, 0..) |spec_field, fi| {
-                    const sz = try fieldSlotSize(spec_field.valtype);
+                    const sz = try fieldSlotSize(spec_field.storage);
                     fields[fi] = .{
                         .offset = offset,
                         .size = sz,
-                        .valtype_byte = spec_field.valtype.specByte(),
+                        .valtype_byte = spec_field.storage.specByte(),
                         .mutable = spec_field.mutable,
                     };
                     offset += sz;
@@ -196,14 +201,14 @@ pub fn materialiseGcTypes(alloc: Allocator, types: sections.Types) Error!GcTypeI
             },
             .arraydef => {
                 const ad = types.array_defs[i].?;
-                const sz = try fieldSlotSize(ad.element.valtype);
+                const sz = try fieldSlotSize(ad.element.storage);
                 entry.field_count = 1;
                 array_infos[i] = .{
                     .type_info = entry,
                     .element = .{
                         .offset = 0,
                         .size = sz,
-                        .valtype_byte = ad.element.valtype.specByte(),
+                        .valtype_byte = ad.element.storage.specByte(),
                         .mutable = ad.element.mutable,
                     },
                 };

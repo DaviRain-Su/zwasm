@@ -822,7 +822,7 @@ test "validate: array.get reads i32 element (10.G op_gc cycle 18)" {
     const struct_defs = [_]?sections.StructDef{ null, null };
     const array_defs = [_]?sections.ArrayDef{
         null,
-        .{ .element = .{ .valtype = .i32, .mutable = true } },
+        .{ .element = .{ .storage = .{ .val = .i32 }, .mutable = true } },
     };
     // i32.const 5 ; array.new_default 1 ; i32.const 0 ; array.get 1 ; end
     const body = [_]u8{ 0x41, 0x05, 0xFB, 0x07, 0x01, 0x41, 0x00, 0xFB, 0x0B, 0x01, 0x0B };
@@ -848,7 +848,7 @@ test "validate: array.set on mutable element round-trips (10.G op_gc cycle 18)" 
     const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
     var kinds = [_]sections.TypeKind{ .func, .arraydef };
     const struct_defs = [_]?sections.StructDef{ null, null };
-    const array_defs = [_]?sections.ArrayDef{ null, .{ .element = .{ .valtype = .i32, .mutable = true } } };
+    const array_defs = [_]?sections.ArrayDef{ null, .{ .element = .{ .storage = .{ .val = .i32 }, .mutable = true } } };
     // new ; idx ; val ; set ; new (result) ; end
     const body = [_]u8{
         0x41, 0x05, 0xFB, 0x07, 0x01,
@@ -878,7 +878,7 @@ test "validate: array.set on immutable element → StackTypeMismatch (10.G op_gc
     const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
     var kinds = [_]sections.TypeKind{ .func, .arraydef };
     const struct_defs = [_]?sections.StructDef{ null, null };
-    const array_defs = [_]?sections.ArrayDef{ null, .{ .element = .{ .valtype = .i32, .mutable = false } } };
+    const array_defs = [_]?sections.ArrayDef{ null, .{ .element = .{ .storage = .{ .val = .i32 }, .mutable = false } } };
     const body = [_]u8{
         0x41, 0x05, 0xFB, 0x07, 0x01,
         0x41, 0x00, 0x41, 0x2A, 0xFB,
@@ -908,7 +908,7 @@ test "validate: array.fill round-trips on mutable element (10.G op_gc cycle 18)"
     const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
     var kinds = [_]sections.TypeKind{ .func, .arraydef };
     const struct_defs = [_]?sections.StructDef{ null, null };
-    const array_defs = [_]?sections.ArrayDef{ null, .{ .element = .{ .valtype = .i32, .mutable = true } } };
+    const array_defs = [_]?sections.ArrayDef{ null, .{ .element = .{ .storage = .{ .val = .i32 }, .mutable = true } } };
     // new ; idx ; val ; count ; fill ; new (return) ; end
     const body = [_]u8{
         0x41, 0x05, 0xFB, 0x07, 0x01,
@@ -941,7 +941,7 @@ test "validate: struct.get reads i32 field (10.G op_gc cycle 17)" {
     const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
     var kinds = [_]sections.TypeKind{ .func, .structdef };
     const sd_fields = [_]sections.StructFieldType{
-        .{ .valtype = .i32, .mutable = true },
+        .{ .storage = .{ .val = .i32 }, .mutable = true },
     };
     const struct_defs = [_]?sections.StructDef{ null, .{ .fields = &sd_fields } };
     const array_defs = [_]?sections.ArrayDef{ null, null };
@@ -983,7 +983,7 @@ test "validate: struct.set on mutable field round-trips (10.G op_gc cycle 17)" {
     const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
     var kinds = [_]sections.TypeKind{ .func, .structdef };
     const sd_fields = [_]sections.StructFieldType{
-        .{ .valtype = .i32, .mutable = true },
+        .{ .storage = .{ .val = .i32 }, .mutable = true },
     };
     const struct_defs = [_]?sections.StructDef{ null, .{ .fields = &sd_fields } };
     const array_defs = [_]?sections.ArrayDef{ null, null };
@@ -1017,7 +1017,7 @@ test "validate: struct.set on immutable field → StackTypeMismatch (10.G op_gc 
     const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
     var kinds = [_]sections.TypeKind{ .func, .structdef };
     const sd_fields = [_]sections.StructFieldType{
-        .{ .valtype = .i32, .mutable = false },
+        .{ .storage = .{ .val = .i32 }, .mutable = false },
     };
     const struct_defs = [_]?sections.StructDef{ null, .{ .fields = &sd_fields } };
     const array_defs = [_]?sections.ArrayDef{ null, null };
@@ -1051,7 +1051,7 @@ test "validate: struct.get with out-of-range fieldidx → InvalidFuncIndex (10.G
     const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
     var kinds = [_]sections.TypeKind{ .func, .structdef };
     const sd_fields = [_]sections.StructFieldType{
-        .{ .valtype = .i32, .mutable = true },
+        .{ .storage = .{ .val = .i32 }, .mutable = true },
     };
     const struct_defs = [_]?sections.StructDef{ null, .{ .fields = &sd_fields } };
     const array_defs = [_]?sections.ArrayDef{ null, null };
@@ -1085,7 +1085,7 @@ test "validate: array.new_default round-trips (10.G op_gc cycle 16)" {
     const struct_defs = [_]?sections.StructDef{ null, null };
     const array_defs = [_]?sections.ArrayDef{
         null,
-        .{ .element = .{ .valtype = .i32, .mutable = true } },
+        .{ .element = .{ .storage = .{ .val = .i32 }, .mutable = true } },
     };
     const body = [_]u8{ 0x41, 0x05, 0xFB, 0x07, 0x01, 0x0B };
     try validateFunctionWithGcTypes(
@@ -1115,7 +1115,7 @@ test "validate: array.new with matching init+size round-trips (10.G op_gc cycle 
     const struct_defs = [_]?sections.StructDef{ null, null };
     const array_defs = [_]?sections.ArrayDef{
         null,
-        .{ .element = .{ .valtype = .i32, .mutable = true } },
+        .{ .element = .{ .storage = .{ .val = .i32 }, .mutable = true } },
     };
     const body = [_]u8{ 0x41, 0x2A, 0x41, 0x08, 0xFB, 0x06, 0x01, 0x0B };
     try validateFunctionWithGcTypes(
@@ -1144,7 +1144,7 @@ test "validate: array.new with wrong init type → StackTypeMismatch (10.G op_gc
     const struct_defs = [_]?sections.StructDef{ null, null };
     const array_defs = [_]?sections.ArrayDef{
         null,
-        .{ .element = .{ .valtype = .i32, .mutable = true } },
+        .{ .element = .{ .storage = .{ .val = .i32 }, .mutable = true } },
     };
     const body = [_]u8{ 0x42, 0x2A, 0x41, 0x08, 0xFB, 0x06, 0x01, 0x0B };
     const r = validateFunctionWithGcTypes(
@@ -1174,7 +1174,7 @@ test "validate: array.new_fixed N=3 round-trips (10.G op_gc cycle 16)" {
     const struct_defs = [_]?sections.StructDef{ null, null };
     const array_defs = [_]?sections.ArrayDef{
         null,
-        .{ .element = .{ .valtype = .i32, .mutable = true } },
+        .{ .element = .{ .storage = .{ .val = .i32 }, .mutable = true } },
     };
     const body = [_]u8{ 0x41, 0x01, 0x41, 0x02, 0x41, 0x03, 0xFB, 0x08, 0x01, 0x03, 0x0B };
     try validateFunctionWithGcTypes(
@@ -1200,7 +1200,7 @@ test "validate: array.new pointing at struct typeidx → InvalidFuncIndex (10.G 
     const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
     var kinds = [_]sections.TypeKind{ .func, .structdef };
     const sd_fields = [_]sections.StructFieldType{
-        .{ .valtype = .i32, .mutable = true },
+        .{ .storage = .{ .val = .i32 }, .mutable = true },
     };
     const struct_defs = [_]?sections.StructDef{ null, .{ .fields = &sd_fields } };
     const array_defs = [_]?sections.ArrayDef{ null, null };
@@ -1239,7 +1239,7 @@ test "validate: struct.new_default round-trips (10.G op_gc cycle 15)" {
     const module_types = [_]FuncType{ fn_sig, dummy_struct_sig };
     var kinds = [_]sections.TypeKind{ .func, .structdef };
     const sd_fields = [_]sections.StructFieldType{
-        .{ .valtype = .i32, .mutable = true },
+        .{ .storage = .{ .val = .i32 }, .mutable = true },
     };
     const struct_defs = [_]?sections.StructDef{
         null,
@@ -1277,8 +1277,8 @@ test "validate: struct.new with matching fields round-trips (10.G op_gc cycle 15
     const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
     var kinds = [_]sections.TypeKind{ .func, .structdef };
     const sd_fields = [_]sections.StructFieldType{
-        .{ .valtype = .i32, .mutable = true },
-        .{ .valtype = .i64, .mutable = false },
+        .{ .storage = .{ .val = .i32 }, .mutable = true },
+        .{ .storage = .{ .val = .i64 }, .mutable = false },
     };
     const struct_defs = [_]?sections.StructDef{ null, .{ .fields = &sd_fields } };
     const array_defs = [_]?sections.ArrayDef{ null, null };
@@ -1309,7 +1309,7 @@ test "validate: struct.new with wrong field type → StackTypeMismatch (10.G op_
     const module_types = [_]FuncType{ fn_sig, .{ .params = &.{}, .results = &.{} } };
     var kinds = [_]sections.TypeKind{ .func, .structdef };
     const sd_fields = [_]sections.StructFieldType{
-        .{ .valtype = .i32, .mutable = true },
+        .{ .storage = .{ .val = .i32 }, .mutable = true },
     };
     const struct_defs = [_]?sections.StructDef{ null, .{ .fields = &sd_fields } };
     const array_defs = [_]?sections.ArrayDef{ null, null };
@@ -1970,7 +1970,7 @@ test "validate (tail-call): return_call_indirect with fn-return mismatch fails" 
 // ============================================================
 
 fn gcField(vt: ValType, mut: bool) sections.StructFieldType {
-    return .{ .valtype = vt, .mutable = mut };
+    return .{ .storage = .{ .val = vt }, .mutable = mut };
 }
 
 test "typeDefIsSubtype: struct width + depth (10.G ADR-0124 cycle 124)" {

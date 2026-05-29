@@ -448,10 +448,10 @@ fn preDecodeSectionBodies(alloc: std.mem.Allocator, module: *Module) bool {
         // now that rec/sub typedefs parse (cyc126), bound-check them or a
         // fixture with an out-of-range field `(ref $N)` would slip through.
         for (t.struct_defs) |sd| if (sd) |sdef| {
-            for (sdef.fields) |f| if (!validRefTypeIdx(f.valtype, ntypes)) return false;
+            for (sdef.fields) |f| if (!validRefTypeIdx(f.storage.operandType(), ntypes)) return false;
         };
         for (t.array_defs) |ad| if (ad) |adef| {
-            if (!validRefTypeIdx(adef.element.valtype, ntypes)) return false;
+            if (!validRefTypeIdx(adef.element.storage.operandType(), ntypes)) return false;
         };
         // ADR-0124 — reject non-conformant `sub`/`sub final` subtype
         // declarations (structural mismatch, extending a final type,

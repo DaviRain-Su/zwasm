@@ -1507,7 +1507,7 @@ pub const Validator = struct {
             var i: usize = sd.fields.len;
             while (i > 0) {
                 i -= 1;
-                try self.popExpect(sd.fields[i].valtype);
+                try self.popExpect(sd.fields[i].storage.operandType());
             }
         }
         // Wasm 3.0 GC §3.3.5.6.1: struct.new $t : […] -> [(ref $t)] — the
@@ -1546,16 +1546,16 @@ pub const Validator = struct {
             // whose typedef is a struct (struct.new now pushes concrete).
             .known => |t| if (!(t.isAnyRef() or t.isEqRef() or self.subtypeCtx(t, ValType.structref))) return Error.StackTypeMismatch,
         }
-        try self.pushType(field.valtype);
+        try self.pushType(field.storage.operandType());
     }
 
     /// Wasm spec 3.0 §3.3.5.6.4 — `struct.set typeidx fieldidx`:
-    /// pop value (matching field.valtype) + pop structref, push
+    /// pop value (matching field.storage.operandType()) + pop structref, push
     /// nothing. Field must be mutable.
     fn opStructSet(self: *Validator) Error!void {
         const field = try self.lookupStructField();
         if (!field.mutable) return Error.StackTypeMismatch;
-        try self.popExpect(field.valtype);
+        try self.popExpect(field.storage.operandType());
         const top = try self.popAny();
         switch (top) {
             .bot => {},
@@ -1583,7 +1583,7 @@ pub const Validator = struct {
             .bot => {},
             .known => |t| if (!(t.isAnyRef() or t.isEqRef() or self.subtypeCtx(t, ValType.arrayref))) return Error.StackTypeMismatch,
         }
-        try self.pushType(ad.element.valtype);
+        try self.pushType(ad.element.storage.operandType());
     }
 
     /// Wasm spec 3.0 §3.3.5.6.12 — `array.set typeidx`: pop value
@@ -1591,7 +1591,7 @@ pub const Validator = struct {
     fn opArraySet(self: *Validator) Error!void {
         const ad = try self.lookupArrayDef();
         if (!ad.element.mutable) return Error.StackTypeMismatch;
-        try self.popExpect(ad.element.valtype);
+        try self.popExpect(ad.element.storage.operandType());
         try self.popExpect(.i32);
         const top = try self.popAny();
         switch (top) {
@@ -1607,7 +1607,7 @@ pub const Validator = struct {
         const ad = try self.lookupArrayDef();
         if (!ad.element.mutable) return Error.StackTypeMismatch;
         try self.popExpect(.i32); // count
-        try self.popExpect(ad.element.valtype); // fill value
+        try self.popExpect(ad.element.storage.operandType()); // fill value
         try self.popExpect(.i32); // idx
         const top = try self.popAny();
         switch (top) {
@@ -1635,7 +1635,7 @@ pub const Validator = struct {
         // Pop order on the stack (top first): size:i32, then init (if any).
         try self.popExpect(.i32);
         if (variant == .with_init) {
-            try self.popExpect(ad.element.valtype);
+            try self.popExpect(ad.element.storage.operandType());
         }
         // Wasm 3.0 GC: array.new $t : […] -> [(ref $t)] (concrete, non-null);
         // subtypeCtx widens it to arrayref/eqref/anyref slots (cycle 137).
@@ -1655,7 +1655,7 @@ pub const Validator = struct {
         const n = try leb128.readUleb128(u32, self.body, &self.pos);
         var i: u32 = 0;
         while (i < n) : (i += 1) {
-            try self.popExpect(ad.element.valtype);
+            try self.popExpect(ad.element.storage.operandType());
         }
         try self.pushType(.{ .ref = .{ .nullable = false, .heap_type = .{ .concrete = typeidx } } });
     }
@@ -2780,8 +2780,16 @@ fn gcValTypeSubtype(actual: ValType, expected: ValType, types: *const sections.T
 /// field is INVARIANT (types equal), a `const` field is COVARIANT.
 fn gcFieldSubtype(sub_f: sections.StructFieldType, sup_f: sections.StructFieldType, types: *const sections.Types) bool {
     if (sub_f.mutable != sup_f.mutable) return false;
-    if (sub_f.mutable) return sub_f.valtype.eql(sup_f.valtype);
-    return gcValTypeSubtype(sub_f.valtype, sup_f.valtype, types);
+    // ADR-0125 — storage class must match: a packed field is never a
+    // subtype of a non-packed one, and packed types are invariant
+    // (i8 <: i8, i16 <: i16; no cross/widening). Compare the wire byte.
+    const sub_p = sub_f.storage.isPacked();
+    if (sub_p != sup_f.storage.isPacked()) return false;
+    if (sub_p) return sub_f.storage.specByte() == sup_f.storage.specByte();
+    const sub_v = sub_f.storage.operandType();
+    const sup_v = sup_f.storage.operandType();
+    if (sub_f.mutable) return sub_v.eql(sup_v); // invariant
+    return gcValTypeSubtype(sub_v, sup_v, types); // covariant
 }
 
 /// ADR-0124 — does typedef `sub` structurally conform to its declared
