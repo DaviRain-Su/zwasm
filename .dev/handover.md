@@ -6,14 +6,14 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 133 (`7994ed5a`) — apply non-funcref element segments
-  to tables at instantiate (i31ref table-init): dispatch on elem_type —
-  func-family resolves funcidx→funcref, else store the encoded ref value
-  (i31 packed) directly. **gc return 18→33 (+15)** — gc/i31.1
-  (tables_of_i31ref, all table ops) fully passes. No regression.
-- cyc132 (`8dc4e1af`) elem_count threading (i31.1 compiles); cyc131
-  decode i31ref element segments; cyc130 (`dc9d539a`) ref.i31 const-expr
-  → **gc return 2→18, trap 0→2** (first big jump); cyc126-129 parse/validate.
+- **HEAD**: cycle 134 (`d4cb589f`) — abstract-head subtyping follows the
+  GC heap lattice (popExpect's valTypeIsSubtypeFree: `a_abs==e_abs` →
+  gcHeapAbstractSubtype, so (ref i31) <: anyref). **gc return 33→48
+  (+15)** — i31.5 (anyref global) + i31.6 (anyref table) pass. No
+  regression (func/extern disjoint = identity). Only i31.3 remains.
+- cyc133 (`7994ed5a`) non-funcref element→table init (return 18→33);
+  cyc132 elem_count threading; cyc131 i31ref element decode; cyc130
+  (`dc9d539a`) ref.i31 const-expr (return 2→18). gc return: 0→2→18→33→48.
 - Runner EXECUTES via interp; GC handlers (i31/struct/array) +
   table.get/grow/fill/copy/init (generic) registered at api/instance.zig.
 - cyc120 (`5db875b0`): cross-module EH propagation + caller-frame catch
@@ -45,21 +45,20 @@
 - **Exit-condition**: gc corpus return pass ≥ 50/407 (first execution
   slice via struct/array) — refine as chunks land.
 
-## Active task — cycle 134: i31.3/5/6 remaining + then struct/array exec — **NEXT**
+## Active task — cycle 135: struct/array EXECUTION (the bulk) — **NEXT**
 
-gc return now 33; ValidateFailed=48. Remaining i31: i31.3
-($i31ref_of_global_table_initializer — global init feeding a table
-initializer), i31.5 ($anyref_global_of_i31ref — anyref global holding
-i31), i31.6 ($anyref_table_of_i31ref — anyref table). i31.5/6 use
-ANYREF (not i31ref) globals/tables; likely the same element/global/
-table-init paths but with anyref elem_type — the cyc131/133 dispatch
-already treats non-func-family generically, so check what still
-ValidateFails (instrument; don't guess — cyc131 lesson). Bounded probe
-on i31.3/5/6 → exact gap → fix. THEN pivot to struct/array EXECUTION
-(the bulk of the 350 remaining return-fails): struct.new needs heap
-alloc via the landed collector + TypeInfo materialise at instantiate;
-handlers registered at api/instance.zig:886-887. Observable: gc return
-↑; no regression to 33 return / 2 trap / 57 invalid.
+gc return now 48 (exit ≥50 nearly met). i31 family done except i31.3
+(preDecode: $i31ref_of_global_table_initializer — a global.get-fed table
+initializer; small, ~3 asserts — can mop up, but struct/array is the
+high-value target). PIVOT to struct/array EXECUTION — the bulk of the
+~335 remaining return-fails. struct.new/get/set + array.new/get/len:
+handlers registered (ext_struct_ops/ext_array_ops, api/instance.zig:886-
+887); substrate landed (`feature/gc/` heap+type_info+collector_null).
+The likely gap: TypeInfo materialise at instantiate (struct.new needs
+the runtime StructInfo to size the heap alloc). Survey the simplest
+struct return fixture (instrument its failure — cyc131 lesson), find
+whether it's TypeInfo-materialise or a handler gap, fix. Observable: gc
+return ↑↑; no regression to 48 return / 2 trap / 57 invalid.
 
 ## Larger §10 work (later bundles)
 
@@ -76,7 +75,7 @@ handlers registered at api/instance.zig:886-887. Observable: gc return
 [tail-call          ] return=71  trap=7   invalid=24  (all pass)
 [exception-handling ] return=34/34 trap=2/2 invalid=7/7 exception=4/4  ✅ FULLY GREEN
 [function-references] return=39(pass=32 fail=1) trap=4(pass) invalid=18(pass)
-[gc                 ] return=407(pass=33 fail=350) trap=100(pass=2 fail=98) invalid=60(pass=57 fail=3) malformed=1(pass) ParseFailed=0 ValidateFailed=48  ← 10.G (cyc133; i31.1 E2E, return 18→33)
+[gc                 ] return=407(pass=48 fail=335) trap=100(pass=2 fail=98) invalid=60(pass=57 fail=3) malformed=1(pass) ParseFailed=0 ValidateFailed=46  ← 10.G (cyc134; i31 family ~done, return 33→48)
 [multi-memory       ] return=407(pass=387 fail=20) trap=238(pass=237 fail=1)
 ```
 
