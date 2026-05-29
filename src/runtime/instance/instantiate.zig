@@ -736,8 +736,18 @@ pub fn evalConstExprValue(expr: []const u8) !Value {
         },
         else => return error.UnsupportedConstExpr,
     };
+    // Wasm 3.0 GC: `ref.i31` (0xFB 0x1C) is a constant-expression op —
+    // it wraps a preceding `i32.const N` into a non-null `(ref i31)`.
+    // (struct.new / array.new const exprs need heap alloc → later chunk.)
+    var result = v;
+    if (pos < expr.len and expr[pos] == 0xFB) {
+        pos += 1;
+        const sub = try leb128.readUleb128(u32, expr, &pos);
+        if (sub != 28) return error.UnsupportedConstExpr; // 0x1C = ref.i31
+        result = Value.fromI31Truncate(result.i32);
+    }
     if (pos >= expr.len or expr[pos] != 0x0B) return error.UnsupportedConstExpr;
-    return v;
+    return result;
 }
 
 /// Evaluate a Wasm const-expression that resolves to an i32.
@@ -1419,4 +1429,13 @@ test "frontendValidate: imported tag occupies the tag index space (10.E-xmodule-
         0x0a, 0x06, 0x01, 0x04, 0x00, 0x08, 0x00, 0x0b, // code: (throw 0) end
     };
     try testing.expect(frontendValidate(testing.allocator, &m));
+}
+
+test "evalConstExprValue: i32.const N; ref.i31; end produces an i31 ref (10.G cycle 130)" {
+    // `i32.const 42; ref.i31; end` (0x41 0x2A 0xFB 0x1C 0x0B) → (ref i31) holding 42.
+    const v = try evalConstExprValue(&[_]u8{ 0x41, 0x2A, 0xFB, 0x1C, 0x0B });
+    try testing.expect(Value.isI31Ref(v));
+    try testing.expectEqual(@as(i32, 42), Value.refAsI31Signed(v));
+    // A non-i31 GC const op in this position is unsupported (struct.new = 0x00).
+    try testing.expectError(error.UnsupportedConstExpr, evalConstExprValue(&[_]u8{ 0x41, 0x00, 0xFB, 0x00, 0x00, 0x0B }));
 }
