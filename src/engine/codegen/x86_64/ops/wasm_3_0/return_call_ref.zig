@@ -2,14 +2,15 @@
 //! ADR-0074 + ADR-0112 D2.
 //!
 //! Wasm spec 3.0 §3.3.8.20. Pop `(ref $sig)` funcref, null-
-//! check + sig dispatch, then frame teardown and `JMP R11`.
+//! check, deref `funcentity_funcptr_offset`, then frame teardown
+//! and `JMP R11`. Delegates to `op_tail_call.emitReturnCallRef`.
 //!
-//! Stub: emit returns `UnsupportedOp`.
-//!
+//! Registered in `dispatch_collector.collected_x86_64_ctx_ops`.
 //! Zone 2 (`src/engine/codegen/x86_64/ops/`).
 
 const meta = @import("../../../../../instruction/wasm_3_0/return_call_ref.zig");
 const ctx_mod = @import("../../ctx.zig");
+const op_tail_call = @import("../../op_tail_call.zig");
 const zir = @import("../../../../../ir/zir.zig");
 
 pub const op_tag = meta.op_tag;
@@ -22,7 +23,5 @@ pub const n_successor_edges: u8 = 0;
 pub const is_safepoint: bool = false;
 
 pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
-    _ = ctx;
-    _ = ins;
-    return error.UnsupportedOp;
+    return op_tail_call.emitReturnCallRef(ctx, ins);
 }

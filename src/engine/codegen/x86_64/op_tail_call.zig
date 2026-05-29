@@ -36,6 +36,7 @@ const gpr = @import("gpr.zig");
 const canonical_type = @import("../shared/canonical_type.zig");
 const jit_abi = @import("../shared/jit_abi.zig");
 const zir = @import("../../../ir/zir.zig");
+const func_mod = @import("../../../runtime/instance/func.zig");
 
 /// R11 — System V AMD64 caller-saved scratch (no fixed role in
 /// the ABI) per System V §3.2.3. ADR-0066 § (bridge thunk)
@@ -241,6 +242,57 @@ pub fn emitIndirectReturnCall(
     // scratch; R11 is the JMP target per `tail_target_gpr`.
     try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.funcptr_base_off).slice());
     try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromBaseIdxLsl3(tail_target_gpr, .rax, idx_r).slice());
+
+    try emitLoadCalleeRtSameModule(ctx.allocator, ctx.buf);
+    try frame_teardown.emit(ctx.allocator, ctx.buf, .{
+        .frame_bytes = ctx.frame_bytes,
+        .uses_runtime_ptr = ctx.uses_runtime_ptr,
+    });
+    try emitTailJump(ctx.allocator, ctx.buf, tail_target_gpr);
+}
+
+/// Wasm spec 3.0 §3.3.8.20 (`return_call_ref $sig`) — tail-call
+/// through a typed funcref. x86_64 mirror of `arm64/op_tail_call.zig:
+/// emitReturnCallRef`: `op_call.emitCallRef`'s funcref front-half
+/// (pop *FuncEntity, OR-null-check, MOV R11 from funcentity_funcptr_
+/// offset) + this file's tail (frame_teardown + JMP R11) instead of
+/// CALL + capture. No runtime sig check (validator guarantees the
+/// funcref's type ⊑ `$sig`). Terminator + safepoint-free (ADR-0112 D7).
+pub fn emitReturnCallRef(
+    ctx: *ctx_mod.EmitCtx,
+    ins: *const zir.ZirInstr,
+) ctx_mod.Error!void {
+    if (ins.payload >= ctx.module_types.len) return ctx_mod.Error.AllocationMissing;
+    const callee_sig: zir.FuncType = ctx.module_types[ins.payload];
+    if (callee_sig.results.len > 2) return ctx_mod.Error.UnsupportedOp;
+
+    if (ctx.pushed_vregs.items.len < 1) return ctx_mod.Error.AllocationMissing;
+    const funcref_vreg = ctx.pushed_vregs.pop().?;
+
+    try op_call.marshalCallArgs(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.spill_base_off,
+        callee_sig,
+    );
+
+    // Funcref ptr → reg (AFTER marshalCallArgs, D-097 d-18 mirror).
+    const funcref_r = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, funcref_vreg, 0);
+
+    // Null check: OR funcref_r, funcref_r (ZF iff null) ; JZ trap.
+    // Reuses the shared bounds trap stub via bounds_fixups.
+    try ctx.buf.appendSlice(ctx.allocator, inst.encOrRR(.q, funcref_r, funcref_r).slice());
+    {
+        const fixup_at: u32 = @intCast(ctx.buf.items.len);
+        try ctx.buf.appendSlice(ctx.allocator, inst.encJccRel32(.e, 0).slice());
+        try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+    }
+
+    // Native entry: MOV R11, [funcref_r + funcentity_funcptr_offset]
+    // (R11 = tail_target_gpr — matches the JMP R11 below).
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(tail_target_gpr, funcref_r, @intCast(func_mod.funcentity_funcptr_offset)).slice());
 
     try emitLoadCalleeRtSameModule(ctx.allocator, ctx.buf);
     try frame_teardown.emit(ctx.allocator, ctx.buf, .{

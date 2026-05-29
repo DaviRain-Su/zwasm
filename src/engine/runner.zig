@@ -537,9 +537,8 @@ test "runI32Export: call_ref through a funcref returns 42 end-to-end (10.R-call_
 
 test "runI32Export: return_call_ref tail-call through a funcref returns 42 (10.R / D-206)" {
     if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
-    // arm64 return_call_ref landed first (manual switch in emit.zig); the
-    // x86_64 mirror is the next cycle. Gate to aarch64 until then (D-206).
-    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-206");
+    // arm64 (manual switch in emit.zig) + x86_64 (collected per-op in
+    // dispatch_collector_ops.zig) both emit return_call_ref as of cyc207.
     // (module
     //   (type $sig (func (result i32)))
     //   (func $worker (export "worker") (type $sig) (i32.const 42))

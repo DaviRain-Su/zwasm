@@ -74,9 +74,6 @@ pub const Blocker = enum {
     /// x86_64 br_if not migrated to (ctx, ins) shape; arm64 landed
     /// cycle 54b.
     @"D-194",
-    /// 10.R/10.TC x86_64 `return_call_ref` JIT emit. arm64 landed
-    /// (manual switch); x86_64 collected-per-op mirror is next cycle.
-    @"D-206",
 };
 
 /// Phase-end batch deferral. See `Win64Phase` doc.

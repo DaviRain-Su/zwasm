@@ -298,7 +298,8 @@ test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // 10.R cycle 58 added x86_64_br_on_null + x86_64_br_on_non_null
     // (D-194 discharge Path B; +2 = 399).
     // 10.R-call_ref-JIT IT-2 added x86_64_call_ref (+1 = 400).
-    try std.testing.expectEqual(@as(usize, 400), collected_x86_64_ctx_ops.len);
+    // 10.R/10.TC added x86_64_return_call_ref (+1 = 401).
+    try std.testing.expectEqual(@as(usize, 401), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would

@@ -822,6 +822,7 @@ const x86_64_throw_ref = @import("x86_64/ops/wasm_3_0/throw_ref.zig");
 const x86_64_return_call = @import("x86_64/ops/wasm_3_0/return_call.zig");
 const x86_64_return_call_indirect = @import("x86_64/ops/wasm_3_0/return_call_indirect.zig");
 const x86_64_call_ref = @import("x86_64/ops/wasm_3_0/call_ref.zig");
+const x86_64_return_call_ref = @import("x86_64/ops/wasm_3_0/return_call_ref.zig");
 
 // 10.R function-references — cycle 50 ref.as_non_null JIT emit
 // (ADR-0123 D2: representation-independent null-check, generic-trap).
@@ -1695,6 +1696,9 @@ pub const collected_x86_64_ctx_ops = .{
     // 10.R function-references — call_ref JIT (10.R-call_ref-JIT IT-2;
     // op_call.emitCallRefCtx; sibling arm64 via manual switch in emit.zig).
     x86_64_call_ref,
+    // 10.R/10.TC — return_call_ref JIT (op_tail_call.emitReturnCallRef;
+    // sibling arm64 via manual switch in emit.zig).
+    x86_64_return_call_ref,
     // 10.R function-references cycle 50.
     x86_64_ref_as_non_null,
     // 10.R cycle 58 — br_on_null / br_on_non_null JIT emit (D-194
