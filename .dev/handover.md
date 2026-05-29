@@ -6,14 +6,13 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc177 (`5c41c273`) — **D-198 Phase-10b LANDED**: iso-recursive
-  rec-group canonical equality (`sections.canonicalEqual` + `rec_span` at
-  decode; positional intra-group / canonical inter-group refs) + funcref
-  RTT (`FuncEntity.raw_typeidx` resolution in `ref.test`/`ref.cast`) +
-  precise equivalence-class `canonical_ids`. **gc return 345→348 (+3)**:
-  type-subtyping ref.test-on-funcref 348/360 pass; module 378 correctly
-  stays 0 (no regression); invalid HELD 57. cyc174: start-exec → multi-mem
-  396. **gc 62→348**.
+- **HEAD**: cyc178 (`3bc85318`) — **ref.cast/ref.cast_null narrow to the
+  cast TARGET type** (was a pre-RTT shortcut pushing the operand). Wasm GC
+  §3.3.5.4: `ref.cast (ref ht)` → `(ref ht)`. **gc trap 90→96 (+6)**:
+  type-subtyping.17 now validates → its 6 `assert_trap` cases run+trap.
+  invalid HELD 57, no regression. cyc177 (`5c41c273`): D-198 Phase-10b
+  iso-recursive canon → gc return 345→348. cyc174: start-exec → multi-mem
+  396. **gc 62→348 ret / 90→96 trap**.
 - Earlier arc: cyc147-148 ADR-0125 packed (62→116); cyc146 ADR-0016 M3
   validate self-attribution (`compile FAIL [fn= off= op=]`) + subtypeCtx
   coercion; cyc144/145 GC blocktypes + br_on_cast; cyc141 rt.datas fix
@@ -39,26 +38,26 @@
 - **Exit-condition**: gc return ≥ 90 **EXCEEDED (345)**. Open target:
   maximise return toward the corpus ceiling (D-198 tail = cyc176).
 
-## Active task — cycle 178: the 2 residual gc type-subtyping FAILsetup — **NEXT**
+## Active task — cycle 179: the last 2 gc type-subtyping fails — **NEXT**
 
-D-198 Phase-10b landed (cyc177, +3). Remaining gc return-fail = **2
-FAILsetup** (type-subtyping `run`-asserts whose module fails to COMPILE,
-even with the iso-recursive validator OR-arm). These compile (not run)
-fails are the debt-row's "within-module cross-rec-group" cluster
-(type-subtyping.9/12/21/24/39/45-class). cyc178:
-1. **Identify the 2 modules** — the FAILsetup `run`-asserts in the
-   type-subtyping `.wast` whose module silently fails compile. The
-   compile failure is at `validateTypeSection`/`typeDefIsSubtype`
-   (a `sub`/`sub final` conformance check), NOT a `run` — so it's a
-   different path than the cyc177 `gcValTypeSubtype` OR-arm.
-2. **Trace why** — `typeDefIsSubtype` (validator ~2925) uses
-   `gcValTypeSubtype` for fields/params/results, which now has the
-   canonical OR-arm; but the rejecting check may be the supertype
-   *declaration* conformance (`$h sub $g2` across rec groups) needing
-   the same iso-recursive treatment, or a finality/forward-ref rule.
-3. Fix + verify FULL test-spec: gc invalid stays 57, no regression to
-   348/396/337/71/34, exit 0, 0 panics. Add to ADR-0126 if it's a 5th
-   distinct mechanism.
+After cyc177 (+3 ret) + cyc178 (+6 trap), gc residual = 2 (both
+type-subtyping). Two DISTINCT mechanisms (verified via `--fail-detail` +
+M3):
+1. **.17 `run` FAILvoid `InvokeFailed`** — module now validates (cyc178);
+   invoking "run" fails at RUNTIME. "run" = 12 blocks each leaving a value
+   (call_indirect / ref.cast over recursive func types `$t1` returns
+   `(ref null $t1)`) then `(br 0)`. Trace the interp error (runtime
+   ref.cast on funcref narrowing, or br-0-with-stacked-values). DIRECT
+   binary + add a runtime diag if needed.
+2. **.19 compile FAIL `InvalidFuncIndex` at call_indirect (op 0x11, fn=2)**
+   — a `call_indirect (type N)` whose type-index validation rejects.
+   `.wast`: trace which type/table. Likely the call_indirect type-use
+   check vs a recursive/sub func type.
+Verify FULL test-spec: gc invalid stays 57, no regression to
+348/96/337/71/34/396, exit 0, 0 panics.
+(Uncounted: .30/.48/.50 bare-module `SignatureMismatch` — cross-module
+func-import subtyping, real conformance gaps but not in the return/trap
+counters; lower priority.)
 
 ## Larger §10 work (later bundles)
 
@@ -71,7 +70,7 @@ fails are the debt-row's "within-module cross-rec-group" cluster
 ```
 [memory64           ] return=337 (all pass)    [tail-call] return=71 (all pass)
 [exception-handling ] 34/34 ✅ FULLY GREEN     [function-references] return=34/39
-[gc                 ] return=348/407 trap=90/100 invalid=57/60 malformed=1/1 skip=20  ← 10.G c177 (iso-recursive)
+[gc                 ] return=348/407 trap=96/100 invalid=57/60 malformed=1/1 skip=20  ← 10.G c178 (ref.cast narrow)
 [multi-memory       ] return=396/407 trap=238/238  ← cyc174 start-exec (+3 start0)
 ```
 
