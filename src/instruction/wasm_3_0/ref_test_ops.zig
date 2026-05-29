@@ -179,28 +179,29 @@ fn refTestNull(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
 /// trap if value is null OR type doesn't match heap_type;
 /// otherwise push the value back narrowed to heap_type.
 ///
-/// Cycle-8 stub semantics (pre-RTT): the validator already
-/// type-checked the heap_type → operand statically matches.
-/// Runtime distinguishes only null from non-null:
-///   - null operand → Trap.NullReference (matches Wasm 3.0 spec
-///     "ref.cast traps on null").
-///   - non-null → push the value back unchanged.
-/// Real subtype-mismatch trap lands with RTT TypeInfo at the
-/// type_hierarchy.zig integration cycle.
-fn refCast(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
+/// `ref.cast heap_type` (Wasm 3.0 GC §4.4.5): trap `CastFailure` if the
+/// operand is null (the non-null target rejects it) OR its runtime type
+/// is not a subtype of `ht`; else push it back. ADR-0125/0116 cycle 152.
+fn refCast(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
     const v = rt.popOperand();
-    if (v.ref == Value.null_ref) return runtime.Trap.NullReference;
+    const ht: u8 = @truncate(instr.payload);
+    if (v.ref == Value.null_ref) return runtime.Trap.CastFailure;
+    if (!gcRefMatchesNonNull(rt, v, ht)) return runtime.Trap.CastFailure;
     try rt.pushOperand(v);
 }
 
-/// Wasm 3.0 GC §3.3.5.4 — `ref.cast_null heap_type`: like
-/// ref.cast but accepts null (null + non-null both pass the
-/// cast pre-RTT). Real subtype-mismatch trap lands with RTT.
-fn refCastNull(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
+/// `ref.cast_null heap_type`: like ref.cast but null passes (the target
+/// is `(ref null ht)`); a non-null operand still trap-checks its type.
+fn refCastNull(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const rt = Runtime.fromOpaque(c);
     const v = rt.popOperand();
-    // Push the same reftype back; null OK with `_null` variant.
+    const ht: u8 = @truncate(instr.payload);
+    if (v.ref == Value.null_ref) {
+        try rt.pushOperand(v);
+        return;
+    }
+    if (!gcRefMatchesNonNull(rt, v, ht)) return runtime.Trap.CastFailure;
     try rt.pushOperand(v);
 }
 
@@ -278,22 +279,23 @@ test "ref.test_null (ref any): non-null ref matches → 1 (10.G cycle 151)" {
     try testing.expectEqual(@as(i32, 1), rt.popOperand().i32);
 }
 
-test "ref.cast: null ref traps NullReference (10.G op_gc cycle 8)" {
+test "ref.cast: null ref traps CastFailure (10.G cycle 152)" {
     var t = DispatchTable.init();
     register(&t);
     var rt = Runtime.init(testing.allocator);
     defer rt.deinit();
     try rt.pushOperand(.{ .ref = Value.null_ref });
-    try testing.expectError(runtime.Trap.NullReference, driveOne(&rt, &t, .@"ref.cast", 0, 0));
+    // payload 0x6E = any; null still fails the non-null `ref.cast`.
+    try testing.expectError(runtime.Trap.CastFailure, driveOne(&rt, &t, .@"ref.cast", 0x6E, 0));
 }
 
-test "ref.cast: non-null ref round-trips unchanged (10.G op_gc cycle 8)" {
+test "ref.cast (ref any): non-null ref round-trips unchanged (10.G cycle 152)" {
     var t = DispatchTable.init();
     register(&t);
     var rt = Runtime.init(testing.allocator);
     defer rt.deinit();
     try rt.pushOperand(.{ .ref = 0xDEADBEEF });
-    try driveOne(&rt, &t, .@"ref.cast", 0, 0);
+    try driveOne(&rt, &t, .@"ref.cast", 0x6E, 0); // any: non-null matches
     try testing.expectEqual(@as(u64, 0xDEADBEEF), rt.popOperand().ref);
 }
 
@@ -303,16 +305,16 @@ test "ref.cast_null: null ref round-trips unchanged (10.G op_gc cycle 8)" {
     var rt = Runtime.init(testing.allocator);
     defer rt.deinit();
     try rt.pushOperand(.{ .ref = Value.null_ref });
-    try driveOne(&rt, &t, .@"ref.cast_null", 0, 0);
+    try driveOne(&rt, &t, .@"ref.cast_null", 0x6E, 0);
     try testing.expectEqual(Value.null_ref, rt.popOperand().ref);
 }
 
-test "ref.cast_null: non-null ref round-trips unchanged (10.G op_gc cycle 8)" {
+test "ref.cast_null (ref any): non-null ref round-trips unchanged (10.G cycle 152)" {
     var t = DispatchTable.init();
     register(&t);
     var rt = Runtime.init(testing.allocator);
     defer rt.deinit();
     try rt.pushOperand(.{ .ref = 0xCAFEBABE });
-    try driveOne(&rt, &t, .@"ref.cast_null", 0, 0);
+    try driveOne(&rt, &t, .@"ref.cast_null", 0x6E, 0); // any: non-null matches
     try testing.expectEqual(@as(u64, 0xCAFEBABE), rt.popOperand().ref);
 }

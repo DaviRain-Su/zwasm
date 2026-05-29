@@ -39,6 +39,11 @@ pub const Trap = error{
     /// (10.E-4) traps uncaught exceptions immediately; full catch
     /// dispatch + frame unwind lands at 10.E-5.
     UncaughtException,
+    /// Wasm 3.0 GC (§4.4.5): `ref.cast` / `ref.cast_null` whose operand's
+    /// runtime type is not a subtype of the target heap type (or a null
+    /// operand for the non-null `ref.cast` variant). Spec reason: "cast
+    /// failure". (10.G cycle 152.)
+    CastFailure,
 };
 
 /// Per-instruction trace event (Phase 6 / §9.6 / 6.A per ADR-0013).

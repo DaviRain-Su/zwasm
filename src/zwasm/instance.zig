@@ -206,6 +206,7 @@ fn mapDispatchErr(err: anyerror) Instance.InvokeError {
         error.CallStackExhausted => error.CallStackExhausted,
         error.NullReference => error.NullReference,
         error.UncaughtException => error.UncaughtException,
+        error.CastFailure => error.CastFailure, // Wasm 3.0 GC ref.cast (10.G c152)
         error.OutOfMemory => error.OutOfMemory,
         else => @panic("zwasm.Instance.invoke: dispatch returned non-Trap error variant"),
     };
