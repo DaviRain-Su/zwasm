@@ -6,11 +6,13 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `97ca5e0e` (cyc203; 10.R-call_ref-JIT IT-1). **arm64 JIT `call_ref`
-  executes** — `ref.func $double; call_ref $sig` → 42 via `runI32Export`. liveness
-  `call_ref` arm + `op_call.emitCallRef` (null-check + `funcentity_funcptr_offset`
-  deref + BLR; no type-check, validator guarantees subtype) + `emit.zig` dispatch.
-  Mac test-all GREEN, lint clean. Test aarch64-gated (x86_64 mirror = D-207).
+- **HEAD**: `3a6efef2` (cyc204; 10.R-call_ref-JIT IT-2). **JIT `call_ref` executes
+  on BOTH arches** — `ref.func $double; call_ref $sig` → 42 via `runI32Export`,
+  test UNGATED. arm64 via manual `emit.zig` switch (IT-1); x86_64 via collected
+  per-op (`x86_64/ops/wasm_3_0/call_ref.zig` → `emitCallRefCtx`, IT-2) — mirrors
+  the `return_call` dispatch shape. emitCallRef = pop funcref (*FuncEntity) →
+  null-check → `funcentity_funcptr_offset` deref → CALL (no type-check; validator
+  guarantees subtype). Mac test-all + lint GREEN. Only null-trap fixture remains (D-207).
 - **10.TC-JIT bundle CLOSED** cyc201: same-module tail-call codegen proven (direct
   0-arg/indirect/recursion-with-args) + real clang `musttail` fixture JIT-checked
   → 15. D-205 discharged; residuals D-206 (cross-module TC + return_call_ref).
@@ -18,35 +20,36 @@
   global-init/subtyping + clang_smoke; EH corpus 34/34 (ADR-0114). Runner EXECUTES
   via interp; gc_heap materialised at instantiate. 10.M memory64 + 10.E EH JIT
   largely done; 10.G GC JIT = interp-only (extreme effort, regalloc stack-map).
-- **Step 0.7 on resume**: cyc203 (IT-1, code) kicks ubuntu @ `97ca5e0e` — verify
-  next cycle. Prior: cyc201 (IT-5) `OK (HEAD=81eeb6fa)` GREEN; cyc202 docs-only.
+- **Step 0.7 on resume**: cyc204 (IT-2, code) kicks ubuntu @ `3a6efef2` — verify
+  next cycle (x86_64 call_ref now runs the ungated test). Prior: cyc203 (IT-1)
+  ubuntu `OK (HEAD=44802a08)` GREEN (call_ref test was aarch64-skipped there).
 
 ## Active bundle
 
 - **Bundle-ID**: 10.R-call_ref-JIT
-- **Cycles-remaining**: ~2 (x86_64 call_ref + null-trap fixture → then return_call_ref reuse)
-- **Continuity-memo**: arm64 `call_ref` JIT landed cyc203 `97ca5e0e` (liveness arm +
-  `op_call.emitCallRef` + `emit.zig` dispatch). Funcref = `@intFromPtr(*FuncEntity)`;
-  emitCallRef = pop funcref → marshal → `CMP X17,#0; B.EQ`(cind bounds stub) →
-  `LDR X16,[X17,#funcentity_funcptr_offset]` → MOV X0,X19 → BLR → capture. Remaining
-  (D-207): (a) **x86_64 mirror** — x86_64 has encoders (`encJccRel32(.e)` null-JZ,
-  `encMovR64FromMemDisp32(funcentity_funcptr_offset)`) but its call dispatch differs
-  from arm64's explicit switch — IT-2 Step-0 = find x86_64 call_ref dispatch path
-  (`x86_64/emit.zig` / dispatch_collector) + mirror `emitCallRef`; then UNGATE the
-  runner test (drop the aarch64 `skip.blocker(.@"D-207")`). (b) **null-trap fixture**
-  — `ref.null $sig; call_ref` → trap (typed `ref.null` heap-type encoding TBD).
-- **Exit-condition**: x86_64 `call_ref` JIT-executes (test ungated, green both
-  hosts) + null-trap fixture → bundle close; then `return_call_ref` reuse (D-206).
+- **Cycles-remaining**: ~1 (null-trap fixture → bundle close; then return_call_ref reuse / D-206)
+- **Continuity-memo**: `call_ref` JIT DONE both arches + ungated (arm64 switch IT-1
+  `97ca5e0e`; x86_64 collected per-op IT-2 `3a6efef2`). x86_64 verified on ubuntu
+  NEXT cycle (Step 0.7). Remaining (D-207): **null-trap fixture** — `ref.null $sig;
+  call_ref` → trap. The null-check IS implemented (arm64 `CMP X17,#0; B.EQ`; x86_64
+  `OR r,r; JZ` → shared bounds trap stub); just needs a fixture. Blocker: typed
+  `ref.null $sig` heap-type binary encoding (concrete type index as heap type) —
+  IT-3 Step-0 = confirm the encoding (check an interp tail/funcref fixture or the
+  parser's reftype/heaptype decode). Minor follow-up: add `FILE-SIZE-EXEMPT` marker
+  to `x86_64/op_call.zig` (now 1020 lines, soft WARN; single-concern call-emit catalog).
+- **Exit-condition**: null-trap fixture (`ref.null; call_ref` → trap) green →
+  bundle close; then `return_call_ref` reuse (D-206) — it can now mirror
+  `emitCallRef` + frame-teardown. (call_ref both arches already met.)
 
-## Active task — 10.R-call_ref-JIT IT-2 (x86_64 + null-trap)  **NEXT**
+## Active task — 10.R-call_ref-JIT IT-3 (null-trap fixture + close)  **NEXT**
 
-Step-0: find how x86_64 dispatches `call`/`call_indirect` (no explicit `.call_ref`
-arm in `x86_64/emit.zig` — likely `dispatch_collector`/`emitCallIndirectCtx`), then
-mirror `op_call.emitCallRef` for x86_64 (`x86_64/op_call.zig`): pop funcref, marshal,
-`TEST`/`JZ`-null → trap fixup, `MOV r,[funcref+funcentity_funcptr_offset]`, MOV RDI=R15,
-CALL, capture. Ungate the runner call_ref test (remove `skip.blocker(.@"D-207")`).
-Add the null-trap fixture (`ref.null $sig; call_ref` → trap). Lighter queued:
-refresh stale 10.P SKIP rationales (I14/I21 reference resolved D-192/D-179).
+Step-0: confirm the typed `ref.null $sig` binary encoding (`0xd0` + heap-type;
+concrete type index encoding) — grep parser reftype/heaptype decode or an existing
+interp funcref-null fixture. Then a `runI32Export` (or trap-expecting) test:
+exported `test()` does `ref.null $sig; call_ref $sig` → traps (`Error.Trap`). Both
+arches (ungated). Then close the 10.R-call_ref-JIT bundle. Also: `FILE-SIZE-EXEMPT`
+marker on `x86_64/op_call.zig`. Lighter queued: refresh stale 10.P SKIP rationales
+(I14/I21 reference resolved D-192/D-179).
 
 ## §10 close map
 
