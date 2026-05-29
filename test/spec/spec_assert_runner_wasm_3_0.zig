@@ -155,6 +155,14 @@ pub fn main(init: std.process.Init) !void {
             defer gpa.free(manifest);
 
             summary.manifests += 1;
+            // Per-manifest fail breakdown (cycle 160 diagnostic infra):
+            // snapshot fail counters so the loop can attribute return/
+            // trap fails to the specific sub-corpus manifest. Printed
+            // below only when this manifest contributed > 0 fails — turns
+            // the diffuse per-proposal totals into a targetable per-feature
+            // map for the next cycle.
+            const mf_ret_fail0 = summary.asserts_return_fail;
+            const mf_trap_fail0 = summary.asserts_trap_fail;
 
             // Active module bytes for assert_return dispatch. A new
             // `module <path>` directive replaces the slice; the
@@ -649,6 +657,11 @@ pub fn main(init: std.process.Init) !void {
                     .skip_impl, .skip_validator, .skip_runtime => summary.skips += 1,
                     .unknown => {},
                 }
+            }
+            const mf_ret_fail = summary.asserts_return_fail - mf_ret_fail0;
+            const mf_trap_fail = summary.asserts_trap_fail - mf_trap_fail0;
+            if (mf_ret_fail + mf_trap_fail > 0) {
+                try stdout.print("  [{s}/{s}] return_fail={d} trap_fail={d}\n", .{ proposal, entry.name, mf_ret_fail, mf_trap_fail });
             }
         }
 
