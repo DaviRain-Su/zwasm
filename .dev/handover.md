@@ -6,16 +6,18 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 129 (`0a3826ac`) — `ref.i31` result is non-null
-  `(ref i31)`, not nullable `.i31ref` (opRefI31 spec fix). Unblocked
-  i31.0's `global.set $1` into a non-null `(ref i31)` global. **gc
-  ValidateFailed 50→49** (i31.0 now passes validate). test+lint green.
-- cyc128 (`d6042f29`) scanInitExpr GC const-expr (0xFB) → i31.4
-  validates (ValidateFailed 51→50); cyc127 (`e14380ec`) D-197 split
-  (ParseFailed=0/ValidateFailed=51); cyc126 rec parse + finality fix
-  (return 0→2, invalid 55→57); cyc124-125 subtype validate; ADR-0124.
+- **HEAD**: cycle 130 (`dc9d539a`) — `evalConstExprValue` handles the
+  `ref.i31` const expr (`i32.const N; ref.i31; end`) at instantiation.
+  Last gap for core i31: handlers were already registered (ext_i31_ops),
+  validate fixed cyc124-129, only global-init eval remained. **gc return
+  pass 2→18 (+16), trap 0→2** — full i31 pipeline works end-to-end
+  (i31.0 + i31.4). No regression. test+lint green. **First big gc
+  return-pass jump.**
+- cyc129 (`0a3826ac`) ref.i31 non-null result (i31.0 validates); cyc128
+  (`d6042f29`) scanInitExpr GC const-expr; cyc127 D-197 split; cyc126 rec
+  parse + finality (return 0→2, invalid 55→57); cyc124-125 subtype validate.
 - Runner EXECUTES via interp (`Instance.invoke` → `dispatch.run`), NOT
-  JIT — so GC execution = interp/mvp handlers (~25 LOC for i31, no heap).
+  JIT. GC interp handlers (i31/struct/array) registered at api/instance.zig:883+.
 - cyc120 (`5db875b0`): cross-module EH propagation + caller-frame catch
   → **EH corpus FULLY GREEN 34/34** (bundle 10.E CLOSED; D-192 PROVEN).
 - **Bundle 10.E-eh-tail CLOSED** — exit (return ≥ 33/34) met at 34/34;
@@ -45,23 +47,22 @@
 - **Exit-condition**: gc corpus return pass ≥ 50/407 (first execution
   slice via struct/array) — refine as chunks land.
 
-## Active task — cycle 130: wire i31 interp EXECUTION → first gc return pass — **NEXT**
+## Active task — cycle 131: i31.1/3/5/6 (tables of i31ref) ValidateFailed — **NEXT**
 
-i31.0 + i31.4 now VALIDATE; they fail at EXECUTION (interp has no 0xFB
-GC handler — ref.i31/i31.get return Trap.Unreachable; global-init eval
-of ref.i31 also missing). Chunk (target a real `gc return` pass):
-(a) interp handlers in `src/interp/mvp.zig` for `.@"ref.i31"` (pop i32,
-push `i31.i32ToI31Truncate(x) | 1` as anyref via `feature/gc/i31.zig`),
-`.@"i31.get_s"` / `.@"i31.get_u"` (pop anyref; if null → Trap; else
-decode via i31ToI32Signed/Unsigned). (b) Register them in the dispatch
-table — `feature/gc/register.zig` is an empty stub (~line 58); wire the
-3 interp fn-pointers (see how other ops register). (c) Global-init-expr
-eval of ref.i31 (find the init-expr evaluator used at instantiate;
-mirror the scanInitExpr opcode set). Red: a unit test invoking a
-ref.i31+i31.get_u func via the interp. Observable: gc return pass ↑
-(i31.0 `new`/`get_u`/`get_s` + i31.4 `get`). Watch: NO regression to 2
-return / 57 invalid / 49 ValidateFailed. ValType: i31 lives in
-Value.anyref (u32, low-bit-1 = i31 discriminant).
+Core i31 (i31.0/4) DONE — full pipeline works. i31.1/3/5/6 still
+ValidateFailed=49 (no return gain). They're tables of i31ref / anyref
+with i31 init + table ops (size/get/grow/fill/copy/init per manifest).
+Likely gaps: (a) the `(ref i31)` ELEMENT-segment init expr eval (mirror
+cyc130's evalConstExprValue ref.i31 — find the element-segment
+evaluator; may be a SEPARATE path from evalConstExprValue), and/or (b) a
+validator gap on table ops over i31ref tables, and/or (c) the `0x40`
+active-table-with-initexpr form. Localize i31.1 (smallest table
+fixture): re-add the bounded func-loop / preDecode probe (cyc127/129
+pattern) → exact error → fix. After i31: struct/array EXECUTION
+(handlers registered at api/instance.zig:886-887; needs struct.new heap
+alloc via collector + TypeInfo materialise at instantiate — bigger).
+Observable: gc return/validate pass ↑; no regression to 18 return / 2
+trap / 57 invalid.
 
 ## Larger §10 work (later bundles)
 
@@ -78,7 +79,7 @@ Value.anyref (u32, low-bit-1 = i31 discriminant).
 [tail-call          ] return=71  trap=7   invalid=24  (all pass)
 [exception-handling ] return=34/34 trap=2/2 invalid=7/7 exception=4/4  ✅ FULLY GREEN
 [function-references] return=39(pass=32 fail=1) trap=4(pass) invalid=18(pass)
-[gc                 ] return=407(pass=2 fail=382) trap=100(fail) invalid=60(pass=57 fail=3) malformed=1(pass) ParseFailed=0 ValidateFailed=49  ← 10.G (cyc129; i31.0+i31.4 validate, need exec)
+[gc                 ] return=407(pass=18 fail=365) trap=100(pass=2 fail=98) invalid=60(pass=57 fail=3) malformed=1(pass) ParseFailed=0 ValidateFailed=49  ← 10.G (cyc130; i31 pipeline E2E)
 [multi-memory       ] return=407(pass=387 fail=20) trap=238(pass=237 fail=1)
 ```
 
