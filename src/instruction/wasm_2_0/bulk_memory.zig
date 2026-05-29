@@ -146,9 +146,12 @@ fn driveOne(rt: *Runtime, table: *const DispatchTable, t: ZirOp, payload: u32, e
 fn allocMem(rt: *Runtime, len: usize) !void {
     const bytes = try rt.alloc.alloc(u8, len);
     @memset(bytes, 0);
-    const mi = try rt.alloc.alloc(runtime.MemoryInstance, 1);
-    mi[0] = .{ .bytes = bytes, .pages_min = @intCast(len / 65536) };
+    const storage = try rt.alloc.alloc(runtime.MemoryInstance, 1);
+    storage[0] = .{ .bytes = bytes, .pages_min = @intCast(len / 65536) };
+    const mi = try rt.alloc.alloc(*runtime.MemoryInstance, 1);
+    mi[0] = &storage[0];
     rt.memories = mi;
+    rt.memory_storage = storage;
     rt.memory = bytes;
 }
 

@@ -1322,39 +1322,39 @@ pub fn instantiateRuntime(
     const def_memory_count: usize = if (defined_memories) |m| m.items.len else 0;
     const total_memory_count_alloc: usize = imp_memory_count + def_memory_count;
     if (total_memory_count_alloc > 0) {
-        const mi = try a.alloc(runtime_mod.MemoryInstance, total_memory_count_alloc);
+        // D-199 — pointer-per-entry. Imported memories ADOPT the
+        // exporter's live `*MemoryInstance` (shared growth); defined
+        // memories live in this instance's owned `memory_storage`.
+        const mi = try a.alloc(*runtime_mod.MemoryInstance, total_memory_count_alloc);
+        const def_storage = try a.alloc(runtime_mod.MemoryInstance, def_memory_count);
         var slot: usize = 0;
         // Imports first.
         if (imp_memory_count > 0) {
             for (imports_decoded.?.items, 0..) |it, idx| {
                 if (it.kind != .memory) continue;
-                const m = bindings.?[idx].memory;
-                mi[slot] = .{
-                    .bytes = m.memory,
-                    .idx_type = m.source_idx_type,
-                    .pages_min = m.source_min,
-                    .pages_max = m.source_max,
-                };
+                mi[slot] = bindings.?[idx].memory.inst; // shared exporter instance
                 slot += 1;
             }
         }
-        // Then defined.
+        // Then defined (own storage; `mi` points into `def_storage`).
         if (defined_memories) |memories| {
-            for (memories.items) |entry| {
+            for (memories.items, 0..) |entry, di| {
                 const pages = entry.min;
                 const bytes_total: usize = @as(usize, pages) * 65536;
                 const mem = try a.alloc(u8, bytes_total);
                 @memset(mem, 0);
-                mi[slot] = .{
+                def_storage[di] = .{
                     .bytes = mem,
                     .idx_type = entry.idx_type,
                     .pages_min = entry.min,
                     .pages_max = entry.max,
                 };
+                mi[slot] = &def_storage[di];
                 slot += 1;
             }
         }
         rt.memories = mi;
+        rt.memory_storage = def_storage;
         rt.memory = mi[0].bytes;
     }
 
@@ -1566,7 +1566,7 @@ pub fn instantiateRuntime(
             seg_bytes[di] = try a.dupe(u8, seg.bytes);
             if (seg.kind != .active) continue;
             if (seg.memidx >= rt.memories.len) return error.DataSegmentOutOfRange;
-            const target = &rt.memories[seg.memidx];
+            const target = rt.memories[seg.memidx]; // already a *MemoryInstance (D-199)
             const mem_idx_type: sections.MemoryEntry.IdxType = target.idx_type;
             const offset = try evalConstMemAddrExprWithGlobals(seg.offset_expr, mem_idx_type, rt.globals);
             const dst_end_u128: u128 = @as(u128, offset) + @as(u128, seg.bytes.len);
@@ -1663,10 +1663,16 @@ fn checkImportTypeMatches(
         },
         .memory => {
             const want = it.payload.memory;
-            const m = binding.memory;
-            if (m.source_min < want.min) return error.ImportTypeMismatch;
+            // D-199 — source descriptor comes from the shared instance.
+            // Wasm §4.5.4 matches the source's CURRENT size (a grown
+            // memory's effective min = its current pages), not its
+            // declared min — imports4 imports a memory grown to 2 while
+            // declaring min 2.
+            const m = binding.memory.inst;
+            const src_pages: u64 = m.bytes.len / 65536;
+            if (src_pages < want.min) return error.ImportTypeMismatch;
             if (want.max) |wm| {
-                const max_s = m.source_max orelse return error.ImportTypeMismatch;
+                const max_s = m.pages_max orelse return error.ImportTypeMismatch;
                 if (max_s > wm) return error.ImportTypeMismatch;
             }
         },

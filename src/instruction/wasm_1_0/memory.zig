@@ -467,12 +467,13 @@ test "memory.size on memory64 returns i64 result (ADR-0111 D2 runtime)" {
     var rt = Runtime.init(testing.allocator);
     defer rt.deinit();
     rt.memory = try testing.allocator.alloc(u8, 2 * 65536); // 2 pages
-    var mi: [1]memory_instance.MemoryInstance = .{.{
+    var mi_val: memory_instance.MemoryInstance = .{
         .bytes = rt.memory,
         .idx_type = sections_mod.MemoryEntry.IdxType.i64,
         .pages_min = 2,
         .pages_max = null,
-    }};
+    };
+    var mi = [_]*memory_instance.MemoryInstance{&mi_val};
     rt.memories = mi[0..];
     defer rt.memories = &.{};
 
@@ -488,12 +489,13 @@ test "memory.grow on memory64 pops i64 delta, pushes i64 old_size (ADR-0111 D2 r
     register(&t);
     var rt = Runtime.init(testing.allocator);
     defer rt.deinit();
-    var mi: [1]memory_instance.MemoryInstance = .{.{
+    var mi_val: memory_instance.MemoryInstance = .{
         .bytes = &.{},
         .idx_type = sections_mod.MemoryEntry.IdxType.i64,
         .pages_min = 0,
         .pages_max = null,
-    }};
+    };
+    var mi = [_]*memory_instance.MemoryInstance{&mi_val};
     rt.memories = mi[0..];
     defer rt.memories = &.{};
 

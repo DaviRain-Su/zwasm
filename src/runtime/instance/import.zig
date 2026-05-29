@@ -78,15 +78,15 @@ pub const TableImport = struct {
     source_max: ?u32,
 };
 
-/// Memory import. The `memory` slice header aliases the source's
-/// memory bytes (per ADR-0014 §2.2 / §6.K.2 the arena holds
-/// the bytes alive across importer teardown). `source_idx_type`
-/// + u64 page widths added at 10.M-1 per ADR-0111 Decision 1.
+/// Memory import. `inst` POINTS AT the source instance's live
+/// `*MemoryInstance` (D-199) — the importer adopts the same pointer
+/// into `rt.memories`, so `memory.grow` (which reallocs the shared
+/// instance's `bytes`) is visible to every importer. The source's
+/// arena keeps the instance alive across importer teardown (ADR-0014
+/// §2.2 / §6.K.2 zombie-park). `idx_type`/page bounds come WITH the
+/// shared instance (no copy needed).
 pub const MemoryImport = struct {
-    memory: []u8,
-    source_idx_type: @import("../../parse/sections.zig").MemoryEntry.IdxType = .i32,
-    source_min: u64,
-    source_max: ?u64,
+    inst: *runtime_mod.MemoryInstance,
 };
 
 /// Global import. The `slot` points at the source runtime's

@@ -405,7 +405,8 @@ pub fn main(init: std.process.Init) !void {
                                     // indexes into rt.memories directly.
                                     if (inst_rt) |rt| {
                                         if (exp.idx < rt.memories.len) {
-                                            cur_linker.defineMemoryBytes(d.func_name, exp.name, rt.memories[exp.idx].bytes) catch {};
+                                            // D-199 — share the live *MemoryInstance.
+                                            cur_linker.defineMemoryInstance(d.func_name, exp.name, rt.memories[exp.idx]) catch {};
                                         }
                                     }
                                 },

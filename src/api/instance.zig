@@ -607,16 +607,13 @@ fn buildBindings(
             },
             .memory => {
                 const src_et = try lookupSourceExportType(source_inst, .memory, it.name);
-                const desc = switch (src_et) {
-                    .memory => |m| m,
+                switch (src_et) {
+                    .memory => {},
                     else => return error.ImportTypeMismatch,
-                };
-                bindings[idx] = .{ .memory = .{
-                    .memory = source_rt.memory,
-                    .source_idx_type = desc.idx_type,
-                    .source_min = desc.min,
-                    .source_max = desc.max,
-                } };
+                }
+                // D-199 — share the exporter's live memory0 *MemoryInstance.
+                if (source_rt.memories.len == 0) return error.UnknownImportModule;
+                bindings[idx] = .{ .memory = .{ .inst = source_rt.memories[0] } };
             },
             .global => {
                 if (ext.global_idx >= source_rt.globals.len) return error.UnknownImportModule;

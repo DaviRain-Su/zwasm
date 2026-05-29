@@ -108,7 +108,9 @@ pub const Linker = struct {
     };
 
     pub const MemoryAlias = struct {
-        bytes: []u8,
+        /// D-199 — the exporter's live `*MemoryInstance` (shared, so
+        /// `memory.grow` is visible to importers), not a stale slice.
+        inst: *_runtime.MemoryInstance,
     };
 
     pub const CrossModuleFuncEntry = struct {
@@ -207,24 +209,27 @@ pub const Linker = struct {
     }
 
     pub fn defineMemory(self: *Linker, module: []const u8, name: []const u8, mem: _memory_mod.Memory) !void {
+        // D-199 — share the exporter's memory0 `*MemoryInstance` so
+        // importers see growth. Requires the source to have a
+        // materialised `rt.memories[0]` (every memory-bearing module
+        // does post-instantiate).
         try self.entries.append(self.engine.alloc, .{
             .module = module,
             .name = name,
-            .payload = .{ .memory_alias = .{ .bytes = mem.rt.memory } },
+            .payload = .{ .memory_alias = .{ .inst = mem.rt.memories[0] } },
         });
     }
 
-    /// 10.M-D195b cycle 75 — raw-bytes overload of `defineMemory`.
-    /// `Memory.slice()` returns the instance's memory0 only; multi-
-    /// memory exports (memidx > 0) need direct slice access. This
-    /// entrypoint takes the slice straight (typically
-    /// `source_inst.handle.runtime.?.memories[memidx].bytes`).
-    /// Caller is responsible for keeping the source instance alive.
-    pub fn defineMemoryBytes(self: *Linker, module: []const u8, name: []const u8, bytes: []u8) !void {
+    /// 10.M-D195b cycle 75 — `*MemoryInstance` overload of
+    /// `defineMemory` for multi-memory exports (memidx > 0). Pass
+    /// `source_inst.handle.runtime.?.memories[memidx]` (D-199: the
+    /// shared instance pointer, not a copied slice). Caller keeps the
+    /// source instance alive.
+    pub fn defineMemoryInstance(self: *Linker, module: []const u8, name: []const u8, inst: *_runtime.MemoryInstance) !void {
         try self.entries.append(self.engine.alloc, .{
             .module = module,
             .name = name,
-            .payload = .{ .memory_alias = .{ .bytes = bytes } },
+            .payload = .{ .memory_alias = .{ .inst = inst } },
         });
     }
 
@@ -442,7 +447,11 @@ pub const Linker = struct {
                         }
                     },
                     .memory => {
-                        const memlimits = switch (it.payload) {
+                        // D-199 — importer adopts the exporter's shared
+                        // `*MemoryInstance` (idx_type/page-bounds come with
+                        // it; the importer's declared limits in `it.payload`
+                        // are the compat constraint, checked elsewhere).
+                        _ = switch (it.payload) {
                             .memory => |m| m,
                             else => return error.ImportKindMismatch,
                         };
@@ -451,10 +460,7 @@ pub const Linker = struct {
                             else => return error.ImportKindMismatch,
                         };
                         bindings_list.append(scratch, .{ .memory = .{
-                            .memory = alias.bytes,
-                            .source_idx_type = memlimits.idx_type,
-                            .source_min = memlimits.min,
-                            .source_max = memlimits.max,
+                            .inst = alias.inst,
                         } }) catch return error.OutOfMemory;
                     },
                     .global => {

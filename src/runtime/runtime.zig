@@ -159,12 +159,20 @@ pub const Runtime = struct {
     /// memidx through codegen.
     memory: []u8 = &.{},
     /// Per-memory runtime descriptors (Wasm 3.0 §5.4.6
-    /// multi-memory data shape, ADR-0111 D2). `memories[0]`
-    /// mirrors `memory` (idx_type + page bounds + bytes alias).
-    /// `memories.len > 1` is a parser-permitted shape (10.M-1)
-    /// but currently rejected at runtime instantiate until MemArg
-    /// memidx wire-up at 10.M-3 enables per-memidx routing.
-    memories: []MemoryInstance = &.{},
+    /// multi-memory data shape, ADR-0111 D2). **Pointer-per-entry**
+    /// (D-199) so a cross-module imported memory ALIASES the
+    /// exporter's live `*MemoryInstance`: `memory.grow` reallocs the
+    /// shared instance's `bytes` and every importer sees it (a copied
+    /// slice would go stale after the exporter grows). `memories[0]`
+    /// mirrors `memory` (the legacy memory0 byte alias).
+    memories: []*MemoryInstance = &.{},
+    /// Backing storage for this instance's OWN (defined) memory
+    /// instances (D-199). `memories[i]` points here for defined
+    /// memories; imported entries point at the exporter's
+    /// `memory_storage` instead (shared). deinit frees this (the owned
+    /// values) + the `memories` pointer array — mirrors
+    /// `globals_storage` / `globals`.
+    memory_storage: []MemoryInstance = &.{},
     /// Module global slots. **Pointer-per-entry** so cross-module
     /// global imports alias the source instance's storage (per
     /// ADR-0014 §2.1 / 6.K.3). Defined globals point at slots in
@@ -388,7 +396,11 @@ pub const Runtime = struct {
         // arena-owned slices stay intact while testing.allocator-
         // owned slices still release without leaking.
         rawFreeOwned(self.alloc, u8, self.memory);
-        rawFreeOwned(self.alloc, MemoryInstance, self.memories);
+        // D-199 — free the pointer array + the OWNED instance storage.
+        // Imported entries point into the exporter's `memory_storage`
+        // (freed by the exporter), so freeing our own storage is correct.
+        rawFreeOwned(self.alloc, *MemoryInstance, self.memories);
+        rawFreeOwned(self.alloc, MemoryInstance, self.memory_storage);
         rawFreeOwned(self.alloc, *Value, self.globals);
         rawFreeOwned(self.alloc, Value, self.globals_storage);
         rawFreeOwned(self.alloc, bool, self.data_dropped);
@@ -526,9 +538,10 @@ test "Runtime.setMemory0Bytes: preserves memory ↔ memories[0].bytes alias (ADR
     try testing.expectEqual(@as(usize, 0), r.memories.len);
 
     // Populated memories: setMemory0Bytes mirrors into memories[0].
-    const mi = try testing.allocator.alloc(MemoryInstance, 1);
+    var inst: MemoryInstance = .{};
+    const mi = try testing.allocator.alloc(*MemoryInstance, 1);
     defer testing.allocator.free(mi);
-    mi[0] = .{};
+    mi[0] = &inst;
     r.memories = mi;
     const bytes = try testing.allocator.alloc(u8, 128);
     defer testing.allocator.free(bytes);
