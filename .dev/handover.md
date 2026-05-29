@@ -6,13 +6,12 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc150 (`2e8b1ef6`) — **crash fix**: cyc149's ref.test
-  readObjKind cast `v.ref`→u32 before the heap-bounds check → SIGABRT on
-  an anyref holding a host pointer (any.convert_extern). Bounds-check as
-  u64 first. Full corpus exits 0 (was 134); gc 116 held. Lesson:
-  `runtime-exec-change-needs-testspec-exitcode` (the slip: --fast gate +
-  summary-grep masked it). cyc149 (`09907dca`): ref.test/test_null
-  abstract RTT (gcAbstractMatch unit-tested).
+- **HEAD**: cyc151 (`bf60e44f`) — **concrete-typeidx ref.test**:
+  materialiseGcTypes builds `TypeInfo.supertype_chain` (self-inclusive)
+  from `Types.supertypes`; ref.test concrete branch walks it (ObjectHeader.
+  info → chain membership). gc return 116→117. Verified full test-spec
+  exit 0 + 0 panics (c150 lesson). cyc149-150: ref.test abstract RTT +
+  crash fix (readObjInfo carries the u64-bounds-before-u32-cast guard).
 - cyc147-148 **ADR-0125 packed COMPLETE** (A union rename → B-validate
   decode → B-exec get_s/u): gc return 62→116, trap 18→54, ValidateFailed
   27→14, invalid 57 held. cyc146 ADR-0016 M3 + concrete-subtype coercion.
@@ -47,27 +46,24 @@
 - **Exit-condition**: gc return ≥ 90 **EXCEEDED (116 at cyc148)**. Open
   target: maximise return (RTT exec) toward the corpus ceiling.
 
-## Active task — cycle 151: RTT exec tail + ref_test 33-fails — **NEXT**
+## Active task — cycle 152: br_on_cast EXEC + ref.cast — **NEXT**
 
-ref.test/test_null abstract DONE (c149) + crash fixed (c150). ref_test
-corpus = return 68 (pass=35 fail=33). **VERIFY runtime changes by full
-test-spec + exit-code check** (lesson `runtime-exec-change-needs-testspec-
-exitcode`), not summary-grep. Pick ONE lever + verify on a
-`/tmp/x/gc/{ref_test,ref_cast,br_on_cast,...}` corpus copy:
-- **ref_test 33-fails**: which assert_return mismatch / trap? Likely an
-  `init`-op gap (any.convert_extern / extern.convert_any identity in
-  ref_convert_ops.zig; struct/array.new_default; ref.null none/nofunc/
-  noextern) OR a wrong ref.test result. Step one invoke to localize.
-- **ref.cast / ref.cast_null EXEC**: reuse `gcRefMatchesNonNull`; trap on
-  mismatch — needs a new `Trap.CastFailure` (widen `runtime/trap.zig`;
-  blast radius: trap_surface c_api map + spec-runner trap-reason). Spec
-  reason string "cast failure".
-- **Concrete-$idx RTT**: thread `Types.supertypes` → `TypeInfo.supertype_
-  chain` at `materialiseGcTypes` (~1016); then `gcAbstractMatch` concrete
-  branch walks the chain instead of coarse-true.
-- **br_on_cast/_fail EXEC**: wire interp (reuse match + `doBranch` from
-  `interp/mvp.zig:285`; ZirInstr extra packs flags|ht1|ht2, payload=label).
-No regression to 116 return / 54 trap / 57 invalid / 393 multi-mem.
+ref.test abstract+concrete DONE (c149/151); supertype_chain materialised.
+**VERIFY runtime changes by full test-spec + exit-code + panic grep**
+(lesson `runtime-exec-change-needs-testspec-exitcode`), not summary-grep.
+- **br_on_cast / br_on_cast_fail EXEC** (`br_on_cast{,_fail}.zig` interp
+  returns NotMigrated — needs a registered handler). Reuse
+  `ref_test_ops.gcRefMatchesNonNull`-style match against ht2 + `doBranch`
+  (`interp/mvp.zig:285`); ZirInstr: payload=labelidx, extra packs
+  flags|ht1<<8|ht2<<16. Unblocks br_on_cast.1/.2 (concrete subtype
+  hierarchy) return assertions.
+- **ref.cast / ref.cast_null EXEC**: reuse the match; trap on mismatch —
+  add `Trap.CastFailure` (widen `runtime/trap.zig`; blast radius:
+  trap_surface c_api map + spec-runner trap-reason "cast failure").
+- **ref_test 33-fails** (return 68 pass=35): likely an `init`-op gap
+  (any.convert_extern identity; ref.null none/nofunc/noextern) — step one
+  invoke to localize; M3 only covers compile, not exec mismatch.
+No regression to 117 return / 54 trap / 57 invalid / 393 multi-mem.
 
 ## Larger §10 work (later bundles)
 
