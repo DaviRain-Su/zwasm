@@ -117,93 +117,132 @@ fn readFieldType(body: []const u8, pos: *usize) Error!StructFieldType {
     return .{ .valtype = valtype, .mutable = mutable };
 }
 
+/// Six parallel arena-backed accumulators for `decodeTypes` — one entry
+/// appended per subtype, kept index-parallel.
+const TypeAcc = struct {
+    items: *std.ArrayList(FuncType),
+    kinds: *std.ArrayList(TypeKind),
+    struct_defs: *std.ArrayList(?StructDef),
+    array_defs: *std.ArrayList(?ArrayDef),
+    supertypes: *std.ArrayList([]const u32),
+    finals: *std.ArrayList(bool),
+};
+
+/// Read one `subtype` (Wasm 3.0 GC §5) and append it as a single type
+/// index to `acc`:
+///   subtype ::= 0x50 vec(typeidx) comptype  -- sub (NoFinal, extendable)
+///             | 0x4F vec(typeidx) comptype  -- sub final
+///             | comptype                     -- = sub final ϵ comptype
+///   comptype ::= 0x60 functype | 0x5F structtype | 0x5E arraytype
+/// Byte assignment per the GC reference interpreter `binary/decode.ml`
+/// (0x50 = NoFinal, 0x4F = Final, 0x4E = rec). A bare comptype is final
+/// with no declared supertypes.
+fn readSubtypeInto(alloc: Allocator, body: []const u8, pos: *usize, acc: TypeAcc) Error!void {
+    var fin = true;
+    var supers: []const u32 = &.{};
+    if (body[pos.*] == 0x50 or body[pos.*] == 0x4F) {
+        if (body[pos.*] == 0x50) fin = false; // 0x50 = sub (open); 0x4F = sub final
+        pos.* += 1;
+        const super_count = try leb128.readUleb128(u32, body, pos);
+        const s = try alloc.alloc(u32, super_count);
+        for (s) |*x| x.* = try leb128.readUleb128(u32, body, pos);
+        supers = s;
+        if (pos.* >= body.len) return Error.UnexpectedEnd;
+    }
+    switch (body[pos.*]) {
+        0x60 => {
+            pos.* += 1;
+            const param_count = try leb128.readUleb128(u32, body, pos);
+            const params = try alloc.alloc(ValType, param_count);
+            for (params) |*p| p.* = try init_expr.readValType(body, pos);
+            const result_count = try leb128.readUleb128(u32, body, pos);
+            const results = try alloc.alloc(ValType, result_count);
+            for (results) |*r| r.* = try init_expr.readValType(body, pos);
+            try acc.items.append(alloc, .{ .params = params, .results = results });
+            try acc.kinds.append(alloc, .func);
+            try acc.struct_defs.append(alloc, null);
+            try acc.array_defs.append(alloc, null);
+        },
+        0x5F => {
+            pos.* += 1;
+            const field_count = try leb128.readUleb128(u32, body, pos);
+            const fields = try alloc.alloc(StructFieldType, field_count);
+            for (fields) |*f| f.* = try readFieldType(body, pos);
+            try acc.items.append(alloc, .{ .params = &.{}, .results = &.{} });
+            try acc.kinds.append(alloc, .structdef);
+            try acc.struct_defs.append(alloc, .{ .fields = fields });
+            try acc.array_defs.append(alloc, null);
+        },
+        0x5E => {
+            pos.* += 1;
+            const element = try readFieldType(body, pos);
+            try acc.items.append(alloc, .{ .params = &.{}, .results = &.{} });
+            try acc.kinds.append(alloc, .arraydef);
+            try acc.struct_defs.append(alloc, null);
+            try acc.array_defs.append(alloc, .{ .element = element });
+        },
+        else => return Error.InvalidFunctype,
+    }
+    try acc.supertypes.append(alloc, supers);
+    try acc.finals.append(alloc, fin);
+}
+
 /// Decode the body of a type section (`SectionId.@"type"`):
-///   vec(typedef)
-/// where typedef is one of:
-///   functype   = 0x60 vec(valtype) vec(valtype)        (Wasm 1.0)
-///   structtype = 0x5F vec(fieldtype)                   (Wasm 3.0 GC §5; ADR-0121 D4)
-///   arraytype  = 0x5E fieldtype                        (Wasm 3.0 GC §5; ADR-0121 D4)
-/// per ADR-0121 D1 the `items` slot stays `FuncType`-typed; non-func
-/// entries land as zero-initialised placeholders consulted only via
-/// the parallel `kinds` array.
+///   vec(rectype)
+///   rectype ::= 0x4E vec(subtype)   -- recursive group (N type indices)
+///             | subtype              -- single (one type index)
+/// A `rec` group of N expands to N CONSECUTIVE type indices; mutual
+/// references resolve against the post-expansion index space (so the
+/// returned `items.len` is the total expanded type count, not the
+/// vec(rectype) length). per ADR-0121 D1 the `items` slot stays
+/// `FuncType`-typed; non-func entries land as zero placeholders
+/// consulted via `kinds`.
 pub fn decodeTypes(parent_alloc: Allocator, body: []const u8) Error!Types {
     var arena = std.heap.ArenaAllocator.init(parent_alloc);
     errdefer arena.deinit();
     const alloc = arena.allocator();
 
     var pos: usize = 0;
-    const count = try leb128.readUleb128(u32, body, &pos);
-    const items = try alloc.alloc(FuncType, count);
-    const kinds = try alloc.alloc(TypeKind, count);
-    const struct_defs = try alloc.alloc(?StructDef, count);
-    const array_defs = try alloc.alloc(?ArrayDef, count);
-    const supertypes = try alloc.alloc([]const u32, count);
-    const finals = try alloc.alloc(bool, count);
-    for (struct_defs) |*s| s.* = null;
-    for (array_defs) |*a| a.* = null;
-    for (supertypes) |*s| s.* = &.{};
-    for (finals) |*f| f.* = true; // bare comptype is final; 0x4F sets false
+    const rec_count = try leb128.readUleb128(u32, body, &pos);
 
-    for (items, 0..) |*ft, i| {
+    var items: std.ArrayList(FuncType) = .empty;
+    var kinds: std.ArrayList(TypeKind) = .empty;
+    var struct_defs: std.ArrayList(?StructDef) = .empty;
+    var array_defs: std.ArrayList(?ArrayDef) = .empty;
+    var supertypes: std.ArrayList([]const u32) = .empty;
+    var finals: std.ArrayList(bool) = .empty;
+    const acc: TypeAcc = .{
+        .items = &items,
+        .kinds = &kinds,
+        .struct_defs = &struct_defs,
+        .array_defs = &array_defs,
+        .supertypes = &supertypes,
+        .finals = &finals,
+    };
+
+    var rec: u32 = 0;
+    while (rec < rec_count) : (rec += 1) {
         if (pos >= body.len) return Error.UnexpectedEnd;
-        // Wasm 3.0 GC §5: a `sub` (0x4F) / `sub final` (0x50) typedef
-        // prefixes its comptype with a vec(typeidx) of declared
-        // supertypes. A bare comptype (0x60/0x5F/0x5E) has none and is
-        // final. The 0x4E `rec` group form is not yet handled (single
-        // subtypes only — the wast2json corpus flattens single types to
-        // bare 0x50/0x4F).
-        if (body[pos] == 0x50 or body[pos] == 0x4F) {
-            if (body[pos] == 0x4F) finals[i] = false;
+        if (body[pos] == 0x4E) {
+            // rec group: vec(subtype) → N consecutive type indices.
             pos += 1;
-            const super_count = try leb128.readUleb128(u32, body, &pos);
-            const supers = try alloc.alloc(u32, super_count);
-            for (supers) |*s| s.* = try leb128.readUleb128(u32, body, &pos);
-            supertypes[i] = supers;
-            if (pos >= body.len) return Error.UnexpectedEnd;
-        }
-        switch (body[pos]) {
-            0x60 => {
-                pos += 1;
-                const param_count = try leb128.readUleb128(u32, body, &pos);
-                const params = try alloc.alloc(ValType, param_count);
-                for (params) |*p| p.* = try init_expr.readValType(body, &pos);
-
-                const result_count = try leb128.readUleb128(u32, body, &pos);
-                const results = try alloc.alloc(ValType, result_count);
-                for (results) |*r| r.* = try init_expr.readValType(body, &pos);
-
-                ft.* = .{ .params = params, .results = results };
-                kinds[i] = .func;
-            },
-            0x5F => {
-                pos += 1;
-                const field_count = try leb128.readUleb128(u32, body, &pos);
-                const fields = try alloc.alloc(StructFieldType, field_count);
-                for (fields) |*f| f.* = try readFieldType(body, &pos);
-                ft.* = .{ .params = &.{}, .results = &.{} };
-                kinds[i] = .structdef;
-                struct_defs[i] = .{ .fields = fields };
-            },
-            0x5E => {
-                pos += 1;
-                const element = try readFieldType(body, &pos);
-                ft.* = .{ .params = &.{}, .results = &.{} };
-                kinds[i] = .arraydef;
-                array_defs[i] = .{ .element = element };
-            },
-            else => return Error.InvalidFunctype,
+            const n = try leb128.readUleb128(u32, body, &pos);
+            var k: u32 = 0;
+            while (k < n) : (k += 1) try readSubtypeInto(alloc, body, &pos, acc);
+        } else {
+            try readSubtypeInto(alloc, body, &pos, acc);
         }
     }
 
     if (pos != body.len) return Error.TrailingBytes;
     return .{
         .arena = arena,
-        .items = items,
-        .kinds = kinds,
-        .struct_defs = struct_defs,
-        .array_defs = array_defs,
-        .supertypes = supertypes,
-        .finals = finals,
+        .items = items.items,
+        .kinds = kinds.items,
+        .struct_defs = struct_defs.items,
+        .array_defs = array_defs.items,
+        .supertypes = supertypes.items,
+        .finals = finals.items,
     };
 }
 
@@ -748,26 +787,52 @@ test "decodeTypes: rejects unknown typedef prefix" {
     try testing.expectError(Error.InvalidFunctype, decodeTypes(testing.allocator, &body));
 }
 
-test "decodeTypes: sub / sub final prefix populates supertypes + finals (10.G ADR-0124 cycle 125)" {
-    // Wasm 3.0 GC §5 subtype binary form:
-    //   type 0 = 0x4F 0x00 (struct i32)         -- `sub` (open, no supers)
-    //   type 1 = 0x50 0x01 0x00 (struct i32 i64) -- `sub final $0`
+test "decodeTypes: sub / sub final prefix populates supertypes + finals (10.G ADR-0124 cycle 126)" {
+    // Wasm 3.0 GC §5 subtype binary form (byte assignment per the GC
+    // reference interpreter binary/decode.ml: 0x4F = sub final, 0x50 = sub):
+    //   type 0 = 0x4F 0x00 (struct i32)          -- `sub final` (no supers)
+    //   type 1 = 0x50 0x01 0x00 (struct i32 i64)  -- `sub $0` (open)
     const body = [_]u8{
         0x02,
-        0x4F, 0x00, 0x5F, 0x01, 0x7F, 0x00, // sub, 0 supers, struct{i32 const}
-        0x50, 0x01, 0x00, 0x5F, 0x02, 0x7F, 0x00, 0x7E, 0x00, // sub final $0, struct{i32,i64 const}
+        0x4F, 0x00, 0x5F, 0x01, 0x7F, 0x00, // sub final, 0 supers, struct{i32 const}
+        0x50, 0x01, 0x00, 0x5F, 0x02, 0x7F, 0x00, 0x7E, 0x00, // sub $0, struct{i32,i64 const}
     };
     var t = try decodeTypes(testing.allocator, &body);
     defer t.deinit();
     try testing.expectEqual(@as(usize, 2), t.items.len);
     try testing.expectEqual(TypeKind.structdef, t.kinds[0]);
     try testing.expectEqual(TypeKind.structdef, t.kinds[1]);
-    // type 0: `sub` → not final, no declared supertypes.
-    try testing.expectEqual(false, t.finals[0]);
+    // type 0: `sub final` → final, no declared supertypes.
+    try testing.expectEqual(true, t.finals[0]);
     try testing.expectEqual(@as(usize, 0), t.supertypes[0].len);
-    // type 1: `sub final $0` → final, one declared supertype (index 0).
-    try testing.expectEqual(true, t.finals[1]);
+    // type 1: `sub $0` → NOT final (open), one declared supertype (index 0).
+    try testing.expectEqual(false, t.finals[1]);
     try testing.expectEqualSlices(u32, &[_]u32{0}, t.supertypes[1]);
+}
+
+test "decodeTypes: 0x4E rec group expands to N consecutive type indices (10.G cycle 126)" {
+    // vec(rectype) of 2: a bare struct, then a `rec` group of 2 mutually-
+    // referencing structs. Total = 3 type indices.
+    //   rectype 0 = 0x5F (struct{i32 const})                  -- bare → final, no supers
+    //   rectype 1 = 0x4E 0x02 (rec group of 2):
+    //     idx 1 = 0x50 0x00 0x5F (struct{ (ref null 2) const })  -- sub, refs idx 2
+    //     idx 2 = 0x50 0x00 0x5F (struct{ (ref null 1) const })  -- sub, refs idx 1
+    const body = [_]u8{
+        0x02, // 2 rectypes
+        0x5F, 0x01, 0x7F, 0x00, // rectype 0: bare struct{i32 const}
+        0x4E, 0x02, // rec group of 2
+        0x50, 0x00, 0x5F, 0x01, 0x63, 0x02, 0x00, // idx1: sub, struct{(ref null $2) const}
+        0x50, 0x00, 0x5F, 0x01, 0x63, 0x01, 0x00, // idx2: sub, struct{(ref null $1) const}
+    };
+    var t = try decodeTypes(testing.allocator, &body);
+    defer t.deinit();
+    try testing.expectEqual(@as(usize, 3), t.items.len); // rec-of-2 expanded
+    try testing.expectEqual(TypeKind.structdef, t.kinds[0]);
+    try testing.expectEqual(TypeKind.structdef, t.kinds[1]);
+    try testing.expectEqual(TypeKind.structdef, t.kinds[2]);
+    try testing.expectEqual(true, t.finals[0]); // bare → final
+    try testing.expectEqual(false, t.finals[1]); // 0x50 sub → open
+    try testing.expectEqual(false, t.finals[2]);
 }
 
 test "decodeTypes: single struct with one i32 const field (ADR-0121 D4; 10.G op_gc cycle 14)" {
