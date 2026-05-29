@@ -1673,7 +1673,11 @@ pub const Validator = struct {
     /// proper type so `i31.get_*` validator-pops match.
     fn opRefI31(self: *Validator) Error!void {
         try self.popExpect(.i32);
-        try self.pushType(.i31ref);
+        // Wasm 3.0 GC: `ref.i31 : [i32] -> [(ref i31)]` — the result is
+        // NON-NULL (an i31 ref is never null). Pushing the nullable
+        // `.i31ref` abbreviation breaks `global.set` / returns into a
+        // non-null `(ref i31)` slot (StackTypeMismatch).
+        try self.pushType(.{ .ref = zir.RefType.abs(.i31, false) });
     }
 
     /// Wasm spec 3.0 §3.x (GC) — `i31.get_s` / `i31.get_u`: pop a

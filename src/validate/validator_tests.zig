@@ -49,6 +49,16 @@ test "validate: i32.const + end produces declared i32 result" {
     try validateFunction(i32_result_sig, &.{}, &[_]u8{ 0x41, 0x07, 0x0B }, &.{}, &.{}, &.{}, 0, &.{}, 0);
 }
 
+test "validate: ref.i31 result is non-null (ref i31), not nullable i31ref (10.G cycle 129)" {
+    // ref.i31 : [i32] -> [(ref i31)] non-null. A non-null (ref i31)
+    // result sig must accept it (the old nullable .i31ref push failed
+    // this with StackTypeMismatch — e.g. gc/i31.0's global.set).
+    const res = [_]ValType{.{ .ref = zir.RefType.abs(.i31, false) }};
+    const sig: FuncType = .{ .params = &.{}, .results = &res };
+    // i32.const 0; ref.i31; end
+    try validateFunction(sig, &.{}, &[_]u8{ 0x41, 0x00, 0xFB, 0x1C, 0x0B }, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
 test "validate: empty body for () -> i32 fails arity" {
     const r = validateFunction(i32_result_sig, &.{}, &[_]u8{0x0B}, &.{}, &.{}, &.{}, 0, &.{}, 0);
     try testing.expectError(Error.ArityMismatch, r);
