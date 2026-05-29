@@ -6,13 +6,12 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc167 (ADR cycle, no gc delta — gc 343 held) — **ADR-0126
-  filed**: WasmGC structural type canonicalization + iso-recursive rec-
-  group subtyping (the deep type-system tail; D-198). Phased 10a
-  (canonicalization → test-canon + cross-module sig fails) → 10b (iso-
-  recursive coinductive validator → 6 type-subtyping fails). §18-required
-  ADR-first for the §4 type-model deviation. cyc166 table-init-expr
-  (i31.3 → i31 clean, +3); cyc161 externref args (+58). **gc 62→343**.
+- **HEAD**: cyc168 (`833c19b9`) — **ADR-0126 Phase-10a: structural
+  canonical type ids** (materialiseGcTypes computes `canonical_ids[]`)
+  + RTT canonical match in `concreteReaches`. Fixes ref_test test-canon:
+  **gc return 343→344 (+1)**, trap 90, invalid 57 held; no regression,
+  0 panics. Runtime-only (validator/linker canonical match = cyc169).
+  cyc167 filed ADR-0126; cyc166 table-init-expr (i31 clean). **gc 62→344**.
 - Earlier arc: cyc147-148 ADR-0125 packed (62→116); cyc146 ADR-0016 M3
   validate self-attribution (`compile FAIL [fn= off= op=]`) + subtypeCtx
   coercion; cyc144/145 GC blocktypes + br_on_cast; cyc141 rt.datas fix
@@ -41,26 +40,28 @@
 - **Exit-condition**: gc return ≥ 90 **EXCEEDED (116 at cyc148)**. Open
   target: maximise return (RTT exec) toward the corpus ceiling.
 
-## Active task — cycle 168: ADR-0126 Phase-10a structural canonicalization — **NEXT**
+## Active task — cycle 169: Phase-10a validator/linker canonical match — **NEXT**
 
-ADR-0126 filed (cyc167). Implement **Phase-10a** (canonicalization;
-LOW-risk, ~150 LOC, the prerequisite half). Survey blueprint:
-- Compute a **canonical type id** per defined type from its comptype
-  structure (kind + fields/elems/params/results + storage/mutability +
-  recursively the canonical ids of contained concrete refs, rec-group
-  self-refs resolved positionally). Preferentially at type-section
-  decode / `materialiseGcTypes` (closed-world, once); store as a
-  parallel `canonical_id[]` (NOT an index remap — less invasive).
-- Consult canonical ids in: `ValType.eql`/subtype concrete compare
-  (validator), `concreteReaches`/`gcRefMatchesNonNull` (runtime RTT),
-  Linker `sigEqual` (cross-module). Fixes ref_test test-canon + the 4
-  cross-module sig fails (type-subtyping.45/46/48/50).
-- **HIGH BLAST RADIUS** (type-section decode is load-bearing; ADR-0124
-  cyc122 parse-coupling regressed gc invalid 55→40). VERIFY FULL test-
-  spec ALL proposals + assert_invalid (`gc invalid` must stay 57) +
-  exit 0 + 0 panics. Then Phase-10b (iso-recursive coinductive) next.
-Remaining gc residuals: type-subtyping=5 + ref_test=2 (test-canon +
-eq-on-externalized). No regression to 343/90/57/393/34.
+Runtime canonical match DONE (c168, test-canon). Now extend canonical-id
+matching to the VALIDATOR + LINKER for the cross-module sig fails
+(type-subtyping.45/46/48/50: UnknownImport / SignatureMismatch on
+structurally-equal-but-distinct-index func types across `register M`):
+- The canonical-id algorithm lives in type_info.zig (`materialiseGcTypes`)
+  but the validator + linker run pre-instantiate / cross-instance — they
+  need a canonical-id computed from the DECODED `sections.Types` (validator)
+  / from each instance's types (linker `sigEqual`). Likely: hoist the
+  fold helpers + a `computeCanonicalIds(types)` into a shared spot
+  (type_info or a parse-side helper) callable from both.
+- Linker `sigEqual` (src/zwasm/linker.zig ~410): compare func param/
+  result types by canonical id, not `ValType.eql` raw index.
+- **HIGH BLAST RADIUS** if touching validator `gcConcreteReaches`
+  (ADR-0124 / cyc122 parse-coupling — gc invalid regressed 55→40 once).
+  Prefer the LINKER-only change first (lower risk, fixes the cross-module
+  imports) + measure; validator-side canonical only if needed.
+- Then **Phase-10b** (iso-recursive coinductive validator → 6 within-
+  module type-subtyping fails) + ref_test_eq (extern↔any tag).
+VERIFY FULL test-spec ALL proposals + assert_invalid (gc invalid 57) +
+exit 0 + 0 panics. No regression to 344/90/57/393/34.
 
 ## Larger §10 work (later bundles)
 
@@ -73,7 +74,7 @@ eq-on-externalized). No regression to 343/90/57/393/34.
 ```
 [memory64           ] return=337 (all pass)    [tail-call] return=71 (all pass)
 [exception-handling ] 34/34 ✅ FULLY GREEN     [function-references] return=34/39
-[gc                 ] return=343/407 trap=90/100 invalid=57/60 malformed=1/1 skip=20  ← 10.G c166
+[gc                 ] return=344/407 trap=90/100 invalid=57/60 malformed=1/1 skip=20  ← 10.G c168
 [multi-memory       ] return=393/407 trap=238/238  ← cyc141 rt.datas fix
 ```
 
