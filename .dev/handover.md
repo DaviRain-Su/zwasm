@@ -6,12 +6,14 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc174 (`cbcd081b`) — **Wasm start section now EXECUTES** at
-  instantiate (was validated-but-discarded; §4.5.4 invoke added to
-  `instantiateInternal` after data init, trap→fail). **multi-memory
-  393→396 (+3, start0 fixed)**, no regression, 0 panics. api/instance.zig
-  cap 3000→3200 (ADR-0099 amend). cyc168/169 = Phase-10a (+2);
-  **gc 62→345**.
+- **HEAD**: cyc175 (root-cause re-scope, no src) — traced the gc
+  type-subtyping residual (5 fails = 3 FAILsetup + 2 FAILval) end-to-end:
+  it's the Runtime-types **`ref.test`-on-funcref** modules, NOT the
+  Linking cross-module imports (those pass). The miss in cyc170-172: a
+  funcref `ref.test` never resolves the func's type idx (`readObjInfo`
+  reads the GC heap, funcrefs aren't heap objects). RE-SCOPED to 3 pieces
+  (ADR-0126 cyc175 amend). cyc174 (`cbcd081b`): start-exec → multi-mem
+  393→396. cyc168/169 = Phase-10a; **gc 62→345**.
 - Earlier arc: cyc147-148 ADR-0125 packed (62→116); cyc146 ADR-0016 M3
   validate self-attribution (`compile FAIL [fn= off= op=]`) + subtypeCtx
   coercion; cyc144/145 GC blocktypes + br_on_cast; cyc141 rt.datas fix
@@ -29,39 +31,39 @@
 
 - **Bundle-ID**: 10.G-wasmgc (WasmGC spec corpus — the largest
   remaining §10 gap; follows the CLOSED 10.E EH chain)
-- **Cycles-remaining**: open (RTT exec + array bulk ops DONE c149-158;
-  next = survey densest remaining gc return-fail cluster)
-- **Continuity-memo**: parse + i31 + struct/array narrowing/exec/const-
-  expr + packed-validate all DONE (gc return →105). Substrate (don't
-  rebuild): `feature/gc/` heap+type_info+i31+collector, struct_ops/
-  array_ops registered (api/instance.zig:883-887), StorageType union
-  (ADR-0125), ADR-0115/0116/0121/0124. **VERIFY by DIRECT binary run**;
-  M3 attributes every compile FAIL (`grep "compile FAIL.*op=0x"`).
-- **Exit-condition**: gc return ≥ 90 **EXCEEDED (116 at cyc148)**. Open
-  target: maximise return (RTT exec) toward the corpus ceiling.
+- **Cycles-remaining**: open; next = the cyc176 3-piece landing (below).
+- **Continuity-memo**: substrate DONE (don't rebuild): `feature/gc/`
+  heap+type_info+i31+collector, struct_ops/array_ops registered, ADR-0115/
+  0116/0121/0124/0125. **VERIFY by DIRECT binary run**; M3 attributes
+  every compile FAIL (`grep "compile FAIL.*op=0x"`).
+- **Exit-condition**: gc return ≥ 90 **EXCEEDED (345)**. Open target:
+  maximise return toward the corpus ceiling (D-198 tail = cyc176).
 
-## Active task — cycle 175: gc D-198 coordinated cross-module landing — **NEXT**
+## Active task — cycle 176: gc ref.test-on-funcref 3-piece coordinated landing — **NEXT**
 
-On-bundle (10.G), observable, HIGH blast radius — the ADR-0126 Phase-10b
-plan; fresh post-compact context = its "fresh-context cycle" precondition.
-Flip the **3 cross-module type-subtyping fails** (45 exporter validate +
-46/48/50 importer link) by landing TWO pieces TOGETHER (one alone is
-non-observable per cyc171):
-1. **Validator** — re-apply `gcCanonicalEqual` (recursive structural
-   equality: finality + canonical supertypes + comptype, refs recurse,
-   depth-32 coinductive cutoff) as an OR in `gcValTypeSubtype`'s
-   concrete→concrete arm. **Verified SAFE c171** (fixture 45 validates,
-   gc invalid HELD 57). See ADR-0126 cyc171 note.
-2. **Linker** — `sigSubtype` (exporter actual <: importer declared:
-   contravariant params / covariant results) replacing the EXACT
-   `ValType.eql` at linker.zig ~527 (fixes 46/48/50 SignatureMismatch).
-VERIFY FULL test-spec ALL proposals + assert_invalid: **gc invalid MUST
-stay 57** (cyc122 regression mode), exit 0, 0 panics, no regression to
-345/90/393/337/71/34. Then SEPARATELY trace the 2 FAILval (non-canonical
-root cause, c172-FALSIFIED — `--fail-detail` per-assert ref.test/cast).
-
-> If the coordinated landing regresses gc invalid → revert both, the
-> linker sigSubtype likely over-accepts; narrow to func-import only.
+On-bundle (10.G), HIGH blast radius. Full decomposition + traps in
+ADR-0126 "Phase-10b RE-SCOPED" (cyc175). Land 3 pieces TOGETHER (none
+observable alone; 2-without-3 silently regresses `.wast` module 378):
+1. **Validator `gcCanonicalEqual`** — narrow OR-arm in `gcValTypeSubtype`
+   concrete→concrete (line ~2885): `... or gcCanonicalEqual(a,e,types)`.
+   Recursive structural equality on `sections.Types` (kind + finality +
+   canonically-equal supertypes + comptype, refs recurse, depth-32
+   coinductive cutoff). **Verified SAFE cyc175** (invalid 57; shifts 1
+   FAILsetup→FAILval). The exact helper is in the ADR section + was in
+   the cyc175 reverted diff (`git show` the revert's parent if needed).
+2. **Funcref→RAW typeidx in `ref_test_ops.gcRefMatchesNonNull`** — when
+   `gti.entries[ht].kind == .func`, resolve `Value.refAsFuncEntity(v)` and
+   `concreteReaches(fe.<RAW typeidx>, ht)`. **Do NOT use
+   `FuncEntity.typeidx`** (canonicalized via `funcTypeEql` → collapses
+   bare funcs → wrong). Get the raw declared typeidx (investigate
+   `runtime.func_typeidxs[fe.func_idx]` or add a raw field).
+3. **Precise equivalence-class `canonical_ids`** in `materialiseGcTypes`
+   (O(n²) pairwise canonicalEqual; cyc168's coarse fold conflates rec-
+   group context). **Regression boundary = `.wast` module 378** (`$f1≢$f2`
+   → `ref.test` must return 0). Verify 348/360→1 AND 378→0 same run.
+VERIFY FULL test-spec ALL proposals + assert_invalid: gc invalid stays 57,
+multi-mem ≥396, exit 0, 0 panics. Then **4th probe**: the 2 residual
+FAILsetup (modules still not compiling after piece 1).
 
 ## Larger §10 work (later bundles)
 

@@ -112,6 +112,78 @@ layout (no Value-representation change).
   + assert_invalid) exit 0 + no `gc invalid` regression, per ADR-0124.
 - D-198 discharges across Phase-10a + Phase-10b.
 
+## Phase-10b RE-SCOPED to THREE pieces (cyc175 empirical root-cause)
+
+cyc175 traced the residual end-to-end (DIRECT binary, `--fail-detail` +
+the `.wast` source). The cyc170-172 framing (validator-canonical +
+linker-sigSubtype, two pieces) was **incomplete** — it missed the actual
+runtime mechanism. The current 5 type-subtyping return-fails are **3
+FAILsetup + 2 FAILval** (not 1-validate + 3-link + 2-val), and the
+fixtures are the **Runtime-types `ref.test` modules** (`.wast` lines
+348-440), NOT the Linking-section cross-module imports (those `module`
+directives at 614-700 already pass). So the **linker `sigSubtype` piece
+is NOT on the residual path** — drop it from the active plan.
+
+The real residual decomposes into THREE coordinated pieces:
+
+**Piece 1 — Validator `gcCanonicalEqual` (verified-safe, non-observable
+alone).** A narrow OR-arm in `gcValTypeSubtype`'s concrete→concrete arm:
+`gcConcreteReaches(a,e) or gcCanonicalEqual(a,e,types)`. `gcCanonicalEqual`
+= recursive structural equality on `sections.Types` (same kind +
+finality + **canonically-equal declared supertypes** + comptype; concrete
+refs recurse via a valtype helper; depth-32 coinductive cutoff returning
+`true`). Comparing supertypes — not just comptype — keeps `(sub $x)` and
+`(sub $y)` distinct when `$x ≢ $y`, avoiding the cyc122 invalid-regression.
+**Verified cyc175**: re-applied → gc invalid HELD 57, and the FAIL split
+shifted **3 FAILsetup+2 FAILval → 2 FAILsetup+3 FAILval** (one Runtime
+module, `.wast` 360 — the `$g2` struct `(sub $s2 ...)` needing
+`(ref $f1)<:(ref $f2)` to validate — now COMPILES). But return stayed 345
+(the fail moved compile→runtime), so it cannot land alone (spike §2).
+
+**Piece 2 — Funcref→RAW-typeidx resolution in `ref.test`/`ref.cast`
+(THE GAP cycles 170-172 MISSED).** `gcRefMatchesNonNull`
+(`ref_test_ops.zig`) on a concrete-typeidx target calls
+`readObjInfo(rt, v)`, which reads an `ObjectHeader` from the **GC heap**.
+But `ref.test (ref $g1) (ref.func $g)` operands are **funcrefs**
+(`Value.fromFuncRef` = a `*FuncEntity` pointer, ≥ heap bounds), NOT heap
+GC objects → `readObjInfo` returns null → `concreteReaches` never runs →
+`ref.test` returns 0. This is why all the residual `ref.test`-on-funcref
+asserts fail, and why cyc172's runtime equivalence-class experiment was
+falsely "non-observable" — the canonical_ids were never even consulted
+for funcrefs. **Fix**: when the concrete target's `gti.entries[ht].kind
+== .func`, resolve the operand via `Value.refAsFuncEntity(v)` and
+`concreteReaches(fe.<RAW typeidx>, ht)`.
+**CAUTION — do NOT use `FuncEntity.typeidx`**: it is the *canonicalized*
+index (`canonicalTypeidx` via `funcTypeEql`, raw param/result `eql`), so
+for bare `()->()` funcs it collapses `$g2 → $f1` (the first bare func),
+**losing the subtype identity** — `concreteReaches($f1, $g1)` then asks
+the wrong question. Piece 2 needs the func's **RAW declared type index**
+(investigate: `runtime.func_typeidxs[fe.func_idx]` or add a raw field to
+`FuncEntity` WITHOUT touching the canonical `.typeidx` that JIT
+`call_indirect` depends on — ADR-0068).
+
+**Piece 3 — PRECISE equivalence-class `canonical_ids` (cyc172's piece,
+correct now that Piece 2 exists).** cyc168 `canonical_ids` fold the
+supertype as **0** (conservative) and hash bare funcs identically
+regardless of rec-group context, so they CONFLATE `$g1`/`$g2` even when
+the context differs. **Regression boundary = `.wast` module 378**: there
+`$f2`'s rec-group struct references `(ref $f1)` (not `(ref $f2)`), so
+`$f1 ≢ $f2` ⟹ `$g1 ≢ $g2` ⟹ `ref.test (ref $g1)(ref.func $g:$g2)` must
+return **0**. Coarse canonical_ids (or any fix landing Piece 2 alone)
+would make 378 return **1** — a silent value-regression that the
+aggregate count can mask. Piece 3 = the O(n²) pairwise-`canonicalEqual`
+equivalence-class merge (per the Phase-10a "Mechanism note"), computed
+once at `materialiseGcTypes`, so `concreteReaches`' canonical compare is
+precise. Verify 348/360 → 1 AND 378 → 0 in the SAME run.
+
+**Landing order (cyc176, fresh budget):** Pieces 1+2+3 land TOGETHER
+(none is observable alone; 2-without-3 regresses 378). Then re-measure:
+the 3 FAILval should flip to pass. The **2 remaining FAILsetup** (modules
+that STILL don't compile after Piece 1) are a SEPARATE 4th investigation
+— trace which `.wast` module + why (may need a validation path beyond
+field-subtype canonical-equal). FULL test-spec ALL proposals +
+assert_invalid: gc invalid MUST stay 57, multi-mem ≥396, exit 0, 0 panics.
+
 ## Phase-10b implementation notes (cyc170 design spike)
 
 Post-Phase-10a, the last 5 gc fails are all `type-subtyping` (everything
@@ -208,3 +280,22 @@ apply it from this note.
   link) flip only when validator-canonical-equal [verified safe] AND
   Linker `sigSubtype` (exporter<:importer) land TOGETHER. The 2 FAILval
   are a SEPARATE, non-canonical, currently-unexplained runtime cause.
+- 2026-05-29 — **Amendment (cyc175): residual RE-SCOPED to three pieces;
+  the cyc170-172 framing was wrong about the mechanism.** End-to-end
+  trace (DIRECT binary + `.wast`) found the residual is the Runtime-types
+  `ref.test`-on-funcref modules (`.wast` 348-440), NOT the Linking-section
+  cross-module imports (those `module` directives already pass) — so the
+  **Linker `sigSubtype` piece is OFF the residual path** (dropped from the
+  active plan). Root cause of the 2 original FAILval (the "unexplained
+  runtime cause" above): `gcRefMatchesNonNull` reads the GC heap via
+  `readObjInfo`, but `ref.func` operands are `*FuncEntity` pointers, not
+  heap objects → null → `ref.test` returns 0. cyc172's equivalence-class
+  was non-observable because the canonical_ids were never consulted for
+  funcrefs at all. See the new "Phase-10b RE-SCOPED" section: Piece 1
+  (validator `gcCanonicalEqual`, re-verified safe — invalid 57, shifts 1
+  FAILsetup→FAILval), Piece 2 (funcref→**RAW** typeidx resolution — do NOT
+  use the canonicalized `FuncEntity.typeidx`), Piece 3 (precise
+  equivalence-class canonical_ids, with `.wast` module 378 — `$f1≢$f2` —
+  as the no-regression boundary). All three land together cyc176; the 2
+  residual FAILsetup are a separate 4th investigation. cyc175 reverted
+  the validator change (non-observable alone, spike §2).
