@@ -1406,7 +1406,8 @@ pub const Validator = struct {
             // br_on_cast / br_on_cast_fail share validator shape:
             // consume flags + labelidx + ht1 + ht2, pop reftype,
             // pop+repush label types, push reftype back on fall-through.
-            24, 25 => try self.opBrOnCast(),
+            24 => try self.opBrOnCast(false), // br_on_cast
+            25 => try self.opBrOnCast(true), // br_on_cast_fail
             // any.convert_extern (26): pop externref, push anyref.
             26 => try self.opConvertRef(.externref, .anyref),
             // extern.convert_any (27): pop anyref, push externref.
@@ -1700,42 +1701,56 @@ pub const Validator = struct {
     }
 
     /// Wasm spec 3.0 §3.3.5.5 — `br_on_cast flags l ht1 ht2` /
-    /// `br_on_cast_fail flags l ht1 ht2`: branch to label l when
-    /// (br_on_cast) the operand matches ht2, else (br_on_cast_fail)
-    /// when it doesn't. Stack effect mirrors br_on_null: pop the
-    /// branch reftype, verify label types match, then push them
-    /// back + the (narrowed) reftype on fall-through.
+    /// `br_on_cast_fail flags l ht1 ht2`. Immediate: flags (bit 0 = ht1
+    /// nullable, bit 1 = ht2 nullable) + labelidx (uleb32) + ht1 + ht2
+    /// (heap-type encodings). `rt1 = (ref null1? ht1)` is the source
+    /// type; `rt2 = (ref null2? ht2)` is the cast target.
     ///
-    /// Cycle-9 stub validator: consume flags (1 byte) + labelidx
-    /// (uleb32) + ht1 (1 byte) + ht2 (1 byte). Pre-RTT we don't
-    /// decode ht1/ht2 into ValType variants — the popped reftype
-    /// is preserved through the label-type round-trip and re-pushed
-    /// on fall-through. The label's last type entry must be the
-    /// popped reftype (mirroring br_on_non_null's contract).
-    fn opBrOnCast(self: *Validator) Error!void {
+    /// `br_on_cast` branches to l when the operand matches rt2 (carrying
+    /// rt2), and falls through with `rt1 \ rt2`. `br_on_cast_fail`
+    /// inverts it: branches with `rt1 \ rt2`, falls through with rt2.
+    /// The difference `rt1 \ rt2` keeps ht1 but drops nullability when
+    /// rt2 is nullable (the null case is consumed by the match). The
+    /// label's last type must be a supertype of the carried reftype
+    /// (subtypeCtx, NOT the cycle-9 stub's `eql(operand)` which wrongly
+    /// compared the source operand instead of the cast target).
+    fn opBrOnCast(self: *Validator, is_fail: bool) Error!void {
         if (self.pos >= self.body.len) return Error.UnexpectedEnd;
-        self.pos += 1; // flags byte
+        const flags = self.body[self.pos];
+        self.pos += 1;
         const depth = try leb128.readUleb128(u32, self.body, &self.pos);
-        if (self.pos + 2 > self.body.len) return Error.UnexpectedEnd;
-        self.pos += 2; // ht1 + ht2 bytes
+        const ht1_nullable = (flags & 0x01) != 0;
+        const ht2_nullable = (flags & 0x02) != 0;
+        const rt1 = init_expr.readTypedRef(self.body, &self.pos, ht1_nullable) catch return Error.BadValType;
+        const rt2 = init_expr.readTypedRef(self.body, &self.pos, ht2_nullable) catch return Error.BadValType;
+        // Spec §3.3.5.5 validity: rt2 <: rt1 (the cast target is a
+        // subtype of the source) — FULL reftype subtyping, including
+        // nullability. Rejects `eqref anyref` / `structref arrayref` /
+        // `funcref (ref $struct)` (heap mismatch) AND `(ref any)` source
+        // with a `(ref null $t)` target (nullable ⊄ non-null). All six
+        // br_on_cast{,_fail} assert_invalid fixtures hinge on this.
+        if (!self.subtypeCtx(rt2, rt1)) return Error.StackTypeMismatch;
+        // Operand: a ref subtype of rt1 (coarse isRef check pre-RTT).
         const top = try self.popAny();
-        const reftype: ValType = switch (top) {
-            .bot => .funcref,
-            .known => |t| blk: {
-                if (!t.isRef()) return Error.StackTypeMismatch;
-                break :blk t;
-            },
-        };
+        switch (top) {
+            .bot => {},
+            .known => |t| if (!t.isRef()) return Error.StackTypeMismatch,
+        }
+        const diff: ValType = .{ .ref = .{
+            .nullable = ht1_nullable and !ht2_nullable,
+            .heap_type = rt1.ref.heap_type,
+        } };
+        const label_carry: ValType = if (is_fail) diff else rt2;
+        const fallthrough: ValType = if (is_fail) rt2 else diff;
         const target = self.frameAt(depth) orelse return Error.InvalidBranchDepth;
-        const lt = target.labelType();
-        switch (lt) {
+        switch (target.labelType()) {
             .empty => return Error.StackTypeMismatch,
             .single => |t| {
-                if (!t.eql(reftype)) return Error.StackTypeMismatch;
+                if (!self.subtypeCtx(label_carry, t)) return Error.StackTypeMismatch;
             },
             .multi => |ts| {
                 if (ts.len == 0) return Error.StackTypeMismatch;
-                if (!ts[ts.len - 1].eql(reftype)) return Error.StackTypeMismatch;
+                if (!self.subtypeCtx(label_carry, ts[ts.len - 1])) return Error.StackTypeMismatch;
                 const prefix = ts[0 .. ts.len - 1];
                 var i: usize = prefix.len;
                 while (i > 0) {
@@ -1745,7 +1760,7 @@ pub const Validator = struct {
                 for (prefix) |t| try self.pushType(t);
             },
         }
-        try self.pushType(reftype);
+        try self.pushType(fallthrough);
     }
 
     /// Wasm spec 3.0 §3.x (GC) — `ref.i31`: pop i32, push an

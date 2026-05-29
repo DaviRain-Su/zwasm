@@ -1,3 +1,4 @@
+// FILE-SIZE-EXEMPT: validator unit-test catalog; P2 pure-data dominance (test blocks sharing empty_sig/validateFunction fixtures — splitting would dup them per N4) (per ADR-0099)
 //! Tests for `src/frontend/validator.zig` (§9.5 / 5.2 carve-out
 //! to keep the validator under §A2's 1000-line soft cap while
 //! the per-feature handler split per ROADMAP §A12 stays queued
@@ -117,6 +118,45 @@ test "validate (block): abstract GC reftype blocktype (structref via 0x6B) accep
     //   0x0B      — end function
     const body = [_]u8{ 0x02, 0x6B, 0xD0, 0x6B, 0x0B, 0x1A, 0x0B };
     try validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
+test "validate: br_on_cast matches label against cast-target rt2, not operand (10.G cycle 145)" {
+    // Wasm 3.0 GC §3.3.5.5: `br_on_cast l ht1 ht2` carries the matched
+    // type rt2 to label l (NOT the operand type). The cycle-9 stub
+    // checked `label_last.eql(operand)` → here operand=anyref but the
+    // label declares (ref i31), so the stub raised StackTypeMismatch.
+    //   0x02 0x64 0x6C       — block (result (ref i31))
+    //   0xD0 0x6E            — ref.null any  (operand = anyref)
+    //   0xFB 0x18 01 00 6E 6C— br_on_cast flags=01(ht1 nullable) l=0
+    //                          ht1=any(0x6E) ht2=i31(0x6C)
+    //   0x00 0x0B 0x1A 0x0B  — unreachable ; end block ; drop ; end fn
+    const body = [_]u8{ 0x02, 0x64, 0x6C, 0xD0, 0x6E, 0xFB, 0x18, 0x01, 0x00, 0x6E, 0x6C, 0x00, 0x0B, 0x1A, 0x0B };
+    try validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
+test "validate: br_on_cast_fail carries rt1\\rt2 to label, falls through with rt2 (10.G cycle 145)" {
+    // br_on_cast_fail l ht1 ht2: branches with rt1\rt2, falls through
+    // with rt2. Here ht1=any ht2=(ref i31): label (result anyref) gets
+    // the diff (anyref), fall-through is (ref i31).
+    //   0x02 0x6E            — block (result anyref)
+    //   0xD0 0x6E            — ref.null any
+    //   0xFB 0x19 01 00 6E 6C— br_on_cast_fail flags=01 l=0 any i31
+    //   0x1A                 — drop  (the (ref i31) fall-through)
+    //   0xD0 0x6E            — ref.null any  (produce block result)
+    //   0x0B 0x1A 0x0B       — end block ; drop ; end fn
+    const body = [_]u8{ 0x02, 0x6E, 0xD0, 0x6E, 0xFB, 0x19, 0x01, 0x00, 0x6E, 0x6C, 0x1A, 0xD0, 0x6E, 0x0B, 0x1A, 0x0B };
+    try validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
+test "validate: br_on_cast with rt2 not a subtype of rt1 is rejected (10.G cycle 145)" {
+    // Wasm 3.0 GC §3.3.5.5: rt2 <: rt1 required. `br_on_cast 0 eqref
+    // anyref` violates it (any ⊄ eq) → assert_invalid (gc/br_on_cast.7).
+    //   0x00                 — unreachable (polymorphic operand)
+    //   0xFB 0x18 03 00 6D 6E— br_on_cast flags=03 l=0 ht1=eq ht2=any
+    //   0x0B                 — end fn
+    const body = [_]u8{ 0x00, 0xFB, 0x18, 0x03, 0x00, 0x6D, 0x6E, 0x0B };
+    const r = validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+    try testing.expectError(Error.StackTypeMismatch, r);
 }
 
 test "validate (block): typed-ref blocktype with out-of-range concrete index rejected" {
