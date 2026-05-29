@@ -51,6 +51,8 @@ pub fn register(table: *DispatchTable) void {
     table.interp[op(.@"array.new_data")] = arrayNewData;
     table.interp[op(.@"array.new_elem")] = arrayNewElem;
     table.interp[op(.@"array.get")] = arrayGet;
+    table.interp[op(.@"array.get_s")] = arrayGetS;
+    table.interp[op(.@"array.get_u")] = arrayGetU;
     table.interp[op(.@"array.set")] = arraySet;
     table.interp[op(.@"array.fill")] = arrayFill;
     // array.len: cycle-12 stub in ref_convert_ops.zig is now
@@ -254,6 +256,39 @@ fn arrayGet(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     var v: Value = undefined;
     @memcpy(std.mem.asBytes(&v)[0..ai.element.size], heap.bytes[src_off .. src_off + ai.element.size]);
     try rt.pushOperand(v);
+}
+
+/// Wasm 3.0 GC §3.3.5.6.11 — `array.get_s` / `array.get_u typeidx`:
+/// pop i32 idx + arrayref (trap null / OOB), read the packed (i8/i16)
+/// element from its 8-byte slot, sign-/zero-extend to i32 (ADR-0125
+/// B-exec). Validator restricts these to packed-element arrays.
+fn arrayGetS(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
+    return arrayGetPacked(c, instr, true);
+}
+fn arrayGetU(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
+    return arrayGetPacked(c, instr, false);
+}
+fn arrayGetPacked(c: *InterpCtx, instr: *const ZirInstr, signed: bool) anyerror!void {
+    const rt = Runtime.fromOpaque(c);
+    const inst = @as(*const Instance, @ptrCast(@alignCast(rt.instance orelse return runtime.Trap.NullReference)));
+    const typeidx: u32 = @intCast(instr.payload);
+    const ai = try resolveArrayInfo(inst, typeidx);
+    const idx_val = rt.popOperand();
+    const idx_i32 = idx_val.i32;
+    const ref_val = rt.popOperand();
+    if (ref_val.ref == Value.null_ref) return runtime.Trap.NullReference;
+    const ref: u32 = @intCast(ref_val.ref);
+    const heap = rt.gc_heap orelse return runtime.Trap.NullReference;
+    const hdr = readArrayHeader(heap, ref);
+    if (idx_i32 < 0 or @as(u32, @intCast(idx_i32)) >= hdr.length) {
+        return runtime.Trap.OutOfBoundsLoad;
+    }
+    const idx: u32 = @intCast(idx_i32);
+    const src_off = ref + array_header_size + idx * ai.element.size;
+    var v: Value = undefined;
+    @memcpy(std.mem.asBytes(&v)[0..8], heap.bytes[src_off .. src_off + 8]);
+    const ext = type_info_mod.extendPackedToI32(v.i32, ai.element.valtype_byte, signed) orelse return runtime.Trap.NullReference;
+    try rt.pushOperand(.{ .i32 = ext });
 }
 
 /// Wasm 3.0 GC §3.3.5.6.12 — `array.set typeidx`: pop value +

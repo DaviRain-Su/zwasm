@@ -137,6 +137,20 @@ pub const GcTypeInfos = struct {
     array_infos: []?ArrayInfo,
 };
 
+/// Extend a packed (i8/i16) field's stored low bytes to i32 — sign-
+/// extend when `signed` (get_s) else zero-extend (get_u). `valtype_byte`
+/// is the FieldInfo wire byte (0x78 i8 / 0x77 i16). Returns null for a
+/// non-packed byte (the validator rejects get_s/get_u there; callers
+/// trap defensively). ADR-0125 B-exec; shared by struct_ops + array_ops.
+pub fn extendPackedToI32(stored: i32, valtype_byte: u8, signed: bool) ?i32 {
+    const u: u32 = @bitCast(stored);
+    return switch (valtype_byte) {
+        0x78 => if (signed) @as(i32, @as(i8, @bitCast(@as(u8, @truncate(u))))) else @as(i32, @as(u8, @truncate(u))),
+        0x77 => if (signed) @as(i32, @as(i16, @bitCast(@as(u16, @truncate(u))))) else @as(i32, @as(u16, @truncate(u))),
+        else => null,
+    };
+}
+
 /// Compute the heap slot size of a field given its storage type.
 /// Slots are 8 bytes uniform (ADR-0116 §3a) — packed i8/i16 occupy a
 /// full slot too; their narrow width is the get_s/get_u extension
@@ -243,6 +257,19 @@ fn decodeAndMaterialise(body: []const u8) !struct {
     errdefer arena.deinit();
     const gti = try materialiseGcTypes(arena.allocator(), t);
     return .{ .arena = arena, .gti = gti };
+}
+
+test "extendPackedToI32: i8/i16 sign- vs zero-extend; truncation; non-packed → null (ADR-0125 B-exec)" {
+    // i8 (0x78): low byte of 0x1FF is 0xFF → -1 signed, 255 unsigned.
+    try testing.expectEqual(@as(?i32, -1), extendPackedToI32(0x1FF, 0x78, true));
+    try testing.expectEqual(@as(?i32, 255), extendPackedToI32(0x1FF, 0x78, false));
+    // i8 positive: 0x7F stays 127 either way.
+    try testing.expectEqual(@as(?i32, 127), extendPackedToI32(0x7F, 0x78, true));
+    // i16 (0x77): low 16 of 0x1FFFF is 0xFFFF → -1 signed, 65535 unsigned.
+    try testing.expectEqual(@as(?i32, -1), extendPackedToI32(0x1FFFF, 0x77, true));
+    try testing.expectEqual(@as(?i32, 65535), extendPackedToI32(0x1FFFF, 0x77, false));
+    // Non-packed wire byte (i32 = 0x7F) → null (validator rejects get_s/_u there).
+    try testing.expectEqual(@as(?i32, null), extendPackedToI32(42, 0x7F, true));
 }
 
 test "materialiseGcTypes: single i32 struct → 1 field offset=0 size=8" {

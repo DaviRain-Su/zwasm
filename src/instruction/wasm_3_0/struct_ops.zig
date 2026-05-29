@@ -52,7 +52,35 @@ pub fn register(table: *DispatchTable) void {
     table.interp[op(.@"struct.new")] = structNew;
     table.interp[op(.@"struct.new_default")] = structNewDefault;
     table.interp[op(.@"struct.get")] = structGet;
+    table.interp[op(.@"struct.get_s")] = structGetS;
+    table.interp[op(.@"struct.get_u")] = structGetU;
     table.interp[op(.@"struct.set")] = structSet;
+}
+
+fn structGetS(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
+    return structGetPacked(c, instr, true);
+}
+fn structGetU(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
+    return structGetPacked(c, instr, false);
+}
+
+fn structGetPacked(c: *InterpCtx, instr: *const ZirInstr, signed: bool) anyerror!void {
+    const rt = Runtime.fromOpaque(c);
+    const inst = @as(*const Instance, @ptrCast(@alignCast(rt.instance orelse return runtime.Trap.NullReference)));
+    const typeidx: u32 = @intCast(instr.payload);
+    const fieldidx: u32 = instr.extra;
+    const si = try resolveStructInfo(inst, typeidx);
+    if (fieldidx >= si.type_info.field_count) return runtime.Trap.NullReference;
+    const field = si.fields[fieldidx];
+    const ref_val = rt.popOperand();
+    if (ref_val.ref == Value.null_ref) return runtime.Trap.NullReference;
+    const ref: u32 = @intCast(ref_val.ref);
+    const heap = rt.gc_heap orelse return runtime.Trap.NullReference;
+    const src_off = ref + header_size + field.offset;
+    var v: Value = undefined;
+    @memcpy(std.mem.asBytes(&v)[0..8], heap.bytes[src_off .. src_off + 8]);
+    const ext = type_info_mod.extendPackedToI32(v.i32, field.valtype_byte, signed) orelse return runtime.Trap.NullReference;
+    try rt.pushOperand(.{ .i32 = ext });
 }
 
 /// Resolve `inst.gc_type_infos.?.struct_infos[typeidx].?` —
