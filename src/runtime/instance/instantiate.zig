@@ -764,15 +764,15 @@ pub fn evalConstExprValue(expr: []const u8) !Value {
     return result;
 }
 
-/// Evaluate a Wasm 3.0 GC `struct.new` constant expression at
-/// instantiation (§3.5.10 const-expr extension). The global-init loop
+/// Evaluate a Wasm 3.0 GC `struct.new` / `array.new` constant expression
+/// at instantiation (§3.5.10 const-expr extension). The global-init loop
 /// falls here when `evalConstExprValue` rejects with
-/// `UnsupportedConstExpr`. Handles `<field consts>; struct.new[_default]
-/// $t; end` via a small const-stack: allocate on `rt.gc_heap` using the
-/// materialised `StructInfo` and write the leading const operands into
-/// the 8-byte field slots (mirrors struct_ops.zig / ADR-0116 §3a).
-/// array.new const exprs are a follow-on.
-fn evalGlobalInitStruct(expr: []const u8, rt: *Runtime, inst: *const Instance) anyerror!Value {
+/// `UnsupportedConstExpr`. A small const-stack handles numeric consts +
+/// ref.i31 + struct.new[_default] + array.new[_default]/array.new_fixed:
+/// allocate on `rt.gc_heap` using the materialised Struct/ArrayInfo and
+/// write the leading const operands into the object slots (mirrors
+/// struct_ops.zig / array_ops.zig / ADR-0116 §3a).
+fn evalGlobalInitGc(expr: []const u8, rt: *Runtime, inst: *const Instance) anyerror!Value {
     const type_info = @import("../../feature/gc/type_info.zig");
     const header_size: u32 = @sizeOf(type_info.ObjectHeader);
     var stack: [16]Value = undefined;
@@ -831,6 +831,61 @@ fn evalGlobalInitStruct(expr: []const u8, rt: *Runtime, inst: *const Instance) a
                                 const off = ref + header_size + si.fields[i].offset;
                                 @memcpy(heap.bytes[off .. off + 8], std.mem.asBytes(&stack[sp])[0..8]);
                             }
+                        }
+                        stack[sp] = .{ .ref = @as(u64, ref) };
+                        sp += 1;
+                    },
+                    6, 7 => { // array.new / array.new_default
+                        const typeidx = try leb128.readUleb128(u32, expr, &pos);
+                        const gti = inst.gc_type_infos orelse return error.UnsupportedConstExpr;
+                        if (typeidx >= gti.array_infos.len) return error.UnsupportedConstExpr;
+                        const ai = gti.array_infos[typeidx] orelse return error.UnsupportedConstExpr;
+                        const heap = rt.gc_heap orelse return error.UnsupportedConstExpr;
+                        const ahs: u32 = @sizeOf(type_info.ArrayHeader);
+                        // Stack (top first): size:i32, then init value (sub 6 only).
+                        if (sp == 0) return error.UnsupportedConstExpr;
+                        sp -= 1;
+                        if (stack[sp].i32 < 0) return error.UnsupportedConstExpr;
+                        const length: u32 = @intCast(stack[sp].i32);
+                        var init_v: Value = .{ .i64 = 0 };
+                        if (sub == 6) {
+                            if (sp == 0) return error.UnsupportedConstExpr;
+                            sp -= 1;
+                            init_v = stack[sp];
+                        }
+                        const ref = try heap.allocate(ahs + length * @as(u32, ai.element.size));
+                        const ah: type_info.ArrayHeader = .{ .header = .{ .kind = .array, .info = typeidx }, .length = length };
+                        @memcpy(heap.bytes[ref .. ref + ahs], std.mem.asBytes(&ah)[0..ahs]);
+                        var k: u32 = 0;
+                        while (k < length) : (k += 1) {
+                            const off = ref + ahs + k * @as(u32, ai.element.size);
+                            if (sub == 6) {
+                                @memcpy(heap.bytes[off .. off + ai.element.size], std.mem.asBytes(&init_v)[0..ai.element.size]);
+                            } else {
+                                @memset(heap.bytes[off .. off + ai.element.size], 0);
+                            }
+                        }
+                        stack[sp] = .{ .ref = @as(u64, ref) };
+                        sp += 1;
+                    },
+                    8 => { // array.new_fixed $t N
+                        const typeidx = try leb128.readUleb128(u32, expr, &pos);
+                        const nlen = try leb128.readUleb128(u32, expr, &pos);
+                        const gti = inst.gc_type_infos orelse return error.UnsupportedConstExpr;
+                        if (typeidx >= gti.array_infos.len) return error.UnsupportedConstExpr;
+                        const ai = gti.array_infos[typeidx] orelse return error.UnsupportedConstExpr;
+                        const heap = rt.gc_heap orelse return error.UnsupportedConstExpr;
+                        const ahs: u32 = @sizeOf(type_info.ArrayHeader);
+                        const ref = try heap.allocate(ahs + nlen * @as(u32, ai.element.size));
+                        const ah: type_info.ArrayHeader = .{ .header = .{ .kind = .array, .info = typeidx }, .length = nlen };
+                        @memcpy(heap.bytes[ref .. ref + ahs], std.mem.asBytes(&ah)[0..ahs]);
+                        var k: u32 = nlen;
+                        while (k > 0) {
+                            k -= 1;
+                            if (sp == 0) return error.UnsupportedConstExpr;
+                            sp -= 1;
+                            const off = ref + ahs + k * @as(u32, ai.element.size);
+                            @memcpy(heap.bytes[off .. off + ai.element.size], std.mem.asBytes(&stack[sp])[0..ai.element.size]);
                         }
                         stack[sp] = .{ .ref = @as(u64, ref) };
                         sp += 1;
@@ -1367,7 +1422,7 @@ pub fn instantiateRuntime(
                     else
                         evalConstExprValue(g.init_expr) catch |e|
                             if (e == error.UnsupportedConstExpr)
-                                try evalGlobalInitStruct(g.init_expr, rt, inst)
+                                try evalGlobalInitGc(g.init_expr, rt, inst)
                             else
                                 return e;
                     slots[imp_global_count + i] = &storage[i];
