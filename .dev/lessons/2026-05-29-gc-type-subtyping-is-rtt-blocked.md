@@ -38,13 +38,26 @@ RTT-blocked. There is no quick non-RTT win in it.
 ## Lessons
 
 - **Instrument the op, not the symptom.** "StackTypeMismatch ×N" is
-  opaque; the op-byte histogram named the blocker (br_on_cast) in one
-  run, after two wrong guesses. Same shape as the cyc127 attributability
-  lesson (`gc-corpus-block-is-validate-not-parse`).
-- **Don't land an unobservable validator shape change** (the
-  concrete-chain `subtypeCtx` fix) — its only exerciser is itself
-  RTT-blocked. Discarded per `spike_discipline.md` §2 (D-153 pattern);
-  re-derive it *inside* the RTT cycle where it becomes observable.
+  opaque; the op-byte histogram named the blocker in one run, after two
+  wrong guesses. Same shape as the cyc127 attributability lesson
+  (`gc-corpus-block-is-validate-not-parse`).
+- **The op-probe is now PERMANENT — do NOT re-add throwaway probes.**
+  ADR-0016 M3 (cyc146, `d8daef9b`) routes every validate failure through
+  the threadlocal diagnostic: the wasm-3.0 spec runner prints
+  `compile FAIL: <err> — <msg> [fn= off= op=]`. To attribute a failure,
+  run the full corpus and `grep "compile FAIL.*op=0x"` (no `cp -R`
+  isolation needed). The throwaway op-probe dance (cyc143/145/146) is
+  retired.
+- **Record correction (via M3):** type-subtyping.6/7 fail FIRST at
+  `call` (op 0x10, fn=1 off=2), not br_on_cast — i.e. a concrete
+  `(ref $sub)` flows to a `call` arg expecting `(ref $super)`, which
+  needs the concrete-subtype-chain coercion in `subtypeCtx` (the fix
+  discarded cyc143, now justified). br_on_cast is a *later* blocker in
+  the same family. The cyc143 "RTT-blocked" framing was too narrow.
+- **Don't land an unobservable validator shape change** (the cyc143
+  concrete-chain `subtypeCtx` fix) — discarded per `spike_discipline.md`
+  §2 (D-153). Re-derive it where it becomes observable (the call-arg
+  coercion above now makes type-subtyping.6/7 the observable).
 
 ## Related
 
