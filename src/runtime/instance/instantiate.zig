@@ -764,6 +764,87 @@ pub fn evalConstExprValue(expr: []const u8) !Value {
     return result;
 }
 
+/// Evaluate a Wasm 3.0 GC `struct.new` constant expression at
+/// instantiation (§3.5.10 const-expr extension). The global-init loop
+/// falls here when `evalConstExprValue` rejects with
+/// `UnsupportedConstExpr`. Handles `<field consts>; struct.new[_default]
+/// $t; end` via a small const-stack: allocate on `rt.gc_heap` using the
+/// materialised `StructInfo` and write the leading const operands into
+/// the 8-byte field slots (mirrors struct_ops.zig / ADR-0116 §3a).
+/// array.new const exprs are a follow-on.
+fn evalGlobalInitStruct(expr: []const u8, rt: *Runtime, inst: *const Instance) anyerror!Value {
+    const type_info = @import("../../feature/gc/type_info.zig");
+    const header_size: u32 = @sizeOf(type_info.ObjectHeader);
+    var stack: [16]Value = undefined;
+    var sp: usize = 0;
+    var pos: usize = 0;
+    while (pos < expr.len) {
+        const op = expr[pos];
+        pos += 1;
+        if (op == 0x0B) break;
+        if (sp >= stack.len) return error.UnsupportedConstExpr;
+        switch (op) {
+            0x41 => {
+                stack[sp] = .{ .i32 = try leb128.readSleb128(i32, expr, &pos) };
+                sp += 1;
+            },
+            0x42 => {
+                stack[sp] = .{ .i64 = try leb128.readSleb128(i64, expr, &pos) };
+                sp += 1;
+            },
+            0x43 => {
+                if (pos + 4 > expr.len) return error.UnsupportedConstExpr;
+                stack[sp] = .{ .bits64 = std.mem.readInt(u32, expr[pos..][0..4], .little) };
+                pos += 4;
+                sp += 1;
+            },
+            0x44 => {
+                if (pos + 8 > expr.len) return error.UnsupportedConstExpr;
+                stack[sp] = .{ .bits64 = std.mem.readInt(u64, expr[pos..][0..8], .little) };
+                pos += 8;
+                sp += 1;
+            },
+            0xFB => {
+                const sub = try leb128.readUleb128(u32, expr, &pos);
+                switch (sub) {
+                    28 => { // ref.i31: wrap the preceding i32 const
+                        if (sp == 0) return error.UnsupportedConstExpr;
+                        stack[sp - 1] = Value.fromI31Truncate(stack[sp - 1].i32);
+                    },
+                    0, 1 => { // struct.new / struct.new_default
+                        const typeidx = try leb128.readUleb128(u32, expr, &pos);
+                        const gti = inst.gc_type_infos orelse return error.UnsupportedConstExpr;
+                        if (typeidx >= gti.struct_infos.len) return error.UnsupportedConstExpr;
+                        const si = gti.struct_infos[typeidx] orelse return error.UnsupportedConstExpr;
+                        const heap = rt.gc_heap orelse return error.UnsupportedConstExpr;
+                        const ref = try heap.allocate(header_size + si.payload_size);
+                        const hdr: type_info.ObjectHeader = .{ .kind = .struct_, .info = typeidx };
+                        @memcpy(heap.bytes[ref .. ref + header_size], std.mem.asBytes(&hdr));
+                        if (sub == 0) {
+                            // Fields are on the const-stack in declared order;
+                            // write top-down so field[i] gets its operand.
+                            var i: usize = si.type_info.field_count;
+                            while (i > 0) {
+                                i -= 1;
+                                if (sp == 0) return error.UnsupportedConstExpr;
+                                sp -= 1;
+                                const off = ref + header_size + si.fields[i].offset;
+                                @memcpy(heap.bytes[off .. off + 8], std.mem.asBytes(&stack[sp])[0..8]);
+                            }
+                        }
+                        stack[sp] = .{ .ref = @as(u64, ref) };
+                        sp += 1;
+                    },
+                    else => return error.UnsupportedConstExpr,
+                }
+            },
+            else => return error.UnsupportedConstExpr,
+        }
+    }
+    if (sp == 0) return error.UnsupportedConstExpr;
+    return stack[sp - 1];
+}
+
 /// Evaluate a Wasm const-expression that resolves to an i32.
 /// Active data-segment offsets currently reach this path; the
 /// only shape v0.1.0 needs is `i32.const N; end` (3+ bytes:
@@ -1284,7 +1365,11 @@ pub fn instantiateRuntime(
                         else
                             return error.InvalidGlobalRefFunc)
                     else
-                        try evalConstExprValue(g.init_expr);
+                        evalConstExprValue(g.init_expr) catch |e|
+                            if (e == error.UnsupportedConstExpr)
+                                try evalGlobalInitStruct(g.init_expr, rt, inst)
+                            else
+                                return e;
                     slots[imp_global_count + i] = &storage[i];
                 }
                 rt.globals = slots;
