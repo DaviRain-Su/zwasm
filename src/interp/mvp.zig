@@ -343,7 +343,24 @@ fn callOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     // and fall through to ordinary ZirFunc dispatch.
     if (idx < rt.host_calls.len) {
         if (rt.host_calls[idx]) |hc| {
-            try hc.fn_ptr(rt, hc.ctx);
+            hc.fn_ptr(rt, hc.ctx) catch |err| {
+                // Cross-module EH (10.E-eh-tail cycle 120): a cross-
+                // module call's thunk transfers an uncaught throw into
+                // `rt.pending_exception` (cross_module.zig). Unlike a
+                // same-module ZIR callee — whose frame `invoke` pops
+                // before searching the CALLER's try_table — the thunk
+                // leaves no frame on `rt`, so the catch in THIS calling
+                // func's own frame must be searched here before
+                // re-raising.
+                if (err == Trap.UncaughtException and rt.pending_exception != null and rt.frame_len > 0) {
+                    const exc = rt.pending_exception.?;
+                    if (try findAndDispatchCatch(rt, rt.currentFrame(), exc)) {
+                        rt.pending_exception = null;
+                        return;
+                    }
+                }
+                return err;
+            };
             return;
         }
     }

@@ -57,7 +57,26 @@ pub fn thunk(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void {
     }
     rt.operand_len = args_start;
 
-    try interp_mvp.invoke(source_rt, cmc.dispatch_table, callee);
+    interp_mvp.invoke(source_rt, cmc.dispatch_table, callee) catch |err| {
+        // Cross-module exception propagation (ADR-0114 D1; 10.E-eh-tail
+        // cycle 120). An uncaught throw in the source instance leaves
+        // its `Exception` in `source_rt.pending_exception`; hand it to
+        // the CALLER's runtime so the caller's `findAndDispatchCatch`
+        // (which reads its own `pending_exception`) can match the catch.
+        // The exc's `*TagInstance` identity is module-independent
+        // (cyc119), so the cross-module catch matches by pointer. The
+        // exc object stays owned by `source_rt.live_exceptions` (freed
+        // at source teardown); the source instance outlives the
+        // importing call, so the borrowed pointer + inline payload stay
+        // valid through the caller's catch.
+        if (err == runtime.Trap.UncaughtException) {
+            if (source_rt.pending_exception) |exc| {
+                rt.pending_exception = exc;
+                source_rt.pending_exception = null;
+            }
+        }
+        return err;
+    };
 
     // Transfer results source-stack → importer-stack.
     const num_results: u32 = @intCast(callee.sig.results.len);
