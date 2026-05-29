@@ -6,12 +6,11 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc156 (`76e1868c`) — **ref.eq opcode fix**: ref.eq is 0xD3
-  (single-byte), was mis-wired at 0xFB 0x13 (= array.init_elem); moved to
-  0xD3 + tightened opRefEq to require eqref operands. ref.eq is pervasive
-  → **gc return 145→226 (+81)**, invalid held 57, trap 56, no regression
-  (FULL test-spec exit 0). cyc149-153 RTT exec arc; **gc return 62→226**
-  across the session. cyc154 filed D-198 (rec-group subtype, deep).
+- **HEAD**: cyc157 (`a4f884dd`) — **array.copy** validate+lower+exec
+  (FB 17): **gc return 226→249 (+23)**, trap 56→63, invalid 57, no
+  regression (FULL test-spec exit 0). cyc156 ref.eq opcode fix
+  (0xFB0x13→0xD3 + eqref) drove +81. **gc return 62→249** across the
+  session (RTT exec cyc149-153 + ref.eq c156 + array.copy c157).
 - cyc147-148 **ADR-0125 packed COMPLETE** (A union rename → B-validate
   decode → B-exec get_s/u): gc return 62→116, trap 18→54, ValidateFailed
   27→14, invalid 57 held. cyc146 ADR-0016 M3 + concrete-subtype coercion.
@@ -46,16 +45,22 @@
 - **Exit-condition**: gc return ≥ 90 **EXCEEDED (116 at cyc148)**. Open
   target: maximise return (RTT exec) toward the corpus ceiling.
 
-## Active task — cycle 157: array bulk ops (copy/init) — **NEXT**
+## Active task — cycle 158: array.init_data / array.init_elem — **NEXT**
 
-**Numbering RESOLVED (cyc156)**: 0xFB 0x11=array.copy(17), 0x12=init_data(18),
-0x13=init_elem(19) — all now correctly NotImplemented (ref.eq moved to 0xD3).
-Implement validate+lower+exec for the three (established pattern; mirror
-array.fill + array.new_data's dataElemNaturalSize). Fixtures array_copy.4 /
-array_init_data.2 / array_init_elem.3 (+ more). VERIFY full test-spec +
-exit-code + panic grep (lesson). After: ref_test/struct init-op gaps,
-extern.0, D-198 (rec-group, ADR-grade).
-No regression to 226 return / 56 trap / 57 invalid / 393 multi-mem.
+array.copy DONE (c157). Now FB 18/19 (validate+lower+exec; mirror c157
+opArrayCopy + array.new_data's segment read). VERIFY full test-spec +
+exit-code + panic grep (lesson).
+- **array.init_data $t $d** (sub 18): pop [len,src_off,dst_off,dst_ref];
+  validate $t arraydef + element mutable + numeric (not ref) + data-count
+  present + dataidx<data_count; exec read `len` elems from rt.datas[$d]
+  (natural width via dataElemNaturalSize, LE zero-extend → 8-byte slot,
+  mirror arrayNewData) into dst slots, bounds-check.
+- **array.init_elem $t $e** (sub 19): pop [len,src_off,dst_off,dst_ref];
+  validate element mutable + elemidx<elem_count + elem_types[$e]<:element;
+  exec copy `len` Value refs from rt.elems[$e] (mirror arrayNewElem).
+  Check rt.data_dropped/elem_dropped → trap if dropped.
+- Then: ref_test/struct init-op gaps, extern.0, D-198 (rec-group, deep).
+No regression to 249 return / 63 trap / 57 invalid / 393 multi-mem.
 
 ## Larger §10 work (later bundles)
 
