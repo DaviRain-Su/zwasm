@@ -6,16 +6,18 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc194 (`7bfc5d64`) — **restored wasm-2.0 wast-runner compile**
-  (3 runners' empty-`sections.Types` literals missing `supertypes`/`finals`,
-  latent since cyc126, masked by ubuntu cache until cyc193 regen). CRITICAL
-  FINDING: `zig build test-all` was FALSELY-green (stale cache) since ~cyc177;
-  the Mac per-chunk gate never builds these test-all-only exes. test-all now
-  BUILDS but is **RED on 1 fail: wast_runner func.21** — non-null-local
-  definite-assignment unimplemented (D-203; the bundle below greens it).
-- cyc193 (`d3f56f4f`) assert_unlinkable directive (gc 3 pass/5 fail; 5 = D-202
-  finality). cyc192 (`6a77cb19`) cross-module import subtyping. cyc190 gc
-  global-init (invalid 60). gc residual: .17 (D-198) + 5 unlinkable (D-202).
+- **HEAD**: cyc195 (`a25dd0a0`) — **non-null-local definite-assignment**
+  (D-203 RESOLVED): grow-only `locals_init` bitset (params always-init — key
+  fix; declared locals init iff defaultable; reachable-code set/get checks;
+  dead-code-skip). func.21 rejected → **`zig build test-all` GREEN** (was
+  falsely-green→RED since cyc177). ZERO regression (gc 349/96/60 + all 5
+  proposals + wast_runner 1158/1158). **Bundle 10.Y CLOSED.** validator.zig
+  cap 3200→3300 (ADR-0099); module-validation helpers = extraction candidate
+  → D-204. **Process gap**: Mac per-chunk gate (test+test-spec) never builds
+  test-all-only exes — latent breaks surface only via ubuntu test-all.
+- cyc194 (`7bfc5d64`) restored wast-runner compile. cyc193 assert_unlinkable
+  (5 fail = D-202). cyc192 import subtyping. cyc190 gc global-init. gc residual:
+  .17 (D-198) + 5 unlinkable (D-202). All ubuntu-green through cyc190.
 - Earlier arc: cyc177 iso-recursive canonicalEqual; cyc147-148 ADR-0125
   packed; cyc146 ADR-0016 M3 self-attribution; cyc130-140 i31/struct/array.
 - Runner EXECUTES via interp; gc_heap + gc_type_infos + rt.datas all
@@ -26,31 +28,25 @@
 - Mac+ubuntu green through cyc190 (`OK` exit 0). 10.G-gc + 10.H-multimem
   CLOSED cyc188. Cross-module sharing substrate: D-199 memory + D-201 table/func.
 
-## Active bundle
+## Active task — cycle 196: realworld/p10 clang fixtures (§10 ROW close) — **NEXT**
 
-- **Bundle-ID**: 10.Y-nonnull-local-init (D-203 — green test-all)
-- **Cycles-remaining**: ~2
-- **Continuity-memo**: cyc194 restored the wasm-2.0 wast-runner compile, but
-  test-all is RED on 1 fail: `wast_runner func.21.wasm (invalid)` wrongly
-  ACCEPTED. func.21 = `(local (ref 0))` non-nullable local read (`local.get 0`)
-  before any `local.set` → INVALID per function-references definite-assignment
-  (§validation), which `frontendValidate` does NOT track. **Must green test-all**
-  (it's the merge gate; currently honestly-red after the cyc194 cache-unmask).
-- **cyc195 IMPLEMENT**: non-null-local definite-assignment in the validator.
-  Step 0 survey: how the validator tracks locals (`opLocalGet`/`opLocalSet`
-  ~validator.zig:1339) + the control-stack (block/loop/if/else/end). Algorithm:
-  init-bitset over locals; params + DEFAULTABLE locals (i32/i64/f32/f64/v128 +
-  NULLABLE refs) start SET; non-defaultable (non-null `(ref $t)`) start UNSET;
-  `local.set`/`local.tee` → set; `local.get`/`local.tee` of UNSET → reject
-  (Error.UninitializedLocal or similar); at control merges, a local is SET only
-  if set on ALL incoming paths (intersection — save bitset at block entry,
-  intersect at branch/end). Red test FIRST: func.21 (+ a valid counter-case:
-  non-null local set-then-get must PASS). Likely 1-2 cycles (control-flow merge
-  is the subtle part).
-- **Exit-condition**: `zig build test-all` GREEN on Mac + ubuntu (func.21
-  rejected; wast_runner 1158/1158); NO regression to the 1157 currently-passing
-  wasm-2.0 asserts or any other proposal; 0 panics. THEN pivot to realworld/p10
-  (clang fixtures, §10 ROW close — the deferred cyc194 target).
+test-all is GREEN; the spec corpus is mined to deep/niche tracked edges (.17 =
+D-198, 5 unlinkable = D-202). The next forward §10 work = **realworld/p10
+fixtures** (§10 ROW 10.G/10.M/10.E/10.TC/10.R close criteria; currently skeleton
+dirs, no `.wasm`). Autonomous: `clang_wasm64` (memory64) + `clang_musttail`
+(tail-call) — clang✓ (wasm32+wasm64 targets) + wasm-tools✓ in PATH.
+**cyc196 Step 0 (read-only survey)**: (1) `test/realworld/p10/README.md` + the
+`test/realworld/` harness (build.zig `test-realworld` / `test-realworld-run`
+steps) — how a fixture is declared + run via `cli_run.runWasm`; does it pick up
+p10 or need wiring? (2) clang → wasm freestanding (`clang --target=wasm32
+-nostdlib -Wl,--no-entry -Wl,--export-all`) producing a runnable no-import
+module with an exported func — verify a trivial C → `.wasm` → runs in zwasm.
+(3) FIRST fixture: clang_musttail (tail-call C `__attribute__((musttail))`) is
+likely simplest (wasm64 needs >4GiB host alloc).
+**Bar**: land ONE real clang fixture (`.wasm` + provenance + expected) zwasm
+runs correctly, wired into a runnable test step; test-all stays GREEN; 0 panics.
+If clang can't emit runnable wasm cleanly, debt-track per extended_challenge;
+emscripten/dart/ocaml/hoot toolchains stay gated.
 
 ## §10 close map (after this bundle)
 
