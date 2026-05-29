@@ -1210,14 +1210,24 @@ pub fn instantiateRuntime(
             const dropped = try a.alloc(bool, elems.items.len);
             @memset(dropped, false);
             for (elems.items, 0..) |seg, idx| {
+                // For func-family segments the slot is a funcidx → resolve
+                // to a funcref. For non-func segments (i31ref/anyref/…) the
+                // slot already holds the ENCODED ref value (e.g. i31-packed,
+                // per the element decoder) → store it directly as a GcRef.
+                const is_funcref_family = seg.elem_type == .ref and switch (seg.elem_type.ref.heap_type) {
+                    .abstract => |ab| ab == .func,
+                    .concrete => true,
+                };
                 const refs = try a.alloc(Value, seg.funcidxs.len);
                 for (seg.funcidxs, 0..) |fidx, j| {
-                    refs[j] = if (fidx == std.math.maxInt(u32))
-                        .{ .ref = Value.null_ref }
-                    else if (fidx < rt.func_entities.len)
-                        Value.fromFuncRef(&rt.func_entities[fidx])
-                    else
-                        return error.InvalidElementFuncIndex;
+                    if (fidx == std.math.maxInt(u32)) {
+                        refs[j] = .{ .ref = Value.null_ref };
+                    } else if (is_funcref_family) {
+                        if (fidx >= rt.func_entities.len) return error.InvalidElementFuncIndex;
+                        refs[j] = Value.fromFuncRef(&rt.func_entities[fidx]);
+                    } else {
+                        refs[j] = .{ .ref = @as(u64, fidx) };
+                    }
                 }
                 seg_storage[idx] = refs;
                 if (seg.kind == .active) {
