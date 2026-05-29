@@ -190,6 +190,24 @@ pub fn materialiseGcTypes(alloc: Allocator, types: sections.Types) Error!GcTypeI
             },
             .field_count = 0,
         };
+        // RTT (ADR-0116 §3) — build the ancestor-inclusive supertype chain
+        // [self, parent, …] from the parsed declared supertypes so
+        // ref.test/cast concrete-$idx matching can membership-test it.
+        // Single-supertype chains dominate; bound to the 8-entry array.
+        {
+            var d: u8 = 0;
+            var cur: u32 = @intCast(i);
+            while (d < entry.supertype_chain.len) {
+                entry.supertype_chain[d] = cur;
+                d += 1;
+                const supers = if (cur < types.supertypes.len) types.supertypes[cur] else &.{};
+                if (supers.len == 0) break;
+                const parent = supers[0];
+                if (parent == cur or parent >= n) break; // cycle / OOB guard
+                cur = parent;
+            }
+            entry.depth = d;
+        }
         switch (kind) {
             .func => {},
             .structdef => {
@@ -270,6 +288,23 @@ test "extendPackedToI32: i8/i16 sign- vs zero-extend; truncation; non-packed →
     try testing.expectEqual(@as(?i32, 65535), extendPackedToI32(0x1FFFF, 0x77, false));
     // Non-packed wire byte (i32 = 0x7F) → null (validator rejects get_s/_u there).
     try testing.expectEqual(@as(?i32, null), extendPackedToI32(42, 0x7F, true));
+}
+
+test "materialiseGcTypes: supertype_chain built self-inclusive from declared supers (10.G cycle 151, RTT)" {
+    // type0 = struct{} (bare); type1 = sub $0 struct{i32}.
+    //   0x02            — 2 types
+    //   0x5F 0x00       — type0: structtype, 0 fields (bare → final, no super)
+    //   0x50 0x01 0x00  — type1: sub (NoFinal), 1 supertype = $0
+    //   0x5F 0x01 0x7F 0x00 — structtype, 1 field i32 const
+    const body = [_]u8{ 0x02, 0x5F, 0x00, 0x50, 0x01, 0x00, 0x5F, 0x01, 0x7F, 0x00 };
+    var r = try decodeAndMaterialise(&body);
+    defer r.arena.deinit();
+    // chain(0) = [0] (self only); chain(1) = [1, 0] (self, parent).
+    try testing.expectEqual(@as(u8, 1), r.gti.entries[0].depth);
+    try testing.expectEqual(@as(u32, 0), r.gti.entries[0].supertype_chain[0]);
+    try testing.expectEqual(@as(u8, 2), r.gti.entries[1].depth);
+    try testing.expectEqual(@as(u32, 1), r.gti.entries[1].supertype_chain[0]);
+    try testing.expectEqual(@as(u32, 0), r.gti.entries[1].supertype_chain[1]);
 }
 
 test "materialiseGcTypes: single i32 struct → 1 field offset=0 size=8" {

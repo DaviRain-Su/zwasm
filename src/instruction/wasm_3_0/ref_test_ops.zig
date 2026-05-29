@@ -36,6 +36,7 @@ const DispatchTable = dispatch.DispatchTable;
 const InterpCtx = dispatch.InterpCtx;
 const Runtime = runtime.Runtime;
 const Value = runtime.Value;
+const Instance = runtime.Instance;
 const AbstractHeapType = zir.AbstractHeapType;
 const ObjectHeader = type_info_mod.ObjectHeader;
 const ObjectKind = type_info_mod.ObjectKind;
@@ -100,8 +101,44 @@ fn readObjKind(rt: *Runtime, v: Value) ?ObjectKind {
 /// the concrete runtime shape. Concrete-typeidx targets fall back to a
 /// coarse non-null match (precise supertype walk lands with
 /// `TypeInfo.supertype_chain` threading, next cycle).
+/// Read a non-null heap GC object's `ObjectHeader.info` (its typeidx).
+/// Same untagged-ref guard as `readObjKind` (bounds-check as u64 before
+/// the u32 cast — `v.ref` may be a non-GC host pointer).
+fn readObjInfo(rt: *Runtime, v: Value) ?u32 {
+    const heap = rt.gc_heap orelse return null;
+    const hdr_size = @sizeOf(ObjectHeader);
+    if (v.ref >= heap.bytes.len) return null;
+    const ref: u32 = @intCast(v.ref);
+    if (@as(usize, ref) + hdr_size > heap.bytes.len) return null;
+    var hdr: ObjectHeader = undefined;
+    @memcpy(std.mem.asBytes(&hdr)[0..hdr_size], heap.bytes[ref .. ref + hdr_size]);
+    return hdr.info;
+}
+
+/// Does the object whose runtime typeidx is `obj_idx` reach concrete
+/// target type `target` via its declared supertype chain (self-inclusive)?
+/// Reads the per-Instance `TypeInfo.supertype_chain` materialised at
+/// instantiate (ADR-0116 §3).
+fn concreteReaches(rt: *Runtime, obj_idx: u32, target: u32) bool {
+    const inst = @as(*const Instance, @ptrCast(@alignCast(rt.instance orelse return false)));
+    const gti = inst.gc_type_infos orelse return false;
+    if (obj_idx >= gti.entries.len) return false;
+    const ti = gti.entries[obj_idx];
+    for (ti.supertype_chain[0..ti.depth]) |s| {
+        if (s == target) return true;
+    }
+    return false;
+}
+
 fn gcRefMatchesNonNull(rt: *Runtime, v: Value, ht: u8) bool {
     const is_i31 = Value.isI31Ref(v);
+    if (decodeAbstract(ht) == null) {
+        // Concrete typeidx target (single-byte; multi-byte indices aren't
+        // reachable — lower.zig stores one byte). i31 has no concrete type.
+        if (is_i31) return false;
+        const info = readObjInfo(rt, v) orelse return false;
+        return concreteReaches(rt, info, ht);
+    }
     const obj_kind: ?ObjectKind = if (is_i31) null else readObjKind(rt, v);
     return gcAbstractMatch(ht, is_i31, obj_kind);
 }
@@ -210,13 +247,14 @@ test "ref.test: null ref returns 0 (10.G op_gc cycle 7)" {
     try testing.expectEqual(@as(i32, 0), rt.popOperand().i32);
 }
 
-test "ref.test: non-null ref returns 1 (10.G op_gc cycle 7)" {
+test "ref.test (ref any): non-null ref matches → 1 (10.G cycle 151)" {
     var t = DispatchTable.init();
     register(&t);
     var rt = Runtime.init(testing.allocator);
     defer rt.deinit();
     try rt.pushOperand(.{ .ref = 0xDEADBEEF });
-    try driveOne(&rt, &t, .@"ref.test", 0, 0);
+    // payload 0x6E = `any`: the hierarchy top matches any non-null operand.
+    try driveOne(&rt, &t, .@"ref.test", 0x6E, 0);
     try testing.expectEqual(@as(i32, 1), rt.popOperand().i32);
 }
 
@@ -230,13 +268,13 @@ test "ref.test_null: null ref returns 1 (10.G op_gc cycle 7; null matches _null 
     try testing.expectEqual(@as(i32, 1), rt.popOperand().i32);
 }
 
-test "ref.test_null: non-null ref returns 1 (10.G op_gc cycle 7)" {
+test "ref.test_null (ref any): non-null ref matches → 1 (10.G cycle 151)" {
     var t = DispatchTable.init();
     register(&t);
     var rt = Runtime.init(testing.allocator);
     defer rt.deinit();
     try rt.pushOperand(.{ .ref = 0xCAFEBABE });
-    try driveOne(&rt, &t, .@"ref.test_null", 0, 0);
+    try driveOne(&rt, &t, .@"ref.test_null", 0x6E, 0);
     try testing.expectEqual(@as(i32, 1), rt.popOperand().i32);
 }
 
