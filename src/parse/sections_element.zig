@@ -22,7 +22,15 @@ pub const ElementSegment = struct {
     tableidx: u32 = 0,
     offset_expr: []const u8 = &.{},
     elem_type: ValType = .funcref,
+    /// funcref / ref.null / i31 / global.get items — u32-encoded (funcidx,
+    /// `maxInt` null sentinel, or i31-pack). Legacy path; load-bearing for
+    /// every funcref-table fixture. Mutually exclusive with `item_exprs`.
     funcidxs: []const u32 = &.{},
+    /// 10.G cycle 164 — Wasm 3.0 GC general const-expr items (array.new /
+    /// array.new_fixed / struct.new …): raw per-item expression bytes,
+    /// evaluated to Values at instantiate via `evalGlobalInitGc`. Populated
+    /// instead of `funcidxs` when a flag-5 segment's items start with 0xFB.
+    item_exprs: []const []const u8 = &.{},
 };
 
 pub const Elements = struct {
@@ -35,6 +43,43 @@ pub const Elements = struct {
 };
 
 /// Decode the body of an element section (Wasm 2.0 §5.5.12).
+/// 10.G cycle 164 — classify a flag-4/5/6/7 element item const-expr:
+/// true iff it constructs a GC aggregate (struct.new / array.new family),
+/// false for a simple ref.func / ref.null / global.get / i31 item.
+/// Scans the expr the same way `scanInitExpr` does (LEB-aware, so a 0xFB
+/// byte inside an immediate doesn't false-match) and reports whether a
+/// struct.new/array.new opcode appears before the `0x0B` end. Items start
+/// with their ARGS (e.g. `i32.const`), so peeking the first byte is not
+/// enough; and the segment's concrete reftype can't disambiguate
+/// func-vs-array in the element section (no type-section access here).
+fn itemIsGeneralConstExpr(body: []const u8, start: usize) bool {
+    var p = start;
+    while (p < body.len) {
+        const op = body[p];
+        p += 1;
+        switch (op) {
+            0x0B => return false,
+            // LEB-immediate ops (i32/i64.const, global.get, ref.func):
+            // skip the immediate by reading it (value discarded).
+            0x41, 0x42, 0x23, 0xD2 => _ = leb128.readUleb128(u64, body, &p) catch return false,
+            0x43 => p += 4,
+            0x44 => p += 8,
+            0xD0 => p += 1, // ref.null reftype byte
+            0xFB => {
+                const sub = leb128.readUleb128(u32, body, &p) catch return false;
+                switch (sub) {
+                    // struct.new / struct.new_default / array.new[_default] /
+                    // array.new_fixed → general GC constructor.
+                    0, 1, 6, 7, 8 => return true,
+                    else => {}, // ref.i31 (28) / convert ops — keep scanning
+                }
+            },
+            else => return false,
+        }
+    }
+    return false;
+}
+
 /// Supports all 8 forms (0–7) per ADR-0014 §2.1 / 6.K.4. Forms
 /// 0/1/3/4 ship in chunk 5d-2; 2/5/6/7 land in 6.K.4. Funcref is
 /// the only supported reftype in v0.1.0; externref defers to a
@@ -139,9 +184,24 @@ pub fn decodeElement(parent_alloc: Allocator, body: []const u8) sections.Error!E
                     else => return sections.Error.InvalidFunctype,
                 };
                 const n = try leb128.readUleb128(u32, body, &pos);
-                const funcs = try alloc.alloc(u32, n);
-                for (funcs) |*f| f.* = try readFuncrefInitExpr(body, &pos, reftype_vt);
-                e.* = .{ .kind = .passive, .elem_type = reftype_vt, .funcidxs = funcs };
+                // 10.G cycle 164 — discriminate by the first item's opcode.
+                // WasmGC general const-expr items (array.new / struct.new …)
+                // start with 0xFB; ref.func / ref.null / global.get / i31
+                // (0xD2 / 0xD0 / 0x23 / 0x41) take the legacy funcidx reader.
+                // gc/array.8: `(elem (ref $bvec) (array.new …) (array.new_fixed …))`.
+                if (n > 0 and itemIsGeneralConstExpr(body, pos)) {
+                    const exprs = try alloc.alloc([]const u8, n);
+                    for (exprs) |*ex| {
+                        const s = pos;
+                        try init_expr.scanInitExpr(body, &pos);
+                        ex.* = body[s..pos];
+                    }
+                    e.* = .{ .kind = .passive, .elem_type = reftype_vt, .item_exprs = exprs };
+                } else {
+                    const funcs = try alloc.alloc(u32, n);
+                    for (funcs) |*f| f.* = try readFuncrefInitExpr(body, &pos, reftype_vt);
+                    e.* = .{ .kind = .passive, .elem_type = reftype_vt, .funcidxs = funcs };
+                }
             },
             6 => {
                 // active, explicit tableidx, offset_expr, reftype,
