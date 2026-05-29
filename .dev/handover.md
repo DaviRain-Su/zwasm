@@ -6,36 +6,37 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `157595d6` (cyc210, docs/script). funcref-call + tail-call JIT POSITIVE
+- **HEAD**: `157595d6`→(this cyc211 docs commit). funcref-call + tail-call JIT POSITIVE
   paths done both arches (call_ref + return_call_ref + direct/indirect/recursion
-  return_call + clang musttail; all ubuntu-verified). cyc210 refreshed stale 10.P
-  SKIP rationales (I14/I21: D-179/D-192 RESOLVED) + enumerated D-208 hypotheses.
-  **D-208 (open)**: x86_64 call_ref/return_call_ref of a NULL funcref returns 0 not
-  trapping (arm64 OK); cyc208 caught it, cyc209 gated tests to aarch64. Leading hyp:
-  ref.null 0 not reaching call_ref funcref_r on x86_64. D-205/D-207 discharged; open:
-  D-208 (x86_64 null-check, close-blocker via 10.P I18), D-206 (cross-module TC, harness-gated).
+  return_call + clang musttail; all ubuntu-verified). **D-208 (open, close-blocker)**:
+  x86_64 call_ref/return_call_ref of a NULL funcref returns Ok(0) not trapping (arm64 OK,
+  gated). cyc211 static investigation ruled out ALL 6 hypotheses (JZ-encoding / patcher /
+  ref.null-value / regalloc[shared+arm64-correct] / trap-stub-emission[unreachable proves
+  it] / fixup) — bug is in x86_64 EMIT BYTES but elusive to static analysis. D-205/D-207
+  discharged; open: D-208, D-206 (cross-module TC, harness-gated).
 - Earlier: 10.TC same-module tail-call (direct/indirect/recursion + clang musttail
   → 15, cyc198-201); EH corpus 34/34 (ADR-0114); cyc190-196 gc global-init/subtyping.
   Phase 10 CLOSE-ELIGIBLE (spec corpus interp-complete); Runner EXECUTES via interp,
   gc_heap materialised at instantiate. 10.M memory64 + 10.E EH JIT largely done;
   10.G GC JIT = interp-only (extreme: regalloc stack-map, ADR-0113 §C).
-- **Step 0.7 on resume**: cyc210 is docs/script-only (10.P rationale refresh + debt) →
-  no ubuntu kick; green holds. Prior: cyc209 ubuntu `OK (HEAD=9dbc84ee)` GREEN (D-208
-  gate recovery confirmed — gated null-trap tests skip on x86_64).
+- **Step 0.7 on resume**: cyc210+cyc211 are docs-only (10.P rationale refresh + D-208
+  investigation) → no ubuntu kick; green holds. Last code-kick: cyc209 ubuntu
+  `OK (HEAD=9dbc84ee)` GREEN (D-208 gate recovery — gated null-trap tests skip on x86_64).
 
-## Active task — investigate D-208 (x86_64 funcref null-check miscompile)  **NEXT**
+## Active task — D-208 byte-disasm harness (x86_64 null-check)  **NEXT**
 
-x86_64 `call_ref`/`return_call_ref` of a NULL funcref returns 0 instead of trapping
-(arm64 OK). Can't reproduce on Mac aarch64 → investigate via byte inspection: emit
-the x86_64 null-check sequence for the `ref.null; call_ref` module and ndisasm it
-(`debug_jit_auto` skill). Step-0: write a Mac-runnable test that drives the x86_64
-`emitCallRef` (explicit-arg form) on a null funcref + dumps the bytes, OR cross-read
-the emitted bytes; ndisasm to verify `OR r64,r64` / `JZ rel32` (after fixup) /
-`MOV RAX,[funcref+16]` is correct. Hypotheses (all "correct in theory" — see D-208):
-the `OR`/`JZ` interaction with `gprLoadSpilled`'s returned reg, or the JZ-disp fixup.
-Hypotheses enumerated in D-208 (JZ-encoding/patcher/ref.null-value REJECTED; leading
-= ref.null 0 not reaching funcref_r). Fix → ungate → verify on ubuntu. Other deferred
-JIT items: cross-module TC (D-206, multi-module harness); GC JIT (10.G, extreme).
+Static analysis exhausted (all 6 hypotheses ruled out, see D-208). Root-cause needs
+seeing the EMITTED x86_64 bytes. Build a Mac-runnable byte-dump (x86_64 emit is pure
+byte-gen): mirror `src/engine/codegen/x86_64/emit_test_int.zig` — construct a ZirFunc
+`[ref.null $sig, call_ref $sig, end]`, compute real liveness (`ir/analysis/liveness.zig`)
++ regalloc (`shared/regalloc.zig`), call `x86_64/emit.zig` compile → `out.bytes`, write
+to a tmp file, `ndisasm -b64` it (debug_jit_auto skill). INSPECT: the `OR r64,r64`, the
+`JZ rel32` (its PATCHED disp — does it point at the trap stub?), and the trap stub
+(does it set trap_flag + RET?). The bug is one of those bytes. Fix → re-run the
+(aarch64-gated) null-trap test logic mentally → ungate → 1 ubuntu round-trip to verify.
+Deferred: cross-module TC (D-206, multi-module harness); GC JIT (10.G, extreme).
+**Yield/user note**: JIT milestone delivered; a user check-in on Phase-10-close-vs-grind
+is high-value (see Open questions yield-taper note).
 
 ## §10 close map
 
