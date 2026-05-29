@@ -6,15 +6,16 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `04476dce` (cyc200, 10.TC-JIT IT-4). **Same-module JIT tail-call is
-  PROVEN**: direct 0-arg (IT-2), indirect via table[0] (IT-3), and direct
-  recursion-WITH-ARGS (IT-4, sum(5,0)=15 over 6 frame-reusing levels — the
-  clang_musttail shape) all JIT-execute e2e via `runI32Export`. Root fix was
-  the liveness terminator-class (`src/ir/analysis/liveness.zig`, ADR-0113 §A,
-  IT-2); emit was already wired. **D-205's core predicate "implement JIT
-  tail-call codegen" is met.** Mac test-all + ubuntu GREEN through IT-3; IT-4
-  Mac test-all GREEN. Phase 10 CLOSE-ELIGIBLE (spec corpus interp-complete);
-  path (b) completing the §10 JIT halves rather than deferring to Phase 11.
+- **HEAD**: `5457997c` (cyc201, 10.TC-JIT IT-5). **10.TC-JIT bundle CLOSED** — JIT
+  tail-call codegen done + proven: direct 0-arg (IT-2), indirect table[0] (IT-3),
+  recursion-WITH-ARGS (IT-4), and a **real clang `__attribute__((musttail))`
+  fixture JIT-result-checked → 15** (IT-5). Root fix was the liveness
+  terminator-class (`src/ir/analysis/liveness.zig`, ADR-0113 §A, IT-2); emit was
+  already wired. New realworld-p10 JIT result-check harness (`build.zig`
+  `run_edge_realworld_p10`, in test-all). Mac test-all GREEN; ubuntu GREEN
+  through IT-4. **D-205 clang_musttail concern discharged**; 10.TC residuals
+  (cross-module TC, return_call_ref) → debt. Phase 10 CLOSE-ELIGIBLE (spec corpus
+  interp-complete); path (b) continuing the §10 JIT halves.
 - cyc196 (`086c2991`) first clang-realworld fixture (clang_smoke; pipeline proven).
   Realworld-clang findings: JIT can't run `return_call` (D-205); runI32Export
   doesn't instantiate; → non-trivial clang fixtures need harness work.
@@ -34,43 +35,26 @@
   test-all — so the 517cb01a→9996d478 gap is a non-code-gap; ubuntu green holds,
   NO re-kick / revert needed. 10.G-gc + 10.H-multimem CLOSED cyc188.
 
-## Active bundle
+## Active task — survey remaining 10.TC/E/G JIT halves  **NEXT**
 
-- **Bundle-ID**: 10.TC-JIT (D-205 discharge)
-- **Cycles-remaining**: ~2 (IT-5 realworld result-check harness → IT-6 generate clang_musttail fixture)
-- **Continuity-memo**: same-module tail-call codegen DONE + proven (direct 0-arg
-  `ef34724c`, indirect `9a060476`, recursion-with-args `04476dce`). Remaining IN
-  bundle = wire a realworld result-check harness so `clang_musttail` can be
-  JIT-verified. Per cyc196 lesson: `runI32Export` can't do it (no full
-  instantiation + no-arg-only → clang -O2 constant-folds), and `test-realworld-run`
-  (`cli_run.runWasm`) fully instantiates but only checks instantiate+invoke
-  (no result-check, globs `test/realworld/wasm/` not `p10/`). IT-5 = extend that
-  harness: glob `p10/` + compare invoke result to a `.expect` file. clang→wasm
-  recipe (cyc196 lesson): `PATH+=lld; NIX_HARDENING_ENABLE="" clang --target=wasm32
-  -nostdlib -Wl,--no-entry -O2 -mtail-call`. OUT of bundle (separate debt):
-  cross-module tail-call (`cross_module_tail_call.zig`, 10.TC-3f); `return_call_ref`
-  (blocked-by `call_ref` JIT, 10.R).
-- **Exit-condition**: `clang_musttail` realworld fixture JIT-result-checked via
-  the new full-instantiate harness → bundle close; test-all GREEN, 0 panics.
-  (same-module codegen — direct + indirect + recursion-with-args — already met.)
+10.TC-JIT bundle CLOSED cyc201 (exit-condition met @ `5457997c`: clang_musttail
+JIT-result-checked → 15). Next: a **survey** chunk to scope the highest-value
+next JIT work under path (b) "complete 10.TC/E/G JIT halves", reporting current
+status of each: 10.TC cross-module tail-call (`cross_module_tail_call.zig`,
+ADR-0112 D4 — needs a multi-module JIT test harness; debt D-206); 10.E EH JIT
+codegen (substrate ADR-0114 built, interp 34/34 — what's the JIT-emit status?);
+10.G GC JIT codegen. Output → `private/notes/p10-jit-halves-survey.md`; end with
+a recommended next concrete chunk. Known 10.TC residuals are debt-rowed (D-206
+cross-module; D-205-tail `return_call_ref` blocked-by `call_ref` JIT / 10.R).
+Lighter queued: refresh stale 10.P SKIP rationales (I14/I21 reference resolved
+D-192/D-179).
 
-## Active task — 10.TC-JIT IT-5  **NEXT**
-
-Extend the realworld run harness to result-check `p10/` fixtures: survey
-`test/realworld/run_runner_jit.zig` (+ `cli_run.runWasm` / `test-realworld-run`
-step), then add (a) globbing of `test/realworld/p10/**`, (b) per-fixture
-`.expect` comparison (mirror the edge-case `.expect` format), and (c) generate
-a non-folding `clang_musttail` `.wasm` (CPS/continuation shape per PROVENANCE.md
-so clang -O2 can't const-fold the recursion). Confirm it JIT-runs the
-`return_call` to the correct result. Lighter queued: refresh stale 10.P SKIP
-rationales (I14/I21 reference resolved D-192/D-179).
-
-## §10 close map (after this bundle)
+## §10 close map
 
 Spec-corpus rows (10.G/10.M/10.E/10.TC/10.R) are mature but ROADMAP-`[ ]`;
-formal close needs realworld/p10 + 10.P. Residual after the bundle:
-- **realworld/p10** (skeleton): clang_wasm64 + clang_musttail AUTONOMOUS
-  (clang✓), emscripten/dart/ocaml/hoot TOOL-GATED — next major chunk.
+formal close needs realworld/p10 + 10.P. Residual:
+- **realworld/p10**: clang_musttail DONE (cyc201, JIT result-checked); clang_wasm64
+  next-AUTONOMOUS (clang✓); emscripten/dart/ocaml/hoot TOOL-GATED.
 - **gc .17** funcref-RTT (D-198 multi-mechanism rabbit hole) — deep defer.
 - **funcrefs** 34/39 — 5 gated; **10.P close gate** = user touchpoint.
 
