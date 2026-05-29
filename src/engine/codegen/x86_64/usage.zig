@@ -114,18 +114,29 @@ pub fn usesRuntimePtr(func: *const ZirFunc) bool {
             .@"memory.init",
             .call,
             .call_indirect,
+            // 10.R call_ref: emit does MOV <arg0>, R15 (runtime_ptr →
+            // callee) + a null-check trap-stub fixup ([R15+trap_flag_off]).
+            // Both read R15 → D-208: missing entry meant a null funcref
+            // returned 0 on x86_64 instead of trapping (the trap stub
+            // wrote trap_flag via an uninitialised R15). Mac arm64 immune
+            // (prologue always sets X19). The positive call_ref test
+            // survived because its callee never dereferenced the bad rt.
+            .call_ref,
             // ADR-0112 D4 / 10.TC: return_call emits MOV RDI, R15
             // (emitLoadCalleeRtSameModule) — reads R15. Must be
             // whitelisted so the prologue PUSH-saves R15 (otherwise
             // the MOV reads uninitialised R15 → silent miscompile,
-            // D-180-class). return_call_ref will land here when its
-            // emit body wires up.
+            // D-180-class).
             .return_call,
             // return_call_indirect ALSO reads R15: bounds via
             // [R15+table_size_off], sig via [R15+typeidx_base_off],
             // funcptr via [R15+funcptr_base_off]. Same D-180 risk
             // class.
             .return_call_indirect,
+            // 10.R return_call_ref: emitLoadCalleeRtSameModule (MOV
+            // RDI, R15) + null-check trap-stub fixup. Same D-208/D-180
+            // risk class as call_ref (cyc208 ungated → 0 on x86_64).
+            .return_call_ref,
             // Trap-stub emitters: unreachable + div / rem (i32/i64
             // × s/u) + trunc_trap (i32/i64 × f32/f64 × s/u) +
             // ref.as_non_null. All write `[r15+trap_flag_off]` on

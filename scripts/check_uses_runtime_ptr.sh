@@ -63,6 +63,24 @@ is_whitelisted() {
     return 1
 }
 
+X86_DIR="src/engine/codegen/x86_64"
+
+# Thin `ops/**` delegators (e.g. `call_ref.zig` → `op_call.emitCallRefCtx`,
+# `return_call_ref.zig` → `op_tail_call.emitReturnCallRef`) carry NO R15
+# bytes themselves — the R15 use lives in the call-family impl files
+# (`op_call.zig` / `op_tail_call.zig`), outside the scanned `ops/` tree.
+# Every call-family op is an R15 user (it passes the runtime_ptr via
+# MOV <arg0>, R15 AND emits a null/bounds/sig trap-stub fixup whose stub
+# writes `[R15+trap_flag_off]`), so a per-op file that delegates into
+# either impl is treated as an implicit R15 user.
+#
+# Origin: D-208 — call_ref / return_call_ref read R15 but slipped the
+# direct scan because their per-op files only delegate; the null funcref
+# returned 0 on x86_64. Scope note: this catches delegation into the
+# call family specifically. A future op delegating into some OTHER
+# R15-using impl file would need that impl added to the regex below.
+CALL_FAMILY_IMPL_RE='\b(op_call|op_tail_call)\.emit'
+
 # Scan each op file. For each, derive the op_tag (= filename
 # without .zig + parent dir = wasm_X_Y/<op>.zig → tag derived
 # by inverse of Zir's namespacing convention OR via `pub const
@@ -95,7 +113,12 @@ while IFS= read -r f; do
             # `sig_mismatch_fixups.append(...)` (call_indirect
             # sig check). Any of these = implicit R15 use.
             if ! grep -nE '\.(bounds_fixups|unreach_fixups|sig_mismatch_fixups)\.append' "$f" >/dev/null 2>&1; then
-                continue
+                # No direct R15 use. A thin delegator into the call-family
+                # impl (op_call / op_tail_call) is still an implicit R15
+                # user (D-208 gap). Anything else genuinely has no R15 use.
+                if ! grep -qE "$CALL_FAMILY_IMPL_RE" "$f"; then
+                    continue
+                fi
             fi
         fi
     fi
