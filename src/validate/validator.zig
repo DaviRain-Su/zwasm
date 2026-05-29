@@ -1032,8 +1032,11 @@ pub const Validator = struct {
             0xD1 => try self.opRefIsNull(),
             0xD2 => try self.opRefFunc(),
 
+            // Wasm 3.0 GC §3.3.5.2 — ref.eq is the single-byte 0xD3 (NOT
+            // 0xFB 0x13, which is array.init_elem; cyc156 mis-numbering fix).
+            0xD3 => try self.opRefEq(),
+
             // Wasm 3.0 typed function references (function-references proposal).
-            // ref.as_non_null is 0xD4 (0xD3 is GC ref.eq, not yet wired).
             0xD4 => try self.opRefAsNonNull(),
             0xD5 => try self.opBrOnNull(),
             0xD6 => try self.opBrOnNonNull(),
@@ -1426,8 +1429,9 @@ pub const Validator = struct {
             16 => try self.opArrayFill(),
             // array.len (Wasm 3.0 GC §3.3.5.6.13): pop arrayref, push i32.
             15 => try self.opArrayLen(),
-            // ref.eq (Wasm 3.0 GC §3.3.5.2): pop 2 reftypes, push i32.
-            19 => try self.opRefEq(),
+            // 0xFB 0x11/0x12/0x13 (17/18/19) = array.copy/init_data/init_elem
+            // (NotImplemented — exec lands later). ref.eq is 0xD3, not 19
+            // (cyc156 mis-numbering fix).
             // ref.test / ref.test_null share validator shape:
             // consume heap_type byte, pop reftype, push i32.
             20, 21 => try self.opRefTest(),
@@ -1735,17 +1739,19 @@ pub const Validator = struct {
         try self.pushType(.i32);
     }
 
-    /// Wasm spec 3.0 §3.3.5.2 — `ref.eq`: pop two reftypes,
-    /// push i32 (1 iff same reference). Pre-RTT we accept any
-    /// reftype on both operands (the spec restricts to eqref-
-    /// subtypes; ADR-0116 §"Internal hierarchy" RTT lands later).
+    /// Wasm spec 3.0 §3.3.5.2 — `ref.eq`: pop two operands, each a
+    /// subtype of `eqref` (the internal-eq hierarchy: i31 / struct /
+    /// array / eq / none — NOT func / extern / any), push i32. Operands
+    /// outside the eq hierarchy (funcref, externref, anyref) are a type
+    /// error (cyc156 — was a lenient any-ref accept that let the
+    /// ref_eq invalid fixtures through).
     fn opRefEq(self: *Validator) Error!void {
         var i: u32 = 0;
         while (i < 2) : (i += 1) {
             const top = try self.popAny();
             switch (top) {
                 .bot => {},
-                .known => |t| if (!t.isRef()) return Error.StackTypeMismatch,
+                .known => |t| if (!self.subtypeCtx(t, ValType.eqref)) return Error.StackTypeMismatch,
             }
         }
         try self.pushType(.i32);

@@ -542,8 +542,10 @@ pub const Lowerer = struct {
                 const idx = try leb128.readUleb128(u32, self.body, &self.pos);
                 try self.emit(.@"ref.func", idx, 0);
             },
+            // Wasm 3.0 GC §3.3.5.2 — ref.eq is single-byte 0xD3 (NOT
+            // 0xFB 0x13 = array.init_elem; cyc156 mis-numbering fix).
+            0xD3 => try self.emit(.@"ref.eq", 0, 0),
             // Wasm 3.0 typed function references (function-references proposal).
-            // ref.as_non_null is 0xD4 (0xD3 is GC ref.eq, not yet wired).
             0xD4 => try self.emit(.@"ref.as_non_null", 0, 0),
             0xD5 => try self.emitUlebPayload(.br_on_null),
             0xD6 => try self.emitUlebPayload(.br_on_non_null),
@@ -663,8 +665,8 @@ pub const Lowerer = struct {
             },
             // array.len (Wasm 3.0 GC §3.3.5.6.13). No immediates.
             15 => try self.emit(.@"array.len", 0, 0),
-            // ref.eq (Wasm 3.0 GC §3.3.5.2). No immediates.
-            19 => try self.emit(.@"ref.eq", 0, 0),
+            // 0xFB 0x13 (19) = array.init_elem (NotImplemented — exec lands
+            // later). ref.eq is 0xD3, not 19 (cyc156 mis-numbering fix).
             // ref.test / ref.test_null (Wasm 3.0 GC §3.3.5.3).
             // Each consumes a heap_type byte from the body. The
             // byte is stored in payload (u32-extended) so the
