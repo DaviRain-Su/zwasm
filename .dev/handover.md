@@ -6,13 +6,14 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc162 (`48fab4e3`) — **abstract GC subtyping** in
-  subtypeCtx (`.abstract => false` → route through gcHeapAbstractSubtype:
-  i31/struct/array <: eq <: any) + table.init segment `.eql`→subtypeCtx.
-  Fixes i31.wast `$anyref_table_of_i31ref` (i31ref values into anyref
-  table.grow/fill/init): **gc return 320→335 (+15)**, i31 19→4, trap 88,
-  invalid 57 held. exit 0, 0 panics. cyc161 host externref args (+58);
-  cyc160 breakdown infra. **gc 62→335** across the session.
+- **HEAD**: cyc163 (`42ecb99a`) — **opt-in `--fail-detail`** reliable
+  per-assert diagnostic in the wasm-3.0 runner (stdout, all 5 fail
+  sites). Finding: the cyc160 per-manifest breakdown + gc return_fail
+  counter OVER-COUNT (claim ref_test=2/i31=4, but reliable probe = 0
+  for both — fully fixed by c161/c162). True gc residuals: array=3
+  (array.8 instantiate-fail cascade) + type-subtyping=5. No
+  count/behaviour change (gc 335, exit 0, 0 panics). cyc162 abstract
+  subtyping (+15); cyc161 externref args (+58). **gc 62→335** session.
 - cyc147-148 **ADR-0125 packed COMPLETE** (A union rename → B-validate
   decode → B-exec get_s/u): gc return 62→116, trap 18→54, ValidateFailed
   27→14, invalid 57 held. cyc146 ADR-0016 M3 + concrete-subtype coercion.
@@ -47,24 +48,30 @@
 - **Exit-condition**: gc return ≥ 90 **EXCEEDED (116 at cyc148)**. Open
   target: maximise return (RTT exec) toward the corpus ceiling.
 
-## Active task — cycle 163: array (6+2t) + i31 const-expr global.get — **NEXT**
+## Active task — cycle 164: array.8 instantiate-fail (true gc residual) — **NEXT**
 
-Post-cyc162 gc breakdown (17 return-fails left): `array=6+2t`,
-`type-subtyping=5+10t (D-198 deep)`, `i31=4`, `ref_test=2`.
+Per the reliable `--fail-detail` probe (run:
+`<bin> test/spec/wasm-3.0-assert --fail-detail`), the TRUE gc return
+residuals are array=3 + type-subtyping=5 (ref_test/i31 are clean; the
+breakdown's claims there are phantom over-counts).
 
-Pick the densest tractable cluster:
-- **array (6 return + 2 trap)**: gc/raw/array.wast — survey which
-  exports fail (per-module CLI probe `zwasm run array.N.wasm`; likely a
-  module-level instantiate/validate cascade like i31/ref_test were).
-- **i31.3 / i31.4 (4 fails)**: const-expr `global.get` of an imported
-  global inside `ref.i31`/table-initializer (i31.wast
-  `$i31ref_of_global_*_initializer`). evalGlobalInitGc + the table-init-
-  expr decoder need global.get-of-import support.
-- `ref_test=2`: residual precise eq/struct-on-externalized-host (coarse
-  gcAbstractMatch; needs real extern↔any discrimination — deeper).
+- **array.8** (`zwasm run gc/array/array.8.wasm` → "decode/validate
+  failed"): array-of-arrays module. `(elem $e (ref $bvec) (array.new
+  $bvec …) (array.new_fixed $bvec …))` — a passive elem segment with a
+  **concrete-array reftype** `(ref $bvec)` + **array.new/array.new_fixed
+  const-expr ITEMS**; `array.new_elem $vec $e` builds an array of those.
+  Investigate decodeElement: does it handle a concrete-ref elem reftype
+  + non-ref.func const-expr items? Likely the decode gap. Fixing
+  array.8 recovers its get/set_get/len cascade (3).
+- **type-subtyping (5)**: 3 setup-cascade + 2 real `run exp=1 got=0`
+  (D-198 rec-group adjacent; deeper).
+- **i31.3/i31.4 (deferred)**: table-with-init-expr decode (`0x40 0x00`
+  form) + const-expr global.get-of-import. The const-expr global.get
+  patch alone is non-observable (reverted cyc163) — land WITH the
+  table-init-expr feature for an observable delta.
 VERIFY full test-spec + exit-code + panic grep (cyc150 lesson; DIRECT
-binary). No regression to 335 return / 88 trap / 57 invalid / 393
-multi-mem / 34 funcrefs.
+binary; use `--fail-detail` for per-assert truth, NOT the breakdown).
+No regression to 335 return / 88 trap / 57 invalid / 393 multi-mem.
 
 ## Larger §10 work (later bundles)
 
@@ -72,14 +79,17 @@ multi-mem / 34 funcrefs.
   `resolveFuncrefGlobals` (off spec-corpus path). **10.P close gate** =
   user touchpoint by construction.
 
-## Spec runner observable (cycle-162, DIRECT binary run)
+## Spec runner observable (cycle-163, DIRECT binary run)
 
 ```
 [memory64           ] return=337 (all pass)    [tail-call] return=71 (all pass)
 [exception-handling ] 34/34 ✅ FULLY GREEN     [function-references] return=34/39
-[gc                 ] return=335/407 trap=88/100 invalid=57/60 malformed=1/1 skip=20  ← 10.G c162
+[gc                 ] return=335/407 trap=88/100 invalid=57/60 malformed=1/1 skip=20  ← 10.G c163
 [multi-memory       ] return=393/407 trap=238/238  ← cyc141 rt.datas fix
 ```
+
+> Per-manifest fail counts via `--fail-detail` (reliable) not the
+> breakdown: real gc residuals = array(3) + type-subtyping(5).
 
 ## Open questions / blockers
 
