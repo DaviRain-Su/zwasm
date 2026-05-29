@@ -28,8 +28,10 @@
   (type_info.slot_size); data-seg elements are NATURAL width.
 - EH corpus FULLY GREEN 34/34 (ADR-0114 substrate cyc110-120; lesson
   `eh-cross-module-tag-substrate-scope` has the journey).
-- Mac+ubuntu green through cyc190 (`OK` exit 0). 10.G-gc + 10.H-multimem
-  CLOSED cyc188. Cross-module sharing substrate: D-199 memory + D-201 table/func.
+- **Step 0.7 on resume**: last ubuntu kick = cyc196 `OK (HEAD=517cb01a)`. cyc197
+  (`544d4440` I2 script + `9996d478` handover) is DOCS/SCRIPT-only — not built by
+  test-all — so the 517cb01a→9996d478 gap is a non-code-gap; ubuntu green holds,
+  NO re-kick / revert needed. 10.G-gc + 10.H-multimem CLOSED cyc188.
 
 ## Resume target — cycle 198 (loop PAUSED by user at cyc197)
 
