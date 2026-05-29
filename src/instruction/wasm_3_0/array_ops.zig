@@ -157,15 +157,38 @@ fn arrayNewData(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const offset: u64 = @intCast(offset_i32);
     if (dataidx >= rt.datas.len) return runtime.Trap.OutOfBoundsLoad;
     const seg: []const u8 = if (dataidx < rt.data_dropped.len and rt.data_dropped[dataidx]) &.{} else rt.datas[dataidx];
-    const byte_len: u64 = @as(u64, size) * ai.element.size;
+    // The data segment holds NATURAL-size elements (i32=4, i8=1, …); the
+    // array slot is the uniform 8-byte slot. Read `nat` bytes per element
+    // (little-endian, zero-extended) into the slot.
+    const nat = dataElemNaturalSize(ai.element.valtype_byte) orelse return runtime.Trap.NullReference;
+    const byte_len: u64 = @as(u64, size) * nat;
     if (offset + byte_len > seg.len) return runtime.Trap.OutOfBoundsLoad;
     const ref = try allocateArray(rt, typeidx, size, ai.element.size);
     const heap = rt.gc_heap.?;
-    const payload_start = ref + array_header_size;
     const off_lo: usize = @intCast(offset);
-    const blen: usize = @intCast(byte_len);
-    @memcpy(heap.bytes[payload_start .. payload_start + blen], seg[off_lo .. off_lo + blen]);
+    var i: u32 = 0;
+    while (i < size) : (i += 1) {
+        var raw: u64 = 0;
+        const src = off_lo + i * nat;
+        var b: u8 = 0;
+        while (b < nat) : (b += 1) raw |= @as(u64, seg[src + b]) << @intCast(@as(u32, b) * 8);
+        const dst_off = ref + array_header_size + i * ai.element.size;
+        @memcpy(heap.bytes[dst_off .. dst_off + 8], std.mem.asBytes(&raw)[0..8]);
+    }
     try rt.pushOperand(.{ .ref = @as(u64, ref) });
+}
+
+/// Natural (packed) byte width of an array element for array.new_data,
+/// from its Wasm valtype byte: i8=1, i16=2, i32/f32=4, i64/f64=8.
+/// Reftypes (which can't be initialised from raw data bytes) → null.
+fn dataElemNaturalSize(valtype_byte: u8) ?u8 {
+    return switch (valtype_byte) {
+        0x78 => 1, // i8 (packed)
+        0x77 => 2, // i16 (packed)
+        0x7F, 0x7D => 4, // i32, f32
+        0x7E, 0x7C => 8, // i64, f64
+        else => null,
+    };
 }
 
 /// Wasm 3.0 GC §3.3.5.6.8 — `array.new_elem $t $e`: pop [offset:i32,
