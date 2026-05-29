@@ -6,14 +6,15 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 135 (`3a9dfd3c`) — thread GC type info (kinds/
-  struct_defs/array_defs) into frontendValidate's validator call (was
-  empty → struct/array ops hit InvalidFuncIndex). **gc return 48→49,
-  ValidateFailed 46→44** — advanced struct.5/7/9 past the func-loop
-  error (now fail PRE-func-loop, next gap). No regression.
-- cyc134 (`d4cb589f`) GC abstract-head subtype lattice (return 33→48);
-  cyc133 non-funcref element→table init (18→33); cyc130-132 i31 exec;
-  gc return: 0→2→18→33→48→49.
+- **HEAD**: cycle 136 (`478cf035`) — struct typed-ref narrowing
+  (ADR-0116): struct.new pushes concrete `(ref $t)`; new
+  `Validator.subtypeCtx` adds the GC concrete→abstract rule (struct/array
+  ref <: eq/any/struct/array via module_types_kinds), routed through
+  popExpect + expectFrameEndTypes + struct.get/set. **struct FAIL 5→2,
+  ValidateFailed 44→41, trap 2→4**. No regression; all unit tests green.
+  gc return flat 49 (struct RETURN asserts need exec verified next).
+- cyc135 GC-type threading (return 48→49); cyc134 abstract-head lattice
+  (33→48); cyc133 element→table init (18→33); cyc130-132 i31 exec.
 - Runner EXECUTES via interp; struct substrate landed (struct_ops.zig
   struct.new/get/set + rt.gc_heap via setupGcHeap; handlers registered).
 - cyc120 (`5db875b0`): cross-module EH propagation + caller-frame catch
@@ -45,20 +46,19 @@
 - **Exit-condition**: gc corpus return pass ≥ 50/407 (first execution
   slice via struct/array) — refine as chunks land.
 
-## Active task — cycle 136: struct.5/7/9 pre-func-loop gap + struct exec — **NEXT**
+## Active task — cycle 137: struct RETURN execution + array narrowing — **NEXT**
 
-cyc135 GC-type threading advanced struct.5/7/9 past the func-loop
-InvalidFuncIndex; they now ValidateFail BEFORE the func loop (the
-func-loop probe did NOT fire). preDecode (unchanged) passed for them
-pre-cyc135, so the gap is an early `return false` in frontendValidate
-(lines 75-344) OR wasm_module_new doing extra validation — instrument
-PER-SECTION + the early returns (cyc131 lesson; don't guess). Likely:
-the type/func-section building rejects a struct typedef (e.g. func_types
-build over a struct-kind typeidx, or a struct field reftype). Find +
-fix. Then struct EXECUTION should work (struct_ops + gc_heap landed) →
-struct return passes. Also queue: i31.3 (preDecode, ~3 asserts) +
-struct.0/10 (preDecode). Observable: gc return ↑; no regression to 49
-return / 2 trap / 57 invalid.
+cyc136 narrowed struct types → struct.5/7 compile + trap-asserts pass,
+but RETURN asserts flat at 49. Verify struct EXECUTION end-to-end:
+instrument a compiling struct fixture's assert_return — does struct.new
+(heap alloc via rt.gc_heap) + struct.get return the right value, or
+wrong/trap? (struct_ops.zig substrate landed; check resolveStructInfo /
+TypeInfo materialise at instantiate — rt may lack the StructInfo the
+handler needs). Fix → struct return passes. THEN apply the SAME
+narrowing to array (array.new push concrete `(ref $t)` + array.get/set/
+fill/len accept concrete via subtypeCtx — mirror cyc136; ~6 edits) →
+array fixtures. Also queue: struct.0/10 + i31.3 (preDecode gaps).
+Observable: gc return ↑ (struct/array); no regression to 49/4/57.
 
 ## Larger §10 work (later bundles)
 
@@ -75,7 +75,7 @@ return / 2 trap / 57 invalid.
 [tail-call          ] return=71  trap=7   invalid=24  (all pass)
 [exception-handling ] return=34/34 trap=2/2 invalid=7/7 exception=4/4  ✅ FULLY GREEN
 [function-references] return=39(pass=32 fail=1) trap=4(pass) invalid=18(pass)
-[gc                 ] return=407(pass=49 fail=334) trap=100(pass=2 fail=98) invalid=60(pass=57 fail=3) malformed=1(pass) ParseFailed=0 ValidateFailed=44  ← 10.G (cyc135; GC-type threading, return 48→49)
+[gc                 ] return=407(pass=49 fail=334) trap=100(pass=4 fail=96) invalid=60(pass=57 fail=3) malformed=1(pass) ParseFailed=0 ValidateFailed=41  ← 10.G (cyc136; struct narrowing, struct FAIL 5→2, trap 2→4)
 [multi-memory       ] return=407(pass=387 fail=20) trap=238(pass=237 fail=1)
 ```
 
