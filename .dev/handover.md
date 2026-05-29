@@ -6,14 +6,14 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 138 (`e7dbb942`) — struct.new const-expr instantiation
-  (`evalGlobalInitStruct`: const-stack evaluator allocating on rt.gc_heap
-  from the materialised StructInfo when evalConstExprValue rejects).
-  **gc return 49→55 — CROSSES the 10.G bundle exit (≥50).** struct.7
-  fully passes. No regression; unit tests green.
-- cyc137 array narrowing (`b13d4158`, ValidateFailed 41→38); cyc136
-  struct narrowing; cyc135 GC-type threading; cyc134 abstract lattice;
-  cyc130-133 i31. gc return: 0→2→18→33→48→49→55.
+- **HEAD**: cycle 139 (`e26276bc`) — array.new const-expr instantiation
+  (extended `evalGlobalInitGc` with array.new/new_default/new_fixed,
+  mirroring cyc138 struct.new). **gc return 55→61, trap 6→10** —
+  array.5/6 (array global inits) instantiate + their ops pass. No
+  regression; unit tests green.
+- cyc138 struct.new const-expr (return 49→55, bundle exit ≥50 MET);
+  cyc136/137 struct/array narrowing; cyc135 GC-type threading; cyc130-133
+  i31. gc return: 0→2→18→33→48→49→55→61.
 - Runner EXECUTES via interp; gc_heap + inst.gc_type_infos materialised
   at instantiate (instantiate.zig:859-880, before the globals loop ~1262).
 - cyc120 (`5db875b0`): cross-module EH propagation + caller-frame catch
@@ -45,19 +45,22 @@
 - **Exit-condition**: gc return ≥ 50 **MET at cyc138 (55)**. Extended
   target: gc return ≥ 90 (array exec + ref.test/cast) — refine as lands.
 
-## Active task — cycle 139: array.new const-expr + array exec returns — **NEXT**
+## Active task — cycle 140: remaining gc gaps (pick by count) — **NEXT**
 
-struct path complete (return 55). Apply the SAME to array: extend
-`evalGlobalInitStruct` (rename → evalGlobalInitGc) with array.new/
-array.new_default/array.new_fixed const exprs (alloc array via gc_heap +
-ArrayInfo; mirror struct.new — array layout = ArrayHeader{len} + N
-8-byte slots). Then verify array RETURN execution end-to-end (array.new/
-get/set/len handlers in array_ops.zig — are they wired + correct?
-instrument a compiling array fixture's assert_return). Find which array
-fixtures still instantiate-FAIL vs return-fail (DIRECT binary, don't
-guess — cyc131 lesson). Observable: gc return ↑ (array.* fixtures); no
-regression to 55 return / 6 trap / 57 invalid. Then ref.test/ref.cast
-(RTT) + packed struct.get_s/u (struct.10).
+struct + array const-expr + i31 all done (return 61). Remaining gc
+compile/instantiate failures (from cyc139 DIRECT run), pick the biggest
+tractable family — INSTRUMENT first (cyc131 lesson), don't guess:
+- **ref.test/ref.cast/br_on_cast** (×~8 ValidateFailed) — RTT typed-ref
+  narrowing; validator stubs consume bytes w/o narrowing (ADR-0116 RTT).
+- **array_new_data/new_elem** (×8 ValidateFailed) — array init from
+  data/elem segments (new validator + exec).
+- **type-subtyping.*** (×many) — split: ValidateFailed (subtype edge
+  cases) + instantiate SignatureMismatch/UnknownImport (cross-module
+  linking of GC types — likely the c_api import-type match).
+- **packed struct.get_s/u** (struct.10, array packed) — ADR-0121 D3
+  deferred (i8/i16 storage); needs packed ValType.
+Localize one family's exact gap → fix. Observable: gc return/validate ↑;
+no regression to 61 return / 10 trap / 57 invalid.
 
 ## Larger §10 work (later bundles)
 
@@ -74,7 +77,7 @@ regression to 55 return / 6 trap / 57 invalid. Then ref.test/ref.cast
 [tail-call          ] return=71  trap=7   invalid=24  (all pass)
 [exception-handling ] return=34/34 trap=2/2 invalid=7/7 exception=4/4  ✅ FULLY GREEN
 [function-references] return=39(pass=32 fail=1) trap=4(pass) invalid=18(pass)
-[gc                 ] return=407(pass=55 fail=327) trap=100(pass=6 fail=94) invalid=60(pass=57 fail=3) malformed=1(pass) ParseFailed=0 ValidateFailed=38  ← 10.G (cyc138; struct.new const-expr, return 49→55, EXIT ≥50 MET)
+[gc                 ] return=407(pass=61 fail=317) trap=100(pass=10 fail=90) invalid=60(pass=57 fail=3) malformed=1(pass) ParseFailed=0 ValidateFailed=38  ← 10.G (cyc139; array.new const-expr, return 55→61, trap 6→10)
 [multi-memory       ] return=407(pass=387 fail=20) trap=238(pass=237 fail=1)
 ```
 
