@@ -669,12 +669,38 @@ pub const Validator = struct {
         const top = try self.popAny();
         switch (top) {
             .bot => {},
-            .known => |t| if (!valTypeIsSubtype(t, expected)) return Error.StackTypeMismatch,
+            .known => |t| if (!self.subtypeCtx(t, expected)) return Error.StackTypeMismatch,
         }
     }
 
     pub fn valTypeIsSubtype(actual: ValType, expected: ValType) bool {
         return valTypeIsSubtypeFree(actual, expected);
+    }
+
+    /// Subtype check WITH module-type context — extends the context-free
+    /// `valTypeIsSubtypeFree` with the Wasm 3.0 GC §4.2.8 concrete→abstract
+    /// rule: a concrete `(ref $t)` satisfies an abstract eq/any/struct/
+    /// array head when `$t`'s kind matches (struct.new pushes `(ref $t)`;
+    /// a func returning structref / anyref must accept it). Needs
+    /// `module_types_kinds` (threaded by frontendValidate, 10.G cycle 135).
+    pub fn subtypeCtx(self: *const Validator, actual: ValType, expected: ValType) bool {
+        if (valTypeIsSubtypeFree(actual, expected)) return true;
+        if (actual != .ref or expected != .ref) return false;
+        if (actual.ref.nullable and !expected.ref.nullable) return false;
+        return switch (actual.ref.heap_type) {
+            .concrete => |idx| switch (expected.ref.heap_type) {
+                .abstract => |e_abs| blk: {
+                    const head: zir.AbstractHeapType = if (idx < self.module_types_kinds.len) switch (self.module_types_kinds[idx]) {
+                        .func => .func,
+                        .structdef => .struct_,
+                        .arraydef => .array,
+                    } else .func;
+                    break :blk gcHeapAbstractSubtype(head, e_abs);
+                },
+                .concrete => false,
+            },
+            .abstract => false,
+        };
     }
 
     fn popAny(self: *Validator) Error!TypeOrBot {
@@ -1442,7 +1468,11 @@ pub const Validator = struct {
                 try self.popExpect(sd.fields[i].valtype);
             }
         }
-        try self.pushType(.structref);
+        // Wasm 3.0 GC §3.3.5.6.1: struct.new $t : […] -> [(ref $t)] — the
+        // result is the CONCRETE non-null typed ref, not abstract structref
+        // (so a func returning `(ref $t)` accepts it; subtypeCtx widens to
+        // structref/eqref/anyref slots).
+        try self.pushType(.{ .ref = .{ .nullable = false, .heap_type = .{ .concrete = typeidx } } });
     }
 
     /// Resolve a (typeidx, fieldidx) pair to a StructDef field. Used
@@ -1470,7 +1500,9 @@ pub const Validator = struct {
         const top = try self.popAny();
         switch (top) {
             .bot => {},
-            .known => |t| if (!(t.isStructRef() or t.isAnyRef() or t.isEqRef())) return Error.StackTypeMismatch,
+            // Accept abstract struct/eq/any heads OR a concrete `(ref $t)`
+            // whose typedef is a struct (struct.new now pushes concrete).
+            .known => |t| if (!(t.isAnyRef() or t.isEqRef() or self.subtypeCtx(t, ValType.structref))) return Error.StackTypeMismatch,
         }
         try self.pushType(field.valtype);
     }
@@ -1485,7 +1517,7 @@ pub const Validator = struct {
         const top = try self.popAny();
         switch (top) {
             .bot => {},
-            .known => |t| if (!(t.isStructRef() or t.isAnyRef() or t.isEqRef())) return Error.StackTypeMismatch,
+            .known => |t| if (!(t.isAnyRef() or t.isEqRef() or self.subtypeCtx(t, ValType.structref))) return Error.StackTypeMismatch,
         }
     }
 
@@ -2522,7 +2554,7 @@ pub const Validator = struct {
                     const top = self.operand_buf[frame.height];
                     switch (top) {
                         .bot => {},
-                        .known => |k| if (!valTypeIsSubtypeFree(k, t)) return Error.StackTypeMismatch,
+                        .known => |k| if (!self.subtypeCtx(k, t)) return Error.StackTypeMismatch,
                     }
                 }
             },
@@ -2533,7 +2565,7 @@ pub const Validator = struct {
                     const expected_t = ts[offset + i];
                     switch (slot) {
                         .bot => {},
-                        .known => |k| if (!valTypeIsSubtypeFree(k, expected_t)) return Error.StackTypeMismatch,
+                        .known => |k| if (!self.subtypeCtx(k, expected_t)) return Error.StackTypeMismatch,
                     }
                 }
             },
