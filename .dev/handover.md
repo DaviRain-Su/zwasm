@@ -6,15 +6,17 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 140 (`92eab71a`) — validate+lower array.new_data/
-  new_elem (validator sub 9/10 → opArrayNewSeg; lower → ZirOp). **gc
-  trap 10→18** (fixtures compile; OOB assert_traps pass via Unreachable
-  pending exec); array_new_data/elem compile-FAIL 8→3. No regression.
-- cyc139 array.new const-expr (return 55→61, trap 6→10); cyc138
-  struct.new const-expr (exit ≥50 MET); cyc136/137 struct/array
-  narrowing; cyc130-135 i31/threading. gc return 0→…→61, trap 0→18.
-- Runner EXECUTES via interp; gc_heap + inst.gc_type_infos materialised
-  at instantiate (instantiate.zig:859-880, before the globals loop ~1262).
+- **HEAD**: cycle 141 (`81c5e6d3`) — array.new_data/new_elem interp exec
+  + **fixed a production rt.datas bug** (instance builder never populated
+  rt.datas; only a test helper did → memory.init/array.new_data read
+  empty). **multi-memory return 387→393 (+6)** (memory.init passive). No
+  regression. gc return 61/trap 18 held (array_new_data.2 compiles but
+  value-return still off — decodeData passive parse suspected).
+- cyc140 array.new_data/elem validate+lower (trap 10→18); cyc139 array.new
+  const-expr (55→61); cyc138 struct.new const-expr (exit ≥50 MET);
+  cyc130-137 i31/struct/array narrowing+exec. gc return 0→…→61.
+- Runner EXECUTES via interp; gc_heap + gc_type_infos + rt.datas now all
+  materialised at instantiate (859-880 / globals ~1262 / data ~1451).
 - cyc120 (`5db875b0`): cross-module EH propagation + caller-frame catch
   → **EH corpus FULLY GREEN 34/34** (bundle 10.E CLOSED; D-192 PROVEN).
 - **Bundle 10.E-eh-tail CLOSED** — exit (return ≥ 33/34) met at 34/34;
@@ -44,20 +46,20 @@
 - **Exit-condition**: gc return ≥ 50 **MET at cyc138 (55)**. Extended
   target: gc return ≥ 90 (array exec + ref.test/cast) — refine as lands.
 
-## Active task — cycle 141: array.new_data/new_elem EXEC → returns — **NEXT**
+## Active task — cycle 142: array_new_data.2 value-return gap — **NEXT**
 
-cyc140 validate+lower landed; the ops trap Unreachable pending exec.
-Implement the interp handlers (array_ops.zig, register in
-api/instance.zig) + lower already emits payload=typeidx, extra=segidx:
-- `array.new_data`: pop [offset:i32, size:i32]; alloc array (size elems);
-  copy `size*elem_size` bytes from data segment[segidx] at byte offset
-  into the array payload; trap OutOfBounds if offset+size*esz > seg.len.
-  Mirror memory.init's data-segment bounds/trap. (rt data-segment store.)
-- `array.new_elem`: same but copy `size` REF values from elem segment
-  rt.elems[segidx] (the []Value built at instantiate) into element slots.
-Observable: gc return ↑ (array_new_data/elem value asserts). Then
-remaining: RTT (ref.test/cast/br_on_cast), type-subtyping linking,
-packed get_s/u. No regression to 61 return / 18 trap / 57 invalid.
+array.new_data/elem exec + rt.datas landed (cyc141). array_new_data.2
+(i32 array from a PASSIVE data seg `aabbccdd` → 3721182122) compiles +
+instantiates but its assert_return still fails — value wrong/trap.
+INSTRUMENT (cyc131 lesson): run array_new_data.2 via DIRECT binary,
+check the runner's got-vs-expected line OR add a probe in arrayNewData.
+Leading suspects: (a) decodeData passive-segment parse (flag 0x01)
+yields wrong seg.bytes/kind → rt.datas[0] wrong; (b) array element-size
+(esz) for i32 ≠ 4 in materialiseGcTypes; (c) array.get reads wrong slot.
+Confirm + fix → array_new_data.2 (+ array_new_elem value asserts) pass.
+Then remaining gc: packed get_s/u (array_new_data.0/1/3, struct.10), RTT
+(ref.test/cast/br_on_cast), type-subtyping linking. No regression to
+61 return / 18 trap / 393 multi-mem.
 
 ## Larger §10 work (later bundles)
 
@@ -74,8 +76,8 @@ packed get_s/u. No regression to 61 return / 18 trap / 57 invalid.
 [tail-call          ] return=71  trap=7   invalid=24  (all pass)
 [exception-handling ] return=34/34 trap=2/2 invalid=7/7 exception=4/4  ✅ FULLY GREEN
 [function-references] return=39(pass=32 fail=1) trap=4(pass) invalid=18(pass)
-[gc                 ] return=407(pass=61 fail=309) trap=100(pass=18 fail=82) invalid=60(pass=57 fail=3) malformed=1(pass) ParseFailed=0 ValidateFailed=33  ← 10.G (cyc140; array.new_data/elem validate+lower, trap 10→18)
-[multi-memory       ] return=407(pass=387 fail=20) trap=238(pass=237 fail=1)
+[gc                 ] return=407(pass=61 fail=309) trap=100(pass=18 fail=82) invalid=60(pass=57 fail=3) malformed=1(pass) ParseFailed=0 ValidateFailed=33  ← 10.G (cyc141 array exec)
+[multi-memory       ] return=407(pass=393 fail=14) trap=238(pass=238) ← cyc141 rt.datas fix (memory.init passive) +6
 ```
 
 ## Open questions / blockers
