@@ -6,14 +6,13 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc165 (`5f44228d`) — **const-expr global.get** (0x23 in
-  evalGlobalInitGc, threading prior global slots) + **spec runner binds
-  cross-module global exports** on `register` (was memory/func only).
-  Fixes i31.4: **gc return 339→340 (+1)**, trap 90, invalid 57 held; no
-  regression, 0 panics. cyc164 general const-expr elem items (array.8,
-  +4); cyc163 `--fail-detail` (use it, NOT the over-counting breakdown);
-  cyc161 externref args (+58); cyc162 abstract subtyping (+15). **gc
-  62→340** session.
+- **HEAD**: cyc166 (`991cdcb5`) — **table-with-explicit-init-expr**
+  (`0x40 0x00 reftype limits constexpr` decode + instantiate slot-fill +
+  imported-global extraction for the init-expr's global.get). Fixes
+  i31.3 → **i31 now FULLY CLEAN**: **gc return 340→343 (+3)**, trap 90,
+  invalid 57 held; no regression, 0 panics. cyc165 const-expr global.get
+  + register-global binding (i31.4); cyc164 general const-expr elem
+  items (array.8); cyc161 externref args (+58). **gc 62→343** session.
 - Earlier arc: cyc147-148 ADR-0125 packed (62→116); cyc146 ADR-0016 M3
   validate self-attribution (`compile FAIL [fn= off= op=]`) + subtypeCtx
   coercion; cyc144/145 GC blocktypes + br_on_cast; cyc141 rt.datas fix
@@ -42,28 +41,25 @@
 - **Exit-condition**: gc return ≥ 90 **EXCEEDED (116 at cyc148)**. Open
   target: maximise return (RTT exec) toward the corpus ceiling.
 
-## Active task — cycle 166: i31.3 table-with-init-expr — **NEXT**
+## Active task — cycle 167: ref_test precise + type-subtyping — **NEXT**
 
-Reliable `--fail-detail` gc residuals: **i31=3** (i31.3 only — i31.4
-DONE c165) + **type-subtyping=5** (D-198 rec-group, deeper) +
-**ref_test=2** (ref_test_eq exp=0 got=2 = eq-on-externalized-host
-precise gap + test-canon InvokeFailed).
-
-- **i31.3** (`$i31ref_of_global_table_initializer`): `(table $t 3 3
-  (ref i31) (ref.i31 (global.get $g)))` — **table-with-init-expr**
-  binary form `0x40 <limflag> reftype limits constexpr`. decodeTables
-  (src/parse/sections.zig ~500) doesn't handle the 0x40 prefix → decode
-  fails. Blueprint (cyc165 survey): (a) TableEntry.init_expr field
-  (zir.zig ~258; optional, additive — readers only touch elem_type/min/
-  max); (b) decodeTables 0x40 branch (read limflag, reftype, limits,
-  scanInitExpr); (c) instantiate table fill (~1355, BEFORE the globals
-  loop) — eval init_expr via evalGlobalInitGc + fill all refs. ORDERING:
-  tables are created before globals build `slots`, so the imported-
-  global slots must be extracted EARLY (from bindings) for the table
-  init-expr's `global.get $g` to resolve. 3 asserts.
-VERIFY full test-spec + exit-code + panic grep (cyc150 lesson; DIRECT
-binary; `--fail-detail` for per-assert truth). No regression to 340
-return / 90 trap / 57 invalid / 393 multi-mem / 34 funcrefs.
+i31 + array fully clean. Reliable `--fail-detail` gc residuals (only 7
+return + traps left):
+- **ref_test=2**: (a) `ref_test_eq exp=0 got=2` — eq-on-externalized-
+  host: `gcAbstractMatch` coarsely returns true for `.eq` on a non-GC
+  host-extern (any.convert_extern result). Real fix needs distinguishing
+  externalized-host values from real eq (i31/struct/array) — likely a
+  tag bit on the externref→anyref sentinel (Value-repr; possibly
+  ADR-grade). (b) `test-canon InvokeFailed` — concrete-subtype ref.cast/
+  call_indirect in ref_test.wast module 2 traps; investigate.
+- **type-subtyping=5**: 3 setup-cascade (modules 21/45/46/48/50 fail
+  validate/instantiate — UnknownImport / SignatureMismatch / D-198 rec-
+  group ValidateFailed) + 2 `run exp=1 got=0` (rec-group subtype RTT).
+  Largely **D-198** (iso-recursive rec-group subtyping) — deep/ADR-grade.
+Pick the most tractable: test-canon (concrete) before the extern↔any
+tag (Value-repr) before D-198. VERIFY full test-spec + exit-code + panic
+grep; `--fail-detail` for per-assert truth. No regression to 343 return
+/ 90 trap / 57 invalid / 393 multi-mem / 34 funcrefs.
 
 ## Larger §10 work (later bundles)
 
@@ -76,7 +72,7 @@ return / 90 trap / 57 invalid / 393 multi-mem / 34 funcrefs.
 ```
 [memory64           ] return=337 (all pass)    [tail-call] return=71 (all pass)
 [exception-handling ] 34/34 ✅ FULLY GREEN     [function-references] return=34/39
-[gc                 ] return=340/407 trap=90/100 invalid=57/60 malformed=1/1 skip=20  ← 10.G c165
+[gc                 ] return=343/407 trap=90/100 invalid=57/60 malformed=1/1 skip=20  ← 10.G c166
 [multi-memory       ] return=393/407 trap=238/238  ← cyc141 rt.datas fix
 ```
 
