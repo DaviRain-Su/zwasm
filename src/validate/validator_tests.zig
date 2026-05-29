@@ -59,6 +59,16 @@ test "validate: ref.i31 result is non-null (ref i31), not nullable i31ref (10.G 
     try validateFunction(sig, &.{}, &[_]u8{ 0x41, 0x00, 0xFB, 0x1C, 0x0B }, &.{}, &.{}, &.{}, 0, &.{}, 0);
 }
 
+test "validate: ref.i31 result satisfies anyref via GC heap lattice (10.G cycle 134)" {
+    // (ref i31) <: anyref (i31 <: eq <: any). A func returning anyref
+    // must accept `i32.const; ref.i31` — the abstract-head subtype check
+    // (was identity-only → StackTypeMismatch; gc/i31.5 anyref global,
+    // i31.6 anyref table).
+    const res = [_]ValType{ValType.anyref};
+    const sig: FuncType = .{ .params = &.{}, .results = &res };
+    try validateFunction(sig, &.{}, &[_]u8{ 0x41, 0x00, 0xFB, 0x1C, 0x0B }, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
 test "validate: empty body for () -> i32 fails arity" {
     const r = validateFunction(i32_result_sig, &.{}, &[_]u8{0x0B}, &.{}, &.{}, &.{}, 0, &.{}, 0);
     try testing.expectError(Error.ArityMismatch, r);

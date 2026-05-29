@@ -2556,10 +2556,14 @@ fn valTypeIsSubtypeFree(actual: ValType, expected: ValType) bool {
             // struct/array defs (non-func heads) enter module_types.
             .abstract => |e_abs| e_abs == .func,
         },
-        // An abstract head never narrows to a concrete type, and only
-        // matches the identical abstract head.
+        // An abstract head never narrows to a concrete type. Abstract→
+        // abstract follows the Wasm 3.0 GC §4.2.8 heap-type lattice
+        // (i31/eq/struct/array <: any, etc.), so (ref i31) satisfies an
+        // anyref slot — global.set/table-init/return into anyref of i31
+        // (gc/i31.5, i31.6). Pre-GC heads (func/extern) are disjoint, so
+        // this is identity for them (no regression).
         .abstract => |a_abs| switch (eh) {
-            .abstract => |e_abs| a_abs == e_abs,
+            .abstract => |e_abs| gcHeapAbstractSubtype(a_abs, e_abs),
             .concrete => false,
         },
     };
