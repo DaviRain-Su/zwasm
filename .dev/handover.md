@@ -6,16 +6,14 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 144 (`715468c3`) — abstract GC reftype shorthands
-  (0x6E..0x69 anyref/eqref/i31ref/structref/arrayref/exnref) now accepted
-  as **blocktypes** in both decoders (validator.readBlockType +
-  lower.readBlockArity, sibling per test-discipline §2). The ref_test/
-  ref_cast/br_on_cast fixtures open `(block (result structref) ...)` —
-  this was their first validate blocker. **gc ValidateFailed 33→31**
-  (br_on_cast_fail.1 + br_on_cast.1 compile; their returns need
-  br_on_cast exec, next chunk). 2 unit tests; no regression.
-- cyc143 (finding): type-subtyping family is RTT-blocked
-  (lesson `gc-type-subtyping-is-rtt-blocked`).
+- **HEAD**: cycle 145 (`ff45c50d`) — spec-correct **br_on_cast /
+  br_on_cast_fail validate** (§3.3.5.5): decode ht1/ht2, enforce
+  `rt2 <: rt1` (full reftype incl. nullability), cast/cast_fail label-
+  carry + fall-through difference types, subtype label match (was the
+  cycle-9 `eql(operand)` stub). **gc ValidateFailed 31→29**; invalid
+  stays 57 (6 assert_invalid still rejected); 3 unit tests; no regression.
+- cyc144 (`715468c3`): GC reftype shorthand blocktypes (ValidateFailed
+  33→31). cyc143: type-subtyping family is RTT-blocked (lesson).
 - cyc141 array exec + rt.datas production fix (multi-memory +6→393);
   cyc138-140 struct/array const-expr + array.new_data/elem; cyc130-137
   i31/struct/array. gc return 0→…→62, trap 18, multi-memory 393.
@@ -32,8 +30,8 @@
 
 - **Bundle-ID**: 10.G-wasmgc (WasmGC spec corpus — the largest
   remaining §10 gap; follows the CLOSED 10.E EH chain)
-- **Cycles-remaining**: ~4 (RTT sub-bundle: blocktype prereq DONE c144;
-  next = ref.test/cast/br_on_cast EXEC type-test; extended target ≥90)
+- **Cycles-remaining**: ~3 (RTT: blocktype c144 + br_on_cast validate
+  c145 DONE; next = ref.test/cast/br_on_cast EXEC type-test → return↑)
 - **Continuity-memo**: parse + i31 + struct narrowing/exec all DONE
   (gc return 0→55). Pattern that worked repeatedly: a frontendValidate
   call dropped GC context (elem_count, kinds/struct_defs) → thread it;
@@ -47,26 +45,24 @@
 - **Exit-condition**: gc return ≥ 50 **MET at cyc138 (55)**. Extended
   target: gc return ≥ 90 (array exec + ref.test/cast) — refine as lands.
 
-## Active task — cycle 145: ref.test/cast/br_on_cast EXEC type-test — **NEXT**
+## Active task — cycle 146: ref.test/cast/br_on_cast EXEC type-test — **NEXT**
 
-Step 0 survey DONE cyc144 (RTT type-test; key file:line below). The
-runtime type-test is the extended-target (`return≥90`) path.
-- **INSTRUMENT first** (cyc131/143 lesson): ref_test.0 + ref_cast.0
-  still fail validate post-blocktype — re-add the op-probe (lesson
-  `gc-type-subtyping-is-rtt-blocked`) on an RTT-only corpus copy
-  (`cp -R gc/{ref_test,ref_cast,br_on_cast,br_on_cast_fail} /tmp/x/gc/`)
-  to name their remaining blocker before fixing.
+br_on_cast/br_on_cast_fail now VALIDATE; modules compile but fail exec
+(NotMigrated) → no return delta yet. EXEC is the `return≥90` path.
 - **ref.test EXEC** (`ref_test_ops.zig:50-95` is a cycle-7 stub: returns
   1 if non-null, ignores the heap_type in `instr.payload`). Decode the
-  ht byte, dispatch: abstract (i31 via Value low-bit / struct,array via
+  ht, dispatch: abstract (i31 via Value low-bit / struct,array via
   `ObjectHeader.kind` / any,eq non-null) → kind check; concrete $idx →
-  walk supertype chain. push i32. Then ref.cast (trap on mismatch),
-  br_on_cast/_fail (`br_on_cast{,_fail}.zig` return NotMigrated — wire
-  the branch). Registration: `api/instance.zig:881-888`.
-- **Concrete-type gap**: `TypeInfo.supertype_chain` is zero-filled at
+  supertype chain. Then ref.cast (trap on mismatch), br_on_cast/_fail
+  (`br_on_cast{,_fail}.zig` return NotMigrated — wire the branch).
+  Registration: `api/instance.zig:881-888`.
+- **Concrete-type gap**: `TypeInfo.supertype_chain` zero-filled at
   `instantiate.zig materialiseGcTypes` (~1016, comment 65-68). Thread
-  the parser's `Types.supertypes` in before concrete-$idx tests work.
-  Re-derive the discarded concrete-`subtypeCtx`-chain fix here if needed.
+  the parser's `Types.supertypes` before concrete-$idx tests work.
+- **Separate (smaller) blocker**: ref_test.0/ref_cast.0 fail validate
+  EARLIER (before func loop) on bottom-type heap shorthands `none`
+  (0x71) / `nofunc` (0x73) / `noextern` (0x72) — `init_expr.readValType`
+  lacks standalone arms for them (only 0x70..0x69). Add + sibling-check.
 No regression to 62 return / 18 trap / 57 invalid / 393 multi-mem.
 
 ## Larger §10 work (later bundles)
