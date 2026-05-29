@@ -6,13 +6,15 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc180 (investigated+reverted, no net src) — .17 `run`
-  `InvokeFailed` is a MULTI-mechanism rabbit hole (runtime call_indirect
-  exact-sig [verified fix known] + a further unidentified Trap.Unreachable);
-  DEFERRED as low-ROI (1 fixture, ≥2 coordinated non-observable fixes, see
-  D-198). **gc bundle effectively COMPLETE: 62→349 ret / 96 trap / 57 inv.**
-  cyc179: typed call_indirect (+1); cyc178: ref.cast narrow (+6 trap);
-  cyc177: iso-recursive canon (+3); cyc174: start-exec (multi-mem 396).
+- **HEAD**: cyc181 (diagnosis, no src) — root-caused **8 of 11
+  multi-memory fails to broken cross-module memory sharing** (D-199):
+  `MemoryInstance.bytes` is a slice VALUE; imports copy it; `memory.grow`
+  reallocs + updates only the growing instance → importers see a STALE
+  slice (imports4/linking2/linking3). Fix design (pointer-ify
+  `rt.memories` → `[]*MemoryInstance`, share via binding) = cyc182.
+  **gc bundle COMPLETE: 62→349 ret / 96 trap / 57 inv** (cyc174 start-exec,
+  cyc177 iso-recursive canon +3, cyc178 ref.cast narrow +6, cyc179 typed
+  call_indirect +1; .17 rabbit hole deferred per D-198).
 - Earlier arc: cyc147-148 ADR-0125 packed (62→116); cyc146 ADR-0016 M3
   validate self-attribution (`compile FAIL [fn= off= op=]`) + subtypeCtx
   coercion; cyc144/145 GC blocktypes + br_on_cast; cyc141 rt.datas fix
@@ -39,21 +41,23 @@
 - **Exit-condition**: multi-memory return > 396 (reduce the 11-fail
   linking/imports cluster). gc return ≥ 90 was long EXCEEDED (349).
 
-## Active task — cycle 181: multi-memory 11 counted return-fails — **NEXT**
+## Active task — cycle 182: cross-module memory sharing (D-199) — **NEXT**
 
-gc bundle has delivered (62→349). Pivot to the next OBSERVABLE cluster:
-multi-memory return=396/407, **fail=11** (counted) across linking0(1) /
-linking1(2) / linking2(2) / linking3(2) / imports4(4) per the per-manifest
-breakdown. Fresh investigation:
-1. `--fail-detail` filtered to multi-memory → classify each fail
-   (FAILsetup / FAILval / FAILtrap) + the failing manifest.
-2. M3 `compile FAIL` / `instantiate FAIL` attribution (DIRECT binary,
-   plain mode) for the setup fails; for FAILval trace the run-assert.
-3. Likely a shared mechanism across linking0-3 (cross-module memory
-   import/export or data-segment linking). Fix the densest cluster first.
-Verify FULL test-spec: no regression to gc 349/96/57, exit 0, 0 panics.
-**Deferred gc**: .17 rabbit hole + .30/.48/.50 uncounted cross-module sig
-(D-198) — land as a focused bundle only if gc conformance is re-prioritised.
+HIGH blast radius (20 `.memories[` sites + binding + JIT). Full diagnosis
++ fix design in D-199. **Share a single memory object across instances**:
+1. `rt.memories: []MemoryInstance → []*MemoryInstance` (runtime.zig +
+   instance.zig). Defined memories `a.create` a `*MemoryInstance`; read/
+   write sites (`rt.memories[i].bytes`) auto-deref (mostly unchanged).
+2. Import wiring (`instantiate.zig:1328`) — importer's slot = the
+   exporter's `*MemoryInstance` (NOT a copied slice). The binding
+   (`import.zig` MemRef / `instance.zig` `.memory`) carries the source's
+   `*MemoryInstance`, not slice+min/max.
+3. `memory.grow` writes through the shared pointer → all importers see it.
+   Handle `setMemory0Bytes`/`rt.memory` alias + JIT (`ctx.zig`/`runner.zig`).
+**Bar**: multi-memory >396 (target +8: imports4/linking2/linking3), no
+regression to gc 349/96/57/337(memory64)/71/34/34, exit 0, 0 panics.
+Then linking0/1 cross-module call InvokeFailed (3, verify after share fix).
+Consider an ADR if the memory-representation change reads as §4/§5.
 
 ## Larger §10 work (later bundles)
 
