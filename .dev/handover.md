@@ -6,44 +6,48 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `0caf9ffb`→(cyc212 docs). funcref-call + tail-call JIT POSITIVE paths done
-  both arches (call_ref + return_call_ref + direct/indirect/recursion return_call + clang
-  musttail; all ubuntu-verified). cyc212 wrote the JIT-codegen-recipe lesson
-  (`2026-05-30-jit-funcref-tail-call-codegen-recipe`) + sharpened D-208. **D-208 (open,
-  close-blocker)**: x86_64 call_ref/return_call_ref of a NULL funcref returns Ok(0) not
-  trapping (arm64 OK, gated). All 6 static hypotheses ruled out (bug in x86_64 emit bytes,
-  elusive); `compileOne` is comptime-arch-locked so the practical root-cause path is an
-  ubuntu byte-dump (see D-208). D-205/D-207 discharged; open: D-208, D-206 (cross-module TC).
+- **HEAD**: `c55aaa12` (cyc213). **D-208 ROOT-CAUSED + FIXED**: `call_ref` /
+  `return_call_ref` were missing from `x86_64/usage.zig::usesRuntimePtr`, so the
+  prologue skipped `MOV R15,RDI` → the null-check trap stub wrote trap_flag via a
+  garbage R15 → a NULL funcref returned Ok(0) on x86_64 instead of trapping (Mac
+  arm64 immune — X19 always set). D-180-class gap (twin of the `ref.as_non_null`
+  / EH cases). Fix: whitelist both ops; ungate the 2 null-trap tests; close the
+  `check_uses_runtime_ptr.sh` thin-delegator blind spot that hid it (per-op files
+  delegate into op_call/op_tail_call where the R15 use lives). D-207 + D-208
+  discharged (rows deleted). The decisive probe was a Mac byte-dump (ndisasm): it
+  showed correct JZ→trap-stub bytes referencing R15 with NO `MOV R15,RDI` prologue.
+- funcref-call + tail-call JIT now COMPLETE both arches (positive + null-trap),
+  pending ubuntu confirm of the x86_64 null-trap (see Step 0.7).
 - Earlier: 10.TC same-module tail-call (direct/indirect/recursion + clang musttail
-  → 15, cyc198-201); EH corpus 34/34 (ADR-0114); cyc190-196 gc global-init/subtyping.
-  Phase 10 CLOSE-ELIGIBLE (spec corpus interp-complete); Runner EXECUTES via interp,
-  gc_heap materialised at instantiate. 10.M memory64 + 10.E EH JIT largely done;
-  10.G GC JIT = interp-only (extreme: regalloc stack-map, ADR-0113 §C).
-- **Step 0.7 on resume**: cyc210-212 are docs-only (10.P rationale + D-208 investigation +
-  lesson) → no ubuntu kick; green holds. Last code-kick: cyc209 ubuntu `OK (HEAD=9dbc84ee)`
-  GREEN (D-208 gate recovery — gated null-trap tests skip on x86_64).
+  → 15); EH corpus 34/34 (ADR-0114); cyc190-196 gc global-init/subtyping. Phase 10
+  CLOSE-ELIGIBLE (spec corpus interp-complete). 10.M memory64 + 10.E EH JIT largely
+  done; 10.G GC JIT = interp-only (extreme: regalloc stack-map, ADR-0113 §C).
+- **Step 0.7 on resume**: cyc213 is a CODE change → ubuntu kicked. **VERIFY the
+  c55aaa12 ubuntu result** (`tail -3 /tmp/ubuntu.log`): the 2 ungated null-trap
+  tests (call_ref/return_call_ref null → Trap) must PASS on x86_64. FAIL ⟹ the
+  usesRuntimePtr fix didn't take → revert pair + re-investigate (root cause is
+  textbook D-180-class; high confidence). Prior green: cyc209 `OK (HEAD=9dbc84ee)`.
 
-## Active task — D-208 root-cause via ubuntu byte-dump (x86_64 null-check)  **NEXT**
+## Active task — realworld/p10 clang_wasm64 fixture  **NEXT**
 
-Static analysis exhausted (all 6 hypotheses ruled out, see D-208). `compileOne` is
-comptime-arch-locked (`shared/compile.zig:42` + x86_64 regalloc params) → a faithful Mac
-byte-dump needs replicating compileOne with x86_64 params (substantial). **Practical path:
-ubuntu byte-dump** — add an env-gated x86_64-emit byte-dump (or reuse a JIT byte-dump
-mechanism; check debug_jit_auto), run the `ref.null; call_ref` null-trap module on ubuntu
-via SSH, scp the bytes, `ndisasm -b64` on Mac → SEE the JZ's PATCHED disp (→ trap stub?)
-+ the trap stub (sets trap_flag + RET?). Bug is in those bytes; fix → ungate → ubuntu-verify.
-Deferred: cross-module TC (D-206, multi-module harness); GC JIT (10.G, extreme).
-**Yield/user note**: JIT milestone delivered; D-208 (close-blocker) needs an ubuntu-iterate
-debug session. A user check-in on Phase-10-close-vs-keep-grinding is high-value (Open questions).
+D-208 (the 10.P I18 close-blocker) is resolved. Next autonomous chunk per the §10
+close map: add the `clang_wasm64` realworld fixture (memory64 via clang, result-
+checked through the cyc201 realworld-p10 harness, `build.zig run_edge_realworld_p10`).
+clang is available (clang_musttail proved the recipe; lesson
+`2026-05-30-clang-wasm-realworld-toolchain-recipe`). Smallest red: a
+`clang --target=wasm64` module exercising a memory64 load/store, run → expected i64.
+Deferred: D-206 cross-module TC (needs a multi-module JIT test harness — actionable
+but harness-build first); 10.G GC JIT (extreme).
 
 ## §10 close map
 
 Spec-corpus rows (10.G/10.M/10.E/10.TC/10.R) are mature but ROADMAP-`[ ]`;
 formal close needs realworld/p10 + 10.P. Residual:
 - **realworld/p10**: clang_musttail DONE (cyc201, JIT result-checked); clang_wasm64
-  next-AUTONOMOUS (clang✓); emscripten/dart/ocaml/hoot TOOL-GATED.
+  next-AUTONOMOUS (clang✓, the Active task); emscripten/dart/ocaml/hoot TOOL-GATED.
 - **gc .17** funcref-RTT (D-198 multi-mechanism rabbit hole) — deep defer.
-- **funcrefs** 34/39 — 5 gated; **10.P close gate** = user touchpoint.
+- **funcrefs** 34/39 — 5 gated; **10.P close gate** = user touchpoint. With D-208
+  (the last close-blocker) cleared, 10.P I18 should now pass.
 
 ## Spec runner observable (cyc190, DIRECT binary run)
 
@@ -62,20 +66,17 @@ formal close needs realworld/p10 + 10.P. Residual:
   validate-error surfacing is ad-hoc via the cyc143 op-probe (lesson
   `gc-type-subtyping-is-rtt-blocked`); permanent diag emitter = D-197 tail.
 - D-192: EH clause PROVEN (EH 34/34). funcrefs clause proven cyc108.
-- **Yield-taper note (2026-05-30)**: the funcref-call + tail-call JIT milestone is
-  DELIVERED (cyc198-208, both arches, ubuntu-verified). cyc208-210 were lower-yield
-  (null-trap fixture + D-208 gate-recovery + 10.P rationale refresh). Remaining
-  autonomous JIT work is gated/slow: D-208 (x86_64 null-check — needs x86_64 disasm /
-  ubuntu-iterate), cross-module TC (D-206 — multi-module harness), 10.G GC JIT
-  (extreme). **Phase 10 close is a user touchpoint** (close map below; 10.P I18 now
-  FAILs on open D-208 = close-blocker). Loop continues on the D-208 byte-disasm
-  (autonomous-eligible), but a user check-in on "close Phase 10 vs keep grinding JIT"
-  would be high-value before the next big chunk. NOT a stop — re-arm holds.
+- **User touchpoint (2026-05-30)**: funcref-call + tail-call JIT is fully
+  DELIVERED both arches (D-205/207/208 all discharged; positive + null-trap).
+  **Phase 10 close is a user touchpoint** (§10 close map); with the last
+  close-blocker (D-208) cleared, a user check-in on "formally close Phase 10
+  vs keep grinding realworld/GC JIT" is high-value before the next big chunk.
+  NOT a stop — loop continues on clang_wasm64; re-arm holds.
 
 ## Key refs
 
 - ADR-0114 (EH `*TagInstance`, IMPLEMENTED cyc110–120); ADR-0115/0116/
   0121 (GC heap + type-info); ADR-0120/0123.
-- `.dev/lessons/2026-05-29-eh-cross-module-tag-substrate-scope.md`
-  (full EH journey) + `2026-05-29-zig-run-step-cache-stale-diag.md`.
+- `.dev/lessons/2026-05-30-jit-funcref-tail-call-codegen-recipe.md` (D-208
+  resolution + usesRuntimePtr gotcha) + `2026-05-28-x86_64-uses-runtime-ptr-eh-gap.md`.
 - ROADMAP §10; `.dev/phase_log/phase10.md`.
