@@ -6,13 +6,12 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc147 (`3bce968c`) — **ADR-0125 packed storage types**:
-  Part A (`ce8a939c`) atomic `StructFieldType.valtype`→`StorageType`
-  union rename (behaviour-neutral); Part B-validate decode i8/i16 +
-  validator get_s/_u (drop NotImplemented; plain get on packed rejects).
-  Packed *decode* was a dominant shared blocker → **gc return 62→105
-  (bundle ≥90 EXCEEDED), trap 18→54, ValidateFailed 27→14**, invalid 57
-  held, no regression.
+- **HEAD**: cyc148 (`0b2764b9`) — **ADR-0125 packed COMPLETE**: B-exec
+  struct/array `get_s`/`get_u` sign/zero-extend (shared
+  `type_info.extendPackedToI32`). **gc return 105→116**; no regression.
+  Packed arc (A `ce8a939c` union rename → B-validate `3bce968c` decode+
+  validate → B-exec): **gc return 62→116, trap 18→54, ValidateFailed
+  27→14**, invalid 57 held throughout.
 - cyc146 infra (`337eb386`): **ADR-0016 M3** validate self-attribution
   (`compile FAIL: … [fn= off= op=]`, retired op-probe) + concrete→concrete
   subtypeCtx coercion (ValidateFailed 29→27). cyc144/145: GC reftype
@@ -33,36 +32,35 @@
 
 - **Bundle-ID**: 10.G-wasmgc (WasmGC spec corpus — the largest
   remaining §10 gap; follows the CLOSED 10.E EH chain)
-- **Cycles-remaining**: ~3 (packed A+B-validate DONE c147; next =
-  B-exec get_s/_u sign-extend → then RTT exec ref.test/cast/br_on_cast)
+- **Cycles-remaining**: ~3 (packed DONE c147-148; next = RTT exec:
+  ref.test/cast abstract+concrete type-test, then br_on_cast branch)
 - **Continuity-memo**: parse + i31 + struct/array narrowing/exec/const-
   expr + packed-validate all DONE (gc return →105). Substrate (don't
   rebuild): `feature/gc/` heap+type_info+i31+collector, struct_ops/
   array_ops registered (api/instance.zig:883-887), StorageType union
   (ADR-0125), ADR-0115/0116/0121/0124. **VERIFY by DIRECT binary run**;
   M3 attributes every compile FAIL (`grep "compile FAIL.*op=0x"`).
-- **Exit-condition**: gc return ≥ 90 **EXCEEDED at cyc147 (105)**. Open
-  target: maximise return (B-exec + RTT) toward the corpus ceiling.
+- **Exit-condition**: gc return ≥ 90 **EXCEEDED (116 at cyc148)**. Open
+  target: maximise return (RTT exec) toward the corpus ceiling.
 
-## Active task — cycle 148: packed get_s/_u EXEC (ADR-0125 B-exec) — **NEXT**
+## Active task — cycle 149: RTT exec — ref.test/ref.cast type-test — **NEXT**
 
-Validate side DONE (c147): packed fields decode + struct.get_s/_u +
-array.get_s/_u VALIDATE (push i32). EXEC handlers are still missing →
-fixtures that actually READ a packed field fail at exec (in the 247
-gc return-fails). Implement:
-- `struct_ops.zig` / `array_ops.zig`: NEW interp handlers struct.get_s/_u
-  + array.get_s/_u — read the low `FieldInfo` width bytes from the 8-byte
-  slot (i8/i16 per `valtype_byte` 0x78/0x77), sign-extend (get_s) /
-  zero-extend (get_u) to i32; register in the dispatch table.
-- struct.set / array.set / array.fill: truncate i32 → i8/i16 on store to
-  a packed field (currently writes the full slot — may need masking).
-- ZirOps + lower.zig dispatch already exist; the interp table lacks the
-  4 handlers. Use M3 + `grep "compile FAIL.*op=0x"` / direct binary run
-  to attribute. Add packed get_s/get_u exec unit tests (sign vs zero).
-Then **RTT exec** (ref.test/cast/br_on_cast — `ref_test_ops.zig:50-95`
-stub + `br_on_cast{,_fail}.zig` NotMigrated; `supertype_chain` zero-filled
-at `materialiseGcTypes` ~1016 needs `Types.supertypes` threaded).
-No regression to 105 return / 54 trap / 57 invalid / 393 multi-mem.
+Packed DONE. Next return-lever: the RTT runtime type-test (236 gc
+return-fails remain; attribute via M3 `grep "compile FAIL.*op=0x"` +
+direct-binary run on a `/tmp/x/gc/<copied dirs>` corpus).
+- **ref.test / ref.test_null / ref.cast / ref.cast_null EXEC**
+  (`ref_test_ops.zig:50-95` is a cycle-7 stub: returns 1 if non-null,
+  ignores the heap_type in `instr.payload`). Decode the ht; dispatch:
+  abstract (i31 via Value low-bit / struct,array via `ObjectHeader.kind`
+  / any,eq non-null / none) → kind check; concrete $idx → walk
+  supertype chain. ref.cast traps on mismatch. push i32 (test) / ref.
+- **Concrete-type prereq**: `TypeInfo.supertype_chain` is zero-filled at
+  `materialiseGcTypes` (~1016, comment 65-68) — thread the parser's
+  `Types.supertypes` in first (else concrete-$idx tests always miss).
+- Then **br_on_cast / br_on_cast_fail EXEC** (`br_on_cast{,_fail}.zig`
+  interp returns NotMigrated — wire the branch: reuse the ref.test match
+  + conditional br) → unblocks br_on_cast.1/.2 return assertions.
+No regression to 116 return / 54 trap / 57 invalid / 393 multi-mem.
 
 ## Larger §10 work (later bundles)
 
