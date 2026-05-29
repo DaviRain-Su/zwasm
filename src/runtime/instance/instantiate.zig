@@ -796,7 +796,7 @@ pub fn evalConstExprValue(expr: []const u8) !Value {
 /// allocate on `rt.gc_heap` using the materialised Struct/ArrayInfo and
 /// write the leading const operands into the object slots (mirrors
 /// struct_ops.zig / array_ops.zig / ADR-0116 §3a).
-fn evalGlobalInitGc(expr: []const u8, rt: *Runtime, inst: *const Instance) anyerror!Value {
+fn evalGlobalInitGc(expr: []const u8, rt: *Runtime, inst: *const Instance, imported_globals: []const *Value) anyerror!Value {
     const type_info = @import("../../feature/gc/type_info.zig");
     const header_size: u32 = @sizeOf(type_info.ObjectHeader);
     var stack: [16]Value = undefined;
@@ -826,6 +826,15 @@ fn evalGlobalInitGc(expr: []const u8, rt: *Runtime, inst: *const Instance) anyer
                 if (pos + 8 > expr.len) return error.UnsupportedConstExpr;
                 stack[sp] = .{ .bits64 = std.mem.readInt(u64, expr[pos..][0..8], .little) };
                 pos += 8;
+                sp += 1;
+            },
+            0x23 => { // global.get N — Wasm §3.5.10 const-expr; read an
+                // already-evaluated prior global (imported or earlier-
+                // defined). i31.wast $i31ref_of_global_global_initializer:
+                // `(global i31ref (ref.i31 (global.get $g)))`.
+                const gidx = try leb128.readUleb128(u32, expr, &pos);
+                if (gidx >= imported_globals.len) return error.UnsupportedConstExpr;
+                stack[sp] = imported_globals[gidx].*;
                 sp += 1;
             },
             0xD2 => { // ref.func N — Wasm §3.5.10 const-expr; push funcref
@@ -1390,7 +1399,10 @@ pub fn instantiateRuntime(
                     // evaluator (allocates on the already-materialised
                     // gc_heap). gc/array.8 `array.new_elem` reads these.
                     const rs = try a.alloc(Value, seg.item_exprs.len);
-                    for (seg.item_exprs, 0..) |ex, j| rs[j] = try evalGlobalInitGc(ex, rt, inst);
+                    // Element segments materialise before globals → no
+                    // imported-global slice available; elem const-expr
+                    // items (array.new/struct.new) don't use global.get.
+                    for (seg.item_exprs, 0..) |ex, j| rs[j] = try evalGlobalInitGc(ex, rt, inst, &.{});
                     break :blk rs;
                 } else blk: {
                     // For func-family segments the slot is a funcidx → resolve
@@ -1468,7 +1480,11 @@ pub fn instantiateRuntime(
                     else
                         evalConstExprValue(g.init_expr) catch |e|
                             if (e == error.UnsupportedConstExpr)
-                                try evalGlobalInitGc(g.init_expr, rt, inst)
+                                // prior_globals = imports + already-evaluated
+                                // defined globals (slots[imp+i] set just
+                                // below) → global.get sees only legal
+                                // lower-index const-expr references.
+                                try evalGlobalInitGc(g.init_expr, rt, inst, slots[0 .. imp_global_count + i])
                             else
                                 return e;
                     slots[imp_global_count + i] = &storage[i];

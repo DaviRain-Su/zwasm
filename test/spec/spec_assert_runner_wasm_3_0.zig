@@ -418,11 +418,17 @@ pub fn main(init: std.process.Init) !void {
                                     // instance's runtime.
                                     cur_linker.defineCrossModuleFunc(d.func_name, exp.name, inst, exp.name) catch {};
                                 },
-                                .table, .global => {
-                                    // Out of scope; table / global
-                                    // cross-module exports remain
-                                    // unbound (importing modules will
-                                    // fail with UnknownImport for those).
+                                .global => {
+                                    // 10.G cycle 165 — bind global exports
+                                    // (mirrors the spectest pre-register +
+                                    // Linker.defineGlobal alias). gc/i31.3
+                                    // + i31.4 `(import "env" "g")` need this.
+                                    cur_linker.defineGlobal(d.func_name, exp.name, inst, exp.name) catch {};
+                                },
+                                .table => {
+                                    // Out of scope; table cross-module
+                                    // exports remain unbound (importing
+                                    // modules fail with UnknownImport).
                                 },
                             }
                         }
