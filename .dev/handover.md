@@ -6,13 +6,14 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 123 (`<this commit>`) — filed **ADR-0124** (WasmGC
-  structural subtype validation lattice: abstract heap-type lattice +
-  struct width+depth / array+func variance rules; checked at
-  type-section validation now + ref.cast/test later; `typeDefIsSubtype`
-  helper + `Types.supertypes` parse feed). Accepted. Docs-only.
-- cyc122: attempted parse-only `0x50`/`0x4F` → reverted (regressed gc
-  invalid 55→40); parse+validate are COUPLED (D-188 class). cyc121 =
+- **HEAD**: cycle 124 (`b8248387`) — GC structural subtype **validation
+  half** per ADR-0124 (validate-first to avoid the cyc122 parse-only
+  regression): `validator.typeDefIsSubtype` + `gcHeapAbstractSubtype`
+  lattice + `gcConcreteReaches` chain + `gcValTypeSubtype` +
+  `gcFieldSubtype` (struct width+depth / array+func variance) + inert
+  `Types.supertypes` field + unit tests. Behavior-neutral (gc unchanged,
+  no 0x50 parse yet); test+lint green.
+- cyc123 ADR-0124 (`0afb643f`); cyc122 parse-coupling finding; cyc121
   survey.
 - cyc120 (`5db875b0`): cross-module EH propagation + caller-frame catch
   → **EH corpus FULLY GREEN 34/34** (bundle 10.E CLOSED; D-192 PROVEN).
@@ -43,23 +44,21 @@
 - **Exit-condition**: gc corpus return pass ≥ 50/407 (first execution
   slice via struct/array) — refine as chunks land.
 
-## Active task — cycle 124: coupled GC subtype parse + validate (per ADR-0124)
+## Active task — cycle 125: ACTIVATE GC subtype (parse 0x50/0x4F + wire) — **NEXT**
 
-ADR-0124 Accepted → implement as ONE coupled chunk (parse-only regresses
-invalid, cyc122). (a) `src/parse/sections.zig decodeTypes`: `0x50`/`0x4F`
-subtype prefix (read `vec(typeidx)` supertypes into a new
-`Types.supertypes: [][]const u32` side-table; bare comptype → empty) —
-the reverted cyc122 diff (each subtype its own index; NO `0x4E rec`
-flattening; also fix the `Types{}` literal in `instantiate.zig:895`).
-(b) `src/validate/validator.zig`: a `typeDefIsSubtype(sub_idx, super_idx,
-types)` per ADR-0124 (same-kind; struct width+depth, array/func variance;
-valtype lattice) + a type-section validation pass that rejects a typedef
-whose declared supertype it doesn't conform to. Wire into
-`frontendValidate`/`preDecodeSectionBodies`. Red: `decodeTypes` 0x50 test
-(parse) + a `typeDefIsSubtype` unit test (good accepts, bad rejects).
-Observable (DIRECT binary): gc ParseFailed ↓ AND invalid ≥55 (target 60,
-no regression). Big coupled cycle — if budget tightens, commit a
-coherent subset + continue.
+cyc124 landed the validate half (inert). cyc125 turns it on (commit
+parse+wire TOGETHER — parse alone regresses, cyc122):
+(a) `parse/sections.zig decodeTypes` (~135-166): handle `0x50` (sub
+final) / `0x4F` (sub) — read `vec(typeidx)` supertypes into the present
+`Types.supertypes` (now all `&.{}`); bare comptype → empty. Each subtype
+its own index; **NO `0x4E rec` flattening** (hexdump: rec=4E sub=4F
+sub-final=50). This is the reverted cyc122 diff, now SAFE.
+(b) `validate/validator.zig`: type-section pass calling the landed
+`typeDefIsSubtype(sub,sup,types)` — reject non-conformance + final-super
+extension. Wire into `frontendValidate` (+ Engine.compile type-validate
+point if separate). Red: 0x50 parse test + frontendValidate reject test.
+Observable (DIRECT binary, D-197 stderr-lossy): gc ParseFailed ↓ AND
+invalid ≥55 (target 60, no regression — validate now rejects bad fixtures).
 
 ## Larger §10 work (later bundles)
 
