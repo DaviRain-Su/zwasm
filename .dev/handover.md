@@ -6,13 +6,14 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc169 (`fb3f8930`) — **ref.test eq excludes externalized-
-  host refs** (gcAbstractMatch `.eq` → is_i31 or obj_kind!=null; a
-  any.convert_extern host sentinel is anyref but not eq). Fixes
-  ref_test_eq → **ref_test FULLY CLEAN**: **gc return 344→345 (+1)**,
-  trap 90, invalid 57 held; no regression, 0 panics. cyc168 canonical
-  ids + RTT match (test-canon); cyc166 table-init-expr (i31 clean).
-  **gc 62→345**. Only gc residual: type-subtyping=5.
+- **HEAD**: cyc170 (ADR cycle, no gc delta — gc 345 held) — **ADR-0126
+  amended** with the Phase-10b implementation plan (verified 5-fixture
+  breakdown: 45 within-module ValidateFailed + 46/48/50 cross-module
+  func-import SignatureMismatch needing exporter<:importer; bisimulation
+  over rec-group-span threading; CORRECTNESS CAUTION — narrow coinductive
+  field-ref guard, NOT structural-bisim replacement of the declared
+  chain → invalid-regression risk). cyc169 ref.test eq-precise (ref_test
+  clean, +1); cyc168 canonical ids + RTT match. **gc 62→345**.
 - Earlier arc: cyc147-148 ADR-0125 packed (62→116); cyc146 ADR-0016 M3
   validate self-attribution (`compile FAIL [fn= off= op=]`) + subtypeCtx
   coercion; cyc144/145 GC blocktypes + br_on_cast; cyc141 rt.datas fix
@@ -41,28 +42,25 @@
 - **Exit-condition**: gc return ≥ 90 **EXCEEDED (116 at cyc148)**. Open
   target: maximise return (RTT exec) toward the corpus ceiling.
 
-## Active task — cycle 170: D-198 Phase-10b — type-subtyping tail — **NEXT**
+## Active task — cycle 171: Phase-10b step 1 — validator coinductive field-ref (fixture 45) — **NEXT**
 
-All gc clean EXCEPT **type-subtyping=5** (the deep D-198 tail). Via
-`--fail-detail`: 3 FAILsetup (modules fail validate/instantiate) + 2
-FAILval `run exp=1 got=0`. These need (per ADR-0126 / cyc167 survey):
-- **Recursive rec-group canonicalization**: cyc168's `canonical_ids`
-  folds RAW concrete-ref target indices (conservative) → structurally-
-  equal recursive/rec-group types at distinct indices do NOT merge.
-  Cross-module func-sig imports (type-subtyping.45/46/48/50 — were
-  UnknownImport/SignatureMismatch) need the concrete-ref to fold the
-  TARGET's canonical id, with rec-group cycle handling (positional
-  intra-group encoding). Then Linker `sigEqual` (linker.zig ~410) +
-  validator can match by canonical id.
-- **Iso-recursive coinductive validator**: `gcConcreteReaches` +
-  `gcFieldSubtype` (validator) need a `visiting` set so a field-ref to
-  a type still under validation is provisionally assumed (Wasm 3.0 GC
-  §4.3.4). The 6 within-module type-subtyping.{9,12,21,24,39,45}
-  ValidateFailed (D-198 row).
-- **HIGH BLAST RADIUS** (validator type-section / cyc122 parse-coupling
-  regressed gc invalid 55→40). Survey/spike the rec-group canonical
-  algorithm first; VERIFY FULL test-spec ALL proposals + assert_invalid
-  (gc invalid 57) + exit 0 + 0 panics. No regression to 345/90/57/393/34.
+Plan + caution in ADR-0126 "Phase-10b implementation notes". Smallest
+first landing = **fixture 45** (within-module ValidateFailed), validator-
+only:
+- FIRST re-derive the EXACT failing comparison: run `zwasm run gc/type-
+  subtyping/type-subtyping.45.wasm` (or M3 via spec runner `compile FAIL
+  [fn= off= op=]`) + decode its type section to see which
+  typeDefIsSubtype / gcFieldSubtype field-ref comparison rejects. Do
+  NOT trust the cyc170 subagent's "replace gcConcreteReaches" framing.
+- Add a NARROW coinductive visiting-pair `(sub_idx,sup_idx)` guard to the
+  concrete-ref comparison in `gcValTypeSubtype`/`gcFieldSubtype`
+  (validator.zig ~2856-2920) so mutually-recursive field refs assume-
+  equal on revisit + terminate. Keep the declared-supertype-chain walk.
+- **HIGH BLAST RADIUS**: VERIFY FULL test-spec ALL proposals +
+  assert_invalid — **gc invalid MUST stay 57** (cyc122 regressed 55→40).
+  If any invalid regresses, the coinduction is too loose → revert.
+Then step 2 = Linker `sigSubtype` (46/48/50, cross-module exporter<:
+importer). No regression to 345/90/57/393/34.
 
 ## Larger §10 work (later bundles)
 

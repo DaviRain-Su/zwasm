@@ -112,6 +112,46 @@ layout (no Value-representation change).
   + assert_invalid) exit 0 + no `gc invalid` regression, per ADR-0124.
 - D-198 discharges across Phase-10a + Phase-10b.
 
+## Phase-10b implementation notes (cyc170 design spike)
+
+Post-Phase-10a, the last 5 gc fails are all `type-subtyping` (everything
+else clean, gc 345). Verified fixture breakdown:
+
+- **45** (M7 exporter): within-module **ValidateFailed** — `$h sub $g2`
+  across rec-group boundaries; the type-section conformance check's
+  recursive field-ref comparison doesn't terminate/match for rec-group-
+  local recursive refs.
+- **46 / 48 / 50** (importers of M7/M8/M9): cross-module func-import
+  **SignatureMismatch** — the spec rule is exporter's actual type **<:**
+  importer's *declared* type (contravariant params / covariant results),
+  but Linker `sigEqual` (linker.zig ~527) is EXACT `ValType.eql` only.
+
+**Decision: bisimulation, NOT positional canonicalization.** A visited-
+pair `(sub_idx, sup_idx)` set handles rec-group cycles WITHOUT threading
+rec-group spans through decode/validate/linker (which decode currently
+discards). Lower-risk, isolated to the subtype-check helpers.
+
+**CORRECTNESS CAUTION (load-bearing — verify in-cycle before coding).**
+Iso-recursive subtyping is the **declared** relationship checked with
+**coinductive structural conformance**, NOT pure structural equality.
+The fix is a NARROW coinductive visiting-pair guard added to the
+**field-ref / concrete-ref comparison** inside `gcFieldSubtype` /
+`gcValTypeSubtype` (so mutually-recursive refs assume-equal on revisit
++ terminate) — it must NOT replace the declared-supertype-chain walk
+(`gcConcreteReaches`) with blanket structural equivalence (that would
+make unrelated same-shape types subtypes → **invalid-regression**, the
+cyc122 failure mode). The cyc170 design-spec subagent's
+"replace gcConcreteReaches with structural bisim" framing is REJECTED
+on this ground; the next implementer must first re-derive the exact
+failing comparison per fixture (the within-module 45 vs the cross-module
+linker 46/48/50 are distinct mechanisms).
+
+**Landing order + verification.** (1) Validator coinductive field-ref
+(fixture 45), then (2) Linker `sigSubtype` (46/48/50). Each MUST verify
+FULL test-spec ALL proposals + assert_invalid (`gc invalid` MUST stay
+57) + exit 0 + 0 panics. HIGH blast radius → fresh-context cycle, not a
+tail-of-session cram.
+
 ## References
 
 - Wasm 3.0 GC §4.2.8 (subtyping), §4.3.4 (defined-type / iso-recursive
@@ -127,3 +167,9 @@ layout (no Value-representation change).
   session's standing mandate to investigate + apply deep GC work; the
   conformance rules are spec-pinned, so this records the
   implementation strategy + the phased landing, not a free choice.
+- 2026-05-29 — Amendment (cyc170): Phase-10a landed (canonical ids +
+  RTT match c168; ref.test eq-precise c169 → gc 343→345). Added the
+  Phase-10b implementation notes (verified 5-fixture breakdown,
+  bisimulation decision, the declared-vs-structural correctness caution
+  rejecting the spike's wholesale-replacement framing). Phase-10b queued
+  as a fresh-context implementation (HIGH blast radius).
