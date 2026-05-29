@@ -62,6 +62,11 @@ pub const Kind = enum {
     /// instantiates it (expecting failure) so partial active-segment
     /// writes to shared imported memory/table persist.
     assert_uninstantiable,
+    /// cyc193 (D-198 bundle) — module fails to LINK (import type/kind
+    /// mismatch). The runner instantiates against the linker; PASS if
+    /// instantiation fails. Verifies the REJECT direction of cross-
+    /// module import subtyping (cyc192 funcTypeImportCompatible).
+    assert_unlinkable,
     /// 10.M-D195b cycle 70 — wast `(register "name" $module_id?)`
     /// directive. The most-recent instance gets registered under
     /// `name` so subsequent modules' imports can resolve through
@@ -492,6 +497,11 @@ pub fn parseLine(
         directive.module_path = rest;
         return directive;
     }
+    if (std.mem.eql(u8, kind_str, "assert_unlinkable")) {
+        directive.kind = .assert_unlinkable;
+        directive.module_path = rest;
+        return directive;
+    }
     if (std.mem.eql(u8, kind_str, "register")) {
         // 10.M-D195b cycle 70 — `register <as>` directive. The
         // registered-as name lands in func_name (the field is
@@ -875,23 +885,23 @@ test "D-188 bisect: EH + func-refs invalid-accepted fixtures (regression marker)
     const Case = struct { name: []const u8, bytes: []const u8 };
     const cases = [_]Case{
         // exception-handling try_table (7 fixtures: 6..12; 6 pass / 1 fail per runner)
-        .{ .name = "try_table.6",  .bytes = @embedFile("wasm-3.0-assert/exception-handling/try_table/try_table.6.wasm") },
-        .{ .name = "try_table.7",  .bytes = @embedFile("wasm-3.0-assert/exception-handling/try_table/try_table.7.wasm") },
-        .{ .name = "try_table.8",  .bytes = @embedFile("wasm-3.0-assert/exception-handling/try_table/try_table.8.wasm") },
-        .{ .name = "try_table.9",  .bytes = @embedFile("wasm-3.0-assert/exception-handling/try_table/try_table.9.wasm") },
+        .{ .name = "try_table.6", .bytes = @embedFile("wasm-3.0-assert/exception-handling/try_table/try_table.6.wasm") },
+        .{ .name = "try_table.7", .bytes = @embedFile("wasm-3.0-assert/exception-handling/try_table/try_table.7.wasm") },
+        .{ .name = "try_table.8", .bytes = @embedFile("wasm-3.0-assert/exception-handling/try_table/try_table.8.wasm") },
+        .{ .name = "try_table.9", .bytes = @embedFile("wasm-3.0-assert/exception-handling/try_table/try_table.9.wasm") },
         .{ .name = "try_table.10", .bytes = @embedFile("wasm-3.0-assert/exception-handling/try_table/try_table.10.wasm") },
         .{ .name = "try_table.11", .bytes = @embedFile("wasm-3.0-assert/exception-handling/try_table/try_table.11.wasm") },
         .{ .name = "try_table.12", .bytes = @embedFile("wasm-3.0-assert/exception-handling/try_table/try_table.12.wasm") },
         // function-references ref (12 fixtures: 1..12; 7 pass / 5 fail per runner)
-        .{ .name = "ref.1",  .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.1.wasm") },
-        .{ .name = "ref.2",  .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.2.wasm") },
-        .{ .name = "ref.3",  .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.3.wasm") },
-        .{ .name = "ref.4",  .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.4.wasm") },
-        .{ .name = "ref.5",  .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.5.wasm") },
-        .{ .name = "ref.6",  .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.6.wasm") },
-        .{ .name = "ref.7",  .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.7.wasm") },
-        .{ .name = "ref.8",  .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.8.wasm") },
-        .{ .name = "ref.9",  .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.9.wasm") },
+        .{ .name = "ref.1", .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.1.wasm") },
+        .{ .name = "ref.2", .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.2.wasm") },
+        .{ .name = "ref.3", .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.3.wasm") },
+        .{ .name = "ref.4", .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.4.wasm") },
+        .{ .name = "ref.5", .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.5.wasm") },
+        .{ .name = "ref.6", .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.6.wasm") },
+        .{ .name = "ref.7", .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.7.wasm") },
+        .{ .name = "ref.8", .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.8.wasm") },
+        .{ .name = "ref.9", .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.9.wasm") },
         .{ .name = "ref.10", .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.10.wasm") },
         .{ .name = "ref.11", .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.11.wasm") },
         .{ .name = "ref.12", .bytes = @embedFile("wasm-3.0-assert/function-references/ref/ref.12.wasm") },
@@ -950,8 +960,8 @@ test "D-189 partial: align64 invalid fixtures rejected (memarg natural-align rul
     // the assert_invalid fixtures start at align64.69 (37 total
     // through align64.105). Embed three representative invalids.
     const fixtures = [_]struct { name: []const u8, bytes: []const u8 }{
-        .{ .name = "align64.69",  .bytes = @embedFile("wasm-3.0-assert/memory64/align64/align64.69.wasm") },
-        .{ .name = "align64.70",  .bytes = @embedFile("wasm-3.0-assert/memory64/align64/align64.70.wasm") },
+        .{ .name = "align64.69", .bytes = @embedFile("wasm-3.0-assert/memory64/align64/align64.69.wasm") },
+        .{ .name = "align64.70", .bytes = @embedFile("wasm-3.0-assert/memory64/align64/align64.70.wasm") },
         .{ .name = "align64.105", .bytes = @embedFile("wasm-3.0-assert/memory64/align64/align64.105.wasm") },
     };
     for (fixtures) |c| {
@@ -1073,16 +1083,20 @@ test "10.M cycle 66: memory.size on memidx=1 returns page count (interp)" {
         // type section: () -> (i32)
         0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f,
         // function section: 1 func, type 0
-        0x03, 0x02, 0x01, 0x00,
+        0x03,
+        0x02, 0x01, 0x00,
         // memory section: memory[0]=min1, memory[1]=min3
-        0x05, 0x05, 0x02, 0x00, 0x01, 0x00, 0x03,
+        0x05, 0x05, 0x02, 0x00, 0x01,
+        0x00, 0x03,
         // export section: "size1" func 0
-        0x07, 0x09, 0x01, 0x05, 's', 'i', 'z', 'e', '1', 0x00, 0x00,
+        0x07, 0x09, 0x01, 0x05, 's',  'i',
+        'z',  'e',  '1',  0x00, 0x00,
         // code section: 1 body, 4 bytes (locals=0, memory.size memidx=1, end)
-        0x0a, 0x06, 0x01, 0x04,
-        0x00,        // locals count
-        0x3f, 0x01,  // memory.size memidx=1
-        0x0b,        // end
+        0x0a, 0x06, 0x01,
+        0x04,
+        0x00, // locals count
+        0x3f, 0x01, // memory.size memidx=1
+        0x0b, // end
     };
     const alloc = testing.allocator;
 
@@ -1126,20 +1140,23 @@ test "10.M cycle 64: i32.store + i32.load via memidx=1 round-trip 42 (interp)" {
         // type section: () -> (i32)
         0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f,
         // function section: 1 func, type 0
-        0x03, 0x02, 0x01, 0x00,
+        0x03,
+        0x02, 0x01, 0x00,
         // memory section: 2 memories, both min=1
-        0x05, 0x05, 0x02, 0x00, 0x01, 0x00, 0x01,
+        0x05, 0x05, 0x02, 0x00, 0x01,
+        0x00, 0x01,
         // export section: "test" func 0
-        0x07, 0x08, 0x01, 0x04, 't', 'e', 's', 't', 0x00, 0x00,
+        0x07, 0x08, 0x01, 0x04, 't',  'e',
+        's',  't',  0x00, 0x00,
         // code section
-        0x0a, 0x12, 0x01, 0x10,            // section header, body count + size
-        0x00,                              // locals count
-        0x41, 0x00,                        // i32.const 0 (store addr)
-        0x41, 0x2a,                        // i32.const 42 (store value)
-        0x36, 0x42, 0x01, 0x00,            // i32.store memidx=1 align=2 offset=0
-        0x41, 0x00,                        // i32.const 0 (load addr)
-        0x28, 0x42, 0x01, 0x00,            // i32.load memidx=1 align=2 offset=0
-        0x0b,                              // end
+        0x0a, 0x12, 0x01, 0x10, // section header, body count + size
+        0x00, // locals count
+        0x41, 0x00, // i32.const 0 (store addr)
+        0x41, 0x2a, // i32.const 42 (store value)
+        0x36, 0x42, 0x01, 0x00, // i32.store memidx=1 align=2 offset=0
+        0x41, 0x00, // i32.const 0 (load addr)
+        0x28, 0x42, 0x01, 0x00, // i32.load memidx=1 align=2 offset=0
+        0x0b, // end
     };
     const alloc = testing.allocator;
 
@@ -1175,7 +1192,7 @@ test "10.M cycle 62: two-defined-memory module instantiates (multi-memory relax)
         0x00, 0x61, 0x73, 0x6d, // \0asm magic
         0x01, 0x00, 0x00, 0x00, // version 1
         0x05, 0x05, // section id 5 (memory), 5 bytes body
-        0x02,       //   count = 2
+        0x02, //   count = 2
         0x00, 0x01, //   memory[0]: flags=0 (min only), min=1
         0x00, 0x01, //   memory[1]: flags=0 (min only), min=1
     };
@@ -1247,37 +1264,37 @@ test "tail-call bisect: enumerate 31 assert_returns + print failures (D-187 regr
         want_f64: u64 = 0,
     };
     const cases = [_]Case{
-        .{ .name = "type-i32",       .args = &.{}, .want_kind = .i32, .want_i32 = 306 },
-        .{ .name = "type-i64",       .args = &.{}, .want_kind = .i64, .want_i64 = 356 },
-        .{ .name = "type-f32",       .args = &.{}, .want_kind = .f32, .want_f32 = 1165172736 },
-        .{ .name = "type-f64",       .args = &.{}, .want_kind = .f64, .want_f64 = 4660882566700597248 },
+        .{ .name = "type-i32", .args = &.{}, .want_kind = .i32, .want_i32 = 306 },
+        .{ .name = "type-i64", .args = &.{}, .want_kind = .i64, .want_i64 = 356 },
+        .{ .name = "type-f32", .args = &.{}, .want_kind = .f32, .want_f32 = 1165172736 },
+        .{ .name = "type-f64", .args = &.{}, .want_kind = .f64, .want_f64 = 4660882566700597248 },
         .{ .name = "type-first-i32", .args = &.{}, .want_kind = .i32, .want_i32 = 32 },
         .{ .name = "type-first-i64", .args = &.{}, .want_kind = .i64, .want_i64 = 64 },
         .{ .name = "type-first-f32", .args = &.{}, .want_kind = .f32, .want_f32 = 1068037571 },
         .{ .name = "type-first-f64", .args = &.{}, .want_kind = .f64, .want_f64 = 4610064722561534525 },
-        .{ .name = "type-second-i32",.args = &.{}, .want_kind = .i32, .want_i32 = 32 },
-        .{ .name = "type-second-i64",.args = &.{}, .want_kind = .i64, .want_i64 = 64 },
-        .{ .name = "type-second-f32",.args = &.{}, .want_kind = .f32, .want_f32 = 1107296256 },
-        .{ .name = "type-second-f64",.args = &.{}, .want_kind = .f64, .want_f64 = 4634211053438658150 },
+        .{ .name = "type-second-i32", .args = &.{}, .want_kind = .i32, .want_i32 = 32 },
+        .{ .name = "type-second-i64", .args = &.{}, .want_kind = .i64, .want_i64 = 64 },
+        .{ .name = "type-second-f32", .args = &.{}, .want_kind = .f32, .want_f32 = 1107296256 },
+        .{ .name = "type-second-f64", .args = &.{}, .want_kind = .f64, .want_f64 = 4634211053438658150 },
         .{ .name = "fac-acc", .args = &[_]zwasm_root.Value{ .{ .i64 = 0 }, .{ .i64 = 1 } }, .want_kind = .i64, .want_i64 = 1 },
         .{ .name = "fac-acc", .args = &[_]zwasm_root.Value{ .{ .i64 = 1 }, .{ .i64 = 1 } }, .want_kind = .i64, .want_i64 = 1 },
         .{ .name = "fac-acc", .args = &[_]zwasm_root.Value{ .{ .i64 = 5 }, .{ .i64 = 1 } }, .want_kind = .i64, .want_i64 = 120 },
         .{ .name = "fac-acc", .args = &[_]zwasm_root.Value{ .{ .i64 = 25 }, .{ .i64 = 1 } }, .want_kind = .i64, .want_i64 = 7034535277573963776 },
-        .{ .name = "count", .args = &[_]zwasm_root.Value{ .{ .i64 = 0 } }, .want_kind = .i64, .want_i64 = 0 },
-        .{ .name = "count", .args = &[_]zwasm_root.Value{ .{ .i64 = 1000 } }, .want_kind = .i64, .want_i64 = 0 },
-        .{ .name = "count", .args = &[_]zwasm_root.Value{ .{ .i64 = 1000000 } }, .want_kind = .i64, .want_i64 = 0 },
-        .{ .name = "even", .args = &[_]zwasm_root.Value{ .{ .i64 = 0 } }, .want_kind = .i32, .want_i32 = 44 },
-        .{ .name = "even", .args = &[_]zwasm_root.Value{ .{ .i64 = 1 } }, .want_kind = .i32, .want_i32 = 99 },
-        .{ .name = "even", .args = &[_]zwasm_root.Value{ .{ .i64 = 100 } }, .want_kind = .i32, .want_i32 = 44 },
-        .{ .name = "even", .args = &[_]zwasm_root.Value{ .{ .i64 = 77 } }, .want_kind = .i32, .want_i32 = 99 },
-        .{ .name = "even", .args = &[_]zwasm_root.Value{ .{ .i64 = 1000000 } }, .want_kind = .i32, .want_i32 = 44 },
-        .{ .name = "even", .args = &[_]zwasm_root.Value{ .{ .i64 = 1000001 } }, .want_kind = .i32, .want_i32 = 99 },
-        .{ .name = "odd", .args = &[_]zwasm_root.Value{ .{ .i64 = 0 } }, .want_kind = .i32, .want_i32 = 99 },
-        .{ .name = "odd", .args = &[_]zwasm_root.Value{ .{ .i64 = 1 } }, .want_kind = .i32, .want_i32 = 44 },
-        .{ .name = "odd", .args = &[_]zwasm_root.Value{ .{ .i64 = 200 } }, .want_kind = .i32, .want_i32 = 99 },
-        .{ .name = "odd", .args = &[_]zwasm_root.Value{ .{ .i64 = 77 } }, .want_kind = .i32, .want_i32 = 44 },
-        .{ .name = "odd", .args = &[_]zwasm_root.Value{ .{ .i64 = 1000000 } }, .want_kind = .i32, .want_i32 = 99 },
-        .{ .name = "odd", .args = &[_]zwasm_root.Value{ .{ .i64 = 999999 } }, .want_kind = .i32, .want_i32 = 44 },
+        .{ .name = "count", .args = &[_]zwasm_root.Value{.{ .i64 = 0 }}, .want_kind = .i64, .want_i64 = 0 },
+        .{ .name = "count", .args = &[_]zwasm_root.Value{.{ .i64 = 1000 }}, .want_kind = .i64, .want_i64 = 0 },
+        .{ .name = "count", .args = &[_]zwasm_root.Value{.{ .i64 = 1000000 }}, .want_kind = .i64, .want_i64 = 0 },
+        .{ .name = "even", .args = &[_]zwasm_root.Value{.{ .i64 = 0 }}, .want_kind = .i32, .want_i32 = 44 },
+        .{ .name = "even", .args = &[_]zwasm_root.Value{.{ .i64 = 1 }}, .want_kind = .i32, .want_i32 = 99 },
+        .{ .name = "even", .args = &[_]zwasm_root.Value{.{ .i64 = 100 }}, .want_kind = .i32, .want_i32 = 44 },
+        .{ .name = "even", .args = &[_]zwasm_root.Value{.{ .i64 = 77 }}, .want_kind = .i32, .want_i32 = 99 },
+        .{ .name = "even", .args = &[_]zwasm_root.Value{.{ .i64 = 1000000 }}, .want_kind = .i32, .want_i32 = 44 },
+        .{ .name = "even", .args = &[_]zwasm_root.Value{.{ .i64 = 1000001 }}, .want_kind = .i32, .want_i32 = 99 },
+        .{ .name = "odd", .args = &[_]zwasm_root.Value{.{ .i64 = 0 }}, .want_kind = .i32, .want_i32 = 99 },
+        .{ .name = "odd", .args = &[_]zwasm_root.Value{.{ .i64 = 1 }}, .want_kind = .i32, .want_i32 = 44 },
+        .{ .name = "odd", .args = &[_]zwasm_root.Value{.{ .i64 = 200 }}, .want_kind = .i32, .want_i32 = 99 },
+        .{ .name = "odd", .args = &[_]zwasm_root.Value{.{ .i64 = 77 }}, .want_kind = .i32, .want_i32 = 44 },
+        .{ .name = "odd", .args = &[_]zwasm_root.Value{.{ .i64 = 1000000 }}, .want_kind = .i32, .want_i32 = 99 },
+        .{ .name = "odd", .args = &[_]zwasm_root.Value{.{ .i64 = 999999 }}, .want_kind = .i32, .want_i32 = 44 },
     };
 
     var pass: u32 = 0;

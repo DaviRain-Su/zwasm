@@ -264,6 +264,15 @@ for c in d['commands']:
             lines.append(f'assert_uninstantiable {c["filename"]}')
         else:
             lines.append('skip-impl directive-assert_uninstantiable-inline')
+    elif t == 'assert_unlinkable':
+        # cyc193 (D-198 bundle) — module is valid but fails to LINK
+        # (import type/kind/limits mismatch). The runner instantiates it
+        # against the linker (expecting failure); verifies the REJECT
+        # direction of cross-module import subtyping (cyc192).
+        if 'filename' in c:
+            lines.append(f'assert_unlinkable {c["filename"]}')
+        else:
+            lines.append('skip-impl directive-assert_unlinkable-inline')
     elif t == 'assert_malformed':
         if c.get('module_type') == 'binary' and 'filename' in c:
             lines.append(f'assert_malformed {c["filename"]}')
@@ -339,7 +348,7 @@ PY
                     copy_stripped "$tmp/$2" "$out_dir/$2"
                 fi
                 ;;
-            assert_invalid|assert_malformed|assert_uninstantiable)
+            assert_invalid|assert_malformed|assert_uninstantiable|assert_unlinkable)
                 copy_stripped "$tmp/$2" "$out_dir/$2" ;;
         esac
     done < "$out_dir/manifest.txt"

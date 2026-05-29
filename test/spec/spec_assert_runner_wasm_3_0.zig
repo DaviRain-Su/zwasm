@@ -87,6 +87,9 @@ const ProposalSummary = struct {
     asserts_invalid: u32 = 0,
     asserts_invalid_pass: u32 = 0,
     asserts_invalid_fail: u32 = 0,
+    asserts_unlinkable: u32 = 0,
+    asserts_unlinkable_pass: u32 = 0,
+    asserts_unlinkable_fail: u32 = 0,
     asserts_malformed: u32 = 0,
     asserts_malformed_pass: u32 = 0,
     asserts_malformed_fail: u32 = 0,
@@ -134,6 +137,8 @@ pub fn main(init: std.process.Init) !void {
     var grand_total_trap_fail: u32 = 0;
     var grand_total_invalid_pass: u32 = 0;
     var grand_total_invalid_fail: u32 = 0;
+    var grand_total_unlinkable_pass: u32 = 0;
+    var grand_total_unlinkable_fail: u32 = 0;
     var grand_total_malformed_pass: u32 = 0;
     var grand_total_malformed_fail: u32 = 0;
     var grand_total_exception_pass: u32 = 0;
@@ -243,27 +248,40 @@ pub fn main(init: std.process.Init) !void {
                 0x05, 0x04, 0x01, 0x01, 0x01, 0x02,
                 // global section: 4 entries (33 bytes content)
                 //   each: valtype byte + mutable byte + init_expr + 0x0B end
-                0x06, 0x21, 0x04,
+                0x06, 0x21,
+                0x04,
                 //   global 0: i32 (0x7F) const 0x9A 0x05 (666 LEB128) — immutable
                 0x7f, 0x00, 0x41, 0x9a, 0x05, 0x0b,
                 //   global 1: i64 (0x7E) const 0x9A 0x05 (666) — immutable
-                0x7e, 0x00, 0x42, 0x9a, 0x05, 0x0b,
+                0x7e,
+                0x00, 0x42, 0x9a, 0x05, 0x0b,
                 //   global 2: f32 (0x7D) const 0.0 — immutable
-                0x7d, 0x00, 0x43, 0x00, 0x00, 0x00, 0x00, 0x0b,
+                0x7d, 0x00, 0x43,
+                0x00, 0x00, 0x00, 0x00, 0x0b,
                 //   global 3: f64 (0x7C) const 0.0 — immutable
-                0x7c, 0x00, 0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0b,
+                0x7c, 0x00, 0x44,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x0b,
                 // export section: 5 entries (62 bytes content)
                 0x07, 0x3e, 0x05,
                 //   "memory" memory 0
-                0x06, 'm', 'e', 'm', 'o', 'r', 'y', 0x02, 0x00,
+                0x06, 'm',  'e',  'm',
+                'o',  'r',  'y',  0x02, 0x00,
                 //   "global_i32" global 0
-                0x0a, 'g', 'l', 'o', 'b', 'a', 'l', '_', 'i', '3', '2', 0x03, 0x00,
+                0x0a, 'g',  'l',
+                'o',  'b',  'a',  'l',  '_',  'i',  '3',  '2',
+                0x03, 0x00,
                 //   "global_i64" global 1
-                0x0a, 'g', 'l', 'o', 'b', 'a', 'l', '_', 'i', '6', '4', 0x03, 0x01,
+                0x0a, 'g',  'l',  'o',  'b',  'a',
+                'l',  '_',  'i',  '6',  '4',  0x03, 0x01,
                 //   "global_f32" global 2
-                0x0a, 'g', 'l', 'o', 'b', 'a', 'l', '_', 'f', '3', '2', 0x03, 0x02,
+                0x0a,
+                'g',  'l',  'o',  'b',  'a',  'l',  '_',  'f',
+                '3',  '2',  0x03, 0x02,
                 //   "global_f64" global 3
-                0x0a, 'g', 'l', 'o', 'b', 'a', 'l', '_', 'f', '6', '4', 0x03, 0x03,
+                0x0a, 'g',  'l',  'o',
+                'b',  'a',  'l',  '_',  'f',  '6',  '4',  0x03,
+                0x03,
             };
             if (cur_engine.compile(&spectest_bytes)) |spectest_mod_compiled| {
                 var spectest_mod = spectest_mod_compiled;
@@ -515,11 +533,7 @@ pub fn main(init: std.process.Init) !void {
                             continue;
                         };
                         // Compare by the result type's discriminator.
-                        const match = if (std.mem.eql(u8, expected_tv.ty, "i32")) got.i32 == expected_zv.i32
-                            else if (std.mem.eql(u8, expected_tv.ty, "i64")) got.i64 == expected_zv.i64
-                            else if (std.mem.eql(u8, expected_tv.ty, "f32")) got.f32 == expected_zv.f32
-                            else if (std.mem.eql(u8, expected_tv.ty, "f64")) got.f64 == expected_zv.f64
-                            else false;
+                        const match = if (std.mem.eql(u8, expected_tv.ty, "i32")) got.i32 == expected_zv.i32 else if (std.mem.eql(u8, expected_tv.ty, "i64")) got.i64 == expected_zv.i64 else if (std.mem.eql(u8, expected_tv.ty, "f32")) got.f32 == expected_zv.f32 else if (std.mem.eql(u8, expected_tv.ty, "f64")) got.f64 == expected_zv.f64 else false;
                         if (match) summary.asserts_return_pass += 1 else {
                             summary.asserts_return_fail += 1;
                             if (fail_detail) try stdout.print("  FAILval [{s}/{s}] {s} exp={d} got={d} ty={s}\n", .{ proposal, entry.name, d.func_name, expected_zv.i32, got.i32, expected_tv.ty });
@@ -650,6 +664,39 @@ pub fn main(init: std.process.Init) !void {
                             summary.asserts_trap_pass += 1; // failed as expected
                         }
                     },
+                    .assert_unlinkable => {
+                        // cyc193 (D-198 bundle) — the module is valid but
+                        // fails to LINK (import type/kind/limits mismatch).
+                        // Instantiate against the current linker; PASS if
+                        // instantiation fails. Verifies the REJECT direction
+                        // of cross-module import subtyping (cyc192
+                        // funcTypeImportCompatible).
+                        summary.asserts_unlinkable += 1;
+                        const ul_bytes = sub_dir.readFileAlloc(io, d.module_path, gpa, .limited(4 << 20)) catch {
+                            summary.asserts_unlinkable_fail += 1;
+                            continue;
+                        };
+                        defer gpa.free(ul_bytes);
+                        zwasm.diagnostic.clearDiag();
+                        var compiled = cur_engine.compile(ul_bytes) catch {
+                            // Rejected at compile — never linked; count pass.
+                            summary.asserts_unlinkable_pass += 1;
+                            continue;
+                        };
+                        modules_list.append(gpa, compiled) catch {
+                            compiled.deinit();
+                            summary.asserts_unlinkable_fail += 1;
+                            continue;
+                        };
+                        const m_ptr = &modules_list.items[modules_list.items.len - 1];
+                        if (cur_linker.instantiate(m_ptr)) |inst| {
+                            var bad_inst = inst;
+                            bad_inst.deinit();
+                            summary.asserts_unlinkable_fail += 1; // unexpectedly linked
+                        } else |_| {
+                            summary.asserts_unlinkable_pass += 1; // failed to link as expected
+                        }
+                    },
                     .assert_exception => {
                         summary.asserts_exception += 1;
                         _ = cur_module_bytes orelse continue;
@@ -727,16 +774,10 @@ pub fn main(init: std.process.Init) !void {
         }
 
         const total_directives = summary.modules + summary.asserts_return + summary.asserts_trap +
-            summary.asserts_invalid + summary.asserts_malformed + summary.asserts_exception + summary.skips;
+            summary.asserts_invalid + summary.asserts_unlinkable + summary.asserts_malformed + summary.asserts_exception + summary.skips;
         try stdout.print(
             "[{s:<22}] manifests={d:<3} module={d:<3} return={d:<4} (pass={d:<4} fail={d:<4}) trap={d:<4} (pass={d:<4} fail={d:<4}) invalid={d:<3} (pass={d:<3} fail={d:<3}) malformed={d:<3} (pass={d:<3} fail={d:<3}) exception={d:<3} (pass={d:<3} fail={d:<3}) skip={d}\n",
-            .{ proposal, summary.manifests, summary.modules, summary.asserts_return,
-               summary.asserts_return_pass, summary.asserts_return_fail,
-               summary.asserts_trap, summary.asserts_trap_pass, summary.asserts_trap_fail,
-               summary.asserts_invalid, summary.asserts_invalid_pass, summary.asserts_invalid_fail,
-               summary.asserts_malformed, summary.asserts_malformed_pass, summary.asserts_malformed_fail,
-               summary.asserts_exception, summary.asserts_exception_pass, summary.asserts_exception_fail,
-               summary.skips },
+            .{ proposal, summary.manifests, summary.modules, summary.asserts_return, summary.asserts_return_pass, summary.asserts_return_fail, summary.asserts_trap, summary.asserts_trap_pass, summary.asserts_trap_fail, summary.asserts_invalid, summary.asserts_invalid_pass, summary.asserts_invalid_fail, summary.asserts_malformed, summary.asserts_malformed_pass, summary.asserts_malformed_fail, summary.asserts_exception, summary.asserts_exception_pass, summary.asserts_exception_fail, summary.skips },
         );
         grand_total_manifests += summary.manifests;
         grand_total_directives += total_directives;
@@ -746,6 +787,8 @@ pub fn main(init: std.process.Init) !void {
         grand_total_trap_fail += summary.asserts_trap_fail;
         grand_total_invalid_pass += summary.asserts_invalid_pass;
         grand_total_invalid_fail += summary.asserts_invalid_fail;
+        grand_total_unlinkable_pass += summary.asserts_unlinkable_pass;
+        grand_total_unlinkable_fail += summary.asserts_unlinkable_fail;
         grand_total_malformed_pass += summary.asserts_malformed_pass;
         grand_total_malformed_fail += summary.asserts_malformed_fail;
         grand_total_exception_pass += summary.asserts_exception_pass;
@@ -753,13 +796,8 @@ pub fn main(init: std.process.Init) !void {
     }
 
     try stdout.print(
-        "[wasm-3.0-assert] total: {d} manifests, {d} directives; assert_return pass={d} fail={d}; assert_trap pass={d} fail={d}; assert_invalid pass={d} fail={d}; assert_malformed pass={d} fail={d}; assert_exception pass={d} fail={d} (multi-value execution + assert_trap class discrimination land in follow-on cycles)\n",
-        .{ grand_total_manifests, grand_total_directives,
-           grand_total_return_pass, grand_total_return_fail,
-           grand_total_trap_pass, grand_total_trap_fail,
-           grand_total_invalid_pass, grand_total_invalid_fail,
-           grand_total_malformed_pass, grand_total_malformed_fail,
-           grand_total_exception_pass, grand_total_exception_fail },
+        "[wasm-3.0-assert] total: {d} manifests, {d} directives; assert_return pass={d} fail={d}; assert_trap pass={d} fail={d}; assert_invalid pass={d} fail={d}; assert_unlinkable pass={d} fail={d}; assert_malformed pass={d} fail={d}; assert_exception pass={d} fail={d} (multi-value execution + assert_trap class discrimination land in follow-on cycles)\n",
+        .{ grand_total_manifests, grand_total_directives, grand_total_return_pass, grand_total_return_fail, grand_total_trap_pass, grand_total_trap_fail, grand_total_invalid_pass, grand_total_invalid_fail, grand_total_unlinkable_pass, grand_total_unlinkable_fail, grand_total_malformed_pass, grand_total_malformed_fail, grand_total_exception_pass, grand_total_exception_fail },
     );
     try stdout.flush();
 }
