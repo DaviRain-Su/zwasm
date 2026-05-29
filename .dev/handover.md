@@ -6,15 +6,13 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc161 (`f45ff26f`) — **bind host externref args**
-  (`ref.extern N`) in the wasm-3.0 manifest parser. parsePayload
-  rejected externref → `invoke init externref:0` was skipped → init()
-  no-op'd → ref_test/ref_cast/br_on_cast/br_on_cast_fail tables null.
-  Sentinel binding unlocks the cascade: **gc return 262→320 (+58)**
-  (ref_test 33→2, br_on_cast/_fail 10→0 each, ref_cast 7→0), trap
-  84→88, invalid 57 held; **funcrefs 32→34**. exit 0, 0 panics.
-  cyc160 per-manifest breakdown infra; cyc159 ref.func const-expr.
-  **gc 62→320** across the session.
+- **HEAD**: cyc162 (`48fab4e3`) — **abstract GC subtyping** in
+  subtypeCtx (`.abstract => false` → route through gcHeapAbstractSubtype:
+  i31/struct/array <: eq <: any) + table.init segment `.eql`→subtypeCtx.
+  Fixes i31.wast `$anyref_table_of_i31ref` (i31ref values into anyref
+  table.grow/fill/init): **gc return 320→335 (+15)**, i31 19→4, trap 88,
+  invalid 57 held. exit 0, 0 panics. cyc161 host externref args (+58);
+  cyc160 breakdown infra. **gc 62→335** across the session.
 - cyc147-148 **ADR-0125 packed COMPLETE** (A union rename → B-validate
   decode → B-exec get_s/u): gc return 62→116, trap 18→54, ValidateFailed
   27→14, invalid 57 held. cyc146 ADR-0016 M3 + concrete-subtype coercion.
@@ -49,23 +47,24 @@
 - **Exit-condition**: gc return ≥ 90 **EXCEEDED (116 at cyc148)**. Open
   target: maximise return (RTT exec) toward the corpus ceiling.
 
-## Active task — cycle 162: i31 (19 return-fails, #1 remaining lever) — **NEXT**
+## Active task — cycle 163: array (6+2t) + i31 const-expr global.get — **NEXT**
 
-Post-cyc161 gc breakdown (32 return-fails left): `i31=19`, `array=6+2t`,
-`type-subtyping=5+10t (D-198 deep)`, `ref_test=2` (residual precise
-eq/struct-on-externalized-host classification — coarse gcAbstractMatch
-returns true for eq/any on a host-extern; needs real extern↔any
-discrimination, follow-on).
+Post-cyc162 gc breakdown (17 return-fails left): `array=6+2t`,
+`type-subtyping=5+10t (D-198 deep)`, `i31=4`, `ref_test=2`.
 
-**i31** (gc/raw/i31.wast, 19 fails): i31 has NO externref-arg init, so
-this is genuine i31 ref.test/get / i31.new / array-of-i31 behaviour.
-SURVEY i31.wast: which exports fail? (per-manifest breakdown localises;
-to see per-assert expected-vs-actual either eyeball i31.wast asserts +
-run via CLI, or add env-gated FAIL-detail to the runner — note the
-cyc161 finding that std.debug.print probes under-report vs the reliable
-stdout breakdown). VERIFY full test-spec + exit-code + panic grep
-(cyc150 lesson; DIRECT binary). No regression to 320 return / 88 trap /
-57 invalid / 393 multi-mem / 34 funcrefs.
+Pick the densest tractable cluster:
+- **array (6 return + 2 trap)**: gc/raw/array.wast — survey which
+  exports fail (per-module CLI probe `zwasm run array.N.wasm`; likely a
+  module-level instantiate/validate cascade like i31/ref_test were).
+- **i31.3 / i31.4 (4 fails)**: const-expr `global.get` of an imported
+  global inside `ref.i31`/table-initializer (i31.wast
+  `$i31ref_of_global_*_initializer`). evalGlobalInitGc + the table-init-
+  expr decoder need global.get-of-import support.
+- `ref_test=2`: residual precise eq/struct-on-externalized-host (coarse
+  gcAbstractMatch; needs real extern↔any discrimination — deeper).
+VERIFY full test-spec + exit-code + panic grep (cyc150 lesson; DIRECT
+binary). No regression to 335 return / 88 trap / 57 invalid / 393
+multi-mem / 34 funcrefs.
 
 ## Larger §10 work (later bundles)
 
@@ -73,12 +72,12 @@ stdout breakdown). VERIFY full test-spec + exit-code + panic grep
   `resolveFuncrefGlobals` (off spec-corpus path). **10.P close gate** =
   user touchpoint by construction.
 
-## Spec runner observable (cycle-161, DIRECT binary run)
+## Spec runner observable (cycle-162, DIRECT binary run)
 
 ```
 [memory64           ] return=337 (all pass)    [tail-call] return=71 (all pass)
 [exception-handling ] 34/34 ✅ FULLY GREEN     [function-references] return=34/39
-[gc                 ] return=320/407 trap=88/100 invalid=57/60 malformed=1/1 skip=20  ← 10.G c161
+[gc                 ] return=335/407 trap=88/100 invalid=57/60 malformed=1/1 skip=20  ← 10.G c162
 [multi-memory       ] return=393/407 trap=238/238  ← cyc141 rt.datas fix
 ```
 
