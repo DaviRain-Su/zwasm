@@ -6,11 +6,13 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc149 (`09907dca`) — **ref.test/test_null abstract RTT**:
-  real runtime type-test (i31 low-bit / struct,array via ObjectHeader.kind
-  / hierarchy tops match non-null / bottoms reject). Pure `gcAbstractMatch`
-  unit-tested. gc return holds 116 (ref_test fixtures blocked END-TO-END
-  by their `init` ops — separate gap, not ref.test). No regression.
+- **HEAD**: cyc150 (`2e8b1ef6`) — **crash fix**: cyc149's ref.test
+  readObjKind cast `v.ref`→u32 before the heap-bounds check → SIGABRT on
+  an anyref holding a host pointer (any.convert_extern). Bounds-check as
+  u64 first. Full corpus exits 0 (was 134); gc 116 held. Lesson:
+  `runtime-exec-change-needs-testspec-exitcode` (the slip: --fast gate +
+  summary-grep masked it). cyc149 (`09907dca`): ref.test/test_null
+  abstract RTT (gcAbstractMatch unit-tested).
 - cyc147-148 **ADR-0125 packed COMPLETE** (A union rename → B-validate
   decode → B-exec get_s/u): gc return 62→116, trap 18→54, ValidateFailed
   27→14, invalid 57 held. cyc146 ADR-0016 M3 + concrete-subtype coercion.
@@ -45,18 +47,17 @@
 - **Exit-condition**: gc return ≥ 90 **EXCEEDED (116 at cyc148)**. Open
   target: maximise return (RTT exec) toward the corpus ceiling.
 
-## Active task — cycle 150: RTT exec tail + ref_test end-to-end — **NEXT**
+## Active task — cycle 151: RTT exec tail + ref_test 33-fails — **NEXT**
 
-ref.test/test_null abstract DONE (c149). Remaining RTT levers (236 gc
-return-fails; abstract ref.test correct but ref_test fixtures need their
-`init` to run). To get a return delta, pick ONE + verify by direct-binary
-run on a `/tmp/x/gc/{ref_test,ref_cast,br_on_cast,...}` corpus copy:
-- **ref_test end-to-end blocker**: ref_test.0's `init` uses
-  any.convert_extern / extern.convert_any (ref_convert_ops.zig identity —
-  check), struct.new_default, array.new_default, `ref.null none/nofunc/
-  noextern`. Find which exec-traps/mismatches (the runner prints
-  assert mismatches; or step a single invoke). Likely a small gap that
-  unblocks the whole ref_test.0 return set + makes c149's ref.test visible.
+ref.test/test_null abstract DONE (c149) + crash fixed (c150). ref_test
+corpus = return 68 (pass=35 fail=33). **VERIFY runtime changes by full
+test-spec + exit-code check** (lesson `runtime-exec-change-needs-testspec-
+exitcode`), not summary-grep. Pick ONE lever + verify on a
+`/tmp/x/gc/{ref_test,ref_cast,br_on_cast,...}` corpus copy:
+- **ref_test 33-fails**: which assert_return mismatch / trap? Likely an
+  `init`-op gap (any.convert_extern / extern.convert_any identity in
+  ref_convert_ops.zig; struct/array.new_default; ref.null none/nofunc/
+  noextern) OR a wrong ref.test result. Step one invoke to localize.
 - **ref.cast / ref.cast_null EXEC**: reuse `gcRefMatchesNonNull`; trap on
   mismatch — needs a new `Trap.CastFailure` (widen `runtime/trap.zig`;
   blast radius: trap_surface c_api map + spec-runner trap-reason). Spec
