@@ -442,6 +442,34 @@ test "runI32Export: direct return_call tail-call returns 42 end-to-end (10.TC-JI
     try testing.expectEqual(@as(u32, 42), try runI32Export(testing.allocator, &bytes, "test"));
 }
 
+test "runI32Export: return_call_indirect through table[0] returns 99 end-to-end (10.TC-JIT / D-205)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    // (module
+    //   (type $sig (func (result i32)))
+    //   (table 1 funcref)
+    //   (elem (i32.const 0) $worker)
+    //   (func $worker (type $sig) (i32.const 99))
+    //   (func $test (export "test") (result i32)
+    //     (i32.const 0) (return_call_indirect (type $sig))))
+    //
+    // Exercises the indirect tail-call JIT path end-to-end
+    // (emit.zig .return_call_indirect → op_tail_call.emitIndirectReturnCall:
+    // bounds-check + sig-check + funcptr→X16 + frame_teardown + BR X16,
+    // table-0/≤2-results fast path). Companion to the direct
+    // return_call e2e test; both now reach the callee body after the
+    // liveness terminator-class fix. Wasm spec 3.0 §3.3.8.19.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type: () -> i32
+        0x03, 0x03, 0x02, 0x00, 0x00, // func: worker→type0, test→type0
+        0x04, 0x04, 0x01, 0x70, 0x00, 0x01, // table: 1 funcref
+        0x07, 0x08, 0x01, 0x04, 0x74, 0x65, 0x73, 0x74, 0x00, 0x01, // export "test" → func1
+        0x09, 0x07, 0x01, 0x00, 0x41, 0x00, 0x0b, 0x01, 0x00, // elem: table[0] = func0 (payload 7 bytes)
+        0x0a, 0x0f, 0x02, 0x05, 0x00, 0x41, 0xe3, 0x00, 0x0b, 0x07, 0x00, 0x41, 0x00, 0x13, 0x00, 0x00, 0x0b, // code: fn0 i32.const 99 (LEB 0xe3 0x00); fn1 i32.const 0; return_call_indirect type0 table0
+    };
+    try testing.expectEqual(@as(u32, 99), try runI32Export(testing.allocator, &bytes, "test"));
+}
+
 test "runI32Export: throw + catch_all returns 42 (IT-6 cycle 3c-iii-d end-to-end)" {
     if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
     // (module
