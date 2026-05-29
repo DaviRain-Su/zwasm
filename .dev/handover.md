@@ -6,17 +6,17 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc191 (diagnosis, no src) — confirmed gc `.30/.48/.50`
-  SignatureMismatch = cross-module import-subtyping gap (`checkImportTypeMatches`
-  instantiate.zig:1649 exact `eql`; Wasm 3.0 §4.5.10 needs func subtyping).
-  Deep edge → OPENED bundle (see below); D-198 refined.
-- cyc190 (`0f06df6e`, ubuntu-verified green) — **gc global-init type-check
-  landed**: `validator.constExprResultType` + `validateGlobalInits` (GC-aware,
-  ADR-0126) in `frontendValidate`. **gc invalid 57→60 fail=0**; ZERO regression
-  (gc return 349 / trap 96 + all 5 proposals unchanged; assert_invalid 191→194).
-  Remaining gc fails: **return=1 + trap=4 = .30/.48/.50** (the bundle below).
-  §10 ROW close also needs realworld/p10 (clang_wasm64+clang_musttail
-  autonomous; emcc/dart/ocaml/hoot tool-gated) — after the gc edges.
+- **HEAD**: cyc192 (`6a77cb19`) — **cross-module func import SUBTYPING landed**:
+  `validator.funcTypeImportCompatible` (contravariant params / covariant
+  results, §4.5.10/§3.3.5.1) wired into `checkImportTypeMatches`. **gc
+  .30/.48/.50 SignatureMismatch 3→0** — they instantiate now. Monotonic-safe
+  (eql fast-path); ZERO regression (all 5 proposals + gc 349/96/60 unchanged;
+  0 panics). Count note: .30/.48/.50 are `module` directives (uncounted), so
+  gc headline count is steady — real win = SignatureMismatch eliminated.
+- cyc190 (`0f06df6e`, ubuntu-green) — gc global-init type-check (invalid 57→60).
+- gc residual: **return=1 (.17 run InvokeFailed) + trap=4** = the .17 multi-
+  mechanism rabbit hole (D-198, deep defer). §10 ROW close also needs realworld/
+  p10 (clang_wasm64+clang_musttail autonomous; emcc/dart/ocaml/hoot tool-gated).
 - Earlier arc: cyc177 iso-recursive canonicalEqual; cyc147-148 ADR-0125
   packed; cyc146 ADR-0016 M3 self-attribution; cyc130-140 i31/struct/array.
 - Runner EXECUTES via interp; gc_heap + gc_type_infos + rt.datas all
@@ -30,39 +30,31 @@
 ## Active bundle
 
 - **Bundle-ID**: 10.X-xmodule-import-subtype (D-198 .30/.48/.50)
-- **Cycles-remaining**: ~2-3
-- **Continuity-memo**: gc `type-subtyping.30/.48/.50` fail at instantiate with
-  `SignatureMismatch` because `checkImportTypeMatches` (instantiate.zig:1649-
-  1654) compares cross_module func sigs with exact `sp.eql(wp)`. Wasm 3.0
-  §4.5.10 external matching uses func SUBTYPING (contravariant params /
-  covariant results, §3.3). Binding carries `source_rt` (exporter Runtime —
-  exporter types reachable) + flat `source_signature`. Results are self-ref
-  CONCRETE refs (`(ref null 1)`, `(ref 0)`); each fixture imports the SAME name
-  under multiple subtype-related sigs (e.g. .30 imports `M.f1` as type 0 AND
-  type 1). **Fix is MONOTONIC-SAFE**: keep `eql` fast-path, add subtype
-  FALLBACK — can only widen acceptance, so the green 407 multi-mem + 34 EH
-  cross-module imports (all pass `eql`) are unaffected by construction.
-- **cyc191 RESOLVED the pivotal unknown**: M (`.29`, `register M` at manifest
-  L53-54) and importer `.30` have **IDENTICAL type sections** (type 0 `(func
-  (result funcref))`, type 1 `(sub 0 (func (result (ref null 1))))`, type 2
-  `(sub 1 …(ref null 2))`). .30 imports `M.f1` (actual type 1) declared as
-  type 0 — type 1 <: type 0, so exact `eql` wrongly rejects. Spec cross-module
-  subtype tests duplicate type defs → indices align.
-- **cyc192 IMPLEMENT**: func subtyping in the `.cross_module` arm — params
-  CONTRAVARIANT `subtype(want_p, src_p)`, results COVARIANT `subtype(src_r,
-  want_r)` (Wasm 3.0 §3.3.5.1), `eql` stays the fast-path. Expose a `pub`
-  helper from validator.zig (mirror cyc190 `validateGlobalInits`) since
-  `gcValTypeSubtype` is private there. **Correctness note (no-workaround)**:
-  do NOT just reuse importer `types` for the source's concrete-ref indices —
-  that only works because these fixtures duplicate types. The あるべき論
-  solution decodes the exporter's types via `source_rt` and compares concrete
-  refs cross-module structurally (generalize `canonicalEqual` across two
-  `Types`). If the cross-module structural compare balloons, a same-space
-  first cut is acceptable ONLY with a D-NNN row naming the gap.
-- **Exit-condition**: gc return 349→350 + trap 96→100 (.30/.48/.50 instantiate
-  OK + assertions pass); NO regression to multi-mem 407 / EH 34 / invalid 60 /
-  all 5 proposals; 0 panics; exit 0. If after 2-3 cycles the cross-module
-  structural compare proves a deeper rabbit hole, close-pivot to realworld/p10.
+- **Cycles-remaining**: ~1
+- **Continuity-memo**: cyc192 (`6a77cb19`) DONE — positive direction:
+  `funcTypeImportCompatible` (func subtyping) in `checkImportTypeMatches`
+  `.cross_module` arm; .30/.48/.50 instantiate (SignatureMismatch 3→0). Same-
+  typespace simplification (M≡importer type defs) → D-202 tracks the distinct-
+  layout generalization. Monotonic-safe (eql fast-path). cyc193 = verify the
+  negative direction via assert_unlinkable (below).
+- **cyc193 NEXT — implement `assert_unlinkable`** to VERIFY + COUNT the negative
+  direction. The .30/.48/.50 `module` directives are followed by `skip-impl
+  directive-assert_unlinkable` lines (manifest L56-58 etc.) — those test that
+  NON-subtype imports are correctly REJECTED, but the runner doesn't implement
+  the directive so they're skipped (so cyc192's reject path is unverified by
+  corpus, only by the unit test). Mirror cyc184 `assert_uninstantiable`:
+  (1) `regen_spec_3_0_assert.sh` — emit `assert_unlinkable <wasm>` (not skip-impl)
+  + copy the .wasm; (2) `wasm_3_0_manifest.zig` — add Kind + parseLine;
+  (3) runner — compile + instantiate against `cur_linker`, count PASS if
+  instantiate fails with a LINK error (ImportTypeMismatch / UnknownImport /
+  ImportKindMismatch), not a runtime trap; (4) targeted regen for gc/type-
+  subtyping. First step: check whether the unlinkable .wasm fixtures are
+  extracted (cyc184 had to add the copy case) — `ls` the dir + read manifest.
+- **Exit-condition**: gc/type-subtyping `assert_unlinkable` directives counted +
+  passing (verifies cyc192 reject-non-subtype direction); NO regression to all
+  5 proposals / gc 349/96/60 / multi-mem 407 / EH 34; 0 panics; exit 0. If the
+  unlinkable fixtures aren't extractable (cyc184-style regen gap that balloons),
+  close the bundle on cyc192's positive win + D-202, pivot to realworld/p10.
 
 ## §10 close map (after this bundle)
 
