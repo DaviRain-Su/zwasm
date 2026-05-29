@@ -1,0 +1,129 @@
+---
+ADR: 0126
+Title: WasmGC structural type canonicalization + iso-recursive rec-group subtyping
+Status: Accepted
+Date: 2026-05-29
+Related: ADR-0124 (structural subtype validation lattice), ADR-0121 (struct/array typedef parse + RTT layout), ADR-0116 (GC roots + RTT + i31), ADR-0123 (typed-ref ValType)
+---
+
+## Context
+
+The 10.G-wasmgc bundle reached **gc return 343/407** (cyc166). The
+remaining gc return-fails are no longer per-op gaps — they are the deep
+**type-system tail**, all rooted in one divergence: zwasm tracks defined
+types **nominally** (by flattened type-section index), but Wasm 3.0 GC
+treats them **structurally / canonically**.
+
+Two intertwined gaps (D-198), confirmed by the cyc167 survey:
+
+1. **Structural canonicalization gap.** Two structurally-identical
+   typedefs at different indices are distinct to us but EQUAL to the
+   spec. `ValType.eql` compares concrete refs by index
+   (`a_idx == b_idx`); `gcConcreteReaches` walks the declared
+   supertype chain by index. So:
+   - `ref_test` **test-canon**: `$t1` and `$t1'` are both
+     `(sub $t0 (struct (field i32)))` at distinct indices →
+     `ref.test (ref $t1') <value of type $t1>` wrongly returns false.
+   - Cross-module func imports (`type-subtyping.45/46/48/50`):
+     the Linker's `sigEqual` uses `ValType.eql` (index identity), so a
+     structurally-identical param/result type at a different index in
+     the importer vs the exporter → `SignatureMismatch` / `UnknownImport`.
+
+2. **Iso-recursive subtyping gap.** `(rec ...)` group identity is
+   discarded at decode (types flatten to consecutive indices;
+   `supertypes[i]` survives, rec-group membership does not). The
+   validator's `gcConcreteReaches` / `gcFieldSubtype` have no
+   **coinductive** rule: a recursive typedef whose field references
+   itself (`(rec (type $t (sub (struct (field (ref $t)))))`) — or a
+   cross-rec-group subtype with self-references — is not handled per
+   Wasm 3.0 GC §4.3.4. The remaining `type-subtyping` `run exp=1 got=0`
+   value-fails need this.
+
+These are spec-defined (Wasm 3.0 GC §4.2.8 subtyping / §4.3.4
+defined-type subtyping), so this ADR records HOW we implement them and
+rejects the under-validating alternatives — not a free design choice.
+ADR-0124 already established the parse-vs-validate coupling caution
+(cyc122: a parse-only change regressed `gc invalid` 55→40), so any
+type-model change MUST be verified against the FULL corpus
+(all proposals + the assert_invalid set), not just the target fixtures.
+
+## Decision
+
+Implement **canonical structural type equivalence** + **iso-recursive
+(coinductive) rec-group subtyping** per the spec, in two phases:
+
+**Phase-10a — Structural canonicalization (lands first).**
+Compute a **canonical type id** for every defined type from its
+*comptype structure* (kind + fields/elements/params/results, their
+storage/mutability, and — recursively — the canonical ids of any
+concrete refs they contain, with rec-group self-references resolved
+positionally). Two types with the same canonical id are
+interchangeable. Consult canonical ids (not raw indices) in:
+- `ValType.eql` for concrete refs (or an equivalent canonical compare
+  at the call sites: subtype checks, `ref.test`/`ref.cast` runtime
+  match, cross-module `sigEqual`).
+- The runtime RTT check (`concreteReaches` / `gcRefMatchesNonNull`) so
+  `ref.test (ref $b) <obj of canonically-equal type $a>` → true.
+
+Fixes test-canon + the 4 cross-module import signature fails.
+
+**Phase-10b — Iso-recursive coinductive subtyping (lands second).**
+Add a `visiting` set to the type-section conformance check so a field
+reftype pointing at a type still under validation is **provisionally
+assumed** to satisfy the coinductive hypothesis (Wasm 3.0 GC §4.3.4),
+while finality / forward-ref / multi-supertype invariants still apply.
+Extends `gcFieldSubtype` / `gcConcreteReaches` to thread the visiting
+set. Fixes the remaining `type-subtyping` validator fails.
+
+**Mechanism note (not load-bearing; finalized in impl):** the canonical
+id is preferentially computed at type-section decode / `materialiseGcTypes`
+(closed-world, once per module) and stored alongside `supertypes` /
+`TypeInfo`, so per-check cost stays O(1)–O(chain). Whether it is an
+index-remap or a parallel `canonical_id[]` slice is an implementation
+choice resolved at Phase-10a landing; both preserve `ObjectHeader`/Value
+layout (no Value-representation change).
+
+## Alternatives (rejected)
+
+- **Nominal-only (status quo).** Under-validates: structurally-equal
+  types stay distinct → test-canon + cross-module imports fail; spec
+  non-conformant.
+- **Per-check structural deep-compare (no canonical id).** Recompute
+  structural equivalence on every subtype check. Correct but O(type
+  size) per check on the validator hot path; the canonical-id memo is
+  strictly better.
+- **Land iso-recursive before canonicalization.** Rejected: iso-
+  recursive alone doesn't fix the cross-module / test-canon canonical
+  equality; canonicalization is the prerequisite (cross-rec-group
+  equivalence needs canonical ids first).
+- **One mega-commit.** Rejected: the parse-coupling regression risk
+  (ADR-0124 / cyc122) demands the canonicalization land + be full-corpus-
+  verified before the coinductive validator change stacks on top.
+
+## Consequences
+
+- Cross-module GC type imports + `ref.test`/`ref.cast`/`br_on_cast`
+  over structurally-equal types become spec-correct.
+- Recursive + mutually-recursive rec-group typedefs validate per spec.
+- No Value / `ObjectHeader` layout change; validator hot path stays
+  O(1)–O(chain) (canonical id is a memo, not a per-check walk).
+- Regression surface = the WHOLE type-section decode + subtype lattice
+  (load-bearing). Each phase MUST verify FULL test-spec (all proposals
+  + assert_invalid) exit 0 + no `gc invalid` regression, per ADR-0124.
+- D-198 discharges across Phase-10a + Phase-10b.
+
+## References
+
+- Wasm 3.0 GC §4.2.8 (subtyping), §4.3.4 (defined-type / iso-recursive
+  subtyping), §3.3 (rec-groups).
+- ADR-0124 (structural subtype validation lattice; parse-vs-validate
+  coupling caution).
+- D-198 (`.dev/debt.md`).
+- cyc167 survey (this ADR's Context + phased plan).
+
+## Revision history
+
+- 2026-05-29 — Initial draft + Accept (cyc167). Autonomous per the
+  session's standing mandate to investigate + apply deep GC work; the
+  conformance rules are spec-pinned, so this records the
+  implementation strategy + the phased landing, not a free choice.
