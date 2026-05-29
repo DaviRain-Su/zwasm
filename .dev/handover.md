@@ -6,18 +6,18 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 130 (`dc9d539a`) — `evalConstExprValue` handles the
-  `ref.i31` const expr (`i32.const N; ref.i31; end`) at instantiation.
-  Last gap for core i31: handlers were already registered (ext_i31_ops),
-  validate fixed cyc124-129, only global-init eval remained. **gc return
-  pass 2→18 (+16), trap 0→2** — full i31 pipeline works end-to-end
-  (i31.0 + i31.4). No regression. test+lint green. **First big gc
-  return-pass jump.**
-- cyc129 (`0a3826ac`) ref.i31 non-null result (i31.0 validates); cyc128
-  (`d6042f29`) scanInitExpr GC const-expr; cyc127 D-197 split; cyc126 rec
-  parse + finality (return 0→2, invalid 55→57); cyc124-125 subtype validate.
-- Runner EXECUTES via interp (`Instance.invoke` → `dispatch.run`), NOT
-  JIT. GC interp handlers (i31/struct/array) registered at api/instance.zig:883+.
+- **HEAD**: cycle 131 (`5ed44656`) — decode i31ref element segments
+  (`i32.const N; ref.i31; end` init; store i31-encoded value in funcidxs
+  slot, interpreted by elem_type at table-init) + skip funcidx
+  range-check for non-func-family segments. Advanced gc/i31.1 past
+  preDecode → now fails func loop at **func[3] InvalidFuncIndex** (a
+  validator gap on i31ref table ops). Corpus counts unchanged (substrate);
+  test+lint green.
+- cyc130 (`dc9d539a`) ref.i31 const-expr eval → **gc return 2→18, trap
+  0→2** (i31 E2E, first big jump); cyc129 ref.i31 non-null; cyc128
+  scanInitExpr GC const-expr; cyc127 D-197 split; cyc126 rec+finality.
+- Runner EXECUTES via interp; GC handlers (i31/struct/array) +
+  table.get/grow/fill/copy/init (generic) registered at api/instance.zig.
 - cyc120 (`5db875b0`): cross-module EH propagation + caller-frame catch
   → **EH corpus FULLY GREEN 34/34** (bundle 10.E CLOSED; D-192 PROVEN).
 - **Bundle 10.E-eh-tail CLOSED** — exit (return ≥ 33/34) met at 34/34;
@@ -47,22 +47,21 @@
 - **Exit-condition**: gc corpus return pass ≥ 50/407 (first execution
   slice via struct/array) — refine as chunks land.
 
-## Active task — cycle 131: i31.1/3/5/6 (tables of i31ref) ValidateFailed — **NEXT**
+## Active task — cycle 132: i31.1 func-loop gap — func[3] InvalidFuncIndex — **NEXT**
 
-Core i31 (i31.0/4) DONE — full pipeline works. i31.1/3/5/6 still
-ValidateFailed=49 (no return gain). They're tables of i31ref / anyref
-with i31 init + table ops (size/get/grow/fill/copy/init per manifest).
-Likely gaps: (a) the `(ref i31)` ELEMENT-segment init expr eval (mirror
-cyc130's evalConstExprValue ref.i31 — find the element-segment
-evaluator; may be a SEPARATE path from evalConstExprValue), and/or (b) a
-validator gap on table ops over i31ref tables, and/or (c) the `0x40`
-active-table-with-initexpr form. Localize i31.1 (smallest table
-fixture): re-add the bounded func-loop / preDecode probe (cyc127/129
-pattern) → exact error → fix. After i31: struct/array EXECUTION
-(handlers registered at api/instance.zig:886-887; needs struct.new heap
-alloc via collector + TypeInfo materialise at instantiate — bigger).
-Observable: gc return/validate pass ↑; no regression to 18 return / 2
-trap / 57 invalid.
+cyc131 advanced i31.1 past preDecode; it now fails the func loop at
+func[3] (`fill`: `local.get;local.get;ref.i31;local.get;table.fill 0`)
+with InvalidFuncIndex. **Leading hypothesis**: `frontendValidate` passes
+`0, // elem_count` to `validateFunctionWithMemIdxAndTags`
+(instantiate.zig ~354) — so `table.init`/`elem.drop` (and maybe the
+validator's table-op path) reject any element-segment reference. Fix:
+thread the actual element-segment count into the validator call. This is
+GENERIC (helps every table.init user, not just gc). Confirm by
+instrumenting which validator check raises InvalidFuncIndex for i31.1
+func[3] (don't guess — cyc131 lesson). Then i31.1/3/6 should advance to
+instantiate/exec (table-init reads the i31-encoded element slots by
+elem_type — verify table-init consumes them). Observable: gc return ↑
+(i31.1/3/5/6 ~40 asserts → toward the ≥50 exit); no regression to 18/2/57.
 
 ## Larger §10 work (later bundles)
 
