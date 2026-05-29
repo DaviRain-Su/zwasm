@@ -6,61 +6,62 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 117 (`<this commit>`) — probe-only: localized the 4
-  remaining EH return fails (`catch-imported`/`-alias`/`imported-mismatch`
-  = cross-module identity; `try-with-param` = standalone try_table-param
-  trap). Docs-only. Prior code HEAD cyc116 (`092e990d`) below.
-- **cyc116 (`092e990d`)** — **cross-module EH tag import binding
-  (ADR-0114)**. Mirrored the cross-module FUNC path:
-  `ImportBinding.tag` + `Linker.Payload.cross_module_tag` +
-  `defineCrossModuleTag` + the linker `.tag` resolve arm;
-  `Instance.tag_exports` side-table (tags kept out of
-  `exports_storage`/`ExternKind` — c_api clean, Option C); runner
-  `.register` tag-export binding; instantiate `.tag` arm +
-  `checkImportTypeMatches` (param-count); and `rt.tag_param_counts`
-  now spans [imported ++ defined] (was defined-only → fixed a throwOp
-  underflow, same import-offset class as cyc114). **exception-handling
-  corpus 0→30/34 return, 0→2/2 trap, 0→4/4 exception** (direct-binary
-  verified); no regression; no crash.
-- Prior: 115 survey/plan (`1a1d3c8f`); 114 imported-tags-in-validator
-  (`5fdab0bf`); 113 catch_ref matching; 112 exnref ValType.
-- Mac test+lint green cyc116. ubuntu: cyc116 HEAD green
-  (`OK (HEAD=4512fefa)`); cyc117 docs-only (no kick).
+- **HEAD**: cycle 118 (`fd29cbda`) — `block`/`if` param-blocktype fix:
+  `mvp.zig` blockOp/ifOp used the packed `(params<<8)|results`
+  (lower.zig readBlockArity) as the whole label arity → `try_table
+  (param i32)` set arity=0x100 > max_block_arity → trap. Now low byte =
+  arity, height excludes params. **EH return 30→31/34** (try-with-param
+  fixed); +interp unit test; no regression. (cyc117 was probe-only.)
+- **cyc116 (`092e990d`)** — cross-module EH tag import binding
+  (ADR-0114, mirror of the FUNC path: `ImportBinding.tag` + Linker
+  `defineCrossModuleTag` + `Instance.tag_exports` Option-C side-table +
+  runner `.register` binding + `rt.tag_param_counts` imported++defined):
+  **EH 0→30/34 return, 0→2/2 trap, 0→4/4 exception**. Detail in the EH
+  lesson.
+- Prior: 117 probe (tail localized); 115 survey/plan; 114
+  imported-tags-in-validator (`5fdab0bf`); 113 catch_ref; 112 exnref.
+- Mac test+lint green cyc118. ubuntu: cyc116 HEAD green
+  (`OK (HEAD=4512fefa)`); cyc117 docs-only; cyc118 kick backgrounded.
 
 ## Active bundle
 
 - **Bundle-ID**: 10.E-eh-tail (the 4 remaining EH return fails +
   execution-identity; follows the CLOSED 10.E-xmodule-tags, exit met
   30/34 @ `092e990d`)
-- **Cycles-remaining**: ~3
-- **Continuity-memo**: 30/34 EH return pass. The 4 fails (cyc117
-  direct-binary probe): `catch-imported` + `catch-imported-alias` +
-  `imported-mismatch` = **cross-module identity** (imported `throw`
-  func runs in try_table.0's runtime → its tag index; try_table.1's
-  catch compares its import index → index-based mismatch across
-  modules → uncaught → InvokeFailed; fix = ADR-0114 `*TagInstance`
-  pointer identity, multi-cycle, `TagInstance`/`rt.tags` still don't
-  exist). `try-with-param` = **standalone** try_table-with-PARAM
-  execution trap (NOT tag-related). Cross-module tag RESOLUTION works
-  (v0.1 param-count match). **VERIFY by DIRECT binary run** (`/tmp/c<NN>`
-  + `/bin/ls -t`; zig-build stderr is cache/lossy — D-197 + cache lesson).
-- **Exit-condition**: exception-handling return pass ≥ 33/34 (all
-  non-text-format cases) OR the 4 fails root-caused + a clear next.
+- **Cycles-remaining**: ~2-3
+- **Continuity-memo**: **31/34** EH return pass (cyc118 fixed
+  try-with-param). 3 remaining fails = **cross-module tag identity**:
+  `catch-imported` + `catch-imported-alias` + `imported-mismatch`. The
+  imported `throw` func runs in try_table.0's runtime (its tag index);
+  try_table.1's catch compares its own import index → index-based
+  mismatch across modules → uncaught → InvokeFailed. Fix = ADR-0114
+  `*TagInstance` pointer identity — multi-cycle: create `tag.zig`
+  TagInstance + `rt.tags: []*TagInstance` (populate defined = fresh,
+  imported = copy the binding's source `*TagInstance`) + `Exception.tag`
+  → `*TagInstance` + throw/catch match by pointer across the
+  cross-module thunk. `ImportBinding.tag` currently carries
+  (source_runtime, source_tag_index) — enough to derive the shared
+  `*TagInstance`. **VERIFY by DIRECT binary run** (`/tmp/c<NN>` +
+  `/bin/ls -t`; zig-build stderr is cache/lossy — D-197 + cache lesson).
+- **Exit-condition**: exception-handling return pass ≥ 33/34 (the 3
+  cross-module cases pass via `*TagInstance`) OR root-caused + next.
 
-## Active task — cycle 118: try-with-param trap (tractable tail item)
+## Active task — cycle 119: `*TagInstance` cross-module identity (ADR-0114)
 
-cyc117 probe (direct-binary `[eh117]`) localized the 4 fails:
-`catch-imported` / `catch-imported-alias` / `imported-mismatch`
-(cross-module identity — multi-cycle `*TagInstance`) + `try-with-param`
-(VOID-ERR InvokeFailed — a standalone try_table-with-PARAM execution
-trap, NOT tag-related). **cyc118 = try-with-param** (the tractable one
-first): get the trap reason (the runner's `invokeInstanceVoid` collapses
-to InvokeFailed — re-add an EH probe or surface the trap; D-197), decode
-try-with-param's body, find where the try_table-param entry traps in the
-interp (`mvp.zig` try_table handler — does it move the blocktype params
-onto the try body's stack?). Smallest red, fix, verify try_table.1
-return 30→31/34 by DIRECT binary run. Then cyc119+ = the `*TagInstance`
-substrate for the 3 cross-module fails (ADR-0114; plan in the EH lesson).
+The 3 remaining EH fails are cross-module tag identity (see
+continuity-memo). Multi-cycle substrate per ADR-0114 + the cyc115 EH
+lesson plan. Smallest first observable step: create `tag.zig`
+`TagInstance` (heap object; address = identity) + `Runtime.tags:
+[]*TagInstance`, populate at instantiate (defined tags → fresh
+TagInstance at slot imp_count+i; imported → copy the
+`ImportBinding.tag` source's `*TagInstance`). Unit test: rt.tags
+populated with distinct pointers. THEN (next cycle) thread
+`Exception.tag` → `*TagInstance` + throw/catch match by pointer (the
+interp throw/catch + the cross-module thunk's exception propagation) →
+the 3 fails pass. Deviation watch: `Runtime.tags` + `Exception.tag`
+shape are §4-adjacent but implement Accepted ADR-0114 (no new ADR);
+file only if the identity model itself changes. **VERIFY by DIRECT
+binary run** (EH return 31→34).
 
 ## Larger §10 work (later bundles)
 
@@ -70,13 +71,14 @@ substrate for the 3 cross-module fails (ADR-0114; plan in the EH lesson).
   `resolveFuncrefGlobals`; externref-elem runner arg parsing.
 - **10.P close gate** — user touchpoint by construction.
 
-## Spec runner observable (cycle-116, verified by DIRECT binary run)
+## Spec runner observable (cycle-118, verified by DIRECT binary run)
 
 ```
 [memory64           ] return=337 trap=205 invalid=83  (all pass)
 [tail-call          ] return=71  trap=7   invalid=24  (all pass)
-[exception-handling ] return=34(pass=30 fail=4) trap=2(pass) invalid=7(pass) exception=4(pass)
-   └─ cyc116: cross-module tag binding → 0/34→30/34. 4 fails = tail.
+[exception-handling ] return=34(pass=31 fail=3) trap=2(pass) invalid=7(pass) exception=4(pass)
+   └─ cyc116 tag binding 0→30/34; cyc118 try-with-param →31/34.
+      3 fails = cross-module *TagInstance identity (cyc119+).
 [function-references] return=39(pass=32 fail=1) trap=4(pass) invalid=18(pass)
 [gc                 ] return=407(fail) trap=100(fail) invalid=60(pass=55 fail=5)
 [multi-memory       ] return=407(pass=387 fail=20) trap=238(pass=237 fail=1)
