@@ -6,16 +6,16 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 127 (`e14380ec`) — **D-197 partial discharge**: split
-  `Engine.CompileError` into `ParseFailed` vs `ValidateFailed`.
-  Behavior-neutral (no pass-count change); the runner now shows the
-  axis. **Revealed: gc ParseFailed=0, ValidateFailed=51** — GC
-  type-section PARSE is COMPLETE; ALL 51 remaining gc failures are
-  VALIDATE (cyc126's "execution-blocked" guess was wrong). Histogram +
-  finding in new lesson. test+lint green; no regression.
-- cyc126 (`7a44b8f4`) 0x4E rec parse + 0x50/0x4F finality fix (gc
-  return 0→2, invalid 55→57); cyc125 (`2d88524d`) subtype validate;
-  cyc124 validation half; cyc123 ADR-0124; cyc121 survey.
+- **HEAD**: cycle 128 (`d6042f29`) — `scanInitExpr` accepts the GC
+  constant-expression subset (`0xFB`: ref.i31 / struct.new[_default] /
+  array.new[_default] / array.new_fixed). Was the i31 pre-func-loop
+  block: a `(ref i31)` global init `i32.const N; ref.i31; end` failed to
+  scan → decodeGlobals → preDecode → ValidateFailed. **gc ValidateFailed
+  51→50** (i31.4 now passes validate); foundational for all gc
+  global/element GC initializers. test+lint green; no regression.
+- cyc127 (`e14380ec`) D-197 split (ParseFailed=0/ValidateFailed=51);
+  cyc126 (`7a44b8f4`) rec parse + finality fix (return 0→2, invalid
+  55→57); cyc125 subtype validate; cyc124 validation half; ADR-0124.
 - cyc120 (`5db875b0`): cross-module EH propagation + caller-frame catch
   → **EH corpus FULLY GREEN 34/34** (bundle 10.E CLOSED; D-192 PROVEN).
 - **Bundle 10.E-eh-tail CLOSED** — exit (return ≥ 33/34) met at 34/34;
@@ -45,24 +45,21 @@
 - **Exit-condition**: gc corpus return pass ≥ 50/407 (first execution
   slice via struct/array) — refine as chunks land.
 
-## Active task — cycle 128: attribute gc VALIDATE failures, fix dominant valid-fixture class — **NEXT**
+## Active task — cycle 129: next i31 validate gap → then i31 execution — **NEXT**
 
-cyc127 proved the 51 remaining gc failures are all VALIDATE (parse
-complete). The validate-error histogram (whole corpus, MIXES valid-gaps
-+ correct invalid-rejections — see lesson): StackTypeMismatch×51,
-InvalidAlignment×37, StackUnderflow×28, InvalidFuncIndex×17,
-ArityMismatch×16, NotImplemented×10 (=struct/array get_s/u packed,
-deferred). i31.0/1/3/4/5/6 fail BEFORE the func loop (preDecode/
-validateTypeSection/early-return), a distinct sub-class.
-Chunk: FIRST attribute — for the ~16 gc VALID return fixtures, find
-which validate error each hits (re-add the throwaway per-func probe OR
-map by manifest assertion type). THEN fix the dominant valid-fixture
-validate gap (likely a GC-op typing bug in `validator.dispatchPrefixFB`
-~1315, e.g. struct.get/array.get result typing, or ref.cast narrowing).
-Start with the i31 pre-func-loop sub-class (smallest, isolatable): pick
-i31.0, trace which `return false` in preDecodeSectionBodies/
-validateTypeSection fires. Observable: gc return/invalid pass ↑, no
-regression to 2 return / 57 invalid.
+cyc128 fixed the i31 global-init scan (i31.4 now validates). i31.0/1/3/
+5/6 still ValidateFailed on a SUBSEQUENT gap (cascading). All are VALID
+fixtures (no assert_invalid). Next: localize the i31.0 next gap — it now
+reaches the func loop; likely `ref.null i31` (`0xD0 0x6C`) heaptype in
+the validator, or global.set type-check vs a `(ref i31)` global. Bounded
+probe (the cyc127 func-loop catch print) → find the exact error/op →
+fix. NOTE: even after validate passes, i31 fixtures need EXECUTION
+(interp has NO 0xFB handler per the cyc127 survey — ref.i31/i31.get
+return Trap.Unreachable). So the i31 return-pass needs BOTH the remaining
+validate fix(es) AND interp ref.i31/i31.get_s/u handlers + register
+(survey: ~25 lines, no heap) + global-init-expr eval of ref.i31. Bundle
+the validate-tail + i31 execution to land a real `gc return` pass.
+Observable: gc return pass ↑ (target i31.0 new/get_u/get_s), no regression.
 
 ## Larger §10 work (later bundles)
 
@@ -79,7 +76,7 @@ regression to 2 return / 57 invalid.
 [tail-call          ] return=71  trap=7   invalid=24  (all pass)
 [exception-handling ] return=34/34 trap=2/2 invalid=7/7 exception=4/4  ✅ FULLY GREEN
 [function-references] return=39(pass=32 fail=1) trap=4(pass) invalid=18(pass)
-[gc                 ] return=407(pass=2 fail=382) trap=100(fail) invalid=60(pass=57 fail=3) malformed=1(pass) ParseFailed=0 ValidateFailed=51  ← 10.G (cyc127)
+[gc                 ] return=407(pass=2 fail=382) trap=100(fail) invalid=60(pass=57 fail=3) malformed=1(pass) ParseFailed=0 ValidateFailed=50  ← 10.G (cyc128)
 [multi-memory       ] return=407(pass=387 fail=20) trap=238(pass=237 fail=1)
 ```
 
