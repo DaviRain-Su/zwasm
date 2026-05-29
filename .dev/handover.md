@@ -6,32 +6,31 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 142 (`e0b5b8e3`) — array.new_data reads NATURAL element
-  size from the data segment (was the uniform 8-byte slot size → over-read
-  → OOB trap). **gc return 61→62** — array_new_data.2 (i32 from data seg)
-  passes. No regression. The 3 remaining array_new_data are packed i8/i16.
+- **HEAD**: cycle 143 (finding, no src delta) — instrumented the
+  type-subtyping ValidateFailed family with an op-probe: it is
+  **RTT-blocked** (`br_on_cast` 0xFB 0x18 ×6 + `br_on_cast_fail`
+  0xFB 0x19 ×3 dominate). Ruled out validateTypeSection / concrete
+  `subtypeCtx`-chain / ref.eq (lesson `gc-type-subtyping-is-rtt-blocked`).
+  gc return still 62. cyc142 (`e0b5b8e3`): array.new_data natural
+  element-size (61→62).
 - cyc141 array exec + rt.datas production fix (multi-memory +6→393);
   cyc138-140 struct/array const-expr + array.new_data/elem; cyc130-137
   i31/struct/array. gc return 0→…→62, trap 18, multi-memory 393.
 - Runner EXECUTES via interp; gc_heap + gc_type_infos + rt.datas all
   materialised at instantiate. Arrays use 8-byte uniform slots
   (type_info.slot_size); data-seg elements are NATURAL width.
-- cyc120 (`5db875b0`): cross-module EH propagation + caller-frame catch
-  → **EH corpus FULLY GREEN 34/34** (bundle 10.E CLOSED; D-192 PROVEN).
-- **Bundle 10.E-eh-tail CLOSED** — exit (return ≥ 33/34) met at 34/34;
-  delta cyc119 (`9d5a6212`, *TagInstance: 31→32) + cyc120 (32→34).
-  This completes the full EH cross-module substrate (cyc110–120,
-  ADR-0114): parser→validator→instantiate-binding→*TagInstance
-  identity→cross-module propagation. D-192 EH clause PROVEN.
-- Mac green cyc120. ubuntu: cyc120 HEAD green (`OK (HEAD=40d7f0d0)`);
-  cyc121-123 docs-only (survey/finding/ADR-0124, no kick).
+- **Bundle 10.E-eh-tail CLOSED** cyc120 (`5db875b0`) — EH corpus FULLY
+  GREEN 34/34 (cross-module propagation + caller-frame catch; ADR-0114
+  full substrate cyc110–120; D-192 EH clause PROVEN). Lesson
+  `eh-cross-module-tag-substrate-scope` has the journey.
+- Mac+ubuntu green through cyc142 (`OK (HEAD=a763d44a)`).
 
 ## Active bundle
 
 - **Bundle-ID**: 10.G-wasmgc (WasmGC spec corpus — the largest
   remaining §10 gap; follows the CLOSED 10.E EH chain)
-- **Cycles-remaining**: ~5 (array const-expr → array exec returns →
-  ref.test/cast → packed get_s/u → array_copy/data/elem)
+- **Cycles-remaining**: ~4 (RTT sub-bundle: ref.test → ref.cast →
+  br_on_cast/br_on_cast_fail; extended target ≥90 needs these)
 - **Continuity-memo**: parse + i31 + struct narrowing/exec all DONE
   (gc return 0→55). Pattern that worked repeatedly: a frontendValidate
   call dropped GC context (elem_count, kinds/struct_defs) → thread it;
@@ -45,21 +44,23 @@
 - **Exit-condition**: gc return ≥ 50 **MET at cyc138 (55)**. Extended
   target: gc return ≥ 90 (array exec + ref.test/cast) — refine as lands.
 
-## Active task — cycle 143: type-subtyping ValidateFailed (×~10) — **NEXT**
+## Active task — cycle 144: RTT sub-bundle, chunk 1 = `ref.test` — **NEXT**
 
-i31/struct/array exec largely done (return 62). Remaining gc families
-(pick most tractable; INSTRUMENT first — cyc131 lesson):
-- **type-subtyping.6/7/9/12/17/19/21/24/39/45 (ValidateFailed)** + .30/
-  40/46/48/50 (instantiate SignatureMismatch/UnknownImport). The
-  ValidateFailed ones are likely validateTypeSection edge cases (rec-
-  group forward-supertype refs — the `s >= i` check I kept strict, or
-  multi-supertype, or deeper subtype chains). The instantiate ones are
-  cross-module GC type LINKING (c_api import/export type match for GC
-  types). Localize one sub-group → fix.
-- **DEFERRED design points** (note, don't start lightly): RTT —
-  ref.test/cast/br_on_cast (×8, ADR-0116 RTT); packed get_s/u — i8/i16
-  storage (×~6: struct.10, array_new_data.0/1/3, array.0/7/8; ADR-0121
-  D3 needs packed ValType). Each is a multi-cycle sub-feature.
+cyc143 instrumentation proved the largest remaining gc return family
+(type-subtyping ×~10) is RTT (`br_on_cast`). RTT is the extended-target
+path. Chunk 1 = **`ref.test` (0xFB 0x14) validate + exec**:
+- **Step 0 survey REQUIRED** (new runtime behaviour): RTT type-test in
+  GC ref-interp + spec §3.3.5.5 / §4.4.5. Heap-type decode (ht byte →
+  abstract any/eq/i31/struct/array/none/func/extern OR concrete $idx).
+- **Validate**: pop a ref (subtype-compatible with ht's hierarchy top),
+  push i32. **Exec**: pop ref value, test runtime type <: ht against
+  `ObjectHeader.info` (concrete $idx → walk supertype chain via the
+  per-instance type infos; abstract → kind check; i31ref → low-bit);
+  push 1/0. Register handler in `feature/gc/` dispatch like struct/array.
+- **Re-derive** the discarded concrete-`subtypeCtx`-chain fix HERE if
+  ref.test/cast operand checks need it — it becomes observable in this
+  cycle's fixtures (was unobservable solo — see lesson).
+Then chunk 2 ref.cast (trap on fail), chunk 3 br_on_cast/_fail (branch).
 No regression to 62 return / 18 trap / 57 invalid / 393 multi-mem.
 
 ## Larger §10 work (later bundles)
@@ -83,10 +84,11 @@ No regression to 62 return / 18 trap / 57 invalid / 393 multi-mem.
 
 ## Open questions / blockers
 
-- D-197 (now-relevant at 10.G): `Engine.compile`/`frontendValidate`
-  collapse specific errors to ParseFailed/bool — surfacing the real
-  validate/decode error would make the gc 384-fail debugging precise.
-  Discharge candidate this bundle.
+- D-197: parse/validate/instantiate axis split DONE cyc127
+  (ParseFailed/ValidateFailed/InstantiateFailed). Surfacing the
+  *specific* validate error (which op/why) is now done ad-hoc via the
+  cyc143 op-probe technique (lesson `gc-type-subtyping-is-rtt-blocked`);
+  a permanent diag emitter is the remaining D-197 tail (debt row).
 - D-192: EH clause PROVEN (EH 34/34). funcrefs clause proven cyc108.
 
 ## Key refs
