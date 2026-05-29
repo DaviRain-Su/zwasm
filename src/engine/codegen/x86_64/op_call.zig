@@ -1,4 +1,5 @@
 //! x86_64 emit pass — call / call_indirect family (D-030 chunk-g).
+// FILE-SIZE-EXEMPT: per-call-class emit catalog (call / call_indirect / call_ref + shared marshalCallArgs / captureCallResult / overflow-buffer helpers) — single concern, no valid extraction (per ADR-0099)
 //!
 //! Extracted from `emit.zig` per ADR-0023 §269-314 + the ARM64
 //! ADR-0021 sub-b mirror shape (`arm64/op_call.zig`). Behaviour
