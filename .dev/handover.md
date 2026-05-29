@@ -6,37 +6,35 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `157595d6`→(this cyc211 docs commit). funcref-call + tail-call JIT POSITIVE
-  paths done both arches (call_ref + return_call_ref + direct/indirect/recursion
-  return_call + clang musttail; all ubuntu-verified). **D-208 (open, close-blocker)**:
-  x86_64 call_ref/return_call_ref of a NULL funcref returns Ok(0) not trapping (arm64 OK,
-  gated). cyc211 static investigation ruled out ALL 6 hypotheses (JZ-encoding / patcher /
-  ref.null-value / regalloc[shared+arm64-correct] / trap-stub-emission[unreachable proves
-  it] / fixup) — bug is in x86_64 EMIT BYTES but elusive to static analysis. D-205/D-207
-  discharged; open: D-208, D-206 (cross-module TC, harness-gated).
+- **HEAD**: `0caf9ffb`→(cyc212 docs). funcref-call + tail-call JIT POSITIVE paths done
+  both arches (call_ref + return_call_ref + direct/indirect/recursion return_call + clang
+  musttail; all ubuntu-verified). cyc212 wrote the JIT-codegen-recipe lesson
+  (`2026-05-30-jit-funcref-tail-call-codegen-recipe`) + sharpened D-208. **D-208 (open,
+  close-blocker)**: x86_64 call_ref/return_call_ref of a NULL funcref returns Ok(0) not
+  trapping (arm64 OK, gated). All 6 static hypotheses ruled out (bug in x86_64 emit bytes,
+  elusive); `compileOne` is comptime-arch-locked so the practical root-cause path is an
+  ubuntu byte-dump (see D-208). D-205/D-207 discharged; open: D-208, D-206 (cross-module TC).
 - Earlier: 10.TC same-module tail-call (direct/indirect/recursion + clang musttail
   → 15, cyc198-201); EH corpus 34/34 (ADR-0114); cyc190-196 gc global-init/subtyping.
   Phase 10 CLOSE-ELIGIBLE (spec corpus interp-complete); Runner EXECUTES via interp,
   gc_heap materialised at instantiate. 10.M memory64 + 10.E EH JIT largely done;
   10.G GC JIT = interp-only (extreme: regalloc stack-map, ADR-0113 §C).
-- **Step 0.7 on resume**: cyc210+cyc211 are docs-only (10.P rationale refresh + D-208
-  investigation) → no ubuntu kick; green holds. Last code-kick: cyc209 ubuntu
-  `OK (HEAD=9dbc84ee)` GREEN (D-208 gate recovery — gated null-trap tests skip on x86_64).
+- **Step 0.7 on resume**: cyc210-212 are docs-only (10.P rationale + D-208 investigation +
+  lesson) → no ubuntu kick; green holds. Last code-kick: cyc209 ubuntu `OK (HEAD=9dbc84ee)`
+  GREEN (D-208 gate recovery — gated null-trap tests skip on x86_64).
 
-## Active task — D-208 byte-disasm harness (x86_64 null-check)  **NEXT**
+## Active task — D-208 root-cause via ubuntu byte-dump (x86_64 null-check)  **NEXT**
 
-Static analysis exhausted (all 6 hypotheses ruled out, see D-208). Root-cause needs
-seeing the EMITTED x86_64 bytes. Build a Mac-runnable byte-dump (x86_64 emit is pure
-byte-gen): mirror `src/engine/codegen/x86_64/emit_test_int.zig` — construct a ZirFunc
-`[ref.null $sig, call_ref $sig, end]`, compute real liveness (`ir/analysis/liveness.zig`)
-+ regalloc (`shared/regalloc.zig`), call `x86_64/emit.zig` compile → `out.bytes`, write
-to a tmp file, `ndisasm -b64` it (debug_jit_auto skill). INSPECT: the `OR r64,r64`, the
-`JZ rel32` (its PATCHED disp — does it point at the trap stub?), and the trap stub
-(does it set trap_flag + RET?). The bug is one of those bytes. Fix → re-run the
-(aarch64-gated) null-trap test logic mentally → ungate → 1 ubuntu round-trip to verify.
+Static analysis exhausted (all 6 hypotheses ruled out, see D-208). `compileOne` is
+comptime-arch-locked (`shared/compile.zig:42` + x86_64 regalloc params) → a faithful Mac
+byte-dump needs replicating compileOne with x86_64 params (substantial). **Practical path:
+ubuntu byte-dump** — add an env-gated x86_64-emit byte-dump (or reuse a JIT byte-dump
+mechanism; check debug_jit_auto), run the `ref.null; call_ref` null-trap module on ubuntu
+via SSH, scp the bytes, `ndisasm -b64` on Mac → SEE the JZ's PATCHED disp (→ trap stub?)
++ the trap stub (sets trap_flag + RET?). Bug is in those bytes; fix → ungate → ubuntu-verify.
 Deferred: cross-module TC (D-206, multi-module harness); GC JIT (10.G, extreme).
-**Yield/user note**: JIT milestone delivered; a user check-in on Phase-10-close-vs-grind
-is high-value (see Open questions yield-taper note).
+**Yield/user note**: JIT milestone delivered; D-208 (close-blocker) needs an ubuntu-iterate
+debug session. A user check-in on Phase-10-close-vs-keep-grinding is high-value (Open questions).
 
 ## §10 close map
 
