@@ -6,12 +6,12 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc154 (finding) — M3-histogrammed the gc compile-fails;
-  biggest cluster = **6 type-subtyping fixtures (.9/12/21/24/39/45) over-
-  rejected by validateTypeSection** (iso-recursive rec-group structural
-  subtype — deep/ADR-grade) → filed **D-198** with the probe. No src delta.
-  cyc153 (`a2ebd0bf`): br_on_cast exec → gc return 117→145. RTT exec arc
-  (cyc149-153) drove **gc return 62→145**; trap 56 / invalid 57.
+- **HEAD**: cyc156 (`76e1868c`) — **ref.eq opcode fix**: ref.eq is 0xD3
+  (single-byte), was mis-wired at 0xFB 0x13 (= array.init_elem); moved to
+  0xD3 + tightened opRefEq to require eqref operands. ref.eq is pervasive
+  → **gc return 145→226 (+81)**, invalid held 57, trap 56, no regression
+  (FULL test-spec exit 0). cyc149-153 RTT exec arc; **gc return 62→226**
+  across the session. cyc154 filed D-198 (rec-group subtype, deep).
 - cyc147-148 **ADR-0125 packed COMPLETE** (A union rename → B-validate
   decode → B-exec get_s/u): gc return 62→116, trap 18→54, ValidateFailed
   27→14, invalid 57 held. cyc146 ADR-0016 M3 + concrete-subtype coercion.
@@ -46,27 +46,16 @@
 - **Exit-condition**: gc return ≥ 90 **EXCEEDED (116 at cyc148)**. Open
   target: maximise return (RTT exec) toward the corpus ceiling.
 
-## Active task — cycle 155: array bulk ops (copy/init) — **NEXT**
+## Active task — cycle 157: array bulk ops (copy/init) — **NEXT**
 
-RTT arc DONE (return 145). **VERIFY runtime changes by full test-spec +
-exit-code + panic grep** (lesson `runtime-exec-change-needs-testspec-
-exitcode`). Most tractable remaining return-lever (established pattern):
-- **array.copy / array.init_data / array.init_elem**. ZirOps exist
-  (zir_ops.zig:542-544). The 0xFB dispatch (validator ~1411-1428 + lower
-  + interp) handles array 6-16, then `19 => ref.eq`, `20+ => ref.test`;
-  **sub 17 (array.copy) + 18 (array.init_data) currently fall to
-  NotImplemented**. ⚠ RESOLVE FIRST: `wasm-tools dump`/`xxd` array_copy.4
-  + array_init_elem.3 to read the actual 0xFB sub-bytes — the codebase's
-  `19=ref.eq` conflicts with spec `array.init_elem=19`, so confirm each
-  op's real number before wiring (one is likely mis-numbered or the spec
-  orders ref.eq before the array bulk tail). Then validate+lower+exec
-  (copy: dst/src array bounds + element memmove; init_*: segment → slot,
-  mirror array.new_data's dataElemNaturalSize). Fixtures: array_copy.4 /
-  array_init_data.2 / array_init_elem.3.
-- **D-198** (deferred, ADR-grade): rec-group iso-recursive subtype — the
-  6 type-subtyping over-rejects (biggest cluster, but deep). Pick up after
-  array bulk ops if no smaller lever remains.
-No regression to 145 return / 56 trap / 57 invalid / 393 multi-mem.
+**Numbering RESOLVED (cyc156)**: 0xFB 0x11=array.copy(17), 0x12=init_data(18),
+0x13=init_elem(19) — all now correctly NotImplemented (ref.eq moved to 0xD3).
+Implement validate+lower+exec for the three (established pattern; mirror
+array.fill + array.new_data's dataElemNaturalSize). Fixtures array_copy.4 /
+array_init_data.2 / array_init_elem.3 (+ more). VERIFY full test-spec +
+exit-code + panic grep (lesson). After: ref_test/struct init-op gaps,
+extern.0, D-198 (rec-group, ADR-grade).
+No regression to 226 return / 56 trap / 57 invalid / 393 multi-mem.
 
 ## Larger §10 work (later bundles)
 
