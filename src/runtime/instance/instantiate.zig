@@ -1451,7 +1451,14 @@ pub fn instantiateRuntime(
     if (module.find(.data)) |data_section| {
         var datas = try sections.decodeData(a, data_section.body);
         defer datas.deinit();
-        for (datas.items) |seg| {
+        // Populate rt.datas with the (instance-arena-owned) segment bytes
+        // so memory.init / data.drop / array.new_data can read them at
+        // runtime — datas.deinit() frees the decode arena, so dupe into
+        // `a`. (Production previously never set rt.datas; only a test
+        // helper did, so passive segments + array.new_data found it empty.)
+        const seg_bytes = try a.alloc([]const u8, datas.items.len);
+        for (datas.items, 0..) |seg, di| {
+            seg_bytes[di] = try a.dupe(u8, seg.bytes);
             if (seg.kind != .active) continue;
             if (seg.memidx >= rt.memories.len) return error.DataSegmentOutOfRange;
             const target = &rt.memories[seg.memidx];
@@ -1462,6 +1469,9 @@ pub fn instantiateRuntime(
             const dst_end: usize = @intCast(dst_end_u128);
             @memcpy(target.bytes[@intCast(offset)..dst_end], seg.bytes);
         }
+        rt.datas = seg_bytes;
+        rt.data_dropped = try a.alloc(bool, datas.items.len);
+        @memset(rt.data_dropped, false);
     }
 
     if (module.find(.@"export")) |export_section| {

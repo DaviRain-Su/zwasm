@@ -48,6 +48,8 @@ pub fn register(table: *DispatchTable) void {
     table.interp[op(.@"array.new")] = arrayNew;
     table.interp[op(.@"array.new_default")] = arrayNewDefault;
     table.interp[op(.@"array.new_fixed")] = arrayNewFixed;
+    table.interp[op(.@"array.new_data")] = arrayNewData;
+    table.interp[op(.@"array.new_elem")] = arrayNewElem;
     table.interp[op(.@"array.get")] = arrayGet;
     table.interp[op(.@"array.set")] = arraySet;
     table.interp[op(.@"array.fill")] = arrayFill;
@@ -132,6 +134,65 @@ fn arrayNewFixed(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
         const dst_off = ref + array_header_size + i * ai.element.size;
         const dst = heap.bytes[dst_off .. dst_off + ai.element.size];
         @memcpy(dst, std.mem.asBytes(&v)[0..ai.element.size]);
+    }
+    try rt.pushOperand(.{ .ref = @as(u64, ref) });
+}
+
+/// Wasm 3.0 GC §3.3.5.6.7 — `array.new_data $t $d`: pop [offset:i32,
+/// size:i32], build a `size`-element array of $t whose payload is the
+/// raw bytes copied from data segment $d at byte `offset` (element
+/// slots are packed `element.size` bytes — the segment layout matches).
+/// Trap OutOfBoundsLoad if offset + size*element.size exceeds the
+/// segment length; the validator enforced $t is arraydef + $d in range.
+fn arrayNewData(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
+    const rt = Runtime.fromOpaque(c);
+    const inst = @as(*const Instance, @ptrCast(@alignCast(rt.instance orelse return runtime.Trap.NullReference)));
+    const typeidx: u32 = @intCast(instr.payload);
+    const dataidx: u32 = instr.extra;
+    const ai = try resolveArrayInfo(inst, typeidx);
+    const size_i32 = rt.popOperand().i32;
+    const offset_i32 = rt.popOperand().i32;
+    if (size_i32 < 0 or offset_i32 < 0) return runtime.Trap.OutOfBoundsLoad;
+    const size: u32 = @intCast(size_i32);
+    const offset: u64 = @intCast(offset_i32);
+    if (dataidx >= rt.datas.len) return runtime.Trap.OutOfBoundsLoad;
+    const seg: []const u8 = if (dataidx < rt.data_dropped.len and rt.data_dropped[dataidx]) &.{} else rt.datas[dataidx];
+    const byte_len: u64 = @as(u64, size) * ai.element.size;
+    if (offset + byte_len > seg.len) return runtime.Trap.OutOfBoundsLoad;
+    const ref = try allocateArray(rt, typeidx, size, ai.element.size);
+    const heap = rt.gc_heap.?;
+    const payload_start = ref + array_header_size;
+    const off_lo: usize = @intCast(offset);
+    const blen: usize = @intCast(byte_len);
+    @memcpy(heap.bytes[payload_start .. payload_start + blen], seg[off_lo .. off_lo + blen]);
+    try rt.pushOperand(.{ .ref = @as(u64, ref) });
+}
+
+/// Wasm 3.0 GC §3.3.5.6.8 — `array.new_elem $t $e`: pop [offset:i32,
+/// size:i32], build a `size`-element array of $t whose elements are the
+/// `size` ref Values copied from element segment $e starting at
+/// `offset`. Trap OutOfBoundsLoad if offset + size exceeds the segment.
+fn arrayNewElem(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
+    const rt = Runtime.fromOpaque(c);
+    const inst = @as(*const Instance, @ptrCast(@alignCast(rt.instance orelse return runtime.Trap.NullReference)));
+    const typeidx: u32 = @intCast(instr.payload);
+    const elemidx: u32 = instr.extra;
+    const ai = try resolveArrayInfo(inst, typeidx);
+    const size_i32 = rt.popOperand().i32;
+    const offset_i32 = rt.popOperand().i32;
+    if (size_i32 < 0 or offset_i32 < 0) return runtime.Trap.OutOfBoundsLoad;
+    const size: u32 = @intCast(size_i32);
+    const offset: u32 = @intCast(offset_i32);
+    if (elemidx >= rt.elems.len) return runtime.Trap.OutOfBoundsLoad;
+    const seg: []const Value = if (elemidx < rt.elem_dropped.len and rt.elem_dropped[elemidx]) &.{} else rt.elems[elemidx];
+    if (@as(u64, offset) + @as(u64, size) > seg.len) return runtime.Trap.OutOfBoundsLoad;
+    const ref = try allocateArray(rt, typeidx, size, ai.element.size);
+    const heap = rt.gc_heap.?;
+    var i: u32 = 0;
+    while (i < size) : (i += 1) {
+        const v = seg[offset + i];
+        const dst_off = ref + array_header_size + i * ai.element.size;
+        @memcpy(heap.bytes[dst_off .. dst_off + ai.element.size], std.mem.asBytes(&v)[0..ai.element.size]);
     }
     try rt.pushOperand(.{ .ref = @as(u64, ref) });
 }
