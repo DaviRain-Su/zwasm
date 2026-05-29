@@ -512,9 +512,8 @@ test "runI32Export: tail-recursive return_call with args sums to 15 (10.TC-JIT /
 
 test "runI32Export: call_ref through a funcref returns 42 end-to-end (10.R-call_ref-JIT / D-186)" {
     if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
-    // arm64 call_ref emit landed first (10.R-call_ref-JIT IT-1); the x86_64
-    // mirror is the next bundle cycle. Gate to aarch64 until then (D-207).
-    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-207");
+    // arm64 (manual switch in emit.zig) + x86_64 (collected per-op
+    // dispatch_collector_ops.zig) both emit call_ref as of 10.R-call_ref-JIT IT-2.
     // (module
     //   (type $sig (func (param i32) (result i32)))
     //   (func $double (export "double") (type $sig) local.get 0 i32.const 2 i32.mul)

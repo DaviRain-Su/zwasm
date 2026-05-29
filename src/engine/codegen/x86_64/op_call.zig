@@ -36,6 +36,7 @@ const gpr = @import("gpr.zig");
 const jit_abi = @import("../shared/jit_abi.zig");
 const types = @import("types.zig");
 const canonical_type = @import("../shared/canonical_type.zig");
+const func_mod = @import("../../../runtime/instance/func.zig");
 
 /// §9.9 / 9.9-i-1 helper: per-call v128-scratch base for Win64.
 /// Returns the [RSP + N] offset where the first 16-byte v128
@@ -500,6 +501,93 @@ pub fn emitCallIndirect(
     // CALL RAX (indirect).
     try buf.appendSlice(allocator, inst.encCallReg(.rax).slice());
 
+    try emitShadowFree(allocator, buf, outgoing_max_bytes);
+
+    try captureCallResult(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, callee_sig, memory_class_return, return_buffer_off);
+}
+
+/// Wasm spec 3.0 §3.3.8.13 (`call_ref $sig`) — call through a typed
+/// funcref. Mirror of `arm64/op_call.zig:emitCallRef`. The funcref
+/// operand is `@intFromPtr(*const FuncEntity)` (the `ref.func` /
+/// `Value.fromFuncRef` encoding). Mirrors `emitCallIndirect` MINUS
+/// the bounds/sig check: the validator guarantees the funcref's
+/// actual type ⊑ `$sig`, so only a null trap is needed (call_ref of
+/// a null funcref traps, §4.4.8.13).
+///   (1) pop funcref vreg (stack: [args..., funcref]),
+///   (2) marshalCallArgs,
+///   (3) funcref ptr → reg ; `OR reg,reg ; JZ trap` (null check,
+///       reuses the shared bounds trap stub via bounds_fixups),
+///   (4) MOV RAX, [reg + funcentity_funcptr_offset]  (native entry),
+///   (5) MEMORY-class buffer LEA + restore runtime_ptr + shadow,
+///   (6) CALL RAX, captureCallResult.
+pub fn emitCallRefCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    return emitCallRef(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.next_vreg,
+        ctx.bounds_fixups,
+        ctx.spill_base_off,
+        ctx.outgoing_max_bytes,
+        ctx.module_types,
+        @as(u32, @intCast(ins.payload)),
+    );
+}
+
+pub fn emitCallRef(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    pushed_vregs: *std.ArrayList(u32),
+    next_vreg: *u32,
+    bounds_fixups: *std.ArrayList(u32),
+    spill_base_off: u32,
+    outgoing_max_bytes: u32,
+    module_types: []const zir.FuncType,
+    type_idx: u32,
+) Error!void {
+    if (type_idx >= module_types.len) return Error.AllocationMissing;
+    const callee_sig = module_types[type_idx];
+
+    // Stack at entry: [args..., funcref]. Pop funcref first.
+    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+    const funcref_vreg = pushed_vregs.pop().?;
+
+    try marshalCallArgs(allocator, buf, alloc, pushed_vregs, spill_base_off, callee_sig);
+
+    // Load funcref pointer (mirror emitCallIndirect's idx load: AFTER
+    // marshalCallArgs so its R10 staging doesn't clobber the load).
+    const funcref_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, funcref_vreg, 0);
+
+    // Null check: OR funcref_r, funcref_r (sets ZF iff null, value
+    // unchanged) ; JZ trap. Reuses the shared bounds trap stub.
+    try buf.appendSlice(allocator, inst.encOrRR(.q, funcref_r, funcref_r).slice());
+    {
+        const fixup_at: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
+        try bounds_fixups.append(allocator, fixup_at);
+    }
+
+    // Native entry: MOV RAX, [funcref_r + funcentity_funcptr_offset].
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, funcref_r, @intCast(func_mod.funcentity_funcptr_offset)).slice());
+
+    // Tail identical to emitCallIndirect: MEMORY-class buffer LEA,
+    // restore runtime_ptr arg slot, shadow alloc, CALL RAX, capture.
+    const memory_class_return: bool = callee_sig.results.len > 2;
+    const return_buffer_off: u32 = if (memory_class_return) computeCallReturnBufferOff(callee_sig) else 0;
+    if (memory_class_return) {
+        const hidden_ptr_gpr: abi.Gpr = if (abi.current_cc == .win64) .rcx else .rdi;
+        try buf.appendSlice(allocator, inst.encLeaR64BaseRspDisp32(hidden_ptr_gpr, @intCast(return_buffer_off)).slice());
+    }
+    const rt_dst_gpr: abi.Gpr = if (memory_class_return)
+        (if (abi.current_cc == .win64) .rdx else .rsi)
+    else
+        abi.current.entry_arg0_gpr;
+    try buf.appendSlice(allocator, inst.encMovRR(.q, rt_dst_gpr, abi.runtime_ptr_save_gpr).slice());
+
+    try emitShadowAlloc(allocator, buf, outgoing_max_bytes);
+    try buf.appendSlice(allocator, inst.encCallReg(.rax).slice());
     try emitShadowFree(allocator, buf, outgoing_max_bytes);
 
     try captureCallResult(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, callee_sig, memory_class_return, return_buffer_off);
