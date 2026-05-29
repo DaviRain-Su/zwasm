@@ -1539,7 +1539,7 @@ pub const Validator = struct {
         const top = try self.popAny();
         switch (top) {
             .bot => {},
-            .known => |t| if (!(t.isArrayRef() or t.isAnyRef() or t.isEqRef())) return Error.StackTypeMismatch,
+            .known => |t| if (!(t.isAnyRef() or t.isEqRef() or self.subtypeCtx(t, ValType.arrayref))) return Error.StackTypeMismatch,
         }
         try self.pushType(ad.element.valtype);
     }
@@ -1554,7 +1554,7 @@ pub const Validator = struct {
         const top = try self.popAny();
         switch (top) {
             .bot => {},
-            .known => |t| if (!(t.isArrayRef() or t.isAnyRef() or t.isEqRef())) return Error.StackTypeMismatch,
+            .known => |t| if (!(t.isAnyRef() or t.isEqRef() or self.subtypeCtx(t, ValType.arrayref))) return Error.StackTypeMismatch,
         }
     }
 
@@ -1570,7 +1570,7 @@ pub const Validator = struct {
         const top = try self.popAny();
         switch (top) {
             .bot => {},
-            .known => |t| if (!(t.isArrayRef() or t.isAnyRef() or t.isEqRef())) return Error.StackTypeMismatch,
+            .known => |t| if (!(t.isAnyRef() or t.isEqRef() or self.subtypeCtx(t, ValType.arrayref))) return Error.StackTypeMismatch,
         }
     }
 
@@ -1595,7 +1595,9 @@ pub const Validator = struct {
         if (variant == .with_init) {
             try self.popExpect(ad.element.valtype);
         }
-        try self.pushType(.arrayref);
+        // Wasm 3.0 GC: array.new $t : […] -> [(ref $t)] (concrete, non-null);
+        // subtypeCtx widens it to arrayref/eqref/anyref slots (cycle 137).
+        try self.pushType(.{ .ref = .{ .nullable = false, .heap_type = .{ .concrete = typeidx } } });
     }
 
     /// Wasm spec 3.0 §3.3.5.6.8 — `array.new_fixed typeidx N`:
@@ -1613,7 +1615,7 @@ pub const Validator = struct {
         while (i < n) : (i += 1) {
             try self.popExpect(ad.element.valtype);
         }
-        try self.pushType(.arrayref);
+        try self.pushType(.{ .ref = .{ .nullable = false, .heap_type = .{ .concrete = typeidx } } });
     }
 
     /// Wasm spec 3.0 §3.3.5.6.13 — `array.len`: pop an arrayref
