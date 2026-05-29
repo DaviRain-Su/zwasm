@@ -1,4 +1,4 @@
-// FILE-SIZE-EXEMPT: (cap=3000) C ABI translation catalog (Zone 3 boundary layer); no separable subsystem per ADR-0099 §D2 P3 evaluation (see .dev/architecture/api_instance_audit.md, §9.12-G (c)). 10.F D-173/D-172 accessor surfaces extended exempt cap 2500→2800→3000 via ADR-0099 (cap=N) override; D-171 (next 10.F chunk) tightens or restructures if growth continues past 3000.
+// FILE-SIZE-EXEMPT: (cap=3200) C ABI translation catalog (Zone 3 boundary layer); no separable subsystem per ADR-0099 §D2 P3 evaluation (see .dev/architecture/api_instance_audit.md, §9.12-G (c)). 10.F D-173/D-172 accessor surfaces extended exempt cap 2500→2800→3000; cyc174 raised 3000→3200 (ADR-0099 amend) for the Wasm start-section execution feature (a runtime-feature add in instantiateInternal, NOT accessor bloat) — consistent with the non-separable P3 eval + the validator.zig cyc158 precedent. D-171 restructure remains for a genuine separable subsystem.
 //! Engine / Store / Module / Instance / Func / Extern surface of
 //! the C ABI binding (§9.5 / 5.0 chunk d carve-out from
 //! `wasm.zig` per ADR-0007).
@@ -53,6 +53,7 @@ const ext_table_ops = if (wasm_2_0_enabled) @import("../instruction/wasm_2_0/tab
 const parser = @import("../parse/parser.zig");
 const cross_module = @import("cross_module.zig");
 const sections = @import("../parse/sections.zig");
+const leb128 = @import("../support/leb128.zig");
 const zir = @import("../ir/zir.zig");
 const dispatch_table_mod = @import("../ir/dispatch_table.zig");
 
@@ -691,6 +692,46 @@ const BuildBindingsCApi = struct {
     }
 };
 
+/// Tear down a fully-built instance whose post-build finalize failed
+/// (instantiateRuntime trap OR start-function trap). Parks the committed
+/// runtime/arena as a zombie when an arena exists (cross-module refs may
+/// point into it — destroying would UAF; ADR-0014 §2.1), else frees.
+fn failBuiltInstance(alloc: std.mem.Allocator, store: *Store, inst: *Instance, inst_rt: *runtime.Runtime) void {
+    if (inst.arena) |arena2| {
+        // EXEMPT-FALLBACK: ADR-0014 — parkAsZombie OOM accepts arena leak over UAF of cross-module references.
+        parkAsZombie(alloc, store, inst_rt, arena2) catch {};
+        inst.arena = null;
+    } else {
+        inst_rt.deinit();
+        alloc.destroy(inst_rt);
+    }
+    inst.funcs_storage = &.{};
+    inst.func_ptrs_storage = &.{};
+    removeFromLiveInstances(store, inst);
+    alloc.destroy(inst);
+}
+
+/// Wasm §5.5.13 — scan section headers for the start section (id 8) and
+/// return its funcidx. Cheap header walk (no full re-parse). The funcidx
+/// is range/sig-validated at compile time (compile.zig).
+fn findStartFuncIdx(bytes: []const u8) ?u32 {
+    if (bytes.len < 8) return null;
+    var pos: usize = 8; // magic + version
+    while (pos < bytes.len) {
+        const id = bytes[pos];
+        pos += 1;
+        const size = leb128.readUleb128(u32, bytes, &pos) catch return null;
+        const body_start = pos;
+        if (id == 8) {
+            var p = body_start;
+            return leb128.readUleb128(u32, bytes, &p) catch null;
+        }
+        pos = body_start + size;
+        if (pos > bytes.len) return null;
+    }
+    return null;
+}
+
 /// Internal entry shared by `wasm_instance_new` (C ABI path,
 /// Extern[]-driven bindings) and `src/zwasm/linker.zig` (native
 /// path, host-fn + cross-instance bindings). Both wrap their
@@ -766,38 +807,48 @@ pub fn instantiateInternal(store: *Store, module: *const Module, builder_state: 
 
     instantiate.instantiateRuntime(bytes, inst, inst_rt, bindings) catch {
         // Per ADR-0014 §2.1 / 6.K.2 sub-change 4: park the failed
-        // instance's runtime + arena on the store's zombie list.
-        // Wasm 2.0 partial-init semantics may have committed
-        // cross-module writes (foreign tables holding *FuncEntity
-        // pointers into our arena); destroying the arena would
-        // turn those into dangling pointers and segfault later
-        // call_indirect dispatches.
-        if (inst.arena) |arena2| {
-            // If parkAsZombie itself OOMs the store list, we have
-            // no graceful recovery — accept the leak (arena +
-            // runtime stay around until process exit) and report
-            // the original instantiation failure.
-            // EXEMPT-FALLBACK: ADR-0014 — parkAsZombie OOM accepts arena leak over UAF of cross-module references.
-            parkAsZombie(alloc, store, inst_rt, arena2) catch {};
-            inst.arena = null;
-        } else {
-            // No arena to park (e.g., parser/import-decode failed
-            // before arena setup). Safe to fully free.
-            inst_rt.deinit();
-            alloc.destroy(inst_rt);
-        }
-        // Instance struct itself can go: the C-API caller never
-        // sees it (we return null below). The runtime + arena
-        // outlived it via the zombie list.
-        inst.funcs_storage = &.{};
-        inst.func_ptrs_storage = &.{};
-        // D-174: live_instances may carry this inst (registered above
-        // before instantiateRuntime). Drop the back-registry entry so
-        // the cascade in wasm_store_delete doesn't double-free.
-        removeFromLiveInstances(store, inst);
-        alloc.destroy(inst);
+        // instance's runtime + arena (committed cross-module writes
+        // would UAF if the arena were destroyed). D-174: drops the
+        // live_instances back-registry entry registered above.
+        failBuiltInstance(alloc, store, inst, inst_rt);
         return null;
     };
+
+    // Wasm §4.5.4 — run the start function (if any) AFTER all sections
+    // (incl. data segments) are initialised. A trap fails instantiation.
+    // The start funcidx was range/sig-validated at compile time.
+    if (findStartFuncIdx(bytes)) |sfx| {
+        if (sfx < inst.func_ptrs_storage.len) {
+            const zfunc = inst.func_ptrs_storage[sfx];
+            const num_locals = zfunc.sig.params.len + zfunc.locals.len;
+            const locals = alloc.alloc(runtime.Value, num_locals) catch {
+                failBuiltInstance(alloc, store, inst, inst_rt);
+                return null;
+            };
+            defer alloc.free(locals);
+            for (locals) |*l| l.* = runtime.Value.zero;
+            const op_base = inst_rt.operand_len;
+            inst_rt.pushFrame(.{
+                .sig = zfunc.sig,
+                .locals = locals,
+                .operand_base = op_base,
+                .pc = 0,
+                .func = zfunc,
+            }) catch {
+                failBuiltInstance(alloc, store, inst, inst_rt);
+                return null;
+            };
+            dispatch.run(inst_rt, dispatchTable(), zfunc.instrs.items) catch {
+                // Start trapped → instantiation fails. The instance
+                // committed state (data writes, cross-module refs), so
+                // park-as-zombie rather than free (mirrors the build path).
+                failBuiltInstance(alloc, store, inst, inst_rt);
+                return null;
+            };
+            _ = inst_rt.popFrame();
+            inst_rt.operand_len = op_base;
+        }
+    }
     return inst;
 }
 
