@@ -6,14 +6,16 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc197 (`544d4440`) — **PAUSED at user request** (clean stop). Reassessed
-  the Phase-10-close path + implemented 10.P invariant **I2** (real spec-corpus
-  feature-completeness check; was a stub-skip). **KEY: Phase 10 is formally
-  CLOSE-ELIGIBLE** — `check_phase10_close_invariants.sh` = 16 PASS / 8 SKIP /
-  0 FAIL. Spec corpus feature-complete (all 5 proposals green via interp). The
-  8 SKIPs are deferred follow-ups (NOT close-blockers): cross fixtures, JIT
-  regalloc 3-axis (EH/GC JIT codegen), realworld toolchains (clang proven cyc196;
-  Dart/hoot gated), bench/widget close-cycle items.
+- **HEAD**: `ef34724c` (cyc198, 10.TC-JIT IT-2). **Direct `return_call` now
+  JIT-executes end-to-end** via `runI32Export` (path (b) in progress). Root
+  blocker was the liveness pass (`stackEffect-missing`): `return_call*` weren't
+  classified as terminators, so `compileWasm` aborted before the already-wired
+  arm64 emit ran. Fix: added them to the return/unreachable/throw drain branch
+  in `src/ir/analysis/liveness.zig` (ADR-0113 §A). Mac test-all GREEN, lint clean.
+  Phase 10 is formally CLOSE-ELIGIBLE (`check_phase10_close_invariants.sh` =
+  16 PASS / 8 SKIP / 0 FAIL; spec corpus feature-complete via interp) but the
+  in-scope ROADMAP §10 JIT halves (10.TC/E/G) aren't done — (b) completes them
+  rather than deferring to Phase 11 via a §18 ADR (the path user paused on cyc197).
 - cyc196 (`086c2991`) first clang-realworld fixture (clang_smoke; pipeline proven).
   Realworld-clang findings: JIT can't run `return_call` (D-205); runI32Export
   doesn't instantiate; → non-trivial clang fixtures need harness work.
@@ -33,27 +35,32 @@
   test-all — so the 517cb01a→9996d478 gap is a non-code-gap; ubuntu green holds,
   NO re-kick / revert needed. 10.G-gc + 10.H-multimem CLOSED cyc188.
 
-## Resume target — cycle 198 (loop PAUSED by user at cyc197)
+## Active bundle
 
-**Decision point (user-relevant)**: Phase 10 is formally CLOSE-ELIGIBLE (10.P
-0 FAIL). The spec corpus is feature-complete via INTERP; the remaining ROADMAP-
-scoped work is the **JIT codegen for the 3.0 features** (tail-call D-205 / EH /
-GC — the 10.TC/E/G JIT halves) + realworld/cross fixtures + the 8 deferred 10.P
-SKIPs. Two paths:
-- **(a) Close Phase 10 now** — interp-feature-complete; defer JIT codegen +
-  realworld/cross to Phase 11. This DEFERS the JIT halves out of 10.TC/E/G
-  scope → needs a §18 ADR (§9 phase-scope change) + audit_scaffolding phase-
-  boundary pass + the close ceremony (widget DONE, §10 SHA backfill, Phase 11
-  open).
-- **(b) Grind JIT codegen in-scope** — complete 10.TC/E/G JIT halves
-  (multi-cycle each; start JIT tail-call D-205, the most self-contained,
-  unblocks clang_musttail). In-scope autonomous default; no ADR.
-**Autonomous default if resuming without user steer**: (b) — open a bundle for
-JIT tail-call (D-205); Step-0 survey the engine/codegen tail-call dispatch
-(where `return_call` → UnsupportedOp), regalloc terminator-class (ADR-0113 §A),
-op_tail_call.zig. **Bar**: any chosen path keeps test-all GREEN, 0 panics.
-Also queued (lighter): refresh the other stale 10.P SKIP rationales (I14/I21
-reference resolved D-192/D-179).
+- **Bundle-ID**: 10.TC-JIT (D-205 discharge)
+- **Cycles-remaining**: ~2 (IT-3 indirect+ref e2e → IT-4 clang_musttail / cross-module)
+- **Continuity-memo**: liveness terminator-class for `return_call*` landed cyc198
+  (`ef34724c`); direct `return_call` JIT-green via `runI32Export`. arm64 emit
+  for direct (`emitDirectReturnCall`) + indirect (`emitIndirectReturnCall`,
+  table-0/≤2-results) already wired (`emit.zig` dispatch). Remaining: e2e-verify
+  `return_call_indirect` (liveness+emit both wired now — likely already works,
+  needs a runI32Export test w/ table+elem); implement `return_call_ref` (still a
+  one-line `UnsupportedOp` stub in `ops/wasm_3_0/return_call_ref.zig`); then
+  clang_musttail realworld JIT-result-check + cross-module (`cross_module_tail_call.zig`,
+  ADR-0112 D4 / 10.TC-3f). Interp trampoline already done (D-187).
+- **Exit-condition**: all three `return_call*` variants JIT-execute via
+  `runI32Export` + `clang_musttail` realworld fixture JIT-result-checked → D-205
+  fully dischargeable; test-all GREEN, 0 panics.
+
+## Active task — 10.TC-JIT IT-3  **NEXT**
+
+Add a `runI32Export` test exercising `return_call_indirect` end-to-end (module
+with a table + elem segment; exported `() -> i32` does `return_call_indirect`
+through table[0]). liveness + emit are both wired now, so expect green or a
+narrowly-localized emit gap. Then tackle the `return_call_ref` stub
+(`ops/wasm_3_0/return_call_ref.zig` — funcref null-check + tail-jump, mirror
+`call_ref` + the op_tail_call teardown/BR dance). Lighter queued: refresh stale
+10.P SKIP rationales (I14/I21 reference resolved D-192/D-179).
 
 ## §10 close map (after this bundle)
 
