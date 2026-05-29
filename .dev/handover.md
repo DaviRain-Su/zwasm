@@ -6,13 +6,13 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc183 (diagnosis, no src) — root-caused the **last 5
-  multi-memory fails to `skip-impl directive-assert_uninstantiable`**
-  (D-200): the runner skips uninstantiable modules whose active data/elem
-  writes to SHARED memory/table persist (before their OOB trap) and which
-  later `assert_return`s depend on (linking0 `call(7)→0`, linking3
-  `load→97`). Unblocked by D-199 (cyc182, multi-mem 396→402 +6). gc bundle
-  COMPLETE 62→349 ret / 96 trap / 57 inv (cyc174/177/178/179).
+- **HEAD**: cyc184 (`4a3d2ad3`) — **implemented `assert_uninstantiable`**
+  (D-200): regen emits the directive + .wasm; runner instantiates
+  (expect-fail), partial writes to shared memory persist (D-199).
+  **multi-memory return 402→404 (+2)** (linking3 `load→97`) **+ trap
+  238→244 (+6)** (the 6 uninstantiable asserts), skip 56→50. No regression.
+  Earlier: D-199 shared memory (cyc182 +6), gc bundle COMPLETE 62→349 ret
+  / 96 trap / 57 inv (cyc174/177/178/179).
 - Earlier arc: cyc147-148 ADR-0125 packed (62→116); cyc146 ADR-0016 M3
   validate self-attribution (`compile FAIL [fn= off= op=]`) + subtypeCtx
   coercion; cyc144/145 GC blocktypes + br_on_cast; cyc141 rt.datas fix
@@ -39,24 +39,24 @@
 - **Exit-condition**: multi-memory return > 396 (reduce the 11-fail
   linking/imports cluster). gc return ≥ 90 was long EXCEEDED (349).
 
-## Active task — cycle 184: implement `assert_uninstantiable` (D-200) — **NEXT**
+## Active task — cycle 185: linking0/1 failed-instance funcref survival — **NEXT**
 
-Closes the last 5 multi-memory fails. Full plan in D-200. Bounded,
-multi-piece (regen targetable → low risk):
-1. **`regen_spec_3_0_assert.sh`** — add `elif t == 'assert_uninstantiable'`
-   emitting `assert_uninstantiable <filename>` (was the catch-all skip at
-   :299) + copy the .wasm (the `assert_invalid|assert_malformed)` case
-   ~:333).
-2. **manifest_parser** — parse the `assert_uninstantiable <wasm>` line.
-3. **runner** (`spec_assert_runner_wasm_3_0.zig`) — compile + instantiate
-   the module against `cur_linker`; PASS if instantiation fails (trap /
-   error); the partial data/elem side effects persist to the shared
-   exporter instance (D-199) automatically.
-4. **Targeted regen**: `bash scripts/regen_spec_3_0_assert.sh multi-memory
-   linking0` (+ linking1, linking3) — regenerates only those manifests +
-   adds the uninstantiable .wasm.
-**Bar**: multi-mem ≥402 (target → 407), no regression to gc 349/96/57,
-exit 0, 0 panics. (Deferred: gc .17 + cross-module sig per D-198.)
+Last 3 multi-memory fails (after cyc184's +2/+6): linking0 `call(7)→0`
+(1) + linking1 `Mm.load` (2), both `InvokeFailed`. The assert_uninstantiable
+module writes an `elem` funcref into a SHARED table (linking0: Mt's table[7]
+= the failed module's `$f`), then traps. Per spec the funcref stays
+callable — but our failed instance is torn down → the funcref dangles →
+`call(7)` traps (uninitialized/dangling). cyc185:
+1. Verify the mechanism: probe linking0's `call(7)` interp error (cyc180
+   pattern) — uninitialized-element vs dangling-deref.
+2. Fix: the failed (uninstantiable) instance whose funcs are referenced
+   cross-module must be ZOMBIE-PARKED (kept alive), like cross-module
+   func imports (ADR-0014). Check whether `cur_linker.instantiate` already
+   parks failed instances (cyc174 `failBuiltInstance` parkAsZombie) — if
+   the runner deinits it, stop doing so for referenced funcs.
+HIGH-ish (cross-module lifetime). If too deep, file a debt row + defer;
+the +2/+6 already landed. Verify no regression to gc 349/96/57, multi-mem
+≥404, exit 0, 0 panics.
 
 ## Larger §10 work (later bundles)
 
@@ -70,7 +70,7 @@ exit 0, 0 panics. (Deferred: gc .17 + cross-module sig per D-198.)
 [memory64           ] return=337 (all pass)    [tail-call] return=71 (all pass)
 [exception-handling ] 34/34 ✅ FULLY GREEN     [function-references] return=34/39
 [gc                 ] return=349/407 trap=96/100 invalid=57/60 malformed=1/1 skip=20  ← 10.G c179 (typed call_indirect)
-[multi-memory       ] return=402/407 trap=238/238  ← cyc182 D-199 shared memory (+6)
+[multi-memory       ] return=404/407 trap=244/244  ← cyc184 assert_uninstantiable (+2 ret/+6 trap)
 ```
 
 > Use `--fail-detail` (reliable per-assert), NOT the per-manifest
