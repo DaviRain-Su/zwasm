@@ -1429,8 +1429,11 @@ pub const Validator = struct {
             16 => try self.opArrayFill(),
             // array.len (Wasm 3.0 GC §3.3.5.6.13): pop arrayref, push i32.
             15 => try self.opArrayLen(),
-            // 0xFB 0x11/0x12/0x13 (17/18/19) = array.copy/init_data/init_elem
-            // (NotImplemented — exec lands later). ref.eq is 0xD3, not 19
+            // array.copy (sub-op 17): dst $t + src $t; pop len + src_off +
+            // src_ref + dst_off + dst_ref (10.G cycle 157).
+            17 => try self.opArrayCopy(),
+            // 0xFB 0x12/0x13 (18/19) = array.init_data/init_elem
+            // (NotImplemented — land next). ref.eq is 0xD3, not 19
             // (cyc156 mis-numbering fix).
             // ref.test / ref.test_null share validator shape:
             // consume heap_type byte, pop reftype, push i32.
@@ -1652,6 +1655,38 @@ pub const Validator = struct {
             .bot => {},
             .known => |t| if (!(t.isAnyRef() or t.isEqRef() or self.subtypeCtx(t, ValType.arrayref))) return Error.StackTypeMismatch,
         }
+    }
+
+    /// True iff array element `src` is assignable to `dst` (covariant, as
+    /// storage types): packed-ness must match (i8/i16 invariant), else the
+    /// operand valtype must subtype. Mirrors gcFieldSubtype's covariant arm.
+    fn arrayElemAssignable(self: *const Validator, src: sections.StructFieldType, dst: sections.StructFieldType) bool {
+        if (src.storage.isPacked() != dst.storage.isPacked()) return false;
+        if (src.storage.isPacked()) return src.storage.specByte() == dst.storage.specByte();
+        return self.subtypeCtx(src.storage.operandType(), dst.storage.operandType());
+    }
+
+    fn popArrayRef(self: *Validator) Error!void {
+        const top = try self.popAny();
+        switch (top) {
+            .bot => {},
+            .known => |t| if (!(t.isAnyRef() or t.isEqRef() or self.subtypeCtx(t, ValType.arrayref))) return Error.StackTypeMismatch,
+        }
+    }
+
+    /// Wasm spec 3.0 §3.3.5.6.14 — `array.copy dst_typeidx src_typeidx`:
+    /// pop [len:i32, src_off:i32, src_ref, dst_off:i32, dst_ref]. dst
+    /// element must be mutable; src element must be assignable to dst's.
+    fn opArrayCopy(self: *Validator) Error!void {
+        const dst = try self.lookupArrayDef(); // dst typeidx (read first)
+        const src = try self.lookupArrayDef(); // src typeidx
+        if (!dst.element.mutable) return Error.StackTypeMismatch;
+        if (!self.arrayElemAssignable(src.element, dst.element)) return Error.StackTypeMismatch;
+        try self.popExpect(.i32); // len
+        try self.popExpect(.i32); // src_off
+        try self.popArrayRef(); // src_ref
+        try self.popExpect(.i32); // dst_off
+        try self.popArrayRef(); // dst_ref
     }
 
     const ArrayNewVariant = enum { with_init, default };

@@ -665,8 +665,16 @@ pub const Lowerer = struct {
             },
             // array.len (Wasm 3.0 GC §3.3.5.6.13). No immediates.
             15 => try self.emit(.@"array.len", 0, 0),
-            // 0xFB 0x13 (19) = array.init_elem (NotImplemented — exec lands
-            // later). ref.eq is 0xD3, not 19 (cyc156 mis-numbering fix).
+            // array.copy (sub-op 17): dst_typeidx + src_typeidx.
+            // payload=dst, extra=src (10.G cycle 157).
+            17 => {
+                const dst_typeidx = try leb128.readUleb128(u32, self.body, &self.pos);
+                const src_typeidx = try leb128.readUleb128(u32, self.body, &self.pos);
+                try self.emit(.@"array.copy", dst_typeidx, src_typeidx);
+            },
+            // 0xFB 0x12/0x13 (18/19) = array.init_data/init_elem
+            // (NotImplemented — land next). ref.eq is 0xD3, not 19
+            // (cyc156 mis-numbering fix).
             // ref.test / ref.test_null (Wasm 3.0 GC §3.3.5.3).
             // Each consumes a heap_type byte from the body. The
             // byte is stored in payload (u32-extended) so the
