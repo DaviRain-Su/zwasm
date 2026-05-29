@@ -102,8 +102,26 @@ else
   fail "§8 I1: $i1_missing declaration(s) missing across $i1_total stub files"
 fi
 
-# §8 I2 — spec testsuite green (memory64 + tail-call + func-refs + EH + GC)
-skip "§8 I2: memory64 FULL GREEN; EH/GC/func-refs gated on D-179 + D-192"
+# §8 I2 — spec testsuite green (memory64 + tail-call + func-refs + EH + GC).
+# cyc197: was a stub-skip gated on D-179/D-192 (both resolved; the corpora
+# matured cyc100-195). Now a REAL check: the build step runs the wasm-3.0
+# corpus; assert 0 panics + the FULLY-green proposals (memory64 / tail-call /
+# exception-handling / multi-memory) have fail=0. gc + function-references
+# carry documented deferred residuals (gc .17 = D-198, finality/distinct-layout
+# = D-202, JIT tail-call = D-205) so are NOT asserted all-green here.
+i2_cc=$(mktemp -d)
+if zig build test-spec-wasm-3.0-assert --cache-dir "$i2_cc" > "$i2_cc/log" 2>&1; then
+  i2_panic=$(grep -ciE "panic|abort|segmentation" "$i2_cc/log" || true)
+  i2_greenfail=$(grep -E "^\[(memory64|tail-call|exception-handling|multi-memory)" "$i2_cc/log" 2>/dev/null | grep -oE "fail=[0-9]+" | grep -vE "fail=0" | wc -l | tr -d ' ')
+  if [ "$i2_panic" -eq 0 ] && [ "${i2_greenfail:-1}" -eq 0 ]; then
+    ok "§8 I2: wasm-3.0 corpus clean (0 panics); memory64/tail-call/EH/multi-memory fail=0 (gc/func-refs carry D-198/202/205 residuals)"
+  else
+    fail "§8 I2: wasm-3.0 corpus regressed (panics=$i2_panic, green-proposal-fails=$i2_greenfail)"
+  fi
+else
+  fail "§8 I2: test-spec-wasm-3.0-assert build failed"
+fi
+rm -rf "$i2_cc"
 
 # §8 I3 — test/edge_cases/p10/cross/ 7 fixtures green
 if [ -d test/edge_cases/p10/cross ]; then
