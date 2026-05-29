@@ -470,6 +470,46 @@ test "runI32Export: return_call_indirect through table[0] returns 99 end-to-end 
     try testing.expectEqual(@as(u32, 99), try runI32Export(testing.allocator, &bytes, "test"));
 }
 
+test "runI32Export: tail-recursive return_call with args sums to 15 (10.TC-JIT / D-205 clang_musttail shape)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    // (module
+    //   (func $sum (param $n i32) (param $acc i32) (result i32)
+    //     (if (i32.eqz (local.get $n)) (then (return (local.get $acc))))
+    //     (return_call $sum
+    //       (i32.sub (local.get $n) (i32.const 1))
+    //       (i32.add (local.get $acc) (local.get $n))))
+    //   (func $test (export "test") (result i32)
+    //     (return_call $sum (i32.const 5) (i32.const 0))))
+    //
+    // The actual D-205 trigger SHAPE: direct return_call WITH non-empty
+    // args + self-recursion (clang __attribute__((musttail))). IT-2/3
+    // used zero args (marshalCallArgs no-op); this exercises arg
+    // marshalling (X1/X2 per AAPCS64) AND frame REUSE across 6 tail-recursive
+    // levels — proper tail-call must not grow the native stack.
+    // sum(5,0) → 5+4+3+2+1 = 15. Wasm spec 3.0 §3.3.8.18.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
+        0x01, 0x0b, 0x02, 0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7f, 0x60, 0x00, 0x01, 0x7f, // type0 (i32,i32)->i32, type1 ()->i32
+        0x03, 0x03, 0x02, 0x00, 0x01, // func: sum→type0, test→type1
+        0x07, 0x08, 0x01, 0x04, 0x74, 0x65, 0x73, 0x74, 0x00, 0x01, // export "test" → func1
+        0x0a, 0x22, 0x02, // code: 2 bodies, payload 0x22
+        // body0 $sum (size 0x17): if(eqz n) return acc; return_call sum(n-1, acc+n)
+        0x17, 0x00, 0x20,
+        0x00, 0x45, 0x04,
+        0x40, 0x20, 0x01,
+        0x0f, 0x0b, 0x20,
+        0x00, 0x41, 0x01,
+        0x6b, 0x20, 0x01,
+        0x20, 0x00, 0x6a,
+        0x12, 0x00, 0x0b,
+        // body1 $test (size 0x08): return_call sum(5, 0)
+        0x08, 0x00, 0x41,
+        0x05, 0x41, 0x00,
+        0x12, 0x00, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 15), try runI32Export(testing.allocator, &bytes, "test"));
+}
+
 test "runI32Export: throw + catch_all returns 42 (IT-6 cycle 3c-iii-d end-to-end)" {
     if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
     // (module
