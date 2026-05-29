@@ -3069,6 +3069,32 @@ pub fn validateGlobalInits(
     return true;
 }
 
+/// Wasm 3.0 §4.5.10 + §3.3.5.1 — function import-matching: the PROVIDED
+/// (source) func type must be a SUBTYPE of the importer's DECLARED type,
+/// not exact-equal. Func subtyping is contravariant in params, covariant
+/// in results. `gcValTypeSubtype` returns true on `eql`, so this subsumes
+/// the prior exact check. The caller passes the importer's `types`; the
+/// cross-module caller relies on the source + importer sharing a type
+/// space (true for the spec cross-module subtype corpus, which duplicates
+/// type defs) — distinct-layout cross-module canonical matching is D-202.
+pub fn funcTypeImportCompatible(
+    want: zir.FuncType,
+    src: zir.FuncType,
+    types: *const sections.Types,
+) bool {
+    if (want.params.len != src.params.len) return false;
+    if (want.results.len != src.results.len) return false;
+    // Params contravariant: declared (want) <: provided (src).
+    for (want.params, src.params) |wp, sp| {
+        if (!gcValTypeSubtype(wp, sp, types)) return false;
+    }
+    // Results covariant: provided (src) <: declared (want).
+    for (src.results, want.results) |sr, wr| {
+        if (!gcValTypeSubtype(sr, wr, types)) return false;
+    }
+    return true;
+}
+
 /// ADR-0124 — validate every declared subtype relationship in a type
 /// section. For each typedef carrying declared supertype(s) (`sub` /
 /// `sub final`): at most one supertype (Wasm 3.0 GC MVP), the supertype

@@ -1643,14 +1643,16 @@ fn checkImportTypeMatches(
             const want_ft = types.items[want_tidx];
             switch (binding.func.source) {
                 .cross_module => |cm| {
-                    const sft = cm.source_signature;
-                    if (sft.params.len != want_ft.params.len) return error.ImportTypeMismatch;
-                    if (sft.results.len != want_ft.results.len) return error.ImportTypeMismatch;
-                    for (sft.params, want_ft.params) |sp, wp| {
-                        if (!sp.eql(wp)) return error.ImportTypeMismatch;
-                    }
-                    for (sft.results, want_ft.results) |sr, wr| {
-                        if (!sr.eql(wr)) return error.ImportTypeMismatch;
+                    // Wasm 3.0 §4.5.10 — the PROVIDED func type must be a
+                    // SUBTYPE of the declared import type (func subtyping,
+                    // §3.3.5.1), not exact-equal. cyc192 (D-198 .30/.48/.50):
+                    // a cross-module module imports the same name under
+                    // multiple subtype-related sigs. Monotonic-safe vs the
+                    // prior exact `eql` — only widens acceptance, so the
+                    // green multi-mem + EH cross-module imports (all eql) are
+                    // unaffected.
+                    if (!validator.funcTypeImportCompatible(want_ft, cm.source_signature, &types)) {
+                        return error.ImportTypeMismatch;
                     }
                 },
                 .wasi => {

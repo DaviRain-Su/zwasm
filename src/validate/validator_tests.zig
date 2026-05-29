@@ -90,6 +90,36 @@ test "constExprResultType: ref.func yields concrete (ref typeidx); scalars + con
     try testing.expect(validator.constExprResultType(&[_]u8{ 0xFB, 0x00, 0x03, 0x0B }, &.{}, &fti) == null);
 }
 
+test "funcTypeImportCompatible: result covariance + param contravariance (cyc192)" {
+    var types: sections.Types = .{
+        .arena = std.heap.ArenaAllocator.init(testing.allocator),
+        .items = &.{},
+        .kinds = &.{},
+        .struct_defs = &.{},
+        .array_defs = &.{},
+        .supertypes = &.{},
+        .finals = &.{},
+        .rec_span = &.{},
+    };
+    defer types.deinit();
+    const any_r = [_]ValType{ValType.anyref};
+    const eq_r = [_]ValType{ValType.eqref}; // eqref <: anyref
+    const f_any: FuncType = .{ .params = &.{}, .results = &any_r };
+    const f_eq: FuncType = .{ .params = &.{}, .results = &eq_r };
+    // Results covariant: provided eqref-result <: declared anyref-result → OK.
+    try testing.expect(validator.funcTypeImportCompatible(f_any, f_eq, &types));
+    // Reverse: provided anyref vs declared eqref → any </: eq → reject.
+    try testing.expect(!validator.funcTypeImportCompatible(f_eq, f_any, &types));
+    // Params contravariant: declared(eq) <: provided(any) → OK.
+    const g_eqp: FuncType = .{ .params = &eq_r, .results = &.{} };
+    const g_anyp: FuncType = .{ .params = &any_r, .results = &.{} };
+    try testing.expect(validator.funcTypeImportCompatible(g_eqp, g_anyp, &types));
+    // Reverse: declared(any) <: provided(eq)? any </: eq → reject.
+    try testing.expect(!validator.funcTypeImportCompatible(g_anyp, g_eqp, &types));
+    // Arity mismatch → reject.
+    try testing.expect(!validator.funcTypeImportCompatible(f_any, g_eqp, &types));
+}
+
 test "validate: ref.i31 result satisfies anyref via GC heap lattice (10.G cycle 134)" {
     // (ref i31) <: anyref (i31 <: eq <: any). A func returning anyref
     // must accept `i32.const; ref.i31` — the abstract-head subtype check
