@@ -10,6 +10,7 @@ const leb128 = @import("../support/leb128.zig");
 const zir = @import("../ir/zir.zig");
 const sections = @import("sections.zig");
 const init_expr = @import("init_expr.zig");
+const i31_enc = @import("../feature/gc/i31.zig");
 
 const Allocator = std.mem.Allocator;
 const ValType = zir.ValType;
@@ -241,6 +242,24 @@ fn readFuncrefInitExpr(body: []const u8, pos: *usize, expected: ValType) section
             if (n >= 0x80000000) return sections.Error.InvalidFunctype;
             break :blk 0x80000000 | n;
         },
+        0x41 => blk: {
+            // Wasm 3.0 GC: `i32.const N; ref.i31` constant expr for an
+            // i31ref / anyref / eqref element segment. The slot holds the
+            // i31-ENCODED value (not a funcidx); table-init interprets it
+            // by `elem_type`. Only valid when the segment's reftype is in
+            // the i31/eq/any family (ref.i31 : (ref i31) <: eqref <: anyref).
+            const head_ok = expected == .ref and switch (expected.ref.heap_type) {
+                .abstract => |a| a == .i31 or a == .eq or a == .any,
+                .concrete => false,
+            };
+            if (!head_ok) return sections.Error.InvalidFunctype;
+            const n = try leb128.readSleb128(i32, body, pos);
+            if (pos.* >= body.len or body[pos.*] != 0xFB) return sections.Error.InvalidFunctype;
+            pos.* += 1;
+            const sub = try leb128.readUleb128(u32, body, pos);
+            if (sub != 28) return sections.Error.InvalidFunctype; // 0x1C = ref.i31
+            break :blk i31_enc.i32ToI31Truncate(n);
+        },
         else => return sections.Error.InvalidFunctype,
     };
     if (pos.* >= body.len) return sections.Error.UnexpectedEnd;
@@ -411,4 +430,23 @@ test "decodeElement: declarative form 7 (reftype + expr-vec)" {
     try testing.expectEqual(ElementKind.declarative, e.items[0].kind);
     try testing.expectEqual(ValType.funcref, e.items[0].elem_type);
     try testing.expectEqualSlices(u32, &[_]u32{0}, e.items[0].funcidxs);
+}
+
+test "decodeElement: form 6 i31ref segment with ref.i31 init (10.G cycle 131)" {
+    // 1 segment: active form 6, table 0, offset i32.const 0, elemtype
+    // i31ref (0x6C), 1 init expr `i32.const 42; ref.i31; end`.
+    const body = [_]u8{
+        0x01, // count
+        0x06, 0x00, // flag 6, tableidx 0
+        0x41, 0x00, 0x0B, // offset: i32.const 0; end
+        0x6C, // elemtype: i31ref
+        0x01, // n = 1
+        0x41, 0x2A, 0xFB, 0x1C, 0x0B, // i32.const 42; ref.i31; end
+    };
+    var e = try decodeElement(testing.allocator, &body);
+    defer e.deinit();
+    try testing.expectEqual(ValType.i31ref, e.items[0].elem_type);
+    // The funcidxs slot holds the i31-ENCODED value (table-init reads it
+    // as a ref value by elem_type, NOT as a funcidx).
+    try testing.expectEqualSlices(u32, &[_]u32{i31_enc.i32ToI31Truncate(42)}, e.items[0].funcidxs);
 }

@@ -536,9 +536,18 @@ fn preDecodeSectionBodies(alloc: std.mem.Allocator, module: *Module) bool {
         } else 0;
         for (e.items) |seg| {
             if (!validRefTypeIdx(seg.elem_type, ntypes)) return false;
-            for (seg.funcidxs) |fidx| {
-                if (fidx == std.math.maxInt(u32)) continue; // ref.null sentinel
-                if (fidx >= total_funcs) return false;
+            // The funcidxs slot is funcidx-typed only for func-family
+            // segments. For i31ref/anyref/etc. it holds an encoded ref
+            // value (e.g. ref.i31), NOT a funcidx — skip the range check.
+            const is_funcref_family = seg.elem_type == .ref and switch (seg.elem_type.ref.heap_type) {
+                .abstract => |a| a == .func,
+                .concrete => true,
+            };
+            if (is_funcref_family) {
+                for (seg.funcidxs) |fidx| {
+                    if (fidx == std.math.maxInt(u32)) continue; // ref.null sentinel
+                    if (fidx >= total_funcs) return false;
+                }
             }
         }
     }
