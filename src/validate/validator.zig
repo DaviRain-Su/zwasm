@@ -735,7 +735,17 @@ pub const Validator = struct {
                 // refs (gc/type-subtyping.6/7 fail at `call` without this).
                 .concrete => |e_idx| gcConcreteReaches(idx, e_idx, self.supertypes),
             },
-            .abstract => false,
+            // Wasm 3.0 GC §4.2.8 abstract heap-type hierarchy
+            // (i31/struct/array <: eq <: any; bottoms <: all in their
+            // hierarchy; cross-hierarchy rejected). e.g. a `(ref i31)`
+            // value flowing into an anyref table.grow/fill/init
+            // (i31.wast $anyref_table_of_i31ref). An abstract head is
+            // never a subtype of a concrete type (the `none <: (ref $t)`
+            // bottom edge isn't exercised by the current corpus).
+            .abstract => |a_abs| switch (expected.ref.heap_type) {
+                .abstract => |e_abs| gcHeapAbstractSubtype(a_abs, e_abs),
+                .concrete => false,
+            },
         };
     }
 
@@ -2386,7 +2396,11 @@ pub const Validator = struct {
         if (elemidx >= self.elem_count) return Error.InvalidFuncIndex;
         if (tableidx >= self.tables.len) return Error.InvalidFuncIndex;
         if (self.elem_types.len != 0) {
-            if (!self.elem_types[elemidx].eql(self.tables[tableidx].elem_type)) {
+            // Wasm §3.3.5.20 — segment reftype must be a SUBTYPE of the
+            // table's reftype (not exact-equal): an i31ref elem segment
+            // initialising an anyref table is valid (i31.wast
+            // $anyref_table_of_i31ref).
+            if (!self.subtypeCtx(self.elem_types[elemidx], self.tables[tableidx].elem_type)) {
                 return Error.StackTypeMismatch;
             }
         }
