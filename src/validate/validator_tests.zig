@@ -120,6 +120,32 @@ test "funcTypeImportCompatible: result covariance + param contravariance (cyc192
     try testing.expect(!validator.funcTypeImportCompatible(f_any, g_eqp, &types));
 }
 
+test "validate: non-null local read before set is invalid (cyc195 definite-assignment / func.21)" {
+    // (local (ref 0)); local.get 0; drop; end — reads a non-defaultable
+    // local before any local.set → UninitializedLocal.
+    const nn_ref0: ValType = .{ .ref = .{ .nullable = false, .heap_type = .{ .concrete = 0 } } };
+    const locals = [_]ValType{nn_ref0};
+    const r = validateFunction(empty_sig, &locals, &[_]u8{ 0x20, 0x00, 0x1A, 0x0B }, &.{}, &.{}, &.{}, 0, &.{}, 0);
+    try testing.expectError(Error.UninitializedLocal, r);
+}
+
+test "validate: defaultable local read without set is OK (cyc195)" {
+    // i32 local read before set → defaultable, auto-init → valid.
+    const locals = [_]ValType{.i32};
+    try validateFunction(i32_result_sig, &locals, &[_]u8{ 0x20, 0x00, 0x0B }, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
+test "validate: non-null local read AFTER set is OK (cyc195 grow-only init)" {
+    // local.set 0 then local.get 0 on a nullable ref local (set provides a
+    // value via ref.null). Nullable refs are defaultable so this is doubly
+    // OK; the point is local.set marks init for the get. Use ref.null func
+    // → (ref null func); local 0 is (ref null func) (defaultable anyway).
+    const locals = [_]ValType{ValType.funcref};
+    // ref.null func (0xD0 0x70); local.set 0 (0x21 0x00); local.get 0 (0x20 0x00); drop; end
+    const body = [_]u8{ 0xD0, 0x70, 0x21, 0x00, 0x20, 0x00, 0x1A, 0x0B };
+    try validateFunction(empty_sig, &locals, &body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
 test "validate: ref.i31 result satisfies anyref via GC heap lattice (10.G cycle 134)" {
     // (ref i31) <: anyref (i31 <: eq <: any). A func returning anyref
     // must accept `i32.const; ref.i31` — the abstract-head subtype check

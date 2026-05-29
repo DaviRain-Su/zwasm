@@ -1,4 +1,4 @@
-// FILE-SIZE-EXEMPT: Wasm spec §3.3 validation single-pass walker (type-stack + control-stack); P1 spec-defined sub-language, intrinsically singular (splitting would create artificial seams across an unsplittable algorithm). (per ADR-0099) (cap=3200)
+// FILE-SIZE-EXEMPT: Wasm spec §3.3 validation single-pass walker (type-stack + control-stack); P1 spec-defined sub-language, intrinsically singular (splitting would create artificial seams across an unsplittable algorithm). The module-level validation helpers (validateTypeSection / validateGlobalInits / constExprResultType / funcTypeImportCompatible / gcValTypeSubtype family) are now an extraction candidate as they accrete — see D-204. (per ADR-0099) (cap=3300)
 //! Wasm function-body **type-stack + control-stack validator**
 //! (Phase 1 / §9.1 / 1.5).
 //!
@@ -50,6 +50,9 @@ pub const Error = error{
     BadBlockType,
     BadValType,
     InvalidLocalIndex,
+    /// Wasm 3.0 function-references §validation: `local.get`/`local.tee`
+    /// reads a non-defaultable (non-null `(ref ht)`) local before it is set.
+    UninitializedLocal,
     InvalidFuncIndex,
     InvalidGlobalIndex,
     ImmutableGlobal,
@@ -516,6 +519,15 @@ pub fn validateFunctionAndCollectSelectTypesWithMemory(
     try v.run();
 }
 
+/// Wasm 3.0 §3.3.3 — a local type is defaultable (numeric/vector or NULLABLE
+/// ref) and readable without a set; non-null `(ref ht)` is not (cyc195).
+fn localIsDefaultable(t: ValType) bool {
+    return switch (t) {
+        .ref => |r| r.nullable,
+        else => true,
+    };
+}
+
 pub const Validator = struct {
     sig: FuncType,
     locals: []const ValType,
@@ -626,6 +638,13 @@ pub const Validator = struct {
     control_buf: [max_control_stack]ControlFrame = undefined,
     control_len: usize = 0,
 
+    /// cyc195 — grow-only definite-assignment bitset for non-defaultable
+    /// locals (Wasm 3.0 function-references §validation; see `markLocalInit`
+    /// + `opLocalGet`). Disabled if local count exceeds the buffer cap (safe).
+    locals_init: [max_operand_stack]bool = undefined,
+    track_local_init: bool = false,
+    n_locals_total: u32 = 0,
+
     /// D-115 d-39: when non-null, `opSelect` appends the resolved
     /// operand valtype byte per untyped `select` (0x1B). Body-walk
     /// order; consumed by `lower.zig` to populate `ZirInstr.extra`
@@ -642,6 +661,21 @@ pub const Validator = struct {
         const fn_end_type: BlockType = blockTypeOfSlice(self.sig.results);
 
         try self.pushFrame(.block, .empty, fn_end_type);
+
+        // cyc195 — seed the definite-assignment bitset (skip if over cap).
+        {
+            const total = self.sig.params.len + self.locals.len;
+            if (total <= max_operand_stack) {
+                self.track_local_init = true;
+                self.n_locals_total = @intCast(total);
+                const params_len = self.sig.params.len;
+                var li: u32 = 0;
+                while (li < total) : (li += 1) {
+                    // Params always init (receive args); declared locals by defaultability.
+                    self.locals_init[li] = li < params_len or localIsDefaultable(self.localType(li).?);
+                }
+            }
+        }
 
         while (self.control_len > 0) {
             if (self.pos >= self.body.len) return Error.UnexpectedEnd;
@@ -1320,6 +1354,13 @@ pub const Validator = struct {
     fn opLocalGet(self: *Validator) Error!void {
         const idx = try leb128.readUleb128(u32, self.body, &self.pos);
         const t = self.localType(idx) orelse return Error.InvalidLocalIndex;
+        // cyc195 — non-defaultable local read before set is invalid (skipped
+        // in unreachable/dead code, which is validation-permissive).
+        if (self.track_local_init and idx < self.n_locals_total and
+            !self.locals_init[idx] and !self.topFrame().unreachable_flag)
+        {
+            return Error.UninitializedLocal;
+        }
         try self.pushType(t);
     }
 
@@ -1327,13 +1368,25 @@ pub const Validator = struct {
         const idx = try leb128.readUleb128(u32, self.body, &self.pos);
         const t = self.localType(idx) orelse return Error.InvalidLocalIndex;
         try self.popExpect(t);
+        self.markLocalInit(idx);
     }
 
     fn opLocalTee(self: *Validator) Error!void {
         const idx = try leb128.readUleb128(u32, self.body, &self.pos);
         const t = self.localType(idx) orelse return Error.InvalidLocalIndex;
         try self.popExpect(t);
+        self.markLocalInit(idx); // tee writes the local before pushing
         try self.pushType(t);
+    }
+
+    /// cyc195 — mark a local definitely-set (grow-only; reachable code only,
+    /// so a dead-code set can't satisfy a later live read).
+    fn markLocalInit(self: *Validator, idx: u32) void {
+        if (self.track_local_init and idx < self.n_locals_total and
+            !self.topFrame().unreachable_flag)
+        {
+            self.locals_init[idx] = true;
+        }
     }
 
     fn opGlobalGet(self: *Validator) Error!void {
@@ -2989,13 +3042,10 @@ pub fn typeDefIsSubtype(sub: u32, sup: u32, types: *const sections.Types) bool {
 }
 
 /// Wasm spec §3.4.3 — infer the result valtype of a *single-instruction*
-/// constant expression (global init / offset expr). Returns null for any
-/// multi-instruction or unrecognized shape, so a caller can treat
-/// "undeterminable" as "don't reject" (conservative): an incomplete
-/// evaluator must never reject a valid module. `ref.func i` yields the
-/// concrete `(ref <func_type_indices[i]>)` (GC-aware, unlike the legacy
-/// funcref-only `runner_validate.validateGlobalInitExpr`); `global.get j`
-/// yields the referenced global's declared type.
+/// const-expr (global init / offset). Returns null for multi-instruction or
+/// unrecognized shapes → caller treats "undeterminable" as "don't reject"
+/// (conservative). `ref.func i` → concrete `(ref func_type_indices[i])`
+/// (GC-aware); `global.get j` → referenced global's type.
 pub fn constExprResultType(
     expr: []const u8,
     global_entries: []const GlobalEntry,
@@ -3050,12 +3100,9 @@ pub fn constExprResultType(
     return produced;
 }
 
-/// Wasm spec §3.4.3 — every defined global's init-expr result type must be
-/// a subtype of the declared global type, honoring iso-recursive rec-group
-/// identity (ADR-0126 via `gcValTypeSubtype`). Conservative per
-/// `constExprResultType`: undeterminable shapes pass. This closes the
-/// native-API (`frontendValidate`) gap where global init types were never
-/// checked — the legacy JIT path validates separately in compile.zig.
+/// Wasm spec §3.4.3 — every defined global's init-expr result type must be a
+/// subtype of the declared global type (iso-recursive, ADR-0126). Conservative
+/// per `constExprResultType`. Closes the `frontendValidate` global-init gap.
 pub fn validateGlobalInits(
     defined_globals: []const sections.GlobalDef,
     global_entries: []const GlobalEntry,
@@ -3069,14 +3116,9 @@ pub fn validateGlobalInits(
     return true;
 }
 
-/// Wasm 3.0 §4.5.10 + §3.3.5.1 — function import-matching: the PROVIDED
-/// (source) func type must be a SUBTYPE of the importer's DECLARED type,
-/// not exact-equal. Func subtyping is contravariant in params, covariant
-/// in results. `gcValTypeSubtype` returns true on `eql`, so this subsumes
-/// the prior exact check. The caller passes the importer's `types`; the
-/// cross-module caller relies on the source + importer sharing a type
-/// space (true for the spec cross-module subtype corpus, which duplicates
-/// type defs) — distinct-layout cross-module canonical matching is D-202.
+/// Wasm 3.0 §4.5.10 + §3.3.5.1 — function import-matching: the provided func
+/// type must be a SUBTYPE of the declared import type (contravariant params /
+/// covariant results), not exact-equal. Same-typespace simplification → D-202.
 pub fn funcTypeImportCompatible(
     want: zir.FuncType,
     src: zir.FuncType,
