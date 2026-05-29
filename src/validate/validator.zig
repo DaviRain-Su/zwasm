@@ -28,6 +28,7 @@ const init_expr = @import("../parse/init_expr.zig");
 const dispatch_collector = @import("../ir/dispatch_collector.zig");
 const wasm_byte_map = @import("../ir/wasm_byte_map.zig");
 const validator_simd = @import("validator_simd.zig");
+const diagnostic = @import("../diagnostic/diagnostic.zig");
 
 const ValType = zir.ValType;
 const FuncType = zir.FuncType;
@@ -627,8 +628,21 @@ pub const Validator = struct {
         while (self.control_len > 0) {
             if (self.pos >= self.body.len) return Error.UnexpectedEnd;
             const op = self.body[self.pos];
+            const op_pos = self.pos;
             self.pos += 1;
-            try self.dispatch(op);
+            // ADR-0016 M3 — attribute the failing instruction on the cold
+            // path: the body offset + opcode of the op that rejected.
+            // `frontendValidate` patches `fn_idx` afterward. This is the
+            // permanent replacement for the throwaway op-probe used during
+            // GC corpus bring-up (lesson `gc-type-subtyping-is-rtt-blocked`).
+            self.dispatch(op) catch |e| {
+                diagnostic.setDiag(.validate, .other, .{ .validate = .{
+                    .fn_idx = 0,
+                    .body_offset = @intCast(op_pos),
+                    .opcode = op,
+                } }, "{s} at op 0x{x}", .{ @errorName(e), op });
+                return e;
+            };
         }
 
         if (self.pos != self.body.len) return Error.TrailingBytes;

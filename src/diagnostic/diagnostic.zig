@@ -95,15 +95,21 @@ pub const Phase = enum(u32) {
     wasi = 5,
 };
 
-/// Location is a tagged union — phase 1 ships only `unknown`.
-/// M2 adds `parse: { byte_offset }`, M3 adds
-/// `validate: { fn_idx, body_offset, opcode }` and
-/// `execute: { fn_idx, pc, ea, mem_size }`. The renderer
-/// switches on `phase` first and only reads `location` for the
-/// variants it knows; new variants land additively without
+/// Location is a tagged union — phase 1 shipped only `unknown`.
+/// M3 (2026-05-29) adds the `validate` variant; M2 `parse` and the
+/// M3 `execute` variant land additively when their callers wire up.
+/// The renderer switches on `phase` first and only reads `location`
+/// for the variants it knows; new variants land additively without
 /// breaking phase-1 callers.
 pub const Location = union(enum) {
     unknown,
+    /// ADR-0016 M3 — validate-phase failure site. `opcode`/`body_offset`
+    /// are set by `validator.run`'s dispatch-loop catch (the failing
+    /// instruction); `fn_idx` is patched by `frontendValidate`'s
+    /// per-function loop via `noteValidateFuncIdx`. A failure raised
+    /// BEFORE the function body (type-section decode / preDecode) carries
+    /// `opcode = 0` + the phase-level message instead.
+    validate: struct { fn_idx: u32, body_offset: u32, opcode: u8 },
 };
 
 /// Inline message buffer size — matches v1 c_api `ERROR_BUF_SIZE`
@@ -173,6 +179,18 @@ pub fn clearDiag() void {
     last_diag = null;
 }
 
+/// ADR-0016 M3 — patch the `fn_idx` of the current validate diagnostic.
+/// The validator's dispatch loop sets `body_offset`/`opcode` but does
+/// not know the function's index; `frontendValidate`'s per-function loop
+/// calls this after catching a failure. No-op if the current diagnostic
+/// is not a `.validate` location (e.g. a type-section decode failure
+/// raised before any function body).
+pub fn noteValidateFuncIdx(fn_idx: u32) void {
+    if (last_diag) |*d| {
+        if (d.location == .validate) d.location.validate.fn_idx = fn_idx;
+    }
+}
+
 /// Read the most recent diagnostic, if any. Returned pointer is
 /// valid until the next `setDiag` / `clearDiag` on this thread.
 pub fn lastDiagnostic() ?*const Info {
@@ -220,6 +238,24 @@ test "diagnostic: oversize message is silently truncated" {
     try testing.expectEqual(@as(usize, message_buf_size), d.message_len);
     try testing.expectEqual(@as(u8, 'x'), d.message()[0]);
     try testing.expectEqual(@as(u8, 'x'), d.message()[message_buf_size - 1]);
+}
+
+test "diagnostic: M3 validate location carries op/offset; noteValidateFuncIdx patches fn_idx" {
+    clearDiag();
+    setDiag(.validate, .other, .{ .validate = .{ .fn_idx = 0, .body_offset = 12, .opcode = 0xFB } }, "StackTypeMismatch at op 0x{x}", .{0xfb});
+    noteValidateFuncIdx(7);
+    const d = lastDiagnostic().?;
+    try testing.expectEqual(Phase.validate, d.phase);
+    try testing.expectEqual(@as(u32, 7), d.location.validate.fn_idx);
+    try testing.expectEqual(@as(u32, 12), d.location.validate.body_offset);
+    try testing.expectEqual(@as(u8, 0xFB), d.location.validate.opcode);
+}
+
+test "diagnostic: noteValidateFuncIdx is a no-op on non-validate location" {
+    clearDiag();
+    setDiag(.parse, .other, .unknown, "type section decode failed", .{});
+    noteValidateFuncIdx(3); // must not crash / must not alter the .unknown location
+    try testing.expectEqual(Location.unknown, lastDiagnostic().?.location);
 }
 
 test "diagnostic: clearDiag after setDiag returns null" {

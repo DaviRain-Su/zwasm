@@ -42,6 +42,7 @@ const testing = std.testing;
 const import_mod = @import("import.zig");
 const instance_mod = @import("instance.zig");
 const heap_mod = @import("../../feature/gc/heap.zig");
+const diagnostic = @import("../../diagnostic/diagnostic.zig");
 
 const Module = runtime_mod.Module;
 const Value = runtime_mod.Value;
@@ -342,7 +343,7 @@ pub fn frontendValidate(alloc: std.mem.Allocator, binary: []const u8) bool {
     // `data_count_section_present` boolean if a fixture surfaces a
     // miscompile around its absence.
 
-    for (codes_owned.items, defined_func_indices) |code, type_idx| {
+    for (codes_owned.items, defined_func_indices, 0..) |code, type_idx, def_idx| {
         const sig = types_owned.items[type_idx];
         validator.validateFunctionWithMemIdxAndTags(
             sig,
@@ -362,7 +363,12 @@ pub fn frontendValidate(alloc: std.mem.Allocator, binary: []const u8) bool {
             types_owned.kinds,
             types_owned.struct_defs,
             types_owned.array_defs,
-        ) catch return false;
+        ) catch {
+            // ADR-0016 M3 — the validator set the op/offset diagnostic in
+            // its dispatch loop; attach the defined-function index here.
+            diagnostic.noteValidateFuncIdx(@intCast(imp_func_count + def_idx));
+            return false;
+        };
     }
     return true;
 }
@@ -424,7 +430,13 @@ fn preDecodeSectionBodies(alloc: std.mem.Allocator, module: *Module) bool {
     // shortcut and reach instantiate as "valid" when spec demands
     // invalid.
     if (module.find(.type)) |s| {
-        var t = sections.decodeTypes(alloc, s.body) catch return false;
+        var t = sections.decodeTypes(alloc, s.body) catch |e| {
+            // ADR-0016 M3 — type-section decode failure (e.g. a packed
+            // storage type i8/i16 the field decoder doesn't accept yet,
+            // or an out-of-range typeidx). Pre-func-loop, so no opcode.
+            diagnostic.setDiag(.validate, .other, .unknown, "type-section decode: {s}", .{@errorName(e)});
+            return false;
+        };
         defer t.deinit();
         const ntypes = t.items.len;
         for (t.items) |ft| {
@@ -445,7 +457,10 @@ fn preDecodeSectionBodies(alloc: std.mem.Allocator, module: *Module) bool {
         // out-of-bounds / forward supertype). Runs in the no-code path
         // too, so type-only gc modules (type-subtyping-invalid corpus)
         // can't bypass it.
-        if (!validator.validateTypeSection(&t)) return false;
+        if (!validator.validateTypeSection(&t)) {
+            diagnostic.setDiag(.validate, .other, .unknown, "type-section subtype validation rejected (ADR-0124)", .{});
+            return false;
+        }
     }
     if (module.find(.import)) |s| {
         var im = sections.decodeImports(alloc, s.body) catch return false;

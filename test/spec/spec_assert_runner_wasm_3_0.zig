@@ -323,8 +323,20 @@ pub fn main(init: std.process.Init) !void {
                         // by the new module resolve against the
                         // linker's existing entries (populated by
                         // prior `register <as>` directives).
+                        zwasm.diagnostic.clearDiag();
                         var compiled = cur_engine.compile(cur_module_bytes.?) catch |e| {
-                            std.debug.print("[wasm-3.0-assert] {s}/{s} compile FAIL: {s}\n", .{ proposal, d.module_path, @errorName(e) });
+                            // ADR-0016 M3 — surface the attributed validate
+                            // failure (op/offset/fn) instead of the bare
+                            // CompileError tag (permanent replacement for
+                            // the GC bring-up op-probe).
+                            if (zwasm.diagnostic.lastDiagnostic()) |dg| {
+                                switch (dg.location) {
+                                    .validate => |v| std.debug.print("[wasm-3.0-assert] {s}/{s} compile FAIL: {s} — {s} [fn={d} off={d} op=0x{x}]\n", .{ proposal, d.module_path, @errorName(e), dg.message(), v.fn_idx, v.body_offset, v.opcode }),
+                                    else => std.debug.print("[wasm-3.0-assert] {s}/{s} compile FAIL: {s} — {s}\n", .{ proposal, d.module_path, @errorName(e), dg.message() }),
+                                }
+                            } else {
+                                std.debug.print("[wasm-3.0-assert] {s}/{s} compile FAIL: {s}\n", .{ proposal, d.module_path, @errorName(e) });
+                            }
                             cur_inst_idx = null;
                             continue;
                         };

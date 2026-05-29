@@ -94,7 +94,13 @@ pub fn runWasmCaptured(
         .data = @constCast(bytes.ptr),
     };
     const module = wasm_c_api.wasm_module_new(store, &bv) orelse {
-        diagnostic.setDiag(.instantiate, .module_alloc_failed, .unknown, "module decode/validate failed (no further detail in phase 1)", .{});
+        // ADR-0016 M3 — `frontendValidate` sets an attributed validate
+        // diagnostic (phase=.validate, op/offset) on the cold path; keep
+        // it. Only fall back to the generic message if no detail was set
+        // (e.g. an allocation failure rather than a validate rejection).
+        if (diagnostic.lastDiagnostic() == null) {
+            diagnostic.setDiag(.instantiate, .module_alloc_failed, .unknown, "module decode/validate failed", .{});
+        }
         return error.ModuleAllocFailed;
     };
     defer wasm_c_api.wasm_module_delete(module);
