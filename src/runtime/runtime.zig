@@ -101,6 +101,12 @@ pub const HostCall = struct {
 /// for `Runtime.deinit` cleanup.
 pub const Exception = @import("../feature/exception_handling/exception.zig").Exception;
 
+/// Wasm 3.0 EH tag identity object (ADR-0114 D1) — re-exported from
+/// `feature/exception_handling/tag.zig`. `Runtime.tags` holds one
+/// `*TagInstance` per tag in the instance's tag index space; identity
+/// is the pointer (cross-module imports share the source's pointer).
+pub const TagInstance = @import("../feature/exception_handling/tag.zig").TagInstance;
+
 /// Max number of operand values a tag's param-list can stash in
 /// `Exception.payload`. Mirrors the `Exception` struct's inline
 /// cap; matches `max_block_arity` in `src/interp/mvp.zig` (the
@@ -229,6 +235,17 @@ pub const Runtime = struct {
     /// never sees a tag_idx past the populated length when the
     /// production pipeline has populated this field.
     tag_param_counts: []const u32 = &.{},
+
+    /// Wasm 3.0 EH tag identity table (ADR-0114 D1; 10.E-eh-tail).
+    /// Parallel to `tag_param_counts`: one `*TagInstance` per tag in
+    /// the instance's tag index space (imported tags first, then
+    /// defined). Imported slots alias the source instance's
+    /// `*TagInstance` (cross-module pointer identity); defined slots
+    /// are freshly allocated. throw stamps `exc.tag = tags[tag_idx]`;
+    /// catch matches `tags[catch_tag_idx] == exc.tag`. Default `&.{}`
+    /// (non-EH modules); throw only occurs in EH modules where this
+    /// is populated.
+    tags: []const *TagInstance = &.{},
 
     /// Wasm 3.0 EH (10.E-payload-prop Cycle 1; ADR-0120 D1+D5+D6)
     /// — JIT payload staging region. Written by JIT throw sites

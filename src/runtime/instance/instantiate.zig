@@ -978,6 +978,8 @@ pub fn instantiateRuntime(
         if (total_tags > 0) {
             const counts = try a.alloc(u32, total_tags);
             const slot_counts = try a.alloc(u32, total_tags);
+            // ADR-0114 D1 tag identity table, parallel to counts.
+            const tags_arr = try a.alloc(*runtime_mod.TagInstance, total_tags);
             var total_slots: u32 = 0;
             var ti: usize = 0;
             const fillTag = struct {
@@ -991,17 +993,30 @@ pub fn instantiateRuntime(
                     if (slots > max_slots.*) max_slots.* = slots;
                 }
             }.f;
-            if (imports_decoded) |im| for (im.items) |it| {
+            if (imports_decoded) |im| for (im.items, 0..) |it, idx| {
                 if (it.kind != .tag) continue;
                 try fillTag(it.payload.tag_typeidx, types.items, counts, slot_counts, ti, &total_slots);
+                // Imported tag identity = the source instance's
+                // *TagInstance (cross-module pointer sharing, ADR-0114
+                // D1). `bindings[idx]` is a `.tag` binding (binding-kind
+                // checked earlier).
+                const src = bindings.?[idx].tag;
+                if (src.source_tag_index >= src.source_runtime.tags.len) return error.ImportTypeMismatch;
+                tags_arr[ti] = src.source_runtime.tags[src.source_tag_index];
                 ti += 1;
             };
             for (defined_tag_entries) |entry| {
                 try fillTag(entry.typeidx, types.items, counts, slot_counts, ti, &total_slots);
+                // Defined tag: fresh identity (its heap address IS the
+                // identity per ADR-0114 D1).
+                const inst_tag = try a.create(runtime_mod.TagInstance);
+                inst_tag.* = .{ .typeidx = entry.typeidx };
+                tags_arr[ti] = inst_tag;
                 ti += 1;
             }
             rt.tag_param_counts = counts;
             rt.tag_param_slot_counts = slot_counts;
+            rt.tags = tags_arr;
             // ADR-0120 D1: pre-size eh_payload to the maximum per-tag
             // slot count (single-use buffer; capacity = max not sum).
             if (total_slots > 0) {

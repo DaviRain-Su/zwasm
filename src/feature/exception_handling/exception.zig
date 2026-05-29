@@ -25,6 +25,7 @@
 
 const value_mod = @import("../../runtime/value.zig");
 const Value = value_mod.Value;
+const TagInstance = @import("tag.zig").TagInstance;
 
 /// Upper bound on per-exception payload values. Matches
 /// `Runtime.max_exception_payload` (= `max_block_arity` in the
@@ -35,6 +36,10 @@ pub const max_payload: u32 = 16;
 
 pub const Exception = struct {
     tag_idx: u32,
+    /// ADR-0114 D1 tag identity (10.E-eh-tail). Set by `throwOp` to
+    /// `rt.tags[tag_idx]`; catch matches by pointer. `null` only on
+    /// the legacy/no-tags path (catch then falls back to `tag_idx`).
+    tag: ?*TagInstance = null,
     payload_len: u32,
     payload: [max_payload]Value,
 

@@ -665,6 +665,9 @@ fn throwOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     // Runtime.deinit (pre-GC milestones).
     const exc = try rt.alloc.create(runtime.Exception);
     exc.* = runtime.Exception.init(thrown_tag_idx, payload_buf[0..param_count]);
+    // ADR-0114 D1 — stamp the tag identity so catch (incl. cross-
+    // module) matches by `*TagInstance` pointer, not index.
+    if (thrown_tag_idx < rt.tags.len) exc.tag = rt.tags[thrown_tag_idx];
     try rt.live_exceptions.append(rt.alloc, exc);
     rt.pending_exception = exc;
 
@@ -718,6 +721,18 @@ fn throwRefOp(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
 ///
 /// `catch_ref` / `catch_all_ref` are deferred to the exnref
 /// implementation (10.E-N follow-up).
+/// ADR-0114 D1 — does a `catch`/`catch_ref` clause (tag index in the
+/// CATCHER's space) match the thrown exception? Compares by
+/// `*TagInstance` pointer (correct across module boundaries) when both
+/// the catcher's `rt.tags` slot and the exception's stamped tag are
+/// available; falls back to the index key on the legacy no-tags path.
+fn catchTagMatches(rt: *Runtime, entry_tag_idx: u32, exc: *const runtime.Exception) bool {
+    if (exc.tag) |thrown_tag| {
+        if (entry_tag_idx < rt.tags.len) return rt.tags[entry_tag_idx] == thrown_tag;
+    }
+    return entry_tag_idx == exc.tag_idx;
+}
+
 fn findAndDispatchCatch(
     rt: *Runtime,
     frame: *runtime.Frame,
@@ -744,7 +759,7 @@ fn findAndDispatchCatch(
                     return true;
                 },
                 .catch_ => {
-                    if (entry.tag_idx != exc.tag_idx) continue;
+                    if (!catchTagMatches(rt, entry.tag_idx, exc)) continue;
                     try dispatchCatchWithPayload(rt, frame, depth + 1 + entry.label_idx, payload);
                     return true;
                 },
@@ -755,7 +770,7 @@ fn findAndDispatchCatch(
                     return true;
                 },
                 .catch_ref => {
-                    if (entry.tag_idx != exc.tag_idx) continue;
+                    if (!catchTagMatches(rt, entry.tag_idx, exc)) continue;
                     // catch_ref pushes the tag's params followed by the exnref.
                     var combined: [runtime.max_exception_payload + 1]Value = undefined;
                     for (payload, 0..) |v, j| combined[j] = v;
@@ -1087,6 +1102,26 @@ test "block (param i32): packed param byte → result-arity + params-excluded he
     try dispatch_loop.run(&rt, &t, fnz.instrs.items);
     try testing.expectEqual(@as(u32, 1), rt.operand_len);
     try testing.expectEqual(@as(u32, 99), rt.popOperand().u32);
+}
+
+test "catchTagMatches: *TagInstance pointer identity vs index fallback (10.E-eh-tail cycle 119)" {
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    // Two structurally-identical tags (same typeidx) — identity is the
+    // POINTER, so they must NOT match each other (ADR-0114 D1).
+    var tag_a: runtime.TagInstance = .{ .typeidx = 0 };
+    var tag_b: runtime.TagInstance = .{ .typeidx = 0 };
+    var tags = [_]*runtime.TagInstance{ &tag_a, &tag_b };
+    rt.tags = &tags;
+    var exc = runtime.Exception.init(0, &.{});
+    exc.tag = &tag_a;
+    try testing.expect(catchTagMatches(&rt, 0, &exc)); // tags[0]==&tag_a==exc.tag
+    try testing.expect(!catchTagMatches(&rt, 1, &exc)); // tags[1]==&tag_b != exc.tag
+    // No stamped tag → legacy index fallback.
+    exc.tag = null;
+    exc.tag_idx = 1;
+    try testing.expect(catchTagMatches(&rt, 1, &exc));
+    try testing.expect(!catchTagMatches(&rt, 0, &exc));
 }
 
 test "unreachable: traps Trap.Unreachable" {
