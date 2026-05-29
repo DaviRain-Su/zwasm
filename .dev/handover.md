@@ -6,18 +6,20 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc195 (`a25dd0a0`) — **non-null-local definite-assignment**
-  (D-203 RESOLVED): grow-only `locals_init` bitset (params always-init — key
-  fix; declared locals init iff defaultable; reachable-code set/get checks;
-  dead-code-skip). func.21 rejected → **`zig build test-all` GREEN** (was
-  falsely-green→RED since cyc177). ZERO regression (gc 349/96/60 + all 5
-  proposals + wast_runner 1158/1158). **Bundle 10.Y CLOSED.** validator.zig
-  cap 3200→3300 (ADR-0099); module-validation helpers = extraction candidate
-  → D-204. **Process gap**: Mac per-chunk gate (test+test-spec) never builds
-  test-all-only exes — latent breaks surface only via ubuntu test-all.
-- cyc194 (`7bfc5d64`) restored wast-runner compile. cyc193 assert_unlinkable
-  (5 fail = D-202). cyc192 import subtyping. cyc190 gc global-init. gc residual:
-  .17 (D-198) + 5 unlinkable (D-202). All ubuntu-green through cyc190.
+- **HEAD**: cyc196 (`086c2991`) — **first clang-realworld fixture** (clang_smoke/
+  loop_sum → JIT i32:55; edge_cases/p10). Proves the clang→wasm→zwasm pipeline.
+  KEY FINDINGS (lesson `clang-wasm-realworld-toolchain-recipe`): clang recipe =
+  `NIX_HARDENING_ENABLE="" PATH=<lld-20> clang --target=wasm32 -nostdlib
+  -Wl,--no-entry -Wl,--export-all -O2`. Realworld-clang is HIGHER-cost / LOWER-
+  marginal-value than assumed: (a) JIT can't run `return_call` (D-205, tail-call
+  interp-only) → clang_musttail blocked; (b) `runI32Export` doesn't instantiate
+  (clang shadow-stack -O0 traps) + no-arg funcs constant-fold → only trivial
+  clang fixtures JIT-verify; (c) realworld-run fully instantiates but no result-
+  check. Non-trivial clang fixtures need harness work.
+- cyc195 non-null-local definite-assignment → **test-all GREEN** (gate restored,
+  bundle 10.Y closed). cyc194 restored wast-runner compile. cyc190-193: gc
+  global-init / import subtyping / assert_unlinkable. gc residual: .17 (D-198)
+  + 5 unlinkable (D-202). All Mac+ubuntu green through cyc195.
 - Earlier arc: cyc177 iso-recursive canonicalEqual; cyc147-148 ADR-0125
   packed; cyc146 ADR-0016 M3 self-attribution; cyc130-140 i31/struct/array.
 - Runner EXECUTES via interp; gc_heap + gc_type_infos + rt.datas all
@@ -28,25 +30,25 @@
 - Mac+ubuntu green through cyc190 (`OK` exit 0). 10.G-gc + 10.H-multimem
   CLOSED cyc188. Cross-module sharing substrate: D-199 memory + D-201 table/func.
 
-## Active task — cycle 196: realworld/p10 clang fixtures (§10 ROW close) — **NEXT**
+## Active task — cycle 197: reassess Phase-10-close path (realworld ROI changed) — **NEXT**
 
-test-all is GREEN; the spec corpus is mined to deep/niche tracked edges (.17 =
-D-198, 5 unlinkable = D-202). The next forward §10 work = **realworld/p10
-fixtures** (§10 ROW 10.G/10.M/10.E/10.TC/10.R close criteria; currently skeleton
-dirs, no `.wasm`). Autonomous: `clang_wasm64` (memory64) + `clang_musttail`
-(tail-call) — clang✓ (wasm32+wasm64 targets) + wasm-tools✓ in PATH.
-**cyc196 Step 0 (read-only survey)**: (1) `test/realworld/p10/README.md` + the
-`test/realworld/` harness (build.zig `test-realworld` / `test-realworld-run`
-steps) — how a fixture is declared + run via `cli_run.runWasm`; does it pick up
-p10 or need wiring? (2) clang → wasm freestanding (`clang --target=wasm32
--nostdlib -Wl,--no-entry -Wl,--export-all`) producing a runnable no-import
-module with an exported func — verify a trivial C → `.wasm` → runs in zwasm.
-(3) FIRST fixture: clang_musttail (tail-call C `__attribute__((musttail))`) is
-likely simplest (wasm64 needs >4GiB host alloc).
-**Bar**: land ONE real clang fixture (`.wasm` + provenance + expected) zwasm
-runs correctly, wired into a runnable test step; test-all stays GREEN; 0 panics.
-If clang can't emit runnable wasm cleanly, debt-track per extended_challenge;
-emscripten/dart/ocaml/hoot toolchains stay gated.
+cyc196 materially changed the realworld assumption: result-checking NON-trivial
+clang fixtures needs harness work (full-instantiation + invoke-with-result) AND
+hits JIT feature gaps (D-205 tail-call), while the spec corpus ALREADY covers
+the features (all 5 proposals green via interp). So realworld-clang is high-cost
+/ low-marginal-value. Before sinking cycles into a fixture harness, **map what
+Phase 10 close ACTUALLY requires** + pick the highest-ROI concrete chunk.
+**cyc197 (read ROADMAP §10 + the 10.P close criteria)**: (1) Read ROADMAP §10
+row 10.P + `scripts/check_phase10_close_invariants.sh` (if it exists) — are
+realworld/p10 fixtures a HARD close-criterion, or is the green spec corpus
+sufficient feature coverage? (2) Enumerate the genuine remaining Phase-10-close
+work: 10.P invariants (the 23-item script), the deep gc edges (D-198 .17 /
+D-202 finality+distinct-layout), JIT feature gaps (D-205 tail-call). (3) PICK
+the highest-value concrete chunk: likely either the 10.P close-invariants script
+(structural, advances the formal close) OR JIT tail-call (D-205, closes the
+10.TC JIT half + unblocks clang_musttail) — choose by ROI, then execute.
+**Bar**: a concrete commit (10.P invariant check, a debt/ROADMAP coherence
+update, or the start of a chosen impl); no regression; test-all stays GREEN.
 
 ## §10 close map (after this bundle)
 
