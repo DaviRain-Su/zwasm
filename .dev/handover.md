@@ -6,14 +6,13 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 139 (`e26276bc`) — array.new const-expr instantiation
-  (extended `evalGlobalInitGc` with array.new/new_default/new_fixed,
-  mirroring cyc138 struct.new). **gc return 55→61, trap 6→10** —
-  array.5/6 (array global inits) instantiate + their ops pass. No
-  regression; unit tests green.
-- cyc138 struct.new const-expr (return 49→55, bundle exit ≥50 MET);
-  cyc136/137 struct/array narrowing; cyc135 GC-type threading; cyc130-133
-  i31. gc return: 0→2→18→33→48→49→55→61.
+- **HEAD**: cycle 140 (`92eab71a`) — validate+lower array.new_data/
+  new_elem (validator sub 9/10 → opArrayNewSeg; lower → ZirOp). **gc
+  trap 10→18** (fixtures compile; OOB assert_traps pass via Unreachable
+  pending exec); array_new_data/elem compile-FAIL 8→3. No regression.
+- cyc139 array.new const-expr (return 55→61, trap 6→10); cyc138
+  struct.new const-expr (exit ≥50 MET); cyc136/137 struct/array
+  narrowing; cyc130-135 i31/threading. gc return 0→…→61, trap 0→18.
 - Runner EXECUTES via interp; gc_heap + inst.gc_type_infos materialised
   at instantiate (instantiate.zig:859-880, before the globals loop ~1262).
 - cyc120 (`5db875b0`): cross-module EH propagation + caller-frame catch
@@ -45,22 +44,20 @@
 - **Exit-condition**: gc return ≥ 50 **MET at cyc138 (55)**. Extended
   target: gc return ≥ 90 (array exec + ref.test/cast) — refine as lands.
 
-## Active task — cycle 140: remaining gc gaps (pick by count) — **NEXT**
+## Active task — cycle 141: array.new_data/new_elem EXEC → returns — **NEXT**
 
-struct + array const-expr + i31 all done (return 61). Remaining gc
-compile/instantiate failures (from cyc139 DIRECT run), pick the biggest
-tractable family — INSTRUMENT first (cyc131 lesson), don't guess:
-- **ref.test/ref.cast/br_on_cast** (×~8 ValidateFailed) — RTT typed-ref
-  narrowing; validator stubs consume bytes w/o narrowing (ADR-0116 RTT).
-- **array_new_data/new_elem** (×8 ValidateFailed) — array init from
-  data/elem segments (new validator + exec).
-- **type-subtyping.*** (×many) — split: ValidateFailed (subtype edge
-  cases) + instantiate SignatureMismatch/UnknownImport (cross-module
-  linking of GC types — likely the c_api import-type match).
-- **packed struct.get_s/u** (struct.10, array packed) — ADR-0121 D3
-  deferred (i8/i16 storage); needs packed ValType.
-Localize one family's exact gap → fix. Observable: gc return/validate ↑;
-no regression to 61 return / 10 trap / 57 invalid.
+cyc140 validate+lower landed; the ops trap Unreachable pending exec.
+Implement the interp handlers (array_ops.zig, register in
+api/instance.zig) + lower already emits payload=typeidx, extra=segidx:
+- `array.new_data`: pop [offset:i32, size:i32]; alloc array (size elems);
+  copy `size*elem_size` bytes from data segment[segidx] at byte offset
+  into the array payload; trap OutOfBounds if offset+size*esz > seg.len.
+  Mirror memory.init's data-segment bounds/trap. (rt data-segment store.)
+- `array.new_elem`: same but copy `size` REF values from elem segment
+  rt.elems[segidx] (the []Value built at instantiate) into element slots.
+Observable: gc return ↑ (array_new_data/elem value asserts). Then
+remaining: RTT (ref.test/cast/br_on_cast), type-subtyping linking,
+packed get_s/u. No regression to 61 return / 18 trap / 57 invalid.
 
 ## Larger §10 work (later bundles)
 
@@ -77,7 +74,7 @@ no regression to 61 return / 10 trap / 57 invalid.
 [tail-call          ] return=71  trap=7   invalid=24  (all pass)
 [exception-handling ] return=34/34 trap=2/2 invalid=7/7 exception=4/4  ✅ FULLY GREEN
 [function-references] return=39(pass=32 fail=1) trap=4(pass) invalid=18(pass)
-[gc                 ] return=407(pass=61 fail=317) trap=100(pass=10 fail=90) invalid=60(pass=57 fail=3) malformed=1(pass) ParseFailed=0 ValidateFailed=38  ← 10.G (cyc139; array.new const-expr, return 55→61, trap 6→10)
+[gc                 ] return=407(pass=61 fail=309) trap=100(pass=18 fail=82) invalid=60(pass=57 fail=3) malformed=1(pass) ParseFailed=0 ValidateFailed=33  ← 10.G (cyc140; array.new_data/elem validate+lower, trap 10→18)
 [multi-memory       ] return=407(pass=387 fail=20) trap=238(pass=237 fail=1)
 ```
 
