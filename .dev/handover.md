@@ -6,7 +6,8 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `5457997c` (cyc201, 10.TC-JIT IT-5). **10.TC-JIT bundle CLOSED** — JIT
+- **HEAD**: `81eeb6fa` (cyc202; 10.TC-JIT IT-5 + bundle-close @ `5457997c`/`81eeb6fa`).
+  cyc202 surveyed the JIT halves → next = **10.R `call_ref` JIT** (see Active bundle). **10.TC-JIT bundle CLOSED** — JIT
   tail-call codegen done + proven: direct 0-arg (IT-2), indirect table[0] (IT-3),
   recursion-WITH-ARGS (IT-4), and a **real clang `__attribute__((musttail))`
   fixture JIT-result-checked → 15** (IT-5). Root fix was the liveness
@@ -30,24 +31,43 @@
   (type_info.slot_size); data-seg elements are NATURAL width.
 - EH corpus FULLY GREEN 34/34 (ADR-0114 substrate cyc110-120; lesson
   `eh-cross-module-tag-substrate-scope` has the journey).
-- **Step 0.7 on resume**: last ubuntu kick = cyc196 `OK (HEAD=517cb01a)`. cyc197
-  (`544d4440` I2 script + `9996d478` handover) is DOCS/SCRIPT-only — not built by
-  test-all — so the 517cb01a→9996d478 gap is a non-code-gap; ubuntu green holds,
-  NO re-kick / revert needed. 10.G-gc + 10.H-multimem CLOSED cyc188.
+- **Step 0.7 on resume**: last ubuntu kick = cyc201 (IT-5) `OK (HEAD=81eeb6fa)` GREEN
+  (spec 212/0, simd 13351/0, realworld 46/55 compile-pass). cyc202 is a survey +
+  handover-only docs cycle (no code) → no ubuntu kick; green holds.
 
-## Active task — survey remaining 10.TC/E/G JIT halves  **NEXT**
+## Active bundle
 
-10.TC-JIT bundle CLOSED cyc201 (exit-condition met @ `5457997c`: clang_musttail
-JIT-result-checked → 15). Next: a **survey** chunk to scope the highest-value
-next JIT work under path (b) "complete 10.TC/E/G JIT halves", reporting current
-status of each: 10.TC cross-module tail-call (`cross_module_tail_call.zig`,
-ADR-0112 D4 — needs a multi-module JIT test harness; debt D-206); 10.E EH JIT
-codegen (substrate ADR-0114 built, interp 34/34 — what's the JIT-emit status?);
-10.G GC JIT codegen. Output → `private/notes/p10-jit-halves-survey.md`; end with
-a recommended next concrete chunk. Known 10.TC residuals are debt-rowed (D-206
-cross-module; D-205-tail `return_call_ref` blocked-by `call_ref` JIT / 10.R).
-Lighter queued: refresh stale 10.P SKIP rationales (I14/I21 reference resolved
-D-192/D-179).
+- **Bundle-ID**: 10.R-call_ref-JIT
+- **Cycles-remaining**: ~2-3 (arm64 call_ref emit + liveness + test → x86_64 → then return_call_ref reuse)
+- **Continuity-memo**: JIT-halves survey (cyc202, `private/notes/p10-jit-halves-survey.md`)
+  picked `call_ref` JIT as highest value: unblocks ~25 function-references spec
+  fixtures (D-186) + `return_call_ref`/D-206, reuses `call_indirect` machinery,
+  no new regalloc axes. **Funcref representation**: `ref.func idx` (already
+  JIT-emitted, `emit.zig:807`) pushes `@intFromPtr(&rt.func_entities[idx])` — a
+  `*FuncEntity` (Value.fromFuncRef encoding, ADR-0014 §2.1). `call_ref $sig` plan:
+  pop funcref vreg → null-check (CBZ → trap) → marshal args (`op_call.marshalCallArgs`)
+  → load JIT-entry from the FuncEntity (Step-0: confirm `FuncEntity` layout +
+  jit-entry/funcptr field offset in `jit_abi` / runtime) → MOV X0,X19 → BLR →
+  `op_call.captureCallResult`. NO runtime type-check (validator guarantees the
+  funcref's type ⊑ `$sig`). Touches: (1) `liveness.zig` — add `call_ref` arm
+  (pop funcref + sig.params, push sig.results; sig from `module_types[payload]`;
+  NON-terminator, mirror the `.call`/`.call_indirect` block ~line 438, NOT the
+  tail-call terminator branch); (2) new `arm64/ops/wasm_3_0/call_ref.zig` +
+  `op_call_ref` emit; (3) dispatch wiring (`emit.zig` + `dispatch_collector`);
+  (4) x86_64 mirror; (5) runI32Export red test.
+- **Exit-condition**: `ref.func $double; call_ref $sig` JIT-executes → 42 via
+  `runI32Export` (arm64 first); test-all GREEN, 0 panics. Then x86_64 + a
+  funcref-corpus delta.
+
+## Active task — 10.R-call_ref-JIT IT-1  **NEXT**
+
+Step-0: confirm `FuncEntity` struct layout (jit-entry/compiled-funcptr field +
+offset) in `src/engine/.../jit_abi*` + the runtime `FuncEntity` def, and how
+`call_indirect` resolves a funcptr (`op_call.emitCallIndirect`) to mirror. Then
+red test: module with `$double (param i32)(result i32)` + exported `test()` doing
+`i32.const 21; ref.func $double; call_ref $sig` → 42. Add the `call_ref` liveness
+arm + arm64 `op_call_ref` emit + dispatch wiring → green. Lighter queued: refresh
+stale 10.P SKIP rationales (I14/I21 reference resolved D-192/D-179).
 
 ## §10 close map
 
