@@ -65,6 +65,7 @@ const op_throw = @import("ops/wasm_3_0/throw.zig");
 const op_throw_ref = @import("ops/wasm_3_0/throw_ref.zig");
 const op_return_call = @import("ops/wasm_3_0/return_call.zig");
 const op_return_call_indirect = @import("ops/wasm_3_0/return_call_indirect.zig");
+const op_return_call_ref = @import("ops/wasm_3_0/return_call_ref.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
 const op_const = @import("op_const.zig");
@@ -1186,6 +1187,10 @@ pub fn compile(
             },
             .return_call_indirect => {
                 try op_return_call_indirect.emit(&ctx, &ins);
+                dead_code = true;
+            },
+            .return_call_ref => {
+                try op_return_call_ref.emit(&ctx, &ins);
                 dead_code = true;
             },
             .@"memory.size" => {

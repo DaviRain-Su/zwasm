@@ -535,6 +535,31 @@ test "runI32Export: call_ref through a funcref returns 42 end-to-end (10.R-call_
     try testing.expectEqual(@as(u32, 42), try runI32Export(testing.allocator, &bytes, "test"));
 }
 
+test "runI32Export: return_call_ref tail-call through a funcref returns 42 (10.R / D-206)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    // arm64 return_call_ref landed first (manual switch in emit.zig); the
+    // x86_64 mirror is the next cycle. Gate to aarch64 until then (D-206).
+    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-206");
+    // (module
+    //   (type $sig (func (result i32)))
+    //   (func $worker (export "worker") (type $sig) (i32.const 42))
+    //   (func $test (export "test") (result i32)
+    //     ref.func $worker return_call_ref $sig))
+    //
+    // Tail-call variant of call_ref: ref.func pushes *FuncEntity;
+    // return_call_ref pops it, null-checks, derefs funcentity_funcptr_offset,
+    // tears down the caller frame, BRs to $worker (no return here). $worker → 42.
+    // Wasm spec 3.0 §3.3.8.20.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type0 () -> i32
+        0x03, 0x03, 0x02, 0x00, 0x00, // func: worker→type0, test→type0
+        0x07, 0x11, 0x02, 0x06, 0x77, 0x6f, 0x72, 0x6b, 0x65, 0x72, 0x00, 0x00, 0x04, 0x74, 0x65, 0x73, 0x74, 0x00, 0x01, // export "worker"→f0, "test"→f1
+        0x0a, 0x0d, 0x02, 0x04, 0x00, 0x41, 0x2a, 0x0b, 0x06, 0x00, 0xd2, 0x00, 0x15, 0x00, 0x0b, // code: worker=i32.const42; test=ref.func0 return_call_ref0
+    };
+    try testing.expectEqual(@as(u32, 42), try runI32Export(testing.allocator, &bytes, "test"));
+}
+
 test "runI32Export: throw + catch_all returns 42 (IT-6 cycle 3c-iii-d end-to-end)" {
     if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
     // (module

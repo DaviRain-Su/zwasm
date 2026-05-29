@@ -6,12 +6,14 @@
 //! check + sig dispatch via the funcref's embedded type, then
 //! frame teardown and BR X16.
 //!
-//! Stub: emit returns `UnsupportedOp`.
+//! Delegates to `op_tail_call.emitReturnCallRef` (the tail-call
+//! variant of `call_ref`: funcref deref + frame_teardown + BR X16).
 //!
 //! Zone 2 (`src/engine/codegen/arm64/ops/`).
 
 const meta = @import("../../../../../instruction/wasm_3_0/return_call_ref.zig");
 const ctx_mod = @import("../../ctx.zig");
+const op_tail_call = @import("../../op_tail_call.zig");
 const zir = @import("../../../../../ir/zir.zig");
 
 pub const op_tag = meta.op_tag;
@@ -25,7 +27,5 @@ pub const n_successor_edges: u8 = 0;
 pub const is_safepoint: bool = false;
 
 pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
-    _ = ctx;
-    _ = ins;
-    return error.UnsupportedOp;
+    return op_tail_call.emitReturnCallRef(ctx, ins);
 }

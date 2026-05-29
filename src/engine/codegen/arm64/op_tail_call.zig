@@ -52,6 +52,7 @@ const op_call = @import("op_call.zig");
 const frame_teardown = @import("frame_teardown.zig");
 const canonical_type = @import("../shared/canonical_type.zig");
 const zir = @import("../../../ir/zir.zig");
+const func_mod = @import("../../../runtime/instance/func.zig");
 
 /// X16 — the AAPCS64 intra-procedure-call scratch (IP0) per
 /// Arm IHI 0055 §6.4. ADR-0066 § (bridge thunk) already uses
@@ -230,6 +231,50 @@ pub fn emitIndirectReturnCall(
     // Funcptr load: LDR X16, [X26, X17, LSL #3]. X16 = tail-target
     // (per `tail_target_gpr`) — matches the BR X16 in step (7).
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrXRegLsl3(tail_target_gpr, 26, 17));
+
+    try emitLoadCalleeRtSameModule(ctx.allocator, ctx.buf);
+    try frame_teardown.emit(ctx.allocator, ctx.buf, .{ .frame_bytes = ctx.frame_bytes });
+    try emitTailJump(ctx.allocator, ctx.buf, tail_target_gpr);
+}
+
+/// Wasm spec 3.0 §3.3.8.20 (`return_call_ref $sig`) — tail-call
+/// through a typed funcref. The tail-call variant of `call_ref`:
+/// `op_call.emitCallRef`'s funcref front-half (pop `*FuncEntity` +
+/// null-check + load native entry) followed by this file's tail
+/// shape (MOV X0=X19 → frame_teardown → BR X16) instead of CALL +
+/// capture. Sequence:
+///   (1) pop funcref vreg (stack: [args..., funcref]),
+///   (2) marshalCallArgs (caller frame still live for outgoing args),
+///   (3) funcref ptr → X17 ; CMP X17, #0 ; B.EQ trap (null),
+///   (4) LDR X16, [X17, #funcentity_funcptr_offset]  (native entry),
+///   (5) MOV X0, X19 (runtime_ptr) ; frame_teardown ; BR X16.
+/// No runtime sig check (validator guarantees funcref type ⊑ `$sig`).
+/// Terminator + safepoint-free (ADR-0112 D7 / ADR-0113 §A); liveness
+/// already classifies `return_call_ref` as a terminator (cyc198).
+pub fn emitReturnCallRef(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
+    if (ins.payload >= ctx.module_types.len) return ctx_mod.Error.AllocationMissing;
+    const callee_sig: zir.FuncType = ctx.module_types[ins.payload];
+    if (callee_sig.results.len > 2) return ctx_mod.Error.UnsupportedOp;
+
+    if (ctx.pushed_vregs.items.len < 1) return ctx_mod.Error.AllocationMissing;
+    const funcref_vreg = ctx.pushed_vregs.pop().?;
+
+    try op_call.marshalCallArgs(ctx, callee_sig);
+
+    // Funcref ptr → X17 ; null-check (CMP X17,#0 ; B.EQ trap). Reuses
+    // the call_indirect bounds trap stub (cind_bounds_fixups).
+    const x_funcref = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, funcref_vreg, 0);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(17, 31, x_funcref));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmX(17, 0));
+    {
+        const fixup_at: u32 = @intCast(ctx.buf.items.len);
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.eq, 0));
+        try ctx.cind_bounds_fixups.append(ctx.allocator, fixup_at);
+    }
+
+    // Native entry: LDR X16, [X17, #funcentity_funcptr_offset]
+    // (X16 = tail_target_gpr — matches the BR X16 below).
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(tail_target_gpr, 17, @intCast(func_mod.funcentity_funcptr_offset)));
 
     try emitLoadCalleeRtSameModule(ctx.allocator, ctx.buf);
     try frame_teardown.emit(ctx.allocator, ctx.buf, .{ .frame_bytes = ctx.frame_bytes });
