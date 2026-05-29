@@ -6,23 +6,22 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `29b16a5b` (cyc209). funcref-call + tail-call JIT POSITIVE paths done both
-  arches (call_ref + return_call_ref + direct/indirect/recursion return_call + clang
-  musttail; all ubuntu-verified). **NEW BUG D-208**: cyc208 null-trap fixtures (ungated)
-  caught an x86_64 miscompile — call_ref/return_call_ref of a NULL funcref returns 0
-  instead of trapping on x86_64 (arm64 traps OK). cyc209 gated the 2 null-trap tests to
-  aarch64 (`skip.blocker(.@"D-208")`) → green restored; D-208 tracks the x86_64 fix.
-  D-205 discharged; D-207 discharged (call_ref/return_call_ref JIT + arm64 null-trap);
-  open: D-208 (x86_64 null-check), D-206 (cross-module TC, harness-gated).
+- **HEAD**: `157595d6` (cyc210, docs/script). funcref-call + tail-call JIT POSITIVE
+  paths done both arches (call_ref + return_call_ref + direct/indirect/recursion
+  return_call + clang musttail; all ubuntu-verified). cyc210 refreshed stale 10.P
+  SKIP rationales (I14/I21: D-179/D-192 RESOLVED) + enumerated D-208 hypotheses.
+  **D-208 (open)**: x86_64 call_ref/return_call_ref of a NULL funcref returns 0 not
+  trapping (arm64 OK); cyc208 caught it, cyc209 gated tests to aarch64. Leading hyp:
+  ref.null 0 not reaching call_ref funcref_r on x86_64. D-205/D-207 discharged; open:
+  D-208 (x86_64 null-check, close-blocker via 10.P I18), D-206 (cross-module TC, harness-gated).
 - Earlier: 10.TC same-module tail-call (direct/indirect/recursion + clang musttail
   → 15, cyc198-201); EH corpus 34/34 (ADR-0114); cyc190-196 gc global-init/subtyping.
   Phase 10 CLOSE-ELIGIBLE (spec corpus interp-complete); Runner EXECUTES via interp,
   gc_heap materialised at instantiate. 10.M memory64 + 10.E EH JIT largely done;
   10.G GC JIT = interp-only (extreme: regalloc stack-map, ADR-0113 §C).
-- **Step 0.7 on resume**: cyc209 (D-208 gate, src) kicks ubuntu @ `29b16a5b` — verify
-  next cycle (null-trap tests now aarch64-gated → x86_64 skips → should be GREEN).
-  Prior: cyc208 ubuntu FAILED (ungated null-trap `expected error.Trap, found 0` on
-  x86_64) → recovered cyc209 via the gate (NOT a revert; arm64 coverage kept).
+- **Step 0.7 on resume**: cyc210 is docs/script-only (10.P rationale refresh + debt) →
+  no ubuntu kick; green holds. Prior: cyc209 ubuntu `OK (HEAD=9dbc84ee)` GREEN (D-208
+  gate recovery confirmed — gated null-trap tests skip on x86_64).
 
 ## Active task — investigate D-208 (x86_64 funcref null-check miscompile)  **NEXT**
 
@@ -34,8 +33,9 @@ the x86_64 null-check sequence for the `ref.null; call_ref` module and ndisasm i
 the emitted bytes; ndisasm to verify `OR r64,r64` / `JZ rel32` (after fixup) /
 `MOV RAX,[funcref+16]` is correct. Hypotheses (all "correct in theory" — see D-208):
 the `OR`/`JZ` interaction with `gprLoadSpilled`'s returned reg, or the JZ-disp fixup.
-Likely a 1-line fix once the bad byte is found; fix → ungate → verify on ubuntu.
-Deferred: 10.P close-invariant SKIP reassessment; cross-module TC (D-206).
+Hypotheses enumerated in D-208 (JZ-encoding/patcher/ref.null-value REJECTED; leading
+= ref.null 0 not reaching funcref_r). Fix → ungate → verify on ubuntu. Other deferred
+JIT items: cross-module TC (D-206, multi-module harness); GC JIT (10.G, extreme).
 
 ## §10 close map
 
@@ -63,6 +63,15 @@ formal close needs realworld/p10 + 10.P. Residual:
   validate-error surfacing is ad-hoc via the cyc143 op-probe (lesson
   `gc-type-subtyping-is-rtt-blocked`); permanent diag emitter = D-197 tail.
 - D-192: EH clause PROVEN (EH 34/34). funcrefs clause proven cyc108.
+- **Yield-taper note (2026-05-30)**: the funcref-call + tail-call JIT milestone is
+  DELIVERED (cyc198-208, both arches, ubuntu-verified). cyc208-210 were lower-yield
+  (null-trap fixture + D-208 gate-recovery + 10.P rationale refresh). Remaining
+  autonomous JIT work is gated/slow: D-208 (x86_64 null-check — needs x86_64 disasm /
+  ubuntu-iterate), cross-module TC (D-206 — multi-module harness), 10.G GC JIT
+  (extreme). **Phase 10 close is a user touchpoint** (close map below; 10.P I18 now
+  FAILs on open D-208 = close-blocker). Loop continues on the D-208 byte-disasm
+  (autonomous-eligible), but a user check-in on "close Phase 10 vs keep grinding JIT"
+  would be high-value before the next big chunk. NOT a stop — re-arm holds.
 
 ## Key refs
 
