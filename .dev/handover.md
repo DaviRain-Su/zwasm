@@ -6,12 +6,12 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc159 (`5783f161`) — **ref.func in GC const-expr** global
-  init (0xD2 in evalGlobalInitGc): **gc return 255→262 (+7)**, trap
-  72→84 (+12, array_init_elem.3 instantiates → its traps run). Fixed
-  the array_init_elem.3 InstantiateFailed. cyc158 array.init_data/elem
-  + elem_types threading drove 249→255 (validator.zig cap 3000→3200,
-  ADR-0099 amend). cyc157 array.copy 226→249. **gc return 62→262**
+- **HEAD**: cyc160 (`034cd2a6`) — **per-manifest fail breakdown** in
+  the wasm-3.0 spec runner (diagnostic infra; prints
+  `  [proposal/manifest] return_fail=N trap_fail=M` when >0). Reveals
+  the gc lever map (see Active task). Counts unchanged (gc 262/84/57,
+  exit 0, 0 panics). cyc159 ref.func GC const-expr drove 255→262;
+  cyc158 array.init_data/elem + elem_types 249→255. **gc 62→262**
   across the session.
 - cyc147-148 **ADR-0125 packed COMPLETE** (A union rename → B-validate
   decode → B-exec get_s/u): gc return 62→116, trap 18→54, ValidateFailed
@@ -47,22 +47,23 @@
 - **Exit-condition**: gc return ≥ 90 **EXCEEDED (116 at cyc148)**. Open
   target: maximise return (RTT exec) toward the corpus ceiling.
 
-## Active task — cycle 160: remaining GC return levers — **NEXT**
+## Active task — cycle 161: ref_test (33 return-fails, #1 gc lever) — **NEXT**
 
-Array bulk ops DONE (c157-158); ref.func GC const-expr DONE (c159; gc
-return 262/407). Module-level instantiate/compile FAILs remaining:
-gc/type-subtyping.{45 ValidateFailed=D-198, 46 UnknownImport, 48/50
-SignatureMismatch}. The bulk of the 90 return-fails are per-assert value
-mismatches in compiling modules (not module-level FAILs) → SURVEY which
-gc modules cascade the most (re-run binary, group by export). Levers:
-- **type-subtyping 46/48/50** — UnknownImport + SignatureMismatch at
-  instantiate (import/signature handling under rec-group/sub types).
-- **ref.test/ref.cast concrete gaps** + **struct init-op gaps**.
-- **extern.convert_any / any.convert_extern** (FB 26/27) exec.
-- **D-198** (type-subtyping.45 rec-group iso-recursive) — deep/ADR.
-VERIFY full test-spec + exit-code + panic grep (cyc150 lesson; DIRECT
-binary). No regression to 262 return / 84 trap / 57 invalid / 393
-multi-mem.
+cyc160 per-manifest breakdown maps the 90 gc return-fails:
+`ref_test=33`, `i31=19`, `br_on_cast=10`, `br_on_cast_fail=10`,
+`ref_cast=7+4t`, `array=6+2t`, `type-subtyping=5+10t (D-198 deep)`.
+
+**ref_test** (test/spec/wasm-3.0-assert/gc/raw/ref_test.wast): one big
+`init` populates $ta(anyref)/$tf(funcref)/$te(externref) tables via
+ref.null abstract heaptypes + struct/array.new_default + any.convert_
+extern + extern.convert_any + ref.i31 + ref.func; then per-type test
+fns (ref_test_any/eq/i31/struct/array/func/…) return ref.test results.
+33 fails → either init() partially fails (cascade) OR ref.test abstract/
+concrete matching wrong for a type category. FIRST PROBE: does init()
+succeed? (likely a per-assert expected-vs-actual diag is needed — build
+it if so, another permanent infra win). VERIFY full test-spec + exit-
+code + panic grep (cyc150 lesson; DIRECT binary). No regression to 262
+return / 84 trap / 57 invalid / 393 multi-mem.
 
 ## Larger §10 work (later bundles)
 
