@@ -282,10 +282,18 @@ pub fn build(b: *std.Build) void {
     run_edge_p9.addArg(b.pathFromRoot("test/edge_cases/p9"));
     const run_edge_p10 = b.addRunArtifact(edge_runner_exe);
     run_edge_p10.addArg(b.pathFromRoot("test/edge_cases/p10"));
+    // Realworld p10 result-check (10.TC-JIT IT-5): the same JIT
+    // edge-runner walks `test/realworld/p10/**`, result-checking any
+    // toolchain-compiled `.wasm` with a sibling `.expect`. Currently
+    // `clang_musttail/musttail_sum` — clang `__attribute__((musttail))`
+    // → `return_call` exercised through the JIT (D-205).
+    const run_edge_realworld_p10 = b.addRunArtifact(edge_runner_exe);
+    run_edge_realworld_p10.addArg(b.pathFromRoot("test/realworld/p10"));
     const test_edge_step = b.step("test-edge-cases", "Run edge-case fixture runner (all hosts post §9.9 / 9.9-j-2b)");
     test_edge_step.dependOn(&run_edge_p7.step);
     test_edge_step.dependOn(&run_edge_p9.step);
     test_edge_step.dependOn(&run_edge_p10.step);
+    test_edge_step.dependOn(&run_edge_realworld_p10.step);
 
     // `zig build test-spec-jit-compile` — §9.7 / 7.5 first
     // sub-chunk. Walks spec corpora and reports whether each
@@ -799,6 +807,7 @@ pub fn build(b: *std.Build) void {
     test_all_step.dependOn(&run_edge_p7.step);
     test_all_step.dependOn(&run_edge_p9.step);
     test_all_step.dependOn(&run_edge_p10.step);
+    test_all_step.dependOn(&run_edge_realworld_p10.step);
     test_all_step.dependOn(&run_realworld_run_jit.step);
     test_all_step.dependOn(&run_wasmtime_misc_runtime.step);
     test_all_step.dependOn(&run_zig_facade.step);
