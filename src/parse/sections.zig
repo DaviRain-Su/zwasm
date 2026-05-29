@@ -141,11 +141,127 @@ pub const Types = struct {
     /// are final; `sub` (0x4F) is open. Extending a final type is invalid
     /// (Wasm 3.0 GC §3 sub-validation; ADR-0124).
     finals: []bool,
+    /// Parallel to `items`; `[start, end)` of each type's `(rec …)` group
+    /// (a bare comptype is a singleton group `[i, i+1)`). Needed by
+    /// `canonicalEqual` for iso-recursive equality (Wasm 3.0 GC §3.3): a
+    /// concrete ref to a member of the SAME group is positional, a ref
+    /// outside is by canonical id — the distinction that separates two
+    /// structurally-similar rec groups. Default `&.{}` for the empty/
+    /// non-decoded `Types` literals; `canonicalEqual` then treats each
+    /// index as its own singleton group.
+    rec_span: []const [2]u32 = &.{},
 
     pub fn deinit(self: *Types) void {
         self.arena.deinit();
     }
 };
+
+/// `[start, end)` of type `i`'s rec group (singleton `[i, i+1)` when no
+/// span was recorded — empty/non-decoded `Types`).
+fn groupSpan(types: *const Types, i: u32) [2]u32 {
+    if (i < types.rec_span.len) return types.rec_span[i];
+    return .{ i, i + 1 };
+}
+
+/// Wasm 3.0 GC §3.3 — iso-recursive canonical EQUALITY of two defined
+/// types. Two types are equal iff they occupy the same POSITION in
+/// structurally-identical rec groups, where a member's concrete refs are
+/// compared **positionally** when they point inside the group (ref to
+/// "member k of this group") and **by canonical equality** when they
+/// point outside it. This intra-vs-inter distinction is what separates,
+/// e.g., `(rec $f (struct (field (ref $f))))` (self-recursive) from
+/// `(rec $g (struct (field (ref $other))))` (external ref) even when the
+/// comptypes look identical by index. Shared by `validator` (the
+/// concrete→concrete subtype OR-arm) and `feature/gc/type_info`
+/// (equivalence-class canonical_ids) so validate-time and runtime agree.
+/// Well-founded: inter-group recursion strictly descends to earlier
+/// (lower-index) groups; the depth guard only backstops malformed input.
+pub fn canonicalEqual(types: *const Types, a: u32, b: u32) bool {
+    return canonicalEqualRec(types, a, b, 0);
+}
+
+fn canonicalEqualRec(types: *const Types, a: u32, b: u32, depth: u32) bool {
+    if (a == b) return true;
+    if (depth > 64) return false;
+    if (a >= types.kinds.len or b >= types.kinds.len) return false;
+    const ga = groupSpan(types, a);
+    const gb = groupSpan(types, b);
+    // Same position within the group + same group size.
+    if (a - ga[0] != b - gb[0]) return false;
+    if (ga[1] - ga[0] != gb[1] - gb[0]) return false;
+    var k: u32 = 0;
+    while (k < ga[1] - ga[0]) : (k += 1) {
+        if (!memberEqual(types, ga[0] + k, gb[0] + k, ga, gb, depth)) return false;
+    }
+    return true;
+}
+
+fn memberEqual(types: *const Types, ia: u32, ib: u32, ga: [2]u32, gb: [2]u32, depth: u32) bool {
+    if (types.kinds[ia] != types.kinds[ib]) return false;
+    if (types.finals[ia] != types.finals[ib]) return false;
+    const supa = types.supertypes[ia];
+    const supb = types.supertypes[ib];
+    if (supa.len != supb.len) return false;
+    for (supa, supb) |x, y| if (!refIdxEqual(types, x, y, ga, gb, depth)) return false;
+    return switch (types.kinds[ia]) {
+        .func => blk: {
+            const fa = types.items[ia];
+            const fb = types.items[ib];
+            if (fa.params.len != fb.params.len or fa.results.len != fb.results.len) break :blk false;
+            for (fa.params, fb.params) |pa, pb| if (!canonValTypeEqual(types, pa, pb, ga, gb, depth)) break :blk false;
+            for (fa.results, fb.results) |ra, rb| if (!canonValTypeEqual(types, ra, rb, ga, gb, depth)) break :blk false;
+            break :blk true;
+        },
+        .structdef => blk: {
+            const sa = (types.struct_defs[ia] orelse break :blk false).fields;
+            const sb = (types.struct_defs[ib] orelse break :blk false).fields;
+            if (sa.len != sb.len) break :blk false;
+            for (sa, sb) |fa, fb| if (!canonFieldEqual(types, fa, fb, ga, gb, depth)) break :blk false;
+            break :blk true;
+        },
+        .arraydef => blk: {
+            const aa = types.array_defs[ia] orelse break :blk false;
+            const ab = types.array_defs[ib] orelse break :blk false;
+            break :blk canonFieldEqual(types, aa.element, ab.element, ga, gb, depth);
+        },
+    };
+}
+
+/// Compare two concrete type-index refs under the iso-recursive rule: an
+/// intra-group ref (inside `ga` / `gb`) matches positionally; an
+/// inter-group ref recurses on canonical equality. Intra vs inter never
+/// match.
+fn refIdxEqual(types: *const Types, x: u32, y: u32, ga: [2]u32, gb: [2]u32, depth: u32) bool {
+    const x_intra = x >= ga[0] and x < ga[1];
+    const y_intra = y >= gb[0] and y < gb[1];
+    if (x_intra != y_intra) return false;
+    if (x_intra) return x - ga[0] == y - gb[0];
+    return canonicalEqualRec(types, x, y, depth + 1);
+}
+
+fn canonValTypeEqual(types: *const Types, a: ValType, b: ValType, ga: [2]u32, gb: [2]u32, depth: u32) bool {
+    if (a != .ref and b != .ref) return a.eql(b);
+    if (a != .ref or b != .ref) return false;
+    if (a.ref.nullable != b.ref.nullable) return false;
+    return switch (a.ref.heap_type) {
+        .concrete => |x| switch (b.ref.heap_type) {
+            .concrete => |y| refIdxEqual(types, x, y, ga, gb, depth),
+            .abstract => false,
+        },
+        .abstract => |aa| switch (b.ref.heap_type) {
+            .abstract => |bb| aa == bb,
+            .concrete => false,
+        },
+    };
+}
+
+fn canonFieldEqual(types: *const Types, a: StructFieldType, b: StructFieldType, ga: [2]u32, gb: [2]u32, depth: u32) bool {
+    if (a.mutable != b.mutable) return false;
+    const ap = a.storage.isPacked();
+    if (ap != b.storage.isPacked()) return false;
+    if (ap) return a.storage.specByte() == b.storage.specByte();
+    return canonValTypeEqual(types, a.storage.operandType(), b.storage.operandType(), ga, gb, depth);
+}
 
 /// Decode a single field-type triple per Wasm 3.0 GC §5: storage type
 /// (`valtype | packedtype`, ADR-0125) + mutability byte (0x00 const,
@@ -280,9 +396,12 @@ pub fn decodeTypes(parent_alloc: Allocator, body: []const u8) Error!Types {
         .finals = &finals,
     };
 
+    var rec_span: std.ArrayList([2]u32) = .empty;
+
     var rec: u32 = 0;
     while (rec < rec_count) : (rec += 1) {
         if (pos >= body.len) return Error.UnexpectedEnd;
+        const grp_start: u32 = @intCast(items.items.len);
         if (body[pos] == 0x4E) {
             // rec group: vec(subtype) → N consecutive type indices.
             pos += 1;
@@ -292,6 +411,11 @@ pub fn decodeTypes(parent_alloc: Allocator, body: []const u8) Error!Types {
         } else {
             try readSubtypeInto(alloc, body, &pos, acc);
         }
+        // Record this group's span for every member (Wasm 3.0 GC §3.3
+        // iso-recursive identity — consumed by `canonicalEqual`).
+        const grp_end: u32 = @intCast(items.items.len);
+        var gi = grp_start;
+        while (gi < grp_end) : (gi += 1) try rec_span.append(alloc, .{ grp_start, grp_end });
     }
 
     if (pos != body.len) return Error.TrailingBytes;
@@ -303,6 +427,7 @@ pub fn decodeTypes(parent_alloc: Allocator, body: []const u8) Error!Types {
         .array_defs = array_defs.items,
         .supertypes = supertypes.items,
         .finals = finals.items,
+        .rec_span = rec_span.items,
     };
 }
 

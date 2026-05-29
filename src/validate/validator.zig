@@ -2883,7 +2883,12 @@ fn gcValTypeSubtype(actual: ValType, expected: ValType, types: *const sections.T
     const eh = expected.ref.heap_type;
     return switch (ah) {
         .concrete => |a_idx| switch (eh) {
-            .concrete => |e_idx| gcConcreteReaches(a_idx, e_idx, types.supertypes),
+            // Declared-chain reach OR iso-recursive canonical equality
+            // (ADR-0126): a raw index that does not reach the target by
+            // declared supertypes may still be the same canonical type
+            // (cross-rec-group structural identity, Wasm 3.0 GC §3.3).
+            .concrete => |e_idx| gcConcreteReaches(a_idx, e_idx, types.supertypes) or
+                sections.canonicalEqual(types, a_idx, e_idx),
             .abstract => |e_abs| blk: {
                 // A concrete ref's head is the kind of its typedef.
                 const head: zir.AbstractHeapType = if (a_idx >= types.kinds.len) .any else switch (types.kinds[a_idx]) {

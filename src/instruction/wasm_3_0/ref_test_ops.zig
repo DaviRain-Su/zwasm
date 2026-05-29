@@ -147,11 +147,29 @@ pub fn gcRefMatchesNonNull(rt: *Runtime, v: Value, ht: u8) bool {
         // Concrete typeidx target (single-byte; multi-byte indices aren't
         // reachable — lower.zig stores one byte). i31 has no concrete type.
         if (is_i31) return false;
+        // ADR-0126 — a concrete FUNC-type target tests a funcref operand:
+        // resolve the funcref's RAW declared typeidx via its FuncEntity
+        // (funcrefs are NOT GC-heap objects, so `readObjInfo` can't see
+        // them → ref.test would wrongly return 0). struct/array targets
+        // read the heap object's `ObjectHeader.info`.
+        if (concreteTargetIsFunc(rt, ht)) {
+            const fe = Value.refAsFuncEntity(v) orelse return false;
+            return concreteReaches(rt, fe.raw_typeidx, ht);
+        }
         const info = readObjInfo(rt, v) orelse return false;
         return concreteReaches(rt, info, ht);
     }
     const obj_kind: ?ObjectKind = if (is_i31) null else readObjKind(rt, v);
     return gcAbstractMatch(ht, is_i31, obj_kind);
+}
+
+/// Is the concrete target type index a func typedef? (Selects the
+/// funcref-resolution path in `gcRefMatchesNonNull`.)
+fn concreteTargetIsFunc(rt: *Runtime, target: u32) bool {
+    const inst = @as(*const Instance, @ptrCast(@alignCast(rt.instance orelse return false)));
+    const gti = inst.gc_type_infos orelse return false;
+    if (target >= gti.entries.len) return false;
+    return gti.entries[target].kind == .func;
 }
 
 /// Pure core of the non-null runtime type-test (testable without a

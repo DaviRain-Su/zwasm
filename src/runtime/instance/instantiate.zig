@@ -1121,6 +1121,10 @@ pub fn instantiateRuntime(
         };
 
     var funcs: []zir.ZirFunc = &.{};
+    // Raw declared typeidx per DEFINED func (parallel to `funcs`); kept
+    // in scope for the FuncEntity build below (ADR-0126 — ref.test/cast
+    // on a funcref needs the raw index).
+    var defined_typeidxs: []const u32 = &.{};
     if (code_section_opt) |code_section| {
         const def_idx = if (func_section) |s|
             try sections.decodeFunctions(a, s.body)
@@ -1129,6 +1133,7 @@ pub fn instantiateRuntime(
 
         const codes = try sections.decodeCodes(a, code_section.body);
         if (codes.items.len != def_idx.len) return error.InvalidModule;
+        defined_typeidxs = def_idx;
 
         funcs = try a.alloc(zir.ZirFunc, codes.items.len);
         for (codes.items, def_idx, 0..) |code, type_idx, i| {
@@ -1253,15 +1258,24 @@ pub fn instantiateRuntime(
     // (WASI is always called by funcidx, never by ref).
     if (total_funcs > 0) {
         const entities = try a.alloc(FuncEntity, total_funcs);
-        for (0..total_funcs) |i| entities[i] = .{
-            .runtime = rt,
-            .func_idx = @intCast(i),
-            // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
-            // Interp instantiate path; JIT mirror-write reads these.
-            // 0 = "not JIT-resolved" sentinel.
-            .typeidx = 0,
-            .funcptr = 0,
-        };
+        for (0..total_funcs) |i| {
+            // Defined funcs sit at `imp_func_count..total_funcs`; carry
+            // their raw declared typeidx for ref.test/cast RTT.
+            const raw_ti: u32 = if (i >= imp_func_count and (i - imp_func_count) < defined_typeidxs.len)
+                defined_typeidxs[i - imp_func_count]
+            else
+                0;
+            entities[i] = .{
+                .runtime = rt,
+                .func_idx = @intCast(i),
+                // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
+                // Interp instantiate path; JIT mirror-write reads these.
+                // 0 = "not JIT-resolved" sentinel.
+                .typeidx = 0,
+                .funcptr = 0,
+                .raw_typeidx = raw_ti,
+            };
+        }
         if (imp_func_count > 0) {
             var imp_idx: u32 = 0;
             for (imports_decoded.?.items, 0..) |it, idx| {

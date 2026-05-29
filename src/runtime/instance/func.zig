@@ -44,6 +44,15 @@ pub const FuncEntity = struct {
     /// `@intFromPtr(compiled.module.block.bytes.ptr + func_offsets[i])`;
     /// imports: `dispatch[i]`; `0` for interp-only / unresolved.
     funcptr: usize,
+    /// RAW declared typeidx of this function's signature (the type-section
+    /// index, NOT canonicalized like `typeidx`). Needed by
+    /// `ref.test`/`ref.cast` on a funcref (ADR-0126): the RTT match walks
+    /// this index's supertype chain + canonical id, which the
+    /// `funcTypeEql`-canonicalized `typeidx` would have collapsed (bare
+    /// funcs all map to the first bare func, losing the subtype identity).
+    /// 0 when unknown (e.g. cross-module funcref — source-space index not
+    /// resolved into the importer's type space; that RTT case is rarer).
+    raw_typeidx: u32 = 0,
 };
 
 /// TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.

@@ -296,7 +296,7 @@ pub fn setupRuntime(
             @intFromPtr(compiled.module.block.bytes.ptr + f_off);
         const raw_ti = compiled.func_typeidxs[i];
         const canon_ti: u32 = if (fe_canon_types) |t| canonical_type.canonicalTypeidx(t.items, raw_ti) else raw_ti;
-        fe.* = .{ .runtime = undefined, .func_idx = @intCast(i), .typeidx = canon_ti, .funcptr = funcptr };
+        fe.* = .{ .runtime = undefined, .func_idx = @intCast(i), .typeidx = canon_ti, .funcptr = funcptr, .raw_typeidx = raw_ti };
     }
 
     // Wasm spec §4.5.7 (table.init / element-segment instantiation)
