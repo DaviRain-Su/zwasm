@@ -6,14 +6,13 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cyc172 (verify+revert, gc 345 held) — runtime equivalence-
-  class `canonical_ids` (pairwise canonicalEqual) verified gc invalid
-  HELD 57 but **did NOT flip the 2 type-subtyping FAILval** →
-  **FALSIFIES** "FAILval = cross-rec-group canonical equality" (cyc170
-  hypothesis); their cause is non-canonical (trace per-assert). Reverted
-  (§2, non-observable). cyc171 verified validator gcCanonicalEqual safe.
-  cyc168/169 = Phase-10a (test-canon + ref.test eq-precise, +2).
-  **gc 62→345**; implementable-without-D-198 set DONE (345/407).
+- **HEAD**: cyc173 (root-cause, no code) — **the Wasm start section is
+  validated but NEVER EXECUTED** at instantiate (only compile.zig:578-587
+  range/sig-checks the funcidx; no `find(.start)` invoke anywhere). This
+  is multi-memory start0's bug (`(start $main)` → $inc×3 never runs →
+  get=65 not 68) + a general gap for ANY start module. Pivoted off the
+  10.G D-198 tail (delta=0 ×3 cycles, ADR-0118 D6; D-198 filed in
+  ADR-0126). cyc168/169 = Phase-10a (+2); **gc 62→345**.
 - Earlier arc: cyc147-148 ADR-0125 packed (62→116); cyc146 ADR-0016 M3
   validate self-attribution (`compile FAIL [fn= off= op=]`) + subtypeCtx
   coercion; cyc144/145 GC blocktypes + br_on_cast; cyc141 rt.datas fix
@@ -42,24 +41,32 @@
 - **Exit-condition**: gc return ≥ 90 **EXCEEDED (116 at cyc148)**. Open
   target: maximise return (RTT exec) toward the corpus ceiling.
 
-## Active task — cycle 173: D-198 coordinated cross-module landing — **NEXT**
+## Active task — cycle 174: implement Wasm start-section execution — **NEXT**
 
-The 5 gc residuals split into two INDEPENDENT problems (cyc170-172
-verified):
-- **3 cross-module (45 exporter ValidateFailed + 46/48/50 importer
-  SignatureMismatch)** — flip ONLY when BOTH land together: (a) validator
-  `gcCanonicalEqual` OR-clause in gcValTypeSubtype (validator.zig ~2886)
-  [VERIFIED SAFE c171 — re-apply from ADR-0126 notes] AND (b) Linker
-  `sigSubtype` (linker.zig ~527 `sigEqual`) doing exporter-type <:
-  importer-declared (iso-recursive, both type spaces). This is the
-  observable path. HIGH blast radius — full-corpus verify gc invalid 57.
-- **2 FAILval `run exp=1 got=0`** — root cause NON-canonical (c172
-  falsified canonical-ids). SEPARATE: decode the 2 modules + instrument
-  the exact failing `run` ref.test/cast to find why it returns 0. Do NOT
-  re-try canonical-ids.
-Both are fresh-context jobs (extreme context at c172). The
-implementable-without-D-198 gc set is DONE (345/407); D-198 is the final
-stubborn tail. No regression to 345/90/57/393/34.
+Bounded, observable, NOT-deep (vs the D-198 tail). The start funcidx is
+read+validated at compile.zig:580 then DISCARDED. Implement execution:
+1. Find `CompiledWasm` (grep `CompiledWasm` — likely src/engine/runner.zig
+   or a types module) + add `start_funcidx: ?u32 = null`; set it at
+   compile.zig:580-587 (the validated funcidx).
+2. `src/zwasm/instance.zig` — factor `invoke` (line 91, by-name) so the
+   post-lookup body becomes `pub fn invokeByIdx(self, funcidx, args,
+   results)`; `invoke` resolves name→idx then calls it.
+3. Zone-3 instantiate wrappers — after the instance is built, if
+   `start_funcidx` set, `invokeByIdx(start, &.{}, &.{})`; a trap →
+   `error.InstantiateFailed` (spec §4.5.4). Hook `src/zwasm/linker.zig`
+   instantiate (~515, the spec-runner path) FIRST (fixes start0 +3
+   observable); then `src/api/instance.zig` wasm_instance_new + CLI for
+   completeness. Order: start runs AFTER data init.
+VERIFY full test-spec exit 0 + 0 panics + multi-memory start0 +3 + NO
+regression (some other start-using fixture may newly run its start —
+confirm correct). No regression to 345/90/57/393/34.
+
+## Deferred — gc D-198 tail (final stubborn 5; fresh-context coordinated)
+
+Per ADR-0126 Phase-10b notes: 3 cross-module (validator gcCanonicalEqual
+[verified safe c171] + Linker sigSubtype, land TOGETHER) + 2 FAILval
+(non-canonical root cause, c172-falsified — trace per-assert). HIGH blast
+radius. Pick up after start-exec.
 
 ## Larger §10 work (later bundles)
 
