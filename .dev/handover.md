@@ -51,14 +51,18 @@
 RTT arc DONE (return 145). **VERIFY runtime changes by full test-spec +
 exit-code + panic grep** (lesson `runtime-exec-change-needs-testspec-
 exitcode`). Most tractable remaining return-lever (established pattern):
-- **array.copy / array.init_data / array.init_elem** (FB sub 17/18/19).
-  Check the validator array dispatch (sub-ops after 16=fill currently fall
-  to `else => NotImplemented`) + array_ops.zig register. Implement
-  validate + lower + exec (copy: src/dst array bounds + element memmove;
-  init_data/elem: segment → array slot, mirror array.new_data's
-  dataElemNaturalSize). Fixtures: array_copy.4 / array_init_data.2 /
-  array_init_elem.3 (+ more). NOTE the FB-numbering (ref.eq=19 in the
-  current dispatch) — confirm the real sub-op for each before wiring.
+- **array.copy / array.init_data / array.init_elem**. ZirOps exist
+  (zir_ops.zig:542-544). The 0xFB dispatch (validator ~1411-1428 + lower
+  + interp) handles array 6-16, then `19 => ref.eq`, `20+ => ref.test`;
+  **sub 17 (array.copy) + 18 (array.init_data) currently fall to
+  NotImplemented**. ⚠ RESOLVE FIRST: `wasm-tools dump`/`xxd` array_copy.4
+  + array_init_elem.3 to read the actual 0xFB sub-bytes — the codebase's
+  `19=ref.eq` conflicts with spec `array.init_elem=19`, so confirm each
+  op's real number before wiring (one is likely mis-numbered or the spec
+  orders ref.eq before the array bulk tail). Then validate+lower+exec
+  (copy: dst/src array bounds + element memmove; init_*: segment → slot,
+  mirror array.new_data's dataElemNaturalSize). Fixtures: array_copy.4 /
+  array_init_data.2 / array_init_elem.3.
 - **D-198** (deferred, ADR-grade): rec-group iso-recursive subtype — the
   6 type-subtyping over-rejects (biggest cluster, but deep). Pick up after
   array bulk ops if no smaller lever remains.
