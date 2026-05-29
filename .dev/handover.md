@@ -6,17 +6,17 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: cycle 136 (`478cf035`) — struct typed-ref narrowing
-  (ADR-0116): struct.new pushes concrete `(ref $t)`; new
-  `Validator.subtypeCtx` adds the GC concrete→abstract rule (struct/array
-  ref <: eq/any/struct/array via module_types_kinds), routed through
-  popExpect + expectFrameEndTypes + struct.get/set. **struct FAIL 5→2,
-  ValidateFailed 44→41, trap 2→4**. No regression; all unit tests green.
-  gc return flat 49 (struct RETURN asserts need exec verified next).
-- cyc135 GC-type threading (return 48→49); cyc134 abstract-head lattice
-  (33→48); cyc133 element→table init (18→33); cyc130-132 i31 exec.
-- Runner EXECUTES via interp; struct substrate landed (struct_ops.zig
-  struct.new/get/set + rt.gc_heap via setupGcHeap; handlers registered).
+- **HEAD**: cycle 137 (`b13d4158`) — array typed-ref narrowing (mirror
+  of cyc136): array.new/new_fixed push concrete `(ref $t)`; array.get/
+  set/fill accept concrete via subtypeCtx. **ValidateFailed 41→38, trap
+  4→6**. No regression; all unit tests green. gc return flat 49 — the
+  unblocked struct/array fixtures hit an INSTANTIATE wall: struct.7 +
+  array global fixtures init globals with `struct.new`/`array.new` CONST
+  EXPRS, which evalConstExprValue defers (only ref.i31 handled, cyc130).
+- cyc136 struct narrowing (`478cf035`); cyc135 GC-type threading (return
+  48→49); cyc134 abstract-head lattice (33→48); cyc130-133 i31/element.
+- Runner EXECUTES via interp; gc_heap + inst.gc_type_infos materialised
+  at instantiate (instantiate.zig:859-880, BEFORE the globals loop ~1262).
 - cyc120 (`5db875b0`): cross-module EH propagation + caller-frame catch
   → **EH corpus FULLY GREEN 34/34** (bundle 10.E CLOSED; D-192 PROVEN).
 - **Bundle 10.E-eh-tail CLOSED** — exit (return ≥ 33/34) met at 34/34;
@@ -46,19 +46,21 @@
 - **Exit-condition**: gc corpus return pass ≥ 50/407 (first execution
   slice via struct/array) — refine as chunks land.
 
-## Active task — cycle 137: struct RETURN execution + array narrowing — **NEXT**
+## Active task — cycle 138: struct.new/array.new const-expr instantiation — **NEXT**
 
-cyc136 narrowed struct types → struct.5/7 compile + trap-asserts pass,
-but RETURN asserts flat at 49. Verify struct EXECUTION end-to-end:
-instrument a compiling struct fixture's assert_return — does struct.new
-(heap alloc via rt.gc_heap) + struct.get return the right value, or
-wrong/trap? (struct_ops.zig substrate landed; check resolveStructInfo /
-TypeInfo materialise at instantiate — rt may lack the StructInfo the
-handler needs). Fix → struct return passes. THEN apply the SAME
-narrowing to array (array.new push concrete `(ref $t)` + array.get/set/
-fill/len accept concrete via subtypeCtx — mirror cyc136; ~6 edits) →
-array fixtures. Also queue: struct.0/10 + i31.3 (preDecode gaps).
-Observable: gc return ↑ (struct/array); no regression to 49/4/57.
+CONFIRMED return-unblocker: struct.7 (+ array global fixtures) init
+globals `(ref $t)` with `struct.new`/`array.new`/`struct.new_default`
+CONST EXPRS (e.g. struct.7 global0 = `f32.const×3; struct.new 0; end`).
+`evalConstExprValue` (instantiate.zig ~694) handles only single consts +
+ref.i31 → UnsupportedConstExpr → instantiate FAIL. Add struct.new/
+struct.new_default/array.new[_default]/array.new_fixed to the global-init
+eval: at the globals loop (~1262), rt.gc_heap + inst.gc_type_infos are
+already materialised (~859-880), so reuse `feature/gc` allocate + the
+struct_ops field-write logic to build the GcRef Value from the leading
+const operands. Needs a context-aware evaluator (heap+type_infos), NOT
+the bare evalConstExprValue. Red: struct.7 instantiates + its 7 returns
+(new/get_*/set_get_*) pass. Observable: gc return ↑↑ (struct.7 ~7 +
+array fixtures); no regression to 49 return / 6 trap / 57 invalid.
 
 ## Larger §10 work (later bundles)
 
@@ -75,7 +77,7 @@ Observable: gc return ↑ (struct/array); no regression to 49/4/57.
 [tail-call          ] return=71  trap=7   invalid=24  (all pass)
 [exception-handling ] return=34/34 trap=2/2 invalid=7/7 exception=4/4  ✅ FULLY GREEN
 [function-references] return=39(pass=32 fail=1) trap=4(pass) invalid=18(pass)
-[gc                 ] return=407(pass=49 fail=334) trap=100(pass=4 fail=96) invalid=60(pass=57 fail=3) malformed=1(pass) ParseFailed=0 ValidateFailed=41  ← 10.G (cyc136; struct narrowing, struct FAIL 5→2, trap 2→4)
+[gc                 ] return=407(pass=49 fail=334) trap=100(pass=6 fail=94) invalid=60(pass=57 fail=3) malformed=1(pass) ParseFailed=0 ValidateFailed=38  ← 10.G (cyc137; array narrowing, ValidateFailed 41→38, trap 4→6)
 [multi-memory       ] return=407(pass=387 fail=20) trap=238(pass=237 fail=1)
 ```
 
