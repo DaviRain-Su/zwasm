@@ -85,11 +85,33 @@ Six workstreams (ADR-0128). Drive in this order; each is value-prioritized, NOT 
 
 ## Step 0.7 (next resume)
 
-cyc250 (`f1f2f38b`, A-2a) ubuntu-verified green `OK`. cyc251 (`68a2dbf0`) = A-2b-1; cyc252
-(`81bd0312`) = A-2b-2: both `struct.*`→runI32Export round-trips are aarch64-gated (skip x86_64
-via `skip.blocker(.@"D-211")`); the arch-independent parts (stackEffect / validator threading /
-usesRuntimePtr whitelist / migratedArchOpCount test) compile + stay non-GC-neutral on x86_64.
-ubuntu kick pending → verify `tail -3 /tmp/ubuntu.log` next resume.
+cyc251 (`68a2dbf0`, A-2b-1) + cyc252 (`81bd0312`/`6d795cb5`, A-2b-2 arm64 struct.get)
+ubuntu-verified green `OK (HEAD=6d795cb5)`. HEAD = `6d795cb5` (green, == origin, ahead=0).
+
+**⚠ IGNORE the current `/tmp/ubuntu.log`**: a x86_64-struct-mirror attempt (commits
+`233a8646`+`c75ed108`) was REVERTED via `git reset --hard 6d795cb5` because it shipped a
+non-compiling `runner.zig` (dropped the `builtin` import while ungating the struct e2e tests;
++ a `.slice()` precedence bug in x86_64 `struct_new_default.zig`) — 21 `zig build test` errors.
+Root cause: the subagent ran only `gate_commit.sh --fast`, which DEFERS `zig build test`/`lint`,
+so it never saw the compile errors. The dead background ubuntu kick (launched against the now-
+reverted `c75ed108`) will leave a stale/FAIL log for a SHA no longer in history — do NOT revert
+anything on its account; HEAD is already the verified-green `6d795cb5`. **NEXT cycle re-kick
+ubuntu against the real HEAD after the redo lands.**
+
+## NEXT = x86_64 struct mirror (REDO, in MAIN)
+
+Re-port arm64 `struct_new_default.zig` + `struct_get.zig` to x86_64/SysV (mirror exactly;
+the reverted attempt's design was sound — only the gate was wrong). MUST do in MAIN with a
+full `zig build test` (NOT `--fast`) before the source commit. Verified facts from the
+reverted attempt (reuse): x86_64 GC ops join the **`collected_x86_64_ctx_ops`** tuple
+(count 404→406); `runner.zig` MUST keep `const builtin = @import("builtin");` (≈20 win64
+phase-end guards depend on it) — only drop the `skip` import if truly unused, else keep both;
+ungate the two struct round-trip tests by removing `if (builtin.cpu.arch != .aarch64) return
+skip.blocker(.@"D-211")`; SysV: rt→RDI, typeidx→ESI, ret EAX, pinned rt = R15; verify with
+`zig build -Dtarget=x86_64-linux-gnu` too. Then A-3 = struct.new (variadic + ADR-0060
+force-spill) + struct.set. Lesson candidate: "`gate_commit.sh --fast` defers test/lint →
+a subagent that only runs --fast can ship non-compiling code; the parent's independent
+`zig build test` before push is the real gate (it caught this)."
 
 ## Key refs
 
