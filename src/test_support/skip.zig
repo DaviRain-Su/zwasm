@@ -74,6 +74,10 @@ pub const Blocker = enum {
     /// x86_64 br_if not migrated to (ctx, ins) shape; arm64 landed
     /// cycle 54b.
     @"D-194",
+    /// 10.G x86_64 struct-op JIT emit (struct.new_default / get / set).
+    /// arm64 landed first; x86_64 needs the SysV trampoline-call +
+    /// slab-base emit. Subsumed by the GC-on-JIT bundle (D-211).
+    @"D-211",
 };
 
 /// Phase-end batch deferral. See `Win64Phase` doc.

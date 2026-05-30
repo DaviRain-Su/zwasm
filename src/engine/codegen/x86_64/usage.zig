@@ -154,6 +154,11 @@ pub fn usesRuntimePtr(func: *const ZirFunc) bool {
             // always set). ref.i31 is NOT here (no trap, no R15).
             .@"i31.get_s",
             .@"i31.get_u",
+            // 10.G GC-on-JIT: struct.new_default CALLs the jitGcAlloc
+            // trampoline with rt in RDI (= R15) → needs R15 pinned
+            // (D-180 class). arm64 emit landed first; the x86_64 emit
+            // (D-211) inherits this whitelist entry.
+            .@"struct.new_default",
             .@"unreachable",
             // §9.9 / 9.9-m-1b: ref.func loads func_entities_ptr
             // from [r15+off]. Requires R15.

@@ -495,6 +495,14 @@ pub fn validateFunctionAndCollectSelectTypesWithMemory(
     out_select_types: *std.ArrayList(u8),
     memory0_idx_type: sections.MemoryEntry.IdxType,
     tags: []const sections.TagEntry,
+    // 10.G GC-on-JIT (ADR-0128 §2): thread the type section's GC
+    // kind + struct/array defs so the JIT compile path validates
+    // struct.new* / array.* (previously defaulted to `&.{}`, which
+    // rejected every GC op as InvalidFuncIndex — the corpus is
+    // interp-only so this JIT-validate-GC path was never exercised).
+    module_types_kinds: []const sections.TypeKind,
+    struct_defs: []const ?sections.StructDef,
+    array_defs: []const ?sections.ArrayDef,
 ) Error!void {
     var v = Validator{
         .sig = sig,
@@ -515,6 +523,9 @@ pub fn validateFunctionAndCollectSelectTypesWithMemory(
         .out_select_types = out_select_types,
         .out_allocator = allocator,
         .tags = tags,
+        .module_types_kinds = module_types_kinds,
+        .struct_defs = struct_defs,
+        .array_defs = array_defs,
     };
     try v.run();
 }

@@ -17,6 +17,8 @@ const rv = @import("runner_validate.zig");
 
 const runner_mod = @import("runner.zig");
 const instantiate = @import("../runtime/instance/instantiate.zig");
+const heap_mod = @import("../feature/gc/heap.zig");
+const gc_type_info = @import("../feature/gc/type_info.zig");
 const Error = runner_mod.Error;
 const CompiledWasm = runner_mod.CompiledWasm;
 
@@ -65,8 +67,17 @@ pub const RuntimeOwned = struct {
     tables_jit_ci: []entry.TableJitCallInfo,
     extra_funcptrs: []u64,
     extra_typeidxs: []u32,
+    // 10.G GC-on-JIT: dedicated arena holding the per-run GC Heap +
+    // GcTypeInfos (rt.gc_heap / gc_type_infos_ptr alias into it).
+    // Null for non-GC modules. One arena.deinit frees the slab + the
+    // materialised type table.
+    gc_arena: ?*std.heap.ArenaAllocator = null,
 
     pub fn deinit(self: *RuntimeOwned, allocator: Allocator) void {
+        if (self.gc_arena) |a| {
+            a.deinit();
+            allocator.destroy(a);
+        }
         if (self.memory.len > 0) allocator.free(self.memory);
         allocator.free(self.dispatch);
         allocator.free(self.globals);
@@ -497,6 +508,40 @@ pub fn setupRuntime(
         }
     }
 
+    // 10.G GC-on-JIT (ADR-0128 §2): materialise the GC heap + type
+    // table for modules with a GC type section, so the JIT
+    // struct.new* / jitGcAlloc trampoline has a slab to allocate into.
+    // All GC allocations live in a dedicated arena (freed at deinit).
+    var gc_arena: ?*std.heap.ArenaAllocator = null;
+    var gc_heap_ptr: ?*anyopaque = null;
+    var gc_type_infos_ptr: ?*anyopaque = null;
+    errdefer if (gc_arena) |a| {
+        a.deinit();
+        allocator.destroy(a);
+    };
+    if (module.needs_gc_heap) {
+        if (module.find(.type)) |ts| {
+            const ga = try allocator.create(std.heap.ArenaAllocator);
+            ga.* = std.heap.ArenaAllocator.init(allocator);
+            gc_arena = ga;
+            const gaa = ga.allocator();
+            var gc_types = try sections.decodeTypes(ta, ts.body);
+            defer gc_types.deinit();
+            const gti = try gaa.create(gc_type_info.GcTypeInfos);
+            // v128 struct/array fields are deferred (ADR-0116 §3a) — map to
+            // the runI32Export "unsupported shape" error rather than widen
+            // the runner Error set with a GC-internal variant.
+            gti.* = gc_type_info.materialiseGcTypes(gaa, gc_types) catch |e| switch (e) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.UnsupportedFieldSize => return error.UnsupportedEntrySignature,
+            };
+            const heap = try gaa.create(heap_mod.Heap);
+            heap.* = heap_mod.Heap.init(gaa);
+            gc_heap_ptr = heap;
+            gc_type_infos_ptr = gti;
+        }
+    }
+
     return .{
         .rt = .{
             .vm_base = if (memory.len > 0) memory.ptr else @ptrFromInt(@as(usize, 0x1000)),
@@ -539,6 +584,10 @@ pub fn setupRuntime(
             else
                 null,
             .eh_code_map_count = @intCast(compiled.module.code_map_entries.len),
+            // 10.G GC-on-JIT: the jitGcAlloc trampoline reads these to
+            // allocate; null for non-GC modules.
+            .gc_heap = gc_heap_ptr,
+            .gc_type_infos_ptr = gc_type_infos_ptr,
         },
         .memory = memory,
         .dispatch = dispatch,
@@ -556,6 +605,7 @@ pub fn setupRuntime(
         .tables_jit_ci = tables_jit_ci_buf,
         .extra_funcptrs = extra_funcptrs_buf,
         .extra_typeidxs = extra_typeidxs_buf,
+        .gc_arena = gc_arena,
     };
 }
 

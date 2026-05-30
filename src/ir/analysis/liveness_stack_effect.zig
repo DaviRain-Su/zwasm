@@ -33,6 +33,11 @@ pub fn stackEffect(op: ZirOp) ?StackEffect {
         .@"f64.const",
         .@"local.get",
         .@"global.get",
+        // Wasm 3.0 GC (10.G): struct.new_default pops nothing (the
+        // alloc trampoline zero-inits) and pushes the GcRef (anyref =
+        // u32, `.scalar`/GPR per ADR-0116 D4). struct.new (variadic
+        // pops) is special-cased in liveness.compute, not here.
+        .@"struct.new_default",
         => .{ .pops = 0, .pushes = 1 },
         // 1 → 0
         .drop,

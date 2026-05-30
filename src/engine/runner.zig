@@ -1216,3 +1216,28 @@ test "runI32Export: i31.get_s on null i31ref traps (10.G JIT)" {
     };
     try testing.expectError(entry.Error.Trap, runI32Export(testing.allocator, &bytes, "f"));
 }
+
+test "runI32Export: struct.new_default + ref.is_null → 0 (10.G struct-on-JIT A-2b-1)" {
+    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-211");
+    // (module
+    //   (type (struct (field (mut i32))))    ;; type 0
+    //   (func (export "f") (result i32)        ;; type 1
+    //     struct.new_default 0  ref.is_null))  ;; fresh struct is non-null → 0
+    // Exercises the full alloc path: JIT validate (GC type-kind threading)
+    // → struct.new_default emit → jitGcAlloc trampoline → setupRuntime-wired
+    // Heap. wat2wasm 1.0.40 lacks GC text; hand-encoded (struct.new_default
+    // = fb 01 typeidx; ref.is_null = d1). arm64 first; x86_64 emit = D-211.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        // type: [0]=struct{i32 mut} (5f 01 7f 01), [1]=func ()->(i32) (60 00 01 7f)
+        0x01, 0x09, 0x02, 0x5f, 0x01, 0x7f, 0x01, 0x60,
+        0x00, 0x01, 0x7f,
+        0x03, 0x02, 0x01, 0x01, // func: type idx 1
+        0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x00, // export "f" func 0
+        // code: body 6 bytes (locals + struct.new_default 0 [fb 01 00] +
+        // ref.is_null [d1] + end), body_size=0x06, sect size=0x08.
+        0x0a, 0x08, 0x01, 0x06, 0x00, 0xfb, 0x01,
+        0x00, 0xd1, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 0), runI32Export(testing.allocator, &bytes, "f"));
+}

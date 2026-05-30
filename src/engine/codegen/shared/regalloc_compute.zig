@@ -115,6 +115,10 @@ pub fn computeWith(
     for (func.instrs.items, 0..) |ins, pc| {
         const is_call = switch (ins.op) {
             .call, .call_indirect, .@"memory.grow" => true,
+            // 10.G GC-on-JIT: struct.new_default emits a BLR/CALL into
+            // the jitGcAlloc trampoline (clobbers caller-saved like
+            // memory.grow), so vregs live across it must force-spill.
+            .@"struct.new_default" => true,
             else => false,
         };
         if (!is_call) continue;

@@ -847,6 +847,9 @@ const x86_64_br_on_non_null = @import("x86_64/ops/wasm_3_0/br_on_non_null.zig");
 const arm64_ref_i31 = @import("arm64/ops/wasm_3_0/ref_i31.zig");
 const arm64_i31_get_s = @import("arm64/ops/wasm_3_0/i31_get_s.zig");
 const arm64_i31_get_u = @import("arm64/ops/wasm_3_0/i31_get_u.zig");
+// 10.G GC-on-JIT struct ops (arm64 first; x86_64 = D-211). struct.new_default
+// allocates via the jitGcAlloc trampoline (cycle A-2b).
+const arm64_struct_new_default = @import("arm64/ops/wasm_3_0/struct_new_default.zig");
 const x86_64_ref_i31 = @import("x86_64/ops/wasm_3_0/ref_i31.zig");
 const x86_64_i31_get_s = @import("x86_64/ops/wasm_3_0/i31_get_s.zig");
 const x86_64_i31_get_u = @import("x86_64/ops/wasm_3_0/i31_get_u.zig");
@@ -1212,6 +1215,8 @@ pub const collected_arm64_ops = .{
     arm64_ref_i31,
     arm64_i31_get_s,
     arm64_i31_get_u,
+    // 10.G GC-on-JIT struct.new_default (arm64 only; x86_64 = D-211).
+    arm64_struct_new_default,
 };
 
 /// Tuple of all migrated x86_64 per-op modules.

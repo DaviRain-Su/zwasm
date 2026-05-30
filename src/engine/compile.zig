@@ -952,6 +952,11 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             &select_types,
             memory0_idx_type,
             tags_slice,
+            // 10.G GC-on-JIT: thread the type section's kind + struct/array
+            // defs so struct.new* / array.* validate (vs InvalidFuncIndex).
+            types.kinds,
+            types.struct_defs,
+            types.array_defs,
         ) catch |err| {
             std.debug.print("compileWasm: func[{d}] params={d} results={d} → validate {s}\n", .{
                 wasm_idx,
