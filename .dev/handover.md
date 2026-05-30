@@ -9,8 +9,8 @@
   2026-05-24). The prior "close-eligible" posture is RETRACTED: §10 exit requires the
   official Wasm 3.0 testsuite at pass=fail=skip=0 on **both backends** (interp + JIT).
 - **HEAD**: `97658b5d` (cyc246 — **x86_64 i31 emit**, i31 complete on BOTH backends,
-  ubuntu-verified green). cyc247 = struct.new JIT **design grounding** (docs-only; design
-  in `phase10_g_op_bundle_plan.md`). Last CODE HEAD = `97658b5d`.
+  ubuntu-verified green). cyc247-248 = struct ops JIT **design grounding** (docs-only; full
+  turn-key cycle decomposition in `phase10_g_op_bundle_plan.md`). Last CODE HEAD = `97658b5d`.
 - **Two execution paths (CODE-verified)**: the spec corpus runs **interp-only**
   (`instance.invoke`→`_dispatch.run`, `instance.zig:169`). The JIT emits 1.0/2.0 +
   tail-call + function-references + EH + **i31 (both arches)**; remaining GC (struct/
@@ -53,14 +53,16 @@ Six workstreams (ADR-0128). Drive in this order; each is value-prioritized, NOT 
   on stack; struct offsets UNIFORM `8+idx*8` (ADR-0116 §3a); GC types are runtime-only
   (`inst.gc_type_infos`) → struct.new needs `field_count` threaded to compile-time; rooting
   DEFERRED (non-moving). e2e = `runI32Export` (hand-encode wasm; wat2wasm 1.0.40 lacks GC text).
-- **First-op order**: (1) **i31** — DONE both arches (`97658b5d`). NEXT = (2) **struct.new
-  / struct.get** (multi-cycle architectural; full JIT design grounded cyc247 in
-  **`.dev/phase10_g_op_bundle_plan.md` §"GC-on-JIT emit design"** — gc_alloc_fn JitRuntime
-  field per memory_grow_fn; uniform offsets `8+idx*8`; field_count threading; emitTableGrow
-  model). **Concrete next step**: survey the **regalloc clobber-point** (how `call` marks
-  caller-saved spill, `engine/codegen/shared/regalloc*.zig`) — struct.new's field vregs must
-  survive the alloc BLR. Then implement cycle A (gc_alloc_fn + threading + arm64 struct.new
-  +get + variadic liveness + runI32Export). (3) array.* (4) ref.cast/test (5) ref.eq.
+- **First-op order**: (1) **i31** — DONE both arches (`97658b5d`). NEXT = struct ops, fully
+  decomposed into TURN-KEY cycles in **`.dev/phase10_g_op_bundle_plan.md`
+  §"GC-on-JIT emit design" → "Cycle decomposition (cyc248)"** (regalloc + JitRuntime/Runtime
+  bridge resolved cyc248). **Concrete next chunk = Cycle A-1** (small, Mac-unit-testable, NO
+  setup/emit/regalloc): JitRuntime += `gc_heap`/`gc_type_infos_ptr` anyopaque fields (append
+  at struct end + offsets + budget, memory_grow_fn pattern) + new `shared/gc_alloc_trampoline.zig`
+  `jitGcAlloc(rt,typeidx)→GcRef` (mirror struct_ops allocateStruct+structNewDefault) + a unit
+  test that builds a JitRuntime w/ Heap+gti and calls it (behavior signal). Then A-2 (setup
+  GC-heap wiring + struct.new_default/get emit + runI32Export round-trip, both arches), A-3
+  (struct.new variadic + ADR-0060 force-spill amendment). (3) array.* (4) ref.cast (5) ref.eq.
 - **Exit-condition**: i31 green via `runI32Export` both arches — **DONE** (`97658b5d`).
   Bundle continues to struct/array/ref.cast; close when all GC ops emit + corpus green.
 
@@ -82,8 +84,8 @@ Six workstreams (ADR-0128). Drive in this order; each is value-prioritized, NOT 
 ## Step 0.7 (next resume)
 
 cyc246 (`97658b5d`, x86_64 i31 + ungated e2e) ubuntu-verified green `OK (HEAD=bd4729db)` —
-the null-trap path (R15 trap stub / `usesRuntimePtr` D-180) passed on real x86_64. cyc247 is
-docs-only (struct.new design grounding) → no ubuntu pending, no revert.
+the null-trap path (R15 trap stub / `usesRuntimePtr` D-180) passed on real x86_64. cyc247-248
+are docs-only (struct ops design grounding) → no ubuntu pending, no revert.
 
 ## Key refs
 

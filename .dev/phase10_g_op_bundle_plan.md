@@ -231,6 +231,51 @@ structGet:145 / structSet:166).
 **array.* → ref.cast/test → ref.eq** — after struct (share alloc + RTT
 machinery; ref.cast = Cohen 8-deep display, `n1>=n2` guard, CVE-2024-4761).
 
+### Cycle decomposition (cyc248 refinement — turn-key)
+
+**New findings cyc248**: (i) `JitRuntime` (jit_abi.zig:139, extern) is SEPARATE
+from `Runtime` (runtime.zig:136); `gc_heap`/`instance` live on Runtime, NOT
+JitRuntime → the alloc trampoline needs JitRuntime data fields to reach the
+heap. (ii) The JIT `setupRuntime` (setup.zig:93) path has NO GC-heap setup
+(no Heap, no gc_type_infos) — only the interp `instantiate.zig` materialises
+them. (iii) **`struct.new_default` has ZERO field operands** → it sidesteps
+the regalloc force-spill + variadic liveness entirely; do it FIRST. (iv)
+Trampoline can be a FIXED fn (address materialised at emit, like
+`throw_trampoline` — NOT a fn-ptr field) since its logic is fixed (reads rt
+fields); it computes payload_size from typeidx via gc_type_infos itself, so
+the EMIT needs no field_count threading for new_default. (v) Offsets uniform
+`8+idx*8` → get/set need no threading.
+
+- **Cycle A-1** (small, Mac-unit-testable, NO setupRuntime/emit/regalloc):
+  JitRuntime += `gc_heap: ?*anyopaque` + `gc_type_infos_ptr: ?*anyopaque`
+  (append at struct END to keep existing offsets stable; add `_off` consts +
+  comptime budget checks per the memory_grow_fn pattern jit_abi.zig:489/610).
+  New `shared/gc_alloc_trampoline.zig`: `pub fn jitGcAlloc(rt: *JitRuntime,
+  typeidx: u32) callconv(.c) u32` — cast rt.gc_heap→*Heap, gc_type_infos_ptr→
+  *const GcTypeInfos; `si = gti.struct_infos[typeidx].?`; `total = 8 +
+  si.payload_size`; `ref = heap.allocate(total) catch return 0`; write
+  ObjectHeader{.struct_, .info=typeidx} + zero payload (mirror
+  struct_ops.zig allocateStruct:98 + structNewDefault:184); return ref.
+  Unit test: build JitRuntime with a Heap + gti (mirror struct_ops
+  buildInstanceForTypes:209 — `materialiseGcTypes(a, decodeTypes(body))` for
+  `struct{i32}` body `01 5F 01 7F 01`), call jitGcAlloc(&rt,0), assert ref≥2 +
+  header.kind=.struct_ + header.info=0 + payload zeroed. **= behavior signal.**
+- **Cycle A-2** (emit + setup): extend `setupRuntime` to create Heap +
+  materialise gc_type_infos + set the 2 rt fields when a GC type section is
+  present (add to RuntimeOwned cleanup). arm64 `struct_new_default.zig` emit
+  (MOVZ/MOVK typeidx→W0? no — marshal rt=X0, typeidx=W1; MOV X16,&jitGcAlloc;
+  BLR X16; capture W0=ref→result vreg) + `struct_get.zig` emit (pop ref,
+  null-trap CMP#0+B.EQ→bounds_fixups, LDR slab=`[X19,#gc_heap_off]`→
+  `[heap,#bytes_ptr_off]`, LDR result=`[slab+ref+8+idx*8]`). stackEffect:
+  struct.new_default=0→1, struct.get=1→1 (fixed). usesRuntimePtr += both.
+  runI32Export round-trip `struct.new_default 0; struct.get 0 0` → 0. x86_64
+  mirror. = the real e2e.
+- **Cycle A-3**: `struct.new` (variadic) — needs ADR-0060 amendment
+  (force-spill alloc-op operands: regalloc_compute.zig:159 strict `<` →
+  inclusive for alloc ops, since fields are read AFTER the alloc BLR) +
+  variadic liveness (mirror call arm, liveness.zig:453) + field-store-inline.
+  `struct.set` (2→0). Then array.* / ref.cast / ref.eq.
+
 ## Related
 
 - ADR-0128 §2 (GC-on-JIT emit workstream — the master plan this section
