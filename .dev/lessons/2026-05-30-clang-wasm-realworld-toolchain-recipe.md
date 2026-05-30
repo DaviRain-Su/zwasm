@@ -33,9 +33,11 @@ fixture harness, but it has two limits for clang output:
    (real `-O` rust/clang code that spills the stack). Previously they
    trapped (`SP - n` wrapped to OOB because globals were left 0). Still
    no WASI / args / data-active-segment-beyond-globals support.
-2. **No args** → a no-arg pure func constant-folds (clang -O2 folded
-   `sum 1..10` to `i32.const 55`), so only trivial clang fixtures are
-   JIT-verifiable this way.
+2. **No args** → a no-arg pure func constant-folds at `-O2` (clang -O2
+   folded `sum 1..10` to `i32.const 55`). Two escapes (cyc224-226): compile
+   at **`-O0`** (no folding; spills to the now-supported shadow stack — see
+   `clang_O0_arr_sum` → 39), or wrap an input in `core::hint::black_box`
+   (rust) — both let NON-trivial real-toolchain code be JIT-verified.
 
 The `test-realworld-run` harness DOES fully instantiate (`cli_run.runWasm`)
 but only checks instantiate+invoke (no result-check, zero-arg) and globs
