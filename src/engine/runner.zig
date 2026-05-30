@@ -635,6 +635,57 @@ test "runI32Export: throw + catch_all returns 42 (IT-6 cycle 3c-iii-d end-to-end
     try testing.expectError(entry.Error.Trap, runI32Export(testing.allocator, &uncaught_bytes, "test"));
 }
 
+test "runI32Export: return_call inside try_table — tail-call consumes the frame so the throw escapes the handler (10.TC × 10.E)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    // EH × Tail-Call integration (ROADMAP 10.TC / 10.E `return_call_in_try_table`).
+    // A `return_call` is a proper tail-call: frame_teardown consumes the caller's
+    // frame — including the PC range its try_table covers — before the tail-jump.
+    // So when the tail-callee throws, the throw-site PC is inside the callee
+    // (outside the caller's try_table range) AND the frame-chain walk skips the
+    // consumed frame. The caller's `catch_all` therefore does NOT catch the
+    // tail-callee's throw; it propagates uncaught → trap. A regression (stale
+    // handler entry / wrong PC normalisation) would instead catch it → 42.
+    //
+    // wat2wasm --enable-tail-call --enable-exceptions:
+    //   (module
+    //     (tag $e0)
+    //     (func $thrower (result i32) (throw $e0))
+    //     (func (export "test") (result i32)
+    //       (block $catch
+    //         (try_table (catch_all $catch)
+    //           (return_call $thrower))   ;; tail-call; the caller's frame is gone
+    //         (return (i32.const 99)))
+    //       (i32.const 42)))              ;; $catch landing pad — never reached
+    const escapes_bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x60,
+        0x00, 0x00, 0x60, 0x00, 0x01, 0x7f, 0x03, 0x03, 0x02, 0x01, 0x01, 0x0d,
+        0x03, 0x01, 0x00, 0x00, 0x07, 0x08, 0x01, 0x04, 0x74, 0x65, 0x73, 0x74,
+        0x00, 0x01, 0x0a, 0x1a, 0x02, 0x04, 0x00, 0x08, 0x00, 0x0b, 0x13, 0x00,
+        0x02, 0x40, 0x1f, 0x40, 0x01, 0x02, 0x00, 0x12, 0x00, 0x0b, 0x41, 0xe3,
+        0x00, 0x0f, 0x0b, 0x41, 0x2a, 0x0b,
+    };
+    try testing.expectError(entry.Error.Trap, runI32Export(testing.allocator, &escapes_bytes, "test"));
+
+    // Companion: a NON-throwing tail-call inside the same try_table shape just
+    // returns the tail-callee's result (77) — the try_table setup doesn't break
+    // the tail-call disposition.
+    //   (module
+    //     (func $non_throw (result i32) (i32.const 77))
+    //     (func (export "test") (result i32)
+    //       (block $catch
+    //         (try_table (catch_all $catch)
+    //           (return_call $non_throw)))
+    //       (i32.const 0)))
+    const non_throw_bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60,
+        0x00, 0x01, 0x7f, 0x03, 0x03, 0x02, 0x00, 0x00, 0x07, 0x08, 0x01, 0x04,
+        0x74, 0x65, 0x73, 0x74, 0x00, 0x01, 0x0a, 0x17, 0x02, 0x05, 0x00, 0x41,
+        0xcd, 0x00, 0x0b, 0x0f, 0x00, 0x02, 0x40, 0x1f, 0x40, 0x01, 0x02, 0x00,
+        0x12, 0x00, 0x0b, 0x0b, 0x41, 0x00, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 77), try runI32Export(testing.allocator, &non_throw_bytes, "test"));
+}
+
 test "runI32Export: tagged catch routes by tag_idx — throw $e1 → catch $e1 returns 77" {
     if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
     // (module
