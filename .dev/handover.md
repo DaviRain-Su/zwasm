@@ -7,41 +7,42 @@
 
 - **Phase**: **10 IN-PROGRESS — autonomous CORRECTNESS substantially COMPLETE**
   (Phase 9 = DONE 2026-05-24). All 4 proposals verified green except deep/deferred
-  residuals (see §10 map + D-202 debt). D-202 bundle CLOSED (PHASE A delivered).
-- **HEAD**: `38bb0e0e` (cyc236, **D-202 PHASE A landed**). Session: cyc232
+  residuals (see §10 map + D-202 debt).
+- **HEAD**: `a4bd9bbb` (cyc239, **D-202 PHASE B-finality**). Session: cyc232
   cross-module `return_call`; cyc233 EH×TC; cyc234-235 stale-debt correction (ADRs
-  0115/0116/0123/0126 Accepted, D-195 discharged, fn-references + gc corpora GREEN);
-  **cyc236 D-202 PHASE A** — C-API Linker cross-module func import now uses
-  `funcTypeImportCompatible` (subtyping) not exact `sigEqual`; `.30/.48/.50`
-  instantiate-FAIL → OK (verified, no regression).
+  0115/0116/0123/0126 Accepted, D-195 discharged, corpora GREEN); cyc236 D-202
+  PHASE A (linker cross-module subtyping, `.30/.48/.50` link, ubuntu-verified);
+  **cyc239 D-202 PHASE B-finality** — `ExportType.func` → `ExportFuncType{sig,final}`,
+  exporter func finality threaded to the C-API Linker, which now rejects a FINAL
+  import resolving against an open `(sub …)` exporter → **assert_unlinkable 5→4**,
+  no regression.
 - **10.P: 16 PASS / 8 SKIP / 0 FAIL → close-eligible.**
 - **nix**: dev shell active (zig 0.16.0 / wabt / wasmtime).
 
-## Step 0.7 (next resume)
+## Step 0.7 (next resume — DO FIRST)
 
-- cyc236 (`38bb0e0e`, D-202 PHASE A) is **ubuntu-verified `OK (HEAD=ebca32b0)`** —
-  `.30/.48/.50` instantiate + no regression on x86_64, both arches green. cyc238 =
-  docs-only (D-202 bundle close + debt update) → no ubuntu kick. No pending, no revert.
+- cyc239 (`a4bd9bbb`) is a multi-file linker/instance code change → ubuntu kicked
+  this turn. Next resume `tail -3 /tmp/ubuntu.log`, expect `OK (HEAD=<turn-final>)`
+  — verifies assert_unlinkable 5→4 + no regression on x86_64. On FAIL: revert the
+  turn's commits; last ubuntu-green = `ebca32b0` (PHASE A).
 
 ## Active task — Phase 10 autonomous correctness substantially COMPLETE  **NEXT**
 
-**D-202-xmodule-finality bundle CLOSED cyc238** — PHASE A (positive subtyping,
-`.30/.48/.50` instantiate) delivered + ubuntu-verified (`38bb0e0e`). PHASE B (the
-FINALITY direction — `assert_unlinkable .35/.36/.42/.52/.54` fail=5, counted) is
-**involved plumbing → D-202 debt row** (the exporter `Instance` retains neither
-func→typeidx nor type-section `finals`/`supertypes`; retrieving the exporter func's
-finality needs RE-DECODING the exporter's module bytes + a func→typeidx→finals walk
-at `defineCrossModuleFunc`, then a finality guard at resolve). Best in a fresh
-context (involved GC type-system; D-202 row carries the full recipe).
+**D-202 PHASE B-finality LANDED cyc239** (`a4bd9bbb`): assert_unlinkable 5→4. The
+remaining **PHASE C = the other 4 assert_unlinkable** (`.36/.42/.52/.54` or subset)
+differ by DECLARED-SUPERTYPE / cross-module canonical type-identity, NOT just the
+finality bool → **D-202 debt row** (needs threading the exporter supertype chain +
+a cross-`Types` `canonicalEqual`; more involved than the finality bool; fresh
+context). 
 
-**Honest state**: this very long session drove Phase 10's clean autonomous
-correctness to substantial completion (cross-module TC, EH×TC, stale-debt
-correction, D-202 PHASE A). The remaining AUTONOMOUS items are all
-fresh-context/dedicated-effort or low-value: D-202 PHASE B (finality plumbing,
-5 fixtures); gc per-op-file migration (behavior-preserving refactor); gc_stress /
-eh_frequency runner 本実装 (involved/perf). The HIGH-VALUE move — formal Phase 10
-close (→ Phase 11; close-eligible, 0 FAIL) — is USER-GATED. Next driving chunk =
-**D-202 PHASE B** (debt-row recipe) when context is fresh; else gc per-op migration.
+**Honest state**: this very long session (cyc232-239) drove Phase 10's clean
+autonomous correctness to substantial completion (cross-module TC, EH×TC,
+stale-debt correction, D-202 PHASE A + B-finality). The remaining AUTONOMOUS items
+are all fresh-context/dedicated-effort or low-value: D-202 PHASE C (supertype
+canonical, 4 fixtures); gc per-op-file migration (behavior-preserving refactor);
+gc_stress / eh_frequency runner (involved/perf). The HIGH-VALUE move — formal
+Phase 10 close (→ Phase 11; close-eligible, 0 FAIL) — is USER-GATED. Next driving
+chunk = **D-202 PHASE C** when context is fresh; else gc per-op migration.
 Re-armable to the Phase-10 close at any user signal.
 
 (Prior context — cyc234-235 stale-debt correction, retained for the lesson):
