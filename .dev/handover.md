@@ -29,58 +29,43 @@
   only ran arm64). On FAIL: revert `3933c9a7`; last ubuntu-green = `7131d711`
   (via bc47d75e).
 
-## Active task — c_api EH type-reflection (wasm_tagtype_*)  **NEXT**
+## Active task — D-202 cross-module type-identity (finality) check  **NEXT**
 
-**10.TC + 10.E codegen + spec corpora are DONE this session.** 10.TC stays `[ ]`
-only for `wasm_of_ocaml` (GC+EH+TC capstone, toolchain+GC-deferred). 10.E codegen
-green (D-182/183/188 + EH×TC); try_table spec corpus = 2 text-format skips (legit
-ADR). **10.E survey result (cyc233):**
-- `eh_frequency_runner` = benchmark *skeleton* (`test/runners/eh_frequency_runner.zig`),
-  perf scaffolding only — low signal, defer.
-- realworld `emscripten_eh/` = PROVENANCE-only placeholder (emscripten EH
-  toolchain not provisioned) — deferred like wasm_of_ocaml.
-- **c_api tag accessors**: `wasm_tagtype_*` declared `include/wasm.h:252-296` but
-  the WHOLE wasm-c-api **type-reflection** layer is unimplemented — `src/api`
-  exports 49 runtime fns (engine/instance/func/global/memory/extern) but NO
-  `wasm_functype_*` / `wasm_*type` type-objects. So "tag accessors" needs the
-  type-object infra (valtype/functype/externtype) built first.
+**cyc234-235 CORRECTION — the debt ledger is STALE and mis-routed the loop 3×
+this session.** Ground-truth verification (ADR Status + live corpus, NOT debt
+prose):
+- ADR-0115 / 0116 / **0123 / 0126 are all ACCEPTED** (0123 "user-delegated
+  autonomous flip" 2026-05-28). There is NO pending user ADR flip. Debt rows
+  D-195 / D-198 saying "gated on ADR-XXXX Accept" are STALE.
+- **function-references corpus GREEN** (ubuntu `return 39/0, trap 4/0,
+  invalid 18/0, skip 1`) — **D-195 is DISCHARGED** (typed-funcref ValType
+  `0x63/0x64` parser landed, `zir.zig:191`). Debt row stale.
+- **GC corpus** GREEN except: `.17` (deferred multi-mechanism rabbit hole) +
+  the **D-202 cross-module negatives** (`gc/type-subtyping.30/.48/.50`
+  instantiate `SignatureMismatch`, `.35/.36/.42/.52/.54` assert_unlinkable
+  wrongly-link).
+- Lesson to write: *verify ADR Status + live corpus before trusting a debt
+  row's "blocked-by ADR flip" framing* — three candidate chunks this session
+  (D-195, the GC ADRs, the gc per-op "migration") were stale/misread.
 
-**cyc234 finding: Phase 10 autonomous CORRECTNESS is substantially COMPLETE.**
-Surveyed + verified all 4 proposals: memory64 done (D-209 >4GiB deferred); TC done
-(wasm_of_ocaml capstone deferred); EH done (c_api tags = v0.1.0 scope per ROADMAP
-§1.2, NOT Phase 10; eh_frequency/emscripten = perf/toolchain deferred); **GC corpus
-GREEN** — ubuntu `gc: return 349/1, trap 96/4, invalid 60/0, skip 12`; the only
-fails are gc/type-subtyping `.17` (deferred multi-mechanism rabbit hole, D-198) +
-the `.30/.48/.50/.35/.36/.42/.52/.54` cross-module type-identity/finality negatives
-(**ADR-gated** D-202). The per-op `struct_*/array_*/ref_*` files returning
-`error.NotMigrated` are NOT behavior gaps — they fall back to the legacy switch
-(`dispatch_collector.zig:280`); the real impl lives in `lower.zig` / `validator.zig`
-/ `mvp.zig` and the corpus is green through it. (The GC-survey-subagent's "all gc
-ops are 3-line stubs → implement struct.new" was a MISREAD of the migration-marker
-architecture — verified against the green corpus + ref_test.zig also returning
-NotMigrated while ref.test passes fixtures.)
+So Phase 10 is NOT at a bucket-3 user-touchpoint — **D-202 is genuine open
+AUTONOMOUS correctness work** (ADRs accepted; impl-only).
 
-**Remaining Phase-10 work, by bucket:**
-- USER-GATED (high value): formal Phase 10 close (close-eligible); GC ADR-0123
-  (D-195 typed-ref `0x63/0x64` parser) + ADR-0126/D-202 (cross-module finality)
-  `Proposed → Accepted` flips → unblock the function-references corpus + the 8
-  ADR-gated gc negatives.
-- Deferred: `.17` exotic fixture; realworld capstones (wasm_of_ocaml/emscripten_eh/
-  dart/hoot — toolchains unprovisioned); memory64 >4GiB offset.
-- **Autonomous (low value, refactor/perf)**: gc op **per-op-file migration**
-  (ROADMAP 10.G `op_gc.zig`/`op_i31.zig` 本実装 — move handlers from the legacy
-  switch into the `NotMigrated` per-op files; behavior-preserving, verified by
-  `dispatch_consistency_audit` + green corpus); `gc_stress_runner` / `eh_frequency_runner`
-  本実装 (perf scaffolding).
-
-Next driving chunk = **start the gc per-op-file migration bundle**. Step 0: read an
-ALREADY-migrated op's per-op file to learn the handler ABI (signature + how it
-reaches the operand stack / runtime ctx), then migrate ONE gc op (e.g. `struct.new`)
-from the legacy switch into its per-op handlers, asserting test-all neutrality
-(green pre+post) + the dispatch-consistency delta. If the migration handler ABI
-turns out to require a large cross-cutting change → re-scope to a bucket-3 touchpoint
-(the user-gated paths above are higher value). NOTE smell: `runner.zig` 1168 lines
-(soft WARN) — test sibling extraction is a future refactor.
+Next driving chunk = **D-202**: implement cross-module structural type-identity
+(finality + declared-supertype + canonical) comparison in
+`instantiate.zig::checkImportTypeMatches` (`.cross_module` arm) +
+`validator.zig::funcTypeImportCompatible`. The exporter types are reachable via
+`source_rt` (`Runtime.module_types` + `gc_type_infos.canonical_ids`) but the
+rec-group structure for cross-`Types` `canonicalEqual` is not threaded into the
+`cross_module` binding. **FIRST verify the discrepancy**: D-198 cyc192
+(`6a77cb19`) claimed `.30/.48/.50` SignatureMismatch 3→0, but the current ubuntu
+log shows them FAILing again — confirm whether cyc192 regressed or the fix was
+partial, via the spec runner per-module emit. Then thread exporter type info +
+the structural compare (monotonic-safe: eql-first, subtype/identity-fallback).
+Step 0 survey: `instantiate.zig::checkImportTypeMatches` + `validator.zig::funcTypeImportCompatible`
++ how `source_rt` exposes exporter `Types`. May be multi-cycle → open a bundle.
+Discharge D-195 (stale) + reconcile D-198 in the same or next chunk.
+NOTE smell: `runner.zig` 1168 lines (soft WARN) — future test sibling extraction.
 **User touchpoint (HIGH-VALUE, held)**: Phase 10 is close-eligible (10.P 0 FAIL,
 TC+EH done). The two highest-value next moves are USER-GATED: (1) formal Phase 10
 close → Phase 11, (2) GC (10.G) ADR-0123 / ADR-0126 `Proposed → Accepted` flips
