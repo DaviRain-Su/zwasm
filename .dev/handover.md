@@ -6,37 +6,45 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS — CLOSE-ELIGIBLE** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `0b8d2a0b` (cyc216). **I3 cross fixtures = 4** + **edge-runner caching fix**.
-  `test/edge_cases/p10/cross/` now: `call_ref_to_memory64`→42, `return_call_to_memory64`→99,
-  `eh_call_ref_catch`→77 (EH unwind across a call_ref boundary), `eh_memory64_catch`→55
-  (EH × memory64 in one frame). All green on Mac via the JIT runner (assembled with
-  wasm-tools parse). **build.zig fix**: the edge/realworld run steps passed their corpus
-  dir via `addArg(string)` (untracked input) → zig cached the run-artifact + SKIPPED
-  re-running on fixture-only changes → FALSE coverage (cyc215's cross fixtures were never
-  actually run by the gate, Mac AND ubuntu). Fixed with `has_side_effects = true` on all
-  4 run_edge_* steps. Lesson `2026-05-30-edge-runner-fixture-cache-false-coverage`.
-- **D-209 VERIFIED green on ubuntu** (cyc215 Step 0.7: `OK (HEAD=fd2fd267)`, wast_runner
-  1158/1158). D-208 (cyc213) + D-209 (cyc214) both fixed + ubuntu-verified.
-- **10.P close-invariants (cyc214): 16 PASS / 8 SKIP / 0 FAIL** → close-eligible. I3 now
-  populated; remaining SKIPs: I14 (EH wasm.h c_api tag accessors, AUTONOMOUS), I5/I11/I16/
-  I20/I23 (deferred-to-close-cycle), I21 (realworld tool-gated).
-- **Step 0.7 on resume**: cyc216 changed build.zig (run-step flags forcing re-run) +
-  added 2 fixtures → ubuntu kicked on `0b8d2a0b`. This is the FIRST real x86_64 run of all
-  4 cross fixtures (the has_side_effects fix un-caches them). VERIFY (`tail /tmp/ubuntu.log`):
-  the 4 cross fixtures pass on x86_64. FAIL ⟹ an x86_64 interaction bug → investigate
-  (fixture/build-only change, low-risk revert).
+- **HEAD**: `<cyc217 docs/script>`. **All 4 I3 cross fixtures VERIFIED green on ubuntu**
+  (cyc216 Step 0.7: `OK (HEAD=bb2a3471)`) — first real x86_64 run, un-cached by the
+  has_side_effects fix. call_ref/return_call/EH × memory64 + EH × call_ref all pass both arches.
+- **I14 surveyed → correctly DEFERRED** (cyc217). The wasm.h tagtype accessors are NOT a
+  standalone 10.E chunk: `wasm_tagtype_new(wasm_functype_t*)` + `wasm_tagtype_as_externtype`
+  DEPEND on the type-reflection C-API family (functype/externtype) which is UNIMPLEMENTED
+  (src/api/ has only runtime-object accessors: func/global/memory/extern/trap/vec; zero
+  *type* accessors). Implementing tagtype in isolation is incoherent → Phase 13 c_api scope.
+  Close-invariant I14 rationale corrected to say so.
+- D-208 (cyc213) + D-209 (cyc214) fixed + ubuntu-verified. **10.P: 16 PASS / 8 SKIP / 0 FAIL**
+  → close-eligible. Remaining SKIPs all deferred-to-close-cycle (I5/I11/I16/I20/I23), tool-gated
+  (I21), or Phase-13 (I14). No autonomous SKIP-flip remains.
+- **Step 0.7 on resume**: cyc217 is DOCS/SCRIPT-only (I14 rationale + handover) → no ubuntu
+  kick; green holds at `bb2a3471`. The NEXT code chunk (D-206) kicks ubuntu.
 
-## Active task — I14: EH wasm.h c_api tag accessors  **NEXT**
+## Active bundle
 
-Cross-feature coverage (I3) is now solid (4 fixtures across the cleanly-JIT-able pairs;
-remaining clean combos hit the GC-JIT / multi-memory-JIT gaps, not worth forcing). Next
-autonomous close-prep: **I14** — implement the EH-related `wasm.h` C-API tag accessors
-(10.E c_api scope; the EH *runtime* is done, D-192 resolved — this is the public C-ABI
-surface). Step 0 survey first: enumerate which `wasm_tag_*` / exception accessors `wasm.h`
-declares vs what `src/api/` implements, and scope whether it's a clean chunk or ADR-grade.
-If substantial/ADR-grade → reconsider (the close is a user touchpoint; remaining autonomous
-work is thinning). Deferred: D-206 cross-module TC (multi-module JIT harness first); 10.G
-GC JIT (extreme).
+- **Bundle-ID**: D-206-cross-module-TC
+- **Cycles-remaining**: ~3
+- **Continuity-memo**: (1) a multi-module JIT test harness (link 2 modules + JIT-run an
+  exported entry — no current `runI32Export`-style multi-module path); (2) cross-module
+  `return_call` inline-bridge emit (ADR-0112 D4; ADR-0066 thunk NOT reused) — arm64 + x86_64.
+  Current block: `op_tail_call.emitDirectReturnCall` rejects `return_call` to an import
+  (`if ins.payload < num_imports → UnsupportedOp`).
+- **Exit-condition**: a 2-module fixture where module A's exported `test` does
+  `return_call $imported` (a func imported from module B), JIT-executed → expected i32, on
+  both arches, ubuntu-verified.
+
+## Active task — D-206 cross-module tail-call JIT: multi-module JIT test harness  **NEXT**
+
+Bundle D-206-cross-module-TC, step 1. The substantive arc-completer (D-205 same-module
+tail-call → D-208 funcref-null → D-206 cross-module). Step 0 survey: how `runI32Export`
+links + JIT-runs a single module; what a 2-module variant needs (the cross-module bridge
+resolver in `engine/codegen/shared/linker.zig` / `cross_module.zig`); whether a
+`runI32Export`-style 2-module helper can be added to `src/engine/runner.zig`. Smallest red:
+a 2-module test where A return_calls B's imported func → expected i32 (will RED on
+`emitDirectReturnCall`'s import-reject). NOT close-required (interp covers it) but completes
+the tail-call JIT matrix. Deferred: 10.G GC JIT (extreme); funcref 34/39 + GC residual
+(D-198 RTT rabbit hole, deep defer).
 
 ## §10 close map
 
