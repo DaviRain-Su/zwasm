@@ -27,28 +27,30 @@
   stack — confirms the unlock handles real rustc algorithmic codegen; `9e4d0cfe`). realworld/p10
   = 6 fixtures, all green. **Stale-exe pitfall** recurs: isolated `find`-by-grep can grab a
   pre-fix exe → use `zig build` EXIT + the exe passing `data_sum=31`.
-- cyc226: `clang_O0_arr_sum`=39 — clang `-O0` (heaviest shadow-stack spill, no regalloc) runs →
-  validates the cyc224 unlock for clang too; lesson "-O0 traps" claim lifted (`0e78ecf8`).
-  realworld/p10 = 7 fixtures (rust loop/recursion/data/sort + clang musttail/wasm64/-O0), all green.
-- **Step 0.7 on resume**: cyc226 added clang_O0_arr_sum (`0e78ecf8`) → ubuntu kicked. VERIFY
-  (`tail /tmp/ubuntu.log`): 7 realworld/p10 pass on x86_64.
+- cyc226-227: clang `-O0` `arr_sum`=39 (int) + `fp_sum`=77 (f64 load/add/mul + trunc) →
+  validate the cyc224 shadow-stack unlock for clang (int + FP); lesson "-O0 traps" lifted
+  (`0e78ecf8`,`59e67cf0`). **realworld/p10 = 8 fixtures, all green — the real-toolchain matrix
+  is COMPLETE** (rust loop/recursion/data/sort + clang musttail/wasm64/-O0-int/-O0-fp).
+- **Step 0.7 on resume**: cyc227 added clang_O0_fp_sum (`59e67cf0`) → ubuntu kicked. VERIFY
+  (`tail /tmp/ubuntu.log`): 8 realworld/p10 pass on x86_64.
 
-## Active task — clang `-O0` floating-point fixture (last matrix cell)  **NEXT**
+## Active task — pre-close scaffolding audit (targeted)  **NEXT**
 
-The rust/clang × control-flow/memory/algorithm/shadow-stack matrix is nearly complete; the one
-distinct codegen cell left is **floating-point**. Gen via `nix develop .#gen`: a C `int test(){
-double x=...; ... return (int)(x*...); }` at `-O0` → real f64 load/store (shadow stack) + f64
-arith + f64→i32 trunc. Land `test/realworld/p10/clang_O0_fp/`; run → known i32. wasmtime-confirm.
-**After this, the realworld-fixture vein is comprehensively explored** (2 real finds: D-209
-LEB, global-init/shadow-stack; the rest validate real-toolchain codegen, which the spec corpus
-already covers → low marginal bug-rate). 
+The tractable fixture veins (cross, realworld) are now EXHAUSTED (matrix complete; 2 real
+finds: D-209 LEB + the global-init/shadow-stack harness bug). Before the Phase-10 close,
+exhaust the remaining cheap autonomous lever: a **targeted coherence audit** of what this
+14-cycle session churned — `.dev/handover.md` (stale SHA/refs), `.dev/debt.md` (D-206/D-209
+rows accurate? any discharged-but-listed?), `.dev/lessons/INDEX.md` (new lessons rowed?),
+the new `flake.nix devShells.gen` + `.dev/toolchain_provisioning.md` + CLAUDE.md pointer
+(consistent?), and `scripts/check_phase10_close_invariants.sh` (re-run; confirm 0 FAIL holds).
+Fix local findings inline; block findings → debt/ADR. This surfaces issues BEFORE the close.
 **User touchpoint (PROMINENT — decision point)**: Phase 10 close-eligible (10.P 0 FAIL). The
-high-value autonomous work (JIT bug fixes, the user-directed gen-shell + shadow-stack unlock,
-the realworld matrix) is DONE. The substantive remaining is DEEP + not-close-required (D-206
-cross-module bridge ≈4-6 cyc; 10.G GC JIT extreme) OR Phase-11-scoped (10 SKIP-WASI). The
-formal Phase-10 close (→ Phase 11) is the genuinely highest-value next step and is a user
-project-direction decision. **Next-cycle-after-fp: either engage D-206 (deep) or surface the
-close decision.** NOT a stop now; re-arm holds.
+high-value autonomous work is DONE (JIT bug fixes D-208/D-209, the user-directed gen-shell +
+shadow-stack unlock, the realworld matrix, 2 caching-coverage fixes). After this audit, the
+ONLY remaining work is DEEP + not-close-required (D-206 ≈4-6 cyc; 10.G GC JIT extreme) OR
+Phase-11-scoped (10 SKIP-WASI) OR the **formal Phase-10 close (→ Phase 11) — a user
+project-direction decision and the genuinely highest-value next step.** A user check-in is
+high-value here. NOT a stop now (audit remains); re-arm holds.
 **User touchpoint (held, prominent)**: Phase 10 close-eligible (10.P 0 FAIL). The real-toolchain
 fixture vein is now PRODUCTIVE again (shadow-stack unlocked → real code finds real bugs, e.g.
 cyc224). Deep not-close-required work (D-206 ≈4-6 cyc; 10.G GC JIT extreme) + the 10 SKIP-WASI
