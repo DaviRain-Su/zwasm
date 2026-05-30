@@ -26,6 +26,9 @@ const Value = @import("../../../runtime/value.zig").Value;
 const FuncEntity = @import("../../../runtime/instance/func.zig").FuncEntity;
 const exception_table = @import("exception_table.zig");
 const code_map = @import("code_map.zig");
+const heap_mod = @import("../../../feature/gc/heap.zig");
+const gc_type_info = @import("../../../feature/gc/type_info.zig");
+const object_alloc = @import("../../../feature/gc/object_alloc.zig");
 
 /// `@sizeOf(FuncEntity)` — exposed for JIT emit's `ref.func`
 /// recipe (`ADD ptr, ptr, #(idx * func_entity_size)`). Comptime
@@ -423,6 +426,18 @@ pub const JitRuntime = extern struct {
     /// the most recent throw site). See `eh_payload_buf`.
     eh_payload_len: u32 = 0,
     _pad14: u32 = 0,
+    /// 10.G GC-on-JIT (ADR-0128 §2) — opaque pointers to the
+    /// per-Instance GC heap (`*feature/gc/heap.Heap`) and GC
+    /// type-info table (`*const feature/gc/type_info.GcTypeInfos`).
+    /// Set at instance setup iff the module declares a GC type
+    /// section; null otherwise. The struct alloc trampoline
+    /// (`jitGcAlloc` below) reads both to look up payload_size +
+    /// allocate; struct.get/set read `gc_heap`'s
+    /// slab base (`Heap.bytes.ptr`) via a second indirection.
+    /// Layout-stable tail (added after the EH fields so existing
+    /// prologue offsets are unaffected).
+    gc_heap: ?*anyopaque = null,
+    gc_type_infos_ptr: ?*anyopaque = null,
 };
 
 /// Default `memory_grow_fn` — unconditionally refuses growth by
@@ -447,6 +462,26 @@ pub fn defaultTableGrowReject(rt: *JitRuntime, tableidx: u32, init: u64, delta: 
     _ = init;
     _ = delta;
     return -1;
+}
+
+/// 10.G GC-on-JIT struct allocation trampoline (ADR-0128 §2). The
+/// per-arch `struct.new` / `struct.new_default` emit materialises
+/// this fn's address + `CALL`s it (rt in X0/RDI, typeidx in W1/ESI).
+/// Resolves the `StructInfo` from `rt.gc_type_infos_ptr` (so the
+/// JIT body needn't know payload_size at emit time), allocates +
+/// stamps + zero-inits via the shared `object_alloc.allocStructObject`
+/// (the SAME logic the interp `struct_ops.zig` uses), and returns the
+/// `GcRef` (u32 slab offset). Returns `0` (null sentinel) on bad
+/// typeidx / unmaterialised GC substrate / OOM — the JIT caller maps
+/// `0` to a trap. C-ABI; callee-saved regs preserved by the callee.
+pub fn jitGcAlloc(rt: *JitRuntime, typeidx: u32) callconv(.c) u32 {
+    const heap_opaque = rt.gc_heap orelse return 0;
+    const gti_opaque = rt.gc_type_infos_ptr orelse return 0;
+    const heap: *heap_mod.Heap = @ptrCast(@alignCast(heap_opaque));
+    const gti: *const gc_type_info.GcTypeInfos = @ptrCast(@alignCast(gti_opaque));
+    if (typeidx >= gti.struct_infos.len) return 0;
+    const si = gti.struct_infos[typeidx] orelse return 0;
+    return object_alloc.allocStructObject(heap, typeidx, si.payload_size, true) catch 0;
 }
 
 // ============================================================
@@ -517,6 +552,13 @@ pub const eh_handler_fp_off: u12 = @offsetOf(JitRuntime, "eh_handler_fp");
 /// array); per-slot stride is 8 bytes.
 pub const eh_payload_buf_off: u16 = @offsetOf(JitRuntime, "eh_payload_buf");
 pub const eh_payload_len_off: u16 = @offsetOf(JitRuntime, "eh_payload_len");
+
+/// 10.G GC-on-JIT (ADR-0128 §2) — both X-form (8-byte pointer)
+/// loads: `gc_heap` read by the alloc trampoline + struct.get/set
+/// slab-base load; `gc_type_infos_ptr` read by the trampoline for
+/// payload_size lookup.
+pub const gc_heap_off: u12 = @offsetOf(JitRuntime, "gc_heap");
+pub const gc_type_infos_ptr_off: u12 = @offsetOf(JitRuntime, "gc_type_infos_ptr");
 
 /// Total size of the head section consumed by the prologue.
 pub const head_size: u32 = @sizeOf(JitRuntime);
@@ -637,6 +679,11 @@ comptime {
     if ((eh_code_map_count_off & 3) != 0) @compileError("eh_code_map_count_off not 4-aligned");
     if (eh_code_map_entries_off > 32760) @compileError("eh_code_map_entries_off exceeds X-form imm12 budget");
     if (eh_code_map_count_off > 16380) @compileError("eh_code_map_count_off exceeds W-form imm12 budget");
+    // 10.G GC-on-JIT: both X-form (8-byte pointer) loads.
+    if ((gc_heap_off & 7) != 0) @compileError("gc_heap_off not 8-aligned");
+    if ((gc_type_infos_ptr_off & 7) != 0) @compileError("gc_type_infos_ptr_off not 8-aligned");
+    if (gc_heap_off > 32760) @compileError("gc_heap_off exceeds X-form imm12 budget");
+    if (gc_type_infos_ptr_off > 32760) @compileError("gc_type_infos_ptr_off exceeds X-form imm12 budget");
 }
 
 // ============================================================
@@ -657,7 +704,7 @@ test "JitRuntime: layout offsets match documented prologue load sequence" {
     try testing.expectEqual(@as(u12, 80), jit_executed_flag_off);
 }
 
-test "JitRuntime: total size = 432 bytes (post-10.E-payload-prop Cycle 2 ADR-0120)" {
+test "JitRuntime: total size = 448 bytes (post-10.G gc_heap/gc_type_infos_ptr tail)" {
     // Phase 10.E IT-6 cycle 3c — EH dispatcher fields appended
     // (+32 bytes = 2 ptrs × 8 B + 2 u32 × 4 B + 2 u32 pads × 4 B).
     // Phase 10.E IT-6 cycle 3c-iii adds the handler-dispatch
@@ -665,7 +712,45 @@ test "JitRuntime: total size = 432 bytes (post-10.E-payload-prop Cycle 2 ADR-012
     // + 3 usize for SP, PC, FP).
     // Phase 10.E-payload-prop Cycle 2 (ADR-0120) adds payload
     // staging (+136 bytes = 16 × 8 B buf + u32 len + u32 pad).
-    try testing.expectEqual(@as(u32, 432), head_size);
+    // 10.G GC-on-JIT (ADR-0128 §2) appends gc_heap + gc_type_infos_ptr
+    // (+16 bytes = 2 × 8 B opaque pointers) → 432 + 16 = 448.
+    try testing.expectEqual(@as(u32, 448), head_size);
+}
+
+test "jitGcAlloc: allocates struct{i32} via the *JitRuntime bridge (10.G A-2a)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const sections = @import("../../../parse/sections.zig");
+    // 1 type: struct { i32 mut } → body `01 5F 01 7F 01`.
+    const body = [_]u8{ 0x01, 0x5F, 0x01, 0x7F, 0x01 };
+    var types = try sections.decodeTypes(testing.allocator, &body);
+    defer types.deinit();
+    var gti = try gc_type_info.materialiseGcTypes(a, types);
+    var heap = heap_mod.Heap.init(a);
+
+    var rt: JitRuntime = std.mem.zeroes(JitRuntime);
+    rt.gc_heap = &heap;
+    rt.gc_type_infos_ptr = &gti;
+
+    const ref = jitGcAlloc(&rt, 0);
+    try testing.expect(ref >= 2); // non-null GcRef
+    const ObjectHeader = gc_type_info.ObjectHeader;
+    const hsz = @sizeOf(ObjectHeader);
+    var hdr: ObjectHeader = undefined;
+    @memcpy(std.mem.asBytes(&hdr)[0..hsz], heap.bytes[ref .. ref + hsz]);
+    try testing.expectEqual(gc_type_info.ObjectKind.struct_, hdr.kind);
+    try testing.expectEqual(@as(u32, 0), hdr.info);
+    // payload (1 i32 field, 8-byte slot) is zero-inited by the trampoline.
+    var payload: u64 = undefined;
+    @memcpy(std.mem.asBytes(&payload), heap.bytes[ref + hsz .. ref + hsz + 8]);
+    try testing.expectEqual(@as(u64, 0), payload);
+}
+
+test "jitGcAlloc: null gc_heap → returns 0 (null sentinel)" {
+    var rt: JitRuntime = std.mem.zeroes(JitRuntime);
+    // gc_heap left null → trampoline returns the null sentinel.
+    try testing.expectEqual(@as(u32, 0), jitGcAlloc(&rt, 0));
 }
 
 test "JitRuntime: eh_payload_buf + eh_payload_len offsets (ADR-0120 Cycle 2)" {
