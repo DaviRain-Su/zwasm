@@ -5,29 +5,45 @@
 
 ## Current state
 
-- **Phase**: **10 IN-PROGRESS — CLOSE-ELIGIBLE** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `3933c9a7` (cyc233). **EH×TC integration fixture LANDED** —
-  `return_call` inside `try_table` (ROADMAP `return_call_in_try_table`). Two
-  `runI32Export` assertions: tail-callee throw ESCAPES the caller's `catch_all`
-  (frame consumed → trap), non-throwing tail-call → 77. Mac arm64 green; correct
-  by construction (static per-PC exception table + FP-chain walk skips the
-  consumed frame), no emit change needed.
-- **Prior (cyc232, `7131d711`)**: D-206 cross-module `return_call` via
-  call-and-return through the ADR-0066 bridge thunk (NOT the frame-consuming
-  BR/JMP of ADR-0112 D4 — arm64 MOV-installs the X19/X24-X28 cohort, so a tail
-  -jump corrupts a same-module grand-caller; thunk preserves it). Bundle CLOSED;
-  ubuntu-verified `OK (HEAD=bc47d75e)`. Proper-tail-call cross-module → D-210.
+- **Phase**: **10 IN-PROGRESS — autonomous CORRECTNESS substantially COMPLETE**
+  (Phase 9 = DONE 2026-05-24). All 4 proposals verified green except deep/deferred
+  residuals (see Active bundle + §10 map).
+- **HEAD**: `05266c03` (cyc235, docs-only debt-sweep). Session landed: cyc232
+  cross-module `return_call` (call-and-return via ADR-0066 thunk; cohort-asymmetry
+  → D-210); cyc233 EH×TC `return_call_in_try_table` (both ubuntu-verified);
+  cyc234-235 Phase-10 survey + stale-debt correction (D-195 discharged, ADRs
+  0115/0116/0123/0126 all Accepted, function-references + gc corpora GREEN).
 - **10.P: 16 PASS / 8 SKIP / 0 FAIL → close-eligible.**
-- **nix**: installed + dev shell active (zig 0.16.0 / wabt / wasmtime via nix
-  store; `wat2wasm --enable-tail-call --enable-exceptions` mints the test bytes).
+- **nix**: dev shell active (zig 0.16.0 / wabt / wasmtime; `wat2wasm
+  --enable-tail-call --enable-exceptions`).
 
-## Step 0.7 (next resume — DO FIRST)
+## Step 0.7 (next resume)
 
-- cyc233 (`3933c9a7`) is a test that exercises the JIT runtime (return_call ×
-  try_table) → ubuntu kicked this turn. Next resume: `tail -3 /tmp/ubuntu.log`,
-  expect `OK (HEAD=3933c9a7)` — verifies the EH×TC interaction on x86_64 (Mac
-  only ran arm64). On FAIL: revert `3933c9a7`; last ubuntu-green = `7131d711`
-  (via bc47d75e).
+- cyc235 (`05266c03`) is docs-only (debt-sweep + lesson) → **no ubuntu kick**
+  (non-code-gap). Last ubuntu-green code = `3933c9a7` (EH×TC) via caf7305b
+  `OK (HEAD=caf7305b)`. No pending gate, no revert.
+
+## Active bundle
+
+- **Bundle-ID**: D-202-xmodule-finality
+- **Cycles-remaining**: ~2-3 (deep GC type-system + linker; start fresh-context)
+- **Continuity-memo**: `.30/.48/.50` instantiate `SignatureMismatch` comes from
+  **`src/zwasm/linker.zig:434-458`** (C-API Linker func-sig compare, EXACT typeidx)
+  — NOT `instantiate.zig:1654` (cyc192 `6a77cb19` fixed THAT path with
+  `validator.funcTypeImportCompatible`, but the spec runner's cross-module
+  linking routes through the C-API Linker, which still does exact compare). So
+  cyc192's "SignatureMismatch 3→0" claim was path-incomplete. Fix = mirror
+  funcTypeImportCompatible (contravariant params / covariant results, subtype)
+  in linker.zig using exporter types reachable via `source_rt`
+  (`Runtime.module_types` + `gc_type_infos.canonical_ids`). **Signal question
+  (resolve FIRST)**: is the `.35/.36/.42/.52/.54` `assert_unlinkable` direction
+  RUN+counted or skip-impl? (debt says "cyc193 implements assert_unlinkable to
+  verify+count" — may still be skip → no RED until counted.) The gc gate is
+  already GREEN (fails are only `.17`), so first establish the observable signal
+  (a 2-module link test, or assert_unlinkable counting) before the fix.
+- **Exit-condition**: `.30/.48/.50` cross-module subtype imports link (SignatureMismatch
+  gone) verified by a test; if assert_unlinkable is counted, `.35` correctly
+  rejected. Both arches, ubuntu-verified.
 
 ## Active task — D-202 cross-module type-identity (finality) check  **NEXT**
 
@@ -51,27 +67,11 @@ prose):
 So Phase 10 is NOT at a bucket-3 user-touchpoint — **D-202 is genuine open
 AUTONOMOUS correctness work** (ADRs accepted; impl-only).
 
-Next driving chunk = **D-202**: implement cross-module structural type-identity
-(finality + declared-supertype + canonical) comparison in
-`instantiate.zig::checkImportTypeMatches` (`.cross_module` arm) +
-`validator.zig::funcTypeImportCompatible`. The exporter types are reachable via
-`source_rt` (`Runtime.module_types` + `gc_type_infos.canonical_ids`) but the
-rec-group structure for cross-`Types` `canonicalEqual` is not threaded into the
-`cross_module` binding. **FIRST verify the discrepancy**: D-198 cyc192
-(`6a77cb19`) claimed `.30/.48/.50` SignatureMismatch 3→0, but the current ubuntu
-log shows them FAILing again — confirm whether cyc192 regressed or the fix was
-partial, via the spec runner per-module emit. Then thread exporter type info +
-the structural compare (monotonic-safe: eql-first, subtype/identity-fallback).
-Step 0 survey: `instantiate.zig::checkImportTypeMatches` + `validator.zig::funcTypeImportCompatible`
-+ how `source_rt` exposes exporter `Types`. May be multi-cycle → open a bundle.
-Discharge D-195 (stale) + reconcile D-198 in the same or next chunk.
-NOTE smell: `runner.zig` 1168 lines (soft WARN) — future test sibling extraction.
-**User touchpoint (HIGH-VALUE, held)**: Phase 10 is close-eligible (10.P 0 FAIL,
-TC+EH done). The two highest-value next moves are USER-GATED: (1) formal Phase 10
-close → Phase 11, (2) GC (10.G) ADR-0123 / ADR-0126 `Proposed → Accepted` flips
-(D-195 typed-ref parser, D-198 iso-recursive subtype) which unblock the bulk of the
-remaining GC corpus. Loop continues autonomously on c_api meanwhile; re-armable to
-either user-gated path at any signal.
+Resume Step 1b routes to the Active bundle above for the next step + discharge
+D-195 (stale) / reconcile D-198 alongside. NOTE smell: `runner.zig` 1168 lines
+(soft WARN) — future test sibling extraction.
+**Formal Phase 10 close** (→ Phase 11) is a separate high-value user decision
+(close-eligible, 0 FAIL); re-armable at any user signal. NOT a blocker on D-202.
 
 ## §10 close map + open
 
