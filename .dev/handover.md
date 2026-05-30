@@ -6,10 +6,13 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS — CLOSE-ELIGIBLE** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `<cyc218>`. **5 cross-feature fixtures** in `test/edge_cases/p10/cross/`:
-  call_ref/return_call/EH × memory64, EH × call_ref, + cyc218 `multivalue_call_ref`→42
-  (multi-value × call_ref — multi-result capture through the funcref JIT path, an untested
-  interaction). All green on Mac; the 4 prior were ubuntu-verified (cyc216 `OK bb2a3471`).
+- **HEAD**: `e1b1c7cc` (cyc219). **6 cross-feature fixtures** in `test/edge_cases/p10/cross/`:
+  call_ref/return_call/EH × memory64, EH × call_ref, multivalue × call_ref, + cyc219
+  `call_indirect_memory64`→42 (table-dispatch × memory64). The first 5 are ubuntu-verified
+  (cyc218 `OK d30e00a0`); cyc219's is Mac-green, ubuntu pending. **Cross-fixture vein is now
+  essentially exhausted** — these are coverage LOCKS (all pass); they don't find bugs the way
+  the realworld clang_wasm64 fixture found D-209 (real wide-LEB output). Remaining clean
+  combos hit GC-JIT / multi-memory-JIT gaps.
 - **D-206 surveyed → re-scoped + DEFERRED** (cyc218). The bundle was opened on a mis-estimate:
   the survey found the CURRENT cross-module call dispatch is INTERP-routed
   (`host_dispatch_base[i]` → `api/cross_module.zig:thunk` → `interp_mvp.invoke`; the
@@ -22,23 +25,27 @@
 - D-208 (cyc213) + D-209 (cyc214) fixed + ubuntu-verified. **10.P: 16 PASS / 8 SKIP / 0 FAIL**
   → close-eligible. All remaining SKIPs are deferred-to-close-cycle (I5/I11/I16/I20/I23),
   tool-gated (I21), or Phase-13 (I14). No autonomous SKIP-flip remains.
-- **Step 0.7 on resume**: cyc218 added 1 fixture (multivalue_call_ref) → ubuntu kicked on
-  the new HEAD. VERIFY (`tail /tmp/ubuntu.log`): the 5 cross fixtures pass on x86_64
-  (FAIL ⟹ a multi-result-via-call_ref x86_64 bug; fixture-only, low-risk revert).
+- **Step 0.7 on resume**: cyc219 added 1 fixture (call_indirect_memory64) → ubuntu kicked on
+  `e1b1c7cc`. VERIFY (`tail /tmp/ubuntu.log`): the 6 cross fixtures pass on x86_64
+  (FAIL ⟹ a call_indirect×memory64 x86_64 bug; fixture-only, low-risk revert).
 
-## Active task — call_indirect × memory64 cross fixture  **NEXT**
+## Active task — SIMD × call_ref cross fixture (last distinct combo)  **NEXT**
 
-Continue cross-feature coverage (tractable, bug-finding-capable, close-prep). Next distinct
-untested interaction: **call_indirect × memory64** — a `(table funcref)` + `call_indirect`
-to a function that addresses `(memory i64 1)` (table-dispatch × memory64, distinct from the
-call_ref combos). Mirror the cross/ `.wat`/`.wasm`/`.expect` convention (`runI32Export` JIT;
-`wasm-tools parse`). Smallest red: the fixture, run → expected i32.
-**User touchpoint (held)**: the high-value autonomous close-prep is now essentially DONE
-(D-208/D-209 JIT fixes, 5 cross fixtures, caching fix, I14/D-206 scope findings). Phase 10
-is close-eligible (10.P 0 FAIL); the formal close (→ Phase 11) vs grinding the deep
-not-close-required work (D-206 native bridge ≈4-6 cyc; 10.G GC JIT extreme; D-198 RTT
-rabbit hole) is a high-value user check-in. NOT a stop — loop continues on tractable cross
-fixtures; re-arm holds.
+One more genuinely-distinct cross combo: **SIMD (v128) × call_ref** — a `call_ref` to a
+funcref returning a `v128`; the caller extracts a lane → i32. Exercises the v128-result
+capture path through the funcref JIT emit (more complex marshal than i32; previously
+untested via call_ref). Mirror cross/ convention (`runI32Export` JIT; `wasm-tools parse`).
+Smallest red: the fixture, run → expected i32. **After this, the cross-fixture vein IS
+exhausted** — the loop must then shift (see below).
+**User touchpoint (held, escalating)**: the high-value autonomous close-prep is DONE
+(D-208/D-209 JIT fixes, 6→7 cross fixtures, caching fix, I14/D-206 scope findings). Phase 10
+is close-eligible (10.P 0 FAIL). After SIMD×call_ref, the ONLY remaining autonomous work is
+DEEP + not-close-required (D-206 native cross-module bridge ≈4-6 cyc; 10.G GC JIT extreme,
+ADR-0113 §C; D-198 funcref/GC-RTT rabbit hole). The formal Phase-10 close (→ Phase 11) is a
+user project-direction decision and is the genuinely highest-value next step. A user check-in
+on "close Phase 10 vs commit a multi-cycle session to D-206/GC-JIT" is high-value. NOT a stop
+— loop continues (next: bite into D-206 OR the realworld-harness result-check improvement,
+whichever the resume judges best); re-arm holds.
 
 ## §10 close map
 
