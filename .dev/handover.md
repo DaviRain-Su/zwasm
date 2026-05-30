@@ -35,15 +35,22 @@ finality bool → **D-202 debt row** (needs threading the exporter supertype cha
 a cross-`Types` `canonicalEqual`; more involved than the finality bool; fresh
 context). 
 
-**Honest state**: this very long session (cyc232-239) drove Phase 10's clean
+**cyc241**: drafted **ADR-0127** (Proposed) — the D-202 PHASE C design (cross-module
+func import type-identity: structural subtyping AND `canonicalEqual`-cross-`Types`
+OR supertype-reach; no-regression set = multi-mem 407 + EH 34 + `.30/.48/.50`). The
+design is now nailed; impl is de-risked.
+
+**Honest state**: this very long session (cyc232-241) drove Phase 10's clean
 autonomous correctness to substantial completion (cross-module TC, EH×TC,
-stale-debt correction, D-202 PHASE A + B-finality). The remaining AUTONOMOUS items
-are all fresh-context/dedicated-effort or low-value: D-202 PHASE C (supertype
-canonical, 4 fixtures); gc per-op-file migration (behavior-preserving refactor);
-gc_stress / eh_frequency runner (involved/perf). The HIGH-VALUE move — formal
-Phase 10 close (→ Phase 11; close-eligible, 0 FAIL) — is USER-GATED. Next driving
-chunk = **D-202 PHASE C** when context is fresh; else gc per-op migration.
-Re-armable to the Phase-10 close at any user signal.
+stale-debt correction, D-202 PHASE A + B-finality, PHASE C ADR). The remaining
+AUTONOMOUS items are all fresh-context/dedicated-effort or low-value: **D-202 PHASE
+C impl** (per ADR-0127 — cross-`Types` canonicalEqual extension + exporter
+supertype threading; regression-risky → best fresh context, or after user-Accepts
+ADR-0127); gc per-op-file migration (refactor); gc_stress / eh_frequency runner
+(involved/perf). The HIGH-VALUE move — formal Phase 10 close (→ Phase 11;
+close-eligible, 0 FAIL) — is USER-GATED. Next driving chunk = **D-202 PHASE C impl
+per ADR-0127** when context is fresh; else gc per-op migration. Re-armable to the
+Phase-10 close at any user signal.
 
 (Prior context — cyc234-235 stale-debt correction, retained for the lesson):
 **the debt ledger was STALE and mis-routed the loop 3×.** Ground-truth (ADR Status
