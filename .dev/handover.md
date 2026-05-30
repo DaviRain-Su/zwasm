@@ -27,30 +27,43 @@
   stack — confirms the unlock handles real rustc algorithmic codegen; `9e4d0cfe`). realworld/p10
   = 6 fixtures, all green. **Stale-exe pitfall** recurs: isolated `find`-by-grep can grab a
   pre-fix exe → use `zig build` EXIT + the exe passing `data_sum=31`.
-- cyc226-227: clang `-O0` `arr_sum`=39 (int) + `fp_sum`=77 (f64 load/add/mul + trunc) →
-  validate the cyc224 shadow-stack unlock for clang (int + FP); lesson "-O0 traps" lifted
-  (`0e78ecf8`,`59e67cf0`). **realworld/p10 = 8 fixtures, all green — the real-toolchain matrix
-  is COMPLETE** (rust loop/recursion/data/sort + clang musttail/wasm64/-O0-int/-O0-fp).
-- **Step 0.7 on resume**: cyc227 added clang_O0_fp_sum (`59e67cf0`) → ubuntu kicked. VERIFY
-  (`tail /tmp/ubuntu.log`): 8 realworld/p10 pass on x86_64.
+- cyc226-227: clang `-O0` `arr_sum`=39 + `fp_sum`=77 → realworld/p10 = 8 fixtures, all green
+  (real-toolchain matrix COMPLETE: rust loop/recursion/data/sort + clang musttail/wasm64/-O0-int/-O0-fp).
+- cyc228: **pre-close audit** (`72cd2c05`) — scaffolding coherent (lessons INDEX'd, D-207/8
+  deleted cleanly, doc cross-refs resolve, SHAs valid); 10.P re-run = 16 PASS / 8 SKIP / 0 FAIL
+  (close-eligible holds); deleted discharged D-205. Tractable autonomous veins now EXHAUSTED.
+- **Step 0.7 on resume**: cyc227 clang_O0_fp_sum (`0aad48c6`) ubuntu kick was in-flight; cyc228
+  is docs/debt-only (no kick). VERIFY (`tail /tmp/ubuntu.log`): `OK (HEAD=0aad48c6)` (8
+  realworld/p10 pass on x86_64). The next CODE chunk (D-206) kicks ubuntu.
 
-## Active task — pre-close scaffolding audit (targeted)  **NEXT**
+## Active bundle
 
-The tractable fixture veins (cross, realworld) are now EXHAUSTED (matrix complete; 2 real
-finds: D-209 LEB + the global-init/shadow-stack harness bug). Before the Phase-10 close,
-exhaust the remaining cheap autonomous lever: a **targeted coherence audit** of what this
-14-cycle session churned — `.dev/handover.md` (stale SHA/refs), `.dev/debt.md` (D-206/D-209
-rows accurate? any discharged-but-listed?), `.dev/lessons/INDEX.md` (new lessons rowed?),
-the new `flake.nix devShells.gen` + `.dev/toolchain_provisioning.md` + CLAUDE.md pointer
-(consistent?), and `scripts/check_phase10_close_invariants.sh` (re-run; confirm 0 FAIL holds).
-Fix local findings inline; block findings → debt/ADR. This surfaces issues BEFORE the close.
-**User touchpoint (PROMINENT — decision point)**: Phase 10 close-eligible (10.P 0 FAIL). The
-high-value autonomous work is DONE (JIT bug fixes D-208/D-209, the user-directed gen-shell +
-shadow-stack unlock, the realworld matrix, 2 caching-coverage fixes). After this audit, the
-ONLY remaining work is DEEP + not-close-required (D-206 ≈4-6 cyc; 10.G GC JIT extreme) OR
-Phase-11-scoped (10 SKIP-WASI) OR the **formal Phase-10 close (→ Phase 11) — a user
-project-direction decision and the genuinely highest-value next step.** A user check-in is
-high-value here. NOT a stop now (audit remains); re-arm holds.
+- **Bundle-ID**: D-206-cross-module-TC (re-opened cyc228 — engaged now that all tractable
+  prep is exhausted; the loop directs deep autonomous work).
+- **Cycles-remaining**: ~3 (measurable-step decomposition; architectural 3-cycle cap applies).
+- **Continuity-memo**: (1) a multi-module JIT test harness — GROUND-TRUTH the real cross-module
+  link API (read the spec runner `test/spec/spec_assert_runner_base.zig` multi-module register/
+  link path — NOT the cyc218 survey's confabulated `linkFunctionImport` name), write a 2-module
+  test where module A JIT-calls a B-imported func (baseline; the existing cross-module dispatch
+  is interp-routed via `host_dispatch_base`→`api/cross_module.zig:thunk`); (2) cross-module
+  `return_call` native inline-bridge emit per ADR-0112 D4 (arm64 then x86_64) — the FIRST native
+  JIT→JIT cross-module path. Current block: `op_tail_call.emitDirectReturnCall` rejects
+  `ins.payload < num_imports`.
+- **Exit-condition**: a 2-module fixture where module A's exported `test` does `return_call` to
+  a B-imported func, JIT-executed → expected i32, both arches, ubuntu-verified.
+
+## Active task — D-206 step 1: ground-truth cross-module link + multi-module JIT harness  **NEXT**
+
+Step 0: read the spec runner's ACTUAL multi-module link code (`spec_assert_runner_base.zig`
+RegisteredExporter + the `(register)` directive handler) + `src/zwasm/linker.zig` to find the
+real cross-module func-import wiring (the cyc218 survey confabulated names). Step 1: add a
+`runI32ExportTwoModule`-style helper (test file, zone-exempt) that instantiates B, links A's
+import to B's export, JIT-runs A's `test` → i32. Smallest red: A does a normal `call $imported`
+→ B returns a const → verify the cross-module call works through the harness (baseline before
+the return_call bridge). NOT close-required (interp covers it); completes the tail-call JIT arc.
+**User touchpoint (held)**: Phase 10 close-eligible (10.P 0 FAIL). Formal close (→ Phase 11)
+remains a high-value user decision; D-206 is the loop's autonomous continuation, re-armable to
+the close at any user signal. Re-arm holds.
 **User touchpoint (held, prominent)**: Phase 10 close-eligible (10.P 0 FAIL). The real-toolchain
 fixture vein is now PRODUCTIVE again (shadow-stack unlocked → real code finds real bugs, e.g.
 cyc224). Deep not-close-required work (D-206 ≈4-6 cyc; 10.G GC JIT extreme) + the 10 SKIP-WASI
