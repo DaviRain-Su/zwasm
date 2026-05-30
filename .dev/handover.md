@@ -5,78 +5,70 @@
 
 ## Current state
 
-- **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `c55aaa12` (cyc213). **D-208 ROOT-CAUSED + FIXED**: `call_ref` /
-  `return_call_ref` were missing from `x86_64/usage.zig::usesRuntimePtr`, so the
-  prologue skipped `MOV R15,RDI` → the null-check trap stub wrote trap_flag via a
-  garbage R15 → a NULL funcref returned Ok(0) on x86_64 instead of trapping (Mac
-  arm64 immune — X19 always set). D-180-class gap (twin of the `ref.as_non_null`
-  / EH cases). Fix: whitelist both ops; ungate the 2 null-trap tests; close the
-  `check_uses_runtime_ptr.sh` thin-delegator blind spot that hid it (per-op files
-  delegate into op_call/op_tail_call where the R15 use lives). D-207 + D-208
-  discharged (rows deleted). The decisive probe was a Mac byte-dump (ndisasm): it
-  showed correct JZ→trap-stub bytes referencing R15 with NO `MOV R15,RDI` prologue.
-- funcref-call + tail-call JIT now COMPLETE both arches (positive + null-trap),
-  pending ubuntu confirm of the x86_64 null-trap (see Step 0.7).
-- Earlier: 10.TC same-module tail-call (direct/indirect/recursion + clang musttail
-  → 15); EH corpus 34/34 (ADR-0114); cyc190-196 gc global-init/subtyping. Phase 10
-  CLOSE-ELIGIBLE (spec corpus interp-complete). 10.M memory64 + 10.E EH JIT largely
-  done; 10.G GC JIT = interp-only (extreme: regalloc stack-map, ADR-0113 §C).
-- **Step 0.7 on resume**: cyc213 is a CODE change → ubuntu kicked. **VERIFY the
-  c55aaa12 ubuntu result** (`tail -3 /tmp/ubuntu.log`): the 2 ungated null-trap
-  tests (call_ref/return_call_ref null → Trap) must PASS on x86_64. FAIL ⟹ the
-  usesRuntimePtr fix didn't take → revert pair + re-investigate (root cause is
-  textbook D-180-class; high confidence). Prior green: cyc209 `OK (HEAD=9dbc84ee)`.
+- **Phase**: **10 IN-PROGRESS — now CLOSE-ELIGIBLE** (Phase 9 = DONE 2026-05-24).
+- **HEAD**: `9d493959` (cyc214). **D-209 FIXED**: realworld memory64 memarg-offset
+  gap — clang `--target=wasm64`/lld emit the memarg `offset` as a width-padded
+  (9-byte) LEB128, valid for a u64 (memory64) offset but the validator + lowerer
+  decoded it at u32 width → `Error.Overlong`. Fix: validator `skipMemargOffset`
+  (u64 width for memory64, keyed on `memory0_idx_type`); lowerer `readMemargOffset`
+  (decode u64, range-check ≤ u32 for the payload slot) at both scalar + SIMD-lane
+  sites. New realworld fixture `clang_wasm64/wasm64_load_store` (`(memory i64 2)` +
+  i64-addressed store/load → 42) is a committed .wasm (runs without clang). Residual
+  (> 4 GiB offset, payload-u32) → D-209 blocked-by. clang_musttail still 15 (no regression).
+- **D-208 VERIFIED green on ubuntu** this cycle (Step 0.7: `OK (HEAD=733a0a98)`) — the
+  x86_64 funcref-null-trap fix (usesRuntimePtr) holds. funcref-call + tail-call JIT
+  matrix complete + verified both arches.
+- **10.P close-invariants: 16 PASS / 8 SKIP / 0 FAIL** (`check_phase10_close_invariants.sh`
+  → "close-eligible"). D-208 was the only FAIL. The 8 SKIPs are deferred-to-close-cycle
+  (I3 cross fixtures unpopulated; I5/I11/I14/I16/I20/I23 deferred; I21 realworld tool-gated).
+- **Step 0.7 on resume**: cyc214 is a CODE change (validate+lower) → ubuntu kicked on
+  `9d493959`. VERIFY (`tail -3 /tmp/ubuntu.log`): the clang_wasm64 fixture + memory64
+  corpus pass on x86_64. FAIL ⟹ revert pair (the offset-width change is the suspect).
 
-## Active task — realworld/p10 clang_wasm64 fixture  **NEXT**
+## Active task — I3: populate test/edge_cases/p10/cross/ (cross-feature fixtures)  **NEXT**
 
-D-208 (the 10.P I18 close-blocker) is resolved. Next autonomous chunk per the §10
-close map: add the `clang_wasm64` realworld fixture (memory64 via clang, result-
-checked through the cyc201 realworld-p10 harness, `build.zig run_edge_realworld_p10`).
-clang is available (clang_musttail proved the recipe; lesson
-`2026-05-30-clang-wasm-realworld-toolchain-recipe`). Smallest red: a
-`clang --target=wasm64` module exercising a memory64 load/store, run → expected i64.
-Deferred: D-206 cross-module TC (needs a multi-module JIT test harness — actionable
-but harness-build first); 10.G GC JIT (extreme).
+Phase-10-close-prep, autonomous. The `test/edge_cases/p10/cross/` dir is empty (10.P I3
+SKIP). Add cross-feature boundary fixtures that stress two Wasm-3.0 proposals interacting
+(e.g. `call_ref` to a memory64 function; a `return_call` whose callee does a memory64
+load; an EH handler that does a `call_ref`). Mirror the edge-runner `.wat`/`.wasm`/`.expect`
+convention (runs via `runI32Export` JIT; `test/edge_cases/runner.zig`). Smallest red: one
+fixture combining tail-call + memory64, run → expected i32. These can surface interaction
+bugs the way clang_wasm64 surfaced D-209. Deferred: D-206 cross-module TC (multi-module
+JIT harness — actionable but harness-build first); 10.G GC JIT (extreme).
 
 ## §10 close map
 
-Spec-corpus rows (10.G/10.M/10.E/10.TC/10.R) are mature but ROADMAP-`[ ]`;
-formal close needs realworld/p10 + 10.P. Residual:
-- **realworld/p10**: clang_musttail DONE (cyc201, JIT result-checked); clang_wasm64
-  next-AUTONOMOUS (clang✓, the Active task); emscripten/dart/ocaml/hoot TOOL-GATED.
-- **gc .17** funcref-RTT (D-198 multi-mechanism rabbit hole) — deep defer.
-- **funcrefs** 34/39 — 5 gated; **10.P close gate** = user touchpoint. With D-208
-  (the last close-blocker) cleared, 10.P I18 should now pass.
+Spec-corpus rows (10.G/10.M/10.E/10.TC/10.R) mature; 10.P now close-eligible (0 FAIL).
+- **realworld/p10**: clang_musttail DONE (cyc201) + clang_wasm64 DONE (cyc214, JIT
+  result-checked). emscripten/dart/ocaml/hoot TOOL-GATED (no toolchain).
+- **gc .17** funcref-RTT (D-198) — deep defer. **funcrefs** 34/39 — 5 gated.
+- **10.P close = user touchpoint** (see Open questions).
 
 ## Spec runner observable (cyc190, DIRECT binary run)
 
 ```
 [memory64           ] return=337 (all pass)    [tail-call] return=71 (all pass)
 [exception-handling ] 34/34 ✅ FULLY GREEN     [function-references] return=34/39
-[gc                 ] return=349/407 trap=96/100 invalid=60/60 ✅ malformed=1/1 skip=20  ← cyc190 invalid-axis closed
-[multi-memory       ] return=407/407 trap=244/244  ← cyc188 ALL-GREEN (D-199/200/201 cross-module chain)
+[gc                 ] return=349/407 trap=96/100 invalid=60/60 ✅ malformed=1/1 skip=20
+[multi-memory       ] return=407/407 trap=244/244  ← cyc188 ALL-GREEN
 ```
-> gc residual: return=1 + trap=4 = type-subtyping.30/.48/.50 (the bundle).
-> Use `--fail-detail` (reliable per-assert), NOT the per-manifest breakdown.
+> gc residual: return=1 + trap=4 = type-subtyping.30/.48/.50. Use `--fail-detail`.
 
 ## Open questions / blockers
 
-- D-197: parse/validate/instantiate split DONE cyc127. Specific
-  validate-error surfacing is ad-hoc via the cyc143 op-probe (lesson
-  `gc-type-subtyping-is-rtt-blocked`); permanent diag emitter = D-197 tail.
-- D-192: EH clause PROVEN (EH 34/34). funcrefs clause proven cyc108.
-- **User touchpoint (2026-05-30)**: funcref-call + tail-call JIT is fully
-  DELIVERED both arches (D-205/207/208 all discharged; positive + null-trap).
-  **Phase 10 close is a user touchpoint** (§10 close map); with the last
-  close-blocker (D-208) cleared, a user check-in on "formally close Phase 10
-  vs keep grinding realworld/GC JIT" is high-value before the next big chunk.
-  NOT a stop — loop continues on clang_wasm64; re-arm holds.
+- D-197: validate-error surfacing ad-hoc via cyc143 op-probe; permanent diag = D-197 tail.
+- D-206: cross-module tail-call JIT (multi-module harness-gated). D-209: > 4 GiB memory64
+  offset (payload u32) deferred.
+- **User touchpoint (2026-05-30)**: **Phase 10 is NOW close-eligible (10.P 0 FAIL)** — the
+  last close-blocker (D-208) + the realworld memory64 gap (D-209) are cleared. The funcref/
+  tail-call JIT matrix + memory64 realworld are DONE both arches. A user check-in on
+  **formally closing Phase 10 (→ Phase 11) vs continuing JIT-completeness** (D-206
+  cross-module TC, 10.G GC JIT — both NOT close-required; interp covers the corpus) is
+  high-value here. NOT a stop — loop continues autonomously on I3 (close-prep); re-arm holds.
 
 ## Key refs
 
-- ADR-0114 (EH `*TagInstance`, IMPLEMENTED cyc110–120); ADR-0115/0116/
-  0121 (GC heap + type-info); ADR-0120/0123.
-- `.dev/lessons/2026-05-30-jit-funcref-tail-call-codegen-recipe.md` (D-208
-  resolution + usesRuntimePtr gotcha) + `2026-05-28-x86_64-uses-runtime-ptr-eh-gap.md`.
-- ROADMAP §10; `.dev/phase_log/phase10.md`.
+- ADR-0111 (memory64 D4/D5); ADR-0114 (EH); ADR-0115/0116/0121 (GC); ADR-0112 (tail-call).
+- `.dev/lessons/2026-05-30-jit-funcref-tail-call-codegen-recipe.md` (D-208) +
+  `2026-05-30-clang-wasm-realworld-toolchain-recipe.md` (clang musttail + wasm64).
+- ROADMAP §10; `.dev/phase_log/phase10.md`; `scripts/check_phase10_close_invariants.sh`.
