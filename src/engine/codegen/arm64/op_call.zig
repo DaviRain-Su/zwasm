@@ -122,24 +122,8 @@ pub fn emitCall(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         // first arg (the host fn signature is
         // `fn(rt: *JitRuntime, ...wasm_args) callconv(.c)`).
         //
-        //   LDR X16, [X19, #host_dispatch_base_off]    ; ptr-of-ptrs
-        //   LDR X16, [X16, #(idx*8)]                    ; actual fn ptr
-        //   ORR X0, XZR, X19                            ; restore rt_ptr
-        //   BLR X16
-        //
-        // imm12 budget for the per-idx LDR scales by 8, so idx must
-        // satisfy `idx * 8 <= 32760` ⇒ `idx <= 4095`. Realistic
-        // import counts stay well under this; surface as
-        // UnsupportedOp otherwise.
-        const idx_byte_off_u: u64 = @as(u64, ins.payload) * 8;
-        if (idx_byte_off_u > 32760) return Error.UnsupportedOp;
-        const idx_byte_off: u15 = @intCast(idx_byte_off_u);
-
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(16, abi.runtime_ptr_save_gpr, jit_abi.host_dispatch_base_off));
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(16, 16, idx_byte_off));
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(0, 31, abi.runtime_ptr_save_gpr));
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBLR(16));
-
+        //   (see emitImportDispatch for the 4-instr sequence)
+        try emitImportDispatch(ctx, @intCast(ins.payload));
         try captureCallResult(ctx, callee_sig, memory_class_return, return_buffer_off);
         return;
     }
@@ -159,6 +143,34 @@ pub fn emitCall(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     });
 
     try captureCallResult(ctx, callee_sig, memory_class_return, return_buffer_off);
+}
+
+/// Emit the host-import indirect dispatch (ADR-0066 §9.9-III chunk
+/// 7.9-d): load the resolved slot from
+/// `JitRuntime.host_dispatch_base[import_idx]`, restore X0 =
+/// runtime_ptr (the host stub / bridge thunk's hidden first arg),
+/// then `BLR X16`:
+///
+///   LDR X16, [X19, #host_dispatch_base_off]   ; ptr-of-ptrs
+///   LDR X16, [X16, #(idx*8)]                   ; actual fn / thunk ptr
+///   ORR X0, XZR, X19                           ; restore rt_ptr
+///   BLR X16
+///
+/// Args MUST already be marshalled into X1..X7 / V0..V7; the result
+/// lands in the AAPCS64 return register(s) per the callee sig. Shared
+/// by `emitCall`'s import branch and
+/// `op_tail_call.emitCrossModuleReturnCall` (the cross-module
+/// `return_call` call-and-return path, ADR-0112 Amendment 2026-05-30).
+/// `idx * 8` must fit the LDR imm12 budget (≤ 32760) — UnsupportedOp
+/// otherwise (realistic import counts stay well under).
+pub fn emitImportDispatch(ctx: *EmitCtx, import_idx: u32) Error!void {
+    const idx_byte_off_u: u64 = @as(u64, import_idx) * 8;
+    if (idx_byte_off_u > 32760) return Error.UnsupportedOp;
+    const idx_byte_off: u15 = @intCast(idx_byte_off_u);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(16, abi.runtime_ptr_save_gpr, jit_abi.host_dispatch_base_off));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(16, 16, idx_byte_off));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(0, 31, abi.runtime_ptr_save_gpr));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBLR(16));
 }
 
 /// Indirect call: `call_indirect type_idx tableidx`. Pops the

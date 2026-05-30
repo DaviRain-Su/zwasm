@@ -132,15 +132,18 @@ pub fn emitDirectTailJump(
 /// Cross-module / indirect / ref tail-calls (which can't reach
 /// via rel32) take the JMP R11 path through follow-on chunks.
 ///
-/// Import-as-callee is rejected (UnsupportedOp): a host import
-/// doesn't follow v2's prologue convention and must route through
-/// the cross-module bridge thunk (10.TC-3f follow-on).
+/// Import-as-callee (`ins.payload < num_imports`) routes to
+/// `emitCrossModuleReturnCall` — the cross-module call-and-return
+/// lowering through the ADR-0066 bridge thunk (ADR-0112 Amendment
+/// 2026-05-30). x86_64's per-frame R15 save would actually permit a
+/// frame-consuming JMP here, but both arches stay on call-and-return
+/// so cross-module tail-recursion depth doesn't diverge by host.
 pub fn emitDirectReturnCall(
     ctx: *ctx_mod.EmitCtx,
     ins: *const zir.ZirInstr,
 ) ctx_mod.Error!void {
     if (ins.payload >= ctx.func_sigs.len) return ctx_mod.Error.AllocationMissing;
-    if (ins.payload < ctx.num_imports) return ctx_mod.Error.UnsupportedOp;
+    if (ins.payload < ctx.num_imports) return emitCrossModuleReturnCall(ctx, ins);
     const callee_sig: zir.FuncType = ctx.func_sigs[ins.payload];
 
     try op_call.marshalCallArgs(
@@ -157,6 +160,48 @@ pub fn emitDirectReturnCall(
         .uses_runtime_ptr = ctx.uses_runtime_ptr,
     });
     try emitDirectTailJump(ctx.allocator, ctx.buf, ctx.call_fixups, @intCast(ins.payload));
+}
+
+/// Cross-module `return_call $import` (ADR-0112 Amendment 2026-05-30,
+/// D-206 step 2). Lowered as **call-and-return** through the ADR-0066
+/// bridge thunk (planted in `host_dispatch_base[idx]`, which
+/// PUSH/POP-preserves the caller's R15 across its CALL) followed by
+/// the normal frame teardown + RET — i.e. the emit shape of
+/// `call $import` immediately followed by the function epilogue:
+///
+///   (1) marshal args → per-CC arg regs
+///   (2) emitImportDispatch — CALL the resolved thunk; the callee's
+///       result lands in RAX/XMM0 and the thunk restores R15
+///   (3) frame_teardown (ADD RSP + POP R15? + POP RBP) + RET
+///
+/// On x86_64 the per-frame R15 save (`uses_runtime_ptr`) makes a
+/// frame-consuming `JMP R11` cohort-safe too, but both arches stay
+/// on call-and-return so cross-module tail-recursion depth doesn't
+/// diverge observably by host (the arm64 prologue MOV-installs its
+/// cohort and cannot do frame-consuming cross-module tail-call until
+/// D-210). No `captureCallResult` runs: the result already sits in
+/// the return register the epilogue's RET hands back. ≤ 2 results
+/// only (MEMORY-class return buffer is a D-210 follow-on).
+fn emitCrossModuleReturnCall(
+    ctx: *ctx_mod.EmitCtx,
+    ins: *const zir.ZirInstr,
+) ctx_mod.Error!void {
+    const callee_sig: zir.FuncType = ctx.func_sigs[ins.payload];
+    if (callee_sig.results.len > 2) return ctx_mod.Error.UnsupportedOp; // D-210: MEMORY-class return buffer
+    try op_call.marshalCallArgs(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.spill_base_off,
+        callee_sig,
+    );
+    try op_call.emitImportDispatch(ctx.allocator, ctx.buf, ctx.outgoing_max_bytes, @intCast(ins.payload));
+    try frame_teardown.emit(ctx.allocator, ctx.buf, .{
+        .frame_bytes = ctx.frame_bytes,
+        .uses_runtime_ptr = ctx.uses_runtime_ptr,
+    });
+    try ctx.buf.appendSlice(ctx.allocator, inst.encRet().slice());
 }
 
 /// Wasm spec 3.0 §3.3.8.19 (tail-call proposal) —

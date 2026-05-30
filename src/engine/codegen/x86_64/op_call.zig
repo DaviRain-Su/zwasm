@@ -214,23 +214,8 @@ pub fn emitCall(
         // its hidden first arg (signature
         // `fn(rt: *JitRuntime, ...wasm_args) callconv(.c)`).
         //
-        //   MOV RAX, [R15 + host_dispatch_base_off]   ; ptr-of-ptrs
-        //   MOV RAX, [RAX + idx*8]                     ; actual fn ptr
-        //   MOV <entry_arg0>, R15                      ; restore rt_ptr
-        //   [Win64: SUB RSP, 32 — shadow space]
-        //   CALL RAX
-        //   [Win64: ADD RSP, 32]
-        const idx_byte_off_u: u64 = @as(u64, callee_idx) * 8;
-        if (idx_byte_off_u > 0x7FFF_FFFF) return Error.UnsupportedOp;
-        const idx_byte_off: i32 = @intCast(idx_byte_off_u);
-
-        try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.host_dispatch_base_off).slice());
-        try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .rax, idx_byte_off).slice());
-        try buf.appendSlice(allocator, inst.encMovRR(.q, abi.current.entry_arg0_gpr, abi.runtime_ptr_save_gpr).slice());
-        try emitShadowAlloc(allocator, buf, outgoing_max_bytes);
-        try buf.appendSlice(allocator, inst.encCallReg(.rax).slice());
-        try emitShadowFree(allocator, buf, outgoing_max_bytes);
-
+        //   (see emitImportDispatch for the sequence)
+        try emitImportDispatch(allocator, buf, outgoing_max_bytes, callee_idx);
         try captureCallResult(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, callee_sig, memory_class_return, return_buffer_off);
         return;
     }
@@ -274,6 +259,40 @@ pub fn emitCall(
     try emitShadowFree(allocator, buf, outgoing_max_bytes);
 
     try captureCallResult(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, callee_sig, memory_class_return, return_buffer_off);
+}
+
+/// Emit the host-import indirect dispatch (Chunk 7.9-d) via
+/// `JitRuntime.host_dispatch_base[import_idx]`:
+///
+///   MOV RAX, [R15 + host_dispatch_base_off]   ; ptr-of-ptrs
+///   MOV RAX, [RAX + idx*8]                     ; actual fn / thunk ptr
+///   MOV <entry_arg0>, R15                      ; restore rt_ptr
+///   [Win64: SUB RSP, 32 — shadow space]
+///   CALL RAX
+///   [Win64: ADD RSP, 32]
+///
+/// Args MUST already be marshalled into the per-CC arg regs; the
+/// result lands in the per-CC return reg per the callee sig. Shared
+/// by `emitCall`'s import branch and
+/// `op_tail_call.emitCrossModuleReturnCall` (the cross-module
+/// `return_call` call-and-return path, ADR-0112 Amendment 2026-05-30).
+/// `idx * 8` must fit the disp32 budget (≤ 0x7FFF_FFFF) —
+/// UnsupportedOp otherwise.
+pub fn emitImportDispatch(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    outgoing_max_bytes: u32,
+    import_idx: u32,
+) Error!void {
+    const idx_byte_off_u: u64 = @as(u64, import_idx) * 8;
+    if (idx_byte_off_u > 0x7FFF_FFFF) return Error.UnsupportedOp;
+    const idx_byte_off: i32 = @intCast(idx_byte_off_u);
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.host_dispatch_base_off).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .rax, idx_byte_off).slice());
+    try buf.appendSlice(allocator, inst.encMovRR(.q, abi.current.entry_arg0_gpr, abi.runtime_ptr_save_gpr).slice());
+    try emitShadowAlloc(allocator, buf, outgoing_max_bytes);
+    try buf.appendSlice(allocator, inst.encCallReg(.rax).slice());
+    try emitShadowFree(allocator, buf, outgoing_max_bytes);
 }
 
 /// Reserve Win64 shadow space below the upcoming CALL. No-op when

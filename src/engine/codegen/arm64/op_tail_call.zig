@@ -143,24 +143,61 @@ pub fn emitDirectTailJump(
 /// path. Cross-module / indirect / ref tail-calls (which can't
 /// reach via imm26) take the BR X16 path through follow-on chunks.
 ///
-/// Import-as-callee is rejected (UnsupportedOp) for now: a host
-/// import call doesn't follow v2's prologue convention and can't
-/// be tail-called via this same-module path. Per ADR-0112 D4 the
-/// cross-module bridge-tail-call shape is a separate chunk
-/// (10.TC-3f) and the import-tail-call subset would route through
-/// there or its own thunk.
+/// Import-as-callee (`ins.payload < num_imports`) routes to
+/// `emitCrossModuleReturnCall` — the cross-module call-and-return
+/// lowering (ADR-0112 Amendment 2026-05-30). A frame-consuming
+/// tail-jump to a host import doesn't follow v2's prologue
+/// convention and would corrupt a same-module grand-caller's pinned
+/// cohort; the bridge-thunk call-and-return preserves it.
 pub fn emitDirectReturnCall(
     ctx: *ctx_mod.EmitCtx,
     ins: *const zir.ZirInstr,
 ) ctx_mod.Error!void {
     if (ins.payload >= ctx.func_sigs.len) return ctx_mod.Error.AllocationMissing;
-    if (ins.payload < ctx.num_imports) return ctx_mod.Error.UnsupportedOp;
+    if (ins.payload < ctx.num_imports) return emitCrossModuleReturnCall(ctx, ins);
     const callee_sig: zir.FuncType = ctx.func_sigs[ins.payload];
 
     try op_call.marshalCallArgs(ctx, callee_sig);
     try emitLoadCalleeRtSameModule(ctx.allocator, ctx.buf);
     try frame_teardown.emit(ctx.allocator, ctx.buf, .{ .frame_bytes = ctx.frame_bytes });
     try emitDirectTailJump(ctx.allocator, ctx.buf, ctx.call_fixups, @intCast(ins.payload));
+}
+
+/// Cross-module `return_call $import` (ADR-0112 Amendment 2026-05-30,
+/// D-206 step 2). Lowered as **call-and-return** through the ADR-0066
+/// bridge thunk (planted in `host_dispatch_base[idx]`, which
+/// save/restores the full pinned cohort X19 + X24-X28 across its BLR)
+/// followed by the normal frame teardown + RET — i.e. the emit shape
+/// of `call $import` immediately followed by the function epilogue:
+///
+///   (1) marshal args → X1..X7 / V0..V7
+///   (2) emitImportDispatch — BLR the resolved thunk; the callee's
+///       result lands in X0/V0 and the thunk restores A's cohort
+///   (3) frame_teardown (ADD SP + LDP X29,X30) + RET
+///
+/// NOT frame-consuming on the cross-module path: arm64 MOV-installs
+/// X19 and LOADs X24-X28 from the rt (it does not stack-save the
+/// cohort), so a frame-consuming `BR X16` to a different-rt callee
+/// would leave the callee's cohort installed when control returns to
+/// a same-module grand-caller — the D-142 corruption class in
+/// tail-call form. The thunk's call-and-return preserves the cohort.
+/// Proper-tail-call cross-module (frame consumed) is deferred to the
+/// arm64-prologue-cohort-save work (D-210).
+///
+/// No `captureCallResult` runs: validation requires the callee result
+/// type == this function's result type, so the result already sits in
+/// the return register the epilogue's RET hands back. ≤ 2 results only
+/// (MEMORY-class return buffer is a D-210 follow-on).
+fn emitCrossModuleReturnCall(
+    ctx: *ctx_mod.EmitCtx,
+    ins: *const zir.ZirInstr,
+) ctx_mod.Error!void {
+    const callee_sig: zir.FuncType = ctx.func_sigs[ins.payload];
+    if (callee_sig.results.len > 2) return ctx_mod.Error.UnsupportedOp; // D-210: MEMORY-class return buffer
+    try op_call.marshalCallArgs(ctx, callee_sig);
+    try op_call.emitImportDispatch(ctx, @intCast(ins.payload));
+    try frame_teardown.emit(ctx.allocator, ctx.buf, .{ .frame_bytes = ctx.frame_bytes });
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encRet(abi.link_register));
 }
 
 /// Wasm spec 3.0 §3.3.8.19 (tail-call proposal) —

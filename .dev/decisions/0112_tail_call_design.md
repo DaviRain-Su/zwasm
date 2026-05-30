@@ -109,6 +109,69 @@ Land tail-call with the following design choices:
    `comptime { std.debug.assert(!@import("op_tail_call.zig").is_safepoint); }`
    in `codegen/<arch>/emit.zig` enforces structurally.
 
+## Amendment 2026-05-30 — cross-module path is call-and-return, not frame-consuming (D-206 step 2)
+
+Decision §4's inline-BR sequence (load callee_rt → X0/RDI, frame_teardown,
+`BR X16` / `JMP R11`) is **correct on x86_64 but corrupts the caller's
+caller on arm64**. The asymmetry is rooted in the per-arch pinned-register
+save discipline (ADR-0017 vs ADR-0026), surfaced by the first cross-module
+`return_call` test (D-206 step 2):
+
+- **x86_64**: the runtime-ptr register R15 is the *only* pinned reg, and
+  every frame that uses it PUSH-saves it in its prologue and POP-restores
+  it in its epilogue (`frame_teardown`'s `uses_runtime_ptr` path). A
+  frame-consuming tail-jump therefore preserves a same-module grand-caller's
+  R15 for free: `frame_teardown` restores it before the `JMP`, the callee
+  re-saves-and-restores it, and the callee's `RET` lands in the grand-caller
+  with R15 intact.
+- **arm64**: the pinned cohort is X19 (runtime_ptr) + X24-X28
+  (typeidx_base / table_size / funcptr_base / mem_limit / vm_base). The
+  prologue **MOV-installs X19 from X0 and LOADs X24-X28 from the rt** — it
+  does **not** stack-save them (ADR-0017 sub-2d-ii; confirmed by
+  `arm64/frame_teardown.zig` Params `uses_runtime_ptr` being arm64-ignored).
+  A frame-consuming tail-jump to a different-rt callee therefore leaves the
+  callee's cohort (B's) in the registers when control returns to a
+  same-module grand-caller that expects A's cohort → wrong memory base /
+  table base on the grand-caller's next memory/table/call op. This is the
+  D-142 corruption class, now in tail-call form.
+
+**Refined decision**: cross-module `return_call{,_indirect,_ref}` lowers to
+**call-and-return through the existing ADR-0066 bridge thunk** (which
+already save/restores the full pinned cohort across the BLR/CALL) +
+the normal `frame_teardown` + `RET`, i.e. the emit shape of
+`call $import` immediately followed by the function epilogue. The result
+register already holds the callee's result (validation requires the callee
+result type == the current function result type for ≤ 2 results), so no
+`captureCallResult` runs. This is cohort-correct on **both** arches.
+
+Consequence — the cross-module path is **NOT frame-consuming**: A's frame
+stays live across the BLR/CALL to the callee, so unbounded *cross-module*
+mutual tail-recursion grows the native stack (eventually overflows) instead
+of running in constant space. Same-module `return_call` (decisions §4
+inline-BR / §4 emitDirectTailJump) remains proper-tail-call (frame
+consumed). The proper-tail-call cross-module path is deferred to the
+arm64-prologue-cohort-save work (**D-210**); when arm64 prologues stack-save
+the cohort (Option B of `abi_callee_saved_pinning.md`), the frame-consuming
+`BR X16` path becomes cohort-correct and both arches can adopt it. x86_64
+could adopt the frame-consuming `JMP R11` path today, but both arches stay
+on call-and-return for now so cross-module tail-recursion depth doesn't
+diverge observably between hosts.
+
+This refines decision §4 (it does NOT reuse the thunk as a tail-bridge —
+the rejected Alternative A — but composes the thunk's *call* with the
+function's *return*, which is a different construction). The new file
+`cross_module_tail_call.zig` named in §4 is **not created**; the emit is a
+~6-line `emitCrossModuleReturnCall` in each arch's `op_tail_call.zig`
+delegating to a shared `op_call.emitImportDispatch` helper. `op_tail_call`'s
+safepoint-free invariant (D7) is unaffected: the BLR-thunk path is the
+existing ADR-0066 call shape, not a new safepoint.
+
+Regression guard: `runner.zig` gains a top-level cross-module `return_call`
+test (→ 42) and a **nested cohort-probe** test (a same-module `$mid` that
+`return_call`s the import, a `test` that calls `$mid` then `i32.load`s its
+own memory — passes only if the cross-module tail-call preserved A's
+cohort; a naive BR-bridge regression traps on B's empty memory).
+
 ## Alternatives considered
 
 - **A. Reuse `cross_module/thunk.zig` for tail-call cross-module**
@@ -230,3 +293,14 @@ transitions to `Closed (Implemented)` with the impl SHA range cited.
   wasmtime/cranelift + wasmer/singlepass. Verification grep
   done at this commit; recorded so future cycles don't re-walk
   the v1-precedent question.
+- 2026-05-30 — **Amendment** (D-206 step 2): cross-module
+  `return_call` lowers to call-and-return through the ADR-0066
+  bridge thunk + normal epilogue, NOT the inline frame-consuming
+  BR/JMP of decision §4. Rationale: arm64 MOV-installs the pinned
+  cohort (X19/X24-X28) rather than stack-saving it, so a
+  frame-consuming cross-module tail-jump corrupts a same-module
+  grand-caller's cohort (x86_64's per-frame R15 save makes it safe
+  there). Frame-consuming cross-module tail-call deferred to the
+  arm64-prologue-cohort-save work (D-210). See the "Amendment
+  2026-05-30" section above. Cohort-asymmetry observation recorded
+  as lesson `2026-05-30-cross-module-tail-call-cohort-asymmetry.md`.
