@@ -17,7 +17,8 @@
 
 ## Active bundle
 
-- **Bundle-ID**: D-206-cross-module-TC. **Cycles-remaining**: ~1-2 (step 1 landed cyc230).
+- **Bundle-ID**: D-206-cross-module-TC
+- **Cycles-remaining**: ~1-2 (step 1 landed cyc230)
 - **cyc229 Step-0 GROUND-TRUTH (re-scopes the wrong cyc218 survey)**: cross-module CALL via JIT
   ALREADY works natively + is spec-validated. The spec runner's `resolveCrossModuleImports`
   (`spec_assert_runner_base.zig:1476`) emits a NATIVE bridge thunk via `shared/thunk.zig:emitThunk`
@@ -42,6 +43,10 @@
   `emitThunk` is CALL-shaped (BLR+RET-to-importer) → return_call needs a NEW tail bridge. The
   callee_rt+callee_entry are embedded in the thunk slot's literal pool; for the tail path the emit
   must reach them — either a tail-variant thunk planted alongside, or expose them at resolve time.
+- **Continuity-memo**: the observable that proves step 2 landed = A.test `return_call $get`
+  JIT-executes to 42 (add the `a_return_call` bytes variant to `CrossModuleHarness`); the reject
+  to lift is `op_tail_call.emitDirectReturnCall` arm64:157 / x86_64:143; new file
+  `cross_module_tail_call.zig` + `frame_teardown.zig` per ADR-0112 D4.
 - **Exit-condition**: extend the harness — A's `test` does `return_call $get` (a_return_call.wat
   bytes already minted: `…0x12 0x00 0x0b`) → JIT-executes → 42, both arches, ubuntu-verified.
 

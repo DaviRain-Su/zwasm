@@ -48,6 +48,7 @@ ADR_TOUCHED=0
 RULES_TOUCHED=0
 SKILLS_TOUCHED=0
 DEV_MD_TOUCHED=0
+HANDOVER_TOUCHED=0
 ANY_STAGED=0
 if [ -n "$STAGED" ]; then
     ANY_STAGED=1
@@ -78,6 +79,11 @@ if [ -n "$STAGED" ]; then
                 ;;
             .dev/*.md|.dev/*/*.md|.dev/*/*/*.md)
                 DEV_MD_TOUCHED=1
+                ;;
+        esac
+        case "$f" in
+            .dev/handover.md)
+                HANDOVER_TOUCHED=1
                 ;;
         esac
     done <<< "$STAGED"
@@ -260,6 +266,16 @@ fi
 if [ "$DEV_MD_TOUCHED" -eq 1 ] && [ -x scripts/check_doc_state.sh ]; then
     echo "[gate_commit] check_doc_state --gate ..."
     bash scripts/check_doc_state.sh --gate > /dev/null
+fi
+
+# Bundle-schema gate (ADR-0118 D6): if handover.md carries an Active
+# bundle, its 4 labeled fields must be present. Catches a rewrite that
+# drops a field (e.g. Continuity-memo) at commit time, not at the next
+# session's SessionStart brief.
+if [ "$HANDOVER_TOUCHED" -eq 1 ] && [ -x scripts/check_bundle_active.sh ] &&
+   grep -q '^## Active bundle' .dev/handover.md; then
+    echo "[gate_commit] check_bundle_active (handover has Active bundle) ..."
+    bash scripts/check_bundle_active.sh > /dev/null
 fi
 
 echo "[gate_commit] All gates passed."
