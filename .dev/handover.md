@@ -8,42 +8,42 @@
 - **Phase**: **10 IN-PROGRESS — autonomous CORRECTNESS substantially COMPLETE**
   (Phase 9 = DONE 2026-05-24). All 4 proposals verified green except deep/deferred
   residuals (see Active bundle + §10 map).
-- **HEAD**: `05266c03` (cyc235, docs-only debt-sweep). Session landed: cyc232
-  cross-module `return_call` (call-and-return via ADR-0066 thunk; cohort-asymmetry
-  → D-210); cyc233 EH×TC `return_call_in_try_table` (both ubuntu-verified);
-  cyc234-235 Phase-10 survey + stale-debt correction (D-195 discharged, ADRs
-  0115/0116/0123/0126 all Accepted, function-references + gc corpora GREEN).
+- **HEAD**: `38bb0e0e` (cyc236, **D-202 PHASE A landed**). Session: cyc232
+  cross-module `return_call`; cyc233 EH×TC; cyc234-235 stale-debt correction (ADRs
+  0115/0116/0123/0126 Accepted, D-195 discharged, fn-references + gc corpora GREEN);
+  **cyc236 D-202 PHASE A** — C-API Linker cross-module func import now uses
+  `funcTypeImportCompatible` (subtyping) not exact `sigEqual`; `.30/.48/.50`
+  instantiate-FAIL → OK (verified, no regression).
 - **10.P: 16 PASS / 8 SKIP / 0 FAIL → close-eligible.**
-- **nix**: dev shell active (zig 0.16.0 / wabt / wasmtime; `wat2wasm
-  --enable-tail-call --enable-exceptions`).
+- **nix**: dev shell active (zig 0.16.0 / wabt / wasmtime).
 
-## Step 0.7 (next resume)
+## Step 0.7 (next resume — DO FIRST)
 
-- cyc235 (`05266c03`) is docs-only (debt-sweep + lesson) → **no ubuntu kick**
-  (non-code-gap). Last ubuntu-green code = `3933c9a7` (EH×TC) via caf7305b
-  `OK (HEAD=caf7305b)`. No pending gate, no revert.
+- cyc236 (`38bb0e0e`) is a linker code change → ubuntu kicked this turn. Next
+  resume `tail -3 /tmp/ubuntu.log`, expect `OK (HEAD=<turn-final>)` — verifies
+  `.30/.48/.50` instantiate + no regression on x86_64. On FAIL: revert the turn's
+  commits; last green = `3933c9a7` via caf7305b.
 
 ## Active bundle
 
 - **Bundle-ID**: D-202-xmodule-finality
-- **Cycles-remaining**: ~2-3 (deep GC type-system + linker; start fresh-context)
-- **Continuity-memo**: `.30/.48/.50` instantiate `SignatureMismatch` comes from
-  **`src/zwasm/linker.zig:434-458`** (C-API Linker func-sig compare, EXACT typeidx)
-  — NOT `instantiate.zig:1654` (cyc192 `6a77cb19` fixed THAT path with
-  `validator.funcTypeImportCompatible`, but the spec runner's cross-module
-  linking routes through the C-API Linker, which still does exact compare). So
-  cyc192's "SignatureMismatch 3→0" claim was path-incomplete. Fix = mirror
-  funcTypeImportCompatible (contravariant params / covariant results, subtype)
-  in linker.zig using exporter types reachable via `source_rt`
-  (`Runtime.module_types` + `gc_type_infos.canonical_ids`). **Signal question
-  (resolve FIRST)**: is the `.35/.36/.42/.52/.54` `assert_unlinkable` direction
-  RUN+counted or skip-impl? (debt says "cyc193 implements assert_unlinkable to
-  verify+count" — may still be skip → no RED until counted.) The gc gate is
-  already GREEN (fails are only `.17`), so first establish the observable signal
-  (a 2-module link test, or assert_unlinkable counting) before the fix.
-- **Exit-condition**: `.30/.48/.50` cross-module subtype imports link (SignatureMismatch
-  gone) verified by a test; if assert_unlinkable is counted, `.35` correctly
-  rejected. Both arches, ubuntu-verified.
+- **Cycles-remaining**: ~1-2 (PHASE B is ADR-grade)
+- **Continuity-memo**: PHASE A LANDED (`38bb0e0e`) — `linker.zig` cross_module_func
+  arm swapped exact `sigEqual` → `validator.funcTypeImportCompatible`; `.30/.48/.50`
+  (positive direction) now instantiate. **PHASE B remaining = the COUNTED RED**
+  (`assert_unlinkable pass=3 fail=5`, verified live): `.35/.36/.42/.52/.54` WRONGLY
+  LINK — importer declares a FINAL `(func)` type, exporter provides an open
+  `(sub (func))` (structurally identical `()->()`, so subtyping passes; only
+  type-definition FINALITY differs). The linker has no finality info: `cmf.source_signature`
+  is a flat `zir.FuncType` AND `zir.FuncType` itself drops finality/supertype
+  (they live in the parse-time `sections.Types`, freed after instantiate). So the
+  fix requires carrying func-type finality through the type representation = **§4
+  architecture change → file an ADR FIRST** (Deviation Watch). ADR options: (a)
+  add `final`/`supertype` to `zir.FuncType`; (b) thread the exporter typeidx +
+  retain its `sections.Types`/`gc_type_infos`. Then add the finality guard in
+  `linker.zig` (and mirror in `instantiate.zig` if needed).
+- **Exit-condition**: `assert_unlinkable fail 5 → 0` (`.35/etc.` correctly rejected),
+  no regression to the now-OK `.30/.48/.50`. Both arches, ubuntu-verified.
 
 ## Active task — D-202 cross-module type-identity (finality) check  **NEXT**
 
