@@ -841,6 +841,12 @@ const x86_64_br_on_null = @import("x86_64/ops/wasm_3_0/br_on_null.zig");
 const arm64_br_on_non_null = @import("arm64/ops/wasm_3_0/br_on_non_null.zig");
 const x86_64_br_on_non_null = @import("x86_64/ops/wasm_3_0/br_on_non_null.zig");
 
+// 10.G GC-on-JIT — i31 op family (ref.i31 / i31.get_s / i31.get_u),
+// arm64 first. Non-allocating shift+tag; x86_64 follows (D-211 bundle).
+const arm64_ref_i31 = @import("arm64/ops/wasm_3_0/ref_i31.zig");
+const arm64_i31_get_s = @import("arm64/ops/wasm_3_0/i31_get_s.zig");
+const arm64_i31_get_u = @import("arm64/ops/wasm_3_0/i31_get_u.zig");
+
 /// Tuple of all migrated arm64 per-op modules.
 pub const collected_arm64_ops = .{
     arm64_i32_add,
@@ -1198,6 +1204,10 @@ pub const collected_arm64_ops = .{
     arm64_br_on_null,
     // 10.R function-references cycle 56 (arm64 only; x86_64 = D-194).
     arm64_br_on_non_null,
+    // 10.G GC-on-JIT i31 family (arm64 only; x86_64 = D-211).
+    arm64_ref_i31,
+    arm64_i31_get_s,
+    arm64_i31_get_u,
 };
 
 /// Tuple of all migrated x86_64 per-op modules.

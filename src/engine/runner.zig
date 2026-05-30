@@ -1166,3 +1166,58 @@ test "cross-module JIT return_call: same-module grand-caller's cohort survives �
     defer h.deinit(gpa);
     try testing.expectEqual(@as(u32, 99), try h.callTest());
 }
+
+// ============================================================
+// 10.G GC-on-JIT — i31 op family e2e (ref.i31 / i31.get_s /
+// i31.get_u). arm64 emit landed this cycle; the round-trip runs
+// through compileWasm (JIT) → callI32NoArgs (JIT entry). x86_64
+// emit follows next cycle (D-211 bundle), so these gate to
+// aarch64 until the x86_64 op-files land and ungate. wat2wasm
+// 1.0.40 predates i31 textual support, so bytes are hand-encoded
+// (opcodes verified against test/spec/.../gc/i31/i31.0.wasm).
+
+test "runI32Export: ref.i31 + i31.get_s positive round-trip → 1234 (10.G JIT)" {
+    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-211");
+    // (module (func (export "f") (result i32)
+    //   i32.const 1234  ref.i31  i31.get_s))
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type ()->(i32)
+        0x03, 0x02, 0x01, 0x00, // func: type 0
+        0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x00, // export "f" func 0
+        0x0a, 0x0b, 0x01, 0x09, 0x00, 0x41, 0xd2,
+        0x09, 0xfb, 0x1c, 0xfb, 0x1d, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 1234), try runI32Export(testing.allocator, &bytes, "f"));
+}
+
+test "runI32Export: ref.i31(-1) + i31.get_u → 0x7FFFFFFF (high bit zero; 10.G JIT)" {
+    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-211");
+    // (module (func (export "f") (result i32)
+    //   i32.const -1  ref.i31  i31.get_u))
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, 0x03,
+        0x02, 0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 0x66,
+        0x00, 0x00, 0x0a, 0x0a, 0x01, 0x08, 0x00, 0x41,
+        0x7f, 0xfb, 0x1c, 0xfb, 0x1e, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 0x7FFF_FFFF), try runI32Export(testing.allocator, &bytes, "f"));
+}
+
+test "runI32Export: i31.get_s on null i31ref traps (10.G JIT)" {
+    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-211");
+    // (module (func (export "f") (result i32)
+    //   ref.null i31  i31.get_s))  ;; spec: traps on null input
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, 0x03,
+        0x02, 0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 0x66,
+        0x00, 0x00,
+        // code: body is 6 bytes (locals + ref.null i31 [d0 6c] +
+        // i31.get_s [fb 1d] + end), so body_size=0x06, sect size=0x08.
+        0x0a, 0x08, 0x01, 0x06, 0x00, 0xd0,
+        0x6c, 0xfb, 0x1d, 0x0b,
+    };
+    try testing.expectError(entry.Error.Trap, runI32Export(testing.allocator, &bytes, "f"));
+}

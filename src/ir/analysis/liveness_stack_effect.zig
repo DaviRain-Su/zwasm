@@ -115,6 +115,13 @@ pub fn stackEffect(op: ZirOp) ?StackEffect {
         .@"i64.extend8_s",
         .@"i64.extend16_s",
         .@"i64.extend32_s",
+        // Wasm 3.0 GC i31 (10.G). 1 → 1 scalar (anyref is a u32 on
+        // the operand stack per ADR-0116 D4, regalloc-classed like
+        // i32 — `.scalar` shape tag). `ref.i31` pops i32 pushes
+        // i31ref; `i31.get_{s,u}` pops i31ref pushes i32.
+        .@"ref.i31",
+        .@"i31.get_s",
+        .@"i31.get_u",
         => .{ .pops = 1, .pushes = 1 },
         // 2 → 1 binop
         .@"i32.add",

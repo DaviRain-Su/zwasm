@@ -478,6 +478,43 @@ pub fn encLsrImmX(rd: Xn, rn: Xn, imm: u6) u32 {
         @as(u32, rd);
 }
 
+/// `ASR Wd, Wn, #imm` — alias for SBFM Wd, Wn, #imm, #31.
+/// Arithmetic right shift (sign-replicating) with immediate count
+/// (1..31). Encoding (32-bit SBFM, sf=0, opc=00, N=0):
+///   `0 00 100110 0 [immr:6] [imms:6] [Rn:5] [Rd:5]`
+/// = 0x13000000 | (immr<<16) | (imms<<10) | (Rn<<5) | Rd.
+/// For ASR: immr = imm, imms = 31 (0x1F → 31<<10 = 0x7C00).
+/// Arm IHI 0055 §C6.2.13 (ASR immediate). Used by `i31.get_s`.
+pub fn encAsrImmW(rd: Xn, rn: Xn, imm: u5) u32 {
+    return 0x13000000 |
+        (@as(u32, imm) << 16) |
+        (@as(u32, 31) << 10) |
+        (@as(u32, rn) << 5) |
+        @as(u32, rd);
+}
+
+/// `ORR Wd, Wn, #1` — set bit 0. The logical-immediate value `1`
+/// in a 32-bit register encodes as (N=0, immr=0, imms=0): a
+/// size-32 element (imms top bit 0) with 1 one bit and no
+/// rotation. Encoding (32-bit ORR immediate, sf=0, opc=01):
+///   `0 01 100100 0 000000 000000 [Rn:5] [Rd:5]`
+/// = 0x32000000 | (Rn<<5) | Rd. Arm IHI 0055 §C6.2.181.
+/// Used by `ref.i31` to set the low-bit-1 i31 discriminant.
+pub fn encOrrImm1W(rd: Xn, rn: Xn) u32 {
+    return 0x32000000 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+/// `TST Wn, #1` — alias for `ANDS WZR, Wn, #1` (sets Z when bit 0
+/// is clear). Same logical-immediate encoding as `encOrrImm1W`
+/// for the value `1`, but opc=11 (ANDS) and Rd = WZR (31).
+/// Encoding (32-bit ANDS immediate, sf=0, opc=11):
+///   `0 11 100100 0 000000 000000 [Rn:5] 11111`
+/// = 0x72000000 | (Rn<<5) | 31. Arm IHI 0055 §C6.2.15 (TST imm).
+/// Used by `i31.get_{s,u}` for the null / non-i31 trap check.
+pub fn encTstImm1W(rn: Xn) u32 {
+    return 0x72000000 | (@as(u32, rn) << 5) | @as(u32, 31);
+}
+
 /// `MOVN Wd, #imm16, lsl #0` — move ~imm16 (zeroed-then-NOT
 /// the lower 16). `MOVN Wd, #0` produces 0xFFFFFFFF = -1
 /// (used by memory.grow's "failure" stub return).
@@ -949,6 +986,25 @@ test "encMovzImm16 x0, #0 — `movz x0, #0` → 0xD2800000" {
 test "encMovzImm16 x0, #42 — `movz x0, #42` → 0xD2800540" {
     // imm16=42 (<<5)=0x540; rd=0; base=0xD2800000.
     try testing.expectEqual(@as(u32, 0xD2800540), encMovzImm16(0, 42));
+}
+
+test "encAsrImmW w0, w0, #1 — `asr w0, w0, #1` → 0x13017C00 (i31.get_s)" {
+    // SBFM Wd,Wn,#imm,#31: base 0x13000000; immr=1 (<<16); imms=31 (<<10=0x7C00).
+    try testing.expectEqual(@as(u32, 0x13017C00), encAsrImmW(0, 0, 1));
+    // Register-field exercise: asr w2, w3, #1.
+    try testing.expectEqual(@as(u32, 0x13017C62), encAsrImmW(2, 3, 1));
+}
+
+test "encOrrImm1W w0, w0 — `orr w0, w0, #1` → 0x32000000 (ref.i31 tag)" {
+    try testing.expectEqual(@as(u32, 0x32000000), encOrrImm1W(0, 0));
+    // Register-field exercise: orr w5, w6, #1.
+    try testing.expectEqual(@as(u32, 0x320000C5), encOrrImm1W(5, 6));
+}
+
+test "encTstImm1W w0 — `tst w0, #1` (ANDS wzr,w0,#1) → 0x7200001F (i31 null check)" {
+    try testing.expectEqual(@as(u32, 0x7200001F), encTstImm1W(0));
+    // Register-field exercise: tst w7, #1.
+    try testing.expectEqual(@as(u32, 0x720000FF), encTstImm1W(7));
 }
 
 test "encMovkImm16 x0, #1, lsl #16 — `movk x0, #1, lsl #16` → 0xF2A00020" {
