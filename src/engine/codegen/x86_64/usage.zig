@@ -159,6 +159,10 @@ pub fn usesRuntimePtr(func: *const ZirFunc) bool {
             // (D-180 class). arm64 emit landed first; the x86_64 emit
             // (D-211) inherits this whitelist entry.
             .@"struct.new_default",
+            // 10.G GC-on-JIT: struct.get loads the gc_heap slab base
+            // from [R15 + gc_heap_off] (= X19 on arm64) → needs R15
+            // pinned. arm64 emit landed first; x86_64 emit = D-211.
+            .@"struct.get",
             .@"unreachable",
             // §9.9 / 9.9-m-1b: ref.func loads func_entities_ptr
             // from [r15+off]. Requires R15.

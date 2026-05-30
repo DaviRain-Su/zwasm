@@ -848,8 +848,10 @@ const arm64_ref_i31 = @import("arm64/ops/wasm_3_0/ref_i31.zig");
 const arm64_i31_get_s = @import("arm64/ops/wasm_3_0/i31_get_s.zig");
 const arm64_i31_get_u = @import("arm64/ops/wasm_3_0/i31_get_u.zig");
 // 10.G GC-on-JIT struct ops (arm64 first; x86_64 = D-211). struct.new_default
-// allocates via the jitGcAlloc trampoline (cycle A-2b).
+// allocates via the jitGcAlloc trampoline (cycle A-2b); struct.get loads a
+// uniform 8-byte field slot off the gc_heap slab (cycle A-2b-2).
 const arm64_struct_new_default = @import("arm64/ops/wasm_3_0/struct_new_default.zig");
+const arm64_struct_get = @import("arm64/ops/wasm_3_0/struct_get.zig");
 const x86_64_ref_i31 = @import("x86_64/ops/wasm_3_0/ref_i31.zig");
 const x86_64_i31_get_s = @import("x86_64/ops/wasm_3_0/i31_get_s.zig");
 const x86_64_i31_get_u = @import("x86_64/ops/wasm_3_0/i31_get_u.zig");
@@ -1215,8 +1217,9 @@ pub const collected_arm64_ops = .{
     arm64_ref_i31,
     arm64_i31_get_s,
     arm64_i31_get_u,
-    // 10.G GC-on-JIT struct.new_default (arm64 only; x86_64 = D-211).
+    // 10.G GC-on-JIT struct.new_default + struct.get (arm64 only; x86_64 = D-211).
     arm64_struct_new_default,
+    arm64_struct_get,
 };
 
 /// Tuple of all migrated x86_64 per-op modules.

@@ -1241,3 +1241,30 @@ test "runI32Export: struct.new_default + ref.is_null → 0 (10.G struct-on-JIT A
     };
     try testing.expectEqual(@as(u32, 0), runI32Export(testing.allocator, &bytes, "f"));
 }
+
+test "runI32Export: struct.new_default + struct.get 0 0 → 0 (10.G struct-on-JIT A-2b-2)" {
+    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-211");
+    // (module
+    //   (type (struct (field (mut i32))))    ;; type 0
+    //   (func (export "f") (result i32)        ;; type 1
+    //     struct.new_default 0  struct.get 0 0))  ;; zero-inited field → 0
+    // Exercises the field-load path: JIT validate → struct.new_default
+    // emit (alloc) → struct.get emit (null-trap + slab-base load of the
+    // 8-byte field slot) → result on stack. Derived from the A-2b-1 module
+    // by replacing ref.is_null (d1, 1 byte) with struct.get 0 0
+    // (fb 02 00 00, 4 bytes); body_size + sect_size each +3.
+    // arm64 first; x86_64 emit = D-211.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        // type: [0]=struct{i32 mut} (5f 01 7f 01), [1]=func ()->(i32) (60 00 01 7f)
+        0x01, 0x09, 0x02, 0x5f, 0x01, 0x7f, 0x01, 0x60,
+        0x00, 0x01, 0x7f,
+        0x03, 0x02, 0x01, 0x01, // func: type idx 1
+        0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x00, // export "f" func 0
+        // code: body 9 bytes (locals + struct.new_default 0 [fb 01 00] +
+        // struct.get 0 0 [fb 02 00 00] + end), body_size=0x09, sect size=0x0b.
+        0x0a, 0x0b, 0x01, 0x09, 0x00, 0xfb, 0x01,
+        0x00, 0xfb, 0x02, 0x00, 0x00, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 0), runI32Export(testing.allocator, &bytes, "f"));
+}

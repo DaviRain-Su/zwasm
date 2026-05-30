@@ -127,6 +127,9 @@ pub fn stackEffect(op: ZirOp) ?StackEffect {
         .@"ref.i31",
         .@"i31.get_s",
         .@"i31.get_u",
+        // Wasm 3.0 GC (10.G): struct.get pops the struct GcRef, pushes
+        // the loaded field Value (1 → 1 scalar; ADR-0116 §3a).
+        .@"struct.get",
         => .{ .pops = 1, .pushes = 1 },
         // 2 → 1 binop
         .@"i32.add",
