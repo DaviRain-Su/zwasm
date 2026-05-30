@@ -19,22 +19,31 @@
 - D-208 (cyc213) + D-209 (cyc214) fixed + ubuntu-verified. **10.P: 16 PASS / 8 SKIP / 0 FAIL**
   → close-eligible. I14 deferred (Phase-13 type-reflection c_api); D-206 deferred (≈4-6 cyc
   native cross-module JIT bridge; existing cross-module dispatch is interp-routed; not close-required).
-- **Step 0.7 on resume**: cyc222 added `rust_fib` (`38afcd7a`) → ubuntu kicked. VERIFY
-  (`tail /tmp/ubuntu.log`): rust_fib (+ the rest) pass on x86_64 (committed `.wasm`, no rustc
-  on ubuntu). FAIL ⟹ a rust-recursion x86_64 codegen miscompile → investigate (high value).
+- **cyc223**: extended the cyc216 caching fix — the 4 `test/realworld/wasm/` runners
+  (`run_realworld{,_run,_run_jit,_diff}`, all in test-all) had the same `addArg(dir-string)`
+  false-coverage gap (missed in cyc216) → `has_side_effects=true` (`f424d7e8`). The 55-fixture
+  realworld corpus (C/C++/tinygo/cljw — already has tinygo_sort!) is now protected; 45/55 pass,
+  10 SKIP-WASI (→ Phase 11). The realworld + cross veins are mature.
+- **Step 0.7 on resume**: cyc223 build.zig change (`f424d7e8`) → ubuntu kicked. VERIFY
+  (`tail /tmp/ubuntu.log`): realworld runners re-run + pass on x86_64. rust_fib already
+  ubuntu-verified (`OK 36547ac2`).
 
-## Active task — tinygo → wasip1 realworld fixture (broaden toolchain) via diff_runner  **NEXT**
+## Active task — rust_data realworld fixture (static data + memory-read codegen)  **NEXT**
 
-Branch from rust to a DIFFERENT, harder toolchain for broader real-world validation. `tinygo`
-is in `devShells.gen`. A `tinygo build -target=wasip1` module has a real (small) runtime + WASI
-calls → it CANNOT use the no-WASI `runI32Export` edge-runner; it belongs in
-`test/realworld/wasm/` under the **diff_runner** (`zig build test-realworld-diff`, byte-diffs
-stdout vs `wasmtime run`; wasmtime is in `default`). Step 0: survey the diff_runner corpus
-conventions (how a `.wasm` is added to `test/realworld/wasm/`, provenance, the MATCH/MISMATCH/
-SKIP-WASI categories). Smallest red: a tinygo "print a constant" → stdout; run via diff_runner;
-MATCH vs wasmtime. A MISMATCH or SKIP-WASI is a real finding (WASI gap / miscompile). Prefer
-tinygo over full `go` first (go's runtime is ~MB; tinygo is lean). Follow-on: emcc
-`-sMEMORY64=1` big-alloc (lazy emcc cache builds on first use).
+The last genuinely-distinct rust codegen path my p10 fixtures don't cover: a `#![no_std]`
+`static DATA: [i32; N]` summed via indexed reads → exercises **data-segment init + memory
+loads** through real rustc output (where subtle data/memory bugs hide), via `runI32Export`.
+Land `test/realworld/p10/rust_data/` (gen via `nix develop .#gen`). Smallest red: sum a
+static array → known i32. **Note**: tinygo/go/emcc-libc need WASI+instantiation → the
+diff_runner corpus (`test/realworld/wasm/`, now un-cached); but that corpus is already mature
+(tinygo_sort etc.), so marginal — defer.
+**User touchpoint (held, prominent)**: Phase 10 close-eligible (10.P 0 FAIL); the high-value
+JIT work + the gen-shell realworld infra are done. The tractable fixture veins (cross,
+realworld) are now MATURE. The substantive remaining autonomous work is DEEP + not-close-
+required (D-206 cross-module bridge ≈4-6 cyc; 10.G GC JIT extreme) OR Phase-11-scoped (the 10
+SKIP-WASI). The formal Phase-10 close (→ Phase 11) is the genuinely highest-value next step
+and is a user project-direction decision. A user check-in is high-value here. NOT a stop —
+loop continues on tractable distinct fixtures; re-arm holds.
 **User touchpoint (held)**: Phase 10 close-eligible (10.P 0 FAIL); formal close (→ Phase 11)
 is a user project-direction decision worth a check-in. Tractable autonomous vein =
 real-toolchain realworld fixtures (now unblocked). Deep not-close-required work (D-206, 10.G
