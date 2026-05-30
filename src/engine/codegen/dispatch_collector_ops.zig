@@ -855,6 +855,8 @@ const arm64_struct_get = @import("arm64/ops/wasm_3_0/struct_get.zig");
 const x86_64_ref_i31 = @import("x86_64/ops/wasm_3_0/ref_i31.zig");
 const x86_64_i31_get_s = @import("x86_64/ops/wasm_3_0/i31_get_s.zig");
 const x86_64_i31_get_u = @import("x86_64/ops/wasm_3_0/i31_get_u.zig");
+const x86_64_struct_new_default = @import("x86_64/ops/wasm_3_0/struct_new_default.zig");
+const x86_64_struct_get = @import("x86_64/ops/wasm_3_0/struct_get.zig");
 
 /// Tuple of all migrated arm64 per-op modules.
 pub const collected_arm64_ops = .{
@@ -1731,4 +1733,6 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_ref_i31,
     x86_64_i31_get_s,
     x86_64_i31_get_u,
+    x86_64_struct_new_default,
+    x86_64_struct_get,
 };

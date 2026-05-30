@@ -1218,7 +1218,8 @@ test "runI32Export: i31.get_s on null i31ref traps (10.G JIT)" {
 }
 
 test "runI32Export: struct.new_default + ref.is_null → 0 (10.G struct-on-JIT A-2b-1)" {
-    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-211");
+    // Ungated for x86_64: the SysV struct.new_default emit landed (D-211
+    // mirror); runs on both Mac aarch64 and Linux x86_64 (ubuntu gate).
     // (module
     //   (type (struct (field (mut i32))))    ;; type 0
     //   (func (export "f") (result i32)        ;; type 1
@@ -1243,7 +1244,8 @@ test "runI32Export: struct.new_default + ref.is_null → 0 (10.G struct-on-JIT A
 }
 
 test "runI32Export: struct.new_default + struct.get 0 0 → 0 (10.G struct-on-JIT A-2b-2)" {
-    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-211");
+    // Ungated for x86_64: the SysV struct.get emit landed (D-211 mirror);
+    // runs on both Mac aarch64 and Linux x86_64 (ubuntu gate).
     // (module
     //   (type (struct (field (mut i32))))    ;; type 0
     //   (func (export "f") (result i32)        ;; type 1
