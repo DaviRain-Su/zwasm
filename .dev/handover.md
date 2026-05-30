@@ -29,23 +29,64 @@
   only ran arm64). On FAIL: revert `3933c9a7`; last ubuntu-green = `7131d711`
   (via bc47d75e).
 
-## Active task — survey 10.E (EH) remaining work, then smallest open chunk  **NEXT**
+## Active task — c_api EH type-reflection (wasm_tagtype_*)  **NEXT**
 
-10.TC is **implementation-complete**: emit (direct/indirect/ref/cross-module) +
-spec corpus + realworld `clang_musttail` + EH×TC fixture all green. 10.TC stays
-`[ ]` only because of the `wasm_of_ocaml` realworld fixture — a GC+EH+TC
-**triple-crown capstone** (PROVENANCE `SKIP-P10-{GC,EH,TC}-GAP`) deferred until
-10.G (GC) lands AND the wasm_of_ocaml/opam toolchain is provisioned in flake.nix
-(not on PATH today). Do NOT flip 10.TC `[x]` until that capstone lands.
-Next driving chunk = **Step 0 survey of 10.E (EH) remaining work** (ROADMAP 10.E
-row: spec corpus 76 assertion, `eh_frequency_runner` impl, c_api tag accessors,
-realworld `emscripten_eh` green, catch_ref/catch_all_ref exnref v0.2 per
-ADR-0120) — find the smallest open EH item with the machinery already landed
-(D-182/183/188 done), implement it. Fall back to 10.G non-ADR-gated items if 10.E
-forward work is thin. NOTE smell: `runner.zig` 1168 lines (soft WARN) —
-integration-test sibling extraction is a future refactor (phase-boundary audit).
-**User touchpoint (held)**: Phase 10 close-eligible (10.P 0 FAIL); formal close
-(→ Phase 11) is a high-value user decision, re-armable at any user signal.
+**10.TC + 10.E codegen + spec corpora are DONE this session.** 10.TC stays `[ ]`
+only for `wasm_of_ocaml` (GC+EH+TC capstone, toolchain+GC-deferred). 10.E codegen
+green (D-182/183/188 + EH×TC); try_table spec corpus = 2 text-format skips (legit
+ADR). **10.E survey result (cyc233):**
+- `eh_frequency_runner` = benchmark *skeleton* (`test/runners/eh_frequency_runner.zig`),
+  perf scaffolding only — low signal, defer.
+- realworld `emscripten_eh/` = PROVENANCE-only placeholder (emscripten EH
+  toolchain not provisioned) — deferred like wasm_of_ocaml.
+- **c_api tag accessors**: `wasm_tagtype_*` declared `include/wasm.h:252-296` but
+  the WHOLE wasm-c-api **type-reflection** layer is unimplemented — `src/api`
+  exports 49 runtime fns (engine/instance/func/global/memory/extern) but NO
+  `wasm_functype_*` / `wasm_*type` type-objects. So "tag accessors" needs the
+  type-object infra (valtype/functype/externtype) built first.
+
+**cyc234 finding: Phase 10 autonomous CORRECTNESS is substantially COMPLETE.**
+Surveyed + verified all 4 proposals: memory64 done (D-209 >4GiB deferred); TC done
+(wasm_of_ocaml capstone deferred); EH done (c_api tags = v0.1.0 scope per ROADMAP
+§1.2, NOT Phase 10; eh_frequency/emscripten = perf/toolchain deferred); **GC corpus
+GREEN** — ubuntu `gc: return 349/1, trap 96/4, invalid 60/0, skip 12`; the only
+fails are gc/type-subtyping `.17` (deferred multi-mechanism rabbit hole, D-198) +
+the `.30/.48/.50/.35/.36/.42/.52/.54` cross-module type-identity/finality negatives
+(**ADR-gated** D-202). The per-op `struct_*/array_*/ref_*` files returning
+`error.NotMigrated` are NOT behavior gaps — they fall back to the legacy switch
+(`dispatch_collector.zig:280`); the real impl lives in `lower.zig` / `validator.zig`
+/ `mvp.zig` and the corpus is green through it. (The GC-survey-subagent's "all gc
+ops are 3-line stubs → implement struct.new" was a MISREAD of the migration-marker
+architecture — verified against the green corpus + ref_test.zig also returning
+NotMigrated while ref.test passes fixtures.)
+
+**Remaining Phase-10 work, by bucket:**
+- USER-GATED (high value): formal Phase 10 close (close-eligible); GC ADR-0123
+  (D-195 typed-ref `0x63/0x64` parser) + ADR-0126/D-202 (cross-module finality)
+  `Proposed → Accepted` flips → unblock the function-references corpus + the 8
+  ADR-gated gc negatives.
+- Deferred: `.17` exotic fixture; realworld capstones (wasm_of_ocaml/emscripten_eh/
+  dart/hoot — toolchains unprovisioned); memory64 >4GiB offset.
+- **Autonomous (low value, refactor/perf)**: gc op **per-op-file migration**
+  (ROADMAP 10.G `op_gc.zig`/`op_i31.zig` 本実装 — move handlers from the legacy
+  switch into the `NotMigrated` per-op files; behavior-preserving, verified by
+  `dispatch_consistency_audit` + green corpus); `gc_stress_runner` / `eh_frequency_runner`
+  本実装 (perf scaffolding).
+
+Next driving chunk = **start the gc per-op-file migration bundle**. Step 0: read an
+ALREADY-migrated op's per-op file to learn the handler ABI (signature + how it
+reaches the operand stack / runtime ctx), then migrate ONE gc op (e.g. `struct.new`)
+from the legacy switch into its per-op handlers, asserting test-all neutrality
+(green pre+post) + the dispatch-consistency delta. If the migration handler ABI
+turns out to require a large cross-cutting change → re-scope to a bucket-3 touchpoint
+(the user-gated paths above are higher value). NOTE smell: `runner.zig` 1168 lines
+(soft WARN) — test sibling extraction is a future refactor.
+**User touchpoint (HIGH-VALUE, held)**: Phase 10 is close-eligible (10.P 0 FAIL,
+TC+EH done). The two highest-value next moves are USER-GATED: (1) formal Phase 10
+close → Phase 11, (2) GC (10.G) ADR-0123 / ADR-0126 `Proposed → Accepted` flips
+(D-195 typed-ref parser, D-198 iso-recursive subtype) which unblock the bulk of the
+remaining GC corpus. Loop continues autonomously on c_api meanwhile; re-armable to
+either user-gated path at any signal.
 
 ## §10 close map + open
 
