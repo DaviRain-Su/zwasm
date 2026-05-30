@@ -6,14 +6,17 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS — CLOSE-ELIGIBLE** (Phase 9 = DONE 2026-05-24).
-- **HEAD**: `be9fb534` (cyc230). Session (cyc213-230) delivered, ubuntu-verified: D-208 + D-209
-  JIT bug fixes; 2 false-coverage caching fixes; nix **`devShells.gen`** toolchain provisioning;
-  cyc224 **shadow-stack unlock**; complete real-toolchain **realworld/p10 matrix** (8); pre-close
-  audit (coherent). **cyc230 = D-206 step 1**: 2-module JIT harness + baseline cross-module CALL
-  (green, isolated unit-level coverage that the .wast corpus didn't give).
+- **HEAD**: `08711880` (cyc231). **cyc230 = D-206 step 1** (2-module JIT harness + baseline
+  cross-module CALL; ubuntu-verified `OK HEAD=487b4f97`). **cyc231 = loop-discipline**: ADR-0076
+  **D5** (in-turn chunk chaining + per-turn ubuntu batch + gate-once + bigger-chunk default, user
+  throughput directive) + a clean-session `/continue` wiring audit (restored handover
+  `Continuity-memo`; gate `check_bundle_active` at commit time). Both cyc231 commits are
+  docs/script-only.
 - **10.P: 16 PASS / 8 SKIP / 0 FAIL → close-eligible.**
-- **Step 0.7 on resume**: cyc230 (`be9fb534`) is a CODE chunk → kicks ubuntu; verify
-  `/tmp/ubuntu.log` next cycle (revert pair on FAIL). Prior green: `OK (HEAD=0aad48c6)`.
+- **Step 0.7 on resume**: cyc231 (`b39689e1`+`08711880`) is docs/script-only → **no ubuntu kick**
+  (non-code-gap). Last code green: `OK (HEAD=487b4f97)`. **Next code chunk = D-206 step 2 → kicks
+  ubuntu.**
+- **NEW cadence (ADR-0076 D5)**: a turn chains N chunks; push/kick/re-arm once at turn end.
 
 ## Active bundle
 
