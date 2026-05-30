@@ -146,6 +146,14 @@ pub fn usesRuntimePtr(func: *const ZirFunc) bool {
             // x86_64 before this whitelist entry, because the trap
             // stub wrote trap_flag via an uninitialised R15).
             .@"ref.as_non_null",
+            // 10.G GC-on-JIT: i31.get_s / i31.get_u emit a null /
+            // non-i31 trap-stub fixup (TEST src,1 + JE → trap stub
+            // writes trap_flag via [R15+off]). Exact D-180 hazard —
+            // without R15 pinned, a null i31.get_* returns garbage
+            // instead of trapping on x86_64 (Mac arm64 immune; X19
+            // always set). ref.i31 is NOT here (no trap, no R15).
+            .@"i31.get_s",
+            .@"i31.get_u",
             .@"unreachable",
             // §9.9 / 9.9-m-1b: ref.func loads func_entities_ptr
             // from [r15+off]. Requires R15.

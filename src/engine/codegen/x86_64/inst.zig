@@ -207,7 +207,9 @@ pub const encSubRSpImm32 = inst_alu.encSubRSpImm32;
 pub const encAddRSpImm32 = inst_alu.encAddRSpImm32;
 pub const encMovImm64Q = inst_alu.encMovImm64Q;
 pub const encShrRImm8 = inst_alu.encShrRImm8;
+pub const encSarRImm8 = inst_alu.encSarRImm8;
 pub const encAndRImm8 = inst_alu.encAndRImm8;
+pub const encOrRImm8 = inst_alu.encOrRImm8;
 pub const encMovImm32W = inst_alu.encMovImm32W;
 
 // ============================================================
@@ -1210,6 +1212,22 @@ test "encAndRImm8: and rax, 1 → 48 83 e0 01" {
 test "encAndRImm8: and rcx, 1 → 48 83 e1 01" {
     const enc = encAndRImm8(.q, .rcx, 1);
     try testing.expectEqualSlices(u8, &.{ 0x48, 0x83, 0xE1, 0x01 }, enc.slice());
+}
+
+test "encSarRImm8: sar eax, 1 (d) → c1 f8 01 (no REX; i31.get_s)" {
+    try testing.expectEqualSlices(u8, &.{ 0xC1, 0xF8, 0x01 }, encSarRImm8(.d, .rax, 1).slice());
+}
+
+test "encSarRImm8: sar rax, 1 (q) → 48 c1 f8 01 (REX.W, /7)" {
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0xC1, 0xF8, 0x01 }, encSarRImm8(.q, .rax, 1).slice());
+}
+
+test "encOrRImm8: or eax, 1 (d) → 83 c8 01 (no REX; ref.i31 tag)" {
+    try testing.expectEqualSlices(u8, &.{ 0x83, 0xC8, 0x01 }, encOrRImm8(.d, .rax, 1).slice());
+}
+
+test "encOrRImm8: or rcx, 1 (q) → 48 83 c9 01 (REX.W, /1)" {
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x83, 0xC9, 0x01 }, encOrRImm8(.q, .rcx, 1).slice());
 }
 
 test "encCvttScalar2Int: cvttss2si eax, xmm0 → f3 0f 2c c0 (no REX)" {

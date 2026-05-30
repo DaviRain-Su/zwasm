@@ -1169,15 +1169,12 @@ test "cross-module JIT return_call: same-module grand-caller's cohort survives �
 
 // ============================================================
 // 10.G GC-on-JIT — i31 op family e2e (ref.i31 / i31.get_s /
-// i31.get_u). arm64 emit landed this cycle; the round-trip runs
-// through compileWasm (JIT) → callI32NoArgs (JIT entry). x86_64
-// emit follows next cycle (D-211 bundle), so these gate to
-// aarch64 until the x86_64 op-files land and ungate. wat2wasm
-// 1.0.40 predates i31 textual support, so bytes are hand-encoded
-// (opcodes verified against test/spec/.../gc/i31/i31.0.wasm).
+// i31.get_u), both arches. The round-trip runs through compileWasm
+// (JIT) → callI32NoArgs (JIT entry). wat2wasm 1.0.40 predates i31
+// textual support, so bytes are hand-encoded (opcodes verified
+// against test/spec/.../gc/i31/i31.0.wasm).
 
 test "runI32Export: ref.i31 + i31.get_s positive round-trip → 1234 (10.G JIT)" {
-    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-211");
     // (module (func (export "f") (result i32)
     //   i32.const 1234  ref.i31  i31.get_s))
     const bytes = [_]u8{
@@ -1192,7 +1189,6 @@ test "runI32Export: ref.i31 + i31.get_s positive round-trip → 1234 (10.G JIT)"
 }
 
 test "runI32Export: ref.i31(-1) + i31.get_u → 0x7FFFFFFF (high bit zero; 10.G JIT)" {
-    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-211");
     // (module (func (export "f") (result i32)
     //   i32.const -1  ref.i31  i31.get_u))
     const bytes = [_]u8{
@@ -1206,7 +1202,6 @@ test "runI32Export: ref.i31(-1) + i31.get_u → 0x7FFFFFFF (high bit zero; 10.G 
 }
 
 test "runI32Export: i31.get_s on null i31ref traps (10.G JIT)" {
-    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-211");
     // (module (func (export "f") (result i32)
     //   ref.null i31  i31.get_s))  ;; spec: traps on null input
     const bytes = [_]u8{

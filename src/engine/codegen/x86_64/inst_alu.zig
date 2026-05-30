@@ -285,6 +285,18 @@ pub fn encShrRImm8(size: Width, dst: Gpr, imm: u8) EncodedInsn {
     return enc;
 }
 
+/// `SAR r/m, imm8` (opcode 0xC1 /7 ib) — arithmetic (sign-
+/// replicating) right shift. Mirrors `encShrRImm8` with the /7
+/// modrm digit. Used by `i31.get_s` (sign-extend `payload >> 1`).
+pub fn encSarRImm8(size: Width, dst: Gpr, imm: u8) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (rexForRR(size, .rax, dst)) |rex| enc.push(rex);
+    enc.push(0xC1);
+    enc.push(encodeModrm(0b11, 7, dst.low3())); // /7 = SAR
+    enc.push(imm);
+    return enc;
+}
+
 /// `AND r/m, imm8` (opcode 0x83 /4 ib) — sign-extended 8-bit
 /// AND. Used by f.convert_i64_u to extract the low bit (round
 /// bit) before re-doubling.
@@ -293,6 +305,18 @@ pub fn encAndRImm8(size: Width, dst: Gpr, imm: i8) EncodedInsn {
     if (rexForRR(size, .rax, dst)) |rex| enc.push(rex);
     enc.push(0x83);
     enc.push(encodeModrm(0b11, 4, dst.low3())); // /4 = AND
+    enc.push(@bitCast(imm));
+    return enc;
+}
+
+/// `OR r/m, imm8` (opcode 0x83 /1 ib) — sign-extended 8-bit OR.
+/// Mirrors `encAndRImm8` with the /1 modrm digit. Used by `ref.i31`
+/// to set the low-bit-1 i31 discriminant after the `<<1` double.
+pub fn encOrRImm8(size: Width, dst: Gpr, imm: i8) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (rexForRR(size, .rax, dst)) |rex| enc.push(rex);
+    enc.push(0x83);
+    enc.push(encodeModrm(0b11, 1, dst.low3())); // /1 = OR
     enc.push(@bitCast(imm));
     return enc;
 }

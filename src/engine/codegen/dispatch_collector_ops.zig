@@ -842,10 +842,14 @@ const arm64_br_on_non_null = @import("arm64/ops/wasm_3_0/br_on_non_null.zig");
 const x86_64_br_on_non_null = @import("x86_64/ops/wasm_3_0/br_on_non_null.zig");
 
 // 10.G GC-on-JIT — i31 op family (ref.i31 / i31.get_s / i31.get_u),
-// arm64 first. Non-allocating shift+tag; x86_64 follows (D-211 bundle).
+// both arches. Non-allocating shift+tag. x86_64 in ctx_ops (the
+// `emit(ctx,ins)` tuple, alongside the other v3_0 ops).
 const arm64_ref_i31 = @import("arm64/ops/wasm_3_0/ref_i31.zig");
 const arm64_i31_get_s = @import("arm64/ops/wasm_3_0/i31_get_s.zig");
 const arm64_i31_get_u = @import("arm64/ops/wasm_3_0/i31_get_u.zig");
+const x86_64_ref_i31 = @import("x86_64/ops/wasm_3_0/ref_i31.zig");
+const x86_64_i31_get_s = @import("x86_64/ops/wasm_3_0/i31_get_s.zig");
+const x86_64_i31_get_u = @import("x86_64/ops/wasm_3_0/i31_get_u.zig");
 
 /// Tuple of all migrated arm64 per-op modules.
 pub const collected_arm64_ops = .{
@@ -1715,4 +1719,8 @@ pub const collected_x86_64_ctx_ops = .{
     // discharge Path B via captureOrEmitBlockMergeMovCtx wrapper).
     x86_64_br_on_null,
     x86_64_br_on_non_null,
+    // 10.G GC-on-JIT i31 family (mirror of arm64; D-211).
+    x86_64_ref_i31,
+    x86_64_i31_get_s,
+    x86_64_i31_get_u,
 };
