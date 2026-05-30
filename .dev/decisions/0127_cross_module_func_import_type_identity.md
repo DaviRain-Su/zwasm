@@ -142,3 +142,20 @@ the 3-host gate, and the impl matches decision #1 + #2. Status →
   (D-202 PHASE C de-risking). Status: Proposed pending user review (the
   cross-module canonical-equality semantics + the no-regression argument
   are the load-bearing review points).
+- 2026-05-30 (cyc242) — Impl-survey CONFIRMED the cross-`Types`
+  `canonicalEqual` is genuinely required; the tempting "cross-module
+  index / supertype-reach" shortcut is exactly the rejected Alternative
+  A and REGRESSES. Evidence: `sections.canonicalEqual(types, a, b)`
+  (`sections.zig:179`) takes a SINGLE `Types` and compares rec-group
+  position + finality + declared-supertypes + struct/array fields — so
+  the importer index `typeidx` and the exporter index `source_typeidx`
+  live in DIFFERENT `Types`; a predicate like `source_typeidx == typeidx`
+  or `typeidx ∈ exporter_supertypes` rejects the green exact-equal
+  imports (407 multi-mem + 34 EH), whose importer/exporter indices do
+  not align. So decision #2 requires a NEW `canonicalEqualCross(types_a,
+  idx_a, types_b, idx_b)` threading both `Types` through the recursion
+  (intricate: the intra-group-positional vs inter-group-canonical
+  distinction must track per-type which `Types` it belongs to). The
+  exporter's full `Types` (not just `final` + a supertype list) must be
+  reachable at the linker. Impl is genuinely intricate → fresh-context /
+  post-Accept cycle, NOT a quick threading extension.
