@@ -6,94 +6,70 @@
 ## Current state
 
 - **Phase**: **10 IN-PROGRESS — autonomous CORRECTNESS substantially COMPLETE**
-  (Phase 9 = DONE 2026-05-24). All 4 proposals verified green except deep/deferred
-  residuals (see §10 map + D-202 debt).
-- **HEAD**: `a4bd9bbb` (cyc239, **D-202 PHASE B-finality**). Session: cyc232
-  cross-module `return_call`; cyc233 EH×TC; cyc234-235 stale-debt correction (ADRs
-  0115/0116/0123/0126 Accepted, D-195 discharged, corpora GREEN); cyc236 D-202
-  PHASE A (linker cross-module subtyping, `.30/.48/.50` link, ubuntu-verified);
-  **cyc239 D-202 PHASE B-finality** — `ExportType.func` → `ExportFuncType{sig,final}`,
-  exporter func finality threaded to the C-API Linker, which now rejects a FINAL
-  import resolving against an open `(sub …)` exporter → **assert_unlinkable 5→4**,
-  no regression.
+  (Phase 9 = DONE 2026-05-24).
+- **HEAD**: `ad011ab1` (cyc242). This long session (cyc232-242) landed +
+  ubuntu-verified: cyc232 cross-module `return_call` (call-and-return; cohort
+  asymmetry → D-210); cyc233 EH×TC `return_call_in_try_table`; cyc234-235 stale-debt
+  correction (ADRs 0115/0116/0123/0126 all Accepted, D-195 discharged, fn-references
+  + gc corpora GREEN — avoided a FALSE bucket-3); cyc236 D-202 PHASE A (linker
+  cross-module subtyping, `.30/.48/.50` link); cyc239 D-202 PHASE B-finality
+  (assert_unlinkable 5→4); cyc241 ADR-0127 (D-202 PHASE C design).
 - **10.P: 16 PASS / 8 SKIP / 0 FAIL → close-eligible.**
 - **nix**: dev shell active (zig 0.16.0 / wabt / wasmtime).
 
-## Step 0.7 (next resume — DO FIRST)
+## Step 0.7 (next resume)
 
-- cyc239 (`a4bd9bbb`) is a multi-file linker/instance code change → ubuntu kicked
-  this turn. Next resume `tail -3 /tmp/ubuntu.log`, expect `OK (HEAD=<turn-final>)`
-  — verifies assert_unlinkable 5→4 + no regression on x86_64. On FAIL: revert the
-  turn's commits; last ubuntu-green = `ebca32b0` (PHASE A).
+- cyc239 PHASE B-finality (`a4bd9bbb`) ubuntu-verified `OK (HEAD=64b27118)` —
+  assert_unlinkable 5→4 + no regression, both arches green. cyc240-242 are docs-only
+  (scope refine + ADR-0127 + revision) → no ubuntu pending, no revert.
 
-## Active task — Phase 10 autonomous correctness substantially COMPLETE  **NEXT**
+## Bucket-3 stop — user touchpoint required  **NEXT**
 
-**D-202 PHASE B-finality LANDED cyc239** (`a4bd9bbb`): assert_unlinkable 5→4. The
-remaining **PHASE C = the other 4 assert_unlinkable** (`.36/.42/.52/.54` or subset)
-differ by DECLARED-SUPERTYPE / cross-module canonical type-identity, NOT just the
-finality bool → **D-202 debt row** (needs threading the exporter supertype chain +
-a cross-`Types` `canonicalEqual`; more involved than the finality bool; fresh
-context). 
+All autonomous prep walked; **loop stops without re-arm** (cyc243). The session
+drove Phase 10's clean autonomous correctness to substantial completion; the
+remaining HIGH-VALUE work structurally needs the user, and the autonomous remainder
+is intricate-fresh-context or low-value (continuing = the spin anti-pattern).
 
-**cyc241**: drafted **ADR-0127** (Proposed) — the D-202 PHASE C design (cross-module
-func import type-identity: structural subtyping AND `canonicalEqual`-cross-`Types`
-OR supertype-reach; no-regression set = multi-mem 407 + EH 34 + `.30/.48/.50`). The
-design is now nailed; impl is de-risked.
+**Gating user touchpoint(s)**:
+- **Formal Phase 10 close → Phase 11** (close-eligible, 10.P 0 FAIL). The loop has
+  driven the autonomous correctness as far as it cleanly goes.
+- **ADR-0127 `Proposed → Accept`** (D-202 PHASE C — cross-module func import
+  type-identity). After Accept the loop implements PHASE C in a fresh-context cycle.
 
-**Honest state**: this very long session (cyc232-241) drove Phase 10's clean
-autonomous correctness to substantial completion (cross-module TC, EH×TC,
-stale-debt correction, D-202 PHASE A + B-finality, PHASE C ADR). The remaining
-AUTONOMOUS items are all fresh-context/dedicated-effort or low-value: **D-202 PHASE
-C impl** (per ADR-0127 — cross-`Types` canonicalEqual extension + exporter
-supertype threading; regression-risky → best fresh context, or after user-Accepts
-ADR-0127); gc per-op-file migration (refactor); gc_stress / eh_frequency runner
-(involved/perf). The HIGH-VALUE move — formal Phase 10 close (→ Phase 11;
-close-eligible, 0 FAIL) — is USER-GATED. Next driving chunk = **D-202 PHASE C impl
-per ADR-0127** when context is fresh; else gc per-op migration. Re-armable to the
-Phase-10 close at any user signal.
+**Autonomous prep walked (do NOT re-walk)**:
+- D-202 PHASE A + B-finality landed + ubuntu-verified (`38bb0e0e`, `a4bd9bbb`);
+  assert_unlinkable 5→4.
+- D-202 PHASE C fully scoped: ADR-0127 (design + alternatives + no-regression) +
+  cyc242 impl-survey. The impl genuinely needs a NEW `canonicalEqualCross`
+  (two-`Types` recursion; `sections.canonicalEqual` is single-`Types`) AND
+  **retaining the exporter's `sections.Types`** (currently `defer types_owned.deinit()`
+  at `instantiate.zig:82` frees it) — a memory-lifetime change + intricate
+  type-system recursion, regression-risky (must keep multi-mem 407 + EH 34 +
+  `.30/.48/.50` green). The naive cross-module index/supertype-reach shortcut is the
+  rejected ADR-0127 Alternative A (regresses). Recipe in D-202 debt + ADR-0127.
+- Lower-value autonomous items: gc per-op-file migration (behavior-preserving
+  refactor; two dispatch patterns to untangle); gc_stress / eh_frequency runner
+  本実装 (perf scaffolding).
 
-(Prior context — cyc234-235 stale-debt correction, retained for the lesson):
-**the debt ledger was STALE and mis-routed the loop 3×.** Ground-truth (ADR Status
-+ live corpus, NOT debt prose):
-- ADR-0115 / 0116 / **0123 / 0126 are all ACCEPTED** (0123 "user-delegated
-  autonomous flip" 2026-05-28). There is NO pending user ADR flip. Debt rows
-  D-195 / D-198 saying "gated on ADR-XXXX Accept" are STALE.
-- **function-references corpus GREEN** (ubuntu `return 39/0, trap 4/0,
-  invalid 18/0, skip 1`) — **D-195 is DISCHARGED** (typed-funcref ValType
-  `0x63/0x64` parser landed, `zir.zig:191`). Debt row stale.
-- **GC corpus** GREEN except: `.17` (deferred multi-mechanism rabbit hole) +
-  the **D-202 cross-module negatives** (`gc/type-subtyping.30/.48/.50`
-  instantiate `SignatureMismatch`, `.35/.36/.42/.52/.54` assert_unlinkable
-  wrongly-link).
-- Lesson to write: *verify ADR Status + live corpus before trusting a debt
-  row's "blocked-by ADR flip" framing* — three candidate chunks this session
-  (D-195, the GC ADRs, the gc per-op "migration") were stale/misread.
-
-So Phase 10 is NOT at a bucket-3 user-touchpoint — **D-202 is genuine open
-AUTONOMOUS correctness work** (ADRs accepted; impl-only).
-
-Resume Step 1b routes to the Active bundle above for the next step + discharge
-D-195 (stale) / reconcile D-198 alongside. NOTE smell: `runner.zig` 1168 lines
-(soft WARN) — future test sibling extraction.
-**Formal Phase 10 close** (→ Phase 11) is a separate high-value user decision
-(close-eligible, 0 FAIL); re-armable at any user signal. NOT a blocker on D-202.
+**To resume**: Accept ADR-0127 (→ PHASE C impl next cycle) OR decide the Phase 10
+close OR just `/continue` — in a fresh context the loop implements PHASE C per
+ADR-0127, else falls back to the low-value items.
 
 ## §10 close map + open
 
 10.P close-eligible (0 FAIL). realworld/p10 matrix 45/55 (0 FAIL, 10 WASI-skip).
-10.TC row `[ ]` (emit + spec + realworld clang_musttail + cross-module + EH×TC
-all DONE; sole residual = `wasm_of_ocaml` triple-crown capstone, deferred to GC+EH
-+toolchain — flip 10.TC `[x]` then). 10.E (EH) + 10.G (GC) are the large open
-Phase-10 areas (GC has ADR-gated residuals D-195/D-198/D-202; D-179 wabt bake). gc
-.17 funcref-RTT (D-198) deep defer; funcrefs 34/39 (5 RTT-gated); 10 SKIP-WASI →
-Phase 11. D-197 (validate-error surfacing); D-209 (>4GiB memory64 offset, payload
-u32); D-210 (cross-module proper-tail-call defer — arm64 prologue cohort-save).
+10.TC row `[ ]` (emit + spec + realworld clang_musttail + cross-module + EH×TC all
+DONE; sole residual = `wasm_of_ocaml` triple-crown capstone, deferred to GC+EH
++toolchain). 10.E (EH) + 10.G (GC) green corpora; residuals: `.17` (deferred); D-202
+PHASE C (ADR-0127); 10 SKIP-WASI → Phase 11. D-197 (validate-error surfacing);
+D-209 (>4GiB memory64 offset); D-210 (cross-module proper-tail-call — arm64 prologue
+cohort-save).
 
 ## Key refs
 
 - ADR-0066 (cross-module bridge thunk; cohort save/restore); ADR-0112 + Amendment
-  2026-05-30 (cross-module tail-call = call-and-return); ADR-0111 (memory64);
-  ADR-0114 (EH). `abi_callee_saved_pinning.md` (pinned cohort discipline).
+  2026-05-30 (cross-module tail-call = call-and-return); ADR-0127 (cross-module func
+  import type-identity, Proposed); `abi_callee_saved_pinning.md`.
 - Lessons: `2026-05-30-{cross-module-tail-call-cohort-asymmetry,
-  jit-funcref-tail-call-codegen-recipe, clang-wasm-realworld-toolchain-recipe}`.
-  ROADMAP §10; `.dev/phase_log/phase10.md`.
+  stale-debt-rows-misroute-the-loop, clang-wasm-realworld-toolchain-recipe}`.
+  ROADMAP §10; `.dev/phase_log/phase10.md`; D-202 debt (PHASE C recipe).
