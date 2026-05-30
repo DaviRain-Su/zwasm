@@ -8,7 +8,7 @@
 - **Phase**: **10 IN-PROGRESS** (Phase 9 = DONE 2026-05-24). Real remaining work is
   enumerated below — Phase 10 is **NOT close-ready**. (The prior "substantially
   complete" framing was interp-only optimism; corrected by the 2026-05-30 user audit.)
-- **HEAD**: `<this-commit>` (cyc243 wiring audit). cyc232-242 landed + ubuntu-verified:
+- **HEAD**: `1f35d08d` (cyc243 wiring audit). cyc232-242 landed + ubuntu-verified:
   cross-module `return_call`, EH×TC, D-202 PHASE A + B-finality, ADR-0127 draft.
 - **Two execution paths (CODE-verified, not doc prose)**: the spec corpus runs via the
   **INTERPRETER** (`instance.invoke` → `_dispatch.run`, `src/zwasm/instance.zig:169`).
