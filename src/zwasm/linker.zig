@@ -18,6 +18,7 @@ const _runtime = @import("../runtime/runtime.zig");
 const _runtime_import = @import("../runtime/instance/import.zig");
 const _wasi_host = @import("../wasi/host.zig");
 const _zir = @import("../ir/zir.zig");
+const _validate = @import("../validate/validator.zig");
 
 const _zwasm = @import("../zwasm.zig");
 const _engine = @import("engine.zig");
@@ -449,12 +450,20 @@ pub const Linker = struct {
                                 }) catch return error.OutOfMemory;
                             },
                             .cross_module_func => |cmf| {
-                                // 10.M-D195b cycle 74 — cross-instance
-                                // func binding. Reuse the existing
-                                // cross_module.thunk dispatcher; the
-                                // runtime-side type-check at call
-                                // boundary uses source_signature.
-                                if (!sigEqual(declared.params, cmf.source_signature.params) or !sigEqual(declared.results, cmf.source_signature.results)) {
+                                // 10.M-D195b cycle 74 — cross-instance func
+                                // binding via the cross_module.thunk dispatcher.
+                                // Import-time check uses func SUBTYPING
+                                // (contravariant params / covariant results;
+                                // Wasm 3.0 §3.3.5.3), NOT exact equality — a
+                                // cross-module import may resolve against a
+                                // subtype-compatible exported func (D-202 PHASE A,
+                                // gc/type-subtyping.30/.48/.50). Mirrors the
+                                // instantiate.zig::checkImportTypeMatches path
+                                // (cyc192). Same-typespace simplification: the
+                                // importer's `module_types` interprets both sides
+                                // (valid while corpus type defs are duplicated;
+                                // distinct-layout + finality = D-202 PHASE B).
+                                if (!_validate.funcTypeImportCompatible(declared, cmf.source_signature, &module_types.?)) {
                                     return error.SignatureMismatch;
                                 }
                                 bindings_list.append(scratch, .{
