@@ -116,7 +116,8 @@ const ProposalSummary = struct {
 /// dispatcher lands in follow-on cycles.
 fn jitReturnEligible(args_len: usize, results_len: usize, result_ty: []const u8, module_id_len: usize) bool {
     return args_len == 0 and results_len == 1 and module_id_len == 0 and
-        (std.mem.eql(u8, result_ty, "i32") or std.mem.eql(u8, result_ty, "i64"));
+        (std.mem.eql(u8, result_ty, "i32") or std.mem.eql(u8, result_ty, "i64") or
+            std.mem.eql(u8, result_ty, "f32") or std.mem.eql(u8, result_ty, "f64"));
 }
 
 /// §1 (ADR-0128) — classify a `runI32Export` error so the JIT RED signal
@@ -150,6 +151,28 @@ fn jitErrorIsUnwiredShape(e: zwasm.engine.runner.Error) bool {
         => true,
         else => false,
     };
+}
+
+/// Shared catch-classifier for the §1 JIT no-arg dispatch arms (i32 / i64 /
+/// f32 / f64): compile/setup rejects → an enumerated skip (the JIT never
+/// executed this shape), execution-stage outcomes (e.g. `error.Trap`) → fail.
+/// One copy so every result-type arm classifies identically.
+fn recordJitRunErr(
+    e: zwasm.engine.runner.Error,
+    summary: *ProposalSummary,
+    fail_detail: bool,
+    stdout: anytype,
+    proposal: []const u8,
+    ename: []const u8,
+    fname: []const u8,
+) !void {
+    if (jitErrorIsUnwiredShape(e)) {
+        summary.jit_return_skip += 1;
+        if (fail_detail) try stdout.print("  JITskip [{s}/{s}] {s} (unwired shape: err={s})\n", .{ proposal, ename, fname, @errorName(e) });
+    } else {
+        summary.jit_return_fail += 1;
+        if (fail_detail) try stdout.print("  JITfail [{s}/{s}] {s} err={s}\n", .{ proposal, ename, fname, @errorName(e) });
+    }
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -577,18 +600,14 @@ pub fn main(init: std.process.Init) !void {
                                 continue;
                             };
                             const exp_zv = manifest_parser.runtimeToZwasm(exp_rv, exp_tv.ty);
-                            // Dispatch by result type. i32 + i64 are wired (no-arg, exact
-                            // bit compare); the catch routes compile/setup rejects to skip
-                            // and execution-stage outcomes to fail (jitErrorIsUnwiredShape).
+                            // Dispatch by result type. i32/i64/f32/f64 are wired (no-arg,
+                            // exact BIT compare — NaN-safe; the corpus encodes FP results
+                            // as literal bit patterns, so no NaN-class matcher is needed).
+                            // `recordJitRunErr` routes compile/setup rejects to skip,
+                            // execution-stage outcomes to fail.
                             if (std.mem.eql(u8, exp_tv.ty, "i64")) {
                                 const got_u = zwasm.engine.runner.runI64Export(gpa, jb, d.func_name) catch |e| {
-                                    if (jitErrorIsUnwiredShape(e)) {
-                                        summary.jit_return_skip += 1;
-                                        if (fail_detail) try stdout.print("  JITskip [{s}/{s}] {s} (unwired shape: err={s})\n", .{ proposal, entry.name, d.func_name, @errorName(e) });
-                                    } else {
-                                        summary.jit_return_fail += 1;
-                                        if (fail_detail) try stdout.print("  JITfail [{s}/{s}] {s} err={s}\n", .{ proposal, entry.name, d.func_name, @errorName(e) });
-                                    }
+                                    try recordJitRunErr(e, &summary, fail_detail, stdout, proposal, entry.name, d.func_name);
                                     continue;
                                 };
                                 if (@as(i64, @bitCast(got_u)) == exp_zv.i64) {
@@ -599,14 +618,38 @@ pub fn main(init: std.process.Init) !void {
                                 }
                                 continue;
                             }
-                            const got_u = zwasm.engine.runner.runI32Export(gpa, jb, d.func_name) catch |e| {
-                                if (jitErrorIsUnwiredShape(e)) {
-                                    summary.jit_return_skip += 1;
-                                    if (fail_detail) try stdout.print("  JITskip [{s}/{s}] {s} (unwired shape: err={s})\n", .{ proposal, entry.name, d.func_name, @errorName(e) });
+                            if (std.mem.eql(u8, exp_tv.ty, "f32")) {
+                                const got_f = zwasm.engine.runner.runF32Export(gpa, jb, d.func_name) catch |e| {
+                                    try recordJitRunErr(e, &summary, fail_detail, stdout, proposal, entry.name, d.func_name);
+                                    continue;
+                                };
+                                const got_bits: u32 = @bitCast(got_f);
+                                const exp_bits: u32 = @bitCast(exp_zv.f32);
+                                if (got_bits == exp_bits) {
+                                    summary.jit_return_pass += 1;
                                 } else {
                                     summary.jit_return_fail += 1;
-                                    if (fail_detail) try stdout.print("  JITfail [{s}/{s}] {s} err={s}\n", .{ proposal, entry.name, d.func_name, @errorName(e) });
+                                    if (fail_detail) try stdout.print("  JITval [{s}/{s}] {s} exp=0x{x:0>8} got=0x{x:0>8}\n", .{ proposal, entry.name, d.func_name, exp_bits, got_bits });
                                 }
+                                continue;
+                            }
+                            if (std.mem.eql(u8, exp_tv.ty, "f64")) {
+                                const got_f = zwasm.engine.runner.runF64Export(gpa, jb, d.func_name) catch |e| {
+                                    try recordJitRunErr(e, &summary, fail_detail, stdout, proposal, entry.name, d.func_name);
+                                    continue;
+                                };
+                                const got_bits: u64 = @bitCast(got_f);
+                                const exp_bits: u64 = @bitCast(exp_zv.f64);
+                                if (got_bits == exp_bits) {
+                                    summary.jit_return_pass += 1;
+                                } else {
+                                    summary.jit_return_fail += 1;
+                                    if (fail_detail) try stdout.print("  JITval [{s}/{s}] {s} exp=0x{x:0>16} got=0x{x:0>16}\n", .{ proposal, entry.name, d.func_name, exp_bits, got_bits });
+                                }
+                                continue;
+                            }
+                            const got_u = zwasm.engine.runner.runI32Export(gpa, jb, d.func_name) catch |e| {
+                                try recordJitRunErr(e, &summary, fail_detail, stdout, proposal, entry.name, d.func_name);
                                 continue;
                             };
                             if (@as(i32, @bitCast(got_u)) == exp_zv.i32) {
@@ -952,7 +995,7 @@ pub fn main(init: std.process.Init) !void {
     );
     if (jit_mode) {
         try stdout.print(
-            "[wasm-3.0-assert] JIT execution mode (ADR-0128 §1): assert_return pass={d} fail={d} skip={d} (skip = JIT could not attempt this shape: eligibility-gated [args / fp / v128 / multi-value / void / cross-module] OR compile/setup-rejected [multi-memory / unemitted-op / const-expr-or-validate gap, per jitErrorIsUnwiredShape]; fail = JIT executed and got the wrong observable result [trap or value mismatch])\n",
+            "[wasm-3.0-assert] JIT execution mode (ADR-0128 §1): assert_return pass={d} fail={d} skip={d} (skip = JIT could not attempt this shape: eligibility-gated [args / v128 / multi-value / void / cross-module] OR compile/setup-rejected [multi-memory / unemitted-op / const-expr-or-validate gap, per jitErrorIsUnwiredShape]; fail = JIT executed and got the wrong observable result [trap or value mismatch])\n",
             .{ grand_total_jit_pass, grand_total_jit_fail, grand_total_jit_skip },
         );
     }
@@ -976,18 +1019,21 @@ test "wasm-3.0-assert: PROPOSALS list matches design plan §3.1-§3.5 + §4.6 + 
     try std.testing.expectEqualStrings("multi-memory", PROPOSALS[5]);
 }
 
-test "wasm-3.0-assert §1: JIT execution-mode eligibility + no-arg i32/i64 JIT invoke (ADR-0128 §1)" {
+test "wasm-3.0-assert §1: JIT execution-mode eligibility + no-arg i32/i64/f32/f64 JIT invoke (ADR-0128 §1)" {
     // §1 dispatcher increment — no-arg + single-result, same-module, with
-    // result type ∈ {i32, i64} wired through the JIT (runI32Export /
-    // runI64Export, exact bit compare). FP (f32/f64) results stay a skip
-    // pending the NaN-canonical/-arithmetic compare in the next increment;
-    // args / multi-value / cross-module also still enumerated skips.
+    // result type ∈ {i32, i64, f32, f64} wired through the JIT. Scalars use
+    // exact BIT comparison (correct for NaN bit patterns, which the corpus
+    // encodes literally — `nan:canonical`/`nan:arithmetic` tokens are absent
+    // from the wasm-3.0 result set, so no class matcher is needed). args /
+    // multi-value / cross-module remain enumerated skips.
     try std.testing.expect(jitReturnEligible(0, 1, "i32", 0)); // wired
-    try std.testing.expect(jitReturnEligible(0, 1, "i64", 0)); // wired (this increment)
+    try std.testing.expect(jitReturnEligible(0, 1, "i64", 0)); // wired
+    try std.testing.expect(jitReturnEligible(0, 1, "f32", 0)); // wired (this increment)
+    try std.testing.expect(jitReturnEligible(0, 1, "f64", 0)); // wired (this increment)
     try std.testing.expect(!jitReturnEligible(1, 1, "i32", 0)); // has args
     try std.testing.expect(!jitReturnEligible(0, 2, "i32", 0)); // multi-value
     try std.testing.expect(!jitReturnEligible(0, 0, "", 0)); // void (side-effect)
-    try std.testing.expect(!jitReturnEligible(0, 1, "f32", 0)); // fp result (next increment)
+    try std.testing.expect(!jitReturnEligible(0, 1, "v128", 0)); // v128 result (later)
     try std.testing.expect(!jitReturnEligible(0, 1, "i32", 3)); // cross-module ($M::field)
 
     // End-to-end: the no-arg i32 export executes THROUGH the JIT entry
@@ -1015,6 +1061,32 @@ test "wasm-3.0-assert §1: JIT execution-mode eligibility + no-arg i32/i64 JIT i
     };
     const got64 = try zwasm.engine.runner.runI64Export(std.testing.allocator, &wasm64, "big");
     try std.testing.expectEqual(@as(i64, -1), @as(i64, @bitCast(got64)));
+
+    // End-to-end f32: the result is a canonical NaN bit pattern
+    // (`0x7fc00000`). Comparing BITS (not float `==`, which is false for
+    // NaN) is what makes the JIT FP path correct. Hand-built
+    // `(module (func (export "qnan") (result f32) f32.const <0x7fc00000>))`.
+    const wasm_f32 = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7d, // type: () -> f32
+        0x03, 0x02, 0x01, 0x00, // func: typeidx 0
+        0x07, 0x08, 0x01, 0x04, 0x71, 0x6e, 0x61, 0x6e, 0x00, 0x00, // export "qnan" func 0
+        0x0a, 0x09, 0x01, 0x07, 0x00, 0x43, 0x00, 0x00, 0xc0, 0x7f, 0x0b, // f32.const 0x7fc00000; end
+    };
+    const got_f32 = try zwasm.engine.runner.runF32Export(std.testing.allocator, &wasm_f32, "qnan");
+    try std.testing.expectEqual(@as(u32, 0x7fc00000), @as(u32, @bitCast(got_f32)));
+
+    // End-to-end f64: `f64.const 2.5` (bits 0x4004000000000000). Hand-built
+    // `(module (func (export "two_half") (result f64) f64.const 2.5))`.
+    const wasm_f64 = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7c, // type: () -> f64
+        0x03, 0x02, 0x01, 0x00, // func: typeidx 0
+        0x07, 0x0c, 0x01, 0x08, 0x74, 0x77, 0x6f, 0x5f, 0x68, 0x61, 0x6c, 0x66, 0x00, 0x00, // export "two_half" func 0
+        0x0a, 0x0d, 0x01, 0x0b, 0x00, 0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x40, 0x0b, // f64.const 2.5; end
+    };
+    const got_f64 = try zwasm.engine.runner.runF64Export(std.testing.allocator, &wasm_f64, "two_half");
+    try std.testing.expectEqual(@as(u64, 0x4004000000000000), @as(u64, @bitCast(got_f64)));
 }
 
 test "wasm-3.0-assert §1: JIT error classification — unwired-shape → skip, executed-wrong → fail (ADR-0128 §1)" {

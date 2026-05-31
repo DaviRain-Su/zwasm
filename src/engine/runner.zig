@@ -268,6 +268,55 @@ pub fn runI64Export(
     return entry.callI64NoArgs(compiled.module, func_idx, &owned.rt);
 }
 
+/// Run a no-arg, f32-result exported function. Mirrors `runI64Export`;
+/// differs only in the result-type gate (`.f32`) and entry helper
+/// (`callF32NoArgs`). Callers compare the raw bit pattern (NaN-safe).
+pub fn runF32Export(
+    allocator: Allocator,
+    wasm_bytes: []const u8,
+    export_name: []const u8,
+) Error!f32 {
+    const func_idx = try findExportFunc(allocator, wasm_bytes, export_name);
+
+    var compiled = try compileWasm(allocator, wasm_bytes);
+    defer compiled.deinit(allocator);
+
+    if (func_idx >= compiled.func_sigs.len) return Error.ExportNotFound;
+    if (func_idx < compiled.num_imports) return Error.UnsupportedEntrySignature;
+    const sig = compiled.func_sigs[func_idx];
+    if (sig.params.len != 0 or sig.results.len != 1 or sig.results[0] != .f32) {
+        return Error.UnsupportedEntrySignature;
+    }
+
+    var owned = try setupRuntime(allocator, &compiled, wasm_bytes);
+    defer owned.deinit(allocator);
+    return entry.callF32NoArgs(compiled.module, func_idx, &owned.rt);
+}
+
+/// Run a no-arg, f64-result exported function. f64 mirror of
+/// `runF32Export` (gate `.f64`, entry `callF64NoArgs`).
+pub fn runF64Export(
+    allocator: Allocator,
+    wasm_bytes: []const u8,
+    export_name: []const u8,
+) Error!f64 {
+    const func_idx = try findExportFunc(allocator, wasm_bytes, export_name);
+
+    var compiled = try compileWasm(allocator, wasm_bytes);
+    defer compiled.deinit(allocator);
+
+    if (func_idx >= compiled.func_sigs.len) return Error.ExportNotFound;
+    if (func_idx < compiled.num_imports) return Error.UnsupportedEntrySignature;
+    const sig = compiled.func_sigs[func_idx];
+    if (sig.params.len != 0 or sig.results.len != 1 or sig.results[0] != .f64) {
+        return Error.UnsupportedEntrySignature;
+    }
+
+    var owned = try setupRuntime(allocator, &compiled, wasm_bytes);
+    defer owned.deinit(allocator);
+    return entry.callF64NoArgs(compiled.module, func_idx, &owned.rt);
+}
+
 /// Run a no-arg, void-result exported function (e.g. `_start`)
 /// and surface trap as Error.Trap. Mirrors `runI32Export`'s
 /// setup; differs only in the entry-call helper + signature
