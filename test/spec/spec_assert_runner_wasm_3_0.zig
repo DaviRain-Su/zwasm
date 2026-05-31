@@ -118,6 +118,39 @@ fn jitReturnEligible(args_len: usize, results_len: usize, result_ty: []const u8,
     return args_len == 0 and results_len == 1 and module_id_len == 0 and std.mem.eql(u8, result_ty, "i32");
 }
 
+/// §1 (ADR-0128) — classify a `runI32Export` error so the JIT RED signal
+/// means "JIT executed and produced the wrong observable behaviour", not
+/// "the JIT entry could not even attempt this shape". A compile- or setup-
+/// stage rejection (multi-memory, an unemitted op, a const-expr/validate
+/// gap) means the JIT never executed — that is a *skip*, structurally the
+/// same as the args/i64/fp eligibility skips above (wasmtime tests/wast.rs
+/// should_fail pattern), and is enumerated (printed under --fail-detail),
+/// not silently dropped. Only an execution-stage outcome counts as a
+/// *fail*: `error.Trap` (JIT ran and trapped where a value was expected)
+/// or a value mismatch (handled at the comparison site, not here).
+///
+/// Empirical basis (2026-05-31 --fail-detail sweep, Mac aarch64): of the
+/// 96 "JITfail"s, 87 were compile/setup rejections (66 MultipleMemories,
+/// 11 UnsupportedOp, 4 InvalidFuncIndex, 3 InvalidGlobalInitExpr, 2
+/// StackTypeMismatch, 1 ElemSegmentTypeMismatch) — the JIT never ran them.
+/// `else => false` keeps `error.Trap` AND any unanticipated error as a
+/// loud fail (a new gap must surface, never hide).
+fn jitErrorIsUnwiredShape(e: zwasm.engine.runner.Error) bool {
+    return switch (e) {
+        error.MultipleMemories,
+        error.UnsupportedOp,
+        error.InvalidFuncIndex,
+        error.InvalidGlobalInitExpr,
+        error.StackTypeMismatch,
+        error.ElemSegmentTypeMismatch,
+        error.UnsupportedEntrySignature,
+        error.ExportNotFound,
+        error.ExportIsNotFunction,
+        => true,
+        else => false,
+    };
+}
+
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const gpa = init.gpa;
@@ -145,12 +178,17 @@ pub fn main(init: std.process.Init) !void {
     // `ZWASM_SPEC_ENGINE=jit` routes the no-arg-i32 assert_return subset
     // through the JIT entry (runI32Export) and reports jit pass/fail/skip
     // alongside the interp totals — the verification backbone that makes
-    // "both backends" mechanically checkable. NOTE (first-increment
-    // limitation, tracked): the JIT path re-compiles the module per call
-    // (runI32Export owns its own runtime), so it does NOT share the
-    // interp run's accumulated cross-directive state; functions that
-    // depend on a prior void-assert mutation will show as JITfail until
-    // the shared-runtime JIT-execute design lands (next §1 chunk).
+    // "both backends" mechanically checkable. The JIT entry re-compiles
+    // the module per call (runI32Export owns its own runtime). A
+    // 2026-05-31 --fail-detail sweep settled the originally-suspected
+    // "stale cross-directive state" worry: of 96 raw fails, ZERO were
+    // state-dependent — 87 were compile/setup rejections (66 multi-memory,
+    // 11 unemitted-op, + setup/validate gaps) now routed to
+    // `jit_return_skip` by `jitErrorIsUnwiredShape`, leaving fail = JIT
+    // actually executed and produced the wrong observable result (trap or
+    // value mismatch). A shared-runtime state bridge was therefore dropped
+    // as a zero-yield next chunk; the live lever is widening the
+    // JIT-runnable shape set (see .dev/lessons + handover bundle).
     const jit_mode = if (init.environ_map.get("ZWASM_SPEC_ENGINE")) |v|
         std.mem.eql(u8, v, "jit")
     else
@@ -539,8 +577,13 @@ pub fn main(init: std.process.Init) !void {
                             };
                             const exp_zv = manifest_parser.runtimeToZwasm(exp_rv, exp_tv.ty);
                             const got_u = zwasm.engine.runner.runI32Export(gpa, jb, d.func_name) catch |e| {
-                                summary.jit_return_fail += 1;
-                                if (fail_detail) try stdout.print("  JITfail [{s}/{s}] {s} err={s}\n", .{ proposal, entry.name, d.func_name, @errorName(e) });
+                                if (jitErrorIsUnwiredShape(e)) {
+                                    summary.jit_return_skip += 1;
+                                    if (fail_detail) try stdout.print("  JITskip [{s}/{s}] {s} (unwired shape: err={s})\n", .{ proposal, entry.name, d.func_name, @errorName(e) });
+                                } else {
+                                    summary.jit_return_fail += 1;
+                                    if (fail_detail) try stdout.print("  JITfail [{s}/{s}] {s} err={s}\n", .{ proposal, entry.name, d.func_name, @errorName(e) });
+                                }
                                 continue;
                             };
                             if (@as(i32, @bitCast(got_u)) == exp_zv.i32) {
@@ -886,7 +929,7 @@ pub fn main(init: std.process.Init) !void {
     );
     if (jit_mode) {
         try stdout.print(
-            "[wasm-3.0-assert] JIT execution mode (ADR-0128 §1): assert_return pass={d} fail={d} skip={d} (skip = shape not yet wired through the JIT — args / i64 / fp / v128 / multi-value / void / cross-module; flipped as the general dispatcher lands)\n",
+            "[wasm-3.0-assert] JIT execution mode (ADR-0128 §1): assert_return pass={d} fail={d} skip={d} (skip = JIT could not attempt this shape: eligibility-gated [args / i64 / fp / v128 / multi-value / void / cross-module] OR compile/setup-rejected [multi-memory / unemitted-op / const-expr-or-validate gap, per jitErrorIsUnwiredShape]; fail = JIT executed and got the wrong observable result [trap or value mismatch])\n",
             .{ grand_total_jit_pass, grand_total_jit_fail, grand_total_jit_skip },
         );
     }
@@ -936,4 +979,24 @@ test "wasm-3.0-assert §1: JIT execution-mode eligibility + no-arg-i32 JIT invok
     };
     const got = try zwasm.engine.runner.runI32Export(std.testing.allocator, &wasm, "seven");
     try std.testing.expectEqual(@as(u32, 7), got);
+}
+
+test "wasm-3.0-assert §1: JIT error classification — unwired-shape → skip, executed-wrong → fail (ADR-0128 §1)" {
+    // Compile/setup-stage rejections (the JIT never executed) classify as
+    // skip — structurally the same as the args/i64/fp eligibility skips,
+    // enumerated not silently dropped. Empirically these are 87 of the 96
+    // raw fails (66 multi-memory + 11 unemitted-op + setup/validate gaps).
+    try std.testing.expect(jitErrorIsUnwiredShape(error.MultipleMemories));
+    try std.testing.expect(jitErrorIsUnwiredShape(error.UnsupportedOp));
+    try std.testing.expect(jitErrorIsUnwiredShape(error.InvalidFuncIndex));
+    try std.testing.expect(jitErrorIsUnwiredShape(error.InvalidGlobalInitExpr));
+    try std.testing.expect(jitErrorIsUnwiredShape(error.StackTypeMismatch));
+    try std.testing.expect(jitErrorIsUnwiredShape(error.ElemSegmentTypeMismatch));
+    try std.testing.expect(jitErrorIsUnwiredShape(error.UnsupportedEntrySignature));
+    try std.testing.expect(jitErrorIsUnwiredShape(error.ExportNotFound));
+
+    // Execution-stage outcome = the JIT ran and produced the wrong
+    // observable behaviour → genuine fail (the meaningful both-backends
+    // RED signal). `error.Trap` and any unanticipated error stay fail.
+    try std.testing.expect(!jitErrorIsUnwiredShape(error.Trap));
 }
