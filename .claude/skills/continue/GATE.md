@@ -28,7 +28,15 @@ verify; predates this rule, unaffected).
 
 ## Pipeline (ADR-0076 D2 + D3)
 
-1. **Mac runs foreground** with the gate from the class column.
+1. **Mac runs foreground** with the gate from the class column. Use
+   `bash scripts/mac_gate.sh` (no arg = auto-classify; or pass
+   `test`/`test-all`) — it runs the scope step + the Mac lint gate and
+   exits 0 iff BOTH pass, with an unambiguous `[mac_gate] OK/FAIL` line.
+   **Do NOT do `zig build test-all > log; grep -c … log`**: a trailing
+   `grep -c` exits 1 on zero matches, which the harness misreports as a
+   "command failed" notification on a green build. Inspect the build by
+   READING `$MAC_GATE_LOG` (default `/tmp/mac_gate.log`) as a SEPARATE
+   step — never append a grep to the gate invocation's exit path.
    Fail-fast — next steps (commit pair / push) need its result inline.
 2. **ubuntu does NOT run here.** Kicked AFTER the single push in
    Step 6+7 (ADR-0076 D2), against just-pushed HEAD. Verification of
