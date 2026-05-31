@@ -65,10 +65,16 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   wat2wasm 1.0.40 can't parse GC array/ref text; ref.cast leaves a REF on stack — trap-test
   bodies need `drop; i32.const 0` to type-check; i32.const ≥ 64 needs multi-byte signed LEB128**).
 - **NEXT = br_on_cast / br_on_cast_fail emit, both arches** (0xFB 0x18/0x19) — cast + BRANCH
-  (control-flow, NOT a straight value op). Combines the R-1/R-2 subtype check with a br-to-label
-  on cast-success (br_on_cast) / cast-failure (br_on_cast_fail); the matched ref stays on the
-  stack for the branch target. Survey the br/br_if label-branch emit (op_control.zig) + how
-  block-result vregs thread to the label; the cast decision reuses gcRefMatchesNonNullCore.
+  (control-flow; SURVEY DONE this cycle, full plan in **`private/notes/p10-br-on-cast-survey.md`**).
+  Key facts: `br`/`br_if` are emit.zig CENTRAL-SWITCH arms calling `op_control.emitBr*` (NOT
+  collected per-op files) — so br_on_cast lives in op_control.zig + an emit.zig switch arm too (no
+  dispatch_collector count bumps). It pops 0 (the ref STAYS on the stack — liveness gap: add a
+  peek-don't-pop handler beside `.br_if` at liveness.zig:414). Recipe: refactor emitBrIf →
+  `branchOnReg(ctx, ins, cond_reg, branch_if_nonzero)` (the 5-case branch body), then emitBrOnCast
+  = peek ref → CALL jitGcRefTest(ht2 | ht2_nullable<<8) → branchOnReg(W0, !is_fail). HAZARDS
+  (in notes): sense-flip CBNZ↔CBZ for `_fail`; W0 must be read before merge MOVs clobber it;
+  force-spill + usesRuntimePtr for the 2 ops. Cycle A = branchOnReg refactor (behaviour-neutral,
+  br_if stays green); Cycle B = emitBrOnCast + liveness + e2e; Cycle C = `_fail` sense-flip.
 - **Exit-condition**: all GC ops emit on both arches + spec corpus green via JIT mode (§1).
 
 ## §10 remaining — the six `[ ]` rows
@@ -85,11 +91,12 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-**R-3 kicked to ubuntu THIS turn** (background `test-all`, against the turn's pushed HEAD = the
-R-3 + handover chain tip). Next `/continue`: `tail -3 /tmp/ubuntu.log` — expect
-`[run_remote_ubuntu] OK (HEAD=<R-3 chain tip>)`. On FAIL: revert the turn's commit pair to the
-last ubuntu-verified HEAD (`ddfb6b64` = R-1/R-2, verified GREEN this cycle). On GREEN: proceed to
-NEXT (br_on_cast — Step 0 survey the label-branch emit first; it is control-flow, not a value op).
+**This cycle = br_on_cast SURVEY/design only (no code shipped → NO ubuntu kick this turn).** R-3
+`ref.cast_null` was ubuntu-verified GREEN this cycle (`OK (HEAD=ca2ce49f)`); all GC value ops
+(i31/struct/array/ref.eq/ref.test/test_null/cast/cast_null) are confirmed on both arches. Next
+`/continue`: Step 0.7 is already settled (no new code kicked) — proceed directly to br_on_cast
+**Cycle A** (the emitBrIf → branchOnReg behaviour-neutral refactor; plan in
+`private/notes/p10-br-on-cast-survey.md`).
 
 **Lesson (still live)**: `gate_commit.sh --fast` DEFERS `zig build test`/`lint` (Step 4/5 own
 them) — parent's full `zig build test` before push is the real gate.
