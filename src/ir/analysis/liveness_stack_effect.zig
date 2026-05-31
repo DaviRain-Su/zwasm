@@ -217,6 +217,9 @@ pub fn stackEffect(op: ZirOp) ?StackEffect {
         // Wasm 3.0 GC (10.G): array.get pops the array GcRef + i32 index,
         // pushes the loaded element (2 → 1; bounds-checked, ADR-0116 §3a).
         .@"array.get",
+        // array.get_s (A-6a) — same shape as array.get (pop ref + idx, push
+        // the sign-extended i32 from the packed element). 2 → 1.
+        .@"array.get_s",
         // array.new pops the init value + i32 length, pushes the GcRef
         // (the trampoline allocs + fills). 2 → 1.
         .@"array.new",

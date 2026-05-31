@@ -890,6 +890,21 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         break :blk out;
     };
 
+    // 10.G GC-on-JIT (A-6a) — typeidx-indexed array element valtype bytes
+    // (Wasm §5.3.5 wire byte: 0x78 i8 / 0x77 i16 / 0x7F i32 …) for the
+    // lowerer to stamp into `array.get_s`'s `ZirInstr.extra`, so the emit
+    // knows the packed width (i8 → SXTB, i16 → SXTH) without re-deriving the
+    // type section. Non-array typeidx → 0. Arena-allocated; read only during
+    // this call's lowering.
+    const array_elem_valtypes: []u8 = blk: {
+        if (types.array_defs.len == 0) break :blk &.{};
+        const out = try a.alloc(u8, types.array_defs.len);
+        for (types.array_defs, 0..) |ad, i| {
+            out[i] = if (ad) |d| d.element.storage.specByte() else 0;
+        }
+        break :blk out;
+    };
+
     // §9.9 / 9.9-l-1b-d093-d82 (skip-impl drainage):
     // Wasm spec §3.4.7.3 / §3.4.10 declared-funcrefs set. A
     // funcidx is "declared" iff it appears in some global
@@ -995,6 +1010,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             memory0_idx_type,
             tag_param_counts,
             struct_field_counts,
+            array_elem_valtypes,
         ) catch |err| {
             std.debug.print("compileWasm: func[{d}] params={d} results={d} → {s}\n", .{
                 wasm_idx,

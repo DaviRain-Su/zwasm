@@ -88,7 +88,7 @@ pub fn lowerFunctionBody(
     module_types: []const FuncType,
     select_types: []const u8,
 ) Error!void {
-    return lowerFunctionBodyWith(alloc, body, out, module_types, select_types, &.{});
+    return lowerFunctionBodyWith(alloc, body, out, module_types, select_types, &.{}, &.{});
 }
 
 /// Variant carrying `struct_field_counts` (typeidx-indexed; built from
@@ -106,6 +106,7 @@ pub fn lowerFunctionBodyWith(
     module_types: []const FuncType,
     select_types: []const u8,
     struct_field_counts: []const u32,
+    array_elem_valtypes: []const u8,
 ) Error!void {
     var lo = Lowerer{
         .alloc = alloc,
@@ -115,6 +116,7 @@ pub fn lowerFunctionBodyWith(
         .module_types = module_types,
         .select_types = select_types,
         .struct_field_counts = struct_field_counts,
+        .array_elem_valtypes = array_elem_valtypes,
     };
     try lo.run();
 }
@@ -139,6 +141,12 @@ pub const Lowerer = struct {
     /// into `ZirInstr.extra` so liveness + emit know the variadic pop
     /// count. Empty → struct.new `extra = 0` (interp path ignores it).
     struct_field_counts: []const u32 = &.{},
+
+    /// 10.G GC-on-JIT (A-6a) — typeidx-indexed array element valtype bytes
+    /// (0x78 i8 / 0x77 i16 / …). `array.get_s` stamps `valtypes[typeidx]`
+    /// into `ZirInstr.extra` so the emit picks the packed-width extend
+    /// (SXTB vs SXTH). Empty → `extra = 0` (interp path ignores it).
+    array_elem_valtypes: []const u8 = &.{},
 
     block_stack: [max_control_stack]u32 = undefined,
     block_stack_len: usize = 0,
@@ -683,7 +691,10 @@ pub const Lowerer = struct {
             },
             // array.get / array.get_s / array.get_u / array.set / array.fill
             // (Wasm 3.0 GC §3.3.5.6.10-14). Encoding: 0xFB {11..14,16}
-            // typeidx(uleb32). Pack typeidx in payload.
+            // typeidx(uleb32). Pack typeidx in payload. `array.get_s` (sub 12)
+            // additionally stamps the packed element valtype byte into `extra`
+            // so the JIT emit picks SXTB (i8) vs SXTH (i16) without re-deriving
+            // the type section (A-6a; mirror struct.new's field-count stamp).
             11, 12, 13, 14, 16 => {
                 const typeidx = try leb128.readUleb128(u32, self.body, &self.pos);
                 const tag: zir.ZirOp = switch (sub) {
@@ -694,7 +705,11 @@ pub const Lowerer = struct {
                     16 => .@"array.fill",
                     else => unreachable,
                 };
-                try self.emit(tag, typeidx, 0);
+                const extra: u32 = if (sub == 12 and typeidx < self.array_elem_valtypes.len)
+                    self.array_elem_valtypes[typeidx]
+                else
+                    0;
+                try self.emit(tag, typeidx, extra);
             },
             // array.len (Wasm 3.0 GC §3.3.5.6.13). No immediates.
             15 => try self.emit(.@"array.len", 0, 0),
