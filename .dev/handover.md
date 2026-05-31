@@ -81,14 +81,13 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior `6dccd1b5` (array A-3) ubuntu-verified green `OK (HEAD=6dccd1b5)` this session. (The
-`failed command:` line in `/tmp/ubuntu.log` is **benign** negative-test stderr — reproduces
-locally with EXIT=0.) This turn = array A-4 `690bcf0d` (array.new emit both arches). Verified
-locally: full `zig build test` (arm64) EXIT=0 + lint 0 + `zig build -Dtarget=x86_64-linux-gnu`
-EXIT=0. The A-4 e2e is **ungated** — x86_64 RUNTIME exec of array.new is verified ONLY by the
-ubuntu kick (Mac runs arm64). **ubuntu kick launched against `690bcf0d`** (user-requested stop:
-NO ScheduleWakeup re-arm this turn). Verify `tail -3 /tmp/ubuntu.log` on next `/continue`;
-revert the turn's commits to the last ubuntu-green HEAD (`6dccd1b5`) on FAIL.
+This turn = array A-4 `690bcf0d` (array.new emit both arches) + handover chore `75355a15`.
+**ubuntu-verified GREEN `OK (HEAD=75355a15)`** (kick ran against the pushed HEAD = A-4 code +
+docs-only chore; `/tmp/ubuntu.log` confirms). Also: arm64 `zig build test` EXIT=0 + lint 0 +
+x86_64 cross-compile EXIT=0. So Step 0.7 next `/continue` = trivially green (log already shows
+`75355a15`); **NO revert needed**, proceed to array A-5. (User-requested stop: NO ScheduleWakeup
+re-arm this turn — the loop resumes only on the next manual `/continue`.) The `failed command:`
+line in the log is **benign** negative-test stderr (reproduces locally with EXIT=0).
 
 **Lesson (still live)**: `gate_commit.sh --fast` DEFERS `zig build test`/`lint` (Step 4/5 own them) — parent's full `zig build test` before push is the real gate.
 
