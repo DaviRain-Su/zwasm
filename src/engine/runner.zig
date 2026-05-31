@@ -1394,3 +1394,30 @@ test "runI32Export: array.set then array.get round-trip → 55 (10.G array-on-JI
     };
     try testing.expectEqual(@as(u32, 55), runI32Export(testing.allocator, &bytes, "f"));
 }
+
+test "runI32Export: array.new fill + array.get → 7 (10.G array-on-JIT A-4)" {
+    // Both arches (arm64 + x86_64 SysV emit landed together).
+    // (module
+    //   (type (array (mut i32)))             ;; type 0
+    //   (func (export "f") (result i32)        ;; type 1
+    //     i32.const 7  i32.const 3  array.new 0  i32.const 1  array.get 0))
+    // array.new pops [init=7, length=3] (length on top), allocs + fills all
+    // 3 elements with 7 via the jitGcAllocArrayFill trampoline; array.get
+    // reads elem[1] → 7 (vs 0 if the fill didn't run). No local needed (the
+    // ref flows new → get directly). array.new = fb 06 typeidx.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        // type: [0]=array{i32 mut} (5e 7f 01), [1]=func ()->(i32) (60 00 01 7f)
+        0x01, 0x08, 0x02, 0x5e, 0x7f, 0x01, 0x60, 0x00,
+        0x01, 0x7f,
+        0x03, 0x02, 0x01, 0x01, // func: type idx 1
+        0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x00, // export "f" func 0
+        // code: body 14 bytes (locals 00 + i32.const 7 [41 07] + i32.const 3
+        // [41 03] + array.new 0 [fb 06 00] + i32.const 1 [41 01] +
+        // array.get 0 [fb 0b 00] + end 0b). body_size=0x0e, sect size=0x10.
+        0x0a, 0x10, 0x01, 0x0e, 0x00, 0x41, 0x07,
+        0x41, 0x03, 0xfb, 0x06, 0x00, 0x41, 0x01,
+        0xfb, 0x0b, 0x00, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 7), runI32Export(testing.allocator, &bytes, "f"));
+}

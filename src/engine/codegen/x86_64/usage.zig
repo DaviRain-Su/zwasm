@@ -179,6 +179,8 @@ pub fn usesRuntimePtr(func: *const ZirFunc) bool {
             // [R15 + gc_heap_off] for the element access → need R15 pinned.
             .@"array.get",
             .@"array.set",
+            // array A-4: array.new CALLs jitGcAllocArrayFill (rt=RDI=R15).
+            .@"array.new",
             .@"unreachable",
             // §9.9 / 9.9-m-1b: ref.func loads func_entities_ptr
             // from [r15+off]. Requires R15.

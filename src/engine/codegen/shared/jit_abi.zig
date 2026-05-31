@@ -505,6 +505,36 @@ pub fn jitGcAllocArray(rt: *JitRuntime, typeidx: u32, length: u32) callconv(.c) 
     return object_alloc.allocArrayObject(heap, typeidx, length, ai.element.size, true) catch 0;
 }
 
+/// 10.G GC-on-JIT array A-4 — `array.new` emit materialises this fn's
+/// address + `CALL`s it (rt=arg0, typeidx=arg1, length=arg2, init=arg3).
+/// Allocates the array, then fills every element with the `init` value
+/// (the 8-byte operand, passed as a u64) — the SAME fill the interp
+/// `array_ops.zig` arrayNew does. Doing the fill HERE (vs an emitted
+/// machine-code loop) keeps the per-arch emit a plain marshal+CALL, since
+/// the element count is a runtime value. Returns the `GcRef`, or `0` on
+/// bad typeidx / unmaterialised substrate / OOM. NOTE: `init` is the raw
+/// 8 bytes of the value; FP element types (f32/f64) would need the emit
+/// to marshal from an FP reg — currently GPR-only (see debt; matches the
+/// struct.new field-store simplification).
+pub fn jitGcAllocArrayFill(rt: *JitRuntime, typeidx: u32, length: u32, init: u64) callconv(.c) u32 {
+    const heap_opaque = rt.gc_heap orelse return 0;
+    const gti_opaque = rt.gc_type_infos_ptr orelse return 0;
+    const heap: *heap_mod.Heap = @ptrCast(@alignCast(heap_opaque));
+    const gti: *const gc_type_info.GcTypeInfos = @ptrCast(@alignCast(gti_opaque));
+    if (typeidx >= gti.array_infos.len) return 0;
+    const ai = gti.array_infos[typeidx] orelse return 0;
+    const ref = object_alloc.allocArrayObject(heap, typeidx, length, ai.element.size, false) catch return 0;
+    const esz: u32 = ai.element.size;
+    const ahsz: u32 = @sizeOf(gc_type_info.ArrayHeader);
+    const init_bytes = std.mem.asBytes(&init);
+    var i: u32 = 0;
+    while (i < length) : (i += 1) {
+        const off = ref + ahsz + i * esz;
+        @memcpy(heap.bytes[off .. off + esz], init_bytes[0..esz]);
+    }
+    return ref;
+}
+
 // ============================================================
 // Comptime offset constants — consumed by prologue emit (per-arch
 // `compile()` writes `LDR Xn, [X0, #vm_base_off]` etc.).
@@ -812,6 +842,39 @@ test "jitGcAllocArray: allocates array(mut i32) length 3 via the *JitRuntime bri
 test "jitGcAllocArray: null gc_heap → returns 0 (null sentinel)" {
     var rt: JitRuntime = std.mem.zeroes(JitRuntime);
     try testing.expectEqual(@as(u32, 0), jitGcAllocArray(&rt, 0, 3));
+}
+
+test "jitGcAllocArrayFill: allocates array(mut i32) len 2 filled with init (10.G array A-4)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const sections = @import("../../../parse/sections.zig");
+    // 1 type: array (mut i32) → body `01 5E 7F 01`.
+    const body = [_]u8{ 0x01, 0x5E, 0x7F, 0x01 };
+    var types = try sections.decodeTypes(testing.allocator, &body);
+    defer types.deinit();
+    var gti = try gc_type_info.materialiseGcTypes(a, types);
+    var heap = heap_mod.Heap.init(a);
+
+    var rt: JitRuntime = std.mem.zeroes(JitRuntime);
+    rt.gc_heap = &heap;
+    rt.gc_type_infos_ptr = &gti;
+
+    const ref = jitGcAllocArrayFill(&rt, 0, 2, 7);
+    try testing.expect(ref >= 2);
+    const ArrayHeader = gc_type_info.ArrayHeader;
+    const ahsz = @sizeOf(ArrayHeader);
+    var hdr: ArrayHeader = undefined;
+    @memcpy(std.mem.asBytes(&hdr)[0..ahsz], heap.bytes[ref .. ref + ahsz]);
+    try testing.expectEqual(@as(u32, 2), hdr.length);
+    // Both element slots filled with 7 (not zero-inited).
+    var i: u32 = 0;
+    while (i < 2) : (i += 1) {
+        const off = ref + ahsz + i * 8;
+        var slot: u64 = undefined;
+        @memcpy(std.mem.asBytes(&slot), heap.bytes[off .. off + 8]);
+        try testing.expectEqual(@as(u64, 7), slot);
+    }
 }
 
 test "JitRuntime: eh_payload_buf + eh_payload_len offsets (ADR-0120 Cycle 2)" {

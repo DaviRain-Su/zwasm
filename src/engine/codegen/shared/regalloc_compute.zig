@@ -138,6 +138,9 @@ pub fn computeWith(
             // operand is consumed into the arg BEFORE the CALL (strict),
             // but vregs spanning it must still force-spill.
             .@"array.new_default" => false,
+            // array.new: BLR/CALL into jitGcAllocArrayFill; init + length
+            // both consumed into args before the CALL (strict).
+            .@"array.new" => false,
             else => null,
         };
         const inc = inclusive orelse continue;
