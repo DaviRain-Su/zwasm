@@ -8,14 +8,17 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD**: GC-op JIT emit COMPLETE both arches (`c94bd04f`, ubuntu-verified `72c0c9e3`):
-  i31 + full struct family + full array family + ref.eq + ref.test/test_null/cast/cast_null
-  + br_on_cast/br_on_cast_fail all emit on arm64 + x86_64. The **10.G-gc-on-jit emit bundle is
-  CLOSED** (exit-condition met). Pivoting to ADR-0128 §1 (spec-corpus JIT execution mode).
-- **Two execution paths (CODE-verified)**: spec corpus runs **interp-only**
-  (`instance.invoke`→`_dispatch.run`, `instance.zig:169`). The JIT execution path for the
-  spec corpus is **NOT yet wired** — that is the new §1 bundle below. Today only `runI32Export`
-  (no-arg i32-result, `src/engine/runner.zig`) exercises the JIT e2e.
+- **HEAD**: §1 spec-corpus JIT execution-mode **backbone LANDED** (`0d9cddd7`). Opt-in
+  `ZWASM_SPEC_ENGINE=jit` routes the no-arg-i32 same-module assert_return subset through the
+  JIT entry (runI32Export) + compares; reports jit pass/fail/skip. Mac aarch64 first run:
+  **pass=43 fail=96 skip=1156** (pass = funcs execute through JIT; fail = intended RED signal —
+  genuine gaps + state-dependent funcs the re-compile-per-call path can't share interp state
+  for; skip = shapes not yet wired). Default stays interp → test-all unchanged. GC-op JIT emit
+  was COMPLETE both arches at `c94bd04f` (10.G-gc-on-jit bundle CLOSED).
+- **Two execution paths (CODE-verified)**: spec corpus runs **interp by default**
+  (`instance.invoke`→`_dispatch.run`, `instance.zig:169`); the **JIT path is now wired as an
+  opt-in mode** (`ZWASM_SPEC_ENGINE=jit`, backbone above). The standalone `runI32Export`
+  (`src/engine/runner.zig`) is the underlying no-arg-i32 JIT e2e primitive.
 - **ADR-0128 + ADR-0127 both Accepted** — no remaining user gate; loop runs autonomously.
 - **Watch**: `src/engine/runner.zig` at 1894 lines (soft-cap WARN; hard cap 2000). Extract the
   accumulating `runI32Export` e2e tests to a `test/` sibling (or FILE-SIZE-EXEMPT) before the
@@ -52,12 +55,15 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   before designing the general dispatcher (two survey subagents disagreed; resolve empirically).
   Mode toggle: env `ZWASM_SPEC_ENGINE=jit` (simplest) — `build.zig:15` documents `-Dengine
   interp/jit/both` but it is NOT yet implemented.
-- **Exit-condition**: the wasm-3.0 spec runner executes ≥1 `assert_return` (no-arg i32 export)
-  THROUGH the JIT (`callI32NoArgs`) and compares the result — i.e. a non-empty JIT-mode pass
-  count, with the not-yet-supported set enumerated in a should_fail/skip list.
-- **NEXT (this turn's chunk 2)**: JIT-mode toggle + no-arg-i32 `assert_return` path + skip-list
-  in `spec_assert_runner_wasm_3_0.zig`. Then grow the dispatcher (args/i64/FP/multi-value/
-  host-imports/typed-trap) chunk-by-chunk, flipping skips.
+- **Exit-condition**: ≥1 `assert_return` (no-arg i32) executes THROUGH the JIT + compares.
+  ✓ **MET** (`0d9cddd7`, jit pass=43 fail=96 skip=1156). Bundle continues for dispatcher growth.
+- **NEXT chunk** (value-order): (a) **shared-runtime JIT-execute** — replace the
+  re-compile-per-call (runI32Export) with a JIT path sharing the interp run's accumulated
+  module state, so state-dependent no-arg-i32 funcs stop being false-RED (splits the ~96 fails
+  into genuine-gap vs state-artifact); (b) **general arg/result dispatcher** — 裏取り the calling
+  convention FIRST (`entry.zig` monomorphized `callI32_i32`… ⇒ C-ABI params; confirm via a
+  prologue param-load read), then wire args + i64/FP + multi-value, flipping skips. Do (a)
+  first — it cleans the RED signal (b) is measured against.
 
 ## §10 remaining — the six `[ ]` rows
 
