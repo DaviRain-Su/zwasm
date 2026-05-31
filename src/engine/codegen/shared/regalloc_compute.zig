@@ -89,6 +89,13 @@ pub fn validateRegallocOpScratchReservation(
 
 const ActiveEntry = struct { slot: u16, last_use_pc: u32 };
 
+/// A callout PC for the ADR-0060 force-spill pre-scan. `inclusive`
+/// (ADR-0060 2026-05-31 amendment) widens the crossing test to
+/// `cp <= last_use_pc` for alloc ops (struct.new) whose operands are
+/// read AFTER the internal alloc CALL; regular calls keep `cp <
+/// last_use_pc`.
+const CallSite = struct { pc: u32, inclusive: bool };
+
 /// Thin wrapper passing the arm64-default force_spill_threshold +
 /// no fence. Callers needing the ADR-0077 fence call
 /// `computeWith` directly.
@@ -108,22 +115,30 @@ pub fn computeWith(
     const live = func.liveness orelse return Error.LivenessMissing;
     if (live.ranges.len == 0) return .{ .slots = &.{}, .n_slots = 0 };
 
-    // ADR-0060: collect callout PCs once.
-    var call_pc_buf: [256]u32 = undefined;
+    // ADR-0060 (+ 2026-05-31 amendment): collect callout PCs once.
+    // `inclusive` marks alloc ops (struct.new) whose field operands are
+    // read AFTER the internal alloc CALL — a vreg whose last_use IS the
+    // op PC must spill across it (`cp <= last_use_pc`). Regular calls
+    // and struct.new_default (zero field operands) keep the strict
+    // bound (`cp < last_use_pc`).
+    var call_pc_buf: [256]CallSite = undefined;
     var call_pc_len: u32 = 0;
     var call_pc_overflow = false;
     for (func.instrs.items, 0..) |ins, pc| {
-        const is_call = switch (ins.op) {
-            .call, .call_indirect, .@"memory.grow" => true,
+        const inclusive: ?bool = switch (ins.op) {
+            .call, .call_indirect, .@"memory.grow" => false,
             // 10.G GC-on-JIT: struct.new_default emits a BLR/CALL into
             // the jitGcAlloc trampoline (clobbers caller-saved like
             // memory.grow), so vregs live across it must force-spill.
-            .@"struct.new_default" => true,
-            else => false,
+            .@"struct.new_default" => false,
+            // struct.new (variadic): field operands stored AFTER the
+            // alloc CALL → inclusive upper bound (ADR-0060 amendment).
+            .@"struct.new" => true,
+            else => null,
         };
-        if (!is_call) continue;
+        const inc = inclusive orelse continue;
         if (call_pc_len < call_pc_buf.len) {
-            call_pc_buf[call_pc_len] = @intCast(pc);
+            call_pc_buf[call_pc_len] = .{ .pc = @intCast(pc), .inclusive = inc };
             call_pc_len += 1;
         } else {
             call_pc_overflow = true;
@@ -159,8 +174,12 @@ pub fn computeWith(
 
         const spans_call = blk: {
             if (call_pc_overflow) break :blk true;
-            for (call_pcs) |cp| {
-                if (r.def_pc < cp and cp < r.last_use_pc) break :blk true;
+            for (call_pcs) |c| {
+                const crosses = if (c.inclusive)
+                    (r.def_pc < c.pc and c.pc <= r.last_use_pc)
+                else
+                    (r.def_pc < c.pc and c.pc < r.last_use_pc);
+                if (crosses) break :blk true;
             }
             break :blk false;
         };
@@ -387,6 +406,57 @@ test "compute: three overlapping ranges fan out to distinct slots" {
     try testing.expectEqual(@as(u16, 0), alloc.slots[0]);
     try testing.expectEqual(@as(u16, 1), alloc.slots[1]);
     try testing.expectEqual(@as(u16, 2), alloc.slots[2]);
+    try regalloc.verify(&f, alloc);
+}
+
+test "alloc-op force-spill: struct.new field operand (last_use AT op PC) spills" {
+    // ADR-0060 amendment — struct.new reads its field operands AFTER the
+    // internal jitGcAlloc CALL, so a vreg whose last_use IS the struct.new
+    // PC must force-spill (inclusive upper bound `cp <= last_use_pc`).
+    var f = freshFunc();
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 7 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"struct.new", .payload = 0 });
+    const ranges = [_]LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+    };
+    f.liveness = .{ .ranges = &ranges };
+    const alloc = try compute(testing.allocator, &f);
+    defer regalloc.deinit(testing.allocator, alloc);
+    try testing.expect(alloc.slots[0] >= max_reg_slots_gpr_default);
+    try regalloc.verify(&f, alloc);
+}
+
+test "alloc-op force-spill: vreg strictly spanning struct.new also spills (superset)" {
+    var f = freshFunc();
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 7 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"struct.new", .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .drop });
+    const ranges = [_]LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 2 },
+    };
+    f.liveness = .{ .ranges = &ranges };
+    const alloc = try compute(testing.allocator, &f);
+    defer regalloc.deinit(testing.allocator, alloc);
+    try testing.expect(alloc.slots[0] >= max_reg_slots_gpr_default);
+    try regalloc.verify(&f, alloc);
+}
+
+test "call (non-alloc): operand consumed AT call PC stays in register (strict bound preserved)" {
+    // Contrast guard: a normal call reads its operand into the arg register
+    // BEFORE the clobber, so last_use == call PC is safe (strict `<`).
+    var f = freshFunc();
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 7 });
+    try f.instrs.append(testing.allocator, .{ .op = .call, .payload = 0 });
+    const ranges = [_]LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 1 },
+    };
+    f.liveness = .{ .ranges = &ranges };
+    const alloc = try compute(testing.allocator, &f);
+    defer regalloc.deinit(testing.allocator, alloc);
+    try testing.expect(alloc.slots[0] < max_reg_slots_gpr_default);
     try regalloc.verify(&f, alloc);
 }
 

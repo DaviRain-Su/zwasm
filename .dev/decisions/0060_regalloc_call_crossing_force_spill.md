@@ -136,6 +136,51 @@ register state to preserve).
     collapse them; today they stay separate so the compute-pass
     parameter remains independent of the post-compute override path.
 
+## Amendment (2026-05-31): alloc-op operand force-spill (10.G GC-on-JIT)
+
+The original Decision force-spills a vreg whose live range **strictly**
+contains a call PC: `r.def_pc < cp and cp < r.last_use_pc`. The strict
+upper bound is justified (§Decision ¶4) because when the call IS the
+vreg's `last_use`, the value is read into its arg register *before* the
+BLR/CALL clobbers anything.
+
+The 10.G GC-on-JIT `struct.new` emit breaks that justification for its
+own **field operands**. Unlike a `call`, `struct.new` does not consume
+its operands into arg registers before the clobbering CALL. Its emit
+sequence is: marshal `rt`+`typeidx` → CALL `jitGcAlloc` (clobbers
+caller-saved) → **then** store each popped field into the freshly
+allocated object. The field operands are therefore read *after* the
+internal alloc CALL, so a field vreg whose `last_use` IS the
+`struct.new` PC must survive the CALL in memory — exactly the case the
+strict `<` excludes.
+
+**Decision extension**: classify the alloc CALL ops (`struct.new`, and
+future `array.new` / `array.new_fixed` with post-CALL operand reads) as
+a distinct **inclusive-alloc-op** category in the `spans_call` pre-scan.
+For PCs in that category the crossing test is `r.def_pc < cp and cp <=
+r.last_use_pc` (inclusive upper bound). The inclusive predicate is a
+strict superset of the original: it additionally catches vregs whose
+`last_use == cp` (the field operands), while still catching every
+strictly-spanning unrelated vreg (since `cp < last_use ⟹ cp <=
+last_use`). A vreg with `last_use == cp` can only be an operand the op
+pops (two instructions never share a PC), so the inclusive rule spills
+precisely the field operands plus the genuine spanners — no
+over-spill of unrelated values.
+
+`struct.new_default` (added to the `is_call` set at A-2, cyc248) stays
+in the **strict** category: it has zero field operands, so no vreg has
+`last_use` at its PC, and strict-vs-inclusive is a no-op for it. Keeping
+it strict documents that the inclusive widening is load-bearing only for
+ops with post-CALL operand reads.
+
+Implementation: `regalloc_compute.zig` `computeWith` — the callout
+pre-scan now records each call site's category (strict vs inclusive) and
+`spans_call` branches on it. No per-arch emit change; the existing
+spill-class STR-before / LDR-after path carries the spilled field vregs
+across the alloc CALL exactly as it carries any other force-spilled
+value. Design grounded in `.dev/phase10_g_op_bundle_plan.md` §"Cycle
+A-3".
+
 ## References
 
 - ROADMAP §9.9 / 9.9-l-1b-d093-d16
@@ -153,10 +198,9 @@ register state to preserve).
 - v1 reference: `~/Documents/MyProducts/zwasm/src/jit.zig` `spillCallerSaved`
   (Alternative B, rejected).
 
-<!--
 ## Revision history
 
 | Date       | SHA          | Note                                    |
 |------------|--------------|-----------------------------------------|
 | 2026-05-14 | `5ccae2cd` | Initial accepted version (d-16).        |
--->
+| 2026-05-31 | `<backfill>` | Amendment — alloc-op operand force-spill (10.G GC-on-JIT). Inclusive upper-bound `cp <= last_use_pc` for `struct.new` (post-CALL operand reads); `struct.new_default` stays strict. |
