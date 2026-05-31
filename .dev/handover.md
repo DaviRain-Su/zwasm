@@ -92,16 +92,13 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-This turn landed A-10a code (`array.new_data`) + this handover chore; prior cycle's survey
-(`a0d997ca`) was docs-only on top of A-9's ubuntu-verified `93925bb6`. ubuntu **test-all** kicked
-in background against this turn's pushed HEAD (`/tmp/ubuntu.log`). Step 0.7 next `/continue`:
-`tail -3 /tmp/ubuntu.log`; expect `OK (HEAD=<final pushed SHA>)`. On FAIL → `git reset --mixed
-HEAD~2` (A-10a source + this handover chore) to last ubuntu-verified HEAD (`93925bb6`), fix,
-re-gate. On GREEN/non-code-gap → proceed to A-10b (`array.new_elem`).
-**User-requested clean-session stop** (context-window reset): NO ScheduleWakeup re-arm this turn;
-this fresh handover is the entry point for the next manual `/continue`. A-10b recipe is in the
-Active bundle NEXT + bundle plan §"array.* sub-bundle" — a verbatim copy of `array_new_data.zig`
-swapping the trampoline (`jitGcArrayNewElem`, `elem_segments_ptr`, direct u64 copy) + op_tag.
+**A-10a `array.new_data` is ubuntu-verified GREEN** (`OK (HEAD=8eab8e09)`) — all array JIT-emit
+ops through A-10a confirmed on BOTH arches. **Step 0.7 is already settled** — the next `/continue`
+needs no ubuntu re-check; proceed directly to A-10b.
+**User-requested clean-session stop** (context-window reset): NO ScheduleWakeup re-arm; this fresh
+handover IS the entry point for the next manual `/continue`. A-10b recipe is in the Active bundle
+NEXT + bundle plan §"array.* sub-bundle" — a verbatim copy of `array_new_data.zig` swapping the
+trampoline (`jitGcArrayNewElem`, `elem_segments_ptr`, direct u64 copy) + op_tag.
 
 **Lesson (still live)**: `gate_commit.sh --fast` DEFERS `zig build test`/`lint` (Step 4/5 own them) — parent's full `zig build test` before push is the real gate.
 
