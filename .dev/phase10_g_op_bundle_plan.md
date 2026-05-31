@@ -276,6 +276,43 @@ the EMIT needs no field_count threading for new_default. (v) Offsets uniform
   variadic liveness (mirror call arm, liveness.zig:453) + field-store-inline.
   `struct.set` (2→0). Then array.* / ref.cast / ref.eq.
 
+## array.* sub-bundle (verified survey, post-struct; cyc-array)
+
+Struct family DONE both arches (`2b942787`). array.* is the next family.
+**Verified facts (subagent survey had errors — these corrected via direct
+read; do NOT re-trust the uniform-vs-packed / lowering-stub claims):**
+
+- **Layout** (`type_info.zig` ArrayHeader, `@sizeOf == 12`): ObjectHeader
+  (8) + `length: u32` @ offset 8. Payload @ offset 12. Element[i] @ `12 +
+  i*element.size`; `element.size = slot_size = 8` UNIFORM this cut
+  (ADR-0116 §3a). So element offsets are 12,20,28,… = **4-mod-8, NOT
+  8-aligned** → `array.get`/`set` (runtime index) MUST use register-offset
+  addressing (`LDR Xt,[base, Xidx, LSL#3]` with base = object+12), NOT the
+  immediate scaled form struct uses. (arm64/x86_64 allow unaligned normal
+  LDR/STR.) `array.len` reads `[base+8]` (offset 8 IS valid).
+- **Lowering ALREADY DONE** (`lower.zig` emitPrefixFB): array.new=sub6,
+  array.new_default=sub7, array.new_fixed=sub8 (`extra=N`), array.new_data/
+  elem=sub9/10 (`extra=segidx`), array.get/get_s/get_u/set/fill=sub11/12/13/
+  14/16, array.len=sub15 (`payload=0`). NO lower.zig change needed.
+- **Trampoline A-1 DONE** (`06ebc165`): `jitGcAllocArray(rt, typeidx,
+  length) callconv(.c) u32` (jit_abi.zig) + `object_alloc.allocArrayObject`
+  (zero-inits). length is RUNTIME → arg2 (W2/EDX). Unit-tested.
+- **Decomposition**: A-2 = `array.new_default` (pop length→arg2; CALL
+  jitGcAllocArray; push ref — strict `is_call` since length is consumed
+  into the arg BEFORE the CALL, not after) + `array.len` (pop ref,
+  null-trap, base=slab+ref, LDR W length `[base+8]`, push). A-3 = `array.get`
+  (+get_s/get_u): pop ref+index, null-trap ref, bounds-check `index <
+  [base+8]` (trap → bounds_fixups), register-offset load. A-4 = `array.set`
+  (bounds-checked register-offset store) + `array.new` (init read AFTER the
+  alloc CALL → **inclusive force-spill** like struct.new; runtime fill
+  loop). A-5 = `array.new_fixed` (variadic, mirror struct.new extra=N). Defer
+  fill/copy/init_data/init_elem (bulk).
+- **Per-op touch-points** (same as struct, see above): op-file + register in
+  `collected_{arm64_ops,x86_64_ctx_ops}` + bump dispatch_collector.zig count
+  LITERALS + stackEffect (or liveness special-case if variadic) + x86_64
+  `usesRuntimePtr` (slab/CALL ops) + ungated runI32Export e2e (test values
+  < 64 for single-byte signed LEB128).
+
 ## Related
 
 - ADR-0128 §2 (GC-on-JIT emit workstream — the master plan this section

@@ -8,15 +8,14 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD**: `5d2c4e8a` — 10.G **`struct.{new,get,set,new_default}` ALL emit both arches**
-  (struct family complete). This turn: C3 `aa158810` x86_64 struct.new SysV mirror + C4
-  `5d2c4e8a` struct.set both arches (2→0 store: null-trap ref, reload slab, STORE value at
-  `[base+8+fieldidx*8]`; stage-0 reused for ref-then-value). struct.new mechanism: lowerer
-  stamps `struct_field_counts[typeidx]`→`ZirInstr.extra` (via `lowerFunctionBodyWith` +
-  `compileOne` param); emit allocs (CALL jitGcAlloc) → reloads slab base AFTER → stores
-  force-spilled fields. e2e round-trips ungated both arches (struct.new→42; struct.set→55).
-  Verified: full `zig build test` (arm64) EXIT=0 + lint 0 + x86_64 cross-compile EXIT=0;
-  x86_64 RUNTIME = ubuntu gate (kicked against final HEAD).
+- **HEAD**: `06ebc165` — 10.G **array A-1 foundation** (`jitGcAllocArray` trampoline +
+  `object_alloc.allocArrayObject`, unit-tested). Arrays differ from structs: total size
+  depends on a RUNTIME length operand → dedicated 3-arg trampoline `jitGcAllocArray(rt,
+  typeidx, length)` (arg2 = length); `allocArrayObject` stamps ArrayHeader{.array,typeidx,
+  length} (12 bytes: ObjectHeader 8 + length u32 @ off 8) + zero-inits. Verified: arm64 `zig
+  build test` EXIT=0 + lint 0 + x86_64 cross-compile EXIT=0. (**Full struct family
+  new_default/get/new/set DONE both arches, ubuntu-green `2b942787`.**) Verified array recipe
+  (survey-corrected) in `.dev/phase10_g_op_bundle_plan.md` §"array.* sub-bundle".
 - **Two execution paths (CODE-verified)**: spec corpus runs **interp-only**
   (`instance.invoke`→`_dispatch.run`, `instance.zig:169`); JIT corpus run = §1. JIT emits
   1.0/2.0 + TC + func-refs + EH + i31 + full struct family (both arches); remaining GC
@@ -43,13 +42,12 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **Cycles-remaining**: ~4-5
 - **Continuity-memo**: PROVEN per-GC-op recipe + full struct design in
   **`.dev/phase10_g_op_bundle_plan.md`** §"GC-on-JIT emit design" (single source — do NOT
-  re-derive). Verified x86_64 facts: pinned rt = R15; SysV args RDI/RSI, ret EAX; emit
-  scratch = `spill_stage_gprs` = {R10(stage0), R11(stage1)} — NOT in regalloc pool
-  (`allocatable_gprs` = {RBX,R12,R13,R14}; do NOT use R13/R14 as ad-hoc scratch); struct.get
-  slab base uses R11 (stage1) so it can't alias the popped ref / result in stage0=R10;
-  result via gprDefSpilled/gprStoreSpilled (encoders: read existing x86_64 struct files).
-  x86_64 ctx-op count test in dispatch_collector.zig is a LITERAL (`expectEqual(406, ...)`) —
-  bump per added op. struct offsets UNIFORM `8+idx*8` (ADR-0116 §3a); rooting DEFERRED.
+  re-derive) + §"array.* sub-bundle". Verified x86_64 facts: pinned rt = R15; SysV args
+  RDI/RSI(/EDX), ret EAX; emit scratch = `spill_stage_gprs` {R10=stage0, R11=stage1} — NOT in
+  regalloc pool (`allocatable_gprs` {RBX,R12,R13,R14}; don't use R13/R14 ad-hoc); result via
+  gprDefSpilled/gprStoreSpilled (encoders: read existing x86_64 struct files). x86_64 ctx-op
+  count test in dispatch_collector.zig is a LITERAL — bump per added op. struct offsets UNIFORM
+  `8+idx*8` (ADR-0116 §3a); array offsets `12+i*8` (4-mod-8, register-offset); rooting DEFERRED.
 - **First-op order**: i31 + **struct.{new_default,get,new,set}** all DONE both arches. Proven
   per-GC-op touch-points (REUSE for array): op-file `codegen/{arm64,x86_64}/ops/wasm_3_0/<op>.zig`
   + register in `collected_{arm64_ops,x86_64_ctx_ops}` (dispatch_collector_ops.zig) + bump the
@@ -59,10 +57,14 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   `runI32Export` e2e (hand-encode; **i32.const value ≥ 64 needs multi-byte signed LEB128** — bit 6
   set sign-extends, e.g. 99=`E3 00` not `63`; keep test values < 64). Alloc ops also need the
   ADR-0060 force-spill (struct.new_default/struct.new are in regalloc_compute.zig `is_call`).
-  **NEXT = array.* (`array.new`/`array.new_default`/`array.get`/`array.set`/`array.len`)**: shares
-  alloc + slab machinery; needs length field in the object header + element-type stride (survey
-  `instruction/wasm_3_0/array_ops.zig` interp contract + ADR-0116 array layout first — Step 0).
-  Then ref.cast / ref.test / ref.eq.
+  array A-1 (trampoline `jitGcAllocArray` + `allocArrayObject`) DONE (`06ebc165`, unit-tested).
+  **NEXT = array A-2 = `array.new_default` + `array.len` emit, both arches** (verified recipe in
+  bundle plan §"array.* sub-bundle"): new_default pops length→arg2, CALL `jitGcAllocArray`, push
+  ref (strict `is_call` — length consumed into arg BEFORE the CALL); array.len pops ref, null-trap,
+  base=slab+ref, LDR W length `[base+8]`, push. stackEffect both 1→1; lowering already done
+  (sub7/sub15). e2e `i32.const 3; array.new_default 0; array.len → 3`. Then A-3 array.get
+  (register-offset load, bounds-check), A-4 array.set + array.new (inclusive force-spill + fill
+  loop), A-5 array.new_fixed. Then ref.cast / ref.test / ref.eq.
 - **Exit-condition**: all GC ops emit on both arches + spec corpus green via JIT mode (§1).
 
 ## §10 remaining — the six `[ ]` rows
@@ -72,22 +74,20 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **10.TC** tail-call — JIT matrix complete; residuals = D-210 + `wasm_of_ocaml`.
 - **10.E** EH — JIT emit present; residuals = eh_frequency runner (I20), c_api tag
   accessors (I14 → Phase 13), emscripten_eh realworld (I21).
-- **10.G** GC — JIT emit PARTIAL (D-211): i31 + **full struct family** (new_default/get/new/set)
-  DONE both arches; remaining = array.* / ref.cast / ref.eq + ADR-0127 PHASE C + D-198 +
-  gc_stress (I19) + dart/hoot realworld (I21).
+- **10.G** GC — JIT emit PARTIAL (D-211): i31 + **full struct family** DONE both arches; array
+  A-1 trampoline done (`06ebc165`); remaining = array emit (A-2..A-5) / ref.cast / ref.eq +
+  ADR-0127 PHASE C + D-198 + gc_stress (I19) + dart/hoot realworld (I21).
 - **10.P** close — flips only at 100% both-backends (ADR-0128).
 
 ## Step 0.7 (next resume)
 
-Prior x86_64 struct mirror (`805d7aa8`) ubuntu-verified green `OK (HEAD=805d7aa8)` — the
-`failed command:` line in `/tmp/ubuntu.log` is **benign** negative-test stderr (reproduces
-locally with EXIT=0; resolved). Prior `b5a8cdc7` (C1+C2) ubuntu-verified green this session.
-This turn = C3 `aa158810` (x86_64 struct.new mirror) + C4 `5d2c4e8a` (struct.set both arches).
-Verified locally: full `zig build test` (arm64) EXIT=0 + lint 0 + `zig build
--Dtarget=x86_64-linux-gnu` EXIT=0. Both struct e2e round-trips are **ungated** — x86_64 RUNTIME
-exec of struct.new + struct.set is verified ONLY by the ubuntu kick (Mac runs arm64). Verify
-`tail -3 /tmp/ubuntu.log` next resume; revert the turn's commits to the last ubuntu-green HEAD
-(`b5a8cdc7`) on FAIL.
+Prior `2b942787` (struct family complete) ubuntu-verified green `OK (HEAD=2b942787)` this
+session. (The `failed command:` line in `/tmp/ubuntu.log` is **benign** negative-test stderr —
+reproduces locally with EXIT=0.) This turn = array A-1 `06ebc165` (jitGcAllocArray trampoline +
+allocArrayObject + unit tests). Verified locally: full `zig build test` (arm64) EXIT=0 + lint 0
++ `zig build -Dtarget=x86_64-linux-gnu` EXIT=0. A-1 is arch-independent Zig (unit-tested; no
+new emit yet), so low ubuntu risk. Verify `tail -3 /tmp/ubuntu.log` next resume; revert the
+turn's commit to the last ubuntu-green HEAD (`2b942787`) on FAIL.
 
 **Lesson (still live)**: `gate_commit.sh --fast` DEFERS `zig build test`/`lint` (Step 4/5 own
 them); the parent's independent full `zig build test` before push is the real gate.
