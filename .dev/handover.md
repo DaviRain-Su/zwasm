@@ -8,13 +8,13 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD**: `fb991029` — 10.G **x86_64 struct mirror**: SysV `struct.new_default`
-  (jitGcAlloc trampoline call; rt→RDI, typeidx→ESI, &fn→R10, CALL, EAX→result) +
-  `struct.get` (null-trap TEST+JE→bounds_fixups; slab base R15→gc_heap→Heap.bytes;
-  R11 slab scratch; 8-byte field load). The two `runI32Export` struct round-trips are
-  UNGATED for x86_64. Verified: `zig build test` (native arm64, full) EXIT=0/0-err — both
-  struct tests now RUN on arm64; `zig build -Dtarget=x86_64-linux-gnu` EXIT=0. x86_64
-  RUNTIME exec = pending ubuntu gate (kicked against fb991029).
+- **HEAD**: `fb73a87b` — 10.G **regalloc alloc-op force-spill** (A-3 foundation; ADR-0060
+  amend): `struct.new` reads its field operands AFTER the internal jitGcAlloc CALL, so a
+  vreg whose last_use IS the struct.new PC must spill across it. Added an inclusive-alloc-op
+  category to the ADR-0060 force-spill pre-scan (`regalloc_compute.zig`: `cp <= last_use_pc`
+  for struct.new; struct.new_default stays strict — 0 field operands). 3 regalloc unit tests.
+  Verified: full `zig build test` (native arm64) EXIT=0 + `zig build lint` 0. (Prior
+  `fb991029` x86_64 struct.new_default/get mirror ubuntu-verified `OK HEAD=805d7aa8`.)
 - **Two execution paths (CODE-verified)**: spec corpus runs **interp-only**
   (`instance.invoke`→`_dispatch.run`, `instance.zig:169`). JIT emits 1.0/2.0 + tail-call +
   function-references + EH + i31 (both arches) + **struct.new_default/get (both arches)**;
@@ -54,10 +54,14 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   ctx-op count test in dispatch_collector.zig is a LITERAL (`expectEqual(406, ...)`) — bump
   it per added op. struct offsets UNIFORM `8+idx*8` (ADR-0116 §3a); rooting DEFERRED.
 - **First-op order**: i31 both arches DONE (`97658b5d`). struct.new_default/struct.get:
-  arm64 DONE (A-2b-1 `68a2dbf0` / A-2b-2 `81bd0312`), x86_64 DONE (`fb991029`). **NEXT = A-3**:
-  `struct.new` (variadic) — needs ADR-0060 amendment (force-spill alloc-op operands: fields
-  read AFTER the alloc CALL) + variadic liveness (mirror `call` arm) + inline field-stores;
-  both arches. Then `struct.set` (2→0). Then array.* / ref.cast / ref.eq.
+  arm64 DONE (A-2b-1 `68a2dbf0` / A-2b-2 `81bd0312`), x86_64 DONE (`fb991029`). **A-3 IN
+  PROGRESS**: regalloc alloc-op force-spill DONE (`fb73a87b`, ADR-0060 amend). **NEXT = A-3
+  arm64 `struct.new` emit**: thread compile-time `struct_field_counts: []const u32` (typeidx
+  index; built from type section) into `liveness.compute` + EmitCtx; liveness special-case
+  (mirror `call` arm @ liveness.zig:453 — pop field_count, push 1); arm64 `struct_new.zig`
+  emit (marshal rt+typeidx → BLR &jitGcAlloc → W0=ref; **reload slab base AFTER call**; store
+  each field `[slab+ref+8+i*8]`; push ref); e2e `runI32Export` round-trip. Then x86_64
+  mirror. Then `struct.set` (2→0). Then array.* / ref.cast / ref.eq.
 - **Exit-condition**: all GC ops emit on both arches + spec corpus green via JIT mode (§1).
 
 ## §10 remaining — the six `[ ]` rows
@@ -74,20 +78,17 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-cyc251 (`68a2dbf0`) + cyc252 (`6d795cb5`) ubuntu-verified green `OK (HEAD=6d795cb5)`.
-This cycle's x86_64 struct mirror (`fb991029`) verified locally by full `zig build test`
-(arm64, EXIT=0, 0 errors, struct tests RUN not skipped) + `zig build -Dtarget=x86_64-linux-gnu`
-(EXIT=0). x86_64 RUNTIME exec of the (now-ungated) struct round-trips verified by the ubuntu
-kick launched against `fb991029` — verify `tail -3 /tmp/ubuntu.log` next resume; revert on FAIL.
+Prior x86_64 struct mirror (`805d7aa8`) ubuntu-verified green `OK (HEAD=805d7aa8)` — the
+`failed command:` line in `/tmp/ubuntu.log` is **benign** negative-test stderr (reproduces
+locally with EXIT=0; resolved this resume). This turn's commits verified locally by full
+`zig build test` (arm64, EXIT=0) + `zig build lint` 0; ubuntu kick launched against the
+turn's final HEAD — verify `tail -3 /tmp/ubuntu.log` next resume; revert the turn's commits
+on FAIL.
 
-**Session note (env instability + lesson)**: 2026-05-31 had real harness degradation
-(status.claude.com: "Opus 4.7 elevated errors" unresolved; GitHub Task-hang bugs #49150/#43866)
-— tool results arrived delayed/batched and two subagent delegations failed (false Usage-Policy
-error; a `--fast`-only gate shipped a non-compiling runner.zig, reverted at `408e0a36`). The
-x86_64 mirror was REDONE in MAIN with full `zig build test`. **Lesson**: `gate_commit.sh --fast`
-DEFERS `zig build test`/`lint`; a worker gated only on `--fast` can ship red code — the parent's
-independent full `zig build test` before push is the real gate. Prefer MAIN over subagents when
-the harness is degraded.
+**Lesson (still live)**: `gate_commit.sh --fast` DEFERS `zig build test`/`lint` (Step 4/5
+own them) — a worker gated only on `--fast` can ship red code; the parent's independent full
+`zig build test` before push is the real gate. Prefer MAIN over subagents when the harness is
+degraded (2026-05-31 elevated-error incident; `408e0a36` revert).
 
 ## Key refs
 
