@@ -8,18 +8,19 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD**: `114cd10a` — 10.G **arm64 `struct.new` variadic emit** (A-3): the lowerer stamps
-  `struct_field_counts[typeidx]` into `ZirInstr.extra` (threaded from `engine/compile.zig`'s
-  parsed `struct_defs` via new `lowerFunctionBodyWith` + a `compileOne` param); liveness reads
-  `extra` for the variadic pop (mirror call arm), arm64 emit reads it for the field-store loop
-  (alloc BLR → reload slab base AFTER → STR each force-spilled field at `[slab+ref+8+i*8]`).
-  e2e `i32.const 42; struct.new 0; struct.get 0 0` → 42 (arm64-gated via `skip.blocker(.D-211)`
-  until x86_64 mirror). Verified: full `zig build test` (arm64) EXIT=0 + lint 0 + x86_64
-  cross-compile EXIT=0. Prior `fb73a87b` = regalloc alloc-op force-spill (ADR-0060 amend).
+- **HEAD**: `aa158810` — 10.G **`struct.new` variadic emit DONE both arches** (A-3 complete):
+  C1 `fb73a87b` regalloc alloc-op force-spill (ADR-0060 amend) + C2 `114cd10a` arm64 emit + C3
+  `aa158810` x86_64 SysV mirror. Mechanism: lowerer stamps `struct_field_counts[typeidx]`→
+  `ZirInstr.extra` (from `engine/compile.zig` `struct_defs` via `lowerFunctionBodyWith` +
+  `compileOne` param); liveness reads `extra` for variadic pop; emit allocs (CALL jitGcAlloc)
+  → reloads slab base AFTER → stores force-spilled fields at `[slab+ref+8+i*8]`. e2e
+  `i32.const 42; struct.new 0; struct.get 0 0` → 42, **ungated** (both arches). Verified: full
+  `zig build test` (arm64) EXIT=0 + lint 0 + x86_64 cross-compile EXIT=0; x86_64 RUNTIME =
+  ubuntu gate (kicked against final HEAD).
 - **Two execution paths (CODE-verified)**: spec corpus runs **interp-only**
   (`instance.invoke`→`_dispatch.run`, `instance.zig:169`); JIT corpus run = §1. JIT emits
-  1.0/2.0 + TC + func-refs + EH + i31 + struct.new_default/get (both arches) + struct.new
-  (arm64); remaining GC interp-only (D-211). Green gc/EH corpus = INTERP coverage.
+  1.0/2.0 + TC + func-refs + EH + i31 + struct.new_default/get/new (both arches); remaining GC
+  (struct.set / array / ref.cast / ref.eq) interp-only (D-211). Green gc/EH corpus = INTERP.
 - **ADR-0128 + ADR-0127 both Accepted** — no remaining user gate; loop runs autonomously.
 
 ## Active task — Phase 10 → 100% (ADR-0128)  **NEXT**
@@ -49,20 +50,18 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   result via gprDefSpilled/gprStoreSpilled (encoders: read existing x86_64 struct files).
   x86_64 ctx-op count test in dispatch_collector.zig is a LITERAL (`expectEqual(406, ...)`) —
   bump per added op. struct offsets UNIFORM `8+idx*8` (ADR-0116 §3a); rooting DEFERRED.
-- **First-op order**: i31 both arches DONE (`97658b5d`). struct.new_default/struct.get:
-  arm64 DONE (A-2b-1 `68a2dbf0` / A-2b-2 `81bd0312`), x86_64 DONE (`fb991029`). **A-3**:
-  regalloc force-spill DONE (`fb73a87b`, ADR-0060 amend) + **arm64 `struct.new` emit DONE**
-  (`114cd10a`). field_count mechanism (REUSE for x86_64 mirror + array.new): lowerer stamps
-  `struct_field_counts[typeidx]`→`ZirInstr.extra` (`engine/compile.zig` builds it from
-  `types.struct_defs`; `lowerFunctionBodyWith` + `compileOne` param thread it); liveness
-  special-case @ liveness.zig (pop `instr.extra`, push 1); emit reads `ins.extra`.
-  **NEXT = x86_64 `struct.new` mirror**: `x86_64/ops/wasm_3_0/struct_new.zig` (model = arm64
-  struct_new.zig + x86_64 struct_new_default/get): RDI=rt, ESI=typeidx, CALL &jitGcAlloc →
-  EAX=ref; preserve ref; reload slab base (R15→gc_heap→Heap.bytes) AFTER call; STR each
-  force-spilled field at `[slab+ref+8+i*8]`; push ref. Register in `collected_x86_64_ctx_ops`;
-  bump `dispatch_collector.zig` x86_64 LITERAL 406→407; `usesRuntimePtr += struct.new` (D-180
-  silent-miscompile guard); ungate the A-3 e2e test for x86_64 (drop the `skip.blocker(.D-211)`
-  arch gate, mirror A-2). Then `struct.set` (2→0). Then array.* / ref.cast / ref.eq.
+- **First-op order**: i31 + struct.new_default/get + **struct.new** all DONE both arches
+  (struct.new: C1 regalloc `fb73a87b` + C2 arm64 `114cd10a` + C3 x86_64 `aa158810`). field_count
+  mechanism (REUSE for array.new): lowerer stamps `struct_field_counts[typeidx]`→`ZirInstr.extra`
+  (`engine/compile.zig` builds from `types.struct_defs`; `lowerFunctionBodyWith` + `compileOne`
+  param thread it); liveness special-case (pop `instr.extra`, push 1); emit reads `ins.extra`.
+  **NEXT = `struct.set` (2→0), BOTH arches in one chunk**: fixed stackEffect 2→0 (pop value +
+  ref); no variadic, no alloc CALL (so no force-spill needed). Model = `struct_get.zig` (both
+  arches) but STORE not load: pop value + ref (`popBinary`); null-trap ref (CMP/TEST + branch →
+  bounds_fixups); reload slab base + ADD ref → object base; STORE value at `[base + 8 +
+  fieldidx*8]` (`fieldidx = ins.extra`). Register both; bump arm64 358→359 + x86_64 407→408;
+  `usesRuntimePtr += struct.set` (x86_64). ONE ungated e2e (`struct.new` set-then-get round-trip)
+  covers both arches. Then array.* / ref.cast / ref.eq.
 - **Exit-condition**: all GC ops emit on both arches + spec corpus green via JIT mode (§1).
 
 ## §10 remaining — the six `[ ]` rows
@@ -72,22 +71,21 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **10.TC** tail-call — JIT matrix complete; residuals = D-210 + `wasm_of_ocaml`.
 - **10.E** EH — JIT emit present; residuals = eh_frequency runner (I20), c_api tag
   accessors (I14 → Phase 13), emscripten_eh realworld (I21).
-- **10.G** GC — JIT emit PARTIAL (D-211): i31 + struct.new_default/get DONE both arches;
-  struct.new variadic DONE arm64 (`114cd10a`); remaining = struct.new x86_64 mirror /
-  struct.set / array / ref.cast / ref.eq + ADR-0127 PHASE C + D-198 + gc_stress (I19) +
-  dart/hoot realworld (I21).
+- **10.G** GC — JIT emit PARTIAL (D-211): i31 + struct.new_default/get + **struct.new** DONE
+  both arches; remaining = struct.set / array / ref.cast / ref.eq + ADR-0127 PHASE C + D-198 +
+  gc_stress (I19) + dart/hoot realworld (I21).
 - **10.P** close — flips only at 100% both-backends (ADR-0128).
 
 ## Step 0.7 (next resume)
 
 Prior x86_64 struct mirror (`805d7aa8`) ubuntu-verified green `OK (HEAD=805d7aa8)` — the
 `failed command:` line in `/tmp/ubuntu.log` is **benign** negative-test stderr (reproduces
-locally with EXIT=0; resolved). This turn = C1 `fb73a87b` (regalloc, shared) + C2 `114cd10a`
-(arm64 struct.new emit). Verified locally: full `zig build test` (arm64) EXIT=0 + lint 0 +
-`zig build -Dtarget=x86_64-linux-gnu` EXIT=0. The A-3 e2e test is **arm64-gated**
-(`skip.blocker(.D-211)`), so x86_64 ubuntu skips it (no UnsupportedOp). ubuntu kick launched
-against final HEAD — verify `tail -3 /tmp/ubuntu.log` next resume; revert the turn's commits
-on FAIL.
+locally with EXIT=0; resolved). Prior `b5a8cdc7` (C1+C2) ubuntu-verified green this session.
+This turn = C3 `aa158810` (x86_64 struct.new SysV mirror) + any chained struct.set. Verified
+locally: full `zig build test` (arm64) EXIT=0 + lint 0 + `zig build -Dtarget=x86_64-linux-gnu`
+EXIT=0. The A-3 e2e is now **ungated** — x86_64 RUNTIME exec of struct.new is verified ONLY by
+the ubuntu kick (Mac runs arm64). Verify `tail -3 /tmp/ubuntu.log` next resume; revert the
+turn's commits to the last ubuntu-green HEAD on FAIL.
 
 **Lesson (still live)**: `gate_commit.sh --fast` DEFERS `zig build test`/`lint` (Step 4/5 own
 them); the parent's independent full `zig build test` before push is the real gate.
