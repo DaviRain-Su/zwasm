@@ -347,9 +347,14 @@ read; do NOT re-trust the uniform-vs-packed / lowering-stub claims):**
   (no 7th-on-stack, no offset-packing; trampoline reads only `rt.gc_heap`, not
   gc_type_infos). Emit = 6-arg marshal (arg regs ∉ regalloc pool → no
   parallel-move) + CALL + post-CALL trap. 5→0; strict force-spill. DONE both arches.
-  **A-10 (NEXT) = `array.new_data` + `array.new_elem`** — alloc-from-segment
-  trampolines (mirror array.fill/copy 5-arg pattern). SURVEY DONE (recipe
-  below; bundle them — same recipe):
+  **A-10a `array.new_data` DONE** (`jitGcArrayNewData`, LE-unpack `nat` bytes/
+  elem from `data_segments_ptr[segidx]`, reuse memory.init plumbing; 5-arg
+  marshal + trap + capture ref; 2→1). **A-10b (NEXT) = `array.new_elem`** —
+  trivial variant: `jitGcArrayNewElem(rt,typeidx,segidx,offset,size)` reads
+  `elem_segments_ptr[segidx]` (`ElemSlice{refs:[*]u64,len:u32}`, reuse
+  table.init plumbing) + `elem_dropped_ptr`, copies `size` u64 ref Values
+  DIRECT (no LE-unpack); emit = copy array_new_data.zig with the NewElem
+  trampoline (lower sub-op 10). The A-10 recipe (both ops):
   - **NO new JitRuntime plumbing.** REUSE the existing segment descriptors
     that `memory.init`/`table.init` (Phase 9) already use: `JitRuntime.
     data_segments_ptr` (`[*]const SegmentSlice{ptr,len:u64}`, 16-byte stride)

@@ -8,20 +8,21 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD**: 10.G **A-9 `array.copy`** emit both arches. Bulk op, trampoline (mirror array.fill
-  A-7): NEW `jitGcArrayCopy(rt, dst_ref, dst_off, src_ref, src_off, len) → u32` (1=ok/0=trap)
-  null-checks both refs + bounds-checks both ranges (@addWithOverflow) + overlap-aware copy
-  (backward when same array + dst_off>src_off) in Zig (mirror interp arrayCopy). Element slot =
-  uniform 8 bytes (ADR-0116 §3a) → the two typeidx immediates are DROPPED, keeping the call at
-  exactly **6 args** (no 7th-on-stack, no offset-packing); trampoline needs only `rt.gc_heap`.
-  Emit = 6-arg marshal (arg regs ∉ regalloc pool, no parallel-move hazard) + CALL + `CMP/TEST 0;
-  B.EQ/JE → bounds_fixups`. 5→0; strict force-spill; usesRuntimePtr. e2e: copy src[0,1]→dst[1,2],
-  array.get dst[2] → 20. (A-1..A-8 DONE; A-8 `ref.eq` ubuntu GREEN `31f1f2da`.) A-9 THIS turn.
-  Verified: arm64 `test-all` EXIT=0 + lint 0 + x86_64 cross EXIT=0.
+- **HEAD**: 10.G **A-10a `array.new_data`** emit both arches. Alloc-from-segment trampoline (mirror
+  array.fill 5-arg): NEW `jitGcArrayNewData(rt, typeidx, segidx, offset, size) → u32` (ref/0=trap)
+  allocs a `size`-elem array + copies payload from data segment `segidx` at byte `offset`, reading
+  the element NATURAL size (i8=1/i16=2/i32,f32=4/i64,f64=8) LE-zero-extended into each 8-byte slot
+  (mirror interp arrayNewData). **REUSES** `JitRuntime.data_segments_ptr`/`data_dropped_ptr` (the
+  same descriptors `memory.init` uses, ADR-0056 m-3b) — NO new JitRuntime field. Emit marshals 5
+  args (rt + typeidx/segidx imms + offset/size operands) → CALL → `CMP/TEST 0; B.EQ/JE →
+  bounds_fixups` → capture W0/EAX ref. 2→1; strict force-spill; usesRuntimePtr. e2e: passive data
+  seg i32 [10,20,30]; `array.new_data 0 0` → array; `array.get 1` → 20. (A-1..A-9 DONE; A-9
+  `array.copy` ubuntu GREEN `93925bb6`.) A-10a THIS turn. Verified: arm64 `test-all` EXIT=0 + lint
+  0 + x86_64 cross EXIT=0.
 - **Two execution paths (CODE-verified)**: spec corpus runs **interp-only**
   (`instance.invoke`→`_dispatch.run`, `instance.zig:169`); JIT corpus run = §1. JIT emits
   1.0/2.0 + TC + func-refs + EH + i31 + full struct family + array.{new_default,len,get,set,
-  new,new_fixed,get_s,get_u,fill,copy} + ref.eq (both arches); remaining GC (array new_data/
+  new,new_fixed,get_s,get_u,fill,copy,new_data} + ref.eq (both arches); remaining GC (array
   new_elem + ref.cast/test) interp-only (D-211). Green gc/EH corpus = INTERP.
 - **ADR-0128 + ADR-0127 both Accepted** — no remaining user gate; loop runs autonomously.
 
@@ -64,15 +65,16 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   + SXTB/SXTH; element valtype threaded via `array_elem_valtypes`→`extra`) `25218e9f` + A-6b
   (`array.get_u` = same + UXTB/UXTH / MOVZX) `62de416c` + A-7 (`array.fill` = `jitGcArrayFill`
   trampoline, 6-arg marshal + post-CALL trap) `17088594` + A-8 (`ref.eq` = CMP+CSET/SETE, no
-  trampoline) `a0eae42a` + A-9 (`array.copy` = `jitGcArrayCopy` trampoline, 6-arg marshal,
-  typeidx dropped/esz=8) THIS turn DONE both arches.
-  **NEXT = A-10 = `array.new_data` + `array.new_elem` emit, both arches** — SURVEY DONE, full
-  recipe in bundle plan §"array.* sub-bundle" (this turn was the A-10 survey; no code landed).
-  KEY: REUSE the existing `JitRuntime.data_segments_ptr`/`elem_segments_ptr` plumbing that
-  memory.init/table.init already use — **NO new JitRuntime field**. 2 trampolines
-  (`jitGcArrayNewData` LE-unpacks `nat` bytes/elem; `jitGcArrayNewElem` direct u64 copy) + 4
-  emit files (5-arg marshal, mirror array.fill; 2→1 push ref). lower sub-op 9/10. Then ref.test/
-  ref.cast (RTT 8-deep Cohen display per ADR-0116; architectural sub-bundle).
+  trampoline) `a0eae42a` + A-9 (`array.copy` = `jitGcArrayCopy`, typeidx dropped/esz=8) `aa1178a0`
+  + A-10a (`array.new_data` = `jitGcArrayNewData`, LE-unpack from data segment, reuse
+  data_segments_ptr) THIS turn DONE both arches.
+  **NEXT = A-10b = `array.new_elem` emit, both arches** — trivial variant of A-10a: NEW
+  `jitGcArrayNewElem(rt, typeidx, segidx, offset, size) → u32` mirrors jitGcArrayNewData but
+  reads `rt.elem_segments_ptr[segidx]` (`ElemSlice{refs:[*]u64, len:u32}`, reuse table.init's
+  plumbing) + `elem_dropped_ptr`, and copies `size` u64 ref Values DIRECT (no LE-unpack, esz=8).
+  Emit = copy array_new_data.zig verbatim with `jitGcArrayNewElem` + op_tag (lower sub-op 10).
+  recipe in bundle plan §"array.* sub-bundle". Then ref.test/ref.cast (RTT 8-deep Cohen display
+  per ADR-0116; architectural sub-bundle).
 - **Exit-condition**: all GC ops emit on both arches + spec corpus green via JIT mode (§1).
 
 ## §10 remaining — the six `[ ]` rows
@@ -83,18 +85,23 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **10.E** EH — JIT emit present; residuals = eh_frequency runner (I20), c_api tag
   accessors (I14 → Phase 13), emscripten_eh realworld (I21).
 - **10.G** GC — JIT emit PARTIAL (D-211): i31 + **full struct family** + **array.{new_default,
-  len,get,set,new,new_fixed,get_s,get_u,fill,copy}** + **ref.eq** DONE both arches; remaining =
-  array new_data/new_elem (A-10) + ref.cast/test (RTT) + ADR-0127 PHASE C + D-198 + gc_stress
+  len,get,set,new,new_fixed,get_s,get_u,fill,copy,new_data}** + **ref.eq** DONE both arches;
+  remaining = array new_elem (A-10b) + ref.cast/test (RTT) + ADR-0127 PHASE C + D-198 + gc_stress
   (I19) + dart/hoot (I21).
 - **10.P** close — flips only at 100% both-backends (ADR-0128).
 
 ## Step 0.7 (next resume)
 
-A-9 (`array.copy`) is ubuntu-verified GREEN (`OK (HEAD=93925bb6)`) — all array JIT-emit ops
-through A-9 confirmed on both arches. **This turn = A-10 survey only** (recipe recorded in the
-bundle plan); NO code landed, NO ubuntu kick (docs-only commit). Step 0.7 next `/continue`: the
-docs chore is a **non-code-gap** on top of the ubuntu-verified `93925bb6` → proceed directly to
-A-10 implementation (no revert). (If ubuntu.log still shows `93925bb6` OK, that's expected.)
+This turn landed A-10a code (`array.new_data`) + this handover chore; prior cycle's survey
+(`a0d997ca`) was docs-only on top of A-9's ubuntu-verified `93925bb6`. ubuntu **test-all** kicked
+in background against this turn's pushed HEAD (`/tmp/ubuntu.log`). Step 0.7 next `/continue`:
+`tail -3 /tmp/ubuntu.log`; expect `OK (HEAD=<final pushed SHA>)`. On FAIL → `git reset --mixed
+HEAD~2` (A-10a source + this handover chore) to last ubuntu-verified HEAD (`93925bb6`), fix,
+re-gate. On GREEN/non-code-gap → proceed to A-10b (`array.new_elem`).
+**User-requested clean-session stop** (context-window reset): NO ScheduleWakeup re-arm this turn;
+this fresh handover is the entry point for the next manual `/continue`. A-10b recipe is in the
+Active bundle NEXT + bundle plan §"array.* sub-bundle" — a verbatim copy of `array_new_data.zig`
+swapping the trampoline (`jitGcArrayNewElem`, `elem_segments_ptr`, direct u64 copy) + op_tag.
 
 **Lesson (still live)**: `gate_commit.sh --fast` DEFERS `zig build test`/`lint` (Step 4/5 own them) — parent's full `zig build test` before push is the real gate.
 
