@@ -1548,3 +1548,52 @@ test "runI32Export: array.fill then array.get → 42 (10.G array-on-JIT A-7)" {
     };
     try testing.expectEqual(@as(u32, 42), runI32Export(testing.allocator, &bytes, "f"));
 }
+
+test "runI32Export: ref.eq distinct arrays → 0 (10.G ref-on-JIT A-8)" {
+    // Both arches (arm64 + x86_64 SysV emit landed together).
+    // (module (type (array (mut i32)))
+    //   (func (export "f") (result i32)
+    //     i32.const 1  array.new_fixed 0 1   ;; ref A
+    //     i32.const 1  array.new_fixed 0 1   ;; ref B (distinct slab offset)
+    //     ref.eq))                            ;; A != B → 0
+    // ref.eq pops two eqrefs, compares the (zero-extended) ref values, pushes
+    // i32 (1=same / 0=distinct). Two array.new_fixed allocate distinct objects
+    // → 0. Emit = CMP + CSET .eq (arm64) / CMP + SETE + MOVZX (x86_64); no
+    // trampoline, no heap. ref.eq = single-byte 0xD3.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x08, 0x02, 0x5e, 0x7f, 0x01, 0x60, 0x00,
+        0x01, 0x7f, 0x03, 0x02, 0x01, 0x01, 0x07, 0x05,
+        0x01, 0x01, 0x66, 0x00, 0x00,
+        // body 15 bytes: locals 00 + i32.const 1 [41 01] + array.new_fixed 0 1
+        // [fb 08 00 01] + i32.const 1 [41 01] + array.new_fixed 0 1 [fb 08 00 01]
+        // + ref.eq [d3] + end [0b]. body_size=0x0f, sect=0x11.
+        0x0a, 0x11, 0x01,
+        0x0f, 0x00, 0x41, 0x01, 0xfb, 0x08, 0x00, 0x01,
+        0x41, 0x01, 0xfb, 0x08, 0x00, 0x01, 0xd3, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 0), runI32Export(testing.allocator, &bytes, "f"));
+}
+
+test "runI32Export: ref.eq same ref → 1 (10.G ref-on-JIT A-8)" {
+    // (module (type (array (mut i32)))
+    //   (func (export "f") (result i32) (local (ref null 0))
+    //     i32.const 1  array.new_fixed 0 1  local.tee 0  local.get 0  ref.eq))
+    // Same non-null ref compared to itself → 1 (exercises the equal path with a
+    // real GcRef, kept via a (ref null 0) local + tee/get). local (ref null 0)
+    // = 63 00.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x08, 0x02, 0x5e, 0x7f, 0x01, 0x60, 0x00,
+        0x01, 0x7f, 0x03, 0x02, 0x01, 0x01, 0x07, 0x05,
+        0x01, 0x01, 0x66, 0x00, 0x00,
+        // body 16 bytes: locals 01 01 63 00 + i32.const 1 [41 01] +
+        // array.new_fixed 0 1 [fb 08 00 01] + local.tee 0 [22 00] +
+        // local.get 0 [20 00] + ref.eq [d3] + end [0b]. body_size=0x10, sect=0x12.
+        0x0a, 0x12, 0x01,
+        0x10, 0x01, 0x01, 0x63, 0x00, 0x41, 0x01, 0xfb,
+        0x08, 0x00, 0x01, 0x22, 0x00, 0x20, 0x00, 0xd3,
+        0x0b,
+    };
+    try testing.expectEqual(@as(u32, 1), runI32Export(testing.allocator, &bytes, "f"));
+}

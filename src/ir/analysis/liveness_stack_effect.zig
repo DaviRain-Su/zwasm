@@ -287,6 +287,8 @@ pub fn stackEffect(op: ZirOp) ?StackEffect {
         .@"array.set" => .{ .pops = 3, .pushes = 0 },
         // array.fill (A-7) pops ref + idx + value + count, no result. 4 → 0.
         .@"array.fill" => .{ .pops = 4, .pushes = 0 },
+        // ref.eq (A-8) pops two eqrefs, pushes i32 (identity compare). 2 → 1.
+        .@"ref.eq" => .{ .pops = 2, .pushes = 1 },
         // §9.9 / 9.9-m-1a/b (per ADR-0056): reference-typed ops.
         //   ref.null t: 0 → 1 (pushes a null reftype)
         //   ref.is_null: 1 → 1 (pop reftype, push i32 test result)
