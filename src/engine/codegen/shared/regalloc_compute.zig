@@ -144,6 +144,10 @@ pub fn computeWith(
             // array.new_fixed (variadic): element operands stored AFTER the
             // alloc CALL → inclusive upper bound (mirror struct.new).
             .@"array.new_fixed" => true,
+            // array.fill: CALL into jitGcArrayFill; all 4 operands consumed
+            // into arg regs BEFORE the CALL (strict), but vregs spanning it
+            // must force-spill (clobbered caller-saved).
+            .@"array.fill" => false,
             else => null,
         };
         const inc = inclusive orelse continue;

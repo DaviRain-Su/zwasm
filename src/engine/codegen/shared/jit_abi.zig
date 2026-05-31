@@ -535,6 +535,41 @@ pub fn jitGcAllocArrayFill(rt: *JitRuntime, typeidx: u32, length: u32, init: u64
     return ref;
 }
 
+/// 10.G GC-on-JIT array A-7 — `array.fill` emit materialises this fn's
+/// address + `CALL`s it (rt=arg0, typeidx=arg1, ref=arg2, idx=arg3,
+/// value=arg4, count=arg5). Operates on an EXISTING array (no alloc):
+/// null-checks `ref`, bounds-checks `idx + count ≤ length` (overflow-
+/// safe via `@addWithOverflow` — a negative i32 idx/count arrives as a
+/// large u32 and is rejected here, mirroring the interp's signed check),
+/// then fills `count` element slots from `idx` with `value` — the SAME
+/// fill the interp `array_ops.zig` arrayFill does. Returns `1` on
+/// success, `0` on trap (null ref / OOB); the JIT caller maps `0` to a
+/// trap (`CMP result,#0; B.EQ → bounds-fixup stub`). `value` is the raw
+/// 8 bytes (GPR-only; FP element types deferred, matching
+/// jitGcAllocArrayFill).
+pub fn jitGcArrayFill(rt: *JitRuntime, typeidx: u32, ref: u32, idx: u32, value: u64, count: u32) callconv(.c) u32 {
+    const heap_opaque = rt.gc_heap orelse return 0;
+    const gti_opaque = rt.gc_type_infos_ptr orelse return 0;
+    const heap: *heap_mod.Heap = @ptrCast(@alignCast(heap_opaque));
+    const gti: *const gc_type_info.GcTypeInfos = @ptrCast(@alignCast(gti_opaque));
+    if (typeidx >= gti.array_infos.len) return 0;
+    const ai = gti.array_infos[typeidx] orelse return 0;
+    if (ref == 0) return 0; // null-ref trap
+    const len_off: u32 = @offsetOf(gc_type_info.ArrayHeader, "length");
+    const length = std.mem.readInt(u32, heap.bytes[ref + len_off ..][0..4], .little);
+    const end = @addWithOverflow(idx, count);
+    if (end[1] != 0 or end[0] > length) return 0; // OOB trap
+    const esz: u32 = ai.element.size;
+    const ahsz: u32 = @sizeOf(gc_type_info.ArrayHeader);
+    const value_bytes = std.mem.asBytes(&value);
+    var i: u32 = 0;
+    while (i < count) : (i += 1) {
+        const off = ref + ahsz + (idx + i) * esz;
+        @memcpy(heap.bytes[off .. off + esz], value_bytes[0..esz]);
+    }
+    return 1;
+}
+
 // ============================================================
 // Comptime offset constants — consumed by prologue emit (per-arch
 // `compile()` writes `LDR Xn, [X0, #vm_base_off]` etc.).

@@ -183,6 +183,8 @@ pub fn usesRuntimePtr(func: *const ZirFunc) bool {
             // the packed element load (then MOVSX / MOVZX) → need R15 pinned.
             .@"array.get_s",
             .@"array.get_u",
+            // array A-7: array.fill CALLs jitGcArrayFill with rt=RDI=R15.
+            .@"array.fill",
             // array A-4: array.new CALLs jitGcAllocArrayFill (rt=RDI=R15).
             .@"array.new",
             // array A-5: array.new_fixed CALLs jitGcAllocArray (rt=RDI=R15)
