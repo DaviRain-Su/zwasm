@@ -570,6 +570,43 @@ pub fn jitGcArrayFill(rt: *JitRuntime, typeidx: u32, ref: u32, idx: u32, value: 
     return 1;
 }
 
+/// 10.G GC-on-JIT array A-9 — `array.copy` emit materialises this fn's
+/// address + `CALL`s it (rt=arg0, dst_ref=arg1, dst_off=arg2, src_ref=arg3,
+/// src_off=arg4, len=arg5). Null-checks both refs, bounds-checks
+/// `dst_off + len ≤ dst.length` AND `src_off + len ≤ src.length`
+/// (overflow-safe; negative-as-u32 rejected), then copies `len` element
+/// slots src→dst with memmove-overlap semantics (backward copy when the
+/// same array + dst_off > src_off) — the SAME copy the interp arrayCopy
+/// does. Returns `1` on success, `0` on trap (null ref / OOB); the JIT
+/// caller maps `0` to a trap. The element slot size is the uniform 8 bytes
+/// (ADR-0116 §3a — the array JIT family hardcodes the 8-byte slot
+/// throughout; revisit with non-uniform slots), so the typeidx immediates
+/// are NOT passed — this trampoline needs only `rt.gc_heap` (no
+/// gc_type_infos).
+pub fn jitGcArrayCopy(rt: *JitRuntime, dst_ref: u32, dst_off: u32, src_ref: u32, src_off: u32, len: u32) callconv(.c) u32 {
+    const heap_opaque = rt.gc_heap orelse return 0;
+    const heap: *heap_mod.Heap = @ptrCast(@alignCast(heap_opaque));
+    if (dst_ref == 0 or src_ref == 0) return 0; // null-ref trap
+    const len_off: u32 = @offsetOf(gc_type_info.ArrayHeader, "length");
+    const ahsz: u32 = @sizeOf(gc_type_info.ArrayHeader);
+    const dst_len = std.mem.readInt(u32, heap.bytes[dst_ref + len_off ..][0..4], .little);
+    const src_len = std.mem.readInt(u32, heap.bytes[src_ref + len_off ..][0..4], .little);
+    const de = @addWithOverflow(dst_off, len);
+    if (de[1] != 0 or de[0] > dst_len) return 0; // dst OOB
+    const se = @addWithOverflow(src_off, len);
+    if (se[1] != 0 or se[0] > src_len) return 0; // src OOB
+    const esz: u32 = 8; // uniform element slot (ADR-0116 §3a)
+    const overlap_backward = (dst_ref == src_ref and dst_off > src_off);
+    var k: u32 = 0;
+    while (k < len) : (k += 1) {
+        const i = if (overlap_backward) len - 1 - k else k;
+        const s = src_ref + ahsz + (src_off + i) * esz;
+        const d = dst_ref + ahsz + (dst_off + i) * esz;
+        @memcpy(heap.bytes[d .. d + esz], heap.bytes[s .. s + esz]);
+    }
+    return 1;
+}
+
 // ============================================================
 // Comptime offset constants — consumed by prologue emit (per-arch
 // `compile()` writes `LDR Xn, [X0, #vm_base_off]` etc.).

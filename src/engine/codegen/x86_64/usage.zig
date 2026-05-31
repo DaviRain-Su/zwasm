@@ -185,6 +185,8 @@ pub fn usesRuntimePtr(func: *const ZirFunc) bool {
             .@"array.get_u",
             // array A-7: array.fill CALLs jitGcArrayFill with rt=RDI=R15.
             .@"array.fill",
+            // array A-9: array.copy CALLs jitGcArrayCopy with rt=RDI=R15.
+            .@"array.copy",
             // array A-4: array.new CALLs jitGcAllocArrayFill (rt=RDI=R15).
             .@"array.new",
             // array A-5: array.new_fixed CALLs jitGcAllocArray (rt=RDI=R15)

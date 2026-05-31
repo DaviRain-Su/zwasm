@@ -148,6 +148,9 @@ pub fn computeWith(
             // into arg regs BEFORE the CALL (strict), but vregs spanning it
             // must force-spill (clobbered caller-saved).
             .@"array.fill" => false,
+            // array.copy: CALL into jitGcArrayCopy; all 5 operands consumed
+            // into arg regs BEFORE the CALL (strict).
+            .@"array.copy" => false,
             else => null,
         };
         const inc = inclusive orelse continue;
