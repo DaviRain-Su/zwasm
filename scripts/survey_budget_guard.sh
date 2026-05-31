@@ -3,17 +3,19 @@
 # surveys to an Explore subagent" discipline (textbook_survey.md;
 # lesson 2026-05-31-continue-context-burn-survey-in-main).
 #
-# Wired as a PreToolUse hook on Read|Grep|Bash|Task|Agent and a
-# UserPromptSubmit hook. It counts MAIN-CONTEXT survey operations
-# (Read / Grep / survey-like Bash) per turn and:
+# Wired as PreToolUse hooks on Read|Grep|Bash|Edit|Write|Task|Agent and a
+# UserPromptSubmit hook. It counts MAIN-CONTEXT survey operations (Read /
+# Grep / primary-verb-search Bash) per turn and:
 #   - SOFT (advisory, stdout, non-blocking): "you're surveying in
 #     main; consider forking to an Explore subagent".
 #   - HARD (exit 2, blocks the tool, feeds the reason to the model):
 #     forces a pause so the remaining survey gets forked.
-# The counter RESETS to 0 on a new user message (UserPromptSubmit)
-# and on any subagent dispatch (Task / Agent) — i.e. forking the
-# survey clears the budget. So the guard is self-healing: comply
-# (dispatch a subagent) and it gets out of the way.
+# The counter RESETS to 0 on: a new user message (UserPromptSubmit), a
+# subagent dispatch (Task / Agent — survey forked), or an Edit / Write
+# (implementation mode — interleaved reads are legit lookups, not a survey).
+# So the guard is self-healing: fork a subagent OR start implementing and
+# it gets out of the way; only a LONG PURE survey (many reads, no writes,
+# no subagent) trips the block.
 #
 # Why a hook and not just prose: the prose rule already existed and
 # was not followed (the survey ran in main and burned ~83% of the
@@ -38,11 +40,19 @@ ev = d.get("hook_event_name", "?")
 tool = d.get("tool_name", "?")
 sess = d.get("session_id", "default")
 cmd = (d.get("tool_input", {}) or {}).get("command", "")
-# Collapse command to a single whitespace-free-ish token bag for grep.
-cmd = " ".join(cmd.split())[:400] if isinstance(cmd, str) else ""
-# Encode cmd presence of survey verbs as a flag to avoid quoting pain.
+cmd = " ".join(cmd.split()) if isinstance(cmd, str) else ""
 import re
-survey = bool(re.search(r'\b(grep|rg|sed|cat|head|tail|find|awk|less)\b', cmd))
+# A Bash call counts as "survey" ONLY if its PRIMARY verb is a read-only
+# search (grep/rg/ag/find). This avoids false positives on build/test/git
+# commands that merely pipe through tail/cat/head to inspect a log
+# (e.g. `zig build 2>log; tail log`). Strip cd/env/timeout prefixes first;
+# build/test/git/ssh verbs never count.
+s = re.sub(r'^(cd\s+\S+\s*&&\s*)+', '', cmd)
+s = re.sub(r'^(timeout\s+\d+\s+)', '', s)
+s = re.sub(r'^([A-Za-z_][A-Za-z0-9_]*=\S+\s+)+', '', s)
+first = (s.split() or [""])[0].split("/")[-1]
+is_build = bool(re.match(r'^(zig|git|cargo|make|npm|bash|sh|nix|ssh|gh|rm|mkdir|cp|mv|echo|ls|chmod|wc|python3?)$', first))
+survey = (not is_build) and bool(re.match(r'^(grep|rg|ag|find)$', first))
 print(ev, tool, sess, "SURVEYCMD" if survey else "OTHERCMD")
 PY
 )
@@ -56,8 +66,10 @@ state_file="$state_dir/.survey_budget_${SESSION}"
 case "$EVENT" in
   UserPromptSubmit) echo 0 > "$state_file" 2>/dev/null || true; exit 0 ;;
 esac
+# Task/Agent = survey forked to a subagent → reset. Edit/Write = entering
+# implementation mode (reads here are legit lookups, not a survey) → reset.
 case "$TOOL" in
-  Task|Agent) echo 0 > "$state_file" 2>/dev/null || true; exit 0 ;;
+  Task|Agent|Edit|Write|MultiEdit|NotebookEdit) echo 0 > "$state_file" 2>/dev/null || true; exit 0 ;;
 esac
 
 # Count only main-context survey operations.
