@@ -8,14 +8,12 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD**: §1 spec-corpus JIT mode backbone (`0d9cddd7`) + **JIT-fail classification**
-  (this turn). Opt-in `ZWASM_SPEC_ENGINE=jit` routes the no-arg-i32 same-module assert_return
-  subset through the JIT entry (runI32Export) + compares. Mac aarch64: **pass=43 fail=9
-  skip=1243** (was fail=96; a `--fail-detail` sweep showed 87 of 96 "fails" were
-  compile/setup rejections that never executed — `jitErrorIsUnwiredShape` now buckets them as
-  enumerated SKIP, leaving fail = JIT executed + wrong observable result [8 trap + 1 value]).
-  **Shared-runtime state-bridge DROPPED** (measured zero-yield: 0 of 96 were stale-state). Default
-  stays interp → test-all unchanged. GC-op JIT emit COMPLETE both arches (`c94bd04f`).
+- **HEAD**: §1 spec-corpus JIT mode — backbone (`0d9cddd7`) + fail-classification + **no-arg
+  i64-result dispatch** (this chunk). Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=47
+  fail=12 skip=1236** (no-arg result type now i32+i64 via `runI32Export`/`runI64Export`; i64
+  flipped 7 from skip: +4 pass, +3 memory.grow64-trap fail). `jitErrorIsUnwiredShape`
+  classifies compile/setup rejects → SKIP, executed-wrong → FAIL (shared-runtime bridge DROPPED
+  — measured 0 of 96 were stale-state). Default stays interp → test-all unchanged.
 - **Two execution paths (CODE-verified)**: spec corpus runs **interp by default**
   (`instance.invoke`→`_dispatch.run`, `instance.zig:169`); the **JIT path is now wired as an
   opt-in mode** (`ZWASM_SPEC_ENGINE=jit`, backbone above). The standalone `runI32Export`
@@ -58,17 +56,16 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   fn-ptr per signature. Mode toggle: env `ZWASM_SPEC_ENGINE=jit` (simplest) — `build.zig:15`
   documents `-Dengine interp/jit/both` but it is NOT yet implemented.
 - **Exit-condition**: ≥1 `assert_return` (no-arg i32) executes THROUGH the JIT + compares.
-  ✓ **MET** (`0d9cddd7`). RED signal now CLEAN (fail=9 = JIT-executed-wrong only). Bundle
-  continues for shape growth.
-- **NEXT chunk** = **general arg/result dispatcher** (the dominant lever: 1243 skips are mostly
-  args / i64 / fp / multi-value / void). Calling-convention 裏取り DONE (see Continuity-memo —
-  C-ABI confirmed). **First increment (bounded, ~1 cycle): widen no-arg result type i32 →
-  {i64,f32,f64}** — `callI64NoArgs` / `callF32NoArgs` / `callF64NoArgs` ALREADY EXIST + tested
-  (`entry.zig:425/457/478`); only `jitReturnEligible` (gates result_ty=="i32") + the result
-  compare site (`spec_assert_runner_wasm_3_0.zig:546`, i32-only; needs i64/FP + the manifest's
-  `nan:canonical`/`nan:arithmetic` expected-value handling — add boundary fixtures per
-  test_discipline §1) must change. THEN args (callI32_i32… exist too) + multi-value. Secondary
-  lever: multi-memory setup in
+  ✓ **MET** (`0d9cddd7`). RED signal CLEAN (fail = JIT-executed-wrong only). Bundle continues
+  for shape growth. Calling-convention 裏取り DONE (Continuity-memo — C-ABI). no-arg result
+  type i32 ✓ + i64 ✓ (this chunk) wired.
+- **NEXT chunk** = **no-arg f32/f64 result** — `callF32NoArgs`/`callF64NoArgs` EXIST + tested
+  (`entry.zig:457/478`); add `runF32Export`/`runF64Export` (mirror runI64Export, gate `.f32`/`.f64`),
+  widen `jitReturnEligible` to f32/f64, add an FP compare arm at the dispatch site. **The FP-specific
+  work = the manifest's `nan:canonical`/`nan:arithmetic` expected-value handling** (reuse the interp
+  path's FP-compare in this file; grep `nan:` / `expected_zv.f32`) + add boundary fixtures per
+  test_discipline §1 (signed-zero, the two NaN classes, ±inf). THEN args (`callI32_i32`… exist) +
+  multi-value. Secondary lever: multi-memory setup in
   `runI32Export`/`setupRuntime` (66 skips; needs JitRuntime per-memory base — likely its own
   chunk). Unemitted ops (11 skips: br_on_null / return_call_indirect / …) tracked by D-198 /
   tail-call / ADR-0127 PHASE C. **Shared-runtime state-bridge is NOT a chunk** — measured
@@ -87,12 +84,12 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-§1 JIT-fail classification code (`15d8c9cd`) is **ubuntu x86_64 VERIFIED GREEN** this turn
-(`/tmp/ubuntu.log`: `OK (HEAD=15d8c9cd)` — fast-forwarded 72c0c9e3→15d8c9cd, covers the prior
-unverified §1 backbone `0d9cddd7` too). The handover-only commit on top is doc-only (non-code-gap
-exception, ADR-0076 D3 — no new ubuntu kick; the code HEAD is the verified one). Last
-ubuntu-verified code HEAD = `15d8c9cd`. Next `/continue` Step 0.7 needs no re-check unless a code
-chunk lands first. Mac aarch64 primary; ubuntu confirms x86_64.
+This turn landed the no-arg-i64 dispatch (code chunk: `runI64Export` in `src/engine/runner.zig`
++ runner widening). Classify=`unclear` → gated at `zig build test-all` (Mac green) + lint green;
+ubuntu kicked at turn end against this turn's HEAD (`test-all`). Next `/continue`: `tail -3
+/tmp/ubuntu.log`, expect `OK (HEAD=<this turn's tip>)`. On FAIL: revert this turn's commits to
+the last ubuntu-verified code HEAD (`15d8c9cd`, the prior fail-classification turn, ubuntu-green).
+Mac aarch64 primary; ubuntu confirms x86_64.
 
 **Lesson (still live)**: `gate_commit.sh --fast` DEFERS `zig build test`/`lint` (Step 4/5 own
 them) — the parent's full `zig build test` before push is the real gate.
