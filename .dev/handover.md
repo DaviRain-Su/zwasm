@@ -81,13 +81,15 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-This turn = array A-4 `690bcf0d` (array.new emit both arches) + handover chore `75355a15`.
-**ubuntu-verified GREEN `OK (HEAD=75355a15)`** (kick ran against the pushed HEAD = A-4 code +
-docs-only chore; `/tmp/ubuntu.log` confirms). Also: arm64 `zig build test` EXIT=0 + lint 0 +
-x86_64 cross-compile EXIT=0. So Step 0.7 next `/continue` = trivially green (log already shows
-`75355a15`); **NO revert needed**, proceed to array A-5. (User-requested stop: NO ScheduleWakeup
-re-arm this turn — the loop resumes only on the next manual `/continue`.) The `failed command:`
-line in the log is **benign** negative-test stderr (reproduces locally with EXIT=0).
+Code UNCHANGED at array A-4 `690bcf0d` (last code commit). This turn = **orphan-prevention
+infra** `0fbec7e5` (tooling-only: `scripts/orphan_guard.sh` + self-guarding
+`run_remote_{ubuntu,windows}.sh` + `orphan_prevention.md` + `CLAUDE.md`; NO
+`src/`/`test/`/`build.zig`/`flake.*`) + this handover chore. **ubuntu-verified GREEN
+`OK (HEAD=0fbec7e5)`** — the modified `run_remote_ubuntu.sh` ran test-all vs the pushed HEAD
+(`/tmp/ubuntu.log`; validates the reap + timeout-reexec + ssh-keepalive path). Step 0.7 next
+`/continue`: log SHA matches origin code; the handover-chore gap is **non-code-gap** → **proceed,
+NO revert**, pick up array A-5. (User-requested stop: NO ScheduleWakeup re-arm — the loop
+resumes on the next manual `/continue`.)
 
 **Lesson (still live)**: `gate_commit.sh --fast` DEFERS `zig build test`/`lint` (Step 4/5 own them) — parent's full `zig build test` before push is the real gate.
 
