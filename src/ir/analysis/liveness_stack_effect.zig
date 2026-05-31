@@ -261,6 +261,9 @@ pub fn stackEffect(op: ZirOp) ?StackEffect {
         //   table.copy x y / table.init x y: 3 → 0 (pop dst, src, n)
         .@"table.get" => .{ .pops = 1, .pushes = 1 },
         .@"table.set" => .{ .pops = 2, .pushes = 0 },
+        // Wasm 3.0 GC (10.G): struct.set pops the value + struct GcRef,
+        // stores into the field slot, pushes nothing (fixed 2→0).
+        .@"struct.set" => .{ .pops = 2, .pushes = 0 },
         .@"table.size" => .{ .pops = 0, .pushes = 1 },
         .@"table.grow" => .{ .pops = 2, .pushes = 1 },
         .@"table.fill", .@"table.copy", .@"table.init" => .{ .pops = 3, .pushes = 0 },

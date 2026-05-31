@@ -167,6 +167,9 @@ pub fn usesRuntimePtr(func: *const ZirFunc) bool {
             // AND reloads the slab base from [R15 + gc_heap_off] for the
             // field stores → needs R15 pinned (A-3 mirror of arm64).
             .@"struct.new",
+            // 10.G GC-on-JIT: struct.set reloads the slab base from
+            // [R15 + gc_heap_off] for the field store → needs R15 pinned.
+            .@"struct.set",
             .@"unreachable",
             // §9.9 / 9.9-m-1b: ref.func loads func_entities_ptr
             // from [r15+off]. Requires R15.

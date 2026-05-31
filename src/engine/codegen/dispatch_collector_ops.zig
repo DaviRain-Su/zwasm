@@ -855,12 +855,14 @@ const arm64_struct_get = @import("arm64/ops/wasm_3_0/struct_get.zig");
 // struct.new (variadic) — allocs then stores field operands (force-spilled
 // across the alloc BLR per ADR-0060 amend); cycle A-3. x86_64 = follow-on.
 const arm64_struct_new = @import("arm64/ops/wasm_3_0/struct_new.zig");
+const arm64_struct_set = @import("arm64/ops/wasm_3_0/struct_set.zig");
 const x86_64_ref_i31 = @import("x86_64/ops/wasm_3_0/ref_i31.zig");
 const x86_64_i31_get_s = @import("x86_64/ops/wasm_3_0/i31_get_s.zig");
 const x86_64_i31_get_u = @import("x86_64/ops/wasm_3_0/i31_get_u.zig");
 const x86_64_struct_new_default = @import("x86_64/ops/wasm_3_0/struct_new_default.zig");
 const x86_64_struct_get = @import("x86_64/ops/wasm_3_0/struct_get.zig");
 const x86_64_struct_new = @import("x86_64/ops/wasm_3_0/struct_new.zig");
+const x86_64_struct_set = @import("x86_64/ops/wasm_3_0/struct_set.zig");
 
 /// Tuple of all migrated arm64 per-op modules.
 pub const collected_arm64_ops = .{
@@ -1228,6 +1230,7 @@ pub const collected_arm64_ops = .{
     arm64_struct_new_default,
     arm64_struct_get,
     arm64_struct_new,
+    arm64_struct_set,
 };
 
 /// Tuple of all migrated x86_64 per-op modules.
@@ -1742,4 +1745,5 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_struct_new_default,
     x86_64_struct_get,
     x86_64_struct_new,
+    x86_64_struct_set,
 };

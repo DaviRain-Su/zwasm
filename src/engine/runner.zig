@@ -1301,3 +1301,36 @@ test "runI32Export: i32.const 42 + struct.new 0 + struct.get 0 0 → 42 (10.G st
     };
     try testing.expectEqual(@as(u32, 42), runI32Export(testing.allocator, &bytes, "f"));
 }
+
+test "runI32Export: struct.set then struct.get round-trip → 55 (10.G struct-on-JIT A-3 set)" {
+    // Both arches (arm64 + x86_64 SysV emit landed together).
+    // (module
+    //   (type (struct (field (mut i32))))             ;; type 0
+    //   (func (export "f") (result i32) (local (ref null 0))  ;; type 1
+    //     struct.new_default 0  local.tee 0  i32.const 55
+    //     struct.set 0 0  local.get 0  struct.get 0 0))  ;; field 0 ← 55
+    // Exercises struct.set: pop value(55) + ref (null-trap), reload slab
+    // base, store 55 at [slab+ref+8]; struct.get reads it back → 55 (vs
+    // the zero-inited 0 without the set). A `(ref null 0)` local (63 00)
+    // holds the ref across the set/get via local.tee/local.get. struct.set
+    // = fb 05 typeidx fieldidx; i32.const 55 = 41 37 (55 < 64 → single-byte
+    // signed LEB128, bit 6 clear; do NOT use values ≥ 64 unencoded).
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        // type: [0]=struct{i32 mut} (5f 01 7f 01), [1]=func ()->(i32) (60 00 01 7f)
+        0x01, 0x09, 0x02, 0x5f, 0x01, 0x7f, 0x01, 0x60,
+        0x00, 0x01, 0x7f,
+        0x03, 0x02, 0x01, 0x01, // func: type idx 1
+        0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x00, // export "f" func 0
+        // code: body 22 bytes. locals = 1 group of 1×(ref null 0) [01 01 63 00];
+        // struct.new_default 0 [fb 01 00] + local.tee 0 [22 00] +
+        // i32.const 99 [41 63] + struct.set 0 0 [fb 05 00 00] +
+        // local.get 0 [20 00] + struct.get 0 0 [fb 02 00 00] + end [0b].
+        // body_size=0x16, sect size=0x18.
+        0x0a, 0x18, 0x01, 0x16, 0x01, 0x01, 0x63,
+        0x00, 0xfb, 0x01, 0x00, 0x22, 0x00, 0x41,
+        0x37, 0xfb, 0x05, 0x00, 0x00, 0x20, 0x00,
+        0xfb, 0x02, 0x00, 0x00, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 55), runI32Export(testing.allocator, &bytes, "f"));
+}
