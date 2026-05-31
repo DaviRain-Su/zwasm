@@ -308,7 +308,8 @@ test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
     // i31.get_u (+3 = 404; D-211 mirror of arm64).
     // 10.G GC-on-JIT added x86_64 struct family — struct.new_default /
     // struct.get (+2 = 406; D-211 mirror of arm64).
-    try std.testing.expectEqual(@as(usize, 406), collected_x86_64_ctx_ops.len);
+    // 10.G GC-on-JIT added x86_64 struct.new (variadic) (+1 = 407; A-3 mirror).
+    try std.testing.expectEqual(@as(usize, 407), collected_x86_64_ctx_ops.len);
 }
 
 // Note: a `dispatch(.arm64, tag, args)` test at this layer would

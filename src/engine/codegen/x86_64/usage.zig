@@ -163,6 +163,10 @@ pub fn usesRuntimePtr(func: *const ZirFunc) bool {
             // from [R15 + gc_heap_off] (= X19 on arm64) → needs R15
             // pinned. arm64 emit landed first; x86_64 emit = D-211.
             .@"struct.get",
+            // 10.G GC-on-JIT: struct.new CALLs jitGcAlloc (rt=RDI=R15)
+            // AND reloads the slab base from [R15 + gc_heap_off] for the
+            // field stores → needs R15 pinned (A-3 mirror of arm64).
+            .@"struct.new",
             .@"unreachable",
             // §9.9 / 9.9-m-1b: ref.func loads func_entities_ptr
             // from [r15+off]. Requires R15.

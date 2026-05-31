@@ -1272,11 +1272,8 @@ test "runI32Export: struct.new_default + struct.get 0 0 → 0 (10.G struct-on-JI
 }
 
 test "runI32Export: i32.const 42 + struct.new 0 + struct.get 0 0 → 42 (10.G struct-on-JIT A-3)" {
-    // x86_64 struct.new emit is the follow-on mirror (D-211); gate to
-    // arm64 so the ubuntu/windows x86_64 `zig build test` doesn't hit
-    // UnsupportedOp until it lands (matches the pre-fb991029 A-2 gate).
-    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-211");
-    // arm64 first; x86_64 = follow-on mirror.
+    // Ungated for x86_64: the SysV struct.new emit landed (A-3 mirror);
+    // runs on both Mac aarch64 and Linux x86_64 (ubuntu gate).
     // (module
     //   (type (struct (field (mut i32))))    ;; type 0
     //   (func (export "f") (result i32)        ;; type 1
