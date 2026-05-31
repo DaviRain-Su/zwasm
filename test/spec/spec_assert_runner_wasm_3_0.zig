@@ -97,7 +97,26 @@ const ProposalSummary = struct {
     asserts_exception_pass: u32 = 0,
     asserts_exception_fail: u32 = 0,
     skips: u32 = 0,
+    // §1 (ADR-0128) — JIT execution-mode tallies (populated only when
+    // ZWASM_SPEC_ENGINE=jit). pass/fail are real JIT outcomes; skip = a
+    // shape not yet wired through the JIT (see jitReturnEligible).
+    jit_return_pass: u32 = 0,
+    jit_return_fail: u32 = 0,
+    jit_return_skip: u32 = 0,
 };
+
+/// §1 (ADR-0128) — JIT execution-mode eligibility for an `assert_return`
+/// directive. The first increment routes only the no-arg + single-i32-
+/// result, same-module subset through the JIT entry (`runI32Export` →
+/// `callI32NoArgs`). Everything else (args, i64/fp/v128 results, multi-
+/// value, void side-effect, cross-module `$M::field`) is enumerated as a
+/// JIT skip so the not-yet-supported set is tracked, not silently
+/// dropped — the per-backend should_fail list of wasmtime's
+/// `tests/wast.rs` pattern. Skips shrink as the general arg/result
+/// dispatcher lands in follow-on cycles.
+fn jitReturnEligible(args_len: usize, results_len: usize, result_ty: []const u8, module_id_len: usize) bool {
+    return args_len == 0 and results_len == 1 and module_id_len == 0 and std.mem.eql(u8, result_ty, "i32");
+}
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -121,6 +140,22 @@ pub fn main(init: std.process.Init) !void {
     // a `--fail-detail` arg; off by default so gate runs stay clean.
     const fail_detail = if (args.next()) |a| std.mem.eql(u8, a, "--fail-detail") else false;
 
+    // §1 (ADR-0128) — opt-in JIT execution mode. Default = interp, so
+    // `zig build test-spec-wasm-3.0-assert` (and test-all) is unchanged.
+    // `ZWASM_SPEC_ENGINE=jit` routes the no-arg-i32 assert_return subset
+    // through the JIT entry (runI32Export) and reports jit pass/fail/skip
+    // alongside the interp totals — the verification backbone that makes
+    // "both backends" mechanically checkable. NOTE (first-increment
+    // limitation, tracked): the JIT path re-compiles the module per call
+    // (runI32Export owns its own runtime), so it does NOT share the
+    // interp run's accumulated cross-directive state; functions that
+    // depend on a prior void-assert mutation will show as JITfail until
+    // the shared-runtime JIT-execute design lands (next §1 chunk).
+    const jit_mode = if (init.environ_map.get("ZWASM_SPEC_ENGINE")) |v|
+        std.mem.eql(u8, v, "jit")
+    else
+        false;
+
     const cwd = std.Io.Dir.cwd();
     var dir = cwd.openDir(io, corpus_root, .{}) catch {
         try stdout.print("[wasm-3.0-assert] corpus root not found: {s} (0 manifests; exit 0)\n", .{corpus_root});
@@ -143,6 +178,10 @@ pub fn main(init: std.process.Init) !void {
     var grand_total_malformed_fail: u32 = 0;
     var grand_total_exception_pass: u32 = 0;
     var grand_total_exception_fail: u32 = 0;
+    // §1 (ADR-0128) — JIT execution-mode grand tallies.
+    var grand_total_jit_pass: u32 = 0;
+    var grand_total_jit_fail: u32 = 0;
+    var grand_total_jit_skip: u32 = 0;
 
     for (PROPOSALS) |proposal| {
         var summary: ProposalSummary = .{ .name = proposal };
@@ -472,6 +511,46 @@ pub fn main(init: std.process.Init) !void {
                     },
                     .assert_return => {
                         summary.asserts_return += 1;
+                        // §1 (ADR-0128) — JIT execution mode. The no-arg-i32
+                        // same-module subset runs through the JIT entry and
+                        // is compared; every other shape is a tracked skip.
+                        // Bypasses the interp path entirely in jit mode (the
+                        // re-compile-per-call path owns its own runtime).
+                        if (jit_mode) {
+                            const elig = jitReturnEligible(
+                                d.args_len,
+                                d.results_len,
+                                if (d.results_len == 1) d.results[0].ty else "",
+                                d.module_id.len,
+                            );
+                            if (!elig) {
+                                summary.jit_return_skip += 1;
+                                if (fail_detail) try stdout.print("  JITskip [{s}/{s}] {s} (args={d} results={d} — only no-arg-i32 wired)\n", .{ proposal, entry.name, d.func_name, d.args_len, d.results_len });
+                                continue;
+                            }
+                            const jb = cur_module_bytes orelse {
+                                summary.jit_return_skip += 1;
+                                continue;
+                            };
+                            const exp_tv = d.results[0];
+                            const exp_rv = manifest_parser.parsePayload(exp_tv) catch {
+                                summary.jit_return_skip += 1;
+                                continue;
+                            };
+                            const exp_zv = manifest_parser.runtimeToZwasm(exp_rv, exp_tv.ty);
+                            const got_u = zwasm.engine.runner.runI32Export(gpa, jb, d.func_name) catch |e| {
+                                summary.jit_return_fail += 1;
+                                if (fail_detail) try stdout.print("  JITfail [{s}/{s}] {s} err={s}\n", .{ proposal, entry.name, d.func_name, @errorName(e) });
+                                continue;
+                            };
+                            if (@as(i32, @bitCast(got_u)) == exp_zv.i32) {
+                                summary.jit_return_pass += 1;
+                            } else {
+                                summary.jit_return_fail += 1;
+                                if (fail_detail) try stdout.print("  JITval [{s}/{s}] {s} exp={d} got={d}\n", .{ proposal, entry.name, d.func_name, exp_zv.i32, @as(i32, @bitCast(got_u)) });
+                            }
+                            continue;
+                        }
                         _ = cur_module_bytes orelse continue;
                         // Build args slice (zwasm.Value); skip if any
                         // typed arg can't parse (e.g. v128 / refs not yet
@@ -793,12 +872,24 @@ pub fn main(init: std.process.Init) !void {
         grand_total_malformed_fail += summary.asserts_malformed_fail;
         grand_total_exception_pass += summary.asserts_exception_pass;
         grand_total_exception_fail += summary.asserts_exception_fail;
+        if (jit_mode) {
+            try stdout.print("[{s:<22}]   JIT: return pass={d} fail={d} skip={d}\n", .{ proposal, summary.jit_return_pass, summary.jit_return_fail, summary.jit_return_skip });
+            grand_total_jit_pass += summary.jit_return_pass;
+            grand_total_jit_fail += summary.jit_return_fail;
+            grand_total_jit_skip += summary.jit_return_skip;
+        }
     }
 
     try stdout.print(
         "[wasm-3.0-assert] total: {d} manifests, {d} directives; assert_return pass={d} fail={d}; assert_trap pass={d} fail={d}; assert_invalid pass={d} fail={d}; assert_unlinkable pass={d} fail={d}; assert_malformed pass={d} fail={d}; assert_exception pass={d} fail={d} (multi-value execution + assert_trap class discrimination land in follow-on cycles)\n",
         .{ grand_total_manifests, grand_total_directives, grand_total_return_pass, grand_total_return_fail, grand_total_trap_pass, grand_total_trap_fail, grand_total_invalid_pass, grand_total_invalid_fail, grand_total_unlinkable_pass, grand_total_unlinkable_fail, grand_total_malformed_pass, grand_total_malformed_fail, grand_total_exception_pass, grand_total_exception_fail },
     );
+    if (jit_mode) {
+        try stdout.print(
+            "[wasm-3.0-assert] JIT execution mode (ADR-0128 §1): assert_return pass={d} fail={d} skip={d} (skip = shape not yet wired through the JIT — args / i64 / fp / v128 / multi-value / void / cross-module; flipped as the general dispatcher lands)\n",
+            .{ grand_total_jit_pass, grand_total_jit_fail, grand_total_jit_skip },
+        );
+    }
     try stdout.flush();
 }
 
@@ -817,4 +908,32 @@ test "wasm-3.0-assert: PROPOSALS list matches design plan §3.1-§3.5 + §4.6 + 
     try std.testing.expectEqualStrings("gc", PROPOSALS[3]);
     try std.testing.expectEqualStrings("function-references", PROPOSALS[4]);
     try std.testing.expectEqualStrings("multi-memory", PROPOSALS[5]);
+}
+
+test "wasm-3.0-assert §1: JIT execution-mode eligibility + no-arg-i32 JIT invoke (ADR-0128 §1)" {
+    // §1 first increment — only the no-arg + single-i32-result, same-
+    // module subset is wired through the JIT (runI32Export). Every
+    // other shape is enumerated as a JIT skip (the wasmtime
+    // tests/wast.rs should_fail pattern), flipped as the general
+    // arg/result dispatcher lands.
+    try std.testing.expect(jitReturnEligible(0, 1, "i32", 0)); // wired
+    try std.testing.expect(!jitReturnEligible(1, 1, "i32", 0)); // has args
+    try std.testing.expect(!jitReturnEligible(0, 2, "i32", 0)); // multi-value
+    try std.testing.expect(!jitReturnEligible(0, 0, "", 0)); // void (side-effect)
+    try std.testing.expect(!jitReturnEligible(0, 1, "i64", 0)); // non-i32 result
+    try std.testing.expect(!jitReturnEligible(0, 1, "f32", 0)); // fp result
+    try std.testing.expect(!jitReturnEligible(0, 1, "i32", 3)); // cross-module ($M::field)
+
+    // End-to-end: the no-arg i32 export executes THROUGH the JIT entry
+    // (runI32Export → callI32NoArgs), not the interpreter. Hand-built
+    // `(module (func (export "seven") (result i32) i32.const 7))`.
+    const wasm = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type: () -> i32
+        0x03, 0x02, 0x01, 0x00, // func: typeidx 0
+        0x07, 0x09, 0x01, 0x05, 0x73, 0x65, 0x76, 0x65, 0x6e, 0x00, 0x00, // export "seven" func 0
+        0x0a, 0x06, 0x01, 0x04, 0x00, 0x41, 0x07, 0x0b, // code: i32.const 7; end
+    };
+    const got = try zwasm.engine.runner.runI32Export(std.testing.allocator, &wasm, "seven");
+    try std.testing.expectEqual(@as(u32, 7), got);
 }
