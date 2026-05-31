@@ -305,11 +305,17 @@ read; do NOT re-trust the uniform-vs-packed / lowering-stub claims):**
   emitted fill loop (the original plan); instead a new
   `jitGcAllocArrayFill(rt,typeidx,length,init)` trampoline allocs + fills
   inside Zig (mirrors interp arrayNew), so the emit stays marshal+CALL +
-  strict `is_call`. **A-5 (NEXT) = `array.new_fixed`** (variadic; N=`extra`
-  compile-time): alloc length-N via jitGcAllocArray, reload slab base AFTER
-  CALL, store N popped values inline `[base+12+i*8]` (reverse-pop, mirror
-  struct.new) → **inclusive force-spill** (is_call=true). Defer get_s/get_u
-  (packed; D-212 FP gap) + fill/copy/init_data/init_elem (bulk).
+  strict `is_call`. A-5 `d4f2a141` = `array.new_fixed` (variadic; N=`extra`
+  compile-time): alloc length-N via `jitGcAllocArray(rt,typeidx,N)`, reload
+  slab base AFTER CALL, store N popped values inline (reverse-pop, mirror
+  struct.new) → **inclusive force-spill** (is_call=true). arm64 biases base
+  +12 then uses i*8 (scaled STR needs 8-aligned imm); x86_64 folds 12+i*8
+  into disp32. liveness variadic special-case extended to array.new_fixed.
+  **A-6 (NEXT) = `array.get_s` + `array.get_u`** (packed i8/i16 load +
+  sign/zero-extend): unlike A-3's uniform 8-byte get/set, packed access must
+  know the element width at emit → thread the compile-time element-type byte
+  into EmitCtx (mirror the `struct_field_counts` threading idea); see D-212
+  FP gap. Then bulk fill/copy/new_data/new_elem (trampoline-based).
 - **Per-op touch-points** (same as struct, see above): op-file + register in
   `collected_{arm64_ops,x86_64_ctx_ops}` + bump dispatch_collector.zig count
   LITERALS + stackEffect (or liveness special-case if variadic) + x86_64

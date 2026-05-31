@@ -8,19 +8,22 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD**: `690bcf0d` — 10.G **array A-4** (`array.new` emit both arches). 2→1: pop init +
-  length, marshal rt+typeidx+length+init → CALL **`jitGcAllocArrayFill`** trampoline (alloc +
-  fill all elements with init INSIDE the trampoline — element count is runtime, mirrors interp
-  arrayNew; no emitted loop). Both operands consumed into args before CALL → strict `is_call`.
-  e2e `i32.const 7; i32.const 3; array.new 0; i32.const 1; array.get 0 → 7` ungated both arches.
-  (array A-1 trampoline `06ebc165` + A-2 new_default/len `d6dea34d` + A-3 get/set `dc5869ca`
-  DONE.) **D-212 filed**: init/field marshaling GPR-only (struct.new + array.new) — f32/f64
-  element/field types deferred (latent until §1 JIT-corpus mode). Verified: arm64 `zig build
-  test` EXIT=0 + lint 0 + x86_64 cross-compile EXIT=0; x86_64 RUNTIME = ubuntu gate.
+- **HEAD**: `d4f2a141` — 10.G **array A-5** (`array.new_fixed` emit both arches). Variadic
+  mirror of struct.new: N=`ins.extra` (compile-time count); marshal N → length arg; CALL
+  **`jitGcAllocArray(rt,typeidx,N)`** (zero-inits payload); reload slab base AFTER call; store
+  the N popped values inline in declared order (reverse-pop). arm64 biases base +12 then i*8
+  (scaled STR needs 8-aligned imm; +12 is 4-mod-8); x86_64 folds 12+i*8 into disp32. Inclusive
+  force-spill (is_call=true, mirror struct.new — values read after the alloc CALL); liveness
+  variadic special-case extended; x86_64 usesRuntimePtr += array.new_fixed. e2e
+  `array.new_fixed 0 3` over [10,20,30]; `array.get 0` idx 2 → 30. (A-1 trampoline `06ebc165` +
+  A-2 new_default/len `d6dea34d` + A-3 get/set `dc5869ca` + A-4 new `690bcf0d` DONE.)
+  **D-212** (init/field marshaling GPR-only; f32/f64 deferred) still applies. Verified: arm64
+  `zig build test-all` EXIT=0 + lint 0 + x86_64 cross-compile EXIT=0; x86_64 RUNTIME = ubuntu gate.
 - **Two execution paths (CODE-verified)**: spec corpus runs **interp-only**
   (`instance.invoke`→`_dispatch.run`, `instance.zig:169`); JIT corpus run = §1. JIT emits
-  1.0/2.0 + TC + func-refs + EH + i31 + full struct family (both arches); remaining GC
-  (array.* / ref.cast / ref.eq) interp-only (D-211). Green gc/EH corpus = INTERP.
+  1.0/2.0 + TC + func-refs + EH + i31 + full struct family + array.{new_default,len,get,set,
+  new,new_fixed} (both arches); remaining GC (array.get_s/get_u + bulk / ref.cast / ref.eq)
+  interp-only (D-211). Green gc/EH corpus = INTERP.
 - **ADR-0128 + ADR-0127 both Accepted** — no remaining user gate; loop runs autonomously.
 
 ## Active task — Phase 10 → 100% (ADR-0128)  **NEXT**
@@ -57,14 +60,14 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   bit 6 sign-extends; keep test values < 64) + ADR-0060 force-spill for alloc ops (is_call).
   array A-1 (trampoline) `06ebc165` + A-2 (new_default + len) `d6dea34d` + A-3 (get + set,
   register-offset + bounds-check) `dc5869ca` + A-4 (array.new via `jitGcAllocArrayFill`
-  trampoline-fill, NOT an emitted loop) `690bcf0d` DONE both arches. **NEXT = array A-5 =
-  `array.new_fixed` emit, both arches** (variadic, mirror struct.new): N = `ins.extra`
-  (compile-time element count); alloc length-N array via `jitGcAllocArray(rt, typeidx, N)`;
-  reload slab base AFTER the CALL; store the N popped element values inline at `[base+12+i*8]`
-  (i=0..N-1, reverse-pop like struct.new). **Inclusive force-spill** for array.new_fixed (values
-  read AFTER the alloc CALL → add to regalloc_compute.zig `is_call` as `true`, like struct.new).
-  No bounds-check (length=N fixed). Then `array.get_s`/`array.get_u` (packed; needs valtype_byte
-  — see D-212 FP gap too), bulk `array.fill`/`copy`/`init_*`. Then ref.cast / ref.test / ref.eq.
+  trampoline-fill) `690bcf0d` + A-5 (`array.new_fixed`, variadic, `jitGcAllocArray(rt,typeidx,N)`
+  + inline reverse-pop stores, inclusive force-spill) `d4f2a141` DONE both arches.
+  **NEXT = array A-6 = `array.get_s` + `array.get_u` emit, both arches** (packed i8/i16 element
+  load + sign/zero-extend): needs the compile-time element-type byte threaded into EmitCtx
+  (mirror the `struct_field_counts` threading idea — array.{get,set} A-3 sidestepped this via
+  uniform 8-byte slots, but get_s/get_u must know the packed width); see D-212 FP gap. Then bulk
+  `array.fill`/`copy`/`new_data`/`new_elem` (trampoline-based like array.new). Then ref.cast /
+  ref.test / ref.eq.
 - **Exit-condition**: all GC ops emit on both arches + spec corpus green via JIT mode (§1).
 
 ## §10 remaining — the six `[ ]` rows
@@ -75,20 +78,17 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **10.E** EH — JIT emit present; residuals = eh_frequency runner (I20), c_api tag
   accessors (I14 → Phase 13), emscripten_eh realworld (I21).
 - **10.G** GC — JIT emit PARTIAL (D-211): i31 + **full struct family** + **array.{new_default,
-  len,get,set,new}** DONE both arches; remaining = array.new_fixed (A-5) + get_s/get_u + bulk /
+  len,get,set,new,new_fixed}** DONE both arches; remaining = array.get_s/get_u (A-6) + bulk /
   ref.cast / ref.eq + ADR-0127 PHASE C + D-198 + gc_stress (I19) + dart/hoot realworld (I21).
 - **10.P** close — flips only at 100% both-backends (ADR-0128).
 
 ## Step 0.7 (next resume)
 
-Code UNCHANGED at array A-4 `690bcf0d` (last code commit). This turn = **orphan-prevention
-infra** `0fbec7e5` (tooling-only: `scripts/orphan_guard.sh` + self-guarding
-`run_remote_{ubuntu,windows}.sh` + `orphan_prevention.md` + `CLAUDE.md`; NO code-gate-inputs)
-+ this handover chore. **ubuntu-verified GREEN `OK (HEAD=0fbec7e5)`** — modified
-`run_remote_ubuntu.sh` ran test-all vs pushed HEAD (`/tmp/ubuntu.log`; validates reap +
-timeout-reexec + ssh-keepalive). Step 0.7 next `/continue`: log SHA matches origin code,
-handover-chore gap is **non-code-gap** → **proceed, NO revert**, array A-5. (User stop: NO
-ScheduleWakeup re-arm — resumes on next manual `/continue`.)
+This turn landed array A-5 code `d4f2a141` (+ this handover chore). ubuntu **test-all** kicked
+in background against the pushed HEAD (`/tmp/ubuntu.log`). Step 0.7 next `/continue`: `tail -3
+/tmp/ubuntu.log`; expect `OK (HEAD=<final pushed SHA>)`. On FAIL → `git reset --mixed HEAD~2`
+(A-5 source + this handover chore) to last ubuntu-verified HEAD (`0fbec7e5`), fix, re-gate.
+On GREEN/non-code-gap → proceed to array A-6 (get_s/get_u).
 
 **Lesson (still live)**: `gate_commit.sh --fast` DEFERS `zig build test`/`lint` (Step 4/5 own them) — parent's full `zig build test` before push is the real gate.
 
