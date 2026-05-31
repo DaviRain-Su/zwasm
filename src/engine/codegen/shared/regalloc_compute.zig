@@ -165,6 +165,12 @@ pub fn computeWith(
             .@"ref.cast" => false,
             // ref.cast_null: CALL into jitGcRefTest; ref consumed pre-CALL (strict).
             .@"ref.cast_null" => false,
+            // Cycle B: br_on_cast / br_on_cast_fail CALL jitGcRefTest. The ref is
+            // PEEKed (not popped): read into the arg reg BEFORE the CALL and
+            // RELOADED AFTER it by branchOnReg's merge. So a vreg whose last_use
+            // IS this op pc (the ref, if not consumed further) must still spill
+            // across the internal CALL → inclusive bound (mirror struct.new).
+            .br_on_cast, .br_on_cast_fail => true,
             else => null,
         };
         const inc = inclusive orelse continue;

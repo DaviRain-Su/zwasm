@@ -912,6 +912,15 @@ const x86_64_ref_test_null = @import("x86_64/ops/wasm_3_0/ref_test_null.zig");
 const x86_64_ref_cast = @import("x86_64/ops/wasm_3_0/ref_cast.zig");
 const x86_64_ref_cast_null = @import("x86_64/ops/wasm_3_0/ref_cast_null.zig");
 
+// 10.G GC-on-JIT br_on_cast / br_on_cast_fail (Cycle B) — cast (jitGcRefTest)
+// + conditional BRANCH via the shared `branchOnReg` (Cycle A `7a44f910`). The
+// ref is PEEKed (stays as block-result top); `_fail` inverts the bool. Both
+// arches; `*_fail.zig` re-exports `*.zig`'s emit (sense from `ins.op`).
+const arm64_br_on_cast = @import("arm64/ops/wasm_3_0/br_on_cast.zig");
+const arm64_br_on_cast_fail = @import("arm64/ops/wasm_3_0/br_on_cast_fail.zig");
+const x86_64_br_on_cast = @import("x86_64/ops/wasm_3_0/br_on_cast.zig");
+const x86_64_br_on_cast_fail = @import("x86_64/ops/wasm_3_0/br_on_cast_fail.zig");
+
 /// Tuple of all migrated arm64 per-op modules.
 pub const collected_arm64_ops = .{
     arm64_i32_add,
@@ -1296,6 +1305,8 @@ pub const collected_arm64_ops = .{
     arm64_ref_test_null,
     arm64_ref_cast,
     arm64_ref_cast_null,
+    arm64_br_on_cast,
+    arm64_br_on_cast_fail,
 };
 
 /// Tuple of all migrated x86_64 per-op modules.
@@ -1828,4 +1839,6 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_ref_test_null,
     x86_64_ref_cast,
     x86_64_ref_cast_null,
+    x86_64_br_on_cast,
+    x86_64_br_on_cast_fail,
 };

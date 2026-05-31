@@ -1460,6 +1460,29 @@ pub fn emitBrIfCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     );
 }
 
+/// `(ctx, ins, cond_r)` adapter for `branchOnReg` — used by the GC
+/// `br_on_cast` / `br_on_cast_fail` per-op files: the cast bool is already
+/// in `cond_r` (RAX), and there is no operand to pop (the ref is PEEKed and
+/// stays on the stack). Mirror of `emitBrIfCtx` minus the pop. The depth is
+/// `ins.payload` (the label immediate).
+pub fn branchOnRegCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr, cond_r: abi.Gpr) Error!void {
+    return branchOnReg(
+        ctx.allocator,
+        ctx.buf,
+        ctx.alloc,
+        ctx.pushed_vregs,
+        ctx.labels,
+        ctx.spill_base_off,
+        ctx.func,
+        ctx.frame_bytes,
+        ctx.uses_runtime_ptr,
+        ctx.return_is_memory_class,
+        ctx.indirect_result_slot_neg_off,
+        @as(u32, @intCast(ins.payload)),
+        cond_r,
+    );
+}
+
 pub fn emitBrTableCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     return emitBrTable(
         ctx.allocator,

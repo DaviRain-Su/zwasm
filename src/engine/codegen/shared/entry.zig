@@ -2741,3 +2741,71 @@ test "entry: br_on_non_null falls through on null funcref param — JIT 10.R cyc
     // ref.null pushed; block result = null; ref.is_null returns 1.
     try testing.expectEqual(@as(u32, 1), try callI32_i64(module, 0, &rt, 0));
 }
+
+test "entry: br_on_cast matches i31 → branch carries the ref → i31.get_s = 7 (10.G Cycle B)" {
+    // 10.G GC-on-JIT Cycle B — end-to-end exercises the br_on_cast emit
+    // handler (cast via jitGcRefTest + conditional branch via the shared
+    // branchOnReg). The ref is an i31, the target is i31 → match → branch
+    // to the block end carrying the (narrowed) i31ref → i31.get_s → 7.
+    //
+    // Body: (func (result i32)
+    //         (block (result (ref i31))
+    //           i32.const 7  ref.i31         ; i31ref(7)
+    //           (br_on_cast 0 (ref null any)(ref i31)))  ; match → branch
+    //         i31.get_s)                       ; → 7
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+
+    // extra packs {flags, ht1, ht2}: flags bit0 = ht1(any) nullable = 1;
+    // ht1 = any (0x6E); ht2 = i31 (0x6C), non-null. = 0x6C6E01.
+    const br_extra: u32 = 0x01 | (@as(u32, 0x6E) << 8) | (@as(u32, 0x6C) << 16);
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
+    var fn0 = ZirFunc.init(0, sig, &.{});
+    defer fn0.deinit(testing.allocator);
+    try fn0.instrs.append(testing.allocator, .{ .op = .block, .payload = 0, .extra = 1 });
+    try fn0.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 7 });
+    try fn0.instrs.append(testing.allocator, .{ .op = .@"ref.i31" });
+    try fn0.instrs.append(testing.allocator, .{ .op = .br_on_cast, .payload = 0, .extra = br_extra });
+    try fn0.instrs.append(testing.allocator, .{ .op = .end }); // closes block
+    try fn0.instrs.append(testing.allocator, .{ .op = .@"i31.get_s" });
+    try fn0.instrs.append(testing.allocator, .{ .op = .end }); // closes func
+    // vreg0 i32.const 7 → ref.i31; vreg1 i31ref spans br_on_cast's CALL (pc3)
+    // and is consumed by i31.get_s (pc5) — it MUST be spill-homed: it lives
+    // across the `jitGcRefTest` CALL, which clobbers every caller-saved pool
+    // register (X9..X13). A register slot (0..max_reg_slots_gpr-1) would put
+    // the i31ref in X10 and the CALL would trash it → i31.get_s reads garbage
+    // and traps. Slot id == max_reg_slots_gpr (10) parks it in the spill frame
+    // (offset 0), where the value survives the CALL via STR/LDR. vreg0 / vreg2
+    // stay in register slots 0 / 1. (Mirrors the "spilled i32.const" test's
+    // force-spill shape above.)
+    fn0.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 1, .last_use_pc = 2 },
+        .{ .def_pc = 2, .last_use_pc = 5 },
+        .{ .def_pc = 5, .last_use_pc = 6 },
+    } };
+    const slots = [_]u16{ 0, 10, 1 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 11, .max_reg_slots_gpr = 10 };
+    const sigs = [_]zir.FuncType{sig};
+    const out0 = try emit.compile(testing.allocator, &fn0, alloc, &sigs, &.{}, 0, &.{}, &.{}, .i32, &.{});
+    defer emit.deinit(testing.allocator, out0);
+
+    const bodies = [_]linker.FuncBody{
+        .{ .bytes = out0.bytes, .call_fixups = out0.call_fixups },
+    };
+    var module = try linker.link(testing.allocator, &bodies, 0);
+    defer module.deinit(testing.allocator);
+
+    var memory: [0]u8 = .{};
+    var rt: JitRuntime = .{
+        .vm_base = &memory,
+        .mem_limit = 0,
+        .funcptr_base = undefined,
+        .table_size = 0,
+        .typeidx_base = undefined,
+        .trap_flag = 0,
+        .globals_base = undefined,
+        .globals_count = 0,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
+    };
+    try testing.expectEqual(@as(u32, 7), try callI32NoArgs(module, 0, &rt));
+}

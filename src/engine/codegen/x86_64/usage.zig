@@ -198,6 +198,9 @@ pub fn usesRuntimePtr(func: *const ZirFunc) bool {
             .@"ref.cast",
             // R-3: ref.cast_null CALLs jitGcRefTest (rt=RDI=R15).
             .@"ref.cast_null",
+            // Cycle B: br_on_cast / br_on_cast_fail CALL jitGcRefTest (rt=RDI=R15).
+            .br_on_cast,
+            .br_on_cast_fail,
             // array A-4: array.new CALLs jitGcAllocArrayFill (rt=RDI=R15).
             .@"array.new",
             // array A-5: array.new_fixed CALLs jitGcAllocArray (rt=RDI=R15)
