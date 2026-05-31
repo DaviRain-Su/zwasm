@@ -49,21 +49,26 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   supports — **no-arg i32-result exports GREEN**; track args / i64 / f32/f64 / v128 /
   multi-value / host-imports / typed-trap as a per-backend SKIP list (enumerated, NOT silently
   dropped). The general arg/result **dispatcher is a SEPARATE downstream chunk** — do NOT block
-  the backbone on it. **Calling-convention 裏取り BEFORE the dispatcher chunk**: `entry.zig` has
-  monomorphized helpers (`callI32_i32`, `callI32_i32i32`, …) ⇒ JIT'd Wasm fns receive params via
-  the C ABI (X1.. / RSI..), NOT the operand stack (operand-stack push/pop is the host-call
-  dispatch path, `instance.zig:119-137`) — CONFIRM by reading `entry.zig` + a prologue param-load
-  before designing the general dispatcher (two survey subagents disagreed; resolve empirically).
-  Mode toggle: env `ZWASM_SPEC_ENGINE=jit` (simplest) — `build.zig:15` documents `-Dengine
-  interp/jit/both` but it is NOT yet implemented.
+  the backbone on it. **Calling-convention 裏取り = RESOLVED** (2026-05-31, `entry.zig`
+  read): JIT'd Wasm fns are invoked via the **C ABI** (`callconv(.c)`) — X0/RDI = `*JitRuntime`,
+  then Wasm params in declaration order across GPR/FP banks per AAPCS64/SysV (int→X1../RSI..,
+  FP→V0../XMM0..), NOT the operand stack. PROOF = the existing tested monomorphized helpers,
+  esp. the mixed `callVoid_i64f32f64i32i32` family (`entry.zig:369-409`, exercises both arg
+  banks) + the `entry.zig:367` comment. The dispatcher just builds the matching `callconv(.c)`
+  fn-ptr per signature. Mode toggle: env `ZWASM_SPEC_ENGINE=jit` (simplest) — `build.zig:15`
+  documents `-Dengine interp/jit/both` but it is NOT yet implemented.
 - **Exit-condition**: ≥1 `assert_return` (no-arg i32) executes THROUGH the JIT + compares.
   ✓ **MET** (`0d9cddd7`). RED signal now CLEAN (fail=9 = JIT-executed-wrong only). Bundle
   continues for shape growth.
 - **NEXT chunk** = **general arg/result dispatcher** (the dominant lever: 1243 skips are mostly
-  args / i64 / fp / multi-value / void). **裏取り the calling convention FIRST** (see
-  Continuity-memo: `entry.zig` monomorphized `callI32_i32`… ⇒ C-ABI params, NOT operand stack;
-  confirm via a prologue param-load read — two surveys disagreed, resolve empirically), THEN wire
-  args + i64/FP + multi-value, flipping skips. Secondary lever: multi-memory setup in
+  args / i64 / fp / multi-value / void). Calling-convention 裏取り DONE (see Continuity-memo —
+  C-ABI confirmed). **First increment (bounded, ~1 cycle): widen no-arg result type i32 →
+  {i64,f32,f64}** — `callI64NoArgs` / `callF32NoArgs` / `callF64NoArgs` ALREADY EXIST + tested
+  (`entry.zig:425/457/478`); only `jitReturnEligible` (gates result_ty=="i32") + the result
+  compare site (`spec_assert_runner_wasm_3_0.zig:546`, i32-only; needs i64/FP + the manifest's
+  `nan:canonical`/`nan:arithmetic` expected-value handling — add boundary fixtures per
+  test_discipline §1) must change. THEN args (callI32_i32… exist too) + multi-value. Secondary
+  lever: multi-memory setup in
   `runI32Export`/`setupRuntime` (66 skips; needs JitRuntime per-memory base — likely its own
   chunk). Unemitted ops (11 skips: br_on_null / return_call_indirect / …) tracked by D-198 /
   tail-call / ADR-0127 PHASE C. **Shared-runtime state-bridge is NOT a chunk** — measured
@@ -82,11 +87,12 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-This turn landed §1 JIT-fail classification (`substrate` scope → `zig build test` gate, green;
-lint green). ubuntu kicked against this turn's HEAD at turn end (covers the prior unverified §1
-backbone `0d9cddd7` too — the context-bloat commits between were doc-only). Next `/continue`:
-`tail -3 /tmp/ubuntu.log`, expect `[run_remote_ubuntu] OK (HEAD=<this turn's tip>)`. On FAIL:
-revert to last ubuntu-verified HEAD (`72c0c9e3`). Mac aarch64 primary; ubuntu confirms x86_64.
+§1 JIT-fail classification code (`15d8c9cd`) is **ubuntu x86_64 VERIFIED GREEN** this turn
+(`/tmp/ubuntu.log`: `OK (HEAD=15d8c9cd)` — fast-forwarded 72c0c9e3→15d8c9cd, covers the prior
+unverified §1 backbone `0d9cddd7` too). The handover-only commit on top is doc-only (non-code-gap
+exception, ADR-0076 D3 — no new ubuntu kick; the code HEAD is the verified one). Last
+ubuntu-verified code HEAD = `15d8c9cd`. Next `/continue` Step 0.7 needs no re-check unless a code
+chunk lands first. Mac aarch64 primary; ubuntu confirms x86_64.
 
 **Lesson (still live)**: `gate_commit.sh --fast` DEFERS `zig build test`/`lint` (Step 4/5 own
 them) — the parent's full `zig build test` before push is the real gate.
