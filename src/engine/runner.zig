@@ -1669,3 +1669,45 @@ test "runI32Export: array.new_data + array.get → 20 (10.G array-on-JIT A-10a)"
     };
     try testing.expectEqual(@as(u32, 20), runI32Export(testing.allocator, &bytes, "f"));
 }
+
+test "runI32Export: array.new_elem + array.get + call_ref → 42 (10.G array-on-JIT A-10b)" {
+    // Both arches (arm64 + x86_64 SysV emit landed together).
+    // (module
+    //   (type $sig (func (result i32)))
+    //   (type $arr (array (mut (ref null $sig))))
+    //   (elem $e (ref null $sig) (ref.func $worker))    ;; passive
+    //   (func $worker (type $sig) (i32.const 42))
+    //   (func $f (export "f") (result i32)
+    //     i32.const 0  i32.const 1  array.new_elem $arr $e  ;; array [funcref $worker]
+    //     i32.const 0  array.get $arr                        ;; elem[0] → (ref null $sig)
+    //     call_ref $sig))                                    ;; → $worker() = 42
+    // array.new_elem allocs a size-1 array and copies the funcref from passive
+    // element segment 0 (a *FuncEntity ptr — the SAME encoding ref.func / call_ref
+    // use) DIRECT into the 8-byte slot (no LE-unpack, esz=8). Emit marshals 5
+    // trampoline args (rt + typeidx + segidx + offset + size) → CALL
+    // jitGcArrayNewElem (reuses table.init's elem_segments_ptr plumbing) →
+    // CMP/TEST 0; B.EQ/JE → bounds_fixups; push ref. 2→1. array.new_elem = fb 0a
+    // typeidx segidx. call_ref through the copied funcref proves the EXACT ref was
+    // carried (a copy failure → null slot → call_ref null-trap, not 42).
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        // type: (func ()->i32) + (array (mut (ref null 0)))
+        0x01, 0x09, 0x02, 0x60, 0x00, 0x01, 0x7f, 0x5e,
+        0x63, 0x00, 0x01,
+        0x03, 0x03, 0x02, 0x00, 0x00, // func: 2 funcs, both type 0
+        0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x01, // export "f" → func 1
+        // elem: 1 passive seg, reftype (ref null 0), [ref.func 0].
+        0x09, 0x08, 0x01, 0x05, 0x63, 0x00, 0x01,
+        0xd2, 0x00, 0x0b,
+        // code: 2 funcs.
+        0x0a, 0x18, 0x02,
+        0x04, 0x00, 0x41, 0x2a, 0x0b, // worker: i32.const 42; end. body=04.
+        // f: body=0x11. i32.const 0; i32.const 1; array.new_elem 1 0;
+        // i32.const 0; array.get 1; call_ref 0; end.
+        0x11, 0x00, 0x41, 0x00, 0x41,
+        0x01, 0xfb, 0x0a, 0x01, 0x00,
+        0x41, 0x00, 0xfb, 0x0b, 0x01,
+        0x14, 0x00, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 42), runI32Export(testing.allocator, &bytes, "f"));
+}

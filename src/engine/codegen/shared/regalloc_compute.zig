@@ -155,6 +155,9 @@ pub fn computeWith(
             // (offset, size) consumed into args before the CALL (strict);
             // the result ref is captured from W0 after.
             .@"array.new_data" => false,
+            // array.new_elem: CALL into jitGcArrayNewElem; same strict
+            // shape as array.new_data (offset + size consumed pre-CALL).
+            .@"array.new_elem" => false,
             else => null,
         };
         const inc = inclusive orelse continue;

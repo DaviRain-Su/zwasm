@@ -227,6 +227,9 @@ pub fn stackEffect(op: ZirOp) ?StackEffect {
         // array.new_data (A-10) pops offset + size, pushes the GcRef (the
         // trampoline allocs + copies from the data segment). 2 → 1.
         .@"array.new_data",
+        // array.new_elem (A-10b) pops offset + size, pushes the GcRef (the
+        // trampoline allocs + copies refs from the element segment). 2 → 1.
+        .@"array.new_elem",
         => .{ .pops = 2, .pushes = 1 },
         // 3 → 1 select
         .select, .select_typed => .{ .pops = 3, .pushes = 1 },
