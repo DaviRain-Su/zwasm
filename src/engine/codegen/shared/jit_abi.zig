@@ -484,6 +484,27 @@ pub fn jitGcAlloc(rt: *JitRuntime, typeidx: u32) callconv(.c) u32 {
     return object_alloc.allocStructObject(heap, typeidx, si.payload_size, true) catch 0;
 }
 
+/// 10.G GC-on-JIT array A-1 — the `array.new_default` (and later
+/// `array.new` / `array.new_fixed`) emit materialises this fn's address
+/// + `CALL`s it (rt in X0/RDI, typeidx in W1/ESI, length in W2/EDX).
+/// Resolves the `ArrayInfo` from `rt.gc_type_infos_ptr`, allocates +
+/// stamps the `ArrayHeader` (`.array` kind + typeidx + length) + zero-
+/// inits the payload via the shared `object_alloc.allocArrayObject` (the
+/// SAME logic the interp `array_ops.zig` uses), and returns the `GcRef`.
+/// Unlike `jitGcAlloc` (struct, compile-time size), the array total size
+/// depends on the runtime `length` operand → the dedicated 3-arg
+/// trampoline. Returns `0` (null sentinel) on bad typeidx / unmaterialised
+/// GC substrate / OOM — the JIT caller maps `0` to a trap.
+pub fn jitGcAllocArray(rt: *JitRuntime, typeidx: u32, length: u32) callconv(.c) u32 {
+    const heap_opaque = rt.gc_heap orelse return 0;
+    const gti_opaque = rt.gc_type_infos_ptr orelse return 0;
+    const heap: *heap_mod.Heap = @ptrCast(@alignCast(heap_opaque));
+    const gti: *const gc_type_info.GcTypeInfos = @ptrCast(@alignCast(gti_opaque));
+    if (typeidx >= gti.array_infos.len) return 0;
+    const ai = gti.array_infos[typeidx] orelse return 0;
+    return object_alloc.allocArrayObject(heap, typeidx, length, ai.element.size, true) catch 0;
+}
+
 // ============================================================
 // Comptime offset constants — consumed by prologue emit (per-arch
 // `compile()` writes `LDR Xn, [X0, #vm_base_off]` etc.).
@@ -751,6 +772,46 @@ test "jitGcAlloc: null gc_heap → returns 0 (null sentinel)" {
     var rt: JitRuntime = std.mem.zeroes(JitRuntime);
     // gc_heap left null → trampoline returns the null sentinel.
     try testing.expectEqual(@as(u32, 0), jitGcAlloc(&rt, 0));
+}
+
+test "jitGcAllocArray: allocates array(mut i32) length 3 via the *JitRuntime bridge (10.G array A-1)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const sections = @import("../../../parse/sections.zig");
+    // 1 type: array (mut i32) → body `01 5E 7F 01`.
+    const body = [_]u8{ 0x01, 0x5E, 0x7F, 0x01 };
+    var types = try sections.decodeTypes(testing.allocator, &body);
+    defer types.deinit();
+    var gti = try gc_type_info.materialiseGcTypes(a, types);
+    var heap = heap_mod.Heap.init(a);
+
+    var rt: JitRuntime = std.mem.zeroes(JitRuntime);
+    rt.gc_heap = &heap;
+    rt.gc_type_infos_ptr = &gti;
+
+    const ref = jitGcAllocArray(&rt, 0, 3);
+    try testing.expect(ref >= 2); // non-null GcRef
+    const ArrayHeader = gc_type_info.ArrayHeader;
+    const ahsz = @sizeOf(ArrayHeader);
+    var hdr: ArrayHeader = undefined;
+    @memcpy(std.mem.asBytes(&hdr)[0..ahsz], heap.bytes[ref .. ref + ahsz]);
+    try testing.expectEqual(gc_type_info.ObjectKind.array, hdr.header.kind);
+    try testing.expectEqual(@as(u32, 0), hdr.header.info);
+    try testing.expectEqual(@as(u32, 3), hdr.length);
+    // 3 element slots (8-byte each) zero-inited by the trampoline.
+    var i: u32 = 0;
+    while (i < 3) : (i += 1) {
+        const off = ref + ahsz + i * 8;
+        var slot: u64 = undefined;
+        @memcpy(std.mem.asBytes(&slot), heap.bytes[off .. off + 8]);
+        try testing.expectEqual(@as(u64, 0), slot);
+    }
+}
+
+test "jitGcAllocArray: null gc_heap → returns 0 (null sentinel)" {
+    var rt: JitRuntime = std.mem.zeroes(JitRuntime);
+    try testing.expectEqual(@as(u32, 0), jitGcAllocArray(&rt, 0, 3));
 }
 
 test "JitRuntime: eh_payload_buf + eh_payload_len offsets (ADR-0120 Cycle 2)" {
