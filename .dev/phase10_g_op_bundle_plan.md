@@ -311,11 +311,20 @@ read; do NOT re-trust the uniform-vs-packed / lowering-stub claims):**
   struct.new) → **inclusive force-spill** (is_call=true). arm64 biases base
   +12 then uses i*8 (scaled STR needs 8-aligned imm); x86_64 folds 12+i*8
   into disp32. liveness variadic special-case extended to array.new_fixed.
-  **A-6 (NEXT) = `array.get_s` + `array.get_u`** (packed i8/i16 load +
-  sign/zero-extend): unlike A-3's uniform 8-byte get/set, packed access must
-  know the element width at emit → thread the compile-time element-type byte
-  into EmitCtx (mirror the `struct_field_counts` threading idea); see D-212
-  FP gap. Then bulk fill/copy/new_data/new_elem (trampoline-based).
+  A-6a `array.get_s` = A-3 load (8-byte slot, uniform per ADR-0116 §3a) + a
+  final register sign-extend (arm64 SXTB/SXTH; x86_64 MOVSX). The packed
+  element valtype byte (0x78 i8 / 0x77 i16) is threaded compile→lower via a
+  new `array_elem_valtypes` table (mirror `struct_field_counts`: compile.zig
+  computes from `array_defs[i].element.storage.specByte()` → compileOne →
+  lowerFunctionBodyWith → Lowerer; lower stamps `extra` for sub==12 only),
+  and the emit switches `ins.extra` → SXTB/SXTH (else unreachable; validator
+  restricts get_s to packed). stackEffect 2→1 (fixed). **A-6b (NEXT) =
+  `array.get_u`** = mirror A-6a UNSIGNED: reuse the threading, extend the
+  lower stamp to sub==13, add 3 NEW zero-extend encoders — arm64 `encUxtbW`
+  (UBFM Wd,Wn,#0,#7 = 0x53001C00) + `encUxthW` (0x53003C00); x86_64
+  `encMovzxR32R16` (0x0F 0xB7, mirror encMovsxR32R16; encMovzxR32R8 exists).
+  Then bulk fill/copy/new_data/new_elem (trampoline-based; fill = 6-arg
+  `jitGcArrayFill` + bool trap-return checked via the bounds_fixups stub).
 - **Per-op touch-points** (same as struct, see above): op-file + register in
   `collected_{arm64_ops,x86_64_ctx_ops}` + bump dispatch_collector.zig count
   LITERALS + stackEffect (or liveness special-case if variadic) + x86_64
