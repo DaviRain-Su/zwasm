@@ -1823,3 +1823,37 @@ test "JitInstance: memory64 grow past max returns i64 -1 (sign-extended, not 0x0
     // grow → 2 > max 1 → i64 -1 = all-ones (the sign-extension under test)
     try testing.expectEqual(@as(?u64, 0xffffffffffffffff), try inst.invoke(testing.allocator, "g", &.{1}));
 }
+
+// ── ADR-0128 §1 / D-217: two-scalar-arg JIT dispatch ──
+
+test "JitInstance: (i32,i32)->i32 add dispatches two args (3,4)->7" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    // (module (func (export "add") (param i32 i32) (result i32)
+    //   local.get 0 local.get 1 i32.add))
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x07, 0x01, 0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7f, // type (i32,i32)->(i32)
+        0x03, 0x02, 0x01, 0x00,
+        0x07, 0x07, 0x01, 0x03, 0x61, 0x64, 0x64, 0x00, 0x00, // export "add"
+        0x0a, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0x6a, 0x0b, // local.get 0,1; i32.add
+    };
+    var inst = try JitInstance.init(testing.allocator, &bytes);
+    defer inst.deinit(testing.allocator);
+    try testing.expectEqual(@as(?u64, 7), try inst.invoke(testing.allocator, "add", &.{ 3, 4 }));
+}
+
+test "JitInstance: (i64,i64)->i64 add dispatches two i64 args (10,20)->30" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    // (module (func (export "addq") (param i64 i64) (result i64)
+    //   local.get 0 local.get 1 i64.add))
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x07, 0x01, 0x60, 0x02, 0x7e, 0x7e, 0x01, 0x7e, // type (i64,i64)->(i64)
+        0x03, 0x02, 0x01, 0x00,
+        0x07, 0x08, 0x01, 0x04, 0x61, 0x64, 0x64, 0x71, 0x00, 0x00, // export "addq"
+        0x0a, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0x7c, 0x0b, // local.get 0,1; i64.add
+    };
+    var inst = try JitInstance.init(testing.allocator, &bytes);
+    defer inst.deinit(testing.allocator);
+    try testing.expectEqual(@as(?u64, 30), try inst.invoke(testing.allocator, "addq", &.{ 10, 20 }));
+}

@@ -419,6 +419,40 @@ fn dispatchScalar1(m: linker.JitModule, func_idx: u32, r: *entry.JitRuntime, key
     };
 }
 
+/// Dispatch a two-scalar-arg, void-result call (D-217). `key` =
+/// param0-key<<4 | param1-key. Only the (param0, param1) combos the
+/// spec corpus exercises have `entry.callVoid_XY` helpers; others →
+/// `UnsupportedEntrySignature` (enumerated skip).
+fn dispatchVoid2(m: linker.JitModule, func_idx: u32, r: *entry.JitRuntime, key: u8, a0: u64, a1: u64) Error!void {
+    const x0_u32: u32 = @truncate(a0);
+    const x1_u32: u32 = @truncate(a1);
+    return switch (key) {
+        0x00 => entry.callVoid_i32i32(m, func_idx, r, x0_u32, x1_u32), // (i32,i32)
+        0x01 => entry.callVoid_i32i64(m, func_idx, r, x0_u32, a1), // (i32,i64)
+        0x10 => entry.callVoid_i64i32(m, func_idx, r, a0, x1_u32), // (i64,i32)
+        else => Error.UnsupportedEntrySignature,
+    };
+}
+
+/// Dispatch a two-scalar-arg, single-scalar-result call (D-217). `key` =
+/// param0-key<<4 | param1-key<<2 | result-key. Covers the scalar 2-arg
+/// combos the spec corpus exercises; others → `UnsupportedEntrySignature`.
+fn dispatchScalar2(m: linker.JitModule, func_idx: u32, r: *entry.JitRuntime, key: u8, a0: u64, a1: u64) Error!u64 {
+    const x0_u32: u32 = @truncate(a0);
+    const x1_u32: u32 = @truncate(a1);
+    const x1_f32: f32 = @bitCast(x1_u32);
+    return switch (key) {
+        0x00 => @as(u64, try entry.callI32_i32i32(m, func_idx, r, x0_u32, x1_u32)), // (i32,i32)->i32
+        0x01 => try entry.callI64_i32i32(m, func_idx, r, x0_u32, x1_u32), // (i32,i32)->i64
+        0x02 => @as(u64, @as(u32, @bitCast(try entry.callF32_i32i32(m, func_idx, r, x0_u32, x1_u32)))), // (i32,i32)->f32
+        0x05 => try entry.callI64_i32i64(m, func_idx, r, x0_u32, a1), // (i32,i64)->i64
+        0x0a => @as(u64, @as(u32, @bitCast(try entry.callF32_i32f32(m, func_idx, r, x0_u32, x1_f32)))), // (i32,f32)->f32
+        0x14 => @as(u64, try entry.callI32_i64i64(m, func_idx, r, a0, a1)), // (i64,i64)->i32
+        0x15 => try entry.callI64_i64i64(m, func_idx, r, a0, a1), // (i64,i64)->i64
+        else => Error.UnsupportedEntrySignature,
+    };
+}
+
 /// Run a single-scalar-arg, single-scalar-result export through the JIT
 /// entry (fresh compile + setup per call — no state persistence). Non-scalar
 /// param/result, wrong arity, or an imported target → `UnsupportedEntrySignature`
@@ -493,13 +527,25 @@ pub const JitInstance = struct {
             const rk = scalarKey(sig.results[0]) orelse return Error.UnsupportedEntrySignature;
             return try dispatchNoArg(m, func_idx, r, rk);
         }
-        // sig.params.len == 1 (args.len matched above)
-        const pk = scalarKey(sig.params[0]) orelse return Error.UnsupportedEntrySignature;
-        if (sig.results.len == 0) {
-            try dispatchVoid1(m, func_idx, r, pk, args[0]);
-            return null;
+        if (sig.params.len == 1) {
+            const pk = scalarKey(sig.params[0]) orelse return Error.UnsupportedEntrySignature;
+            if (sig.results.len == 0) {
+                try dispatchVoid1(m, func_idx, r, pk, args[0]);
+                return null;
+            }
+            const rk = scalarKey(sig.results[0]) orelse return Error.UnsupportedEntrySignature;
+            return try dispatchScalar1(m, func_idx, r, @as(u4, pk) * 4 + rk, args[0]);
         }
-        const rk = scalarKey(sig.results[0]) orelse return Error.UnsupportedEntrySignature;
-        return try dispatchScalar1(m, func_idx, r, @as(u4, pk) * 4 + rk, args[0]);
+        if (sig.params.len == 2) {
+            const pk0 = scalarKey(sig.params[0]) orelse return Error.UnsupportedEntrySignature;
+            const pk1 = scalarKey(sig.params[1]) orelse return Error.UnsupportedEntrySignature;
+            if (sig.results.len == 0) {
+                try dispatchVoid2(m, func_idx, r, (@as(u8, pk0) << 4) | pk1, args[0], args[1]);
+                return null;
+            }
+            const rk = scalarKey(sig.results[0]) orelse return Error.UnsupportedEntrySignature;
+            return try dispatchScalar2(m, func_idx, r, (@as(u8, pk0) << 4) | (@as(u8, pk1) << 2) | rk, args[0], args[1]);
+        }
+        return Error.UnsupportedEntrySignature; // 3+ args: future cycle
     }
 };

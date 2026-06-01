@@ -315,6 +315,19 @@ pub fn callVoid_i32i64(
     return invokeAndCheckVoid(rt, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
+/// `(i64, i32) -> ()` — spec-corpus 2-arg JIT dispatch (D-217). e.g.
+/// memory64 `store(i64 addr, i32 val)` (memory_trap64).
+pub fn callVoid_i64i32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u64,
+    a1: u32,
+) Error!void {
+    const Fn = *const fn (*const JitRuntime, u64, u32) callconv(.c) void;
+    return invokeAndCheckVoid(rt, module.entry(func_idx, Fn), .{ a0, a1 });
+}
+
 /// D-116: `(i32, f32)` void-returning. Used by float_exprs.wast's
 /// `init` exports — `(func (param i32) (param f32) (f32.store ...))`
 /// — so the `(invoke "init" ...)` bare actions actually execute and
@@ -1456,6 +1469,18 @@ pub fn callF32_i32i32(
     a1: u32,
 ) Error!f32 {
     const Fn = *const fn (*const JitRuntime, u32, u32) callconv(.c) f32;
+    return invokeAndCheck(rt, f32, module.entry(func_idx, Fn), .{ a0, a1 });
+}
+
+/// `(i32, f32) -> f32` — spec-corpus 2-arg JIT dispatch (D-217).
+pub fn callF32_i32f32(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u32,
+    a1: f32,
+) Error!f32 {
+    const Fn = *const fn (*const JitRuntime, u32, f32) callconv(.c) f32;
     return invokeAndCheck(rt, f32, module.entry(func_idx, Fn), .{ a0, a1 });
 }
 
