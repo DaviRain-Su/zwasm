@@ -1798,3 +1798,28 @@ test "JitInstance: memory.grow past declared max returns -1" {
     // grow by 1 more → 2 > max 1 → -1 (i32 -1 = 0xffffffff zero-extended in the carrier)
     try testing.expectEqual(@as(?u64, 0xffffffff), try inst.invoke(testing.allocator, "g", &.{1}));
 }
+
+// ── ADR-0128 §1 / D-216 Part B: memory64 grow -1 result i64 sign-extension ──
+
+test "JitInstance: memory64 grow past max returns i64 -1 (sign-extended, not 0x0000_0000ffffffff)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    // (module (memory i64 0 1)
+    //   (func (export "g") (param i64) (result i64) local.get 0 memory.grow))
+    // memory64 grow result is i64; the -1 failure sentinel must widen to a
+    // full i64 -1 (0xffff_ffff_ffff_ffff), not the i32 -1 zero-extended to
+    // 0x0000_0000_ffff_ffff that the pre-D-216 zero-ext capture produced.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x06, 0x01, 0x60, 0x01, 0x7e, 0x01, 0x7e, // type (i64)->(i64)
+        0x03, 0x02, 0x01, 0x00,
+        0x05, 0x04, 0x01, 0x05, 0x00, 0x01, // memory: flag=mem64|has_max, min 0, max 1
+        0x07, 0x05, 0x01, 0x01, 0x67, 0x00,
+        0x00, 0x0a, 0x08, 0x01, 0x06, 0x00,
+        0x20, 0x00, 0x40, 0x00, 0x0b,
+    };
+    var inst = try JitInstance.init(testing.allocator, &bytes);
+    defer inst.deinit(testing.allocator);
+    try testing.expectEqual(@as(?u64, 0), try inst.invoke(testing.allocator, "g", &.{1})); // 0→1 ok, old 0
+    // grow → 2 > max 1 → i64 -1 = all-ones (the sign-extension under test)
+    try testing.expectEqual(@as(?u64, 0xffffffffffffffff), try inst.invoke(testing.allocator, "g", &.{1}));
+}

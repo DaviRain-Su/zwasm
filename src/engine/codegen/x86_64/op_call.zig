@@ -327,6 +327,7 @@ pub fn emitMemoryGrow(
     next_vreg: *u32,
     spill_base_off: u32,
     outgoing_max_bytes: u32,
+    mem64: bool,
 ) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const delta_v = pushed_vregs.pop().?;
@@ -344,7 +345,12 @@ pub fn emitMemoryGrow(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
     const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
-    if (dst_r != abi.return_gpr) {
+    if (mem64) {
+        // memory64 grow result is i64 — sign-extend EAX so the -1 failure
+        // sentinel widens to i64 -1 (D-216). Always emit (even dst==RAX:
+        // MOVSXD RAX,EAX in place; a 32-bit MOV would zero-extend).
+        try buf.appendSlice(allocator, inst.encMovsxdR64R32(dst_r, abi.return_gpr).slice());
+    } else if (dst_r != abi.return_gpr) {
         try buf.appendSlice(allocator, inst.encMovRR(.d, dst_r, abi.return_gpr).slice());
     }
     try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
@@ -1018,6 +1024,7 @@ pub fn emitMemoryGrowCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!
         ctx.next_vreg,
         ctx.spill_base_off,
         ctx.outgoing_max_bytes,
+        ctx.memory0_idx_type == .i64,
     );
 }
 

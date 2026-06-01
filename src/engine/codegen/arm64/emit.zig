@@ -1244,18 +1244,32 @@ pub fn compile(
                     std.debug.print("arm64/emit: memory.grow SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ func.func_idx, result, alloc.slots.len });
                     return Error.SlotOverflow;
                 }
+                // memory64 grow yields an i64; sign-extend W0 so the -1
+                // failure sentinel widens to a full i64 -1 (D-216). mem32
+                // stays i32 (zero-ext; canonical i32 form). Success page
+                // counts are non-negative → identical either way.
+                const grow_is_mem64 = ctx.memory0_idx_type == .i64;
                 switch (alloc.slot(result, .gpr)) {
                     .reg => |id| {
                         const wd = abi.slotToReg(id) orelse {
                             std.debug.print("arm64/emit: memory.grow capture SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ func.func_idx, result, id });
                             return Error.SlotOverflow;
                         };
-                        if (wd != 0) try gpr.writeU32(allocator, &buf, inst.encOrrRegW(wd, 31, 0));
+                        if (grow_is_mem64) {
+                            try gpr.writeU32(allocator, &buf, inst.encSxtw(wd, 0));
+                        } else if (wd != 0) {
+                            try gpr.writeU32(allocator, &buf, inst.encOrrRegW(wd, 31, 0));
+                        }
                     },
                     .spill => |off| {
                         const abs_off: u32 = spill_base_off + off;
                         if (abs_off > 16380) return Error.SlotOverflow;
-                        try gpr.writeU32(allocator, &buf, inst.encStrImmW(0, 31, @intCast(abs_off)));
+                        if (grow_is_mem64) {
+                            try gpr.writeU32(allocator, &buf, inst.encSxtw(0, 0));
+                            try gpr.writeU32(allocator, &buf, inst.encStrImm(0, 31, @intCast(abs_off)));
+                        } else {
+                            try gpr.writeU32(allocator, &buf, inst.encStrImmW(0, 31, @intCast(abs_off)));
+                        }
                     },
                 }
                 try pushed_vregs.append(allocator, result);
