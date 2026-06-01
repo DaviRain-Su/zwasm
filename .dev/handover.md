@@ -9,16 +9,18 @@
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
 - **HEAD**: §1 spec-corpus JIT mode — scalar dispatch 0..3 + persistent runtime + memory.grow +
-  memory64 i64 data offset + gc ref.i31 globals + **ref.as_non_null liveness** (`e2701f0d`, D-220).
-  Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=484 fail=13 skip=798** (ref.as_non_null
-  flipped 0 — co-occurs with the still-broken ref-branch ops; memory64 100% GREEN 337/0/0).
-  **fail taxonomy (real op-gaps, NOT dispatch — D-218)**: 13 = gc/array + gc/i31 + ref_func 4
+  memory64 i64 data offset + gc ref.i31 globals + ref.as_non_null + **ref-branch liveness**
+  (`232dfca1`, D-220: br_on_cast/fail/null transparent, br_on_non_null pop). Opt-in
+  `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=484 fail=13 skip=798** (liveness fixes flipped 0
+  corpus — gc/funcref modules have STACKED blockers; but UnsupportedOp module-rejects 18→7;
+  memory64 100% GREEN 337/0/0). **fail taxonomy (D-218)**: 13 = gc/array + gc/i31 + ref_func 4
   (D-198) + try_table 1. Default interp → test-all unchanged.
-- **Module-reject lever** (diagnostic `JITmodrej`): UnsupportedOp rejects = **liveness gaps**
-  (`liveness: UnsupportedOp[stackEffect-missing]`), NOT emit/lower (those exist). Remaining:
-  MultipleMemories 51 (Phase-14 deferred), **ref-branch liveness** (br_on_cast/fail/null/non_null
-  — see NEXT), gc InvalidGlobalInitExpr 9 (struct.new/array.new const-expr — heap alloc),
-  any.convert_extern/extern.convert_any (need EMIT, no handler) → **D-220**.
+- **Module-reject lever** (diagnostic `JITmodrej`, post-liveness): MultipleMemories 51 (Phase-14
+  deferred), StackTypeMismatch 9 (JIT-validator strictness — investigate), InvalidGlobalInitExpr 9
+  (struct.new/array.new const-expr — heap alloc), UnsupportedOp 7 (now mostly any.convert_extern —
+  needs liveness 1→1 + a transparent EMIT handler), UnsupportedEntrySignature 7, InvalidFuncIndex 4.
+  **Stacked-blocker reality**: each gc/funcref module needs SEVERAL cleared → op-type grinding
+  flips 0 until the last per-module blocker; consider fully-unblocking ONE module, or pivot to D-218.
   Lever is gc op-emit + gc const-expr, NOT arg shapes.
 - **Two execution paths (CODE-verified)**: spec corpus runs **interp by default**
   (`instance.invoke`→`_dispatch.run`, `instance.zig:169`); the **JIT path is now wired as an
@@ -64,18 +66,17 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET** long ago.
   Infra COMPLETE; backbone operational (pass=484). Bundle stays open as the diagnostic-driven
   gap-fixing vehicle (`JITmodrej` tally → fix biggest tractable lever).
-- **NEXT chunk** (**D-220** continues): **ref-branch liveness** — bundle ALL of br_on_cast /
-  br_on_cast_fail / br_on_null / br_on_non_null (they co-occur with ref.as_non_null; fixing one
-  flips 0 modules). Root cause CONFIRMED: `liveness: UnsupportedOp[stackEffect-missing]` (lower +
-  emit exist; only liveness missing). **MUST mirror each emit's `pushed_vregs` exactly or vreg
-  numbering desyncs → regalloc MISCOMPILE** (lesson `2026-06-02-jit-liveness-must-mirror-emit-
-  pushed-vregs`). Per-op (from arm64 `ops/wasm_3_0/*.zig` headers): br_on_cast/fail = PEEK →
-  TRANSPARENT (add a `local.tee`-style special case in liveness.zig, NOT generic 1→1); br_on_null
-  = pop+push (1→1 stackEffect ok); br_on_non_null = pop (1→0 — needs a special case, mark used +
-  pop). Branch ref-ops are conditional → do NOT close above-target vregs (like br_if). Verify via
-  corpus delta + watch for NEW fails (desync surfaces as wrong-value/SEGV). THEN: converts
-  (any.convert_extern/extern.convert_any) need a no-op EMIT handler first; gc struct/array
-  const-expr globals 9 (heap alloc at setup); D-218 fails (13, debug_jit_auto). Skip multi-memory 51.
+- **NEXT chunk** (**D-220**) — STRATEGY SHIFT: op-type grinding flips 0 corpus (stacked blockers).
+  Pick ONE concrete approach: **(A)** fully-unblock ONE module — pick a gc/funcref module with the
+  fewest remaining `JITmodrej` causes, clear ALL (e.g. a module needing only any.convert_extern:
+  add liveness 1→1 + a transparent EMIT handler [pure reinterpret — peek, no pop/push; mirror
+  br_on_cast's emit shape + register in dispatch_collector_ops] → that module flips, real corpus
+  win). **(B)** investigate **StackTypeMismatch 9** — the JIT compile validator may be wrongly
+  rejecting valid gc/funcref typing (run JITmodrej, xxd a rejecting module, find the strict check);
+  if a validator bug, fixing unblocks several. **(C)** pivot to **D-218 fails (13)** — real
+  miscompiles (executed-wrong = the actual correctness signal), each via debug_jit_auto. Prefer
+  (A) or (B) for a corpus win; (C) for correctness. Skip multi-memory 51 (Phase-14 deferred).
+  Re-measure `JITmodrej` after each landing. Lesson on stacked blockers: 2026-06-02-spec-jit-skips.
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -90,11 +91,11 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior turn (`092ebefc`) ubuntu `test-all` = GREEN (`OK (HEAD=092ebefc)`; verified this resume).
-This turn landed ref.as_non_null liveness (`e2701f0d`, D-220; `liveness_stack_effect.zig`) — a
-pure liveness/test change. Mac `test-all` + lint green. Re-kicks ubuntu `test-all` against this
-turn's final HEAD; verify next `/continue`: `tail -3 /tmp/ubuntu.log`, expect `OK (HEAD=<SHA>)`.
-On FAIL: revert to the last ubuntu-green HEAD (`092ebefc`). Mac aarch64 primary; ubuntu = x86_64.
+Prior turn (`c9c55671`) ubuntu `test-all` = GREEN (`OK (HEAD=c9c55671)`; verified this resume).
+This turn landed ref-branch liveness (`232dfca1`, D-220; `liveness.zig`) — a liveness change
+(affects regalloc on BOTH arches; watch x86_64 for desync). Mac `test-all` + lint green. Re-kicks
+ubuntu `test-all` against this turn's final HEAD; verify next `/continue`: `tail -3 /tmp/ubuntu.log`,
+expect `OK (HEAD=<SHA>)`. On FAIL: revert to the last ubuntu-green HEAD (`c9c55671`). Mac aarch64 primary; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
