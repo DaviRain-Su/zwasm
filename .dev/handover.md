@@ -21,15 +21,9 @@
   reject causes: MultipleMemories 51 (Phase-14 deferred), InvalidGlobalInitExpr 9 (struct.new/
   array.new const-expr — heap alloc), UnsupportedOp 7 (any.convert_extern needs EMIT),
   StackTypeMismatch 6 (funcref br_on_null validator gap), UnsupportedEntrySignature 7, InvalidFuncIndex 4.
-  Lever is gc op-emit + gc const-expr, NOT arg shapes.
-- **Two execution paths (CODE-verified)**: spec corpus runs **interp by default**
-  (`instance.invoke`→`_dispatch.run`, `instance.zig:169`); the **JIT path is now wired as an
-  opt-in mode** (`ZWASM_SPEC_ENGINE=jit`, backbone above). The standalone `runI32Export`
-  (`src/engine/runner.zig`) is the underlying no-arg-i32 JIT e2e primitive.
-- **ADR-0128 + ADR-0127 both Accepted** — no remaining user gate; loop runs autonomously.
-- **Watch**: size barrier DISSOLVED — `runner.zig` 354 lines; e2e tests now in
-  `src/engine/runner_test.zig` (1634, soft-WARN only; wired via `zwasm.zig` test loader).
-  As single-arg-dispatch tests grow it, split per-concept (gc/eh/tc) before 2000.
+- **Two paths**: spec corpus = interp by default; JIT is opt-in `ZWASM_SPEC_ENGINE=jit` (default
+  test-all unchanged). JIT entry = `runner.zig` `JitInstance`. ADR-0128 + ADR-0127 Accepted (no user gate).
+- **Watch**: `runner_test.zig` 1700+ (soft-WARN; hard cap 2000) — split per-concept before then.
 
 ## Active task — Phase 10 → 100% (ADR-0128)  **NEXT**
 
