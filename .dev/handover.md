@@ -8,13 +8,13 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD**: §1 spec-corpus JIT mode — no-arg 4-type + single-arg 4×4 (`dc87b072`) + persistent
-  per-module runtime (`dcdd992a`) + real JIT `memory.grow` (`f46fcb71`) + **mem64 grow result
-  i64 sign-ext** (`0c265e86`, D-216 Part B: arm64 SXTW / x86_64 MOVSXD when
-  `ctx.memory0_idx_type==.i64`). Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=127 fail=10
-  skip=1158** (D-215+216 took fail 43→10; memory64 now pass=82 fail=1). **fail taxonomy (clean)**:
-  10 = 1 `memory_trap64` load (the 2-arg `store(i64,i32)` dep is skipped → **D-217**) + 9
-  pre-existing (ref_func 4, i31 3, gc array 1, try_table 1). Default interp → test-all unchanged.
+- **HEAD**: §1 spec-corpus JIT mode — no-arg 4-type + single-arg 4×4 + persistent runtime +
+  memory.grow (+mem64 sign-ext) + **2-scalar-arg dispatch** (`6fbb7ef7`, D-217:
+  `dispatchScalar2`/`dispatchVoid2` over (param0,param1,result); +2 entry helpers
+  `callF32_i32f32`/`callVoid_i64i32`). Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=260
+  fail=11 skip=1024** (D-217 alone: **+133 pass, −134 skip**; memory64 now FULLY GREEN, gc pass
+  14→96). **fail taxonomy (clean, all real op-gaps not dispatch bugs — D-218)**: 11 = ref_func 4
+  (D-198) + gc/i31 3 + gc/array 3 (2 new from gc 2-arg ops) + try_table 1. Default interp → test-all unchanged.
 - **Two execution paths (CODE-verified)**: spec corpus runs **interp by default**
   (`instance.invoke`→`_dispatch.run`, `instance.zig:169`); the **JIT path is now wired as an
   opt-in mode** (`ZWASM_SPEC_ENGINE=jit`, backbone above). The standalone `runI32Export`
@@ -59,17 +59,17 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET**.
   no-arg 4-type ✓ + single-arg 4×4 ✓ + persistent runtime ✓ + memory.grow ✓. Bundle continues
   for shape growth. C-ABI 裏取り DONE.
-- **NEXT chunk** = **D-217: 2-arg (N-arg) scalar JIT dispatch**. `JitInstance.invoke` is 0/1-arg;
-  2-arg invokes are eligibility-skipped → `memory_trap64`'s `store(i64,i32)` never runs (the 1
-  residual memory64 fail) + the `check-memory-zero` 2-arg class stays skipped. **DESIGN CHOICE
-  FIRST (likely ADR)**: `entry.callX_YZ` is an ad-hoc ~36-sig subset, NOT the full 4×4×4=64
-  (arg0,arg1,result) matrix (`callVoid_i64i32` for the trap64 store may be absent). Options: (a)
-  expand the helper matrix (mechanical, large); (b) generic comptime sig-cross-product fn-ptr
-  dispatch (less code; Zig can't build fn types from runtime data → needs a comptime enum
-  cross-product); (c) register-array marshaling trampoline. Survey `entry.zig` coverage + pick
-  before coding. Discharge: trap64 load + check-memory-zero flip. See **D-217**.
-  Then: multi-value, v128. Secondary: multi-memory (407 skips; MultipleMemories → JitRuntime
-  per-memory base, own chunk). Unemitted ops (br_on_null / …) → D-198 / tail-call / ADR-0127 PHASE C.
+- **NEXT chunk** = **measure the new skip taxonomy (1024) → pick biggest flippable**, OR triage
+  the 11 fails (**D-218** — all real gc/func-ref/EH op-gaps now that execution is wide). Skip
+  candidates by likely size: **multi-memory 407** (MultipleMemories compile-reject → JitRuntime
+  per-memory base; big architectural chunk, own cycle), **gc ~305** (unemitted gc ops / compile
+  rejects — some flip with more op coverage), **3-arg dispatch** (small, follow the D-217 pattern;
+  `callX_YZW` helpers mostly exist), **multi-value results** (needs the runner to read >1 result —
+  result_abi/indirect-result mechanism, medium). Recommended order: (1) 3-arg dispatch (cheap,
+  extends D-217); (2) D-218 fail triage per op family (gc/array + gc/i31 → GC-on-JIT D-211/D-212/
+  ADR-0127 PHASE C; ref_func → D-198; try_table → EH); (3) multi-value; (4) multi-memory (big).
+  Run `bash scripts/...` no — measure via the corpus `--fail-detail 2>/dev/null` + a skip-by-reason
+  tally. Unemitted ops (br_on_null / …) → D-198 / tail-call / ADR-0127 PHASE C.
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -84,12 +84,11 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior turn (`975c0bbc`) ubuntu `test-all` = GREEN (`OK (HEAD=975c0bbc)`; verified this resume).
-This turn landed mem64 grow-result sign-ext (`0c265e86`, D-216 Part B — a **codegen** change on
-BOTH arches; x86_64 path compiled on Mac but EXECUTED only on ubuntu). Mac `test-all` + lint green.
-Re-kicks ubuntu `test-all` against this turn's final HEAD; verify next `/continue`:
-`tail -3 /tmp/ubuntu.log`, expect `OK (HEAD=<that SHA>)`. On FAIL (esp. x86_64 MOVSXD path): revert
-this turn's commits to the last ubuntu-green HEAD (`975c0bbc`). Mac aarch64 primary; ubuntu = x86_64.
+Prior turn (`0ab60cd9`) ubuntu `test-all` = GREEN (`OK (HEAD=0ab60cd9)`; verified this resume —
+x86_64 MOVSXD path confirmed). This turn landed 2-scalar-arg JIT dispatch (`6fbb7ef7`, D-217;
+engine + entry codegen). Mac `test-all` + lint green. Re-kicks ubuntu `test-all` against this
+turn's final HEAD; verify next `/continue`: `tail -3 /tmp/ubuntu.log`, expect `OK (HEAD=<SHA>)`.
+On FAIL: revert this turn's commits to the last ubuntu-green HEAD (`0ab60cd9`). Mac aarch64 primary; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
