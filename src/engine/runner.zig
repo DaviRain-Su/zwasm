@@ -546,6 +546,21 @@ pub const JitInstance = struct {
             const rk = scalarKey(sig.results[0]) orelse return Error.UnsupportedEntrySignature;
             return try dispatchScalar2(m, func_idx, r, (@as(u8, pk0) << 4) | (@as(u8, pk1) << 2) | rk, args[0], args[1]);
         }
-        return Error.UnsupportedEntrySignature; // 3+ args: future cycle
+        if (sig.params.len == 3) {
+            // The corpus exercises only (i32,i32,i32) -> {void, i32} at
+            // arity 3; other 3-arg shapes stay enumerated skips (D-217).
+            if (!(sig.params[0] == .i32 and sig.params[1] == .i32 and sig.params[2] == .i32))
+                return Error.UnsupportedEntrySignature;
+            const a0: u32 = @truncate(args[0]);
+            const a1: u32 = @truncate(args[1]);
+            const a2: u32 = @truncate(args[2]);
+            if (sig.results.len == 0) {
+                try entry.callVoid_i32i32i32(m, func_idx, r, a0, a1, a2);
+                return null;
+            }
+            if (sig.results[0] != .i32) return Error.UnsupportedEntrySignature;
+            return @as(u64, try entry.callI32_i32i32i32(m, func_idx, r, a0, a1, a2));
+        }
+        return Error.UnsupportedEntrySignature; // 4+ args: future cycle
     }
 };

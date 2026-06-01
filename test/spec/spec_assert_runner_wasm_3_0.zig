@@ -121,12 +121,12 @@ fn isScalarTy(ty: []const u8) bool {
 
 fn jitReturnEligible(args_len: usize, results_len: usize, result_ty: []const u8, arg0_ty: []const u8, module_id_len: usize) bool {
     if (module_id_len != 0) return false; // cross-module `$M::field` not wired
-    // 0/1/2 scalar args; void or 1 scalar result. Void IS eligible — its
+    // 0..3 scalar args; void or 1 scalar result. Void IS eligible — its
     // side effect (store / global.set) must run so the persistent JitInstance
     // accumulates state for later asserts (D-214). arg1 scalar-ness is enforced
     // downstream (scalarArgBits → skip); a non-scalar arg0 is rejected here.
     // 3+ args / non-scalar args+results stay enumerated skips (D-217).
-    if (args_len > 2) return false;
+    if (args_len > 3) return false;
     if (args_len >= 1 and !isScalarTy(arg0_ty)) return false;
     if (results_len > 1) return false;
     if (results_len == 1 and !isScalarTy(result_ty)) return false;
@@ -1102,7 +1102,8 @@ test "wasm-3.0-assert §1: JIT execution-mode eligibility + no-arg i32/i64/f32/f
     try std.testing.expect(jitReturnEligible(2, 1, "i32", "i32", 0)); // 2-scalar-arg wired (D-217)
     try std.testing.expect(jitReturnEligible(2, 0, "", "i64", 0)); // 2-arg void store (D-217)
     try std.testing.expect(!jitReturnEligible(1, 1, "i32", "v128", 0)); // non-scalar arg0
-    try std.testing.expect(!jitReturnEligible(3, 1, "i32", "i32", 0)); // 3-arg (future)
+    try std.testing.expect(jitReturnEligible(3, 1, "i32", "i32", 0)); // 3-scalar-arg wired (D-217)
+    try std.testing.expect(!jitReturnEligible(4, 1, "i32", "i32", 0)); // 4-arg (future)
     try std.testing.expect(!jitReturnEligible(0, 2, "i32", "", 0)); // multi-value
     try std.testing.expect(!jitReturnEligible(0, 1, "v128", "", 0)); // v128 result (later)
     try std.testing.expect(!jitReturnEligible(0, 1, "i32", "", 3)); // cross-module ($M::field)

@@ -1857,3 +1857,22 @@ test "JitInstance: (i64,i64)->i64 add dispatches two i64 args (10,20)->30" {
     defer inst.deinit(testing.allocator);
     try testing.expectEqual(@as(?u64, 30), try inst.invoke(testing.allocator, "addq", &.{ 10, 20 }));
 }
+
+// ── ADR-0128 §1 / D-217: three-i32-arg JIT dispatch (corpus's only 3-arg shape) ──
+
+test "JitInstance: (i32,i32,i32)->i32 sum dispatches three args (1,2,3)->6" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    // (module (func (export "f") (param i32 i32 i32) (result i32)
+    //   local.get 0 local.get 1 i32.add local.get 2 i32.add))
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x08, 0x01, 0x60, 0x03, 0x7f, 0x7f, 0x7f, 0x01, 0x7f, // type (i32,i32,i32)->(i32)
+        0x03, 0x02, 0x01, 0x00,
+        0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x00, // export "f"
+        0x0a, 0x0c, 0x01, 0x0a, 0x00, 0x20, 0x00,
+        0x20, 0x01, 0x6a, 0x20, 0x02, 0x6a, 0x0b,
+    };
+    var inst = try JitInstance.init(testing.allocator, &bytes);
+    defer inst.deinit(testing.allocator);
+    try testing.expectEqual(@as(?u64, 6), try inst.invoke(testing.allocator, "f", &.{ 1, 2, 3 }));
+}
