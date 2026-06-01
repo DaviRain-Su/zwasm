@@ -120,13 +120,16 @@ fn isScalarTy(ty: []const u8) bool {
 }
 
 fn jitReturnEligible(args_len: usize, results_len: usize, result_ty: []const u8, arg0_ty: []const u8, module_id_len: usize) bool {
-    if (!(results_len == 1 and module_id_len == 0 and isScalarTy(result_ty))) return false;
-    // No-arg subset (runI32/I64/F32/F64Export) + single-scalar-arg subset
-    // (runScalar1Export → entry.callX_Y). Wider arities/non-scalar args
-    // stay enumerated skips until the multi-arg dispatcher lands.
-    if (args_len == 0) return true;
-    if (args_len == 1) return isScalarTy(arg0_ty);
-    return false;
+    if (module_id_len != 0) return false; // cross-module `$M::field` not wired
+    // 0 or 1 scalar arg; void or 1 scalar result. Void IS eligible — its
+    // side effect (store / global.set) must run so the persistent JitInstance
+    // accumulates state for later asserts (D-214). Wider arities / non-scalar
+    // args+results stay enumerated skips until the multi-arg dispatcher lands.
+    if (args_len > 1) return false;
+    if (args_len == 1 and !isScalarTy(arg0_ty)) return false;
+    if (results_len > 1) return false;
+    if (results_len == 1 and !isScalarTy(result_ty)) return false;
+    return true;
 }
 
 /// Pack a parsed scalar arg `zwasm.Value` into the 64-bit carrier
@@ -311,6 +314,14 @@ pub fn main(init: std.process.Init) !void {
             var cur_module_bytes: ?[]u8 = null;
             defer if (cur_module_bytes) |b| gpa.free(b);
 
+            // §1 / D-214 — persistent per-module JIT runtime. Instantiated
+            // once per `module` directive (jit mode only); every subsequent
+            // invoke routes through it so memory.grow / stores / global.set
+            // accumulate across asserts (vs the old recompile-per-assert that
+            // lost cross-directive state). null = no module / JIT-compile rejected.
+            var cur_jit: ?zwasm.engine.runner.JitInstance = null;
+            defer if (cur_jit) |*j| j.deinit(gpa);
+
             // 10.M-D195b cycle 71 — multi-instance lifetime for
             // cross-module `(register …)` support. Pre-cycle-71 each
             // `module` directive tore down the prior Engine/Module/
@@ -473,12 +484,23 @@ pub fn main(init: std.process.Init) !void {
                 switch (d.kind) {
                     .module => {
                         summary.modules += 1;
+                        if (cur_jit) |*j| {
+                            j.deinit(gpa);
+                            cur_jit = null;
+                        }
                         if (cur_module_bytes) |b| gpa.free(b);
                         cur_module_bytes = sub_dir.readFileAlloc(io, d.module_path, gpa, .limited(4 << 20)) catch {
                             cur_module_bytes = null;
                             cur_inst_idx = null;
                             continue;
                         };
+                        // §1 / D-214 — instantiate the persistent JIT runtime
+                        // for this module (jit mode only). A compile/setup
+                        // reject (multi-memory, unemitted op, …) leaves cur_jit
+                        // null → asserts against it become enumerated skips.
+                        if (jit_mode) {
+                            cur_jit = zwasm.engine.runner.JitInstance.init(gpa, cur_module_bytes.?) catch null;
+                        }
                         // 10.M-D195b cycle 71 — compile + instantiate
                         // against the shared engine + linker, then
                         // accumulate. Cross-module imports declared
@@ -609,111 +631,73 @@ pub fn main(init: std.process.Init) !void {
                         // Bypasses the interp path entirely in jit mode (the
                         // re-compile-per-call path owns its own runtime).
                         if (jit_mode) {
+                            // §1 / D-214 — route through the PERSISTENT per-module
+                            // JitInstance so state (memory.grow / stores / global.set)
+                            // accumulates across asserts. Exact BIT compare for FP
+                            // (corpus encodes FP literally; no NaN-class matcher).
                             const elig = jitReturnEligible(
                                 d.args_len,
                                 d.results_len,
                                 if (d.results_len == 1) d.results[0].ty else "",
-                                if (d.args_len == 1) d.args[0].ty else "",
+                                if (d.args_len >= 1) d.args[0].ty else "",
                                 d.module_id.len,
                             );
                             if (!elig) {
                                 summary.jit_return_skip += 1;
-                                if (fail_detail) try stdout.print("  JITskip [{s}/{s}] {s} (args={d} results={d} — only no-arg + single-scalar-arg wired)\n", .{ proposal, entry.name, d.func_name, d.args_len, d.results_len });
+                                if (fail_detail) try stdout.print("  JITskip [{s}/{s}] {s} (args={d} results={d} — scalar 0/1-arg only)\n", .{ proposal, entry.name, d.func_name, d.args_len, d.results_len });
                                 continue;
                             }
-                            const jb = cur_module_bytes orelse {
+                            const inst = if (cur_jit) |*j| j else {
+                                // module did not JIT-compile/instantiate → enumerated skip
                                 summary.jit_return_skip += 1;
                                 continue;
                             };
+                            // Pack scalar args into bit-carriers (declaration order).
+                            var arg_bits: [4]u64 = undefined;
+                            var args_ok = true;
+                            var ai: u8 = 0;
+                            while (ai < d.args_len) : (ai += 1) {
+                                const tv = d.args[ai];
+                                const rvv = manifest_parser.parsePayload(tv) catch {
+                                    args_ok = false;
+                                    break;
+                                };
+                                const zvv = manifest_parser.runtimeToZwasm(rvv, tv.ty);
+                                arg_bits[ai] = scalarArgBits(zvv, tv.ty) orelse {
+                                    args_ok = false;
+                                    break;
+                                };
+                            }
+                            if (!args_ok) {
+                                summary.jit_return_skip += 1;
+                                continue;
+                            }
+                            const got = inst.invoke(gpa, d.func_name, arg_bits[0..d.args_len]) catch |e| {
+                                try recordJitRunErr(e, &summary, fail_detail, stdout, proposal, entry.name, d.func_name);
+                                continue;
+                            };
+                            // Void assert_return: pass = invoke ran without trapping;
+                            // its side effect now persists for later asserts.
+                            if (d.results_len == 0) {
+                                summary.jit_return_pass += 1;
+                                continue;
+                            }
                             const exp_tv = d.results[0];
                             const exp_rv = manifest_parser.parsePayload(exp_tv) catch {
                                 summary.jit_return_skip += 1;
                                 continue;
                             };
                             const exp_zv = manifest_parser.runtimeToZwasm(exp_rv, exp_tv.ty);
-                            // Single-scalar-arg dispatch (ADR-0128 §1). Pack the
-                            // arg into a 64-bit carrier; runScalar1Export selects
-                            // the entry.callX_Y helper per (param, result) pair.
-                            if (d.args_len == 1) {
-                                const arg_tv = d.args[0];
-                                const arg_rv = manifest_parser.parsePayload(arg_tv) catch {
-                                    summary.jit_return_skip += 1;
-                                    continue;
-                                };
-                                const arg_zv = manifest_parser.runtimeToZwasm(arg_rv, arg_tv.ty);
-                                const arg_bits = scalarArgBits(arg_zv, arg_tv.ty) orelse {
-                                    summary.jit_return_skip += 1;
-                                    continue;
-                                };
-                                const got = zwasm.engine.runner.runScalar1Export(gpa, jb, d.func_name, arg_bits) catch |e| {
-                                    try recordJitRunErr(e, &summary, fail_detail, stdout, proposal, entry.name, d.func_name);
-                                    continue;
-                                };
-                                if (jitScalarResultMatches(exp_tv.ty, got, exp_zv)) {
-                                    summary.jit_return_pass += 1;
-                                } else {
-                                    summary.jit_return_fail += 1;
-                                    if (fail_detail) try stdout.print("  JITval1 [{s}/{s}] {s} ty={s} got=0x{x:0>16}\n", .{ proposal, entry.name, d.func_name, exp_tv.ty, got });
-                                }
-                                continue;
-                            }
-                            // Dispatch by result type. i32/i64/f32/f64 are wired (no-arg,
-                            // exact BIT compare — NaN-safe; the corpus encodes FP results
-                            // as literal bit patterns, so no NaN-class matcher is needed).
-                            // `recordJitRunErr` routes compile/setup rejects to skip,
-                            // execution-stage outcomes to fail.
-                            if (std.mem.eql(u8, exp_tv.ty, "i64")) {
-                                const got_u = zwasm.engine.runner.runI64Export(gpa, jb, d.func_name) catch |e| {
-                                    try recordJitRunErr(e, &summary, fail_detail, stdout, proposal, entry.name, d.func_name);
-                                    continue;
-                                };
-                                if (@as(i64, @bitCast(got_u)) == exp_zv.i64) {
-                                    summary.jit_return_pass += 1;
-                                } else {
-                                    summary.jit_return_fail += 1;
-                                    if (fail_detail) try stdout.print("  JITval [{s}/{s}] {s} exp={d} got={d}\n", .{ proposal, entry.name, d.func_name, exp_zv.i64, @as(i64, @bitCast(got_u)) });
-                                }
-                                continue;
-                            }
-                            if (std.mem.eql(u8, exp_tv.ty, "f32")) {
-                                const got_f = zwasm.engine.runner.runF32Export(gpa, jb, d.func_name) catch |e| {
-                                    try recordJitRunErr(e, &summary, fail_detail, stdout, proposal, entry.name, d.func_name);
-                                    continue;
-                                };
-                                const got_bits: u32 = @bitCast(got_f);
-                                const exp_bits: u32 = @bitCast(exp_zv.f32);
-                                if (got_bits == exp_bits) {
-                                    summary.jit_return_pass += 1;
-                                } else {
-                                    summary.jit_return_fail += 1;
-                                    if (fail_detail) try stdout.print("  JITval [{s}/{s}] {s} exp=0x{x:0>8} got=0x{x:0>8}\n", .{ proposal, entry.name, d.func_name, exp_bits, got_bits });
-                                }
-                                continue;
-                            }
-                            if (std.mem.eql(u8, exp_tv.ty, "f64")) {
-                                const got_f = zwasm.engine.runner.runF64Export(gpa, jb, d.func_name) catch |e| {
-                                    try recordJitRunErr(e, &summary, fail_detail, stdout, proposal, entry.name, d.func_name);
-                                    continue;
-                                };
-                                const got_bits: u64 = @bitCast(got_f);
-                                const exp_bits: u64 = @bitCast(exp_zv.f64);
-                                if (got_bits == exp_bits) {
-                                    summary.jit_return_pass += 1;
-                                } else {
-                                    summary.jit_return_fail += 1;
-                                    if (fail_detail) try stdout.print("  JITval [{s}/{s}] {s} exp=0x{x:0>16} got=0x{x:0>16}\n", .{ proposal, entry.name, d.func_name, exp_bits, got_bits });
-                                }
-                                continue;
-                            }
-                            const got_u = zwasm.engine.runner.runI32Export(gpa, jb, d.func_name) catch |e| {
-                                try recordJitRunErr(e, &summary, fail_detail, stdout, proposal, entry.name, d.func_name);
+                            const got_val = got orelse {
+                                // expected a value but export returned void — shape mismatch
+                                summary.jit_return_fail += 1;
                                 continue;
                             };
-                            if (@as(i32, @bitCast(got_u)) == exp_zv.i32) {
+                            if (jitScalarResultMatches(exp_tv.ty, got_val, exp_zv)) {
                                 summary.jit_return_pass += 1;
                             } else {
                                 summary.jit_return_fail += 1;
-                                if (fail_detail) try stdout.print("  JITval [{s}/{s}] {s} exp={d} got={d}\n", .{ proposal, entry.name, d.func_name, exp_zv.i32, @as(i32, @bitCast(got_u)) });
+                                if (fail_detail) try stdout.print("  JITval [{s}/{s}] {s} ty={s} got=0x{x:0>16}\n", .{ proposal, entry.name, d.func_name, exp_tv.ty, got_val });
                             }
                             continue;
                         }
@@ -985,6 +969,29 @@ pub fn main(init: std.process.Init) !void {
                         // dependent asserts. Drop result silently
                         // (matches spec: an action by itself has
                         // no expected outcome other than non-trap).
+                        // §1 / D-214 — in jit mode, drive the persistent
+                        // JitInstance so the side effect persists for later
+                        // JIT asserts (bypasses interp, like assert_return).
+                        if (jit_mode) {
+                            const inst = if (cur_jit) |*j| j else continue;
+                            var ab: [4]u64 = undefined;
+                            var ab_ok = true;
+                            var k: u8 = 0;
+                            while (k < d.args_len) : (k += 1) {
+                                const tv = d.args[k];
+                                const rvv = manifest_parser.parsePayload(tv) catch {
+                                    ab_ok = false;
+                                    break;
+                                };
+                                const zvv = manifest_parser.runtimeToZwasm(rvv, tv.ty);
+                                ab[k] = scalarArgBits(zvv, tv.ty) orelse {
+                                    ab_ok = false;
+                                    break;
+                                };
+                            }
+                            if (ab_ok) _ = inst.invoke(gpa, d.func_name, ab[0..d.args_len]) catch {};
+                            continue;
+                        }
                         _ = cur_module_bytes orelse continue;
                         var call_args: [4]zwasm.Value = undefined;
                         var call_args_ok = true;
@@ -1083,15 +1090,19 @@ test "wasm-3.0-assert §1: JIT execution-mode eligibility + no-arg i32/i64/f32/f
     // encodes literally — `nan:canonical`/`nan:arithmetic` tokens are absent
     // from the wasm-3.0 result set, so no class matcher is needed). args /
     // multi-value / cross-module remain enumerated skips.
-    try std.testing.expect(jitReturnEligible(0, 1, "i32", 0)); // wired
-    try std.testing.expect(jitReturnEligible(0, 1, "i64", 0)); // wired
-    try std.testing.expect(jitReturnEligible(0, 1, "f32", 0)); // wired (this increment)
-    try std.testing.expect(jitReturnEligible(0, 1, "f64", 0)); // wired (this increment)
-    try std.testing.expect(!jitReturnEligible(1, 1, "i32", 0)); // has args
-    try std.testing.expect(!jitReturnEligible(0, 2, "i32", 0)); // multi-value
-    try std.testing.expect(!jitReturnEligible(0, 0, "", 0)); // void (side-effect)
-    try std.testing.expect(!jitReturnEligible(0, 1, "v128", 0)); // v128 result (later)
-    try std.testing.expect(!jitReturnEligible(0, 1, "i32", 3)); // cross-module ($M::field)
+    try std.testing.expect(jitReturnEligible(0, 1, "i32", "", 0)); // no-arg wired
+    try std.testing.expect(jitReturnEligible(0, 1, "i64", "", 0)); // no-arg wired
+    try std.testing.expect(jitReturnEligible(0, 1, "f32", "", 0)); // no-arg wired
+    try std.testing.expect(jitReturnEligible(0, 1, "f64", "", 0)); // no-arg wired
+    try std.testing.expect(jitReturnEligible(1, 1, "i32", "i32", 0)); // single-scalar-arg wired
+    try std.testing.expect(jitReturnEligible(1, 1, "i64", "f64", 0)); // single-scalar-arg wired
+    try std.testing.expect(jitReturnEligible(0, 0, "", "", 0)); // void no-arg (state side-effect runs)
+    try std.testing.expect(jitReturnEligible(1, 0, "", "i32", 0)); // void single-scalar-arg (store)
+    try std.testing.expect(!jitReturnEligible(1, 1, "i32", "v128", 0)); // non-scalar arg
+    try std.testing.expect(!jitReturnEligible(2, 1, "i32", "i32", 0)); // 2-arg (cycle-2)
+    try std.testing.expect(!jitReturnEligible(0, 2, "i32", "", 0)); // multi-value
+    try std.testing.expect(!jitReturnEligible(0, 1, "v128", "", 0)); // v128 result (later)
+    try std.testing.expect(!jitReturnEligible(0, 1, "i32", "", 3)); // cross-module ($M::field)
 
     // End-to-end: the no-arg i32 export executes THROUGH the JIT entry
     // (runI32Export → callI32NoArgs), not the interpreter. Hand-built

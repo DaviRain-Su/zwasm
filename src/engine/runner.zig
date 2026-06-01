@@ -367,14 +367,62 @@ fn scalarKey(t: zir.ValType) ?u2 {
     return null;
 }
 
+/// Dispatch a no-arg scalar-result call to the matching `entry.callXNoArgs`
+/// helper, returning the result as a u64 carrier. `rk` = result scalar key.
+fn dispatchNoArg(m: linker.JitModule, func_idx: u32, r: *entry.JitRuntime, rk: u2) Error!u64 {
+    return switch (rk) {
+        0 => @as(u64, try entry.callI32NoArgs(m, func_idx, r)),
+        1 => try entry.callI64NoArgs(m, func_idx, r),
+        2 => @as(u64, @as(u32, @bitCast(try entry.callF32NoArgs(m, func_idx, r)))),
+        3 => @bitCast(try entry.callF64NoArgs(m, func_idx, r)),
+    };
+}
+
+/// Dispatch a single-scalar-arg, void-result call to the matching
+/// `entry.callVoid_X` helper. `pk` = param scalar key.
+fn dispatchVoid1(m: linker.JitModule, func_idx: u32, r: *entry.JitRuntime, pk: u2, arg_bits: u64) Error!void {
+    const a_u32: u32 = @truncate(arg_bits);
+    return switch (pk) {
+        0 => entry.callVoid_i32(m, func_idx, r, a_u32),
+        1 => entry.callVoid_i64(m, func_idx, r, arg_bits),
+        2 => entry.callVoid_f32(m, func_idx, r, @bitCast(a_u32)),
+        3 => entry.callVoid_f64(m, func_idx, r, @bitCast(arg_bits)),
+    };
+}
+
+/// Dispatch a single-scalar-arg, single-scalar-result call to the matching
+/// `entry.callX_Y` cross-type helper (§9.9 widen set), covering the full 4×4
+/// matrix. `arg_bits` carries the arg (i32/f32 low 32, i64/f64 full 64);
+/// result returns the same way. `key` = param-key*4 + result-key.
+fn dispatchScalar1(m: linker.JitModule, func_idx: u32, r: *entry.JitRuntime, key: u4, arg_bits: u64) Error!u64 {
+    const a_u32: u32 = @truncate(arg_bits);
+    const a_u64: u64 = arg_bits;
+    const a_f32: f32 = @bitCast(a_u32);
+    const a_f64: f64 = @bitCast(a_u64);
+    return switch (key) {
+        0 => @as(u64, try entry.callI32_i32(m, func_idx, r, a_u32)),
+        1 => try entry.callI64_i32(m, func_idx, r, a_u32),
+        2 => @as(u64, @as(u32, @bitCast(try entry.callF32_i32(m, func_idx, r, a_u32)))),
+        3 => @bitCast(try entry.callF64_i32(m, func_idx, r, a_u32)),
+        4 => @as(u64, try entry.callI32_i64(m, func_idx, r, a_u64)),
+        5 => try entry.callI64_i64(m, func_idx, r, a_u64),
+        6 => @as(u64, @as(u32, @bitCast(try entry.callF32_i64(m, func_idx, r, a_u64)))),
+        7 => @bitCast(try entry.callF64_i64(m, func_idx, r, a_u64)),
+        8 => @as(u64, try entry.callI32_f32(m, func_idx, r, a_f32)),
+        9 => try entry.callI64_f32(m, func_idx, r, a_f32),
+        10 => @as(u64, @as(u32, @bitCast(try entry.callF32_f32(m, func_idx, r, a_f32)))),
+        11 => @bitCast(try entry.callF64_f32(m, func_idx, r, a_f32)),
+        12 => @as(u64, try entry.callI32_f64(m, func_idx, r, a_f64)),
+        13 => try entry.callI64_f64(m, func_idx, r, a_f64),
+        14 => @as(u64, @as(u32, @bitCast(try entry.callF32_f64(m, func_idx, r, a_f64)))),
+        15 => @bitCast(try entry.callF64_f64(m, func_idx, r, a_f64)),
+    };
+}
+
 /// Run a single-scalar-arg, single-scalar-result export through the JIT
-/// entry. The arg arrives as a raw 64-bit carrier (i32/f32 in the low 32,
-/// i64/f64 the full 64); the result returns the same way. The
-/// (param, result) scalar pair selects the matching `entry.callX_Y`
-/// cross-type helper (§9.9 widen set), covering the full 4×4 matrix.
-/// Non-scalar param/result, wrong arity, or an imported target →
-/// `UnsupportedEntrySignature` (an enumerated spec-corpus skip, not a
-/// fail). ADR-0128 §1 — single-arg dispatch.
+/// entry (fresh compile + setup per call — no state persistence). Non-scalar
+/// param/result, wrong arity, or an imported target → `UnsupportedEntrySignature`
+/// (an enumerated spec-corpus skip, not a fail). ADR-0128 §1.
 pub fn runScalar1Export(
     allocator: Allocator,
     wasm_bytes: []const u8,
@@ -395,33 +443,63 @@ pub fn runScalar1Export(
 
     var owned = try setupRuntime(allocator, &compiled, wasm_bytes);
     defer owned.deinit(allocator);
-    const m = compiled.module;
-    const r = &owned.rt;
-
-    // Typed views of the carrier; the (pk, rk) key picks which ones apply.
-    const a_u32: u32 = @truncate(arg_bits);
-    const a_u64: u64 = arg_bits;
-    const a_f32: f32 = @bitCast(a_u32);
-    const a_f64: f64 = @bitCast(a_u64);
-
-    // key = pk*4 + rk, all 16 scalar combos covered (no else needed).
-    const key: u4 = @as(u4, pk) * 4 + rk;
-    return switch (key) {
-        0 => @as(u64, try entry.callI32_i32(m, func_idx, r, a_u32)),
-        1 => try entry.callI64_i32(m, func_idx, r, a_u32),
-        2 => @as(u64, @as(u32, @bitCast(try entry.callF32_i32(m, func_idx, r, a_u32)))),
-        3 => @bitCast(try entry.callF64_i32(m, func_idx, r, a_u32)),
-        4 => @as(u64, try entry.callI32_i64(m, func_idx, r, a_u64)),
-        5 => try entry.callI64_i64(m, func_idx, r, a_u64),
-        6 => @as(u64, @as(u32, @bitCast(try entry.callF32_i64(m, func_idx, r, a_u64)))),
-        7 => @bitCast(try entry.callF64_i64(m, func_idx, r, a_u64)),
-        8 => @as(u64, try entry.callI32_f32(m, func_idx, r, a_f32)),
-        9 => try entry.callI64_f32(m, func_idx, r, a_f32),
-        10 => @as(u64, @as(u32, @bitCast(try entry.callF32_f32(m, func_idx, r, a_f32)))),
-        11 => @bitCast(try entry.callF64_f32(m, func_idx, r, a_f32)),
-        12 => @as(u64, try entry.callI32_f64(m, func_idx, r, a_f64)),
-        13 => try entry.callI64_f64(m, func_idx, r, a_f64),
-        14 => @as(u64, @as(u32, @bitCast(try entry.callF32_f64(m, func_idx, r, a_f64)))),
-        15 => @bitCast(try entry.callF64_f64(m, func_idx, r, a_f64)),
-    };
+    return dispatchScalar1(compiled.module, func_idx, &owned.rt, @as(u4, pk) * 4 + rk, arg_bits);
 }
+
+/// A compiled + instantiated module whose JIT runtime PERSISTS across
+/// invocations, so memory/global/table mutations (`memory.grow`, stores,
+/// `global.set`, `table.set`) accumulate — mirroring how an embedder (and
+/// the interp path) uses the JIT. The spec-corpus mode instantiates one per
+/// `module` directive and routes every subsequent invoke through it so
+/// cross-directive state is preserved (D-214; ADR-0128 §1). `wasm_bytes` is
+/// borrowed — the caller must keep it alive for the instance's lifetime.
+pub const JitInstance = struct {
+    compiled: CompiledWasm,
+    owned: setup_mod.RuntimeOwned,
+    wasm_bytes: []const u8,
+
+    pub fn init(allocator: Allocator, wasm_bytes: []const u8) Error!JitInstance {
+        var compiled = try compileWasm(allocator, wasm_bytes);
+        errdefer compiled.deinit(allocator);
+        const owned = try setupRuntime(allocator, &compiled, wasm_bytes);
+        return .{ .compiled = compiled, .owned = owned, .wasm_bytes = wasm_bytes };
+    }
+
+    pub fn deinit(self: *JitInstance, allocator: Allocator) void {
+        self.owned.deinit(allocator);
+        self.compiled.deinit(allocator);
+    }
+
+    /// Invoke an export by name against the persisted runtime. `args` are
+    /// scalar bit-carriers in declaration order. Returns the scalar result
+    /// as a u64 carrier, or null for a void (0-result) export (the call
+    /// still runs, so its side effects persist). Cycle-1 shapes: 0 or 1
+    /// scalar param, void or 1 scalar result; anything wider →
+    /// `UnsupportedEntrySignature` (enumerated skip). D-214.
+    pub fn invoke(self: *JitInstance, allocator: Allocator, export_name: []const u8, args: []const u64) Error!?u64 {
+        const func_idx = try findExportFunc(allocator, self.wasm_bytes, export_name);
+        if (func_idx >= self.compiled.func_sigs.len) return Error.ExportNotFound;
+        if (func_idx < self.compiled.num_imports) return Error.UnsupportedEntrySignature;
+        const sig = self.compiled.func_sigs[func_idx];
+        if (sig.results.len > 1 or sig.params.len != args.len) return Error.UnsupportedEntrySignature;
+        const m = self.compiled.module;
+        const r = &self.owned.rt;
+
+        if (sig.params.len == 0) {
+            if (sig.results.len == 0) {
+                try entry.callVoidNoArgs(m, func_idx, r);
+                return null;
+            }
+            const rk = scalarKey(sig.results[0]) orelse return Error.UnsupportedEntrySignature;
+            return try dispatchNoArg(m, func_idx, r, rk);
+        }
+        // sig.params.len == 1 (args.len matched above)
+        const pk = scalarKey(sig.params[0]) orelse return Error.UnsupportedEntrySignature;
+        if (sig.results.len == 0) {
+            try dispatchVoid1(m, func_idx, r, pk, args[0]);
+            return null;
+        }
+        const rk = scalarKey(sig.results[0]) orelse return Error.UnsupportedEntrySignature;
+        return try dispatchScalar1(m, func_idx, r, @as(u4, pk) * 4 + rk, args[0]);
+    }
+};

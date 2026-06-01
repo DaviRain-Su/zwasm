@@ -25,6 +25,7 @@ const runF32Export = runner.runF32Export;
 const runF64Export = runner.runF64Export;
 const runVoidExport = runner.runVoidExport;
 const runScalar1Export = runner.runScalar1Export;
+const JitInstance = runner.JitInstance;
 
 const entry = @import("codegen/shared/entry.zig");
 const setup_mod = @import("setup.zig");
@@ -1694,4 +1695,58 @@ test "runScalar1Export: (f64)->i32 trunc_s truncates the arg (key=12, FP arg →
     const arg_bits: u64 = @bitCast(x);
     const got = try runScalar1Export(testing.allocator, &bytes, "id", arg_bits);
     try testing.expectEqual(@as(u32, 42), @as(u32, @truncate(got)));
+}
+
+// ── ADR-0128 §1 / D-214: persistent per-module JIT runtime (state accumulates) ──
+
+test "JitInstance: global-counter bump persists state across invokes (1,2,3)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    // (module (global $g (mut i32) i32.const 0)
+    //   (func (export "bump") (result i32)
+    //     global.get 0  i32.const 1  i32.add  global.set 0  global.get 0))
+    // Fresh-recompile-per-call would return 1 every time; a PERSISTED
+    // runtime returns 1, 2, 3 — the D-214 state-accumulation contract.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type () -> i32
+        0x03, 0x02, 0x01, 0x00, // func 0 : type 0
+        0x06, 0x06, 0x01, 0x7f, 0x01, 0x41, 0x00, 0x0b, // global mut i32 = 0
+        0x07, 0x08, 0x01, 0x04, 0x62, 0x75, 0x6d, 0x70, 0x00, 0x00, // export "bump" func 0
+        0x0a, 0x0d, 0x01, 0x0b, 0x00, 0x23, 0x00, 0x41, 0x01, 0x6a,
+        0x24, 0x00, 0x23, 0x00, 0x0b,
+    };
+    var inst = try JitInstance.init(testing.allocator, &bytes);
+    defer inst.deinit(testing.allocator);
+    try testing.expectEqual(@as(?u64, 1), try inst.invoke(testing.allocator, "bump", &.{}));
+    try testing.expectEqual(@as(?u64, 2), try inst.invoke(testing.allocator, "bump", &.{}));
+    try testing.expectEqual(@as(?u64, 3), try inst.invoke(testing.allocator, "bump", &.{}));
+}
+
+test "JitInstance: void-result invoke runs (returns null) and a 1-arg scalar invoke dispatches" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    // (module (global $g (mut i32) i32.const 0)
+    //   (func (export "set") (param i32) local.get 0 global.set 0)   ;; void, 1 arg
+    //   (func (export "get") (result i32) global.get 0))             ;; i32, 0 arg
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        // type sec: 2 types — t0 (i32)->() , t1 ()->(i32)
+        0x01, 0x09, 0x02, 0x60, 0x01, 0x7f, 0x00, 0x60,
+        0x00, 0x01, 0x7f,
+        // func sec: 2 funcs : t0, t1
+        0x03, 0x03, 0x02, 0x00, 0x01,
+        // global mut i32 = 0
+        0x06, 0x06, 0x01, 0x7f, 0x01, 0x41, 0x00, 0x0b,
+        // export sec: "set" func0, "get" func1
+        0x07, 0x0d, 0x02, 0x03, 0x73, 0x65, 0x74, 0x00,
+        0x00, 0x03, 0x67, 0x65, 0x74, 0x00, 0x01,
+        // code sec: 2 bodies
+        0x0a,
+        0x0d, 0x02,
+        0x06, 0x00, 0x20, 0x00, 0x24, 0x00, 0x0b, // set: local.get 0; global.set 0
+        0x04, 0x00, 0x23, 0x00, 0x0b, // get: global.get 0
+    };
+    var inst = try JitInstance.init(testing.allocator, &bytes);
+    defer inst.deinit(testing.allocator);
+    try testing.expectEqual(@as(?u64, null), try inst.invoke(testing.allocator, "set", &.{77}));
+    try testing.expectEqual(@as(?u64, 77), try inst.invoke(testing.allocator, "get", &.{}));
 }
