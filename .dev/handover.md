@@ -8,11 +8,12 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD**: §1 spec-corpus JIT mode — scalar dispatch 0..3 + persistent runtime + memory.grow +
-  memory64 data offset + gc ref.i31 globals + ref-branch liveness + supertypes→validator +
-  **i31ref table elem-init** (`7192777b`, D-221). Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac aarch64:
-  **pass=484 fail=14 skip=797** (memory64 100% GREEN 337/0/0). **fail taxonomy (D-218)**: 14 =
-  gc/array + gc/i31 + ref_func 4 (D-198) + try_table 1. Default interp → test-all unchanged.
+- **HEAD**: §1 spec-corpus JIT mode — …memory64 data offset + gc ref.i31 globals + ref-branch
+  liveness + supertypes→validator + i31 table elem-init + **run ref-result fns for side effects**
+  (`cff07bca`, D-222: gc `new`→global.set pattern via void path). Opt-in `ZWASM_SPEC_ENGINE=jit`.
+  Mac aarch64: **pass=495 fail=16 skip=784** (D-222: **+11 pass, FIRST corpus mover since memory64**;
+  gc pass 112→123; memory64 100% GREEN 337/0/0). **fail taxonomy (D-218)**: 16 = gc/array + gc/i31
+  + ref_func 4 (D-198) + try_table 1 + 2 new gc (ref-result asserts now execute). Default interp → test-all unchanged.
 - **PER-MODULE blocker-STACK reality** (lesson `2026-06-02-jit-corpus-late-phase-is-per-module-
   blocker-stacks`): since memory64 (+208, last big mover), every gc/funcref fix has been correct
   but ~0 corpus — each remaining module has 3-6 DISTINCT blockers; JIT rejects at the FIRST
@@ -65,18 +66,15 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET** long ago.
   Infra COMPLETE; backbone operational (pass=484). Bundle stays open as the diagnostic-driven
   gap-fixing vehicle (`JITmodrej` tally → fix biggest tractable lever).
-- **NEXT chunk** (**D-220**) — PIVOT to higher-yield (4 single-layer fixes this session flipped ~0:
-  the gc/funcref module skips are diverse-stacked). **Recommended: (C) D-218 fails (14)** — each is
-  a real MISCOMPILE (executed-wrong, the correctness signal the backbone exists to find); fixing one
-  drops the fail count (measurable) + is a genuine bug fix. Target **gc/array `get`/`len`/`set_get`
-  err=Trap** (on a COMPILING module — executes, so a fix is a direct fail→pass flip; NOT gc/i31
-  whose `get` is i31.1 = rejects InvalidFuncIndex). `ZWASM_SPEC_ENGINE=jit <bin> <corpus>
-  --fail-detail 2>/dev/null` → failing fn; then debug_jit_auto disasm (likely array created in a
-  prior assert + the ref not persisted, OR array.get/len emit on a real array traps). **OR (A) fully-unblock ONE funcref module**: br_on_null.0
-  rejects StackTypeMismatch — compare the JIT validate entry (validateFunctionAndCollectSelectTypesWithMemory)
-  vs the interp's (instantiate.zig path) to find the br_on_null label-type gap the JIT entry has but
-  interp doesn't (interp ACCEPTS br_on_null.0). Avoid more single-op-type grinding (proven ~0 yield).
-  Skip multi-memory 51 (Phase-14 deferred). Re-measure `JITmodrej`/fail-detail after each landing.
+- **NEXT chunk** — D-222 (+11) validated "**run for side effect**" (uncompared ref/void results) as
+  a high-yield shape. Re-measure first (`ZWASM_SPEC_ENGINE=jit <bin> <corpus> --fail-detail
+  2>/dev/null` + `JITmodrej`). Then: **(1)** triage the now-16 fails — the gc create-then-operate
+  pattern surfaced +2 new gc fails (real array/struct op miscompiles, executed-wrong) → debug_jit_auto
+  disasm the failing fn; a fix is a direct fail→pass flip. **(2)** more reject-cause levers
+  (InvalidGlobalInitExpr 9 = struct.new/array.new const-expr GLOBALS — needs gc-heap alloc at setup,
+  the analog of D-221/D-222 but for global init; any.convert_extern needs a transparent EMIT handler).
+  Prefer fixing FAILS (correctness + measurable) over more skip-unblocking. Skip multi-memory 51
+  (Phase-14 deferred). Stacked-blocker lesson: 2026-06-02-jit-corpus-late-phase-is-per-module-blocker-stacks.
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -91,11 +89,11 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior turn (`a69ac3b3`) ubuntu `test-all` = GREEN (`OK (HEAD=a69ac3b3)`; verified this resume).
-This turn landed i31ref table elem-init (`7192777b`, D-221; `setup.zig`). Mac `test-all` + lint
-green. Re-kicks ubuntu `test-all` against this turn's final HEAD; verify next `/continue`:
-`tail -3 /tmp/ubuntu.log`, expect `OK (HEAD=<SHA>)`. On FAIL: revert to the last ubuntu-green HEAD
-(`a69ac3b3`). Mac aarch64 primary; ubuntu = x86_64.
+Prior turn (`ef16e1eb`) ubuntu `test-all` = GREEN (`OK (HEAD=ef16e1eb)`; verified this resume).
+This turn landed D-222 run-ref-result-for-side-effects (`cff07bca`; `runner.zig` JitInstance.invoke
++ spec runner). Mac `test-all` + lint green. Re-kicks ubuntu `test-all` against this turn's final
+HEAD; verify next `/continue`: `tail -3 /tmp/ubuntu.log`, expect `OK (HEAD=<SHA>)`. On FAIL: revert
+to the last ubuntu-green HEAD (`ef16e1eb`). Mac aarch64 primary; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
