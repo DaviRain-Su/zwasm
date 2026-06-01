@@ -100,6 +100,14 @@ pub fn validateGlobalInitExpr(
             break :blk switch (rt_byte) {
                 0x70 => zir.ValType.funcref,
                 0x6F => zir.ValType.externref,
+                // Wasm 3.0 GC abstract heaptypes (D-220). Concrete
+                // (typeidx) heaptypes stay rejected (enumerated skip).
+                0x6E => zir.ValType.anyref,
+                0x6D => zir.ValType.eqref,
+                0x6C => zir.ValType.i31ref,
+                0x6B => zir.ValType.structref,
+                0x6A => zir.ValType.arrayref,
+                0x71, 0x72, 0x73, 0x69, 0x68 => zir.ValType.anyref, // none/noextern/nofunc/exn/noexn — lenient
                 else => return Error.InvalidGlobalInitExpr,
             };
         },
@@ -143,12 +151,28 @@ pub fn validateGlobalInitExpr(
         },
         else => return Error.InvalidGlobalInitExpr,
     };
-    // Result type must match the declared valtype. Reftype
-    // sub-typing (funcref is not a supertype of externref or
-    // vice-versa) is enforced; numeric types are exact match.
-    if (!produced.eql(want_valtype)) return Error.InvalidGlobalInitExpr;
+    // Wasm 3.0 GC: a trailing `ref.i31` (0xFB 0x1C) wraps a preceding
+    // i32.const into a non-null (ref i31). struct.new / array.new const
+    // exprs (need heap alloc) stay rejected → later chunk. D-220.
+    var produced_vt = produced;
+    if (pos < expr.len and expr[pos] == 0xFB) {
+        pos += 1;
+        const sub = leb128.readUleb128(u32, expr, &pos) catch return Error.InvalidGlobalInitExpr;
+        if (sub != 0x1C or !produced_vt.eql(.i32)) return Error.InvalidGlobalInitExpr;
+        produced_vt = zir.ValType.i31ref;
+    }
+    // Numeric / v128 must match exactly. For ref types the interp's
+    // validator already checked subtyping (this is the JIT compile gate,
+    // not the authoritative validator), so accept any ref-for-ref rather
+    // than re-derive the GC subtype lattice here. D-220.
+    const both_ref = isRefType(produced_vt) and isRefType(want_valtype);
+    if (!both_ref and !produced_vt.eql(want_valtype)) return Error.InvalidGlobalInitExpr;
     if (pos >= expr.len or expr[pos] != 0x0B) return Error.InvalidGlobalInitExpr;
     if (pos + 1 != expr.len) return Error.InvalidGlobalInitExpr;
+}
+
+fn isRefType(t: zir.ValType) bool {
+    return std.meta.activeTag(t) == .ref;
 }
 
 /// Context for resolving `global.get N` inside a const-expression

@@ -1902,3 +1902,29 @@ test "JitInstance: memory64 module with active data at i64 offset compiles + loa
     defer inst.deinit(testing.allocator);
     try testing.expectEqual(@as(?u64, 42), try inst.invoke(testing.allocator, "ld", &.{}));
 }
+
+// ── ADR-0128 §1 / D-220: gc ref.i31 global init-expr (JIT compile gate) ──
+
+test "JitInstance: ref.i31 global init compiles + get returns the i31 value" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    // (module (global $g i31ref (i32.const 1234) (ref.i31))
+    //   (func (export "g") (result i32) global.get 0 i31.get_s))
+    // The JIT compile gate's validateGlobalInitExpr was single-opcode and
+    // rejected the `i32.const; ref.i31; end` sequence (InvalidGlobalInitExpr).
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type ()->(i32)
+        0x03, 0x02, 0x01, 0x00,
+        // global sec: 1 global, type i31ref (0x6c), immutable, init i32.const 1234; ref.i31; end
+        0x06, 0x09, 0x01,
+        0x6c, 0x00, 0x41, 0xd2, 0x09, 0xfb, 0x1c,
+        0x0b,
+        0x07, 0x05, 0x01, 0x01, 0x67, 0x00, 0x00, // export "g"
+        // code: global.get 0; i31.get_s (0xfb 0x1d); end
+        0x0a, 0x08, 0x01, 0x06, 0x00, 0x23, 0x00,
+        0xfb, 0x1d, 0x0b,
+    };
+    var inst = try JitInstance.init(testing.allocator, &bytes);
+    defer inst.deinit(testing.allocator);
+    try testing.expectEqual(@as(?u64, 1234), try inst.invoke(testing.allocator, "g", &.{}));
+}
