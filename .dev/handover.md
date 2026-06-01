@@ -8,14 +8,12 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD**: §1 spec-corpus JIT mode — **gc const-expr globals through JIT** (`824fa694`, D-223:
-  `validateGlobalInitExpr` multi-instruction walk + `evalGlobalInitGc` primitive-param refactor so JIT
-  setup reuses the interp gc alloc; gc heap materialised before the global-init loop). Opt-in
-  `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=538 fail=22 skip=735** (D-223: **+43 pass, biggest
-  mover since memory64**; memory64 100% GREEN 337/0/0). **fail taxonomy (22)**: gc 17 (6× f32 field
-  marshal = **D-212 now SURFACED** `ty=f32 got=0x69`; gc/array+i31 `err=Trap` = D-218) + function-
-  references 4 (D-198) + try_table 1 (EH). +6 vs prior = newly-visible (was compile-skipped); no
-  pass→fail regression. Default interp → test-all unchanged.
+- **HEAD**: §1 spec-corpus JIT mode — gc const-expr globals through JIT (`824fa694`, D-223) +
+  **gc test extraction** (`99e122e1`: runner_test.zig 1983→1180, gc tests → `runner_gc_test.zig`).
+  Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=538 fail=22 skip=735** (D-223: +43, biggest
+  mover since memory64; memory64 100% GREEN; interp test-all UNCHANGED — verified `b217d0c9` ubuntu).
+  **fail taxonomy (22)**: gc 17 (6× f32 = **D-212**, re-scoped below; gc/array+i31 `err=Trap` = D-218)
+  + function-references 4 (D-198) + try_table 1 (EH).
 - **PER-MODULE blocker-STACK reality** (lesson `2026-06-02-jit-corpus-late-phase-is-per-module-
   blocker-stacks`): since memory64 (+208, last big mover), every gc/funcref fix has been correct
   but ~0 corpus — each remaining module has 3-6 DISTINCT blockers; JIT rejects at the FIRST
@@ -25,8 +23,7 @@
   StackTypeMismatch 6 (funcref br_on_null validator gap), UnsupportedEntrySignature 7, InvalidFuncIndex 4.
 - **Two paths**: spec corpus = interp by default; JIT is opt-in `ZWASM_SPEC_ENGINE=jit` (default
   test-all unchanged). JIT entry = `runner.zig` `JitInstance`. ADR-0128 + ADR-0127 Accepted (no user gate).
-- **Watch**: `runner_test.zig` **1983/2000** (17 lines from HARD cap) — split per-concept NOW before
-  the next test addition (will block otherwise). Extract gc / mem64 / dispatch concept groups.
+- **Watch**: `runner_test.zig` 1180 (gc tests extracted → `runner_gc_test.zig`, `99e122e1`). Headroom OK.
 
 ## Active task — Phase 10 → 100% (ADR-0128)  **NEXT**
 
@@ -63,17 +60,16 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET** long ago.
   Infra COMPLETE; backbone operational (pass=484). Bundle stays open as the diagnostic-driven
   gap-fixing vehicle (`JITmodrej` tally → fix biggest tractable lever).
-- **NEXT chunk** = **D-212** (now SURFACED by D-223 — 6 concrete fails, well-understood root cause):
-  f32 struct/array FIELD reads marshal the raw GPR bit-pattern, not the FP value
-  (`JITval [gc/{array,struct}] get ty=f32 got=0x0000000000000069`; array×2 + struct get_{0_0,vec_0,
-  0_y,vec_y}×4). The struct.new/array.new emit stores field operands via the GPR path (`MOV Xn`),
-  WRONG for f32/f64 (value lives in an FP reg). FIX (see D-212 row): detect field/element valtype
-  class at emit (`shape_tag`/`valtype_byte` from `gc_type_infos`) → marshal FP via FMOV (arm64) /
-  MOVQ (x86_64), OR read the operand spill-slot raw bytes. Files: `src/engine/codegen/{arm64,x86_64}/
-  ops/wasm_3_0/{struct_new,array_new}.zig` + `jit_abi.zig` (jitGcAllocArrayFill). Re-measure:
-  `ZWASM_SPEC_ENGINE=jit <bin> test/spec/wasm-3.0-assert --fail-detail 2>/dev/null | grep 'ty=f32'`.
-  AFTER D-212: gc/array+i31 `err=Trap` cluster (D-218, deeper) then ref_func 4 (D-198).
-  Prefer FAIL fixes (direct flip). Skip multi-memory 51. Lessons: 2026-06-02-jit-corpus-late-phase-*.
+- **NEXT chunk** = **D-212 RE-SCOPED** (spike this cycle DISPROVED the GPR-store hypothesis): a bare
+  same-frame `struct.new (f32.const 1.0); struct.get 0 0` returns 1.0 correctly on arm64. The 6 f32
+  fails are the corpus chain `struct.wast:80-102`: `(func (export "get_0_0")(result f32) (call
+  $get_0_0 (struct.new_default $vec)))` with `$get_0_0(param (ref $vec))(result f32)` doing struct.get
+  an f32 field — expected 0.0, **got 0x69** (≈ heap-offset int). So the gap is the **cross-function
+  ref-PARAM call + f32 struct.get + f32-result-through-call** interaction, NOT the bare field store.
+  START next cycle by building a 2-function arm64 fixture (wrapper calls inner(ref)->f32) to repro in
+  isolation; disasm to localise: (1) ref ARG wrong bank/reg; (2) struct.get f32 loads GPR but f32
+  RESULT marshal reads stale V0; (3) call-result GPR→FP move missing. See D-212 row. Skip multi-memory
+  51; AFTER D-212: gc/array+i31 `err=Trap` (D-218) then ref_func 4 (D-198). Prefer FAIL fixes.
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -88,9 +84,11 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-This turn (`824fa694`, D-223) landed CODE (validator + setup + instantiate refactor + test); ubuntu
-`test-all` kicked at turn end → `tail -3 /tmp/ubuntu.log` next resume (Step 0.7). On FAIL revert
-`824fa694` to the prior green `ca0858b3`. Mac aarch64 primary; ubuntu = x86_64.
+Prior turn (`b217d0c9`, D-223) ubuntu `test-all` = GREEN (verified: interp gc pass=349 fail=1 =
+known ADR-0127-PHASE-C residual, NOT a regression; gc/type-subtyping.12/14 compile-FAIL are pre-
+existing assert_invalid). THIS turn (`99e122e1`, gc test split — refactor, no behaviour change)
+kicked ubuntu `test-all` at end → `tail -3 /tmp/ubuntu.log` next resume. On FAIL revert to `b217d0c9`.
+Mac aarch64 primary; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
