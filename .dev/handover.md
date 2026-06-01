@@ -9,16 +9,16 @@
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
 - **HEAD**: §1 spec-corpus JIT mode — scalar dispatch 0..3 + persistent runtime + memory.grow +
-  memory64 i64 data offset + gc ref.i31 globals + ref.as_non_null + **ref-branch liveness**
-  (`232dfca1`, D-220: br_on_cast/fail/null transparent, br_on_non_null pop). Opt-in
-  `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=484 fail=13 skip=798** (liveness fixes flipped 0
-  corpus — gc/funcref modules have STACKED blockers; but UnsupportedOp module-rejects 18→7;
-  memory64 100% GREEN 337/0/0). **fail taxonomy (D-218)**: 13 = gc/array + gc/i31 + ref_func 4
-  (D-198) + try_table 1. Default interp → test-all unchanged.
-- **Module-reject lever** (diagnostic `JITmodrej`, post-liveness): MultipleMemories 51 (Phase-14
-  deferred), StackTypeMismatch 9 (JIT-validator strictness — investigate), InvalidGlobalInitExpr 9
-  (struct.new/array.new const-expr — heap alloc), UnsupportedOp 7 (now mostly any.convert_extern —
-  needs liveness 1→1 + a transparent EMIT handler), UnsupportedEntrySignature 7, InvalidFuncIndex 4.
+  memory64 data offset + gc ref.i31 globals + ref-branch liveness + **supertypes→JIT validator**
+  (`965355c1`, D-220: concrete GC subtyping in compile path). Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac
+  aarch64: **pass=484 fail=14 skip=797** (memory64 100% GREEN 337/0/0). **fail taxonomy (D-218)**:
+  14 = gc/array + gc/i31 + ref_func 4 (D-198) + try_table 1. Default interp → test-all unchanged.
+- **DIVERSE-stacked-blocker reality** (diagnostic `JITmodrej`): the gc/funcref JIT-corpus completion
+  is a LONG slog — each module has 3-5 DISTINCT blockers (op-type/single-fix grinding yields ~0/turn
+  corpus). Remaining rejects: MultipleMemories 51 (Phase-14 deferred), InvalidGlobalInitExpr 9
+  (struct.new/array.new const-expr — heap alloc), UnsupportedOp 7 (any.convert_extern needs EMIT),
+  StackTypeMismatch 6 (funcref br_on_null — a SEPARATE validator gap from supertypes; interp accepts
+  these so the JIT validate entry differs — compare paths), UnsupportedEntrySignature 7, InvalidFuncIndex 4.
   **Stacked-blocker reality**: each gc/funcref module needs SEVERAL cleared → op-type grinding
   flips 0 until the last per-module blocker; consider fully-unblocking ONE module, or pivot to D-218.
   Lever is gc op-emit + gc const-expr, NOT arg shapes.
@@ -66,17 +66,16 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET** long ago.
   Infra COMPLETE; backbone operational (pass=484). Bundle stays open as the diagnostic-driven
   gap-fixing vehicle (`JITmodrej` tally → fix biggest tractable lever).
-- **NEXT chunk** (**D-220**) — STRATEGY SHIFT: op-type grinding flips 0 corpus (stacked blockers).
-  Pick ONE concrete approach: **(A)** fully-unblock ONE module — pick a gc/funcref module with the
-  fewest remaining `JITmodrej` causes, clear ALL (e.g. a module needing only any.convert_extern:
-  add liveness 1→1 + a transparent EMIT handler [pure reinterpret — peek, no pop/push; mirror
-  br_on_cast's emit shape + register in dispatch_collector_ops] → that module flips, real corpus
-  win). **(B)** investigate **StackTypeMismatch 9** — the JIT compile validator may be wrongly
-  rejecting valid gc/funcref typing (run JITmodrej, xxd a rejecting module, find the strict check);
-  if a validator bug, fixing unblocks several. **(C)** pivot to **D-218 fails (13)** — real
-  miscompiles (executed-wrong = the actual correctness signal), each via debug_jit_auto. Prefer
-  (A) or (B) for a corpus win; (C) for correctness. Skip multi-memory 51 (Phase-14 deferred).
-  Re-measure `JITmodrej` after each landing. Lesson on stacked blockers: 2026-06-02-spec-jit-skips.
+- **NEXT chunk** (**D-220**) — PIVOT to higher-yield (4 single-layer fixes this session flipped ~0:
+  the gc/funcref module skips are diverse-stacked). **Recommended: (C) D-218 fails (14)** — each is
+  a real MISCOMPILE (executed-wrong, the correctness signal the backbone exists to find); fixing one
+  drops the fail count (measurable) + is a genuine bug fix. Pick the simplest cluster: gc/i31 or
+  gc/array `get err=Trap` (run `ZWASM_SPEC_ENGINE=jit <bin> <corpus> --fail-detail 2>/dev/null` →
+  the failing fn; then debug_jit_auto disasm). **OR (A) fully-unblock ONE funcref module**: br_on_null.0
+  rejects StackTypeMismatch — compare the JIT validate entry (validateFunctionAndCollectSelectTypesWithMemory)
+  vs the interp's (instantiate.zig path) to find the br_on_null label-type gap the JIT entry has but
+  interp doesn't (interp ACCEPTS br_on_null.0). Avoid more single-op-type grinding (proven ~0 yield).
+  Skip multi-memory 51 (Phase-14 deferred). Re-measure `JITmodrej`/fail-detail after each landing.
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -91,11 +90,11 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior turn (`c9c55671`) ubuntu `test-all` = GREEN (`OK (HEAD=c9c55671)`; verified this resume).
-This turn landed ref-branch liveness (`232dfca1`, D-220; `liveness.zig`) — a liveness change
-(affects regalloc on BOTH arches; watch x86_64 for desync). Mac `test-all` + lint green. Re-kicks
-ubuntu `test-all` against this turn's final HEAD; verify next `/continue`: `tail -3 /tmp/ubuntu.log`,
-expect `OK (HEAD=<SHA>)`. On FAIL: revert to the last ubuntu-green HEAD (`c9c55671`). Mac aarch64 primary; ubuntu = x86_64.
+Prior turn (`203be30a`) ubuntu `test-all` = GREEN (`OK (HEAD=203be30a)`; verified this resume —
+ref-branch liveness regalloc clean on x86_64). This turn landed supertypes→JIT validator
+(`965355c1`, D-220; `validator.zig` + `compile.zig`). Mac `test-all` + lint green. Re-kicks ubuntu
+`test-all` against this turn's final HEAD; verify next `/continue`: `tail -3 /tmp/ubuntu.log`, expect
+`OK (HEAD=<SHA>)`. On FAIL: revert to the last ubuntu-green HEAD (`203be30a`). Mac aarch64 primary; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
