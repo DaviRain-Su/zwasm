@@ -60,16 +60,18 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET** long ago.
   Infra COMPLETE; backbone operational (pass=484). Bundle stays open as the diagnostic-driven
   gap-fixing vehicle (`JITmodrej` tally → fix biggest tractable lever).
-- **NEXT chunk** = **D-212 RE-SCOPED** (spike this cycle DISPROVED the GPR-store hypothesis): a bare
-  same-frame `struct.new (f32.const 1.0); struct.get 0 0` returns 1.0 correctly on arm64. The 6 f32
-  fails are the corpus chain `struct.wast:80-102`: `(func (export "get_0_0")(result f32) (call
-  $get_0_0 (struct.new_default $vec)))` with `$get_0_0(param (ref $vec))(result f32)` doing struct.get
-  an f32 field — expected 0.0, **got 0x69** (≈ heap-offset int). So the gap is the **cross-function
-  ref-PARAM call + f32 struct.get + f32-result-through-call** interaction, NOT the bare field store.
-  START next cycle by building a 2-function arm64 fixture (wrapper calls inner(ref)->f32) to repro in
-  isolation; disasm to localise: (1) ref ARG wrong bank/reg; (2) struct.get f32 loads GPR but f32
-  RESULT marshal reads stale V0; (3) call-result GPR→FP move missing. See D-212 row. Skip multi-memory
-  51; AFTER D-212: gc/array+i31 `err=Trap` (D-218) then ref_func 4 (D-198). Prefer FAIL fixes.
+- **NEXT chunk** = **D-212 — root cause CONFIRMED this cycle (deterministic standalone repro)**.
+  `struct.get`/`array.get` of an **f32/f64 field returns a GPR-class result that never reaches V0/XMM0**
+  when it feeds a function return → the f32-return reads a stale FP reg (0.0 by luck standalone, 0x69
+  in-corpus). Verified: SAME `struct.7.wasm` bytes → 0.0 standalone vs 0x69 in-corpus (stale-reg
+  dependence). RED TEST (write it first, fails in a clean process): `(module (type $s (struct (field
+  f32))) (func $inner (param (ref $s)) (result f32) local.get 0 struct.get 0 0) (func (export "f")
+  (result f32) f32.const 2.5 struct.new 0 call 0))` via `runF32Export` → expect 2.5 (full bytes in
+  D-212 row). Same-frame `struct.new(2.5); struct.get; return` WORKS; only cross-func/function-return
+  fails. FIX: make struct.get/array.get f32/f64 result FP-class (mirror f32.load `encLdrSReg`/movss in
+  `op_memory.zig`) OR FMOV GPR→V0 in the f32-return epilogue; both arches. Needs the field valtype at
+  emit (EmitCtx lacks GC type table — thread it, or use the validator's known result vreg type). See
+  D-212 row. Skip multi-memory 51; AFTER D-212: gc/array+i31 `err=Trap` (D-218), ref_func 4 (D-198).
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -84,11 +86,10 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior turn (`b217d0c9`, D-223) ubuntu `test-all` = GREEN (verified: interp gc pass=349 fail=1 =
-known ADR-0127-PHASE-C residual, NOT a regression; gc/type-subtyping.12/14 compile-FAIL are pre-
-existing assert_invalid). THIS turn (`99e122e1`, gc test split — refactor, no behaviour change)
-kicked ubuntu `test-all` at end → `tail -3 /tmp/ubuntu.log` next resume. On FAIL revert to `b217d0c9`.
-Mac aarch64 primary; ubuntu = x86_64.
+Prior turn (`ee41267a`, gc test split) ubuntu `test-all` = GREEN (verified: interp identical to
+baseline → split behaviour-neutral). THIS turn = INVESTIGATION-ONLY (D-212 root cause confirmed via
+spikes; debt+handover only, no src change → code == green `ee41267a`). SKIP Step 0.7 ubuntu next
+resume (no code delta). Mac aarch64 primary; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
