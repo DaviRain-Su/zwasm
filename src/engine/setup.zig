@@ -435,8 +435,24 @@ pub fn setupRuntime(
             if (base + seg.funcidxs.len > tbl_funcptrs.len) return Error.UnsupportedEntrySignature;
             for (seg.funcidxs, 0..) |fidx, i| {
                 if (fidx == std.math.maxInt(u32)) {
-                    // ref.null funcref — leave the slot null + sentinel typeidx.
+                    // ref.null — leave the slot null + sentinel typeidx.
                     tbl.refs[base + i] = Value.null_ref;
+                    continue;
+                }
+                // Wasm 3.0 GC: an i31ref/eqref/anyref active elem segment
+                // stores the i31-ENCODED value in `funcidxs` (decoder:
+                // i32ToI31Truncate == runtime Value.fromI31Truncate), NOT a
+                // funcidx. Store it directly as the table ref — table.get
+                // returns it, i31.get_{s,u} decode it. D-221. Discriminator
+                // MIRRORS the decoder's `head_ok` (abstract i31/eq/any only —
+                // concrete `(ref $func)` tables still carry funcidxs).
+                // (global.get-marker items [bit31] in these tables → later chunk.)
+                const is_i31_family = seg.elem_type == .ref and switch (seg.elem_type.ref.heap_type) {
+                    .abstract => |a| a == .i31 or a == .eq or a == .any,
+                    .concrete => false,
+                };
+                if (is_i31_family) {
+                    if ((fidx & 0x80000000) == 0) tbl.refs[base + i] = fidx;
                     continue;
                 }
                 if (fidx >= compiled.func_sigs.len) return Error.UnsupportedEntrySignature;
