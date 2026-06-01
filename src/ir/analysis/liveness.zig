@@ -411,8 +411,13 @@ pub fn compute(
             }
             continue;
         }
-        if (instr.op == .br_if or instr.op == .br_table) {
+        if (instr.op == .br_if or instr.op == .br_table or instr.op == .br_on_non_null) {
             // Tolerant pop (see if-handler above for rationale).
+            // br_on_non_null (10.R) pops the ref like br_if pops the
+            // condition: its emit PEEKs the ref to carry it to the label
+            // on the non-null branch, then `pop()`s it (the null fall-
+            // through discards it). Mirrors the emit's pushed_vregs delta
+            // (D-220; lesson 2026-06-02-jit-liveness-must-mirror-emit-pushed-vregs).
             if (sim_len > 0) {
                 sim_len -= 1;
                 const cond_vreg = sim_stack[sim_len];
@@ -437,7 +442,16 @@ pub fn compute(
         // op1` because the right-hand vreg was given the
         // closed-vreg's slot, clobbering op1 before the add
         // read it).
-        if (instr.op == .@"local.tee") {
+        // br_on_cast / br_on_cast_fail / br_on_null are operand-stack-
+        // TRANSPARENT like local.tee: their emit PEEKs the ref (br_on_cast)
+        // or pop()s-then-re-append()s the SAME vreg (br_on_null), so the top
+        // vreg stays — it's both the fall-through value and (via the branch
+        // merge) the label result. Generic 1→1 would close it + fabricate a
+        // fresh vreg → reuse window (D-220; lesson 2026-06-02-jit-liveness-
+        // must-mirror-emit-pushed-vregs).
+        if (instr.op == .@"local.tee" or instr.op == .br_on_cast or
+            instr.op == .br_on_cast_fail or instr.op == .br_on_null)
+        {
             if (sim_len > 0) {
                 const top_vreg = sim_stack[sim_len - 1];
                 ranges.items[top_vreg].last_use_pc = pc;
