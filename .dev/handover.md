@@ -8,13 +8,16 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD**: §1 spec-corpus JIT mode — no-arg 4-type + single-arg 4×4 + persistent runtime +
-  memory.grow (+mem64 sign-ext) + **2-scalar-arg dispatch** (`6fbb7ef7`, D-217:
-  `dispatchScalar2`/`dispatchVoid2` over (param0,param1,result); +2 entry helpers
-  `callF32_i32f32`/`callVoid_i64i32`). Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=260
-  fail=11 skip=1024** (D-217 alone: **+133 pass, −134 skip**; memory64 now FULLY GREEN, gc pass
-  14→96). **fail taxonomy (clean, all real op-gaps not dispatch bugs — D-218)**: 11 = ref_func 4
-  (D-198) + gc/i31 3 + gc/array 3 (2 new from gc 2-arg ops) + try_table 1. Default interp → test-all unchanged.
+- **HEAD**: §1 spec-corpus JIT mode — **scalar arg dispatch 0..3 COMPLETE** (no-arg 4-type +
+  1-arg 4×4 + 2-arg + 3-i32-arg `9966bcdc`) + persistent runtime + memory.grow (+mem64 sign-ext).
+  Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=260 fail=12 skip=1023** (the 2-arg chunk
+  `6fbb7ef7` did the heavy lift: +133 pass; memory64 FULLY GREEN, gc pass 14→96). **fail taxonomy
+  (all real op-gaps, NOT dispatch — D-218)**: 12 = gc/array 4 + ref_func 4 (D-198) + gc/i31 3 +
+  try_table 1. Default interp → test-all unchanged.
+- **Skip lever (lesson `2026-06-02-spec-jit-skips-weight-by-root-cause-not-shape`)**: of 1023
+  skips, **~915 are module-compile-rejects** (multi-memory 407 + unemitted ops + validate gaps;
+  SILENT in --fail-detail) vs ~109 eligibility-shape. Dispatch-arity chunks are spent — the lever
+  is now **module-compile coverage (op emit)**, not more arg shapes.
 - **Two execution paths (CODE-verified)**: spec corpus runs **interp by default**
   (`instance.invoke`→`_dispatch.run`, `instance.zig:169`); the **JIT path is now wired as an
   opt-in mode** (`ZWASM_SPEC_ENGINE=jit`, backbone above). The standalone `runI32Export`
@@ -56,20 +59,19 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   banks) + the `entry.zig:367` comment. The dispatcher just builds the matching `callconv(.c)`
   fn-ptr per signature. Mode toggle: env `ZWASM_SPEC_ENGINE=jit` (simplest) — `build.zig:15`
   documents `-Dengine interp/jit/both` but it is NOT yet implemented.
-- **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET**.
-  no-arg 4-type ✓ + single-arg 4×4 ✓ + persistent runtime ✓ + memory.grow ✓. Bundle continues
-  for shape growth. C-ABI 裏取り DONE.
-- **NEXT chunk** = **measure the new skip taxonomy (1024) → pick biggest flippable**, OR triage
-  the 11 fails (**D-218** — all real gc/func-ref/EH op-gaps now that execution is wide). Skip
-  candidates by likely size: **multi-memory 407** (MultipleMemories compile-reject → JitRuntime
-  per-memory base; big architectural chunk, own cycle), **gc ~305** (unemitted gc ops / compile
-  rejects — some flip with more op coverage), **3-arg dispatch** (small, follow the D-217 pattern;
-  `callX_YZW` helpers mostly exist), **multi-value results** (needs the runner to read >1 result —
-  result_abi/indirect-result mechanism, medium). Recommended order: (1) 3-arg dispatch (cheap,
-  extends D-217); (2) D-218 fail triage per op family (gc/array + gc/i31 → GC-on-JIT D-211/D-212/
-  ADR-0127 PHASE C; ref_func → D-198; try_table → EH); (3) multi-value; (4) multi-memory (big).
-  Run `bash scripts/...` no — measure via the corpus `--fail-detail 2>/dev/null` + a skip-by-reason
-  tally. Unemitted ops (br_on_null / …) → D-198 / tail-call / ADR-0127 PHASE C.
+- **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET** long ago.
+  Infrastructure now COMPLETE: scalar dispatch 0..3 + persistent runtime + memory.grow + C-ABI.
+  The §1 verification backbone is operational (pass=260); remaining work is gap-DRIVEN, not
+  infra-building. Consider closing the bundle next cycle + re-targeting as plain §10 work.
+- **NEXT chunk** = pivot to the real lever — **module-compile coverage (op emit)**, the ~915
+  silent skips. Step 0: tally module-reject causes at the `.module` arm (instrument cur_jit==null
+  by err) → pick the biggest TRACTABLE op cluster. Likely order: (1) **D-218 fail fixes** (12 real
+  miscompiles; bounded, highest-value: gc/array 4 + gc/i31 3 via debug_jit_auto/disasm → GC-on-JIT
+  D-211/D-212/ADR-0127 PHASE C; ref_func 4 → D-198; try_table 1 → EH); (2) **gc unemitted ops**
+  (compile-rejects in gc modules — emit them so the modules JIT-compile + the 3-arg gc asserts run);
+  (3) multi-value results (result_abi/indirect-result, medium); (4) **multi-memory 407** —
+  LIKELY PHASE-14 deferred (`sections.zig`: "runtime cascade to []MemoryInstance is 10.M-2");
+  VERIFY scope before opening (don't build deferred work).
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -84,11 +86,11 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior turn (`0ab60cd9`) ubuntu `test-all` = GREEN (`OK (HEAD=0ab60cd9)`; verified this resume —
-x86_64 MOVSXD path confirmed). This turn landed 2-scalar-arg JIT dispatch (`6fbb7ef7`, D-217;
-engine + entry codegen). Mac `test-all` + lint green. Re-kicks ubuntu `test-all` against this
-turn's final HEAD; verify next `/continue`: `tail -3 /tmp/ubuntu.log`, expect `OK (HEAD=<SHA>)`.
-On FAIL: revert this turn's commits to the last ubuntu-green HEAD (`0ab60cd9`). Mac aarch64 primary; ubuntu = x86_64.
+Prior turn (`8dc8abb0`) ubuntu `test-all` = GREEN (`OK (HEAD=8dc8abb0)`; verified this resume).
+This turn landed 2-arg (`6fbb7ef7`) + 3-arg (`9966bcdc`) JIT dispatch (engine + entry codegen).
+Mac `test-all` + lint green. Re-kicks ubuntu `test-all` against this turn's final HEAD; verify
+next `/continue`: `tail -3 /tmp/ubuntu.log`, expect `OK (HEAD=<SHA>)`. On FAIL: revert this turn's
+commits to the last ubuntu-green HEAD (`8dc8abb0`). Mac aarch64 primary; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
