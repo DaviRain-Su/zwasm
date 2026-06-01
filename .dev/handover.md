@@ -9,16 +9,17 @@
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
 - **HEAD**: §1 spec-corpus JIT mode — scalar dispatch 0..3 + persistent runtime + memory.grow +
-  **memory64 active-data i64 offset** (`98e8997b`, D-219: validate+eval i64 data offsets). Opt-in
-  `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=468 fail=12 skip=815** (D-219 alone: **+208 pass,
-  −208 skip** — **memory64 now 100% GREEN through JIT, 337/0/0**). **fail taxonomy (all real
-  op-gaps, NOT dispatch — D-218)**: 12 = gc/array 4 + ref_func 4 (D-198) + gc/i31 3 + try_table 1.
+  memory64 i64 data offset (`98e8997b`) + **gc ref.i31 / ref.null-gc-heaptype global const-expr**
+  (`89fa192e`, D-220). Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=484 fail=13 skip=798**
+  (D-220: +16 pass; memory64 100% GREEN 337/0/0; gc jit pass ~96→112). **fail taxonomy (real
+  op-gaps, NOT dispatch — D-218)**: 13 = gc/array + gc/i31 + ref_func 4 (D-198) + try_table 1.
   Default interp → test-all unchanged.
-- **Module-reject lever** (diagnostic `JITmodrej`, lesson `2026-06-02-spec-jit-skips-weight-by-
-  root-cause-not-shape`): remaining rejects = MultipleMemories 51 (**Phase-14 deferred** —
-  `sections.zig` 10.M-2), gc **UnsupportedOp 18** (br_on_cast/br_on_cast_fail/ref_test/ref_cast +
-  tail-call return_call_indirect), gc **InvalidGlobalInitExpr 18** (gc const-expr global inits:
-  ref.i31 / ref.null-gc-heaptype) → **D-220**. Lever is gc op-emit + gc const-expr, NOT arg shapes.
+- **Module-reject lever** (diagnostic `JITmodrej`): remaining = MultipleMemories 51
+  (**Phase-14 deferred** — `sections.zig` 10.M-2), gc **UnsupportedOp 18** (br_on_cast/
+  br_on_cast_fail/ref_test/ref_cast + tail-call return_call_indirect — survey flagged emit files
+  EXIST yet module rejects: investigate the dispatch/lowering gap), gc **InvalidGlobalInitExpr 9**
+  array.5/6, struct.7/10, array_copy.4, array_fill.3, array_init_{data,elem}) → **D-220**.
+  Lever is gc op-emit + gc const-expr, NOT arg shapes.
 - **Two execution paths (CODE-verified)**: spec corpus runs **interp by default**
   (`instance.invoke`→`_dispatch.run`, `instance.zig:169`); the **JIT path is now wired as an
   opt-in mode** (`ZWASM_SPEC_ENGINE=jit`, backbone above). The standalone `runI32Export`
@@ -61,18 +62,17 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   fn-ptr per signature. Mode toggle: env `ZWASM_SPEC_ENGINE=jit` (simplest) — `build.zig:15`
   documents `-Dengine interp/jit/both` but it is NOT yet implemented.
 - **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET** long ago.
-  Infra COMPLETE (scalar dispatch 0..3 + persistent runtime + memory.grow + memory64-data). The
-  backbone is operational (pass=468); remaining work is gap-DRIVEN. Bundle stays open as the
-  diagnostic-driven gap-fixing vehicle (`JITmodrej` tally → fix biggest tractable lever).
-- **NEXT chunk** (**D-220**, evidence-driven — diagnostic-led D-219 just flipped +208): pick the
-  biggest TRACTABLE module-reject. Candidates: (1) **gc InvalidGlobalInitExpr 18** — extend the JIT
-  const-expr validator (`runner_validate.zig`) + setup eval for gc global inits (ref.i31 /
-  ref.null gc-heaptype); eval must MATERIALIZE the ref at setup (harder — check setup global-init).
-  Inspect the actual opcodes first (`xxd` a rejecting module's global). (2) **gc UnsupportedOp 18**
-  — emit br_on_cast/br_on_cast_fail/ref_test/ref_cast (ADR-0116 RTT Cohen display; lesson
-  `2026-05-31-jit-passthrough-result-clobbered-by-call`) + return_call_indirect (tail-call). Each
-  op = own emit chunk. (3) **D-218 fail fixes** (12 real miscompiles via debug_jit_auto). Skip
-  **multi-memory 51 (Phase-14 deferred)**. Re-measure with `JITmodrej` after each landing.
+  Infra COMPLETE; backbone operational (pass=484). Bundle stays open as the diagnostic-driven
+  gap-fixing vehicle (`JITmodrej` tally → fix biggest tractable lever).
+- **NEXT chunk** (**D-220** continues, evidence-driven): (1) **gc UnsupportedOp 18** — Step 0:
+  the emit files (ref_test/ref_cast/br_on_cast `ops/wasm_3_0/`) EXIST + are in dispatch_collector,
+  yet modules reject `UnsupportedOp` — find WHERE compileWasm raises it for these (a lowering /
+  wasm_level gate / collector miss?). If a gate flip → cheap big win; if real emit gap → per-op
+  chunk (ADR-0116 RTT Cohen; lesson `2026-05-31-jit-passthrough-result-clobbered-by-call`). Also
+  return_call_indirect (tail-call, 1 module). (2) **gc struct.new/array.new const-expr globals 9**
+  — needs gc-heap alloc at setup (`instantiate.evalGcConstExpr`? check) — harder. (3) **D-218 fail
+  fixes** (13 real miscompiles via debug_jit_auto). Skip **multi-memory 51 (Phase-14 deferred)**.
+  Re-measure `JITmodrej` after each landing.
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -87,12 +87,11 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior turn (`956d6453`) ubuntu `test-all` = GREEN (`OK (HEAD=956d6453)`; verified this resume).
-This turn landed the `JITmodrej` diagnostic + D-219 (memory64 i64 data offset — `compile.zig`,
-`runner_validate.zig`, `setup.zig`). Mac `test-all` + lint green. Re-kicks ubuntu `test-all`
-against this turn's final HEAD; verify next `/continue`: `tail -3 /tmp/ubuntu.log`, expect
-`OK (HEAD=<SHA>)`. On FAIL: revert this turn's commits to the last ubuntu-green HEAD (`956d6453`).
-Mac aarch64 primary; ubuntu = x86_64.
+Prior turn (`36b622db`) ubuntu `test-all` = GREEN (`OK (HEAD=36b622db)`; verified this resume).
+This turn landed D-220 gc ref.i31/ref.null-heaptype global const-expr (`runner_validate.zig`).
+Mac `test-all` + lint green. Re-kicks ubuntu `test-all` against this turn's final HEAD; verify
+next `/continue`: `tail -3 /tmp/ubuntu.log`, expect `OK (HEAD=<SHA>)`. On FAIL: revert this turn's
+commits to the last ubuntu-green HEAD (`36b622db`). Mac aarch64 primary; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
