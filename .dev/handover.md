@@ -8,12 +8,14 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD**: §1 spec-corpus JIT mode — …memory64 data offset + gc ref.i31 globals + ref-branch
-  liveness + supertypes→validator + i31 table elem-init + **run ref-result fns for side effects**
-  (`cff07bca`, D-222: gc `new`→global.set pattern via void path). Opt-in `ZWASM_SPEC_ENGINE=jit`.
-  Mac aarch64: **pass=495 fail=16 skip=784** (D-222: **+11 pass, FIRST corpus mover since memory64**;
-  gc pass 112→123; memory64 100% GREEN 337/0/0). **fail taxonomy (D-218)**: 16 = gc/array + gc/i31
-  + ref_func 4 (D-198) + try_table 1 + 2 new gc (ref-result asserts now execute). Default interp → test-all unchanged.
+- **HEAD**: §1 spec-corpus JIT mode — **gc const-expr globals through JIT** (`824fa694`, D-223:
+  `validateGlobalInitExpr` multi-instruction walk + `evalGlobalInitGc` primitive-param refactor so JIT
+  setup reuses the interp gc alloc; gc heap materialised before the global-init loop). Opt-in
+  `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=538 fail=22 skip=735** (D-223: **+43 pass, biggest
+  mover since memory64**; memory64 100% GREEN 337/0/0). **fail taxonomy (22)**: gc 17 (6× f32 field
+  marshal = **D-212 now SURFACED** `ty=f32 got=0x69`; gc/array+i31 `err=Trap` = D-218) + function-
+  references 4 (D-198) + try_table 1 (EH). +6 vs prior = newly-visible (was compile-skipped); no
+  pass→fail regression. Default interp → test-all unchanged.
 - **PER-MODULE blocker-STACK reality** (lesson `2026-06-02-jit-corpus-late-phase-is-per-module-
   blocker-stacks`): since memory64 (+208, last big mover), every gc/funcref fix has been correct
   but ~0 corpus — each remaining module has 3-6 DISTINCT blockers; JIT rejects at the FIRST
@@ -23,7 +25,8 @@
   StackTypeMismatch 6 (funcref br_on_null validator gap), UnsupportedEntrySignature 7, InvalidFuncIndex 4.
 - **Two paths**: spec corpus = interp by default; JIT is opt-in `ZWASM_SPEC_ENGINE=jit` (default
   test-all unchanged). JIT entry = `runner.zig` `JitInstance`. ADR-0128 + ADR-0127 Accepted (no user gate).
-- **Watch**: `runner_test.zig` 1700+ (soft-WARN; hard cap 2000) — split per-concept before then.
+- **Watch**: `runner_test.zig` **1983/2000** (17 lines from HARD cap) — split per-concept NOW before
+  the next test addition (will block otherwise). Extract gc / mem64 / dispatch concept groups.
 
 ## Active task — Phase 10 → 100% (ADR-0128)  **NEXT**
 
@@ -60,17 +63,16 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET** long ago.
   Infra COMPLETE; backbone operational (pass=484). Bundle stays open as the diagnostic-driven
   gap-fixing vehicle (`JITmodrej` tally → fix biggest tractable lever).
-- **NEXT chunk** = **D-223** (subagent CORRECTED the root cause): the gc/array SKIP cluster
-  (array.5/6/struct.7/10/…) = modules **rejecting at JIT-validate `InvalidGlobalInitExpr`** because
-  their GLOBALS use `array.new`/`array.new_default`/`struct.new` const-expr inits (D-220 item a, gc
-  heap-alloc globals). NOT a trap. Verified: f32 `array.new_default+array.len` (no global) PASSES.
-  FIX (fresh cycle, multi-part — see D-223 row): (1) `validateGlobalInitExpr` walk a const-expr
-  OPERAND stack (array.new=2-op, struct.new=N-op — the single-value model only fits 1-op); accept
-  sub 0x00/01/06/07/08 → `(ref $ti)`. (2) `setup.zig:265` heap-allocate at global init (move gc_heap
-  @594 before the global loop; route via `feature/gc` alloc — no interp evalGcConstExpr to reuse).
-  SEPARATELY: the `new err=Trap` FAILS are a DIFFERENT compiling gc/array module (re-identify:
-  `--fail-detail 2>/dev/null` → which array.N) — a real trap (D-218), independent of D-223.
-  Other fails: ref_func 4 (D-198), gc/type-subtyping run 1, try_table 1, gc/i31 get 4.
+- **NEXT chunk** = **D-212** (now SURFACED by D-223 — 6 concrete fails, well-understood root cause):
+  f32 struct/array FIELD reads marshal the raw GPR bit-pattern, not the FP value
+  (`JITval [gc/{array,struct}] get ty=f32 got=0x0000000000000069`; array×2 + struct get_{0_0,vec_0,
+  0_y,vec_y}×4). The struct.new/array.new emit stores field operands via the GPR path (`MOV Xn`),
+  WRONG for f32/f64 (value lives in an FP reg). FIX (see D-212 row): detect field/element valtype
+  class at emit (`shape_tag`/`valtype_byte` from `gc_type_infos`) → marshal FP via FMOV (arm64) /
+  MOVQ (x86_64), OR read the operand spill-slot raw bytes. Files: `src/engine/codegen/{arm64,x86_64}/
+  ops/wasm_3_0/{struct_new,array_new}.zig` + `jit_abi.zig` (jitGcAllocArrayFill). Re-measure:
+  `ZWASM_SPEC_ENGINE=jit <bin> test/spec/wasm-3.0-assert --fail-detail 2>/dev/null | grep 'ty=f32'`.
+  AFTER D-212: gc/array+i31 `err=Trap` cluster (D-218, deeper) then ref_func 4 (D-198).
   Prefer FAIL fixes (direct flip). Skip multi-memory 51. Lessons: 2026-06-02-jit-corpus-late-phase-*.
 
 ## §10 remaining — the six `[ ]` rows
@@ -86,11 +88,9 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior turn (`ca0858b3`, D-222) ubuntu `test-all` = GREEN. **Last 2 turns investigation-only**
-(narrowed then CORRECTED D-223 via subagent disasm — it's a const-expr-global VALIDATE reject, not
-a trap). NO code change since the green `ca0858b3` (only docs/debt commits ef153995 + this one). No
-ubuntu kick needed; skip Step 0.7 ubuntu next resume (code == green ca0858b3). NEXT cycle: implement
-D-223 (gc const-expr globals) with FULL fresh context — it's multi-part. Mac aarch64 primary; ubuntu = x86_64.
+This turn (`824fa694`, D-223) landed CODE (validator + setup + instantiate refactor + test); ubuntu
+`test-all` kicked at turn end → `tail -3 /tmp/ubuntu.log` next resume (Step 0.7). On FAIL revert
+`824fa694` to the prior green `ca0858b3`. Mac aarch64 primary; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
