@@ -1004,6 +1004,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             types.kinds,
             types.struct_defs,
             types.array_defs,
+            types.supertypes,
         ) catch |err| {
             std.debug.print("compileWasm: func[{d}] params={d} results={d} → validate {s}\n", .{
                 wasm_idx,

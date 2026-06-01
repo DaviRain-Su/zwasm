@@ -503,8 +503,15 @@ pub fn validateFunctionAndCollectSelectTypesWithMemory(
     module_types_kinds: []const sections.TypeKind,
     struct_defs: []const ?sections.StructDef,
     array_defs: []const ?sections.ArrayDef,
+    // D-220: declared supertype chains (parallel to module_types) so the JIT
+    // compile path's `subtypeCtx`/`gcConcreteReaches` validates concrete GC
+    // subtyping (br_on_cast, narrowed-ref call args, gc/type-subtyping).
+    // Previously defaulted to `&.{}` → StackTypeMismatch on every concrete
+    // subtype check (the interp path threads it via instantiate.zig).
+    supertypes: []const []const u32,
 ) Error!void {
     var v = Validator{
+        .supertypes = supertypes,
         .sig = sig,
         .locals = locals,
         .body = body,
