@@ -500,7 +500,13 @@ pub fn main(init: std.process.Init) !void {
                         // reject (multi-memory, unemitted op, …) leaves cur_jit
                         // null → asserts against it become enumerated skips.
                         if (jit_mode) {
-                            cur_jit = zwasm.engine.runner.JitInstance.init(gpa, cur_module_bytes.?) catch null;
+                            // Capture the module-reject cause (else this skip
+                            // class is SILENT — see lesson
+                            // 2026-06-02-spec-jit-skips-weight-by-root-cause).
+                            cur_jit = zwasm.engine.runner.JitInstance.init(gpa, cur_module_bytes.?) catch |e| inner: {
+                                if (fail_detail) try stdout.print("  JITmodrej [{s}/{s}] err={s}\n", .{ proposal, d.module_path, @errorName(e) });
+                                break :inner null;
+                            };
                         }
                         // 10.M-D195b cycle 71 — compile + instantiate
                         // against the shared engine + linker, then
