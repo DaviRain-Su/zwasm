@@ -9,13 +9,12 @@
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
 - **HEAD**: §1 spec-corpus JIT mode — no-arg 4-type + single-arg 4×4 (`dc87b072`) + persistent
-  per-module runtime (`dcdd992a`) + **real JIT `memory.grow`** (`f46fcb71`, D-215 Part A:
-  `jitMemoryGrow` reallocs+zero-inits+enforces max+updates `rt.vm_base`/`mem_limit`; pinned heap
-  `MemGrowCtx` via `rt.host_state` owns the buffer). Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac aarch64:
-  **pass=125 fail=12 skip=1158** (was 94/43/1158; **+31 pass, −31 fail** — flipped 31 of 32
-  memory_grow64). **fail taxonomy (clean)**: 12 = 2 memory_grow64 (mem64 `-1` not i64
-  sign-extended — **D-216 Part B**) + 1 memory_trap64 load (D-216 triage) + 9 pre-existing
-  (ref_func 4, i31 3, gc array 1, try_table 1). Default interp → test-all unchanged.
+  per-module runtime (`dcdd992a`) + real JIT `memory.grow` (`f46fcb71`) + **mem64 grow result
+  i64 sign-ext** (`0c265e86`, D-216 Part B: arm64 SXTW / x86_64 MOVSXD when
+  `ctx.memory0_idx_type==.i64`). Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=127 fail=10
+  skip=1158** (D-215+216 took fail 43→10; memory64 now pass=82 fail=1). **fail taxonomy (clean)**:
+  10 = 1 `memory_trap64` load (the 2-arg `store(i64,i32)` dep is skipped → **D-217**) + 9
+  pre-existing (ref_func 4, i31 3, gc array 1, try_table 1). Default interp → test-all unchanged.
 - **Two execution paths (CODE-verified)**: spec corpus runs **interp by default**
   (`instance.invoke`→`_dispatch.run`, `instance.zig:169`); the **JIT path is now wired as an
   opt-in mode** (`ZWASM_SPEC_ENGINE=jit`, backbone above). The standalone `runI32Export`
@@ -58,19 +57,19 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   fn-ptr per signature. Mode toggle: env `ZWASM_SPEC_ENGINE=jit` (simplest) — `build.zig:15`
   documents `-Dengine interp/jit/both` but it is NOT yet implemented.
 - **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET**.
-  no-arg 4-type ✓ + single-arg 4×4 ✓ + persistent per-module runtime ✓ (`dcdd992a`). Bundle
-  continues for shape growth. C-ABI 裏取り DONE.
-- **NEXT chunk** = **D-216 Part B: memory64 grow result i64 sign-extension** (flips the last 2
-  grow fails). `emitMemoryGrow` captures the i32 trampoline result zero-extended (arm64
-  `encOrrRegW` @ `emit.zig:1212`; x86_64 `.d` MOV @ `op_call.zig:emitMemoryGrow`); memory64 grow
-  yields i64 so the `-1` sentinel must SIGN-extend to `0xffff…ffff`. Plumb the memory `idx_type`
-  into emitMemoryGrow (both arches) → `SXTW`(arm64)/`MOVSXD`(x86_64) when mem64; mem32 stays
-  zero-ext (i32 canonical). Success page counts are non-negative → unaffected. ALSO triage the 1
-  `memory_trap64 load=0` fail (likely a 2-arg store dep skipped by cycle-1 dispatch). Verify both
-  arches via a runner_test grow-(-1) fixture + `ZWASM_SPEC_ENGINE=jit`.
-  Then: 2-arg scalar dispatch (next skip class; check-memory-zero etc.), multi-value, v128.
-  Secondary: multi-memory (407 skips; MultipleMemories → JitRuntime per-memory base, own chunk).
-  Unemitted ops (br_on_null / return_call_indirect / …) tracked by D-198 / tail-call / ADR-0127 PHASE C.
+  no-arg 4-type ✓ + single-arg 4×4 ✓ + persistent runtime ✓ + memory.grow ✓. Bundle continues
+  for shape growth. C-ABI 裏取り DONE.
+- **NEXT chunk** = **D-217: 2-arg (N-arg) scalar JIT dispatch**. `JitInstance.invoke` is 0/1-arg;
+  2-arg invokes are eligibility-skipped → `memory_trap64`'s `store(i64,i32)` never runs (the 1
+  residual memory64 fail) + the `check-memory-zero` 2-arg class stays skipped. **DESIGN CHOICE
+  FIRST (likely ADR)**: `entry.callX_YZ` is an ad-hoc ~36-sig subset, NOT the full 4×4×4=64
+  (arg0,arg1,result) matrix (`callVoid_i64i32` for the trap64 store may be absent). Options: (a)
+  expand the helper matrix (mechanical, large); (b) generic comptime sig-cross-product fn-ptr
+  dispatch (less code; Zig can't build fn types from runtime data → needs a comptime enum
+  cross-product); (c) register-array marshaling trampoline. Survey `entry.zig` coverage + pick
+  before coding. Discharge: trap64 load + check-memory-zero flip. See **D-217**.
+  Then: multi-value, v128. Secondary: multi-memory (407 skips; MultipleMemories → JitRuntime
+  per-memory base, own chunk). Unemitted ops (br_on_null / …) → D-198 / tail-call / ADR-0127 PHASE C.
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -85,11 +84,12 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior turn (`9f01bea2`) ubuntu `test-all` = GREEN (`OK (HEAD=9f01bea2)`; verified this resume).
-This turn landed real JIT `memory.grow` (`f46fcb71`, D-215 Part A). Mac `test-all` + lint green.
-Re-kicks ubuntu `test-all` against this turn's final HEAD (handover commit below); verify next
-`/continue`: `tail -3 /tmp/ubuntu.log`, expect `OK (HEAD=<that SHA>)`. On FAIL: revert this turn's
-commits to the last ubuntu-green HEAD (`9f01bea2`). Mac aarch64 primary; ubuntu confirms x86_64.
+Prior turn (`975c0bbc`) ubuntu `test-all` = GREEN (`OK (HEAD=975c0bbc)`; verified this resume).
+This turn landed mem64 grow-result sign-ext (`0c265e86`, D-216 Part B — a **codegen** change on
+BOTH arches; x86_64 path compiled on Mac but EXECUTED only on ubuntu). Mac `test-all` + lint green.
+Re-kicks ubuntu `test-all` against this turn's final HEAD; verify next `/continue`:
+`tail -3 /tmp/ubuntu.log`, expect `OK (HEAD=<that SHA>)`. On FAIL (esp. x86_64 MOVSXD path): revert
+this turn's commits to the last ubuntu-green HEAD (`975c0bbc`). Mac aarch64 primary; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
