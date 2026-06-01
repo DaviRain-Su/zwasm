@@ -9,16 +9,16 @@
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
 - **HEAD**: §1 spec-corpus JIT mode — scalar dispatch 0..3 + persistent runtime + memory.grow +
-  memory64 i64 data offset (`98e8997b`) + **gc ref.i31 / ref.null-gc-heaptype global const-expr**
-  (`89fa192e`, D-220). Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=484 fail=13 skip=798**
-  (D-220: +16 pass; memory64 100% GREEN 337/0/0; gc jit pass ~96→112). **fail taxonomy (real
-  op-gaps, NOT dispatch — D-218)**: 13 = gc/array + gc/i31 + ref_func 4 (D-198) + try_table 1.
-  Default interp → test-all unchanged.
-- **Module-reject lever** (diagnostic `JITmodrej`): remaining = MultipleMemories 51
-  (**Phase-14 deferred** — `sections.zig` 10.M-2), gc **UnsupportedOp 18** (br_on_cast/
-  br_on_cast_fail/ref_test/ref_cast + tail-call return_call_indirect — survey flagged emit files
-  EXIST yet module rejects: investigate the dispatch/lowering gap), gc **InvalidGlobalInitExpr 9**
-  array.5/6, struct.7/10, array_copy.4, array_fill.3, array_init_{data,elem}) → **D-220**.
+  memory64 i64 data offset + gc ref.i31 globals + **ref.as_non_null liveness** (`e2701f0d`, D-220).
+  Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=484 fail=13 skip=798** (ref.as_non_null
+  flipped 0 — co-occurs with the still-broken ref-branch ops; memory64 100% GREEN 337/0/0).
+  **fail taxonomy (real op-gaps, NOT dispatch — D-218)**: 13 = gc/array + gc/i31 + ref_func 4
+  (D-198) + try_table 1. Default interp → test-all unchanged.
+- **Module-reject lever** (diagnostic `JITmodrej`): UnsupportedOp rejects = **liveness gaps**
+  (`liveness: UnsupportedOp[stackEffect-missing]`), NOT emit/lower (those exist). Remaining:
+  MultipleMemories 51 (Phase-14 deferred), **ref-branch liveness** (br_on_cast/fail/null/non_null
+  — see NEXT), gc InvalidGlobalInitExpr 9 (struct.new/array.new const-expr — heap alloc),
+  any.convert_extern/extern.convert_any (need EMIT, no handler) → **D-220**.
   Lever is gc op-emit + gc const-expr, NOT arg shapes.
 - **Two execution paths (CODE-verified)**: spec corpus runs **interp by default**
   (`instance.invoke`→`_dispatch.run`, `instance.zig:169`); the **JIT path is now wired as an
@@ -64,15 +64,18 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET** long ago.
   Infra COMPLETE; backbone operational (pass=484). Bundle stays open as the diagnostic-driven
   gap-fixing vehicle (`JITmodrej` tally → fix biggest tractable lever).
-- **NEXT chunk** (**D-220** continues, evidence-driven): (1) **gc UnsupportedOp 18** — Step 0:
-  the emit files (ref_test/ref_cast/br_on_cast `ops/wasm_3_0/`) EXIST + are in dispatch_collector,
-  yet modules reject `UnsupportedOp` — find WHERE compileWasm raises it for these (a lowering /
-  wasm_level gate / collector miss?). If a gate flip → cheap big win; if real emit gap → per-op
-  chunk (ADR-0116 RTT Cohen; lesson `2026-05-31-jit-passthrough-result-clobbered-by-call`). Also
-  return_call_indirect (tail-call, 1 module). (2) **gc struct.new/array.new const-expr globals 9**
-  — needs gc-heap alloc at setup (`instantiate.evalGcConstExpr`? check) — harder. (3) **D-218 fail
-  fixes** (13 real miscompiles via debug_jit_auto). Skip **multi-memory 51 (Phase-14 deferred)**.
-  Re-measure `JITmodrej` after each landing.
+- **NEXT chunk** (**D-220** continues): **ref-branch liveness** — bundle ALL of br_on_cast /
+  br_on_cast_fail / br_on_null / br_on_non_null (they co-occur with ref.as_non_null; fixing one
+  flips 0 modules). Root cause CONFIRMED: `liveness: UnsupportedOp[stackEffect-missing]` (lower +
+  emit exist; only liveness missing). **MUST mirror each emit's `pushed_vregs` exactly or vreg
+  numbering desyncs → regalloc MISCOMPILE** (lesson `2026-06-02-jit-liveness-must-mirror-emit-
+  pushed-vregs`). Per-op (from arm64 `ops/wasm_3_0/*.zig` headers): br_on_cast/fail = PEEK →
+  TRANSPARENT (add a `local.tee`-style special case in liveness.zig, NOT generic 1→1); br_on_null
+  = pop+push (1→1 stackEffect ok); br_on_non_null = pop (1→0 — needs a special case, mark used +
+  pop). Branch ref-ops are conditional → do NOT close above-target vregs (like br_if). Verify via
+  corpus delta + watch for NEW fails (desync surfaces as wrong-value/SEGV). THEN: converts
+  (any.convert_extern/extern.convert_any) need a no-op EMIT handler first; gc struct/array
+  const-expr globals 9 (heap alloc at setup); D-218 fails (13, debug_jit_auto). Skip multi-memory 51.
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -87,11 +90,11 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior turn (`36b622db`) ubuntu `test-all` = GREEN (`OK (HEAD=36b622db)`; verified this resume).
-This turn landed D-220 gc ref.i31/ref.null-heaptype global const-expr (`runner_validate.zig`).
-Mac `test-all` + lint green. Re-kicks ubuntu `test-all` against this turn's final HEAD; verify
-next `/continue`: `tail -3 /tmp/ubuntu.log`, expect `OK (HEAD=<SHA>)`. On FAIL: revert this turn's
-commits to the last ubuntu-green HEAD (`36b622db`). Mac aarch64 primary; ubuntu = x86_64.
+Prior turn (`092ebefc`) ubuntu `test-all` = GREEN (`OK (HEAD=092ebefc)`; verified this resume).
+This turn landed ref.as_non_null liveness (`e2701f0d`, D-220; `liveness_stack_effect.zig`) — a
+pure liveness/test change. Mac `test-all` + lint green. Re-kicks ubuntu `test-all` against this
+turn's final HEAD; verify next `/continue`: `tail -3 /tmp/ubuntu.log`, expect `OK (HEAD=<SHA>)`.
+On FAIL: revert to the last ubuntu-green HEAD (`092ebefc`). Mac aarch64 primary; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
