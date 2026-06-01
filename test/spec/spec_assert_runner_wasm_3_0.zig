@@ -119,17 +119,26 @@ fn isScalarTy(ty: []const u8) bool {
         std.mem.eql(u8, ty, "f32") or std.mem.eql(u8, ty, "f64");
 }
 
+/// A reference result type (arrayref / eqref / anyref / funcref / externref /
+/// structref / i31ref / nullref / exnref). The JIT runs these for side effects
+/// (uncompared, `:?`); the manifest spells them all `*ref`. D-222.
+fn isRefResultTy(ty: []const u8) bool {
+    return std.mem.endsWith(u8, ty, "ref");
+}
+
 fn jitReturnEligible(args_len: usize, results_len: usize, result_ty: []const u8, arg0_ty: []const u8, module_id_len: usize) bool {
     if (module_id_len != 0) return false; // cross-module `$M::field` not wired
-    // 0..3 scalar args; void or 1 scalar result. Void IS eligible — its
-    // side effect (store / global.set) must run so the persistent JitInstance
-    // accumulates state for later asserts (D-214). arg1 scalar-ness is enforced
-    // downstream (scalarArgBits → skip); a non-scalar arg0 is rejected here.
-    // 3+ args / non-scalar args+results stay enumerated skips (D-217).
+    // 0..3 scalar args; result void / scalar / REF. Void + ref results are
+    // eligible — they RUN for their side effects (store / global.set, or a
+    // `new` doing `global.set (array.new …)`) so the persistent JitInstance
+    // accumulates state for later asserts (D-214/D-222). A ref result isn't
+    // compared (spec encodes it `:?`); the JIT runs it via the void path.
+    // arg1 scalar-ness enforced downstream; non-scalar arg0 / v128 result /
+    // 4+ args stay enumerated skips (D-217).
     if (args_len > 3) return false;
     if (args_len >= 1 and !isScalarTy(arg0_ty)) return false;
     if (results_len > 1) return false;
-    if (results_len == 1 and !isScalarTy(result_ty)) return false;
+    if (results_len == 1 and !isScalarTy(result_ty) and !isRefResultTy(result_ty)) return false;
     return true;
 }
 
@@ -683,23 +692,20 @@ pub fn main(init: std.process.Init) !void {
                                 try recordJitRunErr(e, &summary, fail_detail, stdout, proposal, entry.name, d.func_name);
                                 continue;
                             };
-                            // Void assert_return: pass = invoke ran without trapping;
-                            // its side effect now persists for later asserts.
-                            if (d.results_len == 0) {
+                            // got == null ⇒ nothing to compare: a void result
+                            // OR a REF result run for side effects (D-222). Pass
+                            // = invoke ran without trapping; its side effect now
+                            // persists for later asserts.
+                            const got_val = got orelse {
                                 summary.jit_return_pass += 1;
                                 continue;
-                            }
+                            };
                             const exp_tv = d.results[0];
                             const exp_rv = manifest_parser.parsePayload(exp_tv) catch {
                                 summary.jit_return_skip += 1;
                                 continue;
                             };
                             const exp_zv = manifest_parser.runtimeToZwasm(exp_rv, exp_tv.ty);
-                            const got_val = got orelse {
-                                // expected a value but export returned void — shape mismatch
-                                summary.jit_return_fail += 1;
-                                continue;
-                            };
                             if (jitScalarResultMatches(exp_tv.ty, got_val, exp_zv)) {
                                 summary.jit_return_pass += 1;
                             } else {

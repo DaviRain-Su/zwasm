@@ -506,10 +506,12 @@ pub const JitInstance = struct {
 
     /// Invoke an export by name against the persisted runtime. `args` are
     /// scalar bit-carriers in declaration order. Returns the scalar result
-    /// as a u64 carrier, or null for a void (0-result) export (the call
-    /// still runs, so its side effects persist). Cycle-1 shapes: 0 or 1
-    /// scalar param, void or 1 scalar result; anything wider →
-    /// `UnsupportedEntrySignature` (enumerated skip). D-214.
+    /// as a u64 carrier, or null when there is nothing to compare — a void
+    /// (0-result) export OR a REF-result export (the latter is RUN for its
+    /// side effects, e.g. `new` doing `global.set (array.new …)`, via the
+    /// void dispatch path: the callee sets the result register, a void caller
+    /// ignores it — ABI-safe; the spec runner uses `:?` for ref results, D-222).
+    /// Wider arities / v128 result / non-scalar args → `UnsupportedEntrySignature`.
     pub fn invoke(self: *JitInstance, allocator: Allocator, export_name: []const u8, args: []const u64) Error!?u64 {
         const func_idx = try findExportFunc(allocator, self.wasm_bytes, export_name);
         if (func_idx >= self.compiled.func_sigs.len) return Error.ExportNotFound;
@@ -519,42 +521,46 @@ pub const JitInstance = struct {
         const m = self.compiled.module;
         const r = &self.owned.rt;
 
+        // 0 results OR a ref result → run via the void path (uncompared);
+        // v128 result → unsupported.
+        const ref_result = sig.results.len == 1 and std.meta.activeTag(sig.results[0]) == .ref;
+        if (sig.results.len == 1 and !ref_result and scalarKey(sig.results[0]) == null)
+            return Error.UnsupportedEntrySignature;
+        const run_as_void = sig.results.len == 0 or ref_result;
+
         if (sig.params.len == 0) {
-            if (sig.results.len == 0) {
+            if (run_as_void) {
                 try entry.callVoidNoArgs(m, func_idx, r);
                 return null;
             }
-            const rk = scalarKey(sig.results[0]) orelse return Error.UnsupportedEntrySignature;
-            return try dispatchNoArg(m, func_idx, r, rk);
+            return try dispatchNoArg(m, func_idx, r, scalarKey(sig.results[0]).?);
         }
         if (sig.params.len == 1) {
             const pk = scalarKey(sig.params[0]) orelse return Error.UnsupportedEntrySignature;
-            if (sig.results.len == 0) {
+            if (run_as_void) {
                 try dispatchVoid1(m, func_idx, r, pk, args[0]);
                 return null;
             }
-            const rk = scalarKey(sig.results[0]) orelse return Error.UnsupportedEntrySignature;
-            return try dispatchScalar1(m, func_idx, r, @as(u4, pk) * 4 + rk, args[0]);
+            return try dispatchScalar1(m, func_idx, r, @as(u4, pk) * 4 + scalarKey(sig.results[0]).?, args[0]);
         }
         if (sig.params.len == 2) {
             const pk0 = scalarKey(sig.params[0]) orelse return Error.UnsupportedEntrySignature;
             const pk1 = scalarKey(sig.params[1]) orelse return Error.UnsupportedEntrySignature;
-            if (sig.results.len == 0) {
+            if (run_as_void) {
                 try dispatchVoid2(m, func_idx, r, (@as(u8, pk0) << 4) | pk1, args[0], args[1]);
                 return null;
             }
-            const rk = scalarKey(sig.results[0]) orelse return Error.UnsupportedEntrySignature;
-            return try dispatchScalar2(m, func_idx, r, (@as(u8, pk0) << 4) | (@as(u8, pk1) << 2) | rk, args[0], args[1]);
+            return try dispatchScalar2(m, func_idx, r, (@as(u8, pk0) << 4) | (@as(u8, pk1) << 2) | scalarKey(sig.results[0]).?, args[0], args[1]);
         }
         if (sig.params.len == 3) {
-            // The corpus exercises only (i32,i32,i32) -> {void, i32} at
+            // The corpus exercises only (i32,i32,i32) -> {void, i32, ref} at
             // arity 3; other 3-arg shapes stay enumerated skips (D-217).
             if (!(sig.params[0] == .i32 and sig.params[1] == .i32 and sig.params[2] == .i32))
                 return Error.UnsupportedEntrySignature;
             const a0: u32 = @truncate(args[0]);
             const a1: u32 = @truncate(args[1]);
             const a2: u32 = @truncate(args[2]);
-            if (sig.results.len == 0) {
+            if (run_as_void) {
                 try entry.callVoid_i32i32i32(m, func_idx, r, a0, a1, a2);
                 return null;
             }
