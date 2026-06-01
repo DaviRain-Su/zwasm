@@ -9,13 +9,14 @@
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
 - **HEAD**: §1 spec-corpus JIT mode — backbone (`0d9cddd7`) + no-arg i32/i64/f32/f64 + tests
-  extracted to `runner_test.zig` (`84ac53ae`) + **single-arg scalar dispatch** (`dc87b072`:
-  `runScalar1Export` keys (param,result)→`entry.callX_Y`, full 4×4 matrix). Opt-in
-  `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=82 fail=41 skip=1172** (was 54/12/1229; +28 pass).
-  **fail taxonomy (clean, attributed)**: 41 = 29 `memory64/memory_grow64` (jit skips intervening
-  `(invoke "grow")` actions → fresh recompile never grows → load traps; **D-214** state-replay
-  gap, NOT miscompiles) + 12 pre-existing no-arg fails. `jitErrorIsUnwiredShape` classifies
-  compile/setup rejects → SKIP, executed-wrong → FAIL. Default interp → test-all unchanged.
+  extracted (`84ac53ae`) + single-arg scalar 4×4 dispatch (`dc87b072`) + **persistent per-module
+  JIT runtime** (`dcdd992a`: `runner.JitInstance` instantiates once per `module`, every
+  assert_return + `(invoke)` routes through it so memory.grow/stores/global.set accumulate; void
+  invokes run via `callVoid_X`). Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=94 fail=43
+  skip=1158** (was 82/41/1172; +12 pass). **fail taxonomy (clean, attributed)**: 43 = 32
+  `memory64/memory_grow64` (all downstream of **D-215** — JIT `memory.grow` returns -1
+  unconditionally; `memory_grow_fn` defaults to reject + no real impl installed) + 11 pre-existing
+  (ref_func 4, i31 3, try_table 1, …). Default interp → test-all unchanged.
 - **Two execution paths (CODE-verified)**: spec corpus runs **interp by default**
   (`instance.invoke`→`_dispatch.run`, `instance.zig:169`); the **JIT path is now wired as an
   opt-in mode** (`ZWASM_SPEC_ENGINE=jit`, backbone above). The standalone `runI32Export`
@@ -57,21 +58,20 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   banks) + the `entry.zig:367` comment. The dispatcher just builds the matching `callconv(.c)`
   fn-ptr per signature. Mode toggle: env `ZWASM_SPEC_ENGINE=jit` (simplest) — `build.zig:15`
   documents `-Dengine interp/jit/both` but it is NOT yet implemented.
-- **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET**
-  (`0d9cddd7`). no-arg i32/i64/f32/f64 ✓ + single-arg scalar 4×4 ✓ (`dc87b072`). Bundle
-  continues for shape growth. C-ABI 裏取り DONE (Continuity-memo).
-- **NEXT chunk** = **D-214 state-replay** (now the cleanest high-value lever; +28 pass exposed
-  it). The 29 grow fails come from jit mode BYPASSING intervening `(invoke)` action directives
-  → fresh recompile loses `memory.grow`. Fix: in the jit_mode block, replay action `(invoke)`
-  directives against a PERSISTENT per-module runtime (don't recompile per assert — compile the
-  module once per `module` directive, keep its `RuntimeOwned`, route both actions and asserts
-  through it). This both flips 29 fails→pass AND restores the pure RED signal. NOTE: the prior
-  "state-bridge zero-yield" lesson was **no-arg-ONLY** (pure const fns); single-arg+ read mutated
-  state, so it now PAYS — see lesson `2026-06-02-spec-jit-single-arg-reopens-state-bridge`.
-  Lighter alternative if the persistent-runtime refactor is too big this cycle: 2-arg scalar
-  dispatch (next skip class) — but it will ADD more state-dependent fails until D-214 lands, so
-  prefer D-214 first. Then multi-value, v128. Secondary: multi-memory (407 skips; MultipleMemories
-  → JitRuntime per-memory base, own chunk).
+- **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET**.
+  no-arg 4-type ✓ + single-arg 4×4 ✓ + persistent per-module runtime ✓ (`dcdd992a`). Bundle
+  continues for shape growth. C-ABI 裏取り DONE.
+- **NEXT chunk** = **D-215: real JIT `memory_grow_fn` / `table_grow_fn`** (the SOLE cause of the
+  32 grow fails; flips them to pass). Today both default to `defaultMemoryGrowReject` (return -1;
+  `jit_abi.zig:446-466`) and NO real impl is installed — JIT literally cannot grow memory. Fix:
+  implement a `callconv(.c)` grow fn (realloc/commit backing buffer + update `rt.memory_base`+size,
+  return old page count or -1), install in `setupRuntime`. **HARD** (survey first): growing may
+  MOVE the memory base pointer, which compiled code caches — needs reserve-then-commit mmap (base
+  stable; but `(memory i64 0)` has no max → unbounded reserve) OR a base-reload discipline after
+  grow. Check how the JIT accesses memory base per op (cached in reg vs reloaded from rt) — that
+  decides the approach. Verify: 32 grow fails flip under `ZWASM_SPEC_ENGINE=jit`.
+  Then: 2-arg scalar dispatch (next skip class; check-memory-zero etc.), multi-value, v128.
+  Secondary: multi-memory (407 skips; MultipleMemories → JitRuntime per-memory base, own chunk).
   Unemitted ops (br_on_null / return_call_indirect / …) tracked by D-198 / tail-call / ADR-0127 PHASE C.
 
 ## §10 remaining — the six `[ ]` rows
@@ -87,13 +87,11 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-This turn landed test-extraction (`84ac53ae`) + single-arg JIT dispatch (`dc87b072`). Mac
-`test-all` + lint green. **Step 0.7 carryover**: prior turn's ubuntu kick (`2134116b`) was
-NOT verified — `/tmp/ubuntu.log` was absent at this resume (machine/`/tmp` reset), so the
-f32/f64 code commit `e453540c` is ubuntu-UNverified; prior verified code HEAD = `8c445488`.
-This turn re-kicks ubuntu `test-all` against the new HEAD (handover commit below); verify next
-`/continue`: `tail -3 /tmp/ubuntu.log`, expect `OK (HEAD=<that SHA>)`. On FAIL: revert this
-turn's commits to `8c445488` (last confirmed ubuntu-green). Mac aarch64 primary; ubuntu confirms x86_64.
+Prior turn (`0139047f`) ubuntu `test-all` = GREEN (212 passed; verified this resume). This turn
+landed the persistent per-module JIT runtime (`dcdd992a`). Mac `test-all` + lint green. Re-kicks
+ubuntu `test-all` against this turn's final HEAD (handover commit below); verify next `/continue`:
+`tail -3 /tmp/ubuntu.log`, expect `OK (HEAD=<that SHA>)`. On FAIL: revert this turn's commits to
+the last ubuntu-green HEAD (`0139047f`). Mac aarch64 primary; ubuntu confirms x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
