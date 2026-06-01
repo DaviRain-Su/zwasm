@@ -66,15 +66,18 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET** long ago.
   Infra COMPLETE; backbone operational (pass=484). Bundle stays open as the diagnostic-driven
   gap-fixing vehicle (`JITmodrej` tally → fix biggest tractable lever).
-- **NEXT chunk** = **D-223** (this turn narrowed it): gc/array `new` traps on f32 arrays (array.5/6),
-  cascading to 6 gc/array fails (new/get/set_get/len). i32 array.new_default+len PASSES (unit test),
-  so it's f32-array-specific OR the gc-ref `(ref null $vec)` global.set/get. debug_jit_auto disasm
-  array.5 `new` (the corpus is the repro: `ZWASM_SPEC_ENGINE=jit <bin> <corpus> --fail-detail
-  2>/dev/null`) → trapping instruction. Candidates: D-212 FP-marshal (array.6), f32-array type_info
-  size, or gc-ref global.set. Fixing `new` cascade-fixes the 6. **OTHER fails**: ref_func 4 (D-198),
-  gc/type-subtyping run 1, try_table 1, gc/i31 get 4 (i31.1 = rejects InvalidFuncIndex separately).
-  D-222 (+11) validated "run for side effect" — prefer FAIL fixes (direct flip) over skip-unblocking.
-  Skip multi-memory 51 (Phase-14 deferred). Lessons: 2026-06-02-jit-corpus-late-phase-* + -jit-liveness-*.
+- **NEXT chunk** = **D-223** (subagent CORRECTED the root cause): the gc/array SKIP cluster
+  (array.5/6/struct.7/10/…) = modules **rejecting at JIT-validate `InvalidGlobalInitExpr`** because
+  their GLOBALS use `array.new`/`array.new_default`/`struct.new` const-expr inits (D-220 item a, gc
+  heap-alloc globals). NOT a trap. Verified: f32 `array.new_default+array.len` (no global) PASSES.
+  FIX (fresh cycle, multi-part — see D-223 row): (1) `validateGlobalInitExpr` walk a const-expr
+  OPERAND stack (array.new=2-op, struct.new=N-op — the single-value model only fits 1-op); accept
+  sub 0x00/01/06/07/08 → `(ref $ti)`. (2) `setup.zig:265` heap-allocate at global init (move gc_heap
+  @594 before the global loop; route via `feature/gc` alloc — no interp evalGcConstExpr to reuse).
+  SEPARATELY: the `new err=Trap` FAILS are a DIFFERENT compiling gc/array module (re-identify:
+  `--fail-detail 2>/dev/null` → which array.N) — a real trap (D-218), independent of D-223.
+  Other fails: ref_func 4 (D-198), gc/type-subtyping run 1, try_table 1, gc/i31 get 4.
+  Prefer FAIL fixes (direct flip). Skip multi-memory 51. Lessons: 2026-06-02-jit-corpus-late-phase-*.
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -89,10 +92,11 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior turn (`ca0858b3`, D-222) ubuntu `test-all` = GREEN (`OK (HEAD=ca0858b3)`; verified this
-resume). **This turn was investigation-only** — narrowed the gc/array `new` trap → **D-223** +
-handover; NO code change (HEAD code == ca0858b3, already ubuntu-green). No new kick needed; next
-resume skip Step 0.7 ubuntu (no code since the green ca0858b3). Mac aarch64 primary; ubuntu = x86_64.
+Prior turn (`ca0858b3`, D-222) ubuntu `test-all` = GREEN. **Last 2 turns investigation-only**
+(narrowed then CORRECTED D-223 via subagent disasm — it's a const-expr-global VALIDATE reject, not
+a trap). NO code change since the green `ca0858b3` (only docs/debt commits ef153995 + this one). No
+ubuntu kick needed; skip Step 0.7 ubuntu next resume (code == green ca0858b3). NEXT cycle: implement
+D-223 (gc const-expr globals) with FULL fresh context — it's multi-part. Mac aarch64 primary; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
