@@ -137,6 +137,14 @@ pub const Linker = struct {
         /// same final type-definition; an open `(sub …)` exporter type
         /// is rejected even when structurally identical.
         source_final: bool,
+        /// ADR-0127 PHASE C — the exporter func's type index into
+        /// `source_types`, + the exporter module's retained `Types`. Lets the
+        /// resolve check compare type-DEFINITIONS canonically across the two
+        /// modules (`canonicalEqualCross` / `superReachesCross`), not just the
+        /// flattened sig. `source_types` is null when the exporter has no type
+        /// section (then PHASE C degenerates to PHASE A/B).
+        source_typeidx: u32,
+        source_types: ?*const _sections.Types,
         ctx_ptr: *_cross_module.CallCtx,
     };
 
@@ -325,18 +333,23 @@ pub const Linker = struct {
         // `exports_storage`) for the D-202 PHASE B import-finality check.
         var src_funcidx: u32 = std.math.maxInt(u32);
         var source_final = false;
+        var source_typeidx: u32 = 0;
         for (source_inst.handle.exports_storage, 0..) |exp, ei| {
             if (!std.mem.eql(u8, exp.name, source_name)) continue;
             if (exp.kind != .func) return error.ImportKindMismatch;
             src_funcidx = exp.idx;
             if (ei < source_inst.handle.export_types.len) {
-                source_final = switch (source_inst.handle.export_types[ei]) {
-                    .func => |fe| fe.final,
-                    else => false,
-                };
+                switch (source_inst.handle.export_types[ei]) {
+                    .func => |fe| {
+                        source_final = fe.final;
+                        source_typeidx = fe.typeidx;
+                    },
+                    else => {},
+                }
             }
             break;
         }
+        const source_types: ?*const _sections.Types = if (source_inst.handle.export_src_types) |*t| t else null;
         if (src_funcidx == std.math.maxInt(u32)) return error.UnknownImport;
         const src_sig = source_inst.exportFuncSig(source_name) orelse return error.SignatureMismatch;
 
@@ -365,6 +378,8 @@ pub const Linker = struct {
                 .source_funcidx = src_funcidx,
                 .source_signature = src_sig,
                 .source_final = source_final,
+                .source_typeidx = source_typeidx,
+                .source_types = source_types,
                 .ctx_ptr = ctx_ptr,
             } },
         });
@@ -482,14 +497,22 @@ pub const Linker = struct {
                                 if (!_validate.funcTypeImportCompatible(declared, cmf.source_signature, &module_types.?)) {
                                     return error.SignatureMismatch;
                                 }
-                                // D-202 PHASE B: a FINAL import type may only
-                                // resolve against a final exporter type-definition.
-                                // An open `(sub …)` exporter type is a distinct
-                                // canonical type even when structurally identical,
-                                // so a `(func)`-final import importing it must be
-                                // rejected (Wasm 3.0 §3.3.5.3; assert_unlinkable
-                                // gc/type-subtyping.35/.36/.42/.52/.54).
-                                if (module_types.?.finals[typeidx] and !cmf.source_final) {
+                                // ADR-0127 PHASE C: type-DEFINITION compatibility
+                                // (subsumes the PHASE B finality check). The
+                                // exporter type-def must BE the importer's declared
+                                // type (canonicalEqualCross) OR declare it as a
+                                // supertype (superReachesCross), compared canonically
+                                // across the two modules' Types — structural sig
+                                // equality is not enough (assert_unlinkable
+                                // gc/type-subtyping.35/.36/.42/.52/.54: open `(sub
+                                // (func))` ↔ distinct `(sub final (func))`). Falls
+                                // back to the finality check when the exporter has no
+                                // retained type section.
+                                if (cmf.source_types) |src_types| {
+                                    const def_ok = _sections.canonicalEqualCross(&module_types.?, typeidx, src_types, cmf.source_typeidx) or
+                                        _sections.superReachesCross(src_types, cmf.source_typeidx, &module_types.?, typeidx);
+                                    if (!def_ok) return error.SignatureMismatch;
+                                } else if (module_types.?.finals[typeidx] and !cmf.source_final) {
                                     return error.SignatureMismatch;
                                 }
                                 bindings_list.append(scratch, .{

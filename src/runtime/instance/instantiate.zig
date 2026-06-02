@@ -660,7 +660,7 @@ pub fn buildExportTypes(
                         if (idx == exp.idx) {
                             const tidx = it.payload.func_typeidx;
                             const t = types_owned orelse return error.UnsupportedImport;
-                            break :blk .{ .func = .{ .sig = t.items[tidx], .final = t.finals[tidx] } };
+                            break :blk .{ .func = .{ .sig = t.items[tidx], .final = t.finals[tidx], .typeidx = tidx } };
                         }
                         idx += 1;
                     }
@@ -672,7 +672,7 @@ pub fn buildExportTypes(
                 if (def_idx >= fs.len) return error.UnsupportedImport;
                 const tidx = fs[def_idx];
                 const t = types_owned orelse return error.UnsupportedImport;
-                break :blk .{ .func = .{ .sig = t.items[tidx], .final = t.finals[tidx] } };
+                break :blk .{ .func = .{ .sig = t.items[tidx], .final = t.finals[tidx], .typeidx = tidx } };
             },
             .table => blk: {
                 var imp_count: u32 = 0;
@@ -1610,6 +1610,10 @@ pub fn instantiateRuntime(
         const exports = try sections.decodeExports(a, export_section.body);
         inst.exports_storage = exports.items;
         inst.export_types = try buildExportTypes(a, module, exports.items, imports_decoded);
+        // ADR-0127 PHASE C — retain the exporter's full type section (arena-
+        // backed, freed by arena.deinit) so a cross-module func import can run
+        // the cross-`Types` type-def identity check at link resolve.
+        inst.export_src_types = if (module.find(.type)) |ts_sec| try sections.decodeTypes(a, ts_sec.body) else null;
         // EH cross-module tag exports (10.E-xmodule-tags): tag exports
         // (kind 0x04) are dropped from exports_storage (c_api ExternKind
         // lacks a tag variant), so scan the export section directly for

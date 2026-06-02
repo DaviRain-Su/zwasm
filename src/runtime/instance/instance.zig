@@ -87,6 +87,13 @@ pub const Instance = struct {
     /// releases them. Resolver for runtime struct.new / array.new
     /// reads `struct_infos[typeidx].?` / `array_infos[typeidx].?`.
     gc_type_infos: ?@import("../../feature/gc/type_info.zig").GcTypeInfos = null,
+    /// ADR-0127 PHASE C — the exporter module's full decoded type section,
+    /// retained (arena-backed) so a cross-module func import can compare
+    /// type-DEFINITIONS canonically across the two modules' `Types`
+    /// (`sections.canonicalEqualCross` / `superReachesCross`). `ExportFuncType`
+    /// only flattens the sig + finality; the supertype chain + nested concrete
+    /// refs need the whole `Types`. Null when the module has no type section.
+    export_src_types: ?sections.Types = null,
 };
 
 /// Structural type of an exported entity. Mirrors the four
@@ -99,7 +106,13 @@ pub const Instance = struct {
 /// `finals`) is freed after instantiate; cross-module import linking
 /// needs it to reject a FINAL import resolving against an open exported
 /// type (D-202 PHASE B).
-pub const ExportFuncType = struct { sig: zir.FuncType, final: bool };
+pub const ExportFuncType = struct {
+    sig: zir.FuncType,
+    final: bool,
+    /// The exporter func's type index into `Instance.export_src_types`
+    /// (ADR-0127 PHASE C — cross-module type-def identity check).
+    typeidx: u32 = 0,
+};
 
 pub const ExportType = union(sections.ImportKind) {
     func: ExportFuncType,
