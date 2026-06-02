@@ -286,7 +286,12 @@ inline fn restoreToLabel(rt: *Runtime, label: runtime.Label) Trap!void {
 }
 
 inline fn doBranch(rt: *Runtime, frame: *runtime.Frame, depth: u32) Trap!void {
-    if (depth >= frame.label_len) return Trap.Unreachable;
+    // `br depth` where depth == label_len targets the function body — Wasm's
+    // implicit outermost block (§4.4.8). Semantically a function return: carry
+    // the result-arity values out and end the frame. (gc/type-subtyping.17
+    // "run" ends with a top-level `br 0` after all blocks close → label_len=0.)
+    if (depth == frame.label_len) return returnFromFunction(rt, frame);
+    if (depth > frame.label_len) return Trap.Unreachable;
     const target = frame.labelAt(depth);
     // Pop (depth + 1) labels off the control stack — except for loop
     // labels, br re-enters them (the loop opcode at target_pc will
@@ -434,7 +439,12 @@ fn callIndirectOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
 
     if (instr.payload >= rt.module_types.len) return Trap.IndirectCallTypeMismatch;
     const expected = rt.module_types[instr.payload];
-    if (!sigEq(callee.sig, expected)) return Trap.IndirectCallTypeMismatch;
+    // Wasm 3.0 §3.3.5.5 — the callee's declared func type need only be a
+    // SUBTYPE of the expected type (not structurally equal): a `$t1` func
+    // (`$t1 <: $t0`) called via `call_indirect (type $t0)` runs (D-198).
+    if (!sigEq(callee.sig, expected) and
+        !(callee_rt == rt and ref_test_ops.concreteReaches(rt, fe.raw_typeidx, @intCast(instr.payload))))
+        return Trap.IndirectCallTypeMismatch;
 
     const dispatch_tbl = rt.table orelse return Trap.Unreachable;
     try invoke(rt, dispatch_tbl, callee);
@@ -462,7 +472,12 @@ fn callRefOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
 
     if (instr.payload >= rt.module_types.len) return Trap.IndirectCallTypeMismatch;
     const expected = rt.module_types[instr.payload];
-    if (!sigEq(callee.sig, expected)) return Trap.IndirectCallTypeMismatch;
+    // Wasm 3.0 §3.3.5.5 — the callee's declared func type need only be a
+    // SUBTYPE of the expected type (not structurally equal): a `$t1` func
+    // (`$t1 <: $t0`) called via `call_indirect (type $t0)` runs (D-198).
+    if (!sigEq(callee.sig, expected) and
+        !(callee_rt == rt and ref_test_ops.concreteReaches(rt, fe.raw_typeidx, @intCast(instr.payload))))
+        return Trap.IndirectCallTypeMismatch;
 
     const dispatch_tbl = rt.table orelse return Trap.Unreachable;
     try invoke(rt, dispatch_tbl, callee);
@@ -857,9 +872,11 @@ fn findLandingPad(pads: []const zir.LandingPad, block_idx: u32) ?zir.LandingPad 
     return null;
 }
 
-fn returnOp(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
-    const rt = Runtime.fromOpaque(c);
-    const frame = rt.currentFrame();
+/// Function return: save the top `sig.results.len` values, drop the operand
+/// stack to the frame base, push them back, end the frame. Shared by the
+/// explicit `return` op AND `doBranch` when a `br` targets the implicit
+/// function-body label (depth == label_len).
+fn returnFromFunction(rt: *Runtime, frame: *runtime.Frame) Trap!void {
     const arity: u32 = @intCast(frame.sig.results.len);
     if (arity > max_block_arity) return Trap.Unreachable;
     var saved: [max_block_arity]Value = undefined;
@@ -875,6 +892,11 @@ fn returnOp(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
     }
     frame.label_len = 0;
     frame.done = true;
+}
+
+fn returnOp(c: *InterpCtx, _: *const ZirInstr) anyerror!void {
+    const rt = Runtime.fromOpaque(c);
+    try returnFromFunction(rt, rt.currentFrame());
 }
 
 fn drop(c: *InterpCtx, _: *const ZirInstr) anyerror!void {

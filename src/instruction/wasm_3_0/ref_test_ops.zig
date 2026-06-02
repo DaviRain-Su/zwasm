@@ -188,6 +188,25 @@ pub fn gcRefMatchesNonNull(rt: *Runtime, v: Value, ht: u8) bool {
     return gcRefMatchesNonNullCore(gti, rt.gc_heap, v, ht);
 }
 
+/// Runtime concrete-type subtype test (Wasm 3.0 §3.3.5.5): is declared func
+/// type `sub_idx` a subtype of `target` via its self-inclusive declared-
+/// supertype chain (raw index OR canonical id)? Used by interp `call_indirect`
+/// so a callee whose declared type is a SUBTYPE of the call's expected type is
+/// accepted, not just a structurally-equal one. `rt` supplies the materialised
+/// `GcTypeInfos`; null (non-GC module) → false (caller falls back to `sigEq`).
+pub fn concreteReaches(rt: *Runtime, sub_idx: u32, target: u32) bool {
+    // Require materialised GC types — func subtyping only exists with GC; a
+    // non-GC module (no gti) uses pure `sigEq` (pre-GC exact match). NO raw
+    // `sub_idx == target` shortcut: a `FuncEntity.raw_typeidx` may default to 0
+    // and collide with a declared type 0 of a different shape (trap_audit
+    // sig-mismatch). `concreteReachesGti`'s self-inclusive chain handles the
+    // genuine same-type case.
+    const inst_opaque = rt.instance orelse return false;
+    const inst = @as(*const Instance, @ptrCast(@alignCast(inst_opaque)));
+    const gti: *const GcTypeInfos = if (inst.gc_type_infos) |*g| g else return false;
+    return concreteReachesGti(gti, sub_idx, target);
+}
+
 /// Is the concrete target type index a func typedef? (Selects the
 /// funcref-resolution path in `gcRefMatchesNonNullCore`.)
 fn concreteTargetIsFuncGti(gti: *const GcTypeInfos, target: u32) bool {
