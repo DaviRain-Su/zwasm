@@ -29,6 +29,9 @@ const code_map = @import("code_map.zig");
 const heap_mod = @import("../../../feature/gc/heap.zig");
 const gc_type_info = @import("../../../feature/gc/type_info.zig");
 const object_alloc = @import("../../../feature/gc/object_alloc.zig");
+// array.init_data recovers the typeidx from the object header (the immediate
+// can't fit the 6-arg SysV budget); the mark-bit must be masked off first.
+const mark_sweep = @import("../../../feature/gc/collector_mark_sweep.zig");
 // ref.test / ref.cast share the interp's subtype-check core (one algorithm,
 // two runtimes) — see `gcRefMatchesNonNullCore`.
 const ref_test_ops = @import("../../../instruction/wasm_3_0/ref_test_ops.zig");
@@ -694,6 +697,101 @@ pub fn jitGcArrayNewElem(rt: *JitRuntime, typeidx: u32, segidx: u32, offset: u32
         @memcpy(heap.bytes[dst_off .. dst_off + 8], std.mem.asBytes(&v)[0..8]);
     }
     return ref;
+}
+
+/// 10.G GC-on-JIT array A-11a — `array.init_data` emit materialises this
+/// fn's address + `CALL`s it (rt=arg0, segidx=arg1, ref=arg2, dst_off=arg3,
+/// src_off=arg4, len=arg5). In-place init of an EXISTING array (no alloc):
+/// null-checks `ref`, bounds-checks `dst_off + len ≤ length` (overflow-safe;
+/// negative-as-u32 rejected), checks `src_off + len*nat ≤ segment length`,
+/// then copies `len` natural-width elements from data segment $segidx (LE
+/// zero-extended into the uniform 8-byte slot, mirror array.new_data) into
+/// the array at `dst_off` — the SAME copy the interp arrayInitData does. The
+/// typeidx immediate is NOT passed (it won't fit the 6-arg SysV register
+/// budget alongside the 4 popped operands + segidx); it is read back from the
+/// array's `ObjectHeader.info` (mark bit masked) to derive the element's
+/// natural width. Reuses the same `data_segments_ptr` / `data_dropped_ptr`
+/// descriptors `array.new_data` uses. Returns `1` on success, `0` on trap
+/// (null ref / OOB / segidx OOB / dropped segment / non-numeric element). The
+/// JIT caller maps `0` to a trap.
+pub fn jitGcArrayInitData(rt: *JitRuntime, segidx: u32, ref: u32, dst_off: u32, src_off: u32, len: u32) callconv(.c) u32 {
+    const heap_opaque = rt.gc_heap orelse return 0;
+    const gti_opaque = rt.gc_type_infos_ptr orelse return 0;
+    const heap: *heap_mod.Heap = @ptrCast(@alignCast(heap_opaque));
+    const gti: *const gc_type_info.GcTypeInfos = @ptrCast(@alignCast(gti_opaque));
+    if (ref == 0) return 0; // null-ref trap
+    const info_off: u32 = @offsetOf(gc_type_info.ArrayHeader, "header") + @offsetOf(gc_type_info.ObjectHeader, "info");
+    const raw_info = std.mem.readInt(u32, heap.bytes[ref + info_off ..][0..4], .little);
+    const typeidx = raw_info & ~mark_sweep.mark_bit_mask;
+    if (typeidx >= gti.array_infos.len) return 0;
+    const ai = gti.array_infos[typeidx] orelse return 0;
+    // Element natural (packed) size in the data segment (inline of the interp's
+    // dataElemNaturalSize; null/reftype → trap).
+    const nat: u64 = switch (ai.element.valtype_byte) {
+        0x78 => 1, // i8
+        0x77 => 2, // i16
+        0x7F, 0x7D => 4, // i32, f32
+        0x7E, 0x7C => 8, // i64, f64
+        else => return 0,
+    };
+    const len_off: u32 = @offsetOf(gc_type_info.ArrayHeader, "length");
+    const length = std.mem.readInt(u32, heap.bytes[ref + len_off ..][0..4], .little);
+    const de = @addWithOverflow(dst_off, len);
+    if (de[1] != 0 or de[0] > length) return 0; // dst OOB
+    if (segidx >= rt.data_segments_count) return 0;
+    const dropped = segidx < rt.data_dropped_count and rt.data_dropped_ptr[segidx] != 0;
+    const seg = rt.data_segments_ptr[segidx];
+    const seg_len: u64 = if (dropped) 0 else seg.len;
+    const so64: u64 = src_off; // negative i32 arrives as a large u32 → src OOB below
+    if (so64 + @as(u64, len) * nat > seg_len) return 0; // src OOB (also catches negatives)
+    const esz: u8 = ai.element.size; // uniform 8-byte slot
+    const ahsz: u32 = @sizeOf(gc_type_info.ArrayHeader);
+    var i: u32 = 0;
+    while (i < len) : (i += 1) {
+        var raw: u64 = 0;
+        const s: u64 = so64 + @as(u64, i) * nat;
+        var b: u64 = 0;
+        while (b < nat) : (b += 1) raw |= @as(u64, seg.ptr[@intCast(s + b)]) << @intCast(b * 8);
+        const dst = ref + ahsz + (dst_off + i) * @as(u32, esz);
+        @memcpy(heap.bytes[dst .. dst + 8], std.mem.asBytes(&raw)[0..8]);
+    }
+    return 1;
+}
+
+/// 10.G GC-on-JIT array A-11b — `array.init_elem` emit materialises this
+/// fn's address + `CALL`s it (rt=arg0, segidx=arg1, ref=arg2, dst_off=arg3,
+/// src_off=arg4, len=arg5). Trivial variant of `jitGcArrayInitData`: in-place
+/// init of an EXISTING array, copying `len` ref Values DIRECT (no LE-unpack —
+/// each entry is already a u64 `Value.ref`; esz=8 uniform per ADR-0116 §3a)
+/// from element segment $segidx into the array at `dst_off` — the SAME copy
+/// the interp arrayInitElem does. The typeidx immediate is NOT needed (uniform
+/// 8-byte slot, no element-width derivation), so the header is not read.
+/// Reuses the `elem_segments_ptr` / `elem_dropped_ptr` descriptors
+/// `array.new_elem` uses. Returns `1` on success, `0` on trap (null ref / OOB
+/// / segidx OOB / dropped segment). The JIT caller maps `0` to a trap.
+pub fn jitGcArrayInitElem(rt: *JitRuntime, segidx: u32, ref: u32, dst_off: u32, src_off: u32, len: u32) callconv(.c) u32 {
+    const heap_opaque = rt.gc_heap orelse return 0;
+    const heap: *heap_mod.Heap = @ptrCast(@alignCast(heap_opaque));
+    if (ref == 0) return 0; // null-ref trap
+    const len_off: u32 = @offsetOf(gc_type_info.ArrayHeader, "length");
+    const length = std.mem.readInt(u32, heap.bytes[ref + len_off ..][0..4], .little);
+    const de = @addWithOverflow(dst_off, len);
+    if (de[1] != 0 or de[0] > length) return 0; // dst OOB
+    if (segidx >= rt.elem_segments_count) return 0;
+    const dropped = segidx < rt.elem_dropped_count and rt.elem_dropped_ptr[segidx] != 0;
+    const seg = rt.elem_segments_ptr[segidx];
+    const seg_len: u64 = if (dropped) 0 else seg.len;
+    const so64: u64 = src_off; // negative i32 arrives as a large u32 → src OOB below
+    if (so64 + @as(u64, len) > seg_len) return 0; // src OOB (also catches negatives)
+    const esz: u32 = 8; // uniform element slot (ADR-0116 §3a)
+    const ahsz: u32 = @sizeOf(gc_type_info.ArrayHeader);
+    var i: u32 = 0;
+    while (i < len) : (i += 1) {
+        const v: u64 = seg.refs[@intCast(so64 + @as(u64, i))];
+        const dst = ref + ahsz + (dst_off + i) * esz;
+        @memcpy(heap.bytes[dst .. dst + 8], std.mem.asBytes(&v)[0..8]);
+    }
+    return 1;
 }
 
 /// 10.G GC-on-JIT R-1 — `ref.test` / `ref.test_null` emit materialises this

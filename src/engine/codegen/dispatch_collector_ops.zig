@@ -882,6 +882,10 @@ const arm64_array_copy = @import("arm64/ops/wasm_3_0/array_copy.zig");
 const arm64_array_new_data = @import("arm64/ops/wasm_3_0/array_new_data.zig");
 // A-10b: array.new_elem (trampoline; alloc + direct ref copy from elem segment).
 const arm64_array_new_elem = @import("arm64/ops/wasm_3_0/array_new_elem.zig");
+// A-11a: array.init_data (trampoline; in-place copy from data segment).
+const arm64_array_init_data = @import("arm64/ops/wasm_3_0/array_init_data.zig");
+// A-11b: array.init_elem (trampoline; in-place direct ref copy from elem segment).
+const arm64_array_init_elem = @import("arm64/ops/wasm_3_0/array_init_elem.zig");
 // R-1: ref.test / ref.test_null (trampoline; subtype check → i32, no trap).
 const arm64_ref_test = @import("arm64/ops/wasm_3_0/ref_test.zig");
 const arm64_ref_test_null = @import("arm64/ops/wasm_3_0/ref_test_null.zig");
@@ -911,6 +915,8 @@ const x86_64_ref_eq = @import("x86_64/ops/wasm_3_0/ref_eq.zig");
 const x86_64_array_copy = @import("x86_64/ops/wasm_3_0/array_copy.zig");
 const x86_64_array_new_data = @import("x86_64/ops/wasm_3_0/array_new_data.zig");
 const x86_64_array_new_elem = @import("x86_64/ops/wasm_3_0/array_new_elem.zig");
+const x86_64_array_init_data = @import("x86_64/ops/wasm_3_0/array_init_data.zig");
+const x86_64_array_init_elem = @import("x86_64/ops/wasm_3_0/array_init_elem.zig");
 const x86_64_ref_test = @import("x86_64/ops/wasm_3_0/ref_test.zig");
 const x86_64_ref_test_null = @import("x86_64/ops/wasm_3_0/ref_test_null.zig");
 const x86_64_ref_cast = @import("x86_64/ops/wasm_3_0/ref_cast.zig");
@@ -1307,6 +1313,8 @@ pub const collected_arm64_ops = .{
     arm64_array_copy,
     arm64_array_new_data,
     arm64_array_new_elem,
+    arm64_array_init_data,
+    arm64_array_init_elem,
     arm64_ref_test,
     arm64_ref_test_null,
     arm64_ref_cast,
@@ -1843,6 +1851,8 @@ pub const collected_x86_64_ctx_ops = .{
     x86_64_array_copy,
     x86_64_array_new_data,
     x86_64_array_new_elem,
+    x86_64_array_init_data,
+    x86_64_array_init_elem,
     x86_64_ref_test,
     x86_64_ref_test_null,
     x86_64_ref_cast,

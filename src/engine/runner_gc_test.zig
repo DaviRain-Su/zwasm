@@ -565,6 +565,100 @@ test "runI32Export: array.new_elem + array.get + call_ref → 42 (10.G array-on-
     try testing.expectEqual(@as(u32, 42), runI32Export(testing.allocator, &bytes, "f"));
 }
 
+test "runI32Export: array.init_data into existing array then array.get → 20 (10.G array-on-JIT A-11a)" {
+    // Both arches (arm64 + x86_64 SysV emit landed together).
+    // (module (type (array (mut i32))) (data $d "\0a\00\00\00\14\00\00\00\1e\00\00\00")
+    //   (func (export "f") (result i32) (local (ref null 0))
+    //     i32.const 3  array.new_default 0  local.tee 0  ;; 3-elem zero array → local0 + stack
+    //     i32.const 0  i32.const 0  i32.const 3  array.init_data 0 0 ;; arr[0..3]=[10,20,30]
+    //     local.get 0  i32.const 1  array.get 0))         ;; elem[1] → 20
+    // array.init_data pops [ref, dst_off, src_off, len]; emit marshals 6 trampoline
+    // args (rt + segidx + those 4) → CALL jitGcArrayInitData → CMP/TEST result,0;
+    // B.EQ/JE → bounds_fixups (trap on null/OOB). 4→0 (no push). typeidx is NOT
+    // passed (6-arg SysV limit) — the trampoline reads it back from the array's
+    // ObjectHeader to derive the element's natural width. array.init_data = fb 12
+    // typeidx dataidx. The ref is kept across the consuming init via a (ref null 0)
+    // local + tee. Datacount section (0c) declares 1 data segment.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x08, 0x02, 0x5e, 0x7f, 0x01, 0x60, 0x00, 0x01, 0x7f, // type
+        0x03, 0x02, 0x01, 0x01, // func
+        0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x00, // export "f"
+        0x0c, 0x01, 0x01, // datacount: 1 data segment
+        // code: body 29 bytes (0x1d); sect 0x1f. locals 01 01 63 00 +
+        // i32.const 3 [41 03] + array.new_default 0 [fb 07 00] + local.tee 0 [22 00]
+        // + i32.const 0 [41 00] + i32.const 0 [41 00] + i32.const 3 [41 03] +
+        // array.init_data 0 0 [fb 12 00 00] + local.get 0 [20 00] + i32.const 1
+        // [41 01] + array.get 0 [fb 0b 00] + end 0b.
+        0x0a, 0x1f, 0x01,
+        0x1d, 0x01, 0x01,
+        0x63, 0x00, 0x41,
+        0x03, 0xfb, 0x07,
+        0x00, 0x22, 0x00,
+        0x41, 0x00, 0x41,
+        0x00, 0x41, 0x03,
+        0xfb, 0x12, 0x00,
+        0x00, 0x20, 0x00,
+        0x41, 0x01, 0xfb,
+        0x0b, 0x00, 0x0b,
+        // data: 1 passive segment (01), 12 bytes = i32 LE [10,20,30].
+        0x0b, 0x0f, 0x01,
+        0x01, 0x0c, 0x0a,
+        0x00, 0x00, 0x00,
+        0x14, 0x00, 0x00,
+        0x00, 0x1e, 0x00,
+        0x00, 0x00,
+    };
+    try testing.expectEqual(@as(u32, 20), runI32Export(testing.allocator, &bytes, "f"));
+}
+
+test "runI32Export: array.init_elem into existing array + array.get + call_ref → 42 (10.G array-on-JIT A-11b)" {
+    // Both arches (arm64 + x86_64 SysV emit landed together).
+    // (module
+    //   (type $sig (func (result i32)))
+    //   (type $arr (array (mut (ref null $sig))))
+    //   (elem $e (ref null $sig) (ref.func $worker))    ;; passive
+    //   (func $worker (type $sig) (i32.const 42))
+    //   (func $f (export "f") (result i32) (local (ref null $arr))
+    //     i32.const 1  array.new_default $arr  local.tee 0  ;; size-1 null array → local0 + stack
+    //     i32.const 0  i32.const 0  i32.const 1  array.init_elem $arr $e ;; arr[0]=funcref $worker
+    //     local.get 0  i32.const 0  array.get $arr          ;; elem[0] → (ref null $sig)
+    //     call_ref $sig))                                   ;; → $worker() = 42
+    // array.init_elem pops [ref, dst_off, src_off, len]; emit marshals 6 trampoline
+    // args (rt + segidx + those 4) → CALL jitGcArrayInitElem (direct ref copy, esz=8
+    // uniform per ADR-0116 §3a; no typeidx needed) → CMP/TEST 0; B.EQ/JE →
+    // bounds_fixups. 4→0. array.init_elem = fb 13 typeidx elemidx. call_ref through
+    // the copied funcref proves the EXACT ref was carried (copy failure → null slot
+    // → call_ref null-trap, not 42).
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        // type: (func ()->i32) + (array (mut (ref null 0)))
+        0x01, 0x09, 0x02, 0x60, 0x00, 0x01, 0x7f, 0x5e,
+        0x63, 0x00, 0x01,
+        0x03, 0x03, 0x02, 0x00, 0x00, // func: 2 funcs, both type 0
+        0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x01, // export "f" → func 1
+        // elem: 1 passive seg, reftype (ref null 0), [ref.func 0].
+        0x09, 0x08, 0x01, 0x05, 0x63, 0x00, 0x01,
+        0xd2, 0x00, 0x0b,
+        // code: 2 funcs. payload 0x26 = count(1) + worker(5) + f(1+31).
+        0x0a, 0x26, 0x02,
+        0x04, 0x00, 0x41, 0x2a, 0x0b, // worker: i32.const 42; end. body=04.
+        // f: body 31 bytes (0x1f). locals 01 01 63 01 + i32.const 1 [41 01] +
+        // array.new_default 1 [fb 07 01] + local.tee 0 [22 00] + i32.const 0 [41 00]
+        // + i32.const 0 [41 00] + i32.const 1 [41 01] + array.init_elem 1 0
+        // [fb 13 01 00] + local.get 0 [20 00] + i32.const 0 [41 00] + array.get 1
+        // [fb 0b 01] + call_ref 0 [14 00] + end 0b.
+        0x1f, 0x01, 0x01, 0x63, 0x01,
+        0x41, 0x01, 0xfb, 0x07, 0x01,
+        0x22, 0x00, 0x41, 0x00, 0x41,
+        0x00, 0x41, 0x01, 0xfb, 0x13,
+        0x01, 0x00, 0x20, 0x00, 0x41,
+        0x00, 0xfb, 0x0b, 0x01, 0x14,
+        0x00, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 42), runI32Export(testing.allocator, &bytes, "f"));
+}
+
 test "runI32Export: ref.test i31 on i31 ref → 1 (10.G ref.test-on-JIT R-1)" {
     // (module (func (export "f") (result i32)
     //   i32.const 5  ref.i31  ref.test i31))   ;; non-null i31 matches i31 → 1

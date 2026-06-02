@@ -308,6 +308,9 @@ pub fn stackEffect(op: ZirOp) ?StackEffect {
         .@"array.fill" => .{ .pops = 4, .pushes = 0 },
         // array.copy (A-9) pops dst_ref + dst_off + src_ref + src_off + len. 5 → 0.
         .@"array.copy" => .{ .pops = 5, .pushes = 0 },
+        // array.init_data/init_elem (A-11) pop ref + dst_off + src_off + len,
+        // copy a segment slice in-place, push nothing. 4 → 0.
+        .@"array.init_data", .@"array.init_elem" => .{ .pops = 4, .pushes = 0 },
         // ref.eq (A-8) pops two eqrefs, pushes i32 (identity compare). 2 → 1.
         .@"ref.eq" => .{ .pops = 2, .pushes = 1 },
         // §9.9 / 9.9-m-1a/b (per ADR-0056): reference-typed ops.

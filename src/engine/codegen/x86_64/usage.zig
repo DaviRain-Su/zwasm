@@ -195,6 +195,11 @@ pub fn usesRuntimePtr(func: *const ZirFunc) bool {
             .@"array.new_data",
             // array A-10b: array.new_elem CALLs jitGcArrayNewElem (rt=RDI=R15).
             .@"array.new_elem",
+            // array A-11: array.init_data / array.init_elem CALL
+            // jitGcArrayInit{Data,Elem} (rt=RDI=R15) + emit a trap-stub fixup
+            // on the 0 return → need R15 pinned (D-180 class).
+            .@"array.init_data",
+            .@"array.init_elem",
             // R-1: ref.test / ref.test_null CALL jitGcRefTest (rt=RDI=R15).
             .@"ref.test",
             .@"ref.test_null",
