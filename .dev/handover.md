@@ -46,20 +46,22 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 - **Bundle-ID**: `10.G-§1-cross-module-jit-imports` (D-225; the §1 backbone is long-operational at
   pass=564 — this sub-bundle is the current multi-cycle integration).
-- **Cycles-remaining**: ~2 (architectural — cross-module FUNC dispatch)
-- **Continuity-memo**: imported-GLOBAL track DONE (i31.3 `a6cfd65e` + i31.4 `c5ab78c1`; setup-time
-  const-expr + runner wiring + import-inclusive globals_buf). **NEXT = cross-module FUNC dispatch**
-  (ref_func call-f/call-v ×3). The §1 JIT path compiles each module standalone (`JitInstance.initLinked`,
-  `runner.zig`); an imported FUNC's `dispatch[N]` slot = `hostDispatchTrap` → call traps. PLAN (survey
-  `private/notes/d225-cross-module-jit-survey.md`): populate `dispatch[N]` with the EXPORTER's JIT entry
-  ptr (C-ABI symmetric, no stack marshal) — but the runner creates each `JitInstance` standalone, so the
-  exporter's JIT entry isn't kept. Either (a) the runner keeps registered exporter `JitInstance`s alive +
-  threads their per-func entry ptrs into the importer's `initLinked` (parallels `jitResolveImportedGlobals`
-  but for funcs — needs an exporter→funcptr accessor on JitInstance), or (b) a host-thunk that re-enters
-  the exporter instance. Start: read how `dispatch`/`host_dispatch_base`/`populateDispatch` (setup.zig:~225)
-  wires imported funcs + what `hostDispatchTrap` does. Likely 2-cycle.
+- **Cycles-remaining**: ~2 (architectural — cross-module FUNC dispatch; survey DONE this cycle)
+- **Continuity-memo**: imported-GLOBAL track DONE (i31.3 `a6cfd65e` + i31.4 `c5ab78c1`). **NEXT =
+  cross-module FUNC dispatch** (ref_func call-f/call-v ×3). FULL SURVEY (this cycle):
+  `private/notes/d225-cross-module-func-dispatch-survey.md`. Key findings: (1) ref_func.1 imports `$f`
+  from "M", calls via funcref/call_indirect; dispatch[0]=`hostDispatchTrap`→trap. (2) Planting the
+  exporter entry directly is UNSAFE — emitted call passes X0=IMPORTER rt (wrong runtime) AND clobbers
+  the pinned cohort reg X19/R15 (D-142/206/210 SEGV lineage). (3) A **JIT-to-JIT bridge thunk** is
+  required (swap X0/RDI→exporter rt, preserve caller cohort) — it does NOT exist yet (`cross_module.zig`
+  is interp; `wrapper_thunk.zig` is host-call). (4) The runner DROPS exporter JitInstances per module
+  directive (runner.zig:~497) — must keep them alive (`jit_exporters: StringHashMap(*JitInstance)` at
+  `register`). IMPL PATH (~2 cycles, cohort-safety CRITICAL, do fresh): keep exporters → resolve func
+  imports (parallel `jitResolveImportedGlobals`) → emit per-arch bridge thunk (model ADR-0066 + D-210
+  cohort-save) → plant in dispatch[N] via initLinked → verify call-f/call-v green + NO SEGV (gate BOTH
+  arches at phase boundary). Land a permanent cohort-sentinel diagnostic (extended_challenge Step 5).
 - **Exit-condition**: ref_func `call-f` OR `call-v` flips green (cross-module FUNC call dispatches to
-  exporter, no trap).
+  exporter, no trap, no SEGV).
 - **NEXT chunk** = **cross-module FUNC dispatch** (ref_func call-f/call-v ×3; see bundle Continuity-memo).
   The remaining D-225 architectural lever now that the imported-GLOBAL track is complete.
   - **The other 8**: gc/array ×6 = CORPUS-CONTEXT-DEPENDENT traps (array.5 `new` works standalone;
@@ -82,10 +84,10 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior turn ubuntu GREEN (`tail -3 /tmp/ubuntu.log` = `OK (HEAD=4344c8b5)`). THIS turn landed the JIT
-import-inclusive globals_buf fix (`c5ab78c1`: src/engine/setup.zig; Mac gate test+lint OK) → ubuntu
-`test-all` kicked at end → `tail -3 /tmp/ubuntu.log` next resume (Step 0.7). On FAIL revert to
-`4344c8b5`. Mac aarch64; ubuntu = x86_64.
+Prior turn ubuntu GREEN (`tail -3 /tmp/ubuntu.log` = `OK (HEAD=2da2bd5d)` — the globals_buf fix
+`c5ab78c1` is remote-verified). THIS turn = cross-module FUNC dispatch SURVEY only (no src change; survey
+note + bundle-memo retarget) → no ubuntu kick needed (docs-only); next resume starts the FUNC-dispatch
+implementation fresh. Mac aarch64; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
