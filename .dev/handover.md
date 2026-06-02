@@ -59,16 +59,14 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **REMAINING**: (a) **4 interp assert_trap fails — FIXED ✓** (D-232 / ADR-0131, `d041e425`): gti materialised
   for func-subtyping + concreteReaches authoritative. interp corpus FULLY GREEN. (b) **§10-scope question** →
   `.dev/phase10_scope_reassessment.md` (USER-flagged; ADR-0128-amendment = user-flip case) — **the bundle's LAST
-  open item; user-gated.** (c) **JIT corpus = return 762/2/531, assert_trap 554/8. The 8 trap "fails" are a
-  RUNNER ARTIFACT, NOT JIT codegen bugs (CONFIRMED, D-233 reclassified, lesson
-  `2026-06-02-jit-mode-assert-trap-evaluates-on-interp-instance`)**: jit-mode evaluates assert_RETURN on
-  `cur_jit` (JIT) but assert_TRAP on the INTERP instance (:1068), AND the setup `(invoke "init")` action runs
-  ONLY on `cur_jit` (:1242) → the interp instance's table/globals are stale → `ref_cast_null` reads null →
-  no trap. A/B: interp 562/0 vs jit 554/8, only delta = setup instance. The JIT GC code is FINE (shared
-  trampolines pass; single-cast unit tests pass). PROPER FIX (substantial, fresh cycle): route jit assert_trap
-  through `cur_jit` (param JIT invoke + trap_flag detection) so ADR-0128 §10 "both backends" actually verifies
-  JIT traps — today it does NOT. The 2 return fails: gc/type-subtyping "run" (call_indirect subtype, interp .17/D-198 analog) + eh/try_table
-  (EH-on-JIT). All real Phase-10 bugs, not deferred. Partially tracked D-211/D-212/D-198.
+  open item; user-gated.** (c) **JIT corpus: D-233 CLOSED (`1d7f25ea`) — jit-mode assert_trap now routes
+  through `cur_jit` (was the stale interp instance), so it ACTUALLY tests JIT traps.** ref_cast_null ×4 now
+  trap correctly; assert_trap 554/8 (meaningless) → **202 pass / 55 fail / 305 skip (real)**. The 55 are REAL
+  JIT trap gaps newly EXPOSED → **D-234**: **51 memory64/memory_trap64 OOB** (i32/i64 load/store with OOB i64
+  address → JIT returns instead of trapping; in-bounds works (+208) but OOB-trap never verified — suspect JIT
+  mem bounds-check drops high address bits / 32-bit compare, op_memory.zig both arches) + 4 gc/type-subtyping.
+  D-234 is the next concrete JIT chunk (real correctness gap, not a missing feature). assert_RETURN: 762/2/531;
+  2 return fails = gc/type-subtyping "run" (call_indirect subtype, D-198) + eh/try_table (EH-on-JIT). Tracked D-211/D-212/D-198/D-234.
 - **Continuity-memo**: interp wasm-3.0 = 0 fails (fully green). JIT 762/2/531. PHASE C follow-ups (debt-worthy):
   api/instance.zig:572 + instantiate.zig:1657 `.cross_module` structural-only. This session CLOSED: D-230 (level-
   sep leak + DCE gate revive, ADR-0130) + D-232 (gti func-subtyping, ADR-0131). D-231 = x86_64 DCE-gate follow-on.
