@@ -3,6 +3,23 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-237"
+    layer: "test"
+    status: "now"
+    description: |-
+      Spec-runner `cur_module_bytes` DOUBLE-FREE (harness-only; surfaced during the
+      ADR-0133 Phase-10 re-scope inventory, 2026-06-03). `test/spec/spec_assert_runner_wasm_3_0.zig`
+      frees the per-module bytes at TWO sites: the `defer if (cur_module_bytes) |b| gpa.free(b)`
+      (:424) AND the `for (kept_bytes.items) |b| gpa.free(b)` loop (:434) — when ownership was
+      transferred to `kept_bytes` (D-225 cross-module exporter retention) the defer still fires →
+      DebugAllocator "Double free detected". Exit stays 0 (DebugAllocator logs, doesn't abort), so
+      corpus counts are unaffected, but it pollutes `2>&1` logs. FIX: null out `cur_module_bytes`
+      after transferring to `kept_bytes` (or skip the defer when transferred). Pairs with the D-234
+      runner-eval fix (both harness-side). Low priority (no correctness impact).
+    first_raised: "2026-06-03"
+    last_reviewed: "2026-06-03"
+    refs: |-
+      `test/spec/spec_assert_runner_wasm_3_0.zig:424` (defer free) + `:434` (kept_bytes loop); D-225 (kept_bytes ownership); D-234 (sibling harness-eval fix); ADR-0133
   - id: "D-235"
     layer: "code"
     status: "resolved"

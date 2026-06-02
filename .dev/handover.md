@@ -5,9 +5,17 @@
 
 ## Current state
 
-- **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE 2026-05-24).
-  §10 exit = official Wasm 3.0 testsuite at pass=fail=skip=0 on **both backends** (interp + JIT).
-- **HEAD** (`881b25e0`): **JIT try_table label carries blocktype arity** — both arches hardcoded
+- **Phase**: **10 IN-PROGRESS — re-scoped (ADR-0133)** (Phase 9 = DONE 2026-05-24). §10 exit =
+  **interp pass=fail=skip=0 (MET) + JIT 0-real-fail + every JIT skip on the forward-ref'd
+  deferred-allowlist** (multi-memory-on-JIT→§14, GC-on-JIT-rooting→§11). Raw "JIT skip=0" (ADR-0128)
+  was unreachable in-phase; re-scoped autonomously per ADR-0132.
+- **THIS turn = GOVERNANCE + RESCOPE (no codegen). STOPPED for user review per directive (no re-arm).**
+  **ADR-0132**: cross-phase ROADMAP re-sequencing is now AUTONOMOUS (no user-flip stop) — amended the
+  /continue deviation-watch, CLAUDE.md frozen invariants, handover-discipline §1, STOP_BUCKETS. **ADR-0133**:
+  Phase 10 exit re-scope (above) — ROADMAP §10 exit/100%-plan/10.P + Deferred-from-§10 registry rewritten,
+  close-invariant I24 added. **§10-scope question RESOLVED** (retired the recurring USER-GATED flag).
+  D-237 filed (spec-runner double-free, harness-only). Auto-memory `feedback-autonomous-roadmap-restructure`.
+- **LAST code HEAD** (`881b25e0`): **JIT try_table label carries blocktype arity** — both arches hardcoded
   result_arity=0/param_arity=0, so the matching `end` truncation discarded the try_table's result vreg →
   a normal-completion consumer (return/br) marshalled a stale register (pointer). Disasm-confirmed
   (debug_jit_auto). Unpack arity from `ins.extra` mirroring `op_control.emitBlock`. JIT EH dir
@@ -52,8 +60,9 @@ Cause A is the next chunk. Cause B is a deeper multi-cycle sub-arc (per-frame-in
 Other non-gated tracks (after EH): **D-234** (memory64 assert_trap harness artifact), **D-198**, **D-209**,
 **D-210** (return_call_indirect-in-try = func[36], TC+EH gap). Realworld GC/EH/TC producers.
 
-**USER-GATED (non-stop — only surface):** **§10-scope** → `.dev/phase10_scope_reassessment.md` (multi-memory's
-407 JIT skips ⇒ JIT skip=0 unreachable as written; ADR-0128-amendment / user-flip). Non-gated work exists → do NOT stop.
+**§10-scope: RESOLVED** (ADR-0133, this turn) — no longer user-gated. The §10 exit is re-scoped (interp
+100% + JIT 0-real-fail + JIT-skip⊆deferred-allowlist). `.dev/phase10_scope_reassessment.md` is now historical
+(prep doc; superseded by ADR-0133). Future cross-phase mismatches: re-sequence autonomously per ADR-0132 (no stop).
 
 ## Active bundle
 
@@ -78,11 +87,11 @@ Other non-gated tracks (after EH): **D-234** (memory64 assert_trap harness artif
 
 ## Step 0.7 (next resume)
 
-LAST code turn = try_table-arity fix (`881b25e0`) — ubuntu **verified OK (HEAD=e0a502aa**, which includes
-`881b25e0`; the whole EH chain 3b668110→e0a502aa is 2-host green). The most-recent re-invocation was a
-READ-ONLY diagnosis of the 3 imported-tag fails (subagent; Cause A/B split above) — NO code commit, NO new
-ubuntu kick. So next resume Step 0.7 has nothing new to verify (e0a502aa already OK); go straight to Cause A
-implementation. Mac aarch64; ubuntu = x86_64.
+THIS turn = governance + Phase-10 rescope (ADRs + ROADMAP + rule files + close-script I24 + debt; NO codegen,
+NO ubuntu kick — docs/rules/bash only). **STOPPED for user review per directive (止まってください) — NOT
+re-armed.** Code state unchanged since `881b25e0`, which is ubuntu-verified OK (HEAD=e0a502aa includes it; EH
+chain 3b668110→e0a502aa 2-host green). Next session (user /continue or fresh): Step 0.7 has nothing new to
+verify; go straight to **Cause A** (the next code chunk). Mac aarch64; ubuntu = x86_64.
 
 **Gate hygiene**: Step-5 Mac gate = `bash scripts/mac_gate.sh`. JIT corpus: `zig build test-spec-wasm-3.0-assert`
 (NO bogus `-Dno-run`), freshest exe via `/usr/bin/find .zig-cache/o -name zwasm-spec-wasm-3-0-assert` (shell

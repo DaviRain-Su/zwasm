@@ -173,6 +173,11 @@ permission needed.
 
 **Deviation watch**: Plan touches §1, §2, §4, §5, §9 scope, §11, §14 →
 STOP. File `.dev/decisions/NNNN_<slug>.md` per §18.2 first.
+**Carve-out (ADR-0132)**: re-sequencing/re-scoping the ROADMAP because a
+phase's exit/scope references genuinely-later-phase work (§18.1 first bullet)
+is **AUTONOMOUS** — do NOT stop. Run the §18.2 four-step (edit ROADMAP + ADR +
+sync handover + ref in commit), forward-ref each deferred item to its true
+phase, and proceed. No user-flip; no recurring "USER-GATED" handover flag.
 
 ### Step 2 — Red
 

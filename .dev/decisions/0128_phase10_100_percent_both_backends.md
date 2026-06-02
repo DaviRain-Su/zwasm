@@ -1,6 +1,6 @@
 # 0128 — Phase 10 = 100% official Wasm 3.0 on BOTH backends (spec-corpus JIT execution mode + GC-on-JIT via non-moving op-emit)
 
-- **Status**: Accepted (2026-05-31; user directive "100% にしてほしい")
+- **Status**: Accepted (2026-05-31; user directive "100% にしてほしい") — **exit re-scoped by ADR-0133 (2026-06-03)**: the raw "pass=fail=skip=0 on BOTH backends" was unreachable in-phase (multi-memory→§14 / GC-rooting→§11 JIT skips); now interp 100% + JIT 0-real-fail + JIT-skip deferred-allowlist. The 100% spirit is preserved; deferred items are forward-ref'd, not dropped.
 - **Date**: 2026-05-31
 - **Author**: claude (with user audit + web research)
 - **Tags**: Phase 10, exit criterion, JIT, GC, spec corpus, both-backends, non-moving collector, deferred rooting, memory64, realworld toolchains, D-211, D-209, D-202

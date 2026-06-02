@@ -343,6 +343,17 @@ fi
 # §8 I23 — widget Phase 10 IN-PROGRESS → DONE
 skip "§8 I23: widget status TBD by phase-close cycle itself"
 
+# §8 I24 — spec-corpus exit (ADR-0133, re-scope of ADR-0128's raw skip=0):
+# interp pass=fail=skip=0 AND JIT 0-REAL-fail AND every JIT skip ∈ the
+# deferred-allowlist (multi-memory-on-JIT→§14, GC-on-JIT-rooting→§11; each
+# forward-ref'd in ROADMAP §10's "Deferred-from-§10 JIT items"). "Real" fail
+# excludes documented harness artifacts tracked to a runner fix (D-234).
+# Full check = run interp + ZWASM_SPEC_ENGINE=jit spec runner, parse summaries,
+# diff the JIT skip set against the allowlist. Deferred to the close-cycle
+# (like I20) — heavy runner parse + needs the in-phase JIT targets cleared
+# first (17 modrej + return_call_indirect/br_on_null + 10.E-eh-on-jit + D-234).
+skip "§8 I24: ADR-0133 spec-corpus exit (interp 0/0/0 + JIT 0-real-fail + JIT-skip⊆allowlist) — close-cycle check, see ROADMAP §10 Deferred-from-§10"
+
 # Report
 echo
 printf '%s\n' "${LINES[@]}"

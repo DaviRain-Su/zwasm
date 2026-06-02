@@ -39,6 +39,12 @@ anti-pattern): that surrenders forward work that IS autonomous-
 eligible. Bucket 3 fires only after every autonomous lever pulled and
 the remaining work *structurally* needs the user.
 
+**NOT a bucket-3 gate (ADR-0132)**: "a phase's exit/scope references
+work scoped to a later phase" is NOT a user touchpoint — re-sequence/
+re-scope the ROADMAP autonomously (ADR + §18.2 four-step + forward-ref
+each deferred item). A row blocked only by such a mismatch is
+autonomous-eligible, not bucket-3.
+
 Handover.md framing for bucket-3: see
 [`handover_doc_discipline.md`](../../rules/handover_doc_discipline.md)
 §4 ("Bucket-3 stop — user touchpoint required").

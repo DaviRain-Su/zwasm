@@ -1328,8 +1328,22 @@ audit at §9.12 IS a hard gate per ADR-0062.
   unwinding.
 - Tail Call: return_call, return_call_indirect, return_call_ref.
 - memory64 lit up; existing load/store ops accept 64-bit offsets.
-- All Phase-5 proposals' spec tests pass=fail=skip=0 (both backends).
+- All Phase-5 proposals' spec tests: **interp pass=fail=skip=0**; **JIT
+  0-real-fail + every JIT skip on the forward-referenced deferred-allowlist**
+  (re-scoped by ADR-0133 — see below).
 - Bench: no unexplained regression vs Phase 9 baseline.
+
+**Exit re-scope (ADR-0133, 2026-06-03; amends ADR-0128)**: raw "JIT skip=0" is
+structurally unreachable in-phase (multi-memory's ~458 JIT skips are Phase-14
+work; GC-on-JIT rooting's ~20 are Phase-11, per ADR-0128 §2 / ADR-0115). The
+honest in-phase bar is **interp 100% (met) + JIT 0-REAL-fail + every JIT skip
+forward-referenced to its true later phase** (no silent drop). Deferred-allowlist:
+**multi-memory-on-JIT → Phase 14** (`compile.zig:125`); **GC-on-JIT rooting →
+Phase 11**. In-phase JIT targets (NOT deferrable): the 17 module-compile rejects
+(`UnsupportedEntrySignature`/`StackTypeMismatch`/`ElemSegmentTypeMismatch`/
+`InvalidGlobalInitExpr` + `return_call_indirect`/`br_on_null` op emits) + the
+`10.E-eh-on-jit` imported-tag fails + the D-234 runner-side fix (memory64
+assert_trap mis-eval; codegen proven correct).
 
 **100% plan (ADR-0128, 2026-05-31)**: "both backends" is made mechanically
 true by a **spec-corpus JIT execution mode** (run the official testsuite
@@ -1337,7 +1351,8 @@ through the JIT, not just the interp); **GC-on-JIT** is emitted via the
 non-moving op-emit path (rooting deferred — ADR-0128 §2, D-211); ADR-0127
 PHASE C lands (assert_unlinkable 5→0); D-209 dissolved (payload u64).
 Close-invariant SKIPs (I3/I5/I16/I20/I21) become real targets. The "close-
-eligible" posture (8 SKIPs counted as deferred) is retracted.
+eligible" posture (8 SKIPs counted as deferred) is retracted (superseded by
+the ADR-0133 deferred-allowlist, which forward-refs each deferred item).
 
 **Design plan**: [`.dev/phase10_design_plan_ja.md`](phase10_design_plan_ja.md) (r3; 2026-05-24 user-reviewed). Sub-chunks recorded in `phase_log/phase10.md` per ADR-0014 + §18.3.
 
@@ -1355,7 +1370,22 @@ eligible" posture (8 SKIPs counted as deferred) is retracted.
 | 10.TC   | Tail Call 実装 — regalloc terminator-class 拡張 (ADR-0113 §A) + `op_tail_call.zig` 新規 + `frame_teardown.zig` helper + `cross_module_tail_call.zig` (inline emit; ADR-0066 thunk 不再利用) + interp trampoline (v1 vm.zig pattern re-derive) + safepoint-free invariant comptime assert + spec corpus 95 wast + realworld (clang_musttail + wasm_of_ocaml) + EH × TC cross fixture。                                                  | [ ]    |
 | 10.E    | EH 実装 — regalloc N-successor callsite 拡張 (ADR-0113 §B; bounds_fixups を `callsite_metadata` 1-edge specialisation に refactor) + `feature/exception_handling/` (tag + exception) + `unwind.zig` FP-walk (SEH 流用しない) + `zwasm_throw` trampoline + `op_exception_handling.zig` landing pad emit + cross-module exception propagation + EH × TC integration test (`return_call_in_try_table.wat`) + c_api tag accessors + spec corpus 76 assertion + `eh_frequency_runner` 本実装 + realworld/p10/emscripten_eh/ green。 | [ ]    |
 | 10.G    | WasmGC 実装 — `Value.anyref` arm 追加 + `Module.needs_gc_heap` parse-time flag + `needs_heap_detector.zig` (type/import/table/global/function/element OR 走査) + `feature/gc/heap.zig` per-Store contiguous slab + `Collector` vtable + regalloc stack-map axis (ADR-0113 §C; per-Instance side-table) + `collector_null.zig` (α) + `delegation.zig` (Mode A 自前 + Mode B host root provider) + `i31.zig` + `type_hierarchy.zig` (RTT 8-deep) + `op_gc.zig` (struct/array/ref.test/ref.cast/br_on_cast family) + `op_i31.zig` (convert_extern/any) + `collector_mark_sweep.zig` (β; 必須 ship) + `gc_stress_runner` 本実装 + cross fixtures + spec corpus ~578 assertion + realworld (dart + wasm_of_ocaml + hoot) green。 | [ ]    |
-| 10.P    | Phase 10 close — `scripts/check_phase10_close_invariants.sh` 整備 (23 件 invariant; design plan §8; `-Dwasm=v2_0` シンボル nm 不在 / Module.needs_gc_heap=false で GC infra 呼出ゼロ / `-Dgc=false` 完全 strip / safepoint-free invariant / SKIP-P10-{PARSER,EH,GC,MEM64,CROSS}-GAP=0 / realworld 9 fixture green 等) + widget 10 IN-PROGRESS → DONE + Phase 11 inline 展開。                                                                                                                                                | [ ]    |
+| 10.P    | Phase 10 close — `scripts/check_phase10_close_invariants.sh` 整備 (23 件 invariant; design plan §8; `-Dwasm=v2_0` シンボル nm 不在 / Module.needs_gc_heap=false で GC infra 呼出ゼロ / `-Dgc=false` 完全 strip / safepoint-free invariant / SKIP-P10-{PARSER,EH,GC,MEM64,CROSS}-GAP=0 / realworld 9 fixture green 等) + **spec-corpus exit (ADR-0133): interp pass=fail=skip=0 + JIT 0-real-fail + 全 JIT skip が deferred-allowlist 上 (multi-memory→§14 / GC-rooting→§11, 各 forward-ref 必須)** + widget 10 IN-PROGRESS → DONE + Phase 11 inline 展開。                                                                                                                                                | [ ]    |
+
+**Deferred-from-§10 JIT items (ADR-0133 allowlist — each forward-ref'd; no
+silent drop).** These are the only JIT skips Phase 10 may close WITH (every
+other JIT skip is an in-phase target). The 10.P close-invariant verifies the
+live JIT skip set is a subset of this allowlist:
+
+- **multi-memory-on-JIT** → **Phase 14** — JIT codegen for >1 memory. The JIT
+  rejects `>1` memory at compile (`src/engine/compile.zig:125`
+  `Error.MultipleMemories`); ~458 `multi-memory/` corpus skips. Multi-memory on
+  the **interp** is Phase-10 (row 10.M); the JIT codegen follows in §14. (Wasm
+  feature, not CI infra — parked in §14 as the JIT-completion carrier; revisit
+  if a dedicated multi-memory-JIT phase is warranted.)
+- **GC-on-JIT rooting** → **Phase 11** — non-moving GC-on-JIT emits in §10.G,
+  but the moving/precise rooting + stack-map walker is deferred (ADR-0128 §2 /
+  ADR-0115 / D-211); ~20 gc corpus skips ride this.
 
 ### Phase 11 — WASI 0.1 full + bench infra
 

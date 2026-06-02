@@ -53,7 +53,12 @@ text or code identifiers.
   phase table expansion = no ADR. Deviation in §1 / §2 (P/A) / §4
   (architecture / Zone / ZirOp) / §5 (layout) / §9 phase scope/exit /
   §11 / §14 forbidden list = file `.dev/decisions/NNNN_<slug>.md` per
-  §18.2 FIRST.
+  §18.2 FIRST. **Carve-out (ADR-0132)**: re-sequencing/re-scoping the
+  ROADMAP because a phase's exit/scope references genuinely-later-phase
+  work (§18.1 first bullet) is **AUTONOMOUS** — file the ADR + §18.2
+  four-step + forward-ref each deferred item to its true phase, and
+  proceed without stopping (no user-flip). Default posture =
+  autonomous-with-ADR; surface only for bucket-2/3 genuine blocks.
 - **3-host gate**: Mac aarch64 + `ubuntunote` Linux x86_64 (SSH) +
   `windowsmini` SSH. Per-chunk autonomous = 2-host (Mac + ubuntunote)
   per ADR-0049 + ADR-0067. windowsmini = phase boundary. OrbStack

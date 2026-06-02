@@ -41,6 +41,10 @@ unreliable by construction.
 
 **Single allowed `user-judgment` use**: §18 ADR amendment requiring
 user-flip at ADR-flip time. Even then, the draft is autonomous.
+**EXCLUDED by ADR-0132**: re-sequencing/re-scoping the ROADMAP for a
+cross-phase dependency (§18.1 first bullet) is autonomous — NOT a
+`user-judgment` use, and MUST NOT be surfaced as a recurring "USER-GATED"
+handover flag. File the ADR, do the §18.2 four-step, proceed.
 
 ## §2 — No numeric predictions (future-tense)
 
