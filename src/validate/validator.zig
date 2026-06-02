@@ -2990,6 +2990,27 @@ fn gcConcreteReaches(sub_idx: u32, super_idx: u32, supertypes: []const []const u
     return false;
 }
 
+/// Like `gcConcreteReaches` but compares each chain member to `super_idx` by
+/// iso-recursive CANONICAL equality, not raw index (Wasm 3.0 GC §3.3). A
+/// declared supertype may live in a different rec group yet be the same
+/// canonical type as `super_idx` (`gc/type-subtyping.12/.14`: `$h <: $g2 <:
+/// $f2`, and `$f2 ≡ $f1` via isomorphic rec groups, so `$h <: $f1`). Used on
+/// the global-init / module-validation path where the full `Types` is alive.
+fn gcConcreteReachesCanonical(sub_idx: u32, super_idx: u32, types: *const sections.Types) bool {
+    if (sub_idx == super_idx or sections.canonicalEqual(types, sub_idx, super_idx)) return true;
+    var depth: u32 = 0;
+    var cur = sub_idx;
+    while (depth < 64) : (depth += 1) {
+        if (cur >= types.supertypes.len) return false;
+        const supers = types.supertypes[cur];
+        if (supers.len == 0) return false;
+        for (supers) |s| if (s == super_idx or sections.canonicalEqual(types, s, super_idx)) return true;
+        cur = supers[0];
+        if (cur == sub_idx) return false; // cycle guard
+    }
+    return false;
+}
+
 /// Wasm 3.0 GC §4.2.8 valtype subtyping (lattice + concrete chain).
 /// Extends `valTypeIsSubtypeFree` with the GC heap lattice + the
 /// declared-supertype chain for concrete refs.
@@ -3005,8 +3026,7 @@ fn gcValTypeSubtype(actual: ValType, expected: ValType, types: *const sections.T
             // (ADR-0126): a raw index that does not reach the target by
             // declared supertypes may still be the same canonical type
             // (cross-rec-group structural identity, Wasm 3.0 GC §3.3).
-            .concrete => |e_idx| gcConcreteReaches(a_idx, e_idx, types.supertypes) or
-                sections.canonicalEqual(types, a_idx, e_idx),
+            .concrete => |e_idx| gcConcreteReachesCanonical(a_idx, e_idx, types),
             .abstract => |e_abs| blk: {
                 // A concrete ref's head is the kind of its typedef.
                 const head: zir.AbstractHeapType = if (a_idx >= types.kinds.len) .any else switch (types.kinds[a_idx]) {
