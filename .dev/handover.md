@@ -60,14 +60,15 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   **.17 "run" CLOSED** (`80aeee1d` call_indirect-subtype + function-level-br, `24a17ed7` guard test) — the
   cyc180/D-198 rabbit hole (2 coordinated interp fixes: root cause #2 was function-level `br 0` trapping
   instead of returning). interp assert_return fully green (1233/0).
-- **REMAINING**: (a) **4 interp assert_trap fails MEASURED + DIAGNOSED → D-232** (handover's "runner-side
-  trap-class" hypothesis DISPROVEN): all 4 are `FAILtrapNoTrap` (real interp over-acceptance in GC
-  call_indirect), funcs fail1/fail2 in 2 type-subtyping modules. H1 CONFIRMED = `sigEq` false-positives
-  structurally-equal-but-distinct types ($t1 vs $t2-final); H2 = $t0-super-as-sub (needs probe). FIX
-  (ADR-relevant §3.3.5.5, delicate — must not regress 1233 assert_return): gate the raw sigEq short-circuit so
-  GC modules use the proper subtype check only. NEXT bundle cycle. (b) **§10-scope question** → prepped in
-  **`.dev/phase10_scope_reassessment.md`** (USER-flagged deliberate; ADR-0128-amendment = user-flip case).
-  (c) JIT eh/try_table (EH-on-JIT, deep) + re-check JIT gc/type-subtyping (the .17 fix is interp-only).
+- **REMAINING**: (a) **4 interp assert_trap fails ROOT-CAUSED → D-232** (handover's "runner-side trap-class"
+  hypothesis DISPROVEN). ROOT: `gc_type_infos` is materialised only when `needs_gc_heap` (instantiate.zig:1070,
+  struct/array-gated); func-only-subtyping modules ($t1/$t2 sub/final func, no heap) get NO gti → `concreteReaches`
+  blind → `sigEq` structural-collision accepts distinct types. Probe PROVED all 23 `sigEq-only` accepts have
+  gti=false; only 4 are bugs (19 are legit non-GC). FIX (coordinated, NEXT cycle, full test-all between steps):
+  (1) materialise gti for sub/final/rec func-subtyping (not just heap); (2) gti present → concreteReaches
+  authoritative over sigEq; (3) verify raw_typeidx reliability + finality in canonical_ids. (b) **§10-scope
+  question** → `.dev/phase10_scope_reassessment.md` (USER-flagged; ADR-0128-amendment = user-flip case).
+  (c) JIT eh/try_table (deep) + re-check JIT gc/type-subtyping.
 - **Continuity-memo**: interp fails 4 (gc/type-subtyping assert_trap) → now diagnosed as D-232 (GC
   call_indirect over-acceptance; fix = gate sigEq short-circuit for GC modules). JIT 762/2/531. PHASE C
   follow-ups (debt-worthy): api/instance.zig:572 + instantiate.zig:1657 `.cross_module` structural-only.
