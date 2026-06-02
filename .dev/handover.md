@@ -59,8 +59,14 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **REMAINING**: (a) **4 interp assert_trap fails — FIXED ✓** (D-232 / ADR-0131, `d041e425`): gti materialised
   for func-subtyping + concreteReaches authoritative. interp corpus FULLY GREEN. (b) **§10-scope question** →
   `.dev/phase10_scope_reassessment.md` (USER-flagged; ADR-0128-amendment = user-flip case) — **the bundle's LAST
-  open item; user-gated.** (c) JIT eh/try_table (deep) + re-check JIT gc/type-subtyping (the interp .17/D-232
-  fixes are interp-only; JIT path may need the same).
+  open item; user-gated.** (c) **JIT corpus = 762/2/531 — 2 fails MEASURED this cycle** (`ZWASM_SPEC_ENGINE=jit`
+  runner, `--fail-detail`): **[1] gc/type-subtyping "run err=Trap"** — JIT `call_indirect` sig-check is EXACT u32
+  on `typeidx_base[idx]` (jit_abi.zig:165; populated setup.zig:574, compared in `op_call.zig` emitCallIndirect
+  both arches) → rejects legit subtypes (analog of interp .17/D-198) AND JIT assert_trap 554/8 (over-accepts
+  structurally-equal-distinct). FIX-SHAPE (ADR-grade, hot-path, fresh cycle): populate `typeidx_base` with
+  CANONICAL ids + compare canonical (fixes the 8 over-accept trap fails) + a runtime subtype trampoline for
+  proper sub<:super (fixes "run"). **[2] eh/try_table "imported-mismatch" JITval** — EH-on-JIT (deep, sep).
+  Both deep JIT codegen, partially tracked D-198/D-211.
 - **Continuity-memo**: interp wasm-3.0 = 0 fails (fully green). JIT 762/2/531. PHASE C follow-ups (debt-worthy):
   api/instance.zig:572 + instantiate.zig:1657 `.cross_module` structural-only. This session CLOSED: D-230 (level-
   sep leak + DCE gate revive, ADR-0130) + D-232 (gti func-subtyping, ADR-0131). D-231 = x86_64 DCE-gate follow-on.
