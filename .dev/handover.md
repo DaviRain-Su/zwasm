@@ -47,23 +47,24 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   green, pass=577; JIT-executed fails now 2, both gated/deep).
 - **Cycles-remaining**: ~2 — array.init DONE (`a11b1699`, +28); convert+RTT now the active multi-cycle sub-target.
 - **Eligible single-result gap-ops SPENT**: `struct.get_s/u` (`568ac652`), `array.init_data/elem` (`a11b1699`).
-- **ACTIVE sub-target = convert+RTT** (lever a). Cycle-1: convert emit (transparent `0→0` liveness + no-op
-  switch arms; null round-trip green) MEASURED +80 pass / **+59 fail** in gc → reverted to spike. Cycle-2
-  (this turn): DIAGNOSIS UNBLOCKED + taxonomy classified. The "diagnostic gap" was just stderr emit-noise
-  splicing stdout under `2>&1` — recipe = direct exe `--fail-detail 2>/dev/null` (lesson
-  `2026-06-02-jit-corpus-fail-detail-needs-stderr-split`; the runner flush + build.zig forwarding I tried were
-  UNNECESSARY → reverted). **60 gc fails = ref_test ×32, br_on_cast ×10, br_on_cast_fail ×10, ref_cast ×7**
-  (+1 pre-existing type-subtyping trap) — the RTT-test family. got: ref_test_i31/struct/eq/any → clean `1`
-  (too-lax); ref_test_null_data → `2`; br_on_cast → `0xffffffff` (wrong branch). **H1/H3 (extern bounds-guard)
-  REFUTED** — fails span i31/struct/array, not extern. **TWO live hypotheses** (`fail-taxonomy.txt` + spike
-  README): **HA** = RTT-logic gap in `jitGcRefTest`/`gcAbstractMatch` for the full heap-type matrix these
-  convert-unblocked comprehensive modules exercise (clean-wrong 0/1 supports); **HB** = the `0→0` transparent
-  convert corrupts regalloc → garbage downstream (`got=2` supports). **NEXT-CYCLE**: distinguish HA/HB cheaply
-  — HB probe = re-model convert `1→1` (real dest vreg + MOV, mirror ref.as_non_null) and re-measure (if +59
-  drops → HB); HA = read `gc/ref_test.wast` expected-vs-got + audit gcAbstractMatch arms vs spec §4.5.2. If
-  neither converges in 1 cycle → PIVOT.
+- **ACTIVE sub-target = convert+RTT** (lever a) — 3 cycles in, narrowed to ONE hypothesis. Cycle-1: convert
+  emit (`0→0` liveness + no-op arms) → +80 pass / **+59 fail** gc → reverted to spike (`convert-emit.diff`).
+  Cycle-2: diagnosis (recipe = direct exe `--fail-detail 2>/dev/null`; lesson `…fail-detail-needs-stderr-split`);
+  60 gc fails = ref_test ×32 / br_on_cast ×10 / br_on_cast_fail ×10 / ref_cast ×7 (RTT-test family); H1/H3
+  (extern bounds-guard) refuted. Cycle-3 (this turn): **HA FULLY REFUTED** — 6 convert-free ref.test
+  abstract-matrix tests (`dcc2389b`: i31/struct × i31/struct/array/eq, ±) all GREEN → ref.test/gcAbstractMatch
+  logic is CORRECT in isolation. **⇒ the +59 is the convert/table path**: gc/ref_test.wast's table-SETUP fn
+  uses `any.convert_extern` (populating `$ta[6,7]`); the `0→0` transparent convert almost certainly corrupts
+  THAT fn's regalloc → wrong stored `$ta` values → ref_test($i) reads garbage (explains clean-but-wrong 0/1
+  AND got=2 across many `$i`; ref_test_i31 itself has no convert, so it's not its own regalloc — it's the
+  setup fn's). **NEXT-CYCLE (sole hypothesis HB)**: re-apply `convert-emit.diff`; write an ISOLATED repro —
+  a fn with a value live ACROSS `any.convert_extern` + a `table.set`/`global.set` consumer (the null
+  round-trip test was too simple to expose it); confirm corruption; then fix the convert regalloc model
+  (try `1→1` real-dest-vreg+MOV mirroring ref.as_non_null — but heed the liveness lesson that naive `1→1`
+  also desyncs; the RIGHT model may need a `compute()` arm like local.tee). Land convert+RTT once the repro
+  + corpus are net-positive. If the model proves intractable in 1 cycle → PIVOT.
 - **PIVOT option** = lever (b) MAJOR multi-value/`buffer_write` ABI (D-094/D-164; compile.zig:1058 hardcodes
-  register_write; ~39 skips; ADR-grade, HIGH blast radius) — if convert+RTT proves too deep (now 2 cycles in).
+  register_write; ~39 skips; ADR-grade, HIGH blast radius) — if convert+RTT proves too deep (3 cycles in).
 - **Continuity-memo**: §1 JIT-EXECUTED assert_return fails = 2 (type-subtyping user-gated ADR-0127 PHASE C;
   try_table EH-on-JIT). Remaining §10 exit bulk = **skip=688** (baseline, post-revert). 2 pre-existing
   array_init trap_fails (baseline-verified) = separate assert_trap follow-on, low ROI.
@@ -83,10 +84,10 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-THIS turn = convert+RTT DIAGNOSIS cycle-2 (no src commit; all probes reverted to clean tree; docs/lesson-only
-commit). HEAD code-equivalent to `95f618e3` (ubuntu-GREEN, no code change → no ubuntu kick). Next resume: go
-straight to Active-bundle convert+RTT — distinguish HA (RTT-logic) vs HB (convert 1→1 regalloc) per the plan;
-re-apply `private/spikes/convert-extern-rtt/convert-emit.diff` to reproduce. Mac aarch64; ubuntu = x86_64.
+THIS turn = convert+RTT cycle-3: committed 6 ref.test abstract-matrix tests (`dcc2389b`, code) → HA refuted.
+ubuntu kick fired against `dcc2389b`. Next resume Step 0.7: `tail -3 /tmp/ubuntu.log` — expect
+`OK (HEAD=dcc2389b)` (the 6 tests are "both arches"; on FAIL revert). Then go to Active-bundle convert+RTT
+NEXT-CYCLE: re-apply `convert-emit.diff` + isolate the HB regalloc repro. Mac aarch64; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
