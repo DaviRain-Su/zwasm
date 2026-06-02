@@ -47,18 +47,24 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 - **Bundle-ID**: `10.G-§1-gc-array-context-traps` (D-225 cross-module bundle CLOSED at `0319d566`,
   exit-condition met: ref_func green, pass=571).
-- **Cycles-remaining**: ~2 (investigation — corpus-context-dependent)
-- **Continuity-memo**: NEXT = **gc/array ×6** (the largest remaining §1 cluster). These trap only IN
-  CORPUS CONTEXT: `array.5` `new` works STANDALONE but `get`/`set` take a ref arg → the repro needs the
-  preceding corpus directive sequence (the funcref/ref operand from a prior `new` must persist). METHOD
-  (lesson `2026-05-31-jit-result-bug-stale-register-confound`): run the JIT corpus with `--fail-detail`,
-  find the exact gc/array `JITfail`/`JITval` lines (`grep -E "JITfail|JITval" .*array`), then reproduce
-  the directive PAIR (the `new` that creates the ref + the `get` that consumes it) as a standalone
-  fixture/unit test, and use the fnv-fingerprint/non-zero-probe to localize (value mismatch vs trap).
-  Likely a ref-arg marshalling or persisted-state gap across the persistent JitInstance. START: `EXE=$(find
-  .zig-cache/o -name zwasm-spec-wasm-3-0-assert -type f -printf '%T@ %p\n'|sort -rn|head -1|cut -d' ' -f2-);
-  ZWASM_SPEC_ENGINE=jit "$EXE" test/spec/wasm-3.0-assert --fail-detail 2>/dev/null | grep -iE 'array'`.
-- **Exit-condition**: ≥1 gc/array assert flips green (a `new`→`get` pair returns the right value, no trap).
+- **Cycles-remaining**: ~2 (JIT-GC runtime investigation)
+- **Continuity-memo**: NEXT = **gc/array ×6** (largest remaining §1 cluster). NARROWED (this cycle, via
+  `--fail-detail`): the 6 fails are in the **`gc/array` manifest, modules array.5 + array.6 — F32-ELEMENT
+  arrays** (type `5e 7d` = array of f32). Ops `new`/`get`/`set_get`/`len` all `JITfail err=Trap`. KEY: `new`
+  is the FIRST runtime invoke after instantiate (NOT cross-directive state) — yet it traps, while the
+  module DID instantiate. array.5/6 have **setup-time global-init `array.new`** (global 0 = `array.new`
+  f32=1.0 ×3; global 1 = `array.new_default` ×3, via `evalGlobalInitGc`). So the dependency is the SETUP
+  GC allocs, not prior asserts. RULED OUT this cycle (by reasoning): cross-directive state (`new` is FIRST
+  invoke); heap OOM (heap.zig = GROW-on-demand bump alloc, offset GcRefs stable across realloc); stale-
+  base-after-grow (setup allocs ~32 B = 1 page, runtime `new` ~16 B → NO grow). REMAINING: (a) `rt.gc_heap`/
+  `gc_type_infos_ptr` not wired for the runtime alloc path (vs setup-time `gc_heap_typed`), or (b) an
+  `array.new_default`-f32 EMIT bug. REPRO + INSTRUMENT: instantiate array.5.wasm (202 B) via
+  `JitInstance.init` + invoke `"new"` (func 0 = `i32.const 3; array.new_default 0`); if it traps standalone,
+  instrument the trap site — verify `rt.gc_heap`/`gc_type_infos_ptr` non-null at the jitGcAlloc trampoline
+  + the array.new_default element-size/header computation for an f32-element array. Files: `setup.zig` rt
+  struct (`gc_heap` / `gc_type_infos_ptr` ~805), jitGcAlloc trampoline, array.new_default emit (codegen
+  `ops/wasm_3_0/array_new*`).
+- **Exit-condition**: ≥1 gc/array assert flips green (array.5 `new`/`get`/`len` no longer trap).
   - **The other 2**: gc/type-subtyping ×1 = ADR-0127 PHASE C (Proposed, user-Accept-gated +
     regression-risky); try_table ×1 = EH. Skip multi-memory 51 (Phase-14).
   - **REALITY**: big levers SPENT; the tail is context-dependent (gc/array) or user-gated. Expect lower
@@ -77,11 +83,10 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior turn ubuntu GREEN (`OK (HEAD=741c2e4d)` — the bridge-thunk infra `e964ba6e` is x86_64-cohort-safe).
-THIS turn landed the kept-bytes fix (`0319d566`: spec-runner-only; Mac gate test+lint OK) flipping
-ref_func +3 → ubuntu `test-all` kicked at end → `tail -3 /tmp/ubuntu.log` next resume (Step 0.7). On FAIL
-revert to `741c2e4d`. The fix is test-runner-only (cur_module_bytes lifetime), low cross-arch risk.
-Mac aarch64; ubuntu = x86_64.
+Prior turn ubuntu GREEN (`OK (HEAD=c0403b4e)` — the kept-bytes fix `0319d566` / ref_func +3 is remote-
+verified). THIS turn = gc/array investigation only (no src change; continuity-memo narrowed to array.5/6
+f32-element + setup-time global-init array.new hypothesis) → no ubuntu kick (docs-only). Next resume:
+reproduce array.5 `new` standalone per the memo. Mac aarch64; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
