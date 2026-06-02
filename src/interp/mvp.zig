@@ -450,12 +450,17 @@ fn callIndirectOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     // Wasm 3.0 §3.3.5.5 — the callee's declared func type need only be a
     // SUBTYPE of the expected type (not structurally equal): a `$t1` func
     // (`$t1 <: $t0`) called via `call_indirect (type $t0)` runs (D-198).
-    // The subtype arm is comptime-elided in sub-3.0 builds (ADR-0129).
-    const accepted = sigEq(callee.sig, expected) or
-        (if (comptime wasm_v3_plus)
-            (callee_rt == rt and ref_test_ops.concreteReaches(rt, fe.raw_typeidx, @intCast(instr.payload)))
-        else
-            false);
+    // When the module carries a GC type-identity table (declares `sub`/`final`
+    // subtyping), `concreteReaches` is AUTHORITATIVE — structural `sigEq` is too
+    // loose (ignores type identity / finality) and wrongly accepts structurally-
+    // equal-but-distinct types (D-232). Cross-module (callee_rt != rt — no
+    // shared type space) + non-subtyping modules use `sigEq`. The 3.0 arm
+    // comptime-elides in sub-3.0 builds (ADR-0129).
+    const accepted = if (comptime wasm_v3_plus) blk: {
+        if (callee_rt == rt and ref_test_ops.hasGti(rt))
+            break :blk ref_test_ops.concreteReaches(rt, fe.raw_typeidx, @intCast(instr.payload));
+        break :blk sigEq(callee.sig, expected);
+    } else sigEq(callee.sig, expected);
     if (!accepted) return Trap.IndirectCallTypeMismatch;
 
     const dispatch_tbl = rt.table orelse return Trap.Unreachable;
@@ -487,12 +492,14 @@ fn callRefOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     // Wasm 3.0 §3.3.5.5 — the callee's declared func type need only be a
     // SUBTYPE of the expected type (not structurally equal): a `$t1` func
     // (`$t1 <: $t0`) called via `call_ref (type $t0)` runs (D-198).
-    // The subtype arm is comptime-elided in sub-3.0 builds (ADR-0129).
-    const accepted = sigEq(callee.sig, expected) or
-        (if (comptime wasm_v3_plus)
-            (callee_rt == rt and ref_test_ops.concreteReaches(rt, fe.raw_typeidx, @intCast(instr.payload)))
-        else
-            false);
+    // gti present (subtyping module) → `concreteReaches` authoritative; structural
+    // `sigEq` is too loose (D-232). Cross-module + non-subtyping → `sigEq`. 3.0
+    // arm comptime-elides in sub-3.0 builds (ADR-0129).
+    const accepted = if (comptime wasm_v3_plus) blk: {
+        if (callee_rt == rt and ref_test_ops.hasGti(rt))
+            break :blk ref_test_ops.concreteReaches(rt, fe.raw_typeidx, @intCast(instr.payload));
+        break :blk sigEq(callee.sig, expected);
+    } else sigEq(callee.sig, expected);
     if (!accepted) return Trap.IndirectCallTypeMismatch;
 
     const dispatch_tbl = rt.table orelse return Trap.Unreachable;

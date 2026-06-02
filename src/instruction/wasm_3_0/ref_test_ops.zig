@@ -207,6 +207,17 @@ pub fn concreteReaches(rt: *Runtime, sub_idx: u32, target: u32) bool {
     return concreteReachesGti(gti, sub_idx, target);
 }
 
+/// Does this runtime carry a materialised GC type-identity table? When true,
+/// `concreteReaches` is the authoritative `call_indirect` / `call_ref` subtype
+/// check (the structural `sigEq` is too loose — it ignores type identity /
+/// finality); when false the module declares no subtyping and `sigEq` is
+/// correct (D-232). Mirrors `concreteReaches`'s gti resolution.
+pub fn hasGti(rt: *Runtime) bool {
+    const inst_opaque = rt.instance orelse return false;
+    const inst = @as(*const Instance, @ptrCast(@alignCast(inst_opaque)));
+    return inst.gc_type_infos != null;
+}
+
 /// Is the concrete target type index a func typedef? (Selects the
 /// funcref-resolution path in `gcRefMatchesNonNullCore`.)
 fn concreteTargetIsFuncGti(gti: *const GcTypeInfos, target: u32) bool {

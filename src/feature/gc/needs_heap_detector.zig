@@ -43,9 +43,45 @@ const std = @import("std");
 
 const parser = @import("../../parse/parser.zig");
 const module_mod = @import("../../runtime/module.zig");
+const sections = @import("../../parse/sections.zig");
 
 const Module = module_mod.Module;
 const SectionId = parser.SectionId;
+
+/// Wasm 3.0 GC §5.3 type-form prefixes that introduce SUBTYPING (a declared
+/// supertype and/or open finality): `sub` (0x50, open/extendable) and
+/// `sub final` (0x4F). A bare comptype (0x60/0x5F/0x5E) is implicitly final with
+/// no super and is purely structural. (Encoding per `sections.zig` decode :434.)
+/// Their presence is the cheap byte pre-filter for D-232.
+const SUB_OPEN_TYPE_TAG: u8 = 0x50;
+const SUB_FINAL_TYPE_TAG: u8 = 0x4F;
+
+/// Cheap byte pre-filter: does the type-section body contain any `sub` /
+/// `sub final` form? False-positive tolerant (a coincidental byte over-triggers
+/// the precise `usesTypeSubtyping` decode, which then rejects it). False here =
+/// provably no subtyping → no `gc_type_infos` decode (ADR-0115 zero-overhead).
+pub fn mayUseTypeSubtyping(module: *const Module) bool {
+    const s = module.find(.type) orelse return false;
+    for (s.body) |b| {
+        if (b == SUB_OPEN_TYPE_TAG or b == SUB_FINAL_TYPE_TAG) return true;
+    }
+    return false;
+}
+
+/// Precise (post-decode) D-232 predicate: does any typedef carry a
+/// non-structural identity — an open (`sub`, non-final) type OR one with a
+/// declared supertype? Such a module needs `gc_type_infos` (supertype-chain +
+/// canonical-id + finality table) for correct `call_indirect` / `ref.*` subtype
+/// checks even with NO GC heap. Two distinct `(sub final (func))` with no super
+/// are canonically structural (≡ a bare `(func)`) → return false → `sigEq` is
+/// the correct check there.
+pub fn usesTypeSubtyping(types: sections.Types) bool {
+    for (types.finals, 0..) |fin, i| {
+        if (!fin) return true;
+        if (types.supertypes[i].len > 0) return true;
+    }
+    return false;
+}
 
 /// Wasm 3.0 GC proposal §5.3 (type encoding) — single-byte tags
 /// that introduce a non-functype declaration in the type section.
@@ -291,6 +327,36 @@ test "needs_gc_heap: clean module with only i32 types returns false" {
     var m = try parser.parse(testing.allocator, &bytes);
     defer m.deinit(testing.allocator);
     try testing.expect(!detectNeedsGcHeap(&m));
+}
+
+// D-232: type-subtyping detection (decouples gti materialisation from heap need).
+
+test "usesTypeSubtyping: bare functype (0x60) → false (structural; sigEq correct)" {
+    // type-section body: count=1, bare func () -> ().
+    const body = [_]u8{ 0x01, 0x60, 0x00, 0x00 };
+    var types = try sections.decodeTypes(testing.allocator, &body);
+    defer types.deinit();
+    try testing.expect(!usesTypeSubtyping(types));
+}
+
+test "usesTypeSubtyping: sub (open, 0x50) functype → true (needs gti)" {
+    // count=1, `sub` (0x50) with 0 supertypes, comptype func () -> ().
+    const body = [_]u8{ 0x01, 0x50, 0x00, 0x60, 0x00, 0x00 };
+    var types = try sections.decodeTypes(testing.allocator, &body);
+    defer types.deinit();
+    try testing.expect(usesTypeSubtyping(types));
+}
+
+test "mayUseTypeSubtyping: byte pre-filter true for a 0x50 sub-form module, false for bare-func" {
+    const sub_bytes = MAGIC_AND_VERSION ++ [_]u8{ 0x01, 0x06, 0x01, 0x50, 0x00, 0x60, 0x00, 0x00 };
+    var ms = try parser.parse(testing.allocator, &sub_bytes);
+    defer ms.deinit(testing.allocator);
+    try testing.expect(mayUseTypeSubtyping(&ms));
+
+    const bare_bytes = MAGIC_AND_VERSION ++ [_]u8{ 0x01, 0x04, 0x01, 0x60, 0x00, 0x00 };
+    var mb = try parser.parse(testing.allocator, &bare_bytes);
+    defer mb.deinit(testing.allocator);
+    try testing.expect(!mayUseTypeSubtyping(&mb));
 }
 
 test {

@@ -3,17 +3,6 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
-  - id: "D-232"
-    layer: "code"
-    status: "now"
-    description: |-
-      **ROOT-CAUSED (2026-06-02 probe).** gc/type-subtyping 4 interp assert_trap fails = GC `call_indirect` over-acceptance; NOT the runner-side "trap class discrimination" limitation the handover hypothesised (DISPROVEN). Diagnostic (`spec_assert_runner_wasm_3_0.zig` FAILtrap* prints, `1218d93a`): all 4 = `FAILtrapNoTrap` (returned normally; expected trap), funcs `fail1`/`fail2` across 2 type-subtyping modules, all `"indirect call"` traps.
-      ROOT CAUSE: `gc_type_infos` (the supertype-chain + canonical-id + finality table that `concreteReaches` needs) is materialised ONLY when `module.needs_gc_heap` (instantiate.zig:1070, gated on struct/array presence). The failing modules declare `sub`/`final` subtyping on FUNC types but have NO struct/array → `needs_gc_heap=false` → NO gti → `concreteReaches` returns false (blind, no gti) → the `sigEq(callee,expected) or concreteReaches(...)` short-circuit (mvp.zig callIndirectOp ~454) falls to `sigEq`, whose pure structural compare (params/results only, mvp.zig:635) wrongly accepts structurally-equal-but-DISTINCT types ($t1=(sub (func)) vs $t2=(sub final (func)); or $t0-super vs $t1-sub). PROOF (env-gated probe, reverted): all 23 `sigEq=true concreteReaches=false` cases have **gti=false** (incl. the 4 bugs); only 4 of those 23 are bugs (the other 19 are genuinely non-GC modules where sigEq is CORRECT) — so a naive "gate sigEq for GC" would regress up to 19.
-      FIX (coordinated, ADR-relevant §3.3.5.5; regression surface = ALL call_indirect — do as a focused cycle w/ full test-all between steps): (1) broaden gti materialisation — build `gc_type_infos` whenever the type section has subtyping structure (sub/final/rec on func types), not just `needs_gc_heap` (decouple type-identity table from heap need; keep ADR-0115 zero-overhead for plain 1.0/2.0 no-subtyping modules). (2) when gti present, make `concreteReaches` AUTHORITATIVE (don't let `sigEq` override it) — `accepted = if (gti) cr else sigEq`. (3) PREREQ verify `fe.raw_typeidx` reliability (comment ref_test_ops:200 warns it 0-defaults) + canonical_id distinguishes finality ($t1 non-final vs $t2 final MUST get different canonical_ids). MUST NOT regress the 1233 assert_return.
-    first_raised: "2026-06-02"
-    last_reviewed: "2026-06-02"
-    refs: |-
-      `src/runtime/instance/instantiate.zig:1070` (`needs_gc_heap` gate — the root); `src/runtime/instance/instance.zig:165` (materialiseGcTypes); `src/interp/mvp.zig` (callIndirectOp ~454 `sigEq or concreteReaches`; sigEq:635); `src/instruction/wasm_3_0/ref_test_ops.zig` (concreteReaches:197 + :200 raw_typeidx-0-default warning, concreteReachesGti:125 canonical_id match); `src/feature/gc/type_info.zig` (materialiseGcTypes + canonical_ids); `test/spec/spec_assert_runner_wasm_3_0.zig` (FAILtrap diagnostic); `test/spec/wasm-3.0-assert/gc/raw/type-subtyping.wast:256-346`; ADR-0116; ADR-0126; ADR-0130
   - id: "D-231"
     layer: "infra"
     status: "now"
@@ -523,7 +512,6 @@ entries:
     first_raised: "2026-05-28"
     last_reviewed: ""
     refs: ""
-
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
@@ -547,14 +535,14 @@ conventions: |-
   >   fires `audit_scaffolding` in narrow mode (§F only) to re-evaluate
   >   the named barrier. This closes the failure mode where
   >   `blocked-by:` quietly outlives its barrier.
-  
-  
-  
+
+
+
   > Move rows here briefly for backreference; remove after one cycle.
-  
-  
+
+
   ## How to read this file
-  
+
   - The Status column is the **only** column that determines whether a
     row is acted on now. `now` rows must be discharged on this resume
     cycle. `blocked-by: <X>` rows must explicitly name the structural
@@ -567,9 +555,9 @@ conventions: |-
   - Refs link to the artefact — file path + line, ADR §, or skill /
     rule path. If a Refs link 404s, that is itself a debt finding
     (the `audit_scaffolding` skill checks for this).
-  
+
   ## Promotion to ADR
-  
+
   A debt row that needs **load-bearing design discussion** (alternatives
   considered, decision rationale, removal condition spelling out
   behaviour change) is promoted from this file to a `.dev/decisions/

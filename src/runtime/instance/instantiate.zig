@@ -43,6 +43,7 @@ const import_mod = @import("import.zig");
 const instance_mod = @import("instance.zig");
 const heap_mod = @import("../../feature/gc/heap.zig");
 const type_info_mod = @import("../../feature/gc/type_info.zig");
+const needs_heap_detector = @import("../../feature/gc/needs_heap_detector.zig");
 const diagnostic = @import("../../diagnostic/diagnostic.zig");
 
 const Module = runtime_mod.Module;
@@ -1071,19 +1072,28 @@ pub fn instantiateRuntime(
         const h = try a.create(heap_mod.Heap);
         h.* = heap_mod.Heap.init(a);
         rt.gc_heap = h;
+    }
 
-        // 10.G op_gc cycle 21 (ADR-0116 §3a impl). Materialise
-        // per-Instance GC type metadata from the parser side-
-        // tables. Decode types fresh (the main type-section
-        // decode happens later in `instantiateInternal` but
-        // doesn't expose its `Types` upward; for now we decode
-        // here too — a follow-up consolidation cycle can share
-        // the decode if hot-path measurement justifies it).
-        if (module.find(.type)) |type_section| {
+    // 10.G op_gc cycle 21 (ADR-0116 §3a impl) + D-232. Materialise the
+    // per-Instance GC type-identity table (supertype chains + canonical ids +
+    // finality) from the parser side-tables. Needed by GC-heap modules AND by
+    // FUNC-only-subtyping modules: a module declaring `sub` / `sub final` func
+    // types has no heap objects but still needs this table for correct
+    // call_indirect / ref.* subtype checks (without it, `sigEq`'s structural
+    // compare wrongly accepts structurally-equal-but-distinct types). Decoupled
+    // from `needs_gc_heap` per D-232. ADR-0115 zero-overhead preserved: the
+    // cheap `mayUseTypeSubtyping` byte pre-filter skips the decode entirely for
+    // non-subtyping modules; the precise `usesTypeSubtyping` then rejects byte
+    // false-positives. (Decode is fresh here; consolidation with the
+    // instantiateInternal decode is a future cycle.)
+    if (module.find(.type)) |type_section| {
+        if (module.needs_gc_heap or needs_heap_detector.mayUseTypeSubtyping(&module)) {
             var types = try sections.decodeTypes(a, type_section.body);
             defer types.deinit();
-            const type_info = @import("../../feature/gc/type_info.zig");
-            inst.gc_type_infos = try type_info.materialiseGcTypes(a, types);
+            if (module.needs_gc_heap or needs_heap_detector.usesTypeSubtyping(types)) {
+                const type_info = @import("../../feature/gc/type_info.zig");
+                inst.gc_type_infos = try type_info.materialiseGcTypes(a, types);
+            }
         }
     }
 
