@@ -1411,3 +1411,31 @@ test "JitInstance.invokeMulti: 1-param 2-result returns (arg, 42) — arm64 para
     try testing.expectEqual(@as(u32, 5), results[0].i32);
     try testing.expectEqual(@as(u32, 42), results[1].i32);
 }
+
+test "memory64: fresh JitInstance i64.load at the page boundary 0xfff8 (D-234 isolation repro)" {
+    // The corpus shows `i64.load 0xfff8` on the persistent cur_jit returning
+    // 0x6867666564000000 (low 3 bytes 'a''b''c' zeroed) instead of "abcdefgh"
+    // = 0x6867666564636261. This probes whether a FRESH instance reproduces
+    // it (= real near-boundary data-init/load bug) or not (= persistent-cur_jit
+    // sequencing artifact per D-234). Hand-assembled minimal module ((memory
+    // i64 1) + data "abcdefgh" at 0xfff8 + `load`(i64)->i64 = i64.load) since
+    // @embedFile can't reach the corpus .wasm outside the src package.
+    const gpa = testing.allocator;
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
+        0x01, 0x06, 0x01, 0x60, 0x01, 0x7e, 0x01, 0x7e, // type: (i64)->(i64)
+        0x03, 0x02, 0x01, 0x00, // func: 1 func, type 0
+        0x05, 0x03, 0x01, 0x04, 0x01, // memory: memory64 (flag 0x04) min 1
+        0x07, 0x08, 0x01, 0x04, 0x6c, 0x6f, 0x61, 0x64, 0x00, 0x00, // export "load" func 0
+        0x0a, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0x29, 0x03, 0x00, 0x0b, // code: local.get 0; i64.load a=3 o=0; end
+        0x0b, 0x10, 0x01, 0x00, 0x42, 0xf8, 0xff, 0x03, 0x0b, 0x08, // data: active mem0 @ i64.const 0xfff8, size 8
+        0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, // "abcdefgh"
+    };
+    var inst = JitInstance.init(gpa, &bytes) catch |e| {
+        std.debug.print("minimal memory64 module init failed: {s}\n", .{@errorName(e)});
+        return error.TestUnexpectedResult;
+    };
+    defer inst.deinit(gpa);
+    // Offset 0xfff8 (the failing corpus case) — last 8 bytes of the 1-page mem.
+    try testing.expectEqual(@as(?u64, 0x6867666564636261), try inst.invoke(gpa, "load", &.{0xfff8}));
+}
