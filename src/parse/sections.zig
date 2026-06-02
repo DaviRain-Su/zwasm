@@ -263,6 +263,101 @@ fn canonFieldEqual(types: *const Types, a: StructFieldType, b: StructFieldType, 
     return canonValTypeEqual(types, a.storage.operandType(), b.storage.operandType(), ga, gb, depth);
 }
 
+/// Iso-recursive canonical equality of type-def `a` in `ta` against type-def
+/// `b` in `tb` — the CROSS-module variant of `canonicalEqual` (ADR-0127 PHASE
+/// C). A func import from module X is valid against an export from module Y
+/// only if their type-DEFINITIONS are canonically equal (finality + declared
+/// supertypes + structure), not merely structurally subtype-compatible: two
+/// distinct `()->()` defs (e.g. open `(sub (func))` vs a differently-grouped
+/// def) flatten identically but are NOT the same type. The single-`Types`
+/// `canonicalEqual` can't express this (its `a == b` short-circuit + shared
+/// `types` assume one module). This threads BOTH `Types` through the recursion;
+/// intra-group refs still match positionally (each side relative to its own
+/// group), inter-group refs recurse canonically across the two `Types`.
+pub fn canonicalEqualCross(ta: *const Types, a: u32, tb: *const Types, b: u32) bool {
+    return canonicalEqualCrossRec(ta, a, tb, b, 0);
+}
+
+fn canonicalEqualCrossRec(ta: *const Types, a: u32, tb: *const Types, b: u32, depth: u32) bool {
+    // No `a == b` short-circuit: a indexes `ta`, b indexes `tb` (different
+    // modules) — equal indices are unrelated types.
+    if (depth > 64) return false;
+    if (a >= ta.kinds.len or b >= tb.kinds.len) return false;
+    const ga = groupSpan(ta, a);
+    const gb = groupSpan(tb, b);
+    // Same position within the group + same group size.
+    if (a - ga[0] != b - gb[0]) return false;
+    if (ga[1] - ga[0] != gb[1] - gb[0]) return false;
+    var k: u32 = 0;
+    while (k < ga[1] - ga[0]) : (k += 1) {
+        if (!memberEqualCross(ta, ga[0] + k, tb, gb[0] + k, ga, gb, depth)) return false;
+    }
+    return true;
+}
+
+fn memberEqualCross(ta: *const Types, ia: u32, tb: *const Types, ib: u32, ga: [2]u32, gb: [2]u32, depth: u32) bool {
+    if (ta.kinds[ia] != tb.kinds[ib]) return false;
+    if (ta.finals[ia] != tb.finals[ib]) return false;
+    const supa = ta.supertypes[ia];
+    const supb = tb.supertypes[ib];
+    if (supa.len != supb.len) return false;
+    for (supa, supb) |x, y| if (!refIdxEqualCross(ta, x, tb, y, ga, gb, depth)) return false;
+    return switch (ta.kinds[ia]) {
+        .func => blk: {
+            const fa = ta.items[ia];
+            const fb = tb.items[ib];
+            if (fa.params.len != fb.params.len or fa.results.len != fb.results.len) break :blk false;
+            for (fa.params, fb.params) |pa, pb| if (!canonValTypeEqualCross(ta, pa, tb, pb, ga, gb, depth)) break :blk false;
+            for (fa.results, fb.results) |ra, rb| if (!canonValTypeEqualCross(ta, ra, tb, rb, ga, gb, depth)) break :blk false;
+            break :blk true;
+        },
+        .structdef => blk: {
+            const sa = (ta.struct_defs[ia] orelse break :blk false).fields;
+            const sb = (tb.struct_defs[ib] orelse break :blk false).fields;
+            if (sa.len != sb.len) break :blk false;
+            for (sa, sb) |fa, fb| if (!canonFieldEqualCross(ta, fa, tb, fb, ga, gb, depth)) break :blk false;
+            break :blk true;
+        },
+        .arraydef => blk: {
+            const aa = ta.array_defs[ia] orelse break :blk false;
+            const ab = tb.array_defs[ib] orelse break :blk false;
+            break :blk canonFieldEqualCross(ta, aa.element, tb, ab.element, ga, gb, depth);
+        },
+    };
+}
+
+fn refIdxEqualCross(ta: *const Types, x: u32, tb: *const Types, y: u32, ga: [2]u32, gb: [2]u32, depth: u32) bool {
+    const x_intra = x >= ga[0] and x < ga[1];
+    const y_intra = y >= gb[0] and y < gb[1];
+    if (x_intra != y_intra) return false;
+    if (x_intra) return x - ga[0] == y - gb[0];
+    return canonicalEqualCrossRec(ta, x, tb, y, depth + 1);
+}
+
+fn canonValTypeEqualCross(ta: *const Types, a: ValType, tb: *const Types, b: ValType, ga: [2]u32, gb: [2]u32, depth: u32) bool {
+    if (a != .ref and b != .ref) return a.eql(b);
+    if (a != .ref or b != .ref) return false;
+    if (a.ref.nullable != b.ref.nullable) return false;
+    return switch (a.ref.heap_type) {
+        .concrete => |x| switch (b.ref.heap_type) {
+            .concrete => |y| refIdxEqualCross(ta, x, tb, y, ga, gb, depth),
+            .abstract => false,
+        },
+        .abstract => |aa| switch (b.ref.heap_type) {
+            .abstract => |bb| aa == bb,
+            .concrete => false,
+        },
+    };
+}
+
+fn canonFieldEqualCross(ta: *const Types, a: StructFieldType, tb: *const Types, b: StructFieldType, ga: [2]u32, gb: [2]u32, depth: u32) bool {
+    if (a.mutable != b.mutable) return false;
+    const ap = a.storage.isPacked();
+    if (ap != b.storage.isPacked()) return false;
+    if (ap) return a.storage.specByte() == b.storage.specByte();
+    return canonValTypeEqualCross(ta, a.storage.operandType(), tb, b.storage.operandType(), ga, gb, depth);
+}
+
 /// Decode a single field-type triple per Wasm 3.0 GC §5: storage type
 /// (`valtype | packedtype`, ADR-0125) + mutability byte (0x00 const,
 /// 0x01 var).
@@ -1020,6 +1115,44 @@ test "decodeTypes: sub / sub final prefix populates supertypes + finals (10.G AD
     // type 1: `sub $0` → NOT final (open), one declared supertype (index 0).
     try testing.expectEqual(false, t.finals[1]);
     try testing.expectEqualSlices(u32, &[_]u32{0}, t.supertypes[1]);
+}
+
+test "canonicalEqualCross: identical bare func defs across two Types are equal (ADR-0127 PHASE C)" {
+    var ta = try decodeTypes(testing.allocator, &[_]u8{ 0x01, 0x60, 0x00, 0x00 }); // () -> ()
+    defer ta.deinit();
+    var tb = try decodeTypes(testing.allocator, &[_]u8{ 0x01, 0x60, 0x00, 0x00 }); // () -> ()
+    defer tb.deinit();
+    try testing.expect(canonicalEqualCross(&ta, 0, &tb, 0));
+}
+
+test "canonicalEqualCross: differing params across two Types are NOT equal (ADR-0127 PHASE C)" {
+    var ta = try decodeTypes(testing.allocator, &[_]u8{ 0x01, 0x60, 0x00, 0x00 }); // () -> ()
+    defer ta.deinit();
+    var tb = try decodeTypes(testing.allocator, &[_]u8{ 0x01, 0x60, 0x01, 0x7F, 0x00 }); // (i32) -> ()
+    defer tb.deinit();
+    try testing.expect(!canonicalEqualCross(&ta, 0, &tb, 0));
+}
+
+test "canonicalEqualCross: same structure but differing finality are NOT equal (the .36/.42 case)" {
+    // ta type 0 = bare 0x60 () -> () → FINAL. tb type 0 = `sub` (0x50, 0 supers)
+    // wrapping the same () -> () → OPEN. Structurally identical, canonically
+    // distinct — PHASE C must reject an import of one against the other.
+    var ta = try decodeTypes(testing.allocator, &[_]u8{ 0x01, 0x60, 0x00, 0x00 }); // final () -> ()
+    defer ta.deinit();
+    var tb = try decodeTypes(testing.allocator, &[_]u8{ 0x01, 0x50, 0x00, 0x60, 0x00, 0x00 }); // sub (open) () -> ()
+    defer tb.deinit();
+    try testing.expect(!canonicalEqualCross(&ta, 0, &tb, 0));
+}
+
+test "canonicalEqualCross: self-recursive struct defs across two Types are equal (intra-group ref)" {
+    // rec group of 1: struct { (ref null $0) const } — a self-reference. The
+    // intra-group ref must match positionally on EACH side's own group.
+    const body = [_]u8{ 0x01, 0x4E, 0x01, 0x50, 0x00, 0x5F, 0x01, 0x63, 0x00, 0x00 };
+    var ta = try decodeTypes(testing.allocator, &body);
+    defer ta.deinit();
+    var tb = try decodeTypes(testing.allocator, &body);
+    defer tb.deinit();
+    try testing.expect(canonicalEqualCross(&ta, 0, &tb, 0));
 }
 
 test "decodeTypes: 0x4E rec group expands to N consecutive type indices (10.G cycle 126)" {
