@@ -3,6 +3,15 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-231"
+    layer: "infra"
+    status: "now"
+    description: |-
+      x86_64-side build-option DCE gate coverage gap (follow-on to D-230 / ADR-0130). `check_build_dce.sh` builds HOST-NATIVE binaries and nm-greps them; a Mac (aarch64) build compiles ONLY arm64 codegen (the Mac v1_0 nm showed zero x86_64 symbols), so the `--gate` call now in `gate_merge.sh` runs Mac-side = catches ONLY arm64 leaks. An x86_64-codegen level-separation leak would surface only in an x86_64-host build → currently unverified by gate. Low risk: x86_64 emit.zig routes 3.0 ops through `dispatch_collector.dispatchX86_64Ctx` → `enabledByBuild()` comptime DCE (correct by construction; that is WHY only arm64 leaked in D-230). FIX: add a `check_build_dce.sh --gate` invocation to the ubuntu leg of `gate_merge.sh` (needs `run_remote_ubuntu.sh` to accept a `dce-gate` step, or run it inline over SSH after the test-all). Verify: deliberately un-gate one x86_64 3.0 prong on a scratch branch → ubuntu --gate must FAIL.
+    first_raised: "2026-06-02"
+    last_reviewed: "2026-06-02"
+    refs: |-
+      `scripts/check_build_dce.sh` (host-native build); `scripts/gate_merge.sh` (Mac-only --gate); `scripts/run_remote_ubuntu.sh`; `src/engine/codegen/x86_64/emit.zig` (collector-routed, DCE-clean); ADR-0130; D-230
   - id: "D-230"
     layer: "code"
     status: "resolved"
