@@ -71,9 +71,8 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   = ONE root cause (JIT call_indirect uses D-111 structural `funcTypeEql`, finality+subtype-BLIND, not the gti
   subtype check). Full fix = **D-235**, complete plan in **`.dev/jit_call_indirect_subtype_prep.md`** (the
   next-clear-session deliverable). Other return fail = eh/try_table (EH-on-JIT, separate). assert_RETURN 762/2/531.
-- **Continuity-memo**: interp wasm-3.0 = 0 fails (fully green). JIT 762/2/531. PHASE C follow-ups (debt-worthy):
-  api/instance.zig:572 + instantiate.zig:1657 `.cross_module` structural-only. This session CLOSED: D-230 (level-
-  sep leak + DCE gate revive, ADR-0130) + D-232 (gti func-subtyping, ADR-0131). D-231 = x86_64 DCE-gate follow-on.
+- **Continuity-memo**: interp wasm-3.0 = 0 fails (fully green). JIT 762/2/531. This session CLOSED: D-230
+  (level-sep + DCE gate, ADR-0130) + D-232 (gti func-subtyping, ADR-0131). D-231/D-234 = follow-ons.
 - **Exit-condition**: 4 trap_fails → 0 ✓ DONE (D-232/ADR-0131; interp corpus fully green). ONLY the §10-scope
   question remains (USER-flip case, prepped doc) — user-gated. Bundle CLOSES once §10-scope resolved; meanwhile
   non-gated forward work = JIT eh/try_table + re-check JIT gc/type-subtyping (interp fixes are interp-only).
