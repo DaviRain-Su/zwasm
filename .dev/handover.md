@@ -29,26 +29,32 @@
 - **EH-on-JIT dispatch IS wired** (lesson `2026-06-03-eh-on-jit-blocker-is-validator-not-dispatch`):
   throw_trampoline.zig trampolineCore + zwasmThrowTrampoline (all 3 ABIs) set eh_handler_sp/fp/pc + JMP.
   Its docstring (lines 9-35, "3c-ii deferred") is STALE — fix when next touching. With try_table.1 now
-  compiling, the dispatch RUNS — and the 5 fails are real dispatch-correctness bugs (below).
+  compiling, the dispatch RUNS — the 2 remaining fails are cross-instance (Cause B / ADR-0134).
 - **Watch**: `runner_test.zig` 1370 / `compile.zig` 1223 / `runner_gc_test.zig` 1476 / `jit_abi.zig` 1350 (WARN, < hard 2000).
 
-## Active task — `10.E-eh-on-jit` bundle: CAUSE B (cross-instance throw)  **NEXT**
+## Active task — CAUSE B cross-instance EH: **cycle 1 = D3 global tag identity**  **NEXT**
 
-try_table.1.wasm runs 34 asserts (32 pass). ✅ Cause A FIXED (`50e5ecd3`, tag-identity canon). The **2
-remaining fails are both Cause B** (`catch-imported` got=1, `imported-mismatch` got=1 — confirmed: each
-throws a tag owned by module 1 via a cross-instance call):
+try_table.1.wasm 32/34. ✅ Cause A (`50e5ecd3`). 2 remaining fails (`catch-imported`, `imported-mismatch`) are
+Cause B = cross-instance throw. **Design locked in ADR-0134** (this turn) — confirmed in §10.E scope (ADR-0114
+D7 + Removal cond `cross_module_throw_propagation.wat` make cross-module EH Phase-10; interp passes day-1 via
+shared `*TagInstance`; ADR-0128 → JIT owes parity). The `unwind.zig:26-31` "Phase 11+" note is a STALE
+impl-deferral (loses to ADR-0114; update it when D2 lands). **Two gaps** (grounded this turn):
 
-- **CAUSE B — cross-INSTANCE throw via the bridge thunk. DEEPER (multi-cycle).** `catch-imported` (and the
-  separate `imported-mismatch` module) call `test::throw` (module 1) via the D-225 bridge thunk, which swaps
-  runtime_ptr to module 1's `*JitRuntime` → the throw runs against module 1's EMPTY exception table → uncaught
-  → thunk RETs normally → caller resumes past the call with `i32.const 1` leaked → returns 1 (the catch NEVER
-  fires; not a landing-pad reconciliation bug). `unwind.zig:26-31` explicitly defers per-frame-instance
-  dispatch. Fix: resolve the thrown tag to its identity at the throw site (throwing instance's tags), then
-  FP-walk frames matching identity against EACH frame's OWN instance exception table (per-frame-instance
-  dispatch). The Cause-A canon map is per-module local ids (NOT comparable across instances) — Cause B needs a
-  GLOBAL identity (source TagInstance ptr / global canonical id) so a module-1 throw matches a module-2 catch.
-  In §10.E scope ("cross-module exception propagation"). loci: throw_trampoline.zig trampolineCore (single
-  rt/table today), exception_table.zig (tag_canon today local), the D-225 thunk in setup.zig (runtime_ptr swap).
+1. **Frame unreachable** — arm64 thunk (`arm64/thunk.zig` emitThunk) DOES `STP X29,X30,[SP,#-80]!` (saves
+   caller call-site LR+FP) but NEVER `MOV X29,SP`, so its frame isn't FP-linked → the FP-walk reaches the
+   caller frame carrying a THUNK pc, not the caller's call-site pc → caller try_table unfindable.
+2. **Single-instance dispatch** — `trampolineCore` holds one `rt`/table; must switch per-frame + compare tags
+   by a GLOBAL id (Cause-A `tag_canon` is per-module local, not cross-instance comparable).
+
+**ADR-0134 sequencing** (bundle, 3 cycles): **cycle 1 = D3** global tag identity — add a `tag_import_targets`
+analog of D-225 `func_import_targets` (spec runner resolves each tag import → source global tag-id), a global
+tag-id map in `JitRuntime`, throw-site + entry resolve to global id, comparison subsumes Cause-A local
+`tag_canon`. Red test: cross-module throw matches by global id at the TABLE level (unit), no frame walk.
+**cycle 2 = D1+D2**: thunk `MOV X29,SP` (+1 instr, both arches; bump `thunk_bytes`/asserts) + process-global
+block-range→`*JitRuntime` registry + per-frame table switch in `unwind.walk`/`trampolineCore`. **cycle 3**:
+x86_64 parity + `cross_module_throw_propagation.wat` fixture + 2-host. **Cycle-1 first read**: how the JIT spec
+runner links modules + assigns/threads a global tag id (check `runner.zig` JitInstance link path + `setup.zig`
+~266-300 func_import_targets loop = the plumbing template).
 
 Other non-gated tracks (after EH): **D-234** (memory64 assert_trap harness artifact), **D-198**, **D-209**,
 **D-210** (return_call_indirect-in-try = func[36], TC+EH gap). Realworld GC/EH/TC producers.
@@ -59,11 +65,11 @@ Other non-gated tracks (after EH): **D-234** (memory64 assert_trap harness artif
 
 ## Active bundle
 
-- **Bundle-ID**: `10.E-eh-on-jit` (opened `3b668110`).  **Cycles-remaining**: ~1-2 (Cause B only).
-- **Continuity-memo**: try_table.1.wasm COMPILES + RUNS, 32/34. ✅ func[6] validate (`3b668110`) → ✅ catchless
-  try_table (`590093f5`, +29) → ✅ try_table-result-arity (`881b25e0`, +2) → ✅ **Cause A aliased-import identity
-  (`50e5ecd3`, +1)** → ❌ **Cause B cross-INSTANCE throw via bridge thunk (2 fails)** — full plan + loci in Active
-  task above. func[36] return_call_indirect-in-try = separate TC+EH gap (D-210 family).
+- **Bundle-ID**: `10.E-eh-on-jit` (opened `3b668110`).  **Cycles-remaining**: ~3 (Cause B = ADR-0134 D3→D1+D2→x86_64).
+- **Continuity-memo**: try_table.1.wasm 32/34. ✅ func[6] validate (`3b668110`) → ✅ catchless (`590093f5`, +29)
+  → ✅ result-arity (`881b25e0`, +2) → ✅ **Cause A aliased-import identity (`50e5ecd3`, +1)** → 🎯 **Cause B
+  cross-instance: ADR-0134 design locked** (this turn, no code yet). NEXT = cycle 1 (D3 global tag identity).
+  func[36] return_call_indirect-in-try = separate TC+EH gap (D-210 family).
 - **Exit-condition**: JIT EH dir return-fail = 0 (currently pass=32 fail=2 skip=0 → target 34/0/0).
 
 ## §10 remaining — the six `[ ]` rows
@@ -78,8 +84,9 @@ Other non-gated tracks (after EH): **D-234** (memory64 assert_trap harness artif
 
 ## Step 0.7 (next resume)
 
-THIS turn = Cause A (`50e5ecd3`, code). Mac `test-all` + lint gate GREEN. ubuntu kick fired against `50e5ecd3`
-(x86_64) — Step 0.7 next resume: `tail -3 /tmp/ubuntu.log`, revert the commit pair on FAIL. Mac aarch64.
+THIS turn = Cause B DESIGN only (ADR-0134 + handover; NO codegen, NO ubuntu kick — docs-only). Code state
+unchanged since `73e55e6d`, ubuntu-verified OK (test-all, exit 0). Prior turn's Cause A (`50e5ecd3`) is 2-host
+green. Next resume: Step 0.7 has nothing new to verify; go straight to cycle 1 (D3). Mac aarch64; ubuntu x86_64.
 
 **Gate hygiene**: Step-5 Mac gate = `bash scripts/mac_gate.sh`. JIT corpus: `zig build test-spec-wasm-3.0-assert`
 (NO bogus `-Dno-run`); **pick the exe by mtime** — `/usr/bin/find .zig-cache/o -name zwasm-spec-wasm-3-0-assert
