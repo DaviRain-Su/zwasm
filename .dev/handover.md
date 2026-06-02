@@ -8,15 +8,14 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD** (`1005d4bf`): §1 spec-corpus JIT mode. Recent: array.init (`a11b1699` +28), convert emit
-  (`b70e2604`), **D-226 reftype-param JIT invoke (`1005d4bf`, +139 — biggest since memory64)**. D-226:
-  `runner.paramScalarKey` maps a `.ref` param to the i64 carrier (u64 GPR passthrough, untruncated via
-  callVoid_i64) + `scalarArgBits` packs externref/funcref args → `(invoke "init" (ref.extern 0))` now runs
-  under JIT → gc/ref_test|ref_cast|br_on_cast tables populate → their asserts execute + PASS. Mac aarch64 JIT:
-  **assert_return pass=744 fail=2 skip=549** (was 605/2/688). **JIT-EXECUTED fails = 2, UNCHANGED**
-  (gc/type-subtyping run-Trap = ADR-0127 PHASE C; eh/try_table = EH-on-JIT; --fail-detail verified no new
-  fails). Interp UNCHANGED. The convert+RTT 4-cycle investigation is CLOSED: the prior "+59 regression" was
-  purely the un-invokable externref-param setup, not convert/ref.test (both proven correct).
+- **HEAD** (`33b479e7`): §1 spec-corpus JIT mode. Recent: D-226 reftype-param JIT invoke (`1005d4bf` +139),
+  **multi-value JIT invoke (`fad904c6` capability + `33b479e7` corpus-wire, +16 — 760/2/533)**. Multi-value:
+  `JitInstance.invokeMulti` reuses ADR-0106's already-implemented buffer-write multi-result ABI via
+  `module.entry_buf` (the wrapper-thunk path the wasm-2.0 runner uses) — NO fresh ADR, NO compileWasm change.
+  The wasm-3.0 corpus runner's `jitReturnEligible` now admits results_len>1 + routes scalar multi-value
+  through invokeMulti; `JitModule.hasThunk` gates NO_THUNK shapes → skip (not panic). Mac aarch64 JIT:
+  **assert_return pass=760 fail=2 skip=533** (was 744/2/549). **JIT-EXECUTED fails = 2, UNCHANGED**
+  (gc/type-subtyping run-Trap = ADR-0127 PHASE C; eh/try_table = EH-on-JIT). Interp UNCHANGED.
 - **PER-MODULE blocker-STACK reality** (lesson `2026-06-02-jit-corpus-late-phase-is-per-module-
   blocker-stacks`): since memory64 (+208, last big mover), every gc/funcref fix has been correct
   but ~0 corpus — each remaining module has 3-6 DISTINCT blockers; JIT rejects at the FIRST
@@ -26,7 +25,7 @@
   StackTypeMismatch 6 (funcref br_on_null validator gap), UnsupportedEntrySignature 7, InvalidFuncIndex 4.
 - **Two paths**: spec corpus = interp by default; JIT is opt-in `ZWASM_SPEC_ENGINE=jit` (default
   test-all unchanged). JIT entry = `runner.zig` `JitInstance`. ADR-0128 + ADR-0127 Accepted (no user gate).
-- **Watch**: `runner_test.zig` 1180 (gc tests extracted → `runner_gc_test.zig`, `99e122e1`). Headroom OK.
+- **Watch**: `runner_test.zig` ~1234 (gc tests extracted → `runner_gc_test.zig`). Over soft 1000 WARN, under hard 2000.
 
 ## Active task — Phase 10 → 100% (ADR-0128)  **NEXT**
 
@@ -42,28 +41,26 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Active bundle
 
-- **Bundle-ID**: `10.G-§1-skip-reduction` (prior gc/array bundle CLOSED at `fa596f08`, exit met: array.8
-  green, pass=577; JIT-executed fails now 2, both gated/deep).
-- **Cycles-remaining**: ~1 — array.init (`a11b1699` +28), convert (`b70e2604`), **D-226 (`1005d4bf` +139)** all
-  DONE. The eligible gap-op + invoke-enablement §1 levers are SPENT. Bundle CLOSE-eligible; next = multi-value.
-- **SPENT levers**: `struct.get_s/u` (`568ac652`), `array.init_data/elem` (`a11b1699`),
-  `any.convert_extern`/`extern.convert_any` (`b70e2604`), reftype-param JIT invoke / D-226 (`1005d4bf`).
-- **convert+RTT CLOSED (4-cycle investigation, +139 net)**: convert emit was correct all along; the "+59
-  regression" was purely the un-invokable externref-param setup (D-226). D-226 landed +139 (744/2/549),
-  biggest mover since memory64. ref.test/ref.cast/br_on_cast on the now-populated tables (incl. convert'd-
-  extern at `$ta[6,7]`) all PASS — H1 (extern bounds-guard) was correct: `readObjKindHeap` returns null for
-  the `0x7000…` host-ref → ref.test classifies it correctly.
-- **NEXT LEVER = (b) multi-value / `buffer_write` ABI** (D-094/D-164; compileWasm hardcodes register_write,
-  compile.zig:1058). ADR-grade, HIGH blast radius → file the ADR FIRST (§18.2). Would flip struct.10's ~20
-  get_packed asserts + ~19 other results=2 eligibility-skips. After multi-value, the residual §1 skip=549 is
-  DOMINATED by multi-memory 407 (Phase-14 deferred, NOT a §10 lever) + scattered args/v128/cross-module
-  eligibility skips — i.e. §1 JIT-corpus is approaching its non-deferred floor. Reassess scope next cycle:
-  multi-value ADR, or pivot to §10 realworld producers (§5) / the 2 gated fails (ADR-0127 PHASE C, EH).
-- **Continuity-memo**: §1 JIT-EXECUTED assert_return fails = 2 (type-subtyping user-gated ADR-0127 PHASE C;
-  try_table EH-on-JIT) — both deep/gated. JIT corpus = **744/2/549**. 2 pre-existing array_init trap_fails =
-  separate assert_trap follow-on, low ROI.
-- **Exit-condition**: multi-value ABI lands (post-ADR) → struct.10 ~20 + ~19 results=2 asserts flip skip→pass
-  (net assert_return fail unchanged at 2). Else bundle CLOSES — §1 tractable skip-reduction is exhausted.
+- **Bundle-ID**: `10.G-§1-multivalue` (prior `10.G-§1-skip-reduction` CLOSED — its gap-op + invoke
+  levers SPENT: `struct.get_s/u`, `array.init_*`, convert, D-226 reftype-param invoke).
+- **Cycles-remaining**: ~1-2. Multi-value JIT invoke core LANDED (`fad904c6` + `33b479e7`, +16 → 760/2/533).
+- **KEY CORRECTION (this cycle)**: multi-value was NOT "ADR-grade HIGH blast radius needing a fresh ADR" —
+  ADR-0106 (Closed/implemented 2026-05-24) ALREADY defines the buffer-write multi-result ABI, exercised by
+  the wasm-2.0 runner via `module.entry_buf` (wrapper thunk). The gap was only that the NEW wasm-3.0
+  `JitInstance` path never wired it up. `invokeMulti` mirrors the 2.0 path; no compileWasm/ABI change.
+- **NEXT LEVER = param-bearing multi-value wrapper thunk (arm64)**. The +16 are all 0-param 2/3-GPR-result
+  fns. `wrapper_thunk.emit` (arm64/AAPCS, src/engine/codegen/shared/wrapper_thunk.zig:173) rejects
+  `params.len != 0` → those modules get NO_THUNK → invokeMulti skips. The x86_64 Win64 arm
+  (`emitX8664Win64`, n_params 1/3) shows the recipe: marshal args from the buffer-write `args` ptr into the
+  body's expected GPRs. Extending the arm64 `emit` to n_params {1,2,3} GPR-class would unlock struct.10
+  get_packed (param-bearing) + more results=2 shapes. Codegen-emit work (Step 0 survey wrapper_thunk +
+  emitX8664Win64; ≤1-2 cycles). Also still NO_THUNK: FP-result multi-value + 4+ results.
+- **Continuity-memo**: §1 JIT-EXECUTED assert_return fails = 2 (type-subtyping ADR-0127 PHASE C; try_table
+  EH) — both deep/gated. JIT corpus = **760/2/533**. After param-bearing thunk, reassess: residual skip is
+  dominated by multi-memory 407 (Phase-14 deferred) → §1 JIT-corpus near its non-deferred floor; pivot to
+  §10 realworld producers (§5) / the 2 gated fails.
+- **Exit-condition**: arm64 param-bearing multi-value wrapper thunk lands → struct.10 get_packed asserts
+  flip skip→pass (fail unchanged at 2). Else bundle CLOSES — §1 tractable multi-value skip-reduction done.
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -78,12 +75,11 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-THIS turn = D-226 reftype-param JIT invoke (`1005d4bf`, code) → +139 corpus (744/2/549), Mac-green
-(zig build test + lint + corpus all green; the 2 fails are the known gated ones). **STOPPED at user request
-(きりが良いところ)** — loop NOT re-armed this turn. ubuntu kick fired for cross-host confirm. Next resume
-Step 0.7: `tail -3 /tmp/ubuntu.log` — expect `OK (HEAD=<handover-SHA>)`; on FAIL revert. Then start the
-NEXT LEVER (multi-value ABI — file ADR first) or reassess (§1 tractable skip-reduction is largely exhausted;
-residual skip=549 ≈ multi-memory 407 deferred + multi-value ~39 + scattered eligibility). Mac aarch64; ubuntu = x86_64.
+THIS turn = multi-value JIT invoke (`fad904c6` invokeMulti capability + unit test; `33b479e7` corpus-wire)
+→ +16 corpus (760/2/533), Mac-green (mac_gate.sh test-all + lint + JIT corpus all green; the 2 fails are the
+known gated ones). Two chunks chained; turn pushed + ubuntu-kicked + re-armed. Next resume Step 0.7:
+`tail -3 /tmp/ubuntu.log` — expect `OK (HEAD=33b479e7)`; on FAIL revert the turn's 2 commit pairs. Then start
+the NEXT LEVER (arm64 param-bearing multi-value wrapper thunk — see Active bundle) or reassess. Mac aarch64; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
