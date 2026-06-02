@@ -61,14 +61,20 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET** long ago.
   Infra COMPLETE; backbone operational (pass=484). Bundle stays open as the diagnostic-driven
   gap-fixing vehicle (`JITmodrej` tally → fix biggest tractable lever).
-- **NEXT chunk** = **D-218 i31 table-mutation ops** (now-visible after the elem fix): `table.grow`/
-  `table.fill`/`table.copy`/`table.init` on an i31ref table mis-handle the i31-encoded ref value
-  (grow returns -1; fill/copy/init likely store wrong). Repro: i31.1 exports grow/fill/copy/init
-  (`ZWASM_SPEC_ENGINE=jit <bin> --fail-detail | grep 'gc/i31'`). Likely the table.grow/fill emit or
-  setup passes the i31 value through a funcref-shaped path. Same is_i31_family discriminator pattern.
-  If i31-mutation proves deep, next tractable targets = gc/array ×6 traps, then ref_func ×3 (D-198).
-  **REALITY** (lesson per-module-blocker-stacks): remaining fails are per-op gaps; big levers SPENT;
-  pick one, clear it. Skip multi-memory 51 (Phase-14). Prefer direct FAIL→pass flips.
+- **NEXT chunk** = **D-224 implement JIT `table.grow`** (root-caused this turn): `table_grow_fn` is
+  unconditionally `defaultTableGrowReject` (returns -1) — never installed. Fixes i31 grow + funcref
+  grow generally. Contained runtime feature (mirror memory.grow / D-215): install a real fn in setup
+  that allocs a fresh per-table refs(+funcptrs) buffer of len+delta, copies+fills, updates the
+  `TableSlice` descriptor in place (table.get reads it fresh — no JIT reload), tracks grown buffers in
+  a grow-ctx for deinit. Plumbing: rt needs a table-grow-ctx (host_state is taken by MemGrowCtx — add
+  a field or combine). Check table.fill/copy/init too. Full design in D-224 row. Verify: i31.1 grow +
+  a funcref table.grow unit test.
+- **TRIAGE of the other 26 fails (this turn)** — all deep, lower-throughput per the per-module-blocker
+  lesson; big levers SPENT: i31.3/4 `get err=Trap` = table-with-init-expr + IMPORTED-global const-expr
+  (cross-module, `(table 3 3 (ref i31) (ref.i31 (global.get $env.g)))`); gc/array `new`/`get` traps =
+  CORPUS-CONTEXT-DEPENDENT (array.5 `new` works standalone via JitInstance — not reproducible alone;
+  `get` takes a ref arg); ref_func ×3 (D-198); gc/type-subtyping ×1 (ADR-0127 PHASE C); try_table ×1
+  (EH). Skip multi-memory 51 (Phase-14). D-209 (memory64 >4GiB offset) = deferred, no observable.
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -83,9 +89,10 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior turn (`0d2b636c`, D-218 triage) ubuntu = n/a (docs only). THIS turn landed the D-218 i31 elem
-3-guard (`64709a95`: compile.zig + setup.zig, +8 corpus) → ubuntu `test-all` kicked at end → `tail -3
-/tmp/ubuntu.log` next resume (Step 0.7). On FAIL revert to `0d2b636c`. Mac aarch64; ubuntu = x86_64.
+Prior turn (`5fbb85ae`, D-218 i31-elem fix) ubuntu `test-all` = GREEN (verified HEAD=5fbb85ae; x86_64
+OK). THIS turn = TRIAGE (root-caused table.grow=default-reject → D-224; characterized the other 26
+fails as deep; debt+handover only → code == green `5fbb85ae`). SKIP Step 0.7 ubuntu next resume (no
+code delta). Mac aarch64; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
