@@ -8,18 +8,18 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD** (`24a17ed7`): **gc/type-subtyping.17 "run" CLOSED** (`80aeee1d` + `24a17ed7` guard test) — two
-  coordinated interp fixes (the cyc180/D-198 rabbit hole): #1 call_indirect/return_call_indirect accept a
-  callee whose declared type is a SUBTYPE of the call type (Wasm §3.3.5.5, gti-gated concreteReaches); #2
-  function-level `br` (depth==label_len) returns via returnFromFunction (Wasm §4.4.8 implicit outermost
-  block) instead of trapping. **interp assert_return now fully green (1233/0)**; no regression (gate green).
-- **⚠ USER-DIRECTED STOP** (no re-arm). Two audits PREPPED for fresh deep sessions (wiring/reference chains):
-  (1) **`.dev/wasm_level_separation_audit.md`** — the user's PRIMARY axis: is wasm 1.0/2.0/3.0 separation
-  real or "half規約頼み"? CONFIRMED leak: mvp.zig registers handlers unconditionally + inlines 3.0 logic
-  (br_on_cast, call_indirect-subtype) NOT per-op-DCE'd → contradicts ADR-0073's "absent from v1_0 binary";
-  dispatch_consistency_audit (shape-only) can't catch it. (2) **`.dev/phase10_scope_reassessment.md`** —
-  §10 exit vs Phase-14 deferral, reframed as ROADMAP RE-STRUCTURING (multi-memory = first instance; enumerate
-  all deferred-but-§10-gating items + re-sequence phases, not a one-off ADR-0128 footnote).
+- **HEAD**: **level-separation PRIMARY-axis audit EXECUTED → ADR-0130** (the user's "real or 半規約頼み?"
+  question). VERDICT: **partially real + dead enforcement gate**. nm truth-test (`check_build_dce.sh --gate`):
+  **v1_0 + v2_0 binaries leak `wasm_3_0` symbols** (v3_0 clean). 6 symbols: (a) interp `mvp.zig`
+  `concreteReaches` (call_indirect/call_ref subtype, NEW this session `80aeee1d`) — **FIXED this turn**
+  (comptime-gated behind `wasm_v3_plus`; 6→5 symbols, text −848B); (b) 5× JIT `emit.zig`
+  `wasm_3_0.{return_call*,throw}.emit` (both arches, pre-existing) — **D-230 next bundle cycle**. META-finding:
+  `check_build_dce.sh` detection is CORRECT and caught it, but `--gate` is wired only into `check_subrow_exit.sh`
+  which NOTHING calls → detection w/o enforcement (lesson `2026-06-02-detection-without-enforcement-dead-gate`).
+  br_on_cast did NOT leak (inlined). DP resolved: fix-not-bless; preserve ADR-0073 wording; revive gate (no new audit axis).
+- **STILL PREPPED (not yet run)**: **`.dev/phase10_scope_reassessment.md`** — §10 exit vs Phase-14 deferral,
+  reframed as ROADMAP RE-STRUCTURING (multi-memory = first instance; enumerate all deferred-but-§10-gating
+  items + re-sequence phases, not a one-off ADR-0128 footnote). The OTHER deep session.
 - **PRIOR**: ADR-0127 PHASE C DONE (cross-module type-def identity; assert_unlinkable 4→0; predicates
   `canonicalEqualCross` `6f1eeb4a` + `superReachesCross` `d5183d4e` + integration `add983e8`). multi-value +18.
 - **wasm-3.0 interp fails now = 4** (was 5): all gc/type-subtyping **assert_trap** (NOT .17 — other modules;
