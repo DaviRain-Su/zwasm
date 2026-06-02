@@ -41,16 +41,12 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Active bundle
 
-- **Bundle-ID**: `10.G-typesubtyping-PHASE-C` (prior `10.G-§1-multivalue` CLOSED — multi-value invoke +
-  arm64 1-param thunk delivered +18 → 762/2/531; the §1 skip tail is now its non-deferred floor: residual
-  skip=531 dominated by multi-memory 407 = Phase-14-deferred. Multi-value follow-ons are low-ROI: x86_64
-  SysV param-bearing = D-229, 2/3-param/FP-result arm64 = unmeasured-but-marginal).
-- **Cycles-remaining**: ~1-2. Cycle-1 survey DONE; cycle-2 `canonicalEqualCross` predicate DONE (`6f1eeb4a`,
-  4 tests). NEXT = the wiring chunk (thread exporter type-def + run PHASE C #2 at resolve).
-- **PIVOT RATIONALE**: §1 corpus skip-reduction is exhausted; the binding §10 exit constraint is now
-  **fail=0 both backends**, currently fail=2. ADR-0127 PHASE C closes ONE real JIT-executed fail
-  (gc/type-subtyping). ADR-0127 is **Accepted** (via ADR-0128 100% directive — autonomous, NOT user-gated;
-  "D-202 PHASE C implements next"). This is higher value than more §1 skip-shaving.
+- **Bundle-ID**: `10.G-typesubtyping-PHASE-C` (prior `10.G-§1-multivalue` CLOSED — +18 → 762/2/531; §1 skip
+  tail at its non-deferred floor, multi-value follow-ons low-ROI = D-229). Pivot rationale: §1 skip-reduction
+  exhausted; binding §10 exit = fail=0 both backends; PHASE C is Accepted/autonomous (ADR-0128 100% directive).
+- **Cycles-remaining**: ~1. BOTH predicates DONE+tested: `canonicalEqualCross` (`6f1eeb4a`, 4 tests) +
+  `superReachesCross` (`d5183d4e`, 2 tests). NEXT (final) = the INTEGRATION chunk (retain exporter Types +
+  thread into CrossModuleFuncEntry + run the check at linker resolve).
 - **SCOPE**: PHASE C targets the **4 assert_unlinkable fails** `gc/type-subtyping.{36,42,52,54}` (NOT the
   assert_return run-Trap — separate RTT, still fail). PHASE A (structural) + B (finality) landed cyc236/239;
   PHASE C adds type-definition identity (canonical-equal OR declared-supertype-reach across two `Types`).
@@ -61,9 +57,15 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   use `canonicalEqualCross`, NOT the same-typespace single-Types hack): accept iff PHASE-A-structural AND
   (`canonicalEqualCross(importer_types, want_tidx, exporter_types, source_tidx)` OR exporter's supertype
   chain from source_tidx reaches a type canonicalEqualCross to want_tidx). Both-false → reject.
-  - **Lifetime**: capture `source_typeidx` + RETAIN the exporter's decoded `Types` in `CrossModuleFuncEntry`
-    (linker.zig:130) at defineCrossModuleFunc (source_inst alive → decode its type section; free at linker
-    deinit). `instantiate.buildExportTypes` frees its Types — don't rely on it.
+  - **INTEGRATION (next, both predicates ready)**: at resolve, accept iff PHASE-A AND
+    (`canonicalEqualCross(&module_types, typeidx, &exporter_types, source_tidx)` OR
+    `superReachesCross(&exporter_types, source_tidx, &module_types, typeidx)`) — replaces the PHASE B finality
+    check at linker.zig:492 (PHASE C subsumes it: .35 importer-final still rejects via both-arms-false).
+  - **Lifetime (two options)**: (a) at defineCrossModuleFunc decode exporter Types from source_inst module
+    bytes + retain in CrossModuleFuncEntry, free at linker deinit (localized, manual free); (b) retain the
+    Types `buildExportTypes` already decodes on the Instance ARENA (auto-freed) + add `typeidx` to
+    ExportFuncType. (b) is cleaner (arena, no manual free) but touches instantiate+instance+ExportFuncType;
+    (a) localizes to linker.zig. Pick at impl. source_typeidx = exporter funcidx→func-section→typeidx.
   - **Regression net (MUST stay green)**: 441 exact-equal imports (407 multi-mem + 34 EH → canonicalEqualCross
     true) + the `.30/M` valid imports (line 506 `import M.f2 as $t1` valid via $t2's super-chain reaching $t1
     with nested `(ref null $t1)` — needs the super-reach arm + exporter Types).
@@ -89,12 +91,12 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-THIS turn = ADR-0127 PHASE C investigation + LOCKED the wiring design (corpus case breakdown — `.36` is the
-importer-open←exporter-final reverse of PHASE B; approach = canonicalEqualCross + super-reach with retained
-exporter Types; regression net). No code commit (design-lock doc only); HEAD stays `11c553a6` (= `6f1eeb4a`
-predicate + docs), already ubuntu-OK. Next resume Step 0.7: `tail -3 /tmp/ubuntu.log` should still read
-`OK (HEAD=11c553a6)`. Then START the wiring chunk per the Active-bundle LOCKED DESIGN (linker path, red test
-first). Mac aarch64; ubuntu = x86_64.
+THIS turn = ADR-0127 PHASE C cycle 3: `sections.superReachesCross` predicate + 2 tests (`d5183d4e`),
+isolated/unwired. BOTH predicates now ready. Mac-green (mac_gate test-all + lint). Next resume Step 0.7:
+`tail -3 /tmp/ubuntu.log` — expect `OK (HEAD=d5183d4e)`; on FAIL revert to last verified HEAD (11c553a6).
+Then do the INTEGRATION chunk (the final PHASE C piece) per the Active-bundle INTEGRATION note: red test
+(M2 exports final `$t2`, importer imports as open `$t1` → link must reject), then retain exporter Types +
+run `canonicalEqualCross`/`superReachesCross` at linker resolve, verify the 441-import regression net. Mac aarch64; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
