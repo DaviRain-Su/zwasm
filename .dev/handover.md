@@ -66,15 +66,11 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **REMAINING**: (a) **4 interp assert_trap fails — FIXED ✓** (D-232 / ADR-0131, `d041e425`): gti materialised
   for func-subtyping + concreteReaches authoritative. interp corpus FULLY GREEN. (b) **§10-scope question** →
   `.dev/phase10_scope_reassessment.md` (USER-flagged; ADR-0128-amendment = user-flip case) — **the bundle's LAST
-  open item; user-gated.** (c) **JIT corpus audited.** jit-mode assert_trap now tests the JIT (D-233
-  `1d7f25ea`). Of the 55 assert_trap fails: **51 memory64 = harness artifacts** (mem64 OOB proven correct via 5
-  isolated paths, D-234); **4 gc/type-subtyping = REAL** (cyc-5 correction: the JIT canonical is
-  D-111 STRUCTURAL `funcTypeEql`, finality-BLIND → `$t1=(sub (func))`/`$t2=(sub final (func))` get the SAME
-  canonical → CMP wrongly ACCEPTS fail1/fail2). Plus the gc/type-subtyping `"run"` RETURN-fail (D-111 also
-  subtype-BLIND → wrongly TRAPS a legit subtype). **Both = ONE root cause: JIT call_indirect uses D-111
-  structural equality, not the gti subtype check (the interp uses gti per D-232).** Full fix → **D-235**
-  (gti-canonical in typeidx_base when gti present + subtype trampoline on mismatch; closes 4 gc trap + 1
-  return). Other return fail = eh/try_table (EH-on-JIT, separate). assert_RETURN 762/2/531.
+  open item; user-gated.** (c) **JIT corpus audited.** Of the 55 jit assert_trap fails: **51 memory64 =
+  harness artifacts** (codegen proven correct, D-234); **4 gc/type-subtyping = REAL** + the `"run"` return-fail
+  = ONE root cause (JIT call_indirect uses D-111 structural `funcTypeEql`, finality+subtype-BLIND, not the gti
+  subtype check). Full fix = **D-235**, complete plan in **`.dev/jit_call_indirect_subtype_prep.md`** (the
+  next-clear-session deliverable). Other return fail = eh/try_table (EH-on-JIT, separate). assert_RETURN 762/2/531.
 - **Continuity-memo**: interp wasm-3.0 = 0 fails (fully green). JIT 762/2/531. PHASE C follow-ups (debt-worthy):
   api/instance.zig:572 + instantiate.zig:1657 `.cross_module` structural-only. This session CLOSED: D-230 (level-
   sep leak + DCE gate revive, ADR-0130) + D-232 (gti func-subtyping, ADR-0131). D-231 = x86_64 DCE-gate follow-on.
