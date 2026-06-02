@@ -112,13 +112,17 @@ single-instance case (collapses to the same comparison).
   (process-global live-rt table; `resolve` finds the instance whose
   CodeMap contains the PC). `trampolineCore` threads the resolver. No
   production change (registry empty); unit-tested per-frame switch.
-- **Cycle 2b (D1 + registration + handler-cmap)** — NEXT: thunk
-  `MOV X29,SP` (arm64) + register each live instance in `eh_registry`
-  (spec-runner pin sites) + resolve the catching instance's cmap from
-  `handler_abs_pc` for the cross-instance SP-restore. `catch-imported` /
-  `imported-mismatch` flip to pass on arm64 (Mac host).
-- **Cycle 3** — x86_64 parity (thunk RBP-set + registry) + the
-  `cross_module_throw_propagation.wat` edge fixture + 2-host gate.
+- **Cycle 2b (D1 + registration + handler-cmap)** — ✅ DONE (`4f73d9ee`):
+  arm64 thunk `MOV X29,SP` (FP-link; instr 19→20 consumed the pad, size
+  96 unchanged, ADR offset 52→48) + spec-runner registers each
+  heap-pinned instance in `eh_registry` (+ unregister at every free site
+  + per-manifest reset) + `trampolineCore` resolves the catching
+  instance's CodeMap from `handler_abs_pc`. EH JIT dir 32/2 → **34/0/0**
+  (catch-imported + imported-mismatch pass); global 794/3 → 796/1; no
+  regression.
+- **Cycle 3** — x86_64 parity (thunk RBP-frame-link + the EH-dir JIT run
+  on `ubuntunote`) + the `cross_module_throw_propagation.wat` edge
+  fixture. Deferred → **D-238** (arch-parity, not Mac-§10-gating).
 
 ## Alternatives considered
 

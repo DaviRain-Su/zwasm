@@ -3,6 +3,30 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-238"
+    layer: "code"
+    status: "now"
+    description: |-
+      x86_64 parity for cross-instance EH on JIT (ADR-0134 cycle 3). Cycle 2b
+      (`4f73d9ee`) made cross-instance EH work on **arm64** (Mac): the bridge thunk
+      now `MOV X29,SP` FP-links its frame so the FP-walk unwinder reaches the caller
+      frame, + the spec runner registers instances in `eh_registry` + per-frame
+      table dispatch. The x86_64 bridge thunk (`src/engine/codegen/x86_64/thunk.zig`)
+      was NOT given the equivalent RBP-frame-link, so a cross-instance JIT throw on
+      x86_64 still can't reach the caller's catch (the thunk frame isn't a chain
+      link; cf. the D-184 "sniffed" RBP read for the `PUSH RBP; PUSH R15; MOV RBP,RSP`
+      prologue — the x86_64 thunk needs a matching RBP setup so `loadFrameSniffed`
+      traverses it). NOT gated by the default 3-host `test-all` (the JIT corpus is
+      Mac-only, opt-in `ZWASM_SPEC_ENGINE=jit`), so no regression today — this is an
+      arch-parity gap, lower priority than the Mac JIT correctness that drives §10.
+      ALSO ship ADR-0114's `cross_module_throw_propagation.wat` edge fixture (the
+      removal-condition fixture) once x86_64 lands so both arches are covered. FIX:
+      mirror the arm64 D1 change on the x86_64 thunk (establish an RBP frame the
+      unwinder can walk), verify on `ubuntunote` via a JIT-corpus run of the EH dir.
+    first_raised: "2026-06-03"
+    last_reviewed: "2026-06-03"
+    refs: |-
+      `src/engine/codegen/x86_64/thunk.zig` (needs RBP frame-link); `src/engine/codegen/arm64/thunk.zig` (the arm64 D1 reference, `4f73d9ee`); `src/engine/codegen/shared/frame_chain_adapter.zig:60-76` (x86_64 sniffed read, D-184); ADR-0134 cycle 3; ADR-0114 (cross_module_throw_propagation.wat removal cond)
   - id: "D-237"
     layer: "test"
     status: "now"
