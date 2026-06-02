@@ -8,16 +8,15 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD** (`a11b1699`): §1 spec-corpus JIT mode. THIS turn: **array.init_data/init_elem JIT emit** (A-11) —
-  2 trampolines jitGcArrayInit{Data,Elem} (mirror jitGcArrayFill 6-arg-CALL) + per-arch emit; init_data reads
-  typeidx from ObjectHeader.info (mark-bit masked — won't fit the 6-arg SysV budget), init_elem needs none
-  (esz=8 uniform). R15-whitelisted, lint clean, both backends. Mac aarch64 JIT: **assert_return pass=605
-  fail=2 skip=688** (was 577/2/716 → **+28 pass, fail FLAT, −28 skip**; interp UNCHANGED). gc/array_init_data
-  + gc/array_init_elem flip modrej→compile, return asserts PASS (return_fail=0); the trap_fail=1 each is
-  PRE-EXISTING (verified vs stash baseline: identical) — separate interp/setup gap, NOT this emit.
-  **JIT-EXECUTED assert_return fails = 2** (gc/type-subtyping = ADR-0127 PHASE C user-gated; try_table =
-  EH-on-JIT). **Eligible single-result gap-ops now SPENT** (struct.get_s/u + array.init_data/elem done);
-  remaining levers = RTT-entangled convert OR major multi-value/buffer_write ABI (Active bundle).
+- **HEAD** (`1005d4bf`): §1 spec-corpus JIT mode. Recent: array.init (`a11b1699` +28), convert emit
+  (`b70e2604`), **D-226 reftype-param JIT invoke (`1005d4bf`, +139 — biggest since memory64)**. D-226:
+  `runner.paramScalarKey` maps a `.ref` param to the i64 carrier (u64 GPR passthrough, untruncated via
+  callVoid_i64) + `scalarArgBits` packs externref/funcref args → `(invoke "init" (ref.extern 0))` now runs
+  under JIT → gc/ref_test|ref_cast|br_on_cast tables populate → their asserts execute + PASS. Mac aarch64 JIT:
+  **assert_return pass=744 fail=2 skip=549** (was 605/2/688). **JIT-EXECUTED fails = 2, UNCHANGED**
+  (gc/type-subtyping run-Trap = ADR-0127 PHASE C; eh/try_table = EH-on-JIT; --fail-detail verified no new
+  fails). Interp UNCHANGED. The convert+RTT 4-cycle investigation is CLOSED: the prior "+59 regression" was
+  purely the un-invokable externref-param setup, not convert/ref.test (both proven correct).
 - **PER-MODULE blocker-STACK reality** (lesson `2026-06-02-jit-corpus-late-phase-is-per-module-
   blocker-stacks`): since memory64 (+208, last big mover), every gc/funcref fix has been correct
   but ~0 corpus — each remaining module has 3-6 DISTINCT blockers; JIT rejects at the FIRST
@@ -45,29 +44,26 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 - **Bundle-ID**: `10.G-§1-skip-reduction` (prior gc/array bundle CLOSED at `fa596f08`, exit met: array.8
   green, pass=577; JIT-executed fails now 2, both gated/deep).
-- **Cycles-remaining**: ~2 — array.init DONE (`a11b1699`); convert emit DONE (`b70e2604`); next = D-226.
-- **Eligible single-result gap-ops SPENT**: `struct.get_s/u` (`568ac652`), `array.init_data/elem` (`a11b1699`),
-  `any.convert_extern`/`extern.convert_any` (`b70e2604`).
-- **convert+RTT RESOLVED (4-cycle investigation)** → `b70e2604`. convert emit landed (transparent `0→0`
-  liveness + no-op arms; both backends; lint clean). The prior "+59 gc regression" was DEFINITIVELY
-  root-caused — NOT convert, NOT ref.test logic, NOT regalloc (all verified correct: 8 committed ref.test
-  matrix+table+round-trip tests `dcc2389b`/`4710903a`/`b70e2604`). It's the **JIT spec-runner can't `(invoke
-  "init" (ref.extern 0))`** — externref arg `scalarArgBits` can't pack → init skipped → `$ta` empty →
-  ref.test reads null → got=1-everywhere. Runner now SKIPs setup-invoke-unrun asserts (correct eligibility
-  classification, not fail) → convert lands **net-zero 605/2/688 (no regression)**, removing modrej for ~5
-  gc modules. Their ~59 asserts correctly skip pending **D-226** (the real lever).
-- **NEXT LEVER = D-226**: implement reftype host-ref arg packing in the jit-mode `.invoke` path (materialise
-  `ref.extern N` into `scalarArgBits`'s u64 carrier) so `init` runs + populates `$ta`; THEN verify ref.test
-  on the populated entries — incl. the convert'd-extern at `$ta[6,7]` (revisits H1: host externref in the
-  any-hierarchy matches any/extern-top but NOT eq/i31/struct/array; confirm `jitGcRefTest`/`readObjKindHeap`
-  bounds-guards a real host-ref). Discharge = ~59 gc asserts flip skip→pass (auto-unskip). Spike retains the
-  investigation history. **PIVOT** if D-226's ref.test-on-extern proves deep → lever (b) multi-value/
-  `buffer_write` ABI (D-094/D-164; compile.zig:1058; ~39 skips; ADR-grade).
+- **Cycles-remaining**: ~1 — array.init (`a11b1699` +28), convert (`b70e2604`), **D-226 (`1005d4bf` +139)** all
+  DONE. The eligible gap-op + invoke-enablement §1 levers are SPENT. Bundle CLOSE-eligible; next = multi-value.
+- **SPENT levers**: `struct.get_s/u` (`568ac652`), `array.init_data/elem` (`a11b1699`),
+  `any.convert_extern`/`extern.convert_any` (`b70e2604`), reftype-param JIT invoke / D-226 (`1005d4bf`).
+- **convert+RTT CLOSED (4-cycle investigation, +139 net)**: convert emit was correct all along; the "+59
+  regression" was purely the un-invokable externref-param setup (D-226). D-226 landed +139 (744/2/549),
+  biggest mover since memory64. ref.test/ref.cast/br_on_cast on the now-populated tables (incl. convert'd-
+  extern at `$ta[6,7]`) all PASS — H1 (extern bounds-guard) was correct: `readObjKindHeap` returns null for
+  the `0x7000…` host-ref → ref.test classifies it correctly.
+- **NEXT LEVER = (b) multi-value / `buffer_write` ABI** (D-094/D-164; compileWasm hardcodes register_write,
+  compile.zig:1058). ADR-grade, HIGH blast radius → file the ADR FIRST (§18.2). Would flip struct.10's ~20
+  get_packed asserts + ~19 other results=2 eligibility-skips. After multi-value, the residual §1 skip=549 is
+  DOMINATED by multi-memory 407 (Phase-14 deferred, NOT a §10 lever) + scattered args/v128/cross-module
+  eligibility skips — i.e. §1 JIT-corpus is approaching its non-deferred floor. Reassess scope next cycle:
+  multi-value ADR, or pivot to §10 realworld producers (§5) / the 2 gated fails (ADR-0127 PHASE C, EH).
 - **Continuity-memo**: §1 JIT-EXECUTED assert_return fails = 2 (type-subtyping user-gated ADR-0127 PHASE C;
-  try_table EH-on-JIT). Remaining §10 exit bulk = **skip=688**. 2 pre-existing array_init trap_fails =
+  try_table EH-on-JIT) — both deep/gated. JIT corpus = **744/2/549**. 2 pre-existing array_init trap_fails =
   separate assert_trap follow-on, low ROI.
-- **Exit-condition**: D-226 lands reftype-arg jit `.invoke` → `init` runs → the ~59 gc ref_test/ref_cast/
-  br_on_cast asserts flip skip→pass (net assert_return fail unchanged at 2). Else pivot to multi-value ABI.
+- **Exit-condition**: multi-value ABI lands (post-ADR) → struct.10 ~20 + ~19 results=2 asserts flip skip→pass
+  (net assert_return fail unchanged at 2). Else bundle CLOSES — §1 tractable skip-reduction is exhausted.
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -82,10 +78,12 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-THIS turn = convert+RTT RESOLVED: convert emit + table-probe tests + runner skip-classification landed
-(`4710903a`, `b70e2604`, code). ubuntu kick fired against final HEAD. Next resume Step 0.7:
-`tail -3 /tmp/ubuntu.log` — expect `OK (HEAD=<handover-SHA>)`; on FAIL revert. Then start **D-226**
-(reftype-arg jit invoke → unskip the ~59 gc setup-dependent asserts). Mac aarch64; ubuntu = x86_64.
+THIS turn = D-226 reftype-param JIT invoke (`1005d4bf`, code) → +139 corpus (744/2/549), Mac-green
+(zig build test + lint + corpus all green; the 2 fails are the known gated ones). **STOPPED at user request
+(きりが良いところ)** — loop NOT re-armed this turn. ubuntu kick fired for cross-host confirm. Next resume
+Step 0.7: `tail -3 /tmp/ubuntu.log` — expect `OK (HEAD=<handover-SHA>)`; on FAIL revert. Then start the
+NEXT LEVER (multi-value ABI — file ADR first) or reassess (§1 tractable skip-reduction is largely exhausted;
+residual skip=549 ≈ multi-memory 407 deferred + multi-value ~39 + scattered eligibility). Mac aarch64; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
