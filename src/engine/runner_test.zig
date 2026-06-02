@@ -1439,3 +1439,34 @@ test "memory64: fresh JitInstance i64.load at the page boundary 0xfff8 (D-234 is
     // Offset 0xfff8 (the failing corpus case) — last 8 bytes of the 1-page mem.
     try testing.expectEqual(@as(?u64, 0x6867666564636261), try inst.invoke(gpa, "load", &.{0xfff8}));
 }
+
+test "function-references: ref.func typed as precise (ref $t) for a (ref $t) param (D-239)" {
+    // Regression guard for the JIT compile-path `func_type_indices` gap: the
+    // validator must type `ref.func $f` as the precise `(ref $t)` (ADR-0123
+    // D4), not abstract funcref, so passing it to a `(ref $t)` param validates
+    // (was StackTypeMismatch). Minimal hand-assembled module:
+    //   (type $t (func (result i32)))             ;; type 0
+    //   (type   (func (param (ref $t)) (result i32))) ;; type 1
+    //   (func $callee (type 1) (i32.const 0))
+    //   (func $f (type 0) (i32.const 7))
+    //   (elem declare func $f)
+    //   (func (export "go") (type 0) (call $callee (ref.func $f)))
+    const gpa = testing.allocator;
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x0b, 0x02, 0x60, 0x00, 0x01, 0x7f, 0x60, 0x01, 0x64, 0x00, 0x01, 0x7f, // types
+        0x03, 0x04, 0x03, 0x01, 0x00, 0x00, // funcs: callee=1, f=0, go=0
+        0x07, 0x06, 0x01, 0x02, 0x67, 0x6f, 0x00, 0x02, // export "go" func 2 (id 7 before elem id 9)
+        0x09, 0x05, 0x01, 0x03, 0x00, 0x01, 0x01, // elem declare func 1
+        0x0a, 0x12, 0x03, // code: 3 funcs
+        0x04, 0x00, 0x41, 0x00, 0x0b, // callee: i32.const 0
+        0x04, 0x00, 0x41, 0x07, 0x0b, // f: i32.const 7
+        0x06, 0x00, 0xd2, 0x01, 0x10, 0x00, 0x0b, // go: ref.func 1; call 0
+    };
+    var inst = JitInstance.init(gpa, &bytes) catch |e| {
+        std.debug.print("fr ref.func module init failed: {s}\n", .{@errorName(e)});
+        return error.TestUnexpectedResult;
+    };
+    defer inst.deinit(gpa);
+    try testing.expectEqual(@as(?u64, 0), try inst.invoke(gpa, "go", &.{}));
+}

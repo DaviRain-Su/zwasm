@@ -77,6 +77,11 @@ const op_throw_ref = @import("ops/wasm_3_0/throw_ref.zig");
 const op_return_call = @import("ops/wasm_3_0/return_call.zig");
 const op_return_call_indirect = @import("ops/wasm_3_0/return_call_indirect.zig");
 const op_return_call_ref = @import("ops/wasm_3_0/return_call_ref.zig");
+// D-239 — function-references null-ref branch ops (handler files existed
+// but were never wired into the dispatch → UnsupportedOp).
+const op_br_on_null = @import("ops/wasm_3_0/br_on_null.zig");
+const op_br_on_non_null = @import("ops/wasm_3_0/br_on_non_null.zig");
+const op_ref_as_non_null = @import("ops/wasm_3_0/ref_as_non_null.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
 const op_const = @import("op_const.zig");
@@ -1208,6 +1213,22 @@ pub fn compile(
             .call_ref => {
                 if (comptime wasm_v3_plus) {
                     try op_call.emitCallRef(&ctx, &ins);
+                } else return Error.UnsupportedOp;
+            },
+            // D-239 — function-references null-ref branch ops.
+            .br_on_null => {
+                if (comptime wasm_v3_plus) {
+                    try op_br_on_null.emit(&ctx, &ins);
+                } else return Error.UnsupportedOp;
+            },
+            .br_on_non_null => {
+                if (comptime wasm_v3_plus) {
+                    try op_br_on_non_null.emit(&ctx, &ins);
+                } else return Error.UnsupportedOp;
+            },
+            .@"ref.as_non_null" => {
+                if (comptime wasm_v3_plus) {
+                    try op_ref_as_non_null.emit(&ctx, &ins);
                 } else return Error.UnsupportedOp;
             },
             .return_call => {

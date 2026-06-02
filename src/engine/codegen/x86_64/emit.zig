@@ -57,6 +57,11 @@ const label_mod = @import("label.zig");
 const op_alu_int = @import("op_alu_int.zig");
 const op_alu_float = @import("op_alu_float.zig");
 const op_convert = @import("op_convert.zig");
+// D-239 — function-references null-ref branch ops (handler files existed
+// but were never wired into the dispatch → UnsupportedOp). Arm64 parity.
+const op_br_on_null = @import("ops/wasm_3_0/br_on_null.zig");
+const op_br_on_non_null = @import("ops/wasm_3_0/br_on_non_null.zig");
+const op_ref_as_non_null = @import("ops/wasm_3_0/ref_as_non_null.zig");
 const op_memory = @import("op_memory.zig");
 const op_control = @import("op_control.zig");
 const op_simd = @import("op_simd.zig");
@@ -1316,6 +1321,10 @@ pub fn compile(
                 try op_control.emitEndCtx(&ctx, &ins);
                 if (at_function_end) break;
             },
+            // D-239 — function-references null-ref branch ops (arm64 parity).
+            .br_on_null => try op_br_on_null.emit(&ctx, &ins),
+            .br_on_non_null => try op_br_on_non_null.emit(&ctx, &ins),
+            .@"ref.as_non_null" => try op_ref_as_non_null.emit(&ctx, &ins),
             else => {
                 std.debug.print("x86_64/emit: UnsupportedOp[body-op-{s}] (func_idx={d})\n", .{ @tagName(ins.op), func.func_idx });
                 return Error.UnsupportedOp;

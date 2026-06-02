@@ -509,9 +509,17 @@ pub fn validateFunctionAndCollectSelectTypesWithMemory(
     // Previously defaulted to `&.{}` → StackTypeMismatch on every concrete
     // subtype check (the interp path threads it via instantiate.zig).
     supertypes: []const []const u32,
+    // D-239: func-index → type-section-index map (imports-first) so typed
+    // `ref.func N` yields the PRECISE `(ref func_type_indices[N])` instead
+    // of abstract funcref (ADR-0123 D4). Previously omitted → defaulted to
+    // `&.{}` → `ref.func` mismatched a `(ref $t)` param → StackTypeMismatch
+    // (br_on_null / br_on_non_null / ref_as_non_null modules). The interp
+    // path threads it via instantiate.zig:128-143.
+    func_type_indices: []const u32,
 ) Error!void {
     var v = Validator{
         .supertypes = supertypes,
+        .func_type_indices = func_type_indices,
         .sig = sig,
         .locals = locals,
         .body = body,

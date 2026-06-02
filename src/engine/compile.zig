@@ -1090,6 +1090,10 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             types.struct_defs,
             types.array_defs,
             types.supertypes,
+            // D-239: typed `ref.func N` → precise `(ref func_typeidxs[N])`
+            // (ADR-0123 D4); else abstract funcref → StackTypeMismatch vs a
+            // `(ref $t)` param (br_on_null / br_on_non_null / ref_as_non_null).
+            func_typeidxs,
         ) catch |err| {
             std.debug.print("compileWasm: func[{d}] params={d} results={d} → validate {s}\n", .{
                 wasm_idx,
