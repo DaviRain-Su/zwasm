@@ -48,28 +48,28 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **Bundle-ID**: `10.G-typesubtyping-RTT` (prior `10.G-typesubtyping-PHASE-C` CLOSED — exit met: assert_unlinkable
   fail 4→0, no regression. ADR-0127 PHASE C: predicates `canonicalEqualCross`+`superReachesCross` + linker
   integration `add983e8`. Earlier this bundle-chain: §1 multi-value +18).
-- **Cycles-remaining**: ~1-2. Cycle-1 investigation DONE — root located.
-- **ROOT (the 5 asserts)**: ONE module (`.wast:229`) with a SELF-RECURSIVE rec-group chain — `$t0 (func
-  (result (ref null func)))`, `$t1 (sub $t0 (func (result (ref null $t1))))`, `$t2 (sub $t1 (func (result
-  (ref null $t2))))`. `(invoke "run")` (assert_return fail=1) does 6 `call_indirect (type $tN)` + 6
-  `ref.cast (ref $tN)` against a `funcref` table `[$f0:$t0,$f1:$t1,$f2:$t2]` that should ALL succeed
-  (subtype calls/casts); `fail1-6` (assert_trap, 4 failing) call_indirect/ref.cast that should TRAP. So the
-  fails are RUNTIME `call_indirect` sig-match + `ref.cast` subtype on SELF-RECURSIVE func types — too-strict
-  (run traps) and/or too-lax (some fail* don't trap).
-- **NEXT (cycle 2)**: find the runtime call_indirect type-match + ref.cast subtype-check sites (likely
-  `feature/gc/type_info.zig` canonical_ids + the runtime sig-match in interp/JIT call_indirect); verify they
-  compare self-recursive func types by canonical id / iso-recursive equality, not raw index. Smallest red:
-  a fixture invoking `run` (must not trap) + a `fail*` (must trap). Cohen-display depth (ADR-0116) +
-  canonical-id (ADR-0126) are the relevant machinery. Decide tractability → fix or debt-row if deep.
-- **ALSO OPEN (lower priority, follow-ups)**: PHASE C wired only the **linker path** (corpus). The
-  api/instance.zig:572 + instantiate.zig:1657 `.cross_module` paths still do structural-only — a C-API
-  cross-module import with distinct type-defs wouldn't reject. Not corpus-exercised → debt-worthy, not §10-
-  blocking. Also: the wasm-3.0 runner doesn't GATE on its fails (reports only) — a regression in the now-green
-  unlinkable wouldn't break the gate; gating becomes possible once all its fails reach 0 (the §10 close goal).
-- **Continuity-memo**: wasm-3.0 interp fails now 5 (1 return + 4 trap, all gc/type-subtyping RTT). JIT corpus
-  762/2/531; the 2 JIT-executed assert_return fails = gc/type-subtyping (this RTT) + eh/try_table (EH-on-JIT).
-- **Exit-condition**: gc/type-subtyping assert_trap fail 4→lower + assert_return fail 1→0 (or a documented
-  blocker if the RTT gap is deep/deferred). No regression elsewhere.
+- **Cycles-remaining**: ~1-2. Cycles 1-2 done — the 5 fails are ONE fixture (`.17` = .wast:229, self-recursive
+  rec-group chain $t0/$t1/$t2). **CONFIRMED cyc180 rabbit hole (D-198)**: needs ≥2 coordinated runtime fixes,
+  each non-observable until "run" fully passes (spike §2). Fix #1 = call_indirect `sigEq`→subtype (verified-
+  correct recipe in D-198: `sigEq OR (callee_rt==rt and ref_test_ops.concreteReaches(rt, fe.raw_typeidx,
+  declared))`). cyc2 RE-PROBED fix #1 → STILL return_fail=1 (root cause #2 — a `Trap.Unreachable` in "run"
+  after the call_indirects — persists, untouched by intervening canonical work). Fix #1 reverted (non-
+  observable alone). This bundle's win = the SEPARATE .12/.14 global-init fix (`8d5d67ed`).
+- **NEXT (cycle 3, focused fresh-context debug)**: IDENTIFY root cause #2 (cyc180 left it unidentified).
+  Apply fix #1 locally, run `.17` "run", trace WHERE the Trap.Unreachable fires — suspects: the recursive
+  self-ref func-type result handling, the stacked `(block (result (ref null $tN)) …)` ×12, or the final
+  `(br 0)` with 12 operands on stack. That's the leverage; with #2 identified, land fix#1+#2 as one bundle
+  → "run" passes + the 6 fail* asserts. If #2 is deep → debt-row .17 + defer (it's 1 exotic fixture).
+- **STRATEGIC (§10 100% reality)**: the remaining §10 fails are ALL deep/deferred — `.17` RTT (here) +
+  eh/try_table (EH-on-JIT) + JIT multi-memory **407 skips (Phase-14 deferred)**. Per ADR-0128 §10 exit =
+  pass=fail=skip=0 BOTH backends, so JIT skip=0 is UNREACHABLE in Phase 10 (needs Phase-14 multi-memory JIT).
+  → §10 "100%" as written is gated on a Phase-14 deferral; flag for meta_audit / ADR-0128 amendment (interp-
+  100% + JIT-modulo-deferred may be the honest in-phase target). Not my unilateral ADR — surface to user.
+- **Continuity-memo**: interp fails 5 (all .17). JIT 762/2/531. PHASE C follow-ups (debt-worthy, non-blocking):
+  api/instance.zig:572 + instantiate.zig:1657 `.cross_module` still structural-only; wasm-3.0 runner reports-
+  not-gates on fails.
+- **Exit-condition**: identify root cause #2 (concrete site named) → land .17 (run passes + fail* trap), OR
+  debt-row .17 as a deferred exotic-fixture blocker. Either CLOSES this bundle.
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -84,12 +84,12 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-THIS turn = (PHASE C add983e8 ubuntu-verified OK) + RTT cycle 1: fixed gc/type-subtyping.12/.14 global-init
-canonical-subtype rejection (`8d5d67ed`) + investigated the 5 RTT asserts → root = runtime call_indirect/
-ref.cast subtype on self-recursive func types (.wast:229 module). Mac-green (test-all + lint). Next resume
-Step 0.7: `tail -3 /tmp/ubuntu.log` — expect `OK (HEAD=8d5d67ed)`; on FAIL revert to last verified HEAD
-(add983e8). Then cycle 2 per Active-bundle NEXT (runtime self-recursive call_indirect/ref.cast subtype).
-Mac aarch64; ubuntu = x86_64.
+THIS turn = RTT cycle 2: (8d5d67ed/.12/.14 fix ubuntu-verified OK) + re-probed the .17 call_indirect-subtype
+fix #1 → still return_fail=1 (root cause #2 persists, = cyc180 D-198 rabbit hole) → reverted (non-observable
+alone). No code commit (probe reverted); doc-only handover. HEAD stays `5faad2b9` (ubuntu-OK). Next resume
+Step 0.7: `tail -3 /tmp/ubuntu.log` should still read `OK (HEAD=5faad2b9)`. Then cycle 3 per Active-bundle NEXT:
+IDENTIFY .17 root cause #2 (fresh-context interp debug — trace the Trap.Unreachable in "run"). Also note the
+STRATEGIC §10-100%-gated-on-Phase-14 finding (surface to user). Mac aarch64; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
