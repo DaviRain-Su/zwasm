@@ -8,12 +8,12 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD**: §1 spec-corpus JIT mode — gc const-expr globals through JIT (`824fa694`, D-223) +
-  **gc test extraction** (`99e122e1`: runner_test.zig 1983→1180, gc tests → `runner_gc_test.zig`).
+- **HEAD** (`6db5fbbd`): §1 spec-corpus JIT mode. D-223 gc const-expr globals (`824fa694`) + gc test
+  extraction (`99e122e1`) + **D-212 scaffolding** (`6db5fbbd`: cross-func control i32 green / f32 red-skip).
   Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=538 fail=22 skip=735** (D-223: +43, biggest
-  mover since memory64; memory64 100% GREEN; interp test-all UNCHANGED — verified `b217d0c9` ubuntu).
-  **fail taxonomy (22)**: gc 17 (6× f32 = **D-212**, re-scoped below; gc/array+i31 `err=Trap` = D-218)
-  + function-references 4 (D-198) + try_table 1 (EH).
+  mover since memory64; memory64 100% GREEN; interp test-all UNCHANGED).
+  **fail taxonomy (22)**: gc 17 (6× f32 = **D-212**, f32-specific cross-func confirmed; gc/array+i31
+  `err=Trap` = D-218) + function-references 4 (D-198) + try_table 1 (EH).
 - **PER-MODULE blocker-STACK reality** (lesson `2026-06-02-jit-corpus-late-phase-is-per-module-
   blocker-stacks`): since memory64 (+208, last big mover), every gc/funcref fix has been correct
   but ~0 corpus — each remaining module has 3-6 DISTINCT blockers; JIT rejects at the FIRST
@@ -60,18 +60,18 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET** long ago.
   Infra COMPLETE; backbone operational (pass=484). Bundle stays open as the diagnostic-driven
   gap-fixing vehicle (`JITmodrej` tally → fix biggest tractable lever).
-- **NEXT chunk** = **D-212 — root cause CONFIRMED this cycle (deterministic standalone repro)**.
-  `struct.get`/`array.get` of an **f32/f64 field returns a GPR-class result that never reaches V0/XMM0**
-  when it feeds a function return → the f32-return reads a stale FP reg (0.0 by luck standalone, 0x69
-  in-corpus). Verified: SAME `struct.7.wasm` bytes → 0.0 standalone vs 0x69 in-corpus (stale-reg
-  dependence). RED TEST (write it first, fails in a clean process): `(module (type $s (struct (field
-  f32))) (func $inner (param (ref $s)) (result f32) local.get 0 struct.get 0 0) (func (export "f")
-  (result f32) f32.const 2.5 struct.new 0 call 0))` via `runF32Export` → expect 2.5 (full bytes in
-  D-212 row). Same-frame `struct.new(2.5); struct.get; return` WORKS; only cross-func/function-return
-  fails. FIX: make struct.get/array.get f32/f64 result FP-class (mirror f32.load `encLdrSReg`/movss in
-  `op_memory.zig`) OR FMOV GPR→V0 in the f32-return epilogue; both arches. Needs the field valtype at
-  emit (EmitCtx lacks GC type table — thread it, or use the validator's known result vreg type). See
-  D-212 row. Skip multi-memory 51; AFTER D-212: gc/array+i31 `err=Trap` (D-218), ref_func 4 (D-198).
+- **NEXT chunk** = **D-212 — f32-specific CONFIRMED + scaffolding landed (`6db5fbbd`)**. Cross-func
+  control pair in `runner_gc_test.zig`: i32 `struct.get` through a ref-param call → 42 (GREEN), f32 →
+  stale 0.0 instead of 2.5 (RED, `skip.blocker(.D-212)`). So ref-arg + GPR results are fine; only the
+  f32 result fails to reach V0/XMM0 across call/return. **NEXT STEP = DISASSEMBLE the inner fn FIRST**
+  (`debug_jit_auto` recipe #16 dump + `objdump -D -b binary -m aarch64`) — do NOT code the FP-class
+  change blind: a SAME-FN `struct.new(2.5); struct.get; return` returns 2.5 correctly, so the missing
+  GPR→V0 move could be in struct.get, the f32-return epilogue, OR the call-result capture; disasm
+  decides. Candidate fix: struct.get/array.get f32/f64 → FP-class (mirror f32.load `encLdrSReg`/movss);
+  needs field valtype at emit+classifier (lowering has the side-tables; ZirFunc/EmitCtx don't). Both
+  arches. Un-skip the f32 red → green. CAUTION: hand-encoded multi-fn wasm is error-prone (recompute
+  section sizes — last cycle's "i32 fails" was a SectionTooLarge bug). Skip multi-memory 51; AFTER
+  D-212: gc/array+i31 `err=Trap` (D-218), ref_func 4 (D-198).
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -86,10 +86,10 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior turn (`ee41267a`, gc test split) ubuntu `test-all` = GREEN (verified: interp identical to
-baseline → split behaviour-neutral). THIS turn = INVESTIGATION-ONLY (D-212 root cause confirmed via
-spikes; debt+handover only, no src change → code == green `ee41267a`). SKIP Step 0.7 ubuntu next
-resume (no code delta). Mac aarch64 primary; ubuntu = x86_64.
+Prior turn (`ea37984f`, D-212 investigation docs) ubuntu = n/a (docs only). THIS turn landed test
+scaffolding (`6db5fbbd`: i32 control + f32 red-skip + skip.zig D-212 Blocker) — ubuntu `test-all`
+kicked at end → `tail -3 /tmp/ubuntu.log` next resume (Step 0.7). On FAIL revert to `ea37984f`.
+Mac aarch64 primary; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
