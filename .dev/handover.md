@@ -8,15 +8,16 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD** (`f1858416`): §1 spec-corpus JIT mode. Recent: D-226 reftype-param invoke (`1005d4bf` +139),
-  **multi-value JIT invoke (`fad904c6`+`33b479e7`, +16) + param-bearing wrapper thunk (`f1858416`, +2) →
-  762/2/531**. Multi-value: `JitInstance.invokeMulti` reuses ADR-0106's buffer-write multi-result ABI via
-  `module.entry_buf` (wrapper-thunk path; NO fresh ADR, NO compileWasm change). `jitReturnEligible` admits
-  results_len>1, routes scalar multi-value through invokeMulti; `JitModule.hasThunk` gates NO_THUNK → skip.
-  `emitAarch64` now also emits the 1-param 2-GPR-result thunk (LDR X1,[X2] → body AAPCS slot). **JIT-EXECUTED
+- **HEAD** (`a5f6b238`): §1 spec-corpus JIT mode. Multi-value JIT invoke DONE (+18 total): `invokeMulti`
+  (`fad904c6`+`33b479e7`, +16) reuses ADR-0106's buffer-write ABI via `module.entry_buf` (NO fresh ADR/
+  compileWasm change); arm64 1-param 2-result wrapper thunk (`f1858416`, +2). **762/2/531**. **JIT-EXECUTED
   fails = 2, UNCHANGED** (gc/type-subtyping = ADR-0127 PHASE C; eh/try_table = EH-on-JIT). Interp UNCHANGED.
-  **D-228 (gate hole, FIXED)**: `test-all` didn't run the wasm_3_0 unit tests → chunk-2's stale eligibility
-  assert false-greened; now `test_all_step.dependOn` both unit artifacts.
+- **Two gate/portability fixes this stretch**: **D-228** (`7bb3699a`) — `test-all` didn't run the wasm_3_0
+  unit tests (only `zig build test` did) → chunk-2's stale `jitReturnEligible` assert false-greened on BOTH
+  hosts; now `test_all_step.dependOn` both unit artifacts. **D-229** (`a5f6b238`) — the param-bearing e2e
+  test errored on x86_64 (SysV `wrapper_thunk.emit` rejects params; only arm64 AAPCS + Win64 do them) →
+  gated the test to aarch64; x86_64 SysV param-bearing thunk is low-ROI follow-on debt. Lesson: a feature
+  added on one arch + an all-arch e2e test = ubuntu red; gate the test per-arch OR implement both arches.
 - **PER-MODULE blocker-STACK reality** (lesson `2026-06-02-jit-corpus-late-phase-is-per-module-
   blocker-stacks`): since memory64 (+208, last big mover), every gc/funcref fix has been correct
   but ~0 corpus — each remaining module has 3-6 DISTINCT blockers; JIT rejects at the FIRST
@@ -42,25 +43,24 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Active bundle
 
-- **Bundle-ID**: `10.G-§1-multivalue` (prior `10.G-§1-skip-reduction` CLOSED — its gap-op + invoke
-  levers SPENT: `struct.get_s/u`, `array.init_*`, convert, D-226 reftype-param invoke).
-- **Cycles-remaining**: ~0-1 (CLOSE-eligible). Multi-value invoke (+16) + arm64 1-param 2-result wrapper
-  thunk (`f1858416`, +2) LANDED → 762/2/531. ADR-0106 (Closed) already defined the buffer-write ABI; the
-  gap was only the wasm-3.0 `JitInstance` not wiring `module.entry_buf` — `invokeMulti` mirrors the 2.0 path.
-- **LOW-YIELD FINDING**: the param-bearing arm64 thunk (1-param 2-result) added only **+2** (gc 384→386),
-  NOT the hoped ~20 struct.10. struct.get_packed returns ONE value (already single-result eligible); the
-  remaining multi-value skips need shapes the 1-param thunk doesn't cover (2/3-param, 3-result-with-param,
-  FP-result, x86_64-SysV-param-bearing — SysV `emit` still rejects params, wrapper_thunk.zig:173). **Measure
-  the actual multi-value skip shape distribution (instrument the NO_THUNK skip with params/results counts)
-  BEFORE more hand-emitted arm64 asm** — the per-shape ROI is small and the asm risk (W54-class) is real.
-- **REASSESS — likely pivot**: §1 multi-value tail is low-yield; residual skip=531 is dominated by
-  multi-memory 407 (Phase-14 deferred, NOT a §10 lever). §1 JIT-corpus is at its non-deferred floor. Higher
-  value: the 2 gated fails (**ADR-0127 PHASE C** closes a real JIT-executed fail) or §10 realworld producers
-  (§5; `wasm_of_ocaml` / `emcc -fwasm-exceptions` / `guile-hoot`).
-- **Continuity-memo**: §1 JIT-EXECUTED assert_return fails = 2 (type-subtyping ADR-0127 PHASE C; try_table
-  EH) — both deep/gated. JIT corpus = **762/2/531**.
-- **Exit-condition**: bundle CLOSE-eligible — §1 tractable multi-value skip-reduction is largely done (+18
-  total). Either measure+extend thunk shapes (if ROI confirmed) or CLOSE and pivot to gated fails / realworld.
+- **Bundle-ID**: `10.G-typesubtyping-PHASE-C` (prior `10.G-§1-multivalue` CLOSED — multi-value invoke +
+  arm64 1-param thunk delivered +18 → 762/2/531; the §1 skip tail is now its non-deferred floor: residual
+  skip=531 dominated by multi-memory 407 = Phase-14-deferred. Multi-value follow-ons are low-ROI: x86_64
+  SysV param-bearing = D-229, 2/3-param/FP-result arm64 = unmeasured-but-marginal).
+- **Cycles-remaining**: ~2-3 (just opened; cycle 1 = survey, 2-3 = implement + corpus-verify).
+- **PIVOT RATIONALE**: §1 corpus skip-reduction is exhausted; the binding §10 exit constraint is now
+  **fail=0 both backends**, currently fail=2. ADR-0127 PHASE C closes ONE real JIT-executed fail
+  (gc/type-subtyping). ADR-0127 is **Accepted** (via ADR-0128 100% directive — autonomous, NOT user-gated;
+  "D-202 PHASE C implements next"). This is higher value than more §1 skip-shaving.
+- **NEXT STEP (cycle 1)**: Step-0 survey ADR-0127 PHASE C scope — structural subtyping + finality bool +
+  cross-`Types` `canonicalEqual` in `validator.zig::funcTypeImportCompatible` + `instantiate.zig::
+  checkImportTypeMatches` (.cross_module arm). The corpus targets: `gc/type-subtyping.{12,14,...}` global
+  init-expr type-mismatch + the run-Trap fail. CAUTION: PHASE C NARROWS acceptance (rejects more imports) →
+  risk of regressing currently-passing cross-module links; the existing assert_unlinkable corpus is the net.
+- **Continuity-memo**: §1 JIT-EXECUTED assert_return fails = 2 (type-subtyping = THIS bundle's target;
+  try_table = EH-on-JIT, separate). JIT corpus = **762/2/531**. See D-202 (PHASE A/B landed, C scope).
+- **Exit-condition**: gc/type-subtyping JIT-executed assert_return fail → 0 (fail 2→1), no regression in
+  assert_unlinkable / cross-module link corpus. Else document the specific blocker + reassess.
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -75,12 +75,12 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-THIS turn = multi-value JIT invoke (`fad904c6`+`33b479e7`, +16) → param-bearing wrapper thunk (`f1858416`,
-+2) + D-228 gate-hole fix (`7bb3699a`) → corpus 762/2/531. Mac-green (mac_gate.sh test-all + lint, NOW incl.
-the wasm_3_0 unit tests per D-228; JIT corpus green; 2 fails are the known gated ones). Next resume Step 0.7:
-`tail -3 /tmp/ubuntu.log` — expect `OK (HEAD=f1858416)`; on FAIL revert this turn's commits to the last
-ubuntu-verified HEAD. Then REASSESS per Active bundle (likely pivot — §1 multi-value tail is low-yield;
-ADR-0127 PHASE C / realworld producers are higher value). Mac aarch64; ubuntu = x86_64.
+THIS turn = recovered a Step-0.7 ubuntu FAIL: the param-bearing e2e test (`35ed8901`) errored on x86_64
+(SysV thunk lacks params). FIXED forward by gating the test to aarch64 + D-229 debt row (`a5f6b238`),
+Mac-green (`zig build test` exit 0). Pivoted the bundle to ADR-0127 PHASE C. Next resume Step 0.7:
+`tail -3 /tmp/ubuntu.log` — expect `OK (HEAD=a5f6b238)`; on FAIL revert to the last ubuntu-verified HEAD
+(8fb4a4e3 was the last confirmed OK; this turn's a5f6b238 kick verifies the fix). Then start the PIVOT —
+Step-0 survey ADR-0127 PHASE C (see Active bundle). Mac aarch64; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
