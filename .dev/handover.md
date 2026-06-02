@@ -60,14 +60,15 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET** long ago.
   Infra COMPLETE; backbone operational (pass=484). Bundle stays open as the diagnostic-driven
   gap-fixing vehicle (`JITmodrej` tally → fix biggest tractable lever).
-- **NEXT chunk** = **D-218 — gc/array + gc/i31 `err=Trap` cluster** (direct FAIL→pass flips on
-  COMPILING modules; preferred over skips). Re-measure + enumerate: `ZWASM_SPEC_ENGINE=jit <bin>
-  test/spec/wasm-3.0-assert --fail-detail 2>/dev/null | grep 'err=Trap'`. These are real op-correctness
-  traps on modules that already JIT-compile (array ops + i31 get) — each is its own investigation
-  (disasm the trapping op; the D-212 disasm recipe #16 + `objdump -D -b binary -m aarch64` applies).
-  Then ref_func 4 (D-198, funcref residual) + try_table 1 (EH) + gc/type-subtyping run 1 (ADR-0127
-  PHASE C cross-`Types` canonicalEqual). Skip multi-memory 51 (Phase-14). Prefer FAIL fixes (direct
-  flip, no per-module blocker stack). Lessons: 2026-06-02-jit-corpus-late-phase-*.
+- **NEXT chunk** = **D-218 i31.1 full-stack clear** (this turn MAPPED its 3-blocker stack — see D-218
+  row). Re-apply the 2 ready fixes [B1 `compile.zig:217` funcidx i31-guard; B2 `setup.zig:484` elem-init
+  early i31 branch], then FIND+FIX B3 (3rd `UnsupportedEntrySignature` after B1+B2 — likely table.get-
+  on-i31ref-table EMIT, a codegen gap; NOT the decoder which is correct). Land all 3 + a green unit
+  test (table-of-i31ref + table.get + i31.get_u via `JitInstance.invoke` 1-arg — bytes worked out this
+  turn, see D-218 row) in ONE focused push → i31.1 green. **REALITY** (lesson per-module-blocker-stacks):
+  the remaining 16 fails are deep per-module stacks each paying ~0 until its LAST blocker clears; big
+  levers (D-223/D-212) are SPENT. Pick ONE module, clear its FULL stack. After i31: gc/array traps,
+  ref_func 4 (D-198), try_table 1 (EH), gc/type-subtyping 1 (ADR-0127 PHASE C). Skip multi-memory 51.
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -82,10 +83,10 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior turn (`3ad97320`, D-212 disasm docs) ubuntu = n/a (docs only). THIS turn landed the D-212 fix
-(`7c86b3a0` GET + `720e5793` SET, both arches, x86_64 cross-compile verified) → ubuntu `test-all`
-kicked at end → `tail -3 /tmp/ubuntu.log` next resume (Step 0.7). On FAIL revert to `3ad97320`.
-Mac aarch64 primary; ubuntu = x86_64.
+Prior turn (`3dd06d23`, D-212 fix) ubuntu `test-all` = GREEN (verified HEAD=3dd06d23; x86_64 OK).
+THIS turn = INVESTIGATION/triage (mapped D-218 i31.1 3-blocker stack; 2 fixes attempted then reverted
+[un-observable alone]; debt+handover only → code == green `3dd06d23`). SKIP Step 0.7 ubuntu next
+resume (no code delta). Mac aarch64 primary; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
