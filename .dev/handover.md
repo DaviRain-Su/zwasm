@@ -8,11 +8,13 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD** (`6f1eeb4a`): on **ADR-0127 PHASE C** (cross-module func-import type-identity; closes the 4
-  `gc/type-subtyping.{36,42,52,54}` assert_unlinkable fails, both backends). Cycle 1 DONE:
-  `sections.canonicalEqualCross` (cross-`Types` iso-recursive type-def equality) + 4 unit tests, isolated/
-  unwired. Prior: multi-value JIT invoke +18 → corpus **762/2/531** (DONE). full wasm-3.0 interp fail tally
-  = 9 (1 return + 4 trap + 4 unlinkable); PHASE C closes the 4 unlinkable.
+- **HEAD** (`add983e8`): **ADR-0127 PHASE C DONE** — cross-module func-import type-def identity. Predicates
+  `canonicalEqualCross` (`6f1eeb4a`) + `superReachesCross` (`d5183d4e`); integration (`add983e8`) wires them
+  at linker resolve via retained exporter `Types` (Instance arena) + `ExportFuncType.typeidx` +
+  `CrossModuleFuncEntry` threading. **wasm-3.0 assert_unlinkable fail 4→0** (gc/type-subtyping.{36,42,52,54};
+  no regression — 407 multi-mem + 34 EH + .30/M super-chain stay green). Prior: multi-value JIT invoke +18.
+- **wasm-3.0 interp fail tally now 5** (was 9): assert_return fail=1 + assert_trap fail=4, all in
+  gc/type-subtyping (the RTT mechanism — SEPARATE from PHASE C's import-linking). JIT corpus 762/2/531.
 - **Recent fixes (detail in debt.yaml)**: **D-228** (`7bb3699a`) test-all now runs the wasm_3_0 unit tests
   (was `zig build test`-only → a stale assert false-greened both hosts). **D-229** (`a5f6b238`) param-bearing
   e2e test gated to aarch64 (x86_64 SysV thunk lacks params; low-ROI follow-on).
@@ -41,42 +43,28 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Active bundle
 
-- **Bundle-ID**: `10.G-typesubtyping-PHASE-C` (prior `10.G-§1-multivalue` CLOSED — +18 → 762/2/531; §1 skip
-  tail at its non-deferred floor, multi-value follow-ons low-ROI = D-229). Pivot rationale: §1 skip-reduction
-  exhausted; binding §10 exit = fail=0 both backends; PHASE C is Accepted/autonomous (ADR-0128 100% directive).
-- **Cycles-remaining**: ~1. BOTH predicates DONE+tested: `canonicalEqualCross` (`6f1eeb4a`, 4 tests) +
-  `superReachesCross` (`d5183d4e`, 2 tests). NEXT (final) = the INTEGRATION chunk (retain exporter Types +
-  thread into CrossModuleFuncEntry + run the check at linker resolve).
-- **SCOPE**: PHASE C targets the **4 assert_unlinkable fails** `gc/type-subtyping.{36,42,52,54}` (NOT the
-  assert_return run-Trap — separate RTT, still fail). PHASE A (structural) + B (finality) landed cyc236/239;
-  PHASE C adds type-definition identity (canonical-equal OR declared-supertype-reach across two `Types`).
-- **LOCKED DESIGN (NEXT = wiring chunk, linker path first)**: corpus path = `linker.zig` (defineCrossModuleFunc
-  :315 → resolve :468). The existing PHASE B check (:491 `module_types.finals[typeidx] and !cmf.source_final`)
-  only rejects importer-FINAL ← exporter-open; **`.36/.42/.52/.54` are the REVERSE** (importer-OPEN `$t1` ←
-  exporter-FINAL `$t2`, structurally `()->()` but distinct defs) → uncaught. PHASE C #2 (per ADR Decision —
-  use `canonicalEqualCross`, NOT the same-typespace single-Types hack): accept iff PHASE-A-structural AND
-  (`canonicalEqualCross(importer_types, want_tidx, exporter_types, source_tidx)` OR exporter's supertype
-  chain from source_tidx reaches a type canonicalEqualCross to want_tidx). Both-false → reject.
-  - **INTEGRATION (next, both predicates ready)**: at resolve, accept iff PHASE-A AND
-    (`canonicalEqualCross(&module_types, typeidx, &exporter_types, source_tidx)` OR
-    `superReachesCross(&exporter_types, source_tidx, &module_types, typeidx)`) — replaces the PHASE B finality
-    check at linker.zig:492 (PHASE C subsumes it: .35 importer-final still rejects via both-arms-false).
-  - **Lifetime (two options)**: (a) at defineCrossModuleFunc decode exporter Types from source_inst module
-    bytes + retain in CrossModuleFuncEntry, free at linker deinit (localized, manual free); (b) retain the
-    Types `buildExportTypes` already decodes on the Instance ARENA (auto-freed) + add `typeidx` to
-    ExportFuncType. (b) is cleaner (arena, no manual free) but touches instantiate+instance+ExportFuncType;
-    (a) localizes to linker.zig. Pick at impl. source_typeidx = exporter funcidx→func-section→typeidx.
-  - **Regression net (MUST stay green)**: 441 exact-equal imports (407 multi-mem + 34 EH → canonicalEqualCross
-    true) + the `.30/M` valid imports (line 506 `import M.f2 as $t1` valid via $t2's super-chain reaching $t1
-    with nested `(ref null $t1)` — needs the super-reach arm + exporter Types).
-  - **Red test**: linker unit test, M2 exports final `$t2`, importer imports it as open `$t1` → expect link
-    reject (currently wrongly links). Then api/instance.zig:572 + instantiate.zig:1657 = follow-up chunks.
-- **Continuity-memo**: full wasm-3.0 fail tally (ubuntu interp): assert_return fail=1 + assert_trap fail=4
-  + assert_unlinkable fail=4 = 9 (both backends share linking/validation fails). PHASE C closes the 4
-  unlinkable. JIT corpus = **762/2/531**. See D-202 (PHASE A/B landed, C scope).
-- **Exit-condition**: `gc/type-subtyping.{36,42,52,54}` assert_unlinkable PASS (fail 4→0 both backends), NO
-  regression in the 441 exact-equal cross-module imports (407 multi-mem + 34 EH — canonically equal, must
-  still link). Risk: PHASE C NARROWS acceptance; the green cross-module corpus is the net.
+- **Bundle-ID**: `10.G-typesubtyping-RTT` (prior `10.G-typesubtyping-PHASE-C` CLOSED — exit met: assert_unlinkable
+  fail 4→0, no regression. ADR-0127 PHASE C: predicates `canonicalEqualCross`+`superReachesCross` + linker
+  integration `add983e8`. Earlier this bundle-chain: §1 multi-value +18).
+- **Cycles-remaining**: ~1-2 (just opened — cycle 1 = investigate). The remaining wasm-3.0 gc/type-subtyping
+  fails are the **RTT mechanism** (NOT import linking): assert_return fail=1 + assert_trap fail=4 (interp,
+  both backends). These are ref.test/ref.cast/br_on_cast against declared sub/supertypes producing a wrong
+  trap-or-value where a subtype relation should hold (or not).
+- **NEXT (cycle 1)**: Step-0 investigate WHICH gc/type-subtyping directives trap/mismatch + the RTT shape.
+  Re-measure: `zig build test-spec-wasm-3.0-assert 2>&1 | grep -iE "type-subtyping|trap_fail"`. The raw .wast
+  is `test/spec/wasm-3.0-assert/gc/raw/type-subtyping.wast`; map the failing `assert_trap`/`assert_return`
+  directives back to their module's type hierarchy + the cast op. Likely a Cohen-display / canonical-id depth
+  or cross-rec-group subtype gap (cf. ADR-0116 RTT 8-deep + ADR-0126 canonical ids). Decide tractability →
+  fix or debt-row.
+- **ALSO OPEN (lower priority, follow-ups)**: PHASE C wired only the **linker path** (corpus). The
+  api/instance.zig:572 + instantiate.zig:1657 `.cross_module` paths still do structural-only — a C-API
+  cross-module import with distinct type-defs wouldn't reject. Not corpus-exercised → debt-worthy, not §10-
+  blocking. Also: the wasm-3.0 runner doesn't GATE on its fails (reports only) — a regression in the now-green
+  unlinkable wouldn't break the gate; gating becomes possible once all its fails reach 0 (the §10 close goal).
+- **Continuity-memo**: wasm-3.0 interp fails now 5 (1 return + 4 trap, all gc/type-subtyping RTT). JIT corpus
+  762/2/531; the 2 JIT-executed assert_return fails = gc/type-subtyping (this RTT) + eh/try_table (EH-on-JIT).
+- **Exit-condition**: gc/type-subtyping assert_trap fail 4→lower + assert_return fail 1→0 (or a documented
+  blocker if the RTT gap is deep/deferred). No regression elsewhere.
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -85,18 +73,18 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **10.TC** tail-call — JIT matrix complete; residuals = D-210 + `wasm_of_ocaml`.
 - **10.E** EH — JIT emit present; residuals = eh_frequency runner (I20), c_api tag
   accessors (I14 → Phase 13), emscripten_eh realworld (I21).
-- **10.G** GC — JIT emit COMPLETE both arches; remaining = §1 JIT-corpus mode (this bundle)
-  + ADR-0127 PHASE C + D-198 + gc_stress (I19) + dart/hoot (I21).
+- **10.G** GC — JIT emit COMPLETE both arches; §1 JIT-corpus + ADR-0127 PHASE C (unlinkable) DONE;
+  remaining = gc/type-subtyping RTT fails (this bundle) + D-198 + gc_stress (I19) + dart/hoot (I21).
 - **10.P** close — flips only at 100% both-backends (ADR-0128).
 
 ## Step 0.7 (next resume)
 
-THIS turn = ADR-0127 PHASE C cycle 3: `sections.superReachesCross` predicate + 2 tests (`d5183d4e`),
-isolated/unwired. BOTH predicates now ready. Mac-green (mac_gate test-all + lint). Next resume Step 0.7:
-`tail -3 /tmp/ubuntu.log` — expect `OK (HEAD=d5183d4e)`; on FAIL revert to last verified HEAD (11c553a6).
-Then do the INTEGRATION chunk (the final PHASE C piece) per the Active-bundle INTEGRATION note: red test
-(M2 exports final `$t2`, importer imports as open `$t1` → link must reject), then retain exporter Types +
-run `canonicalEqualCross`/`superReachesCross` at linker resolve, verify the 441-import regression net. Mac aarch64; ubuntu = x86_64.
+THIS turn = ADR-0127 PHASE C INTEGRATION DONE (`add983e8`) — wired both predicates at linker resolve via
+retained exporter Types + ExportFuncType.typeidx + CrossModuleFuncEntry threading. wasm-3.0 assert_unlinkable
+fail 4→0, no regression (corpus + mac_gate test-all + lint all green). PHASE C bundle CLOSED. Next resume
+Step 0.7: `tail -3 /tmp/ubuntu.log` — expect `OK (HEAD=add983e8)`; on FAIL revert to last verified HEAD
+(d5183d4e). Then start the new bundle `10.G-typesubtyping-RTT`: investigate the remaining gc/type-subtyping
+assert_trap fail=4 + assert_return fail=1 (RTT mechanism). Mac aarch64; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
