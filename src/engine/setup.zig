@@ -315,6 +315,29 @@ pub fn setupRuntime(
     const gc_heap_ptr: ?*anyopaque = gc_heap_typed;
     const gc_type_infos_ptr: ?*anyopaque = gc_type_infos_typed;
 
+    // Build `func_entities` BEFORE the global-init loop so `ref.func N`
+    // const-expr globals resolve to a non-null funcref (`&func_entities[N]`)
+    // rather than the D-223 placeholder null (D-225 sub-fix: ref_func
+    // `is_null-v` etc.). Only depends on `dispatch` + `compiled` + `module`
+    // (all built above); the element-section loop below also consumes it.
+    const FuncEntity = @import("../runtime/instance/func.zig").FuncEntity;
+    const total_funcs = compiled.func_sigs.len;
+    const func_entities = try allocator.alloc(FuncEntity, total_funcs);
+    errdefer allocator.free(func_entities);
+    var fe_canon_types: ?sections.Types = null;
+    defer if (fe_canon_types) |*t| t.deinit();
+    if (module.find(.type)) |ts| fe_canon_types = try sections.decodeTypes(ta, ts.body);
+    for (func_entities, 0..) |*fe, i| {
+        const f_off = compiled.module.func_offsets[i];
+        const funcptr: usize = if (f_off == linker.IMPORT_SENTINEL_OFFSET)
+            (if (i < dispatch.len) dispatch[i] else 0)
+        else
+            @intFromPtr(compiled.module.block.bytes.ptr + f_off);
+        const raw_ti = compiled.func_typeidxs[i];
+        const canon_ti: u32 = if (fe_canon_types) |t| canonical_type.canonicalTypeidx(t.items, raw_ti) else raw_ti;
+        fe.* = .{ .runtime = undefined, .func_idx = @intCast(i), .typeidx = canon_ti, .funcptr = funcptr, .raw_typeidx = raw_ti };
+    }
+
     // Evaluate each defined global's init-expr so e.g. `__stack_pointer`
     // holds its real value. This simplified setup previously left globals
     // at 0, which made shadow-stack modules' `SP - n` wrap to a huge OOB
@@ -322,16 +345,15 @@ pub fn setupRuntime(
     // rustc/clang -O code spills to the shadow stack). Non-const inits
     // (rare in these fixtures) fall back to 0. GC const-exprs (struct.new /
     // array.new) reach `evalGlobalInitGc` via the UnsupportedConstExpr
-    // fallback and allocate on the heap materialised above (D-223). The
-    // empty func_entities slice means a `ref.func`-in-gc-const-expr global
-    // is not yet supported here (enumerated gap; setup func_entities is
-    // built later in this fn).
+    // fallback and allocate on the heap materialised above (D-223). D-225:
+    // `func_entities` (built above) now resolves `ref.func` globals to a
+    // non-null funcref.
     if (decoded_globals) |g| {
         const gti_val: ?gc_type_info.GcTypeInfos = if (gc_type_infos_typed) |t| t.* else null;
         for (g.items, 0..) |gd, i| {
             globals_buf[i] = instantiate.evalConstExprValue(gd.init_expr) catch |e| blk: {
                 if (e == error.UnsupportedConstExpr) {
-                    break :blk instantiate.evalGlobalInitGc(gd.init_expr, gc_heap_typed, gti_val, &.{}, &.{}) catch .{ .bits128 = 0 };
+                    break :blk instantiate.evalGlobalInitGc(gd.init_expr, gc_heap_typed, gti_val, func_entities, &.{}) catch .{ .bits128 = 0 };
                 }
                 break :blk .{ .bits128 = 0 };
             };
@@ -449,25 +471,6 @@ pub fn setupRuntime(
     // §9.9 / 9.9-m-1b: per-module FuncEntity array, allocated
     // above the element-section loop so the loop populates refs
     // (FuncEntity-ptr) in the same pass as funcptrs_buf.
-    const FuncEntity = @import("../runtime/instance/func.zig").FuncEntity;
-    const total_funcs = compiled.func_sigs.len;
-    const func_entities = try allocator.alloc(FuncEntity, total_funcs);
-    errdefer allocator.free(func_entities);
-    // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
-    var fe_canon_types: ?sections.Types = null;
-    defer if (fe_canon_types) |*t| t.deinit();
-    if (module.find(.type)) |ts| fe_canon_types = try sections.decodeTypes(ta, ts.body);
-    for (func_entities, 0..) |*fe, i| {
-        const f_off = compiled.module.func_offsets[i];
-        const funcptr: usize = if (f_off == linker.IMPORT_SENTINEL_OFFSET)
-            (if (i < dispatch.len) dispatch[i] else 0)
-        else
-            @intFromPtr(compiled.module.block.bytes.ptr + f_off);
-        const raw_ti = compiled.func_typeidxs[i];
-        const canon_ti: u32 = if (fe_canon_types) |t| canonical_type.canonicalTypeidx(t.items, raw_ti) else raw_ti;
-        fe.* = .{ .runtime = undefined, .func_idx = @intCast(i), .typeidx = canon_ti, .funcptr = funcptr, .raw_typeidx = raw_ti };
-    }
-
     // Wasm spec §4.5.7 (table.init / element-segment instantiation)
     // — populate the table with funcref entries from the element
     // section. Without this, `call_indirect` loads a NULL funcptr

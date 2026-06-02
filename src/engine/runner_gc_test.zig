@@ -935,3 +935,24 @@ test "JitInstance: table.grow i31 table — grow→old size, get grown slot (D-2
     try testing.expectEqual(@as(?u64, 3), try inst.invoke(testing.allocator, "size", &.{})); // 1+2
     try testing.expectEqual(@as(?u64, 99), try inst.invoke(testing.allocator, "get", &.{1})); // grown slot
 }
+
+// ── D-225 (partial): ref.func in a funcref global init resolves non-null ──
+
+test "runI32Export: global funcref ref.func f + ref.is_null is 0 (D-225)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    // (module (func $f) (global funcref (ref.func $f))
+    //   (func (export "f") (result i32) global.get 0 ref.is_null))
+    // The ref.func global init was left null (setup passed empty func_entities
+    // to evalGlobalInitGc); now func_entities is built before the global loop.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x08, 0x02, 0x60, 0x00, 0x00, 0x60, 0x00, 0x01, 0x7f, // type[0]=()->() type[1]=()->i32
+        0x03, 0x03, 0x02, 0x00, 0x01, // func0=type0 ($f), func1=type1 (export)
+        // global: 1, funcref (0x70), immutable (00), init ref.func 0 (d2 00) end (0b)
+        0x06, 0x06, 0x01, 0x70, 0x00,
+        0xd2, 0x00, 0x0b,
+        0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x01, // export "f" -> func1
+        0x0a, 0x0a, 0x02, 0x02, 0x00, 0x0b, 0x05, 0x00, 0x23, 0x00, 0xd1, 0x0b, // func0 empty; func1 global.get 0 ref.is_null
+    };
+    try testing.expectEqual(@as(u32, 0), runI32Export(testing.allocator, &bytes, "f"));
+}
