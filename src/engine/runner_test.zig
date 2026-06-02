@@ -1234,6 +1234,12 @@ test "JitInstance.invokeMulti: 2-result (i32 i32) returns both values via entry_
 }
 
 test "JitInstance.invokeMulti: 1-param 2-result returns (arg, 42) — arm64 param-bearing wrapper thunk" {
+    // arm64-only: the param-bearing multi-value wrapper thunk is emitted by
+    // `emitAarch64` (AAPCS). The x86_64 SysV path still rejects params (NO_THUNK
+    // → invokeMulti skips), so this shape is unsupported there (D-229). Mirrors
+    // the existing per-arch byte tests' gating.
+    // SIBLING-AT: src/engine/codegen/shared/wrapper_thunk.zig (x86_64 SysV param-bearing thunk: D-229)
+    if (comptime builtin.cpu.arch != .aarch64) return;
     if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
     // (module (func (export "swap") (param i32) (result i32 i32)
     //   (local.get 0) (i32.const 42)))

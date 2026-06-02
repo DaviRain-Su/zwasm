@@ -3,6 +3,15 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-229"
+    layer: "code"
+    status: "now"
+    description: |-
+      x86_64 SysV param-bearing multi-value wrapper thunk UNIMPLEMENTED — backend asymmetry. `emitAarch64` (`f1858416`) emits the 1-param 2-GPR-result thunk (AAPCS: LDR X1,[X2] → body slot), but the SysV path in `wrapper_thunk.emit` (src/engine/codegen/shared/wrapper_thunk.zig:173) still `if (params.len != 0) return UnsupportedOp` → NO_THUNK → `JitInstance.invokeMulti` skips param-bearing multi-value on x86_64 (the `invokeMulti 1-param 2-result` e2e test is gated `arch != .aarch64` for this reason). Win64 (`emitX8664Win64`, n_params 1/3) already does params — the SysV recipe mirrors it: SUB RSP,8; MOV [RSP],RSI (save results); MOV RSI,[RDX] (param0 → body's SysV slot); CALL body; MOV RSI,[RSP]; ADD RSP,8; MOV [RSI],RAX; MOV [RSI+8],RDX. FIX when the multi-value param ROI justifies it (currently +2 on arm64 — LOW; the bigger struct.10 cohort is single-result, already eligible). Verify: an x86_64-gated SysV byte test + the e2e test ungated. Until then x86_64 JIT-corpus multi-value-with-params stays skip (safe, no wrong answers).
+    first_raised: "2026-06-02"
+    last_reviewed: "2026-06-02"
+    refs: |-
+      `src/engine/codegen/shared/wrapper_thunk.zig` (SysV `emit` :173 params reject; `emitX8664Win64` recipe; `emitAarch64` arm64 done); `src/engine/runner_test.zig` (invokeMulti 1-param e2e, arch-gated); ADR-0106; ROADMAP §10
   - id: "D-228"
     layer: "infra"
     status: "resolved"
