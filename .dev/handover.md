@@ -60,18 +60,18 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET** long ago.
   Infra COMPLETE; backbone operational (pass=484). Bundle stays open as the diagnostic-driven
   gap-fixing vehicle (`JITmodrej` tally → fix biggest tractable lever).
-- **NEXT chunk** = **D-212 — f32-specific CONFIRMED + scaffolding landed (`6db5fbbd`)**. Cross-func
-  control pair in `runner_gc_test.zig`: i32 `struct.get` through a ref-param call → 42 (GREEN), f32 →
-  stale 0.0 instead of 2.5 (RED, `skip.blocker(.D-212)`). So ref-arg + GPR results are fine; only the
-  f32 result fails to reach V0/XMM0 across call/return. **NEXT STEP = DISASSEMBLE the inner fn FIRST**
-  (`debug_jit_auto` recipe #16 dump + `objdump -D -b binary -m aarch64`) — do NOT code the FP-class
-  change blind: a SAME-FN `struct.new(2.5); struct.get; return` returns 2.5 correctly, so the missing
-  GPR→V0 move could be in struct.get, the f32-return epilogue, OR the call-result capture; disasm
-  decides. Candidate fix: struct.get/array.get f32/f64 → FP-class (mirror f32.load `encLdrSReg`/movss);
-  needs field valtype at emit+classifier (lowering has the side-tables; ZirFunc/EmitCtx don't). Both
-  arches. Un-skip the f32 red → green. CAUTION: hand-encoded multi-fn wasm is error-prone (recompute
-  section sizes — last cycle's "i32 fails" was a SectionTooLarge bug). Skip multi-memory 51; AFTER
-  D-212: gc/array+i31 `err=Trap` (D-218), ref_func 4 (D-198).
+- **NEXT chunk** = **D-212 — PINNED via disasm (`c963f41f`); fix is now MECHANICAL**. arm64 inner fn
+  decodes to `ldr x9,[x16,#8]` (struct.get → **GPR X9**) then `fmov s0, s16` (f32-return reads **FP S16,
+  never written** → stale). Root cause = struct.get/array.get result is GPR-class (`vregClassOfOp`
+  `else=>.gpr`) but f32 consumers read the FP home. FIX (fresh context — architectural, regalloc-class;
+  build between steps): (1) `regalloc_vreg_class.zig` `vregClassOfOp` → `.fpr` for struct.get/array.get
+  when field/elem valtype is f32/f64; (2) struct.get + array.get emit BOTH arches → `fpDefSpilled` + FP
+  load (`encLdrSReg/DReg` / movss/movsd, mirror f32.load `op_memory.zig`). THREADING: add gc field/elem
+  valtype accessors to ZirFunc (like `localValType`), populated at lowering (`array_elem_valtypes`
+  exists; add `struct_field_valtypes`); array.get plain `extra`=0 (free), struct.get `extra`=fieldidx
+  (taken → ZirFunc lookup). Write the RED test first (un-skip the `skip.blocker(.D-212)` f32 test), green
+  it, re-measure corpus. get_s/get_u are i32-only (untouched). Skip multi-memory 51; AFTER D-212:
+  gc/array+i31 `err=Trap` (D-218), ref_func 4 (D-198).
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -86,9 +86,9 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior turn (`ea37984f`, D-212 investigation docs) ubuntu = n/a (docs only). THIS turn landed test
-scaffolding (`6db5fbbd`: i32 control + f32 red-skip + skip.zig D-212 Blocker) — ubuntu `test-all`
-kicked at end → `tail -3 /tmp/ubuntu.log` next resume (Step 0.7). On FAIL revert to `ea37984f`.
+Prior turn (`c963f41f`, D-212 scaffolding) ubuntu `test-all` = GREEN (verified HEAD=c963f41f). THIS
+turn = INVESTIGATION (disasm pinned D-212 to exact `ldr x9` / `fmov s0,s16` mismatch; debt+handover
+only, no src change → code == green `c963f41f`). SKIP Step 0.7 ubuntu next resume (no code delta).
 Mac aarch64 primary; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
