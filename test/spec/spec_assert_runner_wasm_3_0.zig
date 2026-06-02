@@ -1048,11 +1048,13 @@ pub fn main(init: std.process.Init) !void {
                         const idx_trap: usize = if (d.module_id.len > 0)
                             (name_to_idx.get(d.module_id) orelse {
                                 summary.asserts_trap_fail += 1;
+                                if (fail_detail) try stdout.print("  FAILtrapDispatch [{s}/{s}] {s} id={s}\n", .{ proposal, entry.name, d.func_name, d.module_id });
                                 continue;
                             })
                         else
                             (cur_inst_idx orelse {
                                 summary.asserts_trap_fail += 1;
+                                if (fail_detail) try stdout.print("  FAILtrapSetup [{s}/{s}] {s}\n", .{ proposal, entry.name, d.func_name });
                                 continue;
                             });
                         const instance = &instances_list.items[idx_trap];
@@ -1063,13 +1065,17 @@ pub fn main(init: std.process.Init) !void {
                         // setup errors (compile/instantiate/sig
                         // lookup) propagate as RunError → counted as
                         // fail (the assert couldn't be evaluated).
-                        const outcome = manifest_parser.invokeInstanceTrap(instance, d.func_name, call_args[0..d.args_len]) catch {
+                        const outcome = manifest_parser.invokeInstanceTrap(instance, d.func_name, call_args[0..d.args_len]) catch |e| {
                             summary.asserts_trap_fail += 1;
+                            if (fail_detail) try stdout.print("  FAILtrapErr [{s}/{s}] {s} err={s}\n", .{ proposal, entry.name, d.func_name, @errorName(e) });
                             continue;
                         };
                         switch (outcome) {
                             .trapped => summary.asserts_trap_pass += 1,
-                            .returned_normally => summary.asserts_trap_fail += 1,
+                            .returned_normally => {
+                                summary.asserts_trap_fail += 1;
+                                if (fail_detail) try stdout.print("  FAILtrapNoTrap [{s}/{s}] {s} (returned normally; expected trap)\n", .{ proposal, entry.name, d.func_name });
+                            },
                         }
                     },
                     .assert_invalid => {
