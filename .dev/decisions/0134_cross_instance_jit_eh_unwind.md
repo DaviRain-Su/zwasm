@@ -97,11 +97,15 @@ single-instance case (collapses to the same comparison).
 
 ### Sequencing (bundle cycles)
 
-- **Cycle 1 (D3 foundation)** — global tag identity: `tag_import_targets`
-  + a global tag-id map in `JitRuntime`; throw resolves to global id;
-  entries resolve to global id; the comparison subsumes Cause A's local
-  `tag_canon`. Red test: a cross-module throw matches by global id at the
-  table level (unit), independent of the frame walk.
+- **Cycle 1 (D3 foundation)** — ✅ DONE (`16a921a8`): global tag identity.
+  `ExceptionTable.tag_canon` (u32 local) → `tag_ids` (u64); `setup` builds
+  it over the full tag space (defined → own token address; imported →
+  exporter id via `tag_import_targets`, else local rep token);
+  `TagImportTarget` + `JitInstance.exportedTagTarget` +
+  `sections.findExportedTagIndex`; `initLinked` += `tag_import_targets`;
+  spec runner `jitResolveTagImports`. runner_test verifies an importer's
+  aliased tags inherit the exporter's id. EH dir 32/2, global 794/3, no
+  regression (Cause A now resolved via the real cross-module identity).
 - **Cycle 2 (D1+D2)** — thunk frame-linking + block-range registry +
   per-frame table switch in `walk`/`trampolineCore`. `catch-imported` /
   `imported-mismatch` flip to pass on arm64 (Mac host).

@@ -9,19 +9,19 @@
   **interp pass=fail=skip=0 (MET) + JIT 0-real-fail + every JIT skip on the forward-ref'd
   deferred-allowlist** (multi-memory-on-JIT→§14, GC-on-JIT-rooting→§11). Raw "JIT skip=0" (ADR-0128)
   was unreachable in-phase; re-scoped autonomously per ADR-0132.
-- **LAST code HEAD** (`50e5ecd3`): **JIT tag-identity canon table — 10.E Cause A.** The JIT matched
-  try_table catch clauses by raw local tag index, so two tag imports binding the same source tag
-  (`(import "test" "e0")` ×2 → idx 0,1) compared `0==1` → no match → trap. Added `ExceptionTable.tag_canon`
-  (resolves throw + catch idx to a canonical representative; null/OOB → raw-idx fallback), carried via
-  `JitRuntime.tag_canon_ptr/_count` (size 448→464, layout-stable tail), built in `setup.zig` from the import
-  section (same (module,name) → collapse later idx onto earlier; only when ≥2 imported tags). The JIT analog
-  of interp's `*TagInstance` key (`mvp.catchTagMatches`). **EH JIT dir 31/3 → 32/2, global 793/4 → 794/3,
-  skip=0** (`catch-imported-alias` passes). +1 unit test. **GATE TRAP relearned**: corpus exe MUST be picked
-  by mtime (`find … -exec ls -t {} + | head -1`) — `head -1` alone returned a STALE binary and masked the
-  delta as 0 until caught.
-- **Prior governance turn** (`5447cb10`): ADR-0132 (cross-phase ROADMAP re-sequencing now AUTONOMOUS) +
-  ADR-0133 (Phase 10 exit re-scope; close-invariant I24; §10-scope RESOLVED, USER-GATED flag retired).
-  D-237 (spec-runner double-free, harness-only).
+- **LAST code HEAD** (`16a921a8`): **JIT global tag identity — cross-module (ADR-0134 D3, cycle 1).**
+  Replaced the per-module-local `tag_canon` (u32 repr idx) with a globally-comparable `tag_ids` (u64) — the
+  JIT analog of interp's `*TagInstance` key (ADR-0114 D7). `setup` builds `tag_ids` over the full tag space
+  whenever the module has ≥1 tag: defined tag's id = address of its own `tag_tokens` cell (unique/instance);
+  imported tag inherits the EXPORTER's id (`tag_import_targets`) else its (module,name) local rep token.
+  Added `TagImportTarget` + `exportedTagTarget` + non-filtering `sections.findExportedTagIndex` (decodeExports
+  drops kind=4); `initLinked` += `tag_import_targets`; spec runner `jitResolveTagImports`. Decodes imports on
+  section-presence (not `num_imports`, func-only). Observable: runner_test links 2 instances, importer's aliased
+  tags inherit exporter id. EH JIT dir 32/2 (Cause A green via REAL identity now), global 794/3, no regression.
+- **Cause A** (`50e5ecd3`): the within-module-aliased-import fix, now subsumed by D3's global identity.
+- **Prior governance** (`5447cb10`): ADR-0132 (autonomous ROADMAP re-sequencing) + ADR-0133 (Phase 10 exit
+  re-scope; I24; §10-scope RESOLVED). D-237 (spec-runner double-free, harness-only). **GATE TRAP**: corpus exe
+  MUST be picked by mtime (`find … -exec ls -t {} + | head -1`); bare `head -1` returns a STALE binary.
 - **Prior (this bundle chain)**: `590093f5` JIT catchless try_table (eh_catch_entries null→empty; unblocked
   try_table.1 compile, +29 EH); `3b668110` JIT tag index space includes imported tags (validator
   StackTypeMismatch); `2b48dfdc`/`74d155b7` D-235 JIT call_indirect subtype. interp wasm-3.0 corpus FULLY
@@ -32,29 +32,28 @@
   compiling, the dispatch RUNS — the 2 remaining fails are cross-instance (Cause B / ADR-0134).
 - **Watch**: `runner_test.zig` 1370 / `compile.zig` 1223 / `runner_gc_test.zig` 1476 / `jit_abi.zig` 1350 (WARN, < hard 2000).
 
-## Active task — CAUSE B cross-instance EH: **cycle 1 = D3 global tag identity**  **NEXT**
+## Active task — CAUSE B cross-instance EH: **cycle 2 = D1+D2 (thunk frame-link + per-frame dispatch)**  **NEXT**
 
-try_table.1.wasm 32/34. ✅ Cause A (`50e5ecd3`). 2 remaining fails (`catch-imported`, `imported-mismatch`) are
-Cause B = cross-instance throw. **Design locked in ADR-0134** (this turn) — confirmed in §10.E scope (ADR-0114
-D7 + Removal cond `cross_module_throw_propagation.wat` make cross-module EH Phase-10; interp passes day-1 via
-shared `*TagInstance`; ADR-0128 → JIT owes parity). The `unwind.zig:26-31` "Phase 11+" note is a STALE
-impl-deferral (loses to ADR-0114; update it when D2 lands). **Two gaps** (grounded this turn):
+try_table.1.wasm 32/34. ✅ Cause A (`50e5ecd3`). ✅ **D3 global tag identity** (`16a921a8`): a module-1 throw's
+tag and a module-2 catch's imported tag now resolve to the SAME `tag_ids` u64 (verified at the table/runner
+level). The 2 remaining fails (`catch-imported`, `imported-mismatch`) still fail because the UNWINDER is
+single-instance: `trampolineCore` holds the throwing instance's (module 1's) `rt`/table and walks every frame
+against it, so it never consults module 2's table where the catch lives. **Two gaps to close (ADR-0134 D1+D2)**:
 
-1. **Frame unreachable** — arm64 thunk (`arm64/thunk.zig` emitThunk) DOES `STP X29,X30,[SP,#-80]!` (saves
-   caller call-site LR+FP) but NEVER `MOV X29,SP`, so its frame isn't FP-linked → the FP-walk reaches the
-   caller frame carrying a THUNK pc, not the caller's call-site pc → caller try_table unfindable.
-2. **Single-instance dispatch** — `trampolineCore` holds one `rt`/table; must switch per-frame + compare tags
-   by a GLOBAL id (Cause-A `tag_canon` is per-module local, not cross-instance comparable).
+1. **D1 — frame unreachable.** arm64 thunk (`arm64/thunk.zig` emitThunk, 96B) does `STP X29,X30,[SP,#-80]!`
+   (saves caller call-site LR+FP) but NEVER `MOV X29,SP`, so its frame isn't FP-linked → the FP-walk reaches
+   the caller frame carrying a THUNK pc, not the caller's call-site pc → caller try_table unfindable. Add
+   `MOV X29,SP` after the STP (bump `thunk_bytes` 96→100 + size asserts; x86_64 mirror in cycle 3).
+2. **D2 — per-frame dispatch.** Build a process-global block-range→`*JitRuntime` registry; the walker resolves
+   each frame's abs pc → owning instance and switches the active table + `tag_ids` to it (`unwind.walk` +
+   `trampolineCore`). A thunk-arena pc = pass-through frame (no try_table). Then the throw's `tag_ids`-resolved
+   id (D3) matches the catch entry's `tag_ids`-resolved id in module 2's table. **Update the STALE
+   `unwind.zig:26-31` "Phase 11+" comment** to describe the implemented dispatch.
 
-**ADR-0134 sequencing** (bundle, 3 cycles): **cycle 1 = D3** global tag identity — add a `tag_import_targets`
-analog of D-225 `func_import_targets` (spec runner resolves each tag import → source global tag-id), a global
-tag-id map in `JitRuntime`, throw-site + entry resolve to global id, comparison subsumes Cause-A local
-`tag_canon`. Red test: cross-module throw matches by global id at the TABLE level (unit), no frame walk.
-**cycle 2 = D1+D2**: thunk `MOV X29,SP` (+1 instr, both arches; bump `thunk_bytes`/asserts) + process-global
-block-range→`*JitRuntime` registry + per-frame table switch in `unwind.walk`/`trampolineCore`. **cycle 3**:
-x86_64 parity + `cross_module_throw_propagation.wat` fixture + 2-host. **Cycle-1 first read**: how the JIT spec
-runner links modules + assigns/threads a global tag id (check `runner.zig` JitInstance link path + `setup.zig`
-~266-300 func_import_targets loop = the plumbing template).
+Loci: `arm64/thunk.zig`/`x86_64/thunk.zig` (frame-link), `unwind.zig` walk + FrameLink, `throw_trampoline.zig`
+trampolineCore (single rt today), a new registry (setup/runner link path registers each instance's block range).
+**Cycle-2 first read**: the FP-walk frame loader in `throw_trampoline.zig` (how it materializes FrameLink from
+the live stack) + the thunk frame layout (where caller_rt is recoverable = `[thunk_fp+16]` saved X19).
 
 Other non-gated tracks (after EH): **D-234** (memory64 assert_trap harness artifact), **D-198**, **D-209**,
 **D-210** (return_call_indirect-in-try = func[36], TC+EH gap). Realworld GC/EH/TC producers.
@@ -65,11 +64,12 @@ Other non-gated tracks (after EH): **D-234** (memory64 assert_trap harness artif
 
 ## Active bundle
 
-- **Bundle-ID**: `10.E-eh-on-jit` (opened `3b668110`).  **Cycles-remaining**: ~3 (Cause B = ADR-0134 D3→D1+D2→x86_64).
-- **Continuity-memo**: try_table.1.wasm 32/34. ✅ func[6] validate (`3b668110`) → ✅ catchless (`590093f5`, +29)
-  → ✅ result-arity (`881b25e0`, +2) → ✅ **Cause A aliased-import identity (`50e5ecd3`, +1)** → 🎯 **Cause B
-  cross-instance: ADR-0134 design locked** (this turn, no code yet). NEXT = cycle 1 (D3 global tag identity).
-  func[36] return_call_indirect-in-try = separate TC+EH gap (D-210 family).
+- **Bundle-ID**: `10.E-eh-on-jit` (opened `3b668110`).  **Cycles-remaining**: ~2 (ADR-0134 D1+D2 → x86_64+fixture).
+- **Continuity-memo**: try_table.1.wasm 32/34. ✅ catchless (`590093f5`) → ✅ result-arity (`881b25e0`) →
+  ✅ Cause A (`50e5ecd3`) → ✅ **D3 global tag identity (`16a921a8`)**: throw/catch resolve to the same `tag_ids`
+  u64 across instances (table/runner-verified). 🎯 NEXT = **cycle 2 (D1+D2)**: thunk `MOV X29,SP` frame-link +
+  per-frame-instance table switch so the unwinder consults module 2's table. func[36] return_call_indirect-in-try
+  = separate TC+EH gap (D-210 family).
 - **Exit-condition**: JIT EH dir return-fail = 0 (currently pass=32 fail=2 skip=0 → target 34/0/0).
 
 ## §10 remaining — the six `[ ]` rows
@@ -84,9 +84,9 @@ Other non-gated tracks (after EH): **D-234** (memory64 assert_trap harness artif
 
 ## Step 0.7 (next resume)
 
-THIS turn = Cause B DESIGN only (ADR-0134 + handover; NO codegen, NO ubuntu kick — docs-only). Code state
-unchanged since `73e55e6d`, ubuntu-verified OK (test-all, exit 0). Prior turn's Cause A (`50e5ecd3`) is 2-host
-green. Next resume: Step 0.7 has nothing new to verify; go straight to cycle 1 (D3). Mac aarch64; ubuntu x86_64.
+THIS turn = D3 cycle 1 (`16a921a8`, code). Mac `test-all` + lint GREEN; JIT corpus re-verified (EH 32/2, global
+794/3, no regression). ubuntu `test-all` kicked against the turn HEAD — Step 0.7 next resume: `tail -3
+/tmp/ubuntu.log`, revert the commit pair on FAIL. Mac aarch64; ubuntu x86_64. Then → cycle 2 (D1+D2).
 
 **Gate hygiene**: Step-5 Mac gate = `bash scripts/mac_gate.sh`. JIT corpus: `zig build test-spec-wasm-3.0-assert`
 (NO bogus `-Dno-run`); **pick the exe by mtime** — `/usr/bin/find .zig-cache/o -name zwasm-spec-wasm-3-0-assert
