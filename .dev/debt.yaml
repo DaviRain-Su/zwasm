@@ -3,6 +3,29 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-240"
+    layer: "code"
+    status: "blocked-by"
+    description: |-
+      blocked-by: JIT runtime support for TYPED / abstract-ref TABLES (table.init from a
+      reftype-bearing elem segment + table.get/set of `(ref null $t)` / `i31ref` / etc.). A
+      §10-exit module-reject (ADR-0133 §4): function-references `ref_is_null.0` (ElemSegmentTypeMismatch)
+      + likely gc `i31.6` (same error class). The IMMEDIATE blocker is `compile.zig:257`'s elem-vs-table
+      reftype check using exact `.eql` instead of a SUBTYPE check (Wasm 3.0 §3.3: elem type <: table type,
+      e.g. `(elem (table $t3) (ref $t) …)` into `(table $t3 2 (ref null $t))` = non-null <: nullable). BUT
+      (2026-06-03, this turn): loosening that check ALONE to `validator_mod.Validator.valTypeIsSubtype` made
+      the JIT ACCEPT `ref_is_null.0` then **SEGV at runtime (corpus RUN=139)** — the JIT has no typed-ref
+      table.init/get/set, so the clean reject was (accidentally) the only thing preventing a crash. Reverted
+      the loosening (kept eql + a `// D-240` comment at the site documenting the trap). DISCHARGE (two coordinated
+      pieces, land together): (1) implement the typed-ref table runtime — elem-init that carries the reftype +
+      table.get/set of typed/abstract refs (the SEGV site: probe with `debug_jit_auto` on `ref_is_null.0`); THEN
+      (2) flip `compile.zig:257` eql→`valTypeIsSubtype`. Verify the corpus does NOT regress assert_invalid
+      (the subtype check still rejects genuine non-subtype mismatches). NOT a quick validation fix — the
+      remaining fr/gc ElemSegmentTypeMismatch rejects need this runtime feature.
+    first_raised: "2026-06-03"
+    last_reviewed: "2026-06-03"
+    refs: |-
+      `src/engine/compile.zig:257` (elem-vs-table eql check + the `// D-240` trap comment); `src/validate/validator.zig:768` (`Validator.valTypeIsSubtype`); JIT typed-ref table.init/get/set (runtime, TBD — SEGV site via debug_jit_auto on ref_is_null.0); test/spec/wasm-3.0-assert/function-references/ref_is_null.0 + gc/i31.6; ADR-0133 §4; ADR-0123 (typed refs)
   - id: "D-239"
     layer: "code"
     status: "partial"

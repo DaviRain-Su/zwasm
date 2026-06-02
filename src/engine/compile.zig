@@ -254,6 +254,12 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
                             break :blk defined_tables_reftypes[di];
                         }
                     };
+                    // D-240 — should be a SUBTYPE check (Wasm 3.0 §3.3: elem
+                    // type <: table type, e.g. `(ref $t)` into `(ref null $t)`),
+                    // but loosening this validation alone makes the JIT ACCEPT
+                    // typed-ref-table modules (ref_is_null.0) it then SEGVs on at
+                    // runtime (no typed-ref table.init/get/set support yet). Keep
+                    // the exact-eql reject (no SEGV) until the runtime lands.
                     if (!seg.elem_type.eql(tbl_reftype)) {
                         return Error.ElemSegmentTypeMismatch;
                     }
