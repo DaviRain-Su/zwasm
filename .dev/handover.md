@@ -20,35 +20,39 @@
   + `eh_registry`) + D3 (`16a921a8`, global `tag_ids` u64 cross-module identity) + Cause A (`50e5ecd3`).
 - **10.E-eh-on-jit bundle = CLOSED** (`4f73d9ee`, exit 34/0/0 verified). x86_64 EH thunk-parity +
   `cross_module_throw_propagation.wat` fixture = **D-238** (ADR-0134 cycle 3; arch-parity, not Mac-§10-gating).
-- **§10-exit audit + determination** (`f507bf33` + subagent; determination this turn, no new code): interp
-  100% MET; JIT 0 GENUINE fails MET (memory64 = D-234 harness, 6 proof paths); skips all on the ADR-0133
-  allowlist. **Determination (ADR-0133 §4): the 17 module-rejects are in-phase MUST-FIX, not deferrable.**
-  First cluster root-cause PINNED → **D-239** (JIT compile.zig doesn't pass the validator's `func_type_indices`
-  → `ref.func` abstract not precise → StackTypeMismatch; + emit-dispatch gap). NEXT = fix D-239.
+- **LAST code HEAD** (`faf23f0a`): **D-239 — JIT function-references precise ref.func typing + null-ref emit.**
+  JIT `compile.zig` now passes the validator's `func_type_indices` (ADR-0123 D4 precise `ref.func`, was abstract
+  funcref → StackTypeMismatch) + wired br_on_null/br_on_non_null/ref_as_non_null into BOTH arm64 + x86_64 emit
+  dispatch (handler files existed, never routed). function-references 8/0/31 → 20/0/19; global JIT **796/1 →
+  808/1**; 5 of 8 fr rejects cleared; no regression; +1 regression test.
+- **§10-exit determination** (ADR-0133 §4): interp 100% MET + JIT 0 GENUINE fails MET (memory64 = D-234 harness,
+  6 proof paths, `f507bf33`) + the 17 module-rejects are in-phase MUST-FIX (NOT deferrable; allowlist = only
+  multi-memory→§14 + GC-on-JIT→§11). Remaining rejects after D-239 = the Active-task list.
 - **Prior**: ADR-0132/0133 (`5447cb10`, autonomous re-sequence + Phase-10 exit re-scope). interp wasm-3.0 corpus
   FULLY GREEN. Spec corpus = interp default; JIT opt-in `ZWASM_SPEC_ENGINE=jit`; entry = `runner.zig` `JitInstance`.
   **GATE TRAP**: corpus exe MUST be picked by mtime (`find … -exec ls -t {} + | head -1`); bare `head -1` = STALE.
 - **Watch**: `runner_test.zig` ~1415 / `compile.zig` 1223 / `runner_gc_test.zig` 1476 / `jit_abi.zig` 1350 (WARN, < hard 2000).
 
-## Active task — §10-exit: **fix D-239 (JIT function-references validator + emit)**  **NEXT**
+## Active task — §10-exit: **clear the remaining JIT module-rejects**  **NEXT**
 
-**Determination RESOLVED** (ADR-0133 §4, this turn): the 17 module-compile rejects are §10 **in-phase
-must-fix**, NOT deferrable. The deferred-allowlist is ONLY multi-memory→§14 + GC-on-JIT→§11 (both ✓). So
-§10 exit = interp 100% (MET) + JIT 0 genuine fails (MET — all memory64 fails are D-234 harness, 6 proof
-paths, `f507bf33`) + **clear the 17 rejects**. Concrete fix-list, start with the function-references cluster
-(**D-239**, root cause PINNED this turn):
-1. **D-239 (NEXT)** — JIT `compile.zig` validate doesn't build/pass the validator's `func_type_indices`
-   map → `ref.func N` types as abstract funcref (not precise `(ref func_type_indices[N])`, ADR-0123 D4) →
-   StackTypeMismatch (e.g. br_on_null.0 func[4] `(call $nn (ref.func $f))`). FIX (A): build the map in
-   `compile.zig` (mirror `instantiate.zig:128-143` imports-first func→typeidx) + thread into the
-   function-validate call. FIX (B): wire the 3 emit ops into `arm64/emit.zig` dispatch (handler files exist
-   at `ops/wasm_3_0/{br_on_null,br_on_non_null,ref_as_non_null}.zig` — verify real-not-stub). A is primary.
-   RED test: a minimal fr module (`ref.func $f` → `(ref $t)` param) via `JitInstance.init` compiles (no
-   StackTypeMismatch). Verify corpus: function-references modrej drops. (NOT D-198 — that's interp GC subtyping.)
-2. Then the remaining rejects: tail-call return_call_indirect UnsupportedOp (D-210), ref_is_null
-   ElemSegmentTypeMismatch + ref_null InvalidGlobalInitExpr + gc i31.6 (likely share D-239 root A — verify),
-   UnsupportedEntrySignature ×7 (invoke-path). + **D-234** runner-side harness discharge (so the corpus
-   stops false-reporting the 52 mem64 fails — required for the "0-real-fail" count to read clean).
+§10 exit (ADR-0133 §4): interp 100% (MET) + JIT 0 genuine fails (MET — memory64 = D-234 harness) + clear the
+17 module-rejects (in-phase must-fix, NOT deferrable). ✅ **D-239 DONE** (`faf23f0a`): JIT now passes the
+validator's `func_type_indices` (precise `ref.func` typing) + wired br_on_null/br_on_non_null/ref_as_non_null
+into both-arch emit dispatch → function-references 8/0/31 → 20/0/19 (+12), global 796/1 → **808/1**, 5 of 8 fr
+rejects cleared, no regression. **Remaining rejects (NEXT, pick highest-leverage)**:
+1. **tail-call** `return_call_indirect.0` UnsupportedOp (D-210) — TC emit gap (return_call_indirect not emitted).
+2. **D-239 residual 3** (distinct mechanisms, tracked in D-239): `br_on_null.1` UnsupportedOp (emit handler is
+   first-cut forward-block-only → needs loop/return-target path); `ref_is_null.0` ElemSegmentTypeMismatch
+   (elem-segment reftype validate gap); `ref_null.0` InvalidGlobalInitExpr (const-expr ref.null typing in
+   `rv.validateGlobalInitExpr`).
+3. **gc** `i31.6` ElemSegmentTypeMismatch + **UnsupportedEntrySignature ×7** (invoke-path eligibility — verify
+   if real rejects or the eligibility-gate skips the audit classified as on-allowlist).
+4. **D-234** runner-side harness discharge (so the corpus stops false-reporting the 52 mem64 fails — needed
+   for the "0-real-fail" count to read clean; codegen proven correct).
+
+Process: each is a small TDD fix (red minimal-module via `JitInstance.init` → green → corpus delta). Verify the
+`function-references` 3 residual share no hidden root before splitting effort. Run `scripts/check_phase10_close_invariants.sh`
+when the reject count hits 0 to confirm §10.P can flip.
 
 Other tracks: **D-238** (x86_64 EH parity), realworld GC/EH/TC producers.
 

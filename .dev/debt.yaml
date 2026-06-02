@@ -5,7 +5,7 @@
 entries:
   - id: "D-239"
     layer: "code"
-    status: "now"
+    status: "partial"
     description: |-
       JIT compile-path REJECTS function-references modules (br_on_null / br_on_non_null /
       ref_as_non_null) — a §10-exit in-phase must-fix (ADR-0133 §4; NOT deferrable). TWO
@@ -31,6 +31,17 @@ entries:
       reach emit. Sibling rejects likely sharing root A: ref_is_null ElemSegmentTypeMismatch +
       ref_null InvalidGlobalInitExpr (const-expr ref typing) + the gc i31.6 — verify after A.
       Distinguishing probe done: func_type_indices is the shared-validator knob; interp populates, JIT doesn't.
+      **PARTIAL (RESOLVED 2026-06-03, `faf23f0a`)**: both named gaps fixed — (A) `compile.zig` now passes the
+      already-built `func_typeidxs` to `validateFunctionAndCollectSelectTypesWithMemory` (new param); (B) the 3
+      ops wired into BOTH arm64 + x86_64 emit dispatch (x86_64 cross-compiled). function-references JIT dir
+      8/0/31 → 20/0/19 (+12), global 796/1 → 808/1, no regression, +1 regression test. Resolved 5 of 8 fr
+      rejects. **REMAINING 3 (distinct mechanisms, this row tracks them)**: (1) `br_on_null.1` UnsupportedOp —
+      the emit handler is first-cut "forward-block targets only; function-return + loop targets → UnsupportedOp"
+      (br_on_null.zig docstring); needs the loop/return-target emit path. (2) `ref_is_null.0`
+      ElemSegmentTypeMismatch — NOT a ref.func issue; an elem-segment reftype validation gap on the JIT compile
+      path. (3) `ref_null.0` InvalidGlobalInitExpr — const-expr `ref.null` typing in the JIT global-init
+      validate (`rv.validateGlobalInitExpr`). Each is a separate small fix; NEXT after the higher-frequency
+      §10 rejects (tail-call return_call_indirect, UnsupportedEntrySignature ×7).
     first_raised: "2026-06-03"
     last_reviewed: "2026-06-03"
     refs: |-
