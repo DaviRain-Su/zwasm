@@ -47,19 +47,23 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   green, pass=577; JIT-executed fails now 2, both gated/deep).
 - **Cycles-remaining**: ~2 — array.init DONE (`a11b1699`, +28); convert+RTT now the active multi-cycle sub-target.
 - **Eligible single-result gap-ops SPENT**: `struct.get_s/u` (`568ac652`), `array.init_data/elem` (`a11b1699`).
-- **ACTIVE sub-target = convert+RTT** (lever a): THIS cycle implemented `any.convert_extern`/`extern.convert_any`
-  emit (transparent `0→0` liveness + no-op switch arms both arches — the CORRECT model; null round-trip test
-  green) + MEASURED the JIT corpus: assert_return **605→685 (+80 pass) but fail 2→61 (+59)**, all +60 fails in
-  gc. CONFIRMED the handover prediction: convert unblocks ~5 modrej gc modules but their ref.test/cast/br_on_cast
-  then execute WRONG on extern/any-origin refs. **Transparent modelling is necessary but NOT sufficient** (the
-  "+39 was just liveness desync" hypothesis is DISPROVEN). REVERTED (net +59 regression must not land); the
-  correct convert emit is saved at `private/spikes/convert-extern-rtt/` (`convert-emit.diff` + README w/ H1-H4
-  hypotheses). **NEXT-CYCLE ORDER**: (1) FIX the JIT fail-detail diagnostic gap FIRST — `--fail-detail` printed
-  0 JITval/JITfail for the 60 gc fails despite L298/L881 prints + L1248 flush (can't diagnose blind); (2)
-  re-apply the diff, classify H1-H4 (likely H1/H3: extern host-value reaches jitGcRefTest as an in-bounds index
-  → readObjKindHeap reads garbage instead of null); (3) land convert+RTT together, verify net fail unchanged.
+- **ACTIVE sub-target = convert+RTT** (lever a). Cycle-1: convert emit (transparent `0→0` liveness + no-op
+  switch arms; null round-trip green) MEASURED +80 pass / **+59 fail** in gc → reverted to spike. Cycle-2
+  (this turn): DIAGNOSIS UNBLOCKED + taxonomy classified. The "diagnostic gap" was just stderr emit-noise
+  splicing stdout under `2>&1` — recipe = direct exe `--fail-detail 2>/dev/null` (lesson
+  `2026-06-02-jit-corpus-fail-detail-needs-stderr-split`; the runner flush + build.zig forwarding I tried were
+  UNNECESSARY → reverted). **60 gc fails = ref_test ×32, br_on_cast ×10, br_on_cast_fail ×10, ref_cast ×7**
+  (+1 pre-existing type-subtyping trap) — the RTT-test family. got: ref_test_i31/struct/eq/any → clean `1`
+  (too-lax); ref_test_null_data → `2`; br_on_cast → `0xffffffff` (wrong branch). **H1/H3 (extern bounds-guard)
+  REFUTED** — fails span i31/struct/array, not extern. **TWO live hypotheses** (`fail-taxonomy.txt` + spike
+  README): **HA** = RTT-logic gap in `jitGcRefTest`/`gcAbstractMatch` for the full heap-type matrix these
+  convert-unblocked comprehensive modules exercise (clean-wrong 0/1 supports); **HB** = the `0→0` transparent
+  convert corrupts regalloc → garbage downstream (`got=2` supports). **NEXT-CYCLE**: distinguish HA/HB cheaply
+  — HB probe = re-model convert `1→1` (real dest vreg + MOV, mirror ref.as_non_null) and re-measure (if +59
+  drops → HB); HA = read `gc/ref_test.wast` expected-vs-got + audit gcAbstractMatch arms vs spec §4.5.2. If
+  neither converges in 1 cycle → PIVOT.
 - **PIVOT option** = lever (b) MAJOR multi-value/`buffer_write` ABI (D-094/D-164; compile.zig:1058 hardcodes
-  register_write; ~39 skips; ADR-grade, HIGH blast radius) — if convert+RTT proves too deep.
+  register_write; ~39 skips; ADR-grade, HIGH blast radius) — if convert+RTT proves too deep (now 2 cycles in).
 - **Continuity-memo**: §1 JIT-EXECUTED assert_return fails = 2 (type-subtyping user-gated ADR-0127 PHASE C;
   try_table EH-on-JIT). Remaining §10 exit bulk = **skip=688** (baseline, post-revert). 2 pre-existing
   array_init trap_fails (baseline-verified) = separate assert_trap follow-on, low ROI.
@@ -79,10 +83,10 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-THIS turn = convert+RTT INVESTIGATION (no src commit; convert emit measured +80/+59 → reverted to spike;
-docs-only commit). HEAD code-equivalent to `95f618e3` which is ubuntu-GREEN (`OK (HEAD=95f618e3)` verified
-this turn's Step 0.7). No ubuntu kick (no code change). Next resume: go straight to Active-bundle convert+RTT
-NEXT-CYCLE ORDER (fix fail-detail → re-apply diff → classify H1-H4). Mac aarch64; ubuntu = x86_64.
+THIS turn = convert+RTT DIAGNOSIS cycle-2 (no src commit; all probes reverted to clean tree; docs/lesson-only
+commit). HEAD code-equivalent to `95f618e3` (ubuntu-GREEN, no code change → no ubuntu kick). Next resume: go
+straight to Active-bundle convert+RTT — distinguish HA (RTT-logic) vs HB (convert 1→1 regalloc) per the plan;
+re-apply `private/spikes/convert-extern-rtt/convert-emit.diff` to reproduce. Mac aarch64; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
