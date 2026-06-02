@@ -8,16 +8,16 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD** (`c5ab78c1`): §1 spec-corpus JIT mode. Session +74: D-223 (+43), D-212 (+6), D-218 (+8),
-  D-224 (+11), D-225 ref.func-global (+1) + runner-wiring (+3) + **globals-layout (+1, `c5ab78c1`)**.
-  D-225 imported-GLOBAL track COMPLETE: ref.func-global (`181f2f2b`) + table init-expr (`36904b47`) +
-  setup-time const-expr resolution (`e03c2aee`) + runner wiring (`a6cfd65e`, flips i31.3) + **import-
-  inclusive globals_buf** (`c5ab78c1`: emitted-code global layout is imports-first; globals_buf was
-  defined-only → emitted `global.get $defined` read OOB; now sized num_global_imports+globals_count,
-  flips i31.4 + fixes emitted global.get-of-import). Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac aarch64:
+- **HEAD** (`e964ba6e`): §1 spec-corpus JIT mode. Session +74 corpus: D-225 imported-GLOBAL track
+  COMPLETE (i31.3 `a6cfd65e` + i31.4 `c5ab78c1`). THIS turn: D-225 cross-module FUNC **direct-call**
+  dispatch via bridge thunk (`e964ba6e`) — `setupRuntimeLinked` takes `[]FuncImportTarget`, emits
+  ADR-0066 cohort-safe thunks into a per-instance arena + plants `dispatch[N]`; runner keeps registered
+  exporter JitInstances pinned + resolves func imports. NEW unit test green. **Corpus UNCHANGED (568/11)**:
+  ref_func call-f/call-v use `call_indirect` through a `ref.func $imported` funcref, NOT a direct call —
+  needs the funcref/funcptr-table piece (NEXT). Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac aarch64:
   **pass=568 fail=11 skip=716** (memory64 GREEN; interp UNCHANGED, jit_mode-guarded).
   **fail taxonomy (11)**: gc/array ×6 (corpus-context-dependent traps), ref_func call-f/call-v ×3
-  (cross-module FUNC dispatch — the remaining D-225 lever), gc/type-subtyping ×1 (ADR-0127 PHASE C),
+  (cross-module funcref via call_indirect — D-225 NEXT), gc/type-subtyping ×1 (ADR-0127 PHASE C),
   try_table ×1 (EH).
 - **PER-MODULE blocker-STACK reality** (lesson `2026-06-02-jit-corpus-late-phase-is-per-module-
   blocker-stacks`): since memory64 (+208, last big mover), every gc/funcref fix has been correct
@@ -46,22 +46,21 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 - **Bundle-ID**: `10.G-§1-cross-module-jit-imports` (D-225; the §1 backbone is long-operational at
   pass=564 — this sub-bundle is the current multi-cycle integration).
-- **Cycles-remaining**: ~2 (architectural — cross-module FUNC dispatch; survey DONE this cycle)
-- **Continuity-memo**: imported-GLOBAL track DONE (i31.3 `a6cfd65e` + i31.4 `c5ab78c1`). **NEXT =
-  cross-module FUNC dispatch** (ref_func call-f/call-v ×3). FULL SURVEY (this cycle):
-  `private/notes/d225-cross-module-func-dispatch-survey.md`. Key findings: (1) ref_func.1 imports `$f`
-  from "M", calls via funcref/call_indirect; dispatch[0]=`hostDispatchTrap`→trap. (2) Planting the
-  exporter entry directly is UNSAFE — emitted call passes X0=IMPORTER rt (wrong runtime) AND clobbers
-  the pinned cohort reg X19/R15 (D-142/206/210 SEGV lineage). (3) A **JIT-to-JIT bridge thunk** is
-  required (swap X0/RDI→exporter rt, preserve caller cohort) — it does NOT exist yet (`cross_module.zig`
-  is interp; `wrapper_thunk.zig` is host-call). (4) The runner DROPS exporter JitInstances per module
-  directive (runner.zig:~497) — must keep them alive (`jit_exporters: StringHashMap(*JitInstance)` at
-  `register`). IMPL PATH (~2 cycles, cohort-safety CRITICAL, do fresh): keep exporters → resolve func
-  imports (parallel `jitResolveImportedGlobals`) → emit per-arch bridge thunk (model ADR-0066 + D-210
-  cohort-save) → plant in dispatch[N] via initLinked → verify call-f/call-v green + NO SEGV (gate BOTH
-  arches at phase boundary). Land a permanent cohort-sentinel diagnostic (extended_challenge Step 5).
-- **Exit-condition**: ref_func `call-f` OR `call-v` flips green (cross-module FUNC call dispatches to
-  exporter, no trap, no SEGV).
+- **Cycles-remaining**: ~1 (funcref/call_indirect-of-import piece)
+- **Continuity-memo**: cross-module FUNC **direct-call** dispatch DONE (`e964ba6e`): the ADR-0066
+  bridge-thunk infra (`shared/thunk.zig` emitThunk/allocArena — already existed, cohort-safe) is now
+  wired through `setupRuntimeLinked([]FuncImportTarget)` → thunk arena → `dispatch[N]`; runner pins
+  exporters + resolves func imports; unit test green. **NEXT (flips ref_func call-f/call-v ×3)**:
+  ref_func.1 invokes the imported `$f` via `call_indirect` through a funcref made by `ref.func $f`
+  (imported) + `table.set` — NOT a direct `call`. So `dispatch[N]` is not consulted. The FIX: make
+  `ref.func $imported` produce a funcref whose **call_indirect entry = the bridge thunk** (reuse the
+  thunk arena built this turn — the funcptr-table slot for an imported func's funcref should hold the
+  thunk addr + the import's typeidx). INVESTIGATE: how the JIT lowers `ref.func N` for N<num_func_imports
+  (today → null/trap?), how call_indirect reads funcptr+typeidx from the table (funcptrs_buf /
+  func_entities), and how `table.set` of a funcref stores the native entry. Then point the imported-func
+  funcref at `dispatch[funcimportidx]` (the thunk). Survey: `private/notes/d225-cross-module-func-dispatch-survey.md`.
+- **Exit-condition**: ref_func `call-f` OR `call-v` flips green (call_indirect of an imported-func
+  funcref dispatches to the exporter, no trap, no SEGV).
 - **NEXT chunk** = **cross-module FUNC dispatch** (ref_func call-f/call-v ×3; see bundle Continuity-memo).
   The remaining D-225 architectural lever now that the imported-GLOBAL track is complete.
   - **The other 8**: gc/array ×6 = CORPUS-CONTEXT-DEPENDENT traps (array.5 `new` works standalone;
@@ -84,10 +83,11 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior turn ubuntu GREEN (`tail -3 /tmp/ubuntu.log` = `OK (HEAD=2da2bd5d)` — the globals_buf fix
-`c5ab78c1` is remote-verified). THIS turn = cross-module FUNC dispatch SURVEY only (no src change; survey
-note + bundle-memo retarget) → no ubuntu kick needed (docs-only); next resume starts the FUNC-dispatch
-implementation fresh. Mac aarch64; ubuntu = x86_64.
+Prior turn ubuntu GREEN (`OK (HEAD=2da2bd5d)`); the survey turn `0b7720af` was docs-only. THIS turn
+landed cross-module FUNC direct-call dispatch (`e964ba6e`: setup.zig/runner.zig + spec runner; new unit
+test; `zig build test` + lint green locally) → ubuntu `test-all` kicked at end → `tail -3 /tmp/ubuntu.log`
+next resume (Step 0.7). On FAIL revert to `0b7720af`. Cohort-safety is the risk class — if ubuntu (x86_64
+SysV) SEGVs, the bridge-thunk x86_64 path is suspect. Mac aarch64; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
