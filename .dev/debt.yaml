@@ -3,6 +3,15 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-233"
+    layer: "code"
+    status: "now"
+    description: |-
+      JIT (`ZWASM_SPEC_ENGINE=jit`) assert_trap 8 fails = per-op trap-emission gaps where the JIT returns normally instead of trapping (interp passes all — interp wasm-3.0 corpus fully green per D-232). Measured via FAILtrap diag (spec_assert_runner_wasm_3_0.zig). Clusters: **gc/ref_cast `ref_cast_null` ×4** (idx 1-4 of the ref_cast.wast table = i31 / struct / array / any.convert_extern values, each `ref.cast structref|arrayref|i31ref` to a WRONG abstract type must trap "cast failure"); gc/array_init_data + gc/array_init_elem ×1 (segment OOB trap); multi-memory/data_drop0 ×2 (init_active/init_passive after data.drop = OOB trap). KEY DIAGNOSTIC: `jitGcRefCast` (jit_abi.zig:822) calls the SAME `ref_test_ops.gcRefMatchesNonNullCore` the interp uses (which correctly traps), and the arm64 emit (ops/wasm_3_0/ref_cast.zig) traps on a 0 trampoline return — so the bug is NOT the cast algorithm or the emit's trap branch; it is JIT RUNTIME STATE fed to the trampoline (the `ref` u64 read from the table, and/or `rt.gc_type_infos_ptr`/`rt.gc_heap` pointers in the JitRuntime). HYPOTHESIS (UNVERIFIED — needs runtime inspection, do NOT assume): the table-stored ref value reaching jitGcRefCast is mis-encoded (e.g. i31 tag lost, or a struct ptr that readObjKindHeap mis-reads as matching) OR gc_heap/gti not wired into JitRuntime for this module → readObjKindHeap returns a kind that wrongly matches. NEXT: **debug_jit_auto** — lldb/probe `jitGcRefCast` args (ref, ht, gti!=null, heap!=null, is_i31, obj_kind) for ref_cast_null idx 1-4; compare to the interp values. The multi-index failure (i31 AND struct AND array) rules out an i31-only encoding bug. Then fix the wiring/encoding. Discharge: JIT assert_trap 8→0. (The 2 JIT return fails — gc/type-subtyping "run" call_indirect-subtype + eh/try_table — are SEPARATE, tracked toward D-198/EH.)
+    first_raised: "2026-06-02"
+    last_reviewed: "2026-06-02"
+    refs: |-
+      `src/engine/codegen/shared/jit_abi.zig:822` (jitGcRefCast → gcRefMatchesNonNullCore); `src/engine/codegen/arm64/ops/wasm_3_0/ref_cast.zig` (emit + trap branch); `src/instruction/wasm_3_0/ref_test_ops.zig` (gcRefMatchesNonNullCore + readObjKindHeap); `src/engine/setup.zig` (JitRuntime gc_heap/gti wiring + table population); `test/spec/wasm-3.0-assert/gc/raw/ref_cast.wast:14-64`; D-211; D-212; ADR-0128 §2; debug_jit_auto skill
   - id: "D-231"
     layer: "infra"
     status: "now"
