@@ -178,6 +178,16 @@ pub const JitModule = struct {
     /// - `idx` is out of range.
     /// - `thunk_offsets[idx] == NO_THUNK` (function `idx` has no
     ///   wrapper — sig is single-result OR unsupported shape).
+    /// Whether function `idx` has a buffer-write wrapper thunk usable via
+    /// `entry_buf`. Multi-value invoke callers must gate on this: not every
+    /// shape gets a thunk (single-result or a shape `wrapper_thunk.emit`
+    /// rejects → NO_THUNK, or the whole module emitted none → null offsets).
+    pub fn hasThunk(self: JitModule, idx: u32) bool {
+        const offsets = self.thunk_offsets orelse return false;
+        if (idx >= offsets.len) return false;
+        return offsets[idx] != NO_THUNK;
+    }
+
     pub fn entry_buf(self: JitModule, idx: u32, comptime Fn: type) Fn {
         const offsets = self.thunk_offsets orelse std.debug.panic(
             "JitModule.entry_buf: idx {d} — module has no thunk_offsets",

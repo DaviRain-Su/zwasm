@@ -27,6 +27,15 @@ const std = @import("std");
 
 const manifest_parser = @import("wasm_3_0_manifest.zig");
 const zwasm = @import("zwasm");
+const TypedResult = zwasm.engine.runner.TypedResult;
+
+/// Widen a multi-value `TypedResult` slot to the u64 carrier
+/// `jitScalarResultMatches` compares (i32/f32 zero-extended in the low 32).
+fn typedResultBits(tr: TypedResult) u64 {
+    return switch (tr) {
+        inline else => |v| @as(u64, v),
+    };
+}
 
 // 10.M-D195b cycle 75 — host stubs for the Wasm spec testsuite's
 // `spectest.print*` conventional imports. The wast harness uses them
@@ -219,7 +228,9 @@ fn jitReturnEligible(args_len: usize, results_len: usize, result_ty: []const u8,
     // 4+ args stay enumerated skips (D-217).
     if (args_len > 3) return false;
     if (args_len >= 1 and !isScalarTy(arg0_ty)) return false;
-    if (results_len > 1) return false;
+    // Multi-value (results_len > 1) is eligible count-wise; per-result
+    // scalar-ness is checked at the call site against the full `d.results`
+    // (this fn only sees results[0]). v128/ref multi-value defers there.
     if (results_len == 1 and !isScalarTy(result_ty) and !isRefResultTy(result_ty)) return false;
     return true;
 }
@@ -878,6 +889,50 @@ pub fn main(init: std.process.Init) !void {
                             }
                             if (!args_ok) {
                                 summary.jit_return_skip += 1;
+                                continue;
+                            }
+                            // Multi-value result — route through invokeMulti
+                            // (ADR-0106 entry_buf buffer-write path). All results
+                            // must be scalar to compare; v128/ref multi defers.
+                            if (d.results_len > 1) {
+                                var all_scalar = true;
+                                for (d.results[0..d.results_len]) |rvt| {
+                                    if (!isScalarTy(rvt.ty)) {
+                                        all_scalar = false;
+                                        break;
+                                    }
+                                }
+                                if (!all_scalar) {
+                                    summary.jit_return_skip += 1;
+                                    if (fail_detail) try stdout.print("  JITskip [{s}/{s}] {s} (multi-value with non-scalar result)\n", .{ proposal, entry.name, d.func_name });
+                                    continue;
+                                }
+                                var rbuf: [16]TypedResult = undefined;
+                                inst.invokeMulti(gpa, d.func_name, arg_bits[0..d.args_len], rbuf[0..d.results_len]) catch |e| {
+                                    try recordJitRunErr(e, &summary, fail_detail, stdout, proposal, entry.name, d.func_name);
+                                    continue;
+                                };
+                                var mv_match = true;
+                                var mv_parse_ok = true;
+                                for (d.results[0..d.results_len], 0..) |exp_tv, ri| {
+                                    const exp_rv = manifest_parser.parsePayload(exp_tv) catch {
+                                        mv_parse_ok = false;
+                                        break;
+                                    };
+                                    const exp_zv = manifest_parser.runtimeToZwasm(exp_rv, exp_tv.ty);
+                                    if (!jitScalarResultMatches(exp_tv.ty, typedResultBits(rbuf[ri]), exp_zv)) {
+                                        mv_match = false;
+                                        if (fail_detail) try stdout.print("  JITval [{s}/{s}] {s} result[{d}] ty={s} got=0x{x:0>16}\n", .{ proposal, entry.name, d.func_name, ri, exp_tv.ty, typedResultBits(rbuf[ri]) });
+                                        break;
+                                    }
+                                }
+                                if (!mv_parse_ok) {
+                                    summary.jit_return_skip += 1;
+                                } else if (mv_match) {
+                                    summary.jit_return_pass += 1;
+                                } else {
+                                    summary.jit_return_fail += 1;
+                                }
                                 continue;
                             }
                             const got = inst.invoke(gpa, d.func_name, arg_bits[0..d.args_len]) catch |e| {

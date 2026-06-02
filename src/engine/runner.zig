@@ -30,6 +30,10 @@ const exception_table_mod = @import("codegen/shared/exception_table.zig");
 const entry = @import("codegen/shared/entry.zig");
 const buffer_write = @import("codegen/shared/entry_buffer_write.zig");
 const rv = @import("runner_validate.zig");
+
+/// Re-exported so callers of `JitInstance.invokeMulti` can name the result
+/// slot type from the runner namespace (the spec-corpus multi-value path).
+pub const TypedResult = buffer_write.TypedResult;
 // ADR-0079 Step 1 — setup carve-out (RuntimeOwned + setupRuntime +
 // hostDispatchTrap). Re-exports below keep callers unchanged.
 const setup_mod = @import("setup.zig");
@@ -650,6 +654,9 @@ pub const JitInstance = struct {
         if (sig.results.len != results_out.len or sig.params.len != args.len)
             return Error.UnsupportedEntrySignature;
         if (results_out.len > 16) return Error.UnsupportedEntrySignature;
+        // Not every multi-result shape gets a wrapper thunk (wrapper_thunk.emit
+        // rejects some); without one there is no buffer-write entry → skip.
+        if (!self.compiled.module.hasThunk(func_idx)) return Error.UnsupportedEntrySignature;
 
         const fn_ptr = self.compiled.module.entry_buf(func_idx, buffer_write.BufferWriteFn);
         var u64_buf: [16]u64 = undefined;
