@@ -8,15 +8,14 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD**: **level-separation PRIMARY-axis audit EXECUTED → ADR-0130** (the user's "real or 半規約頼み?"
-  question). VERDICT: **partially real + dead enforcement gate**. nm truth-test (`check_build_dce.sh --gate`):
-  **v1_0 + v2_0 binaries leak `wasm_3_0` symbols** (v3_0 clean). 6 symbols: (a) interp `mvp.zig`
-  `concreteReaches` (call_indirect/call_ref subtype, NEW this session `80aeee1d`) — **FIXED this turn**
-  (comptime-gated behind `wasm_v3_plus`; 6→5 symbols, text −848B); (b) 5× JIT `emit.zig`
-  `wasm_3_0.{return_call*,throw}.emit` (both arches, pre-existing) — **D-230 next bundle cycle**. META-finding:
-  `check_build_dce.sh` detection is CORRECT and caught it, but `--gate` is wired only into `check_subrow_exit.sh`
-  which NOTHING calls → detection w/o enforcement (lesson `2026-06-02-detection-without-enforcement-dead-gate`).
-  br_on_cast did NOT leak (inlined). DP resolved: fix-not-bless; preserve ADR-0073 wording; revive gate (no new audit axis).
+- **HEAD**: **level-separation PRIMARY-axis audit EXECUTED + FULLY FIXED (ADR-0130, D-230 closed)** — the
+  user's "real or 半規約頼み?" question. VERDICT was: partially real + dead enforcement gate. Now CLOSED:
+  (a) interp `mvp.zig` `concreteReaches` comptime-gated (`1323795b`); (b) arm64 `emit.zig` 6 manual 3.0 prongs
+  (throw/throw_ref/call_ref/return_call*) comptime-gated behind `wasm_v3_plus` — x86_64 was already clean
+  (routes via dispatch_collector; arm64 dispatches manually for lack of a `dead_code` ctx field); (c) DCE gate
+  REVIVED into `gate_merge.sh` (the dead `check_subrow_exit.sh` only fired on Phase-9 §9.12 flips → never
+  re-ran post-Phase-10). VERIFIED: `check_build_dce.sh --gate` → **all 6 combos clean** (was v1_0+v2_0 FAIL);
+  v1_0 nm 6→0 wasm_3_0 symbols; Mac test-all green. Lesson `2026-06-02-detection-without-enforcement-dead-gate`.
 - **STILL PREPPED (not yet run)**: **`.dev/phase10_scope_reassessment.md`** — §10 exit vs Phase-14 deferral,
   reframed as ROADMAP RE-STRUCTURING (multi-memory = first instance; enumerate all deferred-but-§10-gating
   items + re-sequence phases, not a one-off ADR-0128 footnote). The OTHER deep session.
