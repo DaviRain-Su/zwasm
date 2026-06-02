@@ -78,6 +78,11 @@ pub const Blocker = enum {
     /// arm64 landed first; x86_64 needs the SysV trampoline-call +
     /// slab-base emit. Subsumed by the GC-on-JIT bundle (D-211).
     @"D-211",
+    /// 10.G struct.get/array.get of an f32/f64 field yields a GPR-class
+    /// result that never reaches the FP return register (V0/XMM0) across
+    /// a call/return boundary → reads stale FP reg. Un-skip the cross-func
+    /// f32 repro when the FP-class result fix lands.
+    @"D-212",
 };
 
 /// Phase-end batch deferral. See `Win64Phase` doc.

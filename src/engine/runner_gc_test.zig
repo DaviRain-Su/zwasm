@@ -15,6 +15,7 @@ const skip = @import("../test_support/skip.zig");
 
 const runner = @import("runner.zig");
 const runI32Export = runner.runI32Export;
+const runF32Export = runner.runF32Export;
 const JitInstance = runner.JitInstance;
 
 const entry = @import("codegen/shared/entry.zig");
@@ -822,4 +823,50 @@ test "JitInstance: ref.as_non_null module JIT-compiles (liveness stackEffect)" {
     };
     var inst = try JitInstance.init(testing.allocator, &bytes); // compiles ⇒ green
     inst.deinit(testing.allocator);
+}
+
+// ── D-212: cross-function ref-param struct.get result-class scaffolding ──
+// A struct ref passed as a call ARGUMENT, then read in the callee via
+// struct.get. The i32 control PASSES (ref-arg passing + GPR result are
+// correct). The f32 case is the D-212 bug: struct.get's f32 result is
+// GPR-class and never reaches the FP return register across the call/return
+// boundary → reads stale V0/XMM0 (0.0 in a clean process). Un-skip the f32
+// test when D-212 lands (struct.get/array.get f32/f64 result → FP-class).
+
+test "runI32Export: cross-func ref-param struct.get i32 field → 42 (D-212 control)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    // (type $s (struct (field i32))) ; $inner (ref $s)->i32 = struct.get 0 0 ;
+    // export "f" ()->i32 = i32.const 42; struct.new 0; call $inner
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x0f, 0x03, 0x5f, 0x01, 0x7f, 0x00, 0x60,
+        0x01, 0x64, 0x00, 0x01, 0x7f, 0x60, 0x00, 0x01,
+        0x7f, 0x03, 0x03, 0x02, 0x01, 0x02, 0x07, 0x05,
+        0x01, 0x01, 0x66, 0x00, 0x01, 0x0a, 0x14, 0x02,
+        0x08, 0x00, 0x20, 0x00, 0xfb, 0x02, 0x00, 0x00,
+        0x0b, 0x09, 0x00, 0x41, 0x2a, 0xfb, 0x00, 0x00,
+        0x10, 0x00, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 42), runI32Export(testing.allocator, &bytes, "f"));
+}
+
+test "runF32Export: cross-func ref-param struct.get f32 field → 2.5 (D-212 RED — un-skip on fix)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    // D-212: returns stale 0.0 instead of 2.5 — f32 struct.get result is
+    // GPR-class, never moved to V0/XMM0 across the call/return boundary.
+    // Un-skip + assert 2.5 once struct.get/array.get f32/f64 → FP-class.
+    if (true) return skip.blocker(.@"D-212");
+    // (type $s (struct (field f32))) ; $inner (ref $s)->f32 = struct.get 0 0 ;
+    // export "f" ()->f32 = f32.const 2.5; struct.new 0; call $inner
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x0f, 0x03, 0x5f, 0x01, 0x7d, 0x00, 0x60,
+        0x01, 0x64, 0x00, 0x01, 0x7d, 0x60, 0x00, 0x01,
+        0x7d, 0x03, 0x03, 0x02, 0x01, 0x02, 0x07, 0x05,
+        0x01, 0x01, 0x66, 0x00, 0x01, 0x0a, 0x17, 0x02,
+        0x08, 0x00, 0x20, 0x00, 0xfb, 0x02, 0x00, 0x00,
+        0x0b, 0x0c, 0x00, 0x43, 0x00, 0x00, 0x20, 0x40,
+        0xfb, 0x00, 0x00, 0x10, 0x00, 0x0b,
+    };
+    try testing.expectEqual(@as(f32, 2.5), try runF32Export(testing.allocator, &bytes, "f"));
 }
