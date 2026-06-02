@@ -17,6 +17,7 @@ const ctx_mod = @import("../../ctx.zig");
 const abi = @import("../../abi.zig");
 const gpr = @import("../../gpr.zig");
 const inst = @import("../../inst.zig");
+const inst_fp = @import("../../inst_fp.zig");
 const jit_abi = @import("../../../shared/jit_abi.zig");
 const heap_mod = @import("../../../../../feature/gc/heap.zig");
 const zir = @import("../../../../../ir/zir.zig");
@@ -34,7 +35,10 @@ const base: inst.Xn = 16;
 const len_scratch: inst.Xn = 14;
 
 pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
-    _ = ins; // typeidx unused — uniform 8-byte slot (ADR-0116 §3a).
+    // D-212 — element valtype selects the result register class. f32/f64
+    // elements are FP-class (vregClassOfOp); the GPR-only load left the
+    // value in a GPR while the f32 consumer reads the FP home → stale.
+    const elem_vt = ctx.func.arrayElemValType(@intCast(ins.payload));
     // args.lhs = array ref; args.rhs = i32 index; args.result = element.
     const args = try ctx.popBinary();
     const xref = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.lhs, 0);
@@ -58,8 +62,24 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
 
     // base += header → element[0] addr; LDR element[index] (8-byte slot).
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(base, base, @intCast(header_size)));
-    const rd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrXRegLsl3(rd, base, xidx));
-    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+    switch (elem_vt) {
+        0x7D, 0x7C => {
+            // FP element. The FP register-offset load doesn't apply LSL #3,
+            // so load the 8-byte slot into a scratch GPR (X14, dead after
+            // the bounds check) then FMOV into the FP result home.
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrXRegLsl3(len_scratch, base, xidx));
+            const vd = try gpr.fpDefSpilled(ctx.alloc, args.result, 0);
+            if (elem_vt == 0x7D)
+                try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovStoFromW(vd, len_scratch))
+            else
+                try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovDtoFromX(vd, len_scratch));
+            try gpr.fpStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+        },
+        else => {
+            const rd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrXRegLsl3(rd, base, xidx));
+            try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+        },
+    }
     try ctx.pushed_vregs.append(ctx.allocator, args.result);
 }

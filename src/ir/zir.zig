@@ -634,6 +634,18 @@ pub const ZirFunc = struct {
     eh_catch_entries: ?[]const CatchEntry = null,
     tail_call_sites: ?[]TailCallSite = null,
 
+    /// 10.G GC-on-JIT (D-212) — module-level GC field/element valtype
+    /// tables, referenced (not owned) so the regalloc vreg-class
+    /// classifier + the struct.get/array.get emit can tell whether the
+    /// loaded field/element is f32/f64 (→ FP-class result) without the
+    /// module type section. `gc_array_elem_valtypes[typeidx]` = the
+    /// array element's spec valtype byte; `gc_struct_field_valtypes[
+    /// typeidx][fieldidx]` = the struct field's spec valtype byte.
+    /// Arena-allocated by `compileWasm`; lifetime spans the compile, so
+    /// `ZirFunc.deinit` does NOT free them. Empty when no GC types.
+    gc_array_elem_valtypes: []const u8 = &.{},
+    gc_struct_field_valtypes: []const []const u8 = &.{},
+
     // Phase 8+ — optimisation passes.
     hoisted_constants: ?[]HoistedConst = null,
     /// Synthetic locals appended by post-lowering passes (notably
@@ -695,6 +707,24 @@ pub const ZirFunc = struct {
         const orig_len: u32 = @intCast(self.locals.len);
         if (decl_idx < orig_len) return self.locals[@intCast(decl_idx)];
         return self.synthetic_locals.?[@intCast(decl_idx - orig_len)];
+    }
+
+    /// 10.G GC-on-JIT (D-212) — the array element's spec valtype byte
+    /// for `array.get`/`array.set` on `typeidx`, or 0 when unknown
+    /// (non-array typeidx / table absent). 0x7D = f32, 0x7C = f64.
+    pub fn arrayElemValType(self: *const ZirFunc, typeidx: u32) u8 {
+        if (typeidx >= self.gc_array_elem_valtypes.len) return 0;
+        return self.gc_array_elem_valtypes[typeidx];
+    }
+
+    /// 10.G GC-on-JIT (D-212) — the struct field's spec valtype byte for
+    /// `struct.get`/`struct.set` of `fieldidx` on `typeidx`, or 0 when
+    /// unknown. 0x7D = f32, 0x7C = f64.
+    pub fn structFieldValType(self: *const ZirFunc, typeidx: u32, fieldidx: u32) u8 {
+        if (typeidx >= self.gc_struct_field_valtypes.len) return 0;
+        const fields = self.gc_struct_field_valtypes[typeidx];
+        if (fieldidx >= fields.len) return 0;
+        return fields[fieldidx];
     }
 };
 

@@ -58,10 +58,27 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
 
     // Load the 8-byte field slot into the result vreg's home (the result
     // vreg already allocated by popUnary — do NOT allocate a second one).
-    // gprDefSpilled returns the home reg (stage-0 = R10 if spilled; R10
-    // may still hold the now-dead xref, overwritten cleanly here).
-    const rd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
-    try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(rd, slab, @intCast(field_off)).slice());
-    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+    // D-212: an f32/f64 field is FP-class (vregClassOfOp) — load the slot
+    // into a scratch GPR then MOVD/MOVQ into the XMM result home, so the
+    // f32 consumer (function return / call) reads the correct XMM-home,
+    // not a stale GPR. i32/i64/ref → GPR. 0x7D=f32, 0x7C=f64.
+    const field_vt = ctx.func.structFieldValType(@intCast(ins.payload), fieldidx);
+    switch (field_vt) {
+        0x7D, 0x7C => {
+            const tmp: abi.Gpr = .r10; // stage-0 scratch (dead xref slot)
+            try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(tmp, slab, @intCast(field_off)).slice());
+            const xd = try gpr.xmmDefSpilled(ctx.alloc, args.result, 0);
+            if (field_vt == 0x7D)
+                try ctx.buf.appendSlice(ctx.allocator, inst.encMovdXmmFromR32(xd, tmp).slice())
+            else
+                try ctx.buf.appendSlice(ctx.allocator, inst.encMovqXmmFromR64(xd, tmp).slice());
+            try gpr.xmmStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+        },
+        else => {
+            const rd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
+            try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(rd, slab, @intCast(field_off)).slice());
+            try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+        },
+    }
     try ctx.pushed_vregs.append(ctx.allocator, args.result);
 }

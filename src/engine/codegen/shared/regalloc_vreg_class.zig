@@ -102,6 +102,20 @@ fn vregClassOfOp(ins: zir.ZirInstr, func: *const ZirFunc) ?VregClass {
             .v128 => VregClass.v128,
             .i32, .i64, .ref => VregClass.gpr,
         },
+        // 10.G GC-on-JIT (D-212) — struct.get / array.get of an f32/f64
+        // field/element produce an FP-class result. Without this the
+        // GPR-class default leaves the value in a GPR while the f32
+        // consumer (function return / call) reads the FP home → stale
+        // V0/XMM0. struct.get_s/get_u are i32-only (packed extend) → gpr.
+        // 0x7D = f32, 0x7C = f64 (ValType.specByte / §5.3).
+        .@"struct.get" => switch (func.structFieldValType(@intCast(ins.payload), ins.extra)) {
+            0x7D, 0x7C => VregClass.fpr,
+            else => VregClass.gpr,
+        },
+        .@"array.get" => switch (func.arrayElemValType(@intCast(ins.payload))) {
+            0x7D, 0x7C => VregClass.fpr,
+            else => VregClass.gpr,
+        },
         // Ops that don't push (advance the vreg counter).
         .@"local.tee",
         .end,

@@ -924,6 +924,25 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         break :blk out;
     };
 
+    // 10.G GC-on-JIT (D-212) — typeidx-indexed rows of struct field valtype
+    // bytes, so the regalloc vreg-class classifier + struct.get emit can
+    // FP-class an f32/f64 field result (the f32-return / call boundary reads
+    // the FP home; a GPR-class struct.get result left V0/XMM0 stale).
+    const struct_field_valtypes: [][]const u8 = blk: {
+        if (types.struct_defs.len == 0) break :blk &.{};
+        const out = try a.alloc([]const u8, types.struct_defs.len);
+        for (types.struct_defs, 0..) |sd, i| {
+            if (sd) |s| {
+                const row = try a.alloc(u8, s.fields.len);
+                for (s.fields, 0..) |f, j| row[j] = f.storage.specByte();
+                out[i] = row;
+            } else {
+                out[i] = &.{};
+            }
+        }
+        break :blk out;
+    };
+
     // §9.9 / 9.9-l-1b-d093-d82 (skip-impl drainage):
     // Wasm spec §3.4.7.3 / §3.4.10 declared-funcrefs set. A
     // funcidx is "declared" iff it appears in some global
@@ -1031,6 +1050,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             tag_param_counts,
             struct_field_counts,
             array_elem_valtypes,
+            struct_field_valtypes,
         ) catch |err| {
             std.debug.print("compileWasm: func[{d}] params={d} results={d} → {s}\n", .{
                 wasm_idx,

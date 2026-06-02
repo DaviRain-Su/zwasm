@@ -30,7 +30,10 @@ const base: abi.Gpr = .rax; // object-base scratch (3rd reg; caller-saved).
 const len_scratch: abi.Gpr = .r10; // stage-0 reused for length.
 
 pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
-    _ = ins; // typeidx unused — uniform 8-byte slot.
+    // D-212 — element valtype selects the result register class (FP for
+    // f32/f64; the GPR-only load left the value in a GPR while the f32
+    // consumer reads the XMM home → stale).
+    const elem_vt = ctx.func.arrayElemValType(@intCast(ins.payload));
     const args = try ctx.popBinary(); // lhs=ref, rhs=index, result=element
     const xref = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.lhs, 0);
     const xidx = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.rhs, 1);
@@ -53,8 +56,23 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
 
     // base += header → element[0]; MOV element[index] (8-byte slot).
     try ctx.buf.appendSlice(ctx.allocator, inst.encAddR64Imm32(base, header_size).slice());
-    const rd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
-    try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromBaseIdxLsl3(rd, base, xidx).slice());
-    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+    switch (elem_vt) {
+        0x7D, 0x7C => {
+            // FP element: load the 8-byte slot into a scratch GPR (R10,
+            // dead after the OOB check) then MOVD/MOVQ into the XMM result.
+            try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromBaseIdxLsl3(len_scratch, base, xidx).slice());
+            const xd = try gpr.xmmDefSpilled(ctx.alloc, args.result, 0);
+            if (elem_vt == 0x7D)
+                try ctx.buf.appendSlice(ctx.allocator, inst.encMovdXmmFromR32(xd, len_scratch).slice())
+            else
+                try ctx.buf.appendSlice(ctx.allocator, inst.encMovqXmmFromR64(xd, len_scratch).slice());
+            try gpr.xmmStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+        },
+        else => {
+            const rd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
+            try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromBaseIdxLsl3(rd, base, xidx).slice());
+            try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+        },
+    }
     try ctx.pushed_vregs.append(ctx.allocator, args.result);
 }

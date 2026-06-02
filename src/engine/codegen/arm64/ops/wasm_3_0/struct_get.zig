@@ -56,11 +56,28 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
 
     // Load the 8-byte field slot into the result vreg's home (the result
     // vreg already allocated by popUnary — mirror i31_get_s, do NOT
-    // allocate a second one). gprDefSpilled returns the home reg (stage
-    // reg X14 if spilled); LDR writes into it; gprStoreSpilled flushes a
-    // spilled result back. field_off is 8-aligned (header_size=8 + idx*8).
-    const rd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(rd, slab, @intCast(field_off)));
-    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+    // allocate a second one). field_off is 8-aligned (header_size=8 + idx*8).
+    // D-212: an f32/f64 field is FP-class (vregClassOfOp) — load via the FP
+    // register file (LDR S/D) so the f32-return / call consumer reads the
+    // correct V-home, not a stale one. i32/i64/ref → GPR (LDR X).
+    const field_vt = ctx.func.structFieldValType(@intCast(ins.payload), fieldidx);
+    switch (field_vt) {
+        0x7D => { // f32
+            if (field_off > 16380) return ctx_mod.Error.SlotOverflow;
+            const vd = try gpr.fpDefSpilled(ctx.alloc, args.result, 0);
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrSImm(vd, slab, @intCast(field_off)));
+            try gpr.fpStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+        },
+        0x7C => { // f64
+            const vd = try gpr.fpDefSpilled(ctx.alloc, args.result, 0);
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrDImm(vd, slab, @intCast(field_off)));
+            try gpr.fpStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+        },
+        else => {
+            const rd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(rd, slab, @intCast(field_off)));
+            try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+        },
+    }
     try ctx.pushed_vregs.append(ctx.allocator, args.result);
 }

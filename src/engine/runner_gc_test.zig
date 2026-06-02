@@ -852,10 +852,7 @@ test "runI32Export: cross-func ref-param struct.get i32 field → 42 (D-212 cont
 
 test "runF32Export: cross-func ref-param struct.get f32 field → 2.5 (D-212 RED — un-skip on fix)" {
     if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
-    // D-212: returns stale 0.0 instead of 2.5 — f32 struct.get result is
-    // GPR-class, never moved to V0/XMM0 across the call/return boundary.
-    // Un-skip + assert 2.5 once struct.get/array.get f32/f64 → FP-class.
-    if (true) return skip.blocker(.@"D-212");
+    // D-212 (fixed): f32 struct.get result is now FP-class → reaches V0/XMM0.
     // (type $s (struct (field f32))) ; $inner (ref $s)->f32 = struct.get 0 0 ;
     // export "f" ()->f32 = f32.const 2.5; struct.new 0; call $inner
     const bytes = [_]u8{
