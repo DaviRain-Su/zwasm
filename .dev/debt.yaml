@@ -3,6 +3,15 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-230"
+    layer: "code"
+    status: "now"
+    description: |-
+      JIT-codegen level-separation leak: 5 `wasm_3_0.*.emit` symbols present in `-Dwasm=v1_0|v2_0` binaries (ADR-0130; audit `.dev/wasm_level_separation_audit.md`). The central JIT dispatch `switch(op)` in `src/engine/codegen/arm64/emit.zig` (arms `.return_call` :1189, `.return_call_indirect` :1194, `.return_call_ref` :1198, + `.throw` / `try_table`) and the x86_64 counterpart (`src/engine/codegen/x86_64/emit.zig`) call `ops/wasm_3_0/*.emit` UNCONDITIONALLY — no `comptime build_options.wasm_level >= v3_0` guard (cf. the correct guard at `codegen/arm64/op_memory.zig:86`). These ops can never be lowered in a sub-3.0 module (feature_level_check forbids it), so the arms are provably dead in those builds; comptime-gate them to elide the symbols. PROOF: `check_build_dce.sh --gate` → v1_0 + v2_0 FAIL "wasm_3_0 present" (nm: `engine.codegen.{arm64,x86_64}.ops.wasm_3_0.{return_call,return_call_indirect,return_call_ref,throw}.emit`); v3_0 clean. The interp half (mvp.zig `concreteReaches`) was fixed in the ADR-0130 commit (6→5 symbols). DISCHARGE = (a) comptime-gate both arches' emit.zig 3.0 dispatch arms; (b) REVIVE the dead gate — wire `check_build_dce.sh --gate` into `gate_merge.sh` (too slow for per-commit: 6 ReleaseSafe builds) + an `audit_scaffolding` anchor, and delete/repoint the orphan `check_subrow_exit.sh` (nothing calls it). Gate-revival is the LAST step (running it before (a) is red). Verify: post-fix `check_build_dce.sh --gate` exits 0 on all 6 combos. Cross-arch: confirm on ubuntu x86_64 too (the x86_64 emit symbols only appear in an x86_64-host build).
+    first_raised: "2026-06-02"
+    last_reviewed: "2026-06-02"
+    refs: |-
+      `src/engine/codegen/arm64/emit.zig:1189-1198` (+ throw/try_table arms); `src/engine/codegen/x86_64/emit.zig`; `src/engine/codegen/arm64/op_memory.zig:86` (correct comptime-gate pattern); `scripts/check_build_dce.sh` (+ orphan `scripts/check_subrow_exit.sh`); `scripts/gate_merge.sh`; ADR-0130; ADR-0073; `.dev/wasm_level_separation_audit.md`; lesson `2026-06-02-detection-without-enforcement-dead-gate`
   - id: "D-229"
     layer: "code"
     status: "now"

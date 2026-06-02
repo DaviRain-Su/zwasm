@@ -1,12 +1,46 @@
 # Wasm 1.0/2.0/3.0 level-separation INTEGRITY audit — wiring / reference chain
 
-> **Doc-state**: ACTIVE
+> **Doc-state**: ACTIVE (EXECUTED 2026-06-02 — verdict below; resolution → ADR-0130)
 >
-> PREP only (user directive 2026-06-02). The FULL audit runs in a fresh deep
-> session. This is the wiring + the confirmed finding + the checklist, so that
-> session executes in one pass. Distinct axis from `phase10_scope_reassessment.md`
-> (that = §10 exit-criteria / Phase-14 deferral; THIS = does level-specific code
-> actually stay confined to its level, or is it "half convention-reliant"?).
+> The full audit RAN 2026-06-02 (the deep session the prep below described).
+> Verdict + evidence in "## VERDICT" immediately below; the original prep
+> (reference chain + checklist) is retained underneath as the audit trail.
+> Distinct axis from `phase10_scope_reassessment.md` (that = §10 exit-criteria /
+> Phase-14 deferral; THIS = does level-specific code stay confined to its level?).
+
+## VERDICT (2026-06-02 — nm truth-test executed)
+
+**Partially real, with confirmed leaks AND a dead enforcement gate.** Answer to
+the user's "half規約頼み?" — **yes, half**: the convention is real where followed
+but nothing FORCED it, and two shared-shell sites quietly violated it.
+
+1. **Real**: per-op-FILE handlers genuinely DCE via `dispatch_collector.enabledByBuild()`;
+   inline `comptime wasm_level >= v3_0` guards (op_memory.zig:86) also work. "Absent
+   from binary" TRUE for these.
+2. **Leak (PROVEN)**: `check_build_dce.sh --gate` → **v1_0 + v2_0 FAIL "wasm_3_0
+   present"**, v3_0 clean. 6 nm symbols (Mac aarch64):
+   - `instruction.wasm_3_0.ref_test_ops.concreteReaches` — interp mvp.zig
+     `callIndirectOp`/`callRefOp` unconditional subtype arm. NEW this session
+     (`80aeee1d`). **FIXED** (comptime-gated; 6→5 symbols). Spec: subtype acceptance
+     is 3.0-only; sub-3.0 needs exact `sigEq`.
+   - 5× `engine.codegen.{arm64,x86_64}.ops.wasm_3_0.{return_call,return_call_indirect,
+     return_call_ref,throw}.emit` — JIT `emit.zig` central `switch` arms, unconditional.
+     PRE-EXISTING (Phase 10 TC/EH). **PENDING** (D-230, next bundle cycle).
+   - `br_on_cast`'s `gcRefMatchesNonNull` did NOT leak — single call site, inlined.
+     nm cannot see inlined 3.0 code (accepted residual limit).
+3. **Dead gate (meta-finding)**: `check_build_dce.sh` detection is CORRECT and caught
+   every leak, but `--gate` (the only non-zero-exit mode) is called ONLY by
+   `check_subrow_exit.sh`, which **nothing invokes**. Audit uses `--sample` (exits 0).
+   → detection without enforcement. Fix = revive the gate (D-230 close), not a new axis.
+
+**Decision points resolved** (full rationale → ADR-0130):
+- DP1: leaks are bugs to FIX (comptime-gate), not an exception to bless.
+- DP2: NO new audit body-containment axis — nm-grep already catches it; revive the gate.
+- DP3: PRESERVE ADR-0073 "absent from binary" wording — fix code to satisfy it.
+
+---
+
+## Original PREP (audit trail — the reference chain the session executed against)
 
 ## The concern (confirmed, not hypothetical)
 

@@ -39,6 +39,14 @@
 //! `mvp_float.zig`, `mvp_conversions.zig`).
 
 const std = @import("std");
+const build_options = @import("build_options");
+
+/// Wasm 3.0 subtype acceptance (§3.3.5.5) in `call_indirect` / `call_ref` is a
+/// 3.0-only relaxation; sub-3.0 builds require exact `sigEq`. Gating the
+/// `concreteReaches` arm behind this comptime const keeps the 3.0 symbol out of
+/// `-Dwasm=v1_0|v2_0` binaries (ADR-0073 "absent from binary"; ADR-0129 leak fix).
+const wasm_v3_plus = @intFromEnum(build_options.wasm_level) >=
+    @intFromEnum(@TypeOf(build_options.wasm_level).v3_0);
 
 const dispatch = @import("../ir/dispatch_table.zig");
 const zir = @import("../ir/zir.zig");
@@ -442,9 +450,13 @@ fn callIndirectOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     // Wasm 3.0 §3.3.5.5 — the callee's declared func type need only be a
     // SUBTYPE of the expected type (not structurally equal): a `$t1` func
     // (`$t1 <: $t0`) called via `call_indirect (type $t0)` runs (D-198).
-    if (!sigEq(callee.sig, expected) and
-        !(callee_rt == rt and ref_test_ops.concreteReaches(rt, fe.raw_typeidx, @intCast(instr.payload))))
-        return Trap.IndirectCallTypeMismatch;
+    // The subtype arm is comptime-elided in sub-3.0 builds (ADR-0129).
+    const accepted = sigEq(callee.sig, expected) or
+        (if (comptime wasm_v3_plus)
+            (callee_rt == rt and ref_test_ops.concreteReaches(rt, fe.raw_typeidx, @intCast(instr.payload)))
+        else
+            false);
+    if (!accepted) return Trap.IndirectCallTypeMismatch;
 
     const dispatch_tbl = rt.table orelse return Trap.Unreachable;
     try invoke(rt, dispatch_tbl, callee);
@@ -474,10 +486,14 @@ fn callRefOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const expected = rt.module_types[instr.payload];
     // Wasm 3.0 §3.3.5.5 — the callee's declared func type need only be a
     // SUBTYPE of the expected type (not structurally equal): a `$t1` func
-    // (`$t1 <: $t0`) called via `call_indirect (type $t0)` runs (D-198).
-    if (!sigEq(callee.sig, expected) and
-        !(callee_rt == rt and ref_test_ops.concreteReaches(rt, fe.raw_typeidx, @intCast(instr.payload))))
-        return Trap.IndirectCallTypeMismatch;
+    // (`$t1 <: $t0`) called via `call_ref (type $t0)` runs (D-198).
+    // The subtype arm is comptime-elided in sub-3.0 builds (ADR-0129).
+    const accepted = sigEq(callee.sig, expected) or
+        (if (comptime wasm_v3_plus)
+            (callee_rt == rt and ref_test_ops.concreteReaches(rt, fe.raw_typeidx, @intCast(instr.payload)))
+        else
+            false);
+    if (!accepted) return Trap.IndirectCallTypeMismatch;
 
     const dispatch_tbl = rt.table orelse return Trap.Unreachable;
     try invoke(rt, dispatch_tbl, callee);
