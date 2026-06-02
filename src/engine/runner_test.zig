@@ -30,6 +30,7 @@ const JitInstance = runner.JitInstance;
 const entry = @import("codegen/shared/entry.zig");
 const setup_mod = @import("setup.zig");
 const setupRuntime = setup_mod.setupRuntime;
+const TypedResult = @import("codegen/shared/entry_buffer_write.zig").TypedResult;
 
 test "runI32Export: memory64 store+load round-trip via i64 idx_type (ADR-0111 D4 e2e)" {
     // D-181 discharge: x86_64 SysV `emitMemOpI64` X-form + wrap-check
@@ -1204,4 +1205,30 @@ test "JitInstance: memory64 module with active data at i64 offset compiles + loa
     var inst = try JitInstance.init(testing.allocator, &bytes);
     defer inst.deinit(testing.allocator);
     try testing.expectEqual(@as(?u64, 42), try inst.invoke(testing.allocator, "ld", &.{}));
+}
+
+test "JitInstance.invokeMulti: 2-result (i32 i32) returns both values via entry_buf (ADR-0106 cycle 3 — multi-value JIT corpus)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    // (module (func (export "pair") (result i32 i32) i32.const 7 i32.const 9))
+    // The single-result `invoke` rejects results.len>1; multi-value
+    // reuses the ADR-0106 wrapper-thunk buffer-write entry (entry_buf).
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // \0asm + version
+        // type sec: 1 type, () -> (i32 i32)
+        0x01, 0x06, 0x01, 0x60, 0x00, 0x02, 0x7f, 0x7f,
+        // func sec: 1 func, type 0
+        0x03, 0x02, 0x01, 0x00,
+        // export sec: 1 export, name="pair", kind=func, idx=0
+        0x07, 0x08, 0x01, 0x04,
+        0x70, 0x61, 0x69, 0x72, 0x00, 0x00,
+        // code sec: 1 body, size 6: locals=0, i32.const 7, i32.const 9, end
+        0x0a, 0x08,
+        0x01, 0x06, 0x00, 0x41, 0x07, 0x41, 0x09, 0x0b,
+    };
+    var inst = try JitInstance.init(testing.allocator, &bytes);
+    defer inst.deinit(testing.allocator);
+    var results = [_]TypedResult{ undefined, undefined };
+    try inst.invokeMulti(testing.allocator, "pair", &.{}, &results);
+    try testing.expectEqual(@as(u32, 7), results[0].i32);
+    try testing.expectEqual(@as(u32, 9), results[1].i32);
 }

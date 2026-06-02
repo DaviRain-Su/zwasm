@@ -28,6 +28,7 @@ const compile_func = @import("codegen/shared/compile.zig");
 const linker = @import("codegen/shared/linker.zig");
 const exception_table_mod = @import("codegen/shared/exception_table.zig");
 const entry = @import("codegen/shared/entry.zig");
+const buffer_write = @import("codegen/shared/entry_buffer_write.zig");
 const rv = @import("runner_validate.zig");
 // ADR-0079 Step 1 — setup carve-out (RuntimeOwned + setupRuntime +
 // hostDispatchTrap). Re-exports below keep callers unchanged.
@@ -370,6 +371,19 @@ fn scalarKey(t: zir.ValType) ?u2 {
     return null;
 }
 
+/// Map a result valtype to the buffer-write `TypedResult` tag (multi-value
+/// invoke). Refs ride the u64 carrier (ADR-0116); v128 is unsupported.
+fn resultKind(t: zir.ValType) ?buffer_write.ResultKind {
+    return switch (t) {
+        .i32 => .i32,
+        .i64 => .i64,
+        .f32 => .f32,
+        .f64 => .f64,
+        .ref => |r| if (r.heap_type == .abstract and r.heap_type.abstract == .extern_) .externref else .funcref,
+        else => null,
+    };
+}
+
 /// Param key for the JIT entry (D-226): like `scalarKey`, but a reftype param
 /// rides the i64 carrier — a ref is a u64 in a GPR (ADR-0116), so the i64 entry
 /// ABI passes it UNTRUNCATED via `callVoid_i64` / `callX_i64`. This lets
@@ -613,5 +627,43 @@ pub const JitInstance = struct {
             return @as(u64, try entry.callI32_i32i32i32(m, func_idx, r, a0, a1, a2));
         }
         return Error.UnsupportedEntrySignature; // 4+ args: future cycle
+    }
+
+    /// Multi-value invoke (results.len > 1), which `invoke` rejects. Routes
+    /// through the ADR-0106 wrapper-thunk buffer-write entry (`entry_buf`):
+    /// the wrapper writes each result to `[results+8*i]`, sidestepping the
+    /// register-pair cap of the single-result C-ABI epilogue. `results_out`
+    /// length must equal the function's result arity; each slot is tagged
+    /// from `sig.results[i]` and filled with the unpacked value. Args are
+    /// packed u64 (i32 zero-extended, ref as its u64 carrier).
+    pub fn invokeMulti(
+        self: *JitInstance,
+        allocator: Allocator,
+        export_name: []const u8,
+        args: []const u64,
+        results_out: []buffer_write.TypedResult,
+    ) Error!void {
+        const func_idx = try findExportFunc(allocator, self.wasm_bytes, export_name);
+        if (func_idx >= self.compiled.func_sigs.len) return Error.ExportNotFound;
+        if (func_idx < self.compiled.num_imports) return Error.UnsupportedEntrySignature;
+        const sig = self.compiled.func_sigs[func_idx];
+        if (sig.results.len != results_out.len or sig.params.len != args.len)
+            return Error.UnsupportedEntrySignature;
+        if (results_out.len > 16) return Error.UnsupportedEntrySignature;
+
+        const fn_ptr = self.compiled.module.entry_buf(func_idx, buffer_write.BufferWriteFn);
+        var u64_buf: [16]u64 = undefined;
+        try buffer_write.invokeBufferWrite(&self.owned.rt, fn_ptr, args.ptr, &u64_buf);
+        for (results_out, 0..) |*res, i| {
+            const slot = u64_buf[i];
+            res.* = switch (resultKind(sig.results[i]) orelse return Error.UnsupportedEntrySignature) {
+                .i32 => .{ .i32 = @truncate(slot) },
+                .i64 => .{ .i64 = slot },
+                .f32 => .{ .f32 = @truncate(slot) },
+                .f64 => .{ .f64 = slot },
+                .funcref => .{ .funcref = slot },
+                .externref => .{ .externref = slot },
+            };
+        }
     }
 };
