@@ -8,6 +8,13 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
+- **⚡ USER DIRECTIVE (2026-06-02)**: context got big → STOP piecemeal small turns.
+  **NEXT (fresh CLEAR session): execute the JIT call_indirect-subtype fix (D-235) in
+  ONE focused pass via the complete prep `.dev/jit_call_indirect_subtype_prep.md`**
+  (design + reference chain + per-file edits + RED-test bytes + verification all wired).
+  JIT matters for perf — do it properly, NOT half-baked in bloated context. If THIS
+  context is still large on resume, do light consolidation only and hold the D-235
+  execution for a genuinely clear session.
 - **HEAD** (`d041e425`): **interp wasm-3.0 corpus FULLY GREEN** — D-232 CLOSED (ADR-0131). assert_return
   1233/0, **assert_trap 562/0** (was 558/4), invalid 194/0, unlinkable 8/0, malformed 3/0, exception 4/0.
   Root: `gc_type_infos` was gated on `needs_gc_heap` (struct/array) → func-only `sub`/`final` modules got no
