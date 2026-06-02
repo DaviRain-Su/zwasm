@@ -49,6 +49,7 @@ const jit_abi = @import("jit_abi.zig");
 const exception_table = @import("exception_table.zig");
 const code_map_mod = @import("code_map.zig");
 const zwasm_throw = @import("zwasm_throw.zig");
+const eh_registry = @import("eh_registry.zig");
 
 // ADR-0119 §Removal condition #1 — empirically validated 2026-05-27
 // (spike `private/spikes/p10-it6-naked-trampoline/`): Zig 0.16
@@ -123,11 +124,17 @@ pub fn trampolineCore(
         .tag_idx = tag_idx,
     };
 
+    // ADR-0134 D2 — cross-instance per-frame dispatch. With zero
+    // registrations (no cross-module setup) the resolver returns null
+    // for every PC → the walk falls back to `table` (this instance's),
+    // i.e. identical single-instance behaviour. Registration (the
+    // linker / spec runner) activates cross-instance unwinding.
     const result = zwasm_throw.dispatchThrow(
         table,
         &cmap,
         site,
         zwasm_throw.default_max_unwind_depth,
+        eh_registry.resolver(),
     );
 
     switch (result) {

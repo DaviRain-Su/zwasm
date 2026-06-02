@@ -106,7 +106,17 @@ pub const ExceptionTable = struct {
     ///     thrown tag resolve to the same identity id (so aliased /
     ///     cross-module-imported indices match their source tag).
     pub fn lookup(self: ExceptionTable, pc: u32, throw_tag_idx: u32) ?HandlerMatch {
-        const throw_id = self.identity(throw_tag_idx);
+        return self.lookupByIdentity(pc, self.identity(throw_tag_idx));
+    }
+
+    /// Like `lookup`, but takes a PRE-RESOLVED throw identity id rather
+    /// than a local tag index. Cross-instance unwinding (ADR-0134 D2)
+    /// resolves the throw's identity ONCE via the THROWING instance's
+    /// `tag_ids`, then matches it against each frame's OWN table (whose
+    /// entries resolve via THAT instance's `tag_ids`) — the local
+    /// `throw_tag_idx` is meaningless in a different instance's index
+    /// space, but the resolved u64 identity is globally comparable.
+    pub fn lookupByIdentity(self: ExceptionTable, pc: u32, throw_id: u64) ?HandlerMatch {
         for (self.entries) |e| {
             if (pc < e.pc_start or pc >= e.pc_end) continue;
             const matches = switch (e.kind) {
@@ -119,6 +129,13 @@ pub const ExceptionTable = struct {
             };
         }
         return null;
+    }
+
+    /// Public accessor for a local tag index's identity id (used by the
+    /// unwinder to resolve the throw's identity from the throwing
+    /// instance's table before walking).
+    pub fn identityOf(self: ExceptionTable, idx: u32) u64 {
+        return self.identity(idx);
     }
 };
 

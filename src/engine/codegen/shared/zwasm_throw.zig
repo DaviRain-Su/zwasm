@@ -77,6 +77,7 @@ pub fn dispatchThrow(
     code_map: *const CodeMap,
     site: ThrowSite,
     max_unwind_depth: u32,
+    resolver: ?unwind.InstanceResolver,
 ) UnwindResult {
     // (1) Normalise the throw-site absolute address to a
     // module-relative PC (= absolute - block_addr) to match
@@ -104,6 +105,7 @@ pub fn dispatchThrow(
         site.initial_fp,
         loader,
         max_unwind_depth,
+        resolver,
     );
 }
 
@@ -142,7 +144,7 @@ test "dispatchThrow: throw-site address inside a function → handler in same fr
         .throw_site_addr = 0x10042,
         .tag_idx = 5,
     };
-    const result = dispatchThrow(table, &cmap, site, 16);
+    const result = dispatchThrow(table, &cmap, site, 16, null);
 
     switch (result) {
         .handler => |h| {
@@ -173,7 +175,7 @@ test "dispatchThrow: no matching handler → uncaught" {
         .throw_site_addr = 0x20050,
         .tag_idx = 99,
     };
-    const result = dispatchThrow(table, &cmap, site, 16);
+    const result = dispatchThrow(table, &cmap, site, 16, null);
     try testing.expectEqual(UnwindResult.uncaught, result);
 }
 
@@ -239,7 +241,7 @@ test "dispatchThrow: handler in caller frame after one unwind step" {
         .throw_site_addr = 0x10042, // rel pc 0x42, in inner's [0, 0x50) catch tag=7
         .tag_idx = 5, // not 7 → miss
     };
-    const result = dispatchThrow(table3, &cmap, site, 16);
+    const result = dispatchThrow(table3, &cmap, site, 16, null);
     switch (result) {
         .handler => |h| {
             try testing.expectEqual(@as(u32, 0x90), h.landing_pad_pc);
@@ -282,7 +284,7 @@ test "dispatchThrow: throw-site outside any JIT function → walks via sentinel"
     };
     // The initial lookup falls through (PC = sentinel maxInt32, no entry covers it),
     // walker advances to outer frame at rel pc 0x50, catch_all hits.
-    const result = dispatchThrow(table, &cmap, site, 16);
+    const result = dispatchThrow(table, &cmap, site, 16, null);
     switch (result) {
         .handler => |h| {
             try testing.expectEqual(@as(u32, 0x42), h.landing_pad_pc);
