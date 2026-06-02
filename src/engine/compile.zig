@@ -505,23 +505,45 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         // standard pop path.
         const TagInfo = struct { counts: []u32, slot_counts: []u32 };
         const empty_tag_info: TagInfo = blk: {
-            const tag_section = module.find(.tag) orelse break :blk .{ .counts = &.{}, .slot_counts = &.{} };
-            const tags_only = try sections.decodeTags(a, tag_section.body);
-            if (tags_only.len == 0) break :blk .{ .counts = &.{}, .slot_counts = &.{} };
+            // Tag index space = imported tags ++ defined tags (§3.4); a
+            // defined-only table mis-indexes a host throw against an
+            // imported tag. Same full-space invariant as the main path.
+            var imp_tags: usize = 0;
+            if (imports_buf) |ib| for (ib.items) |imp| {
+                if (imp.kind == .tag) imp_tags += 1;
+            };
+            const defined_only: []const sections.TagEntry = if (module.find(.tag)) |tag_section|
+                try sections.decodeTags(a, tag_section.body)
+            else
+                &.{};
+            const total = imp_tags + defined_only.len;
+            if (total == 0) break :blk .{ .counts = &.{}, .slot_counts = &.{} };
             const type_section_for_tags = module.find(.type) orelse return Error.MissingTypeSection;
             var types_for_tags = try sections.decodeTypes(a, type_section_for_tags.body);
             defer types_for_tags.deinit();
-            const out_counts = try allocator.alloc(u32, tags_only.len);
+            const out_counts = try allocator.alloc(u32, total);
             errdefer allocator.free(out_counts);
-            const out_slots = try allocator.alloc(u32, tags_only.len);
+            const out_slots = try allocator.alloc(u32, total);
             errdefer allocator.free(out_slots);
-            for (tags_only, 0..) |tag, i| {
-                if (tag.typeidx >= types_for_tags.items.len) return Error.InvalidFuncIndex;
-                const params = types_for_tags.items[tag.typeidx].params;
-                out_counts[i] = @intCast(params.len);
+            var ti: usize = 0;
+            if (imports_buf) |ib| for (ib.items) |imp| {
+                if (imp.kind != .tag) continue;
+                if (imp.payload.tag_typeidx >= types_for_tags.items.len) return Error.InvalidFuncIndex;
+                const params = types_for_tags.items[imp.payload.tag_typeidx].params;
+                out_counts[ti] = @intCast(params.len);
                 var slots: u32 = 0;
                 for (params) |p| slots += runtime_mod.slotCountForValType(p);
-                out_slots[i] = slots;
+                out_slots[ti] = slots;
+                ti += 1;
+            };
+            for (defined_only) |tag| {
+                if (tag.typeidx >= types_for_tags.items.len) return Error.InvalidFuncIndex;
+                const params = types_for_tags.items[tag.typeidx].params;
+                out_counts[ti] = @intCast(params.len);
+                var slots: u32 = 0;
+                for (params) |p| slots += runtime_mod.slotCountForValType(p);
+                out_slots[ti] = slots;
+                ti += 1;
             }
             break :blk .{ .counts = out_counts, .slot_counts = out_slots };
         };
@@ -854,17 +876,43 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         break :blk out;
     } else &.{};
 
-    // Wasm 3.0 EH §4.5 (10.E-N-1): decode the tag section into an
-    // arena-allocated slice so the validator can range-check
-    // `throw tag_idx` + try_table catch / catch_ref `tag_idx`
-    // against `module.tags[]` and pop each tag's param types per
-    // its `module_types[typeidx]`. Absent section → empty slice
-    // (default `Validator.tags`). Freed when `a` (the compileWasm
-    // arena) deinits.
-    const tags_slice: []const sections.TagEntry = if (module.find(.tag)) |ts|
+    // Wasm 3.0 EH §4.5 (10.E-N-1): decode the tag section so the
+    // validator can range-check `throw tag_idx` + try_table catch /
+    // catch_ref `tag_idx` and pop each tag's param types.
+    //
+    // The wasm tag index space is imported tags (kind .tag) ++ defined
+    // tags (section 13), per spec ordering (§3.4). A defined-only slice
+    // mis-resolves every catch/throw index by the imported-tag count →
+    // wrong tag's params → StackTypeMismatch at validate (e.g.
+    // exception-handling/try_table.1, which imports 2 tags). The
+    // tag_param_counts / slot_counts built below index off this same
+    // slice and feed the JIT throw/catch pop-count, so the full space is
+    // load-bearing there too. Mirrors the interp (instantiate.zig cyc114
+    // validator + cyc116 throw wiring). Arena-allocated (freed with `a`).
+    var imp_tag_count: usize = 0;
+    if (imports_buf) |ib| for (ib.items) |imp| {
+        if (imp.kind == .tag) imp_tag_count += 1;
+    };
+    const defined_tags: []const sections.TagEntry = if (module.find(.tag)) |ts|
         try sections.decodeTags(a, ts.body)
     else
         &.{};
+    const tags_slice: []const sections.TagEntry = if (imp_tag_count == 0)
+        defined_tags
+    else blk: {
+        const combined = try a.alloc(sections.TagEntry, imp_tag_count + defined_tags.len);
+        var ci: usize = 0;
+        if (imports_buf) |ib| for (ib.items) |imp| {
+            if (imp.kind != .tag) continue;
+            combined[ci] = .{ .attribute = 0, .typeidx = imp.payload.tag_typeidx };
+            ci += 1;
+        };
+        for (defined_tags) |t| {
+            combined[ci] = t;
+            ci += 1;
+        }
+        break :blk combined;
+    };
 
     // Wasm 3.0 EH (10.E-N-3) — pre-resolve per-tag param count
     // from `tags[i].typeidx → module_types[typeidx].params.len`.

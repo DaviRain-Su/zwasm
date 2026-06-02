@@ -740,6 +740,41 @@ test "compileWasm: multiple tags with mixed-arity types (10.E-N-3)" {
     try testing.expectEqual(@as(u32, 0), compiled.tag_param_counts[2]);
 }
 
+test "compileWasm: tag index space includes imported tags (imports-first) — 10.E try_table.1" {
+    // Regression for the JIT try_table StackTypeMismatch (exception-handling/
+    // try_table.1.wasm rejects on JIT, runs on interp): the wasm tag index
+    // space is imported-tags ++ defined-tags (Wasm 3.0 §3.4). The JIT compile
+    // path built `tags_slice` / tag_param_counts from the DEFINED tag section
+    // only, so catch/throw `tag_idx` (encoded in the full space) mis-resolved
+    // by the imported-tag count → wrong tag's params → StackTypeMismatch at
+    // validate, and wrong pop-count at throw. The interp already builds the
+    // full space (instantiate.zig cyc114/cyc116). Mirror it here.
+    //
+    // type 0: () -> ()    (0 params; the imported tag's type)
+    // type 1: (i32) -> () (1 param;  the defined tag's type)
+    // import: tag "t"."e" → type 0  → full-space tag index 0
+    // tag section: one defined tag → type 1 → full-space tag index 1
+    // Expected tag_param_counts = [0, 1] (imports-first), len 2.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        // type section (1): count=2; type0 ()->(); type1 (i32)->()
+        0x01, 0x08, 0x02, 0x60, 0x00, 0x00, 0x60, 0x01,
+        0x7F, 0x00,
+        // import section (2): count=1; "t"."e" tag attr=0 typeidx=0
+        0x02, 0x08, 0x01, 0x01, 0x74, 0x01,
+        0x65, 0x04, 0x00, 0x00,
+        // tag section (13): count=1; defined tag attr=0 typeidx=1
+        0x0D, 0x03, 0x01, 0x00,
+        0x01,
+    };
+    var compiled = try compileWasm(testing.allocator, &bytes);
+    defer compiled.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(usize, 2), compiled.tag_param_counts.len);
+    try testing.expectEqual(@as(u32, 0), compiled.tag_param_counts[0]); // imported tag → type 0
+    try testing.expectEqual(@as(u32, 1), compiled.tag_param_counts[1]); // defined tag → type 1
+}
+
 // ADR-0066 cross-module bridge thunk + ADR-0112 D4 (cross-module
 // tail-call). Self-contained two-module JIT harness used by the
 // D-206 bundle. It mirrors `resolveCrossModuleImports`
