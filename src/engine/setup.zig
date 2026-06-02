@@ -143,6 +143,29 @@ pub fn jitMemoryGrow(rt: *entry.JitRuntime, delta_pages: u32) callconv(.c) i32 {
     return @bitCast(@as(u32, @truncate(old_pages)));
 }
 
+/// Real `table_grow_fn` (replaces `defaultTableGrowReject`) for D-224.
+/// Grows a non-funcref table by `delta`, filling the new slots with `init`
+/// and returning the OLD size (or -1 on failure). No realloc: setup
+/// pre-allocates each non-funcref table's `refs` arena up to its capacity
+/// (`.max`), so growth just fills pre-allocated slots + bumps `.len` — the
+/// `TableSlice` descriptor is updated in place (table.get reads it fresh, so
+/// no JIT base reload, unlike memory.grow). funcref tables stay rejected
+/// (grown slots would need a funcptrs mirror that resolves the funcref
+/// operand to a native entry — out of this chunk's scope).
+pub fn jitTableGrow(rt: *entry.JitRuntime, tableidx: u32, init: u64, delta: u32) callconv(.c) i32 {
+    if (tableidx >= rt.tables_count) return -1;
+    const descs: [*]entry.TableSlice = @constCast(rt.tables_ptr);
+    const d = &descs[tableidx];
+    if (@intFromPtr(d.funcptrs) != 0) return -1; // funcref → unsupported here
+    const old_len = d.len;
+    const new_len: u64 = @as(u64, old_len) + @as(u64, delta);
+    if (new_len > d.max) return -1; // exceeds pre-allocated capacity (= .max)
+    var i: u32 = old_len;
+    while (i < old_len + delta) : (i += 1) d.refs[i] = init;
+    d.len = @intCast(new_len);
+    return @bitCast(old_len);
+}
+
 /// Build a JitRuntime + populate its host_dispatch table + init
 /// linear memory from data segments. Shared between `runI32Export`
 /// and `runVoidExport`. The caller owns the returned `memory` and
@@ -335,8 +358,22 @@ pub fn setupRuntime(
     // mirrors writes from `funcptrs_buf` into the corresponding
     // `table_refs` slot (using the FuncEntity-ptr encoding, NOT
     // the native-code-ptr encoding used by `funcptrs_buf`).
+    // D-224 — table.grow capacity: pre-allocate non-funcref tables up to
+    // their declared `max` (capped) so `jitTableGrow` can bump `.len` into
+    // pre-allocated slots without realloc (the shared arena can't realloc one
+    // slice). funcref tables stay at `min` (grow needs a funcptrs mirror for
+    // grown slots → still rejected). `.max` is set to this capacity so the
+    // grow fn's cap-check == the actual pre-allocated size.
+    const grow_cap: u32 = 65536;
+    const growCapacity = struct {
+        fn f(tm: anytype, cap: u32) u32 {
+            if (tm.is_funcref) return tm.min;
+            const m = tm.max orelse return tm.min;
+            return @min(m, cap);
+        }
+    }.f;
     var total_table_refs: usize = 0;
-    for (table_metas) |tm| total_table_refs += tm.min;
+    for (table_metas) |tm| total_table_refs += growCapacity(tm, grow_cap);
     const tables_descs = try allocator.alloc(entry.TableSlice, if (table_metas.len == 0) 1 else table_metas.len);
     errdefer allocator.free(tables_descs);
     const table_refs = try allocator.alloc(u64, if (total_table_refs == 0) 1 else total_table_refs);
@@ -347,13 +384,16 @@ pub fn setupRuntime(
         var ref_offset: usize = 0;
         for (table_metas, 0..) |tm, i| {
             const fp_init: [*]allowzero u64 = if (tm.is_funcref) funcptrs_buf.ptr else @ptrFromInt(0);
+            const cap = growCapacity(tm, grow_cap);
             tables_descs[i] = .{
                 .refs = table_refs.ptr + ref_offset,
                 .len = tm.min,
-                .max = tm.max orelse entry.table_no_max,
+                // D-224: `.max` = pre-allocated capacity (funcref keeps its
+                // declared max; grow rejects it via the funcptrs check).
+                .max = if (tm.is_funcref) (tm.max orelse entry.table_no_max) else cap,
                 .funcptrs = fp_init,
             };
-            ref_offset += tm.min;
+            ref_offset += cap;
         }
         if (table_metas.len == 0) {
             tables_descs[0] = .{
@@ -678,6 +718,7 @@ pub fn setupRuntime(
             .data_segments_count = @intCast(data_segments_buf.len),
             .tables_ptr = tables_descs.ptr,
             .tables_count = @intCast(table_metas.len),
+            .table_grow_fn = jitTableGrow, // D-224 (non-funcref tables)
             .elem_segments_ptr = if (elem_segments_buf.len == 0) @as([*]const entry.ElemSlice, undefined) else elem_segments_buf.ptr,
             .elem_segments_count = @intCast(elem_segments_buf.len),
             .tables_jit_ci_ptr = tables_jit_ci_buf.ptr,

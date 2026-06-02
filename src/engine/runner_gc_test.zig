@@ -905,3 +905,33 @@ test "JitInstance: table-of-i31ref active elem + table.get + i31.get_u → 999/8
     try testing.expectEqual(@as(?u64, 888), try inst.invoke(testing.allocator, "get", &.{1}));
     try testing.expectEqual(@as(?u64, 777), try inst.invoke(testing.allocator, "get", &.{2}));
 }
+
+// ── D-224: JIT table.grow on a (non-funcref) i31ref table ──
+
+test "JitInstance: table.grow i31 table — grow→old size, get grown slot (D-224)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    // (module (table $t 1 5 i31ref)
+    //   (func (export "grow") (param i32 i32) (result i32)  ;; p0=delta p1=val
+    //     local.get 1  ref.i31  local.get 0  table.grow $t)
+    //   (func (export "size") (result i32) table.size $t)
+    //   (func (export "get") (param i32) (result i32) local.get 0 table.get $t i31.get_u))
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x10, 0x03, 0x60, 0x02, 0x7f, 0x7f, 0x01,
+        0x7f, 0x60, 0x00, 0x01, 0x7f, 0x60, 0x01, 0x7f,
+        0x01, 0x7f, 0x03, 0x04, 0x03, 0x00, 0x01, 0x02,
+        0x04, 0x05, 0x01, 0x6c, 0x01, 0x01, 0x05, // table i31ref min1 max5
+        0x07, 0x15, 0x03, 0x04, 0x67, 0x72, 0x6f,
+        0x77, 0x00, 0x00, 0x04, 0x73, 0x69, 0x7a,
+        0x65, 0x00, 0x01, 0x03, 0x67, 0x65, 0x74,
+        0x00, 0x02, 0x0a, 0x1c, 0x03,
+        0x0b, 0x00, 0x20, 0x01, 0xfb, 0x1c, 0x20, 0x00, 0xfc, 0x0f, 0x00, 0x0b, // grow
+        0x05, 0x00, 0xfc, 0x10, 0x00, 0x0b, // size
+        0x08, 0x00, 0x20, 0x00, 0x25, 0x00, 0xfb, 0x1e, 0x0b, // get
+    };
+    var inst = try JitInstance.init(testing.allocator, &bytes);
+    defer inst.deinit(testing.allocator);
+    try testing.expectEqual(@as(?u64, 1), try inst.invoke(testing.allocator, "grow", &.{ 2, 99 })); // old size
+    try testing.expectEqual(@as(?u64, 3), try inst.invoke(testing.allocator, "size", &.{})); // 1+2
+    try testing.expectEqual(@as(?u64, 99), try inst.invoke(testing.allocator, "get", &.{1})); // grown slot
+}
