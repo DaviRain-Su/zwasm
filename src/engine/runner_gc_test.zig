@@ -659,6 +659,32 @@ test "runI32Export: array.init_elem into existing array + array.get + call_ref �
     try testing.expectEqual(@as(u32, 42), runI32Export(testing.allocator, &bytes, "f"));
 }
 
+test "runI32Export: any.convert_extern beside a sibling table.set preserves it → table-loaded ref.test i31 → 1" {
+    // (module (table $t 4 anyref) (func (export "f") (result i32)
+    //   i32.const 0  i32.const 5 ref.i31         table.set $t   ;; $t[0] = i31(5)
+    //   i32.const 1  ref.null extern any.convert_extern table.set $t ;; $t[1] = convert
+    //   i32.const 0  table.get $t  ref.test i31))                ;; read $t[0] → expect 1
+    // The transparent 0→0 convert in the SAME function as a sibling table.set does
+    // NOT desync regalloc — $t[0] survives intact (GREEN). Mirrors the corpus setup
+    // fn shape (converts at $ta[6,7] beside direct stores). Proves convert's model
+    // is sound; the corpus +59 was the setup INVOKE not running (externref arg the
+    // JIT runner can't pack), not regalloc corruption.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type () -> i32
+        0x03, 0x02, 0x01, 0x00, // func
+        0x04, 0x04, 0x01, 0x6e, 0x00, 0x04, // table: anyref, min 4
+        0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x00, // export "f"
+        // code: body 25 bytes (0x19); sect 0x1b.
+        0x0a, 0x1b, 0x01, 0x19, 0x00, 0x41, 0x00,
+        0x41, 0x05, 0xfb, 0x1c, 0x26, 0x00, 0x41,
+        0x01, 0xd0, 0x6f, 0xfb, 0x1a, 0x26, 0x00,
+        0x41, 0x00, 0x25, 0x00, 0xfb, 0x14, 0x6c,
+        0x0b,
+    };
+    try testing.expectEqual(@as(u32, 1), runI32Export(testing.allocator, &bytes, "f"));
+}
+
 test "runI32Export: ref.test i31 on i31 ref → 1 (10.G ref.test-on-JIT R-1)" {
     // (module (func (export "f") (result i32)
     //   i32.const 5  ref.i31  ref.test i31))   ;; non-null i31 matches i31 → 1
@@ -1270,4 +1296,29 @@ test "JitInstance: struct.get_s / struct.get_u packed i8 sign/zero-extend (D-225
     const gu = (try inst.invoke(testing.allocator, "gu", &.{})).?;
     try testing.expectEqual(@as(i32, -2), @as(i32, @bitCast(@as(u32, @truncate(gs)))));
     try testing.expectEqual(@as(i32, 254), @as(i32, @bitCast(@as(u32, @truncate(gu)))));
+}
+
+test "runI32Export: any.convert_extern + extern.convert_any null round-trip → ref.is_null 1 (10.G JIT)" {
+    // Both arches. (module (func (export "f") (result i32)
+    //   ref.null extern  any.convert_extern  extern.convert_any  ref.is_null))
+    // The converts are pure identity (externref/anyref share the Value.ref
+    // slot; the any↔extern distinction is validator-only) → emit is a no-op,
+    // liveness is operand-stack-transparent (0→0, like local.tee). This test
+    // proves the value flows THROUGH both converts unchanged (null preserved →
+    // is_null 1). Before the emit/liveness wiring the module rejected with
+    // `liveness: UnsupportedOp[stackEffect-missing] op=any.convert_extern`.
+    // ref.null extern = d0 6f; any.convert_extern = fb 1a; extern.convert_any =
+    // fb 1b; ref.is_null = d1.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type ()->i32
+        0x03, 0x02, 0x01, 0x00, // func type 0
+        0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x00, // export "f"
+        // code: body 9 bytes (0x09); sect 0x0b. locals 00 + ref.null extern
+        // [d0 6f] + any.convert_extern [fb 1a] + extern.convert_any [fb 1b] +
+        // ref.is_null [d1] + end [0b].
+        0x0a, 0x0b, 0x01, 0x09, 0x00, 0xd0, 0x6f,
+        0xfb, 0x1a, 0xfb, 0x1b, 0xd1, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 1), runI32Export(testing.allocator, &bytes, "f"));
 }

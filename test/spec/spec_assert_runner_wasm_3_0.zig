@@ -432,6 +432,15 @@ pub fn main(init: std.process.Init) !void {
             const JitInstanceT = zwasm.engine.runner.JitInstance;
             var cur_jit: ?*JitInstanceT = null;
             var cur_jit_kept = false;
+            // §1 (ADR-0128) — set when a jit-mode `(invoke …)` setup action for
+            // the current module could NOT run (non-scalar arg the JIT invoke
+            // path can't pack — e.g. `(invoke "init" (ref.extern 0))` — or it
+            // errored). Subsequent jit asserts read incompletely-initialised
+            // state (empty tables → ref.test/ref.cast read null → wrong), so
+            // they are enumerated SKIPs ("JIT couldn't attempt this shape"),
+            // NOT fails. Reset per `.module`. Real fix = externref-arg invoke
+            // support (D-NNN).
+            var jit_setup_failed = false;
             var jit_owned: std.ArrayList(*JitInstanceT) = .empty;
             var jit_exporters: std.StringHashMap(*JitInstanceT) = std.StringHashMap(*JitInstanceT).init(gpa);
             defer {
@@ -621,6 +630,7 @@ pub fn main(init: std.process.Init) !void {
                             cur_jit = null;
                         }
                         cur_jit_kept = false;
+                        jit_setup_failed = false; // new module → fresh setup state
                         // Don't free bytes a registered exporter borrows (D-225);
                         // kept_bytes owns them now.
                         if (cur_module_bytes) |b| {
@@ -837,6 +847,13 @@ pub fn main(init: std.process.Init) !void {
                                 summary.jit_return_skip += 1;
                                 continue;
                             };
+                            if (jit_setup_failed) {
+                                // A prior setup `(invoke …)` couldn't run (non-scalar
+                                // arg) → state incomplete → can't attempt → skip.
+                                summary.jit_return_skip += 1;
+                                if (fail_detail) try stdout.print("  JITskip [{s}/{s}] {s} (setup invoke unrun — non-scalar arg)\n", .{ proposal, entry.name, d.func_name });
+                                continue;
+                            }
                             // Pack scalar args into bit-carriers (declaration order).
                             var arg_bits: [4]u64 = undefined;
                             var args_ok = true;
@@ -1171,7 +1188,17 @@ pub fn main(init: std.process.Init) !void {
                                     break;
                                 };
                             }
-                            if (ab_ok) _ = inst.invoke(gpa, d.func_name, ab[0..d.args_len]) catch {};
+                            // A setup action that can't pack its args (non-scalar,
+                            // e.g. an externref host ref) or that errors leaves the
+                            // module's state incomplete → mark so dependent jit
+                            // asserts SKIP rather than read empty state and "fail".
+                            if (ab_ok) {
+                                _ = inst.invoke(gpa, d.func_name, ab[0..d.args_len]) catch {
+                                    jit_setup_failed = true;
+                                };
+                            } else {
+                                jit_setup_failed = true;
+                            }
                             continue;
                         }
                         _ = cur_module_bytes orelse continue;

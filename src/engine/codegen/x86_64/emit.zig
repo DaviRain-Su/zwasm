@@ -858,6 +858,11 @@ pub fn compile(
             continue;
         }
         switch (ins.op) {
+            // any.convert_extern / extern.convert_any: pure identity — the
+            // value flows through in-place (externref/anyref share the
+            // Value.ref slot; the distinction is validator-only). No machine
+            // code, no vreg change; liveness models them transparent 0→0.
+            .@"any.convert_extern", .@"extern.convert_any" => {},
             // §9.12-B / B67: i32.const + i64.const inline bodies
             // extracted into `op_alu_int.emitI{32,64}Const` adapters.
             .@"i32.const" => try op_alu_int.emitI32Const(&ctx, &ins),

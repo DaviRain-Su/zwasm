@@ -53,6 +53,15 @@ pub fn stackEffect(op: ZirOp) ?StackEffect {
         // last-use extension. populateShapeTags also matches
         // (no shape_tag increment at local.tee).
         .@"local.tee" => .{ .pops = 0, .pushes = 0 },
+        // any.convert_extern / extern.convert_any (10.G) are pure identity:
+        // externref and anyref share the Value.ref slot, the distinction is
+        // validator-only. The operand flows through unchanged → transparent
+        // 0→0 (like local.tee, no fresh vreg). Emit is a no-op. Modelling these
+        // 1→1 would close the input vreg's range + fabricate a fresh (never-
+        // written) result vreg → ref.test/ref.cast on the result read garbage
+        // (the reverted +39-fail attempt). See lesson
+        // jit-liveness-must-mirror-emit-pushed-vregs.
+        .@"any.convert_extern", .@"extern.convert_any" => .{ .pops = 0, .pushes = 0 },
         // 1 → 1 testop / unop (i32 / i64 / f32 / f64)
         .@"i32.eqz",
         .@"i32.clz",
