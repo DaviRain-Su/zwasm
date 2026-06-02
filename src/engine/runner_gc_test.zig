@@ -70,6 +70,29 @@ test "runI32Export: i31.get_s on null i31ref traps (10.G JIT)" {
     try testing.expectError(entry.Error.Trap, runI32Export(testing.allocator, &bytes, "f"));
 }
 
+test "runI32Export: try_table (result i32) value survives to function return → 42 (10.E)" {
+    // Regression for the try_table label-arity drop: the arm64/x86_64
+    // try_table emit pushed its label with hardcoded result_arity=0,
+    // param_arity=0 (ignoring the blocktype arity the lowerer threads in
+    // ZirInstr.extra). The matching `end`'s stack truncation then computed
+    // new_len = entry_depth − 0 + 0 = entry_depth and DISCARDED the
+    // try_table's result vreg → a later consumer (here the function return)
+    // marshalled an empty stack → stale register returned instead of 42.
+    // (Caught-path landing worked by luck; this is the normal-completion path.)
+    // (module (func (export "f") (result i32) (try_table (result i32) (i32.const 42))))
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type ()->(i32)
+        0x03, 0x02, 0x01, 0x00, // func: type 0
+        0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x00, // export "f" func 0
+        // code: body=8 (locals=0; try_table 0x1f blocktype=i32 0x7f catch-count=0;
+        //   i32.const 42 [0x41 0x2a]; end [0x0b]; end [0x0b])
+        0x0a, 0x0a, 0x01, 0x08, 0x00, 0x1f, 0x7f,
+        0x00, 0x41, 0x2a, 0x0b, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 42), try runI32Export(testing.allocator, &bytes, "f"));
+}
+
 test "runI32Export: struct.new_default + ref.is_null → 0 (10.G struct-on-JIT A-2b-1)" {
     // Ungated for x86_64: the SysV struct.new_default emit landed (D-211
     // mirror); runs on both Mac aarch64 and Linux x86_64 (ubuntu gate).

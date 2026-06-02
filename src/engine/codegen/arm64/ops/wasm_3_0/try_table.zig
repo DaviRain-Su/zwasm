@@ -85,12 +85,23 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
     // intra-body `br 0` resolution and gets pushed below.
     const labels_depth_outer: u32 = @intCast(ctx.labels.items.len);
 
+    // Mirror op_control.emitBlock: the try_table label carries the
+    // blocktype arity (the lowerer packs it into ins.extra; block_idx is
+    // in ins.payload). Hardcoding arity 0 here dropped the try_table's
+    // result vreg at the matching `end` truncation (new_len = entry_depth
+    // − param_arity + result_arity) → a later consumer (return / br /
+    // outer-block result) marshalled a stale register (10.E miscompile).
+    // results/params > 8 would overflow the shared end-merge buffer
+    // (= op_control merge_top_vregs_cap); reject as emitBlock does.
+    const tt_results: u8 = @intCast(ins.extra & 0xFF);
+    const tt_params: u8 = @intCast((ins.extra >> 8) & 0xFF);
+    if (tt_results > 8 or tt_params > 8) return error.UnsupportedOp;
     try ctx.labels.append(ctx.allocator, .{
         .kind = .block,
         .target_byte_offset = 0,
         .pending = .empty,
-        .result_arity = 0,
-        .param_arity = 0,
+        .result_arity = tt_results,
+        .param_arity = tt_params,
         .entry_stack_depth = @intCast(ctx.pushed_vregs.items.len),
     });
     const labels_depth_after_push: u32 = @intCast(ctx.labels.items.len);

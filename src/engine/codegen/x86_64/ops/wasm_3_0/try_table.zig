@@ -63,12 +63,21 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
     // resolution.
     const labels_depth_outer: u32 = @intCast(ctx.labels.items.len);
 
+    // Mirror op_control.emitBlock: the try_table label carries the
+    // blocktype arity (lowerer packs it into ins.extra; block_idx is in
+    // ins.payload). Hardcoding arity 0 dropped the try_table result vreg
+    // at the matching `end` truncation → stale-register return (10.E
+    // miscompile). results/params > 8 overflow the shared end-merge
+    // buffer (merge_top_vregs_cap); reject as emitBlock does. (Mirrors arm64.)
+    const tt_results: u8 = @intCast(ins.extra & 0xFF);
+    const tt_params: u8 = @intCast((ins.extra >> 8) & 0xFF);
+    if (tt_results > 8 or tt_params > 8) return error.UnsupportedOp;
     try ctx.labels.append(ctx.allocator, .{
         .kind = .block,
         .target_byte_offset = 0,
         .pending = .empty,
-        .result_arity = 0,
-        .param_arity = 0,
+        .result_arity = tt_results,
+        .param_arity = tt_params,
         .entry_stack_depth = @intCast(ctx.pushed_vregs.items.len),
     });
     const labels_depth_after_push: u32 = @intCast(ctx.labels.items.len);
