@@ -492,8 +492,13 @@ pub fn main(init: std.process.Init) !void {
             var jit_setup_failed = false;
             var jit_owned: std.ArrayList(*JitInstanceT) = .empty;
             var jit_exporters: std.StringHashMap(*JitInstanceT) = std.StringHashMap(*JitInstanceT).init(gpa);
+            // ADR-0134 D2 — the cross-instance EH registry is process-global;
+            // each manifest fully owns its instances, so clear any stale
+            // registrations from a prior manifest's error-path leak.
+            zwasm.engine.runner.eh_registry.reset();
             defer {
                 for (jit_owned.items) |p| {
+                    zwasm.engine.runner.eh_registry.unregister(&p.owned.rt);
                     p.deinit(gpa);
                     gpa.destroy(p);
                 }
@@ -502,6 +507,7 @@ pub fn main(init: std.process.Init) !void {
             }
             defer if (cur_jit) |j| {
                 if (!cur_jit_kept) {
+                    zwasm.engine.runner.eh_registry.unregister(&j.owned.rt);
                     j.deinit(gpa);
                     gpa.destroy(j);
                 }
@@ -673,6 +679,7 @@ pub fn main(init: std.process.Init) !void {
                             // Kept (registered) instances are owned by jit_owned;
                             // free only the transient ones here (D-225).
                             if (!cur_jit_kept) {
+                                zwasm.engine.runner.eh_registry.unregister(&j.owned.rt);
                                 j.deinit(gpa);
                                 gpa.destroy(j);
                             }
@@ -730,6 +737,11 @@ pub fn main(init: std.process.Init) !void {
                                     break :blk null;
                                 };
                                 pp.* = built;
+                                // ADR-0134 D2 — register the heap-pinned
+                                // instance's rt for cross-instance unwind
+                                // dispatch (stable address; unregistered
+                                // at every free site below).
+                                zwasm.engine.runner.eh_registry.register(&pp.owned.rt);
                                 break :blk pp;
                             };
                         }

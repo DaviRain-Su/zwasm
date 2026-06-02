@@ -44,6 +44,10 @@ pub const FuncImportTarget = setup_mod.FuncImportTarget;
 /// ADR-0134 D3 — resolved cross-module TAG import identity (re-exported
 /// so the spec runner can build the slice for `initLinked`).
 pub const TagImportTarget = setup_mod.TagImportTarget;
+/// ADR-0134 D2 — cross-instance EH registry (re-exported so the linker /
+/// spec runner can `register`/`unregister` each heap-pinned instance's
+/// `*JitRuntime` for per-frame-instance unwind dispatch).
+pub const eh_registry = @import("codegen/shared/eh_registry.zig");
 
 // ADR-0079 Step 2 — compile carve-out (compileWasm + per-section
 // helpers). Re-exports preserve external callers' import paths

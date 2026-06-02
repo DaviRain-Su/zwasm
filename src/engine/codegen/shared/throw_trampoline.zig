@@ -144,11 +144,14 @@ pub fn trampolineCore(
         },
         .handler => |h| {
             // Resolve the catching function's CodeMap entry via the
-            // absolute PC captured at the matched frame. If the
-            // handler's containing PC isn't in any JIT function
-            // (= corrupted state or future cross-module scenario the
-            // current single-instance walker doesn't support), trap.
-            const entry_lookup = cmap.lookup(h.handler_abs_pc);
+            // absolute PC captured at the matched frame. For a
+            // CROSS-INSTANCE catch the handler lives in a different
+            // instance than the throwing one, so its `start_addr` +
+            // `frame_bytes` must come from the CATCHING instance's
+            // CodeMap (ADR-0134 D2) — fall back to this instance's `cmap`
+            // when the registry has no owner (single-instance / empty).
+            const eff_cmap = eh_registry.codeMapForPc(h.handler_abs_pc) orelse cmap;
+            const entry_lookup = eff_cmap.lookup(h.handler_abs_pc);
             switch (entry_lookup) {
                 .inside => |hit| {
                     // SP-restore: handler_fp = catching frame's X29/RBP

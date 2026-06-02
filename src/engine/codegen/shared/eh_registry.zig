@@ -92,6 +92,25 @@ pub fn resolver() unwind.InstanceResolver {
     return .{ .resolve = resolve, .ctx = null };
 }
 
+/// Return the CodeMap of the registered instance that owns `abs_pc`, or
+/// null if none. The trampoline uses this for the `.handler` SP-restore
+/// + landing-pad computation when the catching frame is in a DIFFERENT
+/// instance than the throwing one (cross-instance catch): the handler's
+/// `start_addr` + `frame_bytes` must come from the CATCHING instance's
+/// CodeMap, not the throwing one's (ADR-0134 D2).
+pub fn codeMapForPc(abs_pc: usize) ?code_map_mod.CodeMap {
+    for (rts) |slot| {
+        const rt = slot orelse continue;
+        const cmap = cmapFor(rt);
+        if (cmap.entries.len == 0) continue;
+        switch (cmap.lookup(abs_pc)) {
+            .inside => return cmap,
+            .outside => {},
+        }
+    }
+    return null;
+}
+
 // ---------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------
