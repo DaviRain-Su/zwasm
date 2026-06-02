@@ -8,12 +8,12 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD** (`6db5fbbd`): §1 spec-corpus JIT mode. D-223 gc const-expr globals (`824fa694`) + gc test
-  extraction (`99e122e1`) + **D-212 scaffolding** (`6db5fbbd`: cross-func control i32 green / f32 red-skip).
-  Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=538 fail=22 skip=735** (D-223: +43, biggest
-  mover since memory64; memory64 100% GREEN; interp test-all UNCHANGED).
-  **fail taxonomy (22)**: gc 17 (6× f32 = **D-212**, f32-specific cross-func confirmed; gc/array+i31
-  `err=Trap` = D-218) + function-references 4 (D-198) + try_table 1 (EH).
+- **HEAD** (`720e5793`): §1 spec-corpus JIT mode. D-223 gc const-expr globals (`824fa694`) + gc test
+  extraction (`99e122e1`) + **D-212 DISCHARGED** (`7c86b3a0` GET + `720e5793` SET: gc struct/array
+  get/set f32/f64 → FP-class; +6 corpus). Opt-in `ZWASM_SPEC_ENGINE=jit`. Mac aarch64: **pass=544
+  fail=16 skip=735** (memory64 100% GREEN; interp test-all UNCHANGED). **fail taxonomy (16)**: gc
+  ~11 (gc/array + gc/i31 `err=Trap` = D-218; gc/type-subtyping run 1 = ADR-0127 PHASE C) +
+  function-references 4 (D-198) + try_table 1 (EH). NO ty=f32 fails remain.
 - **PER-MODULE blocker-STACK reality** (lesson `2026-06-02-jit-corpus-late-phase-is-per-module-
   blocker-stacks`): since memory64 (+208, last big mover), every gc/funcref fix has been correct
   but ~0 corpus — each remaining module has 3-6 DISTINCT blockers; JIT rejects at the FIRST
@@ -60,18 +60,14 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **Exit-condition**: ≥1 `assert_return` executes THROUGH the JIT + compares. ✓ **MET** long ago.
   Infra COMPLETE; backbone operational (pass=484). Bundle stays open as the diagnostic-driven
   gap-fixing vehicle (`JITmodrej` tally → fix biggest tractable lever).
-- **NEXT chunk** = **D-212 — PINNED via disasm (`c963f41f`); fix is now MECHANICAL**. arm64 inner fn
-  decodes to `ldr x9,[x16,#8]` (struct.get → **GPR X9**) then `fmov s0, s16` (f32-return reads **FP S16,
-  never written** → stale). Root cause = struct.get/array.get result is GPR-class (`vregClassOfOp`
-  `else=>.gpr`) but f32 consumers read the FP home. FIX (fresh context — architectural, regalloc-class;
-  build between steps): (1) `regalloc_vreg_class.zig` `vregClassOfOp` → `.fpr` for struct.get/array.get
-  when field/elem valtype is f32/f64; (2) struct.get + array.get emit BOTH arches → `fpDefSpilled` + FP
-  load (`encLdrSReg/DReg` / movss/movsd, mirror f32.load `op_memory.zig`). THREADING: add gc field/elem
-  valtype accessors to ZirFunc (like `localValType`), populated at lowering (`array_elem_valtypes`
-  exists; add `struct_field_valtypes`); array.get plain `extra`=0 (free), struct.get `extra`=fieldidx
-  (taken → ZirFunc lookup). Write the RED test first (un-skip the `skip.blocker(.D-212)` f32 test), green
-  it, re-measure corpus. get_s/get_u are i32-only (untouched). Skip multi-memory 51; AFTER D-212:
-  gc/array+i31 `err=Trap` (D-218), ref_func 4 (D-198).
+- **NEXT chunk** = **D-218 — gc/array + gc/i31 `err=Trap` cluster** (direct FAIL→pass flips on
+  COMPILING modules; preferred over skips). Re-measure + enumerate: `ZWASM_SPEC_ENGINE=jit <bin>
+  test/spec/wasm-3.0-assert --fail-detail 2>/dev/null | grep 'err=Trap'`. These are real op-correctness
+  traps on modules that already JIT-compile (array ops + i31 get) — each is its own investigation
+  (disasm the trapping op; the D-212 disasm recipe #16 + `objdump -D -b binary -m aarch64` applies).
+  Then ref_func 4 (D-198, funcref residual) + try_table 1 (EH) + gc/type-subtyping run 1 (ADR-0127
+  PHASE C cross-`Types` canonicalEqual). Skip multi-memory 51 (Phase-14). Prefer FAIL fixes (direct
+  flip, no per-module blocker stack). Lessons: 2026-06-02-jit-corpus-late-phase-*.
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -86,9 +82,9 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-Prior turn (`c963f41f`, D-212 scaffolding) ubuntu `test-all` = GREEN (verified HEAD=c963f41f). THIS
-turn = INVESTIGATION (disasm pinned D-212 to exact `ldr x9` / `fmov s0,s16` mismatch; debt+handover
-only, no src change → code == green `c963f41f`). SKIP Step 0.7 ubuntu next resume (no code delta).
+Prior turn (`3ad97320`, D-212 disasm docs) ubuntu = n/a (docs only). THIS turn landed the D-212 fix
+(`7c86b3a0` GET + `720e5793` SET, both arches, x86_64 cross-compile verified) → ubuntu `test-all`
+kicked at end → `tail -3 /tmp/ubuntu.log` next resume (Step 0.7). On FAIL revert to `3ad97320`.
 Mac aarch64 primary; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
