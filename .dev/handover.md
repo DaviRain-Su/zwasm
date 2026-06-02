@@ -62,10 +62,12 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   open item; user-gated.** (c) **JIT corpus: D-233 CLOSED (`1d7f25ea`) — jit-mode assert_trap now routes
   through `cur_jit` (was the stale interp instance), so it ACTUALLY tests JIT traps.** ref_cast_null ×4 now
   trap correctly; assert_trap 554/8 (meaningless) → **202 pass / 55 fail / 305 skip (real)**. The 55 are REAL
-  JIT trap gaps newly EXPOSED → **D-234**: **51 memory64/memory_trap64 OOB** (i32/i64 load/store with OOB i64
-  address → JIT returns instead of trapping; in-bounds works (+208) but OOB-trap never verified — suspect JIT
-  mem bounds-check drops high address bits / 32-bit compare, op_memory.zig both arches) + 4 gc/type-subtyping.
-  D-234 is the next concrete JIT chunk (real correctness gap, not a missing feature). assert_RETURN: 762/2/531;
+  JIT trap gaps newly EXPOSED → **D-234**: 51 memory64/memory_trap64 OOB + 4 gc/type-subtyping. **NARROWED
+  (b8800d04, +2 tests):** mem64 OOB i32.load TRAPS correctly on the JIT via const + i64-PARAM fresh-setup
+  (`runI32Export`/`runScalar1Export`) → JIT codegen bounds-check is FINE. The 51 corpus fails differ ONLY in
+  using the PERSISTENT `cur_jit` (`JitInstance.invoke`) vs fresh `setupRuntime` → likely a cur_jit SETUP issue
+  (mem_limit/memory for mem64), **probably another HARNESS artifact like D-233, NOT codegen.** Next: a
+  `JitInstance.invoke` repro → fix is likely runner/setup-side. assert_RETURN: 762/2/531;
   2 return fails = gc/type-subtyping "run" (call_indirect subtype, D-198) + eh/try_table (EH-on-JIT). Tracked D-211/D-212/D-198/D-234.
 - **Continuity-memo**: interp wasm-3.0 = 0 fails (fully green). JIT 762/2/531. PHASE C follow-ups (debt-worthy):
   api/instance.zig:572 + instantiate.zig:1657 `.cross_module` structural-only. This session CLOSED: D-230 (level-
