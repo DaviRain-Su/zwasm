@@ -59,15 +59,15 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 - **REMAINING**: (a) **4 interp assert_trap fails — FIXED ✓** (D-232 / ADR-0131, `d041e425`): gti materialised
   for func-subtyping + concreteReaches authoritative. interp corpus FULLY GREEN. (b) **§10-scope question** →
   `.dev/phase10_scope_reassessment.md` (USER-flagged; ADR-0128-amendment = user-flip case) — **the bundle's LAST
-  open item; user-gated.** (c) **JIT corpus = return 762/2/531, assert_trap 554/8 — fails MEASURED & re-scoped
-  this cycle** (`ZWASM_SPEC_ENGINE=jit --fail-detail` + FAILtrap diag). The 8 trap fails are PER-OP JIT trap-
-  emission gaps (NOT call_indirect — prior canonical-id scoping was WRONG): **gc/ref_cast `ref_cast_null` ×4**
-  (idx 1-4 = i31/struct/array/convert_extern cast to a wrong abstract type → must trap "cast failure", JIT
-  returns normally), gc/array_init_data + array_init_elem ×1 (OOB), multi-memory/data_drop0 ×2 (drop-then-init
-  OOB). KEY: `jitGcRefCast` (jit_abi.zig:822) calls the SAME `gcRefMatchesNonNullCore` the interp passes →
-  bug is JIT RUNTIME STATE (gc_heap/gti ptrs or table-value encoding into the trampoline), NOT the cast algo →
-  needs **debug_jit_auto runtime inspection** (lldb/probe on the ref u64 + gti/heap ptrs), not codegen guesswork.
-  The 2 return fails: gc/type-subtyping "run" (call_indirect subtype, interp .17/D-198 analog) + eh/try_table
+  open item; user-gated.** (c) **JIT corpus = return 762/2/531, assert_trap 554/8. The 8 trap "fails" are a
+  RUNNER ARTIFACT, NOT JIT codegen bugs (CONFIRMED, D-233 reclassified, lesson
+  `2026-06-02-jit-mode-assert-trap-evaluates-on-interp-instance`)**: jit-mode evaluates assert_RETURN on
+  `cur_jit` (JIT) but assert_TRAP on the INTERP instance (:1068), AND the setup `(invoke "init")` action runs
+  ONLY on `cur_jit` (:1242) → the interp instance's table/globals are stale → `ref_cast_null` reads null →
+  no trap. A/B: interp 562/0 vs jit 554/8, only delta = setup instance. The JIT GC code is FINE (shared
+  trampolines pass; single-cast unit tests pass). PROPER FIX (substantial, fresh cycle): route jit assert_trap
+  through `cur_jit` (param JIT invoke + trap_flag detection) so ADR-0128 §10 "both backends" actually verifies
+  JIT traps — today it does NOT. The 2 return fails: gc/type-subtyping "run" (call_indirect subtype, interp .17/D-198 analog) + eh/try_table
   (EH-on-JIT). All real Phase-10 bugs, not deferred. Partially tracked D-211/D-212/D-198.
 - **Continuity-memo**: interp wasm-3.0 = 0 fails (fully green). JIT 762/2/531. PHASE C follow-ups (debt-worthy):
   api/instance.zig:572 + instantiate.zig:1657 `.cross_module` structural-only. This session CLOSED: D-230 (level-
