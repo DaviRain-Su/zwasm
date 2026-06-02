@@ -1030,6 +1030,54 @@ pub fn main(init: std.process.Init) !void {
                     },
                     .assert_trap => {
                         summary.asserts_trap += 1;
+                        // §10 both-backends (D-233) — in jit_mode evaluate the
+                        // trap on the JIT (cur_jit), NOT the interp instance
+                        // (whose setup state the jit-mode `(invoke)` action never
+                        // populates → stale → false "no trap"). Pack scalar args;
+                        // an unwired shape (multi-param / module reject) → skip;
+                        // any non-unwired Error → the func trapped → pass (mirrors
+                        // invokeInstanceTrap "any InvokeError = trapped"); a normal
+                        // return → fail (the expected trap did not fire).
+                        if (jit_mode) {
+                            const inst = if (cur_jit) |j| j else {
+                                summary.skips += 1;
+                                continue;
+                            };
+                            if (jit_setup_failed) {
+                                summary.skips += 1;
+                                continue;
+                            }
+                            var ab: [4]u64 = undefined;
+                            var ab_ok = true;
+                            var k: u8 = 0;
+                            while (k < d.args_len) : (k += 1) {
+                                const tv = d.args[k];
+                                const rvv = manifest_parser.parsePayload(tv) catch {
+                                    ab_ok = false;
+                                    break;
+                                };
+                                const zvv = manifest_parser.runtimeToZwasm(rvv, tv.ty);
+                                ab[k] = scalarArgBits(zvv, tv.ty) orelse {
+                                    ab_ok = false;
+                                    break;
+                                };
+                            }
+                            if (!ab_ok) {
+                                summary.skips += 1;
+                                continue;
+                            }
+                            _ = inst.invoke(gpa, d.func_name, ab[0..d.args_len]) catch |e| {
+                                if (jitErrorIsUnwiredShape(e)) {
+                                    summary.skips += 1;
+                                } else {
+                                    summary.asserts_trap_pass += 1; // trapped = expected
+                                }
+                                continue;
+                            };
+                            summary.asserts_trap_fail += 1;
+                            if (fail_detail) try stdout.print("  FAILtrapNoTrap [{s}/{s}] {s} (jit returned; expected trap)\n", .{ proposal, entry.name, d.func_name });
+                            continue;
+                        }
                         _ = cur_module_bytes orelse continue;
                         // Build args (skip if any typed arg can't
                         // parse — same gate as assert_return).
