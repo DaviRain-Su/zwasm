@@ -405,6 +405,18 @@ pub fn main(init: std.process.Init) !void {
             // sub-corpus dir owns the alloc (freed below).
             var cur_module_bytes: ?[]u8 = null;
             defer if (cur_module_bytes) |b| gpa.free(b);
+            // D-225 — a registered JIT exporter's `JitInstance.wasm_bytes`
+            // BORROWS cur_module_bytes; the importer's later module directive
+            // would free it → exportedFuncTarget re-parses freed memory. So at
+            // `register`, ownership of the exporter's bytes transfers here
+            // (kept alive for the run); `cur_bytes_kept` stops the next module
+            // directive from freeing them.
+            var kept_bytes: std.ArrayList([]u8) = .empty;
+            var cur_bytes_kept = false;
+            defer {
+                for (kept_bytes.items) |b| gpa.free(b);
+                kept_bytes.deinit(gpa);
+            }
 
             // §1 / D-214 — persistent per-module JIT runtime. Instantiated
             // once per `module` directive (jit mode only); every subsequent
@@ -609,7 +621,12 @@ pub fn main(init: std.process.Init) !void {
                             cur_jit = null;
                         }
                         cur_jit_kept = false;
-                        if (cur_module_bytes) |b| gpa.free(b);
+                        // Don't free bytes a registered exporter borrows (D-225);
+                        // kept_bytes owns them now.
+                        if (cur_module_bytes) |b| {
+                            if (!cur_bytes_kept) gpa.free(b);
+                        }
+                        cur_bytes_kept = false;
                         cur_module_bytes = sub_dir.readFileAlloc(io, d.module_path, gpa, .limited(4 << 20)) catch {
                             cur_module_bytes = null;
                             cur_inst_idx = null;
@@ -779,6 +796,13 @@ pub fn main(init: std.process.Init) !void {
                             if (!cur_jit_kept) {
                                 jit_owned.append(gpa, j) catch {};
                                 cur_jit_kept = true;
+                                // Transfer ownership of the bytes j.wasm_bytes
+                                // borrows so they outlive the next module directive
+                                // (exportedFuncTarget re-parses them). D-225.
+                                if (cur_module_bytes) |b| {
+                                    kept_bytes.append(gpa, b) catch {};
+                                    cur_bytes_kept = true;
+                                }
                             }
                             jit_exporters.put(d.func_name, j) catch {};
                         }
