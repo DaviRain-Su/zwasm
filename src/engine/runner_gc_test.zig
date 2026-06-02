@@ -956,3 +956,32 @@ test "runI32Export: global funcref ref.func f + ref.is_null is 0 (D-225)" {
     };
     try testing.expectEqual(@as(u32, 0), runI32Export(testing.allocator, &bytes, "f"));
 }
+
+// ── D-225 (partial): table-with-explicit-init-expr filled at setup ──
+
+test "JitInstance: table (ref i31) explicit init-expr ref.i31 7 + table.get → 7 (D-225)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    // (module (table $t 2 (ref i31) (ref.i31 (i32.const 7)))
+    //   (func (export "get") (param i32) (result i32) local.get 0 table.get $t i31.get_u))
+    // setup previously ignored the table init-expr → slots null → i31.get traps.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x06, 0x01, 0x60, 0x01, 0x7f, 0x01, 0x7f, // type (i32)->(i32)
+        0x03, 0x02, 0x01, 0x00, // func 0
+        // table: explicit-init form 0x40 0x00, reftype (ref i31)=64 6c, limits min2 (00 02),
+        // init-expr i32.const 7; ref.i31; end (41 07 fb 1c 0b)
+        0x04, 0x0c, 0x01, 0x40,
+        0x00, 0x64, 0x6c, 0x00,
+        0x02, 0x41, 0x07, 0xfb,
+        0x1c, 0x0b,
+        0x07, 0x07, 0x01, 0x03, 0x67, 0x65, 0x74, 0x00, 0x00, // export "get" func0
+        0x0a, 0x0a, 0x01, 0x08, 0x00, 0x20, 0x00, 0x25, 0x00, 0xfb, 0x1e, 0x0b, // local.get0 table.get0 i31.get_u
+    };
+    var inst = JitInstance.init(testing.allocator, &bytes) catch |e| {
+        std.debug.print("\n[d225t] init ERR={s}\n", .{@errorName(e)});
+        return error.TestUnexpectedResult;
+    };
+    defer inst.deinit(testing.allocator);
+    try testing.expectEqual(@as(?u64, 7), try inst.invoke(testing.allocator, "get", &.{0}));
+    try testing.expectEqual(@as(?u64, 7), try inst.invoke(testing.allocator, "get", &.{1}));
+}

@@ -255,7 +255,11 @@ pub fn setupRuntime(
     // generalises this to all declared tables for `table.get` /
     // `table.set` / `table.size` (m-2a) and later m-2b/c ops.
     var table_size: u32 = 0;
-    const TableMeta = struct { min: u32, max: ?u32, is_funcref: bool };
+    // `init_expr` (D-225): Wasm 3.0 table-with-explicit-init-expr
+    // (`0x40 0x00 reftype limits constexpr`) — raw const-expr bytes for the
+    // initial element value (empty = default null fill). Slices into the
+    // table section body (ta-owned, outlives `tables_buf.deinit`).
+    const TableMeta = struct { min: u32, max: ?u32, is_funcref: bool, init_expr: []const u8 };
     var table_metas: []TableMeta = &.{};
     if (module.find(.table)) |s| {
         var tables_buf = try sections.decodeTables(ta, s.body);
@@ -264,7 +268,7 @@ pub fn setupRuntime(
             table_size = tables_buf.items[0].min;
             table_metas = try ta.alloc(TableMeta, tables_buf.items.len);
             for (tables_buf.items, 0..) |t, i| {
-                table_metas[i] = .{ .min = t.min, .max = t.max, .is_funcref = (t.elem_type.isFuncref()) };
+                table_metas[i] = .{ .min = t.min, .max = t.max, .is_funcref = (t.elem_type.isFuncref()), .init_expr = t.init_expr };
             }
         }
     }
@@ -424,6 +428,29 @@ pub fn setupRuntime(
                 .max = entry.table_no_max,
                 .funcptrs = funcptrs_buf.ptr,
             };
+        }
+    }
+
+    // D-225 — Wasm 3.0 table-with-explicit-init-expr
+    // (`(table N M reftype constexpr)`): the const-expr value initialises
+    // ALL `min` slots (setup previously left them null → `table.get` of an
+    // i31ref/ref table trapped on i31.get/use). evalConstExprValue handles
+    // ref.null/numeric; evalGlobalInitGc handles ref.i31 / ref.func /
+    // struct.new / array.new (with the heap + func_entities built above).
+    // `global.get` of an IMPORTED global in the init-expr is not yet
+    // resolved here (imported_globals = &.{}) — the cross-module piece.
+    {
+        const gti_val: ?gc_type_info.GcTypeInfos = if (gc_type_infos_typed) |t| t.* else null;
+        for (table_metas, 0..) |tm, i| {
+            if (tm.init_expr.len == 0) continue;
+            const v = instantiate.evalConstExprValue(tm.init_expr) catch
+                instantiate.evalGlobalInitGc(tm.init_expr, gc_heap_typed, gti_val, func_entities, &.{}) catch continue;
+            // A table init-expr always yields a reftype; `.ref` (== `.bits64`
+            // offset in the extern union) holds the ref-encoded u64.
+            const raw: u64 = v.ref;
+            const d = tables_descs[i];
+            var k: u32 = 0;
+            while (k < tm.min) : (k += 1) d.refs[k] = raw;
         }
     }
 
