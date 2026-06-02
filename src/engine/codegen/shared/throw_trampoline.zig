@@ -104,6 +104,12 @@ pub fn trampolineCore(
             p[0..rt.eh_table_count]
         else
             &.{},
+        // 10.E Cause A — tag-identity canonicalization so aliased
+        // imports (same source tag declared twice) match.
+        .tag_canon = if (rt.tag_canon_ptr) |p|
+            p[0..rt.tag_canon_count]
+        else
+            null,
     };
     const cmap: zwasm_throw.CodeMap = .{
         .entries = if (rt.eh_code_map_entries) |p|

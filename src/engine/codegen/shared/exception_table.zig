@@ -67,6 +67,27 @@ pub const HandlerMatch = struct {
 /// Per-Instance exception table. Immutable after JIT emit.
 pub const ExceptionTable = struct {
     entries: []const HandlerEntry,
+    /// Per-instance tag-identity canonicalization map, indexed by
+    /// local tag index. `tag_canon[i]` is the smallest local tag
+    /// index that binds the SAME runtime tag identity as `i`, so
+    /// aliased imports collapse to one representative (10.E Cause A:
+    /// `(import "test" "e0")` declared twice → idx 0 and 1 → both
+    /// canon 0). The interp keys on `*TagInstance` pointer equality
+    /// (`mvp.catchTagMatches`); this map is the JIT-side analog,
+    /// resolved from the import section at instance setup.
+    ///
+    /// `null` (the default) or an out-of-range index falls back to
+    /// raw-index comparison — correct for defined tags (each is its
+    /// own identity) and for the synthetic/no-import paths. Covers
+    /// only the imported-tag prefix of the index space; defined tags
+    /// (index ≥ map.len) are their own canonical representative.
+    tag_canon: ?[]const u32 = null,
+
+    /// Resolve a local tag index to its canonical identity id.
+    fn canon(self: ExceptionTable, idx: u32) u32 {
+        const m = self.tag_canon orelse return idx;
+        return if (idx < m.len) m[idx] else idx;
+    }
 
     /// Lookup the handler for a `(throw_pc, throw_tag_idx)` pair.
     /// Returns the first matching entry per the
@@ -77,14 +98,16 @@ pub const ExceptionTable = struct {
     /// Matching rule (ADR-0114 D3 + Wasm 3.0 §4.5.10 try_table):
     ///   - PC must lie in `[pc_start, pc_end)`.
     ///   - `catch_all` / `catch_all_ref`: matches any tag.
-    ///   - `catch_` / `catch_ref`: matches iff
-    ///     `entry.tag_idx.? == throw_tag_idx`.
+    ///   - `catch_` / `catch_ref`: matches iff the catch tag and the
+    ///     thrown tag resolve to the same canonical identity (so an
+    ///     aliased-import index matches its representative).
     pub fn lookup(self: ExceptionTable, pc: u32, throw_tag_idx: u32) ?HandlerMatch {
+        const throw_canon = self.canon(throw_tag_idx);
         for (self.entries) |e| {
             if (pc < e.pc_start or pc >= e.pc_end) continue;
             const matches = switch (e.kind) {
                 .catch_all, .catch_all_ref => true,
-                .catch_, .catch_ref => e.tag_idx != null and e.tag_idx.? == throw_tag_idx,
+                .catch_, .catch_ref => e.tag_idx != null and self.canon(e.tag_idx.?) == throw_canon,
             };
             if (matches) return .{
                 .landing_pad_pc = e.landing_pad_pc,
@@ -244,6 +267,31 @@ test "exception_table: catch_ matches exact tag_idx, misses on mismatch" {
 
     // Wrong tag → miss.
     try testing.expectEqual(@as(?HandlerMatch, null), t.lookup(50, 6));
+}
+
+test "exception_table: tag_canon collapses aliased imports (10.E Cause A)" {
+    // Two imported tags binding the same source tag → catch on idx 0
+    // must match a throw marshalled with the alias idx 1
+    // (catch-imported-alias). The canonical map maps 1 → 0.
+    var b: Builder = .empty;
+    defer b.deinit(testing.allocator);
+    try b.add(testing.allocator, .{
+        .pc_start = 0,
+        .pc_end = 100,
+        .tag_idx = 0,
+        .landing_pad_pc = 200,
+        .kind = .catch_,
+    });
+    const canon = [_]u32{ 0, 0 }; // idx0→0 ; idx1→0 (alias of 0)
+    const t: ExceptionTable = .{ .entries = b.finalize().entries, .tag_canon = &canon };
+
+    // Throw with the alias index → resolves to canonical 0 → hit.
+    try testing.expectEqual(@as(u32, 200), t.lookup(50, 1).?.landing_pad_pc);
+    // Catch idx 0 vs a defined tag (idx 2, beyond the map → identity) → miss.
+    try testing.expectEqual(@as(?HandlerMatch, null), t.lookup(50, 2));
+    // Sanity: without a map the raw indices must differ → miss on alias.
+    const t_raw: ExceptionTable = .{ .entries = b.finalize().entries };
+    try testing.expectEqual(@as(?HandlerMatch, null), t_raw.lookup(50, 1));
 }
 
 test "exception_table: catch_all matches any tag in PC range" {

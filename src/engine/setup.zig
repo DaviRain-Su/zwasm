@@ -95,6 +95,10 @@ pub const RuntimeOwned = struct {
     // bridge thunks (one slot per resolved func import); `dispatch[N]`
     // points into it. Null when the module has no resolved func imports.
     thunk_arena: ?jit_mem.JitBlock = null,
+    // 10.E Cause A — per-instance tag-identity canonical map (aliased
+    // imports collapse onto one representative). Empty when the module
+    // has < 2 imported tags.
+    tag_canon: []u32 = &.{},
 
     pub fn deinit(self: *RuntimeOwned, allocator: Allocator) void {
         if (self.thunk_arena) |arena| shared_thunk.freeArena(arena);
@@ -123,6 +127,7 @@ pub const RuntimeOwned = struct {
         allocator.free(self.tables_jit_ci);
         if (self.extra_funcptrs.len > 0) allocator.free(self.extra_funcptrs);
         if (self.extra_typeidxs.len > 0) allocator.free(self.extra_typeidxs);
+        if (self.tag_canon.len > 0) allocator.free(self.tag_canon);
     }
 };
 
@@ -246,13 +251,49 @@ pub fn setupRuntimeLinked(
     };
 
     var num_func_imports: u32 = 0;
+    // 10.E Cause A — per-instance tag-identity canonical map over the
+    // imported-tag prefix (allocator-owned; freed via RuntimeOwned).
+    var tag_canon: []u32 = &.{};
+    errdefer if (tag_canon.len > 0) allocator.free(tag_canon);
     if (module.find(.import)) |s| {
         if (compiled.num_imports > 0) {
             var imports_buf = try sections.decodeImports(ta, s.body);
             defer imports_buf.deinit();
             jit_dispatch.populateDispatch(dispatch, imports_buf.items);
+            var imp_tag_count: u32 = 0;
             for (imports_buf.items) |it| {
-                if (it.kind == .func) num_func_imports += 1;
+                switch (it.kind) {
+                    .func => num_func_imports += 1,
+                    .tag => imp_tag_count += 1,
+                    .table, .memory, .global => {},
+                }
+            }
+            // Two tag imports with the same (module,name) resolve to one
+            // source tag, so collapse the later index onto the earlier —
+            // the JIT-side analog of the interp's `*TagInstance` identity
+            // key (`mvp.catchTagMatches`). Only needed when ≥2 imported
+            // tags can alias; a lone import is its own identity.
+            if (imp_tag_count > 1) {
+                const canon = try allocator.alloc(u32, imp_tag_count);
+                errdefer allocator.free(canon);
+                var ti: u32 = 0;
+                for (imports_buf.items, 0..) |it, i| {
+                    if (it.kind != .tag) continue;
+                    canon[ti] = ti;
+                    var tj: u32 = 0;
+                    for (imports_buf.items[0..i]) |prev| {
+                        if (prev.kind != .tag) continue;
+                        if (std.mem.eql(u8, prev.module, it.module) and
+                            std.mem.eql(u8, prev.name, it.name))
+                        {
+                            canon[ti] = tj;
+                            break;
+                        }
+                        tj += 1;
+                    }
+                    ti += 1;
+                }
+                tag_canon = canon;
             }
         }
     }
@@ -921,6 +962,8 @@ pub fn setupRuntimeLinked(
             // allocate; null for non-GC modules.
             .gc_heap = gc_heap_ptr,
             .gc_type_infos_ptr = gc_type_infos_ptr,
+            .tag_canon_ptr = if (tag_canon.len > 0) tag_canon.ptr else null,
+            .tag_canon_count = @intCast(tag_canon.len),
         },
         .mem_ctx = mem_ctx,
         .dispatch = dispatch,
@@ -940,6 +983,7 @@ pub fn setupRuntimeLinked(
         .extra_typeidxs = extra_typeidxs_buf,
         .gc_arena = gc_arena,
         .thunk_arena = thunk_arena,
+        .tag_canon = tag_canon,
     };
 }
 
