@@ -13,12 +13,9 @@
   `sections.canonicalEqualCross` (cross-`Types` iso-recursive type-def equality) + 4 unit tests, isolated/
   unwired. Prior: multi-value JIT invoke +18 → corpus **762/2/531** (DONE). full wasm-3.0 interp fail tally
   = 9 (1 return + 4 trap + 4 unlinkable); PHASE C closes the 4 unlinkable.
-- **Two gate/portability fixes this stretch**: **D-228** (`7bb3699a`) — `test-all` didn't run the wasm_3_0
-  unit tests (only `zig build test` did) → chunk-2's stale `jitReturnEligible` assert false-greened on BOTH
-  hosts; now `test_all_step.dependOn` both unit artifacts. **D-229** (`a5f6b238`) — the param-bearing e2e
-  test errored on x86_64 (SysV `wrapper_thunk.emit` rejects params; only arm64 AAPCS + Win64 do them) →
-  gated the test to aarch64; x86_64 SysV param-bearing thunk is low-ROI follow-on debt. Lesson: a feature
-  added on one arch + an all-arch e2e test = ubuntu red; gate the test per-arch OR implement both arches.
+- **Recent fixes (detail in debt.yaml)**: **D-228** (`7bb3699a`) test-all now runs the wasm_3_0 unit tests
+  (was `zig build test`-only → a stale assert false-greened both hosts). **D-229** (`a5f6b238`) param-bearing
+  e2e test gated to aarch64 (x86_64 SysV thunk lacks params; low-ROI follow-on).
 - **PER-MODULE blocker-STACK reality** (lesson `2026-06-02-jit-corpus-late-phase-is-per-module-
   blocker-stacks`): since memory64 (+208, last big mover), every gc/funcref fix has been correct
   but ~0 corpus — each remaining module has 3-6 DISTINCT blockers; JIT rejects at the FIRST
@@ -54,23 +51,24 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   **fail=0 both backends**, currently fail=2. ADR-0127 PHASE C closes ONE real JIT-executed fail
   (gc/type-subtyping). ADR-0127 is **Accepted** (via ADR-0128 100% directive — autonomous, NOT user-gated;
   "D-202 PHASE C implements next"). This is higher value than more §1 skip-shaving.
-- **SURVEY DONE (`c5c547d1`)** — SCOPE CORRECTION: PHASE C targets the **4 assert_unlinkable fails**
-  `gc/type-subtyping.{36,42,52,54}` (importer imports open `(sub (func))`, exporter provides structurally-
-  identical but canonically-DISTINCT type-def → currently WRONGLY links). NOT the assert_return run-Trap
-  (separate RTT mechanism, still fail). PHASE A (structural subtyping) + B (finality) landed (cyc236/239).
-  PHASE C adds **type-definition identity**: canonical-equal OR declared-supertype-reach across the two
-  modules' `Types`. `funcTypeImportCompatible` (validator.zig:3155) does structural-only today.
-- **IMPL PLAN**: (1) ✅ DONE `6f1eeb4a` — `sections.canonicalEqualCross` predicate + 4 tests. (2) NEXT —
-  thread exporter type-def through `CrossModuleFuncEntry` (linker.zig:130, currently `{source_signature,
-  source_final}`) + `ExportFuncType` (instantiate buildExportTypes:613). PHASE C #2 = canonicalEqualCross
-  OR exporter declares importer's type-def in its supertype chain. **LIFETIME CONCERN**: canonicalEqualCross
-  needs the exporter's FULL `Types` alive at resolve to recurse nested refs; buildExportTypes currently frees
-  the parse-time Types after capturing {sig,final}. The corpus targets (`.36` etc.) are `()->()` with NO
-  nested concrete refs → threading {typeidx, finals, supertypes-as-indices} may suffice WITHOUT keeping the
-  full Types (canonicalEqualCross degenerates to finality+structure for ref-free defs). Decide chunk-2: thin
-  thread (corpus-sufficient) vs full Types retention (general). (3) run #2 at linker resolve (linker.zig:482)
-  + instantiate checkImportTypeMatches (:1657). Start chunk-2 with the smallest red: a 2-module test where
-  importer's open `(sub (func))` vs exporter's distinct def → link REJECTS (currently wrongly accepts).
+- **SCOPE**: PHASE C targets the **4 assert_unlinkable fails** `gc/type-subtyping.{36,42,52,54}` (NOT the
+  assert_return run-Trap — separate RTT, still fail). PHASE A (structural) + B (finality) landed cyc236/239;
+  PHASE C adds type-definition identity (canonical-equal OR declared-supertype-reach across two `Types`).
+- **LOCKED DESIGN (NEXT = wiring chunk, linker path first)**: corpus path = `linker.zig` (defineCrossModuleFunc
+  :315 → resolve :468). The existing PHASE B check (:491 `module_types.finals[typeidx] and !cmf.source_final`)
+  only rejects importer-FINAL ← exporter-open; **`.36/.42/.52/.54` are the REVERSE** (importer-OPEN `$t1` ←
+  exporter-FINAL `$t2`, structurally `()->()` but distinct defs) → uncaught. PHASE C #2 (per ADR Decision —
+  use `canonicalEqualCross`, NOT the same-typespace single-Types hack): accept iff PHASE-A-structural AND
+  (`canonicalEqualCross(importer_types, want_tidx, exporter_types, source_tidx)` OR exporter's supertype
+  chain from source_tidx reaches a type canonicalEqualCross to want_tidx). Both-false → reject.
+  - **Lifetime**: capture `source_typeidx` + RETAIN the exporter's decoded `Types` in `CrossModuleFuncEntry`
+    (linker.zig:130) at defineCrossModuleFunc (source_inst alive → decode its type section; free at linker
+    deinit). `instantiate.buildExportTypes` frees its Types — don't rely on it.
+  - **Regression net (MUST stay green)**: 441 exact-equal imports (407 multi-mem + 34 EH → canonicalEqualCross
+    true) + the `.30/M` valid imports (line 506 `import M.f2 as $t1` valid via $t2's super-chain reaching $t1
+    with nested `(ref null $t1)` — needs the super-reach arm + exporter Types).
+  - **Red test**: linker unit test, M2 exports final `$t2`, importer imports it as open `$t1` → expect link
+    reject (currently wrongly links). Then api/instance.zig:572 + instantiate.zig:1657 = follow-up chunks.
 - **Continuity-memo**: full wasm-3.0 fail tally (ubuntu interp): assert_return fail=1 + assert_trap fail=4
   + assert_unlinkable fail=4 = 9 (both backends share linking/validation fails). PHASE C closes the 4
   unlinkable. JIT corpus = **762/2/531**. See D-202 (PHASE A/B landed, C scope).
@@ -91,11 +89,12 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-THIS turn = ADR-0127 PHASE C cycle 1: `sections.canonicalEqualCross` predicate + 4 unit tests (`6f1eeb4a`),
-isolated/unwired (zero regression risk). Mac-green (mac_gate test-all + lint). Next resume Step 0.7:
-`tail -3 /tmp/ubuntu.log` — expect `OK (HEAD=6f1eeb4a)`; on FAIL revert to the last ubuntu-verified HEAD
-(a5f6b238 was the prior confirmed OK). Then start the WIRING chunk (thread exporter type-def + run PHASE C
-#2 acceptance at linker resolve / checkImportTypeMatches — see Active bundle IMPL PLAN). Mac aarch64; ubuntu = x86_64.
+THIS turn = ADR-0127 PHASE C investigation + LOCKED the wiring design (corpus case breakdown — `.36` is the
+importer-open←exporter-final reverse of PHASE B; approach = canonicalEqualCross + super-reach with retained
+exporter Types; regression net). No code commit (design-lock doc only); HEAD stays `11c553a6` (= `6f1eeb4a`
+predicate + docs), already ubuntu-OK. Next resume Step 0.7: `tail -3 /tmp/ubuntu.log` should still read
+`OK (HEAD=11c553a6)`. Then START the wiring chunk per the Active-bundle LOCKED DESIGN (linker path, red test
+first). Mac aarch64; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
