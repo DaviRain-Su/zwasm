@@ -33,6 +33,9 @@ const rv = @import("runner_validate.zig");
 // hostDispatchTrap). Re-exports below keep callers unchanged.
 const setup_mod = @import("setup.zig");
 const setupRuntime = setup_mod.setupRuntime;
+/// D-225 — resolved cross-module FUNC import target (re-exported so the
+/// spec runner can build the slice for `initLinked` / `exportedFuncTarget`).
+pub const FuncImportTarget = setup_mod.FuncImportTarget;
 
 // ADR-0079 Step 2 — compile carve-out (compileWasm + per-section
 // helpers). Re-exports preserve external callers' import paths
@@ -493,24 +496,46 @@ pub const JitInstance = struct {
     wasm_bytes: []const u8,
 
     pub fn init(allocator: Allocator, wasm_bytes: []const u8) Error!JitInstance {
-        return initLinked(allocator, wasm_bytes, &.{});
+        return initLinked(allocator, wasm_bytes, &.{}, &.{});
     }
 
-    /// D-225 — `init` + cross-module imported-global resolution. The caller
-    /// (spec runner / linker) passes the resolved imported-global values in
-    /// import order so the module's setup-time const-expr evals (defined-
-    /// global init, table explicit-init-expr) can `global.get` an imported
-    /// global. Plain `init` passes `&.{}` (no imports).
-    pub fn initLinked(allocator: Allocator, wasm_bytes: []const u8, imported_global_vals: []const u64) Error!JitInstance {
+    /// D-225 — `init` + cross-module import resolution. The caller (spec
+    /// runner / linker) passes, in import order: resolved imported-GLOBAL
+    /// values (`imported_global_vals`) for setup-time const-expr evals +
+    /// emitted global.get-of-import; and resolved FUNC-import targets
+    /// (`func_import_targets`, func-import order) so the importer emits a
+    /// cohort-safe bridge thunk into `dispatch[N]` and a cross-module call
+    /// dispatches to the exporter instead of trapping. Plain `init` passes
+    /// `&.{}` for both (no imports).
+    pub fn initLinked(
+        allocator: Allocator,
+        wasm_bytes: []const u8,
+        imported_global_vals: []const u64,
+        func_import_targets: []const setup_mod.FuncImportTarget,
+    ) Error!JitInstance {
         var compiled = try compileWasm(allocator, wasm_bytes);
         errdefer compiled.deinit(allocator);
-        const owned = try setup_mod.setupRuntimeLinked(allocator, &compiled, wasm_bytes, imported_global_vals);
+        const owned = try setup_mod.setupRuntimeLinked(allocator, &compiled, wasm_bytes, imported_global_vals, func_import_targets);
         return .{ .compiled = compiled, .owned = owned, .wasm_bytes = wasm_bytes };
     }
 
     pub fn deinit(self: *JitInstance, allocator: Allocator) void {
         self.owned.deinit(allocator);
         self.compiled.deinit(allocator);
+    }
+
+    /// D-225 — resolve THIS instance as a cross-module export target: the
+    /// (callee_rt, callee_entry) an importer plants into a bridge thunk for
+    /// `(import "<this>" "<name>" (func …))`. Null if `name` isn't an
+    /// exported func. `callee_rt` is the address of this instance's pinned
+    /// JitRuntime (stable — JitInstance must not move while referenced).
+    pub fn exportedFuncTarget(self: *JitInstance, allocator: Allocator, name: []const u8) ?setup_mod.FuncImportTarget {
+        const idx = findExportFunc(allocator, self.wasm_bytes, name) catch return null;
+        if (idx < self.compiled.num_imports) return null;
+        return .{
+            .callee_rt = @intFromPtr(&self.owned.rt),
+            .callee_entry = self.compiled.module.entryAddr(idx),
+        };
     }
 
     /// Invoke an export by name against the persisted runtime. `args` are

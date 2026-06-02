@@ -844,6 +844,35 @@ test "cross-module JIT CALL: A.test calls imported B.get → 42 (D-206 harness b
     try testing.expectEqual(@as(u32, 42), try h.callTest());
 }
 
+// D-225 — the same cross-module CALL, but wired through the PUBLIC
+// `initLinked` + `exportedFuncTarget` path (the spec runner uses this):
+// the importer's setup resolves the func-import target + emits the bridge
+// thunk into dispatch[0] itself, rather than the test planting it manually.
+test "JitInstance.initLinked: cross-module FUNC import dispatches to exporter (D-225)" {
+    const gpa = testing.allocator;
+    // (module (func (export "get") (result i32) i32.const 42))
+    const b_bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60,
+        0x00, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x00, 0x07, 0x07, 0x01, 0x03, 0x67,
+        0x65, 0x74, 0x00, 0x00, 0x0a, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2a, 0x0b,
+    };
+    // (module (import "b" "get" (func $get (result i32)))
+    //         (func (export "test") (result i32) call $get))
+    const a_bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60,
+        0x00, 0x01, 0x7f, 0x02, 0x09, 0x01, 0x01, 0x62, 0x03, 0x67, 0x65, 0x74,
+        0x00, 0x00, 0x03, 0x02, 0x01, 0x00, 0x07, 0x08, 0x01, 0x04, 0x74, 0x65,
+        0x73, 0x74, 0x00, 0x01, 0x0a, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0b,
+    };
+    // Exporter kept alive (its rt address is baked into the importer thunk).
+    var b_inst = try JitInstance.init(gpa, &b_bytes);
+    defer b_inst.deinit(gpa);
+    const target = b_inst.exportedFuncTarget(gpa, "get") orelse return error.TestUnexpectedResult;
+    var a_inst = try JitInstance.initLinked(gpa, &a_bytes, &.{}, &.{target});
+    defer a_inst.deinit(gpa);
+    try testing.expectEqual(@as(?u64, 42), try a_inst.invoke(gpa, "test", &.{}));
+}
+
 test "cross-module JIT return_call: A.test return_call's imported B.get → 42 (D-206 step 2)" {
     const gpa = testing.allocator;
     // Same B as the baseline test.

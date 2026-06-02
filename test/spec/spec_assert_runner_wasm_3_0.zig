@@ -105,6 +105,38 @@ fn jitResolveImportedGlobals(
     return vals.toOwnedSlice(gpa);
 }
 
+// D-225 — resolve a JIT module's cross-module FUNC import targets in
+// func-import order: for each `(import "M" "f" (func …))`, look up the
+// registered exporter JitInstance "M" + its exported func "f" entry/rt.
+// The importer setup emits a bridge thunk per resolved target into
+// dispatch[N] so the cross-module call dispatches to the exporter (else
+// hostDispatchTrap). Unresolved → zero target (slot stays trap). gpa-owned.
+fn jitResolveFuncImports(
+    gpa: std.mem.Allocator,
+    wasm_bytes: []const u8,
+    jit_exporters: *const std.StringHashMap(*zwasm.engine.runner.JitInstance),
+) ![]zwasm.engine.runner.FuncImportTarget {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var module = zwasm.parse.parser.parse(a, wasm_bytes) catch return &.{};
+    const imp_sec = module.find(.import) orelse return &.{};
+    var imports = zwasm.parse.sections.decodeImports(a, imp_sec.body) catch return &.{};
+    defer imports.deinit();
+
+    var targets: std.ArrayList(zwasm.engine.runner.FuncImportTarget) = .empty;
+    errdefer targets.deinit(gpa);
+    for (imports.items) |it| {
+        if (it.kind != .func) continue;
+        const t: zwasm.engine.runner.FuncImportTarget = blk: {
+            const exp = jit_exporters.get(it.module) orelse break :blk .{};
+            break :blk exp.exportedFuncTarget(gpa, it.name) orelse .{};
+        };
+        try targets.append(gpa, t);
+    }
+    return targets.toOwnedSlice(gpa);
+}
+
 pub const std_options: std.Options = .{
     .enable_segfault_handler = false,
 };
@@ -379,8 +411,31 @@ pub fn main(init: std.process.Init) !void {
             // invoke routes through it so memory.grow / stores / global.set
             // accumulate across asserts (vs the old recompile-per-assert that
             // lost cross-directive state). null = no module / JIT-compile rejected.
-            var cur_jit: ?zwasm.engine.runner.JitInstance = null;
-            defer if (cur_jit) |*j| j.deinit(gpa);
+            // D-225 — cur_jit is heap-pinned (`?*JitInstance`): a registered
+            // exporter's rt address is baked into importer bridge thunks, so
+            // its JitInstance must NOT move. `jit_owned` owns every kept
+            // (registered) instance (freed once at cleanup); `jit_exporters`
+            // maps register-`<as>` name → ptr (non-owning). Non-registered
+            // cur_jit is freed at the next module directive (as before).
+            const JitInstanceT = zwasm.engine.runner.JitInstance;
+            var cur_jit: ?*JitInstanceT = null;
+            var cur_jit_kept = false;
+            var jit_owned: std.ArrayList(*JitInstanceT) = .empty;
+            var jit_exporters: std.StringHashMap(*JitInstanceT) = std.StringHashMap(*JitInstanceT).init(gpa);
+            defer {
+                for (jit_owned.items) |p| {
+                    p.deinit(gpa);
+                    gpa.destroy(p);
+                }
+                jit_owned.deinit(gpa);
+                jit_exporters.deinit();
+            }
+            defer if (cur_jit) |j| {
+                if (!cur_jit_kept) {
+                    j.deinit(gpa);
+                    gpa.destroy(j);
+                }
+            };
 
             // 10.M-D195b cycle 71 — multi-instance lifetime for
             // cross-module `(register …)` support. Pre-cycle-71 each
@@ -544,10 +599,16 @@ pub fn main(init: std.process.Init) !void {
                 switch (d.kind) {
                     .module => {
                         summary.modules += 1;
-                        if (cur_jit) |*j| {
-                            j.deinit(gpa);
+                        if (cur_jit) |j| {
+                            // Kept (registered) instances are owned by jit_owned;
+                            // free only the transient ones here (D-225).
+                            if (!cur_jit_kept) {
+                                j.deinit(gpa);
+                                gpa.destroy(j);
+                            }
                             cur_jit = null;
                         }
+                        cur_jit_kept = false;
                         if (cur_module_bytes) |b| gpa.free(b);
                         cur_module_bytes = sub_dir.readFileAlloc(io, d.module_path, gpa, .limited(4 << 20)) catch {
                             cur_module_bytes = null;
@@ -566,12 +627,28 @@ pub fn main(init: std.process.Init) !void {
                             // read the real value, not a null import slot.
                             const gvals = jitResolveImportedGlobals(gpa, cur_module_bytes.?, &instances_list, &name_to_idx) catch &.{};
                             defer if (gvals.len > 0) gpa.free(gvals);
+                            // D-225 — resolve cross-module FUNC import targets
+                            // from registered exporter JitInstances (bridge-thunk
+                            // dispatch; else hostDispatchTrap → ref_func call-f traps).
+                            const ftargets = jitResolveFuncImports(gpa, cur_module_bytes.?, &jit_exporters) catch &.{};
+                            defer if (ftargets.len > 0) gpa.free(ftargets);
                             // Capture the module-reject cause (else this skip
                             // class is SILENT — see lesson
                             // 2026-06-02-spec-jit-skips-weight-by-root-cause).
-                            cur_jit = zwasm.engine.runner.JitInstance.initLinked(gpa, cur_module_bytes.?, gvals) catch |e| inner: {
-                                if (fail_detail) try stdout.print("  JITmodrej [{s}/{s}] err={s}\n", .{ proposal, d.module_path, @errorName(e) });
-                                break :inner null;
+                            // Heap-pinned (D-225): the rt address may be baked into
+                            // a later importer's thunk if this module is registered.
+                            cur_jit = blk: {
+                                const built = JitInstanceT.initLinked(gpa, cur_module_bytes.?, gvals, ftargets) catch |e| {
+                                    if (fail_detail) try stdout.print("  JITmodrej [{s}/{s}] err={s}\n", .{ proposal, d.module_path, @errorName(e) });
+                                    break :blk null;
+                                };
+                                const pp = gpa.create(JitInstanceT) catch {
+                                    var tmp = built;
+                                    tmp.deinit(gpa);
+                                    break :blk null;
+                                };
+                                pp.* = built;
+                                break :blk pp;
                             };
                         }
                         // 10.M-D195b cycle 71 — compile + instantiate
@@ -694,6 +771,17 @@ pub fn main(init: std.process.Init) !void {
                         // instance under the `<as>` name so tagged
                         // asserts (`<as>::field`) dispatch to it.
                         name_to_idx.put(d.func_name, idx) catch {};
+                        // D-225 — keep this module's JIT side alive + pinned so a
+                        // later importer's cross-module FUNC call can bridge-thunk
+                        // to its exported func entry + rt. Append to jit_owned once
+                        // (a module registered under multiple names is owned once).
+                        if (cur_jit) |j| {
+                            if (!cur_jit_kept) {
+                                jit_owned.append(gpa, j) catch {};
+                                cur_jit_kept = true;
+                            }
+                            jit_exporters.put(d.func_name, j) catch {};
+                        }
                         summary.skips += 1;
                     },
                     .assert_return => {
@@ -720,7 +808,7 @@ pub fn main(init: std.process.Init) !void {
                                 if (fail_detail) try stdout.print("  JITskip [{s}/{s}] {s} (args={d} results={d} — scalar 0/1-arg only)\n", .{ proposal, entry.name, d.func_name, d.args_len, d.results_len });
                                 continue;
                             }
-                            const inst = if (cur_jit) |*j| j else {
+                            const inst = if (cur_jit) |j| j else {
                                 // module did not JIT-compile/instantiate → enumerated skip
                                 summary.jit_return_skip += 1;
                                 continue;
@@ -1043,7 +1131,7 @@ pub fn main(init: std.process.Init) !void {
                         // JitInstance so the side effect persists for later
                         // JIT asserts (bypasses interp, like assert_return).
                         if (jit_mode) {
-                            const inst = if (cur_jit) |*j| j else continue;
+                            const inst = if (cur_jit) |j| j else continue;
                             var ab: [4]u64 = undefined;
                             var ab_ok = true;
                             var k: u8 = 0;

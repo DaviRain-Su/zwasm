@@ -19,8 +19,21 @@ const runner_mod = @import("runner.zig");
 const instantiate = @import("../runtime/instance/instantiate.zig");
 const heap_mod = @import("../feature/gc/heap.zig");
 const gc_type_info = @import("../feature/gc/type_info.zig");
+const shared_thunk = @import("codegen/shared/thunk.zig");
+const jit_mem = @import("../platform/jit_mem.zig");
 const Error = runner_mod.Error;
 const CompiledWasm = runner_mod.CompiledWasm;
+
+/// D-225 — resolved target for a cross-module FUNC import, in func-import
+/// order. `callee_entry`/`callee_rt` come from the EXPORTER `JitInstance`
+/// (its `module.entryAddr(funcidx)` + `&owned.rt`); the importer setup
+/// emits a cohort-safe bridge thunk (ADR-0066 `emitThunk`) into its own
+/// thunk arena and plants the slot in `dispatch[func_import_idx]`. A
+/// zero `callee_entry` = unresolved (slot stays `hostDispatchTrap`).
+pub const FuncImportTarget = struct {
+    callee_rt: usize = 0,
+    callee_entry: usize = 0,
+};
 
 pub const RuntimeOwned = struct {
     rt: entry.JitRuntime,
@@ -77,8 +90,13 @@ pub const RuntimeOwned = struct {
     // Null for non-GC modules. One arena.deinit frees the slab + the
     // materialised type table.
     gc_arena: ?*std.heap.ArenaAllocator = null,
+    // D-225 — per-instance JIT-capable arena holding the cross-module
+    // bridge thunks (one slot per resolved func import); `dispatch[N]`
+    // points into it. Null when the module has no resolved func imports.
+    thunk_arena: ?jit_mem.JitBlock = null,
 
     pub fn deinit(self: *RuntimeOwned, allocator: Allocator) void {
+        if (self.thunk_arena) |arena| shared_thunk.freeArena(arena);
         if (self.gc_arena) |a| {
             a.deinit();
             allocator.destroy(a);
@@ -175,7 +193,7 @@ pub fn setupRuntime(
     compiled: *const CompiledWasm,
     wasm_bytes: []const u8,
 ) Error!RuntimeOwned {
-    return setupRuntimeLinked(allocator, compiled, wasm_bytes, &.{});
+    return setupRuntimeLinked(allocator, compiled, wasm_bytes, &.{}, &.{});
 }
 
 /// D-225 — `setupRuntime` + cross-module imported-global resolution. The
@@ -191,10 +209,14 @@ pub fn setupRuntimeLinked(
     compiled: *const CompiledWasm,
     wasm_bytes: []const u8,
     imported_global_vals: []const u64,
+    func_import_targets: []const FuncImportTarget,
 ) Error!RuntimeOwned {
     const dispatch = try allocator.alloc(usize, compiled.num_imports);
     errdefer allocator.free(dispatch);
     for (dispatch) |*slot| slot.* = @intFromPtr(&hostDispatchTrap);
+    // D-225 — cross-module FUNC import bridge thunks land here (set below).
+    var thunk_arena: ?jit_mem.JitBlock = null;
+    errdefer if (thunk_arena) |a| shared_thunk.freeArena(a);
 
     var memory: []u8 = &.{};
     errdefer if (memory.len > 0) allocator.free(memory);
@@ -222,11 +244,39 @@ pub fn setupRuntimeLinked(
         break :blk ptrs;
     };
 
+    var num_func_imports: u32 = 0;
     if (module.find(.import)) |s| {
         if (compiled.num_imports > 0) {
             var imports_buf = try sections.decodeImports(ta, s.body);
             defer imports_buf.deinit();
             jit_dispatch.populateDispatch(dispatch, imports_buf.items);
+            for (imports_buf.items) |it| {
+                if (it.kind == .func) num_func_imports += 1;
+            }
+        }
+    }
+    // D-225 — cross-module FUNC dispatch: for each func import the caller
+    // resolved to an exporter JitInstance, emit a cohort-safe bridge thunk
+    // (ADR-0066 `emitThunk`: swap runtime_ptr→callee_rt, BLR/CALL callee_entry,
+    // RET) into a per-instance arena and plant the slot in `dispatch[N]`
+    // (func-import-indexed). Without this an imported-func call hits
+    // `hostDispatchTrap`. allocArena flips this thread writable (Mac per-thread
+    // W^X) → finalizeArena flips back; nothing executes in between.
+    if (func_import_targets.len > 0 and num_func_imports > 0) {
+        var any_resolved = false;
+        for (func_import_targets) |t| {
+            if (t.callee_entry != 0) any_resolved = true;
+        }
+        if (any_resolved) {
+            const arena = try shared_thunk.allocArena(num_func_imports);
+            thunk_arena = arena;
+            for (func_import_targets, 0..) |t, j| {
+                if (j >= num_func_imports or t.callee_entry == 0) continue;
+                const slot = shared_thunk.thunkSlot(arena, j);
+                shared_thunk.emitThunk(slot, t.callee_rt, t.callee_entry);
+                dispatch[j] = @intFromPtr(slot.ptr);
+            }
+            try shared_thunk.finalizeArena(arena);
         }
     }
 
@@ -843,6 +893,7 @@ pub fn setupRuntimeLinked(
         .extra_funcptrs = extra_funcptrs_buf,
         .extra_typeidxs = extra_typeidxs_buf,
         .gc_arena = gc_arena,
+        .thunk_arena = thunk_arena,
     };
 }
 
