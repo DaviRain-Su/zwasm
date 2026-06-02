@@ -232,6 +232,12 @@ fn scalarArgBits(zv: zwasm.Value, ty: []const u8) ?u64 {
     if (std.mem.eql(u8, ty, "i64")) return @as(u64, @bitCast(zv.i64));
     if (std.mem.eql(u8, ty, "f32")) return @as(u32, @bitCast(zv.f32));
     if (std.mem.eql(u8, ty, "f64")) return @as(u64, @bitCast(zv.f64));
+    // D-226 — reftype args ride the u64 carrier (a ref is a u64 in a GPR; the
+    // JIT entry passes it via the i64 path, see runner.paramScalarKey). null →
+    // 0 (= null_ref). Lets `(invoke "init" (ref.extern 0))` populate the
+    // ref.test/ref.cast tables under ZWASM_SPEC_ENGINE=jit.
+    if (std.mem.eql(u8, ty, "externref")) return zv.externref orelse 0;
+    if (std.mem.eql(u8, ty, "funcref")) return zv.funcref orelse 0;
     return null;
 }
 

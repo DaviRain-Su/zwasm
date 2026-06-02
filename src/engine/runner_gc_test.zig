@@ -659,6 +659,31 @@ test "runI32Export: array.init_elem into existing array + array.get + call_ref �
     try testing.expectEqual(@as(u32, 42), runI32Export(testing.allocator, &bytes, "f"));
 }
 
+test "JitInstance.invoke: externref-param setup fn runs + stores host ref → chk ref.is_null 0 (D-226)" {
+    // (module (table $t 1 externref)
+    //   (func (export "setup") (param externref) (table.set $t (i32.const 0) (local.get 0)))
+    //   (func (export "chk") (result i32) (ref.is_null (table.get $t (i32.const 0)))))
+    // Mirrors the corpus `(invoke "init" (ref.extern 0))` setup shape. Before
+    // D-226 the externref-param invoke rejected (UnsupportedEntrySignature) →
+    // tables stayed empty. Now a `.ref` param threads the full u64 host-ref
+    // (0x7000…, untruncated via the i64 carrier) into the JIT entry → stored →
+    // chk reads a non-null ref → ref.is_null 0.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x09, 0x02, 0x60, 0x01, 0x6f, 0x00, 0x60, 0x00, 0x01, 0x7f, // type: (externref)->() + ()->i32
+        0x03, 0x03, 0x02, 0x00, 0x01, // func: f0:t0, f1:t1
+        0x04, 0x04, 0x01, 0x6f, 0x00, 0x01, // table: 1 × externref, min 1
+        0x07, 0x0f, 0x02, 0x05, 0x73, 0x65, 0x74, 0x75, 0x70, 0x00, 0x00, 0x03, 0x63, 0x68, 0x6b, 0x00, 0x01, // export setup,chk
+        // code: f0 setup [i32.const 0; local.get 0; table.set 0; end]; f1 chk [i32.const 0; table.get 0; ref.is_null; end]
+        0x0a, 0x12, 0x02, 0x08, 0x00, 0x41, 0x00, 0x20, 0x00, 0x26, 0x00, 0x0b, 0x07, 0x00, 0x41, 0x00, 0x25,
+        0x00, 0xd1, 0x0b,
+    };
+    var inst = try JitInstance.init(testing.allocator, &bytes);
+    defer inst.deinit(testing.allocator);
+    _ = try inst.invoke(testing.allocator, "setup", &.{0x7000_0000_0000_0000}); // host externref
+    try testing.expectEqual(@as(?u64, 0), try inst.invoke(testing.allocator, "chk", &.{}));
+}
+
 test "runI32Export: any.convert_extern beside a sibling table.set preserves it → table-loaded ref.test i31 → 1" {
     // (module (table $t 4 anyref) (func (export "f") (result i32)
     //   i32.const 0  i32.const 5 ref.i31         table.set $t   ;; $t[0] = i31(5)

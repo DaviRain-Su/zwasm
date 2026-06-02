@@ -370,6 +370,17 @@ fn scalarKey(t: zir.ValType) ?u2 {
     return null;
 }
 
+/// Param key for the JIT entry (D-226): like `scalarKey`, but a reftype param
+/// rides the i64 carrier — a ref is a u64 in a GPR (ADR-0116), so the i64 entry
+/// ABI passes it UNTRUNCATED via `callVoid_i64` / `callX_i64`. This lets
+/// reftype-param setup fns run through the JIT entry — e.g. the spec corpus
+/// `(invoke "init" (ref.extern 0))` that populates ref.test/ref.cast tables.
+/// Results keep `scalarKey` (a ref RESULT routes the void path via `ref_result`).
+fn paramScalarKey(t: zir.ValType) ?u2 {
+    if (std.meta.activeTag(t) == .ref) return 1; // i64-class u64 carrier
+    return scalarKey(t);
+}
+
 /// Dispatch a no-arg scalar-result call to the matching `entry.callXNoArgs`
 /// helper, returning the result as a u64 carrier. `rk` = result scalar key.
 fn dispatchNoArg(m: linker.JitModule, func_idx: u32, r: *entry.JitRuntime, rk: u2) Error!u64 {
@@ -570,7 +581,7 @@ pub const JitInstance = struct {
             return try dispatchNoArg(m, func_idx, r, scalarKey(sig.results[0]).?);
         }
         if (sig.params.len == 1) {
-            const pk = scalarKey(sig.params[0]) orelse return Error.UnsupportedEntrySignature;
+            const pk = paramScalarKey(sig.params[0]) orelse return Error.UnsupportedEntrySignature;
             if (run_as_void) {
                 try dispatchVoid1(m, func_idx, r, pk, args[0]);
                 return null;
@@ -578,8 +589,8 @@ pub const JitInstance = struct {
             return try dispatchScalar1(m, func_idx, r, @as(u4, pk) * 4 + scalarKey(sig.results[0]).?, args[0]);
         }
         if (sig.params.len == 2) {
-            const pk0 = scalarKey(sig.params[0]) orelse return Error.UnsupportedEntrySignature;
-            const pk1 = scalarKey(sig.params[1]) orelse return Error.UnsupportedEntrySignature;
+            const pk0 = paramScalarKey(sig.params[0]) orelse return Error.UnsupportedEntrySignature;
+            const pk1 = paramScalarKey(sig.params[1]) orelse return Error.UnsupportedEntrySignature;
             if (run_as_void) {
                 try dispatchVoid2(m, func_idx, r, (@as(u8, pk0) << 4) | pk1, args[0], args[1]);
                 return null;
