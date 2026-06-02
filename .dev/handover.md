@@ -8,14 +8,15 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD** (`33b479e7`): §1 spec-corpus JIT mode. Recent: D-226 reftype-param JIT invoke (`1005d4bf` +139),
-  **multi-value JIT invoke (`fad904c6` capability + `33b479e7` corpus-wire, +16 — 760/2/533)**. Multi-value:
-  `JitInstance.invokeMulti` reuses ADR-0106's already-implemented buffer-write multi-result ABI via
-  `module.entry_buf` (the wrapper-thunk path the wasm-2.0 runner uses) — NO fresh ADR, NO compileWasm change.
-  The wasm-3.0 corpus runner's `jitReturnEligible` now admits results_len>1 + routes scalar multi-value
-  through invokeMulti; `JitModule.hasThunk` gates NO_THUNK shapes → skip (not panic). Mac aarch64 JIT:
-  **assert_return pass=760 fail=2 skip=533** (was 744/2/549). **JIT-EXECUTED fails = 2, UNCHANGED**
-  (gc/type-subtyping run-Trap = ADR-0127 PHASE C; eh/try_table = EH-on-JIT). Interp UNCHANGED.
+- **HEAD** (`f1858416`): §1 spec-corpus JIT mode. Recent: D-226 reftype-param invoke (`1005d4bf` +139),
+  **multi-value JIT invoke (`fad904c6`+`33b479e7`, +16) + param-bearing wrapper thunk (`f1858416`, +2) →
+  762/2/531**. Multi-value: `JitInstance.invokeMulti` reuses ADR-0106's buffer-write multi-result ABI via
+  `module.entry_buf` (wrapper-thunk path; NO fresh ADR, NO compileWasm change). `jitReturnEligible` admits
+  results_len>1, routes scalar multi-value through invokeMulti; `JitModule.hasThunk` gates NO_THUNK → skip.
+  `emitAarch64` now also emits the 1-param 2-GPR-result thunk (LDR X1,[X2] → body AAPCS slot). **JIT-EXECUTED
+  fails = 2, UNCHANGED** (gc/type-subtyping = ADR-0127 PHASE C; eh/try_table = EH-on-JIT). Interp UNCHANGED.
+  **D-228 (gate hole, FIXED)**: `test-all` didn't run the wasm_3_0 unit tests → chunk-2's stale eligibility
+  assert false-greened; now `test_all_step.dependOn` both unit artifacts.
 - **PER-MODULE blocker-STACK reality** (lesson `2026-06-02-jit-corpus-late-phase-is-per-module-
   blocker-stacks`): since memory64 (+208, last big mover), every gc/funcref fix has been correct
   but ~0 corpus — each remaining module has 3-6 DISTINCT blockers; JIT rejects at the FIRST
@@ -25,7 +26,7 @@
   StackTypeMismatch 6 (funcref br_on_null validator gap), UnsupportedEntrySignature 7, InvalidFuncIndex 4.
 - **Two paths**: spec corpus = interp by default; JIT is opt-in `ZWASM_SPEC_ENGINE=jit` (default
   test-all unchanged). JIT entry = `runner.zig` `JitInstance`. ADR-0128 + ADR-0127 Accepted (no user gate).
-- **Watch**: `runner_test.zig` ~1234 (gc tests extracted → `runner_gc_test.zig`). Over soft 1000 WARN, under hard 2000.
+- **Watch**: `runner_test.zig` 1264 (gc tests extracted → `runner_gc_test.zig`). Over soft 1000 WARN, under hard 2000.
 
 ## Active task — Phase 10 → 100% (ADR-0128)  **NEXT**
 
@@ -43,24 +44,23 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 - **Bundle-ID**: `10.G-§1-multivalue` (prior `10.G-§1-skip-reduction` CLOSED — its gap-op + invoke
   levers SPENT: `struct.get_s/u`, `array.init_*`, convert, D-226 reftype-param invoke).
-- **Cycles-remaining**: ~1-2. Multi-value JIT invoke core LANDED (`fad904c6` + `33b479e7`, +16 → 760/2/533).
-- **KEY CORRECTION (this cycle)**: multi-value was NOT "ADR-grade HIGH blast radius needing a fresh ADR" —
-  ADR-0106 (Closed/implemented 2026-05-24) ALREADY defines the buffer-write multi-result ABI, exercised by
-  the wasm-2.0 runner via `module.entry_buf` (wrapper thunk). The gap was only that the NEW wasm-3.0
-  `JitInstance` path never wired it up. `invokeMulti` mirrors the 2.0 path; no compileWasm/ABI change.
-- **NEXT LEVER = param-bearing multi-value wrapper thunk (arm64)**. The +16 are all 0-param 2/3-GPR-result
-  fns. `wrapper_thunk.emit` (arm64/AAPCS, src/engine/codegen/shared/wrapper_thunk.zig:173) rejects
-  `params.len != 0` → those modules get NO_THUNK → invokeMulti skips. The x86_64 Win64 arm
-  (`emitX8664Win64`, n_params 1/3) shows the recipe: marshal args from the buffer-write `args` ptr into the
-  body's expected GPRs. Extending the arm64 `emit` to n_params {1,2,3} GPR-class would unlock struct.10
-  get_packed (param-bearing) + more results=2 shapes. Codegen-emit work (Step 0 survey wrapper_thunk +
-  emitX8664Win64; ≤1-2 cycles). Also still NO_THUNK: FP-result multi-value + 4+ results.
+- **Cycles-remaining**: ~0-1 (CLOSE-eligible). Multi-value invoke (+16) + arm64 1-param 2-result wrapper
+  thunk (`f1858416`, +2) LANDED → 762/2/531. ADR-0106 (Closed) already defined the buffer-write ABI; the
+  gap was only the wasm-3.0 `JitInstance` not wiring `module.entry_buf` — `invokeMulti` mirrors the 2.0 path.
+- **LOW-YIELD FINDING**: the param-bearing arm64 thunk (1-param 2-result) added only **+2** (gc 384→386),
+  NOT the hoped ~20 struct.10. struct.get_packed returns ONE value (already single-result eligible); the
+  remaining multi-value skips need shapes the 1-param thunk doesn't cover (2/3-param, 3-result-with-param,
+  FP-result, x86_64-SysV-param-bearing — SysV `emit` still rejects params, wrapper_thunk.zig:173). **Measure
+  the actual multi-value skip shape distribution (instrument the NO_THUNK skip with params/results counts)
+  BEFORE more hand-emitted arm64 asm** — the per-shape ROI is small and the asm risk (W54-class) is real.
+- **REASSESS — likely pivot**: §1 multi-value tail is low-yield; residual skip=531 is dominated by
+  multi-memory 407 (Phase-14 deferred, NOT a §10 lever). §1 JIT-corpus is at its non-deferred floor. Higher
+  value: the 2 gated fails (**ADR-0127 PHASE C** closes a real JIT-executed fail) or §10 realworld producers
+  (§5; `wasm_of_ocaml` / `emcc -fwasm-exceptions` / `guile-hoot`).
 - **Continuity-memo**: §1 JIT-EXECUTED assert_return fails = 2 (type-subtyping ADR-0127 PHASE C; try_table
-  EH) — both deep/gated. JIT corpus = **760/2/533**. After param-bearing thunk, reassess: residual skip is
-  dominated by multi-memory 407 (Phase-14 deferred) → §1 JIT-corpus near its non-deferred floor; pivot to
-  §10 realworld producers (§5) / the 2 gated fails.
-- **Exit-condition**: arm64 param-bearing multi-value wrapper thunk lands → struct.10 get_packed asserts
-  flip skip→pass (fail unchanged at 2). Else bundle CLOSES — §1 tractable multi-value skip-reduction done.
+  EH) — both deep/gated. JIT corpus = **762/2/531**.
+- **Exit-condition**: bundle CLOSE-eligible — §1 tractable multi-value skip-reduction is largely done (+18
+  total). Either measure+extend thunk shapes (if ROI confirmed) or CLOSE and pivot to gated fails / realworld.
 
 ## §10 remaining — the six `[ ]` rows
 
@@ -75,11 +75,12 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
 
 ## Step 0.7 (next resume)
 
-THIS turn = multi-value JIT invoke (`fad904c6` invokeMulti capability + unit test; `33b479e7` corpus-wire)
-→ +16 corpus (760/2/533), Mac-green (mac_gate.sh test-all + lint + JIT corpus all green; the 2 fails are the
-known gated ones). Two chunks chained; turn pushed + ubuntu-kicked + re-armed. Next resume Step 0.7:
-`tail -3 /tmp/ubuntu.log` — expect `OK (HEAD=33b479e7)`; on FAIL revert the turn's 2 commit pairs. Then start
-the NEXT LEVER (arm64 param-bearing multi-value wrapper thunk — see Active bundle) or reassess. Mac aarch64; ubuntu = x86_64.
+THIS turn = multi-value JIT invoke (`fad904c6`+`33b479e7`, +16) → param-bearing wrapper thunk (`f1858416`,
++2) + D-228 gate-hole fix (`7bb3699a`) → corpus 762/2/531. Mac-green (mac_gate.sh test-all + lint, NOW incl.
+the wasm_3_0 unit tests per D-228; JIT corpus green; 2 fails are the known gated ones). Next resume Step 0.7:
+`tail -3 /tmp/ubuntu.log` — expect `OK (HEAD=f1858416)`; on FAIL revert this turn's commits to the last
+ubuntu-verified HEAD. Then REASSESS per Active bundle (likely pivot — §1 multi-value tail is low-yield;
+ADR-0127 PHASE C / realworld producers are higher value). Mac aarch64; ubuntu = x86_64.
 
 **Gate hygiene (NEW, `2134116b`)**: use `bash scripts/mac_gate.sh` for the Step-5 Mac gate —
 never `zig build test-all > log; grep -c … log` (trailing `grep -c` exits 1 on zero matches →
