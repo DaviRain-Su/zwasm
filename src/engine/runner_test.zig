@@ -1470,3 +1470,25 @@ test "function-references: ref.func typed as precise (ref $t) for a (ref $t) par
     defer inst.deinit(gpa);
     try testing.expectEqual(@as(?u64, 0), try inst.invoke(gpa, "go", &.{}));
 }
+
+test "function-references: global (ref null $t) init with concrete ref.null $t (D-239 residual)" {
+    // Regression guard for the JIT global-init const-expr `ref.null`
+    // heaptype gap: the validator only mapped ABSTRACT heaptype bytes, so a
+    // CONCRETE `(ref.null $t)` (heaptype = typeidx sleb 0x00) hit the else →
+    // InvalidGlobalInitExpr. Minimal module: (type $t (func)) (global (ref
+    // null $t) (ref.null $t)) (func (export "f")). Must JIT-init (compile).
+    const gpa = testing.allocator;
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type $t = (func)
+        0x03, 0x02, 0x01, 0x00, // func 0 : type 0
+        0x06, 0x07, 0x01, 0x63, 0x00, 0x00, 0xd0, 0x00, 0x0b, // global (ref null $t) = ref.null $t
+        0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x00, // export "f" func 0
+        0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b, // code: empty body
+    };
+    var inst = JitInstance.init(gpa, &bytes) catch |e| {
+        std.debug.print("global ref.null $t init failed: {s}\n", .{@errorName(e)});
+        return error.TestUnexpectedResult;
+    };
+    inst.deinit(gpa);
+}

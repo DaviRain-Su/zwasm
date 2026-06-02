@@ -114,20 +114,25 @@ pub fn validateGlobalInitExpr(
                 pos += 8;
                 produced = .f64;
             },
-            0xD0 => { // ref.null reftype
-                if (pos >= expr.len) return Error.InvalidGlobalInitExpr;
-                const rt_byte = expr[pos];
-                pos += 1;
-                produced = switch (rt_byte) {
-                    0x70 => zir.ValType.funcref,
-                    0x6F => zir.ValType.externref,
+            0xD0 => { // ref.null heaptype (s33: negative = abstract, non-negative = concrete typeidx)
+                const ht = leb128.readSleb128(i64, expr, &pos) catch return Error.InvalidGlobalInitExpr;
+                produced = if (ht >= 0)
+                    // D-239 — concrete typed heaptype `(ref.null $typeidx)`
+                    // (function-references; e.g. `(global (ref null $t)
+                    // (ref.null $t))`). Produce a nullable concrete ref; the
+                    // want-check accepts ref-for-ref + the interp validator
+                    // owns the precise typeidx subtype lattice.
+                    zir.ValType{ .ref = .{ .nullable = true, .heap_type = .{ .concrete = @intCast(ht) } } }
+                else switch (ht) {
+                    -0x10 => zir.ValType.funcref, // 0x70
+                    -0x11 => zir.ValType.externref, // 0x6F
                     // Wasm 3.0 GC abstract heaptypes (D-220).
-                    0x6E => zir.ValType.anyref,
-                    0x6D => zir.ValType.eqref,
-                    0x6C => zir.ValType.i31ref,
-                    0x6B => zir.ValType.structref,
-                    0x6A => zir.ValType.arrayref,
-                    0x71, 0x72, 0x73, 0x69, 0x68 => zir.ValType.anyref, // none/noextern/nofunc/exn/noexn — lenient
+                    -0x12 => zir.ValType.anyref, // 0x6E
+                    -0x13 => zir.ValType.eqref, // 0x6D
+                    -0x14 => zir.ValType.i31ref, // 0x6C
+                    -0x15 => zir.ValType.structref, // 0x6B
+                    -0x16 => zir.ValType.arrayref, // 0x6A
+                    -0x0F, -0x0E, -0x0D, -0x17, -0x18 => zir.ValType.anyref, // none/noextern/nofunc/exn/noexn — lenient
                     else => return Error.InvalidGlobalInitExpr,
                 };
             },
