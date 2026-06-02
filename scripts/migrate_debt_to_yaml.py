@@ -55,7 +55,7 @@ def classify(text: str) -> str:
         return "partial"
     if t.startswith("now"):
         return "now"
-    return "open"
+    return "note"  # unrecognised head → historical/landed note (stays enum-valid)
 
 
 def parse_row(line: str):

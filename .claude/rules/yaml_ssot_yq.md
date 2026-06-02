@@ -63,11 +63,13 @@ grep -oE 'D-[0-9]+' .dev/debt.yaml | sort -t- -k2 -n | tail -1     # highest ID 
 
 ## Enforcement
 
-`bash scripts/check_debt_id_refs.sh [--gate]` — every `D-NNN` cited in
-`src/` / `.claude/` / `scripts/` / `.dev/` (outside ADRs/lessons/archive) must
-resolve to an entry in debt.yaml; flags phantom `D-NEW*` placeholders. Block
-scalars + indentation are validated by `yq` parsing (a malformed entry makes
-every query error).
+`bash scripts/check_debt_yaml.sh [--gate]` (wired into `gate_commit.sh` when
+debt.yaml is staged) — validates the ledger's own integrity: parse, required
+fields, `status` enum, `blocked-by` ⇒ `last_reviewed`, unique IDs, and flags
+phantom `D-NEW*` placeholders. It does NOT resolve every cited `D-NNN` (resolved
+debts are deleted here by design — git is the archive). Block scalars +
+indentation are validated by `yq` parsing (a malformed entry makes every query
+error).
 
 ## Top traps
 
