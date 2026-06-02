@@ -8,23 +8,19 @@
 - **Phase**: **10 IN-PROGRESS — committed to 100% (ADR-0128)** (Phase 9 = DONE
   2026-05-24). §10 exit requires the official Wasm 3.0 testsuite at pass=fail=skip=0
   on **both backends** (interp + JIT).
-- **HEAD**: **level-separation PRIMARY-axis audit EXECUTED + FULLY FIXED (ADR-0130, D-230 closed)** — the
-  user's "real or 半規約頼み?" question. VERDICT was: partially real + dead enforcement gate. Now CLOSED:
-  (a) interp `mvp.zig` `concreteReaches` comptime-gated (`1323795b`); (b) arm64 `emit.zig` 6 manual 3.0 prongs
-  (throw/throw_ref/call_ref/return_call*) comptime-gated behind `wasm_v3_plus` — x86_64 was already clean
-  (routes via dispatch_collector; arm64 dispatches manually for lack of a `dead_code` ctx field); (c) DCE gate
-  REVIVED into `gate_merge.sh` (the dead `check_subrow_exit.sh` only fired on Phase-9 §9.12 flips → never
-  re-ran post-Phase-10). VERIFIED: `check_build_dce.sh --gate` → **all 6 combos clean** (was v1_0+v2_0 FAIL);
-  v1_0 nm 6→0 wasm_3_0 symbols; Mac test-all green. Lesson `2026-06-02-detection-without-enforcement-dead-gate`.
+- **HEAD** (`d041e425`): **interp wasm-3.0 corpus FULLY GREEN** — D-232 CLOSED (ADR-0131). assert_return
+  1233/0, **assert_trap 562/0** (was 558/4), invalid 194/0, unlinkable 8/0, malformed 3/0, exception 4/0.
+  Root: `gc_type_infos` was gated on `needs_gc_heap` (struct/array) → func-only `sub`/`final` modules got no
+  type-identity table → `concreteReaches` blind → `sigEq` accepted structurally-equal-but-distinct types. Fix:
+  materialise gti when `needs_gc_heap` OR `usesTypeSubtyping` (any non-final OR declared super; ADR-0115 zero-
+  overhead kept via a `sub`-form byte pre-filter) + `concreteReaches` authoritative over `sigEq` when gti
+  present. +3 unit tests. Mac test-all green. Lesson `2026-06-02-gti-tied-to-heap-need-misses-func-subtyping`.
+- **PRIOR THIS SESSION**: level-sep PRIMARY-axis audit FULLY FIXED (ADR-0130, D-230): interp+arm64 3.0 leaks
+  comptime-gated, DCE gate revived into `gate_merge.sh`, all 6 `-Dwasm×-Dwasi` combos clean. D-231 = x86_64-side
+  gate-coverage follow-on. ADR-0127 PHASE C (cross-module type-id; assert_unlinkable 4→0).
 - **STILL PREPPED (not yet run)**: **`.dev/phase10_scope_reassessment.md`** — §10 exit vs Phase-14 deferral,
-  reframed as ROADMAP RE-STRUCTURING (multi-memory = first instance; enumerate all deferred-but-§10-gating
-  items + re-sequence phases, not a one-off ADR-0128 footnote). The OTHER deep session.
-- **PRIOR**: ADR-0127 PHASE C DONE (cross-module type-def identity; assert_unlinkable 4→0; predicates
-  `canonicalEqualCross` `6f1eeb4a` + `superReachesCross` `d5183d4e` + integration `add983e8`). multi-value +18.
-- **wasm-3.0 interp fails now = 4** (was 5): all gc/type-subtyping **assert_trap** (NOT .17 — other modules;
-  possibly the runner's "assert_trap class discrimination" limitation). `8d5d67ed` fixed a SEPARATE bug — .12/.14 globals wrongly rejected
-  (concrete-ref subtype reached supers by index, missed cross-rec-group canonical equality; now
-  `gcConcreteReachesCanonical`). The 5 asserts are unmoved — they're RUNTIME (see bundle NEXT). JIT 762/2/531.
+  reframed as ROADMAP RE-STRUCTURING (multi-memory = first instance). USER-flagged; ADR-0128-amendment =
+  user-flip case. **The bundle's last open item.** JIT 762/2/531 (interp now 0-fail).
 - **Recent fixes (detail in debt.yaml)**: **D-228** (`7bb3699a`) test-all now runs the wasm_3_0 unit tests
   (was `zig build test`-only → a stale assert false-greened both hosts). **D-229** (`a5f6b238`) param-bearing
   e2e test gated to aarch64 (x86_64 SysV thunk lacks params; low-ROI follow-on).
@@ -60,21 +56,17 @@ Six workstreams (ADR-0128), value-prioritized (NOT §10 table-first):
   **.17 "run" CLOSED** (`80aeee1d` call_indirect-subtype + function-level-br, `24a17ed7` guard test) — the
   cyc180/D-198 rabbit hole (2 coordinated interp fixes: root cause #2 was function-level `br 0` trapping
   instead of returning). interp assert_return fully green (1233/0).
-- **REMAINING**: (a) **4 interp assert_trap fails ROOT-CAUSED → D-232** (handover's "runner-side trap-class"
-  hypothesis DISPROVEN). ROOT: `gc_type_infos` is materialised only when `needs_gc_heap` (instantiate.zig:1070,
-  struct/array-gated); func-only-subtyping modules ($t1/$t2 sub/final func, no heap) get NO gti → `concreteReaches`
-  blind → `sigEq` structural-collision accepts distinct types. Probe PROVED all 23 `sigEq-only` accepts have
-  gti=false; only 4 are bugs (19 are legit non-GC). FIX (coordinated, NEXT cycle, full test-all between steps):
-  (1) materialise gti for sub/final/rec func-subtyping (not just heap); (2) gti present → concreteReaches
-  authoritative over sigEq; (3) verify raw_typeidx reliability + finality in canonical_ids. (b) **§10-scope
-  question** → `.dev/phase10_scope_reassessment.md` (USER-flagged; ADR-0128-amendment = user-flip case).
-  (c) JIT eh/try_table (deep) + re-check JIT gc/type-subtyping.
-- **Continuity-memo**: interp fails 4 (gc/type-subtyping assert_trap) → now diagnosed as D-232 (GC
-  call_indirect over-acceptance; fix = gate sigEq short-circuit for GC modules). JIT 762/2/531. PHASE C
-  follow-ups (debt-worthy): api/instance.zig:572 + instantiate.zig:1657 `.cross_module` structural-only.
-  Level-sep audit + leak FULLY CLOSED this session (D-230; ADR-0130; all 6 DCE combos clean).
-- **Exit-condition**: the §10-scope question (USER-flip case, prepped doc) + drive the 4 trap_fails to 0
-  (D-232 fix). Trap_fails now MEASURED+diagnosed (was the "floor" target); D-232 fix closes them. Then bundle CLOSES.
+- **REMAINING**: (a) **4 interp assert_trap fails — FIXED ✓** (D-232 / ADR-0131, `d041e425`): gti materialised
+  for func-subtyping + concreteReaches authoritative. interp corpus FULLY GREEN. (b) **§10-scope question** →
+  `.dev/phase10_scope_reassessment.md` (USER-flagged; ADR-0128-amendment = user-flip case) — **the bundle's LAST
+  open item; user-gated.** (c) JIT eh/try_table (deep) + re-check JIT gc/type-subtyping (the interp .17/D-232
+  fixes are interp-only; JIT path may need the same).
+- **Continuity-memo**: interp wasm-3.0 = 0 fails (fully green). JIT 762/2/531. PHASE C follow-ups (debt-worthy):
+  api/instance.zig:572 + instantiate.zig:1657 `.cross_module` structural-only. This session CLOSED: D-230 (level-
+  sep leak + DCE gate revive, ADR-0130) + D-232 (gti func-subtyping, ADR-0131). D-231 = x86_64 DCE-gate follow-on.
+- **Exit-condition**: 4 trap_fails → 0 ✓ DONE (D-232/ADR-0131; interp corpus fully green). ONLY the §10-scope
+  question remains (USER-flip case, prepped doc) — user-gated. Bundle CLOSES once §10-scope resolved; meanwhile
+  non-gated forward work = JIT eh/try_table + re-check JIT gc/type-subtyping (interp fixes are interp-only).
 
 ## §10 remaining — the six `[ ]` rows
 
