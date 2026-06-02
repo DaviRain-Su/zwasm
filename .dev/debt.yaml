@@ -11,7 +11,8 @@ entries:
     first_raised: "2026-06-02"
     last_reviewed: "2026-06-02"
     refs: |-
-      `src/engine/codegen/shared/jit_abi.zig:822` (jitGcRefCast → gcRefMatchesNonNullCore); `src/engine/codegen/arm64/ops/wasm_3_0/ref_cast.zig` (emit + trap branch); `src/instruction/wasm_3_0/ref_test_ops.zig` (gcRefMatchesNonNullCore + readObjKindHeap); `src/engine/setup.zig` (JitRuntime gc_heap/gti wiring + table population); `test/spec/wasm-3.0-assert/gc/raw/ref_cast.wast:14-64`; D-211; D-212; ADR-0128 §2; debug_jit_auto skill
+      `src/engine/codegen/arm64/ops/wasm_3_0/ref_cast_null.zig` (THE emit — `structref`/`arrayref`/`i31ref`/`nullref` are NULLABLE → `ref.cast_null`, NOT ref_cast.zig); `src/engine/codegen/shared/jit_abi.zig:822` (jitGcRefCast → gcRefMatchesNonNullCore); `src/instruction/wasm_3_0/ref_test_ops.zig` (gcRefMatchesNonNullCore; isI31Ref); `test/spec/wasm-3.0-assert/gc/raw/ref_cast.wast:14-64`; D-211; D-212; ADR-0128 §2; debug_jit_auto skill.
+      NARROWED (static analysis, this cycle): table IS correctly populated (ref_cast_i31/struct/array POSITIVE casts all PASS on JIT → table[1]=i31, [2]=struct, [3]=array valid; isI31Ref(table[1])=true confirmed). The buggy op is `ref.cast_null` (nullable target). For an i31 cast to structref, jitGcRefCast → is_i31=true → gcAbstractMatch(struct, true, _) = false → MUST return 0 → trap, INDEPENDENT of gti/heap. Code is statically correct on both the emit and trampoline → the bug is RUNTIME: the `ref` value reaching jitGcRefCast in X1 is not the i31-encoded operand (marshalling / reg-alloc clobber in ref_cast_null.zig's CBZ+CALL sequence — note rd=gprDefSpilled may collide with X0/X1/X2 used for the call args), OR the ht byte is too-permissive (all 4 mismatch indices passing ⇒ tested as `any`?). NEXT: debug_jit_auto — disasm the ref_cast_null emit for ref_cast_null + breakpoint jitGcRefCast, read X1(ref)/W2(ht)/is_i31 vs the interp values.
   - id: "D-231"
     layer: "infra"
     status: "now"
