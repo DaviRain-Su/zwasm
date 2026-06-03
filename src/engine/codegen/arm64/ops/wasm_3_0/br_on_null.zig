@@ -4,37 +4,24 @@
 //! operand stack); if non-null, push ref back as a (non-null) typed
 //! ref and fall through.
 //!
-//! First-cut scope: forward-block targets only. Function-return
-//! (payload == labels.items.len) + loop targets return
-//! `Error.UnsupportedOp`. Filed under D-NNN (handover bundle memo);
-//! covers the most common Wasm 3.0 usage shape.
+//! Implemented via the shared `op_control.branchOnReg` (the same helper
+//! br_if / br_on_cast use) so ALL target shapes work — forward block,
+//! loop, and function-return (payload == labels.items.len). The ref is
+//! the null-CONDITION, not a value passed to the label, so unlike
+//! br_on_cast we POP it first (the label's k values sit below it), feed
+//! a 0/1 null-flag (`CMP Xn,#0; CSET Wn, EQ` → 1 iff null) as the branch
+//! condition (`branchOnReg` branches when the reg != 0), then push the
+//! ref back for the non-null fall-through. D-239 (was first-cut
+//! forward-block-only → UnsupportedOp on br_on_null.1's function-return).
 //!
-//! Pattern (mirrors br_if's CBZ-skip + merge + B path at
-//! op_control.zig:348-358, but with X-form CMP (funcref is u64;
-//! CBNZ is W-form / wrong width) + inverted condition + push src
-//! back for non-null fall-through):
-//!
-//! ```
-//!     CMP Xn, #0
-//!     B.NE skip_byte  ; if non-null, skip the merge+B
-//!     <captureOrEmitBlockMergeMov tgt_idx>  ; place label values
-//!     B → label fixup (append to labels[tgt_idx].pending, kind=.b_uncond)
-//!     skip_byte:
-//!     <push src vreg back to pushed_vregs>
-//! ```
-//!
-//! No usesRuntimePtr concern: this uses label fixups (the existing
-//! br_if machinery), not bounds_fixups → trap stub not triggered →
-//! R15 (x86_64) / X19 (arm64) not implicitly required. (Contrast
-//! ref.as_non_null which DOES append to bounds_fixups and required
-//! the cycle-51b D-180 whitelist fix.)
+//! No usesRuntimePtr concern: label fixups (br_if machinery), not
+//! bounds_fixups → trap stub not triggered → X19 not implicitly required.
 
-const std = @import("std");
 const meta = @import("../../../../../instruction/wasm_3_0/br_on_null.zig");
 const ctx_mod = @import("../../ctx.zig");
 const gpr = @import("../../gpr.zig");
 const inst = @import("../../inst.zig");
-const merge_mov = @import("../../op_control_merge_mov.zig");
+const op_control = @import("../../op_control.zig");
 const zir = @import("../../../../../ir/zir.zig");
 
 pub const op_tag = meta.op_tag;
@@ -46,34 +33,23 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
     const src = ctx.pushed_vregs.pop().?;
     const xn = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src, 0);
 
-    // First-cut: only forward-block targets supported.
-    if (ins.payload >= ctx.labels.items.len) return ctx_mod.Error.UnsupportedOp;
-    const tgt_idx: usize = @intCast(ctx.labels.items.len - 1 - @as(usize, @intCast(ins.payload)));
-    if (ctx.labels.items[tgt_idx].kind != .block) return ctx_mod.Error.UnsupportedOp;
-
-    // CMP Xn, #0 (X-form null check).
+    // Null-flag in a RESERVED scratch (W16/IP0 — NOT an allocatable vreg
+    // home, so it survives branchOnReg's merge MOVs and does not clobber
+    // the ref): CMP Xn,#0 (X-form — funcref is u64) ; CSET W16, EQ → 1 iff
+    // null. CMP only READS Xn, so when `src` is register-resident the ref
+    // value stays live in Xn for the non-null fall-through push below
+    // (CSET-into-Xn would have destroyed it — the block-path regression).
+    // `branchOnReg` branches when the reg != 0 (= null).
+    const flag: inst.Xn = 16;
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmX(xn, 0));
-    // B.NE skip_byte placeholder — if non-null, skip past the merge
-    // + label-branch and fall through to push-src-back.
-    const bne_at: u32 = @intCast(ctx.buf.items.len);
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.ne, 0));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCsetW(flag, .eq));
 
-    // Branch-taken (null) path: place label's k expected values in
-    // their target positions, then unconditional B → label fixup.
-    _ = try merge_mov.captureOrEmitBlockMergeMov(ctx, tgt_idx);
-    const b_at: u32 = @intCast(ctx.buf.items.len);
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encB(0));
-    try ctx.labels.items[tgt_idx].pending.append(ctx.allocator, .{ .byte_offset = b_at, .kind = .b_uncond });
+    // Shared branch body — handles function-return / loop / forward-block,
+    // marshalling the label's k values (now the pushed_vregs top, the ref
+    // having been popped). branchOnReg validates the depth + target shape.
+    try op_control.branchOnReg(ctx, ins, flag);
 
-    // Patch B.NE skip disp to land at the fall-through target
-    // (current buf end).
-    const skip_byte: u32 = @intCast(ctx.buf.items.len);
-    const bne_disp_words: i19 = @intCast(@divExact(@as(i32, @intCast(skip_byte)) - @as(i32, @intCast(bne_at)), 4));
-    std.mem.writeInt(u32, ctx.buf.items[bne_at..][0..4], inst.encBCond(.ne, bne_disp_words), .little);
-
-    // Non-null fall-through: push src vreg back so the ref stays on
-    // the operand stack for the next consumer (typed as non-null per
-    // Wasm spec, though zwasm v2 keeps the type stack generic-funcref
-    // per ADR-0123 D2 — no validator narrowing needed).
+    // Non-null fall-through: ref stays on the operand stack for the next
+    // consumer (kept generic-funcref per ADR-0123 D2 — no narrowing).
     try ctx.pushed_vregs.append(ctx.allocator, src);
 }

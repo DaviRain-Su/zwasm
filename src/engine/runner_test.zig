@@ -1492,3 +1492,25 @@ test "function-references: global (ref null $t) init with concrete ref.null $t (
     };
     inst.deinit(gpa);
 }
+
+test "function-references: br_on_null to function-return target JIT-compiles (D-239; br_on_null.1)" {
+    // Regression guard: br_on_null's arm64 emit was first-cut "forward-block
+    // targets only" → `br_on_null 0` to the function-return label hit
+    // UnsupportedOp (br_on_null.1). Now routed through op_control.branchOnReg
+    // (function-return / loop / block). Minimal module: (type $t (func))
+    // (func (param (ref null $t)) (drop (br_on_null 0 (local.get 0)))) — must
+    // JIT-compile (init succeeds); was a module-reject.
+    const gpa = testing.allocator;
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x09, 0x02, 0x60, 0x00, 0x00, 0x60, 0x01, 0x63, 0x00, 0x00, // types: ()->() ; ((ref null 0))->()
+        0x03, 0x02, 0x01, 0x01, // func 0 : type 1
+        0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x00, // export "f" func 0
+        0x0a, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0xd5, 0x00, 0x1a, 0x0b, // local.get 0; br_on_null 0; drop
+    };
+    var inst = JitInstance.init(gpa, &bytes) catch |e| {
+        std.debug.print("br_on_null function-return module init failed: {s}\n", .{@errorName(e)});
+        return error.TestUnexpectedResult;
+    };
+    inst.deinit(gpa);
+}
