@@ -48,13 +48,12 @@ Two open tracks, both within Phase 13's surface (pick either; runtime-entity is 
    `main`, cli/main.zig:43/58) — a C-library context (`libzwasm.so`, Zig startup never runs) can't reach it, so
    inherit needs platform C APIs (`_NSGetArgv` / `/proc/self/cmdline` / `GetCommandLineW`) or the C `environ`
    global = new libc sites (§14 "unconscious libc fanout"). Do the ADR-0070 amend as Step 1 of that chunk.
-2. **§13.4 — assess close / more examples.** §13.4 scaffolded + 4 conformance examples pass (Mac+ubuntu test-all):
-   `callback` (host func), `global_import`/`memory_import`/`table_import` (`22ef63ae`) — the full host-entity surface
-   through the real C ABI. NEXT options: (a) a trap-propagation example (guest `unreachable` → C `wasm_trap_t*` +
-   `wasm_trap_message`) — validates the trap surface through C; (b) a multi-value / multi-arg func example; then
-   **assess marking §13.4 [x]** (it has wasm-c-api-shaped ports + zwasm-specific tests, fail=0 2-host; 3-host
-   windowsmini = phase boundary). Add each as a `conformance_cases` entry in build.zig. (§13.3 wasi remainder still
-   ADR-0070-blocked.) **WATCH: instance.zig 3299/3300 — further growth needs extraction, not a 3rd exempt bump.**
+2. **§13.5 — host examples** (`examples/{c_host, zig_host, rust_host}` build+run on 3 OS). c_host = `hello.c`
+   exists. NEXT: add **zig_host** (a Zig program driving the native API per ADR-0109, OR the C ABI via `@cImport`)
+   + a build step (mirror the `c_host`/conformance wiring), then **rust_host** (Rust via the C header; needs rustc,
+   available on Mac via `nix develop`). 3-OS = §13.P boundary (windowsmini). Then §13.P (🔒 close).
+   **§13.3 remainder** (inherit_argv/env, preopen_dir) is BOTH ADR-0070-blocked (C-lib process/io provenance) AND
+   lower-value (explicit set_args/set_envs already cover config) → defer to §13.P review or debt-row; not a blocker. **WATCH: instance.zig 3299/3300 — further growth needs extraction, not a 3rd exempt bump.**
 
 gap: `.dev/phase13_capi_gap.md`.
 
@@ -75,9 +74,9 @@ prose. Standing `soon` (not Phase-12): 10 ADR + 10 lesson `<backfill>` markers; 
 
 ## Step 0.7 (next resume)
 
-This turn added 3 §13.4 conformance examples (global/memory/table host imports via the C ABI): all 4 pass
-(`zig build test-c-api-conformance`). Test-only + build.zig (no src change). An ubuntu `test-all` is kicked
-(conformance is in test-all) → next resume `tail /tmp/ubuntu.log` for OK. Prior ubuntu `7a7b0a8d` (test-all) OK; windowsmini `0810b339` GREEN.
+This turn added the trap conformance example (5th) + marked **§13.4 [x]** (conformance suite fail=0 Mac+ubuntu).
+Test-only + build.zig + ROADMAP (no src change). An ubuntu `test-all` is kicked → next resume `tail /tmp/ubuntu.log`
+for OK. Prior ubuntu `9ef24077` (test-all) OK; windowsmini `0810b339` GREEN.
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile: `zig build test
 -Dtarget=x86_64-windows-gnu` (compile-only). 3-host reconcile = phase boundary.
