@@ -61,11 +61,11 @@ pub export fn wasm_global_as_extern(g: ?*Global) callconv(.c) ?*Extern {
 pub export fn wasm_table_as_extern(t: ?*Table) callconv(.c) ?*Extern {
     const handle = t orelse return null;
     if (handle.extern_view) |v| return v;
-    const inst = handle.instance orelse return null;
-    const store = inst.store orelse return null;
+    // instance (export-derived) OR Store (standalone host table).
+    const store = if (handle.instance) |i| (i.store orelse return null) else (handle.store orelse return null);
     const alloc = instance.storeAllocator(store) orelse return null;
     const v = alloc.create(Extern) catch return null;
-    v.* = .{ .kind = .table, .instance = inst, .table = handle, .table_idx = handle.table_idx, .borrowed = true };
+    v.* = .{ .kind = .table, .instance = handle.instance, .table = handle, .table_idx = handle.table_idx, .borrowed = true };
     handle.extern_view = v;
     return v;
 }
@@ -184,6 +184,48 @@ pub export fn wasm_memory_new(store: ?*instance.Store, mt: ?*const types.MemoryT
     };
     m.* = .{ .instance = null, .memory_idx = 0, .minst = mi, .store = s };
     return m;
+}
+
+/// Map a table-element `wasm_valkind_t` byte to the internal ref valtype
+/// (funcref=129 / externref=128 per `valKindOf`). Non-ref kinds aren't
+/// valid table elements → null.
+fn elemRefValType(kind: u8) ?zir.ValType {
+    return switch (kind) {
+        129 => zir.ValType.funcref,
+        128 => zir.ValType.externref,
+        else => null,
+    };
+}
+
+/// `wasm_table_new(store, tabletype, init) -> own wasm_table_t*` — a
+/// host-owned standalone table holding its own `*TableInstance` (`min`
+/// ref slots, each = `init`'s payload or null). get/set/size/grow operate
+/// on it; `wasm_table_as_extern(t)` into `wasm_instance_new`'s imports
+/// value-copies the `TableInstance` (refs aliased) so set/get share the
+/// slot array. Caller owns it (`wasm_table_delete`).
+pub export fn wasm_table_new(store: ?*instance.Store, tt: ?*const types.TableType, init: ?*instance.Ref) callconv(.c) ?*Table {
+    const s = store orelse return null;
+    const ttype = tt orelse return null;
+    const lim = types.wasm_tabletype_limits(ttype) orelse return null;
+    const elem = types.wasm_tabletype_element(ttype) orelse return null;
+    const et = elemRefValType(elem.kind) orelse return null;
+    const alloc = instance.storeAllocator(s) orelse return null;
+    const refs = alloc.alloc(runtime.Value, lim.min) catch return null;
+    const payload: u64 = if (init) |r| r.ref else runtime.Value.null_ref;
+    for (refs) |*slot| slot.* = .{ .ref = payload };
+    const max: ?u32 = if (lim.max == 0xffff_ffff) null else lim.max;
+    const ti = alloc.create(runtime.TableInstance) catch {
+        alloc.free(refs);
+        return null;
+    };
+    ti.* = .{ .refs = refs, .elem_type = et, .max = max };
+    const tbl = alloc.create(Table) catch {
+        alloc.free(refs);
+        alloc.destroy(ti);
+        return null;
+    };
+    tbl.* = .{ .instance = null, .table_idx = 0, .elem_type = et, .min = lim.min, .max = max, .tinst = ti, .store = s };
+    return tbl;
 }
 
 // =====================================================================
@@ -389,4 +431,72 @@ test "wasm_memory_new: host memory imported — guest i32.load reads bytes the h
     var results: vec.ValVec = .{ .size = 1, .data = &results_data };
     try testing.expect(instance.wasm_func_call(rf, &args, &results) == null);
     try testing.expectEqual(@as(i32, 42), results_data[0].of.i32);
+}
+
+test "wasm_table_new: standalone host table size/get/set/grow + bounds" {
+    const e = instance.wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer instance.wasm_engine_delete(e);
+    const s = instance.wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer instance.wasm_store_delete(s);
+
+    // funcref table, min 2 (tabletype_new consumes the valtype). 129 = funcref.
+    var lim: types.Limits = .{ .min = 2, .max = 0xffff_ffff };
+    const tt = types.wasm_tabletype_new(types.wasm_valtype_new(129), &lim) orelse return error.TableTypeAllocFailed;
+    defer types.wasm_tabletype_delete(tt);
+    const t = wasm_table_new(s, tt, null) orelse return error.TableNewFailed;
+    defer instance.wasm_table_delete(t);
+
+    try testing.expectEqual(@as(u32, 2), instance.wasm_table_size(t));
+    const r0 = instance.wasm_table_get(t, 0) orelse return error.NoRef; // null-ref handle is non-null
+    defer instance.wasm_ref_delete(r0);
+    try testing.expect(instance.wasm_table_get(t, 5) == null); // out of range
+    try testing.expect(instance.wasm_table_set(t, 0, null)); // set null ok
+    try testing.expect(!instance.wasm_table_set(t, 5, null)); // oob set fails
+    try testing.expect(instance.wasm_table_grow(t, 1, null));
+    try testing.expectEqual(@as(u32, 3), instance.wasm_table_size(t));
+    try testing.expectEqual(@as(u8, @intFromEnum(instance.ExternKind.table)), instance.wasm_extern_kind(wasm_table_as_extern(t).?));
+}
+
+// (module (import "env" "t" (table 3 funcref))
+//   (func (export "sz") (result i32) (table.size 0)))
+const import_table_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type () -> i32
+    0x02, 0x0b, 0x01, 0x03, 0x65, 0x6e, 0x76, 0x01, 0x74, 0x01, 0x70, 0x00, 0x03, // import env.t table funcref min 3
+    0x03, 0x02, 0x01, 0x00, // func[0]: type 0
+    0x07, 0x06, 0x01, 0x02, 0x73, 0x7a, 0x00, 0x00, // export "sz" → func 0
+    0x0a, 0x07, 0x01, 0x05, 0x00, 0xfc, 0x10, 0x00, 0x0b, // code: table.size 0
+};
+
+test "wasm_table_new: host table imported — guest table.size sees the host table's size" {
+    const e = instance.wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer instance.wasm_engine_delete(e);
+    const s = instance.wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer instance.wasm_store_delete(s);
+
+    var lim: types.Limits = .{ .min = 3, .max = 0xffff_ffff };
+    const tt = types.wasm_tabletype_new(types.wasm_valtype_new(129), &lim) orelse return error.TableTypeAllocFailed;
+    defer types.wasm_tabletype_delete(tt);
+    const ht = wasm_table_new(s, tt, null) orelse return error.TableNewFailed;
+    defer instance.wasm_table_delete(ht);
+
+    var bytes = import_table_wasm;
+    const bv: vec.ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = instance.wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer instance.wasm_module_delete(m);
+
+    var imports = [_]?*const Extern{wasm_table_as_extern_const(ht)};
+    const inst = instance.wasm_instance_new(s, m, &imports, null) orelse return error.InstanceAllocFailed;
+    defer instance.wasm_instance_delete(inst);
+
+    var exports: vec.ExternVec = .{ .size = 0, .data = null };
+    instance.wasm_instance_exports(inst, &exports);
+    defer instance.wasm_extern_vec_delete(&exports);
+    const szf = instance.wasm_extern_as_func(exports.data.?[0]) orelse return error.NotFunc;
+
+    const args: vec.ValVec = .{ .size = 0, .data = null };
+    var results_data: [1]instance.Val = undefined;
+    var results: vec.ValVec = .{ .size = 1, .data = &results_data };
+    try testing.expect(instance.wasm_func_call(szf, &args, &results) == null);
+    try testing.expectEqual(@as(i32, 3), results_data[0].of.i32);
 }

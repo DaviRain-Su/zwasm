@@ -1,4 +1,4 @@
-// FILE-SIZE-EXEMPT: (cap=3200) C ABI translation catalog (Zone 3 boundary layer); no separable subsystem per ADR-0099 §D2 P3 evaluation (see .dev/architecture/api_instance_audit.md, §9.12-G (c)). 10.F D-173/D-172 accessor surfaces extended exempt cap 2500→2800→3000; cyc174 raised 3000→3200 (ADR-0099 amend) for the Wasm start-section execution feature (a runtime-feature add in instantiateInternal, NOT accessor bloat) — consistent with the non-separable P3 eval + the validator.zig cyc158 precedent. D-171 restructure remains for a genuine separable subsystem.
+// FILE-SIZE-EXEMPT: (cap=3300) C ABI translation catalog (Zone 3 boundary layer); no separable subsystem per ADR-0099 §D2 P3 evaluation (see .dev/architecture/api_instance_audit.md, §9.12-G (c)). 10.F D-173/D-172 accessor surfaces extended exempt cap 2500→2800→3000; cyc174 raised 3000→3200 (ADR-0099 amend) for the Wasm start-section execution feature (a runtime-feature add in instantiateInternal, NOT accessor bloat) — consistent with the non-separable P3 eval + the validator.zig cyc158 precedent. P13 §13.2 raised 3200→3300 (ADR-0099 amend) for the runtime-entity host-creation surface — standalone-entity (instance==null) branches in the global/table/memory accessors + the buildBindings host-import arm; the `_new` CONSTRUCTORS are already split to extern_new.zig, this is the irreducible accessor/binding half coupled to the entity structs. D-171 restructure remains for a genuine separable subsystem.
 //! Engine / Store / Module / Instance / Func / Extern surface of
 //! the C ABI binding (§9.5 / 5.0 chunk d carve-out from
 //! `wasm.zig` per ADR-0007).
@@ -180,6 +180,15 @@ pub const Table = struct {
     max: ?u32,
     /// Cached borrowed extern view (see `Func.extern_view`).
     extern_view: ?*Extern = null,
+    /// Host-created standalone table only (`wasm_table_new`,
+    /// `instance == null`): the owned `*TableInstance` backing
+    /// (`refs` slice). Accessors use this when there is no instance;
+    /// it is value-copied (refs aliased) into an importing instance's
+    /// `rt.tables[]` (a `[]TableInstance`) so set/get share the refs
+    /// slice. Null for an instance-backed table.
+    tinst: ?*runtime.TableInstance = null,
+    /// Store handle for the standalone alloc/free path (no instance).
+    store: ?*Store = null,
 };
 
 /// `wasm_memory_t` — opaque-from-C handle for a memory export.
@@ -615,8 +624,20 @@ fn buildBindings(
                     const mi = hm.minst orelse return error.UnknownImportModule;
                     bindings[idx] = .{ .memory = .{ .inst = mi } };
                 },
-                // Host table `_new` not yet implemented; host func is D-252.
-                .func, .table, .tag => return error.UnsupportedHostImport,
+                .table => {
+                    const ht = ext.table orelse return error.UnknownImportModule;
+                    const ti = ht.tinst orelse return error.UnknownImportModule;
+                    bindings[idx] = .{
+                        .table = .{
+                            .instance = ti.*, // value copy; refs slice aliased
+                            .source_elem_type = ht.elem_type,
+                            .source_min = ht.min,
+                            .source_max = ht.max,
+                        },
+                    };
+                },
+                // Host func is D-252 (needs interp host-call plumbing).
+                .func, .tag => return error.UnsupportedHostImport,
             }
             continue;
         }
@@ -1342,10 +1363,13 @@ pub export fn wasm_extern_as_table(e: ?*Extern) callconv(.c) ?*Table {
 /// releases it via the `Extern.table` back-pointer).
 pub export fn wasm_table_delete(t: ?*Table) callconv(.c) void {
     const handle = t orelse return;
-    const inst = handle.instance orelse return;
-    const store = inst.store orelse return;
+    const store = if (handle.instance) |inst| (inst.store orelse return) else (handle.store orelse return);
     const alloc = storeAllocator(store) orelse return;
     if (handle.extern_view) |v| alloc.destroy(v);
+    if (handle.tinst) |ti| { // standalone host table: free its own backing
+        alloc.free(ti.refs);
+        alloc.destroy(ti);
+    }
     alloc.destroy(handle);
 }
 
@@ -1353,10 +1377,12 @@ pub export fn wasm_table_delete(t: ?*Table) callconv(.c) void {
 /// (`table.size`) — slot count of the table's `refs` backing slice.
 pub export fn wasm_table_size(t: ?*const Table) callconv(.c) u32 {
     const handle = t orelse return 0;
-    const inst = handle.instance orelse return 0;
-    const rt = inst.runtime orelse return 0;
-    if (handle.table_idx >= rt.tables.len) return 0;
-    return @intCast(rt.tables[handle.table_idx].refs.len);
+    if (handle.instance) |inst| {
+        const rt = inst.runtime orelse return 0;
+        if (handle.table_idx >= rt.tables.len) return 0;
+        return @intCast(rt.tables[handle.table_idx].refs.len);
+    }
+    return @intCast((handle.tinst orelse return 0).refs.len); // standalone host table
 }
 
 /// `wasm_table_get(*const Table, idx)` — Wasm spec §4.4.6
@@ -1367,15 +1393,16 @@ pub export fn wasm_table_size(t: ?*const Table) callconv(.c) u32 {
 /// reference vs OOB by `wasm_table_size` bound check.
 pub export fn wasm_table_get(t: ?*const Table, idx: u32) callconv(.c) ?*Ref {
     const handle = t orelse return null;
-    const inst = handle.instance orelse return null;
-    const rt = inst.runtime orelse return null;
-    const store = inst.store orelse return null;
-    const alloc = storeAllocator(store) orelse return null;
-    if (handle.table_idx >= rt.tables.len) return null;
-    const tab = rt.tables[handle.table_idx];
+    const tab: runtime.TableInstance = if (handle.instance) |inst| blk: {
+        const rt = inst.runtime orelse return null;
+        if (handle.table_idx >= rt.tables.len) return null;
+        break :blk rt.tables[handle.table_idx];
+    } else (handle.tinst orelse return null).*;
     if (idx >= tab.refs.len) return null;
+    const store = if (handle.instance) |inst| (inst.store orelse return null) else (handle.store orelse return null);
+    const alloc = storeAllocator(store) orelse return null;
     const ref_handle = alloc.create(Ref) catch return null;
-    ref_handle.* = .{ .instance = @constCast(inst), .ref = tab.refs[idx].ref };
+    ref_handle.* = .{ .instance = handle.instance, .ref = tab.refs[idx].ref };
     return ref_handle;
 }
 
@@ -1386,10 +1413,11 @@ pub export fn wasm_table_get(t: ?*const Table, idx: u32) callconv(.c) ?*Ref {
 /// (only the `.ref` payload is read).
 pub export fn wasm_table_set(t: ?*Table, idx: u32, ref: ?*Ref) callconv(.c) bool {
     const handle = t orelse return false;
-    const inst = handle.instance orelse return false;
-    const rt = inst.runtime orelse return false;
-    if (handle.table_idx >= rt.tables.len) return false;
-    const tab = rt.tables[handle.table_idx];
+    const tab: runtime.TableInstance = if (handle.instance) |inst| blk: {
+        const rt = inst.runtime orelse return false;
+        if (handle.table_idx >= rt.tables.len) return false;
+        break :blk rt.tables[handle.table_idx];
+    } else (handle.tinst orelse return false).*; // refs slice aliased — write hits the backing
     if (idx >= tab.refs.len) return false;
     const payload: u64 = if (ref) |r| r.ref else runtime.Value.null_ref;
     tab.refs[idx] = .{ .ref = payload };
@@ -1405,16 +1433,23 @@ pub export fn wasm_table_set(t: ?*Table, idx: u32, ref: ?*Ref) callconv(.c) bool
 /// realloc semantics for the table's `refs` slice.
 pub export fn wasm_table_grow(t: ?*Table, delta: u32, init: ?*Ref) callconv(.c) bool {
     const handle = t orelse return false;
-    const inst = handle.instance orelse return false;
-    const rt = inst.runtime orelse return false;
-    if (handle.table_idx >= rt.tables.len) return false;
-    const tab_ptr = &rt.tables[handle.table_idx];
+    var tab_ptr: *runtime.TableInstance = undefined;
+    var alloc: std.mem.Allocator = undefined;
+    if (handle.instance) |inst| {
+        const rt = inst.runtime orelse return false;
+        if (handle.table_idx >= rt.tables.len) return false;
+        tab_ptr = &rt.tables[handle.table_idx];
+        alloc = rt.alloc;
+    } else { // standalone host table
+        tab_ptr = handle.tinst orelse return false;
+        alloc = storeAllocator(handle.store orelse return false) orelse return false;
+    }
     const old_len = tab_ptr.refs.len;
     const new_len = old_len + delta;
     if (handle.max) |m| {
         if (new_len > m) return false;
     }
-    const grown = rt.alloc.realloc(tab_ptr.refs, new_len) catch return false;
+    const grown = alloc.realloc(tab_ptr.refs, new_len) catch return false;
     const payload: u64 = if (init) |r| r.ref else runtime.Value.null_ref;
     for (grown[old_len..new_len]) |*slot| slot.* = .{ .ref = payload };
     tab_ptr.refs = grown;
