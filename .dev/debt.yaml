@@ -3,40 +3,6 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
-  - id: "D-256"
-    layer: "infra"
-    status: "partial"
-    description: |-
-      **PARTIAL (2026-06-04, `6c80c229`): fuzz crash-harness MVP BUILT.** `test/fuzz/fuzz_loader.zig`
-      (corpus-dir exe: parse + Engine.compile each input; error=expected reject, crash=finding) +
-      `scripts/gen_fuzz_corpus.sh` (deterministic `wasm-tools smith` modules + malformed blobs; seed=
-      committed, campaign=gitignored) + `zig build test-fuzz` wired into test-all (29-file seed corpus,
-      0 crashes). REMAINING for full §14.3: (a) **spec-bump checker** still absent (diff pinned spec
-      testsuite SHA vs upstream) — the §14.3-blocking piece; (b) `nightly.yml` wiring of the campaign
-      (`gen_fuzz_corpus.sh campaign` + loader over the larger corpus, on a schedule/dispatch); (c)
-      **differential oracle** (interp vs JIT result compare — catches miscompiles, not just crashes) as
-      an extension. §14.3 stays `[ ]` until (a)+(b). Original blocker below.
-      blocked-by: fuzz + spec-bump infrastructure did not exist. §14.3 (`nightly.yml` —
-      fuzz + spec-bump + proposal-watch) cannot be wired: verified absent — NO `test/fuzz/`
-      dir, NO `test-fuzz` build step (build.zig only had a "fuzz steps as they land" comment
-      at :845), NO spec-bump checker (only `import_proposal_corpus.sh`). The test/README +
-      ROADMAP file-tree (`test/fuzz/{fuzz_loader,fuzz_gen}.zig`) references are ASPIRATIONAL,
-      not built. proposal-watch is a manual quarterly doc (`.dev/proposal_watch.md`, last
-      reviewed 2026-04-30). A fuzz-LESS nightly would just duplicate pr.yml's test-all
-      (redundant) — the distinct §14.3 value (overnight fuzz campaigns + spec-corpus drift
-      detection) needs the infra. This is a ROADMAP §3-scope deliverable ("Fuzz
-      infrastructure: corpus + edge-case generator + differential fuzz + overnight campaign",
-      §3 line 177) that was never scheduled into a phase + built. DISCHARGE: build the fuzz
-      harness (`wasm-tools smith` corpus gen → `fuzz_loader` runs modules through parse/
-      validate/interp + differential oracle vs wasmtime → `zig build test-fuzz` smoke + a
-      nightly campaign step) + a spec-bump checker (diff the pinned spec testsuite SHA vs
-      upstream); THEN wire §14.3 `nightly.yml`. Sizeable feature, not CI wiring — needs a home
-      (its own task/phase) before §14.3. §14.P close is blocked on this (+ D-245 win64 for
-      windows CI green) OR a §14.P re-scope deferring the nightly leg.
-    first_raised: "2026-06-04"
-    last_reviewed: "2026-06-04"
-    refs: |-
-      `build.zig:845` (fuzz-comment-only); `test/README.md:14` (aspirational test-fuzz row); ROADMAP §3 line 177 (fuzz-infra scope) + §14.3 / §14.P; `.dev/proposal_watch.md`; `scripts/import_proposal_corpus.sh`
   - id: "D-255"
     layer: "code"
     status: "blocked-by"
