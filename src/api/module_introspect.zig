@@ -246,6 +246,87 @@ pub export fn wasm_module_exports(m: ?*const Module, out: ?*types.ExportTypeVec)
     types.wasm_exporttype_vec_new(o, built.items.len, if (built.items.len > 0) built.items.ptr else null);
 }
 
+/// The binding `Module` an Instance was instantiated from (held as an
+/// opaque slot to avoid a Zone-3 import cycle; forward-cast here).
+fn moduleOf(inst: ?*instance.Instance) ?*const Module {
+    const i = inst orelse return null;
+    const mp = i.module orelse return null;
+    return @ptrCast(@alignCast(mp));
+}
+
+/// functype externtype for the func at absolute funcidx `abs_idx`
+/// (imports first, then defined) in the instance's module — mirrors
+/// the `wasm_module_exports` func index-space build.
+fn funcExternTypeAt(inst: ?*instance.Instance, abs_idx: u32) ?*types.ExternType {
+    const mod = moduleOf(inst) orelse return null;
+    const bp = mod.bytes_ptr orelse return null;
+    var arena = std.heap.ArenaAllocator.init(ca);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var parsed = parser.parse(a, bp[0..mod.bytes_len]) catch return null;
+    defer parsed.deinit(a);
+    var func_types: ?sections.Types = null;
+    defer if (func_types) |*t| t.deinit();
+    if (parsed.find(.type)) |ts| func_types = sections.decodeTypes(a, ts.body) catch null;
+    var func_tis: std.ArrayList(u32) = .empty;
+    if (parsed.find(.import)) |imp_sec| {
+        var imps = sections.decodeImports(a, imp_sec.body) catch return null;
+        defer imps.deinit();
+        for (imps.items) |it| switch (it.payload) {
+            .func_typeidx => |ti| func_tis.append(a, ti) catch return null,
+            else => {},
+        };
+    }
+    if (parsed.find(.function)) |fs| {
+        const tis = sections.decodeFunctions(a, fs.body) catch return null;
+        for (tis) |ti| func_tis.append(a, ti) catch return null;
+    }
+    if (abs_idx >= func_tis.items.len) return null;
+    return functypeExtern(func_tis.items[abs_idx], func_types);
+}
+
+/// memorytype externtype for the memory at index `idx` (imports first,
+/// then defined) in the instance's module.
+fn memoryExternTypeAt(inst: ?*instance.Instance, idx: u32) ?*types.ExternType {
+    const mod = moduleOf(inst) orelse return null;
+    const bp = mod.bytes_ptr orelse return null;
+    var arena = std.heap.ArenaAllocator.init(ca);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var parsed = parser.parse(a, bp[0..mod.bytes_len]) catch return null;
+    defer parsed.deinit(a);
+    var mems: std.ArrayList(sections.MemoryEntry) = .empty;
+    if (parsed.find(.import)) |imp_sec| {
+        var imps = sections.decodeImports(a, imp_sec.body) catch return null;
+        defer imps.deinit();
+        for (imps.items) |it| switch (it.payload) {
+            .memory => |mem| mems.append(a, mem) catch return null,
+            else => {},
+        };
+    }
+    if (parsed.find(.memory)) |ms| {
+        var md = sections.decodeMemory(a, ms.body) catch return null;
+        defer md.deinit();
+        for (md.items) |mem| mems.append(a, mem) catch return null;
+    }
+    if (idx >= mems.items.len) return null;
+    return memorytypeExtern(mems.items[idx].min, mems.items[idx].max);
+}
+
+/// `wasm_extern_type(*const Extern) -> own wasm_externtype_t*` — the
+/// externtype of a runtime extern. global/table read the type cached
+/// on the handle; func/memory resolve through the instance module's
+/// per-kind index space. Owned result (caller `wasm_externtype_delete`).
+pub export fn wasm_extern_type(e: ?*const instance.Extern) callconv(.c) ?*types.ExternType {
+    const h = e orelse return null;
+    return switch (h.kind) {
+        .global => if (h.global) |g| globaltypeExtern(g.valtype, g.mutable) else null,
+        .table => if (h.table) |t| tabletypeExtern(t.elem_type, t.min, t.max) else null,
+        .func => if (h.func) |f| funcExternTypeAt(h.instance, f.func_idx) else null,
+        .memory => if (h.memory) |mem| memoryExternTypeAt(h.instance, mem.memory_idx) else null,
+    };
+}
+
 // =====================================================================
 // Tests
 // =====================================================================
@@ -331,4 +412,70 @@ test "wasm_module_exports: null-arg → empty vec, no crash" {
     wasm_module_exports(null, &exports);
     try testing.expectEqual(@as(usize, 0), exports.size);
     wasm_module_exports(null, null);
+}
+
+// (module (table (export "t") 1 funcref) (global (export "g") (mut i32) (i32.const 7)))
+const global_table_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x04, 0x04, 0x01, 0x70, 0x00, 0x01, // table: funcref min 1
+    0x06, 0x06, 0x01, 0x7f, 0x01, 0x41, 0x07, 0x0b, // global: (mut i32) = 7
+    0x07, 0x09, 0x02, 0x01, 0x74, 0x01, 0x00, 0x01, 0x67, 0x03, 0x00, // "t"→table0, "g"→global0
+};
+
+test "wasm_extern_type: func + memory externs resolve via the module index-space decode" {
+    const e = instance.wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer instance.wasm_engine_delete(e);
+    const s = instance.wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer instance.wasm_store_delete(s);
+    var bytes = export_wasm;
+    const bv: vec.ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = instance.wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer instance.wasm_module_delete(m);
+    const inst = instance.wasm_instance_new(s, m, null, null) orelse return error.InstanceAllocFailed;
+    defer instance.wasm_instance_delete(inst);
+
+    var exports: vec.ExternVec = .{ .size = 0, .data = null };
+    instance.wasm_instance_exports(inst, &exports);
+    defer instance.wasm_extern_vec_delete(&exports);
+    try testing.expectEqual(@as(usize, 2), exports.size);
+    const data = exports.data.?;
+
+    const ft = wasm_extern_type(data[0]) orelse return error.NoFuncType;
+    defer types.wasm_externtype_delete(ft);
+    try testing.expectEqual(types.extern_func, types.wasm_externtype_kind(ft));
+    try testing.expectEqual(@as(usize, 0), types.wasm_externtype_as_functype_const(ft).?.params.size);
+    try testing.expectEqual(@as(usize, 1), types.wasm_externtype_as_functype_const(ft).?.results.size);
+
+    const mt = wasm_extern_type(data[1]) orelse return error.NoMemType;
+    defer types.wasm_externtype_delete(mt);
+    try testing.expectEqual(types.extern_memory, types.wasm_externtype_kind(mt));
+
+    try testing.expect(wasm_extern_type(null) == null);
+}
+
+test "wasm_extern_type: table + global externs resolve from the cached handle fields" {
+    const e = instance.wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer instance.wasm_engine_delete(e);
+    const s = instance.wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer instance.wasm_store_delete(s);
+    var bytes = global_table_wasm;
+    const bv: vec.ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = instance.wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer instance.wasm_module_delete(m);
+    const inst = instance.wasm_instance_new(s, m, null, null) orelse return error.InstanceAllocFailed;
+    defer instance.wasm_instance_delete(inst);
+
+    var exports: vec.ExternVec = .{ .size = 0, .data = null };
+    instance.wasm_instance_exports(inst, &exports);
+    defer instance.wasm_extern_vec_delete(&exports);
+    try testing.expectEqual(@as(usize, 2), exports.size);
+    const data = exports.data.?;
+
+    const tt = wasm_extern_type(data[0]) orelse return error.NoTableType;
+    defer types.wasm_externtype_delete(tt);
+    try testing.expectEqual(types.extern_table, types.wasm_externtype_kind(tt));
+
+    const gt = wasm_extern_type(data[1]) orelse return error.NoGlobalType;
+    defer types.wasm_externtype_delete(gt);
+    try testing.expectEqual(types.extern_global, types.wasm_externtype_kind(gt));
 }

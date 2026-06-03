@@ -208,6 +208,7 @@ pub const wasm_module_validate = instance.wasm_module_validate;
 pub const wasm_module_delete = instance.wasm_module_delete;
 pub const wasm_module_imports = module_introspect.wasm_module_imports;
 pub const wasm_module_exports = module_introspect.wasm_module_exports;
+pub const wasm_extern_type = module_introspect.wasm_extern_type;
 pub const wasm_instance_new = instance.wasm_instance_new;
 pub const wasm_instance_delete = instance.wasm_instance_delete;
 pub const zwasm_instance_get_func = instance.zwasm_instance_get_func;
