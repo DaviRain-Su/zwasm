@@ -83,13 +83,22 @@ pub fn fdWrite(
     const slot = host.translateFd(fd) orelse return .badf;
     if (slot.kind == .closed) return .badf;
 
+    // stdout/stderr route to a capture buffer (or are dropped); a file fd
+    // writes to the host file at its cursor via std.Io.File (D-243 cycle 2).
+    var file_opt: ?std.Io.File = null;
     const buffer: ?*std.ArrayList(u8) = switch (slot.kind) {
         .stdout => host.stdout_buffer,
         .stderr => host.stderr_buffer,
         .stdin => return .notsup,
-        .file, .dir => return .notsup, // §9.4 / 4.5 will wire fd-backed writes
+        .dir => return .isdir,
+        .file => fblk: {
+            file_opt = .{ .handle = slot.host_handle orelse return .badf, .flags = .{ .nonblocking = false } };
+            break :fblk null;
+        },
         .closed => return .badf,
     };
+    const io_opt = host.io;
+    if (file_opt != null and io_opt == null) return .nosys;
 
     var total: u32 = 0;
     var i: u32 = 0;
@@ -98,9 +107,8 @@ pub fn fdWrite(
         const buf = readU32LE(mem, entry_off) orelse return .fault;
         const buf_len = readU32LE(mem, entry_off + 4) orelse return .fault;
         const slice = sliceMemConst(mem, buf, buf_len) orelse return .fault;
-        if (buffer) |b| {
-            b.appendSlice(host.alloc, slice) catch return .nomem;
-        }
+        if (buffer) |b| b.appendSlice(host.alloc, slice) catch return .nomem;
+        if (file_opt) |f| f.writeStreamingAll(io_opt.?, slice) catch return .io;
         total += buf_len;
     }
     return writeU32LE(mem, nwritten_ptr, total);
@@ -127,7 +135,8 @@ pub fn fdRead(
     switch (slot.kind) {
         .stdin => {},
         .stdout, .stderr => return .notsup,
-        .file, .dir => return .notsup,
+        .dir => return .isdir,
+        .file => return fdReadFile(host, mem, slot, iovec_ptr, iovec_count, nread_ptr),
         .closed => return .badf,
     }
 
@@ -150,6 +159,35 @@ pub fn fdRead(
         } else {
             break; // no stdin source = EOF
         }
+    }
+    return writeU32LE(mem, nread_ptr, total);
+}
+
+/// Scatter-read a file fd into the iovecs at the file's cursor via
+/// std.Io.File (D-243 cycle 2). A short read (n < iovec len) is EOF and
+/// stops the scatter, per the WASI fd_read contract.
+fn fdReadFile(host: *Host, mem: []u8, slot: *host_mod.OpenFd, iovec_ptr: u32, iovec_count: u32, nread_ptr: u32) p1.Errno {
+    const handle = slot.host_handle orelse return .badf;
+    const io = host.io orelse return .nosys;
+    const file: std.Io.File = .{ .handle = handle, .flags = .{ .nonblocking = false } };
+    var total: u32 = 0;
+    var i: u32 = 0;
+    while (i < iovec_count) : (i += 1) {
+        const entry_off = iovec_ptr + i * 8;
+        const buf = readU32LE(mem, entry_off) orelse return .fault;
+        const buf_len = readU32LE(mem, entry_off + 4) orelse return .fault;
+        const dst = sliceMem(mem, buf, buf_len) orelse return .fault;
+        if (dst.len == 0) continue;
+        // readStreaming raises error.EndOfStream at EOF (it does NOT
+        // return 0); WASI fd_read reports EOF as nread=0, success.
+        const n: usize = file.readStreaming(io, &[_][]u8{dst}) catch |e| blk: {
+            if (e == error.EndOfStream) break :blk 0;
+            return .io;
+        };
+        if (n == 0) break; // EOF
+        total += @intCast(n);
+        if (n < dst.len) break; // short read
+
     }
     return writeU32LE(mem, nread_ptr, total);
 }
@@ -739,6 +777,36 @@ test "pathOpen: O_CREAT creates a new file inside a real preopen (D-243)" {
     const file: std.Io.File = .{ .handle = slot.host_handle.?, .flags = .{ .nonblocking = false } };
     file.close(testing.io);
     slot.kind = .closed;
+}
+
+test "fdWrite + fdRead round-trip through a real file fd (D-243 cycle 2)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = testing.io;
+    const dirfd = try h.addPreopen(tmp.dir.handle, "/sandbox");
+
+    var mem: [128]u8 = @splat(0);
+    @memcpy(mem[16..22], "rt.txt");
+
+    // Create + write "hello fd" via a file fd.
+    try testing.expectEqual(p1.Errno.success, pathOpen(&h, &mem, dirfd, 0, 16, 6, p1.OFLAGS_CREAT, p1.RIGHTS_FD_WRITE, 0, 0, 100));
+    const wfd = std.mem.readInt(u32, mem[100..104], .little);
+    @memcpy(mem[48..56], "hello fd");
+    std.mem.writeInt(u32, mem[32..36], 48, .little); // ciovec.buf
+    std.mem.writeInt(u32, mem[36..40], 8, .little); // ciovec.len
+    try testing.expectEqual(p1.Errno.success, fdWrite(&h, &mem, wfd, 32, 1, 104));
+    try testing.expectEqual(@as(u32, 8), std.mem.readInt(u32, mem[104..108], .little));
+
+    // Reopen for read and read it back (fresh fd → cursor at 0).
+    try testing.expectEqual(p1.Errno.success, pathOpen(&h, &mem, dirfd, 0, 16, 6, 0, p1.RIGHTS_FD_READ, 0, 0, 100));
+    const rfd = std.mem.readInt(u32, mem[100..104], .little);
+    std.mem.writeInt(u32, mem[32..36], 64, .little); // iovec.buf
+    std.mem.writeInt(u32, mem[36..40], 32, .little); // iovec.len (capacity)
+    try testing.expectEqual(p1.Errno.success, fdRead(&h, &mem, rfd, 32, 1, 108));
+    try testing.expectEqual(@as(u32, 8), std.mem.readInt(u32, mem[108..112], .little)); // nread
+    try testing.expectEqualStrings("hello fd", mem[64..72]);
 }
 
 test "fdFdstatSetFlags: persists allowed bits + masks unknown ones" {
