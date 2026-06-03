@@ -48,13 +48,14 @@ Two open tracks, both within Phase 13's surface (pick either; runtime-entity is 
    `main`, cli/main.zig:43/58) — a C-library context (`libzwasm.so`, Zig startup never runs) can't reach it, so
    inherit needs platform C APIs (`_NSGetArgv` / `/proc/self/cmdline` / `GetCommandLineW`) or the C `environ`
    global = new libc sites (§14 "unconscious libc fanout"). Do the ADR-0070 amend as Step 1 of that chunk.
-2. **Close §13.2 + START §13.4.** §13.2's load-bearing surface is done; C/E remain in D-253 (§13.4-driven). Per
-   ADR-0132 (foreign bulk genuinely references §13.4 to know what's load-bearing): file a short ADR re-scoping §13.2
-   (core done; C/E → D-253/§13.4), mark §13.2 `[x]` with that forward-ref, run audit_scaffolding (sub-task, not a
-   phase boundary — opportunistic), then **§13.4**: scaffold `test/c_api_conformance/` + port a minimal wasm-c-api
-   example (e.g. the upstream `hello`/`callback` example) exercising the implemented surface (engine/store/module/
-   instance/exports/func_call + a host func via wasm_func_new). This VALIDATES §13.2 end-to-end + reveals which of
-   D-253 C/E matter. (§13.3 wasi remainder still needs the ADR-0070 io/process-provenance decision; can interleave.)
+2. **§13.4 — more conformance examples.** §13.2 closed (ADR-0142); §13.4 scaffolded (`5a19ebd6`):
+   `test/c_api_conformance/callback.c` (host func via real C ABI) + `zig build test-c-api-conformance` (in test-all).
+   It already caught + fixed a real ABI bug (`wasm_instance_new` read imports as a bare array vs wasm.h's
+   `wasm_extern_vec_t*`). NEXT: add more `.c` ports exercising the rest — host **global/memory/table imports**
+   (validates the `_new` trio + their `_as_extern` through the C ABI; likely surfaces more ABI mismatches like the
+   imports one), then ref/foreign usage (reveals which D-253 C/E matter). Add each as a `conformance_cases` entry.
+   **WATCH: instance.zig 3299/3300 — any further instance.zig growth needs extraction (cross-module tests / ref
+   machinery) or a 3rd exempt bump; prefer extraction.** (§13.3 wasi remainder still ADR-0070-blocked.)
 
 gap: `.dev/phase13_capi_gap.md`.
 
@@ -75,9 +76,9 @@ prose. Standing `soon` (not Phase-12): 10 ADR + 10 lesson `<backfill>` markers; 
 
 ## Step 0.7 (next resume)
 
-This turn landed §13.2 `wasm_foreign` + host_info + as_ref/ref_as_foreign (D-253 D): Mac test+lint+zone green,
-instance.zig 3299/3300. An ubuntu `test` is kicked against this turn's HEAD → next resume `tail /tmp/ubuntu.log` for
-OK (c_allocator + ptr-as-externref, host-portable). Prior ubuntu `3988494d` OK; windowsmini `0810b339` GREEN.
+This turn closed §13.2 (ADR-0142) + scaffolded §13.4 (callback conformance) + fixed the wasm_instance_new imports
+ABI bug: Mac test+lint+zone+test-c-api-conformance green, instance.zig 3299/3300. An ubuntu `test-all` is kicked
+(conformance is in test-all, not `test`) → next resume `tail /tmp/ubuntu.log` for OK. Prior ubuntu `9c15ca50` OK; windowsmini `0810b339` GREEN.
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile: `zig build test
 -Dtarget=x86_64-windows-gnu` (compile-only). 3-host reconcile = phase boundary.
