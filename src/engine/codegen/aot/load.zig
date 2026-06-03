@@ -66,6 +66,11 @@ pub const LoadedModule = struct {
     /// idx), parsed from the types section for standalone entry
     /// dispatch. Allocator-owned.
     func_result_kinds: []ResultKind,
+    /// Pre-evaluated defined-global init values (v0.3 §12.3b), one
+    /// `Value.bits128` per defined global. A stateful standalone runtime
+    /// memcpys these into `globals_base`. Allocator-owned; empty when the
+    /// `.cwasm` has no globals.
+    globals: []u128,
     /// Imported-function count; `entry`/`resolveEntry` index defined
     /// funcs (wasm idx - n_imports).
     n_imports: u32,
@@ -75,6 +80,7 @@ pub const LoadedModule = struct {
         for (self.exports) |e| self.allocator.free(e.name);
         self.allocator.free(self.exports);
         self.allocator.free(self.func_result_kinds);
+        self.allocator.free(self.globals);
         self.allocator.free(self.func_offsets);
         jit_mem.free(self.block);
     }
@@ -132,6 +138,7 @@ pub fn load(allocator: Allocator, bytes: []const u8) Error!LoadedModule {
     if (@as(u64, h.metadata_offset) + h.metadata_size > bytes.len) return Error.TruncatedImage;
     if (@as(u64, h.relocs_offset) + h.relocs_size > bytes.len) return Error.TruncatedImage;
     if (@as(u64, h.exports_offset) + h.exports_size > bytes.len) return Error.TruncatedImage;
+    if (@as(u64, h.globals_offset) + h.globals_size > bytes.len) return Error.TruncatedImage;
     if (h.code_size == 0) return Error.TruncatedImage; // nothing executable to load
 
     // Exports section (v0.2): dup names into allocator-owned memory so
@@ -141,6 +148,10 @@ pub fn load(allocator: Allocator, bytes: []const u8) Error!LoadedModule {
         for (exports) |e| allocator.free(e.name);
         allocator.free(exports);
     }
+
+    // Globals section (v0.3): copy pre-evaluated init values out of `bytes`.
+    const globals = try parseGlobals(allocator, bytes, h);
+    errdefer allocator.free(globals);
 
     // Allocate the executable block, copy the code section in (W^X:
     // writable while copying/patching, executable before any entry call).
@@ -171,9 +182,28 @@ pub fn load(allocator: Allocator, bytes: []const u8) Error!LoadedModule {
         .func_offsets = func_offsets,
         .exports = exports,
         .func_result_kinds = func_result_kinds,
+        .globals = globals,
         .n_imports = h.n_imports,
         .allocator = allocator,
     };
+}
+
+/// Parse the v0.3 globals section ([n_globals: u32] then n_globals ×
+/// 16-byte values) into an allocator-owned `[]u128`. Empty (or a v0.2-
+/// shaped image with globals_size 0) yields zero globals.
+fn parseGlobals(allocator: Allocator, bytes: []const u8, h: format.CwasmHeader) Error![]u128 {
+    if (h.globals_size < 4) return allocator.alloc(u128, 0);
+    const section = bytes[h.globals_offset..][0..h.globals_size];
+    const n_globals = std.mem.readInt(u32, section[0..4], .little);
+    if (4 + @as(u64, n_globals) * format.global_value_size > section.len) return Error.TruncatedImage;
+
+    const out = try allocator.alloc(u128, n_globals);
+    errdefer allocator.free(out);
+    for (0..n_globals) |i| {
+        const off = 4 + i * format.global_value_size;
+        out[i] = std.mem.readInt(u128, section[off..][0..format.global_value_size], .little);
+    }
+    return out;
 }
 
 /// Walk the producer's types section to `type_idx` and return that

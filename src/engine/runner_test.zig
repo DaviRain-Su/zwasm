@@ -34,6 +34,7 @@ const TypedResult = @import("codegen/shared/entry_buffer_write.zig").TypedResult
 
 const aot_produce = @import("codegen/aot/produce.zig");
 const aot_load = @import("codegen/aot/load.zig");
+const aot_run = @import("codegen/aot/run.zig");
 
 test "runI32Export: memory64 store+load round-trip via i64 idx_type (ADR-0111 D4 e2e)" {
     // D-181 discharge: x86_64 SysV `emitMemOpI64` X-form + wrap-check
@@ -1626,7 +1627,7 @@ test "AOT<->JIT differential: .cwasm produce->load->execute equals the JIT resul
     var compiled = try compileWasm(testing.allocator, &wasm_bytes);
     defer compiled.deinit(testing.allocator);
 
-    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled);
+    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled, &wasm_bytes);
     defer testing.allocator.free(cwasm);
 
     var mod = try aot_load.load(testing.allocator, cwasm);
@@ -1665,7 +1666,7 @@ test "AOT<->JIT differential: () -> i64 const round-trips through produce->load 
 
     var compiled = try compileWasm(testing.allocator, &wasm_bytes);
     defer compiled.deinit(testing.allocator);
-    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled);
+    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled, &wasm_bytes);
     defer testing.allocator.free(cwasm);
     var mod = try aot_load.load(testing.allocator, cwasm);
     defer mod.deinit();
@@ -1700,7 +1701,7 @@ test "AOT<->JIT differential: internal call's direct-call reloc executes through
 
     var compiled = try compileWasm(testing.allocator, &wasm_bytes);
     defer compiled.deinit(testing.allocator);
-    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled);
+    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled, &wasm_bytes);
     defer testing.allocator.free(cwasm);
     var mod = try aot_load.load(testing.allocator, cwasm);
     defer mod.deinit();
@@ -1728,7 +1729,7 @@ test "AOT producer serialises the func export table → loaded .cwasm resolves e
 
     var compiled = try compileWasm(testing.allocator, &wasm_bytes);
     defer compiled.deinit(testing.allocator);
-    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled);
+    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled, &wasm_bytes);
     defer testing.allocator.free(cwasm);
     var mod = try aot_load.load(testing.allocator, cwasm);
     defer mod.deinit();
@@ -1744,4 +1745,33 @@ test "AOT producer serialises the func export table → loaded .cwasm resolves e
     const Fn = *const fn (*const entry.JitRuntime) callconv(.c) u32;
     const idx = mod.resolveEntry("f").?;
     try testing.expectEqual(@as(u32, 7), mod.entry(idx, Fn)(&owned.rt));
+}
+
+test "stateful .cwasm cycle-1: global.get returns the serialised init value via standalone runEntry (§12.3b)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+
+    // (module (global i32 (i32.const 42)) (func (export "g") (result i32)
+    //   global.get 0)). Reads a declared global → exercises the
+    // reconstructed globals_base (a stateless runtime would read 0).
+    const wasm_bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, 0x03,
+        0x02, 0x01, 0x00, 0x06, 0x06, 0x01, 0x7f, 0x00,
+        0x41, 0x2a, 0x0b, 0x07, 0x05, 0x01, 0x01, 0x67,
+        0x00, 0x00, 0x0a, 0x06, 0x01, 0x04, 0x00, 0x23,
+        0x00, 0x0b,
+    };
+
+    var compiled = try compileWasm(testing.allocator, &wasm_bytes);
+    defer compiled.deinit(testing.allocator);
+    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled, &wasm_bytes);
+    defer testing.allocator.free(cwasm);
+    var mod = try aot_load.load(testing.allocator, cwasm);
+    defer mod.deinit();
+
+    // The producer serialised the global's evaluated value; the standalone
+    // runner reconstructs globals_base, so global.get 0 yields 42 (not 0).
+    try testing.expectEqual(@as(usize, 1), mod.globals.len);
+    const idx = mod.resolveEntry("g").?;
+    try testing.expectEqual(@as(u64, 42), try aot_run.runEntry(&mod, idx));
 }

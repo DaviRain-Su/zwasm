@@ -61,7 +61,7 @@ pub fn run(
     var compiled = try runner.compileWasm(gpa, wasm_bytes);
     defer compiled.deinit(gpa);
 
-    const cwasm_bytes = try aot_produce.produceFromCompiledWasm(gpa, &compiled);
+    const cwasm_bytes = try aot_produce.produceFromCompiledWasm(gpa, &compiled, wasm_bytes);
     defer gpa.free(cwasm_bytes);
 
     cwd.writeFile(io, .{ .sub_path = out, .data = cwasm_bytes }) catch {

@@ -63,6 +63,14 @@ fn minimalRuntime() JitRuntime {
 /// entry). Propagates `Error.Trap`; rejects out-of-subset result types.
 pub fn runEntry(loaded: *const load.LoadedModule, idx: usize) Error!u64 {
     var rt = minimalRuntime();
+    // §12.3b: wire the reconstructed globals. `LoadedModule.globals` is
+    // `[]u128` = the runtime's `[]Value` (extern union, 16 B, 16-align) bit
+    // pattern, so a pointer cast suffices (no copy). A `global.set` during
+    // the run mutates this owned buffer in place — fine for a single call.
+    if (loaded.globals.len > 0) {
+        rt.globals_base = @ptrCast(loaded.globals.ptr);
+        rt.globals_count = @intCast(loaded.globals.len);
+    }
     const VoidFn = *const fn (*const JitRuntime) callconv(.c) void;
     const I32Fn = *const fn (*const JitRuntime) callconv(.c) u32;
     return switch (loaded.resultKind(idx)) {

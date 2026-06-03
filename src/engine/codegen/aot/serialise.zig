@@ -73,6 +73,11 @@ pub const Input = struct {
     /// Lets a loaded `.cwasm` resolve `_start`/`main`/`--invoke <name>`
     /// without re-parsing the original `.wasm`. Empty for none.
     exports: []const format.CwasmExport = &.{},
+    /// Pre-evaluated defined-global init values (v0.3, ADR-0139 §12.3b),
+    /// one `Value.bits128` per global in defined-global order. A standalone
+    /// runtime memcpys these into `globals_base` — no init-expr eval at
+    /// load. Empty for modules with no defined globals.
+    globals: []const u128 = &.{},
 };
 
 /// Produce a `.cwasm` v0.2 byte stream. Caller owns the
@@ -103,6 +108,9 @@ pub fn produceCwasm(allocator: Allocator, input: Input) Error![]u8 {
     var exports_size: u32 = 4;
     for (input.exports) |e| exports_size += @intCast(format.exportEntrySize(e.name.len));
 
+    // Globals section: 4-byte count then n_globals × 16-byte values.
+    const globals_size: u32 = 4 + @as(u32, @intCast(input.globals.len)) * format.global_value_size;
+
     // Code section: concatenate per-func bytes with 4-byte
     // alignment between funcs (loader mmap()s with
     // PROT_EXEC; arm64 prefers 4-byte-aligned function
@@ -121,7 +129,8 @@ pub fn produceCwasm(allocator: Allocator, input: Input) Error![]u8 {
     const types_offset: u32 = metadata_offset + metadata_size;
     const relocs_offset: u32 = types_offset + types_size;
     const exports_offset: u32 = relocs_offset + relocs_size;
-    const code_offset: u32 = exports_offset + exports_size;
+    const globals_offset: u32 = exports_offset + exports_size;
+    const code_offset: u32 = globals_offset + globals_size;
     const total_size: u32 = code_offset + code_size;
 
     var out = try allocator.alloc(u8, total_size);
@@ -144,6 +153,8 @@ pub fn produceCwasm(allocator: Allocator, input: Input) Error![]u8 {
         .relocs_size = relocs_size,
         .exports_offset = exports_offset,
         .exports_size = exports_size,
+        .globals_offset = globals_offset,
+        .globals_size = globals_size,
     };
     try format.writeHeader(out[0..format.header_size], header);
 
@@ -187,7 +198,14 @@ pub fn produceCwasm(allocator: Allocator, input: Input) Error![]u8 {
         exp_cursor += @intCast(written);
     }
 
-    // 6. Code section.
+    // 6. Globals section: [n_globals: u32] then n_globals × 16-byte values.
+    std.mem.writeInt(u32, out[globals_offset..][0..4], @intCast(input.globals.len), .little);
+    for (input.globals, 0..) |v, i| {
+        const off = globals_offset + 4 + @as(u32, @intCast(i)) * format.global_value_size;
+        std.mem.writeInt(u128, out[off..][0..format.global_value_size], v, .little);
+    }
+
+    // 7. Code section.
     for (input.bytes_per_func, 0..) |b, i| {
         const off = code_offset + per_func_offsets[i];
         @memcpy(out[off..][0..b.len], b);

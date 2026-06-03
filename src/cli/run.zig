@@ -408,7 +408,7 @@ test "runCwasm: compile → produce → load+run a .cwasm, i32 result surfaces a
 
     var compiled = try runner.compileWasm(testing.allocator, &wasm);
     defer compiled.deinit(testing.allocator);
-    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled);
+    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled, &wasm);
     defer testing.allocator.free(cwasm);
 
     // Default entry resolution (no _start/main → first func export "f").

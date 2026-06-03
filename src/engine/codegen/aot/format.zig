@@ -26,12 +26,13 @@ const std = @import("std");
 
 pub const magic = [4]u8{ 'C', 'W', 'A', 'S' };
 pub const version_v0_1: u32 = 0x0001_0000; // (major << 16) | minor — superseded
-pub const version_v0_2: u32 = 0x0002_0000; // current: adds the exports section (ADR-0138)
+pub const version_v0_2: u32 = 0x0002_0000; // superseded: exports section (ADR-0138)
+pub const version_v0_3: u32 = 0x0003_0000; // current: + globals section (ADR-0139 §12.3b)
 
 pub const arch_arm64: u32 = 1;
 pub const arch_x86_64: u32 = 2;
 
-pub const header_size: u32 = 68; // v0.2: 60 (v0.1) + exports_offset + exports_size (ADR-0138)
+pub const header_size: u32 = 76; // v0.3: 68 (v0.2) + globals_offset + globals_size (ADR-0139)
 pub const func_meta_size: u32 = 12;
 pub const reloc_size: u32 = 9; // 4 + 4 + 1 (no padding)
 pub const reloc_kind_direct_call: u8 = 0;
@@ -66,7 +67,15 @@ pub const CwasmHeader = struct {
     // entry points by name without re-parsing the original `.wasm`.
     exports_offset: u32 = 0,
     exports_size: u32 = 0,
+    // v0.3 (ADR-0139 §12.3b): globals section — pre-evaluated defined-global
+    // init values (16 B each, `Value.bits128`) so a standalone runtime
+    // reconstructs `globals_base` without re-evaluating init-exprs.
+    globals_offset: u32 = 0,
+    globals_size: u32 = 0,
 };
+
+/// Bytes per serialised global value (one `runtime.Value` = 16 B).
+pub const global_value_size: u32 = 16;
 
 /// One entry in the exports section (v0.2). Func-kind exports only —
 /// `zwasm run` invokes functions. On parse, `name` aliases into the
@@ -105,7 +114,7 @@ pub const CwasmReloc = struct {
 pub fn writeHeader(buf: []u8, h: CwasmHeader) Error!void {
     if (buf.len < header_size) return Error.TruncatedHeader;
     @memcpy(buf[0..4], &magic);
-    std.mem.writeInt(u32, buf[4..8], version_v0_2, .little);
+    std.mem.writeInt(u32, buf[4..8], version_v0_3, .little);
     std.mem.writeInt(u32, buf[8..12], h.arch, .little);
     std.mem.writeInt(u32, buf[12..16], h.flags, .little);
     std.mem.writeInt(u32, buf[16..20], h.n_funcs, .little);
@@ -121,13 +130,15 @@ pub fn writeHeader(buf: []u8, h: CwasmHeader) Error!void {
     std.mem.writeInt(u32, buf[56..60], h.relocs_size, .little);
     std.mem.writeInt(u32, buf[60..64], h.exports_offset, .little);
     std.mem.writeInt(u32, buf[64..68], h.exports_size, .little);
+    std.mem.writeInt(u32, buf[68..72], h.globals_offset, .little);
+    std.mem.writeInt(u32, buf[72..76], h.globals_size, .little);
 }
 
 pub fn parseHeader(buf: []const u8) Error!CwasmHeader {
     if (buf.len < header_size) return Error.TruncatedHeader;
     if (!std.mem.eql(u8, buf[0..4], &magic)) return Error.BadMagic;
     const version = std.mem.readInt(u32, buf[4..8], .little);
-    if (version != version_v0_2) return Error.UnsupportedVersion;
+    if (version != version_v0_3) return Error.UnsupportedVersion;
     const arch = std.mem.readInt(u32, buf[8..12], .little);
     if (arch != arch_arm64 and arch != arch_x86_64) return Error.UnknownArch;
     return .{
@@ -146,6 +157,8 @@ pub fn parseHeader(buf: []const u8) Error!CwasmHeader {
         .relocs_size = std.mem.readInt(u32, buf[56..60], .little),
         .exports_offset = std.mem.readInt(u32, buf[60..64], .little),
         .exports_size = std.mem.readInt(u32, buf[64..68], .little),
+        .globals_offset = std.mem.readInt(u32, buf[68..72], .little),
+        .globals_size = std.mem.readInt(u32, buf[72..76], .little),
     };
 }
 
@@ -252,6 +265,8 @@ test "writeHeader/parseHeader: round-trip preserves all fields" {
         .relocs_size = 27,
         .exports_offset = 173,
         .exports_size = 19,
+        .globals_offset = 192,
+        .globals_size = 32,
     };
     var buf: [header_size]u8 = undefined;
     try writeHeader(&buf, want);
@@ -289,23 +304,25 @@ test "parseHeader: rejects bad magic" {
 test "parseHeader: rejects unsupported version" {
     var buf: [header_size]u8 = undefined;
     @memcpy(buf[0..4], &magic);
-    std.mem.writeInt(u32, buf[4..8], 0x0003_0000, .little); // v0.3 (future, unsupported)
+    std.mem.writeInt(u32, buf[4..8], 0x0004_0000, .little); // v0.4 (future, unsupported)
     @memset(buf[8..], 0);
     try testing.expectError(Error.UnsupportedVersion, parseHeader(&buf));
 }
 
-test "parseHeader: rejects the superseded v0.1 version" {
+test "parseHeader: rejects the superseded v0.1 / v0.2 versions" {
     var buf: [header_size]u8 = undefined;
     @memcpy(buf[0..4], &magic);
-    std.mem.writeInt(u32, buf[4..8], version_v0_1, .little);
     @memset(buf[8..], 0);
+    std.mem.writeInt(u32, buf[4..8], version_v0_1, .little);
+    try testing.expectError(Error.UnsupportedVersion, parseHeader(&buf));
+    std.mem.writeInt(u32, buf[4..8], version_v0_2, .little);
     try testing.expectError(Error.UnsupportedVersion, parseHeader(&buf));
 }
 
 test "parseHeader: rejects unknown arch" {
     var buf: [header_size]u8 = undefined;
     @memcpy(buf[0..4], &magic);
-    std.mem.writeInt(u32, buf[4..8], version_v0_2, .little);
+    std.mem.writeInt(u32, buf[4..8], version_v0_3, .little);
     std.mem.writeInt(u32, buf[8..12], 99, .little); // unknown arch
     @memset(buf[12..], 0);
     try testing.expectError(Error.UnknownArch, parseHeader(&buf));
@@ -352,7 +369,7 @@ test "parseReloc: rejects truncated buffer" {
 }
 
 test "header_size + func_meta_size + reloc_size constants are stable" {
-    try testing.expectEqual(@as(u32, 68), header_size); // v0.2 (ADR-0138)
+    try testing.expectEqual(@as(u32, 76), header_size); // v0.3 (ADR-0139 §12.3b)
     try testing.expectEqual(@as(u32, 12), func_meta_size);
     try testing.expectEqual(@as(u32, 9), reloc_size);
 }

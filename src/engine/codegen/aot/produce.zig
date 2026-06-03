@@ -25,6 +25,9 @@ const serialise = @import("serialise.zig");
 
 const zir = @import("../../../ir/zir.zig");
 const runner = @import("../../runner.zig");
+const parser = @import("../../../parse/parser.zig");
+const sections = @import("../../../parse/sections.zig");
+const instantiate = @import("../../../runtime/instance/instantiate.zig");
 
 const Allocator = std.mem.Allocator;
 const FuncType = zir.FuncType;
@@ -33,6 +36,13 @@ pub const Error = serialise.Error || error{
     ParamCountTooLarge,
     ResultCountTooLarge,
     UnsupportedHostArch,
+    /// A defined global's init-expr is outside the §12.3b cycle-1 subset
+    /// (simple i32/i64/f/v128.const + ref.null). ref.func / global.get-import
+    /// / struct.new globals are cycle-2 — surfaced loudly, not zero-filled.
+    UnsupportedGlobalInit,
+    /// Re-parsing `wasm_bytes` for the global section failed (should not
+    /// happen — `compileWasm` already parsed+validated the same bytes).
+    GlobalSectionParseFailed,
 };
 
 /// Produce `.cwasm` bytes for the given CompiledWasm. The
@@ -44,6 +54,7 @@ pub const Error = serialise.Error || error{
 pub fn produceFromCompiledWasm(
     allocator: Allocator,
     compiled: *const runner.CompiledWasm,
+    wasm_bytes: []const u8,
 ) Error![]u8 {
     const arch = try hostArch();
 
@@ -118,6 +129,11 @@ pub fn produceFromCompiledWasm(
         exports[i] = .{ .name = e.name, .func_idx = e.func_idx };
     }
 
+    // Pre-evaluate defined-global init values (v0.3 §12.3b) so the loader
+    // reconstructs `globals_base` by memcpy, no init-expr eval at load.
+    const globals = try collectGlobalInits(allocator, wasm_bytes);
+    defer allocator.free(globals);
+
     const input: serialise.Input = .{
         .arch = arch,
         .bytes_per_func = bytes_per_func,
@@ -129,9 +145,34 @@ pub fn produceFromCompiledWasm(
         .n_imports = compiled.num_imports,
         .n_types = @intCast(n_funcs),
         .exports = exports,
+        .globals = globals,
     };
 
     return serialise.produceCwasm(allocator, input);
+}
+
+/// Evaluate each DEFINED global's init-expr into its 16-byte `Value` bits
+/// (v0.3 §12.3b). Re-parses `wasm_bytes` for the global section (a one-time
+/// generator cost; mirrors `setup.setupRuntime`'s eval). Returns an empty
+/// slice for modules with no global section. Cycle-1 handles simple const
+/// inits only — `ref.func` / `global.get` / `struct.new` globals (which need
+/// func_entities / imported-global values / a GC heap) surface as
+/// `UnsupportedGlobalInit` (cycle-2), never silently zero-filled.
+fn collectGlobalInits(allocator: Allocator, wasm_bytes: []const u8) Error![]u128 {
+    var module = parser.parse(allocator, wasm_bytes) catch return Error.GlobalSectionParseFailed;
+    defer module.deinit(allocator);
+
+    const gs = module.find(.global) orelse return allocator.alloc(u128, 0);
+    var globals = sections.decodeGlobals(allocator, gs.body) catch return Error.GlobalSectionParseFailed;
+    defer globals.deinit();
+
+    const out = try allocator.alloc(u128, globals.items.len);
+    errdefer allocator.free(out);
+    for (globals.items, 0..) |gd, i| {
+        const v = instantiate.evalConstExprValue(gd.init_expr) catch return Error.UnsupportedGlobalInit;
+        out[i] = v.bits128;
+    }
+    return out;
 }
 
 /// Map host arch → `.cwasm` arch tag. Producer-only-on-matching-
@@ -180,7 +221,7 @@ test "produceFromCompiledWasm: tiny synthetic wasm round-trips through compileWa
     var compiled = try runner.compileWasm(testing.allocator, &wasm_bytes);
     defer compiled.deinit(testing.allocator);
 
-    const out = try produceFromCompiledWasm(testing.allocator, &compiled);
+    const out = try produceFromCompiledWasm(testing.allocator, &compiled, &wasm_bytes);
     defer testing.allocator.free(out);
 
     const h = try format.parseHeader(out[0..format.header_size]);
