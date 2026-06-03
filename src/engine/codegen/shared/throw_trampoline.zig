@@ -442,25 +442,49 @@ fn invokeTrampolineWith(rt: *jit_abi.JitRuntime, tag_idx: u32) void {
         },
         .x86_64 => {
             const trampoline_addr: usize = @intFromPtr(&zwasmThrowTrampoline);
-            // R12 is callee-saved in SysV → preserved across the
-            // trampoline's CALL → safe slot to save R15. RBP is also
-            // callee-saved; push it on the stack, install the sentinel,
-            // call, then restore.
-            asm volatile (
-                \\movq %%r15, %%r12
-                \\movq %[rt], %%r15
-                \\pushq %%rbp
-                \\movq %[sentinel], %%rbp
-                \\movq %[tag], %%rdi
-                \\callq *%[addr]
-                \\popq %%rbp
-                \\movq %%r12, %%r15
-                :
-                : [rt] "r" (rt),
-                  [addr] "r" (trampoline_addr),
-                  [tag] "r" (tag_idx_widened),
-                  [sentinel] "r" (sentinel_ptr),
-                : x86_64_invoke_clobbers);
+            // R12 is callee-saved under BOTH SysV and Win64 → preserved
+            // across the trampoline's CALL → safe slot to save R15. RBP
+            // is also callee-saved on both; push it, install the sentinel,
+            // call, then restore. The two arms are identical except the
+            // incoming-tag register: the SysV trampoline body reads the
+            // tag from RDI (`movq %rdi,%rdx`), the Win64 body from RCX
+            // (`movq %rcx,%r10`) — see the `.windows` production arm above.
+            // The single `pushq %rbp` before `callq` is shared, so RSP
+            // parity at the trampoline entry matches between the two arms
+            // (and matches the production op_throw call site → entry RSP
+            // ≡ 8 mod 16, the standard callee convention).
+            switch (builtin.target.os.tag) {
+                .windows => asm volatile (
+                    \\movq %%r15, %%r12
+                    \\movq %[rt], %%r15
+                    \\pushq %%rbp
+                    \\movq %[sentinel], %%rbp
+                    \\movq %[tag], %%rcx
+                    \\callq *%[addr]
+                    \\popq %%rbp
+                    \\movq %%r12, %%r15
+                    :
+                    : [rt] "r" (rt),
+                      [addr] "r" (trampoline_addr),
+                      [tag] "r" (tag_idx_widened),
+                      [sentinel] "r" (sentinel_ptr),
+                    : x86_64_invoke_clobbers),
+                else => asm volatile (
+                    \\movq %%r15, %%r12
+                    \\movq %[rt], %%r15
+                    \\pushq %%rbp
+                    \\movq %[sentinel], %%rbp
+                    \\movq %[tag], %%rdi
+                    \\callq *%[addr]
+                    \\popq %%rbp
+                    \\movq %%r12, %%r15
+                    :
+                    : [rt] "r" (rt),
+                      [addr] "r" (trampoline_addr),
+                      [tag] "r" (tag_idx_widened),
+                      [sentinel] "r" (sentinel_ptr),
+                    : x86_64_invoke_clobbers),
+            }
         },
         else => @compileError("unsupported host arch"),
     }

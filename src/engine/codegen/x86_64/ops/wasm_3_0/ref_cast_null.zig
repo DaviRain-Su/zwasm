@@ -42,9 +42,9 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
     try ctx.buf.appendSlice(ctx.allocator, inst.encJccRel32(.e, 0).slice()); // placeholder rel32
 
     // Non-null path: jitGcRefCast(rt, ref, ht) → RAX (ref / 0=trap-on-mismatch).
-    if (xsrc != .rsi) try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, .rsi, xsrc).slice());
-    try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, .rdi, abi.runtime_ptr_save_gpr).slice());
-    try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm32W(.rdx, ht).slice());
+    if (xsrc != abi.current.arg_gprs[1]) try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, abi.current.arg_gprs[1], xsrc).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, abi.current.arg_gprs[0], abi.runtime_ptr_save_gpr).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm32W(abi.current.arg_gprs[2], ht).slice());
     const addr: u64 = @intFromPtr(&jit_abi.jitGcRefCast);
     try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm64Q(call_scratch, addr).slice());
     try ctx.buf.appendSlice(ctx.allocator, inst.encCallReg(call_scratch).slice());

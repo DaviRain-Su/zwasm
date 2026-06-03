@@ -35,8 +35,8 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
     const typeidx: u32 = @intCast(ins.payload);
 
     // Marshal SysV args: RDI = rt (R15), ESI = typeidx immediate.
-    try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, .rdi, abi.runtime_ptr_save_gpr).slice());
-    try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm32W(.rsi, typeidx).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, abi.current.arg_gprs[0], abi.runtime_ptr_save_gpr).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm32W(abi.current.arg_gprs[1], typeidx).slice());
     // Materialise &jitGcAlloc into R10 (emit scratch) and CALL it.
     const addr: u64 = @intFromPtr(&jit_abi.jitGcAlloc);
     try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm64Q(call_scratch, addr).slice());

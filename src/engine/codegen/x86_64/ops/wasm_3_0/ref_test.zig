@@ -33,10 +33,10 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
     const args = try ctx.popUnary(); // src=ref, result=i32
     // RSI = ref (64-bit reftype value).
     const xsrc = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
-    if (xsrc != .rsi) try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, .rsi, xsrc).slice());
+    if (xsrc != abi.current.arg_gprs[1]) try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, abi.current.arg_gprs[1], xsrc).slice());
     // RDI = rt (R15); EDX = ht|nullbit.
-    try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, .rdi, abi.runtime_ptr_save_gpr).slice());
-    try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm32W(.rdx, arg2).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, abi.current.arg_gprs[0], abi.runtime_ptr_save_gpr).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm32W(abi.current.arg_gprs[2], arg2).slice());
     // MOVABS R10 = &jitGcRefTest; CALL R10.
     const addr: u64 = @intFromPtr(&jit_abi.jitGcRefTest);
     try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm64Q(call_scratch, addr).slice());

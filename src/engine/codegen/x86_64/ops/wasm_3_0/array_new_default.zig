@@ -30,10 +30,10 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
     const args = try ctx.popUnary();
     // EDX = length (loaded + moved into arg2 BEFORE R10 is reused for &fn).
     const xlen = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.src, 0);
-    if (xlen != .rdx) try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.d, .rdx, xlen).slice());
+    if (xlen != abi.current.arg_gprs[2]) try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.d, abi.current.arg_gprs[2], xlen).slice());
     // RDI = rt (R15); ESI = typeidx.
-    try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, .rdi, abi.runtime_ptr_save_gpr).slice());
-    try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm32W(.rsi, typeidx).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, abi.current.arg_gprs[0], abi.runtime_ptr_save_gpr).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm32W(abi.current.arg_gprs[1], typeidx).slice());
     // MOVABS R10 = &jitGcAllocArray; CALL R10.
     const addr: u64 = @intFromPtr(&jit_abi.jitGcAllocArray);
     try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm64Q(call_scratch, addr).slice());
