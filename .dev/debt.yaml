@@ -27,8 +27,18 @@ entries:
       `bench/results/simd_gap_profile_p11_3.md`; `bench/runners/wasm/simd/` + `gen_simd_corpus.sh`; `scripts/simd_gap_analysis.sh`; `src/engine/codegen/x86_64/ops/wasm_2_0/*extmul*` (x86_64 has it, arm64 doesn't); ROADMAP §11.3 / §9.10 Track A / Phase 15
   - id: "D-245"
     layer: "code"
-    status: "now"
+    status: "partial"
     description: |-
+      **FIXED both gate arches (no-arg void path): arm64 `8eca59e3` (Mac-verified) + x86_64
+      `de576a76` (ubuntu ReleaseSafe-verified). `entry.invokeAndCheckVoid`'s no-arg branch now
+      calls the JIT via asm that save/restores the host callee-saved set (arm64 stp/ldp X19-X28;
+      x86_64 push/pop RBX/R12-R15 + sub/add $8 for 16-align). `zwasm run --engine=jit` (=
+      runVoidExport, the CLI path) now works in ReleaseSafe on both arches.** REMAINDER (status
+      partial): (a) win64 host→JIT entry still `@call` (windowsmini phase-boundary); (b) the
+      arg'd / i32 / v128 `invokeAndCheck*` variants still `@call` — ReleaseSafe-unsafe but
+      Debug-only-used (spec runner / test harness run Debug); same asm-save fix applies; (c) NO
+      ReleaseSafe regression test yet (the Debug-only `runWasmJit` test is why this shipped — add
+      a `zig build`-driven ReleaseSafe `--engine=jit` smoke gate). (Historical root cause below.)
       Host→JIT calls do NOT preserve the host's callee-saved registers → ANY JIT
       execution from the Zig host SEGV-corrupts the heap in **ReleaseSafe** (works in
       Debug). Surfaced via `zwasm run --engine=jit` (ADR-0136, `8011293a`): exit 134 on
