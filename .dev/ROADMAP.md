@@ -1182,8 +1182,8 @@ of each phase advances it.
 | 8     | DONE        | JIT optimisation foundation 🔒 (per ADR-0019)                                                |
 | 9     | DONE        | Wasm 1.0 + 2.0 (incl. SIMD) **literal 100%** (skip-impl == 0 across spec + edge_cases + realworld + differential) on 3 hosts + Phase 10 substrate readiness (build-option DCE across all layers; per ADR-0056 + ADR-0065 + ADR-0071 + ADR-0073) |
 | 10    | DONE        | GC, EH, Tail call, memory64 (Wasm 3.0 completion) — both backends per ADR-0133 spec-corpus exit |
-| 11    | IN-PROGRESS | WASI 0.1 full + bench infra (incl. SIMD per-op gap analysis, moved from §9.10 per Track A) |
-| 12    | PENDING     | AOT compilation mode                                                                        |
+| 11    | DONE        | WASI 0.1 full + bench infra (incl. SIMD per-op gap analysis, moved from §9.10 per Track A) |
+| 12    | IN-PROGRESS | AOT compilation mode                                                                        |
 | 13    | PENDING     | C API full (wasm-c-api conformance) 🔒                                                       |
 | 14    | PENDING     | CI matrix infrastructure                                                                    |
 | 15    | PENDING     | Performance parity with v1 + ClojureWasm migration                                          |
@@ -1423,11 +1423,11 @@ progresses):
 | Task    | Description                                                                                                                                                                                              | Done |
 |---------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------|
 | 11.0    | Open §11 inline + flip Phase Status widget (Phase 10 → DONE; Phase 11 → IN-PROGRESS).                                                                                                                     | [x]  |
-| 11.1    | WASI 0.1 (preview1) full — complete the syscall surface; close the realworld SKIP-WASI gaps (e.g. `go_math_big` instantiate error) on Mac + Linux; Windows realworld subset (25 samples).                | [ ]  |
-| 11.2    | Bench infra — per-merge auto-recording (Mac native + ubuntunote + `windowsmini` SSH per ADR-0067) into `bench/history.yaml`; `scripts/run_bench.sh --quick` local path.                                  | [ ]  |
+| 11.1    | WASI 0.1 (preview1) full — complete the syscall surface; close the realworld SKIP-WASI gaps (e.g. `go_math_big` instantiate error) on Mac + Linux; Windows realworld subset (25 samples).                | [x]  |
+| 11.2    | Bench infra — per-merge auto-recording into `bench/history.yaml` on **Mac native + ubuntunote** (`scripts/run_bench.sh --quick` local path). **Windows bench timing deferred per ADR-0137 / D-249** (hyperfine absent on `windowsmini`; not autonomously provisionable). 3-host *correctness* reconcile unaffected.                                  | [x]  |
 | 11.3    | SIMD per-op gap analysis vs (wasmtime, wazero, wasmer) — identify ops lagging > 3× the median; file Phase 15 debt entries (carried from §9.10 Track A). Profile: `bench/results/simd_gap_profile_p11_3.md` (0/12 ops > 3×; arm64 dot/extmul emit hole → D-246).                                                   | [x]  |
 | 11.4    | **Moved to Phase 15 (ADR-0135)**. GC-on-JIT precise rooting (D-211) is untestable without GC reclamation — a missed root can only UAF once objects are freed, and the Phase-10 collector is β no-reclaim (`collector_mark_sweep.zig:214`); ADR-0128 §2 = "rooting becomes load-bearing only when reclamation lands". Reclamation was unowned (not in §11.P exit, nor Phase 12/13/14). Re-sequenced: rooting + reclamation land together in Phase 15 (optimisation tier per P14; non-moving no-reclaim is correctness-safe to defer). Row preserved for citation lineage. | [~] moved to Phase 15 |
-| 11.P    | Phase 11 close — exit criteria met (50 realworld Mac+Linux + Windows subset + bench auto-record 3-host + SIMD gap profile) + widget 11 → DONE + Phase 12 inline expand.                                  | [ ]  |
+| 11.P    | Phase 11 close — exit criteria met (50 realworld Mac+Linux + Windows realworld subset green on windowsmini `bbc4900b` + bench auto-record **Mac+Linux** (Windows bench deferred ADR-0137/D-249) + SIMD gap profile) + 3-host `test-all` reconcile GREEN (windowsmini run-2 `bbc4900b` restored post-Phase-10-EH/GC-on-JIT, Win64 arg-marshal + RSP-parity fixes) + widget 11 → DONE + Phase 12 inline expand.                                  | [x]  |
 
 ### Phase 12 — AOT compilation mode
 

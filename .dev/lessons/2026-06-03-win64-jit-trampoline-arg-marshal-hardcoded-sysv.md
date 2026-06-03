@@ -34,9 +34,17 @@ exercise (the same structural blind spot as the OS-only compile drift in
   space. That is a holistic per-op rework, not a literal swap (tracked: D-248).
 - **A test wrapper that hand-marshals into a naked trampoline is ALSO an ABI surface.**
   `invokeTrampolineWith` was SysV-only (tag→RDI); the *production* `.windows` trampoline
-  reads the incoming tag from RCX, so the wrapper needed its own `.windows` arm. Mirror
-  the working SysV arm's push structure exactly so RSP parity at the trampoline entry
-  matches production (entry RSP ≡ 8 mod 16).
+  reads the incoming tag from RCX, so the wrapper needed its own `.windows` arm.
+- **A naked-trampoline test wrapper must reproduce the production call site's RSP PARITY,
+  not just route the right registers.** Confirmed root cause of the throw_trampoline Win64
+  crash (verified `bbc4900b`): mirroring the SysV arm's push structure was NOT enough — the
+  compiler-set in-body RSP in `invokeTrampolineWith` enters the trampoline at ≡0 mod 16, but
+  the production op_throw JIT `CALL` enters at ≡8, so `trampolineCore` was reached misaligned.
+  **SysV silently tolerated it (integer-only uncaught walk); Win64's ABI-strict aligned-SSE
+  prologue faulted (`0xffff…` SEGV at the call site).** Fix = a `subq/addq $8` nudge in the
+  `.windows` wrapper arm to force entry ≡8. Rule: when a test hand-calls a naked asm trampoline,
+  the 16-byte RSP parity at the trampoline entry must match the real (JIT) caller — a
+  same-direction misalignment only shows on the ABI that strictly requires aligned SSE.
 
 Related: [[2026-06-03-host-to-jit-must-preserve-callee-saved]] (D-245 — the *other* Win64
 host↔JIT ABI family: caller-saved preservation, distinct from arg-reg routing).
