@@ -455,12 +455,22 @@ fn invokeTrampolineWith(rt: *jit_abi.JitRuntime, tag_idx: u32) void {
             // ≡ 8 mod 16, the standard callee convention).
             switch (builtin.target.os.tag) {
                 .windows => asm volatile (
+                // The single `pushq %%rbp` would enter the trampoline at
+                // RSP ≡ 0 mod 16, but the production op_throw JIT `CALL`
+                // site enters at ≡ 8 — so the trampoline reaches
+                // `trampolineCore` at ≡ 0 instead of the ABI-required
+                // ≡ 8. SysV tolerates that (integer-only uncaught walk);
+                // Win64's ABI-strict aligned-SSE prologue in
+                // `trampolineCore` faults (D-248 sibling, throw_trampoline
+                // Win64 crash). `subq/addq $8` restores production parity.
                     \\movq %%r15, %%r12
                     \\movq %[rt], %%r15
                     \\pushq %%rbp
                     \\movq %[sentinel], %%rbp
                     \\movq %[tag], %%rcx
+                    \\subq $8, %%rsp
                     \\callq *%[addr]
+                    \\addq $8, %%rsp
                     \\popq %%rbp
                     \\movq %%r12, %%r15
                     :
