@@ -5,8 +5,10 @@
 
 ## Current state
 
-- **Phase**: **12 IN-PROGRESS — AOT compilation mode**. §12.0/§12.1/§12.2/§12.3/§12.3b `[x]`; next `[ ]` = §12.4
-  (cold-start bench). Phase 11 DONE. §12.5 (stack-map) Phase-15-coupled (ADR-0139). §12.P close after §12.4.
+- **Phase**: **12 IN-PROGRESS — AOT compilation mode**. §12.0–§12.4 + §12.3b all `[x]` (§12.4 cold-start bench
+  DONE `8a064761`: 6/6 SIMD fixtures 33-37% AOT-faster). Phase 11 DONE. **Remaining: §12.5 (stack-map) is
+  Phase-15-coupled (ADR-0139 — `zir.GcRootMap` empty) + §12.P close.** Next = evaluate the Phase-12 close:
+  §12.5 likely re-sequences to Phase 15 (mirrors §11.4→Phase 15 / ADR-0135), then §12.P closes the AOT core.
 - **§12.3b stateful `.cwasm` — COMPUTE subset DONE + bundle CLOSED** (ADR-0140). `.cwasm` v0.3 serialises +
   reconstructs module state from the artefact alone: globals (`797a7ef0`), memory + data segments (`58e97a09`),
   table 0 + element segments / `call_indirect` (`9b416428`). Delta: real memory/globals/table compute modules
@@ -20,13 +22,14 @@
 
 ## Next task (autonomous)
 
-§12.4 — cold-start bench-delta: AOT (`zwasm run prog.cwasm` = load+reloc+first-call) vs JIT (`zwasm run
---engine=jit prog.wasm` = compile+first-call) **≥30%** improvement on ≥3 **compute (zero-import)** fixtures (the
-SIMD corpus `bench/runners/wasm/simd/*.wasm` runs AOT today; pick ≥3). Step 0 survey: `scripts/run_bench.sh` (the
-hyperfine harness + `bench/results/history.yaml` schema), how to express the two commands as a hyperfine
-comparison, and whether `--engine=jit` runs the SIMD `_start` (the cli/run.zig `simd_start` test says yes). Bench
-2-host Mac+Linux (ADR-0137). Record the delta; threshold ≥30% (cold-start estimate `p8-8b3-aot-survey.md`). Then
-§12.5 stack-map (Phase-15-coupled — likely a thin reserved section or defer) + §12.P close.
+Phase-12 close evaluation. §12.5 (`.cwasm` stack-map section) is Phase-15-coupled (ADR-0139: `zir.GcRootMap` is
+an empty placeholder — no shape to serialise; the entry shape co-defines with Phase-15 precise rooting). So the
+right move (autonomous per ADR-0132, mirroring §11.4→Phase 15 / ADR-0135): re-sequence §12.5 → Phase 15 (lands
+with the GcRootMap shape) + re-scope §12.P's exit (drop the stack-map criterion, forward-ref) so Phase 12's AOT
+CORE closes now (loader + differential + cross-compile + stateful-compute + cold-start ≥30% all DONE). Then the
+phase-close ritual: **check §12.P→Phase 13 for a hard gate** (Phase 13 header has 🔒 — verify if a
+`.dev/phase*.md` gate doc is registered; if so, STOP + surface, else autonomous) → audit_scaffolding → backfill
+§12 SHAs → widget Phase 12 DONE / Phase 13 IN-PROGRESS → expand §13. File the §12.5-resequence ADR first.
 
 ## Deferred / open debt (none a Phase-12 blocker)
 
@@ -40,10 +43,11 @@ comparison, and whether `--engine=jit` runs the SIMD `_start` (the cli/run.zig `
 
 ## Step 0.7 (next resume)
 
-This turn = §12.3b re-scope + bundle close (ADR-0140) + cycle-2a was verified ubuntu `cf32e57a` OK. No new
-`src/` code this turn (ADR + ROADMAP + debt + handover only) → NO ubuntu kick owed; last code HEAD `cf32e57a`
-verified. Next resume: start §12.4 bench (no ubuntu pending). Phase-12 exec tests skip Win64 via `skip.phaseEnd`;
-windowsmini = phase-boundary.
+This turn landed §12.4 cold-start bench (`8a064761`): `scripts/bench_aot_coldstart.sh` + report, Mac-measured
+(6/6 SIMD fixtures 33-37% AOT-faster). Scripts + report only, NO `src/` Zig change → no ubuntu kick owed (the
+bench delta is architectural — load vs compile — and holds on x86_64; a Linux cold-start run is a nice-to-have,
+the script is re-runnable on ubuntu's nix shell). Last code HEAD verified ubuntu = `cf32e57a`. Phase-12 exec
+tests skip Win64 via `skip.phaseEnd`; windowsmini = phase-boundary.
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile: `zig build test
 -Dtarget=x86_64-windows-gnu` (compile-only). 3-host reconcile = phase boundary.
