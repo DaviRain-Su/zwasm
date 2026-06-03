@@ -576,6 +576,9 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             .tag_param_slot_counts = empty_tag_info.slot_counts,
             // No defined functions → no JIT exception entries (IT-5).
             .exception_table = .{ .entries = &.{} },
+            // No defined functions → nothing AOT-runnable to name (any
+            // export here targets an import, which can't be an entry).
+            .exports = &.{},
             .arena = arena,
         };
     }
@@ -1205,6 +1208,11 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
     );
     errdefer if (exception_entries.len > 0) allocator.free(exception_entries);
 
+    // Func-kind exports for the AOT producer (ADR-0138). Names + slice
+    // are arena-allocated via `a`, so they live as long as the returned
+    // CompiledWasm and need no explicit free in `deinit`.
+    const func_exports = try collectFuncExports(a, &module, total_funcs);
+
     return .{
         .module = linked,
         .func_results = results,
@@ -1217,8 +1225,28 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
         .tag_param_counts = tag_param_counts,
         .tag_param_slot_counts = tag_param_slot_counts,
         .exception_table = .{ .entries = exception_entries },
+        .exports = func_exports,
         .arena = arena,
     };
+}
+
+/// Collect func-kind exports (name → wasm func idx) for the AOT
+/// producer. Names and the returned slice are allocated via `a` (the
+/// CompiledWasm arena), so they share the module's lifetime. Returns an
+/// empty slice when there is no export section. Out-of-range targets are
+/// skipped defensively (the validator already rejects them upstream).
+fn collectFuncExports(a: Allocator, module: anytype, total_funcs: u32) Error![]const runner_mod.FuncExport {
+    const es = module.find(.@"export") orelse return &.{};
+    var exports = try sections.decodeExports(a, es.body);
+    defer exports.deinit();
+
+    var list: std.ArrayList(runner_mod.FuncExport) = .empty;
+    errdefer list.deinit(a);
+    for (exports.items) |e| {
+        if (e.kind != .func or e.idx >= total_funcs) continue;
+        try list.append(a, .{ .name = try a.dupe(u8, e.name), .func_idx = e.idx });
+    }
+    return list.toOwnedSlice(a);
 }
 
 // Post-compile init helpers extracted to `compile_init.zig` per

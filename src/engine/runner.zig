@@ -144,6 +144,14 @@ pub const Error = error{
 /// a single JitModule. Caller owns the module — pair with
 /// `module.deinit`. The `func_results` slice is also returned so
 /// the caller can introspect / `deinitFuncResult` each one.
+/// A func-kind export of a compiled module: name → wasm-space func
+/// index. The AOT producer serialises these so a loaded `.cwasm`
+/// resolves `_start`/`main`/`--invoke <name>` (ADR-0138).
+pub const FuncExport = struct {
+    name: []const u8,
+    func_idx: u32,
+};
+
 pub const CompiledWasm = struct {
     module: linker.JitModule,
     func_results: []compile_func.FuncResult,
@@ -198,6 +206,11 @@ pub const CompiledWasm = struct {
     /// `ExceptionTable.lookup(absolute_pc - block_addr, throw_tag_idx)`.
     /// Empty slice when no function contains a try_table.
     exception_table: exception_table_mod.ExceptionTable,
+    /// Func-kind exports (name → wasm func idx), for the AOT producer
+    /// (ADR-0138). Names + the slice are arena-owned (freed by
+    /// `arena.deinit()`), so `deinit` needs no extra free. Empty slice
+    /// when the module exports no functions.
+    exports: []const FuncExport,
     arena: std.heap.ArenaAllocator,
 
     pub fn deinit(self: *CompiledWasm, allocator: Allocator) void {

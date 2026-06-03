@@ -1711,3 +1711,37 @@ test "AOT<->JIT differential: internal call's direct-call reloc executes through
     const aot_result = mod.entry(0, Fn)(&owned.rt);
     try testing.expectEqual(jit_result, aot_result);
 }
+
+test "AOT producer serialises the func export table → loaded .cwasm resolves entry by name (§12.1 / ADR-0138)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+
+    // `() -> i32` returning 7, exported "f" (same module as the §12.2
+    // i32 differential). The producer must now carry the export so the
+    // loaded image resolves "f" without re-parsing the `.wasm`.
+    const wasm_bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, 0x03,
+        0x02, 0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 0x66,
+        0x00, 0x00, 0x0a, 0x06, 0x01, 0x04, 0x00, 0x41,
+        0x07, 0x0b,
+    };
+
+    var compiled = try compileWasm(testing.allocator, &wasm_bytes);
+    defer compiled.deinit(testing.allocator);
+    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled);
+    defer testing.allocator.free(cwasm);
+    var mod = try aot_load.load(testing.allocator, cwasm);
+    defer mod.deinit();
+
+    // Named lookup hits; default falls back to first func export.
+    try testing.expectEqual(@as(?usize, 0), mod.resolveEntry("f"));
+    try testing.expectEqual(@as(?usize, 0), mod.resolveEntry(null));
+    try testing.expectEqual(@as(?usize, null), mod.resolveEntry("absent"));
+
+    // The resolved entry executes.
+    var owned = try setupRuntime(testing.allocator, &compiled, &wasm_bytes);
+    defer owned.deinit(testing.allocator);
+    const Fn = *const fn (*const entry.JitRuntime) callconv(.c) u32;
+    const idx = mod.resolveEntry("f").?;
+    try testing.expectEqual(@as(u32, 7), mod.entry(idx, Fn)(&owned.rt));
+}

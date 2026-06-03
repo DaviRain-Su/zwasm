@@ -109,6 +109,15 @@ pub fn produceFromCompiledWasm(
         for (ty.results) |rs| try types_buf.append(allocator, @intFromEnum(rs));
     }
 
+    // Map the func-export table → the format's export shape (identical
+    // fields). produceCwasm copies names into the output, so this temp
+    // can be freed after; the source names are arena-owned by `compiled`.
+    var exports = try allocator.alloc(format.CwasmExport, compiled.exports.len);
+    defer allocator.free(exports);
+    for (compiled.exports, 0..) |e, i| {
+        exports[i] = .{ .name = e.name, .func_idx = e.func_idx };
+    }
+
     const input: serialise.Input = .{
         .arch = arch,
         .bytes_per_func = bytes_per_func,
@@ -119,6 +128,7 @@ pub fn produceFromCompiledWasm(
         .types_serialised = types_buf.items,
         .n_imports = compiled.num_imports,
         .n_types = @intCast(n_funcs),
+        .exports = exports,
     };
 
     return serialise.produceCwasm(allocator, input);
