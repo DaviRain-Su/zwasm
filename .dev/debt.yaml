@@ -3,6 +3,33 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-254"
+    layer: "process"
+    status: "blocked-by"
+    description: |-
+      blocked-by: test-host rustc absence (by design). §13.5 `rust_host` (the 3rd
+      embedding-ABI consumer, `examples/rust_host/hello.rs` over `extern "C"` +
+      `libzwasm.a`) builds + runs on the Mac host only — the §13.5 exit phrasing
+      "3-OS rust run" cannot be met because the ubuntunote / windowsmini test hosts
+      are artifact-runners with NO rustc by design (`toolchain_provisioning.md`:
+      fixtures are generated on Mac, the committed artifacts run toolchain-free on
+      the test hosts). The `run-rust-host` build step is therefore Mac-only and NOT
+      in test-all; per-chunk gate parity is the c_host C-ABI conformance (§13.4,
+      2-host) which exercises the SAME wasm.h surface rust_host consumes. Discharge:
+      either (a) provision rustc on the test hosts (cross the toolchain-free
+      invariant — needs an ADR), or (b) accept Mac-only as the §13.P-recorded scope
+      and re-phrase the §13.5 exit from "3-OS rust run" to "Mac rust_host + 2-host
+      C-ABI conformance". (b) is the expected resolution at §13.P.
+      SUB-NOTE (host config, non-blocking): this dev Mac's `xcrun --show-sdk-path`
+      is broken (prints "error: unable to find sdk: 'macosx'" to STDOUT, rc=255,
+      though the SDK is present under Xcode.app) — rustc's link step needs it. The
+      build step works around it by probing `SDKROOT` (xcrun-if-valid-dir, else the
+      two standard SDK locations). Root fix is host-side: `sudo xcodebuild
+      -runFirstLaunch` / `sudo xcode-select --reset` (out of autonomous scope).
+    first_raised: "2026-06-04"
+    last_reviewed: "2026-06-04"
+    refs: |-
+      `examples/rust_host/hello.rs`; `build.zig` (`run-rust-host` step + SDKROOT probe); `.dev/toolchain_provisioning.md`; ROADMAP §13.5 / §13.P; mirrors c_host §13.4 conformance
   - id: "D-246"
     layer: "code"
     status: "blocked-by"

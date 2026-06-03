@@ -1,4 +1,4 @@
-# ADR-0142 — Phase-13 §13.2 C-API surface scoping + §13.3/§13.4 sequencing
+# ADR-0142 — Phase-13 §13.2 C-API surface scoping + §13.3/§13.4 sequencing + §13.5 rust_host Mac-only scope
 
 > **Status**: Accepted (2026-06-04). Autonomous per ADR-0132 carve-out
 > (re-scoping because a phase's exit references genuinely-later/blocked work).
@@ -48,10 +48,28 @@ table,memory}_as_ref` casts.
    actually matter. So: §13.4 next; §13.3 remainder interleaves once ADR-0070
    lands.
 
+3. **§13.5 `rust_host` is Mac-only; the "rust on all 3 OS" sub-clause is
+   deferred to §13.P.** §13.5's exit reads "examples build + run on all 3 OS."
+   c_host (`test-c-api`) and zig_host (`run-zig-host`) are in test-all → 3-OS-
+   verified at the phase boundary. rust_host (`run-rust-host`, `extern "C"` over
+   `libzwasm.a`) builds + runs on Mac only: the ubuntunote / windowsmini test
+   hosts are **rustc-free by design** (`toolchain_provisioning.md` — fixtures
+   are generated on Mac, committed artifacts run toolchain-free on the test
+   hosts), so a "rust run" there would require crossing that invariant. This is
+   the §18.1-first-bullet case (exit references genuinely-blocked work). Mark
+   §13.5 `[x]` now (examples exist + the C-ABI surface rust_host consumes is
+   already 2-host conformance-tested at §13.4); record the rust-3-OS gap as
+   **D-254** and defer the FINAL exit call — provision rustc on test hosts
+   (needs its own ADR to cross the toolchain-free invariant) **vs** re-phrase the
+   exit to "Mac rust_host + 2-host C-ABI conformance" — to §13.P, the 🔒
+   user-gated close. The decision is deferred, not made here.
+
 ## Consequences
 
 - §13.2 closes without C/E; D-253 (blocked-by §13.4 prioritization) carries
   them with full encoding/ownership notes + discharge order.
 - §13.P (phase close 🔒) gates on conformance fail=0 + examples — by then D-253
   C/E are either implemented (if §13.4 needs them) or confirmed not-modeled.
+- §13.5 closes with rust_host Mac-only; D-254 (blocked-by test-host rustc)
+  carries the 3-OS-rust gap + the two discharge options; §13.P makes the call.
 - No ROADMAP §1/§2/§4/§5/§11/§14 change; §9-scope re-scope only (ADR-0132).
