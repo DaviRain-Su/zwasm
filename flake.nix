@@ -47,11 +47,17 @@
             pkgs.wabt          # wat2wasm / wast2json — required by Phase 1+ spec runner
             pkgs.wasmtime      # reference runtime — drives the §9.6 / 6.2 differential gate
             pkgs.wazero        # §11.3 SIMD gap comparator (run_bench.sh --compare=wazero); D-074
-            pkgs.wasmer        # §11.3 SIMD gap comparator (run_bench.sh --compare=wasmer); D-074
             pkgs.wasm-tools    # dump / validate / print / strip / smith / shrink — Phase 6+ debug + Phase 7 fuzz corpus (per ADR-0015 candidate)
             pkgs.lldb          # interactive debugger + watchpoints (per ADR-0015 candidate)
             pkgs.nasm          # `ndisasm -b 64 file.bin` for raw JIT byte stream disasm — paired with lldb / objdump for SEGV root-cause work (autonomous loop x86_64 JIT debug per `.claude/rules/debug_jit.md`)
-          ];
+          ]
+          # §11.3 wasmer comparator — Mac-only. On x86_64-linux nixpkgs has no
+          # binary-cache hit for wasmer, so it builds from source and the
+          # Rust/LLVM link fails, breaking the dev shell on the ubuntu/windows
+          # TEST hosts (which build this same shell for `zig build test-all`).
+          # The SIMD gap analysis (§11.3) runs Mac-only, where wasmer resolves
+          # from cache, so confine it there.
+          ++ pkgs.lib.optionals (system == "aarch64-darwin") [ pkgs.wasmer ];
 
           shellHook = ''
             echo "zwasm v2 dev shell"
