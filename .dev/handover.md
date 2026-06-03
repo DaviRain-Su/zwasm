@@ -21,20 +21,23 @@
   `head -1` = STALE binary → masks the delta.
 - **Watch**: `runner_test.zig` ~1490 / `runner_gc_test.zig` 1476 / `jit_abi.zig` 1350 / `validator.zig` 3204 (cap 3300, D-204) — all < hard 2000/3300.
 
-## Active task — §11.1 / §11 continuation  **NEXT**
+## Active bundle
 
-File-I/O bundle CLOSED (`bca625f2`, rust_file_io exits 0); D-243 reduced to a `note` (capability proven; runner
---dir wiring is cosmetic — rust_file_io is already lenient-PASS/SKIP-EMPTY, not gate-failing). **D-242 RE-DIAGNOSED
-this turn** (no code — a throwaway max_frame_stack bump 256→131072 STILL overflowed go_math_big → RUNAWAY frame
-growth, NOT a too-shallow stack; tail-call ruled out by code, dispatch.zig pops-then-pushes). D-242 is now a
-DEBUG bundle (find the unbounded `call` that never returns via mvp.invoke→dispatch.run re-entry), NOT a
-stack-grow. Lesson filed. Next §11 chunks (pick by value):
-- **D-242 debug bundle**: instrument frame_len growth on go_math_big, capture the repeating call site, fix the
-  interp semantics (interp miscompile / Go re-entry model). The real go_* lever.
-- **11.2 bench infra** (already substantially built: run_bench.sh --quick, history.yaml, record scripts — assess
-  what's left) / **11.4 GC-on-JIT rooting** (D-211).
-- More preview1 syscalls (fd_readdir, path_create_directory, path_rename, fd_seek-for-files) — completeness; no
-  fixture currently needs them (all realworld imports resolve, 0 SKIP-WASI).
+- **Bundle-ID**: 11.1-label-stack (D-242)
+- **Cycles-remaining**: ~1-2
+- **Continuity-memo**: ROOT CAUSE FOUND + PROVEN this turn (no code) — go_* trap is `frame.pushLabel` overflowing
+  the per-frame LABEL stack `max_label_stack = 128 < validator max_control_stack = 1024` (D-241 drift family; the
+  "call stack exhausted" msg is shared by StackOverflow+CallStackExhausted, which mis-led 2 prior diagnoses).
+  Raising max_label_stack → 1024 makes go_math_big exit 0 (verified). But `label_buf [N]Label` is INLINE in Frame
+  → naive [1024] = ~5MB Runtime + 8x per-call copy + a stack-allocated 2-Runtime test SEGFAULTs. FIX = hybrid:
+  keep `label_buf [128]` inline + a LAZY `label_overflow: []Label` (alloc on crossing 128, cap = zir.max_control_stack,
+  free at popFrame). pushLabel needs an allocator → thread it through the 7 `.pushLabel(` sites (interp handlers
+  have `rt`); popLabel/labelAt branch inline-vs-overflow; free-once at popFrame (mind the Frame value-copy).
+- **Exit-condition**: `zwasm run go_math_big.wasm` exits 0 AND the full `zig build test` is green (no 5MB-Runtime
+  segfault) AND no per-call regression for shallow funcs (label_overflow stays unallocated when label_len ≤ 128).
+
+Other §11 tracks: 11.2 bench (substantially built — run_bench.sh --quick / history.yaml / record scripts; assess
+what's left), 11.4 GC-on-JIT rooting (D-211). More preview1 syscalls = completeness only (0 SKIP-WASI remain).
 
 §10 close-hygiene RESOLVED (SHA traceability via `5ab7b981` + phase_log; windowsmini DEFERRED per policy).
 
@@ -51,11 +54,12 @@ stack-grow. Lesson filed. Next §11 chunks (pick by value):
 
 ## Step 0.7 (next resume)
 
-THIS turn = D-242 RE-DIAGNOSIS (DOCS-ONLY, no code): the go_* CallStackExhausted is RUNAWAY frame growth, not a
-too-shallow stack — proven by a throwaway max_frame_stack 256→131072 bump that STILL overflowed go_math_big
-(reverted). Re-scoped D-242 to a debug bundle + filed the runaway-vs-deep lesson; reduced D-243 to note. NO code
-change → NO ubuntu kick (prior `bca625f2` already ubuntu-OK at `95b8efe6`; Step 0.7 next cycle = nothing to
-verify). Next → the D-242 debug bundle (instrument the runaway call site) or 11.2 bench.
+THIS turn = D-242 ROOT-CAUSE FOUND (DOCS-ONLY, no code): probed ALL StackOverflow raise sites → it's
+`frame.pushLabel` overflowing the per-frame LABEL stack (max_label_stack=128 < validator's max_control_stack=1024,
+D-241 family). PROVEN: raising max_label_stack→1024 makes go_math_big exit 0. The naive inline raise crashes a
+stack-test (5MB Runtime) → fix = lazy per-frame label overflow (Active bundle). Corrected the prior 2 wrong
+diagnoses + the lesson. NO code → NO ubuntu kick (prior `bca625f2` already ubuntu-OK at `95b8efe6`; Step 0.7 next
+cycle = nothing to verify). Next → implement the 11.1-label-stack bundle.
 
 **Gate hygiene**: Step-5 Mac gate = `bash scripts/mac_gate.sh`. JIT corpus: `zig build test-spec-wasm-3.0-assert`
 (NO bogus `-Dno-run`); pick the exe by mtime (bare `head -1` = STALE). `ZWASM_SPEC_ENGINE=jit <exe>

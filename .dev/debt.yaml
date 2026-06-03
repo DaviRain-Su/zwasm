@@ -37,29 +37,33 @@ entries:
     layer: "code"
     status: "blocked-by"
     description: |-
-      blocked-by: standard-Go `go_*` wasip1 fixtures `Trap.CallStackExhausted` on
-      `_start`. **RE-DIAGNOSED 2026-06-03 — it is RUNAWAY frame growth, NOT a
-      too-shallow stack.** Proof: a throwaway bump of max_frame_stack 256 → 8192 →
-      131072 (with a lazy heap overflow segment so the Runtime struct stays small)
-      STILL overflows go_math_big — math/big cannot legitimately nest >131072 calls,
-      so the interp is pushing frames unboundedly. Ruled OUT: (a) too-shallow cap
-      (raising it doesn't help); (b) tail-call-as-frame-growth — the interp tail-call
-      correctly pops THEN pushes (dispatch.zig:119/140 = frame-replace, constant
-      depth). Mechanism: a regular `call` → `mvp.invoke` (mvp.zig:654) pushFrame +
-      RE-ENTER `dispatch.run` on the host stack + popFrame (balanced for normal
-      call/return). So the runaway = an unbounded NESTED call chain that never
-      returns — most likely (a) an interp miscompile making go_math_big infinitely
-      recurse, or (b) Go's wasm runtime re-entry / morestack model that v2
-      mishandles. DISCHARGE (a debug bundle, NOT a stack-size change): instrument
-      frame_len growth + capture the repeating call site (which `call`/op pushes the
-      runaway frame); find the call that never returns; fix the interp semantics. Do
-      NOT just grow the stack (proven futile). TinyGo fixtures (shallower, different
-      runtime) PASS. go_* currently green-tracked (facade PASS instantiate-only,
-      run_runner lenient PASS, diff_runner SKIP-V2-TRAP). Phase 11 §11.1.
+      blocked-by: standard-Go `go_*` wasip1 fixtures trap on `_start`. **ROOT CAUSE
+      FOUND 2026-06-03 (3rd diagnosis, finally correct + PROVEN): the per-frame
+      `max_label_stack = 128` (frame.zig:25) is STRICTLY LESS than the validator's
+      `max_control_stack = 1024` (zir.max_control_stack).** Same drift family as D-241
+      (verifier ceiling): the validator ACCEPTS functions nesting up to 1024 control
+      blocks, but the runtime's per-frame `label_buf [128]Label` overflows at 128 →
+      `frame.pushLabel` returns `Trap.StackOverflow` → surfaced as "call stack
+      exhausted" (trap_surface.zig:89 maps StackOverflow + CallStackExhausted to the
+      same message — which mis-led the first two diagnoses). go_*'s wasm has a deeply-
+      nested-control function (>128 active labels). PROOF: a throwaway
+      `max_label_stack` 128 → 1024 → `zwasm run go_math_big.wasm` EXITS 0. (Earlier
+      "frame-depth" / "runaway-frame-growth" diagnoses were WRONG — the interp
+      pushFrame probe never fired; it is the LABEL stack, not the frame stack.)
+      DISCHARGE (the correct fix is consistency w/ the validator = raise to
+      zir.max_control_stack, but NOT naive inline): `label_buf` is INLINE in Frame, so
+      [1024] makes each Frame ~20KB → Runtime ~5MB → an 8x per-call Frame-copy cost AND
+      a stack-allocated 2-Runtime test SEGFAULTs (10MB stack). FIX = hybrid per-frame
+      label storage: keep `label_buf [128]` inline (cheap common case) + a LAZY
+      `label_overflow: []Label` allocated only when a frame crosses 128, capped at
+      zir.max_control_stack, freed at popFrame. Touches frame.zig (pushLabel needs an
+      allocator → 7 call sites) + popFrame free + the value-copy free-once lifecycle.
+      Bundle. go_* currently green-tracked (facade PASS, run_runner lenient PASS,
+      diff_runner SKIP-V2-TRAP). Phase 11 §11.1.
     first_raised: "2026-06-03"
     last_reviewed: "2026-06-03"
     refs: |-
-      src/interp/mvp.zig:654 (invoke pushFrame+run+popFrame) / src/interp/dispatch.zig:119,140 (tail-call frame-replace) / src/runtime/runtime.zig:446 (pushFrame cap) / test/realworld/wasm/go_*.wasm / ROADMAP §11.1
+      src/runtime/frame.zig:25,95,98 (max_label_stack / label_buf / pushLabel) / src/ir/zir.zig:29 (max_control_stack) / src/validate/validator.zig:115 / src/api/trap_surface.zig:89 (ambiguous StackOverflow→msg) / test/realworld/wasm/go_*.wasm / ROADMAP §11.1
   - id: "D-239"
     layer: "code"
     status: "partial"
