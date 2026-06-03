@@ -77,3 +77,30 @@ its module doc is marked superseded by this ADR.
   suite (spec+realworld both arches) is the correctness guard, conservative bail across
   call sites + branch targets (a staging-reg cache MUST invalidate at every call and
   branch target).
+
+## Revision (2026-06-04) — measured: headroom < target → §15.2 folded into §15.P
+
+The empirical reload-headroom measurement (throwaway gpr.zig/fp.zig spill counters via
+`zwasm run --engine jit`, reverted) lands the "small" branch decisively:
+
+| fixture | spill_loads | spill_stores | redundant_adjacent_loads | total_instrs | redund_adj/total |
+|---|---|---|---|---|---|
+| tinygo/fib_loop | 272 | 246 | 203 | 9216 | **2.2%** |
+| shootout/nestedloop | 258 | 233 | 258 | 17905 | **1.4%** |
+| shootout/sieve | 258 | 233 | 258 | 17953 | **1.4%** |
+
+Total spill traffic (loads+stores) is **2.7–5.6%** of all emitted instructions — a strict
+UPPER BOUND on any spill-mov optimiser. The adjacent-round-trip eliminable subset is
+**1.4–2.2%** of total instructions. A ≥5% **perf** win is robustly unreachable (perf gain
+from killing a `LDR`/`STR` is smaller than its instruction-count share; v2's deterministic-
+slot spill-everything emit is already tight on memory traffic).
+
+**Decision**: §15.2 closes — the ≥5%-gated mov-reduction task is empirically unreachable in
+v2's emit model (in EITHER the slot-alias OR reload-elim mechanism). The residual
+store-then-immediate-reload peephole (real but ~1.5–2% — note the 75–100% redund/load
+ratio = a structural def-then-reload pattern) **folds into §15.P** as an opportunistic
+peephole, NOT a dedicated bench-gated effort. Phase-15 perf parity rests on §15.3 (class-
+aware allocation) + §15.4 (SIMD ports) + the §15.P aggregate vs v1. **General caution**: the
+low spill share suggests the regalloc-axis perf tasks (§15.2/§15.3) have less headroom than
+the ROADMAP assumed; the larger wins are likely §15.4 SIMD + algorithmic — assess §15.3 on
+its own measurement before committing to its ≥3% bar.
