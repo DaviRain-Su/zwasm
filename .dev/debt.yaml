@@ -3,6 +3,37 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-244"
+    layer: "code"
+    status: "now"
+    description: |-
+      `zwasm run` (and every C-API consumer) traps `Unreachable` on ANY SIMD-128 op
+      — the CLI cannot execute wasm-2.0 SIMD modules at all, despite the binary being
+      built `wasm-level: v3_0`. ROOT CAUSE (2026-06-03, §11.3 ch3): the interp reads
+      handlers from the `table.interp[]` array (`src/interp/dispatch.zig:43`:
+      `table.interp[idx] orelse return Trap.Unreachable`), but the C-API dispatch-table
+      builder `src/api/instance.zig:918 dispatchTable()` only calls the per-feature
+      `register()` fns (interp_mvp + ext_sign_ext/sat_trunc/bulk_memory/ref_types/
+      table_ops + the wasm_3_0 ext_*), and NONE of them install SIMD. The SIMD interp
+      handlers DO exist (`src/instruction/wasm_2_0/i32x4_add.zig:20 .interp =
+      interp_i32x4_add`, collector pattern), but the collector→table install
+      `dispatch_collector.populateDispatchTable` (`src/ir/dispatch_collector.zig:233`)
+      is a NO-OP STUB (its own test at :483 says "no-op for current stubs; signature
+      doesn't match InterpFn") — so the SIMD `table.interp[]` slots stay null → trap.
+      The spec SIMD corpus passes via a DIFFERENT path (JIT / its own harness), masking
+      this; no realworld fixture uses SIMD, so it never surfaced until the §11.3 bench.
+      PROVEN: a hand-written `(func (export "_start") (v128.store 0 (i32x4.add ...)))`
+      traps on `zwasm run` (exit 1) but runs clean on wasmtime/wazero/wasmer; an i32-only
+      `_start` runs fine on zwasm. Discharge: wire the collected SIMD-128 interp handlers
+      into `table.interp[]` for the C-API path — either complete `populateDispatchTable`
+      (adapt the collector `handlers.interp` signature to `InterpFn`) or add an explicit
+      SIMD registration step in `dispatchTable()` under the `wasm_2_0_enabled` block.
+      Then a SIMD `_start` runs via `zwasm run`. **Blocks §11.3** (can't bench zwasm SIMD
+      via the CLI) AND is a standalone v0.1.0 product gap (SIMD unrunnable via CLI).
+    first_raised: "2026-06-03"
+    last_reviewed: "2026-06-03"
+    refs: |-
+      `src/api/instance.zig:918` (dispatchTable builder — no SIMD register); `src/interp/dispatch.zig:43` (null slot → Trap.Unreachable); `src/ir/dispatch_collector.zig:233` (populateDispatchTable no-op stub) + :483 (its test); `src/instruction/wasm_2_0/i32x4_add.zig:20` (interp handler exists); ROADMAP §11.3 / D-074 / 11.3-simd-gap bundle
   - id: "D-239"
     layer: "code"
     status: "partial"

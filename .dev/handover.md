@@ -35,19 +35,24 @@
 ## Active bundle
 
 - **Bundle-ID**: 11.3-simd-gap (D-074 cohort)
-- **Cycles-remaining**: ~2
+- **Cycles-remaining**: ~3 (D-244 fix added a chunk ahead of the corpus)
 - **Continuity-memo**: §11.3 SIMD per-op gap analysis = v2 vs **median of (wasmtime, wazero, wasmer)**, flag ops
   lagging >3×, file Phase-15 debt. DONE: ch1 (`e6dd3f94`) wazero+wasmer in flake; ch2 (`843cc7de`)
   `run_bench.sh --compare={wazero,wasmer,all}` (all 4 switch-sites) + `pkgs.git` in flake (macOS /usr/bin/git is
   an xcrun shim that dies under `nix develop`, where the gap run must execute). Verified: `nix develop --command
   bash -c 'run_bench.sh --quick --bench=tinygo/arith --compare=all'` records 4 runtime rows, exit 0.
-  NEXT (ch3): a per-op **SIMD micro-bench corpus** — small `.wasm` fixtures each hammering one SIMD op class
-  (i32x4 add/mul, f32x4 ops, shuffles, swizzle, dot, extmul, narrow, etc.) under `bench/runners/wasm/simd/`,
-  generated Mac-only via `nix develop .#gen` (wat2wasm). Then ch4: a gap-analysis script that parses the
-  multi-runtime `recent.yaml`, computes per-op `zwasm_mean / median(wasmtime,wazero,wasmer)`, flags >3×, and files
-  Phase-15 debt rows naming the candidate opt (AVX/CPUID, MOVAPS peephole, SIMD coalescing per §9.10 Track A).
-- **Exit-condition**: a `--compare=all` gap run over the SIMD corpus emits a per-op zwasm/median ratio table +
-  Phase-15 debt entries for every op > 3×; `run_bench.sh --quick` still works locally.
+  **ch3 BLOCKED — D-244 found**: `zwasm run` traps `Unreachable` on EVERY SIMD op (the CLI/C-API interp can't
+  execute wasm-2.0 SIMD at all). Root cause: `instance.zig:918 dispatchTable()` installs MVP+ext via `register()`
+  but never installs SIMD-128; the collector→table installer `populateDispatchTable` (dispatch_collector.zig:233)
+  is a NO-OP STUB, so `table.interp[]` SIMD slots are null → `dispatch.zig:43` traps. The SIMD interp handlers
+  EXIST (`i32x4_add.zig:20 .interp`), just unwired. Proven: a `(v128.store (i32x4.add …))` `_start` traps on
+  zwasm, runs on wasmtime/wazero/wasmer. Scratch fixture: `private/spikes/simd-bench-corpus/i32x4_add.wat`.
+  **NEXT chunk = fix D-244** (wire collected SIMD interp handlers into the C-API `table.interp[]` — complete
+  `populateDispatchTable` with an InterpFn-signature adapter, OR add explicit SIMD registration in
+  `dispatchTable()` under `wasm_2_0_enabled`). Red test: a SIMD `_start` via the C-API/CLI path traps → green:
+  runs. This is ALSO a standalone v0.1.0 product gap. THEN resume ch3 (author the corpus) → ch4 (gap script).
+- **Exit-condition**: (after D-244) a `--compare=all` gap run over a SIMD corpus emits a per-op zwasm/median
+  ratio table + Phase-15 debt entries for every op > 3×; `run_bench.sh --quick` still works locally.
 
 §11.1/§11.2 phase-close-batch items (Windows realworld subset + windowsmini bench row + committed 3-host bench
 rows) remain for §11.P. §11.4 moved to Phase 15 (ADR-0135).
@@ -64,10 +69,9 @@ rows) remain for §11.P. §11.4 moved to Phase 15 (ADR-0135).
 
 ## Step 0.7 (next resume)
 
-Last ubuntu-verified CODE HEAD = `fcc9fe03` (D-243, all `fail=0`). Since then only shell/docs/ADR/flake commits
-(…`e6dd3f94` flake comparators, `843cc7de` --compare wiring + flake git) — none touch src/test, so NO ubuntu
-test-all kick (non-code gap). The flake.nix change (wazero/wasmer/git) rebuilds the dev shell on next remote
-`nix develop`; verify implicitly on the next remote bench run. Next cycle Step 0.7 = nothing to verify.
+Last ubuntu-verified CODE HEAD = `fcc9fe03` (D-243). Since then only shell/docs/ADR/flake/debt commits — none
+touch src/test, so NO ubuntu kick (non-code gap). THIS turn = pure investigation (D-244 root-caused, no code).
+Next cycle Step 0.7 = nothing to verify; the D-244 fix WILL be a src change → kick + verify then.
 
 **Gate hygiene**: Step-5 Mac gate = `bash scripts/mac_gate.sh`. JIT corpus: `zig build test-spec-wasm-3.0-assert`
 (NO bogus `-Dno-run`); pick the exe by mtime (bare `head -1` = STALE). `ZWASM_SPEC_ENGINE=jit <exe>
