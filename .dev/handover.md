@@ -3,24 +3,6 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Active bundle
-
-- **Bundle-ID**: D-256-fuzz-infra (build the §3-scope fuzz infrastructure; unblocks §14.3)
-- **Cycles-remaining**: ~4–6 (corpus gen → loader → test-fuzz step → differential oracle)
-- **Continuity-memo**: fuzz infra is ABSENT (no `test/fuzz/`, no `test-fuzz` step). MVP build order:
-  (1) `test/fuzz/fuzz_loader.zig` — take a `[]u8` blob → run through `parse` → `validate` (+ optionally
-  interp a `_start`/exported func), catching panics/crashes, no false-positive on legitimate parse/validate
-  rejects (those return errors, not crashes); (2) `zig build test-fuzz` step running the loader over a small
-  committed seed corpus + a `wasm-tools smith`-generated batch (smith is in flake.nix; gen Mac-only like the
-  realworld fixtures); (3) wire `test-fuzz` into test-all (smoke) — full campaigns are the nightly (§14.3);
-  (4) differential oracle (interp vs JIT, or vs wasmtime) as a later cycle. **SURVEY DONE →
-  `private/notes/p14-fuzz-survey.md`**: `parser.parse(alloc,[]u8) Error!Module` (parser.zig:75) +
-  `frontendValidate(alloc,[]u8) bool` (instantiate.zig:62, false=invalid, never throws → a FIND is a crash,
-  not error/false). No `std.testing.fuzz` in 0.16 → corpus-dir exe mirroring realworld/runner.zig; build wiring
-  mirrors the realworld step (~build.zig:580). Start MVP chunk 1 (the loader) directly next.
-- **Exit-condition**: `zig build test-fuzz` exists + green on Mac (runs N≥5 smith/seed modules through
-  parse+validate without false-crash); then §14.3 `nightly.yml` can wire the campaign.
-
 ## Current state
 
 - **Phase 14 (CI matrix) IN-PROGRESS** — CI-scaffolding tasks DONE; §14.P blocked on 2 substantial items.
@@ -28,16 +10,20 @@
 - **Phase-14 thin CI DONE**: §14.1 `pr.yml` (3-OS test-all matrix, `2592f255`); §14.2 `bench.yml` (2-host
   per ADR-0137); §14.4 `bench_baseline.yml` (`96e72c24`); §14.5 pre-push verified. All workflow_dispatch
   (manual; §14.5 CI-second-line), actionlint-clean.
-- **§14.3 BLOCKED-BY D-256** (nightly-fuzz; fuzz+spec-bump infra absent — the ACTIVE BUNDLE builds it).
-- **§14.P full-close BLOCKED on**: D-256 (fuzz, §14.3) **+ D-245 win64** (windows CI green). When both land
-  (or §14.P is re-scoped) Phase 14 closes. D-245 win64 = remote-windows asm (hard); deferred to §11.3/P15.
+- **§14.3 PARTIAL (D-256)** — **fuzz crash-harness BUILT** `6c80c229`: `test/fuzz/fuzz_loader.zig` (parse +
+  Engine.compile each input; crash=finding) + `gen_fuzz_corpus.sh` (smith + malformed) + `test-fuzz` in
+  test-all (29-file seed corpus, 0 crashes). REMAINING for §14.3: spec-bump checker (still absent) + nightly.yml
+  campaign wiring; differential oracle = extension. D-256 now `partial`.
+- **§14.P full-close BLOCKED on**: D-256-remaining (spec-bump + nightly wiring, §14.3) **+ D-245 win64**
+  (windows CI green; remote-windows asm, §11.3/P15 home). When both land (or §14.P re-scoped) Phase 14 closes.
 
-## Next task (autonomous — bundle)
+## Next task (autonomous)
 
-**Work the D-256-fuzz-infra bundle** (above). Step 0: dispatch an Explore subagent — v1 fuzz harness design
-(`~/Documents/MyProducts/zwasm/` reference) + `wasm-tools smith` corpus recipe + the `parse`/`validate` entry
-signatures + Zig-0.16 `std.testing.fuzz`. Then build MVP chunk (1)+(2)+(3). Mac-local-verifiable (no remote).
-**NOTE**: stop re-scoping-to-close — this is real feature work. (If the user redirects to D-245-win64-first
+**Options (pick highest-value):** (a) **differential oracle** for the fuzzer — run each corpus module through
+interp AND JIT, compare results/traps (catches miscompiles, the bug-class fuzzing is best at; Mac-local,
+high-value extension of `6c80c229`); (b) **spec-bump checker** + wire §14.3 `nightly.yml` (fuzz campaign), then
+§14.3 closes; (c) re-scope §14.P to close Phase 14 (CI scaffolding done) deferring spec-bump + D-245. Lean (a)
+or (b) — real feature work over re-scoping. (If user redirects to D-245-win64-first or Phase-15, pivot.)
 or Phase-15, pivot.)
 
 ## Step 0.7 (next resume)
