@@ -555,6 +555,29 @@ test "reclamation: sweep frees dead slots (not live), allocate reuses them, curs
     try testing.expect(env.heap.cursor > cursor_after_allocs);
 }
 
+test "reclamation alloc-loop: periodic collection keeps cursor bounded (§15.1 chunk 2 exit)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const body = [_]u8{ 0x01, 0x5F, 0x01, 0x7F, 0x01 }; // struct { i32 } → payload 8
+    const env = try buildArenaedHeap(&arena, &body);
+
+    var c = MarkSweepCollector.init(env.heap, &env.gti);
+    const sz: u32 = header_size + 8;
+    // Allocate 200 transient same-size objects; collect (sweep-only, no
+    // roots → all dead) every 10. Without reclamation the cursor would
+    // reach ~200*sz; with exact-size reuse each batch recycles the prior
+    // batch's freed slots, so the live span never exceeds one batch.
+    var i: u32 = 0;
+    while (i < 200) : (i += 1) {
+        const ref = try env.heap.allocate(sz);
+        const hdr: ObjectHeader = .{ .kind = .struct_, .info = 0 };
+        @memcpy(env.heap.bytes[ref .. ref + header_size], std.mem.asBytes(&hdr)[0..header_size]);
+        if ((i + 1) % 10 == 0) c.collector().collect();
+    }
+    // Bounded near one batch (10*sz) + slack, NOT the 200*sz a leak gives.
+    try testing.expect(env.heap.cursor <= heap_mod.Heap.min_align + 15 * sz);
+}
+
 test "MarkSweepCollector: array object size decoded from ArrayHeader.length (10.G op_gc cycle 26)" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
