@@ -3,6 +3,32 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-245"
+    layer: "code"
+    status: "now"
+    description: |-
+      `zwasm run --engine=jit` (ADR-0136, `8011293a`) SEGFAULTS in **ReleaseSafe** builds
+      — works in Debug. Crash: SIGSEGV at address 0x18 in std `rawFree`
+      (`Allocator.zig:160`), from `owned.deinit(allocator)` (`src/engine/runner.zig:366`)
+      in `runVoidExport`'s cleanup, on EVERY compute-only module (all 12 §11.3 SIMD
+      corpus fixtures + a hand-built `i32x4.add` `_start`). The Debug build + the
+      `runWasmJit` regression test PASS — the test only covers Debug, so the release-mode
+      crash shipped unnoticed. **Blocks §11.3 gap DATA**: `run_bench.sh` builds ReleaseSafe,
+      so every zwasm SIMD row records `null` (the run aborts). Localization so far: all
+      `RuntimeOwned` table/global buffers are alloc'd `len≥1` (safe to free); the faulting
+      free is one with a garbage ptr (~0x18) → an undefined field or a double-free exposed
+      only by ReleaseSafe (Debug's allocator/layout masks it). Probe attempts (std.debug.print
+      / std.posix.write at deinit entry) did NOT surface output before the abort — suspect the
+      probe build failed silently OR ReleaseSafe inlined/reordered; the next attempt needs a
+      verified-compiling probe AND must also bisect `compiled.deinit` (`runner.zig:356`, the
+      other defer). Discharge: root-cause the bad free, fix the init/free, AND add a
+      ReleaseSafe `runWasmJit` regression test (the Debug-only test is why this shipped).
+      NOT a regression to existing behaviour (--engine=jit is opt-in; interp default
+      unaffected) — but the new feature is release-broken until fixed.
+    first_raised: "2026-06-03"
+    last_reviewed: "2026-06-03"
+    refs: |-
+      `src/engine/runner.zig:366` (owned.deinit) + `:356` (compiled.deinit); `src/engine/setup.zig` RuntimeOwned.deinit (~line 118); `src/cli/run.zig` runWasmJit + its Debug-only test; ADR-0136; ROADMAP §11.3 / 11.3-simd-gap bundle
   - id: "D-244"
     layer: "code"
     status: "partial"
