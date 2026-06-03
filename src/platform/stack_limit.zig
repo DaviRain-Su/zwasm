@@ -140,6 +140,43 @@ fn computeWindows(headroom: usize) usize {
 }
 
 // ============================================================
+// Native-stack HIGH end (for the §15.1 conservative GC root scan)
+// ============================================================
+
+/// Top-of-stack address of the current thread — the upper bound for
+/// the conservative GC native-stack scan (ADR-0128 §2 / §15.1): the
+/// scan walks `[current SP, nativeStackHigh())` for words that look
+/// like live `GcRef`s and conservatively marks them, covering refs
+/// held in JIT/host native frames that the precise interp root walk
+/// does not see. Reuses the same per-platform pthread/TIB queries as
+/// `computeStackLimit` (which returns the LOW limit). Returns `0`
+/// (disabled) on query failure / unsupported platform — the caller
+/// then skips the native-stack scan (the interp walk still runs, so
+/// correctness is preserved under the non-moving no-reclaim model).
+pub fn nativeStackHigh() usize {
+    if (comptime builtin.os.tag == .macos) {
+        const high_opt = pthread_get_stackaddr_np(std.c.pthread_self());
+        return @intFromPtr(high_opt orelse return 0);
+    } else if (comptime builtin.os.tag == .linux) {
+        var attr: PthreadAttr = .{ ._opaque = [_]u8{0} ** 64 };
+        if (pthread_getattr_np(std.c.pthread_self(), &attr) != 0) return 0;
+        defer _ = pthread_attr_destroy(&attr);
+        var low_opt: ?*anyopaque = null;
+        var size: usize = 0;
+        if (pthread_attr_getstack(&attr, &low_opt, &size) != 0) return 0;
+        const low = @intFromPtr(low_opt orelse return 0);
+        return low + size;
+    } else if (comptime builtin.os.tag == .windows) {
+        var low: usize = 0;
+        var high: usize = 0;
+        GetCurrentThreadStackLimits(&low, &high);
+        return high;
+    } else {
+        return 0;
+    }
+}
+
+// ============================================================
 // Diagnostic
 // ============================================================
 
@@ -240,4 +277,18 @@ test "computeStackLimit: returns non-zero on supported hosts (Mac / Linux / Wind
 test "STACK_GUARD_HEADROOM: 16 KiB per ADR-0105 D6 initial value (1 MiB on Win64 per R3 cycle 6)" {
     const expected: usize = if (builtin.os.tag == .windows) 1024 * 1024 else 16 * 1024;
     try testing.expectEqual(expected, STACK_GUARD_HEADROOM);
+}
+
+test "nativeStackHigh: top-of-stack is above the current frame on supported hosts" {
+    const high = nativeStackHigh();
+    if (high == 0) return; // unsupported / query failed — the scan caller skips
+    const sp = @frameAddress();
+    // Stack grows down: the top (high) sits above the current frame.
+    try testing.expect(high > sp);
+    // Sanity: the span from here to the top is a bounded stack, not a
+    // wild value (< 1 GiB — typical thread stacks are 512 KiB–8 MiB).
+    try testing.expect(high - sp < (1 << 30));
+    // And it must sit above `computeStackLimit`'s low-end limit.
+    const limit = computeStackLimit(0);
+    if (limit != disabled) try testing.expect(high > limit);
 }
