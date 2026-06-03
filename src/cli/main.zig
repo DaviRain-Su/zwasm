@@ -128,6 +128,19 @@ pub fn main(init: std.process.Init) !void {
             };
             defer gpa.free(bytes);
 
+            // §12.1 — a pre-compiled AOT artefact (CWAS magic) loads +
+            // runs directly, no parse/compile. Compute-only (no WASI /
+            // --dir); the entry resolves via the serialised export table.
+            if (bytes.len >= 4 and std.mem.eql(u8, bytes[0..4], "CWAS")) {
+                const code = cli_run.runCwasm(gpa, bytes, invoke_name) catch |err| {
+                    var buf: [256]u8 = undefined;
+                    const msg = std.fmt.bufPrint(&buf, "zwasm run: cannot run '{s}': {s}", .{ path, @errorName(err) }) catch "zwasm run: .cwasm run failed";
+                    try printlnErr(io, msg);
+                    std.process.exit(1);
+                };
+                std.process.exit(code);
+            }
+
             // Build argv for the WASI guest. Wasmtime's default is
             // argv[0] = wasm filename + any trailing args; mirror
             // that here so guests that print argv produce parity

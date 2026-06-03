@@ -49,6 +49,34 @@ pub fn runWasmJit(
     return 0;
 }
 
+/// `zwasm run <file.cwasm>` (§12.1): load + execute a pre-compiled AOT
+/// artefact directly — NO parse / validate / compile (the point of AOT).
+/// Resolves the entry via the serialised v0.2 export table (ADR-0138):
+/// `--invoke <name>` → `_start` → `main` → first func export. Runs it
+/// with a minimal stateless runtime and surfaces an i32 result as the
+/// exit code (void → 0). COMPUTE-ONLY — no WASI; stateful `.cwasm`
+/// (memory/globals/imports) is later scope (D-250). The caller routes
+/// here on the `CWAS` magic.
+pub fn runCwasm(
+    alloc: std.mem.Allocator,
+    cwasm_bytes: []const u8,
+    invoke_name: ?[]const u8,
+) !u8 {
+    const aot_load = @import("../engine/codegen/aot/load.zig");
+    const aot_run = @import("../engine/codegen/aot/run.zig");
+    diagnostic.clearDiag();
+
+    var mod = try aot_load.load(alloc, cwasm_bytes);
+    defer mod.deinit();
+
+    const idx = mod.resolveEntry(invoke_name) orelse {
+        diagnostic.setDiag(.instantiate, .no_func_export, .unknown, "no runnable entry in .cwasm (looked for invoke/_start/main, then first func export)", .{});
+        return error.NoFuncExport;
+    };
+    const result = try aot_run.runEntry(&mod, idx);
+    return @intCast(@min(result, std.math.maxInt(u8)));
+}
+
 /// Like `runWasm` but routes guest stdout writes (`fd_write`
 /// to fd 1) into the caller-supplied `stdout_capture`. When
 /// non-null, the runner wires `host.stdout_buffer` to it; the
@@ -357,6 +385,39 @@ const simd_start_wasm = [_]u8{
     0x01, 0x20, 0x00, 0x41, 0x01, 0x6b, 0x21, 0x00, 0x20, 0x00, 0x0d, 0x00,
     0x0b, 0x0b, 0x41, 0x00, 0x20, 0x01, 0xfd, 0x0b, 0x04, 0x00, 0x0b,
 };
+
+test "runCwasm: compile → produce → load+run a .cwasm, i32 result surfaces as exit code (§12.1)" {
+    // Executes native AOT machine code → Win64 deferred, mirroring the
+    // aot/load.zig + jit_mem exec tests (skip.phaseEnd; D-250 tracks the
+    // stateful/Win64 remainder). The resolveEntry + exit-code mapping
+    // itself is host-independent.
+    const builtin = @import("builtin");
+    if (builtin.os.tag == .windows) return @import("../test_support/skip.zig").phaseEnd(.win64);
+
+    const runner = @import("../engine/runner.zig");
+    const aot_produce = @import("../engine/codegen/aot/produce.zig");
+
+    // `() -> i32` returning 42, exported "f". (type/func/export/code)
+    const wasm = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, 0x03,
+        0x02, 0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 0x66,
+        0x00, 0x00, 0x0a, 0x06, 0x01, 0x04, 0x00, 0x41,
+        0x2a, 0x0b,
+    };
+
+    var compiled = try runner.compileWasm(testing.allocator, &wasm);
+    defer compiled.deinit(testing.allocator);
+    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled);
+    defer testing.allocator.free(cwasm);
+
+    // Default entry resolution (no _start/main → first func export "f").
+    try testing.expectEqual(@as(u8, 42), try runCwasm(testing.allocator, cwasm, null));
+    // Explicit --invoke by name.
+    try testing.expectEqual(@as(u8, 42), try runCwasm(testing.allocator, cwasm, "f"));
+    // A missing name is a loud NoFuncExport, not a silent fallback.
+    try testing.expectError(error.NoFuncExport, runCwasm(testing.allocator, cwasm, "nope"));
+}
 
 test "runWasmJit: SIMD _start runs via the JIT where the interp traps (ADR-0136 / D-244)" {
     // Interpreter path: no SIMD execution → the `i32x4.add` dispatch slot is
