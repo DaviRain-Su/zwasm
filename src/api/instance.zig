@@ -196,6 +196,15 @@ pub const Memory = struct {
     memory_idx: u32 = 0,
     /// Cached borrowed extern view (see `Func.extern_view`).
     extern_view: ?*Extern = null,
+    /// Host-created standalone memory only (`wasm_memory_new`,
+    /// `instance == null`): the owned `*MemoryInstance` backing. The
+    /// accessors read/grow this when there is no instance; it is shared
+    /// (pointer) into an importing instance as `memories[0]` so
+    /// `rt.memory` aliases its bytes (D-199). Null for an
+    /// instance-backed memory.
+    minst: ?*runtime.MemoryInstance = null,
+    /// Store handle for the standalone alloc/free path (no instance).
+    store: ?*Store = null,
 };
 
 // `Trap` and `TrapKind` live in `src/api/trap_surface.zig`
@@ -601,8 +610,13 @@ fn buildBindings(
                         .source_mutable = hg.mutable,
                     } };
                 },
-                // Host table/memory `_new` not yet implemented; host func is D-252.
-                .func, .table, .memory, .tag => return error.UnsupportedHostImport,
+                .memory => {
+                    const hm = ext.memory orelse return error.UnknownImportModule;
+                    const mi = hm.minst orelse return error.UnknownImportModule;
+                    bindings[idx] = .{ .memory = .{ .inst = mi } };
+                },
+                // Host table `_new` not yet implemented; host func is D-252.
+                .func, .table, .tag => return error.UnsupportedHostImport,
             }
             continue;
         }
@@ -1223,10 +1237,13 @@ pub export fn wasm_extern_as_memory(e: ?*Extern) callconv(.c) ?*Memory {
 /// back-pointer).
 pub export fn wasm_memory_delete(m: ?*Memory) callconv(.c) void {
     const handle = m orelse return;
-    const inst = handle.instance orelse return;
-    const store = inst.store orelse return;
+    const store = if (handle.instance) |inst| (inst.store orelse return) else (handle.store orelse return);
     const alloc = storeAllocator(store) orelse return;
     if (handle.extern_view) |v| alloc.destroy(v);
+    if (handle.minst) |mi| { // standalone host memory: free its own backing
+        if (mi.bytes.len > 0) alloc.free(mi.bytes);
+        alloc.destroy(mi);
+    }
     alloc.destroy(handle);
 }
 
@@ -1237,28 +1254,34 @@ pub export fn wasm_memory_delete(m: ?*Memory) callconv(.c) void {
 /// ADR-0014 §6.K.2). Null on a stale / detached handle.
 pub export fn wasm_memory_data(m: ?*Memory) callconv(.c) ?[*]u8 {
     const handle = m orelse return null;
-    const inst = handle.instance orelse return null;
-    const rt = inst.runtime orelse return null;
-    if (rt.memory.len == 0) return null;
-    return rt.memory.ptr;
+    const bytes: []u8 = if (handle.instance) |inst| blk: {
+        const rt = inst.runtime orelse return null;
+        break :blk rt.memory;
+    } else (handle.minst orelse return null).bytes; // standalone host memory
+    if (bytes.len == 0) return null;
+    return bytes.ptr;
 }
 
 /// `wasm_memory_data_size(*const Memory)` — byte length of the
 /// memory's backing slice. Mirrors `wasm_memory_data` lifetime.
 pub export fn wasm_memory_data_size(m: ?*const Memory) callconv(.c) usize {
     const handle = m orelse return 0;
-    const inst = handle.instance orelse return 0;
-    const rt = inst.runtime orelse return 0;
-    return rt.memory.len;
+    if (handle.instance) |inst| {
+        const rt = inst.runtime orelse return 0;
+        return rt.memory.len;
+    }
+    return (handle.minst orelse return 0).bytes.len;
 }
 
 /// `wasm_memory_size(*const Memory)` — Wasm spec §4.4.7
 /// (`memory.size`) — page count. Page size = 64 KiB per spec.
 pub export fn wasm_memory_size(m: ?*const Memory) callconv(.c) u32 {
     const handle = m orelse return 0;
-    const inst = handle.instance orelse return 0;
-    const rt = inst.runtime orelse return 0;
-    return @intCast(rt.memory.len / 65536);
+    const len: usize = if (handle.instance) |inst| blk: {
+        const rt = inst.runtime orelse return 0;
+        break :blk rt.memory.len;
+    } else (handle.minst orelse return 0).bytes.len;
+    return @intCast(len / 65536);
 }
 
 /// `wasm_memory_grow(*Memory, delta)` — Wasm spec §4.4.7
@@ -1271,14 +1294,24 @@ pub export fn wasm_memory_size(m: ?*const Memory) callconv(.c) u32 {
 /// honours the declared bound through realloc availability).
 pub export fn wasm_memory_grow(m: ?*Memory, delta: u32) callconv(.c) bool {
     const handle = m orelse return false;
-    const inst = handle.instance orelse return false;
-    const rt = inst.runtime orelse return false;
-    const old_pages = rt.memory.len / 65536;
-    const new_pages = old_pages + delta;
-    const new_bytes = new_pages * 65536;
-    const grown = rt.alloc.realloc(rt.memory, new_bytes) catch return false;
-    @memset(grown[rt.memory.len..new_bytes], 0);
-    rt.setMemory0Bytes(grown);
+    if (handle.instance) |inst| {
+        const rt = inst.runtime orelse return false;
+        const old_pages = rt.memory.len / 65536;
+        const new_bytes = (old_pages + delta) * 65536;
+        const grown = rt.alloc.realloc(rt.memory, new_bytes) catch return false;
+        @memset(grown[rt.memory.len..new_bytes], 0);
+        rt.setMemory0Bytes(grown);
+        return true;
+    }
+    // standalone host memory: realloc its own bytes via the Store allocator
+    const mi = handle.minst orelse return false;
+    const store = handle.store orelse return false;
+    const alloc = storeAllocator(store) orelse return false;
+    const old_len = mi.bytes.len;
+    const new_bytes = (old_len / 65536 + delta) * 65536;
+    const grown = alloc.realloc(mi.bytes, new_bytes) catch return false;
+    @memset(grown[old_len..new_bytes], 0);
+    mi.bytes = grown;
     return true;
 }
 

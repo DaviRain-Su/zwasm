@@ -73,11 +73,11 @@ pub export fn wasm_table_as_extern(t: ?*Table) callconv(.c) ?*Extern {
 pub export fn wasm_memory_as_extern(m: ?*Memory) callconv(.c) ?*Extern {
     const handle = m orelse return null;
     if (handle.extern_view) |v| return v;
-    const inst = handle.instance orelse return null;
-    const store = inst.store orelse return null;
+    // instance (export-derived) OR Store (standalone host memory).
+    const store = if (handle.instance) |i| (i.store orelse return null) else (handle.store orelse return null);
     const alloc = instance.storeAllocator(store) orelse return null;
     const v = alloc.create(Extern) catch return null;
-    v.* = .{ .kind = .memory, .instance = inst, .memory = handle, .memory_idx = handle.memory_idx, .borrowed = true };
+    v.* = .{ .kind = .memory, .instance = handle.instance, .memory = handle, .memory_idx = handle.memory_idx, .borrowed = true };
     handle.extern_view = v;
     return v;
 }
@@ -153,6 +153,37 @@ pub export fn wasm_global_new(
         .store = s,
     };
     return g;
+}
+
+/// `wasm_memory_new(store, memorytype) -> own wasm_memory_t*` — a
+/// host-owned standalone linear memory holding its own `*MemoryInstance`
+/// (min pages, zeroed). `wasm_memory_data/size/grow` operate on it;
+/// `wasm_memory_as_extern(m)` into `wasm_instance_new`'s imports shares
+/// the `*MemoryInstance` so `rt.memory` aliases its bytes (guest +
+/// host see one buffer). Caller owns it (`wasm_memory_delete`).
+pub export fn wasm_memory_new(store: ?*instance.Store, mt: ?*const types.MemoryType) callconv(.c) ?*Memory {
+    const s = store orelse return null;
+    const mtype = mt orelse return null;
+    const lim = types.wasm_memorytype_limits(mtype) orelse return null;
+    const alloc = instance.storeAllocator(s) orelse return null;
+    const bytes = alloc.alloc(u8, @as(usize, lim.min) * 65536) catch return null;
+    @memset(bytes, 0);
+    const mi = alloc.create(runtime.MemoryInstance) catch {
+        alloc.free(bytes);
+        return null;
+    };
+    mi.* = .{
+        .bytes = bytes,
+        .pages_min = lim.min,
+        .pages_max = if (lim.max == 0xffff_ffff) null else lim.max,
+    };
+    const m = alloc.create(Memory) catch {
+        alloc.free(bytes);
+        alloc.destroy(mi);
+        return null;
+    };
+    m.* = .{ .instance = null, .memory_idx = 0, .minst = mi, .store = s };
+    return m;
 }
 
 // =====================================================================
@@ -284,4 +315,78 @@ test "wasm_global_new: host global imported — guest global.get sees host value
     instance.wasm_global_set(hg, &hundred);
     try testing.expect(instance.wasm_func_call(getf, &args, &results) == null);
     try testing.expectEqual(@as(i32, 100), results_data[0].of.i32);
+}
+
+test "wasm_memory_new: standalone host memory data/size/grow" {
+    const e = instance.wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer instance.wasm_engine_delete(e);
+    const s = instance.wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer instance.wasm_store_delete(s);
+
+    var lim: types.Limits = .{ .min = 1, .max = 0xffff_ffff };
+    const mt = types.wasm_memorytype_new(&lim) orelse return error.MemTypeAllocFailed;
+    defer types.wasm_memorytype_delete(mt);
+    const m = wasm_memory_new(s, mt) orelse return error.MemNewFailed;
+    defer instance.wasm_memory_delete(m);
+
+    try testing.expectEqual(@as(u32, 1), instance.wasm_memory_size(m));
+    try testing.expectEqual(@as(usize, 65536), instance.wasm_memory_data_size(m));
+    const data = instance.wasm_memory_data(m) orelse return error.NoData;
+    data[0] = 42;
+    try testing.expectEqual(@as(u8, 42), (instance.wasm_memory_data(m).?)[0]);
+    // grow by one page.
+    try testing.expect(instance.wasm_memory_grow(m, 1));
+    try testing.expectEqual(@as(u32, 2), instance.wasm_memory_size(m));
+    // grown region is zeroed; original byte preserved.
+    try testing.expectEqual(@as(u8, 42), (instance.wasm_memory_data(m).?)[0]);
+    // as_extern wraps to kind memory.
+    try testing.expectEqual(@as(u8, @intFromEnum(instance.ExternKind.memory)), instance.wasm_extern_kind(wasm_memory_as_extern(m).?));
+}
+
+// (module (import "env" "m" (memory 1))
+//   (func (export "r") (result i32) (i32.const 0) (i32.load)))
+const import_memory_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type () -> i32
+    0x02, 0x0a, 0x01, 0x03, 0x65, 0x6e, 0x76, 0x01, 0x6d, 0x02, 0x00, 0x01, // import env.m memory min 1
+    0x03, 0x02, 0x01, 0x00, // func[0]: type 0
+    0x07, 0x05, 0x01, 0x01, 0x72, 0x00, 0x00, // export "r" → func 0
+    0x0a, 0x09, 0x01, 0x07, 0x00, 0x41, 0x00, 0x28, 0x02, 0x00, 0x0b, // code: i32.load (i32.const 0)
+};
+
+test "wasm_memory_new: host memory imported — guest i32.load reads bytes the host wrote (shared buffer)" {
+    const e = instance.wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer instance.wasm_engine_delete(e);
+    const s = instance.wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer instance.wasm_store_delete(s);
+
+    var lim: types.Limits = .{ .min = 1, .max = 0xffff_ffff };
+    const mt = types.wasm_memorytype_new(&lim) orelse return error.MemTypeAllocFailed;
+    defer types.wasm_memorytype_delete(mt);
+    const hm = wasm_memory_new(s, mt) orelse return error.MemNewFailed;
+    defer instance.wasm_memory_delete(hm);
+
+    var bytes = import_memory_wasm;
+    const bv: vec.ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = instance.wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer instance.wasm_module_delete(m);
+
+    var imports = [_]?*const Extern{wasm_memory_as_extern_const(hm)};
+    const inst = instance.wasm_instance_new(s, m, &imports, null) orelse return error.InstanceAllocFailed;
+    defer instance.wasm_instance_delete(inst);
+
+    // Host writes the shared buffer AFTER instantiation; guest i32.load sees it.
+    const data = instance.wasm_memory_data(hm) orelse return error.NoData;
+    data[0] = 42; // little-endian i32 = 42
+
+    var exports: vec.ExternVec = .{ .size = 0, .data = null };
+    instance.wasm_instance_exports(inst, &exports);
+    defer instance.wasm_extern_vec_delete(&exports);
+    const rf = instance.wasm_extern_as_func(exports.data.?[0]) orelse return error.NotFunc;
+
+    const args: vec.ValVec = .{ .size = 0, .data = null };
+    var results_data: [1]instance.Val = undefined;
+    var results: vec.ValVec = .{ .size = 1, .data = &results_data };
+    try testing.expect(instance.wasm_func_call(rf, &args, &results) == null);
+    try testing.expectEqual(@as(i32, 42), results_data[0].of.i32);
 }
