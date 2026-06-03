@@ -9,13 +9,13 @@
   **interp pass=fail=skip=0 (MET) + JIT 0-real-fail + every JIT skip on the forward-ref'd
   deferred-allowlist** (multi-memory-on-JIT→§14, GC-on-JIT-rooting→§11). Raw "JIT skip=0" (ADR-0128)
   was unreachable in-phase; re-scoped autonomously per ADR-0132.
-- **LAST code HEAD** (`be5a1a32`): arm64 br_on_null now handles function-return/loop targets (was forward-block
-  only → UnsupportedOp on br_on_null.1). Routed through the shared `op_control.branchOnReg` (pop ref → 0/1
-  null-flag in a RESERVED scratch W16 — NOT the ref's reg, that clobber was a mid-fix block regression → push
-  ref back). br_on_null.1 modrej cleared; function-references 23/0/16 / global 811/1 unchanged (no asserts in
-  that module); no regression. **§10 JIT module-rejects cleared this session**: D-239 (precise ref.func +
-  null-ref emit dispatch, `faf23f0a`) + ref_null.0 concrete ref.null const-expr (`195856a1`) + br_on_null.1.
-  Built on cross-instance EH (`4f73d9ee`, ADR-0134). x86_64 br_on_null function-return parity = D-238 bucket.
+- **LAST code HEAD** (`3af19c65`): D-240 CLOSED by a one-line validator flip — elem-vs-table reftype check
+  `eql`→`valTypeIsSubtype` (Wasm 3.0 §3.3.3 subtyping). The old "loosening SEGVs (RUN=139)" warning was STALE
+  (predated D-218 i31-elems + null-safe funcptr-derive, which already gave the runtime typed-ref table support);
+  re-probed clean. `ref_is_null.0` + `gc/i31.6` go modrej→running; **JIT return pass 811→839 (+28)**, zero new
+  fail (memory64 fail=1 = D-234 harness), assert_invalid 194/0 (no regression), no SEGV. Regression test added
+  (both arches). Lesson: re-run a `blocked-by` probe before scoping it as a bundle (the barrier had dissolved).
+  Prior code: br_on_null function-return (`be5a1a32`), cross-instance EH (`4f73d9ee`, ADR-0134).
 - **Cross-instance EH on JIT DONE** (`4f73d9ee`, 10.E-eh-on-jit bundle CLOSED, EH dir 34/0/0; ADR-0134). x86_64
   EH thunk-parity = D-238. Built on D2 (`cb55013e`) + D3 (`16a921a8`) + Cause A (`50e5ecd3`).
 - **§10-exit determination** (ADR-0133 §4): interp 100% MET + JIT 0 GENUINE fails MET (memory64 = D-234 harness,
@@ -26,30 +26,25 @@
   **GATE TRAP**: corpus exe MUST be picked by mtime (`find … -exec ls -t {} + | head -1`); bare `head -1` = STALE.
 - **Watch**: `runner_test.zig` ~1415 / `compile.zig` 1223 / `runner_gc_test.zig` 1476 / `jit_abi.zig` 1350 (WARN, < hard 2000).
 
-## Active task — §10-exit: **clear the remaining JIT module-rejects**  **NEXT**
+## Active task — §10.P: **the LAST non-allowlisted JIT blocker = D-210**  **NEXT**
 
 §10 exit (ADR-0133): interp 100% (MET) + JIT 0 genuine fails (MET — memory64 = D-234 tracked-harness, §2) +
-JIT skips ⊆ deferred-allowlist. Session progress: function-references 8/0/31 → **23/0/16**; global JIT 796/1 →
-**811/1**; 7 of 8 fr rejects cleared (D-239 ref.func + emit dispatch, ref_null.0, br_on_null.1). **§10.P now
-reduces to EXACTLY 3 non-allowlisted JITmodrej** (everything else — multi-memory→§14, GC-rooting→§11,
-eligibility-gate incl. UnsupportedEntrySignature ×7 + gc/type-subtyping `run`, D-234 memory64-harness — is
-allowlisted/tracked, classified this session):
-1. **`ref_is_null.0`** (concrete `(ref null $t)` table) + **`gc/i31.6`** (abstract i31ref table) — both
-   ElemSegmentTypeMismatch at `compile.zig:257` → **D-240** (blocked-by): needs JIT typed/abstract-ref TABLE
-   runtime (table.init from a reftype elem + table.get/set of typed refs) THEN the eql→`valTypeIsSubtype` flip
-   (loosening alone SEGV'd — proven this session). Probe via `debug_jit_auto`. Multi-cycle runtime feature.
-2. **`tail-call/return_call_indirect.0`** → **D-210**. NOT the obvious "op not emitted" — `emitIndirectReturnCall`
-   IS wired (`op_tail_call.zig:230`) + its 3 visible gates (table_idx≠0 / results>2 / typeidx≥4096) do NOT trip
-   for this module (table 0, ≤1 result, small typeidx). The UnsupportedOp is at **func[36] pc=12** =
-   `return_call_indirect`-IN-`try_table` (TC×EH interaction — a terminator tail-jump inside an open try-region's
-   exception-table/landing-pad bookkeeping). Next step = `debug_jit_auto` probe of func[36] to pin the exact
-   UnsupportedOp site (marshalCallArgs/teardown vs the TC×try_table frame). Deep (TC+EH integration).
-   **arch-pin any JitInstance regression test to arm64** (lesson this session).
+JIT skips ⊆ deferred-allowlist. **§10.P now reduces to EXACTLY 1 non-allowlisted JITmodrej** (D-240 closed this
+turn → ref_is_null.0 + gc/i31.6 cleared; everything else — multi-memory→§14, GC-rooting→§11, eligibility-gate
+incl. UnsupportedEntrySignature ×7, D-234 memory64-harness — is allowlisted/tracked):
 
-Recommended next (fresh-context BUNDLE — both are deep multi-cycle features, not quick wins): **D-240** (covers 2
-of 3, typed-ref table runtime) or **D-210** (TC×EH func[36], probe first). Both gate §10.P; everything else is
-allowlisted/tracked. Then `scripts/check_phase10_close_invariants.sh` → flip §10.P. The broad tractable §10
-work (cross-instance EH + 7 fr rejects + all classifications) is DONE this session; these 2 are the frontier.
+- **`tail-call/return_call_indirect.0`** → **D-210**. NOT the obvious "op not emitted" — `emitIndirectReturnCall`
+  IS wired (`op_tail_call.zig:230`) + its 3 visible gates (table_idx≠0 / results>2 / typeidx≥4096) do NOT trip
+  for this module. The UnsupportedOp is at **func[36] pc=12** = `return_call_indirect`-IN-`try_table` (TC×EH
+  interaction — a terminator tail-jump inside an open try-region's landing-pad/exception-table bookkeeping).
+  Next step = `debug_jit_auto` probe of func[36] to pin the exact UnsupportedOp site (marshalCallArgs/teardown
+  vs the TC×try_table frame). Deep (TC+EH integration). **BUT** re-probe first per this session's lesson — the
+  D-240 "blocked-by SEGV" barrier had silently dissolved; D-210's "func[36] UnsupportedOp" claim was last
+  verified pre-`3af19c65`, so RE-RUN the JIT corpus on tail-call before assuming it still holds.
+  **arch-pin any JitInstance regression test to arm64** if the fix is arm64-first.
+
+Once D-210 clears: `scripts/check_phase10_close_invariants.sh` → flip §10.P. The broad §10 endgame
+(cross-instance EH + all 8 fr rejects + D-240 + all classifications) is DONE; D-210 is the sole frontier.
 
 Other tracks: **D-238** (x86_64 EH parity), realworld GC/EH/TC producers.
 
@@ -58,21 +53,22 @@ Other tracks: **D-238** (x86_64 EH parity), realworld GC/EH/TC producers.
 ## §10 remaining — the six `[ ]` rows
 
 - **10.M** memory64 — corpus green; D-209 stale u32; D-234 (51 OOB assert_trap = harness artifact).
-- **10.R** function-references — corpus green; residual = D-198 + br_on_null/cast modrej (StackTypeMismatch).
-- **10.TC** tail-call — JIT matrix complete; residuals = D-210 + return_call_indirect-in-try + `wasm_of_ocaml`.
+- **10.R** function-references — corpus green; JIT 36/0/3 (all 8 modrej cleared incl. ref_is_null via D-240);
+  residual skips = scalar-arg eligibility gate (allowlisted) + D-198 cast modrej.
+- **10.TC** tail-call — JIT matrix complete; residual = D-210 (return_call_indirect-in-try, func[36]) + `wasm_of_ocaml`.
 - **10.E** EH — JIT EH dir **34/0/0** (cross-instance DONE, `4f73d9ee`); residual = x86_64 parity (D-238) +
   eh_frequency runner (I20), c_api tag accessors (I14 → Phase 13), emscripten_eh realworld (I21).
-- **10.G** GC — JIT emit COMPLETE; §1 + PHASE C + D-235 DONE; remaining = D-198 + gc_stress (I19) + dart/hoot (I21).
+- **10.G** GC — JIT emit COMPLETE; §1 + PHASE C + D-235 DONE; gc/i31.6 cleared (D-240); remaining = D-198 + gc_stress (I19) + dart/hoot (I21).
 - **10.P** close — flips only at 100% both-backends (ADR-0128).
 
 ## Step 0.7 (next resume)
 
-THIS turn = D-210 root-cause scoping (read-only): return_call_indirect.0's UnsupportedOp is NOT the 3 visible
-gates (they don't trip) — it's **func[36] = return_call_indirect-IN-try_table** (TC×EH integration), deep. So
-BOTH §10.P blockers (D-210 TC×EH, D-240 typed-ref table runtime) are confirmed deep multi-cycle features. No
-code; code state `2ce27d5b`, ubuntu-verified OK. NO ubuntu kick (handover-only). Next session → pick D-240 or
-D-210 as a dedicated BUNDLE (Step-0 survey + debug_jit_auto probe for D-210's func[36]). The broad §10 work is
-done; these 2 are the frontier.
+THIS turn = D-240 CLOSED (`3af19c65`, CODE): re-probed the "blocked-by SEGV" barrier (Step 0.5 dissolution
+check) — it had dissolved (D-218 + null-safe derive landed the runtime since), so the fix was a one-line flip
+`eql`→`valTypeIsSubtype` at compile.zig + a regression test. JIT corpus re-measured under
+`ZWASM_SPEC_ENGINE=jit`: return 811→839 (+28), 0 new fail, assert_invalid 194/0, no SEGV (verified Mac, full
+`scripts/mac_gate.sh` green). **ubuntu kick SENT** against `3af19c65` (code chunk) — Step 0.7 next cycle MUST
+`tail -3 /tmp/ubuntu.log`; RED → revert this turn's commits to `2ce27d5b`. Next → D-210 (re-probe first).
 
 **Gate hygiene**: Step-5 Mac gate = `bash scripts/mac_gate.sh`. JIT corpus: `zig build test-spec-wasm-3.0-assert`
 (NO bogus `-Dno-run`); **pick the exe by mtime** — `/usr/bin/find .zig-cache/o -name zwasm-spec-wasm-3-0-assert
@@ -84,6 +80,6 @@ done; these 2 are the frontier.
 
 - ADR-0128 (Phase 10 100%); ADR-0114 (EH design — try_table/landing pads/trampoline); ADR-0119 (naked trampoline);
   ADR-0131/0126 (subtype + canonical ids, D-235). ROADMAP §10.E. `debug_jit_auto` skill for the dispatch fails.
-- Debt: **D-234**, D-198 / D-209 / D-210 / D-211 / D-212.
-  Lessons: `2026-06-03-eh-on-jit-blocker-is-validator-not-dispatch`,
-  `2026-06-02-jit-corpus-late-phase-is-per-module-blocker-stacks`, `2026-06-03-jit-trampoline-mid-op-clobbers-operands`.
+- Debt: **D-234**, D-198 / D-209 / D-210 / D-211 / D-212 (D-240 CLOSED `3af19c65`).
+  Lessons: `2026-06-03-reprobe-blocked-by-barriers-before-scoping` (D-240),
+  `2026-06-03-jitinstance-test-compiles-for-host-arch`, `2026-06-03-eh-on-jit-blocker-is-validator-not-dispatch`.
