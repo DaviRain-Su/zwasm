@@ -19,25 +19,29 @@
 
 ## Next task (autonomous)
 
-**Options (pick highest-value):** (a) **differential oracle** for the fuzzer — run each corpus module through
-interp AND JIT, compare results/traps (catches miscompiles, the bug-class fuzzing is best at; Mac-local,
-high-value extension of `6c80c229`); (b) **spec-bump checker** + wire §14.3 `nightly.yml` (fuzz campaign), then
-§14.3 closes; (c) re-scope §14.P to close Phase 14 (CI scaffolding done) deferring spec-bump + D-245. Lean (a)
-or (b) — real feature work over re-scoping. (If user redirects to D-245-win64-first or Phase-15, pivot.)
-or Phase-15, pivot.)
+Fuzz coverage now = parse + validate + **instantiate** (interp; `16584c1c` — 4/7 smith modules instantiate,
+runs start funcs, 0 crashes). **Options (pick highest-value):** (a) **invoke-exports** — after instantiate,
+call each exported func (interp) with zero-valued args; needs export+functype introspection (via parser.Module
+sections OR the §13.2 C-API `wasm_module_exports` + functype). Deepest interp execution fuzzing, no D-245. (b)
+**differential oracle** (interp-vs-JIT) — higher-value but D-245-entangled (JIT exec) + complex; defer. (c)
+**spec-bump checker + nightly.yml** → closes §14.3 (spec-bump needs establishing a vendor-SHA pin first — the
+spec corpus is regen'd from `$HOME/Documents/OSS/WebAssembly/{spec,testsuite}` with no stored pin). (d) re-scope
+§14.P + close Phase 14. **Lean (a)** (clean execution-fuzz extension). (If user redirects, pivot.)
 
 ## Step 0.7 (next resume)
 
-This turn: §14.4 (`bench_baseline.yml`, `96e72c24`) + §14.5 [x]. CI-config + docs only → no ubuntu kick
-(code HEAD `528d2af3` ubuntu-verified OK). **NOTE** (lesson `gate-tail-vs-exit-code`): benign `failed
-command: …--listen=-` noise next to a passing Build Summary is not a failure. Mac gate clean at `528d2af3`.
+This turn: fuzz loader instantiate extension (`16584c1c`). Prior `a1983b54` (fuzz MVP) ubuntu test-all **OK**
+(fuzz green on Linux too). An ubuntu test-all kicked for `16584c1c` → next resume `tail /tmp/ubuntu.log` for
+`OK`. **NOTE** (lesson `gate-tail-vs-exit-code`): benign `failed command: …--listen=-` noise next to a passing
+Build Summary is not a failure — trust the exit code / Build Summary step count.
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. CI workflows: actionlint before commit. Win64
 cross-compile = `zig build test -Dtarget=x86_64-windows-gnu`. windowsmini exec = `run_remote_windows.sh`.
 
 ## Deferred / open debt
 
-- **D-256** fuzz+spec-bump infra absent — **ACTIVE BUNDLE**. **D-245** win64 host→JIT (windows CI green) —
+- **D-256** fuzz infra — **partial** (crash-harness + instantiate done; spec-bump + nightly wiring remain).
+  **D-245** win64 host→JIT (windows CI green) —
   §14.P blocker, §11.3/P15 home (hard remote asm). **D-249** win bench timing (ADR-0137). **D-255** C-API WASI
   io-infra (ADR-0143). **D-254** rust 3-OS (ADR-0142). **D-253** §13.2 host_info (cap). **§12.5/§11.4** GC
   stack-map → P15. **D-251** WASI in AOT. **D-246** arm64 dot/extmul → P15. **D-238** x86_64 EH thunk.
