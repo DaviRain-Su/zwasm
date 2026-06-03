@@ -8,6 +8,15 @@
 - **Phase**: **11 IN-PROGRESS — WASI 0.1 full + bench infra** (Phase 10 = DONE 2026-06-03, `5ab7b981`; Wasm 3.0
   complete on both backends per ADR-0133). §11 task table open (11.0✓ / 11.1 WASI / 11.2 bench / 11.3 SIMD-gap /
   11.4 GC-rooting / 11.P).
+- **§11.2 bench (in progress, `1c13e9f3`)**: un-stubbed `record_merge_bench.sh` — was a Phase-0-10 placeholder
+  (appended `benches: []` comments); now a thin wrapper exec'ing the real `run_bench.sh` (hyperfine engine).
+  Verified Mac: `--quick --bench=tinygo/arith` → real row (mean_ms=2.39). §12.4 cadence: Phase 0-13 = MANUAL
+  recording (auto-CI `bench.yml` push-trigger DISABLED 2026-05-25 per user — do NOT re-enable). REMAINING for
+  §11.2: (a) Linux row — run `record_merge_bench.sh --phase-record` ON ubuntunote (arch auto = x86_64-linux); a
+  remote bench kick (analogous to `run_remote_ubuntu.sh`) or manual SSH; (b) Windows row → windowsmini, phase-
+  boundary batch; (c) decide if a 3-host `--phase-record` lands real `history.yaml` rows at phase close (§11.P
+  exit = "bench auto-record 3-host"). NOT a `gate_merge.sh` wiring — that would re-introduce the auto-bench the
+  user disabled; manual per-merge is the §12.4 Phase-0-13 design.
 - **LAST code HEAD** (`89aaebcf`): **D-243 RESOLVED** — the realworld DIFF runner now preopens a fresh scratch
   `--dir` (guest ".") for needs-preopen fixtures on BOTH sides (wasmtime `--dir <scratch>::.` + v2
   `runWasmCapturedOpts`). `rust_file_io.wasm` flips SKIP-V2-TRAP → **MATCH** (`zig build test-realworld-diff` =
@@ -25,12 +34,12 @@
 
 ## Next task (autonomous)
 
-§11.1 Mac-side is DONE (0 SKIP-WASI; rust_file_io MATCH). Next autonomous track = **§11.2 bench infra**. Surveyed
-`89aaebcf`: `run_bench.sh` (full hyperfine runner, --quick/--compare/--capture-rss) + `bench/results/history.yaml`
-(committed, 7MB) exist, but (a) `record_merge_bench.sh` self-labels "Phase 0-10: stub; Phase 11+ wires hyperfine"
-— verify/un-stub the actual hyperfine call, and (b) `gate_merge.sh` has ZERO bench linkage → wire per-merge
-auto-record (Mac + ubuntunote + windowsmini per ADR-0067) into the A13 merge gate. Then §11.3 SIMD gap.
-Windows realworld subset (the last 11.1 line) is windowsmini work → phase-boundary batch per the skip policy.
+§11.2 Mac manual recorder is now real (`1c13e9f3`). Next: **§11.2 Linux row** — get a real `x86_64-linux`
+`history.yaml` entry from ubuntunote. Either (a) a one-shot remote bench kick (SSH: sync repo → `nix develop ...
+record_merge_bench.sh --quick --phase-record --reason='p11.2: linux baseline'` → pull the fragment), or (b) note
+it as a phase-close batch alongside the windowsmini row. Heavy benches (e.g. shootout/fib2) take minutes each;
+use the light subset for smoke (tinygo/arith ~2ms). Then **§11.3 SIMD gap** + §11.4 GC-rooting. Windows realworld
+subset (last 11.1 line) + windowsmini bench row both go to the phase-boundary batch per the skip policy.
 
 ## Deferred / open debt (all blocked-by/note; none a Phase-11 blocker)
 
@@ -43,10 +52,11 @@ Windows realworld subset (the last 11.1 line) is windowsmini work → phase-boun
 
 ## Step 0.7 (next resume)
 
-Prior turn's `383e5379` (D-242) was ubuntu-verified GREEN this cycle (Step 0.7 OK, all `fail=0`). THIS turn landed
-`7806936f` (D-242 fix) + `89aaebcf` (D-243 diff-runner preopen) → ubuntu kick fires against `89aaebcf`. Step 0.7
-next cycle = `tail -3 /tmp/ubuntu.log` mechanically; on FAIL revert to `383e5379`. The diff-runner change is
-test-infra only (no src/ delta); Mac diff target + lint were green pre-push.
+`fcc9fe03` (D-243) was ubuntu-verified GREEN this cycle (Step 0.7 OK, all `fail=0`; ubuntunote even ran the
+diff_runner — rust_file_io MATCHed on Linux too). THIS turn landed only `1c13e9f3` — a pure shell-orchestration
+change (`record_merge_bench.sh` → wrapper); `zig build test-all` does NOT invoke it, so NO ubuntu kick (non-code
+gap, like docs-only). Last ubuntu-verified HEAD = `fcc9fe03`. Next cycle Step 0.7 = nothing to verify (no kick
+fired); proceed to §11.2 Linux row / §11.3.
 
 **Gate hygiene**: Step-5 Mac gate = `bash scripts/mac_gate.sh`. JIT corpus: `zig build test-spec-wasm-3.0-assert`
 (NO bogus `-Dno-run`); pick the exe by mtime (bare `head -1` = STALE). `ZWASM_SPEC_ENGINE=jit <exe>
