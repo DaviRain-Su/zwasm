@@ -19,21 +19,22 @@
 
 ## Next task (autonomous)
 
-Fuzz coverage now = parse + validate + **instantiate** (interp; `16584c1c` — 4/7 smith modules instantiate,
-runs start funcs, 0 crashes). **Options (pick highest-value):** (a) **invoke-exports** — after instantiate,
-call each exported func (interp) with zero-valued args; needs export+functype introspection (via parser.Module
-sections OR the §13.2 C-API `wasm_module_exports` + functype). Deepest interp execution fuzzing, no D-245. (b)
-**differential oracle** (interp-vs-JIT) — higher-value but D-245-entangled (JIT exec) + complex; defer. (c)
-**spec-bump checker + nightly.yml** → closes §14.3 (spec-bump needs establishing a vendor-SHA pin first — the
-spec corpus is regen'd from `$HOME/Documents/OSS/WebAssembly/{spec,testsuite}` with no stored pin). (d) re-scope
-§14.P + close Phase 14. **Lean (a)** (clean execution-fuzz extension). (If user redirects, pivot.)
+Fuzz infra: parse+validate+instantiate crash-fuzz (`6c80c229`+`16584c1c`); `nightly.yml` `17e3b6f1` = fuzz
+campaign + proposal-watch (2/3 of §14.3). **§14.3 last leg = spec-bump** but it needs a **Wasm-3.0 pin-target
+decision first** (recorded pin is Phase-9 `wg-2.0`, no enforced SHA; overlaps proposal-watch) — a design chunk,
+likely an ADR. **Options (pick):** (a) **make the spec-bump pin-target decision** (ADR: pin to Wasm-3.0 W3C-Rec
+spec/testsuite SHA) + build `check_spec_bump.sh` (git ls-remote upstream vs pin) → **closes §14.3**; (b) re-scope
+§14.P to close Phase 14 (CI scaffolding + fuzz infra done; spec-bump + D-245 → homes), advance to Phase 15;
+(c) **fuzz invoke-exports** extension (execution fuzzing; needs export introspection — src/ helper or §13.2 C-API);
+(d) **D-245 win64** (the real §14.P/Phase-15 blocker; hard remote asm). **Lean (a) or (b)** to converge Phase 14.
 
 ## Step 0.7 (next resume)
 
-This turn: fuzz loader instantiate extension (`16584c1c`). Prior `a1983b54` (fuzz MVP) ubuntu test-all **OK**
-(fuzz green on Linux too). An ubuntu test-all kicked for `16584c1c` → next resume `tail /tmp/ubuntu.log` for
-`OK`. **NOTE** (lesson `gate-tail-vs-exit-code`): benign `failed command: …--listen=-` noise next to a passing
-Build Summary is not a failure — trust the exit code / Build Summary step count.
+This turn: §14.3 `nightly.yml` (`17e3b6f1`) + `fuzz-campaign` build step + `check_proposal_watch.sh`. Prior
+`f26fe7b0` (instantiate) ubuntu test-all **OK** (fuzz green on Linux). An ubuntu test-all kicked for the
+build.zig change → next resume `tail /tmp/ubuntu.log` for `OK` (fuzz-campaign step is NOT in test-all; test-fuzz
+seed unaffected). **NOTE** (lesson `gate-tail-vs-exit-code`): benign `failed command: …--listen=-` next to a
+passing Build Summary is not a failure. CI workflows: actionlint before commit.
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. CI workflows: actionlint before commit. Win64
 cross-compile = `zig build test -Dtarget=x86_64-windows-gnu`. windowsmini exec = `run_remote_windows.sh`.
