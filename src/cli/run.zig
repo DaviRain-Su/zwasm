@@ -55,7 +55,7 @@ pub fn runWasmJit(
 /// `--invoke <name>` → `_start` → `main` → first func export. Runs it
 /// with a minimal stateless runtime and surfaces an i32 result as the
 /// exit code (void → 0). COMPUTE-ONLY — no WASI; stateful `.cwasm`
-/// (memory/globals/imports) is later scope (D-250). The caller routes
+/// (memory/globals/imports) is §12.3b scope (ADR-0139). The caller routes
 /// here on the `CWAS` magic.
 pub fn runCwasm(
     alloc: std.mem.Allocator,
@@ -388,8 +388,8 @@ const simd_start_wasm = [_]u8{
 
 test "runCwasm: compile → produce → load+run a .cwasm, i32 result surfaces as exit code (§12.1)" {
     // Executes native AOT machine code → Win64 deferred, mirroring the
-    // aot/load.zig + jit_mem exec tests (skip.phaseEnd; D-250 tracks the
-    // stateful/Win64 remainder). The resolveEntry + exit-code mapping
+    // aot/load.zig + jit_mem exec tests (skip.phaseEnd; §12.3b/ADR-0139
+    // tracks the stateful remainder). The resolveEntry + exit-code mapping
     // itself is host-independent.
     const builtin = @import("builtin");
     if (builtin.os.tag == .windows) return @import("../test_support/skip.zig").phaseEnd(.win64);

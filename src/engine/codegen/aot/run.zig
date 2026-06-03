@@ -10,7 +10,7 @@
 //!
 //! **Scope (MVP)**: stateless void / i32-result entries. Stateful
 //! `.cwasm` (memory / globals / imports) needs format sections the v0.2
-//! container does not carry yet — tracked as **D-250** (later §12).
+//! container does not carry yet — tracked as **§12.3b** (ADR-0139).
 //! Non-void/i32 results (i64 / f32 / f64 / v128 / multi-result) are
 //! also deferred; `runEntry` rejects them with `UnsupportedEntrySignature`.
 //!

@@ -710,26 +710,6 @@ entries:
     refs: |-
       ADR-0137; scripts/run_remote_windows.sh (no bench step); scripts/run_bench.sh (hyperfine);
       bench/results/history.yaml; ROADMAP §11.2 / §11.P
-  - id: "D-250"
-    layer: "code"
-    status: "blocked-by"
-    description: |-
-      blocked-by: the v0.2 `.cwasm` container carries no memory / globals / data /
-      element / table / import sections, so a standalone runner can rebuild a
-      `JitRuntime` only for the STATELESS subset (no memory/globals/imports). The
-      §12.1 `zwasm run *.cwasm` MVP runs stateless void / i32-result entries via
-      `aot/run.zig`'s `minimalRuntime()` (base pointers alias a zero pad, never
-      dereferenced; counts/limits 0). A stateful `.cwasm` (uses memory/globals/
-      imports) would dereference those bases → UB. Discharge: extend the format
-      with the missing module sections + a real runtime builder from the `.cwasm`
-      alone (a Phase-12 follow-on / Phase-12+ row), then drop the stateless guard
-      in `aot/run.zig`. Non-void/i32 results (i64/f32/f64/v128/multi) are deferred
-      in the same helper (`UnsupportedEntrySignature`).
-    first_raised: "2026-06-03"
-    last_reviewed: "2026-06-03"
-    refs: |-
-      src/engine/codegen/aot/run.zig (minimalRuntime + runEntry subset guard);
-      ADR-0138 (v0.2 exports section); ADR-0039 (container); ROADMAP §12.1
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
