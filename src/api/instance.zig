@@ -197,6 +197,9 @@ pub const Ref = struct {
     /// this Ref, freed in `wasm_ref_delete`) — the Func a funcref ref
     /// denotes. Borrowed-view discipline like `Func.ref_view` (reverse).
     func_view: ?*Func = null,
+    /// Allocator recovery for an instance-less ref (e.g. a foreign
+    /// externref from `wasm_foreign_as_ref`, `instance == null`).
+    store: ?*Store = null,
 };
 
 /// `wasm_table_t` — opaque-from-C handle for a table export.
@@ -1423,8 +1426,7 @@ pub export fn wasm_memory_grow(m: ?*Memory, delta: u32) callconv(.c) bool {
 /// `wasm_ref_delete(*Ref)` — free a Ref handle. Null-tolerant.
 pub export fn wasm_ref_delete(r: ?*Ref) callconv(.c) void {
     const handle = r orelse return;
-    const inst = handle.instance orelse return;
-    const store = inst.store orelse return;
+    const store = if (handle.instance) |i| (i.store orelse return) else (handle.store orelse return);
     const alloc = storeAllocator(store) orelse return;
     if (handle.func_view) |fv| alloc.destroy(fv);
     alloc.destroy(handle);

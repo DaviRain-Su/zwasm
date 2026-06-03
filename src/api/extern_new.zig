@@ -333,11 +333,11 @@ pub export fn wasm_func_new_with_env(
 /// foreign/externref store path.
 pub export fn wasm_ref_copy(r: ?*const instance.Ref) callconv(.c) ?*instance.Ref {
     const handle = r orelse return null;
-    const inst = handle.instance orelse return null;
-    const store = inst.store orelse return null;
+    // instance-backed (table ref) OR instance-less (foreign externref).
+    const store = if (handle.instance) |i| (i.store orelse return null) else (handle.store orelse return null);
     const alloc = instance.storeAllocator(store) orelse return null;
     const c = alloc.create(instance.Ref) catch return null;
-    c.* = .{ .instance = handle.instance, .ref = handle.ref };
+    c.* = .{ .instance = handle.instance, .ref = handle.ref, .store = handle.store };
     return c;
 }
 
@@ -395,6 +395,84 @@ pub export fn wasm_func_as_ref_const(f: ?*const Func) callconv(.c) ?*const insta
 
 pub export fn wasm_ref_as_func_const(r: ?*const instance.Ref) callconv(.c) ?*const Func {
     return wasm_ref_as_func(@constCast(r));
+}
+
+// ----------------------------------------------------------------
+// `wasm_foreign` — a host-defined opaque object usable as an externref
+// (WASM_DECLARE_REF(foreign) + wasm_foreign_new). Its identity (the
+// `*Foreign` pointer) IS the externref payload. host_info lets the host
+// attach/retrieve its own data. (D-253 D)
+// ----------------------------------------------------------------
+
+pub const Foreign = struct {
+    store: ?*instance.Store,
+    host_info: ?*anyopaque = null,
+    host_info_finalizer: ?*const fn (?*anyopaque) callconv(.c) void = null,
+    /// Cached borrowed externref `wasm_ref_t` view (`wasm_foreign_as_ref`;
+    /// owned by this Foreign, freed in `wasm_foreign_delete`).
+    ref_view: ?*instance.Ref = null,
+};
+
+pub export fn wasm_foreign_new(store: ?*instance.Store) callconv(.c) ?*Foreign {
+    const s = store orelse return null;
+    const alloc = instance.storeAllocator(s) orelse return null;
+    const f = alloc.create(Foreign) catch return null;
+    f.* = .{ .store = s };
+    return f;
+}
+
+pub export fn wasm_foreign_delete(f: ?*Foreign) callconv(.c) void {
+    const handle = f orelse return;
+    const s = handle.store orelse return;
+    const alloc = instance.storeAllocator(s) orelse return;
+    if (handle.host_info_finalizer) |fin| fin(handle.host_info);
+    if (handle.ref_view) |rv| alloc.destroy(rv);
+    alloc.destroy(handle);
+}
+
+/// `wasm_foreign_as_ref(foreign) -> wasm_ref_t*` (borrowed) — an
+/// externref `Ref` whose payload is `@intFromPtr(foreign)` (the Foreign's
+/// identity). Cached as `foreign.ref_view`. The Foreign must outlive any
+/// table/global slot holding the ref (host lifetime responsibility).
+pub export fn wasm_foreign_as_ref(f: ?*Foreign) callconv(.c) ?*instance.Ref {
+    const handle = f orelse return null;
+    if (handle.ref_view) |rv| return rv;
+    const s = handle.store orelse return null;
+    const alloc = instance.storeAllocator(s) orelse return null;
+    const rv = alloc.create(instance.Ref) catch return null;
+    rv.* = .{ .instance = null, .ref = @intFromPtr(handle), .store = s };
+    handle.ref_view = rv;
+    return rv;
+}
+
+/// `wasm_ref_as_foreign(ref) -> wasm_foreign_t*` (borrowed) — reinterpret
+/// an externref payload as the `*Foreign` it denotes. Per wasm-c-api, the
+/// caller guarantees the ref is a foreign (no runtime tag distinguishes
+/// externref kinds); null payload → null.
+pub export fn wasm_ref_as_foreign(r: ?*instance.Ref) callconv(.c) ?*Foreign {
+    const handle = r orelse return null;
+    if (handle.ref == 0) return null;
+    return @ptrFromInt(handle.ref);
+}
+
+pub export fn wasm_foreign_get_host_info(f: ?*const Foreign) callconv(.c) ?*anyopaque {
+    return (f orelse return null).host_info;
+}
+
+pub export fn wasm_foreign_set_host_info(f: ?*Foreign, info: ?*anyopaque) callconv(.c) void {
+    const handle = f orelse return;
+    handle.host_info = info;
+    handle.host_info_finalizer = null;
+}
+
+pub export fn wasm_foreign_set_host_info_with_finalizer(
+    f: ?*Foreign,
+    info: ?*anyopaque,
+    finalizer: ?*const fn (?*anyopaque) callconv(.c) void,
+) callconv(.c) void {
+    const handle = f orelse return;
+    handle.host_info = info;
+    handle.host_info_finalizer = finalizer;
 }
 
 // =====================================================================
@@ -803,4 +881,37 @@ test "wasm_func_as_ref / wasm_ref_as_func: funcref round-trip recovers a callabl
 
     try testing.expect(wasm_ref_as_func(null) == null);
     try testing.expect(wasm_func_as_ref(null) == null);
+}
+
+var foreign_test_finalized: bool = false;
+fn markForeignFinalized(info: ?*anyopaque) callconv(.c) void {
+    _ = info;
+    foreign_test_finalized = true;
+}
+
+test "wasm_foreign: new + host_info + as_ref/ref_as_foreign round-trip + finalizer fires" {
+    const e = instance.wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer instance.wasm_engine_delete(e);
+    const s = instance.wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer instance.wasm_store_delete(s);
+
+    const f = wasm_foreign_new(s) orelse return error.ForeignNewFailed;
+    try testing.expect(wasm_foreign_get_host_info(f) == null);
+    var marker: u32 = 7;
+    wasm_foreign_set_host_info(f, &marker);
+    try testing.expectEqual(@as(?*anyopaque, @ptrCast(&marker)), wasm_foreign_get_host_info(f));
+
+    // as_ref payload = @intFromPtr(f); ref_as_foreign recovers f; cached.
+    const ref = wasm_foreign_as_ref(f) orelse return error.AsRefFailed;
+    try testing.expectEqual(ref, wasm_foreign_as_ref(f).?);
+    try testing.expectEqual(f, wasm_ref_as_foreign(ref).?);
+    try testing.expect(wasm_ref_as_foreign(null) == null);
+    wasm_foreign_delete(f); // frees ref_view + foreign; finalizer null
+
+    // with_finalizer fires at delete.
+    foreign_test_finalized = false;
+    const f2 = wasm_foreign_new(s) orelse return error.ForeignNewFailed;
+    wasm_foreign_set_host_info_with_finalizer(f2, &marker, markForeignFinalized);
+    wasm_foreign_delete(f2);
+    try testing.expect(foreign_test_finalized);
 }
