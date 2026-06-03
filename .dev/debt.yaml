@@ -123,10 +123,16 @@ entries:
       C-API + c_host/zig_host all PASS on win). Seed-dependent in Debug (this run `--seed
       0x931361c3`; Phase-12 close passed on a lucky seed → flaky-red). **win64 widens the seam vs
       x86_64-SysV**: the trampoline must save/restore win64 callee-saved = RBX/RBP/RDI/RSI/R12–R15
-      **+ XMM6–XMM15** (the SIMD regs the JIT body clobbers — the proximate v128 corruptor) + the
-      32-byte shadow space + 16-byte align. **This blocks the §13.P 3-host reconcile (the deferred-
-      to-windowsmini-phase-boundary item is now AT its boundary).** Not Phase-13 work (no src/engine
-      or src/instruction change since `0810b339`, verified by diff).
+      **+ XMM6–XMM15** (win64 non-volatile XMM the SIMD JIT body must not leak) + the 32-byte shadow
+      space + 16-byte align. The unfixed seam is the RETURN-value `invokeAndCheck` (`entry.zig:172`,
+      plain `@call` for ALL arches/variants) + win64; the done partial (`8eca59e3`/`de576a76`) covers
+      only the VOID no-arg path on arm64 + x86_64-SysV. **ELEVATED 2026-06-04 to a windows-gate-
+      RELIABILITY item**: flaky-crashes windowsmini reconciles across Phase-11/12/13 closes (lucky
+      seeds passed; this one didn't). §13.P was **re-scoped PAST it per ADR-0144** (Phase-13 C-API is
+      3-host-green; this is unrelated Phase-11 JIT-ABI — 0 src/engine|src/instruction diff since
+      `0810b339`). **No longer an active /continue bundle** (full win64-asm fix = intricate asm +
+      remote-only probabilistic verify + 114-helper surface; not autonomous-loop-suited). Discharge
+      in its JIT-ABI home (§11.3 / Phase-15 SIMD-JIT) BEFORE it compromises further phase closes.
     first_raised: "2026-06-03"
     last_reviewed: "2026-06-04"
     refs: |-

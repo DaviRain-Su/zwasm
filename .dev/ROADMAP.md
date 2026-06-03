@@ -1184,8 +1184,8 @@ of each phase advances it.
 | 10    | DONE        | GC, EH, Tail call, memory64 (Wasm 3.0 completion) — both backends per ADR-0133 spec-corpus exit |
 | 11    | DONE        | WASI 0.1 full + bench infra (incl. SIMD per-op gap analysis, moved from §9.10 per Track A) |
 | 12    | DONE        | AOT compilation mode — `.cwasm` compile/run, JIT↔AOT differential, cross-compile, stateful-compute exec, cold-start ≥30% (stack-map §12.5 → P15 / ADR-0141; WASI imports → D-251) |
-| 13    | IN-PROGRESS | C API full (wasm-c-api conformance) 🔒                                                       |
-| 14    | PENDING     | CI matrix infrastructure                                                                    |
+| 13    | DONE        | C API full (wasm-c-api conformance) — deliverables 3-host-green; §13.P re-scoped past D-245 win64 (ADR-0144) |
+| 14    | IN-PROGRESS | CI matrix infrastructure                                                                    |
 | 15    | PENDING     | Performance parity with v1 + ClojureWasm migration                                          |
 | 16    | PENDING     | Public release v0.1.0 🔒                                                                     |
 
@@ -1506,7 +1506,7 @@ hard-gate — Phase 13 opens autonomously per the §12.P close, ADR-0141).
 | 13.3    | `wasi.h` + `zwasm.h` ABI surface complete. v0.1 surface = `new`/`delete` + `set_args`/`set_envs`/`inherit_stdio` (`47298cd1`) + `set_wasi`. `inherit_argv`/`env`/`preopen_dir` **deferred post-v0.1** (one root cause: a C-library context has no Zig-0.16 `Init`/io token; decls removed) per ADR-0143 / D-255 → re-add with the C-API io infra (D-251 / Phase-14+). | [x]  |
 | 13.4    | `test/c_api_conformance/` — wasmtime C-API example port + zwasm-specific tests, fail=0 (3-host). DONE: 5 examples via `zig build test-c-api-conformance` (in test-all), fail=0 Mac+ubuntu (windowsmini = §13.P boundary).                                                                                                                            | [x]  |
 | 13.5    | `examples/{c_host, zig_host, rust_host}/` build + run on all 3 OS. c_host (`test-c-api`) + zig_host (`run-zig-host`) in test-all = 3-OS; rust_host (`run-rust-host`) Mac-only (test hosts rustc-free by design) → rust-3-OS sub-clause deferred to §13.P per ADR-0142 / D-254. | [x]  |
-| 13.P    | Phase 13 close 🔒 — wasm-c-api conformance fail=0 + examples green 3-host + 🔒 gate cleared + 3-host reconcile + widget 13 → DONE + Phase 14 inline expand.                                                                  | [ ]  |
+| 13.P    | Phase 13 close 🔒 — wasm-c-api conformance fail=0 ✓ + examples 3-host ✓ + audit_scaffolding 0-block ✓ + 3-host reconcile **re-scoped (ADR-0144)**: Phase-13 C-API deliverables 3-host-green (conformance + c_host + zig_host pass on windowsmini, Build Summary 61/63); sole win failure = D-245 win64 SIMD-JIT host→JIT flakiness (Phase-11, elevated+routed, NOT Phase-13). widget 13 → DONE; Phase 14 expanded. | [x]  |
 
 ### Phase 14 — CI matrix infrastructure
 
@@ -1526,6 +1526,18 @@ hard-gate — Phase 13 opens autonomously per the §12.P close, ADR-0141).
   the first.
 
 **🔒 gate**: no.
+
+#### §14 task table
+
+| Row  | Task                                                                                                                                                                                       | Status |
+|------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------|
+| 14.0 | Open §14 inline + flip Phase Status widget (Phase 13 → DONE; Phase 14 → IN-PROGRESS).                                                                                                     | [x]  |
+| 14.1 | `.github/workflows/pr.yml` — `zig build test-all` matrix on `macos-15` + `ubuntu-22.04` + `windows-2022` (mirrors the local 3-host gate; pins Zig 0.16.0 via the flake or setup-action).  | [ ]  |
+| 14.2 | `.github/workflows/main.yml` — per-merge bench recorder on all 3 OS → append `bench/history.yaml` (reuses `scripts/record_merge_bench.sh`).                                               | [ ]  |
+| 14.3 | `.github/workflows/nightly.yml` — fuzz + spec-bump + proposal-watch (`.dev/proposal_watch.md` quarterly cadence).                                                                         | [ ]  |
+| 14.4 | `.github/workflows/bench_baseline.yml` (`workflow_dispatch`) — record per-arch bench baselines on demand.                                                                                 | [ ]  |
+| 14.5 | Confirm the local `pre_push` hook still works + document CI-as-second-line (not first); CI green ≠ skip local gate.                                                                        | [ ]  |
+| 14.P | Phase 14 close — CI matrix green 3-OS in Actions + widget 14 → DONE + Phase 15 inline expand. (🔒 gate: no.)                                                                               | [ ]  |
 
 ### Phase 15 — Performance parity with v1 + ClojureWasm migration
 
