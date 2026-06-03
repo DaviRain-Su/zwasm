@@ -262,6 +262,18 @@ pub fn callI32NoArgs(
     return invokeAndCheck(rt, u32, module.entry(func_idx, Fn), .{});
 }
 
+/// Variants taking a raw entry fn ptr (rather than a `JitModule` +
+/// idx) so the AOT loader — which holds `LoadedModule.entry(idx, Fn)`
+/// pointers, not a `JitModule` — reuses the same trap-flag / stack-limit
+/// invoke invariant (ADR-0105 D1) instead of duplicating it.
+pub fn callI32NoArgsPtr(f: *const fn (*const JitRuntime) callconv(.c) u32, rt: *JitRuntime) Error!u32 {
+    return invokeAndCheck(rt, u32, f, .{});
+}
+
+pub fn callVoidNoArgsPtr(f: *const fn (*const JitRuntime) callconv(.c) void, rt: *JitRuntime) Error!void {
+    return invokeAndCheckVoid(rt, f, .{});
+}
+
 /// Call a single-i32-argument JIT function returning i32.
 /// Per AAPCS64 / SysV the ABI puts `rt` in X0 / RDI and `a0` in
 /// X1 / RSI; the JIT body's prologue snapshots X1 (W1) into the

@@ -44,6 +44,14 @@ pub const Export = struct {
     func_idx: u32, // wasm-space (imports included)
 };
 
+/// The (single) result type of a defined function, parsed from the
+/// `.cwasm` types section so a standalone runner can dispatch the entry
+/// call without the original `.wasm`. `unsupported` = 0 results is
+/// `void_`; >1 result or a non-scalar valtype is `unsupported` (the
+/// MVP CLI runs only void / scalar-result entries — multi-result +
+/// v128/ref results are later scope).
+pub const ResultKind = enum { void_, i32_, i64_, f32_, f64_, unsupported };
+
 /// A loaded `.cwasm` image: an executable `JitBlock` holding the copied
 /// code section + per-defined-function byte offsets into it.
 pub const LoadedModule = struct {
@@ -54,6 +62,10 @@ pub const LoadedModule = struct {
     /// Func-kind exports (name → wasm func idx), v0.2 (ADR-0138).
     /// Allocator-owned; each `name` is independently allocated.
     exports: []Export,
+    /// Single-result kind per defined function (indexed by defined
+    /// idx), parsed from the types section for standalone entry
+    /// dispatch. Allocator-owned.
+    func_result_kinds: []ResultKind,
     /// Imported-function count; `entry`/`resolveEntry` index defined
     /// funcs (wasm idx - n_imports).
     n_imports: u32,
@@ -62,8 +74,14 @@ pub const LoadedModule = struct {
     pub fn deinit(self: *LoadedModule) void {
         for (self.exports) |e| self.allocator.free(e.name);
         self.allocator.free(self.exports);
+        self.allocator.free(self.func_result_kinds);
         self.allocator.free(self.func_offsets);
         jit_mem.free(self.block);
+    }
+
+    /// Result kind of defined function `idx` (for standalone dispatch).
+    pub fn resultKind(self: LoadedModule, idx: usize) ResultKind {
+        return self.func_result_kinds[idx];
     }
 
     /// Entry pointer for defined function `idx`. `Fn` is the
@@ -131,13 +149,18 @@ pub fn load(allocator: Allocator, bytes: []const u8) Error!LoadedModule {
     try jit_mem.setWritable(block);
     @memcpy(block.bytes[0..h.code_size], bytes[h.code_offset..][0..h.code_size]);
 
-    // Per-defined-function code offsets from the metadata section.
+    // Per-defined-function code offsets + result kinds from the
+    // metadata + types sections.
     const func_offsets = try allocator.alloc(u32, h.n_funcs);
     errdefer allocator.free(func_offsets);
+    const func_result_kinds = try allocator.alloc(ResultKind, h.n_funcs);
+    errdefer allocator.free(func_result_kinds);
+    const types_section = bytes[h.types_offset..][0..h.types_size];
     for (0..h.n_funcs) |i| {
         const off = h.metadata_offset + @as(u32, @intCast(i)) * format.func_meta_size;
         const meta = try format.parseFuncMeta(bytes[off..][0..format.func_meta_size]);
         func_offsets[i] = meta.code_offset;
+        func_result_kinds[i] = typeResultKind(types_section, meta.sig_idx);
     }
 
     try applyRelocs(block, func_offsets, bytes, h);
@@ -147,9 +170,45 @@ pub fn load(allocator: Allocator, bytes: []const u8) Error!LoadedModule {
         .block = block,
         .func_offsets = func_offsets,
         .exports = exports,
+        .func_result_kinds = func_result_kinds,
         .n_imports = h.n_imports,
         .allocator = allocator,
     };
+}
+
+/// Walk the producer's types section to `type_idx` and return that
+/// FuncType's single result kind. Section layout (ADR-0039 §Types,
+/// produced by `serialise`): a sequence of FuncTypes, each
+/// `[params_count:u8][results_count:u8][params…][results…]` where each
+/// valtype byte is `@intFromEnum(zir.ValType)` (i32=0, i64=1, f32=2,
+/// f64=3, v128=4, ref=5). `void_` for 0 results; `unsupported` for >1
+/// result or a non-scalar valtype. Total (never errors): a too-short /
+/// absent types section (e.g. synthetic loader fixtures with no types)
+/// yields `unsupported` — the result kind is only consulted by the
+/// standalone runner, which rejects `unsupported` loudly at call time.
+fn typeResultKind(types_section: []const u8, type_idx: u32) ResultKind {
+    var cursor: usize = 0;
+    var i: u32 = 0;
+    while (true) : (i += 1) {
+        if (cursor + 2 > types_section.len) return .unsupported;
+        const params_count = types_section[cursor];
+        const results_count = types_section[cursor + 1];
+        const body = cursor + 2;
+        const end = body + params_count + results_count;
+        if (end > types_section.len) return .unsupported;
+        if (i == type_idx) {
+            if (results_count == 0) return .void_;
+            if (results_count > 1) return .unsupported;
+            return switch (types_section[body + params_count]) {
+                0 => .i32_,
+                1 => .i64_,
+                2 => .f32_,
+                3 => .f64_,
+                else => .unsupported,
+            };
+        }
+        cursor = end;
+    }
 }
 
 /// Parse the v0.2 exports section, duplicating each name into
