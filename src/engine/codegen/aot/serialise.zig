@@ -1,4 +1,4 @@
-//! `.cwasm` v0.1 producer (§9.8b / 8b.3-c per ADR-0039).
+//! `.cwasm` producer (§9.8b / 8b.3-c per ADR-0039; v0.2 exports per ADR-0138).
 //!
 //! Wraps already-emitted per-function machine code +
 //! relocation list + type metadata in the inline-bytes
@@ -75,7 +75,7 @@ pub const Input = struct {
     exports: []const format.CwasmExport = &.{},
 };
 
-/// Produce a `.cwasm` v0.1 byte stream. Caller owns the
+/// Produce a `.cwasm` v0.2 byte stream. Caller owns the
 /// returned slice; pair with `allocator.free`.
 ///
 /// Layout (per ADR-0039; v0.2 exports section per ADR-0138):

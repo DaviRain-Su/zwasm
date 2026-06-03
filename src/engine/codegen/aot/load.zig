@@ -1,4 +1,4 @@
-//! `.cwasm` v0.1 loader / consumer (Phase 12 §12.1 per ADR-0039).
+//! `.cwasm` loader / consumer (Phase 12 §12.1 per ADR-0039; v0.2 per ADR-0138).
 //!
 //! Reads a `.cwasm` image produced by `serialise.produceCwasm`, copies
 //! its code section into a fresh executable `JitBlock`, applies

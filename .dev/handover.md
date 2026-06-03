@@ -23,30 +23,32 @@
 ## Active bundle
 
 - **Bundle-ID**: 12.1-aot-cwasm-loader
-- **Cycles-remaining**: ~1 (loader CORE + §12.2 differential DONE; remaining = `zwasm run *.cwasm` CLI wiring,
-  blocked on the entry-point design decision below)
-- **Continuity-memo**: Step 0 survey → `private/notes/p12-12.1-aot-loader-survey.md`. **Loader DONE**:
-  `src/engine/codegen/aot/load.zig` `load()` (parseHeader → arch-check → `jit_mem.alloc`+setWritable → memcpy
-  code → parse func metas → `applyRelocs` → setExecutable → `LoadedModule.entry(idx, Fn)`), single-func
-  load+execute (`ca69fc68`), 2-func direct-call reloc (`50b4bd1a`; arm64 BL imm26 / x86_64 CALL rel32 patch
-  math validated). Registered in `src/zwasm.zig` barrel. **§12.2 differential DONE + `[x]`**: runner_test.zig
-  runs real wasm via BOTH JIT (`run{I32,I64}Export`) and AOT (`compileWasm`→`produceFromCompiledWasm`→`load`→
-  `setupRuntime`→`entry(0)(&rt)`), asserts equal across: `()→i32` const (`bd138990`), `()→i64` full-width const
-  + internal-call reloc through the real pipeline (`d0c1281e`). **NEXT (entry-point ADR, then CLI)**: `zwasm run
-  *.cwasm` needs the ENTRY-POINT design — v0.1 `.cwasm` has NO export/name section; `zwasm run` maps
-  `_start`/named→func via the export table (run.zig:173). Producer HAS exports in `compileWasm` but discards
-  them (not serialised). Options: header `entry_idx` / exports-section (v0.2, ADR-0039 amend) vs `func[0]`
-  convention. File a small ADR FIRST (§5/§9-scope-adjacent format change → ADR territory), then wire.
+- **Cycles-remaining**: ~1 (format-layer v0.2 DONE; remaining = producer-side exports wiring + `zwasm run
+  *.cwasm` CLI branch, then §12.1 `[x]`)
+- **Continuity-memo**: Step 0 survey → `private/notes/p12-12.1-aot-loader-survey.md`. **Loader CORE DONE**:
+  `load.zig` `load()` (parseHeader → arch-check → alloc+memcpy code → parse metas → `applyRelocs` →
+  setExecutable → `entry(idx, Fn)`), single-func (`ca69fc68`), 2-func reloc (`50b4bd1a`). **§12.2 differential
+  `[x]`** (`bd138990`,`d0c1281e`): JIT vs AOT equal across i32/i64 const + internal-call reloc through the real
+  pipeline. **ENTRY-POINT DESIGN DONE (ADR-0138)** → **v0.2 format-layer landed `926bed9f`**: `.cwasm` v0.2 adds
+  an exports section (header 60→68B: `exports_offset`+`exports_size`; section = `[n_exports][name_len,name,
+  func_idx]…`, func-kind only). `format.zig` (writeExportEntry/parseExportEntry, version_v0_2), `serialise.zig`
+  (Input.exports, writes section), `load.zig` (parses+dups names into `LoadedModule.exports`, adds
+  `resolveEntry(invoke_name)` mirroring run.zig's `_start`→`main`→first-export precedence, returns DEFINED idx).
+  Unit tests green (round-trip + resolveEntry precedence + exec). **NEXT (producer wiring + CLI)**: (1)
+  `runner.CompiledWasm` doesn't carry exports — thread the wasm export table (func-kind) from `compileWasm`
+  through `produce.produceFromCompiledWasm` into `serialise.Input.exports`; (2) `cli/run.zig` `.cwasm` branch:
+  detect extension/magic → `load` → `resolveEntry(invoke_name)` → invoke (start with void `_start` via the
+  loaded entry, matching `runVoidExport`'s ABI). Then §12.1 `[x]` + end-to-end CLI test.
 - **Exit-condition**: §12.1 `[x]` when `zwasm run *.cwasm` runs a real artefact end-to-end (loader CORE +
-  §12.2 already met; the bundle closes at the CLI wiring).
+  §12.2 + v0.2 format-layer met; the bundle closes at the producer-wiring + CLI branch).
 
 ## Next task (autonomous)
 
-Phase 12 (AOT) IN-PROGRESS. §12.2 differential `[x]` (`d0c1281e` — broadened to i64 full-width + internal-call
-reloc through the real produce→load pipeline). §12.1 loader CORE done (`ca69fc68`, `50b4bd1a`). **NEXT** = the
-`.cwasm` entry-point ADR (header `entry_idx`/exports-section v0.2 vs `func[0]` convention; the producer currently
-discards `compileWasm` exports — run.zig:173 resolves `_start`/named via the export table), THEN `zwasm run
-*.cwasm` CLI wiring. §12.1 row `[x]` waits on that CLI end-to-end run; the loader CORE + differential are complete.
+Phase 12 (AOT) IN-PROGRESS. §12.2 `[x]`. ENTRY-POINT design decided (ADR-0138: `.cwasm` v0.2 exports section)
++ **format-layer landed `926bed9f`** (format/serialise/load + `resolveEntry`, unit-tested). **NEXT** = wire the
+producer side: carry func-kind exports from `compileWasm`/`CompiledWasm` → `produceFromCompiledWasm` →
+`serialise.Input.exports`; then the `cli/run.zig` `.cwasm` branch (`load` → `resolveEntry` → invoke). §12.1 row
+`[x]` closes on the end-to-end `zwasm run *.cwasm` test.
 
 ## Deferred / open debt (none a Phase-12 blocker)
 
@@ -58,10 +60,11 @@ discards `compileWasm` exports — run.zig:173 resolves `_start`/named via the e
 
 ## Step 0.7 (next resume)
 
-Resumed (user re-invoked `/continue`). This turn = §12.2 broadening (`d0c1281e`, Mac green). `/tmp/ubuntu.log`
-was absent at resume (machine cycled; not a FAIL) — last verified ubuntu = `a091d0a7` OK (cycle-2a reloc). An
-ubuntu `test` is kicked against this turn's final HEAD → next resume `tail /tmp/ubuntu.log` for OK. Phase-12 code
-is Mac+ubuntu only (loader exec / differential tests skip Win64 via `skip.phaseEnd`, mirroring jit_mem;
+This turn landed §12.2 broadening (`d0c1281e`) + v0.2 format-layer (`926bed9f`); Mac test+lint+zone green. A
+prior terminal crash interrupted the gate but work was intact + re-verified on resume. `/tmp/ubuntu.log` was
+absent (machine cycled; not a FAIL) — last verified ubuntu = `a091d0a7` OK. An ubuntu `test` is kicked against
+this turn's final HEAD → next resume `tail /tmp/ubuntu.log` for OK. Phase-12 code is Mac+ubuntu only (exec /
+differential tests skip Win64 via `skip.phaseEnd`; the v0.2 `resolveEntry`-precedence test runs on all hosts;
 windowsmini = phase-boundary).
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile: `zig build test
