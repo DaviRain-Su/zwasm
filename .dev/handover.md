@@ -40,22 +40,20 @@
 
 ## Next task (autonomous)
 
-Two open tracks, both within Phase 13's surface (pick either; runtime-entity is higher-value but needs design):
+**Sequencing note (read first):** ROADMAP's first `[ ]` in §13 is **§13.3**, but it is intentionally NOT next —
+its remainder (`inherit_argv`/`inherit_env`, `preopen_dir`) is ADR-0070-blocked (Zig 0.16's capability-based I/O
+gives a C-library context no `Init` token for process argv/env) AND low-value (explicit `set_args`/`set_envs`
+already cover config). It is in-row-annotated as deferred to §13.4-first / §13.P review (ADR-0142). **Do NOT start
+§13.3.** The active next task is §13.5 rust_host.
 
-1. **§13.3 remainder** — `preopen_dir` (posix-open host dir → `Host.addPreopen`; bool; `std.posix.fd_t` differs
-   on Windows) is the self-contained one. **`inherit_argv`/`inherit_env` need an ADR-0070 (libc boundary)
-   amendment FIRST**: Zig 0.16's process API is capability-based (argv/env arrive via the `Init` token to
-   `main`, cli/main.zig:43/58) — a C-library context (`libzwasm.so`, Zig startup never runs) can't reach it, so
-   inherit needs platform C APIs (`_NSGetArgv` / `/proc/self/cmdline` / `GetCommandLineW`) or the C `environ`
-   global = new libc sites (§14 "unconscious libc fanout"). Do the ADR-0070 amend as Step 1 of that chunk.
-2. **§13.5 — rust_host** (c_host `hello.c` + zig_host `hello.zig` `6dbecae8` DONE; both in test-all). NEXT:
-   **rust_host** — a Rust program declaring the wasm.h C ABI via `extern "C"` + linking `libzwasm.a`, exercising
-   engine/store/module/instance/func_call (a 3rd independent ABI consumer — Rust's strict FFI is a good ABI
-   cross-check, cf. the C conformance catching the imports-vec bug). Build wiring: `b.addSystemCommand(rustc ... -L
-   <c_api_lib bin dir> -l static=zwasm)`, **Mac-only** (system rustc at `~/.cargo/bin`; NOT in test-all — the test
-   hosts are artifact-runners with no rustc by design, toolchain_provisioning.md). The §13.5 "3-OS rust run" is
-   genuinely blocked on test-host rustc (deliberate design) → document at §13.P / debt-row, not a per-chunk blocker.
-   Then §13.P (🔒 close). **§13.3 remainder** ADR-0070-blocked + low-value (set_args/envs cover config) → §13.P review. **WATCH: instance.zig 3299/3300 — further growth needs extraction, not a 3rd exempt bump.**
+**Next: §13.5 — rust_host** (c_host `hello.c` + zig_host `hello.zig` `6dbecae8` DONE, both in test-all). Add a Rust
+host that declares the wasm.h C ABI via `extern "C"` + links `libzwasm.a`, exercising engine/store/module/instance/
+func_call — a 3rd independent ABI consumer (Rust's strict FFI is a good cross-check; cf. the C conformance catching
+the imports-vec bug `5a19ebd6`). Build wiring: a `b.addSystemCommand(rustc … -L <c_api_lib emitted-bin dir> -l
+static=zwasm)` step, **Mac-only** (system rustc at `~/.cargo/bin`; NOT in test-all — the test hosts are
+artifact-runners with no rustc by design, `toolchain_provisioning.md`). The §13.5 "3-OS rust run" is genuinely
+blocked on test-host rustc → note at §13.P / debt-row (not a per-chunk blocker). Then §13.5 [x] → **§13.P (🔒 close,
+needs user)**. **WATCH: instance.zig 3299/3300 — further instance.zig growth needs extraction, not a 3rd exempt bump.**
 
 gap: `.dev/phase13_capi_gap.md`.
 
