@@ -55,6 +55,14 @@ bash scripts/check_build_dce.sh --gate
 echo "[gate_merge] --engine=jit ReleaseSafe smoke (D-245) ..."
 bash scripts/check_jit_releasesafe.sh
 
+# §12.3 — the AOT pipeline (producer/loader/runner) must cross-compile for
+# non-host targets. Home here (merge gate): 3 cross-builds are ~30-60s each,
+# too slow per-commit. Compile-only (no exec); cross-ARCH emission stays
+# deferred per ADR-0039 (Alt D). The "cross-produced .cwasm runs on target"
+# half is the per-host `runCwasm` round-trip in the test-all runs below.
+echo "[gate_merge] AOT cross-compile portability (§12.3) ..."
+bash scripts/check_aot_cross_compile.sh
+
 # ---- ubuntunote (native Linux x86_64) via SSH ----
 if ssh -o ConnectTimeout=5 -o BatchMode=yes ubuntunote "echo ok" >/dev/null 2>&1; then
     echo "[gate_merge] zig build test-all on ubuntunote (native x86_64) ..."
