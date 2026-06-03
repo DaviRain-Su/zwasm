@@ -32,6 +32,9 @@ const setup_mod = @import("setup.zig");
 const setupRuntime = setup_mod.setupRuntime;
 const TypedResult = @import("codegen/shared/entry_buffer_write.zig").TypedResult;
 
+const aot_produce = @import("codegen/aot/produce.zig");
+const aot_load = @import("codegen/aot/load.zig");
+
 test "runI32Export: memory64 store+load round-trip via i64 idx_type (ADR-0111 D4 e2e)" {
     // D-181 discharge: x86_64 SysV `emitMemOpI64` X-form + wrap-check
     // body is implemented (src/engine/codegen/x86_64/op_memory.zig:306);
@@ -1582,4 +1585,61 @@ test "tail-call: return_call_indirect on a non-zero table index (D-210)" {
     };
     defer inst.deinit(gpa);
     try testing.expectEqual(@as(?u64, 42), try inst.invoke(gpa, "go", &.{}));
+}
+
+test "AOT<->JIT differential: .cwasm produce->load->execute equals the JIT result (§12.2)" {
+    // Executes native machine code via both paths → mirror the
+    // exec-test Win64 deferral (load.zig / jit_mem.zig).
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+
+    // Synthetic `() -> i32` returning 7, WITH an export "f" so the JIT
+    // runner can resolve func[0]. Section order: type(1), func(3),
+    // export(7), code(10).
+    const wasm_bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, // \0asm
+        0x01, 0x00, 0x00, 0x00, // version 1
+        // type sec: 1 entry, () -> i32
+        0x01, 0x05, 0x01, 0x60,
+        0x00, 0x01, 0x7f,
+        // func sec: 1 func, type 0
+        0x03,
+        0x02, 0x01, 0x00,
+        // export sec: 1 export, name="f" (len 1), kind=func(0x00), idx 0
+        0x07,
+        0x05, 0x01, 0x01, 0x66,
+        0x00, 0x00,
+        // code sec: 1 body, locals=0, i32.const 7, end
+        0x0a, 0x06,
+        0x01, 0x04, 0x00, 0x41,
+        0x07, 0x0b,
+    };
+
+    // JIT path: high-level export runner.
+    const jit_result = try runI32Export(testing.allocator, &wasm_bytes, "f");
+    try testing.expectEqual(@as(u32, 7), jit_result);
+
+    // AOT path: compile -> produce .cwasm -> load into a fresh
+    // executable block -> invoke the loaded func[0]. The loaded code is
+    // the SAME machine code the JIT emitted; func[0]'s prologue expects
+    // `*const JitRuntime` in X0/RDI, so we build a real runtime exactly
+    // as `runI32Export` does and pass it in.
+    var compiled = try compileWasm(testing.allocator, &wasm_bytes);
+    defer compiled.deinit(testing.allocator);
+
+    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled);
+    defer testing.allocator.free(cwasm);
+
+    var mod = try aot_load.load(testing.allocator, cwasm);
+    defer mod.deinit();
+
+    var owned = try setupRuntime(testing.allocator, &compiled, &wasm_bytes);
+    defer owned.deinit(testing.allocator);
+
+    const Fn = *const fn (*const entry.JitRuntime) callconv(.c) u32;
+    const f = mod.entry(0, Fn);
+    const aot_result = f(&owned.rt);
+
+    // Differential equivalence: the AOT-loaded code yields the SAME
+    // result as the JIT path for the same module.
+    try testing.expectEqual(jit_result, aot_result);
 }
