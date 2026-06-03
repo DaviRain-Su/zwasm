@@ -18,6 +18,16 @@ const Allocator = std.mem.Allocator;
 
 const trace = @import("../diagnostic/trace.zig");
 
+/// Implementation cap on control-stack / block-nesting depth. The Wasm
+/// spec sets no limit; this is zwasm's structural ceiling, the single
+/// source of truth for BOTH the validator's `max_control_stack` (the
+/// real gate, `validator.zig`) AND the IR verifier's branch-target
+/// sanity ceiling (`verifier.zig`). They MUST stay equal — they drifted
+/// (validator 1024 vs verifier 256), so a validator-accepted standard-Go
+/// function with depth in [256,1024) was wrongly rejected by the verifier
+/// (D-241, go_* realworld fixtures). Sourcing both here prevents recurrence.
+pub const max_control_stack: usize = 1024;
+
 /// ADR-0123 (Accepted 2026-05-28 cycle 90) D1 — typed-funcref
 /// representation. ValType is a tagged union over the spec's
 /// value-type space: numeric heads (i32/i64/f32/f64/v128) carry

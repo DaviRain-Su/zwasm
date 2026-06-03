@@ -59,12 +59,15 @@ pub const Error = error{
     BranchTargetOutOfRange,
 };
 
-/// Conservative ceiling on branch depths. Matches the validator's
-/// `max_control_stack` so anything that survives the validator
-/// passes this check too. Real per-instr depth would require the
-/// verifier to re-walk the control stack — out of scope for the
-/// "cheap structural check" Phase-5 wants here.
-const max_block_depth: u32 = 256;
+/// Conservative ceiling on branch depths = the validator's
+/// `max_control_stack` (the shared `zir.max_control_stack`, the
+/// single source of truth). Anything that survives the validator
+/// passes this check too; sourcing the same constant prevents the
+/// D-241 drift (was a stale literal 256 vs the validator's 1024 →
+/// validator-accepted standard-Go funcs wrongly rejected here). Real
+/// per-instr depth would require re-walking the control stack — out
+/// of scope for the "cheap structural check" Phase-5 wants here.
+const max_block_depth: usize = zir.max_control_stack;
 
 /// Verify all populated analysis slots on `func`. Returns at the
 /// first failed invariant.
@@ -223,20 +226,29 @@ test "verify: liveness def after last_use fails" {
     try testing.expectError(Error.LivenessDefAfterLastUse, verify(&f));
 }
 
-test "verify: branch_targets within ceiling pass" {
+test "verify: branch_targets within ceiling pass (incl. >256, the D-241 regime)" {
     var f = try buildFunc(testing.allocator, &.{.{ .op = .end }});
     defer f.deinit(testing.allocator);
     try f.branch_targets.append(testing.allocator, 0);
-    try f.branch_targets.append(testing.allocator, 5);
     try f.branch_targets.append(testing.allocator, 255);
+    // 256..1023 were wrongly rejected pre-D-241 (stale 256 ceiling) though
+    // the validator accepts them; standard-Go funcs live here.
+    try f.branch_targets.append(testing.allocator, 256);
+    try f.branch_targets.append(testing.allocator, @intCast(zir.max_control_stack - 1));
     try verify(&f);
 }
 
 test "verify: branch_targets exceeding ceiling fail" {
     var f = try buildFunc(testing.allocator, &.{.{ .op = .end }});
     defer f.deinit(testing.allocator);
-    try f.branch_targets.append(testing.allocator, 999);
+    try f.branch_targets.append(testing.allocator, @intCast(zir.max_control_stack));
     try testing.expectError(Error.BranchTargetOutOfRange, verify(&f));
+}
+
+test "verify: branch-target ceiling matches the validator's control-stack cap (D-241 drift guard)" {
+    // The exact invariant that broke: verifier ceiling == validator cap.
+    const validator = @import("../validate/validator.zig");
+    try testing.expectEqual(validator.max_control_stack, max_block_depth);
 }
 
 test "verify: combined loop_info + liveness + branch_targets pass" {

@@ -110,7 +110,9 @@ pub const GlobalEntry = struct {
 };
 
 pub const max_operand_stack: usize = 1024;
-pub const max_control_stack: usize = 1024;
+/// Single source of truth in `zir` (also used by the IR verifier's
+/// branch-target ceiling — they MUST match; see D-241).
+pub const max_control_stack: usize = zir.max_control_stack;
 
 /// Block result type. Wasm 1.0 binary block-types are `empty` (0x40)
 /// or `single` (one valtype byte). Wasm 2.0 multivalue extends this
