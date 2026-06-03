@@ -1183,8 +1183,8 @@ of each phase advances it.
 | 9     | DONE        | Wasm 1.0 + 2.0 (incl. SIMD) **literal 100%** (skip-impl == 0 across spec + edge_cases + realworld + differential) on 3 hosts + Phase 10 substrate readiness (build-option DCE across all layers; per ADR-0056 + ADR-0065 + ADR-0071 + ADR-0073) |
 | 10    | DONE        | GC, EH, Tail call, memory64 (Wasm 3.0 completion) — both backends per ADR-0133 spec-corpus exit |
 | 11    | DONE        | WASI 0.1 full + bench infra (incl. SIMD per-op gap analysis, moved from §9.10 per Track A) |
-| 12    | IN-PROGRESS | AOT compilation mode                                                                        |
-| 13    | PENDING     | C API full (wasm-c-api conformance) 🔒                                                       |
+| 12    | DONE        | AOT compilation mode — `.cwasm` compile/run, JIT↔AOT differential, cross-compile, stateful-compute exec, cold-start ≥30% (stack-map §12.5 → P15 / ADR-0141; WASI imports → D-251) |
+| 13    | IN-PROGRESS | C API full (wasm-c-api conformance) 🔒                                                       |
 | 14    | PENDING     | CI matrix infrastructure                                                                    |
 | 15    | PENDING     | Performance parity with v1 + ClojureWasm migration                                          |
 | 16    | PENDING     | Public release v0.1.0 🔒                                                                     |
@@ -1476,9 +1476,9 @@ produce}.zig` + `src/cli/compile.zig`) are the loader's contract.
 | 12.2    | AOT ↔ JIT differential-test equivalence (same fixtures, identical observable results both paths).                                                                                                                          | [x]  |
 | 12.3    | Cross-compile (`zig build -Dtarget=x86_64-linux`) + cross-produced `.cwasm` runs on the target host (3-host per ADR-0067). Toolchain cross-compile via `scripts/check_aot_cross_compile.sh` (gate_merge); native per-host produce→run via `runCwasm`. Cross-ARCH *emission* stays deferred (ADR-0039 Alt D). | [x]  |
 | 12.3b   | **Stateful `.cwasm` execution (ADR-0139; promoted from D-250)** — serialise module state into `.cwasm` v0.3 + reconstruct a real runtime from the artefact alone. **DONE for the COMPUTE subset** (ADR-0140): globals (`797a7ef0`), memory + data segments (`58e97a09`), table 0 + element segments / `call_indirect` (`9b416428`) — real memory/globals/table compute modules run AOT (12/12 SIMD corpus fixtures `compile`+`run`). **WASI/host imports DEFERRED** (ADR-0140 / D-251): `--engine=jit` is itself compute-only (no WASI, ADR-0136/D-244), so AOT-WASI lands WITH the JIT-WASI d-3 work — no parity gap. | [x]  |
-| 12.5    | `.cwasm` stack-map section: per-callsite entries serialised in the JIT-mode shape, gated `Module.needs_gc_heap` (empty/zero-overhead for Wasm 1.0/2.0) per ADR-0117 I4. **Phase-15-coupled** (ADR-0139 update): the JIT-side `zir.GcRootMap` is an empty placeholder — per-callsite root population is Phase 15 (D-211), so the entry shape co-defines there (serialising a non-existent shape now = premature). Lands WITH the real shape (one format bump). | [ ]  |
+| 12.5    | **Moved to Phase 15 (ADR-0141)**. `.cwasm` stack-map section (per-callsite GC-root entries per ADR-0117 I4) co-defines with the JIT-side `zir.GcRootMap`, which is an empty placeholder until Phase-15 precise rooting (ADR-0135/0128, D-211) — serialising a non-existent shape now is premature. Lands WITH the Phase-15 rooting work (JIT + AOT halves together; mirrors §11.4→Phase 15). Row preserved for citation lineage. | [~] moved to Phase 15 |
 | 12.4    | Cold-start bench-delta: AOT load + first-call vs JIT compile + first-call **≥30%** on ≥3 **compute (zero-import) fixtures** (re-scoped from "v1-class" per ADR-0140 — WASI-importing fixtures run on neither path until JIT-WASI/D-244; the SIMD corpus + zero-import compute kernels run AOT today). The ADR-0040-deferred §9.8b/8b.3 bench obligation; threshold from `private/notes/p8-8b3-aot-survey.md`. **DONE** — `scripts/bench_aot_coldstart.sh`: 6/6 SIMD fixtures 33-37% faster (Mac; `bench/results/aot_coldstart.md`). | [x]  |
-| 12.P    | Phase 12 close — exit criteria met (loader + differential equiv + cross-compile + cold-start ≥30% + stack-map section) + 3-host reconcile + widget 12 → DONE + Phase 13 inline expand.                                      | [ ]  |
+| 12.P    | Phase 12 close — AOT-core exit criteria met: loader (§12.1) + JIT↔AOT differential (§12.2) + cross-compile (§12.3) + stateful-compute exec (§12.3b) + cold-start ≥30% (§12.4). Stack-map (§12.5) → Phase 15 (ADR-0141); WASI imports → D-251 (ADR-0140). 3-host reconcile (windowsmini test-all + cross-compile gate; Phase-12 AOT exec skips Win64). Widget 12 → DONE; Phase 13 inline expand. | [x]  |
 
 ### Phase 13 — C API full (wasm-c-api conformance) 🔒
 
@@ -1493,7 +1493,20 @@ produce}.zig` + `src/cli/compile.zig`) are the loader's contract.
 - `examples/{c_host, zig_host, rust_host}/` all build and run on all
   3 OS.
 
-**🔒 gate**: yes.
+**🔒 gate**: yes (end-of-phase wasm-c-api conformance gate; NOT an entry
+hard-gate — Phase 13 opens autonomously per the §12.P close, ADR-0141).
+
+#### §13 task table
+
+| Row     | Task                                                                                                                                                                                                                       | Status |
+|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------|
+| 13.0    | Open §13 inline + flip Phase Status widget (Phase 12 → DONE; Phase 13 → IN-PROGRESS).                                                                                                                                     | [x]  |
+| 13.1    | `wasm.h` surface audit (Step 0) — inventory the ~130 `wasm.h` functions; map implemented (engine/store/module/instance/func/extern/trap already exercised by `cli/run.zig` + `api/wasm.zig`) vs missing; file the gap list + group the remainder by category. | [ ]  |
+| 13.2    | Implement the missing `wasm.h` surface (valtype / functype / globaltype / tabletype / memorytype / ref / global / table / memory / extern / trap / frame / foreign), grouped by category; each category red→green.        | [ ]  |
+| 13.3    | `wasi.h` + `zwasm.h` ABI surface complete (the binding's WASI config + zwasm-specific extensions; headers in `include/`).                                                                                                  | [ ]  |
+| 13.4    | `test/c_api_conformance/` — wasmtime C-API example port + zwasm-specific tests, fail=0 (3-host).                                                                                                                            | [ ]  |
+| 13.5    | `examples/{c_host, zig_host, rust_host}/` build + run on all 3 OS.                                                                                                                                                          | [ ]  |
+| 13.P    | Phase 13 close 🔒 — wasm-c-api conformance fail=0 + examples green 3-host + 🔒 gate cleared + 3-host reconcile + widget 13 → DONE + Phase 14 inline expand.                                                                  | [ ]  |
 
 ### Phase 14 — CI matrix infrastructure
 
