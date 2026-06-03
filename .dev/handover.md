@@ -27,10 +27,11 @@
 - **§13.2 extern conversions COMPLETE**: `wasm_extern_as_*_const` + `wasm_extern_type` (`63dab69d`); `wasm_{func,
   global,table,memory}_as_extern[_const]` (`0fc0aac5`, new `api/extern_new.zig`) — entity→Extern WRAP caching a
   borrowed-view Extern (`extern_view`); `Extern.borrowed` makes `extern_delete` a no-op (no double-free).
-- **§13.2 `wasm_global_new` (`5faef5d9`) + `wasm_memory_new` (`a1c9fbfe`) DONE**: host-owned standalone entities.
-  Global = own `*Value` cell; Memory = own `*MemoryInstance` (Global/Memory gained `cell`/`minst` + `store`).
-  Accessors branch instance-vs-own-backing; importable via the buildBindings host-entity arm (`instance==null` →
-  bind host backing) — global cell + memory bytes shared with the guest (both tested e2e: guest reads host writes).
+- **§13.2 host-entity `_new` trio DONE**: `wasm_global_new` (`5faef5d9`, own `*Value`), `wasm_memory_new`
+  (`a1c9fbfe`, own `*MemoryInstance`), `wasm_table_new` (`08d5fd23`, own `*TableInstance`). Each gained own-backing
+  + `store` fields; accessors branch instance-vs-own-backing; importable via the buildBindings host-entity arm
+  (`instance==null` → bind host backing) — all three shared with the guest (tested e2e: guest reads host state).
+  instance.zig exempt cap raised 3200→3300 (ADR-0099 amend) for the runtime-entity accessor/binding surface.
 
 ## Next task (autonomous)
 
@@ -42,14 +43,14 @@ Two open tracks, both within Phase 13's surface (pick either; runtime-entity is 
    `main`, cli/main.zig:43/58) — a C-library context (`libzwasm.so`, Zig startup never runs) can't reach it, so
    inherit needs platform C APIs (`_NSGetArgv` / `/proc/self/cmdline` / `GetCommandLineW`) or the C `environ`
    global = new libc sites (§14 "unconscious libc fanout"). Do the ADR-0070 amend as Step 1 of that chunk.
-2. **§13.2 `wasm_table_new`** (last entity `_new`; survey a3f30dbd done). Standalone `TableInstance` =
-   `alloc(Value, min)` filled from an init funcref; `rt.tables` is `[]TableInstance` (VALUE) so the host binding
-   value-copies a `TableInstance` (refs slice aliased). Table gains `tinst:?*TableInstance`+`store`; branch
-   wasm_table_get/set/size/grow/delete (5, get/grow need `store` for the Ref alloc/realloc); buildBindings `.table`
-   host arm (currently `.func,.table,.tag → error.UnsupportedHostImport`). Ref marshalling = plain u64 (`Value.ref`).
-   **FIRST sub-step: relieve instance.zig (3181/3200 cap — table's ~40 accessor-branch lines won't fit). Recommend
-   an ADR-0099 amendment 3200→3300** (runtime-entity host-creation surface = core, not bloat; cyc174 precedent).
-   Then `wasm_func_new` = **D-252**; then **foreign** (`WASM_DECLARE_REF`).
+2. **§13.2 remaining**: (a) **foreign** (`WASM_DECLARE_REF` — `wasm_ref` copy/same/get-set_host_info/as_ref/
+   share/obtain + the per-entity `*_as_ref`/`*_ref` cross-casts; cross-cutting ref machinery, its own survey +
+   chunk); (b) **`wasm_func_new[_with_env]`** = **D-252** (host-callback dispatch plumbing — a tagged Func variant
+   + a buildBindings host-func arm wrapping the C callback as a HostCall, the cross_module.thunk pattern). Assess
+   D-252 tractability now that the host-entity buildBindings arm + the entity-import pattern exist (the global/
+   memory/table arms are the template; func adds the operand_buf↔wasm_val_vec marshalling). After §13.2: **§13.3**
+   (wasi remainder — `inherit_argv/env` + `preopen_dir` need an ADR-0070 C-API io/process-provenance decision FIRST,
+   see §13.3-partial note above), **§13.4** (`test/c_api_conformance/`), **§13.5** (examples).
 
 gap: `.dev/phase13_capi_gap.md`.
 
@@ -70,9 +71,9 @@ prose. Standing `soon` (not Phase-12): 10 ADR + 10 lesson `<backfill>` markers; 
 
 ## Step 0.7 (next resume)
 
-This turn landed §13.2 `wasm_memory_new` (importable, shared *MemoryInstance): Mac test+lint+zone green, instance.zig
-3181/3200 cap (table_new needs cap relief first). An ubuntu `test` is kicked against this turn's HEAD → next resume
-`tail /tmp/ubuntu.log` for OK (c_allocator bytes + alias, host-portable). Prior ubuntu `29b4b080` OK; windowsmini `0810b339` GREEN.
+This turn landed §13.2 `wasm_table_new` (importable, shared *TableInstance) + exempt cap 3200→3300: Mac test+lint+
+zone green, instance.zig 3214/3300. An ubuntu `test` is kicked against this turn's HEAD → next resume `tail
+/tmp/ubuntu.log` for OK (c_allocator refs + alias, host-portable). Prior ubuntu `0df6f4b2` OK; windowsmini `0810b339` GREEN.
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile: `zig build test
 -Dtarget=x86_64-windows-gnu` (compile-only). 3-host reconcile = phase boundary.
