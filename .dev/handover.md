@@ -13,8 +13,11 @@
   rejects (those return errors, not crashes); (2) `zig build test-fuzz` step running the loader over a small
   committed seed corpus + a `wasm-tools smith`-generated batch (smith is in flake.nix; gen Mac-only like the
   realworld fixtures); (3) wire `test-fuzz` into test-all (smoke) — full campaigns are the nightly (§14.3);
-  (4) differential oracle (interp vs JIT, or vs wasmtime) as a later cycle. Survey v1's fuzz approach +
-  `std.testing.fuzz` (Zig 0.16) + the parse/validate entry signatures first.
+  (4) differential oracle (interp vs JIT, or vs wasmtime) as a later cycle. **SURVEY DONE →
+  `private/notes/p14-fuzz-survey.md`**: `parser.parse(alloc,[]u8) Error!Module` (parser.zig:75) +
+  `frontendValidate(alloc,[]u8) bool` (instantiate.zig:62, false=invalid, never throws → a FIND is a crash,
+  not error/false). No `std.testing.fuzz` in 0.16 → corpus-dir exe mirroring realworld/runner.zig; build wiring
+  mirrors the realworld step (~build.zig:580). Start MVP chunk 1 (the loader) directly next.
 - **Exit-condition**: `zig build test-fuzz` exists + green on Mac (runs N≥5 smith/seed modules through
   parse+validate without false-crash); then §14.3 `nightly.yml` can wire the campaign.
 
