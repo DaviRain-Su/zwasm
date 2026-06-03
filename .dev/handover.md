@@ -32,18 +32,25 @@
 - **Watch**: `runner_test.zig` ~1490 / `runner_gc_test.zig` 1499 / `jit_abi.zig` 1364 / `validator.zig` 3267 (cap
   3300, D-204) — all < hard.
 
-## Next task (autonomous)
+## Active bundle
 
-**§11.4 MOVED to Phase 15** (`732b19c3`, ADR-0135): GC-on-JIT precise rooting is untestable without reclamation
-(β no-reclaim Phase-10 collector; a missed root can't UAF when nothing is freed) and reclamation was unowned →
-re-sequenced to Phase 15 paired with reclamation. Phase 11's only substantive remaining deliverable is now:
+- **Bundle-ID**: 11.3-simd-gap (D-074 cohort)
+- **Cycles-remaining**: ~2
+- **Continuity-memo**: §11.3 SIMD per-op gap analysis = v2 vs **median of (wasmtime, wazero, wasmer)**, flag ops
+  lagging >3×, file Phase-15 debt. DONE: ch1 (`e6dd3f94`) wazero+wasmer in flake; ch2 (`843cc7de`)
+  `run_bench.sh --compare={wazero,wasmer,all}` (all 4 switch-sites) + `pkgs.git` in flake (macOS /usr/bin/git is
+  an xcrun shim that dies under `nix develop`, where the gap run must execute). Verified: `nix develop --command
+  bash -c 'run_bench.sh --quick --bench=tinygo/arith --compare=all'` records 4 runtime rows, exit 0.
+  NEXT (ch3): a per-op **SIMD micro-bench corpus** — small `.wasm` fixtures each hammering one SIMD op class
+  (i32x4 add/mul, f32x4 ops, shuffles, swizzle, dot, extmul, narrow, etc.) under `bench/runners/wasm/simd/`,
+  generated Mac-only via `nix develop .#gen` (wat2wasm). Then ch4: a gap-analysis script that parses the
+  multi-runtime `recent.yaml`, computes per-op `zwasm_mean / median(wasmtime,wazero,wasmer)`, flags >3×, and files
+  Phase-15 debt rows naming the candidate opt (AVX/CPUID, MOVAPS peephole, SIMD coalescing per §9.10 Track A).
+- **Exit-condition**: a `--compare=all` gap run over the SIMD corpus emits a per-op zwasm/median ratio table +
+  Phase-15 debt entries for every op > 3×; `run_bench.sh --quick` still works locally.
 
-Next autonomous track = **§11.3 SIMD per-op gap analysis** — identify SIMD ops where v2 lags >3× the median of
-(wasmtime, wazero, wasmer); file Phase 15 debt entries. This is the D-074 cohort: needs (a) wazero + wasmer added
-to `flake.nix` (only wasmtime present today; `run_bench.sh --compare` rejects non-wasmtime), (b) a per-op SIMD
-micro-bench corpus, (c) a gap-analysis script + `-Dwith-bench-compare` flag. Multi-cycle — survey D-074 +
-ADR-0043 + the §9.10 Track A scope doc, set up a bundle, then build incrementally. §11.1/§11.2 phase-close-batch
-items (Windows realworld subset + windowsmini bench row + committed 3-host bench rows) remain for §11.P.
+§11.1/§11.2 phase-close-batch items (Windows realworld subset + windowsmini bench row + committed 3-host bench
+rows) remain for §11.P. §11.4 moved to Phase 15 (ADR-0135).
 
 ## Deferred / open debt (all blocked-by/note; none a Phase-11 blocker)
 
@@ -57,10 +64,10 @@ items (Windows realworld subset + windowsmini bench row + committed 3-host bench
 
 ## Step 0.7 (next resume)
 
-Last ubuntu-verified CODE HEAD = `fcc9fe03` (D-243, all `fail=0`). Since then only shell + docs/ADR commits
-(`1c13e9f3` bench wrapper, `d303f427` remote bench step, `732b19c3` ADR-0135 re-sequence) — none touch src/test,
-so NO ubuntu test-all kick (non-code gap). The `d303f427` bench step was exercised live on ubuntunote (real
-x86_64-linux row, exit 0). Next cycle Step 0.7 = nothing to verify.
+Last ubuntu-verified CODE HEAD = `fcc9fe03` (D-243, all `fail=0`). Since then only shell/docs/ADR/flake commits
+(…`e6dd3f94` flake comparators, `843cc7de` --compare wiring + flake git) — none touch src/test, so NO ubuntu
+test-all kick (non-code gap). The flake.nix change (wazero/wasmer/git) rebuilds the dev shell on next remote
+`nix develop`; verify implicitly on the next remote bench run. Next cycle Step 0.7 = nothing to verify.
 
 **Gate hygiene**: Step-5 Mac gate = `bash scripts/mac_gate.sh`. JIT corpus: `zig build test-spec-wasm-3.0-assert`
 (NO bogus `-Dno-run`); pick the exe by mtime (bare `head -1` = STALE). `ZWASM_SPEC_ENGINE=jit <exe>
