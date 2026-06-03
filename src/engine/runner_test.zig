@@ -1643,3 +1643,71 @@ test "AOT<->JIT differential: .cwasm produce->load->execute equals the JIT resul
     // result as the JIT path for the same module.
     try testing.expectEqual(jit_result, aot_result);
 }
+
+test "AOT<->JIT differential: () -> i64 const round-trips through produce->load (§12.2)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+
+    // `() -> i64` returning 0x1_0000_0007. The high 32 bits are set so an
+    // i32-truncating path could not produce this value — the differential
+    // therefore exercises the full-width i64 result register on both paths.
+    // Sections: type(1) () -> i64, func(3), export(7) "f", code(10)
+    // i64.const 0x1_0000_0007 (SLEB128 = 87 80 80 80 10).
+    const wasm_bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7e, 0x03,
+        0x02, 0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 0x66,
+        0x00, 0x00, 0x0a, 0x0a, 0x01, 0x08, 0x00, 0x42,
+        0x87, 0x80, 0x80, 0x80, 0x10, 0x0b,
+    };
+
+    const jit_result = try runI64Export(testing.allocator, &wasm_bytes, "f");
+    try testing.expectEqual(@as(u64, 0x1_0000_0007), jit_result);
+
+    var compiled = try compileWasm(testing.allocator, &wasm_bytes);
+    defer compiled.deinit(testing.allocator);
+    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled);
+    defer testing.allocator.free(cwasm);
+    var mod = try aot_load.load(testing.allocator, cwasm);
+    defer mod.deinit();
+    var owned = try setupRuntime(testing.allocator, &compiled, &wasm_bytes);
+    defer owned.deinit(testing.allocator);
+
+    const Fn = *const fn (*const entry.JitRuntime) callconv(.c) u64;
+    const aot_result = mod.entry(0, Fn)(&owned.rt);
+    try testing.expectEqual(jit_result, aot_result);
+}
+
+test "AOT<->JIT differential: internal call's direct-call reloc executes through produce->load (§12.2)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+
+    // func0 (exported "f") returns func1()'s result; func1 returns 7. The
+    // internal `call 1` emits a direct-call reloc that the AOT loader must
+    // patch to func1's loaded address — so this is the differential's reloc
+    // coverage (cycle-2a validated `applyRelocs` on synthetic bytes; here it
+    // runs through the real compileWasm -> produce -> load pipeline).
+    // Sections: type(1) () -> i32, func(3) ×2, export(7) "f", code(10):
+    // func0 = `call 1; end`, func1 = `i32.const 7; end`.
+    const wasm_bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, 0x03,
+        0x03, 0x02, 0x00, 0x00, 0x07, 0x05, 0x01, 0x01,
+        0x66, 0x00, 0x00, 0x0a, 0x0b, 0x02, 0x04, 0x00,
+        0x10, 0x01, 0x0b, 0x04, 0x00, 0x41, 0x07, 0x0b,
+    };
+
+    const jit_result = try runI32Export(testing.allocator, &wasm_bytes, "f");
+    try testing.expectEqual(@as(u32, 7), jit_result);
+
+    var compiled = try compileWasm(testing.allocator, &wasm_bytes);
+    defer compiled.deinit(testing.allocator);
+    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled);
+    defer testing.allocator.free(cwasm);
+    var mod = try aot_load.load(testing.allocator, cwasm);
+    defer mod.deinit();
+    var owned = try setupRuntime(testing.allocator, &compiled, &wasm_bytes);
+    defer owned.deinit(testing.allocator);
+
+    const Fn = *const fn (*const entry.JitRuntime) callconv(.c) u32;
+    const aot_result = mod.entry(0, Fn)(&owned.rt);
+    try testing.expectEqual(jit_result, aot_result);
+}
