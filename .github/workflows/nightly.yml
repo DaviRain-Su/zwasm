@@ -9,12 +9,11 @@
 #
 # Run on demand: `gh workflow run nightly.yml --ref zwasm-from-scratch`.
 #
-# Coverage: (1) fuzz-campaign — a fresh large `wasm-tools smith` corpus run
-# through the loader (parse + validate + instantiate; a crash is a finding);
-# (2) proposal-watch — quarterly-cadence freshness gate on
-# `.dev/proposal_watch.md`. The third §14.3 leg, **spec-bump** (detect upstream
-# WebAssembly/{spec,testsuite} drift vs a vendored pin), is NOT yet wired — the
-# spec corpus is regenerated from local OSS clones with no stored pin (D-256).
+# Coverage (the three §14.3 legs): (1) fuzz-campaign — a fresh large
+# `wasm-tools smith` corpus run through the loader (parse + validate +
+# instantiate; a crash is a finding); (2) proposal-watch — quarterly-cadence
+# freshness gate on `.dev/proposal_watch.md`; (3) spec-bump — alert when
+# WebAssembly/{spec,testsuite} upstream advances beyond `.dev/spec_pin.yaml`.
 
 name: nightly
 
@@ -89,3 +88,16 @@ jobs:
 
       - name: Check proposal-watch cadence
         run: bash scripts/check_proposal_watch.sh --gate
+
+  spec-bump:
+    name: spec-bump drift
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Check spec/testsuite upstream drift
+        run: bash scripts/check_spec_bump.sh --gate
