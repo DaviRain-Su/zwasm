@@ -45,6 +45,8 @@
             pkgs.python3
             pkgs.wabt          # wat2wasm / wast2json — required by Phase 1+ spec runner
             pkgs.wasmtime      # reference runtime — drives the §9.6 / 6.2 differential gate
+            pkgs.wazero        # §11.3 SIMD gap comparator (run_bench.sh --compare=wazero); D-074
+            pkgs.wasmer        # §11.3 SIMD gap comparator (run_bench.sh --compare=wasmer); D-074
             pkgs.wasm-tools    # dump / validate / print / strip / smith / shrink — Phase 6+ debug + Phase 7 fuzz corpus (per ADR-0015 candidate)
             pkgs.lldb          # interactive debugger + watchpoints (per ADR-0015 candidate)
             pkgs.nasm          # `ndisasm -b 64 file.bin` for raw JIT byte stream disasm — paired with lldb / objdump for SEGV root-cause work (autonomous loop x86_64 JIT debug per `.claude/rules/debug_jit.md`)
