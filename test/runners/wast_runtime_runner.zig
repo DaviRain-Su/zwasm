@@ -700,10 +700,11 @@ fn instantiateWithImports(ctx: *RunnerContext, wasm_bytes: []const u8) !ActiveMo
     errdefer wasm_c_api.wasm_module_delete(module);
 
     const imports_slice = try buildImports(ctx, wasm_bytes);
-    const imports_ptr: ?*const anyopaque = if (imports_slice) |slice|
-        @ptrCast(slice.ptr)
-    else
-        null;
+    // wasm.h's `wasm_instance_new` takes a `const wasm_extern_vec_t*`
+    // (a `{size, data}` vec), not a bare extern array (ADR-0142 fix).
+    var imports_vec: wasm_c_api.ExternVec = .{ .size = 0, .data = null };
+    if (imports_slice) |slice| imports_vec = .{ .size = slice.len, .data = @ptrCast(@constCast(slice.ptr)) };
+    const imports_ptr: ?*const anyopaque = @ptrCast(&imports_vec);
 
     const instance = wasm_c_api.wasm_instance_new(store, module, imports_ptr, null) orelse
         return error.InstanceAllocFailed;
@@ -788,10 +789,11 @@ fn handleInstantiateExpectFail(
     errdefer if (!success) wasm_c_api.wasm_module_delete(module);
 
     const imports_slice = try buildImports(ctx, wasm_bytes);
-    const imports_ptr: ?*const anyopaque = if (imports_slice) |slice|
-        @ptrCast(slice.ptr)
-    else
-        null;
+    // wasm.h's `wasm_instance_new` takes a `const wasm_extern_vec_t*`
+    // (a `{size, data}` vec), not a bare extern array (ADR-0142 fix).
+    var imports_vec: wasm_c_api.ExternVec = .{ .size = 0, .data = null };
+    if (imports_slice) |slice| imports_vec = .{ .size = slice.len, .data = @ptrCast(@constCast(slice.ptr)) };
+    const imports_ptr: ?*const anyopaque = @ptrCast(&imports_vec);
 
     const instance_opt = wasm_c_api.wasm_instance_new(store, module, imports_ptr, null);
 

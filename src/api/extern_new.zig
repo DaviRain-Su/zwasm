@@ -584,7 +584,8 @@ test "wasm_global_new: host global imported — guest global.get sees host value
     const m = instance.wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
     defer instance.wasm_module_delete(m);
 
-    var imports = [_]?*const Extern{wasm_global_as_extern_const(hg)};
+    var iarr = [_]?*Extern{wasm_global_as_extern(hg)};
+    var imports: vec.ExternVec = .{ .size = iarr.len, .data = &iarr };
     const inst = instance.wasm_instance_new(s, m, &imports, null) orelse return error.InstanceAllocFailed;
     defer instance.wasm_instance_delete(inst);
 
@@ -660,7 +661,8 @@ test "wasm_memory_new: host memory imported — guest i32.load reads bytes the h
     const m = instance.wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
     defer instance.wasm_module_delete(m);
 
-    var imports = [_]?*const Extern{wasm_memory_as_extern_const(hm)};
+    var iarr = [_]?*Extern{wasm_memory_as_extern(hm)};
+    var imports: vec.ExternVec = .{ .size = iarr.len, .data = &iarr };
     const inst = instance.wasm_instance_new(s, m, &imports, null) orelse return error.InstanceAllocFailed;
     defer instance.wasm_instance_delete(inst);
 
@@ -732,7 +734,8 @@ test "wasm_table_new: host table imported — guest table.size sees the host tab
     const m = instance.wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
     defer instance.wasm_module_delete(m);
 
-    var imports = [_]?*const Extern{wasm_table_as_extern_const(ht)};
+    var iarr = [_]?*Extern{wasm_table_as_extern(ht)};
+    var imports: vec.ExternVec = .{ .size = iarr.len, .data = &iarr };
     const inst = instance.wasm_instance_new(s, m, &imports, null) orelse return error.InstanceAllocFailed;
     defer instance.wasm_instance_delete(inst);
 
@@ -791,7 +794,8 @@ test "wasm_func_new: host callback imported — guest call invokes it (i32 -> i3
     const m = instance.wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
     defer instance.wasm_module_delete(m);
 
-    var imports = [_]?*const Extern{wasm_func_as_extern_const(hf)};
+    var iarr = [_]?*Extern{wasm_func_as_extern(hf)};
+    var imports: vec.ExternVec = .{ .size = iarr.len, .data = &iarr };
     const inst = instance.wasm_instance_new(s, m, &imports, null) orelse return error.InstanceAllocFailed;
     defer instance.wasm_instance_delete(inst);
 

@@ -116,10 +116,8 @@ pub const Func = struct {
     /// mirrors the borrow discipline of the reverse `wasm_extern_as_func`.
     extern_view: ?*Extern = null,
     /// Host-created standalone func only (`wasm_func_new[_with_env]`,
-    /// `instance == null`): the C callback + signature arity. The
-    /// buildBindings host-func arm wires `hostFuncThunk` (a `HostCall`)
-    /// to this payload so the guest's `call` invokes the callback.
-    /// Null for an instance-backed func.
+    /// `instance == null`): the C callback + arity; the buildBindings
+    /// host-func arm wires `hostFuncThunk` so the guest `call` invokes it.
     host: ?*HostFuncPayload = null,
     /// Store handle for the standalone alloc/free path (no instance).
     store: ?*Store = null,
@@ -197,8 +195,7 @@ pub const Ref = struct {
     /// this Ref, freed in `wasm_ref_delete`) — the Func a funcref ref
     /// denotes. Borrowed-view discipline like `Func.ref_view` (reverse).
     func_view: ?*Func = null,
-    /// Allocator recovery for an instance-less ref (e.g. a foreign
-    /// externref from `wasm_foreign_as_ref`, `instance == null`).
+    /// Allocator recovery for an instance-less ref (foreign externref).
     store: ?*Store = null,
 };
 
@@ -676,9 +673,8 @@ fn buildBindings(
                 .func => {
                     const hf = ext.func orelse return error.UnknownImportModule;
                     const payload = hf.host orelse return error.UnknownImportModule;
-                    // Reuse the `.wasi` void source arm — like the native
-                    // `Linker.defineFunc` host binding, this means "host
-                    // callback, invoked by funcidx via host_calls[]".
+                    // Reuse the `.wasi` void source arm (as native defineFunc
+                    // does): "host callback, invoked by funcidx via host_calls[]".
                     bindings[idx] = .{ .func = .{
                         .host_call = .{ .fn_ptr = hostFuncThunk, .ctx = @ptrCast(payload) },
                         .source = .wasi,
@@ -788,14 +784,13 @@ pub export fn wasm_instance_new(
     _ = trap_out;
     const store = s orelse return null;
     const module = m orelse return null;
-    // Upstream wasm.h declares `imports` as `wasm_extern_t* const
-    // imports[]`. We accept it as an opaque pointer and recast
-    // here to keep the C ABI byte-identical while letting the
-    // Zig side hand a typed slice to `instantiateRuntime`.
-    const imports_array: ?[*]const ?*const Extern = if (imports) |p|
-        @as([*]const ?*const Extern, @ptrCast(@alignCast(p)))
-    else
-        null;
+    // wasm.h: `imports` is `const wasm_extern_vec_t*` ({size,data}), NOT a
+    // bare extern array. Recast to the vec; hand buildBindings its `.data`
+    // (indexed by the module's import count). Null vec/data → no imports.
+    const imports_array: ?[*]const ?*const Extern = if (imports) |p| iblk: {
+        const v: *const ExternVec = @ptrCast(@alignCast(p));
+        break :iblk if (v.data) |d| @ptrCast(d) else null;
+    } else null;
 
     return instantiateInternal(store, module, BuildBindingsCApi{ .imports_array = imports_array });
 }
@@ -2636,8 +2631,9 @@ test "wasm 2.0 cross-module funcref via wasm_instance_new: B's main dispatches i
     const m_b = wasm_module_new(s, &bv_b) orelse return error.ModuleBAllocFailed;
     defer wasm_module_delete(m_b);
 
-    var imports_arr: [1]?*const Extern = .{answer_ext};
-    const imports_opaque: *const anyopaque = @ptrCast(&imports_arr);
+    var imports_arr: [1]?*Extern = .{answer_ext};
+    var imports_vec: ExternVec = .{ .size = imports_arr.len, .data = &imports_arr };
+    const imports_opaque: *const anyopaque = @ptrCast(&imports_vec);
     const inst_b = wasm_instance_new(s, m_b, imports_opaque, null) orelse return error.InstanceBAllocFailed;
     defer wasm_instance_delete(inst_b);
 
@@ -2693,8 +2689,9 @@ test "wasm 2.0 cross-module v128 global via wasm_instance_new: D-170 close" {
     const m_imp = wasm_module_new(s, &bv_imp) orelse return error.ImporterModuleAllocFailed;
     defer wasm_module_delete(m_imp);
 
-    var imports_arr: [1]?*const Extern = .{g_ext};
-    const imports_opaque: *const anyopaque = @ptrCast(&imports_arr);
+    var imports_arr: [1]?*Extern = .{g_ext};
+    var imports_vec: ExternVec = .{ .size = imports_arr.len, .data = &imports_arr };
+    const imports_opaque: *const anyopaque = @ptrCast(&imports_vec);
     const inst_imp = wasm_instance_new(s, m_imp, imports_opaque, null) orelse return error.ImporterInstanceAllocFailed;
     defer wasm_instance_delete(inst_imp);
 
@@ -2842,8 +2839,9 @@ test "wasm 2.0 c_api zombie lifecycle: B holds funcref into A after wasm_instanc
         wasm_instance_exports(inst_a, &exports_a);
         defer wasm_extern_vec_delete(&exports_a);
         const answer_ext = exports_a.data.?[0] orelse return error.AnswerExternNull;
-        var imports_arr: [1]?*const Extern = .{answer_ext};
-        const imports_opaque: *const anyopaque = @ptrCast(&imports_arr);
+        var imports_arr: [1]?*Extern = .{answer_ext};
+        var imports_vec: ExternVec = .{ .size = imports_arr.len, .data = &imports_arr };
+        const imports_opaque: *const anyopaque = @ptrCast(&imports_vec);
         break :blk wasm_instance_new(s, m_b, imports_opaque, null) orelse return error.InstanceBAllocFailed;
     };
     defer wasm_instance_delete(inst_b);
@@ -3076,10 +3074,12 @@ test "wasm 2.0 c_api zombie multi-consumer: 2 instances hold funcref into A afte
         wasm_instance_exports(inst_a, &exports_a);
         defer wasm_extern_vec_delete(&exports_a);
         const answer_ext = exports_a.data.?[0] orelse return error.AnswerExternNull;
-        var imports_arr1: [1]?*const Extern = .{answer_ext};
-        var imports_arr2: [1]?*const Extern = .{answer_ext};
-        const imp1_opaque: *const anyopaque = @ptrCast(&imports_arr1);
-        const imp2_opaque: *const anyopaque = @ptrCast(&imports_arr2);
+        var imports_arr1: [1]?*Extern = .{answer_ext};
+        var imports_arr2: [1]?*Extern = .{answer_ext};
+        var imports_vec1: ExternVec = .{ .size = imports_arr1.len, .data = &imports_arr1 };
+        var imports_vec2: ExternVec = .{ .size = imports_arr2.len, .data = &imports_arr2 };
+        const imp1_opaque: *const anyopaque = @ptrCast(&imports_vec1);
+        const imp2_opaque: *const anyopaque = @ptrCast(&imports_vec2);
         const b1 = wasm_instance_new(s, m_b1, imp1_opaque, null) orelse return error.InstanceB1AllocFailed;
         const b2 = wasm_instance_new(s, m_b2, imp2_opaque, null) orelse return error.InstanceB2AllocFailed;
         break :blk .{ b1, b2 };

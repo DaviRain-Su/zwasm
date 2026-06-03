@@ -745,6 +745,36 @@ pub fn build(b: *std.Build) void {
     const test_c_api_step = b.step("test-c-api", "Build libzwasm.a + the C host example, run the example");
     test_c_api_step.dependOn(&run_c_host.step);
 
+    // `zig build test-c-api-conformance` — §13.4. Compiles each
+    // `test/c_api_conformance/*.c` (wasm-c-api example ports +
+    // zwasm-specific tests) against `include/wasm.h` + libzwasm.a and
+    // runs it (exit 0 = pass). Validates the §13.2 C surface end-to-end
+    // through the real C ABI. Add `.c` files here as they land.
+    const conformance_step = b.step("test-c-api-conformance", "Build + run the C-API conformance examples");
+    const conformance_cases = [_]struct { src: []const u8, name: []const u8 }{
+        .{ .src = "test/c_api_conformance/callback.c", .name = "callback" },
+    };
+    for (conformance_cases) |c| {
+        const cmod = createSanitizedModule(b, sanitize_opts, .{
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        cmod.addCSourceFile(.{
+            .file = b.path(c.src),
+            .flags = &.{ "-std=c11", "-Wall", "-Wextra", "-Werror" },
+        });
+        cmod.addIncludePath(b.path("include"));
+        cmod.linkLibrary(c_api_lib);
+        const cexe = b.addExecutable(.{
+            .name = b.fmt("zwasm-conformance-{s}", .{c.name}),
+            .root_module = cmod,
+        });
+        const run_c = b.addRunArtifact(cexe);
+        run_c.expectExitCode(0);
+        conformance_step.dependOn(&run_c.step);
+    }
+
     // `zig build test-all` — aggregate all enabled test layers.
     // Phase 0: only `test`. Phase 1+ adds spec / e2e / realworld /
     // c_api / fuzz steps as they land. Each layer registers itself
@@ -779,6 +809,7 @@ pub fn build(b: *std.Build) void {
     test_all_step.dependOn(&run_wasmtime_misc_basic.step);
     test_all_step.dependOn(&run_wast_runtime_smoke.step);
     test_all_step.dependOn(&run_c_host.step);
+    test_all_step.dependOn(conformance_step); // §13.4 C-API conformance
     test_all_step.dependOn(&run_wasi_p1.step);
     // §9.7 / 7.8 row close (D-045 chunks 1-14 fully discharged):
     // wire test-spec-assert into test-all on ALL hosts. Three-host
