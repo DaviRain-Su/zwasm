@@ -38,12 +38,18 @@ allowlisted/tracked, classified this session):
    ElemSegmentTypeMismatch at `compile.zig:257` → **D-240** (blocked-by): needs JIT typed/abstract-ref TABLE
    runtime (table.init from a reftype elem + table.get/set of typed refs) THEN the eql→`valTypeIsSubtype` flip
    (loosening alone SEGV'd — proven this session). Probe via `debug_jit_auto`. Multi-cycle runtime feature.
-2. **`tail-call/return_call_indirect.0`** UnsupportedOp → **D-210**: emit return_call_indirect (call_indirect
-   table-dispatch + return_call frame-teardown-tail; return_call IS emitted, the indirect variant isn't).
-   Multi-cycle TC emit. **arch-pin any JitInstance regression test to arm64** (lesson this session).
+2. **`tail-call/return_call_indirect.0`** → **D-210**. NOT the obvious "op not emitted" — `emitIndirectReturnCall`
+   IS wired (`op_tail_call.zig:230`) + its 3 visible gates (table_idx≠0 / results>2 / typeidx≥4096) do NOT trip
+   for this module (table 0, ≤1 result, small typeidx). The UnsupportedOp is at **func[36] pc=12** =
+   `return_call_indirect`-IN-`try_table` (TC×EH interaction — a terminator tail-jump inside an open try-region's
+   exception-table/landing-pad bookkeeping). Next step = `debug_jit_auto` probe of func[36] to pin the exact
+   UnsupportedOp site (marshalCallArgs/teardown vs the TC×try_table frame). Deep (TC+EH integration).
+   **arch-pin any JitInstance regression test to arm64** (lesson this session).
 
-Recommended next: **D-210** (return_call_indirect emit — 1 of 3, self-contained TC op) OR **D-240** (covers 2 of
-3, bigger runtime feature). Both multi-cycle → bundle. Then `scripts/check_phase10_close_invariants.sh` → §10.P.
+Recommended next (fresh-context BUNDLE — both are deep multi-cycle features, not quick wins): **D-240** (covers 2
+of 3, typed-ref table runtime) or **D-210** (TC×EH func[36], probe first). Both gate §10.P; everything else is
+allowlisted/tracked. Then `scripts/check_phase10_close_invariants.sh` → flip §10.P. The broad tractable §10
+work (cross-instance EH + 7 fr rejects + all classifications) is DONE this session; these 2 are the frontier.
 
 Other tracks: **D-238** (x86_64 EH parity), realworld GC/EH/TC producers.
 
@@ -61,11 +67,12 @@ Other tracks: **D-238** (x86_64 EH parity), realworld GC/EH/TC producers.
 
 ## Step 0.7 (next resume)
 
-THIS turn = §10.P characterization (read-only): classified the gc/type-subtyping `run` skip as eligibility-gated
-(allowlist) → **§10.P reduces to EXACTLY 3 non-allowlisted modrej** (D-240 ×2 ElemSegmentTypeMismatch + D-210
-return_call_indirect; see Active task). No code; code state `2ce27d5b`, ubuntu-verified OK (`OK (HEAD=2ce27d5b)`).
-NO ubuntu kick (handover-only). Next → start **D-210** (return_call_indirect emit, self-contained TC op) or
-**D-240** (typed-ref table runtime, covers 2 of 3) as a multi-cycle BUNDLE — survey first (Step 0).
+THIS turn = D-210 root-cause scoping (read-only): return_call_indirect.0's UnsupportedOp is NOT the 3 visible
+gates (they don't trip) — it's **func[36] = return_call_indirect-IN-try_table** (TC×EH integration), deep. So
+BOTH §10.P blockers (D-210 TC×EH, D-240 typed-ref table runtime) are confirmed deep multi-cycle features. No
+code; code state `2ce27d5b`, ubuntu-verified OK. NO ubuntu kick (handover-only). Next session → pick D-240 or
+D-210 as a dedicated BUNDLE (Step-0 survey + debug_jit_auto probe for D-210's func[36]). The broad §10 work is
+done; these 2 are the frontier.
 
 **Gate hygiene**: Step-5 Mac gate = `bash scripts/mac_gate.sh`. JIT corpus: `zig build test-spec-wasm-3.0-assert`
 (NO bogus `-Dno-run`); **pick the exe by mtime** — `/usr/bin/find .zig-cache/o -name zwasm-spec-wasm-3-0-assert
