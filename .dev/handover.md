@@ -60,11 +60,13 @@ Other tracks: **D-238** (x86_64 EH parity), realworld GC/EH/TC producers.
 
 ## Step 0.7 (next resume)
 
-THIS turn = arm64 br_on_null function-return emit (`be5a1a32`, code). Mac `test-all` + lint GREEN; JIT corpus
-function-references 23/0/16, global 811/1, no regression (br_on_null.1 modrej cleared). ubuntu `test-all` kicked
-against the turn HEAD — Step 0.7 next resume: `tail -3 /tmp/ubuntu.log`, revert the commit pair on FAIL. (Prior
-D-240 `0c3c4a2c` was comment+docs only; code unchanged since the ubuntu-verified 1bc29837.) Then → D-234 runner
-discharge OR UnsupportedEntrySignature classification (the remaining rejects D-240/D-210 are deeper).
+THIS turn = arm64 br_on_null function-return emit (`be5a1a32`) + a fix-forward (`24b4b6e5`): the prior
+`fffc60c3` went RED on ubuntu (x86_64) because the br_on_null function-return regression test runs on the host
+arch and x86_64 br_on_null emit is still first-cut → UnsupportedOp. The arm64 FIX is correct (Mac-green); only
+the TEST was arch-divergent → comptime arch-pinned it to aarch64 (SIBLING-AT the x86_64 handler gap). Re-kicked
+ubuntu against `24b4b6e5` — Step 0.7 next resume: `tail -3 /tmp/ubuntu.log` (expect OK now). LESSON: a
+JitInstance.init regression test for an ARM64-ONLY emit fix WILL fail on x86_64 (init compiles eagerly for the
+host arch) — arch-pin such tests. Then → D-234 runner discharge OR UnsupportedEntrySignature classification.
 
 **Gate hygiene**: Step-5 Mac gate = `bash scripts/mac_gate.sh`. JIT corpus: `zig build test-spec-wasm-3.0-assert`
 (NO bogus `-Dno-run`); **pick the exe by mtime** — `/usr/bin/find .zig-cache/o -name zwasm-spec-wasm-3-0-assert
