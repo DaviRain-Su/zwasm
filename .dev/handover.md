@@ -15,16 +15,23 @@
   native-stack scan rooting [strictly ADDS roots → can't cause UAF, only prevent; reuse `platform/stack_limit.zig`
   for stack bounds] → (2) free-list reuse in sweep, gated behind (1). Files: collector_mark_sweep.zig, heap.zig
   (free_lists), object_alloc.zig, root_scope.zig. ADR-0135 = rooting↔reclaim couple; no-reclaim safe interim.
-- **PROGRESS**: chunk **1a DONE** `5de51a69` — `stack_limit.nativeStackHigh()` (top-of-stack query, all 3
-  platforms) + test. **NEXT = chunk 1b: integrate the scan** into `collector_mark_sweep.zig walkRootsImpl` —
-  scan `[@frameAddress(), nativeStackHigh())` word-aligned, each word via a new `tryReportRawRef` (check the
-  FULL usize word AND its low-32 bits as candidate GcRefs — conservative covers the JIT ref-representation
-  uncertainty). **CRITICAL**: gate behind a `scan_native_stack: bool` field **default FALSE** (the conservative
-  scan would mark false-positives → break the existing precise survivor/dead-count unit tests); PRODUCTION
-  collector-creation site sets it TRUE; new test sets it true + asserts a stack-only GcRef is marked (with-flag
-  vs without). Verify ALL existing collector_mark_sweep + root_scope tests stay green.
-- **Exit-condition**: free-list reuse lands + an interp alloc-loop test shows `heap.cursor` BOUNDED (vs unbounded
-  leak today) + all existing GC unit/spec tests green.
+- **PROGRESS**: chunk **1a DONE** `5de51a69` — `stack_limit.nativeStackHigh()`. Chunk 1b (scan) ATTEMPTED +
+  REVERTED — surfaced **TWO correctness findings that reshape the design**:
+  1. **markFromRoot CORRUPTS on non-object-start refs** (`collector_mark_sweep.zig:146-147` unconditionally
+     sets bit31 + writes back; `:149` switches on the `ObjectKind` byte). A conservative stack scan reports
+     INTERIOR + garbage offsets, not just object starts → marking one sets bit31 of *payload* data (corruption)
+     + can PANIC on a corrupt enum byte. ⇒ chunk 1b MUST validate **object-start-ness** before marking: build an
+     object-start SET/bitmap (one heap walk like `runCollection` does — start at min_align, decode size via
+     `objectSizeAt`, advance), then mark a stack candidate only if its offset ∈ the set (then markFromRoot
+     traces transitively, safe). Check full-word AND low-32 candidates; flag-gated default-FALSE.
+  2. **GC `collect()` is NEVER triggered in production** — `heap.allocate` just bumps/`growTo` (no auto-collect);
+     the collector is TEST-ONLY. So §15.1's full scope also needs a **heap-pressure collection trigger** (allocate
+     hits a threshold / can't grow → collect → reclaim → retry) — that trigger site is where `scan_native_stack`
+     gets opted-in. Bigger than just free-list reuse.
+  **NEXT chunk 1b (redo, correct)**: object-start-validated conservative scan in walkRootsImpl (scan runs BEFORE
+  the `runtime orelse return` so it's runtime-independent). Test: stack-held GcRef marked with-flag vs not without.
+- **Exit-condition**: free-list reuse + heap-pressure collect trigger land + an alloc-loop test shows `heap.cursor`
+  BOUNDED (vs unbounded leak today) + all existing GC unit/spec tests green.
 
 ## Current state
 
@@ -38,20 +45,20 @@
 
 ## Next task (autonomous)
 
-**Work the 15.1-gc-reclamation bundle (above).** Chunk 1a done (`nativeStackHigh`); **NEXT = chunk 1b** (scan
-integration into `walkRootsImpl`, flag-gated default-FALSE — see the bundle PROGRESS note for the exact recipe +
-the don't-break-existing-tests constraint). Then chunk 2 = free-list reuse (gated). **Correctness-critical — don't
-rush** (a missed root → UAF heisenbug once reclaim is on). After §15.1: §15.2 coalescer → §15.3 class-aware →
-§15.4 SIMD → **§15.5 D-245 win64** (hard/remote; deliberate session) → §15.6 ClojureWasm. (D-257 lesson half
-`partial`, not blocking.)
+**Work the 15.1-gc-reclamation bundle (above).** Chunk 1a done; **NEXT = chunk 1b REDO** — the
+object-start-VALIDATED conservative scan (the naive scan corrupts payload + panics; see the bundle PROGRESS
+findings for the object-start-set recipe). Build the start-set, gate the scan behind `scan_native_stack` (default
+false), test stack-held-ref-marked-with-flag-vs-not. Then chunk 1c = heap-pressure collect trigger + chunk 2 =
+free-list reuse. **Correctness-critical — don't rush.** After §15.1: §15.2 coalescer → §15.3 class-aware → §15.4
+SIMD → **§15.5 D-245 win64** (hard/remote) → §15.6 ClojureWasm. (D-257 lesson half `partial`, not blocking.)
 
 ## Step 0.7 (next resume)
 
-This turn: §15.1 bundle chunk 1a — `stack_limit.nativeStackHigh()` + test (`5de51a69`, CODE). Mac `zig build
-test` + lint green. An ubuntu test-all kicked → next resume `tail /tmp/ubuntu.log` for `[run_remote_ubuntu] OK`
-(revert chunk 1a on a real FAIL). **NOTE** (lesson `gate-tail-vs-exit-code`): benign `failed command:
-…--listen=-` / `arm64/emit: failing op` next to a passing run = error-path test noise, not a failure. (Phase-14
-close was fully 3-host-verified GREEN — windowsmini `[run_remote_windows] OK`, seed dodged D-245.)
+This turn: §15.1 chunk-1b investigation — attempted the scan, found the markFromRoot-corrupts-on-interior +
+no-production-collect-trigger issues (bundle PROGRESS), REVERTED the incorrect scan (kept correct 1a). Prior
+chunk 1a (`5de51a69`) ubuntu test-all **OK** (verified). DOCS only this turn (handover) → no ubuntu kick (code
+HEAD `5de51a69` verified). **NOTE** (lesson `gate-tail-vs-exit-code`): benign `failed command: …--listen=-` /
+`arm64/emit: failing op` next to a passing run = error-path test noise, not a failure.
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile = `zig build test
 -Dtarget=x86_64-windows-gnu`. windowsmini exec = `run_remote_windows.sh` (phase boundary).
