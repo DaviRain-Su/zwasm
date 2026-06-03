@@ -329,7 +329,6 @@ pub fn pathOpen(
     opened_fd_ptr: u32,
 ) p1.Errno {
     _ = dirflags;
-    _ = oflags;
 
     // Bounds-check the path slice.
     const path_end = @as(usize, path_ptr) + @as(usize, path_len);
@@ -347,7 +346,18 @@ pub fn pathOpen(
     const io = host.io orelse return .nosys;
 
     const dir: std.Io.Dir = .{ .handle = dir_handle };
-    const file = dir.openFile(io, path, .{}) catch |err| return mapOpenError(err);
+    // WASI `oflags` select create/trunc/excl; `fs_rights_base` selects the
+    // access mode. O_CREAT → createFile (a `std::fs::File::create` guest);
+    // else openFile read-only / read-write per RIGHTS_FD_WRITE.
+    const wants_write = (fs_rights_base & p1.RIGHTS_FD_WRITE) != 0;
+    const file = if ((oflags & p1.OFLAGS_CREAT) != 0)
+        dir.createFile(io, path, .{
+            .read = true,
+            .truncate = (oflags & p1.OFLAGS_TRUNC) != 0,
+            .exclusive = (oflags & p1.OFLAGS_EXCL) != 0,
+        }) catch |err| return mapOpenError(err)
+    else
+        dir.openFile(io, path, .{ .mode = if (wants_write) .read_write else .read_only }) catch |err| return mapOpenError(err);
 
     // Reserve the new fd_table slot.
     host.fd_table.append(host.alloc, .{
@@ -700,6 +710,32 @@ test "pathOpen: happy path opens an existing file inside a real preopen" {
     // at the handle), so the default `.nonblocking = false`
     // suffices. Production cleanup will route through
     // `fd_close` once that's wired with `io`.
+    const file: std.Io.File = .{ .handle = slot.host_handle.?, .flags = .{ .nonblocking = false } };
+    file.close(testing.io);
+    slot.kind = .closed;
+}
+
+test "pathOpen: O_CREAT creates a new file inside a real preopen (D-243)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = testing.io;
+    const dirfd = try h.addPreopen(tmp.dir.handle, "/sandbox");
+
+    var mem: [64]u8 = @splat(0);
+    @memcpy(mem[16..28], "created.txt\x00"[0..12]);
+    // oflags = OFLAGS_CREAT, rights include FD_WRITE → createFile.
+    const e = pathOpen(&h, &mem, dirfd, 0, 16, 11, p1.OFLAGS_CREAT, p1.RIGHTS_FD_WRITE, 0, 0, 32);
+    try testing.expectEqual(p1.Errno.success, e);
+
+    // The file now exists on the host inside the preopen dir.
+    const st = tmp.dir.statFile(testing.io, "created.txt", .{}) catch return error.FileNotCreated;
+    try testing.expectEqual(std.Io.File.Kind.file, st.kind);
+
+    const new_fd = std.mem.readInt(u32, mem[32..36], .little);
+    const slot = h.translateFd(new_fd) orelse return error.MissingFile;
     const file: std.Io.File = .{ .handle = slot.host_handle.?, .flags = .{ .nonblocking = false } };
     file.close(testing.io);
     slot.kind = .closed;

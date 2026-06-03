@@ -55,6 +55,25 @@ pub fn runWasmCaptured(
     stdout_capture: ?*std.ArrayList(u8),
     invoke_name: ?[]const u8,
 ) !u8 {
+    return runWasmCapturedOpts(alloc, io, bytes, argv, stdout_capture, invoke_name, &.{});
+}
+
+/// One host→guest directory mapping for a WASI preopen (`--dir`, D-243).
+pub const PreopenDir = struct { host_path: []const u8, guest_path: []const u8 };
+
+/// Like `runWasmCaptured` but maps `preopens` host directories into the
+/// guest's WASI preopen table (the `--dir <host>[:<guest>]` flag). The
+/// opened host dir fds live for the process lifetime (CLI-scoped); the
+/// realworld runners pass `&.{}` (no preopens) per D-243.
+pub fn runWasmCapturedOpts(
+    alloc: std.mem.Allocator,
+    io: std.Io,
+    bytes: []const u8,
+    argv: []const []const u8,
+    stdout_capture: ?*std.ArrayList(u8),
+    invoke_name: ?[]const u8,
+    preopens: []const PreopenDir,
+) !u8 {
     _ = alloc; // engine + store own their own c_allocator paths
 
     // Per ADR-0016 phase 1: clear any stale diagnostic from a
@@ -81,6 +100,22 @@ pub fn runWasmCaptured(
         return error.ConfigAllocFailed;
     };
     cfg.io = io;
+    // D-243 — map host directories into the guest's preopen table. Open
+    // each host dir and register its fd via addPreopen; path_open then
+    // resolves guest paths relative to it. The fd stays open for the
+    // process lifetime (host.deinit frees the preopen names, not the fds).
+    for (preopens) |pd| {
+        const host_dir = std.Io.Dir.cwd().openDir(io, pd.host_path, .{ .iterate = true }) catch |err| {
+            diagnostic.setDiag(.instantiate, .config_alloc_failed, .unknown, "wasi preopen dir open failed", .{});
+            wasm_c_api.zwasm_wasi_config_delete(cfg);
+            return err;
+        };
+        _ = cfg.addPreopen(host_dir.handle, pd.guest_path) catch {
+            diagnostic.setDiag(.instantiate, .config_alloc_failed, .unknown, "wasi preopen registration failed", .{});
+            wasm_c_api.zwasm_wasi_config_delete(cfg);
+            return error.ConfigAllocFailed;
+        };
+    }
     if (stdout_capture) |buf| cfg.stdout_buffer = buf;
     if (argv.len > 0) cfg.setArgs(argv) catch {
         diagnostic.setDiag(.instantiate, .config_alloc_failed, .unknown, "wasi argv allocation failed", .{});

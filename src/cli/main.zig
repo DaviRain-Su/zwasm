@@ -63,18 +63,32 @@ pub fn main(init: std.process.Init) !void {
             // flag must precede the path so the trailing argv (= WASI
             // guest argv) is unambiguous.
             var invoke_name: ?[]const u8 = null;
+            var preopen_list: std.ArrayList(cli_run.PreopenDir) = .empty;
+            defer preopen_list.deinit(gpa);
             var next_arg = arg_it.next();
-            if (next_arg) |a| {
+            while (next_arg) |a| {
                 if (std.mem.eql(u8, a, "--invoke")) {
                     invoke_name = arg_it.next() orelse {
                         try printlnErr(io, "usage: zwasm run --invoke <name> <path.wasm> [args...]");
                         std.process.exit(2);
                     };
                     next_arg = arg_it.next();
-                }
+                } else if (std.mem.eql(u8, a, "--dir")) {
+                    // `--dir <host>[:<guest>]` — preopen a host dir for the
+                    // guest. Without a colon the guest path mirrors the host.
+                    const spec = arg_it.next() orelse {
+                        try printlnErr(io, "usage: zwasm run --dir <host>[:<guest>] <path.wasm> [args...]");
+                        std.process.exit(2);
+                    };
+                    const colon = std.mem.findScalar(u8, spec, ':');
+                    const host_path = if (colon) |c| spec[0..c] else spec;
+                    const guest_path = if (colon) |c| spec[c + 1 ..] else spec;
+                    try preopen_list.append(gpa, .{ .host_path = host_path, .guest_path = guest_path });
+                    next_arg = arg_it.next();
+                } else break;
             }
             const path_arg = next_arg orelse {
-                try printlnErr(io, "usage: zwasm run [--invoke <name>] <path.wasm> [args...]");
+                try printlnErr(io, "usage: zwasm run [--invoke <name>] [--dir <host>[:<guest>]] <path.wasm> [args...]");
                 std.process.exit(2);
             };
             const path = try gpa.dupe(u8, path_arg);
@@ -98,7 +112,7 @@ pub fn main(init: std.process.Init) !void {
             try argv_list.append(gpa, path);
             while (arg_it.next()) |a| try argv_list.append(gpa, a);
 
-            const code = cli_run.runWasmCaptured(gpa, io, bytes, argv_list.items, null, invoke_name) catch |err| {
+            const code = cli_run.runWasmCapturedOpts(gpa, io, bytes, argv_list.items, null, invoke_name, preopen_list.items) catch |err| {
                 // Per ADR-0016 phase 1: prefer the structured
                 // diagnostic when one was set; fall back to the
                 // legacy `@errorName` form for unwired sites.
