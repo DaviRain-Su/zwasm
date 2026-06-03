@@ -47,50 +47,61 @@ fn buildValTypeVec(vts: []const zir.ValType) types.ValTypeVec {
     return out;
 }
 
+// Shared externtype builders (used by both import + export resolution).
+
+/// functype externtype from a typeidx into the (decoded) type section.
+fn functypeExtern(typeidx: u32, func_types: ?sections.Types) ?*types.ExternType {
+    const ts = func_types orelse return null;
+    if (typeidx >= ts.items.len) return null;
+    const ft = ts.items[typeidx];
+    var pv = buildValTypeVec(ft.params);
+    var rv = buildValTypeVec(ft.results);
+    const ftype = types.wasm_functype_new(&pv, &rv) orelse {
+        types.wasm_valtype_vec_delete(&pv);
+        types.wasm_valtype_vec_delete(&rv);
+        return null;
+    };
+    return types.wasm_functype_as_externtype(ftype);
+}
+
+fn globaltypeExtern(valtype: zir.ValType, mutable: bool) ?*types.ExternType {
+    const vt = types.wasm_valtype_new(valKindOf(valtype)) orelse return null;
+    const gt = types.wasm_globaltype_new(vt, if (mutable) 1 else 0) orelse {
+        types.wasm_valtype_delete(vt);
+        return null;
+    };
+    return types.wasm_globaltype_as_externtype(gt);
+}
+
+fn tabletypeExtern(elem_type: zir.ValType, min: u32, max: ?u32) ?*types.ExternType {
+    const vt = types.wasm_valtype_new(valKindOf(elem_type)) orelse return null;
+    var lim: types.Limits = .{ .min = min, .max = max orelse 0xffff_ffff };
+    const tt = types.wasm_tabletype_new(vt, &lim) orelse {
+        types.wasm_valtype_delete(vt);
+        return null;
+    };
+    return types.wasm_tabletype_as_externtype(tt);
+}
+
+fn memorytypeExtern(min: u64, max: ?u64) ?*types.ExternType {
+    var lim: types.Limits = .{
+        .min = std.math.cast(u32, min) orelse return null,
+        .max = if (max) |mx| (std.math.cast(u32, mx) orelse 0xffff_ffff) else 0xffff_ffff,
+    };
+    const mt = types.wasm_memorytype_new(&lim) orelse return null;
+    return types.wasm_memorytype_as_externtype(mt);
+}
+
 /// Build the `wasm_externtype_t` for one decoded import. Returns null for
 /// tag imports (no base-wasm-c-api `tagtype`) — the caller skips them.
 fn buildImportExternType(it: sections.Import, func_types: ?sections.Types) ?*types.ExternType {
-    switch (it.payload) {
-        .func_typeidx => |ti| {
-            const ts = func_types orelse return null;
-            if (ti >= ts.items.len) return null;
-            const ft = ts.items[ti];
-            var pv = buildValTypeVec(ft.params);
-            var rv = buildValTypeVec(ft.results);
-            const ftype = types.wasm_functype_new(&pv, &rv) orelse {
-                types.wasm_valtype_vec_delete(&pv);
-                types.wasm_valtype_vec_delete(&rv);
-                return null;
-            };
-            return types.wasm_functype_as_externtype(ftype);
-        },
-        .global => |g| {
-            const vt = types.wasm_valtype_new(valKindOf(g.valtype)) orelse return null;
-            const gt = types.wasm_globaltype_new(vt, if (g.mutable) 1 else 0) orelse {
-                types.wasm_valtype_delete(vt);
-                return null;
-            };
-            return types.wasm_globaltype_as_externtype(gt);
-        },
-        .table => |t| {
-            const vt = types.wasm_valtype_new(valKindOf(t.elem_type)) orelse return null;
-            var lim: types.Limits = .{ .min = t.min, .max = t.max orelse 0xffff_ffff };
-            const tt = types.wasm_tabletype_new(vt, &lim) orelse {
-                types.wasm_valtype_delete(vt);
-                return null;
-            };
-            return types.wasm_tabletype_as_externtype(tt);
-        },
-        .memory => |mem| {
-            var lim: types.Limits = .{
-                .min = std.math.cast(u32, mem.min) orelse return null,
-                .max = if (mem.max) |mx| (std.math.cast(u32, mx) orelse 0xffff_ffff) else 0xffff_ffff,
-            };
-            const mt = types.wasm_memorytype_new(&lim) orelse return null;
-            return types.wasm_memorytype_as_externtype(mt);
-        },
-        .tag_typeidx => return null, // tagtype not in base wasm-c-api — skipped
-    }
+    return switch (it.payload) {
+        .func_typeidx => |ti| functypeExtern(ti, func_types),
+        .global => |g| globaltypeExtern(g.valtype, g.mutable),
+        .table => |t| tabletypeExtern(t.elem_type, t.min, t.max),
+        .memory => |mem| memorytypeExtern(mem.min, mem.max),
+        .tag_typeidx => null, // tagtype not in base wasm-c-api — skipped
+    };
 }
 
 /// `wasm_module_imports(module, own importtype_vec* out)` — decode the
@@ -142,6 +153,99 @@ pub export fn wasm_module_imports(m: ?*const Module, out: ?*types.ImportTypeVec)
     types.wasm_importtype_vec_new(o, built.items.len, if (built.items.len > 0) built.items.ptr else null);
 }
 
+// Index-space type descriptors (import prefix ++ defined section), used to
+// resolve an export's `idx` → its type.
+const GlobalInfo = struct { valtype: zir.ValType, mutable: bool };
+const TableInfo = struct { elem_type: zir.ValType, min: u32, max: ?u32 };
+
+/// `wasm_module_exports(module, own exporttype_vec* out)` — decode the
+/// export section into one `wasm_exporttype_t` per export. Unlike imports,
+/// an export carries only an index, so the type is resolved through the
+/// per-kind index space (import prefix ++ the defined section). `out` is
+/// owned by the caller (`exporttype_vec_delete`).
+pub export fn wasm_module_exports(m: ?*const Module, out: ?*types.ExportTypeVec) callconv(.c) void {
+    const o = out orelse return;
+    o.* = .{ .size = 0, .data = null };
+    const mod = m orelse return;
+    const bp = mod.bytes_ptr orelse return;
+    const bytes = bp[0..mod.bytes_len];
+
+    var arena = std.heap.ArenaAllocator.init(ca);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var parsed = parser.parse(a, bytes) catch return;
+    defer parsed.deinit(a);
+    const exp_sec = parsed.find(.@"export") orelse return; // no exports → empty vec
+    var exports = sections.decodeExports(a, exp_sec.body) catch return;
+    defer exports.deinit();
+    if (exports.items.len == 0) return;
+
+    var func_types: ?sections.Types = null;
+    defer if (func_types) |*t| t.deinit();
+    if (parsed.find(.type)) |ts| func_types = sections.decodeTypes(a, ts.body) catch null;
+
+    // Build the per-kind index spaces: import prefix first, then defined.
+    var func_tis: std.ArrayList(u32) = .empty;
+    var globals: std.ArrayList(GlobalInfo) = .empty;
+    var tables: std.ArrayList(TableInfo) = .empty;
+    var mems: std.ArrayList(sections.MemoryEntry) = .empty;
+    if (parsed.find(.import)) |imp_sec| {
+        var imps = sections.decodeImports(a, imp_sec.body) catch return;
+        defer imps.deinit();
+        for (imps.items) |it| switch (it.payload) {
+            .func_typeidx => |ti| func_tis.append(a, ti) catch return,
+            .global => |g| globals.append(a, .{ .valtype = g.valtype, .mutable = g.mutable }) catch return,
+            .table => |t| tables.append(a, .{ .elem_type = t.elem_type, .min = t.min, .max = t.max }) catch return,
+            .memory => |mem| mems.append(a, mem) catch return,
+            .tag_typeidx => {},
+        };
+    }
+    if (parsed.find(.function)) |fs| {
+        const tis = sections.decodeFunctions(a, fs.body) catch return;
+        for (tis) |ti| func_tis.append(a, ti) catch return;
+    }
+    if (parsed.find(.global)) |gs| {
+        var gd = sections.decodeGlobals(a, gs.body) catch return;
+        defer gd.deinit();
+        for (gd.items) |g| globals.append(a, .{ .valtype = g.valtype, .mutable = g.mutable }) catch return;
+    }
+    if (parsed.find(.table)) |ts| {
+        var td = sections.decodeTables(a, ts.body) catch return;
+        defer td.deinit();
+        for (td.items) |t| tables.append(a, .{ .elem_type = t.elem_type, .min = t.min, .max = t.max }) catch return;
+    }
+    if (parsed.find(.memory)) |ms| {
+        var md = sections.decodeMemory(a, ms.body) catch return;
+        defer md.deinit();
+        for (md.items) |mem| mems.append(a, mem) catch return;
+    }
+
+    var built: std.ArrayList(?*types.ExportType) = .empty;
+    defer built.deinit(ca);
+    for (exports.items) |e| {
+        const et: ?*types.ExternType = switch (e.kind) {
+            .func => if (e.idx < func_tis.items.len) functypeExtern(func_tis.items[e.idx], func_types) else null,
+            .global => if (e.idx < globals.items.len) globaltypeExtern(globals.items[e.idx].valtype, globals.items[e.idx].mutable) else null,
+            .table => if (e.idx < tables.items.len) tabletypeExtern(tables.items[e.idx].elem_type, tables.items[e.idx].min, tables.items[e.idx].max) else null,
+            .memory => if (e.idx < mems.items.len) memorytypeExtern(mems.items[e.idx].min, mems.items[e.idx].max) else null,
+        };
+        const ext = et orelse continue;
+        var nmv: vec.ByteVec = undefined;
+        vec.wasm_byte_vec_new(&nmv, e.name.len, e.name.ptr);
+        const xt = types.wasm_exporttype_new(&nmv, ext) orelse {
+            types.wasm_externtype_delete(ext);
+            if (nmv.data) |p| ca.free(p[0..nmv.size]);
+            continue;
+        };
+        built.append(ca, xt) catch {
+            types.wasm_exporttype_delete(xt);
+            continue;
+        };
+    }
+    types.wasm_exporttype_vec_new(o, built.items.len, if (built.items.len > 0) built.items.ptr else null);
+}
+
 // =====================================================================
 // Tests
 // =====================================================================
@@ -184,4 +288,47 @@ test "wasm_module_imports: null-arg → empty vec, no crash" {
     wasm_module_imports(null, &imports);
     try testing.expectEqual(@as(usize, 0), imports.size);
     wasm_module_imports(null, null);
+}
+
+// (module (type (func (result i32))) (func (type 0) i32.const 7) (memory 1)
+//   (export "f" (func 0)) (export "mem" (memory 0)))
+const export_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type () -> i32
+    0x03, 0x02, 0x01, 0x00, // func[0] : type 0
+    0x05, 0x03, 0x01, 0x00, 0x01, // memory min 1
+    0x07, 0x0b, 0x02, 0x01, 0x66, 0x00, 0x00, 0x03, 0x6d, 0x65, 0x6d, 0x02, 0x00, // export "f"→func0, "mem"→mem0
+    0x0a, 0x06, 0x01, 0x04, 0x00, 0x41, 0x07, 0x0b, // code: i32.const 7
+};
+
+test "wasm_module_exports: func + memory exports → exporttype_vec (idx → type)" {
+    const e = instance.wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer instance.wasm_engine_delete(e);
+    const s = instance.wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer instance.wasm_store_delete(s);
+    var bytes = export_wasm;
+    const bv: vec.ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = instance.wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer instance.wasm_module_delete(m);
+
+    var exports: types.ExportTypeVec = undefined;
+    wasm_module_exports(m, &exports);
+    defer types.wasm_exporttype_vec_delete(&exports);
+
+    try testing.expectEqual(@as(usize, 2), exports.size);
+    const e0 = exports.data.?[0].?;
+    try testing.expectEqualStrings("f", types.wasm_exporttype_name(e0).?.data.?[0..1]);
+    const et0 = types.wasm_exporttype_type(e0).?;
+    try testing.expectEqual(types.extern_func, types.wasm_externtype_kind(et0));
+    try testing.expectEqual(@as(usize, 1), types.wasm_externtype_as_functype_const(et0).?.results.size);
+    const e1 = exports.data.?[1].?;
+    try testing.expectEqualStrings("mem", types.wasm_exporttype_name(e1).?.data.?[0..3]);
+    try testing.expectEqual(types.extern_memory, types.wasm_externtype_kind(types.wasm_exporttype_type(e1).?));
+}
+
+test "wasm_module_exports: null-arg → empty vec, no crash" {
+    var exports: types.ExportTypeVec = undefined;
+    wasm_module_exports(null, &exports);
+    try testing.expectEqual(@as(usize, 0), exports.size);
+    wasm_module_exports(null, null);
 }
