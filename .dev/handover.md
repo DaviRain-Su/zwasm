@@ -33,10 +33,14 @@
   Registered in `src/zwasm.zig` barrel. **CYCLE-2a DONE (`50b4bd1a`)**: 2-func direct-call reloc test —
   `applyRelocs` validated end-to-end (func0 BL/CALLs func1→7, propagates; arm64 STP/LDP frame, x86_64 stack
   CALL). The blind-written BL imm26 / CALL rel32 patch math is correct (Mac green; ubuntu verifies x86_64).
-  **NEXT (cycle-2b)**: `zwasm run *.cwasm` CLI wiring — BUT first resolve the ENTRY-POINT gap: v0.1 `.cwasm`
-  has NO export/name section (header has n_funcs but no export table), so `zwasm run` can't map `_start`→func
-  idx. Decide a convention (func[0] = entry? OR a v0.2 export section?) — likely a small §12 scope note / ADR
-  before wiring. Then §12.2 AOT↔JIT differential.
+  **CYCLE-2b DONE (`bd138990`)**: §12.2 AOT↔JIT differential test (runner_test.zig) — a real `()→i32` wasm run
+  via BOTH JIT (`runI32Export`) and AOT (`compileWasm`→`produceFromCompiledWasm`→`load`→`setupRuntime`→
+  `entry(0)(&rt)`), both = 7, asserted equal. Validates produce→load round-trip is execution-faithful through
+  the full pipeline. **NEXT**: (a) broaden §12.2 fixtures (params / i64 / multi-func-with-call) to harden the
+  differential; (b) `zwasm run *.cwasm` CLI — needs the ENTRY-POINT design first (v0.1 `.cwasm` has NO export/
+  name section; `zwasm run` maps `_start`/named→func via the export table per run.zig:173). Options: header
+  `entry_idx`/exports section (v0.2, ADR-0039 amend) vs `func[0]` convention — a Phase-12 design decision (small
+  ADR) before wiring. Survey: producer has exports in `compileWasm` but discards them (not serialised).
 - **Exit-condition**: `load.zig` loads a `serialise.produceCwasm`-produced `.cwasm` + executes func[0] → the
   asserted i32 (MVP behavior signal); §12.1 `[x]` when `zwasm run *.cwasm` runs a real artefact end-to-end.
 
