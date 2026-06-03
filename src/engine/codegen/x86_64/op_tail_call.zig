@@ -210,8 +210,9 @@ fn emitCrossModuleReturnCall(
 /// JMP R11 path (D4 prescribed) since the callee target comes from
 /// a runtime table lookup, not the linker.
 ///
-/// Restrictions mirror arm64 initial scope (follow-on chunks lift):
-///   - `table_idx == 0` only.
+/// Tables: `table_idx == 0` uses the scalar JitRuntime fields;
+/// any other table loads size + bases from tables_ptr +
+/// tables_jit_ci_ptr at the call site (D-210). Restriction:
 ///   - `callee_sig.results.len <= 2`.
 ///
 /// Sequence (single-table fast path):
@@ -240,7 +241,6 @@ pub fn emitIndirectReturnCall(
     if (ins.payload >= ctx.module_types.len) return ctx_mod.Error.AllocationMissing;
     const callee_sig: zir.FuncType = ctx.module_types[ins.payload];
     const table_idx: u32 = ins.extra;
-    if (table_idx != 0) return ctx_mod.Error.UnsupportedOp;
     if (callee_sig.results.len > 2) return ctx_mod.Error.UnsupportedOp;
 
     if (ctx.pushed_vregs.items.len < 1) return ctx_mod.Error.AllocationMissing;
@@ -262,31 +262,74 @@ pub fn emitIndirectReturnCall(
 
     const expected_typeidx: u32 = canonical_type.canonicalTypeidx(ctx.module_types, @intCast(ins.payload));
 
-    // Bounds: MOV EAX, [R15+table_size_off] ; CMP idx_r, EAX ; JAE trap.
-    try ctx.buf.appendSlice(ctx.allocator, inst.encMovR32FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.table_size_off).slice());
-    try ctx.buf.appendSlice(ctx.allocator, inst.encCmpRR(.d, idx_r, .rax).slice());
-    {
-        const fixup_at: u32 = @intCast(ctx.buf.items.len);
-        try ctx.buf.appendSlice(ctx.allocator, inst.encJccRel32(.ae, 0).slice());
-        try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
-    }
+    if (table_idx == 0) {
+        // Table-0 fast path: scalar JitRuntime fields (table_size_off /
+        // typeidx_base_off / funcptr_base_off) back table 0.
+        // Bounds: MOV EAX, [R15+table_size_off] ; CMP idx_r, EAX ; JAE trap.
+        try ctx.buf.appendSlice(ctx.allocator, inst.encMovR32FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.table_size_off).slice());
+        try ctx.buf.appendSlice(ctx.allocator, inst.encCmpRR(.d, idx_r, .rax).slice());
+        {
+            const fixup_at: u32 = @intCast(ctx.buf.items.len);
+            try ctx.buf.appendSlice(ctx.allocator, inst.encJccRel32(.ae, 0).slice());
+            try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+        }
 
-    // Sig: MOV RAX, [R15+typeidx_base_off] ; MOV EAX, [RAX + idx_r*4] ;
-    //      CMP EAX, canonical ; JNE trap.
-    try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.typeidx_base_off).slice());
-    try ctx.buf.appendSlice(ctx.allocator, inst.encMovR32FromBaseIdxLsl2(.rax, .rax, idx_r).slice());
-    try ctx.buf.appendSlice(ctx.allocator, inst.encCmpRImm32(.rax, expected_typeidx).slice());
-    {
-        const fixup_at: u32 = @intCast(ctx.buf.items.len);
-        try ctx.buf.appendSlice(ctx.allocator, inst.encJccRel32(.ne, 0).slice());
-        try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
-    }
+        // Sig: MOV RAX, [R15+typeidx_base_off] ; MOV EAX, [RAX + idx_r*4] ;
+        //      CMP EAX, canonical ; JNE trap.
+        try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.typeidx_base_off).slice());
+        try ctx.buf.appendSlice(ctx.allocator, inst.encMovR32FromBaseIdxLsl2(.rax, .rax, idx_r).slice());
+        try ctx.buf.appendSlice(ctx.allocator, inst.encCmpRImm32(.rax, expected_typeidx).slice());
+        {
+            const fixup_at: u32 = @intCast(ctx.buf.items.len);
+            try ctx.buf.appendSlice(ctx.allocator, inst.encJccRel32(.ne, 0).slice());
+            try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+        }
 
-    // Funcptr: MOV RAX, [R15+funcptr_base_off] ; MOV R11, [RAX + idx_r*8].
-    // Loading into R11 (tail target) directly — RAX is the LDR-base
-    // scratch; R11 is the JMP target per `tail_target_gpr`.
-    try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.funcptr_base_off).slice());
-    try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromBaseIdxLsl3(tail_target_gpr, .rax, idx_r).slice());
+        // Funcptr: MOV RAX, [R15+funcptr_base_off] ; MOV R11, [RAX + idx_r*8].
+        // Loading into R11 (tail target) directly — RAX is the LDR-base
+        // scratch; R11 is the JMP target per `tail_target_gpr`.
+        try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.funcptr_base_off).slice());
+        try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromBaseIdxLsl3(tail_target_gpr, .rax, idx_r).slice());
+    } else {
+        // Multi-table slow path (D-210): load per-table size + bases from
+        // JitRuntime.tables_ptr[table_idx] + tables_jit_ci_ptr[table_idx],
+        // mirroring op_call.emitCallIndirect's else-branch. RAX is the only
+        // scratch, so each base load reloads the array pointer; the funcptr
+        // lands in tail_target_gpr (R11) for the JMP.
+        if (jit_abi.table_jit_ci_size != 16) @compileError("multi-table tail-call assumes TableJitCallInfo stride 16");
+        const tbl_slice_disp: i32 = @intCast((table_idx * jit_abi.table_slice_size) + 8);
+        const ci_funcptr_disp: i32 = @intCast(table_idx * 16);
+        const ci_typeidx_disp: i32 = @intCast((table_idx * 16) + 8);
+
+        // Bounds: MOV RAX, [R15+tables_ptr_off] ; MOV EAX, [RAX+tbl_slice_disp] (len)
+        //         CMP idx_r, EAX ; JAE trap.
+        try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off).slice());
+        try ctx.buf.appendSlice(ctx.allocator, inst.encMovR32FromMemDisp32(.rax, .rax, tbl_slice_disp).slice());
+        try ctx.buf.appendSlice(ctx.allocator, inst.encCmpRR(.d, idx_r, .rax).slice());
+        {
+            const fixup_at: u32 = @intCast(ctx.buf.items.len);
+            try ctx.buf.appendSlice(ctx.allocator, inst.encJccRel32(.ae, 0).slice());
+            try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+        }
+
+        // Sig: MOV RAX, [R15+tables_jit_ci_ptr_off] ; MOV RAX, [RAX+ci_typeidx_disp]
+        //      MOV EAX, [RAX+idx_r*4] ; CMP EAX, canonical ; JNE trap.
+        try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_jit_ci_ptr_off).slice());
+        try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(.rax, .rax, ci_typeidx_disp).slice());
+        try ctx.buf.appendSlice(ctx.allocator, inst.encMovR32FromBaseIdxLsl2(.rax, .rax, idx_r).slice());
+        try ctx.buf.appendSlice(ctx.allocator, inst.encCmpRImm32(.rax, expected_typeidx).slice());
+        {
+            const fixup_at: u32 = @intCast(ctx.buf.items.len);
+            try ctx.buf.appendSlice(ctx.allocator, inst.encJccRel32(.ne, 0).slice());
+            try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+        }
+
+        // Funcptr: MOV RAX, [R15+tables_jit_ci_ptr_off] ; MOV RAX, [RAX+ci_funcptr_disp]
+        //          MOV R11, [RAX+idx_r*8].
+        try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_jit_ci_ptr_off).slice());
+        try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(.rax, .rax, ci_funcptr_disp).slice());
+        try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromBaseIdxLsl3(tail_target_gpr, .rax, idx_r).slice());
+    }
 
     try emitLoadCalleeRtSameModule(ctx.allocator, ctx.buf);
     try frame_teardown.emit(ctx.allocator, ctx.buf, .{

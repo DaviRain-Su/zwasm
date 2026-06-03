@@ -1551,3 +1551,35 @@ test "function-references: (ref $t) elem into a (ref null $t) table validates (D
     defer inst.deinit(gpa);
     try testing.expectEqual(@as(?u64, 7), try inst.invoke(gpa, "f", &.{}));
 }
+
+test "tail-call: return_call_indirect on a non-zero table index (D-210)" {
+    // Regression guard: emitIndirectReturnCall only had the table-0 fast path
+    // (pinned X24/X25/X26 cohort) and gated `table_idx != 0` → UnsupportedOp.
+    // tail-call/return_call_indirect.0 (func[36]) dispatches on tables 0/1/2;
+    // the table-1 call (func[36] pc=12) hit that gate. Now mirrors
+    // emitCallIndirect's multi-table slow path (load size/typeidx_base/
+    // funcptr_base from JitRuntime), so return_call_indirect on any table
+    // compiles + runs. Minimal module:
+    //   (type $sig (func (result i32)))
+    //   (func $c (type $sig) (i32.const 42))
+    //   (table $t0 1 funcref) (table $t1 1 funcref)
+    //   (elem (table $t1) (i32.const 0) func $c)
+    //   (func (export "go") (type $sig) (i32.const 0) (return_call_indirect $t1 (type $sig)))
+    const gpa = testing.allocator;
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type $sig = (func (result i32))
+        0x03, 0x03, 0x02, 0x00, 0x00, // 2 funcs, both type 0
+        0x04, 0x07, 0x02, 0x70, 0x00, 0x01, 0x70, 0x00, 0x01, // 2 funcref tables, min 1
+        0x07, 0x06, 0x01, 0x02, 0x67, 0x6f, 0x00, 0x01, // export "go" func 1
+        0x09, 0x09, 0x01, 0x02, 0x01, 0x41, 0x00, 0x0b, 0x00, 0x01, 0x00, // elem (table 1) [func 0]
+        0x0a, 0x0e, 0x02, 0x04, 0x00, 0x41, 0x2a, 0x0b, // func $c: i32.const 42
+        0x07, 0x00, 0x41, 0x00, 0x13, 0x00, 0x01, 0x0b, // go: i32.const 0; return_call_indirect (type 0) table 1
+    };
+    var inst = JitInstance.init(gpa, &bytes) catch |e| {
+        std.debug.print("return_call_indirect non-zero table init failed: {s}\n", .{@errorName(e)});
+        return error.TestUnexpectedResult;
+    };
+    defer inst.deinit(gpa);
+    try testing.expectEqual(@as(?u64, 42), try inst.invoke(gpa, "go", &.{}));
+}

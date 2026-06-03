@@ -16,6 +16,7 @@ const inst_fp = @import("inst_fp.zig");
 const abi = @import("abi.zig");
 const prologue = @import("prologue.zig");
 const regalloc = @import("../shared/regalloc.zig");
+const jit_abi = @import("../shared/jit_abi.zig");
 const emit = @import("emit.zig");
 
 const ZirFunc = zir.ZirFunc;
@@ -499,7 +500,11 @@ test "compile: return_call_indirect — bounds + sig + funcptr-to-X16 + frame_te
     try testing.expectEqual(@as(u32, 0xD61F0200), std.mem.readInt(u32, out.bytes[body0 + 40 ..][0..4], .little));
 }
 
-test "compile: return_call_indirect — multi-table (table_idx > 0) rejected as UnsupportedOp (initial scope)" {
+test "compile: return_call_indirect — multi-table (table_idx > 0) loads size+bases from JitRuntime (D-210)" {
+    // Was rejected as UnsupportedOp (initial table-0-only scope); now the
+    // multi-table slow path mirrors emitCallIndirect — bounds/sig/funcptr
+    // come from tables_ptr + tables_jit_ci_ptr at the call site instead of
+    // the pinned X24/X25/X26 cohort.
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
     var f = ZirFunc.init(0, sig, &.{});
     defer f.deinit(testing.allocator);
@@ -514,6 +519,18 @@ test "compile: return_call_indirect — multi-table (table_idx > 0) rejected as 
     var types: [4]zir.FuncType = undefined;
     for (&types) |*t| t.* = .{ .params = &.{}, .results = &.{} };
     types[3] = .{ .params = &.{}, .results = &.{.i32} };
-    const result = compile(testing.allocator, &f, alloc, &.{}, &types, 0, &.{}, &.{}, .i32, &.{}, false);
-    try testing.expectError(error.UnsupportedOp, result);
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &types, 0, &.{}, &.{}, .i32, &.{}, false);
+    defer deinit(testing.allocator, out);
+
+    const body0 = prologue.body_start_offset(false);
+    const rt = abi.runtime_ptr_save_gpr;
+    // After MOVZ idx (body+0) + ORR W17,WZR,W9 (body+4), the multi-table
+    // tell: load tables_ptr, then table-1 size, then CMP W17,W16 (NOT W25).
+    try testing.expectEqual(@as(u32, inst.encLdrImm(16, rt, jit_abi.tables_ptr_off)), std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst.encLdrImmW(16, 16, 1 * jit_abi.table_slice_size + 8)), std.mem.readInt(u32, out.bytes[body0 + 12 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst.encCmpRegW(17, 16)), std.mem.readInt(u32, out.bytes[body0 + 16 ..][0..4], .little));
+    // BR X16 (tail-jump) is present in the body (trap stubs follow it, so it
+    // is not the final word). End-to-end execution is covered by the
+    // runner_test "return_call_indirect on a non-zero table index" case.
+    try testing.expect(std.mem.find(u8, out.bytes, &[_]u8{ 0x00, 0x02, 0x1f, 0xd6 }) != null);
 }

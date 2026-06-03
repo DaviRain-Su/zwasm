@@ -50,6 +50,7 @@ const op_call = @import("op_call.zig");
 // of the arm64 byte stream. arm64 emit always wants arm64 bytes
 // regardless of host, so import the sibling directly.
 const frame_teardown = @import("frame_teardown.zig");
+const jit_abi = @import("../shared/jit_abi.zig");
 const canonical_type = @import("../shared/canonical_type.zig");
 const zir = @import("../../../ir/zir.zig");
 const func_mod = @import("../../../runtime/instance/func.zig");
@@ -205,11 +206,12 @@ fn emitCrossModuleReturnCall(
 /// `op_call.emitCallIndirect` minus the captureCallResult tail,
 /// with frame_teardown inserted between funcptr load and BR X16.
 ///
-/// Restrictions in this initial wiring:
-///   - `table_idx == 0` only (single-table fast path; multi-table
-///     follow-on chunk). `ins.extra > 0` → `UnsupportedOp`.
-///   - `results.len <= 2` (no MEMORY-class return-buffer dance;
-///     the tail-called frame inherits the caller's X8 if any).
+/// Tables: `table_idx == 0` uses the pinned per-call cohort (W25 size
+/// / X24 typeidx / X26 funcptr); any other table loads size + bases
+/// from the JitRuntime at the call site (D-210, mirrors
+/// emitCallIndirect's multi-table else-branch). `results.len <= 2`
+/// (no MEMORY-class return-buffer dance; the tail-called frame
+/// inherits the caller's X8 if any).
 ///
 /// Sequence:
 ///   (1) pop idx vreg, marshal args (caller's frame still live
@@ -222,6 +224,7 @@ fn emitCrossModuleReturnCall(
 ///   (5) MOV X0, X19 (emitLoadCalleeRtSameModule),
 ///   (6) frame_teardown.emit (caller's frame gone),
 ///   (7) BR X16 (emitTailJump).
+/// Steps (2)-(4) take the multi-table form for `table_idx != 0`.
 ///
 /// NOT-a-safepoint invariant (ADR-0112 D7): the bounds+sig
 /// branches both target the trap stub (which does its own
@@ -234,7 +237,6 @@ pub fn emitIndirectReturnCall(
     if (ins.payload >= ctx.module_types.len) return ctx_mod.Error.AllocationMissing;
     const callee_sig: zir.FuncType = ctx.module_types[ins.payload];
     const table_idx: u32 = ins.extra;
-    if (table_idx != 0) return ctx_mod.Error.UnsupportedOp;
     if (callee_sig.results.len > 2) return ctx_mod.Error.UnsupportedOp;
 
     if (ctx.pushed_vregs.items.len < 1) return ctx_mod.Error.AllocationMissing;
@@ -248,26 +250,67 @@ pub fn emitIndirectReturnCall(
     const expected_typeidx: u32 = canonical_type.canonicalTypeidx(ctx.module_types, @intCast(ins.payload));
     if (expected_typeidx >= 4096) return ctx_mod.Error.UnsupportedOp;
 
-    // Bounds: CMP W17, W25 ; B.HS trap.
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegW(17, 25));
-    {
-        const fixup_at: u32 = @intCast(ctx.buf.items.len);
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hs, 0));
-        try ctx.cind_bounds_fixups.append(ctx.allocator, fixup_at);
+    if (table_idx == 0) {
+        // Table-0 fast path: bounds via W25, sig via X24, funcptr via X26
+        // (the pinned per-call cohort) — mirrors emitCallIndirect.
+        // Bounds: CMP W17, W25 ; B.HS trap.
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegW(17, 25));
+        {
+            const fixup_at: u32 = @intCast(ctx.buf.items.len);
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hs, 0));
+            try ctx.cind_bounds_fixups.append(ctx.allocator, fixup_at);
+        }
+        // Sig: LDR W16, [X24, X17, LSL #2] ; CMP W16, #expected ; B.NE trap.
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrWRegLsl2(16, 24, 17));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmW(16, @intCast(expected_typeidx)));
+        {
+            const fixup_at: u32 = @intCast(ctx.buf.items.len);
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.ne, 0));
+            try ctx.cind_sig_fixups.append(ctx.allocator, fixup_at);
+        }
+        // Funcptr load: LDR X16, [X26, X17, LSL #3]. X16 = tail-target
+        // (per `tail_target_gpr`) — matches the BR X16 in step (7).
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrXRegLsl3(tail_target_gpr, 26, 17));
+    } else {
+        // Multi-table slow path (D-210): load per-table size + bases from
+        // the JitRuntime at the call site, mirroring emitCallIndirect's
+        // else-branch. Stride-16 indexing into tables_jit_ci_ptr matches
+        // TableJitCallInfo (funcptr_base @ +0, typeidx_base @ +8). The
+        // funcptr lands in tail_target_gpr (X16) for the BR.
+        if (jit_abi.table_jit_ci_size != 16) @compileError("multi-table tail-call assumes TableJitCallInfo stride 16");
+        const rt_reg: inst.Xn = abi.runtime_ptr_save_gpr;
+        // Bounds: len = tables_ptr[table_idx].len (TableSlice +8).
+        const tbl_slice_byte_off: u32 = (table_idx * jit_abi.table_slice_size) + 8;
+        if (tbl_slice_byte_off > 16380) return ctx_mod.Error.UnsupportedOp;
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(16, rt_reg, jit_abi.tables_ptr_off));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(16, 16, @intCast(tbl_slice_byte_off)));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegW(17, 16));
+        {
+            const fixup_at: u32 = @intCast(ctx.buf.items.len);
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hs, 0));
+            try ctx.cind_bounds_fixups.append(ctx.allocator, fixup_at);
+        }
+        // Sig: typeidx_base = tables_jit_ci_ptr[table_idx].typeidx_base ;
+        // LDR W16, typeidx_base[idx] ; CMP ; B.NE trap.
+        const ci_typeidx_byte_off: u32 = (table_idx * 16) + 8;
+        if (ci_typeidx_byte_off > 32760) return ctx_mod.Error.UnsupportedOp;
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(16, rt_reg, jit_abi.tables_jit_ci_ptr_off));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(16, 16, @intCast(ci_typeidx_byte_off)));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrWRegLsl2(16, 16, 17));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmW(16, @intCast(expected_typeidx)));
+        {
+            const fixup_at: u32 = @intCast(ctx.buf.items.len);
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.ne, 0));
+            try ctx.cind_sig_fixups.append(ctx.allocator, fixup_at);
+        }
+        // Funcptr: funcptr_base = tables_jit_ci_ptr[table_idx].funcptr_base ;
+        // LDR X16, funcptr_base[idx] → tail_target_gpr for the BR.
+        const ci_funcptr_byte_off: u32 = table_idx * 16;
+        if (ci_funcptr_byte_off > 32760) return ctx_mod.Error.UnsupportedOp;
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(16, rt_reg, jit_abi.tables_jit_ci_ptr_off));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(16, 16, @intCast(ci_funcptr_byte_off)));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrXRegLsl3(tail_target_gpr, 16, 17));
     }
-
-    // Sig: LDR W16, [X24, X17, LSL #2] ; CMP W16, #expected ; B.NE trap.
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrWRegLsl2(16, 24, 17));
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmW(16, @intCast(expected_typeidx)));
-    {
-        const fixup_at: u32 = @intCast(ctx.buf.items.len);
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.ne, 0));
-        try ctx.cind_sig_fixups.append(ctx.allocator, fixup_at);
-    }
-
-    // Funcptr load: LDR X16, [X26, X17, LSL #3]. X16 = tail-target
-    // (per `tail_target_gpr`) — matches the BR X16 in step (7).
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrXRegLsl3(tail_target_gpr, 26, 17));
 
     try emitLoadCalleeRtSameModule(ctx.allocator, ctx.buf);
     try frame_teardown.emit(ctx.allocator, ctx.buf, .{ .frame_bytes = ctx.frame_bytes });
