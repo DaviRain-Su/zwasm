@@ -3,6 +3,37 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
+## Active bundle
+
+- **Bundle-ID**: 15.2-coalescer-detection (mov-coalescing detection + emit-side elision — bench-gated ≥5%,
+  correctness-critical, W54-divergence-prone)
+- **Cycles-remaining**: ~3–5 (vreg-model design → spike → detection → 2-arch elision → bench)
+- **Continuity-memo**: Scaffolding is a NO-OP frame (`src/ir/coalesce/pass.zig:47` installs empty records;
+  runs post-regalloc at `compile.zig:302` with `alloc.slots[]`). Design = option (b) (`p8-8b1-coalescer-survey.md`):
+  detect a MOV-shaped op where `slots[src_vreg]==slots[dst_vreg]` AND dst not live-after → record
+  `{instr_pc, slot, .same_slot_alias}` → emit queries `func.coalesced_movs` + skips. **Consumer (emit elision)
+  ALSO unimplemented** — both must land. **HARD CORE**: mapping a candidate ZIR op (local.tee/get/set/select) to
+  its src/dst vreg ids = the operand-stack vreg-numbering (must MATCH regalloc/liveness exactly; a wrong mark →
+  MISCOMPILE). **W54 lesson**: this class of change broke x86_64 (fewer MOVs exposed spill-around-call timing) →
+  metadata-only (no IR mutation), conservative bail on branch targets + call sites, **test Mac aarch64 FIRST**,
+  differential suite (spec+realworld both arches) is the correctness guard.
+- **PROGRESS**: Step-0 surveys done (2 Explore digests + `p8-8b1-coalescer-survey.md`). **FOUNDATIONAL FINDINGS
+  (reshape the approach)**: (1) vreg numbering (`src/ir/analysis/liveness.zig`, operand-stack def-order) is NOT
+  exposed per-instr — coalescer must RE-SIMULATE it (mismatch → miscompile). (2) **Locals have FIXED frame homes
+  (`LocalsLayout.offsets[L]`), a SEPARATE address space from operand-stack slots (`regalloc.slots[]`)** → a
+  `local.tee` store-to-local is NOT a same-slot vreg alias; the scaffolded `slots[src]==slots[dst]` premise does
+  not cleanly apply. (3) `select` allocates its result vreg at EMIT time (`emit.zig:1082`), diverging from
+  liveness numbering. (4) **The design note's OWN option (a) warns v2's deterministic day-1 slot assignment ⇒
+  "most same-slot MOVs never occur" (~2–5% ceiling)** → ≥5% via slot-aliasing is uncertain by the project's own
+  survey. **NEXT = EMPIRICAL SPIKE** (gitignored `private/spikes/coalescer-headroom/`): instrument the JIT compile
+  of `tinygo/fib_loop` + `shootout/nestedloop` to COUNT actually-redundant emitted movs (a store/mov whose value
+  is provably already at the destination) — measure the coalescing HEADROOM before implementing. If <5% reachable
+  → ADR re-scope §15.2 (option a "stop"/re-target the mechanism). If ≥5% headroom found → design detection against
+  the REAL redundancy pattern (not the scaffolded slot-alias premise), then arm64 elision → x86_64 → bench.
+- **Exit-condition**: EITHER ≥5% bench-delta on ≥3 loop-heavy fixtures + differential green (no miscompile) + a
+  detect+elide unit test; OR (if spike shows <5% headroom) an ADR re-scoping §15.2's mechanism/target with the
+  empirical headroom data.
+
 ## Current state
 
 - **Phase 15 (Performance parity with v1 + ClojureWasm) IN-PROGRESS.** Phase 14 (CI) / 13 (C API) /
@@ -32,10 +63,10 @@ applies. After §15.2: §15.3 class-aware (≥3% FP-heavy) → §15.4 SIMD + D-2
 
 ## Step 0.7 (next resume)
 
-This turn: **§15.1 close** — ADR-0148 (carve-out re-scope) + ROADMAP §15.1 row/narrative re-scoped &
-flipped `[x]` + D-211 barrier updated (now moving/AOT, not Phase-15) + handover rewrite. **DOCS/scope
-only — NO src/ change → no ubuntu kick** (code HEAD `45a94348`, ubuntu-verified OK last turn). Prior
-chunk 2 (`45a94348`) ubuntu **OK**. **NOTE** (lesson `gate-tail-vs-exit-code`): benign `failed command:
+This turn: **§15.2 design survey** — 2 deep Explore surveys (coalescer scaffolding + vreg/regalloc model) →
+opened the 15.2-coalescer-detection bundle + recorded the foundational findings (above) that reshape the
+approach toward an empirical-headroom spike FIRST. **DOCS only — NO src/ change → no ubuntu kick** (code HEAD
+`45a94348`, ubuntu-verified OK). **NOTE** (lesson `gate-tail-vs-exit-code`): benign `failed command:
 …--listen=-` / `arm64/emit: failing op` next to a passing run = error-path test noise — EXIT authoritative.
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile = `zig build test
