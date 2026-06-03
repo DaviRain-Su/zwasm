@@ -3,6 +3,28 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-255"
+    layer: "code"
+    status: "blocked-by"
+    description: |-
+      blocked-by: no library-side `std.Io` token in the C-API (Zig-0.16 capability-I/O).
+      The C-API WASI config builders `inherit_argv` / `inherit_env` / `preopen_dir` are
+      DEFERRED post-v0.1 and their declarations removed from `include/wasi.h` (ADR-0143)
+      — all three need a process/io capability a C-library context lacks: a C-ABI export
+      gets no `std.process.Init`, and the C-API engine constructs no io of its own (the
+      CLI threads `init.io` from `main`). argv has no Zig-0.16 library path at all;
+      env would add a cross-platform `std.c.environ` Necessary site (§14 libc fanout)
+      for convenience over the existing `set_args`/`set_envs`; preopen needs io to open
+      (`std.Io.Dir.openDir`) AND at runtime (`path_open`). DISCHARGE: when the C-API gains
+      an engine/`set_wasi`-constructed io wired to `Host.io` (co-located with D-251 WASI/
+      host-imports-under-C-API + the Phase-14+ AOT push that needs cross-platform argv/env
+      anyway), re-add the three: `preopen_dir` + `inherit_env` first, then `inherit_argv`
+      once a vetted cross-platform process-context helper exists. The §13.P close records
+      this as the open Phase-13 carry. v0.1 surface = explicit set_args/set_envs/inherit_stdio.
+    first_raised: "2026-06-04"
+    last_reviewed: "2026-06-04"
+    refs: |-
+      `include/wasi.h` (decls removed); `src/api/wasi.zig` (implemented surface); `src/cli/run.zig:149,155` (ambient-io preopen precedent); `src/cli/main.zig:43-44` (Init→io); ADR-0143; ADR-0070 line 62 (B132 getenv Necessary); D-251; ROADMAP §13.3 / §13.P
   - id: "D-254"
     layer: "process"
     status: "blocked-by"

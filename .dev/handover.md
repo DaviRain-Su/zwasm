@@ -17,34 +17,35 @@
   linking `libzwasm.a` (3rd independent ABI consumer), Mac-only `zig build run-rust-host`, NOT in test-all.
   rust-on-3-OS sub-clause deferred to §13.P (**D-254**; test hosts rustc-free by design) per **ADR-0142** (amended).
   Build step probes `SDKROOT` to survive this Mac's broken `xcrun --show-sdk-path` (host config, SDK present).
-- **§13.3 [ ]** — `inherit_argv`/`inherit_env` + `preopen_dir` remain **ADR-0070-blocked** (Zig 0.16 capability-
-  based I/O: a C-library context has no `Init` token for process argv/env). Partial done `47298cd1` (`set_args`/
-  `set_envs`/`inherit_stdio`). Interleaves once ADR-0070 lands; explicit set_args/envs already cover config.
+- **§13.3 [x]** — `wasi.h` surface re-scoped + made honest. v0.1 = `new`/`delete` + `set_args`/`set_envs`/
+  `inherit_stdio` (`47298cd1`) + `set_wasi`. `inherit_argv`/`inherit_env`/`preopen_dir` were **declared-but-
+  undefined** (link-error landmines); all three **deferred post-v0.1 + decls removed** from `include/wasi.h`
+  per **ADR-0143** / **D-255**. One root cause: a C-library context has no Zig-0.16 `Init`/io token (argv: no
+  path; env: cross-platform `std.c.environ` fanout for marginal value; preopen: needs io to open AND at runtime).
+  Re-add with the C-API io infra (D-251 / Phase-14+). **All §13.0–§13.5 now `[x]`; only §13.P remains.**
 
 ## Next task (autonomous)
 
-**Next: resolve the §13.3 ADR-0070 block — it gates §13.P.** §13.P (Phase-13 close) is NOT a registered
-hard-gate (§13's 🔒 is the end-of-phase conformance gate, explicitly "NOT an entry hard-gate"; §13.P references
-no `.dev/phase*.md` doc → drive it autonomously, not a user-stop). BUT §13.P cannot close while §13.3 (wasi.h
-surface complete) is `[ ]`. So the real next chunk is the §13.3 remainder: **decide, autonomous-with-ADR**,
-whether C-API WASI `inherit_argv`/`inherit_env`/`preopen_dir` is (a) implementable now via the libc `environ`
-global (→ ADR-0070 amendment per `libc_boundary.md`, since a C-library `Host` has no Zig-0.16 `Init`/`std.process`
-token) or (b) genuinely out-of-scope-for-v0.1 → defer with an ADR + re-scope §13.3 exit (explicit `set_args`/
-`set_envs` already cover config). Survey ADR-0070 + `api/wasi.zig` first. Once §13.3 resolves → **§13.P close**:
-audit_scaffolding (mandatory) + windowsmini 3-host reconcile + make the deferred D-254 rust-3-OS call (option (b):
-re-phrase exit to "Mac rust + 2-host conformance") + SHA backfill §13 + widget 13→DONE + Phase 14 inline expand.
-**§13.3 is the gate, NOT a skip.** D-253 C-E stay deferred (cap-blocked / not-modeled).
+**Next: §13.P — Phase 13 close.** NOT a registered hard-gate (§13's 🔒 = end-of-phase conformance gate,
+explicitly "NOT an entry hard-gate"; §13.P references no `.dev/phase*.md` doc; Phase 14 opens autonomously) →
+**drive it autonomously, no user-stop.** Steps: (1) **audit_scaffolding** (mandatory phase-boundary trigger; weight
+§F debt coherence + §G extended-challenge anchors); (2) **windowsmini 3-host reconcile** — `bash scripts/
+run_remote_windows.sh test-all` (or the win runner), verify 0 failed/mismatched (cf. Phase-12 `/tmp/win.log`
+GREEN); (3) make the deferred **D-254** rust-3-OS call (option (b): exit = "Mac rust + 2-host C-ABI conformance");
+(4) SHA-backfill §13 rows; (5) widget 13→DONE + Phase 14 (CI matrix) inline-expand; (6) push + re-arm. **Open
+Phase-13 carries to record at close**: D-253 (host_info/as_ref, cap-blocked), D-254 (rust 3-OS), D-255 (WASI
+inherit/preopen io-infra). Conformance fail=0 ✓ (§13.4); examples green (c/zig 3-OS ✓, rust Mac-only).
 
 gap: `.dev/phase13_capi_gap.md`.
 
 ## Step 0.7 (next resume)
 
-This turn: §13.5 rust_host (`2323714a` src + chore handover/roadmap/ADR/debt commit). Mac gate GREEN
-(`/tmp/mac_gate_rusthost.log`, exit 0). An ubuntu `test-all` is kicked → next resume `tail /tmp/ubuntu.log` for
-`[run_remote_ubuntu] OK`. **NOTE** (lesson `gate-tail-vs-exit-code`, updated this turn): a stray `failed command:`
-in the ubuntu log next to OK is **benign** zig test-isolation noise (abort/panic/trap child procs) — the **exit
-code is authoritative**, not the tail. Do NOT re-investigate / revert on that alone. Prior ubuntu `46edb841`
-(test-all) verified OK (DIRECT_EXIT=0, TESTALL_EXIT=0); windowsmini `0810b339` GREEN.
+This turn: §13.3 close (wasi.h re-scope, ADR-0143 + D-255; header decls removed — no src code change). Mac gate
+GREEN (`/tmp/mac_gate_133.log`, exit 0). An ubuntu `test-all` is kicked → next resume `tail /tmp/ubuntu.log` for
+`[run_remote_ubuntu] OK`. **NOTE** (lesson `gate-tail-vs-exit-code`): a stray `failed command:` in the ubuntu log
+next to OK is **benign** zig test-isolation noise (abort/panic/trap child procs) — the **exit code is
+authoritative**, not the tail. Do NOT re-investigate / revert on that alone. Prior ubuntu `14e1fcab` (test-all)
+verified OK (TESTALL_EXIT=0); windowsmini `0810b339` GREEN (reconcile due at §13.P).
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. rust_host = Mac-only `zig build run-rust-host`
 (needs rustc; not gated, not in test-all). 3-host reconcile = phase boundary.
