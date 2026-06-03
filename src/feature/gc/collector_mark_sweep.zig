@@ -201,6 +201,10 @@ pub const MarkSweepCollector = struct {
         // `walkRoots(markFromRoot, ...)` BEFORE collect().
         // collect() runs the sweep phase only.
         var stats: SweepStats = .{};
+        // Rebuild the reclamation free-list from scratch each sweep
+        // (ADR-0147): "dead" is recomputed every cycle, so a slot the
+        // mark phase conservatively retained is simply not re-added.
+        self.heap.free_list.clearRetainingCapacity();
         var cursor: u32 = heap_mod.null_ref + heap_mod.Heap.min_align;
         // The Heap's bump cursor records the high-water mark; objects
         // exist in [min_align, heap.cursor).
@@ -221,9 +225,15 @@ pub const MarkSweepCollector = struct {
                 @memcpy(self.heap.bytes[cursor .. cursor + header_size], std.mem.asBytes(&hdr)[0..header_size]);
             } else {
                 stats.dead_bytes += obj_size;
-                // Phase 11 amendment: free-list reuse or compaction.
-                // For now the dead region stays in-place but its bytes
-                // are observable garbage. Sweep doesn't recycle.
+                // Reclaim: record the dead slot for exact-size reuse
+                // (ADR-0147). External list → the slot keeps its header,
+                // so the walk stays valid until `allocate` reuses it.
+                self.heap.free_list.append(self.heap.parent, .{ .offset = cursor, .size = obj_size }) catch {
+                    // EXEMPT-FALLBACK: OOM enqueuing a dead slot → it just
+                    // isn't reused this cycle (cursor grows instead). Safe:
+                    // never frees a live object; reclaim is best-effort (ADR-0147).
+                    self.heap.reclaim_oom_count +%= 1;
+                };
             }
             cursor = std.mem.alignForward(u32, cursor + obj_size, heap_mod.Heap.min_align);
         }
@@ -509,6 +519,40 @@ test "MarkSweepCollector: native-stack scan marks a stack-held GcRef only when e
     c.collector().walkRoots(markCallbackForTest, &c);
     std.mem.doNotOptimizeAway(&stack_slots);
     try testing.expect(headerIsMarked(env.heap, ref));
+}
+
+test "reclamation: sweep frees dead slots (not live), allocate reuses them, cursor bounded (§15.1 chunk 2)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const body = [_]u8{ 0x01, 0x5F, 0x01, 0x7F, 0x01 }; // struct { i32 } → payload 8
+    const env = try buildArenaedHeap(&arena, &body);
+
+    var c = MarkSweepCollector.init(env.heap, &env.gti);
+    const sz: u32 = header_size + 8;
+    var refs: [10]u32 = undefined;
+    for (&refs) |*r| {
+        r.* = try env.heap.allocate(sz);
+        const hdr: ObjectHeader = .{ .kind = .struct_, .info = 0 };
+        @memcpy(env.heap.bytes[r.* .. r.* + header_size], std.mem.asBytes(&hdr)[0..header_size]);
+    }
+    const cursor_after_allocs = env.heap.cursor;
+
+    // Mark only refs[0] as a root; the other 9 are dead. Sweep frees the
+    // 9 dead slots (the live one is NOT enqueued) — proves live exclusion.
+    c.markFromRoot(refs[0]);
+    c.collector().collect();
+    try testing.expectEqual(@as(u32, 1), c.last_stats.survivors);
+    try testing.expectEqual(@as(u64, 9 * sz), env.heap.reclaimableBytes());
+
+    // Allocate 9 more same-size objects → all reuse freed slots, so the
+    // cursor does NOT grow and the free-list drains to empty.
+    for (0..9) |_| _ = try env.heap.allocate(sz);
+    try testing.expectEqual(cursor_after_allocs, env.heap.cursor);
+    try testing.expectEqual(@as(u64, 0), env.heap.reclaimableBytes());
+
+    // Free-list now empty → the next allocation falls back to bump.
+    _ = try env.heap.allocate(sz);
+    try testing.expect(env.heap.cursor > cursor_after_allocs);
 }
 
 test "MarkSweepCollector: array object size decoded from ArrayHeader.length (10.G op_gc cycle 26)" {

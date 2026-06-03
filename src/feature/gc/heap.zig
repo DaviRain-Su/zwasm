@@ -40,6 +40,14 @@ pub const null_ref: GcRef = 0;
 /// allocations bump-advance the cursor + 2-byte align. Grow
 /// reallocs the backing slice via the parent arena allocator in
 /// 4 KB page chunks. ADR-0115 §5.
+/// A reclaimed slab region available for reuse (§15.1 chunk 2 /
+/// ADR-0147). `size` is the exact byte size the dead object occupied,
+/// so `allocate` can exact-fit a same-size request into `offset`.
+pub const FreeSlot = struct {
+    offset: GcRef,
+    size: u32,
+};
+
 pub const Heap = struct {
     /// Parent allocator backing `bytes`. Runtime arena per
     /// ADR-0014 §6.K.2 (so `deinit` doesn't free — the parent
@@ -67,6 +75,17 @@ pub const Heap = struct {
     pressure_bytes: u32 = default_pressure_bytes,
     next_gc_at: u32 = default_pressure_bytes,
     gc_cycles: u32 = 0,
+
+    /// Reclamation free-list (§15.1 chunk 2 / ADR-0147). The sweep
+    /// rebuilds this each collection from the dead (unmarked) objects;
+    /// `allocate` reuses an exact-size slot before bumping the cursor.
+    /// External (not intrusive) so dead slots keep their `ObjectHeader`
+    /// and the heap stays walkable for the conservative scan + sweep.
+    free_list: std.ArrayList(FreeSlot) = .empty,
+    /// Dead slots that could not be enqueued because the `free_list`
+    /// append OOM'd mid-sweep (ADR-0147). Best-effort reclaim: those
+    /// slots just aren't reused this cycle — never a freed live object.
+    reclaim_oom_count: u32 = 0,
 
     /// 4 KB grow granularity per ADR-0115 §5. Page is the slab
     /// grow unit, NOT the OS page (the slab is a sub-region of
@@ -103,6 +122,32 @@ pub const Heap = struct {
         if (self.bytes.len > 0) self.parent.free(self.bytes);
         self.bytes = &.{};
         self.cursor = 2;
+        self.free_list.deinit(self.parent);
+    }
+
+    /// Total bytes currently held on the reclamation free-list
+    /// (§15.1 chunk 2 / ADR-0147) — the reusable dead space the last
+    /// sweep recorded. Observable proof reclamation is tracking.
+    pub fn reclaimableBytes(self: *const Heap) u64 {
+        var sum: u64 = 0;
+        for (self.free_list.items) |slot| sum += slot.size;
+        return sum;
+    }
+
+    /// Pop an exact-size reusable slot from the free-list, or null if
+    /// none. Used by `allocate` to reuse a dead slot before bumping
+    /// (§15.1 chunk 2 / ADR-0147). Linear scan — exact-size first cut.
+    fn popFreeSlot(self: *Heap, size: u32) ?GcRef {
+        var i: usize = self.free_list.items.len;
+        while (i > 0) {
+            i -= 1;
+            if (self.free_list.items[i].size == size) {
+                const off = self.free_list.items[i].offset;
+                _ = self.free_list.swapRemove(i);
+                return off;
+            }
+        }
+        return null;
     }
 
     /// Bump-allocate `size` bytes from the slab, growing in
@@ -111,6 +156,10 @@ pub const Heap = struct {
     /// the i31 low-bit invariant.
     pub fn allocate(self: *Heap, size: u32) Error!GcRef {
         if (size == 0) return self.cursor; // zero-size object alias
+        // Reuse an exact-size dead slot before bumping (§15.1 chunk 2 /
+        // ADR-0147). The slot is a former object start (already
+        // min_align-aligned) and exact-fits `size`; cursor stays put.
+        if (self.popFreeSlot(size)) |off| return off;
         // Align the cursor up to min_align before allocating.
         const aligned = std.mem.alignForward(u32, self.cursor, min_align);
         // Range check against 4 GiB cap with overflow protection.
@@ -219,6 +268,26 @@ test "Heap pressure: shouldCollect arms at next_gc_at; noteCollected re-arms + c
     try testing.expectEqual(@as(u32, 1), h.gc_cycles);
     try testing.expectEqual(cursor_at_collect + 64, h.next_gc_at);
     try testing.expect(!h.shouldCollect());
+}
+
+test "Heap free-list: exact-size reuse only; mismatched size bumps (§15.1 chunk 2)" {
+    var h = Heap.init(testing.allocator);
+    defer h.deinit();
+    const off = try h.allocate(16); // bump
+    const cursor1 = h.cursor;
+
+    // Stage a freed 16-byte slot → a same-size request reuses it in place.
+    try h.free_list.append(h.parent, .{ .offset = off, .size = 16 });
+    try testing.expectEqual(off, try h.allocate(16));
+    try testing.expectEqual(cursor1, h.cursor); // no growth
+
+    // Re-stage; a DIFFERENT size must NOT reuse it (would corrupt) — bump.
+    try h.free_list.append(h.parent, .{ .offset = off, .size = 16 });
+    const other = try h.allocate(8);
+    try testing.expect(other != off);
+    try testing.expect(h.cursor > cursor1);
+    // The size-16 slot is untouched by the size-8 request.
+    try testing.expectEqual(@as(u64, 16), h.reclaimableBytes());
 }
 
 test "Heap.allocate: grow in 4 KB pages" {
