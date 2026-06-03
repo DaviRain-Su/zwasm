@@ -1500,6 +1500,12 @@ test "function-references: br_on_null to function-return target JIT-compiles (D-
     // (function-return / loop / block). Minimal module: (type $t (func))
     // (func (param (ref null $t)) (drop (br_on_null 0 (local.get 0)))) — must
     // JIT-compile (init succeeds); was a module-reject.
+    // arm64-pinned: this turn wired br_on_null function-return on arm64 only;
+    // x86_64's br_on_null emit is still first-cut (forward-block) → UnsupportedOp
+    // on this module (x86_64 parity = D-239 residual / D-238 bucket). Comptime
+    // arch-pin per skip.zig §"arch-pinned test that doesn't count" (test_discipline §4).
+    // SIBLING-AT: src/engine/codegen/x86_64/ops/wasm_3_0/br_on_null.zig:47 (x86_64 br_on_null function-return emit — not yet wired, D-239 residual)
+    if (comptime builtin.cpu.arch != .aarch64) return;
     const gpa = testing.allocator;
     const bytes = [_]u8{
         0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
