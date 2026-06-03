@@ -85,6 +85,15 @@ pub const Input = struct {
     mem_min_pages: u32 = 0,
     mem_max_pages: u32 = format.memory_max_none,
     mem_data: []const format.CwasmDataSeg = &.{},
+    /// Table 0 + element segments (v0.3 cycle-2a). `has_table` gates
+    /// `table0_size` + the elem_data section. `elem` = active segments
+    /// (table offsets pre-evaluated; funcidx lists).
+    has_table: bool = false,
+    table0_size: u32 = 0,
+    elem: []const format.CwasmElemSeg = &.{},
+    /// Canonical typeidx per defined function (parallel to `bytes_per_func`),
+    /// written into each `CwasmFuncMeta.canon_typeidx`. Empty → all 0.
+    canon_typeidx_per_func: []const u32 = &.{},
 };
 
 /// Produce a `.cwasm` v0.2 byte stream. Caller owns the
@@ -123,6 +132,11 @@ pub fn produceCwasm(allocator: Allocator, input: Input) Error![]u8 {
     var memory_init_size: u32 = if (input.has_memory) 4 else 0;
     for (input.mem_data) |seg| memory_init_size += 8 + @as(u32, @intCast(seg.bytes.len));
 
+    // Elem_data section: 4-byte count then per active segment
+    // [table_offset:u32][n_funcs:u32][funcidx... ×u32]. Empty when no table.
+    var elem_size: u32 = if (input.has_table) 4 else 0;
+    for (input.elem) |seg| elem_size += 8 + @as(u32, @intCast(seg.funcidxs.len)) * 4;
+
     // Code section: concatenate per-func bytes with 4-byte
     // alignment between funcs (loader mmap()s with
     // PROT_EXEC; arm64 prefers 4-byte-aligned function
@@ -143,7 +157,8 @@ pub fn produceCwasm(allocator: Allocator, input: Input) Error![]u8 {
     const exports_offset: u32 = relocs_offset + relocs_size;
     const globals_offset: u32 = exports_offset + exports_size;
     const memory_init_offset: u32 = globals_offset + globals_size;
-    const code_offset: u32 = memory_init_offset + memory_init_size;
+    const elem_offset: u32 = memory_init_offset + memory_init_size;
+    const code_offset: u32 = elem_offset + elem_size;
     const total_size: u32 = code_offset + code_size;
 
     var out = try allocator.alloc(u8, total_size);
@@ -168,11 +183,15 @@ pub fn produceCwasm(allocator: Allocator, input: Input) Error![]u8 {
         .exports_size = exports_size,
         .globals_offset = globals_offset,
         .globals_size = globals_size,
-        .flags = if (input.has_memory) format.flag_has_memory else 0,
+        .flags = (if (input.has_memory) format.flag_has_memory else 0) |
+            (if (input.has_table) format.flag_has_table else 0),
         .memory_min_pages = if (input.has_memory) input.mem_min_pages else 0,
         .memory_max_pages = if (input.has_memory) input.mem_max_pages else 0,
         .memory_init_offset = memory_init_offset,
         .memory_init_size = memory_init_size,
+        .table0_size = if (input.has_table) input.table0_size else 0,
+        .elem_offset = elem_offset,
+        .elem_size = elem_size,
     };
     try format.writeHeader(out[0..format.header_size], header);
 
@@ -183,6 +202,7 @@ pub fn produceCwasm(allocator: Allocator, input: Input) Error![]u8 {
             .code_size = @intCast(b.len),
             .n_slots = input.n_slots_per_func[i],
             .sig_idx = input.sig_idx_per_func[i],
+            .canon_typeidx = if (i < input.canon_typeidx_per_func.len) input.canon_typeidx_per_func[i] else 0,
         };
         const slot_off = metadata_offset + @as(u32, @intCast(i)) * format.func_meta_size;
         try format.writeFuncMeta(out[slot_off..][0..format.func_meta_size], meta);
@@ -236,7 +256,23 @@ pub fn produceCwasm(allocator: Allocator, input: Input) Error![]u8 {
         }
     }
 
-    // 8. Code section.
+    // 8. Elem_data section: [n_segs:u32] then per segment
+    // [table_offset:u32][n_funcs:u32][funcidx... ×u32].
+    if (input.has_table) {
+        std.mem.writeInt(u32, out[elem_offset..][0..4], @intCast(input.elem.len), .little);
+        var cursor: u32 = elem_offset + 4;
+        for (input.elem) |seg| {
+            std.mem.writeInt(u32, out[cursor..][0..4], seg.table_offset, .little);
+            std.mem.writeInt(u32, out[cursor + 4 ..][0..4], @intCast(seg.funcidxs.len), .little);
+            cursor += 8;
+            for (seg.funcidxs) |fidx| {
+                std.mem.writeInt(u32, out[cursor..][0..4], fidx, .little);
+                cursor += 4;
+            }
+        }
+    }
+
+    // 9. Code section.
     for (input.bytes_per_func, 0..) |b, i| {
         const off = code_offset + per_func_offsets[i];
         @memcpy(out[off..][0..b.len], b);

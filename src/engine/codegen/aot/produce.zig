@@ -29,6 +29,7 @@ const parser = @import("../../../parse/parser.zig");
 const sections = @import("../../../parse/sections.zig");
 const instantiate = @import("../../../runtime/instance/instantiate.zig");
 const runner_validate = @import("../../runner_validate.zig");
+const canonical_type = @import("../shared/canonical_type.zig");
 
 const Allocator = std.mem.Allocator;
 const FuncType = zir.FuncType;
@@ -47,6 +48,21 @@ pub const Error = serialise.Error || error{
     /// A memory/data segment is outside the §12.3b cycle-1b subset (a
     /// non-const active-data offset, or a memory larger than the loader cap).
     UnsupportedMemoryState,
+    /// A table/element segment is outside the §12.3b cycle-2a subset (a
+    /// non-const active-elem offset, or an offset past u32).
+    UnsupportedTableState,
+};
+
+/// Table-0 + element state collected for the producer (v0.3 cycle-2a).
+pub const TableState = struct {
+    has_table: bool = false,
+    table0_size: u32 = 0,
+    /// Active element segments; `funcidxs` allocator-owned (duped — the
+    /// decoder's are arena-backed, freed before serialise).
+    elem: []format.CwasmElemSeg = &.{},
+    /// Canonical typeidx per defined function (allocator-owned). Empty when
+    /// no table (canon typeidx only matters for table slots).
+    canon_typeidx: []u32 = &.{},
 };
 
 /// Linear-memory state collected for the producer (v0.3 cycle-1b).
@@ -152,6 +168,14 @@ pub fn produceFromCompiledWasm(
     const mem = try collectMemory(allocator, wasm_bytes);
     defer allocator.free(mem.data);
 
+    // Table 0 + element segments + per-func canonical typeidx (v0.3 cycle-2a).
+    const tbl = try collectTables(allocator, wasm_bytes, compiled);
+    defer {
+        for (tbl.elem) |seg| allocator.free(seg.funcidxs);
+        allocator.free(tbl.elem);
+        allocator.free(tbl.canon_typeidx);
+    }
+
     const input: serialise.Input = .{
         .arch = arch,
         .bytes_per_func = bytes_per_func,
@@ -168,6 +192,10 @@ pub fn produceFromCompiledWasm(
         .mem_min_pages = mem.min_pages,
         .mem_max_pages = mem.max_pages,
         .mem_data = mem.data,
+        .has_table = tbl.has_table,
+        .table0_size = tbl.table0_size,
+        .elem = tbl.elem,
+        .canon_typeidx_per_func = tbl.canon_typeidx,
     };
 
     return serialise.produceCwasm(allocator, input);
@@ -235,6 +263,65 @@ fn collectMemory(allocator: Allocator, wasm_bytes: []const u8) Error!MemoryState
             try list.append(allocator, .{ .mem_offset = @intCast(off), .bytes = seg.bytes });
         }
         st.data = try list.toOwnedSlice(allocator);
+    }
+    return st;
+}
+
+/// Collect table-0 + element-segment state (v0.3 cycle-2a). Re-parses
+/// `wasm_bytes` for the table/type/element sections. `table0_size` = table-0
+/// declared min; `canon_typeidx[i]` = `canonicalTypeidx(module_types,
+/// func_typeidxs[num_imports+i])` per defined func (the value the runtime
+/// puts in `typeidx_base` for that func; call_indirect's type check compares
+/// it). Active elem segments only (offsets pre-evaluated). `funcidxs` are
+/// duped (the decoder's are arena-backed). Caller frees `.elem[].funcidxs`,
+/// `.elem`, `.canon_typeidx`. MVP: single table 0, non-subtyping (canonical).
+fn collectTables(allocator: Allocator, wasm_bytes: []const u8, compiled: *const runner.CompiledWasm) Error!TableState {
+    var module = parser.parse(allocator, wasm_bytes) catch return Error.GlobalSectionParseFailed;
+    defer module.deinit(allocator);
+
+    var st: TableState = .{};
+    if (module.find(.table)) |s| {
+        var tables = sections.decodeTables(allocator, s.body) catch return Error.GlobalSectionParseFailed;
+        defer tables.deinit();
+        if (tables.items.len > 0) {
+            st.has_table = true;
+            st.table0_size = tables.items[0].min;
+        }
+    }
+    if (!st.has_table) return st;
+
+    // Canonical typeidx per defined func (needs the module's full type table).
+    if (module.find(.type)) |ts| {
+        var types = sections.decodeTypes(allocator, ts.body) catch return Error.GlobalSectionParseFailed;
+        defer types.deinit();
+        const n_defined = compiled.func_results.len;
+        const canon = try allocator.alloc(u32, n_defined);
+        errdefer allocator.free(canon);
+        for (0..n_defined) |i| {
+            const wasm_idx = compiled.num_imports + @as(u32, @intCast(i));
+            canon[i] = canonical_type.canonicalTypeidx(types.items, compiled.func_typeidxs[wasm_idx]);
+        }
+        st.canon_typeidx = canon;
+    }
+    errdefer allocator.free(st.canon_typeidx);
+
+    if (module.find(.element)) |s| {
+        var elems = sections.decodeElement(allocator, s.body) catch return Error.GlobalSectionParseFailed;
+        defer elems.deinit();
+        var list: std.ArrayList(format.CwasmElemSeg) = .empty;
+        errdefer {
+            for (list.items) |e| allocator.free(e.funcidxs);
+            list.deinit(allocator);
+        }
+        for (elems.items) |seg| {
+            if (seg.kind != .active) continue; // passive/declarative → table.init (cycle-2+)
+            const off = runner_validate.evalConstOffsetU64(seg.offset_expr) catch return Error.UnsupportedTableState;
+            if (off > std.math.maxInt(u32)) return Error.UnsupportedTableState;
+            const fids = try allocator.dupe(u32, seg.funcidxs);
+            errdefer allocator.free(fids);
+            try list.append(allocator, .{ .table_offset = @intCast(off), .funcidxs = fids });
+        }
+        st.elem = try list.toOwnedSlice(allocator);
     }
     return st;
 }

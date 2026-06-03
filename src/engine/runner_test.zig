@@ -1834,3 +1834,38 @@ test "stateful .cwasm cycle-1b: active data segment initialises memory, load rea
     const idx = mod.resolveEntry("d").?;
     try testing.expectEqual(@as(u64, 7), try aot_run.runEntry(&mod, idx));
 }
+
+test "stateful .cwasm cycle-2a: call_indirect through a reconstructed table returns 7 (§12.3b)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+
+    // (module (type $i (func (result i32))) (table 1 funcref)
+    //   (elem (i32.const 0) 0)
+    //   (func (result i32) i32.const 7)               ;; func 0
+    //   (func (export "g") (result i32) i32.const 0; call_indirect (type $i))) ;; func 1
+    // call_indirect dispatches table[0] → func 0 → 7. A stateless runtime
+    // has table_size 0 / null funcptr_base → traps.
+    const wasm_bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, 0x03,
+        0x03, 0x02, 0x00, 0x00, 0x04, 0x04, 0x01, 0x70,
+        0x00, 0x01, 0x07, 0x05, 0x01, 0x01, 0x67, 0x00,
+        0x01, 0x09, 0x07, 0x01, 0x00, 0x41, 0x00, 0x0b,
+        0x01, 0x00, 0x0a, 0x0e, 0x02, 0x04, 0x00, 0x41,
+        0x07, 0x0b, 0x07, 0x00, 0x41, 0x00, 0x11, 0x00,
+        0x00, 0x0b,
+    };
+
+    // Validate the fixture via the JIT path (full setupRuntime).
+    try testing.expectEqual(@as(u32, 7), try runI32Export(testing.allocator, &wasm_bytes, "g"));
+
+    var compiled = try compileWasm(testing.allocator, &wasm_bytes);
+    defer compiled.deinit(testing.allocator);
+    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled, &wasm_bytes);
+    defer testing.allocator.free(cwasm);
+    var mod = try aot_load.load(testing.allocator, cwasm);
+    defer mod.deinit();
+
+    try testing.expectEqual(@as(u32, 1), mod.table_size);
+    const idx = mod.resolveEntry("g").?;
+    try testing.expectEqual(@as(u64, 7), try aot_run.runEntry(&mod, idx));
+}

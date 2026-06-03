@@ -85,6 +85,13 @@ pub const LoadedModule = struct {
     has_memory: bool,
     mem_min_pages: u32,
     mem_data: []MemDataSeg,
+    /// Table 0 (v0.3 cycle-2a). `table_size` = slot count; `funcptr_base`
+    /// (native loaded func addresses) + `typeidx_base` (canonical typeidx,
+    /// maxInt sentinel for empty slots) are computed at load from elem_data +
+    /// func_offsets. All allocator-owned; `runEntry` aliases the bases.
+    table_size: u32,
+    funcptr_base: []u64,
+    typeidx_base: []u32,
     /// Imported-function count; `entry`/`resolveEntry` index defined
     /// funcs (wasm idx - n_imports).
     n_imports: u32,
@@ -97,6 +104,8 @@ pub const LoadedModule = struct {
         self.allocator.free(self.globals);
         for (self.mem_data) |seg| self.allocator.free(seg.bytes);
         self.allocator.free(self.mem_data);
+        self.allocator.free(self.funcptr_base);
+        self.allocator.free(self.typeidx_base);
         self.allocator.free(self.func_offsets);
         jit_mem.free(self.block);
     }
@@ -192,15 +201,28 @@ pub fn load(allocator: Allocator, bytes: []const u8) Error!LoadedModule {
     errdefer allocator.free(func_offsets);
     const func_result_kinds = try allocator.alloc(ResultKind, h.n_funcs);
     errdefer allocator.free(func_result_kinds);
+    const func_canon = try allocator.alloc(u32, h.n_funcs);
+    defer allocator.free(func_canon);
     const types_section = bytes[h.types_offset..][0..h.types_size];
     for (0..h.n_funcs) |i| {
         const off = h.metadata_offset + @as(u32, @intCast(i)) * format.func_meta_size;
         const meta = try format.parseFuncMeta(bytes[off..][0..format.func_meta_size]);
         func_offsets[i] = meta.code_offset;
         func_result_kinds[i] = typeResultKind(types_section, meta.sig_idx);
+        func_canon[i] = meta.canon_typeidx;
     }
 
     try applyRelocs(block, func_offsets, bytes, h);
+
+    // Table 0 + element segments (v0.3 cycle-2a): build funcptr/typeidx
+    // arrays from the loaded func addresses + elem_data. Done after relocs
+    // (block address stable); slot funcptr = loaded entry of the elem funcidx.
+    if (@as(u64, h.elem_offset) + h.elem_size > bytes.len) return Error.TruncatedImage;
+    const table = try buildTable(allocator, bytes, h, block, func_offsets, func_canon);
+    errdefer {
+        allocator.free(table.funcptr_base);
+        allocator.free(table.typeidx_base);
+    }
 
     try jit_mem.setExecutable(block);
     return .{
@@ -212,9 +234,65 @@ pub fn load(allocator: Allocator, bytes: []const u8) Error!LoadedModule {
         .has_memory = has_memory,
         .mem_min_pages = h.memory_min_pages,
         .mem_data = mem_data,
+        .table_size = table.table_size,
+        .funcptr_base = table.funcptr_base,
+        .typeidx_base = table.typeidx_base,
         .n_imports = h.n_imports,
         .allocator = allocator,
     };
+}
+
+/// Table-0 reconstruction (v0.3 cycle-2a). Allocates `funcptr_base`
+/// (native loaded entry per slot) + `typeidx_base` (canonical typeidx,
+/// `maxInt(u32)` sentinel for empty slots) sized to `table0_size`, then
+/// fills them from the active element segments. A slot's funcptr is the
+/// loaded address of its elem funcidx (`block.bytes.ptr + func_offsets[F -
+/// n_imports]`); imported funcidxs (F < n_imports) cannot populate a table
+/// (call_indirect can't invoke a host import) → left as the null/sentinel.
+fn buildTable(
+    allocator: Allocator,
+    bytes: []const u8,
+    h: format.CwasmHeader,
+    block: jit_mem.JitBlock,
+    func_offsets: []const u32,
+    func_canon: []const u32,
+) Error!struct { table_size: u32, funcptr_base: []u64, typeidx_base: []u32 } {
+    const has_table = (h.flags & format.flag_has_table) != 0;
+    if (!has_table or h.table0_size == 0) {
+        return .{ .table_size = 0, .funcptr_base = try allocator.alloc(u64, 0), .typeidx_base = try allocator.alloc(u32, 0) };
+    }
+    const n = h.table0_size;
+    const funcptr_base = try allocator.alloc(u64, n);
+    errdefer allocator.free(funcptr_base);
+    @memset(funcptr_base, 0);
+    const typeidx_base = try allocator.alloc(u32, n);
+    errdefer allocator.free(typeidx_base);
+    @memset(typeidx_base, std.math.maxInt(u32)); // "no function in slot"
+
+    if (h.elem_size >= 4) {
+        const section = bytes[h.elem_offset..][0..h.elem_size];
+        const n_segs = std.mem.readInt(u32, section[0..4], .little);
+        var cursor: usize = 4;
+        for (0..n_segs) |_| {
+            if (cursor + 8 > section.len) return Error.TruncatedImage;
+            const table_offset = std.mem.readInt(u32, section[cursor..][0..4], .little);
+            const n_funcs = std.mem.readInt(u32, section[cursor + 4 ..][0..4], .little);
+            cursor += 8;
+            if (cursor + @as(u64, n_funcs) * 4 > section.len) return Error.TruncatedImage;
+            for (0..n_funcs) |i| {
+                const fidx = std.mem.readInt(u32, section[cursor..][0..4], .little);
+                cursor += 4;
+                const slot = table_offset + @as(u32, @intCast(i));
+                if (slot >= n) return Error.TruncatedImage;
+                if (fidx < h.n_imports) continue; // import → can't be a table funcptr
+                const defined = fidx - h.n_imports;
+                if (defined >= func_offsets.len) return Error.TruncatedImage;
+                funcptr_base[slot] = @intFromPtr(block.bytes.ptr + func_offsets[defined]);
+                typeidx_base[slot] = func_canon[defined];
+            }
+        }
+    }
+    return .{ .table_size = n, .funcptr_base = funcptr_base, .typeidx_base = typeidx_base };
 }
 
 /// Parse the v0.3 memory_init section ([n_segs: u32] then per segment

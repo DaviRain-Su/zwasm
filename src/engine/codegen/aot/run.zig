@@ -93,6 +93,14 @@ pub fn runEntry(loaded: *const load.LoadedModule, idx: usize) Error!u64 {
         rt.mem_limit = memory.len;
     }
 
+    // §12.3b cycle-2a: wire table 0 (call_indirect fast path reads these
+    // scalars). Aliased from `loaded` (built at load, no per-call copy).
+    if (loaded.table_size > 0) {
+        rt.funcptr_base = loaded.funcptr_base.ptr;
+        rt.table_size = loaded.table_size;
+        rt.typeidx_base = loaded.typeidx_base.ptr;
+    }
+
     const VoidFn = *const fn (*const JitRuntime) callconv(.c) void;
     const I32Fn = *const fn (*const JitRuntime) callconv(.c) u32;
     return switch (loaded.resultKind(idx)) {

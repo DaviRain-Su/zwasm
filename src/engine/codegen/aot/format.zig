@@ -32,12 +32,15 @@ pub const version_v0_3: u32 = 0x0003_0000; // current: + globals section (ADR-01
 pub const arch_arm64: u32 = 1;
 pub const arch_x86_64: u32 = 2;
 
-pub const header_size: u32 = 92; // v0.3: 76 + memory{min,max}_pages + memory_init{offset,size} (ADR-0139 §12.3b cycle-1b)
+pub const header_size: u32 = 104; // v0.3: 92 + table0_size + elem_{offset,size} (ADR-0139 §12.3b cycle-2a)
 
 /// `flags` bit 0 — the module declares a linear memory (the
 /// `memory_*` header fields + memory_init data section are meaningful).
 pub const flag_has_memory: u32 = 0x1;
-pub const func_meta_size: u32 = 12;
+/// `flags` bit 1 — the module declares table 0 (the `table0_size` +
+/// elem_data section are meaningful; cycle-2a single-table MVP).
+pub const flag_has_table: u32 = 0x2;
+pub const func_meta_size: u32 = 16; // v0.3 cycle-2a: + canon_typeidx (was 12)
 pub const reloc_size: u32 = 9; // 4 + 4 + 1 (no padding)
 pub const reloc_kind_direct_call: u8 = 0;
 
@@ -82,6 +85,13 @@ pub const CwasmHeader = struct {
     memory_max_pages: u32 = 0, // 0xFFFF_FFFF = no explicit max (spec ceiling)
     memory_init_offset: u32 = 0,
     memory_init_size: u32 = 0,
+    // v0.3 cycle-2a: table 0 (valid iff flags & flag_has_table). `table0_size`
+    // = declared min (slot count); `elem_data` section = active element
+    // segments (offsets pre-evaluated). funcptr/typeidx arrays are computed
+    // at load from func_offsets + per-func canon_typeidx.
+    table0_size: u32 = 0,
+    elem_offset: u32 = 0,
+    elem_size: u32 = 0,
 };
 
 /// Sentinel `memory_max_pages` value for "no explicit max declared".
@@ -96,6 +106,14 @@ pub const global_value_size: u32 = 16;
 pub const CwasmDataSeg = struct {
     mem_offset: u32,
     bytes: []const u8,
+};
+
+/// One active element segment for the elem_data section (v0.3 cycle-2a):
+/// a table destination offset (pre-evaluated) + the funcidx list. On parse,
+/// `funcidxs` aliases into the source buffer (read via `readInt`).
+pub const CwasmElemSeg = struct {
+    table_offset: u32,
+    funcidxs: []const u32,
 };
 
 /// One entry in the exports section (v0.2). Func-kind exports only —
@@ -114,6 +132,11 @@ pub const CwasmFuncMeta = struct {
     code_size: u32, // bytes of machine code for this func
     n_slots: u16, // regalloc.Allocation.n_slots (frame sizing)
     sig_idx: u16, // index into types section
+    // v0.3 cycle-2a: canonical typeidx (the value the runtime puts in
+    // `typeidx_base` for a table slot holding this func; what call_indirect's
+    // type check compares against). 0 when unused. Default keeps pre-cycle-2a
+    // synthetic Input call sites compiling.
+    canon_typeidx: u32 = 0,
 };
 
 /// Reloc entry: a call-site within the code section that
@@ -157,6 +180,9 @@ pub fn writeHeader(buf: []u8, h: CwasmHeader) Error!void {
     std.mem.writeInt(u32, buf[80..84], h.memory_max_pages, .little);
     std.mem.writeInt(u32, buf[84..88], h.memory_init_offset, .little);
     std.mem.writeInt(u32, buf[88..92], h.memory_init_size, .little);
+    std.mem.writeInt(u32, buf[92..96], h.table0_size, .little);
+    std.mem.writeInt(u32, buf[96..100], h.elem_offset, .little);
+    std.mem.writeInt(u32, buf[100..104], h.elem_size, .little);
 }
 
 pub fn parseHeader(buf: []const u8) Error!CwasmHeader {
@@ -188,6 +214,9 @@ pub fn parseHeader(buf: []const u8) Error!CwasmHeader {
         .memory_max_pages = std.mem.readInt(u32, buf[80..84], .little),
         .memory_init_offset = std.mem.readInt(u32, buf[84..88], .little),
         .memory_init_size = std.mem.readInt(u32, buf[88..92], .little),
+        .table0_size = std.mem.readInt(u32, buf[92..96], .little),
+        .elem_offset = std.mem.readInt(u32, buf[96..100], .little),
+        .elem_size = std.mem.readInt(u32, buf[100..104], .little),
     };
 }
 
@@ -239,6 +268,7 @@ pub fn writeFuncMeta(buf: []u8, m: CwasmFuncMeta) Error!void {
     std.mem.writeInt(u32, buf[4..8], m.code_size, .little);
     std.mem.writeInt(u16, buf[8..10], m.n_slots, .little);
     std.mem.writeInt(u16, buf[10..12], m.sig_idx, .little);
+    std.mem.writeInt(u32, buf[12..16], m.canon_typeidx, .little);
 }
 
 pub fn parseFuncMeta(buf: []const u8) Error!CwasmFuncMeta {
@@ -248,6 +278,7 @@ pub fn parseFuncMeta(buf: []const u8) Error!CwasmFuncMeta {
         .code_size = std.mem.readInt(u32, buf[4..8], .little),
         .n_slots = std.mem.readInt(u16, buf[8..10], .little),
         .sig_idx = std.mem.readInt(u16, buf[10..12], .little),
+        .canon_typeidx = std.mem.readInt(u32, buf[12..16], .little),
     };
 }
 
@@ -280,7 +311,7 @@ const testing = std.testing;
 test "writeHeader/parseHeader: round-trip preserves all fields" {
     const want: CwasmHeader = .{
         .arch = arch_arm64,
-        .flags = flag_has_memory,
+        .flags = flag_has_memory | flag_has_table,
         .n_funcs = 3,
         .n_types = 2,
         .n_imports = 1,
@@ -300,6 +331,9 @@ test "writeHeader/parseHeader: round-trip preserves all fields" {
         .memory_max_pages = memory_max_none,
         .memory_init_offset = 224,
         .memory_init_size = 40,
+        .table0_size = 3,
+        .elem_offset = 264,
+        .elem_size = 24,
     };
     var buf: [header_size]u8 = undefined;
     try writeHeader(&buf, want);
@@ -372,6 +406,7 @@ test "writeFuncMeta/parseFuncMeta: round-trip preserves all fields" {
         .code_size = 0x0042_0000,
         .n_slots = 7,
         .sig_idx = 2,
+        .canon_typeidx = 0x00AB_CDEF,
     };
     var buf: [func_meta_size]u8 = undefined;
     try writeFuncMeta(&buf, want);
@@ -402,8 +437,8 @@ test "parseReloc: rejects truncated buffer" {
 }
 
 test "header_size + func_meta_size + reloc_size constants are stable" {
-    try testing.expectEqual(@as(u32, 92), header_size); // v0.3 cycle-1b (ADR-0139 §12.3b)
-    try testing.expectEqual(@as(u32, 12), func_meta_size);
+    try testing.expectEqual(@as(u32, 104), header_size); // v0.3 cycle-2a (ADR-0139 §12.3b)
+    try testing.expectEqual(@as(u32, 16), func_meta_size);
     try testing.expectEqual(@as(u32, 9), reloc_size);
 }
 
