@@ -27,25 +27,27 @@
 ## Active bundle
 
 - **Bundle-ID**: 11.P-win64-jit-arg-marshal
-- **Cycles-remaining**: ~2 (cycle 1 = land the 17-file swap + test-wrapper Win64 arm; cycle 2 = verify windowsmini
-  green, iterate on any residual Win64 alignment in the EH test wrapper)
-- **Continuity-memo**: CYCLE-1 DONE (`f725dcd6`): 9 ≤4-arg GC ops + ref_test_null(re-export) → `abi.current.
-  arg_gprs[]` + throw_trampoline test-wrapper `.windows` arm. Mac gate + ubuntu test-all GREEN (SysV no-op
-  confirmed). CYCLE-2 = D-248 (6 ≥5-arg array ops Win64 stack-spill) — full plan in
-  `private/notes/p11-d248-win64-stackspill-plan.md`. **OPEN QUESTION gating cycle-2 scope**: the GC helper calls
-  are intra-op CALLs invisible to `computeOutgoingMaxBytes` (emit_setup.zig:54-58 scans only `.call`) → a GC-only
-  fn reserves 0 Win64 shadow space. If the cycle-1 windowsmini run shows `struct.new_default` STILL failing →
-  jitGcAlloc needs reserved shadow space → prologue fix covers ALL GC ops; if PASSING → only ≥5-arg stack-arg
-  reservation needed. **Read /tmp/windows.log BEFORE implementing cycle-2.**
-- **Exit-condition**: windowsmini `test-all` → `[run_remote_windows] OK` (0 fail/crash for the GC/EH JIT tests).
-  Tracked as **D-248**.
+- **Cycles-remaining**: ~1 (cycle-1 `f725dcd6` + cycle-2 `97b95bc9` DONE; remaining = throw_trampoline Win64
+  crash fix + windowsmini-green confirm)
+- **Continuity-memo**: **run-1 (cycle-1) VALIDATED on windowsmini**: `run test` 2213→2237 pass, **12 fail→0**
+  (≤4-arg GC value bugs cleared — arg_gprs approach sound), 19 crash→7. CYCLE-2 (`97b95bc9`, D-248): 6 ≥5-arg
+  array ops Win64 stack-spill (`gc_marshal.routeArg` + `computeOutgoingMaxBytes` reserves Win64 shadow(32)/
+  stack(48) for GC ops; SysV byte-identical) → fixes the `array.fill`-class crashes (run-2 verifies). REMAINING
+  BLOCKER (separate from D-248): `throw_trampoline.test.zwasmThrowTrampoline: uncaught path` STILL crashes on
+  Win64 (code 3, SEGV at throw_trampoline.zig:132 dispatchThrow via :275) DESPITE the cycle-1 wrapper `.windows`
+  arm (tag→RCX). Same backtrace → NOT the tag-reg; likely RSP alignment into trampolineCore or a deref in
+  dispatchThrow/eh_registry on the Win64 path. TEST-ONLY but the ONLY Win64 JIT-EH coverage (spec corpus =
+  interp). Under investigation.
+- **Exit-condition**: windowsmini `test-all` → `[run_remote_windows] OK` (0 crash for GC/EH JIT tests). D-248 =
+  the array-op part; throw_trampoline = the EH-wrapper part (both in this bundle).
 
 ## Next task (autonomous)
 
-**NEXT** = cycle 1 of the bundle: apply the 17-file `abi.current.arg_gprs[]` swap + throw_trampoline test-wrapper
-`.windows` arm. Verify (a) `zig build test` Mac green + byte tests unchanged (proves SysV-no-op), (b) `zig build
-test -Dtarget=x86_64-windows-gnu` compiles. Commit pair + push + kick windowsmini `test-all` (NOT ubuntu — Win64 is
-the target) + re-arm. Next cycle: read `/tmp/windows.log` for the two tests' verdicts.
+**NEXT** = (1) diagnose + fix the `throw_trampoline` Win64 test crash (trace RSP alignment through wrapper →
+production `.windows` trampoline arm :357 → trampolineCore → dispatchThrow; the 0xffff… SEGV). (2) kick windowsmini
+run-2 vs `97b95bc9` (validates cycle-2 array-op fixes — expect the `array.fill`-class crashes gone) — fold in the
+throw_trampoline fix if found first. (3) On windowsmini fully green: discharge D-248 + close the bundle, flip
+§11.1/§11.2/§11.3 + §11.P `[x]`, run `audit_scaffolding` (MANDATORY phase-boundary), open Phase 12.
 
 ## Deferred / open debt (none a Phase-11 blocker except the bundle)
 

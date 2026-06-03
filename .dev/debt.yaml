@@ -712,8 +712,14 @@ entries:
       shadow space (`[RSP+0x20]`, `[RSP+0x28]`), with the prologue's `outgoing_max_bytes`
       reserving the slots. Until then those 6 array ops produce wrong results / crash on
       Win64 (the named `struct.new_default` GC test is in the FIXED set; the array-op tests
-      are the residual Win64 fails). Discharge: rework the 6 files + windowsmini `test-all`
-      green for all GC/EH JIT tests (the 11.P-win64-jit-arg-marshal bundle exit-condition).
+      are the residual Win64 fails). **2026-06-03 cycle-2 (`97b95bc9`): rework LANDED** —
+      `gc_marshal.routeArg` (args 0-3 → arg_gprs[], args ≥4 → `[RSP+shadow+8k]` stack
+      spill on Win64) + `computeOutgoingMaxBytes` reserves Win64 shadow(32)/stack(48) for
+      GC ops (SysV byte-identical). Mac green + Win64/Linux cross-compile + lint clean.
+      run-1 confirmed cycle-1 cleared the ≤4-arg GC value bugs (12 fail→0); these array
+      ops were the `array.fill`-class crashes. Discharge: windowsmini run-2 shows the 6
+      array ops green (awaiting). NOTE: the `throw_trampoline` Win64 test crash is a
+      SEPARATE bundle item (EH wrapper, not GC arg marshalling), tracked in handover.
     first_raised: "2026-06-03"
     last_reviewed: "2026-06-03"
     refs: |-
