@@ -56,6 +56,59 @@ pub export fn zwasm_wasi_config_delete(h: ?*wasi_host.Host) callconv(.c) void {
     std.heap.c_allocator.destroy(handle);
 }
 
+/// `zwasm_wasi_config_set_args(cfg, argc, argv)` — explicit argv
+/// override (`include/wasi.h`). Each `argv[i]` is a NUL-terminated
+/// C string, borrowed for the call only — the config copies them
+/// (`Host.setArgs` dupes). Null `cfg`/`argv` is a no-op. The C ABI
+/// is void, so OOM leaves the config unchanged (no error channel).
+pub export fn zwasm_wasi_config_set_args(
+    h: ?*wasi_host.Host,
+    argc: usize,
+    argv: [*c]const [*c]const u8,
+) callconv(.c) void {
+    const handle = h orelse return;
+    if (argv == null) return;
+    const ca = std.heap.c_allocator;
+    const tmp = ca.alloc([]const u8, argc) catch return;
+    defer ca.free(tmp);
+    for (0..argc) |i| tmp[i] = std.mem.span(argv[i]);
+    handle.setArgs(tmp) catch return;
+}
+
+/// `zwasm_wasi_config_set_envs(cfg, count, keys, vals)` — explicit
+/// environment override. `keys[i]`/`vals[i]` are NUL-terminated C
+/// strings, borrowed for the call only (the config copies them).
+/// Null `cfg`/`keys`/`vals` is a no-op; same void-ABI OOM contract
+/// as `set_args`.
+pub export fn zwasm_wasi_config_set_envs(
+    h: ?*wasi_host.Host,
+    count: usize,
+    keys: [*c]const [*c]const u8,
+    vals: [*c]const [*c]const u8,
+) callconv(.c) void {
+    const handle = h orelse return;
+    if (keys == null or vals == null) return;
+    const ca = std.heap.c_allocator;
+    const k = ca.alloc([]const u8, count) catch return;
+    defer ca.free(k);
+    const v = ca.alloc([]const u8, count) catch return;
+    defer ca.free(v);
+    for (0..count) |i| {
+        k[i] = std.mem.span(keys[i]);
+        v[i] = std.mem.span(vals[i]);
+    }
+    handle.setEnvs(k, v) catch return;
+}
+
+/// `zwasm_wasi_config_inherit_stdio(cfg)` — route the guest's
+/// stdin/stdout/stderr (fd 0/1/2) to the host process's stdio.
+/// This is the default: `Host.init` already installs the three
+/// stdio fds, so this is a documented no-op kept for wasm-c-api
+/// API parity. Null `cfg` is a no-op.
+pub export fn zwasm_wasi_config_inherit_stdio(h: ?*wasi_host.Host) callconv(.c) void {
+    _ = h orelse return;
+}
+
 // ============================================================
 // WASI host thunks (§9.4 / 4.7 chunk c)
 // ============================================================
@@ -265,6 +318,46 @@ test "zwasm_wasi_config_delete: standalone (not installed on Store) is leak-free
 
 test "zwasm_wasi_config_delete: null-arg discipline" {
     zwasm_wasi_config_delete(null);
+}
+
+test "zwasm_wasi_config_set_args: copies C argv into host.args" {
+    const cfg = zwasm_wasi_config_new() orelse return error.ConfigAllocFailed;
+    defer zwasm_wasi_config_delete(cfg);
+    const argv = [_][*c]const u8{ "prog", "--flag", "x" };
+    zwasm_wasi_config_set_args(cfg, argv.len, &argv);
+    try testing.expectEqual(@as(usize, 3), cfg.args.len);
+    try testing.expectEqualStrings("prog", cfg.args[0]);
+    try testing.expectEqualStrings("--flag", cfg.args[1]);
+    try testing.expectEqualStrings("x", cfg.args[2]);
+}
+
+test "zwasm_wasi_config_set_args: null cfg / null argv are no-ops" {
+    zwasm_wasi_config_set_args(null, 0, null);
+    const cfg = zwasm_wasi_config_new() orelse return error.ConfigAllocFailed;
+    defer zwasm_wasi_config_delete(cfg);
+    zwasm_wasi_config_set_args(cfg, 5, null);
+    try testing.expectEqual(@as(usize, 0), cfg.args.len);
+}
+
+test "zwasm_wasi_config_inherit_stdio: no-op leaves the 3 default stdio fds intact" {
+    const cfg = zwasm_wasi_config_new() orelse return error.ConfigAllocFailed;
+    defer zwasm_wasi_config_delete(cfg);
+    zwasm_wasi_config_inherit_stdio(cfg);
+    zwasm_wasi_config_inherit_stdio(null);
+    try testing.expectEqual(@as(usize, 3), cfg.fd_table.items.len);
+}
+
+test "zwasm_wasi_config_set_envs: copies key/val pairs into host.envs" {
+    const cfg = zwasm_wasi_config_new() orelse return error.ConfigAllocFailed;
+    defer zwasm_wasi_config_delete(cfg);
+    const keys = [_][*c]const u8{ "HOME", "PATH" };
+    const vals = [_][*c]const u8{ "/root", "/bin" };
+    zwasm_wasi_config_set_envs(cfg, keys.len, &keys, &vals);
+    try testing.expectEqual(@as(usize, 2), cfg.envs.len);
+    try testing.expectEqualStrings("HOME", cfg.envs[0].key);
+    try testing.expectEqualStrings("/root", cfg.envs[0].value);
+    try testing.expectEqualStrings("PATH", cfg.envs[1].key);
+    try testing.expectEqualStrings("/bin", cfg.envs[1].value);
 }
 
 test "lookupWasiThunk: every supported WASI 0.1 import resolves" {
