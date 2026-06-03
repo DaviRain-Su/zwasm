@@ -29,13 +29,16 @@
 - **Bundle-ID**: 11.P-win64-jit-arg-marshal
 - **Cycles-remaining**: ~2 (cycle 1 = land the 17-file swap + test-wrapper Win64 arm; cycle 2 = verify windowsmini
   green, iterate on any residual Win64 alignment in the EH test wrapper)
-- **Continuity-memo**: 17 x86_64 GC/EH emit files (struct_new_default, struct_new, array_{new,new_default,
-  new_fixed,new_data,new_elem,copy,fill,init_data,init_elem}, ref_{test,test_null,cast,cast_null}, br_on_cast,
-  throw) marshal args via hardcoded RDI/RSI/RDX/RCX → replace with `abi.current.arg_gprs[N]` (rdi=0/rsi=1/rdx=2/
-  rcx=3). + throw_trampoline.zig:443 `invokeTrampolineWith` x86_64 arm → add `.windows` case (tag→RCX; production
-  trampoline at :357 already Win64-correct). Win64 arg regs: RCX/RDX/R8/R9; shadow space handled by prologue.
-- **Exit-condition**: windowsmini `test-all` → `[run_remote_windows] OK` (0 fail/crash in run-test for the GC/EH
-  JIT tests). Tracked as **D-NNN** (file at commit).
+- **Continuity-memo**: CYCLE-1 DONE (`f725dcd6`): 9 ≤4-arg GC ops + ref_test_null(re-export) → `abi.current.
+  arg_gprs[]` + throw_trampoline test-wrapper `.windows` arm. Mac gate + ubuntu test-all GREEN (SysV no-op
+  confirmed). CYCLE-2 = D-248 (6 ≥5-arg array ops Win64 stack-spill) — full plan in
+  `private/notes/p11-d248-win64-stackspill-plan.md`. **OPEN QUESTION gating cycle-2 scope**: the GC helper calls
+  are intra-op CALLs invisible to `computeOutgoingMaxBytes` (emit_setup.zig:54-58 scans only `.call`) → a GC-only
+  fn reserves 0 Win64 shadow space. If the cycle-1 windowsmini run shows `struct.new_default` STILL failing →
+  jitGcAlloc needs reserved shadow space → prologue fix covers ALL GC ops; if PASSING → only ≥5-arg stack-arg
+  reservation needed. **Read /tmp/windows.log BEFORE implementing cycle-2.**
+- **Exit-condition**: windowsmini `test-all` → `[run_remote_windows] OK` (0 fail/crash for the GC/EH JIT tests).
+  Tracked as **D-248**.
 
 ## Next task (autonomous)
 
@@ -55,9 +58,10 @@ the target) + re-arm. Next cycle: read `/tmp/windows.log` for the two tests' ver
 
 ## Step 0.7 (next resume)
 
-This turn lands the bundle cycle-1 commits → windowsmini `test-all` kick fires against the turn HEAD. Step 0.7
-next cycle: read `/tmp/windows.log` → did `throw_trampoline` + `runner_gc_test` GC tests go green? (ubuntu/Mac were
-already verified; this is a Win64-targeted turn so the kick is windowsmini.) Prior ubuntu `173ca8af` = GREEN.
+Cycle-1 commits (`4c51dea6`+`f725dcd6`) → ubuntu test-all = **GREEN exit 0** (SysV no-op confirmed, Step 0.7 SysV
+side PASS); windowsmini `test-all` (kicked vs `f725dcd6`) = the Win64 gate, IN FLIGHT (~90min). Step 0.7 next
+cycle: read `/tmp/windows.log` → did `throw_trampoline` (test-only fix) + `runner_gc_test struct.new_default` GC
+test go green? That verdict scopes the cycle-2 prologue/shadow-space fix (see Active bundle OPEN QUESTION).
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile-check: `zig build test
 -Dtarget=x86_64-windows-gnu` (compile-only; "unable to execute" run-error = compile PASSED). ReleaseSafe
