@@ -3,6 +3,25 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-257"
+    layer: "doc"
+    status: "now"
+    description: |-
+      **NOW — discharge next cycle.** 20 `<backfill>` provenance markers overdue: 10 ADR
+      Revision-history SHA placeholders (`bash scripts/check_adr_history.sh` → "backfill
+      pending" ×10) + 10 lesson `**Citing**` markers (`bash scripts/check_lesson_citing.sh`).
+      Standing since the Phase-12 close; flagged at §13.P ("sweep before §14.P"); now spans 3
+      phase-close boundaries → past the F.3a >2-boundary block threshold. NOT done in the
+      Phase-14-close turn (a careful per-marker chore — lesson Citings need semantic SHA-
+      matching, hasty lookups risk wrong SHAs). DISCHARGE: per ADR `git log --oneline
+      --follow <adr-file>` → match each Revision-history row to its commit SHA; per lesson,
+      find the commit the observation derives from (the `**Citing**` SHA). One commit each
+      (`chore(adr): SHA backfill cohort` + `chore(lessons): Citing backfill cohort`), then
+      `check_adr_history.sh --gate` + `check_lesson_citing.sh` clean.
+    first_raised: "2026-06-04"
+    last_reviewed: "2026-06-04"
+    refs: |-
+      `scripts/check_adr_history.sh`; `scripts/check_lesson_citing.sh`; `.dev/decisions/*.md` (Revision history); `.dev/lessons/*.md` (Citing); audit_scaffolding §F.3a / §F.6 / §F.7
   - id: "D-255"
     layer: "code"
     status: "blocked-by"

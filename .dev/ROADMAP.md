@@ -1185,8 +1185,8 @@ of each phase advances it.
 | 11    | DONE        | WASI 0.1 full + bench infra (incl. SIMD per-op gap analysis, moved from §9.10 per Track A) |
 | 12    | DONE        | AOT compilation mode — `.cwasm` compile/run, JIT↔AOT differential, cross-compile, stateful-compute exec, cold-start ≥30% (stack-map §12.5 → P15 / ADR-0141; WASI imports → D-251) |
 | 13    | DONE        | C API full (wasm-c-api conformance) — deliverables 3-host-green; §13.P re-scoped past D-245 win64 (ADR-0144) |
-| 14    | IN-PROGRESS | CI matrix infrastructure                                                                    |
-| 15    | PENDING     | Performance parity with v1 + ClojureWasm migration                                          |
+| 14    | DONE        | CI matrix infrastructure — workflows + fuzz infra; §14.P re-scoped past D-245 win64 (ADR-0145) |
+| 15    | IN-PROGRESS | Performance parity with v1 + ClojureWasm migration                                          |
 | 16    | PENDING     | Public release v0.1.0 🔒                                                                     |
 
 State values: `IN-PROGRESS` (one phase at a time), `PENDING`,
@@ -1537,7 +1537,7 @@ hard-gate — Phase 13 opens autonomously per the §12.P close, ADR-0141).
 | 14.3 | `.github/workflows/nightly.yml` — fuzz + spec-bump + proposal-watch. **DONE** (`17e3b6f1`+`1fc63016`): 3/3 legs — (1) fuzz campaign (`gen_fuzz_corpus.sh campaign` → `zig build fuzz-campaign`, ~2000 smith modules; harness `6c80c229`+`16584c1c` = parse/validate/instantiate crash-fuzz); (2) proposal-watch freshness (`check_proposal_watch.sh`, 90d); (3) spec-bump drift (`check_spec_bump.sh` vs `.dev/spec_pin.yaml` Wasm-3.0 baseline). workflow_dispatch; actionlint-clean. | [x]  |
 | 14.4 | `.github/workflows/bench_baseline.yml` (`workflow_dispatch`) — record per-arch bench baselines on demand. **DONE**: runs `record_baseline_v1_regression.sh` on macos-15 + ubuntu-22.04 (2-host per ADR-0137; win deferred D-249), uploads `baseline_v1_regression.yaml` as a per-arch artifact (per-host floor, not committed). actionlint-clean. | [x]  |
 | 14.5 | Confirm the local `pre_push` hook still works + document CI-as-second-line (not first); CI green ≠ skip local gate. **DONE**: `.githooks/pre-push` wired (`core.hooksPath=.githooks`), runs 4 audit gates every push (verified live this session); CI-second-line documented in the hook header + ADR-0076 D4 (merge gate is manual `gate_merge.sh`; CI workflows are `workflow_dispatch`). | [x]  |
-| 14.P | Phase 14 close — CI matrix green 3-OS in Actions + widget 14 → DONE + Phase 15 inline expand. (🔒 gate: no.)                                                                               | [ ]  |
+| 14.P | Phase 14 close (🔒 gate: no). **DONE** — re-scoped (ADR-0145): CI workflows (pr/bench/bench_baseline/nightly) authored + actionlint-clean (workflow_dispatch, §14.5 CI-second-line); the new `test-fuzz` test-all layer verified **3-host-green** (Mac+ubuntu+windowsmini reconcile, `29 processed, 0 crashes` each); audit_scaffolding 0-block. Sole windowsmini failure = D-245 win64 SIMD-JIT (the same elevated carry as §13.P; deferred to §11.3/Phase-15). widget 14→DONE; Phase 15 expanded. | [x]  |
 
 ### Phase 15 — Performance parity with v1 + ClojureWasm migration
 
@@ -1605,6 +1605,19 @@ migration):
   validation.
 
 **🔒 gate**: no, but extensive bench validation.
+
+#### §15 task table
+
+| Row  | Task                                                                                                                                                                                       | Status |
+|------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------|
+| 15.0 | Open §15 inline + flip Phase Status widget (Phase 14 → DONE; Phase 15 → IN-PROGRESS).                                                                                                     | [x]  |
+| 15.1 | **GC reclamation + precise rooting** (ex-§11.4 / D-211, ADR-0135; co-defines `GcRootMap` with §12.5 AOT stack-map per ADR-0141): free-list reuse / compaction (ADR-0115 §10) + `zir.GcRootMap` stack-map root walker + conservative native-stack scan (ADR-0128 §2). Mac-local. | [ ]  |
+| 15.2 | **Coalescer detection logic** (on the §9.8b/8b.1 scaffolding): operand-stack vreg-numbering sim + same-slot-event subscription vs the LIFO free-pool. Exit: ≥5% bench-delta on loop-heavy fixtures. | [ ]  |
+| 15.3 | **Class-aware allocator** (dual-pool GPR/FP, liveness type-tagging, tighter `spillBytes()`; ADR-0038/0040). Exit: ≥3% FP-heavy; combined coalescer+class-aware ≥10% on 3 v1-class fixtures. | [ ]  |
+| 15.4 | **SIMD perf ports** — v1 W43 (SIMD addr cache) / W44 (reg class) / W45 (SIMD loop persistence) + W54-class loop-invariant hoist, as clean additions on the v2 substrate; + the Phase-11 gap candidates (AVX/CPUID, MOVAPS peephole, SIMD coalescing) where gap-justified; **D-246** arm64 `dot`/`extmul` emit hole. | [ ]  |
+| 15.5 | **D-245 win64 host→JIT trampoline** — the cross-phase windows-CI/bench-green blocker (re-scoped past at §13.P/§14.P, ADR-0144/0145). Asm trampoline preserving the win64 callee-saved set (RBX/RBP/RDI/RSI/R12–R15 + XMM6–15) around the `entry.zig invokeAndCheck*` seam (return-value + arg'd + win64 variants); template = arm64 `8eca59e3` / x86_64-SysV `de576a76`. Verify windowsmini `test-all` deterministic-green. **Hard/remote — best as a deliberate session.** | [ ]  |
+| 15.6 | **ClojureWasm CI green** with its `zwasm` dep pointing at a local `build.zig.zon` `path = …` to `zwasm_from_scratch/` (no ClojureWasm-side commits needed for v2-experimental validation). | [ ]  |
+| 15.P | Phase 15 close — bench parity validation (no unexplained regression vs v1 main; coalescer/class-aware/SIMD deltas met) + 3-host reconcile (D-245-dependent) + widget 15 → DONE + Phase 16 inline expand. | [ ]  |
 
 ### Phase 16 — Public release v0.1.0 🔒
 
