@@ -40,6 +40,7 @@
         devShells.default = pkgs.mkShell {
           packages = [
             zig
+            pkgs.git           # real git — macOS /usr/bin/git is an xcrun shim that breaks under `nix develop` (run_bench.sh git rev-parse)
             pkgs.hyperfine
             pkgs.yq-go
             pkgs.python3

@@ -102,22 +102,30 @@ if ! command -v hyperfine >/dev/null 2>&1; then
     exit 1
 fi
 
-# §9.12-H — comparator runtime presence check (--compare=<name>).
-# Currently only `wasmtime` is supported; wazero / wasmer / bun /
-# node are Phase 11 scope per ROADMAP §9.12-H.
+# §11.3 — comparator runtime presence check. --compare accepts a single
+# name, a comma-separated list, or `all` (= wasmtime,wazero,wasmer — the
+# trio the SIMD per-op gap analysis takes the median of). bun / node stay
+# deferred. wazero / wasmer joined the dev shell at §11.3 (D-074).
+COMPARATORS=()
 if [ -n "$COMPARE" ]; then
     case "$COMPARE" in
-        wasmtime)
-            if ! command -v wasmtime >/dev/null 2>&1; then
-                echo "[run_bench] --compare=wasmtime: wasmtime not on PATH" >&2
-                exit 1
-            fi
-            ;;
-        *)
-            echo "[run_bench] --compare=$COMPARE not supported (only 'wasmtime' at §9.12-H; wazero / wasmer / bun / node are Phase 11 scope)" >&2
-            exit 1
-            ;;
+        all) COMPARATORS=(wasmtime wazero wasmer) ;;
+        *)   IFS=',' read -ra COMPARATORS <<< "$COMPARE" ;;
     esac
+    for c in "${COMPARATORS[@]}"; do
+        case "$c" in
+            wasmtime|wazero|wasmer)
+                command -v "$c" >/dev/null 2>&1 || {
+                    echo "[run_bench] --compare=$c: $c not on PATH (the dev shell pins it via flake.nix)" >&2
+                    exit 1
+                }
+                ;;
+            *)
+                echo "[run_bench] --compare: '$c' not supported (wasmtime|wazero|wasmer|all; bun/node deferred)" >&2
+                exit 1
+                ;;
+        esac
+    done
 fi
 
 # §9.12-H — RSS capture relies on /usr/bin/time -l (macOS BSD) /
@@ -217,13 +225,13 @@ date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     echo "  benches:"
 } > "$RECENT"
 
-# §9.12-H — runtime matrix. `zwasm` is always first; `wasmtime`
-# joins when --compare=wasmtime. YAML entries gain a `runtime:`
-# field iff the matrix has > 1 entry, so historical single-runtime
-# entries remain shape-compatible.
+# §11.3 — runtime matrix. `zwasm` is always first; the --compare
+# comparators (wasmtime / wazero / wasmer) follow. YAML entries gain a
+# `runtime:` field iff the matrix has > 1 entry, so historical
+# single-runtime entries remain shape-compatible.
 RUNTIMES=("zwasm")
-if [ "$COMPARE" = "wasmtime" ]; then
-    RUNTIMES+=("wasmtime")
+if [ ${#COMPARATORS[@]} -gt 0 ]; then
+    RUNTIMES+=("${COMPARATORS[@]}")
 fi
 
 # Capture max RSS (kB) from /usr/bin/time stderr after a single
@@ -237,6 +245,8 @@ measure_rss_kb() {
     case "$rt" in
         zwasm)    $TIME_CMD "$ZWASM" run "$wasm" 2>"$rss_out" >/dev/null || true ;;
         wasmtime) $TIME_CMD wasmtime run "$wasm" 2>"$rss_out" >/dev/null || true ;;
+        wazero)   $TIME_CMD wazero run "$wasm" 2>"$rss_out" >/dev/null || true ;;
+        wasmer)   $TIME_CMD wasmer run "$wasm" 2>"$rss_out" >/dev/null || true ;;
     esac
     case "$(uname -s)" in
         Darwin)
@@ -290,6 +300,8 @@ for entry in "${BENCHES[@]}"; do
         case "$runtime" in
             zwasm)    cmd="$ZWASM run $wasm" ;;
             wasmtime) cmd="wasmtime run $wasm" ;;
+            wazero)   cmd="wazero run $wasm" ;;
+            wasmer)   cmd="wasmer run $wasm" ;;
         esac
         echo "[run_bench] $name ($wasm) — runtime=$runtime"
         json=$(mktemp)
