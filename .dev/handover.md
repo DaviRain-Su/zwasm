@@ -28,22 +28,22 @@
 
 ## Active task — §10-exit: **clear the remaining JIT module-rejects**  **NEXT**
 
-§10 exit (ADR-0133 §4): interp 100% (MET) + JIT 0 genuine fails (MET — memory64 = D-234 harness) + clear the
-module-rejects (in-phase must-fix, NOT deferrable). Progress this session: function-references 8/0/31 → **23/0/16**;
-global JIT 796/1 → **811/1**; 7 of 8 fr rejects cleared (D-239 ref.func + emit dispatch, ref_null.0, br_on_null.1).
-**UnsupportedEntrySignature ×7 CLASSIFIED** (this turn, read-only): all 7 are in **multi-memory** (linking1.2/.3,
-data0.3-.6, imports2.2) → on the ADR-0133 deferred-allowlist (multi-memory→§14 + eligibility-gate), **NOT §10
-blockers**. So the must-fix reject set is much smaller than the "17":
-1. **`ref_is_null.0` + gc `i31.6`** (ElemSegmentTypeMismatch) → **D-240** (blocked-by): needs JIT typed/abstract-ref
-   TABLE runtime (table.init from a reftype elem + table.get/set of typed refs) THEN the compile.zig:257
-   eql→`valTypeIsSubtype` flip (loosening alone SEGV'd — proven this session). Probe via `debug_jit_auto`. Bigger.
-2. **tail-call** `return_call_indirect.0` UnsupportedOp (D-210) — known multi-cycle TC emit gap.
-3. **D-234** runner-side harness discharge (corpus stops false-reporting the 52 mem64 fails; codegen proven correct).
-4. Verify the 1 `gc/type-subtyping run` UnsupportedEntrySignature SKIP (GC-on-JIT allowlist or a real gc gap?).
+§10 exit (ADR-0133): interp 100% (MET) + JIT 0 genuine fails (MET — memory64 = D-234 tracked-harness, §2) +
+JIT skips ⊆ deferred-allowlist. Session progress: function-references 8/0/31 → **23/0/16**; global JIT 796/1 →
+**811/1**; 7 of 8 fr rejects cleared (D-239 ref.func + emit dispatch, ref_null.0, br_on_null.1). **§10.P now
+reduces to EXACTLY 3 non-allowlisted JITmodrej** (everything else — multi-memory→§14, GC-rooting→§11,
+eligibility-gate incl. UnsupportedEntrySignature ×7 + gc/type-subtyping `run`, D-234 memory64-harness — is
+allowlisted/tracked, classified this session):
+1. **`ref_is_null.0`** (concrete `(ref null $t)` table) + **`gc/i31.6`** (abstract i31ref table) — both
+   ElemSegmentTypeMismatch at `compile.zig:257` → **D-240** (blocked-by): needs JIT typed/abstract-ref TABLE
+   runtime (table.init from a reftype elem + table.get/set of typed refs) THEN the eql→`valTypeIsSubtype` flip
+   (loosening alone SEGV'd — proven this session). Probe via `debug_jit_auto`. Multi-cycle runtime feature.
+2. **`tail-call/return_call_indirect.0`** UnsupportedOp → **D-210**: emit return_call_indirect (call_indirect
+   table-dispatch + return_call frame-teardown-tail; return_call IS emitted, the indirect variant isn't).
+   Multi-cycle TC emit. **arch-pin any JitInstance regression test to arm64** (lesson this session).
 
-Recommended next: **D-234** (runner-side, unblocks the clean "0-real-fail" count — most §10-critical) OR **D-210**
-(TC emit). D-240 is the biggest (typed-ref table runtime feature). Run `scripts/check_phase10_close_invariants.sh`
-when the reject count hits 0.
+Recommended next: **D-210** (return_call_indirect emit — 1 of 3, self-contained TC op) OR **D-240** (covers 2 of
+3, bigger runtime feature). Both multi-cycle → bundle. Then `scripts/check_phase10_close_invariants.sh` → §10.P.
 
 Other tracks: **D-238** (x86_64 EH parity), realworld GC/EH/TC producers.
 
@@ -61,11 +61,11 @@ Other tracks: **D-238** (x86_64 EH parity), realworld GC/EH/TC producers.
 
 ## Step 0.7 (next resume)
 
-THIS turn = verified the br_on_null fix-forward is 2-host green (ubuntu `OK (HEAD=2ce27d5b)`) + classified the
-7 UnsupportedEntrySignature as multi-memory/allowlisted (read-only). Code state is `2ce27d5b`, ubuntu-verified
-OK. The arm64 br_on_null function-return fix (`be5a1a32`) + the arch-pin guard (`24b4b6e5`) held; lesson
-`2026-06-03-jitinstance-test-compiles-for-host-arch` filed. NO ubuntu kick needed this turn (handover-only;
-code unchanged since the verified 2ce27d5b). Next → D-234 runner discharge (most §10-critical) OR D-210 TC emit.
+THIS turn = §10.P characterization (read-only): classified the gc/type-subtyping `run` skip as eligibility-gated
+(allowlist) → **§10.P reduces to EXACTLY 3 non-allowlisted modrej** (D-240 ×2 ElemSegmentTypeMismatch + D-210
+return_call_indirect; see Active task). No code; code state `2ce27d5b`, ubuntu-verified OK (`OK (HEAD=2ce27d5b)`).
+NO ubuntu kick (handover-only). Next → start **D-210** (return_call_indirect emit, self-contained TC op) or
+**D-240** (typed-ref table runtime, covers 2 of 3) as a multi-cycle BUNDLE — survey first (Step 0).
 
 **Gate hygiene**: Step-5 Mac gate = `bash scripts/mac_gate.sh`. JIT corpus: `zig build test-spec-wasm-3.0-assert`
 (NO bogus `-Dno-run`); **pick the exe by mtime** — `/usr/bin/find .zig-cache/o -name zwasm-spec-wasm-3-0-assert
