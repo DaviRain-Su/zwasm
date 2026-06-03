@@ -53,6 +53,20 @@ pub const Trap = trap_surface.Trap;
 pub const wasm_trap_new = trap_surface.wasm_trap_new;
 pub const wasm_trap_delete = trap_surface.wasm_trap_delete;
 pub const wasm_trap_message = trap_surface.wasm_trap_message;
+pub const wasm_trap_origin = trap_surface.wasm_trap_origin;
+pub const wasm_trap_trace = trap_surface.wasm_trap_trace;
+pub const Frame = trap_surface.Frame;
+pub const FrameVec = trap_surface.FrameVec;
+pub const wasm_frame_delete = trap_surface.wasm_frame_delete;
+pub const wasm_frame_copy = trap_surface.wasm_frame_copy;
+pub const wasm_frame_instance = trap_surface.wasm_frame_instance;
+pub const wasm_frame_func_index = trap_surface.wasm_frame_func_index;
+pub const wasm_frame_func_offset = trap_surface.wasm_frame_func_offset;
+pub const wasm_frame_module_offset = trap_surface.wasm_frame_module_offset;
+pub const wasm_frame_vec_new_empty = trap_surface.wasm_frame_vec_new_empty;
+pub const wasm_frame_vec_new_uninitialized = trap_surface.wasm_frame_vec_new_uninitialized;
+pub const wasm_frame_vec_new = trap_surface.wasm_frame_vec_new;
+pub const wasm_frame_vec_delete = trap_surface.wasm_frame_vec_delete;
 
 // ============================================================
 // Re-exports — vec.zig

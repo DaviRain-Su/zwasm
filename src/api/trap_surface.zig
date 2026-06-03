@@ -166,8 +166,133 @@ pub export fn wasm_trap_message(t: ?*const Trap, out: ?*wasm_c_api.ByteVec) call
 }
 
 // ============================================================
+// Frames + trap stack introspection (§13.2)
+//
+// zwasm's Trap is a single-flag signal (TrapKind; the per-trap-kind +
+// PC widening is ADR-0022 / D-022, deferred) — it does NOT capture a
+// call-stack. So `wasm_trap_origin` honestly returns null and
+// `wasm_trap_trace` an empty vec (the upstream contract permits a trap
+// with no origin/trace). The `wasm_frame_*` surface + `frame_vec` are
+// implemented for ABI completeness (a frame, if ever produced, exposes
+// its fields); `instance` is held as an opaque ptr to avoid an
+// instance.zig import cycle (instance.zig imports this file for Trap).
+// ============================================================
+
+pub const Frame = extern struct {
+    instance: ?*anyopaque = null,
+    func_index: u32 = 0,
+    func_offset: usize = 0,
+    module_offset: usize = 0,
+};
+
+pub const FrameVec = extern struct {
+    size: usize,
+    data: ?[*]?*Frame,
+};
+
+pub export fn wasm_frame_delete(f: ?*Frame) callconv(.c) void {
+    if (f) |p| std.heap.c_allocator.destroy(p);
+}
+
+pub export fn wasm_frame_copy(f: ?*const Frame) callconv(.c) ?*Frame {
+    const src = f orelse return null;
+    const nf = std.heap.c_allocator.create(Frame) catch return null;
+    nf.* = src.*;
+    return nf;
+}
+
+pub export fn wasm_frame_instance(f: ?*const Frame) callconv(.c) ?*anyopaque {
+    return (f orelse return null).instance;
+}
+pub export fn wasm_frame_func_index(f: ?*const Frame) callconv(.c) u32 {
+    return (f orelse return 0).func_index;
+}
+pub export fn wasm_frame_func_offset(f: ?*const Frame) callconv(.c) usize {
+    return (f orelse return 0).func_offset;
+}
+pub export fn wasm_frame_module_offset(f: ?*const Frame) callconv(.c) usize {
+    return (f orelse return 0).module_offset;
+}
+
+pub export fn wasm_frame_vec_new_empty(out: ?*FrameVec) callconv(.c) void {
+    (out orelse return).* = .{ .size = 0, .data = null };
+}
+pub export fn wasm_frame_vec_new_uninitialized(out: ?*FrameVec, size: usize) callconv(.c) void {
+    const o = out orelse return;
+    if (size == 0) {
+        o.* = .{ .size = 0, .data = null };
+        return;
+    }
+    const buf = std.heap.c_allocator.alloc(?*Frame, size) catch {
+        o.* = .{ .size = 0, .data = null };
+        return;
+    };
+    @memset(buf, null);
+    o.* = .{ .size = size, .data = buf.ptr };
+}
+pub export fn wasm_frame_vec_new(out: ?*FrameVec, size: usize, src: ?[*]const ?*Frame) callconv(.c) void {
+    const o = out orelse return;
+    if (size == 0 or src == null) {
+        o.* = .{ .size = 0, .data = null };
+        return;
+    }
+    const buf = std.heap.c_allocator.alloc(?*Frame, size) catch {
+        o.* = .{ .size = 0, .data = null };
+        return;
+    };
+    @memcpy(buf, src.?[0..size]);
+    o.* = .{ .size = size, .data = buf.ptr };
+}
+pub export fn wasm_frame_vec_delete(v: ?*FrameVec) callconv(.c) void {
+    const handle = v orelse return;
+    if (handle.data) |dp| {
+        for (dp[0..handle.size]) |opt| {
+            if (opt) |fr| wasm_frame_delete(fr);
+        }
+        std.heap.c_allocator.free(dp[0..handle.size]);
+    }
+    handle.* = .{ .size = 0, .data = null };
+}
+
+/// `wasm_trap_origin` — zwasm captures no stack frame for a trap → null
+/// (spec permits a frame-less trap). Widening is ADR-0022 / D-022.
+pub export fn wasm_trap_origin(t: ?*const Trap) callconv(.c) ?*Frame {
+    _ = t;
+    return null;
+}
+
+/// `wasm_trap_trace` — empty trace (no captured stack; see above).
+pub export fn wasm_trap_trace(t: ?*const Trap, out: ?*FrameVec) callconv(.c) void {
+    _ = t;
+    (out orelse return).* = .{ .size = 0, .data = null };
+}
+
+// ============================================================
 // Tests
 // ============================================================
+
+test "wasm_frame: copy/accessors + vec delete-cascade; trap origin null + trace empty" {
+    var fr: Frame = .{ .instance = null, .func_index = 7, .func_offset = 16, .module_offset = 32 };
+    const c = wasm_frame_copy(&fr) orelse return error.FrameCopyFailed;
+    try testing.expectEqual(@as(u32, 7), wasm_frame_func_index(c));
+    try testing.expectEqual(@as(usize, 16), wasm_frame_func_offset(c));
+    try testing.expectEqual(@as(usize, 32), wasm_frame_module_offset(c));
+    try testing.expect(wasm_frame_instance(c) == null);
+
+    var elems = [_]?*Frame{c};
+    var fv: FrameVec = undefined;
+    wasm_frame_vec_new(&fv, 1, &elems);
+    try testing.expectEqual(@as(usize, 1), fv.size);
+    wasm_frame_vec_delete(&fv); // frees the copied frame
+    try testing.expectEqual(@as(usize, 0), fv.size);
+
+    // No stack capture → null origin + empty trace.
+    try testing.expect(wasm_trap_origin(null) == null);
+    var trace: FrameVec = undefined;
+    wasm_trap_trace(null, &trace);
+    try testing.expectEqual(@as(usize, 0), trace.size);
+    wasm_frame_delete(null); // null-tolerant
+}
 
 test "wasm_trap_new / message / delete: round-trip from caller-supplied message" {
     const e = wasm_c_api.wasm_engine_new() orelse return error.EngineAllocFailed;
