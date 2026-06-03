@@ -15,8 +15,16 @@
   native-stack scan rooting [strictly ADDS roots → can't cause UAF, only prevent; reuse `platform/stack_limit.zig`
   for stack bounds] → (2) free-list reuse in sweep, gated behind (1). Files: collector_mark_sweep.zig, heap.zig
   (free_lists), object_alloc.zig, root_scope.zig. ADR-0135 = rooting↔reclaim couple; no-reclaim safe interim.
+- **PROGRESS**: chunk **1a DONE** `5de51a69` — `stack_limit.nativeStackHigh()` (top-of-stack query, all 3
+  platforms) + test. **NEXT = chunk 1b: integrate the scan** into `collector_mark_sweep.zig walkRootsImpl` —
+  scan `[@frameAddress(), nativeStackHigh())` word-aligned, each word via a new `tryReportRawRef` (check the
+  FULL usize word AND its low-32 bits as candidate GcRefs — conservative covers the JIT ref-representation
+  uncertainty). **CRITICAL**: gate behind a `scan_native_stack: bool` field **default FALSE** (the conservative
+  scan would mark false-positives → break the existing precise survivor/dead-count unit tests); PRODUCTION
+  collector-creation site sets it TRUE; new test sets it true + asserts a stack-only GcRef is marked (with-flag
+  vs without). Verify ALL existing collector_mark_sweep + root_scope tests stay green.
 - **Exit-condition**: free-list reuse lands + an interp alloc-loop test shows `heap.cursor` BOUNDED (vs unbounded
-  leak today) + all existing GC unit/spec tests green. First red test: native-stack-held GcRef survives collection.
+  leak today) + all existing GC unit/spec tests green.
 
 ## Current state
 
@@ -30,20 +38,20 @@
 
 ## Next task (autonomous)
 
-**Work the 15.1-gc-reclamation bundle (above).** Survey done; **chunk 1 = the conservative native-stack scan**
-(the strictly-safe rooting prerequisite). Step 0: read `platform/stack_limit.zig` (stack-bound infra to reuse) +
-`collector_mark_sweep.zig walkRootsImpl` + how GC is triggered (alloc-time). Red test: an asm/native-stack-held
-GcRef is in the MARK set after collection. Then chunk 2 = free-list reuse (gated). **Correctness-critical — don't
-rush** (a missed root → UAF heisenbug once reclaim is on). Then §15.2 coalescer → §15.3 class-aware → §15.4 SIMD
-→ **§15.5 D-245 win64** (hard/remote; deliberate session) → §15.6 ClojureWasm. (D-257 lesson-Citing half is
+**Work the 15.1-gc-reclamation bundle (above).** Chunk 1a done (`nativeStackHigh`); **NEXT = chunk 1b** (scan
+integration into `walkRootsImpl`, flag-gated default-FALSE — see the bundle PROGRESS note for the exact recipe +
+the don't-break-existing-tests constraint). Then chunk 2 = free-list reuse (gated). **Correctness-critical — don't
+rush** (a missed root → UAF heisenbug once reclaim is on). After §15.1: §15.2 coalescer → §15.3 class-aware →
+§15.4 SIMD → **§15.5 D-245 win64** (hard/remote; deliberate session) → §15.6 ClojureWasm. (D-257 lesson half
 `partial`, not blocking.)
 
 ## Step 0.7 (next resume)
 
-This turn: D-257 ADR SHA-backfill (9 rows, `2893ab5e`) + D-257 → soon — DOCS only, no code → no ubuntu kick
-(HEAD code `011dca7e` ubuntu-verified). **windowsmini reconcile (Phase-14 close) = `[run_remote_windows] OK`
-GREEN** (seed `0x75fe1ff4` dodged D-245; the only `failed command: …--listen=-` lines are benign unit-test-
-isolation noise, lesson `gate-tail-vs-exit-code`). §14 close fully verified 3-host. Next code change → ubuntu kick.
+This turn: §15.1 bundle chunk 1a — `stack_limit.nativeStackHigh()` + test (`5de51a69`, CODE). Mac `zig build
+test` + lint green. An ubuntu test-all kicked → next resume `tail /tmp/ubuntu.log` for `[run_remote_ubuntu] OK`
+(revert chunk 1a on a real FAIL). **NOTE** (lesson `gate-tail-vs-exit-code`): benign `failed command:
+…--listen=-` / `arm64/emit: failing op` next to a passing run = error-path test noise, not a failure. (Phase-14
+close was fully 3-host-verified GREEN — windowsmini `[run_remote_windows] OK`, seed dodged D-245.)
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile = `zig build test
 -Dtarget=x86_64-windows-gnu`. windowsmini exec = `run_remote_windows.sh` (phase boundary).
