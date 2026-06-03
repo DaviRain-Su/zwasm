@@ -8,15 +8,15 @@
 - **Phase**: **11 IN-PROGRESS — WASI 0.1 full + bench infra** (Phase 10 = DONE 2026-06-03, `5ab7b981`; Wasm 3.0
   complete on both backends per ADR-0133). §11 task table open (11.0✓ / 11.1 WASI / 11.2 bench / 11.3 SIMD-gap /
   11.4 GC-rooting / 11.P).
-- **§11.2 bench (in progress, `1c13e9f3`)**: un-stubbed `record_merge_bench.sh` — was a Phase-0-10 placeholder
-  (appended `benches: []` comments); now a thin wrapper exec'ing the real `run_bench.sh` (hyperfine engine).
-  Verified Mac: `--quick --bench=tinygo/arith` → real row (mean_ms=2.39). §12.4 cadence: Phase 0-13 = MANUAL
-  recording (auto-CI `bench.yml` push-trigger DISABLED 2026-05-25 per user — do NOT re-enable). REMAINING for
-  §11.2: (a) Linux row — run `record_merge_bench.sh --phase-record` ON ubuntunote (arch auto = x86_64-linux); a
-  remote bench kick (analogous to `run_remote_ubuntu.sh`) or manual SSH; (b) Windows row → windowsmini, phase-
-  boundary batch; (c) decide if a 3-host `--phase-record` lands real `history.yaml` rows at phase close (§11.P
-  exit = "bench auto-record 3-host"). NOT a `gate_merge.sh` wiring — that would re-introduce the auto-bench the
-  user disabled; manual per-merge is the §12.4 Phase-0-13 design.
+- **§11.2 bench (paths verified, `1c13e9f3`+`d303f427`)**: `record_merge_bench.sh` un-stubbed → thin wrapper over
+  the real `run_bench.sh` hyperfine engine (Mac: `--quick --bench=tinygo/arith` → mean_ms=2.39). `run_remote_ubuntu.sh`
+  gained a `bench` step (runs the recorder under the remote nix shell; hyperfine 1.20.0 confirmed on ubuntunote) →
+  Linux row path verified (`bench --quick --bench=tinygo/arith` wrote a real x86_64-linux recent.yaml row).
+  §12.4 cadence: Phase 0-13 = MANUAL recording; auto-CI `bench.yml` push-trigger DISABLED 2026-05-25 per user —
+  do NOT re-enable, do NOT wire `gate_merge.sh`. REMAINING (phase-close batch): committed 3-host `--phase-record`
+  baseline rows into `history.yaml` (Mac local + Linux via `append_bench_to_history.sh` fragment extract/append +
+  windowsmini) — §11.P exit "bench auto-record 3-host". Use `--windows-subset` (5 light benches) for fast runs;
+  heavy benches (fib2) take minutes each.
 - **LAST code HEAD** (`89aaebcf`): **D-243 RESOLVED** — the realworld DIFF runner now preopens a fresh scratch
   `--dir` (guest ".") for needs-preopen fixtures on BOTH sides (wasmtime `--dir <scratch>::.` + v2
   `runWasmCapturedOpts`). `rust_file_io.wasm` flips SKIP-V2-TRAP → **MATCH** (`zig build test-realworld-diff` =
@@ -34,12 +34,12 @@
 
 ## Next task (autonomous)
 
-§11.2 Mac manual recorder is now real (`1c13e9f3`). Next: **§11.2 Linux row** — get a real `x86_64-linux`
-`history.yaml` entry from ubuntunote. Either (a) a one-shot remote bench kick (SSH: sync repo → `nix develop ...
-record_merge_bench.sh --quick --phase-record --reason='p11.2: linux baseline'` → pull the fragment), or (b) note
-it as a phase-close batch alongside the windowsmini row. Heavy benches (e.g. shootout/fib2) take minutes each;
-use the light subset for smoke (tinygo/arith ~2ms). Then **§11.3 SIMD gap** + §11.4 GC-rooting. Windows realworld
-subset (last 11.1 line) + windowsmini bench row both go to the phase-boundary batch per the skip policy.
+§11.2 recording PATHS are verified (Mac + Linux). The committed 3-host baseline rows are phase-close batch. Next
+autonomous track = **§11.4 GC-on-JIT precise rooting (D-211)** — the substantive remaining §11 feature: conservative
+native-stack scan + stack-map root walker (ADR-0128 §2 / ADR-0115); lands with Phase-11 reclamation, zero codegen
+change (emit already DONE; only rooting deferred). This is a multi-cycle bundle — survey D-211 + ADR-0115/0128 §2,
+set up `## Active bundle`, then TDD. Alternatively **§11.3 SIMD gap** (needs `--compare=wasmtime` bench data, slower
+to gather). Windows realworld subset + windowsmini bench row → phase-boundary batch per the skip policy.
 
 ## Deferred / open debt (all blocked-by/note; none a Phase-11 blocker)
 
@@ -52,11 +52,10 @@ subset (last 11.1 line) + windowsmini bench row both go to the phase-boundary ba
 
 ## Step 0.7 (next resume)
 
-`fcc9fe03` (D-243) was ubuntu-verified GREEN this cycle (Step 0.7 OK, all `fail=0`; ubuntunote even ran the
-diff_runner — rust_file_io MATCHed on Linux too). THIS turn landed only `1c13e9f3` — a pure shell-orchestration
-change (`record_merge_bench.sh` → wrapper); `zig build test-all` does NOT invoke it, so NO ubuntu kick (non-code
-gap, like docs-only). Last ubuntu-verified HEAD = `fcc9fe03`. Next cycle Step 0.7 = nothing to verify (no kick
-fired); proceed to §11.2 Linux row / §11.3.
+Last ubuntu-verified CODE HEAD = `fcc9fe03` (D-243, all `fail=0`). Since then only shell-orchestration commits
+(`1c13e9f3` record_merge_bench wrapper, `d303f427` run_remote_ubuntu bench step) — `zig build test-all` does NOT
+invoke them, so NO ubuntu test-all kick (non-code gap). The `d303f427` bench step WAS exercised live on ubuntunote
+this turn (wrote a real x86_64-linux recent.yaml row, exit 0). Next cycle Step 0.7 = nothing to verify.
 
 **Gate hygiene**: Step-5 Mac gate = `bash scripts/mac_gate.sh`. JIT corpus: `zig build test-spec-wasm-3.0-assert`
 (NO bogus `-Dno-run`); pick the exe by mtime (bare `head -1` = STALE). `ZWASM_SPEC_ENGINE=jit <exe>
