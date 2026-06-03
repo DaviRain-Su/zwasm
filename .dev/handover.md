@@ -5,34 +5,30 @@
 
 ## Active bundle
 
-- **Bundle-ID**: 15.2-coalescer-detection (mov-coalescing detection + emit-side elision — bench-gated ≥5%,
-  correctness-critical, W54-divergence-prone)
-- **Cycles-remaining**: ~3–5 (vreg-model design → spike → detection → 2-arch elision → bench)
-- **Continuity-memo**: Scaffolding is a NO-OP frame (`src/ir/coalesce/pass.zig:47` installs empty records;
-  runs post-regalloc at `compile.zig:302` with `alloc.slots[]`). Design = option (b) (`p8-8b1-coalescer-survey.md`):
-  detect a MOV-shaped op where `slots[src_vreg]==slots[dst_vreg]` AND dst not live-after → record
-  `{instr_pc, slot, .same_slot_alias}` → emit queries `func.coalesced_movs` + skips. **Consumer (emit elision)
-  ALSO unimplemented** — both must land. **HARD CORE**: mapping a candidate ZIR op (local.tee/get/set/select) to
-  its src/dst vreg ids = the operand-stack vreg-numbering (must MATCH regalloc/liveness exactly; a wrong mark →
-  MISCOMPILE). **W54 lesson**: this class of change broke x86_64 (fewer MOVs exposed spill-around-call timing) →
-  metadata-only (no IR mutation), conservative bail on branch targets + call sites, **test Mac aarch64 FIRST**,
-  differential suite (spec+realworld both arches) is the correctness guard.
-- **PROGRESS**: Step-0 surveys done (2 Explore digests + `p8-8b1-coalescer-survey.md`). **FOUNDATIONAL FINDINGS
-  (reshape the approach)**: (1) vreg numbering (`src/ir/analysis/liveness.zig`, operand-stack def-order) is NOT
-  exposed per-instr — coalescer must RE-SIMULATE it (mismatch → miscompile). (2) **Locals have FIXED frame homes
-  (`LocalsLayout.offsets[L]`), a SEPARATE address space from operand-stack slots (`regalloc.slots[]`)** → a
-  `local.tee` store-to-local is NOT a same-slot vreg alias; the scaffolded `slots[src]==slots[dst]` premise does
-  not cleanly apply. (3) `select` allocates its result vreg at EMIT time (`emit.zig:1082`), diverging from
-  liveness numbering. (4) **The design note's OWN option (a) warns v2's deterministic day-1 slot assignment ⇒
-  "most same-slot MOVs never occur" (~2–5% ceiling)** → ≥5% via slot-aliasing is uncertain by the project's own
-  survey. **NEXT = EMPIRICAL SPIKE** (gitignored `private/spikes/coalescer-headroom/`): instrument the JIT compile
-  of `tinygo/fib_loop` + `shootout/nestedloop` to COUNT actually-redundant emitted movs (a store/mov whose value
-  is provably already at the destination) — measure the coalescing HEADROOM before implementing. If <5% reachable
-  → ADR re-scope §15.2 (option a "stop"/re-target the mechanism). If ≥5% headroom found → design detection against
-  the REAL redundancy pattern (not the scaffolded slot-alias premise), then arm64 elision → x86_64 → bench.
+- **Bundle-ID**: 15.2-reload-elim (redundant spill-reload elimination — bench-gated ≥5%, RE-TARGETED from
+  slot-alias coalescing per ADR-0149; correctness-critical, W54-divergence-prone)
+- **Cycles-remaining**: ~3–5 (reload-headroom measurement → emit staging-reg cache → 2-arch → bench)
+- **Continuity-memo**: **ADR-0149 (this turn): the scaffolded slot-alias coalescer has ~0 headroom** —
+  structural read proved `arm64/gpr.zig` helpers already elide all reg-resident movs (`gprStoreSpilled` reg-case
+  `{}`, `gprLoadSpilled` reg-case returns the reg), locals↔spill are separate frame regions, and v2 emits NO
+  vreg-to-vreg movs. So `slots[src]==slots[dst]` detects nothing. **RE-TARGET**: a SPILLED vreg used N× re-emits
+  `gprLoadSpilled` (an `LDR`) each use → cache "vreg→staging-reg" during emit + skip the reload when the value is
+  still resident + the reg un-clobbered. Emit-local (does NOT touch regalloc slots → lower W54 risk than
+  slot-alias). **W54 lesson STILL governs**: the staging-reg cache MUST invalidate at every call + branch target;
+  test Mac aarch64 FIRST; differential suite (spec+realworld both arches) is the correctness guard. Coalescer
+  scaffolding (`src/ir/coalesce/pass.zig`, ADR-0035/0036) left DORMANT (no-op; its stale "detection lands in
+  8b.1-d" doc comment to be marked superseded when the §15.2 emit chunk lands).
+- **PROGRESS**: Step-0 surveys done (2 Explore digests) → **slot-alias coalescer disproven (ADR-0149, this turn)**
+  + ROADMAP §15.2 re-scoped to redundant spill-reload elimination + §15.3 combined-target note updated.
+  **NEXT = reload-headroom measurement**: confirm a SPILLED vreg is actually reloaded multiple times in the
+  loop-heavy fixtures (fib_loop/nestedloop/sieve) before building the staging-reg cache. Cheapest probe: a
+  gitignored emit-instrumentation spike counting `gprLoadSpilled.spill` LDRs per vreg per basic-block (or
+  disasm the hot fn). If a vreg reloads ≥2× within a block (no clobber between) → headroom exists → build the
+  emit-side staging-reg cache (arm64 first per W54) → x86_64 → bench. If reloads are already minimal → revisit
+  ADR-0149 (fold the small gain into §15.P aggregate).
 - **Exit-condition**: EITHER ≥5% bench-delta on ≥3 loop-heavy fixtures + differential green (no miscompile) + a
-  detect+elide unit test; OR (if spike shows <5% headroom) an ADR re-scoping §15.2's mechanism/target with the
-  empirical headroom data.
+  reload-elim unit test; OR (if measured headroom < target) an ADR amendment folding the gain into §15.P aggregate
+  parity with the empirical data.
 
 ## Current state
 
@@ -63,11 +59,11 @@ applies. After §15.2: §15.3 class-aware (≥3% FP-heavy) → §15.4 SIMD + D-2
 
 ## Step 0.7 (next resume)
 
-This turn: **§15.2 design survey** — 2 deep Explore surveys (coalescer scaffolding + vreg/regalloc model) →
-opened the 15.2-coalescer-detection bundle + recorded the foundational findings (above) that reshape the
-approach toward an empirical-headroom spike FIRST. **DOCS only — NO src/ change → no ubuntu kick** (code HEAD
-`45a94348`, ubuntu-verified OK). **NOTE** (lesson `gate-tail-vs-exit-code`): benign `failed command:
-…--listen=-` / `arm64/emit: failing op` next to a passing run = error-path test noise — EXIT authoritative.
+This turn: **§15.2 re-target** — structural read of `arm64/{emit,gpr}.zig` proved the slot-alias coalescer has
+~0 headroom → ADR-0149 + ROADMAP §15.2/§15.3 re-scoped (slot-alias → redundant spill-reload elim). **DOCS/scope
+only — NO src/ change → no ubuntu kick** (code HEAD `45a94348`, ubuntu-verified OK). **NOTE** (lesson
+`gate-tail-vs-exit-code`): benign `failed command: …--listen=-` / `arm64/emit: failing op` next to a passing run
+= error-path test noise — EXIT authoritative.
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile = `zig build test
 -Dtarget=x86_64-windows-gnu`. windowsmini exec = `run_remote_windows.sh` (phase boundary).
