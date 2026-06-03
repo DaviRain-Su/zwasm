@@ -19,8 +19,8 @@
  *   wasm_engine_t* engine = wasm_engine_new();
  *   wasm_store_t*  store  = wasm_store_new(engine);
  *   zwasm_wasi_config_t* cfg = zwasm_wasi_config_new();
- *   zwasm_wasi_config_inherit_argv(cfg);
- *   zwasm_wasi_config_inherit_env(cfg);
+ *   const char* args[] = { "prog", "--flag" };
+ *   zwasm_wasi_config_set_args(cfg, 2, args);
  *   zwasm_wasi_config_inherit_stdio(cfg);
  *   zwasm_store_set_wasi(store, cfg);   // takes ownership of cfg
  *   wasm_instance_t* inst = wasm_instance_new(store, module, NULL, NULL);
@@ -59,12 +59,15 @@ zwasm_wasi_config_t* zwasm_wasi_config_new(void);
 void                 zwasm_wasi_config_delete(zwasm_wasi_config_t*);
 
 /**
- * Inherit argv / environ / stdio fds from the host process.
- * Each is independent — call as many or as few as the host
- * wants the guest to inherit.
+ * Route the guest's stdin/stdout/stderr (fd 0/1/2) to the host
+ * process's stdio. This is the default (`Host.init` installs the
+ * three stdio fds), kept for API parity.
+ *
+ * Process argv / env inheritance (`inherit_argv` / `inherit_env`)
+ * is deferred to post-v0.1 — a C-library context has no Zig-0.16
+ * `Init` token for the process argv/env/io (ADR-0143 / D-255). Use
+ * the explicit `set_args` / `set_envs` below instead.
  */
-void zwasm_wasi_config_inherit_argv(zwasm_wasi_config_t*);
-void zwasm_wasi_config_inherit_env(zwasm_wasi_config_t*);
 void zwasm_wasi_config_inherit_stdio(zwasm_wasi_config_t*);
 
 /**
@@ -83,20 +86,13 @@ void zwasm_wasi_config_set_envs(
     const char* const* keys,
     const char* const* vals);
 
-/**
- * Add a host-side directory as a guest-visible preopen.
- * `host_path` is the host filesystem path to expose; `guest_path`
- * is the name the guest sees (typically just `/`). Strings are
- * copied; caller retains ownership of the inputs.
- *
- * Returns `true` on success, `false` on allocation failure or
- * inability to open the host path. The path-traversal policy
- * (no `..` escapes) is enforced at `path_open` time, not here.
+/*
+ * Host-directory preopen (`zwasm_wasi_config_preopen_dir`) is
+ * deferred to post-v0.1 (ADR-0143 / D-255): opening + serving a
+ * preopen needs a library-side `std.Io` token the pure C-API does
+ * not yet construct (the CLI's `--dir` has the ambient Init io).
+ * Filesystem hosting via the C ABI lands with the io infra (D-251).
  */
-bool zwasm_wasi_config_preopen_dir(
-    zwasm_wasi_config_t*,
-    const char* host_path,
-    const char* guest_path);
 
 /**
  * Install the WASI setup on a Store. Takes ownership of the
