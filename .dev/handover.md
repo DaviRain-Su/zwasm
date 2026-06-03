@@ -19,20 +19,22 @@
   vecs (consume name byte-vecs + own the externtype). Upstream ownership throughout. 🔒 = END conformance gate.
 - §13.2 (c) **module_imports** `80131306` + (d) **module_exports** `befd8acd` — `api/module_introspect.zig`
   (extracted per ADR-0099 §D2 P3 / D-171; instance.zig 3207→3044). imports → importtype_vec; exports → idx
-  resolved via per-kind index space (import prefix ++ defined section). Shared externtype builders
-  (functypeExtern/globaltypeExtern/tabletypeExtern/memorytypeExtern) + `valKindOf`. Tags skipped (no tagtype).
+  resolved via per-kind index space. Shared externtype builders + `valKindOf`. Tags skipped (no tagtype).
+- §13.2 (e) **frames + trap_origin/trace** `d3819d32` — `api/trap_surface.zig`: `wasm_frame_*` + frame_vec;
+  `trap_origin`→null, `trap_trace`→empty (zwasm Trap is single-flag, no stack capture; ADR-0022/D-022).
 
 ## Next task (autonomous)
 
-§13.2 next — the remaining type-surface gaps (gap: `.dev/phase13_capi_gap.md`), smallest-first:
-**(1) frames/foreign + trap_origin/trace** — self-contained, in `api/trap_surface.zig`: `wasm_frame_*` (copy/
-instance/func_index/func_offset/module_offset — trap-time frames; may start as empty/null per the FP-walk
-unwinder's availability), `wasm_foreign_new/delete` (trivial host-opaque), `wasm_trap_origin`/`wasm_trap_trace`
-(frame introspection; null/empty stubs acceptable for base conformance — cite). **(2) func/global/table/memory
-`_new` + `*_as_extern[_const]`** — the runtime-entity layer (Store-coupled; host-defined entities). This is the
-biggest remaining piece + couples to the existing `Extern`/`Func`/etc. in `instance.zig` (near its 3200 cap →
-likely a new `api/extern_new.zig` per the module_introspect precedent). Then **§13.3** (wasi.h builders:
-inherit_argv/env/stdio, set_args/envs, preopen_dir) + §13.4 (`test/c_api_conformance/`) + §13.5 (examples).
+§13.2 next — **func/global/table/memory `_new` + `*_as_extern[_const]`** (the runtime-entity layer; biggest
+remaining piece). These create host-defined entities (Store-coupled) + the Extern conversions. Couples to the
+existing `Extern`/`Func`/`Global`/`Table`/`Memory` in `instance.zig` (near its 3200 exempt cap → likely a new
+`api/extern_new.zig` per the module_introspect precedent, OR carefully assess what fits). Step 0: how
+`instance.zig` represents `Extern`/`Func`/etc. + whether host-func creation (`wasm_func_new[_with_env]` — a
+host callback invoked from the interp/JIT) is feasible or needs a thunk (this is the hard sub-part; global/
+table/memory `_new` are simpler host-state allocations). Then **(2) foreign** (`WASM_DECLARE_REF` — the shared
+ref machinery: copy/same/host_info/as_ref/share/obtain — cross-cutting, its own chunk). Then **§13.3** (wasi.h
+builders: inherit_argv/env/stdio, set_args/envs, preopen_dir), §13.4 (`test/c_api_conformance/`), §13.5 (examples).
+gap: `.dev/phase13_capi_gap.md`.
 
 ## Phase-12 close note
 
@@ -51,10 +53,9 @@ prose. Standing `soon` (not Phase-12): 10 ADR + 10 lesson `<backfill>` markers; 
 
 ## Step 0.7 (next resume)
 
-This turn landed §13.2 `wasm_module_exports` (`befd8acd`, `api/module_introspect.zig`): Mac test+build(C-API lib)
+This turn landed §13.2 frames + trap_origin/trace (`d3819d32`, `api/trap_surface.zig`): Mac test+build(C-API lib)
 +lint+zone green. An ubuntu `test` is kicked against this turn's HEAD → next resume `tail /tmp/ubuntu.log` for OK
-(decode + c_allocator, host-portable; x86_64 link + test block). Prior ubuntu `d9dd90e9` OK; windowsmini
-`0810b339` reconcile GREEN.
+(pure-data + c_allocator, host-portable). Prior ubuntu `a85bbf6d` OK; windowsmini `0810b339` reconcile GREEN.
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile: `zig build test
 -Dtarget=x86_64-windows-gnu` (compile-only). 3-host reconcile = phase boundary.
