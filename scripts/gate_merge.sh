@@ -49,6 +49,12 @@ zig build test-all
 echo "[gate_merge] build-option DCE / level-separation check (6 combos) ..."
 bash scripts/check_build_dce.sh --gate
 
+# D-245 regression — host→JIT callee-saved preservation only fails in
+# ReleaseSafe (Debug-only unit tests miss it). Home here (merge gate) since it
+# needs a full ReleaseSafe build; per-commit would be too slow.
+echo "[gate_merge] --engine=jit ReleaseSafe smoke (D-245) ..."
+bash scripts/check_jit_releasesafe.sh
+
 # ---- ubuntunote (native Linux x86_64) via SSH ----
 if ssh -o ConnectTimeout=5 -o BatchMode=yes ubuntunote "echo ok" >/dev/null 2>&1; then
     echo "[gate_merge] zig build test-all on ubuntunote (native x86_64) ..."

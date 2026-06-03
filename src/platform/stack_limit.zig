@@ -167,6 +167,14 @@ pub fn diagOnceWithRt(rt_ptr: *const anyopaque, stack_limit_off: usize, stack_li
 }
 
 fn diagOnceRaw(stack_limit_value: usize, rt_ptr: ?*const anyopaque, stack_limit_off: usize) void {
+    // Debug-only diagnostic. This is a leftover Win64 stack-probe
+    // investigation print; in release builds it flooded stderr with
+    // `[stack_probe] …` on the first JIT call of every process — including
+    // production `zwasm run --engine=jit` (D-245 cleanup). Gate to Debug so
+    // release output is clean (and `test-jit-releasesafe`'s RunStep, which
+    // checks for empty stderr, isn't tripped). Win64 investigations use a
+    // Debug build, where it still emits.
+    if (comptime builtin.mode != .Debug) return;
     // Once per thread on all hosts. Cycle 3's "per call on Win64"
     // override was retired after R3 cycle 6 root-cause (Windows
     // commit-pattern early-overflow) — no longer need to flood
