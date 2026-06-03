@@ -33,9 +33,10 @@
   memory bytes / table refs shared with the guest, and a host func callback invoked by the guest's `call` (a
   runtime-arity HostCall thunk marshalling operand-stack ↔ wasm_val_vec ↔ C callback). All tested e2e.
   instance.zig exempt cap raised 3200→3300 (ADR-0099 amend); now 3297/3300 (tight — foreign lands in extern_new.zig).
-- **§13.2 ref ops** (D-253): base `wasm_ref_copy`/`_same` (`9e634743`) + funcref cross-cast `wasm_func_as_ref`/
-  `wasm_ref_as_func[_const]` (`8775e30f`, bidirectional borrowed-view `Func.ref_view`/`Ref.func_view`). Remaining
-  D-253: `wasm_foreign` (next) + host_info-bulk (C) + degenerate instance/extern as_ref (E, §13.4-driven).
+- **§13.2 ref ops** (D-253): base `wasm_ref_copy`/`_same` (`9e634743`); funcref cross-cast (`8775e30f`); **`wasm_foreign`
+  + host_info + as_ref/ref_as_foreign** (`410a5023`, host opaque externref; Ref gained `store` for the instance-less
+  path). **§13.2 load-bearing surface COMPLETE.** Remaining D-253: per-entity host_info-bulk (C, blocked by
+  instance.zig 3299/3300 cap → needs a side-table or cap relief) + degenerate instance/extern as_ref (E) — §13.4-driven.
 
 ## Next task (autonomous)
 
@@ -47,14 +48,13 @@ Two open tracks, both within Phase 13's surface (pick either; runtime-entity is 
    `main`, cli/main.zig:43/58) — a C-library context (`libzwasm.so`, Zig startup never runs) can't reach it, so
    inherit needs platform C APIs (`_NSGetArgv` / `/proc/self/cmdline` / `GetCommandLineW`) or the C `environ`
    global = new libc sites (§14 "unconscious libc fanout"). Do the ADR-0070 amend as Step 1 of that chunk.
-2. **§13.2 foreign remainder — D-253** (base ref ops `3e8754bf`; funcref cross-cast B `8775e30f` DONE). Next active
-   chunk = **(D) `wasm_foreign`**: a host opaque object (externref-able). New `Foreign` struct in extern_new.zig
-   (`{store, host_info, finalizer}`); `wasm_foreign_new(store)`; externref payload = `@intFromPtr(*Foreign)`;
-   `wasm_foreign_as_ref`→`Ref{instance=null, ref=@intFromPtr(foreign)}` + `wasm_ref_as_foreign`. **Resolve the
-   instance-less-ref store path** (wasm_ref_delete/copy currently early-return/null on `instance==null` — a foreign
-   externref Ref needs a store handle to free; add `store` to Ref or carry it). Keep instance.zig adds MINIMAL
-   (3297/3300 cap — Foreign + fns go in extern_new). Then C (host_info bulk) + E (degenerate instance/extern as_ref)
-   = §13.4-driven. After §13.2 → **§13.3** (wasi; ADR-0070 io/process-provenance FIRST), **§13.4**, **§13.5**.
+2. **Close §13.2 + START §13.4.** §13.2's load-bearing surface is done; C/E remain in D-253 (§13.4-driven). Per
+   ADR-0132 (foreign bulk genuinely references §13.4 to know what's load-bearing): file a short ADR re-scoping §13.2
+   (core done; C/E → D-253/§13.4), mark §13.2 `[x]` with that forward-ref, run audit_scaffolding (sub-task, not a
+   phase boundary — opportunistic), then **§13.4**: scaffold `test/c_api_conformance/` + port a minimal wasm-c-api
+   example (e.g. the upstream `hello`/`callback` example) exercising the implemented surface (engine/store/module/
+   instance/exports/func_call + a host func via wasm_func_new). This VALIDATES §13.2 end-to-end + reveals which of
+   D-253 C/E matter. (§13.3 wasi remainder still needs the ADR-0070 io/process-provenance decision; can interleave.)
 
 gap: `.dev/phase13_capi_gap.md`.
 
@@ -75,9 +75,9 @@ prose. Standing `soon` (not Phase-12): 10 ADR + 10 lesson `<backfill>` markers; 
 
 ## Step 0.7 (next resume)
 
-This turn landed §13.2 funcref cross-cast `wasm_func_as_ref`/`wasm_ref_as_func` (D-253 B): Mac test+lint+zone green,
-instance.zig 3297/3300. An ubuntu `test` is kicked against this turn's HEAD → next resume `tail /tmp/ubuntu.log` for
-OK (funcref encode + c_allocator, host-portable). Prior ubuntu `9e634743` OK; windowsmini `0810b339` GREEN.
+This turn landed §13.2 `wasm_foreign` + host_info + as_ref/ref_as_foreign (D-253 D): Mac test+lint+zone green,
+instance.zig 3299/3300. An ubuntu `test` is kicked against this turn's HEAD → next resume `tail /tmp/ubuntu.log` for
+OK (c_allocator + ptr-as-externref, host-portable). Prior ubuntu `3988494d` OK; windowsmini `0810b339` GREEN.
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile: `zig build test
 -Dtarget=x86_64-windows-gnu` (compile-only). 3-host reconcile = phase boundary.

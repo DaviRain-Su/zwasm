@@ -740,7 +740,7 @@ entries:
       the bulk, and the degenerate casts (E) need a model decision §13.4 informs. (B) funcref
       cross-cast is the concrete next active chunk (implementable now; not truly blocked); C/D/E
       await the §13.4 signal. Split:
-      (A done) `wasm_ref_copy`/`wasm_ref_same`.
+      (A,B,D done) ref copy/same + funcref cross-cast + wasm_foreign+host_info.
       (B) funcref cross-casts `wasm_func_as_ref[_const]` / `wasm_ref_as_func[_const]`:
       encode via `Value.fromFuncRef(&rt.func_entities[func_idx])` (forward) /
       `Value.refAsFuncEntity` → `fe.runtime.instance` (`*Instance`, set at instance.zig:902)
