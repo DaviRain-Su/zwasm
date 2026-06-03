@@ -35,24 +35,23 @@
 ## Active bundle
 
 - **Bundle-ID**: 11.3-simd-gap (D-074 cohort)
-- **Cycles-remaining**: ~3 (D-244 fix added a chunk ahead of the corpus)
+- **Cycles-remaining**: ~2 (JIT-execute path landed; corpus + gap-script remain)
 - **Continuity-memo**: §11.3 SIMD per-op gap analysis = v2 vs **median of (wasmtime, wazero, wasmer)**, flag ops
   lagging >3×, file Phase-15 debt. DONE: ch1 (`e6dd3f94`) wazero+wasmer in flake; ch2 (`843cc7de`)
   `run_bench.sh --compare={wazero,wasmer,all}` (all 4 switch-sites) + `pkgs.git` in flake (macOS /usr/bin/git is
   an xcrun shim that dies under `nix develop`, where the gap run must execute). Verified: `nix develop --command
   bash -c 'run_bench.sh --quick --bench=tinygo/arith --compare=all'` records 4 runtime rows, exit 0.
-  **ch3 BLOCKED — D-244 (corrected, 2nd dig)**: SIMD is **JIT-ONLY by design**; the interp has NO SIMD
-  execution (per-op interp handlers are `NotMigrated` stubs, no `@Vector` in `src/interp/`, `simd_assert_runner`
-  is JIT-execute vs the separate `spec_assert_runner_non_simd` interp runner — §9.12-E). `zwasm run` is ALWAYS
-  the interp (`engine_mode` discarded at `main.zig:179`), so it traps on SIMD. So §11.3 CANNOT bench zwasm via
-  `zwasm run` — it needs a **JIT-execute bench path** (zwasm JIT-compiles + runs the SIMD module + times, like
-  `simd_assert_runner` via `engine.runner.CompiledWasm`); none exists today. This is DESIGN-GRADE (engine/CLI
-  architecture → likely an ADR). **NEXT chunk = design + ADR the JIT-execute path**: cleanest = a `zwasm run
-  --engine=jit` CLI mode that honours `engine_mode` and routes through the JIT executor (also fixes the standalone
-  v0.1.0 product gap — the CLI currently can't run SIMD at all); lighter = a bench-only JIT runner exe. Then ch3
-  (author corpus) → ch4 (gap script). Scratch fixture: `private/spikes/simd-bench-corpus/i32x4_add.wat`.
-- **Exit-condition**: (after the JIT-execute path) a SIMD micro-bench corpus runs on zwasm-JIT + the 3 comparators
-  via `--compare=all`, emitting a per-op zwasm/median ratio table + Phase-15 debt for every op > 3×.
+  **JIT-execute path DONE** (`8011293a`, ADR-0136): `zwasm run --engine=jit` JIT-executes compute/SIMD modules
+  (D-244 partially discharged; interp stays default + full-WASI). Proven: a SIMD `_start` traps via interp, runs
+  via `--engine=jit` (exit 0); regression test in run.zig. `--engine=jit` is COMPUTE-ONLY (rejects `--dir`; no
+  WASI I/O yet) — exactly what SIMD micro-benches need. `[stack_probe]` debug line prints on STDERR (harmless;
+  stdout clean). **NEXT (ch3): author the SIMD micro-bench corpus** — per-op `.wat` (i32x4 add/mul, f32x4 ops,
+  shuffle, swizzle, dot, extmul, narrow, …) → `wat2wasm` → `bench/runners/wasm/simd/`; template proven at
+  `private/spikes/simd-bench-corpus/i32x4_add.wat`. Then **ch4**: wire `run_bench.sh` to run the zwasm row via
+  `run --engine=jit` for SIMD fixtures (a `--simd` inventory), `--compare=all`, + a gap-analysis script
+  (per-op `zwasm/median(wasmtime,wazero,wasmer)`, flag >3×, file Phase-15 debt).
+- **Exit-condition**: a SIMD micro-bench corpus runs on zwasm-JIT (`run --engine=jit`) + the 3 comparators via
+  `--compare=all`, emitting a per-op zwasm/median ratio table + Phase-15 debt for every op > 3×.
 
 §11.1/§11.2 phase-close-batch items (Windows realworld subset + windowsmini bench row + committed 3-host bench
 rows) remain for §11.P. §11.4 moved to Phase 15 (ADR-0135).
@@ -69,9 +68,10 @@ rows) remain for §11.P. §11.4 moved to Phase 15 (ADR-0135).
 
 ## Step 0.7 (next resume)
 
-Last ubuntu-verified CODE HEAD = `fcc9fe03` (D-243). Since then only shell/docs/ADR/flake/debt commits — none
-touch src/test, so NO ubuntu kick (non-code gap). THIS turn = pure investigation (D-244 root-caused, no code).
-Next cycle Step 0.7 = nothing to verify; the D-244 fix WILL be a src change → kick + verify then.
+THIS turn landed `8011293a` (CLI `--engine=jit` JIT-execute path — a real src change touching cli/) → ubuntu
+test-all kick fires against it. Step 0.7 next cycle = `tail -3 /tmp/ubuntu.log` mechanically; on FAIL revert to
+`fcc9fe03` (the last ubuntu-verified code HEAD; intervening commits were shell/docs only). Mac gate + lint +
+3-arch cross-compile were green pre-push.
 
 **Gate hygiene**: Step-5 Mac gate = `bash scripts/mac_gate.sh`. JIT corpus: `zig build test-spec-wasm-3.0-assert`
 (NO bogus `-Dno-run`); pick the exe by mtime (bare `head -1` = STALE). `ZWASM_SPEC_ENGINE=jit <exe>

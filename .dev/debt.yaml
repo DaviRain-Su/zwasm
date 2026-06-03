@@ -5,10 +5,15 @@
 entries:
   - id: "D-244"
     layer: "code"
-    status: "now"
+    status: "partial"
     description: |-
-      `zwasm run` traps `Unreachable` on ANY SIMD-128 op — the CLI cannot execute
-      wasm-2.0 SIMD modules. ROOT CAUSE (2026-06-03, §11.3 ch3, corrected on 2nd dig):
+      **PARTIALLY DISCHARGED 2026-06-03 (`8011293a`, ADR-0136): `zwasm run --engine=jit`
+      now JIT-executes compute/SIMD modules — the compute-SIMD CLI gap is closed and §11.3
+      is unblocked. RESIDUAL: WASI I/O + `proc_exit` exit-code under the JIT (the d-3
+      follow-up) — `--engine=jit` is compute-only; realworld WASI tools still need the
+      interp (default).** (Historical root cause below.)
+      `zwasm run` (default interp) traps `Unreachable` on ANY SIMD-128 op. ROOT CAUSE
+      (2026-06-03, §11.3 ch3, corrected on 2nd dig):
       **SIMD execution is JIT-ONLY by design; the interp has NO SIMD execution, and
       `zwasm run` is always the interp.** Evidence: (1) `test/spec/simd_assert_runner.zig:1`
       = "SIMD spec assertion runner — JIT-execute"; the interp-side runner is
