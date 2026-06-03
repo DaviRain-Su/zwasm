@@ -7,28 +7,37 @@ entries:
     layer: "code"
     status: "now"
     description: |-
-      `zwasm run --engine=jit` (ADR-0136, `8011293a`) SEGFAULTS in **ReleaseSafe** builds
-      — works in Debug. Crash: SIGSEGV at address 0x18 in std `rawFree`
-      (`Allocator.zig:160`), from `owned.deinit(allocator)` (`src/engine/runner.zig:366`)
-      in `runVoidExport`'s cleanup, on EVERY compute-only module (all 12 §11.3 SIMD
-      corpus fixtures + a hand-built `i32x4.add` `_start`). The Debug build + the
-      `runWasmJit` regression test PASS — the test only covers Debug, so the release-mode
-      crash shipped unnoticed. **Blocks §11.3 gap DATA**: `run_bench.sh` builds ReleaseSafe,
-      so every zwasm SIMD row records `null` (the run aborts). Localization so far: all
-      `RuntimeOwned` table/global buffers are alloc'd `len≥1` (safe to free); the faulting
-      free is one with a garbage ptr (~0x18) → an undefined field or a double-free exposed
-      only by ReleaseSafe (Debug's allocator/layout masks it). Probe attempts (std.debug.print
-      / std.posix.write at deinit entry) did NOT surface output before the abort — suspect the
-      probe build failed silently OR ReleaseSafe inlined/reordered; the next attempt needs a
-      verified-compiling probe AND must also bisect `compiled.deinit` (`runner.zig:356`, the
-      other defer). Discharge: root-cause the bad free, fix the init/free, AND add a
-      ReleaseSafe `runWasmJit` regression test (the Debug-only test is why this shipped).
-      NOT a regression to existing behaviour (--engine=jit is opt-in; interp default
-      unaffected) — but the new feature is release-broken until fixed.
+      Host→JIT calls do NOT preserve the host's callee-saved registers → ANY JIT
+      execution from the Zig host SEGV-corrupts the heap in **ReleaseSafe** (works in
+      Debug). Surfaced via `zwasm run --engine=jit` (ADR-0136, `8011293a`): exit 134 on
+      EVERY module incl. an EMPTY `_start` (so NOT body/SIMD/memory/deinit specific).
+      **ROOT CAUSE (2026-06-03, bisected):** the arm64 JIT prologue MOV-installs the pinned
+      runtime cohort (X19 host_dispatch_base, X24 typeidx_base, X28 vm_base, …; jit_abi.zig:9+)
+      from `rt` WITHOUT stack-saving the caller's X19–X28 (ADR-0017 sub-2d-ii / D-210), so the
+      JIT body CLOBBERS callee-saved regs and its epilogue can't restore them. But
+      `entry.invokeAndCheckVoid` calls the JIT via a plain `@call(.auto, f, .{rt})` with f a
+      `callconv(.c)` fn — a normal C call, where the caller (optimized Zig host) keeps LIVE
+      values in callee-saved X19–X28 across the call, trusting the callee to preserve them.
+      ReleaseSafe does keep live values there → the JIT clobbers them → the host then computes
+      with garbage (e.g. a slice ptr ~0x18) → SIGSEGV in the first `free` after the call
+      (`compiled.deinit`→`deinitFuncResult`, or `owned.deinit` — whichever runs first; both are
+      victims). Debug keeps nothing live in X19–X28 across the call → no corruption (luck).
+      BISECTION (the proof): skip `owned.deinit` → crash moves to `compiled.deinit:204`; skip
+      `callVoidNoArgs` (the JIT call) entirely → NO crash (deinits run clean). So the JIT call
+      is the corruptor, not the deinits. This is a LATENT PROJECT-WIDE host→JIT issue: all JIT
+      execution from Zig (spec runner, runI32Export, …) is ReleaseSafe-unsafe — masked only
+      because those run in Debug. `--engine=jit` is the first release host→JIT path, so it bit
+      first. **Blocks §11.3 gap DATA** (`run_bench.sh` builds ReleaseSafe → zwasm rows = null).
+      DISCHARGE: wrap the host→JIT entry boundary in an asm trampoline that saves/restores the
+      host callee-saved set around the `blr`/`call` (arm64 X19–X28 + FP/LR; x86_64 RBX/RBP/
+      R12–R15) — `entry.invokeAndCheck*`'s `@call` is the single seam. Survey whether a
+      register-preserving entry already exists (the spec runner's path) to route through. ADD a
+      **ReleaseSafe** `runWasmJit` regression test (the Debug-only test is why this shipped).
+      NOT a regression to existing behaviour (interp default unaffected; JIT was Debug-only).
     first_raised: "2026-06-03"
     last_reviewed: "2026-06-03"
     refs: |-
-      `src/engine/runner.zig:366` (owned.deinit) + `:356` (compiled.deinit); `src/engine/setup.zig` RuntimeOwned.deinit (~line 118); `src/cli/run.zig` runWasmJit + its Debug-only test; ADR-0136; ROADMAP §11.3 / 11.3-simd-gap bundle
+      `src/engine/codegen/shared/entry.zig` invokeAndCheckVoid (the `@call` seam) + callVoidNoArgs; `src/engine/codegen/shared/jit_abi.zig:9+` (cohort X19/X24/X28 = arm64 callee-saved); ADR-0017 sub-2d-ii (MOV-install cohort, not stack-save) + D-210; `src/cli/run.zig` runWasmJit (Debug-only test); ADR-0136; ROADMAP §11.3 / 11.3-simd-gap bundle
   - id: "D-244"
     layer: "code"
     status: "partial"
