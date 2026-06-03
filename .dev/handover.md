@@ -32,12 +32,12 @@
 - **Continuity-memo**: **run-1 (cycle-1) VALIDATED on windowsmini**: `run test` 2213→2237 pass, **12 fail→0**
   (≤4-arg GC value bugs cleared — arg_gprs approach sound), 19 crash→7. CYCLE-2 (`97b95bc9`, D-248): 6 ≥5-arg
   array ops Win64 stack-spill (`gc_marshal.routeArg` + `computeOutgoingMaxBytes` reserves Win64 shadow(32)/
-  stack(48) for GC ops; SysV byte-identical) → fixes the `array.fill`-class crashes (run-2 verifies). REMAINING
-  BLOCKER (separate from D-248): `throw_trampoline.test.zwasmThrowTrampoline: uncaught path` STILL crashes on
-  Win64 (code 3, SEGV at throw_trampoline.zig:132 dispatchThrow via :275) DESPITE the cycle-1 wrapper `.windows`
-  arm (tag→RCX). Same backtrace → NOT the tag-reg; likely RSP alignment into trampolineCore or a deref in
-  dispatchThrow/eh_registry on the Win64 path. TEST-ONLY but the ONLY Win64 JIT-EH coverage (spec corpus =
-  interp). Under investigation.
+  stack(48) for GC ops; SysV byte-identical) → fixes the `array.fill`-class crashes. throw_trampoline Win64 crash
+  FIX LANDED (`3c19f638`): root cause = RSP 16-byte misalignment — the test wrapper's `pushq %rbp` enters the
+  trampoline at ≡0 mod 16 but production JIT-CALL enters at ≡8 → trampolineCore reached misaligned → Win64
+  ABI-strict aligned-SSE prologue faults (SysV tolerates). `subq/addq $8` in the `.windows` wrapper arm restores
+  parity (test-only, Win64-arm-only). **run-2 (vs `3c19f638`) verifies BOTH cycle-2 array ops + the parity fix.**
+  Medium-high conf on parity; if it still crashes → in-body RSP parity differs, add an RSP-capture diagnostic.
 - **Exit-condition**: windowsmini `test-all` → `[run_remote_windows] OK` (0 crash for GC/EH JIT tests). D-248 =
   the array-op part; throw_trampoline = the EH-wrapper part (both in this bundle).
 
@@ -60,10 +60,10 @@ throw_trampoline fix if found first. (3) On windowsmini fully green: discharge D
 
 ## Step 0.7 (next resume)
 
-Cycle-1 commits (`4c51dea6`+`f725dcd6`) → ubuntu test-all = **GREEN exit 0** (SysV no-op confirmed, Step 0.7 SysV
-side PASS); windowsmini `test-all` (kicked vs `f725dcd6`) = the Win64 gate, IN FLIGHT (~90min). Step 0.7 next
-cycle: read `/tmp/windows.log` → did `throw_trampoline` (test-only fix) + `runner_gc_test struct.new_default` GC
-test go green? That verdict scopes the cycle-2 prologue/shadow-space fix (see Active bundle OPEN QUESTION).
+windowsmini run-2 kicked vs `3c19f638` (cycle-2 array-op stack-spill + throw_trampoline parity fix). Step 0.7
+next cycle: read `/tmp/windows.log` → `run test` crash count should drop to ~0 (the `array.fill`-class crashes
+gone via D-248; `throw_trampoline` uncaught-path PASS via the parity fix). If `[run_remote_windows] OK` →
+discharge D-248 + close the bundle. ubuntu+Mac already GREEN for the SysV-no-op changes (run-1 + local).
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile-check: `zig build test
 -Dtarget=x86_64-windows-gnu` (compile-only; "unable to execute" run-error = compile PASSED). ReleaseSafe
