@@ -45,26 +45,44 @@ pub const ValTypeVec = extern struct {
     data: ?[*]?*ValType,
 };
 
+// wasm_externkind_t (wasm.h): FUNC=0, GLOBAL=1, TABLE=2, MEMORY=3, TAG=4.
+pub const extern_func: u8 = 0;
+pub const extern_global: u8 = 1;
+pub const extern_table: u8 = 2;
+pub const extern_memory: u8 = 3;
+
+/// `wasm_externtype_t` — the shared header (a `kind` discriminant) the four
+/// concrete extern types embed as their FIRST field, so `*_as_externtype` /
+/// `wasm_externtype_as_*` are zero-alloc reinterpret casts (the upstream
+/// inheritance layout). An externtype pointer IS a concrete-type pointer.
+pub const ExternType = extern struct {
+    kind: u8,
+};
+
 /// Opaque `wasm_functype_t` — owns its param + result valtype vecs.
 pub const FuncType = extern struct {
+    kind: u8 = extern_func,
     params: ValTypeVec,
     results: ValTypeVec,
 };
 
 /// Opaque `wasm_globaltype_t` — owns its content valtype.
 pub const GlobalType = extern struct {
+    kind: u8 = extern_global,
     content: ?*ValType,
     mutability: u8,
 };
 
 /// Opaque `wasm_tabletype_t` — owns its element valtype + limits.
 pub const TableType = extern struct {
+    kind: u8 = extern_table,
     element: ?*ValType,
     limits: Limits,
 };
 
 /// Opaque `wasm_memorytype_t` — limits only.
 pub const MemoryType = extern struct {
+    kind: u8 = extern_memory,
     limits: Limits,
 };
 
@@ -291,6 +309,330 @@ pub export fn wasm_memorytype_copy(mt: ?*const MemoryType) callconv(.c) ?*Memory
 }
 
 // =====================================================================
+// externtype — reinterpret-cast views over the 4 concrete types
+// =====================================================================
+
+pub export fn wasm_externtype_kind(et: ?*const ExternType) callconv(.c) u8 {
+    return (et orelse return 0).kind;
+}
+
+// concrete → externtype: zero-alloc cast (kind is the shared first field).
+pub export fn wasm_functype_as_externtype(ft: ?*FuncType) callconv(.c) ?*ExternType {
+    return @ptrCast(ft);
+}
+pub export fn wasm_globaltype_as_externtype(gt: ?*GlobalType) callconv(.c) ?*ExternType {
+    return @ptrCast(gt);
+}
+pub export fn wasm_tabletype_as_externtype(tt: ?*TableType) callconv(.c) ?*ExternType {
+    return @ptrCast(tt);
+}
+pub export fn wasm_memorytype_as_externtype(mt: ?*MemoryType) callconv(.c) ?*ExternType {
+    return @ptrCast(mt);
+}
+pub export fn wasm_functype_as_externtype_const(ft: ?*const FuncType) callconv(.c) ?*const ExternType {
+    return @ptrCast(ft);
+}
+pub export fn wasm_globaltype_as_externtype_const(gt: ?*const GlobalType) callconv(.c) ?*const ExternType {
+    return @ptrCast(gt);
+}
+pub export fn wasm_tabletype_as_externtype_const(tt: ?*const TableType) callconv(.c) ?*const ExternType {
+    return @ptrCast(tt);
+}
+pub export fn wasm_memorytype_as_externtype_const(mt: ?*const MemoryType) callconv(.c) ?*const ExternType {
+    return @ptrCast(mt);
+}
+
+// externtype → concrete: checked cast (null on kind mismatch).
+pub export fn wasm_externtype_as_functype(et: ?*ExternType) callconv(.c) ?*FuncType {
+    const e = et orelse return null;
+    return if (e.kind == extern_func) @ptrCast(@alignCast(e)) else null;
+}
+pub export fn wasm_externtype_as_globaltype(et: ?*ExternType) callconv(.c) ?*GlobalType {
+    const e = et orelse return null;
+    return if (e.kind == extern_global) @ptrCast(@alignCast(e)) else null;
+}
+pub export fn wasm_externtype_as_tabletype(et: ?*ExternType) callconv(.c) ?*TableType {
+    const e = et orelse return null;
+    return if (e.kind == extern_table) @ptrCast(@alignCast(e)) else null;
+}
+pub export fn wasm_externtype_as_memorytype(et: ?*ExternType) callconv(.c) ?*MemoryType {
+    const e = et orelse return null;
+    return if (e.kind == extern_memory) @ptrCast(@alignCast(e)) else null;
+}
+pub export fn wasm_externtype_as_functype_const(et: ?*const ExternType) callconv(.c) ?*const FuncType {
+    const e = et orelse return null;
+    return if (e.kind == extern_func) @ptrCast(@alignCast(e)) else null;
+}
+pub export fn wasm_externtype_as_globaltype_const(et: ?*const ExternType) callconv(.c) ?*const GlobalType {
+    const e = et orelse return null;
+    return if (e.kind == extern_global) @ptrCast(@alignCast(e)) else null;
+}
+pub export fn wasm_externtype_as_tabletype_const(et: ?*const ExternType) callconv(.c) ?*const TableType {
+    const e = et orelse return null;
+    return if (e.kind == extern_table) @ptrCast(@alignCast(e)) else null;
+}
+pub export fn wasm_externtype_as_memorytype_const(et: ?*const ExternType) callconv(.c) ?*const MemoryType {
+    const e = et orelse return null;
+    return if (e.kind == extern_memory) @ptrCast(@alignCast(e)) else null;
+}
+
+// externtype delete/copy dispatch to the concrete type by kind.
+pub export fn wasm_externtype_delete(et: ?*ExternType) callconv(.c) void {
+    const e = et orelse return;
+    switch (e.kind) {
+        extern_func => wasm_functype_delete(@ptrCast(@alignCast(e))),
+        extern_global => wasm_globaltype_delete(@ptrCast(@alignCast(e))),
+        extern_table => wasm_tabletype_delete(@ptrCast(@alignCast(e))),
+        extern_memory => wasm_memorytype_delete(@ptrCast(@alignCast(e))),
+        else => {},
+    }
+}
+pub export fn wasm_externtype_copy(et: ?*const ExternType) callconv(.c) ?*ExternType {
+    const e = et orelse return null;
+    return switch (e.kind) {
+        extern_func => wasm_functype_as_externtype(wasm_functype_copy(@ptrCast(@alignCast(e)))),
+        extern_global => wasm_globaltype_as_externtype(wasm_globaltype_copy(@ptrCast(@alignCast(e)))),
+        extern_table => wasm_tabletype_as_externtype(wasm_tabletype_copy(@ptrCast(@alignCast(e)))),
+        extern_memory => wasm_memorytype_as_externtype(wasm_memorytype_copy(@ptrCast(@alignCast(e)))),
+        else => null,
+    };
+}
+
+/// `wasm_externtype_vec_t` — pointer-vec; delete cascades to element delete.
+pub const ExternTypeVec = extern struct {
+    size: usize,
+    data: ?[*]?*ExternType,
+};
+
+pub export fn wasm_externtype_vec_new_empty(out: ?*ExternTypeVec) callconv(.c) void {
+    (out orelse return).* = .{ .size = 0, .data = null };
+}
+pub export fn wasm_externtype_vec_new_uninitialized(out: ?*ExternTypeVec, size: usize) callconv(.c) void {
+    const o = out orelse return;
+    if (size == 0) {
+        o.* = .{ .size = 0, .data = null };
+        return;
+    }
+    const buf = ca.alloc(?*ExternType, size) catch {
+        o.* = .{ .size = 0, .data = null };
+        return;
+    };
+    @memset(buf, null);
+    o.* = .{ .size = size, .data = buf.ptr };
+}
+pub export fn wasm_externtype_vec_new(out: ?*ExternTypeVec, size: usize, src: ?[*]const ?*ExternType) callconv(.c) void {
+    const o = out orelse return;
+    if (size == 0 or src == null) {
+        o.* = .{ .size = 0, .data = null };
+        return;
+    }
+    const buf = ca.alloc(?*ExternType, size) catch {
+        o.* = .{ .size = 0, .data = null };
+        return;
+    };
+    @memcpy(buf, src.?[0..size]);
+    o.* = .{ .size = size, .data = buf.ptr };
+}
+pub export fn wasm_externtype_vec_delete(v: ?*ExternTypeVec) callconv(.c) void {
+    const handle = v orelse return;
+    if (handle.data) |dp| {
+        for (dp[0..handle.size]) |opt| {
+            if (opt) |e| wasm_externtype_delete(e);
+        }
+        ca.free(dp[0..handle.size]);
+    }
+    handle.* = .{ .size = 0, .data = null };
+}
+
+// =====================================================================
+// importtype / exporttype  (name = wasm_byte_vec_t)
+// =====================================================================
+
+const ByteVec = @import("vec.zig").ByteVec;
+
+/// Opaque `wasm_importtype_t` — owns its module/name byte vecs + externtype.
+pub const ImportType = extern struct {
+    module: ByteVec,
+    name: ByteVec,
+    et: ?*ExternType,
+};
+
+/// Opaque `wasm_exporttype_t` — owns its name byte vec + externtype.
+pub const ExportType = extern struct {
+    name: ByteVec,
+    et: ?*ExternType,
+};
+
+fn freeByteVec(bv: *ByteVec) void {
+    if (bv.data) |p| ca.free(p[0..bv.size]);
+    bv.* = .{ .size = 0, .data = null };
+}
+
+fn copyByteVec(src: ByteVec) ByteVec {
+    if (src.size == 0 or src.data == null) return .{ .size = 0, .data = null };
+    const buf = ca.alloc(u8, src.size) catch return .{ .size = 0, .data = null };
+    @memcpy(buf, src.data.?[0..src.size]);
+    return .{ .size = src.size, .data = buf.ptr };
+}
+
+pub export fn wasm_importtype_new(module: ?*ByteVec, name: ?*ByteVec, et: ?*ExternType) callconv(.c) ?*ImportType {
+    const it = ca.create(ImportType) catch return null;
+    it.* = .{
+        .module = if (module) |m| m.* else .{ .size = 0, .data = null },
+        .name = if (name) |n| n.* else .{ .size = 0, .data = null },
+        .et = et,
+    };
+    if (module) |m| m.* = .{ .size = 0, .data = null }; // ownership transferred
+    if (name) |n| n.* = .{ .size = 0, .data = null };
+    return it;
+}
+
+pub export fn wasm_importtype_delete(it: ?*ImportType) callconv(.c) void {
+    const i = it orelse return;
+    freeByteVec(&i.module);
+    freeByteVec(&i.name);
+    if (i.et) |e| wasm_externtype_delete(e);
+    ca.destroy(i);
+}
+
+pub export fn wasm_importtype_module(it: ?*const ImportType) callconv(.c) ?*const ByteVec {
+    return &(it orelse return null).module;
+}
+pub export fn wasm_importtype_name(it: ?*const ImportType) callconv(.c) ?*const ByteVec {
+    return &(it orelse return null).name;
+}
+pub export fn wasm_importtype_type(it: ?*const ImportType) callconv(.c) ?*const ExternType {
+    return (it orelse return null).et;
+}
+pub export fn wasm_importtype_copy(it: ?*const ImportType) callconv(.c) ?*ImportType {
+    const src = it orelse return null;
+    const ni = ca.create(ImportType) catch return null;
+    ni.* = .{
+        .module = copyByteVec(src.module),
+        .name = copyByteVec(src.name),
+        .et = if (src.et) |e| wasm_externtype_copy(e) else null,
+    };
+    return ni;
+}
+
+pub export fn wasm_exporttype_new(name: ?*ByteVec, et: ?*ExternType) callconv(.c) ?*ExportType {
+    const xt = ca.create(ExportType) catch return null;
+    xt.* = .{
+        .name = if (name) |n| n.* else .{ .size = 0, .data = null },
+        .et = et,
+    };
+    if (name) |n| n.* = .{ .size = 0, .data = null };
+    return xt;
+}
+
+pub export fn wasm_exporttype_delete(xt: ?*ExportType) callconv(.c) void {
+    const x = xt orelse return;
+    freeByteVec(&x.name);
+    if (x.et) |e| wasm_externtype_delete(e);
+    ca.destroy(x);
+}
+
+pub export fn wasm_exporttype_name(xt: ?*const ExportType) callconv(.c) ?*const ByteVec {
+    return &(xt orelse return null).name;
+}
+pub export fn wasm_exporttype_type(xt: ?*const ExportType) callconv(.c) ?*const ExternType {
+    return (xt orelse return null).et;
+}
+pub export fn wasm_exporttype_copy(xt: ?*const ExportType) callconv(.c) ?*ExportType {
+    const src = xt orelse return null;
+    const nx = ca.create(ExportType) catch return null;
+    nx.* = .{
+        .name = copyByteVec(src.name),
+        .et = if (src.et) |e| wasm_externtype_copy(e) else null,
+    };
+    return nx;
+}
+
+// importtype / exporttype vecs (pointer-vecs; delete cascades).
+pub const ImportTypeVec = extern struct { size: usize, data: ?[*]?*ImportType };
+pub const ExportTypeVec = extern struct { size: usize, data: ?[*]?*ExportType };
+
+pub export fn wasm_importtype_vec_new_empty(out: ?*ImportTypeVec) callconv(.c) void {
+    (out orelse return).* = .{ .size = 0, .data = null };
+}
+pub export fn wasm_importtype_vec_new_uninitialized(out: ?*ImportTypeVec, size: usize) callconv(.c) void {
+    const o = out orelse return;
+    if (size == 0) {
+        o.* = .{ .size = 0, .data = null };
+        return;
+    }
+    const buf = ca.alloc(?*ImportType, size) catch {
+        o.* = .{ .size = 0, .data = null };
+        return;
+    };
+    @memset(buf, null);
+    o.* = .{ .size = size, .data = buf.ptr };
+}
+pub export fn wasm_importtype_vec_new(out: ?*ImportTypeVec, size: usize, src: ?[*]const ?*ImportType) callconv(.c) void {
+    const o = out orelse return;
+    if (size == 0 or src == null) {
+        o.* = .{ .size = 0, .data = null };
+        return;
+    }
+    const buf = ca.alloc(?*ImportType, size) catch {
+        o.* = .{ .size = 0, .data = null };
+        return;
+    };
+    @memcpy(buf, src.?[0..size]);
+    o.* = .{ .size = size, .data = buf.ptr };
+}
+pub export fn wasm_importtype_vec_delete(v: ?*ImportTypeVec) callconv(.c) void {
+    const handle = v orelse return;
+    if (handle.data) |dp| {
+        for (dp[0..handle.size]) |opt| {
+            if (opt) |it| wasm_importtype_delete(it);
+        }
+        ca.free(dp[0..handle.size]);
+    }
+    handle.* = .{ .size = 0, .data = null };
+}
+
+pub export fn wasm_exporttype_vec_new_empty(out: ?*ExportTypeVec) callconv(.c) void {
+    (out orelse return).* = .{ .size = 0, .data = null };
+}
+pub export fn wasm_exporttype_vec_new_uninitialized(out: ?*ExportTypeVec, size: usize) callconv(.c) void {
+    const o = out orelse return;
+    if (size == 0) {
+        o.* = .{ .size = 0, .data = null };
+        return;
+    }
+    const buf = ca.alloc(?*ExportType, size) catch {
+        o.* = .{ .size = 0, .data = null };
+        return;
+    };
+    @memset(buf, null);
+    o.* = .{ .size = size, .data = buf.ptr };
+}
+pub export fn wasm_exporttype_vec_new(out: ?*ExportTypeVec, size: usize, src: ?[*]const ?*ExportType) callconv(.c) void {
+    const o = out orelse return;
+    if (size == 0 or src == null) {
+        o.* = .{ .size = 0, .data = null };
+        return;
+    }
+    const buf = ca.alloc(?*ExportType, size) catch {
+        o.* = .{ .size = 0, .data = null };
+        return;
+    };
+    @memcpy(buf, src.?[0..size]);
+    o.* = .{ .size = size, .data = buf.ptr };
+}
+pub export fn wasm_exporttype_vec_delete(v: ?*ExportTypeVec) callconv(.c) void {
+    const handle = v orelse return;
+    if (handle.data) |dp| {
+        for (dp[0..handle.size]) |opt| {
+            if (opt) |xt| wasm_exporttype_delete(xt);
+        }
+        ca.free(dp[0..handle.size]);
+    }
+    handle.* = .{ .size = 0, .data = null };
+}
+
+// =====================================================================
 // Tests
 // =====================================================================
 
@@ -360,4 +702,70 @@ test "tabletype + memorytype: limits round-trip" {
     const mt = wasm_memorytype_new(&lim).?;
     defer wasm_memorytype_delete(mt);
     try testing.expectEqual(@as(u32, 10), wasm_memorytype_limits(mt).?.max);
+}
+
+test "externtype: functype round-trips through as_externtype + kind + checked downcast" {
+    var pv: ValTypeVec = undefined;
+    var rv: ValTypeVec = undefined;
+    wasm_valtype_vec_new_empty(&pv);
+    wasm_valtype_vec_new_empty(&rv);
+    const ft = wasm_functype_new(&pv, &rv).?;
+    const et = wasm_functype_as_externtype(ft).?; // zero-alloc view
+    try testing.expectEqual(extern_func, wasm_externtype_kind(et));
+    try testing.expect(wasm_externtype_as_functype(et) == ft); // same object
+    try testing.expect(wasm_externtype_as_globaltype(et) == null); // kind mismatch
+    wasm_externtype_delete(et); // dispatches to functype_delete (frees the object once)
+}
+
+test "externtype: copy dispatches by kind (independent delete)" {
+    var lim: Limits = .{ .min = 2, .max = 4 };
+    const mt = wasm_memorytype_new(&lim).?;
+    const et = wasm_memorytype_as_externtype(mt).?;
+    const et2 = wasm_externtype_copy(et).?;
+    defer wasm_externtype_delete(et2);
+    defer wasm_externtype_delete(et);
+    try testing.expectEqual(extern_memory, wasm_externtype_kind(et2));
+    try testing.expectEqual(@as(u32, 4), wasm_externtype_as_memorytype(et2).?.limits.max);
+}
+
+test "importtype: module/name/type + owns externtype, delete frees all" {
+    var lim: Limits = .{ .min = 1, .max = 1 };
+    const et = wasm_tabletype_as_externtype(wasm_tabletype_new(wasm_valtype_new(129), &lim).?).?;
+    var mod: ByteVec = undefined;
+    var nm: ByteVec = undefined;
+    @import("vec.zig").wasm_byte_vec_new(&mod, 3, "env");
+    @import("vec.zig").wasm_byte_vec_new(&nm, 1, "t");
+    const it = wasm_importtype_new(&mod, &nm, et).?;
+    defer wasm_importtype_delete(it);
+    try testing.expectEqual(@as(usize, 0), mod.size); // consumed
+    try testing.expectEqual(@as(usize, 3), wasm_importtype_module(it).?.size);
+    try testing.expectEqual(extern_table, wasm_externtype_kind(wasm_importtype_type(it).?));
+}
+
+test "exporttype: name/type + copy is independent" {
+    var lim: Limits = .{ .min = 0, .max = 0xffff_ffff };
+    const et = wasm_memorytype_as_externtype(wasm_memorytype_new(&lim).?).?;
+    var nm: ByteVec = undefined;
+    @import("vec.zig").wasm_byte_vec_new(&nm, 3, "mem");
+    const xt = wasm_exporttype_new(&nm, et).?;
+    defer wasm_exporttype_delete(xt);
+    const xt2 = wasm_exporttype_copy(xt).?;
+    defer wasm_exporttype_delete(xt2); // independent
+    try testing.expectEqual(@as(usize, 3), wasm_exporttype_name(xt2).?.size);
+    try testing.expectEqual(extern_memory, wasm_externtype_kind(wasm_exporttype_type(xt2).?));
+}
+
+test "importtype_vec: delete cascades to element delete" {
+    var lim: Limits = .{ .min = 1, .max = 1 };
+    var mod: ByteVec = undefined;
+    var nm: ByteVec = undefined;
+    @import("vec.zig").wasm_byte_vec_new(&mod, 1, "a");
+    @import("vec.zig").wasm_byte_vec_new(&nm, 1, "b");
+    const it = wasm_importtype_new(&mod, &nm, wasm_memorytype_as_externtype(wasm_memorytype_new(&lim).?).?).?;
+    var elems = [_]?*ImportType{it};
+    var vec: ImportTypeVec = undefined;
+    wasm_importtype_vec_new(&vec, 1, &elems);
+    try testing.expectEqual(@as(usize, 1), vec.size);
+    wasm_importtype_vec_delete(&vec); // frees the importtype (+ its name vecs + externtype)
+    try testing.expectEqual(@as(usize, 0), vec.size);
 }

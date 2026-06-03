@@ -119,6 +119,56 @@ pub const wasm_memorytype_delete = types.wasm_memorytype_delete;
 pub const wasm_memorytype_limits = types.wasm_memorytype_limits;
 pub const wasm_memorytype_copy = types.wasm_memorytype_copy;
 
+pub const ExternType = types.ExternType;
+pub const ExternTypeVec = types.ExternTypeVec;
+pub const wasm_externtype_kind = types.wasm_externtype_kind;
+pub const wasm_externtype_delete = types.wasm_externtype_delete;
+pub const wasm_externtype_copy = types.wasm_externtype_copy;
+pub const wasm_functype_as_externtype = types.wasm_functype_as_externtype;
+pub const wasm_globaltype_as_externtype = types.wasm_globaltype_as_externtype;
+pub const wasm_tabletype_as_externtype = types.wasm_tabletype_as_externtype;
+pub const wasm_memorytype_as_externtype = types.wasm_memorytype_as_externtype;
+pub const wasm_functype_as_externtype_const = types.wasm_functype_as_externtype_const;
+pub const wasm_globaltype_as_externtype_const = types.wasm_globaltype_as_externtype_const;
+pub const wasm_tabletype_as_externtype_const = types.wasm_tabletype_as_externtype_const;
+pub const wasm_memorytype_as_externtype_const = types.wasm_memorytype_as_externtype_const;
+pub const wasm_externtype_as_functype = types.wasm_externtype_as_functype;
+pub const wasm_externtype_as_globaltype = types.wasm_externtype_as_globaltype;
+pub const wasm_externtype_as_tabletype = types.wasm_externtype_as_tabletype;
+pub const wasm_externtype_as_memorytype = types.wasm_externtype_as_memorytype;
+pub const wasm_externtype_as_functype_const = types.wasm_externtype_as_functype_const;
+pub const wasm_externtype_as_globaltype_const = types.wasm_externtype_as_globaltype_const;
+pub const wasm_externtype_as_tabletype_const = types.wasm_externtype_as_tabletype_const;
+pub const wasm_externtype_as_memorytype_const = types.wasm_externtype_as_memorytype_const;
+pub const wasm_externtype_vec_new_empty = types.wasm_externtype_vec_new_empty;
+pub const wasm_externtype_vec_new_uninitialized = types.wasm_externtype_vec_new_uninitialized;
+pub const wasm_externtype_vec_new = types.wasm_externtype_vec_new;
+pub const wasm_externtype_vec_delete = types.wasm_externtype_vec_delete;
+
+pub const ImportType = types.ImportType;
+pub const ExportType = types.ExportType;
+pub const ImportTypeVec = types.ImportTypeVec;
+pub const ExportTypeVec = types.ExportTypeVec;
+pub const wasm_importtype_new = types.wasm_importtype_new;
+pub const wasm_importtype_delete = types.wasm_importtype_delete;
+pub const wasm_importtype_module = types.wasm_importtype_module;
+pub const wasm_importtype_name = types.wasm_importtype_name;
+pub const wasm_importtype_type = types.wasm_importtype_type;
+pub const wasm_importtype_copy = types.wasm_importtype_copy;
+pub const wasm_importtype_vec_new_empty = types.wasm_importtype_vec_new_empty;
+pub const wasm_importtype_vec_new_uninitialized = types.wasm_importtype_vec_new_uninitialized;
+pub const wasm_importtype_vec_new = types.wasm_importtype_vec_new;
+pub const wasm_importtype_vec_delete = types.wasm_importtype_vec_delete;
+pub const wasm_exporttype_new = types.wasm_exporttype_new;
+pub const wasm_exporttype_delete = types.wasm_exporttype_delete;
+pub const wasm_exporttype_name = types.wasm_exporttype_name;
+pub const wasm_exporttype_type = types.wasm_exporttype_type;
+pub const wasm_exporttype_copy = types.wasm_exporttype_copy;
+pub const wasm_exporttype_vec_new_empty = types.wasm_exporttype_vec_new_empty;
+pub const wasm_exporttype_vec_new_uninitialized = types.wasm_exporttype_vec_new_uninitialized;
+pub const wasm_exporttype_vec_new = types.wasm_exporttype_vec_new;
+pub const wasm_exporttype_vec_delete = types.wasm_exporttype_vec_delete;
+
 // ============================================================
 // Re-exports — instance.zig
 // ============================================================
