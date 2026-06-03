@@ -1555,16 +1555,20 @@ to wasmtime (per v1 D122 self-assessment) is in scope where
 Phase 11's gap profile + a feasibility-supported
 debt entry name a candidate.
 
-**GC reclamation + precise rooting** (moved here per ADR-0135; ex-§11.4,
-D-211): the Phase-10 collector is non-moving + β no-reclaim (mark-sweep
-wired, dead bytes leak per `collector_mark_sweep.zig:214`). Phase 15 adds
-actual reclamation (free-list reuse / compaction per ADR-0115 §10) and,
-as the paired prerequisite, GC-on-JIT **precise rooting** — a stack-map
-root walker (`zir.GcRootMap`, currently an empty placeholder) + a
-conservative native-stack scan (ADR-0128 §2). Deferred to here because
-rooting is untestable until something is actually freed (a missed root
-can only UAF post-reclamation); the no-reclaim model is correctness-safe
-in the interim. Zero codegen change (op-emit already landed in §10.G).
+**GC reclamation + conservative rooting** (moved here per ADR-0135; ex-§11.4,
+D-211; closed `be4357be`): the Phase-10 collector was non-moving + β no-reclaim
+(mark-sweep wired, dead bytes leaked). §15.1 added actual reclamation (external
+free-list reuse, ADR-0147) + a heap-pressure collection trigger (ADR-0146) +
+an object-start-validated conservative native-stack scan (ADR-0128 §2) — the
+rooting mechanism a NON-moving collector needs. ADR-0135's safety argument (a
+missed root can only UAF once something frees) is satisfied by the conservative
+scan landing WITH reclamation. **Re-scoped at close (ADR-0148 carve-out)**: the
+precise `zir.GcRootMap` stack-map walker + §12.5 AOT GC-root serialization are
+NOT required for a non-moving collector (ADR-0128 §2) and have no committed
+consumer → deferred to **D-211** (barrier: a moving collector OR AOT GC-root
+serialization). The JIT alloc trampoline's own collection trigger (separate
+`*JitRuntime` root model) = **D-258**; interp reclamation reclaims JIT-allocated
+dead objects whenever the interp path triggers. Zero codegen change.
 
 **Substrate inherited from §9.8b/8b.1 + 8b.2** (per ADR-0040
 migration):
@@ -1611,7 +1615,7 @@ migration):
 | Row  | Task                                                                                                                                                                                       | Status |
 |------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------|
 | 15.0 | Open §15 inline + flip Phase Status widget (Phase 14 → DONE; Phase 15 → IN-PROGRESS).                                                                                                     | [x]  |
-| 15.1 | **GC reclamation + precise rooting** (ex-§11.4 / D-211, ADR-0135; co-defines `GcRootMap` with §12.5 AOT stack-map per ADR-0141): free-list reuse / compaction (ADR-0115 §10) + `zir.GcRootMap` stack-map root walker + conservative native-stack scan (ADR-0128 §2). Mac-local. | [ ]  |
+| 15.1 | **GC reclamation + conservative rooting** (non-moving; ADR-0128 §2 + ADR-0146/0147/0148): external free-list reuse (ADR-0147) + heap-pressure collection trigger (ADR-0146) + object-start-validated conservative native-stack scan (ADR-0128 §2). Bounded-cursor proof landed (`be4357be`). **Re-scoped (ADR-0148 carve-out)**: the precise `zir.GcRootMap` stack-map walker + §12.5 AOT GC-root serialization are NOT needed for a non-moving collector (ADR-0128 §2) → deferred to **D-211** (barrier: a moving collector OR AOT GC-root serialization). JIT-trampoline collection trigger = **D-258**. Mac-local. | [x]  |
 | 15.2 | **Coalescer detection logic** (on the §9.8b/8b.1 scaffolding): operand-stack vreg-numbering sim + same-slot-event subscription vs the LIFO free-pool. Exit: ≥5% bench-delta on loop-heavy fixtures. | [ ]  |
 | 15.3 | **Class-aware allocator** (dual-pool GPR/FP, liveness type-tagging, tighter `spillBytes()`; ADR-0038/0040). Exit: ≥3% FP-heavy; combined coalescer+class-aware ≥10% on 3 v1-class fixtures. | [ ]  |
 | 15.4 | **SIMD perf ports** — v1 W43 (SIMD addr cache) / W44 (reg class) / W45 (SIMD loop persistence) + W54-class loop-invariant hoist, as clean additions on the v2 substrate; + the Phase-11 gap candidates (AVX/CPUID, MOVAPS peephole, SIMD coalescing) where gap-justified; **D-246** arm64 `dot`/`extmul` emit hole. | [ ]  |
