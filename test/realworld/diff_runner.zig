@@ -36,6 +36,20 @@ const std = @import("std");
 const zwasm = @import("zwasm");
 const cli_run = zwasm.cli.run;
 
+/// Fixtures that need a writable WASI preopen to run to completion (they
+/// `path_open` a file relative to a preopen dir). The diff runner hands
+/// BOTH wasmtime and v2 the same scratch dir mapped at guest "." so their
+/// stdout matches byte-for-byte (D-243). Self-cleaning fixtures (create →
+/// write → read → unlink) can share one scratch dir across the two runs.
+fn fixtureNeedsPreopen(name: []const u8) bool {
+    return std.mem.eql(u8, name, "rust_file_io.wasm");
+}
+
+/// cwd-relative scratch dir handed to needs-preopen fixtures as guest ".".
+/// The wasmtime subprocess inherits the runner's cwd, so both runtimes
+/// resolve the same host path. Recreated empty per run.
+const preopen_scratch = "zig-out/diff-preopen-scratch";
+
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const gpa = init.gpa;
@@ -101,13 +115,32 @@ pub fn main(init: std.process.Init) !void {
         };
         defer gpa.free(bytes);
 
+        const needs_preopen = fixtureNeedsPreopen(entry.name);
+        if (needs_preopen) {
+            // Fresh empty scratch dir for both runtimes (guest sees it as ".").
+            cwd.deleteTree(io, preopen_scratch) catch {};
+            cwd.createDirPath(io, preopen_scratch) catch |err| {
+                try stdout.print("SKIP-V2-PREOPEN  {s}: createDirPath {s}\n", .{ entry.name, @errorName(err) });
+                skipped_v2 += 1;
+                continue;
+            };
+        }
+        defer if (needs_preopen) {
+            cwd.deleteTree(io, preopen_scratch) catch {};
+        };
+
         // Spawn wasmtime, capturing stdout. wasmtime exits with
         // the guest's proc_exit code (0 on success); a non-zero
         // exit + non-empty stderr usually means the guest itself
         // failed, but we still try the byte compare since that
-        // is what §9.6 / 6.F measures.
+        // is what §9.6 / 6.F measures. Needs-preopen fixtures get
+        // `--dir <scratch>::.` (wasmtime host::guest syntax).
+        const wt_argv: []const []const u8 = if (needs_preopen)
+            &.{ wasmtime_path, "run", "--dir", preopen_scratch ++ "::.", fixture_path }
+        else
+            &.{ wasmtime_path, "run", fixture_path };
         const wt_result = std.process.run(gpa, io, .{
-            .argv = &[_][]const u8{ wasmtime_path, "run", fixture_path },
+            .argv = wt_argv,
         }) catch |err| {
             try stdout.print("SKIP-WASMTIME-FAIL  {s}: {s}\n", .{ entry.name, @errorName(err) });
             skipped_wasmtime_fail += 1;
@@ -124,7 +157,12 @@ pub fn main(init: std.process.Init) !void {
         // so guests like `c_hello_wasi` that print argv[0] produce
         // identical bytes.
         const v2_argv: [1][]const u8 = .{entry.name};
-        const v2_result = cli_run.runWasmCaptured(gpa, io, bytes, &v2_argv, &v2_stdout, null);
+        const v2_result = if (needs_preopen)
+            cli_run.runWasmCapturedOpts(gpa, io, bytes, &v2_argv, &v2_stdout, null, &.{
+                .{ .host_path = preopen_scratch, .guest_path = "." },
+            })
+        else
+            cli_run.runWasmCaptured(gpa, io, bytes, &v2_argv, &v2_stdout, null);
         const v2_exit: u8 = v2_result catch |err| {
             try stdout.print("SKIP-V2-{s}  {s}\n", .{ @errorName(err), entry.name });
             skipped_v2 += 1;
@@ -133,17 +171,17 @@ pub fn main(init: std.process.Init) !void {
 
         // v2 trapped / exited non-zero where wasmtime ran to a clean exit
         // (0) = v2 could NOT complete the run — a v2 limitation, not an
-        // output regression. Today: standard-Go binaries CallStackExhausted
-        // (the 256-frame interp cap is too shallow for Go's runtime init,
-        // D-242). Categorise skipped-v2, consistent with instantiate-fail
-        // skips. Both-completed-but-different-output still falls through to
-        // MISMATCH below, so genuine output regressions are NOT masked.
+        // output regression. Categorise skipped-v2, consistent with
+        // instantiate-fail skips. Both-completed-but-different-output still
+        // falls through to MISMATCH below, so genuine output regressions are
+        // NOT masked. (The standard-Go CallStackExhausted case that used to
+        // land here was the label-stack depth bug, resolved in D-242.)
         const wt_exit: u8 = switch (wt_result.term) {
             .exited => |c| c,
             else => 1,
         };
         if (v2_exit != 0 and wt_exit == 0) {
-            try stdout.print("SKIP-V2-TRAP  {s} (v2 exit={d}, wasmtime exit=0 — v2 could not complete; D-242)\n", .{ entry.name, v2_exit });
+            try stdout.print("SKIP-V2-TRAP  {s} (v2 exit={d}, wasmtime exit=0 — v2 could not complete)\n", .{ entry.name, v2_exit });
             skipped_v2 += 1;
             continue;
         }
