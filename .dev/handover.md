@@ -27,25 +27,27 @@
   **GATE TRAP**: corpus exe MUST be picked by mtime (`find … -exec ls -t {} + | head -1`); bare `head -1` = STALE.
 - **Watch**: `runner_test.zig` ~1415 / `compile.zig` 1223 / `runner_gc_test.zig` 1476 / `jit_abi.zig` 1350 (WARN, < hard 2000).
 
-## Active task — §10.P FORMAL CLOSE (spec-corpus exit MET; now gated on debt-discharge)  **NEXT**
+## Active task — §10.P FORMAL CLOSE (close-eligible; run the audited close)  **NEXT**
 
-The ADR-0133 spec-corpus exit (I24) is **MET** as of `dbcfff1b`: interp 100% + JIT 0 genuine fails (memory64
-fail=1 = D-234 tracked-harness, §2) + every JIT skip/modrej allowlisted (8 eligibility-gate "scalar 0/1-arg" +
-"type-subtyping run unwired"; all 59 modrej = multi-memory→§14). NO non-allowlisted JIT modrej remain.
+**Phase 10 is CLOSE-ELIGIBLE.** `check_phase10_close_invariants.sh` = **16 PASS / 9 SKIP / 0 FAIL** →
+"close-eligible (invariants satisfied)". The ADR-0133 spec-corpus exit (I24) is MET (`dbcfff1b`: interp 100% +
+JIT 0 genuine fails, memory64 fail=1 = D-234 harness + all skips/modrej allowlisted). I18 discharged this turn:
+the 14 now-debts → 0 (deleted 5 resolved: D-199/200/201/218/220; re-classified 9 deferred to blocked-by/note).
 
-But **`check_phase10_close_invariants.sh` = 15 PASS / 9 SKIP / 1 FAIL** — the formal §10.P flip is gated by:
-- **I18 (FAIL)**: `debt.yaml has 14 now-status entries of 64; discharge before Phase 10 close`. → NEXT WORK:
-  sweep the 14 `now` debts (`yq -r '.entries[] | select(.status=="now") | .id' .dev/debt.yaml`) — discharge
-  (delete) the resolved ones, re-classify the genuinely-deferred ones to `blocked-by`/later-phase with a
-  predicate. This is the multi-cycle path to §10.P; do it as a bundle.
-- The 9 SKIPs are close-cycle checks (I3/I5/I11/I20/I23 = run-at-close; I14→Phase 13, I16→Phase 11 rooting,
-  I21 realworld producers, I24 = the now-MET spec exit). Verify each at the close cycle.
+**NEXT = the formal close procedure (one focused turn):**
+1. **MANDATORY `audit_scaffolding`** (phase-boundary trigger; weight §F debt-coherence — the sweep is fresh).
+   block finding → fix-local-or-ADR, both continue.
+2. Flip §10.P `[x]` in ROADMAP §9.10 (routine, no ADR per §18) + Phase Status widget Phase 10 → DONE.
+3. Backfill §10 SHA pointers; open **Phase 11** (widget IN-PROGRESS + expand task table — first row = GC
+   reclamation / rooting per ADR-0128 §2, the D-211 follow-on).
+4. windowsmini phase-boundary reconciliation — per user policy autonomous loop DEFERS windowsmini + batch-
+   resolves; note it deferred, don't block the close.
 
-After I18 clears: re-run the invariant script (expect 0 FAIL) → flip §10.P `[x]` (routine, no ADR) →
-**phase boundary: mandatory `audit_scaffolding`** → open Phase 11 → windowsmini phase-boundary reconciliation.
+The 9 invariant SKIPs are close-cycle/later-phase checks (I3/I5/I11/I20/I23 run-at-close; I14→Phase 13,
+I16/I24 = now-met, I21 realworld producers). Verify at the close.
 
-Other open: **D-210** (cross-module frame-consuming TC cohort stack-save — NOT a corpus blocker; terminating
-programs correct), **D-238** (x86_64 EH parity), realworld GC/EH/TC producers.
+Other open (all blocked-by/note now): **D-210** (cross-module TC cohort), **D-211** (GC rooting→Phase 11),
+**D-238** (x86_64 EH parity), **D-234** (memory64 harness), realworld GC/EH/TC producers.
 
 **§10-scope: RESOLVED** (ADR-0133) — autonomous. Future cross-phase mismatches: re-sequence per ADR-0132 (no stop).
 
@@ -63,12 +65,10 @@ programs correct), **D-238** (x86_64 EH parity), realworld GC/EH/TC producers.
 
 ## Step 0.7 (next resume)
 
-THIS turn = multi-table return_call_indirect (`dbcfff1b`, CODE): disassembled func[36] (wasm-tools print) →
-NOT in a try_table, just tables 0/1/2 → fix was same-module multi-table support (mirror emitCallIndirect),
-both arches, x86_64+aarch64 cross-compile clean, full mac_gate green (test-all + lint). tail-call 31→71.
-**§10.P spec-corpus exit (I24) now MET**; formal close gated on I18 (14 now-debts) per close-invariant script.
-**ubuntu kick SENT** against `dbcfff1b` — Step 0.7 next cycle MUST `tail -3 /tmp/ubuntu.log`; RED → revert this
-turn's commits to `ae7d1f6a` (last ubuntu-verified). Next → I18 debt-discharge sweep toward §10.P close.
+THIS turn = I18 debt-discharge sweep (DOCS-ONLY): verified `dbcfff1b` ubuntu OK (`eba86890`), then swept the 14
+now-debts → 0 (5 deleted resolved, 9 re-classified blocked-by/note). `check_phase10_close_invariants.sh` now
+**16 PASS / 9 SKIP / 0 FAIL** → Phase 10 close-eligible. NO code change → NO ubuntu kick (debt.yaml/handover
+only; Step 0.7 next cycle = first-resume exception, nothing to verify). Next → the audited §10.P formal close.
 
 **Gate hygiene**: Step-5 Mac gate = `bash scripts/mac_gate.sh`. JIT corpus: `zig build test-spec-wasm-3.0-assert`
 (NO bogus `-Dno-run`); **pick the exe by mtime** — `/usr/bin/find .zig-cache/o -name zwasm-spec-wasm-3-0-assert
