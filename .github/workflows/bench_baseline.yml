@@ -1,0 +1,100 @@
+# bench_baseline.yml — record the per-host interp wall-clock floor
+# (`bench/baseline_v1_regression.yaml`, the §9.6/6.4 JIT-vs-interp
+# comparison floor) on each gate arch, on demand.
+#
+# Trigger: **manual only** (`workflow_dispatch`) — `gh workflow run
+# bench_baseline.yml --ref zwasm-from-scratch` or the Actions UI.
+# Scope: 2-host (Mac + Linux) per ADR-0137; the windows-2022 leg is
+# deferred (D-249 — hyperfine absent on the windows path).
+#
+# The baseline is per-host ("this host, this commit, current interp")
+# and is compared against the LATEST, not historical drift — so each
+# arch's run is uploaded as an ARTIFACT (not committed; that would
+# clobber a local-dev machine's floor).
+
+name: bench_baseline
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-baseline-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    name: baseline (${{ matrix.name }})
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: aarch64-macos
+            runs-on: macos-15
+          - name: x86_64-linux
+            runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Cache Zig 0.16.0
+        id: cache-zig
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/zig-0.16.0
+          key: zig-0.16.0-${{ matrix.name }}
+
+      - name: Install Zig 0.16.0
+        if: steps.cache-zig.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.local
+          case "${{ matrix.name }}" in
+            aarch64-macos) dir=zig-aarch64-macos-0.16.0 ;;
+            x86_64-linux)  dir=zig-x86_64-linux-0.16.0 ;;
+            *) echo "unexpected matrix name ${{ matrix.name }}" >&2; exit 1 ;;
+          esac
+          curl -fsSL "https://ziglang.org/download/0.16.0/${dir}.tar.xz" -o /tmp/zig.tar.xz
+          tar -xJf /tmp/zig.tar.xz -C ~/.local
+          mv "$HOME/.local/${dir}" "$HOME/.local/zig-0.16.0"
+
+      - name: Add Zig to PATH
+        shell: bash
+        run: echo "$HOME/.local/zig-0.16.0" >> "$GITHUB_PATH"
+
+      - name: Install hyperfine (macOS)
+        if: runner.os == 'macOS'
+        run: brew install hyperfine
+
+      - name: Install hyperfine (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y hyperfine
+
+      - name: Verify toolchain
+        shell: bash
+        run: |
+          zig version
+          hyperfine --version
+          python3 --version
+
+      - name: Record baseline
+        shell: bash
+        run: bash scripts/record_baseline_v1_regression.sh
+
+      - name: Upload baseline artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-${{ matrix.name }}
+          path: bench/baseline_v1_regression.yaml
+          if-no-files-found: error
+          retention-days: 14
