@@ -17,17 +17,21 @@
   `6f721b6b` — externtype is the shared `kind`-header the 4 types embed, so `as_externtype`/`externtype_as_*`
   are zero-alloc reinterpret casts (`@ptrCast(@alignCast(...))` on downcast); importtype/exporttype + their
   vecs (consume name byte-vecs + own the externtype). Upstream ownership throughout. 🔒 = END conformance gate.
+- §13.2 (c) **wasm_module_imports** `80131306` — `api/module_introspect.zig` (NEW; extracted per ADR-0099 §D2
+  P3 / D-171, keeping instance.zig under its 3200 exempt cap): decodes the import section → importtype_vec
+  (func/global/table/memory externtypes; tag imports skipped — no base tagtype). `valKindOf` maps zir.ValType →
+  wasm_valkind. instance.zig 3207→3044.
 
 ## Next task (autonomous)
 
-§13.2 next category — **module_imports/exports** (now unblocked: importtype/exporttype exist). `wasm_module_
-imports(module, own importtype_vec* out)` + `wasm_module_exports(...exporttype_vec*)` (wasm.h:419-420): decode
-the module's import/export sections (Module lives in `api/instance.zig`; `sections.decodeImports/decodeExports`
-give module+name+kind+typeidx) → build `wasm_importtype_t`/`exporttype_t` (name byte-vecs + an externtype built
-from the func/global/table/memory type) per entry. Goes in `instance.zig` (Module-coupled) using the
-`api/types.zig` constructors. Then the remaining §13.2: func/global/table/memory `_new` (Store-coupled host
-entities), `*_as_extern[_const]` conversions, frames/foreign + trap_origin/trace, then §13.3 (wasi.h builders).
-Step 0: how `instance.zig` decodes a Module's sections + the funcidx→functype mapping.
+§13.2 next — **wasm_module_exports** in `api/module_introspect.zig` (reuse `valKindOf`/`buildValTypeVec`/
+`buildImportExternType` + the byte-vec/list pattern from `wasm_module_imports`). Harder than imports: exports
+(`sections.Export {name, kind, idx}`) carry only an INDEX into the index space, so resolving the export's type
+needs the full module decode: func idx → (import-func typeidxs ++ func-section typeidxs)[idx] → functype; global/
+table/memory idx → (import prefix ++ that section)[idx] → the type. Build the func/global/table/memory index
+spaces from imports + the func/table/memory/global sections, then map each export's idx → externtype →
+`wasm_exporttype_new`. Then the remaining §13.2: func/global/table/memory `_new` (Store-coupled), `*_as_extern
+[_const]`, frames/foreign + trap_origin/trace; then §13.3 (wasi.h builders). gap: `.dev/phase13_capi_gap.md`.
 
 ## Phase-12 close note
 
@@ -46,10 +50,10 @@ prose. Standing `soon` (not Phase-12): 10 ADR + 10 lesson `<backfill>` markers; 
 
 ## Step 0.7 (next resume)
 
-This turn landed §13.2 externtype + import/export (`6f721b6b`, `src/api/types.zig`): Mac test+build(C-API lib)+
-lint+zone green. An ubuntu `test` is kicked against this turn's HEAD → next resume `tail /tmp/ubuntu.log` for OK
-(pure-data + c_allocator, host-portable; verifies the `@alignCast` downcasts + test block on x86_64). Prior
-ubuntu `0c6dd273` OK; windowsmini `0810b339` reconcile GREEN.
+This turn landed §13.2 `wasm_module_imports` (`80131306`, new `api/module_introspect.zig` extracted from
+instance.zig): Mac test+build(C-API lib)+lint+zone green. An ubuntu `test` is kicked against this turn's HEAD →
+next resume `tail /tmp/ubuntu.log` for OK (decode + c_allocator, host-portable; x86_64 link + test block). Prior
+ubuntu `2e983b67` OK; windowsmini `0810b339` reconcile GREEN.
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile: `zig build test
 -Dtarget=x86_64-windows-gnu` (compile-only). 3-host reconcile = phase boundary.
