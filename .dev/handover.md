@@ -3,62 +3,58 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
+## Active bundle
+
+- **Bundle-ID**: D-256-fuzz-infra (build the §3-scope fuzz infrastructure; unblocks §14.3)
+- **Cycles-remaining**: ~4–6 (corpus gen → loader → test-fuzz step → differential oracle)
+- **Continuity-memo**: fuzz infra is ABSENT (no `test/fuzz/`, no `test-fuzz` step). MVP build order:
+  (1) `test/fuzz/fuzz_loader.zig` — take a `[]u8` blob → run through `parse` → `validate` (+ optionally
+  interp a `_start`/exported func), catching panics/crashes, no false-positive on legitimate parse/validate
+  rejects (those return errors, not crashes); (2) `zig build test-fuzz` step running the loader over a small
+  committed seed corpus + a `wasm-tools smith`-generated batch (smith is in flake.nix; gen Mac-only like the
+  realworld fixtures); (3) wire `test-fuzz` into test-all (smoke) — full campaigns are the nightly (§14.3);
+  (4) differential oracle (interp vs JIT, or vs wasmtime) as a later cycle. Survey v1's fuzz approach +
+  `std.testing.fuzz` (Zig 0.16) + the parse/validate entry signatures first.
+- **Exit-condition**: `zig build test-fuzz` exists + green on Mac (runs N≥5 smith/seed modules through
+  parse+validate without false-crash); then §14.3 `nightly.yml` can wire the campaign.
+
 ## Current state
 
-- **Phase 13 (C API) DONE** (closed `<this turn>`, ADR-0144). **Phase 14 (CI matrix infrastructure)
-  IN-PROGRESS.** Phase 12 (AOT) DONE.
-- **Phase 13 recap**: full wasm-c-api surface (§13.2), conformance suite fail=0 (§13.4, in test-all),
-  host examples (§13.5: c_host + zig_host 3-OS, rust_host Mac-only ADR-0142/D-254), wasi.h re-scoped
-  honest (§13.3: inherit_argv/env/preopen_dir deferred, ADR-0143/D-255). Deferred: D-253 (host_info/
-  as_ref, cap-blocked).
-- **§13.P close (ADR-0144)**: audit_scaffolding **0 block** (`private/audit-2026-06-04-p13close.md`).
-  Phase-13 deliverables verified **3-host-green** (conformance + c_host + zig_host pass on windowsmini,
-  Build Summary 61/63). The 3-host reconcile was **re-scoped** to decouple Phase-13 from the SOLE
-  windows failure = **D-245 win64 host→JIT SIMD-JIT flakiness** (Phase-11 JIT-ABI, seed-flaky, NOT
-  Phase-13 — 0 src/engine|src/instruction diff since `0810b339`). **⚠ USER-FLAGGED carve-out**: this
-  narrows the 3-host phase-close gate; D-245 win64 is elevated (see below).
+- **Phase 14 (CI matrix) IN-PROGRESS** — CI-scaffolding tasks DONE; §14.P blocked on 2 substantial items.
+  **Phase 13 (C API) DONE** (ADR-0144). Phase 12 (AOT) DONE.
+- **Phase-14 thin CI DONE**: §14.1 `pr.yml` (3-OS test-all matrix, `2592f255`); §14.2 `bench.yml` (2-host
+  per ADR-0137); §14.4 `bench_baseline.yml` (`96e72c24`); §14.5 pre-push verified. All workflow_dispatch
+  (manual; §14.5 CI-second-line), actionlint-clean.
+- **§14.3 BLOCKED-BY D-256** (nightly-fuzz; fuzz+spec-bump infra absent — the ACTIVE BUNDLE builds it).
+- **§14.P full-close BLOCKED on**: D-256 (fuzz, §14.3) **+ D-245 win64** (windows CI green). When both land
+  (or §14.P is re-scoped) Phase 14 closes. D-245 win64 = remote-windows asm (hard); deferred to §11.3/P15.
 
-## Next task (autonomous — Phase 14)
+## Next task (autonomous — bundle)
 
-**§14.1 [x]** `2592f255` (pr.yml). **§14.2 [x]** (bench.yml = 2-host per ADR-0137; win D-249). **§14.5 [x]**
-(pre-push wired+verified; CI second-line). **§14.3 BLOCKED-BY D-256** — fuzz + spec-bump infra does NOT
-exist (no test/fuzz/, no test-fuzz step, no spec-bump checker; §3-scope feature never built). A fuzz-less
-nightly = redundant w/ pr.yml → deferred, NOT a thin workflow.
-**NEXT: §14.4 — `bench_baseline.yml`** (workflow_dispatch, record per-arch bench baselines on demand).
-Survey: `scripts/record_baseline_v1_regression.sh` + run_bench.sh baseline logic (`:444+`); mirror bench.yml's
-job structure (checkout + manual zig-0.16.0 install + cache). actionlint before commit. Then **§14.P close**.
-**⚠ §14.P full-close is BLOCKED on 2 substantial items**: D-256 (fuzz infra, §14.3) + D-245 win64 (windows
-CI green). Either build those OR re-scope §14.P. **CI convention = manual `workflow_dispatch`** (2026-05-25).
-
-## D-245 win64 — elevated (NOT an active bundle)
-
-The §13.P reconcile surfaced D-245's win64 host→JIT callee-saved remainder (v128/SIMD return-value
-`@call` path, `entry.zig:172`). It's **seed-flaky across Phase-11/12/13 windows closes** (lucky seeds
-passed). **Elevated to a windows-gate-RELIABILITY item**; full fix (win64 + return-value-capture + arg'd
-trampoline, 114 helpers) is intricate remote-only JIT-ABI work → its home is §11.3 / Phase-15 SIMD-JIT,
-to land before it compromises more closes. De-bundled (not autonomous-loop-suited). The §14.1 CI matrix
-will keep surfacing it as a real signal.
+**Work the D-256-fuzz-infra bundle** (above). Step 0: dispatch an Explore subagent — v1 fuzz harness design
+(`~/Documents/MyProducts/zwasm/` reference) + `wasm-tools smith` corpus recipe + the `parse`/`validate` entry
+signatures + Zig-0.16 `std.testing.fuzz`. Then build MVP chunk (1)+(2)+(3). Mac-local-verifiable (no remote).
+**NOTE**: stop re-scoping-to-close — this is real feature work. (If the user redirects to D-245-win64-first
+or Phase-15, pivot.)
 
 ## Step 0.7 (next resume)
 
-This turn: Phase-13 close (ADR-0144 re-scope; D-245 elevated). DOC-ONLY this turn (ROADMAP/ADR/debt/
-handover; no src change → no ubuntu kick needed; code HEAD `528d2af3` already ubuntu-verified OK).
-windowsmini reconcile is flaky-red on D-245 (the elevated carry, NOT a revert trigger). Mac gate clean
-at `528d2af3` (`/tmp/mac_gate_133.log`). **NOTE** (lesson `gate-tail-vs-exit-code`): `failed command:
-…test --listen=-` / `…-hello.exe` next to a passing Build Summary = benign zig test-isolation noise.
+This turn: §14.4 (`bench_baseline.yml`, `96e72c24`) + §14.5 [x]. CI-config + docs only → no ubuntu kick
+(code HEAD `528d2af3` ubuntu-verified OK). **NOTE** (lesson `gate-tail-vs-exit-code`): benign `failed
+command: …--listen=-` noise next to a passing Build Summary is not a failure. Mac gate clean at `528d2af3`.
 
-**Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile = `zig build test
--Dtarget=x86_64-windows-gnu`. windowsmini exec verify = `run_remote_windows.sh` (phase boundary).
+**Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. CI workflows: actionlint before commit. Win64
+cross-compile = `zig build test -Dtarget=x86_64-windows-gnu`. windowsmini exec = `run_remote_windows.sh`.
 
 ## Deferred / open debt
 
-- **D-245** win64 host→JIT (v128 return-value @call) — ELEVATED windows-gate-reliability; §11.3/P15 home.
-- **D-255** C-API WASI inherit/preopen (io-infra; ADR-0143). **D-254** rust 3-OS (ADR-0142). **D-253**
-  §13.2 host_info/as_ref (cap-blocked). **§12.5/§11.4** GC stack-map → P15. **D-251** WASI in AOT.
-  **D-246** arm64 dot/extmul → P15. **D-238** x86_64 EH thunk. D-249/D-210/D-234/D-237/D-229/D-231/
-  D-204/D-209/D-213 (note). Standing: 20 `<backfill>` markers (10 ADR + 10 lesson) → sweep before §14.P.
+- **D-256** fuzz+spec-bump infra absent — **ACTIVE BUNDLE**. **D-245** win64 host→JIT (windows CI green) —
+  §14.P blocker, §11.3/P15 home (hard remote asm). **D-249** win bench timing (ADR-0137). **D-255** C-API WASI
+  io-infra (ADR-0143). **D-254** rust 3-OS (ADR-0142). **D-253** §13.2 host_info (cap). **§12.5/§11.4** GC
+  stack-map → P15. **D-251** WASI in AOT. **D-246** arm64 dot/extmul → P15. **D-238** x86_64 EH thunk.
+  Standing: 20 `<backfill>` markers (10 ADR + 10 lesson) → sweep before §14.P.
 
 ## Key refs
 
-- ROADMAP §14 task table (just expanded); Phase Status widget (13 DONE / 14 IN-PROGRESS). ADR-0144
-  (§13.P close re-scope); ADR-0142/0143 (§13 scoping). D-245 (the elevated windows carry).
+- ROADMAP §14 (table; §14.1/2/4/5 [x], §14.3 blocked, §14.P blocked). Phase Status widget (14 IN-PROGRESS).
+  ADR-0144 (§13.P close); ADR-0137 (2-host bench). D-256 (fuzz, the bundle). `build.zig` test-all wiring.
