@@ -841,7 +841,12 @@ test "fdPrestatGet: no preopens → fd 3 is badf (the go_math_big discovery-loop
 test "fdPrestatGet + fdPrestatDirName: a preopen reports its Prestat + dir name" {
     var h = try Host.init(testing.allocator);
     defer h.deinit();
-    const fd = try h.addPreopen(99, "/sandbox"); // host_fd is opaque to these calls
+    // host_fd is opaque to these calls (stored, never derefed). Use a typed
+    // `fd_t` rather than a bare `99` — fd_t is i32 on POSIX but `*anyopaque`
+    // (HANDLE) on Windows, where a comptime_int won't coerce (D-247-adjacent
+    // windowsmini compile fix; mirrors the fake_fd above).
+    const fake_fd: std.posix.fd_t = undefined;
+    const fd = try h.addPreopen(fake_fd, "/sandbox");
     var mem: [32]u8 = @splat(0);
     try testing.expectEqual(p1.Errno.success, fdPrestatGet(&h, &mem, fd, 0));
     // Prestat: pr_type=.dir (0) @0, pr_name_len @4 = len("/sandbox")=8.
