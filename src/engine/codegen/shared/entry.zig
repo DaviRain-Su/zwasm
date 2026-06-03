@@ -184,7 +184,35 @@ inline fn invokeAndCheckVoid(
     rt.stack_limit = stack_limit_mod.computeStackLimit(stack_limit_mod.STACK_GUARD_HEADROOM);
     rt.trap_flag = 0;
     stack_limit_mod.diagOnceWithRt(rt, jit_abi.stack_limit_off, rt.stack_limit);
-    @call(.auto, f, .{rt} ++ args);
+    if (comptime builtin.target.cpu.arch == .aarch64 and args.len == 0) {
+        // D-245: the JIT prologue MOV-installs the pinned cohort (X19 +
+        // X24-X28) from `rt` WITHOUT saving the caller's values
+        // (ADR-0017 / D-210), so it clobbers the host's callee-saved
+        // X19-X28 and its epilogue can't restore them. A plain `@call`
+        // leaves the host's live X19-X28 unprotected → SEGV in ReleaseSafe.
+        // The asm manually stp/ldp X19-X28 around the BLR (balanced SP, 80B
+        // = 16-aligned) so they're preserved WITHOUT clobber-listing them
+        // (listing all 10 over-constrains the register allocator). Caller-
+        // saved + X30 are still declared via aarch64_blr_clobbers.
+        asm volatile (
+            \\ stp x19, x20, [sp, #-80]!
+            \\ stp x21, x22, [sp, #16]
+            \\ stp x23, x24, [sp, #32]
+            \\ stp x25, x26, [sp, #48]
+            \\ stp x27, x28, [sp, #64]
+            \\ blr %[callee]
+            \\ ldp x21, x22, [sp, #16]
+            \\ ldp x23, x24, [sp, #32]
+            \\ ldp x25, x26, [sp, #48]
+            \\ ldp x27, x28, [sp, #64]
+            \\ ldp x19, x20, [sp], #80
+            :
+            : [callee] "r" (f),
+              [rt_arg] "{x0}" (rt),
+            : aarch64_blr_clobbers);
+    } else {
+        @call(.auto, f, .{rt} ++ args);
+    }
     if (rt.trap_flag != 0) return Error.Trap;
 }
 
