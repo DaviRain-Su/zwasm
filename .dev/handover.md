@@ -3,6 +3,21 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
+## Active bundle
+
+- **Bundle-ID**: 15.1-gc-reclamation (GC reclamation + precise rooting — correctness-critical, non-moving)
+- **Cycles-remaining**: ~4–6 (native-stack scan → free-list reclaim → tests)
+- **Continuity-memo**: **Step-0 survey DONE → `private/notes/p15-gc-survey.md`.** Collector = non-moving
+  mark-sweep, sweep `collector_mark_sweep.zig:214` never frees; rooting today = conservative INTERP walk
+  (`walkRootsImpl` :243) — complete for interp, but does NOT scan native JIT frames, and GC-on-JIT emits allocs
+  (§10.G) → reclamation UNSAFE until a conservative native-stack scan covers JIT roots (ADR-0128 §2; NON-moving
+  needs only conservative scan, NOT precise GcRootMap-emit). **SAFE incremental order**: (1) conservative
+  native-stack scan rooting [strictly ADDS roots → can't cause UAF, only prevent; reuse `platform/stack_limit.zig`
+  for stack bounds] → (2) free-list reuse in sweep, gated behind (1). Files: collector_mark_sweep.zig, heap.zig
+  (free_lists), object_alloc.zig, root_scope.zig. ADR-0135 = rooting↔reclaim couple; no-reclaim safe interim.
+- **Exit-condition**: free-list reuse lands + an interp alloc-loop test shows `heap.cursor` BOUNDED (vs unbounded
+  leak today) + all existing GC unit/spec tests green. First red test: native-stack-held GcRef survives collection.
+
 ## Current state
 
 - **Phase 15 (Performance parity with v1 + ClojureWasm) IN-PROGRESS.** Phase 14 (CI matrix) DONE
@@ -15,14 +30,13 @@
 
 ## Next task (autonomous)
 
-**§15.1 — GC reclamation + precise rooting** (ex-§11.4/D-211, ADR-0135; co-defines `zir.GcRootMap` with §12.5
-AOT stack-map, ADR-0141). The Phase-10 collector is non-moving + β-no-reclaim (mark-sweep wired; dead bytes leak,
-`collector_mark_sweep.zig:214`). Add: free-list reuse / compaction (ADR-0115 §10) + a `GcRootMap` stack-map root
-walker (currently empty placeholder) + conservative native-stack scan (ADR-0128 §2). Mac-local-verifiable. Step
-0: survey the collector + `GcRootMap` placeholder + ADR-0115/0128/0135. **Then** §15.2 coalescer → §15.3 class-aware
-allocator → §15.4 SIMD ports → **§15.5 D-245 win64** (recurring windows blocker; hard/remote — a deliberate
-session, or user-prioritized) → §15.6 ClojureWasm CI. (D-257 ADR-backfill half done `2893ab5e`; lesson-Citing
-half now `soon`, not blocking — cycle-refs aren't SHA-recoverable.)
+**Work the 15.1-gc-reclamation bundle (above).** Survey done; **chunk 1 = the conservative native-stack scan**
+(the strictly-safe rooting prerequisite). Step 0: read `platform/stack_limit.zig` (stack-bound infra to reuse) +
+`collector_mark_sweep.zig walkRootsImpl` + how GC is triggered (alloc-time). Red test: an asm/native-stack-held
+GcRef is in the MARK set after collection. Then chunk 2 = free-list reuse (gated). **Correctness-critical — don't
+rush** (a missed root → UAF heisenbug once reclaim is on). Then §15.2 coalescer → §15.3 class-aware → §15.4 SIMD
+→ **§15.5 D-245 win64** (hard/remote; deliberate session) → §15.6 ClojureWasm. (D-257 lesson-Citing half is
+`partial`, not blocking.)
 
 ## Step 0.7 (next resume)
 
