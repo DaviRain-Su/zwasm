@@ -17,21 +17,22 @@
   `6f721b6b` — externtype is the shared `kind`-header the 4 types embed, so `as_externtype`/`externtype_as_*`
   are zero-alloc reinterpret casts (`@ptrCast(@alignCast(...))` on downcast); importtype/exporttype + their
   vecs (consume name byte-vecs + own the externtype). Upstream ownership throughout. 🔒 = END conformance gate.
-- §13.2 (c) **wasm_module_imports** `80131306` — `api/module_introspect.zig` (NEW; extracted per ADR-0099 §D2
-  P3 / D-171, keeping instance.zig under its 3200 exempt cap): decodes the import section → importtype_vec
-  (func/global/table/memory externtypes; tag imports skipped — no base tagtype). `valKindOf` maps zir.ValType →
-  wasm_valkind. instance.zig 3207→3044.
+- §13.2 (c) **module_imports** `80131306` + (d) **module_exports** `befd8acd` — `api/module_introspect.zig`
+  (extracted per ADR-0099 §D2 P3 / D-171; instance.zig 3207→3044). imports → importtype_vec; exports → idx
+  resolved via per-kind index space (import prefix ++ defined section). Shared externtype builders
+  (functypeExtern/globaltypeExtern/tabletypeExtern/memorytypeExtern) + `valKindOf`. Tags skipped (no tagtype).
 
 ## Next task (autonomous)
 
-§13.2 next — **wasm_module_exports** in `api/module_introspect.zig` (reuse `valKindOf`/`buildValTypeVec`/
-`buildImportExternType` + the byte-vec/list pattern from `wasm_module_imports`). Harder than imports: exports
-(`sections.Export {name, kind, idx}`) carry only an INDEX into the index space, so resolving the export's type
-needs the full module decode: func idx → (import-func typeidxs ++ func-section typeidxs)[idx] → functype; global/
-table/memory idx → (import prefix ++ that section)[idx] → the type. Build the func/global/table/memory index
-spaces from imports + the func/table/memory/global sections, then map each export's idx → externtype →
-`wasm_exporttype_new`. Then the remaining §13.2: func/global/table/memory `_new` (Store-coupled), `*_as_extern
-[_const]`, frames/foreign + trap_origin/trace; then §13.3 (wasi.h builders). gap: `.dev/phase13_capi_gap.md`.
+§13.2 next — the remaining type-surface gaps (gap: `.dev/phase13_capi_gap.md`), smallest-first:
+**(1) frames/foreign + trap_origin/trace** — self-contained, in `api/trap_surface.zig`: `wasm_frame_*` (copy/
+instance/func_index/func_offset/module_offset — trap-time frames; may start as empty/null per the FP-walk
+unwinder's availability), `wasm_foreign_new/delete` (trivial host-opaque), `wasm_trap_origin`/`wasm_trap_trace`
+(frame introspection; null/empty stubs acceptable for base conformance — cite). **(2) func/global/table/memory
+`_new` + `*_as_extern[_const]`** — the runtime-entity layer (Store-coupled; host-defined entities). This is the
+biggest remaining piece + couples to the existing `Extern`/`Func`/etc. in `instance.zig` (near its 3200 cap →
+likely a new `api/extern_new.zig` per the module_introspect precedent). Then **§13.3** (wasi.h builders:
+inherit_argv/env/stdio, set_args/envs, preopen_dir) + §13.4 (`test/c_api_conformance/`) + §13.5 (examples).
 
 ## Phase-12 close note
 
@@ -50,10 +51,10 @@ prose. Standing `soon` (not Phase-12): 10 ADR + 10 lesson `<backfill>` markers; 
 
 ## Step 0.7 (next resume)
 
-This turn landed §13.2 `wasm_module_imports` (`80131306`, new `api/module_introspect.zig` extracted from
-instance.zig): Mac test+build(C-API lib)+lint+zone green. An ubuntu `test` is kicked against this turn's HEAD →
-next resume `tail /tmp/ubuntu.log` for OK (decode + c_allocator, host-portable; x86_64 link + test block). Prior
-ubuntu `2e983b67` OK; windowsmini `0810b339` reconcile GREEN.
+This turn landed §13.2 `wasm_module_exports` (`befd8acd`, `api/module_introspect.zig`): Mac test+build(C-API lib)
++lint+zone green. An ubuntu `test` is kicked against this turn's HEAD → next resume `tail /tmp/ubuntu.log` for OK
+(decode + c_allocator, host-portable; x86_64 link + test block). Prior ubuntu `d9dd90e9` OK; windowsmini
+`0810b339` reconcile GREEN.
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile: `zig build test
 -Dtarget=x86_64-windows-gnu` (compile-only). 3-host reconcile = phase boundary.
