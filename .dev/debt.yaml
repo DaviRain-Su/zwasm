@@ -403,9 +403,17 @@ entries:
     layer: "code"
     status: "blocked-by"
     description: |-
+      **USER WANT 2026-06-05: WASI "to latest" is DESIRED → Phase 11 (WASI 0.1/preview1 FULL surface) is now a
+      user-prioritised goal, not an indefinitely-deferred phase.** Today only the minimal preview1 subset ships
+      (`args_get`/`environ_get`/`clock_time_get`/`fd_read`/`fd_write`/`proc_exit`/`random_get`). Full preview1 adds
+      the FS + polling surface (`path_open`/`fd_seek`/`fd_close`/`fd_prestat_*`/`fd_readdir`/`poll_oneoff`/preopens/
+      `*_sizes_get`, etc.). preview1-full is near-term-schedulable; **WASI 0.2/preview2 needs the Component Model
+      = large, stays post-v0.1.0** (ROADMAP §8). Composes with D-251 (WASI in JIT+AOT) — a full WASI host wants to
+      run on all three engines. Sequence: open Phase 11 WASI surface as a scheduled track.
+      ---
       blocked-by: Phase 11 WASI envv / preopens / threading task (per ADR-0102 §(c) explicit-Phase-target predicate) | `runWasm(alloc, io, bytes, argv)` uses positional args; should refactor to `RunOpts` struct when envv/preopens land. Currently 4 callsites pass `&.{}`.
     first_raised: "2026-05-04"
-    last_reviewed: "2026-05-28"
+    last_reviewed: "2026-06-05"
     refs: |-
       `src/cli/run.zig:23-49`
   - id: "D-010"
@@ -767,6 +775,11 @@ entries:
     layer: "code"
     status: "blocked-by"
     description: |-
+      **USER WANT 2026-06-05: this is DESIRED (not just deferred).** Pursue WASI-in-AOT TOGETHER with JIT-WASI
+      (D-244 d-3) as a single "both compute-engines gain WASI" effort — that is the right unit, not AOT-alone
+      (ADR-0140 parity). Elevated from speculative-defer to scheduled-want; sequence after the `--invoke` (1)
+      chunk unless a fuller WASI surface (Phase 11) is opened first (the two compose).
+      ---
       blocked-by: WASI/host imports in the AOT standalone runtime (`aot/run.zig`) are
       deferred to land WITH the JIT-WASI work (D-244 d-3) — `--engine=jit` is itself
       compute-only (no WASI host wired; `proc_exit` just sets trap_flag), so wiring WASI
@@ -777,7 +790,7 @@ entries:
       `wasi/jit_dispatch.zig`) + a WASI Host in `runEntry` + set `host_state` — done
       together with the JIT-WASI d-3 follow-up so both invoke paths gain WASI at once.
     first_raised: "2026-06-03"
-    last_reviewed: "2026-06-03"
+    last_reviewed: "2026-06-05"
     refs: |-
       ADR-0140; ADR-0136 (--engine=jit compute-only); D-244 (JIT-WASI d-3);
       src/engine/codegen/aot/run.zig; src/engine/setup.zig (populateDispatch @284);
@@ -915,8 +928,14 @@ entries:
       src/api/module_serialize.zig; include/wasm.h:422-423 (serialize/deserialize); ROADMAP §16.2 G; D-269
   - id: "D-273"
     layer: "code"
-    status: "note"
+    status: "now"
     description: |-
+      **USER DECISION 2026-06-05: (1) `--invoke NAME=ARGS` arg-passing + typed-result PRINTING is APPROVED to
+      implement** — the loop DESIGNS THE UX ITSELF (not a slavish wasmtime/wasmer copy; zwasm v1 CLI may be a
+      reference; weigh what is genuinely user-friendly and decide autonomously). **(2)-(5) (`--env`/`--fuel`/
+      `--timeout`/`--wasi`) = recorded as MAY-be-requested-later; do NOT pre-build** (deferred-pending-need).
+      `now` covers the (1) sub-task only; on (1) discharge, this row reverts to a `note` tracking (2)-(5).
+      ---
       **note (CLI flag surface vs wasmtime — §16.4 review, ADR-0159): the shipped `run` flags are
       `--invoke <name>` / `--engine <interp|jit>` / `--dir <host>[:<guest>]` only.** Deliberately NOT shipped
       (the surface is kept minimal): (1) `--invoke NAME=ARGS` arg marshalling + typed-result PRINTING — today
