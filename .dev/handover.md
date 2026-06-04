@@ -20,22 +20,28 @@
 
 ## NEXT (autonomous — §16 task-list done; phase-boundary audit DONE; backlog; ADR-0156)
 
-- **Post-§16 backlog (no release; 完成形 = keep improving, ADR-0156).** DONE this session: phase-boundary
-  `audit_scaffolding` (healthy; D-258/261 discharged); **D-257** lesson-Citing backfill; **examples/ fmt-gate**;
-  **D-277** §10.4/§3.1 zwasm.h reconcile; **D-275** wired `wasm_instance_new` `trap_out` → `Module.instantiate`
-  returns `StartTrapped` (+ C hosts now get the start-trap via `trap_out`/`wasm_trap_message` — a C-API conformance
-  fix), `d7190346`. Remaining items are involved → each a focused FRESH-CONTEXT chunk, pick one per cycle:
-  - **D-273** CLI `--invoke` NAME=ARGS arg-marshalling + typed-result printing (parse CLI strings → wasm Values by
-    param type; format results). Touches `src/cli/` + needs an arg'd-invoke runner path (`runWasmJit` is zero-arg).
-  - **D-269** callable funcref from host (deeper, ref model). **D-276** force register-resident GC-rooting worst
-    case (hard to force the regalloc shape). **D-274** zlinter lazy dep (comptime `@import` blocker).
-  - **J.3** 31 active debt rows > 15; old `blocked-by` (D-007/010/020-028/074) → `suggest meta_audit` (user-gated).
+- **Post-§16 backlog — high-value autonomous work is now CLEARED (loop in refinement/maintenance mode; no
+  release, ADR-0156).** DONE this session: phase-boundary `audit_scaffolding` (healthy; D-258/261 discharged);
+  **D-257** lesson-Citing backfill; **examples/ fmt-gate**; **D-277** zwasm.h reconcile; **D-275** wired
+  `wasm_instance_new` `trap_out` → `StartTrapped` + C-host start-trap (C-API conformance fix); **D-276 discharged
+  by PROOF** (`4accb556`) — ADR-0060 force-spill makes the GC-on-JIT register-resident worst case structurally
+  impossible → conservative rooting *proven* correct, not just tested. **Remaining backlog is deferred/gated, NOT
+  build-now**:
+  - **D-273** CLI `--invoke` args + **D-269** callable funcref — wasmtime-parity features the §16.5 dogfooding
+    surfaced **no demonstrated need** for. Per ADR-0159 ("evaluate against real need; don't pre-build") these
+    **wait for a real consumer need**, not speculative build. Scoped if needed: D-273 = arg-marshal by param type +
+    result printing in `src/cli/` (arg'd-invoke runner; `runWasmJit` is zero-arg).
+  - **D-274** zlinter lazy dep — blocked by build.zig:6 comptime `@import("zlinter")`; low value (one-time
+    transitive fetch). Autonomous-but-low: investigate zlinter 0.16.x lazy pattern only if pursued.
+  - **J.3** ~30 active debt rows > 15; old `blocked-by` (D-007/010/020-028/074) → `suggest meta_audit` (user-gated).
+  - Next cycle: if no user direction, either investigate D-274 OR a fresh `audit_scaffolding` / proposal-watch
+    refresh. The substantive work is done; avoid speculative over-engineering (ADR-0159).
 
 ## Step 0.7 (next resume)
 
-**Verify ubuntu** — D-275 (`d7190346`) touched the c_api instantiate path (`instance.zig` `instantiateInternal`
-trap_out) + the facade; this turn kicked `run_remote_ubuntu test`. Tail `/tmp/ubuntu.log` for `OK (HEAD=…)`.
-Portable Zig (no per-arch emit) → `test` scope. (Everything before D-275 this session was doc/debt-only.)
+**No ubuntu kick pending** — D-275 (`d7190346`, instantiate-path trap_out) was verified GREEN
+(`OK (HEAD=72ebe1ed)`); the D-276 discharge since (`4accb556`) is **doc-only** (ADR-0160 proof note + debt). No
+`src/` change → ubuntu unaffected. (Next code-bearing chunk, if any, determines the next kick.)
 **Gate**: Step-5 Mac = `bash scripts/mac_gate.sh`. windowsmini = manual-only (ADR-0156: no loop tag).
 
 ## Deferred / open debt
