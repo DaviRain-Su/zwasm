@@ -972,17 +972,22 @@ entries:
       compute that does NOT re-read a hot loop local: all 12 SIMD ops (0.52–0.96×), keccak 20×, gimli, the 50M
       v128 loop (0.49×, accumulator-only). Full data: bench/results/s15p_parity_vs_v1.md; repro
       private/spikes/s15p-parity/w45_addi.wat vs w45_addc.wat.
-      Hypothesis (verified 2026-06-04 = the trigger is decisively "body reads loop-carried local"; the MECHANISM
-      is strong-inference-not-yet-dumped): v2's single-pass greedy spill-everything slot allocator reloads the
-      loop local from its stack slot on each body use (and/or fails to keep it register-resident across the
-      iteration), where v1 keeps it pinned in a register. **This CONTRADICTS the §15.2/15.3 "~0 regalloc
-      headroom" folds (ADR-0149/0150)** — those measured spill-traffic as % of TOTAL instructions (wrong proxy:
-      a reload in a 3-instr hot loop is ~0% of program but ~2× of that loop's wall-clock). DISCHARGE: (1) confirm
-      the mechanism by dumping v2's emitted inner loop for w45_addi (regalloc spill of i); (2) measure a fix that
-      keeps loop-carried locals register-resident across the body (commit/revert per measure-first) — ROI is ~2×
-      on the extremely common "loop body uses the index" pattern, so likely high; (3) re-examine whether
-      ADR-0149/0150 need a Revision note (the headroom they declared unreachable is reachable on this pattern).
-      NOTE: v2-jit is compute-only (ADR-0136, no WASI) → matters for the compute/embedding JIT path.
+      Mechanism CONFIRMED from source (2026-06-04): v2 stores wasm locals in FIXED STACK SLOTS, not registers;
+      `arm64/emit.zig:910-968` shows every `local.get` creates a NEW vreg (`next_vreg++`) + emits `LDR W,[SP,
+      #local_off]` — there is NO value-residency cache (EmitCtx `ctx.zig` has `pushed_vregs`+`next_vreg` but no
+      `local_last_vreg` map). So two `local.get $i` in a hot loop body each hit memory; v1 keeps the local
+      register-pinned. ROI ceiling is KNOWN (v1 proves full parity is achievable → up to the 2.3×). **CONTRADICTS
+      the §15.2/15.3 "~0 regalloc headroom" folds (ADR-0149/0150)** — those measured spill-traffic as % of TOTAL
+      instructions (wrong proxy: a reload in a 3-instr hot loop is ~0% of program but ~2× of that loop's
+      wall-clock). FIX SCOPE (subagent-scoped): option (i) emit-phase local-residency cache (~40-80 LOC: add
+      `local_last_vreg` to EmitCtx, reuse the vreg on repeat `local.get` if still live+unclobbered, invalidate on
+      `local.set`/block boundary) — BUT regalloc already ran computing per-vreg live ranges, so reusing a vreg
+      means its precomputed liveness must cover the 2nd use → likely pushes option (i) toward MEDIUM (ii, ~200-300
+      LOC, couples to liveness.zig). DISCHARGE: attempt option (i)/(ii) via TDD + FULL gate + ubuntu test-all
+      (correctness-critical: a stale cached local = miscompile, cf. D-260/D-245); commit/revert per measure-first;
+      land if it recovers the loop-index gap cleanly + stays green, else document the architectural cost + defer.
+      Plus an ADR-0149/0150 Revision note (the headroom is reachable on this pattern). NOTE: v2-jit is compute-only
+      (ADR-0136, no WASI) → matters for the compute/embedding JIT path, not WASI programs (interp default).
     first_raised: "2026-06-04"
     last_reviewed: "2026-06-04"
     refs: |-

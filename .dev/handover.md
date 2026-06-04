@@ -17,9 +17,15 @@
   reloads the loop local each body use; v1 register-pins it. **CONTRADICTS §15.2/15.3 ~0-headroom folds**
   (ADR-0149/0150 measured spill % of TOTAL instrs — wrong proxy for hot-loop wall-clock). **W45 verdict: folded,
   data-backed** (v2 v128-loop 2× faster). Repro: `private/spikes/s15p-parity/w45_addi.wat` vs `w45_addc.wat`.
-  **NEXT** = (1) confirm spill mechanism by dumping v2's emitted inner loop for w45_addi (read arm64
-  `emit.zig`+gpr regalloc; find where `local.get` of a loop-resident local emits a slot reload); (2) measure a fix
-  keeping loop-carried locals register-resident across the body (commit/revert per measure-first).
+  MECHANISM CONFIRMED (`emit.zig:910-968`): every `local.get` = `next_vreg++` + `LDR W,[SP,#local_off]` + store —
+  no residency cache (EmitCtx `ctx.zig` has no `local_last_vreg`). Fix is **MEDIUM/STRUCTURAL not cheap**: `alloc.slots`
+  is indexed by a vreg stream computed by a regalloc pass that runs BEFORE emit, so reusing a vreg desyncs the
+  precomputed slot map → the reuse must be modelled in the REGALLOC PASS (couples to liveness.zig; revisits the
+  deliberate ADR-0149/0150 spill-everything model). Correctness-critical (core hot path; stale local = miscompile,
+  cf. D-260/D-245). **NEXT (fresh cycle, careful TDD)**: attempt a loop-local register-residency change in the
+  regalloc pass; FULL gate + ubuntu test-all (cross-compile≠cross-run); measure w45_addi recovery (2.3×→~1×);
+  **bail-to-defer if entangled/risky** (revert, mark D-265 architectural, close §15.P with the finding recorded +
+  ADR-0149/0150 Revision note). Lean: try it (user's measure-first "commit/revert liberally"), gate = safety net.
 - **Exit-condition**: D-265 mechanism confirmed + a fix ROI-measured (landed if it holds, else documented why-not)
   + ADR-0149/0150 Revision note (headroom reachable on this pattern) → then §15.P close → widget 15 → DONE +
   Phase 16 inline expand. **DECISION FLAGGED to user**: fix the ~2.3× loop-local regalloc gap before v0.1.0
