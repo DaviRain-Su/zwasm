@@ -572,7 +572,6 @@ pub export fn wasm_instance_new(
     imports: ?*const anyopaque,
     trap_out: ?*?*Trap,
 ) callconv(.c) ?*Instance {
-    _ = trap_out;
     const store = s orelse return null;
     const module = m orelse return null;
     // wasm.h: `imports` is `const wasm_extern_vec_t*` ({size,data}), NOT a
@@ -583,7 +582,9 @@ pub export fn wasm_instance_new(
         break :iblk if (v.data) |d| @ptrCast(d) else null;
     } else null;
 
-    return instantiateInternal(store, module, BuildBindingsCApi{ .imports_array = imports_array });
+    // D-275: thread `trap_out` so a start-function trap surfaces per the
+    // wasm-c-api contract (null return + `*trap_out` = the start trap).
+    return instantiateInternal(store, module, BuildBindingsCApi{ .imports_array = imports_array }, trap_out);
 }
 
 /// Shape produced by either the c_api Extern path (`wasm_instance_new`)
@@ -653,7 +654,7 @@ fn findStartFuncIdx(bytes: []const u8) ?u32 {
 /// Extern[]-driven bindings) and `src/zwasm/linker.zig` (native
 /// path, host-fn + cross-instance bindings). Both wrap their
 /// resolver in a `BindingsBuilder` and call here.
-pub fn instantiateInternal(store: *Store, module: *const Module, builder_state: anytype) ?*Instance {
+pub fn instantiateInternal(store: *Store, module: *const Module, builder_state: anytype, trap_out: ?*?*Trap) ?*Instance {
     const alloc = storeAllocator(store) orelse return null;
 
     var local_state = builder_state;
@@ -755,10 +756,16 @@ pub fn instantiateInternal(store: *Store, module: *const Module, builder_state: 
                 failBuiltInstance(alloc, store, inst, inst_rt);
                 return null;
             };
-            dispatch.run(inst_rt, dispatchTable(), zfunc.instrs.items) catch {
+            dispatch.run(inst_rt, dispatchTable(), zfunc.instrs.items) catch |err| {
                 // Start trapped → instantiation fails. The instance
                 // committed state (data writes, cross-module refs), so
                 // park-as-zombie rather than free (mirrors the build path).
+                // D-275: surface the trap via `trap_out` (wasm-c-api contract).
+                // Store-level alloc (not the per-instance arena) so the Trap
+                // outlives the parked instance; caller frees via wasm_trap_delete.
+                if (trap_out) |to| {
+                    if (storeAllocator(store)) |sa| to.* = allocTrap(sa, store, mapInterpTrap(err));
+                }
                 failBuiltInstance(alloc, store, inst, inst_rt);
                 return null;
             };

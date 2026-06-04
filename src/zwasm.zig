@@ -921,3 +921,24 @@ test "zwasm facade T1.15: Instance.table get/set/size/grow (D-272)" {
 
     try std.testing.expect(inst.table("nope") == null);
 }
+
+// T1.16 fixture — (module (func $f unreachable) (start $f)): the start
+// function traps at instantiation, so `Module.instantiate` must fail.
+const facade_start_trap_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type () -> ()
+    0x03, 0x02, 0x01, 0x00, // func[0]: type 0
+    0x08, 0x01, 0x00, // start: func 0
+    0x0a, 0x05, 0x01, 0x03, 0x00, 0x00, 0x0b, // code: unreachable; end
+};
+
+test "zwasm facade T1.16: Module.instantiate surfaces a start-function trap (D-275)" {
+    var eng = try Engine.init(std.testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&facade_start_trap_wasm);
+    defer mod.deinit();
+    // The start function hits `unreachable` → instantiation fails with the
+    // dedicated `StartTrapped` (not the coarse `InstantiateFailed`), via the
+    // now-wired `wasm_instance_new` `trap_out` (D-275).
+    try std.testing.expectError(error.StartTrapped, mod.instantiate(.{}));
+}

@@ -7,6 +7,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const _api_instance = @import("../api/instance.zig");
+const _trap_surface = @import("../api/trap_surface.zig");
 const _runtime_module = @import("../runtime/module.zig");
 
 const _zwasm = @import("../zwasm.zig");
@@ -26,10 +27,21 @@ pub const Module = struct {
 
     pub const InstantiateOpts = struct {};
 
-    pub const InstantiateError = error{InstantiateFailed};
+    /// `StartTrapped` = the module's `(start)` function trapped during
+    /// instantiation (D-275); `InstantiateFailed` = any other failure
+    /// (link / alloc). The specific trap kind is available to C hosts via
+    /// `wasm_instance_new`'s `trap_out` + `wasm_trap_message`.
+    pub const InstantiateError = error{ InstantiateFailed, StartTrapped };
 
     pub fn instantiate(self: *Module, _: InstantiateOpts) InstantiateError!_zwasm.Instance {
-        const inst = _api_instance.wasm_instance_new(self.c_store, self.c_handle, null, null) orelse return error.InstantiateFailed;
+        var trap: ?*_trap_surface.Trap = null;
+        const inst = _api_instance.wasm_instance_new(self.c_store, self.c_handle, null, &trap) orelse {
+            if (trap) |t| {
+                _trap_surface.wasm_trap_delete(t); // facade owns the trap; free it
+                return error.StartTrapped;
+            }
+            return error.InstantiateFailed;
+        };
         return .{ .handle = inst, .c_store = self.c_store };
     }
 
