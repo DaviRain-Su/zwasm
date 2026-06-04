@@ -10,14 +10,12 @@ Read [`REWORK.md`](../.claude/skills/continue/REWORK.md). Bundle mode nests insi
 
 - **Campaign-ID**: regalloc-resident-locals (D-265) — the single-pass baseline 完成形 (keep hot locals
   register-resident, as v1 does; within P3/P6, NOT an optimising tier). This IS the §15.P parity-achievement work.
-- **Phase**: **IV — implementation. ✅ STAGES 1+2 (arm64) + 4 (x86_64) LANDED** — register-homing now on BOTH
-  backends for declared i32/i64 locals (the D-265 fix). 1=`a64c72a1` (arm64 call-free, w45_addi **2.30×→0.97×**),
-  2=`5d1dd221` (arm64 across-calls, caller-saved spill at op_call), 4=`f31affa1` (x86_64 port: op_locals reg→reg
-  MOV + prologue seed + ctx wiring; gate dropped to aarch64|x86_64; ARCH-AWARE max_homed arm64=6/x86_64=2 to not
-  starve temps; x86_64 allocatable GPRs all callee-saved → op_call spill is a no-op). SSOT `local_homing.plan`
-  drives all passes both arches. arm64 byte-identical post-stage-4. **x86_64 RUN correctness = ubuntu (kicked)** —
-  Mac only cross-compiles x86_64. Remaining gates: declared i32/i64 only; GcRef/fp/v128 slot-homed; GC-trampolines
-  off (stage 2b). Net (3-host green): `homed_local_membase_loop` + `homed_local_across_call` + the 3 stage-1.
+- **Phase**: **IV — implementation. ✅ STAGES 1+2 (arm64) LANDED + 2-host green; stage 4 (x86_64) REVERTED**
+  (`9d15daf7` reverts `f31affa1`). 1=`a64c72a1` (arm64 call-free, w45_addi **2.30×→0.97×**), 2=`5d1dd221` (arm64
+  across-calls, caller-saved spill). **Stage 4 x86_64 port FAILED on ubuntu** (Step 0.7 caught it — Mac can't run
+  x86_64): the simple i32-loop homed fixtures PASS on x86_64, but **i64 (`fac` got 25≠25!) + recursive-call
+  (`rust_fib` got 511≠55) homing MISCOMPILE**. Reverted to restore green. SSOT `local_homing.plan` + arm64 stages
+  1+2 intact. Net: `homed_local_membase_loop` + `homed_local_across_call` + 3 stage-1 (arm64-homed/x86_64-unhomed).
 - **Phase I result**: D-265 = v2-jit ~2.3× slower than v1 when a loop body reads a loop-carried local (A/B:
   `a=a+i` 2.30× vs `a=a+CONST` 0.96×; not memory/ALU — confounded earlier). MECHANISM (`emit.zig:910-968`): every
   `local.get` = `next_vreg++` + `LDR [SP,#local_off]`; no residency cache. ROI ceiling = v1 parity (known
@@ -31,15 +29,18 @@ Read [`REWORK.md`](../.claude/skills/continue/REWORK.md). Bundle mode nests insi
   adversarial test is **D-258-blocked**; it converts to a **Phase III DESIGN CONSTRAINT** (rework MUST keep
   GcRefs slot-resident across any potential collection point — register-residency for non-ref locals, ref-locals
   spill at collection sites), with the JIT adversarial test deferred to when D-258 lands.
-- **NEXT — verify x86_64 homing (ubuntu, Step 0.7) → measure x86_64 ROI → Phase V (close the campaign)**.
-  Step 0.7 next resume: confirm the ubuntu test-all against `f31affa1` is GREEN (the existing fixtures
-  loop_carried/membase/across_call/arr_sum/fp_sum now run HOMED on x86_64 there — the real x86_64 correctness
-  gate; revert stage 4 on red). Then **measure the x86_64 ROI**: run a w45_addi-style bench on ubuntu (x86_64
-  homed vs un-homed/v1) to confirm the gap closed on x86_64 too (Mac can't measure x86_64). If green + ROI →
-  **campaign exit MET** (register-homed i32/i64 locals on both backends; D-265 gap closed) → **Phase V
-  retrospective**: ADR-0149/0150 Revision note (regalloc headroom real on loop-locals) + ADR-0151 W45 note
-  (loop-persistence matters for scalars) + close the campaign + §15.P + flip the ROADMAP. **Deferred** (measure-
-  first / scope): stage 3 (fp/v128, thin ROI per W45) + stage 2b (GC trampolines, D-258/D-261). All autonomous.
+- **NEXT — re-attempt stage 4 (x86_64) with a FASTER debug loop + a stronger net**. The bug is x86_64-specific
+  (i64 + recursive-call homing); Mac can't run x86_64. **KEY: get a LOCAL x86_64 RUN env via Rosetta 2** — build
+  `-Dtarget=x86_64-macos` and run the test/edge binaries under Rosetta on this aarch64 Mac (x86_64-LINUX can't run
+  on Mac, but x86_64-MACOS does via Rosetta). Verify it works first (`zig build test -Dtarget=x86_64-macos` +
+  run the edge-runner). That turns the ubuntu-only loop into a local one. **Then re-implement x86_64 homing**
+  (the reverted diff is in `f31affa1` — study it) but FIX: (a) i64 homed get/set widths/encoding (fac got the
+  input back → the homed i64 local's writes/reads are wrong); (b) recursive-call homing (rust_fib 511≠55 → a
+  homed local corrupted across a call — re-check the "all x86_64 allocatable are callee-saved → spill is no-op"
+  assumption; maybe a homed reg IS clobbered, or the issue is param-vs-local). **Strengthen the net**: add
+  x86_64-runnable fixtures for an i64 loop + a recursive-call-with-homed-local BEFORE re-landing (run them under
+  Rosetta). Then re-verify ubuntu. Once green+ROI → campaign exit (both backends) → Phase V (ADR-0149/0150/0151
+  Revision + close §15.P). Deferred: stage 3 (fp/v128 thin ROI), stage 2b (GC trampolines). All autonomous.
 
 ## Current state
 
@@ -53,11 +54,11 @@ Read [`REWORK.md`](../.claude/skills/continue/REWORK.md). Bundle mode nests insi
 
 ## Step 0.7 (next resume)
 
-D-265 STAGE 4 (x86_64 homing) LANDED `f31affa1` — Mac gates green (test-edge-cases 80/0 arm64 unaffected; x86_64
-cross-compile clean = 0 source errors). **ubuntu test-all kicked against `f31affa1` = the REAL x86_64 RUN gate**
-(the fixtures now run HOMED on x86_64 there; Mac can't run x86_64). Step 0.7 next resume: verify ubuntu GREEN
-(revert stage-4 `f31affa1` on red — x86_64 miscompile would surface ONLY here). Stages 1+2 already 2-host green.
-(`a64c72a1`/`5d1dd221`/`7152021c`/`f31affa1` validated on Mac; x86_64 pending ubuntu.) **NOTE** (lesson
+D-265 STAGE 4 (x86_64) was REVERTED (`9d15daf7`) — ubuntu Step 0.7 caught i64+recursive miscompiles. Branch back
+to 2-host-green (arm64 stages 1+2). **ubuntu test-all RE-KICKED against the revert HEAD** → Step 0.7 next resume:
+verify GREEN (the revert restores the prior-green state — i64/rust_fib should pass again un-homed). Re-attempt
+stage 4 with Rosetta local x86_64 testing (see NEXT). (`a64c72a1`/`5d1dd221`/`7152021c` validated 2-host; stage 4
+reverted.) **NOTE** (lesson
 `gate-tail-vs-exit-code`): benign `failed command: …--listen=-` / SlotOverflow / `arm64/emit: failing op` next to
 a passing run = error-path noise — EXIT authoritative. **D-262 process fix**: any NEW per-arch emit chunk → run
 `run_remote_ubuntu test-all` (NOT narrow `test`) before discharge (cross-compile ≠ cross-run).
