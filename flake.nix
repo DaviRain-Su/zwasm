@@ -36,6 +36,12 @@
         rustWasm = genPkgs.rust-bin.stable.latest.minimal.override {
           targets = [ "wasm32-unknown-unknown" "wasm32-wasip1" ];
         };
+        # Native rustc (host target only, no wasm-std) for the §13.5
+        # `rust_host` embedder example — a Rust program linking `libzwasm.a`
+        # over the C ABI. Kept in its OWN lean shell (`devShells.rust-host`),
+        # NOT in `default`, so the test hosts' `zig build test-all` shell stays
+        # toolchain-free; only the `run-rust-host` step opts into native rust.
+        rustNative = genPkgs.rust-bin.stable.latest.minimal;
       in {
         devShells.default = pkgs.mkShell {
           packages = [
@@ -79,6 +85,24 @@
                 echo "git hooks: core.hooksPath set to .githooks (was: $current_hp)"
               fi
             fi
+          '';
+        };
+
+        # `rust_host` embedder shell (§13.5; ADR-pending toolchain-on-test-host).
+        # zig (builds `libzwasm.a`) + native rustc (builds `examples/rust_host/
+        # hello.rs` linking it). Used by the `run-rust-host` step on the Linux
+        # test host via `nix develop .#rust-host`; kept separate from `default`
+        # so `test-all` stays toolchain-free. Windows uses native winget rust
+        # (no nix there). Enter with `nix develop .#rust-host`.
+        devShells.rust-host = genPkgs.mkShell {
+          packages = [
+            zig
+            rustNative          # native rustc + cargo (host target)
+            pkgs.git
+          ];
+          shellHook = ''
+            echo "zwasm v2 — rust_host embedder shell (native rustc; §13.5 3-OS rust run)"
+            echo "  rustc: $(rustc --version 2>/dev/null || echo 'NOT FOUND')"
           '';
         };
 
