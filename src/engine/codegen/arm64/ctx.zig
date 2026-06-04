@@ -24,6 +24,7 @@ const sections = @import("../../../parse/sections.zig");
 const regalloc = @import("../shared/regalloc.zig");
 const exception_table = @import("../shared/exception_table.zig");
 const label_mod = @import("label.zig");
+const local_homing = @import("../../../ir/analysis/local_homing.zig");
 
 const Allocator = std.mem.Allocator;
 const ZirFunc = zir.ZirFunc;
@@ -237,6 +238,22 @@ pub const EmitCtx = struct {
     /// that don't yet care (entry / linker / wrapper_thunk test
     /// helpers); compile() populates it for real bodies.
     frame_bytes: u32 = 0,
+
+    /// ADR-0155 stage 2 (D-265 Phase IV) — the register-homing plan for this
+    /// function (the SSOT shared with liveness / regalloc). `op_call` consults
+    /// it to spill caller-saved homed locals around a BL/BLR. Default-empty
+    /// (`count == 0`) keeps every non-homing EmitCtx construction site (test
+    /// helpers, linker) on the un-homed path.
+    homing: local_homing.Plan = .{},
+    /// Count of temporary vregs (= `alloc.slots.len - homing.count`). The home
+    /// pseudo-vreg of rank r is `n_temp + r`. Threaded so `op_call` can resolve
+    /// a homed local's physical home register at the call site.
+    n_temp: u32 = 0,
+    /// `local_offsets[local_idx]` is the in-frame byte offset (relative to
+    /// `local_base_off`) of wasm local `local_idx` — i.e. `layout.offsets`.
+    /// `op_call` uses `local_base_off + local_offsets[lidx]` as the spill/reload
+    /// slot address for a homed local. Empty when no homing.
+    local_offsets: []const u32 = &.{},
 
     /// D-235 — true iff this module declares func subtyping (`sub` /
     /// `sub final` / declared super; `usesTypeSubtyping`). When true,

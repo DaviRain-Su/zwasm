@@ -56,6 +56,80 @@ const EmitCtx = ctx_mod.EmitCtx;
 const Error = ctx_mod.Error;
 const CallFixup = ctx_mod.CallFixup;
 
+/// Regalloc slot-id boundary between caller-saved (volatile) and callee-saved
+/// home registers. Slots 0..4 map to X9..X13 (caller-saved scratch); slots 5..7
+/// map to X20..X22 (callee-saved, survive a call). A register-homed local in a
+/// caller-saved slot is clobbered by a BL/BLR and must be spilled around it; a
+/// callee-saved home is preserved by the callee and needs no spill. Mirrors
+/// `abi.slotToReg`'s pool split (`allocatable_caller_saved_scratch_gprs.len`).
+const callee_saved_slot_boundary: u16 = abi.allocatable_caller_saved_scratch_gprs.len;
+
+/// ADR-0155 stage 2 (D-265 Phase IV) — spill every register-homed local whose
+/// home lives in a CALLER-SAVED register to its in-frame slot, BEFORE a BL/BLR.
+/// Call after args are marshalled (so the home register still holds the local's
+/// current value — `local.set` writes the home reg directly, so the register IS
+/// the live value). Homed locals in callee-saved slots (5..7 = X20..X22) survive
+/// the call and are skipped. Paired with `reloadHomedCallerSaved` after the call
+/// (omitted for tail calls, where control does not return).
+fn spillHomedCallerSaved(ctx: *EmitCtx) Error!void {
+    try homedCallerSavedSpillReload(ctx, .spill);
+}
+
+/// Reload every caller-saved register-homed local from its in-frame slot AFTER a
+/// BL/BLR (before the result is captured). Inverse of `spillHomedCallerSaved`.
+fn reloadHomedCallerSaved(ctx: *EmitCtx) Error!void {
+    try homedCallerSavedSpillReload(ctx, .reload);
+}
+
+const SpillDir = enum { spill, reload };
+
+/// Shared body for the spill-before / reload-after of caller-saved homed locals.
+/// For each homed rank, resolves the home pseudo-vreg's regalloc slot; only a
+/// register-resident home in a caller-saved slot (< `callee_saved_slot_boundary`)
+/// emits an STR (spill) / LDR (reload) at `local_base_off + local_offsets[lidx]`.
+/// i32 homes use the W-form (zero-extended, matching the prologue seed + the
+/// `local.get`/`set` W-form contract); i64 homes use the X-form.
+fn homedCallerSavedSpillReload(ctx: *EmitCtx, dir: SpillDir) Error!void {
+    const homing = ctx.homing;
+    if (homing.count == 0) return;
+    var r: u32 = 0;
+    while (r < homing.count) : (r += 1) {
+        const home_vreg: u32 = ctx.n_temp + r;
+        const home_reg: inst.Xn = switch (ctx.alloc.slot(home_vreg, .gpr)) {
+            .reg => |id| blk: {
+                if (id >= callee_saved_slot_boundary) continue; // callee-saved: no spill
+                break :blk abi.slotToReg(id) orelse return Error.SlotOverflow;
+            },
+            // A spilled home already lives in its frame slot across the call;
+            // nothing to save/restore.
+            .spill => continue,
+        };
+        const lidx: u32 = homing.local_idx[r];
+        const off_u: u32 = ctx.local_base_off + ctx.local_offsets[lidx];
+        const ty = ctx.func.localValType(lidx);
+        switch (ty) {
+            .i32 => {
+                if (off_u > 16380) return Error.SlotOverflow;
+                const w: u14 = @intCast(off_u);
+                switch (dir) {
+                    .spill => try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(home_reg, 31, w)),
+                    .reload => try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(home_reg, 31, w)),
+                }
+            },
+            .i64 => {
+                if (off_u > 32760) return Error.SlotOverflow;
+                const x: u15 = @intCast(off_u);
+                switch (dir) {
+                    .spill => try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImm(home_reg, 31, x)),
+                    .reload => try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(home_reg, 31, x)),
+                }
+            },
+            // local_homing.isHomeableType only homes i32/i64.
+            .f32, .f64, .v128, .ref => unreachable,
+        }
+    }
+}
+
 /// ADR-0069 §Phase 2 chunk (b)-e-2: per-call overflow-args byte
 /// count, mirroring `marshalCallArgs`'s allocation logic. Returns
 /// the size of the `[SP, #0..N-1]` overflow region this call's
@@ -123,7 +197,9 @@ pub fn emitCall(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         // `fn(rt: *JitRuntime, ...wasm_args) callconv(.c)`).
         //
         //   (see emitImportDispatch for the 4-instr sequence)
+        try spillHomedCallerSaved(ctx);
         try emitImportDispatch(ctx, @intCast(ins.payload));
+        try reloadHomedCallerSaved(ctx);
         try captureCallResult(ctx, callee_sig, memory_class_return, return_buffer_off);
         return;
     }
@@ -133,6 +209,10 @@ pub fn emitCall(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     // earlier call in this function).
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(0, 31, abi.runtime_ptr_save_gpr));
 
+    // ADR-0155 stage 2 — spill caller-saved register-homed locals before the
+    // BL (after args + rt-ptr restore, so the spill captures the live home reg).
+    try spillHomedCallerSaved(ctx);
+
     // BL placeholder; the post-emit linker patches via
     // EmitOutput.call_fixups once function-body offsets are known.
     const fixup_at: u32 = @intCast(ctx.buf.items.len);
@@ -141,6 +221,9 @@ pub fn emitCall(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         .byte_offset = fixup_at,
         .target_func_idx = @intCast(ins.payload),
     });
+
+    // Reload the homed locals from their slots before capturing the result.
+    try reloadHomedCallerSaved(ctx);
 
     try captureCallResult(ctx, callee_sig, memory_class_return, return_buffer_off);
 }
@@ -194,6 +277,13 @@ fn emitCallIndirectSubtype(
     const expected_raw: u32 = @intCast(ins.payload);
     if (expected_raw > 0xFFFF or table_idx > 0xFFFF) return Error.UnsupportedOp;
 
+    // ADR-0155 stage 2 — spill caller-saved homed locals BEFORE the resolve
+    // trampoline (it clobbers caller-saved regs just like the final BLR). The
+    // home regs are still live here (idx is read via stage/temp regs, not a
+    // home); they are reloaded after the final BLR below. No homed local is
+    // read between here and the reload (marshalCallArgs reads temps).
+    try spillHomedCallerSaved(ctx);
+
     // Trampoline args: X0=rt, W1=table_idx, W2=idx, W3=expected_raw. Read idx
     // into W2 first; its home reg is never X0..X3 (those aren't in the regalloc
     // pool), so the later arg-reg writes can't clobber it.
@@ -232,6 +322,7 @@ fn emitCallIndirectSubtype(
     // MOV X0, rt ; BLR X17.
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(0, 31, abi.runtime_ptr_save_gpr));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBLR(17));
+    try reloadHomedCallerSaved(ctx);
     try captureCallResult(ctx, callee_sig, memory_class_return, return_buffer_off);
 }
 
@@ -381,8 +472,13 @@ pub fn emitCallIndirect(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrXRegLsl3(17, 16, 17));
     }
 
+    // ADR-0155 stage 2 — spill caller-saved homed locals just before the BLR
+    // (after the bounds/sig/funcptr pipeline, which uses X16/X17 + W17 = idx,
+    // none of which is a homed local's home register).
+    try spillHomedCallerSaved(ctx);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(0, 31, abi.runtime_ptr_save_gpr));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBLR(17));
+    try reloadHomedCallerSaved(ctx);
 
     try captureCallResult(ctx, callee_sig, memory_class_return, return_buffer_off);
 }
@@ -438,9 +534,13 @@ pub fn emitCallRef(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     // Native entry: LDR X16, [X17, #funcentity_funcptr_offset].
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(16, 17, @intCast(func_mod.funcentity_funcptr_offset)));
 
+    // ADR-0155 stage 2 — spill caller-saved homed locals before the BLR
+    // (X16/X17 hold the funcptr pipeline, never a homed local's home reg).
+    try spillHomedCallerSaved(ctx);
     // Restore X0 = runtime_ptr (ADR-0017 sub-2d-ii) ; BLR X16.
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(0, 31, abi.runtime_ptr_save_gpr));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBLR(16));
+    try reloadHomedCallerSaved(ctx);
 
     try captureCallResult(ctx, callee_sig, memory_class_return, return_buffer_off);
 }

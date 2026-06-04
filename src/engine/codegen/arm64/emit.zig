@@ -769,6 +769,10 @@ pub fn compile(
         .tag_param_counts = tag_param_counts,
         .frame_bytes = frame_bytes,
         .uses_type_subtyping = uses_type_subtyping,
+        // ADR-0155 stage 2 — register-homed-local call-site spill/reload.
+        .homing = homing,
+        .n_temp = n_temp,
+        .local_offsets = layout.offsets,
     };
 
     // §9.7 / 7.5-emit-deadcode: track polymorphic-stack dead

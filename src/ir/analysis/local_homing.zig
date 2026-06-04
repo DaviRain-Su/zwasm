@@ -23,12 +23,17 @@
 //! pseudo-vregs onto the low register slots (0..K-1) so they stay
 //! register-resident despite their high ids.
 //!
-//! ## Stage-1 gates (conservative; widened in later ADR-0155 stages)
+//! ## Stage gates (conservative; widened in later ADR-0155 stages)
 //!
 //! - **aarch64 only** — K=0 on every other arch (x86_64 parity is stage 4).
-//! - **no call/trampoline op** — a homed local in a caller-saved register would
-//!   be clobbered across a call; stage 2 adds the call-site spill/reload. Until
-//!   then, any function containing a call-like op homes nothing.
+//! - **no GC/memory TRAMPOLINE op** (stage 2b) — `memory.grow`, `struct.new*`,
+//!   `array.*`, `ref.test*`, `ref.cast*`, `br_on_cast*` route through a Zig
+//!   trampoline whose caller-saved clobber the call-site spill/reload does not
+//!   yet cover; any function containing one homes nothing. Plain calls
+//!   (`.call` / `.call_indirect` / `.call_ref` / `.return_call*`) ARE allowed
+//!   from stage 2: the arm64 op_call emit spills caller-saved homed locals
+//!   before the BL/BLR and reloads them after (tail calls need no reload —
+//!   control does not return).
 //! - **scalar GPR locals only** — i32 / i64 / ref. f32/f64/v128 are FP-class
 //!   (stage 3); GcRef stays slot-homed for GC-scan visibility (ADR-0155
 //!   anti-regression invariant 2; reftype here means a non-GC funcref/externref
@@ -86,18 +91,14 @@ pub const Plan = struct {
 /// locals than this homes nothing past the bound (the early ones still home).
 const max_local_scan: u32 = 256;
 
-/// True if the op emits a call / trampoline that clobbers caller-saved
-/// registers (so a homed local in such a register would be destroyed). Mirrors
-/// the call-crossing op set in `regalloc_compute.zig` plus the direct call ops.
-/// Stage 1 gates homing OFF entirely for any function containing one of these.
-fn isCallLike(op: ZirOp) bool {
+/// True if the op routes through a GC/memory Zig TRAMPOLINE whose caller-saved
+/// clobber is NOT covered by the arm64 op_call call-site spill/reload (stage 2b
+/// territory). A function containing one of these homes nothing. Plain calls
+/// (`.call` / `.call_indirect` / `.call_ref` / `.return_call*`) are deliberately
+/// EXCLUDED here: from stage 2 they spill/reload caller-saved homed locals at
+/// the BL/BLR emit site (`arm64/op_call.zig`).
+fn isTrampolineLike(op: ZirOp) bool {
     return switch (op) {
-        .call,
-        .call_indirect,
-        .call_ref,
-        .return_call,
-        .return_call_indirect,
-        .return_call_ref,
         .@"memory.grow",
         .@"struct.new",
         .@"struct.new_default",
@@ -145,9 +146,11 @@ pub fn plan(func: *const ZirFunc) Plan {
     // Gate: aarch64 only (stage 4 = x86_64 parity).
     if (builtin.target.cpu.arch != .aarch64) return p;
 
-    // Gate: no call/trampoline op in the body (stage 2 adds call-site spill).
+    // Gate: no GC/memory trampoline op in the body (stage 2b). Plain calls are
+    // allowed from stage 2 (op_call spills caller-saved homed locals at the
+    // BL/BLR site).
     for (func.instrs.items) |ins| {
-        if (isCallLike(ins.op)) return p;
+        if (isTrampolineLike(ins.op)) return p;
     }
 
     // Home the first `max_homed` scalar-GPR DECLARED locals in index order.
@@ -193,14 +196,31 @@ test "plan: homes scalar GPR locals on aarch64, gated off elsewhere" {
     }
 }
 
-test "plan: a call-like op gates homing off (stage 1)" {
+test "plan: a GC/memory trampoline op gates homing off (stage 2b)" {
+    var f = freshFunc(&.{ .i32, .i32 });
+    defer f.deinit(testing.allocator);
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"memory.grow", .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    const p = plan(&f);
+    try testing.expectEqual(@as(u32, 0), p.count);
+}
+
+test "plan: a plain call does NOT gate homing off (stage 2)" {
+    // Stage 2 (ADR-0155 D-265 Phase IV) — a function whose only call-like ops
+    // are plain calls homes its declared GPR locals; op_call spills the
+    // caller-saved homes around the BL/BLR.
     var f = freshFunc(&.{ .i32, .i32 });
     defer f.deinit(testing.allocator);
     try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 0 });
     try f.instrs.append(testing.allocator, .{ .op = .call, .payload = 0 });
     try f.instrs.append(testing.allocator, .{ .op = .end });
     const p = plan(&f);
-    try testing.expectEqual(@as(u32, 0), p.count);
+    if (builtin.target.cpu.arch == .aarch64) {
+        try testing.expectEqual(@as(u32, 2), p.count);
+    } else {
+        try testing.expectEqual(@as(u32, 0), p.count);
+    }
 }
 
 test "plan: f32/f64/v128/ref locals stay slot-homed (skipped)" {
