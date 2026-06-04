@@ -3,33 +3,28 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Active bundle
+## Active rework campaign
 
-- **Bundle-ID**: 15.P-parity-vs-v1 (Phase-15 close: parity measured → investigate the one regression → close)
-- **Cycles-remaining**: ~2–3 (root-cause D-265 memory-access gap → measure fix ROI → close §15.P + Phase 15)
-- **Continuity-memo**: §15.P parity MEASURED + D-265 root-cause BISECTED (data: `bench/results/s15p_parity_vs_v1.md`).
-  v1 built at `~/Documents/MyProducts/zwasm` (ReleaseFast); v2 ReleaseFast. Compare v1 `run <wasm>` (default JIT)
-  vs v2 `run --engine=jit <wasm>` (compute-only per ADR-0136 → only gimli/heapsort/keccak/memmove JIT-runnable;
-  TinyGo trap on fd_write). **Findings**: v2-jit FASTER on compute (all 12 SIMD 0.52–0.96×, keccak 20×, gimli,
-  v128 loop 0.49×) but **~2.3× SLOWER when a loop body READS a loop-carried local** (= D-265). **Decisive A/B**:
-  `a=a+CONST` (no i read) → 0.96× parity; `a=a+i` (reads i) → 2.30× — SAME i32.add. NOT memory/ALU-specific (was
-  confounded: heapsort/memmove all index via i). Mechanism (inferred): v2's spill-everything slot allocator
-  reloads the loop local each body use; v1 register-pins it. **CONTRADICTS §15.2/15.3 ~0-headroom folds**
-  (ADR-0149/0150 measured spill % of TOTAL instrs — wrong proxy for hot-loop wall-clock). **W45 verdict: folded,
-  data-backed** (v2 v128-loop 2× faster). Repro: `private/spikes/s15p-parity/w45_addi.wat` vs `w45_addc.wat`.
-  MECHANISM CONFIRMED (`emit.zig:910-968`): every `local.get` = `next_vreg++` + `LDR W,[SP,#local_off]` + store —
-  no residency cache (EmitCtx `ctx.zig` has no `local_last_vreg`). Fix is **MEDIUM/STRUCTURAL not cheap**: `alloc.slots`
-  is indexed by a vreg stream computed by a regalloc pass that runs BEFORE emit, so reusing a vreg desyncs the
-  precomputed slot map → the reuse must be modelled in the REGALLOC PASS (couples to liveness.zig; revisits the
-  deliberate ADR-0149/0150 spill-everything model). Correctness-critical (core hot path; stale local = miscompile,
-  cf. D-260/D-245). **NEXT (fresh cycle, careful TDD)**: attempt a loop-local register-residency change in the
-  regalloc pass; FULL gate + ubuntu test-all (cross-compile≠cross-run); measure w45_addi recovery (2.3×→~1×);
-  **bail-to-defer if entangled/risky** (revert, mark D-265 architectural, close §15.P with the finding recorded +
-  ADR-0149/0150 Revision note). Lean: try it (user's measure-first "commit/revert liberally"), gate = safety net.
-- **Exit-condition**: D-265 mechanism confirmed + a fix ROI-measured (landed if it holds, else documented why-not)
-  + ADR-0149/0150 Revision note (headroom reachable on this pattern) → then §15.P close → widget 15 → DONE +
-  Phase 16 inline expand. **DECISION FLAGGED to user**: fix the ~2.3× loop-local regalloc gap before v0.1.0
-  (Phase 15 = "perf parity" → arguably in-mission), or ship + defer D-265 to Phase 16.
+(ADR-0153 structural rework campaign — runs AUTONOMOUSLY; "hard gate" = self-enforced ordering, not a user stop.
+Read [`REWORK.md`](../.claude/skills/continue/REWORK.md). Bundle mode nests inside a phase for continuity.)
+
+- **Campaign-ID**: regalloc-resident-locals (D-265) — the single-pass baseline 完成形 (keep hot locals
+  register-resident, as v1 does; within P3/P6, NOT an optimising tier). This IS the §15.P parity-achievement work.
+- **Phase**: **II — correctness assurance** (of I→V). **Phase I DONE** (findings: `bench/results/s15p_parity_vs_v1.md`).
+- **Phase I result**: D-265 = v2-jit ~2.3× slower than v1 when a loop body reads a loop-carried local (A/B:
+  `a=a+i` 2.30× vs `a=a+CONST` 0.96×; not memory/ALU — confounded earlier). MECHANISM (`emit.zig:910-968`): every
+  `local.get` = `next_vreg++` + `LDR [SP,#local_off]`; no residency cache. ROI ceiling = v1 parity (known
+  achievable). Blast-radius = ZIR-lowering + `ir/liveness.zig` + `shared/regalloc.zig` + arm64+x86_64 emit
+  (`alloc.slots` indexed by a pre-emit vreg stream → reuse must be modelled in the regalloc pass). W45 folded
+  (v128 loop 2× faster). Repro: `private/spikes/s15p-parity/`.
+- **ROI target**: w45_addi 2.3× → ≤1.1× vs v1; full test net + the Phase-II adversarial net green.
+- **Correctness net (Phase II builds, as `test-only` chunks — NO redesign code until green)**: differential
+  interp==jit on local-heavy programs; adversarial — stale register across a loop back-edge after `local.set`;
+  local aliasing under register pressure; **a GcRef held ONLY in a register at a GC collection point (= D-261,
+  build it HERE — register-resident locals worsen rooting pressure, so this is a prerequisite not a side-quest)**.
+- **NEXT**: Phase II — survey the locals/regalloc/GC-rooting area + author that characterization + adversarial
+  test net (test-only). Then Phase III (design ADR + W54 anti-regression invariants) → IV (TDD, net green every
+  commit) → V (retrospect; ADR-0149/0150 Revision note). Decide all of this autonomously per the philosophy.
 
 ## Current state
 
@@ -65,16 +60,17 @@ from-scratch v1 redesign IN PROGRESS (branch `cw-from-scratch`, v0.0.0, deps=zli
 stable cw = v0.5.0 on `main`. Its zwasm-v2 consumer is cw's OWN future phase → nothing to validate today. v2
 package-consumability already proven by `examples/zig_host/` (ADR-0109). Barrier (D-264) dissolves when cw-v1 lands
 committed `@import("zwasm")` source.
-**See `## Active bundle` above** — §15.P parity is MEASURED (`bench/results/s15p_parity_vs_v1.md`); the bundle's
-NEXT step is root-causing **D-265** (v2-jit memory-access ~2.2× slower than v1). §15.6 deferred (ADR-0152 → D-264);
-§15.5 + 3-host reconcile DONE. §15.P is a hard PERF gate row but NOT a human-in-loop transition gate (no 🔒) —
-autonomous (the close-vs-ship decision on D-265 is flagged to the user but does not stop the loop).
+**See `## Active rework campaign` above** (ADR-0153) — §15.P parity is MEASURED; the remaining §15.P work =
+**achieve** parity via the D-265 regalloc-resident-locals campaign (Phase II next: build the correctness/adversarial
+net incl. D-261 GC-rooting). Runs fully autonomously — decide every step per the philosophy, do NOT stop to ask.
+§15.6 deferred (ADR-0152 → D-264); §15.5 + 3-host reconcile DONE.
 
 ## Step 0.7 (next resume)
 
-§15.5 CLOSED + §15.6 DEFERRED + §15.P parity MEASURED — all docs-only since (no code changed) → no ubuntu kick to
-verify. Next resume = D-265 root-cause (read-only survey of arm64 load/store emit; first commits come when an
-experiment lands). (`510ffce9`/`3a778080` already validated; do NOT revert.) **NOTE** (lesson
+§15.5 CLOSED + §15.6 DEFERRED + §15.P parity MEASURED + D-265 campaign opened (ADR-0153) — all docs-only since (no
+code changed) → no ubuntu kick to verify. Next resume = **D-265 campaign Phase II**: survey locals/regalloc/GC-
+rooting + author the characterization + adversarial test net (test-only chunks; NO redesign code until green). Then
+Phase III design ADR. (`510ffce9`/`3a778080` already validated; do NOT revert.) **NOTE** (lesson
 `gate-tail-vs-exit-code`): benign `failed command: …--listen=-` / SlotOverflow / `arm64/emit: failing op` next to
 a passing run = error-path noise — EXIT authoritative. **D-262 process fix**: any NEW per-arch emit chunk → run
 `run_remote_ubuntu test-all` (NOT narrow `test`) before discharge (cross-compile ≠ cross-run).
