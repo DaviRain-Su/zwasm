@@ -2,15 +2,17 @@
 
 A from-scratch WebAssembly runtime in Zig 0.16.0.
 
-> **Status: Phase 9 in progress.** Wasm 1.0 + 2.0 (incl. SIMD-128)
-> reach 100% spec compliance on Mac aarch64 + Linux x86_64. Windows
-> x86_64 reconcile (§9.13-0) ongoing. v0.1.0 release follows Phase
-> 10–14.
+> **Status: feature-complete (Phase 16 — 完成形), not yet tagged.** Full
+> WebAssembly 3.0 + WASI preview1, interpreter + JIT (arm64 / x86_64) +
+> AOT (`.cwasm`), and the C / Zig / CLI surfaces are settled and green on
+> the 3-host gate (Mac aarch64 + Linux x86_64 + Windows x86_64). A
+> `v0.1.0` tag is a deliberate, manual step and has not been cut.
 
 v2 is a ground-up redesign of [zwasm v1](https://github.com/clojurewasm/zwasm)
 with day-one design for WebAssembly 3.0, wasm-c-api conformance, and
 dual-backend (interpreter + JIT-arm64 + JIT-x86) differential testing.
-v1 ABI compatibility is out of scope; migration guide ships at v0.1.0.
+v1 ABI compatibility is out of scope — see the
+[migration guide](docs/migration_v1_to_v2.md).
 
 ## Supported platforms (verified hosts)
 
@@ -28,47 +30,87 @@ out of scope for v0.1.0.
 
 ### Wasm versions
 
-| Spec                                                                                                                            | Status                  | Notes                                                                            |
-|---------------------------------------------------------------------------------------------------------------------------------|-------------------------|----------------------------------------------------------------------------------|
-| Wasm 1.0                                                                                                                        | ✅ 100%                 | spec testsuite green on Mac aarch64 + ubuntunote x86_64                          |
-| Wasm 2.0 (multi-value, SIMD-128, bulk-memory, reference-types, non-trapping FP-int conversion, sign-extension, mutable globals) | ✅ 100%                 | §9.12-E ★ DONE; `skip-impl == 0`; 4 testsuites green; bit-identical Mac+ubuntu |
-| Wasm 2.0 — Windows reconcile                                                                                                   | 🟡 in progress           | §9.13-0 D-022 / D-084 / D-136 / D-028                                           |
-| Wasm 3.0 (GC, EH, tail-call, memory64, multi-memory, typed func refs, extended-const, relaxed-simd)                             | 📋 deferred to Phase 10+ | Day-1 design slots reserved per ADR-0061                                         |
+| Spec                                                                                                            | Status  | Notes                                                    |
+|-----------------------------------------------------------------------------------------------------------------|---------|----------------------------------------------------------|
+| Wasm 1.0                                                                                                        | ✅ 100% | spec testsuite green on the 3-host gate                  |
+| Wasm 2.0 (multi-value, SIMD-128, bulk-memory, reference-types, non-trapping FP→int, sign-ext, mutable globals) | ✅ 100% | `skip-impl == 0`; bit-identical across hosts             |
+| Wasm 3.0 (GC, EH, tail-call, memory64, multi-memory, typed func refs, extended-const, relaxed-simd)             | ✅ 100% | all 9 proposals; spec testsuite green on the 3-host gate |
 
-### WASI versions
+### WASI
 
-| Spec                                 | Status               | Notes                                                |
-|--------------------------------------|----------------------|------------------------------------------------------|
-| WASI 0.1 (preview1)                  | 🟡 partial            | scope of v0.1.0; full surface lands across Phase 11+ |
-| WASI 0.2 (preview2, Component Model) | 📋 deferred to v0.2.0 |                                                      |
+| Spec                                 | Status               | Notes                                                              |
+|--------------------------------------|----------------------|--------------------------------------------------------------------|
+| WASI 0.1 (preview1)                  | ✅ functional        | interpreter: args / env / preopened dirs / clock / random / fd I/O |
+| WASI 0.2 (preview2, Component Model) | 📋 deferred to v0.2.0 |                                                                    |
 
-### JIT backends
+JIT execution is compute-only (no WASI I/O — use the interpreter for WASI
+guests); AOT-WASI is staged.
 
-| Arch                                | Status                   |
-|-------------------------------------|--------------------------|
-| ARM64 (AAPCS64)                     | ✅ functional            |
-| x86_64 SysV (Linux/macOS-pre-arm64) | ✅ functional            |
-| x86_64 Win64 (MSVC ABI)             | 🟡 in progress (§9.13-0) |
+### Execution backends
+
+| Backend                              | Status        |
+|--------------------------------------|---------------|
+| Interpreter (full WASI)              | ✅ functional |
+| JIT — ARM64 (AAPCS64)               | ✅ functional |
+| JIT — x86_64 SysV (Linux/macOS)     | ✅ functional |
+| JIT — x86_64 Win64 (MSVC ABI)       | ✅ functional |
+| AOT — `.cwasm` compile + load + run | ✅ functional |
+
+The GC-on-JIT path is memory-safe: a conservative native-stack-scan
+collector roots live references across collections, verified by an
+adversarial use-after-free test on aarch64 + x86_64 (ADR-0160).
 
 ## CLI
 
 ```sh
-zwasm                           # print version + build options
-zwasm run <path.wasm> [args]    # WASI-driven exec; exits with guest's
-                                # proc_exit code
-zwasm run --invoke <name> \     # invoke a named export (zero-args)
-    <path.wasm>                 # instead of _start / main
-zwasm compile <path.wasm> \     # produce a .cwasm v0.1 AOT artifact
-    -o <out.cwasm>              # (loader lands in Phase 12)
+zwasm                                  # print version + build options
+zwasm run <file.wasm|.cwasm> [args...] # run a module (WASI _start / main)
+    [--invoke <name>]                  #   run a named export instead
+    [--engine <interp|jit>]            #   interp (default, full WASI) or jit (compute-only)
+    [--dir <host>[:<guest>]]           #   preopen a host directory for WASI
+zwasm compile <file.wasm> -o <out.cwasm>  # compile to a .cwasm AOT artifact
+zwasm --version | -V
+zwasm --help | -h | help
 ```
 
-Runtime env vars:
+The CLI is deliberately `run` + `compile` (ADR-0159) — the
+wasmtime/wazero-aligned shape for a runtime. Validation is programmatic
+(C-API `wasm_module_validate` / Zig `Engine.compile`); wat↔wasm
+conversion and module introspection are `wasm-tools` / `wabt`'s job.
 
-- `ZWASM_DEBUG=<categories>` — dbg.zig category filter
-- `ZWASM_DIAG=<channels>` — diagnostic trace ringbuffer drain channels
+Runtime env vars: `ZWASM_DEBUG=<categories>` (dbg category filter),
+`ZWASM_DIAG=<channels>` (diagnostic trace ringbuffer drain).
 
-Subcommands planned for later phases (per ROADMAP §10): `validate`,
-`inspect`, `features`, `wat`, `wasm`.
+## Embedding
+
+zwasm is a library first, with two host surfaces.
+
+**Zig** (native facade, ADR-0109) — add zwasm as a `build.zig.zon`
+dependency, pull its module (`b.dependency("zwasm", .{}).module("zwasm")`),
+then:
+
+```zig
+const zwasm = @import("zwasm");
+
+var eng = try zwasm.Engine.init(alloc, .{});
+defer eng.deinit();
+var mod = try eng.compile(&wasm_bytes);
+defer mod.deinit();
+var inst = try mod.instantiate(.{});
+defer inst.deinit();
+
+const add = inst.typedFunc(fn (i32, i32) i32, "add");
+const r = try add.call(.{ 2, 40 }); // 42
+```
+
+Surface: `Engine` / `Module` / `Instance` / `Linker` (host imports via
+`defineFunc` + `Caller`) / `Memory` / `Global` / `Table` / `TypedFunc` /
+`Trap` / `Value`. Runnable: [`examples/zig_dep/`](examples/zig_dep/)
+(external path-dep consumer) and [`examples/zig_host/`](examples/zig_host/).
+
+**C** (wasm-c-api) — [`include/wasm.h`](include/wasm.h) is byte-identical
+to the upstream standard (the interface wasmtime/wasmer follow), plus
+`wasi.h` + `zwasm.h` extensions. See [`examples/c_host/`](examples/c_host/).
 
 ## Build flags
 
@@ -110,6 +152,7 @@ src/         Zig sources (parse/ validate/ ir/ runtime/ instruction/ feature/
 include/     Public C headers (wasm.h / wasi.h / zwasm.h)
 build.zig    Build script
 flake.nix    Nix dev shell pinned to Zig 0.16.0
+docs/        Migration guide + design docs
 .dev/        ROADMAP + handover + ADRs + lessons + setup notes
 .claude/     Claude Code settings, skills, rules (auto-loaded)
 scripts/     gate_commit, zone_check, file_size_check, bench, run_remote_*
@@ -120,10 +163,10 @@ private/     gitignored agent scratch
 
 ## References
 
+- [`CHANGELOG.md`](CHANGELOG.md) — release notes
+- [`docs/migration_v1_to_v2.md`](docs/migration_v1_to_v2.md) — v1 → v2 migration
 - [`.dev/ROADMAP.md`](.dev/ROADMAP.md) — mission, principles, phase plan
-- [`.dev/handover.md`](.dev/handover.md) — current session state
 - [`.dev/decisions/`](.dev/decisions/) — ADRs (deviations from ROADMAP)
-- [`.dev/lessons/`](.dev/lessons/) — observational learnings (re-derivable)
 
 ## License
 
