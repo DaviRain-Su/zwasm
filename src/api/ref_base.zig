@@ -235,6 +235,41 @@ pub export fn wasm_ref_as_instance_const(r: ?*const handles.Ref) callconv(.c) ?*
     return wasm_ref_as_instance(@constCast(r));
 }
 
+// ===========================================================================
+// copy (ADR-0158). An INSTANCE-BACKED func/global/table/memory handle owns only
+// `(instance, idx)` (+ lazy cached views) — a fresh handle copying those, with
+// the view caches nulled, is independently deletable + denotes the same entity
+// (no shared ownership → no double-free). A STANDALONE handle (host-created,
+// owns Func.host / Global.cell / Table.tinst / Memory.minst) cannot be safely
+// duplicated without a per-store registry → returns null (D-253-D, documented;
+// not a silent wrong-clone). extern/module/trap/instance/foreign copy land next.
+// ===========================================================================
+
+fn cloneEntity(comptime T: type, h: ?*const T) ?*T {
+    const src = h orelse return null;
+    const i = src.instance orelse return null; // standalone (owns backing) → D-253-D
+    const store = i.store orelse return null;
+    const alloc = instance.storeAllocator(store) orelse return null;
+    const c = alloc.create(T) catch return null;
+    c.* = src.*;
+    c.extern_view = null; // the copy gets its own lazy views
+    c.ref_view = null;
+    return c;
+}
+
+pub export fn wasm_func_copy(f: ?*const handles.Func) callconv(.c) ?*handles.Func {
+    return cloneEntity(handles.Func, f);
+}
+pub export fn wasm_global_copy(g: ?*const handles.Global) callconv(.c) ?*handles.Global {
+    return cloneEntity(handles.Global, g);
+}
+pub export fn wasm_table_copy(t: ?*const handles.Table) callconv(.c) ?*handles.Table {
+    return cloneEntity(handles.Table, t);
+}
+pub export fn wasm_memory_copy(m: ?*const handles.Memory) callconv(.c) ?*handles.Memory {
+    return cloneEntity(handles.Memory, m);
+}
+
 test "wasm_X_same: entity-identity (func/global/table/memory) + pointer (instance/module/trap/foreign)" {
     const inst_a: *instance.Instance = @ptrFromInt(0x1000); // fake, never deref'd by `same`
     var f1: handles.Func = .{ .instance = inst_a, .func_idx = 3 };
@@ -375,4 +410,41 @@ test "as_ref / ref_as round-trip (trap + instance) — object identity, ?*anyopa
 
     try testing.expect(wasm_trap_as_ref(null) == null);
     try testing.expect(wasm_instance_as_ref(null) == null);
+}
+
+test "wasm_X_copy: instance-backed clone is same-entity + independently deletable; standalone → null" {
+    const e = instance.wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer instance.wasm_engine_delete(e);
+    const s = instance.wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer instance.wasm_store_delete(s);
+
+    // instance-backed memory (from a memory-export module) → clone same entity.
+    var ebytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x05, 0x03, 0x01, 0x00, 0x01, // memory min 1
+        0x07, 0x05, 0x01, 0x01, 0x6d, 0x02, 0x00, // export "m" → memory 0
+    };
+    const ebv: vec.ByteVec = .{ .size = ebytes.len, .data = &ebytes };
+    const em = instance.wasm_module_new(s, &ebv) orelse return error.ModuleAllocFailed;
+    defer instance.wasm_module_delete(em);
+    const inst = instance.wasm_instance_new(s, em, null, null) orelse return error.InstanceAllocFailed;
+    defer instance.wasm_instance_delete(inst);
+    var exports: vec.ExternVec = .{ .size = 0, .data = null };
+    instance.wasm_instance_exports(inst, &exports);
+    defer instance.wasm_extern_vec_delete(&exports);
+    const mem = instance.wasm_extern_as_memory(exports.data.?[0]) orelse return error.NotMemory;
+    const cp = wasm_memory_copy(mem) orelse return error.NoCopy;
+    try testing.expect(cp != mem); // distinct handle
+    try testing.expect(wasm_memory_same(mem, cp)); // same (instance, idx) entity
+    instance.wasm_memory_delete(cp); // independently deletable (no double-free)
+
+    // standalone memory → null (D-253-D: owns its backing, can't clone w/o registry).
+    var mlim: types.Limits = .{ .min = 1, .max = 0xffff_ffff };
+    const mt = types.wasm_memorytype_new(&mlim) orelse return error.MemTypeAllocFailed;
+    defer types.wasm_memorytype_delete(mt);
+    const sm = extern_new.wasm_memory_new(s, mt) orelse return error.MemoryAllocFailed;
+    defer instance.wasm_memory_delete(sm);
+    try testing.expect(wasm_memory_copy(sm) == null);
+
+    try testing.expect(wasm_func_copy(null) == null);
 }
