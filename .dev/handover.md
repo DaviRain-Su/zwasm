@@ -21,13 +21,16 @@
 ## NEXT (autonomous — §16 task-list done; phase-boundary audit DONE; backlog; ADR-0156)
 
 - **Post-§16 backlog (no release; 完成形 = keep improving, ADR-0156).** DONE this session: phase-boundary
-  `audit_scaffolding` (`1fa6c951`, healthy; stale D-258/261 discharged); **D-257** lesson-Citing backfill
-  (`841da6d1`); **examples/ fmt-gate** (`73ff44f7`); **D-277** §10.4/§3.1 zwasm.h code-as-truth reconcile
-  (`fd5729a1`). Remaining, pick highest-value-per-risk:
-  - **D-275** richer `Module.instantiate` error — map `wasm_instance_new`→null via `diagnostic.lastDiagnostic()`
-    to a typed error (start-trap / alloc-fail) vs the coarse `InstantiateFailed`. Clean, scoped, TDD-able. **Top.**
-  - **D-274** zlinter lazy dep — NON-TRIVIAL (build.zig:6 comptime `@import("zlinter")`; verify lazy pattern first).
-  - **D-273** CLI `--invoke` args+result-print; **D-269** callable funcref; **D-276** register-resident GC-rooting.
+  `audit_scaffolding` (`1fa6c951`, healthy; D-258/261 discharged); **D-257** lesson-Citing backfill (`841da6d1`);
+  **examples/ fmt-gate** (`73ff44f7`); **D-277** §10.4/§3.1 zwasm.h reconcile (`fd5729a1`); **D-275 re-scoped**
+  (`4798ffec` — investigated: NOT a facade tweak). The clean quick wins are now exhausted; remaining items are
+  involved (ADR + multi-layer + tests) → each is a focused FRESH-CONTEXT chunk, not a cram. Pick one per cycle:
+  - **D-275** wire `wasm_instance_new`'s stubbed `trap_out` — capture the start-trap discarded at
+    `instance.zig:758` → build a `wasm_trap_t` → write `trap_out`; then C hosts + `Module.instantiate` map it to a
+    typed error (`InstantiateError = {InstantiateFailed} || Trap`). Benefits C-API too; likely a small ADR
+    (trap_out is a surface decision). Template: `src/zwasm/instance.zig` `mapDispatchErr`. **Top.**
+  - **D-273** CLI `--invoke` args + typed-result printing (arg-marshal by param type). **D-274** zlinter lazy dep
+    (comptime `@import` blocker — verify lazy pattern). **D-269** callable funcref. **D-276** register-resident GC test.
   - **J.3** 32 active debt rows > 15; old `blocked-by` (D-007/010/020-028/074) → `suggest meta_audit` (user-gated).
 
 ## Step 0.7 (next resume)
