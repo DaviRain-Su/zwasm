@@ -455,6 +455,13 @@ pub export fn wasm_ref_as_foreign(r: ?*instance.Ref) callconv(.c) ?*Foreign {
     return @ptrFromInt(handle.ref);
 }
 
+pub export fn wasm_foreign_as_ref_const(f: ?*const Foreign) callconv(.c) ?*const instance.Ref {
+    return wasm_foreign_as_ref(@constCast(f));
+}
+pub export fn wasm_ref_as_foreign_const(r: ?*const instance.Ref) callconv(.c) ?*const Foreign {
+    return wasm_ref_as_foreign(@constCast(r));
+}
+
 pub export fn wasm_foreign_get_host_info(f: ?*const Foreign) callconv(.c) ?*anyopaque {
     return (f orelse return null).host_info;
 }

@@ -288,4 +288,7 @@ pub const Extern = struct {
     /// it on the entity's delete), NOT by the C host. `wasm_extern_delete`
     /// is a no-op on a borrowed view so the entity stays the sole owner.
     borrowed: bool = false,
+    /// Cached borrowed `wasm_ref_t` view (`wasm_extern_as_ref`, ADR-0158;
+    /// payload = `@intFromPtr(self)`; freed in `wasm_extern_delete`).
+    ref_view: ?*Ref = null,
 };

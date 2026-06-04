@@ -21,6 +21,7 @@ const instance = @import("instance.zig");
 const trap_surface = @import("trap_surface.zig");
 const extern_new = @import("extern_new.zig");
 const types = @import("types.zig"); // test-only: build types for as_ref round-trips
+const vec = @import("vec.zig"); // test-only: ByteVec/ExternVec for the extern/module round-trip
 
 /// Entity identity for the instance-backed handles (func/global/table/memory):
 /// same iff both are backed by the same instance AND the same index; a
@@ -157,6 +158,38 @@ pub export fn wasm_ref_as_memory_const(r: ?*const handles.Ref) callconv(.c) ?*co
     return wasm_ref_as_memory(@constCast(r));
 }
 
+pub export fn wasm_extern_as_ref(e: ?*handles.Extern) callconv(.c) ?*handles.Ref {
+    const h = e orelse return null;
+    return objAsRef(storeOf(h.instance, null), h, &h.ref_view); // host-extern (null instance) → null
+}
+pub export fn wasm_ref_as_extern(r: ?*handles.Ref) callconv(.c) ?*handles.Extern {
+    const h = r orelse return null;
+    if (h.ref == 0) return null;
+    return @ptrFromInt(h.ref);
+}
+pub export fn wasm_extern_as_ref_const(e: ?*const handles.Extern) callconv(.c) ?*const handles.Ref {
+    return wasm_extern_as_ref(@constCast(e));
+}
+pub export fn wasm_ref_as_extern_const(r: ?*const handles.Ref) callconv(.c) ?*const handles.Extern {
+    return wasm_ref_as_extern(@constCast(r));
+}
+
+pub export fn wasm_module_as_ref(m: ?*instance.Module) callconv(.c) ?*handles.Ref {
+    const h = m orelse return null;
+    return objAsRef(h.store, h, &h.ref_view);
+}
+pub export fn wasm_ref_as_module(r: ?*handles.Ref) callconv(.c) ?*instance.Module {
+    const h = r orelse return null;
+    if (h.ref == 0) return null;
+    return @ptrFromInt(h.ref);
+}
+pub export fn wasm_module_as_ref_const(m: ?*const instance.Module) callconv(.c) ?*const handles.Ref {
+    return wasm_module_as_ref(@constCast(m));
+}
+pub export fn wasm_ref_as_module_const(r: ?*const handles.Ref) callconv(.c) ?*const instance.Module {
+    return wasm_ref_as_module(@constCast(r));
+}
+
 test "wasm_X_same: entity-identity (func/global/table/memory) + pointer (instance/module/trap/foreign)" {
     const inst_a: *instance.Instance = @ptrFromInt(0x1000); // fake, never deref'd by `same`
     var f1: handles.Func = .{ .instance = inst_a, .func_idx = 3 };
@@ -230,4 +263,41 @@ test "as_ref / ref_as round-trip (global/table/memory) — object identity + cac
     try testing.expect(wasm_memory_as_ref(null) == null);
     try testing.expect(wasm_ref_as_memory(null) == null);
     try testing.expect(wasm_global_as_ref(null) == null);
+}
+
+test "as_ref / ref_as round-trip (extern + module) — object identity" {
+    const e = instance.wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer instance.wasm_engine_delete(e);
+    const s = instance.wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer instance.wasm_store_delete(s);
+
+    // module — round-trip via an empty `(module)`.
+    var mbytes = [_]u8{ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
+    const mbv: vec.ByteVec = .{ .size = mbytes.len, .data = &mbytes };
+    const m = instance.wasm_module_new(s, &mbv) orelse return error.ModuleAllocFailed;
+    defer instance.wasm_module_delete(m);
+    const mref = wasm_module_as_ref(m) orelse return error.NoRef;
+    try testing.expectEqual(m, wasm_ref_as_module(mref).?);
+    try testing.expectEqual(mref, wasm_module_as_ref(m).?); // cached
+
+    // extern — instance-backed memory export `(module (memory (export "m") 1))`.
+    var ebytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x05, 0x03, 0x01, 0x00, 0x01, // memory: min 1
+        0x07, 0x05, 0x01, 0x01, 0x6d, 0x02, 0x00, // export "m" → memory 0
+    };
+    const ebv: vec.ByteVec = .{ .size = ebytes.len, .data = &ebytes };
+    const em = instance.wasm_module_new(s, &ebv) orelse return error.ModuleAllocFailed;
+    defer instance.wasm_module_delete(em);
+    const inst = instance.wasm_instance_new(s, em, null, null) orelse return error.InstanceAllocFailed;
+    defer instance.wasm_instance_delete(inst);
+    var exports: vec.ExternVec = .{ .size = 0, .data = null };
+    instance.wasm_instance_exports(inst, &exports);
+    defer instance.wasm_extern_vec_delete(&exports);
+    const ext = exports.data.?[0].?;
+    const eref = wasm_extern_as_ref(ext) orelse return error.NoRef;
+    try testing.expectEqual(ext, wasm_ref_as_extern(eref).?); // round-trip (ref_view freed by extern_vec_delete)
+
+    try testing.expect(wasm_extern_as_ref(null) == null);
+    try testing.expect(wasm_module_as_ref(null) == null);
 }

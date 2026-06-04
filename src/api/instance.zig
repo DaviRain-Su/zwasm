@@ -95,6 +95,9 @@ pub const Module = extern struct {
     /// `host_info.zig`, finalizer fired in `wasm_module_delete`.
     host_info: ?*anyopaque = null,
     host_info_finalizer: ?*const fn (?*anyopaque) callconv(.c) void = null,
+    /// Cached borrowed `wasm_ref_t` view (`wasm_module_as_ref`, ADR-0158;
+    /// payload = `@intFromPtr(self)`; freed in `wasm_module_delete`).
+    ref_view: ?*handles.Ref = null,
 };
 
 // Instance + ExportType moved to src/runtime/instance/instance.zig
@@ -355,6 +358,7 @@ pub export fn wasm_module_delete(m: ?*Module) callconv(.c) void {
     if (handle.host_info_finalizer) |fin| fin(handle.host_info);
     const store = handle.store orelse return;
     const alloc = storeAllocator(store) orelse return;
+    if (handle.ref_view) |rv| alloc.destroy(rv); // object-identity as_ref view (ADR-0158)
     if (handle.bytes_ptr) |p| alloc.free(p[0..handle.bytes_len]);
     alloc.destroy(handle);
 }
@@ -990,6 +994,7 @@ pub export fn wasm_extern_delete(e: ?*Extern) callconv(.c) void {
     const inst = handle.instance orelse return;
     const store = inst.store orelse return;
     const alloc = storeAllocator(store) orelse return;
+    if (handle.ref_view) |rv| alloc.destroy(rv); // object-identity as_ref view (ADR-0158)
     alloc.destroy(handle);
 }
 
