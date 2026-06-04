@@ -32,20 +32,25 @@
 
 ## Next task (autonomous)
 
-**NEXT = §15.6 ClojureWasm CI green** (first open `[ ]`). Point ClojureWasm's `zwasm` dep at a local `build.zig.zon`
-`path = …` to `zwasm_from_scratch/` (NO ClojureWasm-side commits needed for v2-experimental validation). Repo is at
-`~/Documents/MyProducts/ClojureWasmFromScratch` (read-only reference clone — do NOT edit/commit there; validate the
-build against zwasm v2 LOCALLY first, e.g. a throwaway `private/spikes/` consumer or a local clone). Step 0: survey
-its current `build.zig.zon` dep shape + how it invokes zwasm (CLI? C-API? AOT?). After §15.6: **§15.P parity-vs-v1
-close** — the load-bearing un-done perf work (D-263): v2-vs-v1 bench (no unexplained regression) + the W45
-loop-isolated measurement (≥50M-iter v128-local loop, baseline-subtracted, per ADR-0151) + widget 15 → DONE.
+**§15.6 ClojureWasm CI — ⏸ DEFERRED** (ADR-0152 → D-264, user-confirmed). `ClojureWasmFromScratch` is itself a
+from-scratch v1 redesign IN PROGRESS (branch `cw-from-scratch`, v0.0.0, deps=zlinter only, no `zwasm` dep, no CI);
+stable cw = v0.5.0 on `main`. Its zwasm-v2 consumer is cw's OWN future phase → nothing to validate today. v2
+package-consumability already proven by `examples/zig_host/` (ADR-0109). Barrier (D-264) dissolves when cw-v1 lands
+committed `@import("zwasm")` source.
+**NEXT = §15.P Phase 15 close — parity-vs-v1 (D-263 HARD gate)**. Now the last active §15 task (§15.6 deferred;
+3-host reconcile DONE, D-245 landed). Required: (1) **v2-vs-v1 steady-state bench** on ≥3 loop-heavy + ≥1 SIMD-loop
+fixture (build/find v1 baseline from `~/Documents/MyProducts/zwasm` clone) — no unexplained regression vs v1; (2)
+**W45 loop-isolated measurement** (≥50M-iter v128-local loop, no-op-baseline subtracted, per ADR-0151 — if v2's
+per-iter v128-reload dominates, RE-OPEN W45) + record the already-efficient finding + opportunistic D-259. Then
+widget 15 → DONE + Phase 16 inline expand. Step 0: survey `scripts/run_bench.sh` + `bench/` harness + v1 clone
+buildability. **Note**: §15.P is a hard gate row but NOT a human-in-loop transition gate (no 🔒) — autonomous.
 
 ## Step 0.7 (next resume)
 
-§15.5 CLOSED this turn: D-245 (`510ffce9`) + D-260 (`3a778080`) both **3-host test-all GREEN** (Mac + ubuntu
-x86_64 + windowsmini win64 rc=0, no SEGV/FAIL). Next resume = **§15.6 ClojureWasm CI** — a fresh `[ ]`, no prior
-ubuntu kick to verify against (§15.6 Step 0 is a local-build survey, not a code chunk). The §15.6 first code chunk
-will kick ubuntu per normal. (`510ffce9`/`3a778080` already validated; do NOT revert.) **NOTE** (lesson
+§15.5 CLOSED (D-245 `510ffce9` + D-260 `3a778080`, 3-host test-all green). §15.6 DEFERRED (ADR-0152 → D-264).
+Next resume = **§15.P parity-vs-v1 close** — Step 0 is a bench-harness survey (`scripts/run_bench.sh` + `bench/` +
+v1 clone buildability), not a code chunk → no prior ubuntu kick to verify. (`510ffce9`/`3a778080` already
+validated; do NOT revert.) **NOTE** (lesson
 `gate-tail-vs-exit-code`): benign `failed command: …--listen=-` / SlotOverflow / `arm64/emit: failing op` next to
 a passing run = error-path noise — EXIT authoritative. **D-262 process fix**: any NEW per-arch emit chunk → run
 `run_remote_ubuntu test-all` (NOT narrow `test`) before discharge (cross-compile ≠ cross-run).
