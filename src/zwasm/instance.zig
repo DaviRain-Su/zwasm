@@ -20,7 +20,9 @@ const _dispatch = @import("../interp/dispatch.zig");
 const _zir = @import("../ir/zir.zig");
 
 const _memory = @import("memory.zig");
+const _global = @import("global.zig");
 const _typed_func = @import("typed_func.zig");
+const _vc = @import("value_conv.zig");
 const _zwasm = @import("../zwasm.zig");
 
 /// Wasm spec §4.4 — runtime trap conditions. Re-exported from
@@ -74,6 +76,27 @@ pub const Instance = struct {
         return .{ .rt = rt };
     }
 
+    /// Wasm spec §4.5.5/6 — accessor for an exported global by name
+    /// (D-272). Returns null if the name has no matching export, the
+    /// export isn't a global, or its slot is missing. The returned
+    /// `Global` reads/writes the live runtime cell (`get`/`set`);
+    /// `set` on an immutable global is `error.Immutable`.
+    pub fn global(self: *Instance, name: []const u8) ?_global.Global {
+        const rt = self.handle.runtime orelse return null;
+        for (self.handle.exports_storage, self.handle.export_types) |exp, et| {
+            if (!std.mem.eql(u8, exp.name, name)) continue;
+            if (exp.kind != .global) return null;
+            if (exp.idx >= rt.globals.len) return null;
+            return .{
+                .rt = rt,
+                .global_idx = exp.idx,
+                .valtype = et.global.valtype,
+                .mutable = et.global.mutable,
+            };
+        }
+        return null;
+    }
+
     /// Binding-shape errors (mismatched export name / kind / arity)
     /// in union with the full `runtime.Trap` set. Every spec trap
     /// condition is individually addressable — `error.DivByZero`,
@@ -117,7 +140,7 @@ pub const Instance = struct {
                     if (args.len != isig.params.len) return error.ArgArityMismatch;
                     if (results.len != isig.results.len) return error.ResultArityMismatch;
                     const op_base = rt0.operand_len;
-                    for (args) |a| rt0.pushOperand(zwasmToRuntime(a)) catch |e| {
+                    for (args) |a| rt0.pushOperand(_vc.zwasmToRuntime(a)) catch |e| {
                         rt0.operand_len = op_base;
                         return mapDispatchErr(e);
                     };
@@ -132,7 +155,7 @@ pub const Instance = struct {
                     var ri: usize = isig.results.len;
                     while (ri > 0) {
                         ri -= 1;
-                        results[ri] = runtimeToZwasm(rt0.operand_buf[op_base + ri], isig.results[ri]);
+                        results[ri] = _vc.runtimeToZwasm(rt0.operand_buf[op_base + ri], isig.results[ri]);
                     }
                     rt0.operand_len = op_base;
                     return;
@@ -155,7 +178,7 @@ pub const Instance = struct {
         const locals = try alloc.alloc(_runtime_value.Value, num_locals);
         defer alloc.free(locals);
         for (locals) |*l| l.* = _runtime_value.Value.zero;
-        for (args, 0..) |a, idx| locals[idx] = zwasmToRuntime(a);
+        for (args, 0..) |a, idx| locals[idx] = _vc.zwasmToRuntime(a);
 
         const op_base = rt.operand_len;
         try rt.pushFrame(.{
@@ -182,46 +205,11 @@ pub const Instance = struct {
         while (i > 0) {
             i -= 1;
             const v = rt.operand_buf[op_base + i];
-            results[i] = runtimeToZwasm(v, sig.results[i]);
+            results[i] = _vc.runtimeToZwasm(v, sig.results[i]);
         }
         rt.operand_len = op_base;
     }
 };
-
-fn zwasmToRuntime(v: _zwasm.Value) _runtime_value.Value {
-    return switch (v) {
-        .i32 => |x| _runtime_value.Value.fromI32(x),
-        .i64 => |x| _runtime_value.Value.fromI64(x),
-        .f32 => |b| _runtime_value.Value.fromF32Bits(b),
-        .f64 => |b| _runtime_value.Value.fromF64Bits(b),
-        .v128 => |b| .{ .bits128 = b },
-        .funcref => |r| .{ .ref = r orelse 0 },
-        .externref => |r| .{ .ref = r orelse 0 },
-    };
-}
-
-fn runtimeToZwasm(v: _runtime_value.Value, vt: _zir.ValType) _zwasm.Value {
-    return switch (vt) {
-        .i32 => .{ .i32 = v.i32 },
-        .i64 => .{ .i64 = v.i64 },
-        .f32 => .{ .f32 = @truncate(v.bits64) },
-        .f64 => .{ .f64 = v.bits64 },
-        .v128 => .{ .v128 = v.bits128 },
-        // ADR-0123 Cycle 2: ValType pivoted to union(enum). Map
-        // each ref-shape to the native facade's Value variant.
-        // Per ADR-0115 §6 / ADR-0116, non-func abstract heads + all
-        // concrete typed refs marshal as `.externref` (host opaque
-        // u64 ref); only func head gets the `.funcref` variant for
-        // call_ref / table.set marshalling.
-        .ref => |r| switch (r.heap_type) {
-            .abstract => |a| if (a == .func)
-                .{ .funcref = if (v.ref == 0) null else v.ref }
-            else
-                .{ .externref = if (v.ref == 0) null else v.ref },
-            .concrete => .{ .externref = if (v.ref == 0) null else v.ref },
-        },
-    };
-}
 
 /// Narrow `dispatch.run`'s `anyerror!void` return back to the
 /// `Trap`-shaped set the spec actually defines. `else => @panic`

@@ -47,6 +47,7 @@ pub const Instance = @import("zwasm/instance.zig").Instance;
 pub const Trap = @import("zwasm/instance.zig").Trap;
 pub const TypedFunc = @import("zwasm/typed_func.zig").TypedFunc;
 pub const Memory = @import("zwasm/memory.zig").Memory;
+pub const Global = @import("zwasm/global.zig").Global;
 pub const Linker = @import("zwasm/linker.zig").Linker;
 pub const Caller = @import("zwasm/caller.zig").Caller;
 
@@ -856,4 +857,37 @@ test "zwasm facade T1.4-types: Instance.invoke return type carries all 12 Trap v
         }
         try std.testing.expect(found);
     }
+}
+
+// T1.14 fixture — (module (global (export "g_mut") (mut i32) (i32.const 7))
+//   (global (export "g_imm") i32 (i32.const 42)))
+const facade_global_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    // global section: 2 globals — [i32 mut =7] [i32 const =42]
+    0x06, 0x0b, 0x02, 0x7f, 0x01, 0x41, 0x07, 0x0b,
+    0x7f, 0x00, 0x41, 0x2a, 0x0b,
+    // export section: "g_mut" global 0, "g_imm" global 1
+    0x07, 0x11, 0x02,
+    0x05, 0x67, 0x5f, 0x6d, 0x75, 0x74, 0x03, 0x00,
+    0x05, 0x67, 0x5f, 0x69, 0x6d, 0x6d, 0x03, 0x01,
+};
+
+test "zwasm facade T1.14: Instance.global get/set + immutable rejection (D-272)" {
+    var eng = try Engine.init(std.testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&facade_global_wasm);
+    defer mod.deinit();
+    var inst = try mod.instantiate(.{});
+    defer inst.deinit();
+
+    const g_mut = inst.global("g_mut") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(i32, 7), g_mut.get().i32);
+    try g_mut.set(.{ .i32 = 100 });
+    try std.testing.expectEqual(@as(i32, 100), g_mut.get().i32);
+
+    const g_imm = inst.global("g_imm") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(i32, 42), g_imm.get().i32);
+    try std.testing.expectError(error.Immutable, g_imm.set(.{ .i32 = 0 }));
+
+    try std.testing.expect(inst.global("nope") == null);
 }

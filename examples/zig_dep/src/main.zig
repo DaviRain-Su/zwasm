@@ -41,6 +41,14 @@ const mem_wasm = [_]u8{
     0x03, 0x6d, 0x65, 0x6d, 0x02, 0x00,
 };
 
+// (module (global (export "counter") (mut i32) (i32.const 7)))
+const global_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x06, 0x06, 0x01, 0x7f, 0x01, 0x41, 0x07, 0x0b,
+    0x07, 0x0b, 0x01, 0x07, 0x63, 0x6f, 0x75, 0x6e,
+    0x74, 0x65, 0x72, 0x03, 0x00,
+};
+
 fn hostAdd(_: *Caller, a: i32, b: i32) i32 {
     return a +% b;
 }
@@ -95,5 +103,19 @@ pub fn main() !void {
         const got = try mem.read(i32, 0x100);
         std.debug.print("zwasm zig_dep: memory[0x100] = {d} ({d} page(s))\n", .{ got, mem.size() });
         if (got != 1234) std.process.exit(5);
+    }
+
+    // (4) Read + write an exported global via the Global accessor (D-272).
+    {
+        var mod = try eng.compile(&global_wasm);
+        defer mod.deinit();
+        var inst = try mod.instantiate(.{});
+        defer inst.deinit();
+
+        const counter = inst.global("counter") orelse std.process.exit(6);
+        try counter.set(.{ .i32 = counter.get().i32 + 35 });
+        const v = counter.get().i32;
+        std.debug.print("zwasm zig_dep: global counter = {d}\n", .{v});
+        if (v != 42) std.process.exit(7);
     }
 }
