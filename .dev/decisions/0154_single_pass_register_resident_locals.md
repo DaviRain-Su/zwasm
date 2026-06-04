@@ -1,6 +1,8 @@
 # 0154 — Single-pass register-resident locals (D-265 rework, Phase III design)
 
-- **Status**: Proposed (2026-06-04; D-265 rework campaign Phase III per ADR-0153; validation spike pending)
+- **Status**: Proposed but SUPERSEDED-IN-DESIGN (2026-06-04; pre-spike analysis showed Option A insufficient for
+  the loop-carried ROI → pivot to Option B local-register residency; see the Revision section. A successor ADR
+  for Option B follows next cycle.)
 - **Date**: 2026-06-04
 - **Author**: claude (autonomous, D-265 campaign Phase III)
 - **Tags**: Phase 15, perf, regalloc, liveness, ZIR, single-pass, D-265, ADR-0149, ADR-0150, ADR-0153, W54
@@ -96,3 +98,33 @@ aggressive / the range-extension is mis-modelled) before any on-branch code.
   headroom is real on the loop-local pattern. A Revision note lands at Phase V.
 - Regalloc, ZIR shape, and the spill-everything model for temporaries are UNCHANGED — only locals gain residency
   via extended ranges. Low blast radius beyond liveness + the two emit `local.get` arms.
+
+## Revision (2026-06-04, same day) — Option A is INSUFFICIENT for the loop-carried ROI; pivot to Option B
+
+Pre-implementation analysis (verified against source, not yet spiked) shows the value-reuse cache (Option A)
+recovers only the **in-body** redundant reads, NOT the loop-carried reload — so it misses the D-265 ≤1.1× target:
+
+- **w45_addi memory-op trace** (per iteration): `$a` LDR×1 + `$i` LDR×3 (body-read, decrement-read, br_if-read) +
+  STR×2. Option A's cache, cleared at the loop op (control-flow merge-fence) and at each `local.set $i`, saves
+  only the **decrement-read** (1 of 6 mem ops, ~17%). The dominant cost is the **per-iteration loop-top reload**:
+  the local's value lives in its slot (`local_base_off`); `local.set $i` writes the slot; the next iteration's
+  `local.get $i` reloads it. So the value crosses the back-edge via MEMORY, not a register.
+- **Root cause**: v2's local model is slot-homed. Carrying a local across the back-edge in a register =
+  **local-register residency** (the local's HOME is a register for the loop's duration, written/read in-register,
+  spilled only at boundaries) = v1's model = **Option B**, NOT a value-reuse cache.
+- **Verified facts** (this supersedes the Phase-III survey's errors): liveness DOES handle loops (line 535 is a
+  catch-all; `.loop`/`.block`/etc. are handled at lines 160-432 and `continue`). v2 reloads BOTH scalar AND v128
+  locals every `local.get`; the v128 loop is faster than v1 only because `f32x4.add` (~3-4cy) dominates the
+  reload (~2cy), whereas a scalar `i32.add` (~1cy) is dwarfed by it. So **no loop-carried residency exists for
+  ANY type** — D-265 must BUILD it (this also re-opens the W45/loop-persistence question ADR-0151 folded, but for
+  SCALAR locals where it bites, not v128 where arithmetic hides it).
+
+**Decision: pivot the design to Option B (single-pass local-register pinning, v1-style), within P3/P6.** v1 proves
+it is single-pass-achievable (read v1's `regalloc.zig` local→register mapping as the textbook). Option A's
+"Rejected alternatives" framing is inverted by this analysis: A is too weak. **NEXT cycle (still Phase III): a
+fresh design ADR (or major rewrite of this one) for loop-carried local-register residency** — survey v1's local
+pinning + v2's loop_info (§9.5/5.3 loop header/end records) + how to assign a local a consistent register across
+the back-edge in the greedy single-pass allocator, with the same invariants (set-invalidate is replaced by
+write-in-register; GcRef locals stay slot-homed; W54 anti-regression). Then spike THAT (the design arithmetic
+already shows it, not A, can hit ≤1.1×). Phase II fixtures remain the correctness net regardless of approach.
+Status of this ADR: **Proposed but superseded-in-design** by the forthcoming Option-B ADR.
