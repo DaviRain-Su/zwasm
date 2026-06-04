@@ -37,6 +37,7 @@ const module_introspect = @import("module_introspect.zig");
 const extern_new = @import("extern_new.zig");
 const config = @import("config.zig");
 const host_info = @import("host_info.zig");
+const ref_base = @import("ref_base.zig");
 
 const testing = std.testing;
 
@@ -315,6 +316,17 @@ pub const wasm_trap_set_host_info_with_finalizer = host_info.wasm_trap_set_host_
 pub const wasm_instance_get_host_info = host_info.wasm_instance_get_host_info;
 pub const wasm_instance_set_host_info = host_info.wasm_instance_set_host_info;
 pub const wasm_instance_set_host_info_with_finalizer = host_info.wasm_instance_set_host_info_with_finalizer;
+
+// ref-base `wasm_X_same` (ref_base.zig, ADR-0158) — entity identity
+pub const wasm_func_same = ref_base.wasm_func_same;
+pub const wasm_global_same = ref_base.wasm_global_same;
+pub const wasm_table_same = ref_base.wasm_table_same;
+pub const wasm_memory_same = ref_base.wasm_memory_same;
+pub const wasm_extern_same = ref_base.wasm_extern_same;
+pub const wasm_instance_same = ref_base.wasm_instance_same;
+pub const wasm_module_same = ref_base.wasm_module_same;
+pub const wasm_trap_same = ref_base.wasm_trap_same;
+pub const wasm_foreign_same = ref_base.wasm_foreign_same;
 pub const wasm_extern_vec_delete = instance.wasm_extern_vec_delete;
 pub const wasm_instance_exports = instance.wasm_instance_exports;
 pub const wasm_func_call = instance.wasm_func_call;
