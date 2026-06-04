@@ -102,7 +102,14 @@ pub fn build(b: *std.Build) void {
     // ADR-0024 D-2 carves out `src/zwasm.zig` as the single
     // re-export hub and test loader.
     // ============================================================
-    const core = createSanitizedModule(b, sanitize_opts, .{
+    // Public, named module so external `build.zig.zon` path-dep
+    // consumers can pull the Zig facade via
+    // `b.dependency("zwasm", .{}).module("zwasm")` (ADR-0109 / §16.5
+    // dogfooding). Internal artifacts (CLI exe, examples, test
+    // runners) reuse this same `*Module` directly. `b.addModule`
+    // (not `createModule`) is what registers it under the "zwasm"
+    // name for dependents.
+    const core = b.addModule("zwasm", .{
         .root_source_file = b.path("src/zwasm.zig"),
         .target = target,
         .optimize = optimize,
@@ -113,6 +120,7 @@ pub fn build(b: *std.Build) void {
         // adjacent runtime (wasm-c-api consumers are C hosts).
         .link_libc = true,
     });
+    applySanitize(core, sanitize_opts);
     core.addImport("build_options", build_options_mod);
     // §9.3 / 3.1: `include/` carries the vendored C API headers
     // (wasm.h pinned via ADR-0004). Adding the path here lets
@@ -1085,7 +1093,16 @@ fn createSanitizedModule(
     mod_opts: std.Build.Module.CreateOptions,
 ) *std.Build.Module {
     const mod = b.createModule(mod_opts);
+    applySanitize(mod, sopts);
+    return mod;
+}
+
+/// Apply the ADR-0015 sanitize flags to an already-created module —
+/// shared by `createSanitizedModule` (private modules) and the public
+/// `b.addModule("zwasm", …)` consumable module (which must be registered
+/// by name, not `createModule`, to be reachable via a path-dep's
+/// `dependency("zwasm").module("zwasm")`).
+fn applySanitize(mod: *std.Build.Module, sopts: SanitizeOpts) void {
     if (sopts.c) |s| mod.sanitize_c = s;
     if (sopts.thread) |t| mod.sanitize_thread = t;
-    return mod;
 }
