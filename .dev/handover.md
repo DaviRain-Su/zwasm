@@ -30,27 +30,27 @@
   wasmtime's ext headers). Live count: `bash scripts/capi_surface_gap.sh` (**gap 76**, was 129).
   Sequence: ✅A type accessors (6, `c3a979fa`) → ✅B per-type vec ops (24, `2116a18b`, PtrVecOps unify) →
   ✅C config (3) + ✅D val_copy/delete (2, POD) → ✅instance.zig split (`092196b6`, ADR-0157 → handles.zig) →
-  ✅E1 host_info trio (18, `031e1c40`) + ✅E2 host_info module/trap (6, `faa03492`) → **E3: Instance host_info
-  (3, Zone decision) + ref-cast/same/copy (~44, ref-model ADR)** → F tagtype/EH (12) → G serialize/share (5,
-  own ADR). A–E2 DONE (gap 70); E3/F/G design-gated. (extern_vec_copy + tagtype_vec also deferred: need
-  wasm_extern_copy / TagType.)
+  ✅E1+E2+E3a host_info COMPLETE — all 9 ref types (`031e1c40`/`faa03492`/`fbbcd4bf`; 27 fns) → **E3b:
+  ref-cast/same/copy (~44, ref-model ADR)** → F tagtype/EH (12) → G serialize/share (5, own ADR). A–E3a DONE
+  (gap 67); E3b/F/G design-gated. (extern_vec_copy + tagtype_vec also deferred: need wasm_extern_copy / TagType.)
 - **Exit-condition**: `capi_surface_gap.sh` gap → 0 (or each residual category has an ADR/debt justifying
   deferral); then close §16.2 [x].
 
 ## NEXT (autonomous — surfaces first, docs last; ADR-0156)
 
-- **✅ chunk E1 host_info** (18, `031e1c40` — func/global/table/memory/ref/extern; fields in `handles.zig`,
-  generic accessors in new `host_info.zig`, finalizer fired in each `wasm_X_delete`; owned externs only —
-  borrowed cache-views don't fire it, folded into the ref-model reconcile). **✅ chunk E2 host_info** (6,
-  `faa03492` — module + trap, fields on their extern structs, same pattern). Gap 94→70.
-- **§16.2 chunk E3 — NEXT**: (a) **Instance host_info (3 fns)** — needs a Zone decision: `instance.Instance`
-  is a `runtime.Instance` alias (Zone 1). A `host_info` field there is zone-LEGAL (no upward import; Zone-3
-  accessors read it downward; finalizer fired in `wasm_instance_delete` before `alloc.destroy(handle)`), but
-  it's a runtime struct carrying a C-API-only field — decide field-on-runtime-Instance (simple, industry-std)
-  vs Zone-3 side-table (decoupled, lifetime-complex); likely just add the field + a clear comment (no ADR — no
-  import violation). (b) **ref-cast/same/copy (~44)** — the bulk; needs the **uniform `wasm_ref_t` model
-  decision** (likely an ADR — D-253: some casts "degenerate in zwasm's model"); reconcile the val
-  `of.ref`=raw-payload divergence (D-269) here. Then F (tagtype/EH — needs `TagType`), G (serialize — own ADR).
+- **✅ host_info COMPLETE** (E1 `031e1c40` func/global/table/memory/ref/extern; E2 `faa03492` module/trap;
+  E3a `fbbcd4bf` instance). 27 fns, generic accessors in `host_info.zig`, finalizer fired in each `wasm_X_delete`.
+  Instance field sits on `runtime.Instance` (zone-legal, import-free; chose field over side-table — simple +
+  industry-std). Owned externs only fire the finalizer (borrowed cache-views don't — ref-model reconcile). Gap 67.
+- **§16.2 chunk E3b (ref-cast/same/copy; ~44) — NEXT**: the design-gated bulk. `_as_ref`/`ref_as_X`
+  (+`_const`) + `_same` + `_copy` for func/global/table/memory/extern/instance/module/trap/foreign (func_as_ref/
+  ref_as_func + foreign_as_ref/ref_as_foreign already done — D-253 B). **Needs the uniform `wasm_ref_t` model
+  decision (ADR)**: zwasm's `Ref` (handles.zig) is a funcref/externref PAYLOAD holder, NOT a generic base-class,
+  so `wasm_memory_as_ref` etc. (C-type-hierarchy upcast for non-reference objects) are "degenerate in zwasm's
+  model" (D-253). Option: ref payload = `@intFromPtr(obj)` like foreign (mechanical, conflates payload), vs a
+  tagged generic base Ref (bigger). Decide in an ADR; reconcile the val `of.ref`=raw-payload divergence (D-269)
+  here too. Step 0: read `extern_new.zig` (foreign as_ref/ref_as_foreign + ref copy/same) + `handles.zig` Ref.
+  Then F (tagtype/EH — needs `TagType`), G (serialize — own ADR).
 - After §16.2: §16.3 Zig-API review (reconcile D-267, ADR-0025 Revision), §16.4 CLI あるべき論 review,
   §16.5 dogfooding, §16.6 memory-safety (D-258→D-261), §16.7 docs LAST. Chain; pay debt en route.
 
