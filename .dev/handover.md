@@ -20,15 +20,27 @@
   **D-267** (ROADMAP §10.A/ADR-0025 name `Runtime`/`Module.parse`; ships `Engine`/`eng.compile`/`typedFunc`
   — code correct, spec stale). Will be revised as the §16.2–4 surface audits settle.
 
+## Active bundle
+
+- **Bundle-ID**: 16.2-capi-completion
+- **Cycles-remaining**: ~6 (one per gap category A–G; E/G are multi-cycle)
+- **Continuity-memo**: §16.2 audit DONE (`.dev/c_api_surface_audit_2026-06-04.md`, D-269) — our `wasm.h` is
+  byte-identical to upstream latest, but **129/293 standard extern fns unimplemented** (link-error for C
+  consumers). wasmtime/wasmer ship 100%; wazero ships none. Decision: implement full standard surface (not
+  wasmtime's ext headers). Live count: `bash scripts/capi_surface_gap.sh`. Sequence: A type accessors (6) →
+  B per-type vec ops (~30) → C config (3) → D val_copy/delete (2) → E ref-cast/host_info (~71, D-253) →
+  F tagtype/EH (12) → G module serialize/share (5, own ADR).
+- **Exit-condition**: `capi_surface_gap.sh` gap → 0 (or each residual category has an ADR/debt justifying
+  deferral); then close §16.2 [x].
+
 ## NEXT (autonomous — surfaces first, docs last; ADR-0156)
 
-- **§16.2 — C-API surface audit vs wasm-c-api.** Audit `include/wasm.h` + `src/api/` against the upstream
-  wasm-c-api standard (the interface wasmtime/wasmer follow; cf. ADR-0004 pin). Read the upstream header +
-  a reference runtime's binding; list divergences (missing funcs, wrong shapes); fix code AND the tests if
-  they encoded a wrong shape. Industry-standard is the bar. (Step 0 survey: subagent — upstream wasm-c-api
-  + src/api/.) Then §16.3 Zig-API review (reconcile D-267, ADR-0025 Revision), §16.4 CLI あるべき論 review,
-  §16.5 minimal-wrapper dogfooding (local build.zig.zon consumer; API/CLI-gap hunt; reuse test corpus),
-  §16.6 memory-safety (D-258→D-261), §16.7 docs LAST (after surfaces settle). Chain; pay debt en route.
+- **§16.2 chunk A (type accessors) — NEXT**: implement `wasm_{func,global,table,memory}_type` +
+  `wasm_func_{param,result}_arity` in `src/api/module_introspect.zig` (reuse the existing per-kind
+  externtype builders; split out inner-type builders). TDD + in-source Zig tests. Then chunk B (vec ops),
+  C (config), D (val lifecycle) — chain. E (ref/host_info) via D-253; G (serialize) own ADR.
+- After §16.2: §16.3 Zig-API review (reconcile D-267, ADR-0025 Revision), §16.4 CLI あるべき論 review,
+  §16.5 dogfooding, §16.6 memory-safety (D-258→D-261), §16.7 docs LAST. Chain; pay debt en route.
 
 ## Step 0.7 (next resume)
 
