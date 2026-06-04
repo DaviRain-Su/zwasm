@@ -493,9 +493,18 @@ entries:
     layer: "code"
     status: "blocked-by"
     description: |-
-      blocked-by: arm64 prologue MOV-installs the pinned cohort (X19 + X24-X28) from the rt rather than stack-saving it (ADR-0017 sub-2d-ii), so a frame-consuming cross-module tail-jump (`BR X16` to a different-rt callee) corrupts a same-module grand-caller's cohort — the callee can't restore values it never saved. Discharge: add a prologue cohort stack-save (Option B of `abi_callee_saved_pinning.md`) on arm64, after which `frame_teardown` can restore the cohort before `BR X16` and both arches adopt the frame-consuming path. ADR-grade + multi-cycle (touches every prologue/epilogue + all emit byte-snapshot tests + a perf tradeoff vs the MOV-install convention); its own bundle when scheduled. | **Cross-module `return_call` is call-and-return, NOT proper-tail-call** (ADR-0112 Amendment 2026-05-30, landed D-206 step 2). The cross-module path lowers to `call $import` (via the ADR-0066 cohort-preserving bridge thunk) + epilogue + RET: cohort-correct on both arches, results correct, but A's frame stays live across the call → unbounded *cross-module* mutual tail-recursion grows the native stack (eventually overflows) instead of constant space. Same-module `return_call` stays proper-tail-call (frame consumed). x86_64's per-frame R15 save would permit a frame-consuming `JMP R11` today, held back only for cross-arch consistency. Result-correct + cohort-safe for all terminating programs; only deep cross-module tail recursion is affected. Preventive guard: `runner.zig` "same-module grand-caller's cohort survives → mem[0]=99".
+      **2026-06-04 RECURRENCE FLAG (session retrospective): the "MOV-install cohort WITHOUT prologue stack-save"
+      convention (ADR-0017 sub-2d-ii) is a recurring root cause — it has now generated callee-saved-preservation
+      bugs at FOUR seams: D-142 + D-206 (cross-module bridge), D-210 (frame-consuming tail-call, this row), and
+      D-245 (host→JIT, fixed 2026-06-04 by yet another per-seam patch — the clobber-trampoline `510ffce9`). Each
+      was patched at the SEAM rather than at the root. This row IS the root fix (prologue cohort stack-save). The
+      structural decision to make consciously: either SCHEDULE the root fix (D-210) — after which D-245's
+      trampoline + the cross-module bridge could simplify AND frame-consuming cross-module tail-calls become
+      legal — OR accept "perpetual per-seam patching" as policy + document that every NEW host→JIT / cross-rt
+      emit path must add its own cohort save. Do not let it silently stay deferred forever; pick one. See
+      [[2026-06-04-session-retrospective-structural-risks]].** blocked-by: arm64 prologue MOV-installs the pinned cohort (X19 + X24-X28) from the rt rather than stack-saving it (ADR-0017 sub-2d-ii), so a frame-consuming cross-module tail-jump (`BR X16` to a different-rt callee) corrupts a same-module grand-caller's cohort — the callee can't restore values it never saved. Discharge: add a prologue cohort stack-save (Option B of `abi_callee_saved_pinning.md`) on arm64, after which `frame_teardown` can restore the cohort before `BR X16` and both arches adopt the frame-consuming path. ADR-grade + multi-cycle (touches every prologue/epilogue + all emit byte-snapshot tests + a perf tradeoff vs the MOV-install convention); its own bundle when scheduled. | **Cross-module `return_call` is call-and-return, NOT proper-tail-call** (ADR-0112 Amendment 2026-05-30, landed D-206 step 2). The cross-module path lowers to `call $import` (via the ADR-0066 cohort-preserving bridge thunk) + epilogue + RET: cohort-correct on both arches, results correct, but A's frame stays live across the call → unbounded *cross-module* mutual tail-recursion grows the native stack (eventually overflows) instead of constant space. Same-module `return_call` stays proper-tail-call (frame consumed). x86_64's per-frame R15 save would permit a frame-consuming `JMP R11` today, held back only for cross-arch consistency. Result-correct + cohort-safe for all terminating programs; only deep cross-module tail recursion is affected. Preventive guard: `runner.zig` "same-module grand-caller's cohort survives → mem[0]=99".
     first_raised: "2026-05-30"
-    last_reviewed: "2026-06-03"
+    last_reviewed: "2026-06-04"
     refs: |-
       `src/engine/codegen/{arm64,x86_64}/op_tail_call.zig` (emitCrossModuleReturnCall) + `op_call.zig` (emitImportDispatch); ADR-0112 Amendment 2026-05-30; ADR-0066; ADR-0017; `.claude/rules/abi_callee_saved_pinning.md`; lesson `2026-05-30-cross-module-tail-call-cohort-asymmetry`; ROADMAP §10 / 10.TC
   - id: "D-209"
@@ -863,30 +872,71 @@ entries:
     refs: |-
       src/engine/codegen/shared/regalloc.zig (spillBytes, class-blind slot space @127-137);
       regalloc_vreg_class.zig (vregClassOfOp); ADR-0150; ADR-0038/0040
-  - id: "D-260"
+  - id: "D-261"
     layer: "code"
     status: "now"
     description: |-
-      **x86_64 SIMD emit CORRECTNESS BUGS exposed by the D-246 lowering arms** (windowsmini test-all
-      2026-06-04, HEAD `730a198b`). `i16x8.q15mulr_sat_s` + `i16x8.extadd_pairwise_i8x16_s` (and likely the
-      extadd_pairwise siblings i8x16_u / i32x4_s/u) produce WRONG results on x86_64 (`expected i32:1, got
-      i32:0`). These x86_64 emit handlers (B107) pre-existed but were NEVER reachable until D-246 added the
-      `lower_simd.zig` arms (`1029e5b4`) — and that work verified arm64-RUNTIME + x86_64-CROSS-COMPILE only,
-      never x86_64-RUNTIME, so latent x86_64 emit bugs shipped. arm64 emit is CORRECT (clang-verified + Mac
-      test-all green); only x86_64 is wrong. NOT a D-245 issue (D-245 win64 crash is FIXED — 2339/2441 pass,
-      no SEGV). DIAGNOSIS: q15mulr `PMULHRSW` does NOT saturate the a==b==-32768 (0x8000) edge → gives -32768
-      not +32767 (needs a post-saturation step). extadd `PMADDUBSW(set1(1), src)` recipe LOOKS correct —
-      needs x86_64 disasm to pin (encoder/operand-order?). FIX (fresh-context + REMOTE x86_64 RUN verify, not
-      cross-compile): correct both recipes in `x86_64/op_simd_int_arith.zig` (q15mulr) +
-      `op_simd_int_cmp_lane.zig` (extadd) → `run_remote_ubuntu test-all` (x86_64 run oracle) + windowsmini.
-      Blocks §15.5 exit (test-all 3-host green) + §15.P. The 21 other D-246 ops (extmul/dot/add_sat/sub_sat)
-      are x86_64-CORRECT (their edge_cases passed on win64).
+      **HIGHEST-STAKES under-verified area: GC-on-JIT conservative rooting correctness has NO adversarial
+      test.** §15.1 (`be4357be`) made the collector FREE memory, gated behind the object-start-validated
+      conservative native-stack scan (chunk 1b, `scanNativeStackRoots`). Its correctness for the JIT path rests
+      ENTIRELY on the ADR-0128 §2 spill-at-call ABI assumption (a live GcRef in a callee-saved reg is, at any
+      collection point, ALSO spilled to some frame's saved-reg area, so the stack scan finds it — JSC-Riptide
+      model). NOTHING validates this adversarially: a GcRef held ONLY in a register (never spilled) live across a
+      collection-triggering alloc = a silent USE-AFTER-FREE (worst kind — surfaces only in ReleaseSafe / specific
+      seeds, like D-245 did). Compounded by D-258 (the JIT alloc trampoline doesn't even TRIGGER collection yet,
+      so the JIT rooting path is currently unexercised end-to-end). DISCHARGE: an ADVERSARIAL stress test — a
+      JIT function that holds a GcRef across a `struct.new`/`array.new` that forces a collection, in a regalloc
+      shape that keeps the ref register-resident (or prove the prologue/spill model makes that impossible) +
+      enable D-258 so the JIT path actually collects + run it under ReleaseSafe on all 3 hosts. Until then, GC
+      reclamation on the JIT path is "trust the ABI model", not verified. Surfaced: 2026-06-04 session
+      retrospective ([[2026-06-04-session-retrospective-structural-risks]]).
     first_raised: "2026-06-04"
     last_reviewed: "2026-06-04"
     refs: |-
-      src/engine/codegen/x86_64/op_simd_int_arith.zig (emitI16x8Q15mulrSatS → encPmulhrsw);
-      src/engine/codegen/x86_64/op_simd_int_cmp_lane.zig (emitI16x8ExtaddPairwiseI8x16S → PMADDUBSW);
-      src/ir/lower_simd.zig (the D-246 arms 124-127/130); test/edge_cases/p9/v128_lane_ops/; /tmp/windows.log
+      ADR-0128 §2 (non-moving conservative scan, spill-at-call); ADR-0147 (reclamation); D-258 (JIT collect
+      trigger); D-211 (precise rooting); src/feature/gc/collector_mark_sweep.zig (scanNativeStackRoots);
+      src/feature/gc/root_scope.zig (maybeCollect); lesson 2026-06-04-session-retrospective-structural-risks
+  - id: "D-262"
+    layer: "process"
+    status: "now"
+    description: |-
+      **x86_64/win64 EMIT correctness is structurally under-verified by the gate topology.** D-260 (x86_64 SIMD
+      bugs) shipped "RESOLVED" + was caught only at a phase-boundary windowsmini run, because: the per-chunk gate
+      is 2-host (Mac arm64 + ubuntu), ubuntu is often kicked at NARROW `test` scope (skips the spec/edge SIMD
+      runners), win64 runs ONLY at phase boundaries, and "x86_64-cross-COMPILE" was mistaken for x86_64-RUN
+      verification (lesson `cross-compile-is-not-cross-run`). ⇒ any newly-added per-arch emit that was
+      arm64-RUN + x86_64-cross-compiled-only may carry LATENT x86_64/win64 bugs. CONCRETE (a) AUDIT: the D-246
+      26 ops — only a subset were win64-RUN-verified (windowsmini test-all `730a198b` caught 2; the rest passed
+      that run, but future emit won't be covered); sweep any emit added since the last green windowsmini test-all
+      for x86_64-RUN coverage. (b) PROCESS FIX: a codegen-emit-touching chunk MUST trigger an x86_64 RUN
+      (`run_remote_ubuntu test-all`, not `test`) before the op is declared done — encode in GATE.md / ADR-0076
+      D1 (the scope-classify map) so emit chunks map to test-all not test. DISCHARGE: process change landed +
+      a one-time emit audit run. Surfaced: 2026-06-04 retrospective ([[2026-06-04-session-retrospective-structural-risks]]).
+    first_raised: "2026-06-04"
+    last_reviewed: "2026-06-04"
+    refs: |-
+      D-260; lesson 2026-06-04-cross-compile-is-not-cross-run; ADR-0076 (gate topology D1 scope-classify);
+      .claude/skills/continue/GATE.md; scripts/classify_chunk_scope.sh; scripts/run_remote_ubuntu.sh
+  - id: "D-263"
+    layer: "process"
+    status: "now"
+    description: |-
+      **The "v2 ≈ v1 parity" claim is an INFERENCE, never measured against v1.** This session folded §15.2 +
+      §15.3 + §15.4 perf ports (ADR-0149/0150/0151) on the basis that v2's emit is spill-efficient + per-op
+      competitive vs wasmtime/wazero/wasmer (§11.3 profile). But NO actual v2-vs-v1 benchmark has been run; the
+      §11.3 comparison was vs other runtimes, not v1, and per-op, not loop-level. §15.P's exit ("parity-vs-v1 +
+      the W45 loop-isolated measurement") is the load-bearing UN-DONE work and is easy to hand-wave at close.
+      RISK: Phase 15 closes claiming parity without ever measuring v1, and W45 (v1's 78x→10x SIMD-loop lever,
+      genuinely absent in v2) is dismissed unmeasured. DISCHARGE: make the §15.P close gate REQUIRE (not
+      optional) (1) an actual v2-vs-v1 steady-state bench on ≥3 loop-heavy + ≥1 SIMD-loop fixture (build v1 from
+      its clone or an existing baseline), AND (2) the W45 loop-isolated measurement (≥50M-iter v128-local loop /
+      no-op-baseline subtraction); if v2 lags v1 on the SIMD-loop, RE-OPEN W45 with the data. Surfaced:
+      2026-06-04 retrospective ([[2026-06-04-session-retrospective-structural-risks]]).
+    first_raised: "2026-06-04"
+    last_reviewed: "2026-06-04"
+    refs: |-
+      ADR-0149/0150/0151 (perf folds); ROADMAP §15.P (parity-vs-v1 row); bench/results/simd_gap_profile_p11_3.md;
+      scripts/run_bench.sh; ~/Documents/MyProducts/zwasm (v1 clone); lesson 2026-06-04-session-retrospective-structural-risks
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
