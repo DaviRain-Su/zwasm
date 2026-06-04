@@ -10,13 +10,13 @@ Read [`REWORK.md`](../.claude/skills/continue/REWORK.md). Bundle mode nests insi
 
 - **Campaign-ID**: regalloc-resident-locals (D-265) — the single-pass baseline 完成形 (keep hot locals
   register-resident, as v1 does; within P3/P6, NOT an optimising tier). This IS the §15.P parity-achievement work.
-- **Phase**: **IV — implementation, stage-1 SPIKE done: ROI VALIDATED, 1 bug to fix before landing**. I/II/III
-  DONE (II = 3 `p9/regalloc/` fixtures 55/30/84; III = **ADR-0155** register-homed locals, pseudo-vreg-per-local).
-  **Spike result (tree reverted clean)**: w45_addi **v2/v1 = 0.57× — v2-jit 1.76× FASTER than v1** (was 2.30×) →
-  approach SOUND, model proven. **BUG**: 2 call-free i32-local fns miscompile (`clang_O0_arr_sum` got 133642/want
-  39; `clang_O0_fp_sum` got 10/want 77) — a liveness↔emit numbering divergence on the clang-`-O0` shape (homed
-  local as memory base + `and/eqz/br_if` loop cond); the 3 Phase-II fixtures DON'T catch it. Call-crossing homed
-  locals also break → stage 1 gates homing OFF for fns with calls (correct). Detail: ADR-0155 §"Spike result".
+- **Phase**: **IV — implementation. ✅ STAGE 1 LANDED** (`a64c72a1`). I/II/III DONE (ADR-0155 register-homed
+  locals, fix A = APPEND pseudo-vregs at highest ids → no renumbering → no break of liveness block/br arithmetic;
+  the prior-spike prepend bug). New SSOT `src/ir/analysis/local_homing.zig` (every pass re-derives the plan →
+  can't drift). **ROI: w45_addi 2.30× → 0.97× (parity, target ≤1.1× MET)**; all gates green (test-edge-cases 0
+  failed incl. the NEW clang-O0 `homed_local_membase_loop` fixture that repro'd the spike's arr_sum/fp_sum
+  miscompile; `zig build test` exit 0; test-spec 9/0; lint + x86_64 cross-compile clean). Stage-1 gates: aarch64
+  only / declared i32-i64 locals only (params+fp+v128+GcRef slot-homed) / no-call fns only / cap 6.
 - **Phase I result**: D-265 = v2-jit ~2.3× slower than v1 when a loop body reads a loop-carried local (A/B:
   `a=a+i` 2.30× vs `a=a+CONST` 0.96×; not memory/ALU — confounded earlier). MECHANISM (`emit.zig:910-968`): every
   `local.get` = `next_vreg++` + `LDR [SP,#local_off]`; no residency cache. ROI ceiling = v1 parity (known
@@ -30,16 +30,14 @@ Read [`REWORK.md`](../.claude/skills/continue/REWORK.md). Bundle mode nests insi
   adversarial test is **D-258-blocked**; it converts to a **Phase III DESIGN CONSTRAINT** (rework MUST keep
   GcRefs slot-resident across any potential collection point — register-residency for non-ref locals, ref-locals
   spill at collection sites), with the JIT adversarial test deferred to when D-258 lands.
-- **NEXT — back to Phase II (close the net gap), then re-spike + land stage 1**. The spike proved the ROI but
-  found a miscompile the Phase-II net misses → correctness-first says STRENGTHEN THE NET FIRST: (1) **add a
-  clang-`-O0`-shaped Phase-II fixture** under `test/edge_cases/p9/regalloc/` (a homed local used as a memory base,
-  read repeatedly, in a loop whose condition is `load; const; i32.lt_s; const; i32.and; i32.eqz; br_if` — repro
-  arr_sum/fp_sum) — derive its `.expect` from current (correct) interp/JIT, confirm it's a RED test under the
-  spike's homing. (2) **root-cause** the liveness↔emit operand-stack numbering divergence on that shape (continue
-  the spike subagent `a89f7df7f111795ec` — it has the impl context — via SendMessage, OR re-implement from
-  ADR-0155 + the spike findings). (3) **fix** + re-run: the new fixture + the 3 existing + w45_addi (≤1.1×) +
-  `zig build test` all green. (4) **land stage 1 on-branch** (commit) → ubuntu test-all (D-262). Then stages 2
-  calls / 3 FP-v128 / 4 x86_64. Approach is GO (ADR-0155 §"Spike result"). All autonomous.
+- **NEXT — Phase IV stage 2 (call-site spill/reload)**. Stage 1 homes locals only in CALL-FREE functions (a homed
+  local in a caller-saved reg would be clobbered across a call). Stage 2: at each call site, spill homed locals
+  that live in caller-saved registers to their `local_base_off` slots, reload after — then drop the no-call gate
+  in `local_homing.zig isCallLike`. Survey v1's call-site local spill (`jit.zig:1705-1719`) + v2's ABI
+  cohort/caller-saved set. Add a Phase-II fixture: a homed local read across a call (correctness). Then stage 3
+  (FP/v128 homes, V16-V28 class) / stage 4 (x86_64 parity, P7 — the big one, gated K=0 today). Each: net green
+  every commit + ubuntu test-all. **ubuntu test-all kicked this turn** against stage 1 (x86_64 K=0-gated → expect
+  no behavior change; Step 0.7 verifies). All autonomous per the philosophy.
 
 ## Current state
 
@@ -53,10 +51,10 @@ Read [`REWORK.md`](../.claude/skills/continue/REWORK.md). Bundle mode nests insi
 
 ## Step 0.7 (next resume)
 
-D-265 campaign **Phase III design DONE (ADR-0155 Option B = register-homed locals)** → next = the off-branch
-validation spike (stage 1: GPR locals register-homed, no-call case; Phase-II fixtures green + w45_addi ≤1.1×).
-All docs-only since the fixtures → no on-branch code, no new ubuntu kick; Phase-II fixtures already x86_64-green
-(`/tmp/ubuntu.log`, 55/30/84). (`510ffce9`/`3a778080` validated; do NOT revert.) **NOTE** (lesson
+D-265 campaign **Phase IV STAGE 1 LANDED** (`a64c72a1`, register-homed scalar GPR locals arm64; w45_addi
+2.30×→0.97×; all gates green). **ubuntu test-all kicked** against `a64c72a1` (x86_64 K=0-gated → expect no
+behavior change) → Step 0.7 next resume: `tail -3 /tmp/ubuntu.log`, green expected (revert stage-1 commit on red).
+Next = stage 2 (call-site spill). (`510ffce9`/`3a778080` validated; do NOT revert.) **NOTE** (lesson
 `gate-tail-vs-exit-code`): benign `failed command: …--listen=-` / SlotOverflow / `arm64/emit: failing op` next to
 a passing run = error-path noise — EXIT authoritative. **D-262 process fix**: any NEW per-arch emit chunk → run
 `run_remote_ubuntu test-all` (NOT narrow `test`) before discharge (cross-compile ≠ cross-run).

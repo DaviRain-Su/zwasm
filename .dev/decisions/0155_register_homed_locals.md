@@ -1,7 +1,7 @@
 # 0155 — Register-homed locals, single-pass (D-265 rework, Phase III — Option B)
 
-- **Status**: Proposed (2026-06-04; D-265 rework campaign Phase III per ADR-0153; supersedes ADR-0154's Option A
-  approach; validation spike + staged Phase IV pending)
+- **Status**: Accepted — STAGE 1 LANDED `a64c72a1` (2026-06-04; D-265 campaign Phase IV; fix A = APPEND chosen;
+  w45_addi 2.30×→0.97×, all gates green; stages 2 calls / 3 FP-v128 / 4 x86_64 remain). Supersedes ADR-0154.
 - **Date**: 2026-06-04
 - **Author**: claude (autonomous, D-265 campaign Phase III redo)
 - **Tags**: Phase 15, perf, regalloc, liveness, emit, single-pass, locals, D-265, ADR-0018, ADR-0149/0150/0151, W54, W45
