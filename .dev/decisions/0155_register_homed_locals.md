@@ -30,11 +30,21 @@ loop_carried_local_sum=55, local_set_then_get_in_loop=30, multi_local_loop_press
 to its `local_base_off` slot only at necessity points), NOT a slot reloaded per access.
 
 This is NOT the temporary-vreg model (those are single-def SSA-ish values from `liveness.zig`'s push-per-op). A
-local is **multi-def mutable** (each `local.set` re-writes it). So locals need their OWN allocation concept — a
-**local-register file** sized by `local_count`, allocated alongside (and competing with) the temporary-vreg slot
-pool — mirroring v1's "vregs 0..N-1 are the locals." (Open design choice for the spike: a separate local-register
-pre-reservation vs unifying locals into a multi-def-capable vreg space; the spike picks whichever is cleaner +
-hits the ROI with lower W54 risk.)
+local is **multi-def mutable** (each `local.set` re-writes it).
+
+**Resolved mechanism (2026-06-04) — pseudo-vreg-per-local, reusing the existing register-resident elision:**
+Allocate **one pseudo-vreg per local** with a **function-spanning live range** (def_pc=0, last_use_pc=function
+end). Regalloc assigns it a slot like any vreg; if the slot < `max_reg_slots_gpr` (8) it is **register-resident**
+the whole function (its range never ends → the free-pool never reclaims it → pinned). Then `local.get $i` /
+`local.set $i` reference that pseudo-vreg via the EXISTING `gprLoadSpilled`/`gprStoreSpilled` helpers — which
+**already elide the LDR/STR for a register-resident vreg** (the ADR-0149 finding: `.reg` branch returns the
+register / is a no-op). So a register-homed local needs **no new emit machinery** — reusing the pseudo-vreg gives
+register residency for free; an overflow local (slot ≥ 8) falls back to today's LDR/STR (the slot IS its home).
+This is lower-W54-risk than a separate local-register file (no parallel allocator) and reuses v2's contract.
+Multi-def is fine: the slot is stable across the whole range, so every `local.set` writes the same home and every
+`local.get` reads it. Cost: K locals pin K slots function-wide → fewer registers for temporaries (v1 has the same
+trade; the first locals get registers, the rest + temporaries overflow). The prologue loads each register-homed
+local's initial value (param or zero) into its pinned register once.
 
 **Mechanism (the four cross-layer touch-points):**
 1. **regalloc** (`shared/regalloc*.zig`): reserve the first K physical GPR/FP slots for the first K locals (by

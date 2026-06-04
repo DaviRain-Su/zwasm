@@ -30,12 +30,20 @@ Read [`REWORK.md`](../.claude/skills/continue/REWORK.md). Bundle mode nests insi
   adversarial test is **D-258-blocked**; it converts to a **Phase III DESIGN CONSTRAINT** (rework MUST keep
   GcRefs slot-resident across any potential collection point — register-residency for non-ref locals, ref-locals
   spill at collection sites), with the JIT adversarial test deferred to when D-258 lands.
-- **NEXT — validation spike** (ADR-0155 §"Validation spike"; off-branch `private/spikes/register-homed-locals/`):
-  implement **stage 1** (GPR locals register-homed for the no-call straight-line-loop case: regalloc reserves K
-  GPR registers for the first K locals; prologue loads them; `local.get`/`set` become reg refs; slot-overflow for
-  the rest). Run the 3 Phase-II fixtures (MUST stay green = correctness) + w45_addi (MUST hit ≤1.1× = ROI).
-  Resolves the open design choice (local-register pre-reservation vs multi-def vreg). Green+ROI → land stage 1
-  on-branch (Phase IV) → stages 2 calls / 3 FP-v128 / 4 x86_64, net green every commit, ubuntu test-all. All autonomous.
+- **NEXT — Phase IV stage 1 (the first surgery; spike on working tree, commit-if-green-else-revert)**. DESIGN
+  RESOLVED (ADR-0155): **one pseudo-vreg per local, function-spanning live range** → regalloc pins it to a
+  register (slot<8) the whole function → `local.get`/`set` reuse that pseudo-vreg via the EXISTING
+  `gprLoadSpilled`/`gprStoreSpilled` (which already elide LDR/STR for register-resident vregs, ADR-0149) = no new
+  emit machinery; overflow locals (slot≥8) keep today's LDR/STR. Concrete edits: (1) `ir/analysis/liveness.zig` —
+  mint K local pseudo-vregs with range [0, end] BEFORE the per-op temporary vregs (so locals get the low slot
+  ids); (2) `shared/regalloc_compute.zig` — naturally pins them (range never ends); (3) `arm64/emit.zig`
+  `local.get`(935-939)/`local.set`(990-993) — reference the local's pseudo-vreg instead of `LDR/STR
+  [local_base_off]`; the per-get fresh-vreg minting is REMOVED (local.get pushes the pseudo-vreg); (4) prologue —
+  load each register-homed local's init (param/zero) into its pinned reg once. KEEP liveness↔emit vreg numbering
+  in lockstep. GcRef locals: stay slot-homed for now (skip the pseudo-vreg, D-261/D-258). Gate: 3 Phase-II
+  fixtures green (correctness) + w45_addi ≤1.1× (ROI) + full `zig build test`. Green → commit (Phase IV ch1) →
+  stages 2 calls / 3 FP-v128 / 4 x86_64. Broken/thin → revert + record. **START FRESH** (big intricate surgery —
+  this turn deliberately flushed here, design complete, to give Phase IV a clean context budget). All autonomous.
 
 ## Current state
 
