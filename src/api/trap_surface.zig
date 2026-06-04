@@ -54,6 +54,10 @@ pub const Trap = extern struct {
     kind: TrapKind,
     message_ptr: ?[*]u8,
     message_len: usize,
+    /// host_info (wasm.h `WASM_DECLARE_REF_BASE`); accessors in
+    /// `host_info.zig`, finalizer fired in `wasm_trap_delete`.
+    host_info: ?*anyopaque = null,
+    host_info_finalizer: ?*const fn (?*anyopaque) callconv(.c) void = null,
 };
 
 // ============================================================
@@ -142,6 +146,7 @@ pub export fn wasm_trap_new(s: ?*wasm_c_api.Store, message: ?*const wasm_c_api.B
 /// the struct. Null-tolerant.
 pub export fn wasm_trap_delete(t: ?*Trap) callconv(.c) void {
     const handle = t orelse return;
+    if (handle.host_info_finalizer) |fin| fin(handle.host_info);
     const store = handle.store orelse return;
     const alloc = wasm_c_api.storeAllocator(store) orelse return;
     if (handle.message_ptr) |p| alloc.free(p[0..handle.message_len]);

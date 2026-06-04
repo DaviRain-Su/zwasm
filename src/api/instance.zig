@@ -91,6 +91,10 @@ pub const Module = extern struct {
     store: ?*Store,
     bytes_ptr: ?[*]u8,
     bytes_len: usize,
+    /// host_info (wasm.h `WASM_DECLARE_SHARABLE_REF`/`REF_BASE`); accessors in
+    /// `host_info.zig`, finalizer fired in `wasm_module_delete`.
+    host_info: ?*anyopaque = null,
+    host_info_finalizer: ?*const fn (?*anyopaque) callconv(.c) void = null,
 };
 
 // Instance + ExportType moved to src/runtime/instance/instance.zig
@@ -348,6 +352,7 @@ pub export fn wasm_module_validate(s: ?*Store, binary: ?*const ByteVec) callconv
 /// `_module_new`. Null-tolerant.
 pub export fn wasm_module_delete(m: ?*Module) callconv(.c) void {
     const handle = m orelse return;
+    if (handle.host_info_finalizer) |fin| fin(handle.host_info);
     const store = handle.store orelse return;
     const alloc = storeAllocator(store) orelse return;
     if (handle.bytes_ptr) |p| alloc.free(p[0..handle.bytes_len]);

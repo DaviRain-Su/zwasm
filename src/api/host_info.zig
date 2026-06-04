@@ -19,8 +19,9 @@ const testing = std.testing;
 
 const handles = @import("handles.zig");
 const zir = @import("../ir/zir.zig");
-// test-only: exercise finalizer-fires-on-delete via a standalone object.
 const instance = @import("instance.zig");
+const trap_surface = @import("trap_surface.zig");
+// test-only: exercise finalizer-fires-on-delete via a standalone object.
 const extern_new = @import("extern_new.zig");
 const types = @import("types.zig");
 
@@ -105,6 +106,26 @@ pub export fn wasm_extern_set_host_info_with_finalizer(h: ?*handles.Extern, info
     setHostInfoFin(handles.Extern, h, info, fin);
 }
 
+pub export fn wasm_module_get_host_info(h: ?*const instance.Module) callconv(.c) ?*anyopaque {
+    return getHostInfo(instance.Module, h);
+}
+pub export fn wasm_module_set_host_info(h: ?*instance.Module, info: ?*anyopaque) callconv(.c) void {
+    setHostInfo(instance.Module, h, info);
+}
+pub export fn wasm_module_set_host_info_with_finalizer(h: ?*instance.Module, info: ?*anyopaque, fin: Finalizer) callconv(.c) void {
+    setHostInfoFin(instance.Module, h, info, fin);
+}
+
+pub export fn wasm_trap_get_host_info(h: ?*const trap_surface.Trap) callconv(.c) ?*anyopaque {
+    return getHostInfo(trap_surface.Trap, h);
+}
+pub export fn wasm_trap_set_host_info(h: ?*trap_surface.Trap, info: ?*anyopaque) callconv(.c) void {
+    setHostInfo(trap_surface.Trap, h, info);
+}
+pub export fn wasm_trap_set_host_info_with_finalizer(h: ?*trap_surface.Trap, info: ?*anyopaque, fin: Finalizer) callconv(.c) void {
+    setHostInfoFin(trap_surface.Trap, h, info, fin);
+}
+
 test "host_info trio: get/set/set_with_finalizer across all 6 handle types + null discipline" {
     var marker: u8 = 0;
     const fin = struct {
@@ -141,6 +162,14 @@ test "host_info trio: get/set/set_with_finalizer across all 6 handle types + nul
     var ext: handles.Extern = .{ .kind = .func, .instance = null };
     wasm_extern_set_host_info(&ext, &marker);
     try testing.expectEqual(@as(?*anyopaque, @ptrCast(&marker)), wasm_extern_get_host_info(&ext));
+
+    var mod: instance.Module = .{ .store = null, .bytes_ptr = null, .bytes_len = 0 };
+    wasm_module_set_host_info(&mod, &marker);
+    try testing.expectEqual(@as(?*anyopaque, @ptrCast(&marker)), wasm_module_get_host_info(&mod));
+
+    var trap: trap_surface.Trap = .{ .store = null, .kind = .unreachable_, .message_ptr = null, .message_len = 0 };
+    wasm_trap_set_host_info_with_finalizer(&trap, &marker, fin);
+    try testing.expectEqual(@as(?*anyopaque, @ptrCast(&marker)), wasm_trap_get_host_info(&trap));
 
     // null discipline (get → null; set → no crash).
     try testing.expect(wasm_func_get_host_info(null) == null);
