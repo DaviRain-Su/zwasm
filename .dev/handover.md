@@ -30,27 +30,27 @@
   wasmtime's ext headers). Live count: `bash scripts/capi_surface_gap.sh` (**gap 76**, was 129).
   Sequence: ✅A type accessors (6, `c3a979fa`) → ✅B per-type vec ops (24, `2116a18b`, PtrVecOps unify) →
   ✅C config (3) + ✅D val_copy/delete (2, POD) → ✅instance.zig split (`092196b6`, ADR-0157 → handles.zig) →
-  ✅E1 host_info trio (18, `031e1c40`, host_info.zig — func/global/table/memory/ref/extern) → **E2 host_info
-  module/trap/instance (9; Instance=Zone decision) + ref-cast/same/copy (~44, ref-model ADR)** → F tagtype/EH
-  (12) → G module serialize/share (5, own ADR). A–E1 DONE; E2/F/G design-gated. (extern_vec_copy + tagtype_vec
-  also deferred to E/F: need wasm_extern_copy / TagType.)
+  ✅E1 host_info trio (18, `031e1c40`) + ✅E2 host_info module/trap (6, `faa03492`) → **E3: Instance host_info
+  (3, Zone decision) + ref-cast/same/copy (~44, ref-model ADR)** → F tagtype/EH (12) → G serialize/share (5,
+  own ADR). A–E2 DONE (gap 70); E3/F/G design-gated. (extern_vec_copy + tagtype_vec also deferred: need
+  wasm_extern_copy / TagType.)
 - **Exit-condition**: `capi_surface_gap.sh` gap → 0 (or each residual category has an ADR/debt justifying
   deferral); then close §16.2 [x].
 
 ## NEXT (autonomous — surfaces first, docs last; ADR-0156)
 
-- **✅ instance.zig split** (`092196b6`, ADR-0157) + **✅ chunk E1 host_info** (18 fns: get/set/set_with_finalizer
-  for func/global/table/memory/ref/extern). Added `host_info`+finalizer fields to the 6 handle structs in
-  `handles.zig`; generic accessors in new `src/api/host_info.zig`; finalizer fired in each `wasm_X_delete`
-  (owned externs only — borrowed cache-views don't fire it, folded into the ref-model reconcile). Gap 94→76.
-- **§16.2 chunk E2 (remaining host_info: module/trap/instance; 9 fns) — NEXT**: Module (`instance.zig` extern
-  struct) + Trap (`trap_surface.zig`) get the field+accessors+delete-firing (same pattern, easy). **Instance
-  needs a Zone decision**: `instance.Instance` is a `runtime.Instance` alias (Zone 1) — putting a Zone-3
-  host_info field on it couples zones; alternative = a Zone-3 side-table (`AutoHashMap(*Instance, host_info)`
-  with removal on instance delete). Pick + (if side-table) note rationale. Then the **ref-cast sub-chunk**
-  (`_as_ref`/`ref_as_X` + `_same`/`_copy`) needing the **uniform `wasm_ref_t` model decision** (likely an ADR —
-  D-253: some casts "degenerate in zwasm's model"); reconcile the val `of.ref`=raw-payload divergence (D-269)
-  here. Then F (tagtype/EH — needs `TagType`), G (serialize — own ADR).
+- **✅ chunk E1 host_info** (18, `031e1c40` — func/global/table/memory/ref/extern; fields in `handles.zig`,
+  generic accessors in new `host_info.zig`, finalizer fired in each `wasm_X_delete`; owned externs only —
+  borrowed cache-views don't fire it, folded into the ref-model reconcile). **✅ chunk E2 host_info** (6,
+  `faa03492` — module + trap, fields on their extern structs, same pattern). Gap 94→70.
+- **§16.2 chunk E3 — NEXT**: (a) **Instance host_info (3 fns)** — needs a Zone decision: `instance.Instance`
+  is a `runtime.Instance` alias (Zone 1). A `host_info` field there is zone-LEGAL (no upward import; Zone-3
+  accessors read it downward; finalizer fired in `wasm_instance_delete` before `alloc.destroy(handle)`), but
+  it's a runtime struct carrying a C-API-only field — decide field-on-runtime-Instance (simple, industry-std)
+  vs Zone-3 side-table (decoupled, lifetime-complex); likely just add the field + a clear comment (no ADR — no
+  import violation). (b) **ref-cast/same/copy (~44)** — the bulk; needs the **uniform `wasm_ref_t` model
+  decision** (likely an ADR — D-253: some casts "degenerate in zwasm's model"); reconcile the val
+  `of.ref`=raw-payload divergence (D-269) here. Then F (tagtype/EH — needs `TagType`), G (serialize — own ADR).
 - After §16.2: §16.3 Zig-API review (reconcile D-267, ADR-0025 Revision), §16.4 CLI あるべき論 review,
   §16.5 dogfooding, §16.6 memory-safety (D-258→D-261), §16.7 docs LAST. Chain; pay debt en route.
 
