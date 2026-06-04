@@ -9,6 +9,12 @@
   DONE. **The loop never tags/publishes/cuts over; release is manual user-only; no release gate exists.**
   Goal = clean design + lightweight-fast + full-featured + 100% spec across the runtime AND the surfaces
   (C/Zig/CLI), to あるべき論 + industry standards, **breaking v1 allowed, v1 full-parity NOT a goal**.
+- **✅ §16.6 memory-safety DONE (ADR-0160; cf21b11c, ubuntu test-all green).** **D-258** wired
+  `root_scope.maybeCollectJit` (conservative-native-stack-scan-only; pure-JIT ⇒ all live GcRefs on the native
+  stack at the trampoline CALL) into both JIT GC-alloc trampolines; **D-261** adversarial survival test (held
+  local across a collect-forcing struct.new → A.field=42 survives; UAF would slot-reuse → 0) — GREEN Mac +
+  x86_64. Latent GC-on-JIT UAF gap closed. Residual **D-276** (callee-saved-register-resident worst case not
+  independently forced). Bundle 16.6-gc-on-jit-memsafety closed.
 - **✅ §16.5 dogfooding DONE — full facade proven externally (c1-c6); D-272 CLOSED.** External
   `build.zig.zon` path-dep consumer (`examples/zig_dep/`). **c1 (`3bfa460a`)** found+fixed a real bug: `build.zig`
   made `core` via `b.createModule` (private) with **no `b.addModule`**, so `dep.module("zwasm")` panicked —
@@ -28,47 +34,26 @@
   guide (`58a483e8`). **✅ §16.3** Zig-API facade confirmed minimal/clean (no code change); D-267 reconciled
   (ADR-0025→ADR-0109); Zig Global/Table accessors = optional gap D-272.
 
-## Active bundle
+## NEXT (autonomous — §16.7 docs is the LAST Phase-16 item; ADR-0156)
 
-- **Bundle-ID**: 16.6-gc-on-jit-memsafety (D-258 → D-261)
-- **Cycles-remaining**: ~0 (impl DONE on Mac; awaiting ubuntu `test-all` verification → then close + §16.6 [x])
-- **Continuity-memo**: JIT collect = **conservative-scan-only** (`JitRuntime` has no `*Runtime`; collector
-  `walkRootsImpl` does `scanNativeStackRoots` then `self.runtime orelse return` — so no-Runtime collect already
-  works). SAFE because GC-on-JIT is **pure-JIT** (no interp↔JIT call bridging; ADR-0128 §22 precise rooting is
-  interp-only/D-211) → every live GcRef is on the native stack at the trampoline CALL (caller-saved spilled
-  pre-call; callee-saved saved in the `callconv(.c)` trampoline frame) → the conservative scan finds all. Add
-  `root_scope.maybeCollectJit(heap, gti)` (mirror `maybeCollect` minus `bindRuntime`/RootScope-rt) + wire into
-  `jit_abi.zig:502` (jitGcAlloc) + `:523` (jitGcAllocArray) BEFORE `object_alloc`. Force collect in tests via
-  `heap.pressure_bytes`/`next_gc_at` small. Observe `heap.gc_cycles` + `MarkSweepCollector.last_stats.survivors`.
-  ADR-0160 records the conservative-only root model + pure-JIT justification.
-- **Exit-condition**: (D-258) a JIT GC-alloc loop under a low pressure threshold drives `heap.gc_cycles > 0`
-  (test); (D-261) an adversarial test — a JIT fn holding a GcRef across a collect-forcing `struct.new`/`array.new`
-  asserts the object SURVIVES (not swept) — green on Mac + `run_remote_ubuntu test-all` (D-262: trampoline is
-  per-arch emit) + windowsmini at phase boundary, under ReleaseSafe.
-- **DONE (Mac green)**: ADR-0160 (`ee91686f`); **D-258** (`3bd04703`) maybeCollectJit + wired both trampolines +
-  RED→GREEN gc_cycles>0 test; **D-261** (`b332081a`) adversarial survival test (held local across collect → A.field
-  stays 42; UAF would slot-reuse → 0). Mac test+lint+zone green. **Residual D-276**: the callee-saved-register-
-  resident worst case isn't independently forced (D-261 covers the held-local shape; zwasm's frame-spilled regalloc
-  makes the common case safe). **BUNDLE CLOSE (next cycle)**: verify ubuntu `test-all` green (Step 0.7) → `bash
-  scripts/check_bundle_active.sh --close` → mark §16.6 [x] → open §16.7 docs.
-
-## NEXT (autonomous — §16.6 memory-safety → docs; ADR-0156)
-
-- **§16.6 memory-safety — driven by the Active bundle above** (design done = ADR-0160; impl = maybeCollectJit +
-  wire + D-258/D-261 tests). Resume via the bundle's NEXT IMPL steps.
-- After §16.6: **§16.7** docs LAST (README/reference/tutorial/CHANGELOG, match the settled surface).
-- Backlog notes (not blockers): **D-269** funcref opaque `?u64` (not callable from a table slot — deeper
-  enhancement); **D-273** CLI flag parity; **D-274** zlinter eager fetch; **D-275** `Module.instantiate` coarse
-  error; `examples/` not fmt-gated by `gate_commit.sh` (caught manually).
+- **§16.7 docs finalization — NEXT.** Match the now-SETTLED surface, not a moving target: `README.md` (install,
+  3-line run/compile happy paths, Wasm proposal/tier table §11, 3-OS matrix), `docs/reference/` (API ref for the
+  settled C/Zig/CLI surface), `docs/tutorial/`, `CHANGELOG.md`. Surface to document: C-API gap=0 (§16.2); Zig
+  facade Engine/Module/Instance/Linker/Caller/Memory/Global/Table (§16.3-5, ADR-0109); CLI = run+compile +
+  `--version`/`--help` (§16.4, ADR-0159); GC-on-JIT memory-safe (§16.6). **Step 0**: survey existing
+  `README.md`/`docs/` state + an industry README (wasmtime/wazero) for shape. Doc chunks; **NOT a release**
+  (ADR-0156 — docs ≠ tag/publish; the loop never cuts over). When §16.7 lands, Phase 16's surface/safety/docs are
+  all 完成形 — the loop keeps refining + paying debt (D-269/273-276), never "ready to release?".
+- Backlog notes (not blockers): **D-269** funcref opaque `?u64`; **D-273** CLI flag parity; **D-274** zlinter
+  eager fetch; **D-275** `Module.instantiate` coarse error; **D-276** D-261 register-resident strengthening;
+  `examples/` not fmt-gated by `gate_commit.sh`.
 
 ## Step 0.7 (next resume)
 
-**Verify ubuntu `test-all`** — this turn pushed §16.6 D-258 (`3bd04703`) + D-261 (`b332081a`): wires the JIT GC
-trampoline collect + the conservative-rooting survival test. Kicked `run_remote_ubuntu test-all` (D-262 — the
-collect path runs the platform-specific native-stack scan, so cross-RUN on Linux x86_64 is load-bearing, not just
-cross-compile). Tail `/tmp/ubuntu.log` for `OK (HEAD=…)`. On GREEN → close the bundle + mark §16.6 [x]. On FAIL →
-revert the turn's commits (the rooting may not hold on x86_64 → a real D-261 finding). **Gate**: Step-5 Mac =
-`bash scripts/mac_gate.sh`. windowsmini = Phase 16 completion boundary.
+**§16.6 ubuntu `test-all` verified GREEN** at `cf21b11c` (last cycle) — conservative GC-on-JIT rooting holds on
+Linux x86_64 too; bundle closed, §16.6 [x]. **This cycle's commit (the §16.6 close) is doc-only** (ROADMAP [x] +
+handover bundle-removal) → no new ubuntu kick. §16.7 is doc-only too. **Gate**: Step-5 Mac =
+`bash scripts/mac_gate.sh`. windowsmini = Phase 16 completion boundary (3-host reconcile when Phase 16 closes).
 
 ## Deferred / open debt
 
