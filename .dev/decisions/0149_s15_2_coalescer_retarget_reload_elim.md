@@ -104,3 +104,20 @@ aware allocation) + §15.4 (SIMD ports) + the §15.P aggregate vs v1. **General 
 low spill share suggests the regalloc-axis perf tasks (§15.2/§15.3) have less headroom than
 the ROADMAP assumed; the larger wins are likely §15.4 SIMD + algorithmic — assess §15.3 on
 its own measurement before committing to its ≥3% bar.
+
+## Revision (2026-06-04, D-265 rework campaign — ADR-0153 close)
+
+The "low spill share → ~0 regalloc headroom" caution above was **measured against the
+wrong proxy** for one pattern and is REVISED. Spill traffic as a fraction of *total*
+emitted instructions (2.7–5.6%) hides hot-loop cost: a single reload inside a
+3-instruction loop body is ~0% of the program yet ~2× of that loop's wall-clock. The
+§15.P parity bench then measured a real **2.30×** regression vs v1 on loops whose body
+reads a loop-carried local (`a=a+i`), A/B-bisected against a no-`i` control at parity
+(0.96×). The headroom IS reachable on this pattern: the D-265 campaign added
+register-homing for hot locals (within single-pass — P3/P6 intact; v1's allocator is
+also single-pass) and recovered arm64 `w45_addi` 2.30×→**0.97×**; on x86_64 the
+reads-`i`/control differential collapsed 2.4×→**1.0×**. What stays CORRECT: the
+*slot-alias coalescer* this ADR retired genuinely has ~0 headroom (v2 emits no
+vreg-to-vreg MOVs) — the recovered lever was local residency-homing, not MOV-elision.
+See `bench/results/s15p_parity_vs_v1.md` + lesson
+[[2026-06-04-regalloc-headroom-hotloop-not-total-instrs]].

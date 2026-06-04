@@ -78,3 +78,15 @@ finding (already-efficient). A fixed aggregate % is replaced by parity-vs-v1.
 - If a future FP-register-pressure-heavy workload (more live FP temps than 13) appears
   — e.g. via ClojureWasm (§15.6) — re-open: dual-pool would then have real headroom.
   Discharge predicate for re-opening = a fixture showing non-zero `fpLoadSpilled`.
+
+## Revision (2026-06-04, D-265 rework campaign — ADR-0153 close)
+
+The "regalloc-axis ~0 headroom" framing (§"The regalloc-axis pattern" above) is
+REVISED to scope: it holds for *FP spill* (genuinely 0%) and for *average* program
+spill traffic, but NOT for the GPR **loop-carried-local** hot path. The §15.P bench
+measured a real 2.30× vs-v1 regression on loops reading a loop local; the D-265
+campaign (ADR-0153) closed it via register-homing of hot locals (single-pass intact),
+recovering arm64 2.30×→0.97× and collapsing the x86_64 reads-`i`/control differential
+2.4×→1.0×. This ADR's own FP conclusion is unaffected (0% FP spill is real); only the
+sibling-ADR-0149 GPR "~0 headroom" generalisation was the over-reach — see ADR-0149
+Revision + lesson [[2026-06-04-regalloc-headroom-hotloop-not-total-instrs]].

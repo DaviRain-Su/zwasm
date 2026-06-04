@@ -1,6 +1,8 @@
 # §15.P — v2-vs-v1 JIT parity measurement (2026-06-04)
 
-> **Doc-state**: ACTIVE
+> **Doc-state**: RESOLVED — the loop-carried-local regression (§Findings 2) was
+> root-caused (D-265) and closed by the register-homing rework campaign (ADR-0153
+> phases I–V). Post-rework verification below (§D-265 post-rework).
 
 Phase 15 close gate (D-263): measure v2-jit vs v1-jit, no unexplained regression,
 + the ADR-0151 W45 loop-isolated measurement. Both binaries built **ReleaseFast**;
@@ -61,6 +63,29 @@ compute/embedding path (where the §15.2/15.3/15.4 perf folds applied).
    slower than the *more*-work scalar_loop. A narrow v2-jit codegen quirk for
    minimal loop bodies; low real-workload impact (real loops have bodies). Noted,
    not chased.
+
+## D-265 post-rework verification (2026-06-04, campaign close)
+
+Register-homing landed on BOTH backends (arm64 stages 1+2 `a64c72a1`/`5d1dd221`;
+x86_64 stage-4-redo `e8b7ad10`). Re-measured the decisive A/B (`a=a+i` reads the
+loop local vs `a=a+CONST` does not):
+
+| target | fixture | metric | pre-rework | post-rework |
+|---|---|---|--:|--:|
+| arm64 (Mac, native) | w45_addi (reads `i`) | v2/v1 | **2.30×** | **0.97×** (parity/faster) |
+| x86_64 (Rosetta) | w45_addi (reads `i`) | v2/v1 | (NotImpl pre-stage-4) | **1.17×** |
+| x86_64 (Rosetta) | w45_addc (control, no `i`) | v2/v1 | — | **1.19×** |
+
+**Verdict: the loop-carried-local reload penalty is ELIMINATED on both backends.**
+The D-265 signature was a ~2.4× *differential* between reads-`i` (2.30×) and the
+no-`i` control (0.96×). Post-rework that differential is **gone**: arm64 hits
+0.97× (≤1.1× ROI target met); on x86_64-Rosetta `addi` (1.17×) and `addc` (1.19×)
+are statistically equal — reading the loop local now costs nothing extra. The
+residual flat ~1.18× on Rosetta appears in the control too, so it is uniform
+binary-translation / baseline-codegen overhead, **not** the D-265 mechanism
+(native arm64 confirms: 0.97×). Native-x86_64 *absolute* ROI vs v1 is unmeasured
+(needs v1 built on ubuntu) → D-266 note; the differential evidence is conclusive
+that the mechanism is fixed, and ubuntu `test-all` is green (correctness).
 
 ## Reproduction
 
