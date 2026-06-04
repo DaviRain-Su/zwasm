@@ -28,20 +28,36 @@
   guide (`58a483e8`). **✅ §16.3** Zig-API facade confirmed minimal/clean (no code change); D-267 reconciled
   (ADR-0025→ADR-0109); Zig Global/Table accessors = optional gap D-272.
 
+## Active bundle
+
+- **Bundle-ID**: 16.6-gc-on-jit-memsafety (D-258 → D-261)
+- **Cycles-remaining**: ~2
+- **Continuity-memo**: JIT collect = **conservative-scan-only** (`JitRuntime` has no `*Runtime`; collector
+  `walkRootsImpl` does `scanNativeStackRoots` then `self.runtime orelse return` — so no-Runtime collect already
+  works). SAFE because GC-on-JIT is **pure-JIT** (no interp↔JIT call bridging; ADR-0128 §22 precise rooting is
+  interp-only/D-211) → every live GcRef is on the native stack at the trampoline CALL (caller-saved spilled
+  pre-call; callee-saved saved in the `callconv(.c)` trampoline frame) → the conservative scan finds all. Add
+  `root_scope.maybeCollectJit(heap, gti)` (mirror `maybeCollect` minus `bindRuntime`/RootScope-rt) + wire into
+  `jit_abi.zig:502` (jitGcAlloc) + `:523` (jitGcAllocArray) BEFORE `object_alloc`. Force collect in tests via
+  `heap.pressure_bytes`/`next_gc_at` small. Observe `heap.gc_cycles` + `MarkSweepCollector.last_stats.survivors`.
+  ADR-0160 records the conservative-only root model + pure-JIT justification.
+- **Exit-condition**: (D-258) a JIT GC-alloc loop under a low pressure threshold drives `heap.gc_cycles > 0`
+  (test); (D-261) an adversarial test — a JIT fn holding a GcRef across a collect-forcing `struct.new`/`array.new`
+  asserts the object SURVIVES (not swept) — green on Mac + `run_remote_ubuntu test-all` (D-262: trampoline is
+  per-arch emit) + windowsmini at phase boundary, under ReleaseSafe.
+- **Done so far (`<this-commit>`)**: ADR-0160 (design + pure-JIT justification). **Test harness**:
+  `runner.JitInstance.init(alloc, &bytes)` is the richer harness (used across `runner_gc_test.zig`); the heap is
+  set up by `setup.setupRuntime` (→ `RuntimeOwned`) and reachable as `JitRuntime.gc_heap` (downcast `*Heap`).
+  NEXT IMPL: (1) find/add a `JitInstance` accessor to the `*Heap` (to set `pressure_bytes`/`next_gc_at` low +
+  read `gc_cycles`); (2) add `root_scope.maybeCollectJit(heap, gti)` (drive collector directly: `coll.scan_native_stack=true`,
+  `coll.collector().walkRoots(markCallbackJit, &coll)` + `.collect()` + `heap.noteCollected()`; new
+  `markCallbackJit` casts ctx→`*MarkSweepCollector`→`markFromRoot`); (3) wire it at `jit_abi.zig:502`/`:523`
+  before `object_alloc`; (4) RED→GREEN D-258 test; (5) D-261 adversarial test.
+
 ## NEXT (autonomous — §16.6 memory-safety → docs; ADR-0156)
 
-- **§16.6 memory-safety completion — NEXT (highest stakes).** Close the latent-UAF gap on the GC-on-JIT path
-  before calling it 完成形. Two linked debts, **correctness-first ordering** (REWORK.md gate II logic — pin
-  behaviour with an adversarial test, don't ship an unverified collector trigger): **D-258** = wire the
-  JIT-trampoline GC collection trigger (the GC has reclamation + heap-pressure trigger per Phase 15.1 / ADR-0128
-  §2 / ADR-0146, but the JIT-trampoline path doesn't fire a collect); **D-261** = the GC-on-JIT conservative
-  native-stack-scan rooting has NO adversarial test → a collect mid-JIT-call could free a live object (UAF). Order:
-  D-258 wires the trigger, which UNBLOCKS D-261's adversarial test (force a collect while a JIT frame holds the
-  only reference to a heap object across the trampoline; assert it survives + is not freed). **Step 0 (subagent)**:
-  survey the GC collect path (`src/runtime/` gc + `src/engine/codegen/shared/` trampoline + ADR-0128/0146/0147/0148
-  + D-258/D-261 bodies + `runner_gc_test.zig`) — where the interp triggers collect vs where the JIT trampoline
-  should. This is multi-cycle; consider **bundle mode**. Mac-local (GC is not per-arch-emit, but the JIT trampoline
-  is — `run_remote_ubuntu test-all` per D-262 before discharge if emit touched).
+- **§16.6 memory-safety — driven by the Active bundle above** (design done = ADR-0160; impl = maybeCollectJit +
+  wire + D-258/D-261 tests). Resume via the bundle's NEXT IMPL steps.
 - After §16.6: **§16.7** docs LAST (README/reference/tutorial/CHANGELOG, match the settled surface).
 - Backlog notes (not blockers): **D-269** funcref opaque `?u64` (not callable from a table slot — deeper
   enhancement); **D-273** CLI flag parity; **D-274** zlinter eager fetch; **D-275** `Module.instantiate` coarse
@@ -49,10 +65,10 @@
 
 ## Step 0.7 (next resume)
 
-**No ubuntu kick this cycle** — c5 (`c992899f`) was verified green last cycle (`OK (HEAD=c992899f)`), and c6 (the
-§16.5 close) is **doc-only** (debt D-275 + ROADMAP [x] + handover; no code). Next code-bearing chunk = §16.6.
-**D-262 rule**: §16.6 touches the JIT trampoline (per-arch emit) → `run_remote_ubuntu test-all` before discharge
-(cross-compile ≠ cross-run). **Gate**: Step-5 Mac = `bash scripts/mac_gate.sh`. windowsmini = phase boundary.
+**No ubuntu kick this cycle** — this turn is doc-only (ADR-0160 + bundle/handover; no code). Last code-bearing
+HEAD `d4f86450`/`c992899f` already green. Next code = the §16.6 bundle impl. **D-262 rule**: §16.6 wires the JIT
+trampoline (per-arch emit) → `run_remote_ubuntu test-all` before discharge (cross-compile ≠ cross-run). **Gate**:
+Step-5 Mac = `bash scripts/mac_gate.sh`. windowsmini = phase boundary.
 
 ## Deferred / open debt
 
