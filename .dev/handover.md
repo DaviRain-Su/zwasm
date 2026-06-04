@@ -3,6 +3,24 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
+## Active bundle
+
+- **Bundle-ID**: 15.P-parity-vs-v1 (Phase-15 close: parity measured → investigate the one regression → close)
+- **Cycles-remaining**: ~2–3 (root-cause D-265 memory-access gap → measure fix ROI → close §15.P + Phase 15)
+- **Continuity-memo**: §15.P parity MEASURED this turn (data: `bench/results/s15p_parity_vs_v1.md`). v1 built at
+  `~/Documents/MyProducts/zwasm` (`zig build -Doptimize=ReleaseFast`); v2 ReleaseFast. Compare v1 `run <wasm>`
+  (default JIT) vs v2 `run --engine=jit <wasm>`. **Methodology constraint**: v2-jit is compute-only (ADR-0136,
+  no WASI) → only 4 realworld fixtures JIT-runnable (gimli/heapsort/keccak/memmove); TinyGo all trap on fd_write.
+  **Findings**: v2-jit FASTER on compute (all 12 SIMD 0.52–0.96×, keccak 20×, gimli, scalar-loop parity, v128
+  loop 0.49×) but **~2.2× SLOWER on memory-access** (load+store loop 2.21×, heapsort 2.38×, memmove 1.98×) →
+  **D-265**. **W45 verdict: folded, data-backed** (v2 v128-loop 2× faster than v1 → re-open trigger NOT met).
+  Repro fixtures: `private/spikes/s15p-parity/` (gitignored). **NEXT** = root-cause D-265: bisect arm64 load/store
+  emit (is it per-access bounds checks v1 elides? FIRST check if v1 even bounds-checks → safety/perf tradeoff?);
+  measure a bounds-check-hoist / base-addr-cache experiment (commit/revert per measure-first); land if ROI holds.
+- **Exit-condition**: D-265 root-caused + a fix ROI-measured (landed if it holds, else documented why-not) →
+  then §15.P close (record done, W45 done) → widget 15 → DONE + Phase 16 inline expand. **DECISION FLAGGED to
+  user**: whether to fix the 2.2× memory-access gap before v0.1.0 or ship + defer D-265 to Phase 16.
+
 ## Current state
 
 - **Phase 15 (Performance parity with v1 + ClojureWasm) IN-PROGRESS.** Phase 14 (CI) / 13 (C API) /
@@ -37,20 +55,16 @@ from-scratch v1 redesign IN PROGRESS (branch `cw-from-scratch`, v0.0.0, deps=zli
 stable cw = v0.5.0 on `main`. Its zwasm-v2 consumer is cw's OWN future phase → nothing to validate today. v2
 package-consumability already proven by `examples/zig_host/` (ADR-0109). Barrier (D-264) dissolves when cw-v1 lands
 committed `@import("zwasm")` source.
-**NEXT = §15.P Phase 15 close — parity-vs-v1 (D-263 HARD gate)**. Now the last active §15 task (§15.6 deferred;
-3-host reconcile DONE, D-245 landed). Required: (1) **v2-vs-v1 steady-state bench** on ≥3 loop-heavy + ≥1 SIMD-loop
-fixture (build/find v1 baseline from `~/Documents/MyProducts/zwasm` clone) — no unexplained regression vs v1; (2)
-**W45 loop-isolated measurement** (≥50M-iter v128-local loop, no-op-baseline subtracted, per ADR-0151 — if v2's
-per-iter v128-reload dominates, RE-OPEN W45) + record the already-efficient finding + opportunistic D-259. Then
-widget 15 → DONE + Phase 16 inline expand. Step 0: survey `scripts/run_bench.sh` + `bench/` harness + v1 clone
-buildability. **Note**: §15.P is a hard gate row but NOT a human-in-loop transition gate (no 🔒) — autonomous.
+**See `## Active bundle` above** — §15.P parity is MEASURED (`bench/results/s15p_parity_vs_v1.md`); the bundle's
+NEXT step is root-causing **D-265** (v2-jit memory-access ~2.2× slower than v1). §15.6 deferred (ADR-0152 → D-264);
+§15.5 + 3-host reconcile DONE. §15.P is a hard PERF gate row but NOT a human-in-loop transition gate (no 🔒) —
+autonomous (the close-vs-ship decision on D-265 is flagged to the user but does not stop the loop).
 
 ## Step 0.7 (next resume)
 
-§15.5 CLOSED (D-245 `510ffce9` + D-260 `3a778080`, 3-host test-all green). §15.6 DEFERRED (ADR-0152 → D-264).
-Next resume = **§15.P parity-vs-v1 close** — Step 0 is a bench-harness survey (`scripts/run_bench.sh` + `bench/` +
-v1 clone buildability), not a code chunk → no prior ubuntu kick to verify. (`510ffce9`/`3a778080` already
-validated; do NOT revert.) **NOTE** (lesson
+§15.5 CLOSED + §15.6 DEFERRED + §15.P parity MEASURED — all docs-only since (no code changed) → no ubuntu kick to
+verify. Next resume = D-265 root-cause (read-only survey of arm64 load/store emit; first commits come when an
+experiment lands). (`510ffce9`/`3a778080` already validated; do NOT revert.) **NOTE** (lesson
 `gate-tail-vs-exit-code`): benign `failed command: …--listen=-` / SlotOverflow / `arm64/emit: failing op` next to
 a passing run = error-path noise — EXIT authoritative. **D-262 process fix**: any NEW per-arch emit chunk → run
 `run_remote_ubuntu test-all` (NOT narrow `test`) before discharge (cross-compile ≠ cross-run).
@@ -63,10 +77,11 @@ a passing run = error-path noise — EXIT authoritative. **D-262 process fix**: 
 - **STRUCTURAL RISKS (2026-06-04 retrospective, hub: lesson `session-retrospective-structural-risks`)** —
   the highest-stakes/most-orphan-prone: **D-261** (NOW, top stakes) GC-on-JIT conservative rooting has NO
   adversarial test → latent UAF (+ D-258). **D-262** (NOW) x86_64/win64 emit under-verified by the gate
-  topology (cross-compile≠cross-run; D-260 symptom). **D-263** (NOW) "v2≈v1 parity" never measured vs v1 →
-  hard §15.P gate. **D-210** (blocked-by) cohort root fix recurring at 4 seams (D-142/206/210/245) — decide
-  root-vs-patch.
-- **D-258** (NOW) JIT-trampoline GC collect trigger. **D-211** (blocked-by) precise GcRootMap (moving/AOT).
+  topology (cross-compile≠cross-run; D-260 symptom). **D-263** (NOW) parity-vs-v1 — MEASURED at §15.P
+  (`bench/results/s15p_parity_vs_v1.md`); surfaced **D-265**. **D-210** (blocked-by) cohort root fix recurring at
+  4 seams (D-142/206/210/245) — decide root-vs-patch.
+- **D-265** (NOW, §15.P bundle) v2-jit memory-access ~2.2× slower than v1 (compute/SIMD faster) — root-cause +
+  measure fix. **D-258** (NOW) JIT-trampoline GC collect trigger. **D-211** (blocked-by) precise GcRootMap.
   **D-257** (partial) 10 lesson `Citing`. **D-259** (note) spillBytes footprint. **D-255** C-API WASI io.
   **D-254** rust 3-OS. **D-253** §13.2 host_info. **D-251** WASI in AOT. **D-249** win bench. **D-238** x86_64
   EH thunk. D-234/237/229/231/204/209/213.
