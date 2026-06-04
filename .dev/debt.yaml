@@ -72,8 +72,15 @@ entries:
       `examples/rust_host/hello.rs`; `build.zig` (`run-rust-host` step + SDKROOT probe); `.dev/toolchain_provisioning.md`; ROADMAP §13.5 / §13.P; mirrors c_host §13.4 conformance
   - id: "D-246"
     layer: "code"
-    status: "blocked-by"
+    status: "partial"
     description: |-
+      **2026-06-04 (§15.4): the named arm64 `dot`/`extmul` emit hole is CLOSED** (`078ffde5` encoders +
+      `ef9876b0` 12 extmul + `5ddfdc5c` dot; clang-verified NEON encodings, JIT execution fixtures green,
+      x86_64 cross-compile OK). Surfaced that `lower_simd.zig` lacked the extmul+dot lowering arms → the ops
+      were dead on BOTH arches (x86_64 emit unreachable too); fixed. **RESIDUAL (full SIMD-op coverage sweep)**:
+      13 more ops x86_64 has per-op files for but arm64 lacks emit (+mostly lowering) → still interp-only on
+      JIT: `i{8x16,16x8}.{add,sub}_sat_{s,u}` (8 → SQADD/UQADD/SQSUB/UQSUB), `i{16x8,32x4}.extadd_pairwise_*_{s,u}`
+      (4 → SADDLP/UADDLP), `i16x8.q15mulr_sat_s` (1 → SQRDMULH). Same recipe as dot/extmul (verify lowering too).
       blocked-by: Phase 15 (SIMD perf tier). The §11.3 SIMD per-op gap analysis
       (`bench/results/simd_gap_profile_p11_3.md`, Mac aarch64, `8eca59e3`) found zwasm's
       JIT SIMD competitive: 0 of 12 ops lag the median of (wasmtime, wazero, wasmer) by
@@ -89,7 +96,7 @@ entries:
       per-op ratio. Discharge: Phase-15 SIMD work consumes the profile + closes the arm64
       dot/extmul emit hole.
     first_raised: "2026-06-03"
-    last_reviewed: "2026-06-03"
+    last_reviewed: "2026-06-04"
     refs: |-
       `bench/results/simd_gap_profile_p11_3.md`; `bench/runners/wasm/simd/` + `gen_simd_corpus.sh`; `scripts/simd_gap_analysis.sh`; `src/engine/codegen/x86_64/ops/wasm_2_0/*extmul*` (x86_64 has it, arm64 doesn't); ROADMAP §11.3 / §9.10 Track A / Phase 15
   - id: "D-245"

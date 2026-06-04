@@ -27,33 +27,27 @@
 
 ## Next task (autonomous)
 
-**§15.4 — D-246 arm64 dot/extmul emit hole** (first open `[ ]`; §15.2+§15.3 folded; user picked ROADMAP-order
-continue). CORRECTNESS gap (NOT bench-gated — build regardless). Survey DONE — full recipe:
-- **13 missing ops** (arm64 → `UnsupportedOp` at `emit.zig:1771-1783`; x86_64 HAS them): `i32x4.dot_i16x8_s` +
-  `{i16x8,i32x4,i64x2}.extmul_{low,high}_*_{s,u}` (12).
-- **Emit infra**: `op_simd.emitV128Binop(ctx, encoder)` (pops 2 vregs→Q, calls `encoder(rd,rn,rm)`, stores) —
-  use for the 12 extmul (each 1 instr). `dot` needs a custom emit (3 instrs into 1 result w/ 2 scratch Q regs).
-  Pattern: new per-op files `arm64/ops/wasm_2_0/<op>.zig` (mirror an existing one) delegating to a helper in
-  `op_simd_int_arith.zig`; dispatch auto-registers once `pub fn emit` exists.
-- **NEON encoders to ADD** to `inst_neon_arith.zig` (mirror `encMul8H`=`0x4E609C00|rm<<16|rn<<5|rd`). DERIVED
-  (VERIFY via spec test — encoding error=miscompile): three-different SMULL/UMULL base `0x0E20C000`; +U(unsigned)
-  `|0x20000000`; +Q(high=SMULL2/UMULL2) `|0x40000000`; size `<<22` (00=.8H from 8b, 01=.4S from 16b, 10=.2D from
-  32b); `|rm<<16|rn<<5|rd`. ADDP.4S = `0x4EA0BC00|rm<<16|rn<<5|rd`.
-- **dot recipe**: SMULL(.4S=.4H*.4H low)→t1, SMULL2(.4S high)→t2, ADDP.4S(rd,t1,t2). **extmul**: low=SMULL/UMULL,
-  high=SMULL2/UMULL2, size per result width (i16x8←8b sz00, i32x4←16b sz01, i64x2←32b sz10).
-- **Verify**: no spec `.wast` fixture found → CREATE a wat fixture (known in/out per op) + run JIT (currently
-  `UnsupportedOp`) → green; cross-check ≥1 encoding vs a reference if possible. Cross-compile x86_64 (unaffected).
-  **Chunk plan**: (A) encoders+tests, (B) extmul family (12, same recipe), (C) dot. After §15.4: **§15.5 D-245
-  win64** (hard/remote) → §15.6 ClojureWasm → §15.P parity. (Not a phase boundary.) Perf ports W43/44/45 =
-  measure-first per [[perf-roi]] lesson, after D-246.
+**§15.4 — SIMD-op JIT coverage sweep (D-246, partial)** (first open `[ ]`; §15.2+§15.3 folded). CORRECTNESS gap
+(NOT bench-gated — build regardless). **DONE this turn**: arm64 `dot`/`extmul` hole CLOSED — 13 ops
+(`078ffde5` encoders + `ef9876b0` 12 extmul + `5ddfdc5c` dot), both layers (found `lower_simd` lacked the arms
+→ dead on both arches), JIT-execution-verified, x86_64 OK.
+**NEXT = the residual 13 arm64-missing SIMD ops** (x86_64 has op files, arm64 lacks emit+mostly lowering →
+interp-only on JIT): `i{8x16,16x8}.{add,sub}_sat_{s,u}` (8 → SQADD/UQADD/SQSUB/UQSUB), `i{16x8,32x4}.extadd_pairwise_*_{s,u}`
+(4 → SADDLP/UADDLP), `i16x8.q15mulr_sat_s` (1 → SQRDMULH). **SAME RECIPE** as dot/extmul: add NEON encoders to
+`inst_neon_arith.zig` (clang-verify each via `clang -c`+`otool -tvVj`), add lowering arms to `lower_simd.zig`
+(check each — extmul/dot were un-lowered), op files + `op_simd_int_arith` helpers (`emitV128Binop` for the
+binops; extadd_pairwise is a 1-src op so a different helper), manifest imports/tuple + count bump, edge_cases JIT
+fixtures. Then D-246 fully resolved. After §15.4: perf ports W43/44/45 = **measure-first** (perf-roi lesson) →
+**§15.5 D-245 win64** (hard/remote) → §15.6 ClojureWasm → §15.P parity.
 
 ## Step 0.7 (next resume)
 
-This turn: user check-in → chose **ROADMAP-order continue**; recorded perf-measure-first lesson (`43ecd845`) +
-memory (user guidance: perf ROI needs measurement, commit/revert liberally). §15.4 D-246 survey DONE (recipe +
-derived NEON encodings captured in Next-task above — NEXT turn implements). **DOCS only — NO src/ change → no
-ubuntu kick** (code HEAD `45a94348`, ubuntu-verified OK). **NOTE** (lesson `gate-tail-vs-exit-code`): benign
-`failed command: …--listen=-` / `arm64/emit: failing op` next to a passing run = error-path noise — EXIT auth.
+This turn: **§15.4/D-246 dot+extmul CLOSED** — 3 commits (`078ffde5` encoders, `ef9876b0` 12 extmul + lowering,
+`5ddfdc5c` dot), 13 ops both layers, JIT fixtures green, x86_64 cross-compile OK; D-246 → partial (residual = 13
+sat-arith/extadd/q15mulr ops). Also recorded perf-measure-first lesson (`43ecd845`). **CODE changed → ubuntu kick
+QUEUED** (scope `test`); Step 0.7 next resume verifies (`tail -3 /tmp/ubuntu.log`) — red → revert to `45a94348`.
+**NOTE** (lesson `gate-tail-vs-exit-code`): benign `failed command: …--listen=-` / SlotOverflow / `arm64/emit:
+failing op` next to a passing run = error-path test noise — EXIT code authoritative.
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile = `zig build test
 -Dtarget=x86_64-windows-gnu`. windowsmini exec = `run_remote_windows.sh` (phase boundary).
@@ -62,8 +56,8 @@ ubuntu kick** (code HEAD `45a94348`, ubuntu-verified OK). **NOTE** (lesson `gate
 
 - **D-258** (NOW) JIT-trampoline GC collect trigger (interp reclaims; JIT alloc path doesn't trigger
   yet — separate `*JitRuntime` root model). **D-211** (blocked-by) precise GcRootMap walker (moving/AOT).
-  **D-257** (partial) 10 lesson `Citing` markers. **D-245** win64 host→JIT = §15.5. **D-246** arm64
-  dot/extmul = §15.4. **D-255** C-API WASI io (ADR-0143). **D-254** rust 3-OS. **D-253** §13.2 host_info.
+  **D-257** (partial) 10 lesson `Citing` markers. **D-245** win64 host→JIT = §15.5. **D-246** (partial)
+  dot/extmul DONE; residual 13 sat-arith/extadd/q15mulr ops = §15.4 next. **D-259** (note) spillBytes footprint. **D-255** C-API WASI io (ADR-0143). **D-254** rust 3-OS. **D-253** §13.2 host_info.
   **D-251** WASI in AOT. **D-249** win bench timing. **D-238** x86_64 EH thunk. D-210/234/237/229/231/204/209/213.
 
 ## Key refs
