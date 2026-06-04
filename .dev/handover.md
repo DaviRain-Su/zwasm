@@ -3,6 +3,39 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
+## Active bundle
+
+- **Bundle-ID**: 15.5-d245-win64-trampoline (host→JIT callee-saved preservation — correctness-critical ABI,
+  W54-class, seed-flaky)
+- **Cycles-remaining**: ~3–5 (survey → arg'd/i32/v128 SysV+arm64 variants → win64 variant → 3-host verify)
+- **Continuity-memo**: **windowsmini IS REACHABLE** (`ssh windowsmini` rc=0 — so the win64 exit is achievable
+  autonomously, NOT blocked). D-245 = host→JIT `@call` seam in `entry.zig` doesn't preserve host callee-saved
+  regs → ReleaseSafe heap-corruption SEGV (Debug-safe). **DONE**: no-arg void path asm-saved (arm64 `8eca59e3`
+  stp/ldp X19-X28; x86_64-SysV `de576a76` push/pop RBX/R12-R15) + ReleaseSafe gate (`0c42e913`). **REMAINING**:
+  (a) **win64** host→JIT entry still `@call` — adapt the SysV asm-save to the win64 callee-saved set
+  (RBX/RBP/RDI/RSI/R12-R15 + **XMM6-15**, the latter need 16B stack slots); verify windowsmini `test-all`
+  deterministic-green (the §15.5 exit). (b) the **arg'd/i32/v128 `invokeAndCheck*` variants** (`entry.zig:162/172`
+  generic + `:240` arg'd void) still `@call` — same asm-save fix, verifiable on Mac(arm64)+ubuntu(x86_64-SysV).
+  Lesson `win64-jit-trampoline-arg-marshal` + rule `abi_callee_saved_pinning`.
+- **PROGRESS**: **survey DONE** (subagent digest). **DESIGN DECIDED: continue the seam asm-save** (extend the
+  no-arg `8eca59e3`/`de576a76` template), NOT the D-210 prologue cohort-save — D-210 is ADR-grade + multi-cycle
+  (every prologue/epilogue + all byte-snapshot tests + a perf tradeoff; its real purpose is frame-consuming
+  tail-calls). The no-arg fix already set the seam-asm precedent. KEY SHAPES: the fix template = `invokeAndCheckVoid`
+  no-arg branch (`entry.zig:187-241`): arm64 `stp/ldp x19-x28` (80B frame) / x86_64-SysV `push/pop rbx,r12-r15
+  + sub/add $8`, invoking `f(rt)` with f in `"{rax}"`/`"r"`, rt in `"{rdi}"`/`"{x0}"`. **The HARD part (top risk)**:
+  the remaining `@call` sites (`invokeAndCheck:172` generic, `:240` arg'd void) carry 0-5 mixed GPR/FP args + a
+  result — and there is NO existing in-asm arg-marshaling template (the Class-B thunks at `1246-1413` are all
+  rt-only). So the arg'd fix must marshal args into ABI regs inside asm (per-arg-count/type comptime templates) —
+  precise + ReleaseSafe-ONLY-manifesting (Debug won't catch errors). **SCOPE NUANCE**: the win64 spec-simd crash is
+  the §15.5 EXIT (likely the ARG'D win64 i32/v128 path); (b) SysV+arm64 arg'd is a ReleaseSafe cleanup (Debug-only-
+  used → not test-blocking) but is the cleaner-to-verify FIRST chunk (Mac `check_jit_releasesafe.sh` + ubuntu).
+  win64 adds RBX/RBP/RSI/RDI/R12-R15 + XMM6-15 (10×16B `movaps`, 16-aligned). **VERIFY**: Mac
+  `scripts/check_jit_releasesafe.sh`; ubuntu `run_remote_ubuntu.sh test-all`; windowsmini `run_remote_windows.sh
+  test-all` (REACHABLE; ReleaseSafe makes the bug deterministic — no seed needed). **NEXT (fresh context)**:
+  implement chunk 1 = arg'd SysV+arm64 seam asm-save (the marshaling template), gate-verify, then chunk 2 = win64.
+- **Exit-condition**: all host→JIT invoke variants asm-save the host callee-saved set; ReleaseSafe gate green on
+  Mac+ubuntu; windowsmini `test-all` deterministic-green (the win64 `@call` SEGV gone).
+
 ## Current state
 
 - **Phase 15 (Performance parity with v1 + ClojureWasm) IN-PROGRESS.** Phase 14 (CI) / 13 (C API) /
@@ -41,12 +74,11 @@ windowsmini (remote Windows SSH) to verify `test-all` deterministic-green; lesso
 
 ## Step 0.7 (next resume)
 
-This turn: **§15.4 CLOSED** — measured the v1 SIMD perf ports (W43 addr-cache / W44 reg-class / W45 loop-persist)
-→ all fold to §15.P (ADR-0151): v2 already 0.5–0.8× the comparator median per-op; W44 done (D-036); W45 deferred
-to a §15.P loop-isolated measurement. §15.4 `[x]`. Measurement was throwaway/reverted. **DOCS/scope only — NO
-src/ change → no ubuntu kick** (code HEAD `aaa267ee`, ubuntu-verified OK). **NOTE** (lesson
-`gate-tail-vs-exit-code`): benign `failed command: …--listen=-` / SlotOverflow / `arm64/emit: failing op` next to
-a passing run = error-path test noise — EXIT code authoritative.
+This turn: **§15.5 D-245 deep survey + bundle setup** — confirmed windowsmini reachable; resolved the design fork
+(seam asm-save, NOT D-210 prologue); captured the fix template + the arg-marshaling risk + 3-host verify path in
+the bundle. **DOCS/scope only — NO src/ change → no ubuntu kick** (code HEAD `aaa267ee`, ubuntu-verified OK).
+**NOTE** (lesson `gate-tail-vs-exit-code`): benign `failed command: …--listen=-` / SlotOverflow / `arm64/emit:
+failing op` next to a passing run = error-path test noise — EXIT code authoritative.
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile = `zig build test
 -Dtarget=x86_64-windows-gnu`. windowsmini exec = `run_remote_windows.sh` (phase boundary).
