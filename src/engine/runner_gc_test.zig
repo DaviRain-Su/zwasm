@@ -1531,3 +1531,44 @@ test "D-258: JIT struct.new triggers a GC collection under heap pressure (ADR-01
     // gc_cycles stays 0 (RED). After wiring maybeCollectJit → >0 (GREEN).
     try testing.expect(heap.gc_cycles > 0);
 }
+
+// D-261 adversarial fixture (the conservative-rooting correctness proof):
+// (module (type (struct (field (mut i32))))
+//   (func (export "f") (result i32) (local (ref null 0))
+//     i32.const 42  struct.new 0   local.set 0   ;; A.field=42, held in local 0
+//     i32.const 0    struct.new 0   drop          ;; B alloc → forces the collect
+//     local.get 0    struct.get 0 0))              ;; read A.field across the collect
+// A is held ONLY in local 0 across B's collection-triggering alloc. If the
+// conservative native-stack scan roots it (ADR-0160), A survives → 42. If A is
+// wrongly swept, B reuses A's exact-size slot (field 0) → 0 — a use-after-free
+// the value discriminator catches deterministically.
+const gc_hold_across_collect_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x09, 0x02, 0x5f, 0x01, 0x7f, 0x01, 0x60,
+    0x00, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x01, 0x07,
+    0x05, 0x01, 0x01, 0x66, 0x00, 0x00, 0x0a, 0x1a,
+    0x01, 0x18, 0x01, 0x01, 0x63, 0x00, 0x41, 0x2a,
+    0xfb, 0x00, 0x00, 0x21, 0x00, 0x41, 0x00, 0xfb,
+    0x00, 0x00, 0x1a, 0x20, 0x00, 0xfb, 0x02, 0x00,
+    0x00, 0x0b,
+};
+
+test "D-261: JIT GcRef held across a collect-forcing alloc survives (ADR-0160)" {
+    var inst = try JitInstance.init(testing.allocator, &gc_hold_across_collect_wasm);
+    defer inst.deinit(testing.allocator);
+
+    const heap: *heap_mod.Heap = @ptrCast(@alignCast(inst.owned.rt.gc_heap.?));
+    // Arm so A's alloc does NOT collect (cursor < next_gc_at) but B's DOES
+    // (cursor has grown past next_gc_at after A). A is live in local 0 across
+    // B's collection — the spill-at-call model (ADR-0128 §2) must place it on
+    // the native stack so scanNativeStackRoots marks it.
+    heap.pressure_bytes = 16;
+    heap.next_gc_at = heap.cursor + 1;
+
+    const r = try inst.invoke(testing.allocator, "f", &.{});
+
+    try testing.expect(heap.gc_cycles > 0); // the collect actually fired
+    // 42 ⇒ A survived (conservative scan rooted the held ref). 0 ⇒ swept +
+    // slot-reused = use-after-free (would fail this assertion, voiding ADR-0160).
+    try testing.expectEqual(@as(?u64, 42), r);
+}
