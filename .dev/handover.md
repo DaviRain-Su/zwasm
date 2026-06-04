@@ -39,8 +39,18 @@
   else-branch route via `@call(.never_inline, …)`. New ReleaseSafe oracle `build.zig jit-result-probe-releasesafe`
   (calls `runI32Export`): RED pre-fix = SEGV@0x18 in rawFree, GREEN post-fix = OK. Since the trampoline is
   ARCH-UNIFORM (win64 cohort == SysV cohort; XMM already JIT-preserved) this may be the WHOLE fix. **NEXT = remote
-  verify**: ubuntu (kicked) + **windowsmini `run_remote_windows.sh test-all`** = the win64 EXIT. If windowsmini
-  red → win64 may need RSI/RDI in the clobber set (win64-extra callee-saved) — add + re-verify.
+  verify**: ubuntu (kicked) + **windowsmini `run_remote_windows.sh test-all`** = the win64 EXIT.
+  **WINDOWSMINI RESULT (this turn)**: ✅ **D-245 win64 CRASH FIXED** — 2339/2441 tests pass, NO SEGV (the path
+  that used to exit-3/SEGV now runs). The clobber-trampoline (arch-uniform RBX/R12-R15 cohort) is sufficient on
+  win64; ubuntu(SysV) + Mac also green. **BUT 3 exes failed = 2 SEPARATE x86_64 SIMD CORRECTNESS BUGS** (NOT
+  D-245): `i16x8.extadd_pairwise_i8x16_s` + `i16x8.q15mulr_sat_s` → "expected i32:1 got i32:0" on x86_64. These
+  are pre-existing x86_64 emit handlers (B107) that my D-246 lowering arms (`ef9876b0`/`1029e5b4`) made REACHABLE
+  but I only verified arm64-runtime + x86_64-CROSS-COMPILE (never x86_64-RUN) → latent x86_64 emit bugs shipped.
+  Block test-all green (all x86_64, not just win64). **NEXT = fix those 2 x86_64 emit recipes** (extadd_pairwise =
+  PMADDUBSW operand-order/sign; q15mulr = PMULHRSW) in `x86_64/op_simd_int_cmp_lane.zig` + `op_simd_int_arith.zig`,
+  cross-compile + **ubuntu `run_remote_ubuntu test-all`** (faster x86_64 RUN oracle) → re-verify windowsmini. Then
+  §15.5 exit (test-all 3-host green) is MET. **LESSON to record**: cross-COMPILE ≠ cross-RUN; newly-lowered ops
+  with existing untested per-arch emit need a per-arch RUN (test-all on that arch), not just cross-compile.
 - **Exit-condition**: all host→JIT invoke variants asm-save the host callee-saved set; ReleaseSafe gate green on
   Mac+ubuntu; windowsmini `test-all` deterministic-green (the win64 `@call` SEGV gone).
 
@@ -82,13 +92,12 @@ windowsmini (remote Windows SSH) to verify `test-all` deterministic-green; lesso
 
 ## Step 0.7 (next resume)
 
-This turn: **§15.5 chunk 1 IMPLEMENTED + Mac-verified** (`510ffce9`) — clobber-trampoline + new ReleaseSafe
-oracle (RED→GREEN proven). **CODE changed → ubuntu kick + windowsmini run QUEUED this turn**; next resume Step
-0.7 verifies BOTH `tail /tmp/ubuntu.log` AND `tail /tmp/windows.log` — red → revert `510ffce9` to `aaa267ee`.
-(windowsmini = the win64 D-245 EXIT.) **NOTE** (lesson `gate-tail-vs-exit-code`): benign
-`failed command: …--listen=-` / SlotOverflow / `arm64/emit: failing op` = error-path noise — EXIT authoritative.
-**NOTE** (lesson `gate-tail-vs-exit-code`): benign `failed command: …--listen=-` / SlotOverflow / `arm64/emit:
-failing op` next to a passing run = error-path test noise — EXIT code authoritative.
+This turn: analyzed the windowsmini result. **§15.5 chunk 1 (`510ffce9`) = D-245 win64 crash FIXED + VALIDATED**
+(2339/2441 win64 tests pass, no SEGV; ubuntu+Mac green) — **do NOT revert**. The 3 win64 test-all failures are
+**D-260** (pre-existing x86_64 SIMD emit bugs in q15mulr/extadd_pairwise, exposed by D-246 — NOT a `510ffce9`
+regression). Filed D-260 + lesson `cross-compile-is-not-cross-run`. DOCS only after the analysis → no new kick
+(`510ffce9` already 3-host-tested). **NOTE** (lesson `gate-tail-vs-exit-code`): benign `failed command:
+…--listen=-` / SlotOverflow / `arm64/emit: failing op` next to a passing run = error-path noise — EXIT authoritative.
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile = `zig build test
 -Dtarget=x86_64-windows-gnu`. windowsmini exec = `run_remote_windows.sh` (phase boundary).

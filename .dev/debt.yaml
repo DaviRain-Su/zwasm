@@ -863,6 +863,30 @@ entries:
     refs: |-
       src/engine/codegen/shared/regalloc.zig (spillBytes, class-blind slot space @127-137);
       regalloc_vreg_class.zig (vregClassOfOp); ADR-0150; ADR-0038/0040
+  - id: "D-260"
+    layer: "code"
+    status: "now"
+    description: |-
+      **x86_64 SIMD emit CORRECTNESS BUGS exposed by the D-246 lowering arms** (windowsmini test-all
+      2026-06-04, HEAD `730a198b`). `i16x8.q15mulr_sat_s` + `i16x8.extadd_pairwise_i8x16_s` (and likely the
+      extadd_pairwise siblings i8x16_u / i32x4_s/u) produce WRONG results on x86_64 (`expected i32:1, got
+      i32:0`). These x86_64 emit handlers (B107) pre-existed but were NEVER reachable until D-246 added the
+      `lower_simd.zig` arms (`1029e5b4`) — and that work verified arm64-RUNTIME + x86_64-CROSS-COMPILE only,
+      never x86_64-RUNTIME, so latent x86_64 emit bugs shipped. arm64 emit is CORRECT (clang-verified + Mac
+      test-all green); only x86_64 is wrong. NOT a D-245 issue (D-245 win64 crash is FIXED — 2339/2441 pass,
+      no SEGV). DIAGNOSIS: q15mulr `PMULHRSW` does NOT saturate the a==b==-32768 (0x8000) edge → gives -32768
+      not +32767 (needs a post-saturation step). extadd `PMADDUBSW(set1(1), src)` recipe LOOKS correct —
+      needs x86_64 disasm to pin (encoder/operand-order?). FIX (fresh-context + REMOTE x86_64 RUN verify, not
+      cross-compile): correct both recipes in `x86_64/op_simd_int_arith.zig` (q15mulr) +
+      `op_simd_int_cmp_lane.zig` (extadd) → `run_remote_ubuntu test-all` (x86_64 run oracle) + windowsmini.
+      Blocks §15.5 exit (test-all 3-host green) + §15.P. The 21 other D-246 ops (extmul/dot/add_sat/sub_sat)
+      are x86_64-CORRECT (their edge_cases passed on win64).
+    first_raised: "2026-06-04"
+    last_reviewed: "2026-06-04"
+    refs: |-
+      src/engine/codegen/x86_64/op_simd_int_arith.zig (emitI16x8Q15mulrSatS → encPmulhrsw);
+      src/engine/codegen/x86_64/op_simd_int_cmp_lane.zig (emitI16x8ExtaddPairwiseI8x16S → PMADDUBSW);
+      src/ir/lower_simd.zig (the D-246 arms 124-127/130); test/edge_cases/p9/v128_lane_ops/; /tmp/windows.log
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
