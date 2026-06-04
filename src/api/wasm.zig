@@ -35,6 +35,7 @@ const types = @import("types.zig");
 const instance = @import("instance.zig");
 const module_introspect = @import("module_introspect.zig");
 const extern_new = @import("extern_new.zig");
+const config = @import("config.zig");
 
 const testing = std.testing;
 
@@ -221,11 +222,17 @@ pub const Instance = instance.Instance;
 pub const Func = instance.Func;
 pub const ValKind = instance.ValKind;
 pub const Val = instance.Val;
+pub const wasm_val_copy = vec.wasm_val_copy;
+pub const wasm_val_delete = vec.wasm_val_delete;
 pub const ExternKind = instance.ExternKind;
 pub const Extern = instance.Extern;
 pub const storeAllocator = instance.storeAllocator;
+pub const Config = config.Config;
 pub const wasm_engine_new = instance.wasm_engine_new;
+pub const wasm_engine_new_with_config = config.wasm_engine_new_with_config;
 pub const wasm_engine_delete = instance.wasm_engine_delete;
+pub const wasm_config_new = config.wasm_config_new;
+pub const wasm_config_delete = config.wasm_config_delete;
 pub const wasm_store_new = instance.wasm_store_new;
 pub const wasm_store_delete = instance.wasm_store_delete;
 pub const zwasm_store_set_wasi = instance.zwasm_store_set_wasi;

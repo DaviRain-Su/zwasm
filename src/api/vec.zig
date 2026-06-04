@@ -162,6 +162,28 @@ pub export fn wasm_val_vec_delete(v: ?*ValVec) callconv(.c) void {
 }
 
 // ============================================================
+// scalar val copy / delete (wasm.h:340-341)
+//
+// zwasm's `wasm_val_t` is plain-old-data: numeric kinds hold the
+// scalar, ref kinds hold the raw GcRef payload directly in `of.ref`
+// (NOT an owned `wasm_ref_t*` handle — see instance.zig
+// fromRuntimeValue). So copy is a struct copy for every kind
+// (matching `wasm_val_vec_copy`'s shallow copy) and delete owns
+// nothing → no-op. (The of.ref = raw-payload representation diverges
+// from upstream's owned-`wasm_ref_t*` contract; reconciled with the
+// ref-model work — D-269 cat E / D-253.)
+// ============================================================
+
+pub export fn wasm_val_copy(out: ?*wasm_c_api.Val, src: ?*const wasm_c_api.Val) callconv(.c) void {
+    const o = out orelse return;
+    o.* = if (src) |s| s.* else .{ .kind = .i32, .of = .{ .i32 = 0 } };
+}
+
+pub export fn wasm_val_delete(v: ?*wasm_c_api.Val) callconv(.c) void {
+    _ = v;
+}
+
+// ============================================================
 // extern vec — pointer-vec prefix
 //
 // `_new_empty` / `_new_uninitialized` / `_new` live here. The
@@ -266,6 +288,26 @@ test "wasm_val_vec_new / copy / delete: round-trip" {
     defer wasm_val_vec_delete(&v2);
     try testing.expectEqual(v.size, v2.size);
     try testing.expect(v.data.? != v2.data.?);
+}
+
+test "wasm_val_copy / wasm_val_delete: POD copy across kinds + null discipline" {
+    var src: wasm_c_api.Val = .{ .kind = .i64, .of = .{ .i64 = -42 } };
+    var dst: wasm_c_api.Val = undefined;
+    wasm_val_copy(&dst, &src);
+    try testing.expectEqual(wasm_c_api.ValKind.i64, dst.kind);
+    try testing.expectEqual(@as(i64, -42), dst.of.i64);
+
+    // ref kind: of.ref raw payload copied as-is (POD model).
+    var rsrc: wasm_c_api.Val = .{ .kind = .funcref, .of = .{ .ref = @ptrFromInt(0xCAFE) } };
+    var rdst: wasm_c_api.Val = undefined;
+    wasm_val_copy(&rdst, &rsrc);
+    try testing.expectEqual(wasm_c_api.ValKind.funcref, rdst.kind);
+    try testing.expectEqual(@as(usize, 0xCAFE), @intFromPtr(rdst.of.ref.?));
+
+    // delete owns nothing → no crash; both null-tolerant.
+    wasm_val_delete(&dst);
+    wasm_val_delete(null);
+    wasm_val_copy(null, &src);
 }
 
 test "wasm_byte_vec_* / wasm_val_vec_*: null-arg discipline" {
