@@ -61,6 +61,22 @@ the trampoline CALL, asserting the object SURVIVES (not swept) — run under
 ReleaseSafe on the 3-host gate. If that test ever fails, the spill model is
 violated and this decision is void (escalate to D-211 precise rooting).
 
+**Structural proof (2026-06-05, D-276 discharge).** The spill-at-call guarantee
+is not merely tested — it is **structurally enforced** by **ADR-0060** (force-spill
+call-crossing vregs). The regalloc's force-spill pre-scan
+(`src/engine/codegen/shared/regalloc_compute.zig`) collects every callout PC —
+explicitly *including* the internal `struct.new`/`array.new` alloc CALL into the
+`jitGcAlloc` trampoline (the `inclusive` marking) — and force-spills any vreg live
+across it to a stack spill slot (`spans_call` vregs "mint and reuse spill slots
+only", never a register). Therefore **no live GcRef is ever register-resident-only
+across the collect-triggering call**: at the collection point inside the trampoline
+every live GcRef sits in a frame spill slot, which `scanNativeStackRoots` walks.
+The D-276 worst case (a GcRef in an unspilled callee-saved register the trampoline
+never touches) is thus impossible by construction — this is the "prove the
+prologue/spill model makes that impossible" discharge path, stronger than the
+register-resident test (which zwasm's regalloc cannot even produce, since
+call-crossing vregs are always spilled). D-276 discharged.
+
 ### Rejected alternatives
 
 - **Thread `*Runtime` into `JitRuntime`** so the JIT path can do a precise walk.
@@ -82,8 +98,10 @@ violated and this decision is void (escalate to D-211 precise rooting).
 
 ## References
 
-- ROADMAP §16.6; D-258 / D-261 (debt ledger). ADR-0128 §2 + §22 (conservative
+- ROADMAP §16.6; D-258 / D-261 / D-276 (debt ledger). **ADR-0060** (force-spill
+  call-crossing vregs — the structural proof). ADR-0128 §2 + §22 (conservative
   rooting + interp-only precise rooting). ADR-0146 (interp trigger), ADR-0147
   (free-list), ADR-0148 (rooting carve-out). `src/feature/gc/root_scope.zig`
   (maybeCollect), `src/feature/gc/collector_mark_sweep.zig` (walkRootsImpl /
-  scanNativeStackRoots), `src/engine/codegen/shared/jit_abi.zig` (trampolines).
+  scanNativeStackRoots), `src/engine/codegen/shared/jit_abi.zig` (trampolines),
+  `src/engine/codegen/shared/regalloc_compute.zig` (ADR-0060 force-spill pre-scan).
