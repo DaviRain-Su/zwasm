@@ -181,6 +181,70 @@ pub fn encAddp4S(rd: Vn, rn: Vn, rm: Vn) u32 {
 }
 
 // =====================================================================
+// Saturating add/sub (SQADD/UQADD/SQSUB/UQSUB) + saturating rounding
+// doubling-mul-high (SQRDMULH) — Advanced SIMD three-same. Plus
+// add-long-pairwise (SADDLP/UADDLP) — two-reg misc (1-src, widening).
+// D-246 residual: i{8x16,16x8}.{add,sub}_sat_{s,u} + i16x8.q15mulr_sat_s
+// + i{16x8,32x4}.extadd_pairwise_*_{s,u}. ALL constants clang+otool
+// verified (`(s|u)q(add|sub)`/`sqrdmulh`/`(s|u)addlp` on v0,v1,v2).
+// =====================================================================
+
+/// `SQADD V<d>.16B, V<n>.16B, V<m>.16B` — signed saturating add i8x16.
+pub fn encSqadd16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E200C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `UQADD V<d>.16B, V<n>.16B, V<m>.16B` — unsigned saturating add i8x16.
+pub fn encUqadd16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E200C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `SQSUB V<d>.16B, V<n>.16B, V<m>.16B` — signed saturating sub i8x16.
+pub fn encSqsub16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E202C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `UQSUB V<d>.16B, V<n>.16B, V<m>.16B` — unsigned saturating sub i8x16.
+pub fn encUqsub16B(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E202C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `SQADD V<d>.8H, V<n>.8H, V<m>.8H` — signed saturating add i16x8.
+pub fn encSqadd8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E600C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `UQADD V<d>.8H, V<n>.8H, V<m>.8H` — unsigned saturating add i16x8.
+pub fn encUqadd8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E600C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `SQSUB V<d>.8H, V<n>.8H, V<m>.8H` — signed saturating sub i16x8.
+pub fn encSqsub8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E602C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `UQSUB V<d>.8H, V<n>.8H, V<m>.8H` — unsigned saturating sub i16x8.
+pub fn encUqsub8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E602C00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `SQRDMULH V<d>.8H, V<n>.8H, V<m>.8H` — i16x8 saturating rounding
+/// doubling multiply returning high half (Wasm `q15mulr_sat_s`).
+pub fn encSqrdmulh8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E60B400 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `SADDLP V<d>.8H, V<n>.16B` — signed add-long-pairwise i8→i16
+/// (Wasm `i16x8.extadd_pairwise_i8x16_s`). Two-reg misc, 1-src.
+pub fn encSaddlp8H(rd: Vn, rn: Vn) u32 {
+    return 0x4E202800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `UADDLP V<d>.8H, V<n>.16B` — unsigned add-long-pairwise i8→i16.
+pub fn encUaddlp8H(rd: Vn, rn: Vn) u32 {
+    return 0x6E202800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `SADDLP V<d>.4S, V<n>.8H` — signed add-long-pairwise i16→i32.
+pub fn encSaddlp4S(rd: Vn, rn: Vn) u32 {
+    return 0x4E602800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `UADDLP V<d>.4S, V<n>.8H` — unsigned add-long-pairwise i16→i32.
+pub fn encUaddlp4S(rd: Vn, rn: Vn) u32 {
+    return 0x6E602800 | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+// =====================================================================
 // Integer unops (abs / neg / popcnt) — Advanced SIMD two-reg misc,
 // Q=1, opcode=01011 (ABS/NEG) or 00101 (CNT, byte-only). U=0 → ABS,
 // U=1 → NEG. size[23:22] selects 16B/8H/4S/2D. Constants verified
@@ -829,6 +893,28 @@ test "encSmull/Umull + Addp: V0,V1,V2 verified vs clang" {
     try testing.expectEqual(@as(u32, 0x6EA2C020), encUmull2_2D(0, 1, 2));
     // ADDP.4S
     try testing.expectEqual(@as(u32, 0x4EA2BC20), encAddp4S(0, 1, 2));
+}
+
+// D-246 residual: saturating add/sub + SQRDMULH + add-long-pairwise.
+// Expected bytes verified via `clang -c` + `otool -tvVj`.
+test "encSqadd/Sqsub/Sqrdmulh/Saddlp etc: V0,V1,(V2) verified vs clang" {
+    // sat add/sub .16B
+    try testing.expectEqual(@as(u32, 0x4E220C20), encSqadd16B(0, 1, 2));
+    try testing.expectEqual(@as(u32, 0x6E220C20), encUqadd16B(0, 1, 2));
+    try testing.expectEqual(@as(u32, 0x4E222C20), encSqsub16B(0, 1, 2));
+    try testing.expectEqual(@as(u32, 0x6E222C20), encUqsub16B(0, 1, 2));
+    // sat add/sub .8H
+    try testing.expectEqual(@as(u32, 0x4E620C20), encSqadd8H(0, 1, 2));
+    try testing.expectEqual(@as(u32, 0x6E620C20), encUqadd8H(0, 1, 2));
+    try testing.expectEqual(@as(u32, 0x4E622C20), encSqsub8H(0, 1, 2));
+    try testing.expectEqual(@as(u32, 0x6E622C20), encUqsub8H(0, 1, 2));
+    // SQRDMULH .8H (q15mulr_sat_s)
+    try testing.expectEqual(@as(u32, 0x6E62B420), encSqrdmulh8H(0, 1, 2));
+    // add-long-pairwise (1-src)
+    try testing.expectEqual(@as(u32, 0x4E202820), encSaddlp8H(0, 1));
+    try testing.expectEqual(@as(u32, 0x6E202820), encUaddlp8H(0, 1));
+    try testing.expectEqual(@as(u32, 0x4E602820), encSaddlp4S(0, 1));
+    try testing.expectEqual(@as(u32, 0x6E602820), encUaddlp4S(0, 1));
 }
 
 // §9.9 / 9.9-f-7 — int-unop encoders. Expected bytes verified via
