@@ -31,15 +31,18 @@ Read [`REWORK.md`](../.claude/skills/continue/REWORK.md). Bundle mode nests insi
   adversarial test is **D-258-blocked**; it converts to a **Phase III DESIGN CONSTRAINT** (rework MUST keep
   GcRefs slot-resident across any potential collection point — register-residency for non-ref locals, ref-locals
   spill at collection sites), with the JIT adversarial test deferred to when D-258 lands.
-- **NEXT — Phase IV stage 3 (FP/v128 local homes)**: home f32/f64/v128 declared locals into the FP/v128 register
-  class (V16-V28, D-036; `max_reg_slots_fp`) — extend `local_homing.isHomeableType` to f32/f64/v128, add an
-  FP-class home reservation in regalloc + FP prologue-seed + `local.get/set` FP reg refs + FP call-site spill
-  (the f-class caller-saved). Add a fixture: a v128/f32 local carried across a loop. Then **stage 4 (x86_64
-  parity, P7 — the big one)**: port the whole homing to the x86_64 emitter (drop the aarch64-only K=0 gate);
-  reuses the SSOT `local_homing.plan`. Also possible: **stage 2b** (home across GC/memory trampolines —
-  `memory.grow`/`struct.new`/`array.*` — needs GcRef-collection-point spill, ties to D-258/D-261). Each stage:
-  net green every commit + ubuntu test-all (D-262). **ubuntu test-all kicked this turn** against stage 2 (op_call
-  is arm64-only + x86_64 K=0-gated → expect no x86_64 change; Step 0.7 verifies). All autonomous.
+- **NEXT — Phase IV stage 4 (x86_64 i32/i64 homing, P7 parity)** [REPRIORITIZED: stage 3 fp/v128 DEFERRED as
+  measure-first-thin — W45 showed v2's v128 loop already 2× faster than v1, so fp/v128 homing has thin ROI; the
+  high-ROI gap is x86_64, which still has the full 2.3× (homing aarch64-only)]. Port homing to the x86_64 emitter
+  (mirror arm64 stages 1+2): `x86_64/op_locals.zig` (homed get/set/tee = reg→reg MOV) + `x86_64/prologue` (home
+  seed) + `x86_64/ctx.zig` (homing/n_temp/local_offsets) + drop the aarch64-only gate in `local_homing.plan`
+  (→ aarch64 OR x86_64). **x86_64 SIMPLIFICATION**: all 4 allocatable GPRs (RBX/R12-R14) are CALLEE-saved → homed
+  locals survive calls, op_call spill is a NO-OP (skip all). **KEY x86_64 TUNING**: only 4 (SysV) / 6 (Win64)
+  allocatable regs → make `max_homed` ARCH-AWARE (`n_allocatable - 2` temp reserve → SysV cap ~2) to NOT starve
+  temporaries. **x86_64 correctness verifiable ONLY on ubuntu** (Mac can't run x86_64) → Mac gate = arm64
+  unaffected + x86_64 cross-compile clean; ubuntu test-all = the real x86_64 RUN gate (the existing fixtures run
+  homed on x86_64). Then the campaign exit (w45_addi ≤1.1× BOTH backends + net green) is MET → Phase V. Stage 2b
+  (GC trampolines, D-258/D-261) + stage 3 (fp/v128) deferred. All autonomous.
 
 ## Current state
 
