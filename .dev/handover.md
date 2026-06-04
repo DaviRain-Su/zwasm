@@ -57,10 +57,11 @@
 
 ## Step 0.7 (next resume)
 
-**No pending ubuntu verification** — the D-265 campaign's last emit commit `e8b7ad10` is ubuntu-test-all
-GREEN (`/tmp/ubuntu.log`, HEAD=33fe020a). The §16 surface-audit / docs work is mostly non-emit; if a chunk
-touches per-arch emit, **D-262 rule**: `run_remote_ubuntu test-all` (NOT narrow `test`) before discharge
-(cross-compile ≠ cross-run; lesson `cross-compile-is-not-cross-run`). **Gate hygiene**: Step-5 Mac =
+**No pending ubuntu verification** — E3a code is ubuntu-test-all GREEN at `1dca63f2`; the latest commit
+`716c1610` is **docs-only** (ADR-0158 + handover/debt) on top, so no code changed → no kick was issued. The
+§16.2 C-API work is portable Zig (non-emit), but C-ABI differs on Linux SysV so test-all cross-run is still
+worth a kick per code chunk. If a chunk touches per-arch emit, **D-262 rule**: `run_remote_ubuntu test-all`
+(NOT narrow `test`) before discharge (cross-compile ≠ cross-run). **Gate hygiene**: Step-5 Mac =
 `bash scripts/mac_gate.sh`. windowsmini exec = phase boundary.
 
 ## Deferred / open debt
