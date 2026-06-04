@@ -27,8 +27,12 @@
 //!     -o <out.cwasm>          ADR-0039). Generator pipeline only —
 //!                             Phase 12's loader executes the artifact.
 //!
-//! ROADMAP §10 envisions `validate / inspect / features / wat /
-//! wasm` subcommands too — those land in later phases.
+//! The surface is `run` + `compile` only (ADR-0159, §16.4): the
+//! wasmtime/wazero-aligned あるべき論 shape for a runtime. Validation
+//! is programmatic (C-API `wasm_module_validate` / Zig `Engine.compile`);
+//! introspection + wat↔wasm conversion are `wasm-tools` / `wabt`'s job —
+//! zwasm deliberately does NOT ship `validate`/`inspect`/`features`/
+//! `wat`/`wasm` subcommands.
 
 const std = @import("std");
 const build_options = @import("build_options");

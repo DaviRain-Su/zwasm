@@ -1013,15 +1013,10 @@ zwasm_from_scratch/
 │   │   ├── vec.zig
 │   │   ├── trap_surface.zig
 │   │   └── cross_module.zig
-│   ├── cli/                    # CLI exe entry + subcommands
+│   ├── cli/                    # CLI exe entry + subcommands (run + compile; ADR-0159)
 │   │   ├── main.zig            # Juicy Main (CLI exe entry; per ADR-0024 D-4)
 │   │   ├── run.zig
 │   │   ├── compile.zig         # Phase 12
-│   │   ├── validate.zig
-│   │   ├── inspect.zig
-│   │   ├── features.zig
-│   │   ├── wat.zig             # Phase 11
-│   │   ├── wasm.zig            # Phase 11
 │   │   └── diag_print.zig
 │   ├── platform/
 │   │   ├── jit_mem.zig         # mmap (POSIX) / VirtualAlloc (Windows)
@@ -1758,19 +1753,24 @@ deferred (D-264).
 
 ### 10.1 Subcommands
 
+Decided + locked by **ADR-0159** (§16.4 surface review, 2026-06-05): the
+wasmtime/wazero-aligned あるべき論 shape is `run` + `compile` plus standard
+`--version` / `--help`.
+
 ```
 zwasm run        <wasm-or-cwasm-file> [args...]
 zwasm compile    <wasm-file> [-o output.cwasm]
-zwasm validate   <wasm-file>
-zwasm inspect    <wasm-file>
-zwasm features   [<wasm-file>]
-zwasm wat        <wasm-file>
-zwasm wasm       <wat-file>
-zwasm version
-zwasm help       [<subcommand>]
+zwasm <wasm-file> [args...]              # shortcut for `zwasm run <wasm-file>`
+zwasm --version | -V
+zwasm --help | -h | help
+zwasm            (no subcommand)         # version + build-options banner
 ```
 
-`zwasm <wasm-file>` is a shortcut for `zwasm run <wasm-file>`.
+`zwasm validate`/`inspect`/`features`/`wat`/`wasm` are **deliberately not
+shipped** (ADR-0159): validation is programmatic (C-API
+`wasm_module_validate` / Zig `Engine.compile`); introspection + wat↔wasm
+conversion are `wasm-tools` / `wabt`'s job. A runtime's CLI is run-it +
+compile-it; the surrounding sprawl belongs to the ecosystem.
 
 ### 10.2 Engine selection
 
