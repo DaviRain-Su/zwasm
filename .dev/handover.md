@@ -29,27 +29,26 @@
   consumers). wasmtime/wasmer ship 100%; wazero ships none. Decision: implement full standard surface (not
   wasmtime's ext headers). Live count: `bash scripts/capi_surface_gap.sh` (**gap 94**, was 129).
   Sequence: ✅A type accessors (6, `c3a979fa`) → ✅B per-type vec ops (24, `2116a18b`, PtrVecOps unify) →
-  ✅C config (3) + ✅D val_copy/delete (2, POD) → **E ref-cast/same/copy/host_info (~71, D-253)** →
-  F tagtype/EH (12) → G module serialize/share (5, own ADR). The low-/no-design A–D subset is DONE; E/F/G
-  are design-gated. (extern_vec_copy + tagtype_vec also deferred to E/F: need wasm_extern_copy / TagType.)
+  ✅C config (3) + ✅D val_copy/delete (2, POD) → ✅instance.zig split (`092196b6`, ADR-0157 → handles.zig,
+  unblocks E) → **E ref-cast/same/copy/host_info (~71, D-253; host_info sub-chunk first)** → F tagtype/EH
+  (12) → G module serialize/share (5, own ADR). A–D DONE; E/F/G design-gated. (extern_vec_copy + tagtype_vec
+  also deferred to E/F: need wasm_extern_copy / TagType.)
 - **Exit-condition**: `capi_surface_gap.sh` gap → 0 (or each residual category has an ADR/debt justifying
   deferral); then close §16.2 [x].
 
 ## NEXT (autonomous — surfaces first, docs last; ADR-0156)
 
-- **PREREQUISITE for §16.2 chunk E — split `src/api/instance.zig` (D-270)**: it sits at **3299/3300** (its
-  per-file cap, ADR-0099). C+D had to relocate out (config→`config.zig`, val→`vec.zig`). Chunk E's host_info
-  adds a `host_info`+finalizer field to the handle structs (Func/Global/Table/Memory/Ref/Extern) which LIVE
-  in instance.zig — even ~18 lines of fields blow the cap. So FIRST carve a coherent slice out of instance.zig
-  (candidate: the type-handle struct defs + their accessors, or the store/engine block) per ADR-0099 split
-  smell (need ≥1 positive, 0 negative). File a split-ADR. Then resume E.
-- **§16.2 chunk E (ref-cast / same / copy / host_info; ~71)**: the D-253 bulk. After the split: mechanical
-  **host_info trio** first (`wasm_X_get/_set_host_info[_with_finalizer]` for func/global/table/memory/extern/
-  instance/module/trap/ref) — mirror the DONE `wasm_foreign_*` pattern (`extern_new.zig:409` host_info+
-  finalizer fields; fire in `_delete`). Then **ref-cast** (`_as_ref`/`ref_as_X` + `_same`/`_copy`) needing the
-  **uniform `wasm_ref_t` model decision** (likely an ADR — D-253: some casts "degenerate in zwasm's model");
-  reconcile the val `of.ref`=raw-payload divergence (D-269 note) here. Then F (tagtype/EH — needs `TagType`),
-  G (serialize — own ADR).
+- **✅ instance.zig split DONE** (`092196b6`, ADR-0157, D-270 discharged): handle structs (Func/Global/Table/
+  Memory/Ref/Extern + Val/ValKind/ExternKind + HostFuncPayload) carved into `src/api/handles.zig` (cycle-safe,
+  one-way → runtime); instance.zig 3299→3081, re-export aliases keep `instance.<T>` working. Room for chunk E.
+- **§16.2 chunk E (host_info first; ~27) — NEXT**: now unblocked. Add a `host_info: ?*anyopaque` +
+  `host_info_finalizer` slot to each handle struct in `handles.zig` (mirror `wasm_foreign_*` in
+  `extern_new.zig:409`), then implement `wasm_X_get_host_info` / `_set_host_info` / `_set_host_info_with_finalizer`
+  for func/global/table/memory/extern/instance/module/trap/ref (put accessors in `extern_new.zig` beside the
+  foreign ones, OR a new `host_info.zig`; fire the finalizer in each existing `_delete`). TDD. Then the
+  **ref-cast sub-chunk** (`_as_ref`/`ref_as_X` + `_same`/`_copy`) needing the **uniform `wasm_ref_t` model
+  decision** (likely an ADR — D-253: some casts "degenerate in zwasm's model"); reconcile the val
+  `of.ref`=raw-payload divergence (D-269 note) here. Then F (tagtype/EH — needs `TagType`), G (serialize — own ADR).
 - After §16.2: §16.3 Zig-API review (reconcile D-267, ADR-0025 Revision), §16.4 CLI あるべき論 review,
   §16.5 dogfooding, §16.6 memory-safety (D-258→D-261), §16.7 docs LAST. Chain; pay debt en route.
 

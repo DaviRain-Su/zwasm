@@ -1031,24 +1031,6 @@ entries:
       include/wasm.h (verbatim upstream); src/api/{module_introspect,types,vec,instance,extern_new}.zig;
       scripts/capi_surface_gap.sh (live checker); .dev/c_api_surface_audit_2026-06-04.md (full audit);
       D-253 (E subset); ADR-0004 (wasm-c-api pin); ADR-0156 (完成形 surfaces); ROADMAP §16.2
-  - id: "D-270"
-    layer: "code"
-    status: "now"
-    description: |-
-      **`src/api/instance.zig` is at its per-file size cap (3299/3300, ADR-0099) → blocks C-API completion
-      (D-269 chunk E).** §16.2 chunk C+D already had to relocate OUT (config→`config.zig`, val_copy/delete→
-      `vec.zig`) because any addition exceeds the cap. Chunk E (host_info trio for func/global/table/memory/
-      ref/extern) must add a `host_info: ?*anyopaque` + finalizer FIELD to each handle struct — and those
-      structs are DEFINED in instance.zig, so even ~18 lines of fields blow the cap. DISCHARGE: carve a
-      coherent slice out of instance.zig per ADR-0099 split smell (≥1 positive, 0 negative) + file a split-ADR
-      BEFORE chunk E. Candidate slices: (a) the type-handle struct defs (Func/Global/Table/Memory/Ref/Extern)
-      + their lifecycle into `handles.zig`; (b) the store/engine block. Pick by cohesion + import-cycle check
-      (instance.zig has many cross-refs; a struct-defs-only module is most decoupled).
-    first_raised: "2026-06-05"
-    last_reviewed: "2026-06-05"
-    refs: |-
-      src/api/instance.zig (3299/3300 cap); ADR-0099 (file-size policy + per-file override); D-269 (C-API
-      completion chunk E blocked); .claude/rules/file_size_smell.md (split positives/negatives)
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
