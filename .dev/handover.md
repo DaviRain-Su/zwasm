@@ -23,27 +23,33 @@
 ## Active bundle
 
 - **Bundle-ID**: 16.2-capi-completion
-- **Cycles-remaining**: ~4 (gap categories C/D/E/F/G; E/G are multi-cycle)
+- **Cycles-remaining**: ~3 (gap categories E/F/G; E/G are multi-cycle / design-gated)
 - **Continuity-memo**: §16.2 audit DONE (`.dev/c_api_surface_audit_2026-06-04.md`, D-269) — our `wasm.h` is
   byte-identical to upstream latest, but standard extern fns were unimplemented (link-error for C
   consumers). wasmtime/wasmer ship 100%; wazero ships none. Decision: implement full standard surface (not
-  wasmtime's ext headers). Live count: `bash scripts/capi_surface_gap.sh` (**gap 99**, was 129).
-  Sequence: ✅A type accessors (6, `c3a979fa`) → ✅B per-type vec ops (24, `2116a18b` — added `PtrVecOps`
-  generic owned-ptr-vec helper in types.zig + migrated valtype/externtype/import/export to it; functype/
-  globaltype/tabletype/memorytype families + the 4 `_vec_copy`) → **C config (3)** → D val_copy/delete (2)
-  → E ref-cast/host_info (~71, D-253) → F tagtype/EH (12) → G module serialize/share (5, own ADR).
-  (extern_vec_copy + tagtype_vec deferred to E/F: need wasm_extern_copy / TagType first.)
+  wasmtime's ext headers). Live count: `bash scripts/capi_surface_gap.sh` (**gap 94**, was 129).
+  Sequence: ✅A type accessors (6, `c3a979fa`) → ✅B per-type vec ops (24, `2116a18b`, PtrVecOps unify) →
+  ✅C config (3) + ✅D val_copy/delete (2, POD) → **E ref-cast/same/copy/host_info (~71, D-253)** →
+  F tagtype/EH (12) → G module serialize/share (5, own ADR). The low-/no-design A–D subset is DONE; E/F/G
+  are design-gated. (extern_vec_copy + tagtype_vec also deferred to E/F: need wasm_extern_copy / TagType.)
 - **Exit-condition**: `capi_surface_gap.sh` gap → 0 (or each residual category has an ADR/debt justifying
   deferral); then close §16.2 [x].
 
 ## NEXT (autonomous — surfaces first, docs last; ADR-0156)
 
-- **§16.2 chunk C (config) — NEXT**: implement `wasm_config_new` / `wasm_config_delete` /
-  `wasm_engine_new_with_config` (wasm.h:64-66,80). Standard config is an opaque object: `wasm_config_t`
-  is `WASM_DECLARE_OWN`, runtime-specific setters are extensions we don't owe; `engine_new_with_config`
-  consumes (takes ownership of) the config and behaves like `engine_new` for our single-tier engine. Survey
-  `src/api/instance.zig` (wasm_engine_new/delete) for the Engine wrapper. TDD. Then D (val_copy/val_delete)
-  — chain. E (ref/host_info) via D-253; G (serialize) own ADR.
+- **PREREQUISITE for §16.2 chunk E — split `src/api/instance.zig` (D-270)**: it sits at **3299/3300** (its
+  per-file cap, ADR-0099). C+D had to relocate out (config→`config.zig`, val→`vec.zig`). Chunk E's host_info
+  adds a `host_info`+finalizer field to the handle structs (Func/Global/Table/Memory/Ref/Extern) which LIVE
+  in instance.zig — even ~18 lines of fields blow the cap. So FIRST carve a coherent slice out of instance.zig
+  (candidate: the type-handle struct defs + their accessors, or the store/engine block) per ADR-0099 split
+  smell (need ≥1 positive, 0 negative). File a split-ADR. Then resume E.
+- **§16.2 chunk E (ref-cast / same / copy / host_info; ~71)**: the D-253 bulk. After the split: mechanical
+  **host_info trio** first (`wasm_X_get/_set_host_info[_with_finalizer]` for func/global/table/memory/extern/
+  instance/module/trap/ref) — mirror the DONE `wasm_foreign_*` pattern (`extern_new.zig:409` host_info+
+  finalizer fields; fire in `_delete`). Then **ref-cast** (`_as_ref`/`ref_as_X` + `_same`/`_copy`) needing the
+  **uniform `wasm_ref_t` model decision** (likely an ADR — D-253: some casts "degenerate in zwasm's model");
+  reconcile the val `of.ref`=raw-payload divergence (D-269 note) here. Then F (tagtype/EH — needs `TagType`),
+  G (serialize — own ADR).
 - After §16.2: §16.3 Zig-API review (reconcile D-267, ADR-0025 Revision), §16.4 CLI あるべき論 review,
   §16.5 dogfooding, §16.6 memory-safety (D-258→D-261), §16.7 docs LAST. Chain; pay debt en route.
 
