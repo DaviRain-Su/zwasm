@@ -1033,6 +1033,26 @@ entries:
     refs: |-
       src/zwasm.zig (Engine facade; Memory exposed, Global/Table not); src/zwasm/instance.zig; ADR-0109;
       ROADMAP §10.A / §16.3; src/api/{instance,extern_new}.zig (C-API global/table accessors exist)
+  - id: "D-273"
+    layer: "code"
+    status: "note"
+    description: |-
+      **note (CLI flag surface vs wasmtime — §16.4 review, ADR-0159): the shipped `run` flags are
+      `--invoke <name>` / `--engine <interp|jit>` / `--dir <host>[:<guest>]` only.** Deliberately NOT shipped
+      (the surface is kept minimal): (1) `--invoke NAME=ARGS` arg marshalling + typed-result PRINTING — today
+      `--invoke` runs a zero-arg export and the result surfaces only as the truncated process exit code
+      (i32→u8 on the AOT path, `runCwasm`), never printed as typed values like wasmtime; (2) `--env KEY=VAL`;
+      (3) `--fuel N` (needs engine metering — may never fit a lightweight runtime); (4) `--timeout DURATION`
+      (needs interruption); (5) `--wasi`/`--no-wasi` (WASI is auto-configured). The highest-value gap is (1):
+      invoking a named compute export and SEEING its result is a core CLI use wasmtime serves.
+      DISCHARGE: evaluate under §16.5 dogfooding against a real consumer; implement (1) [arg parse by param
+      type → wasm Values + multi-value result formatting] if dogfooding needs it; (2)-(5) only on demonstrated
+      need. Not a bug — the runtime + C/Zig APIs already cover these programmatically.
+    first_raised: "2026-06-05"
+    last_reviewed: "2026-06-05"
+    refs: |-
+      src/cli/run.zig (runWasmJit=runVoidExport zero-arg; runCwasm result→exit code); src/cli/main.zig
+      (--invoke/--engine/--dir parsing); ROADMAP §10.3; ADR-0159 (§16.4 surface); §16.5 dogfooding
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.

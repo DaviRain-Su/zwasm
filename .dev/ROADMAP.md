@@ -1688,7 +1688,7 @@ discharge predicate, not a silent workaround.
 | 16.1 | `docs/migration_v1_to_v2.md` — v1→v2 migration guide, grounded in the shipped+tested API (`src/zwasm.zig` facade). Surfaced D-267 (§10.A/ADR-0025 name `Runtime`, ships `Engine`). **Will be revised** as the §16.2–4 surface audits settle. | [x] `58a483e8` |
 | 16.2 | **C-API surface audit vs wasm-c-api** — audit `include/wasm.h` + `src/api/` against the upstream wasm-c-api standard wasmtime/wasmer follow; close any divergence; **fix the tests too** if they encoded a wrong shape. Industry-standard is the bar. **✅ DONE**: `wasm.h` byte-identical to upstream but **129/293 extern fns were unimplemented** (link errors); implemented ALL → **gap 0 (293/293)** (`scripts/capi_surface_gap.sh`). A type-accessors → B vec-ops → C config → D val → instance.zig split (ADR-0157) → host_info (27) → ref-cast same/as_ref/copy all 9 types (ADR-0158) → tagtype/EH → module serialize/share (byte-model). Residual semantic limits debt-tracked: standalone/instance/foreign `_copy`→null (D-253-D), val `of.ref`=raw-payload (D-269), serialize=source-bytes no-AOT-cache (D-271). | [x] `e9367bb2` |
 | 16.3 | **Zig-API surface review (あるべき論)** — confirm the `Engine`/`Module`/`Instance`/`Trap`/`Value`/`TypedFunc`/`Linker`/`Caller`/`Memory` surface is the minimal, clean, idiomatic shape; **reconcile D-267** (`Runtime`/`Module.parse` spec wording → shipped `Engine`/`compile`, or alias) — Revision on ADR-0025. Breaking-allowed. **✅ DONE**: surface confirmed minimal/clean/idiomatic (wasmtime/wasmer shape, 13 facade tests, code unchanged — no code edit needed). D-267 reconciled code-as-truth: `Runtime`/`Module.parse` were NEVER shipped (ADR-0025 superseded by ADR-0109 pre-impl); synced ROADMAP §10.A + ADR-0025 Revision note → shipped `Engine`/`compile`. Optional gap: Zig-level Global/Table accessors not exposed (D-272). | [x]    |
-| 16.4 | **CLI surface review (あるべき論, breaking-allowed)** — design the truly-necessary, simple, industry-standard CLI; v1's `validate`/`inspect`/`features`/`wat`/`wasm` + capability-flag sprawl is NOT owed. Decide + implement the kept surface; close "CLI-only vs API-only" capability gaps surfaced by §16.5. | [ ]    |
+| 16.4 | **CLI surface review (あるべき論, breaking-allowed)** — design the truly-necessary, simple, industry-standard CLI; v1's `validate`/`inspect`/`features`/`wat`/`wasm` + capability-flag sprawl is NOT owed. Decide + implement the kept surface; close "CLI-only vs API-only" capability gaps surfaced by §16.5. **✅ DONE** (ADR-0159): live survey (wasmtime/wazero ship run+compile, no validate) → surface locked at **`run` + `compile`** + standard `--version`/`--help`/`help` + explicit unknown-subcommand error (testable `cli/dispatch.zig`). Removed 5 dead aspirational stubs (validate/inspect/features/wat/wasm — never dispatched); validation stays programmatic (C-API/Engine.compile), wat↔wasm/introspection → wasm-tools/wabt. Reconciled §10.1/§10.2/§10.3 to code-as-truth (`--engine` per ADR-0136, not the stale `--interpreter`; shipped `run` flags). Flag-parity gap vs wasmtime (`--invoke` args/result-print, `--env`/`--fuel`/`--timeout`) debt-tracked D-273 for §16.5 evaluation. | [x]    |
 | 16.5 | **Minimal-wrapper dogfooding** — a local `build.zig.zon` path-dep consumer that uses zwasm v2 as a Zig library; verify it stands up cleanly, hunt ergonomic gaps + "usable from CLI but unreachable from the API" mismatches; reuse the existing test corpus where adaptation makes it serve double duty. (cw-v1 dogfooding stays deferred — D-264.) | [ ]    |
 | 16.6 | **Memory-safety completion** — D-258 (wire the JIT-trampoline GC collection trigger) → D-261 (the GC-on-JIT conservative-rooting **adversarial** test that D-258 unblocks). Close the latent-UAF gap before calling the GC-on-JIT path 完成形. | [ ]    |
 | 16.7 | **Docs finalization (AFTER §16.2–6 settle)** — `README.md` (install, 3-line happy paths, Wasm proposal/tier table §11, 3-OS matrix), `docs/reference/` (API ref for the settled surface), `docs/tutorial/`, `CHANGELOG.md`. Match the finalised surface, not a moving target. | [ ]    |
@@ -1775,32 +1775,32 @@ shipped** (ADR-0159): validation is programmatic (C-API
 conversion are `wasm-tools` / `wabt`'s job. A runtime's CLI is run-it +
 compile-it; the surrounding sprawl belongs to the ecosystem.
 
-### 10.2 Engine selection
+### 10.2 Engine selection (shipped — ADR-0136)
 
-The engine (interpreter / JIT / AOT) is selected automatically:
+- `.cwasm` input → **AOT-loaded** directly (the `CWAS` magic dictates; no
+  parse/compile).
+- `.wasm` input → **interpreter by default** (`--engine interp`, full WASI).
+- `--engine jit` (or `--engine=jit`) → opt into the **JIT** executor. JIT is
+  **compute-only** (SIMD/compute; no WASI I/O yet — D-244); rejects `--dir`.
 
-- `.wasm` input + JIT-enabled build → JIT.
-- `.wasm` input + interpreter-only build (`-Dengine=interp`) → interpreter.
-- `.cwasm` input → AOT-loaded (file extension dictates).
+There is no `--aot` flag (the `.cwasm` extension dictates). The explicit
+`--engine <interp|jit>` (rather than wasmtime's interpreter-less
+`--interpreter`) reflects zwasm's reality of two real engines.
 
-**Override**:
+### 10.3 `run` flags
 
-- `--interpreter` — force interpreter mode (debugging, tracing, JIT
-  bug investigation). The flag is named `--interpreter` (not `--interpret`)
-  to be unambiguous.
+**Shipped:**
 
-There is **no `--jit` flag** (it is the default when compiled in)
-and **no `--aot` flag** (the `.cwasm` file extension dictates). This
-mirrors wasmtime's CLI shape.
+- `--invoke <name>` — run the named export instead of `_start` / `main`
+  (currently zero-arg; result surfaces as the process exit code, not printed).
+- `--engine <interp|jit>` — engine selection (§10.2).
+- `--dir <host>[:<guest>]` — preopen a host directory for WASI (colon
+  separator; guest path mirrors host when omitted).
 
-### 10.3 wasmtime-aligned naming
-
-- `--invoke NAME[=ARGS]` — function to invoke.
-- `--wasi` / `--no-wasi` — WASI on/off (default auto-detect from imports).
-- `--dir HOST=GUEST` — preopen a directory.
-- `--env KEY=VAL` — set wasm-side env var.
-- `--fuel N` — fuel limit.
-- `--timeout DURATION` — wall-clock timeout (`100ms`, `30s`, `5m`).
+**Not shipped (deliberately minimal; D-273 tracks the wasmtime-parity gap):**
+`--invoke NAME=ARGS` arg marshalling + typed-result printing, `--env KEY=VAL`,
+`--fuel N`, `--timeout DURATION`, `--wasi`/`--no-wasi`. These are evaluated
+against real need under §16.5 dogfooding — not pre-built.
 
 ### 10.4 wasm-c-api layered ABI
 
