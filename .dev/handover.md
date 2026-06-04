@@ -29,26 +29,28 @@
   all MATCH, `OK (HEAD=4ec849c8)`). The D6 process fix (`5471e5fb`) + the green audit close both predicates — gate
   topology hardened, no latent x86_64 emit bug. **ZERO `now` debt rows remain.**
 
-  **C-API prep-path survey DONE** (`295bf14b`, lesson `2026-06-05-capi-survey-funcref-from-table`): swept
-  wasmtime/wasmer/wazero C-API engagement (user directive + STOP_BUCKETS prep-path). VALIDATED the D-273/CLI
-  defer (`--invoke`+`--fuel`/`--env` = convenience; wazero ships compile+run only; ADR-0159 enriched) + the
-  surface-layering defer (everyone = std `wasm.h` + richer own API). **CHALLENGED D-269** → reclassified note→now.
+  **C-API funcref-from-C (D-269) — survey + verification done; path A landed, path B is the fix.** Survey
+  (`295bf14b`) reframed D-269 from "don't-pre-build nicety" to a *standard*-wasm-c-api behavioral gap, then a
+  conformance test (`61b606aa`, `test/c_api_conformance/funcref_table_call.c`) split it empirically:
+  • **PATH A (table-slot funcref → `wasm_table_get`→`wasm_ref_as_func`→call): GREEN/conformant + now guarded.**
+  • **PATH B (call-result funcref via `results[i].of.ref`): RED — the NEXT chunk.**
 
-  **NEXT chunk — verify/fix D-269 (the only `now` row):** calling a funcref pulled from a table is *standard*
-  wasm-c-api (`wasm_table_get→wasm_ref_as_func→wasm_func_call`), not a richer extra — so it's a behavioral
-  conformance gap, not a don't-pre-build nicety. `wasm_ref_as_func` (`extern_new.zig:378`) already decodes via
-  `refAsFuncEntity`; open question = does the table-slot funcref encoding (`tab.refs[idx].ref`,
-  `instance.zig:1282`) decode through it? **Step 2 = a RED C test** (`test/c_api_conformance/`: build a
-  table+funcref module → table.get → ref_as_func → func_call → assert result). Green ⇒ downgrade D-269; red ⇒
-  fix the table encoding (independent of D-253's broader owned-handle model). Step 0 first: survey zwasm's
-  funcref/table/ref encoding (how `tab.refs[].ref` is written vs what `refAsFuncEntity` expects).
-  - **Other backlog (gated/external)**: **D-273** CLI flags (validated-defer). **J.3** ~30 `blocked-by` →
-    `suggest meta_audit` (user-gated). **15.6** (only open ROADMAP `[ ]`) blocked on cw-v1 (D-264).
+  **NEXT chunk — D-269 path B fix (owned-handle ref model; the only `now` row; shared with D-253):**
+  `marshalValOut` (`instance.zig:926`) puts the raw `*FuncEntity` payload into `of.ref`, but `of.ref` is
+  `wasm_ref_t*` (=`*Ref`) → consumer `wasm_ref_as_func(of.ref)` type-confuses it (verified RED). Fix: marshal a
+  ref-kind result as an **owned `*Ref`** (thread an allocator into `marshalValOut` + callers), make
+  `wasm_val_delete`/`wasm_val_copy` (`vec.zig:177/182`, today POD) free/clone ref-kind `of.ref`, and flip
+  `marshalValIn` (`:910`) to read `ref.ref` not `@intFromPtr`. **Step 2 RED repro recorded verbatim in D-269**
+  (`get`-returns-funcref module). Watch ownership: leak/double-free across args/results/copy/delete/vec/host-cb —
+  TDD each. Step 0 first: map all `marshalValOut` callers + the val lifecycle.
+  - **Other backlog (gated/external)**: **D-273** CLI flags (validated-defer, ADR-0159). **J.3** ~30 `blocked-by`
+    → `suggest meta_audit` (user-gated). **15.6** (only open ROADMAP `[ ]`) blocked on cw-v1 (D-264).
 
-## Step 0.7 (next resume) — no kick pending
+## Step 0.7 (next resume) — VERIFY this turn's test-all kick
 
-D-262 audit kick already verified GREEN this resume (`OK (HEAD=4ec849c8)`); this turn = doc/debt only, no `src/`
-change since → no new kick. (The D-269 fix chunk, when it touches `src/`, kicks the usual D6 `test-all`.)
+This turn added a C conformance test + `build.zig` wiring (`61b606aa`) → kicked the D6 `test-all` against HEAD.
+Next cycle: `tail -3 /tmp/ubuntu.log` → GREEN `OK (HEAD=<sha>)` = path-A conformance passes on x86_64 too,
+proceed; FAIL = revert the turn's commits to the last verified HEAD (`4ec849c8`).
 **Gate**: Step-5 Mac = `bash scripts/mac_gate.sh`. windowsmini = manual-only (ADR-0156: no loop tag).
 
 ## Deferred / open debt (D-274/275/276/257 discharged this session — removed)

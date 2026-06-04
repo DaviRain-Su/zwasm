@@ -902,18 +902,25 @@ entries:
     layer: "code"
     status: "now"
     description: |-
-      **RECLASSIFIED 2026-06-05 note→now (C-API reference survey [[2026-06-05-capi-survey-funcref-from-table]]).**
-      Surveyed wasmtime/wasmer/wazero C-API engagement (user directive + STOP_BUCKETS prep-path). Finding:
-      **calling a funcref pulled from a table is STANDARD wasm-c-api** (`wasm_table_get → wasm_ref_as_func →
-      wasm_func_call`, plain upstream `wasm.h:473/363/445`; wasmtime `val.h:254` funcref + `func.h` call) — NOT a
-      richer-API extra. So this is a *behavioral* conformance gap (symbols exist, gap=0), not the "wasmtime-parity
-      nicety, don't-pre-build" framing — it's below the standard. NARROWED actionable: `wasm_ref_as_func`
-      (`extern_new.zig:378`) already decodes a raw payload via `refAsFuncEntity` into a callable Func; the open
-      question is whether the **table-slot funcref encoding** (`tab.refs[idx].ref`, `wasm_table_get`
-      `instance.zig:1282`) decodes through it. DISCHARGE: a RED C conformance test (`test/c_api_conformance/`:
-      table.get→ref_as_func→func_call) settles it — green ⇒ downgrade (path already works); red ⇒ fix the table
-      funcref encoding (independent of the broader D-253 owned-handle `of.ref` model below). D-273/surface-philosophy
-      defers VALIDATED as fair (richer-API extras; ADR-0159 holds). Next-cycle chunk.
+      **now — C-API funcref-from-C: path A VERIFIED, path B is the real gap (survey
+      [[2026-06-05-capi-survey-funcref-from-table]]; conformance test `test/c_api_conformance/funcref_table_call.c`
+      `61b606aa`).** Calling a funcref from C is STANDARD wasm-c-api (`wasm_table_get → wasm_ref_as_func →
+      wasm_func_call`, upstream `wasm.h:473/363/445`), not a richer-API extra — so a broken path is a *behavioral*
+      conformance gap (symbols exist, gap=0). Two paths, tested empirically:
+      • **PATH A — funcref from a table slot: GREEN/CONFORMANT.** Elem-segment-populated table → `wasm_table_get`
+        (`instance.zig:1282`, allocates a real `*Ref`) → `wasm_ref_as_func` (`extern_new.zig:378`, decodes via
+        `refAsFuncEntity`) → callable → 42. Now guarded by the conformance test.
+      • **PATH B — funcref RETURNED FROM A CALL, read via `results[i].of.ref`: RED/NON-CONFORMANT (the fix).**
+        `marshalValOut` (`instance.zig:926`) sets `of.ref = @ptrFromInt(v.ref)` = the **raw `*FuncEntity` payload**,
+        but `of.ref` is typed `wasm_ref_t*` (= `*instance.Ref`); a standard consumer's `wasm_ref_as_func(of.ref)`
+        type-confuses the raw `*FuncEntity` for a `*Ref` → recovers a wrong/garbage func (verified: returns ≠ 42).
+      DISCHARGE (next chunk = owned-handle ref model, shared with D-253): make `marshalValOut` allocate an owned
+      `*Ref` for ref-kind results (needs an allocator threaded in), make `wasm_val_delete`/`wasm_val_copy`
+      (`vec.zig:177/182`, currently POD no-op) free/clone ref-kind `of.ref`, and flip `marshalValIn` (`:910`) to
+      read `ref.ref` not `@intFromPtr`. RED repro for that chunk: module
+      `(func(result i32)(i32.const 42))(func(export "get")(result funcref)(ref.func 0))...` → call get →
+      `wasm_ref_as_func(results[0].of.ref)` → call → MUST be 42 (currently not). D-273/surface-philosophy defers
+      VALIDATED as fair (ADR-0159 holds).
       ---
       **note (§16.2 DONE — C-API surface 100% implemented: gap 0 / 293-of-293 via `scripts/capi_surface_gap.sh`,
       `e9367bb2`).** Audit found `include/wasm.h` byte-identical to upstream but 129/293 extern fns unimplemented
