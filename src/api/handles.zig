@@ -18,8 +18,6 @@
 //!
 //! Zone 3 (`src/api/`).
 
-const std = @import("std");
-
 const runtime = @import("../runtime/runtime.zig");
 const runtime_instance = @import("../runtime/instance/instance.zig");
 const zir = @import("../ir/zir.zig");
@@ -37,6 +35,11 @@ const Trap = trap_surface.Trap;
 /// pointer (per upstream wasm.h), so the struct does not need
 /// extern layout.
 pub const Func = struct {
+    /// host_info (wasm.h `WASM_DECLARE_REF_BASE`): host-attached opaque +
+    /// its finalizer, fired in `wasm_func_delete`. Mirrors `Foreign`
+    /// (`extern_new.zig`). Accessors are generic in `host_info.zig`.
+    host_info: ?*anyopaque = null,
+    host_info_finalizer: ?*const fn (?*anyopaque) callconv(.c) void = null,
     instance: ?*Instance,
     func_idx: u32,
     /// Cached borrowed `wasm_extern_t` view (lazily built by
@@ -94,6 +97,9 @@ pub const HostFuncPayload = struct {
 /// 128-bit slot) — see `.dev/lessons/2026-05-24-c_api-v128-spec-boundary.md`.
 /// Zig-side v128 access goes through the ADR-0109 native API only.
 pub const Global = struct {
+    /// host_info (see `Func`); fired in `wasm_global_delete`.
+    host_info: ?*anyopaque = null,
+    host_info_finalizer: ?*const fn (?*anyopaque) callconv(.c) void = null,
     instance: ?*Instance,
     global_idx: u32,
     valtype: zir.ValType,
@@ -119,6 +125,9 @@ pub const Global = struct {
 /// v0.1 surface: payload only; ref-type kind (funcref vs externref)
 /// is implicit from the source Table's `elem_type`.
 pub const Ref = struct {
+    /// host_info (see `Func`); fired in `wasm_ref_delete`.
+    host_info: ?*anyopaque = null,
+    host_info_finalizer: ?*const fn (?*anyopaque) callconv(.c) void = null,
     instance: ?*Instance,
     ref: u64,
     /// Cached borrowed `wasm_func_t` view (`wasm_ref_as_func`; owned by
@@ -137,6 +146,9 @@ pub const Ref = struct {
 /// mutate that slice directly so cross-module imports
 /// see writes uniformly per ADR-0014 §6.K.3 arena-aliased semantics.
 pub const Table = struct {
+    /// host_info (see `Func`); fired in `wasm_table_delete`.
+    host_info: ?*anyopaque = null,
+    host_info_finalizer: ?*const fn (?*anyopaque) callconv(.c) void = null,
     instance: ?*Instance,
     table_idx: u32 = 0,
     elem_type: zir.ValType,
@@ -165,6 +177,9 @@ pub const Table = struct {
 /// (instance B importing instance A's memory) see writes
 /// uniformly per ADR-0014 §6.K.3 arena-aliased semantics.
 pub const Memory = struct {
+    /// host_info (see `Func`); fired in `wasm_memory_delete`.
+    host_info: ?*anyopaque = null,
+    host_info_finalizer: ?*const fn (?*anyopaque) callconv(.c) void = null,
     instance: ?*Instance,
     memory_idx: u32 = 0,
     /// Cached borrowed extern view (see `Func.extern_view`).
@@ -223,6 +238,11 @@ pub const ExternKind = enum(u8) {
 /// global is declared but not yet wired through imports.
 pub const Extern = struct {
     kind: ExternKind,
+    /// host_info (see `Func`); fired in `wasm_extern_delete` for an OWNED
+    /// extern (a borrowed `*_as_extern` cache-view never fires it — that
+    /// edge folds into the D-269/D-253 ref-model reconcile).
+    host_info: ?*anyopaque = null,
+    host_info_finalizer: ?*const fn (?*anyopaque) callconv(.c) void = null,
     /// Back-pointer for allocator recovery in `wasm_extern_delete`.
     instance: ?*Instance,
     /// For kind = func: the Func handle owned by this Extern. C

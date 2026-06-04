@@ -36,6 +36,7 @@ const instance = @import("instance.zig");
 const module_introspect = @import("module_introspect.zig");
 const extern_new = @import("extern_new.zig");
 const config = @import("config.zig");
+const host_info = @import("host_info.zig");
 
 const testing = std.testing;
 
@@ -285,6 +286,26 @@ pub const wasm_ref_as_foreign = extern_new.wasm_ref_as_foreign;
 pub const wasm_foreign_get_host_info = extern_new.wasm_foreign_get_host_info;
 pub const wasm_foreign_set_host_info = extern_new.wasm_foreign_set_host_info;
 pub const wasm_foreign_set_host_info_with_finalizer = extern_new.wasm_foreign_set_host_info_with_finalizer;
+
+// host_info trio for func/global/table/memory/ref/extern (host_info.zig)
+pub const wasm_func_get_host_info = host_info.wasm_func_get_host_info;
+pub const wasm_func_set_host_info = host_info.wasm_func_set_host_info;
+pub const wasm_func_set_host_info_with_finalizer = host_info.wasm_func_set_host_info_with_finalizer;
+pub const wasm_global_get_host_info = host_info.wasm_global_get_host_info;
+pub const wasm_global_set_host_info = host_info.wasm_global_set_host_info;
+pub const wasm_global_set_host_info_with_finalizer = host_info.wasm_global_set_host_info_with_finalizer;
+pub const wasm_table_get_host_info = host_info.wasm_table_get_host_info;
+pub const wasm_table_set_host_info = host_info.wasm_table_set_host_info;
+pub const wasm_table_set_host_info_with_finalizer = host_info.wasm_table_set_host_info_with_finalizer;
+pub const wasm_memory_get_host_info = host_info.wasm_memory_get_host_info;
+pub const wasm_memory_set_host_info = host_info.wasm_memory_set_host_info;
+pub const wasm_memory_set_host_info_with_finalizer = host_info.wasm_memory_set_host_info_with_finalizer;
+pub const wasm_ref_get_host_info = host_info.wasm_ref_get_host_info;
+pub const wasm_ref_set_host_info = host_info.wasm_ref_set_host_info;
+pub const wasm_ref_set_host_info_with_finalizer = host_info.wasm_ref_set_host_info_with_finalizer;
+pub const wasm_extern_get_host_info = host_info.wasm_extern_get_host_info;
+pub const wasm_extern_set_host_info = host_info.wasm_extern_set_host_info;
+pub const wasm_extern_set_host_info_with_finalizer = host_info.wasm_extern_set_host_info_with_finalizer;
 pub const wasm_extern_vec_delete = instance.wasm_extern_vec_delete;
 pub const wasm_instance_exports = instance.wasm_instance_exports;
 pub const wasm_func_call = instance.wasm_func_call;

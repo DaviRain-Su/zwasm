@@ -869,6 +869,7 @@ pub export fn zwasm_instance_get_func(i: ?*Instance, idx: u32) callconv(.c) ?*Fu
 /// `zwasm_instance_get_func`. Null-tolerant.
 pub export fn wasm_func_delete(f: ?*Func) callconv(.c) void {
     const handle = f orelse return;
+    if (handle.host_info_finalizer) |fin| fin(handle.host_info);
     const store = if (handle.instance) |inst| (inst.store orelse return) else (handle.store orelse return);
     const alloc = storeAllocator(store) orelse return;
     if (handle.extern_view) |v| alloc.destroy(v);
@@ -975,6 +976,7 @@ pub export fn wasm_extern_delete(e: ?*Extern) callconv(.c) void {
     // entity, which frees it on its own delete — deleting it here
     // would double-free, so this is a no-op.
     if (handle.borrowed) return;
+    if (handle.host_info_finalizer) |fin| fin(handle.host_info);
     if (handle.func) |fh| wasm_func_delete(fh);
     if (handle.global) |gh| wasm_global_delete(gh);
     if (handle.memory) |mh| wasm_memory_delete(mh);
@@ -1051,6 +1053,7 @@ pub export fn wasm_extern_as_global(e: ?*Extern) callconv(.c) ?*Global {
 /// future `wasm_global_new` (host-side standalone construction).
 pub export fn wasm_global_delete(g: ?*Global) callconv(.c) void {
     const handle = g orelse return;
+    if (handle.host_info_finalizer) |fin| fin(handle.host_info);
     const store = if (handle.instance) |inst| (inst.store orelse return) else (handle.store orelse return);
     const alloc = storeAllocator(store) orelse return;
     if (handle.extern_view) |v| alloc.destroy(v);
@@ -1118,6 +1121,7 @@ pub export fn wasm_extern_as_memory(e: ?*Extern) callconv(.c) ?*Memory {
 /// back-pointer).
 pub export fn wasm_memory_delete(m: ?*Memory) callconv(.c) void {
     const handle = m orelse return;
+    if (handle.host_info_finalizer) |fin| fin(handle.host_info);
     const store = if (handle.instance) |inst| (inst.store orelse return) else (handle.store orelse return);
     const alloc = storeAllocator(store) orelse return;
     if (handle.extern_view) |v| alloc.destroy(v);
@@ -1203,6 +1207,7 @@ pub export fn wasm_memory_grow(m: ?*Memory, delta: u32) callconv(.c) bool {
 /// `wasm_ref_delete(*Ref)` — free a Ref handle. Null-tolerant.
 pub export fn wasm_ref_delete(r: ?*Ref) callconv(.c) void {
     const handle = r orelse return;
+    if (handle.host_info_finalizer) |fin| fin(handle.host_info);
     const store = if (handle.instance) |i| (i.store orelse return) else (handle.store orelse return);
     const alloc = storeAllocator(store) orelse return;
     if (handle.func_view) |fv| alloc.destroy(fv);
@@ -1223,6 +1228,7 @@ pub export fn wasm_extern_as_table(e: ?*Extern) callconv(.c) ?*Table {
 /// releases it via the `Extern.table` back-pointer).
 pub export fn wasm_table_delete(t: ?*Table) callconv(.c) void {
     const handle = t orelse return;
+    if (handle.host_info_finalizer) |fin| fin(handle.host_info);
     const store = if (handle.instance) |inst| (inst.store orelse return) else (handle.store orelse return);
     const alloc = storeAllocator(store) orelse return;
     if (handle.extern_view) |v| alloc.destroy(v);
