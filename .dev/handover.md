@@ -27,21 +27,27 @@
   by PROOF** (`4accb556`) — ADR-0060 force-spill makes the GC-on-JIT register-resident worst case structurally
   impossible → conservative rooting *proven* correct, not just tested. **Remaining backlog is deferred/gated, NOT
   build-now**:
-  - **D-273** CLI `--invoke` args + **D-269** callable funcref — wasmtime-parity features the §16.5 dogfooding
-    surfaced **no demonstrated need** for. Per ADR-0159 ("evaluate against real need; don't pre-build") these
-    **wait for a real consumer need**, not speculative build. Scoped if needed: D-273 = arg-marshal by param type +
-    result printing in `src/cli/` (arg'd-invoke runner; `runWasmJit` is zero-arg).
-  - **D-274** zlinter lazy dep — blocked by build.zig:6 comptime `@import("zlinter")`; low value (one-time
-    transitive fetch). Autonomous-but-low: investigate zlinter 0.16.x lazy pattern only if pursued.
-  - **J.3** ~30 active debt rows > 15; old `blocked-by` (D-007/010/020-028/074) → `suggest meta_audit` (user-gated).
-  - Next cycle: if no user direction, either investigate D-274 OR a fresh `audit_scaffolding` / proposal-watch
-    refresh. The substantive work is done; avoid speculative over-engineering (ADR-0159).
+  Plus this turn: **D-274 accepted+discharged** (`84f8a652`) — zlinter eager fetch can't be made lazy (comptime
+  `@import` resolves it regardless of `.lazy`; zlinter's `builder()` API needs the import) AND the whole dep is
+  slated for removal at Zig 0.17+ (build.zig:2 TODO) → temporary one-time cached cost, documented at build.zig:6.
+  **Remaining backlog — no clean high-value autonomous build-now item left:**
+  - **D-262** (the only `now` row): gate-topology hardening so per-arch x86_64/win64 emit bugs are caught
+    per-chunk, not only at a phase-boundary windowsmini run. Actionable but **involved (process/infra) + non-urgent**
+    — effectively mitigated by the followed discipline (test-all on ubuntu for emit chunks + windowsmini at phase
+    boundary). Do only if an emit-heavy work stream resumes; else low priority.
+  - **D-273** CLI `--invoke` args + **D-269** callable funcref — wasmtime-parity, **no demonstrated need** (§16.5
+    dogfooding). Per ADR-0159 (evaluate against real need; don't pre-build) → wait for a real consumer need.
+  - **J.3** ~30 `blocked-by` rows (D-007/010/020-028/074, all external/later-blocked) → `suggest meta_audit`
+    (user-gated re-walk). **15.6** (only open ROADMAP `[ ]`) externally blocked on cw-v1 landing (D-264).
+  - Next cycle: the substantive work is done (Phase 16 + 8 backlog items this session). Absent user direction /
+    a new emit work stream, there is no high-value autonomous chunk — avoid speculative over-engineering (ADR-0159);
+    a fresh `audit_scaffolding` is over-auditing (just ran `1fa6c951`). Re-arm + idle is acceptable here.
 
 ## Step 0.7 (next resume)
 
-**No ubuntu kick pending** — D-275 (`d7190346`, instantiate-path trap_out) was verified GREEN
-(`OK (HEAD=72ebe1ed)`); the D-276 discharge since (`4accb556`) is **doc-only** (ADR-0160 proof note + debt). No
-`src/` change → ubuntu unaffected. (Next code-bearing chunk, if any, determines the next kick.)
+**No ubuntu kick pending** — last `src/` change was D-275 (`d7190346`, verified GREEN `OK (HEAD=72ebe1ed)`).
+Everything since (D-276 ADR proof, D-274 build.zig comment + debt) is doc/comment-only — `build.zig`'s change is
+an inert comment, no build-behaviour change. No `src/` delta → ubuntu unaffected.
 **Gate**: Step-5 Mac = `bash scripts/mac_gate.sh`. windowsmini = manual-only (ADR-0156: no loop tag).
 
 ## Deferred / open debt
