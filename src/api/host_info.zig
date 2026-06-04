@@ -21,9 +21,10 @@ const handles = @import("handles.zig");
 const zir = @import("../ir/zir.zig");
 const instance = @import("instance.zig");
 const trap_surface = @import("trap_surface.zig");
-// test-only: exercise finalizer-fires-on-delete via a standalone object.
+// test-only: exercise finalizer-fires-on-delete via standalone/real objects.
 const extern_new = @import("extern_new.zig");
 const types = @import("types.zig");
+const vec = @import("vec.zig");
 
 const Finalizer = ?*const fn (?*anyopaque) callconv(.c) void;
 
@@ -126,6 +127,16 @@ pub export fn wasm_trap_set_host_info_with_finalizer(h: ?*trap_surface.Trap, inf
     setHostInfoFin(trap_surface.Trap, h, info, fin);
 }
 
+pub export fn wasm_instance_get_host_info(h: ?*const instance.Instance) callconv(.c) ?*anyopaque {
+    return getHostInfo(instance.Instance, h);
+}
+pub export fn wasm_instance_set_host_info(h: ?*instance.Instance, info: ?*anyopaque) callconv(.c) void {
+    setHostInfo(instance.Instance, h, info);
+}
+pub export fn wasm_instance_set_host_info_with_finalizer(h: ?*instance.Instance, info: ?*anyopaque, fin: Finalizer) callconv(.c) void {
+    setHostInfoFin(instance.Instance, h, info, fin);
+}
+
 test "host_info trio: get/set/set_with_finalizer across all 6 handle types + null discipline" {
     var marker: u8 = 0;
     const fin = struct {
@@ -194,5 +205,27 @@ test "host_info finalizer fires on delete (standalone memory)" {
     var fired = false;
     wasm_memory_set_host_info_with_finalizer(mem, &fired, markFired);
     instance.wasm_memory_delete(mem);
+    try testing.expect(fired);
+}
+
+test "host_info on instance: get/set + finalizer fires on wasm_instance_delete" {
+    const e = instance.wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer instance.wasm_engine_delete(e);
+    const s = instance.wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer instance.wasm_store_delete(s);
+    var bytes = [_]u8{ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 }; // (module)
+    const bv: vec.ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = instance.wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer instance.wasm_module_delete(m);
+    const inst = instance.wasm_instance_new(s, m, null, null) orelse return error.InstanceAllocFailed;
+
+    var marker: u8 = 0;
+    try testing.expect(wasm_instance_get_host_info(inst) == null);
+    wasm_instance_set_host_info(inst, &marker);
+    try testing.expectEqual(@as(?*anyopaque, @ptrCast(&marker)), wasm_instance_get_host_info(inst));
+
+    var fired = false;
+    wasm_instance_set_host_info_with_finalizer(inst, &fired, markFired);
+    instance.wasm_instance_delete(inst); // fires the finalizer
     try testing.expect(fired);
 }

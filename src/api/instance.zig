@@ -791,6 +791,7 @@ fn removeFromLiveInstances(store: *Store, inst: *Instance) void {
 /// Null-tolerant.
 pub export fn wasm_instance_delete(i: ?*Instance) callconv(.c) void {
     const handle = i orelse return;
+    if (handle.host_info_finalizer) |fin| fin(handle.host_info);
     const store = handle.store orelse return;
     const alloc = storeAllocator(store) orelse return;
     // D-174: drop the live-instance registry entry before parking +

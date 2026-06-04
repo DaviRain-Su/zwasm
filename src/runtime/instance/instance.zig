@@ -94,6 +94,14 @@ pub const Instance = struct {
     /// only flattens the sig + finality; the supertype chain + nested concrete
     /// refs need the whole `Types`. Null when the module has no type section.
     export_src_types: ?sections.Types = null,
+    /// C-API host_info slot (wasm.h `WASM_DECLARE_REF_BASE`): an opaque pointer
+    /// + finalizer the Zone-3 binding attaches via `wasm_instance_set_host_info`;
+    /// the runtime never reads it (fired in `wasm_instance_delete`, Zone 3).
+    /// Lives on this runtime struct because the C-API uses it directly (no
+    /// Zone-3 Instance wrapper); both field types are builtin pointers, so this
+    /// stays import-free — no Zone-1→Zone-3 dependency.
+    host_info: ?*anyopaque = null,
+    host_info_finalizer: ?*const fn (?*anyopaque) callconv(.c) void = null,
 };
 
 /// Structural type of an exported entity. Mirrors the four
