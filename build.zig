@@ -3,6 +3,15 @@ const std = @import("std");
 // builtin + -fdeprecated flag (ziglang/zig#22822, accepted on
 // urgent milestone, expected 0.17+). Tracked in
 // .dev/proposal_watch.md.
+//
+// D-274 (accepted): this top-level comptime `@import` makes zlinter an
+// EAGER dependency — a library consumer pulling zwasm transitively fetches
+// the lint tool. `.lazy = true` cannot fix it (the unconditional comptime
+// `@import` resolves zlinter regardless of the lazy flag, and zlinter's
+// `builder()` build-helper API is only reachable via this `@import`, not via
+// `b.lazyDependency`). The eager fetch is a one-time cached cost that
+// dissolves entirely when this dep is dropped at Zig 0.17+ (the TODO above),
+// so the lazy restructuring is not worth it.
 const zlinter = @import("zlinter");
 
 pub fn build(b: *std.Build) void {
