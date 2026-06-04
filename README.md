@@ -109,8 +109,10 @@ Surface: `Engine` / `Module` / `Instance` / `Linker` (host imports via
 (external path-dep consumer) and [`examples/zig_host/`](examples/zig_host/).
 
 **C** (wasm-c-api) — [`include/wasm.h`](include/wasm.h) is byte-identical
-to the upstream standard (the interface wasmtime/wasmer follow), plus
-`wasi.h` + `zwasm.h` extensions. See [`examples/c_host/`](examples/c_host/).
+to the upstream standard (the interface wasmtime/wasmer follow); WASI
+host-setup is the hand-authored [`include/wasi.h`](include/wasi.h). See
+[`examples/c_host/`](examples/c_host/) and
+[`docs/reference/c_api.md`](docs/reference/c_api.md).
 
 ## Build flags
 
@@ -161,10 +163,16 @@ bench/       benchmark history (append-only)
 private/     gitignored agent scratch
 ```
 
+## Documentation
+
+- [`docs/tutorial.md`](docs/tutorial.md) — getting started (build, run, embed)
+- [`docs/reference/`](docs/reference/) — API reference:
+  [Zig](docs/reference/zig_api.md) · [C](docs/reference/c_api.md) · [CLI](docs/reference/cli.md)
+- [`docs/migration_v1_to_v2.md`](docs/migration_v1_to_v2.md) — v1 → v2 migration
+- [`CHANGELOG.md`](CHANGELOG.md) — release notes
+
 ## References
 
-- [`CHANGELOG.md`](CHANGELOG.md) — release notes
-- [`docs/migration_v1_to_v2.md`](docs/migration_v1_to_v2.md) — v1 → v2 migration
 - [`.dev/ROADMAP.md`](.dev/ROADMAP.md) — mission, principles, phase plan
 - [`.dev/decisions/`](.dev/decisions/) — ADRs (deviations from ROADMAP)
 
