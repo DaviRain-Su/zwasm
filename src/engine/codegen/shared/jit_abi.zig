@@ -29,6 +29,7 @@ const code_map = @import("code_map.zig");
 const heap_mod = @import("../../../feature/gc/heap.zig");
 const gc_type_info = @import("../../../feature/gc/type_info.zig");
 const object_alloc = @import("../../../feature/gc/object_alloc.zig");
+const root_scope = @import("../../../feature/gc/root_scope.zig");
 // array.init_data recovers the typeidx from the object header (the immediate
 // can't fit the 6-arg SysV budget); the mark-bit must be masked off first.
 const mark_sweep = @import("../../../feature/gc/collector_mark_sweep.zig");
@@ -499,6 +500,9 @@ pub fn jitGcAlloc(rt: *JitRuntime, typeidx: u32) callconv(.c) u32 {
     const gti: *const gc_type_info.GcTypeInfos = @ptrCast(@alignCast(gti_opaque));
     if (typeidx >= gti.struct_infos.len) return 0;
     const si = gti.struct_infos[typeidx] orelse return 0;
+    // D-258 / ADR-0160 — heap-pressure collect (conservative native-stack
+    // scan) BEFORE the bump, mirroring the interp `struct_ops` guard.
+    root_scope.maybeCollectJit(heap, gti);
     return object_alloc.allocStructObject(heap, typeidx, si.payload_size, true) catch 0;
 }
 
@@ -520,6 +524,9 @@ pub fn jitGcAllocArray(rt: *JitRuntime, typeidx: u32, length: u32) callconv(.c) 
     const gti: *const gc_type_info.GcTypeInfos = @ptrCast(@alignCast(gti_opaque));
     if (typeidx >= gti.array_infos.len) return 0;
     const ai = gti.array_infos[typeidx] orelse return 0;
+    // D-258 / ADR-0160 — heap-pressure collect (conservative native-stack
+    // scan) BEFORE the bump, mirroring the interp `array_ops` guard.
+    root_scope.maybeCollectJit(heap, gti);
     return object_alloc.allocArrayObject(heap, typeidx, length, ai.element.size, true) catch 0;
 }
 

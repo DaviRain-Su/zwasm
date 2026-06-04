@@ -110,6 +110,35 @@ pub fn maybeCollect(
     heap.noteCollected();
 }
 
+/// Wasm spec §4.5 (GC reclamation) — JIT-path heap-pressure collect
+/// (ADR-0160 / D-258). Unlike `maybeCollect`, NO `*Runtime` is bound:
+/// GC-on-JIT runs pure-JIT (no interp↔JIT bridging; ADR-0128 §22), so a
+/// precise Runtime-buffer root walk would be empty. Every live GcRef is
+/// instead on the native stack at the trampoline CALL (caller-saved
+/// spilled pre-call; callee-saved saved in the `callconv(.c)` trampoline
+/// frame), so the conservative scan finds them all. Drives the collector
+/// directly (RootScope's value-add — rt + extra-roots — is absent here).
+/// Correctness of the conservative-only model is pinned by D-261.
+pub fn maybeCollectJit(
+    heap: *heap_mod.Heap,
+    gti: *const type_info_mod.GcTypeInfos,
+) void {
+    if (!heap.shouldCollect()) return;
+    var coll = ms_mod.MarkSweepCollector.init(heap, gti);
+    coll.scan_native_stack = true; // conservative-only; no bindRuntime (ADR-0160)
+    const c = coll.collector();
+    c.walkRoots(markCallbackJit, @ptrCast(&coll));
+    c.collect();
+    heap.noteCollected();
+}
+
+/// Mark callback for the JIT collect path: the ctx IS the
+/// `*MarkSweepCollector` (no RootScope indirection).
+fn markCallbackJit(ctx: *anyopaque, ref: GcRef) void {
+    const ms: *ms_for_callback.MarkSweepCollector = @ptrCast(@alignCast(ctx));
+    ms.markFromRoot(ref);
+}
+
 /// Mark callback used by walkRoots + extra-root iteration.
 /// The ctx is a *RootScope; we forward to the collector's
 /// markFromRoot via a downcast to MarkSweepCollector (the

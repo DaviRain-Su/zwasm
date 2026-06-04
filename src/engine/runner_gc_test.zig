@@ -19,6 +19,7 @@ const runF32Export = runner.runF32Export;
 const JitInstance = runner.JitInstance;
 
 const entry = @import("codegen/shared/entry.zig");
+const heap_mod = @import("../feature/gc/heap.zig");
 
 // ============================================================
 // 10.G GC-on-JIT — i31 op family e2e (ref.i31 / i31.get_s /
@@ -1496,4 +1497,37 @@ test "runI32Export: call_indirect $t1 on a $t1 funcref returns 7 — D-235 exact
         0x00, 0x41, 0x00, 0x11, 0x00, 0x00, 0x0b,
     };
     try testing.expectEqual(@as(u32, 7), runI32Export(testing.allocator, &bytes, "f"));
+}
+
+// ============================================================
+// §16.6 GC-on-JIT memory safety (D-258 + D-261; ADR-0160).
+// ============================================================
+
+// Shared fixture: (module (type (struct (field (mut i32))))
+//   (func (export "f") (result i32) struct.new_default 0  ref.is_null))
+// One JIT struct allocation; `f` returns 0 (fresh struct is non-null).
+const gc_struct_new_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x09, 0x02, 0x5f, 0x01, 0x7f, 0x01, 0x60,
+    0x00, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x01, 0x07,
+    0x05, 0x01, 0x01, 0x66, 0x00, 0x00, 0x0a, 0x08,
+    0x01, 0x06, 0x00, 0xfb, 0x01, 0x00, 0xd1, 0x0b,
+};
+
+test "D-258: JIT struct.new triggers a GC collection under heap pressure (ADR-0160)" {
+    var inst = try JitInstance.init(testing.allocator, &gc_struct_new_wasm);
+    defer inst.deinit(testing.allocator);
+
+    // The struct type section materialises the per-instance GC heap.
+    const heap: *heap_mod.Heap = @ptrCast(@alignCast(inst.owned.rt.gc_heap.?));
+    // Arm collection to fire on the very next allocation: the JIT alloc
+    // trampoline must check pressure + collect BEFORE bumping the cursor.
+    heap.pressure_bytes = 16;
+    heap.next_gc_at = heap.cursor;
+
+    _ = try inst.invoke(testing.allocator, "f", &.{});
+
+    // Before D-258 the JIT trampoline called object_alloc directly →
+    // gc_cycles stays 0 (RED). After wiring maybeCollectJit → >0 (GREEN).
+    try testing.expect(heap.gc_cycles > 0);
 }
