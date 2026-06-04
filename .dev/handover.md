@@ -92,12 +92,14 @@ windowsmini (remote Windows SSH) to verify `test-all` deterministic-green; lesso
 
 ## Step 0.7 (next resume)
 
-This turn: analyzed the windowsmini result. **§15.5 chunk 1 (`510ffce9`) = D-245 win64 crash FIXED + VALIDATED**
-(2339/2441 win64 tests pass, no SEGV; ubuntu+Mac green) — **do NOT revert**. The 3 win64 test-all failures are
-**D-260** (pre-existing x86_64 SIMD emit bugs in q15mulr/extadd_pairwise, exposed by D-246 — NOT a `510ffce9`
-regression). Filed D-260 + lesson `cross-compile-is-not-cross-run`. DOCS only after the analysis → no new kick
-(`510ffce9` already 3-host-tested). **NOTE** (lesson `gate-tail-vs-exit-code`): benign `failed command:
-…--listen=-` / SlotOverflow / `arm64/emit: failing op` next to a passing run = error-path noise — EXIT authoritative.
+This turn: **D-260 FIXED `3a778080`** — q15mulr x86_64 saturation (PMULHRSW + XOR-flip the a==b==-32768 lanes) +
+extadd_pairwise_i8x16_s dst==src aliasing (build the +1 mask in scratch). clang-byte-verified, golden tests
+updated, Debug/lint/cross-compile green. **CODE changed → kicked ubuntu `test-all` (NOT narrow `test` — D-260
+lesson!) + windowsmini `test-all`**; next resume verifies BOTH `/tmp/ubuntu.log` + `/tmp/windows.log` — these are
+the x86_64+win64 RUNTIME oracles for the SIMD fix. If both green → §15.5 EXIT MET (D-245 + D-260 both fixed,
+test-all 3-host green) → close §15.5. Red → iterate the x86_64 recipe. (`510ffce9` D-245 already validated; do
+NOT revert it.) **NOTE** (lesson `gate-tail-vs-exit-code`): benign `failed command: …--listen=-` / SlotOverflow /
+`arm64/emit: failing op` next to a passing run = error-path noise — EXIT authoritative.
 
 **Gate hygiene**: Step-5 Mac = `bash scripts/mac_gate.sh`. Win64 cross-compile = `zig build test
 -Dtarget=x86_64-windows-gnu`. windowsmini exec = `run_remote_windows.sh` (phase boundary).
