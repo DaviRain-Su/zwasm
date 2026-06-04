@@ -17,6 +17,7 @@ const inst = @import("inst.zig");
 const inst_fp = @import("inst_fp.zig");
 const prologue = @import("prologue.zig");
 const regalloc = @import("../shared/regalloc.zig");
+const liveness = @import("../../../ir/analysis/liveness.zig");
 const emit = @import("emit.zig");
 
 const ZirFunc = zir.ZirFunc;
@@ -122,6 +123,12 @@ test "compile: unsupported op surfaces UnsupportedOp" {
 }
 
 test "compile: 1 local — prologue includes SUB SP,SP,#16; epilogue ADD SP,SP,#16" {
+    // ADR-0155 stage 1: the declared i32 local is REGISTER-HOMED. The prologue
+    // still zero-inits its stack slot (STR XZR) + seeds the home register from
+    // it (LDR W); `local.set`/`local.get` become reg→reg MOVs (no STR/LDR to the
+    // slot). Driven through the real liveness+regalloc pipeline so the alloc is
+    // consistent with the appended pseudo-vreg (the hand-built alloc the
+    // pre-homing test used is incompatible). Frame still has the local slot.
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
     const locals = [_]zir.ValType{.i32};
     var f = ZirFunc.init(0, sig, &locals);
@@ -130,33 +137,30 @@ test "compile: 1 local — prologue includes SUB SP,SP,#16; epilogue ADD SP,SP,#
     try f.instrs.append(testing.allocator, .{ .op = .@"local.set", .payload = 0 });
     try f.instrs.append(testing.allocator, .{ .op = .@"local.get", .payload = 0 });
     try f.instrs.append(testing.allocator, .{ .op = .end });
-    f.liveness = .{ .ranges = &[_]zir.LiveRange{
-        .{ .def_pc = 0, .last_use_pc = 1 },
-        .{ .def_pc = 2, .last_use_pc = 3 },
-    } };
-    const slots = [_]u16{ 0, 0 };
-    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    f.liveness = try liveness.compute(testing.allocator, &f, &.{}, &.{});
+    defer if (f.liveness) |lv| liveness.deinit(testing.allocator, lv);
+    const alloc = try regalloc.compute(testing.allocator, &f);
+    defer regalloc.deinit(testing.allocator, alloc);
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
     defer deinit(testing.allocator, out);
 
-    // Stream: STP / MOV-FP / SUB-SP-#16 / STR XZR [SP,#0] (local zero-init) /
-    //         MOVZ W9 #7 / STR W9 [SP,#0] / LDR W9 [SP,#0] / MOV X0 X9 /
-    //         ADD-SP-#16 / LDP / RET = 11 u32s = 44 bytes (+ prologue header).
-    try testing.expectEqual(@as(usize, 120), out.bytes.len);
     const body0 = prologue.body_start_offset(true);
-    // SUB SP at the last prologue word (body0 - 4).
+    // SUB SP at the last prologue word (body0 - 4); 16-byte frame for the local.
     try testing.expectEqual(@as(u32, inst.encSubImm12(31, 31, 16)), std.mem.readInt(u32, out.bytes[body0 - 4 ..][0..4], .little));
-    // STR XZR [SP, #0] (local zero-init) at body+0.
+    // STR XZR [SP, #0] (local zero-init) at body+0 — unchanged by homing.
     try testing.expectEqual(@as(u32, inst.encStrImm(31, 31, 0)), std.mem.readInt(u32, out.bytes[body0..][0..4], .little));
-    // STR W9 [SP,#0] at body+8 (after MOVZ at body+4).
-    try testing.expectEqual(@as(u32, inst.encStrImmW(9, 31, 0)), std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
-    // LDR W9 [SP,#0] at body+12.
-    try testing.expectEqual(@as(u32, inst.encLdrImmW(9, 31, 0)), std.mem.readInt(u32, out.bytes[body0 + 12 ..][0..4], .little));
-    // ADD SP at body+20 (epilogue first word).
-    try testing.expectEqual(@as(u32, inst.encAddImm12(31, 31, 16)), std.mem.readInt(u32, out.bytes[body0 + 20 ..][0..4], .little));
+    // body+4 = LDR W X9, [SP,#0] (seed home reg from the zero-inited slot) —
+    // the homing prologue load. Home reg = allocatable_gprs[0] = X9. The slot
+    // is dormant thereafter (set/get are reg→reg MOVs).
+    try testing.expectEqual(@as(u32, inst.encLdrImmW(9, 31, 0)), std.mem.readInt(u32, out.bytes[body0 + 4 ..][0..4], .little));
 }
 
 test "compile: 3 locals — frame rounds up to 32 bytes (3*8=24 → align to 32)" {
+    // ADR-0155 stage 1: the 3 declared i32 locals are register-homed, but their
+    // stack slots still exist + are zero-inited in the prologue (the frame size
+    // is unchanged). Driven through the real pipeline. local.set 2 / local.get 2
+    // are now reg→reg MOVs (not STR/LDR to slot 2), so the body is shorter; the
+    // assertions check the frame + the per-local zero-init STRs (still present).
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
     const locals = [_]zir.ValType{ .i32, .i32, .i32 };
     var f = ZirFunc.init(0, sig, &locals);
@@ -165,28 +169,32 @@ test "compile: 3 locals — frame rounds up to 32 bytes (3*8=24 → align to 32)
     try f.instrs.append(testing.allocator, .{ .op = .@"local.set", .payload = 2 });
     try f.instrs.append(testing.allocator, .{ .op = .@"local.get", .payload = 2 });
     try f.instrs.append(testing.allocator, .{ .op = .end });
-    f.liveness = .{ .ranges = &[_]zir.LiveRange{
-        .{ .def_pc = 0, .last_use_pc = 1 },
-        .{ .def_pc = 2, .last_use_pc = 3 },
-    } };
-    const slots = [_]u16{ 0, 0 };
-    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    f.liveness = try liveness.compute(testing.allocator, &f, &.{}, &.{});
+    defer if (f.liveness) |lv| liveness.deinit(testing.allocator, lv);
+    const alloc = try regalloc.compute(testing.allocator, &f);
+    defer regalloc.deinit(testing.allocator, alloc);
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
     defer deinit(testing.allocator, out);
     const body0 = prologue.body_start_offset(true);
-    // SUB SP, SP, #32 (3*8=24 → aligned 32) at body0 - 4.
+    // SUB SP, SP, #32 (3*8=24 → aligned 32) at body0 - 4 — frame unchanged.
     try testing.expectEqual(@as(u32, inst.encSubImm12(31, 31, 32)), std.mem.readInt(u32, out.bytes[body0 - 4 ..][0..4], .little));
-    // 3 STR XZR at body+0, +4, +8 (local zero-init for slots 0,1,2).
+    // 3 STR XZR at body+0, +4, +8 (local zero-init for slots 0,1,2) — unchanged.
     try testing.expectEqual(@as(u32, inst.encStrImm(31, 31, 0)), std.mem.readInt(u32, out.bytes[body0..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encStrImm(31, 31, 8)), std.mem.readInt(u32, out.bytes[body0 + 4 ..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encStrImm(31, 31, 16)), std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
-    // local.set 2 → STR at offset 2*8=16 at body+16 (after MOVZ at body+12).
-    try testing.expectEqual(@as(u32, inst.encStrImmW(9, 31, 16)), std.mem.readInt(u32, out.bytes[body0 + 16 ..][0..4], .little));
-    // local.get 2 → LDR at body+20.
-    try testing.expectEqual(@as(u32, inst.encLdrImmW(9, 31, 16)), std.mem.readInt(u32, out.bytes[body0 + 20 ..][0..4], .little));
+    // body+12,+16,+20 = the 3 homing prologue LDR W (seed home regs X9/X10/X11
+    // from slots 0/8/16). local 2 (the set/get target) homes to slot 2 = X11.
+    try testing.expectEqual(@as(u32, inst.encLdrImmW(9, 31, 0)), std.mem.readInt(u32, out.bytes[body0 + 12 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst.encLdrImmW(10, 31, 8)), std.mem.readInt(u32, out.bytes[body0 + 16 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst.encLdrImmW(11, 31, 16)), std.mem.readInt(u32, out.bytes[body0 + 20 ..][0..4], .little));
 }
 
 test "compile: local.tee writes to local but keeps value pushed" {
+    // ADR-0155 stage 1: the declared i32 local is register-homed. `local.tee 0`
+    // MOVs the (peeked) value into the home register and leaves it on the
+    // operand stack — the slot is no longer written. Driven through the real
+    // pipeline; we assert the local zero-init + prologue home-seed are present
+    // and the local.tee does NOT emit an STR-to-slot (homed = reg→reg).
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
     const locals = [_]zir.ValType{.i32};
     var f = ZirFunc.init(0, sig, &locals);
@@ -195,24 +203,26 @@ test "compile: local.tee writes to local but keeps value pushed" {
     try f.instrs.append(testing.allocator, .{ .op = .@"local.tee", .payload = 0 });
     // After tee, vreg0 still on stack. end consumes it.
     try f.instrs.append(testing.allocator, .{ .op = .end });
-    f.liveness = .{ .ranges = &[_]zir.LiveRange{
-        .{ .def_pc = 0, .last_use_pc = 2 },
-    } };
-    const slots = [_]u16{0};
-    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
+    f.liveness = try liveness.compute(testing.allocator, &f, &.{}, &.{});
+    defer if (f.liveness) |lv| liveness.deinit(testing.allocator, lv);
+    const alloc = try regalloc.compute(testing.allocator, &f);
+    defer regalloc.deinit(testing.allocator, alloc);
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
     defer deinit(testing.allocator, out);
-    // Stream: STP / MOV-FP / SUB-SP / STR XZR [SP,#0] (local zero-init) /
-    //         MOVZ W9 #42 / STR W9 [SP,#0] / MOV X0 X9 / ADD-SP / LDP /
-    //         RET = 10 u32s = 40 bytes (+ prologue header).
-    try testing.expectEqual(@as(usize, 116), out.bytes.len);
     const body0 = prologue.body_start_offset(true);
-    // STR XZR (zero-init) at body+0.
+    // STR XZR (zero-init) at body+0 — unchanged.
     try testing.expectEqual(@as(u32, inst.encStrImm(31, 31, 0)), std.mem.readInt(u32, out.bytes[body0..][0..4], .little));
-    // STR (the tee) at body+8 (after MOVZ at body+4).
-    try testing.expectEqual(@as(u32, inst.encStrImmW(9, 31, 0)), std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
-    // MOV X0, X9 (kept value, then end consumes it) at body+12.
-    try testing.expectEqual(@as(u32, 0xAA0903E0), std.mem.readInt(u32, out.bytes[body0 + 12 ..][0..4], .little));
+    // body+4 = LDR W X9, [SP,#0] (homing prologue seed of the home reg).
+    try testing.expectEqual(@as(u32, inst.encLdrImmW(9, 31, 0)), std.mem.readInt(u32, out.bytes[body0 + 4 ..][0..4], .little));
+    // No STR-to-slot for the tee: assert the slot-0 store (encStrImmW(_,31,0))
+    // appears ONLY once (the zero-init at body+0), not again for the tee.
+    var slot0_stores: usize = 0;
+    var i: usize = body0;
+    while (i + 4 <= out.bytes.len) : (i += 4) {
+        const w = std.mem.readInt(u32, out.bytes[i..][0..4], .little);
+        if (w == inst.encStrImmW(9, 31, 0)) slot0_stores += 1;
+    }
+    try testing.expectEqual(@as(usize, 0), slot0_stores);
 }
 
 test "compile: i64.const small value emits single MOVZ" {

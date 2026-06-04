@@ -12,6 +12,7 @@ const std = @import("std");
 const zir = @import("../../../ir/zir.zig");
 const regalloc = @import("regalloc.zig");
 const shape_tags_mod = @import("regalloc_shape_tags.zig");
+const local_homing = @import("../../../ir/analysis/local_homing.zig");
 
 const Allocator = std.mem.Allocator;
 const ZirFunc = zir.ZirFunc;
@@ -203,7 +204,34 @@ pub fn computeWith(
     var free_buf: [@as(usize, max_slots) + 1]u16 = undefined;
     var free_len: u16 = 0;
 
+    // ADR-0155 stage 1 — register-homed locals. liveness APPENDED K
+    // function-spanning pseudo-vregs (the last K vregs). PRIORITISE them onto
+    // the low register slots 0..K-1 BEFORE the greedy temporary scan so they
+    // stay register-resident despite their high vreg ids. Pre-seed the active
+    // list with their spanning ranges (last_use_pc = function end) so the
+    // reclaim test never frees those slots for any temporary; the greedy scan
+    // then mints temporaries starting at slot K. The pseudo-vreg's own
+    // iteration step (vreg id >= homed_base) assigns its reserved slot.
+    const homing = local_homing.plan(func);
+    const homed_count: u16 = @intCast(homing.count);
+    const homed_base: usize = live.ranges.len - @as(usize, homed_count); // first pseudo-vreg id
+    if (homed_count > 0) {
+        const last_pc: u32 = if (func.instrs.items.len > 0) @intCast(func.instrs.items.len - 1) else 0;
+        var s: u16 = 0;
+        while (s < homed_count) : (s += 1) {
+            active_buf[active_len] = .{ .slot = s, .last_use_pc = last_pc };
+            active_len += 1;
+        }
+        n_slots = homed_count;
+    }
+
     for (live.ranges, 0..) |r, vreg| {
+        // Homed pseudo-vreg: take its pre-reserved low slot (rank = id offset
+        // from homed_base). Already in the active list from the pre-seed.
+        if (homed_count > 0 and vreg >= homed_base) {
+            slots[vreg] = @intCast(vreg - homed_base);
+            continue;
+        }
         var i: u16 = 0;
         while (i < active_len) {
             if (active_buf[i].last_use_pc <= r.def_pc) {

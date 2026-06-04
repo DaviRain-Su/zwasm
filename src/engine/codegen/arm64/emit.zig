@@ -44,6 +44,7 @@ const builtin = @import("builtin");
 
 const zir = @import("../../../ir/zir.zig");
 const sections = @import("../../../parse/sections.zig");
+const local_homing = @import("../../../ir/analysis/local_homing.zig");
 const dispatch_collector = @import("../dispatch_collector.zig");
 const inst = @import("inst.zig");
 const inst_fp = @import("inst_fp.zig");
@@ -231,6 +232,17 @@ pub fn compile(
     var layout = try computeLocalLayout(allocator, func);
     defer layout.deinit(allocator);
     const locals_bytes: u32 = layout.total_bytes;
+    // ADR-0155 stage 1 — register-homed locals. liveness APPENDED `homing.count`
+    // function-spanning pseudo-vregs (the highest vreg ids); their numbering is
+    // `n_temp + rank` where `n_temp` = temporary-vreg count = slots.len - count.
+    // A homed `local.get` reads the home register into a fresh temporary (MOV,
+    // not LDR-from-slot); a homed `local.set`/`tee` MOVs a temporary into the
+    // home register. The value crosses the loop back-edge in-register (D-265
+    // win). `local.get`/`local.set` still mint/consume temporary vregs exactly
+    // as the un-homed path, so emit's `next_vreg` stays in lockstep with
+    // liveness (the spike's numbering-divergence bug is avoided by fix A).
+    const homing = local_homing.plan(func);
+    const n_temp: u32 = @intCast(alloc.slots.len - homing.count);
     // ADR-0018: extend frame by spill region. Layout:
     //   [SP + 0 .. locals_bytes-1]                   locals
     //   [SP + locals_bytes .. +spill_bytes-1]        spills
@@ -549,6 +561,35 @@ pub fn compile(
             if (loc_off_u > 32760) return Error.UnsupportedOp;
             const loc_off: u15 = @intCast(loc_off_u);
             try gpr.writeU32(allocator, &buf, inst.encStrImm(31, 31, loc_off));
+        }
+    }
+
+    // ADR-0155 stage 1 — prologue-load each register-homed local's initial
+    // value from its stack slot into its pinned home register. The slot already
+    // holds the correct initial value (param marshalled above, or zero-inited
+    // for declared locals), so a single LDR seeds the register. From here the
+    // slot is dormant; the register is the home (local.get/set are reg ops).
+    // Width: i32 → LDR W (low 32, zero-extended), i64 → LDR X.
+    if (homing.count > 0) {
+        var hr: u32 = 0;
+        while (hr < homing.count) : (hr += 1) {
+            const lidx = homing.local_idx[hr];
+            const home_vreg = n_temp + hr;
+            const xd = try gpr.gprDefSpilled(alloc, home_vreg, 0);
+            const off_u: u32 = local_base_off + layout.offsets[lidx];
+            const ty = localValType(func, num_params, lidx);
+            switch (ty) {
+                .i32 => {
+                    if (off_u > 16380) return Error.UnsupportedOp;
+                    try gpr.writeU32(allocator, &buf, inst.encLdrImmW(xd, 31, @intCast(off_u)));
+                },
+                .i64 => {
+                    if (off_u > 32760) return Error.UnsupportedOp;
+                    try gpr.writeU32(allocator, &buf, inst.encLdrImm(xd, 31, @intCast(off_u)));
+                },
+                // local_homing.isHomeableType only returns true for i32/i64.
+                .f32, .f64, .v128, .ref => unreachable,
+            }
         }
     }
 
@@ -931,6 +972,23 @@ pub fn compile(
                     std.debug.print("arm64/emit: local.get SlotOverflow func[{d}] vreg={d} >= slots.len={d} local_idx={d}\n", .{ func.func_idx, vreg, alloc.slots.len, local_idx });
                     return Error.SlotOverflow;
                 }
+                // ADR-0155 stage 1 — register-homed local: read the home
+                // register into the fresh temporary via reg→reg MOV (no
+                // LDR-from-slot). The fresh temp insulates this value from a
+                // later local.set $same (which rewrites the home register) —
+                // hazard-free, and keeps `next_vreg` in lockstep with liveness.
+                if (homing.pseudoVreg(local_idx, n_temp)) |home_vreg| {
+                    const rs = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, home_vreg, 0);
+                    const rd = try gpr.gprDefSpilled(alloc, vreg, 1);
+                    // MOV Xd, Xs (= ORR Xd, XZR(31), Xs). i32/i64 share the
+                    // X-form; an i32 home holds a zero-extended value (LDR W at
+                    // prologue + W-form set MOV below), so the full X copy is
+                    // correct.
+                    try gpr.writeU32(allocator, &buf, inst.encOrrReg(rd, 31, rs));
+                    try gpr.gprStoreSpilled(allocator, &buf, alloc, ctx.spill_base_off, vreg, 1);
+                    try pushed_vregs.append(allocator, vreg);
+                    continue;
+                }
                 switch (ty) {
                     .i32 => {
                         const rd = try gpr.gprDefSpilled(alloc, vreg, 0);
@@ -986,6 +1044,20 @@ pub fn compile(
                 const offset_x: u15 = if (ty == .i64 or ty == .f64 or ty == .ref) @intCast(offset_u) else 0;
                 const offset_q: u16 = if (ty == .v128) @intCast(offset_u) else 0;
                 const src = pushed_vregs.pop().?;
+                // ADR-0155 stage 1 — register-homed local: MOV the popped src
+                // into the home register (reg→reg, no STR-to-slot). i32 uses the
+                // W-form MOV so the home stays zero-extended; i64 the X-form.
+                if (homing.pseudoVreg(local_idx, n_temp)) |home_vreg| {
+                    const rs = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, src, 0);
+                    const rd = try gpr.gprDefSpilled(alloc, home_vreg, 1);
+                    if (ty == .i32) {
+                        try gpr.writeU32(allocator, &buf, inst.encOrrRegW(rd, 31, rs));
+                    } else {
+                        try gpr.writeU32(allocator, &buf, inst.encOrrReg(rd, 31, rs));
+                    }
+                    try gpr.gprStoreSpilled(allocator, &buf, alloc, ctx.spill_base_off, home_vreg, 1);
+                    continue;
+                }
                 switch (ty) {
                     .i32 => {
                         const rs = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, src, 0);
@@ -1029,6 +1101,19 @@ pub fn compile(
                 const offset_x: u15 = if (ty == .i64 or ty == .f64 or ty == .ref) @intCast(offset_u) else 0;
                 const offset_q: u16 = if (ty == .v128) @intCast(offset_u) else 0;
                 const src = pushed_vregs.items[pushed_vregs.items.len - 1];
+                // ADR-0155 stage 1 — register-homed local: MOV the (peeked) src
+                // into the home register; the value stays on the operand stack.
+                if (homing.pseudoVreg(local_idx, n_temp)) |home_vreg| {
+                    const rs = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, src, 0);
+                    const rd = try gpr.gprDefSpilled(alloc, home_vreg, 1);
+                    if (ty == .i32) {
+                        try gpr.writeU32(allocator, &buf, inst.encOrrRegW(rd, 31, rs));
+                    } else {
+                        try gpr.writeU32(allocator, &buf, inst.encOrrReg(rd, 31, rs));
+                    }
+                    try gpr.gprStoreSpilled(allocator, &buf, alloc, ctx.spill_base_off, home_vreg, 1);
+                    continue;
+                }
                 switch (ty) {
                     .i32 => {
                         const rs = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, src, 0);
@@ -1784,6 +1869,14 @@ pub fn compile(
             },
         }
     }
+
+    // ADR-0155 stage 1 lockstep guard: every temporary vreg emit mints in the
+    // body walk must stay BELOW the homed pseudo-vreg base `n_temp` (= slots.len
+    // - homing.count), so a temporary never aliases a homed local's register
+    // slot. Emit may mint FEWER than n_temp temporaries (transparent ops like
+    // ref.as_non_null push nothing), so the bound is `<=`, not `==`. A
+    // violation = the liveness↔emit numbering divergence the spike hit.
+    std.debug.assert(next_vreg <= n_temp);
 
     // IT-2 — harvest the per-function EH handler entries into an
     // owned slice; the Builder.entries ArrayList transfers ownership

@@ -57,6 +57,10 @@ const stack_effect_mod = @import("liveness_stack_effect.zig");
 pub const StackEffect = stack_effect_mod.StackEffect;
 pub const stackEffect = stack_effect_mod.stackEffect;
 
+// ADR-0155 (D-265 Phase IV stage 1) — register-homed locals. The homing plan
+// is the single source of truth shared with regalloc + emit.
+const local_homing = @import("local_homing.zig");
+
 fn isControlFlow(op: ZirOp) bool {
     // After sub-7.5c-iv, every Wasm 1.0 control-flow op is
     // handled explicitly in `compute`. The function exists
@@ -557,6 +561,22 @@ pub fn compute(
             if (sim_len == max_simulated_stack) return Error.OperandStackUnderflow;
             sim_stack[sim_len] = vreg;
             sim_len += 1;
+        }
+    }
+
+    // ADR-0155 stage 1 (fix A — APPEND): mint K function-spanning pseudo-vregs
+    // for the register-homed locals AFTER every temporary vreg, so temporary
+    // numbering is unchanged (no block/if/br arithmetic above is touched). Each
+    // pseudo-vreg's range is the whole function (def at prologue=pc 0, last_use
+    // at the final instr) so regalloc never reclaims its slot — it stays
+    // register-resident across the loop back-edge (the D-265 win). Regalloc
+    // prioritises these high-id vregs onto low register slots.
+    const homing = local_homing.plan(func);
+    if (homing.count > 0 and func.instrs.items.len > 0) {
+        const last_pc: u32 = @intCast(func.instrs.items.len - 1);
+        var r: u32 = 0;
+        while (r < homing.count) : (r += 1) {
+            try ranges.append(allocator, .{ .def_pc = 0, .last_use_pc = last_pc });
         }
     }
 
