@@ -1016,9 +1016,11 @@ entries:
       A type accessors (6, no design) · B per-type vec ops (~30, vec.zig generic) · C config (3) ·
       D val_copy/val_delete (2) · E ref-cast/same/copy/host_info (~71 — D-253 territory: uniform ref model
       + per-object host_info; foreign+host_info + funcref cross-cast already done) · F tagtype/EH (12) ·
-      G module serialize/share (5, heaviest — own ADR). ✅A `c3a979fa` ✅B `2116a18b` ✅C+D (config + val
-      POD copy/delete). DISCHARGE = gap count → 0 (run the script); close A–D first (low design), then E via
-      D-253, then F, then G. Bundle `16.2-capi-completion`.
+      G module serialize/share (5, heaviest — own ADR). ✅A `c3a979fa` ✅B `2116a18b` ✅C+D `d77aa704`
+      ✅instance.zig-split `092196b6` (ADR-0157) ✅E1 host_info trio `031e1c40` (func/global/table/memory/ref/
+      extern, 18). **gap 129→76.** Remaining: E2 (host_info module/trap/instance — Instance=Zone decision) +
+      ref-cast/same/copy (~44, ref-model ADR), F, G. DISCHARGE = gap count → 0 (run the script).
+      Bundle `16.2-capi-completion`.
       **E reconcile note (val ref representation)**: zwasm's `wasm_val_t.of.ref` holds the RAW GcRef payload
       (`@ptrFromInt(v.ref)`, see fromRuntimeValue), NOT an owned `wasm_ref_t*` — so val_copy is POD + val_delete
       no-op (consistent w/ val_vec_copy's shallow copy), but this DIVERGES from upstream's owned-handle contract:

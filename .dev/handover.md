@@ -27,28 +27,30 @@
 - **Continuity-memo**: §16.2 audit DONE (`.dev/c_api_surface_audit_2026-06-04.md`, D-269) — our `wasm.h` is
   byte-identical to upstream latest, but standard extern fns were unimplemented (link-error for C
   consumers). wasmtime/wasmer ship 100%; wazero ships none. Decision: implement full standard surface (not
-  wasmtime's ext headers). Live count: `bash scripts/capi_surface_gap.sh` (**gap 94**, was 129).
+  wasmtime's ext headers). Live count: `bash scripts/capi_surface_gap.sh` (**gap 76**, was 129).
   Sequence: ✅A type accessors (6, `c3a979fa`) → ✅B per-type vec ops (24, `2116a18b`, PtrVecOps unify) →
-  ✅C config (3) + ✅D val_copy/delete (2, POD) → ✅instance.zig split (`092196b6`, ADR-0157 → handles.zig,
-  unblocks E) → **E ref-cast/same/copy/host_info (~71, D-253; host_info sub-chunk first)** → F tagtype/EH
-  (12) → G module serialize/share (5, own ADR). A–D DONE; E/F/G design-gated. (extern_vec_copy + tagtype_vec
+  ✅C config (3) + ✅D val_copy/delete (2, POD) → ✅instance.zig split (`092196b6`, ADR-0157 → handles.zig) →
+  ✅E1 host_info trio (18, `031e1c40`, host_info.zig — func/global/table/memory/ref/extern) → **E2 host_info
+  module/trap/instance (9; Instance=Zone decision) + ref-cast/same/copy (~44, ref-model ADR)** → F tagtype/EH
+  (12) → G module serialize/share (5, own ADR). A–E1 DONE; E2/F/G design-gated. (extern_vec_copy + tagtype_vec
   also deferred to E/F: need wasm_extern_copy / TagType.)
 - **Exit-condition**: `capi_surface_gap.sh` gap → 0 (or each residual category has an ADR/debt justifying
   deferral); then close §16.2 [x].
 
 ## NEXT (autonomous — surfaces first, docs last; ADR-0156)
 
-- **✅ instance.zig split DONE** (`092196b6`, ADR-0157, D-270 discharged): handle structs (Func/Global/Table/
-  Memory/Ref/Extern + Val/ValKind/ExternKind + HostFuncPayload) carved into `src/api/handles.zig` (cycle-safe,
-  one-way → runtime); instance.zig 3299→3081, re-export aliases keep `instance.<T>` working. Room for chunk E.
-- **§16.2 chunk E (host_info first; ~27) — NEXT**: now unblocked. Add a `host_info: ?*anyopaque` +
-  `host_info_finalizer` slot to each handle struct in `handles.zig` (mirror `wasm_foreign_*` in
-  `extern_new.zig:409`), then implement `wasm_X_get_host_info` / `_set_host_info` / `_set_host_info_with_finalizer`
-  for func/global/table/memory/extern/instance/module/trap/ref (put accessors in `extern_new.zig` beside the
-  foreign ones, OR a new `host_info.zig`; fire the finalizer in each existing `_delete`). TDD. Then the
-  **ref-cast sub-chunk** (`_as_ref`/`ref_as_X` + `_same`/`_copy`) needing the **uniform `wasm_ref_t` model
-  decision** (likely an ADR — D-253: some casts "degenerate in zwasm's model"); reconcile the val
-  `of.ref`=raw-payload divergence (D-269 note) here. Then F (tagtype/EH — needs `TagType`), G (serialize — own ADR).
+- **✅ instance.zig split** (`092196b6`, ADR-0157) + **✅ chunk E1 host_info** (18 fns: get/set/set_with_finalizer
+  for func/global/table/memory/ref/extern). Added `host_info`+finalizer fields to the 6 handle structs in
+  `handles.zig`; generic accessors in new `src/api/host_info.zig`; finalizer fired in each `wasm_X_delete`
+  (owned externs only — borrowed cache-views don't fire it, folded into the ref-model reconcile). Gap 94→76.
+- **§16.2 chunk E2 (remaining host_info: module/trap/instance; 9 fns) — NEXT**: Module (`instance.zig` extern
+  struct) + Trap (`trap_surface.zig`) get the field+accessors+delete-firing (same pattern, easy). **Instance
+  needs a Zone decision**: `instance.Instance` is a `runtime.Instance` alias (Zone 1) — putting a Zone-3
+  host_info field on it couples zones; alternative = a Zone-3 side-table (`AutoHashMap(*Instance, host_info)`
+  with removal on instance delete). Pick + (if side-table) note rationale. Then the **ref-cast sub-chunk**
+  (`_as_ref`/`ref_as_X` + `_same`/`_copy`) needing the **uniform `wasm_ref_t` model decision** (likely an ADR —
+  D-253: some casts "degenerate in zwasm's model"); reconcile the val `of.ref`=raw-payload divergence (D-269)
+  here. Then F (tagtype/EH — needs `TagType`), G (serialize — own ADR).
 - After §16.2: §16.3 Zig-API review (reconcile D-267, ADR-0025 Revision), §16.4 CLI あるべき論 review,
   §16.5 dogfooding, §16.6 memory-safety (D-258→D-261), §16.7 docs LAST. Chain; pay debt en route.
 
