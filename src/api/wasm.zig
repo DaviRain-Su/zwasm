@@ -298,6 +298,7 @@ pub const wasm_table_new = extern_new.wasm_table_new;
 pub const wasm_func_new = extern_new.wasm_func_new;
 pub const wasm_func_new_with_env = extern_new.wasm_func_new_with_env;
 pub const wasm_ref_copy = extern_new.wasm_ref_copy;
+pub const wasm_ref_delete = instance.wasm_ref_delete;
 pub const wasm_ref_same = extern_new.wasm_ref_same;
 pub const wasm_func_as_ref = extern_new.wasm_func_as_ref;
 pub const wasm_ref_as_func = extern_new.wasm_ref_as_func;

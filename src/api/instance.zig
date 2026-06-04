@@ -901,22 +901,43 @@ pub export fn wasm_func_delete(f: ?*Func) callconv(.c) void {
     alloc.destroy(handle);
 }
 
+/// Context for marshalling a ref-typed `runtime.Value` OUT to a
+/// `wasm_val_t` (D-269B owned-handle model): a ref result's `of.ref`
+/// is an OWNED `wasm_ref_t*` (= `*Ref`), allocated here, freed by the
+/// caller via `wasm_val_delete`/`wasm_ref_delete`. `inst`/`store` are
+/// stored on the `*Ref` so `wasm_ref_delete` recovers this allocator.
+pub const RefMarshalCtx = struct {
+    alloc: std.mem.Allocator,
+    inst: ?*Instance,
+    store: ?*Store,
+};
+
+/// Marshal a `wasm_val_t` IN to a `runtime.Value`. For ref kinds the
+/// `of.ref` is an owned `*Ref` handle (D-269B); read its payload. A
+/// null `of.ref` is the null reference. (The host owns the arg `*Ref`;
+/// we only read it — no free here.)
 pub fn marshalValIn(v: Val) runtime.Value {
     return switch (v.kind) {
         .i32 => .{ .i32 = v.of.i32 },
         .i64 => .{ .i64 = v.of.i64 },
         .f32 => .{ .bits64 = @as(u64, @as(u32, @bitCast(v.of.f32))) },
         .f64 => .{ .bits64 = @bitCast(v.of.f64) },
-        .anyref, .funcref => .{ .ref = if (v.of.ref) |p| @intFromPtr(p) else runtime.Value.null_ref },
+        .anyref, .funcref => .{ .ref = if (v.of.ref) |rp| refPayload(rp) else runtime.Value.null_ref },
     };
 }
 
-pub fn marshalValOut(v: runtime.Value, kind: zir.ValType) Val {
-    // ADR-0123 Cycle 2: ValType pivoted to union(enum). The c_api
-    // wasm_val_t shape distinguishes only funcref vs anyref (plus
-    // i31/struct/array all bucket through `.anyref` per ADR-0115
-    // §6's u32 GcRef encoding); the inner switch maps every
-    // abstract heap head to one of those two c_api shapes.
+fn refPayload(rp: *anyopaque) u64 {
+    const r: *Ref = @ptrCast(@alignCast(rp));
+    return r.ref;
+}
+
+/// Marshal a `runtime.Value` OUT to a `wasm_val_t`. ADR-0123 Cycle 2:
+/// the c_api shape distinguishes only funcref vs anyref (i31/struct/
+/// array bucket through `.anyref`). D-269B: a ref `of.ref` is an OWNED
+/// `*Ref` allocated via `rm` (null payload → null `of.ref`); on OOM or
+/// a missing `rm` the ref degrades to a null `of.ref` (the only failure
+/// channel the POD `wasm_val_t` ABI offers).
+pub fn marshalValOut(v: runtime.Value, kind: zir.ValType, rm: ?RefMarshalCtx) Val {
     return switch (kind) {
         .i32 => .{ .kind = .i32, .of = .{ .i32 = v.i32 } },
         .i64 => .{ .kind = .i64, .of = .{ .i64 = v.i64 } },
@@ -924,17 +945,23 @@ pub fn marshalValOut(v: runtime.Value, kind: zir.ValType) Val {
         .f64 => .{ .kind = .f64, .of = .{ .f64 = @bitCast(v.bits64) } },
         .v128 => .{ .kind = .i64, .of = .{ .i64 = 0 } }, // unreachable for MVP
         .ref => |r| blk: {
-            const ref_ptr: ?*anyopaque = if (v.ref == runtime.Value.null_ref) null else @ptrFromInt(v.ref);
-            // c_api wasm_val_t kinds: only .funcref + .anyref are
-            // distinct. All non-func abstract heads + concrete typed
-            // refs marshal as .anyref (same u32 GcRef encoding).
             const c_kind: ValKind = switch (r.heap_type) {
                 .abstract => |a| if (a == .func) .funcref else .anyref,
                 .concrete => .anyref, // typed-funcref → .funcref shape; struct/array → .anyref shape; collapsed for Tier-1
             };
-            break :blk .{ .kind = c_kind, .of = .{ .ref = ref_ptr } };
+            const of_ref: ?*anyopaque = if (v.ref == runtime.Value.null_ref) null else allocRefHandle(rm, v.ref);
+            break :blk .{ .kind = c_kind, .of = .{ .ref = of_ref } };
         },
     };
+}
+
+/// Allocate an owned `*Ref` wrapping `payload` for a marshalled-out ref
+/// value (D-269B). Null on OOM / absent ctx (the ABI has no error path).
+fn allocRefHandle(rm: ?RefMarshalCtx, payload: u64) ?*anyopaque {
+    const m = rm orelse return null;
+    const r = m.alloc.create(Ref) catch return null;
+    r.* = .{ .instance = m.inst, .store = m.store, .ref = payload };
+    return @ptrCast(r);
 }
 
 /// `HostCall` fn_ptr for a `wasm_func_new` host callback (wired by the
@@ -953,8 +980,24 @@ fn hostFuncThunk(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void {
     defer ca.free(args_data);
     const res_data = ca.alloc(Val, nr) catch return runtime.Trap.Unreachable;
     defer ca.free(res_data);
+    // D-269B: a ref-kind arg is marshalled OUT as an owned `*Ref` that
+    // zwasm lends to the callback and frees after it returns. Recover
+    // the store/allocator from the runtime's owning Instance back-ptr.
+    const cb_inst: ?*Instance = if (rt.instance) |io| @ptrCast(@alignCast(io)) else null;
+    const cb_store: ?*Store = if (cb_inst) |ci| ci.store else null;
+    const cb_rm: ?RefMarshalCtx = if (cb_store) |st|
+        (if (storeAllocator(st)) |al| RefMarshalCtx{ .alloc = al, .inst = cb_inst, .store = st } else null)
+    else
+        null;
     const start: usize = rt.operand_len - np;
-    for (0..p.params.len) |i| args_data[i] = marshalValOut(rt.operand_buf[start + i], p.params[i]);
+    for (0..p.params.len) |i| args_data[i] = marshalValOut(rt.operand_buf[start + i], p.params[i], cb_rm);
+    // Free the lent arg ref handles once the callback returns (kind-guarded
+    // so non-ref `of` union members are never misread as a pointer).
+    defer for (0..p.params.len) |i| {
+        if (args_data[i].kind == .funcref or args_data[i].kind == .anyref) {
+            if (args_data[i].of.ref) |rp| wasm_ref_delete(@ptrCast(@alignCast(rp)));
+        }
+    };
     rt.operand_len = @intCast(start);
     @memset(res_data, .{ .kind = .i32, .of = .{ .i32 = 0 } });
     var args_vec: ValVec = .{ .size = p.params.len, .data = if (p.params.len > 0) args_data.ptr else null };
@@ -964,6 +1007,9 @@ fn hostFuncThunk(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void {
         trap_surface.wasm_trap_delete(tr); // consume the callback's owned trap
         return runtime.Trap.Unreachable; // surface as a guest trap
     }
+    // A ref-kind result's `of.ref` is owned by the callback/host (it may
+    // be a borrowed view, e.g. `wasm_func_as_ref`); read the payload only,
+    // do NOT free here — leak-safe over a double-free of a borrowed view.
     for (0..nr) |i| try rt.pushOperand(marshalValIn(res_data[i]));
 }
 
@@ -1098,7 +1144,12 @@ pub export fn wasm_global_get(g: ?*const Global, out: ?*Val) callconv(.c) void {
         if (handle.global_idx >= rt.globals.len) return;
         break :blk rt.globals[handle.global_idx];
     } else handle.cell orelse return; // standalone host global
-    o.* = marshalValOut(slot.*, handle.valtype);
+    const g_store: ?*Store = if (handle.instance) |inst| inst.store else handle.store;
+    const g_rm: ?RefMarshalCtx = if (g_store) |st|
+        (if (storeAllocator(st)) |al| RefMarshalCtx{ .alloc = al, .inst = handle.instance, .store = st } else null)
+    else
+        null;
+    o.* = marshalValOut(slot.*, handle.valtype, g_rm);
 }
 
 /// `wasm_global_set(global, val)` — Wasm spec §4.5.6
@@ -1546,7 +1597,7 @@ pub export fn wasm_func_call(
         while (i > 0) {
             i -= 1;
             const v = rt.popOperand();
-            dp[i] = marshalValOut(v, sig.results[i]);
+            dp[i] = marshalValOut(v, sig.results[i], .{ .alloc = alloc, .inst = inst, .store = store });
         }
     };
     rt.operand_len = op_base;

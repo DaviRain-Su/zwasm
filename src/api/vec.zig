@@ -154,33 +154,55 @@ pub export fn wasm_val_vec_new(out: ?*ValVec, size: usize, src: ?[*]const wasm_c
 }
 
 pub export fn wasm_val_vec_copy(out: ?*ValVec, src: ?*const ValVec) callconv(.c) void {
-    vecCopy(wasm_c_api.Val, ValVec, out, src);
+    vecCopy(wasm_c_api.Val, ValVec, out, src); // array alloc + shallow memcpy
+    // D-269B: deep-clone owned ref handles so out + src don't share a *Ref.
+    const o = out orelse return;
+    if (o.data) |dp| for (0..o.size) |i| {
+        if (dp[i].kind == .funcref or dp[i].kind == .anyref) {
+            if (dp[i].of.ref) |rp| dp[i].of.ref = @ptrCast(wasm_c_api.wasm_ref_copy(@ptrCast(@alignCast(rp))));
+        }
+    };
 }
 
 pub export fn wasm_val_vec_delete(v: ?*ValVec) callconv(.c) void {
+    // D-269B: free each element's owned ref handle before freeing the array.
+    if (v) |vec| if (vec.data) |dp| {
+        for (0..vec.size) |i| wasm_val_delete(&dp[i]);
+    };
     vecDelete(ValVec, v);
 }
 
 // ============================================================
 // scalar val copy / delete (wasm.h:340-341)
 //
-// zwasm's `wasm_val_t` is plain-old-data: numeric kinds hold the
-// scalar, ref kinds hold the raw GcRef payload directly in `of.ref`
-// (NOT an owned `wasm_ref_t*` handle — see instance.zig
-// fromRuntimeValue). So copy is a struct copy for every kind
-// (matching `wasm_val_vec_copy`'s shallow copy) and delete owns
-// nothing → no-op. (The of.ref = raw-payload representation diverges
-// from upstream's owned-`wasm_ref_t*` contract; reconciled with the
-// ref-model work — D-269 cat E / D-253.)
+// D-269B owned-handle model: numeric kinds are POD (struct copy /
+// no-op), but a ref kind's `of.ref` is an OWNED `wasm_ref_t*` (= a
+// `*Ref` allocated by `marshalValOut`). So copy DEEP-clones it
+// (`wasm_ref_copy`) and delete frees it (`wasm_ref_delete`), matching
+// upstream's owned-`wasm_ref_t*` contract. Kind-guarded so a numeric
+// `of` union member is never misread as a pointer.
 // ============================================================
 
 pub export fn wasm_val_copy(out: ?*wasm_c_api.Val, src: ?*const wasm_c_api.Val) callconv(.c) void {
     const o = out orelse return;
-    o.* = if (src) |s| s.* else .{ .kind = .i32, .of = .{ .i32 = 0 } };
+    const s = src orelse {
+        o.* = .{ .kind = .i32, .of = .{ .i32 = 0 } };
+        return;
+    };
+    o.* = s.*;
+    if (s.kind == .funcref or s.kind == .anyref) {
+        if (s.of.ref) |rp| o.of.ref = @ptrCast(wasm_c_api.wasm_ref_copy(@ptrCast(@alignCast(rp))));
+    }
 }
 
 pub export fn wasm_val_delete(v: ?*wasm_c_api.Val) callconv(.c) void {
-    _ = v;
+    const val = v orelse return;
+    if (val.kind == .funcref or val.kind == .anyref) {
+        if (val.of.ref) |rp| {
+            wasm_c_api.wasm_ref_delete(@ptrCast(@alignCast(rp)));
+            val.of.ref = null;
+        }
+    }
 }
 
 // ============================================================
@@ -290,24 +312,34 @@ test "wasm_val_vec_new / copy / delete: round-trip" {
     try testing.expect(v.data.? != v2.data.?);
 }
 
-test "wasm_val_copy / wasm_val_delete: POD copy across kinds + null discipline" {
+test "wasm_val_copy / wasm_val_delete: numeric POD copy + null discipline" {
+    // Numeric kinds are POD: struct-copied, delete is a no-op.
     var src: wasm_c_api.Val = .{ .kind = .i64, .of = .{ .i64 = -42 } };
     var dst: wasm_c_api.Val = undefined;
     wasm_val_copy(&dst, &src);
     try testing.expectEqual(wasm_c_api.ValKind.i64, dst.kind);
     try testing.expectEqual(@as(i64, -42), dst.of.i64);
 
-    // ref kind: of.ref raw payload copied as-is (POD model).
-    var rsrc: wasm_c_api.Val = .{ .kind = .funcref, .of = .{ .ref = @ptrFromInt(0xCAFE) } };
-    var rdst: wasm_c_api.Val = undefined;
-    wasm_val_copy(&rdst, &rsrc);
-    try testing.expectEqual(wasm_c_api.ValKind.funcref, rdst.kind);
-    try testing.expectEqual(@as(usize, 0xCAFE), @intFromPtr(rdst.of.ref.?));
+    var fsrc: wasm_c_api.Val = .{ .kind = .f64, .of = .{ .f64 = 3.5 } };
+    var fdst: wasm_c_api.Val = undefined;
+    wasm_val_copy(&fdst, &fsrc);
+    try testing.expectEqual(@as(f64, 3.5), fdst.of.f64);
 
-    // delete owns nothing → no crash; both null-tolerant.
+    // A null-ref funcref: no handle to clone/free (D-269B kind-guarded).
+    var nsrc: wasm_c_api.Val = .{ .kind = .funcref, .of = .{ .ref = null } };
+    var ndst: wasm_c_api.Val = undefined;
+    wasm_val_copy(&ndst, &nsrc);
+    try testing.expectEqual(wasm_c_api.ValKind.funcref, ndst.kind);
+    try testing.expect(ndst.of.ref == null);
+    wasm_val_delete(&ndst);
+
+    // delete numeric / null-tolerant.
     wasm_val_delete(&dst);
     wasm_val_delete(null);
     wasm_val_copy(null, &src);
+    // The owned-handle ref path (non-null funcref deep-copy + free) is
+    // exercised end-to-end in test/c_api_conformance/funcref_result_call.c
+    // (D-269B) — a proper *Ref requires a live Store for allocator recovery.
 }
 
 test "wasm_byte_vec_* / wasm_val_vec_*: null-arg discipline" {
