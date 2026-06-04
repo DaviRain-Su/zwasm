@@ -4,6 +4,16 @@
 - **Date**: 2026-05-05
 - **Author**: Shota / Zig host-API gap surfaced post-ADR-0024
 - **Tags**: roadmap, api, library, surface, phase8, breaking-changes-allowed
+- **Revision (2026-06-05, §16.3 / D-267 closure)**: This ADR's body (D-1/D-7)
+  names the stable surface `Runtime` / `Module.parse(&rt, bytes)` / `getTyped` —
+  that shape was NEVER shipped; ADR-0109 superseded it pre-implementation. The
+  **shipped + tested** Zig surface (`src/zwasm.zig`, 13 facade tests) is
+  `Engine.init` → `eng.compile` → `mod.instantiate` → `inst.invoke` /
+  `inst.typedFunc`, with `Linker` (defineFunc/Memory/Wasi) + `Caller` + `Memory`
+  + `Trap` + `Value` — the wasmtime/wasmer idiom. The §16.3 surface review
+  (2026-06-05) confirmed this is the minimal/clean/idiomatic shape; ROADMAP §10.A
+  was synced to it (was stale, "per ADR-0025"). D-267 discharged. Authoritative
+  Zig-surface ADR = **ADR-0109**; the body below is historical design lineage.
 
 ## Context
 

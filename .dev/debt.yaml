@@ -960,27 +960,6 @@ entries:
     refs: |-
       bench/results/s15p_parity_vs_v1.md (D-265 post-rework verification table); ADR-0153 (rework campaign);
       private/spikes/s15p-parity/ (w45_addi/w45_addc); scripts/run_remote_ubuntu.sh; ~/Documents/MyProducts/zwasm
-  - id: "D-267"
-    layer: "doc"
-    status: "now"
-    description: |-
-      **ROADMAP §10.A + ADR-0025 D-7 name the stable Zig surface as `Runtime` / `Module.parse(&rt, bytes)` /
-      `getTyped`, but the SHIPPED + tested API is `Engine` / `engine.compile(bytes)` / `instance.typedFunc`**
-      (authoritative: `src/zwasm.zig` exports `Engine`/`Module`/`Instance`/`TypedFunc`/`Linker`/`Caller`/`Memory`
-      + the 13 `zwasm facade` tests there exercise `Engine.init → eng.compile → mod.instantiate → inst.invoke /
-      inst.typedFunc(fn,name).call`). The CODE is correct (3-host green); the SPEC WORDING is stale (doc-vs-code
-      drift, not a code bug). Surfaced 2026-06-04 while writing §16.1 migration guide — the guide was written
-      against shipped reality (Engine/compile), NOT the stale §10.A wording. DISCHARGE: reconcile when writing
-      §16.4 (API reference) — enumerate the real stable surface, then EITHER update ROADMAP §10.A + ADR-0025 D-7
-      to `Engine`/`compile`/`typedFunc` (a Revision note on ADR-0025, since the stable-surface naming IS the
-      stability contract), OR (if `Runtime` was an intended alias) add the alias. Pick code-as-truth unless a
-      reason to rename the code surfaces. Until then, all public docs (migration guide, README, tutorial) MUST
-      use the shipped `Engine`/`compile`/`typedFunc` names.
-    first_raised: "2026-06-04"
-    last_reviewed: "2026-06-04"
-    refs: |-
-      src/zwasm.zig (Engine/Module/Instance/TypedFunc/Linker/Caller/Memory exports + 13 facade tests);
-      ROADMAP §10.A; ADR-0025 (D-7 stable surface); docs/migration_v1_to_v2.md (§16.1); ROADMAP §16.4 (API ref)
   - id: "D-268"
     layer: "perf"
     status: "note"
@@ -1038,6 +1017,22 @@ entries:
     last_reviewed: "2026-06-05"
     refs: |-
       src/api/module_serialize.zig; include/wasm.h:422-423 (serialize/deserialize); ROADMAP §16.2 G; D-269
+  - id: "D-272"
+    layer: "code"
+    status: "note"
+    description: |-
+      **note (optional 完成形 enhancement): the Zig facade (`src/zwasm.zig`, ADR-0109) exposes `Instance.memory()`
+      + `typedFunc`/`invoke` but NOT exported-Global / exported-Table accessors at the Zig level.** The §16.3
+      surface review (2026-06-05) confirmed functions + memory cover the 95% host use; the C-API DOES have
+      global/table get/set (wasm_global_*/wasm_table_*). For a fully-featured Zig surface, `inst.global(name)` /
+      `inst.table(name)` (read/write a value, get/set/grow) would match wasmtime/wasmer. Not added in §16.3 (not
+      in that row's listed surface). DISCHARGE: add the accessors if §16.5 dogfooding or a real consumer needs
+      them; else accept the current set as the idiomatic minimum. Low priority (host rarely touches globals/tables).
+    first_raised: "2026-06-05"
+    last_reviewed: "2026-06-05"
+    refs: |-
+      src/zwasm.zig (Engine facade; Memory exposed, Global/Table not); src/zwasm/instance.zig; ADR-0109;
+      ROADMAP §10.A / §16.3; src/api/{instance,extern_new}.zig (C-API global/table accessors exist)
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.

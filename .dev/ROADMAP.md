@@ -1692,7 +1692,7 @@ discharge predicate, not a silent workaround.
 | 16.0 | Open §16 inline + flip Phase Status widget (Phase 15 → DONE; Phase 16 → IN-PROGRESS). Reframed to completion-finalization per ADR-0156.                                       | [x]    |
 | 16.1 | `docs/migration_v1_to_v2.md` — v1→v2 migration guide, grounded in the shipped+tested API (`src/zwasm.zig` facade). Surfaced D-267 (§10.A/ADR-0025 name `Runtime`, ships `Engine`). **Will be revised** as the §16.2–4 surface audits settle. | [x] `58a483e8` |
 | 16.2 | **C-API surface audit vs wasm-c-api** — audit `include/wasm.h` + `src/api/` against the upstream wasm-c-api standard wasmtime/wasmer follow; close any divergence; **fix the tests too** if they encoded a wrong shape. Industry-standard is the bar. **✅ DONE**: `wasm.h` byte-identical to upstream but **129/293 extern fns were unimplemented** (link errors); implemented ALL → **gap 0 (293/293)** (`scripts/capi_surface_gap.sh`). A type-accessors → B vec-ops → C config → D val → instance.zig split (ADR-0157) → host_info (27) → ref-cast same/as_ref/copy all 9 types (ADR-0158) → tagtype/EH → module serialize/share (byte-model). Residual semantic limits debt-tracked: standalone/instance/foreign `_copy`→null (D-253-D), val `of.ref`=raw-payload (D-269), serialize=source-bytes no-AOT-cache (D-271). | [x] `e9367bb2` |
-| 16.3 | **Zig-API surface review (あるべき論)** — confirm the `Engine`/`Module`/`Instance`/`Trap`/`Value`/`TypedFunc`/`Linker`/`Caller`/`Memory` surface is the minimal, clean, idiomatic shape; **reconcile D-267** (`Runtime`/`Module.parse` spec wording → shipped `Engine`/`compile`, or alias) — Revision on ADR-0025. Breaking-allowed. | [ ]    |
+| 16.3 | **Zig-API surface review (あるべき論)** — confirm the `Engine`/`Module`/`Instance`/`Trap`/`Value`/`TypedFunc`/`Linker`/`Caller`/`Memory` surface is the minimal, clean, idiomatic shape; **reconcile D-267** (`Runtime`/`Module.parse` spec wording → shipped `Engine`/`compile`, or alias) — Revision on ADR-0025. Breaking-allowed. **✅ DONE**: surface confirmed minimal/clean/idiomatic (wasmtime/wasmer shape, 13 facade tests, code unchanged — no code edit needed). D-267 reconciled code-as-truth: `Runtime`/`Module.parse` were NEVER shipped (ADR-0025 superseded by ADR-0109 pre-impl); synced ROADMAP §10.A + ADR-0025 Revision note → shipped `Engine`/`compile`. Optional gap: Zig-level Global/Table accessors not exposed (D-272). | [x]    |
 | 16.4 | **CLI surface review (あるべき論, breaking-allowed)** — design the truly-necessary, simple, industry-standard CLI; v1's `validate`/`inspect`/`features`/`wat`/`wasm` + capability-flag sprawl is NOT owed. Decide + implement the kept surface; close "CLI-only vs API-only" capability gaps surfaced by §16.5. | [ ]    |
 | 16.5 | **Minimal-wrapper dogfooding** — a local `build.zig.zon` path-dep consumer that uses zwasm v2 as a Zig library; verify it stands up cleanly, hunt ergonomic gaps + "usable from CLI but unreachable from the API" mismatches; reuse the existing test corpus where adaptation makes it serve double duty. (cw-v1 dogfooding stays deferred — D-264.) | [ ]    |
 | 16.6 | **Memory-safety completion** — D-258 (wire the JIT-trampoline GC collection trigger) → D-261 (the GC-on-JIT conservative-rooting **adversarial** test that D-258 unblocks). Close the latent-UAF gap before calling the GC-on-JIT path 完成形. | [ ]    |
@@ -1717,34 +1717,40 @@ zwasm v2 has three independent consumer surfaces. They share
 internal core types (Runtime / Trap / Value) but each has its
 own ergonomic shape and stability boundary.
 
-### 10.A Zig library surface (per ADR-0025)
+### 10.A Zig library surface (per ADR-0109; §16.3 reviewed, D-267 reconciled)
 
-Zig hosts that import zwasm as a Zig package see the surface
-defined by `src/zwasm.zig` per ADR-0025. The 3-line happy path:
+Zig hosts that import zwasm as a Zig package see the native API
+defined by `src/zwasm.zig` per **ADR-0109** (which superseded the
+ADR-0025 c_api-veneer shape — `Runtime`/`Module.parse` were never
+shipped; the surface is **`Engine`/`compile`**, matching wasmtime/
+wasmer). The happy path:
 
 ```zig
 const zwasm = @import("zwasm");
-var rt = try zwasm.Runtime.init(alloc, .{});
-defer rt.deinit();
-var module = try zwasm.Module.parse(&rt, wasm_bytes);
+var eng = try zwasm.Engine.init(alloc, .{});
+defer eng.deinit();
+var module = try eng.compile(wasm_bytes);
 defer module.deinit();
 var instance = try module.instantiate(.{});
 defer instance.deinit();
-try instance.invoke("fib", &args, &results);
+try instance.invoke("fib", &args, &results);          // untyped (Value slice)
+const fib = instance.typedFunc(fn (i32) i32, "fib");  // typed
 ```
 
-**Stable surface** (per ADR-0025 D-7): `Runtime`, `Module`,
-`Instance`, `Trap`, `Value`, `WasiConfig`, `ImportEntry`,
-`TypedFunc(P, R)`, `ParseError`, `InstantiateError`. Other
-re-exports under `zwasm.parse / .ir / .engine / ...` exist for
-the build system + test runners and are **not** stability-
-committed. Breaking changes to the stable surface are allowed
-v0.1.0 → v0.2.0; SemVer compatibility starts at v1.0.
+**Stable surface** (per ADR-0109): `Engine`, `Module`, `Instance`,
+`Trap`, `Value`, `TypedFunc`, `Memory`, `Linker`, `Caller`. Host
+imports via `Linker` (`defineFunc` / `defineMemory` / `defineWasi`).
+Other re-exports under `zwasm.parse / .ir / .engine / ...` exist for
+the build system + test runners and are **not** stability-committed.
+Breaking changes allowed pre-v1.0; SemVer compatibility starts at v1.0.
 
-ClojureWasm v1 (the only known external Zig consumer per
-CLAUDE.md context) is migrated to the new surface as Phase C
-of ADR-0025's implementation chain (after Phase D's
-`docs/migration_v1_to_v2.md` Zig section ships).
+§16.3 surface review (2026-06-05): the Engine/Linker/TypedFunc/Memory
+set is the minimal, clean, idiomatic wasmtime/wasmer-shaped surface;
+v128 access is Zig-native via `Value.v128` (C-API is scalar-only per
+D-171). Exported Global/Table accessors at the Zig level are not
+exposed (functions + memory cover the 95% host use; C-API has them) —
+optional 完成形 enhancement tracked as D-272. ClojureWasm v1 migration
+deferred (D-264).
 
 ### 10.B CLI surface
 

@@ -16,18 +16,20 @@
   copy all 9 types (ADR-0158, new ref_base.zig) → tagtype/EH (TagType) → module serialize/share (byte-model,
   module_serialize.zig). Residual SEMANTIC limits debt-noted (functions exist + honest): val `of.ref`=raw
   payload (D-269), standalone/instance/foreign `_copy`→null (D-253-D), serialize=source-bytes/no-AOT (D-271).
-- **✅ §16.1 migration guide** (`58a483e8`). **Phase 15 CLOSED** (D-265 register-homing campaign, ADR-0153).
+- **✅ §16.1 migration guide** (`58a483e8`). **✅ §16.3 Zig-API surface review** — confirmed the `Engine`/
+  `Module`/`Instance`/`Linker`/`Caller`/`Memory`/`TypedFunc`/`Trap`/`Value` facade (src/zwasm.zig) is the
+  minimal clean wasmtime/wasmer-idiomatic shape (13 facade tests; no code change); reconciled D-267 code-as-truth
+  (`Runtime`/`Module.parse` never shipped — ADR-0025 superseded by ADR-0109; synced §10.A + ADR-0025 Revision);
+  Zig Global/Table accessors = optional gap D-272. **Phase 15 CLOSED** (D-265 campaign, ADR-0153).
 
 ## NEXT (autonomous — surfaces first, docs last; ADR-0156)
 
-- **§16.3 — Zig-API surface review (あるべき論) — NEXT.** Confirm the `Engine`/`Module`/`Instance`/`Trap`/
-  `Value`/`TypedFunc`/`Linker`/`Caller`/`Memory` surface (`src/zwasm.zig` facade) is the minimal, clean,
-  idiomatic shape. **Reconcile D-267**: ROADMAP §10.A + ADR-0025 D-7 name the stable surface `Runtime` /
-  `Module.parse(&rt,bytes)` / `getTyped`, but the SHIPPED + tested API is `Engine` / `engine.compile` /
-  `instance.typedFunc` — code is correct (3-host green), spec wording is stale. DISCHARGE: update §10.A +
-  ADR-0025 D-7 to the shipped names (Revision on ADR-0025, code-as-truth) OR add a `Runtime` alias if intended.
-  Breaking-allowed. Step 0: survey `src/zwasm.zig` (exports + the 13 facade tests). TDD where behaviour changes.
-- After §16.3: **§16.4** CLI あるべき論 review (kept surface; v1 sprawl not owed) → **§16.5** minimal-wrapper
+- **§16.4 — CLI surface review (あるべき論, breaking-allowed) — NEXT.** Design the truly-necessary, simple,
+  industry-standard CLI; v1's `validate`/`inspect`/`features`/`wat`/`wasm` + capability-flag sprawl is NOT owed.
+  Decide + implement the kept surface. Step 0: survey `src/cli/` (current subcommands: run/compile — see §10.B,
+  §10.1) + an industry CLI (wasmtime/wasmer/wazero CLI) for the minimal shape; check the C/Zig surfaces for any
+  "CLI-only vs API-only" capability gaps. Likely keep `run` + `compile`; assess `validate`. TDD CLI behaviour.
+- After §16.4: **§16.5** minimal-wrapper
   dogfooding (local build.zig.zon consumer; API/CLI-gap hunt — likely re-surfaces D-269 of.ref) → **§16.6**
   memory-safety (D-258 wire JIT-trampoline GC collect → D-261 GC-on-JIT adversarial test; highest stakes) →
   **§16.7** docs LAST (README/reference/tutorial/CHANGELOG, match the settled surface). Chain; pay debt en route.
