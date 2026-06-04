@@ -13,10 +13,13 @@
 
 **Per ADR-0049 + ADR-0067 + ADR-0076**: the autonomous loop's
 per-chunk gate is **two-host** (Mac aarch64 foreground +
-`ubuntunote` native Linux x86_64 background via SSH). Scope is
-adaptive per ADR-0076 D1 — substrate chunks gate at `zig build
-test`, logic/cohort chunks at `zig build test-all`. The
-windowsmini gate is **deferred to Phase-boundary
+`ubuntunote` native Linux x86_64 background via SSH). Only the
+**foreground Mac** gate is scope-adaptive (ADR-0076 D1 —
+substrate→`zig build test`, logic/cohort→`zig build test-all`);
+the **background ubuntu** gate is unconditionally `zig build
+test-all` (ADR-0076 **D6** — no-wait async gate, so narrow scope
+saved no loop time but skipped the x86_64-RUN runners; D-260/D-262).
+The windowsmini gate is **deferred to Phase-boundary
 "Windows reconciliation"** — autonomous chunks must NOT fire
 `bash scripts/run_remote_windows.sh test-all`, regardless of
 `should_gate_windows.sh`'s output.

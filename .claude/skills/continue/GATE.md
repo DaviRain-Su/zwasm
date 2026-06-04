@@ -9,16 +9,22 @@ this file has the full pipeline + Step 5b bench-delta sub-step.
 bash scripts/classify_chunk_scope.sh
 ```
 
-Map the printed class to the gate command (ADR-0076 D1):
+Map the printed class to the **foreground Mac** gate command (ADR-0076
+D1). The **background ubuntu** gate is unconditionally `test-all`
+(ADR-0076 **D6** — D5-b's no-wait ubuntu removed the latency that once
+justified narrow scope; closes the D-260/D-262 x86_64-RUN coverage gap):
 
-| Class       | Mac gate (foreground) | ubuntu gate (background, kicked AFTER push) |
-|-------------|-----------------------|---------------------------------------------|
-| `substrate` | `zig build test`      | `zig build test`                            |
-| `logic`     | `zig build test-all`  | `zig build test-all`                        |
-| `cohort`    | `zig build test-all`  | `zig build test-all`                        |
-| `unclear`   | `zig build test-all`  | `zig build test-all`                        |
+| Class       | Mac gate (foreground, waited-on) | ubuntu gate (background, after push) |
+|-------------|----------------------------------|--------------------------------------|
+| `substrate` | `zig build test`                 | `zig build test-all` (always)        |
+| `logic`     | `zig build test-all`             | `zig build test-all` (always)        |
+| `cohort`    | `zig build test-all`             | `zig build test-all` (always)        |
+| `unclear`   | `zig build test-all`             | `zig build test-all` (always)        |
 
-The script IS the rule. When the heuristic is wrong, edit
+The classifier drives the **Mac column only**. The ubuntu kick never
+consults it — there is no scope decision to get wrong (the D-260
+foot-gun: an emit chunk eyeballed to narrow `test`). The script IS the
+rule for the Mac column; when its heuristic is wrong, edit
 `scripts/classify_chunk_scope.sh` (mirroring `gate_commit.sh` /
 `zone_check.sh` discipline). LOOP.md does NOT maintain the judgement
 table in prose.
@@ -55,12 +61,15 @@ verify; predates this rule, unaffected).
 
 ## Per-chunk commands
 
-- `zig build <step> > /tmp/mac.log 2>&1` (Mac aarch64, foreground)
-- `bash scripts/run_remote_ubuntu.sh <step> > /tmp/ubuntu.log 2>&1`
+- `zig build <step> > /tmp/mac.log 2>&1` (Mac aarch64, foreground;
+  `<step>` from the Mac column).
+- `bash scripts/run_remote_ubuntu.sh test-all > /tmp/ubuntu.log 2>&1`
   (Linux x86_64 via SSH; Bash timeout ≥ 600000 ms for cold builds;
-  **`run_in_background: true`**). Wrapper does `git fetch + reset
-  --hard origin/zwasm-from-scratch` on remote, then runs `nix develop
-  --command zig build <step>` (pinned Zig 0.16.0 from `flake.nix`).
+  **`run_in_background: true`**). **Always `test-all`** (ADR-0076 D6 —
+  the background gate does not scope-adapt). Wrapper does `git fetch +
+  reset --hard origin/zwasm-from-scratch` on remote, then runs `nix
+  develop --command zig build test-all` (pinned Zig 0.16.0 from
+  `flake.nix`).
 
 ## Phase-boundary windowsmini reconciliation (NOT per-chunk)
 

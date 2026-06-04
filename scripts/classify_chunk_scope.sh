@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # Classify the current chunk's scope for the autonomous loop's
-# per-chunk test gate (per ADR-0076).
+# per-chunk FOREGROUND Mac test gate (per ADR-0076 D1).
+#
+# NOTE (ADR-0076 D6): this class drives the Mac gate ONLY. The
+# background ubuntu gate is unconditionally `zig build test-all` and
+# does NOT consult this script — once D5-b stopped the loop waiting on
+# ubuntu, narrow scope there saved no loop wall-clock but skipped the
+# x86_64-RUN spec/edge runners (the D-260 foot-gun). So the "Gate:"
+# notes below are the Mac mapping; ubuntu = always test-all.
 #
 # Reads the staged + unstaged diff against HEAD and prints ONE of:
 #

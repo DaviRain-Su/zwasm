@@ -300,9 +300,12 @@ hard-gate / bucket-3 / user touchpoint, or a deliberate flush.
 6. **Single push (ADR-0076 D2)**. `git pull --rebase --autostash origin zwasm-from-scratch && git push origin zwasm-from-scratch`.
    One push lands ALL the turn's commit pairs (rebase integrates the
    bench-CI bot commits once).
-7. **ubuntu kick (background; ADR-0076 D3+D5-b)**. ONE kick against
-   the turn's final HEAD, scope-matched to the turn's widest chunk.
-   `bash scripts/run_remote_ubuntu.sh <step> > /tmp/ubuntu.log 2>&1`
+7. **ubuntu kick (background; ADR-0076 D3+D5-b+D6)**. ONE kick against
+   the turn's final HEAD, **always `test-all`** (ADR-0076 D6 — the
+   background gate does not scope-adapt; narrow `test` saved zero loop
+   wall-clock once D5-b stopped waiting on it, but skipped the
+   spec/edge x86_64-RUN runners → the D-260 foot-gun).
+   `bash scripts/run_remote_ubuntu.sh test-all > /tmp/ubuntu.log 2>&1`
    with `run_in_background: true`. Do NOT wait; Step 0.7 next cycle
    verifies (red turn → revert all the turn's commits to the last
    ubuntu-verified HEAD).

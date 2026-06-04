@@ -46,6 +46,10 @@ script *is* the rule (mirroring `gate_commit.sh` / `zone_check.sh` /
 `file_size_check.sh`). When the heuristic needs updating (new file
 shape, new layer), the script is the single edit site.
 
+> **D6 (2026-06-05) scopes this table to the FOREGROUND Mac gate only.**
+> The background ubuntu gate is unconditionally `test-all` and no longer
+> consults the classifier — see D6 below.
+
 ### D2 — Single-push cycle
 
 Source commit and handover commit land back-to-back locally, then
@@ -176,6 +180,44 @@ round-trip **once per turn** instead of once per chunk. A red turn
 loses N chunks of forward motion at the next Step 0.7 instead of 1
 — the priced-in cost of the batch.
 
+### D6 — Background ubuntu gate is unconditionally `test-all` (2026-06-05 amend; D-262)
+
+D1's scope-adaptive table was authored when ubuntu was **waited on**
+(original D1+D3: Mac test → push → **ubuntu wait** → next chunk). The
+narrow-`test` ubuntu option existed to cut that wait (Alternative A:
+~5.8 h saved across §9.12-B). **D5-b moved the ubuntu kick to per-turn
+background — the loop no longer waits on it.** With the wait gone, the
+sole justification for narrow-scope ubuntu evaporated, while the cost of
+getting the scope wrong stayed real: D-260 shipped x86_64 SIMD emit bugs
+marked "RESOLVED" because an emit chunk's ubuntu kick was eyeballed to
+narrow `test` (which skips the spec/edge SIMD runners) and "x86_64
+cross-COMPILE" was mistaken for x86_64-RUN (lesson
+`2026-06-04-cross-compile-is-not-cross-run`); the bugs surfaced only at
+the phase-boundary windowsmini `test-all`.
+
+**Decision: the background ubuntu gate runs `test-all` unconditionally.**
+`classify_chunk_scope.sh` now drives ONLY the **foreground Mac** gate —
+where narrow `test` still buys real loop latency, because the loop blocks
+on it (Step 5). The async ubuntu gate no longer consults the classifier:
+every per-chunk/per-turn kick is `bash scripts/run_remote_ubuntu.sh
+test-all` (its no-arg default), so there is no scope decision left to get
+wrong. Net:
+
+- **Mac (foreground, waited-on)**: scope-adaptive per D1 (unchanged).
+- **ubuntu (background, not waited-on)**: always `test-all` — x86_64-RUN
+  of the full spec + edge + realworld corpora every cycle.
+
+This reverses the **ubuntu half** of Alternative A (and Alternative B's
+"substrate skips `-spec`/`-realworld`"): both were priced against a wait
+that D5-b removed. The residual cost is background ubuntu CPU + a wider
+in-flight deferral window — absorbed by D3/D5-b's existing "OK-line-absent
+= still running, re-check next cycle" tolerance, and by the fact that
+emit-heavy turns (where coverage matters most) are slow enough for the
+test-all to finish. Safety (uniform x86_64-RUN coverage, no eyeballed-scope
+foot-gun) beats background machine time. **win64-RUN stays phase-boundary**
+(windowsmini; ADR-0049/0067) — D6 closes the x86_64-RUN half; the win64
+half remains a known, accepted phase-boundary gate.
+
 ## Alternatives considered
 
 ### Alternative A — Keep test-all per chunk
@@ -266,3 +308,4 @@ exactly the wall-clock penalty of this block.
 | 2026-05-19 | `3063dd0d`   | Initial accepted version (D1 + D2 + D3).                                                              |
 | 2026-05-20 | `c1e16f7d` | D4 amend — pre-commit / pre-push hook slim-down (`gate_commit.sh --fast`; pre-push drops gate re-run).|
 | 2026-05-30 | `b39689e1` | D5 amend — in-turn chunk chaining + per-turn ubuntu batch (widens D3 one-chunk→one-turn) + gate-once + bigger-chunk default (user throughput directive). |
+| 2026-06-05 | `<backfill>` | D6 amend — background ubuntu gate unconditionally `test-all` (classifier drives Mac foreground only); closes D-262 x86_64-RUN coverage gap (justification removed by D5-b's no-wait ubuntu). |

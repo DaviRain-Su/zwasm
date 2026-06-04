@@ -16,6 +16,11 @@
 #   bash scripts/run_remote_ubuntu.sh test-spec                # zig build test-spec
 #   bash scripts/run_remote_ubuntu.sh --branch NAME [STEP]     # test arbitrary branch (feature branch verification)
 #
+# Per-chunk /continue gate: ALWAYS `test-all` (ADR-0076 D6). The
+# narrow steps above are for manual/feature-branch (`--branch`) use;
+# the autonomous loop kicks the no-arg default (= test-all) so the
+# background x86_64-RUN gate never under-scopes (the D-260 foot-gun).
+#
 # The `--branch` form is used by §9.13-V Phase A.6 to verify
 # feature branches (e.g. `zwasm-from-scratch-value16`) before
 # merging to the main dev branch. Default branch is
