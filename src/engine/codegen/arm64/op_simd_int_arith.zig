@@ -141,6 +141,41 @@ pub fn emitI64x2ExtmulHighI32x4U(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
 }
 
 // ============================================================
+// §15.4 / D-246 — i32x4.dot_i16x8_s (pairwise multiply-add)
+// ============================================================
+//
+// Wasm SIMD spec — `i32x4.dot_i16x8_s`: result[i] = a[2i]*b[2i] +
+// a[2i+1]*b[2i+1] for i=0..3 (signed i16×i16→i32 products, pairwise
+// summed). 3-instr synthesis (not a single NEON instruction):
+//   SMULL  V31      = lhs.4h * rhs.4h    → [p0,p1,p2,p3]
+//   SMULL2 result_v = lhs.8h * rhs.8h    → [p4,p5,p6,p7]
+//   ADDP   result_v = ADDP(V31, result_v)= [p0+p1,p2+p3,p4+p5,p6+p7]
+// V31 (op_simd.simd_scratch_v) is the always-reserved SIMD scratch.
+// Choreography reads each source before any write, so it is alias-safe
+// even if result_v coincides with lhs_v or rhs_v.
+
+/// Wasm spec (SIMD) — `i32x4.dot_i16x8_s`. 3-word emission per call.
+pub fn emitI32x4DotI16x8S(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    const rhs_vreg = ctx.pushed_vregs.pop().?;
+    const rhs_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, rhs_vreg, 1);
+
+    const lhs_vreg = ctx.pushed_vregs.pop().?;
+    const lhs_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, lhs_vreg, 0);
+
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
+
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon_arith.encSmull4S(op_simd.simd_scratch_v, lhs_v, rhs_v));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon_arith.encSmull2_4S(result_v, lhs_v, rhs_v));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon_arith.encAddp4S(result_v, op_simd.simd_scratch_v, result_v));
+
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
+// ============================================================
 // §9.9 / 9.9-g-10 — int min/max + avgr_u (14 ops)
 // ============================================================
 //

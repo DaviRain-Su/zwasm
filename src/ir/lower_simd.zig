@@ -224,6 +224,11 @@ pub fn emitPrefixFD(self: *Lowerer) Error!void {
         184 => try self.emit(.@"i32x4.max_s", 0, 0),
         185 => try self.emit(.@"i32x4.max_u", 0, 0),
 
+        // §15.4 / D-246: i32x4.dot_i16x8_s (pairwise i16×i16→i32
+        // multiply-add). Same lower-side gap as the extmul ops — the
+        // sub-op→ZirOp wiring was missing.
+        186 => try self.emit(.@"i32x4.dot_i16x8_s", 0, 0),
+
         // §9.9 / 9.9-g-2: SIMD comparison ops. ZirOps + per-arch
         // emit dispatch pre-existed; only the lower-side
         // sub-op→ZirOp wiring was missing. Wasm SIMD spec:

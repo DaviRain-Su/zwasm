@@ -106,6 +106,7 @@ const arm64_i32x4_extmul_low_i16x8_s = @import("arm64/ops/wasm_2_0/i32x4_extmul_
 const arm64_i32x4_extmul_high_i16x8_s = @import("arm64/ops/wasm_2_0/i32x4_extmul_high_i16x8_s.zig");
 const arm64_i32x4_extmul_low_i16x8_u = @import("arm64/ops/wasm_2_0/i32x4_extmul_low_i16x8_u.zig");
 const arm64_i32x4_extmul_high_i16x8_u = @import("arm64/ops/wasm_2_0/i32x4_extmul_high_i16x8_u.zig");
+const arm64_i32x4_dot_i16x8_s = @import("arm64/ops/wasm_2_0/i32x4_dot_i16x8_s.zig");
 const arm64_i64x2_extmul_low_i32x4_s = @import("arm64/ops/wasm_2_0/i64x2_extmul_low_i32x4_s.zig");
 const arm64_i64x2_extmul_high_i32x4_s = @import("arm64/ops/wasm_2_0/i64x2_extmul_high_i32x4_s.zig");
 const arm64_i64x2_extmul_low_i32x4_u = @import("arm64/ops/wasm_2_0/i64x2_extmul_low_i32x4_u.zig");
@@ -1095,6 +1096,7 @@ pub const collected_arm64_ops = .{
     arm64_i32x4_extmul_high_i16x8_s,
     arm64_i32x4_extmul_low_i16x8_u,
     arm64_i32x4_extmul_high_i16x8_u,
+    arm64_i32x4_dot_i16x8_s,
     arm64_i64x2_extmul_low_i32x4_s,
     arm64_i64x2_extmul_high_i32x4_s,
     arm64_i64x2_extmul_low_i32x4_u,
