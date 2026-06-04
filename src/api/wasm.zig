@@ -67,6 +67,7 @@ pub const wasm_frame_module_offset = trap_surface.wasm_frame_module_offset;
 pub const wasm_frame_vec_new_empty = trap_surface.wasm_frame_vec_new_empty;
 pub const wasm_frame_vec_new_uninitialized = trap_surface.wasm_frame_vec_new_uninitialized;
 pub const wasm_frame_vec_new = trap_surface.wasm_frame_vec_new;
+pub const wasm_frame_vec_copy = trap_surface.wasm_frame_vec_copy;
 pub const wasm_frame_vec_delete = trap_surface.wasm_frame_vec_delete;
 
 // ============================================================
@@ -159,6 +160,7 @@ pub const wasm_externtype_as_memorytype_const = types.wasm_externtype_as_memoryt
 pub const wasm_externtype_vec_new_empty = types.wasm_externtype_vec_new_empty;
 pub const wasm_externtype_vec_new_uninitialized = types.wasm_externtype_vec_new_uninitialized;
 pub const wasm_externtype_vec_new = types.wasm_externtype_vec_new;
+pub const wasm_externtype_vec_copy = types.wasm_externtype_vec_copy;
 pub const wasm_externtype_vec_delete = types.wasm_externtype_vec_delete;
 
 pub const ImportType = types.ImportType;
@@ -174,6 +176,7 @@ pub const wasm_importtype_copy = types.wasm_importtype_copy;
 pub const wasm_importtype_vec_new_empty = types.wasm_importtype_vec_new_empty;
 pub const wasm_importtype_vec_new_uninitialized = types.wasm_importtype_vec_new_uninitialized;
 pub const wasm_importtype_vec_new = types.wasm_importtype_vec_new;
+pub const wasm_importtype_vec_copy = types.wasm_importtype_vec_copy;
 pub const wasm_importtype_vec_delete = types.wasm_importtype_vec_delete;
 pub const wasm_exporttype_new = types.wasm_exporttype_new;
 pub const wasm_exporttype_delete = types.wasm_exporttype_delete;
@@ -183,7 +186,29 @@ pub const wasm_exporttype_copy = types.wasm_exporttype_copy;
 pub const wasm_exporttype_vec_new_empty = types.wasm_exporttype_vec_new_empty;
 pub const wasm_exporttype_vec_new_uninitialized = types.wasm_exporttype_vec_new_uninitialized;
 pub const wasm_exporttype_vec_new = types.wasm_exporttype_vec_new;
+pub const wasm_exporttype_vec_copy = types.wasm_exporttype_vec_copy;
 pub const wasm_exporttype_vec_delete = types.wasm_exporttype_vec_delete;
+
+pub const wasm_functype_vec_new_empty = types.wasm_functype_vec_new_empty;
+pub const wasm_functype_vec_new_uninitialized = types.wasm_functype_vec_new_uninitialized;
+pub const wasm_functype_vec_new = types.wasm_functype_vec_new;
+pub const wasm_functype_vec_copy = types.wasm_functype_vec_copy;
+pub const wasm_functype_vec_delete = types.wasm_functype_vec_delete;
+pub const wasm_globaltype_vec_new_empty = types.wasm_globaltype_vec_new_empty;
+pub const wasm_globaltype_vec_new_uninitialized = types.wasm_globaltype_vec_new_uninitialized;
+pub const wasm_globaltype_vec_new = types.wasm_globaltype_vec_new;
+pub const wasm_globaltype_vec_copy = types.wasm_globaltype_vec_copy;
+pub const wasm_globaltype_vec_delete = types.wasm_globaltype_vec_delete;
+pub const wasm_tabletype_vec_new_empty = types.wasm_tabletype_vec_new_empty;
+pub const wasm_tabletype_vec_new_uninitialized = types.wasm_tabletype_vec_new_uninitialized;
+pub const wasm_tabletype_vec_new = types.wasm_tabletype_vec_new;
+pub const wasm_tabletype_vec_copy = types.wasm_tabletype_vec_copy;
+pub const wasm_tabletype_vec_delete = types.wasm_tabletype_vec_delete;
+pub const wasm_memorytype_vec_new_empty = types.wasm_memorytype_vec_new_empty;
+pub const wasm_memorytype_vec_new_uninitialized = types.wasm_memorytype_vec_new_uninitialized;
+pub const wasm_memorytype_vec_new = types.wasm_memorytype_vec_new;
+pub const wasm_memorytype_vec_copy = types.wasm_memorytype_vec_copy;
+pub const wasm_memorytype_vec_delete = types.wasm_memorytype_vec_delete;
 
 // ============================================================
 // Re-exports — instance.zig

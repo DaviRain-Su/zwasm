@@ -113,68 +113,96 @@ pub export fn wasm_valtype_copy(vt: ?*const ValType) callconv(.c) ?*ValType {
 // valtype vec (pointer-vec; delete cascades to element delete)
 // =====================================================================
 
-pub export fn wasm_valtype_vec_new_empty(out: ?*ValTypeVec) callconv(.c) void {
-    (out orelse return).* = .{ .size = 0, .data = null };
-}
-
-pub export fn wasm_valtype_vec_new_uninitialized(out: ?*ValTypeVec, size: usize) callconv(.c) void {
-    const o = out orelse return;
-    if (size == 0) {
-        o.* = .{ .size = 0, .data = null };
-        return;
-    }
-    const buf = ca.alloc(?*ValType, size) catch {
-        o.* = .{ .size = 0, .data = null };
-        return;
-    };
-    @memset(buf, null);
-    o.* = .{ .size = size, .data = buf.ptr };
-}
-
-pub export fn wasm_valtype_vec_new(out: ?*ValTypeVec, size: usize, src: ?[*]const ?*ValType) callconv(.c) void {
-    const o = out orelse return;
-    if (size == 0 or src == null) {
-        o.* = .{ .size = 0, .data = null };
-        return;
-    }
-    const buf = ca.alloc(?*ValType, size) catch {
-        o.* = .{ .size = 0, .data = null };
-        return;
-    };
-    @memcpy(buf, src.?[0..size]);
-    o.* = .{ .size = size, .data = buf.ptr };
-}
-
-pub export fn wasm_valtype_vec_copy(out: ?*ValTypeVec, src: ?*const ValTypeVec) callconv(.c) void {
-    const o = out orelse return;
-    const s = src orelse {
-        o.* = .{ .size = 0, .data = null };
-        return;
-    };
-    if (s.size == 0 or s.data == null) {
-        o.* = .{ .size = 0, .data = null };
-        return;
-    }
-    // Deep copy — each new vec owns its own elements (shallow would double-free).
-    const buf = ca.alloc(?*ValType, s.size) catch {
-        o.* = .{ .size = 0, .data = null };
-        return;
-    };
-    for (s.data.?[0..s.size], 0..) |opt, i| {
-        buf[i] = if (opt) |vt| wasm_valtype_copy(vt) else null;
-    }
-    o.* = .{ .size = s.size, .data = buf.ptr };
-}
-
-pub export fn wasm_valtype_vec_delete(v: ?*ValTypeVec) callconv(.c) void {
-    const handle = v orelse return;
-    if (handle.data) |dp| {
-        for (dp[0..handle.size]) |opt| {
-            if (opt) |vt| wasm_valtype_delete(vt);
+/// Comptime-generic owned-pointer vec ops — the `WASM_DECLARE_VEC(T, *)`
+/// family for the type descriptors (functype/globaltype/… + valtype/externtype/
+/// importtype/exporttype). `data` is an array of owned `?*Elem`; the vec owns
+/// both the array and each element. `new` adopts the caller's pointers
+/// (wasm-c-api ownership transfer); `copy` deep-clones each element via `copyFn`
+/// (shallow would double-free on delete); `delete` frees each element via
+/// `deleteFn` then the array. One shape, all families.
+fn PtrVecOps(
+    comptime Elem: type,
+    comptime VecT: type,
+    comptime copyFn: fn (?*const Elem) callconv(.c) ?*Elem,
+    comptime deleteFn: fn (?*Elem) callconv(.c) void,
+) type {
+    return struct {
+        fn newEmpty(out: ?*VecT) void {
+            (out orelse return).* = .{ .size = 0, .data = null };
         }
-        ca.free(dp[0..handle.size]);
-    }
-    handle.* = .{ .size = 0, .data = null };
+        fn newUninit(out: ?*VecT, size: usize) void {
+            const o = out orelse return;
+            if (size == 0) {
+                o.* = .{ .size = 0, .data = null };
+                return;
+            }
+            const buf = ca.alloc(?*Elem, size) catch {
+                o.* = .{ .size = 0, .data = null };
+                return;
+            };
+            @memset(buf, null);
+            o.* = .{ .size = size, .data = buf.ptr };
+        }
+        fn new(out: ?*VecT, size: usize, src: ?[*]const ?*Elem) void {
+            const o = out orelse return;
+            if (size == 0 or src == null) {
+                o.* = .{ .size = 0, .data = null };
+                return;
+            }
+            const buf = ca.alloc(?*Elem, size) catch {
+                o.* = .{ .size = 0, .data = null };
+                return;
+            };
+            @memcpy(buf, src.?[0..size]);
+            o.* = .{ .size = size, .data = buf.ptr };
+        }
+        fn copy(out: ?*VecT, src: ?*const VecT) void {
+            const o = out orelse return;
+            const s = src orelse {
+                o.* = .{ .size = 0, .data = null };
+                return;
+            };
+            if (s.size == 0 or s.data == null) {
+                o.* = .{ .size = 0, .data = null };
+                return;
+            }
+            const buf = ca.alloc(?*Elem, s.size) catch {
+                o.* = .{ .size = 0, .data = null };
+                return;
+            };
+            for (s.data.?[0..s.size], 0..) |opt, i| {
+                buf[i] = if (opt) |el| copyFn(el) else null;
+            }
+            o.* = .{ .size = s.size, .data = buf.ptr };
+        }
+        fn delete(v: ?*VecT) void {
+            const handle = v orelse return;
+            if (handle.data) |dp| {
+                for (dp[0..handle.size]) |opt| {
+                    if (opt) |el| deleteFn(el);
+                }
+                ca.free(dp[0..handle.size]);
+            }
+            handle.* = .{ .size = 0, .data = null };
+        }
+    };
+}
+
+const ValTypeVecOps = PtrVecOps(ValType, ValTypeVec, wasm_valtype_copy, wasm_valtype_delete);
+pub export fn wasm_valtype_vec_new_empty(out: ?*ValTypeVec) callconv(.c) void {
+    ValTypeVecOps.newEmpty(out);
+}
+pub export fn wasm_valtype_vec_new_uninitialized(out: ?*ValTypeVec, size: usize) callconv(.c) void {
+    ValTypeVecOps.newUninit(out, size);
+}
+pub export fn wasm_valtype_vec_new(out: ?*ValTypeVec, size: usize, src: ?[*]const ?*ValType) callconv(.c) void {
+    ValTypeVecOps.new(out, size, src);
+}
+pub export fn wasm_valtype_vec_copy(out: ?*ValTypeVec, src: ?*const ValTypeVec) callconv(.c) void {
+    ValTypeVecOps.copy(out, src);
+}
+pub export fn wasm_valtype_vec_delete(v: ?*ValTypeVec) callconv(.c) void {
+    ValTypeVecOps.delete(v);
 }
 
 // =====================================================================
@@ -404,44 +432,21 @@ pub const ExternTypeVec = extern struct {
     data: ?[*]?*ExternType,
 };
 
+const ExternTypeVecOps = PtrVecOps(ExternType, ExternTypeVec, wasm_externtype_copy, wasm_externtype_delete);
 pub export fn wasm_externtype_vec_new_empty(out: ?*ExternTypeVec) callconv(.c) void {
-    (out orelse return).* = .{ .size = 0, .data = null };
+    ExternTypeVecOps.newEmpty(out);
 }
 pub export fn wasm_externtype_vec_new_uninitialized(out: ?*ExternTypeVec, size: usize) callconv(.c) void {
-    const o = out orelse return;
-    if (size == 0) {
-        o.* = .{ .size = 0, .data = null };
-        return;
-    }
-    const buf = ca.alloc(?*ExternType, size) catch {
-        o.* = .{ .size = 0, .data = null };
-        return;
-    };
-    @memset(buf, null);
-    o.* = .{ .size = size, .data = buf.ptr };
+    ExternTypeVecOps.newUninit(out, size);
 }
 pub export fn wasm_externtype_vec_new(out: ?*ExternTypeVec, size: usize, src: ?[*]const ?*ExternType) callconv(.c) void {
-    const o = out orelse return;
-    if (size == 0 or src == null) {
-        o.* = .{ .size = 0, .data = null };
-        return;
-    }
-    const buf = ca.alloc(?*ExternType, size) catch {
-        o.* = .{ .size = 0, .data = null };
-        return;
-    };
-    @memcpy(buf, src.?[0..size]);
-    o.* = .{ .size = size, .data = buf.ptr };
+    ExternTypeVecOps.new(out, size, src);
+}
+pub export fn wasm_externtype_vec_copy(out: ?*ExternTypeVec, src: ?*const ExternTypeVec) callconv(.c) void {
+    ExternTypeVecOps.copy(out, src);
 }
 pub export fn wasm_externtype_vec_delete(v: ?*ExternTypeVec) callconv(.c) void {
-    const handle = v orelse return;
-    if (handle.data) |dp| {
-        for (dp[0..handle.size]) |opt| {
-            if (opt) |e| wasm_externtype_delete(e);
-        }
-        ca.free(dp[0..handle.size]);
-    }
-    handle.* = .{ .size = 0, .data = null };
+    ExternTypeVecOps.delete(v);
 }
 
 // =====================================================================
@@ -552,84 +557,117 @@ pub export fn wasm_exporttype_copy(xt: ?*const ExportType) callconv(.c) ?*Export
 pub const ImportTypeVec = extern struct { size: usize, data: ?[*]?*ImportType };
 pub const ExportTypeVec = extern struct { size: usize, data: ?[*]?*ExportType };
 
+const ImportTypeVecOps = PtrVecOps(ImportType, ImportTypeVec, wasm_importtype_copy, wasm_importtype_delete);
 pub export fn wasm_importtype_vec_new_empty(out: ?*ImportTypeVec) callconv(.c) void {
-    (out orelse return).* = .{ .size = 0, .data = null };
+    ImportTypeVecOps.newEmpty(out);
 }
 pub export fn wasm_importtype_vec_new_uninitialized(out: ?*ImportTypeVec, size: usize) callconv(.c) void {
-    const o = out orelse return;
-    if (size == 0) {
-        o.* = .{ .size = 0, .data = null };
-        return;
-    }
-    const buf = ca.alloc(?*ImportType, size) catch {
-        o.* = .{ .size = 0, .data = null };
-        return;
-    };
-    @memset(buf, null);
-    o.* = .{ .size = size, .data = buf.ptr };
+    ImportTypeVecOps.newUninit(out, size);
 }
 pub export fn wasm_importtype_vec_new(out: ?*ImportTypeVec, size: usize, src: ?[*]const ?*ImportType) callconv(.c) void {
-    const o = out orelse return;
-    if (size == 0 or src == null) {
-        o.* = .{ .size = 0, .data = null };
-        return;
-    }
-    const buf = ca.alloc(?*ImportType, size) catch {
-        o.* = .{ .size = 0, .data = null };
-        return;
-    };
-    @memcpy(buf, src.?[0..size]);
-    o.* = .{ .size = size, .data = buf.ptr };
+    ImportTypeVecOps.new(out, size, src);
+}
+pub export fn wasm_importtype_vec_copy(out: ?*ImportTypeVec, src: ?*const ImportTypeVec) callconv(.c) void {
+    ImportTypeVecOps.copy(out, src);
 }
 pub export fn wasm_importtype_vec_delete(v: ?*ImportTypeVec) callconv(.c) void {
-    const handle = v orelse return;
-    if (handle.data) |dp| {
-        for (dp[0..handle.size]) |opt| {
-            if (opt) |it| wasm_importtype_delete(it);
-        }
-        ca.free(dp[0..handle.size]);
-    }
-    handle.* = .{ .size = 0, .data = null };
+    ImportTypeVecOps.delete(v);
 }
 
+const ExportTypeVecOps = PtrVecOps(ExportType, ExportTypeVec, wasm_exporttype_copy, wasm_exporttype_delete);
 pub export fn wasm_exporttype_vec_new_empty(out: ?*ExportTypeVec) callconv(.c) void {
-    (out orelse return).* = .{ .size = 0, .data = null };
+    ExportTypeVecOps.newEmpty(out);
 }
 pub export fn wasm_exporttype_vec_new_uninitialized(out: ?*ExportTypeVec, size: usize) callconv(.c) void {
-    const o = out orelse return;
-    if (size == 0) {
-        o.* = .{ .size = 0, .data = null };
-        return;
-    }
-    const buf = ca.alloc(?*ExportType, size) catch {
-        o.* = .{ .size = 0, .data = null };
-        return;
-    };
-    @memset(buf, null);
-    o.* = .{ .size = size, .data = buf.ptr };
+    ExportTypeVecOps.newUninit(out, size);
 }
 pub export fn wasm_exporttype_vec_new(out: ?*ExportTypeVec, size: usize, src: ?[*]const ?*ExportType) callconv(.c) void {
-    const o = out orelse return;
-    if (size == 0 or src == null) {
-        o.* = .{ .size = 0, .data = null };
-        return;
-    }
-    const buf = ca.alloc(?*ExportType, size) catch {
-        o.* = .{ .size = 0, .data = null };
-        return;
-    };
-    @memcpy(buf, src.?[0..size]);
-    o.* = .{ .size = size, .data = buf.ptr };
+    ExportTypeVecOps.new(out, size, src);
+}
+pub export fn wasm_exporttype_vec_copy(out: ?*ExportTypeVec, src: ?*const ExportTypeVec) callconv(.c) void {
+    ExportTypeVecOps.copy(out, src);
 }
 pub export fn wasm_exporttype_vec_delete(v: ?*ExportTypeVec) callconv(.c) void {
-    const handle = v orelse return;
-    if (handle.data) |dp| {
-        for (dp[0..handle.size]) |opt| {
-            if (opt) |xt| wasm_exporttype_delete(xt);
-        }
-        ca.free(dp[0..handle.size]);
-    }
-    handle.* = .{ .size = 0, .data = null };
+    ExportTypeVecOps.delete(v);
+}
+
+// =====================================================================
+// functype / globaltype / tabletype / memorytype vecs (wasm.h
+// WASM_DECLARE_TYPE → WASM_DECLARE_VEC). Owned-pointer vecs; same shape
+// as the valtype/externtype/import/export families above (PtrVecOps).
+// =====================================================================
+
+pub const FuncTypeVec = extern struct { size: usize, data: ?[*]?*FuncType };
+pub const GlobalTypeVec = extern struct { size: usize, data: ?[*]?*GlobalType };
+pub const TableTypeVec = extern struct { size: usize, data: ?[*]?*TableType };
+pub const MemoryTypeVec = extern struct { size: usize, data: ?[*]?*MemoryType };
+
+const FuncTypeVecOps = PtrVecOps(FuncType, FuncTypeVec, wasm_functype_copy, wasm_functype_delete);
+pub export fn wasm_functype_vec_new_empty(out: ?*FuncTypeVec) callconv(.c) void {
+    FuncTypeVecOps.newEmpty(out);
+}
+pub export fn wasm_functype_vec_new_uninitialized(out: ?*FuncTypeVec, size: usize) callconv(.c) void {
+    FuncTypeVecOps.newUninit(out, size);
+}
+pub export fn wasm_functype_vec_new(out: ?*FuncTypeVec, size: usize, src: ?[*]const ?*FuncType) callconv(.c) void {
+    FuncTypeVecOps.new(out, size, src);
+}
+pub export fn wasm_functype_vec_copy(out: ?*FuncTypeVec, src: ?*const FuncTypeVec) callconv(.c) void {
+    FuncTypeVecOps.copy(out, src);
+}
+pub export fn wasm_functype_vec_delete(v: ?*FuncTypeVec) callconv(.c) void {
+    FuncTypeVecOps.delete(v);
+}
+
+const GlobalTypeVecOps = PtrVecOps(GlobalType, GlobalTypeVec, wasm_globaltype_copy, wasm_globaltype_delete);
+pub export fn wasm_globaltype_vec_new_empty(out: ?*GlobalTypeVec) callconv(.c) void {
+    GlobalTypeVecOps.newEmpty(out);
+}
+pub export fn wasm_globaltype_vec_new_uninitialized(out: ?*GlobalTypeVec, size: usize) callconv(.c) void {
+    GlobalTypeVecOps.newUninit(out, size);
+}
+pub export fn wasm_globaltype_vec_new(out: ?*GlobalTypeVec, size: usize, src: ?[*]const ?*GlobalType) callconv(.c) void {
+    GlobalTypeVecOps.new(out, size, src);
+}
+pub export fn wasm_globaltype_vec_copy(out: ?*GlobalTypeVec, src: ?*const GlobalTypeVec) callconv(.c) void {
+    GlobalTypeVecOps.copy(out, src);
+}
+pub export fn wasm_globaltype_vec_delete(v: ?*GlobalTypeVec) callconv(.c) void {
+    GlobalTypeVecOps.delete(v);
+}
+
+const TableTypeVecOps = PtrVecOps(TableType, TableTypeVec, wasm_tabletype_copy, wasm_tabletype_delete);
+pub export fn wasm_tabletype_vec_new_empty(out: ?*TableTypeVec) callconv(.c) void {
+    TableTypeVecOps.newEmpty(out);
+}
+pub export fn wasm_tabletype_vec_new_uninitialized(out: ?*TableTypeVec, size: usize) callconv(.c) void {
+    TableTypeVecOps.newUninit(out, size);
+}
+pub export fn wasm_tabletype_vec_new(out: ?*TableTypeVec, size: usize, src: ?[*]const ?*TableType) callconv(.c) void {
+    TableTypeVecOps.new(out, size, src);
+}
+pub export fn wasm_tabletype_vec_copy(out: ?*TableTypeVec, src: ?*const TableTypeVec) callconv(.c) void {
+    TableTypeVecOps.copy(out, src);
+}
+pub export fn wasm_tabletype_vec_delete(v: ?*TableTypeVec) callconv(.c) void {
+    TableTypeVecOps.delete(v);
+}
+
+const MemoryTypeVecOps = PtrVecOps(MemoryType, MemoryTypeVec, wasm_memorytype_copy, wasm_memorytype_delete);
+pub export fn wasm_memorytype_vec_new_empty(out: ?*MemoryTypeVec) callconv(.c) void {
+    MemoryTypeVecOps.newEmpty(out);
+}
+pub export fn wasm_memorytype_vec_new_uninitialized(out: ?*MemoryTypeVec, size: usize) callconv(.c) void {
+    MemoryTypeVecOps.newUninit(out, size);
+}
+pub export fn wasm_memorytype_vec_new(out: ?*MemoryTypeVec, size: usize, src: ?[*]const ?*MemoryType) callconv(.c) void {
+    MemoryTypeVecOps.new(out, size, src);
+}
+pub export fn wasm_memorytype_vec_copy(out: ?*MemoryTypeVec, src: ?*const MemoryTypeVec) callconv(.c) void {
+    MemoryTypeVecOps.copy(out, src);
+}
+pub export fn wasm_memorytype_vec_delete(v: ?*MemoryTypeVec) callconv(.c) void {
+    MemoryTypeVecOps.delete(v);
 }
 
 // =====================================================================
@@ -768,4 +806,71 @@ test "importtype_vec: delete cascades to element delete" {
     try testing.expectEqual(@as(usize, 1), vec.size);
     wasm_importtype_vec_delete(&vec); // frees the importtype (+ its name vecs + externtype)
     try testing.expectEqual(@as(usize, 0), vec.size);
+}
+
+test "globaltype_vec (PtrVecOps): new adopts, copy is deep-independent, delete cascades + null discipline" {
+    var elems = [_]?*GlobalType{
+        wasm_globaltype_new(wasm_valtype_new(0), 0), // const i32
+        wasm_globaltype_new(wasm_valtype_new(1), 1), // var i64
+    };
+    var v: GlobalTypeVec = undefined;
+    wasm_globaltype_vec_new(&v, elems.len, &elems);
+    try testing.expectEqual(@as(usize, 2), v.size);
+    try testing.expectEqual(@as(u8, 1), wasm_valtype_kind(wasm_globaltype_content(v.data.?[1].?).?)); // i64
+    try testing.expectEqual(@as(u8, 1), wasm_globaltype_mutability(v.data.?[1].?)); // WASM_VAR
+
+    var c: GlobalTypeVec = undefined;
+    wasm_globaltype_vec_copy(&c, &v);
+    try testing.expectEqual(@as(usize, 2), c.size);
+    try testing.expect(v.data.? != c.data.?); // independent array
+    try testing.expect(v.data.?[0].? != c.data.?[0].?); // independent elements (deep copy)
+    try testing.expectEqual(@as(u8, 0), wasm_valtype_kind(wasm_globaltype_content(c.data.?[0].?).?)); // i32
+
+    wasm_globaltype_vec_delete(&v);
+    wasm_globaltype_vec_delete(&c);
+    try testing.expectEqual(@as(usize, 0), v.size);
+
+    var empty: GlobalTypeVec = .{ .size = 99, .data = null };
+    wasm_globaltype_vec_new_empty(&empty);
+    try testing.expectEqual(@as(usize, 0), empty.size);
+    var u: GlobalTypeVec = undefined;
+    wasm_globaltype_vec_new_uninitialized(&u, 3);
+    try testing.expectEqual(@as(usize, 3), u.size);
+    try testing.expect(u.data.?[0] == null); // pointer-vec memset to null
+    wasm_globaltype_vec_delete(&u);
+    wasm_globaltype_vec_new_empty(null);
+    wasm_globaltype_vec_copy(null, null);
+    wasm_globaltype_vec_delete(null);
+}
+
+test "functype/tabletype/memorytype vec: new/copy/delete smoke (PtrVecOps instantiations)" {
+    var fts = [_]?*FuncType{wasm_functype_new(null, null)}; // () -> ()
+    var fv: FuncTypeVec = undefined;
+    wasm_functype_vec_new(&fv, fts.len, &fts);
+    var fv2: FuncTypeVec = undefined;
+    wasm_functype_vec_copy(&fv2, &fv);
+    try testing.expectEqual(@as(usize, 1), fv2.size);
+    try testing.expect(fv.data.?[0].? != fv2.data.?[0].?); // deep copy
+    wasm_functype_vec_delete(&fv);
+    wasm_functype_vec_delete(&fv2);
+
+    var tlim: Limits = .{ .min = 1, .max = 0xffff_ffff };
+    var tts = [_]?*TableType{wasm_tabletype_new(wasm_valtype_new(129), &tlim)}; // funcref [1..]
+    var tv: TableTypeVec = undefined;
+    wasm_tabletype_vec_new(&tv, tts.len, &tts);
+    var tv2: TableTypeVec = undefined;
+    wasm_tabletype_vec_copy(&tv2, &tv);
+    try testing.expectEqual(@as(usize, 1), tv2.size);
+    wasm_tabletype_vec_delete(&tv);
+    wasm_tabletype_vec_delete(&tv2);
+
+    var mlim: Limits = .{ .min = 2, .max = 0xffff_ffff };
+    var mts = [_]?*MemoryType{wasm_memorytype_new(&mlim)}; // [2..]
+    var mv: MemoryTypeVec = undefined;
+    wasm_memorytype_vec_new(&mv, mts.len, &mts);
+    var mv2: MemoryTypeVec = undefined;
+    wasm_memorytype_vec_copy(&mv2, &mv);
+    try testing.expectEqual(@as(usize, 1), mv2.size);
+    wasm_memorytype_vec_delete(&mv);
+    wasm_memorytype_vec_delete(&mv2);
 }

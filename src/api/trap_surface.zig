@@ -243,6 +243,26 @@ pub export fn wasm_frame_vec_new(out: ?*FrameVec, size: usize, src: ?[*]const ?*
     @memcpy(buf, src.?[0..size]);
     o.* = .{ .size = size, .data = buf.ptr };
 }
+pub export fn wasm_frame_vec_copy(out: ?*FrameVec, src: ?*const FrameVec) callconv(.c) void {
+    const o = out orelse return;
+    const s = src orelse {
+        o.* = .{ .size = 0, .data = null };
+        return;
+    };
+    if (s.size == 0 or s.data == null) {
+        o.* = .{ .size = 0, .data = null };
+        return;
+    }
+    // Deep copy — each vec owns its own frames (shallow would double-free).
+    const buf = std.heap.c_allocator.alloc(?*Frame, s.size) catch {
+        o.* = .{ .size = 0, .data = null };
+        return;
+    };
+    for (s.data.?[0..s.size], 0..) |opt, i| {
+        buf[i] = if (opt) |fr| wasm_frame_copy(fr) else null;
+    }
+    o.* = .{ .size = s.size, .data = buf.ptr };
+}
 pub export fn wasm_frame_vec_delete(v: ?*FrameVec) callconv(.c) void {
     const handle = v orelse return;
     if (handle.data) |dp| {
@@ -292,6 +312,23 @@ test "wasm_frame: copy/accessors + vec delete-cascade; trap origin null + trace 
     wasm_trap_trace(null, &trace);
     try testing.expectEqual(@as(usize, 0), trace.size);
     wasm_frame_delete(null); // null-tolerant
+}
+
+test "wasm_frame_vec_copy: deep-independent copy + null discipline" {
+    var fr0: Frame = .{ .instance = null, .func_index = 1, .func_offset = 8, .module_offset = 16 };
+    var fr1: Frame = .{ .instance = null, .func_index = 2, .func_offset = 24, .module_offset = 48 };
+    var elems = [_]?*Frame{ wasm_frame_copy(&fr0), wasm_frame_copy(&fr1) };
+    var v: FrameVec = undefined;
+    wasm_frame_vec_new(&v, elems.len, &elems);
+    var c: FrameVec = undefined;
+    wasm_frame_vec_copy(&c, &v);
+    try testing.expectEqual(@as(usize, 2), c.size);
+    try testing.expect(v.data.? != c.data.?); // independent array
+    try testing.expect(v.data.?[1].? != c.data.?[1].?); // independent frames (deep copy)
+    try testing.expectEqual(@as(u32, 2), wasm_frame_func_index(c.data.?[1].?));
+    wasm_frame_vec_delete(&v);
+    wasm_frame_vec_delete(&c);
+    wasm_frame_vec_copy(null, null); // null-tolerant
 }
 
 test "wasm_trap_new / message / delete: round-trip from caller-supplied message" {
