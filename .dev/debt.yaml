@@ -1000,21 +1000,25 @@ entries:
     layer: "code"
     status: "note"
     description: |-
-      **note (§16.5 dogfooding c6 sweep, minor Zig-facade ergonomics): `Module.instantiate` collapses every
-      failure to `error.InstantiateFailed`.** The no-imports convenience path (`src/zwasm/module.zig`) maps
-      `wasm_instance_new` → null to a single `InstantiateError{InstantiateFailed}`, so a trapping `(start)`
-      function or an allocation failure loses detail — the underlying c_api sets a `diagnostic.lastDiagnostic()`
-      that is never surfaced as a typed Zig error. By contrast `Linker.instantiate` (the imports path) already has
-      a rich `LinkError` (UnknownImport / ImportKindMismatch / SignatureMismatch / …). LOW priority: a no-import
-      module rarely fails to instantiate (start-trap or OOM only), and the c_api diagnostic remains queryable.
-      DISCHARGE: enrich `InstantiateError` (e.g. surface a start-function trap as the specific `Trap` variant,
-      distinguish alloc failure) by reading `diagnostic.lastDiagnostic()` in `Module.instantiate`, OR accept the
-      coarse error as the documented v0.1 shape. Not a §16.5 blocker — found by the c6 completeness sweep.
+      **note (§16.5/§16.7: `wasm_instance_new` start-trap is dropped — affects BOTH the C-API and the Zig
+      facade).** Investigated 2026-06-05 (corrects an earlier wrong note that said "the c_api sets a
+      diagnostic"): a trapping `(start)` function is caught at `src/api/instance.zig:758` by a bare
+      `dispatch.run(...) catch { failBuiltInstance(...); return null; }` — the trap error is **DISCARDED, no
+      diagnostic set** (all instantiate-failure paths there are bare `catch {}`). And `wasm_instance_new`'s
+      `trap_out` param (the wasm-c-api-standard way to report a start-trap) is **stubbed** (`_ = trap_out;`,
+      instance.zig:575). So a C host AND `Module.instantiate` both get a bare `null` / `InstantiateFailed` with no
+      trap detail. Scope is therefore NOT a "minor facade tweak" — the proper fix WIRES `trap_out`: capture the
+      err at :758 → build a `wasm_trap_t` (message from the trap kind) → write `trap_out`; then C hosts read it and
+      `Module.instantiate` passes a `trap_out`, mapping it to a typed error (`InstantiateError = {InstantiateFailed}
+      || Trap`). LOW priority (no-import start-traps are rare) but it's a real C-API completeness gap, likely its
+      own small ADR (trap_out wiring is a surface decision). `Linker.instantiate` is unaffected (its `LinkError`
+      covers the imports path). DISCHARGE: wire trap_out + map in both surfaces, OR accept the coarse error as v0.1.
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-05"
     refs: |-
-      src/zwasm/module.zig (instantiate → InstantiateFailed); src/zwasm/instance.zig (InvokeError is the rich
-      template); src/zwasm/linker.zig (LinkError rich errors); ADR-0109 §3.6; ROADMAP §16.5
+      src/api/instance.zig:575 (trap_out stubbed), :758 (start-trap catch{} discards err, no setDiag);
+      src/zwasm/module.zig (instantiate → InstantiateFailed); include/wasm.h (wasm_instance_new trap_out);
+      src/zwasm/instance.zig (InvokeError/mapDispatchErr = the Trap-mapping template); ADR-0109 §3.6
   - id: "D-276"
     layer: "code"
     status: "note"
