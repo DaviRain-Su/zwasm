@@ -48,6 +48,7 @@ pub const Trap = @import("zwasm/instance.zig").Trap;
 pub const TypedFunc = @import("zwasm/typed_func.zig").TypedFunc;
 pub const Memory = @import("zwasm/memory.zig").Memory;
 pub const Global = @import("zwasm/global.zig").Global;
+pub const Table = @import("zwasm/table.zig").Table;
 pub const Linker = @import("zwasm/linker.zig").Linker;
 pub const Caller = @import("zwasm/caller.zig").Caller;
 
@@ -890,4 +891,33 @@ test "zwasm facade T1.14: Instance.global get/set + immutable rejection (D-272)"
     try std.testing.expectError(error.Immutable, g_imm.set(.{ .i32 = 0 }));
 
     try std.testing.expect(inst.global("nope") == null);
+}
+
+// T1.15 fixture — (module (table (export "t") 2 externref))
+const facade_table_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x04, 0x04, 0x01, 0x6f, 0x00, 0x02, // table: externref, min 2
+    0x07, 0x05, 0x01, 0x01, 0x74, 0x01, 0x00, // export "t" table 0
+};
+
+test "zwasm facade T1.15: Instance.table get/set/size/grow (D-272)" {
+    var eng = try Engine.init(std.testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&facade_table_wasm);
+    defer mod.deinit();
+    var inst = try mod.instantiate(.{});
+    defer inst.deinit();
+
+    const t = inst.table("t") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u32, 2), t.size());
+    try std.testing.expect((try t.get(0)).externref == null);
+    try t.set(0, .{ .externref = 0xABCD });
+    try std.testing.expectEqual(@as(?u64, 0xABCD), (try t.get(0)).externref);
+    try std.testing.expectError(error.OutOfBounds, t.get(2));
+
+    try t.grow(1, .{ .externref = null });
+    try std.testing.expectEqual(@as(u32, 3), t.size());
+    try std.testing.expect((try t.get(2)).externref == null);
+
+    try std.testing.expect(inst.table("nope") == null);
 }

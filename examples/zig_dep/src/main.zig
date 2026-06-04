@@ -49,6 +49,13 @@ const global_wasm = [_]u8{
     0x74, 0x65, 0x72, 0x03, 0x00,
 };
 
+// (module (table (export "t") 2 externref))
+const table_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x04, 0x04, 0x01, 0x6f, 0x00, 0x02, 0x07, 0x05,
+    0x01, 0x01, 0x74, 0x01, 0x00,
+};
+
 fn hostAdd(_: *Caller, a: i32, b: i32) i32 {
     return a +% b;
 }
@@ -117,5 +124,20 @@ pub fn main() !void {
         const v = counter.get().i32;
         std.debug.print("zwasm zig_dep: global counter = {d}\n", .{v});
         if (v != 42) std.process.exit(7);
+    }
+
+    // (5) Read/write/grow an exported table via the Table accessor (D-272).
+    {
+        var mod = try eng.compile(&table_wasm);
+        defer mod.deinit();
+        var inst = try mod.instantiate(.{});
+        defer inst.deinit();
+
+        const t = inst.table("t") orelse std.process.exit(8);
+        try t.set(1, .{ .externref = 0xCAFE });
+        try t.grow(2, .{ .externref = null });
+        const slot = (try t.get(1)).externref orelse std.process.exit(9);
+        std.debug.print("zwasm zig_dep: table[1]=0x{x} size={d}\n", .{ slot, t.size() });
+        if (slot != 0xCAFE or t.size() != 4) std.process.exit(10);
     }
 }

@@ -21,6 +21,7 @@ const _zir = @import("../ir/zir.zig");
 
 const _memory = @import("memory.zig");
 const _global = @import("global.zig");
+const _table = @import("table.zig");
 const _typed_func = @import("typed_func.zig");
 const _vc = @import("value_conv.zig");
 const _zwasm = @import("../zwasm.zig");
@@ -92,6 +93,27 @@ pub const Instance = struct {
                 .global_idx = exp.idx,
                 .valtype = et.global.valtype,
                 .mutable = et.global.mutable,
+            };
+        }
+        return null;
+    }
+
+    /// Wasm spec §4.4.6/7 — accessor for an exported table by name
+    /// (D-272). Returns null if the name has no matching export, the
+    /// export isn't a table, or its slot is missing. The returned
+    /// `Table` reads/writes the live runtime table (`get`/`set`/`size`/
+    /// `grow`).
+    pub fn table(self: *Instance, name: []const u8) ?_table.Table {
+        const rt = self.handle.runtime orelse return null;
+        for (self.handle.exports_storage, self.handle.export_types) |exp, et| {
+            if (!std.mem.eql(u8, exp.name, name)) continue;
+            if (exp.kind != .table) return null;
+            if (exp.idx >= rt.tables.len) return null;
+            return .{
+                .rt = rt,
+                .table_idx = exp.idx,
+                .elem_type = et.table.elem_type,
+                .max = et.table.max,
             };
         }
         return null;
