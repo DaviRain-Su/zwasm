@@ -117,6 +117,70 @@ pub fn encMul4S(rd: Vn, rn: Vn, rm: Vn) u32 {
 }
 
 // =====================================================================
+// Widening multiply (SMULL/UMULL + SMULL2/UMULL2) — Advanced SIMD
+// "three different", opcode=1100. Base SMULL.8H = 0x0E20C000; +U
+// (0x2000_0000) = unsigned; +Q (0x4000_0000) = the "2" (high-half
+// source lanes); size[23:22] = 00 (.8H←.8B) / 01 (.4S←.4H) / 10
+// (.2D←.2S). Plus ADDP (three-same, opcode=10111) for the dot
+// pairwise reduce. ALL constants verified via `clang -c` + `otool
+// -tvVj` (D-246: i32x4.dot_i16x8_s + i{16x8,32x4,64x2}.extmul_*).
+// =====================================================================
+
+/// `SMULL V<d>.8H, V<n>.8B, V<m>.8B` — signed widen-mul i8→i16, low 8 lanes.
+pub fn encSmull8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x0E20C000 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `SMULL2 V<d>.8H, V<n>.16B, V<m>.16B` — signed widen-mul i8→i16, high 8 lanes.
+pub fn encSmull2_8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E20C000 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `UMULL V<d>.8H, V<n>.8B, V<m>.8B` — unsigned widen-mul i8→i16, low 8 lanes.
+pub fn encUmull8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x2E20C000 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `UMULL2 V<d>.8H, V<n>.16B, V<m>.16B` — unsigned widen-mul i8→i16, high 8 lanes.
+pub fn encUmull2_8H(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E20C000 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `SMULL V<d>.4S, V<n>.4H, V<m>.4H` — signed widen-mul i16→i32, low 4 lanes.
+pub fn encSmull4S(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x0E60C000 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `SMULL2 V<d>.4S, V<n>.8H, V<m>.8H` — signed widen-mul i16→i32, high 4 lanes.
+pub fn encSmull2_4S(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4E60C000 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `UMULL V<d>.4S, V<n>.4H, V<m>.4H` — unsigned widen-mul i16→i32, low 4 lanes.
+pub fn encUmull4S(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x2E60C000 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `UMULL2 V<d>.4S, V<n>.8H, V<m>.8H` — unsigned widen-mul i16→i32, high 4 lanes.
+pub fn encUmull2_4S(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6E60C000 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `SMULL V<d>.2D, V<n>.2S, V<m>.2S` — signed widen-mul i32→i64, low 2 lanes.
+pub fn encSmull2D(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x0EA0C000 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `SMULL2 V<d>.2D, V<n>.4S, V<m>.4S` — signed widen-mul i32→i64, high 2 lanes.
+pub fn encSmull2_2D(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4EA0C000 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `UMULL V<d>.2D, V<n>.2S, V<m>.2S` — unsigned widen-mul i32→i64, low 2 lanes.
+pub fn encUmull2D(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x2EA0C000 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `UMULL2 V<d>.2D, V<n>.4S, V<m>.4S` — unsigned widen-mul i32→i64, high 2 lanes.
+pub fn encUmull2_2D(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x6EA0C000 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+/// `ADDP V<d>.4S, V<n>.4S, V<m>.4S` — pairwise add adjacent i32 lanes
+/// (used to reduce dot's 8 partial products to 4). Three-same, opcode 10111.
+pub fn encAddp4S(rd: Vn, rn: Vn, rm: Vn) u32 {
+    return 0x4EA0BC00 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | @as(u32, rd);
+}
+
+// =====================================================================
 // Integer unops (abs / neg / popcnt) — Advanced SIMD two-reg misc,
 // Q=1, opcode=01011 (ABS/NEG) or 00101 (CNT, byte-only). U=0 → ABS,
 // U=1 → NEG. size[23:22] selects 16B/8H/4S/2D. Constants verified
@@ -743,6 +807,28 @@ test "encAdd4S: V31, V31, V31" {
 test "encAdd4S vs encOrrV16B: distinct opcodes (4S add ≠ 16B or)" {
     // Sanity: same operands produce different bytes.
     try testing.expect(encAdd4S(0, 1, 2) != inst_neon.encOrrV16B(0, 1, 2));
+}
+
+// D-246: widening multiply + ADDP. Expected bytes verified via
+// `clang -c` + `otool -tvVj` of `(s|u)mull(2)?` + `addp` on v0,v1,v2.
+test "encSmull/Umull + Addp: V0,V1,V2 verified vs clang" {
+    // .8H (i8→i16)
+    try testing.expectEqual(@as(u32, 0x0E22C020), encSmull8H(0, 1, 2));
+    try testing.expectEqual(@as(u32, 0x4E22C020), encSmull2_8H(0, 1, 2));
+    try testing.expectEqual(@as(u32, 0x2E22C020), encUmull8H(0, 1, 2));
+    try testing.expectEqual(@as(u32, 0x6E22C020), encUmull2_8H(0, 1, 2));
+    // .4S (i16→i32)
+    try testing.expectEqual(@as(u32, 0x0E62C020), encSmull4S(0, 1, 2));
+    try testing.expectEqual(@as(u32, 0x4E62C020), encSmull2_4S(0, 1, 2));
+    try testing.expectEqual(@as(u32, 0x2E62C020), encUmull4S(0, 1, 2));
+    try testing.expectEqual(@as(u32, 0x6E62C020), encUmull2_4S(0, 1, 2));
+    // .2D (i32→i64)
+    try testing.expectEqual(@as(u32, 0x0EA2C020), encSmull2D(0, 1, 2));
+    try testing.expectEqual(@as(u32, 0x4EA2C020), encSmull2_2D(0, 1, 2));
+    try testing.expectEqual(@as(u32, 0x2EA2C020), encUmull2D(0, 1, 2));
+    try testing.expectEqual(@as(u32, 0x6EA2C020), encUmull2_2D(0, 1, 2));
+    // ADDP.4S
+    try testing.expectEqual(@as(u32, 0x4EA2BC20), encAddp4S(0, 1, 2));
 }
 
 // §9.9 / 9.9-f-7 — int-unop encoders. Expected bytes verified via
