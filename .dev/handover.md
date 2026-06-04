@@ -31,7 +31,7 @@
 ## Active bundle
 
 - **Bundle-ID**: 16.6-gc-on-jit-memsafety (D-258 → D-261)
-- **Cycles-remaining**: ~2
+- **Cycles-remaining**: ~0 (impl DONE on Mac; awaiting ubuntu `test-all` verification → then close + §16.6 [x])
 - **Continuity-memo**: JIT collect = **conservative-scan-only** (`JitRuntime` has no `*Runtime`; collector
   `walkRootsImpl` does `scanNativeStackRoots` then `self.runtime orelse return` — so no-Runtime collect already
   works). SAFE because GC-on-JIT is **pure-JIT** (no interp↔JIT call bridging; ADR-0128 §22 precise rooting is
@@ -45,14 +45,12 @@
   (test); (D-261) an adversarial test — a JIT fn holding a GcRef across a collect-forcing `struct.new`/`array.new`
   asserts the object SURVIVES (not swept) — green on Mac + `run_remote_ubuntu test-all` (D-262: trampoline is
   per-arch emit) + windowsmini at phase boundary, under ReleaseSafe.
-- **Done so far (`<this-commit>`)**: ADR-0160 (design + pure-JIT justification). **Test harness**:
-  `runner.JitInstance.init(alloc, &bytes)` is the richer harness (used across `runner_gc_test.zig`); the heap is
-  set up by `setup.setupRuntime` (→ `RuntimeOwned`) and reachable as `JitRuntime.gc_heap` (downcast `*Heap`).
-  NEXT IMPL: (1) find/add a `JitInstance` accessor to the `*Heap` (to set `pressure_bytes`/`next_gc_at` low +
-  read `gc_cycles`); (2) add `root_scope.maybeCollectJit(heap, gti)` (drive collector directly: `coll.scan_native_stack=true`,
-  `coll.collector().walkRoots(markCallbackJit, &coll)` + `.collect()` + `heap.noteCollected()`; new
-  `markCallbackJit` casts ctx→`*MarkSweepCollector`→`markFromRoot`); (3) wire it at `jit_abi.zig:502`/`:523`
-  before `object_alloc`; (4) RED→GREEN D-258 test; (5) D-261 adversarial test.
+- **DONE (Mac green)**: ADR-0160 (`ee91686f`); **D-258** (`3bd04703`) maybeCollectJit + wired both trampolines +
+  RED→GREEN gc_cycles>0 test; **D-261** (`b332081a`) adversarial survival test (held local across collect → A.field
+  stays 42; UAF would slot-reuse → 0). Mac test+lint+zone green. **Residual D-276**: the callee-saved-register-
+  resident worst case isn't independently forced (D-261 covers the held-local shape; zwasm's frame-spilled regalloc
+  makes the common case safe). **BUNDLE CLOSE (next cycle)**: verify ubuntu `test-all` green (Step 0.7) → `bash
+  scripts/check_bundle_active.sh --close` → mark §16.6 [x] → open §16.7 docs.
 
 ## NEXT (autonomous — §16.6 memory-safety → docs; ADR-0156)
 
@@ -65,15 +63,17 @@
 
 ## Step 0.7 (next resume)
 
-**No ubuntu kick this cycle** — this turn is doc-only (ADR-0160 + bundle/handover; no code). Last code-bearing
-HEAD `d4f86450`/`c992899f` already green. Next code = the §16.6 bundle impl. **D-262 rule**: §16.6 wires the JIT
-trampoline (per-arch emit) → `run_remote_ubuntu test-all` before discharge (cross-compile ≠ cross-run). **Gate**:
-Step-5 Mac = `bash scripts/mac_gate.sh`. windowsmini = phase boundary.
+**Verify ubuntu `test-all`** — this turn pushed §16.6 D-258 (`3bd04703`) + D-261 (`b332081a`): wires the JIT GC
+trampoline collect + the conservative-rooting survival test. Kicked `run_remote_ubuntu test-all` (D-262 — the
+collect path runs the platform-specific native-stack scan, so cross-RUN on Linux x86_64 is load-bearing, not just
+cross-compile). Tail `/tmp/ubuntu.log` for `OK (HEAD=…)`. On GREEN → close the bundle + mark §16.6 [x]. On FAIL →
+revert the turn's commits (the rooting may not hold on x86_64 → a real D-261 finding). **Gate**: Step-5 Mac =
+`bash scripts/mac_gate.sh`. windowsmini = Phase 16 completion boundary.
 
 ## Deferred / open debt
 
-- **Memory-safety (highest stakes; §16.6)** — **D-261** GC-on-JIT conservative rooting has NO adversarial test
-  → latent UAF, **blocked on D-258** (JIT-trampoline GC collect trigger). Close D-258 → D-261 before 完成形.
+- **Memory-safety (§16.6)** — **D-258 + D-261 DONE on Mac** (collect trigger wired + adversarial survival test
+  green); awaiting ubuntu `test-all`. Residual **D-276** (callee-saved-register-resident worst case not forced).
 - **Surface residuals** — **D-274** consuming zwasm transitively fetches zlinter (make lazy; §16.5). **D-273**
   CLI flag gap vs wasmtime (`--invoke` args/result-print, `--env`/`--fuel`/`--timeout`) — §16.5. **D-272** Zig
   Global/Table accessors (§16.5). **D-269** val `of.ref`=raw. **D-253** ref machinery (incl. D-253-D

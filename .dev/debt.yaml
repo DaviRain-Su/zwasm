@@ -1077,6 +1077,29 @@ entries:
     refs: |-
       src/zwasm/module.zig (instantiate → InstantiateFailed); src/zwasm/instance.zig (InvokeError is the rich
       template); src/zwasm/linker.zig (LinkError rich errors); ADR-0109 §3.6; ROADMAP §16.5
+  - id: "D-276"
+    layer: "code"
+    status: "note"
+    description: |-
+      **note (§16.6 D-261 strengthening — conservative GC-on-JIT rooting worst case): the D-261 adversarial test
+      (`runner_gc_test.zig`, ADR-0160) verifies a GcRef held in a LOCAL survives a collect-forcing alloc, but does
+      not independently FORCE the callee-saved-register-resident-never-spilled worst case.** The conservative scan
+      finds a live GcRef only if it is ON the native stack at the collection point. ADR-0128 §2's spill-at-call
+      model holds for: caller-saved regs (spilled by the JIT body before the CALL) + callee-saved regs the
+      `callconv(.c)` trampoline itself uses (saved to the trampoline frame). The residual risk: a GcRef sitting in
+      a callee-saved register that NEITHER the JIT body spills NOR the trampoline/collect path touches would stay
+      register-only → missed by the scan → UAF. The D-261 test passes (A survives) in zwasm's actual regalloc
+      shape (deterministic-slot, frame-spilled locals), so the common case is safe; the worst case is not yet
+      proven impossible. DISCHARGE: either (a) audit the JIT regalloc + call-emit to prove zwasm never leaves a
+      live GcRef in an unspilled callee-saved reg across a CALL (then the conservative scan is provably sufficient),
+      or (b) add a register-pressure variant that forces a GcRef register-resident across the collect. Low residual
+      probability (the deep collect call clobbers most callee-saved regs → trampoline saves them), but
+      memory-safety-critical, so worth closing.
+    first_raised: "2026-06-05"
+    last_reviewed: "2026-06-05"
+    refs: |-
+      src/engine/runner_gc_test.zig (D-261 test, b332081a); src/feature/gc/root_scope.zig (maybeCollectJit);
+      src/feature/gc/collector_mark_sweep.zig (scanNativeStackRoots); ADR-0160; ADR-0128 §2; ROADMAP §16.6
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
