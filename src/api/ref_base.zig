@@ -20,6 +20,7 @@ const handles = @import("handles.zig");
 const instance = @import("instance.zig");
 const trap_surface = @import("trap_surface.zig");
 const extern_new = @import("extern_new.zig");
+const types = @import("types.zig"); // test-only: build types for as_ref round-trips
 
 /// Entity identity for the instance-backed handles (func/global/table/memory):
 /// same iff both are backed by the same instance AND the same index; a
@@ -80,6 +81,82 @@ pub export fn wasm_foreign_same(a: ?*const extern_new.Foreign, b: ?*const extern
     return ptrSame(extern_new.Foreign, a, b);
 }
 
+// ===========================================================================
+// as_ref / ref_as (+const) — ADR-0158. A handle's `as_ref` returns a borrowed
+// `ref_view` Ref whose payload is `@intFromPtr(handle)` (object identity);
+// `ref_as_X` recovers it via `@ptrFromInt` (caller-guarantees-type, exactly as
+// `wasm_ref_as_foreign`). The view is cached on the handle + freed in its
+// `wasm_X_delete`. func/foreign as_ref live in extern_new.zig (funcref/externref
+// payload, not object identity). This chunk: global/table/memory; extern/module/
+// trap/instance follow (instance needs the Zone-1 anyopaque ref_view workaround).
+// ===========================================================================
+
+/// Cached object-identity `ref_view` for `handle` (payload `@intFromPtr(obj)`).
+/// `store` is the handle's owning store (instance-backed → instance.store;
+/// standalone → handle.store). Null store/OOM → null.
+fn objAsRef(store: ?*instance.Store, obj: *const anyopaque, slot: *?*handles.Ref) ?*handles.Ref {
+    if (slot.*) |rv| return rv;
+    const s = store orelse return null;
+    const alloc = instance.storeAllocator(s) orelse return null;
+    const rv = alloc.create(handles.Ref) catch return null;
+    rv.* = .{ .instance = null, .ref = @intFromPtr(obj), .store = s };
+    slot.* = rv;
+    return rv;
+}
+
+fn storeOf(inst: ?*instance.Instance, standalone: ?*instance.Store) ?*instance.Store {
+    if (inst) |i| return i.store;
+    return standalone;
+}
+
+pub export fn wasm_global_as_ref(g: ?*handles.Global) callconv(.c) ?*handles.Ref {
+    const h = g orelse return null;
+    return objAsRef(storeOf(h.instance, h.store), h, &h.ref_view);
+}
+pub export fn wasm_ref_as_global(r: ?*handles.Ref) callconv(.c) ?*handles.Global {
+    const h = r orelse return null;
+    if (h.ref == 0) return null;
+    return @ptrFromInt(h.ref);
+}
+pub export fn wasm_global_as_ref_const(g: ?*const handles.Global) callconv(.c) ?*const handles.Ref {
+    return wasm_global_as_ref(@constCast(g));
+}
+pub export fn wasm_ref_as_global_const(r: ?*const handles.Ref) callconv(.c) ?*const handles.Global {
+    return wasm_ref_as_global(@constCast(r));
+}
+
+pub export fn wasm_table_as_ref(t: ?*handles.Table) callconv(.c) ?*handles.Ref {
+    const h = t orelse return null;
+    return objAsRef(storeOf(h.instance, h.store), h, &h.ref_view);
+}
+pub export fn wasm_ref_as_table(r: ?*handles.Ref) callconv(.c) ?*handles.Table {
+    const h = r orelse return null;
+    if (h.ref == 0) return null;
+    return @ptrFromInt(h.ref);
+}
+pub export fn wasm_table_as_ref_const(t: ?*const handles.Table) callconv(.c) ?*const handles.Ref {
+    return wasm_table_as_ref(@constCast(t));
+}
+pub export fn wasm_ref_as_table_const(r: ?*const handles.Ref) callconv(.c) ?*const handles.Table {
+    return wasm_ref_as_table(@constCast(r));
+}
+
+pub export fn wasm_memory_as_ref(m: ?*handles.Memory) callconv(.c) ?*handles.Ref {
+    const h = m orelse return null;
+    return objAsRef(storeOf(h.instance, h.store), h, &h.ref_view);
+}
+pub export fn wasm_ref_as_memory(r: ?*handles.Ref) callconv(.c) ?*handles.Memory {
+    const h = r orelse return null;
+    if (h.ref == 0) return null;
+    return @ptrFromInt(h.ref);
+}
+pub export fn wasm_memory_as_ref_const(m: ?*const handles.Memory) callconv(.c) ?*const handles.Ref {
+    return wasm_memory_as_ref(@constCast(m));
+}
+pub export fn wasm_ref_as_memory_const(r: ?*const handles.Ref) callconv(.c) ?*const handles.Memory {
+    return wasm_ref_as_memory(@constCast(r));
+}
+
 test "wasm_X_same: entity-identity (func/global/table/memory) + pointer (instance/module/trap/foreign)" {
     const inst_a: *instance.Instance = @ptrFromInt(0x1000); // fake, never deref'd by `same`
     var f1: handles.Func = .{ .instance = inst_a, .func_idx = 3 };
@@ -113,4 +190,44 @@ test "wasm_X_same: entity-identity (func/global/table/memory) + pointer (instanc
     try testing.expect(wasm_instance_same(null, null));
     try testing.expect(wasm_module_same(null, null));
     try testing.expect(wasm_foreign_same(null, null));
+}
+
+test "as_ref / ref_as round-trip (global/table/memory) — object identity + cache + null discipline" {
+    const e = instance.wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer instance.wasm_engine_delete(e);
+    const s = instance.wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer instance.wasm_store_delete(s);
+
+    // memory — full round-trip + cache + lifetime.
+    var mlim: types.Limits = .{ .min = 1, .max = 0xffff_ffff };
+    const mt = types.wasm_memorytype_new(&mlim) orelse return error.MemTypeAllocFailed;
+    defer types.wasm_memorytype_delete(mt);
+    const mem = extern_new.wasm_memory_new(s, mt) orelse return error.MemoryAllocFailed;
+    const mref = wasm_memory_as_ref(mem) orelse return error.NoRef;
+    try testing.expectEqual(mem, wasm_ref_as_memory(mref).?); // round-trip → same handle
+    try testing.expectEqual(mref, wasm_memory_as_ref(mem).?); // cached view (same Ref)
+    instance.wasm_memory_delete(mem); // frees the ref_view (no leak/UAF)
+
+    // global — round-trip.
+    const gt = types.wasm_globaltype_new(types.wasm_valtype_new(0), 0) orelse return error.GtAllocFailed;
+    defer types.wasm_globaltype_delete(gt);
+    var gval: instance.Val = .{ .kind = .i32, .of = .{ .i32 = 7 } };
+    const glob = extern_new.wasm_global_new(s, gt, &gval) orelse return error.GlobalAllocFailed;
+    const gref = wasm_global_as_ref(glob) orelse return error.NoRef;
+    try testing.expectEqual(glob, wasm_ref_as_global(gref).?);
+    instance.wasm_global_delete(glob);
+
+    // table — round-trip.
+    var tlim: types.Limits = .{ .min = 1, .max = 0xffff_ffff };
+    const tt = types.wasm_tabletype_new(types.wasm_valtype_new(129), &tlim) orelse return error.TtAllocFailed;
+    defer types.wasm_tabletype_delete(tt);
+    const tbl = extern_new.wasm_table_new(s, tt, null) orelse return error.TableAllocFailed;
+    const tref = wasm_table_as_ref(tbl) orelse return error.NoRef;
+    try testing.expectEqual(tbl, wasm_ref_as_table(tref).?);
+    instance.wasm_table_delete(tbl);
+
+    // null discipline.
+    try testing.expect(wasm_memory_as_ref(null) == null);
+    try testing.expect(wasm_ref_as_memory(null) == null);
+    try testing.expect(wasm_global_as_ref(null) == null);
 }

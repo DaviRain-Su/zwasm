@@ -1063,6 +1063,7 @@ pub export fn wasm_global_delete(g: ?*Global) callconv(.c) void {
     const store = if (handle.instance) |inst| (inst.store orelse return) else (handle.store orelse return);
     const alloc = storeAllocator(store) orelse return;
     if (handle.extern_view) |v| alloc.destroy(v);
+    if (handle.ref_view) |rv| alloc.destroy(rv); // object-identity as_ref view (ADR-0158)
     if (handle.cell) |c| alloc.destroy(c); // standalone own-cell (instance-backed: null)
     alloc.destroy(handle);
 }
@@ -1131,6 +1132,7 @@ pub export fn wasm_memory_delete(m: ?*Memory) callconv(.c) void {
     const store = if (handle.instance) |inst| (inst.store orelse return) else (handle.store orelse return);
     const alloc = storeAllocator(store) orelse return;
     if (handle.extern_view) |v| alloc.destroy(v);
+    if (handle.ref_view) |rv| alloc.destroy(rv); // object-identity as_ref view (ADR-0158)
     if (handle.minst) |mi| { // standalone host memory: free its own backing
         if (mi.bytes.len > 0) alloc.free(mi.bytes);
         alloc.destroy(mi);
@@ -1238,6 +1240,7 @@ pub export fn wasm_table_delete(t: ?*Table) callconv(.c) void {
     const store = if (handle.instance) |inst| (inst.store orelse return) else (handle.store orelse return);
     const alloc = storeAllocator(store) orelse return;
     if (handle.extern_view) |v| alloc.destroy(v);
+    if (handle.ref_view) |rv| alloc.destroy(rv); // object-identity as_ref view (ADR-0158)
     if (handle.tinst) |ti| { // standalone host table: free its own backing
         alloc.free(ti.refs);
         alloc.destroy(ti);

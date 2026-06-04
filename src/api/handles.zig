@@ -106,6 +106,9 @@ pub const Global = struct {
     mutable: bool,
     /// Cached borrowed extern view (see `Func.extern_view`).
     extern_view: ?*Extern = null,
+    /// Cached borrowed `wasm_ref_t` view (`wasm_global_as_ref`, ADR-0158;
+    /// payload = `@intFromPtr(self)`; freed in `wasm_global_delete`).
+    ref_view: ?*Ref = null,
     /// Host-created standalone global only (`wasm_global_new`,
     /// `instance == null`): the owned `*Value` backing cell. The
     /// get/set accessors read/write this when there is no instance;
@@ -156,6 +159,9 @@ pub const Table = struct {
     max: ?u32,
     /// Cached borrowed extern view (see `Func.extern_view`).
     extern_view: ?*Extern = null,
+    /// Cached borrowed `wasm_ref_t` view (`wasm_table_as_ref`, ADR-0158;
+    /// payload = `@intFromPtr(self)`; freed in `wasm_table_delete`).
+    ref_view: ?*Ref = null,
     /// Host-created standalone table only (`wasm_table_new`,
     /// `instance == null`): the owned `*TableInstance` backing
     /// (`refs` slice). Accessors use this when there is no instance;
@@ -184,6 +190,9 @@ pub const Memory = struct {
     memory_idx: u32 = 0,
     /// Cached borrowed extern view (see `Func.extern_view`).
     extern_view: ?*Extern = null,
+    /// Cached borrowed `wasm_ref_t` view (`wasm_memory_as_ref`, ADR-0158;
+    /// payload = `@intFromPtr(self)`; freed in `wasm_memory_delete`).
+    ref_view: ?*Ref = null,
     /// Host-created standalone memory only (`wasm_memory_new`,
     /// `instance == null`): the owned `*MemoryInstance` backing. The
     /// accessors read/grow this when there is no instance; it is shared
