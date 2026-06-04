@@ -963,26 +963,33 @@ entries:
     layer: "code"
     status: "now"
     description: |-
-      **v2-jit load/store codegen is ~2.2× SLOWER than v1-jit** (MEASURED at §15.P, 2026-06-04, ReleaseFast,
-      Mac aarch64). Pure 20M-iter load+store loop: v2/v1 = 2.21×; reproduced on heapsort (2.38×) + memmove
-      (1.98×). Compute is the opposite — v2 is FASTER on all 12 SIMD ops (0.52–0.96×), keccak (0.05×, 20×),
-      gimli (0.87×), scalar reg loops (parity), and the 50M v128 loop (0.49×). So the gap is SPECIFIC to the
-      memory-access (effective-address + load/store) emit path. Full data: bench/results/s15p_parity_vs_v1.md.
-      Hypothesis (verified at 2026-06-04 = the 2.2× is real + memory-specific; root cause NOT yet bisected):
-      v2 emits per-access bounds checks and/or recomputed effective addresses each iteration that v1 elides or
-      hoists (cf. ADR-0151's empty `simd_base_special`/address-cache scaffolding). FIRST root-cause question:
-      does v1 bounds-check at all on these loads? If v1 is unsafe-by-omission, the gap is a safety/perf tradeoff,
-      not a pure codegen loss — measure that before "fixing". DISCHARGE: bisect the load/store emit (arm64
-      op_mem / address compute), measure a bounds-check-hoist or base-addr-cache experiment (commit/revert per
-      measure-first), land it if ROI holds OR document why the safety cost makes it not-worth. NOTE: v2-jit is
-      compute-only (ADR-0136, no WASI) so this matters for the compute/embedding JIT path, not WASI programs
-      (which run on the interp default). Surfaced by §15.P parity measurement (D-263).
+      **v2-jit generates ~2.3× SLOWER code for loops whose body READS a loop-carried local** (MEASURED + A/B
+      BISECTED at §15.P, 2026-06-04, ReleaseFast, Mac aarch64). NOT memory-access, NOT ALU-op-specific (the
+      initial "memory-access 2.2×" framing was confounded — heapsort/memmove/mem_loop all index via the loop
+      counter). Decisive A/B (identical loop, only the body differs): `a=a+CONST` (body does NOT read i) →
+      v2/v1=0.96× PARITY; `a=a+i` (body READS i) → v2/v1=2.30×. Same i32.add both. Confirmed across mul/and/shl/
+      or (2.1–2.9×) and load/store (2.2–2.4×) — all share "body reads the mutated loop counter". v2 is FASTER on
+      compute that does NOT re-read a hot loop local: all 12 SIMD ops (0.52–0.96×), keccak 20×, gimli, the 50M
+      v128 loop (0.49×, accumulator-only). Full data: bench/results/s15p_parity_vs_v1.md; repro
+      private/spikes/s15p-parity/w45_addi.wat vs w45_addc.wat.
+      Hypothesis (verified 2026-06-04 = the trigger is decisively "body reads loop-carried local"; the MECHANISM
+      is strong-inference-not-yet-dumped): v2's single-pass greedy spill-everything slot allocator reloads the
+      loop local from its stack slot on each body use (and/or fails to keep it register-resident across the
+      iteration), where v1 keeps it pinned in a register. **This CONTRADICTS the §15.2/15.3 "~0 regalloc
+      headroom" folds (ADR-0149/0150)** — those measured spill-traffic as % of TOTAL instructions (wrong proxy:
+      a reload in a 3-instr hot loop is ~0% of program but ~2× of that loop's wall-clock). DISCHARGE: (1) confirm
+      the mechanism by dumping v2's emitted inner loop for w45_addi (regalloc spill of i); (2) measure a fix that
+      keeps loop-carried locals register-resident across the body (commit/revert per measure-first) — ROI is ~2×
+      on the extremely common "loop body uses the index" pattern, so likely high; (3) re-examine whether
+      ADR-0149/0150 need a Revision note (the headroom they declared unreachable is reachable on this pattern).
+      NOTE: v2-jit is compute-only (ADR-0136, no WASI) → matters for the compute/embedding JIT path.
     first_raised: "2026-06-04"
     last_reviewed: "2026-06-04"
     refs: |-
-      bench/results/s15p_parity_vs_v1.md; private/spikes/s15p-parity/ (w45_mem_loop.wat repro); ADR-0151
-      (W43 base-addr cache + simd_base_special scaffolding); ROADMAP §15.P; D-263 (parity-never-measured, now
-      measured); src/engine/codegen/arm64/ (load/store emit); ~/Documents/MyProducts/zwasm (v1 JIT comparator)
+      bench/results/s15p_parity_vs_v1.md; private/spikes/s15p-parity/ (w45_addi vs w45_addc decisive A/B);
+      ADR-0149 (§15.2 slot-alias fold) + ADR-0150 (§15.3 fold) — CONTRADICTED by this pattern; ROADMAP §15.P;
+      D-263 (parity now measured); src/engine/codegen/arm64/emit.zig + gpr regalloc; ~/Documents/MyProducts/zwasm
+      (v1 JIT comparator, keeps loop locals register-pinned)
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.

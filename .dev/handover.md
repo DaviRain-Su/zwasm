@@ -7,19 +7,23 @@
 
 - **Bundle-ID**: 15.P-parity-vs-v1 (Phase-15 close: parity measured → investigate the one regression → close)
 - **Cycles-remaining**: ~2–3 (root-cause D-265 memory-access gap → measure fix ROI → close §15.P + Phase 15)
-- **Continuity-memo**: §15.P parity MEASURED this turn (data: `bench/results/s15p_parity_vs_v1.md`). v1 built at
-  `~/Documents/MyProducts/zwasm` (`zig build -Doptimize=ReleaseFast`); v2 ReleaseFast. Compare v1 `run <wasm>`
-  (default JIT) vs v2 `run --engine=jit <wasm>`. **Methodology constraint**: v2-jit is compute-only (ADR-0136,
-  no WASI) → only 4 realworld fixtures JIT-runnable (gimli/heapsort/keccak/memmove); TinyGo all trap on fd_write.
-  **Findings**: v2-jit FASTER on compute (all 12 SIMD 0.52–0.96×, keccak 20×, gimli, scalar-loop parity, v128
-  loop 0.49×) but **~2.2× SLOWER on memory-access** (load+store loop 2.21×, heapsort 2.38×, memmove 1.98×) →
-  **D-265**. **W45 verdict: folded, data-backed** (v2 v128-loop 2× faster than v1 → re-open trigger NOT met).
-  Repro fixtures: `private/spikes/s15p-parity/` (gitignored). **NEXT** = root-cause D-265: bisect arm64 load/store
-  emit (is it per-access bounds checks v1 elides? FIRST check if v1 even bounds-checks → safety/perf tradeoff?);
-  measure a bounds-check-hoist / base-addr-cache experiment (commit/revert per measure-first); land if ROI holds.
-- **Exit-condition**: D-265 root-caused + a fix ROI-measured (landed if it holds, else documented why-not) →
-  then §15.P close (record done, W45 done) → widget 15 → DONE + Phase 16 inline expand. **DECISION FLAGGED to
-  user**: whether to fix the 2.2× memory-access gap before v0.1.0 or ship + defer D-265 to Phase 16.
+- **Continuity-memo**: §15.P parity MEASURED + D-265 root-cause BISECTED (data: `bench/results/s15p_parity_vs_v1.md`).
+  v1 built at `~/Documents/MyProducts/zwasm` (ReleaseFast); v2 ReleaseFast. Compare v1 `run <wasm>` (default JIT)
+  vs v2 `run --engine=jit <wasm>` (compute-only per ADR-0136 → only gimli/heapsort/keccak/memmove JIT-runnable;
+  TinyGo trap on fd_write). **Findings**: v2-jit FASTER on compute (all 12 SIMD 0.52–0.96×, keccak 20×, gimli,
+  v128 loop 0.49×) but **~2.3× SLOWER when a loop body READS a loop-carried local** (= D-265). **Decisive A/B**:
+  `a=a+CONST` (no i read) → 0.96× parity; `a=a+i` (reads i) → 2.30× — SAME i32.add. NOT memory/ALU-specific (was
+  confounded: heapsort/memmove all index via i). Mechanism (inferred): v2's spill-everything slot allocator
+  reloads the loop local each body use; v1 register-pins it. **CONTRADICTS §15.2/15.3 ~0-headroom folds**
+  (ADR-0149/0150 measured spill % of TOTAL instrs — wrong proxy for hot-loop wall-clock). **W45 verdict: folded,
+  data-backed** (v2 v128-loop 2× faster). Repro: `private/spikes/s15p-parity/w45_addi.wat` vs `w45_addc.wat`.
+  **NEXT** = (1) confirm spill mechanism by dumping v2's emitted inner loop for w45_addi (read arm64
+  `emit.zig`+gpr regalloc; find where `local.get` of a loop-resident local emits a slot reload); (2) measure a fix
+  keeping loop-carried locals register-resident across the body (commit/revert per measure-first).
+- **Exit-condition**: D-265 mechanism confirmed + a fix ROI-measured (landed if it holds, else documented why-not)
+  + ADR-0149/0150 Revision note (headroom reachable on this pattern) → then §15.P close → widget 15 → DONE +
+  Phase 16 inline expand. **DECISION FLAGGED to user**: fix the ~2.3× loop-local regalloc gap before v0.1.0
+  (Phase 15 = "perf parity" → arguably in-mission), or ship + defer D-265 to Phase 16.
 
 ## Current state
 
@@ -80,8 +84,9 @@ a passing run = error-path noise — EXIT authoritative. **D-262 process fix**: 
   topology (cross-compile≠cross-run; D-260 symptom). **D-263** (NOW) parity-vs-v1 — MEASURED at §15.P
   (`bench/results/s15p_parity_vs_v1.md`); surfaced **D-265**. **D-210** (blocked-by) cohort root fix recurring at
   4 seams (D-142/206/210/245) — decide root-vs-patch.
-- **D-265** (NOW, §15.P bundle) v2-jit memory-access ~2.2× slower than v1 (compute/SIMD faster) — root-cause +
-  measure fix. **D-258** (NOW) JIT-trampoline GC collect trigger. **D-211** (blocked-by) precise GcRootMap.
+- **D-265** (NOW, §15.P bundle) v2-jit ~2.3× slower when a loop body reads a loop-carried local (regalloc
+  spill; bisected; contradicts §15.2/15.3 folds) — confirm mechanism + measure fix. **D-258** (NOW)
+  JIT-trampoline GC collect trigger. **D-211** (blocked-by) precise GcRootMap.
   **D-257** (partial) 10 lesson `Citing`. **D-259** (note) spillBytes footprint. **D-255** C-API WASI io.
   **D-254** rust 3-OS. **D-253** §13.2 host_info. **D-251** WASI in AOT. **D-249** win bench. **D-238** x86_64
   EH thunk. D-234/237/229/231/204/209/213.

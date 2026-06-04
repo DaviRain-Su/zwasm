@@ -25,12 +25,14 @@ compute/embedding path (where the §15.2/15.3/15.4 perf folds applied).
 | simd/* (all 12 ops) | SIMD compute | 8–14 | 4–12 | **0.52–0.96× (v2 faster on ALL 12)** |
 | shootout/keccak | bitwise/permute | 148.6 | 7.1 | **0.05× (v2 20× faster)** |
 | shootout/gimli | bitwise/permute | 6.3 | 5.4 | 0.87× (v2 faster) |
-| w45_scalar_loop (50M i32.add) | scalar reg loop | 27.7 | 27.4 | 0.99× (parity) |
-| w45_simd_loop (50M f32x4.add) | v128 reg loop | 67.1 | 33.1 | **0.49× (v2 2× faster)** |
-| **shootout/heapsort** | sort (load/store-heavy) | 727 | 1735 | **2.38× (v2 SLOWER)** |
-| **shootout/memmove** | memory copy | 130 | 258 | **1.98× (v2 SLOWER)** |
-| **w45_mem_loop (20M load+store)** | pure load/store | 17.7 | 39.1 | **2.21× (v2 SLOWER)** |
-| w45_baseline (50M counter-only) | near-empty loop | 27.2 | 62.7 | 2.31× (v2 slower, edge) |
+| w45_scalar_loop (a=a+CONST) | body does NOT read i | 27.7 | 27.4 | 0.99× (parity) |
+| **w45_addc (a=a+CONST, 20M)** | **A/B control: no i read** | 12.7 | 12.3 | **0.96× (parity)** |
+| **w45_addi (a=a+i, 20M)** | **A/B: body READS i** | 12.4 | 28.4 | **2.30× (SLOWER)** |
+| w45_mul / and / shl / or | body reads i (via op) | 12.1–12.5 | 26–37 | 2.1–2.9× (SLOWER) |
+| w45_simd_loop (50M f32x4.add) | v128 accumulator (no i read) | 67.1 | 33.1 | **0.49× (v2 2× faster)** |
+| shootout/heapsort | sort (indexes via i) | 727 | 1735 | 2.38× (SLOWER) |
+| shootout/memmove | copy (indexes via i) | 130 | 258 | 1.98× (SLOWER) |
+| w45_mem_loop (20M load+store) | indexes via i | 17.7 | 39.1 | 2.21× (SLOWER) |
 
 ## Findings
 
@@ -38,14 +40,19 @@ compute/embedding path (where the §15.2/15.3/15.4 perf folds applied).
    bitwise/permute (keccak 20×, gimli), scalar register loops (parity). The
    §15.2/15.3/15.4 fold conclusion ("v2 emit already efficient") **holds for the
    compute/register axis**.
-2. **v2-jit is ~2.2× SLOWER on memory-access-heavy workloads** — confirmed by a
-   pure 20M load+store control (2.21×), and reproduced on heapsort (2.38×) +
-   memmove (1.98×). The load/store emit path is the v2-jit gap vs v1. **→ D-265.**
-   Leading hypothesis: v2 emits per-access bounds checks / recomputed effective
-   addresses that v1 elides or hoists (cf. the empty `simd_base_special` /
-   address-cache scaffolding noted in ADR-0151). Whether v1 is *safe* there
-   (does it bounds-check?) is the first root-cause question — the gap may be a
-   safety/perf tradeoff, not pure codegen loss.
+2. **v2-jit is ~2.3× SLOWER for loops whose body READS a loop-carried local**
+   — NOT memory-access (the initial framing was confounded). **A/B bisected**
+   (identical loop, only body differs): `a=a+CONST` (body doesn't read i) →
+   **0.96× parity**; `a=a+i` (body reads i) → **2.30×**. Same `i32.add` both.
+   Holds across mul/and/shl/or (2.1–2.9×) and load/store (2.2–2.4×) — all share
+   "body re-reads the mutated loop counter". heapsort/memmove/mem_loop showed it
+   only because array indexing reads `i`. **→ D-265.** Mechanism (strong
+   inference): v2's single-pass spill-everything slot allocator reloads the loop
+   local each body use; v1 keeps it register-pinned. **This contradicts the
+   §15.2/15.3 "~0 regalloc headroom" folds** (ADR-0149/0150) — they measured spill
+   traffic as % of *total* instructions, the wrong proxy (one reload in a 3-instr
+   hot loop ≈ 0% of the program but ≈2× of that loop's wall-clock).
+   Bisection fixtures: `private/spikes/s15p-parity/w45_{addi,addc,mul,and,shl,or}.wat`.
 3. **W45 verdict (ADR-0151 gate): folded, data-backed.** The 50M-iter v128-local
    loop runs **2× FASTER on v2** than v1 (0.49×) → v2's per-iteration v128-reload
    does NOT dominate → ADR-0151's "re-open W45 if v2 lags" trigger is NOT met →
