@@ -10,13 +10,14 @@ Read [`REWORK.md`](../.claude/skills/continue/REWORK.md). Bundle mode nests insi
 
 - **Campaign-ID**: regalloc-resident-locals (D-265) — the single-pass baseline 完成形 (keep hot locals
   register-resident, as v1 does; within P3/P6, NOT an optimising tier). This IS the §15.P parity-achievement work.
-- **Phase**: **IV — implementation. ✅ STAGE 1 LANDED** (`a64c72a1`). I/II/III DONE (ADR-0155 register-homed
-  locals, fix A = APPEND pseudo-vregs at highest ids → no renumbering → no break of liveness block/br arithmetic;
-  the prior-spike prepend bug). New SSOT `src/ir/analysis/local_homing.zig` (every pass re-derives the plan →
-  can't drift). **ROI: w45_addi 2.30× → 0.97× (parity, target ≤1.1× MET)**; all gates green (test-edge-cases 0
-  failed incl. the NEW clang-O0 `homed_local_membase_loop` fixture that repro'd the spike's arr_sum/fp_sum
-  miscompile; `zig build test` exit 0; test-spec 9/0; lint + x86_64 cross-compile clean). Stage-1 gates: aarch64
-  only / declared i32-i64 locals only (params+fp+v128+GcRef slot-homed) / no-call fns only / cap 6.
+- **Phase**: **IV — implementation. ✅ STAGES 1+2 LANDED** (1=`a64c72a1`, 2=`5d1dd221`). I/II/III DONE (ADR-0155
+  register-homed locals; SSOT `src/ir/analysis/local_homing.zig`, every pass re-derives plan → can't drift; fix A
+  = APPEND pseudo-vregs at highest ids → no renumbering). **Stage 1**: declared i32/i64 locals → register home in
+  CALL-FREE fns (w45_addi **2.30×→0.97×**). **Stage 2**: widened to fns with PLAIN calls — `op_call.zig` spills
+  caller-saved homed locals (X9-X13) to slot before BL/BLR + reloads after (Option A, v1-style); callee-saved
+  (X20-X22) survive, skipped; tail calls emit neither. Gate narrowed `isCallLike`→`isTrampolineLike` (only
+  GC/memory trampolines gate off now = stage 2b). All gates green incl. NEW fixtures `homed_local_membase_loop`
+  + `homed_local_across_call`. Gates still: aarch64 only / declared i32-i64 only / GcRef+fp+v128 slot-homed.
 - **Phase I result**: D-265 = v2-jit ~2.3× slower than v1 when a loop body reads a loop-carried local (A/B:
   `a=a+i` 2.30× vs `a=a+CONST` 0.96×; not memory/ALU — confounded earlier). MECHANISM (`emit.zig:910-968`): every
   `local.get` = `next_vreg++` + `LDR [SP,#local_off]`; no residency cache. ROI ceiling = v1 parity (known
@@ -30,14 +31,15 @@ Read [`REWORK.md`](../.claude/skills/continue/REWORK.md). Bundle mode nests insi
   adversarial test is **D-258-blocked**; it converts to a **Phase III DESIGN CONSTRAINT** (rework MUST keep
   GcRefs slot-resident across any potential collection point — register-residency for non-ref locals, ref-locals
   spill at collection sites), with the JIT adversarial test deferred to when D-258 lands.
-- **NEXT — Phase IV stage 2 (call-site spill/reload)**. Stage 1 homes locals only in CALL-FREE functions (a homed
-  local in a caller-saved reg would be clobbered across a call). Stage 2: at each call site, spill homed locals
-  that live in caller-saved registers to their `local_base_off` slots, reload after — then drop the no-call gate
-  in `local_homing.zig isCallLike`. Survey v1's call-site local spill (`jit.zig:1705-1719`) + v2's ABI
-  cohort/caller-saved set. Add a Phase-II fixture: a homed local read across a call (correctness). Then stage 3
-  (FP/v128 homes, V16-V28 class) / stage 4 (x86_64 parity, P7 — the big one, gated K=0 today). Each: net green
-  every commit + ubuntu test-all. **ubuntu test-all kicked this turn** against stage 1 (x86_64 K=0-gated → expect
-  no behavior change; Step 0.7 verifies). All autonomous per the philosophy.
+- **NEXT — Phase IV stage 3 (FP/v128 local homes)**: home f32/f64/v128 declared locals into the FP/v128 register
+  class (V16-V28, D-036; `max_reg_slots_fp`) — extend `local_homing.isHomeableType` to f32/f64/v128, add an
+  FP-class home reservation in regalloc + FP prologue-seed + `local.get/set` FP reg refs + FP call-site spill
+  (the f-class caller-saved). Add a fixture: a v128/f32 local carried across a loop. Then **stage 4 (x86_64
+  parity, P7 — the big one)**: port the whole homing to the x86_64 emitter (drop the aarch64-only K=0 gate);
+  reuses the SSOT `local_homing.plan`. Also possible: **stage 2b** (home across GC/memory trampolines —
+  `memory.grow`/`struct.new`/`array.*` — needs GcRef-collection-point spill, ties to D-258/D-261). Each stage:
+  net green every commit + ubuntu test-all (D-262). **ubuntu test-all kicked this turn** against stage 2 (op_call
+  is arm64-only + x86_64 K=0-gated → expect no x86_64 change; Step 0.7 verifies). All autonomous.
 
 ## Current state
 
@@ -51,9 +53,10 @@ Read [`REWORK.md`](../.claude/skills/continue/REWORK.md). Bundle mode nests insi
 
 ## Step 0.7 (next resume)
 
-D-265 STAGE 1 + x86_64 test-gate fix **2-host VERIFIED GREEN** (`44ca450a`, ubuntu OK). Stage 2 (call-site spill,
-Option A) IN PROGRESS via subagent → its commit will kick ubuntu; Step 0.7 next resume verifies that.
-(`510ffce9`/`3a778080`/`a64c72a1`/`7152021c` validated; do NOT revert.) **NOTE** (lesson
+D-265 STAGES 1+2 LANDED (1 2-host green `44ca450a`; 2 = `5d1dd221`, all Mac gates green: test-edge-cases 80/0,
+the new `homed_local_across_call`=20 fixture + arr_sum/fp_sum/rust_fib pass, w45_addi 0.998×). **ubuntu test-all
+kicked against stage 2** (op_call arm64-only + x86_64 K=0-gated → expect no x86_64 change) → Step 0.7 next resume
+verifies green (revert stage-2 commit on red). (`a64c72a1`/`7152021c`/`5d1dd221` validated; do NOT revert.) **NOTE** (lesson
 `gate-tail-vs-exit-code`): benign `failed command: …--listen=-` / SlotOverflow / `arm64/emit: failing op` next to
 a passing run = error-path noise — EXIT authoritative. **D-262 process fix**: any NEW per-arch emit chunk → run
 `run_remote_ubuntu test-all` (NOT narrow `test`) before discharge (cross-compile ≠ cross-run).
