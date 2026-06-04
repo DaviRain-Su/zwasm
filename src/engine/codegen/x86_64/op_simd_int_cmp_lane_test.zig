@@ -997,7 +997,7 @@ test "emitI16x8ExtaddPairwiseI8x16U: PCMPEQB + PABSB + MOVAPS + PMADDUBSW (4 ins
     try testing.expectEqualSlices(u8, expected.items, buf.items);
 }
 
-test "emitI16x8ExtaddPairwiseI8x16S: PCMPEQB + PABSB + PMADDUBSW (3 instr; dst holds +1 mask)" {
+test "emitI16x8ExtaddPairwiseI8x16S: PCMPEQB + PABSB scratch, MOVAPS dst, PMADDUBSW (4 instr; +1 mask built in XMM14 to keep src intact under dst==src alias)" {
     var slot_ids = [_]u16{ 0, 1 };
     const alloc: regalloc.Allocation = .{
         .slots = &slot_ids,
@@ -1017,8 +1017,12 @@ test "emitI16x8ExtaddPairwiseI8x16S: PCMPEQB + PABSB + PMADDUBSW (3 instr; dst h
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
-    try expected.appendSlice(testing.allocator, inst.encPcmpeqB(.xmm9, .xmm9).slice());
-    try expected.appendSlice(testing.allocator, inst.encPabsb(.xmm9, .xmm9).slice());
+    // +1 constant built in XMM14 (scratch), then MOVAPS into dst,
+    // then PMADDUBSW(dst, src). dst(xmm9) != src(xmm8) so no XMM7
+    // stash on this path.
+    try expected.appendSlice(testing.allocator, inst.encPcmpeqB(.xmm14, .xmm14).slice());
+    try expected.appendSlice(testing.allocator, inst.encPabsb(.xmm14, .xmm14).slice());
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm9, .xmm14).slice());
     try expected.appendSlice(testing.allocator, inst.encPmaddubsw(.xmm9, .xmm8).slice());
     try testing.expectEqualSlices(u8, expected.items, buf.items);
 }

@@ -1019,11 +1019,69 @@ pub fn emitI16x8AvgrU(allocator: Allocator, buf: *std.ArrayList(u8), alloc: rega
 }
 
 /// Wasm spec §4.4.4 (i16x8.q15mulr_sat_s) — Q15-format multiply
-/// with rounding and saturating clamp to i16. PMULHRSW (SSSE3,
-/// `lower.isle:1287-1294`) implements exactly this in 1
-/// instruction; reuses op_simd.emitV128IntBinop.
+/// with rounding and saturating clamp to i16: result =
+/// sat_s16(round((a*b) / 2^15)). PMULHRSW (SSSE3) computes the
+/// round-and-shift but does NOT saturate the single overflowing
+/// case: when a == b == -32768 (0x8000), round((-32768)^2 / 2^15)
+/// = +32768 which PMULHRSW wraps to 0x8000 (-32768). The Wasm spec
+/// (and arm64 SQRDMULH) require saturation to +32767 (0x7FFF).
+///
+/// Correction: every genuine PMULHRSW result lies in [-32767,
+/// +32767] (|round(a*b/2^15)| ≤ 32767 for a,b in [-32768,32767]),
+/// so a raw output of exactly 0x8000 occurs ONLY in the
+/// a==b==-32768 overflow lane (verified exhaustively). Detect
+/// product lanes equal to 0x8000 and flip them to 0x7FFF:
+///   splat = 0x8000-per-word            (PCMPEQW ones; PSLLW 15)
+///   prod  = PMULHRSW(a, b)
+///   ovf   = PCMPEQW(prod, splat)        (0xFFFF where prod==0x8000)
+///   result = prod XOR ovf               (0x8000 XOR 0xFFFF = 0x7FFF)
+/// XOR 0x0000 leaves every non-overflow lane unchanged.
+///
+/// Only XMM7 (the project SIMD scratch) is free here: XMM14/XMM15
+/// are the spill-staging registers that `xmmLoadSpilledV128` /
+/// `xmmDefSpilledV128` may already hold the inputs/result in
+/// (ADR-0053), so the splat mask + overflow detect both reuse
+/// dst / XMM7 only.
 pub fn emitI16x8Q15mulrSatS(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
-    return op_simd.emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmulhrsw);
+    if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
+    const rhs_v = pushed_vregs.pop().?;
+    const lhs_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const rhs_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, rhs_v, 0);
+    const lhs_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, lhs_v, 1);
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 1);
+    const splat: inst.Xmm = .xmm7; // 0x8000-per-word, then overflow mask
+
+    // Stash rhs through XMM14 staging is unavailable (it may hold a
+    // spilled input); instead compute the product into dst first
+    // and re-read it for the overflow compare — dst is the only
+    // register that survives the PMULHRSW write, so no input alias
+    // can corrupt the compare.
+    var rhs_for_op = rhs_x;
+    if (dst_x != lhs_x and dst_x == rhs_x) {
+        // dst aliases rhs: MOVAPS dst,lhs would clobber rhs before
+        // PMULHRSW reads it. Stash rhs through XMM7 (reused as splat
+        // afterwards — splat is only needed post-product).
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(.xmm7, rhs_x).slice());
+        rhs_for_op = .xmm7;
+    }
+    if (dst_x != lhs_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, lhs_x).slice());
+    }
+    // dst = round-mul-shift(a, b).
+    try buf.appendSlice(allocator, inst.encPmulhrsw(dst_x, rhs_for_op).slice());
+    // splat (XMM7) = 0x8000 per word.
+    try buf.appendSlice(allocator, inst.encPcmpeqW(splat, splat).slice());
+    try buf.appendSlice(allocator, inst.encPsllwImm(splat, 15).slice());
+    // splat := (dst == 0x8000) ? 0xFFFF : 0x0000 — the overflow mask.
+    try buf.appendSlice(allocator, inst.encPcmpeqW(splat, dst_x).slice());
+    // dst ^= overflow mask: 0x8000 -> 0x7FFF on overflow lanes only.
+    try buf.appendSlice(allocator, inst.encPxor(dst_x, splat).slice());
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 1);
+    try pushed_vregs.append(allocator, result_v);
 }
 
 /// Wasm spec §4.4.4 (i32x4.dot_i16x8_s) — pairwise dot product

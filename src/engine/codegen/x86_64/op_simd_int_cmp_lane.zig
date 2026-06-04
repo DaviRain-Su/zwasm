@@ -2100,7 +2100,17 @@ pub fn emitI32x4ExtaddPairwiseI16x8U(allocator: Allocator, buf: *std.ArrayList(u
 /// add adjacent signed i8 lanes, widening to i16. Same PMADDUBSW
 /// recipe as the unsigned variant but with operand roles swapped:
 /// the +1 vector goes into the unsigned slot (dst) so PMADDUBSW
-/// reads the source's signed bytes correctly. 4-instr recipe.
+/// reads the source's signed bytes correctly.
+///
+/// The +1 constant is built in a scratch (XMM14), NOT directly in
+/// dst: regalloc's LIFO slot-reuse can alias `dst == src` for a
+/// 1-pop op (src dies here, its slot reused for the result).
+/// Building 0x01 straight into dst via PCMPEQB(dst,dst) would then
+/// clobber src before PMADDUBSW reads it — yielding 1*1+1*1 = 2
+/// per lane instead of the pairwise byte sum. Stash src through
+/// XMM7 on the alias path (D-066 / D-071 mirror; the `_u` variant
+/// already keeps its constant out of dst, so it was never hit).
+/// 4-instr recipe (+1 MOVAPS stash on the alias case).
 pub fn emitI16x8ExtaddPairwiseI8x16S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const src_v = pushed_vregs.pop().?;
@@ -2110,12 +2120,22 @@ pub fn emitI16x8ExtaddPairwiseI8x16S(allocator: Allocator, buf: *std.ArrayList(u
 
     const src_x = try gpr.resolveXmm(alloc, src_v);
     const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const ones = abi.fp_spill_stage_xmms[0]; // XMM14 — 0x01-per-byte
 
-    // 1-2: dst = 0x01 per byte (read as unsigned 1 by PMADDUBSW).
-    try buf.appendSlice(allocator, inst.encPcmpeqB(dst_x, dst_x).slice());
-    try buf.appendSlice(allocator, inst.encPabsb(dst_x, dst_x).slice());
-    // 3: PMADDUBSW dst, src — result_word = unsigned(1)*signed(b0)
+    // 1-2: ones = 0x01 per byte (read as unsigned 1 by PMADDUBSW).
+    try buf.appendSlice(allocator, inst.encPcmpeqB(ones, ones).slice());
+    try buf.appendSlice(allocator, inst.encPabsb(ones, ones).slice());
+    // 3: dst = ones (the unsigned operand). When dst aliases src,
+    // stash src through XMM7 first so PMADDUBSW still sees the
+    // original signed bytes.
+    var src_for_op = src_x;
+    if (dst_x == src_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(.xmm7, src_x).slice());
+        src_for_op = .xmm7;
+    }
+    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, ones).slice());
+    // 4: PMADDUBSW dst, src — result_word = unsigned(1)*signed(b0)
     // + unsigned(1)*signed(b1) = i8 + i8 (sign-extended sum).
-    try buf.appendSlice(allocator, inst.encPmaddubsw(dst_x, src_x).slice());
+    try buf.appendSlice(allocator, inst.encPmaddubsw(dst_x, src_for_op).slice());
     try pushed_vregs.append(allocator, result_v);
 }

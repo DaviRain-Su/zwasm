@@ -437,7 +437,7 @@ test "emitI32x4Add: spilled rhs loads via MOVUPS stage XMM14 (ADR-0053 Part 3)" 
     try testing.expectEqual(@as(u8, 0x10), buf.items[2]);
 }
 
-test "emitI16x8Q15mulrSatS: PMULHRSW dst, src" {
+test "emitI16x8Q15mulrSatS: PMULHRSW + saturate a==b==0x8000 overflow lanes to 0x7FFF" {
     var slot_ids = [_]u16{ 0, 1, 2 };
     const alloc: regalloc.Allocation = .{
         .slots = &slot_ids,
@@ -458,9 +458,16 @@ test "emitI16x8Q15mulrSatS: PMULHRSW dst, src" {
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
-    // emitV128IntBinop: MOVAPS dst, lhs (when dst != lhs); ENC dst, rhs.
+    // lhs=vreg0(xmm8), rhs=vreg1(xmm9), dst=vreg2(xmm10); dst aliases
+    // neither input → no XMM7 stash. MOVAPS dst,lhs; PMULHRSW dst,rhs;
+    // then build splat(0x8000) in XMM7, PCMPEQW(XMM7,dst) → overflow
+    // mask, PXOR dst,XMM7 saturates the a==b==-32768 lane to 0x7FFF.
     try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm10, .xmm8).slice());
     try expected.appendSlice(testing.allocator, inst.encPmulhrsw(.xmm10, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encPcmpeqW(.xmm7, .xmm7).slice());
+    try expected.appendSlice(testing.allocator, inst.encPsllwImm(.xmm7, 15).slice());
+    try expected.appendSlice(testing.allocator, inst.encPcmpeqW(.xmm7, .xmm10).slice());
+    try expected.appendSlice(testing.allocator, inst.encPxor(.xmm10, .xmm7).slice());
     try testing.expectEqualSlices(u8, expected.items, buf.items);
 }
 
