@@ -89,6 +89,40 @@ Test: if you would re-arm `/continue` to immediately work on
 this thing next cycle → bundle. If you're noting "this needs
 fixing eventually" → debt row.
 
+## Structural rework campaign (ADR-0153)
+
+When a **measured** structural deficiency in a 完成形 dimension
+(clean / full-featured / 100% spec / **lightweight-yet-fast**) — a
+canonical case: a **v1-parity miss** (§1.2) rooted in a deliberate v2
+simplification (e.g. D-265: deterministic-slot regalloc ~2.3× slower
+than v1 on loop-locals) — cannot be closed by a quick local fix, open a
+**rework campaign**: a multi-bundle, five-phase, correctness-first
+redesign. Full mechanics: sibling [`REWORK.md`](REWORK.md).
+
+**Default posture (ADR-0153): schedule the rework, do NOT defer past
+v0.1.0.** v0.1.0 timing never gates the decision; correctness + design
+quality do (design priority: memory
+`feedback_design_priority_completeness_over_v010`). The rework stays
+WITHIN the inviolable principles — P3/P6 single-pass, no optimising
+tier (§1.3/§3.2); a rework needing a P3/P6 violation STOPS for a
+P-level ADR + user decision.
+
+Five ordered phases, **I + II are hard gates before any redesign code**:
+**I Investigation** (mechanism confirmed + ROI measured + blast-radius
+mapped → findings doc) · **II Correctness-assurance FIRST**
+(characterization + **adversarial** tests pin current behaviour so the
+rework cannot silently regress — the 正しさ担保 gate; closes D-261-class
+"no adversarial test" gaps first) · **III Design** (ADR + anti-regression
+invariants + incremental migration) · **IV Implementation** (TDD, full
+test net green at EVERY commit, perf measured at milestones) ·
+**V Retrospective** (hit the 完成形? new debt? Revision note on the
+superseded simplification ADR). Correctness-first ordering (II before
+IV) is a hard invariant — never optimise an area you cannot prove you
+have not broken.
+
+Detection: handover `## Active rework campaign` (Resume Step 1c).
+Bundle mode is used WITHIN a campaign phase for continuity.
+
 ## Resume procedure (run on every session pickup)
 
 Outline (full details in [`RESUME.md`](RESUME.md)):
@@ -102,8 +136,17 @@ Outline (full details in [`RESUME.md`](RESUME.md)):
     sequence supersedes ROADMAP for this session.
 1b. **Bundle override (NEW)** — handover has `## Active bundle` with
     non-met exit-condition → bundle-next-step supersedes ROADMAP.
+    (If a `## Active rework campaign` is ALSO present, 1c is the outer
+    frame and is checked first — this bundle is its current-phase
+    continuity.)
+1c. **Campaign override (ADR-0153)** — **checked before 1b.** handover
+    has `## Active rework campaign` → it is the outer frame; its
+    current-phase next-step supersedes ROADMAP. Read [`REWORK.md`](REWORK.md);
+    honour the phase order (I+II are hard gates before any redesign
+    code). A nested `## Active bundle` is read as the current phase's
+    per-multi-cycle continuity (1b mechanics apply WITHIN the phase).
 2. **Read ROADMAP** — Phase Status widget + first `[ ]` row. Skip
-    when Step 1a / 1b fired.
+    when Step 1a / 1b / 1c fired.
 3. **git log + status** — clean: proceed. Uncommitted in-flight:
    complete or stash. Local ahead of origin: push immediately.
 4. **Step 0.4 — Lesson scan** ([`RESUME.md`](RESUME.md#step-04)).

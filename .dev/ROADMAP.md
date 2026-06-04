@@ -86,6 +86,14 @@ wasm-c-api standardisation:**
 | Binary footprint           | 1.20–1.60 MB stripped                                         | comparable (no fixed numeric target — see §12) |
 | **wasm-c-api conformance** | **Custom ABI only**                                            | **Standard `wasm.h` + `zwasm.h` extensions**     |
 
+> **Parity is the line (ADR-0153).** A *measured* v0.1.0 parity miss vs
+> v1 rooted in a deliberate v2 simplification (e.g. D-265: the
+> single-pass deterministic-slot regalloc is ~2.3× slower than v1 on
+> loop-locals) is **scheduled as a correctness-first rework campaign**
+> (`.claude/skills/continue/REWORK.md`), not deferred past v0.1.0 — v0.1.0
+> is not urgent; parity + design quality gate it. The rework improves the
+> **single-pass baseline** within P3/P6 (no optimising tier, §1.3/§3.2).
+
 ### 1.3 v0.2.0 line and beyond (post-v0.1.0)
 
 Explicitly **not** in v0.1.0 scope:

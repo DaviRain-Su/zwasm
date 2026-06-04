@@ -571,6 +571,13 @@ See [`.claude/rules/spike_discipline.md`](../../rules/spike_discipline.md)
 (landed at close-plan §6 (d)) for the full spike discipline this
 rule references.
 
+When several `architectural` chunks chain into a cross-layer redesign
+of a hot / correctness-critical path (the design itself in question, not
+just one feature), that is a **structural rework campaign** — see
+[`REWORK.md`](REWORK.md) (ADR-0153). The campaign is the outer frame
+(investigation → correctness-assurance → design → impl → retrospective);
+each `architectural`/`emit` chunk + bundle runs inside one of its phases.
+
 ### Chunk-table schema in `.dev/phase_log/<phase>.md`
 
 Forward-going schema (= applies from the next new chunk row):

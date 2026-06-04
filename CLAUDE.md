@@ -80,6 +80,16 @@ text or code identifiers.
 ## Working agreement (short list)
 
 - TDD: red → green → refactor.
+- **Design priority (ADR-0153)**: the bar is clean final design +
+  full-featured + 100% spec + **lightweight-yet-fast**. A *measured*
+  structural deficiency in one of those — esp. a v1-parity miss (§1.2)
+  rooted in a deliberate v2 simplification — **schedules a rework, not a
+  defer-past-v0.1.0** (v0.1.0 is not urgent; correctness + design
+  quality gate, not the date). Run it as a correctness-first
+  **rework campaign** per
+  [`continue/REWORK.md`](.claude/skills/continue/REWORK.md) (I+II hard
+  gates before redesign code), WITHIN single-pass P3/P6 (no optimising
+  tier). Never over correctness.
 - Step 0 Survey before each task per
   [`textbook_survey.md`](.claude/rules/textbook_survey.md). No copy-paste
   from v1 per [`no_copy_from_v1.md`](.claude/rules/no_copy_from_v1.md).
