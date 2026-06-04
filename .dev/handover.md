@@ -31,9 +31,9 @@
   Sequence: ✅A type accessors (6, `c3a979fa`) → ✅B per-type vec ops (24, `2116a18b`, PtrVecOps unify) →
   ✅C config (3) + ✅D val_copy/delete (2, POD) → ✅instance.zig split (`092196b6`, ADR-0157 → handles.zig) →
   ✅E1+E2+E3a host_info COMPLETE (27) → E3b ref-cast/same/copy: ✅ADR-0158 + ✅E3b-1 same (9, `7236237c`) +
-  ✅E3b same(9) + as_ref/ref_as all 9 types(28) DONE → E3b-3 copy: ✅func/global/table/memory(4) →
-  **E3b-3b copy extern/module/trap + instance/foreign(null)(5)** → F tagtype/EH(12) → G serialize/share(5).
-  Gap 67→24. (extern_vec_copy + tagtype_vec also deferred: wasm_extern_copy lands in E3b-3b; TagType in F.)
+  ✅**E3b ref-cast COMPLETE** — same(9) + as_ref/ref_as all 9 types(28) + copy all 9 types + extern_vec_copy →
+  **F tagtype/EH(13) → G module serialize/share(5)**. Gap 67→18. F = the wasm_tagtype_* family (EH tag type);
+  G = serialize/deserialize/share/obtain/shared_module_delete (heavy, own ADR).
 - **Exit-condition**: `capi_surface_gap.sh` gap → 0 (or each residual category has an ADR/debt justifying
   deferral); then close §16.2 [x].
 
@@ -49,16 +49,16 @@
 - **✅ E3b-2** (global/table/memory `as_ref`/`ref_as`+const, `2474f1c2`): the `objAsRef` helper in `ref_base.zig`
   (cached `ref_view`, payload `@intFromPtr`), `ref_view` fields on the 3 structs, freed in their `_delete`;
   round-trip + lifetime test green. Gap 58→46.
-- **✅ E3b-3a copy** func/global/table/memory (`cloneEntity` in ref_base.zig: instance-backed shallow clone with
-  views nulled = same-entity + independently deletable; standalone-owner → null per D-253-D). Test: clone via
-  memory-export module (same + indep-delete) + standalone→null. Gap 28→24.
-- **§16.2 chunk E3b-3b `wasm_X_copy` (extern/module/trap/instance/foreign) — NEXT** (5 fns, ADR-0158):
-  • **extern** instance-backed → new Extern + cloned contained handle (funcCopy/etc, instance-backed), borrowed=false,
-  views nulled; borrowed/standalone → null. **wasm_extern_copy unblocks `extern_vec_copy`** (add that too via the
-  PtrVecOps copy, +1). • **module** → deep-clone (dup `bytes_ptr` + same store, null views) — fresh independent
-  handle. • **trap** → deep-clone (dup message, same store/kind, null views). • **instance** → null (owns arena/
-  runtime; can't clone — D-253-D). • **foreign** → null (owns host_info; share=double-finalize, fresh=loses
-  identity — D-253-D). TDD. Then F (tagtype/EH — `TagType`), G (serialize — own ADR).
+- **✅ E3b ref-cast COMPLETE** (E3b-3b copy: extern deep-clones contained handle; module dups bytes; trap dups
+  message; instance/foreign → null per D-253-D; extern_vec_copy via wasm_extern_copy). `wasm_ref_t` model
+  (ADR-0158) fully implemented across same/as_ref/ref_as/copy for all 9 ref types. Gap 24→18.
+- **§16.2 chunk F (tagtype/EH; 13) — NEXT**: the `wasm_tagtype_*` family — `wasm_tagtype_new(functype)` /
+  `_delete` / `_copy` / `_functype` (a tag wraps a functype), `_as_externtype`(+const) +
+  `wasm_externtype_as_tagtype`(+const), `wasm_tagtype_vec_*` (5, via the types.zig PtrVecOps). Needs a `TagType`
+  type + an `externtype` tag variant. Step 0: survey `src/api/types.zig` (ExternType + as_functype pattern) +
+  how EH tags exist internally (the runtime supports EH). Header decls: include/wasm.h:250-296. Then **G
+  (serialize/share; 5)** — `wasm_module_serialize/_deserialize/_share/_obtain/_shared_module_delete`; heaviest,
+  needs an artifact-persistence design (own ADR). That closes §16.2 (gap→0).
 - After §16.2: §16.3 Zig-API review (reconcile D-267, ADR-0025 Revision), §16.4 CLI あるべき論 review,
   §16.5 dogfooding, §16.6 memory-safety (D-258→D-261), §16.7 docs LAST. Chain; pay debt en route.
 
