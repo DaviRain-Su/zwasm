@@ -10,12 +10,15 @@ Read [`REWORK.md`](../.claude/skills/continue/REWORK.md). Bundle mode nests insi
 
 - **Campaign-ID**: regalloc-resident-locals (D-265) — the single-pass baseline 完成形 (keep hot locals
   register-resident, as v1 does; within P3/P6, NOT an optimising tier). This IS the §15.P parity-achievement work.
-- **Phase**: **IV — implementation. ✅ STAGES 1+2 (arm64) LANDED + 2-host green; stage 4 (x86_64) REVERTED**
-  (`9d15daf7` reverts `f31affa1`). 1=`a64c72a1` (arm64 call-free, w45_addi **2.30×→0.97×**), 2=`5d1dd221` (arm64
-  across-calls, caller-saved spill). **Stage 4 x86_64 port FAILED on ubuntu** (Step 0.7 caught it — Mac can't run
-  x86_64): the simple i32-loop homed fixtures PASS on x86_64, but **i64 (`fac` got 25≠25!) + recursive-call
-  (`rust_fib` got 511≠55) homing MISCOMPILE**. Reverted to restore green. SSOT `local_homing.plan` + arm64 stages
-  1+2 intact. Net: `homed_local_membase_loop` + `homed_local_across_call` + 3 stage-1 (arm64-homed/x86_64-unhomed).
+- **Phase**: **IV — implementation. ✅ STAGES 1+2 (arm64) + 4 REDO (x86_64) LANDED** — register-homing on BOTH
+  backends. 1=`a64c72a1` (arm64 call-free, w45_addi **2.30×→0.97×**), 2=`5d1dd221` (arm64 across-calls), 4-redo=
+  **`e8b7ad10`** (x86_64; the first try `f31affa1` was reverted `9d15daf7` after ubuntu caught i64+recursive
+  miscompiles). **Root causes (OUR logic — they reproduced under Rosetta x86_64-macos, NOT the D-148 Zig-backend
+  class)**: x86_64 allocatable GPRs (RBX/R12-R14) are ALL C-ABI callee-saved but JIT fns never push/restore them.
+  Fix: (1) prologue snapshots home regs + every return path restores (emit.zig+op_control.zig); (2) the first try's
+  "callee-saved→no-spill" op_call no-op was WRONG (JIT callees don't honor callee-saved) → real spill/reload around
+  every CALL. New fixtures `homed_i64_loop` + `homed_local_recursive_call`. **Rosetta-VERIFIED** (edge p9=82/0,
+  rust_fib=55, fac correct, wasm-2.0-assert 25437/0); arm64 byte-identical. **x86_64-LINUX (ubuntu) RUN UNVERIFIED.**
 - **Phase I result**: D-265 = v2-jit ~2.3× slower than v1 when a loop body reads a loop-carried local (A/B:
   `a=a+i` 2.30× vs `a=a+CONST` 0.96×; not memory/ALU — confounded earlier). MECHANISM (`emit.zig:910-968`): every
   `local.get` = `next_vreg++` + `LDR [SP,#local_off]`; no residency cache. ROI ceiling = v1 parity (known
@@ -29,18 +32,17 @@ Read [`REWORK.md`](../.claude/skills/continue/REWORK.md). Bundle mode nests insi
   adversarial test is **D-258-blocked**; it converts to a **Phase III DESIGN CONSTRAINT** (rework MUST keep
   GcRefs slot-resident across any potential collection point — register-residency for non-ref locals, ref-locals
   spill at collection sites), with the JIT adversarial test deferred to when D-258 lands.
-- **NEXT — re-attempt stage 4 (x86_64) with a FASTER debug loop + a stronger net**. The bug is x86_64-specific
-  (i64 + recursive-call homing); Mac can't run x86_64. **KEY: get a LOCAL x86_64 RUN env via Rosetta 2** — build
-  `-Dtarget=x86_64-macos` and run the test/edge binaries under Rosetta on this aarch64 Mac (x86_64-LINUX can't run
-  on Mac, but x86_64-MACOS does via Rosetta). Verify it works first (`zig build test -Dtarget=x86_64-macos` +
-  run the edge-runner). That turns the ubuntu-only loop into a local one. **Then re-implement x86_64 homing**
-  (the reverted diff is in `f31affa1` — study it) but FIX: (a) i64 homed get/set widths/encoding (fac got the
-  input back → the homed i64 local's writes/reads are wrong); (b) recursive-call homing (rust_fib 511≠55 → a
-  homed local corrupted across a call — re-check the "all x86_64 allocatable are callee-saved → spill is no-op"
-  assumption; maybe a homed reg IS clobbered, or the issue is param-vs-local). **Strengthen the net**: add
-  x86_64-runnable fixtures for an i64 loop + a recursive-call-with-homed-local BEFORE re-landing (run them under
-  Rosetta). Then re-verify ubuntu. Once green+ROI → campaign exit (both backends) → Phase V (ADR-0149/0150/0151
-  Revision + close §15.P). Deferred: stage 3 (fp/v128 thin ROI), stage 2b (GC trampolines). All autonomous.
+- **NEXT (clear-session resume) — verify stage-4-redo `e8b7ad10` on x86_64-LINUX (ubuntu), then close the
+  campaign**. The session that landed it was wrapped up (context grown) WITHOUT kicking ubuntu, so there is **no
+  `/tmp/ubuntu.log` for `e8b7ad10`** — Step 0.7 cannot mechanically verify yet. **FIRST ACTION**: `bash
+  scripts/run_remote_ubuntu.sh test-all > /tmp/ubuntu.log 2>&1` (bg) against HEAD `e8b7ad10`, then verify GREEN
+  (the homed fixtures + fac/rust_fib now run HOMED on x86_64-linux there). Mac + Rosetta x86_64-macos are already
+  green. **If ubuntu GREEN** → register-homed i32/i64 locals on BOTH backends = **D-265 campaign exit MET** →
+  **Phase V**: measure x86_64 ROI (ubuntu w45_addi-style bench), ADR-0149/0150 Revision (regalloc headroom real on
+  loop-locals) + ADR-0151 W45 note (matters for scalars), close the campaign + §15.P, flip ROADMAP. **If ubuntu
+  RED** → apply the D-148 diagnostic below (Debug-vs-Release on x86_64-linux; if it's a Zig self-hosted-Debug
+  backend bug → LLVM workaround, not logic; else fix the logic — Rosetta repros our-logic bugs). Deferred: stage 3
+  (fp/v128 thin ROI), stage 2b (GC trampolines, D-258/D-261). All autonomous.
 
 ## Current state
 
@@ -54,11 +56,21 @@ Read [`REWORK.md`](../.claude/skills/continue/REWORK.md). Bundle mode nests insi
 
 ## Step 0.7 (next resume)
 
-D-265 STAGE 4 (x86_64) was REVERTED (`9d15daf7`) — ubuntu Step 0.7 caught i64+recursive miscompiles. Branch back
-to 2-host-green (arm64 stages 1+2). **ubuntu test-all RE-KICKED against the revert HEAD** → Step 0.7 next resume:
-verify GREEN (the revert restores the prior-green state — i64/rust_fib should pass again un-homed). Re-attempt
-stage 4 with Rosetta local x86_64 testing (see NEXT). (`a64c72a1`/`5d1dd221`/`7152021c` validated 2-host; stage 4
-reverted.) **NOTE** (lesson
+**D-265 x86_64 BUG DIAGNOSTIC (user's compiler-bug lens, [[feedback_arch_env_compiler_bug_lens]])**: the ubuntu
+fail is x86_64-LINUX **Debug** (`standardOptimizeOption` default) = the self-hosted backend D-148 found buggy
+(Zig#35343: x86_64-linux Debug miscompile; arm64 + LLVM/Release PASS; workaround `.use_llvm=true`). D-148's repro
+PASSES under Rosetta x86_64-MACOS (Debug+Release) → **Rosetta tests x86_64-macos, NOT x86_64-linux** (diff target →
+diff self-hosted codegen). DIAGNOSTIC when the x86_64-homing subagent reports: (a) fac/rust_fib reproduce under
+Rosetta x86_64-macos → OUR emit logic (fix it); (b) NOT reproducible under Rosetta but ubuntu-Debug fails →
+Zig x86_64-linux-Debug backend bug → fix = LLVM workaround (`.use_llvm=true` on the x86_64 path), NOT logic. Confirm
+on ubuntu: x86_64-linux Debug-fail + ReleaseFast-pass = Zig bug.
+
+D-265 STAGE 4 REDO is COMMITTED (`e8b7ad10`) + Mac/Rosetta-green, but **x86_64-LINUX (ubuntu) is UNVERIFIED — no
+ubuntu kick was run for it** (session wrapped up, context grown). **Clear-session FIRST ACTION = kick ubuntu
+test-all against `e8b7ad10`** (see NEXT) — that IS the deferred Step 0.7. Revert `e8b7ad10` on ubuntu-red (or
+apply the D-148 diagnostic above if it looks like a Zig-backend bug). The bugs the redo fixed DID reproduce under
+Rosetta = our-logic, so ubuntu is expected green. (`a64c72a1`/`5d1dd221`/`7152021c` 2-host; `e8b7ad10` Mac+Rosetta,
+ubuntu pending.) **NOTE** (lesson
 `gate-tail-vs-exit-code`): benign `failed command: …--listen=-` / SlotOverflow / `arm64/emit: failing op` next to
 a passing run = error-path noise — EXIT authoritative. **D-262 process fix**: any NEW per-arch emit chunk → run
 `run_remote_ubuntu test-all` (NOT narrow `test`) before discharge (cross-compile ≠ cross-run).
