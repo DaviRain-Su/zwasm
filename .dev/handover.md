@@ -25,25 +25,23 @@
   fmt-gate; **D-277** zwasm.h; **D-275** `wasm_instance_new` trap_out → `StartTrapped`; **D-276 discharged by
   PROOF** (`4accb556`, ADR-0060 force-spill); **D-274** accepted (zlinter eager fetch, dep slated for Zig-0.17
   removal, `84f8a652`).
-  **Remaining backlog:**
-  - **D-262 (b) PROCESS FIX LANDED this turn** (`5471e5fb`, ADR-0076 **D6**): the background ubuntu gate is now
-    unconditionally `test-all` (classifier drives the foreground Mac gate ONLY) — the eyeballed per-turn ubuntu
-    scope (the D-260 foot-gun) is gone. D6's root insight: D5-b made ubuntu no-wait, so narrow scope there saved
-    zero loop wall-clock while staying a coverage foot-gun. **D-262 stays `now` one more cycle**: its discharge
-    needs the (a) audit RUN — the first D6 `test-all` kick is in-flight this turn; discharge at Step 0.7 GREEN.
+  **D-262 DISCHARGED** (`4ec849c8` audit GREEN: ubuntu x86_64-RUN `test-all` = spec 25437+212 / facade 55 / realworld
+  all MATCH, `OK (HEAD=4ec849c8)`). The D6 process fix (`5471e5fb`) + the green audit close both predicates — gate
+  topology hardened, no latent x86_64 emit bug. **ZERO `now` debt rows remain.**
+
+  **Remaining backlog — all gated/don't-pre-build (no `now`):**
   - **D-273** CLI `--invoke` args + **D-269** callable funcref — wasmtime-parity, **no demonstrated need** (§16.5
-    dogfooding). Per ADR-0159 (evaluate against real need; don't pre-build) → wait for a real consumer need.
-  - **J.3** ~30 `blocked-by` rows (D-007/010/020-028/074, all external/later-blocked) → `suggest meta_audit`
-    (user-gated re-walk). **15.6** (only open ROADMAP `[ ]`) externally blocked on cw-v1 landing (D-264).
+    dogfooding; C/Rust/Zig consumers all exist). Per ADR-0159 (evaluate against real need; don't pre-build).
+  - **J.3** ~30 `blocked-by` rows → `suggest meta_audit` (user-gated). **15.6** (only open ROADMAP `[ ]`) externally
+    blocked on cw-v1 landing (D-264).
+  - **Bucket-3 status**: criteria 1–3 met (no autonomous ROADMAP row, zero `now`, nothing dissolved). Gate = the
+    autonomous-prep-path walk (STOP_BUCKETS §"Autonomous prep paths"). **Walking the last un-pulled lever now**:
+    reference-repo survey of how wasmtime/wasmer/wazero engage the C-API (also honors the standing user directive),
+    captured as ADR enrichment + lesson. After it's recorded, next cycle has a clean bucket-3 assessment.
 
-## Step 0.7 (next resume) — VERIFY THE D6 AUDIT KICK
+## Step 0.7 (next resume) — no kick pending
 
-**ubuntu kick PENDING this turn = `test-all` against `<this turn's HEAD>` (D-262(a) audit + FIRST D6 always-test-all
-kick).** Next cycle: `tail -3 /tmp/ubuntu.log` →
-- **GREEN `OK (HEAD=<sha>)`** → x86_64-RUN of all committed emit passed → **discharge D-262** (`del` the row; both
-  (a)+(b) met) + drop this Step-0.7 note.
-- **FAIL** → a real latent x86_64 emit bug surfaced (exactly D-262's fear) → fix it as a NEW finding; do NOT revert
-  the D6 commit (the topology fix is correct — it's what caught the bug).
+D-262 audit kick already verified GREEN this resume (`OK (HEAD=4ec849c8)`). No `src/` change since → no new kick.
 **Gate**: Step-5 Mac = `bash scripts/mac_gate.sh`. windowsmini = manual-only (ADR-0156: no loop tag).
 
 ## Deferred / open debt (D-274/275/276/257 discharged this session — removed)
