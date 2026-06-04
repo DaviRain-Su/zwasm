@@ -1,6 +1,6 @@
 # 0153 — Structural rework campaign mode + correctness-assured optimization discipline
 
-- **Status**: Proposed (2026-06-04; user-directed instruction-system change — pending user review per "止めて待受け")
+- **Status**: Accepted (2026-06-04; user-directed instruction-system change; hard-gate semantics clarified to AUTONOMOUS self-enforcement per user review — gates order the loop's own work, never a user-intervention point)
 - **Date**: 2026-06-04
 - **Author**: claude (instruction-system rewrite, user-directed)
 - **Tags**: meta, loop, instruction-system, regalloc, perf, correctness, ADR-0118, ADR-0132, design-priority
@@ -47,7 +47,10 @@ locals register-resident, as v1 does — also single-pass), NEVER adds an optimi
 require violating P3/P6 is out of scope and must stop for a P-level ADR + user decision.
 
 **3. Add a structural-rework campaign mode** (`.claude/skills/continue/REWORK.md`), a multi-bundle structure with
-five ordered phases, the first two of which are **hard gates** before any redesign code lands:
+five ordered phases, the first two of which are **hard gates** before any redesign code lands. **"Hard gate" = a
+self-enforced ordering invariant the loop verifies itself (e.g. "is the Phase-II correctness net green?"); it is
+NEVER a user-intervention point.** Campaigns run fully autonomously — open, execute, and close on the loop's own
+judgment, re-arming every cycle. The phases:
   - **I — Investigation** (調査): deep, multi-angle root-cause to a *confirmed mechanism* (not inference) + ROI
     ceiling *measured* + cross-layer blast-radius mapped + candidate approaches with cost/risk. Output = a written
     findings doc. (D-265's `bench/results/s15p_parity_vs_v1.md` is the template.)
@@ -68,9 +71,13 @@ five ordered phases, the first two of which are **hard gates** before any redesi
     to the superseded simplification ADR (e.g. ADR-0149/0150). Institutionalises the retrospective that surfaced
     D-261/262/263.
 
-**4. Correctness-first ordering is a HARD invariant.** Phases I + II MUST complete (findings doc + adversarial
-test net green) before any Phase IV redesign code. You do not optimise an area you cannot prove you have not
-broken. A rework that jumps "found problem → redesign code" is the forbidden anti-pattern.
+**4. Correctness-first ordering is a HARD, SELF-ENFORCED invariant.** Phases I + II MUST complete (findings doc +
+adversarial test net green) before any Phase IV redesign code. The loop verifies this itself and proceeds; it is
+not a user stop. You do not optimise an area you cannot prove you have not broken. A rework that jumps "found
+problem → redesign code" is the forbidden anti-pattern. The default at EVERY campaign decision point (open it?
+phase done? which approach?) is **autonomous philosophy-aligned judgment** (this ADR + the design priority + the
+inviolable principles), never an escalation to the user. Stopping to ask is the over-babysitting anti-pattern;
+the campaign adds no new user-gate beyond the pre-existing rare bucket-2 (a proven ROADMAP §2 conflict).
 
 ## Rejected alternatives
 
@@ -91,4 +98,6 @@ broken. A rework that jumps "found problem → redesign code" is the forbidden a
   lookup, parallel to the bundle override (Step 1b).
 - No inviolable principle changes; ROADMAP §1.2 gains a clarifying note that a measured parity miss is scheduled
   as a correctness-assured rework (this ADR), within single-pass.
-- **Pending user review** (the instruction-system rewrite was directed to stop for review before activation).
+- **Activated after user review (2026-06-04).** The one review correction: hard-gate semantics are AUTONOMOUS
+  self-enforcement (the loop orders its own work), not user-intervention points — campaigns never stop for
+  approval. First campaign opens immediately: **D-265** (single-pass register-resident locals).

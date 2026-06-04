@@ -20,6 +20,17 @@ v0.1.0.** v0.1.0 timing never gates the decision; correctness + design
 quality do. This is the opposite of the old "perf gap → debt-row →
 maybe later" reflex.
 
+**This is an AUTONOMOUS judgment, never a user gate.** Once a 完成形
+deficiency is measured, the loop decides to open the campaign and runs
+it to completion on its own — it does NOT stop to ask permission. The
+project philosophy (this doc + the design priority + the inviolable
+principles) IS the decision criterion: apply it and proceed (re-arm
+every cycle). Stopping to ask "should I do this rework / is this phase
+done?" is the over-babysitting anti-pattern. The only stop is a genuine
+pre-existing bucket-2 (a proven ROADMAP §2 conflict), which is rare and
+already handled by the stop-bucket framework — campaigns add NO new
+user-stop.
+
 **Campaign vs quick fix vs bundle:**
 - **Quick fix** — local, single-layer, ≤ a few chunks, no ADR. Just a
   normal `emit`/`infrastructure` chunk. Not a campaign.
@@ -34,11 +45,21 @@ P3 + P6 = single-pass (Decode → ZIR → regalloc → emit; **no SSA /
 multi-pass IR optimisation**). §1.3 + §3.2 = a multi-tier optimising
 JIT is **permanently post-v0.1.0**. A rework improves the **single-pass
 baseline** (v1 is the existence proof — its locals-in-registers
-allocator is also single-pass), never adds an optimisation tier. **A
-rework that would need to violate P3/P6 STOPS** for a P-level ADR + a
-user decision (that is bucket-2 / a genuine user gate, not autonomous).
+allocator is also single-pass), never adds an optimisation tier. Staying
+within P3/P6 IS the philosophy-aligned **autonomous** judgment — never
+violate an inviolable principle. If an approach seems to need a P3/P6
+violation, it is the wrong approach: find one within single-pass and
+proceed. (Only a *genuinely-proven* impossibility is the pre-existing
+bucket-2 stop = ROADMAP §2 conflict — the campaign adds no new gate.)
 
 ## The five phases (I + II are hard gates before any redesign code)
+
+**"Hard gate" = a self-enforced ORDERING invariant, NOT a
+user-intervention point.** The loop checks the gate itself (e.g. "is the
+Phase-II correctness net green before I write Phase-IV redesign code?")
+and proceeds autonomously — it never pauses for user approval at a phase
+transition. The gate constrains the *order* of the loop's own work, not
+who decides. Campaigns re-arm every cycle like all other loop work.
 
 ### I — Investigation (調査)
 
@@ -57,7 +78,7 @@ Apply `investigation_discipline.md` (hypothesis list, dedup vs
 debt/lessons) + `extended_challenge.md` Step 4 (裏取り: v1, reference
 repos, spikes).
 
-### II — Correctness assurance FIRST (正しさ担保) — HARD GATE
+### II — Correctness assurance FIRST (正しさ担保) — HARD GATE (self-enforced; not a user stop)
 
 Before ANY design code: pin the current correct behaviour of the area
 being reworked so the rework **cannot silently regress**. Exit (ALL):

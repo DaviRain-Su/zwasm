@@ -104,10 +104,18 @@ v0.1.0.** v0.1.0 timing never gates the decision; correctness + design
 quality do (design priority: memory
 `feedback_design_priority_completeness_over_v010`). The rework stays
 WITHIN the inviolable principles — P3/P6 single-pass, no optimising
-tier (§1.3/§3.2); a rework needing a P3/P6 violation STOPS for a
-P-level ADR + user decision.
+tier (§1.3/§3.2); staying within them IS the autonomous,
+philosophy-aligned judgment (only a *proven* impossibility is the rare
+pre-existing bucket-2 = §2 conflict).
 
-Five ordered phases, **I + II are hard gates before any redesign code**:
+**Campaigns are fully AUTONOMOUS** — the loop opens, runs, and closes a
+campaign on its own judgment, re-arming every cycle. "Hard gate" orders
+the loop's OWN work (I+II before redesign code); it is the loop checking
+itself, NEVER a user-intervention point. Stopping to ask "should I
+rework / is this phase done?" is the over-babysitting anti-pattern.
+
+Five ordered phases, **I + II are self-enforced gates before any
+redesign code**:
 **I Investigation** (mechanism confirmed + ROI measured + blast-radius
 mapped → findings doc) · **II Correctness-assurance FIRST**
 (characterization + **adversarial** tests pin current behaviour so the
