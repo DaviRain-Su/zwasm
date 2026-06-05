@@ -47,6 +47,13 @@ entries:
       add a per-kind channel each, route every append to its kind, emit one stub per kind. ~50 sites across both
       arches → an architectural/rework-style chunk, NOT a quick fix. Lower frequency than the common 4 so
       deferred behind D-292 B/C/D; pick up as a follow-on widening (or fold into workstream D's audit-gap close).
+      SLICE-1 DONE (`15a54fdf`): oob_table (code 2) now precise + UNIFIED across arm64+x86_64 for table-access
+      (get/set/fill/copy/init) + call_indirect bounds (x86_64 oobtable_fixups channel built; arm64 op_table
+      re-routed to cind_bounds_fixups; sig/null sites correctly left generic). Test: table.get OOB → code 2.
+      REMAINING D-293 kinds (still generic): invalid_conversion + trunc int_overflow (op_convert / arm64
+      bounds_check.zig), null_reference (ref.as_non_null / struct/array null / call_ref null = op_call.zig:706),
+      cast_failure (ref.cast / i31.get), array_oob (array.* GC ops) — each a follow-on slice via the same
+      per-kind-channel pattern. (Below: the original slice-1 survey, kept as the method template.)
       SLICE-1 PLAN — oob_table (code 2), surveyed 2026-06-06 (DO BOTH ARCHES TOGETHER; a runVoidExportWasi test
       asserting code 2 FAILS the x86_64/ubuntu gate if x86_64 stays generic → the test enforces parity).
       DISCOVERY: x86_64 has NO oob_table precision at all — its call_indirect bounds AND table bounds all append

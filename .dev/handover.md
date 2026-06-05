@@ -59,17 +59,19 @@ audit-gap list closed-or-deferred.
   Real fix = a flat/trampolined interp (no native recursion) OR a native-stack-limit check in `invoke` — an
   interp-architecture change (ADR). Substantial → moved to the queue. (Latent: Win 1MB native limit ~128 < 256.)
 
-## ← LEAD: D-293 slice-1 — oob_table precision (PRECISE PLAN RECORDED in the D-293 debt row)
+- ✅ **D-293 slice-1 DONE** (`15a54fdf`): oob_table (code 2) precise + UNIFIED across arm64+x86_64 for
+  table-access (get/set/fill/copy/init) + call_indirect bounds. x86_64 got a new `oobtable_fixups` channel
+  (it had NO oob_table precision before); arm64 op_table re-routed to `cind_bounds_fixups`. sig-mismatch
+  (code 3) + null sites correctly left generic. Test: table.get OOB → code 2. Build + Mac green.
 
-Surveyed this turn → a complete, corrected edit plan is in the D-293 row. KEY FINDINGS: (1) x86_64 has NO
-oob_table precision at all (cind bounds + table bounds → generic `bounds_fixups`); arm64 is precise for cind
-only. (2) A test asserting code 2 enforces BOTH-arches parity (fails the ubuntu gate otherwise) → must do both
-arches together. (3) ⚠️ x86_64 op_call 495/546/597 are sig/null (codes 3/null_reference), NOT oob_table — a
-subagent plan mis-classified them; route ONLY the bounds sites 529+583. EDITS: arm64 = re-route 7 op_table
-bounds → `cind_bounds_fixups`; x86_64 = build an `oobtable_fixups` channel (mirror A3 `oob_fixups`→stub code 2)
-+ thread it through op_call/op_table (bounds sites only). ~30 edits, error-prone → execute fresh + careful.
-NOTE: this is a prep turn — the remaining queue (D-293/D-291/D-288/B-core) is uniformly substantial per-arch /
-architectural work best executed with fresh context; the precise plans are recorded to make execution clean.
+## ← LEAD: D-293 slice-2 — next trap kind (null_reference or invalid_conversion)
+
+Same per-kind-channel pattern as slice-1. Candidates (still generic): null_reference (ref.as_non_null /
+struct/array null deref / call_ref null = op_call.zig:706 `OR;JE`), invalid_conversion + trunc int_overflow
+(op_convert.zig / arm64 bounds_check.zig float→int), cast_failure (ref.cast/i31.get), array_oob (array.* GC).
+NEXT: pick one kind, classify its sites both arches (mind sig-vs-bounds-style mislabels), build/route its
+channel, add a code → jitTrapCode mapping (new codes 9+ or reuse the TrapKind), execution test. (D-291/D-288/
+B-core remain substantial-architectural — see top + queue.)
 
 ## Queue (time-consuming first, per user directive)
 
