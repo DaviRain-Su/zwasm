@@ -14,16 +14,18 @@ ready fix plan in its debt row:
 - **D-289 GPR PATHS FIXED + VERIFIED (`340eaf5e`)**: arm64 large frame-offset addressing — `frameAddrLarge`
   + `frameLdrGpr`/`frameStrGpr` applied to body local.get/set/tee (i32/i64/ref) + prologue scalar/home-seed +
   gpr.zig spills. 2 new fixtures green (`many_locals` local off~40k→305419896; `many_locals_spill` spill
-  off>32760→210) + 83 edge + full test, no regression. x86_64-clean (disp32). **Remaining D-289**: FP/v128 +
-  param-marshal + stack-args large arms still cap (follow-on, no fixture yet). **ed25519 now COMPILES but
-  SEGVs at a stack address** — huge frames × call depth = likely STACK EXHAUSTION (→ D-288), NOT addressing.
-- **D-288 (NEXT?)**: zwasm call/native-stack too shallow — ackermann(3,7) 1021-deep traps; AND ed25519's
-  huge-frame×depth SEGV likely the same class. Investigate zwasm's stack sizing vs wasmtime.
-- **D-284**: 3 engines differ on entry resolution; unify runWasmJit to wasmtime-aligned exit-0. Plan in body.
-- **D-287** (control-stack cap 1024 rejects switch; needs ADR), **D-286** (fill/init byte-loop, deferred —
-  no signal), **D-290** (wabt→wasm-tools migration, user-directed, low-urgency hygiene).
-- This turn = arm64 `src/` change (gpr.zig + emit.zig, D-289 GPR fix) → ubuntu gate kicked (x86_64 unaffected,
-  low risk); windows on cadence. Prior 3-host green = D-285 (`838de5a1`).
+  off>32760→210) + 83 edge + full test + **ubuntu green** (`OK 701cbe60`), no regression. x86_64-clean (disp32).
+  **Remaining D-289**: FP/v128 + param-marshal + stack-args large arms still cap (follow-on, no fixture yet).
+- **D-291 (NEW)**: ed25519 now COMPILES but **SIGSEGVs at runtime** (jit). CORRECTED: the [stack_probe] diag
+  margin was ~16 MB (SP far above limit) → **NOT stack exhaustion** (mis-said D-288 last turn). Genuine memory
+  fault; needs `debug_jit_auto` (lldb at faulting PC) — D-289-path miscompile in an untested combo, OR a
+  pre-existing JIT bug newly exposed (ed25519 never JIT-ran before). wasmtime runs it clean; not gated.
+- **NEXT** (fresh-context candidates): **D-291** (ed25519 SIGSEGV via debug_jit_auto) OR **D-288** (ackermann
+  1021-deep recursion limit — separate, purely interp/jit stack sizing) OR D-289 FP/param/stack arms.
+- **D-284** (entry-resolution unify), **D-287** (control-stack cap ADR), **D-286** (fill/init, no signal),
+  **D-290** (wabt→wasm-tools, user-directed hygiene).
+- This turn: D-289 attribution correction (debt only). 3-host: ubuntu green @701cbe60; **windows gate was
+  running — verify `/tmp/win.log` at next Step 0.7** (cadence had fired). Prior full green = D-285 `838de5a1`.
 
 ## Current state
 
