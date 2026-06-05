@@ -952,6 +952,26 @@ entries:
     refs: |-
       src/cli/run.zig (runWasmJit=runVoidExport zero-arg; runCwasm result→exit code); src/cli/main.zig
       (--invoke/--engine/--dir parsing); ROADMAP §10.3; ADR-0159 (§16.4 surface); §16.5 dogfooding
+  - id: "D-278"
+    layer: "code"
+    status: "blocked-by"
+    description: |-
+      blocked-by: ADR-0161 WASI program order — sequenced AFTER the `--invoke` chunk (D-273(1)); flip to `now`
+      when D-273(1) lands (independent subsystems, but user-ordered --invoke-first 2026-06-05). | **WASI preview1
+      21→46 completion (interp path).** Audit (`src/api/wasi.zig:285 lookupWasiThunk`) = 21/46 wired; §11.1's
+      "preview1 full" was an overclaim (ADR-0161, ROADMAP corrected). Implement the missing 25 on the interp host:
+      **sockets ×9** (sock_accept/recv/recv_from/send/send_to/connect/bind/listen/shutdown), **fd_readdir** (dir
+      enumeration), **path_* ×7** (create_directory/remove_directory/rename/link/symlink/readlink/filestat_get +
+      filestat_set_times), **fd_pread/pwrite/sync/datasync/advise/allocate**, **fd_fdstat_set_rights**,
+      **fd_filestat_set_size/set_times**, **clock_res_get**, **proc_raise**. Add each to the
+      `wasi.zig:286-306` dispatch + a handler in `src/wasi/{fd,path,clocks,proc}.zig` + a WASI-testsuite or
+      self-authored fixture per syscall (TDD). DISCHARGE: 46/46 wired + green Mac+Linux. Then all-engine WASI
+      (D-251 / D-244 d-3) + CM survey (ADR-0161 §3) follow.
+    first_raised: "2026-06-05"
+    last_reviewed: "2026-06-05"
+    refs: |-
+      ADR-0161 (WASI completion program); src/api/wasi.zig:285 (lookupWasiThunk 21-name table);
+      src/wasi/{fd,clocks,proc,host}.zig (handlers); ROADMAP §11.1 (corrected) / §8; D-251 / D-244 / D-007
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
