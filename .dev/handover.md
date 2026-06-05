@@ -41,7 +41,8 @@
   (`aot/format.zig`). **DISCIPLINE: cross-compile windows-gnu; trust ubuntu for Linux-runtime divergence; Win64
   JIT-exec tests gate `skip.phaseEnd(.win64)`; jit_dispatch unit tests run all-platform.**
 - **Exit-condition**: ✅ MET — a JIT-run WASI module does REAL I/O (clock nonzero + fd_write→real stdout + file ops
-  via preopen); lookup resolves 46/46. Pending: ubuntu+windows green at `dfa614cd` → then close.
+  via preopen); lookup resolves 46/46. **ubuntu CONFIRMED green at `71cd3c85`**; windows in-flight → on green
+  (or D-282 env-flake) CLOSE this bundle (see Step 0.7 for the exact close + D-251-start steps).
 
 ## NEXT — USER-DIRECTED PROGRAM 2026-06-05 (supersedes the bucket-3 plateau): complete WASI + all-engine + CM
 
@@ -63,12 +64,21 @@ no auto-revert. Step 6+7: `should_gate_windows.sh` exit 0 → kick `run_remote_w
 
 ## Step 0.7 (next resume) — verify per-cadence remote logs
 
-ubuntu GREEN at `c3745a65` + windows GREEN at `cd10a3b6` (args/environ + the fd_write→stdout verified on Win64).
-This turn pushed the FULL 46-syscall JIT registration (`487a38ed`, +422 LOC subagent-generated, Mac+x-compile
-verified) + JIT preopens (`dfa614cd`); re-kicked both. **Step 0.7 next resume:
-`tail /tmp/ubuntu.log` (must be OK, auto-revert on FAIL) + `tail /tmp/win.log` — distinguish the D-282 env-flake
-(ALL runners 0-failed + only `configure phase FileNotFound`) from a REAL crash (`' exited with code N`/`panic`/
-`TODO implement ... windows` + a named test). A std Win64 `TODO`-panic in an op I use → reroute like `20b9f860`.**
+**ubuntu CONFIRMED GREEN at `71cd3c85`** (`OK HEAD=71cd3c85`) — the FULL 46-syscall JIT registration (`487a38ed`,
++422 LOC subagent-generated) + JIT preopens (`dfa614cd`) verified on Mac + x86_64 Linux + windows-gnu cross-compile.
+**windows test-all is IN-FLIGHT at `71cd3c85`** (re-kicked this session).
+
+**THE SINGLE NEXT ACTION for a fresh `/continue`** (Step 0.7 + bundle-close):
+1. `tail /tmp/win.log` — if `[run_remote_windows] OK.` OR (ALL runners 0-failed + only `configure phase FileNotFound`
+   = the **D-282 env-flake**, green-for-correctness) → windows is green.  If a REAL crash (`' exited with code N`/
+   `panic`/`TODO implement ... windows` + a named test) → D7-classify; a std Win64 `TODO`-panic in an op I use →
+   reroute like `20b9f860`.
+2. windows green → **CLOSE the jit-wasi (D-244) bundle**: the exit-condition is MET (verify `bash
+   scripts/check_bundle_active.sh --close`), rewrite the handover Active-bundle into a brief done-note, do the
+   V-retrospective (new debt? the `test/realworld/run_runner_jit.zig` run-stage is disabled — enabling it for
+   end-to-end JIT-WASI differential coverage is a good follow-up debt), then **start D-251 (AOT-WASI)**: survey
+   `engine/codegen/aot/{format,load,run}.zig` — `.cwasm` needs v0.3 import-metadata serialization to reconstruct
+   the host_dispatch_base (reuse `wasi/jit_dispatch.zig:populateDispatch`) + attach a Host in runEntry.
 **DISCIPLINE: cross-compile windows-gnu (catches compile gaps); Win64 runtime panics (std TODOs) only surface on
 the actual windows run — read the crash line.** **Gate**: Mac = `mac_gate.sh`; ubuntu = always (D6); windows = cadence (D7).
 
