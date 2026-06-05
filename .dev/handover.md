@@ -16,18 +16,18 @@ ready fix plan in its debt row:
   gpr.zig spills. 2 new fixtures green (`many_locals` local off~40k→305419896; `many_locals_spill` spill
   off>32760→210) + 83 edge + full test + **ubuntu green** (`OK 701cbe60`), no regression. x86_64-clean (disp32).
   **Remaining D-289**: FP/v128 + param-marshal + stack-args large arms still cap (follow-on, no fixture yet).
-- **D-291 (NEW)**: ed25519 now COMPILES but **SIGSEGVs at runtime** (jit). CORRECTED: the [stack_probe] diag
-  margin was ~16 MB (SP far above limit) → **NOT stack exhaustion** (mis-said D-288 last turn). Genuine memory
-  fault; needs `debug_jit_auto` (lldb at faulting PC) — D-289-path miscompile in an untested combo, OR a
-  pre-existing JIT bug newly exposed (ed25519 never JIT-ran before). wasmtime runs it clean; not gated.
+- **D-291 CHARACTERIZED (`256a4333`)**: ed25519 JIT fault is a **controlled JIT trap, NOT a SIGSEGV** (lldb
+  caught no signal; clean `Trap`+exit 1) and **NOT stack** (margin ~16 MB) — both earlier guesses corrected.
+  Ruled out: stack, SIGSEGV, basic-op (spec-green), D-289 GPR paths (fixtures verify). Left: a pre-existing
+  miscompile in an op/interaction at scale, newly exposed. NEXT: read trap-code (D-165 infra → KIND), then
+  debug_jit_auto PC→op + shrink repro. Not gated (ed25519 excluded).
 - **D-288 mechanism CONFIRMED (`3b128e97`)**: interp recursion cap = `frame.zig max_frame_stack=256` (fixed
-  inline `frame_buf:[256]Frame`, pushFrame traps at 256). NOT a trivial bump — Frame embeds `label_buf[128]`
-  so frame_buf is already large; fix = frame-stack inline+heap-overflow redesign (mirror label_buf+
-  label_overflow) OR move label_buf off-Frame, likely an ADR. JIT side separate (native stack).
-- **NEXT** (fresh-context candidates, all ready-scoped in debt): **D-288** (frame-stack redesign — real fix,
-  ADR-likely) · **D-291** (ed25519 JIT SIGSEGV via debug_jit_auto) · **D-284** (entry-resolution unify) ·
-  **D-289 FP/param/stack arms** (low signal) · **D-287** (control-stack cap ADR) · **D-286** (fill/init) ·
-  **D-290** (wabt→wasm-tools hygiene). The deep/design ones (D-288/D-291/D-287) want fresh context.
+  inline `frame_buf:[256]Frame`). NOT a trivial bump — Frame embeds `label_buf[128]`; fix = frame-stack
+  inline+heap-overflow redesign (mirror label_buf+label_overflow), likely an ADR. JIT side separate.
+- **NEXT** (fresh-context candidates, precisely scoped in debt): **D-291** (surface trap-code KIND → debug_jit_auto
+  → op; cheap first step) · **D-288** (frame-stack redesign, ADR-likely) · **D-284** (entry-resolution unify) ·
+  **D-287** (control-stack cap ADR) · **D-290** (wabt→wasm-tools, user-directed) · D-289 FP arms + D-286
+  (low-signal/speculative — measure-first defer). Deep/design ones want fresh context.
 - 3-host: **D-289 GPR fix now FULLY GREEN on all 3 hosts** — Mac native + ubuntu `OK 701cbe60` + windows
   `OK` (cadence recorded @635bd734). The earlier `zwasm-zig-host-hello` line was mid-stream verbose, not a
   failure. So the new full-3-host-green baseline = `635bd734` (supersedes D-285 `838de5a1`). Last 2 turns = debt only.
