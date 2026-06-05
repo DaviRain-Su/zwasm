@@ -151,7 +151,7 @@
         # `scripts/run_bench.sh --compare=all` reproduces against the full set
         # (wasmtime / wazero / wasmer / wasmedge). The `default` shell carries
         # only the §11.3 SIMD-gap trio (wasmtime / wazero / wasmer) — this shell
-        # adds the WASI-realworld AOT comparator (wasmedge) on top. Invoked
+        # adds the wasmedge WASI-realworld comparator on top. Invoked
         # manually on the Mac bench host via `nix develop .#bench`; never built
         # by the ubuntu/windows TEST hosts (which build `default` for
         # `test-all`), so the heavier comparators here can't break their gate.
@@ -169,7 +169,7 @@
             pkgs.python3       # hyperfine-JSON → ms parsing (run_bench.sh)
             pkgs.wasmtime      # Cranelift JIT reference
             pkgs.wazero        # pure-Go interpreter/compiler comparator
-            pkgs.wasmedge      # LLVM AOT comparator (WASI _start)
+            pkgs.wasmedge      # WASI _start comparator (interpreter by default; AOT via `wasmedge compile`)
           ]
           # wasmer is a binary-cache hit on aarch64-darwin but builds from
           # source (Rust/LLVM) elsewhere; the bench host is Mac, so confine it

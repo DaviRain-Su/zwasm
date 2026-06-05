@@ -112,18 +112,20 @@ if ! command -v hyperfine >/dev/null 2>&1; then
     exit 1
 fi
 
-# §11.3 — comparator runtime presence check. --compare accepts a single
-# name, a comma-separated list, or `all` (= wasmtime,wazero,wasmer — the
-# trio the SIMD per-op gap analysis takes the median of). bun / node stay
-# deferred. wazero / wasmer joined the dev shell at §11.3 (D-074).
+# §11.3 / ADR-0163-B — comparator runtime presence check. --compare accepts a
+# single name, a comma-separated list, or `all` (= every comparator on PATH).
+# The SIMD per-op gap analysis (§11.3) takes the median of wasmtime/wazero/
+# wasmer; wasmedge (LLVM AOT) joined for the WASI-realworld matrix (ADR-0163).
+# bun / node stay deferred (need a JS WASI wrapper). The `.#bench` dev shell
+# pins the full set; `default` pins only the SIMD trio.
 COMPARATORS=()
 if [ -n "$COMPARE" ]; then
     case "$COMPARE" in
         all)
-            # Only the comparators actually on PATH (wasmer is Mac-only —
-            # see flake.nix; the gap run is Mac-only so all 3 resolve there).
+            # Only the comparators actually on PATH (wasmer is Mac-only — see
+            # flake.nix; the bench host is Mac so all resolve via `.#bench`).
             COMPARATORS=()
-            for c in wasmtime wazero wasmer; do
+            for c in wasmtime wazero wasmer wasmedge; do
                 command -v "$c" >/dev/null 2>&1 && COMPARATORS+=("$c")
             done
             ;;
@@ -131,14 +133,14 @@ if [ -n "$COMPARE" ]; then
     esac
     for c in "${COMPARATORS[@]}"; do
         case "$c" in
-            wasmtime|wazero|wasmer)
+            wasmtime|wazero|wasmer|wasmedge)
                 command -v "$c" >/dev/null 2>&1 || {
-                    echo "[run_bench] --compare=$c: $c not on PATH (the dev shell pins it via flake.nix)" >&2
+                    echo "[run_bench] --compare=$c: $c not on PATH (the .#bench dev shell pins it via flake.nix)" >&2
                     exit 1
                 }
                 ;;
             *)
-                echo "[run_bench] --compare: '$c' not supported (wasmtime|wazero|wasmer|all; bun/node deferred)" >&2
+                echo "[run_bench] --compare: '$c' not supported (wasmtime|wazero|wasmer|wasmedge|all; bun/node deferred)" >&2
                 exit 1
                 ;;
         esac
@@ -258,7 +260,7 @@ date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 } > "$RECENT"
 
 # §11.3 — runtime matrix. `zwasm` is always first; the --compare
-# comparators (wasmtime / wazero / wasmer) follow. YAML entries gain a
+# comparators (wasmtime / wazero / wasmer / wasmedge) follow. YAML entries gain a
 # `runtime:` field iff the matrix has > 1 entry, so historical
 # single-runtime entries remain shape-compatible.
 RUNTIMES=("zwasm")
@@ -279,6 +281,7 @@ measure_rss_kb() {
         wasmtime) $TIME_CMD wasmtime run "$wasm" 2>"$rss_out" >/dev/null || true ;;
         wazero)   $TIME_CMD wazero run "$wasm" 2>"$rss_out" >/dev/null || true ;;
         wasmer)   $TIME_CMD wasmer run "$wasm" 2>"$rss_out" >/dev/null || true ;;
+        wasmedge) $TIME_CMD wasmedge "$wasm" 2>"$rss_out" >/dev/null || true ;;
     esac
     case "$(uname -s)" in
         Darwin)
@@ -334,6 +337,7 @@ for entry in "${BENCHES[@]}"; do
             wasmtime) cmd="wasmtime run $wasm" ;;
             wazero)   cmd="wazero run $wasm" ;;
             wasmer)   cmd="wasmer run $wasm" ;;
+            wasmedge) cmd="wasmedge $wasm" ;;   # no `run` subcommand; runs WASI _start
         esac
         echo "[run_bench] $name ($wasm) — runtime=$runtime"
         json=$(mktemp)
