@@ -211,6 +211,21 @@ pub fn fdClose(host: *Host, fd: p1.Fd) p1.Errno {
     }
 }
 
+/// `fd_renumber(from, to) → errno` — renumber fd `from` onto `to`: `to` now
+/// refers to `from`'s open file and `from` is closed. Mirrors `fd_close`'s
+/// slot-only model (the host fd is not eagerly closed — process-lifetime, as
+/// in `fdClose`); `to`'s prior slot is overwritten. Both must be in range.
+pub fn fdRenumber(host: *Host, from: p1.Fd, to: p1.Fd) p1.Errno {
+    const slot_from = host.translateFd(from) orelse return .badf;
+    if (slot_from.kind == .closed) return .badf;
+    const slot_to = host.translateFd(to) orelse return .badf;
+    if (from == to) return .success;
+    slot_to.* = slot_from.*;
+    slot_from.kind = .closed;
+    slot_from.host_handle = null;
+    return .success;
+}
+
 /// `fd_seek(fd, offset, whence, *new_pos_out) → errno`. Stdio
 /// fds (and pipes more generally) cannot seek — return `spipe`.
 /// Non-stdio fds: TODO(4.5) actual seek; return `notsup` for
@@ -1043,6 +1058,41 @@ test "fdPwrite / fdPread: positional round-trip at an offset (no cursor move)" {
     try testing.expectEqualStrings("WORLD", mem[48..53]);
 
     const slot = h.translateFd(fd).?;
+    const file: std.Io.File = .{ .handle = slot.host_handle.?, .flags = .{ .nonblocking = false } };
+    file.close(testing.io);
+    slot.kind = .closed;
+}
+
+test "fdRenumber: moves an fd onto another; source becomes badf" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "x", .data = "12345" }); // 5 bytes
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "y", .data = "z" }); // 1 byte
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = testing.io;
+    const dirfd = try h.addPreopen(tmp.dir.handle, "/sandbox");
+
+    var mem: [128]u8 = @splat(0);
+    @memcpy(mem[100..101], "x");
+    try testing.expectEqual(p1.Errno.success, pathOpen(&h, &mem, dirfd, 0, 100, 1, 0, p1.RIGHTS_FD_READ, 0, 0, 108));
+    const fd_x = std.mem.readInt(u32, mem[108..112], .little);
+    @memcpy(mem[100..101], "y");
+    try testing.expectEqual(p1.Errno.success, pathOpen(&h, &mem, dirfd, 0, 100, 1, 0, p1.RIGHTS_FD_READ, 0, 0, 108));
+    const fd_y = std.mem.readInt(u32, mem[108..112], .little);
+
+    // Renumber x onto y: fd_y now holds x's 5-byte file; fd_x is closed.
+    try testing.expectEqual(p1.Errno.success, fdRenumber(&h, fd_x, fd_y));
+    try testing.expectEqual(p1.Errno.success, fdFilestatGet(&h, &mem, fd_y, 0));
+    try testing.expectEqual(@as(u64, 5), std.mem.readInt(u64, mem[32..40], .little)); // Filestat.size @32
+    try testing.expectEqual(p1.Errno.badf, fdFilestatGet(&h, &mem, fd_x, 0)); // source closed
+
+    // Self-renumber is a no-op; out-of-range either side → badf.
+    try testing.expectEqual(p1.Errno.success, fdRenumber(&h, fd_y, fd_y));
+    try testing.expectEqual(p1.Errno.badf, fdRenumber(&h, 999, fd_y));
+    try testing.expectEqual(p1.Errno.badf, fdRenumber(&h, fd_y, 999));
+
+    const slot = h.translateFd(fd_y).?;
     const file: std.Io.File = .{ .handle = slot.host_handle.?, .flags = .{ .nonblocking = false } };
     file.close(testing.io);
     slot.kind = .closed;
