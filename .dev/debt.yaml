@@ -969,18 +969,20 @@ entries:
     status: "now"
     description: |-
       now (ACTIVE BUNDLE wasi-p1-completion; unblocked `34dbebbc`): WASI preview1 21→46 completion (interp).
-      **PROGRESS 2026-06-05: 21→27 wired.** DONE: **clock_res_get** (`bf0b8a56`), **fd_sync/fd_datasync/fd_advise**
-      (`fe02e638`), **fd_pread/fd_pwrite** (`4e1e31c6`) — all TDD-green Mac. REMAINING (19): **fd_filestat_set_size**
-      (needs ftruncate — no std.Io.File.setSize; use std.posix or investigate) + **fd_allocate** (same),
-      **fd_filestat_set_times** (std.Io.File.setTimestamps, easy) + **path_* ×8** (create_directory/remove_directory/
-      rename/link/symlink/readlink/filestat_get/filestat_set_times — new `src/wasi/path.zig`; std.Io.Dir ops),
-      **fd_readdir** (std.Io.Dir.iterate + Dircookie cursor + dirent marshal), **fd_fdstat_set_rights** (rights bits
-      on the slot), **proc_raise** (sandbox-signal design — likely notsup/abort, NOT a real host raise; small ADR/
-      note), **sockets ×9** (std.Io has NO sockets — std.net removed 0.14; via std.posix.socket + manual sockaddr,
-      structural ~500 LOC, LAST batch; ADR-0070 = std.posix OK, not raw libc). Note: `src/wasi/fd.zig` now 1103 LOC
-      (WARN) — split candidate (fd_io / fd_meta) once the batch settles. Per-syscall TDD; thunk in `wasi.zig` +
-      handler + `lookupWasiThunk` name + resolve-all test name. DISCHARGE: 46/46 wired + green Mac+Linux. Then
-      all-engine WASI (D-251 / D-244 d-3) + CM survey (ADR-0161 §3).
+      **PROGRESS 2026-06-05: 21→31 wired** (all `std.Io.File`-based, Win64 cross-compile-clean). DONE: clock_res_get
+      (`bf0b8a56`), fd_sync/datasync/advise (`fe02e638`), fd_pread/pwrite (`4e1e31c6`), fd_filestat_set_times
+      (`1cf93b1a`), fd_filestat_set_size + fd_allocate (`32c078f7`, via setLength guarded-grow), fd_fdstat_set_rights
+      (`c750fa9a`, narrow-only). **Win64 NOTE: `std.posix.<fd_call>` (fdatasync etc.) is BANNED — Windows fd_t is a
+      HANDLE not c_int; use `std.Io.File`/`std.Io`. Cross-compile windows-gnu before push (lesson
+      windowsmini-reconciliation, D7 incident `42e99737`).** REMAINING (15): **path_* ×8** (create_directory/
+      remove_directory/rename/link/symlink/readlink/filestat_get/filestat_set_times — new `src/wasi/path.zig`;
+      std.Io.Dir.{createDir,deleteDir,rename,symLink,readLink} + Dir.statFile; mirror pathOpen preopen-resolve +
+      `..`-guard), **fd_readdir** (Dir.iterate + Dircookie cursor + dirent marshal), **proc_raise** (sandbox-signal:
+      notsup/abort, NOT a real host raise; short note), **sockets ×9** (std.Io has NO sockets — std.net removed
+      0.14; std.posix.socket + manual sockaddr, ~500 LOC, LAST; ADR-0070 = std.posix OK, not raw libc).
+      `src/wasi/fd.zig`=1190 LOC (WARN) — split candidate (fd_io/fd_meta) after the batch. Per-syscall TDD; thunk in
+      `wasi.zig` + handler + `lookupWasiThunk` name + resolve-all test name. DISCHARGE: 46/46 wired + green
+      Mac+Linux. Then all-engine WASI (D-251 / D-244 d-3) + CM survey (ADR-0161 §3).
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-05"
     refs: |-
