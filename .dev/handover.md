@@ -18,13 +18,19 @@
 
 The synthetic `proc_exit(42)` proves the AOT-WASI wiring; the dogfooding/completeness step is to run the
 **realworld WASI fixture corpus under `--engine aot`** (compile each `.wasm`→`.cwasm`, run, differential vs
-interp/wasmtime) to surface concrete gaps (syscalls/memory-state/ops the AOT path doesn't yet handle). **D-283**
-already tracks realworld-under-`--engine jit`; widen it to AOT. **Step 0 (investigation-first, no redesign yet)**:
-locate the realworld diff_runner (`src/engine/runner_test.zig` / `test/` realworld harness; the interp+jit paths
-exist) → add an AOT lane (produce `.cwasm` via `aot/produce.produceFromCompiledWasm`, run via
-`cli/run.runCwasmWasi` with stdout capture) → run, triage pass/fail counts → file findings. Likely gaps:
-passive data/`memory.init` (AOT §12.3b cycle-1 = active-only), multi-value/non-i32 entry results, unsupported
-ops. Each gap = a TDD chunk or a debt row, NOT a silent skip. Bundle when it spans cycles.
+interp/wasmtime). **Survey done (this cycle)** — concrete anchors:
+- Harness `test/realworld/diff_runner.zig:102-105` enumerates **55** `.wasm` in `test/realworld/wasm/`; interp lane
+  = `cli_run.runWasmCaptured`, jit lane = `runWasmCapturedOpts` (both take `stdout_capture: ?*ArrayList(u8)`);
+  byte-compares both vs the `wasmtime` reference (l.195).
+- **Chunk 1 (small, do first)**: add a `stdout_capture: ?*std.ArrayList(u8)` param to `cli/run.zig:runCwasmWasi`
+  (wire `if (stdout_capture) |b| host.stdout_buffer = b;` after `Host.init`, mirroring `runWasmCapturedOpts` l.237)
+  + an fd_write→capture AOT test (hardens AOT-WASI beyond proc_exit). Fixture: `test/wasi/hello.wat` or an inline
+  fd_write hello (see `runner_test.zig` for an existing inline byte array).
+- **Chunk 2**: add the AOT lane to `diff_runner.zig` (`runner.compileWasm` → `aot/produce.produceFromCompiledWasm`
+  → `runCwasmWasi` w/ capture) → run → triage pass/fail. **Known AOT limits (expect failures, classify NOT skip)**:
+  entry result void/i32 only (`aot/run.zig` `Error.UnsupportedEntrySignature` rejects i64/f32/f64/multi); ACTIVE
+  data only (`produce.zig` `UnsupportedMemoryState` on passive/`memory.init`); const globals only
+  (`UnsupportedGlobalInit`). Each gap = TDD chunk or debt row, NOT a silent skip. Bundle when it spans cycles.
 
 **Alternatives if AOT-realworld is quickly green or blocked**: (a) **D-211** precise GcRootMap + AOT-GC —
 **verify load-bearing FIRST** (conservative native-stack scan is proven sufficient per ADR-0060; only schedule if
