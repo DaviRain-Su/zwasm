@@ -259,14 +259,14 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
             else => unreachable,
         };
         try gpr.writeU32(ctx.allocator, ctx.buf, word);
-        // ADR-0164 B / D-291 — gated: capture the loaded VALUE of the ed25519
-        // funcptr load (`i32.load offset=16777416`) into trap_aux2 while it is
-        // still live in `wd`, BEFORE the spill-store. entry.zig prints it next to
-        // the cind index to localise load-side vs preserve-side. comptime-gated;
-        // the i64-idx path never matches `i32.load` so this is inert there.
+        // ADR-0164 B / D-291 — gated: capture the EFFECTIVE wasm address (ip0 = idx
+        // + offset, in X16) of the ed25519 funcptr load into trap_aux2. ==16777416
+        // ⇒ memory clobbered (store miscompile); != ⇒ the load index operand is
+        // corrupted in context. comptime-gated; the i64-idx path never matches
+        // `i32.load` so this is inert there. (Loaded VALUE already == cind index.)
         if (comptime build_options.trace_stackprobe) {
             if (offset_imm == 16777416 and ins.op == .@"i32.load") {
-                try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(wd, abi.runtime_ptr_save_gpr, jit_abi.trap_aux2_off));
+                try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(ip0, abi.runtime_ptr_save_gpr, jit_abi.trap_aux2_off));
             }
         }
         if (is_fp_value) {
@@ -438,14 +438,14 @@ fn emitMemOpI64(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
             else => unreachable,
         };
         try gpr.writeU32(ctx.allocator, ctx.buf, word);
-        // ADR-0164 B / D-291 — gated: capture the loaded VALUE of the ed25519
-        // funcptr load (`i32.load offset=16777416`) into trap_aux2 while it is
-        // still live in `wd`, BEFORE the spill-store. entry.zig prints it next to
-        // the cind index to localise load-side vs preserve-side. comptime-gated;
-        // the i64-idx path never matches `i32.load` so this is inert there.
+        // ADR-0164 B / D-291 — gated: capture the EFFECTIVE wasm address (ip0 = idx
+        // + offset, in X16) of the ed25519 funcptr load into trap_aux2. ==16777416
+        // ⇒ memory clobbered (store miscompile); != ⇒ the load index operand is
+        // corrupted in context. comptime-gated; the i64-idx path never matches
+        // `i32.load` so this is inert there. (Loaded VALUE already == cind index.)
         if (comptime build_options.trace_stackprobe) {
             if (offset_imm == 16777416 and ins.op == .@"i32.load") {
-                try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(wd, abi.runtime_ptr_save_gpr, jit_abi.trap_aux2_off));
+                try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(ip0, abi.runtime_ptr_save_gpr, jit_abi.trap_aux2_off));
             }
         }
         if (is_fp_value) {
