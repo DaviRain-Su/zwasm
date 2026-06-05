@@ -59,13 +59,17 @@ audit-gap list closed-or-deferred.
   Real fix = a flat/trampolined interp (no native recursion) OR a native-stack-limit check in `invoke` — an
   interp-architecture change (ADR). Substantial → moved to the queue. (Latent: Win 1MB native limit ~128 < 256.)
 
-## ← LEAD: D-293 — remaining JIT trap-kind precision (incremental, leverages workstream-A context)
+## ← LEAD: D-293 slice-1 — oob_table precision (PRECISE PLAN RECORDED in the D-293 debt row)
 
-`bounds_fixups` still multiplexes generic kinds (oob_table / invalid_conversion / trunc int_overflow /
-null_reference / cast_failure / array_oob) → JIT prints "kind not yet distinguished". Do it INCREMENTALLY
-like A1/A2/A3 (per-kind channel/stub + `jitTrapCode` + execution test), starting with **oob_table** (op_table
-table.get/set/copy/init bounds). NEXT: Step 0 — the A3 survey's per-site classification table is the map;
-demux the op_table oob_table sites to a precise code (both arches), mirror the A3 oob_memory pattern.
+Surveyed this turn → a complete, corrected edit plan is in the D-293 row. KEY FINDINGS: (1) x86_64 has NO
+oob_table precision at all (cind bounds + table bounds → generic `bounds_fixups`); arm64 is precise for cind
+only. (2) A test asserting code 2 enforces BOTH-arches parity (fails the ubuntu gate otherwise) → must do both
+arches together. (3) ⚠️ x86_64 op_call 495/546/597 are sig/null (codes 3/null_reference), NOT oob_table — a
+subagent plan mis-classified them; route ONLY the bounds sites 529+583. EDITS: arm64 = re-route 7 op_table
+bounds → `cind_bounds_fixups`; x86_64 = build an `oobtable_fixups` channel (mirror A3 `oob_fixups`→stub code 2)
++ thread it through op_call/op_table (bounds sites only). ~30 edits, error-prone → execute fresh + careful.
+NOTE: this is a prep turn — the remaining queue (D-293/D-291/D-288/B-core) is uniformly substantial per-arch /
+architectural work best executed with fresh context; the precise plans are recorded to make execution clean.
 
 ## Queue (time-consuming first, per user directive)
 
