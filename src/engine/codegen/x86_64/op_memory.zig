@@ -673,24 +673,39 @@ pub fn emitMemoryCopy(
     const fwd_at: u32 = @intCast(buf.items.len);
     try buf.appendSlice(allocator, inst.encJccRel32(.be, 0).slice());
 
-    // ---- Backward path. ----
-    //   ADD RCX, R10           ; dst_p += n
-    //   ADD RDX, R10           ; src_p += n
+    // ---- Backward path (copy high→low, 8 bytes/iter while n >= 8, then a
+    // ≤7-byte tail). D-285: the prior byte loop made bulk copies slower than
+    // the interpreter's vectorized copy. ----
+    //   ADD RCX, R10 ; ADD RDX, R10   ; dst_p/src_p += n (point past end)
     try buf.appendSlice(allocator, inst.encAddRR(.q, .rcx, .r10).slice());
     try buf.appendSlice(allocator, inst.encAddRR(.q, .rdx, .r10).slice());
-    // Need a zero scratch for byte-base-idx encoders. Reuse RAX
-    // (currently holds vm_base which is no longer needed).
+    // Zero scratch RAX for the [base+idx] encoders (idx held at 0; pointers
+    // advance via ADD). RAX held vm_base, no longer needed.
     try buf.appendSlice(allocator, inst.encXorRR(.d, .rax, .rax).slice());
-    // .bwd_loop:
-    //   ADD RCX, -1
-    //   ADD RDX, -1
-    //   MOVZX R11d, byte [RDX + RAX]  ; R11 is spill_stage, but at
-    //                                  ; this point safe (no further
-    //                                  ; spill-loads in this op).
-    //   MOV [RCX + RAX], R11B          ; (low byte of R11)
-    //   ADD R10, -1
-    //   JNZ .bwd_loop
-    const bwd_loop_start: u32 = @intCast(buf.items.len);
+    // .bwd_word: while (n >= 8) { dst-=8; src-=8; *dst = *src; n-=8; }
+    const bwd_word_top: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encCmpRImm8(.q, .r10, 8).slice());
+    const bwd_word_exit_at: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJccRel32(.b, 0).slice()); // JB .bwd_tail (fixup)
+    try buf.appendSlice(allocator, inst.encAddR64Imm32(.rcx, -8).slice());
+    try buf.appendSlice(allocator, inst.encAddR64Imm32(.rdx, -8).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromBaseIdx(.r11, .rdx, .rax).slice());
+    try buf.appendSlice(allocator, inst.encStoreR64MemBaseIdx(.r11, .rcx, .rax).slice());
+    try buf.appendSlice(allocator, inst.encAddR64Imm32(.r10, -8).slice());
+    {
+        const after_jmp: i32 = @as(i32, @intCast(buf.items.len)) + 5;
+        try buf.appendSlice(allocator, inst.encJmpRel32(@as(i32, @intCast(bwd_word_top)) - after_jmp).slice());
+    }
+    // .bwd_tail: patch JB to here; copy ≤7 remaining bytes high→low.
+    const bwd_tail_top: u32 = @intCast(buf.items.len);
+    {
+        const disp: i32 = @as(i32, @intCast(bwd_tail_top)) - (@as(i32, @intCast(bwd_word_exit_at)) + 6);
+        @memcpy(buf.items[bwd_word_exit_at..][0..6], inst.encJccRel32(.b, disp).slice()[0..6]);
+    }
+    try buf.appendSlice(allocator, inst.encTestRR(.q, .r10, .r10).slice());
+    const bwd_tail_skip_at: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice()); // JZ .bwd_done (fixup)
+    const bwd_byte_loop: u32 = @intCast(buf.items.len);
     try buf.appendSlice(allocator, inst.encAddR64Imm32(.rcx, -1).slice());
     try buf.appendSlice(allocator, inst.encAddR64Imm32(.rdx, -1).slice());
     try buf.appendSlice(allocator, inst.encMovzxR32_8MemBaseIdx(.r11, .rdx, .rax).slice());
@@ -698,30 +713,48 @@ pub fn emitMemoryCopy(
     try buf.appendSlice(allocator, inst.encAddR64Imm32(.r10, -1).slice());
     {
         const after_jnz: i32 = @as(i32, @intCast(buf.items.len)) + 6;
-        const disp: i32 = @as(i32, @intCast(bwd_loop_start)) - after_jnz;
-        try buf.appendSlice(allocator, inst.encJccRel32(.ne, disp).slice());
+        try buf.appendSlice(allocator, inst.encJccRel32(.ne, @as(i32, @intCast(bwd_byte_loop)) - after_jnz).slice());
     }
-    // JMP .end (placeholder, patched after fwd loop).
+    // .bwd_done: JMP .end (patched after fwd path).
     const bwd_end_jmp_at: u32 = @intCast(buf.items.len);
     try buf.appendSlice(allocator, inst.encJmpRel32(0).slice());
+    // Patch the no-tail JZ to skip straight to .bwd_done (the JMP→.end).
+    {
+        const disp: i32 = @as(i32, @intCast(bwd_end_jmp_at)) - (@as(i32, @intCast(bwd_tail_skip_at)) + 6);
+        @memcpy(buf.items[bwd_tail_skip_at..][0..6], inst.encJccRel32(.e, disp).slice()[0..6]);
+    }
 
-    // ---- Forward path. ----
-    // Patch the JBE.
+    // ---- Forward path. Patch the JBE to here. ----
     const fwd_byte: u32 = @intCast(buf.items.len);
     {
         const disp: i32 = @as(i32, @intCast(fwd_byte)) - (@as(i32, @intCast(fwd_at)) + 6);
-        const word: [6]u8 = inst.encJccRel32(.be, disp).slice()[0..6].*;
-        @memcpy(buf.items[fwd_at..][0..6], &word);
+        @memcpy(buf.items[fwd_at..][0..6], inst.encJccRel32(.be, disp).slice()[0..6]);
     }
     try buf.appendSlice(allocator, inst.encXorRR(.d, .rax, .rax).slice());
-    // .fwd_loop:
-    //   MOVZX R11d, byte [RDX + RAX]
-    //   MOV   byte [RCX + RAX], R11B
-    //   ADD   RCX, 1
-    //   ADD   RDX, 1
-    //   ADD   R10, -1
-    //   JNZ   .fwd_loop
-    const fwd_loop_start: u32 = @intCast(buf.items.len);
+    // .fwd_word: while (n >= 8) { *dst = *src; dst+=8; src+=8; n-=8; }
+    const fwd_word_top: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encCmpRImm8(.q, .r10, 8).slice());
+    const fwd_word_exit_at: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJccRel32(.b, 0).slice()); // JB .fwd_tail (fixup)
+    try buf.appendSlice(allocator, inst.encMovR64FromBaseIdx(.r11, .rdx, .rax).slice());
+    try buf.appendSlice(allocator, inst.encStoreR64MemBaseIdx(.r11, .rcx, .rax).slice());
+    try buf.appendSlice(allocator, inst.encAddR64Imm32(.rcx, 8).slice());
+    try buf.appendSlice(allocator, inst.encAddR64Imm32(.rdx, 8).slice());
+    try buf.appendSlice(allocator, inst.encAddR64Imm32(.r10, -8).slice());
+    {
+        const after_jmp: i32 = @as(i32, @intCast(buf.items.len)) + 5;
+        try buf.appendSlice(allocator, inst.encJmpRel32(@as(i32, @intCast(fwd_word_top)) - after_jmp).slice());
+    }
+    // .fwd_tail: patch JB to here; copy ≤7 remaining bytes low→high.
+    const fwd_tail_top: u32 = @intCast(buf.items.len);
+    {
+        const disp: i32 = @as(i32, @intCast(fwd_tail_top)) - (@as(i32, @intCast(fwd_word_exit_at)) + 6);
+        @memcpy(buf.items[fwd_word_exit_at..][0..6], inst.encJccRel32(.b, disp).slice()[0..6]);
+    }
+    try buf.appendSlice(allocator, inst.encTestRR(.q, .r10, .r10).slice());
+    const fwd_tail_skip_at: u32 = @intCast(buf.items.len);
+    try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice()); // JZ .end (fixup)
+    const fwd_byte_loop: u32 = @intCast(buf.items.len);
     try buf.appendSlice(allocator, inst.encMovzxR32_8MemBaseIdx(.r11, .rdx, .rax).slice());
     try buf.appendSlice(allocator, inst.encStoreR8MemBaseIdx(.r11, .rcx, .rax).slice());
     try buf.appendSlice(allocator, inst.encAddR64Imm32(.rcx, 1).slice());
@@ -729,21 +762,22 @@ pub fn emitMemoryCopy(
     try buf.appendSlice(allocator, inst.encAddR64Imm32(.r10, -1).slice());
     {
         const after_jnz: i32 = @as(i32, @intCast(buf.items.len)) + 6;
-        const disp: i32 = @as(i32, @intCast(fwd_loop_start)) - after_jnz;
-        try buf.appendSlice(allocator, inst.encJccRel32(.ne, disp).slice());
+        try buf.appendSlice(allocator, inst.encJccRel32(.ne, @as(i32, @intCast(fwd_byte_loop)) - after_jnz).slice());
     }
 
-    // .end: patch n==0 skip and bwd→end JMP.
+    // .end: patch n==0 skip, bwd→end JMP, and the fwd no-tail JZ.
     const end_byte: u32 = @intCast(buf.items.len);
     {
         const disp: i32 = @as(i32, @intCast(end_byte)) - (@as(i32, @intCast(skip_zero_at)) + 6);
-        const word: [6]u8 = inst.encJccRel32(.e, disp).slice()[0..6].*;
-        @memcpy(buf.items[skip_zero_at..][0..6], &word);
+        @memcpy(buf.items[skip_zero_at..][0..6], inst.encJccRel32(.e, disp).slice()[0..6]);
     }
     {
         const disp: i32 = @as(i32, @intCast(end_byte)) - (@as(i32, @intCast(bwd_end_jmp_at)) + 5);
-        const word: [5]u8 = inst.encJmpRel32(disp).slice()[0..5].*;
-        @memcpy(buf.items[bwd_end_jmp_at..][0..5], &word);
+        @memcpy(buf.items[bwd_end_jmp_at..][0..5], inst.encJmpRel32(disp).slice()[0..5]);
+    }
+    {
+        const disp: i32 = @as(i32, @intCast(end_byte)) - (@as(i32, @intCast(fwd_tail_skip_at)) + 6);
+        @memcpy(buf.items[fwd_tail_skip_at..][0..6], inst.encJccRel32(.e, disp).slice()[0..6]);
     }
 }
 
