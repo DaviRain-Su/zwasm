@@ -37,6 +37,23 @@ purely the unit-test build.)
   `zig build test -Dtarget=x86_64-windows-gnu`; the "host unable to execute … x86_64-windows"
   run error means the COMPILE passed (only the run-on-Mac step fails, which is expected).
 
+## Production-code facet (2026-06-05, D-278 fd_datasync, `42e99737`)
+
+Same root cause, NON-test side: a WASI handler called `std.posix.fdatasync(handle)`. Even
+with a correctly-typed `fd_t`, the **`std.posix` fd-FUNCTIONS hardcode the POSIX `c_int` fd
+ABI** — `fn fdatasync(fd: c_int)` — so a Windows HANDLE (`*anyopaque`) is rejected at the
+call (`expected c_int, found *anyopaque`). Mac/ubuntu green; windowsmini build broke
+(`zwasm-zig-facade-runner Debug native 1 errors`).
+
+- **Rule: in production host code, prefer the cross-platform `std.Io.File` / `std.Io` wrappers
+  over `std.posix.<fd_call>`.** `File.sync(io)` works on every OS; `std.posix.fdatasync/fsync/
+  pread/...` assume POSIX int fds. (Fix: route `fd_datasync` through `File.sync` — datasync only
+  *permits* skipping metadata, so a full sync is conformant.)
+- **Unlike the test-literal case above, the LIB cross-compile DOES catch this**: `zig build
+  -Dtarget=x86_64-windows-gnu` (seconds) would have caught it pre-push. **Run it before any push
+  that touches platform-typed code (`src/wasi/`, `src/platform/`, anything using `std.posix`).**
+  This push skipped it → a wasted windowsmini round-trip. (Memory `feedback_platform_gap_handling`.)
+
 Related axis: [[2026-06-03-jitinstance-test-compiles-for-host-arch]] (arch-divergent test
 emit — same family: a test green on one host/target, red on another, caught only when that
 target actually builds/runs the tests).
