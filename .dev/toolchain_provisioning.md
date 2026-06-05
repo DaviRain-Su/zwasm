@@ -18,13 +18,18 @@ hosts run it through the **Zig-built edge-runner** (`runI32Export` /
 - The generation toolchains (emcc / tinygo / rustc / go / clang) are
   needed **only on the Mac generation host**, and only when fixtures are
   (re)generated — a rare maintenance task.
-- **ubuntu / windows never need the toolchains.** They `git reset --hard`
-  + `zig build test-all`, which runs the committed `.wasm` via the
-  edge-runner. No toolchain install, no per-host generation.
+- **ubuntu / windows never need the *generation* toolchains.** They
+  `git reset --hard` + `zig build test-all`, which runs the committed
+  `.wasm` via the edge-runner. No generation toolchain install.
+- **Carve-out (ADR-0162, 2026-06-05): native rust IS on the test hosts —
+  for the §13.5 `rust_host` step ONLY.** ubuntunote via `nix develop
+  .#rust-host` (pinned); windowsmini via native winget rust (rustc 1.96.0,
+  no nix on Windows). This is the sole non-generation toolchain on the
+  test hosts; `test-all`'s `devShells.default` stays toolchain-free.
 
 This is why the heavy toolchains are kept **out of `devShells.default`**
-(the shell the test hosts enter via SSH) and live in a separate
-`devShells.gen`.
+(the shell the test hosts enter via SSH) and live in separate
+`devShells.gen` (Mac generation) / `devShells.rust-host` (rust_host only).
 
 ## `devShells.gen` (flake.nix)
 
@@ -34,10 +39,11 @@ nix develop .#gen        # Mac host only; provides the generation toolchains
 
 `flake.nix` defines two shells:
 
-| Shell | Used by | Contents |
-|---|---|---|
-| `devShells.default` | every host (Mac + ubuntu + windows) | zig + wabt + wasmtime + wasm-tools + lldb + nasm (lightweight) |
-| `devShells.gen` | Mac generation host only | + emscripten, tinygo, go, rustc (wasm32 targets via rust-overlay), clang + lld, wasm-tools |
+| Shell                 | Used by                             | Contents                                                                                      |
+|-----------------------|-------------------------------------|-----------------------------------------------------------------------------------------------|
+| `devShells.default`   | every host (Mac + ubuntu + windows) | zig + wabt + wasmtime + wasm-tools + lldb + nasm (lightweight)                                |
+| `devShells.gen`       | Mac generation host only            | + emscripten, tinygo, go, rustc (wasm32 targets via rust-overlay), clang + lld, wasm-tools    |
+| `devShells.rust-host` | ubuntunote (§13.5 `run-rust-host`) | zig + native rustc (host target; ADR-0162). Windows uses native winget rust instead (no nix). |
 
 `gen` uses a separate `genPkgs` binding (with the `rust-overlay`) so the
 overlay never perturbs `default`. Rust wasm targets pinned:
