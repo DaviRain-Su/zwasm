@@ -15,11 +15,17 @@ entries:
       @panic = INTERNAL ERROR not `Trap`; ideal zero host-crash; restrict the `[stack_probe]` diag to genuine
       stack-overflow); C) exception(EH)-vs-trap distinction; D) audit vs wasmtime/wasmer/WasmEdge/v1 (messages,
       backtrace, exit codes) → gap list. **Synergy: workstream A first directly UNBLOCKS D-291** (ed25519's
-      trap kind becomes one command away). INVESTIGATION/AUDIT FIRST (spans engines), then fix. DISCHARGE:
-      all engines emit clear per-kind trap messages + crash/trap/exception cleanly distinguished + audit-gap
-      list closed-or-deferred.
+      trap kind becomes one command away). INVESTIGATION/AUDIT FIRST (spans engines), then fix.
+      PROGRESS (b6da8604, 2026-06-06): workstream A CLI surface done — JIT/AOT run paths thread trap_kind →
+      trap_surface.jitTrapCode → CLI per-kind message; single-message interp-parity (double-`Trap` bug fixed,
+      genuine trap = exit 1 not re-raised error.Trap). REMAINING A: codegen widening — JIT records only generic
+      0/1 for unreachable/oob_memory/div_by_zero/int_overflow (only call_indirect+stack precise), so JIT still
+      prints "kind not yet distinguished" for the common traps. Split the generic bucket at the trap sites
+      (arm64/emit.zig + x86_64/op_control.zig) for full parity. Then B (scope [stack_probe]) / C / D.
+      DISCHARGE: all engines emit clear per-kind trap messages + crash/trap/exception cleanly distinguished +
+      audit-gap list closed-or-deferred.
     first_raised: "2026-06-05"
-    last_reviewed: "2026-06-05"
+    last_reviewed: "2026-06-06"
     refs: |-
       `.dev/decisions/0164_trap_crash_exception_diagnostics_ux.md`; `src/runtime/trap.zig` (Trap set); `src/cli/run.zig` (surfaceTrap + runWasmJit generic Trap); `src/cli/diag_print.zig`; `src/platform/stack_limit.zig`; `~/Documents/MyProducts/zwasm/src/cli.zig` (v1 per-kind msgs); D-291 (motivating case); D-165 (JIT trap-code infra)
   - id: "D-291"
