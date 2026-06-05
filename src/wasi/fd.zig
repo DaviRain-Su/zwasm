@@ -475,6 +475,37 @@ fn mapOpenError(err: anyerror) p1.Errno {
     };
 }
 
+/// Build a `std.Io.File.SetTimestamp` from a WASI fstflags pair
+/// (`*_NOW` → now, `*` set → the explicit `ns` value, neither → unchanged).
+fn setTimestampOf(flags: p1.Fstflags, now_bit: p1.Fstflags, set_bit: p1.Fstflags, ns: u64) std.Io.File.SetTimestamp {
+    if (flags & now_bit != 0) return .now;
+    if (flags & set_bit != 0) return .{ .new = std.Io.Timestamp.fromNanoseconds(@intCast(ns)) };
+    return .unchanged;
+}
+
+/// `fd_filestat_set_times(fd, atim, mtim, fst_flags) → errno` — set the
+/// access/modify timestamps of a file fd via `std.Io.File.setTimestamps`.
+/// Setting both the explicit-value and the `*_NOW` bit for one timestamp is
+/// `inval`. File/dir only (stdio → `spipe`, closed → `badf`).
+pub fn fdFilestatSetTimes(host: *Host, fd: p1.Fd, atim: u64, mtim: u64, fst_flags: p1.Fstflags) p1.Errno {
+    if (fst_flags & p1.FSTFLAGS_ATIM != 0 and fst_flags & p1.FSTFLAGS_ATIM_NOW != 0) return .inval;
+    if (fst_flags & p1.FSTFLAGS_MTIM != 0 and fst_flags & p1.FSTFLAGS_MTIM_NOW != 0) return .inval;
+    const slot = host.translateFd(fd) orelse return .badf;
+    switch (slot.kind) {
+        .stdin, .stdout, .stderr => return .spipe,
+        .closed => return .badf,
+        .file, .dir => {},
+    }
+    const io = host.io orelse return .nosys;
+    const handle = slot.host_handle orelse return .badf;
+    const file: std.Io.File = .{ .handle = handle, .flags = .{ .nonblocking = false } };
+    file.setTimestamps(io, .{
+        .access_timestamp = setTimestampOf(fst_flags, p1.FSTFLAGS_ATIM_NOW, p1.FSTFLAGS_ATIM, atim),
+        .modify_timestamp = setTimestampOf(fst_flags, p1.FSTFLAGS_MTIM_NOW, p1.FSTFLAGS_MTIM, mtim),
+    }) catch return .io;
+    return .success;
+}
+
 /// `path_open(dirfd, dirflags, path, oflags, rights_base,
 /// rights_inheriting, fdflags, *opened_fd_out) → errno` —
 /// opens a path RELATIVE to a preopen `dirfd`. Strict scope:
@@ -880,6 +911,38 @@ test "fdPwrite / fdPread: positional round-trip at an offset (no cursor move)" {
     try testing.expectEqual(p1.Errno.success, fdPread(&h, &mem, fd, 40, 1, 3, 68));
     try testing.expectEqual(@as(u32, 5), std.mem.readInt(u32, mem[68..72], .little));
     try testing.expectEqualStrings("WORLD", mem[48..53]);
+
+    const slot = h.translateFd(fd).?;
+    const file: std.Io.File = .{ .handle = slot.host_handle.?, .flags = .{ .nonblocking = false } };
+    file.close(testing.io);
+    slot.kind = .closed;
+}
+
+test "fdFilestatSetTimes: set mtim and read it back via fdFilestatGet" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = testing.io;
+    const dirfd = try h.addPreopen(tmp.dir.handle, "/sandbox");
+
+    var mem: [128]u8 = @splat(0);
+    @memcpy(mem[0..8], "tim.txt\x00");
+    const oe = pathOpen(&h, &mem, dirfd, 0, 0, 7, p1.OFLAGS_CREAT, p1.RIGHTS_FD_WRITE, 0, 0, 96);
+    try testing.expectEqual(p1.Errno.success, oe);
+    const fd = std.mem.readInt(u32, mem[96..100], .little);
+
+    // 2.0s exactly — a whole second survives any filesystem mtime granularity.
+    try testing.expectEqual(p1.Errno.success, fdFilestatSetTimes(&h, fd, 0, 2_000_000_000, p1.FSTFLAGS_MTIM));
+    try testing.expectEqual(p1.Errno.success, fdFilestatGet(&h, &mem, fd, 0));
+    // Filestat.mtim is at byte offset 48 (dev8 ino8 type1 pad7 nlink8 size8 atim8 mtim8 ctim8).
+    try testing.expectEqual(@as(u64, 2_000_000_000), std.mem.readInt(u64, mem[48..56], .little));
+
+    // Conflicting explicit + NOW for one timestamp → inval.
+    try testing.expectEqual(p1.Errno.inval, fdFilestatSetTimes(&h, fd, 0, 0, p1.FSTFLAGS_MTIM | p1.FSTFLAGS_MTIM_NOW));
+    // stdio → spipe; out-of-range → badf.
+    try testing.expectEqual(p1.Errno.spipe, fdFilestatSetTimes(&h, 1, 0, 0, p1.FSTFLAGS_MTIM_NOW));
+    try testing.expectEqual(p1.Errno.badf, fdFilestatSetTimes(&h, 999, 0, 0, p1.FSTFLAGS_MTIM_NOW));
 
     const slot = h.translateFd(fd).?;
     const file: std.Io.File = .{ .handle = slot.host_handle.?, .flags = .{ .nonblocking = false } };
