@@ -934,13 +934,19 @@ entries:
       src/api/module_serialize.zig; include/wasm.h:422-423 (serialize/deserialize); ROADMAP §16.2 G; D-269
   - id: "D-273"
     layer: "code"
-    status: "now"
+    status: "note"
     description: |-
-      **USER DECISION 2026-06-05: (1) `--invoke NAME=ARGS` arg-passing + typed-result PRINTING is APPROVED to
-      implement** — the loop DESIGNS THE UX ITSELF (not a slavish wasmtime/wasmer copy; zwasm v1 CLI may be a
-      reference; weigh what is genuinely user-friendly and decide autonomously). **(2)-(5) (`--env`/`--fuel`/
-      `--timeout`/`--wasi`) = recorded as MAY-be-requested-later; do NOT pre-build** (deferred-pending-need).
-      `now` covers the (1) sub-task only; on (1) discharge, this row reverts to a `note` tracking (2)-(5).
+      **(1) DONE (`34dbebbc`): `--invoke NAME=ARGS` typed arg-passing + result printing SHIPPED on the interp
+      path.** `src/cli/invoke_args.zig` parses comma-args by each export param type (i32/i64/f32/f64; base-0
+      ints with unsigned-wrap; floats) into boundary Vals, sizes the results vec to the result arity (a
+      value-returning export now runs, was always 0 → arity mismatch), and prints typed results bare (one per
+      line) on the guest-stdout channel — wasmtime semantics. Single-token `NAME=ARGS` keeps the trailing WASI
+      argv unambiguous; `--invoke NAME` stays the zero-arg form. JIT/.cwasm entry runners are zero-arg
+      compute-only and loudly reject `=ARGS` (D-273(1)-JITAOT: extend if a real consumer needs JIT/AOT args).
+      **(2)-(5) (`--env`/`--fuel`/`--timeout`/`--wasi`) remain deferred-pending-need; do NOT pre-build.**
+      ---
+      **USER DECISION 2026-06-05 (historical): (1) was APPROVED to implement** — the loop DESIGNS THE UX
+      ITSELF (not a slavish wasmtime/wasmer copy). **(2)-(5) recorded as MAY-be-requested-later.**
       ---
       **note (CLI flag surface vs wasmtime — §16.4 review, ADR-0159): the shipped `run` flags are
       `--invoke <name>` / `--engine <interp|jit>` / `--dir <host>[:<guest>]` only.** Deliberately NOT shipped
@@ -960,10 +966,10 @@ entries:
       (--invoke/--engine/--dir parsing); ROADMAP §10.3; ADR-0159 (§16.4 surface); §16.5 dogfooding
   - id: "D-278"
     layer: "code"
-    status: "blocked-by"
+    status: "now"
     description: |-
-      blocked-by: ADR-0161 WASI program order — sequenced AFTER the `--invoke` chunk (D-273(1)); flip to `now`
-      when D-273(1) lands (independent subsystems, but user-ordered --invoke-first 2026-06-05). | **WASI preview1
+      now (unblocked 2026-06-05 `34dbebbc`): the user-ordered --invoke-first prerequisite (D-273(1)) landed;
+      this is the next active chunk per ADR-0161 WASI program order. | **WASI preview1
       21→46 completion (interp path).** Audit (`src/api/wasi.zig:285 lookupWasiThunk`) = 21/46 wired; §11.1's
       "preview1 full" was an overclaim (ADR-0161, ROADMAP corrected). Implement the missing 25 on the interp host:
       **sockets ×9** (sock_accept/recv/recv_from/send/send_to/connect/bind/listen/shutdown), **fd_readdir** (dir

@@ -21,7 +21,8 @@ realworld `.wasm` fixtures is Mac-only via `nix develop .#gen`.)
 
 ```sh
 zwasm run hello.wasm                 # WASI _start / main; exits with proc_exit code
-zwasm run --invoke add hello.wasm    # run a named export instead
+zwasm run --invoke add hello.wasm    # run a named export instead (zero-arg)
+zwasm run --invoke 'add=2,3' math.wasm   # pass typed args; prints the result (→ 5)
 zwasm run --dir .:/ guest.wasm       # preopen the cwd as the guest's /
 ```
 

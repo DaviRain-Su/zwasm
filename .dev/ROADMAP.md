@@ -1793,8 +1793,11 @@ There is no `--aot` flag (the `.cwasm` extension dictates). The explicit
 
 **Shipped:**
 
-- `--invoke <name>` — run the named export instead of `_start` / `main`
-  (currently zero-arg; result surfaces as the process exit code, not printed).
+- `--invoke <name>[=arg1,arg2,...]` — run the named export instead of
+  `_start` / `main`. With `=args` (comma-separated, parsed by the export's
+  param types: i32/i64/f32/f64), the typed results print bare (one per line)
+  on stdout. Zero-arg `--invoke <name>` keeps exit-code semantics. Interp
+  engine only (JIT/.cwasm entry is zero-arg compute-only).
 - `--engine <interp|jit>` — engine selection (§10.2).
 - `--dir <host>[:<guest>]` — preopen a host directory for WASI (colon
   separator; guest path mirrors host when omitted).

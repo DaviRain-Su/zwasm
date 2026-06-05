@@ -65,7 +65,7 @@ adversarial use-after-free test on aarch64 + x86_64 (ADR-0160).
 ```sh
 zwasm                                  # print version + build options
 zwasm run <file.wasm|.cwasm> [args...] # run a module (WASI _start / main)
-    [--invoke <name>]                  #   run a named export instead
+    [--invoke <name>[=a,b,…]]          #   run a named export; =args prints typed results
     [--engine <interp|jit>]            #   interp (default, full WASI) or jit (compute-only)
     [--dir <host>[:<guest>]]           #   preopen a host directory for WASI
 zwasm compile <file.wasm> -o <out.cwasm>  # compile to a .cwasm AOT artifact

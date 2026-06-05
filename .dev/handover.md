@@ -24,15 +24,16 @@ The prior finalization items are DONE (C-API funcref D-269 = owned-handle `of.re
 closed; verified x86_64 `OK HEAD=2ea7c187`). A new **user-directed program** (chat 2026-06-05) is now the active
 work — **ADR-0161** (WASI completion) + **ADR-0162** (toolchain carve-out). Ordered:
 
-- **A — 整備 DONE this session**: rust on test hosts (win rustc / ubuntu flake `.#rust-host`); ADR-0161 (WASI)
-  +0162 (toolchain) +**0076 D7** (windows cadence gate, below); §11.1 overclaim corrected (**WASI=21/46**); D-278
-  scheduled. **A5 CM survey DONE** (`component_model_survey.md`: pivot risk **LOW-MED**, CM = new `src/feature/
-  component/` layer ≈v1's 5,600 LOC, no core rewrite). **A1-wire DONE — 3-OS rust run COMPLETE**: rust_host green
-  on Mac + ubuntu (`.#rust-host`) + **windows (GNU toolchain + `.exe` fix)**; D-254 resolved (a). 3-host test-all
-  re-checked: Mac+ubuntu GREEN; windows flaked once → **D-279 Win64 SIMD heisenbug** (re-run `simd_assert_runner:
-  13351 passed/0 failed` — intermittent, not a miscompile; now monitored by D7).
-- **1. D-273(1) `--invoke` args + typed result** (the only `now` row) — type-driven parse → stdout. Ref v1 CLI. FIRST.
-- **2. D-278 WASI preview1 21→46** (interp) — sockets ×9 / fd_readdir / path_* ×7 / pread/pwrite/sync/... TDD each.
+- **A — 整備 DONE (prior session)**: rust on test hosts; ADR-0161/0162/0076-D7; §11.1 corrected (**WASI=21/46**);
+  A5 CM survey + A1-wire 3-OS rust DONE; **D-279 Win64 SIMD heisenbug** (intermittent, monitored by D7).
+- **1. D-273(1) `--invoke NAME=ARGS` args + typed result — ✅ DONE (`34dbebbc`)**: `src/cli/invoke_args.zig` parses
+  comma-args by export param type (i32/i64/f32/f64; base-0+unsigned-wrap; floats) → boundary Vals; results vec
+  sized to result arity (value-returning export now runs); typed results print bare on guest-stdout (wasmtime
+  semantics). Interp only; JIT/.cwasm loudly reject `=ARGS`. Smoke-verified (add=2,3→5, swap multi-value, hex, neg).
+- **2. D-278 WASI preview1 21→46 (interp) — NEXT (now `now`, unblocked by chunk 1)**: sockets ×9 / fd_readdir /
+  path_* ×7 / fd_pread/pwrite/sync/datasync/advise/allocate / fdstat_set_rights / filestat_set_size/set_times /
+  clock_res_get / proc_raise. Add each to `wasi.zig:286-306` dispatch + handler in `src/wasi/{fd,path,clocks,proc}`
+  + a WASI-testsuite/self-authored fixture per syscall (TDD). DISCHARGE: 46/46 wired + green Mac+Linux.
 - **3. All-engine WASI** (D-251 AOT + D-244 d-3 JIT). **4. Precise GC root + AOT-GC** (D-211; verify load-bearing first).
 - **Post-v0.1.0**: Component Model / WASI P2 (A5 survey informs). WASI 0.3/async (ClojureWasmFromScratch agent ref).
 
@@ -42,17 +43,18 @@ no auto-revert. Step 6+7: `should_gate_windows.sh` exit 0 → kick `run_remote_w
 
 ## Step 0.7 (next resume) — verify per-cadence remote logs
 
-Mac+ubuntu test-all GREEN this session; ubuntu rust_host GREEN. Origin = `72c4aaf8` (after push). Next code chunk
-(D-273(1)) kicks ubuntu (always) + windows (if `should_gate_windows.sh` exit 0 — likely, build.zig touched). Step
-0.7: `tail /tmp/ubuntu.log` (auto-revert on FAIL) + `tail /tmp/win.log` if windows fired (D7 heisenbug-classify).
+D-273(1) chunk: Mac `zig build test` GREEN + lint/zone clean + CLI smoke OK. This turn pushed `34dbebbc` and
+kicked ubuntu (always) + windows (cadence: cli/* + zwasm.zig diff). Step 0.7 next resume: `tail /tmp/ubuntu.log`
+(auto-revert on FAIL) + `tail /tmp/win.log` if windows fired (D7 heisenbug-classify, no auto-revert).
 **Gate**: Mac = `bash scripts/mac_gate.sh`; ubuntu = always test-all (D6); windows = cadence (D7).
 
 ## Deferred / open debt (D-274/275/276/257 discharged this session — removed)
 
 - **Memory-safety (§16.6 DONE, verified 2-host; D-276 proven by ADR-0060)** — only residual is **D-211** precise
   GcRootMap (deferred; conservative scan proven sufficient meanwhile). **D-210** cohort root fix (D-142/206/210/245).
-- **Surface residuals** — (**D-269** promoted to NEXT chunk above.) **D-273** CLI flag gap vs wasmtime (validated
-  defer). **D-253** ref machinery (incl. D-253-D standalone-copy; owned-handle `of.ref` model). **D-271**
+- **Surface residuals** — **D-273** now `note`: (1) `--invoke` args DONE (`34dbebbc`); (2)-(5)
+  `--env`/`--fuel`/`--timeout`/`--wasi` deferred-pending-need. **D-253** ref machinery (incl. D-253-D
+  standalone-copy; owned-handle `of.ref` model). **D-271**
   serialize=source-bytes (no AOT cache). **D-255** C-API WASI io. **D-251** WASI in AOT.
 - **D-254** rust 3-OS. **D-249** win bench. **D-238** x86_64 EH thunk. **D-266/D-259** notes.
 

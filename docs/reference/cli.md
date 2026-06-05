@@ -28,7 +28,7 @@ parse/compile).
 
 | Flag                     | Effect                                                                                                |
 |--------------------------|-------------------------------------------------------------------------------------------------------|
-| `--invoke <name>`        | run the named export instead of `_start`/`main` (zero-arg; result surfaces as the exit code — D-273) |
+| `--invoke <name>[=a,b,…]` | run the named export instead of `_start`/`main`. Zero-arg form → result surfaces as the exit code. `=args` (comma-separated, parsed by param type i32/i64/f32/f64) → typed results print bare, one per line, on stdout. Interp engine only |
 | `--engine <interp\|jit>` | `interp` (default, full WASI) or `jit` (compute-only — SIMD/compute, no WASI I/O)                    |
 | `--dir <host>[:<guest>]` | preopen a host directory for WASI (colon separator; guest path mirrors host when omitted)             |
 
@@ -52,6 +52,6 @@ artifact (ADR-0039) to the `-o` / `--output` path. `zwasm run
 ## Not shipped
 
 `validate` / `inspect` / `features` / `wat` / `wasm` are deliberately
-absent (ADR-0159). wasmtime-style `--env` / `--fuel` / `--timeout` and
-`--invoke NAME=ARGS` arg-marshalling + typed-result printing are tracked
-as D-273.
+absent (ADR-0159). wasmtime-style `--env` / `--fuel` / `--timeout` are
+tracked as D-273 (deferred-pending-need). (`--invoke NAME=ARGS`
+arg-marshalling + typed-result printing shipped — see the `run` table.)
